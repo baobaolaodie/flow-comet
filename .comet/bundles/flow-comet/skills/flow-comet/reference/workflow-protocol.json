@@ -624,7 +624,7 @@
           "kind": "directory",
           "required": true,
           "paths": [
-            "archive/<date>-<change-id>/"
+            "archive/*-<change-id>"
           ],
           "pathBase": "specs-root"
         }
