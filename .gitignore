@@ -1,0 +1,8 @@
+# 运行状态（每项目不同，不入库）
+.comet/current-change.json
+.comet/flow-comet-state.json
+.comet/flow-comet-plan.json
+.comet/real-eval-result.json
+.comet/bundle-evals/
+node_modules/
+*.log

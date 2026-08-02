@@ -1,0 +1,213 @@
+{
+  "schemaVersion": 1,
+  "kind": "workflow-kernel",
+  "name": "flow-comet",
+  "goal": "flow-kit 9 阶段工作流 + 自动状态管理。工件直接读写 .specs/<change-id>/，不经过 OpenSpec。",
+  "nodes": [
+    {
+      "id": "open",
+      "label": "Open",
+      "kind": "control",
+      "responsibility": "CHANGE 反问 + REQUIREMENT 需求分析。生成 CHANGE.md 和 REQUIREMENT.md。",
+      "implementation": { "skill": "flow-comet-open" },
+      "requiredSkillCalls": [
+        { "skill": "flow-comet-change", "scope": "main", "enforcement": "guarded", "reason": "CHANGE 反问协议" },
+        { "skill": "flow-comet-requirement", "scope": "main", "enforcement": "guarded", "reason": "REQUIREMENT 需求分析" }
+      ],
+      "outputSchemas": ["flowkit.intake.v1"],
+      "guardrails": [
+        { "id": "intake-artifacts", "label": "CHANGE.md + REQUIREMENT.md exist", "validation": "artifact-exists" }
+      ]
+    },
+    {
+      "id": "design",
+      "label": "Design",
+      "kind": "control",
+      "responsibility": "技术栈选型 + ADR + 数据流。生成 DESIGN.md（前端项目还需 UI-DESIGN.md）。",
+      "implementation": { "skill": "flow-comet-design" },
+      "requiredSkillCalls": [
+        { "skill": "flow-comet-design", "scope": "main", "enforcement": "guarded", "reason": "技术栈选型 + ADR" },
+        { "skill": "flow-comet-ui-design", "scope": "main", "enforcement": "advisory", "reason": "UI-DESIGN（仅前端项目）" }
+      ],
+      "outputSchemas": ["flowkit.design.v1"],
+      "guardrails": [
+        { "id": "design-artifacts", "label": "DESIGN.md exists", "validation": "artifact-exists" }
+      ]
+    },
+    {
+      "id": "plan",
+      "label": "Plan",
+      "kind": "control",
+      "responsibility": "拆原子任务（XML 格式）+ 波次划分 + 并行标记 [P]。生成 TASK.md。",
+      "implementation": { "skill": "flow-comet-task" },
+      "requiredSkillCalls": [
+        { "skill": "flow-comet-task", "scope": "main", "enforcement": "guarded", "reason": "拆原子任务" }
+      ],
+      "outputSchemas": ["flowkit.plan.v1"],
+      "guardrails": [
+        { "id": "plan-artifacts", "label": "TASK.md exists", "validation": "artifact-exists" }
+      ]
+    },
+    {
+      "id": "execute",
+      "label": "Execute",
+      "kind": "control",
+      "responsibility": "按 TASK.md 逐任务串行执行：TDD + 6 维自查 + LESSONS 扫描 + diff 边界 verify。",
+      "implementation": { "skill": "flow-comet-execute" },
+      "requiredSkillCalls": [
+        { "skill": "flow-comet-dev", "scope": "main", "enforcement": "guarded", "reason": "TDD + 6 维自查 + R4.5 + R4.6" }
+      ],
+      "outputSchemas": ["flowkit.execution.v1"],
+      "guardrails": [
+        { "id": "build-evidence", "label": "At least one SUMMARY.md produced", "validation": "artifact-exists" }
+      ]
+    },
+    {
+      "id": "subagent-execute",
+      "label": "Subagent Execute",
+      "kind": "handoff",
+      "responsibility": "委托 [P] 并行任务给子代理执行，要求子代理加载 flow-comet-dev 并回传 evidence。",
+      "implementation": { "skill": "flow-comet-subagent-execute" },
+      "requiredSkillCalls": [
+        { "skill": "flow-comet-dev", "scope": "handoff", "enforcement": "handoff-guarded", "reason": "子代理必须加载 DEV 规则集并回传 evidence" }
+      ],
+      "outputSchemas": ["flowkit.handoff.v1"],
+      "guardrails": [
+        { "id": "handoff-evidence", "label": "Handoff evidence recorded", "validation": "evidence-only" }
+      ]
+    },
+    {
+      "id": "review",
+      "label": "Review",
+      "kind": "control",
+      "responsibility": "3 轮审查：spec 合规 + 代码质量（6 维衰退）+ UI 视觉。生成 REVIEW.md。",
+      "implementation": { "skill": "flow-comet-review" },
+      "requiredSkillCalls": [
+        { "skill": "flow-comet-review", "scope": "main", "enforcement": "guarded", "reason": "3 轮审查" },
+        { "skill": "flow-comet-test", "scope": "main", "enforcement": "guarded", "reason": "5 轮测试金字塔完整性" }
+      ],
+      "outputSchemas": ["flowkit.review.v1"],
+      "guardrails": [
+        { "id": "review-evidence", "label": "REVIEW.md exists", "validation": "artifact-exists" }
+      ]
+    },
+    {
+      "id": "verify",
+      "label": "Verify",
+      "kind": "control",
+      "responsibility": "集成验证 + UAT + 失败诊断（≤3 轮）。生成 TEST.md + UAT.md。",
+      "implementation": { "skill": "flow-comet-verify" },
+      "requiredSkillCalls": [
+        { "skill": "flow-comet-integration", "scope": "main", "enforcement": "guarded", "reason": "集成验证 + UAT + LESSONS 提名" }
+      ],
+      "outputSchemas": ["flowkit.verify.v1"],
+      "guardrails": [
+        { "id": "verify-evidence", "label": "TEST.md or UAT.md exists", "validation": "artifact-exists" }
+      ]
+    },
+    {
+      "id": "archive",
+      "label": "Archive",
+      "kind": "control",
+      "responsibility": "LESSONS 提名 + 归档到 .specs/archive/ + CHANGELOG 更新。",
+      "implementation": { "skill": "flow-comet-archive" },
+      "requiredSkillCalls": [
+        { "skill": "flow-comet-integration", "scope": "main", "enforcement": "guarded", "reason": "归档 + LESSONS" }
+      ],
+      "outputSchemas": ["flowkit.archive.v1"],
+      "guardrails": [
+        { "id": "archive-evidence", "label": "Archive completed", "validation": "state-transition" }
+      ]
+    }
+  ],
+  "edges": [
+    { "from": "open", "to": "design", "condition": "success" },
+    { "from": "design", "to": "plan", "condition": "success" },
+    { "from": "plan", "to": "execute", "condition": "success" },
+    { "from": "execute", "to": "subagent-execute", "condition": "parallel-tasks" },
+    { "from": "execute", "to": "review", "condition": "all-tasks-done" },
+    { "from": "subagent-execute", "to": "execute", "condition": "serial-tasks-remain" },
+    { "from": "subagent-execute", "to": "review", "condition": "all-tasks-done" },
+    { "from": "review", "to": "verify", "condition": "success" },
+    { "from": "verify", "to": "archive", "condition": "success" },
+    { "from": "archive", "to": null, "condition": "success" }
+  ],
+  "outputSchemas": [
+    {
+      "id": "flowkit.intake.v1",
+      "description": "CHANGE.md + REQUIREMENT.md intake artifacts.",
+      "artifacts": [
+        { "id": "change-doc", "kind": "file", "required": true, "paths": ["<change-id>/CHANGE.md"] },
+        { "id": "requirement-doc", "kind": "file", "required": true, "paths": ["<change-id>/REQUIREMENT.md"] }
+      ],
+      "evidence": [{ "id": "intake-summary", "required": true }]
+    },
+    {
+      "id": "flowkit.design.v1",
+      "description": "DESIGN.md design artifacts.",
+      "artifacts": [
+        { "id": "design-doc", "kind": "file", "required": true, "paths": ["<change-id>/DESIGN.md", "<change-id>/DESIGN-lite.md"] }
+      ],
+      "evidence": [{ "id": "design-summary", "required": true }]
+    },
+    {
+      "id": "flowkit.plan.v1",
+      "description": "TASK.md implementation plan.",
+      "artifacts": [
+        { "id": "task-plan", "kind": "file", "required": true, "paths": ["<change-id>/TASK.md"] }
+      ],
+      "evidence": [{ "id": "plan-summary", "required": true }]
+    },
+    {
+      "id": "flowkit.execution.v1",
+      "description": "Code changes + SUMMARY.md per task.",
+      "artifacts": [
+        { "id": "task-summaries", "kind": "file", "required": true, "paths": ["<change-id>/*-SUMMARY.md"] }
+      ],
+      "evidence": [{ "id": "implementation-summary", "required": true }]
+    },
+    {
+      "id": "flowkit.handoff.v1",
+      "description": "Subagent handoff request and returned evidence.",
+      "artifacts": [],
+      "evidence": [
+        { "id": "handoff-request", "required": true },
+        { "id": "handoff-result", "required": true }
+      ]
+    },
+    {
+      "id": "flowkit.review.v1",
+      "description": "REVIEW.md review report.",
+      "artifacts": [
+        { "id": "review-doc", "kind": "file", "required": true, "paths": ["<change-id>/REVIEW.md"] }
+      ],
+      "evidence": [{ "id": "review-summary", "required": true }]
+    },
+    {
+      "id": "flowkit.verify.v1",
+      "description": "TEST.md + UAT.md verification.",
+      "artifacts": [
+        { "id": "test-doc", "kind": "file", "required": true, "paths": ["<change-id>/TEST.md"] },
+        { "id": "uat-doc", "kind": "file", "required": true, "paths": ["<change-id>/UAT.md"] }
+      ],
+      "evidence": [{ "id": "verification-result", "required": true }]
+    },
+    {
+      "id": "flowkit.archive.v1",
+      "description": "Archived change in .specs/archive/.",
+      "artifacts": [
+        { "id": "archive-dir", "kind": "directory", "required": true, "paths": ["archive/<date>-<change-id>/"] }
+      ],
+      "evidence": [{ "id": "archive-summary", "required": true }]
+    }
+  ],
+  "artifactRoot": ".specs",
+  "state": {
+    "kind": "workflow-kernel",
+    "path": ".comet/flow-comet-state.json",
+    "activeChangeField": "activeChange",
+    "currentNodeField": "currentNode",
+    "completedNodesField": "completedNodes",
+    "evidenceField": "evidence"
+  }
+}

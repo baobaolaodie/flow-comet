@@ -1,0 +1,476 @@
+{
+  "schemaVersion": 1,
+  "resolvedSkills": [
+    {
+      "query": "flow-comet",
+      "status": "available",
+      "sources": [
+        {
+          "name": "flow-comet",
+          "query": "flow-comet",
+          "description": "flow-kit 9 阶段工作流 + 自动状态管理。工件直接读写 .specs/，不经过 OpenSpec。Use when the user invokes /flow-comet or wants to start/continue a structured development workflow.",
+          "platform": "claude-code",
+          "scope": "project",
+          "origin": "project",
+          "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet",
+          "hash": "local"
+        }
+      ],
+      "preferenceIndex": 0
+    },
+    {
+      "query": "flow-comet-archive",
+      "status": "available",
+      "sources": [
+        {
+          "name": "flow-comet-archive",
+          "query": "flow-comet-archive",
+          "description": "Archive node for flow-comet: scans SUMMARY.md files for lessons, adds qualifying lessons to .specs/LESSONS.md, moves change to .specs/archive/, and updates C",
+          "platform": "claude-code",
+          "scope": "project",
+          "origin": "project",
+          "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-archive",
+          "hash": "local"
+        }
+      ],
+      "preferenceIndex": 1
+    },
+    {
+      "query": "flow-comet-change",
+      "status": "available",
+      "sources": [
+        {
+          "name": "flow-comet-change",
+          "query": "flow-comet-change",
+          "description": "flow-kit CHANGE 阶段协议：反问澄清、change-id 自动生成、架构级变更检测、视觉调性预选。Comet open 阶段的 flow-kit 增强。",
+          "platform": "claude-code",
+          "scope": "project",
+          "origin": "project",
+          "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-change",
+          "hash": "local"
+        }
+      ],
+      "preferenceIndex": 2
+    },
+    {
+      "query": "flow-comet-design",
+      "status": "available",
+      "sources": [
+        {
+          "name": "flow-comet-design",
+          "query": "flow-comet-design",
+          "description": "Design node for flow-comet: produces DESIGN.md (and UI-DESIGN.md for frontend) via tech stack selection, ADR, and architecture alignment. Do not use for ordin",
+          "platform": "claude-code",
+          "scope": "project",
+          "origin": "project",
+          "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-design",
+          "hash": "local"
+        }
+      ],
+      "preferenceIndex": 3
+    },
+    {
+      "query": "flow-comet-dev",
+      "status": "available",
+      "sources": [
+        {
+          "name": "flow-comet-dev",
+          "query": "flow-comet-dev",
+          "description": "flow-kit DEV 阶段协议：TDD + 6 维自查 + diff 边界 verify + LESSONS 扫描 + R4.5 Schema 迁移 + R4.6 破坏性变更。Comet execute/subagent-execute 的 flow-kit 增强。",
+          "platform": "claude-code",
+          "scope": "project",
+          "origin": "project",
+          "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-dev",
+          "hash": "local"
+        }
+      ],
+      "preferenceIndex": 4
+    },
+    {
+      "query": "flow-comet-execute",
+      "status": "available",
+      "sources": [
+        {
+          "name": "flow-comet-execute",
+          "query": "flow-comet-execute",
+          "description": "Execute node for flow-comet: iterates through pending tasks in TASK.md, applying TDD, LESSONS scan, diff boundary check, and atomic commits for each. Do not",
+          "platform": "claude-code",
+          "scope": "project",
+          "origin": "project",
+          "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-execute",
+          "hash": "local"
+        }
+      ],
+      "preferenceIndex": 5
+    },
+    {
+      "query": "flow-comet-integration",
+      "status": "available",
+      "sources": [
+        {
+          "name": "flow-comet-integration",
+          "query": "flow-comet-integration",
+          "description": "flow-kit INTEGRATION 阶段协议：集成验证 + UAT + 失败诊断（≤3 轮）+ LESSONS 提名 + 归档。Comet verify/archive 阶段的 flow-kit 增强。",
+          "platform": "claude-code",
+          "scope": "project",
+          "origin": "project",
+          "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-integration",
+          "hash": "local"
+        }
+      ],
+      "preferenceIndex": 6
+    },
+    {
+      "query": "flow-comet-open",
+      "status": "available",
+      "sources": [
+        {
+          "name": "flow-comet-open",
+          "query": "flow-comet-open",
+          "description": "Open node for flow-comet: produces CHANGE.md + REQUIREMENT.md via structured questioning and AC derivation. First node in the flow — no upstream artifacts neede",
+          "platform": "claude-code",
+          "scope": "project",
+          "origin": "project",
+          "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-open",
+          "hash": "local"
+        }
+      ],
+      "preferenceIndex": 7
+    },
+    {
+      "query": "flow-comet-plan",
+      "status": "available",
+      "sources": [
+        {
+          "name": "flow-comet-plan",
+          "query": "flow-comet-plan",
+          "description": "Plan node for flow-comet: produces TASK.md with atomic tasks, wave division, and parallel markers. Do not use for ordinary standalone tasks.",
+          "platform": "claude-code",
+          "scope": "project",
+          "origin": "project",
+          "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-plan",
+          "hash": "local"
+        }
+      ],
+      "preferenceIndex": 8
+    },
+    {
+      "query": "flow-comet-requirement",
+      "status": "available",
+      "sources": [
+        {
+          "name": "flow-comet-requirement",
+          "query": "flow-comet-requirement",
+          "description": "flow-kit REQUIREMENT 阶段协议：AC（Given/When/Then）+ v1·v2·out 范围切分 + 术语提取。Comet open 阶段的 flow-kit 增强。",
+          "platform": "claude-code",
+          "scope": "project",
+          "origin": "project",
+          "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-requirement",
+          "hash": "local"
+        }
+      ],
+      "preferenceIndex": 9
+    },
+    {
+      "query": "flow-comet-review",
+      "status": "available",
+      "sources": [
+        {
+          "name": "flow-comet-review",
+          "query": "flow-comet-review",
+          "description": "Review node for flow-comet: performs 4-round review (spec compliance, code quality 6-dimension decay, UI visual, optional debt assessment) and produces REVIEW",
+          "platform": "claude-code",
+          "scope": "project",
+          "origin": "project",
+          "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-review",
+          "hash": "local"
+        }
+      ],
+      "preferenceIndex": 10
+    },
+    {
+      "query": "flow-comet-subagent-execute",
+      "status": "available",
+      "sources": [
+        {
+          "name": "flow-comet-subagent-execute",
+          "query": "flow-comet-subagent-execute",
+          "description": "Subagent Execute node for flow-comet: delegates parallel (parallel=true) tasks to subagents with flow-comet-dev loaded, collecting handoff evidence.",
+          "platform": "claude-code",
+          "scope": "project",
+          "origin": "project",
+          "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-subagent-execute",
+          "hash": "local"
+        }
+      ],
+      "preferenceIndex": 11
+    },
+    {
+      "query": "flow-comet-task",
+      "status": "available",
+      "sources": [
+        {
+          "name": "flow-comet-task",
+          "query": "flow-comet-task",
+          "description": "flow-kit TASK 阶段协议：拆原子任务（XML 格式）、read_files/write_files 边界、波次划分、并行标记 [P]。Comet plan producer 的 flow-kit 实现。",
+          "platform": "claude-code",
+          "scope": "project",
+          "origin": "project",
+          "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-task",
+          "hash": "local"
+        }
+      ],
+      "preferenceIndex": 12
+    },
+    {
+      "query": "flow-comet-test",
+      "status": "available",
+      "sources": [
+        {
+          "name": "flow-comet-test",
+          "query": "flow-comet-test",
+          "description": "flow-kit TEST 阶段协议：5 轮测试金字塔（功能/性能/安全/兼容/可观测）+ 测试质量 6 维自检。Comet execute 阶段的 flow-kit 增强。",
+          "platform": "claude-code",
+          "scope": "project",
+          "origin": "project",
+          "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-test",
+          "hash": "local"
+        }
+      ],
+      "preferenceIndex": 13
+    },
+    {
+      "query": "flow-comet-ui-design",
+      "status": "available",
+      "sources": [
+        {
+          "name": "flow-comet-ui-design",
+          "query": "flow-comet-ui-design",
+          "description": "flow-kit 2a UI-DESIGN 阶段协议：美学方向 + design tokens + 反 AI-slop 自检。仅前端项目触发。",
+          "platform": "claude-code",
+          "scope": "project",
+          "origin": "project",
+          "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-ui-design",
+          "hash": "local"
+        }
+      ],
+      "preferenceIndex": 14
+    },
+    {
+      "query": "flow-comet-verify",
+      "status": "available",
+      "sources": [
+        {
+          "name": "flow-comet-verify",
+          "query": "flow-comet-verify",
+          "description": "Verify node for flow-comet: runs full automation (tests + type check + build), guides human UAT, performs failure diagnosis with max 3 auto-retries, and produ",
+          "platform": "claude-code",
+          "scope": "project",
+          "origin": "project",
+          "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-verify",
+          "hash": "local"
+        }
+      ],
+      "preferenceIndex": 15
+    }
+  ],
+  "sourceSummaries": [
+    {
+      "name": "flow-comet",
+      "query": "flow-comet",
+      "description": "flow-kit 9 阶段工作流 + 自动状态管理。工件直接读写 .specs/，不经过 OpenSpec。Use when the user invokes /flow-comet or wants to start/continue a structured development workflow.",
+      "platform": "claude-code",
+      "scope": "project",
+      "origin": "project",
+      "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet",
+      "hash": "local"
+    },
+    {
+      "name": "flow-comet-archive",
+      "query": "flow-comet-archive",
+      "description": "Archive node for flow-comet: scans SUMMARY.md files for lessons, adds qualifying lessons to .specs/LESSONS.md, moves change to .specs/archive/, and updates C",
+      "platform": "claude-code",
+      "scope": "project",
+      "origin": "project",
+      "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-archive",
+      "hash": "local"
+    },
+    {
+      "name": "flow-comet-change",
+      "query": "flow-comet-change",
+      "description": "flow-kit CHANGE 阶段协议：反问澄清、change-id 自动生成、架构级变更检测、视觉调性预选。Comet open 阶段的 flow-kit 增强。",
+      "platform": "claude-code",
+      "scope": "project",
+      "origin": "project",
+      "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-change",
+      "hash": "local"
+    },
+    {
+      "name": "flow-comet-design",
+      "query": "flow-comet-design",
+      "description": "Design node for flow-comet: produces DESIGN.md (and UI-DESIGN.md for frontend) via tech stack selection, ADR, and architecture alignment. Do not use for ordin",
+      "platform": "claude-code",
+      "scope": "project",
+      "origin": "project",
+      "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-design",
+      "hash": "local"
+    },
+    {
+      "name": "flow-comet-dev",
+      "query": "flow-comet-dev",
+      "description": "flow-kit DEV 阶段协议：TDD + 6 维自查 + diff 边界 verify + LESSONS 扫描 + R4.5 Schema 迁移 + R4.6 破坏性变更。Comet execute/subagent-execute 的 flow-kit 增强。",
+      "platform": "claude-code",
+      "scope": "project",
+      "origin": "project",
+      "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-dev",
+      "hash": "local"
+    },
+    {
+      "name": "flow-comet-execute",
+      "query": "flow-comet-execute",
+      "description": "Execute node for flow-comet: iterates through pending tasks in TASK.md, applying TDD, LESSONS scan, diff boundary check, and atomic commits for each. Do not",
+      "platform": "claude-code",
+      "scope": "project",
+      "origin": "project",
+      "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-execute",
+      "hash": "local"
+    },
+    {
+      "name": "flow-comet-integration",
+      "query": "flow-comet-integration",
+      "description": "flow-kit INTEGRATION 阶段协议：集成验证 + UAT + 失败诊断（≤3 轮）+ LESSONS 提名 + 归档。Comet verify/archive 阶段的 flow-kit 增强。",
+      "platform": "claude-code",
+      "scope": "project",
+      "origin": "project",
+      "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-integration",
+      "hash": "local"
+    },
+    {
+      "name": "flow-comet-open",
+      "query": "flow-comet-open",
+      "description": "Open node for flow-comet: produces CHANGE.md + REQUIREMENT.md via structured questioning and AC derivation. First node in the flow — no upstream artifacts neede",
+      "platform": "claude-code",
+      "scope": "project",
+      "origin": "project",
+      "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-open",
+      "hash": "local"
+    },
+    {
+      "name": "flow-comet-plan",
+      "query": "flow-comet-plan",
+      "description": "Plan node for flow-comet: produces TASK.md with atomic tasks, wave division, and parallel markers. Do not use for ordinary standalone tasks.",
+      "platform": "claude-code",
+      "scope": "project",
+      "origin": "project",
+      "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-plan",
+      "hash": "local"
+    },
+    {
+      "name": "flow-comet-requirement",
+      "query": "flow-comet-requirement",
+      "description": "flow-kit REQUIREMENT 阶段协议：AC（Given/When/Then）+ v1·v2·out 范围切分 + 术语提取。Comet open 阶段的 flow-kit 增强。",
+      "platform": "claude-code",
+      "scope": "project",
+      "origin": "project",
+      "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-requirement",
+      "hash": "local"
+    },
+    {
+      "name": "flow-comet-review",
+      "query": "flow-comet-review",
+      "description": "Review node for flow-comet: performs 4-round review (spec compliance, code quality 6-dimension decay, UI visual, optional debt assessment) and produces REVIEW",
+      "platform": "claude-code",
+      "scope": "project",
+      "origin": "project",
+      "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-review",
+      "hash": "local"
+    },
+    {
+      "name": "flow-comet-subagent-execute",
+      "query": "flow-comet-subagent-execute",
+      "description": "Subagent Execute node for flow-comet: delegates parallel (parallel=true) tasks to subagents with flow-comet-dev loaded, collecting handoff evidence.",
+      "platform": "claude-code",
+      "scope": "project",
+      "origin": "project",
+      "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-subagent-execute",
+      "hash": "local"
+    },
+    {
+      "name": "flow-comet-task",
+      "query": "flow-comet-task",
+      "description": "flow-kit TASK 阶段协议：拆原子任务（XML 格式）、read_files/write_files 边界、波次划分、并行标记 [P]。Comet plan producer 的 flow-kit 实现。",
+      "platform": "claude-code",
+      "scope": "project",
+      "origin": "project",
+      "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-task",
+      "hash": "local"
+    },
+    {
+      "name": "flow-comet-test",
+      "query": "flow-comet-test",
+      "description": "flow-kit TEST 阶段协议：5 轮测试金字塔（功能/性能/安全/兼容/可观测）+ 测试质量 6 维自检。Comet execute 阶段的 flow-kit 增强。",
+      "platform": "claude-code",
+      "scope": "project",
+      "origin": "project",
+      "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-test",
+      "hash": "local"
+    },
+    {
+      "name": "flow-comet-ui-design",
+      "query": "flow-comet-ui-design",
+      "description": "flow-kit 2a UI-DESIGN 阶段协议：美学方向 + design tokens + 反 AI-slop 自检。仅前端项目触发。",
+      "platform": "claude-code",
+      "scope": "project",
+      "origin": "project",
+      "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-ui-design",
+      "hash": "local"
+    },
+    {
+      "name": "flow-comet-verify",
+      "query": "flow-comet-verify",
+      "description": "Verify node for flow-comet: runs full automation (tests + type check + build), guides human UAT, performs failure diagnosis with max 3 auto-retries, and produ",
+      "platform": "claude-code",
+      "scope": "project",
+      "origin": "project",
+      "root": "D:\\LongYinHaHa\\大学\\大创\\赛事系统\\.claude\\skills\\flow-comet-verify",
+      "hash": "local"
+    }
+  ],
+  "workflow": {
+    "kind": "workflow-kernel",
+    "nodes": [
+      {
+        "id": "open",
+        "label": "Open"
+      },
+      {
+        "id": "design",
+        "label": "Design"
+      },
+      {
+        "id": "plan",
+        "label": "Plan"
+      },
+      {
+        "id": "execute",
+        "label": "Execute"
+      },
+      {
+        "id": "subagent-execute",
+        "label": "Subagent-Execute"
+      },
+      {
+        "id": "review",
+        "label": "Review"
+      },
+      {
+        "id": "verify",
+        "label": "Verify"
+      },
+      {
+        "id": "archive",
+        "label": "Archive"
+      }
+    ]
+  }
+}

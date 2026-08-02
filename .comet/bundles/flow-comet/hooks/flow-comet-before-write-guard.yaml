@@ -1,0 +1,5 @@
+event: before_write
+matcher: Write|Edit
+script: comet-hook-guard
+failure: block
+requiresConfirmation: false

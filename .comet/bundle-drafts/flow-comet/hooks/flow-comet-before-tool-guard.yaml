@@ -1,0 +1,5 @@
+event: before_tool
+matcher: "*"
+script: comet-hook-guard
+failure: block
+requiresConfirmation: false

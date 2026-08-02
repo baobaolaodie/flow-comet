@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "protocolHash": "fec3178f7f27b4fa6faf9cf4ee9d4186da60d22786d00fa7540ec258cef6ada9",
+  "lanes": [
+    {
+      "lane": "script"
+    },
+    {
+      "lane": "reference"
+    },
+    {
+      "lane": "pause-points"
+    },
+    {
+      "lane": "workflow-entry"
+    },
+    {
+      "lane": "skill-core"
+    },
+    {
+      "lane": "skill-review"
+    }
+  ],
+  "review": {
+    "passed": null,
+    "evidenceSource": "deterministic-check-only",
+    "voters": null,
+    "lenses": [],
+    "rounds": null,
+    "blockingFindings": [],
+    "warnings": [
+      "No LLM authoring review recorded for this Bundle"
+    ]
+  }
+}
