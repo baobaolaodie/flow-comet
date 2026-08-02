@@ -18,7 +18,7 @@ CHANGE → REQUIREMENT → DESIGN → [UI-DESIGN] → TASK → DEV → TEST → 
 
 | 依赖 | 用途 | 许可 | 获取 |
 |---|---|---|---|
-| [Comet](https://github.com/rpamis/comet) | workflow-kernel 运行时 + `comet bundle` 生命周期 | MIT | npm 安装 |
+| [Comet](https://github.com/rpamis/comet) | workflow-kernel 运行时 + `comet bundle` 生命周期 | MIT（© 2026 rpamis） | npm 安装 |
 | [flow-kit](https://github.com/rihebty/flow-kit) | 9 阶段协议（prompts/templates/reference），**外部依赖** | MIT（© 2026 rihebty） | clone 到目标项目根 `flow-kit/` |
 
 > flow-kit 是独立开源项目，不随本仓库分发。目标项目使用 flow-comet 前需先安装 flow-kit。
