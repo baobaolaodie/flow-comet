@@ -35,6 +35,27 @@ skills:
   - id: flow-comet-archive
     path: skills/flow-comet-archive
     visibility: internal
+  - id: flow-comet-change
+    path: skills/flow-comet-change
+    visibility: internal
+  - id: flow-comet-requirement
+    path: skills/flow-comet-requirement
+    visibility: internal
+  - id: flow-comet-ui-design
+    path: skills/flow-comet-ui-design
+    visibility: internal
+  - id: flow-comet-task
+    path: skills/flow-comet-task
+    visibility: internal
+  - id: flow-comet-dev
+    path: skills/flow-comet-dev
+    visibility: internal
+  - id: flow-comet-test
+    path: skills/flow-comet-test
+    visibility: internal
+  - id: flow-comet-integration
+    path: skills/flow-comet-integration
+    visibility: internal
 resources:
   rules:
     - id: flow-comet-orchestration
