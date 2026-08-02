@@ -52,13 +52,11 @@ comet bundle distribute flow-comet --platform claude --scope project   # 安装�
 ## 仓库结构
 
 ```
-├── .comet/
-│   ├── bundle-authoring/flow-comet.json   # bundle 元数据（draftPath/currentHash/eval/review）
-│   ├── bundle-drafts/flow-comet/          # ★ 权威源（contentDrafts：skills + rules + hooks）
-│   ├── bundles/flow-comet/                # 已发布 bundle（可 distribute）
-│   └── config.yaml
-├── rules/                                 # flow-comet-orchestration.md（分发到 .claude/rules/）
-└── skills/                                # distribute 到本机项目的安装副本（参考）
+└── .comet/
+    ├── bundle-authoring/flow-comet.json   # bundle 元数据（draftPath/currentHash/eval/review）
+    ├── bundle-drafts/flow-comet/          # ★ 权威源（contentDrafts：16 skills + rules + hooks）
+    ├── bundles/flow-comet/                # 已发布 bundle（16 skills，可 distribute）
+    └── config.yaml
 ```
 
 > 修改 skill/脚本请改 `.comet/bundle-drafts/flow-comet/skills/`，然后 `comet bundle compile` 验证、`publish` 更新发布产物。
