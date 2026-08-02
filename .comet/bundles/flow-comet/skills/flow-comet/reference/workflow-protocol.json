@@ -465,7 +465,8 @@
           "required": true,
           "paths": [
             "<change-id>/CHANGE.md"
-          ]
+          ],
+          "pathBase": "specs-root"
         },
         {
           "id": "requirement-doc",
@@ -473,7 +474,8 @@
           "required": true,
           "paths": [
             "<change-id>/REQUIREMENT.md"
-          ]
+          ],
+          "pathBase": "specs-root"
         }
       ],
       "evidence": [
@@ -494,7 +496,8 @@
           "paths": [
             "<change-id>/DESIGN.md",
             "<change-id>/DESIGN-lite.md"
-          ]
+          ],
+          "pathBase": "specs-root"
         }
       ],
       "evidence": [
@@ -514,7 +517,8 @@
           "required": true,
           "paths": [
             "<change-id>/TASK.md"
-          ]
+          ],
+          "pathBase": "specs-root"
         }
       ],
       "evidence": [
@@ -534,7 +538,8 @@
           "required": true,
           "paths": [
             "<change-id>/*-SUMMARY.md"
-          ]
+          ],
+          "pathBase": "specs-root"
         }
       ],
       "evidence": [
@@ -569,7 +574,8 @@
           "required": true,
           "paths": [
             "<change-id>/REVIEW.md"
-          ]
+          ],
+          "pathBase": "specs-root"
         }
       ],
       "evidence": [
@@ -589,7 +595,8 @@
           "required": true,
           "paths": [
             "<change-id>/TEST.md"
-          ]
+          ],
+          "pathBase": "specs-root"
         },
         {
           "id": "uat-doc",
@@ -597,7 +604,8 @@
           "required": true,
           "paths": [
             "<change-id>/UAT.md"
-          ]
+          ],
+          "pathBase": "specs-root"
         }
       ],
       "evidence": [
@@ -617,7 +625,8 @@
           "required": true,
           "paths": [
             "archive/<date>-<change-id>/"
-          ]
+          ],
+          "pathBase": "specs-root"
         }
       ],
       "evidence": [
@@ -630,7 +639,7 @@
   ],
   "state": {
     "kind": "workflow-run",
-    "statePath": ".comet/runs/flow-comet/state.json",
+    "statePath": ".comet/flow-comet-state.json",
     "currentNodeField": "currentNode",
     "completedNodesField": "completedNodes",
     "evidenceField": "evidence"

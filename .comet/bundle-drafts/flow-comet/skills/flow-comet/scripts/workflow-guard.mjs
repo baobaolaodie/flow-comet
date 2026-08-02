@@ -1087,6 +1087,9 @@ async function workflowPathBaseRoot(pathBase) {
       config.nativeArtifactRoot,
       'native.artifact_root',
     ).target;
+  } else if (pathBase === 'specs-root') {
+    // flow-kit 工件根：.specs/<change-id>/ (schedule-management-fixes 等)
+    resolved = path.join(runRoot, '.specs');
   } else {
     resolved = runRoot;
   }
@@ -1724,7 +1727,7 @@ async function pathPatternExists(root, relativePattern) {
   return walk(root, 0);
 }
 
-async function missingRequiredArtifacts(protocol, node) {
+async function missingRequiredArtifacts(protocol, node, change) {
   const schemas = schemaMap(protocol);
   const missing = [];
   for (const schemaId of node.outputSchemas ?? []) {
@@ -1733,9 +1736,11 @@ async function missingRequiredArtifacts(protocol, node) {
       if (!artifact.required) continue;
       const exists = (
         await Promise.all(
-          (artifact.paths ?? []).map(async (artifactPath) =>
-            pathPatternExists(await workflowPathBaseRoot(artifact.pathBase), artifactPath),
-          ),
+          (artifact.paths ?? []).map(async (artifactPath) => {
+            // 替换 <change-id> 占位符为实际 change（如 name-format-unify）
+            const resolvedPath = change ? artifactPath.replaceAll('<change-id>', change) : artifactPath;
+            return pathPatternExists(await workflowPathBaseRoot(artifact.pathBase), resolvedPath);
+          }),
         )
       ).some(Boolean);
       if (!exists) missing.push(schemaId + '.' + artifact.id);
@@ -1780,7 +1785,7 @@ async function main() {
       console.error('BLOCKED: missing Output Schema evidence: ' + missingSchemaEvidence.join(', '));
       process.exit(1);
     }
-    const missingArtifacts = await missingRequiredArtifacts(protocol, node);
+    const missingArtifacts = await missingRequiredArtifacts(protocol, node, change);
     if (missingArtifacts.length > 0) {
       console.error('BLOCKED: missing Output Schema artifacts: ' + missingArtifacts.join(', '));
       process.exit(1);
@@ -1826,7 +1831,7 @@ async function main() {
     console.error('BLOCKED: missing Output Schema evidence: ' + missingSchemaEvidence.join(', '));
     process.exit(1);
   }
-  const missingArtifacts = await missingRequiredArtifacts(protocol, node);
+  const missingArtifacts = await missingRequiredArtifacts(protocol, node, state.activeChange);
   if (missingArtifacts.length > 0) {
     console.error('BLOCKED: missing Output Schema artifacts: ' + missingArtifacts.join(', '));
     process.exit(1);
