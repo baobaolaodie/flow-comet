@@ -174,6 +174,11 @@ async function main() {
     }
     const state = await readState();
     const detectedNode = await determineNode(changeName, protocol, state.completedNodes);
+    // P0-2: 状态漂移自动校正——以文件产物为准（determineNode），校正 state.currentNode
+    if (state.currentNode !== detectedNode) {
+      state.currentNode = detectedNode;
+      await writeState(state);
+    }
     printNext(protocol, detectedNode);
     return;
   }
