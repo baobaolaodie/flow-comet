@@ -1,0 +1,182 @@
+apiVersion: comet.eval/v1alpha1
+kind: SkillEvalManifest
+metadata:
+  name: flow-comet
+  description: flow-kit 9 阶段工作流 + 自动状态管理。工件直接读写 .specs/，不经过 OpenSpec。
+  draftHash: 4481e472ae27532a3b05daf97f02f13b9b784c8ffb1581b40136d19936564cec
+skill:
+  name: flow-comet
+  source: ..
+  profile: authoring-skill
+evaluation:
+  recommendedTasks:
+    - authoring-skill-smoke
+    - workflow-route-conformance
+  baselineTreatments:
+    - CONTROL
+  qualityGates:
+    minWeightedScore: 0.8
+    minPassAt1: 0.6
+    maxInstabilityGap: 0.4
+  requiredOutputSchemas:
+    - flowkit.intake.v1
+    - flowkit.design.v1
+    - flowkit.plan.v1
+    - flowkit.execution.v1
+    - flowkit.handoff.v1
+    - flowkit.review.v1
+    - flowkit.verify.v1
+    - flowkit.archive.v1
+  expectedEvidence:
+    - node: open
+      check: output-schema:open.flowkit.intake.v1.intake-summary
+      schema: flowkit.intake.v1
+      evidence: intake-summary
+    - node: design
+      check: output-schema:design.flowkit.design.v1.design-summary
+      schema: flowkit.design.v1
+      evidence: design-summary
+    - node: plan
+      check: output-schema:plan.flowkit.plan.v1.plan-summary
+      schema: flowkit.plan.v1
+      evidence: plan-summary
+    - node: execute
+      check: output-schema:execute.flowkit.execution.v1.implementation-summary
+      schema: flowkit.execution.v1
+      evidence: implementation-summary
+    - node: subagent-execute
+      check: output-schema:subagent-execute.flowkit.handoff.v1.handoff-request
+      schema: flowkit.handoff.v1
+      evidence: handoff-request
+    - node: subagent-execute
+      check: output-schema:subagent-execute.flowkit.handoff.v1.handoff-result
+      schema: flowkit.handoff.v1
+      evidence: handoff-result
+    - node: review
+      check: output-schema:review.flowkit.review.v1.review-summary
+      schema: flowkit.review.v1
+      evidence: review-summary
+    - node: verify
+      check: output-schema:verify.flowkit.verify.v1.verification-result
+      schema: flowkit.verify.v1
+      evidence: verification-result
+    - node: archive
+      check: output-schema:archive.flowkit.archive.v1.archive-summary
+      schema: flowkit.archive.v1
+      evidence: archive-summary
+    # Required Skill Call checks
+    - node: open
+      check: required-skill:open.flow-comet-change
+      enforcement: guarded
+    - node: open
+      check: required-skill:open.flow-comet-requirement
+      enforcement: guarded
+    - node: design
+      check: required-skill:design.flow-comet-design
+      enforcement: guarded
+    - node: design
+      check: required-skill:design.flow-comet-ui-design
+      enforcement: advisory
+    - node: plan
+      check: required-skill:plan.flow-comet-task
+      enforcement: guarded
+    - node: execute
+      check: required-skill:execute.flow-comet-dev
+      enforcement: guarded
+    - node: subagent-execute
+      check: required-skill:subagent-execute.flow-comet-dev
+      enforcement: handoff-guarded
+    - node: review
+      check: required-skill:review.flow-comet-review
+      enforcement: guarded
+    - node: review
+      check: required-skill:review.flow-comet-test
+      enforcement: guarded
+    - node: verify
+      check: required-skill:verify.flow-comet-integration
+      enforcement: guarded
+    - node: archive
+      check: required-skill:archive.flow-comet-integration
+      enforcement: guarded
+  requiredSkills:
+    - flow-comet
+    - flow-comet-open
+    - flow-comet-design
+    - flow-comet-plan
+    - flow-comet-execute
+    - flow-comet-subagent-execute
+    - flow-comet-review
+    - flow-comet-verify
+    - flow-comet-archive
+    - flow-comet-change
+    - flow-comet-requirement
+    - flow-comet-ui-design
+    - flow-comet-task
+    - flow-comet-dev
+    - flow-comet-review
+    - flow-comet-test
+    - flow-comet-integration
+  generatedNodeSkills:
+    - flow-comet-open
+    - flow-comet-design
+    - flow-comet-plan
+    - flow-comet-execute
+    - flow-comet-subagent-execute
+    - flow-comet-review
+    - flow-comet-verify
+    - flow-comet-archive
+  expectedArtifacts:
+    - node: open
+      schema: flowkit.intake.v1
+      artifact: change-doc
+      paths:
+        - .specs/<change-id>/CHANGE.md
+    - node: open
+      schema: flowkit.intake.v1
+      artifact: requirement-doc
+      paths:
+        - .specs/<change-id>/REQUIREMENT.md
+    - node: design
+      schema: flowkit.design.v1
+      artifact: design-doc
+      paths:
+        - .specs/<change-id>/DESIGN.md
+    - node: plan
+      schema: flowkit.plan.v1
+      artifact: task-plan
+      paths:
+        - .specs/<change-id>/TASK.md
+    - node: execute
+      schema: flowkit.execution.v1
+      artifact: task-summaries
+      paths:
+        - .specs/<change-id>/*-SUMMARY.md
+    - node: review
+      schema: flowkit.review.v1
+      artifact: review-doc
+      paths:
+        - .specs/<change-id>/REVIEW.md
+    - node: verify
+      schema: flowkit.verify.v1
+      artifact: test-doc
+      paths:
+        - .specs/<change-id>/TEST.md
+    - node: verify
+      schema: flowkit.verify.v1
+      artifact: uat-doc
+      paths:
+        - .specs/<change-id>/UAT.md
+  routeConformance:
+    task: workflow-route-conformance
+    expectedNodeOrder:
+      - open
+      - design
+      - plan
+      - execute
+      - subagent-execute
+      - review
+      - verify
+      - archive
+interaction:
+  mode: none
+  maxTurns: 8
