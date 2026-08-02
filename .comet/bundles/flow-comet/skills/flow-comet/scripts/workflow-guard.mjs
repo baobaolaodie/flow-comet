@@ -1681,6 +1681,30 @@ function missingRequiredSchemaEvidence(protocol, node, evidence) {
   return missing;
 }
 
+// P2: 并行冲突检测——解析 TASK.md 中 parallel=pending 任务的 write_files，找交集（防同 wave 并行写冲突）
+async function findParallelWriteConflicts(changeDir) {
+  const taskFile = path.join(changeDir, 'TASK.md');
+  let text;
+  try { text = await fs.readFile(taskFile, 'utf8'); } catch { return []; }
+  const blocks = [...text.matchAll(/<task[^>]*parallel="true"[^>]*status="pending"[\s\S]*?<\/task>/g)];
+  const perTask = [];
+  for (const b of blocks) {
+    const idMatch = b[0].match(/<task[^>]*id="([^"]+)"/);
+    const wf = b[0].match(/<write_files>([\s\S]*?)<\/write_files>/);
+    if (!idMatch || !wf) continue;
+    const files = [...wf[1].matchAll(/([A-Za-z0-9_./@*-]+\.(?:ts|tsx|py|js|mjs|json|css|md))/g)].map((m) => m[1]);
+    perTask.push({ id: idMatch[1], files: new Set(files) });
+  }
+  const conflicts = [];
+  for (let i = 0; i < perTask.length; i++) {
+    for (let j = i + 1; j < perTask.length; j++) {
+      const overlap = [...perTask[i].files].filter((f) => perTask[j].files.has(f));
+      if (overlap.length) conflicts.push({ a: perTask[i].id, b: perTask[j].id, files: overlap });
+    }
+  }
+  return conflicts;
+}
+
 function escapeRegExp(value) {
   return String(value).replace(/[|\\{}()[\]^$+?.]/gu, '\\$&');
 }
@@ -1819,6 +1843,14 @@ async function main() {
     if (current !== node.id && !state.completedNodes.includes(node.id)) {
       console.error('BLOCKED: current Node is ' + String(current) + ', cannot enter ' + node.id + '.');
       process.exit(1);
+    }
+    // P2: 并行冲突检测——subagent-execute 委托前校验 wave 内 parallel 任务 write_files 无交集
+    if (node.id === 'subagent-execute' && state.activeChange) {
+      const conflicts = await findParallelWriteConflicts(path.join(runRoot, '.specs', state.activeChange));
+      if (conflicts.length > 0) {
+        console.error('BLOCKED: parallel tasks write_files 冲突: ' + conflicts.map((c) => `${c.a}×${c.b}(${c.files.join(',')})`).join('; '));
+        process.exit(1);
+      }
     }
     console.log('ENTRY OK: ' + node.id);
     return;
