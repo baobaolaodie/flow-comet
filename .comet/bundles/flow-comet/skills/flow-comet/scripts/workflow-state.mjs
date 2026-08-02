@@ -196,10 +196,20 @@ async function main() {
     if (!nodeId) throw new Error('record requires a Node id.');
     const state = await readState();
     state.evidence = state.evidence || {};
+    // 解析 JSON 参数并展开到 evidence 顶层（summary/completedChecks/output-schema evidence 等）；
+    // 若不可解析则作为 summary 字符串
+    let parsed = {};
+    const raw = process.argv.slice(4).join(' ');
+    try {
+      parsed = raw ? JSON.parse(raw) : {};
+      if (typeof parsed !== 'object' || Array.isArray(parsed)) parsed = { summary: String(parsed) };
+    } catch {
+      parsed = { summary: raw || 'recorded' };
+    }
     state.evidence[nodeId] = {
       ...(state.evidence[nodeId] || {}),
+      ...parsed,
       recordedAt: new Date().toISOString(),
-      summary: process.argv.slice(4).join(' ') || 'recorded'
     };
     await writeState(state);
     console.log('EVIDENCE: ' + nodeId);
