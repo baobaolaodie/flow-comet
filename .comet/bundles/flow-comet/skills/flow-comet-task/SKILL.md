@@ -18,6 +18,7 @@ description: "flow-kit TASK 阶段协议：拆原子任务（XML 格式）、rea
    - 并行标记 `[P]`：互不冲突的任务
    - 依赖：`depends_on: <task-id>`
 3. **每任务 7 字段**：id / name / read_files / write_files / action / verify / done
+   - **write_files 必须包含关联测试文件**：若任务修改组件/函数，且有关联测试直接 import 其本地导出（如 `src/**/__tests__/*.test.ts` 从组件文件 import），该测试文件**必须纳入该任务 write_files**。否则组件删除本地导出/改 import 后，关联测试会编译失败或断言失效（实测：name-format-unify 的 T02-T04 改组件时破坏了 elo/livescore/schedule-status 三个测试文件）。
 4. **波次划分**：同层并行，跨层串行
 5. **XML 格式**：便于 AI 解析与执行
 
