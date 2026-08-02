@@ -44,7 +44,13 @@ This node performs a structured multi-round review of the implemented change, ch
    - Check no unplanned features were added.
    - Check no DESIGN.md architecture was violated.
 
-2. **Round 2 — Code quality (6 decay risks)**: Diagnose the diff across 6 dimensions from brooks-lint:
+2. **Round 1.5 — Contract consistency check (O-8)**: For changes touching API contracts, state machines, or form validation, verify frontend/backend consistency — this catches silent enum/value mismatches that unit tests on each side miss:
+   - **Enum/state values**: Backend status/type enums must match frontend maps (e.g. `ScheduleConfig.status` 0/2/3/4 vs frontend `SCHEDULE_STATUS_MAP`) — grep both sides, confirm the same values mean the same thing.
+   - **Field names**: API response fields must match frontend TypeScript types (no silent rename / nested-vs-flat mismatch).
+   - **Validation rules**: min/max/required conditions must align between backend Pydantic `Field(ge=...)` / conditional checks and frontend form rules (e.g. required only when a switch is enabled).
+   - Record any mismatch as a Major finding with both file:line references (frontend + backend).
+
+3. **Round 2 — Code quality (6 decay risks)**: Diagnose the diff across 6 dimensions from brooks-lint:
    - **R1 Cognitive Overload**: Is the code hard to understand? (>50 line functions, >3 nesting levels)
    - **R2 Change Propagation**: Does changing one thing break unrelated parts?
    - **R3 Knowledge Duplication**: Is the same business rule/constant expressed in multiple places? (Conceptual, not literal code duplication)
@@ -52,7 +58,7 @@ This node performs a structured multi-round review of the implemented change, ch
    - **R5 Dependency Disorder**: Do dependencies flow consistently (high -> low layer)?
    - **R6 Domain Model Distortion**: Does the code faithfully reflect the business domain?
 
-   If brooks-lint installed: run `/brooks-review` and paste output verbatim. Otherwise: diagnose with 4-element format (Symptom/Source/Consequence/Remedy) with file:line references and book citations.
+   Prefer `/brooks-review` (main session has brooks-lint installed) and paste output verbatim. The built-in 6-dimension quick check is a FALLBACK ONLY when brooks-lint is genuinely unavailable (e.g. subagent environment without the plugin) — then diagnose with 4-element format (Symptom/Source/Consequence/Remedy) with file:line references and book citations, and record "brooks-lint unavailable" in the review.
 
 3. **Round 2.0 — TEST.md 5-round pyramid completeness**: Before code quality, verify TEST.md:
    - All 5 rounds have clear status (no unfilled).
