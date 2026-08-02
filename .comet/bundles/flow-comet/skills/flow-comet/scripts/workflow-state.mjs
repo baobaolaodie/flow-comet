@@ -109,6 +109,13 @@ async function writeState(state) {
   await writeJson(statePath, state);
 }
 
+// comet 原生状态机同步：写 .comet/current-change.json，让 comet hook-router/工具识别 flow-comet 的活跃 change
+async function syncCometSelection(change) {
+  const selFile = path.join(runRoot, '.comet', 'current-change.json');
+  const sel = { schema: 'comet.selection.v2', workflow: 'classic', change: change ?? null, branch: null };
+  await writeJson(selFile, sel);
+}
+
 function route(protocol) {
   return (protocol.nodes ?? []).filter(n => !n.disabled);
 }
@@ -141,6 +148,7 @@ async function main() {
       createdAt: new Date().toISOString()
     };
     await writeState(state);
+    await syncCometSelection(changeName);  // 同步 comet 原生状态机
     console.log('Initialized: ' + changeName);
     printNext(protocol, 'open');
     return;
@@ -192,6 +200,7 @@ async function main() {
     state.activeChange = changeName;
     if (!state.currentNode) state.currentNode = await determineNode(changeName, protocol, state.completedNodes);
     await writeState(state);
+    await syncCometSelection(changeName);  // 同步 comet 原生状态机
     console.log('Selected: ' + changeName);
     return;
   }

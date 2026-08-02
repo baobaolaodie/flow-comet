@@ -1896,6 +1896,14 @@ async function main() {
     // archive 节点完成后 change 已归档 → 清空活跃 change（flow-comet 回到无活跃状态）
     const isArchive = node.id === 'archive';
     if (isArchive) state.activeChange = null;
+    if (isArchive) {
+      // 同步 comet 原生状态机：清 current-change.json（无活跃 change）
+      try {
+        await writeJson(path.join(runRoot, '.comet', 'current-change.json'), {
+          schema: 'comet.selection.v2', workflow: 'classic', change: null, branch: null,
+        });
+      } catch {}
+    }
     const next = isArchive ? null : nextNode(protocol, state);
     state.currentNode = isArchive ? null : (next?.id ?? null);
     state.status = next ? 'running' : 'completed';
