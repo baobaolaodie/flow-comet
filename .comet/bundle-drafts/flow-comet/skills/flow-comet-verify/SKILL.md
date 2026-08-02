@@ -35,6 +35,8 @@ This node performs the final integration verification: running all automated tes
 
 ### Steps
 
+**Express 路径（低风险 change，P1）**：若 CHANGE.md 头部含 `express: true`，则 TEST.md 用最小矩阵（只第 1 轮功能，2-5 轮声明 N/A）、UAT 用简化脚本（核心 AC 手动确认 + 其余单测覆盖）；否则完整 5 轮金字塔 + 全 UAT。
+
 1. **Run full automation**: Execute all automated checks and paste real output:
    - Full unit tests: `pytest tests/ -q` (or equivalent).
    - Integration/e2e tests: if available.
