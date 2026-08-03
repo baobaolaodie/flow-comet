@@ -1986,6 +1986,17 @@ async function main() {
       console.error('BLOCKED: SUMMARY 关键段校验失败: ' + violations.join('; '));
       process.exit(1);
     }
+    // brooks-lint 自检方法审计：检查 6 维自查段是否声明了自检方法
+    const summaryFiles = (await fs.readdir(changeDir).catch(() => [])).filter(f => f.endsWith('-SUMMARY.md'));
+    for (const f of summaryFiles) {
+      try {
+        const content = await fs.readFile(path.join(changeDir, f), 'utf8');
+        const sixDim = content.match(/##\s*6\s*维自查[\s\S]*?(?=\n##|\n---|\Z)/i);
+        if (sixDim && !/brooks.?review/i.test(sixDim[0])) {
+          console.error('BROOKS-LINT WARN: ' + f + ' 的 6 维自查未声明使用 /brooks-review（可能使用了内置快查）');
+        }
+      } catch {}
+    }
   }
   // P0-A: all-tasks-done 校验——execute 出口必须所有 task 都 done
   if (node.id === 'execute' && state.activeChange) {

@@ -52,7 +52,7 @@ For each pending task in TASK.md, execute the following sequence:
 
 8. **Run verify (section 3)**: Execute the `<verify>` command. Paste real output into SUMMARY.md. Only proceed if verify passes.
 
-9. **Self-review (section 4)**: If brooks-lint installed: run `/brooks-review`. Critical must be fixed before commit. Otherwise: 6-dimension quick check (R1 Cognitive Overload, R2 Change Propagation, R3 Knowledge Duplication, R4 Accidental Complexity, R5 Dependency Disorder, R6 Domain Model Distortion).
+9. **Self-review (section 4)**: MUST call `/brooks-review` if the skill tool is available. Only if the skill tool reports the plugin is unavailable may you fall back to the built-in R1-R6 quick check. The SUMMARY.md **must** include a `## 自检方法` field declaring which method was used: `brooks-review` or `builtin-quickcheck`. Critical must be fixed before commit.
 
 10. **Diff boundary check (R6.5, section 5)**: Run `git diff --name-only HEAD` and `git status --short`. Compare against TASK.md `write_files`. Any out-of-boundary files must be reverted or explicitly approved. Record in SUMMARY.md "boundary check" section.
 
