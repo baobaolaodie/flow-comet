@@ -37,7 +37,9 @@ This node parallelizes execution by delegating independent tasks (marked `parall
 
 1. **Identify parallel tasks**: Read TASK.md and find all tasks with `parallel="true"` and `status="pending"`. Verify they are genuinely independent (no file conflicts between them — check `write_files` do not overlap).
 
-2. **For each parallel task, create handoff request**: Use `workflow-handoff.mjs request <task-id>` to register the handoff. The handoff prompt must include:
+2. **For each parallel task, create handoff request**: Use `workflow-handoff.mjs request <task-id>` to register the handoff.
+   > 若不传 `--write-files`，脚本会自动从 TASK.md 对应 task 的 `<write_files>` 块解析（orchestrator 无需手动从 TASK.md 提取文件列表）。
+   The handoff prompt must include:
    - The task's full XML block from TASK.md.
    - DESIGN.md sections 0 and 0.5 for context.
    - REQUIREMENT.md ACs relevant to this task.

@@ -13,6 +13,21 @@ const protocolPath = path.join(packageRoot, 'reference', 'workflow-protocol.json
 const WORKFLOW_PROJECT_CONFIG_MAX_BYTES = 64 * 1024;
 const WORKFLOW_PROJECT_FILE_MAX_BYTES = 2 * 1024 * 1024;
 
+// Phase 写入白名单：currentNode → 允许写入的（相对 runRoot 的）路径前缀
+// '' 空字符串表示允许所有路径（execute / subagent-execute 需要写源码 + SUMMARY）
+// '.specs/' 前缀表示只允许 .specs 目录下的文件
+// 其他路径前缀精确匹配
+const PHASE_WRITE_WHITELIST = {
+  'open':             ['.specs/'],
+  'design':           ['.specs/', '.specs/adr/'],
+  'plan':             ['.specs/'],
+  'execute':          [''],  // 允许所有（源码 + SUMMARY）
+  'subagent-execute': [''],  // 允许所有
+  'review':           ['.specs/'],
+  'verify':           ['.specs/'],
+  'archive':          ['.specs/archive/', '.specs/CHANGELOG.md', '.specs/LESSONS.md'],
+};
+
 function workflowProjectRelativeSegments(value, label) {
   if (typeof value !== 'string') throw new Error(label + ' must be a string');
   const trimmed = value.trim();
@@ -1593,6 +1608,36 @@ function nextNode(protocol, state) {
   return route(protocol).find((node) => !completed.has(node.id)) ?? null;
 }
 
+// PreToolUse hook 输入从 stdin 传入（JSON：{ tool_name, tool_input: { file_path, ... } }）。
+// 解析失败 / 无输入时返回 null，phase 写入控制因此跳过（不阻断）。
+async function readHookInput() {
+  try {
+    const chunks = [];
+    for await (const chunk of process.stdin) chunks.push(chunk);
+    const text = Buffer.concat(chunks).toString('utf8').trim();
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return null;
+  }
+}
+
+// 计算写入目标相对 runRoot 的路径（正斜杠分隔，供 PHASE_WRITE_WHITELIST 前缀匹配）。
+// 无法解析或目标在项目根之外时返回 null。
+function writeTargetFromHookInput(input) {
+  if (!input || typeof input !== 'object') return null;
+  const toolInput =
+    input.tool_input && typeof input.tool_input === 'object' ? input.tool_input : null;
+  const filePath =
+    toolInput && typeof toolInput.file_path === 'string' ? toolInput.file_path : null;
+  if (!filePath) return null;
+  const absolute = path.resolve(filePath);
+  const relative = path.relative(runRoot, absolute);
+  if (path.isAbsolute(relative) || relative === '..' || relative.startsWith('..' + path.sep)) {
+    return null;
+  }
+  return relative === '' ? '.' : relative.replaceAll('\\', '/');
+}
+
 async function main() {
   const protocol = await readJson(protocolPath);
   if (protocol.schemaVersion !== 1 || !Array.isArray(protocol.nodes)) {
@@ -1601,6 +1646,28 @@ async function main() {
   const nodes = route(protocol);
   if (nodes.length === 0) {
     throw new Error('workflow protocol has no enabled nodes');
+  }
+  // Phase 写入控制：按 .comet/flow-comet-state.json 的 currentNode 检查写入目标是否在白名单内
+  // state 文件读取失败时不阻断（state 可能不存在），继续执行后续安全检查
+  const stateFile = path.join(runRoot, '.comet', 'flow-comet-state.json');
+  let currentNode = null;
+  try {
+    const stateContent = await fs.readFile(stateFile, 'utf8');
+    const state = JSON.parse(stateContent);
+    currentNode = state.currentNode;
+  } catch {}
+
+  const target = writeTargetFromHookInput(await readHookInput());
+  if (currentNode && target) {
+    const whitelist = PHASE_WRITE_WHITELIST[currentNode];
+    if (whitelist) {
+      const allowed = whitelist.some(prefix => prefix === '' || target.startsWith(prefix));
+      if (!allowed) {
+        console.error(`BLOCKED: phase "${currentNode}" 不允许写入 "${target}"`);
+        console.error(`允许范围: ${whitelist.join(', ')}`);
+        process.exit(2);
+      }
+    }
   }
   if (isCometOverlay(protocol)) {
     const change = await resolveCometOverlayChange();
@@ -1619,12 +1686,12 @@ async function main() {
     state = await readStateJson(await statePath(protocol));
   } catch (error) {
     if (error && typeof error === 'object' && error.code === 'ENOENT') {
-      throw new Error('workflow state is missing; run workflow-state.mjs init first');
+      // 无 state 文件（无活跃 workflow / 新克隆仓库）→ 放行，不阻断写入
+      console.log('workflow-hook-guard-ok');
+      console.log('EVENT: before_tool (no active workflow)');
+      return;
     }
     throw error;
-  }
-  if (state.workflow !== protocol.name) {
-    throw new Error('workflow state does not match this workflow protocol');
   }
   if (state.status !== 'running') {
     throw new Error('workflow is not running; current status is ' + String(state.status));

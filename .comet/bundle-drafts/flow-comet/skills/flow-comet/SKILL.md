@@ -163,6 +163,20 @@ All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT
 | `comet-check.mjs` | workflow contract 检查 |
 | `comet-hook-guard.mjs` | 文件写入边界守卫 |
 
+### 机器拥有字段
+
+以下字段只能由 `workflow-state.mjs` 和 `workflow-guard.mjs` 脚本管理，不应被手动编辑：
+
+| 字段 | 说明 | 管理者 |
+|------|------|--------|
+| `currentNode` | 当前活动节点 | workflow-state.mjs next/advance |
+| `completedNodes` | 已完成节点列表 | workflow-guard.mjs exit --apply |
+| `evidence` | 节点证据记录 | workflow-state.mjs record |
+| `verifyFailures` | verify 失败计数 | workflow-guard.mjs (auto-increment) |
+| `status` | 运行状态 | workflow-guard.mjs exit --apply |
+
+手动修改这些字段可能导致 guard 校验不一致。若需修正状态，使用 `workflow-state.mjs advance` 或 `workflow-state.mjs select`。
+
 The route, Output Schemas, required Skill calls, and recovery state are defined by `reference/workflow-protocol.json`.
 
 

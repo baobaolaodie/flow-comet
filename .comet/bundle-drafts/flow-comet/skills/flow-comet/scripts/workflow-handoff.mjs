@@ -42,6 +42,20 @@ async function main() {
     } else {
       description = args.join(' ') || 'pending';
     }
+    // P1-C: 若未显式传 --write-files，从 TASK.md 自动解析（orchestrator 无需手动提取文件列表）
+    if (!writeFiles || writeFiles.length === 0) {
+      try {
+        const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
+        const taskContent = await fs.readFile(taskFile, 'utf8');
+        // 找到对应 task 块的 <write_files> 内容
+        const taskRegex = new RegExp(`<task[^>]*id="${taskId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[\\s\\S]*?<write_files>([\\s\\S]*?)</write_files>`, 'i');
+        const match = taskContent.match(taskRegex);
+        if (match) {
+          const files = match[1].trim().split(/\s*\n\s*/).filter(f => f.trim());
+          writeFiles = files.map(f => f.trim());
+        }
+      } catch {}
+    }
     state.evidence = state.evidence || {};
     state.evidence['subagent-execute'] = state.evidence['subagent-execute'] || {};
     if (!state.evidence['subagent-execute'].handoffRequests) {

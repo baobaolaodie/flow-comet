@@ -11,20 +11,18 @@ Complete the `execute` Node for `flow-comet`.
 
 Responsibility: 按 TASK.md 逐任务执行：TDD + 6 维自查 + LESSONS 扫描 + diff 边界 verify。
 
-## Guidance
-
----
-name: flow-comet-execute
-description: "Execute node for flow-comet: iterates through pending tasks in TASK.md, applying TDD, LESSONS scan, diff boundary check, and atomic commits for each. Do not use for ordinary standalone tasks."
----
-
-# Execute
-
-## Node Goal
-
 This node executes all pending tasks from TASK.md one by one, applying the full dev protocol for each: TDD (RED/GREEN/REFACTOR), LESSONS scan, existing abstraction grep, self-review, diff boundary verification, and atomic commits. It produces a SUMMARY.md per task and marks each task as done in TASK.md. This is the core implementation node where code is actually written.
 
 ## Guidance
+
+### 任务范围
+
+execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pending 任务**。
+
+- `parallel="true"` 的 pending 任务由 subagent-execute 节点负责委托
+- execute 遍历 TASK.md 时，遇到 `parallel="true" status="pending"` 的任务块应**跳过**
+- 若所有 pending 任务都是 parallel=true，execute 应视为无事可做，直接走 exit guard 让路由到 subagent-execute
+- determineNode 路由逻辑会优先检测 parallel 任务并路由到 subagent-execute；若 determineNode 路由到了 execute，说明当前没有需要 execute 处理的任务（此时 execute 做空退出，让 guard 重新路由）
 
 ### Prerequisites
 
@@ -32,6 +30,7 @@ This node executes all pending tasks from TASK.md one by one, applying the full 
 - `.specs/<change-id>/DESIGN.md` or `DESIGN-lite.md` must exist — agent must read section 0 (tech stack) and section 0.5 (architecture alignment).
 - `.specs/LESSONS.md` must exist (or be created from template if missing).
 - For frontend/UI tasks: `.specs/<change-id>/UI-DESIGN.md` must exist.
+- 若 `.specs/<change>/PROGRESS.md` 存在，必须先读取"已排除方案"段（R1.6 反重复），确认当前计划不在排除列表中。完成后删除 PROGRESS.md，有用信息迁移至 SUMMARY。
 
 ### Steps
 
@@ -95,6 +94,8 @@ node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry execute
 
 ## Skill Implementation
 
+Load `flow-comet-execute` for this Node. Operation: `require`.
+
 The execute node loads `flow-comet-dev` for each task execution. It iterates through all pending tasks in TASK.md, applying the full dev protocol: TDD, LESSONS scan, existing abstraction grep, self-review (brooks-lint or 6-dimension quick check), diff boundary verification, and atomic commits. Each task produces a SUMMARY.md and is marked done in TASK.md.
 
 ## Required Skill Calls
@@ -102,6 +103,12 @@ The execute node loads `flow-comet-dev` for each task execution. It iterates thr
 | Skill | Enforcement | Reason |
 |-------|-------------|--------|
 | `flow-comet-dev` | Required for each task execution | Provides TDD protocol, LESSONS scan, 6-dimension self-check, diff boundary rules, schema migration, breaking change protocol |
+
+Load `flow-comet-dev` during this Node and record completed check `required-skill:execute.flow-comet-dev`. Reason: TDD + 6 维自查 + R4.5 + R4.6
+
+## Augmentations
+
+This Node has no declared augmentations.
 
 ## Output Schemas
 
@@ -118,6 +125,11 @@ Evidence: `implementation-summary` (required)
 
 ```bash
 node .claude/skills/flow-comet/scripts/workflow-state.mjs record execute '{"summary":"All N tasks completed, each with SUMMARY.md and verify output"}'
+```
+
+Generic template:
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs record execute '{"summary":"record the real Node result","completedChecks":[]}'
 ```
 
 ## Guardrails
@@ -137,6 +149,8 @@ node .claude/skills/flow-comet/scripts/workflow-guard.mjs exit execute --apply
 
 After exit, run `node .claude/skills/flow-comet/scripts/workflow-state.mjs next` to get the next node.
 
+If the script prints `SKILL: flow-comet-subagent-execute`, load that Skill next.
+
 ## Recovery
 
 1. Re-run entry check to confirm workflow state.
@@ -146,47 +160,4 @@ After exit, run `node .claude/skills/flow-comet/scripts/workflow-state.mjs next`
 5. Resume from the first pending task. Do not repeat completed tasks.
 6. If a PROGRESS.md exists for the current task, delete it after completion and migrate useful info to SUMMARY.md.
 
-
-## Entry Check
-
-```bash
-node flow-comet/scripts/workflow-guard.mjs entry execute
-```
-
-## Skill Implementation
-
-Load `flow-comet-execute` for this Node. Operation: `require`.
-
-## Required Skill Calls
-
-- Load `flow-comet-dev` during this Node and record completed check `required-skill:execute.flow-comet-dev`. Reason: TDD + 6 维自查 + R4.5 + R4.6
-
-## Augmentations
-
-- This Node has no declared augmentations.
-
-## Output Schemas
-
-- `flowkit.execution.v1`: SUMMARY.md per task Required evidence: `implementation-summary`. Required artifacts: `task-summaries` at `<change-id>/*-SUMMARY.md`.
-
-## Evidence Record
-
-```bash
-node flow-comet/scripts/workflow-state.mjs record execute '{"summary":"record the real Node result","completedChecks":[]}'
-```
-
-## Guardrails
-
-- `build-evidence`: SUMMARY.md produced (artifact-exists).
-
-## Exit Check
-
-```bash
-node flow-comet/scripts/workflow-guard.mjs exit execute --apply
-```
-
-If the script prints `SKILL: flow-comet-subagent-execute`, load that Skill next.
-
-## Recovery
-
-Read `reference/workflow-protocol.json` and the configured workflow state. Resume the first Node that is not listed in `completedNodes`.
+Generic fallback: read `.claude/skills/flow-comet/reference/workflow-protocol.json` and the configured workflow state; resume the first Node not listed in `completedNodes`.
