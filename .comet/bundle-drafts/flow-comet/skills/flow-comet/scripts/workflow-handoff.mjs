@@ -71,12 +71,15 @@ async function main() {
       const commitHash = String(parsed.commitHash);
       const { execSync } = await import('child_process');
       try {
-        const out = execSync(`git show ${commitHash} --name-only --format=`, { cwd: runRoot, encoding: 'utf8' });
+        const out = execSync(`git show ${commitHash} --name-only --format=`, { cwd: runRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
         const committedFiles = out.split('\n').map(s => s.trim()).filter(Boolean);
         const allowed = state.evidence['subagent-execute'].handoffRequests?.[taskId]?.writeFiles || [];
-        const violations = committedFiles.filter(f => !allowed.some(a => f.startsWith(a.replace('*', ''))));
-        if (violations.length > 0) {
-          console.error('HANDOFF WARN: 提交文件超出 writeFiles 范围: ' + violations.join(', '));
+        // 空 writeFiles（request 未带 --write-files）时跳过子集校验——避免全量越界误报噪音
+        if (allowed.length > 0) {
+          const violations = committedFiles.filter(f => !allowed.some(a => f.startsWith(a.replace('*', ''))));
+          if (violations.length > 0) {
+            console.error('HANDOFF WARN: 提交文件超出 writeFiles 范围: ' + violations.join(', '));
+          }
         }
       } catch {
         console.error('HANDOFF ERROR: commitHash 无效或 git show 失败: ' + commitHash);

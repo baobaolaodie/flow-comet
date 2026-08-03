@@ -1963,14 +1963,21 @@ async function main() {
     }
   }
   // W1-D: Return Contract 校验——每个 delegated task 的 result 必须含 commitHash + greenEvidence
+  // 过渡规则（对齐 W1-C）：旧格式纯字符串 result（非 JSON）视为 pre-contract，仅 WARN 不阻断——
+  // 避免已有 change 的旧 handoff 记录在 subagent-execute 重入时被硬性卡死
   if (node.id === 'subagent-execute') {
     const he = state.evidence['subagent-execute'];
     const results = he && he.handoffResult ? he.handoffResult : {};
     const violations = [];
+    const legacy = [];
     for (const [taskId, rec] of Object.entries(results)) {
-      const r = typeof rec.result === 'object' ? rec.result : {};
+      const r = typeof rec.result === 'object' && rec.result !== null ? rec.result : null;
+      if (!r) { legacy.push(taskId); continue; }
       if (!r.commitHash) violations.push(taskId + ' 缺 commitHash');
       if (!r.greenEvidence || !r.greenEvidence.command) violations.push(taskId + ' 缺 greenEvidence');
+    }
+    if (legacy.length > 0) {
+      console.error('HANDOFF WARN: 以下任务为旧格式 handoff（非 Return Contract），建议补录完整契约: ' + legacy.join(', '));
     }
     if (violations.length > 0) {
       console.error('BLOCKED: Return Contract 校验失败: ' + violations.join('; '));
