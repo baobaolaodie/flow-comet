@@ -27,8 +27,12 @@ const NODE_TRANSITION_GATES = {
   archive:          { evidence: ['archive-summary'],          artifacts: ['<change-id>/archive/*'] },
 };
 
-// W1-B: flow-kit SUMMARY 模板必填段
-const SUMMARY_REQUIRED_SECTIONS = ['## verify 输出', '## 6 维自查', '## 越界检查'];
+// W1-B: flow-kit SUMMARY 模板必填段（正则匹配，大小写不敏感 + 变体兼容）
+const SUMMARY_REQUIRED_SECTIONS = [
+  { regex: /##\s*verify\s*输出/i, label: '## verify 输出' },
+  { regex: /##\s*6\s*维自查/i, label: '## 6 维自查' },
+  { regex: /##\s*(越界检查|边界检查)/i, label: '## 越界检查' },
+];
 
 function workflowProjectRelativeSegments(value, label) {
   if (typeof value !== 'string') throw new Error(label + ' must be a string');
@@ -1795,13 +1799,14 @@ async function fileExists(file) {
 }
 
 // W1-B: 校验 change 目录下每份 *-SUMMARY.md 含 SUMMARY 模板的三个必填段
+// 用正则（大小写不敏感 + 变体兼容）——避免现有 SUMMARY 格式漂移导致误 BLOCKED
 async function verifySummaries(changeDir) {
   const files = (await fs.readdir(changeDir).catch(() => [])).filter(f => f.endsWith('-SUMMARY.md'));
   const violations = [];
   for (const f of files) {
     const content = await fs.readFile(path.join(changeDir, f), 'utf8');
     for (const section of SUMMARY_REQUIRED_SECTIONS) {
-      if (!content.includes(section)) violations.push(`${f} 缺 ${section}`);
+      if (!section.regex.test(content)) violations.push(`${f} 缺 ${section.label}`);
     }
   }
   return violations;
