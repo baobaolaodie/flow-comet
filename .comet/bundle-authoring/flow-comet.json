@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "name": "flow-comet",
   "mode": "create",
-  "status": "draft",
+  "status": "ready",
   "draftPath": "./.comet/bundle-drafts/flow-comet",
-  "currentHash": "b5be7347fe1cf774edaac031d81df284f0c8fe8f1e0494b91858a7e04bad2c4b",
+  "currentHash": "40771da9f1a70734ec3258a5f96bd4e495d21560ebf9edadff1b832b56b44db4",
   "candidates": [
     {
       "name": "flow-comet-open",
@@ -1932,5 +1932,22 @@
       "findings": [],
       "reviewedAt": "2026-08-01T00:00:00Z"
     }
+  },
+  "eval": {
+    "level": "quick",
+    "hash": "40771da9f1a70734ec3258a5f96bd4e495d21560ebf9edadff1b832b56b44db4",
+    "resultPath": "./.comet/bundle-evals/flow-comet/40771da9f1a70734ec3258a5f96bd4e495d21560ebf9edadff1b832b56b44db4/c4a63584a02cff116fe3aa1413b303d967ff2efade7db997e5f505e911ee1b25/result.json",
+    "passed": true
+  },
+  "review": {
+    "hash": "40771da9f1a70734ec3258a5f96bd4e495d21560ebf9edadff1b832b56b44db4",
+    "decision": "approved",
+    "reviewer": "baobaolaodie",
+    "at": "2026-08-03T12:09:31.794Z"
+  },
+  "ready": {
+    "hash": "40771da9f1a70734ec3258a5f96bd4e495d21560ebf9edadff1b832b56b44db4",
+    "path": "./.comet/bundles/flow-comet",
+    "publishedAt": "2026-08-03T12:09:47.267Z"
   }
 }
