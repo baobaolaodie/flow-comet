@@ -1896,7 +1896,33 @@ async function main() {
     // archive 节点完成后 change 已归档 → 清空活跃 change（flow-comet 回到无活跃状态）
     const isArchive = node.id === 'archive';
     if (isArchive) state.activeChange = null;
-    const next = isArchive ? null : nextNode(protocol, state);
+    let next = isArchive ? null : nextNode(protocol, state);
+    // P0: parallel-aware 路由——如果下一候选是 execute，检查 TASK.md 是否有依赖已满足的 pending parallel 任务
+    // 有则路由到 subagent-execute（与 workflow-state.mjs 的 determineNode 逻辑一致）
+    if (next && next.id === 'execute' && state.activeChange) {
+      const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
+      try {
+        const taskContent = await fs.readFile(taskFile, 'utf8');
+        // 收集所有 done 任务的 id
+        const doneIds = new Set((taskContent.match(/<task[^>]*id="([^"]+)"[^>]*status="done"/g) || [])
+          .map(m => { const id = m.match(/id="([^"]+)"/); return id ? id[1] : null; })
+          .filter(Boolean));
+        // 检查 pending parallel 任务中是否有依赖已满足的
+        const parallelBlocks = taskContent.match(/<task[^>]*parallel="true"[^>]*status="pending"[\s\S]*?<\/task>/g) || [];
+        const eligibleParallel = parallelBlocks.filter(block => {
+          const depsMatch = block.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
+          if (!depsMatch || !depsMatch[1].trim()) return true;
+          const deps = depsMatch[1].trim().split(/[,\s]+/).filter(Boolean);
+          return deps.every(d => doneIds.has(d));
+        });
+        if (eligibleParallel.length > 0) {
+          const subagentNode = findNode(protocol, 'subagent-execute');
+          if (subagentNode && !completed.has('subagent-execute')) {
+            next = subagentNode;
+          }
+        }
+      } catch {}
+    }
     state.currentNode = isArchive ? null : (next?.id ?? null);
     state.status = next ? 'running' : 'completed';
     state.history = Array.isArray(state.history) ? state.history : [];

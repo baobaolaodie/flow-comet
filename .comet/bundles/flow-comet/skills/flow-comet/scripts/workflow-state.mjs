@@ -78,14 +78,26 @@ async function determineNode(changeName, protocol, completedNodes = []) {
     const taskContent = await fs.readFile(path.join(changeDir, 'TASK.md'), 'utf8');
     // Use <task ... status="..." to match only task tags, not documentation text
     const pending = (taskContent.match(/<task[^>]*status="pending"/g) || []).length;
-    const parallelPending = (taskContent.match(/<task[^>]*parallel="true"[^>]*status="pending"/g) || []).length;
     const done = (taskContent.match(/<task[^>]*status="done"/g) || []).length;
     if (pending > 0) {
-      // Every wave's parallel tasks are eligible for subagent-execute: the TASK.md wave
-      // division guarantees same-wave tasks have disjoint write_files. Serial tasks (or
-      // waves without parallel=true tasks) fall through to execute.
+      // P0 fix: 只检测依赖已满足的 parallel 任务，避免 Wave N+1 的 parallel 任务
+      // 在 Wave N 串行任务未完成时就被路由到 subagent-execute
       const hasSubagentNode = route(protocol).some(n => n.id === 'subagent-execute');
-      if (parallelPending > 0 && hasSubagentNode) return 'subagent-execute';
+      if (hasSubagentNode) {
+        // 收集所有 done 任务的 id
+        const doneIds = new Set((taskContent.match(/<task[^>]*id="([^"]+)"[^>]*status="done"/g) || [])
+          .map(m => { const id = m.match(/id="([^"]+)"/); return id ? id[1] : null; })
+          .filter(Boolean));
+        // 检查 pending parallel 任务中是否有依赖已满足的
+        const parallelBlocks = taskContent.match(/<task[^>]*parallel="true"[^>]*status="pending"[\s\S]*?<\/task>/g) || [];
+        const eligibleParallel = parallelBlocks.filter(block => {
+          const depsMatch = block.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
+          if (!depsMatch || !depsMatch[1].trim()) return true; // 无依赖
+          const deps = depsMatch[1].trim().split(/[,\s]+/).filter(Boolean);
+          return deps.every(d => doneIds.has(d));
+        });
+        if (eligibleParallel.length > 0) return 'subagent-execute';
+      }
       return 'execute';
     }
     // All tasks done — require at least one SUMMARY to proceed to review
