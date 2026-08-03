@@ -56,21 +56,19 @@ flow-kit 9 阶段工作流的 workflow-kernel 实现。保留 flow-kit 的全部
 
 ### 决策分类与决策点
 
-先分类再行动：有两个或以上会改变范围、行为、风险接受或不可逆结果的合法选项才是用户决策；唯一安全下一步直接执行；guard 失败是停止条件。
+先分类再行动：
 
-| 情况 | 处理 |
-|------|------|
-| 首次调用且主题/范围明确 | 自动初始化并进入 open 节点 |
-| 存在两个以上互斥且合法的范围解释 | 合并为一个问题让用户选择 |
-| flow-kit 反问协议要求确认（CHANGE/REQUIREMENT/DESIGN） | 按 flow-kit 规则暂停等待 |
-| 技术栈选型（5~6 卡让用户选） | design 节点内暂停 |
-| 破坏性变更检测（R4.6） | execute 节点内暂停，展示引用图 |
-| Schema 迁移（R4.5） | execute 节点内暂停，问是否执行迁移 |
-| REVIEW Critical 项 | review 节点暂停，等人工确认 |
-| UAT 失败超 3 轮 | verify 节点暂停，等人工决策 |
-| 归档操作（不可逆） | archive 节点暂停，等最终确认 |
+| 分类 | 定义 | 处理 |
+|------|------|------|
+| 用户决策 | ≥2 个会改变范围/行为/风险/不可逆结果的合法选项 | 用 AskUserQuestion 问（优先）或文本回退；相邻选择合并为一个问题，不重问已持久化选择 |
+| 自动处理 | 唯一安全下一步 | 直接执行并汇报，不许制造确认 |
+| 停止条件 | guard 失败 / 缺依赖 / 状态损坏 | 报告阻塞与恢复条件，无合法动作时才升级为用户决策 |
+| 手动交接 | `NEXT: manual`（若有） | 不是用户决策，直接继续 |
 
-Node guard 失败时先自动诊断并执行唯一安全修复；若缺少依赖或状态损坏导致无法继续，报告停止条件。只有恢复方式存在多个会改变范围或风险的合法选项时，才升级为上表中的用户决策。
+**决策点清单（挂到四分类下）**：
+- **用户决策**：首次调用且主题/范围有多个合法解释；技术栈选型（5~6 卡，design 节点内暂停）；破坏性变更检测（R4.6，execute 节点内暂停展示引用图）；Schema 迁移（R4.5，execute 节点内暂停）；REVIEW Critical 项（review 节点暂停等人工确认）；UAT 失败超限（第 4 次，机器计数 verifyFailures，verify 节点暂停）；归档操作（不可逆，archive 节点暂停等最终确认）
+- **自动处理**：唯一安全下一步直接执行；flow-kit 反问协议要求确认（CHANGE/REQUIREMENT/DESIGN）按 flow-kit 规则暂停等待
+- **停止条件**：Node guard 失败时先自动诊断并执行唯一安全修复；缺依赖或状态损坏导致无法继续时报告停止条件与恢复条件；只有恢复方式存在多个会改变范围或风险的合法选项时，才升级为用户决策
 
 ### Red Flags
 
@@ -173,10 +171,10 @@ The route, Output Schemas, required Skill calls, and recovery state are defined 
 1. `flow-comet-open` - Open (control). Responsibility: CHANGE 反问 + REQUIREMENT 需求分析。生成 CHANGE.md 和 REQUIREMENT.md。 Required Skills: `flow-comet-change`, `flow-comet-requirement`. Output Schemas: `flowkit.intake.v1`.
 2. `flow-comet-design` - Design (control). Responsibility: 技术栈选型 + ADR + 数据流。生成 DESIGN.md。 Required Skills: `flow-comet-design`, `flow-comet-ui-design`. Output Schemas: `flowkit.design.v1`.
 3. `flow-comet-plan` - Plan (control). Responsibility: 拆原子任务（XML 格式）+ 波次划分。生成 TASK.md。 Required Skills: `flow-comet-task`. Output Schemas: `flowkit.plan.v1`.
-4. `flow-comet-execute` - Execute (control). Responsibility: 按 TASK.md 逐任务执行：TDD + 6 维自查 + LESSONS 扫描 + diff 边界 verify。 Required Skills: `flow-comet-dev`. Output Schemas: `flowkit.execution.v1`.
+4. `flow-comet-execute` - Execute (control). Responsibility: 按 TASK.md 逐任务执行：TDD + 6 维自查 + LESSONS 扫描 + diff 边界 verify。 Required Skills: `flow-comet-dev`. Output Schemas: `flowkit.execution.v1`. 进入前读 `reference/dirty-worktree.md` 做 dirty-worktree 归属检查。
 5. `flow-comet-subagent-execute` - Subagent Execute (handoff). Responsibility: 委托 [P] 并行任务给子代理，要求加载 flow-comet-dev 并回传 evidence。 Required Skills: `flow-comet-dev`. Output Schemas: `flowkit.handoff.v1`.
 6. `flow-comet-review` - Review (control). Responsibility: 4 轮审查（spec 合规 + 代码质量 + UI 视觉 + 可选）。生成 REVIEW.md。 Required Skills: `flow-comet-review`, `flow-comet-test`. Output Schemas: `flowkit.review.v1`.
-7. `flow-comet-verify` - Verify (control). Responsibility: 集成验证 + UAT + 失败诊断（≤3 轮）。生成 TEST.md + UAT.md。 Required Skills: `flow-comet-integration`. Output Schemas: `flowkit.verify.v1`.
+7. `flow-comet-verify` - Verify (control). Responsibility: 集成验证 + UAT + 失败诊断。生成 TEST.md + UAT.md。 Required Skills: `flow-comet-integration`. Output Schemas: `flowkit.verify.v1`. 进入前读 `reference/dirty-worktree.md` 做 dirty-worktree 归属检查。verify 失败自动重试 ≤ 3 次（机器计数 verifyFailures，`node workflow-state.mjs verify-fail`）；第 4 次失败必须暂停问用户「继续修 / 停止」。exit verify 会真实执行 TEST.md `## 验证命令` 段声明的命令（严格版）。
 8. `flow-comet-archive` - Archive (control). Responsibility: LESSONS 提名 + 归档到 .specs/archive/ + CHANGELOG 更新。 Required Skills: `flow-comet-integration`. Output Schemas: `flowkit.archive.v1`.
 
 ## Skill Bindings

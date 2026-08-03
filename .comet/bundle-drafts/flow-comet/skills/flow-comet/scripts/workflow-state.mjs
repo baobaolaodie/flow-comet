@@ -114,7 +114,7 @@ async function determineNode(changeName, protocol, completedNodes = []) {
 
 async function readState() {
   if (await fileExists(statePath)) return readJson(statePath);
-  return { activeChange: null, currentNode: null, completedNodes: [], evidence: {} };
+  return { activeChange: null, currentNode: null, completedNodes: [], evidence: {}, verifyFailures: 0 };
 }
 
 async function writeState(state) {
@@ -150,6 +150,7 @@ async function main() {
       currentNode: 'open',
       completedNodes: [],
       evidence: {},
+      verifyFailures: 0,
       createdAt: new Date().toISOString()
     };
     await writeState(state);
@@ -236,6 +237,20 @@ async function main() {
     return;
   }
 
+  if (command === 'verify-fail') {
+    const state = await readState();
+    state.verifyFailures = state.verifyFailures ?? 0;
+    // W2-A: 机器计数——连续 3 次失败后（第 4 次）BLOCKED，要求用户决策（继续修 / 停止）
+    if (state.verifyFailures >= 3) {
+      console.error('verify 失败超限，需用户决策（verifyFailures=' + state.verifyFailures + '）。继续修 / 停止？');
+      process.exit(1);
+    }
+    state.verifyFailures += 1;
+    await writeState(state);
+    console.log('VERIFY-FAIL: ' + state.verifyFailures + '/3');
+    return;
+  }
+
   if (command === 'advance') {
     const state = await readState();
     if (!state.activeChange) {
@@ -253,7 +268,7 @@ async function main() {
     return;
   }
 
-  throw new Error('Unknown command: ' + command + '. Use: init, status, next, select, record, advance');
+  throw new Error('Unknown command: ' + command + '. Use: init, status, next, select, record, verify-fail, advance');
 }
 
 main().catch(error => {

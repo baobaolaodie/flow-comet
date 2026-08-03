@@ -68,6 +68,28 @@ This node parallelizes execution by delegating independent tasks (marked `parall
 
 7. **Exit check**: Run exit check.
 
+## Return Contract（子代理必须回传）
+
+每个被委托的子代理，完成时必须在最终回复中回传以下结构化信息（缺任一项，orchestrator 不得记录 handoff result）：
+
+```json
+{
+  "status": "DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT",
+  "taskId": "T0X",
+  "commitHash": "<git commit sha>",
+  "changedFiles": ["<file>", "..."],
+  "redEvidence": { "command": "<RED 失败测试命令>", "output": "<真实失败输出片段>" },
+  "greenEvidence": { "command": "<GREEN 通过测试命令>", "output": "<真实通过输出片段>" },
+  "riskSignals": ["cross-module | security | concurrency | migration | public-api | 200+lines | none"],
+  "concerns": "<可选：未解决的疑虑>"
+}
+```
+
+- `status=DONE` 才视为完成；`BLOCKED` / `NEEDS_CONTEXT` 需 orchestrator 处理。
+- `redEvidence` / `greenEvidence` 缺任一 → 视为未执行 TDD，orchestrator 拒绝记录。
+- `riskSignals` 非 `none` 时，orchestrator 应将该任务标记为 review 节点的高优先级审查对象。
+- 子代理回传后，orchestrator 用 `workflow-handoff.mjs result <task-id> '<JSON>'` 记录；guard exit subagent-execute 会校验 commitHash + greenEvidence（W1-D）。
+
 ### Completion reasoning
 
 This node is truly done when:
