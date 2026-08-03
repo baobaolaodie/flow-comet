@@ -11,17 +11,6 @@ Complete the `review` Node for `flow-comet`.
 
 Responsibility: 4 轮审查（spec 合规 + 代码质量 + UI 视觉 + 可选）。生成 REVIEW.md。
 
-## Guidance
-
----
-name: flow-comet-review
-description: "Review node for flow-comet: performs 4-round review (spec compliance, code quality 6-dimension decay, UI visual, optional debt assessment) and produces REVIEW.md. Do not use for ordinary standalone tasks."
----
-
-# Review
-
-## Node Goal
-
 This node performs a structured multi-round review of the implemented change, checking spec compliance, code quality across 6 decay dimensions, UI visual consistency (frontend only), and optional tech debt assessment. It produces REVIEW.md and generates fix tasks (T-FIX-NN) for any Critical or Major findings. The review node is the quality gate before integration — nothing enters verify without passing this node's checks.
 
 ## Guidance
@@ -121,6 +110,8 @@ node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry review
 
 ## Skill Implementation
 
+Load `flow-comet-review` for this Node. Operation: `require`.
+
 The review node performs a structured 4-round review: spec compliance (Round 1), code quality with 6 decay dimensions + TEST.md completeness + architecture dependency check (Round 2), UI visual review for frontend (Round 3), and optional tech debt/cross-model supplements (Round 4). It produces REVIEW.md and generates fix tasks for Critical/Major findings. The reviewer does not modify code directly.
 
 ## Required Skill Calls
@@ -131,6 +122,12 @@ The review node performs a structured 4-round review: spec compliance (Round 1),
 | `/brooks-review` | Preferred if installed | Provides book-backed 6-dimension code quality diagnosis |
 | `/brooks-audit` | Conditional (large changes) | Provides architecture dependency graph with cycle detection |
 | `/brooks-debt` | Conditional (milestones) | Provides tech debt prioritization with Pain x Spread |
+
+Load `flow-comet-test` during this Node and record completed check `required-skill:review.flow-comet-test`. Reason: 测试金字塔完整性
+
+## Augmentations
+
+This Node has no declared augmentations.
 
 ## Output Schemas
 
@@ -147,6 +144,11 @@ Evidence: `review-summary` (required)
 
 ```bash
 node .claude/skills/flow-comet/scripts/workflow-state.mjs record review '{"summary":"REVIEW.md produced: N Critical, M Major, K Minor. X fix tasks generated."}'
+```
+
+Generic template:
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs record review '{"summary":"record the real Node result","completedChecks":[]}'
 ```
 
 ## Guardrails
@@ -175,48 +177,4 @@ If the script prints `SKILL: flow-comet-verify`, load that Skill next.
 5. If fix tasks were generated but not executed, return to execute node.
 6. Do not repeat completed review rounds.
 
-
-## Entry Check
-
-```bash
-node flow-comet/scripts/workflow-guard.mjs entry review
-```
-
-## Skill Implementation
-
-Load `flow-comet-review` for this Node. Operation: `require`.
-
-## Required Skill Calls
-
-- Load `flow-comet-review` during this Node and record completed check `required-skill:review.flow-comet-review`. Reason: 3 轮审查
-- Load `flow-comet-test` during this Node and record completed check `required-skill:review.flow-comet-test`. Reason: 测试金字塔完整性
-
-## Augmentations
-
-- This Node has no declared augmentations.
-
-## Output Schemas
-
-- `flowkit.review.v1`: REVIEW.md Required evidence: `review-summary`. Required artifacts: `review-doc` at `<change-id>/REVIEW.md`.
-
-## Evidence Record
-
-```bash
-node flow-comet/scripts/workflow-state.mjs record review '{"summary":"record the real Node result","completedChecks":[]}'
-```
-
-## Guardrails
-
-- `review-evidence`: REVIEW.md exists (artifact-exists).
-
-## Exit Check
-
-```bash
-node flow-comet/scripts/workflow-guard.mjs exit review --apply
-```
-
-If the script prints `SKILL: flow-comet-verify`, load that Skill next.
-
-## Recovery
-
-Read `reference/workflow-protocol.json` and the configured workflow state. Resume the first Node that is not listed in `completedNodes`.
+Generic fallback: read `.claude/skills/flow-comet/reference/workflow-protocol.json` and the configured workflow state; resume the first Node not listed in `completedNodes`.

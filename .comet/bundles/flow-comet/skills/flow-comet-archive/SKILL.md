@@ -11,17 +11,6 @@ Complete the `archive` Node for `flow-comet`.
 
 Responsibility: LESSONS 提名 + 归档到 .specs/archive/ + CHANGELOG 更新。
 
-## Guidance
-
----
-name: flow-comet-archive
-description: "Archive node for flow-comet: scans SUMMARY.md files for lessons, adds qualifying lessons to .specs/LESSONS.md, moves change to .specs/archive/, and updates CHANGELOG.md. Do not use for ordinary standalone tasks."
----
-
-# Archive
-
-## Node Goal
-
 This node finalizes a completed change by extracting reusable lessons from the development process, archiving the change artifacts, and updating the project changelog. It ensures that hard-won knowledge (debugging > 30min, cross-task applicability, 6-month retry probability) is preserved in the project-level LESSONS.md, while change-specific artifacts are moved to the archive for future reference. This is the final node in the flow-comet workflow.
 
 ## Guidance
@@ -108,6 +97,8 @@ node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry archive
 
 ## Skill Implementation
 
+Load `flow-comet-archive` for this Node. Operation: `require`.
+
 The archive node scans all SUMMARY.md files for lessons (applying > 30min debugging / cross-task applicability / 6-month retry criteria), adds qualifying lessons to `.specs/LESSONS.md`, moves the change directory to `.specs/archive/`, updates `.specs/CHANGELOG.md`, and clears STATE.md. It requires user confirmation before the irreversible file move.
 
 ## Required Skill Calls
@@ -115,6 +106,12 @@ The archive node scans all SUMMARY.md files for lessons (applying > 30min debugg
 | Skill | Enforcement | Reason |
 |-------|-------------|--------|
 | `flow-comet-integration` | Required for LESSONS nomination protocol | Provides nomination criteria and LESSONS.md format |
+
+Load `flow-comet-integration` during this Node and record completed check `required-skill:archive.flow-comet-integration`. Reason: 归档 + LESSONS
+
+## Augmentations
+
+This Node has no declared augmentations.
 
 ## Output Schemas
 
@@ -132,6 +129,11 @@ Evidence: `archive-summary` (required)
 
 ```bash
 node .claude/skills/flow-comet/scripts/workflow-state.mjs record archive '{"summary":"Change archived to .specs/archive/<date>-<id>/, N lessons added, CHANGELOG updated"}'
+```
+
+Generic template:
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs record archive '{"summary":"record the real Node result","completedChecks":[]}'
 ```
 
 ## Guardrails
@@ -160,47 +162,4 @@ If the script prints `NEXT: done`, summarize the workflow evidence and stop. The
 5. If already archived but LESSONS not updated: scan SUMMARY.md files in the archive directory and update LESSONS.md.
 6. If partially archived (source removed but destination incomplete): investigate and complete the move.
 
-
-## Entry Check
-
-```bash
-node flow-comet/scripts/workflow-guard.mjs entry archive
-```
-
-## Skill Implementation
-
-Load `flow-comet-archive` for this Node. Operation: `require`.
-
-## Required Skill Calls
-
-- Load `flow-comet-integration` during this Node and record completed check `required-skill:archive.flow-comet-integration`. Reason: 归档 + LESSONS
-
-## Augmentations
-
-- This Node has no declared augmentations.
-
-## Output Schemas
-
-- `flowkit.archive.v1`: Archive Required evidence: `archive-summary`. Required artifacts: `archive-dir` at `archive/<date>-<change-id>/`.
-
-## Evidence Record
-
-```bash
-node flow-comet/scripts/workflow-state.mjs record archive '{"summary":"record the real Node result","completedChecks":[]}'
-```
-
-## Guardrails
-
-- `archive-evidence`: Archive completed (state-transition).
-
-## Exit Check
-
-```bash
-node flow-comet/scripts/workflow-guard.mjs exit archive --apply
-```
-
-If the script prints `NEXT: done`, summarize the workflow evidence and stop.
-
-## Recovery
-
-Read `reference/workflow-protocol.json` and the configured workflow state. Resume the first Node that is not listed in `completedNodes`.
+Generic fallback: read `.claude/skills/flow-comet/reference/workflow-protocol.json` and the configured workflow state; resume the first Node not listed in `completedNodes`.

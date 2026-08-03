@@ -9,20 +9,9 @@ description: "Use only when explicitly invoked as /flow-comet-verify or routed b
 
 Complete the `verify` Node for `flow-comet`.
 
-Responsibility: 集成验证 + UAT + 失败诊断（≤3 轮）。生成 TEST.md + UAT.md。
+Responsibility: 集成验证 + UAT + 失败诊断（自动重试 ≤ 3 次，第 4 次失败暂停）。生成 TEST.md + UAT.md。
 
-## Guidance
-
----
-name: flow-comet-verify
-description: "Verify node for flow-comet: runs full automation (tests + type check + build), guides human UAT, performs failure diagnosis with max 3 auto-retries, and produces UAT.md. Do not use for ordinary standalone tasks."
----
-
-# Verify
-
-## Node Goal
-
-This node performs the final integration verification: running all automated tests, type checks, and builds, then guiding the human through UAT scripts from TEST.md. It produces UAT.md with pass/fail results for each item. If failures occur, it diagnoses root causes, generates fix tasks, and auto-retries up to 3 rounds before pausing for human decision. This node is the final quality gate before archiving.
+This node performs the final integration verification: running all automated tests, type checks, and builds, then guiding the human through UAT scripts from TEST.md. It produces UAT.md with pass/fail results for each item. If failures occur, it diagnoses root causes, generates fix tasks, and auto-retries ≤ 3 times (machine-counted verifyFailures); on the 4th failure it must pause and ask the user「继续修 / 停止」. This node is the final quality gate before archiving.
 
 ## Guidance
 
@@ -55,7 +44,7 @@ This node performs the final integration verification: running all automated tes
    - Return to execute node for fix execution.
    - Re-run verification after fix.
 
-4. **Auto-retry limit (R2.6)**: Maximum 3 rounds of automatic retry. After 3rd round failure, pause and require human decision. Do not auto-retry beyond 3 rounds.
+4. **Auto-retry limit (R2.6)**: verify 失败自动重试 ≤ 3 次（机器计数 verifyFailures）；第 4 次失败必须暂停问用户「继续修 / 停止」。Do not auto-retry beyond 3 times.
 
 5. **LESSONS nomination**: Before archiving, scan all `*-SUMMARY.md` "decisions and deviations" sections and any `*-PROGRESS.md` "excluded solutions" sections. Apply nomination criteria:
    - Debugging/trial-and-error took > 30 minutes -> nominate.
@@ -74,7 +63,7 @@ The full verification protocol, UAT format, and failure diagnosis are in:
 This node is truly done when:
 - All automated checks pass with real output pasted.
 - All UAT items have pass/fail recorded in `.specs/<change-id>/UAT.md`.
-- No more than 3 auto-retry rounds were used.
+- verify 失败自动重试 ≤ 3 次（机器计数 verifyFailures），第 4 次失败已暂停问用户。
 - All failures have been diagnosed and fix tasks generated.
 - LESSONS have been nominated from SUMMARY.md files.
 
@@ -82,7 +71,7 @@ This node is truly done when:
 
 - **Agent thought**: "Tests passed last time, no need to run again." **Actual risk**: Claiming pass without pasting real output (R4.4 violation) means failures go undetected. Must run and paste.
 - **Agent thought**: "This UAT item is similar to the last one, marking pass." **Actual risk**: UAT must be executed by the human, not assumed. Each item needs explicit human confirmation.
-- **Agent thought**: "Auto-retry 4th time, maybe it'll work now." **Actual risk**: Beyond 3 retries (R2.6 violation), the problem is likely systematic, not transient. Must pause for human decision.
+- **Agent thought**: "Auto-retry 4th time, maybe it'll work now." **Actual risk**: On the 4th failure (R2.6 violation), the problem is likely systematic, not transient. Must pause and ask the user「继续修 / 停止」.
 - **Agent thought**: "Fix the failure directly, no need for a fix task." **Actual risk**: Bypassing the fix-task -> execute -> re-verify cycle means the fix is not properly tracked or tested. Must go through the proper loop.
 
 ## Entry Check
@@ -93,13 +82,21 @@ node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry verify
 
 ## Skill Implementation
 
-The verify node loads `flow-comet-integration` for the verification protocol. It runs all automated checks (tests, type check, build), guides the human through UAT scripts from TEST.md, performs failure diagnosis with max 3 auto-retries, and produces UAT.md. It also nominates lessons from SUMMARY.md files before the archive step.
+Load `flow-comet-verify` for this Node. Operation: `require`.
+
+The verify node loads `flow-comet-integration` for the verification protocol. It runs all automated checks (tests, type check, build), guides the human through UAT scripts from TEST.md, performs failure diagnosis with ≤3 auto-retries (4th failure pauses for human decision), and produces UAT.md. It also nominates lessons from SUMMARY.md files before the archive step.
 
 ## Required Skill Calls
 
 | Skill | Enforcement | Reason |
 |-------|-------------|--------|
 | `flow-comet-integration` | Required for verification protocol | Provides automation execution, UAT guidance, failure diagnosis, LESSONS nomination |
+
+Load `flow-comet-integration` during this Node and record completed check `required-skill:verify.flow-comet-integration`. Reason: 集成验证 + UAT + LESSONS 提名
+
+## Augmentations
+
+This Node has no declared augmentations.
 
 ## Output Schemas
 
@@ -119,13 +116,18 @@ Evidence: `verification-result` (required)
 node .claude/skills/flow-comet/scripts/workflow-state.mjs record verify '{"summary":"All automation passed, N UAT items verified (X pass, Y fail), Z lessons nominated"}'
 ```
 
+Generic template:
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs record verify '{"summary":"record the real Node result","completedChecks":[]}'
+```
+
 ## Guardrails
 
 | Guardrail ID | Label | Validation Type |
 |--------------|-------|-----------------|
 | `verify-evidence` | UAT.md exists with results | artifact-exists |
 | `automation-passed` | All automated checks pass (real output) | content-check |
-| `retry-limit` | No more than 3 auto-retry rounds | process-check |
+| `retry-limit` | No more than 3 auto-retries (4th failure pauses) | process-check |
 | `lessons-nominated` | LESSONS.md updated with new entries | artifact-exists |
 
 ## Exit Check
@@ -143,50 +145,7 @@ If the script prints `SKILL: flow-comet-archive`, load that Skill next.
 3. If UAT.md exists with all items passing, verification is done.
 4. If UAT.md has failures, check if fix tasks were generated in TASK.md.
 5. If fix tasks exist but not executed, return to execute node.
-6. Count previous auto-retry rounds from UAT.md to enforce R2.6 limit.
+6. Count previous auto-retries (from UAT.md / machine-counted verifyFailures) to enforce R2.6 limit.
 7. Resume from the first incomplete verification step.
 
-
-## Entry Check
-
-```bash
-node flow-comet/scripts/workflow-guard.mjs entry verify
-```
-
-## Skill Implementation
-
-Load `flow-comet-verify` for this Node. Operation: `require`.
-
-## Required Skill Calls
-
-- Load `flow-comet-integration` during this Node and record completed check `required-skill:verify.flow-comet-integration`. Reason: 集成验证 + UAT + LESSONS 提名
-
-## Augmentations
-
-- This Node has no declared augmentations.
-
-## Output Schemas
-
-- `flowkit.verify.v1`: TEST.md + UAT.md Required evidence: `verification-result`. Required artifacts: `test-doc` at `<change-id>/TEST.md`; `uat-doc` at `<change-id>/UAT.md`.
-
-## Evidence Record
-
-```bash
-node flow-comet/scripts/workflow-state.mjs record verify '{"summary":"record the real Node result","completedChecks":[]}'
-```
-
-## Guardrails
-
-- `verify-evidence`: TEST.md or UAT.md exists (artifact-exists).
-
-## Exit Check
-
-```bash
-node flow-comet/scripts/workflow-guard.mjs exit verify --apply
-```
-
-If the script prints `SKILL: flow-comet-archive`, load that Skill next.
-
-## Recovery
-
-Read `reference/workflow-protocol.json` and the configured workflow state. Resume the first Node that is not listed in `completedNodes`.
+Generic fallback: read `.claude/skills/flow-comet/reference/workflow-protocol.json` and the configured workflow state; resume the first Node not listed in `completedNodes`.

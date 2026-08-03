@@ -17,14 +17,14 @@ const WORKFLOW_PROJECT_FILE_MAX_BYTES = 2 * 1024 * 1024;
 
 // W1-A: 节点 → 合法 exit 的前置条件（对齐 flow-kit 阶段门 + flowkit.*.v1 evidence）
 const NODE_TRANSITION_GATES = {
-  open:             { evidence: ['intake-summary'],           artifacts: ['<change-id>/CHANGE.md', '<change-id>/REQUIREMENT.md'] },
-  design:           { evidence: ['design-summary'],           artifacts: ['<change-id>/DESIGN.md'] },
-  plan:             { evidence: ['plan-summary'],             artifacts: ['<change-id>/TASK.md'] },
-  execute:          { evidence: ['implementation-summary'],   artifacts: ['<change-id>/*-SUMMARY.md'] },
-  'subagent-execute':{ evidence: ['handoff-result'],          artifacts: ['<change-id>/*-SUMMARY.md'] },
-  review:           { evidence: ['review-summary'],           artifacts: ['<change-id>/REVIEW.md'] },
-  verify:           { evidence: ['verification-result'],      artifacts: ['<change-id>/TEST.md', '<change-id>/UAT.md'] },
-  archive:          { evidence: ['archive-summary'],          artifacts: ['<change-id>/archive/*'] },
+  open:             { evidence: ['intake-summary'] },
+  design:           { evidence: ['design-summary'] },
+  plan:             { evidence: ['plan-summary'] },
+  execute:          { evidence: ['implementation-summary'] },
+  'subagent-execute':{ evidence: ['handoff-result'] },
+  review:           { evidence: ['review-summary'] },
+  verify:           { evidence: ['verification-result'] },
+  archive:          { evidence: ['archive-summary'] },
 };
 
 // W1-B: flow-kit SUMMARY 模板必填段（正则匹配，大小写不敏感 + 变体兼容）
@@ -1924,6 +1924,60 @@ async function main() {
       }
     }
   }
+  // P1-A: open exit 校验 REQUIREMENT 含 AC 段
+  if (node.id === 'open' && state.activeChange) {
+    const reqFile = path.join(runRoot, '.specs', state.activeChange, 'REQUIREMENT.md');
+    try {
+      const content = await fs.readFile(reqFile, 'utf8');
+      if (!/##\s*(验收标准|AC|Acceptance Criteria)/i.test(content) && !/Given/i.test(content)) {
+        console.error('BLOCKED: REQUIREMENT.md 缺少验收标准/AC 段');
+        process.exit(1);
+      }
+    } catch {}
+  }
+  // P1-A: design exit 校验 DESIGN 含技术栈段
+  if (node.id === 'design' && state.activeChange) {
+    const designFile = path.join(runRoot, '.specs', state.activeChange, 'DESIGN.md');
+    const designLite = path.join(runRoot, '.specs', state.activeChange, 'DESIGN-lite.md');
+    const target = (await fileExists(designFile)) ? designFile : (await fileExists(designLite)) ? designLite : null;
+    if (target) {
+      try {
+        const content = await fs.readFile(target, 'utf8');
+        if (!/##\s*0[\s.]/.test(content) && !/##\s*技术栈/.test(content)) {
+          console.error('BLOCKED: DESIGN.md 缺少 §0 技术栈段');
+          process.exit(1);
+        }
+      } catch {}
+    }
+  }
+  // P1-A: plan exit 校验 TASK 含 task 块和 verify 字段
+  if (node.id === 'plan' && state.activeChange) {
+    const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
+    try {
+      const content = await fs.readFile(taskFile, 'utf8');
+      const taskBlocks = content.match(/<task[\s\S]*?<\/task>/g) || [];
+      if (taskBlocks.length === 0) {
+        console.error('BLOCKED: TASK.md 无 <task> 块');
+        process.exit(1);
+      }
+      const missingVerify = taskBlocks.filter(b => !/<verify>/.test(b));
+      if (missingVerify.length > 0) {
+        console.error('BLOCKED: TASK.md 中 ' + missingVerify.length + ' 个 task 缺 <verify> 字段');
+        process.exit(1);
+      }
+    } catch {}
+  }
+  // P1-A: review exit 校验 REVIEW 含实质内容
+  if (node.id === 'review' && state.activeChange) {
+    const reviewFile = path.join(runRoot, '.specs', state.activeChange, 'REVIEW.md');
+    try {
+      const stat = await fs.stat(reviewFile);
+      if (stat.size < 100) {
+        console.error('BLOCKED: REVIEW.md 内容不足（' + stat.size + ' 字节，需 ≥ 100）');
+        process.exit(1);
+      }
+    } catch {}
+  }
   // W1-B: execute / subagent-execute 出口校验每份 SUMMARY 含三个必填段
   if (node.id === 'execute' || node.id === 'subagent-execute') {
     const changeDir = path.join(runRoot, '.specs', state.activeChange ?? '');
@@ -1932,6 +1986,21 @@ async function main() {
       console.error('BLOCKED: SUMMARY 关键段校验失败: ' + violations.join('; '));
       process.exit(1);
     }
+  }
+  // P0-A: all-tasks-done 校验——execute 出口必须所有 task 都 done
+  if (node.id === 'execute' && state.activeChange) {
+    const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
+    try {
+      const taskContent = await fs.readFile(taskFile, 'utf8');
+      const allTasks = taskContent.match(/<task[^>]*id="([^"]+)"[^>]*status="([^"]+)"/g) || [];
+      const pendingTasks = allTasks
+        .map(m => { const id = m.match(/id="([^"]+)"/); const st = m.match(/status="([^"]+)"/); return id && st ? { id: id[1], status: st[1] } : null; })
+        .filter(t => t && t.status !== 'done');
+      if (pendingTasks.length > 0) {
+        console.error('BLOCKED: execute 出口仍有 pending 任务: ' + pendingTasks.map(t => t.id).join(', '));
+        process.exit(1);
+      }
+    } catch {}
   }
   // W1-C: verify 出口必须真实跑命令（严格版）——历史归档 change 豁免（过渡规则）
   if (node.id === 'verify' && !(await isArchivedChange(state.activeChange))) {
@@ -1942,7 +2011,7 @@ async function main() {
     if (await fileExists(testDoc)) {
       const text = await fs.readFile(testDoc, 'utf8');
       const m = text.match(/##\s*验证命令\s*\n\s*```[^\n]*\n([\s\S]*?)```/);
-      if (m) verifyCommand = m[1].trim().split('\n')[0];
+      if (m) verifyCommand = m[1].trim().split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).join(' && ');
     }
     // 2) state 的 verifyCommand
     if (!verifyCommand && state.verifyCommand) verifyCommand = state.verifyCommand;
@@ -1958,7 +2027,16 @@ async function main() {
     try {
       execSync(verifyCommand, { cwd: runRoot, stdio: 'pipe', timeout: 300000 });
     } catch (e) {
-      console.error('BLOCKED: verify 命令失败: ' + verifyCommand + '\n' + String(e.stdout || e.message).slice(0, 500));
+      // P0-A: verify-fail 自动递增（无需 LLM 主动调用）
+      state.verifyFailures = (state.verifyFailures || 0) + 1;
+      const file = await statePath(protocol);
+      await writeJson(file, state);
+      if (state.verifyFailures >= 4) {
+        console.error('BLOCKED: verify 已失败 ' + state.verifyFailures + ' 次，需用户决策（继续修/停止）。');
+      } else {
+        console.error('BLOCKED: verify 命令失败: ' + verifyCommand + '\n' + String(e.stdout || e.message).slice(0, 500));
+        console.error('VERIFY-FAIL: ' + state.verifyFailures + '/3');
+      }
       process.exit(1);
     }
   }
@@ -1975,6 +2053,10 @@ async function main() {
       if (!r) { legacy.push(taskId); continue; }
       if (!r.commitHash) violations.push(taskId + ' 缺 commitHash');
       if (!r.greenEvidence || !r.greenEvidence.command) violations.push(taskId + ' 缺 greenEvidence');
+      // P2-B: redEvidence 缺失警告（过渡期不阻断）
+      if (r && !r.redEvidence) {
+        console.error('HANDOFF WARN: ' + taskId + ' 缺 redEvidence（可能未执行 TDD RED 阶段）');
+      }
     }
     if (legacy.length > 0) {
       console.error('HANDOFF WARN: 以下任务为旧格式 handoff（非 Return Contract），建议补录完整契约: ' + legacy.join(', '));
