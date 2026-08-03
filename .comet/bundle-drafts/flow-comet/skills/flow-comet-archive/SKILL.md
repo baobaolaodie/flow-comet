@@ -73,6 +73,13 @@ This node finalizes a completed change by extracting reusable lessons from the d
 
 10. **Exit check**: Run exit check.
 
+### 归档提交（R4.1 对齐 comet archive 交付闭环）
+
+1. 用显式路径 stage：只 stage 本 change 可归属路径（原活动路径、实际归档路径、改过的主 spec）
+2. `git diff --cached --stat` 检查后，单一 commit：`chore: archive <change-id>`
+3. 按用户确认的交付方式 push / 建 PR（如用 git 流水线）
+4. 归档操作（移动文件）必须用户确认后才执行（不可逆）
+
 The full archive protocol and templates are in:
 - `flow-kit/prompts/7-integration.md` (INTEGRATION phase, archive + LESSONS sections)
 

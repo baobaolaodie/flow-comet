@@ -5,8 +5,8 @@ import { fileURLToPath } from 'url';
 
 // workflow-handoff.mjs: Record subagent handoff evidence
 // Usage:
-//   node workflow-handoff.mjs request <task-id> <description>  -- record handoff request
-//   node workflow-handoff.mjs result <task-id> <result>        -- record handoff result
+//   node workflow-handoff.mjs request <task-id> <description> [--write-files <files...>]  -- record handoff request (W2-D: optional writeFiles allow-list)
+//   node workflow-handoff.mjs result <task-id> <result-or-JSON>  -- record handoff result (W1-D: JSON Return Contract; W2-D: commitHash subset check)
 //   node workflow-handoff.mjs status                           -- show all handoff evidence
 
 const runRoot = process.cwd();
@@ -30,15 +30,26 @@ async function main() {
 
   if (action === 'request') {
     const taskId = process.argv[3];
-    const desc = process.argv.slice(4).join(' ');
-    if (!taskId) { console.error('Usage: workflow-handoff.mjs request <task-id> <description>'); process.exit(1); }
+    const args = process.argv.slice(4);
+    if (!taskId) { console.error('Usage: workflow-handoff.mjs request <task-id> <description> [--write-files <files...>]'); process.exit(1); }
+    // W2-D: 可选 --write-files 记录该 task 允许写入的文件列表（含 glob），供 result 的提交文件子集校验
+    let description = 'pending';
+    let writeFiles = [];
+    const wfIdx = args.indexOf('--write-files');
+    if (wfIdx >= 0) {
+      description = args.slice(0, wfIdx).join(' ') || 'pending';
+      writeFiles = args.slice(wfIdx + 1).filter(a => !a.startsWith('--')).flatMap(a => a.split(/[, ]+/)).filter(Boolean);
+    } else {
+      description = args.join(' ') || 'pending';
+    }
     state.evidence = state.evidence || {};
     state.evidence['subagent-execute'] = state.evidence['subagent-execute'] || {};
     if (!state.evidence['subagent-execute'].handoffRequests) {
       state.evidence['subagent-execute'].handoffRequests = {};
     }
     state.evidence['subagent-execute'].handoffRequests[taskId] = {
-      description: desc || 'pending', requestedAt: new Date().toISOString()
+      description, requestedAt: new Date().toISOString(),
+      ...(writeFiles.length ? { writeFiles } : {})
     };
     await writeState(state);
     console.log('HANDOFF REQUEST: ' + taskId);
@@ -47,13 +58,34 @@ async function main() {
 
   if (action === 'result') {
     const taskId = process.argv[3];
-    const result = process.argv.slice(4).join(' ');
+    const raw = process.argv.slice(4).join(' ');
     if (!taskId) { console.error('Usage: workflow-handoff.mjs result <task-id> <result>'); process.exit(1); }
+    // W1-D: 尝试解析 JSON（Return Contract）——解析失败则存原始字符串
+    let parsed = raw;
+    try { parsed = JSON.parse(raw); } catch {}
     state.evidence = state.evidence || {};
     state.evidence['subagent-execute'] = state.evidence['subagent-execute'] || {};
     state.evidence['subagent-execute'].handoffResult = state.evidence['subagent-execute'].handoffResult || {};
+    // W2-D: 完整版 hash 校验——提交文件 ⊆ writeFiles 允许范围（子集，前缀匹配；越界仅 WARN）
+    if (typeof parsed === 'object' && parsed !== null && parsed.commitHash && /^[0-9a-f]{7,40}$/i.test(String(parsed.commitHash))) {
+      const commitHash = String(parsed.commitHash);
+      const { execSync } = await import('child_process');
+      try {
+        const out = execSync(`git show ${commitHash} --name-only --format=`, { cwd: runRoot, encoding: 'utf8' });
+        const committedFiles = out.split('\n').map(s => s.trim()).filter(Boolean);
+        const allowed = state.evidence['subagent-execute'].handoffRequests?.[taskId]?.writeFiles || [];
+        const violations = committedFiles.filter(f => !allowed.some(a => f.startsWith(a.replace('*', ''))));
+        if (violations.length > 0) {
+          console.error('HANDOFF WARN: 提交文件超出 writeFiles 范围: ' + violations.join(', '));
+        }
+      } catch {
+        console.error('HANDOFF ERROR: commitHash 无效或 git show 失败: ' + commitHash);
+      }
+    } else if (typeof parsed === 'object' && parsed !== null && parsed.commitHash) {
+      console.error('HANDOFF ERROR: commitHash 格式非法: ' + String(parsed.commitHash));
+    }
     state.evidence['subagent-execute'].handoffResult[taskId] = {
-      result: result || 'completed', completedAt: new Date().toISOString()
+      result: parsed, completedAt: new Date().toISOString()
     };
     await writeState(state);
     console.log('HANDOFF RESULT: ' + taskId);

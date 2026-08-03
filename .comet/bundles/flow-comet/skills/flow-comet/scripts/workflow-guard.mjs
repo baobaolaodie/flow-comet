@@ -15,6 +15,21 @@ const protocolPath = path.join(packageRoot, 'reference', 'workflow-protocol.json
 const WORKFLOW_PROJECT_CONFIG_MAX_BYTES = 64 * 1024;
 const WORKFLOW_PROJECT_FILE_MAX_BYTES = 2 * 1024 * 1024;
 
+// W1-A: 节点 → 合法 exit 的前置条件（对齐 flow-kit 阶段门 + flowkit.*.v1 evidence）
+const NODE_TRANSITION_GATES = {
+  open:             { evidence: ['intake-summary'],           artifacts: ['<change-id>/CHANGE.md', '<change-id>/REQUIREMENT.md'] },
+  design:           { evidence: ['design-summary'],           artifacts: ['<change-id>/DESIGN.md'] },
+  plan:             { evidence: ['plan-summary'],             artifacts: ['<change-id>/TASK.md'] },
+  execute:          { evidence: ['implementation-summary'],   artifacts: ['<change-id>/*-SUMMARY.md'] },
+  'subagent-execute':{ evidence: ['handoff-result'],          artifacts: ['<change-id>/*-SUMMARY.md'] },
+  review:           { evidence: ['review-summary'],           artifacts: ['<change-id>/REVIEW.md'] },
+  verify:           { evidence: ['verification-result'],      artifacts: ['<change-id>/TEST.md', '<change-id>/UAT.md'] },
+  archive:          { evidence: ['archive-summary'],          artifacts: ['<change-id>/archive/*'] },
+};
+
+// W1-B: flow-kit SUMMARY 模板必填段
+const SUMMARY_REQUIRED_SECTIONS = ['## verify 输出', '## 6 维自查', '## 越界检查'];
+
 function workflowProjectRelativeSegments(value, label) {
   if (typeof value !== 'string') throw new Error(label + ' must be a string');
   const trimmed = value.trim();
@@ -1775,6 +1790,32 @@ async function missingRequiredArtifacts(protocol, node, change) {
   return missing;
 }
 
+async function fileExists(file) {
+  try { await fs.access(file); return true; } catch { return false; }
+}
+
+// W1-B: 校验 change 目录下每份 *-SUMMARY.md 含 SUMMARY 模板的三个必填段
+async function verifySummaries(changeDir) {
+  const files = (await fs.readdir(changeDir).catch(() => [])).filter(f => f.endsWith('-SUMMARY.md'));
+  const violations = [];
+  for (const f of files) {
+    const content = await fs.readFile(path.join(changeDir, f), 'utf8');
+    for (const section of SUMMARY_REQUIRED_SECTIONS) {
+      if (!content.includes(section)) violations.push(`${f} 缺 ${section}`);
+    }
+  }
+  return violations;
+}
+
+// W1-C 过渡规则: 历史归档 change 不强制真实跑验证命令（判断 .specs/archive/ 目录）
+async function isArchivedChange(changeName) {
+  if (!changeName) return false;
+  const archiveRoot = path.join(runRoot, '.specs', 'archive');
+  if (await fileExists(path.join(archiveRoot, changeName))) return true;
+  const entries = await fs.readdir(archiveRoot).catch(() => []);
+  return entries.some(e => e === changeName || e.endsWith('-' + changeName));
+}
+
 async function main() {
   const protocol = await readJson(protocolPath);
   if (protocol.schemaVersion !== 1 || !Array.isArray(protocol.nodes)) {
@@ -1860,6 +1901,77 @@ async function main() {
     console.error('BLOCKED: missing evidence for Node ' + node.id + '.');
     process.exit(1);
   }
+  // W1-A: 转移前置约束——currentNode 必须等于被 exit 的节点（防跳阶段）
+  if (state.currentNode !== node.id) {
+    console.error('BLOCKED: currentNode is ' + String(state.currentNode) + ', cannot exit ' + node.id + '.');
+    process.exit(1);
+  }
+  // W1-A: 每个节点合法 exit 必须满足前置 evidence（对应 flowkit.*.v1 的 evidence）
+  // 语义与 missingRequiredSchemaEvidence 一致：summary 视同满足（record 命令默认只写 summary）
+  const gate = NODE_TRANSITION_GATES[node.id];
+  if (gate) {
+    for (const ev of gate.evidence) {
+      const satisfied = hasEvidenceField(evidence, ev) ||
+        (typeof evidence.summary === 'string' && evidence.summary.trim() !== '');
+      if (!satisfied) {
+        console.error('BLOCKED: node ' + node.id + ' exit requires evidence: ' + ev);
+        process.exit(1);
+      }
+    }
+  }
+  // W1-B: execute / subagent-execute 出口校验每份 SUMMARY 含三个必填段
+  if (node.id === 'execute' || node.id === 'subagent-execute') {
+    const changeDir = path.join(runRoot, '.specs', state.activeChange ?? '');
+    const violations = await verifySummaries(changeDir);
+    if (violations.length > 0) {
+      console.error('BLOCKED: SUMMARY 关键段校验失败: ' + violations.join('; '));
+      process.exit(1);
+    }
+  }
+  // W1-C: verify 出口必须真实跑命令（严格版）——历史归档 change 豁免（过渡规则）
+  if (node.id === 'verify' && !(await isArchivedChange(state.activeChange))) {
+    const { execSync } = await import('child_process');
+    let verifyCommand = null;
+    // 1) TEST.md 的 ## 验证命令 段（首行代码块首行）
+    const testDoc = path.join(runRoot, '.specs', state.activeChange ?? '', 'TEST.md');
+    if (await fileExists(testDoc)) {
+      const text = await fs.readFile(testDoc, 'utf8');
+      const m = text.match(/##\s*验证命令\s*\n\s*```[^\n]*\n([\s\S]*?)```/);
+      if (m) verifyCommand = m[1].trim().split('\n')[0];
+    }
+    // 2) state 的 verifyCommand
+    if (!verifyCommand && state.verifyCommand) verifyCommand = state.verifyCommand;
+    // 3) 项目探测回退
+    if (!verifyCommand) {
+      if (await fileExists(path.join(runRoot, 'pingpong-tournament', 'pyproject.toml'))) verifyCommand = 'cd pingpong-tournament && python -m pytest tests/ -q';
+      else if (await fileExists(path.join(runRoot, 'frontend', 'package.json'))) verifyCommand = 'cd frontend && npm test';
+    }
+    if (!verifyCommand) {
+      console.error('BLOCKED: TEST.md 需声明 ## 验证命令 段（严格版要求）');
+      process.exit(1);
+    }
+    try {
+      execSync(verifyCommand, { cwd: runRoot, stdio: 'pipe', timeout: 300000 });
+    } catch (e) {
+      console.error('BLOCKED: verify 命令失败: ' + verifyCommand + '\n' + String(e.stdout || e.message).slice(0, 500));
+      process.exit(1);
+    }
+  }
+  // W1-D: Return Contract 校验——每个 delegated task 的 result 必须含 commitHash + greenEvidence
+  if (node.id === 'subagent-execute') {
+    const he = state.evidence['subagent-execute'];
+    const results = he && he.handoffResult ? he.handoffResult : {};
+    const violations = [];
+    for (const [taskId, rec] of Object.entries(results)) {
+      const r = typeof rec.result === 'object' ? rec.result : {};
+      if (!r.commitHash) violations.push(taskId + ' 缺 commitHash');
+      if (!r.greenEvidence || !r.greenEvidence.command) violations.push(taskId + ' 缺 greenEvidence');
+    }
+    if (violations.length > 0) {
+      console.error('BLOCKED: Return Contract 校验失败: ' + violations.join('; '));
+      process.exit(1);
+    }
+  }
   // P0-1: 自动补 required-skill completedChecks——节点被完成即视为其实现 skill 已加载
   if ((node.requiredSkillCalls ?? []).length > 0) {
     const checks = Array.isArray(evidence.completedChecks) ? evidence.completedChecks : [];
@@ -1892,6 +2004,8 @@ async function main() {
   if (apply) {
     const completed = completedSet(state);
     completed.add(node.id);
+    // W2-A: verify exit --apply 成功 → verifyFailures 清零
+    if (node.id === 'verify') state.verifyFailures = 0;
     state.completedNodes = route(protocol).filter((item) => completed.has(item.id)).map((item) => item.id);
     // archive 节点完成后 change 已归档 → 清空活跃 change（flow-comet 回到无活跃状态）
     const isArchive = node.id === 'archive';
