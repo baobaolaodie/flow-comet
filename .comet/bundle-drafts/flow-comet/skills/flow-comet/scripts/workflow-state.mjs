@@ -264,8 +264,9 @@ async function main() {
     }
     const state = await readState();
     state.executionMode = mode;
-    // direct 是逃生口：必须用户显式调用，并记录 directOverride；subagent 时 directOverride 不变（历史标记）
-    if (mode === 'direct') state.directOverride = true;
+    // direct 是逃生口：必须用户显式调用，并记录 directOverride；切回 subagent 时清除
+    // （directOverride 恒等于"当前是否处于用户确认的 direct"——再次切 direct 必须重新确认，无历史歧义）
+    state.directOverride = mode === 'direct';
     await writeState(state);
     console.log('EXECUTION-MODE: ' + state.executionMode + (state.directOverride ? ' (directOverride)' : ''));
     return;
