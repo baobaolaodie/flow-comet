@@ -11,6 +11,8 @@ Complete the `subagent-execute` Node for `flow-comet`.
 
 Responsibility: 委托 [P] 并行任务给子代理，要求加载 flow-comet-dev 并回传 evidence。
 
+职责分工：execute 节点负责**串行委托**（非 parallel 任务，一次一个），本节点负责**并行委托**（`parallel="true"` 任务，同 wave 多任务同时发）。两者共用同一委托证据库（handoff 记录在 subagent-execute evidence）。
+
 ## Guidance
 
 ---
@@ -23,6 +25,8 @@ description: "Subagent Execute node for flow-comet: delegates parallel (parallel
 ## Node Goal
 
 This node parallelizes execution by delegating independent tasks (marked `parallel="true"` in TASK.md) to separate subagents. Each subagent loads the full `flow-comet-dev` protocol and operates within its task's `read_files`/`write_files` boundaries. This node produces handoff evidence for each delegated task and marks them done in TASK.md after all subagents complete. It exists to exploit parallelism when tasks have no file conflicts.
+
+Division of labor: `execute` node handles serial delegation (non-parallel tasks, one at a time); this node handles parallel delegation (`parallel="true"` tasks, dispatching tasks of the same wave concurrently). Both share the same delegation evidence library (handoff recorded under subagent-execute evidence).
 
 ## Guidance
 
@@ -107,7 +111,7 @@ This node is truly done when:
 
 ### Red flags
 
-- **Agent thought**: "This task looks independent, I'll delegate it." **Actual risk**: Delegating tasks that are not marked `parallel="true"` bypasses the wave division logic. Only tasks explicitly marked parallel should be delegated.
+- **Agent thought**: "This task looks independent, I'll delegate it." **Actual risk**: Delegating tasks that are not marked `parallel="true"` bypasses the wave division logic. execute 的串行委托走 execute 节点，本节点只并行委托 parallel 任务。
 - **Agent thought**: "Subagent can figure out what to do from context." **Actual risk**: Subagent not loading `flow-comet-dev` means it skips TDD, LESSONS scan, diff boundary check, and self-review. The handoff prompt must explicitly require flow-comet-dev.
 - **Agent thought**: "Subagent might need to touch related files for context." **Actual risk**: Subagent exceeding `write_files` boundaries creates merge conflicts with other parallel subagents. Strict boundary enforcement is mandatory.
 - **Agent thought**: "One subagent finished, mark it done immediately." **Actual risk**: Marking tasks done before all subagents complete can cause issues if a later subagent fails and needs to reference completed work. Wait for all, then batch mark.

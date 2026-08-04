@@ -16,7 +16,7 @@ description: "flow-kit DEV 阶段协议：TDD + 6 维自查 + diff 边界 verify
 1. **沿用既有抽象 grep（R6.4）**：写代码前 grep 同类抽象，找到了 import 用
 2. **LESSONS 扫描（R1.8）**：grep `.specs/LESSONS.md`，命中 active 条目必须声明差异
 3. **TDD（RED→GREEN→REFACTOR）**：先写失败测试，再写最少代码通过
-4. **6 维自查**：优先调用 `/brooks-review`（主会话已装 brooks-lint）；仅当插件确实不可用（如子代理环境未加载）才用内置 R1~R6 快查，并在 SUMMARY 记录"brooks-lint 不可用"
+4. **6 维自查**：优先调用 `/brooks-review`（主会话已装 brooks-lint）；仅当插件确实不可用（如子代理环境未加载）才用内置 R1~R6 快查，并在 SUMMARY 记录"brooks-lint 不可用"。回传 Return Contract 时 `selfReview` 字段必填：`brooks-review` 或 `builtin-quickcheck`；builtin 时 SUMMARY 需声明 `## 自检方法` 并注明 brooks-lint 不可用原因。
 5. **diff 边界 verify（R6.5）**：`git diff --name-only` 与 TASK write_files 比对，越界必须回滚
 6. **原子提交**：`<type>(<change-id>): <task-id> <subject>`
 

@@ -9,9 +9,9 @@ description: "Use only when explicitly invoked as /flow-comet-execute or routed 
 
 Complete the `execute` Node for `flow-comet`.
 
-Responsibility: 按 TASK.md 逐任务执行：TDD + 6 维自查 + LESSONS 扫描 + diff 边界 verify。
+Responsibility: 按 TASK.md 逐任务**统一委托子代理**执行（协调者流程）：TDD + 6 维自查 + LESSONS 扫描 + diff 边界 verify 由子代理执行，协调者负责构造 handoff、验收 SUMMARY、标记 done。
 
-This node executes all pending tasks from TASK.md one by one, applying the full dev protocol for each: TDD (RED/GREEN/REFACTOR), LESSONS scan, existing abstraction grep, self-review, diff boundary verification, and atomic commits. It produces a SUMMARY.md per task and marks each task as done in TASK.md. This is the core implementation node where code is actually written.
+This node is a coordinator. It does not write implementation code directly. It delegates all pending tasks to fresh-context subagents via the Agent tool (worktree isolation), each subagent applies the full dev protocol (TDD RED/GREEN/REFACTOR, LESSONS scan, existing abstraction grep, self-review, diff boundary verification, atomic commits) and returns a Return Contract. The coordinator records handoff evidence, verifies each SUMMARY, and marks tasks done in TASK.md.
 
 ## Guidance
 
@@ -19,7 +19,9 @@ This node executes all pending tasks from TASK.md one by one, applying the full 
 
 execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pending 任务**。
 
-- `parallel="true"` 的 pending 任务由 subagent-execute 节点负责委托
+本节点**不直接写实现代码**。所有 pending 任务统一通过 Agent 工具委托 fresh-context 子代理执行（加载 flow-comet-dev + 回传 Return Contract）。
+
+- `parallel="true"` 的 pending 任务由 subagent-execute 节点负责并行委托
 - execute 遍历 TASK.md 时，遇到 `parallel="true" status="pending"` 的任务块应**跳过**
 - 若所有 pending 任务都是 parallel=true，execute 应视为无事可做，直接走 exit guard 让路由到 subagent-execute
 - determineNode 路由逻辑会优先检测 parallel 任务并路由到 subagent-execute；若 determineNode 路由到了 execute，说明当前没有需要 execute 处理的任务（此时 execute 做空退出，让 guard 重新路由）
@@ -32,42 +34,22 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 - For frontend/UI tasks: `.specs/<change-id>/UI-DESIGN.md` must exist.
 - 若 `.specs/<change>/PROGRESS.md` 存在，必须先读取"已排除方案"段（R1.6 反重复），确认当前计划不在排除列表中。完成后删除 PROGRESS.md，有用信息迁移至 SUMMARY。
 
-### Steps
+### Steps（协调者流程，统一委托子代理）
 
-For each pending task in TASK.md, execute the following sequence:
+对 TASK.md 每个 pending 串行任务，协调者执行：
 
-1. **Read task block**: Extract the `<task>` XML block. Read `action`, `read_files`, `write_files`, `verify`, `done`. If ambiguous, stop and ask — do not guess.
+1. **读 task 块，构造 handoff request**：读 `<task>` XML 块（`action` / `read_files` / `write_files` / `verify` / `done`）。若内容有歧义，停下询问——不要猜。构造 handoff request 内容：task 全文 + DESIGN §0/§0.5 + AC + read/write_files 边界。运行 `workflow-handoff.mjs request <task-id>` 记录。
+2. **委托子代理**：用 Agent 工具（`isolation: "worktree"`）委托 fresh-context 子代理。handoff prompt 强制协议：加载 flow-comet-dev、执行 TDD（RED/GREEN/REFACTOR）、LESSONS 扫描、既有抽象 grep、verify、6 维自查、越界检查、原子 commit（`<type>(<change-id>): <task-id> <subject>`），写 `.specs/<change-id>/<task-id>-SUMMARY.md`，回传 Return Contract（含 commitHash + greenEvidence + selfReview）。
+3. **记录 handoff result**：子代理回传后，运行 `workflow-handoff.mjs result <task-id> '<JSON>'` 记录（Return Contract 含 commitHash + greenEvidence + selfReview）。
+4. **验收 SUMMARY，TASK.md 标 done**：确认 SUMMARY 含 `## 自检方法` 段（声明 brooks-review 或 builtin-quickcheck）、verify 输出真实、6 维自查与越界检查有实质内容；通过后在 TASK.md 将任务标 `status="done"` 并加时间戳。
+5. **下一个 pending 任务**：重复步骤 1-4。
 
-2. **Grep existing abstractions (R6.4)**: Before writing any code, grep the project for each capability mentioned in `action`. Check: HTTP clients, date formatting, state management, repository patterns, error handling, custom hooks. Use the actual grep commands from `4-dev.md` section 1.4.1. Record results in SUMMARY.md "6-dimension self-check" section.
+> 原 Steps 的 TDD / LESSONS / verify / 6 维自查 / 越界检查 / commit 协议**移入 handoff prompt 作为子代理的强制协议**，协调者不亲自执行。
 
-3. **Scan LESSONS (R1.8)**: Grep `.specs/LESSONS.md` using keywords from task files and action. For each active hit: declare "Reviewed L-NNN, difference is X" or "Reviewed L-NNN, still applies, will not retry". If plan matches an active lesson exactly — stop and answer "difference from last time is X".
-
-4. **UI task extra check (1.6)**: If task involves `.css`/`.tsx`/`.vue`/`.html` files or UI keywords: load UI-DESIGN.md, load `ui-anti-patterns.md`, load `frontend-engineer-rules.md` (sections 1, 2, 10 mandatory). Declare each hit from anti-patterns. Colors/fonts/spacing must come from CSS variables derived from UI-DESIGN.md frontmatter — no hardcoded values.
-
-5. **Schema migration check (R4.5, section 1.7)**: If task involves table/field changes: declare schema diff, select migration mechanism (detect Prisma/Alembic/Rails/Knex/Flyway/Liquibase), generate reversible migration with up+down, detect DB credentials to decide whether to execute now or defer.
-
-6. **Breaking change check (R4.6, section 1.8)**: If task deletes >= 5 lines, changes public exports, changes public API, or deletes files: grep reference graph, list impact, ask user for handling approach (direct delete + sync / deprecation period / codemod / abort).
-
-7. **TDD (section 2)**: RED (write failing test from AC/done) -> confirm failure -> GREEN (minimal code to pass) -> confirm pass -> REFACTOR (improve under test protection). Exception: pure doc/config tasks can skip TDD with explanation in SUMMARY.
-
-8. **Run verify (section 3)**: Execute the `<verify>` command. Paste real output into SUMMARY.md. Only proceed if verify passes.
-
-9. **Self-review (section 4)**: MUST call `/brooks-review` if the skill tool is available. Only if the skill tool reports the plugin is unavailable may you fall back to the built-in R1-R6 quick check. The SUMMARY.md **must** include a `## 自检方法` field declaring which method was used: `brooks-review` or `builtin-quickcheck`. Critical must be fixed before commit.
-
-10. **Diff boundary check (R6.5, section 5)**: Run `git diff --name-only HEAD` and `git status --short`. Compare against TASK.md `write_files`. Any out-of-boundary files must be reverted or explicitly approved. Record in SUMMARY.md "boundary check" section.
-
-11. **Atomic commit (R4.1, section 5.5)**: Format: `<type>(<change-id>): <task-id> <subject>`. Code + test in same commit.
-
-12. **Write SUMMARY.md (section 6)**: Use `flow-kit/templates/SUMMARY.md` template. Save to `.specs/<change-id>/<task-id>-SUMMARY.md`. Must include: what changed, which files, verify output, 6-dimension self-check, boundary check.
-
-13. **Mark done (section 7)**: Update TASK.md task status to "done" with timestamp.
-
-14. **Move to next pending task**: Repeat from step 1.
-
-15. **All done**: Run exit check.
+> **Return Contract 非代码任务**：纯文档 / 纯配置任务子代理回传时，`greenEvidence` 允许 `{"command":"N/A (non-code task)","output":"..."}`（command 字段存在即可通过 W1-D 校验）。
 
 The full dev protocol, templates, and constraints are in:
-- `flow-kit/prompts/4-dev.md` (DEV phase)
+- `flow-kit/prompts/4-dev.md` (DEV phase) — 作为 handoff prompt 的子代理强制协议引用
 
 ### Completion reasoning
 
