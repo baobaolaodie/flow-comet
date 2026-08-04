@@ -2,6 +2,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { validateStateFields } from './state-schema.mjs';
 
 // workflow-handoff.mjs: Record subagent handoff evidence
 // evidence 统一记录在 subagent-execute 名下作为委托证据库——execute（串行委托）与 subagent-execute（并行委托）共用。不改成节点参数，保持最小改动。
@@ -21,6 +22,12 @@ async function readState() {
 }
 
 async function writeState(state) {
+  // D3: 与 workflow-state.mjs C6 同构——写入前校验已知字段类型（fail-closed），非法 → BLOCKED + exit 1
+  const bad = validateStateFields(state);
+  if (bad.length) {
+    console.error('BLOCKED: state 字段类型非法: ' + bad[0]);
+    process.exit(1);
+  }
   await fs.mkdir(path.dirname(statePath), { recursive: true });
   await fs.writeFile(statePath, JSON.stringify(state, null, 2) + '\n', 'utf8');
 }

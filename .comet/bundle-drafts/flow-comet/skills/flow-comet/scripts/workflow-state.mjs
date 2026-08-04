@@ -2,6 +2,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { validateStateFields } from './state-schema.mjs';
 
 const command = process.argv[2] ?? 'status';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -124,26 +125,13 @@ async function readState() {
 }
 
 // C6: writeState 写入前校验已知字段类型（fail-closed：非法 → BLOCKED 拒绝写入，不修复不猜测）
-// 未知字段允许（前向兼容）；缺字段允许（readState 默认补）；只校验存在字段的类型
-const STATE_FIELD_VALIDATORS = [
-  { field: 'activeChange', check: (v) => typeof v === 'string' || v === null },
-  { field: 'currentNode', check: (v) => typeof v === 'string' || v === null },
-  { field: 'completedNodes', check: (v) => Array.isArray(v) && v.every((x) => typeof x === 'string') },
-  { field: 'evidence', check: (v) => typeof v === 'object' && v !== null && !Array.isArray(v) },
-  { field: 'verifyFailures', check: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 },
-  { field: 'executionMode', check: (v) => v === 'subagent' || v === 'direct' },
-  { field: 'directOverride', check: (v) => typeof v === 'boolean' },
-  { field: 'taskHash', check: (v) => typeof v === 'string' || v === undefined },
-];
-
+// 未知字段允许（前向兼容）；缺字段允许（readState 默认补）；只校验存在字段的类型。
+// D3: 校验表已迁移到 state-schema.mjs（唯一来源），行为与批次 C C6 完全一致（对第一个非法字段输出后退出）
 async function writeState(state) {
-  if (state && typeof state === 'object') {
-    for (const { field, check } of STATE_FIELD_VALIDATORS) {
-      if (Object.prototype.hasOwnProperty.call(state, field) && !check(state[field])) {
-        console.error('BLOCKED: state 字段类型非法: ' + field);
-        process.exit(1);
-      }
-    }
+  const bad = validateStateFields(state);
+  if (bad.length) {
+    console.error('BLOCKED: state 字段类型非法: ' + bad[0]);
+    process.exit(1);
   }
   await writeJson(statePath, state);
 }
