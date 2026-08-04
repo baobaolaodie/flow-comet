@@ -88,7 +88,7 @@ open → design → plan → execute ⇄ subagent-execute → review → verify 
 | **verify** | 集成验证 + UAT + 失败诊断（≤3 轮） | `TEST.md` / `UAT.md` / LESSONS 提名 | 验证命令真实执行；UAT 必填段；LESSONS 编号/位置检测 |
 | **archive** | LESSONS 提名 + 归档 + 分支收尾 | `.specs/archive/<date>-<id>/` / CHANGELOG | 分支校验（新模式）；CHANGELOG 倒序检测 |
 
-### 分支模式（批次 E）
+### 分支模式
 
 - `init` 自动创建 `change/<change-id>` 分支（git 仓库时），全流程在分支上进行
 - 归档时收尾：合并回主分支 + 删除分支（`enablePrReview=true` 时先推送 + PR，approve 后合并）
@@ -175,11 +175,11 @@ CHANGE.md 头部含 `express: true`（低风险判定：改动 ≤3 文件、无
 
 - 任意入口恢复：determineNode 从文件推导 + state 自动纠偏（不依赖对话历史）
 - PROGRESS.md 恢复警告（R1.6 反重复）
-- 分支-状态一致性校验（批次 E）
+- 分支-状态一致性校验
 
 ### 6. guard 自测套件
 
-`scripts/guard-self-test.mjs`：23 场景覆盖全部 entry/exit 校验正反例（含批次 E 分支校验与追加位置检测），每次改动后回归：
+`scripts/guard-self-test.mjs`：23 场景覆盖全部 entry/exit 校验正反例（含分支校验与追加位置检测），每次改动后回归：
 
 ```bash
 node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
@@ -190,7 +190,7 @@ node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.m
 
 ## 设计原理
 
-为什么 flow-comet 这样设计（完整决策记录见仓库本地内部文档 `docs/internal/ARCHITECTURE.md`）：
+为什么 flow-comet 这样设计：
 
 - **文件即真相，不做事件溯源**：单文件状态机 + 从 `.specs/` 推导节点——简单且恢复不依赖历史
 - **结构级校验，不做语义判断**：guard 判"填没填"（段名/非空/结构），"填得好不好"交给 review——校验轻、误报少
@@ -337,11 +337,9 @@ node .../workflow-handoff.mjs status
 | `WORKTREE WARN: .specs/<change>/ 有未提交工件` | 委托前工件未 commit | commit 工件，或在委托 prompt 内联上下文 |
 | `BLOCKED: TASK.md 任务集被修改` | execute 期间增删任务/改 action/改边界 | 回退 TASK.md 到 enter 时内容（仅标记 done 是合法的） |
 | `BLOCKED: state 字段类型非法` | state 文件被直改坏 | 修复字段类型或从备份/git 历史恢复 `.comet/flow-comet-state.json` |
-| `WARN: CONTEXT.md 检测到孤立追加段` | 术语/决策被尾部追加成新段 | 把内容移入术语表表格/已锁决策清单（E6 纪律） |
+| `WARN: CONTEXT.md 检测到孤立追加段` | 术语/决策被尾部追加成新段 | 把内容移入术语表表格/已锁决策清单 |
 | `WARN: LESSONS.md 条目编号乱序/区外` | 新条目未按 L-NNN 插入条目区 | 按编号插入 `## 条目区`（或 `## 活跃条目`） |
-| `HANDOFF ERROR: commitHash 无效或 git show 失败` | 产物 commit 不在当前仓库（跨仓库 worktree 场景） | 预期降级——产物已提取即忽略，不阻断记录 |
 | `BROOKS-LINT WARN: 使用 builtin-quickcheck 未声明原因` | SUMMARY 缺"插件不可用"说明 | 在 SUMMARY 的 `## 自检方法` 段补原因 |
-| `bundle-authoring drift-conflict` | 直接编辑 drafts 绕过 creator 流程 | 下次走 creator 流程时 reconcile（不影响运行时） |
 | `BLOCKED: verify 失败超限（verifyFailures=3）` | UAT/自动化连续失败 3 次 | 暂停，人工决策「继续修 / 停止」（R2.6） |
 
 ---
@@ -402,8 +400,8 @@ node .../workflow-handoff.mjs status
 
 | 项 | 说明 |
 |----|------|
-| **当前版本** | v1.1.0（记录于 [CHANGELOG.md](CHANGELOG.md) 与 git tag；v1.0.0 = 首个稳定版，批次 A-D 内部迭代） |
-| **版本策略** | 语义化版本：新功能批次 → minor（1.2.0）、bug 修复 → patch（1.1.1）、破坏性变更 → major（2.0.0）；每批次完成时 bump |
+| **当前版本** | v1.1.0（记录于 [CHANGELOG.md](CHANGELOG.md) 与 git tag；v1.0.0 = 首个稳定版：8 节点工作流 + 三层防线 + guard 校验体系） |
+| **版本策略** | 语义化版本：新功能发布 → minor（1.2.0）、bug 修复 → patch（1.1.1）、破坏性变更 → major（2.0.0）；每轮功能迭代完成时 bump |
 | **bundle 版本解耦** | `bundle.yaml`/`skill.yaml` 的 version 保持 1.0.0（bundle 发布流程与版本号解耦——避免每次 bump 需重新 eval/distribute）；git tag 与 CHANGELOG 是版本唯一事实来源 |
 | **依赖（必需）** | [flow-kit](https://github.com/rihebty/flow-kit)（方法论与工件模板）；Claude Code |
 | **依赖（可选）** | [Comet CLI](https://github.com/rpamis/comet)（仅作者分发流程：compile/eval/review/approve/run/distribute） |
