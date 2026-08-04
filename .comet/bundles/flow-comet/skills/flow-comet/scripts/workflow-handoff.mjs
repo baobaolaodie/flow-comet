@@ -53,7 +53,9 @@ async function main() {
         const match = taskContent.match(taskRegex);
         if (match) {
           const files = match[1].trim().split(/\s*\n\s*/).filter(f => f.trim());
-          writeFiles = files.map(f => f.trim());
+          // 剥离 XML 注释（<!-- … -->）：TASK.md 模板 write_files 每行可带注释，保留会导致
+          // W2-D 提交文件子集校验误报（f.startsWith('path  <!-- 注释 -->') 恒 false）
+          writeFiles = files.map(f => f.trim().replace(/<!--[\s\S]*?-->/g, '').trim()).filter(Boolean);
         }
       } catch {}
     }
