@@ -3,6 +3,7 @@
 **flow-kit 9 阶段开发工作流的自动化执行引擎** —— 面向 Claude Code 平台的 workflow-kernel 实现。
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](CHANGELOG.md)
 
 flow-comet 把 flow-kit 的 9 阶段开发流程（CHANGE → REQUIREMENT → DESIGN → TASK → DEV → TEST → REVIEW → INTEGRATION → ARCHIVE）从"依赖人工纪律的手动流程"变成**可验证的确定状态机**：脚本控制阶段推进、guard 校验产物质量、hook 拦截跨阶段写入、子代理隔离并行执行——流程结构自动化，行为纪律保留。
 
@@ -355,6 +356,7 @@ node .../workflow-handoff.mjs status
 
 | 文档 | 说明 |
 |------|------|
+| [变更日志](CHANGELOG.md) | Keep a Changelog 风格，版本历史（当前 v1.1.0） |
 | [产物示例](docs/examples/schedule-venue-filter/) | 全流程 12 个工件参考 |
 | [验证记录](VERIFICATION.md) | 分发验证 |
 
@@ -400,7 +402,9 @@ node .../workflow-handoff.mjs status
 
 | 项 | 说明 |
 |----|------|
-| **版本** | 1.0.0（`bundle.yaml` metadata.version） |
+| **当前版本** | v1.1.0（记录于 [CHANGELOG.md](CHANGELOG.md) 与 git tag；v1.0.0 = 首个稳定版，批次 A-D 内部迭代） |
+| **版本策略** | 语义化版本：新功能批次 → minor（1.2.0）、bug 修复 → patch（1.1.1）、破坏性变更 → major（2.0.0）；每批次完成时 bump |
+| **bundle 版本解耦** | `bundle.yaml`/`skill.yaml` 的 version 保持 1.0.0（bundle 发布流程与版本号解耦——避免每次 bump 需重新 eval/distribute）；git tag 与 CHANGELOG 是版本唯一事实来源 |
 | **依赖（必需）** | [flow-kit](https://github.com/rihebty/flow-kit)（方法论与工件模板）；Claude Code |
 | **依赖（可选）** | [Comet CLI](https://github.com/rpamis/comet)（仅作者分发流程：compile/eval/review/approve/run/distribute） |
 | **平台** | Claude Code（skill 体系）；不保证 Codex/Gemini/Cursor |
