@@ -1937,7 +1937,8 @@ async function main() {
     const reqFile = path.join(runRoot, '.specs', state.activeChange, 'REQUIREMENT.md');
     try {
       const content = await fs.readFile(reqFile, 'utf8');
-      if (!/##\s*(验收标准|AC|Acceptance Criteria)/i.test(content) && !/Given/i.test(content)) {
+      // 段名以 flow-kit 模板为权威：## 验收准则（AC）；兼容 ## 验收标准 / ## AC / Given 后备
+      if (!/##\s*(验收准则|验收标准|AC|Acceptance Criteria)/i.test(content) && !/Given/i.test(content)) {
         console.error('BLOCKED: REQUIREMENT.md 缺少验收标准/AC 段');
         process.exit(1);
       }
