@@ -76,7 +76,7 @@
 | D1 | 场地过滤用 `Tournament.id.in_(SELECT venue.tournament_id WHERE venue.id=?)` 子查询 | JOIN + DISTINCT / EXISTS | 与既有 `event_type` 过滤写法（`crud_tournament.py:128`）一致，`count_query` 与 `query` 双语句共用同一 filter，保持 `total` 口径统一 | EXISTS 语义在 SQLite/MySQL 一致但索引路径略不同；子查询已由 `venues.tournament_id` 索引覆盖 |
 | D2 | `venue_names` 走批量预取（一次 `SELECT venue WHERE tournament_id IN (...)`）挂进 `set_tournament_list_counts` | 每行 lazy load / 响应里内嵌 venue 列表 | 沿用既有批量助手，防 N+1（列表页 15 行/页，多 1 条批量查询可接受） | `set_tournament_list_counts` 调用点需要一并传 venue 名映射；detail 接口（`get_tournament_detail`）不在本次范围 |
 | D3 | 场地下拉数据源新增 `GET /tournaments/venues`（admin-only，`is_active=True`） | 复用 `fetchVenues(eventId)` 按赛事拉 | 管理端需要跨赛事的全量启用场地聚合，现有接口是 event 粒度，语义不符 | 新增一个只读接口，需注册路由 + 权限检查（多 ~20 行） |
-| D4 | 前端场地名展示用 `venue_names: string[]` 计算字段 | 后端拼 `"市体育馆"` 字符串 | 字段保持数组，前端 `join("、")` 渲染，为将来多场馆留扩展 | 前端多一次 map 逻辑，成本可忽略 |
+| D4 | 前端场地名展示用 `venue_names: string[]` 计算字段 | 后端拼 `"示例体育馆"` 字符串 | 字段保持数组，前端 `join("、")` 渲染，为将来多场馆留扩展 | 前端多一次 map 逻辑，成本可忽略 |
 
 ## 2. 数据流 / 架构图
 
