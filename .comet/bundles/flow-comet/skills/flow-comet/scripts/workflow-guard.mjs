@@ -1898,8 +1898,8 @@ async function main() {
         process.exit(1);
       }
     }
-    // 协调者禁令：subagent-execute 阶段主会话只能委托，禁止直接写源码
-    if (node.id === 'subagent-execute') {
+    // 协调者禁令：execute / subagent-execute 阶段主会话只能委托，禁止直接写源码
+    if (node.id === 'execute' || node.id === 'subagent-execute') {
       console.log('COORDINATOR: 你是协调者，不是执行者。禁止在主会话直接修改源码；只能通过 Agent 工具 worktree isolation 委托子代理；子代理回传后仅更新 TASK.md / SUMMARY / handoff evidence。');
     }
     console.log('ENTRY OK: ' + node.id);
@@ -1982,27 +1982,39 @@ async function main() {
       }
     } catch {}
   }
-  // W1-B: execute / subagent-execute 出口校验每份 SUMMARY 含三个必填段
+  // W1-B: execute / subagent-execute 出口校验每份 SUMMARY 含三个必填段 + C1 6 维自查非空 + D1 自检方法
   if (node.id === 'execute' || node.id === 'subagent-execute') {
     const changeDir = path.join(runRoot, '.specs', state.activeChange ?? '');
     const violations = await verifySummaries(changeDir);
-    if (violations.length > 0) {
-      console.error('BLOCKED: SUMMARY 关键段校验失败: ' + violations.join('; '));
-      process.exit(1);
-    }
     // brooks-lint 自检方法审计：检查 6 维自查段是否声明了自检方法
     const summaryFiles = (await fs.readdir(changeDir).catch(() => [])).filter(f => f.endsWith('-SUMMARY.md'));
     for (const f of summaryFiles) {
       try {
         const content = await fs.readFile(path.join(changeDir, f), 'utf8');
         const sixDim = content.match(/##\s*6\s*维自查[\s\S]*?(?=\n##|\n---|\Z)/i);
+        // C1: 6 维自查段非空——逐维有实质内容（每维标题后到下一维，非空白字符 ≥ 10）
+        //    越界检查段含实际 diff 记录（含 "diff" 或 "越界" 字样且非空）
+        if (sixDim && sixDim[0].replace(/#{1,6}\s*R\d|##\s*6\s*维自查/g, '').trim().length < 10) {
+          violations.push(f + ' 的 6 维自查段无实质内容');
+        }
+        // D1: 生产代码任务必填 ## 自检方法，声明 brooks-review 或 builtin-quickcheck
+        const method = content.match(/##\s*自检方法\s*\n\s*([a-z-]+)/i);
+        if (!method) {
+          violations.push(f + ' 缺 ## 自检方法 字段（必须声明 brooks-review 或 builtin-quickcheck）');
+        } else if (/builtin/.test(method[1]) && !/brooks-lint 不可用|插件不可用|unavailable|N\/A/i.test(content)) {
+          console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明 brooks-lint 不可用原因');
+        }
         if (sixDim && !/brooks.?review/i.test(sixDim[0])) {
           console.error('BROOKS-LINT WARN: ' + f + ' 的 6 维自查未声明使用 /brooks-review（可能使用了内置快查）');
         }
       } catch {}
     }
+    if (violations.length > 0) {
+      console.error('BLOCKED: SUMMARY 关键段校验失败: ' + violations.join('; '));
+      process.exit(1);
+    }
   }
-  // P0-A: execute 出口校验——区分串行/并行，并检测越俎代庖（parallel 任务只能由 subagent-execute 委托完成）
+  // P0-A: execute 出口校验——统一委托后所有 done 任务需 handoff（越俎代庖检测覆盖串行/并行）
   if (node.id === 'execute' && state.activeChange) {
     const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
     try {
@@ -2022,18 +2034,18 @@ async function main() {
         process.exit(1);
       }
 
-      // 豁免机制：evidence（当前节点 execute）含 parallelTakeoverApproved: true 时跳过 parallel-done 检测（只保留串行 pending 检测）
+      // 豁免机制：evidence（当前节点 execute）含 parallelTakeoverApproved: true 时跳过越俎代庖检测（只保留串行 pending 检测）
       const executeEvidence = state.evidence['execute'];
-      const parallelTakeoverApproved = !!(executeEvidence && executeEvidence.parallelTakeoverApproved);
+      const takeoverApproved = !!(executeEvidence && executeEvidence.parallelTakeoverApproved);
 
-      if (!parallelTakeoverApproved) {
-        // parallel 被标记 done 但无 handoffResult → 越俎代庖（应由 subagent-execute 委托）→ BLOCKED
+      if (!takeoverApproved) {
+        // 所有 done 任务无 handoffResult → 越俎代庖（统一委托后只能由子代理完成）
         const he = state.evidence['subagent-execute'];
         const results = he && he.handoffResult ? he.handoffResult : {};
-        const unauthorized = tasks.filter(t => t.parallel && t.status === 'done' && !results[t.id]);
+        const unauthorized = tasks.filter(t => t.status === 'done' && !results[t.id]);
         if (unauthorized.length > 0) {
-          console.error('BLOCKED: parallel 任务被串行标记 done（越俎代庖），只能由 subagent-execute 委托完成: ' + unauthorized.map(t => t.id).join(', '));
-          console.error('解决: 回退这些任务的 done 标记，exit 后路由到 subagent-execute 委托；或用 workflow-state.mjs record execute \'{"parallelTakeoverApproved":true}\' 显式豁免');
+          console.error('BLOCKED: 任务被主代理直接标记 done（越俎代庖），统一委托下只能由子代理完成并记录 handoff: ' + unauthorized.map(t => t.id).join(', '));
+          console.error('解决: 回退这些任务的 done 标记，重新委托子代理；或用 workflow-state.mjs record execute \'{"parallelTakeoverApproved":true}\' 显式豁免');
           process.exit(1);
         }
         // parallel 仍 pending → 合法（下一步 determineNode 路由到 subagent-execute）
