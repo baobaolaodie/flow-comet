@@ -3,7 +3,6 @@
 - **日期**: 2026-08-03
 - **状态**: 草案
 - **定位**: 架构级改进规格。先确立原则（每个 Comet 原则怎么扬弃），再映射到具体改动。
-- **前身**: `docs/flow-comet-improvement-spec.md`（W1-W3 波次计划，是本规格的实现层）。
 
 ---
 
@@ -258,10 +257,6 @@ SKILL.md（Auto 区）的 Guidance 段改为 `<!-- see <node>-GUIDANCE.md -->` �
 | — | handoff 从 TASK.md 自动解析 write_files（G-4） | workflow-handoff.mjs + flow-comet-subagent-execute/SKILL.md | P1 |
 | — | Return Contract 补齐 redEvidence 校验（G-3，渐进策略） | workflow-guard.mjs（当前只 WARN 不 BLOCK） | P2 |
 | — | 清理 NODE_TRANSITION_GATES.artifacts 死数据（G-1） | workflow-guard.mjs | P2 |
-
-### 与原 improvement-spec（W1-W3）的关系
-
-原 spec 的 W1-W3 波次是本规格的**已实现子集**。本规格新增的改动项（以 ②④ 为主）是原 spec 未覆盖的结构性差距。执行时以本规格为准，原 spec 中已实现的部分直接复用。
 
 ---
 

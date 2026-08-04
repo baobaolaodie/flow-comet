@@ -103,10 +103,7 @@ comet publish distribute flow-comet --platform claude --scope project --project 
 | 文档 | 说明 |
 |------|------|
 | [扬弃规格](docs/flow-comet-sublation-spec.md) | Comet × flow-kit 七原则架构分析 + 改进决策 |
-| [越俎代庖修复规格](docs/fix-overreach-spec.md) | subagent-execute 越俎代庖修复 + 三层防线设计 |
-| [执行质量规格](docs/flow-comet-execution-quality-spec.md) | 子代理化 + 模板强制 + 内容级校验（批次 A/B 依据） |
-| [批次 C 执行规格](docs/batch-C-spec.md) | guard 自测套件 + 段名模板派生 + TASK 签名哈希 + 委托前检查 + schema 校验 |
-| [批次 D 执行规格](docs/batch-D-spec.md) | GUIDANCE 全量推广 + state 校验统一 |
+| [执行质量规格](docs/flow-comet-execution-quality-spec.md) | 执行引擎子代理化 + 模板强制 + 内容级校验设计原则 |
 | [产物示例](docs/examples/schedule-venue-filter/) | 全流程 12 个工件参考 |
 | [验证记录](VERIFICATION.md) | 分发验证 |
 
