@@ -14,15 +14,15 @@ const WORKFLOW_PROJECT_CONFIG_MAX_BYTES = 64 * 1024;
 const WORKFLOW_PROJECT_FILE_MAX_BYTES = 2 * 1024 * 1024;
 
 // Phase 写入白名单：currentNode → 允许写入的（相对 runRoot 的）路径前缀
-// '' 空字符串表示允许所有路径（execute / subagent-execute 需要写源码 + SUMMARY）
-// '.specs/' 前缀表示只允许 .specs 目录下的文件
+// '' 空字符串表示允许所有路径（execute 串行实现需要写源码 + SUMMARY）
+// '.specs/' 前缀表示只允许 .specs 目录下的文件（subagent-execute 协调者只写工件；源码由 worktree 子代理写）
 // 其他路径前缀精确匹配
 const PHASE_WRITE_WHITELIST = {
   'open':             ['.specs/'],
   'design':           ['.specs/', '.specs/adr/'],
   'plan':             ['.specs/'],
-  'execute':          [''],  // 允许所有（源码 + SUMMARY）
-  'subagent-execute': [''],  // 允许所有
+  'execute':          [''],       // 串行实现：主代理合法写源码 + SUMMARY
+  'subagent-execute': ['.specs/'],// 协调者只写 .specs 工件；源码必须由 worktree 子代理写（子代理 cwd 无 .comet/state → hook 放行）
   'review':           ['.specs/'],
   'verify':           ['.specs/'],
   'archive':          ['.specs/archive/', '.specs/CHANGELOG.md', '.specs/LESSONS.md'],

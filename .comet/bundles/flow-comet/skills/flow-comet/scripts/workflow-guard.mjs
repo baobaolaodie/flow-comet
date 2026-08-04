@@ -1898,6 +1898,10 @@ async function main() {
         process.exit(1);
       }
     }
+    // 协调者禁令：subagent-execute 阶段主会话只能委托，禁止直接写源码
+    if (node.id === 'subagent-execute') {
+      console.log('COORDINATOR: 你是协调者，不是执行者。禁止在主会话直接修改源码；只能通过 Agent 工具 worktree isolation 委托子代理；子代理回传后仅更新 TASK.md / SUMMARY / handoff evidence。');
+    }
     console.log('ENTRY OK: ' + node.id);
     return;
   }
@@ -1998,18 +2002,41 @@ async function main() {
       } catch {}
     }
   }
-  // P0-A: all-tasks-done 校验——execute 出口必须所有 task 都 done
+  // P0-A: execute 出口校验——区分串行/并行，并检测越俎代庖（parallel 任务只能由 subagent-execute 委托完成）
   if (node.id === 'execute' && state.activeChange) {
     const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
     try {
       const taskContent = await fs.readFile(taskFile, 'utf8');
-      const allTasks = taskContent.match(/<task[^>]*id="([^"]+)"[^>]*status="([^"]+)"/g) || [];
-      const pendingTasks = allTasks
-        .map(m => { const id = m.match(/id="([^"]+)"/); const st = m.match(/status="([^"]+)"/); return id && st ? { id: id[1], status: st[1] } : null; })
-        .filter(t => t && t.status !== 'done');
-      if (pendingTasks.length > 0) {
-        console.error('BLOCKED: execute 出口仍有 pending 任务: ' + pendingTasks.map(t => t.id).join(', '));
+      // 解析 TASK.md 全部 task 的 {id, status, parallel}
+      const taskBlocks = taskContent.match(/<task[^>]*>[\s\S]*?<\/task>/g) || [];
+      const tasks = taskBlocks.map(block => ({
+        id: (block.match(/id="([^"]+)"/) || [])[1] || null,
+        status: (block.match(/status="([^"]+)"/) || [])[1] || null,
+        parallel: /parallel="true"/.test(block),
+      })).filter(t => t.id);
+
+      // 串行 pending → BLOCKED（execute 任务没做完）
+      const serialPending = tasks.filter(t => !t.parallel && t.status !== 'done');
+      if (serialPending.length > 0) {
+        console.error('BLOCKED: execute 出口仍有串行 pending 任务: ' + serialPending.map(t => t.id).join(', '));
         process.exit(1);
+      }
+
+      // 豁免机制：evidence（当前节点 execute）含 parallelTakeoverApproved: true 时跳过 parallel-done 检测（只保留串行 pending 检测）
+      const executeEvidence = state.evidence['execute'];
+      const parallelTakeoverApproved = !!(executeEvidence && executeEvidence.parallelTakeoverApproved);
+
+      if (!parallelTakeoverApproved) {
+        // parallel 被标记 done 但无 handoffResult → 越俎代庖（应由 subagent-execute 委托）→ BLOCKED
+        const he = state.evidence['subagent-execute'];
+        const results = he && he.handoffResult ? he.handoffResult : {};
+        const unauthorized = tasks.filter(t => t.parallel && t.status === 'done' && !results[t.id]);
+        if (unauthorized.length > 0) {
+          console.error('BLOCKED: parallel 任务被串行标记 done（越俎代庖），只能由 subagent-execute 委托完成: ' + unauthorized.map(t => t.id).join(', '));
+          console.error('解决: 回退这些任务的 done 标记，exit 后路由到 subagent-execute 委托；或用 workflow-state.mjs record execute \'{"parallelTakeoverApproved":true}\' 显式豁免');
+          process.exit(1);
+        }
+        // parallel 仍 pending → 合法（下一步 determineNode 路由到 subagent-execute）
       }
     } catch {}
   }
