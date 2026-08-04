@@ -3,22 +3,22 @@
 - **Change ID**: test-schedule-venue-filter
 - **验证时间**: 2026-08-04 11:00 ~ 11:15
 - **执行人**: 管理员
-- **环境**: 本地全栈（uvicorn :8000 + vite :5173），seed 管理员 13800000000
+- **环境**: 本地全栈（uvicorn :8000 + vite :5173），seed 管理员 13900000000
 
 ---
 
 ## AC-1 · 按场地过滤赛事
 
-- **前置**: 启用场地 v1="市体育馆"（归属赛事 A）、v2="工人文化宫"（归属赛事 B）
+- **前置**: 启用场地 v1="示例体育馆"（归属赛事 A）、v2="示例文化宫"（归属赛事 B）
 - **验证方式**: `pytest tests/test_api_tournaments_venue_filter.py::test_list_tournaments_filter_by_venue_id -q`
-- **结果**: 通过（`GET /tournaments?venue_id=1` 仅返回赛事 A，total=1，venue_names=["市体育馆"]）
+- **结果**: 通过（`GET /tournaments?venue_id=1` 仅返回赛事 A，total=1，venue_names=["示例体育馆"]）
 - **补充**: 手动 curl 验证 `venue_id=2` 返回赛事 B，`venue_id=99999`（不存在）返回空 items / total=0
 
 ## AC-2 · 场地名称展示在列表项中
 
 - **前置**: 赛事 A 关联启用场地 v1
 - **验证方式**: `AdminTournaments.test.tsx` 两个渲染用例 + UAT-1
-- **结果**: 通过（列表行"场地"列显示"市体育馆"；未关联场地显示"—"）
+- **结果**: 通过（列表行"场地"列显示"示例体育馆"；未关联场地显示"—"）
 
 ## AC-3 · 筛选与既有筛选叠加不冲突
 
@@ -30,7 +30,7 @@
 
 - **前置**: 启用场地 v1、v2 与停用场地 v3
 - **验证方式**: `test_list_all_active_venues` + UAT-3
-- **结果**: 通过（返回 `[{id:1,name:"市体育馆"},{id:2,name:"工人文化宫"}]`，不含 v3，按 name 排序；未授权请求返回 401）
+- **结果**: 通过（返回 `[{id:1,name:"示例体育馆"},{id:2,name:"示例文化宫"}]`，不含 v3，按 name 排序；未授权请求返回 401）
 
 ## AC-5 · 响应向后兼容
 

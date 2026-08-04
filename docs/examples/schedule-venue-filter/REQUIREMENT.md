@@ -17,16 +17,16 @@
 
 ### AC-1 · 按场地过滤赛事
 
-- **Given** 系统内存在启用场地 `v1（id=1，"市体育馆"）` 归属赛事 `A`、启用场地 `v2（id=2，"工人文化宫"）` 归属赛事 `B`，且 `GET /tournaments` 无需认证依赖之外的额外权限
+- **Given** 系统内存在启用场地 `v1（id=1，"示例体育馆"）` 归属赛事 `A`、启用场地 `v2（id=2，"示例文化宫"）` 归属赛事 `B`，且 `GET /tournaments` 无需认证依赖之外的额外权限
 - **When** 管理员调用 `GET /tournaments?venue_id=1`
-- **Then** 返回 `items` 中仅包含赛事 `A`，`total` 为 1，且每项 `venue_names` 包含 `"市体育馆"`
+- **Then** 返回 `items` 中仅包含赛事 `A`，`total` 为 1，且每项 `venue_names` 包含 `"示例体育馆"`
 - **验证方式**: `cd pingpong-tournament && pytest tests/test_api_tournaments_venue_filter.py -q` 的 `test_list_tournaments_filter_by_venue_id`
 
 ### AC-2 · 场地名称展示在列表项中
 
-- **Given** 赛事 `A` 关联启用场地 `v1（name="市体育馆"）`
+- **Given** 赛事 `A` 关联启用场地 `v1（name="示例体育馆"）`
 - **When** 前端加载赛事列表
-- **Then** 赛事 `A` 所在行展示场地名 `"市体育馆"`（表格"场地"列）；若赛事未关联任何场地，该列显示 `—`
+- **Then** 赛事 `A` 所在行展示场地名 `"示例体育馆"`（表格"场地"列）；若赛事未关联任何场地，该列显示 `—`
 - **验证方式**: 前端单测 `frontend/src/pages/admin/__tests__/AdminTournaments.test.tsx` 的 `render venue column`；UAT-1
 
 ### AC-3 · 筛选与既有筛选叠加不冲突
@@ -40,7 +40,7 @@
 
 - **Given** 系统内有启用场地 `v1`、`v2` 与一个停用场地 `v3`
 - **When** 管理员调用 `GET /tournaments/venues`
-- **Then** 返回 `[{id:1,name:"市体育馆"},{id:2,name:"工人文化宫"}]`，不含 `v3`，按 `name` 排序
+- **Then** 返回 `[{id:1,name:"示例体育馆"},{id:2,name:"示例文化宫"}]`，不含 `v3`，按 `name` 排序
 - **验证方式**: 后端 API 集成测试 `test_list_all_active_venues`；UAT-1
 
 ### AC-5 · 响应向后兼容
