@@ -4,7 +4,7 @@
   "mode": "create",
   "status": "drift-conflict",
   "draftPath": "./.comet/bundle-drafts/flow-comet",
-  "currentHash": "93e18dc3f4cd562733b42758d309fb6c4cc6e28bfa253550f7d975ed79c01032",
+  "currentHash": "cc25cbaa3adee0ddf14a36dfc1de331e891ee99ea8595ee6fb04c125549489fc",
   "candidates": [
     {
       "name": "flow-comet-open",
@@ -1951,7 +1951,7 @@
     "publishedAt": "2026-08-03T12:09:47.267Z"
   },
   "conflict": {
-    "draftHash": "93e18dc3f4cd562733b42758d309fb6c4cc6e28bfa253550f7d975ed79c01032",
-    "readyHash": "f24c604431cdc321a5ad267225b9760675cda40444863f5b7d2f419d59d36e72"
+    "draftHash": "cc25cbaa3adee0ddf14a36dfc1de331e891ee99ea8595ee6fb04c125549489fc",
+    "readyHash": "cc25cbaa3adee0ddf14a36dfc1de331e891ee99ea8595ee6fb04c125549489fc"
   }
 }
