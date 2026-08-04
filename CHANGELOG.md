@@ -6,7 +6,7 @@
 
 ## [1.1.0] - 2026-08-05
 
-批次 E（change 分支 + PR 审查 + 追加位置纪律）+ 文档重写。
+change 分支 + PR 审查 + 追加位置纪律 + 文档重写。
 
 ### Added
 
@@ -23,11 +23,11 @@
 
 ### Fixed
 
-- E7 LESSONS 乱序检测改**分段**：多段编号体系（`## 活跃条目` / `## 已解决条目` 独立编号）不再误报
+- LESSONS 乱序检测改**分段**：多段编号体系（`## 活跃条目` / `## 已解决条目` 独立编号）不再误报
 
 ## [1.0.0] - 2026-08-04
 
-首个稳定版（批次 A-D 内部迭代，含两轮端到端 dogfood 验证）。
+首个稳定版（8 节点工作流 + 三层防线 + guard 校验体系，经端到端真实项目验证）。
 
 ### Added
 
@@ -37,4 +37,4 @@
 - guard 校验体系：段名模板派生、SUMMARY 六段 + 自检方法强制、TASK 签名哈希、verify 真实执行、verifyFailures 计数、state schema 校验（fail-closed）
 - 执行引擎子代理化 + executionMode（subagent 默认 / direct 逃生口）+ Return Contract + handoff hash 溯源
 - 横向命令（flow-comet-evolve / flow-comet-health）+ express 降级路径
-- guard 自测套件（17 场景）+ 两轮端到端 dogfood 验证（greenfield + brownfield）
+- guard 自测套件（17 场景）+ 端到端真实项目验证（新项目与既有项目两类场景）
