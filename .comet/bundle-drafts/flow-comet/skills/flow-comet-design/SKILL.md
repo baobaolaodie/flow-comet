@@ -3,6 +3,8 @@ name: flow-comet-design
 description: "Use only when explicitly invoked as /flow-comet-design or routed by the flow-comet entry/runtime to the design Node; complete Design for flow-comet. Do not use for ordinary standalone tasks or as the workflow entry."
 ---
 
+<!-- 手写区详细协议见 GUIDANCE.md（可选阅读） -->
+
 # Design
 
 ## Node Goal

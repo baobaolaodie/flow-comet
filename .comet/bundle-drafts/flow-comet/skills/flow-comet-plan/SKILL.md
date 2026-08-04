@@ -3,6 +3,8 @@ name: flow-comet-plan
 description: "Use only when explicitly invoked as /flow-comet-plan or routed by the flow-comet entry/runtime to the plan Node; complete Plan for flow-comet. Do not use for ordinary standalone tasks or as the workflow entry."
 ---
 
+<!-- 手写区详细协议见 GUIDANCE.md（可选阅读） -->
+
 # Plan
 
 ## Node Goal

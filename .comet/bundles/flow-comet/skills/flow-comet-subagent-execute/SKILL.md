@@ -3,6 +3,8 @@ name: flow-comet-subagent-execute
 description: "Use only when explicitly invoked as /flow-comet-subagent-execute or routed by the flow-comet entry/runtime to the subagent-execute Node; complete Subagent Execute for flow-comet. Do not use for ordinary standalone tasks or as the workflow entry."
 ---
 
+<!-- 手写区详细协议见 GUIDANCE.md（可选阅读） -->
+
 # Subagent Execute
 
 ## Node Goal

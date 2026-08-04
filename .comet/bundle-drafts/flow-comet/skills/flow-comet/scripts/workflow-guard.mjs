@@ -3,6 +3,7 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
+import { validateStateFields } from './state-schema.mjs';
 
 const command = process.argv[2] ?? 'verify';
 const nodeId = process.argv[3] ?? null;
@@ -1996,6 +1997,8 @@ async function main() {
       if (await fileExists(taskFile)) {
         try {
           state.taskHash = taskSetSignature(await fs.readFile(taskFile, 'utf8'));
+          const bad = validateStateFields(state);
+          if (bad.length) { console.error('BLOCKED: state 字段类型非法: ' + bad[0]); process.exit(1); }
           await writeJson(file, state);
         } catch {}
       }
@@ -2259,6 +2262,8 @@ async function main() {
       // P0-A: verify-fail 自动递增（无需 LLM 主动调用）
       state.verifyFailures = (state.verifyFailures || 0) + 1;
       const file = await statePath(protocol);
+      const bad = validateStateFields(state);
+      if (bad.length) { console.error('BLOCKED: state 字段类型非法: ' + bad[0]); process.exit(1); }
       await writeJson(file, state);
       if (state.verifyFailures >= 4) {
         console.error('BLOCKED: verify 已失败 ' + state.verifyFailures + ' 次，需用户决策（继续修/停止）。');
@@ -2364,6 +2369,8 @@ async function main() {
     state.status = next ? 'running' : 'completed';
     state.history = Array.isArray(state.history) ? state.history : [];
     state.history.push({ event: 'exit-applied', node: node.id, at: new Date().toISOString() });
+    const bad = validateStateFields(state);
+    if (bad.length) { console.error('BLOCKED: state 字段类型非法: ' + bad[0]); process.exit(1); }
     await writeJson(file, state);
     console.log('ALL CHECKS PASSED');
     printNext(protocol, next);
