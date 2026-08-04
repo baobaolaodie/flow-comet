@@ -104,6 +104,16 @@ async function main() {
     } else if (typeof parsed === 'object' && parsed !== null && parsed.commitHash) {
       console.error('HANDOFF ERROR: commitHash 格式非法: ' + String(parsed.commitHash));
     }
+    // C8: Return Contract 渐进校验——缺 greenEvidence/redEvidence（或 command 非字符串）仅 WARN 仍记录，
+    // 不 BLOCK 不拒绝（避免卡死流程）；commitHash 非法格式维持上方现有 HANDOFF ERROR 行为不变
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      if (!parsed.greenEvidence || typeof parsed.greenEvidence !== 'object' || typeof parsed.greenEvidence.command !== 'string') {
+        console.error('HANDOFF WARN: ' + taskId + ' 缺 greenEvidence（未执行 TDD GREEN？）');
+      }
+      if (!parsed.redEvidence || typeof parsed.redEvidence !== 'object' || typeof parsed.redEvidence.command !== 'string') {
+        console.error('HANDOFF WARN: ' + taskId + ' 缺 redEvidence（未执行 TDD RED？）');
+      }
+    }
     state.evidence['subagent-execute'].handoffResult[taskId] = {
       result: parsed, completedAt: new Date().toISOString()
     };
