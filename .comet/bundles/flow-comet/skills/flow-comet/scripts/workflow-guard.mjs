@@ -2,6 +2,7 @@
   import { constants as fsConstants, promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createHash } from 'crypto';
 
 const command = process.argv[2] ?? 'verify';
 const nodeId = process.argv[3] ?? null;
@@ -1821,6 +1822,74 @@ async function isArchivedChange(changeName) {
   return entries.some(e => e === changeName || e.endsWith('-' + changeName));
 }
 
+// C2: 段名校验从模板自动派生——读 <runRoot>/flow-kit/templates/{CHANGE,REQUIREMENT,DESIGN}.md
+// 提取全部 ^## 段名，正则化生成宽松匹配模式；模板目录/文件缺失时 fallback 内置段名
+let templateSectionPatternsCacheRoot = null;
+let templateSectionPatternsCache = null;
+
+const TEMPLATE_FALLBACK_SECTION_PATTERNS = {
+  changeWhy: /^##\s*Why\b/im,
+  requirementUserStory: /^##\s*用户故事/im,
+  requirementAcceptance: /##\s*(验收准则|验收标准|AC|Acceptance Criteria)/i,
+  designDecisionList: /^##\s*\d*\.?\s*决策清单/m,
+};
+
+// 模板段名 → 宽松匹配正则：编号前缀（1. / 0.5）可选 + 段名主体字面匹配 + 尾部括号内容（如 （AC））可选
+function templateSectionPattern(rawName) {
+  const name = String(rawName).trim();
+  const body = name
+    .replace(/[（(][^）)\n]*[）)]\s*$/u, '')   // 去尾部括号内容：Why（为什么做）→ Why
+    .replace(/^\d+(?:\.\d+)?\.?\s*/u, '')       // 去编号前缀：1. 决策清单 → 决策清单
+    .trim();
+  const escaped = escapeRegExp(body || name);
+  return new RegExp(
+    '^##\\s*(?:\\d+(?:\\.\\d+)?\\.?\\s*)?' + escaped + '\\s*(?:[（(][^\\n）)]*[）)])?\\s*$',
+    'im',
+  );
+}
+
+// 读取模板全部段名生成模式列表（模块级缓存，避免每次 exit 重复读文件）；pick 按关键词选段，找不到 → fallback
+async function templateSectionPatterns() {
+  if (templateSectionPatternsCacheRoot === runRoot && templateSectionPatternsCache) {
+    return templateSectionPatternsCache;
+  }
+  const templateDir = path.join(runRoot, 'flow-kit', 'templates');
+  const result = { change: [], requirement: [], design: [] };
+  for (const [key, fileName] of Object.entries({
+    change: 'CHANGE.md',
+    requirement: 'REQUIREMENT.md',
+    design: 'DESIGN.md',
+  })) {
+    const templateFile = path.join(templateDir, fileName);
+    if (await fileExists(templateFile)) {
+      try {
+        const text = await fs.readFile(templateFile, 'utf8');
+        for (const match of text.matchAll(/^##\s+(.+)$/gmu)) {
+          const sectionName = match[1].trim();
+          result[key].push({ name: sectionName, regex: templateSectionPattern(sectionName) });
+        }
+      } catch {}
+    }
+  }
+  result.pick = (key, keywords, fallback) => {
+    for (const section of result[key] ?? []) {
+      if (keywords.some((keyword) => section.name.includes(keyword))) return section.regex;
+    }
+    return fallback;
+  };
+  templateSectionPatternsCache = result;
+  templateSectionPatternsCacheRoot = runRoot;
+  return result;
+}
+
+// C3: TASK.md 任务集签名——提取全部 <task> 块，剥离 status 属性（标记 done 合法），排序防顺序漂移，拼接后 sha256
+function taskSetSignature(taskContent) {
+  const blocks = (String(taskContent).match(/<task[\s\S]*?<\/task>/g) || [])
+    .map((block) => block.replace(/\s*status="[^"]*"/g, ''))
+    .sort();
+  return createHash('sha256').update(blocks.join('\n'), 'utf8').digest('hex');
+}
+
 async function main() {
   const protocol = await readJson(protocolPath);
   if (protocol.schemaVersion !== 1 || !Array.isArray(protocol.nodes)) {
@@ -1898,6 +1967,39 @@ async function main() {
         process.exit(1);
       }
     }
+    // C4: 委托前工件 commit 检查——worktree isolation 子代理看不到未提交工件（WARN 不 BLOCKED）
+    if ((node.id === 'execute' || node.id === 'subagent-execute') && state.activeChange) {
+      const { execFileSync } = await import('child_process');
+      try {
+        execFileSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: runRoot, stdio: 'pipe' });
+        const statusOut = execFileSync(
+          'git',
+          ['status', '--porcelain', '--', path.posix.join('.specs', state.activeChange) + '/'],
+          { cwd: runRoot, stdio: 'pipe', encoding: 'utf8' },
+        );
+        if (String(statusOut).trim() !== '') {
+          console.error('WORKTREE WARN: .specs/' + state.activeChange + '/ 有未提交工件，worktree isolation 子代理将看不到它们——建议先 commit 或 prompt 内联上下文');
+        }
+      } catch {
+        // 非 git 仓库或路径不可查 → 跳过该检查
+      }
+    }
+    // C7: PROGRESS.md 存在警告（清窗恢复产物，R1.6 反重复）
+    if (node.id === 'execute' && state.activeChange) {
+      if (await fileExists(path.join(runRoot, '.specs', state.activeChange, 'PROGRESS.md'))) {
+        console.error('WARNING: PROGRESS.md 存在（清窗恢复产物），先读"已排除方案"段（R1.6 反重复）');
+      }
+    }
+    // C3: enter execute / subagent-execute 记录 TASK.md 任务集签名（exit 时比对，防 execute 期间增删任务/改 action/改边界）
+    if ((node.id === 'execute' || node.id === 'subagent-execute') && state.activeChange) {
+      const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
+      if (await fileExists(taskFile)) {
+        try {
+          state.taskHash = taskSetSignature(await fs.readFile(taskFile, 'utf8'));
+          await writeJson(file, state);
+        } catch {}
+      }
+    }
     // 协调者禁令：execute / subagent-execute 阶段主会话只能委托，禁止直接写源码
     // 例外：direct 模式 execute 是主代理直写（逃生口），不输出协调者禁令
     const entryExecutionMode = state.executionMode ?? 'subagent';
@@ -1932,13 +2034,28 @@ async function main() {
       }
     }
   }
-  // P1-A: open exit 校验 REQUIREMENT 含 AC 段
+  // C3: exit execute / subagent-execute 校验 TASK.md 任务集签名未变（status 标记 done 合法已剥离；增删任务/改 action/改边界 BLOCKED）
+  if ((node.id === 'execute' || node.id === 'subagent-execute') && state.activeChange) {
+    if (typeof state.taskHash === 'string' && state.taskHash.length > 0) {
+      const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
+      if (await fileExists(taskFile)) {
+        try {
+          const currentHash = taskSetSignature(await fs.readFile(taskFile, 'utf8'));
+          if (currentHash !== state.taskHash) {
+            console.error('BLOCKED: TASK.md 任务集被修改（签名不匹配），execute 期间不允许增删任务/改 action/改边界');
+            process.exit(1);
+          }
+        } catch {}
+      }
+    }
+  }
+  // P1-A: open exit 校验 REQUIREMENT 含 AC 段（段名基准从 REQUIREMENT 模板派生，模板缺失 fallback 内置段名）
   if (node.id === 'open' && state.activeChange) {
     const reqFile = path.join(runRoot, '.specs', state.activeChange, 'REQUIREMENT.md');
     try {
       const content = await fs.readFile(reqFile, 'utf8');
-      // 段名以 flow-kit 模板为权威：## 验收准则（AC）；兼容 ## 验收标准 / ## AC / Given 后备
-      if (!/##\s*(验收准则|验收标准|AC|Acceptance Criteria)/i.test(content) && !/Given/i.test(content)) {
+      const acceptance = (await templateSectionPatterns()).pick('requirement', ['验收'], TEMPLATE_FALLBACK_SECTION_PATTERNS.requirementAcceptance);
+      if (!acceptance.test(content) && !/Given/i.test(content)) {
         console.error('BLOCKED: REQUIREMENT.md 缺少验收标准/AC 段');
         process.exit(1);
       }
@@ -1959,11 +2076,15 @@ async function main() {
       } catch {}
     }
   }
-  // C2: open exit 补必填段校验（结构+存在级，不做语义）——CHANGE.md 含 ## Why 段；REQUIREMENT.md 含 ## 用户故事
+  // C2: open exit 补必填段校验（结构+存在级，不做语义）——CHANGE.md 含 Why 段；REQUIREMENT.md 含 用户故事 段
   if (node.id === 'open' && state.activeChange) {
     const changeDir = path.join(runRoot, '.specs', state.activeChange);
-    // 段名以 flow-kit 模板为权威：CHANGE.md 为 "## Why（为什么做）"（express 变体 "## Why"）
-    const required = [['CHANGE.md', /^##\s*Why\b/im], ['REQUIREMENT.md', /^##\s*用户故事/im]];
+    // 段名基准从 flow-kit 模板派生（CHANGE 模板 "## Why（为什么做）"、REQUIREMENT 模板 "## 用户故事"），模板缺失 fallback
+    const tpl = await templateSectionPatterns();
+    const required = [
+      ['CHANGE.md', tpl.pick('change', ['Why', '为什么'], TEMPLATE_FALLBACK_SECTION_PATTERNS.changeWhy)],
+      ['REQUIREMENT.md', tpl.pick('requirement', ['用户故事'], TEMPLATE_FALLBACK_SECTION_PATTERNS.requirementUserStory)],
+    ];
     for (const [file, regex] of required) {
       const p = path.join(changeDir, file);
       if (await fileExists(p)) {
@@ -1977,7 +2098,7 @@ async function main() {
       }
     }
   }
-  // C2: design exit 补必填段校验——DESIGN.md 含 ## 决策清单（模板编号为 "## 1. 决策清单"）
+  // C2: design exit 补必填段校验——DESIGN.md 含 ## 决策清单（段名基准从 DESIGN 模板派生，"## 1. 决策清单" 编号前缀可选）
   if (node.id === 'design' && state.activeChange) {
     const designFile = path.join(runRoot, '.specs', state.activeChange, 'DESIGN.md');
     const designLite = path.join(runRoot, '.specs', state.activeChange, 'DESIGN-lite.md');
@@ -1985,7 +2106,8 @@ async function main() {
     if (target) {
       try {
         const text = await fs.readFile(target, 'utf8');
-        if (!/^##\s*\d*\.?\s*决策清单/m.test(text)) {
+        const decisionList = (await templateSectionPatterns()).pick('design', ['决策清单'], TEMPLATE_FALLBACK_SECTION_PATTERNS.designDecisionList);
+        if (!decisionList.test(text)) {
           console.error('BLOCKED: DESIGN.md 缺必填段 ## 决策清单');
           process.exit(1);
         }
