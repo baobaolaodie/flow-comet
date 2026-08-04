@@ -23,12 +23,12 @@ flow-comet 解决的问题：flow-kit 的 9 阶段开发流程（CHANGE → REQU
 - **executionMode**：`subagent`（默认，统一委托）/ `direct`（受控逃生口，用户显式切换，`directOverride` 记录确认；切回 subagent 时自动清除）
 - **并行执行**：`subagent-execute` 按 wave 委托并行任务，依赖感知路由 + write_files 冲突检测
 - **express 路径**：低风险 change 自动降级 review 与 TEST/UAT
-- **guard 自测套件**：`scripts/guard-self-test.mjs`（17 场景覆盖全部 entry/exit 校验正反例），每批次改动后回归
+- **guard 自测套件**：`scripts/guard-self-test.mjs`（17 场景覆盖全部 entry/exit 校验正反例），每次改动后回归
 - **横向命令**：`flow-comet-evolve`（架构沉淀）+ `flow-comet-health`（巡检）
 
-### 硬约束层（吸收 Comet 机制）
+### 硬约束层
 
-基于两轮真实项目全流程 dogfood 验证（greenfield + brownfield）和 [Comet × flow-kit 扬弃分析](docs/flow-comet-sublation-spec.md)补强：
+基于两轮真实项目全流程验证（greenfield + brownfield）沉淀的机制化约束：
 
 | 类别 | 机制 | 校验点 |
 |------|------|--------|
@@ -102,8 +102,6 @@ comet publish distribute flow-comet --platform claude --scope project --project 
 
 | 文档 | 说明 |
 |------|------|
-| [扬弃规格](docs/flow-comet-sublation-spec.md) | Comet × flow-kit 七原则架构分析 + 改进决策 |
-| [执行质量规格](docs/flow-comet-execution-quality-spec.md) | 执行引擎子代理化 + 模板强制 + 内容级校验设计原则 |
 | [产物示例](docs/examples/schedule-venue-filter/) | 全流程 12 个工件参考 |
 | [验证记录](VERIFICATION.md) | 分发验证 |
 
