@@ -17,8 +17,8 @@ Responsibility: CHANGE 反问 + REQUIREMENT 需求分析。生成 CHANGE.md 和 
 
 | 文件 | 必填段 |
 |------|--------|
-| CHANGE.md | `## 变更目标` / `## 变更范围` / `## 影响面` / `## 风险` |
-| REQUIREMENT.md | `## 用户故事` / `## 验收标准` / `## 范围切分` |
+| CHANGE.md | `## Why（为什么做）` / `## 变更范围` / `## 影响面` / `## 风险` |
+| REQUIREMENT.md | `## 用户故事` / `## 验收准则（AC）` / `## 范围切分` |
 
 **缺失任一必填段 = 节点未完成**，exit guard 校验（见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B）。
 
