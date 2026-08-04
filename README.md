@@ -57,38 +57,69 @@ flow-comet 解决的问题：flow-kit 的 9 阶段开发流程（CHANGE → REQU
 ### Requirements
 
 - [Claude Code](https://claude.ai/code)（已安装并认证）
-- [Comet CLI](https://github.com/rpamis/comet)（`npm install -g @rpamis/comet`）
-
-### 1. 在目标项目安装 flow-kit
+- 目标项目已安装 [flow-kit](https://github.com/rihebty/flow-kit)：
 
 ```bash
 cd <目标项目>
 git clone https://github.com/rihebty/flow-kit.git flow-kit
 ```
 
-### 2. 分发 flow-comet 到目标项目
+### 方案 A · 直接复制安装（推荐，第三方用户）
+
+从本仓库复制 skill 与配置到目标项目（无 Comet CLI 依赖）：
 
 ```bash
 cd <本仓库>
+SKILLS=.comet/bundle-drafts/flow-comet/skills
+TARGET=<目标项目绝对路径>
+
+# 1. 复制 18 个 skill（含 GUIDANCE 与脚本）
+cp -r $SKILLS/flow-comet* "$TARGET/.claude/skills/"
+
+# 2. 复制编排规则
+cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.claude/rules/"
+
+# 3. 注册 hook（拦截 Write/Edit，按 phase 白名单控制写入）
+#    在目标项目 .claude/settings.local.json 的 "hooks" 中添加：
+#    { "matcher": "Write|Edit", "hooks": [{ "type": "command",
+#      "command": "node .claude/skills/flow-comet/scripts/comet-hook-guard.mjs" }] }
+
+# 4. 运行状态 .comet/flow-comet-state.json 由首个 /flow-comet 调用自动创建
+```
+
+验证安装：`node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id>` 应输出 `NODE: open`。
+
+### 方案 B · comet bundle 分发（作者流程，源工作区）
+
+> **注意**：comet 的分发模型是**从有 bundle-authoring 状态的项目分发**（即本仓库自身），不是"分发到任意目标项目"——对全新项目执行 distribute 会因缺少 `.comet/bundle-authoring/flow-comet.json` 报 ENOENT。
+
+```bash
+cd <本仓库>   # 必须在源工作区（有 .comet/bundle-authoring/ 状态）
 comet bundle compile flow-comet --platform claude
+comet eval flow-comet/comet/eval.yaml --project .   # 需 ANTHROPIC_API_KEY
+comet publish review flow-comet --platform claude
+comet publish approve flow-comet --reviewer <reviewer>
+comet publish run flow-comet --platform claude
 comet publish distribute flow-comet --platform claude --scope project \
-  --project <目标项目绝对路径> --confirm-executables
+  --project . --confirm-executables
 ```
 
 分发前可 `comet publish distribute flow-comet --preview` 检查将写入的文件。
 
-### 3. 修改后的发布流程
+### 作者修改后的完整发布流程
+
+> **eval 是硬前置**：修改 `.comet/bundle-drafts/flow-comet/skills/` 会改变 bundle hash → 旧 eval/review 证据失效 → approve/run 拒绝，必须先重新 eval。
 
 ```bash
-# 修改 .comet/bundle-drafts/flow-comet/skills/ 后：
 comet bundle compile flow-comet --platform claude
+comet eval flow-comet/comet/eval.yaml --project .          # 重新生成当前 hash 的 eval 证据
 comet publish review flow-comet --platform claude
 comet publish approve flow-comet --reviewer <reviewer>
 comet publish run flow-comet --platform claude
-comet publish distribute flow-comet --platform claude --scope project --project <目标> --confirm-executables
+comet publish distribute flow-comet --platform claude --scope project --project . --confirm-executables
 ```
 
-改动 skill/脚本会改变 bundle hash，必须重新 eval + publish + distribute。
+> 无 `ANTHROPIC_API_KEY` 时 eval 无法运行——改用方案 A（直接复制）保持安装副本同步，并在 bundle-authoring 状态中记录 hash 漂移（`drift-conflict`），下次有 key 时 reconcile。
 
 ## Usage
 
@@ -130,7 +161,7 @@ comet publish distribute flow-comet --platform claude --scope project --project 
 ## Limitations
 
 - **仅 Claude Code 平台**：非 Claude Code 环境不保证可用
-- **comet eval 需 API key**：容器内 eval 需 `ANTHROPIC_API_KEY`；无 key 时用手动桥接（`comet bundle eval-record`，详见 VERIFICATION.md）
+- **comet eval 需 API key**：eval（`comet eval <skill>/comet/eval.yaml --project .`）需 `ANTHROPIC_API_KEY`；无 key 时无法生成 eval 证据，approve/run/distribute 会拒绝——改用方案 A（直接复制安装）保持副本同步
 - **Return Contract 过渡规则**：旧格式纯字符串 handoff 豁免为 WARN；redEvidence/greenEvidence 缺失渐进 WARN（不 BLOCK），避免已有 change 重入被卡死
 - **与 comet classic 不互通**：workflow-kernel 状态独立于 classic（设计决策，非缺陷）
 - **无活跃 change 时 hook 放行**：`.comet/flow-comet-state.json` 不存在时 hook guard 降级放行所有写入（设计决策：无 workflow 时不限制文件操作）
