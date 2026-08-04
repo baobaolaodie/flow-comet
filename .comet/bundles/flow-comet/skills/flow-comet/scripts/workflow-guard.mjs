@@ -1958,23 +1958,25 @@ async function main() {
       } catch {}
     }
   }
-  // C2: open exit 补必填段校验（结构+存在级，不做语义）——CHANGE.md 含 ## 变更目标；REQUIREMENT.md 含 ## 用户故事
+  // C2: open exit 补必填段校验（结构+存在级，不做语义）——CHANGE.md 含 ## Why 段；REQUIREMENT.md 含 ## 用户故事
   if (node.id === 'open' && state.activeChange) {
     const changeDir = path.join(runRoot, '.specs', state.activeChange);
-    for (const [file, section] of [['CHANGE.md', '## 变更目标'], ['REQUIREMENT.md', '## 用户故事']]) {
+    // 段名以 flow-kit 模板为权威：CHANGE.md 为 "## Why（为什么做）"（express 变体 "## Why"）
+    const required = [['CHANGE.md', /^##\s*Why\b/im], ['REQUIREMENT.md', /^##\s*用户故事/im]];
+    for (const [file, regex] of required) {
       const p = path.join(changeDir, file);
       if (await fileExists(p)) {
         try {
           const text = await fs.readFile(p, 'utf8');
-          if (!text.includes(section)) {
-            console.error('BLOCKED: ' + file + ' 缺必填段 ' + section);
+          if (!regex.test(text)) {
+            console.error('BLOCKED: ' + file + ' 缺必填段 ' + regex);
             process.exit(1);
           }
         } catch {}
       }
     }
   }
-  // C2: design exit 补必填段校验——DESIGN.md 含 ## 决策清单
+  // C2: design exit 补必填段校验——DESIGN.md 含 ## 决策清单（模板编号为 "## 1. 决策清单"）
   if (node.id === 'design' && state.activeChange) {
     const designFile = path.join(runRoot, '.specs', state.activeChange, 'DESIGN.md');
     const designLite = path.join(runRoot, '.specs', state.activeChange, 'DESIGN-lite.md');
@@ -1982,7 +1984,7 @@ async function main() {
     if (target) {
       try {
         const text = await fs.readFile(target, 'utf8');
-        if (!text.includes('## 决策清单')) {
+        if (!/^##\s*\d*\.?\s*决策清单/m.test(text)) {
           console.error('BLOCKED: DESIGN.md 缺必填段 ## 决策清单');
           process.exit(1);
         }
