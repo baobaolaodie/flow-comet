@@ -89,6 +89,33 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
 
 验证安装：`node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id>` 应输出 `NODE: open`。
 
+### 安装后的项目集成（对 Comet 注入内容的定制）
+
+flow-comet 会**定制 `comet init` 注入的 `<comet-ambient-resume>` 块**（Comet 标准恢复协议）为 flow-comet 优先路由——否则恢复流程只会跑 Comet 标准探针，不会路由到 `/flow-comet`：
+
+1. 若目标项目已运行过 `comet init`（CLAUDE.md 存在该块），将其内容替换为：
+
+```markdown
+### 优先级 1：flow-comet 路由（项目主工作流）
+如果 `.claude/skills/flow-comet/SKILL.md` 存在（flow-comet 已安装）：
+1. 检查 `.comet/current-change.json` 或运行 `comet state get <change> phase` 确认是否有活跃 change
+2. 如有活跃 change 且 `phase=build`，直接进入 `/flow-comet`（不要运行 resume probe）
+3. 如有活跃 change 但 phase 不是 build，按 flow-comet 的节点路由表决定入口
+4. 如无活跃 change，用户明确要开发时进入 `/flow-comet`（它会路由到 open 阶段）
+
+### 优先级 2：Comet 标准探针（flow-comet 不适用时）
+仅当 flow-comet 未安装或用户明确调用 `/comet-classic` 时，运行标准探针：
+`comet resume-probe . --stdin --json`
+```
+
+2. **注意**：块头保留 `Managed by Comet` 标记——重跑 `comet init`/`comet update` 会把该块**覆盖回标准内容**，需重新应用本定制。
+
+3. 若目标项目未运行过 `comet init`，本定制可选（flow-comet 不依赖 resume-probe，有自己的 `.comet/flow-comet-state.json` 状态机 + determineNode 文件推导恢复）。
+
+**规则文件**（安装到 `.claude/rules/`）：
+- `flow-comet-orchestration.md` — flow-comet bundle 自带（自动安装，标识 Entry Skill 与编排结构）
+- `comet-workflow-guard.md` — Comet 生态规则（`comet init` 安装，Native/Classic 双 workflow 防串扰）
+
 ### 方案 B · comet bundle 分发（作者流程，源工作区）
 
 > **注意**：comet 的分发模型是**从有 bundle-authoring 状态的项目分发**（即本仓库自身），不是"分发到任意目标项目"——对全新项目执行 distribute 会因缺少 `.comet/bundle-authoring/flow-comet.json` 报 ENOENT。
