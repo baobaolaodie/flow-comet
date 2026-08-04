@@ -2080,8 +2080,11 @@ async function main() {
         if (outside) console.error('WARN: LESSONS.md 有条目在条目区外');
       }
       const nums = headings.map(h => parseInt(h[1], 10));
+      // 分段检测：按 ## 标题分段，仅同段内比较编号递增（多段 LESSONS 如「活跃条目/已解决条目」编号体系可独立）
+      const sectionStarts = [...content.matchAll(/^##\s+.*$/gm)].map(m => m.index);
       for (let i = 1; i < nums.length; i++) {
-        if (nums[i] <= nums[i - 1]) {
+        const sameSection = !sectionStarts.some(s => s > headings[i - 1].index && s < headings[i].index);
+        if (sameSection && nums[i] <= nums[i - 1]) {
           console.error('WARN: LESSONS.md 条目编号乱序（L-' + String(nums[i]).padStart(3, '0') + ' 应按序插入条目区）');
           break;
         }
