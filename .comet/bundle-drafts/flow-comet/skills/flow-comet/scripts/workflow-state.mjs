@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { execFileSync } from 'child_process';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -119,9 +120,61 @@ async function readState() {
     // 兼容旧 state：无 executionMode / directOverride 时补默认（subagent 默认，direct 是显式逃生口）
     if (st.executionMode === undefined) st.executionMode = 'subagent';
     if (st.directOverride === undefined) st.directOverride = false;
+    // E1: branchMode 默认 true（git 仓库时 init 会判定为 true；非 git 仓库 init 纠正为 false；
+    // status/next 显示以实时 git 检测为准——非 git 仓库显示 BRANCH: none）
+    if (st.branchMode === undefined) st.branchMode = true;
+    if (st.enablePrReview === undefined) st.enablePrReview = false;
     return st;
   }
-  return { activeChange: null, currentNode: null, completedNodes: [], evidence: {}, verifyFailures: 0, executionMode: 'subagent', directOverride: false };
+  return { activeChange: null, currentNode: null, completedNodes: [], evidence: {}, verifyFailures: 0, executionMode: 'subagent', directOverride: false, branchMode: true, enablePrReview: false };
+}
+
+// ---------- E1 · 分支模式辅助（git 仓库检测 + 分支名） ----------
+
+// git 仓库检测：`git rev-parse --is-inside-work-tree` 成功且输出 true
+function isInsideWorkTree() {
+  try {
+    const out = execFileSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: runRoot, stdio: 'pipe', encoding: 'utf8' });
+    return String(out).trim() === 'true';
+  } catch {
+    return false;
+  }
+}
+
+// 当前分支名；非 git 仓库 / detached HEAD 失败 → null
+function gitBranchName() {
+  try {
+    const out = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: runRoot, stdio: 'pipe', encoding: 'utf8' });
+    return String(out).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+// 分支是否存在（本地分支）
+function branchExists(name) {
+  try {
+    const out = execFileSync('git', ['branch', '--format', '%(refname:short)'], { cwd: runRoot, stdio: 'pipe', encoding: 'utf8' });
+    return String(out).split('\n').map(s => s.trim()).includes(name);
+  } catch {
+    return false;
+  }
+}
+
+// E1: status/next 追加分支信息——BRANCH: <当前分支> | 一致性: ok|mismatch
+// mismatch（activeChange 存在但当前分支不是 change/<activeChange>）→ WARN 不 BLOCK；非 git 仓库 → BRANCH: none
+function printBranchLine(activeChange) {
+  const branch = gitBranchName();
+  if (branch === null) {
+    console.log('BRANCH: none');
+    return;
+  }
+  const expected = 'change/' + activeChange;
+  const consistent = branch === expected;
+  console.log('BRANCH: ' + branch + ' | 一致性: ' + (consistent ? 'ok' : 'mismatch'));
+  if (!consistent) {
+    console.error('WARN: 分支与 activeChange 不一致——先 git checkout ' + expected + ' 再继续');
+  }
 }
 
 // C6: writeState 写入前校验已知字段类型（fail-closed：非法 → BLOCKED 拒绝写入，不修复不猜测）
@@ -168,6 +221,8 @@ async function main() {
   if (command === 'init') {
     const changeName = process.argv[3];
     if (!changeName) throw new Error('init requires a change name.');
+    // E1: branchMode 自动判定——git 仓库（cwd=runRoot）→ true；非 git 仓库 → false
+    const branchMode = isInsideWorkTree();
     const state = {
       activeChange: changeName,
       currentNode: 'open',
@@ -176,10 +231,26 @@ async function main() {
       verifyFailures: 0,
       executionMode: 'subagent',
       directOverride: false,
+      branchMode,
+      enablePrReview: false,
       createdAt: new Date().toISOString()
     };
     await writeState(state);
+    // E1: 分支创建——branchMode && 当前分支 ≠ change/<id> && 分支不存在 → git checkout -b change/<id>
+    // 失败 → WARN 不 BLOCK，继续纯文件模式（向后兼容）
+    const expectedBranch = 'change/' + changeName;
+    if (branchMode) {
+      const currentBranch = gitBranchName();
+      if (currentBranch !== null && currentBranch !== expectedBranch && !branchExists(expectedBranch)) {
+        try {
+          execFileSync('git', ['checkout', '-b', expectedBranch], { cwd: runRoot, stdio: 'pipe' });
+        } catch {
+          console.error('WARN: 创建分支 ' + expectedBranch + ' 失败——继续纯文件模式（分支功能降级；可稍后手动 git checkout -b ' + expectedBranch + '）');
+        }
+      }
+    }
     console.log('Initialized: ' + changeName);
+    console.log('BRANCH: ' + (branchMode ? expectedBranch : 'none（非 git 仓库）'));
     printNext(protocol, 'open');
     return;
   }
@@ -200,9 +271,12 @@ async function main() {
       completedNodes: state.completedNodes,
       executionMode: state.executionMode ?? 'subagent',
       directOverride: state.directOverride ?? false,
+      branchMode: isInsideWorkTree(),
+      enablePrReview: state.enablePrReview ?? false,
       artifactRoot: '.specs/' + changeName,
       coordinatorMode: ['execute', 'subagent-execute'].includes(detectedNode)
     }, null, 2));
+    printBranchLine(changeName);
     return;
   }
 
@@ -221,6 +295,7 @@ async function main() {
       await writeState(state);
     }
     printNext(protocol, detectedNode, state.executionMode ?? 'subagent');
+    printBranchLine(changeName);
     return;
   }
 
@@ -263,6 +338,32 @@ async function main() {
     const nextNode = changeName ? await determineNode(changeName, protocol, state.completedNodes) : null;
     printNext(protocol, nextNode ?? null, state.executionMode ?? 'subagent');
     return;
+  }
+
+  if (command === 'config') {
+    // E1: 配置命令——config set <key> <value>；branchMode 只读（init 自动判定），enablePrReview 手动开关
+    const sub = process.argv[3];
+    const key = process.argv[4];
+    const value = process.argv[5];
+    if (sub !== 'set') throw new Error('config 仅支持 set 子命令。用法: workflow-state.mjs config set <key> <value>');
+    if (!key || value === undefined) throw new Error('config set 需要 key 和 value。用法: workflow-state.mjs config set <key> <value>');
+    if (key === 'branchMode') {
+      console.error('BLOCKED: branchMode 由 init 自动判定，不可手动设置');
+      process.exit(1);
+    }
+    if (key === 'enablePrReview') {
+      if (value !== 'true' && value !== 'false') {
+        console.error('BLOCKED: config set 值非法（enablePrReview 必须为 true 或 false）: ' + value);
+        process.exit(1);
+      }
+      const state = await readState();
+      state.enablePrReview = value === 'true';
+      await writeState(state);
+      console.log('CONFIG: enablePrReview = ' + state.enablePrReview);
+      return;
+    }
+    console.error('BLOCKED: 未知配置键: ' + key + '（支持: enablePrReview；branchMode 由 init 自动判定）');
+    process.exit(1);
   }
 
   if (command === 'execution-mode') {
@@ -312,7 +413,7 @@ async function main() {
     return;
   }
 
-  throw new Error('Unknown command: ' + command + '. Use: init, status, next, select, record, verify-fail, advance, execution-mode');
+  throw new Error('Unknown command: ' + command + '. Use: init, status, next, select, record, verify-fail, advance, execution-mode, config');
 }
 
 main().catch(error => {

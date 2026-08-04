@@ -35,7 +35,7 @@ This node finalizes a completed change by extracting reusable lessons from the d
 3. **Add qualifying lessons to LESSONS.md**: For each nominated lesson:
    - Assign next `L-NNN` number (continuing from existing).
    - Fill required fields: label, keywords, applicable tech stack, status (active).
-   - Save to `.specs/LESSONS.md`.
+   - Save to `.specs/LESSONS.md` — 新条目插入 `## 条目区` 内**按 L-NNN 编号顺序**（继续现有编号），**禁止文件尾追加**。
    - **Do NOT archive LESSONS.md** — it is a project-level permanent file that accumulates across changes.
 
 4. **Check existing lessons for superseded/deprecated**: Scan existing active lessons in `.specs/LESSONS.md`. If this change's lessons or outcomes supersede or deprecate existing entries, update their status accordingly.
@@ -45,11 +45,10 @@ This node finalizes a completed change by extracting reusable lessons from the d
    - Date format: YYYY-MM-DD of the archive date.
    - Verify the move completed successfully (source no longer exists, destination has all files).
 
-6. **Update CHANGELOG.md**: Append one line to `.specs/CHANGELOG.md`:
+6. **Update CHANGELOG.md**: 在 `.specs/CHANGELOG.md` 表格**顶部**按日期倒序插入一行（倒序约定：新条目永远在最新日期行之上；文件不存在则从模板创建）:
    - Format: `| YYYY-MM-DD | <change-id> | one-line summary | PR link | new L-NNN entries |`
-   - If CHANGELOG.md does not exist, create it from template.
 
-7. **Update STATE.md**: Clear the active change field in the repository root `STATE.md`.
+7. **Update STATE.md**: Clear the active change field in the repository root `STATE.md`; 决策日志新条目**顶部**插入（倒序约定，**禁止文件尾追加**）。
 
 8. **Notify user of architecture sedimentation**: Check DESIGN.md section 9 for sedimentation suggestions. If N > 0 suggestions exist, tell user:
    ```
@@ -68,6 +67,21 @@ This node finalizes a completed change by extracting reusable lessons from the d
 2. `git diff --cached --stat` 检查后，单一 commit：`chore: archive <change-id>`
 3. 按用户确认的交付方式 push / 建 PR（如用 git 流水线）
 4. 归档操作（移动文件）必须用户确认后才执行（不可逆）
+
+### 分支收尾（branchMode=true 时，批次 E）
+
+分支模式下（`branchMode=true`，git 仓库 + init 已建 `change/<id>` 分支）在完成上述归档提交后执行收尾：
+
+1. 确认当前分支 = `change/<id>`（`git branch --show-current`；entry archive 已校验，异常先切回）
+2. `git checkout main && git merge change/<id>`——冲突时**提示用户处理，禁止自动解决冲突**
+3. `git branch -d change/<id>` 删除已合并分支
+4. `.specs/archive/` 归档照旧——分支合并是收尾动作，不是新节点
+
+**`enablePrReview=true` 时**（用户已开启 PR 审查）：**先推送分支 + 创建 PR，PR approve 后再走合并**——
+
+1. `git push -u origin change/<id>` 推送分支
+2. 创建 PR：`gh pr create` 或提示用户手动在 GitHub 创建
+3. PR approve 后回到第 2 步的合并流程（`git checkout main && git merge change/<id>`）
 
 The full archive protocol and templates are in:
 - `flow-kit/prompts/7-integration.md` (INTEGRATION phase, archive + LESSONS sections)

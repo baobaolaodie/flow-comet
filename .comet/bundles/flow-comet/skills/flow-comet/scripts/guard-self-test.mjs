@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · workflow-guard.mjs 自测套件（17 场景）
+// C1 · workflow-guard.mjs 自测套件（23 场景：17 基础 + 批次 E 6 个分支/追加位置检测场景）
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -7,7 +7,7 @@
 // （COMET_RUN_ROOT=<临时目录>）→ 断言退出码与输出关键词。场景跑完 rmSync 清理。
 //
 // 运行: node scripts/guard-self-test.mjs
-// 全过 → exit 0，输出 ALL 17 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
+// 全过 → exit 0，输出 ALL 23 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
 //
 // 仅 node 内置模块（child_process/fs/os/path）；无网络；不依赖 flow-kit 模板目录
 // 存在（fallback 场景用内置段名；S1/S4 复制模板文件进临时目录验证 C2 模板派生）。
@@ -416,6 +416,100 @@ const SCENARIOS = [
       const res = runGuard(['entry', 'execute'], dir);
       assertExit(res, 0);
       assertOut(res, 'PROGRESS.md 存在');
+    },
+  },
+
+  // ---------- 批次 E 场景（S18~S23：分支校验 + 追加位置检测） ----------
+
+  // 18: entry archive 分支校验 BLOCKED（branchMode=true + activeChange + 当前分支非 change/<id>）
+  // 注意：需初始 commit——unborn HEAD 下 git rev-parse --abbrev-ref HEAD 失败（按规格"失败跳过"不触发校验）
+  {
+    name: '18 entry archive BLOCKED：分支不是 change/<id>（branchMode）',
+    run: (dir) => {
+      execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--allow-empty', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
+      const st = baseState('archive');
+      st.branchMode = true;
+      writeState(dir, st);
+      const res = runGuard(['entry', 'archive'], dir);
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, '归档必须在 change/' + CHANGE_ID + ' 分支上进行');
+    },
+  },
+
+  // 19: entry archive 通过（当前分支 change/<id>）
+  {
+    name: '19 entry archive 通过：当前分支 change/<id>',
+    run: (dir) => {
+      execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--allow-empty', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
+      execFileSync('git', ['checkout', '-b', 'change/' + CHANGE_ID], { cwd: dir, stdio: 'ignore' });
+      const st = baseState('archive');
+      st.branchMode = true;
+      writeState(dir, st);
+      const res = runGuard(['entry', 'archive'], dir);
+      assertExit(res, 0);
+      assertOut(res, 'ENTRY OK: archive');
+    },
+  },
+
+  // 20: exit open——CONTEXT.md 孤立追加段 → WARN 不 BLOCK
+  {
+    name: '20 exit open WARN：CONTEXT.md 孤立追加段',
+    run: (dir) => {
+      const st = baseState('open');
+      st.evidence.open = { summary: 'intake complete' };
+      writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\n## 验收准则（AC）\n');
+      writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n\n## 术语（test-change 追加）\n\n某术语\n');
+      const res = runGuard(['exit', 'open'], dir);
+      assertExit(res, 0);
+      assertOut(res, 'WARN: CONTEXT.md 检测到孤立追加段');
+    },
+  },
+
+  // 21: exit verify——LESSONS.md 条目编号乱序 → WARN 不 BLOCK
+  {
+    name: '21 exit verify WARN：LESSONS.md 编号乱序',
+    run: (dir) => {
+      const st = baseState('verify');
+      st.evidence.verify = { summary: 'verified' };
+      writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```bash\nnode -e "1"\n```\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/UAT.md', '# UAT\n\n通过\n');
+      writeFile(dir, '.specs/LESSONS.md', '# LESSONS\n\n## 条目区\n\n### L-002: b\n### L-001: a\n');
+      const res = runGuard(['exit', 'verify'], dir);
+      assertExit(res, 0);
+      assertOut(res, 'WARN: LESSONS.md 条目编号乱序');
+    },
+  },
+
+  // 22: exit archive——CHANGELOG.md 表格日期非倒序 → WARN 不 BLOCK
+  {
+    name: '22 exit archive WARN：CHANGELOG.md 表格日期非倒序',
+    run: (dir) => {
+      const st = baseState('archive');
+      st.evidence.archive = { summary: 'archived' };
+      writeState(dir, st);
+      writeFile(dir, '.specs/archive/foo-' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n');
+      writeFile(dir, '.specs/CHANGELOG.md', '# CHANGELOG\n\n| 日期 | 说明 |\n|------|------|\n| 2026-08-03 | a |\n| 2026-08-04 | b |\n');
+      const res = runGuard(['exit', 'archive'], dir);
+      assertExit(res, 0);
+      assertOut(res, 'WARN: CHANGELOG.md 表格日期非倒序');
+    },
+  },
+
+  // 23: 旧 state 兼容（无 branchMode 字段 + 无分支）entry archive → exit 0（不触发分支校验）
+  {
+    name: '23 旧 state 兼容：无 branchMode 无分支 entry archive',
+    run: (dir) => {
+      const st = baseState('archive'); // 无 branchMode 字段（旧 state 形状）
+      writeState(dir, st);
+      const res = runGuard(['entry', 'archive'], dir);
+      assertExit(res, 0);
+      assertOut(res, 'ENTRY OK: archive');
     },
   },
 ];

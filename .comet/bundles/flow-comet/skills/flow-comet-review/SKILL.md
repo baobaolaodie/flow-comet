@@ -86,7 +86,7 @@ This node performs a structured multi-round review of the implemented change, ch
    - Major (should fix: design issues, significant regression)
    - Minor (optional: naming, style, small refactor)
 
-8. **Generate fix tasks**: For all Critical and decided-to-fix Major findings, append to TASK.md as `T-FIX-NN` with full 7 fields, then trigger return to execute node.
+8. **Generate fix tasks**: For all Critical and decided-to-fix Major findings, append to `.specs/<change-id>/TASK.md` as `T-FIX-NN` with full 7 fields — 追加到 TASK.md 的 `## Fix 任务` 段内（**禁止文件尾追加**）, then trigger return to execute node.
 
 The full review protocol, templates, and checklists are in:
 - `flow-kit/prompts/6-review.md` (REVIEW phase)

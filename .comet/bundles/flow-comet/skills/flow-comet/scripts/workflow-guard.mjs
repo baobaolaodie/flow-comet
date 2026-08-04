@@ -1960,6 +1960,20 @@ async function main() {
       console.error('BLOCKED: current Node is ' + String(current) + ', cannot enter ' + node.id + '.');
       process.exit(1);
     }
+    // E2: entry archive 分支校验（新模式 branchMode=true）——归档必须在 change/<activeChange> 分支上进行
+    // 旧模式（无 branchMode 字段 / 非 git 仓库 / git 不可用）跳过，向后兼容
+    if (node.id === 'archive' && state.branchMode === true && state.activeChange) {
+      const { execFileSync } = await import('child_process');
+      try {
+        const branch = String(execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: runRoot, stdio: 'pipe', encoding: 'utf8' })).trim();
+        if (branch !== 'change/' + state.activeChange) {
+          console.error('BLOCKED: 归档必须在 change/' + state.activeChange + ' 分支上进行（当前: ' + branch + '）');
+          process.exit(1);
+        }
+      } catch {
+        // git 不可用 → 跳过分支校验（旧模式兼容）
+      }
+    }
     // P2: 并行冲突检测——subagent-execute 委托前校验 wave 内 parallel 任务 write_files 无交集
     if (node.id === 'subagent-execute' && state.activeChange) {
       const conflicts = await findParallelWriteConflicts(path.join(runRoot, '.specs', state.activeChange));
@@ -2023,6 +2037,80 @@ async function main() {
   if (state.currentNode !== node.id) {
     console.error('BLOCKED: currentNode is ' + String(state.currentNode) + ', cannot exit ' + node.id + '.');
     process.exit(1);
+  }
+  // E2: exit archive 分支合并检查（WARN 不 BLOCK）——分支未合并到 main 允许"归档先行、合并后补"
+  if (node.id === 'archive' && state.branchMode === true && state.activeChange) {
+    const { execFileSync } = await import('child_process');
+    try {
+      const branch = String(execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: runRoot, stdio: 'pipe', encoding: 'utf8' })).trim();
+      const mergedOut = String(execFileSync('git', ['branch', '--merged', 'main'], { cwd: runRoot, stdio: 'pipe', encoding: 'utf8' }));
+      const mergedBranches = mergedOut.split('\n').map(l => l.trim().replace(/^\*\s*/, ''));
+      if (!mergedBranches.includes(branch)) {
+        console.error('WARN: 分支 change/' + state.activeChange + ' 未合并到 main——归档后请完成 merge + 删除分支');
+      }
+    } catch {
+      // git 不可用 / main 不存在 → 跳过合并检查
+    }
+  }
+  // E7: 追加位置结构检测（全部 WARN 不 BLOCK）——防 CONTEXT/LESSONS/STATE/CHANGELOG 文件尾追加破坏插入位置纪律
+  if (node.id === 'open' && state.activeChange) {
+    const contextFile = path.join(runRoot, '.specs', 'CONTEXT.md');
+    try {
+      const content = await fs.readFile(contextFile, 'utf8');
+      const m = content.match(/^## (术语|已锁决策|决策|术语表)[（(][^\n]*(?:追加|update)[^\n]*$/im);
+      if (m) {
+        console.error('WARN: CONTEXT.md 检测到孤立追加段（术语/决策应插入既有结构段）：' + m[0].replace(/^##\s*/, '').trim());
+      }
+    } catch {}
+  }
+  if ((node.id === 'verify' || node.id === 'archive') && state.activeChange) {
+    const lessonsFile = path.join(runRoot, '.specs', 'LESSONS.md');
+    try {
+      const content = await fs.readFile(lessonsFile, 'utf8');
+      // 条目区锚点兼容：## 条目区（模板）/ ## 活跃条目 + ## 已解决条目（赛事系统实际结构）——取最早条目段
+      const zoneIndex = (() => {
+        const hits = ['条目区', '活跃条目', '已解决条目']
+          .map(s => content.search(new RegExp('^##\\s*' + s + '\\s*$', 'm')))
+          .filter(i => i !== -1);
+        return hits.length ? Math.min(...hits) : -1;
+      })();
+      const headings = [...content.matchAll(/^###\s*L-(\d+)/gm)];
+      if (zoneIndex !== -1) {
+        const outside = headings.some(h => h.index < zoneIndex);
+        if (outside) console.error('WARN: LESSONS.md 有条目在条目区外');
+      }
+      const nums = headings.map(h => parseInt(h[1], 10));
+      for (let i = 1; i < nums.length; i++) {
+        if (nums[i] <= nums[i - 1]) {
+          console.error('WARN: LESSONS.md 条目编号乱序（L-' + String(nums[i]).padStart(3, '0') + ' 应按序插入条目区）');
+          break;
+        }
+      }
+    } catch {}
+  }
+  if (node.id === 'archive') {
+    const stateMd = path.join(runRoot, 'STATE.md');
+    try {
+      const content = await fs.readFile(stateMd, 'utf8');
+      const dates = [...content.matchAll(/^- `?\[(\d{4}-\d{2}-\d{2})\]/gm)].map(m => m[1]);
+      for (let i = 1; i < dates.length; i++) {
+        if (dates[i] > dates[i - 1]) {
+          console.error('WARN: STATE.md 决策日志非倒序（新决策应插入顶部）');
+          break;
+        }
+      }
+    } catch {}
+    const changelogFile = path.join(runRoot, '.specs', 'CHANGELOG.md');
+    try {
+      const content = await fs.readFile(changelogFile, 'utf8');
+      const dates = [...content.matchAll(/^\| (\d{4}-\d{2}-\d{2}) \|/gm)].map(m => m[1]);
+      for (let i = 1; i < dates.length; i++) {
+        if (dates[i] > dates[i - 1]) {
+          console.error('WARN: CHANGELOG.md 表格日期非倒序（新条目应插入表格顶部）');
+          break;
+        }
+      }
+    } catch {}
   }
   // W1-A: 每个节点合法 exit 必须满足前置 evidence（对应 flowkit.*.v1 的 evidence）
   // 语义与 missingRequiredSchemaEvidence 一致：summary 视同满足（record 命令默认只写 summary）
