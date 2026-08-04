@@ -1,56 +1,196 @@
 # flow-comet
 
-**flow-kit 9 阶段工作流的 Comet `workflow-kernel` 实现** —— 面向 Claude Code 平台的开发工作流框架。
+**flow-kit 9 阶段开发工作流的自动化执行引擎** —— 面向 Claude Code 平台的 workflow-kernel 实现。
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## About
-
-flow-comet 解决的问题：flow-kit 的 9 阶段开发流程（CHANGE → REQUIREMENT → DESIGN → TASK → DEV → TEST → REVIEW → INTEGRATION → ARCHIVE）依赖手动维护状态和人工纪律。flow-comet 用 Comet 的 workflow-kernel 机制把这些流程**自动化为可验证的确定状态机**——脚本控制阶段推进、guard 校验产物质量、hook 拦截跨阶段写入，同时保留 flow-kit 的 `.specs/` 文档体系和 R1-R8 规则。
-
-与 [Comet Classic](https://github.com/rpamis/comet)（OpenSpec + Superpowers 双星）不同，flow-comet 是独立的 workflow-kernel，不依赖 OpenSpec 或 Superpowers，状态不与 classic 互通。
+flow-comet 把 flow-kit 的 9 阶段开发流程（CHANGE → REQUIREMENT → DESIGN → TASK → DEV → TEST → REVIEW → INTEGRATION → ARCHIVE）从"依赖人工纪律的手动流程"变成**可验证的确定状态机**：脚本控制阶段推进、guard 校验产物质量、hook 拦截跨阶段写入、子代理隔离并行执行——流程结构自动化，行为纪律保留。
 
 > **平台适配**：本项目适配 Claude Code（skill 体系、`claude` CLI、`.claude/` 安装位置）。不保证适配其他平台（Codex / Gemini / Cursor 等）。
 
-## Features
+---
 
-### 基础能力
+## 目录
 
-- **8 节点自动路由**：`open → design → plan → execute → subagent-execute → review → verify → archive`，脚本读 TASK.md 工件自动检测状态并路由
-- **自有状态机**：`.comet/flow-comet-state.json`，独立于 comet classic
-- **evidence 自动化**：`record` 传 summary 即可，状态漂移自动校正（P0-2：determineNode 推导与 state 不一致时自动写回）
-- **执行引擎子代理化**：execute/subagent-execute 均为协调者节点——主会话不写实现代码，统一通过 `Agent` worktree isolation 委托 fresh-context 子代理（加载 flow-comet-dev + 回传 Return Contract）
-- **executionMode**：`subagent`（默认，统一委托）/ `direct`（受控逃生口，用户显式切换，`directOverride` 记录确认；切回 subagent 时自动清除）
-- **并行执行**：`subagent-execute` 按 wave 委托并行任务，依赖感知路由 + write_files 冲突检测
-- **express 路径**：低风险 change 自动降级 review 与 TEST/UAT
-- **guard 自测套件**：`scripts/guard-self-test.mjs`（17 场景覆盖全部 entry/exit 校验正反例），每次改动后回归
-- **横向命令**：`flow-comet-evolve`（架构沉淀）+ `flow-comet-health`（巡检）
+- [生态关系](#生态关系)
+- [快速开始](#快速开始)
+- [工作流总览](#工作流总览)
+- [工件体系](#工件体系)
+- [核心机制](#核心机制)
+- [设计原理](#设计原理)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Examples](#examples)
+- [Architecture](#architecture)
+- [Limitations](#limitations)
+- [Contributing](#contributing)
+- [License](#license)
 
-### 硬约束层
+---
 
-基于两轮真实项目全流程验证（greenfield + brownfield）沉淀的机制化约束：
+## 生态关系
 
-| 类别 | 机制 | 校验点 |
+flow-comet 站在三个项目的交汇点：
+
+| 项目 | 定位 | 与 flow-comet 的关系 |
+|------|------|---------------------|
+| [flow-kit](https://github.com/rihebty/flow-kit) | **方法论与工件体系**：9 阶段流程定义、`.specs/` 文档模板（CHANGE/REQUIREMENT/DESIGN/TASK/…）、R1-R8 行为规则 | **依赖**——flow-comet 是它的执行自动化层，工件模板与规则由 flow-kit 定义 |
+| [Comet](https://github.com/rpamis/comet) | **Skill Creator 生态**：workflow-kernel 的机制来源（bundle 创作/编译、hook guard 模式、状态机管理） | **机制来源**——flow-comet 用 Comet CLI 创作与分发 bundle；**运行时可选**（直接复制安装无需 Comet CLI） |
+| **Comet Classic** | Comet 的经典工作流（OpenSpec + Superpowers 双星） | **不依赖**——flow-comet 是独立 workflow-kernel，不依赖 OpenSpec/Superpowers，状态与 classic **不互通**（自有 `.comet/flow-comet-state.json` 状态机 + 文件推导路由，避免双系统歧义） |
+
+**一句话**：flow-kit 定义"做什么"，flow-comet 自动执行"怎么推进"，Comet 提供"创作与分发工具"——三者职责分离，flow-comet 运行时只强依赖 flow-kit。
+
+---
+
+## 快速开始
+
+**5 分钟跑通第一个 change**（详细安装见 [Installation](#installation)）：
+
+```bash
+# 1. 安装（方案 A：直接复制，无 Comet CLI 依赖）
+#    复制 skills/ + rules/ + 注册 hook（见 Installation 方案 A）
+
+# 2. 启动工作流（自动创建 change/<id> 分支 + open 节点）
+node .claude/skills/flow-comet/scripts/workflow-state.mjs init my-first-change
+# → Initialized: my-first-change
+# → BRANCH: change/my-first-change
+# → NODE: open
+
+# 3. 在 Claude Code 中输入 /flow-comet 开始 CHANGE 阶段
+#    按流程产出 CHANGE.md / REQUIREMENT.md → design → plan → execute → …
+```
+
+> 每次节点推进后运行 `node .claude/skills/flow-comet/scripts/workflow-state.mjs next` 获取下一节点与 SKILL。
+
+---
+
+## 工作流总览
+
+### 8 节点流程
+
+```
+open → design → plan → execute ⇄ subagent-execute → review → verify → archive
+```
+
+路由由脚本从 `.specs/` 工件**自动推导**（determineNode）：文件不齐 → 停在对应节点；任务未完成 → 停在 execute；全部完成 → 依次推进 review/verify/archive。
+
+### 逐节点说明
+
+| 节点 | 职责 | 关键产物 | 出口校验（guard） |
+|------|------|---------|------------------|
+| **open** | CHANGE 反问 + 需求分析（AC 推导） | `CHANGE.md` / `REQUIREMENT.md` / CONTEXT 术语更新 | 必填段（模板派生）：`## Why` / `## 用户故事` / 验收段；CONTEXT 孤立追加段检测 |
+| **design** | 技术栈选型 + 架构对齐 + 决策 | `DESIGN.md`（§0 技术栈 / §0.5 架构对齐 / 决策清单 / 风险） | §0 段 + `## 决策清单`（模板派生，支持编号） |
+| **plan** | 原子任务拆分（XML）+ 波次划分 | `TASK.md`（`<task>` 块含 7 字段 + parallel 标记） | task 块存在 + verify 字段；TASK 签名哈希（enter 记录） |
+| **execute** | 串行任务执行（协调者委托子代理） | `<task-id>-SUMMARY.md` | SUMMARY 六段 + 6 维自查非空 + `## 自检方法` 强制；TASK 签名比对；越俎代庖检测 |
+| **subagent-execute** | parallel 任务并行委托（wave） | 同上（每任务一份 SUMMARY） | 同上 + handoff evidence（Return Contract） |
+| **review** | 双轮审查（spec 合规 + 代码质量 6 维） | `REVIEW.md`（Critical/发现/结论） | ≥100B + 必填段 |
+| **verify** | 集成验证 + UAT + 失败诊断（≤3 轮） | `TEST.md` / `UAT.md` / LESSONS 提名 | 验证命令真实执行；UAT 必填段；LESSONS 编号/位置检测 |
+| **archive** | LESSONS 提名 + 归档 + 分支收尾 | `.specs/archive/<date>-<id>/` / CHANGELOG | 分支校验（新模式）；CHANGELOG 倒序检测 |
+
+### 分支模式（批次 E）
+
+- `init` 自动创建 `change/<change-id>` 分支（git 仓库时），全流程在分支上进行
+- 归档时收尾：合并回主分支 + 删除分支（`enablePrReview=true` 时先推送 + PR，approve 后合并）
+- 分支-状态一致性：`status`/`next` 检测分支与 activeChange 不符 → WARN（不 BLOCK）
+- **向后兼容**：无分支的旧 change 照常运行（分支校验仅新模式生效）
+
+### 执行模式（executionMode）
+
+| 模式 | 语义 | 何时用 |
 |------|------|--------|
-| 状态机 | 转移门 | `exit` 校验 `currentNode === 被 exit 节点` + 前置 evidence |
-| 状态机 | state schema 校验 | writeState 8 字段类型 fail-closed（`state-schema.mjs` 单一来源，state/guard/handoff 三脚本共用） |
-| 产物质量 | 段名模板派生 | open/design exit 段名校验从 `flow-kit/templates/*.md` 自动派生（模板缺失 fallback 内置段名），消灭手抄段名漂移 |
-| 产物质量 | 节点内容校验 | open 需 AC 段；design 需 §0 技术栈 + 决策清单；plan 需 task 块+verify；review ≥ 100B |
-| 产物质量 | SUMMARY 六段校验 | execute/subagent-execute 出口校验 verify 输出 / 6 维自查（非空）/ 越界检查 + `## 自检方法` 强制（brooks-review 或 builtin-quickcheck+原因） |
-| 产物质量 | all-tasks-done | execute 出口检查 TASK.md 所有 task 为 done |
-| 产物质量 | TASK 签名哈希 | enter execute 记录任务集签名（剥离 status），exit 比对——execute 期间增删任务/改 action/改边界 BLOCKED；标记 done 合法 |
-| 测试纪律 | verify 真实执行 | verify 出口真实跑 TEST.md `## 验证命令` 段（支持多行 `&&`） |
-| 测试纪律 | verifyFailures 计数 | guard 自动递增，第 4 次 BLOCKED（无需 LLM 主动调用） |
-| 子代理 | Return Contract | `{status, commitHash, redEvidence, greenEvidence, riskSignals}`，缺 hash/green 则 BLOCKED；redEvidence 缺失渐进 WARN |
-| 子代理 | handoff hash 溯源 | `git show` 校验提交文件 ⊆ writeFiles；未传 `--write-files` 时自动从 TASK.md 解析（剥离 XML 注释） |
-| 写入控制 | phase 白名单 | hook guard 按 currentNode 控制文件写入权限（execute/subagent-execute 协调者只允许 `.specs/`，源码由 worktree 子代理写——cwd 无 state 放行） |
-| 写入控制 | 委托前检查 | entry execute/subagent-execute 检测 `.specs/<change>/` 未提交工件 → WORKTREE WARN；PROGRESS.md 存在 → 恢复警告（R1.6） |
-| 审计 | brooks-lint 审计 | execute exit 检查 6 维自查是否声明 `/brooks-review`，未声明输出 WARN；`## 自检方法` 用 builtin 必须声明原因 |
-| 归档 | 交付闭环 | 单一 `chore: archive` commit + 显式路径 stage |
+| `subagent`（默认） | 统一委托子代理：协调者构造 handoff → Agent worktree 委托 → 收集 Return Contract → 验收标 done | 默认质量兜底 |
+| `direct`（逃生口） | 主代理直接执行串行任务（需加载 flow-comet-dev 完整协议） | 用户显式切换（`workflow-state.mjs execution-mode direct`）后 |
 
-### 流程安全
+`directOverride` 记录"当前处于用户确认的 direct"，切回 subagent 时自动清除。
 
-完整继承 flow-kit 规则：TDD（RED→GREEN→REFACTOR）/ LESSONS 扫描 / diff 边界 / 角色红线 / 决策点四分类 / dirty-worktree 归属。节点 SKILL 采用**引用式分离**（手写区协议在 `<skill>-GUIDANCE.md`，SKILL.md 保留 kernel Auto 区 + 引用行），跨仓库 worktree 委托注意见 [worktree-notes.md](.comet/bundle-drafts/flow-comet/skills/flow-comet/reference/worktree-notes.md)。
+---
+
+## 工件体系
+
+所有流程产物存放在 `.specs/`（项目级文件）与 `.specs/<change-id>/`（单次变更）：
+
+| 文件 | 位置 | 用途 | 产出节点 |
+|------|------|------|---------|
+| `CHANGE.md` | change 目录 | 变更提案（Why/What/影响面/范围排除/验收线） | open |
+| `REQUIREMENT.md` | change 目录 | 需求 + AC（Given/When/Then）+ v1·v2·out 范围切分 | open |
+| `DESIGN.md` | change 目录 | 技术决策（§0 技术栈/§0.5 架构对齐/决策清单/风险） | design |
+| `TASK.md` | change 目录 | 原子任务（XML 7 字段 + parallel 标记 + 波次划分） | plan |
+| `<task-id>-SUMMARY.md` | change 目录 | 每任务完成报告（六段：做了什么/改动文件/verify 输出/6 维自查/越界检查/自检方法） | execute / subagent-execute |
+| `<task-id>-PROGRESS.md` | change 目录 | 任务中途清窗快照（临时，恢复后删除） | execute（临时） |
+| `TEST.md` | change 目录 | 5 轮测试金字塔 + 验证命令 + UAT 脚本 | review |
+| `REVIEW.md` | change 目录 | 审查报告（Critical/发现/结论） | review |
+| `UAT.md` | change 目录 | 验收结果（每项 pass/fail） | verify |
+| `CONTEXT.md` | `.specs/` | 项目级共享上下文（术语表/已锁决策/默认偏好） | open（每次追加） |
+| `LESSONS.md` | `.specs/` | 跨任务失败知识库（L-NNN 按编号插入） | verify / archive |
+| `CHANGELOG.md` | `.specs/` | 变更日志（表格顶部按日期倒序插入） | archive |
+| `.comet/flow-comet-state.json` | `.comet/` | 状态机（activeChange/currentNode/completedNodes/evidence/executionMode/branchMode/…） | 全程（脚本管理） |
+
+> **追加位置纪律**：CONTEXT 术语→术语表表格、决策→已锁决策清单；LESSONS→条目区按 L-NNN 编号；STATE/CHANGELOG→顶部倒序；T-FIX→`## Fix 任务` 段——guard 检测（WARN 渐进）兜底。
+
+---
+
+## 核心机制
+
+### 1. 状态机与路由（文件即真相）
+
+- 单文件状态机 `.comet/flow-comet-state.json`；节点推进由 `workflow-guard.mjs exit <node> --apply` 门控
+- **determineNode**：从 `.specs/` 工件实时推导当前节点（文件不齐→停在对应节点），不完全信任 state
+- **P0-2 自动纠偏**：state 的 currentNode 与推导不一致时自动写回（`next` 触发）
+
+### 2. 三层防线（越俎代庖防护）
+
+| 层 | 机制 | 校验点 |
+|----|------|--------|
+| ① hook 物理拦截 | phase 白名单：execute/subagent-execute 协调者只写 `.specs/`；源码由 worktree 子代理写（cwd 无 state → 放行） | 写入目标路径 + currentNode 判定 |
+| ② 协调者禁令 | `next`/`entry` 每次注入"你是协调者不是执行者"（direct 模式 execute 豁免） | 输出注入 |
+| ③ exit 越俎代庖检测 | parallel 任务 done 必须有 handoffResult，否则 BLOCKED（`parallelTakeoverApproved` 显式豁免） | TASK.md + handoff evidence |
+
+### 3. guard 校验体系（证据驱动推进）
+
+| 机制 | 校验点 | 触发 |
+|------|--------|------|
+| 段名模板派生 | open/design exit 必填段名从 `flow-kit/templates/` 自动派生（模板缺失 fallback） | exit open/design |
+| TASK 签名哈希 | enter 记录任务集签名（剥离 status）→ exit 比对：增删任务/改 action/改边界 BLOCKED；标记 done 合法 | enter/exit execute |
+| SUMMARY 六段校验 | verify 输出/6 维自查（非空，按行过滤标题含 emoji）/越界检查 + `## 自检方法` 强制 | exit execute |
+| verify 真实执行 | TEST.md `## 验证命令` 段真实运行（支持多行 `&&`）；verifyFailures 机器计数，第 4 次 BLOCKED | exit verify |
+| 追加位置检测 | CONTEXT 孤立追加段 / LESSONS 编号乱序+区外 / STATE+CHANGELOG 非倒序 → WARN（渐进） | exit open/verify/archive |
+| 委托前检查 | `.specs/<change>/` 未提交工件 → WORKTREE WARN；PROGRESS.md 存在 → 恢复警告 | entry execute |
+| state schema 校验 | writeState 8 字段类型 fail-closed（state-schema.mjs 单一来源，三脚本共用） | 全部 state 写入 |
+
+### 4. 执行模型（子代理化）
+
+- **Return Contract**：子代理回传 `{status, commitHash, redEvidence, greenEvidence, riskSignals}`——缺 commitHash/greenEvidence BLOCK；redEvidence 缺失渐进 WARN
+- **handoff hash 溯源**：`git show <commitHash>` 校验提交文件 ⊆ write_files（自动从 TASK.md 解析，剥离 XML 注释）
+- **write_files 冲突检测**：parallel 任务 write_files 不重叠才可同 wave 并行
+
+### 5. 恢复协议
+
+- 任意入口恢复：determineNode 从文件推导 + state 自动纠偏（不依赖对话历史）
+- PROGRESS.md 恢复警告（R1.6 反重复）
+- 分支-状态一致性校验（批次 E）
+
+### 6. guard 自测套件
+
+`scripts/guard-self-test.mjs`：23 场景覆盖全部 entry/exit 校验正反例（含批次 E 分支校验与追加位置检测），每次改动后回归：
+
+```bash
+node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
+# → ALL 23 SCENARIOS PASSED
+```
+
+---
+
+## 设计原理
+
+为什么 flow-comet 这样设计（完整决策记录见仓库本地内部文档 `docs/internal/ARCHITECTURE.md`）：
+
+- **文件即真相，不做事件溯源**：单文件状态机 + 从 `.specs/` 推导节点——简单且恢复不依赖历史
+- **结构级校验，不做语义判断**：guard 判"填没填"（段名/非空/结构），"填得好不好"交给 review——校验轻、误报少
+- **检测+纠偏，不做拦截**：agent 环境无法真正阻止 LLM 直改文件，机器字段靠检测与自动写回
+- **状态不入库**：`.comet/` 保持 gitignore——分支切换共享同一份工作树状态，避免状态分裂
+- **不并行 change、不强制 PR**：一次一个 active change（状态机模型简单）；PR 审查按需开启
+
+---
 
 ## Installation
 
@@ -148,13 +288,31 @@ comet publish distribute flow-comet --platform claude --scope project --project 
 
 > 无 `ANTHROPIC_API_KEY` 时 eval 无法运行——改用方案 A（直接复制）保持安装副本同步，并在 bundle-authoring 状态中记录 hash 漂移（`drift-conflict`），下次有 key 时 reconcile。
 
+---
+
 ## Usage
 
 在目标项目输入 `/flow-comet` 启动。首次调用自动检测活跃 change 或初始化新 change。
 
+常用命令：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id>   # 初始化 change（自动建分支）
+node .claude/skills/flow-comet/scripts/workflow-state.mjs next               # 获取下一节点与 SKILL
+node .claude/skills/flow-comet/scripts/workflow-state.mjs status             # 当前状态 + 分支一致性
+node .claude/skills/flow-comet/scripts/workflow-state.mjs record <node> '{"summary":"..."}'  # 记录节点证据
+node .claude/skills/flow-comet/scripts/workflow-state.mjs config set enablePrReview true      # 开启 PR 审查
+node .claude/skills/flow-comet/scripts/workflow-handoff.mjs request/result <task-id> ...      # 委托证据
+node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry/exit <node> [--apply]         # 节点门禁
+```
+
+---
+
 ## Examples
 
 [docs/examples/schedule-venue-filter/](docs/examples/schedule-venue-filter/) —— 12 个工件覆盖 open→archive 全链路的完整产物示例，对照 flow-kit 模板质量标准。
+
+---
 
 ## Documentation
 
@@ -163,7 +321,9 @@ comet publish distribute flow-comet --platform claude --scope project --project 
 | [产物示例](docs/examples/schedule-venue-filter/) | 全流程 12 个工件参考 |
 | [验证记录](VERIFICATION.md) | 分发验证 |
 
-**回归验证**：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 17 SCENARIOS PASSED`（覆盖全部 entry/exit 校验正反例）。
+**回归验证**：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 23 SCENARIOS PASSED`。
+
+---
 
 ## Architecture
 
@@ -172,7 +332,7 @@ comet publish distribute flow-comet --platform claude --scope project --project 
 │ flow-comet（本仓库）                                      │
 │  ├─ .comet/bundle-drafts/   ★ 权威源（18 skills + scripts）│
 │  ├─ .comet/bundles/         已发布 bundle（可 distribute） │
-│  ├─ docs/                   规格 / 示例 / 验证记录         │
+│  ├─ docs/                   产物示例 / 验证记录           │
 │  └─ 运行时（安装到目标项目）                               │
 │      ├─ .claude/skills/flow-comet*   （skill 实现 + GUIDANCE）│
 │      ├─ .claude/rules/                （编排规则）          │
@@ -181,9 +341,11 @@ comet publish distribute flow-comet --platform claude --scope project --project 
 └─────────────────────────────────────────────────────────┘
 ```
 
-- **状态机**：`.comet/flow-comet-state.json`（activeChange/currentNode/completedNodes/evidence/verifyFailures/executionMode/directOverride/taskHash）
-- **hooks**：`flow-comet-hook-guard` 按 phase 白名单控制文件写入权限 + 路径安全校验（防 symlink 逃逸）。**不安装** comet 的 `comet-hook-router`（classic 专用，与 workflow-kernel 不兼容）
+- **状态机**：`.comet/flow-comet-state.json`（activeChange/currentNode/completedNodes/evidence/verifyFailures/executionMode/directOverride/branchMode/enablePrReview/taskHash）
+- **hooks**：`comet-hook-guard` 按 phase 白名单控制文件写入权限 + 路径安全校验（防 symlink 逃逸）。**不安装** comet 的 `comet-hook-router`（classic 专用，与 workflow-kernel 不兼容）
 - **state 写入**：三脚本（state/guard/handoff）统一经 `state-schema.mjs` 字段校验（fail-closed）
+
+---
 
 ## Limitations
 
@@ -195,9 +357,13 @@ comet publish distribute flow-comet --platform claude --scope project --project 
 - **worktree 挂载依赖**：Agent `isolation: "worktree"` 的 worktree 挂在**会话项目根**（非子代理目标项目）——跨仓库场景产物需 `git show <branch>:<path>` 手动搬运，W2-D 的 `git show` 校验降级（详见 `reference/worktree-notes.md`）
 - **GUIDANCE 不经 lane 记录**：`<skill>-GUIDANCE.md` 与 SKILL.md 引用行不登记 authoring-lanes，重跑 `comet creator generate` 会清掉（bundle compile 不受影响）
 
+---
+
 ## Contributing
 
-欢迎贡献。修改 skill/脚本请改 `.comet/bundle-drafts/flow-comet/skills/`（权威源），然后走发布流程（见 Installation 第 3 步）。
+欢迎贡献。修改 skill/脚本请改 `.comet/bundle-drafts/flow-comet/skills/`（权威源），然后走发布流程（见 Installation 第 3 步）。每次改动后运行 `guard-self-test.mjs` 回归（23 场景全绿为验收标准）。
+
+---
 
 ## License
 
