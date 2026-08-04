@@ -15,6 +15,14 @@ This node performs a structured multi-round review of the implemented change, ch
 
 ## Guidance
 
+### 必填段清单（exit guard 校验，结构+存在级）
+
+| 文件 | 必填段 |
+|------|--------|
+| REVIEW.md | `## Critical` / `## 发现` / `## 结论` |
+
+**缺失任一必填段 = 节点未完成**，exit guard 校验（见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B）。
+
 ### Prerequisites
 
 - All tasks in TASK.md must have `status="done"`.

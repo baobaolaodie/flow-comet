@@ -15,6 +15,14 @@ Responsibility: 委托 [P] 并行任务给子代理，要求加载 flow-comet-de
 
 ## Guidance
 
+### 必填段清单（exit guard 校验，结构+存在级）
+
+| 文件 | 必填段 |
+|------|--------|
+| SUMMARY.md | `## 做了什么` / `## 改动文件` / `## verify 输出` / `## 6 维自查` / `## 越界检查` / `## 自检方法` |
+
+**缺失任一必填段 = 节点未完成**，exit guard 校验（见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B）。
+
 ---
 name: flow-comet-subagent-execute
 description: "Subagent Execute node for flow-comet: delegates parallel (parallel=true) tasks to subagents with flow-comet-dev loaded, collecting handoff evidence. Do not use for ordinary standalone tasks."

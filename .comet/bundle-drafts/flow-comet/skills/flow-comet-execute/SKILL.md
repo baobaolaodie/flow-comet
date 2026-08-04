@@ -9,11 +9,28 @@ description: "Use only when explicitly invoked as /flow-comet-execute or routed 
 
 Complete the `execute` Node for `flow-comet`.
 
-Responsibility: 按 TASK.md 逐任务**统一委托子代理**执行（协调者流程）：TDD + 6 维自查 + LESSONS 扫描 + diff 边界 verify 由子代理执行，协调者负责构造 handoff、验收 SUMMARY、标记 done。
+Responsibility: 按 TASK.md 逐任务执行（**执行模式按 executionMode**：subagent 默认统一委托子代理、direct 逃生口主代理直写）。串行任务的 TDD + 6 维自查 + LESSONS 扫描 + diff 边界 verify 由执行者承担，无论哪种模式都必须加载 flow-comet-dev 协议。
 
 This node is a coordinator. It does not write implementation code directly. It delegates all pending tasks to fresh-context subagents via the Agent tool (worktree isolation), each subagent applies the full dev protocol (TDD RED/GREEN/REFACTOR, LESSONS scan, existing abstraction grep, self-review, diff boundary verification, atomic commits) and returns a Return Contract. The coordinator records handoff evidence, verifies each SUMMARY, and marks tasks done in TASK.md.
 
 ## Guidance
+
+### 必填段清单（exit guard 校验，结构+存在级）
+
+| 文件 | 必填段 |
+|------|--------|
+| SUMMARY.md | `## 做了什么` / `## 改动文件` / `## verify 输出` / `## 6 维自查` / `## 越界检查` / `## 自检方法` |
+
+**缺失任一必填段 = 节点未完成**，exit guard 校验（见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B）。
+
+### 执行模型（按 executionMode，用户显式选择）
+
+- **subagent（默认）**: 统一委托子代理——协调者流程（构造 handoff → Agent worktree 委托 → 收集 Return Contract → 验收标 done）
+- **direct（逃生口，需用户显式切换）**: 主代理直接执行串行任务——但必须加载 flow-comet-dev 完整协议
+  （TDD/6 维自查/越界检查/原子 commit），SUMMARY 必填段 + `## 自检方法` 强制（guard 校验兜底）
+- 无论哪种模式：`parallel="true"` 任务始终由 subagent-execute 并行委托，不在此节点执行。
+
+执行模式由 `node workflow-state.mjs status` 输出（`executionMode` / `directOverride`）决定，切换用 `node workflow-state.mjs execution-mode <subagent|direct>`。direct 是逃生口，必须用户显式调用才生效。
 
 ### 任务范围
 
@@ -34,7 +51,7 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 - For frontend/UI tasks: `.specs/<change-id>/UI-DESIGN.md` must exist.
 - 若 `.specs/<change>/PROGRESS.md` 存在，必须先读取"已排除方案"段（R1.6 反重复），确认当前计划不在排除列表中。完成后删除 PROGRESS.md，有用信息迁移至 SUMMARY。
 
-### Steps（协调者流程，统一委托子代理）
+### Steps（subagent 模式 · 协调者流程，统一委托子代理）
 
 对 TASK.md 每个 pending 串行任务，协调者执行：
 

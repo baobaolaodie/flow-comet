@@ -1899,8 +1899,12 @@ async function main() {
       }
     }
     // 协调者禁令：execute / subagent-execute 阶段主会话只能委托，禁止直接写源码
+    // 例外：direct 模式 execute 是主代理直写（逃生口），不输出协调者禁令
+    const entryExecutionMode = state.executionMode ?? 'subagent';
     if (node.id === 'execute' || node.id === 'subagent-execute') {
-      console.log('COORDINATOR: 你是协调者，不是执行者。禁止在主会话直接修改源码；只能通过 Agent 工具 worktree isolation 委托子代理；子代理回传后仅更新 TASK.md / SUMMARY / handoff evidence。');
+      if (!(entryExecutionMode === 'direct' && node.id === 'execute')) {
+        console.log('COORDINATOR: 你是协调者，不是执行者。禁止在主会话直接修改源码；只能通过 Agent 工具 worktree isolation 委托子代理；子代理回传后仅更新 TASK.md / SUMMARY / handoff evidence。');
+      }
     }
     console.log('ENTRY OK: ' + node.id);
     return;
@@ -1949,6 +1953,37 @@ async function main() {
         const content = await fs.readFile(target, 'utf8');
         if (!/##\s*0[\s.]/.test(content) && !/##\s*技术栈/.test(content)) {
           console.error('BLOCKED: DESIGN.md 缺少 §0 技术栈段');
+          process.exit(1);
+        }
+      } catch {}
+    }
+  }
+  // C2: open exit 补必填段校验（结构+存在级，不做语义）——CHANGE.md 含 ## 变更目标；REQUIREMENT.md 含 ## 用户故事
+  if (node.id === 'open' && state.activeChange) {
+    const changeDir = path.join(runRoot, '.specs', state.activeChange);
+    for (const [file, section] of [['CHANGE.md', '## 变更目标'], ['REQUIREMENT.md', '## 用户故事']]) {
+      const p = path.join(changeDir, file);
+      if (await fileExists(p)) {
+        try {
+          const text = await fs.readFile(p, 'utf8');
+          if (!text.includes(section)) {
+            console.error('BLOCKED: ' + file + ' 缺必填段 ' + section);
+            process.exit(1);
+          }
+        } catch {}
+      }
+    }
+  }
+  // C2: design exit 补必填段校验——DESIGN.md 含 ## 决策清单
+  if (node.id === 'design' && state.activeChange) {
+    const designFile = path.join(runRoot, '.specs', state.activeChange, 'DESIGN.md');
+    const designLite = path.join(runRoot, '.specs', state.activeChange, 'DESIGN-lite.md');
+    const target = (await fileExists(designFile)) ? designFile : (await fileExists(designLite)) ? designLite : null;
+    if (target) {
+      try {
+        const text = await fs.readFile(target, 'utf8');
+        if (!text.includes('## 决策清单')) {
+          console.error('BLOCKED: DESIGN.md 缺必填段 ## 决策清单');
           process.exit(1);
         }
       } catch {}
@@ -2039,12 +2074,20 @@ async function main() {
       const takeoverApproved = !!(executeEvidence && executeEvidence.parallelTakeoverApproved);
 
       if (!takeoverApproved) {
-        // 所有 done 任务无 handoffResult → 越俎代庖（统一委托后只能由子代理完成）
+        // 越俎代庖检测按 executionMode 分支：
+        // - direct（逃生口）：串行任务主代理直写，不需 handoff；parallel 仍必须委托（防 execute 吞 parallel 回归）
+        // - subagent（默认）：所有 done 任务需 handoff（统一委托下只能由子代理完成）
+        const executionMode = state.executionMode ?? 'subagent';
         const he = state.evidence['subagent-execute'];
         const results = he && he.handoffResult ? he.handoffResult : {};
-        const unauthorized = tasks.filter(t => t.status === 'done' && !results[t.id]);
+        let unauthorized;
+        if (executionMode === 'direct') {
+          unauthorized = tasks.filter(t => t.parallel && t.status === 'done' && !results[t.id]);
+        } else {
+          unauthorized = tasks.filter(t => t.status === 'done' && !results[t.id]);
+        }
         if (unauthorized.length > 0) {
-          console.error('BLOCKED: 任务被主代理直接标记 done（越俎代庖），统一委托下只能由子代理完成并记录 handoff: ' + unauthorized.map(t => t.id).join(', '));
+          console.error('BLOCKED: 任务被主代理直接标记 done（越俎代庖）' + (executionMode === 'direct' ? '，direct 模式下 parallel 任务仍必须委托子代理' : '，统一委托下只能由子代理完成并记录 handoff') + ': ' + unauthorized.map(t => t.id).join(', '));
           console.error('解决: 回退这些任务的 done 标记，重新委托子代理；或用 workflow-state.mjs record execute \'{"parallelTakeoverApproved":true}\' 显式豁免');
           process.exit(1);
         }
