@@ -81,6 +81,7 @@ flow-kit 9 阶段工作流的 workflow-kernel 实现。保留 flow-kit 的全部
 | "LESSONS.md 不用扫" | R1.8：每个 DEV 任务必须扫描 |
 | "测试从实现派生就行" | R5.1：测试必须从 AC 派生 |
 | "guard 失败了，让用户决定" | 先自动诊断并执行唯一安全修复；无合法动作时才报告停止条件 |
+| "subagent-execute 阶段，我直接改源码更快" | 协调者禁令：subagent-execute 阶段主会话禁止写源码（hook 白名单只允许 .specs/），必须 worktree 委托子代理 |
 
 ## Workflow Nodes
 
@@ -161,7 +162,7 @@ All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT
 | `workflow-handoff.mjs` | 子代理交接：request/result/status |
 | `comet-plan.mjs` | plan 状态查询 |
 | `comet-check.mjs` | workflow contract 检查 |
-| `comet-hook-guard.mjs` | 文件写入边界守卫 |
+| `comet-hook-guard.mjs` | 文件写入边界守卫（phase 白名单：subagent-execute 阶段只允许 .specs/） |
 
 ### 机器拥有字段
 

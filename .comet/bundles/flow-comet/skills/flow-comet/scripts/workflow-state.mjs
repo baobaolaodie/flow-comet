@@ -137,6 +137,9 @@ function printNext(protocol, nodeId) {
   console.log('NEXT: auto');
   console.log('NODE: ' + nodeId);
   console.log('SKILL: ' + generatedNodeSkillName(protocol, nodeId));
+  if (nodeId === 'subagent-execute') {
+    console.log('COORDINATOR: 你是协调者，不是执行者。禁止在主会话直接修改源码；只能通过 Agent 工具 worktree isolation 委托子代理；子代理回传后仅更新 TASK.md / SUMMARY / handoff evidence。');
+  }
 }
 
 async function main() {
@@ -173,7 +176,8 @@ async function main() {
       currentNode: detectedNode,
       stateCurrentNode: state.currentNode,
       completedNodes: state.completedNodes,
-      artifactRoot: '.specs/' + changeName
+      artifactRoot: '.specs/' + changeName,
+      coordinatorMode: detectedNode === 'subagent-execute'
     }, null, 2));
     return;
   }
