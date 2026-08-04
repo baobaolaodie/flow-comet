@@ -2026,17 +2026,28 @@ async function main() {
     for (const f of summaryFiles) {
       try {
         const content = await fs.readFile(path.join(changeDir, f), 'utf8');
-        const sixDim = content.match(/##\s*6\s*维自查[\s\S]*?(?=\n##|\n---|\Z)/i);
-        // C1: 6 维自查段非空——逐维有实质内容（每维标题后到下一维，非空白字符 ≥ 10）
-        //    越界检查段含实际 diff 记录（含 "diff" 或 "越界" 字样且非空）
-        if (sixDim && sixDim[0].replace(/#{1,6}\s*R\d|##\s*6\s*维自查/g, '').trim().length < 10) {
+        // 段终止 lookahead 用 \n##\s（而非 \n##）：###/#### 级子标题（如 "### 🟢 R1"）是段内内容，不是段结束
+        const sixDim = content.match(/##\s*6\s*维自查[\s\S]*?(?=\n##\s|\n---|\Z)/i);
+        // C1: 6 维自查段非空——去掉所有标题行后剩余实质内容 ≥ 10 字符
+        // 按行过滤标题（/^\s*#/）比正则替换稳健：任何标题格式（emoji 🟢/中英文/数字）都不计入内容
+        const dimBody = sixDim ? sixDim[0].split('\n').filter(l => !/^\s*#/.test(l)).join('').trim() : '';
+        if (sixDim && dimBody.length < 10) {
           violations.push(f + ' 的 6 维自查段无实质内容');
         }
         // D1: 生产代码任务必填 ## 自检方法，声明 brooks-review 或 builtin-quickcheck
-        const method = content.match(/##\s*自检方法\s*\n\s*([a-z-]+)/i);
+        // 格式兼容：方法名行允许中文前缀/括号说明（如 "方法：brooks-review"），按关键词搜索而非 [a-z-]+ 硬匹配
+        // 分隔符用 .?（任意字符）而非 \.?（字面点）：canonical 名 "brooks-review"/"builtin-quickcheck" 是连字符，与既有 /brooks.?review/ 约定一致
+        const methodLine = content.match(/##\s*自检方法\s*\n\s*([^\n]+)/i);
+        const method = methodLine ? /brooks.?review|builtin.?quickcheck/i.exec(methodLine[1]) : null;
         if (!method) {
-          violations.push(f + ' 缺 ## 自检方法 字段（必须声明 brooks-review 或 builtin-quickcheck）');
-        } else if (/builtin/.test(method[1]) && !/brooks-lint 不可用|插件不可用|unavailable|N\/A/i.test(content)) {
+          // D1 过渡规则：旧格式 SUMMARY（批次 A 之前）无 ## 自检方法 段——
+          // 若全文已声明 brooks-review/builtin（旧模板行为），WARN 兼容不 BLOCKED；无任何自检声明才 BLOCKED
+          if (/brooks.?review|builtin.?quickcheck/i.test(content)) {
+            console.error('BROOKS-LINT WARN: ' + f + ' 缺 ## 自检方法 段（旧格式），6 维自查已声明自检方法——兼容通过，建议补全');
+          } else {
+            violations.push(f + ' 缺 ## 自检方法 字段（必须声明 brooks-review 或 builtin-quickcheck）');
+          }
+        } else if (/builtin/i.test(method[0]) && !/brooks-lint 不可用|插件不可用|unavailable|N\/A/i.test(content)) {
           console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明 brooks-lint 不可用原因');
         }
         if (sixDim && !/brooks.?review/i.test(sixDim[0])) {
