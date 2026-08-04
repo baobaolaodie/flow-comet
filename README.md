@@ -103,6 +103,13 @@ open → design → plan → execute ⇄ subagent-execute → review → verify 
 
 `directOverride` 记录"当前处于用户确认的 direct"，切回 subagent 时自动清除。
 
+### Express 路径（低风险降级）
+
+CHANGE.md 头部含 `express: true`（低风险判定：改动 ≤3 文件、无后端 schema/API/数据库变更、无安全/认证/并发、纯前端重构/文案/简单 bug 修复）时自动降级：
+
+- **review** 只执行 Round 1（spec 合规）+ Round 1.5（契约核对），跳过代码质量轮与 UI 轮
+- **TEST/UAT** 用最小矩阵（只第 1 轮功能 + 核心 AC 手动确认），REVIEW.md 标注 "express 审查"
+
 ---
 
 ## 工件体系
@@ -302,9 +309,39 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs next               # �
 node .claude/skills/flow-comet/scripts/workflow-state.mjs status             # 当前状态 + 分支一致性
 node .claude/skills/flow-comet/scripts/workflow-state.mjs record <node> '{"summary":"..."}'  # 记录节点证据
 node .claude/skills/flow-comet/scripts/workflow-state.mjs config set enablePrReview true      # 开启 PR 审查
-node .claude/skills/flow-comet/scripts/workflow-handoff.mjs request/result <task-id> ...      # 委托证据
+node .claude/skills/flow-comet/scripts/workflow-state.mjs execution-mode <subagent|direct>   # 切换执行模式
 node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry/exit <node> [--apply]         # 节点门禁
 ```
+
+**子代理委托流程**（execute/subagent-execute 协调者，每任务）：
+
+```bash
+# 1. 注册委托请求（write_files 自动从 TASK.md 解析）
+node .../workflow-handoff.mjs request <task-id> "<任务描述>"
+# 2. 用 Agent 工具（isolation: "worktree"）委托子代理，要求回传 Return Contract
+# 3. 记录委托结果（Return Contract：status/commitHash/redEvidence/greenEvidence/riskSignals）
+node .../workflow-handoff.mjs result <task-id> '{"status":"DONE","commitHash":"<sha>","redEvidence":{"command":"...","output":"..."},"greenEvidence":{"command":"...","output":"..."},"riskSignals":["none"]}'
+# 4. 查看全部委托证据
+node .../workflow-handoff.mjs status
+```
+
+---
+
+## Troubleshooting
+
+| 现象 | 原因 | 处理 |
+|------|------|------|
+| `BLOCKED: 归档必须在 change/<id> 分支上进行` | 在错误分支执行 archive（分支模式） | `git checkout change/<id>` 后重试 |
+| `WARN: 分支与 activeChange 不一致` | 分支与状态漂移 | `git checkout change/<activeChange>`（按 WARN 提示）后继续 |
+| `WORKTREE WARN: .specs/<change>/ 有未提交工件` | 委托前工件未 commit | commit 工件，或在委托 prompt 内联上下文 |
+| `BLOCKED: TASK.md 任务集被修改` | execute 期间增删任务/改 action/改边界 | 回退 TASK.md 到 enter 时内容（仅标记 done 是合法的） |
+| `BLOCKED: state 字段类型非法` | state 文件被直改坏 | 修复字段类型或从备份/git 历史恢复 `.comet/flow-comet-state.json` |
+| `WARN: CONTEXT.md 检测到孤立追加段` | 术语/决策被尾部追加成新段 | 把内容移入术语表表格/已锁决策清单（E6 纪律） |
+| `WARN: LESSONS.md 条目编号乱序/区外` | 新条目未按 L-NNN 插入条目区 | 按编号插入 `## 条目区`（或 `## 活跃条目`） |
+| `HANDOFF ERROR: commitHash 无效或 git show 失败` | 产物 commit 不在当前仓库（跨仓库 worktree 场景） | 预期降级——产物已提取即忽略，不阻断记录 |
+| `BROOKS-LINT WARN: 使用 builtin-quickcheck 未声明原因` | SUMMARY 缺"插件不可用"说明 | 在 SUMMARY 的 `## 自检方法` 段补原因 |
+| `bundle-authoring drift-conflict` | 直接编辑 drafts 绕过 creator 流程 | 下次走 creator 流程时 reconcile（不影响运行时） |
+| `BLOCKED: verify 失败超限（verifyFailures=3）` | UAT/自动化连续失败 3 次 | 暂停，人工决策「继续修 / 停止」（R2.6） |
 
 ---
 
@@ -356,6 +393,20 @@ node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry/exit <node> [--a
 - **无活跃 change 时 hook 放行**：`.comet/flow-comet-state.json` 不存在时 hook guard 降级放行所有写入（设计决策：无 workflow 时不限制文件操作）
 - **worktree 挂载依赖**：Agent `isolation: "worktree"` 的 worktree 挂在**会话项目根**（非子代理目标项目）——跨仓库场景产物需 `git show <branch>:<path>` 手动搬运，W2-D 的 `git show` 校验降级（详见 `reference/worktree-notes.md`）
 - **GUIDANCE 不经 lane 记录**：`<skill>-GUIDANCE.md` 与 SKILL.md 引用行不登记 authoring-lanes，重跑 `comet creator generate` 会清掉（bundle compile 不受影响）
+
+---
+
+## 版本与兼容性
+
+| 项 | 说明 |
+|----|------|
+| **版本** | 1.0.0（`bundle.yaml` metadata.version） |
+| **依赖（必需）** | [flow-kit](https://github.com/rihebty/flow-kit)（方法论与工件模板）；Claude Code |
+| **依赖（可选）** | [Comet CLI](https://github.com/rpamis/comet)（仅作者分发流程：compile/eval/review/approve/run/distribute） |
+| **平台** | Claude Code（skill 体系）；不保证 Codex/Gemini/Cursor |
+| **运行时** | 脚本为 Node.js ESM（Node ≥ 18）；工件语言与项目主语言一致 |
+| **兼容策略** | 旧 change/旧 state 自动补默认字段（executionMode/branchMode/enablePrReview），无分支 change 照常运行——向后兼容 |
+| **回归基线** | `guard-self-test.mjs` 23 场景全绿（每次改动后必须） |
 
 ---
 
