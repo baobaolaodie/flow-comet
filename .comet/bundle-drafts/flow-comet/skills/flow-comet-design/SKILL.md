@@ -13,6 +13,14 @@ Responsibility: 技术栈选型 + ADR + 数据流。生成 DESIGN.md。
 
 ## Guidance
 
+### 必填段清单（exit guard 校验，结构+存在级）
+
+| 文件 | 必填段 |
+|------|--------|
+| DESIGN.md | `## 0. 技术栈选定` / `## 0.5 架构对齐` / `## 决策清单` / `## 风险` |
+
+**缺失任一必填段 = 节点未完成**，exit guard 校验（见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B）。
+
 ---
 name: flow-comet-design
 description: "Design node for flow-comet: produces DESIGN.md (and UI-DESIGN.md for frontend) via tech stack selection, ADR, and architecture alignment. Do not use for ordinary standalone tasks."

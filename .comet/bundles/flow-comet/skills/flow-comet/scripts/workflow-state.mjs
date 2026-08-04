@@ -113,8 +113,14 @@ async function determineNode(changeName, protocol, completedNodes = []) {
 }
 
 async function readState() {
-  if (await fileExists(statePath)) return readJson(statePath);
-  return { activeChange: null, currentNode: null, completedNodes: [], evidence: {}, verifyFailures: 0 };
+  if (await fileExists(statePath)) {
+    const st = await readJson(statePath);
+    // 兼容旧 state：无 executionMode / directOverride 时补默认（subagent 默认，direct 是显式逃生口）
+    if (st.executionMode === undefined) st.executionMode = 'subagent';
+    if (st.directOverride === undefined) st.directOverride = false;
+    return st;
+  }
+  return { activeChange: null, currentNode: null, completedNodes: [], evidence: {}, verifyFailures: 0, executionMode: 'subagent', directOverride: false };
 }
 
 async function writeState(state) {
@@ -129,7 +135,7 @@ function generatedNodeSkillName(protocol, nodeId) {
   return protocol.name + '-' + nodeId;
 }
 
-function printNext(protocol, nodeId) {
+function printNext(protocol, nodeId, executionMode = 'subagent') {
   if (!nodeId) {
     console.log('NEXT: done');
     return;
@@ -138,7 +144,12 @@ function printNext(protocol, nodeId) {
   console.log('NODE: ' + nodeId);
   console.log('SKILL: ' + generatedNodeSkillName(protocol, nodeId));
   if (nodeId === 'execute' || nodeId === 'subagent-execute') {
-    console.log('COORDINATOR: 你是协调者，不是执行者。禁止在主会话直接修改源码；只能通过 Agent 工具 worktree isolation 委托子代理；子代理回传后仅更新 TASK.md / SUMMARY / handoff evidence。');
+    if (executionMode === 'direct' && nodeId === 'execute') {
+      console.log('EXECUTION-MODE: direct（主代理直接执行串行任务，必须加载 flow-comet-dev 完整协议；parallel 任务仍由 subagent-execute 委托）');
+    } else {
+      console.log('COORDINATOR: 你是协调者，不是执行者。禁止在主会话直接修改源码；只能通过 Agent 工具 worktree isolation 委托子代理；子代理回传后仅更新 TASK.md / SUMMARY / handoff evidence。');
+      console.log('EXECUTION-MODE: ' + (executionMode === 'direct' ? 'direct' : 'subagent'));
+    }
   }
 }
 
@@ -154,6 +165,8 @@ async function main() {
       completedNodes: [],
       evidence: {},
       verifyFailures: 0,
+      executionMode: 'subagent',
+      directOverride: false,
       createdAt: new Date().toISOString()
     };
     await writeState(state);
@@ -176,6 +189,8 @@ async function main() {
       currentNode: detectedNode,
       stateCurrentNode: state.currentNode,
       completedNodes: state.completedNodes,
+      executionMode: state.executionMode ?? 'subagent',
+      directOverride: state.directOverride ?? false,
       artifactRoot: '.specs/' + changeName,
       coordinatorMode: ['execute', 'subagent-execute'].includes(detectedNode)
     }, null, 2));
@@ -196,7 +211,7 @@ async function main() {
       state.currentNode = detectedNode;
       await writeState(state);
     }
-    printNext(protocol, detectedNode);
+    printNext(protocol, detectedNode, state.executionMode ?? 'subagent');
     return;
   }
 
@@ -237,7 +252,22 @@ async function main() {
     console.log('EVIDENCE: ' + nodeId);
     const changeName = state.activeChange || await findActiveChange();
     const nextNode = changeName ? await determineNode(changeName, protocol, state.completedNodes) : null;
-    printNext(protocol, nextNode ?? null);
+    printNext(protocol, nextNode ?? null, state.executionMode ?? 'subagent');
+    return;
+  }
+
+  if (command === 'execution-mode') {
+    const mode = process.argv[3];
+    if (mode !== 'subagent' && mode !== 'direct') {
+      console.error('BLOCKED: execution-mode 参数必须为 subagent 或 direct，收到: ' + String(mode));
+      process.exit(1);
+    }
+    const state = await readState();
+    state.executionMode = mode;
+    // direct 是逃生口：必须用户显式调用，并记录 directOverride；subagent 时 directOverride 不变（历史标记）
+    if (mode === 'direct') state.directOverride = true;
+    await writeState(state);
+    console.log('EXECUTION-MODE: ' + state.executionMode + (state.directOverride ? ' (directOverride)' : ''));
     return;
   }
 
@@ -272,7 +302,7 @@ async function main() {
     return;
   }
 
-  throw new Error('Unknown command: ' + command + '. Use: init, status, next, select, record, verify-fail, advance');
+  throw new Error('Unknown command: ' + command + '. Use: init, status, next, select, record, verify-fail, advance, execution-mode');
 }
 
 main().catch(error => {

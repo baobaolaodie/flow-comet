@@ -14,18 +14,9 @@ const WORKFLOW_PROJECT_CONFIG_MAX_BYTES = 64 * 1024;
 const WORKFLOW_PROJECT_FILE_MAX_BYTES = 2 * 1024 * 1024;
 
 // Phase 写入白名单：currentNode → 允许写入的（相对 runRoot 的）路径前缀
-// '.specs/' 前缀表示只允许 .specs 目录下的文件（execute / subagent-execute 都是协调者，只写工件；源码由 worktree 子代理写）
+// '.specs/' 前缀表示只允许 .specs 目录下的文件（subagent-execute 始终协调者，只写工件；源码由 worktree 子代理写）
 // 其他路径前缀精确匹配
-const PHASE_WRITE_WHITELIST = {
-  'open':             ['.specs/'],
-  'design':           ['.specs/', '.specs/adr/'],
-  'plan':             ['.specs/'],
-  'execute':          ['.specs/'],// 协调者只写 .specs 工件；源码由 worktree 子代理写（统一委托子代理）
-  'subagent-execute': ['.specs/'],// 协调者只写 .specs 工件；源码必须由 worktree 子代理写（子代理 cwd 无 .comet/state → hook 放行）
-  'review':           ['.specs/'],
-  'verify':           ['.specs/'],
-  'archive':          ['.specs/archive/', '.specs/CHANGELOG.md', '.specs/LESSONS.md'],
-};
+// 注：execute 的名单由 state.executionMode 动态决定（subagent=协调者 .specs/；direct=逃生口允许主代理直写源码），见 main() 内组装
 
 function workflowProjectRelativeSegments(value, label) {
   if (typeof value !== 'string') throw new Error(label + ' must be a string');
@@ -1650,11 +1641,26 @@ async function main() {
   // state 文件读取失败时不阻断（state 可能不存在），继续执行后续安全检查
   const stateFile = path.join(runRoot, '.comet', 'flow-comet-state.json');
   let currentNode = null;
+  let executionMode = 'subagent';
   try {
     const stateContent = await fs.readFile(stateFile, 'utf8');
     const state = JSON.parse(stateContent);
     currentNode = state.currentNode;
+    executionMode = state.executionMode ?? 'subagent';
   } catch {}
+
+  // 白名单：direct 模式下 execute 允许写源码（主代理直接执行串行任务）；subagent 模式与 subagent-execute 始终协调者（只写 .specs/）
+  const executeWhitelist = executionMode === 'direct' ? [''] : ['.specs/'];
+  const PHASE_WRITE_WHITELIST = {
+    'open':             ['.specs/'],
+    'design':           ['.specs/', '.specs/adr/'],
+    'plan':             ['.specs/'],
+    'execute':          executeWhitelist, // subagent: .specs/（协调者）；direct: 允许所有（主代理直写）
+    'subagent-execute': ['.specs/'],      // 始终协调者（parallel 仍委托，防 execute 吞 parallel 回归）
+    'review':           ['.specs/'],
+    'verify':           ['.specs/'],
+    'archive':          ['.specs/archive/', '.specs/CHANGELOG.md', '.specs/LESSONS.md', 'STATE.md'],
+  };
 
   const target = writeTargetFromHookInput(await readHookInput());
   if (currentNode && target) {
