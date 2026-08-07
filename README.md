@@ -322,7 +322,14 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 >
 > **settings 保护**：若目标项目 `settings.local.json` 已存在且 JSON 非法，或 `hooks.PreToolUse` 不是数组结构，脚本会**中止注入并警告**（不覆盖用户配置），请手动按方案 B 添加 hook。
 
-验证安装（无副作用，不创建 change）：检查 `<目标项目>/.claude/` 生成物——19 个 `flow-comet*` skill + `rules/flow-comet-orchestration.md` + `settings.local.json` 的 PreToolUse hook 注入；再跑安装回归自测：`node <目标项目>/.claude/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 54 SCENARIOS PASSED`。
+验证安装（无副作用，不创建 change）：
+
+1. **结构检查**：`<目标项目>/.claude/skills/` 下 19 个 `flow-comet*` skill 目录 + `rules/flow-comet-orchestration.md` + `settings.local.json` 均存在
+2. **配置可加载性**：`settings.local.json` 是合法 JSON；`hooks.PreToolUse[].command` 指向 `node .claude/skills/flow-comet/scripts/comet-hook-guard.mjs` 且该文件存在
+3. **一致性检查**：与权威源比对（在 flow-comet 仓库内执行，strip 行尾差异后应无差异）：`diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/rules <目标项目>/.claude/rules` 与 `diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/skills <目标项目>/.claude/skills`
+4. **真实环境冒烟**：`node <目标项目>/.claude/skills/flow-comet/scripts/workflow-state.mjs status` 能正常输出（证明脚本在真实 cwd 下可运行、无语法错误、能读状态）
+
+> **注意**：`guard-self-test.mjs` 的 54 场景是**作者回归基线**（脚本自身机制自测——在自建临时环境模拟 state/协议/hook 输入，不依赖安装完整性），不是安装验证判据；它通过只证明脚本逻辑没坏。
 
 ### 方案 B · 手动复制粘贴（无脚本环境兜底）
 
