@@ -3,7 +3,7 @@
 **flow-kit 9 阶段开发工作流的自动化执行引擎** —— 面向 Claude Code 平台的 workflow-kernel 实现。
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](CHANGELOG.md)
 
 flow-comet 把 flow-kit 的 9 阶段开发流程（CHANGE → REQUIREMENT → DESIGN → TASK → DEV → TEST → REVIEW → INTEGRATION → ARCHIVE）从"依赖人工纪律的手动流程"变成**可验证的确定状态机**：脚本控制阶段推进、guard 校验产物质量、hook 拦截跨阶段写入、子代理隔离并行执行——流程结构自动化，行为纪律保留。
 
@@ -37,7 +37,7 @@ flow-comet 站在三个项目的交汇点：
 | 项目 | 定位 | 与 flow-comet 的关系 |
 |------|------|---------------------|
 | [flow-kit](https://github.com/rihebty/flow-kit) | **方法论与工件体系**：9 阶段流程定义、`.specs/` 文档模板（CHANGE/REQUIREMENT/DESIGN/TASK/…）、R1-R8 行为规则 | **依赖**——flow-comet 是它的执行自动化层，工件模板与规则由 flow-kit 定义 |
-| [Comet](https://github.com/rpamis/comet) | **Skill Creator 生态**：workflow-kernel 的机制来源（bundle 创作/编译、hook guard 模式、状态机管理） | **机制来源**——flow-comet 用 Comet CLI 创作与分发 bundle；**运行时可选**（直接复制安装无需 Comet CLI） |
+| [Comet](https://github.com/rpamis/comet) | **Skill Creator 生态**：workflow-kernel 的机制来源（bundle 创作/编译、hook guard 模式、状态机管理） | **机制来源**——flow-comet 借鉴 Comet CLI 的 bundle 创作模式；**运行时可选**（直接复制安装无需 Comet CLI） |
 | **Comet Classic** | Comet 的经典工作流（OpenSpec + Superpowers 双星） | **不依赖**——flow-comet 是独立 workflow-kernel，不依赖 OpenSpec/Superpowers，状态与 classic **不互通**（自有 `.comet/flow-comet-state.json` 状态机 + 文件推导路由，避免双系统歧义） |
 
 **一句话**：flow-kit 定义"做什么"，flow-comet 自动执行"怎么推进"，Comet 提供"创作与分发工具"——三者职责分离，flow-comet 运行时只强依赖 flow-kit。
@@ -183,11 +183,11 @@ CHANGE.md 头部含 `express: true`（低风险判定：改动 ≤3 文件、无
 
 ### 6. guard 自测套件
 
-`scripts/guard-self-test.mjs`：49 场景覆盖全部 entry/exit 校验正反例（含分支校验、追加位置检测、自定义协议、组合场景），每次改动后回归：
+`scripts/guard-self-test.mjs`：54 场景覆盖全部 entry/exit 校验正反例（含分支校验、追加位置检测、自定义协议、组合场景），每次改动后回归：
 
 ```bash
 node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 49 SCENARIOS PASSED
+# → ALL 54 SCENARIOS PASSED
 ```
 
 ---
@@ -375,39 +375,9 @@ flow-comet 会**定制 `comet init` 注入的 `<comet-ambient-resume>` 块**（C
 - `flow-comet-orchestration.md` — flow-comet bundle 自带（自动安装，标识 Entry Skill 与编排结构）
 - `comet-workflow-guard.md` — Comet 生态规则（`comet init` 安装，Native/Classic 双 workflow 防串扰）
 
-### 方案 C · comet bundle 分发（作者流程，源工作区）
-
-> **注意**：comet 的分发模型是**从有 bundle-authoring 状态的项目分发**（即本仓库自身），不是"分发到任意目标项目"——对全新项目执行 distribute 会因缺少 `.comet/bundle-authoring/flow-comet.json` 报 ENOENT。
-
-```bash
-cd <本仓库>   # 必须在源工作区（有 .comet/bundle-authoring/ 状态）
-comet bundle compile flow-comet --platform claude
-comet eval flow-comet/comet/eval.yaml --project .   # 需 ANTHROPIC_API_KEY
-comet publish review flow-comet --platform claude
-comet publish approve flow-comet --reviewer <reviewer>
-comet publish run flow-comet --platform claude
-comet publish distribute flow-comet --platform claude --scope project \
-  --project . --confirm-executables
-```
-
-分发前可 `comet publish distribute flow-comet --preview` 检查将写入的文件。
-
-### 作者修改后的完整发布流程
-
-> **eval 是硬前置**：修改 `.comet/bundle-drafts/flow-comet/skills/` 会改变 bundle hash → 旧 eval/review 证据失效 → approve/run 拒绝，必须先重新 eval。
-
-```bash
-comet bundle compile flow-comet --platform claude
-comet eval flow-comet/comet/eval.yaml --project .          # 重新生成当前 hash 的 eval 证据
-comet publish review flow-comet --platform claude
-comet publish approve flow-comet --reviewer <reviewer>
-comet publish run flow-comet --platform claude
-comet publish distribute flow-comet --platform claude --scope project --project . --confirm-executables
-```
-
-> 无 `ANTHROPIC_API_KEY` 时 eval 无法运行——改用方案 A（prepare-env 安装器）或方案 B（手动复制）保持安装副本同步，并在 bundle-authoring 状态中记录 hash 漂移（`drift-conflict`），下次有 key 时 reconcile。
-
 ---
+
+
 
 ## Usage
 
@@ -465,11 +435,11 @@ node .../workflow-handoff.mjs status
 
 | 文档 | 说明 |
 |------|------|
-| [变更日志](CHANGELOG.md) | Keep a Changelog 风格，版本历史（当前 v1.1.0） |
+| [变更日志](CHANGELOG.md) | Keep a Changelog 风格，版本历史（当前 v1.2.0） |
 | [产物示例](docs/examples/schedule-venue-filter/) | 全流程 12 个工件参考 |
 | [验证记录](VERIFICATION.md) | 分发验证 |
 
-**回归验证**：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 49 SCENARIOS PASSED`。
+**回归验证**：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 54 SCENARIOS PASSED`。
 
 ---
 
@@ -478,8 +448,7 @@ node .../workflow-handoff.mjs status
 ```
 ┌─────────────────────────────────────────────────────────┐
 │ flow-comet（本仓库）                                      │
-│  ├─ .comet/bundle-drafts/   ★ 权威源（18 skills + scripts）│
-│  ├─ .comet/bundles/         已发布 bundle（可 distribute） │
+│  ├─ .comet/bundle-drafts/   ★ 权威源（19 skills + scripts）│
 │  ├─ docs/                   产物示例 / 验证记录           │
 │  └─ 运行时（安装到目标项目）                               │
 │      ├─ .claude/skills/flow-comet*   （skill 实现 + GUIDANCE）│
@@ -498,7 +467,6 @@ node .../workflow-handoff.mjs status
 ## Limitations
 
 - **仅 Claude Code 平台**：非 Claude Code 环境不保证可用
-- **comet eval 需 API key**：eval（`comet eval <skill>/comet/eval.yaml --project .`）需 `ANTHROPIC_API_KEY`；无 key 时无法生成 eval 证据，approve/run/distribute 会拒绝——改用方案 A（直接复制安装）保持副本同步
 - **Return Contract 过渡规则**：旧格式纯字符串 handoff 豁免为 WARN；redEvidence/greenEvidence 缺失渐进 WARN（不 BLOCK），避免已有 change 重入被卡死
 - **与 comet classic 不互通**：workflow-kernel 状态独立于 classic（设计决策，非缺陷）
 - **无活跃 change 时 hook 放行**：`.comet/flow-comet-state.json` 不存在时 hook guard 降级放行所有写入（设计决策：无 workflow 时不限制文件操作）
@@ -511,21 +479,20 @@ node .../workflow-handoff.mjs status
 
 | 项 | 说明 |
 |----|------|
-| **当前版本** | v1.1.0（记录于 [CHANGELOG.md](CHANGELOG.md) 与 git tag；v1.0.0 = 首个稳定版：8 节点工作流 + 三层防线 + guard 校验体系） |
+| **当前版本** | v1.2.0（记录于 [CHANGELOG.md](CHANGELOG.md) 与 git tag；v1.0.0 = 首个稳定版：8 节点工作流 + 三层防线 + guard 校验体系） |
 | **版本策略** | 语义化版本：新功能发布 → minor（1.2.0）、bug 修复 → patch（1.1.1）、破坏性变更 → major（2.0.0）；每轮功能迭代完成时 bump |
-| **bundle 版本解耦** | `bundle.yaml`/`skill.yaml` 的 version 保持 1.0.0（bundle 发布流程与版本号解耦——避免每次 bump 需重新 eval/distribute）；git tag 与 CHANGELOG 是版本唯一事实来源 |
+| **bundle 版本解耦** | `bundle.yaml`/`skill.yaml` 的 version 保持 1.0.0（bundle 发布流程与版本号解耦）；git tag 与 CHANGELOG 是版本唯一事实来源 |
 | **依赖（必需）** | [flow-kit](https://github.com/rihebty/flow-kit)（方法论与工件模板）；Claude Code |
-| **依赖（可选）** | [Comet CLI](https://github.com/rpamis/comet)（仅作者分发流程：compile/eval/review/approve/run/distribute） |
 | **平台** | Claude Code（skill 体系）；不保证 Codex/Gemini/Cursor |
 | **运行时** | 脚本为 Node.js ESM（Node ≥ 18）；工件语言与项目主语言一致 |
 | **兼容策略** | 旧 change/旧 state 自动补默认字段（executionMode/branchMode/enablePrReview），无分支 change 照常运行——向后兼容 |
-| **回归基线** | `guard-self-test.mjs` 49 场景全绿（每次改动后必须） |
+| **回归基线** | `guard-self-test.mjs` 54 场景全绿（每次改动后必须） |
 
 ---
 
 ## Contributing
 
-欢迎贡献。修改 skill/脚本请改 `.comet/bundle-drafts/flow-comet/skills/`（权威源），然后走发布流程（见 Installation 方案 A）。每次改动后运行 `guard-self-test.mjs` 回归（49 场景全绿为验收标准）。
+欢迎贡献。修改 skill/脚本请改 `.comet/bundle-drafts/flow-comet/skills/`（权威源），然后走发布流程（见 Installation 方案 A）。每次改动后运行 `guard-self-test.mjs` 回归（54 场景全绿为验收标准）。
 
 ---
 
