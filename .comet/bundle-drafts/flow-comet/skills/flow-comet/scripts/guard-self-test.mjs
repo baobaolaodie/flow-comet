@@ -1363,6 +1363,46 @@ const SCENARIOS = [
       assertOut(res, '一致性: ok');
     },
   },
+
+  // ---------- T-FIX-15 场景（S55~S57：init 写 status + hook 判定对齐） ----------
+
+  // 55: init 生成的 state 必须含 status:'running'（当前缺——hook 判定不一致的根源）
+  {
+    name: '55 init state 含 status: running（T-FIX-15）',
+    run: (dir) => {
+      const res = runState(['init', 'tf15-st'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      if (st.status !== 'running') {
+        throw new Error('init state 缺 status: running，实际: ' + JSON.stringify(st.status));
+      }
+    },
+  },
+
+  // 56: init 后（open 阶段）越权写源码 → hook BLOCK（当前因 status undefined 放行——三层防线缺口）
+  {
+    name: '56 hook BLOCKED：init 后越权写源码（T-FIX-15）',
+    run: (dir) => {
+      const initRes = runState(['init', 'tf15-hk'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(initRes, 0);
+      const res = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'src', 'evil.py') } });
+      assertExit(res, 2);
+    },
+  },
+
+  // 57: status:'completed'（归档后状态）→ hook 放行（当前 exit 1 拦截全部写入）
+  {
+    name: '57 hook 放行：status completed 归档后状态（T-FIX-15）',
+    run: (dir) => {
+      writeState(dir, composeState({ status: 'completed', activeChange: null, currentNode: null }));
+      const res = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'anything.md') } });
+      assertExit(res, 0);
+    },
+  },
 ];
 
 // ---------- 运行 ----------

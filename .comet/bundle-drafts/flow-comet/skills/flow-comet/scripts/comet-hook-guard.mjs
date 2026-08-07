@@ -1737,7 +1737,15 @@ async function main() {
     }
     throw error;
   }
-  if (state.status !== 'running') {
+  // T-FIX-15: status 判定三层语义——running（含旧 state 无 status 但有 activeChange，fail-closed 向后兼容）
+  // → 白名单校验；completed（归档后）→ 放行；其他 → 拦截
+  const running = state.status === 'running' || (Boolean(state.activeChange) && state.status === undefined);
+  if (!running) {
+    if (state.status === 'completed') {
+      console.log('workflow-hook-guard-ok');
+      console.log('EVENT: ' + event + ' (workflow completed)');
+      return;
+    }
     throw new Error('workflow is not running; current status is ' + String(state.status));
   }
   const current = state.currentNode ?? nextNode(protocol, state)?.id ?? null;

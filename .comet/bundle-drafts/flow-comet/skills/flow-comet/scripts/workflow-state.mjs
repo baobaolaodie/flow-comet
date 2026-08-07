@@ -413,6 +413,7 @@ async function main() {
       branchMode,
       enablePrReview: false,
       branchPrefix,
+      status: 'running',
       createdAt: new Date().toISOString()
     };
     await writeState(state);
