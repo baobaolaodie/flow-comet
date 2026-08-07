@@ -1453,6 +1453,52 @@ const SCENARIOS = [
       }
     },
   },
+
+  // ---------- 补齐场景（S61~S62：T-FIX-15 兼容分支固化 + T-FIX-17 扩展） ----------
+
+  // 61: 旧 state（无 status 字段但有 activeChange）→ hook 按 running 处理（fail-closed 向后兼容，行为固化）
+  {
+    name: '61 hook fail-closed：旧 state 无 status 有 activeChange 按 running（T-FIX-15 固化）',
+    run: (dir) => {
+      const st = baseState('open');
+      delete st.status;
+      st.activeChange = 'legacy-change';
+      writeState(dir, st);
+      const res = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'src', 'evil.py') } });
+      assertExit(res, 2);
+    },
+  },
+
+  // 62: state 文件缺失 + .specs/ 顶层残留目录（含 TASK.md）但 archive/ 下有对应归档 → 不误判（T-FIX-17 扩展）
+  {
+    name: '62 state 缺失时归档残留不误判（T-FIX-17 扩展）',
+    run: (dir) => {
+      writeFile(dir, '.specs/calc-expr-eval/CHANGE.md', '# CHANGE\n## Why\nx\n');
+      writeFile(dir, '.specs/calc-expr-eval/TASK.md', '# TASK\n');
+      writeFile(dir, '.specs/archive/2026-08-08-calc-expr-eval/CHANGE.md', '# CHANGE\n## Why\nx\n');
+      const res = runState(['status'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'no-change');
+      assertNotOut(res, 'calc-expr-eval');
+    },
+  },
+
+  // 63: init 后（open 阶段）合法写 .specs/ 工件 → hook 放行（T-FIX-15 正确 RED：
+  // 修复前 init 无 status → hook「not running」throw exit 1 拦截合法写入——open 阶段无法产出工件）
+  {
+    name: '63 hook 放行：init 后写 .specs/ 工件（T-FIX-15）',
+    run: (dir) => {
+      const initRes = runState(['init', 'tf15-ok'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(initRes, 0);
+      const res = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', 'tf15-ok', 'CHANGE.md') } });
+      assertExit(res, 0);
+      assertOut(res, 'NODE: open');
+    },
+  },
 ];
 
 // ---------- 运行 ----------

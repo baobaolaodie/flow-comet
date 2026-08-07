@@ -45,9 +45,17 @@ async function findActiveChange() {
   // 2. Scan .specs/ for directories with TASK.md (active flow-kit changes)
   try {
     const entries = await fs.readdir(specsRoot, { withFileTypes: true });
+    // T-FIX-17 扩展: 归档残留防误判——archive/ 下已有对应归档（<date>-<id> 剥日期前缀）的目录跳过；
+    // 真实进行中的 change 无归档，恢复兜底不受影响
+    const archivedIds = new Set(
+      (await fs.readdir(path.join(specsRoot, 'archive'), { withFileTypes: true }).catch(() => []))
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name.replace(/^\d{4}-\d{2}-\d{2}-/, ''))
+    );
     const candidates = [];
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name === 'archive' || entry.name === 'health' || entry.name === 'evolve' || entry.name === 'adr') continue;
+      if (archivedIds.has(entry.name)) continue;
       const taskFile = path.join(specsRoot, entry.name, 'TASK.md');
       if (await fileExists(taskFile)) candidates.push(entry.name);
     }
