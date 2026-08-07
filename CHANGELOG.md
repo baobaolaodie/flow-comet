@@ -4,6 +4,23 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号仅记录于 git tag 与本文档；`bundle.yaml` 的 version 保持 1.0.0（与 bundle 发布流程解耦，见 README「版本与兼容性」）。
 
+## [1.2.1] - 2026-08-08
+
+安装引导 dogfood 修复批次（T-FIX-15~18 + README 指引修复）。
+
+### Fixed
+
+- **init state 补 `status: 'running'` + hook 判定三层语义**（T-FIX-15，dogfood D-09/D-12）：此前 init 不写 status，hook 对 status 未定义的 state 放行——open 阶段（首次 guard exit 前）三层防线第一层失效；且归档后 `completed` 状态被 hook 拦截全部写入。修复后：running（含旧 state 无 status 有 activeChange，fail-closed 向后兼容）→ 白名单校验；completed → 放行
+- **init 创建 `.specs/<id>/` 目录**（T-FIX-16，dogfood D-02）：此前 init 后 `next`/`status` 报「No active change. Run: init」（findActiveChange 要求目录存在），与 SKILL 启动协议（init → next）矛盾
+- **findActiveChange 归档完成态不兜底扫描**（T-FIX-17，dogfood D-10）：归档残留目录（含 TASK.md 的旧副本）不再被误判为 active change
+- **init currentNode 按协议首节点**（T-FIX-18，dogfood D-11）：自定义协议首节点非 open 时不再硬编码 open
+- guard 自测套件扩展至 60 场景（S55~S60：init status/init 后 hook 拦截/completed 放行/init 后 next 识别/残留不误判/协议首节点）
+
+### Changed
+
+- **README 验证安装**改为四步（结构检查 / 配置可加载性 / 权威源 diff 一致性 / 真实环境冒烟）——guard-self-test 标注为**作者回归基线**（脚本逻辑自测，不依赖安装完整性，不是安装验证判据）
+- README 快速开始补 flow-kit 前置依赖提示与新会话生效提示；Requirements 补 flow-kit 安装验证步骤；settings 注入说明补首次创建/已有文件两情形；hook command 补相对路径解析基准（项目根）
+
 ## [1.2.0] - 2026-08-08
 
 自定义组合 skill（flow-comet-compose）+ 协议参数化 + 非破坏安装器。

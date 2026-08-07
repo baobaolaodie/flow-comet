@@ -3,7 +3,7 @@
 **flow-kit 9 阶段开发工作流的自动化执行引擎** —— 面向 Claude Code 平台的 workflow-kernel 实现。
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.2.1-blue.svg)](CHANGELOG.md)
 
 flow-comet 把 flow-kit 的 9 阶段开发流程（CHANGE → REQUIREMENT → DESIGN → TASK → DEV → TEST → REVIEW → INTEGRATION → ARCHIVE）从"依赖人工纪律的手动流程"变成**可验证的确定状态机**：脚本控制阶段推进、guard 校验产物质量、hook 拦截跨阶段写入、子代理隔离并行执行——流程结构自动化，行为纪律保留。
 
@@ -48,6 +48,8 @@ flow-comet 站在三个项目的交汇点：
 
 **5 分钟跑通第一个 change**（详细安装见 [Installation](#installation)）：
 
+> **前置依赖**：目标项目需先安装 [flow-kit](https://github.com/rihebty/flow-kit)（见 [Installation Requirements](#requirements)，`git clone https://github.com/rihebty/flow-kit.git flow-kit`）——flow-comet 的产物模板与规则来自 flow-kit。
+
 1. **安装**（方案 A：prepare-env 安装器，无 Comet CLI 依赖）——在 flow-comet 仓库内执行一次：
 
    ```bash
@@ -55,7 +57,7 @@ flow-comet 站在三个项目的交汇点：
    node scripts/prepare-env.mjs --target <目标项目绝对路径>
    ```
 
-2. **打开目标项目**，在 Claude Code 中输入：
+2. **打开目标项目**（新开会话，让 Claude Code 识别新安装的 skill），在 Claude Code 中输入：
 
    ```
    /flow-comet
@@ -188,13 +190,13 @@ CHANGE.md 头部含 `express: true`（低风险判定：改动 ≤3 文件、无
 - PROGRESS.md 恢复警告（R1.6 反重复）
 - 分支-状态一致性校验
 
-### 6. guard 自测套件
+### 6. guard 自测套件（作者回归基线）
 
-`scripts/guard-self-test.mjs`：54 场景覆盖全部 entry/exit 校验正反例（含分支校验、追加位置检测、自定义协议、组合场景），每次改动后回归：
+`scripts/guard-self-test.mjs`：60 场景覆盖全部 entry/exit 校验正反例（含分支校验、追加位置检测、自定义协议、组合场景），**作者每次改动后回归**（脚本自身机制自测——在自建临时环境模拟 state/协议/hook 输入，**不依赖安装完整性**，不是安装验证判据）：
 
 ```bash
 node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 54 SCENARIOS PASSED
+# → ALL 60 SCENARIOS PASSED
 ```
 
 ---
@@ -294,6 +296,8 @@ cd <目标项目>
 git clone https://github.com/rihebty/flow-kit.git flow-kit
 ```
 
+  验证 flow-kit 安装成功：`ls <目标项目>/flow-kit/templates/` 应列出工件模板文件（CHANGE.md / REQUIREMENT.md 等）。
+
 ### 方案 A · prepare-env 安装器（推荐）
 
 从本仓库使用 `prepare-env` 脚本自动化安装到目标项目（无需 Comet CLI）：
@@ -305,7 +309,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径>
 
 `prepare-env` 会：
 1. **生成/覆盖 `rules/` 与 `skills/`**（全部 flow-comet* skill，从权威源 `.comet/bundle-drafts/flow-comet/`）
-2. **注入 hook 到 `settings.local.json`**——采用**读-合并-写**方式（参考 Comet 安装器）：保留目标项目既有的一切内容（`permissions`、自定义 hook、其他 matcher 组等），仅在 `hooks.PreToolUse` 中注入/更新 comet-hook-guard 条目（已存在的 comet hook 会被替换而不是重复追加——幂等）
+2. **注入 hook 到 `settings.local.json`**——采用**读-合并-写**方式（参考 Comet 安装器）：保留目标项目既有的一切内容（`permissions`、自定义 hook、其他 matcher 组等），仅在 `hooks.PreToolUse` 中注入/更新 comet-hook-guard 条目（已存在的 comet hook 会被替换而不是重复追加——幂等）。**首次创建**（目标项目原本没有 `settings.local.json`）时只写入 hook 条目；**已有文件**时按读-合并-写保留既有字段
 
 **非破坏设计**：默认**不会删除**目标项目 `.claude/` 下任何既有内容（`commands/`、自定义 skill、自定义配置全部保留）。显式传入 `--purge --yes` 才会删除整个 `.claude/` 后重建（打印删除清单 + 警告，用于 e2e 假项目等干净环境；`--yes` 为二次确认，防误传）。
 
@@ -329,7 +333,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 3. **一致性检查**：与权威源比对（在 flow-comet 仓库内执行，strip 行尾差异后应无差异）：`diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/rules <目标项目>/.claude/rules` 与 `diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/skills <目标项目>/.claude/skills`
 4. **真实环境冒烟**：`node <目标项目>/.claude/skills/flow-comet/scripts/workflow-state.mjs status` 能正常输出（证明脚本在真实 cwd 下可运行、无语法错误、能读状态）
 
-> **注意**：`guard-self-test.mjs` 的 54 场景是**作者回归基线**（脚本自身机制自测——在自建临时环境模拟 state/协议/hook 输入，不依赖安装完整性），不是安装验证判据；它通过只证明脚本逻辑没坏。
+> **注意**：`guard-self-test.mjs` 的 60 场景是**作者回归基线**（脚本自身机制自测——在自建临时环境模拟 state/协议/hook 输入，不依赖安装完整性），不是安装验证判据；它通过只证明脚本逻辑没坏。
 
 ### 方案 B · 手动复制粘贴（无脚本环境兜底）
 
@@ -347,7 +351,7 @@ cp -r $SKILLS/flow-comet* "$TARGET/.claude/skills/"
 cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.claude/rules/"
 ```
 
-**3. 注册 hook（手动）**：在目标项目 `.claude/settings.local.json` 的 `hooks` 中**合并**以下片段（保留该文件既有内容，如 `permissions`）：
+**3. 注册 hook（手动）**：在目标项目 `.claude/settings.local.json` 的 `hooks` 中**合并**以下片段（保留该文件既有内容，如 `permissions`）。hook command 的相对路径**相对于 Claude Code 的项目根**解析（即 `<目标项目>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`）：
 
 ```json
 {
@@ -499,11 +503,11 @@ node workflow-handoff.mjs request|result|status                # 子代理委托
 
 | 文档 | 说明 |
 |------|------|
-| [变更日志](CHANGELOG.md) | Keep a Changelog 风格，版本历史（当前 v1.2.0） |
+| [变更日志](CHANGELOG.md) | Keep a Changelog 风格，版本历史（当前 v1.2.1） |
 | [产物示例](docs/examples/schedule-venue-filter/) | 全流程 12 个工件参考 |
 | [验证记录](VERIFICATION.md) | 分发验证 |
 
-**回归验证**：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 54 SCENARIOS PASSED`。
+**回归验证（作者基线）**：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 60 SCENARIOS PASSED`。
 
 ---
 
@@ -543,20 +547,20 @@ node workflow-handoff.mjs request|result|status                # 子代理委托
 
 | 项 | 说明 |
 |----|------|
-| **当前版本** | v1.2.0（记录于 [CHANGELOG.md](CHANGELOG.md) 与 git tag；v1.0.0 = 首个稳定版：8 节点工作流 + 三层防线 + guard 校验体系） |
+| **当前版本** | v1.2.1（记录于 [CHANGELOG.md](CHANGELOG.md) 与 git tag；v1.0.0 = 首个稳定版：8 节点工作流 + 三层防线 + guard 校验体系） |
 | **版本策略** | 语义化版本：新功能发布 → minor（1.2.0）、bug 修复 → patch（1.1.1）、破坏性变更 → major（2.0.0）；每轮功能迭代完成时 bump |
 | **bundle 版本解耦** | `bundle.yaml`/`skill.yaml` 的 version 保持 1.0.0（bundle 发布流程与版本号解耦）；git tag 与 CHANGELOG 是版本唯一事实来源 |
 | **依赖（必需）** | [flow-kit](https://github.com/rihebty/flow-kit)（方法论与工件模板）；Claude Code |
 | **平台** | Claude Code（skill 体系）；不保证 Codex/Gemini/Cursor |
 | **运行时** | 脚本为 Node.js ESM（Node ≥ 18）；工件语言与项目主语言一致 |
 | **兼容策略** | 旧 change/旧 state 自动补默认字段（executionMode/branchMode/enablePrReview），无分支 change 照常运行——向后兼容 |
-| **回归基线** | `guard-self-test.mjs` 54 场景全绿（每次改动后必须） |
+| **回归基线** | `guard-self-test.mjs` 60 场景全绿（每次改动后必须） |
 
 ---
 
 ## Contributing
 
-欢迎贡献。修改 skill/脚本请改 `.comet/bundle-drafts/flow-comet/skills/`（权威源），然后走发布流程（见 Installation 方案 A）。每次改动后运行 `guard-self-test.mjs` 回归（54 场景全绿为验收标准）。
+欢迎贡献。修改 skill/脚本请改 `.comet/bundle-drafts/flow-comet/skills/`（权威源），然后走发布流程（见 Installation 方案 A）。每次改动后运行 `guard-self-test.mjs` 回归（60 场景全绿为验收标准）。
 
 ---
 
