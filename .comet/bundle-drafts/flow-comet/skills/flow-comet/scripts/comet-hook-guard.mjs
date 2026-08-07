@@ -2,12 +2,20 @@
   import { constants as fsConstants, promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import {
+  parseProtocolWriteWhitelist,
+  readProtocolFile,
+  resolveProtocol,
+  validateProtocolSchema,
+} from './protocol-utils.mjs';
 
 const event = process.argv[2] ?? 'before_tool';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..');
 const runRoot = process.env.COMET_RUN_ROOT ? path.resolve(process.env.COMET_RUN_ROOT) : process.cwd();
-const protocolPath = path.join(packageRoot, 'reference', 'workflow-protocol.json');
+// hook 由 settings.json 静态命令调用，不支持 CLI 参数（cliArgs 传 []）：
+// 协议路径取 env FLOW_COMET_PROTOCOL 或默认 <packageRoot>/reference/workflow-protocol.json
+const protocolPath = resolveProtocol(packageRoot, runRoot, []);
 
 
 const WORKFLOW_PROJECT_CONFIG_MAX_BYTES = 64 * 1024;
@@ -16,7 +24,9 @@ const WORKFLOW_PROJECT_FILE_MAX_BYTES = 2 * 1024 * 1024;
 // Phase 写入白名单：currentNode → 允许写入的（相对 runRoot 的）路径前缀
 // '.specs/' 前缀表示只允许 .specs 目录下的文件（subagent-execute 始终协调者，只写工件；源码由 worktree 子代理写）
 // 其他路径前缀精确匹配
-// 注：execute 的名单由 state.executionMode 动态决定（subagent=协调者 .specs/；direct=逃生口允许主代理直写源码），见 main() 内组装
+// 注：白名单已声明化（协议 writeWhitelist 优先，缺失/读取失败时回退下方缺省表）；
+// execute 的名单由 state.executionMode 动态收窄（subagent=协调者 .specs/；direct=逃生口允许主代理直写源码），
+// 收窄规则对缺省/声明表同样生效，见 resolvePhaseWriteWhitelist()
 
 function workflowProjectRelativeSegments(value, label) {
   if (typeof value !== 'string') throw new Error(label + ' must be a string');
@@ -1568,10 +1578,6 @@ async function statePath(protocol) {
   return target;
 }
 
-async function readJson(file) {
-  return JSON.parse(await fs.readFile(file, 'utf8'));
-}
-
 async function readStateJson(file) {
   return JSON.parse(
     (
@@ -1628,11 +1634,47 @@ function writeTargetFromHookInput(input) {
   return relative === '' ? '.' : relative.replaceAll('\\', '/');
 }
 
-async function main() {
-  const protocol = await readJson(protocolPath);
-  if (protocol.schemaVersion !== 1 || !Array.isArray(protocol.nodes)) {
-    throw new Error('workflow-protocol.json must use the current schema with nodes');
+// 声明化写入白名单：协议 writeWhitelist（节点 id → 路径前缀数组）优先；
+// 协议读取/解析失败或未声明 writeWhitelist 时静默回退缺省表（fail-closed，不 throw、不阻断 hook 主体流程——
+// 与 state 读取失败放行不同：白名单缺失会出洞，缺省表是最小安全兜底）
+// execute 收窄为通用规则：无论 execute 来自缺省还是协议，subagent 模式一律收窄为 ['.specs/']（协调者只写工件），
+// direct 模式用声明/缺省值（缺省 direct 允许所有 = 主代理直写源码）
+async function resolvePhaseWriteWhitelist(executionMode) {
+  try {
+    const protocol = await readProtocolFile(runRoot, protocolPath);
+    validateProtocolSchema(protocol);
+    const declared = parseProtocolWriteWhitelist(protocol);
+    if (declared !== null) {
+      // 协议声明模式：返回声明表 + declared=true（main 中对未列出节点 fail-closed 拒绝）
+      return {
+        whitelist: executionMode === 'subagent'
+          ? { ...declared, execute: ['.specs/'] }
+          : declared,
+        declared: true,
+      };
+    }
+  } catch {
+    // 协议读取/解析失败 → 静默回退缺省表（不 throw）
   }
+  const executeWhitelist = executionMode === 'direct' ? [''] : ['.specs/'];
+  return {
+    whitelist: {
+      'open':             ['.specs/'],
+      'design':           ['.specs/', '.specs/adr/'],
+      'plan':             ['.specs/'],
+      'execute':          executeWhitelist, // subagent: .specs/（协调者）；direct: 允许所有（主代理直写）
+      'subagent-execute': ['.specs/'],      // 始终协调者（parallel 仍委托，防 execute 吞 parallel 回归）
+      'review':           ['.specs/'],
+      'verify':           ['.specs/'],
+      'archive':          ['.specs/archive/', '.specs/CHANGELOG.md', '.specs/LESSONS.md', 'STATE.md'],
+    },
+    declared: false,
+  };
+}
+
+async function main() {
+  const protocol = await readProtocolFile(runRoot, protocolPath);
+  validateProtocolSchema(protocol);
   const nodes = route(protocol);
   if (nodes.length === 0) {
     throw new Error('workflow protocol has no enabled nodes');
@@ -1649,18 +1691,9 @@ async function main() {
     executionMode = state.executionMode ?? 'subagent';
   } catch {}
 
-  // 白名单：direct 模式下 execute 允许写源码（主代理直接执行串行任务）；subagent 模式与 subagent-execute 始终协调者（只写 .specs/）
-  const executeWhitelist = executionMode === 'direct' ? [''] : ['.specs/'];
-  const PHASE_WRITE_WHITELIST = {
-    'open':             ['.specs/'],
-    'design':           ['.specs/', '.specs/adr/'],
-    'plan':             ['.specs/'],
-    'execute':          executeWhitelist, // subagent: .specs/（协调者）；direct: 允许所有（主代理直写）
-    'subagent-execute': ['.specs/'],      // 始终协调者（parallel 仍委托，防 execute 吞 parallel 回归）
-    'review':           ['.specs/'],
-    'verify':           ['.specs/'],
-    'archive':          ['.specs/archive/', '.specs/CHANGELOG.md', '.specs/LESSONS.md', 'STATE.md'],
-  };
+  // 白名单声明化：协议 writeWhitelist 优先（节点 id → 路径前缀数组），缺失/读取失败时静默回退缺省表（fail-closed）
+  // execute 收窄规则对缺省/声明表同样生效（subagent → ['.specs/'] 协调者；direct → 声明/缺省值）
+  const { whitelist: PHASE_WRITE_WHITELIST, declared } = await resolvePhaseWriteWhitelist(executionMode);
 
   const target = writeTargetFromHookInput(await readHookInput());
   if (currentNode && target) {
@@ -1672,6 +1705,12 @@ async function main() {
         console.error(`允许范围: ${whitelist.join(', ')}`);
         process.exit(2);
       }
+    } else if (declared) {
+      // 审查补充（2026-08-08）：协议声明了 writeWhitelist 但未列出当前节点 → fail-closed 拒绝
+      // （漏声明节点不放行——防协议作者漏列导致防线出洞）
+      console.error(`BLOCKED: phase "${currentNode}" 未在协议 writeWhitelist 中声明，默认拒绝写入 "${target}"`);
+      console.error(`请在协议 writeWhitelist 中为节点 "${currentNode}" 声明允许的路径前缀`);
+      process.exit(2);
     }
   }
   if (isCometOverlay(protocol)) {

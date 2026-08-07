@@ -18,6 +18,7 @@ flow-comet 把 flow-kit 的 9 阶段开发流程（CHANGE → REQUIREMENT → DE
 - [工作流总览](#工作流总览)
 - [工件体系](#工件体系)
 - [核心机制](#核心机制)
+- [自定义协议（flow-comet-compose）](#自定义协议flow-comet-compose)
 - [设计原理](#设计原理)
 - [Installation](#installation)
 - [Usage](#usage)
@@ -48,8 +49,8 @@ flow-comet 站在三个项目的交汇点：
 **5 分钟跑通第一个 change**（详细安装见 [Installation](#installation)）：
 
 ```bash
-# 1. 安装（方案 A：直接复制，无 Comet CLI 依赖）
-#    复制 skills/ + rules/ + 注册 hook（见 Installation 方案 A）
+# 1. 安装（方案 A：prepare-env 安装器，无 Comet CLI 依赖）
+#    node scripts/prepare-env.mjs --target <目标项目>（见 Installation 方案 A）
 
 # 2. 启动工作流（自动创建 change/<id> 分支 + open 节点）
 node .claude/skills/flow-comet/scripts/workflow-state.mjs init my-first-change
@@ -158,7 +159,10 @@ CHANGE.md 头部含 `express: true`（低风险判定：改动 ≤3 文件、无
 | 机制 | 校验点 | 触发 |
 |------|--------|------|
 | 段名模板派生 | open/design exit 必填段名从 `flow-kit/templates/` 自动派生（模板缺失 fallback） | exit open/design |
-| TASK 签名哈希 | enter 记录任务集签名（剥离 status）→ exit 比对：增删任务/改 action/改边界 BLOCKED；标记 done 合法 | enter/exit execute |
+| TASK 签名哈希 | enter 记录任务集签名（行尾规范化 + 剥离标记类属性 status/completed_at 等）→ exit 比对：增删任务/改 action/改边界 BLOCKED；标记 done/加标记属性合法 | enter/exit execute |
+| 节点顺序 BLOCK | next 时 currentNode 未 exit（非正常推进后继）→ BLOCKED；exit 推进后的正常 next 豁免；T-FIX 回退豁免（TASK 有 pending T-FIX） | next |
+| handoff completedChecks | 子代理回传的 Return Contract 必须含 required-skill completedChecks（skill 加载证据），缺失 BLOCKED | exit subagent-execute |
+| redEvidence 时序 | handoff 中 redEvidence 必须先于 greenEvidence 真实存在；已记录 greenEvidence 后补录 redEvidence → BLOCKED | workflow-handoff result |
 | SUMMARY 六段校验 | verify 输出/6 维自查（非空，按行过滤标题含 emoji）/越界检查 + `## 自检方法` 强制 | exit execute |
 | verify 真实执行 | TEST.md `## 验证命令` 段真实运行（支持多行 `&&`）；verifyFailures 机器计数，第 4 次 BLOCKED | exit verify |
 | 追加位置检测 | CONTEXT 孤立追加段 / LESSONS 编号乱序+区外 / STATE+CHANGELOG 非倒序 → WARN（渐进） | exit open/verify/archive |
@@ -167,7 +171,7 @@ CHANGE.md 头部含 `express: true`（低风险判定：改动 ≤3 文件、无
 
 ### 4. 执行模型（子代理化）
 
-- **Return Contract**：子代理回传 `{status, commitHash, redEvidence, greenEvidence, riskSignals}`——缺 commitHash/greenEvidence BLOCK；redEvidence 缺失渐进 WARN
+- **Return Contract**：子代理回传 `{status, commitHash, redEvidence, greenEvidence, completedChecks, riskSignals}`——缺 commitHash/greenEvidence/completedChecks BLOCK；redEvidence 缺失渐进 WARN；redEvidence 事后补录 BLOCK
 - **handoff hash 溯源**：`git show <commitHash>` 校验提交文件 ⊆ write_files（自动从 TASK.md 解析，剥离 XML 注释）
 - **write_files 冲突检测**：parallel 任务 write_files 不重叠才可同 wave 并行
 
@@ -179,12 +183,55 @@ CHANGE.md 头部含 `express: true`（低风险判定：改动 ≤3 文件、无
 
 ### 6. guard 自测套件
 
-`scripts/guard-self-test.mjs`：23 场景覆盖全部 entry/exit 校验正反例（含分支校验与追加位置检测），每次改动后回归：
+`scripts/guard-self-test.mjs`：49 场景覆盖全部 entry/exit 校验正反例（含分支校验、追加位置检测、自定义协议、组合场景），每次改动后回归：
 
 ```bash
 node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 23 SCENARIOS PASSED
+# → ALL 49 SCENARIOS PASSED
 ```
+
+---
+
+## 自定义协议（flow-comet-compose）
+
+`/flow-comet-compose` 是横向命令 skill（与 flow-comet-evolve / flow-comet-health 同类，**不属于 8 节点流程**）：引导你把任意已安装 skill 组合成自定义工作流协议（protocol JSON），生成后由同一套机制完整驱动（状态机路由 / guard 校验 / hook 拦截），无需新增任何运行时能力。内置 8 节点协议是默认工作流，**不可被取代**。
+
+### 加载方式
+
+| 方式 | 说明 |
+|------|------|
+| `--protocol <path>`（或 `--protocol=<path>`） | CLI 参数 |
+| `FLOW_COMET_PROTOCOL` | 环境变量 |
+
+优先级：`--protocol` CLI 参数 > `FLOW_COMET_PROTOCOL` 环境变量 > 内置默认（resolveProtocol）。
+
+### 协议最小结构
+
+| 字段 | 说明 |
+|------|------|
+| `schemaVersion` | `1` |
+| `kind` | `"workflow-kernel"` |
+| `name` | 协议名 |
+| `nodes[]` | 节点数组：`id`（避开内置 8 节点 id）、`implementation.skill`、`requiredSkillCalls`、`outputSchemas` |
+| `outputSchemas[]` | 产物 schema：`artifacts[].paths` + `evidence` |
+| `writeWhitelist`（可选） | hook 白名单（节点 id → 允许写入的路径前缀数组），缺省用内置白名单表 |
+| `taskFile`（可选） | 任务文件路径，缺省 `TASK.md` |
+
+### 强制最小规则
+
+- **每节点必须有产物**：`outputSchemas` 引用的 schema 必须存在于顶层 `outputSchemas[]`，且 `artifacts[].paths` 非空——没有产物就无法做 guard 校验与恢复
+- **每节点必须有 evidence**：每个 outputSchema 必须带 `evidence: [{ id, required }]`，供 `workflow-state.mjs record` 记录节点证据
+- **节点 id 避开内置 8 节点 id**：`open` / `design` / `plan` / `execute` / `subagent-execute` / `review` / `verify` / `archive` 为保留 id，自定义协议不得复用——防止特化校验（ADR-002 语义）误触发
+
+### 与内置协议的关系
+
+- **并存、互不干扰**：切换只需修改启动参数或环境变量
+- **默认不可变**：自定义协议不持久化生效，未显式指定时一切行为与内置协议完全一致
+- 内置 8 节点协议始终可用，作为默认工作流**不可被取代**
+
+### 指引
+
+详细交互流程见 `flow-comet-compose` skill；用法示例（最小 3 节点协议：头脑风暴 → TDD → 代码审查）见该 skill 的「产物示例」。
 
 ---
 
@@ -212,30 +259,75 @@ cd <目标项目>
 git clone https://github.com/rihebty/flow-kit.git flow-kit
 ```
 
-### 方案 A · 直接复制安装（推荐，第三方用户）
+### 方案 A · prepare-env 安装器（推荐）
 
-从本仓库复制 skill 与配置到目标项目（无 Comet CLI 依赖）：
+从本仓库使用 `prepare-env` 脚本自动化安装到目标项目（无需 Comet CLI）：
+
+```bash
+cd <本仓库>
+node scripts/prepare-env.mjs --target <目标项目绝对路径>
+```
+
+`prepare-env` 会：
+1. **生成/覆盖 `rules/` 与 `skills/`**（全部 flow-comet* skill，从权威源 `.comet/bundle-drafts/flow-comet/`）
+2. **注入 hook 到 `settings.local.json`**——采用**读-合并-写**方式（参考 Comet 安装器）：保留目标项目既有的一切内容（`permissions`、自定义 hook、其他 matcher 组等），仅在 `hooks.PreToolUse` 中注入/更新 comet-hook-guard 条目（已存在的 comet hook 会被替换而不是重复追加——幂等）
+
+**非破坏设计**：默认**不会删除**目标项目 `.claude/` 下任何既有内容（`commands/`、自定义 skill、自定义配置全部保留）。显式传入 `--purge --yes` 才会删除整个 `.claude/` 后重建（打印删除清单 + 警告，用于 e2e 假项目等干净环境；`--yes` 为二次确认，防误传）。
+
+```bash
+# 查看将覆盖的生成物清单后确认（默认非破坏，安全）
+node scripts/prepare-env.mjs --target <目标项目绝对路径>
+# 破坏性重建（仅用于干净环境，会删除目标 .claude/ 全部内容；需 --yes 二次确认）
+node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
+```
+
+> **使用前提**：`prepare-env` 脚本必须在 flow-comet 仓库内运行（它从仓库的 `.comet/bundle-drafts/flow-comet/` 权威源读取安装内容），`--target` 指向目标项目。
+>
+> **覆盖说明**：`prepare-env` 会覆盖目标项目 `.claude/rules/` 与 `.claude/skills/` 下的 **flow-comet 生成物**——若你对 flow-comet 自身文件做过本地修改，会被权威源版本覆盖；`.claude/` 下其他内容（`commands/`、自定义 skill、自定义配置）不受影响。
+>
+> **settings 保护**：若目标项目 `settings.local.json` 已存在且 JSON 非法，或 `hooks.PreToolUse` 不是数组结构，脚本会**中止注入并警告**（不覆盖用户配置），请手动按方案 B 添加 hook。
+
+验证安装：`node <目标项目>/.claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id>` 应输出 `NODE: open`。
+
+### 方案 B · 手动复制粘贴（无脚本环境兜底）
+
+无法运行 prepare-env 时，手动复制与配置：
 
 ```bash
 cd <本仓库>
 SKILLS=.comet/bundle-drafts/flow-comet/skills
 TARGET=<目标项目绝对路径>
 
-# 1. 复制 18 个 skill（含 GUIDANCE 与脚本）
+# 1. 复制全部 flow-comet* skill（含 GUIDANCE 与脚本）
 cp -r $SKILLS/flow-comet* "$TARGET/.claude/skills/"
 
 # 2. 复制编排规则
 cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.claude/rules/"
-
-# 3. 注册 hook（拦截 Write/Edit，按 phase 白名单控制写入）
-#    在目标项目 .claude/settings.local.json 的 "hooks" 中添加：
-#    { "matcher": "Write|Edit", "hooks": [{ "type": "command",
-#      "command": "node .claude/skills/flow-comet/scripts/comet-hook-guard.mjs" }] }
-
-# 4. 运行状态 .comet/flow-comet-state.json 由首个 /flow-comet 调用自动创建
 ```
 
-验证安装：`node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id>` 应输出 `NODE: open`。
+**3. 注册 hook（手动）**：在目标项目 `.claude/settings.local.json` 的 `hooks` 中**合并**以下片段（保留该文件既有内容，如 `permissions`）：
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/skills/flow-comet/scripts/comet-hook-guard.mjs"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+> `settings.local.json` 是每个项目各自的本地配置（权限、hook、偏好），**prepare-env 只注入 hook 条目、不覆盖其他字段**；手动安装时同样遵循"合并而非覆盖"。
+
+**4. 运行状态**：`.comet/flow-comet-state.json` 由首个 `/flow-comet` 调用自动创建。
 
 ### 安装后的项目集成（对 Comet 注入内容的定制）
 
@@ -244,16 +336,35 @@ flow-comet 会**定制 `comet init` 注入的 `<comet-ambient-resume>` 块**（C
 1. 若目标项目已运行过 `comet init`（CLAUDE.md 存在该块），将其内容替换为：
 
 ```markdown
+<comet-ambient-resume>
+<!-- Managed by Comet. Edits inside this block may be replaced by comet init/update. -->
+<!-- Contract: comet.resume_probe.v2 -->
+<!-- flow-comet overlay: project uses flow-comet as primary workflow -->
+
+## Comet Ambient Resume
+
+在这个仓库中，开始处理需要改动或调查的任务前，如果可能存在活跃 Comet workflow，按以下顺序检查：
+
 ### 优先级 1：flow-comet 路由（项目主工作流）
+
 如果 `.claude/skills/flow-comet/SKILL.md` 存在（flow-comet 已安装）：
+
 1. 检查 `.comet/current-change.json` 或运行 `comet state get <change> phase` 确认是否有活跃 change
 2. 如有活跃 change 且 `phase=build`，直接进入 `/flow-comet`（不要运行 resume probe）
 3. 如有活跃 change 但 phase 不是 build，按 flow-comet 的节点路由表决定入口
 4. 如无活跃 change，用户明确要开发时进入 `/flow-comet`（它会路由到 open 阶段）
 
 ### 优先级 2：Comet 标准探针（flow-comet 不适用时）
+
 仅当 flow-comet 未安装或用户明确调用 `/comet-classic` 时，运行标准探针：
 `comet resume-probe . --stdin --json`
+
+- 如果用户通过宿主明确调用任意 Comet Skill（例如 `/comet`、`/comet-classic`、`/comet-hotfix`），显式调用优先于本恢复协议。
+- 如果 probe 返回 `auto_resume`，简短说明选中的 active change，并进入 `nextCommand` 指向的永久入口。
+- 如果 probe 返回 `ask_user`，只问一个简短问题并等待用户回复。
+- 如果 probe 返回 `out_of_scope` 或 `none`，不要进入 Comet workflow。
+- 不能只因为存在 active change 就把无关任务挂到该 change。
+</comet-ambient-resume>
 ```
 
 2. **注意**：块头保留 `Managed by Comet` 标记——重跑 `comet init`/`comet update` 会把该块**覆盖回标准内容**，需重新应用本定制。
@@ -264,7 +375,7 @@ flow-comet 会**定制 `comet init` 注入的 `<comet-ambient-resume>` 块**（C
 - `flow-comet-orchestration.md` — flow-comet bundle 自带（自动安装，标识 Entry Skill 与编排结构）
 - `comet-workflow-guard.md` — Comet 生态规则（`comet init` 安装，Native/Classic 双 workflow 防串扰）
 
-### 方案 B · comet bundle 分发（作者流程，源工作区）
+### 方案 C · comet bundle 分发（作者流程，源工作区）
 
 > **注意**：comet 的分发模型是**从有 bundle-authoring 状态的项目分发**（即本仓库自身），不是"分发到任意目标项目"——对全新项目执行 distribute 会因缺少 `.comet/bundle-authoring/flow-comet.json` 报 ENOENT。
 
@@ -294,7 +405,7 @@ comet publish run flow-comet --platform claude
 comet publish distribute flow-comet --platform claude --scope project --project . --confirm-executables
 ```
 
-> 无 `ANTHROPIC_API_KEY` 时 eval 无法运行——改用方案 A（直接复制）保持安装副本同步，并在 bundle-authoring 状态中记录 hash 漂移（`drift-conflict`），下次有 key 时 reconcile。
+> 无 `ANTHROPIC_API_KEY` 时 eval 无法运行——改用方案 A（prepare-env 安装器）或方案 B（手动复制）保持安装副本同步，并在 bundle-authoring 状态中记录 hash 漂移（`drift-conflict`），下次有 key 时 reconcile。
 
 ---
 
@@ -358,7 +469,7 @@ node .../workflow-handoff.mjs status
 | [产物示例](docs/examples/schedule-venue-filter/) | 全流程 12 个工件参考 |
 | [验证记录](VERIFICATION.md) | 分发验证 |
 
-**回归验证**：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 23 SCENARIOS PASSED`。
+**回归验证**：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 49 SCENARIOS PASSED`。
 
 ---
 
@@ -408,13 +519,13 @@ node .../workflow-handoff.mjs status
 | **平台** | Claude Code（skill 体系）；不保证 Codex/Gemini/Cursor |
 | **运行时** | 脚本为 Node.js ESM（Node ≥ 18）；工件语言与项目主语言一致 |
 | **兼容策略** | 旧 change/旧 state 自动补默认字段（executionMode/branchMode/enablePrReview），无分支 change 照常运行——向后兼容 |
-| **回归基线** | `guard-self-test.mjs` 23 场景全绿（每次改动后必须） |
+| **回归基线** | `guard-self-test.mjs` 49 场景全绿（每次改动后必须） |
 
 ---
 
 ## Contributing
 
-欢迎贡献。修改 skill/脚本请改 `.comet/bundle-drafts/flow-comet/skills/`（权威源），然后走发布流程（见 Installation 第 3 步）。每次改动后运行 `guard-self-test.mjs` 回归（23 场景全绿为验收标准）。
+欢迎贡献。修改 skill/脚本请改 `.comet/bundle-drafts/flow-comet/skills/`（权威源），然后走发布流程（见 Installation 方案 A）。每次改动后运行 `guard-self-test.mjs` 回归（49 场景全绿为验收标准）。
 
 ---
 

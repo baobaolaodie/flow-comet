@@ -8,7 +8,7 @@ import { validateStateFields } from './state-schema.mjs';
 // evidence 统一记录在 subagent-execute 名下作为委托证据库——execute（串行委托）与 subagent-execute（并行委托）共用。不改成节点参数，保持最小改动。
 // Usage:
 //   node workflow-handoff.mjs request <task-id> <description> [--write-files <files...>]  -- record handoff request (W2-D: optional writeFiles allow-list)
-//   node workflow-handoff.mjs result <task-id> <result-or-JSON>  -- record handoff result (W1-D: JSON Return Contract; W2-D: commitHash subset check)
+//   node workflow-handoff.mjs result <task-id> <result-or-JSON>  -- record handoff result (W1-D: JSON Return Contract; W2-D: commitHash subset check; T-FIX-04: completedChecks 规范化; T-FIX-06: redEvidence 时间顺序校验)
 //   node workflow-handoff.mjs status                           -- show all handoff evidence
 
 const runRoot = process.cwd();
@@ -110,6 +110,41 @@ async function main() {
       }
     } else if (typeof parsed === 'object' && parsed !== null && parsed.commitHash) {
       console.error('HANDOFF ERROR: commitHash 格式非法: ' + String(parsed.commitHash));
+    }
+    // T-FIX-06: redEvidence 时间顺序校验——重新 result 已存在 taskId 且该 task 已有 greenEvidence
+    // 而无 redEvidence 时，新增 redEvidence 属于事后补录（TDD 要求 RED 先于 GREEN）→ BLOCKED。
+    // 同批一次性回传 red+green 不受影响；已存在 redEvidence 的记录重录（补 green）同样不受影响
+    const existing = state.evidence['subagent-execute'].handoffResult[taskId];
+    if (existing && typeof existing.result === 'object' && existing.result !== null) {
+      const old = existing.result;
+      const hasGreen = !!(old.greenEvidence && typeof old.greenEvidence === 'object' && old.greenEvidence.command);
+      const hasRed = !!(old.redEvidence && typeof old.redEvidence === 'object' && old.redEvidence.command);
+      const newRed = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+        && parsed.redEvidence && typeof parsed.redEvidence === 'object' && parsed.redEvidence.command;
+      if (hasGreen && !hasRed && newRed) {
+        console.error('BLOCKED: ' + taskId + ' redEvidence 事后补录（已记录 greenEvidence 而无 redEvidence——TDD 要求 RED 先于 GREEN，禁止事后补录掩盖缺 RED）');
+        process.exit(1);
+      }
+    }
+    // T-FIX-04: 解析 Return Contract 的 completedChecks 字段（数组），缺省记 []——规范化后随
+    // result 一起存储，status 输出自然包含 completedChecks；guard W1-D 对条目做严格校验（
+    // required-skill:subagent-execute.<skill>，无旧 change 豁免），此处不拦截只规范化
+    // T-FIX-06: redEvidence/greenEvidence 写入 evidence 时附带 recordedAt 时间戳（时间顺序可
+    // 审计；重录时保留同 key 首次记录时间，避免补录覆盖原始 RED/GREEN 时序）
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      parsed.completedChecks = Array.isArray(parsed.completedChecks) ? parsed.completedChecks : [];
+      const now = new Date().toISOString();
+      for (const key of ['redEvidence', 'greenEvidence']) {
+        const ev = parsed[key];
+        if (ev && typeof ev === 'object' && !Array.isArray(ev)) {
+          const prior = existing && typeof existing.result === 'object' && existing.result !== null
+            && existing.result[key] && typeof existing.result[key] === 'object'
+            && typeof existing.result[key].recordedAt === 'string'
+            ? existing.result[key].recordedAt
+            : null;
+          parsed[key] = { ...ev, recordedAt: prior ?? now };
+        }
+      }
     }
     // C8: Return Contract 渐进校验——缺 greenEvidence/redEvidence（或 command 非字符串）仅 WARN 仍记录，
     // 不 BLOCK 不拒绝（避免卡死流程）；commitHash 非法格式维持上方现有 HANDOFF ERROR 行为不变
