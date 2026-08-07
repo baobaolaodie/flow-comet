@@ -1420,6 +1420,23 @@ const SCENARIOS = [
       assertNotOut(res, 'No active change');
     },
   },
+
+  // ---------- T-FIX-17 场景（S59：归档完成态不兜底识别残留目录） ----------
+
+  // 59: state 为归档完成态（completed + activeChange null）→ .specs/ 顶层残留目录（含 TASK.md）不被兜底识别
+  {
+    name: '59 归档后残留目录不误判为 active（T-FIX-17）',
+    run: (dir) => {
+      writeState(dir, composeState({ status: 'completed', activeChange: null, currentNode: null }));
+      writeFile(dir, '.specs/stale/CHANGE.md', '# CHANGE\n## Why\nx\n');
+      writeFile(dir, '.specs/stale/TASK.md', '# TASK\n');
+      const res = runState(['status'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'no-change');
+      assertNotOut(res, 'stale');
+    },
+  },
 ];
 
 // ---------- 运行 ----------

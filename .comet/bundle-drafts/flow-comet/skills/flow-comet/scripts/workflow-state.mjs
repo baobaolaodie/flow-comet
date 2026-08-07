@@ -38,6 +38,9 @@ async function findActiveChange() {
       const changeDir = path.join(specsRoot, state.activeChange);
       if (await fileExists(changeDir)) return state.activeChange;
     }
+    // T-FIX-17: 归档完成态（completed 且无 activeChange）→ 不扫描兜底——
+    // 防归档残留目录（含 TASK.md 的旧副本）被误判为 active change（D-10）
+    if (state.status === 'completed') return null;
   }
   // 2. Scan .specs/ for directories with TASK.md (active flow-kit changes)
   try {
