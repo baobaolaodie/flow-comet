@@ -417,6 +417,10 @@ async function main() {
       createdAt: new Date().toISOString()
     };
     await writeState(state);
+    // T-FIX-16: init 创建 .specs/<id>/ 目录——文件即真相从 init 起成立，findActiveChange 立即可识别
+    //（此前 init 后 next/status 报 No active change，与 SKILL 启动协议 init → next 矛盾）
+    const specsChangeDir = path.join(specsRoot, changeName);
+    await fs.mkdir(specsChangeDir, { recursive: true });
     // E1 + T-FIX-14: 分支创建——branchMode && 当前分支 ≠ <prefix><id> && 分支不存在 → git checkout -b
     // 前缀由 --branch-prefix 指定（缺省 'change/'，向后兼容；可适配仓库自身分支规范如 feat/）
     // 失败 → WARN 不 BLOCK，继续纯文件模式（向后兼容）

@@ -1403,6 +1403,23 @@ const SCENARIOS = [
       assertExit(res, 0);
     },
   },
+
+  // ---------- T-FIX-16 场景（S58：init 创建 .specs/<id>/ 目录，findActiveChange 立即可识别） ----------
+
+  // 58: init 后 next 识别 active change（当前因 .specs/<id>/ 目录未建报 No active change）
+  {
+    name: '58 init 后 next 识别 active change（T-FIX-16）',
+    run: (dir) => {
+      const initRes = runState(['init', 'tf16-dir'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(initRes, 0);
+      const res = runState(['next'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 1);
+      assertOut(res, '疑似未 exit 节点 open');
+      assertNotOut(res, 'No active change');
+    },
+  },
 ];
 
 // ---------- 运行 ----------
