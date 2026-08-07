@@ -48,24 +48,24 @@ flow-comet 站在三个项目的交汇点：
 
 **5 分钟跑通第一个 change**（详细安装见 [Installation](#installation)）：
 
-```bash
-# 1. 安装（方案 A：prepare-env 安装器，无 Comet CLI 依赖）——在 flow-comet 仓库内执行
-cd <flow-comet 仓库>
-node scripts/prepare-env.mjs --target <目标项目绝对路径>
+1. **安装**（方案 A：prepare-env 安装器，无 Comet CLI 依赖）——在 flow-comet 仓库内执行一次：
 
-# 2. 进入目标项目，启动工作流（自动创建 change/<id> 分支 + open 节点）
-cd <目标项目>
-node .claude/skills/flow-comet/scripts/workflow-state.mjs init my-first-change
-# → Initialized: my-first-change
-# → BRANCH: change/my-first-change
-# → NODE: open
+   ```bash
+   cd <flow-comet 仓库>
+   node scripts/prepare-env.mjs --target <目标项目绝对路径>
+   ```
 
-# 3. 在 Claude Code 中输入 /flow-comet 开始 CHANGE 阶段（节点执行入口）
-#    按流程产出 CHANGE.md / REQUIREMENT.md → design → plan → execute → …
-```
+2. **打开目标项目**，在 Claude Code 中输入：
 
-> 每次节点推进后运行 `node .claude/skills/flow-comet/scripts/workflow-state.mjs next` 获取下一节点与 SKILL。
-> `init` 是状态初始化（命令行）；`/flow-comet` 是阶段执行入口（skill 路由）；两者配合：init 建立 change 与分支，之后每个节点的进入/退出由 `/flow-comet` 与 `next` 驱动。
+   ```
+   /flow-comet
+   ```
+
+   首次调用会先与你确认 change 主题与范围，然后**自动**完成：创建 `change/<id>` 分支 → 初始化状态 → 进入 open 节点 → 按 flow-kit 协议产出 `CHANGE.md` / `REQUIREMENT.md`。
+
+3. **之后每个阶段**：flow-comet 自动路由（design → plan → execute → review → verify → archive）。你只需要在**决策点**回答 Claude 的问题（首次范围确认、技术栈选型、破坏性变更确认、REVIEW Critical 项、归档/merge 确认等），其余全部自动推进。
+
+> 节点检测、状态推进、分支管理、产物校验全部由 Claude 在 flow-comet skill 协议下自动执行——**你不需要手动运行任何脚本**。需要排查或高级用法时见 [Usage](#usage) 的「脚本速查」。
 
 ---
 
@@ -96,8 +96,10 @@ open → design → plan → execute ⇄ subagent-execute → review → verify 
 
 ### 分支模式
 
-- `init` 自动创建 `change/<change-id>` 分支（git 仓库时），全流程在分支上进行；分支前缀可自定义：`init <change-id> --branch-prefix <prefix>`（如 `feat/`，须以 `/` 结尾，默认 `change/`）
-- 归档时收尾：合并回主分支 + 删除分支（`enablePrReview=true` 时先推送 + PR，approve 后合并）
+以下分支操作均由 Claude 在 skill 协议下**自动执行**（无需手动 git 操作）：
+
+- 首次调用 `/flow-comet` 自动创建 `change/<change-id>` 分支（git 仓库时），全流程在分支上进行；分支前缀可配置（`init --branch-prefix <prefix>`，如 `feat/`，须以 `/` 结尾，默认 `change/`）
+- 归档时收尾：自动合并回主分支 + 删除分支（`enablePrReview=true` 时先推送 + PR；**merge 前暂停等你确认**）
 - 分支-状态一致性：`status`/`next` 检测分支与 activeChange 不符 → WARN（不 BLOCK）
 - **向后兼容**：无分支的旧 change 照常运行（分支校验仅新模式生效）
 
@@ -205,10 +207,10 @@ node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.m
 
 | 方式 | 说明 |
 |------|------|
-| `--protocol <path>`（或 `--protocol=<path>`） | CLI 参数 |
-| `FLOW_COMET_PROTOCOL` | 环境变量 |
+| `--protocol <path>`（或 `--protocol=<path>`） | CLI 参数——由 Claude 在流程中自动附带 |
+| `FLOW_COMET_PROTOCOL` | 环境变量——写入项目环境（如 `.claude/settings.json` 的 `env`）可持久生效 |
 
-优先级：`--protocol` CLI 参数 > `FLOW_COMET_PROTOCOL` 环境变量 > 内置默认（resolveProtocol）。
+优先级：`--protocol` CLI 参数 > `FLOW_COMET_PROTOCOL` 环境变量 > 内置默认（resolveProtocol）。未显式指定时一切行为与内置协议完全一致（见下「与内置协议的关系」）。
 
 ### 协议最小结构
 
@@ -320,7 +322,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 >
 > **settings 保护**：若目标项目 `settings.local.json` 已存在且 JSON 非法，或 `hooks.PreToolUse` 不是数组结构，脚本会**中止注入并警告**（不覆盖用户配置），请手动按方案 B 添加 hook。
 
-验证安装：`node <目标项目>/.claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id>` 应输出 `NODE: open`。
+验证安装（无副作用，不创建 change）：检查 `<目标项目>/.claude/` 生成物——19 个 `flow-comet*` skill + `rules/flow-comet-orchestration.md` + `settings.local.json` 的 PreToolUse hook 注入；再跑安装回归自测：`node <目标项目>/.claude/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 54 SCENARIOS PASSED`。
 
 ### 方案 B · 手动复制粘贴（无脚本环境兜底）
 
@@ -416,32 +418,47 @@ flow-comet 会**定制 `comet init` 注入的 `<comet-ambient-resume>` 块**（C
 
 ## Usage
 
-在目标项目输入 `/flow-comet` 启动。首次调用自动检测活跃 change 或初始化新 change。
+### 用户入口
 
-常用命令：
+在目标项目打开 Claude Code，输入：
+
+| 入口 | 用途 |
+|------|------|
+| `/flow-comet` | 启动或继续 8 节点工作流（自动检测活跃 change，路由到当前节点） |
+| `/flow-comet-compose` | 组合已安装 skill 生成自定义协议（横向命令，不属于 8 节点流程，见[自定义协议](#自定义协议flow-comet-compose)） |
+| `/flow-comet-evolve` | 扫描已归档 change 的 DESIGN §9，批量评审沉积候选（横向） |
+| `/flow-comet-health` | 周期健康检查：CONTEXT 一致性 / LESSONS 扫描 / 技术债 / 冗余（横向） |
+
+### 流程中的决策点
+
+flow-comet 在以下节点**暂停并向你确认**（其余全部自动推进）：
+
+| 节点 | 决策点 |
+|------|--------|
+| 首次调用 | change 主题与范围（存在多个合法解释时） |
+| design | 技术栈选型（5~6 张候选卡） |
+| execute | 破坏性变更检测（R4.6）；Schema 迁移（R4.5） |
+| review | REVIEW 的 Critical 项处理 |
+| verify | UAT 连续失败第 4 次：「继续修 / 停止」 |
+| archive | 归档与 merge change 分支到 main（不可逆操作） |
+| 归档前置 | PR approve（`enablePrReview` 开启时） |
+
+### 脚本速查（引擎内部，Claude 自动执行）
+
+以下脚本由 flow-comet skill 在流程中**自动运行**，**用户无需手动执行**——仅在故障排查或高级场景使用。路径为 `<目标项目>/.claude/skills/flow-comet/scripts/`：
 
 ```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id> [--branch-prefix <prefix>]   # 初始化 change（自动建分支；分支前缀默认 change/）
-node .claude/skills/flow-comet/scripts/workflow-state.mjs next               # 获取下一节点与 SKILL
-node .claude/skills/flow-comet/scripts/workflow-state.mjs status             # 当前状态 + 分支一致性
-node .claude/skills/flow-comet/scripts/workflow-state.mjs record <node> '{"summary":"..."}'  # 记录节点证据
-node .claude/skills/flow-comet/scripts/workflow-state.mjs config set enablePrReview true      # 开启 PR 审查
-node .claude/skills/flow-comet/scripts/workflow-state.mjs execution-mode <subagent|direct>   # 切换执行模式
-node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry/exit <node> [--apply]         # 节点门禁
+node workflow-state.mjs status             # 当前状态 + 分支一致性
+node workflow-state.mjs init <id> [--branch-prefix <prefix>]   # 初始化 change（自动建分支，前缀默认 change/）
+node workflow-state.mjs next               # 获取下一节点与 SKILL
+node workflow-state.mjs record <node> '{...}'                  # 记录节点证据
+node workflow-state.mjs config set enablePrReview true         # 开启 PR 审查
+node workflow-state.mjs execution-mode <subagent|direct>       # 切换执行模式（direct 需用户确认）
+node workflow-guard.mjs entry/exit <node> [--apply]            # 节点门禁
+node workflow-handoff.mjs request|result|status                # 子代理委托交接
 ```
 
-**子代理委托流程**（execute/subagent-execute 协调者，每任务）：
-
-```bash
-# 在目标项目内执行；以下路径为 <目标项目>/.claude/skills/flow-comet/scripts/
-# 1. 注册委托请求（write_files 自动从 TASK.md 解析）
-node .claude/skills/flow-comet/scripts/workflow-handoff.mjs request <task-id> "<任务描述>"
-# 2. 用 Agent 工具（isolation: "worktree"）委托子代理，要求回传 Return Contract
-# 3. 记录委托结果（Return Contract：status/commitHash/redEvidence/greenEvidence/riskSignals）
-node .claude/skills/flow-comet/scripts/workflow-handoff.mjs result <task-id> '{"status":"DONE","commitHash":"<sha>","redEvidence":{"command":"...","output":"..."},"greenEvidence":{"command":"...","output":"..."},"riskSignals":["none"]}'
-# 4. 查看全部委托证据
-node .claude/skills/flow-comet/scripts/workflow-handoff.mjs status
-```
+**子代理委托**（execute/subagent-execute 节点，由 Claude 自动执行）：按 TASK.md 解析 write_files → `workflow-handoff.mjs request` 注册 → Agent 工具（`isolation: "worktree"`）委托子代理并回传 Return Contract → `result` 记录证据 → guard 校验委托合法性。
 
 ---
 
