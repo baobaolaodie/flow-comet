@@ -43,19 +43,14 @@ async function findActiveChange() {
     if (state.status === 'completed') return null;
   }
   // 2. Scan .specs/ for directories with TASK.md (active flow-kit changes)
+  // 注: T-FIX-17 曾尝试按 archive/ 对应归档跳过残留目录——但会误伤同名新 change（S64 实证），已撤回。
+  // 「state 缺失 + 归档残留」为已知限制（对比报告已记录"捡残留桩"共性问题）；归档后正常态由
+  // 上文 completed 分支覆盖（T-FIX-17 主修复）
   try {
     const entries = await fs.readdir(specsRoot, { withFileTypes: true });
-    // T-FIX-17 扩展: 归档残留防误判——archive/ 下已有对应归档（<date>-<id> 剥日期前缀）的目录跳过；
-    // 真实进行中的 change 无归档，恢复兜底不受影响
-    const archivedIds = new Set(
-      (await fs.readdir(path.join(specsRoot, 'archive'), { withFileTypes: true }).catch(() => []))
-        .filter((e) => e.isDirectory())
-        .map((e) => e.name.replace(/^\d{4}-\d{2}-\d{2}-/, ''))
-    );
     const candidates = [];
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name === 'archive' || entry.name === 'health' || entry.name === 'evolve' || entry.name === 'adr') continue;
-      if (archivedIds.has(entry.name)) continue;
       const taskFile = path.join(specsRoot, entry.name, 'TASK.md');
       if (await fileExists(taskFile)) candidates.push(entry.name);
     }
