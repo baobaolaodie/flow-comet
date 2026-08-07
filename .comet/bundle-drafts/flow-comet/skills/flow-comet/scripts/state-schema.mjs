@@ -15,6 +15,8 @@ export const STATE_FIELD_VALIDATORS = [
   // E5: 批次 E 新增字段（readState 默认补后类型校验；旧 state 缺失字段放行）
   { field: 'branchMode', check: (v) => typeof v === 'boolean' },
   { field: 'enablePrReview', check: (v) => typeof v === 'boolean' },
+  // T-FIX-14: 分支前缀（init --branch-prefix 可配置，适配仓库自身分支规范；缺省 'change/'）
+  { field: 'branchPrefix', check: (v) => typeof v === 'string' },
 ];
 
 // 返回非法字段名数组（空 = 合法）。仅校验存在字段；unknown / 缺失字段一律放行。

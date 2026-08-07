@@ -62,6 +62,7 @@ Division of labor: `execute` node handles serial delegation (non-parallel tasks,
    - DESIGN.md sections 0 and 0.5 for context.
    - REQUIREMENT.md ACs relevant to this task.
    - Explicit instruction to load `flow-comet-dev` and follow its full protocol.
+   - Explicit requirement to return `completedChecks` in the Return Contract containing `required-skill:subagent-execute.flow-comet-dev`（证明已加载 implementation skill；guard W1-D 严格校验，缺失 → exit BLOCKED，无旧 change 豁免）。
    - The task's `read_files` and `write_files` boundaries.
    - Instruction to produce `<task-id>-SUMMARY.md` in `.specs/<change-id>/`.
 
@@ -98,6 +99,7 @@ Division of labor: `execute` node handles serial delegation (non-parallel tasks,
   "taskId": "T0X",
   "commitHash": "<git commit sha>",
   "changedFiles": ["<file>", "..."],
+  "completedChecks": ["required-skill:subagent-execute.flow-comet-dev"],
   "redEvidence": { "command": "<RED 失败测试命令>", "output": "<真实失败输出片段>" },
   "greenEvidence": { "command": "<GREEN 通过测试命令>", "output": "<真实通过输出片段>" },
   "riskSignals": ["cross-module | security | concurrency | migration | public-api | 200+lines | none"],
@@ -107,8 +109,9 @@ Division of labor: `execute` node handles serial delegation (non-parallel tasks,
 
 - `status=DONE` 才视为完成；`BLOCKED` / `NEEDS_CONTEXT` 需 orchestrator 处理。
 - `redEvidence` / `greenEvidence` 缺任一 → 视为未执行 TDD，orchestrator 拒绝记录。
+- `completedChecks` 必须含 `required-skill:subagent-execute.flow-comet-dev`（子代理加载 implementation skill 的证明）；缺任一项 → guard exit 严格 BLOCKED（W1-D，无旧 change 豁免），orchestrator 不得以旧格式/补录方式绕过。
 - `riskSignals` 非 `none` 时，orchestrator 应将该任务标记为 review 节点的高优先级审查对象。
-- 子代理回传后，orchestrator 用 `workflow-handoff.mjs result <task-id> '<JSON>'` 记录；guard exit subagent-execute 会校验 commitHash + greenEvidence（W1-D）。
+- 子代理回传后，orchestrator 用 `workflow-handoff.mjs result <task-id> '<JSON>'` 记录；guard exit subagent-execute 会校验 commitHash + greenEvidence + completedChecks（W1-D，严格）。
 
 ### Completion reasoning
 

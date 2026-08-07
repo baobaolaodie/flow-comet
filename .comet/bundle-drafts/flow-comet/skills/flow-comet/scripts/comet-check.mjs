@@ -2,6 +2,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { validateProtocolSchema } from './protocol-utils.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..');
@@ -50,9 +51,7 @@ async function main() {
     process.exit(1);
   }
   const protocol = JSON.parse(await fs.readFile(path.join(packageRoot, 'reference', 'workflow-protocol.json'), 'utf8'));
-  if (protocol.schemaVersion !== 1 || !Array.isArray(protocol.nodes)) {
-    throw new Error('workflow-protocol.json must use the current schema with nodes');
-  }
+  validateProtocolSchema(protocol);
   console.log('workflow-contract-ok');
 }
 

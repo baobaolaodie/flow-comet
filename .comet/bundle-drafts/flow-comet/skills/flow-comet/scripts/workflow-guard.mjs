@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import { validateStateFields } from './state-schema.mjs';
+import { resolveProtocol, readProtocolFile, validateProtocolSchema } from './protocol-utils.mjs';
 
 const command = process.argv[2] ?? 'verify';
 const nodeId = process.argv[3] ?? null;
@@ -11,7 +12,9 @@ const apply = process.argv.includes('--apply');
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..');
 const runRoot = process.env.COMET_RUN_ROOT ? path.resolve(process.env.COMET_RUN_ROOT) : process.cwd();
-const protocolPath = path.join(packageRoot, 'reference', 'workflow-protocol.json');
+// 协议路径解析（resolveProtocol）：--protocol 全局参数从命令后的剩余参数提取（command=argv[2]），
+// 其次 FLOW_COMET_PROTOCOL 环境变量，最后内置默认 <packageRoot>/reference/workflow-protocol.json
+const protocolPath = resolveProtocol(packageRoot, runRoot, process.argv.slice(3));
 
 
 const WORKFLOW_PROJECT_CONFIG_MAX_BYTES = 64 * 1024;
@@ -1597,10 +1600,6 @@ async function statePath(protocol) {
   return target;
 }
 
-async function readJson(file) {
-  return JSON.parse(await fs.readFile(file, 'utf8'));
-}
-
 async function readStateJson(file) {
   return JSON.parse(
     (
@@ -1883,19 +1882,31 @@ async function templateSectionPatterns() {
   return result;
 }
 
-// C3: TASK.md 任务集签名——提取全部 <task> 块，剥离 status 属性（标记 done 合法），排序防顺序漂移，拼接后 sha256
+// C3: TASK.md 任务集签名——提取全部 <task> 块，剥离开标签上的标记类属性（仅保留 id/parallel），排序防顺序漂移，拼接后 sha256
+// T-FIX-09: 行尾规范化——Windows 下 bash heredoc 写 LF、python 写 CRLF（os.linesep），跨工具编辑
+// 导致"任务集逻辑未变但字节变"的误报 BLOCK；签名前统一 CRLF → LF（仅归一化行尾，不改变内容语义）
+// T-FIX-10: 标记类属性白名单——子代理标记 task done 会在开标签追加 completed_at/started_at/finished_at/
+// assigned_to/updated_at 等属性（纯状态标记），仅剥离 status 仍误报 BLOCK；改为开标签只保留
+// 影响路由语义的 id/parallel，其余属性一律剥离（含未来新增标记属性，无需再改）；
+// 任务内容（name/action/write_files/verify/depends_on）保持签名敏感
 function taskSetSignature(taskContent) {
-  const blocks = (String(taskContent).match(/<task[\s\S]*?<\/task>/g) || [])
-    .map((block) => block.replace(/\s*status="[^"]*"/g, ''))
+  const normalized = String(taskContent).replace(/\r\n/g, '\n');
+  const blocks = (normalized.match(/<task[\s\S]*?<\/task>/g) || [])
+    .map((block) =>
+      block.replace(/<task[^>]*>/, (open) =>
+        open.replace(/\s+[a-zA-Z_][\w-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'))?/g, (attr) =>
+          /^\s*(?:id|parallel)(?=[\s=>])/.test(attr) ? attr : ''
+        )
+      )
+    )
     .sort();
   return createHash('sha256').update(blocks.join('\n'), 'utf8').digest('hex');
 }
 
 async function main() {
-  const protocol = await readJson(protocolPath);
-  if (protocol.schemaVersion !== 1 || !Array.isArray(protocol.nodes)) {
-    throw new Error('workflow-protocol.json must use the current schema with nodes');
-  }
+  // 受保护读取 + fail-closed schema 校验（读失败/校验失败沿用 throw → main().catch 统一处理）
+  const protocol = await readProtocolFile(runRoot, protocolPath);
+  validateProtocolSchema(protocol);
   if (command === 'verify') {
     console.log('workflow-guard-ok');
     return;
@@ -1966,8 +1977,10 @@ async function main() {
       const { execFileSync } = await import('child_process');
       try {
         const branch = String(execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: runRoot, stdio: 'pipe', encoding: 'utf8' })).trim();
-        if (branch !== 'change/' + state.activeChange) {
-          console.error('BLOCKED: 归档必须在 change/' + state.activeChange + ' 分支上进行（当前: ' + branch + '）');
+        // T-FIX-14: 归档分支前缀用 state.branchPrefix（缺省 'change/'，适配仓库自身规范）
+        const archivePrefix = state.branchPrefix ?? 'change/';
+        if (branch !== archivePrefix + state.activeChange) {
+          console.error('BLOCKED: 归档必须在 ' + archivePrefix + state.activeChange + ' 分支上进行（当前: ' + branch + '）');
           process.exit(1);
         }
       } catch {
@@ -2052,6 +2065,7 @@ async function main() {
       // git 不可用 / main 不存在 → 跳过合并检查
     }
   }
+  // 特化校验按节点 id 绑定（ADR-002）：内置节点 id 触发 flow-kit 契约校验；自定义协议节点不误触发（通用层防线对其生效）
   // E7: 追加位置结构检测（全部 WARN 不 BLOCK）——防 CONTEXT/LESSONS/STATE/CHANGELOG 文件尾追加破坏插入位置纪律
   if (node.id === 'open' && state.activeChange) {
     const contextFile = path.join(runRoot, '.specs', 'CONTEXT.md');
@@ -2366,25 +2380,33 @@ async function main() {
     }
   }
   // W1-D: Return Contract 校验——每个 delegated task 的 result 必须含 commitHash + greenEvidence
-  // 过渡规则（对齐 W1-C）：旧格式纯字符串 result（非 JSON）视为 pre-contract，仅 WARN 不阻断——
-  // 避免已有 change 的旧 handoff 记录在 subagent-execute 重入时被硬性卡死
+  // T-FIX-04: handoff-guarded 落实——每个 result 的 completedChecks 必须包含
+  // required-skill:subagent-execute.<skill>（skill 名从协议 requiredSkillCalls 读）。
+  // 严格模式：旧格式非 JSON result（无 completedChecks 载体）同样 BLOCKED，无旧 change 豁免——
+  // 补录/重录必须回传完整契约（含 completedChecks），不允许历史格式绕过委托证明
   if (node.id === 'subagent-execute') {
     const he = state.evidence['subagent-execute'];
     const results = he && he.handoffResult ? he.handoffResult : {};
+    const requiredChecks = (node.requiredSkillCalls ?? [])
+      .map((binding) => 'required-skill:' + node.id + '.' + binding.skill);
     const violations = [];
-    const legacy = [];
     for (const [taskId, rec] of Object.entries(results)) {
       const r = typeof rec.result === 'object' && rec.result !== null ? rec.result : null;
-      if (!r) { legacy.push(taskId); continue; }
+      if (!r) { violations.push(taskId + ' 非 Return Contract（旧格式，缺 completedChecks）'); continue; }
       if (!r.commitHash) violations.push(taskId + ' 缺 commitHash');
       if (!r.greenEvidence || !r.greenEvidence.command) violations.push(taskId + ' 缺 greenEvidence');
       // P2-B: redEvidence 缺失警告（过渡期不阻断）
       if (r && !r.redEvidence) {
         console.error('HANDOFF WARN: ' + taskId + ' 缺 redEvidence（可能未执行 TDD RED 阶段）');
       }
-    }
-    if (legacy.length > 0) {
-      console.error('HANDOFF WARN: 以下任务为旧格式 handoff（非 Return Contract），建议补录完整契约: ' + legacy.join(', '));
+      // T-FIX-04: completedChecks 严格校验（无旧 change 豁免）
+      if (requiredChecks.length > 0) {
+        const checks = Array.isArray(r.completedChecks) ? r.completedChecks : [];
+        const missing = requiredChecks.filter((check) => !checks.includes(check));
+        if (missing.length > 0) {
+          violations.push(taskId + ' 缺 completedChecks: ' + missing.join(', '));
+        }
+      }
     }
     if (violations.length > 0) {
       console.error('BLOCKED: Return Contract 校验失败: ' + violations.join('; '));

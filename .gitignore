@@ -10,3 +10,6 @@ node_modules/
 # distribute 到源仓库自身的安装副本（源仓库不需要，目标项目各自 distribute）
 .claude/
 docs/internal/
+
+# flow-comet 流程工件（不入库，仓库只跟踪功能代码）
+.specs/
