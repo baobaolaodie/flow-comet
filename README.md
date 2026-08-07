@@ -49,20 +49,23 @@ flow-comet 站在三个项目的交汇点：
 **5 分钟跑通第一个 change**（详细安装见 [Installation](#installation)）：
 
 ```bash
-# 1. 安装（方案 A：prepare-env 安装器，无 Comet CLI 依赖）
-#    node scripts/prepare-env.mjs --target <目标项目>（见 Installation 方案 A）
+# 1. 安装（方案 A：prepare-env 安装器，无 Comet CLI 依赖）——在 flow-comet 仓库内执行
+cd <flow-comet 仓库>
+node scripts/prepare-env.mjs --target <目标项目绝对路径>
 
-# 2. 启动工作流（自动创建 change/<id> 分支 + open 节点）
+# 2. 进入目标项目，启动工作流（自动创建 change/<id> 分支 + open 节点）
+cd <目标项目>
 node .claude/skills/flow-comet/scripts/workflow-state.mjs init my-first-change
 # → Initialized: my-first-change
 # → BRANCH: change/my-first-change
 # → NODE: open
 
-# 3. 在 Claude Code 中输入 /flow-comet 开始 CHANGE 阶段
+# 3. 在 Claude Code 中输入 /flow-comet 开始 CHANGE 阶段（节点执行入口）
 #    按流程产出 CHANGE.md / REQUIREMENT.md → design → plan → execute → …
 ```
 
 > 每次节点推进后运行 `node .claude/skills/flow-comet/scripts/workflow-state.mjs next` 获取下一节点与 SKILL。
+> `init` 是状态初始化（命令行）；`/flow-comet` 是阶段执行入口（skill 路由）；两者配合：init 建立 change 与分支，之后每个节点的进入/退出由 `/flow-comet` 与 `next` 驱动。
 
 ---
 
@@ -73,6 +76,8 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs init my-first-change
 ```
 open → design → plan → execute ⇄ subagent-execute → review → verify → archive
 ```
+
+**与 flow-kit 9 阶段的映射**：flow-comet 把 9 阶段收敛为 8 节点——`open` 节点产出 CHANGE 与 REQUIREMENT 两阶段工件（`CHANGE.md` + `REQUIREMENT.md`），其余一一对应（design=TASK 之前的设计阶段，execute/subagent-execute=DEV 与 TEST 的执行拆分，review/verify/archive 对应 REVIEW/INTEGRATION/ARCHIVE 收尾）。
 
 路由由脚本从 `.specs/` 工件**自动推导**（determineNode）：文件不齐 → 停在对应节点；任务未完成 → 停在 execute；全部完成 → 依次推进 review/verify/archive。
 
@@ -91,7 +96,7 @@ open → design → plan → execute ⇄ subagent-execute → review → verify 
 
 ### 分支模式
 
-- `init` 自动创建 `change/<change-id>` 分支（git 仓库时），全流程在分支上进行
+- `init` 自动创建 `change/<change-id>` 分支（git 仓库时），全流程在分支上进行；分支前缀可自定义：`init <change-id> --branch-prefix <prefix>`（如 `feat/`，须以 `/` 结尾，默认 `change/`）
 - 归档时收尾：合并回主分支 + 删除分支（`enablePrReview=true` 时先推送 + PR，approve 后合并）
 - 分支-状态一致性：`status`/`next` 检测分支与 activeChange 不符 → WARN（不 BLOCK）
 - **向后兼容**：无分支的旧 change 照常运行（分支校验仅新模式生效）
@@ -223,6 +228,34 @@ node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.m
 - **每节点必须有 evidence**：每个 outputSchema 必须带 `evidence: [{ id, required }]`，供 `workflow-state.mjs record` 记录节点证据
 - **节点 id 避开内置 8 节点 id**：`open` / `design` / `plan` / `execute` / `subagent-execute` / `review` / `verify` / `archive` 为保留 id，自定义协议不得复用——防止特化校验（ADR-002 语义）误触发
 
+### 最小协议示例
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "workflow-kernel",
+  "name": "compose-demo",
+  "nodes": [
+    { "id": "brainstorm",  "outputSchemas": ["compose.notes.v1"],    "requiredSkillCalls": [], "augmentations": [] },
+    { "id": "tdd",         "outputSchemas": ["compose.tdd.v1"],      "requiredSkillCalls": [], "augmentations": [] },
+    { "id": "codereview",  "outputSchemas": ["compose.verdict.v1"],  "requiredSkillCalls": [], "augmentations": [] }
+  ],
+  "outputSchemas": [
+    {
+      "id": "compose.notes.v1",
+      "artifacts": [
+        { "id": "notes", "kind": "file", "required": true,
+          "paths": ["<change-id>/notes.md"], "pathBase": "specs-root" }
+      ],
+      "evidence": [ { "id": "notes", "required": true } ]
+    }
+  ],
+  "writeWhitelist": { "brainstorm": [".specs/"] }
+}
+```
+
+> 每个节点必须有非空 `outputSchemas` 引用 + 每条 schema 必须带 `evidence`；`writeWhitelist` 省略时 hook 回退内置缺省表。完整生成流程见 `/flow-comet-compose` skill 的「产物示例」。
+
 ### 与内置协议的关系
 
 - **并存、互不干扰**：切换只需修改启动参数或环境变量
@@ -327,9 +360,11 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
 
 > `settings.local.json` 是每个项目各自的本地配置（权限、hook、偏好），**prepare-env 只注入 hook 条目、不覆盖其他字段**；手动安装时同样遵循"合并而非覆盖"。
 
-**4. 运行状态**：`.comet/flow-comet-state.json` 由首个 `/flow-comet` 调用自动创建。
+**4. 运行状态**：`.comet/flow-comet-state.json` 由 `init`（或首个 `/flow-comet` 调用）自动创建。
 
-### 安装后的项目集成（对 Comet 注入内容的定制）
+### 安装后的项目集成（仅当目标项目也使用 Comet 时适用）
+
+> **适用条件**：以下定制只针对**已运行过 `comet init` 的目标项目**（其 CLAUDE.md 中存在 `<comet-ambient-resume>` 块）。未使用 Comet 的项目**跳过本段**——flow-comet 不依赖 Comet，有自己的状态机与文件推导恢复。
 
 flow-comet 会**定制 `comet init` 注入的 `<comet-ambient-resume>` 块**（Comet 标准恢复协议）为 flow-comet 优先路由——否则恢复流程只会跑 Comet 标准探针，不会路由到 `/flow-comet`：
 
@@ -372,7 +407,7 @@ flow-comet 会**定制 `comet init` 注入的 `<comet-ambient-resume>` 块**（C
 3. 若目标项目未运行过 `comet init`，本定制可选（flow-comet 不依赖 resume-probe，有自己的 `.comet/flow-comet-state.json` 状态机 + determineNode 文件推导恢复）。
 
 **规则文件**（安装到 `.claude/rules/`）：
-- `flow-comet-orchestration.md` — flow-comet bundle 自带（自动安装，标识 Entry Skill 与编排结构）
+- `flow-comet-orchestration.md` — flow-comet 自带（prepare-env/方案 B 自动安装，标识 Entry Skill 与编排结构）
 - `comet-workflow-guard.md` — Comet 生态规则（`comet init` 安装，Native/Classic 双 workflow 防串扰）
 
 ---
@@ -386,7 +421,7 @@ flow-comet 会**定制 `comet init` 注入的 `<comet-ambient-resume>` 块**（C
 常用命令：
 
 ```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id>   # 初始化 change（自动建分支）
+node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id> [--branch-prefix <prefix>]   # 初始化 change（自动建分支；分支前缀默认 change/）
 node .claude/skills/flow-comet/scripts/workflow-state.mjs next               # 获取下一节点与 SKILL
 node .claude/skills/flow-comet/scripts/workflow-state.mjs status             # 当前状态 + 分支一致性
 node .claude/skills/flow-comet/scripts/workflow-state.mjs record <node> '{"summary":"..."}'  # 记录节点证据
@@ -398,13 +433,14 @@ node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry/exit <node> [--a
 **子代理委托流程**（execute/subagent-execute 协调者，每任务）：
 
 ```bash
+# 在目标项目内执行；以下路径为 <目标项目>/.claude/skills/flow-comet/scripts/
 # 1. 注册委托请求（write_files 自动从 TASK.md 解析）
-node .../workflow-handoff.mjs request <task-id> "<任务描述>"
+node .claude/skills/flow-comet/scripts/workflow-handoff.mjs request <task-id> "<任务描述>"
 # 2. 用 Agent 工具（isolation: "worktree"）委托子代理，要求回传 Return Contract
 # 3. 记录委托结果（Return Contract：status/commitHash/redEvidence/greenEvidence/riskSignals）
-node .../workflow-handoff.mjs result <task-id> '{"status":"DONE","commitHash":"<sha>","redEvidence":{"command":"...","output":"..."},"greenEvidence":{"command":"...","output":"..."},"riskSignals":["none"]}'
+node .claude/skills/flow-comet/scripts/workflow-handoff.mjs result <task-id> '{"status":"DONE","commitHash":"<sha>","redEvidence":{"command":"...","output":"..."},"greenEvidence":{"command":"...","output":"..."},"riskSignals":["none"]}'
 # 4. 查看全部委托证据
-node .../workflow-handoff.mjs status
+node .claude/skills/flow-comet/scripts/workflow-handoff.mjs status
 ```
 
 ---
@@ -422,6 +458,10 @@ node .../workflow-handoff.mjs status
 | `WARN: LESSONS.md 条目编号乱序/区外` | 新条目未按 L-NNN 插入条目区 | 按编号插入 `## 条目区`（或 `## 活跃条目`） |
 | `BROOKS-LINT WARN: 使用 builtin-quickcheck 未声明原因` | SUMMARY 缺"插件不可用"说明 | 在 SUMMARY 的 `## 自检方法` 段补原因 |
 | `BLOCKED: verify 失败超限（verifyFailures=3）` | UAT/自动化连续失败 3 次 | 暂停，人工决策「继续修 / 停止」（R2.6） |
+| `BLOCKED: 疑似未 exit 节点 <node>` | `next` 检测到节点顺序非法（跳节点/未 exit） | 按提示执行 `workflow-guard.mjs exit <node> --apply`（T-FIX 回退场景见提示） |
+| `BLOCKED: workflow protocol node must have a non-empty string id` | 自定义协议 `nodes[]` 含空/非法元素 | 修复协议 JSON：每个节点 `id` 为非空字符串且避开内置 8 节点 id |
+| `BLOCKED: 未在协议 writeWhitelist 中声明` | 写入路径超出自定义协议白名单（fail-closed） | 在协议 `writeWhitelist` 声明该节点允许的路径前缀，或改用内置协议 |
+| `--protocol <path> 加载失败` | 协议路径不存在 / schemaVersion 或 kind 不符 | 检查路径；确认 `schemaVersion: 1`、`kind: "workflow-kernel"` |
 
 ---
 
@@ -448,7 +488,7 @@ node .../workflow-handoff.mjs status
 ```
 ┌─────────────────────────────────────────────────────────┐
 │ flow-comet（本仓库）                                      │
-│  ├─ .comet/bundle-drafts/   ★ 权威源（19 skills + scripts）│
+│  ├─ .comet/bundle-drafts/  ★ 权威源（19 skills + scripts）│
 │  ├─ docs/                   产物示例 / 验证记录           │
 │  └─ 运行时（安装到目标项目）                               │
 │      ├─ .claude/skills/flow-comet*   （skill 实现 + GUIDANCE）│
