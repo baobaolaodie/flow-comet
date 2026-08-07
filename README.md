@@ -542,6 +542,7 @@ node workflow-handoff.mjs request|result|status                # 子代理委托
 - **Return Contract 过渡规则**：旧格式纯字符串 handoff 豁免为 WARN；redEvidence/greenEvidence 缺失渐进 WARN（不 BLOCK），避免已有 change 重入被卡死
 - **与 comet classic 不互通**：workflow-kernel 状态独立于 classic（设计决策，非缺陷）
 - **无活跃 change 时 hook 放行**：`.comet/flow-comet-state.json` 不存在时 hook guard 降级放行所有写入（设计决策：无 workflow 时不限制文件操作）
+- **hook blocking 语义依赖标准后端**：PreToolUse hook 的 exit 2（blocking，阻止工具调用）在标准 Claude Code TUI 生效；SDK CLI 模式（代理后端）下非零退出被降级为 non-blocking——仅日志记录拦截，写入不阻止（2026-08-08 实测，D-13）
 - **worktree 挂载依赖**：Agent `isolation: "worktree"` 的 worktree 挂在**会话项目根**（非子代理目标项目）——跨仓库场景产物需 `git show <branch>:<path>` 手动搬运，W2-D 的 `git show` 校验降级（详见 `reference/worktree-notes.md`）
 - **GUIDANCE 不经 lane 记录**：`<skill>-GUIDANCE.md` 与 SKILL.md 引用行不登记 authoring-lanes，重跑 `comet creator generate` 会清掉（bundle compile 不受影响）
 
