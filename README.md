@@ -192,11 +192,11 @@ CHANGE.md 头部含 `express: true`（低风险判定：改动 ≤3 文件、无
 
 ### 6. guard 自测套件（作者回归基线）
 
-`scripts/guard-self-test.mjs`：60 场景覆盖全部 entry/exit 校验正反例（含分支校验、追加位置检测、自定义协议、组合场景），**作者每次改动后回归**（脚本自身机制自测——在自建临时环境模拟 state/协议/hook 输入，**不依赖安装完整性**，不是安装验证判据）：
+`scripts/guard-self-test.mjs`：63 场景覆盖全部 entry/exit 校验正反例（含分支校验、追加位置检测、自定义协议、组合场景），**作者每次改动后回归**（脚本自身机制自测——在自建临时环境模拟 state/协议/hook 输入，**不依赖安装完整性**，不是安装验证判据）：
 
 ```bash
 node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 60 SCENARIOS PASSED
+# → ALL 63 SCENARIOS PASSED
 ```
 
 ---
@@ -332,12 +332,12 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 
 1. **结构检查**：`<目标项目>/.claude/skills/` 下 `flow-comet*` skill 目录数量与 prepare-env 输出一致（当前 19 个）+ `rules/flow-comet-orchestration.md` + `settings.local.json` 均存在
 2. **配置可加载性**：`settings.local.json` 是合法 JSON；`hooks.PreToolUse[].command` 指向 `node .claude/skills/flow-comet/scripts/comet-hook-guard.mjs` 且该文件存在
-3. **一致性检查**：与权威源比对（在 flow-comet 仓库内执行，strip 行尾差异后应无差异）：`diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/rules <目标项目>/.claude/rules` 与 `diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/skills <目标项目>/.claude/skills`
-4. **真实环境冒烟**：**在目标项目目录内执行** `cd <目标项目> && node .claude/skills/flow-comet/scripts/workflow-state.mjs status` 能正常输出（证明脚本在真实 cwd 下可运行、无语法错误、能读状态）
+3. **一致性检查**：与权威源比对（在 flow-comet 仓库内执行，strip 行尾差异后应无差异）：`diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/rules <目标项目>/.claude/rules` 与 `diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/skills <目标项目>/.claude/skills`——**diff 无输出即通过**（无差异）
+4. **真实环境冒烟**：**在目标项目目录内执行** `cd <目标项目> && node .claude/skills/flow-comet/scripts/workflow-state.mjs status`——期望输出 JSON 状态对象（全新项目为 `{"status": "no-change", ...}`，运行中为 `{"status": "running", "change": ...}`），证明脚本在真实 cwd 下可运行、无语法错误、能读状态
 
 > 命令为 POSIX 风格（Git Bash / WSL / macOS 终端）；Windows 用户请在 Git Bash 中执行。
 
-> **注意**：`guard-self-test.mjs` 的 60 场景是**作者回归基线**（脚本自身机制自测——在自建临时环境模拟 state/协议/hook 输入，不依赖安装完整性），不是安装验证判据；它通过只证明脚本逻辑没坏。
+> **注意**：`guard-self-test.mjs` 的 63 场景是**作者回归基线**（脚本自身机制自测——在自建临时环境模拟 state/协议/hook 输入，不依赖安装完整性），不是安装验证判据；它通过只证明脚本逻辑没坏。
 
 ### 方案 B · 手动复制粘贴（无脚本环境兜底）
 
@@ -511,7 +511,7 @@ node workflow-handoff.mjs request|result|status                # 子代理委托
 | [产物示例](docs/examples/schedule-venue-filter/) | 全流程 12 个工件参考 |
 | [验证记录](VERIFICATION.md) | 分发验证 |
 
-**回归验证（作者基线）**：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 60 SCENARIOS PASSED`。
+**回归验证（作者基线）**：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 63 SCENARIOS PASSED`。
 
 ---
 
@@ -558,13 +558,13 @@ node workflow-handoff.mjs request|result|status                # 子代理委托
 | **平台** | Claude Code（skill 体系）；不保证 Codex/Gemini/Cursor |
 | **运行时** | 脚本为 Node.js ESM（Node ≥ 18）；工件语言与项目主语言一致 |
 | **兼容策略** | 旧 change/旧 state 自动补默认字段（executionMode/branchMode/enablePrReview），无分支 change 照常运行——向后兼容 |
-| **回归基线** | `guard-self-test.mjs` 60 场景全绿（每次改动后必须） |
+| **回归基线** | `guard-self-test.mjs` 63 场景全绿（每次改动后必须） |
 
 ---
 
 ## Contributing
 
-欢迎贡献。修改 skill/脚本请改 `.comet/bundle-drafts/flow-comet/skills/`（权威源），然后走发布流程（见 Installation 方案 A）。每次改动后运行 `guard-self-test.mjs` 回归（60 场景全绿为验收标准）。
+欢迎贡献。修改 skill/脚本请改 `.comet/bundle-drafts/flow-comet/skills/`（权威源），然后走发布流程（见 Installation 方案 A）。每次改动后运行 `guard-self-test.mjs` 回归（63 场景全绿为验收标准）。
 
 ---
 
