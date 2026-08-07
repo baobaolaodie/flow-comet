@@ -1437,6 +1437,22 @@ const SCENARIOS = [
       assertNotOut(res, 'stale');
     },
   },
+
+  // ---------- T-FIX-18 场景（S60：init currentNode 按协议首节点） ----------
+
+  // 60: 自定义协议 init → currentNode = 协议首节点 brainstorm（当前硬编码 open——D-11）
+  {
+    name: '60 init currentNode 按协议首节点（T-FIX-18）',
+    run: (dir) => {
+      const custom = writeCustomProtocol(dir);
+      const initRes = runState(['init', 'tf18-cp'], dir, { FLOW_COMET_PROTOCOL: custom });
+      assertExit(initRes, 0);
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      if (st.currentNode !== 'brainstorm') {
+        throw new Error('init currentNode 应为协议首节点 brainstorm，实际: ' + JSON.stringify(st.currentNode));
+      }
+    },
+  },
 ];
 
 // ---------- 运行 ----------

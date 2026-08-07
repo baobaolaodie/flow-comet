@@ -407,7 +407,8 @@ async function main() {
     const branchMode = isInsideWorkTree();
     const state = {
       activeChange: changeName,
-      currentNode: 'open',
+      // T-FIX-18: currentNode 取协议首节点（内置协议 = open，行为不变；自定义协议 = 首节点，如 brainstorm）
+      currentNode: route(protocol)[0]?.id ?? 'open',
       completedNodes: [],
       evidence: {},
       verifyFailures: 0,
