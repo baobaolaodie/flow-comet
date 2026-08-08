@@ -18,7 +18,8 @@ const statePath = path.join(runRoot, '.comet', 'flow-comet-state.json');
 const specsRoot = path.join(runRoot, '.specs');
 
 async function readJson(file) {
-  return JSON.parse(await fs.readFile(file, 'utf8'));
+  // D-22: 容忍 UTF-8 BOM（外部写入如会话 Write 可能带 BOM）
+  return JSON.parse((await fs.readFile(file, 'utf8')).replace(/^﻿/, ''));
 }
 
 async function writeJson(file, value) {
@@ -34,12 +35,18 @@ async function findActiveChange() {
   // 1. Read from state file if exists
   if (await fileExists(statePath)) {
     const state = await readJson(statePath);
+    // D-19: completed 检查优先于 activeChange 分支——归档完成态（无论 activeChange 是否残留）
+    // 一律不识别为 active（防归档残留目录/残留字段误判，D-10 主修复）
+    if (state.status === 'completed') return null;
     if (state.activeChange) {
       const changeDir = path.join(specsRoot, state.activeChange);
       if (await fileExists(changeDir)) return state.activeChange;
     }
   }
   // 2. Scan .specs/ for directories with TASK.md (active flow-kit changes)
+  // 注: T-FIX-17 曾尝试按 archive/ 对应归档跳过残留目录——但会误伤同名新 change（S64 实证），已撤回。
+  // 「state 缺失 + 归档残留」为已知限制（对比报告已记录"捡残留桩"共性问题）；归档后正常态由
+  // 上文 completed 分支覆盖（T-FIX-17 主修复）
   try {
     const entries = await fs.readdir(specsRoot, { withFileTypes: true });
     const candidates = [];
@@ -404,7 +411,8 @@ async function main() {
     const branchMode = isInsideWorkTree();
     const state = {
       activeChange: changeName,
-      currentNode: 'open',
+      // T-FIX-18: currentNode 取协议首节点（内置协议 = open，行为不变；自定义协议 = 首节点，如 brainstorm）
+      currentNode: route(protocol)[0]?.id ?? 'open',
       completedNodes: [],
       evidence: {},
       verifyFailures: 0,
@@ -413,9 +421,14 @@ async function main() {
       branchMode,
       enablePrReview: false,
       branchPrefix,
+      status: 'running',
       createdAt: new Date().toISOString()
     };
     await writeState(state);
+    // T-FIX-16: init 创建 .specs/<id>/ 目录——文件即真相从 init 起成立，findActiveChange 立即可识别
+    //（此前 init 后 next/status 报 No active change，与 SKILL 启动协议 init → next 矛盾）
+    const specsChangeDir = path.join(specsRoot, changeName);
+    await fs.mkdir(specsChangeDir, { recursive: true });
     // E1 + T-FIX-14: 分支创建——branchMode && 当前分支 ≠ <prefix><id> && 分支不存在 → git checkout -b
     // 前缀由 --branch-prefix 指定（缺省 'change/'，向后兼容；可适配仓库自身分支规范如 feat/）
     // 失败 → WARN 不 BLOCK，继续纯文件模式（向后兼容）
@@ -432,7 +445,8 @@ async function main() {
     }
     console.log('Initialized: ' + changeName);
     console.log('BRANCH: ' + (branchMode ? expectedBranch : 'none（非 git 仓库）'));
-    printNext(protocol, 'open');
+    // D-17: init 输出取协议首节点（与 T-FIX-18 的 state.currentNode 一致——内置协议 = open，行为不变）
+    printNext(protocol, route(protocol)[0]?.id ?? 'open');
     return;
   }
 
@@ -527,8 +541,18 @@ async function main() {
     state.evidence = state.evidence || {};
     // 解析 JSON 参数并展开到 evidence 顶层（summary/completedChecks/output-schema evidence 等）；
     // 若不可解析则作为 summary 字符串
+    // D-14: payload 解析前剥离 --protocol（及 --protocol=<p>）——resolveProtocol 已全局提取协议路径，
+    // 此处仅防其拼入 payload 导致 JSON 解析失败（结构字段丢失）
     let parsed = {};
-    const raw = process.argv.slice(4).join(' ');
+    const payloadArgs = [];
+    const recordArgs = process.argv.slice(4);
+    for (let i = 0; i < recordArgs.length; i++) {
+      const arg = recordArgs[i];
+      if (arg === '--protocol') { i += 1; continue; }
+      if (typeof arg === 'string' && arg.startsWith('--protocol=')) continue;
+      payloadArgs.push(arg);
+    }
+    const raw = payloadArgs.join(' ');
     try {
       parsed = raw ? JSON.parse(raw) : {};
       if (typeof parsed !== 'object' || Array.isArray(parsed)) parsed = { summary: String(parsed) };

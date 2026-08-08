@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 1,
+  "kind": "workflow-kernel",
+  "name": "brainstorm-tdd-review",
+  "goal": "示例：头脑风暴 → TDD 实现 → 代码审查 的自定义工作流（任意已安装 skill 组合）",
+  "nodes": [
+    {
+      "id": "brainstorm",
+      "label": "Brainstorm",
+      "kind": "control",
+      "responsibility": "澄清意图与需求，产出 BRAINSTORM.md",
+      "implementation": {
+        "skill": "superpowers:brainstorming",
+        "operation": "require",
+        "scope": "main",
+        "enforcement": "guarded"
+      },
+      "operations": ["require", "augment"],
+      "requiredSkillCalls": [],
+      "outputSchemas": ["compose.brainstorm.v1"],
+      "guardrails": [
+        {
+          "id": "brainstorm-artifacts",
+          "label": "BRAINSTORM.md exists",
+          "validation": "artifact-exists"
+        }
+      ],
+      "augmentations": [],
+      "satisfies": [],
+      "disabled": false
+    },
+    {
+      "id": "tdd",
+      "label": "TDD",
+      "kind": "control",
+      "responsibility": "按 TDD 实现功能，产出 SUMMARY.md",
+      "implementation": {
+        "skill": "superpowers:test-driven-development",
+        "operation": "require",
+        "scope": "main",
+        "enforcement": "guarded"
+      },
+      "operations": ["require", "augment"],
+      "requiredSkillCalls": [],
+      "outputSchemas": ["compose.tdd.v1"],
+      "guardrails": [
+        {
+          "id": "tdd-evidence",
+          "label": "SUMMARY.md produced",
+          "validation": "artifact-exists"
+        }
+      ],
+      "augmentations": [],
+      "satisfies": [],
+      "disabled": false
+    },
+    {
+      "id": "codereview",
+      "label": "Review",
+      "kind": "control",
+      "responsibility": "代码审查，产出 REVIEW.md",
+      "implementation": {
+        "skill": "superpowers:requesting-code-review",
+        "operation": "require",
+        "scope": "main",
+        "enforcement": "guarded"
+      },
+      "operations": ["require", "augment"],
+      "requiredSkillCalls": [],
+      "outputSchemas": ["compose.review.v1"],
+      "guardrails": [
+        {
+          "id": "review-artifacts",
+          "label": "REVIEW.md exists",
+          "validation": "artifact-exists"
+        }
+      ],
+      "augmentations": [],
+      "satisfies": [],
+      "disabled": false
+    }
+  ],
+  "outputSchemas": [
+    {
+      "id": "compose.brainstorm.v1",
+      "description": "BRAINSTORM.md",
+      "artifacts": [
+        {
+          "id": "brainstorm-doc",
+          "kind": "file",
+          "required": true,
+          "paths": ["<change-id>/BRAINSTORM.md"],
+          "pathBase": "specs-root"
+        }
+      ],
+      "evidence": [
+        { "id": "brainstorm-summary", "required": true }
+      ]
+    },
+    {
+      "id": "compose.tdd.v1",
+      "description": "SUMMARY.md per task",
+      "artifacts": [
+        {
+          "id": "task-summaries",
+          "kind": "file",
+          "required": true,
+          "paths": ["<change-id>/*-SUMMARY.md"],
+          "pathBase": "specs-root"
+        }
+      ],
+      "evidence": [
+        { "id": "implementation-summary", "required": true }
+      ]
+    },
+    {
+      "id": "compose.review.v1",
+      "description": "REVIEW.md",
+      "artifacts": [
+        {
+          "id": "review-doc",
+          "kind": "file",
+          "required": true,
+          "paths": ["<change-id>/REVIEW.md"],
+          "pathBase": "specs-root"
+        }
+      ],
+      "evidence": [
+        { "id": "review-summary", "required": true }
+      ]
+    }
+  ],
+  "writeWhitelist": {
+    "brainstorm": [".specs/<change-id>/", ".comet/"],
+    "tdd": [".specs/<change-id>/", ".comet/", "calc/", "tests/", "README.md"],
+    "codereview": [".specs/<change-id>/", ".comet/", "STATE.md", ".specs/CONTEXT.md", ".specs/LESSONS.md"]
+  },
+  "state": {
+    "kind": "workflow-run",
+    "statePath": ".comet/flow-comet-state.json",
+    "currentNodeField": "currentNode",
+    "completedNodesField": "completedNodes",
+    "evidenceField": "evidence"
+  }
+}

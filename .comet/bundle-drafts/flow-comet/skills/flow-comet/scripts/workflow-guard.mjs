@@ -1314,7 +1314,7 @@ async function readOverlayEvidence(protocol, change) {
           'workflow evidence file',
           WORKFLOW_PROJECT_FILE_MAX_BYTES,
         )
-      ).toString('utf8'),
+      ).toString('utf8').replace(/^﻿/, ''),  // D-22: 容忍 UTF-8 BOM
     );
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
   } catch (error) {
@@ -1601,6 +1601,7 @@ async function statePath(protocol) {
 }
 
 async function readStateJson(file) {
+  // D-22: 容忍 UTF-8 BOM（外部写入可能带 BOM）
   return JSON.parse(
     (
       await readWorkflowProtectedFile(
@@ -1609,7 +1610,7 @@ async function readStateJson(file) {
         'workflow-run state',
         WORKFLOW_PROJECT_FILE_MAX_BYTES,
       )
-    ).toString('utf8'),
+    ).toString('utf8').replace(/^﻿/, ''),
   );
 }
 
