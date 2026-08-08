@@ -33,7 +33,7 @@ Hook blocking semantics: PreToolUse hook exit 2 (blocking — prevents the tool 
 | Node order BLOCK | next when currentNode not exited (non-normal successor) → BLOCKED; normal next after exit advancement exempt; T-FIX rollback exempt (pending T-FIX in TASK) | next |
 | handoff completedChecks | subagent Return Contract must carry required-skill completedChecks (skill-load evidence), missing → BLOCKED | exit subagent-execute |
 | redEvidence ordering | redEvidence must exist before greenEvidence; recording redEvidence after greenEvidence → BLOCKED | workflow-handoff result |
-| SUMMARY six sections | verify output / 6-dimension self-check (non-empty) / boundary check + mandatory `## 自检方法` | exit execute |
+| SUMMARY six sections | verify output / 6-dimension self-check (non-empty) / boundary check + mandatory `## 自检方法` — self-review two-tier fallback: `brooks-review` (Skill tool) → if only a "Launching skill" placeholder is returned, Read the plugin-cache protocol files and execute the full review manually (`cache-brooks`) → builtin R1~R6 quick-check last (`builtin-quickcheck` must state the unavailable reason AND the cache-attempt evidence; missing evidence → progressive WARN) | exit execute |
 | verify real execution | TEST.md `## 验证命令` actually runs (multi-line `&&` supported); verifyFailures machine-counted, 4th → BLOCKED | exit verify |
 | Append placement | CONTEXT orphan sections / LESSONS numbering-out-of-order / STATE+CHANGELOG non-reverse-order → WARN (progressive) | exit open/verify/archive |
 | Pre-delegation check | uncommitted artifacts in `.specs/<change>/` → WORKTREE WARN; PROGRESS.md present → recovery warning | entry execute |
@@ -57,7 +57,7 @@ Hook blocking semantics: PreToolUse hook exit 2 (blocking — prevents the tool 
 
 ```bash
 node .claude/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 74 SCENARIOS PASSED
+# → ALL 77 SCENARIOS PASSED
 ```
 
 ## Design principles
