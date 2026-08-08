@@ -1499,6 +1499,124 @@ const SCENARIOS = [
       assertOut(res, '"change": "sci-notation"');
     },
   },
+
+  // ---------- Round 2 场景（D-14~D-20，独立验证者发现） ----------
+
+  // 65: record 命令的 --protocol 参数不得污染 payload（D-14：payload 解析前剥离）
+  {
+    name: '65 record --protocol 不污染 payload（D-14）',
+    run: (dir) => {
+      const custom = writeCustomProtocol(dir);
+      const initRes = runState(['init', 'tf14-rec'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(initRes, 0);
+      const res = runState(['record', 'open', '{"summary":"x","completedChecks":["a"]}', '--protocol', custom], dir);
+      assertExit(res, 0);
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const ev = st.evidence.open || {};
+      if (ev.summary !== 'x') {
+        throw new Error('summary 被污染，应为 "x"，实际: ' + JSON.stringify(ev.summary));
+      }
+      if (ev.completedChecks === undefined) {
+        throw new Error('completedChecks 丢失（payload 未解析为对象）: ' + JSON.stringify(ev));
+      }
+    },
+  },
+
+  // 66: 自定义协议未声明 writeWhitelist 时，非内置节点写源码 → BLOCK（D-16 方案 B：
+  // 协调者默认 .specs/——当前 fail-open 放行）
+  {
+    name: '66 自定义节点未声明白名单写源码 BLOCK（D-16）',
+    run: (dir) => {
+      const custom = writeCustomProtocol(dir);
+      writeState(dir, composeState({ status: 'running' }));
+      const res = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'src', 'evil.py') } },
+        { FLOW_COMET_PROTOCOL: custom });
+      assertExit(res, 2);
+    },
+  },
+
+  // 67: 自定义协议未声明白名单时，写 .specs/ 工件 → 放行（D-16 协调者默认的正面）
+  {
+    name: '67 自定义节点未声明白名单写工件放行（D-16）',
+    run: (dir) => {
+      const custom = writeCustomProtocol(dir);
+      writeState(dir, composeState({ status: 'running' }));
+      const res = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', 'compose-demo', 'notes.md') } },
+        { FLOW_COMET_PROTOCOL: custom });
+      assertExit(res, 0);
+      assertOut(res, 'NODE: brainstorm');
+    },
+  },
+
+  // 68: 旧格式 state（无 status 字段 + 无 activeChange + 无 currentNode——批次 C 归档后升级场景）
+  // → hook 放行（D-15：无 activeChange 与无 state 文件同语义——当前被「not running」拦截）
+  {
+    name: '68 旧 state 无 status 无 activeChange hook 放行（D-15）',
+    run: (dir) => {
+      const st = baseState('open');
+      delete st.status;
+      st.activeChange = null;
+      st.currentNode = null;
+      writeState(dir, st);
+      const res = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'src', 'evil.py') } });
+      assertExit(res, 0);
+    },
+  },
+
+  // 69: writeWhitelist 路径支持 <change-id> 占位符（D-20：协议复用自动适配——
+  // 与 artifacts paths 同机制——当前字面匹配失败 BLOCK）
+  {
+    name: '69 writeWhitelist change-id 占位符（D-20）',
+    run: (dir) => {
+      const custom = customProtocol();
+      custom.writeWhitelist = { brainstorm: ['.specs/<change-id>/'] };
+      writeFile(dir, 'ph-protocol.json', JSON.stringify(custom, null, 2) + '\n');
+      writeState(dir, composeState({ status: 'running' }));
+      // 写 .specs/compose-demo/（占位符替换为 activeChange=compose-demo）→ 放行
+      const r1 = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', 'compose-demo', 'notes.md') } },
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'ph-protocol.json') });
+      assertExit(r1, 0);
+      // 写 .specs/other/（不在白名单）→ BLOCK
+      const r2 = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', 'other', 'x.md') } },
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'ph-protocol.json') });
+      assertExit(r2, 2);
+    },
+  },
+
+  // 70: 自定义协议 init 输出 NODE: 协议首节点（D-17：printNext 硬编码 open——输出与 state 不一致）
+  {
+    name: '70 init 输出 NODE 协议首节点（D-17）',
+    run: (dir) => {
+      const custom = writeCustomProtocol(dir);
+      const res = runState(['init', 'tf17-out'], dir, { FLOW_COMET_PROTOCOL: custom });
+      assertExit(res, 0);
+      assertOut(res, 'NODE: brainstorm');
+      assertNotOut(res, 'NODE: open');
+    },
+  },
+
+  // 71: state completed + activeChange 非空（残留值）→ status 应 no-change（D-19：
+  // completed 检查优先于 activeChange 分支——当前 activeChange 分支先命中误判）
+  {
+    name: '71 completed state 残留 activeChange 不误判（D-19）',
+    run: (dir) => {
+      const st = composeState({ status: 'completed', currentNode: null });
+      st.activeChange = 'stale-id';
+      writeState(dir, st);
+      writeFile(dir, '.specs/stale-id/CHANGE.md', '# CHANGE\n## Why\nx\n');
+      writeFile(dir, '.specs/stale-id/TASK.md', '# TASK\n');
+      const res = runState(['status'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'no-change');
+    },
+  },
 ];
 
 // ---------- 运行 ----------

@@ -1684,11 +1684,13 @@ async function main() {
   const stateFile = path.join(runRoot, '.comet', 'flow-comet-state.json');
   let currentNode = null;
   let executionMode = 'subagent';
+  let activeChange = null;
   try {
     const stateContent = await fs.readFile(stateFile, 'utf8');
     const state = JSON.parse(stateContent);
     currentNode = state.currentNode;
     executionMode = state.executionMode ?? 'subagent';
+    activeChange = state.activeChange ?? null;
   } catch {}
 
   // 白名单声明化：协议 writeWhitelist 优先（节点 id → 路径前缀数组），缺失/读取失败时静默回退缺省表（fail-closed）
@@ -1699,7 +1701,17 @@ async function main() {
   if (currentNode && target) {
     const whitelist = PHASE_WRITE_WHITELIST[currentNode];
     if (whitelist) {
-      const allowed = whitelist.some(prefix => prefix === '' || target.startsWith(prefix));
+      // D-20: writeWhitelist 路径支持 <change-id> 占位符（与 artifacts paths 同机制——
+      // 协议复用自动适配当前 change；无 activeChange 时字面匹配保底）
+      const replaceChangeId = (prefix) => (
+        typeof prefix === 'string' && prefix.includes('<change-id>') && activeChange
+          ? prefix.replaceAll('<change-id>', activeChange)
+          : prefix
+      );
+      const allowed = whitelist.some(prefix => {
+        const p = replaceChangeId(prefix);
+        return p === '' || target.startsWith(p);
+      });
       if (!allowed) {
         console.error(`BLOCKED: phase "${currentNode}" 不允许写入 "${target}"`);
         console.error(`允许范围: ${whitelist.join(', ')}`);
@@ -1711,6 +1723,16 @@ async function main() {
       console.error(`BLOCKED: phase "${currentNode}" 未在协议 writeWhitelist 中声明，默认拒绝写入 "${target}"`);
       console.error(`请在协议 writeWhitelist 中为节点 "${currentNode}" 声明允许的路径前缀`);
       process.exit(2);
+    } else {
+      // D-16（round2）：未声明 writeWhitelist 时，非内置节点（缺省表无此 id）→ 协调者默认 ['.specs/']
+      // ——与内置 execute/subagent-execute 协调者语义统一（写源码必须显式声明，防 fail-open 防线出洞）
+      const coordDefault = ['.specs/'];
+      const allowed = coordDefault.some(prefix => prefix === '' || target.startsWith(prefix));
+      if (!allowed) {
+        console.error(`BLOCKED: phase "${currentNode}" 不允许写入 "${target}"`);
+        console.error(`允许范围: ${coordDefault.join(', ')}（未声明 writeWhitelist 的协调者默认）`);
+        process.exit(2);
+      }
     }
   }
   if (isCometOverlay(protocol)) {
@@ -1737,9 +1759,16 @@ async function main() {
     }
     throw error;
   }
-  // T-FIX-15: status 判定三层语义——running（含旧 state 无 status 但有 activeChange，fail-closed 向后兼容）
-  // → 白名单校验；completed（归档后）→ 放行；其他 → 拦截
-  const running = state.status === 'running' || (Boolean(state.activeChange) && state.status === undefined);
+  // T-FIX-15 + D-15: 判定语义——
+  // ① 无 activeChange（无论 status；与"无 state 文件"同语义，覆盖批次 C 旧 state 归档后）→ 放行
+  // ② running（含旧 state 无 status 但有 activeChange，fail-closed 向后兼容）→ 白名单校验
+  // ③ completed（归档后）→ 放行；其他 → 拦截
+  if (!state.activeChange) {
+    console.log('workflow-hook-guard-ok');
+    console.log('EVENT: ' + event + ' (no active workflow)');
+    return;
+  }
+  const running = state.status === 'running' || state.status === undefined;
   if (!running) {
     if (state.status === 'completed') {
       console.log('workflow-hook-guard-ok');
