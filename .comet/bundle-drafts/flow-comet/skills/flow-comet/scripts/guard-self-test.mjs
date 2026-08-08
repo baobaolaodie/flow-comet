@@ -1617,6 +1617,23 @@ const SCENARIOS = [
       assertOut(res, 'no-change');
     },
   },
+
+  // 72: 自定义协议未声明 state.statePath（最小 schema）→ hook 不崩溃，写 .specs/ 放行
+  // （D-21：statePath 缺省回退 .comet/flow-comet-state.json——与 workflow-state 硬编码一致；
+  //  当前空值解析崩溃 exit 1 全量拦截）
+  {
+    name: '72 无 statePath 协议 hook 不崩溃（D-21）',
+    run: (dir) => {
+      const custom = customProtocol();
+      delete custom.state;
+      writeFile(dir, 'nostate-protocol.json', JSON.stringify(custom, null, 2) + '\n');
+      writeState(dir, composeState({ status: 'running' }));
+      const res = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', 'compose-demo', 'notes.md') } },
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'nostate-protocol.json') });
+      assertExit(res, 0);
+    },
+  },
 ];
 
 // ---------- 运行 ----------

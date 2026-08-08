@@ -1563,7 +1563,10 @@ async function writeOverlayEvidence(protocol, change, value) {
 
 
 async function statePath(protocol) {
-  const preferred = String(protocol.state?.statePath ?? '');
+  // D-21: 协议未声明 state.statePath（最小 schema 协议）→ 回退默认 .comet/flow-comet-state.json
+  // （与 workflow-state.mjs 写 state 的硬编码路径一致——防最小协议在 hook 下全量崩溃，
+  //  顺带消除"相位白名单读硬编码路径 vs 主流程读协议路径"的两段不一致）
+  const preferred = String(protocol.state?.statePath ?? '') || '.comet/flow-comet-state.json';
   const target = resolveWorkflowRelativePath(
     runRoot,
     preferred,
