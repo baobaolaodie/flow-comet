@@ -47,3 +47,24 @@
 - archive-dir artifact path 用 glob 匹配日期（`archive/*-<change-id>`，修尾部斜杠）
 - exit archive 自动清理 activeChange（归档后回到无活跃状态）
 - flow-comet-task write_files 指南补"含关联测试文件"
+
+## 后续验证进展（2026-08-04 ~ 2026-08-08）
+
+### e2e 项目完整 8 节点验证（多轮 dogfood）
+
+- **e2e-processor / e2e-processor-enhance / e2e-chunk / processor-topn / stats-aggregation**：8 节点全流程多轮跑通（open→archive），每节点 guard exit 通过，最终 `ALL CHECKS PASSED + NEXT: done`
+- 分支模式（change/<id> + 归档 merge + 删分支）、追加位置纪律、PR 审查开关均真实验证
+- 真实 TDD（RED→GREEN 证据全文）、UAT 场景级对照、归档完整（.specs/archive/ + CHANGELOG + LESSONS）
+
+### 安装引导 dogfood（2026-08-08，用户从主仓按说明安装）
+
+- fresh 用户按 README 方案 A 安装到全新项目 → 四步验证安装全部通过（结构/配置/一致性 diff/冒烟）
+- 真实 harness 会话（claude -p）完整流程：内置 8 节点（sqrt 144 passed / calc-pi-const 114 passed）、自定义协议（calc-mod 101 / calc-min 168 / sci-notation 87）——三种协议形态零回归
+- hook 主会话 TUI blocking 实测生效（越权写被物理阻止）
+
+### 修复批次与回归基线
+
+- 74 场景回归基线（guard-self-test）：`ALL 74 SCENARIOS PASSED`——修复批次 round1（T-FIX-15~18）+ round2（D-14~22）全部 TDD（RED→GREEN + 回滚验证）
+- 独立验证者两轮（fresh 执行者按缺陷报告独立复现）：round1 5 项解决 + 发现 6 新问题；round2 12/12 解决 + 发现 D-21/D-22
+
+**当时的「限制与后续」已全部落地**：guard exit 完整闭环（review/verify/archive）已在 e2e 多轮验证；完整 8 节点在真实交互式/无头会话均验证通过。

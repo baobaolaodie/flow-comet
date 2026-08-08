@@ -1,0 +1,61 @@
+<div align="right">
+
+[English](MECHANISM.md) · [中文](MECHANISM-zh.md)
+
+</div>
+
+# Core Mechanisms (behavior layer)
+
+This document describes what flow-comet **does** — the behaviors and rules you will observe while using it. Implementation details (script logic, decision tables, historical fixes) live in the project's internal documentation.
+
+## 1. State machine and routing (file-as-truth)
+
+- Single-file state machine `.comet/flow-comet-state.json`; node advancement is gated by `workflow-guard.mjs exit <node> --apply`
+- **determineNode**: the current node is derived in real time from `.specs/` artifacts (missing files → stop at that node); state is not fully trusted
+- **P0-2 auto-correction**: when state's currentNode disagrees with derivation, it is written back automatically (triggered by `next`)
+
+## 2. Three defense layers (takeover protection)
+
+| Layer | Mechanism | Check point |
+|-------|-----------|-------------|
+| ① Hook physical interception | Phase whitelist: execute/subagent-execute coordinators may only write `.specs/`; source code is written by worktree subagents (no state in their cwd → allowed) | write target path + currentNode |
+| ② Coordinator prohibition | `next`/`entry` inject "you are the coordinator, not the executor" each time (direct-mode execute exempt) | output injection |
+| ③ Exit takeover detection | parallel tasks done must have handoffResult, otherwise BLOCKED (`parallelTakeoverApproved` explicit exemption) | TASK.md + handoff evidence |
+
+Hook blocking semantics: PreToolUse hook exit 2 (blocking — prevents the tool call) is **verified working in the main TUI session**; in `claude -p` (SDK CLI mode) non-zero exits are downgraded to non-blocking — the write is logged but not prevented.
+
+## 3. Guard validation (evidence-driven advancement)
+
+| Mechanism | Check point | Trigger |
+|-----------|-------------|---------|
+| Template-derived section names | open/design exit required section names derived from `flow-kit/templates/` (built-in fallback when templates missing) | exit open/design |
+| TASK signature hash | enter records task-set signature (line-ending normalized + marker attributes stripped) → exit compares: add/remove tasks, change action/boundaries → BLOCKED; marking done/adding marker attributes → legal | enter/exit execute |
+| Node order BLOCK | next when currentNode not exited (non-normal successor) → BLOCKED; normal next after exit advancement exempt; T-FIX rollback exempt (pending T-FIX in TASK) | next |
+| handoff completedChecks | subagent Return Contract must carry required-skill completedChecks (skill-load evidence), missing → BLOCKED | exit subagent-execute |
+| redEvidence ordering | redEvidence must exist before greenEvidence; recording redEvidence after greenEvidence → BLOCKED | workflow-handoff result |
+| SUMMARY six sections | verify output / 6-dimension self-check (non-empty) / boundary check + mandatory `## 自检方法` | exit execute |
+| verify real execution | TEST.md `## 验证命令` actually runs (multi-line `&&` supported); verifyFailures machine-counted, 4th → BLOCKED | exit verify |
+| Append placement | CONTEXT orphan sections / LESSONS numbering-out-of-order / STATE+CHANGELOG non-reverse-order → WARN (progressive) | exit open/verify/archive |
+| Pre-delegation check | uncommitted artifacts in `.specs/<change>/` → WORKTREE WARN; PROGRESS.md present → recovery warning | entry execute |
+| state schema validation | writeState field types fail-closed (state-schema.mjs single source, shared by three scripts) | all state writes |
+
+## 4. Execution model (subagent-based)
+
+- **Return Contract**: subagents return `{status, commitHash, redEvidence, greenEvidence, completedChecks, riskSignals}` — missing commitHash/greenEvidence/completedChecks → BLOCK; missing redEvidence → progressive WARN; redEvidence recorded after the fact → BLOCK
+- **handoff hash provenance**: `git show <commitHash>` verifies committed files ⊆ write_files (auto-parsed from TASK.md, XML comments stripped)
+- **write_files conflict detection**: parallel tasks may share a wave only if their write_files do not overlap
+
+## 5. Recovery protocol
+
+- Any-entry recovery: determineNode derives from files + state auto-correction (no conversation history needed)
+- PROGRESS.md recovery warning (R1.6 anti-repetition)
+- Branch-state consistency check
+
+## 6. Guard self-test suite (author regression baseline)
+
+`scripts/guard-self-test.mjs`: **74 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios) — the author's regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
+
+```bash
+node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
+# → ALL 74 SCENARIOS PASSED
+```
