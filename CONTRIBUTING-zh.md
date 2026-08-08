@@ -49,6 +49,23 @@ dev ──PR（squash）──▶ main               （发布分支——历史
 | 禁删除 | ✅ | ✅ |
 | stale review 失效 | ✅ | ✅ |
 
+## 开发环境
+
+- **运行时**：Node.js ≥ 18（ESM）
+- **仓库**：clone 后先验证回归基线可跑：
+  `node .claude/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 74 SCENARIOS PASSED`
+- **创作环境**：Claude Code（skill/hook 在 Claude Code 会话中运行）；hook 通过 `prepare-env` 安装到你的项目 `.claude/`
+- **机制相关工作**：动手改脚本前先读 `docs/internal/MECHANISM.md`（内部文档，不推送）了解机制语义
+
+## Issues（报告 bug / 提 feature）
+
+开 Issue 时写清描述：
+
+- **Bug**：实际行为 vs 期望、复现步骤（或确切的 BLOCKED/WARN 消息）、环境（Node 版本、安装方式）
+- **Feature 提案**：目标、想要的工作流、你设想的 skill 组合（自定义协议见 [PROTOCOL-zh.md](docs/PROTOCOL-zh.md)）
+
+Issue 确认后：bug 用 `fix/` 分支、feature 用 `feature/` 分支——都按[PR 流程](#pr-流程)合入 `dev`。
+
 ## 开发规范
 
 - **权威源**：skill/脚本改动在 `.comet/bundle-drafts/flow-comet/skills/`（单一权威源；`.claude/` 副本是安装产物——用 `prepare-env` 更新，勿手改）
@@ -85,6 +102,20 @@ test: D-22 补测——S74/S75 BOM 容忍场景
 - **PR 描述**：改了什么、为什么、验证证据（测试输出、真实会话证据）
 - **范围**：代码改动 → 伴随测试 + 回归；文档改动 → 两语同步
 - **1 个 approving review**（分支保护）；新推送使旧 approve 失效（dismiss stale reviews）
+
+## 保持 PR 更新
+
+PR 打开期间，保持与 `dev` 同步：
+
+```bash
+git fetch origin
+git rebase origin/dev        # 把 feature 分支 rebase 到最新 dev
+# 有冲突先解决，然后：
+node .claude/skills/flow-comet/scripts/guard-self-test.mjs   # 重跑回归
+git push --force-with-lease origin feature/<描述>            # feature 分支允许 force push
+```
+
+你自己的 feature 分支允许 force push（无保护）；新推送会使旧 approve 失效（dismiss stale reviews），更新后请重新请求审核。
 
 ## 发布流程（维护者）
 

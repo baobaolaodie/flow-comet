@@ -49,6 +49,23 @@ dev ──PR(squash)──▶ main               (release branch — clean histo
 | Block deletions | ✅ | ✅ |
 | Dismiss stale reviews | ✅ | ✅ |
 
+## Development setup
+
+- **Runtime**: Node.js ≥ 18 (ESM)
+- **Repo**: clone, then verify the regression baseline runs:
+  `node .claude/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 74 SCENARIOS PASSED`
+- **Authoring environment**: Claude Code (skills/hooks run in Claude Code sessions); the hook is installed via `prepare-env` into your project's `.claude/`
+- **For mechanism work**: read `docs/internal/MECHANISM.md` (internal, not pushed) for the mechanism semantics before touching scripts
+
+## Issues (reporting bugs / proposing features)
+
+Open an issue with a clear description:
+
+- **Bug**: what happened vs expected, reproduction steps (or the exact BLOCKED/WARN message), environment (Node version, install method)
+- **Feature proposal**: the goal, the workflow you want, any skill combination you have in mind (see [PROTOCOL.md](docs/PROTOCOL.md) for custom protocols)
+
+After the issue is confirmed: bug fixes use a `fix/` branch, features use a `feature/` branch — both PR into `dev` per the [Pull-request workflow](#pull-request-workflow).
+
 ## Development standards
 
 - **Authoritative source**: edit skills/scripts under `.comet/bundle-drafts/flow-comet/skills/` (the single source; `.claude/` copies are install artifacts — update them via `prepare-env`, never by hand)
@@ -85,6 +102,20 @@ test: D-22 complement — S74/S75 BOM-tolerance scenarios
 - **PR description**: what changed, why, verification evidence (test output, real-session evidence)
 - **Scope**: code change → accompany tests + regression; doc change → both languages in sync
 - **One approving review** required (branch protection); a new push invalidates the previous approval (dismiss stale reviews)
+
+## Keeping a PR current
+
+While a PR is open, keep it up to date with `dev`:
+
+```bash
+git fetch origin
+git rebase origin/dev        # rebase your feature branch onto the latest dev
+# resolve conflicts if any, then:
+node .claude/skills/flow-comet/scripts/guard-self-test.mjs   # re-run regression
+git push --force-with-lease origin feature/<description>     # force push is allowed on feature branches
+```
+
+Force push is allowed on your own feature branch (no protection); a new push invalidates previous approvals (dismiss stale reviews), so request re-review after updating.
 
 ## Release process (maintainers)
 
