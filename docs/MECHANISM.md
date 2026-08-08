@@ -59,3 +59,21 @@ Hook blocking semantics: PreToolUse hook exit 2 (blocking — prevents the tool 
 node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
 # → ALL 74 SCENARIOS PASSED
 ```
+
+## Design principles
+
+- **File-as-truth, no event sourcing**: single-file state machine + node derivation from `.specs/` — simple, recovery never depends on history
+- **Structural validation, no semantic judgment**: guard checks "filled or not" (sections/non-empty/structure); "good or not" is left to review — light validation, few false positives
+- **Detect + correct, not intercept**: agents cannot truly be prevented from editing files directly; machine fields rely on detection and auto-correction
+- **State stays out of version control**: `.comet/` is gitignored — branch switches share one working-tree state, avoiding state divergence
+- **One change at a time, no forced PR**: a single active change keeps the state machine simple; PR review is opt-in
+
+## Limitations
+
+- **Claude Code only**: other platforms (Codex/Gemini/Cursor) not guaranteed
+- **Return Contract transition rule**: legacy pure-string handoffs are exempt as WARN; missing redEvidence/greenEvidence is progressive WARN (not BLOCK) to avoid blocking legacy change re-entry
+- **Not interoperable with Comet Classic**: workflow-kernel state is independent of classic (design decision, not a defect)
+- **Hook allows writes when no active change**: when `.comet/flow-comet-state.json` is absent, the hook guard allows all writes (design decision: no workflow, no write restrictions)
+- **Hook blocking semantics**: exit 2 (blocking) is verified working in the main TUI session; in `claude -p` (SDK CLI mode) non-zero exits are downgraded to non-blocking — writes logged but not prevented
+- **Worktree mount dependency**: Agent `isolation: "worktree"` worktrees mount at the **session project root** (not the subagent's target project) — cross-repo artifacts need manual `git show <branch>:<path>` transport, and W2-D `git show` validation is degraded
+- **GUIDANCE not lane-tracked**: `<skill>-GUIDANCE.md` and SKILL.md reference lines are not recorded in authoring-lanes; re-running `comet creator generate` clears them

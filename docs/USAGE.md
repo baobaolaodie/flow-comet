@@ -29,6 +29,28 @@ Routing is **derived from `.specs/` artifacts** (determineNode): missing files �
 | **verify** | Integration verification + UAT + failure diagnosis (≤3 rounds) | `TEST.md` / `UAT.md` / LESSONS nominations | verification commands actually executed; UAT sections; LESSONS numbering/placement |
 | **archive** | LESSONS nominations + archive + branch wrap-up | `.specs/archive/<date>-<id>/` / CHANGELOG | branch check (new mode); CHANGELOG ordering |
 
+## Artifacts
+
+All workflow artifacts live in `.specs/` (project-level) and `.specs/<change-id>/` (per change):
+
+| File | Location | Purpose | Produced at |
+|------|----------|---------|-------------|
+| `CHANGE.md` | change dir | change proposal (Why/What/impact/scope-exclusion/acceptance line) | open |
+| `REQUIREMENT.md` | change dir | requirements + ACs (Given/When/Then) + v1·v2·out scope split | open |
+| `DESIGN.md` | change dir | technical decisions (§0 stack/§0.5 architecture/decision list/risks) | design |
+| `TASK.md` | change dir | atomic tasks (XML 7 fields + parallel markers + wave planning) | plan |
+| `<task-id>-SUMMARY.md` | change dir | per-task report (six sections: what/changed files/verify output/6-dim self-check/boundary check/self-check method) | execute / subagent-execute |
+| `<task-id>-PROGRESS.md` | change dir | mid-task context-window snapshot (temporary, removed on resume) | execute (temporary) |
+| `TEST.md` | change dir | 5-tier test pyramid + verification commands + UAT script | review |
+| `REVIEW.md` | change dir | review report (Critical/findings/conclusion) | review |
+| `UAT.md` | change dir | acceptance results (per-item pass/fail) | verify |
+| `CONTEXT.md` | `.specs/` | project-level shared context (glossary/locked decisions/defaults) | open (append each time) |
+| `LESSONS.md` | `.specs/` | cross-task failure knowledge base (L-NNN numbered entries) | verify / archive |
+| `CHANGELOG.md` | `.specs/` | change log (table, newest date first) | archive |
+| `.comet/flow-comet-state.json` | `.comet/` | state machine (activeChange/currentNode/completedNodes/evidence/…) | throughout (script-managed) |
+
+> **Append placement discipline**: CONTEXT terms → glossary table, decisions → locked-decision list; LESSONS → entries section by L-NNN; STATE/CHANGELOG → top (reverse order); T-FIX → `## Fix 任务` section — guard detects violations (progressive WARN).
+
 ## Branch mode
 
 All branch operations are **executed automatically by Claude under the skill protocol** (no manual git):

@@ -35,6 +35,14 @@ flow-comet turns the flow-kit 9-stage process (CHANGE → REQUIREMENT → DESIGN
 - **Subagent-isolated execution** — implementation work is delegated to fresh-context subagents with a verifiable Return Contract
 - **File-as-truth recovery** — state is derived from `.specs/` artifacts, so recovery never depends on conversation history
 
+## Ecosystem
+
+| Project | Role | Relationship to flow-comet |
+|---------|------|---------------------------|
+| [flow-kit](https://github.com/rihebty/flow-kit) | Methodology & artifact system (9-stage flow, `.specs/` templates, R1-R8 rules) | **Dependency** — flow-comet is its automation layer; artifacts and rules come from flow-kit |
+| [Comet](https://github.com/rpamis/comet) | Skill Creator ecosystem (bundle authoring, hook-guard pattern, state machine) | **Mechanism source** — flow-comet borrows Comet CLI's bundle authoring model; **runtime optional** (copy install needs no Comet CLI) |
+| **Comet Classic** | Comet's classic workflow (OpenSpec + Superpowers) | **Not a dependency** — flow-comet is an independent workflow-kernel; state does not interoperate with classic (own `.comet/flow-comet-state.json` + file-derived routing) |
+
 ## Quick Start
 
 Requires [Claude Code](https://claude.ai/code) and [flow-kit](https://github.com/rihebty/flow-kit) in the target project (see [Installation](docs/INSTALLATION.md)).
