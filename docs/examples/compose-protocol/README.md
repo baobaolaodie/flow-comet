@@ -1,24 +1,30 @@
-# compose-protocol 示例：自定义协议（brainstorm → tdd → codereview）
+<div align="right">
 
-> 用 `/flow-comet-compose` 组合三个已安装 skill 生成自定义工作流的**完整示例**——协议 JSON + 冒烟验证记录。节点 id 避开内置 8 节点 id（`brainstorm`/`tdd`/`codereview`），特化校验不误触发。
+[English](README.md) · [中文](README-zh.md)
 
-## 文件
+</div>
 
-| 文件 | 说明 |
-|------|------|
-| `protocol.json` | 自定义协议（brainstorm → tdd → codereview，writeWhitelist 用 `<change-id>` 占位符——协议跨 change 复用自动适配） |
-| `VALIDATION.md` | `validateProtocolSchema` 冒烟验证记录（协议生效证据） |
+# compose-protocol example: custom protocol (brainstorm → tdd → codereview)
 
-## 使用
+> A complete example of composing three installed skills into a custom workflow via `/flow-comet-compose` — protocol JSON + smoke-validation record. Node ids avoid the built-in 8-node ids (`brainstorm`/`tdd`/`codereview`), so specialization validation never misfires.
 
-1. 复制 `protocol.json` 到你的项目（建议 `.specs/protocols/<name>.json`）
-2. 把 `implementation.skill` 替换为你实际安装的 skill 名（示例为 superpowers 系占位）
-3. 冒烟验证（见 VALIDATION.md 的命令）
-4. 启动：`/flow-comet`（配合 `FLOW_COMET_PROTOCOL` 环境变量指向协议，或由 Claude 以 `--protocol` 附带）
+## Files
 
-## 协议要点
+| File | Description |
+|------|-------------|
+| `protocol.json` | Custom protocol (brainstorm → tdd → codereview; `writeWhitelist` uses the `<change-id>` placeholder — protocols reuse across changes with automatic adaptation) |
+| `VALIDATION.md` | `validateProtocolSchema` smoke-validation record (protocol effectiveness evidence) |
 
-- **每节点有产物**：outputSchemas 引用非空 `artifacts[].paths`
-- **每节点有 evidence**：每条 schema 带 `evidence: [{ id, required }]`
-- **写源码需声明**：`writeWhitelist.tdd` 需声明源码路径（如 `calc/`、`tests/`）——未声明时自定义节点默认协调者白名单 `.specs/`，写源码会被 hook BLOCK
-- **`<change-id>` 占位符**：writeWhitelist 与 artifacts paths 均支持，协议跨 change 复用无需手工改路径
+## Usage
+
+1. Copy `protocol.json` into your project (suggest `.specs/protocols/<name>.json`)
+2. Replace `implementation.skill` with skills actually installed in your project (the example uses superpowers placeholders)
+3. Smoke-validate (see the command in VALIDATION.md)
+4. Start: `/flow-comet` (with `FLOW_COMET_PROTOCOL` env pointing at the protocol, or Claude attaches `--protocol`)
+
+## Protocol essentials
+
+- **Every node has artifacts**: `outputSchemas` references carry non-empty `artifacts[].paths`
+- **Every node has evidence**: each schema carries `evidence: [{ id, required }]`
+- **Writing source code requires declaration**: `writeWhitelist.tdd` must declare source paths (e.g. `calc/`, `tests/`) — undeclared custom nodes default to the coordinator whitelist `.specs/`, and source writes are BLOCKED by the hook
+- **`<change-id>` placeholder**: supported in both `writeWhitelist` and artifact paths — protocols reuse across changes without manual path edits

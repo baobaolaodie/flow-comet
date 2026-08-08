@@ -12,7 +12,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [1.2.1] - 2026-08-08
 
-Installation-guided dogfood fix batch (T-FIX-15~18 + README guidance fixes + round2 independent-verification fixes).
+Installation-guide fix batch (T-FIX-15~18 + README guidance fixes + round2 independent-verification fixes).
 
 ### Fixed
 

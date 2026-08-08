@@ -40,7 +40,7 @@ flow-comet 把 flow-kit 的 9 阶段开发流程（CHANGE → REQUIREMENT → DE
 | 项目 | 定位 | 与 flow-comet 的关系 |
 |------|------|---------------------|
 | [flow-kit](https://github.com/rihebty/flow-kit) | 方法论与工件体系（9 阶段流程、`.specs/` 模板、R1-R8 规则） | **依赖**——flow-comet 是它的执行自动化层；产物与规则来自 flow-kit |
-| [Comet](https://github.com/rpamis/comet) | Skill Creator 生态（bundle 创作、hook guard 模式、状态机） | **机制来源**——flow-comet 借鉴 Comet CLI 的 bundle 创作模式；**运行时可选**（复制安装无需 Comet CLI） |
+| [Comet](https://github.com/rpamis/comet) | Skill Creator 生态（bundle 创作、hook guard 模式、状态机） | **机制来源**——flow-comet 大量借鉴 Comet 的机制范式（协议即事实源、脚本拥有状态、guard 门禁、hook 拦截）；**运行时可选**（复制安装无需 Comet CLI）。详见[生态](docs/ECOSYSTEM-zh.md) |
 | **Comet Classic** | Comet 的经典工作流（OpenSpec + Superpowers） | **不依赖**——flow-comet 是独立 workflow-kernel；状态与 classic 不互通（自有 `.comet/flow-comet-state.json` + 文件推导路由） |
 
 ## 快速开始
@@ -115,6 +115,7 @@ flow-comet/
 
 | 文档 | 说明 |
 |------|------|
+| [生态](docs/ECOSYSTEM-zh.md) | flow-kit 与 Comet 的作用、flow-comet 借鉴什么与明确不吸收什么 |
 | [安装](docs/INSTALLATION-zh.md) | 前置依赖、prepare-env 方案 A/B、安装验证 |
 | [使用](docs/USAGE-zh.md) | 8 节点工作流、分支模式、执行模式、决策点 |
 | [自定义协议](docs/PROTOCOL-zh.md) | 组合 skill 成自定义工作流 |

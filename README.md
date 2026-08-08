@@ -40,7 +40,7 @@ flow-comet turns the flow-kit 9-stage process (CHANGE → REQUIREMENT → DESIGN
 | Project | Role | Relationship to flow-comet |
 |---------|------|---------------------------|
 | [flow-kit](https://github.com/rihebty/flow-kit) | Methodology & artifact system (9-stage flow, `.specs/` templates, R1-R8 rules) | **Dependency** — flow-comet is its automation layer; artifacts and rules come from flow-kit |
-| [Comet](https://github.com/rpamis/comet) | Skill Creator ecosystem (bundle authoring, hook-guard pattern, state machine) | **Mechanism source** — flow-comet borrows Comet CLI's bundle authoring model; **runtime optional** (copy install needs no Comet CLI) |
+| [Comet](https://github.com/rpamis/comet) | Skill Creator ecosystem (bundle authoring, hook-guard pattern, state machine) | **Mechanism source** — flow-comet borrows Comet's mechanism patterns extensively (workflow-protocol as source of truth, script-owned state, guard gates, hook interception); **runtime optional** (copy install needs no Comet CLI). Details in [Ecosystem](docs/ECOSYSTEM.md) |
 | **Comet Classic** | Comet's classic workflow (OpenSpec + Superpowers) | **Not a dependency** — flow-comet is an independent workflow-kernel; state does not interoperate with classic (own `.comet/flow-comet-state.json` + file-derived routing) |
 
 ## Quick Start
@@ -115,6 +115,7 @@ flow-comet/
 
 | Document | Description |
 |----------|-------------|
+| [Ecosystem](docs/ECOSYSTEM.md) | Roles of flow-kit & Comet, what flow-comet borrows and deliberately does not |
 | [Installation](docs/INSTALLATION.md) | Prerequisites, prepare-env options A/B, installation verification |
 | [Usage](docs/USAGE.md) | 8-node workflow, branch mode, execution modes, decision points |
 | [Custom Protocols](docs/PROTOCOL.md) | Compose skills into custom workflows |

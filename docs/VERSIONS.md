@@ -11,7 +11,7 @@
 | Item | Description |
 |------|-------------|
 | **Current version** | v1.2.1 (recorded in [CHANGELOG.md](../CHANGELOG.md) and git tag; v1.0.0 = first stable: 8-node workflow + three defense layers + guard validation) |
-| **Versioning** | Semantic Versioning: feature release → minor (1.2.0), bug fix → patch (1.1.1), breaking change → major (2.0.0); bump at the end of each feature batch |
+| **Versioning** | Semantic Versioning: feature release → minor (1.2.0), bug fix → patch (1.1.1), breaking change → major (2.0.0); bump at the end of each feature release |
 | **Bundle version decoupling** | `bundle.yaml`/`skill.yaml` version stays 1.0.0 (decoupled from release versioning); git tag + CHANGELOG are the single source of truth |
 
 ## Dependencies
@@ -28,7 +28,7 @@
 - Progressive WARN (not BLOCK) for legacy change re-entry (missing redEvidence/greenEvidence, pure-string handoff)
 - Regression baseline: `guard-self-test.mjs` 74 scenarios green (required after every change)
 
-## Release checklist (per batch)
+## Release checklist (per release)
 
 1. Update CHANGELOG (Added/Changed/Fixed)
 2. Update README version badge + version status
