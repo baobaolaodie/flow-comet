@@ -128,11 +128,12 @@ flow-comet/
 
 ## 贡献
 
-1. Fork 仓库
-2. 创建功能分支（`feat/` 前缀，Conventional Commits）
-3. 修改 skill/脚本请改 `.comet/bundle-drafts/flow-comet/skills/`（权威源）
-4. 运行回归：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 74 SCENARIOS PASSED`
-5. 提交 Pull Request
+完整指南见 [CONTRIBUTING-zh.md](CONTRIBUTING-zh.md)——分支模型（`feature → dev → main`）、PR 流程、合并规则与提交规范。速览：
+
+1. 从 `dev` 开分支：`git checkout dev && git checkout -b feature/<描述>`
+2. 修改 skill/脚本请改 `.comet/bundle-drafts/flow-comet/skills/`（权威源）；TDD——先写 RED 场景
+3. 运行回归：`node .claude/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 74 SCENARIOS PASSED`
+4. 开 PR 合入 `dev`（merge commit）；发布 PR `dev → main`（squash）
 
 ## License
 
