@@ -2281,8 +2281,15 @@ async function main() {
           } else {
             violations.push(f + ' 缺 ## 自检方法 字段（必须声明 brooks-review 或 builtin-quickcheck）');
           }
-        } else if (/builtin/i.test(method[0]) && !/brooks-lint 不可用|插件不可用|unavailable|N\/A/i.test(content)) {
-          console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明 brooks-lint 不可用原因');
+        } else if (/builtin/i.test(method[0])) {
+          // T-FIX-19: builtin 降级两级校验——① 必须声明不可用原因（既有）；② 必须含缓存尝试证据
+          // （已尝试 Read 插件缓存协议文件手动执行仍不可行——两级降级路径第 2 级；防「未尝试读缓存」的偷懒降级）
+          // 关键词声明级校验（设计边界：不做语义判断）；缺失 → WARN 渐进（不 BLOCK，向后兼容旧 SUMMARY）
+          if (!/brooks-lint 不可用|插件不可用|unavailable|N\/A/i.test(content)) {
+            console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明 brooks-lint 不可用原因');
+          } else if (!/插件缓存|缓存协议|协议文件|plugins\/cache/i.test(content)) {
+            console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明缓存尝试证据（应先 Read 插件缓存协议文件手动执行完整 brooks 流程——T-FIX-19 两级降级路径）');
+          }
         }
         if (sixDim && !/brooks.?review/i.test(sixDim[0])) {
           console.error('BROOKS-LINT WARN: ' + f + ' 的 6 维自查未声明使用 /brooks-review（可能使用了内置快查）');
