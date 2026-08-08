@@ -1582,6 +1582,7 @@ async function statePath(protocol) {
 }
 
 async function readStateJson(file) {
+  // D-22: 容忍 UTF-8 BOM（外部写入可能带 BOM）
   return JSON.parse(
     (
       await readWorkflowProtectedFile(
@@ -1590,7 +1591,7 @@ async function readStateJson(file) {
         'workflow-run state',
         WORKFLOW_PROJECT_FILE_MAX_BYTES,
       )
-    ).toString('utf8'),
+    ).toString('utf8').replace(/^﻿/, ''),
   );
 }
 
@@ -1614,7 +1615,7 @@ async function readHookInput() {
     const chunks = [];
     for await (const chunk of process.stdin) chunks.push(chunk);
     const text = Buffer.concat(chunks).toString('utf8').trim();
-    return text ? JSON.parse(text) : null;
+    return text ? JSON.parse(text.replace(/^﻿/, '')) : null;
   } catch {
     return null;
   }

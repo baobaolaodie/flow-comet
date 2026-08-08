@@ -1634,6 +1634,23 @@ const SCENARIOS = [
       assertExit(res, 0);
     },
   },
+
+  // 73: state 文件带 UTF-8 BOM（外部写入如会话 Write）→ status 正常输出（D-22：
+  // 读端 JSON.parse 应容忍 BOM——当前崩）
+  {
+    name: '73 state 带 BOM 正常读取（D-22）',
+    run: (dir) => {
+      const st = composeState({ status: 'running' });
+      const raw = '﻿' + JSON.stringify(st, null, 2) + '\n';
+      fs.mkdirSync(path.join(dir, '.comet'), { recursive: true });
+      fs.writeFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), raw, 'utf8');
+      writeFile(dir, '.specs/compose-demo/CHANGE.md', '# CHANGE\n## Why\nx\n');
+      const res = runState(['status'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, '"status": "running"');
+    },
+  },
 ];
 
 // ---------- 运行 ----------

@@ -18,7 +18,8 @@ const statePath = path.join(runRoot, '.comet', 'flow-comet-state.json');
 const specsRoot = path.join(runRoot, '.specs');
 
 async function readJson(file) {
-  return JSON.parse(await fs.readFile(file, 'utf8'));
+  // D-22: 容忍 UTF-8 BOM（外部写入如会话 Write 可能带 BOM）
+  return JSON.parse((await fs.readFile(file, 'utf8')).replace(/^﻿/, ''));
 }
 
 async function writeJson(file, value) {
