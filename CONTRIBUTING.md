@@ -1,0 +1,96 @@
+<div align="right">
+
+[English](CONTRIBUTING.md) · [中文](CONTRIBUTING-zh.md)
+
+</div>
+
+# Contributing
+
+Thanks for contributing to flow-comet. This guide covers the branch model, pull-request workflow, merge rules, and code standards — the repository is protected by these rules, so following them keeps the flow smooth.
+
+## Branch model
+
+```
+feature/xxx ──PR(merge commit)──▶ dev        (integration branch — full history)
+                                      │
+dev ──PR(squash)──▶ main               (release branch — clean history)
+```
+
+| Branch | Role | Merge style | History |
+|--------|------|-------------|---------|
+| `main` | Release branch | **squash** | Clean — one commit per release/feature batch |
+| `dev` | Integration branch | **merge commit** | Full — every feature commit preserved, traceable |
+| `feature/*` | Development branch | — | Working history, deleted after merge |
+
+**Why this split**: `dev` preserves the complete history of every TDD fix (traceability — each commit is a RED→GREEN loop), while `main` stays clean for release and changelog purposes.
+
+## Pull-request workflow
+
+1. **Create a feature branch** from `dev` (prefix `feature/`, or `fix/` for bug fixes):
+
+   ```bash
+   git checkout dev
+   git checkout -b feature/<description>
+   ```
+
+2. **Develop** on the feature branch — follow the [Development standards](#development-standards) below.
+3. **Open a PR** into `dev` (base `dev`, head `feature/<description>`). Fill in the PR description: what changed, why, verification evidence.
+4. **Get review approval** — one approving review is required (branch protection).
+5. **Merge into `dev`** — **merge commit** (preserves feature history).
+6. **Release PR** — when `dev` is ready, open a PR into `main` (base `main`, head `dev`). Merge with **squash** — one clean commit per release.
+7. After merge, delete the feature branch.
+
+## Branch protection (reference)
+
+| Rule | `main` | `dev` |
+|------|--------|-------|
+| Require pull request reviews | ✅ (1 approve) | ✅ (1 approve) |
+| Block force pushes | ✅ | ❌ allowed (integration rebases) |
+| Block deletions | ✅ | ✅ |
+| Dismiss stale reviews | ✅ | ✅ |
+
+## Development standards
+
+- **Authoritative source**: edit skills/scripts under `.comet/bundle-drafts/flow-comet/skills/` (the single source; `.claude/` copies are install artifacts — update them via `prepare-env`, never by hand)
+- **TDD**: every mechanism fix starts with a RED scenario in `guard-self-test.mjs` (watch it fail for the right reason), then GREEN, then full regression
+- **Regression baseline**: `node .claude/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 74 SCENARIOS PASSED` (mandatory after every change)
+- **Documentation sync**: behavior-layer docs live in `docs/` (bilingual EN/zh — keep both in sync when a doc changes); implementation details stay out of public docs
+- **Backward compatibility**: old changes/states keep working — progressive WARN over BLOCK
+- **No internal terms in public docs**: no batch ids (E-NN), no dogfood/T-FIX/D- references, no pointers to `docs/internal/`
+
+## Commit convention
+
+[Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>(<scope>): <subject>
+
+feat:      new feature / mechanism
+fix:       bug fix (mechanism, script, hook)
+docs:      documentation (README, docs/, CHANGELOG)
+chore:     tooling, release wrap-up
+test:      test-only changes (guard-self-test scenarios)
+```
+
+Examples:
+
+```
+fix: init state gains status:'running' + three-tier hook semantics
+docs: README restructured into multi-document bilingual layout
+test: D-22 complement — S74/S75 BOM-tolerance scenarios
+```
+
+## Review requirements
+
+- **PR description**: what changed, why, verification evidence (test output, real-session evidence)
+- **Scope**: code change → accompany tests + regression; doc change → both languages in sync
+- **One approving review** required (branch protection); a new push invalidates the previous approval (dismiss stale reviews)
+
+## Release process (maintainers)
+
+Per release (see [VERSIONS.md](docs/VERSIONS.md)):
+
+1. Update CHANGELOG (Added/Changed/Fixed — bilingual)
+2. Update README version badge
+3. `git tag vX.Y.Z` + push --tags (after merging the release PR into main)
+4. prepare-env release to all installed copies (main `.claude/` + target projects) — verify each copy's `guard-self-test` after release
