@@ -11,7 +11,7 @@
 ## 分支模型
 
 ```
-feature/xxx ──PR（merge commit）──▶ dev        （集成分支——历史完整）
+feat/xxx ──PR（merge commit）──▶ dev        （集成分支——历史完整）
                                           │
 dev ──PR（squash）──▶ main               （发布分支——历史干净）
 ```
@@ -20,21 +20,21 @@ dev ──PR（squash）──▶ main               （发布分支——历史
 |------|------|---------|------|
 | `main` | 发布分支 | **squash** | 干净——每次发布/功能批次一条 |
 | `dev` | 集成分支 | **merge commit** | 完整——每个 feature 提交保留、可追溯 |
-| `feature/*` | 开发分支 | — | 工作历史，合并后删除 |
+| `feat/*` | 开发分支 | — | 工作历史，合并后删除 |
 
 **为什么这样拆分**：`dev` 保留每个 TDD 修复的完整历史（可追溯性——每个提交是一个 RED→GREEN 闭环）；`main` 保持干净，便于发布与变更日志管理。
 
 ## PR 流程
 
-1. **从 `dev` 创建功能分支**（前缀 `feature/`；bug 修复用 `fix/`）：
+1. **从 `dev` 创建功能分支**（前缀 `feat/`；bug 修复用 `fix/`）：
 
    ```bash
    git checkout dev
-   git checkout -b feature/<描述>
+   git checkout -b feat/<描述>
    ```
 
 2. **在功能分支上开发**——遵循下方[开发规范](#开发规范)。
-3. **开 PR 合入 `dev`**（base `dev`，head `feature/<描述>`）。PR 描述写明：改了什么、为什么、验证证据。
+3. **开 PR 合入 `dev`**（base `dev`，head `feat/<描述>`）。PR 描述写明：改了什么、为什么、验证证据。
 4. **获得审核 approve**——需要 1 个 approving review（分支保护）。
 5. **合入 `dev`**——用 **merge commit**（保留 feature 历史）。
 6. **发布 PR**——`dev` 就绪后，开 PR 合入 `main`（base `main`，head `dev`）。用 **squash** 合并——每次发布一条干净提交。
@@ -55,7 +55,7 @@ dev ──PR（squash）──▶ main               （发布分支——历史
 - **仓库**：clone 后先验证回归基线可跑：
   `node .claude/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 74 SCENARIOS PASSED`
 - **创作环境**：Claude Code（skill/hook 在 Claude Code 会话中运行）；hook 通过 `prepare-env` 安装到你的项目 `.claude/`
-- **机制相关工作**：动手改脚本前先读 `docs/internal/MECHANISM.md`（内部文档，不推送）了解机制语义
+- **机制相关工作**：动手改脚本前先读 [docs/MECHANISM.md](docs/MECHANISM.md) 了解机制语义（行为层）
 
 ## Issues（报告 bug / 提 feature）
 
@@ -64,7 +64,7 @@ dev ──PR（squash）──▶ main               （发布分支——历史
 - **Bug**：实际行为 vs 期望、复现步骤（或确切的 BLOCKED/WARN 消息）、环境（Node 版本、安装方式）
 - **Feature 提案**：目标、想要的工作流、你设想的 skill 组合（自定义协议见 [PROTOCOL-zh.md](docs/PROTOCOL-zh.md)）
 
-Issue 确认后：bug 用 `fix/` 分支、feature 用 `feature/` 分支——都按[PR 流程](#pr-流程)合入 `dev`。
+Issue 确认后：bug 用 `fix/` 分支、feature 用 `feat/` 分支——都按[PR 流程](#pr-流程)合入 `dev`。
 
 ## 开发规范
 
@@ -99,18 +99,21 @@ revert:    回滚之前的提交
 ```
 fix: init state 补 status:'running' + hook 判定三层语义
 docs: README 重构为多文档中英双语结构
-test: D-22 补测——S74/S75 BOM 容忍场景
+test: BOM 容忍场景——带 UTF-8 BOM 的 state/evidence 文件正常解析
 ```
 
-**分支前缀对齐**：前缀应与改动类型匹配，而非固定默认。通过 flow-comet 工作流开发时，用匹配的前缀初始化 change 分支：
+**分支前缀对齐**：前缀应与改动类型匹配，而非固定默认。按开发方式二选一：
+
+- **纯 git 开发**（不经 flow-comet 工作流）：`git checkout -b feat/<描述>`（或 `fix/` 等）——见[PR 流程](#pr-流程)
+- **经 flow-comet 工作流开发**：`init` 自动建分支——指定匹配的前缀：
 
 ```bash
-node workflow-state.mjs init <change-id> --branch-prefix feat/   # 功能开发
-node workflow-state.mjs init <change-id> --branch-prefix fix/    # bug 修复
-node workflow-state.mjs init <change-id> --branch-prefix docs/   # 文档
+node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix feat/   # 功能开发
+node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix fix/    # bug 修复
+node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix docs/   # 文档
 ```
 
-内置默认前缀是 `change/`（与既有 change 向后兼容）；本仓库规范要求显式指定类型前缀，使分支与改动类型一致。
+内置默认前缀是 `change/`（与既有 change 向后兼容）；本仓库规范要求显式指定类型前缀，使分支与改动类型一致——与手动 `feat/`/`fix/` 分支同一惯例。
 
 ## 审核要求
 
@@ -127,7 +130,7 @@ git fetch origin
 git rebase origin/dev        # 把 feature 分支 rebase 到最新 dev
 # 有冲突先解决，然后：
 node .claude/skills/flow-comet/scripts/guard-self-test.mjs   # 重跑回归
-git push --force-with-lease origin feature/<描述>            # feature 分支允许 force push
+git push --force-with-lease origin feat/<描述>            # feature 分支允许 force push
 ```
 
 你自己的 feature 分支允许 force push（无保护）；新推送会使旧 approve 失效（dismiss stale reviews），更新后请重新请求审核。

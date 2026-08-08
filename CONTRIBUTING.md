@@ -11,7 +11,7 @@ Thanks for contributing to flow-comet. This guide covers the branch model, pull-
 ## Branch model
 
 ```
-feature/xxx ──PR(merge commit)──▶ dev        (integration branch — full history)
+feat/xxx ──PR(merge commit)──▶ dev        (integration branch — full history)
                                       │
 dev ──PR(squash)──▶ main               (release branch — clean history)
 ```
@@ -20,21 +20,21 @@ dev ──PR(squash)──▶ main               (release branch — clean histo
 |--------|------|-------------|---------|
 | `main` | Release branch | **squash** | Clean — one commit per release/feature batch |
 | `dev` | Integration branch | **merge commit** | Full — every feature commit preserved, traceable |
-| `feature/*` | Development branch | — | Working history, deleted after merge |
+| `feat/*` | Development branch | — | Working history, deleted after merge |
 
 **Why this split**: `dev` preserves the complete history of every TDD fix (traceability — each commit is a RED→GREEN loop), while `main` stays clean for release and changelog purposes.
 
 ## Pull-request workflow
 
-1. **Create a feature branch** from `dev` (prefix `feature/`, or `fix/` for bug fixes):
+1. **Create a feature branch** from `dev` (prefix `feat/`, or `fix/` for bug fixes):
 
    ```bash
    git checkout dev
-   git checkout -b feature/<description>
+   git checkout -b feat/<description>
    ```
 
 2. **Develop** on the feature branch — follow the [Development standards](#development-standards) below.
-3. **Open a PR** into `dev` (base `dev`, head `feature/<description>`). Fill in the PR description: what changed, why, verification evidence.
+3. **Open a PR** into `dev` (base `dev`, head `feat/<description>`). Fill in the PR description: what changed, why, verification evidence.
 4. **Get review approval** — one approving review is required (branch protection).
 5. **Merge into `dev`** — **merge commit** (preserves feature history).
 6. **Release PR** — when `dev` is ready, open a PR into `main` (base `main`, head `dev`). Merge with **squash** — one clean commit per release.
@@ -55,7 +55,7 @@ dev ──PR(squash)──▶ main               (release branch — clean histo
 - **Repo**: clone, then verify the regression baseline runs:
   `node .claude/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 74 SCENARIOS PASSED`
 - **Authoring environment**: Claude Code (skills/hooks run in Claude Code sessions); the hook is installed via `prepare-env` into your project's `.claude/`
-- **For mechanism work**: read `docs/internal/MECHANISM.md` (internal, not pushed) for the mechanism semantics before touching scripts
+- **For mechanism work**: read [docs/MECHANISM.md](docs/MECHANISM.md) for the mechanism semantics (behavior layer) before touching scripts
 
 ## Issues (reporting bugs / proposing features)
 
@@ -64,7 +64,7 @@ Open an issue with a clear description:
 - **Bug**: what happened vs expected, reproduction steps (or the exact BLOCKED/WARN message), environment (Node version, install method)
 - **Feature proposal**: the goal, the workflow you want, any skill combination you have in mind (see [PROTOCOL.md](docs/PROTOCOL.md) for custom protocols)
 
-After the issue is confirmed: bug fixes use a `fix/` branch, features use a `feature/` branch — both PR into `dev` per the [Pull-request workflow](#pull-request-workflow).
+After the issue is confirmed: bug fixes use a `fix/` branch, features use a `feat/` branch — both PR into `dev` per the [Pull-request workflow](#pull-request-workflow).
 
 ## Development standards
 
@@ -99,18 +99,21 @@ Examples:
 ```
 fix: init state gains status:'running' + three-tier hook semantics
 docs: README restructured into multi-document bilingual layout
-test: D-22 complement — S74/S75 BOM-tolerance scenarios
+test: BOM-tolerance scenarios — state/evidence files with UTF-8 BOM parse normally
 ```
 
-**Branch prefix alignment**: the prefix should match the change type, not a fixed default. When developing through the flow-comet workflow, initialize the change branch with the matching prefix:
+**Branch prefix alignment**: the prefix should match the change type, not a fixed default. Two ways to create a branch — pick by how you develop:
+
+- **Pure git development** (no flow-comet workflow): `git checkout -b feat/<description>` (or `fix/`) as in the [Pull-request workflow](#pull-request-workflow)
+- **Through the flow-comet workflow**: `init` creates the branch for you — specify the matching prefix:
 
 ```bash
-node workflow-state.mjs init <change-id> --branch-prefix feat/   # feature work
-node workflow-state.mjs init <change-id> --branch-prefix fix/    # bug fixes
-node workflow-state.mjs init <change-id> --branch-prefix docs/   # documentation
+node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix feat/   # feature work
+node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix fix/    # bug fixes
+node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix docs/   # documentation
 ```
 
-The built-in default prefix is `change/` (backward-compatible with existing changes); this repository's convention is to specify the type prefix explicitly so the branch matches the change type.
+The built-in default prefix is `change/` (backward-compatible with existing changes); this repository's convention is to specify the type prefix explicitly so the branch matches the change type — same convention as the manual `feat/`/`fix/` branches.
 
 ## Review requirements
 
@@ -127,7 +130,7 @@ git fetch origin
 git rebase origin/dev        # rebase your feature branch onto the latest dev
 # resolve conflicts if any, then:
 node .claude/skills/flow-comet/scripts/guard-self-test.mjs   # re-run regression
-git push --force-with-lease origin feature/<description>     # force push is allowed on feature branches
+git push --force-with-lease origin feat/<description>     # force push is allowed on feature branches
 ```
 
 Force push is allowed on your own feature branch (no protection); a new push invalidates previous approvals (dismiss stale reviews), so request re-review after updating.
