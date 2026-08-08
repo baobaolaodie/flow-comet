@@ -1,84 +1,101 @@
+<div align="right">
+
+[English](CHANGELOG.md) · [中文](CHANGELOG-zh.md)
+
+</div>
+
 # Changelog
 
-本项目的所有显著变更都记录在此文件中。
+All notable changes to this project are documented in this file.
 
-格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号仅记录于 git tag 与本文档；`bundle.yaml` 的 version 保持 1.0.0（与 bundle 发布流程解耦，见 README「版本与兼容性」）。
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded only in git tags and this document; `bundle.yaml` version stays 1.0.0 (decoupled from release versioning — see the README's version section).
 
 ## [1.2.1] - 2026-08-08
 
-安装引导 dogfood 修复批次（T-FIX-15~18 + README 指引修复）。
+Installation-guided dogfood fix batch (T-FIX-15~18 + README guidance fixes + round2 independent-verification fixes).
 
 ### Fixed
 
-- **init state 补 `status: 'running'` + hook 判定三层语义**（T-FIX-15，dogfood D-09/D-12）：此前 init 不写 status，hook 对 status 未定义的 state 放行——open 阶段（首次 guard exit 前）三层防线第一层失效；且归档后 `completed` 状态被 hook 拦截全部写入。修复后：running（含旧 state 无 status 有 activeChange，fail-closed 向后兼容）→ 白名单校验；completed → 放行
-- **init 创建 `.specs/<id>/` 目录**（T-FIX-16，dogfood D-02）：此前 init 后 `next`/`status` 报「No active change. Run: init」（findActiveChange 要求目录存在），与 SKILL 启动协议（init → next）矛盾
-- **findActiveChange 归档完成态不兜底扫描**（T-FIX-17，dogfood D-10）：归档残留目录（含 TASK.md 的旧副本）不再被误判为 active change
-- **init currentNode 按协议首节点**（T-FIX-18，dogfood D-11）：自定义协议首节点非 open 时不再硬编码 open
-- guard 自测套件扩展至 60 场景（S55~S60：init status/init 后 hook 拦截/completed 放行/init 后 next 识别/残留不误判/协议首节点）
+- **init state gains `status: 'running'` + three-tier hook semantics** (T-FIX-15, dogfood D-09/D-12): init previously did not write `status`, and the hook allowed writes on undefined-status state — the first defense layer was ineffective during open (before the first guard exit); archived `completed` states were also blocked from all writes. After: running (including legacy states without status but with activeChange — fail-closed backward compatible) → whitelist validation; completed → allowed
+- **init creates `.specs/<id>/` directory** (T-FIX-16, dogfood D-02): previously `next`/`status` reported "No active change. Run: init" after init (findActiveChange requires the directory), contradicting the SKILL startup protocol
+- **findActiveChange skips fallback scan on archived-complete state** (T-FIX-17, dogfood D-10): leftover archive directories (with TASK.md copies) are no longer misdetected as active changes
+- **init currentNode follows the protocol's first node** (T-FIX-18, dogfood D-11): no longer hardcodes `open` when a custom protocol starts elsewhere
+- **record strips `--protocol` from payload** (D-14): stripped before JSON parsing, preventing structural fields from being lost on parse failure
+- **Custom-node coordinator-default whitelist** (D-16): undeclared non-built-in nodes default to `['.specs/']` (writing source code requires explicit declaration) — closes the fail-open gap
+- **Legacy state without activeChange is allowed** (D-15): batch-C legacy states (no status + no activeChange) are no longer fully blocked by the hook
+- **writeWhitelist supports the `<change-id>` placeholder** (D-20): protocols reuse across changes with automatic adaptation
+- **init output NODE follows the protocol's first node** (D-17): consistent with state.currentNode (previously hardcoded open)
+- **findActiveChange checks completed first** (D-19): archived-complete states with a residual activeChange are no longer misdetected
+- **hook statePath falls back to default** (D-21): minimal-schema protocols (no `state.statePath`) no longer crash
+- **Three scripts tolerate UTF-8 BOM in JSON.parse** (D-22): state/evidence files written by external tools (e.g. session Write) with BOM parse normally
+- guard self-test suite expanded to 74 scenarios (S55~S75: round1 T-FIX scenarios + round2 independent-verification scenarios + BOM tolerance)
 
 ### Changed
 
-- **README 验证安装**改为四步（结构检查 / 配置可加载性 / 权威源 diff 一致性 / 真实环境冒烟）——guard-self-test 标注为**作者回归基线**（脚本逻辑自测，不依赖安装完整性，不是安装验证判据）
-- README 快速开始补 flow-kit 前置依赖提示与新会话生效提示；Requirements 补 flow-kit 安装验证步骤；settings 注入说明补首次创建/已有文件两情形；hook command 补相对路径解析基准（项目根）
+- **README installation verification** now has four steps (structure / config loadability / authoritative-source diff consistency / real-environment smoke test) — `guard-self-test` marked as the **author regression baseline** (script-logic self-test; does not depend on installation completeness; not an installation verification criterion)
+- README Quick Start gains the flow-kit prerequisite hint and a new-session hint; Requirements gains a flow-kit verification step; settings injection documents first-time vs existing-file cases; hook command documents the project-root resolution base
+- **SKILL startup protocol documentation corrected** (D-18): init output is the first route (NODE: open / protocol first node); `next` is used after a node exits
+- **README restructured into multi-document layout** (bilingual): README index + docs/ (INSTALLATION/USAGE/PROTOCOL/MECHANISM/TROUBLESHOOTING/VERSIONS) + compose example; VERIFICATION.md removed from the public repo (verification records are internal knowledge)
+- **hook blocking semantics confirmed by measurement**: main TUI session blocks writes (physical interception); `claude -p` (SDK CLI mode) downgrades to non-blocking (log-only)
 
 ## [1.2.0] - 2026-08-08
 
-自定义组合 skill（flow-comet-compose）+ 协议参数化 + 非破坏安装器。
+Custom skill composition (flow-comet-compose) + protocol parameterization + non-destructive installer.
 
 ### Added
 
-- **flow-comet-compose 引导 skill**：交互式组合任意已安装 skill（superpowers/brooks-lint/自定义）为自定义协议 JSON，复用同一机制驱动（状态路由 + guard 校验 + hook 拦截），不取代内置 8 节点协议
-- **协议参数化**：`resolveProtocol` 解析优先级（`--protocol` CLI → `FLOW_COMET_PROTOCOL` 环境变量 → 默认 `reference/workflow-protocol.json`）；`determineNode` 数据化——节点声明由协议 JSON 驱动（ADR-001）
-- **特化校验按节点 id 绑定**：通用层防线协议无关（所有协议一律物理校验）；特化层仅内置节点 id 触发，自定义节点不误触发（ADR-002）
-- **writeWhitelist 声明化**：协议可声明 hook 写白名单；解析失败用缺省表（fail-closed，防白名单出洞）
-- **prepare-env 安装器**：从权威源 `.comet/bundle-drafts/flow-comet/` 生成/覆盖目标项目 `.claude/`（rules + skills + settings 注入）；settings 采用读-合并-写幂等注入（保留 permissions 等既有字段）；`--purge --yes` 显式破坏性重建
-- **分支前缀可配置**：`--branch-prefix` 自定义 change 分支前缀（默认 `change/`，T-FIX-14）
-- guard 自测套件扩展至 54 场景（自定义协议/组合场景/节点元素校验/豁免严格化/hook 声明 fail-closed/分支前缀正反例）
+- **flow-comet-compose guidance skill**: interactively composes any installed skill (superpowers/brooks-lint/custom) into a custom protocol JSON, driven by the same engine (state routing + guard validation + hook interception); does not replace the built-in 8-node protocol
+- **Protocol parameterization**: `resolveProtocol` priority (`--protocol` CLI → `FLOW_COMET_PROTOCOL` env → default `reference/workflow-protocol.json`); `determineNode` data-driven — node declarations come from the protocol JSON (ADR-001)
+- **Specialization validation bound by node id**: the general defense layer is protocol-agnostic (all protocols physically validated); specialization fires only for built-in node ids, never for custom ids (ADR-002)
+- **writeWhitelist declaration**: protocols may declare hook write whitelists; parse failures fall back to the built-in table (fail-closed, no whitelist gaps)
+- **prepare-env installer**: generates/overwrites the target project's `.claude/` (rules + skills + settings injection) from `.comet/bundle-drafts/flow-comet/`; settings use read-merge-write idempotent injection (preserving `permissions` etc.); `--purge --yes` for explicit destructive rebuild
+- **Configurable branch prefix**: `--branch-prefix` customizes the change branch prefix (default `change/`, T-FIX-14)
+- guard self-test suite expanded to 54 scenarios (custom protocols / composition / node-element validation / exemption tightening / hook-declaration fail-closed / branch-prefix positive-negative)
 
 ### Changed
 
-- **单一权威源**：移除 `.comet/bundles/` 双目录（comet 有 eval/publish 分发才需要；flow-comet 只是复制安装——单一源 `bundle-drafts/`）；README 安装方案改为 prepare-env（方案 A）+ 手动复制（方案 B），删除 comet bundle 分发流程
-- **prepare-env 非破坏化**：默认只覆盖生成物（rules/skills）+ settings 注入，不再无条件删除目标 `.claude/`（T-FIX-13）
+- **Single authoritative source**: removed the `.comet/bundles/` dual directory (comet needs eval/publish distribution; flow-comet is copy-install only — single source `bundle-drafts/`); README installation now uses prepare-env (option A) + manual copy (option B), comet bundle distribution flow removed
+- **prepare-env non-destructive**: overwrites only generated files (rules/skills) + settings injection by default; no longer unconditionally deletes the target `.claude/` (T-FIX-13)
 
 ### Fixed
 
-- **record 覆盖 handoff 越俎代庖**：record 命令整体覆盖 evidence key 时 BLOCK（T-FIX-08 相关，S48 场景）
-- **节点乱序/完成标记**：completedChecks 校验、跳过节点 BLOCK（T-FIX-04/05）
-- **redEvidence 时序**：T-FIX 补 redEvidence 的时序校验（T-FIX-06）
-- **next 误拦修复**：T-FIX-05 引入的豁免节点误拦修正（T-FIX-11）
-- **hook 声明 fail-closed**：协议 hook 声明解析失败时按缺省表拦截（审查补充）
+- **record overwriting handoff triggers takeover BLOCK** (T-FIX-08 related, S48): record that replaces an evidence key wholesale is BLOCKED
+- **Node ordering/completion markers**: completedChecks validation, skipped-node BLOCK (T-FIX-04/05)
+- **redEvidence ordering** (T-FIX-06): redEvidence must precede greenEvidence
+- **next false-block fix** (T-FIX-11): exempt-node mis-block introduced by T-FIX-05 corrected
+- **hook declaration fail-closed**: protocol hook-declaration parse failures fall back to the built-in table (audit supplement)
 
 ## [1.1.0] - 2026-08-05
 
-change 分支 + PR 审查 + 追加位置纪律 + 文档重写。
+Change branches + PR review + append-placement discipline + documentation rewrite.
 
 ### Added
 
-- **change 分支模式**：`init` 自动创建 `change/<id>` 分支，全流程在分支上进行，归档时合并收尾（merge + 删除分支）
-- **PR 审查**：`config set enablePrReview true` 开启，归档前推送分支 + 创建 PR，approve 后合并
-- **分支-状态一致性校验**：`status`/`next` 检测分支与 activeChange 不符 → WARN（不 BLOCK）
-- **追加位置纪律与结构检测**：CONTEXT 术语/决策插入既有结构段、LESSONS 按 L-NNN 编号插入条目区、STATE 决策日志顶部插入（倒序）、CHANGELOG 表格顶部插入、T-FIX 追加到 `## Fix 任务` 段；guard 检测（孤立追加段/编号乱序/条目区外/非倒序）WARN 渐进
-- guard 自测套件扩展至 23 场景（分支校验 + 追加位置检测正反例）
+- **Change branch mode**: `init` auto-creates the `change/<id>` branch; the whole flow runs on it; archive wraps up with merge + branch deletion
+- **PR review**: `config set enablePrReview true`; push branch + create PR before archiving, merge after approve
+- **Branch-state consistency check**: `status`/`next` detect branch/activeChange mismatch → WARN (not BLOCK)
+- **Append-placement discipline and structural detection**: CONTEXT terms/decisions inserted into existing sections, LESSONS inserted by L-NNN into the entries section, STATE decision log inserted at top (reverse order), CHANGELOG table inserted at top, T-FIX appended to `## Fix 任务`; guard detects (orphan sections / numbering disorder / outside entries / non-reverse order) as progressive WARN
+- guard self-test suite expanded to 23 scenarios (branch checks + append-placement positive-negative)
 
 ### Changed
 
-- README 全面重写为完整产品文档（生态关系 / 快速开始 / 工作流总览 / 工件体系 / 核心机制 / 设计原理 / Troubleshooting / 版本与兼容性）
-- state-schema 补 `branchMode` / `enablePrReview` 字段校验（boolean）
+- README fully rewritten as a complete product document (ecosystem / quick start / workflow overview / artifacts / core mechanisms / design principles / troubleshooting / versions)
+- state-schema gains `branchMode` / `enablePrReview` field validation (boolean)
 
 ### Fixed
 
-- LESSONS 乱序检测改**分段**：多段编号体系（`## 活跃条目` / `## 已解决条目` 独立编号）不再误报
+- LESSONS disorder detection split by section: multi-section numbering (`## 活跃条目` / `## 已解决条目` independent numbering) no longer false-positives
 
 ## [1.0.0] - 2026-08-04
 
-首个稳定版（8 节点工作流 + 三层防线 + guard 校验体系，经端到端真实项目验证）。
+First stable release (8-node workflow + three defense layers + guard validation, verified end-to-end in real projects).
 
 ### Added
 
-- 8 节点自动路由工作流（open → design → plan → execute ⇄ subagent-execute → review → verify → archive）
-- 自有状态机（`.comet/flow-comet-state.json`）+ determineNode 文件推导 + P0-2 自动纠偏
-- 三层防线（hook phase 白名单 / 协调者禁令 / exit 越俎代庖检测）
-- guard 校验体系：段名模板派生、SUMMARY 六段 + 自检方法强制、TASK 签名哈希、verify 真实执行、verifyFailures 计数、state schema 校验（fail-closed）
-- 执行引擎子代理化 + executionMode（subagent 默认 / direct 逃生口）+ Return Contract + handoff hash 溯源
-- 横向命令（flow-comet-evolve / flow-comet-health）+ express 降级路径
-- guard 自测套件（17 场景）+ 端到端真实项目验证（新项目与既有项目两类场景）
+- 8-node auto-routed workflow (open → design → plan → execute ⇄ subagent-execute → review → verify → archive)
+- Own state machine (`.comet/flow-comet-state.json`) + determineNode file derivation + P0-2 auto-correction
+- Three defense layers (hook phase whitelist / coordinator prohibition / exit takeover detection)
+- Guard validation system: template-derived section names, SUMMARY six sections + mandatory self-check method, TASK signature hash, real verify execution, verifyFailures counting, state schema validation (fail-closed)
+- Subagent-based execution engine + executionMode (subagent default / direct escape hatch) + Return Contract + handoff hash provenance
+- Side commands (flow-comet-evolve / flow-comet-health) + express downgrade path
+- guard self-test suite (17 scenarios) + end-to-end real-project verification (new and existing projects)

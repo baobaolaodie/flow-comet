@@ -122,7 +122,7 @@ flow-comet/
 | [故障排查](docs/TROUBLESHOOTING-zh.md) | 常见错误与处理 |
 | [版本](docs/VERSIONS-zh.md) | SemVer 策略、兼容性 |
 | [产物示例](docs/examples/) | 全流程工件示例 |
-| [变更日志](CHANGELOG.md) | 版本历史（Keep a Changelog） |
+| [变更日志](CHANGELOG-zh.md) | 版本历史（Keep a Changelog） |
 
 ## 贡献
 
