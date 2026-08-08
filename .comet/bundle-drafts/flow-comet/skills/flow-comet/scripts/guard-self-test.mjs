@@ -1363,6 +1363,326 @@ const SCENARIOS = [
       assertOut(res, '一致性: ok');
     },
   },
+
+  // ---------- T-FIX-15 场景（S55~S57：init 写 status + hook 判定对齐） ----------
+
+  // 55: init 生成的 state 必须含 status:'running'（当前缺——hook 判定不一致的根源）
+  {
+    name: '55 init state 含 status: running（T-FIX-15）',
+    run: (dir) => {
+      const res = runState(['init', 'tf15-st'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      if (st.status !== 'running') {
+        throw new Error('init state 缺 status: running，实际: ' + JSON.stringify(st.status));
+      }
+    },
+  },
+
+  // 56: init 后（open 阶段）越权写源码 → hook BLOCK（当前因 status undefined 放行——三层防线缺口）
+  {
+    name: '56 hook BLOCKED：init 后越权写源码（T-FIX-15）',
+    run: (dir) => {
+      const initRes = runState(['init', 'tf15-hk'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(initRes, 0);
+      const res = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'src', 'evil.py') } });
+      assertExit(res, 2);
+    },
+  },
+
+  // 57: status:'completed'（归档后状态）→ hook 放行（当前 exit 1 拦截全部写入）
+  {
+    name: '57 hook 放行：status completed 归档后状态（T-FIX-15）',
+    run: (dir) => {
+      writeState(dir, composeState({ status: 'completed', activeChange: null, currentNode: null }));
+      const res = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'anything.md') } });
+      assertExit(res, 0);
+    },
+  },
+
+  // ---------- T-FIX-16 场景（S58：init 创建 .specs/<id>/ 目录，findActiveChange 立即可识别） ----------
+
+  // 58: init 后 next 识别 active change（当前因 .specs/<id>/ 目录未建报 No active change）
+  {
+    name: '58 init 后 next 识别 active change（T-FIX-16）',
+    run: (dir) => {
+      const initRes = runState(['init', 'tf16-dir'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(initRes, 0);
+      const res = runState(['next'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 1);
+      assertOut(res, '疑似未 exit 节点 open');
+      assertNotOut(res, 'No active change');
+    },
+  },
+
+  // ---------- T-FIX-17 场景（S59：归档完成态不兜底识别残留目录） ----------
+
+  // 59: state 为归档完成态（completed + activeChange null）→ .specs/ 顶层残留目录（含 TASK.md）不被兜底识别
+  {
+    name: '59 归档后残留目录不误判为 active（T-FIX-17）',
+    run: (dir) => {
+      writeState(dir, composeState({ status: 'completed', activeChange: null, currentNode: null }));
+      writeFile(dir, '.specs/stale/CHANGE.md', '# CHANGE\n## Why\nx\n');
+      writeFile(dir, '.specs/stale/TASK.md', '# TASK\n');
+      const res = runState(['status'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'no-change');
+      assertNotOut(res, 'stale');
+    },
+  },
+
+  // ---------- T-FIX-18 场景（S60：init currentNode 按协议首节点） ----------
+
+  // 60: 自定义协议 init → currentNode = 协议首节点 brainstorm（当前硬编码 open——D-11）
+  {
+    name: '60 init currentNode 按协议首节点（T-FIX-18）',
+    run: (dir) => {
+      const custom = writeCustomProtocol(dir);
+      const initRes = runState(['init', 'tf18-cp'], dir, { FLOW_COMET_PROTOCOL: custom });
+      assertExit(initRes, 0);
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      if (st.currentNode !== 'brainstorm') {
+        throw new Error('init currentNode 应为协议首节点 brainstorm，实际: ' + JSON.stringify(st.currentNode));
+      }
+    },
+  },
+
+  // ---------- 补齐场景（S61：T-FIX-15 兼容分支固化） ----------
+
+  // 61: 旧 state（无 status 字段但有 activeChange）→ hook 按 running 处理（fail-closed 向后兼容，行为固化）
+  {
+    name: '61 hook fail-closed：旧 state 无 status 有 activeChange 按 running（T-FIX-15 固化）',
+    run: (dir) => {
+      const st = baseState('open');
+      delete st.status;
+      st.activeChange = 'legacy-change';
+      writeState(dir, st);
+      const res = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'src', 'evil.py') } });
+      assertExit(res, 2);
+    },
+  },
+
+  // 63: init 后（open 阶段）合法写 .specs/ 工件 → hook 放行（T-FIX-15 正确 RED：
+  // 修复前 init 无 status → hook「not running」throw exit 1 拦截合法写入——open 阶段无法产出工件）
+  {
+    name: '63 hook 放行：init 后写 .specs/ 工件（T-FIX-15）',
+    run: (dir) => {
+      const initRes = runState(['init', 'tf15-ok'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(initRes, 0);
+      const res = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', 'tf15-ok', 'CHANGE.md') } });
+      assertExit(res, 0);
+      assertOut(res, 'NODE: open');
+    },
+  },
+
+  // 64: 新 change 与旧归档同名（state 缺失时走扫描兜底）→ 应识别为 active（T-FIX-17 扩展边界：
+  // archivedIds 剥日期前缀匹配不得误伤同名新 change）
+  {
+    name: '64 同名新 change 不被归档检查误跳过（T-FIX-17 边界）',
+    run: (dir) => {
+      writeFile(dir, '.specs/sci-notation/CHANGE.md', '# CHANGE\n## Why\nx\n');
+      writeFile(dir, '.specs/sci-notation/TASK.md', '# TASK\n');
+      writeFile(dir, '.specs/archive/2026-08-08-sci-notation/CHANGE.md', '# CHANGE\n## Why\nx\n');
+      const res = runState(['status'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, '"change": "sci-notation"');
+    },
+  },
+
+  // ---------- Round 2 场景（D-14~D-20，独立验证者发现） ----------
+
+  // 65: record 命令的 --protocol 参数不得污染 payload（D-14：payload 解析前剥离）
+  {
+    name: '65 record --protocol 不污染 payload（D-14）',
+    run: (dir) => {
+      const custom = writeCustomProtocol(dir);
+      const initRes = runState(['init', 'tf14-rec'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(initRes, 0);
+      const res = runState(['record', 'open', '{"summary":"x","completedChecks":["a"]}', '--protocol', custom], dir);
+      assertExit(res, 0);
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const ev = st.evidence.open || {};
+      if (ev.summary !== 'x') {
+        throw new Error('summary 被污染，应为 "x"，实际: ' + JSON.stringify(ev.summary));
+      }
+      if (ev.completedChecks === undefined) {
+        throw new Error('completedChecks 丢失（payload 未解析为对象）: ' + JSON.stringify(ev));
+      }
+    },
+  },
+
+  // 66: 自定义协议未声明 writeWhitelist 时，非内置节点写源码 → BLOCK（D-16 方案 B：
+  // 协调者默认 .specs/——当前 fail-open 放行）
+  {
+    name: '66 自定义节点未声明白名单写源码 BLOCK（D-16）',
+    run: (dir) => {
+      const custom = writeCustomProtocol(dir);
+      writeState(dir, composeState({ status: 'running' }));
+      const res = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'src', 'evil.py') } },
+        { FLOW_COMET_PROTOCOL: custom });
+      assertExit(res, 2);
+    },
+  },
+
+  // 67: 自定义协议未声明白名单时，写 .specs/ 工件 → 放行（D-16 协调者默认的正面）
+  {
+    name: '67 自定义节点未声明白名单写工件放行（D-16）',
+    run: (dir) => {
+      const custom = writeCustomProtocol(dir);
+      writeState(dir, composeState({ status: 'running' }));
+      const res = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', 'compose-demo', 'notes.md') } },
+        { FLOW_COMET_PROTOCOL: custom });
+      assertExit(res, 0);
+      assertOut(res, 'NODE: brainstorm');
+    },
+  },
+
+  // 68: 旧格式 state（无 status 字段 + 无 activeChange + 无 currentNode——批次 C 归档后升级场景）
+  // → hook 放行（D-15：无 activeChange 与无 state 文件同语义——当前被「not running」拦截）
+  {
+    name: '68 旧 state 无 status 无 activeChange hook 放行（D-15）',
+    run: (dir) => {
+      const st = baseState('open');
+      delete st.status;
+      st.activeChange = null;
+      st.currentNode = null;
+      writeState(dir, st);
+      const res = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'src', 'evil.py') } });
+      assertExit(res, 0);
+    },
+  },
+
+  // 69: writeWhitelist 路径支持 <change-id> 占位符（D-20：协议复用自动适配——
+  // 与 artifacts paths 同机制——当前字面匹配失败 BLOCK）
+  {
+    name: '69 writeWhitelist change-id 占位符（D-20）',
+    run: (dir) => {
+      const custom = customProtocol();
+      custom.writeWhitelist = { brainstorm: ['.specs/<change-id>/'] };
+      writeFile(dir, 'ph-protocol.json', JSON.stringify(custom, null, 2) + '\n');
+      writeState(dir, composeState({ status: 'running' }));
+      // 写 .specs/compose-demo/（占位符替换为 activeChange=compose-demo）→ 放行
+      const r1 = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', 'compose-demo', 'notes.md') } },
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'ph-protocol.json') });
+      assertExit(r1, 0);
+      // 写 .specs/other/（不在白名单）→ BLOCK
+      const r2 = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', 'other', 'x.md') } },
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'ph-protocol.json') });
+      assertExit(r2, 2);
+    },
+  },
+
+  // 70: 自定义协议 init 输出 NODE: 协议首节点（D-17：printNext 硬编码 open——输出与 state 不一致）
+  {
+    name: '70 init 输出 NODE 协议首节点（D-17）',
+    run: (dir) => {
+      const custom = writeCustomProtocol(dir);
+      const res = runState(['init', 'tf17-out'], dir, { FLOW_COMET_PROTOCOL: custom });
+      assertExit(res, 0);
+      assertOut(res, 'NODE: brainstorm');
+      assertNotOut(res, 'NODE: open');
+    },
+  },
+
+  // 71: state completed + activeChange 非空（残留值）→ status 应 no-change（D-19：
+  // completed 检查优先于 activeChange 分支——当前 activeChange 分支先命中误判）
+  {
+    name: '71 completed state 残留 activeChange 不误判（D-19）',
+    run: (dir) => {
+      const st = composeState({ status: 'completed', currentNode: null });
+      st.activeChange = 'stale-id';
+      writeState(dir, st);
+      writeFile(dir, '.specs/stale-id/CHANGE.md', '# CHANGE\n## Why\nx\n');
+      writeFile(dir, '.specs/stale-id/TASK.md', '# TASK\n');
+      const res = runState(['status'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'no-change');
+    },
+  },
+
+  // 72: 自定义协议未声明 state.statePath（最小 schema）→ hook 不崩溃，写 .specs/ 放行
+  // （D-21：statePath 缺省回退 .comet/flow-comet-state.json——与 workflow-state 硬编码一致；
+  //  当前空值解析崩溃 exit 1 全量拦截）
+  {
+    name: '72 无 statePath 协议 hook 不崩溃（D-21）',
+    run: (dir) => {
+      const custom = customProtocol();
+      delete custom.state;
+      writeFile(dir, 'nostate-protocol.json', JSON.stringify(custom, null, 2) + '\n');
+      writeState(dir, composeState({ status: 'running' }));
+      const res = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', 'compose-demo', 'notes.md') } },
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'nostate-protocol.json') });
+      assertExit(res, 0);
+    },
+  },
+
+  // 73: state 文件带 UTF-8 BOM（外部写入如会话 Write）→ status 正常输出（D-22：
+  // 读端 JSON.parse 应容忍 BOM——当前崩）
+  {
+    name: '73 state 带 BOM 正常读取（D-22）',
+    run: (dir) => {
+      const st = composeState({ status: 'running' });
+      const raw = '﻿' + JSON.stringify(st, null, 2) + '\n';
+      fs.mkdirSync(path.join(dir, '.comet'), { recursive: true });
+      fs.writeFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), raw, 'utf8');
+      writeFile(dir, '.specs/compose-demo/CHANGE.md', '# CHANGE\n## Why\nx\n');
+      const res = runState(['status'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, '"status": "running"');
+    },
+  },
+
+  // 74: hook 读带 BOM 的 state → 判定正常（D-22——hook readStateJson 的 BOM 容忍）
+  {
+    name: '74 hook 读带 BOM state 正常（D-22）',
+    run: (dir) => {
+      const st = baseState('open');
+      st.status = 'running';
+      const raw = '﻿' + JSON.stringify(st, null, 2) + '\n';
+      fs.mkdirSync(path.join(dir, '.comet'), { recursive: true });
+      fs.writeFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), raw, 'utf8');
+      const res = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', 'compose-demo', 'CHANGE.md') } });
+      assertExit(res, 0);
+      assertOut(res, 'NODE: open');
+    },
+  },
+
+  // 75: guard 读带 BOM 的 state → 正常（D-22——guard readStateJson 的 BOM 容忍）
+  {
+    name: '75 guard 读带 BOM state 正常（D-22）',
+    run: (dir) => {
+      const st = baseState('open');
+      st.status = 'running';
+      const raw = '﻿' + JSON.stringify(st, null, 2) + '\n';
+      fs.mkdirSync(path.join(dir, '.comet'), { recursive: true });
+      fs.writeFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), raw, 'utf8');
+      writeFile(dir, '.specs/compose-demo/CHANGE.md', '# CHANGE\n## Why\nx\n');
+      const res = runGuard(['entry', 'open'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+    },
+  },
 ];
 
 // ---------- 运行 ----------

@@ -57,7 +57,7 @@ description: "Use only when explicitly invoked as /flow-comet-compose. Not part 
 - 必填顶层字段：`schemaVersion: 1`、`kind: "workflow-kernel"`、`name`、`goal`、`nodes[]`、`outputSchemas[]`、`state{}`
 - **`edges` 可省略 = 顺序推进**：不写 edges 时按 `nodes[]` 数组顺序推进，同内置协议行为；写 edges 则按显式转移表路由
 - 可选顶层字段：
-  - `writeWhitelist`：hook 白名单（节点 id → 允许写入的路径前缀数组）；缺省用内置白名单表
+  - `writeWhitelist`：hook 白名单（节点 id → 允许写入的路径前缀数组）。**路径支持 `<change-id>` 占位符**（与 outputSchemas 的 artifacts paths 同机制，协议复用自动适配当前 change）。**未声明时**：内置节点 id 用内置白名单表；**自定义节点 id 默认协调者白名单 `['.specs/']`**（写源码必须显式声明——D-16 round2 语义）
   - `taskFile`：任务文件路径字符串
 
 生成的协议**写用户指定路径**（建议 `.specs/` 或项目根，例如 `.specs/protocols/<name>.json`），并在写前与用户确认。
@@ -244,6 +244,6 @@ console.log('protocol valid');
 | 驱动机制 | workflow-state.mjs + workflow-guard.mjs + comet-hook-guard.mjs | 同一套机制，零差异 |
 
 - **加载方式**：`--protocol <path>`（或 `--protocol=<path>`）CLI 参数，或 `FLOW_COMET_PROTOCOL` 环境变量；两种方式均被工作流脚本（resolveProtocol）支持。
-- **hook 白名单**：自定义协议可声明 `writeWhitelist`（节点 id → 路径前缀数组）；缺省时使用内置白名单表（`parseProtocolWriteWhitelist` 返回 null，调用方回退内置缺省）。
+- **hook 白名单**：自定义协议可声明 `writeWhitelist`（节点 id → 路径前缀数组，**支持 `<change-id>` 占位符**——D-20 round2）；缺省时内置节点 id 用内置白名单表、**自定义节点 id 用协调者默认 `['.specs/']`**（写源码必须显式声明——D-16 round2，防 fail-open）。
 - **默认不可变**：自定义协议不持久化生效，未显式指定时一切行为与内置协议完全一致；内置 8 节点协议始终可用，作为默认工作流不可被取代。
 - 自定义协议与内置协议互不干扰，可并存；切换只需修改启动参数或环境变量。
