@@ -2288,7 +2288,7 @@ async function main() {
           if (!/brooks-lint 不可用|插件不可用|unavailable|N\/A/i.test(content)) {
             console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明 brooks-lint 不可用原因');
           } else if (!/插件缓存|缓存协议|协议文件|plugins\/cache/i.test(content)) {
-            console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明缓存尝试证据（应先 Read 插件缓存协议文件手动执行完整 brooks 流程——T-FIX-19 两级降级路径）');
+            console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明缓存尝试证据（应先 Read 插件缓存协议文件手动执行完整 brooks 流程）');
           }
         }
         if (sixDim && !/brooks.?review/i.test(sixDim[0])) {
