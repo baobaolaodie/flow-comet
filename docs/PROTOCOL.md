@@ -55,13 +55,29 @@ Priority: `--protocol` CLI > `FLOW_COMET_PROTOCOL` env > built-in default (resol
           "paths": ["<change-id>/notes.md"], "pathBase": "specs-root" }
       ],
       "evidence": [ { "id": "notes", "required": true } ]
+    },
+    {
+      "id": "compose.tdd.v1",
+      "artifacts": [
+        { "id": "task-summaries", "kind": "file", "required": true,
+          "paths": ["<change-id>/*-SUMMARY.md"], "pathBase": "specs-root" }
+      ],
+      "evidence": [ { "id": "implementation-summary", "required": true } ]
+    },
+    {
+      "id": "compose.verdict.v1",
+      "artifacts": [
+        { "id": "review-doc", "kind": "file", "required": true,
+          "paths": ["<change-id>/REVIEW.md"], "pathBase": "specs-root" }
+      ],
+      "evidence": [ { "id": "review-summary", "required": true } ]
     }
   ],
   "writeWhitelist": { "brainstorm": [".specs/"] }
 }
 ```
 
-> Each node must have non-empty `outputSchemas` references, and each schema must carry `evidence`; when `writeWhitelist` is omitted, built-in ids use the built-in table and custom ids default to the coordinator whitelist `['.specs/']` (writing source code requires explicit declaration). Full generation flow: see the `/flow-comet-compose` skill's artifact example.
+> Each node must have non-empty `outputSchemas` references, and each referenced schema must exist in top-level `outputSchemas[]` with non-empty `artifacts[].paths` and `evidence` (mandatory minimum rules 1–2); when `writeWhitelist` is omitted, built-in ids use the built-in table and custom ids default to the coordinator whitelist `['.specs/']` (writing source code requires explicit declaration). Full generation flow (which enforces these rules interactively): see the `/flow-comet-compose` skill's artifact example.
 
 ## Relationship with the built-in protocol
 

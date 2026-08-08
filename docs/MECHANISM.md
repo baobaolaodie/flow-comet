@@ -75,5 +75,5 @@ node .claude/skills/flow-comet/scripts/guard-self-test.mjs
 - **Not interoperable with Comet Classic**: workflow-kernel state is independent of classic (design decision, not a defect)
 - **Hook allows writes when no active change**: when `.comet/flow-comet-state.json` is absent, the hook guard allows all writes (design decision: no workflow, no write restrictions)
 - **Hook blocking semantics**: exit 2 (blocking) is verified working in the main TUI session; in `claude -p` (SDK CLI mode) non-zero exits are downgraded to non-blocking — writes logged but not prevented
-- **Worktree mount dependency**: Agent `isolation: "worktree"` worktrees mount at the **session project root** (not the subagent's target project) — cross-repo artifacts need manual `git show <branch>:<path>` transport, and W2-D `git show` validation is degraded
-- **GUIDANCE not lane-tracked**: `<skill>-GUIDANCE.md` and SKILL.md reference lines are not recorded in authoring-lanes; re-running `comet creator generate` clears them
+- **Worktree mount dependency**: Agent `isolation: "worktree"` worktrees mount at the **session project root** (not the subagent's target project) — cross-repo artifacts need manual `git show <branch>:<path>` transport, and the commit-file provenance check (`git show` subset validation) is degraded in that case
+- **GUIDANCE not tracked by the authoring record**: `<skill>-GUIDANCE.md` and SKILL.md reference lines are not recorded in the authoring manifest; re-running the Skill generator tool clears them

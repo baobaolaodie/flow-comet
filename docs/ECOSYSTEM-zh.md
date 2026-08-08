@@ -52,9 +52,9 @@ Comet 是**可恢复的长期任务工作流与 Skill 平台**（Node-only 运�
 | 5 | **determineNode / 产物推导节点检测** | `workflow-state.mjs` 从协议 outputSchemas artifacts 推导完成标志（`<change-id>` 占位、仅 required） |
 | 6 | **guard --apply 推进 + NEXT: 协议**（`NEXT: auto\|manual\|done` + `SKILL:`） | `workflow-guard.mjs entry/exit <node> --apply`；`workflow-state.mjs next` 输出 `NEXT:` + `SKILL:` 路由；init 输出即首路由 |
 | 7 | **Hook 白名单 / fail-closed / 受保护路径**（before_tool + before_write 描述符、failure: block、symlink/junction 检测、TOCTOU 快照） | `comet-hook-guard.mjs`——同款 guard 风格；白名单经协议 `writeWhitelist` 声明化（缺省表回退）；execute 按 executionMode 动态收窄（subagent/direct） |
-| 8 | **Entry Skill 双区结构**（确定性 Auto 区：路由表/Skill Bindings/Guardrails/Recovery + Authored 区：Decision Core 四必填节） | SKILL.md 同构；Decision Core 含相同四节（自动节点检测/决策分类/停止条件/Red Flags） |
+| 8 | **Entry Skill 双区结构**（确定性 Auto 区：路由表/Skill Bindings/Guardrails/Recovery + Authored 区：Decision Core 四必填节） | SKILL.md 同构；Decision Core 含相同四节（自动节点检测/Resume 规则/决策分类/Red Flags） |
 | 9 | **Handoff 证据协议**（handoff kind 节点 + 子代理证据回传） | `workflow-handoff.mjs request/result/status`（writeFiles 白名单、JSON Return Contract、completedChecks 校验、commitHash 子集检查） |
-| 10 | **eval.yaml manifest**（comet.eval/v1alpha1 + qualityGates + routeConformance） | `comet/eval.yaml` 同构；`checks.yaml`（state_equals）、`skill.yaml`、`guardrails.yaml` 齐备 |
+| 10 | **eval.yaml manifest**（comet.eval/v1alpha1 + qualityGates + routeConformance） | `comet/eval.yaml` 同构；`checks.yaml`（state_equals）、`skill.yaml`、`guardrails.yaml` 齐备（`engine.enabled: false` 在 `bundle.yaml` 中） |
 | 11 | **bundle.yaml / resolved-skills.json / composition-report** | 同构包结构（apiVersion comet/v1alpha1、SkillBundle、resources、platforms.requires） |
 | 12 | **多 change 选择语义**（零/一/多候选 → 暂停） | `findActiveChange`（state 优先 → `.specs/` 扫描；completed 优先防归档残留） |
 

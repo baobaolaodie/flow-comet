@@ -6,7 +6,7 @@
 
 # flow-comet artifact examples
 
-Artifacts produced by a complete flow-comet run, for reference and comparison.
+Artifacts produced by a complete flow-comet run, for reference and comparison. **This is simulated data** — a synthetic project used to demonstrate artifact quality, not a real codebase.
 
 ## Scenario: venue filter for schedules
 

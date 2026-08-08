@@ -16,7 +16,7 @@
 | `WARN: CONTEXT.md 检测到孤立追加段` | terms/decisions appended as a new tail section | move content into the glossary table / locked-decision list |
 | `WARN: LESSONS.md 条目编号乱序/区外` | new entry not inserted by L-NNN in the entries section | insert by number into `## 条目区` (or `## 活跃条目`) |
 | `BROOKS-LINT WARN: 使用 builtin-quickcheck 未声明原因` | SUMMARY missing "plugin unavailable" note | add the reason in SUMMARY's `## 自检方法` |
-| `BLOCKED: verify 失败超限（verifyFailures=3）` | 3 consecutive UAT/automation failures | pause, human decision: "continue / stop" (R2.6) |
+| `BLOCKED: verify 已失败 N/3` / `BLOCKED: verify 已失败 4 次，需用户决策` | auto-retry up to 3 times; 4th failure requires human decision | pause, human decision: "continue / stop" |
 | `BLOCKED: 疑似未 exit 节点 <node>` | `next` detects illegal node order (skipped/not exited) | run `workflow-guard.mjs exit <node> --apply` per the hint (T-FIX rollback scenarios see hint) |
 | `BLOCKED: workflow protocol node must have a non-empty string id` | custom protocol `nodes[]` contains empty/invalid element | fix protocol JSON: each node `id` non-empty string, avoid built-in 8-node ids |
 | `BLOCKED: 未在协议 writeWhitelist 中声明` | write target outside the custom protocol whitelist (fail-closed) | declare the node's allowed path prefixes in protocol `writeWhitelist`, or use the built-in protocol |

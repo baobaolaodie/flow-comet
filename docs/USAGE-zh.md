@@ -25,7 +25,7 @@ open → design → plan → execute ⇄ subagent-execute → review → verify 
 | **plan** | 原子任务拆分（XML）+ 波次划分 | `TASK.md`（`<task>` 块含 7 字段 + parallel 标记） | task 块存在 + verify 字段；TASK 签名哈希（enter 记录） |
 | **execute** | 串行任务执行（协调者委托子代理） | `<task-id>-SUMMARY.md` | SUMMARY 六段 + 6 维自查 + 强制 `## 自检方法`；TASK 签名比对；越俎代庖检测 |
 | **subagent-execute** | parallel 任务并行委托（wave） | 同上（每任务一份 SUMMARY） | 同上 + handoff evidence（Return Contract） |
-| **review** | 双轮审查（spec 合规 + 代码质量） | `REVIEW.md`（Critical/发现/结论） | ≥100B + 必填段 |
+| **review** | 4 轮审查（spec 合规 / 代码质量 / UI 视觉 / 可选） | `REVIEW.md`（Critical/发现/结论） | ≥100B + 必填段 |
 | **verify** | 集成验证 + UAT + 失败诊断（≤3 轮） | `TEST.md` / `UAT.md` / LESSONS 提名 | 验证命令真实执行；UAT 必填段；LESSONS 编号/位置检测 |
 | **archive** | LESSONS 提名 + 归档 + 分支收尾 | `.specs/archive/<date>-<id>/` / CHANGELOG | 分支校验（新模式）；CHANGELOG 倒序检测 |
 

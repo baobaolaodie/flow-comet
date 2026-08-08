@@ -12,29 +12,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [1.2.1] - 2026-08-08
 
-Installation-guide fix batch (T-FIX-15~18 + README guidance fixes + round2 independent-verification fixes).
+Installation-guide fix batch (init/hook/state fixes + README guidance fixes + independent-verification fixes).
 
 ### Fixed
 
-- **init state gains `status: 'running'` + three-tier hook semantics** (T-FIX-15, dogfood D-09/D-12): init previously did not write `status`, and the hook allowed writes on undefined-status state — the first defense layer was ineffective during open (before the first guard exit); archived `completed` states were also blocked from all writes. After: running (including legacy states without status but with activeChange — fail-closed backward compatible) → whitelist validation; completed → allowed
-- **init creates `.specs/<id>/` directory** (T-FIX-16, dogfood D-02): previously `next`/`status` reported "No active change. Run: init" after init (findActiveChange requires the directory), contradicting the SKILL startup protocol
-- **findActiveChange skips fallback scan on archived-complete state** (T-FIX-17, dogfood D-10): leftover archive directories (with TASK.md copies) are no longer misdetected as active changes
-- **init currentNode follows the protocol's first node** (T-FIX-18, dogfood D-11): no longer hardcodes `open` when a custom protocol starts elsewhere
-- **record strips `--protocol` from payload** (D-14): stripped before JSON parsing, preventing structural fields from being lost on parse failure
-- **Custom-node coordinator-default whitelist** (D-16): undeclared non-built-in nodes default to `['.specs/']` (writing source code requires explicit declaration) — closes the fail-open gap
-- **Legacy state without activeChange is allowed** (D-15): batch-C legacy states (no status + no activeChange) are no longer fully blocked by the hook
-- **writeWhitelist supports the `<change-id>` placeholder** (D-20): protocols reuse across changes with automatic adaptation
-- **init output NODE follows the protocol's first node** (D-17): consistent with state.currentNode (previously hardcoded open)
-- **findActiveChange checks completed first** (D-19): archived-complete states with a residual activeChange are no longer misdetected
-- **hook statePath falls back to default** (D-21): minimal-schema protocols (no `state.statePath`) no longer crash
-- **Three scripts tolerate UTF-8 BOM in JSON.parse** (D-22): state/evidence files written by external tools (e.g. session Write) with BOM parse normally
-- guard self-test suite expanded to 74 scenarios (S55~S75: round1 T-FIX scenarios + round2 independent-verification scenarios + BOM tolerance)
+- **init state gains `status: 'running'` + three-tier hook semantics** : init previously did not write `status`, and the hook allowed writes on undefined-status state — the first defense layer was ineffective during open (before the first guard exit); archived `completed` states were also blocked from all writes. After: running (including legacy states without status but with activeChange — fail-closed backward compatible) → whitelist validation; completed → allowed
+- **init creates `.specs/<id>/` directory** : previously `next`/`status` reported "No active change. Run: init" after init (findActiveChange requires the directory), contradicting the SKILL startup protocol
+- **findActiveChange skips fallback scan on archived-complete state** : leftover archive directories (with TASK.md copies) are no longer misdetected as active changes
+- **init currentNode follows the protocol's first node** : no longer hardcodes `open` when a custom protocol starts elsewhere
+- **record strips `--protocol` from payload** : stripped before JSON parsing, preventing structural fields from being lost on parse failure
+- **Custom-node coordinator-default whitelist** : undeclared non-built-in nodes default to `['.specs/']` (writing source code requires explicit declaration) — closes the fail-open gap
+- **Legacy state without activeChange is allowed** : legacy states (no status + no activeChange) are no longer fully blocked by the hook
+- **writeWhitelist supports the `<change-id>` placeholder** : protocols reuse across changes with automatic adaptation
+- **init output NODE follows the protocol's first node** : consistent with state.currentNode (previously hardcoded open)
+- **findActiveChange checks completed first** : archived-complete states with a residual activeChange are no longer misdetected
+- **hook statePath falls back to default** : minimal-schema protocols (no `state.statePath`) no longer crash
+- **Three scripts tolerate UTF-8 BOM in JSON.parse** : state/evidence files written by external tools (e.g. session Write) with BOM parse normally
+- guard self-test suite expanded to 74 scenarios (full positive/negative cases + independent-verification scenarios + BOM tolerance)
 
 ### Changed
 
 - **README installation verification** now has four steps (structure / config loadability / authoritative-source diff consistency / real-environment smoke test) — `guard-self-test` marked as the **author regression baseline** (script-logic self-test; does not depend on installation completeness; not an installation verification criterion)
 - README Quick Start gains the flow-kit prerequisite hint and a new-session hint; Requirements gains a flow-kit verification step; settings injection documents first-time vs existing-file cases; hook command documents the project-root resolution base
-- **SKILL startup protocol documentation corrected** (D-18): init output is the first route (NODE: open / protocol first node); `next` is used after a node exits
+- **SKILL startup protocol documentation corrected** : init output is the first route (NODE: open / protocol first node); `next` is used after a node exits
 - **README restructured into multi-document layout** (bilingual): README index + docs/ (INSTALLATION/USAGE/PROTOCOL/MECHANISM/TROUBLESHOOTING/VERSIONS) + compose example; VERIFICATION.md removed from the public repo (verification records are internal knowledge)
 - **hook blocking semantics confirmed by measurement**: main TUI session blocks writes (physical interception); `claude -p` (SDK CLI mode) downgrades to non-blocking (log-only)
 
@@ -49,20 +49,20 @@ Custom skill composition (flow-comet-compose) + protocol parameterization + non-
 - **Specialization validation bound by node id**: the general defense layer is protocol-agnostic (all protocols physically validated); specialization fires only for built-in node ids, never for custom ids (ADR-002)
 - **writeWhitelist declaration**: protocols may declare hook write whitelists; parse failures fall back to the built-in table (fail-closed, no whitelist gaps)
 - **prepare-env installer**: generates/overwrites the target project's `.claude/` (rules + skills + settings injection) from `.comet/bundle-drafts/flow-comet/`; settings use read-merge-write idempotent injection (preserving `permissions` etc.); `--purge --yes` for explicit destructive rebuild
-- **Configurable branch prefix**: `--branch-prefix` customizes the change branch prefix (default `change/`, T-FIX-14)
+- **Configurable branch prefix**: `--branch-prefix` customizes the change branch prefix (default `change/`)
 - guard self-test suite expanded to 54 scenarios (custom protocols / composition / node-element validation / exemption tightening / hook-declaration fail-closed / branch-prefix positive-negative)
 
 ### Changed
 
 - **Single authoritative source**: removed the `.comet/bundles/` dual directory (comet needs eval/publish distribution; flow-comet is copy-install only — single source `bundle-drafts/`); README installation now uses prepare-env (option A) + manual copy (option B), comet bundle distribution flow removed
-- **prepare-env non-destructive**: overwrites only generated files (rules/skills) + settings injection by default; no longer unconditionally deletes the target `.claude/` (T-FIX-13)
+- **prepare-env non-destructive**: overwrites only generated files (rules/skills) + settings injection by default; no longer unconditionally deletes the target `.claude/`
 
 ### Fixed
 
-- **record overwriting handoff triggers takeover BLOCK** (T-FIX-08 related, S48): record that replaces an evidence key wholesale is BLOCKED
-- **Node ordering/completion markers**: completedChecks validation, skipped-node BLOCK (T-FIX-04/05)
-- **redEvidence ordering** (T-FIX-06): redEvidence must precede greenEvidence
-- **next false-block fix** (T-FIX-11): exempt-node mis-block introduced by T-FIX-05 corrected
+- **record overwriting handoff triggers takeover BLOCK** : record that replaces an evidence key wholesale is BLOCKED
+- **Node ordering/completion markers**: completedChecks validation, skipped-node BLOCK 
+- **redEvidence ordering** : redEvidence must precede greenEvidence
+- **next false-block fix** : exempt-node mis-block corrected
 - **hook declaration fail-closed**: protocol hook-declaration parse failures fall back to the built-in table (audit supplement)
 
 ## [1.1.0] - 2026-08-05

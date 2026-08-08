@@ -55,13 +55,29 @@
           "paths": ["<change-id>/notes.md"], "pathBase": "specs-root" }
       ],
       "evidence": [ { "id": "notes", "required": true } ]
+    },
+    {
+      "id": "compose.tdd.v1",
+      "artifacts": [
+        { "id": "task-summaries", "kind": "file", "required": true,
+          "paths": ["<change-id>/*-SUMMARY.md"], "pathBase": "specs-root" }
+      ],
+      "evidence": [ { "id": "implementation-summary", "required": true } ]
+    },
+    {
+      "id": "compose.verdict.v1",
+      "artifacts": [
+        { "id": "review-doc", "kind": "file", "required": true,
+          "paths": ["<change-id>/REVIEW.md"], "pathBase": "specs-root" }
+      ],
+      "evidence": [ { "id": "review-summary", "required": true } ]
     }
   ],
   "writeWhitelist": { "brainstorm": [".specs/"] }
 }
 ```
 
-> 每个节点必须有非空 `outputSchemas` 引用 + 每条 schema 必须带 `evidence`；`writeWhitelist` 省略时内置 id 用内置表、自定义 id 用协调者默认 `['.specs/']`（写源码必须显式声明）。完整生成流程见 `/flow-comet-compose` skill 的「产物示例」。
+> 每个节点必须有非空 `outputSchemas` 引用，且每个被引用的 schema 必须存在于顶层 `outputSchemas[]` 并含非空 `artifacts[].paths` 与 `evidence`（强制最小规则 1-2）；`writeWhitelist` 省略时内置 id 用内置表、自定义 id 用协调者默认 `['.specs/']`（写源码必须显式声明）。完整生成流程（交互式保证这些规则）见 `/flow-comet-compose` skill 的「产物示例」。
 
 ## 与内置协议的关系
 

@@ -25,7 +25,7 @@ Routing is **derived from `.specs/` artifacts** (determineNode): missing files �
 | **plan** | Atomic task breakdown (XML) + wave planning | `TASK.md` (`<task>` blocks with 7 fields + parallel markers) | task blocks + verify field; TASK signature hash (recorded at enter) |
 | **execute** | Serial task execution (coordinator delegates subagents) | `<task-id>-SUMMARY.md` | SUMMARY six sections + 6-dimension self-check + mandatory `## 自检方法`; TASK signature compare; takeover detection |
 | **subagent-execute** | Parallel task delegation (waves) | same (one SUMMARY per task) | same + handoff evidence (Return Contract) |
-| **review** | Two-round review (spec compliance + code quality) | `REVIEW.md` (Critical/findings/conclusion) | ≥100B + required sections |
+| **review** | 4-round review (spec compliance / code quality / UI visual / optional) | `REVIEW.md` (Critical/findings/conclusion) | ≥100B + required sections |
 | **verify** | Integration verification + UAT + failure diagnosis (≤3 rounds) | `TEST.md` / `UAT.md` / LESSONS nominations | verification commands actually executed; UAT sections; LESSONS numbering/placement |
 | **archive** | LESSONS nominations + archive + branch wrap-up | `.specs/archive/<date>-<id>/` / CHANGELOG | branch check (new mode); CHANGELOG ordering |
 

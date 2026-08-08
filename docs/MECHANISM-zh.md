@@ -75,5 +75,5 @@ node .claude/skills/flow-comet/scripts/guard-self-test.mjs
 - **与 Comet Classic 不互通**：workflow-kernel 状态独立于 classic（设计决策，非缺陷）
 - **无活跃 change 时 hook 放行**：`.comet/flow-comet-state.json` 不存在时 hook guard 放行所有写入（设计决策：无 workflow 时不限制文件操作）
 - **hook blocking 语义**：exit 2（blocking）在主会话 TUI 实测生效；`claude -p`（SDK CLI 模式）下非零退出降级为 non-blocking——写入被记录但不阻止
-- **worktree 挂载依赖**：Agent `isolation: "worktree"` 的 worktree 挂在**会话项目根**（非子代理目标项目）——跨仓库产物需 `git show <branch>:<path>` 手动搬运，W2-D 的 `git show` 校验降级
-- **GUIDANCE 不经 lane 记录**：`<skill>-GUIDANCE.md` 与 SKILL.md 引用行不登记 authoring-lanes，重跑 `comet creator generate` 会清掉
+- **worktree 挂载依赖**：Agent `isolation: "worktree"` 的 worktree 挂在**会话项目根**（非子代理目标项目）——跨仓库产物需 `git show <branch>:<path>` 手动搬运，该场景下提交文件溯源校验（`git show` 子集检查）降级
+- **GUIDANCE 不经创作清单记录**：`<skill>-GUIDANCE.md` 与 SKILL.md 引用行不登记创作清单，重跑 Skill 生成工具会清掉
