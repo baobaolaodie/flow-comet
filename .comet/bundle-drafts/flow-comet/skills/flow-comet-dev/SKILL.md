@@ -16,7 +16,11 @@ description: "flow-kit DEV 阶段协议：TDD + 6 维自查 + diff 边界 verify
 1. **沿用既有抽象 grep（R6.4）**：写代码前 grep 同类抽象，找到了 import 用
 2. **LESSONS 扫描（R1.8）**：grep `.specs/LESSONS.md`，命中 active 条目必须声明差异
 3. **TDD（RED→GREEN→REFACTOR）**：先写失败测试，再写最少代码通过
-4. **6 维自查**：优先调用 `/brooks-review`（主会话已装 brooks-lint）；仅当插件确实不可用（如子代理环境未加载）才用内置 R1~R6 快查，并在 SUMMARY 记录"brooks-lint 不可用"。回传 Return Contract 时 `selfReview` 字段必填：`brooks-review` 或 `builtin-quickcheck`；builtin 时 SUMMARY 需声明 `## 自检方法` 并注明 brooks-lint 不可用原因。
+4. **6 维自查（两级降级路径，T-FIX-19）**：
+   - **第 1 级**：调用 `/brooks-review` 或 Skill 工具加载 `brooks-lint:brooks-review` 执行完整 brooks 审查
+   - **第 2 级**：若仅返回 "Launching skill" 占位/无实际审查指令（worktree 子代理 skill 路由不稳定，L-004）——**Read 插件缓存协议文件手动执行完整 brooks 流程**：`~/.claude/plugins/cache/brooks-lint-marketplace/brooks-lint/<ver>/skills/brooks-review/`（SKILL.md + 引用文件 + `_shared/`），按协议产出 4-element 审查（Symptom/Source/Consequence/Remedy + file:line + 书引用）
+   - **第 3 级**：缓存文件也不可读/不存在时，才用内置 R1~R6 快查
+   - SUMMARY `## 自检方法` 必须声明三要素：尝试方式 / 失败原因 / 替代方法；回传 Return Contract 时 `selfReview` 字段必填三值之一：`brooks-review`（成功）/ `cache-brooks`（读缓存手动执行）/ `builtin-quickcheck`（最终降级——guard 校验须含缓存尝试证据，缺失 WARN）。
 5. **diff 边界 verify（R6.5）**：`git diff --name-only` 与 TASK write_files 比对，越界必须回滚
 6. **原子提交**：`<type>(<change-id>): <task-id> <subject>`
 
