@@ -2272,19 +2272,26 @@ async function main() {
         // 格式兼容：方法名行允许中文前缀/括号说明（如 "方法：brooks-review"），按关键词搜索而非 [a-z-]+ 硬匹配
         // 分隔符用 .?（任意字符）而非 \.?（字面点）：canonical 名 "brooks-review"/"builtin-quickcheck" 是连字符，与既有 /brooks.?review/ 约定一致
         const methodLine = content.match(/##\s*自检方法\s*\n\s*([^\n]+)/i);
-        const method = methodLine ? /brooks.?review|builtin.?quickcheck/i.exec(methodLine[1]) : null;
+        const method = methodLine ? /brooks.?review|cache.?brooks|builtin.?quickcheck/i.exec(methodLine[1]) : null;
         if (!method) {
           // D1 过渡规则：旧格式 SUMMARY（批次 A 之前）无 ## 自检方法 段——
-          // 若全文已声明 brooks-review/builtin（旧模板行为），WARN 兼容不 BLOCKED；无任何自检声明才 BLOCKED
-          if (/brooks.?review|builtin.?quickcheck/i.test(content)) {
+          // 若全文已声明 brooks-review/cache-brooks/builtin（旧模板行为），WARN 兼容不 BLOCKED；无任何自检声明才 BLOCKED
+          if (/brooks.?review|cache.?brooks|builtin.?quickcheck/i.test(content)) {
             console.error('BROOKS-LINT WARN: ' + f + ' 缺 ## 自检方法 段（旧格式），6 维自查已声明自检方法——兼容通过，建议补全');
           } else {
             violations.push(f + ' 缺 ## 自检方法 字段（必须声明 brooks-review 或 builtin-quickcheck）');
           }
-        } else if (/builtin/i.test(method[0]) && !/brooks-lint 不可用|插件不可用|unavailable|N\/A/i.test(content)) {
-          console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明 brooks-lint 不可用原因');
+        } else if (/builtin/i.test(method[0])) {
+          // T-FIX-19: builtin 降级两级校验——① 必须声明不可用原因（既有）；② 必须含缓存尝试证据
+          // （已尝试 Read 插件缓存协议文件手动执行仍不可行——两级降级路径第 2 级；防「未尝试读缓存」的偷懒降级）
+          // 关键词声明级校验（设计边界：不做语义判断）；缺失 → WARN 渐进（不 BLOCK，向后兼容旧 SUMMARY）
+          if (!/brooks-lint 不可用|插件不可用|unavailable|N\/A/i.test(content)) {
+            console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明 brooks-lint 不可用原因');
+          } else if (!/插件缓存|缓存协议|协议文件|plugins\/cache/i.test(content)) {
+            console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明缓存尝试证据（应先 Read 插件缓存协议文件手动执行完整 brooks 流程）');
+          }
         }
-        if (sixDim && !/brooks.?review/i.test(sixDim[0])) {
+        if (sixDim && !/brooks.?review|cache.?brooks/i.test(sixDim[0])) {
           console.error('BROOKS-LINT WARN: ' + f + ' 的 6 维自查未声明使用 /brooks-review（可能使用了内置快查）');
         }
       } catch {}
