@@ -10,6 +10,21 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号仅记录于 git tag 与本文档；`bundle.yaml` 的 version 保持 1.0.0（与发布流程解耦，见 README「版本与兼容性」）。
 
+## [1.2.2] - 2026-08-08
+
+6 维自查的 brooks-lint 两级降级路径。
+
+### Fixed
+
+- **brooks-lint 两级降级**：Skill 工具仅返回 "Launching skill" 占位时（worktree 子代理 skill 路由不稳定——插件执行体可能未注入），子代理 **Read 插件缓存协议文件手动执行完整 brooks 审查**（`selfReview: cache-brooks`），之后才降级内置 R1~R6 快查——加载失败时审查质量不降级
+- **guard 校验降级证据**：`builtin-quickcheck` 声明必须同时含不可用原因**和**缓存尝试证据（缺任一 → 渐进 `BROOKS-LINT WARN`，不 BLOCK）
+- **guard 识别 `cache-brooks`**：方法行/全文/6 维三处正则更新——干净声明放行无 WARN（此前会被误 BLOCK）
+- guard 自测套件扩展至 77 场景（S76/S77/S78：builtin 证据校验 + cache-brooks 接受；RED→GREEN 正确失败原因，两轮独立验证者复验）
+
+### Changed
+
+- Troubleshooting 新增 WARN 条目（双语）；公开 MECHANISM（双语）行为层补两级降级描述；场景数 74→77 全公开文档同步（README/INSTALLATION/MECHANISM/VERSIONS/CONTRIBUTING——历史条目不改）
+
 ## [1.2.1] - 2026-08-08
 
 安装引导修复批次（init/hook/状态修复 + README 指引修复 + 独立验证批次修复）。
