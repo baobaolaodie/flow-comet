@@ -223,7 +223,7 @@ node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.m
 | `name` | 协议名 |
 | `nodes[]` | 节点数组：`id`（避开内置 8 节点 id）、`implementation.skill`、`requiredSkillCalls`、`outputSchemas` |
 | `outputSchemas[]` | 产物 schema：`artifacts[].paths` + `evidence` |
-| `writeWhitelist`（可选） | hook 白名单（节点 id → 允许写入的路径前缀数组），缺省用内置白名单表 |
+| `writeWhitelist`（可选） | hook 白名单（节点 id → 允许写入的路径前缀数组，**支持 `<change-id>` 占位符**——协议复用自动适配）；未声明时内置 id 用内置表、自定义 id 默认协调者白名单 `['.specs/']`（写源码必须声明） |
 | `taskFile`（可选） | 任务文件路径，缺省 `TASK.md` |
 
 ### 强制最小规则
@@ -258,7 +258,7 @@ node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.m
 }
 ```
 
-> 每个节点必须有非空 `outputSchemas` 引用 + 每条 schema 必须带 `evidence`；`writeWhitelist` 省略时 hook 回退内置缺省表。完整生成流程见 `/flow-comet-compose` skill 的「产物示例」。
+> 每个节点必须有非空 `outputSchemas` 引用 + 每条 schema 必须带 `evidence`；`writeWhitelist` 省略时内置 id 用内置表、自定义 id 用协调者默认 `['.specs/']`（D-16，写源码必须显式声明）。完整生成流程见 `/flow-comet-compose` skill 的「产物示例」。
 
 ### 与内置协议的关系
 
