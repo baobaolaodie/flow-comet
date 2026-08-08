@@ -10,6 +10,21 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded only in git tags and this document; `bundle.yaml` version stays 1.0.0 (decoupled from release versioning — see the README's version section).
 
+## [1.2.2] - 2026-08-08
+
+Self-review two-tier fallback for the 6-dimension check (brooks-lint).
+
+### Fixed
+
+- **Two-tier fallback for brooks-lint**: when the Skill tool returns only a "Launching skill" placeholder (worktree subagent skill routing is unstable — plugin content may not be injected), the subagent now Reads the plugin-cache protocol files and executes the full brooks review manually (`selfReview: cache-brooks`) before falling back to the built-in R1~R6 quick check. Review quality is preserved even when loading fails.
+- **Guard validates fallback evidence**: a `builtin-quickcheck` declaration must now state the unavailability reason **and** the cache-attempt evidence (missing either → progressive `BROOKS-LINT WARN`, never BLOCK).
+- **Guard recognizes `cache-brooks`**: method/whole-content/six-dimension patterns updated — a clean `cache-brooks` declaration passes without WARN (previously mis-blocked).
+- guard self-test suite expanded to 77 scenarios (S76/S77/S78: builtin evidence checks + cache-brooks acceptance; RED→GREEN with correct failure reasons, verified by two independent reviewers).
+
+### Changed
+
+- Troubleshooting gains the new WARN entry (bilingual); public MECHANISM (bilingual) documents the two-tier fallback behavior layer; scenario counts 74→77 synced across all public docs (README/INSTALLATION/MECHANISM/VERSIONS/CONTRIBUTING — historical changelog entries unchanged).
+
 ## [1.2.1] - 2026-08-08
 
 Installation-guide fix batch (init/hook/state fixes + README guidance fixes + independent-verification fixes).
