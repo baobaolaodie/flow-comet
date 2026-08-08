@@ -84,9 +84,14 @@ After the issue is confirmed: bug fixes use a `fix/` branch, features use a `fea
 
 feat:      new feature / mechanism
 fix:       bug fix (mechanism, script, hook)
+refactor:  behavior-preserving restructuring
+perf:      performance improvement
 docs:      documentation (README, docs/, CHANGELOG)
-chore:     tooling, release wrap-up
 test:      test-only changes (guard-self-test scenarios)
+build:     build/tooling changes (scripts, installer)
+ci:        CI pipeline changes
+chore:     tooling, release wrap-up
+revert:    reverts a previous commit
 ```
 
 Examples:
@@ -96,6 +101,16 @@ fix: init state gains status:'running' + three-tier hook semantics
 docs: README restructured into multi-document bilingual layout
 test: D-22 complement — S74/S75 BOM-tolerance scenarios
 ```
+
+**Branch prefix alignment**: the prefix should match the change type, not a fixed default. When developing through the flow-comet workflow, initialize the change branch with the matching prefix:
+
+```bash
+node workflow-state.mjs init <change-id> --branch-prefix feat/   # feature work
+node workflow-state.mjs init <change-id> --branch-prefix fix/    # bug fixes
+node workflow-state.mjs init <change-id> --branch-prefix docs/   # documentation
+```
+
+The built-in default prefix is `change/` (backward-compatible with existing changes); this repository's convention is to specify the type prefix explicitly so the branch matches the change type.
 
 ## Review requirements
 
