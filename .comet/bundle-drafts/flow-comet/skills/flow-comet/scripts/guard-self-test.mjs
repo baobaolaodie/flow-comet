@@ -1668,6 +1668,67 @@ const SCENARIOS = [
     },
   },
 
+  // ---------- T-FIX-19 场景（S76~S77：builtin 降级须含缓存尝试证据） ----------
+
+  // 76: builtin-quickcheck 声明 + 不可用原因但无缓存尝试证据 → BROOKS-LINT WARN
+  // （T-FIX-19：防「未尝试 Read 插件缓存协议文件」的偷懒降级——修复前不校验 = RED）
+  {
+    name: '76 builtin 无缓存尝试证据 → WARN（T-FIX-19）',
+    run: (dir) => {
+      const st = baseState('execute');
+      st.evidence.execute = { summary: 'executed' };
+      st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
+      writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent({
+        method: '## 自检方法\n\nbuiltin-quickcheck — brooks-lint 不可用（Skill 仅返回占位，插件执行体未加载），按协议降级内置 R1~R6 快查',
+      }));
+      const res = runGuard(['exit', 'execute'], dir);
+      assertExit(res, 0);
+      assertOut(res, 'BROOKS-LINT WARN');
+    },
+  },
+
+  // 78: cache-brooks 声明（两级降级路径第 2 级——读缓存手动执行成功）→ 放行
+  // （T-FIX-19 补：guard method 正则须识别 cache-brooks——修复前正则不匹配 → 全文无 brooks-review/builtin → BLOCKED = RED）
+  {
+    name: '78 cache-brooks 声明 → 放行（T-FIX-19）',
+    run: (dir) => {
+      const st = baseState('execute');
+      st.evidence.execute = { summary: 'executed' };
+      st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
+      writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent({
+        method: '## 自检方法\n\ncache-brooks — 已 Read 插件缓存协议文件手动执行完整审查（4-element + file:line + 书引用），结果见「6 维自查」',
+        sixDim: '## 6 维自查\n\n- 功能: 通过（cache-brooks 审查已跑）\n- 性能: 无影响\n- 安全: 无影响\n- 兼容: 通过\n- 可观测: 通过\n- 可维护: 通过',
+      }));
+      const res = runGuard(['exit', 'execute'], dir);
+      assertExit(res, 0);
+      assertNotOut(res, 'BLOCKED');
+      assertNotOut(res, 'BROOKS-LINT WARN');
+    },
+  },
+
+  // 77: builtin-quickcheck 声明 + 不可用原因 + 含缓存尝试证据（已 Read 插件缓存协议文件）→ 无 WARN 放行
+  // （T-FIX-19 正面：两级降级路径的第 2 级被正确执行后的合法态）
+  {
+    name: '77 builtin 含缓存尝试证据 → 无 WARN（T-FIX-19）',
+    run: (dir) => {
+      const st = baseState('execute');
+      st.evidence.execute = { summary: 'executed' };
+      st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
+      writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent({
+        method: '## 自检方法\n\nbuiltin-quickcheck — 已尝试 Skill 加载（仅占位）并已 Read 插件缓存协议文件（~/.claude/plugins/cache/brooks-lint-marketplace/...）手动执行，仍不可行，brooks-lint 不可用，按协议降级内置 R1~R6 快查',
+      }));
+      const res = runGuard(['exit', 'execute'], dir);
+      assertExit(res, 0);
+      assertNotOut(res, 'BROOKS-LINT WARN');
+    },
+  },
+
   // 75: guard 读带 BOM 的 state → 正常（D-22——guard readStateJson 的 BOM 容忍）
   {
     name: '75 guard 读带 BOM state 正常（D-22）',
