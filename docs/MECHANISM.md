@@ -6,7 +6,7 @@
 
 # Core Mechanisms (behavior layer)
 
-This document describes what flow-comet **does** — the behaviors and rules you will observe while using it. Implementation details (script logic, decision tables, historical fixes) live in the project's internal documentation.
+This document describes what flow-comet **does** — the behaviors and rules you will observe while using it. Implementation details (script logic, decision tables, historical fixes) are out of scope here.
 
 ## 1. State machine and routing (file-as-truth)
 
@@ -56,7 +56,7 @@ Hook blocking semantics: PreToolUse hook exit 2 (blocking — prevents the tool 
 `scripts/guard-self-test.mjs`: **74 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios) — the author's regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
 
 ```bash
-node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
+node .claude/skills/flow-comet/scripts/guard-self-test.mjs
 # → ALL 74 SCENARIOS PASSED
 ```
 

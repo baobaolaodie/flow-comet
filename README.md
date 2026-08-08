@@ -94,6 +94,7 @@ flow-comet/
 ├── scripts/                prepare-env installer
 ├── docs/
 │   ├── examples/           workflow artifact examples
+│   └── ECOSYSTEM.md        roles of flow-kit & Comet, borrowing boundaries
 │   └── INSTALLATION.md     installation guide
 │   └── USAGE.md            usage guide
 │   └── PROTOCOL.md         custom protocol guide

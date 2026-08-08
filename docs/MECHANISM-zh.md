@@ -56,7 +56,7 @@ hook blocking 语义：PreToolUse hook 的 exit 2（blocking——阻止工具�
 `scripts/guard-self-test.mjs`：**74 场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景）——作者每次改动后的回归基线（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
 
 ```bash
-node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
+node .claude/skills/flow-comet/scripts/guard-self-test.mjs
 # → ALL 74 SCENARIOS PASSED
 ```
 

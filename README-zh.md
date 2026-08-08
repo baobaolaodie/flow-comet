@@ -94,6 +94,7 @@ flow-comet/
 ├── scripts/                prepare-env 安装器
 ├── docs/
 │   ├── examples/           工作流产物示例
+│   └── ECOSYSTEM.md        flow-kit 与 Comet 的作用、借鉴边界
 │   └── INSTALLATION.md     安装指南
 │   └── USAGE.md            使用指南
 │   └── PROTOCOL.md         自定义协议指南
