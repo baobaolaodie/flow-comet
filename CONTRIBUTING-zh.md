@@ -84,9 +84,14 @@ Issue 确认后：bug 用 `fix/` 分支、feature 用 `feature/` 分支——都
 
 feat:      新功能 / 新机制
 fix:       bug 修复（机制、脚本、hook）
+refactor:  保持行为不变的重构
+perf:      性能优化
 docs:      文档（README、docs/、CHANGELOG）
-chore:     工具、发布收尾
 test:      仅测试改动（guard-self-test 场景）
+build:     构建/工具改动（脚本、安装器）
+ci:        CI 管道改动
+chore:     工具、发布收尾
+revert:    回滚之前的提交
 ```
 
 示例：
@@ -96,6 +101,16 @@ fix: init state 补 status:'running' + hook 判定三层语义
 docs: README 重构为多文档中英双语结构
 test: D-22 补测——S74/S75 BOM 容忍场景
 ```
+
+**分支前缀对齐**：前缀应与改动类型匹配，而非固定默认。通过 flow-comet 工作流开发时，用匹配的前缀初始化 change 分支：
+
+```bash
+node workflow-state.mjs init <change-id> --branch-prefix feat/   # 功能开发
+node workflow-state.mjs init <change-id> --branch-prefix fix/    # bug 修复
+node workflow-state.mjs init <change-id> --branch-prefix docs/   # 文档
+```
+
+内置默认前缀是 `change/`（与既有 change 向后兼容）；本仓库规范要求显式指定类型前缀，使分支与改动类型一致。
 
 ## 审核要求
 
