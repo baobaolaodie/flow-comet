@@ -128,11 +128,12 @@ flow-comet/
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch (`feat/` prefix, conventional commits)
-3. Edit skills/scripts under `.comet/bundle-drafts/flow-comet/skills/` (authoritative source)
-4. Run regression: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 74 SCENARIOS PASSED`
-5. Open a pull request
+Full guide in [CONTRIBUTING.md](CONTRIBUTING.md) — branch model (`feature → dev → main`), PR workflow, merge rules, and commit convention. In short:
+
+1. Branch from `dev`: `git checkout dev && git checkout -b feature/<description>`
+2. Edit skills/scripts under `.comet/bundle-drafts/flow-comet/skills/` (authoritative source); TDD with RED scenario first
+3. Run regression: `node .claude/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 74 SCENARIOS PASSED`
+4. Open a PR into `dev` (merge commit); release PR `dev → main` (squash)
 
 ## License
 
