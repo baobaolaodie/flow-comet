@@ -1651,6 +1651,38 @@ const SCENARIOS = [
       assertOut(res, '"status": "running"');
     },
   },
+
+  // 74: hook 读带 BOM 的 state → 判定正常（D-22——hook readStateJson 的 BOM 容忍）
+  {
+    name: '74 hook 读带 BOM state 正常（D-22）',
+    run: (dir) => {
+      const st = baseState('open');
+      st.status = 'running';
+      const raw = '﻿' + JSON.stringify(st, null, 2) + '\n';
+      fs.mkdirSync(path.join(dir, '.comet'), { recursive: true });
+      fs.writeFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), raw, 'utf8');
+      const res = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', 'compose-demo', 'CHANGE.md') } });
+      assertExit(res, 0);
+      assertOut(res, 'NODE: open');
+    },
+  },
+
+  // 75: guard 读带 BOM 的 state → 正常（D-22——guard readStateJson 的 BOM 容忍）
+  {
+    name: '75 guard 读带 BOM state 正常（D-22）',
+    run: (dir) => {
+      const st = baseState('open');
+      st.status = 'running';
+      const raw = '﻿' + JSON.stringify(st, null, 2) + '\n';
+      fs.mkdirSync(path.join(dir, '.comet'), { recursive: true });
+      fs.writeFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), raw, 'utf8');
+      writeFile(dir, '.specs/compose-demo/CHANGE.md', '# CHANGE\n## Why\nx\n');
+      const res = runGuard(['entry', 'open'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+    },
+  },
 ];
 
 // ---------- 运行 ----------
