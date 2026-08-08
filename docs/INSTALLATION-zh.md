@@ -96,6 +96,39 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
 ## 与 Comet 集成（仅当目标项目也使用 Comet 时适用）
 
 > **适用条件**：以下定制只针对**已运行过 `comet init` 的目标项目**（其 CLAUDE.md 存在 `<comet-ambient-resume>` 块）。未使用 Comet 的项目**跳过本段**——flow-comet 不依赖 Comet，有自己的状态机与文件推导恢复。
+> 
+> 模板语言随目标项目主语言（此处为中文示例）。复制以下内容替换目标项目的 CLAUDE.md 中的 `<comet-ambient-resume>` 块：
+```markdown
+<comet-ambient-resume>
+<!-- Managed by Comet. Edits inside this block may be replaced by comet init/update. -->
+<!-- Contract: comet.resume_probe.v2 -->
+<!-- flow-comet overlay: project uses flow-comet as primary workflow -->
+
+## Comet Ambient Resume
+
+在这个仓库中，开始处理需要改动或调查的任务前，如果可能存在活跃 Comet workflow，按以下顺序检查：
+
+### 优先级 1：flow-comet 路由（项目主工作流）
+
+如果 `.claude/skills/flow-comet/SKILL.md` 存在（flow-comet 已安装）：
+
+1. 检查 `.comet/current-change.json` 或运行 `comet state get <change> phase` 确认是否有活跃 change
+2. 如有活跃 change 且 `phase=build`，直接进入 `/flow-comet`（不要运行 resume probe）
+3. 如有活跃 change 但 phase 不是 build，按 flow-comet 的节点路由表决定入口
+4. 如无活跃 change，用户明确要开发时进入 `/flow-comet`（它会路由到 open 阶段）
+
+### 优先级 2：Comet 标准探针（flow-comet 不适用时）
+
+仅当 flow-comet 未安装或用户明确调用 `/comet-classic` 时，运行标准探针：
+`comet resume-probe . --stdin --json`
+
+- 如果用户通过宿主明确调用任意 Comet Skill（例如 `/comet`、`/comet-classic`、`/comet-hotfix`），显式调用优先于本恢复协议。
+- 如果 probe 返回 `auto_resume`，简短说明选中的 active change，并进入 `nextCommand` 指向的永久入口。
+- 如果 probe 返回 `ask_user`，只问一个简短问题并等待用户回复。
+- 如果 probe 返回 `out_of_scope` 或 `none`，不要进入 Comet workflow。
+- 不能只因为存在 active change 就把无关任务挂到该 change。
+</comet-ambient-resume>
+```
 
 flow-comet 会把 `comet init` 注入的 `<comet-ambient-resume>` 块定制为 flow-comet 优先路由（否则恢复流程只跑 Comet 标准探针，不会路由到 `/flow-comet`）：
 

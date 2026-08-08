@@ -98,6 +98,41 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
 
 > **Applicability**: the following customization is only for projects that have run `comet init` (their CLAUDE.md contains a `<comet-ambient-resume>` block). Projects not using Comet should skip this section — flow-comet does not depend on Comet; it has its own state machine and file-derived recovery.
 
+> **Template language** follows the target project's primary language (Chinese shown here as an example).
+
+Replace the following content in the target project's CLAUDE.md:
+```markdown
+<comet-ambient-resume>
+<!-- Managed by Comet. Edits inside this block may be replaced by comet init/update. -->
+<!-- Contract: comet.resume_probe.v2 -->
+<!-- flow-comet overlay: project uses flow-comet as primary workflow -->
+
+## Comet Ambient Resume
+
+在这个仓库中，开始处理需要改动或调查的任务前，如果可能存在活跃 Comet workflow，按以下顺序检查：
+
+### 优先级 1：flow-comet 路由（项目主工作流）
+
+如果 `.claude/skills/flow-comet/SKILL.md` 存在（flow-comet 已安装）：
+
+1. 检查 `.comet/current-change.json` 或运行 `comet state get <change> phase` 确认是否有活跃 change
+2. 如有活跃 change 且 `phase=build`，直接进入 `/flow-comet`（不要运行 resume probe）
+3. 如有活跃 change 但 phase 不是 build，按 flow-comet 的节点路由表决定入口
+4. 如无活跃 change，用户明确要开发时进入 `/flow-comet`（它会路由到 open 阶段）
+
+### 优先级 2：Comet 标准探针（flow-comet 不适用时）
+
+仅当 flow-comet 未安装或用户明确调用 `/comet-classic` 时，运行标准探针：
+`comet resume-probe . --stdin --json`
+
+- 如果用户通过宿主明确调用任意 Comet Skill（例如 `/comet`、`/comet-classic`、`/comet-hotfix`），显式调用优先于本恢复协议。
+- 如果 probe 返回 `auto_resume`，简短说明选中的 active change，并进入 `nextCommand` 指向的永久入口。
+- 如果 probe 返回 `ask_user`，只问一个简短问题并等待用户回复。
+- 如果 probe 返回 `out_of_scope` 或 `none`，不要进入 Comet workflow。
+- 不能只因为存在 active change 就把无关任务挂到该 change。
+</comet-ambient-resume>
+```
+
 flow-comet customizes the `<comet-ambient-resume>` block injected by `comet init` so recovery routes to `/flow-comet` first — otherwise recovery only runs the Comet standard probe:
 
 1. If the target project has run `comet init`, replace the block with the flow-comet-priority variant (route to `/flow-comet` when `flow-comet` is installed, fall back to the standard probe otherwise).
