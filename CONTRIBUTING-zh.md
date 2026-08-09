@@ -18,7 +18,7 @@ dev ──PR（squash）──▶ main               （发布分支——历史
 
 | 分支 | 角色 | 合并方式 | 历史 |
 |------|------|---------|------|
-| `main` | 发布分支 | **squash** | 干净——每次发布/功能批次一条 |
+| `main` | 发布分支 | **squash** | 干净——每次发布一条 |
 | `dev` | 集成分支 | **merge commit** | 完整——每个 feature 提交保留、可追溯 |
 | `feat/*` | 开发分支 | — | 工作历史，合并后删除 |
 
@@ -73,11 +73,13 @@ Issue 确认后：bug 用 `fix/` 分支、feature 用 `feat/` 分支——都按
 - **回归基线**：`node .claude/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 82 SCENARIOS PASSED`（每次改动后必须）
 - **文档同步**：行为层文档在 `docs/`（中英双语——改文档时两语同步）；实现细节不进公开文档
 - **向后兼容**：旧 change/旧 state 照常工作——渐进 WARN 优先于 BLOCK
-- **公开文档无内部术语**：无批次编号（E-NN）、无 dogfood/T-FIX/D- 引用、无指向 `docs/internal/` 的链接
+- **公开文档不使用代号、编号或行话**：README/docs/CHANGELOG/提交信息保持一致
 
 ## 提交规范
 
 [Conventional Commits](https://www.conventionalcommits.org/zh-CN/)：
+
+> **提交信息是公开产物**——在 GitHub 的 git 历史中可见。请写纯描述：**不使用代号、编号或行话**。与 CHANGELOG 和公开文档同一语言标准。示例：`fix: brooks 6 维自查两级降级路径`。
 
 ```
 <type>(<scope>): <subject>

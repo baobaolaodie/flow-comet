@@ -12,20 +12,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [1.2.3] - 2026-08-09
 
-Worktree delegation chain fixes (real-run report: points-system-recon).
+Worktree delegation chain fixes (real-run report).
 
 ### Fixed
 
-- **P0-route diagnostic**: when TASK.md task tags carry `parallel="true"` without `status="pending"` (old template shape), the P0 router now emits a `P0-ROUTE WARN` explaining the required attribute order — structural validation stays strict, failures are visible instead of silently stalling in execute.
+- **route diagnostic**: when TASK.md task tags carry `parallel="true"` without `status="pending"` (old template shape), the router now emits a `ROUTE WARN` explaining the required attribute order — structural validation stays strict, failures are visible instead of silently stalling in execute.
 - **C4 check visible**: the worktree dirty-check catch block now prints `C4-CHECK SKIP: <reason>` (previously silently swallowed — Windows git-command failures were invisible).
 - **WARN COUNT summary**: entry/exit output ends with a `WARN COUNT: N` summary line (appended; existing output unchanged).
-- **Empty-exit documentation aligned with implementation**: the execute SKILL no longer claims an "empty exit" path (guard blocks it in three layers: evidence → serial pending → output-schema artifacts); documented correct paths (P0 routing to subagent-execute / explicit `parallelTakeoverApproved` exemption).
+- **Empty-exit documentation aligned with implementation**: the execute SKILL no longer claims an "empty exit" path (guard blocks it in three layers: evidence → serial pending → output-schema artifacts); documented correct paths (direct routing to subagent-execute / explicit `parallelTakeoverApproved` exemption).
 - **Pre-delegation checklist**: subagent-execute SKILL now mandates a pre-delegation checklist (git status / HEAD / inline context) with a Red Flag; dirty-worktree protocol marked as mandatory before delegation.
 - guard self-test suite expanded to 82 scenarios (S79~S83; RED→GREEN with correct failure reasons, verified by an independent reviewer with 24 independently constructed assertions).
 
 ### Changed
 
-- Troubleshooting gains new entries (P0-ROUTE WARN / C4-CHECK SKIP / WARN COUNT, bilingual); scenario counts 77→82 synced across all public docs (historical changelog entries unchanged).
+- Troubleshooting gains new entries (ROUTE WARN / C4-CHECK SKIP / WARN COUNT, bilingual); scenario counts 77→82 synced across all public docs (historical changelog entries unchanged).
 
 ## [1.2.2] - 2026-08-08
 
@@ -44,7 +44,7 @@ Self-review two-tier fallback for the 6-dimension check (brooks-lint).
 
 ## [1.2.1] - 2026-08-08
 
-Installation-guide fix batch (init/hook/state fixes + README guidance fixes + independent-verification fixes).
+Installation-guide fixes (init/hook/state fixes + README guidance fixes + independently verified fixes).
 
 ### Fixed
 
@@ -67,7 +67,7 @@ Installation-guide fix batch (init/hook/state fixes + README guidance fixes + in
 - **README installation verification** now has four steps (structure / config loadability / authoritative-source diff consistency / real-environment smoke test) — `guard-self-test` marked as the **author regression baseline** (script-logic self-test; does not depend on installation completeness; not an installation verification criterion)
 - README Quick Start gains the flow-kit prerequisite hint and a new-session hint; Requirements gains a flow-kit verification step; settings injection documents first-time vs existing-file cases; hook command documents the project-root resolution base
 - **SKILL startup protocol documentation corrected** : init output is the first route (NODE: open / protocol first node); `next` is used after a node exits
-- **README restructured into multi-document layout** (bilingual): README index + docs/ (INSTALLATION/USAGE/PROTOCOL/MECHANISM/TROUBLESHOOTING/VERSIONS) + compose example; VERIFICATION.md removed from the public repo (verification records are internal knowledge)
+- **README restructured into multi-document layout** (bilingual): README index + docs/ (INSTALLATION/USAGE/PROTOCOL/MECHANISM/TROUBLESHOOTING/VERSIONS) + compose example; VERIFICATION.md removed from the public repo (verification records are out of scope for the public repository)
 - **hook blocking semantics confirmed by measurement**: main TUI session blocks writes (physical interception); `claude -p` (SDK CLI mode) downgrades to non-blocking (log-only)
 
 ## [1.2.0] - 2026-08-08
@@ -106,7 +106,7 @@ Change branches + PR review + append-placement discipline + documentation rewrit
 - **Change branch mode**: `init` auto-creates the `change/<id>` branch; the whole flow runs on it; archive wraps up with merge + branch deletion
 - **PR review**: `config set enablePrReview true`; push branch + create PR before archiving, merge after approve
 - **Branch-state consistency check**: `status`/`next` detect branch/activeChange mismatch → WARN (not BLOCK)
-- **Append-placement discipline and structural detection**: CONTEXT terms/decisions inserted into existing sections, LESSONS inserted by L-NNN into the entries section, STATE decision log inserted at top (reverse order), CHANGELOG table inserted at top, T-FIX appended to `## Fix 任务`; guard detects (orphan sections / numbering disorder / outside entries / non-reverse order) as progressive WARN
+- **Append-placement discipline and structural detection**: CONTEXT terms/decisions inserted into existing sections, LESSONS inserted by L-NNN into the entries section, STATE decision log inserted at top (reverse order), CHANGELOG table inserted at top, rollback fixes appended to `## Fix 任务`; guard detects (orphan sections / numbering disorder / outside entries / non-reverse order) as progressive WARN
 - guard self-test suite expanded to 23 scenarios (branch checks + append-placement positive-negative)
 
 ### Changed
@@ -125,7 +125,7 @@ First stable release (8-node workflow + three defense layers + guard validation,
 ### Added
 
 - 8-node auto-routed workflow (open → design → plan → execute ⇄ subagent-execute → review → verify → archive)
-- Own state machine (`.comet/flow-comet-state.json`) + determineNode file derivation + P0-2 auto-correction
+- Own state machine (`.comet/flow-comet-state.json`) + determineNode file derivation + auto-correction
 - Three defense layers (hook phase whitelist / coordinator prohibition / exit takeover detection)
 - Guard validation system: template-derived section names, SUMMARY six sections + mandatory self-check method, TASK signature hash, real verify execution, verifyFailures counting, state schema validation (fail-closed)
 - Subagent-based execution engine + executionMode (subagent default / direct escape hatch) + Return Contract + handoff hash provenance

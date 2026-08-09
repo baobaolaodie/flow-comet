@@ -49,7 +49,7 @@ open → design → plan → execute ⇄ subagent-execute → review → verify 
 | `CHANGELOG.md` | `.specs/` | 变更日志（表格顶部按日期倒序插入） | archive |
 | `.comet/flow-comet-state.json` | `.comet/` | 状态机（activeChange/currentNode/completedNodes/evidence/…） | 全程（脚本管理） |
 
-> **追加位置纪律**：CONTEXT 术语→术语表表格、决策→已锁决策清单；LESSONS→条目区按 L-NNN 编号；STATE/CHANGELOG→顶部倒序；T-FIX→`## Fix 任务` 段——guard 检测（WARN 渐进）兜底。
+> **追加位置纪律**：CONTEXT 术语→术语表表格、决策→已锁决策清单；LESSONS→条目区按 L-NNN 编号；STATE/CHANGELOG→顶部倒序；回退修复→`## Fix 任务` 段——guard 检测（WARN 渐进）兜底。
 
 ## 分支模式
 
@@ -101,7 +101,7 @@ flow-comet 在以下节点**暂停并向你确认**（其余全部自动推进�
 | archive | 归档与 merge change 分支到 main（不可逆操作） |
 | 归档前置 | PR approve（`enablePrReview` 开启时） |
 
-## 脚本速查（引擎内部，Claude 自动执行）
+## 脚本速查（Claude 自动执行）
 
 以下脚本由 flow-comet skill 在流程中**自动运行**——正常使用无需手动执行，仅在故障排查或高级场景使用。路径：`<目标项目>/.claude/skills/flow-comet/scripts/`：
 

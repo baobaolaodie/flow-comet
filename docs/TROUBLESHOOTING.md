@@ -18,11 +18,11 @@
 | `BROOKS-LINT WARN: 使用 builtin-quickcheck 未声明原因` | SUMMARY missing "plugin unavailable" note | add the reason in SUMMARY's `## 自检方法` |
 | `BROOKS-LINT WARN: 使用 builtin-quickcheck 但未声明缓存尝试证据` | builtin fallback declared without evidence of reading the plugin-cache protocol files | in SUMMARY's `## 自检方法`, state that you Read the plugin-cache protocol files (e.g. `~/.claude/plugins/cache/brooks-lint-marketplace/.../brooks-review/`) and executed manually before falling back |
 | `BLOCKED: verify 已失败 N/3` / `BLOCKED: verify 已失败 4 次，需用户决策` | auto-retry up to 3 times; 4th failure requires human decision | pause, human decision: "continue / stop" |
-| `BLOCKED: 疑似未 exit 节点 <node>` | `next` detects illegal node order (skipped/not exited) | run `workflow-guard.mjs exit <node> --apply` per the hint (T-FIX rollback scenarios see hint) |
+| `BLOCKED: 疑似未 exit 节点 <node>` | `next` detects illegal node order (skipped/not exited) | run `workflow-guard.mjs exit <node> --apply` per the hint (rollback scenarios see hint) |
 | `BLOCKED: workflow protocol node must have a non-empty string id` | custom protocol `nodes[]` contains empty/invalid element | fix protocol JSON: each node `id` non-empty string, avoid built-in 8-node ids |
 | `BLOCKED: 未在协议 writeWhitelist 中声明` | write target outside the custom protocol whitelist (fail-closed) | declare the node's allowed path prefixes in protocol `writeWhitelist`, or use the built-in protocol |
 | `--protocol <path> 加载失败` | protocol path missing / schemaVersion or kind mismatch | check the path; confirm `schemaVersion: 1`, `kind: "workflow-kernel"` |
-| `P0-ROUTE WARN: 未找到 parallel="true" status="pending" 的任务块` | TASK.md task tags lack the `status="pending"` attribute (or wrong attribute order) | add `status="pending"` after `parallel="true"` in each task tag (attribute order matters: parallel before status) |
+| `ROUTE WARN: 未找到 parallel="true" status="pending" 的任务块` | TASK.md task tags lack the `status="pending"` attribute (or wrong attribute order) | add `status="pending"` after `parallel="true"` in each task tag (attribute order matters: parallel before status) |
 | `C4-CHECK SKIP: <reason>` | worktree dirty-check skipped (not a git repo, or git command failed) | expected in non-git projects; if it appears in a git repo, the git command failed — check the reason |
 | `WARN COUNT: N` | summary line on entry/exit — N warns were emitted this call | review each WARN above this line |
 | `Unexpected token ... is not valid JSON` (state) | state file carries a UTF-8 BOM or corrupted content | rewrite the state file without BOM (scripts tolerate BOM since 1.2.1) |

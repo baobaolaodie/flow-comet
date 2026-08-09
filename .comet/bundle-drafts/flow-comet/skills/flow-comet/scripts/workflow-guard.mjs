@@ -2485,7 +2485,7 @@ async function main() {
         // batch-H (P3): 路由无匹配时输出诊断——结构校验保持严格（不放松正则），检测失败纠偏可见
         // 旧模板（task 标签无 status 属性）产出的 TASK.md 无法匹配——明确提示而非静默卡在 execute
         if (parallelBlocks.length === 0 && /<task[^>]*parallel="true"/.test(taskContent)) {
-          console.error('P0-ROUTE WARN: 未找到 parallel="true" status="pending" 的任务块——检查 task 标签属性（属性顺序：parallel 在 status 前；缺 status 不视为 pending）');
+          console.error('ROUTE WARN: 未找到 parallel="true" status="pending" 的任务块——检查 task 标签属性（属性顺序：parallel 在 status 前；缺 status 不视为 pending）');
         }
         const eligibleParallel = parallelBlocks.filter(block => {
           const depsMatch = block.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
