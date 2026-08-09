@@ -30,7 +30,10 @@
 
 ## Release checklist (per release)
 
-1. Update CHANGELOG (Added/Changed/Fixed)
+Releases are **batched**: `dev` accumulates feature changes; one release PR ships the batch. Before releasing, present a **release approval sheet** (changes included / verification results / version) and get one approval.
+
+1. Update CHANGELOG (Added/Changed/Fixed — with PR links)
 2. Update README version badge + version status
 3. `git tag vX.Y.Z` + push --tags
 4. prepare-env release to all installed copies (main `.claude/` + target projects) when functionality changed
+5. Sync `dev` to `main` after the release PR merges
