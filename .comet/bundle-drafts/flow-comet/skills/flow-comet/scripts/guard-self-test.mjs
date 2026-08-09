@@ -2105,11 +2105,11 @@ console.log('RESULT: ' + passed + '/' + SCENARIOS.length + ' scenarios passed');
 const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
 const isAuthoritativeSource = fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'));
 if (isAuthoritativeSource) {
-  // ① 场景数全清单（公开双语 + 内部文档 + CLAUDE；全变体：ALL n SCENARIOS / n scenarios / n 场景 / n/n）
+  // ① 场景数全清单（公开双语 + 内部文档 + CLAUDE + PR 模板；全变体：ALL n SCENARIOS / n scenarios / n 场景 / n/n）
   const SCENARIO_COUNT_FILES = [
     'README.md', 'README-zh.md', 'CONTRIBUTING.md', 'CONTRIBUTING-zh.md',
     'docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
-    'docs/VERSIONS.md', 'docs/VERSIONS-zh.md', 'CLAUDE.md',
+    'docs/VERSIONS.md', 'docs/VERSIONS-zh.md', 'CLAUDE.md', '.github/PULL_REQUEST_TEMPLATE.md',
     'docs/internal/ARCHITECTURE.md', 'docs/internal/DOC-CHECKLIST.md', 'docs/internal/MECHANISM.md',
     'docs/internal/next-change-prompt.md', 'docs/internal/ROADMAP.md', 'docs/internal/WORKING-METHOD.md',
   ];
