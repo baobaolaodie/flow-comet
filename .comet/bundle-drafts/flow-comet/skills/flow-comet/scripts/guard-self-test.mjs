@@ -2017,6 +2017,59 @@ const SCENARIOS = [
       assertOut(res, '重置节点状态');
     },
   },
+
+  // 97~98: dogfood 实证的校验误报修复（2026-08-10）
+  // 97: 自检方法段内后续行声明方法（子代理把方法名写在列表后续行）→ 放行无 WARN
+  // （修复前 guard 正则只匹配段后第一行 → 全文有 cache-brooks 声明 → 误报 BROOKS-LINT WARN = RED）
+  {
+    name: '97 自检方法段后续行声明 → 放行',
+    run: (dir) => {
+      const st = baseState('execute');
+      st.evidence.execute = { summary: 'executed' };
+      st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
+      writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent({
+        method: '## 自检方法\n\n- flow-comet-dev Skill 加载成功\n- 自检：第 1 级 brooks-review 返回占位 → 第 2 级 Read 插件缓存协议文件手动执行（selfReview: cache-brooks）',
+        sixDim: '## 6 维自查\n\n- 功能: 通过（cache-brooks 审查已跑）\n- 性能: 无影响\n- 安全: 无影响\n- 兼容: 通过\n- 可观测: 通过\n- 可维护: 通过',
+      }));
+      const res = runGuard(['exit', 'execute'], dir);
+      assertExit(res, 0);
+      assertNotOut(res, 'BROOKS-LINT WARN');
+    },
+  },
+
+  // 98: handoff changedFiles 含 *-SUMMARY.md（强制产物）→ 不报越界 WARN
+  // （修复前 W2-D 子集校验把强制产物当越界 = RED；真实 commitHash 供 git show 校验）
+  {
+    name: '98 handoff 含 SUMMARY 文件 → 无越界 WARN',
+    run: (dir) => {
+      const g = (args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
+      g(['init', '-q']);
+      g(['config', 'user.email', 't@t']);
+      g(['config', 'user.name', 't']);
+      writeFile(dir, 'test_stats.py', 'def f():\n    pass\n');
+      writeFile(dir, 'T01-SUMMARY.md', '# T01-SUMMARY\n## 做了什么\nx\n');
+      // 只提交指定文件（场景运行器预置的 reference/ 协议文件不入提交集）
+      g(['add', 'test_stats.py', 'T01-SUMMARY.md']);
+      g(['commit', '-qm', 'init']);
+      const hash = g(['rev-parse', 'HEAD']).stdout.trim();
+      const st = baseState('subagent-execute');
+      st.evidence['subagent-execute'] = {
+        handoffRequests: { T01: { writeFiles: ['test_stats.py'] } },
+        handoffResult: {},
+      };
+      writeState(dir, st);
+      const res = runHandoff(['result', 'T01', JSON.stringify({
+        status: 'DONE', taskId: 'T01', commitHash: hash,
+        changedFiles: ['test_stats.py', 'T01-SUMMARY.md'],
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        greenEvidence: { command: 'node --check test_stats.py', output: 'ok' },
+      })], dir);
+      assertExit(res, 0);
+      if (res.output.includes('超出 writeFiles 范围')) throw new Error('SUMMARY 为强制产物不应报越界 WARN');
+    },
+  },
 ];
 
 // ---------- 运行 ----------

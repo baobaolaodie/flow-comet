@@ -100,7 +100,8 @@ async function main() {
         const allowed = state.evidence['subagent-execute'].handoffRequests?.[taskId]?.writeFiles || [];
         // 空 writeFiles（request 未带 --write-files）时跳过子集校验——避免全量越界误报噪音
         if (allowed.length > 0) {
-          const violations = committedFiles.filter(f => !allowed.some(a => f.startsWith(a.replace('*', ''))));
+          // S98（dogfood 实证）：*-SUMMARY.md 是 flow-comet 强制产物（execute 证据），非越界——豁免
+          const violations = committedFiles.filter(f => !f.endsWith('-SUMMARY.md') && !allowed.some(a => f.startsWith(a.replace('*', ''))));
           if (violations.length > 0) {
             console.error('HANDOFF WARN: 提交文件超出 writeFiles 范围: ' + violations.join(', '));
           }
