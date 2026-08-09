@@ -12,20 +12,20 @@
 
 ## [1.2.3] - 2026-08-09
 
-worktree 委托链路修复（真实运行实录：points-system-recon）。
+worktree 委托链路修复。
 
 ### Fixed
 
-- **P0 路由诊断**：TASK.md task 标签含 `parallel="true"` 但缺 `status="pending"`（旧模板形态）时，P0 路由输出 `P0-ROUTE WARN` 说明属性顺序要求——结构校验保持严格，检测失败可见（不再静默卡在 execute）
+- **路由诊断**：TASK.md task 标签含 `parallel="true"` 但缺 `status="pending"`（旧模板形态）时，路由输出 `ROUTE WARN` 说明属性顺序要求——结构校验保持严格，检测失败可见（不再静默卡在 execute）
 - **C4 检查可见化**：worktree 脏检查的 catch 块输出 `C4-CHECK SKIP: <原因>`（此前静默吞错——Windows 下 git 命令失败不可见）
 - **WARN COUNT 汇总行**：entry/exit 输出末尾追加 `WARN COUNT: N`（不改变既有输出）
-- **空退出文档-实现一致化**：execute SKILL 不再声称「空退出」路径（guard 实际三层 BLOCKED：evidence → 串行 pending → 产物）；文档改为正确路径（P0 直路由 subagent-execute / 显式 `parallelTakeoverApproved` 豁免）
+- **空退出文档-实现一致化**：execute SKILL 不再声称「空退出」路径（guard 实际三层 BLOCKED：evidence → 串行 pending → 产物）；文档改为正确路径（直接路由 subagent-execute / 显式 `parallelTakeoverApproved` 豁免）
 - **委托前检查清单**：subagent-execute SKILL 强制委托前检查（git status / HEAD / 内联上下文）+ Red Flag；dirty-worktree 协议标注为委托前必做
 - guard 自测套件扩展至 82 场景（S79~S83；RED→GREEN 正确失败原因，独立验证者 24 条独立构造断言复验）
 
 ### Changed
 
-- Troubleshooting 新增条目（P0-ROUTE WARN / C4-CHECK SKIP / WARN COUNT，双语）；场景数 77→82 全公开文档同步（历史条目不改）
+- Troubleshooting 新增条目（ROUTE WARN / C4-CHECK SKIP / WARN COUNT，双语）；场景数 77→82 全公开文档同步（历史条目不改）
 
 ## [1.2.2] - 2026-08-08
 
@@ -44,7 +44,7 @@ worktree 委托链路修复（真实运行实录：points-system-recon）。
 
 ## [1.2.1] - 2026-08-08
 
-安装引导修复批次（init/hook/状态修复 + README 指引修复 + 独立验证批次修复）。
+安装引导修复（init/hook/状态修复 + README 指引修复 + 独立验证修复）。
 
 ### Fixed
 
@@ -60,14 +60,14 @@ worktree 委托链路修复（真实运行实录：points-system-recon）。
 - **findActiveChange completed 优先**：归档完成态下 activeChange 残留不再误判
 - **hook statePath 缺省回退**：最小 schema 协议（无 state.statePath）不再崩溃
 - **三脚本 JSON.parse 容忍 UTF-8 BOM**：外部写入（如会话 Write）带 BOM 的 state/evidence 正常读取
-- guard 自测套件扩展至 74 场景（全量正反例 + 独立验证批次场景 + BOM 容忍）
+- guard 自测套件扩展至 74 场景（全量正反例 + 独立验证场景 + BOM 容忍）
 
 ### Changed
 
 - **README 验证安装**改为四步（结构检查 / 配置可加载性 / 权威源 diff 一致性 / 真实环境冒烟）——guard-self-test 标注为**作者回归基线**（脚本逻辑自测，不依赖安装完整性，不是安装验证判据）
 - README 快速开始补 flow-kit 前置依赖提示与新会话生效提示；Requirements 补 flow-kit 安装验证步骤；settings 注入说明补首次创建/已有文件两情形；hook command 补相对路径解析基准（项目根）
 - **SKILL 启动协议文档修正**：init 输出即首次路由（NODE: open/协议首节点）；next 在节点 exit 后使用
-- **README 重构为多文档结构**（中英双语）：README 索引 + docs/（INSTALLATION/USAGE/PROTOCOL/MECHANISM/TROUBLESHOOTING/VERSIONS）+ compose 示例；公开 repo 移除 VERIFICATION.md（验证记录属内部知识）
+- **README 重构为多文档结构**（中英双语）：README 索引 + docs/（INSTALLATION/USAGE/PROTOCOL/MECHANISM/TROUBLESHOOTING/VERSIONS）+ compose 示例；公开 repo 移除 VERIFICATION.md（验证记录不属于公开仓库范围）
 - **hook blocking 语义实测确认**：主会话 TUI 生效（越权写物理阻止）；claude -p（SDK CLI）软拦截（仅日志）
 
 ## [1.2.0] - 2026-08-08
@@ -106,7 +106,7 @@ change 分支 + PR 审查 + 追加位置纪律 + 文档重写。
 - **change 分支模式**：`init` 自动创建 `change/<id>` 分支，全流程在分支上进行，归档时合并收尾（merge + 删除分支）
 - **PR 审查**：`config set enablePrReview true` 开启，归档前推送分支 + 创建 PR，approve 后合并
 - **分支-状态一致性校验**：`status`/`next` 检测分支与 activeChange 不符 → WARN（不 BLOCK）
-- **追加位置纪律与结构检测**：CONTEXT 术语/决策插入既有结构段、LESSONS 按 L-NNN 编号插入条目区、STATE 决策日志顶部插入（倒序）、CHANGELOG 表格顶部插入、T-FIX 追加到 `## Fix 任务` 段；guard 检测（孤立追加段/编号乱序/条目区外/非倒序）WARN 渐进
+- **追加位置纪律与结构检测**：CONTEXT 术语/决策插入既有结构段、LESSONS 按 L-NNN 编号插入条目区、STATE 决策日志顶部插入（倒序）、CHANGELOG 表格顶部插入、回退修复追加到 `## Fix 任务` 段；guard 检测（孤立追加段/编号乱序/条目区外/非倒序）WARN 渐进
 - guard 自测套件扩展至 23 场景（分支校验 + 追加位置检测正反例）
 
 ### Changed
@@ -125,7 +125,7 @@ change 分支 + PR 审查 + 追加位置纪律 + 文档重写。
 ### Added
 
 - 8 节点自动路由工作流（open → design → plan → execute ⇄ subagent-execute → review → verify → archive）
-- 自有状态机（`.comet/flow-comet-state.json`）+ determineNode 文件推导 + P0-2 自动纠偏
+- 自有状态机（`.comet/flow-comet-state.json`）+ determineNode 文件推导 + 自动纠偏
 - 三层防线（hook phase 白名单 / 协调者禁令 / exit 越俎代庖检测）
 - guard 校验体系：段名模板派生、SUMMARY 六段 + 自检方法强制、TASK 签名哈希、verify 真实执行、verifyFailures 计数、state schema 校验（fail-closed）
 - 执行引擎子代理化 + executionMode（subagent 默认 / direct 逃生口）+ Return Contract + handoff hash 溯源

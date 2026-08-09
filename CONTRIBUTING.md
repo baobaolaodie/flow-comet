@@ -18,7 +18,7 @@ dev ──PR(squash)──▶ main               (release branch — clean histo
 
 | Branch | Role | Merge style | History |
 |--------|------|-------------|---------|
-| `main` | Release branch | **squash** | Clean — one commit per release/feature batch |
+| `main` | Release branch | **squash** | Clean — one commit per release |
 | `dev` | Integration branch | **merge commit** | Full — every feature commit preserved, traceable |
 | `feat/*` | Development branch | — | Working history, deleted after merge |
 
@@ -73,11 +73,13 @@ After the issue is confirmed: bug fixes use a `fix/` branch, features use a `fea
 - **Regression baseline**: `node .claude/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 82 SCENARIOS PASSED` (mandatory after every change)
 - **Documentation sync**: behavior-layer docs live in `docs/` (bilingual EN/zh — keep both in sync when a doc changes); implementation details stay out of public docs
 - **Backward compatibility**: old changes/states keep working — progressive WARN over BLOCK
-- **No internal terms in public docs**: no batch ids (E-NN), no dogfood/T-FIX/D- references, no pointers to `docs/internal/`
+- **Public docs stay jargon-free**: no codes, numbers, or process shorthand in README/docs/CHANGELOG/commit messages
 
 ## Commit convention
 
 [Conventional Commits](https://www.conventionalcommits.org/):
+
+> **Commit messages are public artifacts** — they are visible in the git history on GitHub. Write them as plain descriptions: **no codes, numbers, or jargon**. Use the same public-facing language as CHANGELOG and the docs. Example: `fix: brooks 6-dimension self-check two-tier fallback`.
 
 ```
 <type>(<scope>): <subject>

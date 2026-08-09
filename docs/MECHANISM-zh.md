@@ -12,7 +12,7 @@
 
 - 单文件状态机 `.comet/flow-comet-state.json`；节点推进由 `workflow-guard.mjs exit <node> --apply` 门控
 - **determineNode**：从 `.specs/` 工件实时推导当前节点（文件不齐 → 停在对应节点），不完全信任 state
-- **P0-2 自动纠偏**：state 的 currentNode 与推导不一致时自动写回（`next` 触发）
+- **自动纠偏**：state 的 currentNode 与推导不一致时自动写回（`next` 触发）
 
 ## 2. 三层防线（越俎代庖防护）
 
@@ -30,7 +30,7 @@ hook blocking 语义：PreToolUse hook 的 exit 2（blocking——阻止工具�
 |------|--------|------|
 | 段名模板派生 | open/design exit 必填段名从 `flow-kit/templates/` 派生（模板缺失 fallback 内置） | exit open/design |
 | TASK 签名哈希 | enter 记录任务集签名（行尾规范化 + 剥离标记类属性）→ exit 比对：增删任务/改 action/改边界 → BLOCKED；标记 done/加标记属性合法 | enter/exit execute |
-| 节点顺序 BLOCK | next 时 currentNode 未 exit（非正常推进后继）→ BLOCKED；exit 推进后正常 next 豁免；T-FIX 回退豁免 | next |
+| 节点顺序 BLOCK | next 时 currentNode 未 exit（非正常推进后继）→ BLOCKED；exit 推进后正常 next 豁免；回退豁免 | next |
 | handoff completedChecks | 子代理 Return Contract 必须含 required-skill completedChecks（skill 加载证据），缺失 → BLOCKED | exit subagent-execute |
 | redEvidence 时序 | redEvidence 必须先于 greenEvidence 真实存在；已记录 greenEvidence 后补录 redEvidence → BLOCKED | workflow-handoff result |
 | SUMMARY 六段 | verify 输出 / 6 维自查（非空）/ 越界检查 + 强制 `## 自检方法`——6 维自查两级降级：`brooks-review`（Skill 工具）→ 仅返回 "Launching skill" 占位时 Read 插件缓存协议文件手动执行完整审查（`cache-brooks`）→ 最后才是内置 R1~R6 快查（`builtin-quickcheck` 须声明不可用原因**和**缓存尝试证据；缺证据 → 渐进 WARN） | exit execute |
