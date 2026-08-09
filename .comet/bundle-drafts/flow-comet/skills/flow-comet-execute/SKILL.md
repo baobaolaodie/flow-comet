@@ -40,8 +40,10 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 
 - `parallel="true"` 的 pending 任务由 subagent-execute 节点负责并行委托
 - execute 遍历 TASK.md 时，遇到 `parallel="true" status="pending"` 的任务块应**跳过**
-- 若所有 pending 任务都是 parallel=true，execute 应视为无事可做，直接走 exit guard 让路由到 subagent-execute
-- determineNode 路由逻辑会优先检测 parallel 任务并路由到 subagent-execute；若 determineNode 路由到了 execute，说明当前没有需要 execute 处理的任务（此时 execute 做空退出，让 guard 重新路由）
+- **全 parallel 任务时 execute 不得空退出**：guard 的 exit 校验（evidence 前置 → 串行 pending 检测 → Output Schema 产物）会 BLOCKED——「空退出」路径在实际 guard 中不可达（2026-08-09 实录确认）。正确路径：
+  1. 正常流程下 determineNode 的 P0 路由会**直接路由到 subagent-execute**（无需经过 execute 空退出）——协调者确认 P0 路由生效（`NODE: subagent-execute`）后直接进入该节点
+  2. 若已进入 execute 且确认无串行任务可做：按正常 exit 流程处理（record execute evidence + 满足产物校验），需要豁免越俎代庖检测时用 `record execute '{"parallelTakeoverApproved":true}'` 显式声明
+- determineNode 路由逻辑会优先检测 parallel 任务并路由到 subagent-execute；若 determineNode 路由到了 execute，说明存在需要 execute 处理的串行任务（此时应执行而非空退出）
 
 ### Prerequisites
 
