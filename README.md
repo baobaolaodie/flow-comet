@@ -135,7 +135,7 @@ Full guide in [CONTRIBUTING.md](CONTRIBUTING.md) — branch model (`feature → 
 
 1. Branch from `dev`: `git checkout dev && git checkout -b feature/<description>`
 2. Edit skills/scripts under `.comet/bundle-drafts/flow-comet/skills/` (authoritative source); TDD with RED scenario first
-3. Run regression: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 87 SCENARIOS PASSED`
+3. Run regression: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 95 SCENARIOS PASSED`
 4. Open a PR into `dev` (merge commit); release PR `dev → main` (squash)
 
 ## License
