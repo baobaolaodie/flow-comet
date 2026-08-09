@@ -33,28 +33,28 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: '权威源回归（§5: 95 场景 + 场景数/代号自检）'
+      - name: '权威源回归 / Authoritative-source regression（§5: 95 scenarios + scenario-count/code self-checks）'
         run: node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
-      - name: '全量脚本语法（§2 命令路径）'
+      - name: '全量脚本语法 / Script syntax（§2 command paths）'
         run: |
           for f in $(git ls-files '*.mjs'); do
             node --check "$f" || { echo "语法错误: $f"; exit 1; }
           done
-      - name: 'BOM 防线'
+      - name: 'BOM 防线 / BOM guard'
         run: |
           for f in $(git ls-files '*.mjs' '*.yaml' '*.json'); do
             if head -c 3 "$f" | od -An -tx1 | grep -qi 'ef bb bf'; then
               echo "BOM 污染: $f"; exit 1
             fi
           done
-      - name: '安装器可复现性（单一权威源纪律：prepare-env 生成 == 权威源）'
+      - name: '安装器可复现性 / Installer reproducibility（prepare-env output == authoritative source）'
         run: |
           node scripts/prepare-env.mjs --target "$RUNNER_TEMP/installed" >/dev/null
           diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/skills "$RUNNER_TEMP/installed/.claude/skills" \
             || { echo "prepare-env 生成结果与权威源不一致（安装器漂移）"; exit 1; }
           diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/rules "$RUNNER_TEMP/installed/.claude/rules" \
             || { echo "prepare-env 生成 rules 与权威源不一致"; exit 1; }
-      - name: 'workflow 文件 yaml 有效性（防未来编辑破坏 CI 自身）'
+      - name: 'workflow yaml 有效性 / Workflow yaml validity'
         run: |
           for f in $(git ls-files '.github/workflows/*.yml' '.github/workflows/*.yaml'); do
             python -c "import yaml,sys; yaml.safe_load(open('$f', encoding='utf-8')); print('OK $f')" \
@@ -139,7 +139,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: '版本全库一致（README×2 徽章 + VERSIONS×2 + CHANGELOG×2 + tag）'
+      - name: '版本全库一致 / Version consistency（README×2 + VERSIONS×2 + CHANGELOG×2 + tag）'
         run: |
           R1=$(grep -oE 'version-[0-9]+\.[0-9]+\.[0-9]+' README.md | head -1 | sed 's/version-//')
           R2=$(grep -oE 'version-[0-9]+\.[0-9]+\.[0-9]+' README-zh.md | head -1 | sed 's/version-//')
@@ -154,13 +154,13 @@ jobs:
             TAG=${GITHUB_REF#refs/tags/v}
             [ "$TAG" = "$R1" ] || { echo "tag v$TAG 与文档版本 $R1 不一致"; exit 1; }
           fi
-      - name: 'CHANGELOG 每版本段含 PR 链接（§4）'
+      - name: 'CHANGELOG PR 链接 / CHANGELOG PR links（§4）'
         run: |
           for f in CHANGELOG.md CHANGELOG-zh.md; do
             awk -v file="$f" '
               /^## \[[0-9]/{ver=$2; has[ver]=0}
               /pull\/[0-9]+/{if (ver) has[ver]=1}
-              END{for (v in has) if (!has[v]) {print file " 版本段缺 PR 链接: " v; exit 1}}' "$f"
+              END{for (v in has) if (!has[v] && v !~ /^\[1\.(0|1|2)\.0\]$/) {print file " 版本段缺 PR 链接: " v; exit 1}}' "$f"
           done
 
   # ── §2 死链 + §3 语言切换器（lychee 自动覆盖）──
@@ -168,7 +168,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: '死链检查'
+      - name: '死链检查 / Dead-link check'
         uses: lycheeverse/lychee-action@v2
         with:
           # 排除: 未合并 PR 404 误报 / claude.ai 防爬 403 误报（GitHub Actions IP 被 Cloudflare 拒，浏览器可访问）

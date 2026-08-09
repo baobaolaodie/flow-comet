@@ -104,6 +104,8 @@ worktree 委托链路修复。([#12](https://github.com/baobaolaodie/flow-comet/
 
 ## [1.2.0] - 2026-08-08
 
+> PR 流程建立前的历史版本——无 PR 链接可引用。
+
 自定义组合 skill（flow-comet-compose）+ 协议参数化 + 非破坏安装器。
 
 ### Added
@@ -131,6 +133,8 @@ worktree 委托链路修复。([#12](https://github.com/baobaolaodie/flow-comet/
 
 ## [1.1.0] - 2026-08-05
 
+> PR 流程建立前的历史版本——无 PR 链接可引用。
+
 change 分支 + PR 审查 + 追加位置纪律 + 文档重写。
 
 ### Added
@@ -151,6 +155,8 @@ change 分支 + PR 审查 + 追加位置纪律 + 文档重写。
 - LESSONS 乱序检测改**分段**：多段编号体系（`## 活跃条目` / `## 已解决条目` 独立编号）不再误报
 
 ## [1.0.0] - 2026-08-04
+
+> PR 流程建立前的历史版本——无 PR 链接可引用。
 
 首个稳定版（8 节点工作流 + 三层防线 + guard 校验体系，经端到端真实项目验证）。
 

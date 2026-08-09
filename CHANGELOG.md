@@ -104,6 +104,8 @@ Installation-guide fixes (init/hook/state fixes + README guidance fixes + indepe
 
 ## [1.2.0] - 2026-08-08
 
+> Historical version from before the PR workflow existed — no PR link available.
+
 Custom skill composition (flow-comet-compose) + protocol parameterization + non-destructive installer.
 
 ### Added
@@ -131,6 +133,8 @@ Custom skill composition (flow-comet-compose) + protocol parameterization + non-
 
 ## [1.1.0] - 2026-08-05
 
+> Historical version from before the PR workflow existed — no PR link available.
+
 Change branches + PR review + append-placement discipline + documentation rewrite.
 
 ### Added
@@ -151,6 +155,8 @@ Change branches + PR review + append-placement discipline + documentation rewrit
 - LESSONS disorder detection split by section: multi-section numbering (`## 活跃条目` / `## 已解决条目` independent numbering) no longer false-positives
 
 ## [1.0.0] - 2026-08-04
+
+> Historical version from before the PR workflow existed — no PR link available.
 
 First stable release (8-node workflow + three defense layers + guard validation, verified end-to-end in real projects).
 
