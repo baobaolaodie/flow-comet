@@ -22,6 +22,8 @@ on:
   push:
     branches: [main, dev]   # dev: post-merge regression backstop; main: post-release backstop
     tags: ['v*']
+  schedule:
+    - cron: '17 3 * * 1'   # 每周一 03:17 UTC——集成金丝雀(防安装器/环境漂移静默失效)
 
 permissions:
   contents: read
@@ -80,11 +82,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: 'workflow yaml 有效性 / Workflow yaml validity'
-        run: |
-          for f in $(git ls-files '.github/workflows/*.yml' '.github/workflows/*.yaml'); do
-            python -c "import yaml,sys; yaml.safe_load(open('$f', encoding='utf-8')); print('OK $f')"               || { echo "yaml 无效 / invalid yaml: $f"; exit 1; }
-          done
+      - name: 'workflow lint / Workflow lint (actionlint)'
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color
       - name: '双语镜像对称 / Bilingual mirror symmetry'
         run: |
           python - <<'EOF'
@@ -152,6 +151,10 @@ jobs:
               if (!body.includes(`- [x] ${it}`) && !body.includes(`- [ ] ${it}`))
                 P.push(`PR body deleted or omitted checkbox "${it.slice(0, 24)}…" (keep unchecked items)`);
             }
+
+            // PR title must follow Conventional Commits (type: subject)
+            const titleConv = /^(feat|fix|docs|chore|test|ci|refactor|perf|build|revert)(\([^)]+\))?: .+/;
+            if (!titleConv.test(pr.title)) P.push(`PR title not Conventional Commits: "${pr.title}"`);
 
             // Zero internal codes in title/body
             const banned = /T-FIX|batch-|D-\d+|P0|dogfood|round\s*\d/;
