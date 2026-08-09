@@ -36,9 +36,11 @@ dev ──PR（squash）──▶ main               （发布分支——历史
 2. **在功能分支上开发**——遵循下方[开发规范](#开发规范)。
 3. **开 PR 合入 `dev`**（base `dev`，head `feat/<描述>`）。**使用仓库 PR 模板**（`.github/PULL_REQUEST_TEMPLATE.md`——改动范围/验证/自查勾选）。PR 描述写明改了什么、为什么、验证证据。**保留完整清单**：涉及项勾 `[x]`、未涉及项留 `[ ]`——**不要删除未勾选项**（清单是 reviewer 判断完整性的依据）。
 4. **获得审核 approve**——需要 1 个 approving review（分支保护）。
-5. **合入 `dev`**——用 **merge commit**（保留 feature 历史）。
-6. **发布 PR**——`dev` 就绪后，开 PR 合入 `main`（base `main`，head `dev`）。用 **squash** 合并——每次发布一条干净提交。
+5. **合入 `dev`**——用 **merge commit**（保留 feature 历史）。`dev` **积累改动**——不要每个改动都发布。
+6. **发布 PR（批次）**——`dev` 积累一批后（一组相关改动，或维护批次），开**一个**发布 PR 合入 `main`（base `main`，head `dev`）。用 **squash** 合并——每个发布批次一条干净提交。
 7. 合并后删除 feature 分支。
+
+**维护批次**：纯文档/清理类改动（无行为影响）可积累在一个分支（如 `docs/maintenance-<日期>`）作为**一个** PR 合入 `dev`——减少 PR 数量且不丢可追溯性。
 
 ## 分支保护（参考）
 
@@ -158,6 +160,16 @@ git push --force-with-lease origin feat/<描述>            # feature 分支允�
 你自己的 feature 分支允许 force push（无保护）；新推送会使旧 approve 失效（dismiss stale reviews），更新后请重新请求审核。
 
 ## 发布流程（维护者）
+
+**发布审批单**——每次发布前向用户呈现以下清单并取得**一次**审批，然后连续执行完整发布（合并发布 PR + 三处发布 + tag），不再逐步询问：
+
+```markdown
+## 发布审批单
+
+- 包含改动：PR 列表 + 每项一句话摘要
+- 验证结果：回归（82 场景）/ 安装副本验证
+- 版本：X.Y.Z（文档批次可不 bump）
+```
 
 每次发布（见 [VERSIONS-zh.md](docs/VERSIONS-zh.md)）：
 
