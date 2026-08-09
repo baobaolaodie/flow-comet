@@ -14,7 +14,7 @@ name: ci
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, dev]   # dev: PR 合并后回归兜底（防合并竞态）；main: 发布后兜底
     tags: ['v*']
 
 permissions:
@@ -112,8 +112,13 @@ jobs:
 
             if (P.length) core.setFailed('DOC-CHECKLIST 违规:\n' + P.join('\n'));
 
-  # ── §2 版本对账 + §4 CHANGELOG PR 链接（发布 PR / push main / tag 全查）──
+  # ── §2 版本对账 + §4 CHANGELOG PR 链接 ──
+  # 仅发布面触发：main push / tag / 发布 PR（base=main）。dev 是开发中间态
+  # （版本号/CHANGELOG 在发布批次才 bump），dev push 跑版本对账会误报。
   release-consistency:
+    if: >-
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')))
+      || (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
