@@ -1,19 +1,19 @@
 ---
-name: 使用问题
-about: 提问工作流的使用方式或澄清行为
+name: 使用问题 / Question
+about: 提问工作流的使用方式或澄清行为 / Ask how to use the workflow or clarify behavior
 title: "[question] "
 labels: question
 ---
 
-## 问题
+## 问题 / Question
 
-<!-- 想问什么 -->
+<!-- 想问什么 / What do you want to ask -->
 
-## 已尝试
+## 已尝试 / What you've tried
 
-<!-- 已尝试的方案或查阅过的文档 -->
+<!-- 已尝试的方案或查阅过的文档 / Approaches tried or docs consulted -->
 
-## 环境（如适用）
+## 环境（如适用）/ Environment (if applicable)
 
-- Node 版本：
-- 安装方式（prepare-env 安装器 / 手动复制）：
+- Node 版本 / Node version：
+- 安装方式 / Install method（prepare-env 安装器 / 手动复制；prepare-env installer / manual copy）：

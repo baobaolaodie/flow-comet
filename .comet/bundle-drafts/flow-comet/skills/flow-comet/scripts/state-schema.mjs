@@ -17,6 +17,10 @@ export const STATE_FIELD_VALIDATORS = [
   { field: 'enablePrReview', check: (v) => typeof v === 'boolean' },
   // T-FIX-14: 分支前缀（init --branch-prefix 可配置，适配仓库自身分支规范；缺省 'change/'）
   { field: 'branchPrefix', check: (v) => typeof v === 'string' },
+  // auto-init-detection: 项目上下文字段（'none' = 用户拒绝初始化；路径 = 用户指定文档）
+  { field: 'ai_context_doc', check: (v) => typeof v === 'string' || v === null },
+  // auto-init-detection: 上次全量初始化扫描时间（ISO 日期字符串或 null）
+  { field: 'last_intel_scan', check: (v) => typeof v === 'string' || v === null },
 ];
 
 // 返回非法字段名数组（空 = 合法）。仅校验存在字段；unknown / 缺失字段一律放行。
