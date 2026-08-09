@@ -13,3 +13,12 @@ docs/internal/
 
 # flow-comet 流程工件（不入库，仓库只跟踪功能代码）
 .specs/
+
+flow-kit/
+
+CLAUDE.md
+# 本地测试集（验证阶梯工具，不随发布分发）
+scripts/reset-dogfood.mjs
+
+# 本地检查工具（gitignore 不随发布）
+scripts/check-codes-local.mjs
