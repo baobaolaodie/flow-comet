@@ -66,6 +66,34 @@ jobs:
             python -c "import yaml,sys; yaml.safe_load(open('$f', encoding='utf-8')); print('OK $f')" \
               || { echo "yaml 无效 / invalid yaml: $f"; exit 1; }
           done
+      - name: '安装冒烟 / Install smoke test'
+        run: |
+          node scripts/prepare-env.mjs --target "$RUNNER_TEMP/smoke" >/dev/null
+          cd "$RUNNER_TEMP/smoke"
+          node .claude/skills/flow-comet/scripts/workflow-state.mjs status | grep -q "no-change" \
+            || { echo "冒烟失败 / smoke failed: status"; exit 1; }
+          node .claude/skills/flow-comet/scripts/workflow-state.mjs init smoke-check --init-skip | grep -q "Initialized" \
+            || { echo "冒烟失败 / smoke failed: init"; exit 1; }
+          node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry open | grep -q "ENTRY OK" \
+            || { echo "冒烟失败 / smoke failed: entry"; exit 1; }
+      - name: '双语镜像对称 / Bilingual mirror symmetry'
+        run: |
+          python - <<'EOF'
+          import io, os
+          pairs = [('README.md','README-zh.md'),('CONTRIBUTING.md','CONTRIBUTING-zh.md'),
+                   ('CHANGELOG.md','CHANGELOG-zh.md'),('docs/INSTALLATION.md','docs/INSTALLATION-zh.md'),
+                   ('docs/USAGE.md','docs/USAGE-zh.md'),('docs/PROTOCOL.md','docs/PROTOCOL-zh.md'),
+                   ('docs/MECHANISM.md','docs/MECHANISM-zh.md'),('docs/TROUBLESHOOTING.md','docs/TROUBLESHOOTING-zh.md'),
+                   ('docs/VERSIONS.md','docs/VERSIONS-zh.md'),('docs/ECOSYSTEM.md','docs/ECOSYSTEM-zh.md')]
+          for en, zh in pairs:
+              if not os.path.isfile(en) or not os.path.isfile(zh):
+                  raise SystemExit('missing bilingual pair: %s / %s' % (en, zh))
+              ne = sum(1 for _ in io.open(en, encoding='utf-8'))
+              nz = sum(1 for _ in io.open(zh, encoding='utf-8'))
+              if abs(ne - nz) > 10:
+                  raise SystemExit('bilingual asymmetry: %s %d vs %s %d' % (en, ne, zh, nz))
+          print('10 bilingual pairs OK')
+          EOF
 
   # ── PR 纪律: 分支规范 + 模板完整 + 零内部代号 / PR policy ──
   pr-policy:
@@ -119,6 +147,19 @@ jobs:
             const banned = /T-FIX|batch-|D-\d+|P0|dogfood|round\s*\d/;
             if (banned.test(pr.title)) P.push(`PR title contains an internal code: "${pr.title}"`);
             if (banned.test(body)) P.push('PR body contains internal codes (T-FIX/batch/D-NN/P0/dogfood/round)');
+
+            // Commit-message convention: Conventional Commits prefix + zero internal codes
+            // (merge commits exempt)
+            const conv = /^(feat|fix|docs|chore|test|ci|refactor|perf|build|revert)(\([^)]+\))?: .+/;
+            const commits = await github.rest.pulls.listCommits({
+              owner: context.repo.owner, repo: context.repo.repo, pull_number: pr.number,
+            });
+            for (const c of commits.data) {
+              const msg = c.commit.message.split('\n')[0];
+              if (/^Merge /.test(msg)) continue;
+              if (!conv.test(msg)) P.push(`commit message not Conventional Commits: "${msg.slice(0, 60)}"`);
+              if (banned.test(msg)) P.push(`commit message contains internal code: "${msg.slice(0, 60)}"`);
+            }
 
             // Zero internal codes in added lines of public files
             // Fork-PR compatibility: head branch lives in the fork (not origin) — skip the diff check then
