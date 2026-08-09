@@ -1,0 +1,154 @@
+# flow-comet CI — DOC-CHECKLIST 机械化（2026-08-10 落地）
+#
+# 映射（每项检查指回已锁规定）：
+#   regression         §5 guard-self-test 全绿（内置：95 场景 + 场景数 17 文件自检 +
+#                     公开产物零代号扫描含 PR/issue 模板）/ §2 命令路径 / 脚本语法 / BOM 防线
+#   pr-policy          §0·5 PR 模板完整性（5 段双语前缀 + 17 勾选项，删除=fail）/ 改动经 feature 分支 /
+#                     dev-main 同步检查 / §1 PR 标题+描述+公开 diff 零代号
+#   release-consistency §2 版本 6 处对账 + tag 对账 / §4 CHANGELOG 每版本段 PR 链接
+#   docs-links         §2 死链 + §3 语言切换器（lychee，排除 pull/N 404 误报）
+#
+# required 时机：首发观察 2~3 轮后设 required（防 CI 自身问题挡发布）。
+
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── §1/§2/§5: 权威源回归 + 场景数/代号自检 + 脚本语法 + BOM 防线 ──
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 权威源回归（§5: 95 场景 + 场景数/代号自检）
+        run: node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
+      - name: 全量脚本语法（§2 命令路径）
+        run: |
+          for f in $(git ls-files '*.mjs'); do
+            node --check "$f" || { echo "语法错误: $f"; exit 1; }
+          done
+      - name: BOM 防线
+        run: |
+          for f in $(git ls-files '*.mjs' '*.yaml' '*.json'); do
+            head -c 3 "$f" | od -An -tx1 | grep -qi 'ef bb bf' && { echo "BOM 污染: $f"; exit 1; }
+          done
+
+  # ── §0·5 PR 纪律 + §1 零代号（PR 维度）──
+  pr-policy:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const { execSync } = require('child_process');
+            const fs = require('fs');
+            const pr = context.payload.pull_request;
+            const isRelease = pr.base.ref === 'main';
+            const P = [];
+
+            // §0·5 改动经 feature 分支（发布 PR head=dev 豁免）
+            if (!isRelease && !/^(feat|fix|docs|chore|hotfix)\//.test(pr.head.ref))
+              P.push(`开发 PR 头分支应带 feat/fix/docs/chore/hotfix 前缀，当前 ${pr.head.ref}`);
+
+            // §0·5 dev-main 同步（发布 PR 前置 + 开发 PR 集成门）
+            const behind = execSync('git rev-list origin/main ^origin/dev')
+              .toString().trim().split('\n').filter(Boolean).length;
+            if (isRelease && behind > 0)
+              P.push(`dev 落后 main ${behind} 个提交——创建发布 PR 前必须执行 dev 同步 main`);
+            if (!isRelease && behind > 0)
+              P.push(`dev 落后 main ${behind} 个提交（上次发布漏同步）——先执行 dev 同步 main 再开发`);
+
+            // §0·5 PR 模板完整性：5 段标题（双语前缀匹配）+ 17 勾选项（双语文本，删除 = fail）
+            const tmpl = fs.readFileSync('.github/PULL_REQUEST_TEMPLATE.md', 'utf8');
+            const body = pr.body ?? '';
+            const SECTION_PAIRS = [
+              ['## 摘要', '## Summary'],
+              ['## 改动范围', '## Scope of Changes'],
+              ['## 验证', '## Verification'],
+              ['## 自查', '## Self-check'],
+              ['## 审查注意点', '## Review Notes'],
+            ];
+            for (const [zh, en] of SECTION_PAIRS)
+              if (!body.includes(zh) && !body.includes(en))
+                P.push(`PR 描述缺少模板段: ${zh} / ${en}`);
+            for (const m of tmpl.matchAll(/^- \[ \] (.+)$/gm)) {
+              const it = m[1].trim(); // 双语文本如 "工作流脚本 / Workflow scripts(...)"
+              if (!body.includes(`- [x] ${it}`) && !body.includes(`- [ ] ${it}`))
+                P.push(`PR 描述删除/遗漏勾选项「${it.slice(0, 24)}…」（不删除未勾选项）`);
+            }
+
+            // §1 标题/描述零代号
+            const banned = /T-FIX|batch-|D-\d+|P0|dogfood|round\s*\d/;
+            if (banned.test(pr.title)) P.push(`PR 标题含过程代号: "${pr.title}"`);
+            if (banned.test(body)) P.push('PR 描述含过程代号（T-FIX/batch/D-NN/P0/dogfood/round）');
+
+            // §1 公开文件 diff 新增行零代号
+            const files = execSync(`git diff --name-only origin/${pr.base.ref}...origin/${pr.head.ref}`)
+              .toString().trim().split('\n').filter(Boolean);
+            const pub = files.filter(f =>
+              /^(README|CONTRIBUTING|CHANGELOG)[^/]*\.md$|^docs\/.+\.md$|^\.github\/.+\.md$/.test(f));
+            for (const f of pub) {
+              const add = execSync(`git diff origin/${pr.base.ref}...origin/${pr.head.ref} -- "${f}"`)
+                .toString().split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).join('\n');
+              if (banned.test(add)) P.push(`公开文档新增行含过程代号: ${f}`);
+            }
+
+            if (P.length) core.setFailed('DOC-CHECKLIST 违规:\n' + P.join('\n'));
+
+  # ── §2 版本对账 + §4 CHANGELOG PR 链接（发布 PR / push main / tag 全查）──
+  release-consistency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 版本全库一致（README×2 徽章 + VERSIONS×2 + CHANGELOG×2 + tag）
+        run: |
+          R1=$(grep -oE 'version-[0-9]+\.[0-9]+\.[0-9]+' README.md | head -1 | sed 's/version-//')
+          R2=$(grep -oE 'version-[0-9]+\.[0-9]+\.[0-9]+' README-zh.md | head -1 | sed 's/version-//')
+          V1=$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' docs/VERSIONS.md | head -1 | tr -d 'v')
+          V2=$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' docs/VERSIONS-zh.md | head -1 | tr -d 'v')
+          C1=$(grep -m1 '^## \[[0-9]' CHANGELOG.md | sed -E 's/## \[([0-9.]+).*/\1/')
+          C2=$(grep -m1 '^## \[[0-9]' CHANGELOG-zh.md | sed -E 's/## \[([0-9.]+).*/\1/')
+          echo "README=$R1/$R2 VERSIONS=$V1/$V2 CHANGELOG=$C1/$C2"
+          [ "$R1" = "$R2" ] && [ "$R1" = "$V1" ] && [ "$R1" = "$V2" ] && [ "$R1" = "$C1" ] && [ "$R1" = "$C2" ] \
+            || { echo "§2 版本全库不一致（发布 checklist ①②）"; exit 1; }
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG=${GITHUB_REF#refs/tags/v}
+            [ "$TAG" = "$R1" ] || { echo "tag v$TAG 与文档版本 $R1 不一致"; exit 1; }
+          fi
+      - name: CHANGELOG 每版本段含 PR 链接（§4）
+        run: |
+          for f in CHANGELOG.md CHANGELOG-zh.md; do
+            awk -v file="$f" '
+              /^## \[[0-9]/{ver=$2; has[ver]=0}
+              /pull\/[0-9]+/{if (ver) has[ver]=1}
+              END{for (v in has) if (!has[v]) {print file " 版本段缺 PR 链接: " v; exit 1}}' "$f"
+          done
+
+  # ── §2 死链 + §3 语言切换器（lychee 自动覆盖）──
+  docs-links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 死链检查
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --no-progress --exclude 'https?://github\.com/baobaolaodie/flow-comet/pull/' README.md README-zh.md CONTRIBUTING.md CONTRIBUTING-zh.md CHANGELOG.md CHANGELOG-zh.md docs/ .github/
