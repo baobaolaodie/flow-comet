@@ -20,7 +20,7 @@ Automatic project-context initialization (init pre-step). ([#30](https://github.
 - **Agent-assisted generation protocol**: `init <id> --init-context` is now a collaboration — the script performs deterministic detection, decision, prompting, and validation, while the agent reads existing documents and probes the codebase to generate a template-aligned `CONTEXT.md` (seven sections, source-attribution citations, accumulated glossary/decisions/defaults preserved); the script validates the seven sections plus key template formats (dated decision entries, metadata fields, glossary table) and records the scan timestamp only after validation passes. A re-run after generation completes the handoff.
 - **Template-aware guidance**: the generation prompt reports whether the flow-kit CONTEXT template is detected and validates section names against it (built-in fallback when the template is missing).
 - **Scenario-count consistency check**: the regression suite now fails when public docs' scenario count drifts from the actual suite size.
-- guard self-test suite expanded to 95 scenarios covering detection prompting, generation guidance, validation pass and fail, placeholder tolerance, and guidance wording.
+- guard self-test suite expanded to 97 scenarios covering detection prompting, generation guidance, validation pass and fail, placeholder tolerance, and guidance wording.
 
 ### Fixed
 
