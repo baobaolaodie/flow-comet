@@ -2045,13 +2045,21 @@ for (const sc of SCENARIOS) {
 
 console.log('RESULT: ' + passed + '/' + SCENARIOS.length + ' scenarios passed');
 
-// 场景数一致性自检（场景数纪律工具化，2026-08-10）：公开文档中的场景数须与 SCENARIOS.length 一致
-// ——漏同步（改场景数没改文档）即 FAIL。仅权威源仓库（含 .comet/bundle-drafts 锚点）执行；
-// 安装副本（目标项目）无 flow-comet 文档，跳过。
+// 文档一致性自检（场景数纪律 + 公开产物零代号纪律工具化，2026-08-10）：
+// ① 场景数：全清单文档（公开 10 + 内部 6 + CLAUDE）须与 SCENARIOS.length 一致（全变体检查）；
+// ② 内部概念：公开文档不得含过程代号（S 编号/T-FIX/batch/D-NN/P0/dogfood/round/内部——历史 CHANGELOG 回归实证）。
+// 仅权威源仓库（含 .comet/bundle-drafts 锚点）执行；安装副本（目标项目）无 flow-comet 文档，跳过。
 const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
 const isAuthoritativeSource = fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'));
 if (isAuthoritativeSource) {
-  const SCENARIO_COUNT_FILES = ['README.md', 'README-zh.md', 'CLAUDE.md'];
+  // ① 场景数全清单（公开双语 + 内部文档 + CLAUDE；全变体：ALL n SCENARIOS / n scenarios / n 场景 / n/n）
+  const SCENARIO_COUNT_FILES = [
+    'README.md', 'README-zh.md', 'CONTRIBUTING.md', 'CONTRIBUTING-zh.md',
+    'docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
+    'docs/VERSIONS.md', 'docs/VERSIONS-zh.md', 'CLAUDE.md',
+    'docs/internal/ARCHITECTURE.md', 'docs/internal/DOC-CHECKLIST.md', 'docs/internal/MECHANISM.md',
+    'docs/internal/next-change-prompt.md', 'docs/internal/ROADMAP.md', 'docs/internal/WORKING-METHOD.md',
+  ];
   for (const rel of SCENARIO_COUNT_FILES) {
     const docPath = path.join(repoRoot, rel);
     try {
@@ -2059,12 +2067,40 @@ if (isAuthoritativeSource) {
       const n = SCENARIOS.length;
       const ok = text.includes('ALL ' + n + ' SCENARIOS PASSED')
         || text.includes(n + ' scenarios')
-        || text.includes(n + ' 场景');
+        || text.includes(n + ' 场景')
+        || text.includes(n + '/' + n);
       if (!ok) throw new Error(rel + ' 场景数未同步（应为 ' + n + '）');
     } catch (e) {
       if (e.code !== 'ENOENT') {
         failures.push({ name: '场景数一致性(' + rel + ')', error: e.message });
         console.error('FAIL: 场景数一致性(' + rel + ')\n' + e.message);
+      }
+    }
+  }
+
+  // ② 公开文档零代号（公开产物纪律——CHANGELOG 历史 S 编号回归的教训，2026-08-10）
+  const PUBLIC_DOCS = [
+    'README.md', 'README-zh.md', 'CONTRIBUTING.md', 'CONTRIBUTING-zh.md',
+    'CHANGELOG.md', 'CHANGELOG-zh.md',
+    'docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
+    'docs/USAGE.md', 'docs/USAGE-zh.md', 'docs/PROTOCOL.md', 'docs/PROTOCOL-zh.md',
+    'docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md', 'docs/VERSIONS.md', 'docs/VERSIONS-zh.md',
+    'docs/ECOSYSTEM.md', 'docs/ECOSYSTEM-zh.md',
+    '.github/PULL_REQUEST_TEMPLATE.md',
+    '.github/ISSUE_TEMPLATE/1-bug_report.md', '.github/ISSUE_TEMPLATE/2-feature_request.md',
+    '.github/ISSUE_TEMPLATE/3-question.md', '.github/ISSUE_TEMPLATE/4-task.md',
+  ];
+  const INTERNAL_CODE_RE = /\bS\d{2}\b|T-FIX|batch-|D-\d+|P0|dogfood|round\s*\d|内部/;
+  for (const rel of PUBLIC_DOCS) {
+    const docPath = path.join(repoRoot, rel);
+    try {
+      const text = fs.readFileSync(docPath, 'utf8');
+      const m = text.match(INTERNAL_CODE_RE);
+      if (m) throw new Error(rel + ' 含过程代号: "' + m[0] + '"');
+    } catch (e) {
+      if (e.code !== 'ENOENT') {
+        failures.push({ name: '公开产物零代号(' + rel + ')', error: e.message });
+        console.error('FAIL: 公开产物零代号(' + rel + ')\n' + e.message);
       }
     }
   }
