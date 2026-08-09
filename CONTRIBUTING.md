@@ -75,9 +75,21 @@ git branch -d hotfix/<description>
 
 - **Runtime**: Node.js ≥ 18 (ESM)
 - **Repo**: clone, then verify the regression baseline runs:
-  `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 82 SCENARIOS PASSED`
+  `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 97 SCENARIOS PASSED`
 - **Authoring environment**: Claude Code (skills/hooks run in Claude Code sessions); the hook is installed via `prepare-env` into your project's `.claude/`
 - **For mechanism work**: read [docs/MECHANISM.md](docs/MECHANISM.md) for the mechanism semantics (behavior layer) before touching scripts
+
+### CI enforcement (no local setup needed)
+
+CI runs automatically on every PR and push — it enforces the repository conventions server-side (regression suite with scenario-count and public-artifact code self-checks, script syntax, BOM guard, installer reproducibility, workflow yaml validity, PR template completeness, version consistency, CHANGELOG PR links, dead links). Nothing to install or configure locally.
+
+Before pushing, the only local pre-check you need is the regression baseline:
+
+```bash
+node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 97 SCENARIOS PASSED
+```
+
+CI handles everything else.
 
 ## Issues (reporting bugs / proposing features)
 
@@ -92,7 +104,7 @@ After the issue is confirmed: bug fixes use a `fix/` branch, features use a `fea
 
 - **Authoritative source**: edit skills/scripts under `.comet/bundle-drafts/flow-comet/skills/` (the single source; `.claude/` copies are install artifacts — update them via `prepare-env`, never by hand)
 - **TDD**: every mechanism fix starts with a RED scenario in `guard-self-test.mjs` (watch it fail for the right reason), then GREEN, then full regression
-- **Regression baseline**: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 82 SCENARIOS PASSED` (mandatory after every change)
+- **Regression baseline**: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 97 SCENARIOS PASSED` (mandatory after every change)
 - **Documentation sync**: behavior-layer docs live in `docs/` (bilingual EN/zh — keep both in sync when a doc changes); implementation details stay out of public docs
 - **Backward compatibility**: old changes/states keep working — progressive WARN over BLOCK
 - **Public docs stay jargon-free**: no codes, numbers, or process shorthand in README/docs/CHANGELOG/commit messages
@@ -167,7 +179,7 @@ Force push is allowed on your own feature branch (no protection); a new push inv
 ## 发布审批单
 
 - 包含改动：PR 列表 + 每项一句话摘要
-- 验证结果：回归（82 场景）/ 安装副本验证
+- 验证结果：回归（97 场景）/ 安装副本验证
 - 版本：X.Y.Z（文档批次可不 bump）
 ```
 

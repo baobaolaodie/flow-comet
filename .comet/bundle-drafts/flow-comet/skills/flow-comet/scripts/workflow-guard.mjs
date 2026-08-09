@@ -2281,8 +2281,11 @@ async function main() {
         // 生产代码任务必填 ## 自检方法，声明 brooks-review 或 builtin-quickcheck
         // 格式兼容：方法名行允许中文前缀/括号说明（如 "方法：brooks-review"），按关键词搜索而非 [a-z-]+ 硬匹配
         // 分隔符用 .?（任意字符）而非 \.?（字面点）：canonical 名 "brooks-review"/"builtin-quickcheck" 是连字符，与既有 /brooks.?review/ 约定一致
-        const methodLine = content.match(/##\s*自检方法\s*\n\s*([^\n]+)/i);
-        const method = methodLine ? /brooks.?review|cache.?brooks|builtin.?quickcheck/i.exec(methodLine[1]) : null;
+        // S97（dogfood 实证）：方法名可能在段内后续行（子代理列表写法）——段内全文搜索而非仅第一行
+        // 段内容截取到下一个段标题（\n## ）或分隔线（\n---）或文件尾（split 处理,避免 JS 无 \Z 的问题）
+        const methodMatch = content.match(/##\s*自检方法\s*\n([\s\S]*)/i);
+        const methodSection = methodMatch ? methodMatch[1].split(/\n##\s|\n---/)[0] : null;
+        const method = methodSection ? /brooks.?review|cache.?brooks|builtin.?quickcheck/i.exec(methodSection) : null;
         if (!method) {
           // 过渡规则：旧格式 SUMMARY 无 ## 自检方法 段——
           // 若全文已声明 brooks-review/cache-brooks/builtin（旧模板行为），WARN 兼容不 BLOCKED；无任何自检声明才 BLOCKED

@@ -1840,6 +1840,236 @@ const SCENARIOS = [
       assertOut(res, 'missing Output Schema artifacts');
     },
   },
+
+  // 84~92: 自动初始化检测（auto-init-detection）——脚本确定性探测/判决/提示 + agent 生成协作
+  // 生成职责（2026-08-10 机制修正）：--init-context 时 CONTEXT 缺失 → INIT-GENERATE 指引（不生成、
+  // 不写 last_intel_scan），由 agent 全量阅读生成；生成后重跑 → 脚本校验 7 段 → 通过写 last_intel_scan。
+  // 84: CONTEXT 缺失 + 有代码上下文 → init 输出 INIT-NEEDED 且不自动生成（基础探测）
+  {
+    name: '84 CONTEXT 缺失 + 有代码 → init 输出 INIT-NEEDED 不生成',
+    run: (dir) => {
+      writeFile(dir, 'package.json', '{"name":"x"}');
+      const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'INIT-NEEDED');
+      if (fs.existsSync(path.join(dir, '.specs', 'CONTEXT.md'))) throw new Error('CONTEXT 不应被自动生成');
+    },
+  },
+
+  // 85: --init-skip → state.ai_context_doc='none'，下次 init 不再提示（拒绝路径）
+  {
+    name: '85 --init-skip 记 none 且下次 init 静默',
+    run: (dir) => {
+      writeFile(dir, 'package.json', '{"name":"x"}');
+      runState(['init', CHANGE_ID, '--init-skip'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const st1 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      if (st1.ai_context_doc !== 'none') throw new Error('ai_context_doc 应为 none');
+      const res2 = runState(['init', CHANGE_ID + '-2'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      if (res2.output.includes('INIT-NEEDED') || res2.output.includes('INIT-HINT')) throw new Error('下次 init 不应再提示');
+    },
+  },
+
+  // 86: CONTEXT 新鲜（last_intel_scan ≤90 天）→ init 零初始化输出（新鲜路径）
+  {
+    name: '86 CONTEXT 新鲜 → init 零初始化输出',
+    run: (dir) => {
+      writeState(dir, { ...baseState('open'), last_intel_scan: new Date(Date.now() - 10 * 864e5).toISOString() });
+      writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n');
+      const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      if (res.output.includes('INIT-NEEDED') || res.output.includes('INIT-HINT')) throw new Error('不应有初始化提示');
+    },
+  },
+
+  // 87: 有 CONTEXT 无扫描记录（旧项目迁移）→ INIT-HINT 文案不得含 null
+  {
+    name: '87 有 CONTEXT 无扫描记录 → INIT-HINT 文案无 null',
+    run: (dir) => {
+      writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n');
+      const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'INIT-HINT');
+      if (res.output.includes('null')) throw new Error('INIT-HINT 不应含 "null"（无扫描记录时用友好文案）');
+    },
+  },
+
+  // 88: CONTEXT 缺失 + --init-context → INIT-GENERATE 指引且不生成、不写 last_intel_scan（生成协作第一步）
+  {
+    name: '88 --init-context 无 CONTEXT → INIT-GENERATE 指引不生成',
+    run: (dir) => {
+      writeFile(dir, 'package.json', '{"name":"x"}');
+      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'INIT-GENERATE');
+      if (fs.existsSync(path.join(dir, '.specs', 'CONTEXT.md'))) throw new Error('CONTEXT 不应由脚本生成（生成职责在 agent）');
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      if (st.last_intel_scan) throw new Error('校验通过前不应写 last_intel_scan');
+    },
+  },
+
+  // 89: CONTEXT 缺失 + 既有 AI 文档 + --init-context → INIT-GENERATE 指引含源文档列表
+  {
+    name: '89 --init-context 指引含源文档列表',
+    run: (dir) => {
+      writeFile(dir, 'CLAUDE.md', '# CLAUDE\n项目约定：使用 kebab-case 命名。\n');
+      writeFile(dir, 'package.json', '{"name":"x"}');
+      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'INIT-GENERATE');
+      assertOut(res, 'CLAUDE.md');
+    },
+  },
+
+  // 90: CONTEXT 缺失 + 代码信号 + --init-context → INIT-GENERATE 指引含代码信号
+  {
+    name: '90 --init-context 指引含代码信号',
+    run: (dir) => {
+      writeFile(dir, 'requirements.txt', 'pytest\n');
+      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'INIT-GENERATE');
+      assertOut(res, '代码信号');
+    },
+  },
+
+  // 91: CONTEXT 已存在且 7 段 + 模板格式完整 + --init-context → INIT-DONE + last_intel_scan 写入（生成协作第二步）
+  {
+    name: '91 CONTEXT 7 段+格式完整 --init-context → INIT-DONE + state 写入',
+    run: (dir) => {
+      writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n## 技术栈\nx\n## 域语言\n| 术语 | 定义 |\n|---|---|\n| 例 | 定义 |\n## 已锁决策\n- [2026-08-01] 决策一\n## 默认偏好\nx\n## 既有抽象索引\nx\n## intel-scan 元数据\n- **last_intel_scan**: x\n- **scanner**: x\n- **下次重扫建议**: x\n');
+      writeFile(dir, 'package.json', '{"name":"x"}');
+      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'INIT-DONE');
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      if (!st.last_intel_scan) throw new Error('校验通过后应写 last_intel_scan');
+    },
+  },
+
+  // 92: CONTEXT 存在但缺段 + --init-context → INIT-VALIDATE-FAILED 重写指引 + 不写 last_intel_scan
+  {
+    name: '92 CONTEXT 缺段 --init-context → 重写指引不写 state',
+    run: (dir) => {
+      writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n');
+      writeFile(dir, 'package.json', '{"name":"x"}');
+      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'INIT-VALIDATE-FAILED');
+      assertOut(res, '重写');
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      if (st.last_intel_scan) throw new Error('校验失败不应写 last_intel_scan');
+    },
+  },
+
+  // 93: CONTEXT 7 段齐全但模板格式不满足（已锁决策无日期前缀）→ 格式校验失败重写指引 + 不写 state
+  {
+    name: '93 CONTEXT 格式不满足模板 → 重写指引不写 state',
+    run: (dir) => {
+      // 7 段齐全但已锁决策条目缺 [YYYY-MM-DD] 日期前缀（模板格式）
+      writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n## 技术栈\nx\n## 域语言\n| 术语 | 定义 |\n|---|---|\n| 例 | 定义 |\n## 已锁决策\n- 决策缺日期前缀\n## 默认偏好\nx\n## 既有抽象索引\nx\n## intel-scan 元数据\n- **last_intel_scan**: x\n- **scanner**: x\n- **下次重扫建议**: x\n');
+      writeFile(dir, 'package.json', '{"name":"x"}');
+      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'INIT-VALIDATE-FAILED');
+      assertOut(res, '日期');
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      if (st.last_intel_scan) throw new Error('格式校验失败不应写 last_intel_scan');
+    },
+  },
+
+  // 94: 新项目骨架 CONTEXT（已锁决策仅占位）→ 占位放行 INIT-DONE（DF-5：占位不是裸条目）
+  {
+    name: '94 新项目占位 CONTEXT → 校验通过 INIT-DONE',
+    run: (dir) => {
+      writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\n新项目骨架\n## 技术栈\nx\n## 域语言\n| 术语 | 定义 |\n|---|---|\n| （待沉淀） | 随 change 逐步补充 |\n## 已锁决策\n- （待沉淀——后续 change 按时间倒序追加）\n## 默认偏好\n- 待补充\n## 既有抽象索引\nx\n## intel-scan 元数据\n- **last_intel_scan**: x\n- **scanner**: x\n- **下次重扫建议**: x\n');
+      writeFile(dir, 'package.json', '{"name":"x"}');
+      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'INIT-DONE');
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      if (!st.last_intel_scan) throw new Error('占位 CONTEXT 校验通过应写 last_intel_scan');
+    },
+  },
+
+  // 95: CONTEXT 已满足模板但无扫描记录 + init 无参数 → 提示"记录扫描时间"（C 文案优化——
+  // agent 生成后未重跑的悬空态，误导性"扫描时间未知/刷新"文案不出现）
+  {
+    name: '95 CONTEXT 就绪无扫描记录 → 提示记录扫描时间',
+    run: (dir) => {
+      writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n## 技术栈\nx\n## 域语言\n| 术语 | 定义 |\n|---|---|\n| 例 | 定义 |\n## 已锁决策\n- [2026-08-01] 决策一\n## 默认偏好\nx\n## 既有抽象索引\nx\n## intel-scan 元数据\n- **last_intel_scan**: x\n- **scanner**: x\n- **下次重扫建议**: x\n');
+      writeFile(dir, 'package.json', '{"name":"x"}');
+      const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, '记录扫描时间');
+      if (res.output.includes('刷新')) throw new Error('CONTEXT 已就绪不应提示"刷新"（应提示记录扫描时间）');
+    },
+  },
+
+  // 96: init 同 id 重跑（.specs/<id>/ 已存在）→ WARN 防护输出且不阻断（F）
+  {
+    name: '96 init 同 id 重跑 → WARN 防护不阻断',
+    run: (dir) => {
+      writeFile(dir, 'package.json', '{"name":"x"}');
+      runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'WARN: change ' + CHANGE_ID + ' 已存在');
+      assertOut(res, '重置节点状态');
+    },
+  },
+
+  // 97~98: dogfood 实证的校验误报修复（2026-08-10）
+  // 97: 自检方法段内后续行声明方法（子代理把方法名写在列表后续行）→ 放行无 WARN
+  // （修复前 guard 正则只匹配段后第一行 → 全文有 cache-brooks 声明 → 误报 BROOKS-LINT WARN = RED）
+  {
+    name: '97 自检方法段后续行声明 → 放行',
+    run: (dir) => {
+      const st = baseState('execute');
+      st.evidence.execute = { summary: 'executed' };
+      st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
+      writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent({
+        method: '## 自检方法\n\n- flow-comet-dev Skill 加载成功\n- 自检：第 1 级 brooks-review 返回占位 → 第 2 级 Read 插件缓存协议文件手动执行（selfReview: cache-brooks）',
+        sixDim: '## 6 维自查\n\n- 功能: 通过（cache-brooks 审查已跑）\n- 性能: 无影响\n- 安全: 无影响\n- 兼容: 通过\n- 可观测: 通过\n- 可维护: 通过',
+      }));
+      const res = runGuard(['exit', 'execute'], dir);
+      assertExit(res, 0);
+      assertNotOut(res, 'BROOKS-LINT WARN');
+    },
+  },
+
+  // 98: handoff changedFiles 含 *-SUMMARY.md（强制产物）→ 不报越界 WARN
+  // （修复前 W2-D 子集校验把强制产物当越界 = RED；真实 commitHash 供 git show 校验）
+  {
+    name: '98 handoff 含 SUMMARY 文件 → 无越界 WARN',
+    run: (dir) => {
+      const g = (args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
+      g(['init', '-q']);
+      g(['config', 'user.email', 't@t']);
+      g(['config', 'user.name', 't']);
+      writeFile(dir, 'test_stats.py', 'def f():\n    pass\n');
+      writeFile(dir, 'T01-SUMMARY.md', '# T01-SUMMARY\n## 做了什么\nx\n');
+      // 只提交指定文件（场景运行器预置的 reference/ 协议文件不入提交集）
+      g(['add', 'test_stats.py', 'T01-SUMMARY.md']);
+      g(['commit', '-qm', 'init']);
+      const hash = g(['rev-parse', 'HEAD']).stdout.trim();
+      const st = baseState('subagent-execute');
+      st.evidence['subagent-execute'] = {
+        handoffRequests: { T01: { writeFiles: ['test_stats.py'] } },
+        handoffResult: {},
+      };
+      writeState(dir, st);
+      const res = runHandoff(['result', 'T01', JSON.stringify({
+        status: 'DONE', taskId: 'T01', commitHash: hash,
+        changedFiles: ['test_stats.py', 'T01-SUMMARY.md'],
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        greenEvidence: { command: 'node --check test_stats.py', output: 'ok' },
+      })], dir);
+      assertExit(res, 0);
+      if (res.output.includes('超出 writeFiles 范围')) throw new Error('SUMMARY 为强制产物不应报越界 WARN');
+    },
+  },
 ];
 
 // ---------- 运行 ----------
@@ -1867,6 +2097,67 @@ for (const sc of SCENARIOS) {
 }
 
 console.log('RESULT: ' + passed + '/' + SCENARIOS.length + ' scenarios passed');
+
+// 文档一致性自检（场景数纪律 + 公开产物零代号纪律工具化，2026-08-10）：
+// ① 场景数：全清单文档（公开 10 + 内部 6 + CLAUDE）须与 SCENARIOS.length 一致（全变体检查）；
+// ② 内部概念：公开文档不得含过程代号（S 编号/T-FIX/batch/D-NN/P0/dogfood/round/内部——历史 CHANGELOG 回归实证）。
+// 仅权威源仓库（含 .comet/bundle-drafts 锚点）执行；安装副本（目标项目）无 flow-comet 文档，跳过。
+const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+const isAuthoritativeSource = fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'));
+if (isAuthoritativeSource) {
+  // ① 场景数全清单（公开双语 + 内部文档 + CLAUDE + PR 模板；全变体：ALL n SCENARIOS / n scenarios / n 场景 / n/n）
+  const SCENARIO_COUNT_FILES = [
+    'README.md', 'README-zh.md', 'CONTRIBUTING.md', 'CONTRIBUTING-zh.md',
+    'docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
+    'docs/VERSIONS.md', 'docs/VERSIONS-zh.md', 'CLAUDE.md', '.github/PULL_REQUEST_TEMPLATE.md',
+    'docs/internal/ARCHITECTURE.md', 'docs/internal/DOC-CHECKLIST.md', 'docs/internal/MECHANISM.md',
+    'docs/internal/next-change-prompt.md', 'docs/internal/ROADMAP.md', 'docs/internal/WORKING-METHOD.md',
+  ];
+  for (const rel of SCENARIO_COUNT_FILES) {
+    const docPath = path.join(repoRoot, rel);
+    try {
+      const text = fs.readFileSync(docPath, 'utf8');
+      const n = SCENARIOS.length;
+      const ok = text.includes('ALL ' + n + ' SCENARIOS PASSED')
+        || text.includes(n + ' scenarios')
+        || text.includes(n + ' 场景')
+        || text.includes(n + '/' + n);
+      if (!ok) throw new Error(rel + ' 场景数未同步（应为 ' + n + '）');
+    } catch (e) {
+      if (e.code !== 'ENOENT') {
+        failures.push({ name: '场景数一致性(' + rel + ')', error: e.message });
+        console.error('FAIL: 场景数一致性(' + rel + ')\n' + e.message);
+      }
+    }
+  }
+
+  // ② 公开文档零代号（公开产物纪律——CHANGELOG 历史 S 编号回归的教训，2026-08-10）
+  const PUBLIC_DOCS = [
+    'README.md', 'README-zh.md', 'CONTRIBUTING.md', 'CONTRIBUTING-zh.md',
+    'CHANGELOG.md', 'CHANGELOG-zh.md',
+    'docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
+    'docs/USAGE.md', 'docs/USAGE-zh.md', 'docs/PROTOCOL.md', 'docs/PROTOCOL-zh.md',
+    'docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md', 'docs/VERSIONS.md', 'docs/VERSIONS-zh.md',
+    'docs/ECOSYSTEM.md', 'docs/ECOSYSTEM-zh.md',
+    '.github/PULL_REQUEST_TEMPLATE.md',
+    '.github/ISSUE_TEMPLATE/1-bug_report.md', '.github/ISSUE_TEMPLATE/2-feature_request.md',
+    '.github/ISSUE_TEMPLATE/3-question.md', '.github/ISSUE_TEMPLATE/4-task.md',
+  ];
+  const INTERNAL_CODE_RE = /\bS\d{2}\b|T-FIX|batch-|D-\d+|P0|dogfood|round\s*\d|内部/;
+  for (const rel of PUBLIC_DOCS) {
+    const docPath = path.join(repoRoot, rel);
+    try {
+      const text = fs.readFileSync(docPath, 'utf8');
+      const m = text.match(INTERNAL_CODE_RE);
+      if (m) throw new Error(rel + ' 含过程代号: "' + m[0] + '"');
+    } catch (e) {
+      if (e.code !== 'ENOENT') {
+        failures.push({ name: '公开产物零代号(' + rel + ')', error: e.message });
+        console.error('FAIL: 公开产物零代号(' + rel + ')\n' + e.message);
+      }
+    }
+  }
+}
 
 // 清理验证：自测套件自身创建的临时目录不留残留
 const residue = createdDirs.filter((d) => fs.existsSync(d));

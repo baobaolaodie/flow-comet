@@ -10,6 +10,28 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号仅记录于 git tag 与本文档；`bundle.yaml` 的 version 保持 1.0.0（与发布流程解耦，见 README「版本与兼容性」）。
 
+## [1.3.0] - 2026-08-10
+
+自动项目上下文初始化（init 前置步骤）。([#30](https://github.com/baobaolaodie/flow-comet/pull/30))
+
+自动项目上下文初始化（init 前置步骤）。
+
+### 新增
+
+- **自动初始化检测**：项目首次使用时，工作流自动检测项目上下文（`CONTEXT.md`）是否存在，缺失时提示初始化——检测到既有 AI 上下文文档（如 `CLAUDE.md` / `AGENTS.md`）会读取并整合（带出处标注，**绝不修改既有文件**）；上下文已存在且新鲜的项目完全静默。无需记忆任何独立命令。
+- **agent 协作生成协议**：`init <id> --init-context` 改为协作模式——脚本负责确定性探测/判决/提示/校验，agent 全量阅读既有文档并探测代码库，生成模板对齐的 `CONTEXT.md`（七段结构 + 出处标注，既有术语/决策/默认行为**保留**）；脚本校验七段结构与模板关键格式（带日期决策条目/元数据字段/术语表），校验通过后才记录扫描时间——生成后重跑一次即完成交接。
+- **模板感知指引**：生成提示会报告是否检测到 flow-kit 的 CONTEXT 模板，段名按模板校验（模板缺失时回退内置基准）。
+- **场景数一致性自检**：回归套件在公开文档场景数与实际套件规模漂移时失败。
+- guard 自测套件扩展至 95 场景（覆盖：提示不生成 / 生成指引 / 校验通过与失败 / 占位放行 / 指引文案）。
+
+### 修复
+
+- 无扫描记录（旧项目）时的新鲜度提示不再显示"null 天"——改为指向精确的下一步动作。
+- 刷新项目上下文时保留既有 CONTEXT 的累积内容（术语/已锁决策/默认行为），不再覆盖丢失。
+- 新项目骨架 CONTEXT（占位段）通过校验，不再被拒绝。
+- 对已存在的 change id 重跑 `init` 时先警告再重置（防误操作丢进度）。
+- agent 生成的 CONTEXT 条目格式错误（如反引号包裹日期）会被格式校验拦截并给出精确的重写提示。
+
 ## [1.2.4] - 2026-08-09
 
 文档与消息清理——公开内容统一为纯描述语言。
@@ -31,7 +53,7 @@ worktree 委托链路修复。([#12](https://github.com/baobaolaodie/flow-comet/
 - **WARN COUNT 汇总行**：entry/exit 输出末尾追加 `WARN COUNT: N`（不改变既有输出）
 - **空退出文档-实现一致化**：execute SKILL 不再声称「空退出」路径（guard 实际三层 BLOCKED：evidence → 串行 pending → 产物）；文档改为正确路径（直接路由 subagent-execute / 显式 `parallelTakeoverApproved` 豁免）
 - **委托前检查清单**：subagent-execute SKILL 强制委托前检查（git status / HEAD / 内联上下文）+ Red Flag；dirty-worktree 协议标注为委托前必做
-- guard 自测套件扩展至 82 场景（S79~S83；RED→GREEN 正确失败原因，独立验证者 24 条独立构造断言复验）
+- guard 自测套件扩展至 82 场景（RED→GREEN 正确失败原因，独立验证者 24 条独立构造断言复验）
 
 ### Changed
 
@@ -46,7 +68,7 @@ worktree 委托链路修复。([#12](https://github.com/baobaolaodie/flow-comet/
 - **brooks-lint 两级降级**：Skill 工具仅返回 "Launching skill" 占位时（worktree 子代理 skill 路由不稳定——插件执行体可能未注入），子代理 **Read 插件缓存协议文件手动执行完整 brooks 审查**（`selfReview: cache-brooks`），之后才降级内置 R1~R6 快查——加载失败时审查质量不降级
 - **guard 校验降级证据**：`builtin-quickcheck` 声明必须同时含不可用原因**和**缓存尝试证据（缺任一 → 渐进 `BROOKS-LINT WARN`，不 BLOCK）
 - **guard 识别 `cache-brooks`**：方法行/全文/6 维三处正则更新——干净声明放行无 WARN（此前会被误 BLOCK）
-- guard 自测套件扩展至 77 场景（S76/S77/S78：builtin 证据校验 + cache-brooks 接受；RED→GREEN 正确失败原因，两轮独立验证者复验）
+- guard 自测套件扩展至 77 场景（builtin 证据校验 + cache-brooks 接受；RED→GREEN 正确失败原因，两轮独立验证者复验）
 
 ### Changed
 
@@ -82,6 +104,8 @@ worktree 委托链路修复。([#12](https://github.com/baobaolaodie/flow-comet/
 
 ## [1.2.0] - 2026-08-08
 
+> PR 流程建立前的历史版本——无 PR 链接可引用。
+
 自定义组合 skill（flow-comet-compose）+ 协议参数化 + 非破坏安装器。
 
 ### Added
@@ -109,6 +133,8 @@ worktree 委托链路修复。([#12](https://github.com/baobaolaodie/flow-comet/
 
 ## [1.1.0] - 2026-08-05
 
+> PR 流程建立前的历史版本——无 PR 链接可引用。
+
 change 分支 + PR 审查 + 追加位置纪律 + 文档重写。
 
 ### Added
@@ -129,6 +155,8 @@ change 分支 + PR 审查 + 追加位置纪律 + 文档重写。
 - LESSONS 乱序检测改**分段**：多段编号体系（`## 活跃条目` / `## 已解决条目` 独立编号）不再误报
 
 ## [1.0.0] - 2026-08-04
+
+> PR 流程建立前的历史版本——无 PR 链接可引用。
 
 首个稳定版（8 节点工作流 + 三层防线 + guard 校验体系，经端到端真实项目验证）。
 

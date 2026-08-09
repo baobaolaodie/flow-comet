@@ -27,3 +27,5 @@
 | `WARN COUNT: N` | summary line on entry/exit — N warns were emitted this call | review each WARN above this line |
 | `Unexpected token ... is not valid JSON` (state) | state file carries a UTF-8 BOM or corrupted content | rewrite the state file without BOM (scripts tolerate BOM since 1.2.1) |
 | `PreToolUse:Write hook error: ... non-blocking` (claude -p) | SDK CLI mode downgrades hook exit codes to non-blocking | expected in `claude -p`; main TUI session blocks writes (exit 2) |
+| `INIT-NEEDED: 项目上下文（CONTEXT.md）尚未初始化` | first use in a project — no project context yet | run `init <id> --init-context` to generate it (reads existing AI-context docs with attribution; ~15-30k tokens, first use only), or `--init-skip` to record the skip and stay silent on future inits |
+| `INIT-HINT: 上次扫描已 X 天` | context exists but the last scan is older than 90 days | optional — rerun `init <id> --init-context` to refresh; not required |

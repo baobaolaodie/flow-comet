@@ -53,12 +53,24 @@ hook blocking 语义：PreToolUse hook 的 exit 2（blocking——阻止工具�
 
 ## 6. guard 自测套件（作者回归基线）
 
-`scripts/guard-self-test.mjs`：**82 场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景）——作者每次改动后的回归基线（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
+`scripts/guard-self-test.mjs`：**97 场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——作者每次改动后的回归基线（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
 
 ```bash
 node .claude/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 82 SCENARIOS PASSED
+# → ALL 97 SCENARIOS PASSED
 ```
+
+## 6·5 自动初始化检测（init 前置步骤）
+
+`init` 时工作流自动检测项目上下文（`.specs/CONTEXT.md`）是否存在，按 A~F 判决：
+
+- **A/B**：已记录上下文决策或上下文新鲜（≤ 90 天）→ 完全静默
+- **C**：上下文存在但上次扫描超过 90 天 → 仅提示（不强制）
+- **D**：无上下文 + 检测到既有 AI 上下文文档（CLAUDE.md / AGENTS.md / .cursor / .windsurf / Copilot / Cline）→ 提示列出；同意后读取并整合（出处标注 `来自 <doc>:<line>` + 源文档段）——**绝不修改既有文件**
+- **E**：无上下文 + 有代码 → 提示；同意后全量生成（依赖/目录探测填充技术栈与抽象索引段）
+- **F**：greenfield（无代码上下文）→ 提示；同意后生成骨架
+
+显式参数授权（无阻塞提示，无头兼容）：`--init-context` 执行全量生成（约 15-30k tokens，仅首次，提示中如实告知）；`--init-skip` 记录 `ai_context_doc: none` 并静默后续提示。项目级字段（`ai_context_doc` / `last_intel_scan`）跨 change 保留；state-schema 校验（fail-closed，旧 state 缺省为 null）。
 
 ## 设计原理
 
