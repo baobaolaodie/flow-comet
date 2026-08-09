@@ -45,9 +45,29 @@ dev ──PR(squash)──▶ main               (release branch — clean histo
 | Rule | `main` | `dev` |
 |------|--------|-------|
 | Require pull request reviews | ✅ (1 approve) | ✅ (1 approve) |
-| Block force pushes | ✅ | ❌ allowed (integration rebases) |
+| Block force pushes | ✅ | ✅ |
 | Block deletions | ✅ | ✅ |
 | Dismiss stale reviews | ✅ | ✅ |
+
+**Dev syncs main** (after each new squash commit on `main`):
+
+```bash
+git checkout dev
+git merge --no-ff main -m "sync: main → dev（<summary>）"
+git push origin dev
+```
+
+**Hotfix fast path** (production emergency fix, independent of the dev release cadence):
+
+```bash
+git checkout main
+git checkout -b hotfix/<description>
+# fix → commit (fix: subject) → test
+# merge straight into main (merge commit) → sync dev
+git checkout main && git merge --no-ff hotfix/<description>
+git checkout dev && git merge --no-ff main -m "sync: main → dev（hotfix <description>）"
+git branch -d hotfix/<description>
+```
 
 ## Development setup
 
