@@ -35,7 +35,7 @@ dev ──PR(squash)──▶ main               (release branch — clean histo
 
 2. **Develop** on the feature branch — follow the [Development standards](#development-standards) below.
 3. **Open a PR** into `dev` (base `dev`, head `feat/<description>`). **Use the repository PR template** (`.github/PULL_REQUEST_TEMPLATE.md` — scope / verification / self-check checklists). Fill in what changed, why, and verification evidence. **Keep the full checklist visible**: mark involved items `[x]` and leave non-involved items `[ ]` — do not delete unchecked items (the checklist is the reviewer's completeness signal).
-4. **Get review approval** — one approving review is required (branch protection).
+4. **Get review approval** — one approving review is required (branch protection). The approving reviewer is the maintainer / user — **the PR author cannot approve their own PR** (GitHub restriction). **Merge only after the user has reviewed and approved** — present the PR (link + summary + verification) to the user first; never self-merge with admin bypass.
 5. **Merge into `dev`** — **merge commit** (preserves feature history). `dev` **accumulates** changes — do not release after every change.
 6. **Release PR (batched)** — when `dev` has accumulated a batch (a set of related changes, or a maintenance batch), open **one** release PR into `main` (base `main`, head `dev`). Merge with **squash** — one clean commit per release batch.
 7. After merge, delete the feature branch.
