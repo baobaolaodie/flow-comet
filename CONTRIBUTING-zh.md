@@ -26,7 +26,7 @@ dev ──PR（squash）──▶ main               （发布分支——历史
 
 ## PR 流程
 
-1. **从 `dev` 创建功能分支**（前缀 `feat/`；bug 修复用 `fix/`）：
+1. **从 `dev` 创建功能分支**（前缀 `feat/`；bug 修复用 `fix/`）——**所有改动（含文档）必须经 feature 分支，禁止直接 commit 到 `dev`**：
 
    ```bash
    git checkout dev
@@ -34,7 +34,7 @@ dev ──PR（squash）──▶ main               （发布分支——历史
    ```
 
 2. **在功能分支上开发**——遵循下方[开发规范](#开发规范)。
-3. **开 PR 合入 `dev`**（base `dev`，head `feat/<描述>`）。PR 描述写明：改了什么、为什么、验证证据。
+3. **开 PR 合入 `dev`**（base `dev`，head `feat/<描述>`）。**使用仓库 PR 模板**（`.github/PULL_REQUEST_TEMPLATE.md`——改动范围/验证/自查勾选）。PR 描述写明改了什么、为什么、验证证据。**保留完整清单**：涉及项勾 `[x]`、未涉及项留 `[ ]`——**不要删除未勾选项**（清单是 reviewer 判断完整性的依据）。
 4. **获得审核 approve**——需要 1 个 approving review（分支保护）。
 5. **合入 `dev`**——用 **merge commit**（保留 feature 历史）。
 6. **发布 PR**——`dev` 就绪后，开 PR 合入 `main`（base `main`，head `dev`）。用 **squash** 合并——每次发布一条干净提交。
