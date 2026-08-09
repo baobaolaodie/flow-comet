@@ -11,7 +11,7 @@ Complete the `review` Node for `flow-comet`.
 
 Responsibility: 4 轮审查（spec 合规 + 代码质量 + UI 视觉 + 可选）。生成 REVIEW.md。
 
-This node performs a structured multi-round review of the implemented change, checking spec compliance, code quality across 6 decay dimensions, UI visual consistency (frontend only), and optional tech debt assessment. It produces REVIEW.md and generates fix tasks (T-FIX-NN) for any Critical or Major findings. The review node is the quality gate before integration — nothing enters verify without passing this node's checks.
+This node performs a structured multi-round review of the implemented change, checking spec compliance, code quality across 6 decay dimensions, UI visual consistency (frontend only), and optional tech debt assessment. It produces REVIEW.md and generates numbered fix tasks for any Critical or Major findings. The review node is the quality gate before integration — nothing enters verify without passing this node's checks.
 
 ## Guidance
 
@@ -86,7 +86,7 @@ This node performs a structured multi-round review of the implemented change, ch
    - Major (should fix: design issues, significant regression)
    - Minor (optional: naming, style, small refactor)
 
-8. **Generate fix tasks**: For all Critical and decided-to-fix Major findings, append to `.specs/<change-id>/TASK.md` as `T-FIX-NN` with full 7 fields — 追加到 TASK.md 的 `## Fix 任务` 段内（**禁止文件尾追加**）, then trigger return to execute node.
+8. **Generate fix tasks**: For all Critical and decided-to-fix Major findings, append to `.specs/<change-id>/TASK.md` as numbered fix tasks with full 7 fields — 追加到 TASK.md 的 `## Fix 任务` 段内（**禁止文件尾追加**）, then trigger return to execute node.
 
 The full review protocol, templates, and checklists are in:
 - `flow-kit/prompts/6-review.md` (REVIEW phase)
@@ -144,7 +144,7 @@ Schema: `flowkit.review.v1`
 | Schema ID | Artifact Kind | Required | Path |
 |-----------|--------------|----------|------|
 | `review-doc` | file | yes | `.specs/<change-id>/REVIEW.md` |
-| `fix-tasks` | file | conditional | `.specs/<change-id>/TASK.md` (T-FIX-NN appended) |
+| `fix-tasks` | file | conditional | `.specs/<change-id>/TASK.md` (numbered fix tasks appended) |
 
 Evidence: `review-summary` (required)
 

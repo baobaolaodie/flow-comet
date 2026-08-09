@@ -68,7 +68,7 @@ This node finalizes a completed change by extracting reusable lessons from the d
 3. 按用户确认的交付方式 push / 建 PR（如用 git 流水线）
 4. 归档操作（移动文件）必须用户确认后才执行（不可逆）
 
-### 分支收尾（branchMode=true 时，批次 E）
+### 分支收尾（branchMode=true 时）
 
 分支模式下（`branchMode=true`，git 仓库 + init 已建 `change/<id>` 分支）在完成上述归档提交后执行收尾：
 
