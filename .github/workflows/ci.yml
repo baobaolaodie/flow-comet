@@ -161,17 +161,21 @@ jobs:
             if (banned.test(pr.title)) P.push(`PR title contains a process code: "${pr.title}"`);
             if (banned.test(body)) P.push('PR body contains process codes (T-FIX/batch/D-NN/P0/dogfood/round)');
 
-            // Commit-message convention: Conventional Commits prefix + zero internal codes
-            // (merge commits exempt)
-            const conv = /^(feat|fix|docs|chore|test|ci|refactor|perf|build|revert)(\([^)]+\))?: .+/;
-            const commits = await github.rest.pulls.listCommits({
-              owner: context.repo.owner, repo: context.repo.repo, pull_number: pr.number,
-            });
-            for (const c of commits.data) {
-              const msg = c.commit.message.split('\n')[0];
-              if (/^Merge /.test(msg)) continue;
-              if (!conv.test(msg)) P.push(`commit message not Conventional Commits: "${msg.slice(0, 60)}"`);
-              if (banned.test(msg)) P.push(`commit message contains a process code: "${msg.slice(0, 60)}"`);
+            // Commit-message convention: Conventional Commits prefix + zero process codes
+            // Development PRs only — a release PR (dev -> main) carries the accumulated
+            // history of past batches (already reviewed/merged under their own PRs);
+            // rewriting history is not an option, so those commits are not re-audited.
+            if (!isRelease) {
+              const conv = /^(feat|fix|docs|chore|test|ci|refactor|perf|build|revert)(\([^)]+\))?: .+/;
+              const commits = await github.rest.pulls.listCommits({
+                owner: context.repo.owner, repo: context.repo.repo, pull_number: pr.number,
+              });
+              for (const c of commits.data) {
+                const msg = c.commit.message.split('\n')[0];
+                if (/^Merge /.test(msg)) continue;
+                if (!conv.test(msg)) P.push(`commit message not Conventional Commits: "${msg.slice(0, 60)}"`);
+                if (banned.test(msg)) P.push(`commit message contains a process code: "${msg.slice(0, 60)}"`);
+              }
             }
 
             // Zero internal codes in added lines of public files
