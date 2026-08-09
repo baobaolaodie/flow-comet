@@ -53,29 +53,38 @@ jobs:
               echo "BOM 污染 / BOM in: $f"; exit 1
             fi
           done
+
+  # ── 安装器: 可复现性 + 安装后可用性冒烟 / Installer ──
+  installer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
       - name: '安装器可复现性 / Installer reproducibility'
         run: |
           node scripts/prepare-env.mjs --target "$RUNNER_TEMP/installed" >/dev/null
-          diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/skills "$RUNNER_TEMP/installed/.claude/skills" \
-            || { echo "安装器漂移 / prepare-env output differs from authoritative source"; exit 1; }
-          diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/rules "$RUNNER_TEMP/installed/.claude/rules" \
-            || { echo "rules 与权威源不一致 / prepare-env rules differ from authoritative source"; exit 1; }
-      - name: 'workflow yaml 有效性 / Workflow yaml validity'
-        run: |
-          for f in $(git ls-files '.github/workflows/*.yml' '.github/workflows/*.yaml'); do
-            python -c "import yaml,sys; yaml.safe_load(open('$f', encoding='utf-8')); print('OK $f')" \
-              || { echo "yaml 无效 / invalid yaml: $f"; exit 1; }
-          done
+          diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/skills "$RUNNER_TEMP/installed/.claude/skills"             || { echo "安装器漂移 / prepare-env output differs from authoritative source"; exit 1; }
+          diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/rules "$RUNNER_TEMP/installed/.claude/rules"             || { echo "rules 与权威源不一致 / prepare-env rules differ from authoritative source"; exit 1; }
       - name: '安装冒烟 / Install smoke test'
         run: |
           node scripts/prepare-env.mjs --target "$RUNNER_TEMP/smoke" >/dev/null
           cd "$RUNNER_TEMP/smoke"
-          node .claude/skills/flow-comet/scripts/workflow-state.mjs status | grep -q "no-change" \
-            || { echo "冒烟失败 / smoke failed: status"; exit 1; }
-          node .claude/skills/flow-comet/scripts/workflow-state.mjs init smoke-check --init-skip | grep -q "Initialized" \
-            || { echo "冒烟失败 / smoke failed: init"; exit 1; }
-          node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry open | grep -q "ENTRY OK" \
-            || { echo "冒烟失败 / smoke failed: entry"; exit 1; }
+          node .claude/skills/flow-comet/scripts/workflow-state.mjs status | grep -q "no-change"             || { echo "冒烟失败 / smoke failed: status"; exit 1; }
+          node .claude/skills/flow-comet/scripts/workflow-state.mjs init smoke-check --init-skip | grep -q "Initialized"             || { echo "冒烟失败 / smoke failed: init"; exit 1; }
+          node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry open | grep -q "ENTRY OK"             || { echo "冒烟失败 / smoke failed: entry"; exit 1; }
+
+  # ── 质量: workflow 配置有效性 + 双语镜像对称 / Quality ──
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 'workflow yaml 有效性 / Workflow yaml validity'
+        run: |
+          for f in $(git ls-files '.github/workflows/*.yml' '.github/workflows/*.yaml'); do
+            python -c "import yaml,sys; yaml.safe_load(open('$f', encoding='utf-8')); print('OK $f')"               || { echo "yaml 无效 / invalid yaml: $f"; exit 1; }
+          done
       - name: '双语镜像对称 / Bilingual mirror symmetry'
         run: |
           python - <<'EOF'
@@ -94,6 +103,7 @@ jobs:
                   raise SystemExit('bilingual asymmetry: %s %d vs %s %d' % (en, ne, zh, nz))
           print('10 bilingual pairs OK')
           EOF
+
 
   # ── PR 纪律: 分支规范 + 模板完整 + 零内部代号 / PR policy ──
   pr-policy:
