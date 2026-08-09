@@ -26,7 +26,7 @@ dev ──PR(squash)──▶ main               (release branch — clean histo
 
 ## Pull-request workflow
 
-1. **Create a feature branch** from `dev` (prefix `feat/`, or `fix/` for bug fixes):
+1. **Create a feature branch** from `dev` (prefix `feat/`, or `fix/` for bug fixes) — **all changes (including documentation) must go through a feature branch; never commit directly to `dev`**:
 
    ```bash
    git checkout dev
@@ -34,7 +34,7 @@ dev ──PR(squash)──▶ main               (release branch — clean histo
    ```
 
 2. **Develop** on the feature branch — follow the [Development standards](#development-standards) below.
-3. **Open a PR** into `dev` (base `dev`, head `feat/<description>`). Fill in the PR description: what changed, why, verification evidence.
+3. **Open a PR** into `dev` (base `dev`, head `feat/<description>`). **Use the repository PR template** (`.github/PULL_REQUEST_TEMPLATE.md` — scope / verification / self-check checklists). Fill in what changed, why, and verification evidence. **Keep the full checklist visible**: mark involved items `[x]` and leave non-involved items `[ ]` — do not delete unchecked items (the checklist is the reviewer's completeness signal).
 4. **Get review approval** — one approving review is required (branch protection).
 5. **Merge into `dev`** — **merge commit** (preserves feature history).
 6. **Release PR** — when `dev` is ready, open a PR into `main` (base `main`, head `dev`). Merge with **squash** — one clean commit per release.
