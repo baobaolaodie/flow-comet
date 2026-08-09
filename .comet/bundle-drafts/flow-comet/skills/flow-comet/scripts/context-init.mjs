@@ -102,10 +102,22 @@ export function classify(probe, state) {
 }
 
 // 输出提示（公开描述性文案；INIT-NEEDED 含预算说明与参数指引）
-export function printDetection(probe, verdict, out = console) {
+// C 优化（2026-08-10）：CONTEXT 已满足模板但无扫描记录（agent 生成后未重跑）→
+// 提示精准动作（记录扫描时间）而非误导性的"刷新"文案。
+export async function printDetection(runRoot, probe, verdict, out = console) {
   if (verdict === 'skip') return;
   if (verdict === 'hint') {
-    out.log(`INIT-HINT: 项目上下文（CONTEXT.md）已存在但上次扫描已 ${probe.lastScanDays} 天。可重跑全量刷新：init <change-id> --init-context（可选，不强制）。`);
+    // DF-1: 无扫描记录（旧项目迁移，lastScanDays=null）时不拼 null 进文案
+    const freshness = probe.lastScanDays === null ? '上次扫描时间未知' : `上次扫描已 ${probe.lastScanDays} 天`;
+    if (probe.lastScanDays === null) {
+      // C: CONTEXT 已满足模板（agent 生成后未重跑）→ 精准指引；不满足 → 刷新/重写指引
+      const { missingSections, formatIssues } = await validateContext(runRoot);
+      if (missingSections.length === 0 && formatIssues.length === 0) {
+        out.log('INIT-HINT: 项目上下文（CONTEXT.md）已就绪（7 段 + 模板格式校验通过）但尚未记录扫描时间。运行 init <change-id> --init-context 记录扫描时间即可（此后 90 天内不再提示）。');
+        return;
+      }
+    }
+    out.log(`INIT-HINT: 项目上下文（CONTEXT.md）已存在但${freshness}。可重跑全量刷新：init <change-id> --init-context（可选，不强制）。`);
     return;
   }
   let detail = '';
@@ -116,171 +128,124 @@ export function printDetection(probe, verdict, out = console) {
   out.log(`INIT-NEEDED: 项目上下文（CONTEXT.md）尚未初始化${skeletonNote}。${detail ? '\n' + detail : ''}\n初始化将：读取既有文档并整合（带出处标注）+ 全量代码探测，生成结构化的项目上下文。\n成本：约 15-30k tokens（仅首次）。同意请重跑：init <change-id> --init-context；拒绝：--init-skip。`);
 }
 
-// 读取文档关键行（全量阅读后提取含约定/规范/命名/决策等关键词的行，标注出处）
-async function readDocLines(root, rel) {
-  const full = path.join(root, rel);
+// CONTEXT 模板 7 段标题（校验基准——agent 生成后脚本校验结构完整性）
+// 2026-08-10 改进：段清单从 flow-kit/templates/CONTEXT.md 解析派生（括号前前缀），
+// 模板缺失/解析不到时 fallback 内置（对齐 C2 段名校验模板派生模式，消灭手抄漂移）。
+const CONTEXT_SECTIONS_FALLBACK = [
+  '## 项目概要',
+  '## 技术栈',
+  '## 域语言',
+  '## 已锁决策',
+  '## 默认偏好',
+  '## 既有抽象索引',
+  '## intel-scan 元数据',
+];
+
+// 模板存在性探测：返回 { exists, path }——flow-kit 是否安装在目标项目
+export async function probeTemplate(runRoot) {
+  const p = path.join(runRoot, 'flow-kit', 'templates', 'CONTEXT.md');
+  try { await fs.access(p); return { exists: true, path: p }; } catch { return { exists: false, path: p }; }
+}
+
+// 从模板派生 7 段标题清单（`## 名称（后缀）` → `## 名称` 前缀）；模板缺失/解析失败返回 null
+async function deriveSections(runRoot) {
+  const { exists, path: p } = await probeTemplate(runRoot);
+  if (!exists) return null;
   try {
-    const text = await fs.readFile(full, 'utf8');
-    return text.split('\n').map((l, i) => ({ line: i + 1, text: l }));
-  } catch { return []; }
+    const text = await fs.readFile(p, 'utf8');
+    const sections = [...text.matchAll(/^## ([^\n(（]+)/gm)]
+      .map((m) => m[1].trim())
+      .filter((s) => s.length > 0 && s.length <= 30);
+    return sections.length >= 7 ? sections : null;
+  } catch { return null; }
 }
 
-const KEYWORD_RE = /约定|规范|命名|决策|禁用|禁止|风格|策略|结构|目录|依赖|框架|部署/;
+// 校验段清单（模板派生优先，fallback 内置）
+async function contextSections(runRoot) {
+  const derived = await deriveSections(runRoot);
+  return derived ?? CONTEXT_SECTIONS_FALLBACK;
+}
 
-// 全量初始化：读既有文档 → 整合（出处标注）→ 代码探测 → 生成 CONTEXT.md（模板 7 段）
-// 返回 { state 更新字段（last_intel_scan）由调用方写回 }；生成失败抛错（fail-closed）
-export async function runFullInit(runRoot, probe) {
-  const sections = [];
-  const sources = [];
+// 模板关键格式检查（flow-kit/templates/CONTEXT.md 基准——段存在时校验其内格式，确定性检查）
+const CONTEXT_FORMAT_CHECKS = [
+  {
+    name: '已锁决策条目日期前缀',
+    applies: (t) => t.includes('## 已锁决策'),
+    // 段内列表条目须带日期 `- [20xx-xx-xx]`；占位条目（[xxx] 形态/待沉淀类/模板尖括号）放行——
+    // 新项目骨架（无历史决策）不应被格式校验拒绝（DF-5）。
+    passes: (t) => {
+      const seg = (t.split('## 已锁决策')[1] ?? '').split('\n##')[0];
+      const items = seg.split('\n').filter((l) => /^\s*-\s+/.test(l));
+      if (items.length === 0) return true; // 空段放行
+      const bare = items.filter((l) => {
+        if (/-\s+\[20\d\d-\d\d-\d\d\]/.test(l)) return false; // 真实日期条目
+        if (/-\s+\[[^\]]*\]/.test(l)) return false;            // [xxx] 形态（含模板占位 [YYYY-MM-DD]）
+        if (/-\s+（?(待沉淀|待补充|待写入)|<[^>]+>/.test(l)) return false; // 中文占位 / 模板尖括号
+        return true; // 裸条目（无日期无占位形态）
+      });
+      return bare.length === 0;
+    },
+    hint: '模板格式 `- [YYYY-MM-DD] 决策 — 来自 @...`',
+  },
+  {
+    name: 'intel-scan 元数据三字段',
+    applies: (t) => t.includes('## intel-scan 元数据'),
+    passes: (t) => t.includes('**last_intel_scan**') && t.includes('**scanner**') && t.includes('**下次重扫建议**'),
+    hint: '模板字段 last_intel_scan / scanner / 下次重扫建议',
+  },
+  {
+    name: '域语言表格表头',
+    applies: (t) => t.includes('## 域语言'),
+    passes: (t) => /\|\s*术语\s*\|\s*定义\s*\|/.test(t),
+    hint: '模板表格 `| 术语 | 定义 |`',
+  },
+];
 
-  // 1. 源文档段（顶部）
-  const allDocs = [...probe.aiDocs, ...probe.projectDocs];
-  if (allDocs.length > 0) {
-    sources.push('## 源文档');
-    sources.push('');
-    sources.push('> 以下既有文档的关键决策已整合进本文件对应段（出处标注 `来自 <doc>:<line>`）；原文档保持不动。');
-    for (const d of allDocs) sources.push(`- \`${d}\``);
-    sources.push('');
-  }
-
-  // 2. 既有文档整合（全量阅读 → 关键行 → 对应段）
-  const terms = [];
-  const decisions = [];
-  const prefs = [];
-  const naming = [];
-  const forbidden = [];
-  for (const doc of allDocs) {
-    const lines = await readDocLines(runRoot, doc);
-    for (const l of lines) {
-      if (!KEYWORD_RE.test(l.text)) continue;
-      const t = l.text.trim();
-      if (!t || t.startsWith('#') || t.startsWith('>') || t.startsWith('---')) continue;
-      const cite = `（来自 \`${doc}:${l.line}\`）`;
-      if (/命名|风格|规范/.test(t)) naming.push(`- ${t} ${cite}`);
-      else if (/禁用|禁止/.test(t)) forbidden.push(`- ${t} ${cite}`);
-      else if (/决策/.test(t)) decisions.push(`- ${t} ${cite}`);
-      else if (/策略|偏好|约定/.test(t)) prefs.push(`- ${t} ${cite}`);
-      else terms.push(`| ${t.slice(0, 40)} | ${cite} |`);
-    }
-  }
-
-  // 3. 代码探测（依赖 → 技术栈；目录 → 抽象索引）
-  const stackLines = await detectStack(runRoot, probe);
-
-  // 4. 生成模板 7 段
-  const lines = [];
-  lines.push('# CONTEXT — 项目共享上下文');
-  lines.push('');
-  lines.push('> 本文件跨 change 长期累积（自动初始化生成，2026 起）。格式基准：flow-kit 模板。');
-  lines.push('');
-  lines.push('---');
-  lines.push('');
-  if (sources.length > 0) { lines.push(...sources); lines.push(''); }
-  lines.push('## 项目概要');
-  lines.push('');
-  lines.push('（自动初始化生成——请补 3~5 句话：项目是什么、给谁、为什么存在）');
-  lines.push('');
-  lines.push('## 技术栈（团队级默认 / 已锁定）');
-  lines.push('');
-  lines.push(...stackLines);
-  lines.push('');
-  lines.push('## 域语言（术语表）');
-  lines.push('');
-  lines.push('| 术语 | 定义 |');
-  lines.push('|---|---|');
-  if (terms.length > 0) lines.push(...terms);
-  else lines.push('| （待沉淀） | 随 change 逐步补充 |');
-  lines.push('');
-  lines.push('## 已锁决策');
-  lines.push('');
-  lines.push('按时间倒序追加：');
-  lines.push('');
-  if (decisions.length > 0) lines.push(...decisions);
-  else lines.push('- （自动初始化——既有文档关键决策已整合至此，后续 change 按时间倒序追加）');
-  lines.push('');
-  lines.push('## 默认偏好（AI 在缺省时按此决策）');
-  lines.push('');
-  if (prefs.length > 0) lines.push(...prefs);
-  else lines.push('- （自动初始化——既有文档约定已整合至此；随 change 补充）');
-  lines.push('');
-  if (naming.length > 0) {
-    lines.push('## 既有抽象索引（来自 I-intel-scan · 防 AI 重复实现 · B5 老项目护栏）');
-    lines.push('');
-    lines.push('### 命名约定');
-    lines.push('');
-    lines.push(...naming);
-    lines.push('');
-  }
-  if (forbidden.length > 0) {
-    if (!naming.length) {
-      lines.push('## 既有抽象索引（来自 I-intel-scan · 防 AI 重复实现 · B5 老项目护栏）');
-      lines.push('');
-    }
-    lines.push('### 禁动清单（AI 不许"顺手"碰）');
-    lines.push('');
-    lines.push(...forbidden);
-    lines.push('');
-  }
-  if (!naming.length && !forbidden.length) {
-    lines.push('## 既有抽象索引（来自 I-intel-scan · 防 AI 重复实现 · B5 老项目护栏）');
-    lines.push('');
-    lines.push('> 代码抽象探测结果（自动初始化）：');
-    lines.push('');
-    lines.push('### 数据库访问');
-    lines.push('');
-    lines.push('- **模式**：未发现（无数据库抽象）');
-    lines.push('');
-    lines.push('### 工具函数（utils / helpers）');
-    lines.push('');
-    lines.push('| 工具类型 | 路径 | 入口符号 |');
-    lines.push('|---|---|---|');
-    lines.push('| 日期 | 未发现 | — |');
-    lines.push('');
-    lines.push('### 禁动清单（AI 不许"顺手"碰）');
-    lines.push('');
-    lines.push('> 初始为空——随 change 的 DESIGN 0.5.1 逐步补充。');
-    lines.push('');
-  }
-  lines.push('---');
-  lines.push('');
-  lines.push('## intel-scan 元数据');
-  lines.push('');
-  lines.push(`- **last_intel_scan**: ${new Date().toISOString().slice(0, 10)}`);
-  lines.push('- **scanner**: flow-comet 自动初始化');
-  lines.push('- **下次重扫建议**: 90 天后（或架构重构/框架升级时）');
-  lines.push('');
-  lines.push('---');
-  lines.push('');
-  lines.push('> 此文件长度建议 ≤ 300 行；超出时把陈旧条目归档到 `.specs/archive/CONTEXT-history.md`。');
-
+// 校验 .specs/CONTEXT.md 7 段结构 + 模板关键格式；文件缺失 = 全缺。返回
+// { missingSections, formatIssues, template }（missingSections 与 formatIssues 皆空 = 通过）。
+// 生成由 agent 执行（intel-scan 全量阅读语义）——脚本只做确定性结构/格式校验，不做智能整合。
+export async function validateContext(runRoot) {
   const target = path.join(runRoot, '.specs', 'CONTEXT.md');
-  await fs.mkdir(path.dirname(target), { recursive: true });
-  await fs.writeFile(target, lines.join('\n'), 'utf8');
-  return target;
+  const sections = await contextSections(runRoot);
+  let text;
+  try {
+    text = await fs.readFile(target, 'utf8');
+  } catch {
+    return { missingSections: [...sections], formatIssues: [], template: await probeTemplate(runRoot) };
+  }
+  const missingSections = sections.filter((s) => !text.includes(s));
+  const formatIssues = CONTEXT_FORMAT_CHECKS
+    .filter((c) => c.applies(text) && !c.passes(text))
+    .map((c) => c.name + '（' + c.hint + '）');
+  return { missingSections, formatIssues, template: await probeTemplate(runRoot) };
 }
 
-// 依赖探测 → 技术栈字段（简单映射，覆盖常见信号）
-async function detectStack(runRoot, probe) {
-  const out = [];
-  if (await exists(path.join(runRoot, 'package.json'))) {
-    out.push('- **语言/运行时**: Node.js（检测到 package.json）');
-    out.push('- **包管理**: npm / yarn / pnpm（按 lockfile 而定）');
-  } else if (await exists(path.join(runRoot, 'pyproject.toml'))) {
-    out.push('- **语言/运行时**: Python（检测到 pyproject.toml）');
-  } else if (await exists(path.join(runRoot, 'go.mod'))) {
-    out.push('- **语言/运行时**: Go（检测到 go.mod）');
-  } else if (await exists(path.join(runRoot, 'Cargo.toml'))) {
-    out.push('- **语言/运行时**: Rust（检测到 Cargo.toml）');
+// 生成指引（--init-context 时 CONTEXT 缺失或不满足模板时输出）——生成由 agent 全量阅读执行：
+// 读取既有文档（含既有 CONTEXT 的累积术语/决策）并整合（出处标注 `来自 <doc>:<line>`），
+// 探测代码技术栈/抽象索引，**对照 flow-kit/templates/CONTEXT.md 模板**产出 7 段；既有文档零写入。
+// rewrite=true：CONTEXT 已存在但不满足模板（缺段/格式不符）——重写，保留既有累积内容。
+export async function printGenerationGuide(runRoot, probe, { rewrite = false, problems = [] } = {}, out = console) {
+  const template = await probeTemplate(runRoot);
+  const tplNote = template.exists
+    ? '模板：flow-kit/templates/CONTEXT.md（已检测到——严格对照模板段名与条目格式）'
+    : '模板：flow-kit/templates/CONTEXT.md（未检测到——按 7 段基准：项目概要 / 技术栈 / 域语言 / 已锁决策 / 默认偏好 / 既有抽象索引 / intel-scan 元数据）';
+  const lines = [];
+  if (rewrite) {
+    const why = problems.length > 0 ? problems.join('；') : '缺段';
+    lines.push(`INIT-VALIDATE-FAILED: CONTEXT.md 已存在但不满足模板（${why}）。请重写——保留既有 CONTEXT 的累积术语/决策（跨 change 长期累积语义），出处标注 \`来自 <doc>:<line>\`，原文档零写入。${tplNote}`);
   } else {
-    out.push('- **语言/运行时**: （待补充——未识别依赖文件）');
+    lines.push('INIT-GENERATE: 项目上下文未初始化——请生成 .specs/CONTEXT.md。' + tplNote);
   }
-  out.push('- **前端框架**: （待补充）');
-  out.push('- **后端框架**: （待补充）');
-  out.push('- **数据库**: （待补充）');
-  out.push('- **测试**: （待补充）');
-  out.push('- **构建/部署**: （待补充）');
-  out.push('- **栈卡片编号**: （不适用/待补充）');
-  return out;
+  const docs = [...probe.aiDocs, ...probe.projectDocs];
+  if (docs.length > 0) {
+    lines.push('源文档（全量阅读并整合，出处标注 `来自 <doc>:<line>`；原文档零写入）：');
+    for (const d of docs) lines.push('  - ' + d);
+  }
+  if (probe.hasCodeContext) {
+    lines.push('代码信号：已检测到代码上下文（依赖文件或源码目录）——探测技术栈并登记既有抽象索引。');
+  }
+  lines.push('生成后重跑：init <change-id> --init-context（脚本校验 7 段并记录扫描时间）。');
+  out.log(lines.join('\n'));
 }
 
 // --init-skip：记 none（由调用方写回 state）
