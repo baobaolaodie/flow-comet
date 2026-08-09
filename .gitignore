@@ -13,3 +13,5 @@ docs/internal/
 
 # flow-comet 流程工件（不入库，仓库只跟踪功能代码）
 .specs/
+
+flow-kit/
