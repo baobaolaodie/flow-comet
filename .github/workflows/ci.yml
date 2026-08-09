@@ -115,13 +115,20 @@ jobs:
             if (banned.test(body)) P.push('PR 描述含过程代号（T-FIX/batch/D-NN/P0/dogfood/round）');
 
             // §1 公开文件 diff 新增行零代号
-            const files = execSync(`git diff --name-only origin/${pr.base.ref}...origin/${pr.head.ref}`)
-              .toString().trim().split('\n').filter(Boolean);
+            // fork PR 兼容: head 分支在 fork 仓库(不在 origin)——diff 不可用时跳过该检查(其余检查继续)
+            let files = [];
+            try {
+              files = execSync(`git diff --name-only origin/${pr.base.ref}...origin/${pr.head.ref}`)
+                .toString().trim().split('\n').filter(Boolean);
+            } catch { /* fork PR: head 不在 origin,跳过公开 diff 检查 */ }
             const pub = files.filter(f =>
               /^(README|CONTRIBUTING|CHANGELOG)[^/]*\.md$|^docs\/.+\.md$|^\.github\/.+\.md$/.test(f));
             for (const f of pub) {
-              const add = execSync(`git diff origin/${pr.base.ref}...origin/${pr.head.ref} -- "${f}"`)
-                .toString().split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).join('\n');
+              let add = '';
+              try {
+                add = execSync(`git diff origin/${pr.base.ref}...origin/${pr.head.ref} -- "${f}"`)
+                  .toString().split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).join('\n');
+              } catch { continue; }
               if (banned.test(add)) P.push(`公开文档新增行含过程代号: ${f}`);
             }
 
