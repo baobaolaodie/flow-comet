@@ -104,7 +104,7 @@ jobs:
           EOF
 
 
-  # ── PR 纪律: 分支规范 + 模板完整 + 零内部代号 / PR policy ──
+  # ── PR 纪律: 分支规范 + 模板完整 + 零过程代号 / PR policy ──
   pr-policy:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -156,10 +156,10 @@ jobs:
             const titleConv = /^(feat|fix|docs|chore|test|ci|refactor|perf|build|revert)(\([^)]+\))?: .+/;
             if (!titleConv.test(pr.title)) P.push(`PR title not Conventional Commits: "${pr.title}"`);
 
-            // Zero internal codes in title/body
+            // Zero process codes in title/body
             const banned = /T-FIX|batch-|D-\d+|P0|dogfood|round\s*\d/;
-            if (banned.test(pr.title)) P.push(`PR title contains an internal code: "${pr.title}"`);
-            if (banned.test(body)) P.push('PR body contains internal codes (T-FIX/batch/D-NN/P0/dogfood/round)');
+            if (banned.test(pr.title)) P.push(`PR title contains a process code: "${pr.title}"`);
+            if (banned.test(body)) P.push('PR body contains process codes (T-FIX/batch/D-NN/P0/dogfood/round)');
 
             // Commit-message convention: Conventional Commits prefix + zero internal codes
             // (merge commits exempt)
@@ -171,7 +171,7 @@ jobs:
               const msg = c.commit.message.split('\n')[0];
               if (/^Merge /.test(msg)) continue;
               if (!conv.test(msg)) P.push(`commit message not Conventional Commits: "${msg.slice(0, 60)}"`);
-              if (banned.test(msg)) P.push(`commit message contains internal code: "${msg.slice(0, 60)}"`);
+              if (banned.test(msg)) P.push(`commit message contains a process code: "${msg.slice(0, 60)}"`);
             }
 
             // Zero internal codes in added lines of public files
@@ -189,7 +189,7 @@ jobs:
                 add = execSync(`git diff origin/${pr.base.ref}...origin/${pr.head.ref} -- "${f}"`)
                   .toString().split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).join('\n');
               } catch { continue; }
-              if (banned.test(add)) P.push(`public doc added lines contain internal codes: ${f}`);
+              if (banned.test(add)) P.push(`public doc added lines contain process codes: ${f}`);
             }
 
             if (P.length) core.setFailed('Convention violations:\n' + P.join('\n'));
