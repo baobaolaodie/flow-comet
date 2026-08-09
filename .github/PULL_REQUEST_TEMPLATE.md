@@ -16,7 +16,7 @@
 
 ## 验证（勾选已执行）
 
-- [ ] 回归测试：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → ALL 82 SCENARIOS PASSED
+- [ ] 回归测试：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → ALL 87 SCENARIOS PASSED
 - [ ] 脚本改动：先写失败测试（确认测试因缺陷失败）再实现
 - [ ] 文档改动：中英双语同步
 - [ ] 发布验证：各安装副本回归通过

@@ -12,6 +12,8 @@
 
 ## [1.3.0] - 2026-08-10
 
+自动项目上下文初始化（init 前置步骤）。([#30](https://github.com/baobaolaodie/flow-comet/pull/30))
+
 自动项目上下文初始化（init 前置步骤）。
 
 ### 新增
