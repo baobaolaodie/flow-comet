@@ -4,7 +4,7 @@
 
 进入 execute / verify 节点前，运行：
 
-> **强制上下文**（2026-08-09 points-system-recon 实录）：委托 worktree 子代理前**必须**先执行本协议——未 commit 的工件不会被 worktree 子代理看到（harness 从已提交 HEAD 创建 worktree），实录中 8 个排查任务因工件未 commit 全部空上下文运行。本协议是委托前的前置步骤，不是可选项。
+> **强制上下文**（实测）：委托 worktree 子代理前**必须**先执行本协议——未 commit 的工件不会被 worktree 子代理看到（harness 从已提交 HEAD 创建 worktree），曾有 8 个排查任务因工件未 commit 全部空上下文运行。本协议是委托前的前置步骤，不是可选项。
 
 ```bash
 git status --short

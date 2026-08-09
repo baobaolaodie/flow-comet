@@ -53,7 +53,7 @@ Division of labor: `execute` node handles serial delegation (non-parallel tasks,
 
 ### Steps
 
-0. **委托前检查清单（batch-H，必做——2026-08-09 points-system-recon 实录：未 commit 导致 worktree 子代理空上下文）**：
+0. **委托前检查清单（必做——未 commit 的工件不会被 worktree 子代理看到，曾导致子代理空上下文运行）**：
    - ① `git status --short`：change 工件（`.specs/<change-id>/`）**必须已 commit**——未 commit 时 worktree 子代理看不到工件（harness 从已提交 HEAD 创建 worktree）
    - ② `git log --oneline -1`：确认 HEAD 位置（change 分支）
    - ③ 委托 prompt **必须内联任务块全文 + 相关 AC**（worktree 基线可能不是 change 分支——harness 行为不可控，内联是唯一可靠路径）

@@ -49,7 +49,7 @@ All workflow artifacts live in `.specs/` (project-level) and `.specs/<change-id>
 | `CHANGELOG.md` | `.specs/` | change log (table, newest date first) | archive |
 | `.comet/flow-comet-state.json` | `.comet/` | state machine (activeChange/currentNode/completedNodes/evidence/…) | throughout (script-managed) |
 
-> **Append placement discipline**: CONTEXT terms → glossary table, decisions → locked-decision list; LESSONS → entries section by L-NNN; STATE/CHANGELOG → top (reverse order); T-FIX → `## Fix 任务` section — guard detects violations (progressive WARN).
+> **Append placement discipline**: CONTEXT terms → glossary table, decisions → locked-decision list; LESSONS → entries section by L-NNN; STATE/CHANGELOG → top (reverse order); rollback fixes → `## Fix 任务` section — guard detects violations (progressive WARN).
 
 ## Branch mode
 
@@ -84,7 +84,7 @@ In the target project, open Claude Code and enter:
 |-------|---------|
 | `/flow-comet` | Start or continue the 8-node workflow (auto-detects active change, routes to current node) |
 | `/flow-comet-compose` | Compose installed skills into a custom protocol (side command, not part of the 8-node flow — see [PROTOCOL.md](PROTOCOL.md)) |
-| `/flow-comet-evolve` | Scan archived changes' DESIGN §9, batch-review sediment candidates (side) |
+| `/flow-comet-evolve` | Scan archived changes' DESIGN §9, review sediment candidates in bulk (side) |
 | `/flow-comet-health` | Periodic health check: CONTEXT consistency / LESSONS scan / tech debt / redundancy (side) |
 
 ## Decision points
@@ -101,7 +101,7 @@ flow-comet **pauses for your confirmation** at these points (everything else adv
 | archive | archiving + merging the change branch to main (irreversible) |
 | pre-archive | PR approve (when `enablePrReview` is on) |
 
-## Script reference (engine-internal, executed automatically by Claude)
+## Script reference (executed automatically by Claude)
 
 These scripts are **run automatically by the flow-comet skill** — you normally never run them manually; use only for troubleshooting or advanced scenarios. Path: `<target project>/.claude/skills/flow-comet/scripts/`:
 
