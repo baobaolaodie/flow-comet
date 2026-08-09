@@ -45,6 +45,19 @@ jobs:
           for f in $(git ls-files '*.mjs' '*.yaml' '*.json'); do
             head -c 3 "$f" | od -An -tx1 | grep -qi 'ef bb bf' && { echo "BOM 污染: $f"; exit 1; }
           done
+      - name: '安装器可复现性（单一权威源纪律：prepare-env 生成 == 权威源）'
+        run: |
+          node scripts/prepare-env.mjs --target "$RUNNER_TEMP/installed" >/dev/null
+          diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/skills "$RUNNER_TEMP/installed/.claude/skills" \
+            || { echo "prepare-env 生成结果与权威源不一致（安装器漂移）"; exit 1; }
+          diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/rules "$RUNNER_TEMP/installed/.claude/rules" \
+            || { echo "prepare-env 生成 rules 与权威源不一致"; exit 1; }
+      - name: 'workflow 文件 yaml 有效性（防未来编辑破坏 CI 自身）'
+        run: |
+          for f in $(git ls-files '.github/workflows/*.yml' '.github/workflows/*.yaml'); do
+            python -c "import yaml,sys; yaml.safe_load(open('$f', encoding='utf-8')); print('OK $f')" \
+              || { echo "yaml 无效: $f"; exit 1; }
+          done
 
   # ── §0·5 PR 纪律 + §1 零代号（PR 维度）──
   pr-policy:
