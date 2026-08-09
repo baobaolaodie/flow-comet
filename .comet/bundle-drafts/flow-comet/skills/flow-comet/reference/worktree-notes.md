@@ -9,7 +9,7 @@ description: "跨仓库 worktree 场景笔记：isolation:worktree 挂载在会�
 
 Agent 工具 `isolation: "worktree"` 创建的 worktree 挂在**会话项目根**（`git worktree list` 确认），不是子代理要工作的目标项目仓库。
 
-跨仓库 dogfood / 多仓库场景下：
+跨仓库端到端 / 多仓库场景下：
 
 - worktree 内容来自**父项目**（会话项目）的当前分支快照，与子代理目标仓库无关
 - 子代理产物不会自动进入目标仓库，需手动搬运：在目标仓库内用 `git show <branch>:<path>` 取回内容，或先 `git log --all --oneline -- <path>` 定位产物所在 commit 再 cherry-pick / 复制
@@ -22,7 +22,7 @@ W2-D 用 `git show <commitHash>` 校验提交文件子集。当产物 commit 属
 ## 3. 规避方式
 
 1. **委托 prompt 内联全部上游上下文**：AC / 设计 / 任务块全文写进委托 prompt，子代理不依赖 worktree 里的工件
-2. **委托前 commit 上游工件**：把 `.specs/<change>/` 工件先 commit，配合批次 C 的 C4 WORKTREE WARN（entry execute / entry subagent-execute 检测未提交工件并提示）
+2. **委托前 commit 上游工件**：把 `.specs/<change>/` 工件先 commit，配合脏检查 WORKTREE WARN（entry execute / entry subagent-execute 检测未提交工件并提示）
 3. **单仓库场景不受影响**：worktree 与目标项目同根（同一仓库）时无此问题
 
 ## 4. 验证方法
@@ -32,7 +32,7 @@ git worktree list                # 确认 worktree 挂在哪个仓库/分支（�
 git ls-tree <branch> <path>      # 确认产物在目标仓库哪个分支、路径是否存在
 ```
 
-## 5. change 分支 + worktree 组合（批次 E）
+## 5. change 分支 + worktree 组合（）
 
 分支模式（`branchMode=true`，git 仓库 + init 自动创建 `change/<id>` 分支）下：
 

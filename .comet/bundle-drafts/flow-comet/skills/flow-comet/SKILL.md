@@ -130,7 +130,7 @@ flow-kit 9 阶段工作流的 workflow-kernel 实现。保留 flow-kit 的全部
 
 1. Run `node .claude/skills/flow-comet/scripts/workflow-state.mjs status` to detect active change and current node.
 2. If no active change and user wants to start new work: `node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-name>`.
-3. **D-18（round2）**: `init` 输出即首次路由（NODE: 内置 open 或协议首节点）——直接加载该节点 Skill 并执行（产出工件）。`next` 在节点完成（`guard exit <node> --apply` 推进）后用于获取下一节点；init 后立即 `next` 会命中节点顺序门禁（open 未 exit → BLOCKED，符合 T-FIX-05 语义）。
+3. **: `init` 输出即首次路由（NODE: 内置 open 或协议首节点）——直接加载该节点 Skill 并执行（产出工件）。`next` 在节点完成（`guard exit <node> --apply` 推进）后用于获取下一节点；init 后立即 `next` 会命中节点顺序门禁（open 未 exit → BLOCKED，符合节点顺序门禁语义）。
 
 ### Resume Rules (every context resume)
 
@@ -229,7 +229,7 @@ The route, Output Schemas, required Skill calls, and recovery state are defined 
 
 1. Run `node flow-comet/scripts/workflow-state.mjs status` to read current state.
 2. If the workflow is not started, confirm scope with the user, then run `node flow-comet/scripts/workflow-state.mjs init`.
-3. **D-18（round2）**: `init` 输出即首次路由（NODE: 内置 open 或协议首节点）——直接加载该节点 Skill 执行；`next` 在节点 exit 后用于推进（init 后立即 next 命中节点顺序门禁属预期）。Do not load multiple Skills at once.
+3. **: `init` 输出即首次路由（NODE: 内置 open 或协议首节点）——直接加载该节点 Skill 执行；`next` 在节点 exit 后用于推进（init 后立即 next 命中节点顺序门禁属预期）。Do not load multiple Skills at once.
 
 ### Resume Rules (every context resume)
 
