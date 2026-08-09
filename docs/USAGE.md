@@ -74,7 +74,7 @@ All branch operations are **executed automatically by Claude under the skill pro
 When CHANGE.md carries `express: true` (low-risk: ≤3 files, no backend schema/API/DB changes, no security/auth/concurrency, pure frontend refactor/copy/simple bug fix):
 
 - **review** runs only Round 1 (spec compliance) + Round 1.5 (contract check), skipping code-quality and UI rounds
-- **TEST/UAT** use a minimal matrix (Round 1 functionality + core AC manual confirmation); REVIEW.md is marked "express 审查"
+- **TEST/UAT** use a minimal matrix (Round 1 functionality + core AC manual confirmation); REVIEW.md is marked "express review" (streamlined review for small changes)
 
 ## User entry points
 
