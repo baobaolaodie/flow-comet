@@ -19,3 +19,6 @@ flow-kit/
 CLAUDE.md
 # 本地测试集（验证阶梯工具，不随发布分发）
 scripts/reset-dogfood.mjs
+
+# 本地检查工具（gitignore 不随发布）
+scripts/check-codes-local.mjs
