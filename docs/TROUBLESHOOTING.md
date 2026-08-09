@@ -22,5 +22,8 @@
 | `BLOCKED: workflow protocol node must have a non-empty string id` | custom protocol `nodes[]` contains empty/invalid element | fix protocol JSON: each node `id` non-empty string, avoid built-in 8-node ids |
 | `BLOCKED: 未在协议 writeWhitelist 中声明` | write target outside the custom protocol whitelist (fail-closed) | declare the node's allowed path prefixes in protocol `writeWhitelist`, or use the built-in protocol |
 | `--protocol <path> 加载失败` | protocol path missing / schemaVersion or kind mismatch | check the path; confirm `schemaVersion: 1`, `kind: "workflow-kernel"` |
+| `P0-ROUTE WARN: 未找到 parallel="true" status="pending" 的任务块` | TASK.md task tags lack the `status="pending"` attribute (or wrong attribute order) | add `status="pending"` after `parallel="true"` in each task tag (attribute order matters: parallel before status) |
+| `C4-CHECK SKIP: <reason>` | worktree dirty-check skipped (not a git repo, or git command failed) | expected in non-git projects; if it appears in a git repo, the git command failed — check the reason |
+| `WARN COUNT: N` | summary line on entry/exit — N warns were emitted this call | review each WARN above this line |
 | `Unexpected token ... is not valid JSON` (state) | state file carries a UTF-8 BOM or corrupted content | rewrite the state file without BOM (scripts tolerate BOM since 1.2.1) |
 | `PreToolUse:Write hook error: ... non-blocking` (claude -p) | SDK CLI mode downgrades hook exit codes to non-blocking | expected in `claude -p`; main TUI session blocks writes (exit 2) |
