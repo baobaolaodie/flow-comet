@@ -49,7 +49,7 @@ This node performs the final integration verification: running all automated tes
 
 3. **Failure diagnosis**: For any failure (automated test or UAT):
    - Switch to "Diagnose sub-role" — identify root cause, not symptom.
-   - Produce fix-plan: append to TASK.md as `T-FIX-XX` with full 7 fields and verify command.
+   - Produce fix-plan: append to TASK.md as numbered fix tasks with full 7 fields and verify command.
    - Return to execute node for fix execution.
    - Re-run verification after fix.
 
