@@ -1747,7 +1747,7 @@ const SCENARIOS = [
 
   // ---------- batch-H 场景（S79~S83：worktree 委托链路，P1~P7 实录） ----------
 
-  // 79: P0 路由诊断——TASK 无 status 属性（旧模板形态）→ exit plan --apply 的 P0 路由输出 P0-ROUTE WARN
+  // 79: P0 路由诊断——TASK 无 status 属性（旧模板形态）→ exit plan --apply 的 P0 路由输出 ROUTE WARN
   // （batch-H P3：结构校验保持严格 + 检测失败纠偏可见——修复前无诊断 = RED）
   // nextNode 只看 completedNodes——P0 路由触发场景 = exit plan（completed 后 nextNode=execute → 路由检查）
   {
@@ -1765,7 +1765,7 @@ const SCENARIOS = [
       const res = runGuard(['exit', 'plan', '--apply'], dir,
         { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
       assertExit(res, 0);
-      assertOut(res, 'P0-ROUTE WARN');
+      assertOut(res, 'ROUTE WARN');
     },
   },
 
