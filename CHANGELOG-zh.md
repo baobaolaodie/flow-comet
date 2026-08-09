@@ -12,7 +12,7 @@
 
 ## [1.2.3] - 2026-08-09
 
-worktree 委托链路修复。
+worktree 委托链路修复。([#12](https://github.com/baobaolaodie/flow-comet/pull/12)、[#13](https://github.com/baobaolaodie/flow-comet/pull/13)、[#14](https://github.com/baobaolaodie/flow-comet/pull/14))
 
 ### Fixed
 
@@ -29,7 +29,7 @@ worktree 委托链路修复。
 
 ## [1.2.2] - 2026-08-08
 
-6 维自查的 brooks-lint 两级降级路径。
+6 维自查的 brooks-lint 两级降级路径。([#8](https://github.com/baobaolaodie/flow-comet/pull/8)、[#9](https://github.com/baobaolaodie/flow-comet/pull/9))
 
 ### Fixed
 
@@ -44,7 +44,7 @@ worktree 委托链路修复。
 
 ## [1.2.1] - 2026-08-08
 
-安装引导修复（init/hook/状态修复 + README 指引修复 + 独立验证修复）。
+安装引导修复（init/hook/状态修复 + README 指引修复 + 独立验证修复）。([#1](https://github.com/baobaolaodie/flow-comet/pull/1)、[#4](https://github.com/baobaolaodie/flow-comet/pull/4)、[#6](https://github.com/baobaolaodie/flow-comet/pull/6)、[#10](https://github.com/baobaolaodie/flow-comet/pull/10))
 
 ### Fixed
 
