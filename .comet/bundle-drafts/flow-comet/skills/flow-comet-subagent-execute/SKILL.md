@@ -53,6 +53,13 @@ Division of labor: `execute` node handles serial delegation (non-parallel tasks,
 
 ### Steps
 
+0. **委托前检查清单（batch-H，必做——2026-08-09 points-system-recon 实录：未 commit 导致 worktree 子代理空上下文）**：
+   - ① `git status --short`：change 工件（`.specs/<change-id>/`）**必须已 commit**——未 commit 时 worktree 子代理看不到工件（harness 从已提交 HEAD 创建 worktree）
+   - ② `git log --oneline -1`：确认 HEAD 位置（change 分支）
+   - ③ 委托 prompt **必须内联任务块全文 + 相关 AC**（worktree 基线可能不是 change 分支——harness 行为不可控，内联是唯一可靠路径）
+   - **Red Flag**：worktree 工件不可见/基线不确定时**禁止继续委托**——先 commit 或内联上下文
+   - 委托后：子代理回报 commitHash 后校验存在性（`git cat-file -e <commitHash>`，workflow-handoff result 已有 W2-D git show 校验兜底）
+
 1. **Identify parallel tasks**: Read TASK.md and find all tasks with `parallel="true"` and `status="pending"`. Verify they are genuinely independent (no file conflicts between them — check `write_files` do not overlap).
 
 2. **For each parallel task, create handoff request**: Use `workflow-handoff.mjs request <task-id>` to register the handoff.
