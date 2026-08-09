@@ -1904,7 +1904,16 @@ function taskSetSignature(taskContent) {
   return createHash('sha256').update(blocks.join('\n'), 'utf8').digest('hex');
 }
 
+// batch-H (F): WARN 计数——entry/exit 成功路径末尾输出汇总行（可观测性；追加不改变既有输出）
+let __warnCount = 0;
+const __origError = console.error;
+
 async function main() {
+  // batch-H (F): 包装 console.error 统计 WARN 输出（转发原实现，行为不变）
+  console.error = (...args) => {
+    if (/WARN/.test(args.join(' '))) __warnCount += 1;
+    __origError(...args);
+  };
   // 受保护读取 + fail-closed schema 校验（读失败/校验失败沿用 throw → main().catch 统一处理）
   const protocol = await readProtocolFile(runRoot, protocolPath);
   validateProtocolSchema(protocol);
@@ -2009,8 +2018,9 @@ async function main() {
         if (String(statusOut).trim() !== '') {
           console.error('WORKTREE WARN: .specs/' + state.activeChange + '/ 有未提交工件，worktree isolation 子代理将看不到它们——建议先 commit 或 prompt 内联上下文');
         }
-      } catch {
-        // 非 git 仓库或路径不可查 → 跳过该检查
+      } catch (err) {
+        // batch-H (P4): 检测失败可见化——非 git 仓库/路径不可查时提示 SKIP 原因（防静默失效）
+        console.error('C4-CHECK SKIP: ' + (err && err.message ? String(err.message).split('\n')[0] : String(err)));
       }
     }
     // C7: PROGRESS.md 存在警告（清窗恢复产物，R1.6 反重复）
@@ -2472,6 +2482,11 @@ async function main() {
           .filter(Boolean));
         // 检查 pending parallel 任务中是否有依赖已满足的
         const parallelBlocks = taskContent.match(/<task[^>]*parallel="true"[^>]*status="pending"[\s\S]*?<\/task>/g) || [];
+        // batch-H (P3): 路由无匹配时输出诊断——结构校验保持严格（不放松正则），检测失败纠偏可见
+        // 旧模板（task 标签无 status 属性）产出的 TASK.md 无法匹配——明确提示而非静默卡在 execute
+        if (parallelBlocks.length === 0 && /<task[^>]*parallel="true"/.test(taskContent)) {
+          console.error('P0-ROUTE WARN: 未找到 parallel="true" status="pending" 的任务块——检查 task 标签属性（属性顺序：parallel 在 status 前；缺 status 不视为 pending）');
+        }
         const eligibleParallel = parallelBlocks.filter(block => {
           const depsMatch = block.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
           if (!depsMatch || !depsMatch[1].trim()) return true;
@@ -2501,7 +2516,10 @@ async function main() {
   console.log('APPLY: rerun with --apply to update workflow state');
 }
 
-main().catch((error) => {
+main().then(() => {
+  // batch-H (F): 成功路径末尾输出 WARN COUNT 汇总（用未包装的 console.error——避免自增）
+  if (__warnCount > 0) __origError('WARN COUNT: ' + __warnCount);
+}).catch((error) => {
   console.error(error.message);
   process.exit(1);
 });
