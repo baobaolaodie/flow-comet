@@ -18,7 +18,7 @@ const statePath = path.join(runRoot, '.comet', 'flow-comet-state.json');
 const specsRoot = path.join(runRoot, '.specs');
 
 async function readJson(file) {
-  // D-22: 容忍 UTF-8 BOM（外部写入如会话 Write 可能带 BOM）
+  // 容忍 UTF-8 BOM（外部写入如会话 Write 可能带 BOM）
   return JSON.parse((await fs.readFile(file, 'utf8')).replace(/^﻿/, ''));
 }
 
@@ -35,8 +35,8 @@ async function findActiveChange() {
   // 1. Read from state file if exists
   if (await fileExists(statePath)) {
     const state = await readJson(statePath);
-    // D-19: completed 检查优先于 activeChange 分支——归档完成态（无论 activeChange 是否残留）
-    // 一律不识别为 active（防归档残留目录/残留字段误判，D-10 主修复）
+    // completed 检查优先于 activeChange 分支——归档完成态（无论 activeChange 是否残留）
+    // 一律不识别为 active（防归档残留目录/残留字段误判， 主修复）
     if (state.status === 'completed') return null;
     if (state.activeChange) {
       const changeDir = path.join(specsRoot, state.activeChange);
@@ -44,9 +44,9 @@ async function findActiveChange() {
     }
   }
   // 2. Scan .specs/ for directories with TASK.md (active flow-kit changes)
-  // 注: T-FIX-17 曾尝试按 archive/ 对应归档跳过残留目录——但会误伤同名新 change（S64 实证），已撤回。
+  // 注:  曾尝试按 archive/ 对应归档跳过残留目录——但会误伤同名新 change（S64 实证），已撤回。
   // 「state 缺失 + 归档残留」为已知限制（对比报告已记录"捡残留桩"共性问题）；归档后正常态由
-  // 上文 completed 分支覆盖（T-FIX-17 主修复）
+  // 上文 completed 分支覆盖（ 主修复）
   try {
     const entries = await fs.readdir(specsRoot, { withFileTypes: true });
     const candidates = [];
@@ -142,7 +142,7 @@ async function nodeFlagsComplete(nodeFlags, nodeId) {
 }
 
 async function determineNode(changeName, protocol, completedNodes = []) {
-  // T-FIX-03（dogfood D1）: 全部节点已完成 → 完成态，不产出最后节点。
+  // （实测）: 全部节点已完成 → 完成态，不产出最后节点。
   // 自定义协议无 archive 节点时，completedNodes 全齐后 next 仍会输出 NODE: <最后节点>
   // （产物推导只返回最后节点 id）——此处（产物推导之前）判定：route(protocol) 的所有节点
   // id 均已包含在 completedNodes 中 → 返回 null。printNext(null) 输出 "NEXT: done"；
@@ -197,7 +197,7 @@ async function determineNode(changeName, protocol, completedNodes = []) {
     const pending = (taskContent.match(/<task[^>]*status="pending"/g) || []).length;
     const done = (taskContent.match(/<task[^>]*status="done"/g) || []).length;
     if (pending > 0) {
-      // P0 fix: 只检测依赖已满足的 parallel 任务，避免 Wave N+1 的 parallel 任务
+      // 只检测依赖已满足的 parallel 任务，避免 Wave N+1 的 parallel 任务
       // 在 Wave N 串行任务未完成时就被路由到 subagent-execute
       const hasSubagentNode = route(protocol).some((n) => n.id === 'subagent-execute');
       if (hasSubagentNode) {
@@ -232,9 +232,9 @@ async function determineNode(changeName, protocol, completedNodes = []) {
   return 'execute';
 }
 
-// T-FIX-09: T-FIX 回退豁免判定——T-FIX 标准回退路径：review/verify 阶段发现缺陷 → TASK.md 追加
-// pending T-FIX 任务（含 T-FIX-NN）→ next 回 execute。三条件全满足才豁免（否则维持 T-FIX-05 严格 BLOCK）：
-// ① currentNode 为 review/verify（T-FIX 回退源节点）；② TASK.md 存在 status="pending" 任务块；
+// 回退修复豁免判定——回退修复标准路径：review/verify 阶段发现缺陷 → TASK.md 追加
+// pending 回退任务 → next 回 execute。三条件全满足才豁免（否则维持严格 BLOCK）：
+// ① currentNode 为 review/verify（回退修复源节点）；② TASK.md 存在 status="pending" 任务块；
 // ③ determineNode 推导为 execute（回退目标）。任一不满足 → 不豁免，保持严格拦截。
 async function tFixRollbackExempt(changeName, protocol, currentNode, completedNodes) {
   if (currentNode !== 'review' && currentNode !== 'verify') return false;
@@ -248,14 +248,14 @@ async function tFixRollbackExempt(changeName, protocol, currentNode, completedNo
   }
 }
 
-// T-FIX-11: 正常推进豁免判定——exit --apply 会把 currentNode 推进到下一节点（如 open exit 后
+// 正常推进豁免判定——exit --apply 会把 currentNode 推进到下一节点（如 open exit 后
 // currentNode=design，该节点尚未开始故 evidence 无记录），随后按 SKILL 协议调 next（正常路径）
-// 不应被 T-FIX-05 误拦为"疑似未 exit"。判定三条件：① completedNodes 非空；② 最后一个已完成节点
+// 不应被  误拦为"疑似未 exit"。判定三条件：① completedNodes 非空；② 最后一个已完成节点
 // 在路由列表（route(protocol)，disabled 过滤）中的直接后继 = currentNode（exit 推进的正常下一节点）；
 // ③ 最后一个已完成节点存在 evidence（exit --apply 必须带证据通过——证据存在证明该 exit 真实发生，
-// 排除伪造/漂移状态如 S43 类 review 无 evidence）。与 T-FIX-09 回退豁免独立判断（回退 = TASK.md
-// 有 pending T-FIX；本豁免 = 正常推进后继）。真乱序（currentNode 不是 completedNodes 的后继）仍
-// 维持 T-FIX-05 严格 BLOCK。
+// 排除伪造/漂移状态如 S43 类 review 无 evidence）。与  回退豁免独立判断（回退 = TASK.md
+// 有 pending 回退修复任务；本豁免 = 正常推进后继）。真乱序（currentNode 不是 completedNodes 的后继）仍
+// 维持  严格 BLOCK。
 function normalAdvanceExempt(state, protocol, completedNodes, currentNode) {
   if (completedNodes.length === 0) return false;
   const lastNodeId = completedNodes[completedNodes.length - 1];
@@ -287,7 +287,7 @@ async function readState() {
     // status/next 显示以实时 git 检测为准——非 git 仓库显示 BRANCH: none）
     if (st.branchMode === undefined) st.branchMode = true;
     if (st.enablePrReview === undefined) st.enablePrReview = false;
-    // T-FIX-14: 分支前缀（init --branch-prefix 记录；旧 state 缺省 'change/' 向后兼容）
+    // 分支前缀（init --branch-prefix 记录；旧 state 缺省 'change/' 向后兼容）
     if (st.branchPrefix === undefined) st.branchPrefix = 'change/';
     return st;
   }
@@ -389,7 +389,7 @@ async function main() {
   if (command === 'init') {
     const changeName = process.argv[3];
     if (!changeName) throw new Error('init requires a change name.');
-    // T-FIX-14: --branch-prefix <prefix>（缺省 'change/'）；从剩余参数解析
+    // --branch-prefix <prefix>（缺省 'change/'）；从剩余参数解析
     let branchPrefix = 'change/';
     const initArgs = process.argv.slice(4);
     for (let i = 0; i < initArgs.length; i++) {
@@ -411,7 +411,7 @@ async function main() {
     const branchMode = isInsideWorkTree();
     const state = {
       activeChange: changeName,
-      // T-FIX-18: currentNode 取协议首节点（内置协议 = open，行为不变；自定义协议 = 首节点，如 brainstorm）
+      // currentNode 取协议首节点（内置协议 = open，行为不变；自定义协议 = 首节点，如 brainstorm）
       currentNode: route(protocol)[0]?.id ?? 'open',
       completedNodes: [],
       evidence: {},
@@ -425,11 +425,11 @@ async function main() {
       createdAt: new Date().toISOString()
     };
     await writeState(state);
-    // T-FIX-16: init 创建 .specs/<id>/ 目录——文件即真相从 init 起成立，findActiveChange 立即可识别
+    // init 创建 .specs/<id>/ 目录——文件即真相从 init 起成立，findActiveChange 立即可识别
     //（此前 init 后 next/status 报 No active change，与 SKILL 启动协议 init → next 矛盾）
     const specsChangeDir = path.join(specsRoot, changeName);
     await fs.mkdir(specsChangeDir, { recursive: true });
-    // E1 + T-FIX-14: 分支创建——branchMode && 当前分支 ≠ <prefix><id> && 分支不存在 → git checkout -b
+    // E1 + : 分支创建——branchMode && 当前分支 ≠ <prefix><id> && 分支不存在 → git checkout -b
     // 前缀由 --branch-prefix 指定（缺省 'change/'，向后兼容；可适配仓库自身分支规范如 feat/）
     // 失败 → WARN 不 BLOCK，继续纯文件模式（向后兼容）
     const expectedBranch = branchPrefix + changeName;
@@ -445,7 +445,7 @@ async function main() {
     }
     console.log('Initialized: ' + changeName);
     console.log('BRANCH: ' + (branchMode ? expectedBranch : 'none（非 git 仓库）'));
-    // D-17: init 输出取协议首节点（与 T-FIX-18 的 state.currentNode 一致——内置协议 = open，行为不变）
+    // init 输出取协议首节点（与  的 state.currentNode 一致——内置协议 = open，行为不变）
     printNext(protocol, route(protocol)[0]?.id ?? 'open');
     return;
   }
@@ -483,12 +483,12 @@ async function main() {
       return;
     }
     const state = await readState();
-    // T-FIX-05: 节点顺序校验（严格模式）——state.currentNode 非 null、不在 completedNodes、
+    // 节点顺序校验（严格模式）——state.currentNode 非 null、不在 completedNodes、
     // 且 evidence 无该节点记录 → 上一节点从未 exit 就推进 → BLOCKED（exit 1）。
     // P0-2 漂移校正保留：已完成节点（currentNode ∈ completedNodes，或 evidence 已记录——
     // 节点已被 record/exit 处理过）正常推进不受影响；本校验只拦"证据完全缺失的疑似跳阶段"。
-    // 豁免（两种独立判断，任一成立即放行）：T-FIX-09 回退豁免（TASK.md 有 pending T-FIX 回 execute）；
-    // T-FIX-11 正常推进豁免（currentNode 是 completedNodes 最后节点 exit 推进的正常下一节点，
+    // 豁免（两种独立判断，任一成立即放行）： 回退豁免（TASK.md 有 pending 回退修复任务 回 execute）；
+    //  正常推进豁免（currentNode 是 completedNodes 最后节点 exit 推进的正常下一节点，
     // 见 normalAdvanceExempt）——真乱序（跳节点）仍严格 BLOCK
     const completedArr = Array.isArray(state.completedNodes) ? state.completedNodes : [];
     if (state.currentNode && !completedArr.includes(state.currentNode)) {
@@ -497,12 +497,12 @@ async function main() {
         : null;
       const hasEvidence = !!(nodeEvidence && typeof nodeEvidence === 'object' && !Array.isArray(nodeEvidence));
       if (!hasEvidence) {
-        // T-FIX-09: 回退豁免——review/verify 发现缺陷追加 pending T-FIX 任务后回 execute 的
-        // T-FIX 标准回退路径放行（否则被 T-FIX-05 严格模式误拦为"未 exit 跳阶段"）；
+        // 回退豁免——review/verify 发现缺陷追加 pending T-FIX 任务后回 execute 的
+        // T-FIX 标准回退路径放行（否则被  严格模式误拦为"未 exit 跳阶段"）；
         // 豁免条件不满足时维持严格 BLOCK
         const rollbackExempt = await tFixRollbackExempt(changeName, protocol, state.currentNode, completedArr);
-        // T-FIX-11: 正常推进豁免——exit --apply 推进 currentNode 到下一节点后按 SKILL 协议调 next
-        // （正常路径）不拦截；与 T-FIX-09 回退豁免独立判断（详见 normalAdvanceExempt 注释）
+        // 正常推进豁免——exit --apply 推进 currentNode 到下一节点后按 SKILL 协议调 next
+        // （正常路径）不拦截；与  回退豁免独立判断（详见 normalAdvanceExempt 注释）
         const advanceExempt = normalAdvanceExempt(state, protocol, completedArr, state.currentNode);
         if (!rollbackExempt && !advanceExempt) {
           console.error('BLOCKED: 疑似未 exit 节点 ' + state.currentNode + '，先 workflow-guard.mjs exit ' + state.currentNode + ' --apply');
@@ -541,7 +541,7 @@ async function main() {
     state.evidence = state.evidence || {};
     // 解析 JSON 参数并展开到 evidence 顶层（summary/completedChecks/output-schema evidence 等）；
     // 若不可解析则作为 summary 字符串
-    // D-14: payload 解析前剥离 --protocol（及 --protocol=<p>）——resolveProtocol 已全局提取协议路径，
+    // payload 解析前剥离 --protocol（及 --protocol=<p>）——resolveProtocol 已全局提取协议路径，
     // 此处仅防其拼入 payload 导致 JSON 解析失败（结构字段丢失）
     let parsed = {};
     const payloadArgs = [];
