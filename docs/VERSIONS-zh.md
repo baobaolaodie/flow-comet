@@ -30,7 +30,10 @@
 
 ## 发布 checklist（每次发布收尾）
 
-1. 更新 CHANGELOG（Added/Changed/Fixed）
+发布按**批次**进行：`dev` 积累功能改动后统一发布（一个发布 PR 对应一个批次）。发布前呈现**发布审批单**（包含改动 / 验证结果 / 版本号）并取得一次审批。
+
+1. 更新 CHANGELOG（Added/Changed/Fixed——含 PR 链接）
 2. 更新 README 版本徽章 + 版本状态
 3. `git tag vX.Y.Z` + push --tags
 4. prepare-env 发布到全部已安装副本（主仓 `.claude/` + 各目标项目）——功能改动时
+5. 发布 PR 合并后同步 `dev` 到 `main`
