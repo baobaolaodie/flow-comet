@@ -43,7 +43,9 @@ jobs:
       - name: 'BOM 防线'
         run: |
           for f in $(git ls-files '*.mjs' '*.yaml' '*.json'); do
-            head -c 3 "$f" | od -An -tx1 | grep -qi 'ef bb bf' && { echo "BOM 污染: $f"; exit 1; }
+            if head -c 3 "$f" | od -An -tx1 | grep -qi 'ef bb bf'; then
+              echo "BOM 污染: $f"; exit 1
+            fi
           done
       - name: '安装器可复现性（单一权威源纪律：prepare-env 生成 == 权威源）'
         run: |
