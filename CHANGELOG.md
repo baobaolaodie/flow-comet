@@ -12,7 +12,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [1.2.3] - 2026-08-09
 
-Worktree delegation chain fixes (real-run report).
+Worktree delegation chain fixes (real-run report). ([#12](https://github.com/baobaolaodie/flow-comet/pull/12), [#13](https://github.com/baobaolaodie/flow-comet/pull/13), [#14](https://github.com/baobaolaodie/flow-comet/pull/14))
 
 ### Fixed
 
@@ -29,7 +29,7 @@ Worktree delegation chain fixes (real-run report).
 
 ## [1.2.2] - 2026-08-08
 
-Self-review two-tier fallback for the 6-dimension check (brooks-lint).
+Self-review two-tier fallback for the 6-dimension check (brooks-lint). ([#8](https://github.com/baobaolaodie/flow-comet/pull/8), [#9](https://github.com/baobaolaodie/flow-comet/pull/9))
 
 ### Fixed
 
@@ -44,7 +44,7 @@ Self-review two-tier fallback for the 6-dimension check (brooks-lint).
 
 ## [1.2.1] - 2026-08-08
 
-Installation-guide fixes (init/hook/state fixes + README guidance fixes + independently verified fixes).
+Installation-guide fixes (init/hook/state fixes + README guidance fixes + independently verified fixes). ([#1](https://github.com/baobaolaodie/flow-comet/pull/1), [#4](https://github.com/baobaolaodie/flow-comet/pull/4), [#6](https://github.com/baobaolaodie/flow-comet/pull/6), [#10](https://github.com/baobaolaodie/flow-comet/pull/10))
 
 ### Fixed
 
