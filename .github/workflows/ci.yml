@@ -216,8 +216,11 @@ jobs:
           C1=$(grep -m1 '^## \[[0-9]' CHANGELOG.md | sed -E 's/## \[([0-9.]+).*/\1/')
           C2=$(grep -m1 '^## \[[0-9]' CHANGELOG-zh.md | sed -E 's/## \[([0-9.]+).*/\1/')
           echo "README=$R1/$R2 VERSIONS=$V1/$V2 CHANGELOG=$C1/$C2"
-          [ "$R1" = "$R2" ] && [ "$R1" = "$V1" ] && [ "$R1" = "$V2" ] && [ "$R1" = "$C1" ] && [ "$R1" = "$C2" ] \
-            || { echo "版本不一致 / version mismatch across docs"; exit 1; }
+          if [ "$R1" = "$R2" ] && [ "$R1" = "$V1" ] && [ "$R1" = "$V2" ] && [ "$R1" = "$C1" ] && [ "$R1" = "$C2" ]; then
+            :
+          else
+            echo "版本不一致 / version mismatch across docs"; exit 1
+          fi
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             TAG=${GITHUB_REF#refs/tags/v}
             [ "$TAG" = "$R1" ] || { echo "tag 与文档版本不一致 / tag v$TAG != documented version $R1"; exit 1; }
