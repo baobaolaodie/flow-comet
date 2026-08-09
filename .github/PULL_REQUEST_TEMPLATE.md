@@ -17,7 +17,7 @@
 
 ## 验证（勾选已执行）/ Verification (check executed)
 
-- [ ] 回归测试 / Regression：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → ALL 95 SCENARIOS PASSED
+- [ ] 回归测试 / Regression：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → ALL 97 SCENARIOS PASSED
 - [ ] 脚本改动：先写失败测试（确认测试因缺陷失败）再实现 / Script changes: write a failing test first (confirm it fails for the right reason) before implementing
 - [ ] 文档改动：中英双语同步 / Doc changes: EN and ZH mirrored
 - [ ] 发布验证：各安装副本回归通过 / Release check: regression passes in all installed copies
