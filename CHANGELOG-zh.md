@@ -10,6 +10,16 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号仅记录于 git tag 与本文档；`bundle.yaml` 的 version 保持 1.0.0（与发布流程解耦，见 README「版本与兼容性」）。
 
+## [1.2.4] - 2026-08-09
+
+文档与消息清理——公开内容统一为纯描述语言。
+
+### Changed
+
+- **公开内容清理**：提交规范要求纯描述（不使用代号、编号或行话——提交信息、PR 标题、变更日志同一标准）；脚本注释、场景名与运行时警告消息清理过程代号——行为不变（82/82 回归 + 真实运行验证）
+- **变更日志条目补发布链接**（Keep a Changelog 惯例——公开追溯；v1.2.1~1.2.3 条目已回填）
+- 贡献指南补公开产物纯语言规范。([#14](https://github.com/baobaolaodie/flow-comet/pull/14)、[#15](https://github.com/baobaolaodie/flow-comet/pull/15))
+
 ## [1.2.3] - 2026-08-09
 
 worktree 委托链路修复。([#12](https://github.com/baobaolaodie/flow-comet/pull/12)、[#13](https://github.com/baobaolaodie/flow-comet/pull/13)、[#14](https://github.com/baobaolaodie/flow-comet/pull/14))

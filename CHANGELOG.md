@@ -10,6 +10,16 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded only in git tags and this document; `bundle.yaml` version stays 1.0.0 (decoupled from release versioning — see the README's version section).
 
+## [1.2.4] - 2026-08-09
+
+Documentation and message cleanup — public-facing content uses plain descriptive language throughout.
+
+### Changed
+
+- **Public-facing content cleanup**: commit-message convention now requires plain descriptions (no codes, numbers, or jargon — commit messages, PR titles, and CHANGELOG follow the same standard); script comments, scenario names, and runtime warning messages cleaned of process codes; behavior unchanged (82/82 regression + real-run verification).
+- **CHANGELOG entries now link their release PRs** (Keep a Changelog practice — public traceability; v1.2.1~v1.2.3 entries backfilled).
+- Contributing guide gains the plain-language convention for public artifacts. ([#14](https://github.com/baobaolaodie/flow-comet/pull/14), [#15](https://github.com/baobaolaodie/flow-comet/pull/15))
+
 ## [1.2.3] - 2026-08-09
 
 Worktree delegation chain fixes (real-run report). ([#12](https://github.com/baobaolaodie/flow-comet/pull/12), [#13](https://github.com/baobaolaodie/flow-comet/pull/13), [#14](https://github.com/baobaolaodie/flow-comet/pull/14))
