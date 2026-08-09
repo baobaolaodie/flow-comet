@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · workflow-guard.mjs 自测套件（49 场景：17 基础 + 批次 E 6 个分支/追加位置检测场景 + 批次 D T06 8 个自定义协议场景 + T-FIX-03 2 个全部完成 → done 场景 + T-FIX-04 2 个 completedChecks 校验 + T-FIX-05 2 个 next 节点顺序校验 + T-FIX-06 2 个 redEvidence 时间顺序校验 + T-FIX-09 4 个 C3 签名行尾规范化 + T-FIX-10 2 个 C3 签名标记类属性剥离 + T-FIX 回退豁免 + T-FIX-11 2 个 next 正常推进豁免 + T-FIX-12 2 个机制交互组合场景：record 覆盖 handoff + 越俎代庖 / 路由 + 节点推进）
+// C1 · workflow-guard.mjs 自测套件（49 场景：17 基础 + 批次 E 6 个分支/追加位置检测场景 + 批次 D T06 8 个自定义协议场景 +  2 个全部完成 → done 场景 + T-FIX-04 2 个 completedChecks 校验 + T-FIX-05 2 个 next 节点顺序校验 + T-FIX-06 2 个 redEvidence 时间顺序校验 + T-FIX-09 4 个 C3 签名行尾规范化 + T-FIX-10 2 个 C3 签名标记类属性剥离 + T-FIX 回退豁免 + T-FIX-11 2 个 next 正常推进豁免 + T-FIX-12 2 个机制交互组合场景：record 覆盖 handoff + 越俎代庖 / 路由 + 节点推进）
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -88,7 +88,7 @@ function runState(args, root, envOverrides = {}) {
   return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
 }
 
-// 跑 workflow-handoff.mjs：runRoot = process.cwd()（T-FIX-06 场景用 cwd=临时目录 + 伪造 state，
+// 跑 workflow-handoff.mjs：runRoot = process.cwd()（ 场景用 cwd=临时目录 + 伪造 state，
 // 直接调用 result 命令验证时间顺序校验与 recordedAt 附带，不经过 guard exit）
 function runHandoff(args, root, envOverrides = {}) {
   const res = spawnSync(process.execPath, [HANDOFF, ...args], {
@@ -304,7 +304,7 @@ function summaryContent(options = {}) {
 }
 
 // 伪造 handoffResult（P0-A 越俎代庖检测要求 done 任务有 handoff；Return Contract 完整形状）
-// T-FIX-04: handoff-guarded 落实——result 必须回传 completedChecks 含
+// handoff-guarded 落实——result 必须回传 completedChecks 含
 // required-skill:subagent-execute.flow-comet-dev（guard W1-D 严格校验；S15/S34 等场景同步补齐，
 // 缺该字段的旧格式材料已随 S35 明确覆盖 BLOCKED 路径）
 function handoffFor(taskIds) {
@@ -330,14 +330,14 @@ const TASK_P1 =
   '<task id="P01" status="done" parallel="true"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n';
 const TASK_P2 =
   '<task id="P02" status="done" parallel="true"><action>实现 P02</action><write_files>src/p2.mjs</write_files><verify>node --check src/p2.mjs</verify></task>\n';
-// T-FIX-12: 第二波 parallel pending 任务（depends_on P01 已满足——第一波 P01 done 后才可委托；
+// 第二波 parallel pending 任务（depends_on P01 已满足——第一波 P01 done 后才可委托；
 // status 属性在前，与 TASK_P1/TASK_P2 常量属性顺序一致）
 const TASK_P2_PENDING =
   '<task id="P02" status="pending" parallel="true"><action>实现 P02</action><write_files>src/p2.mjs</write_files><verify>node --check src/p2.mjs</verify><depends_on>P01</depends_on></task>\n';
-// T-FIX-12: 串行 pending 任务（depends P01,P02——第二波 P02 完成前不可执行）
+// 串行 pending 任务（depends P01,P02——第二波 P02 完成前不可执行）
 const TASK_T03_PENDING =
   '<task id="T03"><action>实现 T03</action><write_files>src/t3.mjs</write_files><verify>node --check src/t3.mjs</verify><depends_on>P01,P02</depends_on></task>\n';
-// T-FIX-09: review/verify 阶段追加的 pending T-FIX 任务（T-FIX 标准回退路径触发源）
+// review/verify 阶段追加的 pending T-FIX 任务（T-FIX 标准回退路径触发源）
 const TASK_TFIX =
   '<task id="T-FIX-01" status="pending"><action>修复 verify 发现的缺陷</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n';
 
@@ -864,7 +864,7 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- T-FIX-03 场景（S32~S33：自定义协议全部完成 → NEXT: done；部分完成仍走产物推导） ----------
+  // ----------  场景（S32~S33：自定义协议全部完成 → NEXT: done；部分完成仍走产物推导） ----------
 
   // 32: 自定义协议无 archive 节点，3 节点全部 exit 完成（completedNodes 含 brainstorm/tdd/codereview）
   // → next 输出 NEXT: done（修复前缺陷：determineNode 只按产物推导，全部完成仍输出 NODE: codereview）
@@ -888,7 +888,7 @@ const SCENARIOS = [
 
   // 33: 反例（防过度修复）——completedNodes 为空（部分完成）但产物全齐 → next 仍输出最后节点
   // codereview：产物推导继续生效，不因"全部完成 → done"判定误伤最后节点路由
-  // T-FIX-05 适配：currentNode=brainstorm 已记录 evidence（节点已工作）→ 不触发节点顺序 BLOCK；
+  //  适配：currentNode=brainstorm 已记录 evidence（节点已工作）→ 不触发节点顺序 BLOCK；
   // completedNodes 仍为空，"部分完成但产物全齐 → 仍 NODE: codereview"断言保持不变
   {
     name: '33 反例：completedNodes 空但产物全齐 → 仍 NODE: codereview',
@@ -908,7 +908,7 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- T-FIX-04 场景（S34~S35：handoff completedChecks 严格校验，handoff-guarded 落实） ----------
+  // ----------  场景（S34~S35：handoff completedChecks 严格校验，handoff-guarded 落实） ----------
 
   // 34: subagent-execute exit 通过——handoff result 的 completedChecks 含 required-skill 条目 → exit 0
   {
@@ -945,7 +945,7 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- T-FIX-05 场景（S36~S37：next 节点顺序校验，严格模式） ----------
+  // ----------  场景（S36~S37：next 节点顺序校验，严格模式） ----------
 
   // 36: next BLOCKED——currentNode=open 未 exit（completedNodes 空 + evidence 无 open 记录）
   // → 上一节点未 exit 就推进 → 严格拦截，输出恢复指令（先 exit open --apply）
@@ -979,7 +979,7 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- T-FIX-06 场景（S38~S39：redEvidence 时间顺序校验） ----------
+  // ----------  场景（S38~S39：redEvidence 时间顺序校验） ----------
 
   // 38: handoff result 时间顺序通过——先记录 redEvidence（TDD RED），再补 greenEvidence（GREEN）
   // → 两次均通过；且 evidence 中 redEvidence/greenEvidence 附带 recordedAt 时间戳
@@ -1025,7 +1025,7 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- T-FIX-09 场景（S40~S43：C3 签名行尾规范化 + T-FIX 回退豁免） ----------
+  // ----------  场景（S40~S43：C3 签名行尾规范化 + T-FIX 回退豁免） ----------
 
   // 40: execute exit 通过——TASK.md 从 LF 行尾改写为 CRLF（bash heredoc → python os.linesep
   // 跨工具编辑），任务集逻辑未变 → 签名一致（行尾规范化），不误报"任务集被修改"
@@ -1097,7 +1097,7 @@ const SCENARIOS = [
   },
 
   // 43: next 维持严格 BLOCK——verify 未 exit（evidence 无 verify 记录）且 TASK.md 无 pending
-  // 任务（非 T-FIX 回退）→ 豁免不成立 → 维持 T-FIX-05 严格拦截，输出恢复指令
+  // 任务（非 T-FIX 回退）→ 豁免不成立 → 维持  严格拦截，输出恢复指令
   {
     name: '43 next 维持 BLOCK：无 pending 任务（非 T-FIX 回退）',
     run: (dir) => {
@@ -1116,7 +1116,7 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- T-FIX-10 场景（S44~S45：C3 签名标记类属性剥离——completed_at 误报修复） ----------
+  // ----------  场景（S44~S45：C3 签名标记类属性剥离——completed_at 误报修复） ----------
 
   // 44: execute exit 通过——enter 后子代理在 task 开标签追加 completed_at 标记属性
   // （标记 task done 的时序属性，纯状态标记不影响任务集逻辑）→ 签名不受标记属性影响，不误报 BLOCK
@@ -1168,11 +1168,11 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- T-FIX-11 场景（S46~S47：next 正常推进豁免——exit 推进后的正常 next 不再被误拦） ----------
+  // ----------  场景（S46~S47：next 正常推进豁免——exit 推进后的正常 next 不再被误拦） ----------
 
   // 46: next 正常推进豁免通过——open exit --apply 已把 currentNode 推进到 design（completedNodes=['open']、
   // design 尚未开始故 evidence 无 design 记录），随后按 SKILL 协议调 next（正常路径）→ 不 BLOCK，
-  // 输出 NODE: design（T-FIX-05 误拦回归：修复前此状态被 BLOCK 为"疑似未 exit 节点 design"；
+  // 输出 NODE: design（ 误拦回归：修复前此状态被 BLOCK 为"疑似未 exit 节点 design"；
   // open 的 evidence 证明该 exit 真实发生过，满足 normalAdvanceExempt）
   {
     name: '46 next 正常：open exit 推进后 currentNode=design 无 evidence（T-FIX-11 豁免）',
@@ -1193,7 +1193,7 @@ const SCENARIOS = [
 
   // 47: next 维持严格 BLOCK——真乱序跳节点：currentNode=review 但 completedNodes 仅 ['open']
   // （open 已 exit 且有 evidence）→ review 不是 open 的路由直接后继（open 的后继是 design）
-  // → T-FIX-11 豁免不成立（T-FIX-09 回退豁免也不成立：TASK.md 无 pending）→ T-FIX-05 核心价值
+  // →  豁免不成立（T-FIX-09 回退豁免也不成立：TASK.md 无 pending）→ T-FIX-05 核心价值
   // 保持（跳节点仍严格拦截），输出恢复指令
   {
     name: '47 next BLOCKED：跳节点乱序（completedNodes 仅 open，currentNode=review）',
@@ -1211,7 +1211,7 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- T-FIX-12 场景（S48~S49：机制交互组合——两个机制同时作用，防单机制测试盲区） ----------
+  // ----------  场景（S48~S49：机制交互组合——两个机制同时作用，防单机制测试盲区） ----------
 
   // 48: 组合盲区 A（对照组 A 撞出）——record 覆盖语义 × 越俎代庖检测：先经 workflow-handoff
   // result 正确记录 T01 的 Return Contract（含 completedChecks），随后 record subagent-execute
@@ -1327,11 +1327,11 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- T-FIX-14 场景（S53~S54：分支前缀可配置，适配仓库规范） ----------
+  // ----------  场景（S53~S54：分支前缀可配置，适配仓库规范） ----------
 
   // 53: init --branch-prefix feat/ → 分支创建为 feat/<id>（适配仓库规范如 feat/）
   {
-    name: '53 init --branch-prefix feat/ 创建 feat/<id> 分支（T-FIX-14）',
+    name: '53 init --branch-prefix feat/ 创建 feat/<id> 分支',
     run: (dir) => {
       execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
       execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--allow-empty', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
@@ -1347,7 +1347,7 @@ const SCENARIOS = [
 
   // 54: 一致性校验用 state.branchPrefix（status 显示 ok）
   {
-    name: '54 status 一致性：branchPrefix=feat/ 分支 feat/<id> → ok（T-FIX-14）',
+    name: '54 status 一致性：branchPrefix=feat/ 分支 feat/<id> → ok',
     run: (dir) => {
       execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
       execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--allow-empty', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
@@ -1364,11 +1364,11 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- T-FIX-15 场景（S55~S57：init 写 status + hook 判定对齐） ----------
+  // ----------  场景（S55~S57：init 写 status + hook 判定对齐） ----------
 
   // 55: init 生成的 state 必须含 status:'running'（当前缺——hook 判定不一致的根源）
   {
-    name: '55 init state 含 status: running（T-FIX-15）',
+    name: '55 init state 含 status: running',
     run: (dir) => {
       const res = runState(['init', 'tf15-st'], dir,
         { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
@@ -1382,7 +1382,7 @@ const SCENARIOS = [
 
   // 56: init 后（open 阶段）越权写源码 → hook BLOCK（当前因 status undefined 放行——三层防线缺口）
   {
-    name: '56 hook BLOCKED：init 后越权写源码（T-FIX-15）',
+    name: '56 hook BLOCKED：init 后越权写源码',
     run: (dir) => {
       const initRes = runState(['init', 'tf15-hk'], dir,
         { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
@@ -1395,7 +1395,7 @@ const SCENARIOS = [
 
   // 57: status:'completed'（归档后状态）→ hook 放行（当前 exit 1 拦截全部写入）
   {
-    name: '57 hook 放行：status completed 归档后状态（T-FIX-15）',
+    name: '57 hook 放行：status completed 归档后状态',
     run: (dir) => {
       writeState(dir, composeState({ status: 'completed', activeChange: null, currentNode: null }));
       const res = runHook(['before_tool'], dir,
@@ -1404,11 +1404,11 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- T-FIX-16 场景（S58：init 创建 .specs/<id>/ 目录，findActiveChange 立即可识别） ----------
+  // ----------  场景（S58：init 创建 .specs/<id>/ 目录，findActiveChange 立即可识别） ----------
 
   // 58: init 后 next 识别 active change（当前因 .specs/<id>/ 目录未建报 No active change）
   {
-    name: '58 init 后 next 识别 active change（T-FIX-16）',
+    name: '58 init 后 next 识别 active change',
     run: (dir) => {
       const initRes = runState(['init', 'tf16-dir'], dir,
         { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
@@ -1421,11 +1421,11 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- T-FIX-17 场景（S59：归档完成态不兜底识别残留目录） ----------
+  // ----------  场景（S59：归档完成态不兜底识别残留目录） ----------
 
   // 59: state 为归档完成态（completed + activeChange null）→ .specs/ 顶层残留目录（含 TASK.md）不被兜底识别
   {
-    name: '59 归档后残留目录不误判为 active（T-FIX-17）',
+    name: '59 归档后残留目录不误判为 active',
     run: (dir) => {
       writeState(dir, composeState({ status: 'completed', activeChange: null, currentNode: null }));
       writeFile(dir, '.specs/stale/CHANGE.md', '# CHANGE\n## Why\nx\n');
@@ -1438,11 +1438,11 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- T-FIX-18 场景（S60：init currentNode 按协议首节点） ----------
+  // ----------  场景（S60：init currentNode 按协议首节点） ----------
 
-  // 60: 自定义协议 init → currentNode = 协议首节点 brainstorm（当前硬编码 open——D-11）
+  // 60: 自定义协议 init → currentNode = 协议首节点 brainstorm（当前硬编码 open——）
   {
-    name: '60 init currentNode 按协议首节点（T-FIX-18）',
+    name: '60 init currentNode 按协议首节点',
     run: (dir) => {
       const custom = writeCustomProtocol(dir);
       const initRes = runState(['init', 'tf18-cp'], dir, { FLOW_COMET_PROTOCOL: custom });
@@ -1454,7 +1454,7 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- 补齐场景（S61：T-FIX-15 兼容分支固化） ----------
+  // ---------- 补齐场景（S61： 兼容分支固化） ----------
 
   // 61: 旧 state（无 status 字段但有 activeChange）→ hook 按 running 处理（fail-closed 向后兼容，行为固化）
   {
@@ -1470,10 +1470,10 @@ const SCENARIOS = [
     },
   },
 
-  // 63: init 后（open 阶段）合法写 .specs/ 工件 → hook 放行（T-FIX-15 正确 RED：
+  // 63: init 后（open 阶段）合法写 .specs/ 工件 → hook 放行（ 正确 RED：
   // 修复前 init 无 status → hook「not running」throw exit 1 拦截合法写入——open 阶段无法产出工件）
   {
-    name: '63 hook 放行：init 后写 .specs/ 工件（T-FIX-15）',
+    name: '63 hook 放行：init 后写 .specs/ 工件',
     run: (dir) => {
       const initRes = runState(['init', 'tf15-ok'], dir,
         { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
@@ -1485,7 +1485,7 @@ const SCENARIOS = [
     },
   },
 
-  // 64: 新 change 与旧归档同名（state 缺失时走扫描兜底）→ 应识别为 active（T-FIX-17 扩展边界：
+  // 64: 新 change 与旧归档同名（state 缺失时走扫描兜底）→ 应识别为 active（ 扩展边界：
   // archivedIds 剥日期前缀匹配不得误伤同名新 change）
   {
     name: '64 同名新 change 不被归档检查误跳过（T-FIX-17 边界）',
@@ -1500,11 +1500,11 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- Round 2 场景（D-14~D-20，独立验证者发现） ----------
+  // ---------- Round 2 场景（~D-20，独立验证者发现） ----------
 
-  // 65: record 命令的 --protocol 参数不得污染 payload（D-14：payload 解析前剥离）
+  // 65: record 命令的 --protocol 参数不得污染 payload（：payload 解析前剥离）
   {
-    name: '65 record --protocol 不污染 payload（D-14）',
+    name: '65 record --protocol 不污染 payload',
     run: (dir) => {
       const custom = writeCustomProtocol(dir);
       const initRes = runState(['init', 'tf14-rec'], dir,
@@ -1523,10 +1523,10 @@ const SCENARIOS = [
     },
   },
 
-  // 66: 自定义协议未声明 writeWhitelist 时，非内置节点写源码 → BLOCK（D-16 方案 B：
+  // 66: 自定义协议未声明 writeWhitelist 时，非内置节点写源码 → BLOCK（ 方案 B：
   // 协调者默认 .specs/——当前 fail-open 放行）
   {
-    name: '66 自定义节点未声明白名单写源码 BLOCK（D-16）',
+    name: '66 自定义节点未声明白名单写源码 BLOCK',
     run: (dir) => {
       const custom = writeCustomProtocol(dir);
       writeState(dir, composeState({ status: 'running' }));
@@ -1537,9 +1537,9 @@ const SCENARIOS = [
     },
   },
 
-  // 67: 自定义协议未声明白名单时，写 .specs/ 工件 → 放行（D-16 协调者默认的正面）
+  // 67: 自定义协议未声明白名单时，写 .specs/ 工件 → 放行（ 协调者默认的正面）
   {
-    name: '67 自定义节点未声明白名单写工件放行（D-16）',
+    name: '67 自定义节点未声明白名单写工件放行',
     run: (dir) => {
       const custom = writeCustomProtocol(dir);
       writeState(dir, composeState({ status: 'running' }));
@@ -1552,9 +1552,9 @@ const SCENARIOS = [
   },
 
   // 68: 旧格式 state（无 status 字段 + 无 activeChange + 无 currentNode——批次 C 归档后升级场景）
-  // → hook 放行（D-15：无 activeChange 与无 state 文件同语义——当前被「not running」拦截）
+  // → hook 放行（：无 activeChange 与无 state 文件同语义——当前被「not running」拦截）
   {
-    name: '68 旧 state 无 status 无 activeChange hook 放行（D-15）',
+    name: '68 旧 state 无 status 无 activeChange hook 放行',
     run: (dir) => {
       const st = baseState('open');
       delete st.status;
@@ -1567,10 +1567,10 @@ const SCENARIOS = [
     },
   },
 
-  // 69: writeWhitelist 路径支持 <change-id> 占位符（D-20：协议复用自动适配——
+  // 69: writeWhitelist 路径支持 <change-id> 占位符（：协议复用自动适配——
   // 与 artifacts paths 同机制——当前字面匹配失败 BLOCK）
   {
-    name: '69 writeWhitelist change-id 占位符（D-20）',
+    name: '69 writeWhitelist change-id 占位符',
     run: (dir) => {
       const custom = customProtocol();
       custom.writeWhitelist = { brainstorm: ['.specs/<change-id>/'] };
@@ -1589,9 +1589,9 @@ const SCENARIOS = [
     },
   },
 
-  // 70: 自定义协议 init 输出 NODE: 协议首节点（D-17：printNext 硬编码 open——输出与 state 不一致）
+  // 70: 自定义协议 init 输出 NODE: 协议首节点（：printNext 硬编码 open——输出与 state 不一致）
   {
-    name: '70 init 输出 NODE 协议首节点（D-17）',
+    name: '70 init 输出 NODE 协议首节点',
     run: (dir) => {
       const custom = writeCustomProtocol(dir);
       const res = runState(['init', 'tf17-out'], dir, { FLOW_COMET_PROTOCOL: custom });
@@ -1601,10 +1601,10 @@ const SCENARIOS = [
     },
   },
 
-  // 71: state completed + activeChange 非空（残留值）→ status 应 no-change（D-19：
+  // 71: state completed + activeChange 非空（残留值）→ status 应 no-change（：
   // completed 检查优先于 activeChange 分支——当前 activeChange 分支先命中误判）
   {
-    name: '71 completed state 残留 activeChange 不误判（D-19）',
+    name: '71 completed state 残留 activeChange 不误判',
     run: (dir) => {
       const st = composeState({ status: 'completed', currentNode: null });
       st.activeChange = 'stale-id';
@@ -1619,10 +1619,10 @@ const SCENARIOS = [
   },
 
   // 72: 自定义协议未声明 state.statePath（最小 schema）→ hook 不崩溃，写 .specs/ 放行
-  // （D-21：statePath 缺省回退 .comet/flow-comet-state.json——与 workflow-state 硬编码一致；
+  // （：statePath 缺省回退 .comet/flow-comet-state.json——与 workflow-state 硬编码一致；
   //  当前空值解析崩溃 exit 1 全量拦截）
   {
-    name: '72 无 statePath 协议 hook 不崩溃（D-21）',
+    name: '72 无 statePath 协议 hook 不崩溃',
     run: (dir) => {
       const custom = customProtocol();
       delete custom.state;
@@ -1635,10 +1635,10 @@ const SCENARIOS = [
     },
   },
 
-  // 73: state 文件带 UTF-8 BOM（外部写入如会话 Write）→ status 正常输出（D-22：
+  // 73: state 文件带 UTF-8 BOM（外部写入如会话 Write）→ status 正常输出（：
   // 读端 JSON.parse 应容忍 BOM——当前崩）
   {
-    name: '73 state 带 BOM 正常读取（D-22）',
+    name: '73 state 带 BOM 正常读取',
     run: (dir) => {
       const st = composeState({ status: 'running' });
       const raw = '﻿' + JSON.stringify(st, null, 2) + '\n';
@@ -1652,9 +1652,9 @@ const SCENARIOS = [
     },
   },
 
-  // 74: hook 读带 BOM 的 state → 判定正常（D-22——hook readStateJson 的 BOM 容忍）
+  // 74: hook 读带 BOM 的 state → 判定正常（——hook readStateJson 的 BOM 容忍）
   {
-    name: '74 hook 读带 BOM state 正常（D-22）',
+    name: '74 hook 读带 BOM state 正常',
     run: (dir) => {
       const st = baseState('open');
       st.status = 'running';
@@ -1668,12 +1668,12 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- T-FIX-19 场景（S76~S77：builtin 降级须含缓存尝试证据） ----------
+  // ----------  场景（S76~S77：builtin 降级须含缓存尝试证据） ----------
 
   // 76: builtin-quickcheck 声明 + 不可用原因但无缓存尝试证据 → BROOKS-LINT WARN
-  // （T-FIX-19：防「未尝试 Read 插件缓存协议文件」的偷懒降级——修复前不校验 = RED）
+  // （：防「未尝试 Read 插件缓存协议文件」的偷懒降级——修复前不校验 = RED）
   {
-    name: '76 builtin 无缓存尝试证据 → WARN（T-FIX-19）',
+    name: '76 builtin 无缓存尝试证据 → WARN',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
@@ -1690,9 +1690,9 @@ const SCENARIOS = [
   },
 
   // 78: cache-brooks 声明（两级降级路径第 2 级——读缓存手动执行成功）→ 放行
-  // （T-FIX-19 补：guard method 正则须识别 cache-brooks——修复前正则不匹配 → 全文无 brooks-review/builtin → BLOCKED = RED）
+  // （ 补：guard method 正则须识别 cache-brooks——修复前正则不匹配 → 全文无 brooks-review/builtin → BLOCKED = RED）
   {
-    name: '78 cache-brooks 声明 → 放行（T-FIX-19）',
+    name: '78 cache-brooks 声明 → 放行',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
@@ -1711,9 +1711,9 @@ const SCENARIOS = [
   },
 
   // 77: builtin-quickcheck 声明 + 不可用原因 + 含缓存尝试证据（已 Read 插件缓存协议文件）→ 无 WARN 放行
-  // （T-FIX-19 正面：两级降级路径的第 2 级被正确执行后的合法态）
+  // （ 正面：两级降级路径的第 2 级被正确执行后的合法态）
   {
-    name: '77 builtin 含缓存尝试证据 → 无 WARN（T-FIX-19）',
+    name: '77 builtin 含缓存尝试证据 → 无 WARN',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
@@ -1729,9 +1729,9 @@ const SCENARIOS = [
     },
   },
 
-  // 75: guard 读带 BOM 的 state → 正常（D-22——guard readStateJson 的 BOM 容忍）
+  // 75: guard 读带 BOM 的 state → 正常（——guard readStateJson 的 BOM 容忍）
   {
-    name: '75 guard 读带 BOM state 正常（D-22）',
+    name: '75 guard 读带 BOM state 正常',
     run: (dir) => {
       const st = baseState('open');
       st.status = 'running';
@@ -1745,13 +1745,13 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- batch-H 场景（S79~S83：worktree 委托链路，P1~P7 实录） ----------
+  // ----------  场景（S79~S83：worktree 委托链路，P1~P7 实录） ----------
 
   // 79: P0 路由诊断——TASK 无 status 属性（旧模板形态）→ exit plan --apply 的 P0 路由输出 ROUTE WARN
-  // （batch-H P3：结构校验保持严格 + 检测失败纠偏可见——修复前无诊断 = RED）
+  // （ P3：结构校验保持严格 + 检测失败纠偏可见——修复前无诊断 = RED）
   // nextNode 只看 completedNodes——P0 路由触发场景 = exit plan（completed 后 nextNode=execute → 路由检查）
   {
-    name: '79 P0 路由无匹配输出诊断（batch-H）',
+    name: '79 P0 路由无匹配输出诊断',
     run: (dir) => {
       const st = baseState('plan');
       st.completedNodes = ['open', 'design'];
@@ -1770,9 +1770,9 @@ const SCENARIOS = [
   },
 
   // 80: C4 catch 可见化——非 git 仓库 → entry execute 输出 C4-CHECK SKIP
-  // （batch-H P4：检测失败也要可见——修复前 catch 静默 = RED）
+  // （ P4：检测失败也要可见——修复前 catch 静默 = RED）
   {
-    name: '80 C4 catch 非 git 仓库输出 SKIP（batch-H）',
+    name: '80 C4 catch 非 git 仓库输出 SKIP',
     run: (dir) => {
       const st = baseState('execute');
       writeState(dir, st);
@@ -1783,7 +1783,7 @@ const SCENARIOS = [
     },
   },
 
-  // 81: handoff result commitHash 存在性校验——不存在 → HANDOFF ERROR（固化：校验已存在（W2-D），batch-H P6 确认）
+  // 81: handoff result commitHash 存在性校验——不存在 → HANDOFF ERROR（固化：校验已存在（W2-D）， P6 确认）
   {
     name: '81 handoff result 无效 commitHash → ERROR（batch-H 固化）',
     run: (dir) => {
@@ -1806,9 +1806,9 @@ const SCENARIOS = [
   },
 
   // 82: entry/exit WARN COUNT 汇总行——构造 BROOKS-LINT WARN → exit 输出 WARN COUNT
-  // （batch-H F：可观测性——修复前无汇总行 = RED）
+  // （ F：可观测性——修复前无汇总行 = RED）
   {
-    name: '82 exit 输出 WARN COUNT 汇总（batch-H）',
+    name: '82 exit 输出 WARN COUNT 汇总',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
