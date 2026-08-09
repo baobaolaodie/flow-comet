@@ -12,7 +12,7 @@
 // 仅 node 内置模块（child_process/fs/os/path）；无网络；不依赖 flow-kit 模板目录
 // 存在（fallback 场景用内置段名；S1/S4 复制模板文件进临时目录验证 C2 模板派生）。
 //
-// 批次 D T06 协议路径适配：T03 起 workflow-guard 用 readProtocolFile（protected-path：
+// 自定义协议路径适配：T03 起 workflow-guard 用 readProtocolFile（protected-path：
 // 协议路径必须在 runRoot 内）。场景 runRoot=临时目录、内置协议默认路径在 packageRoot
 // （脚本所在仓库，tmpdir 外）→ 全部场景曾报 "workflow protocol file must stay inside the
 // project root"。修复（测试场景适配，非弱化断言）：真实项目协议位于 <项目根>/reference/
@@ -150,7 +150,7 @@ function baseState(node) {
   };
 }
 
-// ---------- 批次 D T06：自定义协议场景材料 ----------
+// ---------- 自定义协议场景材料 ----------
 
 // 自定义协议（compose-demo）：3 节点 brainstorm/tdd/codereview（避开内置 8 节点 id，验证
 // 协议数据化路由与通用层防线对自定义节点生效）；无 writeWhitelist（hook 回退内置缺省表）；
@@ -303,7 +303,7 @@ function summaryContent(options = {}) {
   ].join('\n');
 }
 
-// 伪造 handoffResult（P0-A 越俎代庖检测要求 done 任务有 handoff；Return Contract 完整形状）
+// 伪造 handoffResult（越俎代庖检测要求 done 任务有 handoff；Return Contract 完整形状）
 // handoff-guarded 落实——result 必须回传 completedChecks 含
 // required-skill:subagent-execute.flow-comet-dev（guard W1-D 严格校验；S15/S34 等场景同步补齐，
 // 缺该字段的旧格式材料已随 S35 明确覆盖 BLOCKED 路径）
@@ -619,7 +619,7 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- 批次 E 场景（S18~S23：分支校验 + 追加位置检测） ----------
+  // ---------- 分组场景（S18~S23：分支校验 + 追加位置检测） ----------
 
   // 18: entry archive 分支校验 BLOCKED（branchMode=true + activeChange + 当前分支非 change/<id>）
   // 注意：需初始 commit——unborn HEAD 下 git rev-parse --abbrev-ref HEAD 失败（按规格"失败跳过"不触发校验）
@@ -713,7 +713,7 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- 批次 D T06 场景（S24~S31：自定义协议加载路由 + 通用层防线 + 特化校验绑定 + hook 白名单缺省） ----------
+  // ---------- 分组场景（S24~S31：自定义协议加载路由 + 通用层防线 + 特化校验绑定 + hook 白名单缺省） ----------
 
   // 24: 自定义协议加载路由（AC-2/3）——--protocol CLI 指向 <dir>/custom-protocol.json；
   // workflow-state status 按协议 outputSchemas 推导 currentNode：全部产物缺失 → 第 1 节点
