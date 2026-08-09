@@ -122,8 +122,8 @@ jobs:
             const P = [];
 
             // Feature-branch prefix (release PR head=dev is exempt)
-            if (!isRelease && !/^(feat|fix|docs|chore|hotfix)\//.test(pr.head.ref))
-              P.push(`dev PR head branch must carry a feat/fix/docs/chore/hotfix prefix, got ${pr.head.ref}`);
+            if (!isRelease && !/^(feat|fix|docs|chore|hotfix|ci)\//.test(pr.head.ref))
+              P.push(`dev PR head branch must carry a feat/fix/docs/chore/hotfix/ci prefix, got ${pr.head.ref}`);
 
             // dev-main sync (release PR precondition + dev integration gate)
             // Tree-level check: sync means identical trees. A release squash commit may
