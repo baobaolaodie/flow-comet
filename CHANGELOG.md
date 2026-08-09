@@ -10,6 +10,16 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded only in git tags and this document; `bundle.yaml` version stays 1.0.0 (decoupled from release versioning — see the README's version section).
 
+## [1.3.0] - 2026-08-10
+
+Automatic project-context initialization (init pre-step).
+
+### Added
+
+- **Automatic initialization detection**: on first use in a project, the workflow automatically detects whether a project context (`CONTEXT.md`) exists and prompts to initialize it when missing — existing AI-context documents (such as `CLAUDE.md` / `AGENTS.md`) are read and integrated with source attribution (existing files are never modified); projects with a fresh context run silently. No separate command to remember.
+- **Full initialization execution**: `init <id> --init-context` reads existing documents and probes the codebase to generate a template-aligned `CONTEXT.md` (seven sections, source-attribution citations); `--init-skip` records the skip and silences future prompts.
+- guard self-test suite expanded to 87 scenarios (S84~S88: prompt-not-generate / full-init generation / skip memory / fresh-silence / attribution & zero-modification).
+
 ## [1.2.4] - 2026-08-09
 
 Documentation and message cleanup — public-facing content uses plain descriptive language throughout.

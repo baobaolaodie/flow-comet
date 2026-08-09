@@ -53,12 +53,24 @@ Hook blocking semantics: PreToolUse hook exit 2 (blocking — prevents the tool 
 
 ## 6. Guard self-test suite (author regression baseline)
 
-`scripts/guard-self-test.mjs`: **82 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios) — the author's regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
+`scripts/guard-self-test.mjs`: **87 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection S84~S88) — the author's regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
 
 ```bash
 node .claude/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 82 SCENARIOS PASSED
+# → ALL 87 SCENARIOS PASSED
 ```
+
+## 6.5 Automatic initialization detection (init pre-step)
+
+On `init`, the workflow automatically detects whether a project context (`.specs/CONTEXT.md`) exists and classifies the project (A~F):
+
+- **A/B**: a context decision was recorded or the context is fresh (≤ 90 days) → fully silent
+- **C**: context exists but the last scan is older than 90 days → hint only (non-blocking)
+- **D**: no context + existing AI-context documents (CLAUDE.md / AGENTS.md / .cursor / .windsurf / Copilot / Cline) → prompt listing them; on approval, reads and integrates them with source attribution (`from <doc>:<line>` + a source-documents section) — **existing files are never modified**
+- **E**: no context + code present → prompt; full generation on approval (dependency/directory probing fills the tech-stack and abstraction sections)
+- **F**: greenfield (no code context) → prompt; skeleton generation on approval
+
+Explicit parameter authorization (no blocking prompts, headless-safe): `--init-context` runs the full generation (≈15-30k tokens, first use only, stated in the prompt); `--init-skip` records `ai_context_doc: none` and silences future prompts. Project-level fields (`ai_context_doc`, `last_intel_scan`) persist across changes; state-schema validates them (fail-closed, legacy states default to null).
 
 ## Design principles
 
