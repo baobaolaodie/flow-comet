@@ -79,6 +79,8 @@ Issue 确认后：bug 用 `fix/` 分支、feature 用 `feat/` 分支——都按
 
 [Conventional Commits](https://www.conventionalcommits.org/zh-CN/)：
 
+> **提交信息是公开产物**——在 GitHub 的 git 历史中可见。请写成纯描述：**不含内部标识**（批次号如 `batch-H`、缺陷/任务编号如 `T-FIX-19`/`P1`/`S79`、内部术语如 `dogfood`/`round2`）。与 CHANGELOG 和公开文档同一标准。示例：`fix: brooks 6 维自查两级降级路径`——而不是 `fix: T-FIX-19 ...`。
+
 ```
 <type>(<scope>): <subject>
 
