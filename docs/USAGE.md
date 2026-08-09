@@ -107,7 +107,7 @@ These scripts are **run automatically by the flow-comet skill** — you normally
 
 ```bash
 node workflow-state.mjs status             # current state + branch consistency
-node workflow-state.mjs init <id> [--branch-prefix <prefix>] [--init-context|--init-skip]   # init change (auto branch, prefix default change/; --init-context runs full context initialization, --init-skip records skip)
+node workflow-state.mjs init <id> [--branch-prefix <prefix>] [--init-context|--init-skip]   # init change (auto branch, prefix default change/; --init-context prompts context generation — the agent reads existing docs and generates CONTEXT.md, re-run after generation to validate and record the scan timestamp; --init-skip records skip)
 node workflow-state.mjs next               # next node + SKILL
 node workflow-state.mjs record <node> '{...}'                  # record node evidence
 node workflow-state.mjs config set enablePrReview true         # enable PR review
