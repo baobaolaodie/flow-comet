@@ -1840,6 +1840,79 @@ const SCENARIOS = [
       assertOut(res, 'missing Output Schema artifacts');
     },
   },
+
+  // 84~88: 自动初始化检测（auto-init-detection）——init 前置探测 + 提示/静默 + --init-context/--init-skip
+  // 84: CONTEXT 缺失 + 有代码上下文 → init 输出 INIT-NEEDED 且不自动生成（实现前无提示 = RED 语义）
+  {
+    name: '84 CONTEXT 缺失 + 有代码 → init 输出 INIT-NEEDED 不生成',
+    run: (dir) => {
+      writeFile(dir, 'package.json', '{"name":"x"}');
+      const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'INIT-NEEDED');
+      if (fs.existsSync(path.join(dir, '.specs', 'CONTEXT.md'))) throw new Error('CONTEXT 不应被自动生成');
+    },
+  },
+
+  // 85: --init-context → 生成模板 7 段 CONTEXT.md + state.last_intel_scan 写入
+  {
+    name: '85 --init-context 生成模板 7 段 CONTEXT + state 写入',
+    run: (dir) => {
+      writeFile(dir, 'package.json', '{"name":"x"}');
+      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      const ctx = fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8');
+      for (const seg of ['项目概要', '技术栈', '域语言', '已锁决策', '默认偏好', '既有抽象索引', 'intel-scan 元数据']) {
+        if (!ctx.includes(seg)) throw new Error('CONTEXT 缺段: ' + seg);
+      }
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      if (!st.last_intel_scan) throw new Error('state 缺 last_intel_scan');
+    },
+  },
+
+  // 86: --init-skip → state.ai_context_doc='none'，下次 init 不再提示
+  {
+    name: '86 --init-skip 记 none 且下次 init 静默',
+    run: (dir) => {
+      writeFile(dir, 'package.json', '{"name":"x"}');
+      runState(['init', CHANGE_ID, '--init-skip'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const st1 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      if (st1.ai_context_doc !== 'none') throw new Error('ai_context_doc 应为 none');
+      const res2 = runState(['init', CHANGE_ID + '-2'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      if (res2.output.includes('INIT-NEEDED') || res2.output.includes('INIT-HINT')) throw new Error('下次 init 不应再提示');
+    },
+  },
+
+  // 87: CONTEXT 新鲜（last_intel_scan ≤90 天）→ init 零初始化输出（正例）
+  {
+    name: '87 CONTEXT 新鲜 → init 零初始化输出',
+    run: (dir) => {
+      writeState(dir, { ...baseState('open'), last_intel_scan: new Date(Date.now() - 10 * 864e5).toISOString() });
+      writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n');
+      const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      if (res.output.includes('INIT-NEEDED') || res.output.includes('INIT-HINT')) throw new Error('不应有初始化提示');
+    },
+  },
+
+  // 88: 有既有 AI 文档 → INIT-NEEDED 列出 + --init-context 后源文档段/出处标注 + 既有文档零改动（正例）
+  {
+    name: '88 既有 AI 文档 → 列出 + 整合出处 + 零改动',
+    run: (dir) => {
+      writeFile(dir, 'CLAUDE.md', '# CLAUDE\n项目约定：使用 kebab-case 命名。\n');
+      writeFile(dir, 'package.json', '{"name":"x"}');
+      const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertOut(res, 'INIT-NEEDED');
+      assertOut(res, 'CLAUDE.md');
+      const res2 = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res2, 0);
+      const ctx = fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8');
+      if (!ctx.includes('源文档')) throw new Error('缺源文档段');
+      if (!ctx.includes('CLAUDE.md:2')) throw new Error('缺出处标注');
+      const claude = fs.readFileSync(path.join(dir, 'CLAUDE.md'), 'utf8');
+      if (claude !== '# CLAUDE\n项目约定：使用 kebab-case 命名。\n') throw new Error('CLAUDE.md 被改动');
+    },
+  },
 ];
 
 // ---------- 运行 ----------
