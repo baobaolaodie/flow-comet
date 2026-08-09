@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema } from './protocol-utils.mjs';
 import { validateStateFields } from './state-schema.mjs';
+import { probeProject, classify, printDetection, runFullInit, skipInit } from './context-init.mjs';
 
 const command = process.argv[2] ?? 'status';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -389,8 +390,10 @@ async function main() {
   if (command === 'init') {
     const changeName = process.argv[3];
     if (!changeName) throw new Error('init requires a change name.');
-    // --branch-prefix <prefix>（缺省 'change/'）；从剩余参数解析
+    // --branch-prefix <prefix>（缺省 'change/'）；--init-context / --init-skip（自动初始化检测授权）
     let branchPrefix = 'change/';
+    let initContext = false;
+    let initSkip = false;
     const initArgs = process.argv.slice(4);
     for (let i = 0; i < initArgs.length; i++) {
       if (initArgs[i] === '--branch-prefix') {
@@ -405,7 +408,30 @@ async function main() {
           throw new Error('--branch-prefix requires a non-empty prefix (e.g. feat/)');
         }
         branchPrefix = value.endsWith('/') ? value : value + '/';
+      } else if (initArgs[i] === '--init-context') {
+        initContext = true;
+      } else if (initArgs[i] === '--init-skip') {
+        initSkip = true;
       }
+    }
+    // 自动初始化检测（前置步骤）：读旧 state（项目级字段跨 change 保留）→ 探测 → 判决 → 提示/执行
+    let prevState = null;
+    try { prevState = await readState(); } catch { prevState = null; }
+    const probe = await probeProject(runRoot, prevState);
+    const verdict = classify(probe, prevState);
+    if (initContext || initSkip) {
+      // 显式授权路径：--init-context 全量生成；--init-skip 记 none
+      if (initContext && verdict !== 'skip') {
+        await runFullInit(runRoot, probe);
+        console.log('INIT-DONE: 项目上下文（CONTEXT.md）已生成。');
+      } else if (initContext) {
+        console.log('INIT-DONE: 项目上下文已存在且新鲜，跳过生成。');
+      }
+      if (initSkip && !initContext) {
+        console.log('INIT-SKIPPED: 已记录跳过初始化。');
+      }
+    } else {
+      printDetection(probe, verdict);
     }
     // E1: branchMode 自动判定——git 仓库（cwd=runRoot）→ true；非 git 仓库 → false
     const branchMode = isInsideWorkTree();
@@ -422,7 +448,13 @@ async function main() {
       enablePrReview: false,
       branchPrefix,
       status: 'running',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      // 项目级上下文字段跨 change 保留（迁移旧 state；--init-context 刷新扫描时间；--init-skip 记拒绝）
+      ...(prevState?.ai_context_doc !== undefined ? { ai_context_doc: prevState.ai_context_doc } : {}),
+      ...(initSkip ? { ai_context_doc: 'none' } : {}),
+      ...(initContext && verdict !== 'skip'
+        ? { last_intel_scan: new Date().toISOString() }
+        : (prevState?.last_intel_scan !== undefined ? { last_intel_scan: prevState.last_intel_scan } : {}))
     };
     await writeState(state);
     // init 创建 .specs/<id>/ 目录——文件即真相从 init 起成立，findActiveChange 立即可识别
