@@ -15,3 +15,7 @@ docs/internal/
 .specs/
 
 flow-kit/
+
+CLAUDE.md
+# 本地测试集（验证阶梯工具，不随发布分发）
+scripts/reset-dogfood.mjs

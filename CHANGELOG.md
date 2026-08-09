@@ -19,8 +19,18 @@ Automatic project-context initialization (init pre-step).
 ### Added
 
 - **Automatic initialization detection**: on first use in a project, the workflow automatically detects whether a project context (`CONTEXT.md`) exists and prompts to initialize it when missing — existing AI-context documents (such as `CLAUDE.md` / `AGENTS.md`) are read and integrated with source attribution (existing files are never modified); projects with a fresh context run silently. No separate command to remember.
-- **Full initialization execution**: `init <id> --init-context` reads existing documents and probes the codebase to generate a template-aligned `CONTEXT.md` (seven sections, source-attribution citations); `--init-skip` records the skip and silences future prompts.
-- guard self-test suite expanded to 87 scenarios (S84~S88: prompt-not-generate / full-init generation / skip memory / fresh-silence / attribution & zero-modification).
+- **Agent-assisted generation protocol**: `init <id> --init-context` is now a collaboration — the script performs deterministic detection, decision, prompting, and validation, while the agent reads existing documents and probes the codebase to generate a template-aligned `CONTEXT.md` (seven sections, source-attribution citations, accumulated glossary/decisions/defaults preserved); the script validates the seven sections plus key template formats (dated decision entries, metadata fields, glossary table) and records the scan timestamp only after validation passes. A re-run after generation completes the handoff.
+- **Template-aware guidance**: the generation prompt reports whether the flow-kit CONTEXT template is detected and validates section names against it (built-in fallback when the template is missing).
+- **Scenario-count consistency check**: the regression suite now fails when public docs' scenario count drifts from the actual suite size.
+- guard self-test suite expanded to 95 scenarios (S84~S96: prompt-not-generate / generation guidance / validation pass & fail / placeholder tolerance / guidance wording).
+
+### Fixed
+
+- The freshness hint no longer shows "null days" when no scan record exists (legacy projects) — it points to the exact next action instead.
+- Refreshing project context preserves accumulated CONTEXT content (glossary / locked decisions / defaults) instead of overwriting it.
+- New-project skeleton CONTEXT (placeholder sections) passes validation instead of being rejected.
+- Re-running `init` with an existing change id warns before resetting progress (protection against accidental progress loss).
+- Agent-generated CONTEXT entries in the wrong format (e.g. backtick-wrapped dates) are caught by format validation with a precise rewrite hint.
 
 ## [1.2.4] - 2026-08-09
 

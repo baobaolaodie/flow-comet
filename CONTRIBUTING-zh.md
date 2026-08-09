@@ -75,7 +75,7 @@ git branch -d hotfix/<描述>
 
 - **运行时**：Node.js ≥ 18（ESM）
 - **仓库**：clone 后先验证回归基线可跑：
-  `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 87 SCENARIOS PASSED`
+  `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 95 SCENARIOS PASSED`
 - **创作环境**：Claude Code（skill/hook 在 Claude Code 会话中运行）；hook 通过 `prepare-env` 安装到你的项目 `.claude/`
 - **机制相关工作**：动手改脚本前先读 [docs/MECHANISM.md](docs/MECHANISM.md) 了解机制语义（行为层）
 
@@ -92,7 +92,7 @@ Issue 确认后：bug 用 `fix/` 分支、feature 用 `feat/` 分支——都按
 
 - **权威源**：skill/脚本改动在 `.comet/bundle-drafts/flow-comet/skills/`（单一权威源；`.claude/` 副本是安装产物——用 `prepare-env` 更新，勿手改）
 - **TDD**：每个机制修复先写 RED 场景（`guard-self-test.mjs`——确认以正确原因失败）→ GREEN → 全量回归
-- **回归基线**：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 87 SCENARIOS PASSED`（每次改动后必须）
+- **回归基线**：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 95 SCENARIOS PASSED`（每次改动后必须）
 - **文档同步**：行为层文档在 `docs/`（中英双语——改文档时两语同步）；实现细节不进公开文档
 - **向后兼容**：旧 change/旧 state 照常工作——渐进 WARN 优先于 BLOCK
 - **公开文档不使用代号、编号或行话**：README/docs/CHANGELOG/提交信息保持一致
@@ -167,7 +167,7 @@ git push --force-with-lease origin feat/<描述>            # feature 分支允�
 ## 发布审批单
 
 - 包含改动：PR 列表 + 每项一句话摘要
-- 验证结果：回归（87 场景）/ 安装副本验证
+- 验证结果：回归（95 场景）/ 安装副本验证
 - 版本：X.Y.Z（文档批次可不 bump）
 ```
 
