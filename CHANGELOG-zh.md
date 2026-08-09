@@ -10,6 +10,23 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号仅记录于 git tag 与本文档；`bundle.yaml` 的 version 保持 1.0.0（与发布流程解耦，见 README「版本与兼容性」）。
 
+## [1.2.3] - 2026-08-09
+
+worktree 委托链路修复（真实运行实录：points-system-recon）。
+
+### Fixed
+
+- **P0 路由诊断**：TASK.md task 标签含 `parallel="true"` 但缺 `status="pending"`（旧模板形态）时，P0 路由输出 `P0-ROUTE WARN` 说明属性顺序要求——结构校验保持严格，检测失败可见（不再静默卡在 execute）
+- **C4 检查可见化**：worktree 脏检查的 catch 块输出 `C4-CHECK SKIP: <原因>`（此前静默吞错——Windows 下 git 命令失败不可见）
+- **WARN COUNT 汇总行**：entry/exit 输出末尾追加 `WARN COUNT: N`（不改变既有输出）
+- **空退出文档-实现一致化**：execute SKILL 不再声称「空退出」路径（guard 实际三层 BLOCKED：evidence → 串行 pending → 产物）；文档改为正确路径（P0 直路由 subagent-execute / 显式 `parallelTakeoverApproved` 豁免）
+- **委托前检查清单**：subagent-execute SKILL 强制委托前检查（git status / HEAD / 内联上下文）+ Red Flag；dirty-worktree 协议标注为委托前必做
+- guard 自测套件扩展至 82 场景（S79~S83；RED→GREEN 正确失败原因，独立验证者 24 条独立构造断言复验）
+
+### Changed
+
+- Troubleshooting 新增条目（P0-ROUTE WARN / C4-CHECK SKIP / WARN COUNT，双语）；场景数 77→82 全公开文档同步（历史条目不改）
+
 ## [1.2.2] - 2026-08-08
 
 6 维自查的 brooks-lint 两级降级路径。

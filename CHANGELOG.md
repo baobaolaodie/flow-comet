@@ -10,6 +10,23 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded only in git tags and this document; `bundle.yaml` version stays 1.0.0 (decoupled from release versioning — see the README's version section).
 
+## [1.2.3] - 2026-08-09
+
+Worktree delegation chain fixes (real-run report: points-system-recon).
+
+### Fixed
+
+- **P0-route diagnostic**: when TASK.md task tags carry `parallel="true"` without `status="pending"` (old template shape), the P0 router now emits a `P0-ROUTE WARN` explaining the required attribute order — structural validation stays strict, failures are visible instead of silently stalling in execute.
+- **C4 check visible**: the worktree dirty-check catch block now prints `C4-CHECK SKIP: <reason>` (previously silently swallowed — Windows git-command failures were invisible).
+- **WARN COUNT summary**: entry/exit output ends with a `WARN COUNT: N` summary line (appended; existing output unchanged).
+- **Empty-exit documentation aligned with implementation**: the execute SKILL no longer claims an "empty exit" path (guard blocks it in three layers: evidence → serial pending → output-schema artifacts); documented correct paths (P0 routing to subagent-execute / explicit `parallelTakeoverApproved` exemption).
+- **Pre-delegation checklist**: subagent-execute SKILL now mandates a pre-delegation checklist (git status / HEAD / inline context) with a Red Flag; dirty-worktree protocol marked as mandatory before delegation.
+- guard self-test suite expanded to 82 scenarios (S79~S83; RED→GREEN with correct failure reasons, verified by an independent reviewer with 24 independently constructed assertions).
+
+### Changed
+
+- Troubleshooting gains new entries (P0-ROUTE WARN / C4-CHECK SKIP / WARN COUNT, bilingual); scenario counts 77→82 synced across all public docs (historical changelog entries unchanged).
+
 ## [1.2.2] - 2026-08-08
 
 Self-review two-tier fallback for the 6-dimension check (brooks-lint).
