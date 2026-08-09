@@ -169,4 +169,5 @@ jobs:
       - name: '死链检查'
         uses: lycheeverse/lychee-action@v2
         with:
-          args: --no-progress --exclude 'https?://github\.com/baobaolaodie/flow-comet/pull/' README.md README-zh.md CONTRIBUTING.md CONTRIBUTING-zh.md CHANGELOG.md CHANGELOG-zh.md docs/ .github/
+          # 排除: 未合并 PR 404 误报 / claude.ai 防爬 403 误报（GitHub Actions IP 被 Cloudflare 拒，浏览器可访问）
+          args: --no-progress --exclude 'https?://github\.com/baobaolaodie/flow-comet/pull/|https?://claude\.ai/' README.md README-zh.md CONTRIBUTING.md CONTRIBUTING-zh.md CHANGELOG.md CHANGELOG-zh.md docs/ .github/
