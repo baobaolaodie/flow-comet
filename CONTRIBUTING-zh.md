@@ -99,7 +99,7 @@ Issue 确认后：bug 用 `fix/` 分支、feature 用 `feat/` 分支——都按
 
 ## 提交规范
 
-[Conventional Commits](https://www.conventionalcommits.org/zh-CN/)：
+[Conventional Commits](https://www.conventionalcommits.org/zh-hans/)：
 
 > **提交信息是公开产物**——在 GitHub 的 git 历史中可见。请写纯描述：**不使用代号、编号或行话**。与 CHANGELOG 和公开文档同一语言标准。示例：`fix: brooks 6 维自查两级降级路径`。
 
