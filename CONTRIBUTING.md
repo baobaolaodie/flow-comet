@@ -176,11 +176,11 @@ Force push is allowed on your own feature branch (no protection); a new push inv
 **Release approval sheet** — before every release, present this sheet to the user and get **one** approval; then execute the full release (merge release PR + distribute + tag) without further per-step prompts:
 
 ```markdown
-## 发布审批单
+## Release approval sheet
 
-- 包含改动：PR 列表 + 每项一句话摘要
-- 验证结果：回归（97 场景）/ 安装副本验证
-- 版本：X.Y.Z（文档批次可不 bump）
+- Changes: PR list + one-line summary each
+- Verification: regression (97 scenarios) / installed-copy checks
+- Version: X.Y.Z (doc-only batches may skip the bump)
 ```
 
 Per release (see [VERSIONS.md](docs/VERSIONS.md)):
