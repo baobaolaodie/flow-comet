@@ -1,20 +1,26 @@
-# flow-comet CI — DOC-CHECKLIST 机械化（2026-08-10 落地）
+# flow-comet CI — 仓库约定机械化 / automated enforcement of repository conventions (2026-08-10)
 #
-# 映射（每项检查指回已锁规定）：
-#   regression         §5 guard-self-test 全绿（内置：95 场景 + 场景数 17 文件自检 +
-#                     公开产物零代号扫描含 PR/issue 模板）/ §2 命令路径 / 脚本语法 / BOM 防线
-#   pr-policy          §0·5 PR 模板完整性（5 段双语前缀 + 17 勾选项，删除=fail）/ 改动经 feature 分支 /
-#                     dev-main 同步检查 / §1 PR 标题+描述+公开 diff 零代号
-#   release-consistency §2 版本 6 处对账 + tag 对账 / §4 CHANGELOG 每版本段 PR 链接
-#   docs-links         §2 死链 + §3 语言切换器（lychee，排除 pull/N 404 误报）
+# 设计 / Design: CI 检查在本工作流中独立实现(服务端权威——贡献者无法通过修改仓库文件削弱检查)。
+# (All checks are enforced server-side and independently.)
 #
-# required 时机：首发观察 2~3 轮后设 required（防 CI 自身问题挡发布）。
+# 检查映射 / Check mapping:
+#   regression           guard self-test (95 scenarios incl. scenario-count & public-artifact
+#                        code self-checks) / script syntax / BOM guard / installer
+#                        reproducibility / workflow yaml validity
+#   pr-policy            PR template completeness (5 bilingual sections + 17 checkboxes,
+#                        deletion = fail) / feature-branch prefix / dev-main sync /
+#                        zero internal codes in title, body, public-file diffs
+#   release-consistency  version consistency (6 spots) + tag reconciliation +
+#                        CHANGELOG per-version PR links
+#   docs-links           dead links + language switchers (lychee; pull/N and claude.ai excluded)
+#
+# Required checks are enabled only after 2-3 observed runs (avoid CI issues blocking releases).
 
 name: ci
 on:
   pull_request:
   push:
-    branches: [main, dev]   # dev: PR 合并后回归兜底（防合并竞态）；main: 发布后兜底
+    branches: [main, dev]   # dev: post-merge regression backstop; main: post-release backstop
     tags: ['v*']
 
 permissions:
@@ -25,7 +31,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ── §1/§2/§5: 权威源回归 + 场景数/代号自检 + 脚本语法 + BOM 防线 ──
+  # ── 回归: 权威源套件 + 静态健康 / Regression ──
   regression:
     runs-on: ubuntu-latest
     steps:
@@ -33,35 +39,35 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: '权威源回归 / Authoritative-source regression（§5: 95 scenarios + scenario-count/code self-checks）'
+      - name: '回归自测 / Guard self-test'
         run: node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
-      - name: '全量脚本语法 / Script syntax（§2 command paths）'
+      - name: '脚本语法 / Script syntax'
         run: |
           for f in $(git ls-files '*.mjs'); do
-            node --check "$f" || { echo "语法错误: $f"; exit 1; }
+            node --check "$f" || { echo "语法错误 / syntax error: $f"; exit 1; }
           done
       - name: 'BOM 防线 / BOM guard'
         run: |
           for f in $(git ls-files '*.mjs' '*.yaml' '*.json'); do
             if head -c 3 "$f" | od -An -tx1 | grep -qi 'ef bb bf'; then
-              echo "BOM 污染: $f"; exit 1
+              echo "BOM 污染 / BOM in: $f"; exit 1
             fi
           done
-      - name: '安装器可复现性 / Installer reproducibility（prepare-env output == authoritative source）'
+      - name: '安装器可复现性 / Installer reproducibility'
         run: |
           node scripts/prepare-env.mjs --target "$RUNNER_TEMP/installed" >/dev/null
           diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/skills "$RUNNER_TEMP/installed/.claude/skills" \
-            || { echo "prepare-env 生成结果与权威源不一致（安装器漂移）"; exit 1; }
+            || { echo "安装器漂移 / prepare-env output differs from authoritative source"; exit 1; }
           diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/rules "$RUNNER_TEMP/installed/.claude/rules" \
-            || { echo "prepare-env 生成 rules 与权威源不一致"; exit 1; }
+            || { echo "rules 与权威源不一致 / prepare-env rules differ from authoritative source"; exit 1; }
       - name: 'workflow yaml 有效性 / Workflow yaml validity'
         run: |
           for f in $(git ls-files '.github/workflows/*.yml' '.github/workflows/*.yaml'); do
             python -c "import yaml,sys; yaml.safe_load(open('$f', encoding='utf-8')); print('OK $f')" \
-              || { echo "yaml 无效: $f"; exit 1; }
+              || { echo "yaml 无效 / invalid yaml: $f"; exit 1; }
           done
 
-  # ── §0·5 PR 纪律 + §1 零代号（PR 维度）──
+  # ── PR 纪律: 分支规范 + 模板完整 + 零内部代号 / PR policy ──
   pr-policy:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -78,19 +84,19 @@ jobs:
             const isRelease = pr.base.ref === 'main';
             const P = [];
 
-            // §0·5 改动经 feature 分支（发布 PR head=dev 豁免）
+            // Feature-branch prefix (release PR head=dev is exempt)
             if (!isRelease && !/^(feat|fix|docs|chore|hotfix)\//.test(pr.head.ref))
-              P.push(`开发 PR 头分支应带 feat/fix/docs/chore/hotfix 前缀，当前 ${pr.head.ref}`);
+              P.push(`dev PR head branch must carry a feat/fix/docs/chore/hotfix prefix, got ${pr.head.ref}`);
 
-            // §0·5 dev-main 同步（发布 PR 前置 + 开发 PR 集成门）
+            // dev-main sync (release PR precondition + dev integration gate)
             const behind = execSync('git rev-list origin/main ^origin/dev')
               .toString().trim().split('\n').filter(Boolean).length;
             if (isRelease && behind > 0)
-              P.push(`dev 落后 main ${behind} 个提交——创建发布 PR 前必须执行 dev 同步 main`);
+              P.push(`dev is ${behind} commit(s) behind main — run the dev-sync before creating the release PR`);
             if (!isRelease && behind > 0)
-              P.push(`dev 落后 main ${behind} 个提交（上次发布漏同步）——先执行 dev 同步 main 再开发`);
+              P.push(`dev is ${behind} commit(s) behind main (missed post-release sync) — sync dev first`);
 
-            // §0·5 PR 模板完整性：5 段标题（双语前缀匹配）+ 17 勾选项（双语文本，删除 = fail）
+            // PR template completeness: 5 bilingual sections + 17 checkboxes (deletion = fail)
             const tmpl = fs.readFileSync('.github/PULL_REQUEST_TEMPLATE.md', 'utf8');
             const body = pr.body ?? '';
             const SECTION_PAIRS = [
@@ -102,25 +108,25 @@ jobs:
             ];
             for (const [zh, en] of SECTION_PAIRS)
               if (!body.includes(zh) && !body.includes(en))
-                P.push(`PR 描述缺少模板段: ${zh} / ${en}`);
+                P.push(`PR body missing template section: ${zh} / ${en}`);
             for (const m of tmpl.matchAll(/^- \[ \] (.+)$/gm)) {
-              const it = m[1].trim(); // 双语文本如 "工作流脚本 / Workflow scripts(...)"
+              const it = m[1].trim(); // bilingual text e.g. "工作流脚本 / Workflow scripts(...)"
               if (!body.includes(`- [x] ${it}`) && !body.includes(`- [ ] ${it}`))
-                P.push(`PR 描述删除/遗漏勾选项「${it.slice(0, 24)}…」（不删除未勾选项）`);
+                P.push(`PR body deleted or omitted checkbox "${it.slice(0, 24)}…" (keep unchecked items)`);
             }
 
-            // §1 标题/描述零代号
+            // Zero internal codes in title/body
             const banned = /T-FIX|batch-|D-\d+|P0|dogfood|round\s*\d/;
-            if (banned.test(pr.title)) P.push(`PR 标题含过程代号: "${pr.title}"`);
-            if (banned.test(body)) P.push('PR 描述含过程代号（T-FIX/batch/D-NN/P0/dogfood/round）');
+            if (banned.test(pr.title)) P.push(`PR title contains an internal code: "${pr.title}"`);
+            if (banned.test(body)) P.push('PR body contains internal codes (T-FIX/batch/D-NN/P0/dogfood/round)');
 
-            // §1 公开文件 diff 新增行零代号
-            // fork PR 兼容: head 分支在 fork 仓库(不在 origin)——diff 不可用时跳过该检查(其余检查继续)
+            // Zero internal codes in added lines of public files
+            // Fork-PR compatibility: head branch lives in the fork (not origin) — skip the diff check then
             let files = [];
             try {
               files = execSync(`git diff --name-only origin/${pr.base.ref}...origin/${pr.head.ref}`)
                 .toString().trim().split('\n').filter(Boolean);
-            } catch { /* fork PR: head 不在 origin,跳过公开 diff 检查 */ }
+            } catch { /* fork PR: head not on origin, skip public-diff check */ }
             const pub = files.filter(f =>
               /^(README|CONTRIBUTING|CHANGELOG)[^/]*\.md$|^docs\/.+\.md$|^\.github\/.+\.md$/.test(f));
             for (const f of pub) {
@@ -129,14 +135,15 @@ jobs:
                 add = execSync(`git diff origin/${pr.base.ref}...origin/${pr.head.ref} -- "${f}"`)
                   .toString().split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).join('\n');
               } catch { continue; }
-              if (banned.test(add)) P.push(`公开文档新增行含过程代号: ${f}`);
+              if (banned.test(add)) P.push(`public doc added lines contain internal codes: ${f}`);
             }
 
-            if (P.length) core.setFailed('DOC-CHECKLIST 违规:\n' + P.join('\n'));
+            if (P.length) core.setFailed('Convention violations:\n' + P.join('\n'));
 
-  # ── §2 版本对账 + §4 CHANGELOG PR 链接 ──
-  # 仅发布面触发：main push / tag / 发布 PR（base=main）。dev 是开发中间态
-  # （版本号/CHANGELOG 在发布批次才 bump），dev push 跑版本对账会误报。
+  # ── 发布一致性: 版本 + CHANGELOG(仅发布面) / Release consistency ──
+  # Triggered on main push / tag / release PR (base=main). dev is a development
+  # intermediate (version/CHANGELOG bumped only at release time) — version checks
+  # on dev pushes would be false alarms.
   release-consistency:
     if: >-
       (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')))
@@ -146,7 +153,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: '版本全库一致 / Version consistency（README×2 + VERSIONS×2 + CHANGELOG×2 + tag）'
+      - name: '版本全库一致 / Version consistency'
         run: |
           R1=$(grep -oE 'version-[0-9]+\.[0-9]+\.[0-9]+' README.md | head -1 | sed 's/version-//')
           R2=$(grep -oE 'version-[0-9]+\.[0-9]+\.[0-9]+' README-zh.md | head -1 | sed 's/version-//')
@@ -156,21 +163,21 @@ jobs:
           C2=$(grep -m1 '^## \[[0-9]' CHANGELOG-zh.md | sed -E 's/## \[([0-9.]+).*/\1/')
           echo "README=$R1/$R2 VERSIONS=$V1/$V2 CHANGELOG=$C1/$C2"
           [ "$R1" = "$R2" ] && [ "$R1" = "$V1" ] && [ "$R1" = "$V2" ] && [ "$R1" = "$C1" ] && [ "$R1" = "$C2" ] \
-            || { echo "§2 版本全库不一致（发布 checklist ①②）"; exit 1; }
+            || { echo "版本不一致 / version mismatch across docs"; exit 1; }
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             TAG=${GITHUB_REF#refs/tags/v}
-            [ "$TAG" = "$R1" ] || { echo "tag v$TAG 与文档版本 $R1 不一致"; exit 1; }
+            [ "$TAG" = "$R1" ] || { echo "tag 与文档版本不一致 / tag v$TAG != documented version $R1"; exit 1; }
           fi
-      - name: 'CHANGELOG PR 链接 / CHANGELOG PR links（§4）'
+      - name: 'CHANGELOG 每版本段 PR 链接 / CHANGELOG per-version PR links'
         run: |
           for f in CHANGELOG.md CHANGELOG-zh.md; do
             awk -v file="$f" '
               /^## \[[0-9]/{ver=$2; has[ver]=0}
               /pull\/[0-9]+/{if (ver) has[ver]=1}
-              END{for (v in has) if (!has[v] && v !~ /^\[1\.(0|1|2)\.0\]$/) {print file " 版本段缺 PR 链接: " v; exit 1}}' "$f"
+              END{for (v in has) if (!has[v] && v !~ /^\[1\.(0|1|2)\.0\]$/) {print file " version section missing PR link: " v; exit 1}}' "$f"
           done
 
-  # ── §2 死链 + §3 语言切换器（lychee 自动覆盖）──
+  # ── 死链 + 语言切换器(lychee 覆盖) / Dead links ──
   docs-links:
     runs-on: ubuntu-latest
     steps:
@@ -178,5 +185,5 @@ jobs:
       - name: '死链检查 / Dead-link check'
         uses: lycheeverse/lychee-action@v2
         with:
-          # 排除: 未合并 PR 404 误报 / claude.ai 防爬 403 误报（GitHub Actions IP 被 Cloudflare 拒，浏览器可访问）
+          # Exclude: unmerged-PR 404 false positives / claude.ai anti-bot 403 (Actions IP blocked by Cloudflare; browser works)
           args: --no-progress --exclude 'https?://github\.com/baobaolaodie/flow-comet/pull/|https?://claude\.ai/' README.md README-zh.md CONTRIBUTING.md CONTRIBUTING-zh.md CHANGELOG.md CHANGELOG-zh.md docs/ .github/

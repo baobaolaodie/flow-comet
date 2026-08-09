@@ -79,6 +79,18 @@ git branch -d hotfix/<描述>
 - **创作环境**：Claude Code（skill/hook 在 Claude Code 会话中运行）；hook 通过 `prepare-env` 安装到你的项目 `.claude/`
 - **机制相关工作**：动手改脚本前先读 [docs/MECHANISM.md](docs/MECHANISM.md) 了解机制语义（行为层）
 
+### CI 强制检查（无需本地配置）
+
+CI 在每个 PR 与 push 时自动运行——服务端强制仓库约定（回归套件含场景数与公开产物代号自检、脚本语法、BOM 防线、安装器可复现性、workflow yaml 有效性、PR 模板完整性、版本一致性、CHANGELOG PR 链接、死链）。无需本地安装或配置。
+
+推送前唯一需要的本地预检是回归基线：
+
+```bash
+node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 95 SCENARIOS PASSED
+```
+
+其余全部由 CI 处理。
+
 ## Issues（报告 bug / 提 feature）
 
 开 Issue 时写清描述：
