@@ -45,9 +45,29 @@ dev ──PR（squash）──▶ main               （发布分支——历史
 | 规则 | `main` | `dev` |
 |------|--------|-------|
 | require pull request reviews | ✅（1 approve） | ✅（1 approve） |
-| 禁 force push | ✅ | ❌ 允许（集成 rebase） |
+| 禁 force push | ✅ | ✅ |
 | 禁删除 | ✅ | ✅ |
 | stale review 失效 | ✅ | ✅ |
+
+**dev 同步 main**（每次 main 有新 squash 提交后执行）：
+
+```bash
+git checkout dev
+git merge --no-ff main -m "sync: main → dev（<摘要>）"
+git push origin dev
+```
+
+**hotfix 快路径**（生产紧急修复，不等 dev 发布节奏）：
+
+```bash
+git checkout main
+git checkout -b hotfix/<描述>
+# 修复 → 提交（fix: subject）→ 测试
+# 直合 main（merge commit）→ 同步 dev
+git checkout main && git merge --no-ff hotfix/<描述>
+git checkout dev && git merge --no-ff main -m "sync: main → dev（hotfix <描述>）"
+git branch -d hotfix/<描述>
+```
 
 ## 开发环境
 
