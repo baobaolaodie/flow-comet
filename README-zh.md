@@ -15,13 +15,13 @@
 <p align="center">
   <a href="#快速开始"><img src="https://img.shields.io/badge/Quick_Start-4CAF50?style=for-the-badge" alt="快速开始" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="License" /></a>
-  <a href="CHANGELOG-zh.md"><img src="https://img.shields.io/badge/version-1.2.4-blue.svg" alt="Version" /></a>
 </p>
 
 <p align="center">
   <a href="https://claude.ai/code"><img src="https://img.shields.io/badge/Claude_Code-D97757?style=flat&logo=claude&logoColor=white" alt="Claude Code" /></a>
   <a href="https://github.com/rihebty/flow-kit"><img src="https://img.shields.io/badge/flow--kit-4CAF50?style=flat" alt="flow-kit" /></a>
   <a href="https://github.com/rpamis/comet"><img src="https://img.shields.io/badge/comet-4CAF50?style=flat" alt="comet" /></a>
+  <a href="CHANGELOG-zh.md"><img src="https://img.shields.io/badge/version-1.2.4-blue.svg" alt="Version" /></a>
 </p>
 
 ---
