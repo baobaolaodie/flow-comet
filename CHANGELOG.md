@@ -22,7 +22,7 @@ Automatic project-context initialization (init pre-step).
 - **Agent-assisted generation protocol**: `init <id> --init-context` is now a collaboration — the script performs deterministic detection, decision, prompting, and validation, while the agent reads existing documents and probes the codebase to generate a template-aligned `CONTEXT.md` (seven sections, source-attribution citations, accumulated glossary/decisions/defaults preserved); the script validates the seven sections plus key template formats (dated decision entries, metadata fields, glossary table) and records the scan timestamp only after validation passes. A re-run after generation completes the handoff.
 - **Template-aware guidance**: the generation prompt reports whether the flow-kit CONTEXT template is detected and validates section names against it (built-in fallback when the template is missing).
 - **Scenario-count consistency check**: the regression suite now fails when public docs' scenario count drifts from the actual suite size.
-- guard self-test suite expanded to 95 scenarios (S84~S96: prompt-not-generate / generation guidance / validation pass & fail / placeholder tolerance / guidance wording).
+- guard self-test suite expanded to 95 scenarios covering detection prompting, generation guidance, validation pass and fail, placeholder tolerance, and guidance wording.
 
 ### Fixed
 
@@ -53,7 +53,7 @@ Worktree delegation chain fixes (real-run report). ([#12](https://github.com/bao
 - **WARN COUNT summary**: entry/exit output ends with a `WARN COUNT: N` summary line (appended; existing output unchanged).
 - **Empty-exit documentation aligned with implementation**: the execute SKILL no longer claims an "empty exit" path (guard blocks it in three layers: evidence → serial pending → output-schema artifacts); documented correct paths (direct routing to subagent-execute / explicit `parallelTakeoverApproved` exemption).
 - **Pre-delegation checklist**: subagent-execute SKILL now mandates a pre-delegation checklist (git status / HEAD / inline context) with a Red Flag; dirty-worktree protocol marked as mandatory before delegation.
-- guard self-test suite expanded to 82 scenarios (S79~S83; RED→GREEN with correct failure reasons, verified by an independent reviewer with 24 independently constructed assertions).
+- guard self-test suite expanded to 82 scenarios (RED→GREEN with correct failure reasons, verified by an independent reviewer with 24 independently constructed assertions).
 
 ### Changed
 
@@ -68,7 +68,7 @@ Self-review two-tier fallback for the 6-dimension check (brooks-lint). ([#8](htt
 - **Two-tier fallback for brooks-lint**: when the Skill tool returns only a "Launching skill" placeholder (worktree subagent skill routing is unstable — plugin content may not be injected), the subagent now Reads the plugin-cache protocol files and executes the full brooks review manually (`selfReview: cache-brooks`) before falling back to the built-in R1~R6 quick check. Review quality is preserved even when loading fails.
 - **Guard validates fallback evidence**: a `builtin-quickcheck` declaration must now state the unavailability reason **and** the cache-attempt evidence (missing either → progressive `BROOKS-LINT WARN`, never BLOCK).
 - **Guard recognizes `cache-brooks`**: method/whole-content/six-dimension patterns updated — a clean `cache-brooks` declaration passes without WARN (previously mis-blocked).
-- guard self-test suite expanded to 77 scenarios (S76/S77/S78: builtin evidence checks + cache-brooks acceptance; RED→GREEN with correct failure reasons, verified by two independent reviewers).
+- guard self-test suite expanded to 77 scenarios (builtin evidence checks + cache-brooks acceptance; RED→GREEN with correct failure reasons, verified by two independent reviewers).
 
 ### Changed
 
