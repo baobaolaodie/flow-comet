@@ -1314,7 +1314,7 @@ async function readOverlayEvidence(protocol, change) {
           'workflow evidence file',
           WORKFLOW_PROJECT_FILE_MAX_BYTES,
         )
-      ).toString('utf8').replace(/^﻿/, ''),  // D-22: 容忍 UTF-8 BOM
+      ).toString('utf8').replace(/^﻿/, ''),  // 容忍 UTF-8 BOM
     );
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
   } catch (error) {
@@ -1601,7 +1601,7 @@ async function statePath(protocol) {
 }
 
 async function readStateJson(file) {
-  // D-22: 容忍 UTF-8 BOM（外部写入可能带 BOM）
+  // 容忍 UTF-8 BOM（外部写入可能带 BOM）
   return JSON.parse(
     (
       await readWorkflowProtectedFile(
@@ -1689,7 +1689,7 @@ function schemaMap(protocol) {
 function missingRequiredSchemaEvidence(protocol, node, evidence) {
   const schemas = schemaMap(protocol);
   const missing = [];
-  // P0: schema evidence 缺失但 record 传了 summary → 以 summary 视为产出证据（避免手动构造各字段）
+  // schema evidence 缺失但 record 传了 summary → 以 summary 视为产出证据（避免手动构造各字段）
   const hasSummary = typeof evidence?.summary === 'string' && evidence.summary.trim() !== '';
   for (const schemaId of node.outputSchemas ?? []) {
     const schema = schemas.get(schemaId);
@@ -1884,9 +1884,9 @@ async function templateSectionPatterns() {
 }
 
 // C3: TASK.md 任务集签名——提取全部 <task> 块，剥离开标签上的标记类属性（仅保留 id/parallel），排序防顺序漂移，拼接后 sha256
-// T-FIX-09: 行尾规范化——Windows 下 bash heredoc 写 LF、python 写 CRLF（os.linesep），跨工具编辑
+// 行尾规范化——Windows 下 bash heredoc 写 LF、python 写 CRLF（os.linesep），跨工具编辑
 // 导致"任务集逻辑未变但字节变"的误报 BLOCK；签名前统一 CRLF → LF（仅归一化行尾，不改变内容语义）
-// T-FIX-10: 标记类属性白名单——子代理标记 task done 会在开标签追加 completed_at/started_at/finished_at/
+// 标记类属性白名单——子代理标记 task done 会在开标签追加 completed_at/started_at/finished_at/
 // assigned_to/updated_at 等属性（纯状态标记），仅剥离 status 仍误报 BLOCK；改为开标签只保留
 // 影响路由语义的 id/parallel，其余属性一律剥离（含未来新增标记属性，无需再改）；
 // 任务内容（name/action/write_files/verify/depends_on）保持签名敏感
@@ -1904,12 +1904,12 @@ function taskSetSignature(taskContent) {
   return createHash('sha256').update(blocks.join('\n'), 'utf8').digest('hex');
 }
 
-// batch-H (F): WARN 计数——entry/exit 成功路径末尾输出汇总行（可观测性；追加不改变既有输出）
+// WARN 计数——entry/exit 成功路径末尾输出汇总行（可观测性；追加不改变既有输出）
 let __warnCount = 0;
 const __origError = console.error;
 
 async function main() {
-  // batch-H (F): 包装 console.error 统计 WARN 输出（转发原实现，行为不变）
+  // 包装 console.error 统计 WARN 输出（转发原实现，行为不变）
   console.error = (...args) => {
     if (/WARN/.test(args.join(' '))) __warnCount += 1;
     __origError(...args);
@@ -1987,7 +1987,7 @@ async function main() {
       const { execFileSync } = await import('child_process');
       try {
         const branch = String(execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: runRoot, stdio: 'pipe', encoding: 'utf8' })).trim();
-        // T-FIX-14: 归档分支前缀用 state.branchPrefix（缺省 'change/'，适配仓库自身规范）
+        // 归档分支前缀用 state.branchPrefix（缺省 'change/'，适配仓库自身规范）
         const archivePrefix = state.branchPrefix ?? 'change/';
         if (branch !== archivePrefix + state.activeChange) {
           console.error('BLOCKED: 归档必须在 ' + archivePrefix + state.activeChange + ' 分支上进行（当前: ' + branch + '）');
@@ -2019,7 +2019,7 @@ async function main() {
           console.error('WORKTREE WARN: .specs/' + state.activeChange + '/ 有未提交工件，worktree isolation 子代理将看不到它们——建议先 commit 或 prompt 内联上下文');
         }
       } catch (err) {
-        // batch-H (P4): 检测失败可见化——非 git 仓库/路径不可查时提示 SKIP 原因（防静默失效）
+        //  (P4): 检测失败可见化——非 git 仓库/路径不可查时提示 SKIP 原因（防静默失效）
         console.error('C4-CHECK SKIP: ' + (err && err.message ? String(err.message).split('\n')[0] : String(err)));
       }
     }
@@ -2261,7 +2261,7 @@ async function main() {
       }
     } catch {}
   }
-  // W1-B: execute / subagent-execute 出口校验每份 SUMMARY 含三个必填段 + C1 6 维自查非空 + D1 自检方法
+  // W1-B: execute / subagent-execute 出口校验每份 SUMMARY 含三个必填段 + 6 维自查非空 + 自检方法
   if (node.id === 'execute' || node.id === 'subagent-execute') {
     const changeDir = path.join(runRoot, '.specs', state.activeChange ?? '');
     const violations = await verifySummaries(changeDir);
@@ -2278,13 +2278,13 @@ async function main() {
         if (sixDim && dimBody.length < 10) {
           violations.push(f + ' 的 6 维自查段无实质内容');
         }
-        // D1: 生产代码任务必填 ## 自检方法，声明 brooks-review 或 builtin-quickcheck
+        // 生产代码任务必填 ## 自检方法，声明 brooks-review 或 builtin-quickcheck
         // 格式兼容：方法名行允许中文前缀/括号说明（如 "方法：brooks-review"），按关键词搜索而非 [a-z-]+ 硬匹配
         // 分隔符用 .?（任意字符）而非 \.?（字面点）：canonical 名 "brooks-review"/"builtin-quickcheck" 是连字符，与既有 /brooks.?review/ 约定一致
         const methodLine = content.match(/##\s*自检方法\s*\n\s*([^\n]+)/i);
         const method = methodLine ? /brooks.?review|cache.?brooks|builtin.?quickcheck/i.exec(methodLine[1]) : null;
         if (!method) {
-          // D1 过渡规则：旧格式 SUMMARY（批次 A 之前）无 ## 自检方法 段——
+          // 过渡规则：旧格式 SUMMARY 无 ## 自检方法 段——
           // 若全文已声明 brooks-review/cache-brooks/builtin（旧模板行为），WARN 兼容不 BLOCKED；无任何自检声明才 BLOCKED
           if (/brooks.?review|cache.?brooks|builtin.?quickcheck/i.test(content)) {
             console.error('BROOKS-LINT WARN: ' + f + ' 缺 ## 自检方法 段（旧格式），6 维自查已声明自检方法——兼容通过，建议补全');
@@ -2292,7 +2292,7 @@ async function main() {
             violations.push(f + ' 缺 ## 自检方法 字段（必须声明 brooks-review 或 builtin-quickcheck）');
           }
         } else if (/builtin/i.test(method[0])) {
-          // T-FIX-19: builtin 降级两级校验——① 必须声明不可用原因（既有）；② 必须含缓存尝试证据
+          // builtin 降级两级校验——① 必须声明不可用原因（既有）；② 必须含缓存尝试证据
           // （已尝试 Read 插件缓存协议文件手动执行仍不可行——两级降级路径第 2 级；防「未尝试读缓存」的偷懒降级）
           // 关键词声明级校验（设计边界：不做语义判断）；缺失 → WARN 渐进（不 BLOCK，向后兼容旧 SUMMARY）
           if (!/brooks-lint 不可用|插件不可用|unavailable|N\/A/i.test(content)) {
@@ -2311,7 +2311,7 @@ async function main() {
       process.exit(1);
     }
   }
-  // P0-A: execute 出口校验——统一委托后所有 done 任务需 handoff（越俎代庖检测覆盖串行/并行）
+  // execute 出口校验——统一委托后所有 done 任务需 handoff（越俎代庖检测覆盖串行/并行）
   if (node.id === 'execute' && state.activeChange) {
     const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
     try {
@@ -2382,7 +2382,7 @@ async function main() {
     try {
       execSync(verifyCommand, { cwd: runRoot, stdio: 'pipe', timeout: 300000 });
     } catch (e) {
-      // P0-A: verify-fail 自动递增（无需 LLM 主动调用）
+      // verify-fail 自动递增（无需 LLM 主动调用）
       state.verifyFailures = (state.verifyFailures || 0) + 1;
       const file = await statePath(protocol);
       const bad = validateStateFields(state);
@@ -2398,7 +2398,7 @@ async function main() {
     }
   }
   // W1-D: Return Contract 校验——每个 delegated task 的 result 必须含 commitHash + greenEvidence
-  // T-FIX-04: handoff-guarded 落实——每个 result 的 completedChecks 必须包含
+  // handoff-guarded 落实——每个 result 的 completedChecks 必须包含
   // required-skill:subagent-execute.<skill>（skill 名从协议 requiredSkillCalls 读）。
   // 严格模式：旧格式非 JSON result（无 completedChecks 载体）同样 BLOCKED，无旧 change 豁免——
   // 补录/重录必须回传完整契约（含 completedChecks），不允许历史格式绕过委托证明
@@ -2417,7 +2417,7 @@ async function main() {
       if (r && !r.redEvidence) {
         console.error('HANDOFF WARN: ' + taskId + ' 缺 redEvidence（可能未执行 TDD RED 阶段）');
       }
-      // T-FIX-04: completedChecks 严格校验（无旧 change 豁免）
+      // completedChecks 严格校验（无旧 change 豁免）
       if (requiredChecks.length > 0) {
         const checks = Array.isArray(r.completedChecks) ? r.completedChecks : [];
         const missing = requiredChecks.filter((check) => !checks.includes(check));
@@ -2431,7 +2431,7 @@ async function main() {
       process.exit(1);
     }
   }
-  // P0-1: 自动补 required-skill completedChecks——节点被完成即视为其实现 skill 已加载
+  // 自动补 required-skill completedChecks——节点被完成即视为其实现 skill 已加载
   if ((node.requiredSkillCalls ?? []).length > 0) {
     const checks = Array.isArray(evidence.completedChecks) ? evidence.completedChecks : [];
     for (const binding of node.requiredSkillCalls ?? []) {
@@ -2470,7 +2470,7 @@ async function main() {
     const isArchive = node.id === 'archive';
     if (isArchive) state.activeChange = null;
     let next = isArchive ? null : nextNode(protocol, state);
-    // P0: parallel-aware 路由——如果下一候选是 execute，检查 TASK.md 是否有依赖已满足的 pending parallel 任务
+    // parallel-aware 路由——如果下一候选是 execute，检查 TASK.md 是否有依赖已满足的 pending parallel 任务
     // 有则路由到 subagent-execute（与 workflow-state.mjs 的 determineNode 逻辑一致）
     if (next && next.id === 'execute' && state.activeChange) {
       const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
@@ -2482,7 +2482,7 @@ async function main() {
           .filter(Boolean));
         // 检查 pending parallel 任务中是否有依赖已满足的
         const parallelBlocks = taskContent.match(/<task[^>]*parallel="true"[^>]*status="pending"[\s\S]*?<\/task>/g) || [];
-        // batch-H (P3): 路由无匹配时输出诊断——结构校验保持严格（不放松正则），检测失败纠偏可见
+        //  (P3): 路由无匹配时输出诊断——结构校验保持严格（不放松正则），检测失败纠偏可见
         // 旧模板（task 标签无 status 属性）产出的 TASK.md 无法匹配——明确提示而非静默卡在 execute
         if (parallelBlocks.length === 0 && /<task[^>]*parallel="true"/.test(taskContent)) {
           console.error('ROUTE WARN: 未找到 parallel="true" status="pending" 的任务块——检查 task 标签属性（属性顺序：parallel 在 status 前；缺 status 不视为 pending）');
@@ -2517,7 +2517,7 @@ async function main() {
 }
 
 main().then(() => {
-  // batch-H (F): 成功路径末尾输出 WARN COUNT 汇总（用未包装的 console.error——避免自增）
+  // 成功路径末尾输出 WARN COUNT 汇总（用未包装的 console.error——避免自增）
   if (__warnCount > 0) __origError('WARN COUNT: ' + __warnCount);
 }).catch((error) => {
   console.error(error.message);
