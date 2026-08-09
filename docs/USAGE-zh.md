@@ -107,7 +107,7 @@ flow-comet 在以下节点**暂停并向你确认**（其余全部自动推进�
 
 ```bash
 node workflow-state.mjs status             # 当前状态 + 分支一致性
-node workflow-state.mjs init <id> [--branch-prefix <prefix>]   # 初始化 change（自动建分支，前缀默认 change/）
+node workflow-state.mjs init <id> [--branch-prefix <prefix>] [--init-context|--init-skip]   # 初始化 change（自动建分支，前缀默认 change/；--init-context 执行全量上下文初始化，--init-skip 记录跳过）
 node workflow-state.mjs next               # 获取下一节点与 SKILL
 node workflow-state.mjs record <node> '{...}'                  # 记录节点证据
 node workflow-state.mjs config set enablePrReview true         # 开启 PR 审查

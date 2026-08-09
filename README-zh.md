@@ -21,7 +21,7 @@
   <a href="https://claude.ai/code"><img src="https://img.shields.io/badge/Claude_Code-D97757?style=flat&logo=claude&logoColor=white" alt="Claude Code" /></a>
   <a href="https://github.com/rihebty/flow-kit"><img src="https://img.shields.io/badge/flow--kit-4CAF50?style=flat" alt="flow-kit" /></a>
   <a href="https://github.com/rpamis/comet"><img src="https://img.shields.io/badge/comet-4CAF50?style=flat" alt="comet" /></a>
-  <a href="CHANGELOG-zh.md"><img src="https://img.shields.io/badge/version-1.2.4-blue.svg" alt="Version" /></a>
+  <a href="CHANGELOG-zh.md"><img src="https://img.shields.io/badge/version-1.3.0-blue.svg" alt="Version" /></a>
 </p>
 
 ---
@@ -60,6 +60,8 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径>
 ```
 
 首次调用先确认范围，然后自动完成：创建 `change/<id>` 分支 → 初始化状态 → 进入 open 节点 → 产出 `CHANGE.md` / `REQUIREMENT.md`。之后每个阶段自动路由——你只需要回答决策点（范围确认、技术栈选型、破坏性变更、REVIEW 结论、归档确认）。
+
+在项目首次使用时，工作流会自动检测项目上下文（`CONTEXT.md`）是否存在，缺失时提示初始化——检测到既有 AI 上下文文档（如 `CLAUDE.md` / `AGENTS.md`）会读取并整合（带出处标注），**绝不修改既有文件**。上下文已存在且新鲜的项目完全静默。无需记忆任何独立命令。
 
 ## 使用
 
@@ -133,7 +135,7 @@ flow-comet/
 
 1. 从 `dev` 开分支：`git checkout dev && git checkout -b feature/<描述>`
 2. 修改 skill/脚本请改 `.comet/bundle-drafts/flow-comet/skills/`（权威源）；TDD——先写 RED 场景
-3. 运行回归：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 82 SCENARIOS PASSED`
+3. 运行回归：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 87 SCENARIOS PASSED`
 4. 开 PR 合入 `dev`（merge commit）；发布 PR `dev → main`（squash）
 
 ## License
