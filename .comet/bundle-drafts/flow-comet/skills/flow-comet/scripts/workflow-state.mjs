@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema } from './protocol-utils.mjs';
 import { validateStateFields } from './state-schema.mjs';
+import { probeProject, classify, printDetection, validateContext, printGenerationGuide, skipInit } from './context-init.mjs';
 
 const command = process.argv[2] ?? 'status';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -389,8 +390,10 @@ async function main() {
   if (command === 'init') {
     const changeName = process.argv[3];
     if (!changeName) throw new Error('init requires a change name.');
-    // --branch-prefix <prefix>（缺省 'change/'）；从剩余参数解析
+    // --branch-prefix <prefix>（缺省 'change/'）；--init-context / --init-skip（自动初始化检测授权）
     let branchPrefix = 'change/';
+    let initContext = false;
+    let initSkip = false;
     const initArgs = process.argv.slice(4);
     for (let i = 0; i < initArgs.length; i++) {
       if (initArgs[i] === '--branch-prefix') {
@@ -405,7 +408,57 @@ async function main() {
           throw new Error('--branch-prefix requires a non-empty prefix (e.g. feat/)');
         }
         branchPrefix = value.endsWith('/') ? value : value + '/';
+      } else if (initArgs[i] === '--init-context') {
+        initContext = true;
+      } else if (initArgs[i] === '--init-skip') {
+        initSkip = true;
       }
+    }
+    // 自动初始化检测（前置步骤）：读旧 state（项目级字段跨 change 保留）→ 探测 → 判决 → 提示/执行
+    // 生成职责：--init-context 时 CONTEXT 缺失 → 输出 INIT-GENERATE 指引，由 agent 全量阅读生成
+    // （intel-scan 语义）；生成后重跑 → 脚本校验 7 段结构 → 通过写 last_intel_scan（确定性校验）。
+    let prevState = null;
+    try { prevState = await readState(); } catch { prevState = null; }
+    const probe = await probeProject(runRoot, prevState);
+    const verdict = classify(probe, prevState);
+    let ctxValid = null; // null=未进入校验（非 init-context 或已新鲜）；true/false=校验结果
+    if (initContext || initSkip) {
+      // 显式授权路径：--init-context 生成协作（agent 生成 + 脚本校验）；--init-skip 记 none
+      if (initContext) {
+        // 显式 --init-context 总是校验结构（含 verdict=skip 新鲜/记忆场景）——防 CONTEXT 损坏漏检
+        let ctxExists = false;
+        try { await fs.access(path.join(runRoot, '.specs', 'CONTEXT.md')); ctxExists = true; } catch { /* 文件不存在 */ }
+        if (ctxExists) {
+          const { missingSections, formatIssues } = await validateContext(runRoot);
+          if (missingSections.length === 0 && formatIssues.length === 0) {
+            ctxValid = true;
+            if (verdict === 'skip') {
+              console.log('INIT-DONE: 项目上下文已存在且新鲜，跳过生成。');
+            } else {
+              console.log('INIT-DONE: 项目上下文（CONTEXT.md）已就绪（7 段 + 模板格式校验通过）。');
+            }
+          } else {
+            // 存在但不满足模板（缺段/格式不符/损坏）——引导 agent 重写（保留既有累积内容）
+            const problems = [...formatIssues, ...missingSections.map((s) => '缺段 ' + s)];
+            await printGenerationGuide(runRoot, probe, { rewrite: true, problems });
+          }
+        } else if (verdict !== 'skip') {
+          await printGenerationGuide(runRoot, probe);
+        }
+        // verdict=skip（记忆 A 拒绝 / 新鲜 B）且 CONTEXT 缺失 → 尊重既有决策，不输出
+      }
+      if (initSkip && !initContext) {
+        console.log('INIT-SKIPPED: 已记录跳过初始化。');
+      }
+    } else {
+      await printDetection(runRoot, probe, verdict);
+    }
+    // F（2026-08-10）：init 同 id 重跑防护——.specs/<id>/ 已存在或 activeChange 相同 → WARN 不阻断
+    //（向后兼容；正常流程 init 只在 open 前执行一次，防护针对误操作清空进度）
+    let specsDirExists = false;
+    try { await fs.access(path.join(specsRoot, changeName)); specsDirExists = true; } catch { /* 目录不存在 */ }
+    if (prevState?.activeChange === changeName || specsDirExists) {
+      console.error('WARN: change ' + changeName + ' 已存在——重跑 init 将重置节点状态（completedNodes/evidence 清空）。若需继续已有 change，请用 advance/select 而非重跑 init。');
     }
     // E1: branchMode 自动判定——git 仓库（cwd=runRoot）→ true；非 git 仓库 → false
     const branchMode = isInsideWorkTree();
@@ -422,7 +475,14 @@ async function main() {
       enablePrReview: false,
       branchPrefix,
       status: 'running',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      // 项目级上下文字段跨 change 保留（迁移旧 state；--init-context 刷新扫描时间；--init-skip 记拒绝）
+      ...(prevState?.ai_context_doc !== undefined ? { ai_context_doc: prevState.ai_context_doc } : {}),
+      ...(initSkip ? { ai_context_doc: 'none' } : {}),
+      // last_intel_scan 仅在校验通过后写入（agent 生成 → 脚本校验 7 段 → 记录扫描时间）
+      ...(ctxValid === true
+        ? { last_intel_scan: new Date().toISOString() }
+        : (prevState?.last_intel_scan !== undefined ? { last_intel_scan: prevState.last_intel_scan } : {}))
     };
     await writeState(state);
     // init 创建 .specs/<id>/ 目录——文件即真相从 init 起成立，findActiveChange 立即可识别

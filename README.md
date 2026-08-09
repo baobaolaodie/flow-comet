@@ -21,7 +21,7 @@
   <a href="https://claude.ai/code"><img src="https://img.shields.io/badge/Claude_Code-D97757?style=flat&logo=claude&logoColor=white" alt="Claude Code" /></a>
   <a href="https://github.com/rihebty/flow-kit"><img src="https://img.shields.io/badge/flow--kit-4CAF50?style=flat" alt="flow-kit" /></a>
   <a href="https://github.com/rpamis/comet"><img src="https://img.shields.io/badge/comet-4CAF50?style=flat" alt="comet" /></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.2.4-blue.svg" alt="Version" /></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.3.0-blue.svg" alt="Version" /></a>
 </p>
 
 ---
@@ -60,6 +60,8 @@ node scripts/prepare-env.mjs --target <absolute path to your project>
 ```
 
 The first call confirms scope, then automatically creates the `change/<id>` branch, initializes state, enters the open node, and produces `CHANGE.md` / `REQUIREMENT.md`. Every subsequent stage is routed automatically — you only answer decision points (scope, tech stack, destructive changes, review findings, archive confirmation).
+
+On first use in a project, the workflow automatically detects whether a project context (`CONTEXT.md`) exists and prompts to initialize it when missing — existing AI-context documents (such as `CLAUDE.md` / `AGENTS.md`) are read and integrated with source attribution, and existing files are never modified. Projects with a fresh context run silently. No separate command to remember.
 
 ## Usage
 
@@ -133,7 +135,7 @@ Full guide in [CONTRIBUTING.md](CONTRIBUTING.md) — branch model (`feature → 
 
 1. Branch from `dev`: `git checkout dev && git checkout -b feature/<description>`
 2. Edit skills/scripts under `.comet/bundle-drafts/flow-comet/skills/` (authoritative source); TDD with RED scenario first
-3. Run regression: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 82 SCENARIOS PASSED`
+3. Run regression: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 97 SCENARIOS PASSED`
 4. Open a PR into `dev` (merge commit); release PR `dev → main` (squash)
 
 ## License

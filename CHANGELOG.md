@@ -10,6 +10,28 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded only in git tags and this document; `bundle.yaml` version stays 1.0.0 (decoupled from release versioning — see the README's version section).
 
+## [1.3.0] - 2026-08-10
+
+自动项目上下文初始化（init 前置步骤）。([#30](https://github.com/baobaolaodie/flow-comet/pull/30))
+
+Automatic project-context initialization (init pre-step).
+
+### Added
+
+- **Automatic initialization detection**: on first use in a project, the workflow automatically detects whether a project context (`CONTEXT.md`) exists and prompts to initialize it when missing — existing AI-context documents (such as `CLAUDE.md` / `AGENTS.md`) are read and integrated with source attribution (existing files are never modified); projects with a fresh context run silently. No separate command to remember.
+- **Agent-assisted generation protocol**: `init <id> --init-context` is now a collaboration — the script performs deterministic detection, decision, prompting, and validation, while the agent reads existing documents and probes the codebase to generate a template-aligned `CONTEXT.md` (seven sections, source-attribution citations, accumulated glossary/decisions/defaults preserved); the script validates the seven sections plus key template formats (dated decision entries, metadata fields, glossary table) and records the scan timestamp only after validation passes. A re-run after generation completes the handoff.
+- **Template-aware guidance**: the generation prompt reports whether the flow-kit CONTEXT template is detected and validates section names against it (built-in fallback when the template is missing).
+- **Scenario-count consistency check**: the regression suite now fails when public docs' scenario count drifts from the actual suite size.
+- guard self-test suite expanded to 95 scenarios covering detection prompting, generation guidance, validation pass and fail, placeholder tolerance, and guidance wording.
+
+### Fixed
+
+- The freshness hint no longer shows "null days" when no scan record exists (legacy projects) — it points to the exact next action instead.
+- Refreshing project context preserves accumulated CONTEXT content (glossary / locked decisions / defaults) instead of overwriting it.
+- New-project skeleton CONTEXT (placeholder sections) passes validation instead of being rejected.
+- Re-running `init` with an existing change id warns before resetting progress (protection against accidental progress loss).
+- Agent-generated CONTEXT entries in the wrong format (e.g. backtick-wrapped dates) are caught by format validation with a precise rewrite hint.
+
 ## [1.2.4] - 2026-08-09
 
 Documentation and message cleanup — public-facing content uses plain descriptive language throughout.
@@ -31,7 +53,7 @@ Worktree delegation chain fixes (real-run report). ([#12](https://github.com/bao
 - **WARN COUNT summary**: entry/exit output ends with a `WARN COUNT: N` summary line (appended; existing output unchanged).
 - **Empty-exit documentation aligned with implementation**: the execute SKILL no longer claims an "empty exit" path (guard blocks it in three layers: evidence → serial pending → output-schema artifacts); documented correct paths (direct routing to subagent-execute / explicit `parallelTakeoverApproved` exemption).
 - **Pre-delegation checklist**: subagent-execute SKILL now mandates a pre-delegation checklist (git status / HEAD / inline context) with a Red Flag; dirty-worktree protocol marked as mandatory before delegation.
-- guard self-test suite expanded to 82 scenarios (S79~S83; RED→GREEN with correct failure reasons, verified by an independent reviewer with 24 independently constructed assertions).
+- guard self-test suite expanded to 82 scenarios (RED→GREEN with correct failure reasons, verified by an independent reviewer with 24 independently constructed assertions).
 
 ### Changed
 
@@ -46,7 +68,7 @@ Self-review two-tier fallback for the 6-dimension check (brooks-lint). ([#8](htt
 - **Two-tier fallback for brooks-lint**: when the Skill tool returns only a "Launching skill" placeholder (worktree subagent skill routing is unstable — plugin content may not be injected), the subagent now Reads the plugin-cache protocol files and executes the full brooks review manually (`selfReview: cache-brooks`) before falling back to the built-in R1~R6 quick check. Review quality is preserved even when loading fails.
 - **Guard validates fallback evidence**: a `builtin-quickcheck` declaration must now state the unavailability reason **and** the cache-attempt evidence (missing either → progressive `BROOKS-LINT WARN`, never BLOCK).
 - **Guard recognizes `cache-brooks`**: method/whole-content/six-dimension patterns updated — a clean `cache-brooks` declaration passes without WARN (previously mis-blocked).
-- guard self-test suite expanded to 77 scenarios (S76/S77/S78: builtin evidence checks + cache-brooks acceptance; RED→GREEN with correct failure reasons, verified by two independent reviewers).
+- guard self-test suite expanded to 77 scenarios (builtin evidence checks + cache-brooks acceptance; RED→GREEN with correct failure reasons, verified by two independent reviewers).
 
 ### Changed
 
@@ -82,6 +104,8 @@ Installation-guide fixes (init/hook/state fixes + README guidance fixes + indepe
 
 ## [1.2.0] - 2026-08-08
 
+> Historical version from before the PR workflow existed — no PR link available.
+
 Custom skill composition (flow-comet-compose) + protocol parameterization + non-destructive installer.
 
 ### Added
@@ -109,6 +133,8 @@ Custom skill composition (flow-comet-compose) + protocol parameterization + non-
 
 ## [1.1.0] - 2026-08-05
 
+> Historical version from before the PR workflow existed — no PR link available.
+
 Change branches + PR review + append-placement discipline + documentation rewrite.
 
 ### Added
@@ -129,6 +155,8 @@ Change branches + PR review + append-placement discipline + documentation rewrit
 - LESSONS disorder detection split by section: multi-section numbering (`## 活跃条目` / `## 已解决条目` independent numbering) no longer false-positives
 
 ## [1.0.0] - 2026-08-04
+
+> Historical version from before the PR workflow existed — no PR link available.
 
 First stable release (8-node workflow + three defense layers + guard validation, verified end-to-end in real projects).
 
