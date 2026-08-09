@@ -1764,7 +1764,7 @@ async function main() {
     throw error;
   }
   //  判定语义——
-  // ① 无 activeChange（无论 status；与"无 state 文件"同语义，覆盖批次 C 旧 state 归档后）→ 放行
+  // ① 无 activeChange（无论 status；与"无 state 文件"同语义，覆盖旧 state 归档后）→ 放行
   // ② running（含旧 state 无 status 但有 activeChange，fail-closed 向后兼容）→ 白名单校验
   // ③ completed（归档后）→ 放行；其他 → 拦截
   if (!state.activeChange) {
