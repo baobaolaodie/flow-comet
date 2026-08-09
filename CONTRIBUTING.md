@@ -79,7 +79,7 @@ After the issue is confirmed: bug fixes use a `fix/` branch, features use a `fea
 
 [Conventional Commits](https://www.conventionalcommits.org/):
 
-> **Commit messages are public artifacts** — they are visible in the git history on GitHub. Write them as plain descriptions: **no internal identifiers** (batch codes like `batch-H`, defect/task ids like `T-FIX-19` / `P1` / `S79`, internal terms like `dogfood` / `round2`). Use the same public-facing standard as CHANGELOG and the docs. Example: `fix: brooks 6-dimension self-check two-tier fallback` — not `fix: T-FIX-19 ...`.
+> **Commit messages are public artifacts** — they are visible in the git history on GitHub. Write them as plain descriptions with **no internal identifiers** (workflow-internal codes, defect or scenario numbers, internal process terms) — the same public-facing standard as CHANGELOG and the docs. Example: `fix: brooks 6-dimension self-check two-tier fallback` — a plain description, no internal codes.
 
 ```
 <type>(<scope>): <subject>
