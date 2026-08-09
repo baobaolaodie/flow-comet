@@ -1744,6 +1744,102 @@ const SCENARIOS = [
       assertExit(res, 0);
     },
   },
+
+  // ---------- batch-H 场景（S79~S83：worktree 委托链路，P1~P7 实录） ----------
+
+  // 79: P0 路由诊断——TASK 无 status 属性（旧模板形态）→ exit plan --apply 的 P0 路由输出 P0-ROUTE WARN
+  // （batch-H P3：结构校验保持严格 + 检测失败纠偏可见——修复前无诊断 = RED）
+  // nextNode 只看 completedNodes——P0 路由触发场景 = exit plan（completed 后 nextNode=execute → 路由检查）
+  {
+    name: '79 P0 路由无匹配输出诊断（batch-H）',
+    run: (dir) => {
+      const st = baseState('plan');
+      st.completedNodes = ['open', 'design'];
+      st.evidence.plan = { summary: 'executed' };
+      writeState(dir, st);
+      // 上游工件（open=CHANGE+REQUIREMENT、design=DESIGN-lite、plan=TASK——TASK 无 status 属性 = 旧模板形态）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n## Why\nx\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n## 用户故事\nx\n## 验收准则（AC）\nx\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN-lite.md', '# DESIGN-lite\n## 决策清单\n- d1: x\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="T01" parallel="true">\n  <action>do</action>\n  <verify>echo ok</verify>\n</task>\n');
+      const res = runGuard(['exit', 'plan', '--apply'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'P0-ROUTE WARN');
+    },
+  },
+
+  // 80: C4 catch 可见化——非 git 仓库 → entry execute 输出 C4-CHECK SKIP
+  // （batch-H P4：检测失败也要可见——修复前 catch 静默 = RED）
+  {
+    name: '80 C4 catch 非 git 仓库输出 SKIP（batch-H）',
+    run: (dir) => {
+      const st = baseState('execute');
+      writeState(dir, st);
+      const res = runGuard(['entry', 'execute'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'C4-CHECK SKIP');
+    },
+  },
+
+  // 81: handoff result commitHash 存在性校验——不存在 → HANDOFF ERROR（固化：校验已存在（W2-D），batch-H P6 确认）
+  {
+    name: '81 handoff result 无效 commitHash → ERROR（batch-H 固化）',
+    run: (dir) => {
+      writeState(dir, baseState('subagent-execute'));
+      fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
+      execFileSync('git', ['init', '-q'], { cwd: dir });
+      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: dir });
+      const payload = JSON.stringify({
+        status: 'DONE',
+        commitHash: 'deadbeef00000000000000000000000000000000',
+        redEvidence: { command: 'echo red', output: 'red' },
+        greenEvidence: { command: 'echo green', output: 'green' },
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        riskSignals: ['none'],
+      });
+      const res = runHandoff(['result', 'T01', payload], dir);
+      assertExit(res, 0);
+      assertOut(res, 'HANDOFF ERROR: commitHash 无效或 git show 失败');
+    },
+  },
+
+  // 82: entry/exit WARN COUNT 汇总行——构造 BROOKS-LINT WARN → exit 输出 WARN COUNT
+  // （batch-H F：可观测性——修复前无汇总行 = RED）
+  {
+    name: '82 exit 输出 WARN COUNT 汇总（batch-H）',
+    run: (dir) => {
+      const st = baseState('execute');
+      st.evidence.execute = { summary: 'executed' };
+      st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
+      writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent({
+        method: '## 自检方法\n\nbuiltin-quickcheck — brooks-lint 不可用（Skill 仅返回占位，插件执行体未加载），按协议降级内置 R1~R6 快查',
+      }));
+      const res = runGuard(['exit', 'execute'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'BROOKS-LINT WARN');
+      assertOut(res, 'WARN COUNT:');
+    },
+  },
+
+  // 83: 空退出行为固化——全 parallel 任务 exit execute → task-summaries BLOCKED（现状保护，H1 文档一致化的行为锚点）
+  {
+    name: '83 全 parallel exit execute BLOCKED 产物（batch-H 固化）',
+    run: (dir) => {
+      const st = baseState('execute');
+      st.evidence.execute = { summary: 'executed' };
+      writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="T01" parallel="true" status="pending">\n  <action>do</action>\n</task>\n<task id="T02" parallel="true" status="pending">\n  <action>do2</action>\n</task>\n');
+      const res = runGuard(['exit', 'execute'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 1);
+      assertOut(res, 'missing Output Schema artifacts');
+    },
+  },
 ];
 
 // ---------- 运行 ----------
