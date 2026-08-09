@@ -53,7 +53,7 @@ dev ──PR(squash)──▶ main               (release branch — clean histo
 
 - **Runtime**: Node.js ≥ 18 (ESM)
 - **Repo**: clone, then verify the regression baseline runs:
-  `node .claude/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 77 SCENARIOS PASSED`
+  `node .claude/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 82 SCENARIOS PASSED`
 - **Authoring environment**: Claude Code (skills/hooks run in Claude Code sessions); the hook is installed via `prepare-env` into your project's `.claude/`
 - **For mechanism work**: read [docs/MECHANISM.md](docs/MECHANISM.md) for the mechanism semantics (behavior layer) before touching scripts
 
@@ -70,7 +70,7 @@ After the issue is confirmed: bug fixes use a `fix/` branch, features use a `fea
 
 - **Authoritative source**: edit skills/scripts under `.comet/bundle-drafts/flow-comet/skills/` (the single source; `.claude/` copies are install artifacts — update them via `prepare-env`, never by hand)
 - **TDD**: every mechanism fix starts with a RED scenario in `guard-self-test.mjs` (watch it fail for the right reason), then GREEN, then full regression
-- **Regression baseline**: `node .claude/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 77 SCENARIOS PASSED` (mandatory after every change)
+- **Regression baseline**: `node .claude/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 82 SCENARIOS PASSED` (mandatory after every change)
 - **Documentation sync**: behavior-layer docs live in `docs/` (bilingual EN/zh — keep both in sync when a doc changes); implementation details stay out of public docs
 - **Backward compatibility**: old changes/states keep working — progressive WARN over BLOCK
 - **No internal terms in public docs**: no batch ids (E-NN), no dogfood/T-FIX/D- references, no pointers to `docs/internal/`
