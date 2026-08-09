@@ -12,7 +12,7 @@ This document describes what flow-comet **does** — the behaviors and rules you
 
 - Single-file state machine `.comet/flow-comet-state.json`; node advancement is gated by `workflow-guard.mjs exit <node> --apply`
 - **determineNode**: the current node is derived in real time from `.specs/` artifacts (missing files → stop at that node); state is not fully trusted
-- **P0-2 auto-correction**: when state's currentNode disagrees with derivation, it is written back automatically (triggered by `next`)
+- **auto-correction**: when state's currentNode disagrees with derivation, it is written back automatically (triggered by `next`)
 
 ## 2. Three defense layers (takeover protection)
 
@@ -30,7 +30,7 @@ Hook blocking semantics: PreToolUse hook exit 2 (blocking — prevents the tool 
 |-----------|-------------|---------|
 | Template-derived section names | open/design exit required section names derived from `flow-kit/templates/` (built-in fallback when templates missing) | exit open/design |
 | TASK signature hash | enter records task-set signature (line-ending normalized + marker attributes stripped) → exit compares: add/remove tasks, change action/boundaries → BLOCKED; marking done/adding marker attributes → legal | enter/exit execute |
-| Node order BLOCK | next when currentNode not exited (non-normal successor) → BLOCKED; normal next after exit advancement exempt; T-FIX rollback exempt (pending T-FIX in TASK) | next |
+| Node order BLOCK | next when currentNode not exited (non-normal successor) → BLOCKED; normal next after exit advancement exempt; rollback exempt (pending rollback task in TASK) | next |
 | handoff completedChecks | subagent Return Contract must carry required-skill completedChecks (skill-load evidence), missing → BLOCKED | exit subagent-execute |
 | redEvidence ordering | redEvidence must exist before greenEvidence; recording redEvidence after greenEvidence → BLOCKED | workflow-handoff result |
 | SUMMARY six sections | verify output / 6-dimension self-check (non-empty) / boundary check + mandatory `## 自检方法` — self-review two-tier fallback: `brooks-review` (Skill tool) → if only a "Launching skill" placeholder is returned, Read the plugin-cache protocol files and execute the full review manually (`cache-brooks`) → builtin R1~R6 quick-check last (`builtin-quickcheck` must state the unavailable reason AND the cache-attempt evidence; missing evidence → progressive WARN) | exit execute |
