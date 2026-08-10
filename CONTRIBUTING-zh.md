@@ -11,18 +11,18 @@
 ## 分支模型
 
 ```
-feat/xxx ──PR（merge commit）──▶ dev        （集成分支——历史完整）
+feat/xxx ──PR（squash）──▶ dev          （集成分支——change 级提交）
                                           │
-dev ──PR（squash）──▶ main               （发布分支——历史干净）
+dev ──PR（merge commit）──▶ main        （发布分支——积累 change 级提交）
 ```
 
 | 分支 | 角色 | 合并方式 | 历史 |
 |------|------|---------|------|
-| `main` | 发布分支 | **squash** | 干净——每次发布一条 |
-| `dev` | 集成分支 | **merge commit** | 完整——每个 feature 提交保留、可追溯 |
+| `main` | 发布分支 | **merge commit** | 每次发布积累 change 级提交 |
+| `dev` | 集成分支 | **squash** | 每个 PR 一条 change 级提交——PR 的修复明细在该 PR 的 Commits 列表可查 |
 | `feat/*` | 开发分支 | — | 工作历史，合并后删除 |
 
-**为什么这样拆分**：`dev` 保留每个 TDD 修复的完整历史（可追溯性——每个提交是一个 RED→GREEN 闭环）；`main` 保持干净，便于发布与变更日志管理。
+**为什么这样拆分**：`dev` 承载每个 PR 的**一条 change 级提交**（squash）——稳定、可读的提交序列，每个 PR 是一个单元；PR 的提交历史（每个 TDD 修复）仍可在该 PR 的 Commits 列表查看。`main` 每次发布**积累** dev 的 change 级提交——发布历史按 change 粒度可读，不掺过程细节。
 
 ## PR 流程
 
@@ -36,8 +36,8 @@ dev ──PR（squash）──▶ main               （发布分支——历史
 2. **在功能分支上开发**——遵循下方[开发规范](#开发规范)。
 3. **开 PR 合入 `dev`**（base `dev`，head `feat/<描述>`）。**使用仓库 PR 模板**（`.github/PULL_REQUEST_TEMPLATE.md`——改动范围/验证/自查勾选）。PR 描述写明改了什么、为什么、验证证据。**保留完整清单**：涉及项勾 `[x]`、未涉及项留 `[ ]`——**不要删除未勾选项**（清单是 reviewer 判断完整性的依据）。
 4. **获得审核 approve**——需要 1 个 approving review（分支保护）。
-5. **合入 `dev`**——用 **merge commit**（保留 feature 历史）。`dev` **积累改动**——不要每个改动都发布。
-6. **发布 PR（批次）**——`dev` 积累一批后（一组相关改动，或维护批次），开**一个**发布 PR 合入 `main`（base `main`，head `dev`）。用 **squash** 合并——每个发布批次一条干净提交。
+5. **合入 `dev`**——用 **squash** 合并：每个 PR 一条 **change 级提交**（PR 的提交仍可在该 PR 的 Commits 列表查看）。`dev` **积累改动**——不要每个改动都发布。
+6. **发布 PR（批次）**——`dev` 积累一组相关改动（功能批次或维护批次）后，开**一个**发布 PR 合入 `main`（base `main`，head `dev`）。用 **merge commit** 合并——dev 的 change 级提交**积累进 `main`**。
 7. 合并后删除 feature 分支。
 
 **维护批次**：纯文档/清理类改动（无行为影响）可积累在一个分支（如 `docs/maintenance-<日期>`）作为**一个** PR 合入 `dev`——减少 PR 数量且不丢可追溯性。
@@ -51,7 +51,7 @@ dev ──PR（squash）──▶ main               （发布分支——历史
 | 禁删除 | ✅ | ✅ |
 | stale review 失效 | ✅ | ✅ |
 
-**dev 同步 main**（每次 main 有新 squash 提交后执行）：
+**dev 同步 main**（每次发布合入 main 后执行）：
 
 ```bash
 git checkout dev
@@ -192,5 +192,5 @@ git push --force-with-lease origin feat/<描述>            # feature 分支允�
 4. prepare-env 发布到全部已安装副本（主仓 `.claude/` + 各目标项目）——发布后逐一验证各副本 `guard-self-test`
 
 **发布 PR 要点**：
-- 发布 PR（dev → main）天然列出 dev 的全部未发布原始提交（dev 保留完整历史、main 每次发布 squash）——这是设计，不是问题
-- 合并时用**自定义 squash 消息**（`gh pr merge --squash --subject "<发布摘要>" --body "<验证摘要>"`）——GitHub 默认 squash 消息会列出全部 commit，把历史提交的过程代号带进 main 的公开提交历史
+- 发布 PR（dev → main）天然列出 dev 的全部未发布 change 级提交（dev 是 change 级提交序列、main 每次发布积累它们）——这是设计，不是问题
+- 用 `gh pr merge --merge` 合并——merge commit 的消息来自 PR 标题/正文（公开面语言），过程细节不会进入 main 的历史
