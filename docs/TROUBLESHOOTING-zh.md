@@ -28,4 +28,7 @@
 | `Unexpected token ... is not valid JSON`（state） | state 文件带 UTF-8 BOM 或内容损坏 | 重写 state 文件（无 BOM；脚本自 1.2.1 起容忍 BOM） |
 | `PreToolUse:Write hook error: ... non-blocking`（claude -p） | SDK CLI 模式把 hook 退出码降级为 non-blocking | `claude -p` 下属预期；主会话 TUI 会阻止写入（exit 2） |
 | `INIT-NEEDED: 项目上下文（CONTEXT.md）尚未初始化` | 项目首次使用——尚无项目上下文 | 执行 `init <id> --init-context` 生成（读取既有 AI 上下文文档并带出处整合；约 15-30k tokens，仅首次），或 `--init-skip` 记录跳过并在后续 init 保持静默 |
-| `INIT-HINT: 上次扫描已 X 天` | 上下文存在但上次扫描超过 90 天 | 可选——执行 `init <id> --init-context` 刷新；非强制 |
+| `INIT-HINT: 项目上下文（CONTEXT.md）已就绪（7 段 + 模板格式校验通过）但尚未记录扫描时间` / `INIT-HINT: 上次扫描已 X 天` | 上下文已存在但未记录扫描：CONTEXT 满足模板但无扫描记录（生成后未重跑），或上次扫描超过 90 天 | 就绪态：运行 `init <id> --init-context` 记录扫描时间（此后 90 天内不再提示）；过期态：可选重跑刷新，非强制 |
+| `INIT-GENERATE: 项目上下文未初始化——请生成 .specs/CONTEXT.md`（后附模板指引：已检测到 flow-kit/templates/CONTEXT.md 时严格对照模板段名与条目格式；未检测到时按 7 段基准） | `--init-context` 时 CONTEXT.md 缺失——生成协作第一步 | 按指引全量阅读源文档并整合（出处标注 `来自 <doc>:<line>`，原文档零写入）+ 代码探测（技术栈/既有抽象索引），对照模板生成 7 段；生成后重跑 `init <id> --init-context` 由脚本校验并记录扫描时间 |
+| `INIT-VALIDATE-FAILED: CONTEXT.md 已存在但不满足模板（<原因>）`（<原因> = 格式问题/缺段清单） | `--init-context` 显式校验发现 CONTEXT.md 缺段或格式不符 | 重写——保留既有 CONTEXT 的累积术语/决策（跨 change 长期累积语义），出处标注 `来自 <doc>:<line>`，原文档零写入；对照模板段名与条目格式 |
+| `INIT-DONE: 项目上下文（CONTEXT.md）已就绪（7 段 + 模板格式校验通过）` / `INIT-DONE: 项目上下文已存在且新鲜，跳过生成。` | 生成协作第二步——重跑 `init <id> --init-context` 时脚本校验 7 段结构 + 模板格式通过（或 CONTEXT 90 天内仍新鲜） | 无需处置——扫描时间已记录，此后 90 天内不再提示 |
