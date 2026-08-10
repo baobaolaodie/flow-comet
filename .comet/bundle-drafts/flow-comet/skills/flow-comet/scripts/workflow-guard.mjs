@@ -1847,6 +1847,28 @@ async function isArchivedChange(changeName) {
   return entries.some(e => e === changeName || e.endsWith('-' + changeName));
 }
 
+// T-FIX-04: 声明标记目录解析——活动路径 .specs/<change-id>/.skill-loads/ 优先；归档路径兜底
+// （archive 节点「先移目录后 record/exit」顺序下 change 目录已在 .specs/archive/<前缀>-<change-id>/，
+// 标记只随目录移动——只查活动路径会把「标记存在」误判成「机制未激活」）。归档扫描匹配后缀
+// -<change-id>（前缀可含日期等，与协议 flowkit.archive.v1 的 archive/*-<change-id> 同构）。
+// 两者皆无 → null（D6 语义：声明机制从未激活，调用方按旧 change 兼容跳过）。
+async function findSkillLoadsDir(root, changeName) {
+  const activeDir = path.join(root, '.specs', changeName, '.skill-loads');
+  if (await fileExists(activeDir)) {
+    return { dir: activeDir, display: '.specs/' + changeName + '/.skill-loads/' };
+  }
+  const archiveRoot = path.join(root, '.specs', 'archive');
+  const entries = await fs.readdir(archiveRoot).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.endsWith('-' + changeName)) continue;
+    const candidate = path.join(archiveRoot, entry, '.skill-loads');
+    if (await fileExists(candidate)) {
+      return { dir: candidate, display: '.specs/archive/' + entry + '/.skill-loads/' };
+    }
+  }
+  return null;
+}
+
 // C2: 段名校验从模板自动派生——读 <runRoot>/flow-kit/templates/{CHANGE,REQUIREMENT,DESIGN}.md
 // 提取全部 ^## 段名，正则化生成宽松匹配模式；模板目录/文件缺失时 fallback 内置段名
 let templateSectionPatternsCacheRoot = null;
@@ -2468,17 +2490,19 @@ async function main() {
   // skill-load，声明机制未激活）→ 跳过校验；节点已 exit 不重验（校验只在当前 exit 时执行）；
   // 节点重新 exit（重入后再退）时按新规则要求，无豁免。
   if (state.activeChange && NODE_PROTOCOL_FILES[node.id]) {
-    const loadsDir = path.join(runRoot, '.specs', state.activeChange, '.skill-loads');
-    if (await fileExists(loadsDir)) {
+    // T-FIX-04: 标记目录活动/归档双路径解析（archive 节点「先移目录后 exit」顺序下标记只在
+    // 归档路径——单查活动路径会误报「机制未激活」静默放行）；两处皆无才走 D6 旧 change 兼容
+    const loadsDir = await findSkillLoadsDir(runRoot, state.activeChange);
+    if (loadsDir) {
       const prefix = node.id + '-';
       const protocolSet = NODE_PROTOCOL_FILES[node.id];
-      const markers = (await fs.readdir(loadsDir).catch(() => []))
+      const markers = (await fs.readdir(loadsDir.dir).catch(() => []))
         .filter((f) => f.startsWith(prefix) && f.endsWith('.json'));
       const malformed = [];
       let declared = false;
       for (const f of markers) {
         try {
-          const marker = JSON.parse(await fs.readFile(path.join(loadsDir, f), 'utf8'));
+          const marker = JSON.parse(await fs.readFile(path.join(loadsDir.dir, f), 'utf8'));
           // T-FIX-01: 比对 basename——新格式（skill-load 写入 basename）与旧格式（完整绝对路径）
           // 经 markerProtocolBasename 提取后统一比对；损坏值（null/非字符串/超集外 basename）
           // 提取为 null 或不匹配 → 不进 declared，fail-closed
@@ -2491,17 +2515,17 @@ async function main() {
         }
       }
       if (!declared) {
-        console.error('BLOCKED: 节点 ' + node.id + ' exit 缺协议声明标记——.specs/' + state.activeChange +
-          '/.skill-loads/ 下需有 ' + prefix + '*.json 且 protocol ∈ [' + protocolSet.join(', ') +
+        console.error('BLOCKED: 节点 ' + node.id + ' exit 缺协议声明标记——' + loadsDir.display +
+          ' 下需有 ' + prefix + '*.json 且 protocol ∈ [' + protocolSet.join(', ') +
           ']；执行 skill-load --prompt <flow-kit/prompts/ 协议文件> 声明已阅读协议（声明非物理证明，仅可追溯）' +
           (malformed.length > 0 ? '；不可解析标记: ' + malformed.join(', ') : ''));
         process.exit(1);
       }
     } else {
-      // D6 过渡规则：旧 change 兼容——声明机制未激活（无任何 skill-load 标记）不追溯；
+      // D6 过渡规则：旧 change 兼容——活动与归档路径均无声明标记目录（机制未激活）不追溯；
       // 首个 skill-load 写入后新规则生效（该 change 后续节点 exit 均需声明标记）
       console.error('SKILL-LOAD WARN: 旧 change 兼容——.specs/' + state.activeChange +
-        '/.skill-loads/ 不存在，协议声明校验跳过（机制未激活；首个 skill-load 后新规则生效）');
+        '/.skill-loads/（活动与归档路径）不存在，协议声明校验跳过（机制未激活；首个 skill-load 后新规则生效）');
     }
   }
   // 自动补 required-skill completedChecks——节点被完成即视为其实现 skill 已加载

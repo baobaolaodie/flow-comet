@@ -112,6 +112,27 @@ function protocolUnderFlowKitPrompts(value) {
   return false;
 }
 
+// T-FIX-04: 标记目录解析——活动路径 .specs/<change-id>/.skill-loads/ 优先；归档路径兜底
+// （archive 节点「先移目录后 record/exit」顺序下 change 目录已在 .specs/archive/<前缀>-<change-id>/，
+// 标记只随目录移动——只查活动路径会误报缺失）。归档扫描匹配后缀 -<change-id>（前缀可含日期等，
+// 与协议 flowkit.archive.v1 的 archive/*-<change-id> artifact 路径同构）。两者皆无 → null。
+async function findSkillLoadsDir(changeName) {
+  const activeDir = path.join(specsRoot, changeName, '.skill-loads');
+  if (await fileExists(activeDir)) {
+    return { dir: activeDir, display: '.specs/' + changeName + '/.skill-loads/' };
+  }
+  const archiveRoot = path.join(specsRoot, 'archive');
+  const entries = await fs.readdir(archiveRoot).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.endsWith('-' + changeName)) continue;
+    const candidate = path.join(archiveRoot, entry, '.skill-loads');
+    if (await fileExists(candidate)) {
+      return { dir: candidate, display: '.specs/archive/' + entry + '/.skill-loads/' };
+    }
+  }
+  return null;
+}
+
 // D3/D5/D6: completedChecks 真实性校验。解析 completedChecks 的 required-skill:<node>.<skill>
 // 条目 → 对应声明标记 .specs/<change-id>/.skill-loads/<node>-<skill>.json 必须存在（D3，缺失 →
 // BLOCKED + 指引先加载 skill 并运行 skill-load）；标记 at 必须 ≤ 本次记录时间（D5 交叉自洽：
@@ -137,15 +158,29 @@ async function verifySkillLoadMarkers(completedChecks, changeName, recordTime) {
     return { ok: false, reason: 'completedChecks 含 required-skill 条目但无 active change——无法定位声明标记（先运行 init <change-id>）' };
   }
   for (const item of required) {
-    // specsRoot 已含 .specs/，markerRel 为相对其下的路径；展示路径补 .specs/ 前缀便于用户定位
-    const markerRel = path.posix.join(changeName, '.skill-loads', item.node + '-' + item.skill + '.json');
-    const markerDisplay = '.specs/' + markerRel;
-    const markerPath = path.join(specsRoot, markerRel);
-    if (!(await fileExists(markerPath))) {
+    // T-FIX-04: 标记路径解析——活动路径优先，归档路径兜底（archive 节点「先移目录后 record」
+    // 顺序下标记只在 .specs/archive/*-<change-id>/.skill-loads/）；两处都找不到 → BLOCK + 指引
+    // （不静默放行）。展示路径补 .specs/ 前缀便于用户定位。
+    const markerName = item.node + '-' + item.skill + '.json';
+    const activeDisplay = '.specs/' + path.posix.join(changeName, '.skill-loads', markerName);
+    const activePath = path.join(specsRoot, changeName, '.skill-loads', markerName);
+    let markerPath = await fileExists(activePath) ? activePath : null;
+    let markerDisplay = activeDisplay;
+    if (!markerPath) {
+      const loadsDir = await findSkillLoadsDir(changeName);
+      if (loadsDir !== null) {
+        const altPath = path.join(loadsDir.dir, markerName);
+        if (await fileExists(altPath)) {
+          markerPath = altPath;
+          markerDisplay = loadsDir.display + markerName;
+        }
+      }
+    }
+    if (!markerPath) {
       return {
         ok: false,
-        reason: 'completedChecks 条目 ' + item.raw + ' 缺少对应声明标记 ' + markerDisplay +
-          '——先加载该 skill 并运行 workflow-state.mjs skill-load ' + item.node + ' ' + item.skill,
+        reason: 'completedChecks 条目 ' + item.raw + ' 缺少对应声明标记 ' + activeDisplay +
+          '（归档路径也未找到）——先加载该 skill 并运行 workflow-state.mjs skill-load ' + item.node + ' ' + item.skill,
       };
     }
     let marker;
