@@ -75,27 +75,15 @@ flow-comet turns the flow-kit 9-stage process (CHANGE → REQUIREMENT → DESIGN
 
 ## Screenshots
 
-Real-run captures from production-length sessions (each shows elapsed time and token usage):
+Real-run captures from production-length sessions. During these multi-hour runs, the **only human interaction was the workflow-defined decision points** (scope confirmation, tech-stack selection, review findings, archive confirmation) — no other manual interference or ad-hoc decisions; the specification was strictly enforced from start to finish.
 
 **Complete artifact trail** — every workflow artifact from a real run (CHANGE / DESIGN / REQUIREMENT / REVIEW / TASK / TEST / UAT + 21 task summaries):
 
 ![Artifact trail](images/long-run-output.png)
 
-**Long-running serial execution** — tasks running for hours with stable context management (3h26m, 250k tokens):
+**5-hour verification run** — full validation and UAT at the end of a 5h14m session (↓399k tokens):
 
-![Serial execution](images/long-run-3h.png)
-
-**Parallel subagent delegation** — implementation delegated to isolated subagents (4h05m, 333k tokens):
-
-![Subagent delegation](images/long-run-4h.png)
-
-**Stable skill triggering** — skills keep loading correctly through a 4h+ session:
-
-![Skill triggering](images/long-run-4h-and-skill-triggering.png)
-
-**Verification stage** — full validation and UAT at the end of a 5h session (5h14m, 399k tokens):
-
-![Verification](images/long-run-5h.png)
+![Verification run](images/long-run-5h.png)
 
 ## Ecosystem
 
