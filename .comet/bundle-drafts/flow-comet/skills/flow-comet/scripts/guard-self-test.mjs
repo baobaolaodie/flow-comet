@@ -2104,8 +2104,11 @@ const SCENARIOS = [
       if (marker.node !== 'open' || marker.skill !== 'flow-comet-change') {
         throw new Error('标记 node/skill 字段不符: ' + JSON.stringify(marker));
       }
-      if (typeof marker.protocol !== 'string' || marker.protocol.length === 0) {
-        throw new Error('标记缺 protocol 字段: ' + JSON.stringify(marker));
+      // T-FIX-01: 标记 protocol = --protocol 参数的 basename（与 guard exit 的 D7 表比对同值，
+      // 真实链路 skill-load → exit 一致；P1 缺陷时代写 resolveProtocol 解析后的完整绝对路径，
+      // 与 D7 表 basename 精确比对必然失败——机制实际不可用，已修复）
+      if (marker.protocol !== '0-change.md') {
+        throw new Error('标记 protocol 应为 --protocol 参数的 basename 0-change.md: ' + JSON.stringify(marker));
       }
       if (typeof marker.at !== 'string' || Number.isNaN(Date.parse(marker.at))) {
         throw new Error('标记缺 ISO 时间戳 at: ' + JSON.stringify(marker));
@@ -2185,35 +2188,63 @@ const SCENARIOS = [
     },
   },
 
-  // 102: exit 协议声明标记校验（AC-4）——.skill-loads/ 已激活（目录存在）但无本节点协议标记
-  // （<node>-*.json 且 protocol ∈ 该节点协议集）→ BLOCKED；有 → 通过。
-  // 注意：对照值按 guard 的 D7 映射表（flow-kit/prompts/ 协议文件 basename，如 open → 0-change.md）——
-  // 本场景直接构造标记文件（协议集内值）固守 guard 对照语义；skill-load 实际写入的协议字段为
-  // 解析后的完整路径，二者对齐属脚本侧集成修复范畴（本场景按实现行为固化断言）
+  // 102: exit 协议声明标记校验（AC-4）+ 真实链路集成（T-FIX-01）——.skill-loads/ 已激活
+  // （目录存在）但无本节点协议标记（<node>-*.json 且 protocol ∈ 该节点协议集，D7 映射表
+  // basename）→ BLOCKED；真实 skill-load --protocol 写入的标记（protocol = basename）→ exit 通过
+  // （修复后真实链路一致——P1 缺陷时代 skill-load 写解析后完整路径，exit 必 BLOCKED）；未传
+  // --protocol（标记 protocol = null）→ BLOCKED；损坏标记（protocol 非协议集）→ BLOCKED
   {
-    name: '102 exit 协议标记校验：无标记 BLOCKED / 有标记通过（AC-4）',
+    name: '102 exit 协议标记校验：真实链路通过 / 无标记·null·损坏 BLOCKED（AC-4）',
     run: (dir) => {
       const st = baseState('open');
       st.evidence.open = { summary: 'intake complete' };
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n\n## 范围\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\n## 验收准则（AC）\n');
-      // ① 机制已激活（.skill-loads/ 存在）但无 open-* 标记（仅他节点标记）→ BLOCKED
+      // 场景内 flow-kit/prompts/ 协议文件（真实 skill-load --protocol 指向，受保护读取需文件存在）
+      writeFile(dir, 'flow-kit/prompts/0-change.md', JSON.stringify(customProtocol(), null, 2) + '\n');
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       const loadsDir = path.join(dir, '.specs', CHANGE_ID, '.skill-loads');
       fs.mkdirSync(loadsDir, { recursive: true });
+      // ① 机制已激活（.skill-loads/ 存在）但无 open-* 标记（仅他节点标记）→ BLOCKED
       writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/design-flow-comet-design.json',
         JSON.stringify({ node: 'design', skill: 'flow-comet-design', protocol: '2-design.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
       const resBlock = runGuard(['exit', 'open'], dir);
       assertExit(resBlock, 1);
       assertOut(resBlock, 'BLOCKED');
       assertOut(resBlock, 'exit 缺协议声明标记');
-      // ② 补本节点标记（protocol ∈ open 协议集）→ 通过
-      writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-change.json',
-        JSON.stringify({ node: 'open', skill: 'flow-comet-change', protocol: '0-change.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+      // ② 真实链路（T-FIX-01）：skill-load --protocol 写入标记（protocol = basename）→ exit 通过
+      const markerPath = path.join(loadsDir, 'open-flow-comet-change.json');
+      const sl = runState(['skill-load', 'open', 'flow-comet-change', '--protocol', 'flow-kit/prompts/0-change.md'], dir, env);
+      assertExit(sl, 0);
+      assertOut(sl, 'SKILL-LOAD: open flow-comet-change');
+      const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+      if (marker.protocol !== '0-change.md') {
+        throw new Error('skill-load 标记 protocol 应为 --protocol 参数的 basename 0-change.md: ' + JSON.stringify(marker));
+      }
       const resPass = runGuard(['exit', 'open'], dir);
       assertExit(resPass, 0);
       assertOut(resPass, 'ALL CHECKS PASSED');
       assertNotOut(resPass, 'BLOCKED');
+      // ③ skill-load 未传 --protocol → 标记 protocol = null → exit BLOCKED（fail-closed：
+      // 无协议声明不可通过——指引补 skill-load --protocol）
+      const slNull = runState(['skill-load', 'open', 'flow-comet-change'], dir, env);
+      assertExit(slNull, 0);
+      const markerNull = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+      if (markerNull.protocol !== null) {
+        throw new Error('skill-load 未传 --protocol 标记 protocol 应为 null: ' + JSON.stringify(markerNull));
+      }
+      const resNull = runGuard(['exit', 'open'], dir);
+      assertExit(resNull, 1);
+      assertOut(resNull, 'BLOCKED');
+      assertOut(resNull, 'exit 缺协议声明标记');
+      // ④ 损坏标记（protocol 非协议集 basename）→ BLOCKED（fail-closed）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-change.json',
+        JSON.stringify({ node: 'open', skill: 'flow-comet-change', protocol: '9-other.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+      const resCorrupt = runGuard(['exit', 'open'], dir);
+      assertExit(resCorrupt, 1);
+      assertOut(resCorrupt, 'BLOCKED');
+      assertOut(resCorrupt, 'exit 缺协议声明标记');
     },
   },
 

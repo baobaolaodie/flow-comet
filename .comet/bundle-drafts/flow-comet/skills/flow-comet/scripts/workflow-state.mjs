@@ -718,7 +718,11 @@ async function main() {
     if (!changeName) {
       throw new Error('skill-load requires an active change（先运行 init <change-id>）');
     }
-    const marker = { node: nodeId, skill: skillName, protocol: protocolPath, at: new Date().toISOString() };
+    // T-FIX-01: 标记 protocol 字段 = --protocol 参数的 basename（如 0-change.md）——与 guard exit
+    // 校验的 D7 表 basename 精确比对同值（真实链路 skill-load → exit 一致）；未传 --protocol →
+    // null（无协议声明，exit 校验 fail-closed）。P1 修复：旧实现写 resolveProtocol 解析后的完整
+    // 绝对路径，与 D7 表 basename 比对必然失败（真实链路必 BLOCKED——机制实际不可用）。
+    const marker = { node: nodeId, skill: skillName, protocol: protocolArg === null ? null : path.basename(protocolArg), at: new Date().toISOString() };
     // specsRoot 已含 .specs/，相对路径为 <change-id>/.skill-loads/<node>-<skill>.json
     const markerRel = path.posix.join(changeName, '.skill-loads', nodeId + '-' + skillName + '.json');
     await writeJson(path.join(specsRoot, markerRel), marker);

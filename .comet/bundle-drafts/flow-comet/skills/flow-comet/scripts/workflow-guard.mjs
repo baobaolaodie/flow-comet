@@ -46,6 +46,16 @@ const NODE_PROTOCOL_FILES = {
   archive: ['7-integration.md'],
 };
 
+// T-FIX-01: 声明标记 protocol → basename 提取（exit 校验与 D7 表 basename 精确比对）。
+// 兼容新旧两种格式：新格式（skill-load 写入）= 纯 basename（如 0-change.md），原样返回；
+// 旧格式（P1 缺陷时代写入）= resolveProtocol 解析后的完整绝对路径（Windows 反斜杠 /
+// POSIX 斜杠），提取最后一段后可比对。非字符串（null——skill-load 未传 --protocol 的
+// 新格式缺省）→ null（协议集内无 null，fail-closed 由 includes 比对兜底）。
+function markerProtocolBasename(value) {
+  if (typeof value !== 'string' || value === '') return null;
+  return String(value).replaceAll('\\', '/').split('/').pop() || null;
+}
+
 // W1-B: flow-kit SUMMARY 模板必填段（正则匹配，大小写不敏感 + 变体兼容）
 const SUMMARY_REQUIRED_SECTIONS = [
   { regex: /##\s*verify\s*输出/i, label: '## verify 输出' },
@@ -2469,7 +2479,10 @@ async function main() {
       for (const f of markers) {
         try {
           const marker = JSON.parse(await fs.readFile(path.join(loadsDir, f), 'utf8'));
-          if (marker && typeof marker === 'object' && protocolSet.includes(marker.protocol)) {
+          // T-FIX-01: 比对 basename——新格式（skill-load 写入 basename）与旧格式（完整绝对路径）
+          // 经 markerProtocolBasename 提取后统一比对；损坏值（null/非字符串/超集外 basename）
+          // 提取为 null 或不匹配 → 不进 declared，fail-closed
+          if (marker && typeof marker === 'object' && protocolSet.includes(markerProtocolBasename(marker.protocol))) {
             declared = true;
             break;
           }
