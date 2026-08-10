@@ -112,6 +112,16 @@ function protocolUnderFlowKitPrompts(value) {
   return false;
 }
 
+// T-FIX-06: requiredSkillCalls scope 分类——按协议 requiredSkillCalls 查 <node>.<skill> 绑定：
+// main scope = 协调者加载（如 flow-comet-subagent-execute），要求协调者 skill-load 标记；
+// handoff scope = 子代理加载（如 subagent-execute 节点的 flow-comet-dev），协调者不加载它。
+// 协议外条目（无绑定 / 非 main / 非 handoff scope）→ null（fail-closed：仍按 main 处理要标记）。
+function findRequiredSkillBinding(protocol, nodeId, skillName) {
+  const node = (protocol.nodes ?? []).find((n) => n.id === nodeId);
+  if (!node) return null;
+  return (node.requiredSkillCalls ?? []).find((binding) => binding.skill === skillName) ?? null;
+}
+
 // T-FIX-04: 标记目录解析——活动路径 .specs/<change-id>/.skill-loads/ 优先；归档路径兜底
 // （archive 节点「先移目录后 record/exit」顺序下 change 目录已在 .specs/archive/<前缀>-<change-id>/，
 // 标记只随目录移动——只查活动路径会误报缺失）。归档扫描匹配后缀 -<change-id>（前缀可含日期等，
@@ -138,10 +148,15 @@ async function findSkillLoadsDir(changeName) {
 // BLOCKED + 指引先加载 skill 并运行 skill-load）；标记 at 必须 ≤ 本次记录时间（D5 交叉自洽：
 // 标记先于记录声明；ISO-8601 UTC 字符串字典序 = 时间序）。仅校验本次 record 写入的
 // completedChecks（D6 兼容：旧 evidence 不追溯——由调用方只传本次 parsed.completedChecks）。
+// T-FIX-06: 条目按协议 requiredSkillCalls scope 分类——handoff scope 条目（子代理加载的 skill，
+// 如 subagent-execute 节点的 flow-comet-dev）豁免标记，以共用证据库 evidence['subagent-execute']
+// 的 handoffResult（有委托记录即满足）为证据；main scope / 协议外条目仍要求标记（fail-closed）。
 // 诚实边界：标记是"声明"而非物理证明——运行时没有 Skill 调用观察点，脚本无法确认执行者
-// 真实加载过该 skill；标记仅证明"执行者主动声明已加载"，由流程纪律兜底。
+// 真实加载过该 skill；标记仅证明"执行者主动声明已加载"，由流程纪律兜底。handoff 条目的证据
+// 同样不是物理证明——它是子代理回传的 Return Contract 委托声明（子代理自称已加载并执行），
+// 由 handoff result 的 commitHash/greenEvidence 审计性兜底。
 // 返回 { ok: true } 或 { ok: false, reason }（fail-closed：无 active change / 标记损坏同样 BLOCK）。
-async function verifySkillLoadMarkers(completedChecks, changeName, recordTime) {
+async function verifySkillLoadMarkers(completedChecks, changeName, recordTime, protocol, state) {
   if (!Array.isArray(completedChecks)) return { ok: true };
   const required = [];
   for (const check of completedChecks) {
@@ -158,6 +173,28 @@ async function verifySkillLoadMarkers(completedChecks, changeName, recordTime) {
     return { ok: false, reason: 'completedChecks 含 required-skill 条目但无 active change——无法定位声明标记（先运行 init <change-id>）' };
   }
   for (const item of required) {
+    // T-FIX-06: handoff scope 条目豁免标记——子代理加载的 skill（协调者不加载它，无法诚实
+    // 声明加载），以共用证据库 handoffResult 的委托记录为证据；无委托记录 → BLOCK（不静默
+    // 放行，指引先委托并回传 handoff result）
+    const binding = findRequiredSkillBinding(protocol, item.node, item.skill);
+    if (binding && binding.scope === 'handoff') {
+      const handoff = state?.evidence?.['subagent-execute']?.handoffResult;
+      const hasDelegation = !!(
+        handoff &&
+        typeof handoff === 'object' &&
+        !Array.isArray(handoff) &&
+        Object.keys(handoff).length > 0
+      );
+      if (!hasDelegation) {
+        return {
+          ok: false,
+          reason: 'completedChecks 条目 ' + item.raw + ' 为 handoff scope（' + item.node +
+            ' 节点的 ' + item.skill + ' 由子代理加载，协调者无需 skill-load 标记）但共用证据库' +
+            ' evidence[subagent-execute].handoffResult 无委托记录——先委托子代理并回传 Return Contract（workflow-handoff.mjs result <task-id> <contract>）',
+        };
+      }
+      continue;
+    }
     // T-FIX-04: 标记路径解析——活动路径优先，归档路径兜底（archive 节点「先移目录后 record」
     // 顺序下标记只在 .specs/archive/*-<change-id>/.skill-loads/）；两处都找不到 → BLOCK + 指引
     // （不静默放行）。展示路径补 .specs/ 前缀便于用户定位。
@@ -800,9 +837,11 @@ async function main() {
     // （D5 交叉自洽：标记先于记录声明）。仅校验本次写入的 payload，旧 evidence 不追溯（D6）。
     const recordedAt = new Date().toISOString();
     // 标记归属 change 与 evidence 一致：优先 state.activeChange，缺失时回退 findActiveChange（与
-    // 下方 NEXT 推导同语义）；两者皆无 → verifySkillLoadMarkers 内 fail-closed BLOCK
+    // 下方 NEXT 推导同语义）；两者皆无 → verifySkillLoadMarkers 内 fail-closed BLOCK。
+    // T-FIX-06: 传入 protocol + state——按 requiredSkillCalls scope 分类条目（handoff scope 豁免标记，
+    // 以共用证据库 handoffResult 为证据）
     const markerChange = state.activeChange || await findActiveChange();
-    const markerCheck = await verifySkillLoadMarkers(parsed.completedChecks, markerChange, recordedAt);
+    const markerCheck = await verifySkillLoadMarkers(parsed.completedChecks, markerChange, recordedAt, protocol, state);
     if (!markerCheck.ok) {
       console.error('BLOCKED: ' + markerCheck.reason);
       process.exit(1);
