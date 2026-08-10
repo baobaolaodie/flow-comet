@@ -104,7 +104,7 @@ flow-kit 9 阶段工作流的 workflow-kernel 实现。保留 flow-kit 的全部
 |------|---------------|----------------|-------------|
 | open | flow-comet-open | flow-comet-change, flow-comet-requirement | guarded |
 | design | flow-comet-design | flow-comet-design, flow-comet-ui-design (advisory) | guarded |
-| plan | flow-comet-plan | flow-comet-task | guarded |
+| plan | flow-comet-task | flow-comet-task | guarded |
 | execute | flow-comet-execute | flow-comet-dev | guarded |
 | subagent-execute | flow-comet-subagent-execute | flow-comet-dev (handoff) | handoff-guarded |
 | review | flow-comet-review | flow-comet-review, flow-comet-test | guarded |
