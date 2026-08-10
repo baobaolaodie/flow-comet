@@ -1706,6 +1706,20 @@ function hasEvidenceField(evidence, id) {
   );
 }
 
+// T-FIX-05: 共用证据库 handoffResult 识别——subagent-execute 的委托结果由 workflow-handoff
+// result 写入嵌套 handoffResult（{ <taskId>: { result, completedAt } }），非顶层
+// handoff-result 字段；嵌套对象存在且非空（至少一个任务记录）视为该 evidence 已产生
+// （gate 只认存在性，内容严格校验由 W1-D Return Contract 校验负责）。
+function hasNonEmptyHandoffResult(evidence) {
+  const handoff = evidence?.handoffResult;
+  return !!(
+    handoff &&
+    typeof handoff === 'object' &&
+    !Array.isArray(handoff) &&
+    Object.keys(handoff).length > 0
+  );
+}
+
 function schemaMap(protocol) {
   return new Map((protocol.outputSchemas ?? []).map((schema) => [schema.id, schema]));
 }
@@ -2191,8 +2205,12 @@ async function main() {
   const gate = NODE_TRANSITION_GATES[node.id];
   if (gate) {
     for (const ev of gate.evidence) {
+      // T-FIX-05: subagent-execute 的 handoff-result gate 兼容共用证据库——委托结果记录在
+      // 嵌套 handoffResult（键名契约 handoff-result vs handoffResult 错位），非空即满足
+      // （存在性校验；每个委托内容的 Return Contract 严格校验由 W1-D 负责）
       const satisfied = hasEvidenceField(evidence, ev) ||
-        (typeof evidence.summary === 'string' && evidence.summary.trim() !== '');
+        (typeof evidence.summary === 'string' && evidence.summary.trim() !== '') ||
+        (node.id === 'subagent-execute' && ev === 'handoff-result' && hasNonEmptyHandoffResult(evidence));
       if (!satisfied) {
         console.error('BLOCKED: node ' + node.id + ' exit requires evidence: ' + ev);
         process.exit(1);
