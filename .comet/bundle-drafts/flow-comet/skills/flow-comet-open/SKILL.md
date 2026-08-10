@@ -111,6 +111,13 @@ The open node loads `flow-comet-change` for the CHANGE phase (structured questio
 | `flow-comet-change` | Required before CHANGE.md generation | Provides structured questioning protocol, architecture detection, and tone preselection |
 | `flow-comet-requirement` | Required before REQUIREMENT.md generation | Provides AC format (Given/When/Then), scope split, and terminology extraction rules |
 
+**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-change --protocol flow-kit/prompts/0-change.md
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-requirement --protocol flow-kit/prompts/1-requirement.md
+```
+
 ## Output Schemas
 
 Schema: `flowkit.intake.v1`
@@ -168,6 +175,13 @@ Load `flow-comet-open` for this Node. Operation: `require`.
 
 - Load `flow-comet-change` during this Node and record completed check `required-skill:open.flow-comet-change`. Reason: CHANGE 反问协议
 - Load `flow-comet-requirement` during this Node and record completed check `required-skill:open.flow-comet-requirement`. Reason: REQUIREMENT 需求分析
+
+**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+
+```bash
+node flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-change --protocol flow-kit/prompts/0-change.md
+node flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-requirement --protocol flow-kit/prompts/1-requirement.md
+```
 
 ## Augmentations
 

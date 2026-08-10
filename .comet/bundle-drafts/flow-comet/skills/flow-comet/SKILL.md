@@ -111,6 +111,14 @@ flow-kit 9 阶段工作流的 workflow-kernel 实现。保留 flow-kit 的全部
 | verify | flow-comet-verify | flow-comet-integration | guarded |
 | archive | flow-comet-archive | flow-comet-integration | guarded |
 
+**节点 skill 加载声明**：进入节点、加载节点 skill 后**立即**运行声明命令，记录本次加载使用的 skill 与协议文件（open/review 等涉及多个协议文件的节点，每个协议文件对应一条声明命令）：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <skill> --protocol flow-kit/prompts/<阶段>.md
+```
+
+节点退出（exit）与证据记录（record）会核对声明标记。声明如实记录执行者动作——加载了哪个 skill、按哪份协议工作——**不等于产出证明**；产出是否正确由产物结构校验与门禁把关。
+
 ## Guardrails And Evidence
 
 | 节点 | Guardrail | Validation | Description |
@@ -206,6 +214,8 @@ The route, Output Schemas, required Skill calls, and recovery state are defined 
 - `review`: implementation `flow-comet-review` (require); required calls `flow-comet-review`, `flow-comet-test`; augmentations none.
 - `verify`: implementation `flow-comet-verify` (require); required calls `flow-comet-integration`; augmentations none.
 - `archive`: implementation `flow-comet-archive` (require); required calls `flow-comet-integration`; augmentations none.
+
+**节点 skill 加载声明**：加载节点 skill 后立即运行 `node flow-comet/scripts/workflow-state.mjs skill-load <node> <skill> --protocol flow-kit/prompts/<阶段>.md` 记录本次加载（多协议节点每个协议文件一条命令）；exit/record 会核对声明标记。声明如实记录加载动作，不等于产出证明——正确性由产物门禁校验把关。
 
 ## Guardrails And Evidence
 

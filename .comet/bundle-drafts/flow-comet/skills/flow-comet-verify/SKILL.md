@@ -103,6 +103,12 @@ The verify node loads `flow-comet-integration` for the verification protocol. It
 
 Load `flow-comet-integration` during this Node and record completed check `required-skill:verify.flow-comet-integration`. Reason: 集成验证 + UAT + LESSONS 提名
 
+**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load verify flow-comet-integration --protocol flow-kit/prompts/7-integration.md
+```
+
 ## Augmentations
 
 This Node has no declared augmentations.

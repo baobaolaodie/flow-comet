@@ -153,6 +153,12 @@ The subagent-execute node identifies all `parallel="true"` pending tasks in TASK
 | `flow-comet-dev` | Required in each subagent's prompt | Provides TDD, LESSONS scan, diff boundary, self-review protocol for each parallel task |
 | `superpowers:subagent-driven-development` | Required for delegation pattern | Provides the Agent tool invocation pattern for parallel task execution |
 
+**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load subagent-execute flow-comet-dev --protocol flow-kit/prompts/4-dev.md
+```
+
 ## Output Schemas
 
 Schema: `flowkit.handoff.v1`
@@ -209,6 +215,12 @@ Load `flow-comet-subagent-execute` for this Node. Operation: `require`.
 ## Required Skill Calls
 
 - When delegating this Node, the handoff prompt must require loading `flow-comet-dev` and returning evidence with completed check `required-skill:subagent-execute.flow-comet-dev`. Reason: 子代理加载 DEV 规则并回传 evidence
+
+**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+
+```bash
+node flow-comet/scripts/workflow-state.mjs skill-load subagent-execute flow-comet-dev --protocol flow-kit/prompts/4-dev.md
+```
 
 ## Augmentations
 

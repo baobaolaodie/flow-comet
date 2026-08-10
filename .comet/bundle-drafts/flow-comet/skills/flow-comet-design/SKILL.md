@@ -110,6 +110,12 @@ The design node reads CHANGE.md and REQUIREMENT.md, then produces DESIGN.md thro
 |-------|-------------|--------|
 | `flow-comet-ui-design` | Required for frontend projects | Produces UI-DESIGN.md with design tokens, anti-AI-slop check, visual north star |
 
+**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load design flow-comet-design --protocol flow-kit/prompts/2-design.md
+```
+
 ## Output Schemas
 
 Schema: `flowkit.design.v1`
@@ -167,6 +173,12 @@ Load `flow-comet-design` for this Node. Operation: `require`.
 
 - Load `flow-comet-design` during this Node and record completed check `required-skill:design.flow-comet-design`. Reason: 技术栈选型 + ADR
 - Load `flow-comet-ui-design` during this Node and record completed check `required-skill:design.flow-comet-ui-design`. Reason: UI-DESIGN（仅前端）
+
+**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+
+```bash
+node flow-comet/scripts/workflow-state.mjs skill-load design flow-comet-design --protocol flow-kit/prompts/2-design.md
+```
 
 ## Augmentations
 
