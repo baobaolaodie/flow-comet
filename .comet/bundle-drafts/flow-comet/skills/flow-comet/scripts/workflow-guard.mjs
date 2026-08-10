@@ -2473,8 +2473,11 @@ async function main() {
       console.error('BLOCKED: TEST.md 需声明 ## 验证命令 段（严格版要求）');
       process.exit(1);
     }
+    // T-FIX-19: verify 命令 timeout 可配置——FLOW_COMET_VERIFY_TIMEOUT_MS 环境变量优先，
+    // 缺省 300000ms（300s；赛事系统后端测试耗时可超 300s，用 env 调大）；非数字/0 → 回退缺省
+    const verifyTimeoutMs = Number.parseInt(process.env.FLOW_COMET_VERIFY_TIMEOUT_MS ?? '300000', 10) || 300000;
     try {
-      execSync(verifyCommand, { cwd: runRoot, stdio: 'pipe', timeout: 300000 });
+      execSync(verifyCommand, { cwd: runRoot, stdio: 'pipe', timeout: verifyTimeoutMs });
     } catch (e) {
       // verify-fail 自动递增（无需 LLM 主动调用）
       state.verifyFailures = (state.verifyFailures || 0) + 1;
@@ -2485,7 +2488,10 @@ async function main() {
       if (state.verifyFailures >= 4) {
         console.error('BLOCKED: verify 已失败 ' + state.verifyFailures + ' 次，需用户决策（继续修/停止）。');
       } else {
-        console.error('BLOCKED: verify 命令失败: ' + verifyCommand + '\n' + String(e.stdout || e.message).slice(0, 500));
+        // stdout 为空（如超时被 kill 时 stdout 是空 Buffer——truthy）→ 显示错误消息；
+        // 消息中带实际应用的 timeout（超时可诊断，且与 Node 版本无关）
+        const detail = (e.stdout && e.stdout.length) ? e.stdout : e.message;
+        console.error('BLOCKED: verify 命令失败（timeout ' + verifyTimeoutMs + 'ms）: ' + verifyCommand + '\n' + String(detail).slice(0, 500));
         console.error('VERIFY-FAIL: ' + state.verifyFailures + '/3');
       }
       process.exit(1);
