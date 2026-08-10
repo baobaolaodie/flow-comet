@@ -2461,7 +2461,7 @@ async function main() {
   // D4: exit 协议声明标记校验——节点 exit 时扫描 .specs/<change-id>/.skill-loads/ 下该节点标记
   // （<node>-*.json，执行者加载节点 skill 后经 skill-load 写入，含 protocol 字段——指向
   // flow-kit/prompts/ 协议文件，只读引用），校验至少一个标记的 protocol ∈ 该节点协议集（D7 映射表）。
-  // 缺失 → BLOCKED（提示缺协议声明标记 + 指引 skill-load --protocol）；有 → 通过。
+  // 缺失 → BLOCKED（提示缺协议声明标记 + 指引 skill-load --prompt）；有 → 通过。
   // 诚实边界：标记是执行者的自我声明——校验只确认「声明存在且 protocol 归属节点」，
   // 无法证明执行者真的阅读了协议（声明非物理证明，仅保证协议阅读声明可追溯）。
   // D6 兼容：旧 change/旧 evidence 不追溯——.skill-loads/ 目录不存在（该 change 从未运行过
@@ -2493,7 +2493,7 @@ async function main() {
       if (!declared) {
         console.error('BLOCKED: 节点 ' + node.id + ' exit 缺协议声明标记——.specs/' + state.activeChange +
           '/.skill-loads/ 下需有 ' + prefix + '*.json 且 protocol ∈ [' + protocolSet.join(', ') +
-          ']；执行 skill-load --protocol <flow-kit/prompts/ 协议文件> 声明已阅读协议（声明非物理证明，仅可追溯）' +
+          ']；执行 skill-load --prompt <flow-kit/prompts/ 协议文件> 声明已阅读协议（声明非物理证明，仅可追溯）' +
           (malformed.length > 0 ? '；不可解析标记: ' + malformed.join(', ') : ''));
         process.exit(1);
       }
