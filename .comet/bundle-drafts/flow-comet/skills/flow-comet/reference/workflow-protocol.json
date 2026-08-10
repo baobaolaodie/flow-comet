@@ -627,6 +627,15 @@
             "archive/*-<change-id>"
           ],
           "pathBase": "specs-root"
+        },
+        {
+          "id": "known-issues",
+          "kind": "file",
+          "required": false,
+          "paths": [
+            "archive/*-<change-id>/KNOWN-ISSUES.md"
+          ],
+          "pathBase": "specs-root"
         }
       ],
       "evidence": [

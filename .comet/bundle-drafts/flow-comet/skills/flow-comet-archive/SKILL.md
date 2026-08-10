@@ -40,26 +40,33 @@ This node finalizes a completed change by extracting reusable lessons from the d
 
 4. **Check existing lessons for superseded/deprecated**: Scan existing active lessons in `.specs/LESSONS.md`. If this change's lessons or outcomes supersede or deprecate existing entries, update their status accordingly.
 
-5. **Move change to archive**: After user confirmation:
+5. **Compile the leftover issues list (problem-handling principle)**: Before the move, collect everything that remains open or known-limited in this change:
+   - REVIEW.md findings marked `[转待办]` (deferred — recorded but not fixed) plus any known limitations captured during the change.
+   - Write `.specs/<change-id>/KNOWN-ISSUES.md` — each entry: issue description, why it was deferred, and where it may surface again.
+   - The file moves with the change into `.specs/archive/<YYYY-MM-DD>-<change-id>/` (archived alongside the other artifacts), so the leftover issues never silently vanish after archive.
+   - If there are no leftovers, still state that explicitly in the file (e.g. "无遗留问题" / "No known leftover issues").
+
+6. **Move change to archive**: After user confirmation:
    - Move `.specs/<change-id>/` to `.specs/archive/<YYYY-MM-DD>-<change-id>/`.
    - Date format: YYYY-MM-DD of the archive date.
    - Verify the move completed successfully (source no longer exists, destination has all files).
 
-6. **Update CHANGELOG.md**: 在 `.specs/CHANGELOG.md` 表格**顶部**按日期倒序插入一行（倒序约定：新条目永远在最新日期行之上；文件不存在则从模板创建）:
+7. **Update CHANGELOG.md**: 在 `.specs/CHANGELOG.md` 表格**顶部**按日期倒序插入一行（倒序约定：新条目永远在最新日期行之上；文件不存在则从模板创建）:
    - Format: `| YYYY-MM-DD | <change-id> | one-line summary | PR link | new L-NNN entries |`
 
-7. **Update STATE.md**: Clear the active change field in the repository root `STATE.md`; 决策日志新条目**顶部**插入（倒序约定，**禁止文件尾追加**）。
+8. **Update STATE.md**: Clear the active change field in the repository root `STATE.md`; 决策日志新条目**顶部**插入（倒序约定，**禁止文件尾追加**）。
 
-8. **Notify user of architecture sedimentation**: Check DESIGN.md section 9 for sedimentation suggestions. If N > 0 suggestions exist, tell user:
+9. **Notify user of architecture sedimentation + leftover issues**: Check DESIGN.md section 9 for sedimentation suggestions. If N > 0 suggestions exist, tell user — and always explicitly enumerate the leftover issues from KNOWN-ISSUES.md in the archive notification (they must not silently disappear after archive):
    ```
    Archived to .specs/archive/<YYYY-MM-DD>-<change-id>/
+   遗留问题清单（KNOWN-ISSUES.md，随工件归档）: <each leftover issue, or 无>
    This change's DESIGN section 9 has N architecture sedimentation candidates, deferred for batch sync.
    Recommended: run A-evolve workflow after >= 5 changes or 60 days to batch-review and patch CONTEXT.md.
    ```
 
-9. **Record evidence**: Run workflow-state.mjs to record archive completion.
+10. **Record evidence**: Run workflow-state.mjs to record archive completion.
 
-10. **Exit check**: Run exit check.
+11. **Exit check**: Run exit check.
 
 ### 归档提交（R4.1 对齐 comet archive 交付闭环）
 
@@ -92,6 +99,8 @@ This node is truly done when:
 - `.specs/<change-id>/` has been moved to `.specs/archive/<YYYY-MM-DD>-<change-id>/`.
 - `.specs/CHANGELOG.md` has been updated with the change entry.
 - `.specs/LESSONS.md` has been updated with any qualifying new lessons.
+- `.specs/archive/<YYYY-MM-DD>-<change-id>/KNOWN-ISSUES.md` exists (leftover issues compiled and archived; explicit "无遗留" when none).
+- The archive notification explicitly enumerated the leftover issues list.
 - STATE.md has been updated (active change cleared).
 - User has confirmed the archive operation.
 - LESSONS.md has NOT been moved or archived (it remains project-level).
@@ -102,6 +111,7 @@ This node is truly done when:
 - **Agent thought**: "LESSONS.md is part of the change, archive it too." **Actual risk**: Archiving LESSONS.md with the change removes project-level knowledge that should persist across changes. LESSONS.md is permanent and must stay in `.specs/`.
 - **Agent thought**: "No lessons to nominate, skip the scan." **Actual risk**: Even if no lessons qualify, the scan must be performed and documented. Skipping means potentially valuable knowledge is lost.
 - **Agent thought**: "Update CONTEXT.md with DESIGN section 9 suggestions during archive." **Actual risk**: Directly updating CONTEXT.md during archive violates the A-evolve workflow. Section 9 suggestions are deferred for batch sync, not applied immediately.
+- **Agent thought**: "Archived, done — the leftover issues will sort themselves out." **Actual risk**: Deferred findings and known limitations that are not compiled into KNOWN-ISSUES.md silently vanish after the archive move. Compile the leftover list before moving and enumerate it in the archive notification.
 
 ## Entry Check
 
@@ -140,6 +150,7 @@ Schema: `flowkit.archive.v1`
 | Schema ID | Artifact Kind | Required | Path |
 |-----------|--------------|----------|------|
 | `archive-dir` | directory | yes | `.specs/archive/<YYYY-MM-DD>-<change-id>/` |
+| `known-issues` | file | optional | `.specs/archive/<YYYY-MM-DD>-<change-id>/KNOWN-ISSUES.md` (leftover issues list, archived with the change) |
 | `changelog-entry` | file | yes | `.specs/CHANGELOG.md` (appended) |
 | `lessons-updated` | file | conditional | `.specs/LESSONS.md` (if new lessons nominated) |
 
