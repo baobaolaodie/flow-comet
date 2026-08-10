@@ -26,7 +26,7 @@
 
 - Old changes / old states auto-fill default fields (executionMode/branchMode/enablePrReview); changes without a branch run unchanged — backward compatible
 - Progressive WARN (not BLOCK) for legacy change re-entry (missing redEvidence/greenEvidence, pure-string handoff)
-- Regression baseline: `guard-self-test.mjs` 105 scenarios green (required after every change)
+- Regression baseline: `guard-self-test.mjs` 106 scenarios green (required after every change)
 
 ## Release checklist (per release)
 

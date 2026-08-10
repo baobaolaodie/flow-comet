@@ -88,6 +88,12 @@ This node performs a structured multi-round review of the implemented change, ch
 
 8. **Generate fix tasks**: For all Critical and decided-to-fix Major findings, append to `.specs/<change-id>/TASK.md` as numbered fix tasks with full 7 fields — 追加到 TASK.md 的 `## Fix 任务` 段内（**禁止文件尾追加**）, then trigger return to execute node.
 
+9. **Disposition markers (problem-handling principle)**: Every finding entry in the `## 发现` section of REVIEW.md — including Minor — must carry a **disposition marker** so findings never silently disappear after being recorded:
+   - `[已修]` — fixed via a fix task (linked in the entry)
+   - `[升级]` — escalated to the user for a decision (accept + reason recorded)
+   - `[转待办]` — deferred to `.specs/<change-id>/KNOWN-ISSUES.md` at archive time
+   The exit guard structurally checks these markers on the findings area (missing marker → non-blocking warning, to avoid deadlocking legacy reviews; add markers to clear it).
+
 The full review protocol, templates, and checklists are in:
 - `flow-kit/prompts/6-review.md` (REVIEW phase)
 - `flow-kit/prompts/5-test.md` (TEST phase, for test pyramid completeness)
@@ -96,7 +102,7 @@ The full review protocol, templates, and checklists are in:
 
 This node is truly done when:
 - `.specs/<change-id>/REVIEW.md` exists with all 3 mandatory rounds completed.
-- Every finding has a severity label and file:line reference.
+- Every finding has a severity label, file:line reference, and a disposition marker (`[已修]` / `[升级]` / `[转待办]`).
 - All Critical items are either fixed (fix tasks generated) or explicitly accepted with user confirmation.
 - 0 unacknowledged Critical items remain.
 - TEST.md 5-round pyramid completeness has been verified.
@@ -109,6 +115,7 @@ This node is truly done when:
 - **Agent thought**: "I'll fix this small issue directly." **Actual risk**: Reviewer modifying code violates R3.3. Must generate fix tasks instead.
 - **Agent thought**: "Round 3 (UI) is optional." **Actual risk**: For frontend projects with UI changes, Round 3 is mandatory. Only non-frontend projects skip it.
 - **Agent thought**: "6-dimension review is just a checklist." **Actual risk**: Without file:line references and book citations (when using built-in path), the review lacks rigor and fixability.
+- **Agent thought**: "I'll record this Minor and move on." **Actual risk**: Findings (especially Minor) that are recorded without a disposition marker silently disappear — the exit guard warns on missing markers; every finding must be `[已修]`, `[升级]` (user decision), or `[转待办]` (tracked for archive).
 
 ## Entry Check
 

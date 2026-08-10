@@ -14,7 +14,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ### Added
 
-- Regression suite expanded to 105 scenarios covering skill-load declaration markers, record validation against declaration markers, exit protocol declaration checks, cross-consistency timestamps, and legacy compatibility.
+- Regression suite expanded to 106 scenarios covering skill-load declaration markers, record validation against declaration markers, exit protocol declaration checks, cross-consistency timestamps, legacy compatibility, and review finding disposition checks.
 
 ## [1.3.0] - 2026-08-10
 

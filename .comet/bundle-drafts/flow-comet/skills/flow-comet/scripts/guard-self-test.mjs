@@ -2350,6 +2350,33 @@ const SCENARIOS = [
       }
     },
   },
+
+  // 106: exit review——REVIEW.md 发现区条目处置状态结构级校验（L3-1：问题处理原则）——
+  // 发现项（含 Minor）无处置状态标记（[已修]/[升级]/[转待办]）→ REVIEW WARN 渐进不 BLOCK
+  // （防旧 REVIEW 卡死——旧 REVIEW 未按新格式写标记只警告不阻断）；全部带标记 → 无 WARN
+  // （发现不得"记录后无声消失"——每条须有处置去向）
+  {
+    name: '106 exit review WARN：发现区条目缺处置状态标记（L3-1）',
+    run: (dir) => {
+      const st = baseState('review');
+      st.evidence.review = { summary: 'review done' };
+      writeState(dir, st);
+      // ① 发现区 Minor 条目无处置标记 → REVIEW WARN + 通过（渐进不阻断）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
+        '# REVIEW\n\n## 发现\n\n### Critical\n\n无\n\n### Major\n\n无\n\n### Minor\n\n- **m-1 · 示例发现**：描述（未处置）\n\n## 结论\n\n通过\n');
+      const res = runGuard(['exit', 'review'], dir);
+      assertExit(res, 0);
+      assertOut(res, 'REVIEW WARN');
+      assertOut(res, 'ALL CHECKS PASSED');
+      // ② 同一条目带 [转待办] 处置标记 → 无 REVIEW WARN
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
+        '# REVIEW\n\n## 发现\n\n### Critical\n\n无\n\n### Major\n\n无\n\n### Minor\n\n- **m-1 · 示例发现**：描述 [转待办]\n\n## 结论\n\n通过\n');
+      const res2 = runGuard(['exit', 'review'], dir);
+      assertExit(res2, 0);
+      assertNotOut(res2, 'REVIEW WARN');
+      assertOut(res2, 'ALL CHECKS PASSED');
+    },
+  },
 ];
 
 // ---------- 运行 ----------

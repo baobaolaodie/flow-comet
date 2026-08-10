@@ -56,6 +56,24 @@ function markerProtocolBasename(value) {
   return String(value).replaceAll('\\', '/').split('/').pop() || null;
 }
 
+// L3-1（T-FIX-15）: REVIEW.md 发现区条目处置状态提取——"## 发现" 段下 Critical/Major/Minor
+// 子区的发现项 = 以 "- **" 开头的列表项（加粗标题）；"无" 条目（"- 无" / "无（...）"）表示
+// 该级别无发现，豁免。返回缺处置状态标记（[已修]/[升级]/[转待办]）的条目标题列表——
+// 结构级校验（不做语义判断：标记存在即视为已处置）。发现项（含 Minor）不得"记录后无声消失"。
+function reviewFindingsMissingDisposition(text) {
+  const missing = [];
+  for (const section of text.split(/\n##\s+/)) {
+    if (!/^发现/.test(section)) continue;
+    for (const line of section.split('\n')) {
+      const m = line.match(/^\s*-\s*\*\*(.+?)\*\*/);
+      if (!m) continue;
+      if (/^无/.test(m[1].trim())) continue; // "无" 条目豁免
+      if (!/\[已修\]|\[升级\]|\[转待办\]/.test(line)) missing.push(m[1]);
+    }
+  }
+  return missing;
+}
+
 // W1-B: flow-kit SUMMARY 模板必填段（正则匹配，大小写不敏感 + 变体兼容）
 const SUMMARY_REQUIRED_SECTIONS = [
   { regex: /##\s*verify\s*输出/i, label: '## verify 输出' },
@@ -2314,7 +2332,7 @@ async function main() {
       }
     } catch {}
   }
-  // P1-A: review exit 校验 REVIEW 含实质内容
+  // P1-A: review exit 校验 REVIEW 含实质内容 + L3-1（T-FIX-15）发现区条目处置状态结构级校验
   if (node.id === 'review' && state.activeChange) {
     const reviewFile = path.join(runRoot, '.specs', state.activeChange, 'REVIEW.md');
     try {
@@ -2322,6 +2340,15 @@ async function main() {
       if (stat.size < 100) {
         console.error('BLOCKED: REVIEW.md 内容不足（' + stat.size + ' 字节，需 ≥ 100）');
         process.exit(1);
+      }
+      // L3-1: 发现项（含 Minor）须有处置状态标记——[已修]（对应 fix 任务）/ [升级]（用户决策：
+      // 接受+理由）/ [转待办]（归档时进 KNOWN-ISSUES）。结构级校验，WARN 渐进不 BLOCK：
+      // 旧 REVIEW 未按新格式写标记只警告不阻断（防旧 REVIEW 卡死），执行者补标记后可消除。
+      const missingDisposition = reviewFindingsMissingDisposition(await fs.readFile(reviewFile, 'utf8'));
+      if (missingDisposition.length > 0) {
+        console.error('REVIEW WARN: REVIEW.md 发现区 ' + missingDisposition.length +
+          ' 项条目缺处置状态标记（[已修]/[升级]/[转待办]）: ' + missingDisposition.join('、') +
+          '——未处置的发现（含 Minor）不应无声消失，补标记后本警告消除（渐进不阻断）');
       }
     } catch {}
   }
