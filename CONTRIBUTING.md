@@ -106,6 +106,7 @@ After the issue is confirmed: bug fixes use a `fix/` branch, features use a `fea
 - **TDD**: every mechanism fix starts with a RED scenario in `guard-self-test.mjs` (watch it fail for the right reason), then GREEN, then full regression
 - **Regression baseline**: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 97 SCENARIOS PASSED` (mandatory after every change)
 - **Documentation sync**: behavior-layer docs live in `docs/` (bilingual EN/zh — keep both in sync when a doc changes); implementation details stay out of public docs
+- **Bilingual discipline**: English docs contain no Chinese (except the language switcher, flow-kit artifact section names, and runtime message quotes); Chinese docs contain no long English sentences (except commands, URLs, and proper terms). Local optional check: `node scripts/check-docs-local.mjs` (a gitignored local tool — English-doc zero-Chinese, Chinese-doc zero-English-sentences, bilingual symmetry, version/scenario consistency)
 - **Backward compatibility**: old changes/states keep working — progressive WARN over BLOCK
 - **Public docs stay jargon-free**: no codes, numbers, or process shorthand in README/docs/CHANGELOG/commit messages
 
@@ -176,11 +177,11 @@ Force push is allowed on your own feature branch (no protection); a new push inv
 **Release approval sheet** — before every release, present this sheet to the user and get **one** approval; then execute the full release (merge release PR + distribute + tag) without further per-step prompts:
 
 ```markdown
-## 发布审批单
+## Release approval sheet
 
-- 包含改动：PR 列表 + 每项一句话摘要
-- 验证结果：回归（97 场景）/ 安装副本验证
-- 版本：X.Y.Z（文档批次可不 bump）
+- Changes: PR list + one-line summary each
+- Verification: regression (97 scenarios) / installed-copy checks
+- Version: X.Y.Z (doc-only batches may skip the bump)
 ```
 
 Per release (see [VERSIONS.md](docs/VERSIONS.md)):
@@ -189,3 +190,7 @@ Per release (see [VERSIONS.md](docs/VERSIONS.md)):
 2. Update README version badge
 3. `git tag vX.Y.Z` + push --tags (after merging the release PR into main)
 4. prepare-env release to all installed copies (main `.claude/` + target projects) — verify each copy's `guard-self-test` after release
+
+**Release PR specifics**:
+- The release PR (dev → main) naturally lists all unpublished original commits from dev (dev keeps full history; main is squashed per release) — this is by design, not a problem
+- When merging, use a **custom squash message** (`gh pr merge --squash --subject "<release summary>" --body "<verification summary>"`) — GitHub's default squash message lists every commit and would carry historical internal codes into main's public commit history
