@@ -18,6 +18,10 @@ const protocolPath = resolveProtocol(packageRoot, runRoot, process.argv.slice(3)
 const statePath = path.join(runRoot, '.comet', 'flow-comet-state.json');
 const specsRoot = path.join(runRoot, '.specs');
 
+// D3: 内置 8 节点清单（skill-load 的 node 参数白名单；自定义协议节点不属于 skill-load 声明范畴——
+// required-skill 条目的 <node> 段即执行引擎节点，与内置节点 id 一一对应）
+const BUILTIN_NODES = ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review', 'verify', 'archive'];
+
 async function readJson(file) {
   // 容忍 UTF-8 BOM（外部写入如会话 Write 可能带 BOM）
   return JSON.parse((await fs.readFile(file, 'utf8')).replace(/^﻿/, ''));
@@ -68,6 +72,95 @@ async function findActiveChange() {
     }
   } catch {}
   return null;
+}
+
+// ---------- D1/D3/D5 · skill-load 声明标记（completedChecks 真实性校验配套） ----------
+
+// --protocol 原始参数提取：resolveProtocol 已全局解析出协议路径（CLI > env > 默认），
+// 此处仅取用户显式传入的原始值，供 skill-load 的 flow-kit/prompts/ 归属校验与标记记录。
+function findProtocolArg(cliArgs) {
+  for (let index = 0; index < cliArgs.length; index++) {
+    const arg = cliArgs[index];
+    if (arg === '--protocol') {
+      const value = cliArgs[index + 1];
+      if (typeof value !== 'string' || value === '') return null;
+      return value;
+    }
+    if (typeof arg === 'string' && arg.startsWith('--protocol=')) {
+      const value = arg.slice('--protocol='.length);
+      return value === '' ? null : value;
+    }
+  }
+  return null;
+}
+
+// flow-kit/prompts/ 归属校验（相对或绝对路径，前缀校验）——flow-kit 为 vendored 上游，
+// 协议提示只读引用；skill-load 声明的 --protocol 必须位于其 prompts 目录下。
+// 相对路径：字符串前缀必须为 flow-kit/prompts/；绝对路径：路径段中必须含 flow-kit/prompts。
+function protocolUnderFlowKitPrompts(value) {
+  const normalized = String(value).replaceAll('\\', '/');
+  if (!path.isAbsolute(value)) {
+    return normalized.startsWith('flow-kit/prompts/');
+  }
+  const segments = normalized.split('/').filter((s) => s !== '');
+  for (let index = 0; index <= segments.length - 2; index++) {
+    if (segments[index] === 'flow-kit' && segments[index + 1] === 'prompts') return true;
+  }
+  return false;
+}
+
+// D3/D5/D6: completedChecks 真实性校验。解析 completedChecks 的 required-skill:<node>.<skill>
+// 条目 → 对应声明标记 .specs/<change-id>/.skill-loads/<node>-<skill>.json 必须存在（D3，缺失 →
+// BLOCKED + 指引先加载 skill 并运行 skill-load）；标记 at 必须 ≤ 本次记录时间（D5 交叉自洽：
+// 标记先于记录声明；ISO-8601 UTC 字符串字典序 = 时间序）。仅校验本次 record 写入的
+// completedChecks（D6 兼容：旧 evidence 不追溯——由调用方只传本次 parsed.completedChecks）。
+// 诚实边界：标记是"声明"而非物理证明——运行时没有 Skill 调用观察点，脚本无法确认执行者
+// 真实加载过该 skill；标记仅证明"执行者主动声明已加载"，由流程纪律兜底。
+// 返回 { ok: true } 或 { ok: false, reason }（fail-closed：无 active change / 标记损坏同样 BLOCK）。
+async function verifySkillLoadMarkers(completedChecks, changeName, recordTime) {
+  if (!Array.isArray(completedChecks)) return { ok: true };
+  const required = [];
+  for (const check of completedChecks) {
+    if (typeof check !== 'string' || !check.startsWith('required-skill:')) continue;
+    const spec = check.slice('required-skill:'.length);
+    const dot = spec.lastIndexOf('.');
+    if (dot <= 0 || dot === spec.length - 1) {
+      return { ok: false, reason: 'completedChecks 条目格式非法（应为 required-skill:<node>.<skill>）: ' + check };
+    }
+    required.push({ raw: check, node: spec.slice(0, dot), skill: spec.slice(dot + 1) });
+  }
+  if (required.length === 0) return { ok: true };
+  if (!changeName) {
+    return { ok: false, reason: 'completedChecks 含 required-skill 条目但无 active change——无法定位声明标记（先运行 init <change-id>）' };
+  }
+  for (const item of required) {
+    // specsRoot 已含 .specs/，markerRel 为相对其下的路径；展示路径补 .specs/ 前缀便于用户定位
+    const markerRel = path.posix.join(changeName, '.skill-loads', item.node + '-' + item.skill + '.json');
+    const markerDisplay = '.specs/' + markerRel;
+    const markerPath = path.join(specsRoot, markerRel);
+    if (!(await fileExists(markerPath))) {
+      return {
+        ok: false,
+        reason: 'completedChecks 条目 ' + item.raw + ' 缺少对应声明标记 ' + markerDisplay +
+          '——先加载该 skill 并运行 workflow-state.mjs skill-load ' + item.node + ' ' + item.skill,
+      };
+    }
+    let marker;
+    try {
+      marker = await readJson(markerPath);
+    } catch {
+      return { ok: false, reason: '声明标记损坏（非法 JSON，需重新运行 skill-load）: ' + markerDisplay };
+    }
+    // D5: 交叉自洽——标记 at 必须 ≤ 本次记录时间（标记先于记录声明）
+    if (typeof marker.at !== 'string' || marker.at > recordTime) {
+      return {
+        ok: false,
+        reason: '声明标记时间序非法（标记 at=' + JSON.stringify(marker.at) + ' 不早于本次记录时间 ' + recordTime +
+          '）——标记必须先于记录声明（重新运行 skill-load）',
+      };
+    }
+  }
+  return { ok: true };
 }
 
 // ---------- D2 · determineNode 数据化：完成标志从协议 outputSchemas 推导 ----------
@@ -594,6 +687,45 @@ async function main() {
     return;
   }
 
+  if (command === 'skill-load') {
+    // D1: 执行者加载节点 skill 后运行 skill-load <node> <skill> [--protocol <path>]，
+    // 写入声明标记 .specs/<change-id>/.skill-loads/<node>-<skill>.json（{ node, skill, protocol, at }），
+    // record 校验 completedChecks 的 required-skill 条目以此为准（D3）。
+    // 诚实边界：标记是"声明"而非物理证明——运行时没有 Skill 调用观察点，脚本无法确认执行者
+    // 真实加载过该 skill；标记仅记录"执行者主动声明已加载"，由流程纪律兜底。
+    const nodeId = process.argv[3];
+    const skillName = process.argv[4];
+    if (!nodeId || !skillName) {
+      throw new Error('skill-load requires <node> <skill>. 用法: workflow-state.mjs skill-load <node> <skill> [--protocol <path>]');
+    }
+    // 参数校验：node 为内置 8 节点之一；skill 名仅允许字母数字连字符
+    if (!BUILTIN_NODES.includes(nodeId)) {
+      throw new Error('skill-load node 非法: ' + nodeId + '（内置节点: ' + BUILTIN_NODES.join('/') + '）');
+    }
+    if (!/^[A-Za-z0-9-]+$/.test(skillName)) {
+      throw new Error('skill-load skill 名非法（仅允许字母数字连字符）: ' + skillName);
+    }
+    // --protocol 归属校验：路径必须位于 flow-kit/prompts/ 下（相对或绝对，前缀校验；
+    // flow-kit 为 vendored 上游，协议提示只读引用）。协议加载本身由 resolveProtocol 全局
+    // 处理（含受保护读取），此处仅校验用户显式传入的 --protocol 原始值。
+    const protocolArg = findProtocolArg(process.argv.slice(3));
+    if (protocolArg !== null && !protocolUnderFlowKitPrompts(protocolArg)) {
+      throw new Error('skill-load --protocol 路径必须位于 flow-kit/prompts/ 下（flow-kit 为 vendored 上游，协议提示只读引用）: ' + protocolArg);
+    }
+    // 声明标记写入：.skill-loads/ 目录不存在时创建（writeJson 自带 mkdir recursive）；
+    // 同 node-skill 重复调用覆盖（记录最新声明）
+    const changeName = await findActiveChange();
+    if (!changeName) {
+      throw new Error('skill-load requires an active change（先运行 init <change-id>）');
+    }
+    const marker = { node: nodeId, skill: skillName, protocol: protocolPath, at: new Date().toISOString() };
+    // specsRoot 已含 .specs/，相对路径为 <change-id>/.skill-loads/<node>-<skill>.json
+    const markerRel = path.posix.join(changeName, '.skill-loads', nodeId + '-' + skillName + '.json');
+    await writeJson(path.join(specsRoot, markerRel), marker);
+    console.log('SKILL-LOAD: ' + nodeId + ' ' + skillName + ' → .skill-loads/' + nodeId + '-' + skillName + '.json');
+    return;
+  }
+
   if (command === 'record') {
     const nodeId = process.argv[3];
     if (!nodeId) throw new Error('record requires a Node id.');
@@ -619,10 +751,23 @@ async function main() {
     } catch {
       parsed = { summary: raw || 'recorded' };
     }
+    // D3/D5/D6: completedChecks 真实性校验（skill-load 声明标记）——解析本次 record 写入的
+    // completedChecks 的 required-skill:<node>.<skill> 条目 → 对应声明标记必须存在（D3，
+    // 缺失 → BLOCKED + 指引先加载 skill 并运行 skill-load）；标记 at 必须 ≤ 本次记录时间
+    // （D5 交叉自洽：标记先于记录声明）。仅校验本次写入的 payload，旧 evidence 不追溯（D6）。
+    const recordedAt = new Date().toISOString();
+    // 标记归属 change 与 evidence 一致：优先 state.activeChange，缺失时回退 findActiveChange（与
+    // 下方 NEXT 推导同语义）；两者皆无 → verifySkillLoadMarkers 内 fail-closed BLOCK
+    const markerChange = state.activeChange || await findActiveChange();
+    const markerCheck = await verifySkillLoadMarkers(parsed.completedChecks, markerChange, recordedAt);
+    if (!markerCheck.ok) {
+      console.error('BLOCKED: ' + markerCheck.reason);
+      process.exit(1);
+    }
     state.evidence[nodeId] = {
       ...(state.evidence[nodeId] || {}),
       ...parsed,
-      recordedAt: new Date().toISOString(),
+      recordedAt,
     };
     await writeState(state);
     console.log('EVIDENCE: ' + nodeId);
@@ -705,7 +850,7 @@ async function main() {
     return;
   }
 
-  throw new Error('Unknown command: ' + command + '. Use: init, status, next, select, record, verify-fail, advance, execution-mode, config');
+  throw new Error('Unknown command: ' + command + '. Use: init, status, next, select, record, verify-fail, advance, execution-mode, config, skill-load');
 }
 
 main().catch(error => {
