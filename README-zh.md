@@ -138,6 +138,8 @@ flow-comet/
 3. 运行回归：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 97 SCENARIOS PASSED`
 4. 开 PR 合入 `dev`（merge commit）；发布 PR `dev → main`（squash）
 
+CI 在每个 PR 与 push 时自动强制仓库约定（回归、PR 纪律、版本一致性、死链）——无需本地配置。完整指南见 [CONTRIBUTING-zh.md](CONTRIBUTING-zh.md)。
+
 ## License
 
 [MIT](LICENSE) © 2026 baobaolaodie

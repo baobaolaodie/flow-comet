@@ -138,6 +138,8 @@ Full guide in [CONTRIBUTING.md](CONTRIBUTING.md) — branch model (`feature → 
 3. Run regression: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 97 SCENARIOS PASSED`
 4. Open a PR into `dev` (merge commit); release PR `dev → main` (squash)
 
+CI enforces the repository conventions automatically on every PR and push (regression, PR discipline, version consistency, dead links) — no local setup needed. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
+
 ## License
 
 [MIT](LICENSE) © 2026 baobaolaodie
