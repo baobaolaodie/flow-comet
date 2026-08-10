@@ -18,8 +18,8 @@ const protocolPath = resolveProtocol(packageRoot, runRoot, process.argv.slice(3)
 const statePath = path.join(runRoot, '.comet', 'flow-comet-state.json');
 const specsRoot = path.join(runRoot, '.specs');
 
-// D3: 内置 8 节点清单（skill-load 的 node 参数白名单；自定义协议节点不属于 skill-load 声明范畴——
-// required-skill 条目的 <node> 段即执行引擎节点，与内置节点 id 一一对应）
+// D3: 内置 8 节点常量（供其他用途参照——如 guard 的节点→协议映射对照；skill-load 的 node
+// 参数校验已改为当前协议节点集合动态读取，T-FIX-07：compose 自定义协议节点可声明）
 const BUILTIN_NODES = ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review', 'verify', 'archive'];
 
 async function readJson(file) {
@@ -773,9 +773,12 @@ async function main() {
     if (!nodeId || !skillName) {
       throw new Error('skill-load requires <node> <skill>. 用法: workflow-state.mjs skill-load <node> <skill> [--prompt <path>]');
     }
-    // 参数校验：node 为内置 8 节点之一；skill 名仅允许字母数字连字符
-    if (!BUILTIN_NODES.includes(nodeId)) {
-      throw new Error('skill-load node 非法: ' + nodeId + '（内置节点: ' + BUILTIN_NODES.join('/') + '）');
+    // 参数校验（T-FIX-07）：node 为当前协议节点集合之一（动态读取协议 nodes[].id——内置 +
+    // 自定义，compose 自定义协议节点可声明）；协议外节点名依然非法（fail-closed）。
+    // BUILTIN_NODES 仅作内置常量保留（其他用途参照），skill-load 校验不再依赖它。
+    const protocolNodeIds = (protocol.nodes ?? []).map((n) => n.id);
+    if (!protocolNodeIds.includes(nodeId)) {
+      throw new Error('skill-load node 非法: ' + nodeId + '（协议节点: ' + protocolNodeIds.join('/') + '）');
     }
     if (!/^[A-Za-z0-9-]+$/.test(skillName)) {
       throw new Error('skill-load skill 名非法（仅允许字母数字连字符）: ' + skillName);

@@ -259,6 +259,15 @@ function customProtocol() {
   };
 }
 
+// T-FIX-07: 含 requiredSkillCalls 的自定义协议变体——compose 自定义节点可声明必调 skill
+// （compose SKILL 节点组装 requiredSkillCalls 可空）；skill-load/record 端到端验证用：
+// 仅 brainstorm 带 main scope 绑定（协调者加载 → 需 skill-load 声明标记），其余与 customProtocol() 同
+function customProtocolWithSkillCall() {
+  const p = customProtocol();
+  p.nodes[0].requiredSkillCalls = [{ skill: 'flow-comet-brainstorm', scope: 'main' }];
+  return p;
+}
+
 // 写入 <dir>/custom-protocol.json，返回绝对路径（供 --protocol CLI / FLOW_COMET_PROTOCOL env 使用）
 function writeCustomProtocol(dir) {
   writeFile(dir, 'custom-protocol.json', JSON.stringify(customProtocol(), null, 2) + '\n');
@@ -2142,6 +2151,12 @@ const SCENARIOS = [
       const rD = runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'reference/workflow-protocol.json'], dir, env);
       assertExit(rD, 1);
       assertOut(rD, 'skill-load --prompt 路径必须位于 flow-kit/prompts/ 下');
+      // e) 自定义协议下未知节点同样拒绝（T-FIX-07：node 校验从内置清单改为当前协议节点集合
+      // 动态读取——协议外节点名依然非法，fail-closed 行为不变）
+      const custom = writeCustomProtocol(dir);
+      const rE = runState(['skill-load', 'bogus', 'flow-comet-change'], dir, { FLOW_COMET_PROTOCOL: custom });
+      assertExit(rE, 1);
+      assertOut(rE, 'skill-load node 非法');
       // 全部拒绝后 .skill-loads/ 不产生任何标记文件
       const loadsDir = path.join(dir, '.specs', CHANGE_ID, '.skill-loads');
       if (fs.existsSync(loadsDir) && fs.readdirSync(loadsDir).length > 0) {
@@ -2186,6 +2201,17 @@ const SCENARIOS = [
       if (!st.evidence.open || st.evidence.open.summary !== 'done') {
         throw new Error('record 未写入 evidence: ' + JSON.stringify(st.evidence));
       }
+      // T-FIX-07: 自定义协议节点（compose 兼容）——node 校验按当前协议节点集合动态读取
+      // （内置 + 自定义），自定义节点（brainstorm）可 skill-load 声明 + record D3 端到端通过
+      // （修复前 BUILTIN_NODES 硬编码只含内置 8 节点 → skill-load 拒绝 brainstorm = RED）
+      writeFile(dir, 'custom-protocol.json', JSON.stringify(customProtocolWithSkillCall(), null, 2) + '\n');
+      const customEnv = { FLOW_COMET_PROTOCOL: path.join(dir, 'custom-protocol.json') };
+      const slCustom = runState(['skill-load', 'brainstorm', 'flow-comet-brainstorm'], dir, customEnv);
+      assertExit(slCustom, 0);
+      assertOut(slCustom, 'SKILL-LOAD: brainstorm flow-comet-brainstorm');
+      const resCustom = runState(['record', 'brainstorm', JSON.stringify({ summary: 'brainstorm done', completedChecks: ['required-skill:brainstorm.flow-comet-brainstorm'] })], dir, customEnv);
+      assertExit(resCustom, 0);
+      assertOut(resCustom, 'EVIDENCE: brainstorm');
     },
   },
 
