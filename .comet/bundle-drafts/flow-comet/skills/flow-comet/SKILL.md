@@ -103,7 +103,7 @@ flow-kit 9 阶段工作流的 workflow-kernel 实现。保留 flow-kit 的全部
 | 节点 | Implementation | Required Calls | Enforcement |
 |------|---------------|----------------|-------------|
 | open | flow-comet-open | flow-comet-change, flow-comet-requirement | guarded |
-| design | flow-comet-design | flow-comet-design, flow-comet-ui-design (advisory) | guarded |
+| design | flow-comet-design | flow-comet-design, flow-comet-ui-design (advisory，不要求声明) | guarded |
 | plan | flow-comet-task | flow-comet-task | guarded |
 | execute | flow-comet-execute | flow-comet-dev | guarded |
 | subagent-execute | flow-comet-subagent-execute | flow-comet-dev (handoff) | handoff-guarded |
@@ -207,7 +207,7 @@ The route, Output Schemas, required Skill calls, and recovery state are defined 
 ## Skill Bindings
 
 - `open`: implementation `flow-comet-open` (require); required calls `flow-comet-change`, `flow-comet-requirement`; augmentations none.
-- `design`: implementation `flow-comet-design` (require); required calls `flow-comet-design`, `flow-comet-ui-design`; augmentations none.
+- `design`: implementation `flow-comet-design` (require); required calls `flow-comet-design`, `flow-comet-ui-design` (advisory——仅前端项目触发，不要求 skill-load 声明；record D3 只校验执行者实际声明的条目); augmentations none.
 - `plan`: implementation `flow-comet-task` (require); required calls `flow-comet-task`; augmentations none.
 - `execute`: implementation `flow-comet-execute` (require); required calls `flow-comet-dev`; augmentations none.
 - `subagent-execute`: implementation `flow-comet-subagent-execute` (require); required calls `flow-comet-dev`; augmentations none.
