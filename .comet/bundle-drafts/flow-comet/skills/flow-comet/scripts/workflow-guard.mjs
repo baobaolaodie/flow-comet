@@ -32,6 +32,20 @@ const NODE_TRANSITION_GATES = {
   archive:          { evidence: ['archive-summary'] },
 };
 
+// D7: 内置节点 → flow-kit/prompts/ 协议文件映射（completedChecks 真实性声明机制：exit 校验
+// 声明标记的 protocol 归属）。注释约定：以 flow-kit/prompts/ 实文件为准（0-change.md ~
+// 7-integration.md，随 flow-kit 仓库同步）；新增/重命名协议文件需同步本表。
+const NODE_PROTOCOL_FILES = {
+  open: ['0-change.md', '1-requirement.md'],
+  design: ['2-design.md'],
+  plan: ['3-task.md'],
+  execute: ['4-dev.md'],
+  'subagent-execute': ['4-dev.md'],
+  review: ['6-review.md', '5-test.md'],
+  verify: ['7-integration.md'],
+  archive: ['7-integration.md'],
+};
+
 // W1-B: flow-kit SUMMARY 模板必填段（正则匹配，大小写不敏感 + 变体兼容）
 const SUMMARY_REQUIRED_SECTIONS = [
   { regex: /##\s*verify\s*输出/i, label: '## verify 输出' },
@@ -2432,6 +2446,49 @@ async function main() {
     if (violations.length > 0) {
       console.error('BLOCKED: Return Contract 校验失败: ' + violations.join('; '));
       process.exit(1);
+    }
+  }
+  // D4: exit 协议声明标记校验——节点 exit 时扫描 .specs/<change-id>/.skill-loads/ 下该节点标记
+  // （<node>-*.json，执行者加载节点 skill 后经 skill-load 写入，含 protocol 字段——指向
+  // flow-kit/prompts/ 协议文件，只读引用），校验至少一个标记的 protocol ∈ 该节点协议集（D7 映射表）。
+  // 缺失 → BLOCKED（提示缺协议声明标记 + 指引 skill-load --protocol）；有 → 通过。
+  // 诚实边界：标记是执行者的自我声明——校验只确认「声明存在且 protocol 归属节点」，
+  // 无法证明执行者真的阅读了协议（声明非物理证明，仅保证协议阅读声明可追溯）。
+  // D6 兼容：旧 change/旧 evidence 不追溯——.skill-loads/ 目录不存在（该 change 从未运行过
+  // skill-load，声明机制未激活）→ 跳过校验；节点已 exit 不重验（校验只在当前 exit 时执行）；
+  // 节点重新 exit（重入后再退）时按新规则要求，无豁免。
+  if (state.activeChange && NODE_PROTOCOL_FILES[node.id]) {
+    const loadsDir = path.join(runRoot, '.specs', state.activeChange, '.skill-loads');
+    if (await fileExists(loadsDir)) {
+      const prefix = node.id + '-';
+      const protocolSet = NODE_PROTOCOL_FILES[node.id];
+      const markers = (await fs.readdir(loadsDir).catch(() => []))
+        .filter((f) => f.startsWith(prefix) && f.endsWith('.json'));
+      const malformed = [];
+      let declared = false;
+      for (const f of markers) {
+        try {
+          const marker = JSON.parse(await fs.readFile(path.join(loadsDir, f), 'utf8'));
+          if (marker && typeof marker === 'object' && protocolSet.includes(marker.protocol)) {
+            declared = true;
+            break;
+          }
+        } catch {
+          malformed.push(f);
+        }
+      }
+      if (!declared) {
+        console.error('BLOCKED: 节点 ' + node.id + ' exit 缺协议声明标记——.specs/' + state.activeChange +
+          '/.skill-loads/ 下需有 ' + prefix + '*.json 且 protocol ∈ [' + protocolSet.join(', ') +
+          ']；执行 skill-load --protocol <flow-kit/prompts/ 协议文件> 声明已阅读协议（声明非物理证明，仅可追溯）' +
+          (malformed.length > 0 ? '；不可解析标记: ' + malformed.join(', ') : ''));
+        process.exit(1);
+      }
+    } else {
+      // D6 过渡规则：旧 change 兼容——声明机制未激活（无任何 skill-load 标记）不追溯；
+      // 首个 skill-load 写入后新规则生效（该 change 后续节点 exit 均需声明标记）
+      console.error('SKILL-LOAD WARN: 旧 change 兼容——.specs/' + state.activeChange +
+        '/.skill-loads/ 不存在，协议声明校验跳过（机制未激活；首个 skill-load 后新规则生效）');
     }
   }
   // 自动补 required-skill completedChecks——节点被完成即视为其实现 skill 已加载
