@@ -122,16 +122,19 @@ jobs:
             const P = [];
 
             // Feature-branch prefix (release PR head=dev is exempt)
-            if (!isRelease && !/^(feat|fix|docs|chore|hotfix)\//.test(pr.head.ref))
-              P.push(`dev PR head branch must carry a feat/fix/docs/chore/hotfix prefix, got ${pr.head.ref}`);
+            if (!isRelease && !/^(feat|fix|docs|chore|hotfix|ci)\//.test(pr.head.ref))
+              P.push(`dev PR head branch must carry a feat/fix/docs/chore/hotfix/ci prefix, got ${pr.head.ref}`);
 
             // dev-main sync (release PR precondition + dev integration gate)
-            const behind = execSync('git rev-list origin/main ^origin/dev')
-              .toString().trim().split('\n').filter(Boolean).length;
-            if (isRelease && behind > 0)
-              P.push(`dev is ${behind} commit(s) behind main — run the dev-sync before creating the release PR`);
-            if (!isRelease && behind > 0)
-              P.push(`dev is ${behind} commit(s) behind main (missed post-release sync) — sync dev first`);
+            // Tree-level, main-relative: only files main ADDED that dev lacks mean dev
+            // is behind. dev may legitimately lead main with unpublished batch changes
+            // (those appear as deletions on the main side and must not count).
+            const drift = execSync('git diff --name-only origin/dev origin/main --diff-filter=A')
+              .toString().trim();
+            if (isRelease && drift)
+              P.push(`dev lacks ${drift.split('\n').length} file(s) that main added — sync dev before creating the release PR`);
+            if (!isRelease && drift)
+              P.push(`dev lacks ${drift.split('\n').length} file(s) that main added — sync dev first (missed post-release sync)`);
 
             // PR template completeness: 5 bilingual sections + 17 checkboxes (deletion = fail)
             const tmpl = fs.readFileSync('.github/PULL_REQUEST_TEMPLATE.md', 'utf8');
