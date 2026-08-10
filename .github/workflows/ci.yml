@@ -126,15 +126,15 @@ jobs:
               P.push(`dev PR head branch must carry a feat/fix/docs/chore/hotfix/ci prefix, got ${pr.head.ref}`);
 
             // dev-main sync (release PR precondition + dev integration gate)
-            // Tree-level check: sync means identical trees. A release squash commit may
-            // not be a direct ancestor of dev (the tree is already merged there), so a
-            // commit-count (rev-list) check would false-alarm after such a release.
-            const drift = execSync('git diff origin/main origin/dev --stat')
+            // Tree-level, main-relative: only content main has that dev lacks means
+            // dev is behind. dev may legitimately lead main with unpublished batch
+            // changes, so a two-way diff would false-alarm after merging a dev PR.
+            const drift = execSync('git diff origin/dev origin/main --stat')
               .toString().trim();
             if (isRelease && drift)
-              P.push(`dev tree differs from main (${drift.split('\n').length} file(s)) — sync dev before creating the release PR`);
+              P.push(`dev lacks ${drift.split('\n').length} file(s) that main has — sync dev before creating the release PR`);
             if (!isRelease && drift)
-              P.push(`dev tree differs from main (${drift.split('\n').length} file(s)) — sync dev first (missed post-release sync)`);
+              P.push(`dev lacks ${drift.split('\n').length} file(s) that main has — sync dev first (missed post-release sync)`);
 
             // PR template completeness: 5 bilingual sections + 17 checkboxes (deletion = fail)
             const tmpl = fs.readFileSync('.github/PULL_REQUEST_TEMPLATE.md', 'utf8');
