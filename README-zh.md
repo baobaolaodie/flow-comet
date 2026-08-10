@@ -75,27 +75,15 @@ flow-comet 把 flow-kit 的 9 阶段开发流程（CHANGE → REQUIREMENT → DE
 
 ## 运行展示（截图）
 
-来自真实生产级会话的运行截图（每张标注耗时与 token 消耗）：
+来自真实生产级会话的运行截图。这些数小时运行中，**唯一的人工交互是工作流规定的决策点**（范围确认、技术栈选型、评审结论、归档确认）——除此之外没有任何其他人工干扰或临时决策，全程严格执行规范。
 
 **完整产物体系**——一次真实运行的全部流程工件（CHANGE / DESIGN / REQUIREMENT / REVIEW / TASK / TEST / UAT + 21 份任务摘要）：
 
 ![产物体系](images/long-run-output.png)
 
-**长时间串行执行**——任务连续运行数小时，上下文管理稳定（3 小时 26 分，250k tokens）：
+**5 小时验证运行**——5 小时 14 分会话末的全量验证与用户验收（↓399k tokens）：
 
-![串行执行](images/long-run-3h.png)
-
-**并行子代理委派**——实现委托给隔离的子代理（4 小时 5 分，333k tokens）：
-
-![子代理委派](images/long-run-4h.png)
-
-**技能稳定触发**——4 小时以上会话中技能持续正确加载：
-
-![技能触发](images/long-run-4h-and-skill-triggering.png)
-
-**验证阶段**——5 小时会话末的全量验证与用户验收（5 小时 14 分，399k tokens）：
-
-![验证阶段](images/long-run-5h.png)
+![验证运行](images/long-run-5h.png)
 
 ## 生态关系
 
