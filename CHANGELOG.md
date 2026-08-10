@@ -10,6 +10,12 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded only in git tags and this document; `bundle.yaml` version stays 1.0.0 (decoupled from release versioning — see the README's version section).
 
+## [Unreleased]
+
+### Added
+
+- Regression suite expanded to 105 scenarios covering skill-load declaration markers, record validation against declaration markers, exit protocol declaration checks, cross-consistency timestamps, and legacy compatibility.
+
 ## [1.3.0] - 2026-08-10
 
 Automatic project-context initialization (init pre-step). ([#30](https://github.com/baobaolaodie/flow-comet/pull/30), [#32](https://github.com/baobaolaodie/flow-comet/pull/32))

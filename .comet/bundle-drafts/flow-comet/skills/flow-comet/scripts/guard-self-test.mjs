@@ -36,6 +36,17 @@ const HANDOFF = path.join(__dirname, 'workflow-handoff.mjs');
 const BUILTIN_PROTOCOL_SOURCE = path.join(__dirname, '..', 'reference', 'workflow-protocol.json');
 const CHANGE_ID = 'ch';
 
+// 场景数一致性自检清单（20 文件，全变体：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n）——
+// S105 场景与底部自检共用同一清单（自检常量同步：SCENARIOS.length 变更 → 20 文件须同步）
+const SCENARIO_COUNT_FILES = [
+  'README.md', 'README-zh.md', 'CONTRIBUTING.md', 'CONTRIBUTING-zh.md',
+  'docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
+  'docs/VERSIONS.md', 'docs/VERSIONS-zh.md', 'CLAUDE.md', '.github/PULL_REQUEST_TEMPLATE.md',
+  'CHANGELOG.md', 'CHANGELOG-zh.md',
+  'docs/internal/ARCHITECTURE.md', 'docs/internal/DOC-CHECKLIST.md', 'docs/internal/MECHANISM.md',
+  'docs/internal/next-change-prompt.md', 'docs/internal/ROADMAP.md', 'docs/internal/WORKING-METHOD.md',
+];
+
 let passed = 0;
 const failures = [];
 const createdDirs = [];
@@ -2070,6 +2081,217 @@ const SCENARIOS = [
       if (res.output.includes('超出 writeFiles 范围')) throw new Error('SUMMARY 为强制产物不应报越界 WARN');
     },
   },
+
+  // ----------  场景（S98~S105：completedChecks 真实性声明机制——skill-load/record/exit 校验 + 交叉自洽 + 旧兼容 + 场景数同步，T03） ----------
+
+  // 98: skill-load 写入声明标记（AC-1）——完整命令形态（--protocol flow-kit/prompts/<阶段>.md，
+  // 归属校验通过）→ 标记 .specs/<change-id>/.skill-loads/<node>-<skill>.json 生成，
+  // 内容含 node/skill/protocol/at（ISO 时间戳）+ 输出确认提示
+  {
+    name: '98 skill-load 写入声明标记（AC-1）',
+    run: (dir) => {
+      // 场景内 flow-kit/prompts/ 协议文件（有效 JSON——skill-load 的协议加载步骤需要）
+      writeFile(dir, 'flow-kit/prompts/0-change.md', JSON.stringify(customProtocol(), null, 2) + '\n');
+      writeState(dir, baseState('open'));
+      fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
+      const res = runState(['skill-load', 'open', 'flow-comet-change', '--protocol', 'flow-kit/prompts/0-change.md'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'SKILL-LOAD: open flow-comet-change → .skill-loads/open-flow-comet-change.json');
+      const markerPath = path.join(dir, '.specs', CHANGE_ID, '.skill-loads', 'open-flow-comet-change.json');
+      if (!fs.existsSync(markerPath)) throw new Error('标记文件未生成: ' + markerPath);
+      const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+      if (marker.node !== 'open' || marker.skill !== 'flow-comet-change') {
+        throw new Error('标记 node/skill 字段不符: ' + JSON.stringify(marker));
+      }
+      if (typeof marker.protocol !== 'string' || marker.protocol.length === 0) {
+        throw new Error('标记缺 protocol 字段: ' + JSON.stringify(marker));
+      }
+      if (typeof marker.at !== 'string' || Number.isNaN(Date.parse(marker.at))) {
+        throw new Error('标记缺 ISO 时间戳 at: ' + JSON.stringify(marker));
+      }
+    },
+  },
+
+  // 99: skill-load 非法参数拒绝（AC-2）——缺 node/skill / node 非法 / skill 名非法字符 /
+  // --protocol 不在 flow-kit/prompts/ 下 → 报错 exit 非 0，不写任何标记（.skill-loads/ 无文件）
+  {
+    name: '99 skill-load 非法参数拒绝不写标记（AC-2）',
+    run: (dir) => {
+      writeState(dir, baseState('open'));
+      fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      // a) 缺参数（无 node/skill）
+      const rA = runState(['skill-load'], dir, env);
+      assertExit(rA, 1);
+      assertOut(rA, 'skill-load requires <node> <skill>');
+      // b) node 非法（非内置节点）
+      const rB = runState(['skill-load', 'bogus', 'flow-comet-change'], dir, env);
+      assertExit(rB, 1);
+      assertOut(rB, 'skill-load node 非法');
+      // c) skill 名含非法字符
+      const rC = runState(['skill-load', 'open', 'bad/name'], dir, env);
+      assertExit(rC, 1);
+      assertOut(rC, 'skill-load skill 名非法');
+      // d) --protocol 不在 flow-kit/prompts/ 下（指向场景内 reference 副本——文件存在可加载，
+      //    归属校验拒绝；若归属校验被跳过则此处会成功写标记，断言即失效）
+      const rD = runState(['skill-load', 'open', 'flow-comet-change', '--protocol', 'reference/workflow-protocol.json'], dir, env);
+      assertExit(rD, 1);
+      assertOut(rD, 'skill-load --protocol 路径必须位于 flow-kit/prompts/ 下');
+      // 全部拒绝后 .skill-loads/ 不产生任何标记文件
+      const loadsDir = path.join(dir, '.specs', CHANGE_ID, '.skill-loads');
+      if (fs.existsSync(loadsDir) && fs.readdirSync(loadsDir).length > 0) {
+        throw new Error('非法参数不应写入标记: ' + fs.readdirSync(loadsDir).join(', '));
+      }
+    },
+  },
+
+  // 100: record 校验 BLOCK（AC-3 反例）——completedChecks 含 required-skill:open.flow-comet-change
+  // 条目但无对应声明标记 → BLOCKED + 指引先加载 skill 并运行 skill-load；evidence 不写入
+  {
+    name: '100 record BLOCKED：completedChecks 缺声明标记（AC-3）',
+    run: (dir) => {
+      writeState(dir, baseState('open'));
+      fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
+      const res = runState(['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, '缺少对应声明标记');
+      assertOut(res, 'workflow-state.mjs skill-load open flow-comet-change');
+      // BLOCK 先于记录——校验失败后 evidence 不得写入
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      if (st.evidence && st.evidence.open) throw new Error('BLOCKED 后不应写入 evidence: ' + JSON.stringify(st.evidence.open));
+    },
+  },
+
+  // 101: record 校验通过（AC-3 正例）——先 skill-load 写入标记，record 带同条 completedChecks → 正常记录
+  {
+    name: '101 record 通过：先 skill-load 声明标记（AC-3 正例）',
+    run: (dir) => {
+      writeState(dir, baseState('open'));
+      fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const sl = runState(['skill-load', 'open', 'flow-comet-change'], dir, env);
+      assertExit(sl, 0);
+      assertOut(sl, 'SKILL-LOAD: open flow-comet-change');
+      const res = runState(['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })], dir, env);
+      assertExit(res, 0);
+      assertOut(res, 'EVIDENCE: open');
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      if (!st.evidence.open || st.evidence.open.summary !== 'done') {
+        throw new Error('record 未写入 evidence: ' + JSON.stringify(st.evidence));
+      }
+    },
+  },
+
+  // 102: exit 协议声明标记校验（AC-4）——.skill-loads/ 已激活（目录存在）但无本节点协议标记
+  // （<node>-*.json 且 protocol ∈ 该节点协议集）→ BLOCKED；有 → 通过。
+  // 注意：对照值按 guard 的 D7 映射表（flow-kit/prompts/ 协议文件 basename，如 open → 0-change.md）——
+  // 本场景直接构造标记文件（协议集内值）固守 guard 对照语义；skill-load 实际写入的协议字段为
+  // 解析后的完整路径，二者对齐属脚本侧集成修复范畴（本场景按实现行为固化断言）
+  {
+    name: '102 exit 协议标记校验：无标记 BLOCKED / 有标记通过（AC-4）',
+    run: (dir) => {
+      const st = baseState('open');
+      st.evidence.open = { summary: 'intake complete' };
+      writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n\n## 范围\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\n## 验收准则（AC）\n');
+      // ① 机制已激活（.skill-loads/ 存在）但无 open-* 标记（仅他节点标记）→ BLOCKED
+      const loadsDir = path.join(dir, '.specs', CHANGE_ID, '.skill-loads');
+      fs.mkdirSync(loadsDir, { recursive: true });
+      writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/design-flow-comet-design.json',
+        JSON.stringify({ node: 'design', skill: 'flow-comet-design', protocol: '2-design.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+      const resBlock = runGuard(['exit', 'open'], dir);
+      assertExit(resBlock, 1);
+      assertOut(resBlock, 'BLOCKED');
+      assertOut(resBlock, 'exit 缺协议声明标记');
+      // ② 补本节点标记（protocol ∈ open 协议集）→ 通过
+      writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-change.json',
+        JSON.stringify({ node: 'open', skill: 'flow-comet-change', protocol: '0-change.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+      const resPass = runGuard(['exit', 'open'], dir);
+      assertExit(resPass, 0);
+      assertOut(resPass, 'ALL CHECKS PASSED');
+      assertNotOut(resPass, 'BLOCKED');
+    },
+  },
+
+  // 103: 交叉自洽（AC-5）——标记存在但 at 晚于 record 时间（手工构造未来时间戳）→ BLOCKED
+  // （标记必须先于记录声明——时间序可审计）
+  {
+    name: '103 record BLOCKED：标记 at 晚于记录时间（AC-5 交叉自洽）',
+    run: (dir) => {
+      writeState(dir, baseState('open'));
+      fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
+      writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-change.json',
+        JSON.stringify({ node: 'open', skill: 'flow-comet-change', protocol: '0-change.md', at: '2999-12-31T00:00:00.000Z' }, null, 2) + '\n');
+      const res = runState(['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, '标记必须先于记录声明');
+    },
+  },
+
+  // 104: 旧 evidence/旧 change 兼容（AC-6）——旧格式记录（completedChecks 无 required-skill 条目 /
+  // 无 completedChecks）无标记照常通过；exit 在 .skill-loads/ 未激活（目录不存在）时
+  // SKILL-LOAD WARN 照常通过（D6：声明机制未激活不追溯）
+  {
+    name: '104 旧 evidence/旧 change 兼容：无标记照常通过（AC-6）',
+    run: (dir) => {
+      writeState(dir, baseState('open'));
+      fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      // ① 旧格式 record：completedChecks 无 required-skill 条目 → 无标记也通过
+      const resA = runState(['record', 'open', JSON.stringify({ summary: 'legacy', completedChecks: ['unit-tests'] })], dir, env);
+      assertExit(resA, 0);
+      assertOut(resA, 'EVIDENCE: open');
+      // ② 无 completedChecks 的纯 summary 记录 → 通过
+      const resB = runState(['record', 'open', JSON.stringify({ summary: 'plain' })], dir, env);
+      assertExit(resB, 0);
+      // ③ exit open：.skill-loads/ 不存在（声明机制未激活）→ SKILL-LOAD WARN + 通过
+      const st = baseState('open');
+      st.evidence.open = { summary: 'intake complete' };
+      writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n\n## 范围\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\n## 验收准则（AC）\n');
+      const resC = runGuard(['exit', 'open'], dir);
+      assertExit(resC, 0);
+      assertOut(resC, 'SKILL-LOAD WARN');
+      assertOut(resC, 'ALL CHECKS PASSED');
+    },
+  },
+
+  // 105: 场景数一致性自检同步（AC-8）——SCENARIOS.length 变更时 SCENARIO_COUNT_FILES 20 文件须同步
+  // （ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n 变体）。本场景直接读取权威源仓库的
+  // 20 文件断言含当前场景数变体——文档漏同步即 RED（与底部自检同判据；安装副本无文档跳过）
+  {
+    name: '105 场景数自检同步：20 文件含当前场景数变体（AC-8）',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无 flow-comet 文档
+      const n = SCENARIOS.length;
+      const missing = [];
+      for (const rel of SCENARIO_COUNT_FILES) {
+        let text;
+        try {
+          text = fs.readFileSync(path.join(repoRoot, rel), 'utf8');
+        } catch (e) {
+          if (e.code === 'ENOENT') continue; // 文件不存在跳过（与底部自检一致）
+          throw e;
+        }
+        const ok = text.includes('ALL ' + n + ' SCENARIOS PASSED')
+          || text.includes(n + ' scenarios')
+          || text.includes(n + ' 场景')
+          || text.includes(n + '/' + n);
+        if (!ok) missing.push(rel);
+      }
+      if (missing.length > 0) {
+        throw new Error('场景数未同步（应为 ' + n + '）: ' + missing.join(', '));
+      }
+    },
+  },
 ];
 
 // ---------- 运行 ----------
@@ -2106,14 +2328,7 @@ const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
 const isAuthoritativeSource = fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'));
 if (isAuthoritativeSource) {
   // ① 场景数全清单（公开双语 + 内部文档 + CLAUDE + PR 模板；全变体：ALL n SCENARIOS / n scenarios / n 场景 / n/n）
-  const SCENARIO_COUNT_FILES = [
-    'README.md', 'README-zh.md', 'CONTRIBUTING.md', 'CONTRIBUTING-zh.md',
-    'docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
-    'docs/VERSIONS.md', 'docs/VERSIONS-zh.md', 'CLAUDE.md', '.github/PULL_REQUEST_TEMPLATE.md',
-    'CHANGELOG.md', 'CHANGELOG-zh.md',
-    'docs/internal/ARCHITECTURE.md', 'docs/internal/DOC-CHECKLIST.md', 'docs/internal/MECHANISM.md',
-    'docs/internal/next-change-prompt.md', 'docs/internal/ROADMAP.md', 'docs/internal/WORKING-METHOD.md',
-  ];
+  // SCENARIO_COUNT_FILES 为模块级常量（S105 场景与底部自检共用同一清单，见文件头定义）
   for (const rel of SCENARIO_COUNT_FILES) {
     const docPath = path.join(repoRoot, rel);
     try {

@@ -188,7 +188,7 @@ flow-comet/
 
 1. 从 `dev` 开分支：`git checkout dev && git checkout -b feature/<描述>`
 2. 修改 skill/脚本请改 `.comet/bundle-drafts/flow-comet/skills/`（权威源）；TDD——先写 RED 场景
-3. 运行回归：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 97 SCENARIOS PASSED`
+3. 运行回归：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 105 SCENARIOS PASSED`
 4. 开 PR 合入 `dev`（merge commit）；发布 PR `dev → main`（squash）
 
 CI 在每个 PR 与 push 时自动强制仓库约定（回归、PR 纪律、版本一致性、死链）——无需本地配置。完整指南见 [CONTRIBUTING-zh.md](CONTRIBUTING-zh.md)。
