@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · workflow-guard.mjs 自测套件（49 场景：17 基础 + 批次 E 6 个分支/追加位置检测场景 + 批次 D T06 8 个自定义协议场景 +  2 个全部完成 → done 场景 + T-FIX-04 2 个 completedChecks 校验 + T-FIX-05 2 个 next 节点顺序校验 + T-FIX-06 2 个 redEvidence 时间顺序校验 + T-FIX-09 4 个 C3 签名行尾规范化 + T-FIX-10 2 个 C3 签名标记类属性剥离 + T-FIX 回退豁免 + T-FIX-11 2 个 next 正常推进豁免 + T-FIX-12 2 个机制交互组合场景：record 覆盖 handoff + 越俎代庖 / 路由 + 节点推进）
+// C1 · flow-comet 引擎自测套件（105 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、场景数一致性自检）
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -7,7 +7,7 @@
 // （COMET_RUN_ROOT=<临时目录>）→ 断言退出码与输出关键词。场景跑完 rmSync 清理。
 //
 // 运行: node scripts/guard-self-test.mjs
-// 全过 → exit 0，输出 ALL 49 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
+// 全过 → exit 0，输出 ALL 105 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
 //
 // 仅 node 内置模块（child_process/fs/os/path）；无网络；不依赖 flow-kit 模板目录
 // 存在（fallback 场景用内置段名；S1/S4 复制模板文件进临时目录验证 C2 模板派生）。
@@ -1490,10 +1490,10 @@ const SCENARIOS = [
     },
   },
 
-  // 63: init 后（open 阶段）合法写 .specs/ 工件 → hook 放行（ 正确 RED：
+  // 62: init 后（open 阶段）合法写 .specs/ 工件 → hook 放行（ 正确 RED：
   // 修复前 init 无 status → hook「not running」throw exit 1 拦截合法写入——open 阶段无法产出工件）
   {
-    name: '63 hook 放行：init 后写 .specs/ 工件',
+    name: '62 hook 放行：init 后写 .specs/ 工件',
     run: (dir) => {
       const initRes = runState(['init', 'tf15-ok'], dir,
         { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
@@ -1505,10 +1505,10 @@ const SCENARIOS = [
     },
   },
 
-  // 64: 新 change 与旧归档同名（state 缺失时走扫描兜底）→ 应识别为 active（ 扩展边界：
+  // 63: 新 change 与旧归档同名（state 缺失时走扫描兜底）→ 应识别为 active（ 扩展边界：
   // archivedIds 剥日期前缀匹配不得误伤同名新 change）
   {
-    name: '64 同名新 change 不被归档检查误跳过（T-FIX-17 边界）',
+    name: '63 同名新 change 不被归档检查误跳过（T-FIX-17 边界）',
     run: (dir) => {
       writeFile(dir, '.specs/sci-notation/CHANGE.md', '# CHANGE\n## Why\nx\n');
       writeFile(dir, '.specs/sci-notation/TASK.md', '# TASK\n');
@@ -1522,9 +1522,9 @@ const SCENARIOS = [
 
   // ---------- Round 2 场景（~D-20，独立验证者发现） ----------
 
-  // 65: record 命令的 --protocol 参数不得污染 payload（：payload 解析前剥离）
+  // 64: record 命令的 --protocol 参数不得污染 payload（：payload 解析前剥离）
   {
-    name: '65 record --protocol 不污染 payload',
+    name: '64 record --protocol 不污染 payload',
     run: (dir) => {
       const custom = writeCustomProtocol(dir);
       const initRes = runState(['init', 'tf14-rec'], dir,
@@ -1543,10 +1543,10 @@ const SCENARIOS = [
     },
   },
 
-  // 66: 自定义协议未声明 writeWhitelist 时，非内置节点写源码 → BLOCK（ 方案 B：
+  // 65: 自定义协议未声明 writeWhitelist 时，非内置节点写源码 → BLOCK（ 方案 B：
   // 协调者默认 .specs/——当前 fail-open 放行）
   {
-    name: '66 自定义节点未声明白名单写源码 BLOCK',
+    name: '65 自定义节点未声明白名单写源码 BLOCK',
     run: (dir) => {
       const custom = writeCustomProtocol(dir);
       writeState(dir, composeState({ status: 'running' }));
@@ -1557,9 +1557,9 @@ const SCENARIOS = [
     },
   },
 
-  // 67: 自定义协议未声明白名单时，写 .specs/ 工件 → 放行（ 协调者默认的正面）
+  // 66: 自定义协议未声明白名单时，写 .specs/ 工件 → 放行（ 协调者默认的正面）
   {
-    name: '67 自定义节点未声明白名单写工件放行',
+    name: '66 自定义节点未声明白名单写工件放行',
     run: (dir) => {
       const custom = writeCustomProtocol(dir);
       writeState(dir, composeState({ status: 'running' }));
@@ -1571,10 +1571,10 @@ const SCENARIOS = [
     },
   },
 
-  // 68: 旧格式 state（无 status 字段 + 无 activeChange + 无 currentNode——批次 C 归档后升级场景）
+  // 67: 旧格式 state（无 status 字段 + 无 activeChange + 无 currentNode——批次 C 归档后升级场景）
   // → hook 放行（：无 activeChange 与无 state 文件同语义——当前被「not running」拦截）
   {
-    name: '68 旧 state 无 status 无 activeChange hook 放行',
+    name: '67 旧 state 无 status 无 activeChange hook 放行',
     run: (dir) => {
       const st = baseState('open');
       delete st.status;
@@ -1587,10 +1587,10 @@ const SCENARIOS = [
     },
   },
 
-  // 69: writeWhitelist 路径支持 <change-id> 占位符（：协议复用自动适配——
+  // 68: writeWhitelist 路径支持 <change-id> 占位符（：协议复用自动适配——
   // 与 artifacts paths 同机制——当前字面匹配失败 BLOCK）
   {
-    name: '69 writeWhitelist change-id 占位符',
+    name: '68 writeWhitelist change-id 占位符',
     run: (dir) => {
       const custom = customProtocol();
       custom.writeWhitelist = { brainstorm: ['.specs/<change-id>/'] };
@@ -1609,9 +1609,9 @@ const SCENARIOS = [
     },
   },
 
-  // 70: 自定义协议 init 输出 NODE: 协议首节点（：printNext 硬编码 open——输出与 state 不一致）
+  // 69: 自定义协议 init 输出 NODE: 协议首节点（：printNext 硬编码 open——输出与 state 不一致）
   {
-    name: '70 init 输出 NODE 协议首节点',
+    name: '69 init 输出 NODE 协议首节点',
     run: (dir) => {
       const custom = writeCustomProtocol(dir);
       const res = runState(['init', 'tf17-out'], dir, { FLOW_COMET_PROTOCOL: custom });
@@ -1621,10 +1621,10 @@ const SCENARIOS = [
     },
   },
 
-  // 71: state completed + activeChange 非空（残留值）→ status 应 no-change（：
+  // 70: state completed + activeChange 非空（残留值）→ status 应 no-change（：
   // completed 检查优先于 activeChange 分支——当前 activeChange 分支先命中误判）
   {
-    name: '71 completed state 残留 activeChange 不误判',
+    name: '70 completed state 残留 activeChange 不误判',
     run: (dir) => {
       const st = composeState({ status: 'completed', currentNode: null });
       st.activeChange = 'stale-id';
@@ -1638,11 +1638,11 @@ const SCENARIOS = [
     },
   },
 
-  // 72: 自定义协议未声明 state.statePath（最小 schema）→ hook 不崩溃，写 .specs/ 放行
+  // 71: 自定义协议未声明 state.statePath（最小 schema）→ hook 不崩溃，写 .specs/ 放行
   // （：statePath 缺省回退 .comet/flow-comet-state.json——与 workflow-state 硬编码一致；
   //  当前空值解析崩溃 exit 1 全量拦截）
   {
-    name: '72 无 statePath 协议 hook 不崩溃',
+    name: '71 无 statePath 协议 hook 不崩溃',
     run: (dir) => {
       const custom = customProtocol();
       delete custom.state;
@@ -1655,10 +1655,10 @@ const SCENARIOS = [
     },
   },
 
-  // 73: state 文件带 UTF-8 BOM（外部写入如会话 Write）→ status 正常输出（：
+  // 72: state 文件带 UTF-8 BOM（外部写入如会话 Write）→ status 正常输出（：
   // 读端 JSON.parse 应容忍 BOM——当前崩）
   {
-    name: '73 state 带 BOM 正常读取',
+    name: '72 state 带 BOM 正常读取',
     run: (dir) => {
       const st = composeState({ status: 'running' });
       const raw = '﻿' + JSON.stringify(st, null, 2) + '\n';
@@ -1672,9 +1672,9 @@ const SCENARIOS = [
     },
   },
 
-  // 74: hook 读带 BOM 的 state → 判定正常（——hook readStateJson 的 BOM 容忍）
+  // 73: hook 读带 BOM 的 state → 判定正常（——hook readStateJson 的 BOM 容忍）
   {
-    name: '74 hook 读带 BOM state 正常',
+    name: '73 hook 读带 BOM state 正常',
     run: (dir) => {
       const st = baseState('open');
       st.status = 'running';
@@ -1688,12 +1688,12 @@ const SCENARIOS = [
     },
   },
 
-  // ----------  场景（S76~S77：builtin 降级须含缓存尝试证据） ----------
+  // ----------  场景（S74~S77：builtin 降级须含缓存尝试证据） ----------
 
-  // 76: builtin-quickcheck 声明 + 不可用原因但无缓存尝试证据 → BROOKS-LINT WARN
+  // 74: builtin-quickcheck 声明 + 不可用原因但无缓存尝试证据 → BROOKS-LINT WARN
   // （：防「未尝试 Read 插件缓存协议文件」的偷懒降级——修复前不校验 = RED）
   {
-    name: '76 builtin 无缓存尝试证据 → WARN',
+    name: '74 builtin 无缓存尝试证据 → WARN',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
@@ -1709,10 +1709,10 @@ const SCENARIOS = [
     },
   },
 
-  // 78: cache-brooks 声明（两级降级路径第 2 级——读缓存手动执行成功）→ 放行
+  // 75: cache-brooks 声明（两级降级路径第 2 级——读缓存手动执行成功）→ 放行
   // （ 补：guard method 正则须识别 cache-brooks——修复前正则不匹配 → 全文无 brooks-review/builtin → BLOCKED = RED）
   {
-    name: '78 cache-brooks 声明 → 放行',
+    name: '75 cache-brooks 声明 → 放行',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
@@ -1730,10 +1730,10 @@ const SCENARIOS = [
     },
   },
 
-  // 77: builtin-quickcheck 声明 + 不可用原因 + 含缓存尝试证据（已 Read 插件缓存协议文件）→ 无 WARN 放行
+  // 76: builtin-quickcheck 声明 + 不可用原因 + 含缓存尝试证据（已 Read 插件缓存协议文件）→ 无 WARN 放行
   // （ 正面：两级降级路径的第 2 级被正确执行后的合法态）
   {
-    name: '77 builtin 含缓存尝试证据 → 无 WARN',
+    name: '76 builtin 含缓存尝试证据 → 无 WARN',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
@@ -1749,9 +1749,9 @@ const SCENARIOS = [
     },
   },
 
-  // 75: guard 读带 BOM 的 state → 正常（——guard readStateJson 的 BOM 容忍）
+  // 77: guard 读带 BOM 的 state → 正常（——guard readStateJson 的 BOM 容忍）
   {
-    name: '75 guard 读带 BOM state 正常',
+    name: '77 guard 读带 BOM state 正常',
     run: (dir) => {
       const st = baseState('open');
       st.status = 'running';
@@ -1765,13 +1765,13 @@ const SCENARIOS = [
     },
   },
 
-  // ----------  场景（S79~S83：worktree 委托链路，P1~P7 实录） ----------
+  // ----------  场景（S78~S82：worktree 委托链路，P1~P7 实录） ----------
 
-  // 79: P0 路由诊断——TASK 无 status 属性（旧模板形态）→ exit plan --apply 的 P0 路由输出 ROUTE WARN
+  // 78: P0 路由诊断——TASK 无 status 属性（旧模板形态）→ exit plan --apply 的 P0 路由输出 ROUTE WARN
   // （ P3：结构校验保持严格 + 检测失败纠偏可见——修复前无诊断 = RED）
   // nextNode 只看 completedNodes——P0 路由触发场景 = exit plan（completed 后 nextNode=execute → 路由检查）
   {
-    name: '79 P0 路由无匹配输出诊断',
+    name: '78 P0 路由无匹配输出诊断',
     run: (dir) => {
       const st = baseState('plan');
       st.completedNodes = ['open', 'design'];
@@ -1789,10 +1789,10 @@ const SCENARIOS = [
     },
   },
 
-  // 80: C4 catch 可见化——非 git 仓库 → entry execute 输出 C4-CHECK SKIP
+  // 79: C4 catch 可见化——非 git 仓库 → entry execute 输出 C4-CHECK SKIP
   // （ P4：检测失败也要可见——修复前 catch 静默 = RED）
   {
-    name: '80 C4 catch 非 git 仓库输出 SKIP',
+    name: '79 C4 catch 非 git 仓库输出 SKIP',
     run: (dir) => {
       const st = baseState('execute');
       writeState(dir, st);
@@ -1803,9 +1803,9 @@ const SCENARIOS = [
     },
   },
 
-  // 81: handoff result commitHash 存在性校验——不存在 → HANDOFF ERROR（固化：校验已存在（W2-D）， P6 确认）
+  // 80: handoff result commitHash 存在性校验——不存在 → HANDOFF ERROR（固化：校验已存在（W2-D）， P6 确认）
   {
-    name: '81 handoff result 无效 commitHash → ERROR（batch-H 固化）',
+    name: '80 handoff result 无效 commitHash → ERROR（batch-H 固化）',
     run: (dir) => {
       writeState(dir, baseState('subagent-execute'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
@@ -1825,10 +1825,10 @@ const SCENARIOS = [
     },
   },
 
-  // 82: entry/exit WARN COUNT 汇总行——构造 BROOKS-LINT WARN → exit 输出 WARN COUNT
+  // 81: entry/exit WARN COUNT 汇总行——构造 BROOKS-LINT WARN → exit 输出 WARN COUNT
   // （ F：可观测性——修复前无汇总行 = RED）
   {
-    name: '82 exit 输出 WARN COUNT 汇总',
+    name: '81 exit 输出 WARN COUNT 汇总',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
@@ -1846,9 +1846,9 @@ const SCENARIOS = [
     },
   },
 
-  // 83: 空退出行为固化——全 parallel 任务 exit execute → task-summaries BLOCKED（现状保护，H1 文档一致化的行为锚点）
+  // 82: 空退出行为固化——全 parallel 任务 exit execute → task-summaries BLOCKED（现状保护，H1 文档一致化的行为锚点）
   {
-    name: '83 全 parallel exit execute BLOCKED 产物（batch-H 固化）',
+    name: '82 全 parallel exit execute BLOCKED 产物（batch-H 固化）',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
@@ -1861,12 +1861,12 @@ const SCENARIOS = [
     },
   },
 
-  // 84~92: 自动初始化检测（auto-init-detection）——脚本确定性探测/判决/提示 + agent 生成协作
+  // 83~91: 自动初始化检测（auto-init-detection）——脚本确定性探测/判决/提示 + agent 生成协作
   // 生成职责（2026-08-10 机制修正）：--init-context 时 CONTEXT 缺失 → INIT-GENERATE 指引（不生成、
   // 不写 last_intel_scan），由 agent 全量阅读生成；生成后重跑 → 脚本校验 7 段 → 通过写 last_intel_scan。
-  // 84: CONTEXT 缺失 + 有代码上下文 → init 输出 INIT-NEEDED 且不自动生成（基础探测）
+  // 83: CONTEXT 缺失 + 有代码上下文 → init 输出 INIT-NEEDED 且不自动生成（基础探测）
   {
-    name: '84 CONTEXT 缺失 + 有代码 → init 输出 INIT-NEEDED 不生成',
+    name: '83 CONTEXT 缺失 + 有代码 → init 输出 INIT-NEEDED 不生成',
     run: (dir) => {
       writeFile(dir, 'package.json', '{"name":"x"}');
       const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
@@ -1876,9 +1876,9 @@ const SCENARIOS = [
     },
   },
 
-  // 85: --init-skip → state.ai_context_doc='none'，下次 init 不再提示（拒绝路径）
+  // 84: --init-skip → state.ai_context_doc='none'，下次 init 不再提示（拒绝路径）
   {
-    name: '85 --init-skip 记 none 且下次 init 静默',
+    name: '84 --init-skip 记 none 且下次 init 静默',
     run: (dir) => {
       writeFile(dir, 'package.json', '{"name":"x"}');
       runState(['init', CHANGE_ID, '--init-skip'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
@@ -1889,9 +1889,9 @@ const SCENARIOS = [
     },
   },
 
-  // 86: CONTEXT 新鲜（last_intel_scan ≤90 天）→ init 零初始化输出（新鲜路径）
+  // 85: CONTEXT 新鲜（last_intel_scan ≤90 天）→ init 零初始化输出（新鲜路径）
   {
-    name: '86 CONTEXT 新鲜 → init 零初始化输出',
+    name: '85 CONTEXT 新鲜 → init 零初始化输出',
     run: (dir) => {
       writeState(dir, { ...baseState('open'), last_intel_scan: new Date(Date.now() - 10 * 864e5).toISOString() });
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n');
@@ -1901,9 +1901,9 @@ const SCENARIOS = [
     },
   },
 
-  // 87: 有 CONTEXT 无扫描记录（旧项目迁移）→ INIT-HINT 文案不得含 null
+  // 86: 有 CONTEXT 无扫描记录（旧项目迁移）→ INIT-HINT 文案不得含 null
   {
-    name: '87 有 CONTEXT 无扫描记录 → INIT-HINT 文案无 null',
+    name: '86 有 CONTEXT 无扫描记录 → INIT-HINT 文案无 null',
     run: (dir) => {
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n');
       const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
@@ -1913,9 +1913,9 @@ const SCENARIOS = [
     },
   },
 
-  // 88: CONTEXT 缺失 + --init-context → INIT-GENERATE 指引且不生成、不写 last_intel_scan（生成协作第一步）
+  // 87: CONTEXT 缺失 + --init-context → INIT-GENERATE 指引且不生成、不写 last_intel_scan（生成协作第一步）
   {
-    name: '88 --init-context 无 CONTEXT → INIT-GENERATE 指引不生成',
+    name: '87 --init-context 无 CONTEXT → INIT-GENERATE 指引不生成',
     run: (dir) => {
       writeFile(dir, 'package.json', '{"name":"x"}');
       const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
@@ -1927,9 +1927,9 @@ const SCENARIOS = [
     },
   },
 
-  // 89: CONTEXT 缺失 + 既有 AI 文档 + --init-context → INIT-GENERATE 指引含源文档列表
+  // 88: CONTEXT 缺失 + 既有 AI 文档 + --init-context → INIT-GENERATE 指引含源文档列表
   {
-    name: '89 --init-context 指引含源文档列表',
+    name: '88 --init-context 指引含源文档列表',
     run: (dir) => {
       writeFile(dir, 'CLAUDE.md', '# CLAUDE\n项目约定：使用 kebab-case 命名。\n');
       writeFile(dir, 'package.json', '{"name":"x"}');
@@ -1940,9 +1940,9 @@ const SCENARIOS = [
     },
   },
 
-  // 90: CONTEXT 缺失 + 代码信号 + --init-context → INIT-GENERATE 指引含代码信号
+  // 89: CONTEXT 缺失 + 代码信号 + --init-context → INIT-GENERATE 指引含代码信号
   {
-    name: '90 --init-context 指引含代码信号',
+    name: '89 --init-context 指引含代码信号',
     run: (dir) => {
       writeFile(dir, 'requirements.txt', 'pytest\n');
       const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
@@ -1952,9 +1952,9 @@ const SCENARIOS = [
     },
   },
 
-  // 91: CONTEXT 已存在且 7 段 + 模板格式完整 + --init-context → INIT-DONE + last_intel_scan 写入（生成协作第二步）
+  // 90: CONTEXT 已存在且 7 段 + 模板格式完整 + --init-context → INIT-DONE + last_intel_scan 写入（生成协作第二步）
   {
-    name: '91 CONTEXT 7 段+格式完整 --init-context → INIT-DONE + state 写入',
+    name: '90 CONTEXT 7 段+格式完整 --init-context → INIT-DONE + state 写入',
     run: (dir) => {
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n## 技术栈\nx\n## 域语言\n| 术语 | 定义 |\n|---|---|\n| 例 | 定义 |\n## 已锁决策\n- [2026-08-01] 决策一\n## 默认偏好\nx\n## 既有抽象索引\nx\n## intel-scan 元数据\n- **last_intel_scan**: x\n- **scanner**: x\n- **下次重扫建议**: x\n');
       writeFile(dir, 'package.json', '{"name":"x"}');
@@ -1966,9 +1966,9 @@ const SCENARIOS = [
     },
   },
 
-  // 92: CONTEXT 存在但缺段 + --init-context → INIT-VALIDATE-FAILED 重写指引 + 不写 last_intel_scan
+  // 91: CONTEXT 存在但缺段 + --init-context → INIT-VALIDATE-FAILED 重写指引 + 不写 last_intel_scan
   {
-    name: '92 CONTEXT 缺段 --init-context → 重写指引不写 state',
+    name: '91 CONTEXT 缺段 --init-context → 重写指引不写 state',
     run: (dir) => {
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n');
       writeFile(dir, 'package.json', '{"name":"x"}');
@@ -1981,9 +1981,9 @@ const SCENARIOS = [
     },
   },
 
-  // 93: CONTEXT 7 段齐全但模板格式不满足（已锁决策无日期前缀）→ 格式校验失败重写指引 + 不写 state
+  // 92: CONTEXT 7 段齐全但模板格式不满足（已锁决策无日期前缀）→ 格式校验失败重写指引 + 不写 state
   {
-    name: '93 CONTEXT 格式不满足模板 → 重写指引不写 state',
+    name: '92 CONTEXT 格式不满足模板 → 重写指引不写 state',
     run: (dir) => {
       // 7 段齐全但已锁决策条目缺 [YYYY-MM-DD] 日期前缀（模板格式）
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n## 技术栈\nx\n## 域语言\n| 术语 | 定义 |\n|---|---|\n| 例 | 定义 |\n## 已锁决策\n- 决策缺日期前缀\n## 默认偏好\nx\n## 既有抽象索引\nx\n## intel-scan 元数据\n- **last_intel_scan**: x\n- **scanner**: x\n- **下次重扫建议**: x\n');
@@ -1997,9 +1997,9 @@ const SCENARIOS = [
     },
   },
 
-  // 94: 新项目骨架 CONTEXT（已锁决策仅占位）→ 占位放行 INIT-DONE（DF-5：占位不是裸条目）
+  // 93: 新项目骨架 CONTEXT（已锁决策仅占位）→ 占位放行 INIT-DONE（DF-5：占位不是裸条目）
   {
-    name: '94 新项目占位 CONTEXT → 校验通过 INIT-DONE',
+    name: '93 新项目占位 CONTEXT → 校验通过 INIT-DONE',
     run: (dir) => {
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\n新项目骨架\n## 技术栈\nx\n## 域语言\n| 术语 | 定义 |\n|---|---|\n| （待沉淀） | 随 change 逐步补充 |\n## 已锁决策\n- （待沉淀——后续 change 按时间倒序追加）\n## 默认偏好\n- 待补充\n## 既有抽象索引\nx\n## intel-scan 元数据\n- **last_intel_scan**: x\n- **scanner**: x\n- **下次重扫建议**: x\n');
       writeFile(dir, 'package.json', '{"name":"x"}');
@@ -2011,10 +2011,10 @@ const SCENARIOS = [
     },
   },
 
-  // 95: CONTEXT 已满足模板但无扫描记录 + init 无参数 → 提示"记录扫描时间"（C 文案优化——
+  // 94: CONTEXT 已满足模板但无扫描记录 + init 无参数 → 提示"记录扫描时间"（C 文案优化——
   // agent 生成后未重跑的悬空态，误导性"扫描时间未知/刷新"文案不出现）
   {
-    name: '95 CONTEXT 就绪无扫描记录 → 提示记录扫描时间',
+    name: '94 CONTEXT 就绪无扫描记录 → 提示记录扫描时间',
     run: (dir) => {
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n## 技术栈\nx\n## 域语言\n| 术语 | 定义 |\n|---|---|\n| 例 | 定义 |\n## 已锁决策\n- [2026-08-01] 决策一\n## 默认偏好\nx\n## 既有抽象索引\nx\n## intel-scan 元数据\n- **last_intel_scan**: x\n- **scanner**: x\n- **下次重扫建议**: x\n');
       writeFile(dir, 'package.json', '{"name":"x"}');
@@ -2025,9 +2025,9 @@ const SCENARIOS = [
     },
   },
 
-  // 96: init 同 id 重跑（.specs/<id>/ 已存在）→ WARN 防护输出且不阻断（F）
+  // 95: init 同 id 重跑（.specs/<id>/ 已存在）→ WARN 防护输出且不阻断（F）
   {
-    name: '96 init 同 id 重跑 → WARN 防护不阻断',
+    name: '95 init 同 id 重跑 → WARN 防护不阻断',
     run: (dir) => {
       writeFile(dir, 'package.json', '{"name":"x"}');
       runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
@@ -2038,11 +2038,11 @@ const SCENARIOS = [
     },
   },
 
-  // 97~98: dogfood 实证的校验误报修复（2026-08-10）
-  // 97: 自检方法段内后续行声明方法（子代理把方法名写在列表后续行）→ 放行无 WARN
+  // 96~97: dogfood 实证的校验误报修复（2026-08-10）
+  // 96: 自检方法段内后续行声明方法（子代理把方法名写在列表后续行）→ 放行无 WARN
   // （修复前 guard 正则只匹配段后第一行 → 全文有 cache-brooks 声明 → 误报 BROOKS-LINT WARN = RED）
   {
-    name: '97 自检方法段后续行声明 → 放行',
+    name: '96 自检方法段后续行声明 → 放行',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
@@ -2059,10 +2059,10 @@ const SCENARIOS = [
     },
   },
 
-  // 98: handoff changedFiles 含 *-SUMMARY.md（强制产物）→ 不报越界 WARN
+  // 97: handoff changedFiles 含 *-SUMMARY.md（强制产物）→ 不报越界 WARN
   // （修复前 W2-D 子集校验把强制产物当越界 = RED；真实 commitHash 供 git show 校验）
   {
-    name: '98 handoff 含 SUMMARY 文件 → 无越界 WARN',
+    name: '97 handoff 含 SUMMARY 文件 → 无越界 WARN',
     run: (dir) => {
       const g = (args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
       g(['init', '-q']);
