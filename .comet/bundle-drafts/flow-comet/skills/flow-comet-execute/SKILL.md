@@ -58,14 +58,19 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 对 TASK.md 每个 pending 串行任务，协调者执行：
 
 1. **读 task 块，构造 handoff request**：读 `<task>` XML 块（`action` / `read_files` / `write_files` / `verify` / `done`）。若内容有歧义，停下询问——不要猜。构造 handoff request 内容：task 全文 + DESIGN §0/§0.5 + AC + read/write_files 边界。运行 `workflow-handoff.mjs request <task-id>` 记录。
-2. **委托子代理**：用 Agent 工具（`isolation: "worktree"`）委托 fresh-context 子代理。handoff prompt 强制协议：加载 flow-comet-dev、执行 TDD（RED/GREEN/REFACTOR）、LESSONS 扫描、既有抽象 grep、verify、6 维自查、越界检查、原子 commit（`<type>(<change-id>): <task-id> <subject>`），写 `.specs/<change-id>/<task-id>-SUMMARY.md`，回传 Return Contract（含 commitHash + greenEvidence + selfReview）。
-3. **记录 handoff result**：子代理回传后，运行 `workflow-handoff.mjs result <task-id> '<JSON>'` 记录（Return Contract 含 commitHash + greenEvidence + selfReview）。
+2. **委托子代理**：用 Agent 工具（`isolation: "worktree"`）委托 fresh-context 子代理。handoff prompt 强制协议：加载 flow-comet-dev、执行 TDD（RED/GREEN/REFACTOR）、LESSONS 扫描、既有抽象 grep、verify、6 维自查、越界检查、原子 commit（`<type>(<change-id>): <task-id> <subject>`），写 `.specs/<change-id>/<task-id>-SUMMARY.md`，回传 Return Contract（含 commitHash + greenEvidence + completedChecks + selfReview）。
+3. **记录 handoff result**：子代理回传后，运行 `workflow-handoff.mjs result <task-id> '<JSON>'` 记录（Return Contract 含 commitHash + greenEvidence + completedChecks + selfReview）。
 4. **验收 SUMMARY，TASK.md 标 done**：确认 SUMMARY 含 `## 自检方法` 段（声明 brooks-review 或 builtin-quickcheck）、verify 输出真实、6 维自查与越界检查有实质内容；通过后在 TASK.md 将任务标 `status="done"` 并加时间戳。
 5. **下一个 pending 任务**：重复步骤 1-4。
 
 > 原 Steps 的 TDD / LESSONS / verify / 6 维自查 / 越界检查 / commit 协议**移入 handoff prompt 作为子代理的强制协议**，协调者不亲自执行。
 
 > **Return Contract 非代码任务**：纯文档 / 纯配置任务子代理回传时，`greenEvidence` 允许 `{"command":"N/A (non-code task)","output":"..."}`（command 字段存在即可通过 W1-D 校验）。
+
+> **Return Contract 的 completedChecks 统一契约**：子代理回传的 `completedChecks` 必须包含 `required-skill:subagent-execute.flow-comet-dev`——execute（串行委托）与 subagent-execute（并行委托）的 handoff 统一记录在 subagent-execute 证据库（共用证据库语义），guard 的 W1-D 对全部委托结果统一校验该契约。取值与节点自证命名（本节点自身证据用的 `required-skill:execute.flow-comet-dev`，见 Required Skill Calls）无关。示例：
+>
+> - 正确：`"completedChecks": ["required-skill:subagent-execute.flow-comet-dev"]`
+> - 错误：`"completedChecks": ["required-skill:execute.flow-comet-dev"]` —— 按 execute 域命名会被 W1-D 拦截（exit BLOCKED），子代理必须回传统一契约值
 
 The full dev protocol, templates, and constraints are in:
 - `flow-kit/prompts/4-dev.md` (DEV phase) — 作为 handoff prompt 的子代理强制协议引用
