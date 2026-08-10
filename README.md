@@ -81,6 +81,10 @@ Real-run captures from production-length sessions. During these multi-hour runs,
 
 ![Artifact trail](images/long-run-output.png)
 
+**Stable skill triggering** — workflow skills keep loading correctly through a 4h+ session:
+
+![Skill triggering](images/long-run-4h-and-skill-triggering.png)
+
 **5-hour verification run** — full validation and UAT at the end of a 5h14m session (↓399k tokens):
 
 ![Verification run](images/long-run-5h.png)

@@ -81,6 +81,10 @@ flow-comet 把 flow-kit 的 9 阶段开发流程（CHANGE → REQUIREMENT → DE
 
 ![产物体系](images/long-run-output.png)
 
+**技能稳定触发**——4 小时以上会话中工作流技能持续正确加载：
+
+![技能触发](images/long-run-4h-and-skill-triggering.png)
+
 **5 小时验证运行**——5 小时 14 分会话末的全量验证与用户验收（↓399k tokens）：
 
 ![验证运行](images/long-run-5h.png)
