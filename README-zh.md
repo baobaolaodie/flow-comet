@@ -36,6 +36,59 @@ flow-comet 把 flow-kit 的 9 阶段开发流程（CHANGE → REQUIREMENT → DE
 - **子代理隔离执行**——实现工作委托给 fresh-context 子代理，回传可验证的 Return Contract
 - **文件即真相恢复**——状态从 `.specs/` 工件推导，恢复不依赖对话历史
 
+## 什么是 flow-kit
+
+[flow-kit](https://github.com/rihebty/flow-kit) 是一套融合了主流 AI 编码工作流——[superpowers](https://github.com/obra/superpowers)、[OpenSpec](https://github.com/Fission-AI/OpenSpec)、[spec-kit](https://github.com/github/spec-kit)、GSD、[gstack](https://github.com/garrytan/gstack)、[claude-task-master](https://github.com/eyaltoledano/claude-task-master)——再按自己的流程重排的纯 Markdown 开发方法论：9 阶段流程（CHANGE → REQUIREMENT → DESIGN → TASK → DEV → TEST → REVIEW → INTEGRATION → ARCHIVE）、`.specs/` 工件模板与 R1-R8 行为规则。没有运行时、没有 CLI——克隆进项目即可用：它定义"该产出什么、该守什么规矩"，但推进全靠人与 AI 的纪律。
+
+## 为什么选择 flow-comet
+
+### 横向对比
+
+| 项目 | 定位 | 工作机制 | 与 flow-comet 的关系 |
+|------|------|---------|---------------------|
+| **flow-kit** | 纯 Markdown 方法论包：9 阶段流程 + `.specs/` 模板 + R1-R8 规则，零运行时 | 人按阶段加载 prompt 文件推进，状态经 `.md` 工件传递 | **依赖/底座**——flow-comet 是它的执行自动化层，工件与规则完全继承 |
+| **OpenSpec**（Fission-AI） | 规范驱动开发框架：编码前加一层轻量规范 | `openspec/` 目录，每个变更一套 proposal/specs/design/tasks，propose→apply→verify→archive | **思想来源 + 轻量替代**——规范先行思想被 flow-kit 融合；独立使用时更轻（无状态机、无阶段门强制） |
+| **Superpowers**（obra） | Claude Code 技能集 + 完整开发方法论 | 可组合技能（头脑风暴/计划/TDD/调试/评审），按上下文触发，靠指令约束 | **思想来源 + 部分重叠**——技能式纪律依赖模型自觉；flow-comet 把同款纪律脚本化、机器校验化 |
+| **comet**（rpamis） | 可恢复长任务工作流 + 技能平台：协议状态机、guard 门、hook 拦截 | `/comet` 按配置路由；Classic = OpenSpec + Superpowers 五阶段状态机 | **机制来源**——flow-comet 吸收其机制形态（协议即事实源、脚本管状态、guard 门、hook 白名单），丢弃平台设施（eval/发布）；与 Comet Classic 状态不互通 |
+| **GSD** | 规范驱动开发的元提示/上下文工程工作流 | 里程碑→切片→任务；每阶段 fresh context 预内联上下文；工作树隔离 + UAT | **思想来源（同类）**——fresh-context 执行与阶段门思想一致；无脚本状态机路由，靠提示词纪律 |
+| **spec-kit**（GitHub） | SDD 工具包：Spec→Plan→Tasks→Implement | 每阶段产 markdown 工件喂给下一阶段；任务格式带顺序 ID、并行标记 [P]、文件路径 | **思想来源（同类）**——任务带文件路径/并行标记的形态与 flow-kit TASK 同源；无阶段迁移强制 |
+| **claude-task-master** | AI 驱动的任务管理系统（MCP + CLI） | PRD 解析→任务分解→依赖图→next_task 编排 | **补足**——只管任务层（分解/排序/依赖），不管阶段门、工件验证与写权限 |
+
+### 纵向对比：手动 flow-kit → flow-comet
+
+| 维度 | 手动 flow-kit（靠纪律） | flow-comet（自动化） |
+|------|------------------------|---------------------|
+| 阶段推进 | 人记住流程、手动加载 prompt；跳步/漏步靠自觉 | 脚本从 `.specs/` 工件实时推导当前节点，自动路由；顺序错误直接阻断 |
+| 验证 | 人对照规则自查工件；TEST.md 验证命令"应该跑" | guard 在每节点出入口强制校验工件与节段；verify 真实执行 TEST.md 命令并计数失败 |
+| 纪律强制 | 规则是 markdown 文字，模型可能忽略 | 三层防御：写文件白名单物理拦截越权 / 协调者禁令 / 退出接管检测 |
+| 恢复 | 依赖对话记忆，换会话易丢进度 | 文件即真相：从 `.specs/` 重新推导节点并纠偏，任何会话/断线可恢复 |
+| 并行实现 | 人协调多窗口，易越界 | 子代理在独立工作树隔离实现（协调者写不了源码），返回经验证的契约（提交哈希 + 证据） |
+| 决策负担 | 每阶段都有确认点，人疲于应答 | 决策分四类，人只在关键点介入：范围、技术栈、破坏性变更、评审结论、归档确认 |
+
+### 为什么选 flow-comet
+
+1. **把"靠自觉"变成"靠机器"**——每个阶段出入口都有脚本校验：工件齐不齐、节段填没填、验证命令跑没跑、任务有没有越界，机器逐项检查并阻断。
+2. **断了线、换了会话也不丢进度**——进行到哪一步永远从 `.specs/` 工件推导，不靠对话记忆；随时重开从正确节点继续。
+3. **实现与协调物理隔离，防止越权**——实现交给全新上下文的子代理在独立工作树完成，必须交回"提交哈希 + 验证证据 + 完成检查"才放行；协调者被禁止写源码，写文件白名单物理拦截越权。
+4. **flow-kit 方法论的原生自动化层**——不是另起炉灶：工件格式、规则、阶段与 flow-kit 完全一致；装了 flow-kit 的项目装上 flow-comet 即升级为机器化流程，无需迁移。
+5. **协议驱动、零依赖、拷贝即用**——内置 8 节点流程开箱即用；任意已装技能可组合成自定义协议跑在同一引擎；Node.js 18+、无第三方依赖、一条命令装入目标项目。
+
+## 运行展示（截图）
+
+来自真实生产级会话的运行截图。这些数小时运行中，**唯一的人工交互是工作流规定的决策点**（范围确认、技术栈选型、评审结论、归档确认）——除此之外没有任何其他人工干扰或临时决策，全程严格执行规范。
+
+**完整产物体系**——一次真实运行的全部流程工件（CHANGE / DESIGN / REQUIREMENT / REVIEW / TASK / TEST / UAT + 21 份任务摘要）：
+
+![产物体系](images/long-run-output.png)
+
+**技能稳定触发**——4 小时以上会话中工作流技能持续正确加载：
+
+![技能触发](images/long-run-4h-and-skill-triggering.png)
+
+**5 小时验证运行**——5 小时 14 分会话末的全量验证与用户验收（↓399k tokens）：
+
+![验证运行](images/long-run-5h.png)
+
 ## 生态关系
 
 | 项目 | 定位 | 与 flow-comet 的关系 |
@@ -137,6 +190,8 @@ flow-comet/
 2. 修改 skill/脚本请改 `.comet/bundle-drafts/flow-comet/skills/`（权威源）；TDD——先写 RED 场景
 3. 运行回归：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 97 SCENARIOS PASSED`
 4. 开 PR 合入 `dev`（merge commit）；发布 PR `dev → main`（squash）
+
+CI 在每个 PR 与 push 时自动强制仓库约定（回归、PR 纪律、版本一致性、死链）——无需本地配置。完整指南见 [CONTRIBUTING-zh.md](CONTRIBUTING-zh.md)。
 
 ## License
 
