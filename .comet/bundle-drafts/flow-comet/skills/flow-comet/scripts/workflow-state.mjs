@@ -76,18 +76,21 @@ async function findActiveChange() {
 
 // ---------- D1/D3/D5 · skill-load 声明标记（completedChecks 真实性校验配套） ----------
 
-// --protocol 原始参数提取：resolveProtocol 已全局解析出协议路径（CLI > env > 默认），
-// 此处仅取用户显式传入的原始值，供 skill-load 的 flow-kit/prompts/ 归属校验与标记记录。
-function findProtocolArg(cliArgs) {
+// --prompt 原始参数提取（skill-load 专用，T-FIX-02）：--protocol 由 resolveProtocol 全局解析
+// （CLI > env > 默认）为工作流协议 JSON——skill-load 曾用 --protocol 传 prompt 路径，主仓真实链路
+// 必现撞车（markdown 被当协议 JSON 解析 → 启动报错「workflow protocol file is not valid JSON」，
+// P2 实证）。改名 --prompt 后与全局协议解析彻底解耦；此处仅取用户显式传入的原始值，供 skill-load
+// 的 flow-kit/prompts/ 归属校验与标记记录。
+function findPromptArg(cliArgs) {
   for (let index = 0; index < cliArgs.length; index++) {
     const arg = cliArgs[index];
-    if (arg === '--protocol') {
+    if (arg === '--prompt') {
       const value = cliArgs[index + 1];
       if (typeof value !== 'string' || value === '') return null;
       return value;
     }
-    if (typeof arg === 'string' && arg.startsWith('--protocol=')) {
-      const value = arg.slice('--protocol='.length);
+    if (typeof arg === 'string' && arg.startsWith('--prompt=')) {
+      const value = arg.slice('--prompt='.length);
       return value === '' ? null : value;
     }
   }
@@ -95,7 +98,7 @@ function findProtocolArg(cliArgs) {
 }
 
 // flow-kit/prompts/ 归属校验（相对或绝对路径，前缀校验）——flow-kit 为 vendored 上游，
-// 协议提示只读引用；skill-load 声明的 --protocol 必须位于其 prompts 目录下。
+// 协议提示只读引用；skill-load 声明的 --prompt 必须位于其 prompts 目录下。
 // 相对路径：字符串前缀必须为 flow-kit/prompts/；绝对路径：路径段中必须含 flow-kit/prompts。
 function protocolUnderFlowKitPrompts(value) {
   const normalized = String(value).replaceAll('\\', '/');
@@ -688,7 +691,7 @@ async function main() {
   }
 
   if (command === 'skill-load') {
-    // D1: 执行者加载节点 skill 后运行 skill-load <node> <skill> [--protocol <path>]，
+    // D1: 执行者加载节点 skill 后运行 skill-load <node> <skill> [--prompt <path>]，
     // 写入声明标记 .specs/<change-id>/.skill-loads/<node>-<skill>.json（{ node, skill, protocol, at }），
     // record 校验 completedChecks 的 required-skill 条目以此为准（D3）。
     // 诚实边界：标记是"声明"而非物理证明——运行时没有 Skill 调用观察点，脚本无法确认执行者
@@ -696,7 +699,7 @@ async function main() {
     const nodeId = process.argv[3];
     const skillName = process.argv[4];
     if (!nodeId || !skillName) {
-      throw new Error('skill-load requires <node> <skill>. 用法: workflow-state.mjs skill-load <node> <skill> [--protocol <path>]');
+      throw new Error('skill-load requires <node> <skill>. 用法: workflow-state.mjs skill-load <node> <skill> [--prompt <path>]');
     }
     // 参数校验：node 为内置 8 节点之一；skill 名仅允许字母数字连字符
     if (!BUILTIN_NODES.includes(nodeId)) {
@@ -705,12 +708,13 @@ async function main() {
     if (!/^[A-Za-z0-9-]+$/.test(skillName)) {
       throw new Error('skill-load skill 名非法（仅允许字母数字连字符）: ' + skillName);
     }
-    // --protocol 归属校验：路径必须位于 flow-kit/prompts/ 下（相对或绝对，前缀校验；
+    // --prompt 归属校验：路径必须位于 flow-kit/prompts/ 下（相对或绝对，前缀校验；
     // flow-kit 为 vendored 上游，协议提示只读引用）。协议加载本身由 resolveProtocol 全局
-    // 处理（含受保护读取），此处仅校验用户显式传入的 --protocol 原始值。
-    const protocolArg = findProtocolArg(process.argv.slice(3));
-    if (protocolArg !== null && !protocolUnderFlowKitPrompts(protocolArg)) {
-      throw new Error('skill-load --protocol 路径必须位于 flow-kit/prompts/ 下（flow-kit 为 vendored 上游，协议提示只读引用）: ' + protocolArg);
+    // 处理（含受保护读取）——--protocol 语义不变（工作流协议 JSON）；此处仅校验用户显式传入的
+    // --prompt 原始值（T-FIX-02：skill-load 专属参数，不再与全局协议解析共用 --protocol）。
+    const promptArg = findPromptArg(process.argv.slice(3));
+    if (promptArg !== null && !protocolUnderFlowKitPrompts(promptArg)) {
+      throw new Error('skill-load --prompt 路径必须位于 flow-kit/prompts/ 下（flow-kit 为 vendored 上游，协议提示只读引用）: ' + promptArg);
     }
     // 声明标记写入：.skill-loads/ 目录不存在时创建（writeJson 自带 mkdir recursive）；
     // 同 node-skill 重复调用覆盖（记录最新声明）
@@ -718,11 +722,11 @@ async function main() {
     if (!changeName) {
       throw new Error('skill-load requires an active change（先运行 init <change-id>）');
     }
-    // T-FIX-01: 标记 protocol 字段 = --protocol 参数的 basename（如 0-change.md）——与 guard exit
-    // 校验的 D7 表 basename 精确比对同值（真实链路 skill-load → exit 一致）；未传 --protocol →
+    // T-FIX-01: 标记 protocol 字段 = --prompt 参数的 basename（如 0-change.md）——与 guard exit
+    // 校验的 D7 表 basename 精确比对同值（真实链路 skill-load → exit 一致）；未传 --prompt →
     // null（无协议声明，exit 校验 fail-closed）。P1 修复：旧实现写 resolveProtocol 解析后的完整
     // 绝对路径，与 D7 表 basename 比对必然失败（真实链路必 BLOCKED——机制实际不可用）。
-    const marker = { node: nodeId, skill: skillName, protocol: protocolArg === null ? null : path.basename(protocolArg), at: new Date().toISOString() };
+    const marker = { node: nodeId, skill: skillName, protocol: promptArg === null ? null : path.basename(promptArg), at: new Date().toISOString() };
     // specsRoot 已含 .specs/，相对路径为 <change-id>/.skill-loads/<node>-<skill>.json
     const markerRel = path.posix.join(changeName, '.skill-loads', nodeId + '-' + skillName + '.json');
     await writeJson(path.join(specsRoot, markerRel), marker);

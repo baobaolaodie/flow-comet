@@ -156,7 +156,7 @@ The subagent-execute node identifies all `parallel="true"` pending tasks in TASK
 **加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
 
 ```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load subagent-execute flow-comet-dev --protocol flow-kit/prompts/4-dev.md
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load subagent-execute flow-comet-dev --prompt flow-kit/prompts/4-dev.md
 ```
 
 ## Output Schemas
@@ -219,7 +219,7 @@ Load `flow-comet-subagent-execute` for this Node. Operation: `require`.
 **加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
 
 ```bash
-node flow-comet/scripts/workflow-state.mjs skill-load subagent-execute flow-comet-dev --protocol flow-kit/prompts/4-dev.md
+node flow-comet/scripts/workflow-state.mjs skill-load subagent-execute flow-comet-dev --prompt flow-kit/prompts/4-dev.md
 ```
 
 ## Augmentations

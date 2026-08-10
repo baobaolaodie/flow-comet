@@ -114,8 +114,8 @@ The open node loads `flow-comet-change` for the CHANGE phase (structured questio
 **加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
 
 ```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-change --protocol flow-kit/prompts/0-change.md
-node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-requirement --protocol flow-kit/prompts/1-requirement.md
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-change --prompt flow-kit/prompts/0-change.md
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-requirement --prompt flow-kit/prompts/1-requirement.md
 ```
 
 ## Output Schemas
@@ -179,8 +179,8 @@ Load `flow-comet-open` for this Node. Operation: `require`.
 **加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
 
 ```bash
-node flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-change --protocol flow-kit/prompts/0-change.md
-node flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-requirement --protocol flow-kit/prompts/1-requirement.md
+node flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-change --prompt flow-kit/prompts/0-change.md
+node flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-requirement --prompt flow-kit/prompts/1-requirement.md
 ```
 
 ## Augmentations

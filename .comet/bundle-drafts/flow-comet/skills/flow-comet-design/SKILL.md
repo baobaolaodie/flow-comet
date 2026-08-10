@@ -113,7 +113,7 @@ The design node reads CHANGE.md and REQUIREMENT.md, then produces DESIGN.md thro
 **加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
 
 ```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load design flow-comet-design --protocol flow-kit/prompts/2-design.md
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load design flow-comet-design --prompt flow-kit/prompts/2-design.md
 ```
 
 ## Output Schemas
@@ -177,7 +177,7 @@ Load `flow-comet-design` for this Node. Operation: `require`.
 **加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
 
 ```bash
-node flow-comet/scripts/workflow-state.mjs skill-load design flow-comet-design --protocol flow-kit/prompts/2-design.md
+node flow-comet/scripts/workflow-state.mjs skill-load design flow-comet-design --prompt flow-kit/prompts/2-design.md
 ```
 
 ## Augmentations

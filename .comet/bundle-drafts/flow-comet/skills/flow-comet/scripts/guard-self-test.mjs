@@ -2084,17 +2084,18 @@ const SCENARIOS = [
 
   // ----------  场景（S98~S105：completedChecks 真实性声明机制——skill-load/record/exit 校验 + 交叉自洽 + 旧兼容 + 场景数同步，T03） ----------
 
-  // 98: skill-load 写入声明标记（AC-1）——完整命令形态（--protocol flow-kit/prompts/<阶段>.md，
+  // 98: skill-load 写入声明标记（AC-1）——完整命令形态（--prompt flow-kit/prompts/<阶段>.md，
   // 归属校验通过）→ 标记 .specs/<change-id>/.skill-loads/<node>-<skill>.json 生成，
   // 内容含 node/skill/protocol/at（ISO 时间戳）+ 输出确认提示
   {
     name: '98 skill-load 写入声明标记（AC-1）',
     run: (dir) => {
-      // 场景内 flow-kit/prompts/ 协议文件（有效 JSON——skill-load 的协议加载步骤需要）
-      writeFile(dir, 'flow-kit/prompts/0-change.md', JSON.stringify(customProtocol(), null, 2) + '\n');
+      // 场景内 flow-kit/prompts/ 提示文件（skill-load --prompt 指向——T-FIX-02 后归属校验仅查
+      // 前缀不读内容；协议加载走 env reference 路径，文件无需为 JSON）
+      writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
       writeState(dir, baseState('open'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
-      const res = runState(['skill-load', 'open', 'flow-comet-change', '--protocol', 'flow-kit/prompts/0-change.md'], dir,
+      const res = runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir,
         { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
       assertExit(res, 0);
       assertOut(res, 'SKILL-LOAD: open flow-comet-change → .skill-loads/open-flow-comet-change.json');
@@ -2104,11 +2105,11 @@ const SCENARIOS = [
       if (marker.node !== 'open' || marker.skill !== 'flow-comet-change') {
         throw new Error('标记 node/skill 字段不符: ' + JSON.stringify(marker));
       }
-      // T-FIX-01: 标记 protocol = --protocol 参数的 basename（与 guard exit 的 D7 表比对同值，
+      // T-FIX-01: 标记 protocol = --prompt 参数的 basename（与 guard exit 的 D7 表比对同值，
       // 真实链路 skill-load → exit 一致；P1 缺陷时代写 resolveProtocol 解析后的完整绝对路径，
       // 与 D7 表 basename 精确比对必然失败——机制实际不可用，已修复）
       if (marker.protocol !== '0-change.md') {
-        throw new Error('标记 protocol 应为 --protocol 参数的 basename 0-change.md: ' + JSON.stringify(marker));
+        throw new Error('标记 protocol 应为 --prompt 参数的 basename 0-change.md: ' + JSON.stringify(marker));
       }
       if (typeof marker.at !== 'string' || Number.isNaN(Date.parse(marker.at))) {
         throw new Error('标记缺 ISO 时间戳 at: ' + JSON.stringify(marker));
@@ -2117,7 +2118,7 @@ const SCENARIOS = [
   },
 
   // 99: skill-load 非法参数拒绝（AC-2）——缺 node/skill / node 非法 / skill 名非法字符 /
-  // --protocol 不在 flow-kit/prompts/ 下 → 报错 exit 非 0，不写任何标记（.skill-loads/ 无文件）
+  // --prompt 不在 flow-kit/prompts/ 下 → 报错 exit 非 0，不写任何标记（.skill-loads/ 无文件）
   {
     name: '99 skill-load 非法参数拒绝不写标记（AC-2）',
     run: (dir) => {
@@ -2136,11 +2137,11 @@ const SCENARIOS = [
       const rC = runState(['skill-load', 'open', 'bad/name'], dir, env);
       assertExit(rC, 1);
       assertOut(rC, 'skill-load skill 名非法');
-      // d) --protocol 不在 flow-kit/prompts/ 下（指向场景内 reference 副本——文件存在可加载，
+      // d) --prompt 不在 flow-kit/prompts/ 下（指向场景内 reference 副本——文件存在可加载，
       //    归属校验拒绝；若归属校验被跳过则此处会成功写标记，断言即失效）
-      const rD = runState(['skill-load', 'open', 'flow-comet-change', '--protocol', 'reference/workflow-protocol.json'], dir, env);
+      const rD = runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'reference/workflow-protocol.json'], dir, env);
       assertExit(rD, 1);
-      assertOut(rD, 'skill-load --protocol 路径必须位于 flow-kit/prompts/ 下');
+      assertOut(rD, 'skill-load --prompt 路径必须位于 flow-kit/prompts/ 下');
       // 全部拒绝后 .skill-loads/ 不产生任何标记文件
       const loadsDir = path.join(dir, '.specs', CHANGE_ID, '.skill-loads');
       if (fs.existsSync(loadsDir) && fs.readdirSync(loadsDir).length > 0) {
@@ -2190,9 +2191,9 @@ const SCENARIOS = [
 
   // 102: exit 协议声明标记校验（AC-4）+ 真实链路集成（T-FIX-01）——.skill-loads/ 已激活
   // （目录存在）但无本节点协议标记（<node>-*.json 且 protocol ∈ 该节点协议集，D7 映射表
-  // basename）→ BLOCKED；真实 skill-load --protocol 写入的标记（protocol = basename）→ exit 通过
+  // basename）→ BLOCKED；真实 skill-load --prompt 写入的标记（protocol = basename）→ exit 通过
   // （修复后真实链路一致——P1 缺陷时代 skill-load 写解析后完整路径，exit 必 BLOCKED）；未传
-  // --protocol（标记 protocol = null）→ BLOCKED；损坏标记（protocol 非协议集）→ BLOCKED
+  // --prompt（标记 protocol = null）→ BLOCKED；损坏标记（protocol 非协议集）→ BLOCKED
   {
     name: '102 exit 协议标记校验：真实链路通过 / 无标记·null·损坏 BLOCKED（AC-4）',
     run: (dir) => {
@@ -2201,8 +2202,8 @@ const SCENARIOS = [
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n\n## 范围\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\n## 验收准则（AC）\n');
-      // 场景内 flow-kit/prompts/ 协议文件（真实 skill-load --protocol 指向，受保护读取需文件存在）
-      writeFile(dir, 'flow-kit/prompts/0-change.md', JSON.stringify(customProtocol(), null, 2) + '\n');
+      // 场景内 flow-kit/prompts/ 提示文件（真实 skill-load --prompt 指向——归属校验仅查前缀不读内容）
+      writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
       const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       const loadsDir = path.join(dir, '.specs', CHANGE_ID, '.skill-loads');
       fs.mkdirSync(loadsDir, { recursive: true });
@@ -2213,26 +2214,26 @@ const SCENARIOS = [
       assertExit(resBlock, 1);
       assertOut(resBlock, 'BLOCKED');
       assertOut(resBlock, 'exit 缺协议声明标记');
-      // ② 真实链路（T-FIX-01）：skill-load --protocol 写入标记（protocol = basename）→ exit 通过
+      // ② 真实链路（T-FIX-01）：skill-load --prompt 写入标记（protocol = basename）→ exit 通过
       const markerPath = path.join(loadsDir, 'open-flow-comet-change.json');
-      const sl = runState(['skill-load', 'open', 'flow-comet-change', '--protocol', 'flow-kit/prompts/0-change.md'], dir, env);
+      const sl = runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir, env);
       assertExit(sl, 0);
       assertOut(sl, 'SKILL-LOAD: open flow-comet-change');
       const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
       if (marker.protocol !== '0-change.md') {
-        throw new Error('skill-load 标记 protocol 应为 --protocol 参数的 basename 0-change.md: ' + JSON.stringify(marker));
+        throw new Error('skill-load 标记 protocol 应为 --prompt 参数的 basename 0-change.md: ' + JSON.stringify(marker));
       }
       const resPass = runGuard(['exit', 'open'], dir);
       assertExit(resPass, 0);
       assertOut(resPass, 'ALL CHECKS PASSED');
       assertNotOut(resPass, 'BLOCKED');
-      // ③ skill-load 未传 --protocol → 标记 protocol = null → exit BLOCKED（fail-closed：
-      // 无协议声明不可通过——指引补 skill-load --protocol）
+      // ③ skill-load 未传 --prompt → 标记 protocol = null → exit BLOCKED（fail-closed：
+      // 无协议声明不可通过——指引补 skill-load --prompt）
       const slNull = runState(['skill-load', 'open', 'flow-comet-change'], dir, env);
       assertExit(slNull, 0);
       const markerNull = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
       if (markerNull.protocol !== null) {
-        throw new Error('skill-load 未传 --protocol 标记 protocol 应为 null: ' + JSON.stringify(markerNull));
+        throw new Error('skill-load 未传 --prompt 标记 protocol 应为 null: ' + JSON.stringify(markerNull));
       }
       const resNull = runGuard(['exit', 'open'], dir);
       assertExit(resNull, 1);
