@@ -75,7 +75,7 @@ git branch -d hotfix/<description>
 
 - **Runtime**: Node.js ≥ 18 (ESM)
 - **Repo**: clone, then verify the regression baseline runs:
-  `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 111 SCENARIOS PASSED`
+  `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 112 SCENARIOS PASSED`
 - **Authoring environment**: Claude Code (skills/hooks run in Claude Code sessions); the hook is installed via `prepare-env` into your project's `.claude/`
 - **For mechanism work**: read [docs/MECHANISM.md](docs/MECHANISM.md) for the mechanism semantics (behavior layer) before touching scripts
 
@@ -86,7 +86,7 @@ CI runs automatically on every PR and push — it enforces the repository conven
 Before pushing, the only local pre-check you need is the regression baseline:
 
 ```bash
-node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 111 SCENARIOS PASSED
+node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 112 SCENARIOS PASSED
 ```
 
 CI handles everything else.
@@ -104,7 +104,7 @@ After the issue is confirmed: bug fixes use a `fix/` branch, features use a `fea
 
 - **Authoritative source**: edit skills/scripts under `.comet/bundle-drafts/flow-comet/skills/` (the single source; `.claude/` copies are install artifacts — update them via `prepare-env`, never by hand)
 - **TDD**: every mechanism fix starts with a RED scenario in `guard-self-test.mjs` (watch it fail for the right reason), then GREEN, then full regression
-- **Regression baseline**: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 111 SCENARIOS PASSED` (mandatory after every change)
+- **Regression baseline**: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 112 SCENARIOS PASSED` (mandatory after every change)
 - **Documentation sync**: behavior-layer docs live in `docs/` (bilingual EN/zh — keep both in sync when a doc changes); implementation details stay out of public docs
 - **Bilingual discipline**: English docs contain no Chinese (except the language switcher, flow-kit artifact section names, and runtime message quotes); Chinese docs contain no long English sentences (except commands, URLs, and proper terms). Local optional check: `node scripts/check-docs-local.mjs` (a gitignored local tool — English-doc zero-Chinese, Chinese-doc zero-English-sentences, bilingual symmetry, version/scenario consistency)
 - **Backward compatibility**: old changes/states keep working — progressive WARN over BLOCK
@@ -180,7 +180,7 @@ Force push is allowed on your own feature branch (no protection); a new push inv
 ## Release approval sheet
 
 - Changes: PR list + one-line summary each
-- Verification: regression (111 scenarios) / installed-copy checks
+- Verification: regression (112 scenarios) / installed-copy checks
 - Version: X.Y.Z (doc-only batches may skip the bump)
 ```
 

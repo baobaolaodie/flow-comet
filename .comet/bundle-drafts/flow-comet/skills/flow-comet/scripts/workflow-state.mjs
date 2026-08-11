@@ -749,6 +749,7 @@ async function main() {
         const advanceExempt = normalAdvanceExempt(state, protocol, completedArr, state.currentNode);
         if (!rollbackExempt && !advanceExempt) {
           console.error('BLOCKED: 疑似未 exit 节点 ' + state.currentNode + '，先 workflow-guard.mjs exit ' + state.currentNode + ' --apply');
+          console.error('恢复（KI-3）: 确认当前节点实际已完成 → 用 exit <节点> --apply 正常推进；节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进）或 select（切换 change）；禁止手改 state 机器字段');
           process.exit(1);
         }
       }

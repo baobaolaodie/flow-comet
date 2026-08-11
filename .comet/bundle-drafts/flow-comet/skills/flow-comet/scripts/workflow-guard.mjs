@@ -2138,6 +2138,7 @@ async function main() {
   // W1-A: 转移前置约束——currentNode 必须等于被 exit 的节点（防跳阶段）
   if (state.currentNode !== node.id) {
     console.error('BLOCKED: currentNode is ' + String(state.currentNode) + ', cannot exit ' + node.id + '.');
+    console.error('恢复（KI-3）: 若节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进，确认节点实际已完成后再用）或 select（切换 change）；禁止手改 state 机器字段');
     process.exit(1);
   }
   // E2: exit archive 分支合并检查（WARN 不 BLOCK）——分支未合并到 main 允许"归档先行、合并后补"

@@ -2548,6 +2548,33 @@ const SCENARIOS = [
       assertNotOut(res2, '越权委托');
     },
   },
+
+  // 112: 节点顺序 BLOCK 消息含恢复指引（KI-3）——next 的「疑似未 exit」BLOCK 与
+  // exit 的「currentNode 不匹配」BLOCK 均提示恢复通道（advance 强制推进/select 切换/
+  // exit --apply）——防 resume 自锁（上轮 dogfood 观察：机器推导节点无脚本恢复通道）
+  {
+    name: '112 节点顺序 BLOCK 消息含恢复指引（KI-3）',
+    run: (dir) => {
+      // ① next:currentNode=execute 但未 exit → BLOCK 消息含 advance/select 指引
+      const st1 = baseState('execute');
+      st1.evidence.execute = { summary: 'execute done' };
+      writeState(dir, st1);
+      const nx = runState(['next'], dir);
+      assertExit(nx, 1);
+      assertOut(nx, 'BLOCKED');
+      assertOut(nx, 'advance');
+      assertOut(nx, 'select');
+      // ② exit:currentNode=design 但 exit open → BLOCK 消息含 advance 指引
+      const st2 = baseState('design');
+      st2.evidence.design = { summary: 'design done' };
+      writeState(dir, st2);
+      writeIntakeArtifacts(dir);
+      const ex = runGuard(['exit', 'open'], dir);
+      assertExit(ex, 1);
+      assertOut(ex, 'BLOCKED');
+      assertOut(ex, 'advance');
+    },
+  },
 ];
 
 // ---------- 运行 ----------
