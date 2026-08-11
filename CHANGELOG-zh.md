@@ -12,7 +12,7 @@
 
 ## [1.3.1] - 2026-08-11
 
-文档与 CI 维护批次——无行为变更。([#31](https://github.com/baobaolaodie/flow-comet/pull/31)、[#33](https://github.com/baobaolaodie/flow-comet/pull/33)、[#34](https://github.com/baobaolaodie/flow-comet/pull/34)、[#35](https://github.com/baobaolaodie/flow-comet/pull/35)、[#36](https://github.com/baobaolaodie/flow-comet/pull/36))
+文档与 CI 维护批次——无行为变更。([#31](https://github.com/baobaolaodie/flow-comet/pull/31)、[#33](https://github.com/baobaolaodie/flow-comet/pull/33)、[#34](https://github.com/baobaolaodie/flow-comet/pull/34)、[#35](https://github.com/baobaolaodie/flow-comet/pull/35)、[#36](https://github.com/baobaolaodie/flow-comet/pull/36)）、[#37](https://github.com/baobaolaodie/flow-comet/pull/37)）
 
 ### 新增
 
