@@ -2,7 +2,7 @@
 // context-init.mjs — 自动初始化检测（init 前置步骤）
 // 探测项目上下文状态 → 判决 A~F → 提示/静默；--init-context 全量生成 .specs/CONTEXT.md
 // 由 workflow-state.mjs init 分支调用；独立模块便于 guard-self-test 集成测试。
-// 文案为公开描述性中文（无内部概念）。
+// 文案为公开描述性中文（无未公开概念）。
 
 import { promises as fs } from 'fs';
 import path from 'path';

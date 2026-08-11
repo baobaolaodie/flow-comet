@@ -34,7 +34,7 @@ This node performs a structured multi-round review of the implemented change, ch
 
 ### Steps
 
-**Express 路径（低风险 change 降级，P1）**：若 CHANGE.md 头部含 `express: true`（低风险判定：改动 ≤3 文件、无后端 schema/API/数据库变更、无安全/认证/并发、纯前端重构/文案/简单 bug 修复），则只执行 **Round 1（spec 合规）+ Round 1.5（契约核对）**，跳过 Round 2（完整 6 维）、Round 2.0/2.2、Round 3（UI）、Round 4；REVIEW.md 标注 "express 审查"。否则执行完整轮次。
+**Express 路径（低风险变更快捷路径）**：若 CHANGE.md 头部含 `express: true`（低风险判定：改动 ≤3 文件、无后端 schema/API/数据库变更、无安全/认证/并发、纯前端重构/文案/简单 bug 修复），则只执行 **Round 1（spec 合规）+ Round 1.5（契约核对）**，跳过 Round 2（完整 6 维）、Round 2.0/2.2、Round 3（UI）、Round 4；REVIEW.md 标注 "express 审查"。否则执行完整轮次。
 
 1. **Round 1 — Spec compliance**: For each AC in REQUIREMENT.md:
    - Check if implemented (link to code/file).

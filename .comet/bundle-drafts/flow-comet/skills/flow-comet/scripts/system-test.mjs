@@ -20,7 +20,7 @@
 // 断言退出码与输出关键词。测试项跑完 rmSync 清理。
 //
 // 输出纪律：逐项 PASS/FAIL + 汇总（SYSTEM TEST: N/M passed）；全过 exit 0，有 FAIL exit 1。
-// 测试项命名与输出为公开面——零内部过程代号（场景编号/修复编号/批次/缺陷编号/内部）。
+// 测试项命名与输出为公开面——零过程代号（场景编号/修复编号/批次/缺陷编号/未公开概念）。
 //
 // 运行: node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/system-test.mjs
 // 仅 node 内置模块（child_process/fs/os/path）；无网络。

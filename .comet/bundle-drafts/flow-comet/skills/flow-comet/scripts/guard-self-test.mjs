@@ -18,7 +18,7 @@
 // project root"。修复（测试场景适配，非弱化断言）：真实项目协议位于 <项目根>/reference/
 // workflow-protocol.json（runRoot 内）——每个场景把内置协议复制到 <dir>/reference/ 并由
 // runGuard 的 FLOW_COMET_PROTOCOL 指向场景内副本；自定义协议场景用 --protocol CLI（优先级
-// 最高）或 env 覆盖。S24~S31 同时覆盖 AC-2/3/4/5/6（自定义协议加载路由、通用层防线、特化
+// 最高）或 env 覆盖。自定义协议场景组同时覆盖 AC-2/3/4/5/6（加载路由、通用层防线、特化
 // 校验绑定、hook 白名单缺省）。
 
 import { execFileSync, spawnSync } from 'child_process';
@@ -262,7 +262,7 @@ function customProtocol() {
   };
 }
 
-// T-FIX-07: 含 requiredSkillCalls 的自定义协议变体——compose 自定义节点可声明必调 skill
+// 含 requiredSkillCalls 的自定义协议变体——compose 自定义节点可声明必调 skill
 // （compose SKILL 节点组装 requiredSkillCalls 可空）；skill-load/record 端到端验证用：
 // 仅 brainstorm 带 main scope 绑定（协调者加载 → 需 skill-load 声明标记），其余与 customProtocol() 同
 function customProtocolWithSkillCall() {
@@ -328,8 +328,8 @@ function summaryContent(options = {}) {
 
 // 伪造 handoffResult（越俎代庖检测要求 done 任务有 handoff；Return Contract 完整形状）
 // handoff-guarded 落实——result 必须回传 completedChecks 含
-// required-skill:subagent-execute.flow-comet-dev（guard W1-D 严格校验；S15/S34 等场景同步补齐，
-// 缺该字段的旧格式材料已随 S35 明确覆盖 BLOCKED 路径）
+// required-skill:subagent-execute.flow-comet-dev（guard W1-D 严格校验；相关场景同步补齐，
+// 缺该字段的旧格式材料已明确覆盖 BLOCKED 路径）
 function handoffFor(taskIds) {
   const handoffResult = {};
   for (const id of taskIds) {
@@ -354,13 +354,13 @@ const TASK_P1 =
 const TASK_P2 =
   '<task id="P02" status="done" parallel="true"><action>实现 P02</action><write_files>src/p2.mjs</write_files><verify>node --check src/p2.mjs</verify></task>\n';
 // 第二波 parallel pending 任务（depends_on P01 已满足——第一波 P01 done 后才可委托；
-// status 属性在前，与 TASK_P1/TASK_P2 常量属性顺序一致）
+// status 属性在前，与上方 parallel 任务常量的属性顺序一致）
 const TASK_P2_PENDING =
   '<task id="P02" status="pending" parallel="true"><action>实现 P02</action><write_files>src/p2.mjs</write_files><verify>node --check src/p2.mjs</verify><depends_on>P01</depends_on></task>\n';
 // 串行 pending 任务（depends P01,P02——第二波 P02 完成前不可执行）
 const TASK_T03_PENDING =
   '<task id="T03"><action>实现 T03</action><write_files>src/t3.mjs</write_files><verify>node --check src/t3.mjs</verify><depends_on>P01,P02</depends_on></task>\n';
-// review/verify 阶段追加的 pending T-FIX 任务（T-FIX 标准回退路径触发源）
+// review/verify 阶段追加的 pending 修复任务（标准回退路径触发源）
 const TASK_TFIX =
   '<task id="T-FIX-01" status="pending"><action>修复 verify 发现的缺陷</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n';
 
@@ -642,7 +642,7 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- 分组场景（S18~S23：分支校验 + 追加位置检测） ----------
+  // ---------- 分组场景（分支校验 + 追加位置检测） ----------
 
   // 18: entry archive 分支校验 BLOCKED（branchMode=true + activeChange + 当前分支非 change/<id>）
   // 注意：需初始 commit——unborn HEAD 下 git rev-parse --abbrev-ref HEAD 失败（按规格"失败跳过"不触发校验）
@@ -693,8 +693,8 @@ const SCENARIOS = [
     },
   },
 
-  // 21: exit verify——LESSONS.md 条目编号乱序 → WARN 不 BLOCK；T-FIX-19 追加 verify 命令
-  // timeout 可配置覆盖：① 缺省 timeout（无 env）下耗时命令通过（缺省保持大值）；② env
+  // 21: exit verify——LESSONS.md 条目编号乱序 → WARN 不 BLOCK；verify 命令 timeout 可配置：
+  // ① 缺省 timeout（无 env）下耗时命令通过（缺省保持大值）；② env
   // FLOW_COMET_VERIFY_TIMEOUT_MS 覆盖生效——设小值后同耗时命令超时 BLOCK
   {
     name: '21 exit verify WARN：LESSONS.md 编号乱序 + verify timeout env 覆盖',
@@ -754,7 +754,7 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- 分组场景（S24~S31：自定义协议加载路由 + 通用层防线 + 特化校验绑定 + hook 白名单缺省） ----------
+  // ---------- 分组场景（自定义协议加载路由 + 通用层防线 + 特化校验绑定 + hook 白名单缺省） ----------
 
   // 24: 自定义协议加载路由（AC-2/3）——--protocol CLI 指向 <dir>/custom-protocol.json；
   // workflow-state status 按协议 outputSchemas 推导 currentNode：全部产物缺失 → 第 1 节点
@@ -905,7 +905,7 @@ const SCENARIOS = [
     },
   },
 
-  // ----------  场景（S32~S33：自定义协议全部完成 → NEXT: done；部分完成仍走产物推导） ----------
+  // ----------  场景（自定义协议全部完成 → NEXT: done；部分完成仍走产物推导） ----------
 
   // 32: 自定义协议无 archive 节点，3 节点全部 exit 完成（completedNodes 含 brainstorm/tdd/codereview）
   // → next 输出 NEXT: done（修复前缺陷：determineNode 只按产物推导，全部完成仍输出 NODE: codereview）
@@ -949,7 +949,7 @@ const SCENARIOS = [
     },
   },
 
-  // ----------  场景（S34~S35：handoff completedChecks 严格校验，handoff-guarded 落实） ----------
+  // ----------  场景（handoff completedChecks 严格校验，handoff-guarded 落实） ----------
 
   // 34: subagent-execute exit 通过——handoff result 的 completedChecks 含 required-skill 条目 → exit 0
   {
@@ -986,7 +986,7 @@ const SCENARIOS = [
     },
   },
 
-  // ----------  场景（S36~S37：next 节点顺序校验，严格模式） ----------
+  // ----------  场景（next 节点顺序校验，严格模式） ----------
 
   // 36: next BLOCKED——currentNode=open 未 exit（completedNodes 空 + evidence 无 open 记录）
   // → 上一节点未 exit 就推进 → 严格拦截，输出恢复指令（先 exit open --apply）
@@ -1003,7 +1003,7 @@ const SCENARIOS = [
   },
 
   // 37: next 正常——open 已 exit（completedNodes 含 open）+ 当前节点 evidence 已记录 → 正常推进
-  // （P0-2 漂移校正保留：已完成节点正常推进不受严格校验影响）
+  // （状态漂移校正保留：已完成节点正常推进不受严格校验影响）
   {
     name: '37 next 正常：open 已 exit 后正常推进',
     run: (dir) => {
@@ -1020,7 +1020,7 @@ const SCENARIOS = [
     },
   },
 
-  // ----------  场景（S38~S39：redEvidence 时间顺序校验） ----------
+  // ----------  场景（redEvidence 时间顺序校验） ----------
 
   // 38: handoff result 时间顺序通过——先记录 redEvidence（TDD RED），再补 greenEvidence（GREEN）
   // → 两次均通过；且 evidence 中 redEvidence/greenEvidence 附带 recordedAt 时间戳
@@ -1066,7 +1066,7 @@ const SCENARIOS = [
     },
   },
 
-  // ----------  场景（S40~S43：C3 签名行尾规范化 + T-FIX 回退豁免） ----------
+  // ----------  场景（C3 签名行尾规范化 + 回退豁免） ----------
 
   // 40: execute exit 通过——TASK.md 从 LF 行尾改写为 CRLF（bash heredoc → python os.linesep
   // 跨工具编辑），任务集逻辑未变 → 签名一致（行尾规范化），不误报"任务集被修改"
@@ -1116,7 +1116,7 @@ const SCENARIOS = [
   },
 
   // 42: next 回退豁免通过——verify 未 exit（completedNodes 无 verify + evidence 无 verify 记录）
-  // 但 TASK.md 存在 pending T-FIX 任务且 determineNode 推导为 execute → 允许 T-FIX 标准回退路径
+  // 但 TASK.md 存在 pending 修复任务且 determineNode 推导为 execute → 允许标准回退路径
   // （verify 发现缺陷 → 回 execute），不 BLOCK，输出 NODE: execute
   {
     name: '42 next 回退豁免：verify 未 exit + pending T-FIX → 允许回 execute',
@@ -1128,7 +1128,7 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n## 0. 技术栈\n');
-      // 既有 done 任务 + verify 阶段追加的 pending T-FIX 任务
+      // 既有 done 任务 + verify 阶段追加的 pending 修复任务
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE + TASK_P1 + TASK_TFIX);
       const res = runState(['next'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
       assertExit(res, 0);
@@ -1138,7 +1138,7 @@ const SCENARIOS = [
   },
 
   // 43: next 维持严格 BLOCK——verify 未 exit（evidence 无 verify 记录）且 TASK.md 无 pending
-  // 任务（非 T-FIX 回退）→ 豁免不成立 → 维持  严格拦截，输出恢复指令
+  // 任务（非修复回退）→ 豁免不成立 → 维持  严格拦截，输出恢复指令
   {
     name: '43 next 维持 BLOCK：无 pending 任务（非 T-FIX 回退）',
     run: (dir) => {
@@ -1157,7 +1157,7 @@ const SCENARIOS = [
     },
   },
 
-  // ----------  场景（S44~S45：C3 签名标记类属性剥离——completed_at 误报修复） ----------
+  // ----------  场景（C3 签名标记类属性剥离——completed_at 误报修复） ----------
 
   // 44: execute exit 通过——enter 后子代理在 task 开标签追加 completed_at 标记属性
   // （标记 task done 的时序属性，纯状态标记不影响任务集逻辑）→ 签名不受标记属性影响，不误报 BLOCK
@@ -1209,7 +1209,7 @@ const SCENARIOS = [
     },
   },
 
-  // ----------  场景（S46~S47：next 正常推进豁免——exit 推进后的正常 next 不再被误拦） ----------
+  // ----------  场景（next 正常推进豁免——exit 推进后的正常 next 不再被误拦） ----------
 
   // 46: next 正常推进豁免通过——open exit --apply 已把 currentNode 推进到 design（completedNodes=['open']、
   // design 尚未开始故 evidence 无 design 记录），随后按 SKILL 协议调 next（正常路径）→ 不 BLOCK，
@@ -1234,7 +1234,7 @@ const SCENARIOS = [
 
   // 47: next 维持严格 BLOCK——真乱序跳节点：currentNode=review 但 completedNodes 仅 ['open']
   // （open 已 exit 且有 evidence）→ review 不是 open 的路由直接后继（open 的后继是 design）
-  // →  豁免不成立（T-FIX-09 回退豁免也不成立：TASK.md 无 pending）→ T-FIX-05 核心价值
+  // →  豁免不成立（回退豁免也不成立：TASK.md 无 pending）→ 严格拦截核心价值
   // 保持（跳节点仍严格拦截），输出恢复指令
   {
     name: '47 next BLOCKED：跳节点乱序（completedNodes 仅 open，currentNode=review）',
@@ -1252,12 +1252,12 @@ const SCENARIOS = [
     },
   },
 
-  // ----------  场景（S48~S49：机制交互组合——两个机制同时作用，防单机制测试盲区） ----------
+  // ----------  场景（机制交互组合——两个机制同时作用，防单机制测试盲区） ----------
 
   // 48: 组合盲区 A（对照组 A 撞出）——record 覆盖语义 × 越俎代庖检测：先经 workflow-handoff
   // result 正确记录 T01 的 Return Contract（含 completedChecks），随后 record subagent-execute
   // '{"handoffResult":{}}'（浅合并整体替换 handoffResult 键）把已记录的 handoff 覆盖丢失 →
-  // exit execute 的 P0-A 越俎代庖检测（统一委托下 done 任务必须有 handoff）BLOCK——
+  // exit execute 的越俎代庖检测（统一委托下 done 任务必须有 handoff）BLOCK——
   // 组合语义：record 的"整体覆盖"不是无害操作，会连带破坏委托证明链（T01 合法 done 变越俎代庖）
   {
     name: '48 execute exit BLOCKED：record 覆盖 handoff（越俎代庖）',
@@ -1296,7 +1296,7 @@ const SCENARIOS = [
   // parallel 全 done + exit，completedNodes 含该节点）后，第二波 parallel 任务（P02，depends 已
   // 满足）出现时：next 不得再路由回 subagent-execute（防死循环——已完成节点不能作为路由目标
   // 再入），应路由到 execute 继续串行委托；而 entry subagent-execute 仍放行（completedNodes 含
-  // 该节点允许重入——第二波委托入口；exit 路径由 P0 保护不再自动路由回）
+  // 该节点允许重入——第二波委托入口；exit 路径受严格校验保护，不再自动路由回）
   {
     name: '49 next → execute + entry subagent-execute 重入（二次并行不回流）',
     run: (dir) => {
@@ -1320,7 +1320,7 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- 审查补充场景（S50~S52，2026-08-08：validateProtocolSchema nodes 校验 / 豁免 summary 严格化 / hook 声明模式 fail-closed） ----------
+  // ---------- 审查补充场景（2026-08-08：validateProtocolSchema nodes 校验 / 豁免 summary 严格化 / hook 声明模式 fail-closed） ----------
 
   // 50: validateProtocolSchema 拒绝空 node（自定义协议 nodes 含空对象 → 加载报错 fail-closed）
   {
@@ -1368,7 +1368,7 @@ const SCENARIOS = [
     },
   },
 
-  // ----------  场景（S53~S54：分支前缀可配置，适配仓库规范） ----------
+  // ----------  场景（分支前缀可配置，适配仓库规范） ----------
 
   // 53: init --branch-prefix feat/ → 分支创建为 feat/<id>（适配仓库规范如 feat/）
   {
@@ -1405,7 +1405,7 @@ const SCENARIOS = [
     },
   },
 
-  // ----------  场景（S55~S57：init 写 status + hook 判定对齐） ----------
+  // ----------  场景（init 写 status + hook 判定对齐） ----------
 
   // 55: init 生成的 state 必须含 status:'running'（当前缺——hook 判定不一致的根源）
   {
@@ -1445,7 +1445,7 @@ const SCENARIOS = [
     },
   },
 
-  // ----------  场景（S58：init 创建 .specs/<id>/ 目录，findActiveChange 立即可识别） ----------
+  // ----------  场景（init 创建 .specs/<id>/ 目录，findActiveChange 立即可识别） ----------
 
   // 58: init 后 next 识别 active change（当前因 .specs/<id>/ 目录未建报 No active change）
   {
@@ -1462,7 +1462,7 @@ const SCENARIOS = [
     },
   },
 
-  // ----------  场景（S59：归档完成态不兜底识别残留目录） ----------
+  // ----------  场景（归档完成态不兜底识别残留目录） ----------
 
   // 59: state 为归档完成态（completed + activeChange null）→ .specs/ 顶层残留目录（含 TASK.md）不被兜底识别
   {
@@ -1479,7 +1479,7 @@ const SCENARIOS = [
     },
   },
 
-  // ----------  场景（S60：init currentNode 按协议首节点） ----------
+  // ----------  场景（init currentNode 按协议首节点） ----------
 
   // 60: 自定义协议 init → currentNode = 协议首节点 brainstorm（当前硬编码 open——）
   {
@@ -1495,7 +1495,7 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- 补齐场景（S61： 兼容分支固化） ----------
+  // ---------- 补齐场景（兼容分支固化） ----------
 
   // 61: 旧 state（无 status 字段但有 activeChange）→ hook 按 running 处理（fail-closed 向后兼容，行为固化）
   {
@@ -1541,7 +1541,7 @@ const SCENARIOS = [
     },
   },
 
-  // ---------- Round 2 场景（~D-20，独立验证者发现） ----------
+  // ---------- 独立验证补充场景（验证者发现） ----------
 
   // 64: record 命令的 --protocol 参数不得污染 payload（：payload 解析前剥离）
   {
@@ -1709,7 +1709,7 @@ const SCENARIOS = [
     },
   },
 
-  // ----------  场景（S74~S77：builtin 降级须含缓存尝试证据） ----------
+  // ----------  场景（builtin 降级须含缓存尝试证据） ----------
 
   // 74: builtin-quickcheck 声明 + 不可用原因但无缓存尝试证据 → BROOKS-LINT WARN
   // （：防「未尝试 Read 插件缓存协议文件」的偷懒降级——修复前不校验 = RED）
@@ -1786,11 +1786,11 @@ const SCENARIOS = [
     },
   },
 
-  // ----------  场景（S78~S82：worktree 委托链路，P1~P7 实录） ----------
+  // ----------  场景（worktree 委托链路，验证问题实录） ----------
 
-  // 78: P0 路由诊断——TASK 无 status 属性（旧模板形态）→ exit plan --apply 的 P0 路由输出 ROUTE WARN
-  // （ P3：结构校验保持严格 + 检测失败纠偏可见——修复前无诊断 = RED）
-  // nextNode 只看 completedNodes——P0 路由触发场景 = exit plan（completed 后 nextNode=execute → 路由检查）
+  // 78: 路由诊断——TASK 无 status 属性（旧模板形态）→ exit plan --apply 的路由输出 ROUTE WARN
+  // （结构校验保持严格 + 检测失败纠偏可见——修复前无诊断 = RED）
+  // nextNode 只看 completedNodes——路由触发场景 = exit plan（completed 后 nextNode=execute → 路由检查）
   {
     name: '78 P0 路由无匹配输出诊断',
     run: (dir) => {
@@ -1811,7 +1811,7 @@ const SCENARIOS = [
   },
 
   // 79: C4 catch 可见化——非 git 仓库 → entry execute 输出 C4-CHECK SKIP
-  // （ P4：检测失败也要可见——修复前 catch 静默 = RED）
+  // （检测失败也要可见——修复前 catch 静默 = RED）
   {
     name: '79 C4 catch 非 git 仓库输出 SKIP',
     run: (dir) => {
@@ -1824,7 +1824,7 @@ const SCENARIOS = [
     },
   },
 
-  // 80: handoff result commitHash 存在性校验——不存在 → HANDOFF ERROR（固化：校验已存在（W2-D）， P6 确认）
+  // 80: handoff result commitHash 存在性校验——不存在 → HANDOFF ERROR（固化：校验已存在（W2-D），经确认）
   {
     name: '80 handoff result 无效 commitHash → ERROR（batch-H 固化）',
     run: (dir) => {
@@ -2059,7 +2059,7 @@ const SCENARIOS = [
     },
   },
 
-  // 96~97: dogfood 实证的校验误报修复（2026-08-10）
+  // 96~97: 真实项目端到端验证实证的校验误报修复（2026-08-10）
   // 96: 自检方法段内后续行声明方法（子代理把方法名写在列表后续行）→ 放行无 WARN
   // （修复前 guard 正则只匹配段后第一行 → 全文有 cache-brooks 声明 → 误报 BROOKS-LINT WARN = RED）
   {
@@ -2112,7 +2112,7 @@ const SCENARIOS = [
     },
   },
 
-  // ----------  场景（S98~S105：completedChecks 真实性声明机制——skill-load/record/exit 校验 + 交叉自洽 + 旧兼容 + 场景数同步，T03） ----------
+  // ----------  场景（completedChecks 真实性声明机制——skill-load/record/exit 校验 + 交叉自洽 + 旧兼容 + 场景数同步） ----------
 
   // 98: skill-load 写入声明标记（AC-1）——完整命令形态（--prompt flow-kit/prompts/<阶段>.md，
   // 归属校验通过）→ 标记 .specs/<change-id>/.skill-loads/<node>-<skill>.json 生成，
@@ -2120,7 +2120,7 @@ const SCENARIOS = [
   {
     name: '98 skill-load 写入声明标记（AC-1）',
     run: (dir) => {
-      // 场景内 flow-kit/prompts/ 提示文件（skill-load --prompt 指向——T-FIX-02 后归属校验仅查
+      // 场景内 flow-kit/prompts/ 提示文件（skill-load --prompt 指向——改名 --prompt 后归属校验仅查
       // 前缀不读内容；协议加载走 env reference 路径，文件无需为 JSON）
       writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
       writeState(dir, baseState('open'));
@@ -2135,9 +2135,9 @@ const SCENARIOS = [
       if (marker.node !== 'open' || marker.skill !== 'flow-comet-change') {
         throw new Error('标记 node/skill 字段不符: ' + JSON.stringify(marker));
       }
-      // T-FIX-01: 标记 protocol = --prompt 参数的 basename（与 guard exit 的 D7 表比对同值，
-      // 真实链路 skill-load → exit 一致；P1 缺陷时代写 resolveProtocol 解析后的完整绝对路径，
-      // 与 D7 表 basename 精确比对必然失败——机制实际不可用，已修复）
+      // 标记 protocol = --prompt 参数的 basename（与 guard exit 的 节点协议映射表比对同值，
+      // 真实链路 skill-load → exit 一致；缺陷修复前写 resolveProtocol 解析后的完整绝对路径，
+      // 与 节点协议映射表 basename 精确比对必然失败——机制实际不可用，已修复）
       if (marker.protocol !== '0-change.md') {
         throw new Error('标记 protocol 应为 --prompt 参数的 basename 0-change.md: ' + JSON.stringify(marker));
       }
@@ -2172,7 +2172,7 @@ const SCENARIOS = [
       const rD = runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'reference/workflow-protocol.json'], dir, env);
       assertExit(rD, 1);
       assertOut(rD, 'skill-load --prompt 路径必须位于 flow-kit/prompts/ 下');
-      // e) 自定义协议下未知节点同样拒绝（T-FIX-07：node 校验从内置清单改为当前协议节点集合
+      // e) 自定义协议下未知节点同样拒绝（node 校验从内置清单改为当前协议节点集合
       // 动态读取——协议外节点名依然非法，fail-closed 行为不变）
       const custom = writeCustomProtocol(dir);
       const rE = runState(['skill-load', 'bogus', 'flow-comet-change'], dir, { FLOW_COMET_PROTOCOL: custom });
@@ -2222,8 +2222,8 @@ const SCENARIOS = [
       if (!st.evidence.open || st.evidence.open.summary !== 'done') {
         throw new Error('record 未写入 evidence: ' + JSON.stringify(st.evidence));
       }
-      // T-FIX-07: 自定义协议节点（compose 兼容）——node 校验按当前协议节点集合动态读取
-      // （内置 + 自定义），自定义节点（brainstorm）可 skill-load 声明 + record D3 端到端通过
+      // 自定义协议节点（compose 兼容）——node 校验按当前协议节点集合动态读取
+      // （内置 + 自定义），自定义节点（brainstorm）可 skill-load 声明 + record 声明校验端到端通过
       // （修复前 BUILTIN_NODES 硬编码只含内置 8 节点 → skill-load 拒绝 brainstorm = RED）
       writeFile(dir, 'custom-protocol.json', JSON.stringify(customProtocolWithSkillCall(), null, 2) + '\n');
       const customEnv = { FLOW_COMET_PROTOCOL: path.join(dir, 'custom-protocol.json') };
@@ -2236,10 +2236,10 @@ const SCENARIOS = [
     },
   },
 
-  // 102: exit 协议声明标记校验（AC-4）+ 真实链路集成（T-FIX-01）——.skill-loads/ 已激活
-  // （目录存在）但无本节点协议标记（<node>-*.json 且 protocol ∈ 该节点协议集，D7 映射表
+  // 102: exit 协议声明标记校验（AC-4）+ 真实链路集成——.skill-loads/ 已激活
+  // （目录存在）但无本节点协议标记（<node>-*.json 且 protocol ∈ 该节点协议集，节点协议映射表
   // basename）→ BLOCKED；真实 skill-load --prompt 写入的标记（protocol = basename）→ exit 通过
-  // （修复后真实链路一致——P1 缺陷时代 skill-load 写解析后完整路径，exit 必 BLOCKED）；未传
+  // （修复后真实链路一致——缺陷修复前 skill-load 写解析后完整路径，exit 必 BLOCKED）；未传
   // --prompt（标记 protocol = null）→ BLOCKED；损坏标记（protocol 非协议集）→ BLOCKED
   {
     name: '102 exit 协议标记校验：真实链路通过 / 无标记·null·损坏 BLOCKED（AC-4）',
@@ -2261,7 +2261,7 @@ const SCENARIOS = [
       assertExit(resBlock, 1);
       assertOut(resBlock, 'BLOCKED');
       assertOut(resBlock, 'exit 缺协议声明标记');
-      // ② 真实链路（T-FIX-01）：skill-load --prompt 写入标记（protocol = basename）→ exit 通过
+      // ② 真实链路：skill-load --prompt 写入标记（protocol = basename）→ exit 通过
       const markerPath = path.join(loadsDir, 'open-flow-comet-change.json');
       const sl = runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir, env);
       assertExit(sl, 0);
@@ -2315,7 +2315,7 @@ const SCENARIOS = [
 
   // 104: 旧 evidence/旧 change 兼容（AC-6）——旧格式记录（completedChecks 无 required-skill 条目 /
   // 无 completedChecks）无标记照常通过；exit 在 .skill-loads/ 未激活（目录不存在）时
-  // SKILL-LOAD WARN 照常通过（D6：声明机制未激活不追溯）
+  // SKILL-LOAD WARN 照常通过（声明机制未激活不追溯）
   {
     name: '104 旧 evidence/旧 change 兼容：无标记照常通过（AC-6）',
     run: (dir) => {
@@ -2554,7 +2554,7 @@ const SCENARIOS = [
 
   // 112: 节点顺序 BLOCK 消息含恢复指引——next 的「疑似未 exit」BLOCK 与
   // exit 的「currentNode 不匹配」BLOCK 均提示恢复通道（advance 强制推进/select 切换/
-  // exit --apply）——防 resume 自锁（上轮 dogfood 观察：机器推导节点无脚本恢复通道）
+  // exit --apply）——防 resume 自锁（上轮真实项目端到端验证观察：机器推导节点无脚本恢复通道）
   {
     name: '112 节点顺序 BLOCK 消息含恢复指引',
     run: (dir) => {
@@ -2645,13 +2645,13 @@ for (const sc of SCENARIOS) {
 console.log('RESULT: ' + passed + '/' + SCENARIOS.length + ' scenarios passed');
 
 // 文档一致性自检（场景数纪律 + 公开产物零代号纪律工具化，2026-08-10）：
-// ① 场景数：全清单文档（公开 10 + 内部 6 + CLAUDE）须与 SCENARIOS.length 一致（全变体检查）；
-// ② 内部概念：公开文档不得含过程代号（S 编号/T-FIX/batch/D-NN/P0/dogfood/round/内部——历史 CHANGELOG 回归实证）。
+// ① 场景数：全清单文档（公开 10 + 非公开 6 + CLAUDE）须与 SCENARIOS.length 一致（全变体检查）；
+// ② 公开产物零代号：公开文档不得含过程代号（场景编号/修复编号/批次/缺陷编号/问题级/验证代号/验证轮次/未公开概念——历史 CHANGELOG 回归实证）。
 // 仅权威源仓库（含 .comet/bundle-drafts 锚点）执行；安装副本（目标项目）无 flow-comet 文档，跳过。
 const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
 const isAuthoritativeSource = fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'));
 if (isAuthoritativeSource) {
-  // ① 场景数全清单（公开双语 + 内部文档 + CLAUDE + PR 模板；全变体：ALL n SCENARIOS / n scenarios / n 场景 / n/n）
+  // ① 场景数全清单（公开双语 + 非公开文档 + CLAUDE + PR 模板；全变体：ALL n SCENARIOS / n scenarios / n 场景 / n/n）
   // SCENARIO_COUNT_FILES 为模块级常量（S105 场景与底部自检共用同一清单，见文件头定义）
   for (const rel of SCENARIO_COUNT_FILES) {
     const docPath = path.join(repoRoot, rel);

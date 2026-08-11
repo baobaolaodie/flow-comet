@@ -11,15 +11,15 @@ const command = process.argv[2] ?? 'status';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..');
 const runRoot = process.cwd();
-// D1: 协议路径统一由 resolveProtocol 解析——优先级：--protocol CLI 参数 → FLOW_COMET_PROTOCOL
+// 协议解析: 协议路径统一由 resolveProtocol 解析——优先级：--protocol CLI 参数 → FLOW_COMET_PROTOCOL
 // 环境变量 → 内置默认 reference/workflow-protocol.json。--protocol 为全局参数（可放在 command
 // 之后的任意位置）；cliArgs = 去掉 command 后的剩余参数数组。
 const protocolPath = resolveProtocol(packageRoot, runRoot, process.argv.slice(3));
 const statePath = path.join(runRoot, '.comet', 'flow-comet-state.json');
 const specsRoot = path.join(runRoot, '.specs');
 
-// D3: 内置 8 节点常量（供其他用途参照——如 guard 的节点→协议映射对照；skill-load 的 node
-// 参数校验已改为当前协议节点集合动态读取，T-FIX-07：compose 自定义协议节点可声明）
+// 内置节点常量: 内置 8 节点常量（供其他用途参照——如 guard 的节点→协议映射对照；skill-load 的 node
+// 参数校验已改为当前协议节点集合动态读取——compose 自定义协议节点可声明）
 const BUILTIN_NODES = ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review', 'verify', 'archive'];
 
 async function readJson(file) {
@@ -49,7 +49,7 @@ async function findActiveChange() {
     }
   }
   // 2. Scan .specs/ for directories with TASK.md (active flow-kit changes)
-  // 注:  曾尝试按 archive/ 对应归档跳过残留目录——但会误伤同名新 change（S64 实证），已撤回。
+  // 注:  曾尝试按 archive/ 对应归档跳过残留目录——但会误伤同名新 change（既有实证），已撤回。
   // 「state 缺失 + 归档残留」为已知限制（对比报告已记录"捡残留桩"共性问题）；归档后正常态由
   // 上文 completed 分支覆盖（ 主修复）
   try {
@@ -74,12 +74,12 @@ async function findActiveChange() {
   return null;
 }
 
-// ---------- D1/D3/D5 · skill-load 声明标记（completedChecks 真实性校验配套） ----------
+// ---------- 协议解析/内置节点常量/声明标记写入 · skill-load 声明标记（completedChecks 真实性校验配套） ----------
 
-// --prompt 原始参数提取（skill-load 专用，T-FIX-02）：--protocol 由 resolveProtocol 全局解析
+// --prompt 原始参数提取（skill-load 专用参数）：--protocol 由 resolveProtocol 全局解析
 // （CLI > env > 默认）为工作流协议 JSON——skill-load 曾用 --protocol 传 prompt 路径，主仓真实链路
 // 必现撞车（markdown 被当协议 JSON 解析 → 启动报错「workflow protocol file is not valid JSON」，
-// P2 实证）。改名 --prompt 后与全局协议解析彻底解耦；此处仅取用户显式传入的原始值，供 skill-load
+// 已实证）。改名 --prompt 后与全局协议解析彻底解耦；此处仅取用户显式传入的原始值，供 skill-load
 // 的 flow-kit/prompts/ 归属校验与标记记录。
 function findPromptArg(cliArgs) {
   for (let index = 0; index < cliArgs.length; index++) {
@@ -112,7 +112,7 @@ function protocolUnderFlowKitPrompts(value) {
   return false;
 }
 
-// T-FIX-06: requiredSkillCalls scope 分类——按协议 requiredSkillCalls 查 <node>.<skill> 绑定：
+// requiredSkillCalls scope 分类——按协议 requiredSkillCalls 查 <node>.<skill> 绑定：
 // main scope = 协调者加载（如 flow-comet-subagent-execute），要求协调者 skill-load 标记；
 // handoff scope = 子代理加载（如 subagent-execute 节点的 flow-comet-dev），协调者不加载它。
 // 协议外条目（无绑定 / 非 main / 非 handoff scope）→ null（fail-closed：仍按 main 处理要标记）。
@@ -122,7 +122,7 @@ function findRequiredSkillBinding(protocol, nodeId, skillName) {
   return (node.requiredSkillCalls ?? []).find((binding) => binding.skill === skillName) ?? null;
 }
 
-// T-FIX-04: 标记目录解析——活动路径 .specs/<change-id>/.skill-loads/ 优先；归档路径兜底
+// 标记目录解析——活动路径 .specs/<change-id>/.skill-loads/ 优先；归档路径兜底
 // （archive 节点「先移目录后 record/exit」顺序下 change 目录已在 .specs/archive/<前缀>-<change-id>/，
 // 标记只随目录移动——只查活动路径会误报缺失）。归档扫描匹配后缀 -<change-id>（前缀可含日期等，
 // 与协议 flowkit.archive.v1 的 archive/*-<change-id> artifact 路径同构）。两者皆无 → null。
@@ -143,12 +143,12 @@ async function findSkillLoadsDir(changeName) {
   return null;
 }
 
-// D3/D5/D6: completedChecks 真实性校验。解析 completedChecks 的 required-skill:<node>.<skill>
-// 条目 → 对应声明标记 .specs/<change-id>/.skill-loads/<node>-<skill>.json 必须存在（D3，缺失 →
-// BLOCKED + 指引先加载 skill 并运行 skill-load）；标记 at 必须 ≤ 本次记录时间（D5 交叉自洽：
+// 内置节点常量/声明标记写入/旧 change 兼容: completedChecks 真实性校验。解析 completedChecks 的 required-skill:<node>.<skill>
+// 条目 → 对应声明标记 .specs/<change-id>/.skill-loads/<node>-<skill>.json 必须存在（内置节点常量，缺失 →
+// BLOCKED + 指引先加载 skill 并运行 skill-load）；标记 at 必须 ≤ 本次记录时间（声明标记写入 交叉自洽：
 // 标记先于记录声明；ISO-8601 UTC 字符串字典序 = 时间序）。仅校验本次 record 写入的
-// completedChecks（D6 兼容：旧 evidence 不追溯——由调用方只传本次 parsed.completedChecks）。
-// T-FIX-06: 条目按协议 requiredSkillCalls scope 分类——handoff scope 条目（子代理加载的 skill，
+// completedChecks（旧 change 兼容：旧 evidence 不追溯——由调用方只传本次 parsed.completedChecks）。
+// 条目按协议 requiredSkillCalls scope 分类——handoff scope 条目（子代理加载的 skill，
 // 如 subagent-execute 节点的 flow-comet-dev）豁免标记，以共用证据库 evidence['subagent-execute']
 // 的 handoffResult（有委托记录即满足）为证据；main scope / 协议外条目仍要求标记（fail-closed）。
 // 诚实边界：标记是"声明"而非物理证明——运行时没有 Skill 调用观察点，脚本无法确认执行者
@@ -173,7 +173,7 @@ async function verifySkillLoadMarkers(completedChecks, changeName, recordTime, p
     return { ok: false, reason: 'completedChecks 含 required-skill 条目但无 active change——无法定位声明标记（先运行 init <change-id>）' };
   }
   for (const item of required) {
-    // T-FIX-06: handoff scope 条目豁免标记——子代理加载的 skill（协调者不加载它，无法诚实
+    // handoff scope 条目豁免标记——子代理加载的 skill（协调者不加载它，无法诚实
     // 声明加载），以共用证据库 handoffResult 的委托记录为证据；无委托记录 → BLOCK（不静默
     // 放行，指引先委托并回传 handoff result）
     const binding = findRequiredSkillBinding(protocol, item.node, item.skill);
@@ -195,7 +195,7 @@ async function verifySkillLoadMarkers(completedChecks, changeName, recordTime, p
       }
       continue;
     }
-    // T-FIX-04: 标记路径解析——活动路径优先，归档路径兜底（archive 节点「先移目录后 record」
+    // 标记路径解析——活动路径优先，归档路径兜底（archive 节点「先移目录后 record」
     // 顺序下标记只在 .specs/archive/*-<change-id>/.skill-loads/）；两处都找不到 → BLOCK + 指引
     // （不静默放行）。展示路径补 .specs/ 前缀便于用户定位。
     const markerName = item.node + '-' + item.skill + '.json';
@@ -226,7 +226,7 @@ async function verifySkillLoadMarkers(completedChecks, changeName, recordTime, p
     } catch {
       return { ok: false, reason: '声明标记损坏（非法 JSON，需重新运行 skill-load）: ' + markerDisplay };
     }
-    // D5: 交叉自洽——标记 at 必须 ≤ 本次记录时间（标记先于记录声明）
+    // 声明标记写入: 交叉自洽——标记 at 必须 ≤ 本次记录时间（标记先于记录声明）
     if (typeof marker.at !== 'string' || marker.at > recordTime) {
       return {
         ok: false,
@@ -238,7 +238,7 @@ async function verifySkillLoadMarkers(completedChecks, changeName, recordTime, p
   return { ok: true };
 }
 
-// ---------- D2 · determineNode 数据化：完成标志从协议 outputSchemas 推导 ----------
+// ---------- 节点完成判定 · determineNode 数据化：完成标志从协议 outputSchemas 推导 ----------
 
 // 为每个节点构建"完成标志文件集"：遍历节点 outputSchemas 引用的 schema 的 artifacts
 // （schema 在 protocol.outputSchemas 数组中按 id 查找），paths 中 <change-id> 替换为实际
@@ -338,7 +338,7 @@ async function determineNode(changeName, protocol, completedNodes = []) {
     return null;
   }
   const changeDir = path.join(specsRoot, changeName);
-  // D2: 节点完成标志从协议 outputSchemas 推导（内置协议缺省行为与现硬编码逐字节一致）
+  // 节点完成判定: 节点完成标志从协议 outputSchemas 推导（内置协议缺省行为与现硬编码逐字节一致）
   const nodeFlags = buildNodeCompletionFlags(protocol, changeName);
   // 任务文件路径：协议可选 taskFile 字段（相对 changeDir），无声明时缺省 TASK.md。
   // 自定义协议无 taskFile 时 parallel 检测自然降级为串行（任务文件缺失 → 不路由 subagent-execute）。
@@ -437,7 +437,7 @@ async function tFixRollbackExempt(changeName, protocol, currentNode, completedNo
 // 不应被  误拦为"疑似未 exit"。判定三条件：① completedNodes 非空；② 最后一个已完成节点
 // 在路由列表（route(protocol)，disabled 过滤）中的直接后继 = currentNode（exit 推进的正常下一节点）；
 // ③ 最后一个已完成节点存在 evidence（exit --apply 必须带证据通过——证据存在证明该 exit 真实发生，
-// 排除伪造/漂移状态如 S43 类 review 无 evidence）。与  回退豁免独立判断（回退 = TASK.md
+// 排除伪造/漂移状态（如 review 无 evidence）。与  回退豁免独立判断（回退 = TASK.md
 // 有 pending 回退修复任务；本豁免 = 正常推进后继）。真乱序（currentNode 不是 completedNodes 的后继）仍
 // 维持  严格 BLOCK。
 function normalAdvanceExempt(state, protocol, completedNodes, currentNode) {
@@ -528,7 +528,7 @@ function printBranchLine(activeChange, branchPrefix = 'change/') {
 
 // C6: writeState 写入前校验已知字段类型（fail-closed：非法 → BLOCKED 拒绝写入，不修复不猜测）
 // 未知字段允许（前向兼容）；缺字段允许（readState 默认补）；只校验存在字段的类型。
-// D3: 校验表已迁移到 state-schema.mjs（唯一来源），行为与批次 C C6 完全一致（对第一个非法字段输出后退出）
+// 内置节点常量: 校验表已迁移到 state-schema.mjs（唯一来源），行为与批次 C C6 完全一致（对第一个非法字段输出后退出）
 async function writeState(state) {
   const bad = validateStateFields(state);
   if (bad.length) {
@@ -565,7 +565,7 @@ function printNext(protocol, nodeId, executionMode = 'subagent') {
 }
 
 async function main() {
-  // D1: 协议加载 = resolveProtocol 解析路径 + 受保护读取 + fail-closed schema 校验
+  // 协议解析: 协议加载 = resolveProtocol 解析路径 + 受保护读取 + fail-closed schema 校验
   // （读失败/校验失败直接 throw，沿用现有错误处理风格）
   const protocol = await readProtocolFile(runRoot, protocolPath);
   validateProtocolSchema(protocol);
@@ -728,7 +728,7 @@ async function main() {
     const state = await readState();
     // 节点顺序校验（严格模式）——state.currentNode 非 null、不在 completedNodes、
     // 且 evidence 无该节点记录 → 上一节点从未 exit 就推进 → BLOCKED（exit 1）。
-    // P0-2 漂移校正保留：已完成节点（currentNode ∈ completedNodes，或 evidence 已记录——
+    // 状态漂移校正保留：已完成节点（currentNode ∈ completedNodes，或 evidence 已记录——
     // 节点已被 record/exit 处理过）正常推进不受影响；本校验只拦"证据完全缺失的疑似跳阶段"。
     // 豁免（两种独立判断，任一成立即放行）： 回退豁免（TASK.md 有 pending 回退修复任务 回 execute）；
     //  正常推进豁免（currentNode 是 completedNodes 最后节点 exit 推进的正常下一节点，
@@ -740,8 +740,8 @@ async function main() {
         : null;
       const hasEvidence = !!(nodeEvidence && typeof nodeEvidence === 'object' && !Array.isArray(nodeEvidence));
       if (!hasEvidence) {
-        // 回退豁免——review/verify 发现缺陷追加 pending T-FIX 任务后回 execute 的
-        // T-FIX 标准回退路径放行（否则被  严格模式误拦为"未 exit 跳阶段"）；
+        // 回退豁免——review/verify 发现缺陷追加 pending 修复任务后回 execute 的
+        // 修复任务标准回退路径放行（否则被  严格模式误拦为"未 exit 跳阶段"）；
         // 豁免条件不满足时维持严格 BLOCK
         const rollbackExempt = await tFixRollbackExempt(changeName, protocol, state.currentNode, completedArr);
         // 正常推进豁免——exit --apply 推进 currentNode 到下一节点后按 SKILL 协议调 next
@@ -755,7 +755,7 @@ async function main() {
       }
     }
     const detectedNode = await determineNode(changeName, protocol, state.completedNodes);
-    // P0-2: 状态漂移自动校正——以文件产物为准（determineNode），校正 state.currentNode
+    // 状态漂移自动校正——以文件产物为准（determineNode），校正 state.currentNode
     if (state.currentNode !== detectedNode) {
       state.currentNode = detectedNode;
       await writeState(state);
@@ -779,9 +779,9 @@ async function main() {
   }
 
   if (command === 'skill-load') {
-    // D1: 执行者加载节点 skill 后运行 skill-load <node> <skill> [--prompt <path>]，
+    // 协议解析: 执行者加载节点 skill 后运行 skill-load <node> <skill> [--prompt <path>]，
     // 写入声明标记 .specs/<change-id>/.skill-loads/<node>-<skill>.json（{ node, skill, protocol, at }），
-    // record 校验 completedChecks 的 required-skill 条目以此为准（D3）。
+    // record 校验 completedChecks 的 required-skill 条目以此为准（内置节点常量）。
     // 诚实边界：标记是"声明"而非物理证明——运行时没有 Skill 调用观察点，脚本无法确认执行者
     // 真实加载过该 skill；标记仅记录"执行者主动声明已加载"，由流程纪律兜底。
     const nodeId = process.argv[3];
@@ -789,7 +789,7 @@ async function main() {
     if (!nodeId || !skillName) {
       throw new Error('skill-load requires <node> <skill>. 用法: workflow-state.mjs skill-load <node> <skill> [--prompt <path>]');
     }
-    // 参数校验（T-FIX-07）：node 为当前协议节点集合之一（动态读取协议 nodes[].id——内置 +
+    // 参数校验：node 为当前协议节点集合之一（动态读取协议 nodes[].id——内置 +
     // 自定义，compose 自定义协议节点可声明）；协议外节点名依然非法（fail-closed）。
     // BUILTIN_NODES 仅作内置常量保留（其他用途参照），skill-load 校验不再依赖它。
     const protocolNodeIds = (protocol.nodes ?? []).map((n) => n.id);
@@ -802,7 +802,7 @@ async function main() {
     // --prompt 归属校验：路径必须位于 flow-kit/prompts/ 下（相对或绝对，前缀校验；
     // flow-kit 为 vendored 上游，协议提示只读引用）。协议加载本身由 resolveProtocol 全局
     // 处理（含受保护读取）——--protocol 语义不变（工作流协议 JSON）；此处仅校验用户显式传入的
-    // --prompt 原始值（T-FIX-02：skill-load 专属参数，不再与全局协议解析共用 --protocol）。
+    // --prompt 原始值（skill-load 专属参数，不再与全局协议解析共用 --protocol）。
     const promptArg = findPromptArg(process.argv.slice(3));
     if (promptArg !== null && !protocolUnderFlowKitPrompts(promptArg)) {
       throw new Error('skill-load --prompt 路径必须位于 flow-kit/prompts/ 下（flow-kit 为 vendored 上游，协议提示只读引用）: ' + promptArg);
@@ -813,10 +813,10 @@ async function main() {
     if (!changeName) {
       throw new Error('skill-load requires an active change（先运行 init <change-id>）');
     }
-    // T-FIX-01: 标记 protocol 字段 = --prompt 参数的 basename（如 0-change.md）——与 guard exit
-    // 校验的 D7 表 basename 精确比对同值（真实链路 skill-load → exit 一致）；未传 --prompt →
-    // null（无协议声明，exit 校验 fail-closed）。P1 修复：旧实现写 resolveProtocol 解析后的完整
-    // 绝对路径，与 D7 表 basename 比对必然失败（真实链路必 BLOCKED——机制实际不可用）。
+    // 标记 protocol 字段 = --prompt 参数的 basename（如 0-change.md）——与 guard exit
+    // 校验的 节点协议映射 表 basename 精确比对同值（真实链路 skill-load → exit 一致）；未传 --prompt →
+    // null（无协议声明，exit 校验 fail-closed）。修复前旧实现写 resolveProtocol 解析后的完整
+    // 绝对路径，与 节点协议映射 表 basename 比对必然失败（真实链路必 BLOCKED——机制实际不可用）。
     const marker = { node: nodeId, skill: skillName, protocol: promptArg === null ? null : path.basename(promptArg), at: new Date().toISOString() };
     // specsRoot 已含 .specs/，相对路径为 <change-id>/.skill-loads/<node>-<skill>.json
     const markerRel = path.posix.join(changeName, '.skill-loads', nodeId + '-' + skillName + '.json');
@@ -850,14 +850,14 @@ async function main() {
     } catch {
       parsed = { summary: raw || 'recorded' };
     }
-    // D3/D5/D6: completedChecks 真实性校验（skill-load 声明标记）——解析本次 record 写入的
-    // completedChecks 的 required-skill:<node>.<skill> 条目 → 对应声明标记必须存在（D3，
+    // 内置节点常量/声明标记写入/旧 change 兼容: completedChecks 真实性校验（skill-load 声明标记）——解析本次 record 写入的
+    // completedChecks 的 required-skill:<node>.<skill> 条目 → 对应声明标记必须存在（内置节点常量，
     // 缺失 → BLOCKED + 指引先加载 skill 并运行 skill-load）；标记 at 必须 ≤ 本次记录时间
-    // （D5 交叉自洽：标记先于记录声明）。仅校验本次写入的 payload，旧 evidence 不追溯（D6）。
+    // （声明标记写入 交叉自洽：标记先于记录声明）。仅校验本次写入的 payload，旧 evidence 不追溯（旧 change 兼容）。
     const recordedAt = new Date().toISOString();
     // 标记归属 change 与 evidence 一致：优先 state.activeChange，缺失时回退 findActiveChange（与
     // 下方 NEXT 推导同语义）；两者皆无 → verifySkillLoadMarkers 内 fail-closed BLOCK。
-    // T-FIX-06: 传入 protocol + state——按 requiredSkillCalls scope 分类条目（handoff scope 豁免标记，
+    // 传入 protocol + state——按 requiredSkillCalls scope 分类条目（handoff scope 豁免标记，
     // 以共用证据库 handoffResult 为证据）
     const markerChange = state.activeChange || await findActiveChange();
     const markerCheck = await verifySkillLoadMarkers(parsed.completedChecks, markerChange, recordedAt, protocol, state);
