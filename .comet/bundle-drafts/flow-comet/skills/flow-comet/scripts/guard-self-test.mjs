@@ -45,6 +45,9 @@ const SCENARIO_COUNT_FILES = [
   'CHANGELOG.md', 'CHANGELOG-zh.md',
   'docs/internal/ARCHITECTURE.md', 'docs/internal/DOC-CHECKLIST.md', 'docs/internal/MECHANISM.md',
   'docs/internal/next-change-prompt.md', 'docs/internal/ROADMAP.md', 'docs/internal/WORKING-METHOD.md',
+  // T9: CI workflow 文件纳入场景数自检（此前盲区——ci.yml 注释/greeting 欢迎消息的
+  // 场景数字样游离,发布时靠人工核对;纳入后自检强制同步,防漏）
+  '.github/workflows/ci.yml', '.github/workflows/greeting.yml',
 ];
 
 let passed = 0;
