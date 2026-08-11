@@ -2519,6 +2519,35 @@ const SCENARIOS = [
       assertOut(res2, 'ALL CHECKS PASSED');
     },
   },
+
+  // 111: verify 出口越权委托兜底检测（KI-9）——同 KI-10 判定（TASK parallel done +
+  // completedNodes 无 subagent-execute + 非 direct）,verify 时仍未 exit → WARN 兜底
+  // （execute 出口未拦截的兜底提示）
+  {
+    name: '111 verify exit：parallel done 无 subagent-execute → WARN 越权委托兜底（KI-9）',
+    run: (dir) => {
+      const st = baseState('verify');
+      st.evidence.verify = { summary: 'verified' };
+      st.completedNodes = ['open', 'design', 'plan', 'execute', 'review']; // 无 subagent-execute
+      st.evidence['subagent-execute'] = { handoffResult: handoffFor(['P01']) };
+      writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```bash\nnode -e "1"\n```\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/UAT.md', '# UAT\n\n通过\n');
+      // ① completedNodes 无 subagent-execute → WARN 兜底
+      const res = runGuard(['exit', 'verify'], dir);
+      assertExit(res, 0);
+      assertOut(res, '越权委托');
+      assertOut(res, 'subagent-execute');
+      // ② completedNodes 含 subagent-execute → 无越权 WARN
+      st.completedNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review'];
+      writeState(dir, st);
+      const res2 = runGuard(['exit', 'verify'], dir);
+      assertExit(res2, 0);
+      assertNotOut(res2, '越权委托');
+    },
+  },
 ];
 
 // ---------- 运行 ----------

@@ -2476,6 +2476,27 @@ async function main() {
   }
   // W1-C: verify 出口必须真实跑命令（严格版）——历史归档 change 豁免（过渡规则）
   if (node.id === 'verify' && !(await isArchivedChange(state.activeChange))) {
+    // KI-9: 越权委托兜底检测（verify 出口）——同 KI-10 判定（TASK parallel done +
+    // completedNodes 无 subagent-execute + 非 direct + 协议含 subagent-execute 节点）,
+    // verify 时仍未 exit → WARN 兜底（execute 出口未拦截的提示）
+    try {
+      const ki9TaskText = await fs.readFile(path.join(runRoot, '.specs', state.activeChange ?? '', 'TASK.md'), 'utf8');
+      const ki9TaskBlocks = [...ki9TaskText.matchAll(/<task\b[^>]*>[\s\S]*?<\/task>/g)].map(m => m[0]);
+      const ki9Tasks = ki9TaskBlocks.map(block => ({
+        id: (block.match(/id="([^"]+)"/) || [])[1] || null,
+        status: (block.match(/status="([^"]+)"/) || [])[1] || null,
+        parallel: /parallel="true"/.test(block),
+      })).filter(t => t.id);
+      const ki9ParallelDone = ki9Tasks.filter(t => t.parallel && t.status === 'done').map(t => t.id);
+      const ki9ProtocolHasSubagent = (protocol.nodes ?? []).some(n => n.id === 'subagent-execute');
+      if (ki9ParallelDone.length > 0
+          && !(state.completedNodes ?? []).includes('subagent-execute')
+          && (state.executionMode ?? 'subagent') !== 'direct'
+          && ki9ProtocolHasSubagent) {
+        console.error('WARN: TASK 有 parallel done 任务（' + ki9ParallelDone.join(', ')
+          + '）但 subagent-execute 节点未 exit——疑似越权委托（execute 出口未拦截,verify 兜底提示）');
+      }
+    } catch {}
     const { execSync } = await import('child_process');
     let verifyCommand = null;
     // 1) TEST.md 的 ## 验证命令 段（首行代码块首行）
