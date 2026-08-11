@@ -10,6 +10,12 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号仅记录于 git tag 与本文档；`bundle.yaml` 的 version 保持 1.0.0（与发布流程解耦，见 README「版本与兼容性」）。
 
+## [Unreleased]
+
+### 新增
+
+- 回归套件扩展至 106 场景（覆盖 skill-load 声明标记 / record 按声明标记校验 / exit 协议声明校验 / 交叉自洽时间序 / 旧兼容 / 审查发现项处置状态校验）。
+
 ## [1.3.1] - 2026-08-11
 
 文档与 CI 维护批次——无行为变更。([#31](https://github.com/baobaolaodie/flow-comet/pull/31)、[#33](https://github.com/baobaolaodie/flow-comet/pull/33)、[#34](https://github.com/baobaolaodie/flow-comet/pull/34)、[#35](https://github.com/baobaolaodie/flow-comet/pull/35)、[#36](https://github.com/baobaolaodie/flow-comet/pull/36)）、[#37](https://github.com/baobaolaodie/flow-comet/pull/37)）

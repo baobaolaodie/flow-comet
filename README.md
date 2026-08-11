@@ -188,8 +188,8 @@ Full guide in [CONTRIBUTING.md](CONTRIBUTING.md) — branch model (`feature → 
 
 1. Branch from `dev`: `git checkout dev && git checkout -b feature/<description>`
 2. Edit skills/scripts under `.comet/bundle-drafts/flow-comet/skills/` (authoritative source); TDD with RED scenario first
-3. Run regression: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 97 SCENARIOS PASSED`
-4. Open a PR into `dev` (merge commit); release PR `dev → main` (squash)
+3. Run regression: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 106 SCENARIOS PASSED`
+4. Open a PR into `dev` (squash — one change-level commit); release PR `dev → main` (squash — one release commit)
 
 CI enforces the repository conventions automatically on every PR and push (regression, PR discipline, version consistency, dead links) — no local setup needed. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
 
