@@ -2468,6 +2468,7 @@ async function main() {
       if (ki10ParallelDone.length > 0
           && !(state.completedNodes ?? []).includes('subagent-execute')
           && (state.executionMode ?? 'subagent') !== 'direct'
+          && !takeoverApproved
           && ki10ProtocolHasSubagent) {
         console.error('WARN: TASK 有 parallel done 任务（' + ki10ParallelDone.join(', ')
           + '）但 subagent-execute 节点未 exit——疑似 execute 阶段越权委托，[P] 任务应由 subagent-execute 节点委托');
@@ -2489,9 +2490,11 @@ async function main() {
       })).filter(t => t.id);
       const ki9ParallelDone = ki9Tasks.filter(t => t.parallel && t.status === 'done').map(t => t.id);
       const ki9ProtocolHasSubagent = (protocol.nodes ?? []).some(n => n.id === 'subagent-execute');
+      const ki9TakeoverApproved = !!(state.evidence?.execute && state.evidence.execute.parallelTakeoverApproved);
       if (ki9ParallelDone.length > 0
           && !(state.completedNodes ?? []).includes('subagent-execute')
           && (state.executionMode ?? 'subagent') !== 'direct'
+          && !ki9TakeoverApproved
           && ki9ProtocolHasSubagent) {
         console.error('WARN: TASK 有 parallel done 任务（' + ki9ParallelDone.join(', ')
           + '）但 subagent-execute 节点未 exit——疑似越权委托（execute 出口未拦截,verify 兜底提示）');
