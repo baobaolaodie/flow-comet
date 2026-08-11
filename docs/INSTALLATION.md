@@ -109,27 +109,27 @@ Replace the following content in the target project's CLAUDE.md:
 
 ## Comet Ambient Resume
 
-在这个仓库中，开始处理需要改动或调查的任务前，如果可能存在活跃 Comet workflow，按以下顺序检查：
+Before starting a task that changes or investigates the repo, if an active Comet workflow may exist, check in this order:
 
-### 优先级 1：flow-comet 路由（项目主工作流）
+### Priority 1: flow-comet routing (project main workflow)
 
-如果 `.claude/skills/flow-comet/SKILL.md` 存在（flow-comet 已安装）：
+If `.claude/skills/flow-comet/SKILL.md` exists (flow-comet installed):
 
-1. 检查 `.comet/current-change.json` 或运行 `comet state get <change> phase` 确认是否有活跃 change
-2. 如有活跃 change 且 `phase=build`，直接进入 `/flow-comet`（不要运行 resume probe）
-3. 如有活跃 change 但 phase 不是 build，按 flow-comet 的节点路由表决定入口
-4. 如无活跃 change，用户明确要开发时进入 `/flow-comet`（它会路由到 open 阶段）
+1. Check `.comet/current-change.json` or run `comet state get <change> phase` to confirm an active change
+2. If an active change exists and `phase=build`, go straight to `/flow-comet` (do not run the resume probe)
+3. If an active change exists but phase is not build, pick the entry per the flow-comet node routing table
+4. If no active change, enter `/flow-comet` when the user explicitly wants to develop (it routes to the open stage)
 
-### 优先级 2：Comet 标准探针（flow-comet 不适用时）
+### Priority 2: Comet standard probe (when flow-comet does not apply)
 
-仅当 flow-comet 未安装或用户明确调用 `/comet-classic` 时，运行标准探针：
+Only when flow-comet is not installed or the user explicitly invokes `/comet-classic`, run the standard probe:
 `comet resume-probe . --stdin --json`
 
-- 如果用户通过宿主明确调用任意 Comet Skill（例如 `/comet`、`/comet-classic`、`/comet-hotfix`），显式调用优先于本恢复协议。
-- 如果 probe 返回 `auto_resume`，简短说明选中的 active change，并进入 `nextCommand` 指向的永久入口。
-- 如果 probe 返回 `ask_user`，只问一个简短问题并等待用户回复。
-- 如果 probe 返回 `out_of_scope` 或 `none`，不要进入 Comet workflow。
-- 不能只因为存在 active change 就把无关任务挂到该 change。
+- If the user explicitly invokes any Comet Skill through the host (e.g. `/comet`, `/comet-classic`, `/comet-hotfix`), the explicit invocation takes precedence over this resume protocol.
+- If the probe returns `auto_resume`, briefly state the selected active change and enter the permanent entry pointed to by `nextCommand`.
+- If the probe returns `ask_user`, ask one short question and wait for the reply.
+- If the probe returns `out_of_scope` or `none`, do not enter the Comet workflow.
+- Do not attach an unrelated task to an active change just because one exists.
 </comet-ambient-resume>
 ```
 
