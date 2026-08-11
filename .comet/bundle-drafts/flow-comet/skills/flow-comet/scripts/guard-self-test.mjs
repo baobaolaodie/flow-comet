@@ -2395,6 +2395,41 @@ const SCENARIOS = [
       assertOut(res2, 'ALL CHECKS PASSED');
     },
   },
+
+  // 107: determineNode 产物推导 pathBase 感知（KI-1）——compose 自定义协议 outputSchemas 含
+  // pathBase='project' 工件（项目根 README.md）时,status/next 按项目根产物正确推进。
+  // 修复前 buildNodeCompletionFlags 丢弃 pathBase、nodeFlagsComplete 一律按 .specs/ 解析
+  // → 项目根工件永不命中 → 节点判定不完成 → next 钉回（卡死）。
+  {
+    name: '107 产物推导 pathBase 感知：project 根工件正确推进（KI-1）',
+    run: (dir) => {
+      // 自定义协议:brief(project 根 README.md)→ doccheck(specs-root report.md)
+      const custom = path.join(dir, 'pb-protocol.json');
+      writeFile(dir, 'pb-protocol.json', JSON.stringify({
+        schemaVersion: 1,
+        kind: 'workflow-kernel',
+        name: 'pathbase-test',
+        goal: 'KI-1 场景：pathBase=project 工件正确推进。',
+        nodes: [
+          { id: 'brief', label: 'Brief', kind: 'control', responsibility: '产出项目根 README.md。', outputSchemas: ['pathbase.brief.v1'], requiredSkillCalls: [], augmentations: [], disabled: false },
+          { id: 'doccheck', label: 'Doc Check', kind: 'control', responsibility: '产出 specs-root report.md。', outputSchemas: ['pathbase.doccheck.v1'], requiredSkillCalls: [], augmentations: [], disabled: false },
+        ],
+        outputSchemas: [
+          { id: 'pathbase.brief.v1', artifacts: [{ id: 'readme', paths: ['README.md'], pathBase: 'project' }] },
+          { id: 'pathbase.doccheck.v1', artifacts: [{ id: 'report', paths: ['report.md'] }] },
+        ],
+      }, null, 2));
+      // init(自定义协议经 --protocol CLI)+ 项目根产物 README.md
+      assertExit(runState(['init', CHANGE_ID, '--protocol', custom, '--init-skip'], dir), 0);
+      writeFile(dir, 'README.md', '# project readme\n');
+      // brief 完成(README.md 在项目根存在)→ determineNode 推导下一节点 doccheck
+      // （KI-1 验证点:产物推导尊重 pathBase——修复前 README.md 按 .specs/ 解析永不命中 → currentNode 仍 brief）
+      // （注:next 的顺序门禁会 BLOCK 未 exit 节点——那是节点顺序语义,非本场景目标）
+      const st = runState(['status', '--protocol', custom], dir);
+      assertExit(st, 0);
+      assertOut(st, '"currentNode": "doccheck"');
+    },
+  },
 ];
 
 // ---------- 运行 ----------

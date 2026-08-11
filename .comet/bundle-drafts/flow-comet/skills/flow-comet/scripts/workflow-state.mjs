@@ -258,6 +258,7 @@ function buildNodeCompletionFlags(protocol, changeName) {
         artifacts.push({
           id: schemaId + '.' + (artifact.id ?? 'artifact'),
           paths: (artifact.paths ?? []).map((p) => String(p).replaceAll('<change-id>', changeName)),
+          pathBase: artifact.pathBase,
         });
       }
     }
@@ -296,11 +297,16 @@ async function pathPatternExists(root, relativePattern) {
 }
 
 // 节点完成判定 = 标志文件集全部存在（artifact 存在 = 其 paths 任一命中 glob）
+// KI-1: 产物根按 artifact.pathBase 解析——'specs-root' → .specs/；'project'/缺省 → 项目根
+// （与 workflow-guard.mjs 的 workflowPathBaseRoot 对齐：内置协议 10 个 artifacts 全部显式
+// 声明 specs-root；compose 自定义协议可声明 project 根工件如 README.md）。
+// classic/native 等其余 pathBase 暂按 specs-root 兜底（与修复前一致，不回归——guard 侧全量感知）。
 async function nodeFlagsComplete(nodeFlags, nodeId) {
   for (const artifact of nodeFlags.get(nodeId) ?? []) {
     let present = false;
+    const artifactRoot = artifact.pathBase === 'specs-root' ? specsRoot : runRoot;
     for (const pattern of artifact.paths) {
-      if (await pathPatternExists(specsRoot, pattern)) {
+      if (await pathPatternExists(artifactRoot, pattern)) {
         present = true;
         break;
       }
