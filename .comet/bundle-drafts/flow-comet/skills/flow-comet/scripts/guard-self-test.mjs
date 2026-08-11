@@ -2573,6 +2573,14 @@ const SCENARIOS = [
       assertExit(ex, 1);
       assertOut(ex, 'BLOCKED');
       assertOut(ex, 'advance');
+      // ③ exit 无 evidence → BLOCK 消息含 record 补证据指引（KI-3 补全）
+      const st3 = baseState('design');
+      writeState(dir, st3);
+      writeIntakeArtifacts(dir);
+      const ex3 = runGuard(['exit', 'open'], dir);
+      assertExit(ex3, 1);
+      assertOut(ex3, 'missing evidence');
+      assertOut(ex3, 'record');
     },
   },
 
