@@ -4,7 +4,7 @@
  *
  * 定位:仓库约定(与 .github/workflows/ci.yml 同类)——主仓私有,**不分发**到
  *       flow-comet 安装副本(各项目的内部词由各项目自己定义,非通用词表)。
- *       hook(commit-msg/pre-push)与本地检查工具(scripts/check-codes-local.mjs)
+ *       hook(commit-msg/pre-push)与本地检查工具
  *       共用本文件,消除两处正则漂移。
  *
  * BANNED:提交消息 / PR 表述 / 文件内容检测层共用。
