@@ -255,6 +255,15 @@ function buildNodeCompletionFlags(protocol, changeName) {
       const schema = schemaById.get(schemaId);
       for (const artifact of schema?.artifacts ?? []) {
         if (artifact.required === false) continue; // 可选产物不是完成门控
+        // B 方案（fail-fast）：classic/native pathBase 由 guard 侧 workflowPathBaseRoot 全量
+        // 感知，但状态机推导暂不支持（按 specs-root 兜底会与 guard 不一致导致卡死/误判）——
+        // 显式报错提示改用 specs-root/project + 完整路径（如 project + openspec/changes/xxx.md）。
+        if (artifact.pathBase === 'classic-openspec-root'
+          || artifact.pathBase === 'classic-superpowers-root'
+          || artifact.pathBase === 'native-root') {
+          throw new Error('产物根 pathBase "' + artifact.pathBase
+            + '" 由 guard 校验支持但状态机推导暂不支持——请改用 specs-root/project + 完整路径（如 project + openspec/changes/xxx.md）');
+        }
         artifacts.push({
           id: schemaId + '.' + (artifact.id ?? 'artifact'),
           paths: (artifact.paths ?? []).map((p) => String(p).replaceAll('<change-id>', changeName)),

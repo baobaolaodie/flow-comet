@@ -2430,6 +2430,35 @@ const SCENARIOS = [
       assertOut(st, '"currentNode": "doccheck"');
     },
   },
+
+  // 108: 产物推导 fail-fast（B 方案）——协议声明 classic/native pathBase 时状态机推导
+  // 暂不支持（guard 侧全量感知、state 侧兜底不一致的已知边界）,显式报错提示改用
+  // specs-root/project + 完整路径——不静默兜底（防卡死/误判）。
+  {
+    name: '108 产物推导 fail-fast：classic/native pathBase 显式报错（B 方案）',
+    run: (dir) => {
+      // 自定义协议:proposal 节点声明 classic-openspec-root 工件
+      const custom = path.join(dir, 'classic-protocol.json');
+      writeFile(dir, 'classic-protocol.json', JSON.stringify({
+        schemaVersion: 1,
+        kind: 'workflow-kernel',
+        name: 'classic-test',
+        goal: 'fail-fast 场景：classic pathBase 显式报错。',
+        nodes: [
+          { id: 'proposal', label: 'Proposal', kind: 'control', responsibility: '产出 openspec 产物。', outputSchemas: ['classic.proposal.v1'], requiredSkillCalls: [], augmentations: [], disabled: false },
+        ],
+        outputSchemas: [
+          { id: 'classic.proposal.v1', artifacts: [{ id: 'proposal', paths: ['changes/xxx.md'], pathBase: 'classic-openspec-root' }] },
+        ],
+      }, null, 2));
+      assertExit(runState(['init', CHANGE_ID, '--protocol', custom, '--init-skip'], dir), 0);
+      // status:classic/native pathBase → fail-fast 显式报错（不静默兜底）
+      const st = runState(['status', '--protocol', custom], dir);
+      assertExit(st, 1);
+      assertOut(st, '状态机推导暂不支持');
+      assertOut(st, 'specs-root');
+    },
+  },
 ];
 
 // ---------- 运行 ----------
