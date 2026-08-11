@@ -2173,7 +2173,7 @@ async function main() {
     const lessonsFile = path.join(runRoot, '.specs', 'LESSONS.md');
     try {
       const content = await fs.readFile(lessonsFile, 'utf8');
-      // 条目区锚点兼容：## 条目区（模板）/ ## 活跃条目 + ## 已解决条目（赛事系统实际结构）——取最早条目段
+      // 条目区锚点兼容：## 条目区（模板）/ ## 活跃条目 + ## 已解决条目（实际项目结构）——取最早条目段
       const zoneIndex = (() => {
         const hits = ['条目区', '活跃条目', '已解决条目']
           .map(s => content.search(new RegExp('^##\\s*' + s + '\\s*$', 'm')))
@@ -2545,7 +2545,7 @@ async function main() {
       process.exit(1);
     }
     // verify 命令 timeout 可配置——FLOW_COMET_VERIFY_TIMEOUT_MS 环境变量优先，
-    // 缺省 300000ms（300s；赛事系统后端测试耗时可超 300s，用 env 调大）；非数字/0 → 回退缺省
+    // 缺省 300000ms（300s；后端测试耗时可超 300s，用 env 调大）；非数字/0 → 回退缺省
     const verifyTimeoutMs = Number.parseInt(process.env.FLOW_COMET_VERIFY_TIMEOUT_MS ?? '300000', 10) || 300000;
     try {
       execSync(verifyCommand, { cwd: runRoot, stdio: 'pipe', timeout: verifyTimeoutMs });
