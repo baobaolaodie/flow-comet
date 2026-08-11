@@ -13,12 +13,12 @@
 ```
 feat/xxx ──PR（squash）──▶ dev          （集成分支——change 级提交）
                                           │
-dev ──PR（merge commit）──▶ main        （发布分支——积累 change 级提交）
+dev ──PR(squash)──▶ main    （发布分支——每次发布 1 个 squash 发布提交）
 ```
 
 | 分支 | 角色 | 合并方式 | 历史 |
 |------|------|---------|------|
-| `main` | 发布分支 | **merge commit** | 每次发布积累 change 级提交 |
+| `main` | 发布分支 | **squash** | 每次发布 squash 成 1 个发布提交(消息概括 dev 的 change 级提交) |
 | `dev` | 集成分支 | **squash** | 每个 PR 一条 change 级提交——PR 的修复明细在该 PR 的 Commits 列表可查 |
 | `feat/*` | 开发分支 | — | 工作历史，合并后删除 |
 
@@ -37,7 +37,7 @@ dev ──PR（merge commit）──▶ main        （发布分支——积累 
 3. **开 PR 合入 `dev`**（base `dev`，head `feat/<描述>`）。**使用仓库 PR 模板**（`.github/PULL_REQUEST_TEMPLATE.md`——改动范围/验证/自查勾选）。PR 描述写明改了什么、为什么、验证证据。**保留完整清单**：涉及项勾 `[x]`、未涉及项留 `[ ]`——**不要删除未勾选项**（清单是 reviewer 判断完整性的依据）。
 4. **获得审核 approve**——需要 1 个 approving review（分支保护）。
 5. **合入 `dev`**——用 **squash** 合并：每个 PR 一条 **change 级提交**（PR 的提交仍可在该 PR 的 Commits 列表查看）。`dev` **积累改动**——不要每个改动都发布。
-6. **发布 PR（批次）**——`dev` 积累一组相关改动（功能批次或维护批次）后，开**一个**发布 PR 合入 `main`（base `main`，head `dev`）。用 **merge commit** 合并——dev 的 change 级提交**积累进 `main`**。
+6. **发布 PR（批次）**——`dev` 积累一组相关改动（功能批次或维护批次）后，开**一个**发布 PR 合入 `main`（base `main`，head `dev`）。以 **squash** 合并——1 个发布提交，消息概括 dev 积累的 change 级提交。
 7. 合并后删除 feature 分支。
 
 **维护批次**：纯文档/清理类改动（无行为影响）可积累在一个分支（如 `docs/maintenance-<日期>`）作为**一个** PR 合入 `dev`——减少 PR 数量且不丢可追溯性。
@@ -65,8 +65,8 @@ git push origin dev
 git checkout main
 git checkout -b hotfix/<描述>
 # 修复 → 提交（fix: subject）→ 测试
-# 直合 main（merge commit）→ 同步 dev
-git checkout main && git merge --no-ff hotfix/<描述>
+# hotfix 以 squash 合并——1 个干净提交进 main,与发布 squash 策略一致
+git checkout main && git merge --squash hotfix/<描述> && git commit -m "fix: hotfix <描述>"
 git checkout dev && git merge --no-ff main -m "sync: main → dev（hotfix <描述>）"
 git branch -d hotfix/<描述>
 ```
@@ -193,4 +193,4 @@ git push --force-with-lease origin feat/<描述>            # feature 分支允�
 
 **发布 PR 要点**：
 - 发布 PR（dev → main）天然列出 dev 的全部未发布 change 级提交（dev 是 change 级提交序列、main 每次发布积累它们）——这是设计，不是问题
-- 用 `gh pr merge --merge` 合并——merge commit 的消息来自 PR 标题/正文（公开面语言），过程细节不会进入 main 的历史
+- 用 `gh pr merge --squash` 合并——squash 消息用公开面语言（发布摘要），过程细节不会进入 main 的历史
