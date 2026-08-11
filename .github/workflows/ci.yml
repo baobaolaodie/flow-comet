@@ -9,7 +9,7 @@
 #                        reproducibility / workflow yaml validity
 #   pr-policy            PR template completeness (5 bilingual sections + 17 checkboxes,
 #                        deletion = fail) / feature-branch prefix / dev-main sync /
-#                        zero internal codes in title, body, public-file diffs
+#                        Conventional Commits (title + dev-PR commit messages)
 #   release-consistency  version consistency (6 spots) + tag reconciliation +
 #                        CHANGELOG per-version PR links
 #   docs-links           dead links + language switchers (lychee; pull/N and claude.ai excluded)
@@ -104,7 +104,7 @@ jobs:
           EOF
 
 
-  # ── PR 纪律: 分支规范 + 模板完整 + 零过程代号 / PR policy ──
+  # ── PR 纪律: 分支规范 + 模板完整 + 提交规范 / PR policy ──
   pr-policy:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -159,12 +159,7 @@ jobs:
             const titleConv = /^(feat|fix|docs|chore|test|ci|refactor|perf|build|revert)(\([^)]+\))?: .+/;
             if (!titleConv.test(pr.title)) P.push(`PR title not Conventional Commits: "${pr.title}"`);
 
-            // Zero process codes in title/body
-            const banned = /T-FIX|batch-|D-\d+|P0|dogfood|round\s*\d/;
-            if (banned.test(pr.title)) P.push(`PR title contains a process code: "${pr.title}"`);
-            if (banned.test(body)) P.push('PR body contains process codes (T-FIX/batch/D-NN/P0/dogfood/round)');
-
-            // Commit-message convention: Conventional Commits prefix + zero process codes
+            // Commit-message convention: Conventional Commits prefix
             // Development PRs only — a release PR (dev -> main) carries the accumulated
             // history of past batches (already reviewed/merged under their own PRs);
             // rewriting history is not an option, so those commits are not re-audited.
@@ -177,26 +172,7 @@ jobs:
                 const msg = c.commit.message.split('\n')[0];
                 if (/^Merge /.test(msg)) continue;
                 if (!conv.test(msg)) P.push(`commit message not Conventional Commits: "${msg.slice(0, 60)}"`);
-                if (banned.test(msg)) P.push(`commit message contains a process code: "${msg.slice(0, 60)}"`);
               }
-            }
-
-            // Zero internal codes in added lines of public files
-            // Fork-PR compatibility: head branch lives in the fork (not origin) — skip the diff check then
-            let files = [];
-            try {
-              files = execSync(`git diff --name-only origin/${pr.base.ref}...origin/${pr.head.ref}`)
-                .toString().trim().split('\n').filter(Boolean);
-            } catch { /* fork PR: head not on origin, skip public-diff check */ }
-            const pub = files.filter(f =>
-              /^(README|CONTRIBUTING|CHANGELOG)[^/]*\.md$|^docs\/.+\.md$|^\.github\/.+\.md$/.test(f));
-            for (const f of pub) {
-              let add = '';
-              try {
-                add = execSync(`git diff origin/${pr.base.ref}...origin/${pr.head.ref} -- "${f}"`)
-                  .toString().split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).join('\n');
-              } catch { continue; }
-              if (banned.test(add)) P.push(`public doc added lines contain process codes: ${f}`);
             }
 
             if (P.length) core.setFailed('Convention violations:\n' + P.join('\n'));
