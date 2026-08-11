@@ -1,0 +1,43 @@
+#!/usr/bin/env node
+/**
+ * pre-push hook — 将被推送的提交信息含内部词(过程代号)时阻止推送(本项目仓库约定)
+ *
+ * stdin 每行:<local ref> <local oid> <remote ref> <remote oid>。
+ * 对每个将被推送的 ref,检查其推送范围内的提交 subject(含 merge 提交)。
+ */
+import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { BANNED } from './internal-codes.mjs';
+
+const stdin = fs.readFileSync(0, 'utf8');
+const lines = stdin.trim().split('\n').filter(Boolean);
+const bad = [];
+
+for (const line of lines) {
+  const [localRef, localOid, remoteRef, remoteOid] = line.split(/\s+/);
+  if (!localOid || !/^[0-9a-f]{40,}$/.test(localOid) || /^0+$/.test(localOid)) continue;
+  const args = ['log', '--format=%s'];
+  if (remoteOid && !/^0+$/.test(remoteOid)) {
+    args.push(`${remoteOid}..${localOid}`);
+  } else {
+    // 新分支:本地未推送的全部提交
+    args.push(localOid, '--not', '--remotes');
+  }
+  let out;
+  try {
+    out = execFileSync('git', args, { encoding: 'utf8' });
+  } catch {
+    continue; // 范围异常:不误拦(commit-msg 已把关本地提交)
+  }
+  for (const subj of out.split('\n')) {
+    if (!subj.trim()) continue;
+    const m = subj.match(BANNED);
+    if (m) bad.push(`  ${subj.trim().slice(0, 80)}  ← 含「${m[0]}」`);
+  }
+}
+
+if (bad.length > 0) {
+  console.error('推送被拒绝:以下提交信息含内部词(过程代号)——请先重写提交消息(git commit --amend / git rebase -i)再推送:');
+  for (const b of bad) console.error(b);
+  process.exit(1);
+}
