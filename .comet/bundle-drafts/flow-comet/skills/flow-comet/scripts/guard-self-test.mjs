@@ -2488,6 +2488,37 @@ const SCENARIOS = [
       assertOut(res2, 'ALL CHECKS PASSED');
     },
   },
+
+  // 110: execute 出口越权委托检测（KI-10）——TASK 有 parallel done 任务 + completedNodes
+  // 无 subagent-execute + 非 direct 模式 → WARN 渐进（[P] 任务应由 subagent-execute 节点委托,
+  // execute 阶段完成 [P] 是越权委托痕迹——上轮 dogfood 实证 L-039）;completedNodes 含
+  // subagent-execute 或 direct 模式 → 无越权 WARN
+  {
+    name: '110 execute exit：parallel done 无 subagent-execute → WARN 越权委托（KI-10）',
+    run: (dir) => {
+      const st = baseState('execute');
+      st.evidence.execute = { summary: 'execute done' };
+      st.completedNodes = ['open', 'design', 'plan', 'execute']; // subagent-execute 未 exit
+      st.evidence['subagent-execute'] = { handoffResult: handoffFor(['P01']) }; // 已委托(共用证据库)
+      writeState(dir, st);
+      // TASK:parallel done P01 + 产物 SUMMARY(满足 task-summaries 出口门禁 + KI-8)
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent());
+      // ① completedNodes 无 subagent-execute + 非 direct → WARN（越权委托）
+      const res = runGuard(['exit', 'execute'], dir);
+      assertExit(res, 0);
+      assertOut(res, '越权委托');
+      assertOut(res, 'subagent-execute');
+      assertOut(res, 'ALL CHECKS PASSED');
+      // ② completedNodes 含 subagent-execute → 无越权 WARN
+      st.completedNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute'];
+      writeState(dir, st);
+      const res2 = runGuard(['exit', 'execute'], dir);
+      assertExit(res2, 0);
+      assertNotOut(res2, '越权委托');
+      assertOut(res2, 'ALL CHECKS PASSED');
+    },
+  },
 ];
 
 // ---------- 运行 ----------

@@ -2458,6 +2458,20 @@ async function main() {
         }
         // parallel 仍 pending → 合法（下一步 determineNode 路由到 subagent-execute）
       }
+
+      // KI-10: 越权委托检测（execute 出口第一道）——TASK 有 parallel done 任务 +
+      // completedNodes 无 subagent-execute + 非 direct 模式 + 协议含 subagent-execute 节点
+      // → WARN 渐进（[P] 任务应由 subagent-execute 节点委托——execute 阶段完成 [P] 是
+      // 越权委托痕迹；handoff 记录存在但节点未 exit——上轮 dogfood 实证 L-039）
+      const ki10ParallelDone = tasks.filter(t => t.parallel && t.status === 'done').map(t => t.id);
+      const ki10ProtocolHasSubagent = (protocol.nodes ?? []).some(n => n.id === 'subagent-execute');
+      if (ki10ParallelDone.length > 0
+          && !(state.completedNodes ?? []).includes('subagent-execute')
+          && (state.executionMode ?? 'subagent') !== 'direct'
+          && ki10ProtocolHasSubagent) {
+        console.error('WARN: TASK 有 parallel done 任务（' + ki10ParallelDone.join(', ')
+          + '）但 subagent-execute 节点未 exit——疑似 execute 阶段越权委托，[P] 任务应由 subagent-execute 节点委托');
+      }
     } catch {}
   }
   // W1-C: verify 出口必须真实跑命令（严格版）——历史归档 change 豁免（过渡规则）
