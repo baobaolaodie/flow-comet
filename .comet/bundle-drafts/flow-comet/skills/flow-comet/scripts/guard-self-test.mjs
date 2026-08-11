@@ -2396,12 +2396,12 @@ const SCENARIOS = [
     },
   },
 
-  // 107: determineNode 产物推导 pathBase 感知（KI-1）——compose 自定义协议 outputSchemas 含
+  // 107: determineNode 产物推导 pathBase 感知——compose 自定义协议 outputSchemas 含
   // pathBase='project' 工件（项目根 README.md）时,status/next 按项目根产物正确推进。
   // 修复前 buildNodeCompletionFlags 丢弃 pathBase、nodeFlagsComplete 一律按 .specs/ 解析
   // → 项目根工件永不命中 → 节点判定不完成 → next 钉回（卡死）。
   {
-    name: '107 产物推导 pathBase 感知：project 根工件正确推进（KI-1）',
+    name: '107 产物推导 pathBase 感知：project 根工件正确推进',
     run: (dir) => {
       // 自定义协议:brief(project 根 README.md)→ doccheck(specs-root report.md)
       const custom = path.join(dir, 'pb-protocol.json');
@@ -2409,7 +2409,7 @@ const SCENARIOS = [
         schemaVersion: 1,
         kind: 'workflow-kernel',
         name: 'pathbase-test',
-        goal: 'KI-1 场景：pathBase=project 工件正确推进。',
+        goal: 'pathBase 场景：pathBase=project 工件正确推进。',
         nodes: [
           { id: 'brief', label: 'Brief', kind: 'control', responsibility: '产出项目根 README.md。', outputSchemas: ['pathbase.brief.v1'], requiredSkillCalls: [], augmentations: [], disabled: false },
           { id: 'doccheck', label: 'Doc Check', kind: 'control', responsibility: '产出 specs-root report.md。', outputSchemas: ['pathbase.doccheck.v1'], requiredSkillCalls: [], augmentations: [], disabled: false },
@@ -2423,7 +2423,7 @@ const SCENARIOS = [
       assertExit(runState(['init', CHANGE_ID, '--protocol', custom, '--init-skip'], dir), 0);
       writeFile(dir, 'README.md', '# project readme\n');
       // brief 完成(README.md 在项目根存在)→ determineNode 推导下一节点 doccheck
-      // （KI-1 验证点:产物推导尊重 pathBase——修复前 README.md 按 .specs/ 解析永不命中 → currentNode 仍 brief）
+      // （验证点:产物推导尊重 pathBase——修复前 README.md 按 .specs/ 解析永不命中 → currentNode 仍 brief）
       // （注:next 的顺序门禁会 BLOCK 未 exit 节点——那是节点顺序语义,非本场景目标）
       const st = runState(['status', '--protocol', custom], dir);
       assertExit(st, 0);
@@ -2460,14 +2460,14 @@ const SCENARIOS = [
     },
   },
 
-  // 109: execute 出口校验——TASK done 任务 ↔ <id>-SUMMARY.md 存在（KI-8）——
+  // 109: execute 出口校验——TASK done 任务 ↔ <id>-SUMMARY.md 存在——
   // 缺任一 done 任务的 SUMMARY → WARN 渐进不 BLOCK（防旧 change 卡死）；齐全 → 无 WARN
   {
-    name: '109 execute exit：done 任务缺 SUMMARY → WARN 渐进（KI-8）',
+    name: '109 execute exit：done 任务缺 SUMMARY → WARN 渐进',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'execute done' };
-      st.executionMode = 'direct'; // direct:串行任务主代理直写,不要求 handoff(聚焦 KI-8 校验)
+      st.executionMode = 'direct'; // direct:串行任务主代理直写,不要求 handoff(聚焦产物完整性校验)
       writeState(dir, st);
       // TASK:两个 done 任务(T01/T02)
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
@@ -2480,7 +2480,7 @@ const SCENARIOS = [
       assertOut(res, 'WARN');
       assertOut(res, 'T01-SUMMARY.md');
       assertOut(res, 'ALL CHECKS PASSED');
-      // ② 补 T01-SUMMARY.md → 无 KI-8 缺产物 WARN（既有 SKILL-LOAD 兼容 WARN 与本文无关）
+      // ② 补 T01-SUMMARY.md → 无缺产物 WARN（既有 SKILL-LOAD 兼容 WARN 与本文无关）
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
       const res2 = runGuard(['exit', 'execute'], dir);
       assertExit(res2, 0);
@@ -2489,12 +2489,12 @@ const SCENARIOS = [
     },
   },
 
-  // 110: execute 出口越权委托检测（KI-10）——TASK 有 parallel done 任务 + completedNodes
+  // 110: execute 出口越权委托检测——TASK 有 parallel done 任务 + completedNodes
   // 无 subagent-execute + 非 direct 模式 → WARN 渐进（[P] 任务应由 subagent-execute 节点委托,
-  // execute 阶段完成 [P] 是越权委托痕迹——上轮 dogfood 实证 L-039）;completedNodes 含
+  // execute 阶段完成 [P] 是越权委托痕迹——上轮真实流程实证的越权委托）;completedNodes 含
   // subagent-execute 或 direct 模式 → 无越权 WARN
   {
-    name: '110 execute exit：parallel done 无 subagent-execute → WARN 越权委托（KI-10）',
+    name: '110 execute exit：parallel done 无 subagent-execute → WARN 越权委托',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'execute done' };
@@ -2520,11 +2520,11 @@ const SCENARIOS = [
     },
   },
 
-  // 111: verify 出口越权委托兜底检测（KI-9）——同 KI-10 判定（TASK parallel done +
+  // 111: verify 出口越权委托兜底检测——同 KI-10 判定（TASK parallel done +
   // completedNodes 无 subagent-execute + 非 direct）,verify 时仍未 exit → WARN 兜底
   // （execute 出口未拦截的兜底提示）
   {
-    name: '111 verify exit：parallel done 无 subagent-execute → WARN 越权委托兜底（KI-9）',
+    name: '111 verify exit：parallel done 无 subagent-execute → WARN 越权委托兜底',
     run: (dir) => {
       const st = baseState('verify');
       st.evidence.verify = { summary: 'verified' };
@@ -2549,17 +2549,17 @@ const SCENARIOS = [
     },
   },
 
-  // 112: 节点顺序 BLOCK 消息含恢复指引（KI-3）——next 的「疑似未 exit」BLOCK 与
+  // 112: 节点顺序 BLOCK 消息含恢复指引——next 的「疑似未 exit」BLOCK 与
   // exit 的「currentNode 不匹配」BLOCK 均提示恢复通道（advance 强制推进/select 切换/
   // exit --apply）——防 resume 自锁（上轮 dogfood 观察：机器推导节点无脚本恢复通道）
   {
-    name: '112 节点顺序 BLOCK 消息含恢复指引（KI-3）',
+    name: '112 节点顺序 BLOCK 消息含恢复指引',
     run: (dir) => {
-      // ① next:currentNode=execute 但未 exit → BLOCK 消息含 advance/select 指引
-      const st1 = baseState('execute');
-      st1.evidence.execute = { summary: 'execute done' };
+      // ① next:currentNode=execute 但未 exit(无 evidence 记录)→ BLOCK 消息含 advance/select 指引
+      const st1 = baseState('execute'); // evidence 空——无豁免,触发"疑似未 exit"BLOCK
       writeState(dir, st1);
-      const nx = runState(['next'], dir);
+      fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true }); // findActiveChange 要求目录存在
+      const nx = runState(['next'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
       assertExit(nx, 1);
       assertOut(nx, 'BLOCKED');
       assertOut(nx, 'advance');
@@ -2568,7 +2568,8 @@ const SCENARIOS = [
       const st2 = baseState('design');
       st2.evidence.design = { summary: 'design done' };
       writeState(dir, st2);
-      writeIntakeArtifacts(dir);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n\n## 范围\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## AC\n');
       const ex = runGuard(['exit', 'open'], dir);
       assertExit(ex, 1);
       assertOut(ex, 'BLOCKED');
@@ -2576,7 +2577,6 @@ const SCENARIOS = [
       // ③ exit 无 evidence → BLOCK 消息含 record 补证据指引（KI-3 补全）
       const st3 = baseState('design');
       writeState(dir, st3);
-      writeIntakeArtifacts(dir);
       const ex3 = runGuard(['exit', 'open'], dir);
       assertExit(ex3, 1);
       assertOut(ex3, 'missing evidence');
@@ -2584,11 +2584,11 @@ const SCENARIOS = [
     },
   },
 
-  // 113: plan 出口波次散文一致性检测（KI-4）——TASK 的 ## 波次划分 Wave 行任务带 [P]
+  // 113: plan 出口波次散文一致性检测——TASK 的 ## 波次划分 Wave 行任务带 [P]
   // 标记（并行语义）但 XML 任务无 parallel="true" → WARN（散文与机器路由依据不一致,
   // 以任务标记为准）;XML 补齐 parallel → 无 WARN。容错:无并行语义的 Wave 行不参与比对。
   {
-    name: '113 plan exit：波次散文与并行标记不一致 → WARN（KI-4）',
+    name: '113 plan exit：波次散文与并行标记不一致 → WARN',
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };

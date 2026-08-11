@@ -306,7 +306,7 @@ async function pathPatternExists(root, relativePattern) {
 }
 
 // 节点完成判定 = 标志文件集全部存在（artifact 存在 = 其 paths 任一命中 glob）
-// KI-1: 产物根按 artifact.pathBase 解析——'specs-root' → .specs/；'project'/缺省 → 项目根
+// 产物推导 pathBase 感知: 产物根按 artifact.pathBase 解析——'specs-root' → .specs/；'project'/缺省 → 项目根
 // （与 workflow-guard.mjs 的 workflowPathBaseRoot 对齐：内置协议 10 个 artifacts 全部显式
 // 声明 specs-root；compose 自定义协议可声明 project 根工件如 README.md）。
 // classic/native 等其余 pathBase 暂按 specs-root 兜底（与修复前一致，不回归——guard 侧全量感知）。
@@ -749,7 +749,7 @@ async function main() {
         const advanceExempt = normalAdvanceExempt(state, protocol, completedArr, state.currentNode);
         if (!rollbackExempt && !advanceExempt) {
           console.error('BLOCKED: 疑似未 exit 节点 ' + state.currentNode + '，先 workflow-guard.mjs exit ' + state.currentNode + ' --apply');
-          console.error('恢复（KI-3）: 确认当前节点实际已完成 → 用 exit <节点> --apply 正常推进；节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进）或 select（切换 change）；禁止手改 state 机器字段');
+          console.error('恢复: 确认当前节点实际已完成 → 用 exit <节点> --apply 正常推进；节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进）或 select（切换 change）；禁止手改 state 机器字段');
           process.exit(1);
         }
       }

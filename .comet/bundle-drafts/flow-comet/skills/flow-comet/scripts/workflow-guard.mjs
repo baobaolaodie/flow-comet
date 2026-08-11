@@ -2019,7 +2019,7 @@ async function main() {
     const evidence = evidenceFor(evidenceState, node.id);
     if (!evidence) {
       console.error('BLOCKED: missing evidence for Node ' + node.id + '.');
-      console.error('恢复（KI-3）: 该节点已完成但缺证据记录 → 用 workflow-state.mjs record ' + node.id + ' \'{"summary":"<完成摘要>"}\' 补证据后重试；禁止手改 state 机器字段');
+      console.error('恢复: 该节点已完成但缺证据记录 → 用 workflow-state.mjs record ' + node.id + ' \'{"summary":"<完成摘要>"}\' 补证据后重试；禁止手改 state 机器字段');
       process.exit(1);
     }
     const missingSchemaEvidence = missingRequiredSchemaEvidence(protocol, node, evidence);
@@ -2134,13 +2134,13 @@ async function main() {
   const evidence = evidenceFor(state, node.id);
   if (!evidence) {
     console.error('BLOCKED: missing evidence for Node ' + node.id + '.');
-    console.error('恢复（KI-3）: 该节点已完成但缺证据记录 → 用 workflow-state.mjs record ' + node.id + ' \'{"summary":"<完成摘要>"}\' 补证据后重试；状态漂移 → advance/select；禁止手改 state 机器字段');
+    console.error('恢复: 该节点已完成但缺证据记录 → 用 workflow-state.mjs record ' + node.id + ' \'{"summary":"<完成摘要>"}\' 补证据后重试；状态漂移 → advance/select；禁止手改 state 机器字段');
     process.exit(1);
   }
   // W1-A: 转移前置约束——currentNode 必须等于被 exit 的节点（防跳阶段）
   if (state.currentNode !== node.id) {
     console.error('BLOCKED: currentNode is ' + String(state.currentNode) + ', cannot exit ' + node.id + '.');
-    console.error('恢复（KI-3）: 若节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进，确认节点实际已完成后再用）或 select（切换 change）；禁止手改 state 机器字段');
+    console.error('恢复: 若节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进，确认节点实际已完成后再用）或 select（切换 change）；禁止手改 state 机器字段');
     process.exit(1);
   }
   // E2: exit archive 分支合并检查（WARN 不 BLOCK）——分支未合并到 main 允许"归档先行、合并后补"
@@ -2333,7 +2333,7 @@ async function main() {
         console.error('BLOCKED: TASK.md 中 ' + missingVerify.length + ' 个 task 缺 <verify> 字段');
         process.exit(1);
       }
-      // KI-4: 波次散文一致性检测（WARN 渐进）——## 波次划分 的 Wave 行任务带 [P] 标记
+      // 波次散文一致性检测: 波次散文一致性检测（WARN 渐进）——## 波次划分 的 Wave 行任务带 [P] 标记
       // （并行语义）但 XML 任务无 parallel="true" → WARN（散文与机器路由依据不一致,以任务
       // 标记为准）。容错:无并行语义的 Wave 行不参与比对;解析不到波次段跳过（不误报）。
       const waveSection = content.match(/##\s*波次划分\s*\n([\s\S]*?)(?=\n##\s|\n---|\Z)/);
@@ -2449,7 +2449,7 @@ async function main() {
         process.exit(1);
       }
 
-      // KI-8: done 任务 ↔ <id>-SUMMARY.md 存在（WARN 渐进不 BLOCK——防旧 change 卡死；
+      // done 任务 ↔ SUMMARY 完整性: done 任务 ↔ <id>-SUMMARY.md 存在（WARN 渐进不 BLOCK——防旧 change 卡死；
       // 结构级校验与 TASK 签名同源：任务完成声明须有对应产物）
       const ki8ChangeDir = path.join(runRoot, '.specs', state.activeChange ?? '');
       for (const tid of tasks.filter(t => t.status === 'done').map(t => t.id)) {
@@ -2483,7 +2483,7 @@ async function main() {
         // parallel 仍 pending → 合法（下一步 determineNode 路由到 subagent-execute）
       }
 
-      // KI-10: 越权委托检测（execute 出口第一道）——TASK 有 parallel done 任务 +
+      // 越权委托检测（execute 出口）: 越权委托检测（execute 出口第一道）——TASK 有 parallel done 任务 +
       // completedNodes 无 subagent-execute + 非 direct 模式 + 协议含 subagent-execute 节点
       // → WARN 渐进（[P] 任务应由 subagent-execute 节点委托——execute 阶段完成 [P] 是
       // 越权委托痕迹；handoff 记录存在但节点未 exit——上轮 dogfood 实证 L-039）
@@ -2501,7 +2501,7 @@ async function main() {
   }
   // W1-C: verify 出口必须真实跑命令（严格版）——历史归档 change 豁免（过渡规则）
   if (node.id === 'verify' && !(await isArchivedChange(state.activeChange))) {
-    // KI-9: 越权委托兜底检测（verify 出口）——同 KI-10 判定（TASK parallel done +
+    // 越权委托兜底检测（verify 出口）: 越权委托兜底检测（verify 出口）——同 KI-10 判定（TASK parallel done +
     // completedNodes 无 subagent-execute + 非 direct + 协议含 subagent-execute 节点）,
     // verify 时仍未 exit → WARN 兜底（execute 出口未拦截的提示）
     try {
