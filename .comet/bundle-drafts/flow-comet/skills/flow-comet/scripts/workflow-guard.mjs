@@ -2425,6 +2425,15 @@ async function main() {
         process.exit(1);
       }
 
+      // KI-8: done 任务 ↔ <id>-SUMMARY.md 存在（WARN 渐进不 BLOCK——防旧 change 卡死；
+      // 结构级校验与 TASK 签名同源：任务完成声明须有对应产物）
+      const ki8ChangeDir = path.join(runRoot, '.specs', state.activeChange ?? '');
+      for (const tid of tasks.filter(t => t.status === 'done').map(t => t.id)) {
+        if (!(await fileExists(path.join(ki8ChangeDir, tid + '-SUMMARY.md')))) {
+          console.error('WARN: done 任务 ' + tid + ' 缺少 ' + tid + '-SUMMARY.md——execute 产物不完整（任务完成须有对应 SUMMARY）');
+        }
+      }
+
       // 豁免机制：evidence（当前节点 execute）含 parallelTakeoverApproved: true 时跳过越俎代庖检测（只保留串行 pending 检测）
       const executeEvidence = state.evidence['execute'];
       const takeoverApproved = !!(executeEvidence && executeEvidence.parallelTakeoverApproved);

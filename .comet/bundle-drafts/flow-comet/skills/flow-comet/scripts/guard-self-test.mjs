@@ -2459,6 +2459,35 @@ const SCENARIOS = [
       assertOut(st, 'specs-root');
     },
   },
+
+  // 109: execute 出口校验——TASK done 任务 ↔ <id>-SUMMARY.md 存在（KI-8）——
+  // 缺任一 done 任务的 SUMMARY → WARN 渐进不 BLOCK（防旧 change 卡死）；齐全 → 无 WARN
+  {
+    name: '109 execute exit：done 任务缺 SUMMARY → WARN 渐进（KI-8）',
+    run: (dir) => {
+      const st = baseState('execute');
+      st.evidence.execute = { summary: 'execute done' };
+      st.executionMode = 'direct'; // direct:串行任务主代理直写,不要求 handoff(聚焦 KI-8 校验)
+      writeState(dir, st);
+      // TASK:两个 done 任务(T01/T02)
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+        '<task id="T01" status="done"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n' +
+        '<task id="T02" status="done"><action>实现 T02</action><write_files>src/t2.mjs</write_files><verify>node --check src/t2.mjs</verify></task>\n');
+      // ① 只有 T02-SUMMARY.md(T01 缺)→ WARN 点名 T01-SUMMARY.md + 通过（渐进）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T02-SUMMARY.md', summaryContent());
+      const res = runGuard(['exit', 'execute'], dir);
+      assertExit(res, 0);
+      assertOut(res, 'WARN');
+      assertOut(res, 'T01-SUMMARY.md');
+      assertOut(res, 'ALL CHECKS PASSED');
+      // ② 补 T01-SUMMARY.md → 无 KI-8 缺产物 WARN（既有 SKILL-LOAD 兼容 WARN 与本文无关）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      const res2 = runGuard(['exit', 'execute'], dir);
+      assertExit(res2, 0);
+      assertNotOut(res2, '缺少 T01-SUMMARY.md');
+      assertOut(res2, 'ALL CHECKS PASSED');
+    },
+  },
 ];
 
 // ---------- 运行 ----------
