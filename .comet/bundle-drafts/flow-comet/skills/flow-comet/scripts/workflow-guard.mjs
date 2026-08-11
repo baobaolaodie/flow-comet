@@ -2019,6 +2019,7 @@ async function main() {
     const evidence = evidenceFor(evidenceState, node.id);
     if (!evidence) {
       console.error('BLOCKED: missing evidence for Node ' + node.id + '.');
+      console.error('恢复（KI-3）: 该节点已完成但缺证据记录 → 用 workflow-state.mjs record ' + node.id + ' \'{"summary":"<完成摘要>"}\' 补证据后重试；禁止手改 state 机器字段');
       process.exit(1);
     }
     const missingSchemaEvidence = missingRequiredSchemaEvidence(protocol, node, evidence);
