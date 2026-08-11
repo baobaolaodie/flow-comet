@@ -1119,7 +1119,7 @@ const SCENARIOS = [
   // 但 TASK.md 存在 pending 修复任务且 determineNode 推导为 execute → 允许标准回退路径
   // （verify 发现缺陷 → 回 execute），不 BLOCK，输出 NODE: execute
   {
-    name: '42 next 回退豁免：verify 未 exit + pending T-FIX → 允许回 execute',
+    name: '42 next 回退豁免：verify 未 exit + pending 修复任务 → 允许回 execute',
     run: (dir) => {
       const st = baseState('verify');
       st.completedNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review'];
@@ -1140,7 +1140,7 @@ const SCENARIOS = [
   // 43: next 维持严格 BLOCK——verify 未 exit（evidence 无 verify 记录）且 TASK.md 无 pending
   // 任务（非修复回退）→ 豁免不成立 → 维持  严格拦截，输出恢复指令
   {
-    name: '43 next 维持 BLOCK：无 pending 任务（非 T-FIX 回退）',
+    name: '43 next 维持 BLOCK：无 pending 任务（非修复任务回退）',
     run: (dir) => {
       const st = baseState('verify');
       st.completedNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review'];
@@ -1216,7 +1216,7 @@ const SCENARIOS = [
   // 输出 NODE: design（ 误拦回归：修复前此状态被 BLOCK 为"疑似未 exit 节点 design"；
   // open 的 evidence 证明该 exit 真实发生过，满足 normalAdvanceExempt）
   {
-    name: '46 next 正常：open exit 推进后 currentNode=design 无 evidence（T-FIX-11 豁免）',
+    name: '46 next 正常：open exit 推进后 currentNode=design 无 evidence（修复任务回退豁免）',
     run: (dir) => {
       const st = baseState('design');
       st.completedNodes = ['open'];
@@ -1499,7 +1499,7 @@ const SCENARIOS = [
 
   // 61: 旧 state（无 status 字段但有 activeChange）→ hook 按 running 处理（fail-closed 向后兼容，行为固化）
   {
-    name: '61 hook fail-closed：旧 state 无 status 有 activeChange 按 running（T-FIX-15 固化）',
+    name: '61 hook fail-closed：旧 state 无 status 有 activeChange 按 running（既有修复固化）',
     run: (dir) => {
       const st = baseState('open');
       delete st.status;
@@ -1529,7 +1529,7 @@ const SCENARIOS = [
   // 63: 新 change 与旧归档同名（state 缺失时走扫描兜底）→ 应识别为 active（ 扩展边界：
   // archivedIds 剥日期前缀匹配不得误伤同名新 change）
   {
-    name: '63 同名新 change 不被归档检查误跳过（T-FIX-17 边界）',
+    name: '63 同名新 change 不被归档检查误跳过',
     run: (dir) => {
       writeFile(dir, '.specs/sci-notation/CHANGE.md', '# CHANGE\n## Why\nx\n');
       writeFile(dir, '.specs/sci-notation/TASK.md', '# TASK\n');
@@ -1792,7 +1792,7 @@ const SCENARIOS = [
   // （结构校验保持严格 + 检测失败纠偏可见——修复前无诊断 = RED）
   // nextNode 只看 completedNodes——路由触发场景 = exit plan（completed 后 nextNode=execute → 路由检查）
   {
-    name: '78 P0 路由无匹配输出诊断',
+    name: '78 路由无匹配输出诊断',
     run: (dir) => {
       const st = baseState('plan');
       st.completedNodes = ['open', 'design'];
