@@ -2575,6 +2575,36 @@ const SCENARIOS = [
       assertOut(ex, 'advance');
     },
   },
+
+  // 113: plan 出口波次散文一致性检测（KI-4）——TASK 的 ## 波次划分 Wave 行任务带 [P]
+  // 标记（并行语义）但 XML 任务无 parallel="true" → WARN（散文与机器路由依据不一致,
+  // 以任务标记为准）;XML 补齐 parallel → 无 WARN。容错:无并行语义的 Wave 行不参与比对。
+  {
+    name: '113 plan exit：波次散文与并行标记不一致 → WARN（KI-4）',
+    run: (dir) => {
+      const st = baseState('plan');
+      st.evidence.plan = { summary: 'plan done' };
+      writeState(dir, st);
+      // TASK:波次散文 Wave 1 (parallel): T01[P], T02[P];XML 仅 T01 parallel（T02 不一致）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n## 波次划分\n\nWave 1 (parallel): T01[P], T02[P]\n\n## 任务清单\n\n'
+        + '<task id="T01" parallel="true" status="pending"><action>a</action><write_files>f1</write_files><verify>v</verify></task>\n'
+        + '<task id="T02" status="pending"><action>b</action><write_files>f2</write_files><verify>v</verify></task>\n');
+      // ① 散文 T02[P] 但 XML 无 parallel → WARN
+      const res = runGuard(['exit', 'plan'], dir);
+      assertExit(res, 0);
+      assertOut(res, '波次散文');
+      assertOut(res, 'T02');
+      assertOut(res, 'ALL CHECKS PASSED');
+      // ② XML 补 T02 parallel → 无波次 WARN
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n## 波次划分\n\nWave 1 (parallel): T01[P], T02[P]\n\n## 任务清单\n\n'
+        + '<task id="T01" parallel="true" status="pending"><action>a</action><write_files>f1</write_files><verify>v</verify></task>\n'
+        + '<task id="T02" parallel="true" status="pending"><action>b</action><write_files>f2</write_files><verify>v</verify></task>\n');
+      const res2 = runGuard(['exit', 'plan'], dir);
+      assertExit(res2, 0);
+      assertNotOut(res2, '波次散文');
+      assertOut(res2, 'ALL CHECKS PASSED');
+    },
+  },
 ];
 
 // ---------- 运行 ----------

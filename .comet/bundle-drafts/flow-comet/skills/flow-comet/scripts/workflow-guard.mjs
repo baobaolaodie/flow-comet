@@ -2331,6 +2331,27 @@ async function main() {
         console.error('BLOCKED: TASK.md 中 ' + missingVerify.length + ' 个 task 缺 <verify> 字段');
         process.exit(1);
       }
+      // KI-4: 波次散文一致性检测（WARN 渐进）——## 波次划分 的 Wave 行任务带 [P] 标记
+      // （并行语义）但 XML 任务无 parallel="true" → WARN（散文与机器路由依据不一致,以任务
+      // 标记为准）。容错:无并行语义的 Wave 行不参与比对;解析不到波次段跳过（不误报）。
+      const waveSection = content.match(/##\s*波次划分\s*\n([\s\S]*?)(?=\n##\s|\n---|\Z)/);
+      if (waveSection) {
+        const proseParallelIds = [];
+        for (const line of waveSection[1].split('\n')) {
+          if (!/(Wave|\d+\s*波|parallel|并行)/i.test(line)) continue; // 无并行语义行跳过
+          for (const m of line.matchAll(/([A-Z][A-Z0-9-]*)\[P\]/g)) proseParallelIds.push(m[1]);
+        }
+        if (proseParallelIds.length > 0) {
+          const xmlParallelIds = taskBlocks
+            .filter(b => /parallel="true"/.test(b))
+            .map(b => (b.match(/id="([^"]+)"/) || [])[1])
+            .filter(Boolean);
+          const missing = proseParallelIds.filter(id => !xmlParallelIds.includes(id));
+          if (missing.length > 0) {
+            console.error('WARN: 波次散文标记为并行（[P]）但任务无 parallel="true"——散文与任务标记不一致（以任务标记为准）: ' + missing.join(', '));
+          }
+        }
+      }
     } catch {}
   }
   // P1-A: review exit 校验 REVIEW 含实质内容 + L3-1（T-FIX-15）发现区条目处置状态结构级校验
