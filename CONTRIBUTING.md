@@ -79,17 +79,25 @@ git branch -d hotfix/<description>
 - **Authoring environment**: Claude Code (skills/hooks run in Claude Code sessions); the hook is installed via `prepare-env` into your project's `.claude/`
 - **For mechanism work**: read [docs/MECHANISM.md](docs/MECHANISM.md) for the mechanism semantics (behavior layer) before touching scripts
 
-### CI enforcement (no local setup needed)
+### CI enforcement and local hooks
 
-CI runs automatically on every PR and push — it enforces the repository conventions server-side (regression suite with scenario-count and public-artifact code self-checks, script syntax, BOM guard, installer reproducibility, workflow yaml validity, PR template completeness, version consistency, CHANGELOG PR links, dead links). Nothing to install or configure locally.
+CI runs automatically on every PR and push — it enforces the repository conventions server-side (regression suite with scenario-count and public-artifact code self-checks, script syntax, BOM guard, installer reproducibility, workflow yaml validity, PR template completeness, commit-message conventions, version consistency, CHANGELOG PR links, dead links).
 
-Before pushing, the only local pre-check you need is the regression baseline:
+**Local hooks** (install once after cloning):
+
+```bash
+node scripts/install-commit-hook.mjs   # sets core.hooksPath → .githooks/
+```
+
+The hooks reject commits and pushes whose messages carry process codes — project shorthand such as fix numbers, batch codes, or scenario numbers. This word list is this project's own convention (not a universal list); commit messages are public artifacts, so keep them as plain descriptions (see the commit convention below).
+
+Before pushing, run the regression baseline:
 
 ```bash
 node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 113 SCENARIOS PASSED
 ```
 
-CI handles everything else.
+CI handles the rest.
 
 ## Issues (reporting bugs / proposing features)
 

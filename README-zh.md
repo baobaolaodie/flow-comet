@@ -191,7 +191,7 @@ flow-comet/
 3. 运行回归：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 113 SCENARIOS PASSED`
 4. 开 PR 合入 `dev`（squash——change 级提交）；发布 PR `dev → main`（squash——发布级提交）
 
-CI 在每个 PR 与 push 时自动强制仓库约定（回归、PR 纪律、版本一致性、死链）——无需本地配置。完整指南见 [CONTRIBUTING-zh.md](CONTRIBUTING-zh.md)。
+CI 在每个 PR 与 push 时自动强制仓库约定（回归、PR 纪律、版本一致性、死链）。本地 hook（提交/推送消息检测）通过 `node scripts/install-commit-hook.mjs` 安装——完整指南见 [CONTRIBUTING-zh.md](CONTRIBUTING-zh.md)。
 
 ## License
 

@@ -191,7 +191,7 @@ Full guide in [CONTRIBUTING.md](CONTRIBUTING.md) — branch model (`feature → 
 3. Run regression: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 113 SCENARIOS PASSED`
 4. Open a PR into `dev` (squash — one change-level commit); release PR `dev → main` (squash — one release commit)
 
-CI enforces the repository conventions automatically on every PR and push (regression, PR discipline, version consistency, dead links) — no local setup needed. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
+CI enforces the repository conventions automatically on every PR and push (regression, PR discipline, version consistency, dead links). Local hooks (commit/push message checks) install with `node scripts/install-commit-hook.mjs` — see [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
 
 ## License
 
