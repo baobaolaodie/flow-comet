@@ -309,7 +309,7 @@ function fullContract(commitHash, taskId) {
   });
 }
 
-// 仓库本地工具执行（check-docs-local / check-codes-local，gitignore 不随克隆分发）：
+// 仓库本地验证工具执行（仅主仓存在、不随克隆分发；副本上文件缺失自动跳过）：
 // 返回 { status, output }（spawnSync 原始结果 output 是数组，统一拼接成字符串供断言）
 function runLocalTool(checker, repoRoot) {
   const res = spawnSync(process.execPath, [checker], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });

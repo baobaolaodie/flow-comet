@@ -114,7 +114,7 @@ After the issue is confirmed: bug fixes use a `fix/` branch, features use a `fea
 - **TDD**: every mechanism fix starts with a RED scenario in `guard-self-test.mjs` (watch it fail for the right reason), then GREEN, then full regression
 - **Regression baseline**: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 113 SCENARIOS PASSED` (mandatory after every change)
 - **Documentation sync**: behavior-layer docs live in `docs/` (bilingual EN/zh — keep both in sync when a doc changes); implementation details stay out of public docs
-- **Bilingual discipline**: English docs contain no Chinese (except the language switcher, flow-kit artifact section names, and runtime message quotes); Chinese docs contain no long English sentences (except commands, URLs, and proper terms). Local optional check: `node scripts/check-docs-local.mjs` (a gitignored local tool — English-doc zero-Chinese, Chinese-doc zero-English-sentences, bilingual symmetry, version/scenario consistency)
+- **Bilingual discipline**: English docs contain no Chinese (except the language switcher, flow-kit artifact section names, and runtime message quotes); Chinese docs contain no long English sentences (except commands, URLs, and proper terms)
 - **Backward compatibility**: old changes/states keep working — progressive WARN over BLOCK
 - **Public docs stay jargon-free**: no codes, numbers, or process shorthand in README/docs/CHANGELOG/commit messages
 

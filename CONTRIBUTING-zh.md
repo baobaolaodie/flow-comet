@@ -114,7 +114,7 @@ Issue 确认后：bug 用 `fix/` 分支、feature 用 `feat/` 分支——都按
 - **TDD**：每个机制修复先写 RED 场景（`guard-self-test.mjs`——确认以正确原因失败）→ GREEN → 全量回归
 - **回归基线**：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 113 SCENARIOS PASSED`（每次改动后必须）
 - **文档同步**：行为层文档在 `docs/`（中英双语——改文档时两语同步）；实现细节不进公开文档
-- **双语纪律**：英文文档不含中文（语言切换器、flow-kit 工件段名、运行时消息原文除外）；中文文档不含英文长句（命令、URL、专有术语除外）。本地可选检查：`node scripts/check-docs-local.mjs`（gitignore 本地工具——英文文档零中文 / 中文文档零英文长句 / 双语对称 / 版本场景数一致）
+- **双语纪律**：英文文档不含中文（语言切换器、flow-kit 工件段名、运行时消息原文除外）；中文文档不含英文长句（命令、URL、专有术语除外）
 - **向后兼容**：旧 change/旧 state 照常工作——渐进 WARN 优先于 BLOCK
 - **公开文档不使用代号、编号或行话**：README/docs/CHANGELOG/提交信息保持一致
 
