@@ -106,6 +106,7 @@ Issue 确认后：bug 用 `fix/` 分支、feature 用 `feat/` 分支——都按
 - **TDD**：每个机制修复先写 RED 场景（`guard-self-test.mjs`——确认以正确原因失败）→ GREEN → 全量回归
 - **回归基线**：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 97 SCENARIOS PASSED`（每次改动后必须）
 - **文档同步**：行为层文档在 `docs/`（中英双语——改文档时两语同步）；实现细节不进公开文档
+- **双语纪律**：英文文档不含中文（语言切换器、flow-kit 工件段名、运行时消息原文除外）；中文文档不含英文长句（命令、URL、专有术语除外）。本地可选检查：`node scripts/check-docs-local.mjs`（gitignore 本地工具——英文文档零中文 / 中文文档零英文长句 / 双语对称 / 版本场景数一致）
 - **向后兼容**：旧 change/旧 state 照常工作——渐进 WARN 优先于 BLOCK
 - **公开文档不使用代号、编号或行话**：README/docs/CHANGELOG/提交信息保持一致
 
@@ -189,3 +190,7 @@ git push --force-with-lease origin feat/<描述>            # feature 分支允�
 2. 更新 README 版本徽章
 3. `git tag vX.Y.Z` + push --tags（发布 PR 合入 main 后）
 4. prepare-env 发布到全部已安装副本（主仓 `.claude/` + 各目标项目）——发布后逐一验证各副本 `guard-self-test`
+
+**发布 PR 要点**：
+- 发布 PR（dev → main）天然列出 dev 的全部未发布原始提交（dev 保留完整历史、main 每次发布 squash）——这是设计，不是问题
+- 合并时用**自定义 squash 消息**（`gh pr merge --squash --subject "<发布摘要>" --body "<验证摘要>"`）——GitHub 默认 squash 消息会列出全部 commit，把历史提交的过程代号带进 main 的公开提交历史

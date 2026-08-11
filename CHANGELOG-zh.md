@@ -10,9 +10,24 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号仅记录于 git tag 与本文档；`bundle.yaml` 的 version 保持 1.0.0（与发布流程解耦，见 README「版本与兼容性」）。
 
+## [1.3.1] - 2026-08-11
+
+文档与 CI 维护批次——无行为变更。([#31](https://github.com/baobaolaodie/flow-comet/pull/31)、[#33](https://github.com/baobaolaodie/flow-comet/pull/33)、[#34](https://github.com/baobaolaodie/flow-comet/pull/34)、[#35](https://github.com/baobaolaodie/flow-comet/pull/35)、[#36](https://github.com/baobaolaodie/flow-comet/pull/36)）、[#37](https://github.com/baobaolaodie/flow-comet/pull/37)）
+
+### 新增
+
+- README 运行展示区（真实运行截图，双语）；flow-kit 简介与横向纵向对比（双语）。
+- TROUBLESHOOTING 补 1.3.0 初始化消息条目（INIT-GENERATE / VALIDATE-FAILED / DONE，双语）。
+
+### 变更
+
+- CI：dev-main 同步检查改树级单向（仅 main 新增文件判定 dev 落后——修复 squash 发布后的误报）；分支前缀白名单补 `ci/`；commit message 规范检查限定开发 PR（发布 PR 携带历史批次为设计）；actionlint 升级 + 每周金丝雀。
+- CHANGELOG 场景数修正 95→97（与实现一致）；CONTRIBUTING / INSTALLATION / USAGE 双语与措辞清理。
+- 回归套件自检清单纳入 CHANGELOG（防条目场景数过时）；回归映射注释修正为实际场景数。
+
 ## [1.3.0] - 2026-08-10
 
-自动项目上下文初始化（init 前置步骤）。([#30](https://github.com/baobaolaodie/flow-comet/pull/30))
+自动项目上下文初始化（init 前置步骤）。([#30](https://github.com/baobaolaodie/flow-comet/pull/30)、[#32](https://github.com/baobaolaodie/flow-comet/pull/32))
 
 自动项目上下文初始化（init 前置步骤）。
 
@@ -22,7 +37,7 @@
 - **agent 协作生成协议**：`init <id> --init-context` 改为协作模式——脚本负责确定性探测/判决/提示/校验，agent 全量阅读既有文档并探测代码库，生成模板对齐的 `CONTEXT.md`（七段结构 + 出处标注，既有术语/决策/默认行为**保留**）；脚本校验七段结构与模板关键格式（带日期决策条目/元数据字段/术语表），校验通过后才记录扫描时间——生成后重跑一次即完成交接。
 - **模板感知指引**：生成提示会报告是否检测到 flow-kit 的 CONTEXT 模板，段名按模板校验（模板缺失时回退内置基准）。
 - **场景数一致性自检**：回归套件在公开文档场景数与实际套件规模漂移时失败。
-- guard 自测套件扩展至 95 场景（覆盖：提示不生成 / 生成指引 / 校验通过与失败 / 占位放行 / 指引文案）。
+- guard 自测套件扩展至 97 场景（覆盖：提示不生成 / 生成指引 / 校验通过与失败 / 占位放行 / 指引文案）。
 
 ### 修复
 

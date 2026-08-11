@@ -22,3 +22,4 @@ scripts/reset-dogfood.mjs
 
 # 本地检查工具（gitignore 不随发布）
 scripts/check-codes-local.mjs
+scripts/check-docs-local.mjs
