@@ -145,7 +145,7 @@ async function findSkillLoadsDir(changeName) {
 
 // completedChecks 真实性校验。解析 completedChecks 的 required-skill:<node>.<skill>
 // 条目 → 对应声明标记 .specs/<change-id>/.skill-loads/<node>-<skill>.json 必须存在（内置节点常量，缺失 →
-// BLOCKED + 指引先加载 skill 并运行 skill-load）；标记 at 必须 ≤ 本次记录时间（声明标记写入 交叉自洽：
+// BLOCKED + 指引先加载 skill 并运行 skill-load）；标记 at 必须 ≤ 本次记录时间（交叉自洽：
 // 标记先于记录声明；ISO-8601 UTC 字符串字典序 = 时间序）。仅校验本次 record 写入的
 // completedChecks（旧 change 兼容：旧 evidence 不追溯——由调用方只传本次 parsed.completedChecks）。
 // 条目按协议 requiredSkillCalls scope 分类——handoff scope 条目（子代理加载的 skill，
