@@ -21,6 +21,8 @@
   <a href="https://claude.ai/code"><img src="https://img.shields.io/badge/Claude_Code-D97757?style=flat&logo=claude&logoColor=white" alt="Claude Code" /></a>
   <a href="https://github.com/rihebty/flow-kit"><img src="https://img.shields.io/badge/flow--kit-4CAF50?style=flat" alt="flow-kit" /></a>
   <a href="https://github.com/rpamis/comet"><img src="https://img.shields.io/badge/comet-4CAF50?style=flat" alt="comet" /></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js_%E2%89%A518-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js 18+" /></a>
+  <a href="https://github.com/baobaolaodie/flow-comet/actions"><img src="https://img.shields.io/github/actions/workflow/status/baobaolaodie/flow-comet/ci.yml?style=flat" alt="CI" /></a>
   <a href="CHANGELOG-zh.md"><img src="https://img.shields.io/badge/version-1.3.1-blue.svg" alt="Version" /></a>
 </p>
 
@@ -123,6 +125,13 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径>
 - **[核心机制](docs/MECHANISM-zh.md)**——状态机、三层防线、guard 校验、执行模型
 - **[故障排查](docs/TROUBLESHOOTING-zh.md)**——BLOCKED/WARN 信息与处理
 
+入口是 `/flow-comet` 命令；状态查看与推进可从命令行完成：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs status   # 当前 change + 节点
+node .claude/skills/flow-comet/scripts/workflow-state.mjs next     # 下一节点 + 技能
+```
+
 ## 架构
 
 ```mermaid
@@ -150,12 +159,12 @@ flow-comet/
 ├── scripts/                prepare-env 安装器
 ├── docs/
 │   ├── examples/           工作流产物示例
-│   └── ECOSYSTEM.md        flow-kit 与 Comet 的作用、借鉴边界
-│   └── INSTALLATION.md     安装指南
-│   └── USAGE.md            使用指南
-│   └── PROTOCOL.md         自定义协议指南
-│   └── MECHANISM.md        核心机制（行为层）
-│   └── TROUBLESHOOTING.md  故障排查
+│   ├── ECOSYSTEM.md        flow-kit 与 Comet 的作用、借鉴边界
+│   ├── INSTALLATION.md     安装指南
+│   ├── USAGE.md            使用指南
+│   ├── PROTOCOL.md         自定义协议指南
+│   ├── MECHANISM.md        核心机制（行为层）
+│   ├── TROUBLESHOOTING.md  故障排查
 │   └── VERSIONS.md         版本与兼容性
 └── CHANGELOG.md            Keep a Changelog 风格
 ```

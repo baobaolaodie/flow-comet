@@ -21,6 +21,8 @@
   <a href="https://claude.ai/code"><img src="https://img.shields.io/badge/Claude_Code-D97757?style=flat&logo=claude&logoColor=white" alt="Claude Code" /></a>
   <a href="https://github.com/rihebty/flow-kit"><img src="https://img.shields.io/badge/flow--kit-4CAF50?style=flat" alt="flow-kit" /></a>
   <a href="https://github.com/rpamis/comet"><img src="https://img.shields.io/badge/comet-4CAF50?style=flat" alt="comet" /></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js_%E2%89%A518-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js 18+" /></a>
+  <a href="https://github.com/baobaolaodie/flow-comet/actions"><img src="https://img.shields.io/github/actions/workflow/status/baobaolaodie/flow-comet/ci.yml?style=flat" alt="CI" /></a>
   <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.3.1-blue.svg" alt="Version" /></a>
 </p>
 
@@ -123,6 +125,13 @@ On first use in a project, the workflow automatically detects whether a project 
 - **[Core mechanisms](docs/MECHANISM.md)** — state machine, three defense layers, guard validation, execution model
 - **[Troubleshooting](docs/TROUBLESHOOTING.md)** — BLOCKED/WARN messages and their fixes
 
+The entry point is the `/flow-comet` command; state is inspected and advanced from the command line:
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs status   # current change + node
+node .claude/skills/flow-comet/scripts/workflow-state.mjs next     # next node + skill
+```
+
 ## Architecture
 
 ```mermaid
@@ -150,12 +159,12 @@ flow-comet/
 ├── scripts/                prepare-env installer
 ├── docs/
 │   ├── examples/           workflow artifact examples
-│   └── ECOSYSTEM.md        roles of flow-kit & Comet, borrowing boundaries
-│   └── INSTALLATION.md     installation guide
-│   └── USAGE.md            usage guide
-│   └── PROTOCOL.md         custom protocol guide
-│   └── MECHANISM.md        core mechanisms (behavior layer)
-│   └── TROUBLESHOOTING.md  failure diagnosis
+│   ├── ECOSYSTEM.md        roles of flow-kit & Comet, borrowing boundaries
+│   ├── INSTALLATION.md     installation guide
+│   ├── USAGE.md            usage guide
+│   ├── PROTOCOL.md         custom protocol guide
+│   ├── MECHANISM.md        core mechanisms (behavior layer)
+│   ├── TROUBLESHOOTING.md  failure diagnosis
 │   └── VERSIONS.md         versioning & compatibility
 └── CHANGELOG.md            Keep a Changelog style
 ```
