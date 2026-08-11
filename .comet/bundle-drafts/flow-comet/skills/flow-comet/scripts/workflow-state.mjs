@@ -74,7 +74,7 @@ async function findActiveChange() {
   return null;
 }
 
-// ---------- 协议解析/内置节点常量/声明标记写入 · skill-load 声明标记（completedChecks 真实性校验配套） ----------
+// ---------- skill-load 声明标记（completedChecks 真实性校验配套） ----------
 
 // --prompt 原始参数提取（skill-load 专用参数）：--protocol 由 resolveProtocol 全局解析
 // （CLI > env > 默认）为工作流协议 JSON——skill-load 曾用 --protocol 传 prompt 路径，主仓真实链路
@@ -143,7 +143,7 @@ async function findSkillLoadsDir(changeName) {
   return null;
 }
 
-// 内置节点常量/声明标记写入/旧 change 兼容: completedChecks 真实性校验。解析 completedChecks 的 required-skill:<node>.<skill>
+// completedChecks 真实性校验。解析 completedChecks 的 required-skill:<node>.<skill>
 // 条目 → 对应声明标记 .specs/<change-id>/.skill-loads/<node>-<skill>.json 必须存在（内置节点常量，缺失 →
 // BLOCKED + 指引先加载 skill 并运行 skill-load）；标记 at 必须 ≤ 本次记录时间（声明标记写入 交叉自洽：
 // 标记先于记录声明；ISO-8601 UTC 字符串字典序 = 时间序）。仅校验本次 record 写入的
@@ -226,7 +226,7 @@ async function verifySkillLoadMarkers(completedChecks, changeName, recordTime, p
     } catch {
       return { ok: false, reason: '声明标记损坏（非法 JSON，需重新运行 skill-load）: ' + markerDisplay };
     }
-    // 声明标记写入: 交叉自洽——标记 at 必须 ≤ 本次记录时间（标记先于记录声明）
+    // 交叉自洽——标记 at 必须 ≤ 本次记录时间（标记先于记录声明）
     if (typeof marker.at !== 'string' || marker.at > recordTime) {
       return {
         ok: false,
@@ -850,10 +850,10 @@ async function main() {
     } catch {
       parsed = { summary: raw || 'recorded' };
     }
-    // 内置节点常量/声明标记写入/旧 change 兼容: completedChecks 真实性校验（skill-load 声明标记）——解析本次 record 写入的
+    // completedChecks 真实性校验（skill-load 声明标记）——解析本次 record 写入的
     // completedChecks 的 required-skill:<node>.<skill> 条目 → 对应声明标记必须存在（内置节点常量，
     // 缺失 → BLOCKED + 指引先加载 skill 并运行 skill-load）；标记 at 必须 ≤ 本次记录时间
-    // （声明标记写入 交叉自洽：标记先于记录声明）。仅校验本次写入的 payload，旧 evidence 不追溯（旧 change 兼容）。
+    // （交叉自洽：标记先于记录声明）。仅校验本次写入的 payload，旧 evidence 不追溯（旧 change 兼容）。
     const recordedAt = new Date().toISOString();
     // 标记归属 change 与 evidence 一致：优先 state.activeChange，缺失时回退 findActiveChange（与
     // 下方 NEXT 推导同语义）；两者皆无 → verifySkillLoadMarkers 内 fail-closed BLOCK。
