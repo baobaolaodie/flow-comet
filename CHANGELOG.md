@@ -10,11 +10,20 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded only in git tags and this document; `bundle.yaml` version stays 1.0.0 (decoupled from release versioning — see the README's version section).
 
-## [Unreleased]
+## [1.3.1] - 2026-08-11
+
+Documentation and CI maintenance release — no behavior changes. ([#31](https://github.com/baobaolaodie/flow-comet/pull/31), [#33](https://github.com/baobaolaodie/flow-comet/pull/33), [#34](https://github.com/baobaolaodie/flow-comet/pull/34), [#35](https://github.com/baobaolaodie/flow-comet/pull/35), [#36](https://github.com/baobaolaodie/flow-comet/pull/36), [#37](https://github.com/baobaolaodie/flow-comet/pull/37))
 
 ### Added
 
-- Regression suite expanded to 106 scenarios covering skill-load declaration markers, record validation against declaration markers, exit protocol declaration checks, cross-consistency timestamps, legacy compatibility, and review finding disposition checks.
+- README run-demo section with real screenshots (bilingual); flow-kit introduction and comparison with alternatives (bilingual).
+- TROUBLESHOOTING entries for the 1.3.0 initialization messages (INIT-GENERATE / VALIDATE-FAILED / DONE, bilingual).
+
+### Changed
+
+- CI: dev-main sync check is now tree-level and one-directional (only files main added count as dev behind — fixes false positives after squashed releases); branch-prefix allowlist gains `ci/`; commit-message convention check applies to development PRs only (release PRs carry accumulated history by design); actionlint upgrade with weekly canary job.
+- CHANGELOG scenario count corrected 95 → 97 to match the implementation; bilingual wording cleanups across CONTRIBUTING / INSTALLATION / USAGE.
+- Regression suite self-check list now includes CHANGELOG (prevents stale scenario counts in entries); regression mapping comment corrected to the actual count.
 
 ## [1.3.0] - 2026-08-10
 

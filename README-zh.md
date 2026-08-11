@@ -21,7 +21,7 @@
   <a href="https://claude.ai/code"><img src="https://img.shields.io/badge/Claude_Code-D97757?style=flat&logo=claude&logoColor=white" alt="Claude Code" /></a>
   <a href="https://github.com/rihebty/flow-kit"><img src="https://img.shields.io/badge/flow--kit-4CAF50?style=flat" alt="flow-kit" /></a>
   <a href="https://github.com/rpamis/comet"><img src="https://img.shields.io/badge/comet-4CAF50?style=flat" alt="comet" /></a>
-  <a href="CHANGELOG-zh.md"><img src="https://img.shields.io/badge/version-1.3.0-blue.svg" alt="Version" /></a>
+  <a href="CHANGELOG-zh.md"><img src="https://img.shields.io/badge/version-1.3.1-blue.svg" alt="Version" /></a>
 </p>
 
 ---
@@ -188,8 +188,8 @@ flow-comet/
 
 1. 从 `dev` 开分支：`git checkout dev && git checkout -b feature/<描述>`
 2. 修改 skill/脚本请改 `.comet/bundle-drafts/flow-comet/skills/`（权威源）；TDD——先写 RED 场景
-3. 运行回归：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 106 SCENARIOS PASSED`
-4. 开 PR 合入 `dev`（squash——每 PR 一条 change 级提交）；发布 PR `dev → main`（squash——1 个发布提交）
+3. 运行回归：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 97 SCENARIOS PASSED`
+4. 开 PR 合入 `dev`（merge commit）；发布 PR `dev → main`（squash）
 
 CI 在每个 PR 与 push 时自动强制仓库约定（回归、PR 纪律、版本一致性、死链）——无需本地配置。完整指南见 [CONTRIBUTING-zh.md](CONTRIBUTING-zh.md)。
 

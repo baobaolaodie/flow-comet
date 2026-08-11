@@ -10,11 +10,20 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号仅记录于 git tag 与本文档；`bundle.yaml` 的 version 保持 1.0.0（与发布流程解耦，见 README「版本与兼容性」）。
 
-## [Unreleased]
+## [1.3.1] - 2026-08-11
+
+文档与 CI 维护批次——无行为变更。([#31](https://github.com/baobaolaodie/flow-comet/pull/31)、[#33](https://github.com/baobaolaodie/flow-comet/pull/33)、[#34](https://github.com/baobaolaodie/flow-comet/pull/34)、[#35](https://github.com/baobaolaodie/flow-comet/pull/35)、[#36](https://github.com/baobaolaodie/flow-comet/pull/36)）、[#37](https://github.com/baobaolaodie/flow-comet/pull/37)）
 
 ### 新增
 
-- 回归套件扩展至 106 场景（覆盖 skill-load 声明标记 / record 按声明标记校验 / exit 协议声明校验 / 交叉自洽时间序 / 旧兼容 / 审查发现项处置状态校验）。
+- README 运行展示区（真实运行截图，双语）；flow-kit 简介与横向纵向对比（双语）。
+- TROUBLESHOOTING 补 1.3.0 初始化消息条目（INIT-GENERATE / VALIDATE-FAILED / DONE，双语）。
+
+### 变更
+
+- CI：dev-main 同步检查改树级单向（仅 main 新增文件判定 dev 落后——修复 squash 发布后的误报）；分支前缀白名单补 `ci/`；commit message 规范检查限定开发 PR（发布 PR 携带历史批次为设计）；actionlint 升级 + 每周金丝雀。
+- CHANGELOG 场景数修正 95→97（与实现一致）；CONTRIBUTING / INSTALLATION / USAGE 双语与措辞清理。
+- 回归套件自检清单纳入 CHANGELOG（防条目场景数过时）；回归映射注释修正为实际场景数。
 
 ## [1.3.0] - 2026-08-10
 
