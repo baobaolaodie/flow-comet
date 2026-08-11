@@ -36,6 +36,9 @@ Hook blocking semantics: PreToolUse hook exit 2 (blocking — prevents the tool 
 | SUMMARY six sections | verify output / 6-dimension self-check (non-empty) / boundary check + mandatory `## 自检方法` — self-review two-tier fallback: `brooks-review` (Skill tool) → if only a "Launching skill" placeholder is returned, Read the plugin-cache protocol files and execute the full review manually (`cache-brooks`) → builtin R1~R6 quick-check last (`builtin-quickcheck` must state the unavailable reason AND the cache-attempt evidence; missing evidence → progressive WARN) | exit execute |
 | verify real execution | TEST.md `## 验证命令` actually runs (multi-line `&&` supported); verifyFailures machine-counted, 4th → BLOCKED | exit verify |
 | Append placement | CONTEXT orphan sections / LESSONS numbering-out-of-order / STATE+CHANGELOG non-reverse-order → WARN (progressive) | exit open/verify/archive |
+| Task completion artifacts | every `done` task must have a matching `<id>-SUMMARY.md`; missing → progressive WARN (artifacts incomplete — the task claims done without its summary) | exit execute |
+| Parallel-task delegation | completed parallel (`[P]`) tasks require the delegation node to have been exited; otherwise → progressive WARN (the parallel work was done outside the delegation node — an overreach trace) | exit execute/verify |
+| Wave-wording consistency | wave-section text marks a task `[P]` (parallel intent) but the task tag lacks `parallel="true"` → progressive WARN (machine routing follows the task tags) | exit plan |
 | Pre-delegation check | uncommitted artifacts in `.specs/<change>/` → WORKTREE WARN; PROGRESS.md present → recovery warning | entry execute |
 | state schema validation | writeState field types fail-closed (state-schema.mjs single source, shared by three scripts) | all state writes |
 
