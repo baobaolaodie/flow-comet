@@ -18,7 +18,9 @@
 | `BROOKS-LINT WARN: 使用 builtin-quickcheck 未声明原因` | SUMMARY 缺"插件不可用"说明 | 在 SUMMARY 的 `## 自检方法` 段补原因 |
 | `BROOKS-LINT WARN: 使用 builtin-quickcheck 但未声明缓存尝试证据` | builtin 降级声明但无「已读插件缓存协议文件」证据 | 在 SUMMARY 的 `## 自检方法` 段声明：已 Read 插件缓存协议文件（如 `~/.claude/plugins/cache/brooks-lint-marketplace/.../brooks-review/`）手动执行完整 brooks 流程后才降级 |
 | `BLOCKED: verify 已失败 N/3` / `BLOCKED: verify 已失败 4 次，需用户决策` | 自动重试 ≤3 次；第 4 次失败需人工决策 | 暂停，人工决策「继续修 / 停止」 |
-| `BLOCKED: 疑似未 exit 节点 <node>` | `next` 检测到节点顺序非法（跳节点/未 exit） | 按提示执行 `workflow-guard.mjs exit <node> --apply`（回退场景见提示） |
+| `BLOCKED: 疑似未 exit 节点 <node>` | `next` 检测到节点顺序非法（跳节点/未 exit） | 按提示执行 `workflow-guard.mjs exit <node> --apply`（回退场景见提示）；节点实际已完成但状态卡住/漂移时，用 `workflow-state.mjs advance`（强制推进——确认节点确实完成后才用）或 `select` |
+| `BLOCKED: currentNode is <node>, cannot exit <target>` | 尝试 exit 的不是当前节点（状态漂移） | 用 `workflow-state.mjs advance`（强制推进——确认当前节点确实完成后才用）或 `select` 切换；禁止手改机器字段 |
+| `BLOCKED: missing evidence for Node <node>` | 节点已完成但缺证据记录 | 运行 `workflow-state.mjs record <node> '{"summary":"<完成摘要>"}'` 补证据后重试；状态漂移用 `advance`/`select` |
 | `BLOCKED: workflow protocol node must have a non-empty string id` | 自定义协议 `nodes[]` 含空/非法元素 | 修复协议 JSON：每个节点 `id` 非空字符串且避开内置 8 节点 id |
 | `BLOCKED: 未在协议 writeWhitelist 中声明` | 写入路径超出自定义协议白名单（fail-closed） | 在协议 `writeWhitelist` 声明该节点允许的路径前缀，或改用内置协议 |
 | `--protocol <path> 加载失败` | 协议路径不存在 / schemaVersion 或 kind 不符 | 检查路径；确认 `schemaVersion: 1`、`kind: "workflow-kernel"` |
