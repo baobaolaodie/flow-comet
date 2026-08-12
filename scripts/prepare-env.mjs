@@ -29,6 +29,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -275,6 +276,21 @@ function main() {
     copyTree(path.join(skillsSrc, name), path.join(claudeDir, 'skills', name), stats);
     stats.skills.push(name);
   }
+
+  // 3.5. 版本标识:优先从源仓库 git describe 生成(多人协作精确检测——发布版 = 精确 tag,
+  //      开发态 = "<tag>-<领先提交数>-g<hash>",提 issue 时维护者可据此判断包含哪些积累);
+  //      无 git(纯手动复制兜底)时用权威源随技能包分发的 INSTALLED_VERSION(最近发布版本)。
+  let installedVersion = '';
+  try {
+    const desc = execFileSync('git', ['describe', '--tags'], { cwd: REPO_ROOT, encoding: 'utf8', timeout: 30000 }).trim();
+    if (desc) installedVersion = desc.replace(/^v/, ''); // 剥 v 前缀,与 CHANGELOG 版本号一致
+  } catch { /* 无 tag 或非 git 仓库:回退权威源文件 */ }
+  if (!installedVersion) {
+    const bundled = path.join(skillsSrc, 'flow-comet', 'INSTALLED_VERSION');
+    if (fs.existsSync(bundled)) installedVersion = fs.readFileSync(bundled, 'utf8').trim();
+  }
+  fs.writeFileSync(path.join(claudeDir, 'skills', 'flow-comet', 'INSTALLED_VERSION'), installedVersion + '\n', 'utf8');
+  stats.files++;
 
   // 摘要
   console.log(`[prepare-env] 已准备环境: ${claudeDir}`);

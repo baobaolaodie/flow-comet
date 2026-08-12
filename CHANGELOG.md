@@ -15,7 +15,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 ### Added
 
 - **skill-load declaration mechanism**: subagents declare loaded workflow skills per node; record validates declarations against the protocol's required skill calls; exit checks protocol declaration markers; cross-consistency timestamp checks; backward compatible with legacy changes.
-- **Installed version marker**: `prepare-env` writes `<project>/.claude/INSTALLED_VERSION` (the release version from CHANGELOG, or `unreleased`) so issues and PRs can state the exact version reported.
+- **Installed version marker**: `prepare-env` writes `<project>/.claude/skills/flow-comet/INSTALLED_VERSION` from the source repo's git state (`1.3.1` on a release tag; `1.3.1-N-g<hash>` on accumulated dev) so issues and PRs can state the exact version — including how far dev has accumulated since the last release.
 - **Local commit/push hooks**: `install-commit-hook.mjs` sets up commit-msg and pre-push hooks that reject messages carrying process codes (this project's own convention, not a universal list).
 
 ### Changed

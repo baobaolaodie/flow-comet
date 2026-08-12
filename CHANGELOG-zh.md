@@ -15,7 +15,7 @@
 ### 新增
 
 - **skill-load 声明机制**：子代理按节点声明已加载的工作流技能；record 按协议要求的技能调用校验声明；exit 校验协议声明标记；交叉自洽时间序校验；与旧 change 向后兼容。
-- **安装版本标识**：`prepare-env` 写入 `<项目>/.claude/INSTALLED_VERSION`（取自 CHANGELOG 的发布版本，开发态为 `unreleased`）——issue 与 PR 可据此说明所报告的精确版本。
+- **安装版本标识**：`prepare-env` 写入 `<项目>/.claude/skills/flow-comet/INSTALLED_VERSION`（取自源仓库 git 状态：发布 tag 上为 `1.3.1`，积累中的 dev 为 `1.3.1-N-g<hash>`）——issue 与 PR 可据此说明精确版本，含 dev 自上次发布以来的积累程度。
 - **本地提交/推送 hook**：`install-commit-hook.mjs` 配置 commit-msg 与 pre-push hook，拒绝含过程代号的提交/推送消息（本项目的工程约定，非通用词表）。
 
 ### 变更
