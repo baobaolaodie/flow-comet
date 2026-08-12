@@ -1321,7 +1321,7 @@ const TEST_ITEMS = [
   // ---------- K. 安装器 ----------
 
   {
-    name: 'K1 安装器：prepare-env 写入版本标识且与 CHANGELOG 一致',
+    name: 'K1 安装器：版本标识随技能包分发且与权威源一致',
     run: (dir) => {
       const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
       if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
@@ -1331,14 +1331,12 @@ const TEST_ITEMS = [
       fs.mkdirSync(target, { recursive: true });
       const res = spawnSync(process.execPath, [installer, '--target', target], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
       if (res.status !== 0) throw new Error('prepare-env 失败: ' + (res.stderr || JSON.stringify(res.output)));
-      const versionFile = path.join(target, '.claude', 'INSTALLED_VERSION');
-      if (!fs.existsSync(versionFile)) throw new Error('缺少 .claude/INSTALLED_VERSION(版本标识文件)');
+      const versionFile = path.join(target, '.claude', 'skills', 'flow-comet', 'INSTALLED_VERSION');
+      if (!fs.existsSync(versionFile)) throw new Error('缺少 INSTALLED_VERSION(版本标识文件)');
       const installed = fs.readFileSync(versionFile, 'utf8').trim();
-      const changelog = fs.readFileSync(path.join(repoRoot, 'CHANGELOG.md'), 'utf8');
-      const m = changelog.match(/^## \[(\d+\.\d+\.\d+)\]/m);
-      const expected = m ? m[1] : 'unreleased';
-      if (installed !== expected) throw new Error('版本标识不符: 安装 ' + installed + ' ≠ 期望 ' + expected);
-      console.log('  版本标识 = ' + installed + '(与 CHANGELOG 一致)✓');
+      const srcVersion = fs.readFileSync(path.join(repoRoot, '.comet', 'bundle-drafts', 'flow-comet', 'skills', 'flow-comet', 'INSTALLED_VERSION'), 'utf8').trim();
+      if (installed !== srcVersion) throw new Error('版本标识不符: 安装 ' + installed + ' ≠ 权威源 ' + srcVersion);
+      console.log('  版本标识 = ' + installed + '(随技能包分发,两种安装方式一致)✓');
     },
   },
 ];

@@ -16,5 +16,5 @@ labels: question
 ## 环境（如适用）/ Environment (if applicable)
 
 - Node 版本 / Node version：
-- flow-comet 版本 / flow-comet version（`cat .claude/INSTALLED_VERSION`，由安装器写入；installer-generated）：
+- flow-comet 版本 / flow-comet version（`cat .claude/skills/flow-comet/INSTALLED_VERSION`，随技能包分发；ships with the skill bundle）：
 - 安装方式 / Install method（prepare-env 安装器 / 手动复制；prepare-env installer / manual copy）：

@@ -47,7 +47,7 @@ node scripts/prepare-env.mjs --target <absolute path to target project> --purge 
 
 ### Verifying installation (no side effects, no change created)
 
-1. **Structure**: `flow-comet*` skill directories under `<target>/.claude/skills/` (count matches prepare-env output, currently 19) + `rules/flow-comet-orchestration.md` + `settings.local.json`
+1. **Structure**: `flow-comet*` skill directories under `<target>/.claude/skills/` (count matches prepare-env output, currently 19) + `rules/flow-comet-orchestration.md` + `settings.local.json` + `skills/flow-comet/INSTALLED_VERSION` (version marker shipped with the skill bundle — `cat .claude/skills/flow-comet/INSTALLED_VERSION`)
 2. **Config loadability**: `settings.local.json` is valid JSON; `hooks.PreToolUse[].command` points to `node .claude/skills/flow-comet/scripts/comet-hook-guard.mjs` and that file exists
 3. **Consistency**: diff against the authoritative source (run inside the flow-comet repo; no output = identical):
    `diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/rules <target>/.claude/rules` and the same for `skills`
