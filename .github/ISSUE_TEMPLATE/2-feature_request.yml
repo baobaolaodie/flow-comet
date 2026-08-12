@@ -38,6 +38,13 @@ body:
       options:
         - label: 我已搜索既有 issue / I have searched existing issues
           required: true
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: 贡献意愿 / Contribution intent
+      options:
+        - label: 我打算自己实现此功能 / I plan to implement this myself
+        - label: 我期望维护者或其他贡献者实现 / I expect a maintainer or another contributor to implement it
   - type: dropdown
     id: scope
     attributes:

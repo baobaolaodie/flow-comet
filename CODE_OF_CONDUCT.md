@@ -59,8 +59,9 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement at the repository
-maintainer (see the repository's issue templates for the contact path).
+reported to the community leaders responsible for enforcement — the repository
+maintainer (GitHub: baobaolaodie). Reports may also be filed through a private
+security advisory if discretion is needed.
 
 All complaints will be reviewed and investigated promptly and fairly.
 

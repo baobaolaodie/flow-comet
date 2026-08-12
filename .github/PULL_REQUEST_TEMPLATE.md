@@ -2,6 +2,8 @@
 
 ## 摘要 / Summary
 
+<!-- 标题须为 Conventional Commits：<type>(<scope>): <subject>，如 feat: ... / fix: ... / docs: ... / ci: ... -->
+<!-- Title must be Conventional Commits: <type>(<scope>): <subject>, e.g. feat: ... / fix: ... / docs: ... / ci: ... -->
 <!-- 结构引导：动机(为什么做)→ 做法(改了什么)→ 影响(影响范围与验证依据) / Structure: Motivation → What changed → Impact -->
 
 ## 改动范围（勾选）/ Scope of Changes (check)
