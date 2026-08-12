@@ -132,20 +132,24 @@ function probePlatform(target) {
   return null;
 }
 
-// TTY 交互选择（缺省路径——用户裁决：交互式选择为主；无 TTY 自动走探测/默认）
+// TTY 交互选择（缺省路径——用户裁决：交互式选择为主；无 TTY 自动走探测/默认）。
+// 探测结果影响默认值：检测到 .codex/ 痕迹时回车默认 Codex（而非恒默认 Claude Code）。
 async function promptPlatformSelection(probe) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
+    const defaultChoice = probe === 'codex' ? 'codex' : 'claude-code';
+    const defaultLabel = probe === 'codex' ? 'Codex' : 'Claude Code';
     const probeNote = probe
-      ? `（检测到目标项目已有 ${probe === 'codex' ? '.codex/' : '.claude/'} 痕迹）`
+      ? `（检测到目标项目已有 ${probe === 'codex' ? '.codex/' : '.claude/'} 痕迹——默认 ${defaultLabel}）`
       : '';
     const answer = await rl.question(
       `[prepare-env] 选择安装平台 ${probeNote}:\n` +
-      `  1) Claude Code（默认）\n` +
-      `  2) Codex\n` +
-      `  输入序号或回车（默认 1）: `
+      `  1) Claude Code${defaultChoice === 'claude-code' ? '（默认）' : ''}\n` +
+      `  2) Codex${defaultChoice === 'codex' ? '（默认）' : ''}\n` +
+      `  输入序号或回车（默认 ${defaultChoice === 'codex' ? '2' : '1'}）: `
     );
     const choice = String(answer ?? '').trim().toLowerCase();
+    if (choice === '') return defaultChoice;
     if (choice === '2' || choice === 'codex') return 'codex';
     return 'claude-code';
   } finally {

@@ -316,7 +316,7 @@ function runLocalTool(checker, repoRoot) {
   return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
 }
 
-// ---------- 系统测试项（A~J 十大类） ----------
+// ---------- 系统测试项（A~K 十一类） ----------
 
 const TEST_ITEMS = [
   // ---------- A. 状态机与路由 ----------
