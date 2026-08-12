@@ -37,8 +37,11 @@
 - frontend/src/types/tournament.ts（既有 · Tournament 类型加 venue_names?）
 
 新增模块：
+- app/crud/crud_venue.py（新建：get_active_venues_by_tournament 等场地查询，见 T03）
 - app/api/v1/endpoints/tournaments.py 内新增 GET /tournaments/venues 子路由（挂同一 router，不新建文件）
 - frontend/src/api/adminApi.ts 新增 fetchAllVenues()（既有文件内加函数，不新建文件）
+
+测试与文档文件（tests/*.py、README/CHANGELOG 等）随各任务 write_files 新增，不在此列举——以 TASK.md 的 write_files 边界为准。
 
 禁动清单（与本次无关，AI 不许"顺手"碰）：
 - app/crud/crud_schedule.py:254 起的 venue_availability 排班 CRUD

@@ -30,6 +30,7 @@ Wave 3 (serial):   T05（depends on T03, T04）
     app/models/venue.py
   </read_files>
   <write_files>
+    app/api/v1/endpoints/tournaments.py
     app/crud/crud_tournament.py
     app/schemas/tournament.py
     app/services/tournament_service.py
@@ -78,7 +79,7 @@ Wave 3 (serial):   T05（depends on T03, T04）
     cd frontend && npx vitest run src/api/__tests__/adminApi.venue.test.ts
   </verify>
   <done>
-    AC-4 前端可调用 /tournaments/venues；AC-3 参数透传链路可用
+    AC-4 后端接口 GET /tournaments/venues 可返回全量启用场地；AC-3 参数透传链路可用
   </done>
   <depends_on></depends_on>
 </task>

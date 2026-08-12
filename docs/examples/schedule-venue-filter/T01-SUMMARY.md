@@ -89,8 +89,8 @@ N/A（无 schema 变更，`venues.tournament_id` 为既有 FK）。
 
 ```
 ✅ 越界检查（R6.5）：
-  - TASK write_files：4 项
-  - 实际 diff 涉及：4 项（crud_tournament.py / schemas/tournament.py / tournament_service.py / tests/test_api_tournaments_venue_filter.py）
+  - TASK write_files：5 项
+  - 实际 diff 涉及：5 项（tournaments.py / crud_tournament.py / schemas/tournament.py / tournament_service.py / tests/test_api_tournaments_venue_filter.py）
   - 越界：0 / 已撤销 / 已扩范围
 ```
 

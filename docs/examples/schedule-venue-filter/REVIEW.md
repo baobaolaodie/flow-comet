@@ -15,7 +15,7 @@
 | 每条 AC 都有测试 | ✅ | AC-1/3/5 `tests/test_api_tournaments_venue_filter.py`（T01/T03）；AC-2/3 `AdminTournaments.test.tsx`（T04）；AC-4 `test_list_all_active_venues`（T03） |
 | 未引入 `out of scope` 内容 | ✅ | v2（CSV 导出/多对多/用户端场地名）与 out（批量操作/排班日历）均未实现 |
 | 未范围蔓延（无 REQUIREMENT 外的功能） | ✅ | 全部 diff 对应 AC-1~5；无新增功能 |
-| 未越过 DESIGN 边界 | ✅ | write_files 均在 `DESIGN 0.5.1` 触碰清单内；禁动清单（crud_schedule 排班 / search_service / AdminSchedules 场地管理）零触碰 |
+| 未越过 DESIGN 边界 | ✅ | 源码 write_files 均在 `DESIGN 0.5.1` 触碰/新增清单内（测试与文档文件随任务 write_files，见各任务边界）；禁动清单（crud_schedule 排班 / search_service / AdminSchedules 场地管理）零触碰 |
 
 **Spec 合规结论**: 通过
 
@@ -57,7 +57,7 @@
 **生成 fix 任务**：无（已知接受，见总结）
 ```
 
-### 2.3 架构依赖图（大型 change · 来自 /brooks-audit）
+### 2.3 架构依赖图（大型 change · AI 内置诊断）
 
 ```mermaid
 graph LR
@@ -83,7 +83,7 @@ graph LR
 
 ## 第四轮 · 补充审查（按触发条件）
 
-### 4.1 技术债评估（来自 /brooks-debt，仅里程碑 / 重构）
+### 4.1 技术债评估（AI 内置诊断，仅里程碑 / 重构）
 
 未触发（非里程碑/重构 change）。
 

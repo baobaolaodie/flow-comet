@@ -17,7 +17,7 @@
 |---|---|---|
 | `docs/CHANGELOG.md` | 修改 | 追加 `feat(test-schedule-venue-filter): 赛事列表按场地筛选` |
 | `docs/known_issues.md` | 修改 | 记录 venues 1:1 绑定技术债（含影响面） |
-| `tests/test_api_tournaments_venue_filter.py` | 修改 | 全量回归前补一个边界用例（venue_id=0 不生效） |
+| `tests/test_api_tournaments_venue_filter.py` | 修改 | 全量回归前补一个边界用例（venue_id=0 被 FastAPI `ge=1` 校验拒绝 422） |
 | `frontend/src/pages/admin/__tests__/AdminTournaments.test.tsx` | 修改 | 补充 venue 下拉 options 空态用例 |
 
 ## verify 输出（必填）
@@ -121,4 +121,4 @@ N/A。
 ## 完成判定
 
 - TASK.md 中对应任务已勾选：是
-- 提交 hash：`sim-abc1237`
+- 提交 hash：`sim-abc1238`
