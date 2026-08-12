@@ -1331,6 +1331,16 @@ const TEST_ITEMS = [
       fs.mkdirSync(target, { recursive: true });
       const res = spawnSync(process.execPath, [installer, '--target', target], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
       if (res.status !== 0) throw new Error('prepare-env 失败: ' + (res.stderr || JSON.stringify(res.output)));
+      // 分发主干:权威源随技能包分发的静态文件(手动复制也有效,不依赖安装脚本)
+      const srcVersionFile = path.join(repoRoot, '.comet', 'bundle-drafts', 'flow-comet', 'skills', 'flow-comet', 'INSTALLED_VERSION');
+      if (!fs.existsSync(srcVersionFile)) throw new Error('缺少权威源 INSTALLED_VERSION(随技能包分发)');
+      const srcVersion = fs.readFileSync(srcVersionFile, 'utf8').trim();
+      if (!srcVersion) throw new Error('权威源版本标识为空');
+      // 权威源须与 CHANGELOG 首个版本段一致(发布批次更新;CI release-consistency 同规则)
+      const changelog = fs.readFileSync(path.join(repoRoot, 'CHANGELOG.md'), 'utf8');
+      const m = changelog.match(/^## \[(\d+\.\d+\.\d+)\]/m);
+      const expected = m ? m[1] : 'unreleased';
+      if (srcVersion !== expected) throw new Error('权威源版本标识不符: ' + srcVersion + ' ≠ CHANGELOG 版本 ' + expected);
       const versionFile = path.join(target, '.claude', 'skills', 'flow-comet', 'INSTALLED_VERSION');
       if (!fs.existsSync(versionFile)) throw new Error('缺少 INSTALLED_VERSION(版本标识文件)');
       const installed = fs.readFileSync(versionFile, 'utf8').trim();
