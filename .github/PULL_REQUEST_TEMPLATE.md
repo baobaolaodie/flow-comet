@@ -35,7 +35,10 @@
 
 ## 关联（可选）/ Related (optional)
 
-<!-- 关联 issue / PR（如 Fixes #39）/ Related issues / PRs -->
+<!-- 仅本 PR 解决的 issue 用 Fixes/Closes/Resolves #N（合入默认分支时自动关闭）；注意：开发 PR 目标是 dev（非默认分支），关键词不会触发自动关闭——需在发布 PR（dev → main）中处理。
+Only use Fixes/Closes/Resolves #N for issues this PR actually resolves (auto-closed on merge into the default branch). Note: dev-targeted PRs are not the default branch, so these keywords do not auto-close — handle closing in the release PR (dev → main).
+非解决性事项用文字描述即可，不要引用 issue 编号（避免在 issue 时间线留下误导性引用）。
+For anything not resolved by this PR, describe it in text without referencing issue numbers (avoids misleading cross-references on the issue timeline). -->
 
 ## 审查注意点 / Review Notes
 
