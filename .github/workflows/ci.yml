@@ -136,7 +136,8 @@ jobs:
               .filter((f) => {
                 try { execSync(`git cat-file -e origin/dev:${f}`); return true; } catch { /* dev lacks it */ }
                 return !execSync(`git log --oneline origin/dev -- ${f}`).toString().trim();
-              });
+              })
+              .join('\n');
             if (isRelease && drift)
               P.push(`dev lacks ${drift.split('\n').length} file(s) that main added — sync dev before creating the release PR`);
             if (!isRelease && drift)
