@@ -132,7 +132,7 @@ The engine routes between nodes by deriving state from `.specs/` artifacts (dete
 4. **The native automation layer for flow-kit** — not a re-invention: artifact formats, rules, and stages are identical to flow-kit; a flow-kit project upgrades to a machine-driven flow by installing flow-comet, no migration needed.
 5. **Protocol-driven, zero dependencies, copy-and-run** — the built-in 8-node flow works out of the box; any installed skill can be composed into a custom protocol on the same engine; Node.js 18+, no third-party dependencies, one command installs it.
 
-**Fit**: flow-comet is built for long-running, multi-session development changes on Claude Code — the discipline it automates pays off when a change spans hours and multiple sessions. It is not a general CI/CD or project-management tool; other platforms (Codex / Gemini / Cursor) are not guaranteed.
+**Fit**: flow-comet is built for long-running, multi-session development changes on Claude Code — the discipline it automates pays off when a change spans hours and multiple sessions. It is not a general CI/CD or project-management tool; Codex is supported experimentally (see [Installation](docs/INSTALLATION.md#platforms)), other platforms (Gemini / Cursor) are not guaranteed.
 
 ## Screenshots
 
