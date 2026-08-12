@@ -55,7 +55,7 @@ open → design → plan → execute ⇄ subagent-execute → review → verify 
 
 以下分支操作均由 Claude 在 skill 协议下**自动执行**（无需手动 git）：
 
-- 首次 `/flow-comet` 调用自动创建 `change/<change-id>` 分支（git 仓库时），全流程在分支上进行；分支前缀可配置（`init --branch-prefix <prefix>`，如 `feat/`，须以 `/` 结尾，默认 `change/`）
+- 首次 `/flow-comet` 调用自动创建 `change/<id>` 分支（git 仓库时），全流程在分支上进行；分支前缀可配置（`init --branch-prefix <prefix>`，如 `feat/`，须以 `/` 结尾，默认 `change/`）
 - 归档时收尾：自动合并回主分支 + 删除分支（`enablePrReview=true` 时先推送 + PR；**merge 前暂停等你确认**）
 - 分支-状态一致性：`status`/`next` 检测分支与 activeChange 不符 → WARN（不 BLOCK）
 - **向后兼容**：无分支的旧 change 照常运行（分支校验仅新模式生效）

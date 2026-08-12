@@ -55,7 +55,7 @@ All workflow artifacts live in `.specs/` (project-level) and `.specs/<change-id>
 
 All branch operations are **executed automatically by Claude under the skill protocol** (no manual git):
 
-- First `/flow-comet` call creates the `change/<change-id>` branch (git repos), workflow runs on it; prefix configurable (`init --branch-prefix <prefix>`, e.g. `feat/`, must end with `/`, default `change/`)
+- First `/flow-comet` call creates the `change/<id>` branch (git repos), workflow runs on it; prefix configurable (`init --branch-prefix <prefix>`, e.g. `feat/`, must end with `/`, default `change/`)
 - Archive wrap-up: merges back to main + deletes the branch (`enablePrReview=true` pushes + PR first; **pauses for your confirmation before merge**)
 - Branch-state consistency: `status`/`next` detect branch/activeChange mismatch → WARN (not BLOCK)
 - **Backward compatible**: old changes without a branch run unchanged (branch checks apply to new mode only)
