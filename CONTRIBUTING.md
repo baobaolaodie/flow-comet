@@ -102,7 +102,7 @@ The hooks reject commits and pushes whose messages carry process codes — proje
 Before pushing, run the regression baseline:
 
 ```bash
-node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 113 SCENARIOS PASSED
+node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 114 SCENARIOS PASSED
 ```
 
 CI handles the rest.

@@ -2624,12 +2624,19 @@ const SCENARIOS = [
     run: (dir) => {
       execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
       execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--allow-empty', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
+      const branchBefore = execFileSync('git', ['branch', '--show-current'], { cwd: dir, encoding: 'utf8' }).trim();
       const res = runState(['init', '--help'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
       assertExit(res, 1);
       assertOut(res, 'not a change name');
+      assertOut(res, 'Usage: workflow-state.mjs init');
       assertNotOut(res, 'BRANCH:');
+      const branchAfter = execFileSync('git', ['branch', '--show-current'], { cwd: dir, encoding: 'utf8' }).trim();
+      if (branchAfter !== branchBefore) throw new Error('init --help 不应切换或创建分支');
       if (fs.existsSync(path.join(dir, '.comet', 'flow-comet-state.json'))) {
         throw new Error('init --help 不应写状态文件(此前被当作 change 名执行的副作用)');
+      }
+      if (fs.existsSync(path.join(dir, '.specs', '--help'))) {
+        throw new Error('init --help 不应创建 .specs/--help 工件目录');
       }
     },
   },

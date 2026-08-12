@@ -66,8 +66,10 @@ representative at an online or offline event.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leaders responsible for enforcement — the repository
-maintainer (GitHub: baobaolaodie). Reports may also be filed through a private
-security advisory if discretion is needed.
+maintainer (GitHub: baobaolaodie). Confidential conduct reports may also be
+filed through the repository's private security advisory (Security tab →
+Report a vulnerability, noting it is a conduct report); vulnerability reports
+should always use that advisory channel.
 
 All complaints will be reviewed and investigated promptly and fairly.
 

@@ -102,7 +102,7 @@ hook 在提交与推送时拒绝含过程代号（修复编号、批次代号、
 推送前运行回归基线：
 
 ```bash
-node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 113 SCENARIOS PASSED
+node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 114 SCENARIOS PASSED
 ```
 
 其余由 CI 处理。
