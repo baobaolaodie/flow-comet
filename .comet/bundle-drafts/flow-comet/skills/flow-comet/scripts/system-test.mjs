@@ -1336,7 +1336,12 @@ const TEST_ITEMS = [
       const installed = fs.readFileSync(versionFile, 'utf8').trim();
       const srcVersion = fs.readFileSync(path.join(repoRoot, '.comet', 'bundle-drafts', 'flow-comet', 'skills', 'flow-comet', 'INSTALLED_VERSION'), 'utf8').trim();
       if (installed !== srcVersion) throw new Error('版本标识不符: 安装 ' + installed + ' ≠ 权威源 ' + srcVersion);
-      console.log('  版本标识 = ' + installed + '(随技能包分发,两种安装方式一致)✓');
+      // 权威源版本标识须与 CHANGELOG 首个版本段一致(无版本段 = unreleased)——与 CI release-consistency 同规则
+      const changelog = fs.readFileSync(path.join(repoRoot, 'CHANGELOG.md'), 'utf8');
+      const m = changelog.match(/^## \[(\d+\.\d+\.\d+)\]/m);
+      const expected = m ? m[1] : 'unreleased';
+      if (srcVersion !== expected) throw new Error('权威源版本标识不符: ' + srcVersion + ' ≠ CHANGELOG 版本 ' + expected);
+      console.log('  版本标识 = ' + installed + '(随技能包分发,与 CHANGELOG 一致)✓');
     },
   },
 ];
