@@ -47,14 +47,14 @@ node scripts/prepare-env.mjs --target <absolute path to target project> --purge 
 
 ### Verifying installation (no side effects, no change created)
 
-1. **Structure**: `flow-comet*` skill directories under `<target>/.claude/skills/` (count matches prepare-env output, currently 19) + `rules/flow-comet-orchestration.md` + `settings.local.json`
+1. **Structure**: `flow-comet*` skill directories under `<target>/.claude/skills/` (count matches prepare-env output, currently 19) + `rules/flow-comet-orchestration.md` + `settings.local.json` + `skills/flow-comet/INSTALLED_VERSION` (version marker shipped with the skill bundle — `cat .claude/skills/flow-comet/INSTALLED_VERSION`; it equals the latest release version, or for prepare-env installs with git available, a precise `<release>-<n>-g<hash>` describing how far the source has accumulated since that release)
 2. **Config loadability**: `settings.local.json` is valid JSON; `hooks.PreToolUse[].command` points to `node .claude/skills/flow-comet/scripts/comet-hook-guard.mjs` and that file exists
 3. **Consistency**: diff against the authoritative source (run inside the flow-comet repo; no output = identical):
    `diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/rules <target>/.claude/rules` and the same for `skills`
 4. **Smoke test** (run inside the target project): `cd <target> && node .claude/skills/flow-comet/scripts/workflow-state.mjs status` — expected output is a JSON state object (`{"status":"no-change",...}` for a fresh project, `{"status":"running","change":...}` when a workflow is active)
 
 > Commands are POSIX-style (Git Bash / WSL / macOS terminal); Windows users should run them in Git Bash.
-> **Note**: `guard-self-test.mjs` (97 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
+> **Note**: `guard-self-test.mjs` (113 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
 
 ## Option B · Manual copy (fallback)
 
@@ -93,6 +93,24 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
 ```
 
 **4. Runtime state**: `.comet/flow-comet-state.json` is created by `init` (or the first `/flow-comet` call).
+
+## Uninstalling
+
+Remove flow-comet from a target project:
+
+```bash
+# 1. Remove the skill directories and the orchestration rule
+rm -rf <target>/.claude/skills/flow-comet*
+rm <target>/.claude/rules/flow-comet-orchestration.md
+
+# 2. Remove the hook entry from .claude/settings.local.json
+#    (delete only the PreToolUse entry whose command references comet-hook-guard.mjs,
+#     keeping everything else — permissions, custom hooks, other matcher groups)
+
+# 3. Optional: remove workflow state and artifacts
+rm <target>/.comet/flow-comet-state.json
+rm -rf <target>/.specs/          # only if you no longer need the workflow artifacts
+```
 
 ## Integration with Comet (only when the target project also uses Comet)
 

@@ -103,13 +103,21 @@ flow-kit 9 阶段工作流的 workflow-kernel 实现。保留 flow-kit 的全部
 | 节点 | Implementation | Required Calls | Enforcement |
 |------|---------------|----------------|-------------|
 | open | flow-comet-open | flow-comet-change, flow-comet-requirement | guarded |
-| design | flow-comet-design | flow-comet-design, flow-comet-ui-design (advisory) | guarded |
+| design | flow-comet-design | flow-comet-design, flow-comet-ui-design (advisory，不要求声明) | guarded |
 | plan | flow-comet-plan | flow-comet-task | guarded |
 | execute | flow-comet-execute | flow-comet-dev | guarded |
 | subagent-execute | flow-comet-subagent-execute | flow-comet-dev (handoff) | handoff-guarded |
 | review | flow-comet-review | flow-comet-review, flow-comet-test | guarded |
 | verify | flow-comet-verify | flow-comet-integration | guarded |
 | archive | flow-comet-archive | flow-comet-integration | guarded |
+
+**节点 skill 加载声明**：进入节点、加载节点 skill 后**立即**运行声明命令，记录本次加载使用的 skill 与协议文件（open/review 等涉及多个协议文件的节点，每个协议文件对应一条声明命令）：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <skill> --prompt flow-kit/prompts/<阶段>.md
+```
+
+节点退出（exit）与证据记录（record）会核对声明标记。声明如实记录执行者动作——加载了哪个 skill、按哪份协议工作——**不等于产出证明**；产出是否正确由产物结构校验与门禁把关。
 
 ## Guardrails And Evidence
 
@@ -199,13 +207,15 @@ The route, Output Schemas, required Skill calls, and recovery state are defined 
 ## Skill Bindings
 
 - `open`: implementation `flow-comet-open` (require); required calls `flow-comet-change`, `flow-comet-requirement`; augmentations none.
-- `design`: implementation `flow-comet-design` (require); required calls `flow-comet-design`, `flow-comet-ui-design`; augmentations none.
-- `plan`: implementation `flow-comet-task` (require); required calls `flow-comet-task`; augmentations none.
+- `design`: implementation `flow-comet-design` (require); required calls `flow-comet-design`, `flow-comet-ui-design` (advisory——仅前端项目触发，不要求 skill-load 声明；record D3 只校验执行者实际声明的条目); augmentations none.
+- `plan`: implementation `flow-comet-plan` (require); required calls `flow-comet-task`; augmentations none.
 - `execute`: implementation `flow-comet-execute` (require); required calls `flow-comet-dev`; augmentations none.
 - `subagent-execute`: implementation `flow-comet-subagent-execute` (require); required calls `flow-comet-dev`; augmentations none.
 - `review`: implementation `flow-comet-review` (require); required calls `flow-comet-review`, `flow-comet-test`; augmentations none.
 - `verify`: implementation `flow-comet-verify` (require); required calls `flow-comet-integration`; augmentations none.
 - `archive`: implementation `flow-comet-archive` (require); required calls `flow-comet-integration`; augmentations none.
+
+**节点 skill 加载声明**：加载节点 skill 后立即运行 `node flow-comet/scripts/workflow-state.mjs skill-load <node> <skill> --prompt flow-kit/prompts/<阶段>.md` 记录本次加载（多协议节点每个协议文件一条命令）；exit/record 会核对声明标记。声明如实记录加载动作，不等于产出证明——正确性由产物门禁校验把关。
 
 ## Guardrails And Evidence
 

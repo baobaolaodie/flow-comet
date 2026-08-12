@@ -1,0 +1,4 @@
+# 仓库约定 git hooks 强制 LF 行尾(2026-08-12)
+# Windows core.autocrlf=true 下,CRLF 行尾会使 sh 执行的 hook 脚本报错($'\r: command not found);
+# git 约定类脚本必须以 LF 入库与检出。
+.githooks/** text eol=lf

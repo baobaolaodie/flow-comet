@@ -108,7 +108,13 @@ The design node reads CHANGE.md and REQUIREMENT.md, then produces DESIGN.md thro
 
 | Skill | Enforcement | Reason |
 |-------|-------------|--------|
-| `flow-comet-ui-design` | Required for frontend projects | Produces UI-DESIGN.md with design tokens, anti-AI-slop check, visual north star |
+| `flow-comet-ui-design` | Advisory（仅前端项目触发） | Produces UI-DESIGN.md with design tokens, anti-AI-slop check, visual north star——advisory 条目不要求 skill-load 声明（record D3 只校验执行者实际声明的 guarded 条目） |
+
+**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）。`flow-comet-ui-design` 为 advisory 条目——仅前端项目加载，且**不要求**对应的 skill-load 声明标记（非前端项目不加载不声明；前端项目加载后若把 `required-skill:design.flow-comet-ui-design` 记入 completedChecks，则必须先运行 skill-load 声明，D3 校验声明过的条目）：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load design flow-comet-design --prompt flow-kit/prompts/2-design.md
+```
 
 ## Output Schemas
 
@@ -166,7 +172,13 @@ Load `flow-comet-design` for this Node. Operation: `require`.
 ## Required Skill Calls
 
 - Load `flow-comet-design` during this Node and record completed check `required-skill:design.flow-comet-design`. Reason: 技术栈选型 + ADR
-- Load `flow-comet-ui-design` during this Node and record completed check `required-skill:design.flow-comet-ui-design`. Reason: UI-DESIGN（仅前端）
+- Load `flow-comet-ui-design` during this Node and record completed check `required-skill:design.flow-comet-ui-design`. Reason: UI-DESIGN（仅前端）——**advisory 条目，不要求 skill-load 声明**：record D3 只校验执行者实际声明的条目，非前端项目不加载不声明；若声明该条目则须先运行 `skill-load design flow-comet-ui-design --prompt flow-kit/prompts/2a-ui-design.md`（exit 的 required-skill 自动补全不触发 per-skill 标记校验——D4 为节点级协议声明）
+
+**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+
+```bash
+node flow-comet/scripts/workflow-state.mjs skill-load design flow-comet-design --prompt flow-kit/prompts/2-design.md
+```
 
 ## Augmentations
 

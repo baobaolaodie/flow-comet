@@ -33,7 +33,7 @@ This node performs the final integration verification: running all automated tes
 
 ### Steps
 
-**Express 路径（低风险 change，P1）**：若 CHANGE.md 头部含 `express: true`，则 TEST.md 用最小矩阵（只第 1 轮功能，2-5 轮声明 N/A）、UAT 用简化脚本（核心 AC 手动确认 + 其余单测覆盖）；否则完整 5 轮金字塔 + 全 UAT。
+**Express 路径（低风险变更快捷路径）**：若 CHANGE.md 头部含 `express: true`，则 TEST.md 用最小矩阵（只第 1 轮功能，2-5 轮声明 N/A）、UAT 用简化脚本（核心 AC 手动确认 + 其余单测覆盖）；否则完整 5 轮金字塔 + 全 UAT。
 
 1. **Run full automation**: Execute all automated checks and paste real output:
    - Full unit tests: `pytest tests/ -q` (or equivalent).
@@ -102,6 +102,12 @@ The verify node loads `flow-comet-integration` for the verification protocol. It
 | `flow-comet-integration` | Required for verification protocol | Provides automation execution, UAT guidance, failure diagnosis, LESSONS nomination |
 
 Load `flow-comet-integration` during this Node and record completed check `required-skill:verify.flow-comet-integration`. Reason: 集成验证 + UAT + LESSONS 提名
+
+**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load verify flow-comet-integration --prompt flow-kit/prompts/7-integration.md
+```
 
 ## Augmentations
 

@@ -110,6 +110,12 @@ The plan node loads `flow-comet-task` to perform task decomposition. It reads DE
 |-------|-------------|--------|
 | `flow-comet-task` | Required for task decomposition | Provides XML template, wave division protocol, and file boundary rules |
 
+**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load plan flow-comet-task --prompt flow-kit/prompts/3-task.md
+```
+
 ## Output Schemas
 
 Schema: `flowkit.plan.v1`
@@ -164,6 +170,12 @@ Load `flow-comet-task` for this Node. Operation: `require`.
 ## Required Skill Calls
 
 - Load `flow-comet-task` during this Node and record completed check `required-skill:plan.flow-comet-task`. Reason: 拆原子任务
+
+**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+
+```bash
+node flow-comet/scripts/workflow-state.mjs skill-load plan flow-comet-task --prompt flow-kit/prompts/3-task.md
+```
 
 ## Augmentations
 

@@ -55,7 +55,7 @@ All workflow artifacts live in `.specs/` (project-level) and `.specs/<change-id>
 
 All branch operations are **executed automatically by Claude under the skill protocol** (no manual git):
 
-- First `/flow-comet` call creates the `change/<change-id>` branch (git repos), workflow runs on it; prefix configurable (`init --branch-prefix <prefix>`, e.g. `feat/`, must end with `/`, default `change/`)
+- First `/flow-comet` call creates the `change/<id>` branch (git repos), workflow runs on it; prefix configurable (`init --branch-prefix <prefix>`, e.g. `feat/`, must end with `/`, default `change/`)
 - Archive wrap-up: merges back to main + deletes the branch (`enablePrReview=true` pushes + PR first; **pauses for your confirmation before merge**)
 - Branch-state consistency: `status`/`next` detect branch/activeChange mismatch → WARN (not BLOCK)
 - **Backward compatible**: old changes without a branch run unchanged (branch checks apply to new mode only)
@@ -114,6 +114,8 @@ node workflow-state.mjs config set enablePrReview true         # enable PR revie
 node workflow-state.mjs execution-mode <subagent|direct>       # switch execution mode (direct needs confirmation)
 node workflow-guard.mjs entry/exit <node> [--apply]            # node gates
 node workflow-handoff.mjs request|result|status                # subagent delegation handoff
+node workflow-state.mjs skill-load <node> '<json>'             # skill-load declaration (run by Claude)
+node workflow-state.mjs verify-fail                            # verify failure counter (3 retries, 4th BLOCKED)
 ```
 
 **Subagent delegation** (execute/subagent-execute nodes, executed by Claude): parse write_files from TASK.md → `workflow-handoff.mjs request` → Agent tool (`isolation: "worktree"`) delegation with Return Contract → `result` records evidence → guard validates the delegation.

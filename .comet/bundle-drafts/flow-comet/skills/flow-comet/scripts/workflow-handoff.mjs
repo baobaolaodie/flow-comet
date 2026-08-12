@@ -22,7 +22,7 @@ async function readState() {
 }
 
 async function writeState(state) {
-  // D3: 与 workflow-state.mjs C6 同构——写入前校验已知字段类型（fail-closed），非法 → BLOCKED + exit 1
+  // 内置节点常量: 与 workflow-state.mjs C6 同构——写入前校验已知字段类型（fail-closed），非法 → BLOCKED + exit 1
   const bad = validateStateFields(state);
   if (bad.length) {
     console.error('BLOCKED: state 字段类型非法: ' + bad[0]);
@@ -50,7 +50,7 @@ async function main() {
     } else {
       description = args.join(' ') || 'pending';
     }
-    // P1-C: 若未显式传 --write-files，从 TASK.md 自动解析（orchestrator 无需手动提取文件列表）
+    // 若未显式传 --write-files，从 TASK.md 自动解析（orchestrator 无需手动提取文件列表）
     if (!writeFiles || writeFiles.length === 0) {
       try {
         const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
@@ -100,7 +100,7 @@ async function main() {
         const allowed = state.evidence['subagent-execute'].handoffRequests?.[taskId]?.writeFiles || [];
         // 空 writeFiles（request 未带 --write-files）时跳过子集校验——避免全量越界误报噪音
         if (allowed.length > 0) {
-          // S98（dogfood 实证）：*-SUMMARY.md 是 flow-comet 强制产物（execute 证据），非越界——豁免
+          // 真实项目端到端验证实证：*-SUMMARY.md 是 flow-comet 强制产物（execute 证据），非越界——豁免
           const violations = committedFiles.filter(f => !f.endsWith('-SUMMARY.md') && !allowed.some(a => f.startsWith(a.replace('*', ''))));
           if (violations.length > 0) {
             console.error('HANDOFF WARN: 提交文件超出 writeFiles 范围: ' + violations.join(', '));

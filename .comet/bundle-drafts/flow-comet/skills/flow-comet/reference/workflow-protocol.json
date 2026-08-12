@@ -101,7 +101,7 @@
       "kind": "control",
       "responsibility": "拆原子任务（XML 格式）+ 波次划分。生成 TASK.md。",
       "implementation": {
-        "skill": "flow-comet-task",
+        "skill": "flow-comet-plan",
         "operation": "require",
         "scope": "main",
         "enforcement": "guarded"
@@ -625,6 +625,15 @@
           "required": true,
           "paths": [
             "archive/*-<change-id>"
+          ],
+          "pathBase": "specs-root"
+        },
+        {
+          "id": "known-issues",
+          "kind": "file",
+          "required": false,
+          "paths": [
+            "archive/*-<change-id>/KNOWN-ISSUES.md"
           ],
           "pathBase": "specs-root"
         }

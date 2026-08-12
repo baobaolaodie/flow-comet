@@ -47,13 +47,13 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 
 ### 验证安装（无副作用，不创建 change）
 
-1. **结构检查**：`<目标项目>/.claude/skills/` 下 `flow-comet*` skill 目录数量与 prepare-env 输出一致（当前 19 个）+ `rules/flow-comet-orchestration.md` + `settings.local.json` 均存在
+1. **结构检查**：`<目标项目>/.claude/skills/` 下 `flow-comet*` skill 目录数量与 prepare-env 输出一致（当前 19 个）+ `rules/flow-comet-orchestration.md` + `settings.local.json` 均存在 + `skills/flow-comet/INSTALLED_VERSION`（随技能包分发的版本标识——`cat .claude/skills/flow-comet/INSTALLED_VERSION`；内容为基于的最近发布版本；prepare-env 安装且源仓库有 git 时更精确：`<发布版本>-<领先提交数>-g<hash>`）
 2. **配置可加载性**：`settings.local.json` 是合法 JSON；`hooks.PreToolUse[].command` 指向 `node .claude/skills/flow-comet/scripts/comet-hook-guard.mjs` 且该文件存在
 3. **一致性检查**（在 flow-comet 仓库内执行，strip 行尾后应无差异）：`diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/rules <目标项目>/.claude/rules` 与 `.../skills`——**diff 无输出即通过**
 4. **真实环境冒烟**（在目标项目目录内执行）：`cd <目标项目> && node .claude/skills/flow-comet/scripts/workflow-state.mjs status`——期望输出 JSON 状态对象（全新项目为 `{"status":"no-change",...}`，运行中为 `{"status":"running","change":...}`）
 
 > 命令为 POSIX 风格（Git Bash / WSL / macOS 终端）；Windows 用户请在 Git Bash 中执行。
-> **注意**：`guard-self-test.mjs`（97 场景）是**作者回归基线**（沙箱环境自测脚本逻辑——不依赖安装完整性，不是安装验证判据）。
+> **注意**：`guard-self-test.mjs`（113 场景）是**作者回归基线**（沙箱环境自测脚本逻辑——不依赖安装完整性，不是安装验证判据）。
 
 ## 方案 B · 手动复制（兜底）
 
@@ -92,6 +92,24 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
 ```
 
 **4. 运行状态**：`.comet/flow-comet-state.json` 由 `init`（或首个 `/flow-comet` 调用）自动创建。
+
+## 卸载
+
+从目标项目移除 flow-comet：
+
+```bash
+# 1. 删除 skill 目录与编排规则
+rm -rf <目标项目>/.claude/skills/flow-comet*
+rm <目标项目>/.claude/rules/flow-comet-orchestration.md
+
+# 2. 从 .claude/settings.local.json 移除 hook 条目
+#    （只删除 command 引用 comet-hook-guard.mjs 的 PreToolUse 条目，
+#      其余内容如 permissions、自定义 hook、其他 matcher 组全部保留）
+
+# 3. 可选：清理运行状态与流程工件
+rm <目标项目>/.comet/flow-comet-state.json
+rm -rf <目标项目>/.specs/          # 仅当不再需要流程工件时
+```
 
 ## 与 Comet 集成（仅当目标项目也使用 Comet 时适用）
 

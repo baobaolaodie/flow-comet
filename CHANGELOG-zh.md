@@ -10,9 +10,33 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号仅记录于 git tag 与本文档；`bundle.yaml` 的 version 保持 1.0.0（与发布流程解耦，见 README「版本与兼容性」）。
 
+## [Unreleased]
+
+### 新增
+
+- **skill-load 声明机制**：子代理按节点声明已加载的工作流技能；record 按协议要求的技能调用校验声明；exit 校验协议声明标记；交叉自洽时间序校验；与旧 change 向后兼容。
+- **安装版本标识**：`prepare-env` 写入 `<项目>/.claude/skills/flow-comet/INSTALLED_VERSION`（取自源仓库 git 状态：发布 tag 上为 `1.3.1`，积累中的 dev 为 `1.3.1-N-g<hash>`）——issue 与 PR 可据此说明精确版本，含 dev 自上次发布以来的积累程度。
+- **本地提交/推送 hook**：`install-commit-hook.mjs` 配置 commit-msg 与 pre-push hook，拒绝含过程代号的提交/推送消息（本项目的工程约定，非通用词表）。
+
+### 变更
+
+- **回归套件扩展至 113 场景**：覆盖 skill-load 声明、record 校验、exit 协议校验、交叉自洽时间序、旧兼容、审查发现项处置、产物完整性、委托归属、恢复指引、波次一致性。
+- **CI**：过程代号检查从服务端 PR 策略移至本地 hook；PR/issue 模板按实践重构（勾选项去重、关联 issue 段、基于版本、协议与安装版本字段）。
+- **提交历史平实化**：52 条历史提交消息重写为纯描述（树不变）；重复提交去重。
+- **文档**：README 布局重组（快速开始前置）与借势增强（GSD 链接、痛点引导、适用边界）；安装指南补卸载小节；发布清单去重为单一权威；术语全库统一。
+- **系统测试集扩展至 45 项**（新增安装器版本标识检查）。
+
+### 修复
+
+- 产物路径推导尊重协议 `pathBase`（自定义协议声明项目根工件时正确推进）；不支持的根类型 fail-fast。
+- 已完成任务须有对应任务摘要（渐进 WARN，不 BLOCK）。
+- 委托的并行任务越权检测（execute 与 verify 出口）。
+- BLOCKED 消息补恢复指引（advance / select / record）。
+- 波次散文一致性：散文标记并行但任务标签缺并行属性时渐进 WARN。
+
 ## [1.3.1] - 2026-08-11
 
-文档与 CI 维护批次——无行为变更。([#31](https://github.com/baobaolaodie/flow-comet/pull/31)、[#33](https://github.com/baobaolaodie/flow-comet/pull/33)、[#34](https://github.com/baobaolaodie/flow-comet/pull/34)、[#35](https://github.com/baobaolaodie/flow-comet/pull/35)、[#36](https://github.com/baobaolaodie/flow-comet/pull/36)）、[#37](https://github.com/baobaolaodie/flow-comet/pull/37)）
+文档与 CI 维护批次——无行为变更。([#31](https://github.com/baobaolaodie/flow-comet/pull/31)、[#33](https://github.com/baobaolaodie/flow-comet/pull/33)、[#34](https://github.com/baobaolaodie/flow-comet/pull/34)、[#35](https://github.com/baobaolaodie/flow-comet/pull/35)、[#36](https://github.com/baobaolaodie/flow-comet/pull/36)、[#37](https://github.com/baobaolaodie/flow-comet/pull/37)）
 
 ### 新增
 
@@ -28,8 +52,6 @@
 ## [1.3.0] - 2026-08-10
 
 自动项目上下文初始化（init 前置步骤）。([#30](https://github.com/baobaolaodie/flow-comet/pull/30)、[#32](https://github.com/baobaolaodie/flow-comet/pull/32))
-
-自动项目上下文初始化（init 前置步骤）。
 
 ### 新增
 

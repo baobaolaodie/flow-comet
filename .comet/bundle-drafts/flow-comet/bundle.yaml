@@ -71,7 +71,10 @@ resources:
     - skills/flow-comet/reference/resolved-skills.json
     - skills/flow-comet/reference/workflow-protocol.json
     - skills/flow-comet/reference/decision-points.md
+    - skills/flow-comet/reference/dirty-worktree.md
+    - skills/flow-comet/reference/init-detection.md
     - skills/flow-comet/reference/recovery.md
+    - skills/flow-comet/reference/worktree-notes.md
     - skills/flow-comet/reference/authoring-lanes.json
     - skills/flow-comet/reference/skill-review.md
     - skills/flow-comet/reference/composition-report.md

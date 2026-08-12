@@ -1,5 +1,5 @@
 // state-schema.mjs: state 字段类型校验表（唯一来源）
-// 批次 D D3：自 workflow-state.mjs C6 内联表原样迁移，供 workflow-state / workflow-guard / workflow-handoff 三脚本共用。
+// 批次 D 内置节点常量：自 workflow-state.mjs C6 内联表原样迁移，供 workflow-state / workflow-guard / workflow-handoff 三脚本共用。
 // 语义（与批次 C C6 完全一致）：存在字段逐一校验；未知字段放行（前向兼容）；缺字段放行（readState 默认补）；
 // 只校验存在字段的类型。调用方负责 BLOCKED / exit(1) 处理。
 
@@ -15,7 +15,7 @@ export const STATE_FIELD_VALIDATORS = [
   // E5: 批次 E 新增字段（readState 默认补后类型校验；旧 state 缺失字段放行）
   { field: 'branchMode', check: (v) => typeof v === 'boolean' },
   { field: 'enablePrReview', check: (v) => typeof v === 'boolean' },
-  // T-FIX-14: 分支前缀（init --branch-prefix 可配置，适配仓库自身分支规范；缺省 'change/'）
+  // 机制说明-14: 分支前缀（init --branch-prefix 可配置，适配仓库自身分支规范；缺省 'change/'）
   { field: 'branchPrefix', check: (v) => typeof v === 'string' },
   // auto-init-detection: 项目上下文字段（'none' = 用户拒绝初始化；路径 = 用户指定文档）
   { field: 'ai_context_doc', check: (v) => typeof v === 'string' || v === null },
