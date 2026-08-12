@@ -14,7 +14,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ### Added
 
-- Regression suite expanded to 113 scenarios covering skill-load declaration markers, record validation against declaration markers, exit protocol declaration checks, cross-consistency timestamps, legacy compatibility, and review finding disposition checks.
+- **skill-load declaration mechanism**: subagents declare loaded workflow skills per node; record validates declarations against the protocol's required skill calls; exit checks protocol declaration markers; cross-consistency timestamp checks; backward compatible with legacy changes.
+- **Installed version marker**: `prepare-env` writes `<project>/.claude/INSTALLED_VERSION` (the release version from CHANGELOG, or `unreleased`) so issues and PRs can state the exact version reported.
+- **Local commit/push hooks**: `install-commit-hook.mjs` sets up commit-msg and pre-push hooks that reject messages carrying process codes (this project's own convention, not a universal list).
+
+### Changed
+
+- **Regression suite expanded to 113 scenarios** covering skill-load declarations, record validation, exit protocol checks, cross-consistency timestamps, legacy compatibility, review finding disposition, artifact completeness, delegation attribution, recovery guidance, and wave-wording consistency.
+- **CI**: process-code checks moved from the server-side PR policy to local hooks; PR/issue templates reworked for practice (deduplicated checkboxes, related-issue section, based-on version, protocol and installed-version fields).
+- **Commit history made jargon-free**: 52 historical commit messages rewritten to plain descriptions (tree unchanged); duplicate commits deduplicated.
+- **Docs**: README reorganized (quick start moved up) with recognizable anchors (GSD link, pain-point intro, fit boundary); installation guide gained an uninstall section; release checklist deduplicated to a single source; terminology unified across docs.
+- **System test suite expanded to 45 items** (installer version-marker check added).
+
+### Fixed
+
+- Artifact-path derivation respects protocol `pathBase` (custom protocols with project-root artifacts now advance correctly); fail-fast for unsupported roots.
+- Done tasks require matching per-task summaries (progressive warning, not block).
+- Overreach detection for delegated parallel tasks (execute and verify exits).
+- Recovery guidance added to blocked messages (advance / select / record).
+- Wave-wording consistency: prose marking a task parallel without the matching task attribute warns progressively.
 
 ## [1.3.1] - 2026-08-11
 
