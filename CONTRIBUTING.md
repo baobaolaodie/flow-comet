@@ -172,7 +172,23 @@ The built-in default prefix is `change/` (backward-compatible with existing chan
 
 - **PR description**: what changed, why, verification evidence (test output, real-session evidence)
 - **Scope**: code change → accompany tests + regression; doc change → both languages in sync
-- **One approving review** required (branch protection); a new push invalidates the previous approval (dismiss stale reviews)
+- **Merge gate**: required CI checks must pass; the user (maintainer) reviews and approves before merging.
+
+## Bot reviewers (CodeRabbit / Sourcery)
+
+- **Advisory only**: bot comments are suggestions, not requirements — bots can be wrong. Apply your own judgment (and the maintainer's review) over bot suggestions.
+- **Actionable vs informational**: a bot comment is *actionable* when it asks for a concrete change (a fix, a clarification, or additional tests); informational comments (summaries, questions, praise) do not need to be resolved.
+- **Before merging**: address every actionable bot comment — fix it, or reply in its thread explaining why you decline it. Resolve the thread when done.
+- **Keep the PR timeline clean**: reply to bot comments in their threads, not as new timeline mentions. For inline comments use the threaded reply; for an overall review (no thread), use a quote reply that cites the review's text.
+- **Bot checks vs required CI checks**: only the CI jobs (regression / pr-policy / quality / installer / docs-links) are required for merge. Bot checks (CodeRabbit / Sourcery) are informational — they may show as pending or rate-limited in the checks panel without blocking the merge.
+
+## CHANGELOG conventions
+
+- **Development PRs (→ dev)**: behavior changes are recorded in the CHANGELOG `Unreleased` section (Added/Changed/Fixed, bilingual) — the PR updates CHANGELOG itself.
+- **Before a release (on dev)**: the version number is settled on dev — `Unreleased` is turned into the `[X.Y.Z] - date` section linking the batch's merged development PRs.
+- **Release PR (dev → main)**: does not update CHANGELOG — the version section already exists on dev; the release PR only merges it into main.
+- **main**: never edits CHANGELOG separately — it receives the version section via the release PR merge.
+- **After a release**: dev syncs to main (tree-identical) and a fresh `Unreleased` section starts accumulating the next batch.
 
 ## Keeping a PR current
 

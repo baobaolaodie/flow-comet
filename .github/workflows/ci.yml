@@ -129,8 +129,15 @@ jobs:
             // Tree-level, main-relative: only files main ADDED that dev lacks mean dev
             // is behind. dev may legitimately lead main with unpublished batch changes
             // (those appear as deletions on the main side and must not count).
+            // Files dev deliberately deleted (present in dev's history, removed by an
+            // unpublished evolution — e.g. template md → forms migration) are not drift.
             const drift = execSync('git diff --name-only origin/dev origin/main --diff-filter=A')
-              .toString().trim();
+              .toString().trim().split('\n').filter(Boolean)
+              .filter((f) => {
+                try { execSync(`git cat-file -e origin/dev:${f}`); return true; } catch { /* dev lacks it */ }
+                return !execSync(`git log --oneline origin/dev -- ${f}`).toString().trim();
+              })
+              .join('\n');
             if (isRelease && drift)
               P.push(`dev lacks ${drift.split('\n').length} file(s) that main added — sync dev before creating the release PR`);
             if (!isRelease && drift)
@@ -153,6 +160,17 @@ jobs:
               const it = m[1].trim(); // bilingual text e.g. "工作流脚本 / Workflow scripts(...)"
               if (!body.includes(`- [x] ${it}`) && !body.includes(`- [ ] ${it}`))
                 P.push(`PR body deleted or omitted checkbox "${it.slice(0, 24)}…" (keep unchecked items)`);
+            }
+
+            // CHANGELOG self-check verification: when the PR claims "Behavior changes
+            // recorded in CHANGELOG (Unreleased)" (checked), the branch must actually
+            // change CHANGELOG relative to its base. Development PRs compare against
+            // dev; release PRs (dev -> main) compare against main and pass naturally
+            // because the version section is settled on dev before the release.
+            if (body.includes('- [x] 行为变化已记入 CHANGELOG（Unreleased）/ Behavior changes recorded in CHANGELOG (Unreleased)')) {
+              const base = pr.base.ref === 'main' ? 'origin/main' : 'origin/dev';
+              const clDiff = execSync(`git diff --name-only ${base} HEAD -- CHANGELOG.md CHANGELOG-zh.md`).toString().trim();
+              if (!clDiff) P.push('self-check claims CHANGELOG updated (Unreleased) but no CHANGELOG diff against base');
             }
 
             // PR title must follow Conventional Commits (type: subject)

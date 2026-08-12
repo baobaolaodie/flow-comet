@@ -172,7 +172,23 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --bra
 
 - **PR 描述**：改了什么、为什么、验证证据（测试输出、真实会话证据）
 - **范围**：代码改动 → 伴随测试 + 回归；文档改动 → 两语同步
-- **1 个 approving review**（分支保护）；新推送使旧 approve 失效（dismiss stale reviews）
+- **合并门禁**：required CI checks 必须通过；合并前由用户（维护者）审核批准。
+
+## Bot 审查（CodeRabbit / Sourcery）
+
+- **仅供参考**：bot 评论是建议而非要求——bot 也会出错。以你自己的判断（与维护者审核）为准，不要盲从 bot 建议。
+- **可执行 vs 信息性**：bot 评论提出具体修改要求（修复、澄清、补测试）才算*可执行*；信息性评论（总结、提问、赞许）无需处理。
+- **合并前处理**：每条可执行的 bot 评论必须处理——修复它，或在其线程内回复说明拒绝理由。完成后解决线程。
+- **保持 PR 时间线干净**：在 bot 评论的线程内回复，不要在时间线新开 @ 评论。行内评论用线程回复；整体 review（无线程）用引用原文的 quote reply。
+- **Bot checks 与 required CI checks**：只有 CI job（regression / pr-policy / quality / installer / docs-links）是合并必需。Bot checks（CodeRabbit / Sourcery）是信息性的——在 checks 面板可能显示 pending 或被限流，不阻塞合并。
+
+## CHANGELOG 写作规范
+
+- **开发 PR（→ dev）**：行为变化记入 CHANGELOG 的 `Unreleased` 段（新增/变更/修复，双语）——PR 自身更新 CHANGELOG。
+- **发布前（dev 上）**：版本号在 dev 上定好——`Unreleased` 整理为 `[X.Y.Z] - 日期` 版本段，链接该批次已合并的开发 PR。
+- **发布 PR（dev → main）**：不更新 CHANGELOG——版本段已在 dev 上；发布 PR 只把它合并进 main。
+- **main**：从不单独编辑 CHANGELOG——通过发布 PR 合并获得版本段。
+- **发布后**：dev 同步 main（树一致），重新开启 `Unreleased` 段积累下一批次。
 
 ## 保持 PR 更新
 
