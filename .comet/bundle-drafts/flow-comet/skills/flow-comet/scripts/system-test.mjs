@@ -1351,6 +1351,131 @@ const TEST_ITEMS = [
       console.log('  版本标识 = ' + installed + '(git describe 或权威源兜底——多人协作精确检测)✓');
     },
   },
+
+  // ---------- K 扩展:多平台安装器框架(1.4.0) ----------
+
+  // K2: codex 平台安装冒烟——技能落 .agents/skills/ + SKILL 路径平台化替换 + .codex/hooks.json 注入
+  // (含 --platform codex 托管命令)+ AGENTS.md 托管区内联 + 纯 codex 不生成 .claude/ + 版本标识
+  {
+    name: 'K2 安装器:codex 平台安装(技能/路径替换/hooks.json/AGENTS 托管区)',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
+      const target = path.join(dir, 'k2-target');
+      fs.mkdirSync(target, { recursive: true });
+      const res = spawnSync(process.execPath, [installer, '--target', target, '--platform', 'codex'], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      if (res.status !== 0) throw new Error('prepare-env --platform codex 失败: ' + (res.stderr || JSON.stringify(res.output)));
+      // ① 技能落 .agents/skills/(Codex 自动发现位置)
+      const skillMd = path.join(target, '.agents', 'skills', 'flow-comet', 'SKILL.md');
+      if (!fs.existsSync(skillMd)) throw new Error('codex 平台技能未安装到 .agents/skills/');
+      // ② SKILL 路径平台化替换生效(命令路径 .claude/skills → .agents/skills)
+      const text = fs.readFileSync(skillMd, 'utf8');
+      if (!text.includes('.agents/skills/flow-comet/scripts/')) throw new Error('SKILL 命令路径未替换为 .agents/skills/');
+      if (text.includes('.claude/skills/flow-comet/scripts/')) throw new Error('SKILL 仍含 .claude/skills/flow-comet/scripts/ 命令路径');
+      // ③ .codex/hooks.json 注入托管 hook(含平台标记)
+      const hooksFile = path.join(target, '.codex', 'hooks.json');
+      if (!fs.existsSync(hooksFile)) throw new Error('缺少 .codex/hooks.json');
+      const hooksText = fs.readFileSync(hooksFile, 'utf8');
+      JSON.parse(hooksText); // 非法 JSON → throw(RED)
+      if (!hooksText.includes('comet-hook-guard.mjs')) throw new Error('hooks.json 未注入托管 hook 命令');
+      if (!hooksText.includes('--platform codex')) throw new Error('hooks.json hook 命令缺平台标记');
+      // ④ AGENTS.md 托管区(内联 orchestration 全文——Codex 指令唯一自动加载路径)
+      const agentsFile = path.join(target, 'AGENTS.md');
+      if (!fs.existsSync(agentsFile)) throw new Error('缺少 AGENTS.md');
+      const agents = fs.readFileSync(agentsFile, 'utf8');
+      if (!agents.includes('Managed by flow-comet')) throw new Error('AGENTS.md 无托管标记');
+      if (!agents.includes('flow-comet Orchestration')) throw new Error('AGENTS.md 未内联 orchestration 内容');
+      // ⑤ 纯 codex 平台不生成 .claude/
+      if (fs.existsSync(path.join(target, '.claude'))) throw new Error('codex 平台不应生成 .claude/');
+      // ⑥ 版本标识随技能包分发(平台化路径)
+      const verFile = path.join(target, '.agents', 'skills', 'flow-comet', 'INSTALLED_VERSION');
+      if (!fs.existsSync(verFile)) throw new Error('缺少 INSTALLED_VERSION(版本标识文件)');
+      const installed = fs.readFileSync(verFile, 'utf8').trim();
+      if (!installed) throw new Error('版本标识为空');
+    },
+  },
+
+  // K3: hook 平台分支输出契约——codex 分支 stdout 为合法 JSON(拦截含 decision:"block";放行可解析非 block);
+  // claude-code 分支(无平台标记)输出与现状一致(文本 workflow-hook-guard-ok)
+  {
+    name: 'K3 hook:codex 平台分支 JSON 契约(拦截/放行)+ CC 分支不变',
+    run: (dir) => {
+      // ① codex 分支:写越权路径(源码)→ stdout 合法 JSON + decision block
+      const st = baseState('open');
+      st.status = 'running';
+      writeState(dir, st);
+      fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
+      const block = runHook(['before_tool', '--platform', 'codex'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'src', 'evil.py') } });
+      assertExit(block, 0);
+      const blockParsed = JSON.parse(block.output.trim()); // stdout 非 JSON → throw(RED)
+      if (blockParsed.decision !== 'block') throw new Error('codex 拦截输出应含 decision:"block": ' + JSON.stringify(blockParsed));
+      // ② codex 分支:写 .specs/ 工件 → 放行(输出可解析、非 block)
+      const ok = runHook(['before_tool', '--platform', 'codex'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', CHANGE_ID, 'CHANGE.md') } });
+      assertExit(ok, 0);
+      const okParsed = JSON.parse(ok.output.trim()); // 放行输出须为合法 JSON(空串解析失败 → RED)
+      if (okParsed.decision === 'block') throw new Error('codex 放行输出不应含 decision block');
+      // ③ codex 分支:无活跃 workflow → 放行(JSON 可解析)
+      fs.rmSync(path.join(dir, '.comet'), { recursive: true, force: true });
+      const noActive = runHook(['before_tool', '--platform', 'codex'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'src', 'x.py') } });
+      assertExit(noActive, 0);
+      JSON.parse(noActive.output.trim());
+      // ④ claude-code 分支(无平台标记):输出与现状一致(文本 workflow-hook-guard-ok)
+      writeState(dir, { ...baseState('open'), status: 'running' });
+      const cc = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', CHANGE_ID, 'CHANGE.md') } });
+      assertExit(cc, 0);
+      assertOut(cc, 'workflow-hook-guard-ok');
+      assertNotOut(cc, 'decision');
+    },
+  },
+
+  // K4: 平台选择链——--platform 显式(两平台互不串扰)/ 无 TTY 探测(项目已有 .codex/ 或 .claude/)/ 两者皆无默认
+  {
+    name: 'K4 安装器:平台选择链(显式/无 TTY 探测/默认)',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return;
+      const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
+      const run = (target) => spawnSync(process.execPath, [installer, '--target', target], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      // ① --platform claude-code 显式 → .claude/skills 生成,.agents 不生成
+      const t1 = path.join(dir, 'k4-cc');
+      fs.mkdirSync(t1, { recursive: true });
+      const r1 = spawnSync(process.execPath, [installer, '--target', t1, '--platform', 'claude-code'], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      if (r1.status !== 0) throw new Error('--platform claude-code 失败: ' + (r1.stderr || JSON.stringify(r1.output)));
+      if (!fs.existsSync(path.join(t1, '.claude', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('claude-code 平台未生成 .claude/skills/');
+      if (fs.existsSync(path.join(t1, '.agents'))) throw new Error('claude-code 平台不应生成 .agents/');
+      // ② --platform codex 显式 → .agents/skills 生成,.claude 不生成
+      const t2 = path.join(dir, 'k4-codex');
+      fs.mkdirSync(t2, { recursive: true });
+      const r2 = spawnSync(process.execPath, [installer, '--target', t2, '--platform', 'codex'], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      if (r2.status !== 0) throw new Error('--platform codex 失败: ' + (r2.stderr || JSON.stringify(r2.output)));
+      if (!fs.existsSync(path.join(t2, '.agents', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('codex 平台未生成 .agents/skills/');
+      if (fs.existsSync(path.join(t2, '.claude'))) throw new Error('codex 平台不应生成 .claude/');
+      // ③ 无 --platform(spawnSync 无 TTY)+ 目标已有 .codex/ → 探测为 codex
+      const t3 = path.join(dir, 'k4-probe-codex');
+      fs.mkdirSync(path.join(t3, '.codex'), { recursive: true });
+      const r3 = run(t3);
+      if (r3.status !== 0) throw new Error('探测 codex 安装失败: ' + (r3.stderr || JSON.stringify(r3.output)));
+      if (!fs.existsSync(path.join(t3, '.agents', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('已有 .codex/ 的项目应探测为 codex 平台');
+      // ④ 无 --platform + 目标已有 .claude/ → 探测为 claude-code
+      const t4 = path.join(dir, 'k4-probe-cc');
+      fs.mkdirSync(path.join(t4, '.claude'), { recursive: true });
+      const r4 = run(t4);
+      if (r4.status !== 0) throw new Error('探测 claude-code 安装失败: ' + (r4.stderr || JSON.stringify(r4.output)));
+      if (!fs.existsSync(path.join(t4, '.claude', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('已有 .claude/ 的项目应探测为 claude-code 平台');
+      if (fs.existsSync(path.join(t4, '.agents'))) throw new Error('探测为 claude-code 时不应生成 .agents/');
+      // ⑤ 无 --platform + 两者皆无 → 默认 claude-code
+      const t5 = path.join(dir, 'k4-default');
+      fs.mkdirSync(t5, { recursive: true });
+      const r5 = run(t5);
+      if (r5.status !== 0) throw new Error('默认平台安装失败: ' + (r5.stderr || JSON.stringify(r5.output)));
+      if (!fs.existsSync(path.join(t5, '.claude', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('两者皆无应默认 claude-code');
+    },
+  },
 ];
 
 // ---------- 运行 ----------
