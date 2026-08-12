@@ -162,6 +162,17 @@ jobs:
                 P.push(`PR body deleted or omitted checkbox "${it.slice(0, 24)}…" (keep unchecked items)`);
             }
 
+            // CHANGELOG self-check verification: when the PR claims "Behavior changes
+            // recorded in CHANGELOG (Unreleased)" (checked), the branch must actually
+            // change CHANGELOG relative to its base. Development PRs compare against
+            // dev; release PRs (dev -> main) compare against main and pass naturally
+            // because the version section is settled on dev before the release.
+            if (body.includes('- [x] 行为变化已记入 CHANGELOG（Unreleased）/ Behavior changes recorded in CHANGELOG (Unreleased)')) {
+              const base = pr.base.ref === 'main' ? 'origin/main' : 'origin/dev';
+              const clDiff = execSync(`git diff --name-only ${base} HEAD -- CHANGELOG.md CHANGELOG-zh.md`).toString().trim();
+              if (!clDiff) P.push('self-check claims CHANGELOG updated (Unreleased) but no CHANGELOG diff against base');
+            }
+
             // PR title must follow Conventional Commits (type: subject)
             const titleConv = /^(feat|fix|docs|chore|test|ci|refactor|perf|build|revert)(\([^)]+\))?: .+/;
             if (!titleConv.test(pr.title)) P.push(`PR title not Conventional Commits: "${pr.title}"`);

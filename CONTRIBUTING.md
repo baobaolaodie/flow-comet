@@ -180,6 +180,14 @@ The built-in default prefix is `change/` (backward-compatible with existing chan
 - **Before merging**: address every actionable bot comment — fix it, or reply in its thread explaining why you decline it. Resolve the thread when done.
 - **Keep the PR timeline clean**: reply to bot comments in their threads, not as new timeline mentions.
 
+## CHANGELOG conventions
+
+- **Development PRs (→ dev)**: behavior changes are recorded in the CHANGELOG `Unreleased` section (Added/Changed/Fixed, bilingual) — the PR updates CHANGELOG itself.
+- **Before a release (on dev)**: the version number is settled on dev — `Unreleased` is turned into the `[X.Y.Z] - date` section linking the batch's merged development PRs.
+- **Release PR (dev → main)**: does not update CHANGELOG — the version section already exists on dev; the release PR only merges it into main.
+- **main**: never edits CHANGELOG separately — it receives the version section via the release PR merge.
+- **After a release**: dev syncs to main (tree-identical) and a fresh `Unreleased` section starts accumulating the next batch.
+
 ## Keeping a PR current
 
 While a PR is open, keep it up to date with `dev`:

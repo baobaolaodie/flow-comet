@@ -180,6 +180,14 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --bra
 - **合并前处理**：每条可执行的 bot 评论必须处理——修复它，或在其线程内回复说明拒绝理由。完成后解决线程。
 - **保持 PR 时间线干净**：在 bot 评论的线程内回复，不要在时间线新开 @ 评论。
 
+## CHANGELOG 写作规范
+
+- **开发 PR（→ dev）**：行为变化记入 CHANGELOG 的 `Unreleased` 段（新增/变更/修复，双语）——PR 自身更新 CHANGELOG。
+- **发布前（dev 上）**：版本号在 dev 上定好——`Unreleased` 整理为 `[X.Y.Z] - 日期` 版本段，链接该批次已合并的开发 PR。
+- **发布 PR（dev → main）**：不更新 CHANGELOG——版本段已在 dev 上；发布 PR 只把它合并进 main。
+- **main**：从不单独编辑 CHANGELOG——通过发布 PR 合并获得版本段。
+- **发布后**：dev 同步 main（树一致），重新开启 `Unreleased` 段积累下一批次。
+
 ## 保持 PR 更新
 
 PR 打开期间，保持与 `dev` 同步：
