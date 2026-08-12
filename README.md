@@ -7,7 +7,7 @@
 <h1 align="center">flow-comet</h1>
 
 <p align="center">
-  <strong>An automated execution engine for the flow-kit 9-stage development workflow, built for Claude Code.</strong>
+  <strong>An automated execution engine that turns AI coding discipline into a verifiable state machine — for the flow-kit 9-stage workflow, built for Claude Code.</strong>
   <br />
   <em>For AI coding workflows — deterministic state machine · protocol-driven · guard-validated · subagent-isolated</em>
 </p>
@@ -129,6 +129,8 @@ The engine routes between nodes by deriving state from `.specs/` artifacts (dete
 3. **Implementation and coordination are physically separated** — implementation runs in fresh-context subagents inside isolated worktrees and must return a verified contract; the coordinator is banned from writing source, and the write whitelist blocks violations at the physical layer.
 4. **The native automation layer for flow-kit** — not a re-invention: artifact formats, rules, and stages are identical to flow-kit; a flow-kit project upgrades to a machine-driven flow by installing flow-comet, no migration needed.
 5. **Protocol-driven, zero dependencies, copy-and-run** — the built-in 8-node flow works out of the box; any installed skill can be composed into a custom protocol on the same engine; Node.js 18+, no third-party dependencies, one command installs it.
+
+**Fit**: flow-comet is built for long-running, multi-session development changes on Claude Code — the discipline it automates pays off when a change spans hours and multiple sessions. It is not a general CI/CD or project-management tool; other platforms (Codex / Gemini / Cursor) are not guaranteed.
 
 ## Screenshots
 
