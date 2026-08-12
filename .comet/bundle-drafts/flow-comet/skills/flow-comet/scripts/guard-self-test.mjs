@@ -7,7 +7,7 @@
 // （COMET_RUN_ROOT=<临时目录>）→ 断言退出码与输出关键词。场景跑完 rmSync 清理。
 //
 // 运行: node scripts/guard-self-test.mjs
-// 全过 → exit 0，输出 ALL 106 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
+// 全过 → exit 0，输出 ALL 114 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
 //
 // 仅 node 内置模块（child_process/fs/os/path）；无网络；不依赖 flow-kit 模板目录
 // 存在（fallback 场景用内置段名；S1/S4 复制模板文件进临时目录验证 C2 模板派生）。
@@ -36,8 +36,8 @@ const HANDOFF = path.join(__dirname, 'workflow-handoff.mjs');
 const BUILTIN_PROTOCOL_SOURCE = path.join(__dirname, '..', 'reference', 'workflow-protocol.json');
 const CHANGE_ID = 'ch';
 
-// 场景数一致性自检清单（20 文件，全变体：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n）——
-// S105 场景与底部自检共用同一清单（自检常量同步：SCENARIOS.length 变更 → 20 文件须同步）
+// 场景数一致性自检清单（22 文件，全变体：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n）——
+// S105 场景与底部自检共用同一清单（自检常量同步：SCENARIOS.length 变更 → 22 文件须同步）
 const SCENARIO_COUNT_FILES = [
   'README.md', 'README-zh.md', 'CONTRIBUTING.md', 'CONTRIBUTING-zh.md',
   'docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
@@ -2342,11 +2342,11 @@ const SCENARIOS = [
     },
   },
 
-  // 105: 场景数一致性自检同步（AC-8）——SCENARIOS.length 变更时 SCENARIO_COUNT_FILES 20 文件须同步
+  // 105: 场景数一致性自检同步（AC-8）——SCENARIOS.length 变更时 SCENARIO_COUNT_FILES 22 文件须同步
   // （ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n 变体）。本场景直接读取权威源仓库的
-  // 20 文件断言含当前场景数变体——文档漏同步即 RED（与底部自检同判据；安装副本无文档跳过）
+  // 22 文件断言含当前场景数变体——文档漏同步即 RED（与底部自检同判据；安装副本无文档跳过）
   {
-    name: '105 场景数自检同步：20 文件含当前场景数变体（AC-8）',
+    name: '105 场景数自检同步：22 文件含当前场景数变体（AC-8）',
     run: (dir) => {
       const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
       if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无 flow-comet 文档

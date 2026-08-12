@@ -110,4 +110,4 @@ N/A。
 ## 完成判定
 
 - TASK.md 中对应任务已勾选：是
-- 提交 hash：`sim-abc1235`
+- 提交 hash：`sim-abc1236`

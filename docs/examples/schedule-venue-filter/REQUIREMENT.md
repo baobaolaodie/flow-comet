@@ -77,18 +77,18 @@
 
 ## 非功能性需求
 
-- **性能**: 列表接口 P95 ≤ 500ms（含 venue EXISTS 子查询 + `venue_names` 批量预取，沿用 `set_tournament_list_counts` 的批量模式）；`venue_names` 每赛事最多 1 次查询，禁止 N+1
+- **性能**: 列表接口 P95 ≤ 500ms（含 venue IN 子查询 + `venue_names` 批量预取，沿用 `set_tournament_list_counts` 的批量模式）；每个列表页最多 1 次 venue 批量查询，禁止 N+1
 - **可访问性**: 无（Select 沿用 Ant Design 内置 a11y，不新增自定义控件）
-- **安全**: `GET /tournaments/venues` 仅管理员可调（沿用 `Depends(get_current_admin)`，与 `AdminSchedules` 的场地接口一致）；`venue_id` 做 `ge=1` 校验防负值注入
+- **安全**: `GET /tournaments/venues` 仅管理员可调（沿用 `Depends(get_current_admin)`，与 `AdminSchedules` 的场地接口一致）；`venue_id` 做 `ge=1` 范围校验（拒绝 0 与负数，防无效取值）
 - **兼容性**: Chrome/Firefox/Safari/Edge 最新 -1；`GET /tournaments` 响应新增字段不改旧字段，老 TS 类型以可选字段接入
 - **可观测性**: `venue_id` 筛选命中数记入现有 API 日志（沿用 `app/core/logging.py` 的 `logger`），不新增埋点
 
 ## 依赖与假设
 
-- 依赖既有 `app/crud/crud_venue.py` 的 `venue_crud.get_venues_by_tournament` 与 `Venue.is_active` 字段（grep 已确认存在：`app/models/venue.py:53`）
+- 依赖既有 `app/crud/crud_venue.py` 的 `crud_venue.get_active_venues_by_tournament` 与 `Venue.is_active` 字段（grep 已确认存在：`app/models/venue.py:53`）
 - 依赖既有批量计数助手 `set_tournament_list_counts`（`app/services/tournament_service.py`）
 - 假设：管理端此前没有"全量启用场地聚合查询"，需要新增接口（DESIGN 阶段 grep 复核，若已有则复用删除本接口）
-- 假设：测试环境沿用内存 SQLite（`sqlite+aiosqlite://`），`EXISTS` 子查询在 SQLite 与 MySQL 语义一致
+- 假设：测试环境沿用内存 SQLite（`sqlite+aiosqlite://`），`IN` 子查询在 SQLite 与 MySQL 语义一致
 
 ---
 

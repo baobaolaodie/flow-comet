@@ -15,12 +15,12 @@ Responsibility: CHANGE 反问 + REQUIREMENT 需求分析。生成 CHANGE.md 和 
 
 ### 必填段清单（exit guard 校验，结构+存在级）
 
-| 文件 | 必填段 |
-|------|--------|
-| CHANGE.md | `## Why（为什么做）` / `## 变更范围` / `## 影响面` / `## 风险` |
-| REQUIREMENT.md | `## 用户故事` / `## 验收准则（AC）` / `## 范围切分` |
+| 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
+|------|-------------------------------|-----------------------------------|
+| CHANGE.md | `## Why（为什么做）` | `## What（做什么）` / `## 影响面` / `## 风险与未知` 等 |
+| REQUIREMENT.md | `## 用户故事` / `## 验收准则（AC）` | `## 范围切分` / `## 非功能性需求` 等 |
 
-**缺失任一必填段 = 节点未完成**，exit guard 校验（见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B）。
+guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / templateSectionPatterns；「填得好不好」由 review 把关。
 
 ### 分支创建
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // system-test.mjs — flow-comet 系统测试集（与 guard-self-test 同构的载体，测试内容为系统级全链路）
 //
-// 定位：guard-self-test 是引擎脚本的单元/场景级回归（106 场景，fixture 构造为主）；
+// 定位：guard-self-test 是引擎脚本的单元/场景级回归（114 场景，fixture 构造为主）；
 // 本套件是**系统级**测试——每个测试项走真实命令序列（init → record → guard exit → handoff →
-// hook …），覆盖 flow-comet 全部机制面（A~J 十大类）：
+// hook …），覆盖 flow-comet 全部机制面（A~K 十一类）：
 //   A. 状态机与路由（init/status/next/select/advance/record/execution-mode/config）
 //   B. 声明机制（skill-load 标记/record 校验/时间序/损坏 fail-closed/委托范围豁免/exit 协议标记/旧兼容）
 //   C. 委托链路（handoff request/result/status、RED 先于 GREEN、Return Contract、证据键名契约）

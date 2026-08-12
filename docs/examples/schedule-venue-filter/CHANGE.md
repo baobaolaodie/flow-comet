@@ -13,7 +13,7 @@
 
 ## What（做什么）
 
-给赛事列表接口 `GET /tournaments`（`app/api/v1/endpoints/tournaments.py:35`）新增可选 `venue_id` 查询参数，后端按"赛事包含该场地"（`venues.tournament_id = tournaments.id` 的 EXISTS 子查询）过滤；同时新增管理员专用接口 `GET /tournaments/venues` 返回全量启用场地下拉数据，并在赛事列表响应项 `TournamentResponse` 上追加计算字段 `venue_names: list[str]`；前端 `AdminTournaments.tsx` 新增场地筛选下拉（Select）+ 表格场地名称列，`fetchAdminTournaments` 透传 `venue_id`。
+给赛事列表接口 `GET /tournaments`（`app/api/v1/endpoints/tournaments.py:35`）新增可选 `venue_id` 查询参数，后端按"赛事包含该场地"（`venues.tournament_id = tournaments.id` 的 IN 子查询）过滤；同时新增管理员专用接口 `GET /tournaments/venues` 返回全量启用场地下拉数据，并在赛事列表响应项 `TournamentResponse` 上追加计算字段 `venue_names: list[str]`；前端 `AdminTournaments.tsx` 新增场地筛选下拉（Select）+ 表格场地名称列，`fetchAdminTournaments` 透传 `venue_id`。
 
 ## 视觉调性（前端项目必填，由 0-change 步骤 0.6 预选填入）
 

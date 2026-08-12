@@ -9,19 +9,6 @@ description: "Use when the user wants the flow-comet managed workflow for flow-k
 
 ## Decision Core
 
----
-name: flow-comet
-description: "flow-kit 9 阶段工作流 + 自动状态管理。工件直接读写 .specs/，不经过 OpenSpec。Use when the user invokes /flow-comet or wants to start/continue a structured development workflow."
----
-
-# flow-comet
-
-flow-kit 9 阶段工作流的 workflow-kernel 实现。保留 flow-kit 的全部产物模板、规则体系和 LESSONS 知识库，用脚本自动管理状态和阶段路由。
-
-**工件根目录：`.specs/<change-id>/`**
-
-## Decision Core
-
 ### 自动节点检测
 
 **Step 0：确定当前节点与意图**
@@ -215,7 +202,7 @@ The route, Output Schemas, required Skill calls, and recovery state are defined 
 - `verify`: implementation `flow-comet-verify` (require); required calls `flow-comet-integration`; augmentations none.
 - `archive`: implementation `flow-comet-archive` (require); required calls `flow-comet-integration`; augmentations none.
 
-**节点 skill 加载声明**：加载节点 skill 后立即运行 `node flow-comet/scripts/workflow-state.mjs skill-load <node> <skill> --prompt flow-kit/prompts/<阶段>.md` 记录本次加载（多协议节点每个协议文件一条命令）；exit/record 会核对声明标记。声明如实记录加载动作，不等于产出证明——正确性由产物门禁校验把关。
+**节点 skill 加载声明**：加载节点 skill 后立即运行 `node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <skill> --prompt flow-kit/prompts/<阶段>.md` 记录本次加载（多协议节点每个协议文件一条命令）；exit/record 会核对声明标记。声明如实记录加载动作，不等于产出证明——正确性由产物门禁校验把关。
 
 ## Guardrails And Evidence
 
@@ -237,9 +224,9 @@ The route, Output Schemas, required Skill calls, and recovery state are defined 
 
 ### Startup Protocol
 
-1. Run `node flow-comet/scripts/workflow-state.mjs status` to read current state.
-2. If the workflow is not started, confirm scope with the user, then run `node flow-comet/scripts/workflow-state.mjs init`.
-3. **: `init` 输出即首次路由（NODE: 内置 open 或协议首节点）——直接加载该节点 Skill 执行；`next` 在节点 exit 后用于推进（init 后立即 next 命中节点顺序门禁属预期）。Do not load multiple Skills at once.
+1. Run `node .claude/skills/flow-comet/scripts/workflow-state.mjs status` to read current state.
+2. If the workflow is not started, confirm scope with the user, then run `node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-name>`.
+3. `init` 输出即首次路由（NODE: 内置 open 或协议首节点）——直接加载该节点 Skill 执行；`next` 在节点 exit 后用于推进（init 后立即 next 命中节点顺序门禁属预期）。Do not load multiple Skills at once.
 
 ### Resume Rules (every context resume)
 
@@ -249,7 +236,7 @@ The route, Output Schemas, required Skill calls, and recovery state are defined 
 
 ### Node Boundary Rules
 
-- Before leaving a Node, run `node flow-comet/scripts/workflow-guard.mjs exit <node> --apply` to advance state and record evidence.
+- Before leaving a Node, run `node .claude/skills/flow-comet/scripts/workflow-guard.mjs exit <node> --apply` to advance state and record evidence.
 - If the guard fails, do not proceed — present the guard output and ask the user how to fix it.
 - If the user wants to redo a completed Node, reset its completion state and re-enter rather than creating a parallel path.
 

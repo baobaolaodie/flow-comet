@@ -8,9 +8,9 @@
 
 Artifacts produced by a complete flow-comet run, for reference and comparison. **This is simulated data** — a synthetic project used to demonstrate artifact quality, not a real codebase.
 
-## Scenario: venue filter for schedules
+## Scenario: venue filter for tournaments
 
-A feature change in a simulated ping-pong tournament system: admins filter schedules by venue on the schedule list page. Involves a backend API `venue_id` query parameter + a frontend filter dropdown.
+A feature change in a simulated ping-pong tournament system: admins filter tournaments by venue on the tournament list page. Involves a backend API `venue_id` query parameter + a frontend filter dropdown.
 
 ## Artifact list (in flow-kit 9-stage order)
 
