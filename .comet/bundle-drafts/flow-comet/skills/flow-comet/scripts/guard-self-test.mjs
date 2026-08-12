@@ -2342,11 +2342,11 @@ const SCENARIOS = [
     },
   },
 
-  // 105: 场景数一致性自检同步（AC-8）——SCENARIOS.length 变更时 SCENARIO_COUNT_FILES 20 文件须同步
+  // 105: 场景数一致性自检同步（AC-8）——SCENARIOS.length 变更时 SCENARIO_COUNT_FILES 22 文件须同步
   // （ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n 变体）。本场景直接读取权威源仓库的
-  // 20 文件断言含当前场景数变体——文档漏同步即 RED（与底部自检同判据；安装副本无文档跳过）
+  // 22 文件断言含当前场景数变体——文档漏同步即 RED（与底部自检同判据；安装副本无文档跳过）
   {
-    name: '105 场景数自检同步：20 文件含当前场景数变体（AC-8）',
+    name: '105 场景数自检同步：22 文件含当前场景数变体（AC-8）',
     run: (dir) => {
       const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
       if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无 flow-comet 文档

@@ -46,7 +46,7 @@ dev ──PR(squash)──▶ main    （发布分支——每次发布 1 个 sq
 
 | 规则 | `main` | `dev` |
 |------|--------|-------|
-| require status checks（CI job） | ✅（regression / pr-policy / quality / installer / docs-links） | ✅（同上） |
+| require status checks（CI job） | ✅（regression / pr-policy / quality / installer / docs-links——合并必需；release-consistency 仅发布面运行，不 required） | ✅（同上） |
 | 禁 force push | ✅ | ✅ |
 | 禁删除 | ✅ | ✅ |
 | stale review 失效 | ✅ | ✅ |

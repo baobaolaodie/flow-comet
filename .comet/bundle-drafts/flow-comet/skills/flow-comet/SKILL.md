@@ -236,7 +236,7 @@ The route, Output Schemas, required Skill calls, and recovery state are defined 
 
 ### Node Boundary Rules
 
-- Before leaving a Node, run `node flow-comet/scripts/workflow-guard.mjs exit <node> --apply` to advance state and record evidence.
+- Before leaving a Node, run `node .claude/skills/flow-comet/scripts/workflow-guard.mjs exit <node> --apply` to advance state and record evidence.
 - If the guard fails, do not proceed — present the guard output and ask the user how to fix it.
 - If the user wants to redo a completed Node, reset its completion state and re-enter rather than creating a parallel path.
 

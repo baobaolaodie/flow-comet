@@ -78,6 +78,12 @@
 
 测试项（2）：J1 双语健康检查 / J2 公开产物零代号检查。
 
+### K. 安装器版本标识
+
+覆盖：prepare-env 生成的版本标识（优先源仓库 git describe：发布版 = 精确 tag、开发态 = `<tag>-N-g<hash>`；无 git 时回退权威源随技能包分发的 INSTALLED_VERSION）精确反映源仓库状态；权威源文件与 CHANGELOG 首个版本段一致（CI release-consistency 同规则）。
+
+测试项（1）：K1 安装器版本标识（源仓库状态精确反映 + 权威源一致性）。
+
 ## 四、附：design 节点 required 自指核验结论
 
 **核验对象**：`workflow-protocol.json` 的 design 节点——`requiredSkillCalls` 含与 `implementation` 相同的技能（自指），对照 open / review 两模式核验（本批次遗留核验项）。

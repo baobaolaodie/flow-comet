@@ -46,7 +46,7 @@ dev ──PR(squash)──▶ main   (release branch — one squash commit per r
 
 | Rule | `main` | `dev` |
 |------|--------|-------|
-| Require status checks (CI jobs) | ✅ (regression / pr-policy / quality / installer / docs-links) | ✅ (same) |
+| Require status checks (CI jobs) | ✅ (regression / pr-policy / quality / installer / docs-links — required for merge; release-consistency runs on the release face only and is not required) | ✅ (same) |
 | Block force pushes | ✅ | ✅ |
 | Block deletions | ✅ | ✅ |
 | Dismiss stale reviews | ✅ | ✅ |
