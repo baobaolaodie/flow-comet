@@ -22,6 +22,7 @@ labels: bug
 ## 环境 / Environment
 
 - Node 版本 / Node version：
+- flow-comet 版本 / flow-comet version（`cat .claude/INSTALLED_VERSION`，由安装器写入；installer-generated）：
 - 安装方式 / Install method（prepare-env 安装器 / 手动复制；prepare-env installer / manual copy）：
 - 协议 / Protocol（内置 8 节点 / 自定义 compose 协议；built-in 8-node / custom compose protocol）：
 - 是否使用分支模式 / Branch mode used（change/ 分支 / branch）：

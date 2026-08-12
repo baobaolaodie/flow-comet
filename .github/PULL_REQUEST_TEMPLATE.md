@@ -29,6 +29,10 @@
 - [ ] 向后兼容：无破坏性变更（如有已说明）/ Backward compatible: no breaking changes (explain if any)
 - [ ] 无无关文件或本地伪影 / No unrelated files or local artifacts
 
+## 基于版本 / Based on
+
+<!-- 基于哪个基线开发：main v1.3.1 / 最新 dev / 具体 commit / Which baseline (e.g. main v1.3.1, latest dev, specific commit) -->
+
 ## 关联（可选）/ Related (optional)
 
 <!-- 关联 issue / PR（如 Fixes #39）/ Related issues / PRs -->

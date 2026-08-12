@@ -1317,6 +1317,30 @@ const TEST_ITEMS = [
       assertOut(res, '过程代号检查通过');
     },
   },
+
+  // ---------- K. 安装器 ----------
+
+  {
+    name: 'K1 安装器：prepare-env 写入版本标识且与 CHANGELOG 一致',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
+      if (!fs.existsSync(installer)) throw new Error('缺少 prepare-env.mjs');
+      const target = path.join(dir, 'j3-target');
+      fs.mkdirSync(target, { recursive: true });
+      const res = spawnSync(process.execPath, [installer, '--target', target], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      if (res.status !== 0) throw new Error('prepare-env 失败: ' + (res.stderr || JSON.stringify(res.output)));
+      const versionFile = path.join(target, '.claude', 'INSTALLED_VERSION');
+      if (!fs.existsSync(versionFile)) throw new Error('缺少 .claude/INSTALLED_VERSION(版本标识文件)');
+      const installed = fs.readFileSync(versionFile, 'utf8').trim();
+      const changelog = fs.readFileSync(path.join(repoRoot, 'CHANGELOG.md'), 'utf8');
+      const m = changelog.match(/^## \[(\d+\.\d+\.\d+)\]/m);
+      const expected = m ? m[1] : 'unreleased';
+      if (installed !== expected) throw new Error('版本标识不符: 安装 ' + installed + ' ≠ 期望 ' + expected);
+      console.log('  版本标识 = ' + installed + '(与 CHANGELOG 一致)✓');
+    },
+  },
 ];
 
 // ---------- 运行 ----------

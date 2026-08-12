@@ -276,6 +276,18 @@ function main() {
     stats.skills.push(name);
   }
 
+  // 3.5. 版本标识:从 CHANGELOG.md 提取当前版本(首个 [x.y.z] 段;无发布版本时为 unreleased),
+  //      写入 <target>/.claude/INSTALLED_VERSION——贡献者可通过 cat 获知安装版本
+  //      (issue/PR 模板的环境字段引用此文件;版本号与发布版本解耦的 bundle.yaml 无关)
+  let installedVersion = 'unreleased';
+  try {
+    const changelog = fs.readFileSync(path.join(REPO_ROOT, 'CHANGELOG.md'), 'utf8');
+    const verMatch = changelog.match(/^## \[(\d+\.\d+\.\d+)\]/m);
+    if (verMatch) installedVersion = verMatch[1];
+  } catch { /* CHANGELOG 缺失:默认 unreleased */ }
+  fs.writeFileSync(path.join(claudeDir, 'INSTALLED_VERSION'), installedVersion + '\n', 'utf8');
+  stats.files++;
+
   // 摘要
   console.log(`[prepare-env] 已准备环境: ${claudeDir}`);
   console.log(
