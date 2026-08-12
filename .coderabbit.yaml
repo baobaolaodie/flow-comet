@@ -1,0 +1,24 @@
+# CodeRabbit 审查配置(2026-08-13)——降噪 + 聚焦影响合并的问题
+language: en-US
+early_access: false
+reviews:
+  profile: chill          # 只报高严重度(本仓库已有 TDD/场景测试纪律,断言级噪音价值低)
+  request_changes_workflow: false   # 只建议不阻塞——门禁留给 CI(回归/策略已有硬强制)
+  auto_review:
+    enabled: true
+    drafts: false         # 草稿 PR 不审
+  collapse_walkthrough: true   # summary 折叠,减少时间线噪音
+  high_level_summary: true
+  poem: false             # 关闭诗
+  sequence_diagrams: false     # 关闭控制流图
+  related_issues: false
+  related_prs: false
+  changed_files_summary: false  # 关闭逐文件变更列表
+chat:
+  auto_reply: true        # @coderabbitai 命令响应
+tone_instructions: |
+  Comment only on findings that affect what gets merged: a real bug, a violated
+  project rule, or a concrete risk. Maximum three sentences per comment: failure
+  mode, location, suggested fix. No praise, no style nits, no diff restating,
+  no emojis. Do not comment on test naming or formatting (the project enforces
+  its own discipline via the guard-self-test suite and local checks).
