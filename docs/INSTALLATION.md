@@ -94,6 +94,24 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
 
 **4. Runtime state**: `.comet/flow-comet-state.json` is created by `init` (or the first `/flow-comet` call).
 
+## Uninstalling
+
+Remove flow-comet from a target project:
+
+```bash
+# 1. Remove the skill directories and the orchestration rule
+rm -rf <target>/.claude/skills/flow-comet*
+rm <target>/.claude/rules/flow-comet-orchestration.md
+
+# 2. Remove the hook entry from .claude/settings.local.json
+#    (delete only the PreToolUse entry whose command references comet-hook-guard.mjs,
+#     keeping everything else — permissions, custom hooks, other matcher groups)
+
+# 3. Optional: remove workflow state and artifacts
+rm <target>/.comet/flow-comet-state.json
+rm -rf <target>/.specs/          # only if you no longer need the workflow artifacts
+```
+
 ## Integration with Comet (only when the target project also uses Comet)
 
 > **Applicability**: the following customization is only for projects that have run `comet init` (their CLAUDE.md contains a `<comet-ambient-resume>` block). Projects not using Comet should skip this section — flow-comet does not depend on Comet; it has its own state machine and file-derived recovery.

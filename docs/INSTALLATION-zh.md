@@ -93,6 +93,24 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
 
 **4. 运行状态**：`.comet/flow-comet-state.json` 由 `init`（或首个 `/flow-comet` 调用）自动创建。
 
+## 卸载
+
+从目标项目移除 flow-comet：
+
+```bash
+# 1. 删除 skill 目录与编排规则
+rm -rf <目标项目>/.claude/skills/flow-comet*
+rm <目标项目>/.claude/rules/flow-comet-orchestration.md
+
+# 2. 从 .claude/settings.local.json 移除 hook 条目
+#    （只删除 command 引用 comet-hook-guard.mjs 的 PreToolUse 条目，
+#      其余内容如 permissions、自定义 hook、其他 matcher 组全部保留）
+
+# 3. 可选：清理运行状态与流程工件
+rm <目标项目>/.comet/flow-comet-state.json
+rm -rf <目标项目>/.specs/          # 仅当不再需要流程工件时
+```
+
 ## 与 Comet 集成（仅当目标项目也使用 Comet 时适用）
 
 > **适用条件**：以下定制只针对**已运行过 `comet init` 的目标项目**（其 CLAUDE.md 存在 `<comet-ambient-resume>` 块）。未使用 Comet 的项目**跳过本段**——flow-comet 不依赖 Comet，有自己的状态机与文件推导恢复。
