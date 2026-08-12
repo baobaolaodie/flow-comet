@@ -19,7 +19,7 @@
 | Type | Item |
 |------|------|
 | **Required** | [flow-kit](https://github.com/rihebty/flow-kit) (methodology and artifact templates); Claude Code |
-| **Platform** | Claude Code (skill system); other platforms (Codex/Gemini/Cursor) not guaranteed |
+| **Platform** | Claude Code (skill system, default); Codex (experimental — skills/rules/hook via `prepare-env --platform codex`, see [Installation](INSTALLATION.md#platforms)); other platforms (Gemini/Cursor) not guaranteed |
 | **Runtime** | Node.js ESM (Node ≥ 18); artifact language follows the project's primary language |
 
 ## Compatibility strategy

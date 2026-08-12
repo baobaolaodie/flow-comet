@@ -8,7 +8,8 @@
 
 ## 前置依赖
 
-- [Claude Code](https://claude.ai/code)（已安装并认证）
+- [Claude Code](https://claude.ai/code)（已安装并认证，默认平台）
+- [Codex](https://github.com/openai/codex) CLI（已安装，实验性平台——技能/规则/hook 支持见下文[平台](#平台)）
 - 目标项目已安装 [flow-kit](https://github.com/rihebty/flow-kit)：
 
 ```bash
@@ -24,7 +25,8 @@ git clone https://github.com/rihebty/flow-kit.git flow-kit
 
 ```bash
 cd <flow-comet 仓库>
-node scripts/prepare-env.mjs --target <目标项目绝对路径>
+node scripts/prepare-env.mjs --target <目标项目绝对路径>          # Claude Code（默认）
+node scripts/prepare-env.mjs --target <目标项目绝对路径> --platform codex   # Codex（实验性）
 ```
 
 `prepare-env` 会：
@@ -44,6 +46,17 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 **使用前提**：脚本必须在 flow-comet 仓库内运行（从 `.comet/bundle-drafts/flow-comet/` 读取安装内容）；`--target` 指向目标项目。
 
 **更新已安装的 flow-comet**：重跑同一条方案 A 命令即可（幂等——覆盖生成物 + 合并注入 hook，既有配置保留）。
+
+### 平台
+
+安装器默认面向 **Claude Code**（行为不变）。目标平台按以下顺序确定：显式 `--platform <claude-code|codex>` 优先；否则在交互式终端（TTY）提示选择；非交互环境（CI/脚本）探测目标项目既有 `.codex/` 或 `.claude/`，均无则默认 Claude Code。
+
+| 平台 | 技能 | 编排规则 | 写入守卫 hook |
+|------|------|----------|---------------|
+| Claude Code（默认） | `.claude/skills/`（不变） | `.claude/rules/`（自动加载） | `settings.local.json` → `hooks.PreToolUse`（文本输出，exit 2 拦截） |
+| Codex（实验性） | `.agents/skills/`（Codex 自动发现） | `AGENTS.md` 托管区（安装时内联；Codex 的 `rules/` 目录服务于命令批准策略，非指令文件） | `.codex/hooks.json`（matcher `apply_patch`；JSON 契约——拦截 `{"decision":"block"}` / 放行 `{}`） |
+
+非默认平台上，SKILL/GUIDANCE 内的命令路径在安装时按平台实际技能位置重写（权威源保持 `.claude` 形态）。Codex 支持为实验性：8 节点流程尚未在 Codex 上完成端到端演练。
 
 ### 验证安装（无副作用，不创建 change）
 

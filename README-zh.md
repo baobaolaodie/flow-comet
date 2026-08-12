@@ -43,13 +43,15 @@
 
 ## 快速开始
 
-需要目标项目安装 [Claude Code](https://claude.ai/code) 与 [flow-kit](https://github.com/rihebty/flow-kit)（见[安装](docs/INSTALLATION-zh.md)）。
+需要目标项目安装 [Claude Code](https://claude.ai/code)（或 [Codex](https://github.com/openai/codex)，实验性）与 [flow-kit](https://github.com/rihebty/flow-kit)（见[安装](docs/INSTALLATION-zh.md)）。
 
 ```bash
 # 1. 从本仓库安装（方案 A：prepare-env 安装器）
 cd <flow-comet 仓库>
 node scripts/prepare-env.mjs --target <目标项目绝对路径>
 ```
+
+安装器默认面向 Claude Code（行为不变）。面向 Codex（实验性）：`node scripts/prepare-env.mjs --target <路径> --platform codex`——技能安装到自动发现的 `.agents/skills/`，编排规则注入 `AGENTS.md` 托管区，写入守卫 hook 使用 Codex 的 JSON 契约。平台也可在终端交互选择（TTY），或按目标项目既有 `.claude/` / `.codex/` 自动探测。
 
 ```bash
 # 2. 在目标项目新开会话，输入：
@@ -179,7 +181,7 @@ flow-comet/
 | 层 | 技术 |
 |----|------|
 | 运行时 | Node.js ≥ 18（ESM，零第三方依赖） |
-| 平台 | Claude Code（skill 体系、`.claude/` 安装、hooks） |
+| 平台 | Claude Code（默认——skill 体系、`.claude/` 安装、hooks）；Codex（实验性——`.agents/skills/`、AGENTS.md 托管规则、JSON hook 契约） |
 | 方法论 | [flow-kit](https://github.com/rihebty/flow-kit)（产物、规则、模板） |
 
 ## 文档

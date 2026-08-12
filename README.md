@@ -43,13 +43,15 @@ If you use skill-based disciplines like [superpowers](https://github.com/obra/su
 
 ## Quick Start
 
-Requires [Claude Code](https://claude.ai/code) and [flow-kit](https://github.com/rihebty/flow-kit) in the target project (see [Installation](docs/INSTALLATION.md)).
+Requires [Claude Code](https://claude.ai/code) (or [Codex](https://github.com/openai/codex), experimental) and [flow-kit](https://github.com/rihebty/flow-kit) in the target project (see [Installation](docs/INSTALLATION.md)).
 
 ```bash
 # 1. Install from this repository (option A: prepare-env installer)
 cd <flow-comet repo>
 node scripts/prepare-env.mjs --target <absolute path to your project>
 ```
+
+By default the installer targets Claude Code (unchanged behavior). For Codex (experimental): `node scripts/prepare-env.mjs --target <path> --platform codex` — skills install to `.agents/skills/` (auto-discovered), orchestration rules are injected into an `AGENTS.md` managed block, and the write-guard hook speaks Codex's JSON contract. The platform can also be chosen interactively (TTY) or detected from an existing `.claude/` / `.codex/` in the target project.
 
 ```bash
 # 2. Open your project in a new Claude Code session and run:
@@ -179,7 +181,7 @@ flow-comet/
 | Layer | Technology |
 |-------|------------|
 | Runtime | Node.js ≥ 18 (ESM, zero third-party dependencies) |
-| Platform | Claude Code (skills, `.claude/` installation, hooks) |
+| Platform | Claude Code (default — skills, `.claude/` installation, hooks); Codex (experimental — `.agents/skills/`, AGENTS.md managed rules, JSON hook contract) |
 | Methodology | [flow-kit](https://github.com/rihebty/flow-kit) (artifacts, rules, templates) |
 
 ## Documentation

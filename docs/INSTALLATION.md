@@ -8,7 +8,8 @@
 
 ## Requirements
 
-- [Claude Code](https://claude.ai/code), installed and authenticated
+- [Claude Code](https://claude.ai/code), installed and authenticated (default platform)
+- [Codex](https://github.com/openai/codex) CLI, installed (experimental platform — skills/rules/hook support as described under [Platforms](#platforms))
 - [flow-kit](https://github.com/rihebty/flow-kit) installed in the target project:
 
 ```bash
@@ -24,7 +25,8 @@ Automated installation from this repository (no Comet CLI required):
 
 ```bash
 cd <flow-comet repo>
-node scripts/prepare-env.mjs --target <absolute path to target project>
+node scripts/prepare-env.mjs --target <absolute path to target project>          # Claude Code (default)
+node scripts/prepare-env.mjs --target <absolute path to target project> --platform codex   # Codex (experimental)
 ```
 
 `prepare-env` does:
@@ -44,6 +46,17 @@ node scripts/prepare-env.mjs --target <absolute path to target project> --purge 
 **Prerequisites for use**: run the script inside the flow-comet repository (it reads from `.comet/bundle-drafts/flow-comet/`); `--target` points at the target project.
 
 **Updating an installed flow-comet**: re-run the same Option A command — idempotent (overwrites generated files + merges the hook, preserves existing config).
+
+### Platforms
+
+The installer targets **Claude Code** by default (unchanged behavior). The target platform is chosen as follows: an explicit `--platform <claude-code|codex>` wins; otherwise, on an interactive terminal you are asked to pick; in non-interactive environments (CI, scripts) an existing `.codex/` or `.claude/` in the target project is detected, falling back to Claude Code.
+
+| Platform | Skills | Orchestration rule | Write-guard hook |
+|----------|--------|--------------------|-------------------|
+| Claude Code (default) | `.claude/skills/` (unchanged) | `.claude/rules/` (auto-loaded) | `settings.local.json` → `hooks.PreToolUse` (text output, exit 2 blocks) |
+| Codex (experimental) | `.agents/skills/` (auto-discovered by Codex) | `AGENTS.md` managed block (inlined at install; Codex's `rules/` directory serves command-approval policies, not instruction files) | `.codex/hooks.json` (matcher `apply_patch`; JSON contract — `{"decision":"block"}` on interception, `{}` on allow) |
+
+On non-default platforms, command paths inside SKILL/GUIDANCE files are rewritten at install time to the platform's actual skill location (the authoritative source stays in `.claude` form). Codex support is experimental: the 8-node flow has not yet been exercised end-to-end on Codex.
 
 ### Verifying installation (no side effects, no change created)
 

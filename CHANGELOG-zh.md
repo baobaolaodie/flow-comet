@@ -17,6 +17,7 @@
 - **skill-load 声明机制**：子代理按节点声明已加载的工作流技能；record 按协议要求的技能调用校验声明；exit 校验协议声明标记；交叉自洽时间序校验；与旧 change 向后兼容。
 - **安装版本标识**：`prepare-env` 写入 `<项目>/.claude/skills/flow-comet/INSTALLED_VERSION`（取自源仓库 git 状态：发布 tag 上为 `1.3.1`，积累中的 dev 为 `1.3.1-N-g<hash>`）——issue 与 PR 可据此说明精确版本，含 dev 自上次发布以来的积累程度。
 - **本地提交/推送 hook**：`install-commit-hook.mjs` 配置 commit-msg 与 pre-push hook，拒绝含过程代号的提交/推送消息（本项目的工程约定，非通用词表）。
+- **多平台安装器框架**：`prepare-env` 现支持 Claude Code（默认，行为不变）与 Codex（实验性）——平台描述符表驱动；TTY 交互式平台选择 + 显式 `--platform` 覆盖 + 自动探测既有 `.claude/` / `.codex/`；技能安装到各平台原生位置（Codex 为自动发现的 `.agents/skills/`）；SKILL/GUIDANCE 命令路径在安装时按平台重写（权威源保持 `.claude` 形态）；Codex 规则注入 AGENTS.md 托管区（Codex 的 `rules/` 目录服务于命令批准策略，非指令文件）；写入守卫 hook 在 Codex 下输出兼容 JSON 契约（拦截 `{"decision":"block"}` / 放行 `{}`），Claude Code 输出保持不变。
 
 ### 变更
 
@@ -25,7 +26,7 @@
 - **CI**：过程代号检查从服务端 PR 策略移至本地 hook；PR/issue 模板按实践重构（勾选项去重、关联 issue 段、基于版本、协议与安装版本字段）。
 - **提交历史平实化**：52 条历史提交消息重写为纯描述（树不变）；重复提交去重。
 - **文档**：README 布局重组（快速开始前置）与借势增强（GSD 链接、痛点引导、适用边界）；安装指南补卸载小节；发布清单去重为单一权威；术语全库统一。
-- **系统测试集扩展至 45 项**（新增安装器版本标识检查）。
+- **系统测试集扩展至 48 项**（先新增安装器版本标识检查；再新增多平台安装器场景：Codex 安装冒烟、hook 平台分支契约、平台选择链）。
 - **合并门禁改为 CI status checks**：分支保护不再要求 approving review（单人账号无法自 approve）；required checks 为 CI 各 job；bot 审查（CodeRabbit / Sourcery）为意见层——贡献指南新增 bot 审查实践节（仅供参考、行内线程回复、合并前处理）。
 
 ### 修复
