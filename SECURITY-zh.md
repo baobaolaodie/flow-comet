@@ -1,3 +1,9 @@
+<div align="right">
+
+[English](SECURITY.md)
+
+</div>
+
 # 安全政策
 
 ## 报告漏洞

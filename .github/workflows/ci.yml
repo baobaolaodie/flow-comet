@@ -230,4 +230,4 @@ jobs:
         uses: lycheeverse/lychee-action@v2
         with:
           # Exclude: unmerged-PR 404 false positives / claude.ai anti-bot 403 (Actions IP blocked by Cloudflare; browser works)
-          args: --no-progress --exclude 'https?://github\.com/baobaolaodie/flow-comet/pull/|https?://claude\.ai/' README.md README-zh.md CONTRIBUTING.md CONTRIBUTING-zh.md CHANGELOG.md CHANGELOG-zh.md docs/ .github/
+          args: --no-progress --exclude 'https?://github\.com/baobaolaodie/flow-comet/pull/|https?://claude\.ai/' README.md README-zh.md CONTRIBUTING.md CONTRIBUTING-zh.md SECURITY.md SECURITY-zh.md CODE_OF_CONDUCT.md CODE_OF_CONDUCT-zh.md CHANGELOG.md CHANGELOG-zh.md docs/ .github/

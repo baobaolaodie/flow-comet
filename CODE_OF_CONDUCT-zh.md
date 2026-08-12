@@ -1,3 +1,9 @@
+<div align="right">
+
+[English](CODE_OF_CONDUCT.md)
+
+</div>
+
 # 贡献者公约行为准则
 
 ## 我们的承诺

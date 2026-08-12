@@ -1,3 +1,9 @@
+<div align="right">
+
+[中文](SECURITY-zh.md)
+
+</div>
+
 # Security Policy
 
 ## Reporting a vulnerability

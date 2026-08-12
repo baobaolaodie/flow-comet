@@ -1,3 +1,9 @@
+<div align="right">
+
+[中文](CODE_OF_CONDUCT-zh.md)
+
+</div>
+
 # Contributor Covenant Code of Conduct
 
 ## Our Pledge
