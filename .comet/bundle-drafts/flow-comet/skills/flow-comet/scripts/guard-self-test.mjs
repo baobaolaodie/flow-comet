@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · flow-comet 引擎自测套件（113 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、场景数一致性自检）
+// C1 · flow-comet 引擎自测套件（114 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、场景数一致性自检）
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -2616,6 +2616,37 @@ const SCENARIOS = [
       assertOut(res2, 'ALL CHECKS PASSED');
     },
   },
+
+  // 114: init 未知参数(以 -- 开头,如 --help)→ 报错而非当作 change 名执行
+  // (此前 --help 会被当作 change id 使用:自动开 change、建分支、写状态——误用有破坏性)
+  {
+    name: '114 init 未知参数(以 -- 开头)报错而非当作 change 名',
+    run: (dir) => {
+      execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--allow-empty', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
+      const branchBefore = execFileSync('git', ['branch', '--show-current'], { cwd: dir, encoding: 'utf8' }).trim();
+      const res = runState(['init', '--help'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 1);
+      assertOut(res, 'not a change name');
+      assertOut(res, 'Usage: workflow-state.mjs init');
+      assertNotOut(res, 'BRANCH:');
+      const branchAfter = execFileSync('git', ['branch', '--show-current'], { cwd: dir, encoding: 'utf8' }).trim();
+      if (branchAfter !== branchBefore) throw new Error('init --help 不应切换或创建分支');
+      if (fs.existsSync(path.join(dir, '.comet', 'flow-comet-state.json'))) {
+        throw new Error('init --help 不应写状态文件(此前被当作 change 名执行的副作用)');
+      }
+      if (fs.existsSync(path.join(dir, '.specs', '--help'))) {
+        throw new Error('init --help 不应创建 .specs/--help 工件目录');
+      }
+      // ② 带前导空白的 flag-like 参数(如 " --help")经 trim 后同样应被拒绝
+      const res2 = runState(['init', ' --help'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res2, 1);
+      assertOut(res2, 'not a change name');
+      if (fs.existsSync(path.join(dir, '.specs', ' --help'))) {
+        throw new Error('init " --help" 不应创建工件目录(trim 后应被拒绝)');
+      }
+    },
+  },
 ];
 
 // ---------- 运行 ----------
@@ -2674,13 +2705,14 @@ if (isAuthoritativeSource) {
   // ② 公开文档零代号（公开产物纪律——CHANGELOG 历史 S 编号回归的教训，2026-08-10）
   const PUBLIC_DOCS = [
     'README.md', 'README-zh.md', 'CONTRIBUTING.md', 'CONTRIBUTING-zh.md',
+    'SECURITY.md', 'SECURITY-zh.md', 'CODE_OF_CONDUCT.md', 'CODE_OF_CONDUCT-zh.md',
     'CHANGELOG.md', 'CHANGELOG-zh.md',
     'docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
     'docs/USAGE.md', 'docs/USAGE-zh.md', 'docs/PROTOCOL.md', 'docs/PROTOCOL-zh.md',
     'docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md', 'docs/VERSIONS.md', 'docs/VERSIONS-zh.md',
     'docs/ECOSYSTEM.md', 'docs/ECOSYSTEM-zh.md',
     '.github/PULL_REQUEST_TEMPLATE.md',
-    '.github/ISSUE_TEMPLATE/1-bug_report.md', '.github/ISSUE_TEMPLATE/2-feature_request.md',
+    '.github/ISSUE_TEMPLATE/1-bug_report.yml', '.github/ISSUE_TEMPLATE/2-feature_request.yml',
     '.github/ISSUE_TEMPLATE/3-question.md', '.github/ISSUE_TEMPLATE/4-task.md',
   ];
   const INTERNAL_CODE_RE = /\bS\d{2}\b|T-FIX|batch-|D-\d+|P0|dogfood|round\s*\d|内部/;

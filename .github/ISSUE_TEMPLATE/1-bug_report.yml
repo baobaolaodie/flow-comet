@@ -1,0 +1,67 @@
+name: 问题报告 / Bug report
+description: 报告工作流异常行为 / Report abnormal workflow behavior
+title: "[bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        <!-- 报告前请先搜索既有 issue,避免重复 / Search existing issues before filing -->
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为 / Actual behavior
+      description: 发生了什么 / What actually happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为 / Expected behavior
+      description: 应该怎样 / What should have happened
+    validations:
+      required: true
+  - type: textarea
+    id: message
+    attributes:
+      label: 消息 / 错误 / Message / Error
+      description: 确切的 BLOCKED / WARN 消息或报错文本(如有)/ Exact BLOCKED / WARN message or error text if any
+      render: shell
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤 / Steps to reproduce
+      description: 从干净 change 开始的最小化复现 / Minimal reproduction from a fresh change
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: checkboxes
+    id: duplicates
+    attributes:
+      label: 查重 / Duplicate check
+      options:
+        - label: 我已搜索既有 issue / I have searched existing issues
+          required: true
+  - type: dropdown
+    id: impact
+    attributes:
+      label: 影响 / Impact
+      options:
+        - 阻塞(无法继续)/ Blocking (cannot continue)
+        - 降级(功能部分失效)/ Degraded (partial functionality)
+        - 轻微 / Minor
+      default: 2
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境 / Environment
+      description: 用于定位问题的上下文 / Context for reproducing the issue
+      placeholder: |
+        - Node 版本 / Node version:
+        - flow-comet 版本 / flow-comet version(cat .claude/skills/flow-comet/INSTALLED_VERSION;开发态源安装请补 git -C 源仓库 describe --tags):
+        - 安装方式 / Install method(prepare-env 安装器 / 手动复制):
+        - 协议 / Protocol(内置 8 节点 / 自定义 compose):
+        - 是否使用分支模式 / Branch mode used:

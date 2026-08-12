@@ -4,10 +4,10 @@
 # (All checks are enforced server-side and independently.)
 #
 # 检查映射 / Check mapping:
-#   regression           guard self-test (113 scenarios incl. scenario-count & public-artifact
+#   regression           guard self-test (114 scenarios incl. scenario-count & public-artifact
 #                        code self-checks) / script syntax / BOM guard / installer
 #                        reproducibility / workflow yaml validity
-#   pr-policy            PR template completeness (5 bilingual sections + 16 checkboxes,
+#   pr-policy            PR template completeness (5 bilingual sections + 17 checkboxes,
 #                        deletion = fail) / feature-branch prefix / dev-main sync /
 #                        Conventional Commits (title + dev-PR commit messages)
 #   release-consistency  version consistency (6 spots) + tag reconciliation +
@@ -230,4 +230,4 @@ jobs:
         uses: lycheeverse/lychee-action@v2
         with:
           # Exclude: unmerged-PR 404 false positives / claude.ai anti-bot 403 (Actions IP blocked by Cloudflare; browser works)
-          args: --no-progress --exclude 'https?://github\.com/baobaolaodie/flow-comet/pull/|https?://claude\.ai/' README.md README-zh.md CONTRIBUTING.md CONTRIBUTING-zh.md CHANGELOG.md CHANGELOG-zh.md docs/ .github/
+          args: --no-progress --exclude 'https?://github\.com/baobaolaodie/flow-comet/pull/|https?://claude\.ai/' README.md README-zh.md CONTRIBUTING.md CONTRIBUTING-zh.md SECURITY.md SECURITY-zh.md CODE_OF_CONDUCT.md CODE_OF_CONDUCT-zh.md CHANGELOG.md CHANGELOG-zh.md docs/ .github/
