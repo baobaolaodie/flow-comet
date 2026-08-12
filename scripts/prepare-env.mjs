@@ -416,6 +416,28 @@ function injectCodexRules(target, stats) {
   return true;
 }
 
+/**
+ * 移除 .codex/hooks.json 中的托管 hook 条目（purge 语义：移除而非注入——保留用户条目；
+ * 重建流程会重新注入新托管条目）。文件非法 JSON 时不动（保护用户配置）。
+ */
+function removeManagedCodexHooks(codexDir) {
+  const hooksPath = path.join(codexDir, 'hooks.json');
+  if (!fs.existsSync(hooksPath)) return;
+  let hooks;
+  try {
+    hooks = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
+  } catch { return; } // 非法 JSON 不触碰（保护用户配置）
+  if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks) || !Array.isArray(hooks.PreToolUse)) return;
+  hooks.PreToolUse = hooks.PreToolUse
+    .map((group) => (
+      group && typeof group === 'object' && !Array.isArray(group) && Array.isArray(group.hooks)
+        ? { ...group, hooks: group.hooks.filter((hook) => !isManagedHookCommand(hook && hook.command)) }
+        : group
+    ))
+    .filter((group) => group && typeof group === 'object' && Array.isArray(group.hooks) && group.hooks.length > 0);
+  fs.writeFileSync(hooksPath, JSON.stringify(hooks, null, 2) + '\n', 'utf8');
+}
+
 function escapeRegExp(value) {
   return String(value).replace(/[|\\{}()[\]^$+?.]/g, '\\$&');
 }
@@ -478,9 +500,9 @@ async function main() {
       }
       const hooksPath = path.join(target, '.codex', 'hooks.json');
       if (fs.existsSync(hooksPath)) {
-        console.error(`  - ${hooksPath}（托管 hook 条目）`);
-        // 只移除托管条目,保留用户条目
-        injectCodexHook(path.join(target, '.codex'));
+        console.error(`  - ${hooksPath}（移除托管 hook 条目,保留用户条目）`);
+        // 移除托管条目（重建流程随后重新注入新托管条目——purge = 移除旧生成物后重建）
+        removeManagedCodexHooks(path.join(target, '.codex'));
       }
       const agentsPath = path.join(target, 'AGENTS.md');
       if (fs.existsSync(agentsPath)) {

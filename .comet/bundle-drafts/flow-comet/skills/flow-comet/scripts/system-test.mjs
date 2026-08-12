@@ -1393,6 +1393,14 @@ const TEST_ITEMS = [
       if (!fs.existsSync(verFile)) throw new Error('缺少 INSTALLED_VERSION(版本标识文件)');
       const installed = fs.readFileSync(verFile, 'utf8').trim();
       if (!installed) throw new Error('版本标识为空');
+      // ⑦ .codex/hooks.json 非法 JSON → fail-safe(不覆盖用户配置,报错退出)
+      const badTarget = path.join(dir, 'k2-bad-hooks');
+      fs.mkdirSync(path.join(badTarget, '.codex'), { recursive: true });
+      fs.writeFileSync(path.join(badTarget, '.codex', 'hooks.json'), '{ not json', 'utf8');
+      const badRes = spawnSync(process.execPath, [installer, '--target', badTarget, '--platform', 'codex'], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      if (badRes.status === 0) throw new Error('非法 hooks.json 应导致安装失败(fail-safe)');
+      const badOut = String(badRes.stderr || '') + String(badRes.stdout || '');
+      if (!badOut.includes('已存在但内容非法')) throw new Error('非法 hooks.json 应输出 fail-safe 提示: ' + badOut);
     },
   },
 
@@ -1474,6 +1482,60 @@ const TEST_ITEMS = [
       const r5 = run(t5);
       if (r5.status !== 0) throw new Error('默认平台安装失败: ' + (r5.stderr || JSON.stringify(r5.output)));
       if (!fs.existsSync(path.join(t5, '.claude', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('两者皆无应默认 claude-code');
+      // ⑥ --platform 未知平台 → 报错拒绝(不静默回退)
+      const t6 = path.join(dir, 'k4-unknown');
+      fs.mkdirSync(t6, { recursive: true });
+      const r6 = spawnSync(process.execPath, [installer, '--target', t6, '--platform', 'bogus'], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      if (r6.status === 0) throw new Error('未知平台应报错拒绝');
+      const out6 = String(r6.stderr || '') + String(r6.stdout || '');
+      if (!out6.includes('未知平台')) throw new Error('未知平台错误信息应含"未知平台": ' + out6);
+    },
+  },
+
+  // K5: purge 语义——缺 --yes 拒绝(不破坏)/ --purge --yes 清理重建 / 用户内容(生成物外)保留
+  {
+    name: 'K5 安装器:purge 语义(缺 --yes 拒绝/重建/用户内容保留)',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return;
+      const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
+      const run = (target, extra) => spawnSync(process.execPath, [installer, '--target', target, ...extra], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      // ① codex 平台:首次安装 + 用户内容(项目根,非生成物)
+      const target = path.join(dir, 'k5-codex');
+      fs.mkdirSync(target, { recursive: true });
+      const first = run(target, ['--platform', 'codex']);
+      if (first.status !== 0) throw new Error('codex 首次安装失败: ' + (first.stderr || JSON.stringify(first.output)));
+      fs.writeFileSync(path.join(target, 'USER_KEEP.md'), '# 用户内容(保留)\n', 'utf8');
+      // ② 缺 --yes → 拒绝且不破坏(错误提示含 --yes;生成物与用户内容仍在)
+      const dry = run(target, ['--platform', 'codex', '--purge']);
+      if (dry.status === 0) throw new Error('--purge 缺 --yes 应失败');
+      const dryOut = String(dry.stderr || '') + String(dry.stdout || '');
+      if (!dryOut.includes('--yes')) throw new Error('--purge 缺 --yes 错误信息应提示 --yes: ' + dryOut);
+      if (!fs.existsSync(path.join(target, '.agents', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('--purge 拒绝后生成物不应被删除');
+      if (!fs.existsSync(path.join(target, 'USER_KEEP.md'))) throw new Error('--purge 拒绝后用户内容不应被删除');
+      // ③ --purge --yes → 清理重建(生成物重新生成、托管区重建、用户内容保留)
+      const ok = run(target, ['--platform', 'codex', '--purge', '--yes']);
+      if (ok.status !== 0) throw new Error('--purge --yes 失败: ' + (ok.stderr || JSON.stringify(ok.output)));
+      if (!fs.existsSync(path.join(target, '.agents', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('--purge --yes 后技能应重新生成');
+      if (!fs.existsSync(path.join(target, 'USER_KEEP.md'))) throw new Error('--purge --yes 后用户内容应保留');
+      const hooksText = fs.readFileSync(path.join(target, '.codex', 'hooks.json'), 'utf8');
+      if ((hooksText.match(/comet-hook-guard\.mjs/g) || []).length !== 1) throw new Error('--purge --yes 后 hooks.json 应含 1 条重建托管条目: ' + hooksText);
+      const agents = fs.readFileSync(path.join(target, 'AGENTS.md'), 'utf8');
+      if (!agents.includes('Managed by flow-comet')) throw new Error('--purge --yes 后 AGENTS.md 托管区应重建');
+      // ④ claude-code 平台同样:缺 --yes 拒绝 + --purge --yes 重建 + 用户内容保留
+      const tcc = path.join(dir, 'k5-cc');
+      fs.mkdirSync(tcc, { recursive: true });
+      const ccFirst = run(tcc, []);
+      if (ccFirst.status !== 0) throw new Error('claude-code 首次安装失败: ' + (ccFirst.stderr || JSON.stringify(ccFirst.output)));
+      fs.writeFileSync(path.join(tcc, 'USER_KEEP.md'), '# 用户内容(保留)\n', 'utf8');
+      const ccDry = run(tcc, ['--purge']);
+      if (ccDry.status === 0) throw new Error('claude-code --purge 缺 --yes 应失败');
+      if (!fs.existsSync(path.join(tcc, '.claude', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('claude-code --purge 拒绝后生成物不应被删除');
+      if (!fs.existsSync(path.join(tcc, 'USER_KEEP.md'))) throw new Error('claude-code --purge 拒绝后用户内容不应被删除');
+      const ccOk = run(tcc, ['--purge', '--yes']);
+      if (ccOk.status !== 0) throw new Error('claude-code --purge --yes 失败: ' + (ccOk.stderr || JSON.stringify(ccOk.output)));
+      if (!fs.existsSync(path.join(tcc, '.claude', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('claude-code --purge --yes 后技能应重新生成');
+      if (!fs.existsSync(path.join(tcc, 'USER_KEEP.md'))) throw new Error('claude-code --purge --yes 后用户内容应保留');
     },
   },
 ];
