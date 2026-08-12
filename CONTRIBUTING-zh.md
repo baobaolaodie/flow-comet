@@ -71,6 +71,14 @@ git checkout dev && git merge --no-ff main -m "sync: main → dev（hotfix <描�
 git branch -d hotfix/<描述>
 ```
 
+## 新贡献者入门
+
+1. **读 README** —— 快速开始展示了一个最小工作流。
+2. **选一个入门 issue** —— 标记为 `good first issue` 的 issue 适合新贡献者。
+3. **准备环境** —— Node.js ≥ 18；clone 仓库；运行一次 `node scripts/install-commit-hook.mjs`（本地提交/推送消息检查）。
+4. **验证基线** —— 运行回归套件（见下方开发环境）。
+5. **不确定改动是否被需要？** 先开 issue —— issue 模板会引导你提供所需上下文。
+
 ## 开发环境
 
 - **运行时**：Node.js ≥ 18（ESM）

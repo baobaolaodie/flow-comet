@@ -71,6 +71,14 @@ git checkout dev && git merge --no-ff main -m "sync: main → dev（hotfix <desc
 git branch -d hotfix/<description>
 ```
 
+## Getting started for newcomers
+
+1. **Read the README** — the quick start walks through a minimal workflow.
+2. **Pick a first issue** — issues labeled `good first issue` are scoped for newcomers.
+3. **Set up your environment** — Node.js ≥ 18; clone the repo; run `node scripts/install-commit-hook.mjs` once (local commit/push message checks).
+4. **Verify the baseline** — run the regression suite (see Development setup below).
+5. **Not sure whether a change is wanted?** Open an issue first — the issue templates ask for the context we need.
+
 ## Development setup
 
 - **Runtime**: Node.js ≥ 18 (ESM)
