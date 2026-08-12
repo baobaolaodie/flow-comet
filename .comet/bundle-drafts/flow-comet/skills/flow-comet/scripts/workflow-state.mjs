@@ -573,6 +573,11 @@ async function main() {
   if (command === 'init') {
     const changeName = process.argv[3];
     if (!changeName) throw new Error('init requires a change name.');
+    // 参数误用防护:以 -- 开头的参数(如 --help)是选项不是 change 名——报错并提示用法,
+    // 防止被当作 change id 执行(自动开 change、建分支、写状态——有破坏性)
+    if (changeName.startsWith('--')) {
+      throw new Error('init: ' + changeName + ' looks like a flag, not a change name. Usage: workflow-state.mjs init <change-id> [--branch-prefix <prefix>] [--init-context|--init-skip]');
+    }
     // --branch-prefix <prefix>（缺省 'change/'）；--init-context / --init-skip（自动初始化检测授权）
     let branchPrefix = 'change/';
     let initContext = false;

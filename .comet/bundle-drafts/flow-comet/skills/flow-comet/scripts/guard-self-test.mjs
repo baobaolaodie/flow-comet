@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · flow-comet 引擎自测套件（113 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、场景数一致性自检）
+// C1 · flow-comet 引擎自测套件（114 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、场景数一致性自检）
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -2614,6 +2614,23 @@ const SCENARIOS = [
       assertExit(res2, 0);
       assertNotOut(res2, '波次散文');
       assertOut(res2, 'ALL CHECKS PASSED');
+    },
+  },
+
+  // 114: init 未知参数(以 -- 开头,如 --help)→ 报错而非当作 change 名执行
+  // (此前 --help 会被当作 change id 使用:自动开 change、建分支、写状态——误用有破坏性)
+  {
+    name: '114 init 未知参数(以 -- 开头)报错而非当作 change 名',
+    run: (dir) => {
+      execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--allow-empty', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
+      const res = runState(['init', '--help'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 1);
+      assertOut(res, 'not a change name');
+      assertNotOut(res, 'BRANCH:');
+      if (fs.existsSync(path.join(dir, '.comet', 'flow-comet-state.json'))) {
+        throw new Error('init --help 不应写状态文件(此前被当作 change 名执行的副作用)');
+      }
     },
   },
 ];

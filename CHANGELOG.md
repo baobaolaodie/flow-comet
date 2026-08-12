@@ -21,6 +21,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 ### Changed
 
 - **Regression suite expanded to 113 scenarios** covering skill-load declarations, record validation, exit protocol checks, cross-consistency timestamps, legacy compatibility, review finding disposition, artifact completeness, delegation attribution, recovery guidance, and wave-wording consistency.
+- **Regression suite expanded to 114 scenarios**: `init` rejects unknown flag-like arguments (e.g. `--help`) instead of treating them as a change name.
 - **CI**: process-code checks moved from the server-side PR policy to local hooks; PR/issue templates reworked for practice (deduplicated checkboxes, related-issue section, based-on version, protocol and installed-version fields).
 - **Commit history made jargon-free**: 52 historical commit messages rewritten to plain descriptions (tree unchanged); duplicate commits deduplicated.
 - **Docs**: README reorganized (quick start moved up) with recognizable anchors (GSD link, pain-point intro, fit boundary); installation guide gained an uninstall section; release checklist deduplicated to a single source; terminology unified across docs.
@@ -33,6 +34,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 - Overreach detection for delegated parallel tasks (execute and verify exits).
 - Recovery guidance added to blocked messages (advance / select / record).
 - Wave-wording consistency: prose marking a task parallel without the matching task attribute warns progressively.
+- `init` command rejects arguments starting with `--` (e.g. `--help`) — previously treated as the change name, which auto-created a change, a branch, and state.
 
 ## [1.3.1] - 2026-08-11
 
