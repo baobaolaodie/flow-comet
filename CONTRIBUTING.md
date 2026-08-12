@@ -22,7 +22,7 @@ dev ──PR(squash)──▶ main   (release branch — one squash commit per r
 | `dev` | Integration branch | **squash** | One change-level commit per PR — internal fix detail lives in the PR's Commits list |
 | `feat/*` | Development branch | — | Working history, deleted after merge |
 
-**Why this split**: `dev` carries one **change-level commit per PR** (squash) — a clean, stable sequence where each PR is one unit; the PR's internal commit history (each TDD fix) remains browsable in that PR's Commits list. `main` receives **one squash commit per release** — the release commit message summarizes dev.s accumulated change-level commits; release history stays clean with no internal process detail.
+**Why this split**: `dev` carries one **change-level commit per PR** (squash) — a clean, stable sequence where each PR is one unit; the PR's internal commit history (each TDD fix) remains browsable in that PR's Commits list. `main` receives **one squash commit per release** — the release commit message summarizes dev's accumulated change-level commits; release history stays clean with no internal process detail.
 
 ## Pull-request workflow
 
@@ -37,7 +37,7 @@ dev ──PR(squash)──▶ main   (release branch — one squash commit per r
 3. **Open a PR** into `dev` (base `dev`, head `feat/<description>`). **Use the repository PR template** (`.github/PULL_REQUEST_TEMPLATE.md` — scope / verification / self-check checklists). Fill in what changed, why, and verification evidence. **Keep the full checklist visible**: mark involved items `[x]` and leave non-involved items `[ ]` — do not delete unchecked items (the checklist is the reviewer's completeness signal).
 4. **Get review approval** — one approving review is required (branch protection).
 5. **Merge into `dev`** — **squash** merge: one **change-level commit** per PR (the PR's internal commits remain browsable in its Commits list). `dev` **accumulates** changes — do not release after every change.
-6. **Release PR (batched)** — when `dev` has accumulated a set of related changes (a feature batch or a maintenance batch), open **one** release PR into `main` (base `main`, head `dev`). Merge with **squash** — one release commit whose message summarizes dev.s accumulated change-level commits; each change.s internal detail stays browsable in its PR Commits list.
+6. **Release PR (batched)** — when `dev` has accumulated a set of related changes (a feature batch or a maintenance batch), open **one** release PR into `main` (base `main`, head `dev`). Merge with **squash** — one release commit whose message summarizes dev's accumulated change-level commits; each change's internal detail stays browsable in its PR Commits list.
 7. After merge, delete the feature branch.
 
 **Maintenance batches**: pure-documentation or cleanup changes without behavior impact may accumulate on a single branch (e.g. `docs/maintenance-<date>`) and ship as **one** PR into `dev` — reducing PR count without losing traceability.
@@ -200,5 +200,5 @@ Per release (see [VERSIONS.md](docs/VERSIONS.md)):
 4. prepare-env release to all installed copies (main `.claude/` + target projects) — verify each copy's `guard-self-test` after release
 
 **Release PR specifics**:
-- The release PR (dev → main) lists dev.s change-level commits (by design — each PR = one change); merging it produces one clean squash release commit on main
-- Merge with `gh pr merge --squash` — the squash message is written in public-facing language (release summary), so internal process detail never enters main.s history
+- The release PR (dev → main) lists dev's change-level commits (by design — each PR = one change); merging it produces one clean squash release commit on main
+- Merge with `gh pr merge --squash` — the squash message is written in public-facing language (release summary), so internal process detail never enters main's history
