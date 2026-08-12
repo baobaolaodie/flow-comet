@@ -9,7 +9,7 @@
 <p align="center">
   <strong>An automated execution engine for the flow-kit 9-stage development workflow, built for Claude Code.</strong>
   <br />
-  <em>Deterministic state machine · Protocol-driven · Guard-validated · Subagent-isolated</em>
+  <em>For AI coding workflows — deterministic state machine · protocol-driven · guard-validated · subagent-isolated</em>
 </p>
 
 <p align="center">
@@ -33,7 +33,7 @@
 
 ## Why
 
-flow-comet turns the flow-kit 9-stage process (CHANGE → REQUIREMENT → DESIGN → TASK → DEV → TEST → REVIEW → INTEGRATION → ARCHIVE) from a discipline-dependent manual flow into a **verifiable deterministic state machine**:
+If you use skill-based disciplines like [superpowers](https://github.com/obra/superpowers), [OpenSpec](https://github.com/Fission-AI/OpenSpec), or [GSD](https://github.com/open-gsd/gsd-core), you know the pain: discipline relies on the model's compliance, and progress lives in chat history. flow-comet turns the flow-kit 9-stage process (CHANGE → REQUIREMENT → DESIGN → TASK → DEV → TEST → REVIEW → INTEGRATION → ARCHIVE) from a discipline-dependent manual flow into a **verifiable deterministic state machine**:
 
 - **Automated routing** — scripts manage stage transitions, guard validations, and hook-based write interception
 - **Protocol-driven** — the built-in 8-node protocol is the default workflow; custom protocols composed from any installed skill run on the same engine (see [Custom Protocols](docs/PROTOCOL.md))
@@ -95,7 +95,7 @@ The engine routes between nodes by deriving state from `.specs/` artifacts (dete
 
 ## What is flow-kit
 
-[flow-kit](https://github.com/rihebty/flow-kit) is a pure-Markdown development methodology that fuses mainstream AI coding workflows — [superpowers](https://github.com/obra/superpowers), [OpenSpec](https://github.com/Fission-AI/OpenSpec), [spec-kit](https://github.com/github/spec-kit), GSD, [gstack](https://github.com/garrytan/gstack), [claude-task-master](https://github.com/eyaltoledano/claude-task-master) — into its own 9-stage process (CHANGE → REQUIREMENT → DESIGN → TASK → DEV → TEST → REVIEW → INTEGRATION → ARCHIVE) with `.specs/` artifact templates and R1-R8 behavior rules. No runtime, no CLI — clone it into a project and it defines *what to produce and what rules to follow*, but progress relies on human (and AI) discipline.
+[flow-kit](https://github.com/rihebty/flow-kit) is a pure-Markdown development methodology that fuses mainstream AI coding workflows — [superpowers](https://github.com/obra/superpowers), [OpenSpec](https://github.com/Fission-AI/OpenSpec), [spec-kit](https://github.com/github/spec-kit), [GSD](https://github.com/open-gsd/gsd-core), [gstack](https://github.com/garrytan/gstack), [claude-task-master](https://github.com/eyaltoledano/claude-task-master) — into its own 9-stage process (CHANGE → REQUIREMENT → DESIGN → TASK → DEV → TEST → REVIEW → INTEGRATION → ARCHIVE) with `.specs/` artifact templates and R1-R8 behavior rules. No runtime, no CLI — clone it into a project and it defines *what to produce and what rules to follow*, but progress relies on human (and AI) discipline.
 
 ## Why flow-comet
 
