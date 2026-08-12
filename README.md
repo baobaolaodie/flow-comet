@@ -41,6 +41,58 @@ flow-comet turns the flow-kit 9-stage process (CHANGE → REQUIREMENT → DESIGN
 - **Subagent-isolated execution** — implementation work is delegated to fresh-context subagents with a verifiable Return Contract
 - **File-as-truth recovery** — state is derived from `.specs/` artifacts, so recovery never depends on conversation history
 
+## Quick Start
+
+Requires [Claude Code](https://claude.ai/code) and [flow-kit](https://github.com/rihebty/flow-kit) in the target project (see [Installation](docs/INSTALLATION.md)).
+
+```bash
+# 1. Install from this repository (option A: prepare-env installer)
+cd <flow-comet repo>
+node scripts/prepare-env.mjs --target <absolute path to your project>
+```
+
+```bash
+# 2. Open your project in a new Claude Code session and run:
+/flow-comet
+```
+
+The first call confirms scope, then automatically creates the `change/<id>` branch, initializes state, enters the open node, and produces `CHANGE.md` / `REQUIREMENT.md`. Every subsequent stage is routed automatically — you only answer decision points (scope, tech stack, destructive changes, review findings, archive confirmation).
+
+On first use in a project, the workflow automatically detects whether a project context (`CONTEXT.md`) exists and prompts to initialize it when missing — existing AI-context documents (such as `CLAUDE.md` / `AGENTS.md`) are read and integrated with source attribution, and existing files are never modified. Projects with a fresh context run silently. No separate command to remember.
+
+## Usage
+
+- **[8-node workflow](docs/USAGE.md)** — node-by-node responsibilities, branch mode, execution modes, decision points
+- **[Custom protocols](docs/PROTOCOL.md)** — compose any installed skill into a custom workflow via `/flow-comet-compose`
+- **[Core mechanisms](docs/MECHANISM.md)** — state machine, three defense layers, guard validation, execution model
+- **[Troubleshooting](docs/TROUBLESHOOTING.md)** — BLOCKED/WARN messages and their fixes
+
+The entry point is the `/flow-comet` command; state is inspected and advanced from the command line:
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs status   # current change + node
+node .claude/skills/flow-comet/scripts/workflow-state.mjs next     # next node + skill
+```
+
+## Architecture
+
+```mermaid
+graph LR
+    O[open] --> D[design] --> P[plan] --> E[execute]
+    E <--> SE[subagent-execute]
+    E --> R[review] --> V[verify] --> A[archive]
+    style O fill:#e8f5e9
+    style D fill:#e3f2fd
+    style P fill:#fff3e0
+    style E fill:#fce4ec
+    style SE fill:#f3e5f5
+    style R fill:#e8eaf6
+    style V fill:#e0f7fa
+    style A fill:#f1f8e9
+```
+
+The engine routes between nodes by deriving state from `.specs/` artifacts (determineNode), gated by guard exit validations.
+
 ## What is flow-kit
 
 [flow-kit](https://github.com/rihebty/flow-kit) is a pure-Markdown development methodology that fuses mainstream AI coding workflows — [superpowers](https://github.com/obra/superpowers), [OpenSpec](https://github.com/Fission-AI/OpenSpec), [spec-kit](https://github.com/github/spec-kit), GSD, [gstack](https://github.com/garrytan/gstack), [claude-task-master](https://github.com/eyaltoledano/claude-task-master) — into its own 9-stage process (CHANGE → REQUIREMENT → DESIGN → TASK → DEV → TEST → REVIEW → INTEGRATION → ARCHIVE) with `.specs/` artifact templates and R1-R8 behavior rules. No runtime, no CLI — clone it into a project and it defines *what to produce and what rules to follow*, but progress relies on human (and AI) discipline.
@@ -101,58 +153,6 @@ Real-run captures from production-length sessions. During these multi-hour runs,
 | [flow-kit](https://github.com/rihebty/flow-kit) | Methodology & artifact system (9-stage flow, `.specs/` templates, R1-R8 rules) | **Dependency** — flow-comet is its automation layer; artifacts and rules come from flow-kit |
 | [Comet](https://github.com/rpamis/comet) | Skill Creator ecosystem (bundle authoring, hook-guard pattern, state machine) | **Mechanism source** — flow-comet borrows Comet's mechanism patterns extensively (workflow-protocol as source of truth, script-owned state, guard gates, hook interception); **runtime optional** (copy install needs no Comet CLI). Details in [Ecosystem](docs/ECOSYSTEM.md) |
 | **Comet Classic** | Comet's classic workflow (OpenSpec + Superpowers) | **Not a dependency** — flow-comet is an independent workflow-kernel; state does not interoperate with classic (own `.comet/flow-comet-state.json` + file-derived routing) |
-
-## Quick Start
-
-Requires [Claude Code](https://claude.ai/code) and [flow-kit](https://github.com/rihebty/flow-kit) in the target project (see [Installation](docs/INSTALLATION.md)).
-
-```bash
-# 1. Install from this repository (option A: prepare-env installer)
-cd <flow-comet repo>
-node scripts/prepare-env.mjs --target <absolute path to your project>
-```
-
-```bash
-# 2. Open your project in a new Claude Code session and run:
-/flow-comet
-```
-
-The first call confirms scope, then automatically creates the `change/<id>` branch, initializes state, enters the open node, and produces `CHANGE.md` / `REQUIREMENT.md`. Every subsequent stage is routed automatically — you only answer decision points (scope, tech stack, destructive changes, review findings, archive confirmation).
-
-On first use in a project, the workflow automatically detects whether a project context (`CONTEXT.md`) exists and prompts to initialize it when missing — existing AI-context documents (such as `CLAUDE.md` / `AGENTS.md`) are read and integrated with source attribution, and existing files are never modified. Projects with a fresh context run silently. No separate command to remember.
-
-## Usage
-
-- **[8-node workflow](docs/USAGE.md)** — node-by-node responsibilities, branch mode, execution modes, decision points
-- **[Custom protocols](docs/PROTOCOL.md)** — compose any installed skill into a custom workflow via `/flow-comet-compose`
-- **[Core mechanisms](docs/MECHANISM.md)** — state machine, three defense layers, guard validation, execution model
-- **[Troubleshooting](docs/TROUBLESHOOTING.md)** — BLOCKED/WARN messages and their fixes
-
-The entry point is the `/flow-comet` command; state is inspected and advanced from the command line:
-
-```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs status   # current change + node
-node .claude/skills/flow-comet/scripts/workflow-state.mjs next     # next node + skill
-```
-
-## Architecture
-
-```mermaid
-graph LR
-    O[open] --> D[design] --> P[plan] --> E[execute]
-    E <--> SE[subagent-execute]
-    E --> R[review] --> V[verify] --> A[archive]
-    style O fill:#e8f5e9
-    style D fill:#e3f2fd
-    style P fill:#fff3e0
-    style E fill:#fce4ec
-    style SE fill:#f3e5f5
-    style R fill:#e8eaf6
-    style V fill:#e0f7fa
-    style A fill:#f1f8e9
-```
-
-The engine routes between nodes by deriving state from `.specs/` artifacts (determineNode), gated by guard exit validations.
 
 ## Directory Structure
 

@@ -41,6 +41,58 @@ flow-comet 把 flow-kit 的 9 阶段开发流程（CHANGE → REQUIREMENT → DE
 - **子代理隔离执行**——实现工作委托给 fresh-context 子代理，回传可验证的 Return Contract
 - **文件即真相恢复**——状态从 `.specs/` 工件推导，恢复不依赖对话历史
 
+## 快速开始
+
+需要目标项目安装 [Claude Code](https://claude.ai/code) 与 [flow-kit](https://github.com/rihebty/flow-kit)（见[安装](docs/INSTALLATION-zh.md)）。
+
+```bash
+# 1. 从本仓库安装（方案 A：prepare-env 安装器）
+cd <flow-comet 仓库>
+node scripts/prepare-env.mjs --target <目标项目绝对路径>
+```
+
+```bash
+# 2. 在目标项目新开会话，输入：
+/flow-comet
+```
+
+首次调用先确认范围，然后自动完成：创建 `change/<id>` 分支 → 初始化状态 → 进入 open 节点 → 产出 `CHANGE.md` / `REQUIREMENT.md`。之后每个阶段自动路由——你只需要回答决策点（范围确认、技术栈选型、破坏性变更、REVIEW 结论、归档确认）。
+
+在项目首次使用时，工作流会自动检测项目上下文（`CONTEXT.md`）是否存在，缺失时提示初始化——检测到既有 AI 上下文文档（如 `CLAUDE.md` / `AGENTS.md`）会读取并整合（带出处标注），**绝不修改既有文件**。上下文已存在且新鲜的项目完全静默。无需记忆任何独立命令。
+
+## 使用
+
+- **[8 节点工作流](docs/USAGE-zh.md)**——逐节点职责、分支模式、执行模式、决策点
+- **[自定义协议](docs/PROTOCOL-zh.md)**——通过 `/flow-comet-compose` 把任意已安装 skill 组合成自定义工作流
+- **[核心机制](docs/MECHANISM-zh.md)**——状态机、三层防线、guard 校验、执行模型
+- **[故障排查](docs/TROUBLESHOOTING-zh.md)**——BLOCKED/WARN 信息与处理
+
+入口是 `/flow-comet` 命令；状态查看与推进可从命令行完成：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs status   # 当前 change + 节点
+node .claude/skills/flow-comet/scripts/workflow-state.mjs next     # 下一节点 + 技能
+```
+
+## 架构
+
+```mermaid
+graph LR
+    O[open] --> D[design] --> P[plan] --> E[execute]
+    E <--> SE[subagent-execute]
+    E --> R[review] --> V[verify] --> A[archive]
+    style O fill:#e8f5e9
+    style D fill:#e3f2fd
+    style P fill:#fff3e0
+    style E fill:#fce4ec
+    style SE fill:#f3e5f5
+    style R fill:#e8eaf6
+    style V fill:#e0f7fa
+    style A fill:#f1f8e9
+```
+
+引擎从 `.specs/` 工件推导状态（determineNode）进行节点间路由，由 guard exit 校验门控推进。
+
 ## 什么是 flow-kit
 
 [flow-kit](https://github.com/rihebty/flow-kit) 是一套融合了主流 AI 编码工作流——[superpowers](https://github.com/obra/superpowers)、[OpenSpec](https://github.com/Fission-AI/OpenSpec)、[spec-kit](https://github.com/github/spec-kit)、GSD、[gstack](https://github.com/garrytan/gstack)、[claude-task-master](https://github.com/eyaltoledano/claude-task-master)——再按自己的流程重排的纯 Markdown 开发方法论：9 阶段流程（CHANGE → REQUIREMENT → DESIGN → TASK → DEV → TEST → REVIEW → INTEGRATION → ARCHIVE）、`.specs/` 工件模板与 R1-R8 行为规则。没有运行时、没有 CLI——克隆进项目即可用：它定义"该产出什么、该守什么规矩"，但推进全靠人与 AI 的纪律。
@@ -101,58 +153,6 @@ flow-comet 把 flow-kit 的 9 阶段开发流程（CHANGE → REQUIREMENT → DE
 | [flow-kit](https://github.com/rihebty/flow-kit) | 方法论与工件体系（9 阶段流程、`.specs/` 模板、R1-R8 规则） | **依赖**——flow-comet 是它的执行自动化层；产物与规则来自 flow-kit |
 | [Comet](https://github.com/rpamis/comet) | Skill Creator 生态（bundle 创作、hook guard 模式、状态机） | **机制来源**——flow-comet 大量借鉴 Comet 的机制范式（协议即事实源、脚本拥有状态、guard 门禁、hook 拦截）；**运行时可选**（复制安装无需 Comet CLI）。详见[生态](docs/ECOSYSTEM-zh.md) |
 | **Comet Classic** | Comet 的经典工作流（OpenSpec + Superpowers） | **不依赖**——flow-comet 是独立 workflow-kernel；状态与 classic 不互通（自有 `.comet/flow-comet-state.json` + 文件推导路由） |
-
-## 快速开始
-
-需要目标项目安装 [Claude Code](https://claude.ai/code) 与 [flow-kit](https://github.com/rihebty/flow-kit)（见[安装](docs/INSTALLATION-zh.md)）。
-
-```bash
-# 1. 从本仓库安装（方案 A：prepare-env 安装器）
-cd <flow-comet 仓库>
-node scripts/prepare-env.mjs --target <目标项目绝对路径>
-```
-
-```bash
-# 2. 在目标项目新开会话，输入：
-/flow-comet
-```
-
-首次调用先确认范围，然后自动完成：创建 `change/<id>` 分支 → 初始化状态 → 进入 open 节点 → 产出 `CHANGE.md` / `REQUIREMENT.md`。之后每个阶段自动路由——你只需要回答决策点（范围确认、技术栈选型、破坏性变更、REVIEW 结论、归档确认）。
-
-在项目首次使用时，工作流会自动检测项目上下文（`CONTEXT.md`）是否存在，缺失时提示初始化——检测到既有 AI 上下文文档（如 `CLAUDE.md` / `AGENTS.md`）会读取并整合（带出处标注），**绝不修改既有文件**。上下文已存在且新鲜的项目完全静默。无需记忆任何独立命令。
-
-## 使用
-
-- **[8 节点工作流](docs/USAGE-zh.md)**——逐节点职责、分支模式、执行模式、决策点
-- **[自定义协议](docs/PROTOCOL-zh.md)**——通过 `/flow-comet-compose` 把任意已安装 skill 组合成自定义工作流
-- **[核心机制](docs/MECHANISM-zh.md)**——状态机、三层防线、guard 校验、执行模型
-- **[故障排查](docs/TROUBLESHOOTING-zh.md)**——BLOCKED/WARN 信息与处理
-
-入口是 `/flow-comet` 命令；状态查看与推进可从命令行完成：
-
-```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs status   # 当前 change + 节点
-node .claude/skills/flow-comet/scripts/workflow-state.mjs next     # 下一节点 + 技能
-```
-
-## 架构
-
-```mermaid
-graph LR
-    O[open] --> D[design] --> P[plan] --> E[execute]
-    E <--> SE[subagent-execute]
-    E --> R[review] --> V[verify] --> A[archive]
-    style O fill:#e8f5e9
-    style D fill:#e3f2fd
-    style P fill:#fff3e0
-    style E fill:#fce4ec
-    style SE fill:#f3e5f5
-    style R fill:#e8eaf6
-    style V fill:#e0f7fa
-    style A fill:#f1f8e9
-```
-
-引擎从 `.specs/` 工件推导状态（determineNode）进行节点间路由，由 guard exit 校验门控推进。
 
 ## 目录结构
 
