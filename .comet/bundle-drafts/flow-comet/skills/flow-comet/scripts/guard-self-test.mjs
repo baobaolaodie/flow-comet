@@ -2697,7 +2697,7 @@ if (isAuthoritativeSource) {
     'docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md', 'docs/VERSIONS.md', 'docs/VERSIONS-zh.md',
     'docs/ECOSYSTEM.md', 'docs/ECOSYSTEM-zh.md',
     '.github/PULL_REQUEST_TEMPLATE.md',
-    '.github/ISSUE_TEMPLATE/1-bug_report.md', '.github/ISSUE_TEMPLATE/2-feature_request.md',
+    '.github/ISSUE_TEMPLATE/1-bug_report.yml', '.github/ISSUE_TEMPLATE/2-feature_request.yml',
     '.github/ISSUE_TEMPLATE/3-question.md', '.github/ISSUE_TEMPLATE/4-task.md',
   ];
   const INTERNAL_CODE_RE = /\bS\d{2}\b|T-FIX|batch-|D-\d+|P0|dogfood|round\s*\d|内部/;

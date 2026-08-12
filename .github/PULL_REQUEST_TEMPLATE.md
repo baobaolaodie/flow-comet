@@ -20,7 +20,7 @@
 - [ ] 脚本改动：先写失败测试（确认测试因缺陷失败）再实现 / Script changes: write a failing test first (confirm it fails for the right reason) before implementing
 - [ ] 文档改动：中英双语同步 / Doc changes: EN and ZH mirrored
 - [ ] 发布验证：各安装副本回归通过 / Release check: regression passes in all installed copies
-- [ ] 未运行（说明原因）/ Not run (explain)：
+- [ ] 如有未运行的验证项（说明原因）/ Not run if any (explain)：
 
 ## 自查（勾选）/ Self-check (check)
 
