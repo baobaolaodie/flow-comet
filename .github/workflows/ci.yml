@@ -129,8 +129,14 @@ jobs:
             // Tree-level, main-relative: only files main ADDED that dev lacks mean dev
             // is behind. dev may legitimately lead main with unpublished batch changes
             // (those appear as deletions on the main side and must not count).
+            // Files dev deliberately deleted (present in dev's history, removed by an
+            // unpublished evolution — e.g. template md → forms migration) are not drift.
             const drift = execSync('git diff --name-only origin/dev origin/main --diff-filter=A')
-              .toString().trim();
+              .toString().trim().split('\n').filter(Boolean)
+              .filter((f) => {
+                try { execSync(`git cat-file -e origin/dev:${f}`); return true; } catch { /* dev lacks it */ }
+                return !execSync(`git log --oneline origin/dev -- ${f}`).toString().trim();
+              });
             if (isRelease && drift)
               P.push(`dev lacks ${drift.split('\n').length} file(s) that main added — sync dev before creating the release PR`);
             if (!isRelease && drift)
