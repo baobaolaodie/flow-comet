@@ -7,7 +7,7 @@
 #   regression           guard self-test (114 scenarios incl. scenario-count & public-artifact
 #                        code self-checks) / script syntax / BOM guard / installer
 #                        reproducibility / workflow yaml validity
-#   pr-policy            PR template completeness (5 bilingual sections + 16 checkboxes,
+#   pr-policy            PR template completeness (5 bilingual sections + 17 checkboxes,
 #                        deletion = fail) / feature-branch prefix / dev-main sync /
 #                        Conventional Commits (title + dev-PR commit messages)
 #   release-consistency  version consistency (6 spots) + tag reconciliation +

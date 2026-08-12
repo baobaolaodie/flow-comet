@@ -7,11 +7,11 @@
 ## 改动范围（勾选）/ Scope of Changes (check)
 
 - [ ] 工作流脚本 / Workflow scripts（`.comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/`）
-- [ ] Skill 指令 / Skill instructions（`skills/flow-comet*/`）
+- [ ] Skill 指令 / Skill instructions（`.comet/bundle-drafts/flow-comet/skills/flow-comet*/`）
 - [ ] 安装器 / Installer（`scripts/prepare-env.mjs`）
-- [ ] 回归场景 / Regression scenarios（guard-self-test）
+- [ ] 回归场景 / Regression scenarios（guard-self-test；场景数变化需全库同步 / scenario-count changes require repo-wide sync）
 - [ ] 文档 / Docs（README / docs/ / CHANGELOG / CONTRIBUTING）
-- [ ] 版本收尾 / Version wrap-up（CHANGELOG 条目 + 徽章 + VERSIONS）
+- [ ] 版本收尾 / Version wrap-up（CHANGELOG 条目 + 徽章 + VERSIONS + 权威源 INSTALLED_VERSION）
 - [ ] 其他 / Other：
 
 ## 验证（勾选已执行）/ Verification (check executed)
@@ -26,6 +26,7 @@
 
 - [ ] 提交信息为纯描述（无代号、编号、行话）/ Commit messages are plain descriptions (no codes, numbers, jargon)
 - [ ] 版本号 / 场景数与实现一致 / Version number / scenario count match the implementation
+- [ ] 行为变化已记入 CHANGELOG（Unreleased）/ Behavior changes recorded in CHANGELOG (Unreleased)
 - [ ] 向后兼容：无破坏性变更（如有已说明）/ Backward compatible: no breaking changes (explain if any)
 - [ ] 无无关文件或本地伪影 / No unrelated files or local artifacts
 

@@ -31,6 +31,13 @@ body:
     attributes:
       label: 验收标准(可选)/ Acceptance criteria (optional)
       description: 完成判据 / Definition of done
+  - type: checkboxes
+    id: duplicates
+    attributes:
+      label: 查重 / Duplicate check
+      options:
+        - label: 我已搜索既有 issue / I have searched existing issues
+          required: true
   - type: dropdown
     id: scope
     attributes:

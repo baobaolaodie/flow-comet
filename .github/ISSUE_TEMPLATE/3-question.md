@@ -1,7 +1,7 @@
 ---
 name: 使用问题 / Question
 about: 提问工作流的使用方式或澄清行为 / Ask how to use the workflow or clarify behavior
-title: "[question] "
+title: "[question]: "
 labels: question
 ---
 
