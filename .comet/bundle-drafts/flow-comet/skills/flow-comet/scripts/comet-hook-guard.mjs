@@ -10,6 +10,47 @@ import {
 } from './protocol-utils.mjs';
 
 const event = process.argv[2] ?? 'before_tool';
+// 平台识别（1.4.0 多平台）：--platform codex argv 参数（prepare-env 注入 hook 命令时带平台标记）。
+// 缺省 claude-code = 既有行为（stdout 自由文本 + exit 2 block）。
+// Codex 分支：stdout 严格 JSON schema（拦截输出 {"decision":"block"}，放行输出 {}），exit 0。
+function platformFromArgs(argv) {
+  for (let index = 0; index < argv.length; index++) {
+    if (argv[index] === '--platform') {
+      if (typeof argv[index + 1] === 'string' && argv[index + 1] !== '') return argv[index + 1];
+    }
+    if (typeof argv[index] === 'string' && argv[index].startsWith('--platform=')) {
+      const value = argv[index].slice('--platform='.length);
+      if (value !== '') return value;
+    }
+  }
+  return null;
+}
+const platform = platformFromArgs(process.argv.slice(2)) ?? 'claude-code';
+const isCodex = platform === 'codex';
+
+// 放行输出：Codex 分支只输出 {}（Codex 对 hook stdout 严格 schema 校验,额外字段整体无效）;
+// Claude Code 分支输出既有文本（workflow-hook-guard-ok + EVENT + 可选标注）。
+function hookOk(extra) {
+  if (isCodex) {
+    console.log('{}');
+    return;
+  }
+  console.log('workflow-hook-guard-ok');
+  console.log('EVENT: ' + event + (extra ? ' ' + extra : ''));
+}
+
+// 拦截输出：Codex 分支输出 {"decision":"block",reason} + exit 0（Codex block 语义——
+// permissionDecision:"ask" 不支持,直接 block）;Claude Code 分支既有文本 + exit 2。
+function hookBlock(mainLine, detailLine) {
+  if (isCodex) {
+    console.log(JSON.stringify({ decision: 'block', reason: mainLine + (detailLine ? ' ' + detailLine : '') }));
+    process.exit(0);
+  }
+  console.error(mainLine);
+  if (detailLine) console.error(detailLine);
+  process.exit(2);
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..');
 const runRoot = process.env.COMET_RUN_ROOT ? path.resolve(process.env.COMET_RUN_ROOT) : process.cwd();
@@ -1717,25 +1758,19 @@ async function main() {
         return p === '' || target.startsWith(p);
       });
       if (!allowed) {
-        console.error(`BLOCKED: phase "${currentNode}" 不允许写入 "${target}"`);
-        console.error(`允许范围: ${whitelist.join(', ')}`);
-        process.exit(2);
+        hookBlock(`BLOCKED: phase "${currentNode}" 不允许写入 "${target}"`, `允许范围: ${whitelist.join(', ')}`);
       }
     } else if (declared) {
       // 审查补充（2026-08-08）：协议声明了 writeWhitelist 但未列出当前节点 → fail-closed 拒绝
       // （漏声明节点不放行——防协议作者漏列导致防线出洞）
-      console.error(`BLOCKED: phase "${currentNode}" 未在协议 writeWhitelist 中声明，默认拒绝写入 "${target}"`);
-      console.error(`请在协议 writeWhitelist 中为节点 "${currentNode}" 声明允许的路径前缀`);
-      process.exit(2);
+      hookBlock(`BLOCKED: phase "${currentNode}" 未在协议 writeWhitelist 中声明，默认拒绝写入 "${target}"`, `请在协议 writeWhitelist 中为节点 "${currentNode}" 声明允许的路径前缀`);
     } else {
       // ：未声明 writeWhitelist 时，非内置节点（缺省表无此 id）→ 协调者默认 ['.specs/']
       // ——与内置 execute/subagent-execute 协调者语义统一（写源码必须显式声明，防 fail-open 防线出洞）
       const coordDefault = ['.specs/'];
       const allowed = coordDefault.some(prefix => prefix === '' || target.startsWith(prefix));
       if (!allowed) {
-        console.error(`BLOCKED: phase "${currentNode}" 不允许写入 "${target}"`);
-        console.error(`允许范围: ${coordDefault.join(', ')}（未声明 writeWhitelist 的协调者默认）`);
-        process.exit(2);
+        hookBlock(`BLOCKED: phase "${currentNode}" 不允许写入 "${target}"`, `允许范围: ${coordDefault.join(', ')}（未声明 writeWhitelist 的协调者默认）`);
       }
     }
   }
@@ -1746,8 +1781,8 @@ async function main() {
     if (!current || !nodes.some((node) => node.id === current)) {
       throw new Error('active Comet change has no valid workflow Node');
     }
-    console.log('workflow-hook-guard-ok');
-    console.log('EVENT: ' + event);
+    hookOk();
+    if (isCodex) return;
     console.log('NODE: ' + current);
     return;
   }
@@ -1757,8 +1792,7 @@ async function main() {
   } catch (error) {
     if (error && typeof error === 'object' && error.code === 'ENOENT') {
       // 无 state 文件（无活跃 workflow / 新克隆仓库）→ 放行，不阻断写入
-      console.log('workflow-hook-guard-ok');
-      console.log('EVENT: before_tool (no active workflow)');
+      hookOk('(no active workflow)');
       return;
     }
     throw error;
@@ -1768,15 +1802,13 @@ async function main() {
   // ② running（含旧 state 无 status 但有 activeChange，fail-closed 向后兼容）→ 白名单校验
   // ③ completed（归档后）→ 放行；其他 → 拦截
   if (!state.activeChange) {
-    console.log('workflow-hook-guard-ok');
-    console.log('EVENT: ' + event + ' (no active workflow)');
+    hookOk('(no active workflow)');
     return;
   }
   const running = state.status === 'running' || state.status === undefined;
   if (!running) {
     if (state.status === 'completed') {
-      console.log('workflow-hook-guard-ok');
-      console.log('EVENT: ' + event + ' (workflow completed)');
+      hookOk('(workflow completed)');
       return;
     }
     throw new Error('workflow is not running; current status is ' + String(state.status));
@@ -1785,8 +1817,8 @@ async function main() {
   if (!current || !nodes.some((node) => node.id === current)) {
     throw new Error('workflow state has no valid current Node');
   }
-  console.log('workflow-hook-guard-ok');
-  console.log('EVENT: ' + event);
+  hookOk();
+  if (isCodex) return;
   console.log('NODE: ' + current);
 }
 
