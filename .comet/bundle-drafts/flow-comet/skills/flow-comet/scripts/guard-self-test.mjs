@@ -2638,6 +2638,13 @@ const SCENARIOS = [
       if (fs.existsSync(path.join(dir, '.specs', '--help'))) {
         throw new Error('init --help 不应创建 .specs/--help 工件目录');
       }
+      // ② 带前导空白的 flag-like 参数(如 " --help")经 trim 后同样应被拒绝
+      const res2 = runState(['init', ' --help'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res2, 1);
+      assertOut(res2, 'not a change name');
+      if (fs.existsSync(path.join(dir, '.specs', ' --help'))) {
+        throw new Error('init " --help" 不应创建工件目录(trim 后应被拒绝)');
+      }
     },
   },
 ];
