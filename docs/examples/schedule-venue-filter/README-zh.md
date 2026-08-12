@@ -1,6 +1,12 @@
+<div align="right">
+
+[English](README.md) · [中文](README-zh.md)
+
+</div>
+
 # flow-comet 产物示例
 
-本目录包含 flow-comet 全流程产出的工件示例，用于参考和对照。
+本目录包含 flow-comet 全流程产出的工件示例，用于参考和对照。**本示例为模拟数据**——用于演示工件质量的合成项目，非真实代码库。
 
 ## 场景：赛事场地筛选器
 
