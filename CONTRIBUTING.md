@@ -172,7 +172,14 @@ The built-in default prefix is `change/` (backward-compatible with existing chan
 
 - **PR description**: what changed, why, verification evidence (test output, real-session evidence)
 - **Scope**: code change → accompany tests + regression; doc change → both languages in sync
-- **One approving review** required (branch protection); a new push invalidates the previous approval (dismiss stale reviews)
+- **Merge gate**: required status checks (CI — regression / pr-policy / quality / installer / docs-links must pass). Human approval is a process-level gate: the user (maintainer) reviews and approves before merging (in this single-account repo the author cannot approve their own PR, so the maintainer's review replaces the GitHub approval gate).
+
+## Bot reviewers (CodeRabbit / Sourcery)
+
+- **Advisory layer, not a merge gate**: bots comment and suggest; the merge gate is CI status checks (bot checks may be pending or rate-limited without blocking).
+- **Before merging**: address or explicitly decline every actionable bot comment — reply inline (threaded reply citing the fix commit), then resolve the thread. A PR with unresolved actionable comments should not be merged.
+- **Threaded replies only**: reply to a bot's inline comment via its thread (not a new timeline mention) to keep the PR timeline clean.
+- **Default configuration**: CodeRabbit and Sourcery run with their default settings (aligned with the reference repository's practice); they never approve PRs.
 
 ## Keeping a PR current
 

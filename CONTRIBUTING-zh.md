@@ -172,7 +172,14 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --bra
 
 - **PR 描述**：改了什么、为什么、验证证据（测试输出、真实会话证据）
 - **范围**：代码改动 → 伴随测试 + 回归；文档改动 → 两语同步
-- **1 个 approving review**（分支保护）；新推送使旧 approve 失效（dismiss stale reviews）
+- **合并门禁**：required status checks（CI——regression / pr-policy / quality / installer / docs-links 必须通过）。人工审核为流程级门禁：合并前由用户（维护者）审核批准（本单人账号仓库中 PR 作者无法 approve 自己的 PR，维护者审核取代 GitHub approval 门禁）。
+
+## Bot 审查（CodeRabbit / Sourcery）
+
+- **意见层，非合并门禁**：bot 只评论与建议；合并门禁是 CI status checks（bot checks 可能 pending 或被限流，不阻塞合并）。
+- **合并前处理**：每条可执行的 bot 评论必须被处理（采纳或明确拒绝）——行内线程回复（引用修复提交），然后解决线程。存在未解决 actionable 评论的 PR 不应合并。
+- **仅行内线程回复**：回复 bot 的行内评论须在其线程内（而非时间线新 @ 评论），保持 PR 时间线干净。
+- **默认配置**：CodeRabbit 与 Sourcery 使用默认配置（与参考仓库实践一致）；它们从不 approve PR。
 
 ## 保持 PR 更新
 
