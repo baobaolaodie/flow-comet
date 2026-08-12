@@ -26,6 +26,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 - **Commit history made jargon-free**: 52 historical commit messages rewritten to plain descriptions (tree unchanged); duplicate commits deduplicated.
 - **Docs**: README reorganized (quick start moved up) with recognizable anchors (GSD link, pain-point intro, fit boundary); installation guide gained an uninstall section; release checklist deduplicated to a single source; terminology unified across docs.
 - **System test suite expanded to 45 items** (installer version-marker check added).
+- **Merge gate changed to CI status checks**: branch protection no longer requires an approving review (single-account repo cannot self-approve); required checks are the CI jobs; bot reviewers (CodeRabbit / Sourcery) are advisory — contributing guide gains a bot-reviewers section (advisory-only, threaded replies, resolve before merge).
 
 ### Fixed
 
@@ -35,6 +36,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 - Recovery guidance added to blocked messages (advance / select / record).
 - Wave-wording consistency: prose marking a task parallel without the matching task attribute warns progressively.
 - `init` command rejects arguments starting with `--` (e.g. `--help`) — previously treated as the change name, which auto-created a change, a branch, and state.
+- dev-main sync check: files deliberately deleted on dev (e.g. the template md → forms migration) no longer counted as drift.
 
 ## [1.3.1] - 2026-08-11
 
