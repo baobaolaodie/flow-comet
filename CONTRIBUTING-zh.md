@@ -179,7 +179,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --bra
 - **仅供参考**：bot 评论是建议而非要求——bot 也会出错。以你自己的判断（与维护者审核）为准，不要盲从 bot 建议。
 - **可执行 vs 信息性**：bot 评论提出具体修改要求（修复、澄清、补测试）才算*可执行*；信息性评论（总结、提问、赞许）无需处理。
 - **合并前处理**：每条可执行的 bot 评论必须处理——修复它，或在其线程内回复说明拒绝理由。完成后解决线程。
-- **保持 PR 时间线干净**：在 bot 评论的线程内回复，不要在时间线新开 @ 评论。
+- **保持 PR 时间线干净**：在 bot 评论的线程内回复，不要在时间线新开 @ 评论。行内评论用线程回复；整体 review（无线程）用引用原文的 quote reply。
 - **Bot checks 与 required CI checks**：只有 CI job（regression / pr-policy / quality / installer / docs-links）是合并必需。Bot checks（CodeRabbit / Sourcery）是信息性的——在 checks 面板可能显示 pending 或被限流，不阻塞合并。
 
 ## CHANGELOG 写作规范

@@ -179,7 +179,7 @@ The built-in default prefix is `change/` (backward-compatible with existing chan
 - **Advisory only**: bot comments are suggestions, not requirements — bots can be wrong. Apply your own judgment (and the maintainer's review) over bot suggestions.
 - **Actionable vs informational**: a bot comment is *actionable* when it asks for a concrete change (a fix, a clarification, or additional tests); informational comments (summaries, questions, praise) do not need to be resolved.
 - **Before merging**: address every actionable bot comment — fix it, or reply in its thread explaining why you decline it. Resolve the thread when done.
-- **Keep the PR timeline clean**: reply to bot comments in their threads, not as new timeline mentions.
+- **Keep the PR timeline clean**: reply to bot comments in their threads, not as new timeline mentions. For inline comments use the threaded reply; for an overall review (no thread), use a quote reply that cites the review's text.
 - **Bot checks vs required CI checks**: only the CI jobs (regression / pr-policy / quality / installer / docs-links) are required for merge. Bot checks (CodeRabbit / Sourcery) are informational — they may show as pending or rate-limited in the checks panel without blocking the merge.
 
 ## CHANGELOG conventions
