@@ -192,12 +192,7 @@ git push --force-with-lease origin feat/<描述>            # feature 分支允�
 - 版本：X.Y.Z（文档批次可不 bump）
 ```
 
-每次发布（见 [VERSIONS-zh.md](docs/VERSIONS-zh.md)）：
-
-1. 更新 CHANGELOG（Added/Changed/Fixed——双语）
-2. 更新 README 版本徽章
-3. `git tag vX.Y.Z` + push --tags（发布 PR 合入 main 后）
-4. prepare-env 发布到全部已安装副本（主仓 `.claude/` + 各目标项目）——发布后逐一验证各副本 `guard-self-test`
+**发布步骤**：五步清单（CHANGELOG → README 徽章 → tag → prepare-env 分发 → dev 同步）见 [VERSIONS-zh.md](docs/VERSIONS-zh.md)。
 
 **发布 PR 要点**：
 - 发布 PR（dev → main）天然列出 dev 的全部未发布 change 级提交（dev 是 change 级提交序列、main 每次发布积累它们）——这是设计，不是问题

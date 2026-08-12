@@ -192,12 +192,7 @@ Force push is allowed on your own feature branch (no protection); a new push inv
 - Version: X.Y.Z (doc-only batches may skip the bump)
 ```
 
-Per release (see [VERSIONS.md](docs/VERSIONS.md)):
-
-1. Update CHANGELOG (Added/Changed/Fixed — bilingual)
-2. Update README version badge
-3. `git tag vX.Y.Z` + push --tags (after merging the release PR into main)
-4. prepare-env release to all installed copies (main `.claude/` + target projects) — verify each copy's `guard-self-test` after release
+**Release steps**: the five-step checklist (CHANGELOG → README badge → tag → prepare-env distribution → dev sync) lives in [VERSIONS.md](docs/VERSIONS.md).
 
 **Release PR specifics**:
 - The release PR (dev → main) lists dev's change-level commits (by design — each PR = one change); merging it produces one clean squash release commit on main
