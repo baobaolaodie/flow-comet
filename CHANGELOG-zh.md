@@ -10,7 +10,9 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号记录于 git tag、本文档、README 徽章、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 与权威源 `skills/flow-comet/INSTALLED_VERSION`；`bundle.yaml` 的 version 保持 1.0.0（与发布流程解耦）。
 
-## [Unreleased]
+## [1.4.0] - 2026-08-13
+
+多平台安装器框架、平台模块化与真实产物示例。([#45](https://github.com/baobaolaodie/flow-comet/pull/45)、[#46](https://github.com/baobaolaodie/flow-comet/pull/46)、[#47](https://github.com/baobaolaodie/flow-comet/pull/47))
 
 ### 新增
 
