@@ -490,6 +490,12 @@ const TEST_ITEMS = [
       assertExit(runState(['record', 'open', 'plain text'], dir), 0);
       const st2 = readStateFile(dir);
       if (st2.evidence.open.summary !== 'plain text') throw new Error('非 JSON payload 应按 summary 记录');
+      // --json-file:从文件读 JSON payload(规避 Windows PowerShell 引号剥离)
+      fs.writeFileSync(path.join(dir, 'payload.json'), '{"summary":"from-file"}', 'utf8');
+      const rf = runState(['record', 'open', '--json-file', 'payload.json'], dir);
+      assertExit(rf, 0);
+      const st3 = readStateFile(dir);
+      if (st3.evidence.open.summary !== 'from-file') throw new Error('--json-file payload 未生效');
       // 缺 node 参数 → 拒绝
       const noNode = runState(['record'], dir);
       assertExit(noNode, 1);

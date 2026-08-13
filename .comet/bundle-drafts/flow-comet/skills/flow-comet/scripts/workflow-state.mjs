@@ -843,16 +843,30 @@ async function main() {
     // 若不可解析则作为 summary 字符串
     // payload 解析前剥离 --protocol（及 --protocol=<p>）——resolveProtocol 已全局提取协议路径，
     // 此处仅防其拼入 payload 导致 JSON 解析失败（结构字段丢失）
+    // --json-file <path>（或 --json-file=<path>）：从文件读 JSON payload——规避 Windows
+    // PowerShell 传参剥离内嵌双引号导致 JSON 损坏（record 存成 {summary:...} 脏数据）
     let parsed = {};
+    let jsonFile = null;
     const payloadArgs = [];
     const recordArgs = process.argv.slice(4);
     for (let i = 0; i < recordArgs.length; i++) {
       const arg = recordArgs[i];
       if (arg === '--protocol') { i += 1; continue; }
       if (typeof arg === 'string' && arg.startsWith('--protocol=')) continue;
+      if (arg === '--json-file') {
+        jsonFile = recordArgs[i + 1];
+        i += 1;
+        continue;
+      }
+      if (typeof arg === 'string' && arg.startsWith('--json-file=')) {
+        jsonFile = arg.slice('--json-file='.length);
+        continue;
+      }
       payloadArgs.push(arg);
     }
-    const raw = payloadArgs.join(' ');
+    const raw = jsonFile !== null
+      ? await fs.readFile(path.resolve(runRoot, jsonFile), 'utf8')
+      : payloadArgs.join(' ');
     try {
       parsed = raw ? JSON.parse(raw) : {};
       if (typeof parsed !== 'object' || Array.isArray(parsed)) parsed = { summary: String(parsed) };
