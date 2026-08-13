@@ -1595,6 +1595,41 @@ const TEST_ITEMS = [
       if (!fs.existsSync(path.join(tcc, 'USER_KEEP.md'))) throw new Error('claude-code --purge --yes 后用户内容应保留');
     },
   },
+
+  // K6: 平台描述符驱动防回归——PLATFORMS 每平台条目含安装/清理函数(installHooks/installRules/
+  // purge/overwriteDescription);main 统一调度(源码无平台分支标识——新增平台 = 描述符条目,
+  // main 零改动);对源码提取的全部平台逐一真实安装冒烟(未来新增平台自动纳入测试)
+  {
+    name: 'K6 安装器:平台描述符驱动(全平台安装冒烟 + main 统一调度)',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return;
+      const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
+      const src = fs.readFileSync(installer, 'utf8');
+      // ① main 统一调度:平台分支标识已消除(新增平台 = 描述符条目,main 零改动)
+      if (src.includes('isClaudeCode')) {
+        throw new Error('prepare-env main 仍含平台分支标识 isClaudeCode(应迁入描述符)');
+      }
+      // ② 描述符完整性:每平台条目须含 4 个平台函数(installHooks/installRules/purge/overwriteDescription)
+      const platformBlock = src.match(/const PLATFORMS = \{[\s\S]*?\n\};/);
+      if (!platformBlock) throw new Error('未找到 PLATFORMS 描述符表');
+      const ids = [...src.matchAll(/^\s{2}'([a-z-]+)':\s*\{/gm)].map((m) => m[1]);
+      if (!ids.includes('claude-code') || !ids.includes('codex')) {
+        throw new Error('PLATFORMS 应含 claude-code/codex: ' + ids.join(', '));
+      }
+      for (const fn of ['installHooks', 'installRules', 'purge', 'overwriteDescription']) {
+        if (!platformBlock[0].includes(fn)) throw new Error('描述符缺平台函数: ' + fn);
+      }
+      // ③ 全平台逐一安装冒烟(从源码提取 id——未来新增平台自动纳入)
+      for (const id of ids) {
+        const target = path.join(dir, 'k6-' + id);
+        fs.mkdirSync(target, { recursive: true });
+        const res = spawnSync(process.execPath, [installer, '--target', target, '--platform', id], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+        if (res.status !== 0) throw new Error('平台 ' + id + ' 安装失败: ' + (res.stderr || JSON.stringify(res.output)));
+      }
+      console.log('  描述符驱动: ' + ids.length + ' 个平台逐一安装冒烟通过✓');
+    },
+  },
 ];
 
 // ---------- 运行 ----------
