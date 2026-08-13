@@ -24,6 +24,7 @@ W2-D 用 `git show <commitHash>` 校验提交文件子集。当产物 commit 属
 1. **委托 prompt 内联全部上游上下文**：AC / 设计 / 任务块全文写进委托 prompt，子代理不依赖 worktree 里的工件
 2. **委托前 commit 上游工件**：把 `.specs/<change>/` 工件先 commit，配合脏检查 WORKTREE WARN（entry execute / entry subagent-execute 检测未提交工件并提示）
 3. **单仓库场景不受影响**：worktree 与目标项目同根（同一仓库）时无此问题
+4. **委托回报后立即提取**：子代理回报 commitHash 后**立即**用 `git show <branch>:<path>` 提取产物到目标仓库——worktree 任务结束清理后，提交对象可能不可见（悬挂对象被回收/分支删除），回报时提取可避免产物丢失
 
 ## 4. 验证方法
 

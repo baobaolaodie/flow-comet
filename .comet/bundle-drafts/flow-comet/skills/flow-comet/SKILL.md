@@ -104,7 +104,7 @@ description: "Use when the user wants the flow-comet managed workflow for flow-k
 node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <skill> --prompt flow-kit/prompts/<阶段>.md
 ```
 
-节点退出（exit）与证据记录（record）会核对声明标记。声明如实记录执行者动作——加载了哪个 skill、按哪份协议工作——**不等于产出证明**；产出是否正确由产物结构校验与门禁把关。
+节点退出（exit）与证据记录（record）会核对声明标记。声明如实记录执行者动作——加载了哪个 skill、按哪份协议工作——**不等于产出证明**；产出是否正确由产物结构校验与门禁把关。**record 会自动补写缺失的声明标记**（按协议 requiredSkillCalls 代记，标记带 `auto: true`）——手动声明仍推荐（如实记录加载动作与协议文件），自动补是兜底。
 
 ## Guardrails And Evidence
 
