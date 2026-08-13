@@ -107,7 +107,7 @@ node workflow-state.mjs config set enablePrReview true         # enable PR revie
 node workflow-state.mjs execution-mode <subagent|direct>       # switch execution mode (direct needs confirmation)
 node workflow-guard.mjs entry/exit <node> [--apply]            # node gates
 node workflow-handoff.mjs request|result|status                # subagent delegation handoff
-node workflow-state.mjs skill-load <node> '<json>'             # skill-load declaration (run by Claude)
+node workflow-state.mjs skill-load <node> <skill> [--prompt <path>]  # skill-load declaration (run by Claude; --prompt points at flow-kit/prompts/)
 node workflow-state.mjs verify-fail                            # verify failure counter (3 retries, 4th BLOCKED)
 ```
 

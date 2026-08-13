@@ -107,7 +107,7 @@ node workflow-state.mjs config set enablePrReview true         # 开启 PR 审�
 node workflow-state.mjs execution-mode <subagent|direct>       # 切换执行模式（direct 需确认）
 node workflow-guard.mjs entry/exit <node> [--apply]            # 节点门禁
 node workflow-handoff.mjs request|result|status                # 子代理委托交接
-node workflow-state.mjs skill-load <node> '<json>'             # 技能加载声明（由 Claude 执行）
+node workflow-state.mjs skill-load <node> <skill> [--prompt <path>]  # 技能加载声明（由 Claude 执行；--prompt 指向 flow-kit/prompts/）
 node workflow-state.mjs verify-fail                            # verify 失败计数（重试 3 次，第 4 次 BLOCKED）
 ```
 
