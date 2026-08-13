@@ -43,13 +43,15 @@
 
 ## 快速开始
 
-需要目标项目安装 [Claude Code](https://claude.ai/code) 与 [flow-kit](https://github.com/rihebty/flow-kit)（见[安装](docs/INSTALLATION-zh.md)）。
+需要目标项目安装 [Claude Code](https://claude.ai/code)（或 [Codex](https://github.com/openai/codex)）与 [flow-kit](https://github.com/rihebty/flow-kit)（见[安装](docs/INSTALLATION-zh.md)）。
 
 ```bash
 # 1. 从本仓库安装（方案 A：prepare-env 安装器）
 cd <flow-comet 仓库>
 node scripts/prepare-env.mjs --target <目标项目绝对路径>
 ```
+
+安装器默认面向 Claude Code（行为不变）。面向 Codex：`node scripts/prepare-env.mjs --target <路径> --platform codex`——技能安装到自动发现的 `.agents/skills/`，编排规则注入 `AGENTS.md` 托管区，写入守卫 hook 经 Codex PreToolUse 拦截 Bash 写命令（首次使用需信任 hook：`/hooks`）。平台也可在终端交互选择（TTY），或按目标项目既有 `.claude/` / `.codex/` 自动探测。
 
 ```bash
 # 2. 在目标项目新开会话，输入：
@@ -130,13 +132,13 @@ graph LR
 4. **flow-kit 方法论的原生自动化层**——不是另起炉灶：工件格式、规则、阶段与 flow-kit 完全一致；装了 flow-kit 的项目装上 flow-comet 即升级为机器化流程，无需迁移。
 5. **协议驱动、零依赖、拷贝即用**——内置 8 节点流程开箱即用；任意已装技能可组合成自定义协议跑在同一引擎；Node.js 18+、无第三方依赖、一条命令装入目标项目。
 
-**适用场景**：flow-comet 面向 Claude Code 上耗时数小时、跨多会话的开发 change——纪律自动化的价值在长任务中体现。它不是通用 CI/CD 或项目管理工具；其他平台（Codex / Gemini / Cursor）不保证支持。
+**适用场景**：flow-comet 面向 Claude Code 上耗时数小时、跨多会话的开发 change——纪律自动化的价值在长任务中体现。它不是通用 CI/CD 或项目管理工具；Codex 受支持（见[安装](docs/INSTALLATION-zh.md#平台)），其他平台（Gemini / Cursor）不保证支持。
 
 ## 运行展示（截图）
 
 来自真实生产级会话的运行截图。这些数小时运行中，**唯一的人工交互是工作流规定的决策点**（范围确认、技术栈选型、评审结论、归档确认）——除此之外没有任何其他人工干扰或临时决策，全程严格执行规范。
 
-**完整产物体系**——一次真实运行的全部流程工件（CHANGE / DESIGN / REQUIREMENT / REVIEW / TASK / TEST / UAT + 21 份任务摘要）：
+**完整产物体系**——一次真实运行的全部流程工件（CHANGE / DESIGN / REQUIREMENT / REVIEW / TASK / TEST / UAT + 每任务一份摘要）：
 
 ![产物体系](images/long-run-output.png)
 
@@ -179,7 +181,7 @@ flow-comet/
 | 层 | 技术 |
 |----|------|
 | 运行时 | Node.js ≥ 18（ESM，零第三方依赖） |
-| 平台 | Claude Code（skill 体系、`.claude/` 安装、hooks） |
+| 平台 | Claude Code（默认——skill 体系、`.claude/` 安装、hooks）；Codex（`.agents/skills/`、AGENTS.md 托管规则、PreToolUse 写拦截） |
 | 方法论 | [flow-kit](https://github.com/rihebty/flow-kit)（产物、规则、模板） |
 
 ## 文档

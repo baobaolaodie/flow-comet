@@ -15,15 +15,19 @@ Responsibility: 委托 [P] 并行任务给子代理，要求加载 flow-comet-de
 
 职责分工：execute 节点负责**串行委托**（非 parallel 任务，一次一个），本节点负责**并行委托**（`parallel="true"` 任务，同 wave 多任务同时发）。两者共用同一委托证据库（handoff 记录在 subagent-execute evidence）。
 
+> **Codex 平台委托方式（2026-08-13 调研修正 + 实测）**：Codex CLI 无 `--worktree` 一键 flag（openai/codex#12862 跟踪中），但 git worktree 是标准支持方式（Codex App 内置 worktree；子代理运行时自动创建 worktree 隔离）——本节点委托与 Claude Code 的 worktree 隔离语义对齐：协调者对每个 parallel 任务 `git worktree add <worktree路径> -b <分支>` → 在 worktree 内 `codex exec` 委托（fresh-context，prompt 内联任务块 + AC + 强制加载 flow-comet-dev 与回传 Return Contract，`</dev/null>` 防 stdin 卡住）→ 子代理回报 commitHash 后校验存在性 + 任务完成回收（`git worktree remove`）。
+> **沙箱要求（实测 2026-08-13）**：worktree 的 `.git` 是主仓共享——`workspace-write`/`git-write-access` 沙箱均被 Codex 硬拦截（index.lock / objects / COMMIT_EDITMSG Permission denied）；子代理必须用 `sandbox_mode="danger-full-access"` 才能完成 git 提交（worktree 隔离已限定写范围，full-access 仅用于让 git 提交可行）。
+> worktree 内无项目 `.codex/`（hook 不生效）——与 CC worktree 子代理无 state 放行语义一致（子代理负责实现，不受协调者白名单限制）。handoff 记录（workflow-handoff request/result）与 Return Contract 校验机制不变。
+
 ## Guidance
 
-### 必填段清单（exit guard 校验，结构+存在级）
+### 必填段清单（结构+存在级）
 
-| 文件 | 必填段 |
-|------|--------|
-| SUMMARY.md | `## 做了什么` / `## 改动文件` / `## verify 输出` / `## 6 维自查` / `## 越界检查` / `## 自检方法` |
+| 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
+|------|-------------------------------|-----------------------------------|
+| SUMMARY.md | `## verify 输出` / `## 6 维自查`（须含实质内容）/ `## 越界检查` / `## 自检方法` | `## 做了什么` / `## 改动文件` 等（执行纪律，review 把关） |
 
-**缺失任一必填段 = 节点未完成**，exit guard 校验（见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B）。
+guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
 
 ---
 name: flow-comet-subagent-execute
@@ -151,7 +155,6 @@ The subagent-execute node identifies all `parallel="true"` pending tasks in TASK
 | Skill | Enforcement | Reason |
 |-------|-------------|--------|
 | `flow-comet-dev` | Required in each subagent's prompt | Provides TDD, LESSONS scan, diff boundary, self-review protocol for each parallel task |
-| `superpowers:subagent-driven-development` | Required for delegation pattern | Provides the Agent tool invocation pattern for parallel task execution |
 
 **加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
 

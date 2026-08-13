@@ -15,14 +15,14 @@ This node performs the final integration verification: running all automated tes
 
 ## Guidance
 
-### 必填段清单（exit guard 校验，结构+存在级）
+### 必填段清单（结构+存在级）
 
-| 文件 | 必填段 |
-|------|--------|
-| TEST.md | `## 测试矩阵` / `## 验证命令` |
-| UAT.md | `## 验收结果` |
+| 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
+|------|-------------------------------|-----------------------------------|
+| TEST.md | `## 验证命令`（exit verify 真实执行） | `## 测试矩阵` 等段（5 轮金字塔，review 把关） |
+| UAT.md | `## 验收结果` | 其余（执行纪律，review 把关） |
 
-**缺失任一必填段 = 节点未完成**，exit guard 校验（见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B）。
+guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
 
 ### Prerequisites
 
@@ -32,8 +32,6 @@ This node performs the final integration verification: running all automated tes
 - `.specs/<change-id>/REQUIREMENT.md` must exist for AC reference.
 
 ### Steps
-
-**Express 路径（低风险变更快捷路径）**：若 CHANGE.md 头部含 `express: true`，则 TEST.md 用最小矩阵（只第 1 轮功能，2-5 轮声明 N/A）、UAT 用简化脚本（核心 AC 手动确认 + 其余单测覆盖）；否则完整 5 轮金字塔 + 全 UAT。
 
 1. **Run full automation**: Execute all automated checks and paste real output:
    - Full unit tests: `pytest tests/ -q` (or equivalent).

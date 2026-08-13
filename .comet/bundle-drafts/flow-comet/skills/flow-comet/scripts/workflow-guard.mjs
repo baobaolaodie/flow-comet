@@ -2395,10 +2395,12 @@ async function main() {
         }
         // 生产代码任务必填 ## 自检方法，声明 brooks-review 或 builtin-quickcheck
         // 格式兼容：方法名行允许中文前缀/括号说明（如 "方法：brooks-review"），按关键词搜索而非 [a-z-]+ 硬匹配
+        // 段名允许带括号后缀（如 "## 自检方法（声明 brooks-review 或 builtin-quickcheck）"——括号为说明非段名部分，
+        // 执行者常按模板标题原样书写导致旧正则不匹配落入"旧格式 WARN"；括号后缀与段名等价）
         // 分隔符用 .?（任意字符）而非 \.?（字面点）：canonical 名 "brooks-review"/"builtin-quickcheck" 是连字符，与既有 /brooks.?review/ 约定一致
         // 真实项目端到端验证实证：方法名可能在段内后续行（子代理列表写法）——段内全文搜索而非仅第一行
         // 段内容截取到下一个段标题（\n## ）或分隔线（\n---）或文件尾（split 处理,避免 JS 无 \Z 的问题）
-        const methodMatch = content.match(/##\s*自检方法\s*\n([\s\S]*)/i);
+        const methodMatch = content.match(/##\s*自检方法(?:[（(][^）)\n]*[）)])?\s*\n([\s\S]*)/i);
         const methodSection = methodMatch ? methodMatch[1].split(/\n##\s|\n---/)[0] : null;
         const method = methodSection ? /brooks.?review|cache.?brooks|builtin.?quickcheck/i.exec(methodSection) : null;
         if (!method) {

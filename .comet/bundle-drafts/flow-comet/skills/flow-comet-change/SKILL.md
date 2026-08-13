@@ -18,8 +18,7 @@ description: "flow-kit CHANGE 阶段协议：反问澄清、change-id 自动生�
 5. **结构化反问**（步骤 1）：每轮最多 3 个问题
 6. **影响面判定 + 范围排除**
 7. **生成 CHANGE.md**（使用 `flow-kit/templates/CHANGE.md`）
-8. **Express 判定（低风险变更快捷路径）**：若低风险（改动 ≤3 文件、无后端 schema/API/数据库变更、无安全/认证/并发、纯前端重构/文案/简单 bug 修复），在 CHANGE.md 头部加 `express: true`（触发 review 只 Round 1+1.5、verify 最小矩阵的降级路径）
-9. **路径建议**：完整/中等/最短
+8. **路径建议**：完整/中等/最短
 
 ## 产物
 

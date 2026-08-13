@@ -85,7 +85,7 @@ Explicit parameter authorization (no blocking prompts, headless-safe): `--init-c
 
 ## Limitations
 
-- **Claude Code only**: other platforms (Codex/Gemini/Cursor) not guaranteed
+- **Platforms**: Claude Code (default) and Codex (skills/rules/hook via the multi-platform installer, see [Installation](INSTALLATION.md#platforms)) are supported; other platforms (Gemini/Cursor) not guaranteed
 - **Return Contract transition rule**: legacy pure-string handoffs are exempt as WARN; missing redEvidence/greenEvidence is progressive WARN (not BLOCK) to avoid blocking legacy change re-entry
 - **Not interoperable with Comet Classic**: workflow-kernel state is independent of classic (design decision, not a defect)
 - **Hook allows writes when no active change**: when `.comet/flow-comet-state.json` is absent, the hook guard allows all writes (design decision: no workflow, no write restrictions)

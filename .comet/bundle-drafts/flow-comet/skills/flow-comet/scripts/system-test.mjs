@@ -316,7 +316,7 @@ function runLocalTool(checker, repoRoot) {
   return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
 }
 
-// ---------- 系统测试项（A~J 十大类） ----------
+// ---------- 系统测试项（A~K 十一类） ----------
 
 const TEST_ITEMS = [
   // ---------- A. 状态机与路由 ----------
@@ -490,6 +490,12 @@ const TEST_ITEMS = [
       assertExit(runState(['record', 'open', 'plain text'], dir), 0);
       const st2 = readStateFile(dir);
       if (st2.evidence.open.summary !== 'plain text') throw new Error('非 JSON payload 应按 summary 记录');
+      // --json-file:从文件读 JSON payload(规避 Windows PowerShell 引号剥离)
+      fs.writeFileSync(path.join(dir, 'payload.json'), '{"summary":"from-file"}', 'utf8');
+      const rf = runState(['record', 'open', '--json-file', 'payload.json'], dir);
+      assertExit(rf, 0);
+      const st3 = readStateFile(dir);
+      if (st3.evidence.open.summary !== 'from-file') throw new Error('--json-file payload 未生效');
       // 缺 node 参数 → 拒绝
       const noNode = runState(['record'], dir);
       assertExit(noNode, 1);
@@ -1349,6 +1355,244 @@ const TEST_ITEMS = [
       const ok = /^\d+\.\d+\.\d+(-\d+-g[0-9a-f]+)?$/.test(installed) || installed === 'unreleased';
       if (!ok) throw new Error('版本标识格式异常: ' + installed);
       console.log('  版本标识 = ' + installed + '(git describe 或权威源兜底——多人协作精确检测)✓');
+    },
+  },
+
+  // ---------- K 扩展:多平台安装器框架(1.4.0) ----------
+
+  // K2: codex 平台安装冒烟——技能落 .agents/skills/ + SKILL 路径平台化替换 + .codex/hooks.json 注入
+  // (含 --platform codex 托管命令)+ AGENTS.md 托管区内联 + 纯 codex 不生成 .claude/ + 版本标识
+  {
+    name: 'K2 安装器:codex 平台安装(技能/路径替换/hooks.json/AGENTS 托管区)',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
+      const target = path.join(dir, 'k2-target');
+      fs.mkdirSync(target, { recursive: true });
+      const res = spawnSync(process.execPath, [installer, '--target', target, '--platform', 'codex'], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      if (res.status !== 0) throw new Error('prepare-env --platform codex 失败: ' + (res.stderr || JSON.stringify(res.output)));
+      // ① 技能落 .agents/skills/(Codex 自动发现位置)
+      const skillMd = path.join(target, '.agents', 'skills', 'flow-comet', 'SKILL.md');
+      if (!fs.existsSync(skillMd)) throw new Error('codex 平台技能未安装到 .agents/skills/');
+      // ② SKILL 路径平台化替换生效(命令路径 .claude/skills → .agents/skills)
+      const text = fs.readFileSync(skillMd, 'utf8');
+      if (!text.includes('.agents/skills/flow-comet/scripts/')) throw new Error('SKILL 命令路径未替换为 .agents/skills/');
+      if (text.includes('.claude/skills/flow-comet/scripts/')) throw new Error('SKILL 仍含 .claude/skills/flow-comet/scripts/ 命令路径');
+      // ③ .codex/hooks.json 注入托管 hook(顶层 hooks 包裹层 + matcher * + 平台标记)
+      const hooksFile = path.join(target, '.codex', 'hooks.json');
+      if (!fs.existsSync(hooksFile)) throw new Error('缺少 .codex/hooks.json');
+      const hooksParsed = JSON.parse(fs.readFileSync(hooksFile, 'utf8'));
+      const preToolUse = hooksParsed.hooks && hooksParsed.hooks.PreToolUse;
+      if (!Array.isArray(preToolUse) || preToolUse.length === 0) throw new Error('hooks.json 缺 hooks.PreToolUse 包裹层');
+      const hooksText = JSON.stringify(hooksParsed);
+      if (!hooksText.includes('comet-hook-guard.mjs')) throw new Error('hooks.json 未注入托管 hook 命令');
+      if (!hooksText.includes('--platform codex')) throw new Error('hooks.json hook 命令缺平台标记');
+      if (preToolUse[0].matcher !== '*') throw new Error('hooks.json matcher 应为 * (Codex PreToolUse 只拦截 Bash 工具): ' + JSON.stringify(preToolUse[0]));
+      // ③b .codex/config.toml hooks 启用(features——Codex hooks 默认关闭)
+      const configFile = path.join(target, '.codex', 'config.toml');
+      if (!fs.existsSync(configFile)) throw new Error('缺少 .codex/config.toml');
+      const configText = fs.readFileSync(configFile, 'utf8');
+      if (!/\[features\]/.test(configText) || !/hooks\s*=\s*true/.test(configText)) throw new Error('config.toml 未启用 hooks(features)');
+      // ④ AGENTS.md 托管区(内联 orchestration 全文——Codex 指令唯一自动加载路径)
+      const agentsFile = path.join(target, 'AGENTS.md');
+      if (!fs.existsSync(agentsFile)) throw new Error('缺少 AGENTS.md');
+      const agents = fs.readFileSync(agentsFile, 'utf8');
+      if (!agents.includes('Managed by flow-comet')) throw new Error('AGENTS.md 无托管标记');
+      if (!agents.includes('flow-comet Orchestration')) throw new Error('AGENTS.md 未内联 orchestration 内容');
+      // ⑤ 纯 codex 平台不生成 .claude/
+      if (fs.existsSync(path.join(target, '.claude'))) throw new Error('codex 平台不应生成 .claude/');
+      // ⑥ 版本标识随技能包分发(平台化路径)
+      const verFile = path.join(target, '.agents', 'skills', 'flow-comet', 'INSTALLED_VERSION');
+      if (!fs.existsSync(verFile)) throw new Error('缺少 INSTALLED_VERSION(版本标识文件)');
+      const installed = fs.readFileSync(verFile, 'utf8').trim();
+      if (!installed) throw new Error('版本标识为空');
+      // ⑦ .codex/hooks.json 非法 JSON → fail-safe(不覆盖用户配置,报错退出)
+      const badTarget = path.join(dir, 'k2-bad-hooks');
+      fs.mkdirSync(path.join(badTarget, '.codex'), { recursive: true });
+      fs.writeFileSync(path.join(badTarget, '.codex', 'hooks.json'), '{ not json', 'utf8');
+      const badRes = spawnSync(process.execPath, [installer, '--target', badTarget, '--platform', 'codex'], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      if (badRes.status === 0) throw new Error('非法 hooks.json 应导致安装失败(fail-safe)');
+      const badOut = String(badRes.stderr || '') + String(badRes.stdout || '');
+      if (!badOut.includes('已存在但内容非法')) throw new Error('非法 hooks.json 应输出 fail-safe 提示: ' + badOut);
+    },
+  },
+
+  // K3: hook 平台分支输出契约——codex 分支 stdout 为合法 JSON(拦截含 decision:"block";放行可解析非 block);
+  // claude-code 分支(无平台标记)输出与现状一致(文本 workflow-hook-guard-ok)
+  {
+    name: 'K3 hook:codex 平台分支 JSON 契约(拦截/放行)+ CC 分支不变',
+    run: (dir) => {
+      // ① codex 分支:写越权路径(源码)→ stdout 合法 JSON + decision block
+      const st = baseState('open');
+      st.status = 'running';
+      writeState(dir, st);
+      fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
+      const block = runHook(['before_tool', '--platform', 'codex'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'src', 'evil.py') } });
+      assertExit(block, 0);
+      const blockParsed = JSON.parse(block.output.trim()); // stdout 非 JSON → throw(RED)
+      if (blockParsed.decision !== 'block') throw new Error('codex 拦截输出应含 decision:"block": ' + JSON.stringify(blockParsed));
+      // ② codex 分支:写 .specs/ 工件 → 放行(输出可解析、非 block)
+      const ok = runHook(['before_tool', '--platform', 'codex'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', CHANGE_ID, 'CHANGE.md') } });
+      assertExit(ok, 0);
+      const okParsed = JSON.parse(ok.output.trim()); // 放行输出须为合法 JSON(空串解析失败 → RED)
+      if (okParsed.decision === 'block') throw new Error('codex 放行输出不应含 decision block');
+      // ③ codex 分支:无活跃 workflow → 放行(JSON 可解析)
+      fs.rmSync(path.join(dir, '.comet'), { recursive: true, force: true });
+      const noActive = runHook(['before_tool', '--platform', 'codex'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'src', 'x.py') } });
+      assertExit(noActive, 0);
+      JSON.parse(noActive.output.trim());
+      // ④ claude-code 分支(无平台标记):输出与现状一致(文本 workflow-hook-guard-ok)
+      writeState(dir, { ...baseState('open'), status: 'running' });
+      const cc = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', CHANGE_ID, 'CHANGE.md') } });
+      assertExit(cc, 0);
+      assertOut(cc, 'workflow-hook-guard-ok');
+      assertNotOut(cc, 'decision');
+      // ⑤ codex 分支:Bash 写入检测(PowerShell 命令字符串——Codex 写路径经 Bash 工具,无 file_path)
+      const bashBlock = runHook(['before_tool', '--platform', 'codex'], dir,
+        { tool_name: 'Bash', tool_input: { command: 'Set-Content -LiteralPath "src/evil.py" -Value "x=1"' } });
+      assertExit(bashBlock, 0);
+      const bashBlockParsed = JSON.parse(bashBlock.output.trim());
+      if (bashBlockParsed.decision !== 'block') throw new Error('codex Bash 越权写入应输出 decision block: ' + JSON.stringify(bashBlockParsed));
+      // ⑥ codex 分支:Bash 合法写 .specs → 放行
+      const bashOk = runHook(['before_tool', '--platform', 'codex'], dir,
+        { tool_name: 'Bash', tool_input: { command: 'Set-Content -LiteralPath ".specs/ch/CHANGE.md" -Value "# CHANGE"' } });
+      assertExit(bashOk, 0);
+      const bashOkParsed = JSON.parse(bashOk.output.trim());
+      if (bashOkParsed.decision === 'block') throw new Error('codex Bash 合法写入不应 block');
+      // ⑦ codex 分支:Bash 无写入模式(纯命令)→ 放行
+      const bashNone = runHook(['before_tool', '--platform', 'codex'], dir,
+        { tool_name: 'Bash', tool_input: { command: 'python -m pytest test_calculator.py -q' } });
+      assertExit(bashNone, 0);
+      JSON.parse(bashNone.output.trim());
+      // ⑧ codex 分支:读类 cmdlet(Get-Content -Path)→ 无写入语义,放行
+      const bashRead = runHook(['before_tool', '--platform', 'codex'], dir,
+        { tool_name: 'Bash', tool_input: { command: 'Get-Content -Path "src/readme.md"' } });
+      assertExit(bashRead, 0);
+      const bashReadParsed = JSON.parse(bashRead.output.trim());
+      if (bashReadParsed.decision === 'block') throw new Error('codex 读类 cmdlet(Get-Content)不应 block');
+      // ⑨ codex 分支:.NET File.Copy 目标 = 第二参数(越权目标 → block;合法目标 → 放行)
+      const copyBlock = runHook(['before_tool', '--platform', 'codex'], dir,
+        { tool_name: 'Bash', tool_input: { command: '[System.IO.File]::Copy("src/a.txt", "src/b.txt")' } });
+      assertExit(copyBlock, 0);
+      const copyParsed = JSON.parse(copyBlock.output.trim());
+      if (copyParsed.decision !== 'block') throw new Error('codex File.Copy 越权目标(第二参数)应 block');
+      const copyOk = runHook(['before_tool', '--platform', 'codex'], dir,
+        { tool_name: 'Bash', tool_input: { command: '[System.IO.File]::Copy("src/a.txt", ".specs/ch/b.txt")' } });
+      assertExit(copyOk, 0);
+      const copyOkParsed = JSON.parse(copyOk.output.trim());
+      if (copyOkParsed.decision === 'block') throw new Error('codex File.Copy 合法目标不应 block');
+    },
+  },
+
+  // K4: 平台选择链——--platform 显式(两平台互不串扰)/ 无 TTY 探测(项目已有 .codex/ 或 .claude/)/ 两者皆无默认
+  {
+    name: 'K4 安装器:平台选择链(显式/无 TTY 探测/默认)',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return;
+      const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
+      const run = (target) => spawnSync(process.execPath, [installer, '--target', target], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      // ① --platform claude-code 显式 → .claude/skills 生成,.agents 不生成
+      const t1 = path.join(dir, 'k4-cc');
+      fs.mkdirSync(t1, { recursive: true });
+      const r1 = spawnSync(process.execPath, [installer, '--target', t1, '--platform', 'claude-code'], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      if (r1.status !== 0) throw new Error('--platform claude-code 失败: ' + (r1.stderr || JSON.stringify(r1.output)));
+      if (!fs.existsSync(path.join(t1, '.claude', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('claude-code 平台未生成 .claude/skills/');
+      if (fs.existsSync(path.join(t1, '.agents'))) throw new Error('claude-code 平台不应生成 .agents/');
+      // ② --platform codex 显式 → .agents/skills 生成,.claude 不生成
+      const t2 = path.join(dir, 'k4-codex');
+      fs.mkdirSync(t2, { recursive: true });
+      const r2 = spawnSync(process.execPath, [installer, '--target', t2, '--platform', 'codex'], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      if (r2.status !== 0) throw new Error('--platform codex 失败: ' + (r2.stderr || JSON.stringify(r2.output)));
+      if (!fs.existsSync(path.join(t2, '.agents', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('codex 平台未生成 .agents/skills/');
+      if (fs.existsSync(path.join(t2, '.claude'))) throw new Error('codex 平台不应生成 .claude/');
+      // ③ 无 --platform(spawnSync 无 TTY)+ 目标已有 .codex/ → 探测为 codex
+      const t3 = path.join(dir, 'k4-probe-codex');
+      fs.mkdirSync(path.join(t3, '.codex'), { recursive: true });
+      const r3 = run(t3);
+      if (r3.status !== 0) throw new Error('探测 codex 安装失败: ' + (r3.stderr || JSON.stringify(r3.output)));
+      if (!fs.existsSync(path.join(t3, '.agents', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('已有 .codex/ 的项目应探测为 codex 平台');
+      // ④ 无 --platform + 目标已有 .claude/ → 探测为 claude-code
+      const t4 = path.join(dir, 'k4-probe-cc');
+      fs.mkdirSync(path.join(t4, '.claude'), { recursive: true });
+      const r4 = run(t4);
+      if (r4.status !== 0) throw new Error('探测 claude-code 安装失败: ' + (r4.stderr || JSON.stringify(r4.output)));
+      if (!fs.existsSync(path.join(t4, '.claude', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('已有 .claude/ 的项目应探测为 claude-code 平台');
+      if (fs.existsSync(path.join(t4, '.agents'))) throw new Error('探测为 claude-code 时不应生成 .agents/');
+      // ⑤ 无 --platform + 两者皆无 → 默认 claude-code
+      const t5 = path.join(dir, 'k4-default');
+      fs.mkdirSync(t5, { recursive: true });
+      const r5 = run(t5);
+      if (r5.status !== 0) throw new Error('默认平台安装失败: ' + (r5.stderr || JSON.stringify(r5.output)));
+      if (!fs.existsSync(path.join(t5, '.claude', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('两者皆无应默认 claude-code');
+      // ⑥ --platform 未知平台 → 报错拒绝(不静默回退)
+      const t6 = path.join(dir, 'k4-unknown');
+      fs.mkdirSync(t6, { recursive: true });
+      const r6 = spawnSync(process.execPath, [installer, '--target', t6, '--platform', 'bogus'], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      if (r6.status === 0) throw new Error('未知平台应报错拒绝');
+      const out6 = String(r6.stderr || '') + String(r6.stdout || '');
+      if (!out6.includes('未知平台')) throw new Error('未知平台错误信息应含"未知平台": ' + out6);
+    },
+  },
+
+  // K5: purge 语义——缺 --yes 拒绝(不破坏)/ --purge --yes 清理重建 / 用户内容(生成物外)保留
+  {
+    name: 'K5 安装器:purge 语义(缺 --yes 拒绝/重建/用户内容保留)',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return;
+      const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
+      const run = (target, extra) => spawnSync(process.execPath, [installer, '--target', target, ...extra], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      // ① codex 平台:首次安装 + 用户内容(项目根,非生成物)
+      const target = path.join(dir, 'k5-codex');
+      fs.mkdirSync(target, { recursive: true });
+      const first = run(target, ['--platform', 'codex']);
+      if (first.status !== 0) throw new Error('codex 首次安装失败: ' + (first.stderr || JSON.stringify(first.output)));
+      fs.writeFileSync(path.join(target, 'USER_KEEP.md'), '# 用户内容(保留)\n', 'utf8');
+      // ② 缺 --yes → 拒绝且不破坏(错误提示含 --yes;生成物与用户内容仍在)
+      const dry = run(target, ['--platform', 'codex', '--purge']);
+      if (dry.status === 0) throw new Error('--purge 缺 --yes 应失败');
+      const dryOut = String(dry.stderr || '') + String(dry.stdout || '');
+      if (!dryOut.includes('--yes')) throw new Error('--purge 缺 --yes 错误信息应提示 --yes: ' + dryOut);
+      if (!fs.existsSync(path.join(target, '.agents', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('--purge 拒绝后生成物不应被删除');
+      if (!fs.existsSync(path.join(target, 'USER_KEEP.md'))) throw new Error('--purge 拒绝后用户内容不应被删除');
+      // ②b 写入用户自有资产(.agents/skills/ 用户技能 + hooks.json 用户条目)——purge 后须保留
+      fs.mkdirSync(path.join(target, '.agents', 'skills', 'user-own-skill'), { recursive: true });
+      fs.writeFileSync(path.join(target, '.agents', 'skills', 'user-own-skill', 'SKILL.md'), '# user skill\n', 'utf8');
+      const userHooksPath = path.join(target, '.codex', 'hooks.json');
+      const userHooks = JSON.parse(fs.readFileSync(userHooksPath, 'utf8'));
+      userHooks.hooks.PreToolUse.push({ matcher: 'UserOwn', hooks: [{ type: 'command', command: 'node user-own-hook.mjs' }] });
+      fs.writeFileSync(userHooksPath, JSON.stringify(userHooks, null, 2) + '\n', 'utf8');
+      // ③ --purge --yes → 清理重建(仅 flow-comet 技能,用户资产保留)
+      const ok = run(target, ['--platform', 'codex', '--purge', '--yes']);
+      if (ok.status !== 0) throw new Error('--purge --yes 失败: ' + (ok.stderr || JSON.stringify(ok.output)));
+      if (!fs.existsSync(path.join(target, '.agents', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('--purge --yes 后 flow-comet 技能应重新生成');
+      if (!fs.existsSync(path.join(target, '.agents', 'skills', 'user-own-skill', 'SKILL.md'))) throw new Error('--purge --yes 后用户技能应保留(.agents/ 为共享目录)');
+      if (!fs.existsSync(path.join(target, 'USER_KEEP.md'))) throw new Error('--purge --yes 后用户内容应保留');
+      const hooksText = fs.readFileSync(path.join(target, '.codex', 'hooks.json'), 'utf8');
+      if ((hooksText.match(/comet-hook-guard\.mjs/g) || []).length !== 1) throw new Error('--purge --yes 后 hooks.json 应含 1 条重建托管条目: ' + hooksText);
+      if (!hooksText.includes('user-own-hook.mjs')) throw new Error('--purge --yes 后用户 hook 条目应保留: ' + hooksText);
+      const agents = fs.readFileSync(path.join(target, 'AGENTS.md'), 'utf8');
+      if (!agents.includes('Managed by flow-comet')) throw new Error('--purge --yes 后 AGENTS.md 托管区应重建');
+      // ④ claude-code 平台同样:缺 --yes 拒绝 + --purge --yes 重建 + 用户内容保留
+      const tcc = path.join(dir, 'k5-cc');
+      fs.mkdirSync(tcc, { recursive: true });
+      const ccFirst = run(tcc, []);
+      if (ccFirst.status !== 0) throw new Error('claude-code 首次安装失败: ' + (ccFirst.stderr || JSON.stringify(ccFirst.output)));
+      fs.writeFileSync(path.join(tcc, 'USER_KEEP.md'), '# 用户内容(保留)\n', 'utf8');
+      const ccDry = run(tcc, ['--purge']);
+      if (ccDry.status === 0) throw new Error('claude-code --purge 缺 --yes 应失败');
+      if (!fs.existsSync(path.join(tcc, '.claude', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('claude-code --purge 拒绝后生成物不应被删除');
+      if (!fs.existsSync(path.join(tcc, 'USER_KEEP.md'))) throw new Error('claude-code --purge 拒绝后用户内容不应被删除');
+      const ccOk = run(tcc, ['--purge', '--yes']);
+      if (ccOk.status !== 0) throw new Error('claude-code --purge --yes 失败: ' + (ccOk.stderr || JSON.stringify(ccOk.output)));
+      if (!fs.existsSync(path.join(tcc, '.claude', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('claude-code --purge --yes 后技能应重新生成');
+      if (!fs.existsSync(path.join(tcc, 'USER_KEEP.md'))) throw new Error('claude-code --purge --yes 后用户内容应保留');
     },
   },
 ];

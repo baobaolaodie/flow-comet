@@ -69,13 +69,6 @@ open → design → plan → execute ⇄ subagent-execute → review → verify 
 
 `directOverride` 记录"当前处于用户确认的 direct"，切回 subagent 时自动清除。
 
-## Express 路径（低风险降级）
-
-CHANGE.md 头部含 `express: true`（低风险判定：改动 ≤3 文件、无后端 schema/API/数据库变更、无安全/认证/并发、纯前端重构/文案/简单 bug 修复）时自动降级：
-
-- **review** 只执行 Round 1（spec 合规）+ Round 1.5（契约核对），跳过代码质量轮与 UI 轮
-- **TEST/UAT** 用最小矩阵（只第 1 轮功能 + 核心 AC 手动确认）；REVIEW.md 标注 "express 审查"
-
 ## 用户入口
 
 在目标项目打开 Claude Code，输入：

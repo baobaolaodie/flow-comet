@@ -8,7 +8,8 @@
 
 ## Requirements
 
-- [Claude Code](https://claude.ai/code), installed and authenticated
+- [Claude Code](https://claude.ai/code), installed and authenticated (default platform)
+- [Codex](https://github.com/openai/codex) CLI, installed (skills/rules/hook support as described under [Platforms](#platforms))
 - [flow-kit](https://github.com/rihebty/flow-kit) installed in the target project:
 
 ```bash
@@ -24,7 +25,8 @@ Automated installation from this repository (no Comet CLI required):
 
 ```bash
 cd <flow-comet repo>
-node scripts/prepare-env.mjs --target <absolute path to target project>
+node scripts/prepare-env.mjs --target <absolute path to target project>          # Claude Code (default)
+node scripts/prepare-env.mjs --target <absolute path to target project> --platform codex   # Codex
 ```
 
 `prepare-env` does:
@@ -45,6 +47,17 @@ node scripts/prepare-env.mjs --target <absolute path to target project> --purge 
 
 **Updating an installed flow-comet**: re-run the same Option A command — idempotent (overwrites generated files + merges the hook, preserves existing config).
 
+### Platforms
+
+The installer targets **Claude Code** by default (unchanged behavior). The target platform is chosen as follows: an explicit `--platform <claude-code|codex>` wins; otherwise, on an interactive terminal you are asked to pick; in non-interactive environments (CI, scripts) an existing `.codex/` or `.claude/` in the target project is detected, falling back to Claude Code.
+
+| Platform | Skills | Orchestration rule | Write-guard hook |
+|----------|--------|--------------------|-------------------|
+| Claude Code (default) | `.claude/skills/` (unchanged) | `.claude/rules/` (auto-loaded) | `settings.local.json` → `hooks.PreToolUse` (text output, exit 2 blocks) |
+| Codex | `.agents/skills/` (auto-discovered by Codex) | `AGENTS.md` managed block (inlined at install; Codex's `rules/` directory serves command-approval policies, not instruction files) | `.codex/hooks.json` (matcher `*` — Codex PreToolUse intercepts Bash tool calls; deny via `{"decision":"block"}`) |
+
+On non-default platforms, command paths inside SKILL/GUIDANCE files are rewritten at install time to the platform's actual skill location (the authoritative source stays in `.claude` form). Codex support has been exercised end-to-end (8-node flow on Codex CLI 0.146.0); the write-guard hook intercepts Bash write commands (PowerShell cmdlets, .NET File API, redirection) — command-level interception covers the mainstream patterns, alternate spellings may bypass it (Codex platform limit).
+
 ### Verifying installation (no side effects, no change created)
 
 1. **Structure**: `flow-comet*` skill directories under `<target>/.claude/skills/` (count matches prepare-env output, currently 19) + `rules/flow-comet-orchestration.md` + `settings.local.json` + `skills/flow-comet/INSTALLED_VERSION` (version marker shipped with the skill bundle — `cat .claude/skills/flow-comet/INSTALLED_VERSION`; it equals the latest release version, or for prepare-env installs with git available, a precise `<release>-<n>-g<hash>` describing how far the source has accumulated since that release)
@@ -55,6 +68,26 @@ node scripts/prepare-env.mjs --target <absolute path to target project> --purge 
 
 > Commands are POSIX-style (Git Bash / WSL / macOS terminal); Windows users should run them in Git Bash.
 > **Note**: `guard-self-test.mjs` (114 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
+
+### Using flow-comet on Codex
+
+Measured on Codex CLI 0.146.0 — the 8-node flow runs end-to-end.
+
+- **First use**: trust the write-guard hook — run `/hooks` in an interactive session and trust the flow-comet hook entry; for scripted automation pass `--dangerously-bypass-hook-trust` to `codex exec`.
+- **Scripted automation**: `codex exec … </dev/null` — when stdin is piped, Codex waits for stdin to close before starting (add the redirect when driving it from scripts/CI).
+- **Execution mode**: the execute node runs in **direct** mode (the Codex main agent implements; switch with `execution-mode direct`). The `subagent-execute` node delegates `parallel="true"` tasks through **git worktrees** (one worktree per task: `git worktree add <path> -b <branch>` → `codex exec` inside the worktree, loading `flow-comet-dev` and returning a Return Contract → verify the commitHash and `git worktree remove` after the task) — worktree isolation matches Claude Code's delegation semantics; Codex CLI has no `--worktree` one-command flag (tracked in [openai/codex#12862](https://github.com/openai/codex/issues/12862)), so the coordinator manages worktrees explicitly.
+- **Windows PowerShell argument quoting**: `node … '{"summary":"…"}'` loses embedded double quotes through PowerShell 5.1 — run such commands via .NET `ProcessStartInfo`/`ArgumentList`, or from Git Bash.
+- **Commit discipline**: the workflow scripts validate artifacts, not git commits — mark tasks `status="done"` in TASK.md and commit as part of the execute node protocol.
+- **Archive order**: run `skill-load archive flow-comet-integration --prompt flow-kit/prompts/7-integration.md` **before** copying the archive directory (declaration markers travel with the directory copy).
+
+### Verifying a Codex installation
+
+1. **Structure**: `flow-comet*` skill directories under `<target>/.agents/skills/` (19) + `AGENTS.md` managed block (`grep "Managed by flow-comet" <target>/AGENTS.md`) + `.codex/hooks.json` managed hook entry + `<target>/.agents/skills/flow-comet/INSTALLED_VERSION`
+2. **Command paths rewritten**: `grep -c "\.claude/skills/flow-comet/scripts/" <target>/.agents/skills/flow-comet/SKILL.md` → 0; `grep -c "\.agents/skills/flow-comet/scripts/" <target>/.agents/skills/flow-comet/SKILL.md` → non-zero
+3. **Hook contract smoke** (run inside the target project): feed the guard an out-of-scope write target and expect a JSON block decision — `echo '{"tool_name":"Write","tool_input":{"file_path":"src/evil.py"}}' | node .agents/skills/flow-comet/scripts/comet-hook-guard.mjs before_tool --platform codex` → `{"decision":"block",...}`
+4. **Smoke test** (run inside the target project): `cd <target> && node .agents/skills/flow-comet/scripts/workflow-state.mjs status` → JSON state object
+
+> **Note**: Codex support targets full parity with Claude Code (measured on Codex CLI 0.146.0): skill auto-discovery, AGENTS.md loading, the workflow scripts, and the write-guard hook all work — the hook intercepts Bash write commands (PowerShell cmdlets, .NET File API, redirection) via PreToolUse `decision:"block"`. First use in a project requires trusting the hook (run `/hooks` in an interactive session, or pass `--dangerously-bypass-hook-trust` for scripted automation). Interception is command-level — alternate write spellings (other File APIs) can bypass it, a Codex platform limit; the mainstream patterns are covered.
 
 ## Option B · Manual copy (fallback)
 

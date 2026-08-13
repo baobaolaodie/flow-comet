@@ -15,13 +15,13 @@ Responsibility: 拆原子任务（XML 格式）+ 波次划分。生成 TASK.md�
 
 ## Guidance
 
-### 必填段清单（exit guard 校验，结构+存在级）
+### 必填段清单（结构+存在级）
 
-| 文件 | 必填段 |
-|------|--------|
-| TASK.md | 每个 `<task>` 含 `id` / `name` / `read_files` / `write_files` / `action` / `verify` / `done` 7 字段 |
+| 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
+|------|-------------------------------|-----------------------------------|
+| TASK.md | 至少一个 `<task>` 块 + 每个任务含 `<verify>` 字段 | `id` / `name` / `read_files` / `write_files` / `action` / `done` 等字段（执行纪律，review 把关） |
 
-**缺失任一必填段 = 节点未完成**，exit guard 校验（见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B）。
+guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
 
 ---
 name: flow-comet-plan
@@ -79,7 +79,7 @@ The full task decomposition protocol, XML template, and constraints are in:
 
 This node is truly done when:
 - `.specs/<change-id>/TASK.md` exists in XML format.
-- Every task has all 7 required fields (id, name, read_files, write_files, action, verify, done).
+- At least one `<task>` block exists; every task carries a `<verify>` field (the full seven-field shape — id/name/read_files/write_files/action/verify/done — is the execution discipline, review-checked; guard enforces the subset).
 - Every `verify` field is an executable command (not a description).
 - Every `write_files` is strictly within DESIGN.md touched + new modules range (not in forbidden list).
 - At least 1 task is marked `[P]` (parallel), unless all tasks are genuinely serial.

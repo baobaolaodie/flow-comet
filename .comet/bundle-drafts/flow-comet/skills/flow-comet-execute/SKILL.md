@@ -15,13 +15,13 @@ This node is a coordinator. It does not write implementation code directly. It d
 
 ## Guidance
 
-### 必填段清单（exit guard 校验，结构+存在级）
+### 必填段清单（结构+存在级）
 
-| 文件 | 必填段 |
-|------|--------|
-| SUMMARY.md | `## 做了什么` / `## 改动文件` / `## verify 输出` / `## 6 维自查` / `## 越界检查` / `## 自检方法` |
+| 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
+|------|-------------------------------|-----------------------------------|
+| SUMMARY.md | `## verify 输出` / `## 6 维自查`（须含实质内容）/ `## 越界检查` / `## 自检方法` | `## 做了什么` / `## 改动文件` 等（执行纪律，review 把关） |
 
-**缺失任一必填段 = 节点未完成**，exit guard 校验（见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B）。
+guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
 
 ### 执行模型（按 executionMode，用户显式选择）
 
@@ -80,7 +80,7 @@ The full dev protocol, templates, and constraints are in:
 This node is truly done when:
 - All tasks in TASK.md have `status="done"`.
 - Every done task has a corresponding `<task-id>-SUMMARY.md` in `.specs/<change-id>/`.
-- Every SUMMARY.md contains: verify output (real, not fabricated), 6-dimension self-check, boundary check.
+- Every SUMMARY.md contains: verify output (real, not fabricated), 6-dimension self-check, boundary check, and a declared `## 自检方法` (brooks-review / cache-brooks / builtin-quickcheck).
 - No REQUIREMENT.md or DESIGN.md has been modified during execution.
 - No out-of-boundary files have been changed without explicit approval.
 
@@ -153,6 +153,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record execute '{"summ
 | `all-tasks-done` | All tasks in TASK.md have status="done" | content-check |
 | `verify-output-real` | Every SUMMARY.md has verify output (not fabricated) | content-check |
 | `no-design-changes` | REQUIREMENT.md and DESIGN.md not modified | file-unchanged |
+| `self-check-method` | Every SUMMARY.md declares `## 自检方法`（brooks-review / cache-brooks / builtin-quickcheck） | content-check |
 
 ## Exit Check
 

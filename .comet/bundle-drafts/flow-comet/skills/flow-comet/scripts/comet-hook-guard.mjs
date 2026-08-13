@@ -10,6 +10,104 @@ import {
 } from './protocol-utils.mjs';
 
 const event = process.argv[2] ?? 'before_tool';
+// 平台识别（1.4.0 多平台）：--platform codex argv 参数（prepare-env 注入 hook 命令时带平台标记）。
+// 缺省 claude-code = 既有行为（stdout 自由文本 + exit 2 block）。
+// Codex 分支：stdout 严格 JSON schema（拦截输出 {"decision":"block"}，放行输出 {}），exit 0。
+function platformFromArgs(argv) {
+  for (let index = 0; index < argv.length; index++) {
+    if (argv[index] === '--platform') {
+      if (typeof argv[index + 1] === 'string' && argv[index + 1] !== '') return argv[index + 1];
+    }
+    if (typeof argv[index] === 'string' && argv[index].startsWith('--platform=')) {
+      const value = argv[index].slice('--platform='.length);
+      if (value !== '') return value;
+    }
+  }
+  return null;
+}
+const platform = platformFromArgs(process.argv.slice(2)) ?? 'claude-code';
+const isCodex = platform === 'codex';
+
+// 放行输出：Codex 分支只输出 {}（Codex 对 hook stdout 严格 schema 校验,额外字段整体无效）;
+// Claude Code 分支输出既有文本（workflow-hook-guard-ok + EVENT + 可选标注）。
+function hookOk(extra) {
+  if (isCodex) {
+    console.log('{}');
+    return;
+  }
+  console.log('workflow-hook-guard-ok');
+  console.log('EVENT: ' + event + (extra ? ' ' + extra : ''));
+}
+
+// 拦截输出：Codex 分支输出 {"decision":"block",reason} + exit 0（实测确认的 Codex deny 通道——
+// 2026-08-13 Codex 0.146：exit 2 / permissionDecision:"deny" 均不被 enforce,decision:"block"+exit 0 生效）;
+// Claude Code 分支既有文本 + exit 2。
+function hookBlock(mainLine, detailLine) {
+  if (isCodex) {
+    console.log(JSON.stringify({ decision: 'block', reason: mainLine + (detailLine ? ' ' + detailLine : '') }));
+    process.exit(0);
+  }
+  console.error(mainLine);
+  if (detailLine) console.error(detailLine);
+  process.exit(2);
+}
+
+// Codex 平台写路径适配：PreToolUse 只拦截 shell(Bash)工具,Codex 在 Windows 经 PowerShell 写文件——
+// tool_input 为 command 字符串(无 file_path)。按常见写入模式解析命令中的目标路径:
+//  ① PowerShell cmdlet 的 -Path/-LiteralPath 参数
+//  ② .NET File API 的第一个参数(路径)
+//  ③ shell 重定向 > / >>
+// 命中任一模式即提取路径(供白名单判定);未命中 = 无写入语义,放行。
+// 边界:检测为命令级——换写法(如其他 File API)可绕过,属平台限制;覆盖主流模式后越权写入
+// 对执行者的阻力与可见性已足够(每次绕过都留下试错痕迹)。
+function codexWriteTargetsFromCommand(command) {
+  if (typeof command !== 'string' || command.trim() === '') return [];
+  const targets = [];
+  const patterns = [
+    // PowerShell 写类 cmdlet 的 -Path/-LiteralPath(引号内空格整体捕获并剥引号;
+    // 只匹配写类 cmdlet——读类(Get-Content 等)的 -Path 不提取;同一命令内 [^;|&]*? 防跨命令)
+    /(?:Set-Content|Add-Content|New-Item|Out-File|Copy-Item|Move-Item|Remove-Item|Set-Item|Export-Csv)[^;|&]*?-(?:Path|LiteralPath)\s+("[^"]*"|'[^']*'|[^\s;|&]+)/gi,
+    // shell 重定向(含描述符变体:> / >> / 2> / 1>>)
+    /(?:^|[;\s|&])(?:[0-9]*>>?)\s*("[^"]*"|'[^']*'|[^\s;|&]+)/gi,
+  ];
+  for (const re of patterns) {
+    let m;
+    while ((m = re.exec(command)) !== null) {
+      let t = m[1] && m[1].trim();
+      if (t) t = t.replace(/^["']|["']$/g, ''); // 剥引号
+      if (t && t !== 'NUL' && t !== '/dev/null' && !targets.includes(t)) targets.push(t); // 去重
+    }
+  }
+  // .NET File API:写 API 的目标参数按语义区分——WriteAll*/AppendAll*/Delete 目标 = 第一参数;
+  // Copy(source, destination) / Move(source, destination) 目标 = 第二参数(第一参数是源路径,守卫应检查写入目标)
+  const apiRe = /\[System\.IO\.File\]::(WriteAllText|WriteAllBytes|AppendAllText|WriteAllLines|Copy|Move|Delete)\s*\(\s*("[^"]*"|'[^']*'|[^,\s)]+)(?:\s*,\s*("[^"]*"|'[^']*'|[^,\s)]+))?/gi;
+  let m;
+  while ((m = apiRe.exec(command)) !== null) {
+    const isCopyMove = m[1] === 'Copy' || m[1] === 'Move';
+    let t = (isCopyMove ? m[3] : m[2]) || '';
+    t = t.trim().replace(/^["']|["']$/g, '');
+    if (t && t !== 'NUL' && t !== '/dev/null' && !targets.includes(t)) targets.push(t);
+  }
+  return targets;
+}
+
+// writeWhitelist 路径支持 <change-id> 占位符(与 artifacts paths 同机制——协议复用自动适配
+// 当前 change;无 activeChange 时字面匹配保底)
+function replaceChangeId(prefix, activeChange) {
+  return (typeof prefix === 'string' && prefix.includes('<change-id>') && activeChange)
+    ? prefix.replaceAll('<change-id>', activeChange)
+    : prefix;
+}
+
+// 白名单判定(共享):目标相对路径前缀匹配(含 <change-id> 占位符替换)——file_path 路径与
+// Codex Bash 命令写入路径两条判定共用,避免两处逻辑漂移
+function targetAllowed(targetRel, whitelist, activeChange) {
+  return whitelist.some(prefix => {
+    const p = replaceChangeId(prefix, activeChange);
+    return p === '' || targetRel.startsWith(p);
+  });
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..');
 const runRoot = process.env.COMET_RUN_ROOT ? path.resolve(process.env.COMET_RUN_ROOT) : process.cwd();
@@ -1701,41 +1799,53 @@ async function main() {
   // execute 收窄规则对缺省/声明表同样生效（subagent → ['.specs/'] 协调者；direct → 声明/缺省值）
   const { whitelist: PHASE_WRITE_WHITELIST, declared } = await resolvePhaseWriteWhitelist(executionMode);
 
-  const target = writeTargetFromHookInput(await readHookInput());
+  const hookInput = await readHookInput();
+  const target = writeTargetFromHookInput(hookInput);
+
+  // Codex 平台写路径适配:Bash 工具的 command 字符串(无 file_path)——解析写入目标按当前节点
+  // 白名单判定(与 file_path 判定同语义);未命中写入模式 = 无写入语义,放行
+  if (isCodex && hookInput && typeof hookInput === 'object' && hookInput.tool_name === 'Bash') {
+    const command = hookInput.tool_input && typeof hookInput.tool_input === 'object' ? hookInput.tool_input.command : null;
+    const writeTargets = codexWriteTargetsFromCommand(command);
+    if (writeTargets.length > 0 && currentNode) {
+      const whitelist = PHASE_WRITE_WHITELIST[currentNode];
+      // 声明模式未列出节点 → fail-closed(同 file_path 判定);缺省表无此节点 → 协调者默认 .specs/
+      const effectiveWhitelist = whitelist || (declared ? null : ['.specs/']);
+      for (const t of writeTargets) {
+        const absolute = path.resolve(runRoot, t);
+        const rel = path.relative(runRoot, absolute);
+        const targetRel = (path.isAbsolute(rel) || rel === '..' || rel.startsWith('..' + path.sep)) ? null : rel.replaceAll('\\', '/');
+        const allowed = targetRel !== null && effectiveWhitelist !== null && targetAllowed(targetRel, effectiveWhitelist, activeChange);
+        if (!allowed) {
+          hookBlock(
+            `BLOCKED: codex 写入 "${t}" 不在当前节点 "${currentNode}" 允许范围`,
+            effectiveWhitelist === null
+              ? `请在协议 writeWhitelist 中为节点 "${currentNode}" 声明允许的路径前缀`
+              : `允许范围: ${effectiveWhitelist.join(', ')}`
+          );
+        }
+      }
+    }
+  }
+
   if (currentNode && target) {
     const whitelist = PHASE_WRITE_WHITELIST[currentNode];
     if (whitelist) {
-      // writeWhitelist 路径支持 <change-id> 占位符（与 artifacts paths 同机制——
-      // 协议复用自动适配当前 change；无 activeChange 时字面匹配保底）
-      const replaceChangeId = (prefix) => (
-        typeof prefix === 'string' && prefix.includes('<change-id>') && activeChange
-          ? prefix.replaceAll('<change-id>', activeChange)
-          : prefix
-      );
-      const allowed = whitelist.some(prefix => {
-        const p = replaceChangeId(prefix);
-        return p === '' || target.startsWith(p);
-      });
+      const allowed = targetAllowed(target, whitelist, activeChange);
       if (!allowed) {
-        console.error(`BLOCKED: phase "${currentNode}" 不允许写入 "${target}"`);
-        console.error(`允许范围: ${whitelist.join(', ')}`);
-        process.exit(2);
+        hookBlock(`BLOCKED: phase "${currentNode}" 不允许写入 "${target}"`, `允许范围: ${whitelist.join(', ')}`);
       }
     } else if (declared) {
       // 审查补充（2026-08-08）：协议声明了 writeWhitelist 但未列出当前节点 → fail-closed 拒绝
       // （漏声明节点不放行——防协议作者漏列导致防线出洞）
-      console.error(`BLOCKED: phase "${currentNode}" 未在协议 writeWhitelist 中声明，默认拒绝写入 "${target}"`);
-      console.error(`请在协议 writeWhitelist 中为节点 "${currentNode}" 声明允许的路径前缀`);
-      process.exit(2);
+      hookBlock(`BLOCKED: phase "${currentNode}" 未在协议 writeWhitelist 中声明，默认拒绝写入 "${target}"`, `请在协议 writeWhitelist 中为节点 "${currentNode}" 声明允许的路径前缀`);
     } else {
       // ：未声明 writeWhitelist 时，非内置节点（缺省表无此 id）→ 协调者默认 ['.specs/']
       // ——与内置 execute/subagent-execute 协调者语义统一（写源码必须显式声明，防 fail-open 防线出洞）
       const coordDefault = ['.specs/'];
       const allowed = coordDefault.some(prefix => prefix === '' || target.startsWith(prefix));
       if (!allowed) {
-        console.error(`BLOCKED: phase "${currentNode}" 不允许写入 "${target}"`);
-        console.error(`允许范围: ${coordDefault.join(', ')}（未声明 writeWhitelist 的协调者默认）`);
-        process.exit(2);
+        hookBlock(`BLOCKED: phase "${currentNode}" 不允许写入 "${target}"`, `允许范围: ${coordDefault.join(', ')}（未声明 writeWhitelist 的协调者默认）`);
       }
     }
   }
@@ -1746,8 +1856,8 @@ async function main() {
     if (!current || !nodes.some((node) => node.id === current)) {
       throw new Error('active Comet change has no valid workflow Node');
     }
-    console.log('workflow-hook-guard-ok');
-    console.log('EVENT: ' + event);
+    hookOk();
+    if (isCodex) return;
     console.log('NODE: ' + current);
     return;
   }
@@ -1757,8 +1867,7 @@ async function main() {
   } catch (error) {
     if (error && typeof error === 'object' && error.code === 'ENOENT') {
       // 无 state 文件（无活跃 workflow / 新克隆仓库）→ 放行，不阻断写入
-      console.log('workflow-hook-guard-ok');
-      console.log('EVENT: before_tool (no active workflow)');
+      hookOk('(no active workflow)');
       return;
     }
     throw error;
@@ -1768,15 +1877,13 @@ async function main() {
   // ② running（含旧 state 无 status 但有 activeChange，fail-closed 向后兼容）→ 白名单校验
   // ③ completed（归档后）→ 放行；其他 → 拦截
   if (!state.activeChange) {
-    console.log('workflow-hook-guard-ok');
-    console.log('EVENT: ' + event + ' (no active workflow)');
+    hookOk('(no active workflow)');
     return;
   }
   const running = state.status === 'running' || state.status === undefined;
   if (!running) {
     if (state.status === 'completed') {
-      console.log('workflow-hook-guard-ok');
-      console.log('EVENT: ' + event + ' (workflow completed)');
+      hookOk('(workflow completed)');
       return;
     }
     throw new Error('workflow is not running; current status is ' + String(state.status));
@@ -1785,8 +1892,8 @@ async function main() {
   if (!current || !nodes.some((node) => node.id === current)) {
     throw new Error('workflow state has no valid current Node');
   }
-  console.log('workflow-hook-guard-ok');
-  console.log('EVENT: ' + event);
+  hookOk();
+  if (isCodex) return;
   console.log('NODE: ' + current);
 }
 
