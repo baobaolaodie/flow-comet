@@ -407,12 +407,12 @@ function injectCodexConfig(codexDir) {
     content = fs.readFileSync(configPath, 'utf8');
   } catch { /* 文件缺失 = 首次安装 */ }
   if (content.includes('[features]')) {
-    // 已有 [features] 段:补 hooks 键(未设置时)
-    if (!/^hooks\s*=/m.test(content)) {
-      content = content.replace(/\[features\]\n/, '[features]\nhooks = true\n');
-    }
-    if (!/^codex_hooks\s*=/m.test(content)) {
-      content = content.replace(/\[features\]\n/, '[features]\ncodex_hooks = true\n');
+    // 已有 [features] 段:一次性补齐全部缺失键(分次 replace 会因插入点被前次消耗而失配)
+    const missing = [];
+    if (!/^hooks\s*=/m.test(content)) missing.push('hooks = true');
+    if (!/^codex_hooks\s*=/m.test(content)) missing.push('codex_hooks = true');
+    if (missing.length > 0) {
+      content = content.replace(/\[features\]\n/, '[features]\n' + missing.join('\n') + '\n');
     }
   } else {
     const trimmed = content.trim();
