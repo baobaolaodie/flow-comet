@@ -8,10 +8,12 @@
  *   源仓库自我改进 worktree 环境准备。
  *
  * 多平台（1.4.0）：平台描述符表 PLATFORMS 驱动——claude-code(默认,现状语义)
- *   + codex(新增)。平台差异：技能安装位置 / SKILL 命令路径替换 / rules 注入方式
- *   (CC=.claude/rules 自动加载;Codex=.codex/rules 为命令批准规则目录,指令走
- *   AGENTS.md 托管区) / hook 配置位置与输出契约(CC=settings.local.json 文本输出;
- *   Codex=.codex/hooks.json JSON schema 输出)。
+ *   + codex(新增)。平台差异全部封装在描述符条目内：技能安装位置 skillRoot /
+ *   SKILL 命令路径替换 pathReplacements / hook 注入 installHooks
+ *   (CC=settings.local.json;Codex=.codex/hooks.json + config.toml 启用) / rules 注入
+ *   installRules (CC=.claude/rules 自动加载;Codex=.codex/rules 为命令批准规则目录,
+ *   指令走 AGENTS.md 托管区) / 清理 purge / 覆盖清单 overwriteDescription——
+ *   main 统一调度,新增平台 = 描述符条目 + 安装/清理函数,main 零改动。
  *
  * 非破坏设计（T-FIX-13，2026-08-08 用户裁决）：
  *   - 默认（无 --purge）：**不删除整个 .claude/（或 .agents/）**——只精确覆盖生成物
@@ -51,7 +53,7 @@ const MANAGED_HOOK_COMMAND_MARKER = 'comet-hook-guard.mjs';
 const MANAGED_AGENTS_START = '<!-- Managed by flow-comet prepare-env -->';
 const MANAGED_AGENTS_END = '<!-- /Managed by flow-comet prepare-env -->';
 
-// ---------- 平台描述符表（单一来源——新增平台 = 新增条目） ----------
+// ---------- 平台描述符表（单一来源——新增平台 = 描述符条目 + 安装/清理函数，main 零改动） ----------
 
 const PLATFORMS = {
   'claude-code': {
@@ -60,10 +62,42 @@ const PLATFORMS = {
     skillRoot: (target) => path.join(target, '.claude', 'skills'),
     // 平台路径替换表（from 正则 → to）：claude-code 为空 = 权威源即目标形态
     pathReplacements: [],
-    // hook 配置目录（用于 purge 清理与覆盖清单）
-    hookConfigDir: (target) => path.join(target, '.claude'),
-    // 生成物根（purge 清理范围；CC 整删 .claude/——既有语义）
-    purgeRoot: (target) => path.join(target, '.claude'),
+    // hook 注入：settings.local.json 读-合并-写（保留既有字段；matcher Write|Edit）
+    installHooks(target, stats) {
+      const claudeDir = path.join(target, '.claude');
+      fs.mkdirSync(claudeDir, { recursive: true });
+      stats.dirs++;
+      const settings = injectSettingsHook(claudeDir);
+      const injected = !!(settings.hooks && settings.hooks.PreToolUse);
+      stats.files++;
+      console.log(`[prepare-env] settings.local.json ${injected ? '注入完成（保留既有字段）' : '已生成'}`);
+    },
+    // rules 注入：.claude/rules/ 整树复制（自动加载 markdown 指令）
+    installRules(target, stats) {
+      const rulesSrc = path.join(BUNDLE_DRAFTS, 'rules');
+      if (fs.existsSync(rulesSrc)) {
+        copyTree(rulesSrc, path.join(target, '.claude', 'rules'), stats);
+      }
+    },
+    // purge 清理：整删 .claude/（CC 的 .claude 即 flow-comet 生成物域）；返回删除清单供打印
+    purge(target) {
+      const claudeDir = path.join(target, '.claude');
+      const removed = [];
+      if (fs.existsSync(claudeDir)) {
+        for (const entry of fs.readdirSync(claudeDir)) {
+          removed.push(path.join(claudeDir, entry));
+        }
+        fs.rmSync(claudeDir, { recursive: true, force: true });
+      }
+      return removed;
+    },
+    // 覆盖清单描述（默认非破坏：只覆盖生成物）
+    overwriteDescription(target) {
+      return [
+        path.join(target, '.claude', 'rules'),
+        path.join(target, '.claude', 'settings.local.json') + '（注入方式：保留既有字段，仅更新 hooks.PreToolUse）',
+      ];
+    },
   },
   'codex': {
     label: 'Codex',
@@ -73,9 +107,61 @@ const PLATFORMS = {
     pathReplacements: [
       { from: /\.claude\/skills\/flow-comet\/scripts\//g, to: '.agents/skills/flow-comet/scripts/' },
     ],
-    hookConfigDir: (target) => path.join(target, '.codex'),
-    // purge 清理范围：.agents/(Codex 技能区)+ .codex/hooks.json(托管)+ AGENTS.md 托管区(保留文件本身)
-    purgeRoot: (target) => path.join(target, '.agents'),
+    // hook 注入：.codex/hooks.json（顶层 hooks 包裹层 + matcher *）+ config.toml features 启用
+    installHooks(target, stats) {
+      const codexDir = path.join(target, '.codex');
+      injectCodexHook(codexDir);
+      injectCodexConfig(codexDir);
+      stats.files += 2;
+      console.log('[prepare-env] .codex/hooks.json + config.toml 注入完成（hooks 启用，保留既有字段）');
+    },
+    // rules 注入：AGENTS.md 托管区内联（Codex 指令唯一自动加载路径；.codex/rules/ 是命令批准规则目录，不混用）
+    installRules(target, stats) {
+      if (injectCodexRules(target, stats)) {
+        console.log('[prepare-env] AGENTS.md 托管区注入完成（保留托管区外用户内容）');
+      }
+    },
+    // purge 清理：只清 flow-comet 技能（.agents/ 为多工具共享位置——非 flow-comet 条目保留）
+    // + .codex/hooks.json 托管条目（保留用户条目）+ AGENTS.md 托管区（保留文件本身）
+    purge(target) {
+      const removed = [];
+      const agentsSkillsDir = path.join(target, '.agents', 'skills');
+      if (fs.existsSync(agentsSkillsDir)) {
+        for (const entry of fs.readdirSync(agentsSkillsDir)) {
+          if (!/^flow-comet/.test(entry)) continue;
+          const managed = path.join(agentsSkillsDir, entry);
+          removed.push(managed);
+          fs.rmSync(managed, { recursive: true, force: true });
+        }
+      }
+      const hooksPath = path.join(target, '.codex', 'hooks.json');
+      if (fs.existsSync(hooksPath)) {
+        removed.push(hooksPath + '（移除托管 hook 条目,保留用户条目）');
+        // 移除托管条目（重建流程随后重新注入新托管条目——purge = 移除旧生成物后重建）
+        removeManagedCodexHooks(path.join(target, '.codex'));
+      }
+      const agentsPath = path.join(target, 'AGENTS.md');
+      if (fs.existsSync(agentsPath)) {
+        const content = fs.readFileSync(agentsPath, 'utf8');
+        if (content.includes(MANAGED_AGENTS_START)) {
+          removed.push(agentsPath + '（托管区）');
+          const stripped = content.replace(
+            new RegExp(escapeRegExp(MANAGED_AGENTS_START) + '[\\s\\S]*?' + escapeRegExp(MANAGED_AGENTS_END) + '\\n?'),
+            ''
+          );
+          fs.writeFileSync(agentsPath, stripped.trim() + '\n', 'utf8');
+        }
+      }
+      return removed;
+    },
+    // 覆盖清单描述（默认非破坏：只覆盖生成物）
+    overwriteDescription(target) {
+      return [
+        path.join(target, 'AGENTS.md') + '（托管区注入：保留托管区外用户内容）',
+        path.join(target, '.codex', 'hooks.json') + '（注入方式：保留既有字段，仅更新托管 hook 条目）',
+        path.join(target, '.codex', 'config.toml') + '（注入方式：补 [features] hooks 启用键）',
+      ];
+    },
   },
 };
 
@@ -513,7 +599,6 @@ async function main() {
     throw new Error(`权威源 skills 目录不存在: ${skillsSrc}`);
   }
 
-  const isClaudeCode = platform === PLATFORMS['claude-code'];
   const skillRoot = platform.skillRoot(target);
   const stats = { dirs: 0, files: 0, skills: [] };
 
@@ -523,44 +608,8 @@ async function main() {
       throw new Error('--purge 是破坏性操作，需显式 --yes 确认：node scripts/prepare-env.mjs --target <dir> --platform <id> --purge --yes');
     }
     console.error(`[prepare-env] 警告: --purge 将删除 ${platform.label} 平台的以下生成物（不可恢复）：`);
-    if (isClaudeCode) {
-      const claudeDir = platform.purgeRoot(target);
-      if (fs.existsSync(claudeDir)) {
-        for (const entry of fs.readdirSync(claudeDir)) {
-          console.error(`  - ${path.join(claudeDir, entry)}`);
-        }
-        fs.rmSync(claudeDir, { recursive: true, force: true });
-      }
-    } else {
-      // purge 只清理 flow-comet 管理的技能目录——.agents/ 为多工具共享位置
-      //（.agents/skills/ 下可能有其他工具/用户的技能），非 flow-comet 条目保留
-      const agentsSkillsDir = path.join(target, '.agents', 'skills');
-      if (fs.existsSync(agentsSkillsDir)) {
-        for (const entry of fs.readdirSync(agentsSkillsDir)) {
-          if (!/^flow-comet/.test(entry)) continue;
-          const managed = path.join(agentsSkillsDir, entry);
-          console.error(`  - ${managed}`);
-          fs.rmSync(managed, { recursive: true, force: true });
-        }
-      }
-      const hooksPath = path.join(target, '.codex', 'hooks.json');
-      if (fs.existsSync(hooksPath)) {
-        console.error(`  - ${hooksPath}（移除托管 hook 条目,保留用户条目）`);
-        // 移除托管条目（重建流程随后重新注入新托管条目——purge = 移除旧生成物后重建）
-        removeManagedCodexHooks(path.join(target, '.codex'));
-      }
-      const agentsPath = path.join(target, 'AGENTS.md');
-      if (fs.existsSync(agentsPath)) {
-        const content = fs.readFileSync(agentsPath, 'utf8');
-        if (content.includes(MANAGED_AGENTS_START)) {
-          console.error(`  - ${agentsPath}（托管区）`);
-          const stripped = content.replace(
-            new RegExp(escapeRegExp(MANAGED_AGENTS_START) + '[\\s\\S]*?' + escapeRegExp(MANAGED_AGENTS_END) + '\\n?'),
-            ''
-          );
-          fs.writeFileSync(agentsPath, stripped.trim() + '\n', 'utf8');
-        }
-      }
+    for (const entry of platform.purge(target)) {
+      console.error(`  - ${entry}`);
     }
     console.error('[prepare-env] 已删除，开始重新生成。');
   }
@@ -568,43 +617,15 @@ async function main() {
   // 覆盖前打印将覆盖的生成物清单（默认非破坏：只覆盖生成物）
   console.log(`[prepare-env] 平台: ${platform.label} — 将覆盖以下生成物（其他内容保留）：`);
   console.log(`  - ${skillRoot}`);
-  if (isClaudeCode) {
-    console.log(`  - ${path.join(target, '.claude', 'rules')}`);
-    console.log(`  - ${path.join(target, '.claude', 'settings.local.json')}（注入方式：保留既有字段，仅更新 hooks.PreToolUse）`);
-  } else {
-    console.log(`  - ${path.join(target, 'AGENTS.md')}（托管区注入：保留托管区外用户内容）`);
-    console.log(`  - ${path.join(target, '.codex', 'hooks.json')}（注入方式：保留既有字段，仅更新托管 hook 条目）`);
-    console.log(`  - ${path.join(target, '.codex', 'config.toml')}（注入方式：补 [features] hooks 启用键）`);
+  for (const line of platform.overwriteDescription(target)) {
+    console.log(`  - ${line}`);
   }
 
-  // 1. hook 注入（平台化）
-  if (isClaudeCode) {
-    const claudeDir = path.join(target, '.claude');
-    fs.mkdirSync(claudeDir, { recursive: true });
-    stats.dirs++;
-    const settings = injectSettingsHook(claudeDir);
-    const injected = !!(settings.hooks && settings.hooks.PreToolUse);
-    stats.files++;
-    console.log(`[prepare-env] settings.local.json ${injected ? '注入完成（保留既有字段）' : '已生成'}`);
-  } else {
-    const codexDir = path.join(target, '.codex');
-    injectCodexHook(codexDir);
-    injectCodexConfig(codexDir);
-    stats.files += 2;
-    console.log('[prepare-env] .codex/hooks.json + config.toml 注入完成（hooks 启用，保留既有字段）');
-  }
+  // 1. hook 注入（平台化：描述符驱动——CC=settings.local.json；Codex=hooks.json+config.toml）
+  platform.installHooks(target, stats);
 
-  // 2. rules 注入（平台化：CC 复制到 .claude/rules/ 自动加载；Codex 走 AGENTS.md 托管区）
-  if (isClaudeCode) {
-    const rulesSrc = path.join(BUNDLE_DRAFTS, 'rules');
-    if (fs.existsSync(rulesSrc)) {
-      copyTree(rulesSrc, path.join(target, '.claude', 'rules'), stats);
-    }
-  } else {
-    if (injectCodexRules(target, stats)) {
-      console.log('[prepare-env] AGENTS.md 托管区注入完成（保留托管区外用户内容）');
-    }
-  }
+  // 2. rules 注入（平台化：描述符驱动——CC=.claude/rules/ 复制；Codex=AGENTS.md 托管区）
+  platform.installRules(target, stats);
 
   // 3. skills/（复制全部 flow-comet* 目录 + 平台路径替换）
   const skillNames = fs

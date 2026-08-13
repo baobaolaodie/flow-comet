@@ -26,7 +26,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 - **CI**: process-code checks moved from the server-side PR policy to local hooks; PR/issue templates reworked for practice (deduplicated checkboxes, related-issue section, based-on version, protocol and installed-version fields).
 - **Commit history made jargon-free**: 52 historical commit messages rewritten to plain descriptions (tree unchanged); duplicate commits deduplicated.
 - **Docs**: README reorganized (quick start moved up) with recognizable anchors (GSD link, pain-point intro, fit boundary); installation guide gained an uninstall section; release checklist deduplicated to a single source; terminology unified across docs.
-- **System test suite expanded to 49 items** (installer version-marker check, then multi-platform installer scenarios: Codex install smoke, hook platform contract, platform selection chain, purge semantics).
+- **System test suite expanded to 50 items** (installer version-marker check, multi-platform installer scenarios: Codex install smoke, hook platform contract, platform selection chain, purge semantics, platform-descriptor-driven install smoke).
 - **Merge gate changed to CI status checks**: branch protection no longer requires an approving review (single-account repo cannot self-approve); required checks are the CI jobs; bot reviewers (CodeRabbit / Sourcery) are advisory — contributing guide gains a bot-reviewers section (advisory-only, threaded replies, resolve before merge).
 
 ### Fixed

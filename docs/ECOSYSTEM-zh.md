@@ -16,7 +16,7 @@ flow-kit 是**纯 markdown 方法论包**（不是工具——"clone 到项目�
 
 | flow-kit | flow-comet 的用法 |
 |----------|------------------|
-| **阶段协议**（prompts/0-change、1-requirement、3-task、4-dev、5-test、7-integration、2a-ui-design） | 8 节点一一对应；节点 skill 自述「flow-kit \<阶段\> 阶段协议」，执行时读取 flow-kit prompt 文件 |
+| **阶段协议**（prompts/0-change、1-requirement、2-design、3-task、4-dev、5-test、6-review、7-integration、2a-ui-design） | 8 节点映射到阶段协议（open 组合 0-change + 1-requirement；2a-ui-design 为前端可选附加）；节点 skill 自述「flow-kit \<阶段\> 阶段协议」，执行时读取 flow-kit prompt 文件 |
 | **工件模板**（CHANGE/REQUIREMENT/DESIGN/TASK/SUMMARY/TEST/REVIEW/UAT/LESSONS/CONTEXT/…） | 工件路径与必填段完全遵循模板 |
 | **R1-R8 行为规则**（fresh-context、工件门禁、反幻觉 grep、破坏性变更协议、测试纪律） | flow-comet skill 中按编号逐条引用（R1.8、R4.5、R4.6、R5.1、R6.4、R6.5…） |
 | **Artifact Preflight Gate**（GO.md / R2.7） | 移植为节点产物门禁表（design 需 CHANGE+REQUIREMENT、plan 需 DESIGN、…） |
