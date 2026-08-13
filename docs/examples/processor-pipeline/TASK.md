@@ -145,7 +145,7 @@ Wave 4 (serial):   T06（收口：全量回归 + 文档，depends on T05）
 
 ## Fix 任务（来自 REVIEW / INTEGRATION）
 
-> 此区域由 review/integration 阶段自动追加，编号 `FIX-XX`。
+> 此区域由 review/integration 阶段自动追加，编号 `T-FIX-XX`。
 
 ```xml
 <!-- 占位 -->
