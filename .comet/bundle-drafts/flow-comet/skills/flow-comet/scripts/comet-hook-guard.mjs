@@ -67,8 +67,6 @@ function codexWriteTargetsFromCommand(command) {
     // PowerShell 写类 cmdlet 的 -Path/-LiteralPath(引号内空格整体捕获并剥引号;
     // 只匹配写类 cmdlet——读类(Get-Content 等)的 -Path 不提取;同一命令内 [^;|&]*? 防跨命令)
     /(?:Set-Content|Add-Content|New-Item|Out-File|Copy-Item|Move-Item|Remove-Item|Set-Item|Export-Csv)[^;|&]*?-(?:Path|LiteralPath)\s+("[^"]*"|'[^']*'|[^\s;|&]+)/gi,
-    // .NET File API:第一个参数 = 路径(引号内空格整体捕获)
-    /\[System\.IO\.File\]::(?:WriteAllText|WriteAllBytes|AppendAllText|WriteAllLines|Copy|Move|Delete)\s*\(\s*("[^"]*"|'[^']*'|[^,\s)]+)/gi,
     // shell 重定向(含描述符变体:> / >> / 2> / 1>>)
     /(?:^|[;\s|&])(?:[0-9]*>>?)\s*("[^"]*"|'[^']*'|[^\s;|&]+)/gi,
   ];
@@ -79,6 +77,16 @@ function codexWriteTargetsFromCommand(command) {
       if (t) t = t.replace(/^["']|["']$/g, ''); // 剥引号
       if (t && t !== 'NUL' && t !== '/dev/null' && !targets.includes(t)) targets.push(t); // 去重
     }
+  }
+  // .NET File API:写 API 的目标参数按语义区分——WriteAll*/AppendAll*/Delete 目标 = 第一参数;
+  // Copy(source, destination) / Move(source, destination) 目标 = 第二参数(第一参数是源路径,守卫应检查写入目标)
+  const apiRe = /\[System\.IO\.File\]::(WriteAllText|WriteAllBytes|AppendAllText|WriteAllLines|Copy|Move|Delete)\s*\(\s*("[^"]*"|'[^']*'|[^,\s)]+)(?:\s*,\s*("[^"]*"|'[^']*'|[^,\s)]+))?/gi;
+  let m;
+  while ((m = apiRe.exec(command)) !== null) {
+    const isCopyMove = m[1] === 'Copy' || m[1] === 'Move';
+    let t = (isCopyMove ? m[3] : m[2]) || '';
+    t = t.trim().replace(/^["']|["']$/g, '');
+    if (t && t !== 'NUL' && t !== '/dev/null' && !targets.includes(t)) targets.push(t);
   }
   return targets;
 }

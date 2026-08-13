@@ -1463,6 +1463,23 @@ const TEST_ITEMS = [
         { tool_name: 'Bash', tool_input: { command: 'python -m pytest test_calculator.py -q' } });
       assertExit(bashNone, 0);
       JSON.parse(bashNone.output.trim());
+      // ⑧ codex 分支:读类 cmdlet(Get-Content -Path)→ 无写入语义,放行
+      const bashRead = runHook(['before_tool', '--platform', 'codex'], dir,
+        { tool_name: 'Bash', tool_input: { command: 'Get-Content -Path "src/readme.md"' } });
+      assertExit(bashRead, 0);
+      const bashReadParsed = JSON.parse(bashRead.output.trim());
+      if (bashReadParsed.decision === 'block') throw new Error('codex 读类 cmdlet(Get-Content)不应 block');
+      // ⑨ codex 分支:.NET File.Copy 目标 = 第二参数(越权目标 → block;合法目标 → 放行)
+      const copyBlock = runHook(['before_tool', '--platform', 'codex'], dir,
+        { tool_name: 'Bash', tool_input: { command: '[System.IO.File]::Copy("src/a.txt", "src/b.txt")' } });
+      assertExit(copyBlock, 0);
+      const copyParsed = JSON.parse(copyBlock.output.trim());
+      if (copyParsed.decision !== 'block') throw new Error('codex File.Copy 越权目标(第二参数)应 block');
+      const copyOk = runHook(['before_tool', '--platform', 'codex'], dir,
+        { tool_name: 'Bash', tool_input: { command: '[System.IO.File]::Copy("src/a.txt", ".specs/ch/b.txt")' } });
+      assertExit(copyOk, 0);
+      const copyOkParsed = JSON.parse(copyOk.output.trim());
+      if (copyOkParsed.decision === 'block') throw new Error('codex File.Copy 合法目标不应 block');
     },
   },
 
