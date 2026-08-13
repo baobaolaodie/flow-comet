@@ -107,10 +107,10 @@ async function main() {
           }
         }
       } catch {
-        console.error('HANDOFF ERROR: commitHash 无效或 git show 失败: ' + commitHash);
+        console.error('HANDOFF ERROR: commitHash 无效或 git show 失败: ' + commitHash + '——协调者需确认原因(跨仓库 worktree 提交校验降级属预期,确认后继续)');
       }
     } else if (typeof parsed === 'object' && parsed !== null && parsed.commitHash) {
-      console.error('HANDOFF ERROR: commitHash 格式非法: ' + String(parsed.commitHash));
+      console.error('HANDOFF ERROR: commitHash 格式非法: ' + String(parsed.commitHash) + '——协调者需确认原因并记录(提交对象不可校验时,确认后继续)');
     }
     // redEvidence 时间顺序校验——重新 result 已存在 taskId 且该 task 已有 greenEvidence
     // 而无 redEvidence 时，新增 redEvidence 属于事后补录（TDD 要求 RED 先于 GREEN）→ BLOCKED。

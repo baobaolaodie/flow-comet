@@ -22,6 +22,19 @@ const specsRoot = path.join(runRoot, '.specs');
 // 参数校验已改为当前协议节点集合动态读取——compose 自定义协议节点可声明）
 const BUILTIN_NODES = ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review', 'verify', 'archive'];
 
+// 节点 → flow-kit/prompts/ 协议文件映射(M5 record 自动补声明标记的 protocol 归属;
+// 与 workflow-guard.mjs 的 NODE_PROTOCOL_FILES 保持一致——单一来源约定,改动词表两份同改)
+const NODE_PROTOCOL_FILES = {
+  open: ['0-change.md', '1-requirement.md'],
+  design: ['2-design.md'],
+  plan: ['3-task.md'],
+  execute: ['4-dev.md'],
+  'subagent-execute': ['4-dev.md'],
+  review: ['6-review.md', '5-test.md'],
+  verify: ['7-integration.md'],
+  archive: ['7-integration.md'],
+};
+
 async function readJson(file) {
   // 容忍 UTF-8 BOM（外部写入如会话 Write 可能带 BOM）
   return JSON.parse((await fs.readFile(file, 'utf8')).replace(/^﻿/, ''));
@@ -687,6 +700,16 @@ async function main() {
     const expectedBranch = branchPrefix + changeName;
     if (branchMode) {
       const currentBranch = gitBranchName();
+      // M8: 空仓库检测——无提交(git rev-parse HEAD 失败)时分支创建不可行,输出提示(不 BLOCK;纯文件模式继续)
+      let emptyRepo = false;
+      try {
+        execFileSync('git', ['rev-parse', 'HEAD'], { cwd: runRoot, stdio: 'pipe' });
+      } catch {
+        emptyRepo = true;
+      }
+      if (emptyRepo) {
+        console.error('INIT EMPTY-REPO WARN: 仓库无提交(git 空仓库),无法创建 ' + expectedBranch + ' 分支——先 git commit 初始提交再 init 启用分支模式,或继续纯文件模式');
+      }
       if (currentBranch !== null && currentBranch !== expectedBranch && !branchExists(expectedBranch)) {
         try {
           execFileSync('git', ['checkout', '-b', expectedBranch], { cwd: runRoot, stdio: 'pipe' });
@@ -887,6 +910,27 @@ async function main() {
     if (!markerCheck.ok) {
       console.error('BLOCKED: ' + markerCheck.reason);
       process.exit(1);
+    }
+    // M5: 声明自动化——record 时按协议 requiredSkillCalls 自动补写缺失的声明标记
+    // (执行者无需手动 skill-load;标记如实记录"节点完成即视为其实现/协议技能已加载",
+    // 由 record 代记;与手动 skill-load 标记同体系,exit 协议声明校验共用)
+    const recordNodeDef = (protocol.nodes ?? []).find((n) => n.id === nodeId);
+    if (recordNodeDef && markerChange) {
+      const recordProtoFiles = NODE_PROTOCOL_FILES[nodeId] ?? [];
+      for (const binding of recordNodeDef.requiredSkillCalls ?? []) {
+        const markerFile = path.join(runRoot, '.specs', markerChange, '.skill-loads', nodeId + '-' + binding.skill + '.json');
+        let markerExists = false;
+        try { await fs.access(markerFile); markerExists = true; } catch { /* 标记不存在 */ }
+        if (!markerExists) {
+          await writeJson(markerFile, {
+            node: nodeId,
+            skill: binding.skill,
+            protocol: recordProtoFiles.length > 0 ? recordProtoFiles[0] : null,
+            at: recordedAt,
+            auto: true,
+          });
+        }
+      }
     }
     state.evidence[nodeId] = {
       ...(state.evidence[nodeId] || {}),

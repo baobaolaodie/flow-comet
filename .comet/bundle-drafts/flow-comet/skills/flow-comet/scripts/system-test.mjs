@@ -682,29 +682,28 @@ const TEST_ITEMS = [
   },
 
   {
-    name: 'B8 exit：协议声明标记校验（真实链路通过 / 无标记·空协议·损坏拦截）',
+    name: 'B8 exit：协议声明标记校验（record 自动补通过 / 手动声明 / 空协议·损坏拦截）',
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
       writeIntakeArtifacts(dir);
       writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
+      // ① M5: record 自动补声明标记 → 出口通过（无需手动 skill-load）
       assertExit(runState(['record', 'open', '{"summary":"intake complete"}'], dir), 0);
-      const loadsDir = path.join(dir, '.specs', CHANGE_ID, '.skill-loads');
-      fs.mkdirSync(loadsDir, { recursive: true });
-      // ① 机制已激活（.skill-loads/ 存在）但无本节点标记 → 拦截
-      writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/design-flow-comet-design.json',
-        JSON.stringify({ node: 'design', skill: 'flow-comet-design', protocol: '2-design.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
-      const rBlock = runGuard(['exit', 'open'], dir);
-      assertExit(rBlock, 1);
-      assertOut(rBlock, 'BLOCKED');
-      assertOut(rBlock, 'exit 缺协议声明标记');
-      // ② 真实链路：skill-load --prompt（protocol = basename）→ 出口通过
+      const autoMarker = path.join(dir, '.specs', CHANGE_ID, '.skill-loads', 'open-flow-comet-change.json');
+      if (!fs.existsSync(autoMarker)) throw new Error('record 自动声明标记缺失: open-flow-comet-change.json');
+      const rAuto = runGuard(['exit', 'open'], dir);
+      assertExit(rAuto, 0);
+      assertOut(rAuto, 'ALL CHECKS PASSED');
+      assertNotOut(rAuto, 'BLOCKED');
+      // ② 手动 skill-load --prompt（protocol = basename）覆盖自动标记 → 出口通过
       assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
       const rPass = runGuard(['exit', 'open'], dir);
       assertExit(rPass, 0);
       assertOut(rPass, 'ALL CHECKS PASSED');
       assertNotOut(rPass, 'BLOCKED');
-      // ③ 未传 --prompt → 标记 protocol = null → 拦截（fail-closed）
+      // ③ 未传 --prompt → 标记 protocol = null → 拦截（fail-closed；open 两个 requiredSkillCalls 均覆盖为 null）
       assertExit(runState(['skill-load', 'open', 'flow-comet-change'], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-requirement'], dir), 0);
       const rNull = runGuard(['exit', 'open'], dir);
       assertExit(rNull, 1);
       assertOut(rNull, 'exit 缺协议声明标记');
@@ -718,21 +717,21 @@ const TEST_ITEMS = [
   },
 
   {
-    name: 'B9 旧项目兼容：未激活声明机制照常通过',
+    name: 'B9 旧项目兼容：record 自动补声明后照常通过',
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
-      // 旧格式记录：completedChecks 无 required-skill 条目 → 无标记照常通过
+      // 旧格式记录：completedChecks 无 required-skill 条目 → 不校验标记,通过
       const rA = runState(['record', 'open', JSON.stringify({ summary: 'legacy', completedChecks: ['unit-tests'] })], dir);
       assertExit(rA, 0);
       assertOut(rA, 'EVIDENCE: open');
-      // 无 completedChecks 的纯 summary 记录 → 通过
+      // 无 completedChecks 的纯 summary 记录 → 通过（M5: record 自动补声明标记）
       assertExit(runState(['record', 'open', JSON.stringify({ summary: 'plain' })], dir), 0);
-      // 出口：.skill-loads/ 不存在（声明机制未激活）→ 兼容警告 + 通过
+      // 出口：record 已自动补标记 → 无兼容警告,正常通过
       writeIntakeArtifacts(dir);
       const rC = runGuard(['exit', 'open'], dir);
       assertExit(rC, 0);
-      assertOut(rC, 'SKILL-LOAD WARN');
       assertOut(rC, 'ALL CHECKS PASSED');
+      assertNotOut(rC, 'SKILL-LOAD WARN');
     },
   },
 

@@ -51,6 +51,12 @@ const NODE_PROTOCOL_FILES = {
 // 旧格式（缺陷修复前写入）= resolveProtocol 解析后的完整绝对路径（Windows 反斜杠 /
 // POSIX 斜杠），提取最后一段后可比对。非字符串（null——skill-load 未传 --protocol 的
 // 新格式缺省）→ null（协议集内无 null，fail-closed 由 includes 比对兜底）。
+// M7: 新旧 change 区分——enteredNodes 非空(enter 机制激活) = 新 change(严格);
+// 缺失/空(机制未激活,旧 change) = 渐进 WARN 兼容。供 M2/M3 升级与 M1 enter 证据检测使用。
+function isNewChange(state) {
+  return Array.isArray(state.enteredNodes) && state.enteredNodes.length > 0;
+}
+
 function markerProtocolBasename(value) {
   if (typeof value !== 'string' || value === '') return null;
   return String(value).replaceAll('\\', '/').split('/').pop() || null;
@@ -2128,6 +2134,14 @@ async function main() {
         console.log('COORDINATOR: 你是协调者，不是执行者。禁止在主会话直接修改源码；只能通过 Agent 工具 worktree isolation 委托子代理；子代理回传后仅更新 TASK.md / SUMMARY / handoff evidence。');
       }
     }
+    // M1: enter 证据——entry 记录节点进入标记(enteredNodes),exit 检测未 entry(防跳过 entry 无痕)
+    state.enteredNodes = Array.isArray(state.enteredNodes) ? state.enteredNodes : [];
+    if (!state.enteredNodes.includes(node.id)) {
+      state.enteredNodes.push(node.id);
+      const bad = validateStateFields(state);
+      if (bad.length) { console.error('BLOCKED: state 字段类型非法: ' + bad[0]); process.exit(1); }
+      await writeJson(file, state);
+    }
     console.log('ENTRY OK: ' + node.id);
     return;
   }
@@ -2142,6 +2156,11 @@ async function main() {
     console.error('BLOCKED: currentNode is ' + String(state.currentNode) + ', cannot exit ' + node.id + '.');
     console.error('恢复: 若节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进，确认节点实际已完成后再用）或 select（切换 change）；禁止手改 state 机器字段');
     process.exit(1);
+  }
+  // M1: enter 证据检测——enter 机制激活(enteredNodes 非空,新 change)但本节点未 entry 直接 exit → ENTER WARN(渐进)
+  // 跳过 entry 会漏掉进入检查(协调者禁令/C4 WORKTREE/PROGRESS/签名记录);旧 change(机制未激活)兼容跳过
+  if (isNewChange(state) && !state.enteredNodes.includes(node.id)) {
+    console.error('ENTER WARN: 节点 ' + node.id + ' 未执行 entry 直接 exit——entry 的进入检查(协调者禁令/C4 委托前检查/签名记录)被跳过,请先 entry 该节点再 exit(渐进不阻断)');
   }
   // E2: exit archive 分支合并检查（WARN 不 BLOCK）——分支未合并到 main 允许"归档先行、合并后补"
   if (node.id === 'archive' && state.branchMode === true && state.activeChange) {
@@ -2445,17 +2464,25 @@ async function main() {
       })).filter(t => t.id);
 
       // 串行 pending → BLOCKED（execute 任务没做完）
+      // M6: 显式空退出豁免(evidence.execute.emptyExitApproved)——全 parallel 任务无串行可做时,
+      // 协调者显式声明后允许空退出(替代自动路由/parallelTakeoverApproved;防规划错误仍默认 BLOCKED)
+      const emptyExitApproved = !!(state.evidence?.execute && state.evidence.execute.emptyExitApproved);
       const serialPending = tasks.filter(t => !t.parallel && t.status !== 'done');
-      if (serialPending.length > 0) {
+      if (serialPending.length > 0 && !emptyExitApproved) {
         console.error('BLOCKED: execute 出口仍有串行 pending 任务: ' + serialPending.map(t => t.id).join(', '));
         process.exit(1);
       }
 
       // done 任务 ↔ SUMMARY 完整性: done 任务 ↔ <id>-SUMMARY.md 存在（WARN 渐进不 BLOCK——防旧 change 卡死；
       // 结构级校验与 TASK 签名同源：任务完成声明须有对应产物）
+      // M2: 新 change(enter 机制激活)升级为 BLOCKED——执行遗漏(声称完成但无产物)不静默进归档;旧 change 保持渐进
       const ki8ChangeDir = path.join(runRoot, '.specs', state.activeChange ?? '');
       for (const tid of tasks.filter(t => t.status === 'done').map(t => t.id)) {
         if (!(await fileExists(path.join(ki8ChangeDir, tid + '-SUMMARY.md')))) {
+          if (isNewChange(state)) {
+            console.error('BLOCKED: done 任务 ' + tid + ' 缺少 ' + tid + '-SUMMARY.md——execute 产物不完整（新 change 强制任务完成须有对应 SUMMARY;旧 change 渐进 WARN）');
+            process.exit(1);
+          }
           console.error('WARN: done 任务 ' + tid + ' 缺少 ' + tid + '-SUMMARY.md——execute 产物不完整（任务完成须有对应 SUMMARY）');
         }
       }
@@ -2586,9 +2613,13 @@ async function main() {
       if (!r) { violations.push(taskId + ' 非 Return Contract（旧格式，缺 completedChecks）'); continue; }
       if (!r.commitHash) violations.push(taskId + ' 缺 commitHash');
       if (!r.greenEvidence || !r.greenEvidence.command) violations.push(taskId + ' 缺 greenEvidence');
-      // redEvidence 缺失警告（过渡期不阻断）
+      // redEvidence 缺失警告（过渡期不阻断）——M3: 新 change(enter 机制激活)升级为 BLOCKED(TDD RED 证据强制)
       if (r && !r.redEvidence) {
-        console.error('HANDOFF WARN: ' + taskId + ' 缺 redEvidence（可能未执行 TDD RED 阶段）');
+        if (isNewChange(state)) {
+          violations.push(taskId + ' 缺 redEvidence（新 change 强制 TDD RED 证据;旧 change 渐进 WARN）');
+        } else {
+          console.error('HANDOFF WARN: ' + taskId + ' 缺 redEvidence（可能未执行 TDD RED 阶段）');
+        }
       }
       // completedChecks 严格校验（无旧 change 豁免）
       if (requiredChecks.length > 0) {
@@ -2603,6 +2634,27 @@ async function main() {
       console.error('BLOCKED: Return Contract 校验失败: ' + violations.join('; '));
       process.exit(1);
     }
+  }
+  // M2: subagent-execute 出口——done 任务缺 SUMMARY(新 change BLOCKED;旧 change 渐进 WARN)
+  // 此前为已知边界(W1-B 只查存在 SUMMARY 的段内容);执行遗漏(声称完成无产物)不应静默进归档
+  if (node.id === 'subagent-execute' && state.activeChange) {
+    const saTaskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
+    try {
+      const saContent = await fs.readFile(saTaskFile, 'utf8');
+      const saTasks = (saContent.match(/<task[^>]*>[\s\S]*?<\/task>/g) || [])
+        .map(block => ({ id: (block.match(/id="([^"]+)"/) || [])[1] || null, status: (block.match(/status="([^"]+)"/) || [])[1] || null }))
+        .filter(t => t.id);
+      const saDir = path.join(runRoot, '.specs', state.activeChange ?? '');
+      for (const t of saTasks.filter(t => t.status === 'done')) {
+        if (!(await fileExists(path.join(saDir, t.id + '-SUMMARY.md')))) {
+          if (isNewChange(state)) {
+            console.error('BLOCKED: done 任务 ' + t.id + ' 缺少 ' + t.id + '-SUMMARY.md——subagent-execute 产物不完整（新 change 强制任务完成须有对应 SUMMARY;旧 change 渐进 WARN）');
+            process.exit(1);
+          }
+          console.error('WARN: done 任务 ' + t.id + ' 缺少 ' + t.id + '-SUMMARY.md——subagent-execute 产物不完整（任务完成须有对应 SUMMARY）');
+        }
+      }
+    } catch {}
   }
   // exit 协议声明标记校验——节点 exit 时扫描 .specs/<change-id>/.skill-loads/ 下该节点标记
   // （<node>-*.json，执行者加载节点 skill 后经 skill-load 写入，含 protocol 字段——指向
@@ -2666,7 +2718,9 @@ async function main() {
     console.error('BLOCKED: missing Output Schema evidence: ' + missingSchemaEvidence.join(', '));
     process.exit(1);
   }
-  const missingArtifacts = await missingRequiredArtifacts(protocol, node, state.activeChange);
+  // M6: execute 显式空退出豁免——evidence.execute.emptyExitApproved 时跳过产物校验(全 parallel 无 SUMMARY 属预期)
+  const missingArtifacts = (node.id === 'execute' && state.evidence?.execute?.emptyExitApproved)
+    ? [] : await missingRequiredArtifacts(protocol, node, state.activeChange);
   if (missingArtifacts.length > 0) {
     console.error('BLOCKED: missing Output Schema artifacts: ' + missingArtifacts.join(', '));
     process.exit(1);
