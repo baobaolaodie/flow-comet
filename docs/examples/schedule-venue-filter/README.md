@@ -37,4 +37,7 @@ A feature change in a simulated ping-pong tournament system: admins filter tourn
 
 ## Notes
 
+- This is simulated data — no real project code is involved
+- All sensitive information is anonymized (phone numbers, usernames, etc.)
 - Artifact language follows the example project's primary language (Chinese) — per flow-kit R8.1
+- Code path references point to the simulated ping-pong tournament system structure
