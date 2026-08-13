@@ -10,9 +10,22 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号记录于 git tag、本文档、README 徽章、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 与权威源 `skills/flow-comet/INSTALLED_VERSION`；`bundle.yaml` 的 version 保持 1.0.0（与发布流程解耦）。
 
+## Unreleased
+
+### 变更
+
+- **全库文档检修**：技能指令去重（删除生成器模板残留与中部 frontmatter）、Comet 定位声称替换为 flow-comet 自身机制表述、逐节点门禁表对齐实际实现（未实现项标注为 review 把关的执行纪律）、双平台（Claude Code / Codex）适配（brooks-lint 调用方式、用户入口、安装文档）、回归基线在全部文档中提升为两级（引擎回归 + 系统测试集）、时效性更新（路线图状态、设计文档回填、交接文档归档）。
+
+### 修复
+
+- 技能内缺失安装路径前缀的命令补全为权威源路径——两平台安装后均可执行。
+- 过程代号检测正则覆盖 1~3 位场景编号（原先只拦两位）；文档扫描正则与单一来源重新同步；POSIX hook 文件在安装时补齐执行位。
+- CI 双语镜像检查补 SECURITY 对（CoC 按设计豁免，与本地检查一致）；版本期望提取不再依赖失效的回退。
+- 包元数据对齐：技能清单、references 与脚本 sideEffect 与实际分发一致。
+
 ## [1.4.0] - 2026-08-13
 
-多平台安装器框架、平台模块化与真实产物示例。([#45](https://github.com/baobaolaodie/flow-comet/pull/45)、[#46](https://github.com/baobaolaodie/flow-comet/pull/46)、[#47](https://github.com/baobaolaodie/flow-comet/pull/47))
+多平台安装器框架、平台模块化与真实产物示例。([#45](https://github.com/baobaolaodie/flow-comet/pull/45)、[#46](https://github.com/baobaolaodie/flow-comet/pull/46)、[#47](https://github.com/baobaolaodie/flow-comet/pull/47)、[#48](https://github.com/baobaolaodie/flow-comet/pull/48)、[#50](https://github.com/baobaolaodie/flow-comet/pull/50))
 
 ### 新增
 
