@@ -28,6 +28,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 - **Docs**: README reorganized (quick start moved up) with recognizable anchors (GSD link, pain-point intro, fit boundary); installation guide gained an uninstall section; release checklist deduplicated to a single source; terminology unified across docs.
 - **System test suite expanded to 50 items** (installer version-marker check, multi-platform installer scenarios: Codex install smoke, hook platform contract, platform selection chain, purge semantics, platform-descriptor-driven install smoke).
 - **Merge gate changed to CI status checks**: branch protection no longer requires an approving review (single-account repo cannot self-approve); required checks are the CI jobs; bot reviewers (CodeRabbit / Sourcery) are advisory — contributing guide gains a bot-reviewers section (advisory-only, threaded replies, resolve before merge).
+- **Examples rebuilt from a real archived run**: `docs/examples/` now carries the complete artifact set of a real 8-node change (processor-pipeline, run in the e2e fake project) — six-section summaries, review findings with disposition markers, skill-load declaration markers, actually-executed verify; the simulated example and outdated artifact screenshots were removed, and the README showcase now points at the real artifacts.
 
 ### Fixed
 
