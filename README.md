@@ -135,13 +135,19 @@ The engine routes between nodes by deriving state from `.specs/` artifacts (dete
 
 **Fit**: flow-comet is built for long-running, multi-session development changes on Claude Code — the discipline it automates pays off when a change spans hours and multiple sessions. It is not a general CI/CD or project-management tool; Codex is supported (see [Installation](docs/INSTALLATION.md#platforms)), other platforms (Gemini / Cursor) are not guaranteed.
 
-## Screenshots
+## Real-run artifacts
 
-Real-run captures from production-length sessions. During these multi-hour runs, the **only human interaction was the workflow-defined decision points** (scope confirmation, tech-stack selection, review findings, archive confirmation) — no other manual interference or ad-hoc decisions; the specification was strictly enforced from start to finish.
+A complete 8-node run produces the full artifact trail shown in [docs/examples/processor-pipeline](docs/examples/processor-pipeline/) — a real archived change (e2e fake project, 2026-08-13): CHANGE / REQUIREMENT / DESIGN / TASK / six-section SUMMARYs / REVIEW with disposition markers / TEST / UAT / KNOWN-ISSUES / skill-load declaration markers.
 
-**Complete artifact trail** — every workflow artifact from a real run (CHANGE / DESIGN / REQUIREMENT / REVIEW / TASK / TEST / UAT + one summary per task):
-
-![Artifact trail](images/long-run-output.png)
+```
+processor-pipeline/            (archived change, full artifact set)
+├── CHANGE.md / REQUIREMENT.md / DESIGN.md / TASK.md
+├── T01~T06-SUMMARY.md          (six-section SUMMARYs)
+├── REVIEW.md                   (findings with disposition markers)
+├── TEST.md / UAT.md            (verify actually executes the test command)
+├── KNOWN-ISSUES.md
+└── .skill-loads/               (11 skill-load declaration markers)
+```
 
 **Stable skill triggering** — workflow skills keep loading correctly through a 4h+ session:
 

@@ -135,13 +135,19 @@ graph LR
 
 **适用场景**：flow-comet 面向 Claude Code 上耗时数小时、跨多会话的开发 change——纪律自动化的价值在长任务中体现。它不是通用 CI/CD 或项目管理工具；Codex 受支持（见[安装](docs/INSTALLATION-zh.md#平台)），其他平台（Gemini / Cursor）不保证支持。
 
-## 运行展示（截图）
+## 真实运行产物展示
 
-来自真实生产级会话的运行截图。这些数小时运行中，**唯一的人工交互是工作流规定的决策点**（范围确认、技术栈选型、评审结论、归档确认）——除此之外没有任何其他人工干扰或临时决策，全程严格执行规范。
+一次完整 8 节点运行的全部流程工件见 [docs/examples/processor-pipeline](docs/examples/processor-pipeline/)——真实归档的 change（e2e 假项目，2026-08-13）：CHANGE / REQUIREMENT / DESIGN / TASK / 六段 SUMMARY / 带处置标记的 REVIEW / TEST / UAT / KNOWN-ISSUES / skill-load 声明标记。
 
-**完整产物体系**——一次真实运行的全部流程工件（CHANGE / DESIGN / REQUIREMENT / REVIEW / TASK / TEST / UAT + 每任务一份摘要）：
-
-![产物体系](images/long-run-output.png)
+```
+processor-pipeline/            （归档 change，完整产物集）
+├── CHANGE.md / REQUIREMENT.md / DESIGN.md / TASK.md
+├── T01~T06-SUMMARY.md          （六段 SUMMARY）
+├── REVIEW.md                   （发现区带处置标记）
+├── TEST.md / UAT.md            （verify 出口真实执行测试命令）
+├── KNOWN-ISSUES.md
+└── .skill-loads/               （11 个 skill-load 声明标记）
+```
 
 **技能稳定触发**——4 小时以上会话中工作流技能持续正确加载：
 
