@@ -35,7 +35,7 @@
 
 ## 基于版本 / Based on
 
-<!-- 基于哪个基线开发：main v1.3.1 / 最新 dev / 具体 commit / Which baseline (e.g. main v1.3.1, latest dev, specific commit) -->
+<!-- 基于哪个基线开发：main 最近发布版本 / 最新 dev / 具体 commit / Which baseline (e.g. latest release on main, latest dev, specific commit) -->
 
 ## 关联（可选）/ Related (optional)
 

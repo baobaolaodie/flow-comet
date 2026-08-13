@@ -22,8 +22,8 @@ open → design → plan → execute ⇄ subagent-execute → review → verify 
 |------|------|---------|------------------|
 | **open** | CHANGE 反问 + 需求分析（AC 推导） | `CHANGE.md` / `REQUIREMENT.md` / CONTEXT 术语更新 | 必填段（模板派生）：`## Why` / `## 用户故事` / 验收段；CONTEXT 孤立追加段检测 |
 | **design** | 技术栈选型 + 架构对齐 + 决策 | `DESIGN.md`（§0 技术栈 / §0.5 架构对齐 / 决策清单 / 风险） | §0 段 + `## 决策清单`（模板派生，支持编号） |
-| **plan** | 原子任务拆分（XML）+ 波次划分 | `TASK.md`（`<task>` 块含 7 字段 + parallel 标记） | task 块存在 + verify 字段；TASK 签名哈希（enter 记录） |
-| **execute** | 串行任务执行（协调者委托子代理） | `<task-id>-SUMMARY.md` | SUMMARY 六段 + 6 维自查 + 强制 `## 自检方法`；TASK 签名比对；越俎代庖检测 |
+| **plan** | 原子任务拆分（XML）+ 波次划分 | `TASK.md`（`<task>` 块含 7 字段 + parallel 标记） | task 块存在 + verify 字段 |
+| **execute** | 串行任务执行（协调者委托子代理） | `<task-id>-SUMMARY.md` | SUMMARY 六段 + 6 维自查 + 强制 `## 自检方法`；TASK 签名哈希（enter 记录、exit 比对）；越俎代庖检测 |
 | **subagent-execute** | parallel 任务并行委托（wave） | 同上（每任务一份 SUMMARY） | 同上 + handoff evidence（Return Contract） |
 | **review** | 4 轮审查（spec 合规 / 代码质量 / UI 视觉 / 可选） | `REVIEW.md`（Critical/发现/结论） | ≥100B + 必填段 |
 | **verify** | 集成验证 + UAT + 失败诊断（≤3 轮） | `TEST.md` / `UAT.md` / LESSONS 提名 | 验证命令真实执行；UAT 必填段；LESSONS 编号/位置检测 |
@@ -71,7 +71,7 @@ open → design → plan → execute ⇄ subagent-execute → review → verify 
 
 ## 用户入口
 
-在目标项目打开 Claude Code，输入：
+在目标项目打开 Claude Code 会话，输入（Codex：经 `/use flow-comet` 或自然语言调用技能——入口语义一致）：
 
 | 入口 | 用途 |
 |------|------|
@@ -96,7 +96,7 @@ flow-comet 在以下节点**暂停并向你确认**（其余全部自动推进�
 
 ## 脚本速查（Claude 自动执行）
 
-以下脚本由 flow-comet skill 在流程中**自动运行**——正常使用无需手动执行，仅在故障排查或高级场景使用。路径：`<目标项目>/.claude/skills/flow-comet/scripts/`：
+以下脚本由 flow-comet skill 在流程中**自动运行**——正常使用无需手动执行，仅在故障排查或高级场景使用。路径：`<目标项目>/.claude/skills/flow-comet/scripts/`（Claude Code；Codex：`<目标项目>/.agents/skills/flow-comet/scripts/`）：
 
 ```bash
 node workflow-state.mjs status             # 当前状态 + 分支一致性

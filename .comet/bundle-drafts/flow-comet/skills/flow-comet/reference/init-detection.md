@@ -18,7 +18,7 @@ workflow-state.mjs init <change-id> [--init-context | --init-skip]
 
 | 情形 | 行为 |
 |------|------|
-| 已记录跳过或指定上下文文档 | 静默（沿用上次决策） |
+| 已记录跳过（`--init-skip`，`ai_context_doc: none`） | 静默（沿用上次决策） |
 | CONTEXT.md 已存在且扫描 ≤ 90 天 | 静默（零打扰） |
 | CONTEXT.md 已存在但扫描 > 90 天 | 提示"可重跑刷新"（不强制） |
 | 无 CONTEXT.md + 检测到既有 AI 文档（AGENTS.md / CLAUDE.md / .cursor / .windsurf / Copilot / Cline 等） | 提示（列出文档）→ 同意后：读取并整合既有文档（出处标注）+ 代码探测，生成 CONTEXT.md |

@@ -11,7 +11,7 @@ Complete the `execute` Node for `flow-comet`.
 
 Responsibility: 按 TASK.md 逐任务执行（**执行模式按 executionMode**：subagent 默认统一委托子代理、direct 逃生口主代理直写）。串行任务的 TDD + 6 维自查 + LESSONS 扫描 + diff 边界 verify 由执行者承担，无论哪种模式都必须加载 flow-comet-dev 协议。
 
-This node is a coordinator. It does not write implementation code directly. It delegates all pending tasks to fresh-context subagents via the Agent tool (worktree isolation), each subagent applies the full dev protocol (TDD RED/GREEN/REFACTOR, LESSONS scan, existing abstraction grep, self-review, diff boundary verification, atomic commits) and returns a Return Contract. The coordinator records handoff evidence, verifies each SUMMARY, and marks tasks done in TASK.md.
+In subagent mode (default) this node is a coordinator: it does not write implementation code directly — it delegates all pending tasks to fresh-context subagents via the Agent tool (worktree isolation), each subagent applies the full dev protocol (TDD RED/GREEN/REFACTOR, LESSONS scan, existing abstraction grep, self-review, diff boundary verification, atomic commits) and returns a Return Contract. The coordinator records handoff evidence, verifies each SUMMARY, and marks tasks done in TASK.md. In direct mode (escape hatch, user-confirmed) the main agent implements serial tasks directly — see 执行模型 below.
 
 ## Guidance
 
@@ -30,7 +30,7 @@ guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好�
   （TDD/6 维自查/越界检查/原子 commit），SUMMARY 必填段 + `## 自检方法` 强制（guard 校验兜底）
 - 无论哪种模式：`parallel="true"` 任务始终由 subagent-execute 并行委托，不在此节点执行。
 
-执行模式由 `node workflow-state.mjs status` 输出（`executionMode` / `directOverride`）决定，切换用 `node workflow-state.mjs execution-mode <subagent|direct>`。direct 是逃生口，必须用户显式调用才生效。
+执行模式由 `node .claude/skills/flow-comet/scripts/workflow-state.mjs status` 输出（`executionMode` / `directOverride`）决定，切换用 `node .claude/skills/flow-comet/scripts/workflow-state.mjs execution-mode <subagent|direct>`。direct 是逃生口，必须用户显式调用才生效。
 
 ### 任务范围
 
@@ -57,7 +57,7 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 
 对 TASK.md 每个 pending 串行任务，协调者执行：
 
-1. **读 task 块，构造 handoff request**：读 `<task>` XML 块（`action` / `read_files` / `write_files` / `verify` / `done`）。若内容有歧义，停下询问——不要猜。构造 handoff request 内容：task 全文 + DESIGN §0/§0.5 + AC + read/write_files 边界。运行 `workflow-handoff.mjs request <task-id>` 记录。
+1. **读 task 块，构造 handoff request**：读 `<task>` XML 块（`action` / `read_files` / `write_files` / `verify` / `done`）。若内容有歧义，停下询问——不要猜。构造 handoff request 内容：task 全文 + DESIGN §0/§0.5 + AC + read/write_files 边界。运行 `node .claude/skills/flow-comet/scripts/workflow-handoff.mjs request <task-id>` 记录。
 2. **委托子代理**：用 Agent 工具（`isolation: "worktree"`）委托 fresh-context 子代理。handoff prompt 强制协议：加载 flow-comet-dev、执行 TDD（RED/GREEN/REFACTOR）、LESSONS 扫描、既有抽象 grep、verify、6 维自查、越界检查、原子 commit（`<type>(<change-id>): <task-id> <subject>`），写 `.specs/<change-id>/<task-id>-SUMMARY.md`，回传 Return Contract（含 commitHash + greenEvidence + completedChecks + selfReview）。
 3. **记录 handoff result**：子代理回传后，运行 `workflow-handoff.mjs result <task-id> '<JSON>'` 记录（Return Contract 含 commitHash + greenEvidence + completedChecks + selfReview）。
 4. **验收 SUMMARY，TASK.md 标 done**：确认 SUMMARY 含 `## 自检方法` 段（声明 brooks-review 或 builtin-quickcheck）、verify 输出真实、6 维自查与越界检查有实质内容；通过后在 TASK.md 将任务标 `status="done"` 并加时间戳。
@@ -140,20 +140,15 @@ Evidence: `implementation-summary` (required)
 node .claude/skills/flow-comet/scripts/workflow-state.mjs record execute '{"summary":"All N tasks completed, each with SUMMARY.md and verify output"}'
 ```
 
-Generic template:
-```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs record execute '{"summary":"record the real Node result","completedChecks":[]}'
-```
-
 ## Guardrails
 
 | Guardrail ID | Label | Validation Type |
 |--------------|-------|-----------------|
 | `build-evidence` | At least one SUMMARY.md produced | artifact-exists |
-| `all-tasks-done` | All tasks in TASK.md have status="done" | content-check |
-| `verify-output-real` | Every SUMMARY.md has verify output (not fabricated) | content-check |
-| `no-design-changes` | REQUIREMENT.md and DESIGN.md not modified | file-unchanged |
-| `self-check-method` | Every SUMMARY.md declares `## 自检方法`（brooks-review / cache-brooks / builtin-quickcheck） | content-check |
+| `all-tasks-done` | All tasks in TASK.md have status="done"（pending 串行任务 → BLOCKED） | content-check |
+| `verify-output-real` | Every SUMMARY.md has verify output (not fabricated) | 执行纪律（review 把关），guard 不校验 |
+| `no-design-changes` | REQUIREMENT.md and DESIGN.md not modified | 执行纪律（review 把关），guard 不校验 |
+| `self-check-method` | Every SUMMARY.md declares `## 自检方法`（brooks-review / cache-brooks / builtin-quickcheck） | W1-B 段级校验 |
 
 ## Exit Check
 
@@ -173,5 +168,3 @@ If the script prints `SKILL: flow-comet-subagent-execute`, load that Skill next.
 4. Check for `<task-id>-PROGRESS.md` files — if found, read "excluded solutions" section to avoid repeating failures (R1.6).
 5. Resume from the first pending task. Do not repeat completed tasks.
 6. If a PROGRESS.md exists for the current task, delete it after completion and migrate useful info to SUMMARY.md.
-
-Generic fallback: read `.claude/skills/flow-comet/reference/workflow-protocol.json` and the configured workflow state; resume the first Node not listed in `completedNodes`.

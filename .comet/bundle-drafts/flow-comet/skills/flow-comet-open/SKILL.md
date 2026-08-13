@@ -136,8 +136,8 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record open '{"summary
 | Guardrail ID | Label | Validation Type |
 |--------------|-------|-----------------|
 | `intake-artifacts` | CHANGE.md + REQUIREMENT.md exist | artifact-exists |
-| `context-updated` | CONTEXT.md has new terms/decisions | artifact-exists |
-| `scope-exclusion` | At least 1 out-of-scope item in CHANGE.md | content-check |
+| `context-updated` | CONTEXT.md has new terms/decisions | 执行纪律（review 把关），guard 不校验 |
+| `scope-exclusion` | At least 1 out-of-scope item in CHANGE.md | 执行纪律（review 把关），guard 不校验 |
 
 ## Exit Check
 
@@ -154,56 +154,3 @@ If the script prints `SKILL: flow-comet-design`, load that Skill next.
 3. Read `.specs/<change-id>/REQUIREMENT.md` — if exists and confirmed, skip REQUIREMENT phase.
 4. Resume from the first incomplete artifact. Do not repeat confirmed phases.
 5. If CHANGE.md exists but REQUIREMENT.md does not, continue from REQUIREMENT phase only.
-
-
-## Entry Check
-
-```bash
-node flow-comet/scripts/workflow-guard.mjs entry open
-```
-
-## Skill Implementation
-
-Load `flow-comet-open` for this Node. Operation: `require`.
-
-## Required Skill Calls
-
-- Load `flow-comet-change` during this Node and record completed check `required-skill:open.flow-comet-change`. Reason: CHANGE 反问协议
-- Load `flow-comet-requirement` during this Node and record completed check `required-skill:open.flow-comet-requirement`. Reason: REQUIREMENT 需求分析
-
-**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
-
-```bash
-node flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-change --prompt flow-kit/prompts/0-change.md
-node flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-requirement --prompt flow-kit/prompts/1-requirement.md
-```
-
-## Augmentations
-
-- This Node has no declared augmentations.
-
-## Output Schemas
-
-- `flowkit.intake.v1`: CHANGE.md + REQUIREMENT.md Required evidence: `intake-summary`. Required artifacts: `change-doc` at `<change-id>/CHANGE.md`; `requirement-doc` at `<change-id>/REQUIREMENT.md`.
-
-## Evidence Record
-
-```bash
-node flow-comet/scripts/workflow-state.mjs record open '{"summary":"record the real Node result","completedChecks":[]}'
-```
-
-## Guardrails
-
-- `intake-artifacts`: CHANGE.md + REQUIREMENT.md exist (artifact-exists).
-
-## Exit Check
-
-```bash
-node flow-comet/scripts/workflow-guard.mjs exit open --apply
-```
-
-If the script prints `SKILL: flow-comet-design`, load that Skill next.
-
-## Recovery
-
-Read `reference/workflow-protocol.json` and the configured workflow state. Resume the first Node that is not listed in `completedNodes`.

@@ -13,7 +13,7 @@
 | Method | Description |
 |--------|-------------|
 | `--protocol <path>` (or `--protocol=<path>`) | CLI argument — attached automatically by Claude during the flow |
-| `FLOW_COMET_PROTOCOL` | Environment variable — persistent when set in project env (e.g. `.claude/settings.json` `env`) |
+| `FLOW_COMET_PROTOCOL` | Environment variable — persistent when set in project env (e.g. Claude Code `.claude/settings.json` `env`; Codex via shell env or `config.toml`) |
 
 Priority: `--protocol` CLI > `FLOW_COMET_PROTOCOL` env > built-in default (resolveProtocol). Without explicit specification, everything behaves exactly like the built-in protocol.
 

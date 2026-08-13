@@ -34,7 +34,7 @@ node scripts/prepare-env.mjs --target <absolute path to target project> --platfo
 1. **Generates/overwrites `rules/` and `skills/`** — all flow-comet* skills, from the authoritative source `.comet/bundle-drafts/flow-comet/`
 2. **Injects the hook into `settings.local.json`** — read-merge-write: preserves everything already in the target project (`permissions`, custom hooks, other matcher groups), only injects/updates the comet-hook-guard entry under `hooks.PreToolUse` (existing comet hooks are replaced, not duplicated — idempotent). First-time creation writes only the hook entry; existing files are merged.
 
-**Non-destructive by default**: nothing under the target project's `.claude/` is deleted (`commands/`, custom skills, custom config all preserved). Explicit `--purge --yes` deletes the entire `.claude/` and rebuilds (prints the deletion list + warning; `--yes` is a second confirmation).
+**Non-destructive by default**: nothing under the target project's install root (`.claude/` for Claude Code, `.agents/` for Codex) is deleted (`commands/`, custom skills, custom config all preserved). Explicit `--purge --yes` deletes the generated files and rebuilds — on Claude Code the entire `.claude/` is removed; on Codex only the flow-comet skills + managed hook entries + AGENTS.md managed block are removed (`.agents/` is shared with other tools; user entries are preserved). Prints the deletion list + warning; `--yes` is a second confirmation.
 
 ```bash
 # View the overwrite list, then confirm (non-destructive, safe)
@@ -87,11 +87,9 @@ Measured on Codex CLI 0.146.0 — the 8-node flow runs end-to-end.
 3. **Hook contract smoke** (run inside the target project): feed the guard an out-of-scope write target and expect a JSON block decision — `echo '{"tool_name":"Write","tool_input":{"file_path":"src/evil.py"}}' | node .agents/skills/flow-comet/scripts/comet-hook-guard.mjs before_tool --platform codex` → `{"decision":"block",...}`
 4. **Smoke test** (run inside the target project): `cd <target> && node .agents/skills/flow-comet/scripts/workflow-state.mjs status` → JSON state object
 
-> **Note**: Codex support targets full parity with Claude Code (measured on Codex CLI 0.146.0): skill auto-discovery, AGENTS.md loading, the workflow scripts, and the write-guard hook all work — the hook intercepts Bash write commands (PowerShell cmdlets, .NET File API, redirection) via PreToolUse `decision:"block"`. First use in a project requires trusting the hook (run `/hooks` in an interactive session, or pass `--dangerously-bypass-hook-trust` for scripted automation). Interception is command-level — alternate write spellings (other File APIs) can bypass it, a Codex platform limit; the mainstream patterns are covered.
-
 ## Option B · Manual copy (fallback)
 
-When prepare-env cannot be run:
+When prepare-env cannot be run (Claude Code target; Codex users should prefer Option A — manual copy does not run the platform path replacement):
 
 ```bash
 cd <flow-comet repo>

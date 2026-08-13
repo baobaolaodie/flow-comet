@@ -54,7 +54,7 @@ This node finalizes a completed change by extracting reusable lessons from the d
 7. **Update CHANGELOG.md**: 在 `.specs/CHANGELOG.md` 表格**顶部**按日期倒序插入一行（倒序约定：新条目永远在最新日期行之上；文件不存在则从模板创建）:
    - Format: `| YYYY-MM-DD | <change-id> | one-line summary | PR link | new L-NNN entries |`
 
-8. **Update STATE.md**: Clear the active change field in the repository root `STATE.md`; 决策日志新条目**顶部**插入（倒序约定，**禁止文件尾追加**）。
+8. **Update STATE.md（可选决策日志）**: 若项目维护 `STATE.md`，新决策日志条目**顶部**插入（倒序约定，**禁止文件尾追加**）。flow-comet 的活动 change 状态由 `.comet/flow-comet-state.json` 管理——STATE.md 无 active change 字段，不需要也不应手动清除。
 
 9. **Notify user of architecture sedimentation + leftover issues**: Check DESIGN.md section 9 for sedimentation suggestions. If N > 0 suggestions exist, tell user — and always explicitly enumerate the leftover issues from KNOWN-ISSUES.md in the archive notification (they must not silently disappear after archive):
    ```
@@ -64,11 +64,11 @@ This node finalizes a completed change by extracting reusable lessons from the d
    Recommended: run A-evolve workflow after >= 5 changes or 60 days to batch-review and patch CONTEXT.md.
    ```
 
-10. **Record evidence**: Run workflow-state.mjs to record archive completion.
+10. **Record evidence**: Run `node .claude/skills/flow-comet/scripts/workflow-state.mjs record archive '<evidence JSON>'` to record archive completion.
 
 11. **Exit check**: Run exit check.
 
-### 归档提交（R4.1 对齐 comet archive 交付闭环）
+### 归档提交（R4.1 交付闭环）
 
 1. 用显式路径 stage：只 stage 本 change 可归属路径（原活动路径、实际归档路径、改过的主 spec）
 2. `git diff --cached --stat` 检查后，单一 commit：`chore: archive <change-id>`
@@ -101,7 +101,7 @@ This node is truly done when:
 - `.specs/LESSONS.md` has been updated with any qualifying new lessons.
 - `.specs/archive/<YYYY-MM-DD>-<change-id>/KNOWN-ISSUES.md` exists (leftover issues compiled and archived; explicit "无遗留" when none).
 - The archive notification explicitly enumerated the leftover issues list.
-- STATE.md has been updated (active change cleared).
+- STATE.md decision log has been updated (if the project keeps one; active change state lives in the state machine).
 - User has confirmed the archive operation.
 - LESSONS.md has NOT been moved or archived (it remains project-level).
 
@@ -123,7 +123,7 @@ node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry archive
 
 Load `flow-comet-archive` for this Node. Operation: `require`.
 
-The archive node scans all SUMMARY.md files for lessons (applying > 30min debugging / cross-task applicability / 6-month retry criteria), adds qualifying lessons to `.specs/LESSONS.md`, moves the change directory to `.specs/archive/`, updates `.specs/CHANGELOG.md`, and clears STATE.md. It requires user confirmation before the irreversible file move.
+The archive node scans all SUMMARY.md files for lessons (applying > 30min debugging / cross-task applicability / 6-month retry criteria), adds qualifying lessons to `.specs/LESSONS.md`, moves the change directory to `.specs/archive/`, and updates `.specs/CHANGELOG.md`. It requires user confirmation before the irreversible file move.
 
 ## Required Skill Calls
 
@@ -151,7 +151,7 @@ Schema: `flowkit.archive.v1`
 |-----------|--------------|----------|------|
 | `archive-dir` | directory | yes | `.specs/archive/<YYYY-MM-DD>-<change-id>/` |
 | `known-issues` | file | optional | `.specs/archive/<YYYY-MM-DD>-<change-id>/KNOWN-ISSUES.md` (leftover issues list, archived with the change) |
-| `changelog-entry` | file | yes | `.specs/CHANGELOG.md` (appended) |
+| `changelog-entry` | file | yes | `.specs/CHANGELOG.md` (inserted at the top, reverse-chronological) |
 | `lessons-updated` | file | conditional | `.specs/LESSONS.md` (if new lessons nominated) |
 
 Evidence: `archive-summary` (required)
@@ -162,19 +162,14 @@ Evidence: `archive-summary` (required)
 node .claude/skills/flow-comet/scripts/workflow-state.mjs record archive '{"summary":"Change archived to .specs/archive/<date>-<id>/, N lessons added, CHANGELOG updated"}'
 ```
 
-Generic template:
-```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs record archive '{"summary":"record the real Node result","completedChecks":[]}'
-```
-
 ## Guardrails
 
 | Guardrail ID | Label | Validation Type |
 |--------------|-------|-----------------|
 | `archive-evidence` | Archive directory exists, source removed | state-transition |
-| `changelog-updated` | CHANGELOG.md has new entry | content-check |
-| `lessons-preserved` | LESSONS.md still in .specs/ (not archived) | file-exists |
-| `user-confirmed` | User confirmed archive before execution | process-check |
+| `changelog-updated` | CHANGELOG.md has new entry | 执行纪律（review 把关），guard 不校验（倒序位置有 WARN 渐进检查） |
+| `lessons-preserved` | LESSONS.md still in .specs/ (not archived) | 执行纪律（review 把关），guard 不校验 |
+| `user-confirmed` | User confirmed archive before execution | 执行纪律（review 把关），guard 不校验 |
 
 ## Exit Check
 
@@ -192,5 +187,3 @@ If the script prints `NEXT: done`, summarize the workflow evidence and stop. The
 4. If already archived but CHANGELOG not updated: update CHANGELOG.md manually.
 5. If already archived but LESSONS not updated: scan SUMMARY.md files in the archive directory and update LESSONS.md.
 6. If partially archived (source removed but destination incomplete): investigate and complete the move.
-
-Generic fallback: read `.claude/skills/flow-comet/reference/workflow-protocol.json` and the configured workflow state; resume the first Node not listed in `completedNodes`.

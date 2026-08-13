@@ -54,5 +54,7 @@ body:
         - 工作流脚本 / Workflow scripts
         - Skill 指令 / Skill instructions
         - 安装器 / Installer
+        - 回归场景 / Regression scenarios
         - 文档 / Docs
+        - 版本收尾 / Version wrap-up
         - 其他 / Other

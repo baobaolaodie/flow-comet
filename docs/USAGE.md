@@ -22,8 +22,8 @@ Routing is **derived from `.specs/` artifacts** (determineNode): missing files �
 |------|---------------|---------------|------------------------|
 | **open** | CHANGE clarification + requirements (AC derivation) | `CHANGE.md` / `REQUIREMENT.md` / CONTEXT terms | Required sections (template-derived): `## Why` / `## 用户故事` / acceptance; CONTEXT orphan-section detection |
 | **design** | Tech-stack selection + architecture alignment + decisions | `DESIGN.md` (§0 stack / §0.5 architecture / decision list / risks) | §0 sections + `## 决策清单` (template-derived, numbered) |
-| **plan** | Atomic task breakdown (XML) + wave planning | `TASK.md` (`<task>` blocks with 7 fields + parallel markers) | task blocks + verify field; TASK signature hash (recorded at enter) |
-| **execute** | Serial task execution (coordinator delegates subagents) | `<task-id>-SUMMARY.md` | SUMMARY six sections + 6-dimension self-check + mandatory `## 自检方法`; TASK signature compare; takeover detection |
+| **plan** | Atomic task breakdown (XML) + wave planning | `TASK.md` (`<task>` blocks with 7 fields + parallel markers) | task blocks + verify field |
+| **execute** | Serial task execution (coordinator delegates subagents) | `<task-id>-SUMMARY.md` | SUMMARY six sections + 6-dimension self-check + mandatory `## 自检方法`; TASK signature hash (recorded at enter, compared at exit); takeover detection |
 | **subagent-execute** | Parallel task delegation (waves) | same (one SUMMARY per task) | same + handoff evidence (Return Contract) |
 | **review** | 4-round review (spec compliance / code quality / UI visual / optional) | `REVIEW.md` (Critical/findings/conclusion) | ≥100B + required sections |
 | **verify** | Integration verification + UAT + failure diagnosis (≤3 rounds) | `TEST.md` / `UAT.md` / LESSONS nominations | verification commands actually executed; UAT sections; LESSONS numbering/placement |
@@ -71,7 +71,7 @@ All branch operations are **executed automatically by Claude under the skill pro
 
 ## User entry points
 
-In the target project, open Claude Code and enter:
+In the target project, open a Claude Code session and enter (Codex: invoke the skill via `/use flow-comet` or natural language — same entry semantics):
 
 | Entry | Purpose |
 |-------|---------|
@@ -96,7 +96,7 @@ flow-comet **pauses for your confirmation** at these points (everything else adv
 
 ## Script reference (executed automatically by Claude)
 
-These scripts are **run automatically by the flow-comet skill** — you normally never run them manually; use only for troubleshooting or advanced scenarios. Path: `<target project>/.claude/skills/flow-comet/scripts/`:
+These scripts are **run automatically by the flow-comet skill** — you normally never run them manually; use only for troubleshooting or advanced scenarios. Path: `<target project>/.claude/skills/flow-comet/scripts/` (Claude Code; Codex: `<target project>/.agents/skills/flow-comet/scripts/`):
 
 ```bash
 node workflow-state.mjs status             # current state + branch consistency

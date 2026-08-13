@@ -9,7 +9,7 @@ description: "Use only when explicitly invoked as /flow-comet-verify or routed b
 
 Complete the `verify` Node for `flow-comet`.
 
-Responsibility: 集成验证 + UAT + 失败诊断（自动重试 ≤ 3 次，第 4 次失败暂停）。生成 TEST.md + UAT.md。
+Responsibility: 集成验证 + UAT + 失败诊断（自动重试 ≤ 3 次，第 4 次失败暂停）。生成 UAT.md（TEST.md 前置已有）。
 
 This node performs the final integration verification: running all automated tests, type checks, and builds, then guiding the human through UAT scripts from TEST.md. It produces UAT.md with pass/fail results for each item. If failures occur, it diagnoses root causes, generates fix tasks, and auto-retries ≤ 3 times (machine-counted verifyFailures); on the 4th failure it must pause and ask the user「继续修 / 停止」. This node is the final quality gate before archiving.
 
@@ -129,19 +129,14 @@ Evidence: `verification-result` (required)
 node .claude/skills/flow-comet/scripts/workflow-state.mjs record verify '{"summary":"All automation passed, N UAT items verified (X pass, Y fail), Z lessons nominated"}'
 ```
 
-Generic template:
-```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs record verify '{"summary":"record the real Node result","completedChecks":[]}'
-```
-
 ## Guardrails
 
 | Guardrail ID | Label | Validation Type |
 |--------------|-------|-----------------|
-| `verify-evidence` | UAT.md exists with results | artifact-exists |
-| `automation-passed` | All automated checks pass (real output) | content-check |
-| `retry-limit` | No more than 3 auto-retries (4th failure pauses) | process-check |
-| `lessons-nominated` | LESSONS.md updated with new entries | artifact-exists |
+| `verify-evidence` | UAT.md exists | artifact-exists |
+| `automation-passed` | All automated checks pass (real output) | 执行纪律（review 把关），guard 不校验 |
+| `retry-limit` | No more than 3 auto-retries（机器计数 verifyFailures，第 4 次 BLOCKED） | process-check |
+| `lessons-nominated` | LESSONS.md updated with new entries | 执行纪律（review 把关），guard 不校验 |
 
 ## Exit Check
 
@@ -160,5 +155,3 @@ If the script prints `SKILL: flow-comet-archive`, load that Skill next.
 5. If fix tasks exist but not executed, return to execute node.
 6. Count previous auto-retries (from UAT.md / machine-counted verifyFailures) to enforce R2.6 limit.
 7. Resume from the first incomplete verification step.
-
-Generic fallback: read `.claude/skills/flow-comet/reference/workflow-protocol.json` and the configured workflow state; resume the first Node not listed in `completedNodes`.

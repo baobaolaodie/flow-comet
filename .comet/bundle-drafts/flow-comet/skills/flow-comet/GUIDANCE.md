@@ -5,7 +5,7 @@ description: "Use when the user wants the flow-comet managed workflow for flow-k
 
 # flow-comet
 
-> 手写区详细协议——主 SKILL.md 的展开版（可选阅读；主 SKILL.md 与本文冲突时以本文为准以外的部分以 SKILL.md 为准，协议定义以 `reference/workflow-protocol.json` 为准）。
+> 手写区详细协议——主 SKILL.md 的展开版（可选阅读；主 SKILL.md 与本文冲突时以本文为准，本文以外的部分以 SKILL.md 为准，协议定义以 `reference/workflow-protocol.json` 为准）。
 
 flow-kit 9 阶段工作流的 workflow-kernel 实现。保留 flow-kit 的全部产物模板、规则体系和 LESSONS 知识库，用脚本自动管理状态和阶段路由。
 
@@ -53,7 +53,7 @@ flow-kit 9 阶段工作流的 workflow-kernel 实现。保留 flow-kit 的全部
 
 | 分类 | 定义 | 处理 |
 |------|------|------|
-| 用户决策 | ≥2 个会改变范围/行为/风险/不可逆结果的合法选项 | 用 AskUserQuestion 问（优先）或文本回退；相邻选择合并为一个问题，不重问已持久化选择 |
+| 用户决策 | ≥2 个会改变范围/行为/风险/不可逆结果的合法选项 | 用交互确认问（Claude Code 用 AskUserQuestion 优先；Codex 用文本提问+内联确认）或文本回退；相邻选择合并为一个问题，不重问已持久化选择 |
 | 自动处理 | 唯一安全下一步 | 直接执行并汇报，不许制造确认 |
 | 停止条件 | guard 失败 / 缺依赖 / 状态损坏 | 报告阻塞与恢复条件，无合法动作时才升级为用户决策 |
 | 手动交接 | `NEXT: manual`（若有） | 不是用户决策，直接继续 |
@@ -129,7 +129,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <ski
 
 1. Run `node .claude/skills/flow-comet/scripts/workflow-state.mjs status` to detect active change and current node.
 2. If no active change and user wants to start new work: `node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-name>`. **init 自动检测项目上下文**：需要初始化时输出提示（同意重跑 `init <id> --init-context` 全量生成 CONTEXT.md / 拒绝 `--init-skip`）；CONTEXT.md 已存在且新鲜时完全静默——详见 `reference/init-detection.md`。
-3. **: `init` 输出即首次路由（NODE: 内置 open 或协议首节点）——直接加载该节点 Skill 并执行（产出工件）。`next` 在节点完成（`guard exit <node> --apply` 推进）后用于获取下一节点；init 后立即 `next` 会命中节点顺序门禁（open 未 exit → BLOCKED，符合节点顺序门禁语义）。
+3. **首次路由**: `init` 输出即首次路由（NODE: 内置 open 或协议首节点）——直接加载该节点 Skill 并执行（产出工件），一次只加载一个 Skill。`next` 在节点完成（`guard exit <node> --apply` 推进）后用于获取下一节点；init 后立即 `next` 会命中节点顺序门禁（open 未 exit → BLOCKED，符合节点顺序门禁语义）。
 
 ### Resume Rules (every context resume)
 
@@ -158,10 +158,10 @@ All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT
 
 | 脚本 | 用途 |
 |------|------|
-| `workflow-state.mjs` | 状态管理：init/status/next/select/record/advance/skill-load/execution-mode |
+| `workflow-state.mjs` | 状态管理：init/status/next/select/record/advance/skill-load/execution-mode/config/verify-fail |
 | `workflow-guard.mjs` | 节点门禁：entry/exit/verify 检查 |
 | `workflow-handoff.mjs` | 子代理交接：request/result/status |
-| `comet-plan.mjs` | plan 状态查询 |
+| `comet-plan.mjs` | 兼容别名入口（内容为 workflow-state 的别名壳） |
 | `comet-check.mjs` | workflow contract 检查 |
 | `comet-hook-guard.mjs` | 文件写入边界守卫（phase 白名单：subagent-execute 阶段只允许 .specs/） |
 

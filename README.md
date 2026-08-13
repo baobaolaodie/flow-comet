@@ -52,11 +52,13 @@ cd <flow-comet repo>
 node scripts/prepare-env.mjs --target <absolute path to your project>
 ```
 
-By default the installer targets Claude Code (unchanged behavior). For Codex: `node scripts/prepare-env.mjs --target <path> --platform codex` — skills install to `.agents/skills/` (auto-discovered), orchestration rules are injected into an `AGENTS.md` managed block, and the write-guard hook intercepts Bash write commands via Codex's PreToolUse (trust the hook on first use: `/hooks`). The platform can also be chosen interactively (TTY) or detected from an existing `.claude/` / `.codex/` in the target project.
+By default the installer targets Claude Code (unchanged behavior). For Codex: `node scripts/prepare-env.mjs --target <path> --platform codex` — skills install to `.agents/skills/` (auto-discovered), orchestration rules are injected into an `AGENTS.md` managed block, and the write-guard hook intercepts Bash write commands via Codex's PreToolUse (trust the hook on first use: `/hooks`). The platform can also be chosen interactively on a terminal (TTY); in non-interactive environments (CI/scripts) an existing `.claude/` / `.codex/` in the target project is detected, falling back to Claude Code.
 
 ```bash
 # 2. Open your project in a new Claude Code session and run:
 /flow-comet
+#    (Codex: invoke the skill in a Codex session — `/use flow-comet` or natural language;
+#     same workflow, see Installation → "Using flow-comet on Codex")
 ```
 
 The first call confirms scope, then automatically creates the `change/<id>` branch, initializes state, enters the open node, and produces `CHANGE.md` / `REQUIREMENT.md`. Every subsequent stage is routed automatically — you only answer decision points (scope, tech stack, destructive changes, review findings, archive confirmation).
@@ -70,7 +72,7 @@ On first use in a project, the workflow automatically detects whether a project 
 - **[Core mechanisms](docs/MECHANISM.md)** — state machine, three defense layers, guard validation, execution model
 - **[Troubleshooting](docs/TROUBLESHOOTING.md)** — BLOCKED/WARN messages and their fixes
 
-The entry point is the `/flow-comet` command; state is inspected and advanced from the command line:
+The entry point is the `/flow-comet` command; state is inspected and advanced from the command line (paths below assume the Claude Code install `.claude/skills/`; Codex installs to `.agents/skills/` — see [Installation](docs/INSTALLATION.md)):
 
 ```bash
 node .claude/skills/flow-comet/scripts/workflow-state.mjs status   # current change + node

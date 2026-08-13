@@ -9,6 +9,8 @@ description: "Use only when explicitly invoked as /flow-comet-evolve; scan archi
 
 用户说「同步架构 / 整理沉淀 / evolve / 同步 CONTEXT」；或 STATE.md last_evolve_at > 60 天。
 
+> **载体说明（沿用 flow-kit 约定）**：`STATE.md` 与 `last_evolve_at` 是 flow-kit 的约定（A-evolve.md 定义：GO.md 按 last_evolve_at 提示、evolve 读/写该字段）——项目需有按 flow-kit 维护的 STATE.md；flow-comet 引擎不自动创建/维护该字段，无 STATE.md 的项目触发本命令时按「无 last_evolve_at 基线」处理（扫描全部未沉淀的归档 change 并人工确认）。
+
 ## 流程
 
 1. 扫 `STATE.md` last_evolve_at 之后归档的 change

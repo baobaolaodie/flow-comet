@@ -49,7 +49,7 @@ description: "Use when the user wants the flow-comet managed workflow for flow-k
 
 | 分类 | 定义 | 处理 |
 |------|------|------|
-| 用户决策 | ≥2 个会改变范围/行为/风险/不可逆结果的合法选项 | 用 AskUserQuestion 问（优先）或文本回退；相邻选择合并为一个问题，不重问已持久化选择 |
+| 用户决策 | ≥2 个会改变范围/行为/风险/不可逆结果的合法选项 | 用交互确认问（Claude Code 用 AskUserQuestion 优先；Codex 用文本提问+内联确认）或文本回退；相邻选择合并为一个问题，不重问已持久化选择 |
 | 自动处理 | 唯一安全下一步 | 直接执行并汇报，不许制造确认 |
 | 停止条件 | guard 失败 / 缺依赖 / 状态损坏 | 报告阻塞与恢复条件，无合法动作时才升级为用户决策 |
 | 手动交接 | `NEXT: manual`（若有） | 不是用户决策，直接继续 |
@@ -116,7 +116,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <ski
 | execute | build-evidence | artifact-exists | At least one SUMMARY.md |
 | subagent-execute | handoff-evidence | evidence-only | Handoff evidence recorded |
 | review | review-evidence | artifact-exists | REVIEW.md exists |
-| verify | verify-evidence | artifact-exists | TEST.md or UAT.md exists |
+| verify | verify-evidence | artifact-exists | UAT.md exists |
 | archive | archive-evidence | state-transition | Archive completed |
 
 ## Runtime And Recovery
@@ -125,7 +125,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <ski
 
 1. Run `node .claude/skills/flow-comet/scripts/workflow-state.mjs status` to detect active change and current node.
 2. If no active change and user wants to start new work: `node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-name>`. **init 自动检测项目上下文**：需要初始化时输出提示（同意重跑 `init <id> --init-context` 全量生成 CONTEXT.md / 拒绝 `--init-skip`）；CONTEXT.md 已存在且新鲜时完全静默——详见 `reference/init-detection.md`。
-3. **: `init` 输出即首次路由（NODE: 内置 open 或协议首节点）——直接加载该节点 Skill 并执行（产出工件）。`next` 在节点完成（`guard exit <node> --apply` 推进）后用于获取下一节点；init 后立即 `next` 会命中节点顺序门禁（open 未 exit → BLOCKED，符合节点顺序门禁语义）。
+3. **首次路由**: `init` 输出即首次路由（NODE: 内置 open 或协议首节点）——直接加载该节点 Skill 并执行（产出工件），一次只加载一个 Skill。`next` 在节点完成（`guard exit <node> --apply` 推进）后用于获取下一节点；init 后立即 `next` 会命中节点顺序门禁（open 未 exit → BLOCKED，符合节点顺序门禁语义）。
 
 ### Resume Rules (every context resume)
 
@@ -154,7 +154,7 @@ All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT
 
 | 脚本 | 用途 |
 |------|------|
-| `workflow-state.mjs` | 状态管理：init/status/next/select/record/advance |
+| `workflow-state.mjs` | 状态管理：init/status/next/select/record/advance/skill-load/execution-mode/verify-fail（verify 失败计数，第 4 次 BLOCKED） |
 | `workflow-guard.mjs` | 节点门禁：entry/exit/verify 检查 |
 | `workflow-handoff.mjs` | 子代理交接：request/result/status |
 | `comet-plan.mjs` | plan 状态查询 |
@@ -178,66 +178,4 @@ All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT
 手动修改这些字段可能导致 guard 校验不一致。若需修正状态，使用 `workflow-state.mjs advance` 或 `workflow-state.mjs select`。
 
 The route, Output Schemas, required Skill calls, and recovery state are defined by `reference/workflow-protocol.json`.
-
-
-## Workflow Nodes
-
-1. `flow-comet-open` - Open (control). Responsibility: CHANGE 反问 + REQUIREMENT 需求分析。生成 CHANGE.md 和 REQUIREMENT.md。 Required Skills: `flow-comet-change`, `flow-comet-requirement`. Output Schemas: `flowkit.intake.v1`.
-2. `flow-comet-design` - Design (control). Responsibility: 技术栈选型 + ADR + 数据流。生成 DESIGN.md。 Required Skills: `flow-comet-design`, `flow-comet-ui-design`. Output Schemas: `flowkit.design.v1`.
-3. `flow-comet-plan` - Plan (control). Responsibility: 拆原子任务（XML 格式）+ 波次划分。生成 TASK.md。 Required Skills: `flow-comet-task`. Output Schemas: `flowkit.plan.v1`.
-4. `flow-comet-execute` - Execute (control). Responsibility: 按 TASK.md 逐任务执行：TDD + 6 维自查 + LESSONS 扫描 + diff 边界 verify。 Required Skills: `flow-comet-dev`. Output Schemas: `flowkit.execution.v1`. 进入前读 `reference/dirty-worktree.md` 做 dirty-worktree 归属检查。
-5. `flow-comet-subagent-execute` - Subagent Execute (handoff). Responsibility: 委托 [P] 并行任务给子代理，要求加载 flow-comet-dev 并回传 evidence。 Required Skills: `flow-comet-dev`. Output Schemas: `flowkit.handoff.v1`.
-6. `flow-comet-review` - Review (control). Responsibility: 4 轮审查（spec 合规 + 代码质量 + UI 视觉 + 可选）。生成 REVIEW.md。 Required Skills: `flow-comet-review`, `flow-comet-test`. Output Schemas: `flowkit.review.v1`.
-7. `flow-comet-verify` - Verify (control). Responsibility: 集成验证 + UAT + 失败诊断。生成 TEST.md + UAT.md。 Required Skills: `flow-comet-integration`. Output Schemas: `flowkit.verify.v1`. 进入前读 `reference/dirty-worktree.md` 做 dirty-worktree 归属检查。verify 失败自动重试 ≤ 3 次（机器计数 verifyFailures，`node workflow-state.mjs verify-fail`）；第 4 次失败必须暂停问用户「继续修 / 停止」。exit verify 会真实执行 TEST.md `## 验证命令` 段声明的命令（严格版）。
-8. `flow-comet-archive` - Archive (control). Responsibility: LESSONS 提名 + 归档到 .specs/archive/ + CHANGELOG 更新。 Required Skills: `flow-comet-integration`. Output Schemas: `flowkit.archive.v1`.
-
-## Skill Bindings
-
-- `open`: implementation `flow-comet-open` (require); required calls `flow-comet-change`, `flow-comet-requirement`; augmentations none.
-- `design`: implementation `flow-comet-design` (require); required calls `flow-comet-design`, `flow-comet-ui-design` (advisory——仅前端项目触发，不要求 skill-load 声明；record D3 只校验执行者实际声明的条目); augmentations none.
-- `plan`: implementation `flow-comet-plan` (require); required calls `flow-comet-task`; augmentations none.
-- `execute`: implementation `flow-comet-execute` (require); required calls `flow-comet-dev`; augmentations none.
-- `subagent-execute`: implementation `flow-comet-subagent-execute` (require); required calls `flow-comet-dev`; augmentations none.
-- `review`: implementation `flow-comet-review` (require); required calls `flow-comet-review`, `flow-comet-test`; augmentations none.
-- `verify`: implementation `flow-comet-verify` (require); required calls `flow-comet-integration`; augmentations none.
-- `archive`: implementation `flow-comet-archive` (require); required calls `flow-comet-integration`; augmentations none.
-
-**节点 skill 加载声明**：加载节点 skill 后立即运行 `node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <skill> --prompt flow-kit/prompts/<阶段>.md` 记录本次加载（多协议节点每个协议文件一条命令）；exit/record 会核对声明标记。声明如实记录加载动作，不等于产出证明——正确性由产物门禁校验把关。
-
-## Guardrails And Evidence
-
-- `open.intake-artifacts`: CHANGE.md + REQUIREMENT.md exist (artifact-exists).
-- `design.design-artifacts`: DESIGN.md exists (artifact-exists).
-- `plan.plan-artifacts`: TASK.md exists (artifact-exists).
-- `execute.build-evidence`: SUMMARY.md produced (artifact-exists).
-- `subagent-execute.handoff-evidence`: Handoff evidence recorded (evidence-only).
-- `review.review-evidence`: REVIEW.md exists (artifact-exists).
-- `verify.verify-evidence`: TEST.md or UAT.md exists (artifact-exists).
-- `archive.archive-evidence`: Archive completed (state-transition).
-
-## Workflow References
-
-- Route, Output Schemas, required Skill calls, and recovery state: `reference/workflow-protocol.json`.
 - Resolved source Skill evidence and composition provenance: `reference/resolved-skills.json`.
-
-## Runtime And Recovery
-
-### Startup Protocol
-
-1. Run `node .claude/skills/flow-comet/scripts/workflow-state.mjs status` to read current state.
-2. If the workflow is not started, confirm scope with the user, then run `node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-name>`.
-3. `init` 输出即首次路由（NODE: 内置 open 或协议首节点）——直接加载该节点 Skill 执行；`next` 在节点 exit 后用于推进（init 后立即 next 命中节点顺序门禁属预期）。Do not load multiple Skills at once.
-
-### Resume Rules (every context resume)
-
-- **Re-detect from scratch**: on every context resume, re-run the Startup Protocol. Do not trust conversation history for current-Node detection — context compaction may have discarded critical state.
-- **Trust files over state**: if the script says a Node is DONE but its expected artifacts or evidence are missing, treat the Node as incomplete and re-enter it. File evidence is the source of truth.
-- **Drift handling**: if the user's request belongs to a different Node than the one returned by `next`, pause and confirm which Node to enter. Do not silently follow the script if the user's intent conflicts.
-
-### Node Boundary Rules
-
-- Before leaving a Node, run `node .claude/skills/flow-comet/scripts/workflow-guard.mjs exit <node> --apply` to advance state and record evidence.
-- If the guard fails, do not proceed — present the guard output and ask the user how to fix it.
-- If the user wants to redo a completed Node, reset its completion state and re-enter rather than creating a parallel path.
-
-The route, Output Schemas, required Skill calls, and recovery state are defined by `reference/workflow-protocol.json`.

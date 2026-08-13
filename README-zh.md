@@ -52,11 +52,13 @@ cd <flow-comet 仓库>
 node scripts/prepare-env.mjs --target <目标项目绝对路径>
 ```
 
-安装器默认面向 Claude Code（行为不变）。面向 Codex：`node scripts/prepare-env.mjs --target <路径> --platform codex`——技能安装到自动发现的 `.agents/skills/`，编排规则注入 `AGENTS.md` 托管区，写入守卫 hook 经 Codex PreToolUse 拦截 Bash 写命令（首次使用需信任 hook：`/hooks`）。平台也可在终端交互选择（TTY），或按目标项目既有 `.claude/` / `.codex/` 自动探测。
+安装器默认面向 Claude Code（行为不变）。面向 Codex：`node scripts/prepare-env.mjs --target <路径> --platform codex`——技能安装到自动发现的 `.agents/skills/`，编排规则注入 `AGENTS.md` 托管区，写入守卫 hook 经 Codex PreToolUse 拦截 Bash 写命令（首次使用需信任 hook：`/hooks`）。平台也可在终端交互选择（TTY）；非交互环境（CI/脚本）按目标项目既有 `.claude/` / `.codex/` 自动探测，均无则默认 Claude Code。
 
 ```bash
-# 2. 在目标项目新开会话，输入：
+# 2. 在目标项目新开 Claude Code 会话，输入：
 /flow-comet
+#    （Codex：在 Codex 会话中调用技能——`/use flow-comet` 或自然语言；
+#     同一工作流，见安装指南「在 Codex 上使用 flow-comet」）
 ```
 
 首次调用先确认范围，然后自动完成：创建 `change/<id>` 分支 → 初始化状态 → 进入 open 节点 → 产出 `CHANGE.md` / `REQUIREMENT.md`。之后每个阶段自动路由——你只需要回答决策点（范围确认、技术栈选型、破坏性变更、REVIEW 结论、归档确认）。
@@ -70,7 +72,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径>
 - **[核心机制](docs/MECHANISM-zh.md)**——状态机、三层防线、guard 校验、执行模型
 - **[故障排查](docs/TROUBLESHOOTING-zh.md)**——BLOCKED/WARN 信息与处理
 
-入口是 `/flow-comet` 命令；状态查看与推进可从命令行完成：
+入口是 `/flow-comet` 命令；状态查看与推进可从命令行完成（下方路径为 Claude Code 安装形态 `.claude/skills/`；Codex 安装于 `.agents/skills/`——见[安装](docs/INSTALLATION-zh.md)）：
 
 ```bash
 node .claude/skills/flow-comet/scripts/workflow-state.mjs status   # 当前 change + 节点

@@ -34,7 +34,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --platform code
 1. **生成/覆盖 `rules/` 与 `skills/`**——全部 flow-comet* skill，来源为权威源 `.comet/bundle-drafts/flow-comet/`
 2. **注入 hook 到 `settings.local.json`**——读-合并-写：保留目标项目既有的一切（`permissions`、自定义 hook、其他 matcher 组），仅在 `hooks.PreToolUse` 中注入/更新 comet-hook-guard 条目（已存在的 comet hook 被替换而非重复追加——幂等）。**首次创建**（项目原本无此文件）只写入 hook 条目；**已有文件**按合并保留既有字段
 
-**非破坏设计**：默认不删除目标项目 `.claude/` 下任何内容（`commands/`、自定义 skill、自定义配置全部保留）。显式 `--purge --yes` 才会删除整个 `.claude/` 后重建（打印删除清单 + 警告；`--yes` 为二次确认）。
+**非破坏设计**：默认不删除目标项目安装根（Claude Code 为 `.claude/`，Codex 为 `.agents/`）下任何内容（`commands/`、自定义 skill、自定义配置全部保留）。显式 `--purge --yes` 才删除生成物后重建——Claude Code 上整删 `.claude/`；Codex 上只清 flow-comet 技能 + 托管 hook 条目 + AGENTS.md 托管区（`.agents/` 为多工具共享位置，用户条目保留）。打印删除清单 + 警告；`--yes` 为二次确认。
 
 ```bash
 # 查看将覆盖的清单后确认（默认非破坏，安全）
@@ -86,11 +86,9 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 3. **hook 契约冒烟**（在目标项目内执行）：向守卫喂越权写入目标，期望 JSON block 决策——`echo '{"tool_name":"Write","tool_input":{"file_path":"src/evil.py"}}' | node .agents/skills/flow-comet/scripts/comet-hook-guard.mjs before_tool --platform codex` → `{"decision":"block",...}`
 4. **冒烟测试**（在目标项目内执行）：`cd <目标项目> && node .agents/skills/flow-comet/scripts/workflow-state.mjs status` → JSON 状态对象
 
-> **注意**：Codex 支持以与 Claude Code 完全对齐为目标（实测 Codex CLI 0.146.0）：技能自动发现、AGENTS.md 加载、工作流脚本与写入守卫 hook 全部可用——hook 经 PreToolUse `decision:"block"` 拦截 Bash 写命令（PowerShell cmdlet、.NET File API、重定向）。项目首次使用需信任 hook（交互会话运行 `/hooks`；脚本化自动化传 `--dangerously-bypass-hook-trust`）。拦截为命令级——换写法（其他 File API）可绕过，属 Codex 平台限制；主流写入模式已覆盖。
-
 ## 方案 B · 手动复制（兜底）
 
-无法运行 prepare-env 时：
+无法运行 prepare-env 时（面向 Claude Code；Codex 用户请优先方案 A——手动复制不执行平台路径替换）：
 
 ```bash
 cd <flow-comet 仓库>

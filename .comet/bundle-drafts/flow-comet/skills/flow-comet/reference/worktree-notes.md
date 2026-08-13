@@ -32,7 +32,7 @@ git worktree list                # 确认 worktree 挂在哪个仓库/分支（�
 git ls-tree <branch> <path>      # 确认产物在目标仓库哪个分支、路径是否存在
 ```
 
-## 5. change 分支 + worktree 组合（）
+## 5. change 分支 + worktree 组合
 
 分支模式（`branchMode=true`，git 仓库 + init 自动创建 `change/<id>` 分支）下：
 
