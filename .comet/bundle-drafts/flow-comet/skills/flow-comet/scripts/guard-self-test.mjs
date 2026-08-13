@@ -501,9 +501,9 @@ const SCENARIOS = [
       assertExit(resVariant, 0);
       assertOut(resVariant, 'ALL CHECKS PASSED');
       assertNotOut(resVariant, 'BROOKS-LINT WARN');
-      // 变体负例:段名匹配(含括号后缀)但段内无自检方法声明 → 缺自检方法 BLOCKED
+      // 变体负例:段名匹配(含括号后缀,但括号说明不含方法词)且段内无自检方法声明 → 缺自检方法 BLOCKED
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent({
-        method: '## 自检方法（声明 brooks-review 或 builtin-quickcheck）\n\n（未声明任何方法）',
+        method: '## 自检方法（声明自检方法）\n\n（未声明任何方法）',
       }));
       const resVariantNeg = runGuard(['exit', 'execute'], dir);
       assertExit(resVariantNeg, 1);
