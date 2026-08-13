@@ -75,7 +75,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 3. **hook 契约冒烟**（在目标项目内执行）：向守卫喂越权写入目标，期望 JSON block 决策——`echo '{"tool_name":"Write","tool_input":{"file_path":"src/evil.py"}}' | node .agents/skills/flow-comet/scripts/comet-hook-guard.mjs before_tool --platform codex` → `{"decision":"block",...}`
 4. **冒烟测试**（在目标项目内执行）：`cd <目标项目> && node .agents/skills/flow-comet/scripts/workflow-state.mjs status` → JSON 状态对象
 
-> **注意**：Codex 支持为实验性——实测（Codex CLI 0.146.0）：技能自动发现、AGENTS.md 加载、工作流脚本可用；写入守卫 hook **不拦截** Codex 写入（Codex 写路径——PowerShell/exec 或 apply_patch——不向 PreToolUse 暴露 `file_path`），物理防线在 Codex 下缺失，纪律依赖协调者禁令与退出检测。hook 条目仍注入（未来版本兼容）。
+> **注意**：Codex 支持以与 Claude Code 完全对齐为目标（实测 Codex CLI 0.146.0）：技能自动发现、AGENTS.md 加载、工作流脚本与写入守卫 hook 全部可用——hook 经 PreToolUse `decision:"block"` 拦截 Bash 写命令（PowerShell cmdlet、.NET File API、重定向）。项目首次使用需信任 hook（交互会话运行 `/hooks`；脚本化自动化传 `--dangerously-bypass-hook-trust`）。拦截为命令级——换写法（其他 File API）可绕过，属 Codex 平台限制；主流写入模式已覆盖。
 
 ## 方案 B · 手动复制（兜底）
 

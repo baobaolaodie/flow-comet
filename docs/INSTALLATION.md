@@ -76,7 +76,7 @@ On non-default platforms, command paths inside SKILL/GUIDANCE files are rewritte
 3. **Hook contract smoke** (run inside the target project): feed the guard an out-of-scope write target and expect a JSON block decision — `echo '{"tool_name":"Write","tool_input":{"file_path":"src/evil.py"}}' | node .agents/skills/flow-comet/scripts/comet-hook-guard.mjs before_tool --platform codex` → `{"decision":"block",...}`
 4. **Smoke test** (run inside the target project): `cd <target> && node .agents/skills/flow-comet/scripts/workflow-state.mjs status` → JSON state object
 
-> **Note**: Codex support is experimental — measured on Codex CLI 0.146.0: skill auto-discovery, AGENTS.md loading, and the workflow scripts work; the write-guard hook does **not** intercept writes (Codex's write path — PowerShell/exec or `apply_patch` — does not expose a `file_path` to PreToolUse), so the physical defense layer is absent on Codex and discipline relies on the coordinator prohibition and exit detection. The hook entry is still injected for future compatibility.
+> **Note**: Codex support targets full parity with Claude Code (measured on Codex CLI 0.146.0): skill auto-discovery, AGENTS.md loading, the workflow scripts, and the write-guard hook all work — the hook intercepts Bash write commands (PowerShell cmdlets, .NET File API, redirection) via PreToolUse `decision:"block"`. First use in a project requires trusting the hook (run `/hooks` in an interactive session, or pass `--dangerously-bypass-hook-trust` for scripted automation). Interception is command-level — alternate write spellings (other File APIs) can bypass it, a Codex platform limit; the mainstream patterns are covered.
 
 ## Option B · Manual copy (fallback)
 

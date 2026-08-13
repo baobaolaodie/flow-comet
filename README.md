@@ -51,7 +51,7 @@ cd <flow-comet repo>
 node scripts/prepare-env.mjs --target <absolute path to your project>
 ```
 
-By default the installer targets Claude Code (unchanged behavior). For Codex (experimental): `node scripts/prepare-env.mjs --target <path> --platform codex` — skills install to `.agents/skills/` (auto-discovered), orchestration rules are injected into an `AGENTS.md` managed block, and the write-guard hook speaks Codex's JSON contract. The platform can also be chosen interactively (TTY) or detected from an existing `.claude/` / `.codex/` in the target project.
+By default the installer targets Claude Code (unchanged behavior). For Codex: `node scripts/prepare-env.mjs --target <path> --platform codex` — skills install to `.agents/skills/` (auto-discovered), orchestration rules are injected into an `AGENTS.md` managed block, and the write-guard hook intercepts Bash write commands via Codex's PreToolUse (trust the hook on first use: `/hooks`). The platform can also be chosen interactively (TTY) or detected from an existing `.claude/` / `.codex/` in the target project.
 
 ```bash
 # 2. Open your project in a new Claude Code session and run:
@@ -132,7 +132,7 @@ The engine routes between nodes by deriving state from `.specs/` artifacts (dete
 4. **The native automation layer for flow-kit** — not a re-invention: artifact formats, rules, and stages are identical to flow-kit; a flow-kit project upgrades to a machine-driven flow by installing flow-comet, no migration needed.
 5. **Protocol-driven, zero dependencies, copy-and-run** — the built-in 8-node flow works out of the box; any installed skill can be composed into a custom protocol on the same engine; Node.js 18+, no third-party dependencies, one command installs it.
 
-**Fit**: flow-comet is built for long-running, multi-session development changes on Claude Code — the discipline it automates pays off when a change spans hours and multiple sessions. It is not a general CI/CD or project-management tool; Codex is supported experimentally (see [Installation](docs/INSTALLATION.md#platforms)), other platforms (Gemini / Cursor) are not guaranteed.
+**Fit**: flow-comet is built for long-running, multi-session development changes on Claude Code — the discipline it automates pays off when a change spans hours and multiple sessions. It is not a general CI/CD or project-management tool; Codex is supported (see [Installation](docs/INSTALLATION.md#platforms)), other platforms (Gemini / Cursor) are not guaranteed.
 
 ## Screenshots
 
@@ -181,7 +181,7 @@ flow-comet/
 | Layer | Technology |
 |-------|------------|
 | Runtime | Node.js ≥ 18 (ESM, zero third-party dependencies) |
-| Platform | Claude Code (default — skills, `.claude/` installation, hooks); Codex (experimental — `.agents/skills/`, AGENTS.md managed rules, JSON hook contract) |
+| Platform | Claude Code (default — skills, `.claude/` installation, hooks); Codex (`.agents/skills/`, AGENTS.md managed rules, PreToolUse write interception) |
 | Methodology | [flow-kit](https://github.com/rihebty/flow-kit) (artifacts, rules, templates) |
 
 ## Documentation

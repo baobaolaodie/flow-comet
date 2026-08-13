@@ -19,7 +19,7 @@
 | 类型 | 项 |
 |------|-----|
 | **必需** | [flow-kit](https://github.com/rihebty/flow-kit)（方法论与工件模板）；Claude Code |
-| **平台** | Claude Code（skill 体系，默认）；Codex（实验性——技能/规则/hook 经 `prepare-env --platform codex`，见[安装](INSTALLATION-zh.md#平台)）；不保证 Gemini/Cursor |
+| **平台** | Claude Code（skill 体系，默认）；Codex（技能/规则/hook 经 `prepare-env --platform codex`，见[安装](INSTALLATION-zh.md#平台)）；不保证 Gemini/Cursor |
 | **运行时** | Node.js ESM（Node ≥ 18）；工件语言与项目主语言一致 |
 
 ## 兼容策略
