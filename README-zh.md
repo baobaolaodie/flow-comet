@@ -138,7 +138,7 @@ graph LR
 
 来自真实生产级会话的运行截图。这些数小时运行中，**唯一的人工交互是工作流规定的决策点**（范围确认、技术栈选型、评审结论、归档确认）——除此之外没有任何其他人工干扰或临时决策，全程严格执行规范。
 
-**完整产物体系**——一次真实运行的全部流程工件（CHANGE / DESIGN / REQUIREMENT / REVIEW / TASK / TEST / UAT + 21 份任务摘要）：
+**完整产物体系**——一次真实运行的全部流程工件（CHANGE / DESIGN / REQUIREMENT / REVIEW / TASK / TEST / UAT + 每任务一份摘要）：
 
 ![产物体系](images/long-run-output.png)
 

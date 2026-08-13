@@ -10,7 +10,7 @@ flow-comet stands on two upstream projects: **flow-kit** provides the methodolog
 
 ## 1. flow-kit — the methodology layer (dependency)
 
-flow-kit is a **pure-markdown methodology package** (not a tool — "clone it into the project root and it works, no runtime"). It defines the 9-stage flow, the R1-R8 behavior rules, and 14 artifact templates.
+flow-kit is a **pure-markdown methodology package** (not a tool — "clone it into the project root and it works, no runtime"). It defines the 9-stage flow, the R1-R8 behavior rules, and 13 artifact templates.
 
 ### What flow-comet depends on
 

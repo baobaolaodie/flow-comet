@@ -69,6 +69,17 @@ On non-default platforms, command paths inside SKILL/GUIDANCE files are rewritte
 > Commands are POSIX-style (Git Bash / WSL / macOS terminal); Windows users should run them in Git Bash.
 > **Note**: `guard-self-test.mjs` (114 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
 
+### Using flow-comet on Codex
+
+Measured on Codex CLI 0.146.0 — the 8-node flow runs end-to-end.
+
+- **First use**: trust the write-guard hook — run `/hooks` in an interactive session and trust the flow-comet hook entry; for scripted automation pass `--dangerously-bypass-hook-trust` to `codex exec`.
+- **Scripted automation**: `codex exec … </dev/null` — when stdin is piped, Codex waits for stdin to close before starting (add the redirect when driving it from scripts/CI).
+- **Execution mode**: Codex has no worktree isolation, so the execute node runs in **direct** mode (the main agent implements; switch with `execution-mode direct`). The `subagent-execute` node delegates `parallel="true"` tasks to fresh `codex exec` subprocesses (one per task, each loading `flow-comet-dev` and returning a Return Contract) — isolation is task-level write_files discipline rather than worktrees.
+- **Windows PowerShell argument quoting**: `node … '{"summary":"…"}'` loses embedded double quotes through PowerShell 5.1 — run such commands via .NET `ProcessStartInfo`/`ArgumentList`, or from Git Bash.
+- **Commit discipline**: the workflow scripts validate artifacts, not git commits — mark tasks `status="done"` in TASK.md and commit as part of the execute node protocol.
+- **Archive order**: run `skill-load archive flow-comet-integration --prompt flow-kit/prompts/7-integration.md` **before** copying the archive directory (declaration markers travel with the directory copy).
+
 ### Verifying a Codex installation
 
 1. **Structure**: `flow-comet*` skill directories under `<target>/.agents/skills/` (19) + `AGENTS.md` managed block (`grep "Managed by flow-comet" <target>/AGENTS.md`) + `.codex/hooks.json` managed hook entry + `<target>/.agents/skills/flow-comet/INSTALLED_VERSION`

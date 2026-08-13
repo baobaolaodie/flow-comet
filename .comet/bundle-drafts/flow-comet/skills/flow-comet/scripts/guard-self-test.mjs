@@ -492,6 +492,15 @@ const SCENARIOS = [
       const res = runGuard(['exit', 'execute'], dir);
       assertExit(res, 0);
       assertOut(res, 'ALL CHECKS PASSED');
+      // 变体:自检方法段名带括号后缀(执行者按模板标题原样书写,如 "## 自检方法（声明 brooks-review 或 builtin-quickcheck）")
+      // → 段名识别放宽后通过,无"旧格式"兼容 WARN
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent({
+        method: '## 自检方法（声明 brooks-review 或 builtin-quickcheck）\n\nbrooks-review',
+      }));
+      const resVariant = runGuard(['exit', 'execute'], dir);
+      assertExit(resVariant, 0);
+      assertOut(resVariant, 'ALL CHECKS PASSED');
+      assertNotOut(resVariant, 'BROOKS-LINT WARN');
     },
   },
 

@@ -138,7 +138,7 @@ The engine routes between nodes by deriving state from `.specs/` artifacts (dete
 
 Real-run captures from production-length sessions. During these multi-hour runs, the **only human interaction was the workflow-defined decision points** (scope confirmation, tech-stack selection, review findings, archive confirmation) — no other manual interference or ad-hoc decisions; the specification was strictly enforced from start to finish.
 
-**Complete artifact trail** — every workflow artifact from a real run (CHANGE / DESIGN / REQUIREMENT / REVIEW / TASK / TEST / UAT + 21 task summaries):
+**Complete artifact trail** — every workflow artifact from a real run (CHANGE / DESIGN / REQUIREMENT / REVIEW / TASK / TEST / UAT + one summary per task):
 
 ![Artifact trail](images/long-run-output.png)
 
