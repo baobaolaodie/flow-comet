@@ -1373,13 +1373,21 @@ const TEST_ITEMS = [
       const text = fs.readFileSync(skillMd, 'utf8');
       if (!text.includes('.agents/skills/flow-comet/scripts/')) throw new Error('SKILL 命令路径未替换为 .agents/skills/');
       if (text.includes('.claude/skills/flow-comet/scripts/')) throw new Error('SKILL 仍含 .claude/skills/flow-comet/scripts/ 命令路径');
-      // ③ .codex/hooks.json 注入托管 hook(含平台标记)
+      // ③ .codex/hooks.json 注入托管 hook(顶层 hooks 包裹层 + matcher * + 平台标记)
       const hooksFile = path.join(target, '.codex', 'hooks.json');
       if (!fs.existsSync(hooksFile)) throw new Error('缺少 .codex/hooks.json');
-      const hooksText = fs.readFileSync(hooksFile, 'utf8');
-      JSON.parse(hooksText); // 非法 JSON → throw(RED)
+      const hooksParsed = JSON.parse(fs.readFileSync(hooksFile, 'utf8'));
+      const preToolUse = hooksParsed.hooks && hooksParsed.hooks.PreToolUse;
+      if (!Array.isArray(preToolUse) || preToolUse.length === 0) throw new Error('hooks.json 缺 hooks.PreToolUse 包裹层');
+      const hooksText = JSON.stringify(hooksParsed);
       if (!hooksText.includes('comet-hook-guard.mjs')) throw new Error('hooks.json 未注入托管 hook 命令');
       if (!hooksText.includes('--platform codex')) throw new Error('hooks.json hook 命令缺平台标记');
+      if (preToolUse[0].matcher !== '*') throw new Error('hooks.json matcher 应为 * (Codex PreToolUse 只拦截 Bash 工具): ' + JSON.stringify(preToolUse[0]));
+      // ③b .codex/config.toml hooks 启用(features——Codex hooks 默认关闭)
+      const configFile = path.join(target, '.codex', 'config.toml');
+      if (!fs.existsSync(configFile)) throw new Error('缺少 .codex/config.toml');
+      const configText = fs.readFileSync(configFile, 'utf8');
+      if (!/\[features\]/.test(configText) || !/hooks\s*=\s*true/.test(configText)) throw new Error('config.toml 未启用 hooks(features)');
       // ④ AGENTS.md 托管区(内联 orchestration 全文——Codex 指令唯一自动加载路径)
       const agentsFile = path.join(target, 'AGENTS.md');
       if (!fs.existsSync(agentsFile)) throw new Error('缺少 AGENTS.md');
@@ -1438,6 +1446,23 @@ const TEST_ITEMS = [
       assertExit(cc, 0);
       assertOut(cc, 'workflow-hook-guard-ok');
       assertNotOut(cc, 'decision');
+      // ⑤ codex 分支:Bash 写入检测(PowerShell 命令字符串——Codex 写路径经 Bash 工具,无 file_path)
+      const bashBlock = runHook(['before_tool', '--platform', 'codex'], dir,
+        { tool_name: 'Bash', tool_input: { command: 'Set-Content -LiteralPath "src/evil.py" -Value "x=1"' } });
+      assertExit(bashBlock, 0);
+      const bashBlockParsed = JSON.parse(bashBlock.output.trim());
+      if (bashBlockParsed.decision !== 'block') throw new Error('codex Bash 越权写入应输出 decision block: ' + JSON.stringify(bashBlockParsed));
+      // ⑥ codex 分支:Bash 合法写 .specs → 放行
+      const bashOk = runHook(['before_tool', '--platform', 'codex'], dir,
+        { tool_name: 'Bash', tool_input: { command: 'Set-Content -LiteralPath ".specs/ch/CHANGE.md" -Value "# CHANGE"' } });
+      assertExit(bashOk, 0);
+      const bashOkParsed = JSON.parse(bashOk.output.trim());
+      if (bashOkParsed.decision === 'block') throw new Error('codex Bash 合法写入不应 block');
+      // ⑦ codex 分支:Bash 无写入模式(纯命令)→ 放行
+      const bashNone = runHook(['before_tool', '--platform', 'codex'], dir,
+        { tool_name: 'Bash', tool_input: { command: 'python -m pytest test_calculator.py -q' } });
+      assertExit(bashNone, 0);
+      JSON.parse(bashNone.output.trim());
     },
   },
 
