@@ -28,6 +28,7 @@
 - **文档**：README 布局重组（快速开始前置）与借势增强（GSD 链接、痛点引导、适用边界）；安装指南补卸载小节；发布清单去重为单一权威；术语全库统一。
 - **系统测试集扩展至 50 项**（安装器版本标识、多平台安装器场景：Codex 安装冒烟、hook 平台分支契约、平台选择链、清理语义、平台描述符驱动安装冒烟）。
 - **合并门禁改为 CI status checks**：分支保护不再要求 approving review（单人账号无法自 approve）；required checks 为 CI 各 job；bot 审查（CodeRabbit / Sourcery）为意见层——贡献指南新增 bot 审查实践节（仅供参考、行内线程回复、合并前处理）。
+- **示例重构为真实归档产物**：`docs/examples/` 现包含一次真实完整 8 节点 change 的全部工件（processor-pipeline，e2e 假项目运行）——六段 SUMMARY、REVIEW 发现区处置标记、skill-load 声明标记、verify 出口真实执行；移除旧模拟示例与过时产物截图，README 展示区指向真实产物。
 
 ### 修复
 
