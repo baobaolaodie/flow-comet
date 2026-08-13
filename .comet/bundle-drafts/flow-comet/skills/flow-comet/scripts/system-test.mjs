@@ -1610,24 +1610,29 @@ const TEST_ITEMS = [
       if (src.includes('isClaudeCode')) {
         throw new Error('prepare-env main 仍含平台分支标识 isClaudeCode(应迁入描述符)');
       }
-      // ② 描述符完整性:每平台条目须含 4 个平台函数(installHooks/installRules/purge/overwriteDescription)
+      // ② 描述符完整性:平台 id 从描述符块提取(防块外误匹配);聚合块须含 4 个平台函数
+      // (installHooks/installRules/purge/overwriteDescription——未来新增平台缺任一函数时,
+      // 下方逐平台 purge 冒烟会因 platform.purge 未定义而真实失败)
       const platformBlock = src.match(/const PLATFORMS = \{[\s\S]*?\n\};/);
       if (!platformBlock) throw new Error('未找到 PLATFORMS 描述符表');
-      const ids = [...src.matchAll(/^\s{2}'([a-z-]+)':\s*\{/gm)].map((m) => m[1]);
+      const ids = [...platformBlock[0].matchAll(/^\s{2}'([a-z-]+)':\s*\{/gm)].map((m) => m[1]);
       if (!ids.includes('claude-code') || !ids.includes('codex')) {
         throw new Error('PLATFORMS 应含 claude-code/codex: ' + ids.join(', '));
       }
       for (const fn of ['installHooks', 'installRules', 'purge', 'overwriteDescription']) {
         if (!platformBlock[0].includes(fn)) throw new Error('描述符缺平台函数: ' + fn);
       }
-      // ③ 全平台逐一安装冒烟(从源码提取 id——未来新增平台自动纳入)
+      // ③ 全平台逐一安装 + purge 冒烟(从描述符块提取 id——未来新增平台自动纳入;
+      // purge 冒烟验证清理函数真实可用,缺函数/清理失败即红)
       for (const id of ids) {
         const target = path.join(dir, 'k6-' + id);
         fs.mkdirSync(target, { recursive: true });
         const res = spawnSync(process.execPath, [installer, '--target', target, '--platform', id], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
         if (res.status !== 0) throw new Error('平台 ' + id + ' 安装失败: ' + (res.stderr || JSON.stringify(res.output)));
+        const purgeRes = spawnSync(process.execPath, [installer, '--target', target, '--platform', id, '--purge', '--yes'], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+        if (purgeRes.status !== 0) throw new Error('平台 ' + id + ' purge 失败: ' + (purgeRes.stderr || JSON.stringify(purgeRes.output)));
       }
-      console.log('  描述符驱动: ' + ids.length + ' 个平台逐一安装冒烟通过✓');
+      console.log('  描述符驱动: ' + ids.length + ' 个平台逐一安装 + purge 冒烟通过✓');
     },
   },
 ];
