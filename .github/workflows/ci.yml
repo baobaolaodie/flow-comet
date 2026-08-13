@@ -16,7 +16,7 @@
 #                        CHANGELOG per-version PR links
 #   docs-links           dead links + language switchers (lychee; pull/N and claude.ai excluded)
 #
-# Required checks are enabled only after 2-3 observed runs (avoid CI issues blocking releases).
+# Historical note: required checks were enabled after 2-3 observed runs (avoid CI issues blocking releases).
 
 name: ci
 on:
@@ -94,7 +94,9 @@ jobs:
                    ('CHANGELOG.md','CHANGELOG-zh.md'),('docs/INSTALLATION.md','docs/INSTALLATION-zh.md'),
                    ('docs/USAGE.md','docs/USAGE-zh.md'),('docs/PROTOCOL.md','docs/PROTOCOL-zh.md'),
                    ('docs/MECHANISM.md','docs/MECHANISM-zh.md'),('docs/TROUBLESHOOTING.md','docs/TROUBLESHOOTING-zh.md'),
-                   ('docs/VERSIONS.md','docs/VERSIONS-zh.md'),('docs/ECOSYSTEM.md','docs/ECOSYSTEM-zh.md')]
+                   ('docs/VERSIONS.md','docs/VERSIONS-zh.md'),('docs/ECOSYSTEM.md','docs/ECOSYSTEM-zh.md'),
+                   ('SECURITY.md','SECURITY-zh.md')]
+          # CODE_OF_CONDUCT 除外:标准模板(Contributor Covenant)与官方翻译的段落行数天然不对齐(与本地 check-docs-local 一致)
           for en, zh in pairs:
               if not os.path.isfile(en) or not os.path.isfile(zh):
                   raise SystemExit('missing bilingual pair: %s / %s' % (en, zh))
@@ -220,7 +222,8 @@ jobs:
           C2=$(grep -m1 '^## \[[0-9]' CHANGELOG-zh.md | sed -E 's/## \[([0-9.]+).*/\1/')
           # 安装版本标识:权威源文件须等于 CHANGELOG 首个版本段(无版本段 = unreleased)
           IV=$(tr -d '\r\n' < .comet/bundle-drafts/flow-comet/skills/flow-comet/INSTALLED_VERSION)
-          IV_EXPECTED=$(grep -m1 '^## \[[0-9]' CHANGELOG.md | sed -E 's/## \[([0-9.]+).*/\1/' || echo 'unreleased')
+          IV_EXPECTED=$(grep -m1 '^## \[[0-9]' CHANGELOG.md | sed -nE 's/## \[([0-9.]+).*/\1/p' | head -1)
+          IV_EXPECTED=${IV_EXPECTED:-unreleased}
           echo "README=$R1/$R2 VERSIONS=$V1/$V2 CHANGELOG=$C1/$C2 INSTALLED_VERSION=$IV"
           if [ "$R1" = "$R2" ] && [ "$R1" = "$V1" ] && [ "$R1" = "$V2" ] && [ "$R1" = "$C1" ] && [ "$R1" = "$C2" ]; then
             :

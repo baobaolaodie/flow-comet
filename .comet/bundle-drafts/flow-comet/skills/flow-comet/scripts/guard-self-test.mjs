@@ -10,7 +10,7 @@
 // 全过 → exit 0，输出 ALL 114 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
 //
 // 仅 node 内置模块（child_process/fs/os/path）；无网络；不依赖 flow-kit 模板目录
-// 存在（fallback 场景用内置段名；S1/S4 复制模板文件进临时目录验证 C2 模板派生）。
+// 存在（fallback 场景用内置段名；部分场景复制模板文件进临时目录验证 C2 模板派生）。
 //
 // 自定义协议路径适配：T03 起 workflow-guard 用 readProtocolFile（protected-path：
 // 协议路径必须在 runRoot 内）。场景 runRoot=临时目录、内置协议默认路径在 packageRoot
@@ -37,7 +37,7 @@ const BUILTIN_PROTOCOL_SOURCE = path.join(__dirname, '..', 'reference', 'workflo
 const CHANGE_ID = 'ch';
 
 // 场景数一致性自检清单（22 文件，全变体：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n）——
-// S105 场景与底部自检共用同一清单（自检常量同步：SCENARIOS.length 变更 → 22 文件须同步）
+// 场景数自检与底部自检共用同一清单（自检常量同步：SCENARIOS.length 变更 → 22 文件须同步）
 const SCENARIO_COUNT_FILES = [
   'README.md', 'README-zh.md', 'CONTRIBUTING.md', 'CONTRIBUTING-zh.md',
   'docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
@@ -2701,7 +2701,7 @@ const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
 const isAuthoritativeSource = fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'));
 if (isAuthoritativeSource) {
   // ① 场景数全清单（公开双语 + 非公开文档 + CLAUDE + PR 模板；全变体：ALL n SCENARIOS / n scenarios / n 场景 / n/n）
-  // SCENARIO_COUNT_FILES 为模块级常量（S105 场景与底部自检共用同一清单，见文件头定义）
+  // SCENARIO_COUNT_FILES 为模块级常量（场景数自检与底部自检共用同一清单，见文件头定义）
   for (const rel of SCENARIO_COUNT_FILES) {
     const docPath = path.join(repoRoot, rel);
     try {
@@ -2733,7 +2733,9 @@ if (isAuthoritativeSource) {
     '.github/ISSUE_TEMPLATE/1-bug_report.yml', '.github/ISSUE_TEMPLATE/2-feature_request.yml',
     '.github/ISSUE_TEMPLATE/3-question.md', '.github/ISSUE_TEMPLATE/4-task.md',
   ];
-  const INTERNAL_CODE_RE = /\bS\d{2}\b|T-FIX|batch-|D-\d+|P0|dogfood|round\s*\d|内部/;
+  // 与 .githooks/internal-codes.mjs 的 BANNED 保持同步（单一来源约定；本文件随 bundle
+  // 分发，不能 import 主仓私有 .githooks——改动词表时两份同改，行为必须一致）
+  const INTERNAL_CODE_RE = /\bS\d{1,3}\b|T-FIX|batch-(?![a-z])|D-\d+|P[0-7]\b|round\s*\d|dogfood|内部/;
   for (const rel of PUBLIC_DOCS) {
     const docPath = path.join(repoRoot, rel);
     try {

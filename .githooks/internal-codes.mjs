@@ -11,6 +11,6 @@
  * BANNED_COMMENT:注释层专用扩展(另拦无连字符 D 编号,如 D7)——仅限注释层
  *                 检测,不可用于公开产物(README 徽章色码 D97757 等会误伤)。
  */
-export const BANNED = /\bS\d{2}\b|T-FIX|batch-(?![a-z])|D-\d+|P[0-7]\b|round\s*\d|dogfood|内部/;
+export const BANNED = /\bS\d{1,3}\b|T-FIX|batch-(?![a-z])|D-\d+|P[0-7]\b|round\s*\d|dogfood|内部/;
 
 export const BANNED_COMMENT = new RegExp(BANNED.source + '|(?<![A-Za-z])D\\d+(?![A-Za-z0-9-])');

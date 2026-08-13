@@ -43,4 +43,11 @@ if (current) {
 }
 execFileSync('git', ['config', 'core.hooksPath', target]);
 console.log(`[install-commit-hook] 已设置 core.hooksPath → ${target}`);
+// POSIX(macOS/Linux)上 git 会跳过不可执行的 hook 文件——安装时补齐执行位(Windows 无执行位语义)
+if (process.platform !== 'win32') {
+  for (const f of REQUIRED) {
+    try { fs.chmodSync(path.join(HOOKS_DIR, f), 0o755); } catch { /* 权限异常不阻断 */ }
+  }
+  console.log('[install-commit-hook] 已为非 Windows 平台补齐 hook 执行位');
+}
 console.log('[install-commit-hook] commit-msg + pre-push 生效:提交/推送信息含内部词(过程代号)将被阻止');
