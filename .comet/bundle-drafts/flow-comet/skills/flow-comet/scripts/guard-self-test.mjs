@@ -501,9 +501,11 @@ const SCENARIOS = [
       assertExit(resVariant, 0);
       assertOut(resVariant, 'ALL CHECKS PASSED');
       assertNotOut(resVariant, 'BROOKS-LINT WARN');
-      // 变体负例:段名匹配(含括号后缀,但括号说明不含方法词)且段内无自检方法声明 → 缺自检方法 BLOCKED
+      // 变体负例:段名匹配(含括号后缀,但括号说明不含方法词)且段内无自检方法声明
+      // → 缺自检方法 BLOCKED(六维自查也须不含方法词——全文兼容检测会命中)
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent({
         method: '## 自检方法（声明自检方法）\n\n（未声明任何方法）',
+        sixDim: '## 6 维自查\n\n- 功能: 通过\n- 性能: 无影响\n- 安全: 无影响\n- 兼容: 通过\n- 可观测: 通过\n- 可维护: 通过',
       }));
       const resVariantNeg = runGuard(['exit', 'execute'], dir);
       assertExit(resVariantNeg, 1);
