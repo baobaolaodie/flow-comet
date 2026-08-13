@@ -59,7 +59,7 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 
 1. **读 task 块，构造 handoff request**：读 `<task>` XML 块（`action` / `read_files` / `write_files` / `verify` / `done`）。若内容有歧义，停下询问——不要猜。构造 handoff request 内容：task 全文 + DESIGN §0/§0.5 + AC + read/write_files 边界。运行 `node .claude/skills/flow-comet/scripts/workflow-handoff.mjs request <task-id>` 记录。
 2. **委托子代理**：用 Agent 工具（`isolation: "worktree"`）委托 fresh-context 子代理。handoff prompt 强制协议：加载 flow-comet-dev、执行 TDD（RED/GREEN/REFACTOR）、LESSONS 扫描、既有抽象 grep、verify、6 维自查、越界检查、原子 commit（`<type>(<change-id>): <task-id> <subject>`），写 `.specs/<change-id>/<task-id>-SUMMARY.md`，回传 Return Contract（含 commitHash + greenEvidence + completedChecks + selfReview）。
-3. **记录 handoff result**：子代理回传后，运行 `workflow-handoff.mjs result <task-id> '<JSON>'` 记录（Return Contract 含 commitHash + greenEvidence + completedChecks + selfReview）。
+3. **记录 handoff result**：子代理回传后，运行 `node .claude/skills/flow-comet/scripts/workflow-handoff.mjs result <task-id> '<JSON>'` 记录（Return Contract 含 commitHash + greenEvidence + completedChecks + selfReview）。
 4. **验收 SUMMARY，TASK.md 标 done**：确认 SUMMARY 含 `## 自检方法` 段（声明 brooks-review 或 builtin-quickcheck）、verify 输出真实、6 维自查与越界检查有实质内容；通过后在 TASK.md 将任务标 `status="done"` 并加时间戳。
 5. **下一个 pending 任务**：重复步骤 1-4。
 
