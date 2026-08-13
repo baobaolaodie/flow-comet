@@ -10,12 +10,14 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded in git tags, this document, the README badge, [docs/VERSIONS.md](docs/VERSIONS.md) and the authoritative `skills/flow-comet/INSTALLED_VERSION`; `bundle.yaml` version stays 1.0.0 (decoupled from release versioning).
 
-## [Unreleased]
+## [1.4.0] - 2026-08-13
+
+Multi-platform installer framework, platform modularization, and real-artifact examples. ([#45](https://github.com/baobaolaodie/flow-comet/pull/45), [#46](https://github.com/baobaolaodie/flow-comet/pull/46), [#47](https://github.com/baobaolaodie/flow-comet/pull/47))
 
 ### Added
 
 - **skill-load declaration mechanism**: subagents declare loaded workflow skills per node; record validates declarations against the protocol's required skill calls; exit checks protocol declaration markers; cross-consistency timestamp checks; backward compatible with legacy changes.
-- **Installed version marker**: `prepare-env` writes `<project>/.claude/skills/flow-comet/INSTALLED_VERSION` from the source repo's git state (`1.3.1` on a release tag; `1.3.1-N-g<hash>` on accumulated dev) so issues and PRs can state the exact version — including how far dev has accumulated since the last release.
+- **Installed version marker**: `prepare-env` writes `<project>/.claude/skills/flow-comet/INSTALLED_VERSION` from the source repo's git state (`1.4.0` on a release tag; `1.4.0-N-g<hash>` on accumulated dev) so issues and PRs can state the exact version — including how far dev has accumulated since the last release.
 - **Local commit/push hooks**: `install-commit-hook.mjs` sets up commit-msg and pre-push hooks that reject messages carrying process codes (this project's own convention, not a universal list).
 - **Multi-platform installer framework**: `prepare-env` now targets Claude Code (default, unchanged) or Codex via a platform-descriptor table — interactive platform selection (TTY) with an explicit `--platform` override and automatic detection of an existing `.claude/` / `.codex/`; skills install to each platform's native location (`.agents/skills/` for Codex, auto-discovered); SKILL/GUIDANCE command paths are rewritten at install time for non-default platforms (authoritative source stays in `.claude` form); Codex rules are injected into an AGENTS.md managed block (Codex's `rules/` directory serves command-approval policies, not instruction files); the write-guard hook gains full Codex adaptation — Codex PreToolUse intercepts Bash tool calls, the hook parses write targets from the command (PowerShell cmdlets, .NET File API, redirection) and denies out-of-scope writes via `{"decision":"block"}` (measured on Codex CLI 0.146.0; trust the hook on first use via `/hooks`), while the Claude Code output stays unchanged.
 

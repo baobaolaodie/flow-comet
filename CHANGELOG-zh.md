@@ -10,12 +10,14 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号记录于 git tag、本文档、README 徽章、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 与权威源 `skills/flow-comet/INSTALLED_VERSION`；`bundle.yaml` 的 version 保持 1.0.0（与发布流程解耦）。
 
-## [Unreleased]
+## [1.4.0] - 2026-08-13
+
+多平台安装器框架、平台模块化与真实产物示例。([#45](https://github.com/baobaolaodie/flow-comet/pull/45)、[#46](https://github.com/baobaolaodie/flow-comet/pull/46)、[#47](https://github.com/baobaolaodie/flow-comet/pull/47))
 
 ### 新增
 
 - **skill-load 声明机制**：子代理按节点声明已加载的工作流技能；record 按协议要求的技能调用校验声明；exit 校验协议声明标记；交叉自洽时间序校验；与旧 change 向后兼容。
-- **安装版本标识**：`prepare-env` 写入 `<项目>/.claude/skills/flow-comet/INSTALLED_VERSION`（取自源仓库 git 状态：发布 tag 上为 `1.3.1`，积累中的 dev 为 `1.3.1-N-g<hash>`）——issue 与 PR 可据此说明精确版本，含 dev 自上次发布以来的积累程度。
+- **安装版本标识**：`prepare-env` 写入 `<项目>/.claude/skills/flow-comet/INSTALLED_VERSION`（取自源仓库 git 状态：发布 tag 上为 `1.4.0`，积累中的 dev 为 `1.4.0-N-g<hash>`）——issue 与 PR 可据此说明精确版本，含 dev 自上次发布以来的积累程度。
 - **本地提交/推送 hook**：`install-commit-hook.mjs` 配置 commit-msg 与 pre-push hook，拒绝含过程代号的提交/推送消息（本项目的工程约定，非通用词表）。
 - **多平台安装器框架**：`prepare-env` 现支持 Claude Code（默认，行为不变）与 Codex——平台描述符表驱动；TTY 交互式平台选择 + 显式 `--platform` 覆盖 + 自动探测既有 `.claude/` / `.codex/`；技能安装到各平台原生位置（Codex 为自动发现的 `.agents/skills/`）；SKILL/GUIDANCE 命令路径在安装时按平台重写（权威源保持 `.claude` 形态）；Codex 规则注入 AGENTS.md 托管区（Codex 的 `rules/` 目录服务于命令批准策略，非指令文件）；写入守卫 hook 完成 Codex 完全适配——Codex PreToolUse 拦截 Bash 工具调用，hook 从命令解析写入目标（PowerShell cmdlet、.NET File API、重定向）并经 `{"decision":"block"}` 拒绝越权写入（实测 Codex CLI 0.146.0；首次使用经 `/hooks` 信任 hook），Claude Code 输出保持不变。
 
