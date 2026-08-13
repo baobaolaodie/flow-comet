@@ -7,7 +7,7 @@
 <h1 align="center">flow-comet</h1>
 
 <p align="center">
-  <strong>An automated execution engine that turns AI coding discipline into a verifiable state machine — for the flow-kit 9-stage workflow, built for Claude Code.</strong>
+  <strong>An automated execution engine that turns AI coding discipline into a verifiable state machine — for the flow-kit 9-stage workflow, built for Claude Code and Codex.</strong>
   <br />
   <em>For AI coding workflows — deterministic state machine · protocol-driven · guard-validated · subagent-isolated</em>
 </p>
@@ -19,6 +19,7 @@
 
 <p align="center">
   <a href="https://claude.ai/code"><img src="https://img.shields.io/badge/Claude_Code-D97757?style=flat&logo=claude&logoColor=white" alt="Claude Code" /></a>
+  <a href="https://github.com/openai/codex"><img src="https://img.shields.io/badge/Codex-4CAF50?style=flat" alt="Codex" /></a>
   <a href="https://github.com/rihebty/flow-kit"><img src="https://img.shields.io/badge/flow--kit-4CAF50?style=flat" alt="flow-kit" /></a>
   <a href="https://github.com/rpamis/comet"><img src="https://img.shields.io/badge/comet-4CAF50?style=flat" alt="comet" /></a>
 </p>
