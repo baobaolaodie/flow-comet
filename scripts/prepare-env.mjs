@@ -407,12 +407,13 @@ function injectCodexConfig(codexDir) {
     content = fs.readFileSync(configPath, 'utf8');
   } catch { /* 文件缺失 = 首次安装 */ }
   if (content.includes('[features]')) {
-    // 已有 [features] 段:一次性补齐全部缺失键(分次 replace 会因插入点被前次消耗而失配)
+    // 已有 [features] 段:一次性补齐全部缺失键(分次 replace 会因插入点被前次消耗而失配;
+    // CRLF 行尾与文件尾无换行均须匹配——(\[features\])(?:\r?\n|$) 覆盖)
     const missing = [];
     if (!/^hooks\s*=/m.test(content)) missing.push('hooks = true');
     if (!/^codex_hooks\s*=/m.test(content)) missing.push('codex_hooks = true');
     if (missing.length > 0) {
-      content = content.replace(/\[features\]\n/, '[features]\n' + missing.join('\n') + '\n');
+      content = content.replace(/(\[features\])(?:\r?\n|$)/, '$1\r\n' + missing.join('\r\n') + '\r\n');
     }
   } else {
     const trimmed = content.trim();

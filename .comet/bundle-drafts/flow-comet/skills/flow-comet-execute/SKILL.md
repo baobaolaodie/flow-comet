@@ -80,7 +80,7 @@ The full dev protocol, templates, and constraints are in:
 This node is truly done when:
 - All tasks in TASK.md have `status="done"`.
 - Every done task has a corresponding `<task-id>-SUMMARY.md` in `.specs/<change-id>/`.
-- Every SUMMARY.md contains: verify output (real, not fabricated), 6-dimension self-check, boundary check.
+- Every SUMMARY.md contains: verify output (real, not fabricated), 6-dimension self-check, boundary check, and a declared `## 自检方法` (brooks-review / cache-brooks / builtin-quickcheck).
 - No REQUIREMENT.md or DESIGN.md has been modified during execution.
 - No out-of-boundary files have been changed without explicit approval.
 
@@ -153,6 +153,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record execute '{"summ
 | `all-tasks-done` | All tasks in TASK.md have status="done" | content-check |
 | `verify-output-real` | Every SUMMARY.md has verify output (not fabricated) | content-check |
 | `no-design-changes` | REQUIREMENT.md and DESIGN.md not modified | file-unchanged |
+| `self-check-method` | Every SUMMARY.md declares `## 自检方法`（brooks-review / cache-brooks / builtin-quickcheck） | content-check |
 
 ## Exit Check
 

@@ -64,18 +64,20 @@ function codexWriteTargetsFromCommand(command) {
   if (typeof command !== 'string' || command.trim() === '') return [];
   const targets = [];
   const patterns = [
-    // PowerShell cmdlet:-Path / -LiteralPath 参数值(引号/无引号)
-    /-(?:Path|LiteralPath)\s+["']?([^"'\s;|&]+)/gi,
-    // .NET File API:第一个参数 = 路径
-    /\[System\.IO\.File\]::(?:WriteAllText|WriteAllBytes|AppendAllText|WriteAllLines|Copy|Move|Delete)\s*\(\s*["']([^"']+)["']/gi,
-    // shell 重定向(命令边界后)
-    /(?:^|[;\s|&])(?:>>|>)\s*["']?([^"'\s;|&]+)/gi,
+    // PowerShell 写类 cmdlet 的 -Path/-LiteralPath(引号内空格整体捕获并剥引号;
+    // 只匹配写类 cmdlet——读类(Get-Content 等)的 -Path 不提取;同一命令内 [^;|&]*? 防跨命令)
+    /(?:Set-Content|Add-Content|New-Item|Out-File|Copy-Item|Move-Item|Remove-Item|Set-Item|Export-Csv)[^;|&]*?-(?:Path|LiteralPath)\s+("[^"]*"|'[^']*'|[^\s;|&]+)/gi,
+    // .NET File API:第一个参数 = 路径(引号内空格整体捕获)
+    /\[System\.IO\.File\]::(?:WriteAllText|WriteAllBytes|AppendAllText|WriteAllLines|Copy|Move|Delete)\s*\(\s*("[^"]*"|'[^']*'|[^,\s)]+)/gi,
+    // shell 重定向(含描述符变体:> / >> / 2> / 1>>)
+    /(?:^|[;\s|&])(?:[0-9]*>>?)\s*("[^"]*"|'[^']*'|[^\s;|&]+)/gi,
   ];
   for (const re of patterns) {
     let m;
     while ((m = re.exec(command)) !== null) {
-      const t = m[1] && m[1].trim();
-      if (t && t !== 'NUL' && t !== '/dev/null') targets.push(t);
+      let t = m[1] && m[1].trim();
+      if (t) t = t.replace(/^["']|["']$/g, ''); // 剥引号
+      if (t && t !== 'NUL' && t !== '/dev/null' && !targets.includes(t)) targets.push(t); // 去重
     }
   }
   return targets;
