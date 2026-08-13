@@ -25,7 +25,11 @@ for (const f of REQUIRED) {
   }
 }
 
-const current = execFileSync('git', ['config', 'core.hooksPath'], { encoding: 'utf8' }).trim();
+// core.hooksPath 未设置时 git config 返回非零——视为首次安装(当前为空),不崩溃
+let current = '';
+try {
+  current = execFileSync('git', ['config', 'core.hooksPath'], { encoding: 'utf8' }).trim();
+} catch { /* 未设置 = 首次安装 */ }
 // 绝对路径(正斜杠)写入——Windows 反斜杠与 shell 转义问题
 const target = path.join(REPO_ROOT, '.githooks').replace(/\\/g, '/');
 
