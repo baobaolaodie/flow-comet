@@ -39,8 +39,9 @@ function hookOk(extra) {
   console.log('EVENT: ' + event + (extra ? ' ' + extra : ''));
 }
 
-// 拦截输出：Codex 分支输出 {"decision":"block",reason} + exit 0（Codex block 语义——
-// permissionDecision:"ask" 不支持,直接 block）;Claude Code 分支既有文本 + exit 2。
+// 拦截输出：Codex 分支输出 {"decision":"block",reason} + exit 0（实测确认的 Codex deny 通道——
+// 2026-08-13 Codex 0.146：exit 2 / permissionDecision:"deny" 均不被 enforce,decision:"block"+exit 0 生效）;
+// Claude Code 分支既有文本 + exit 2。
 function hookBlock(mainLine, detailLine) {
   if (isCodex) {
     console.log(JSON.stringify({ decision: 'block', reason: mainLine + (detailLine ? ' ' + detailLine : '') }));
@@ -49,6 +50,43 @@ function hookBlock(mainLine, detailLine) {
   console.error(mainLine);
   if (detailLine) console.error(detailLine);
   process.exit(2);
+}
+
+// Codex 平台写路径适配：PreToolUse 只拦截 shell(Bash)工具,Codex 在 Windows 经 PowerShell 写文件——
+// tool_input 为 command 字符串(无 file_path)。按常见写入模式解析命令中的目标路径:
+//  ① PowerShell cmdlet 的 -Path/-LiteralPath 参数
+//  ② .NET File API 的第一个参数(路径)
+//  ③ shell 重定向 > / >>
+// 命中任一模式即提取路径(供白名单判定);未命中 = 无写入语义,放行。
+// 边界:检测为命令级——换写法(如其他 File API)可绕过,属平台限制;覆盖主流模式后越权写入
+// 对执行者的阻力与可见性已足够(每次绕过都留下试错痕迹)。
+function codexWriteTargetsFromCommand(command) {
+  if (typeof command !== 'string' || command.trim() === '') return [];
+  const targets = [];
+  const patterns = [
+    // PowerShell cmdlet:-Path / -LiteralPath 参数值(引号/无引号)
+    /-(?:Path|LiteralPath)\s+["']?([^"'\s;|&]+)/gi,
+    // .NET File API:第一个参数 = 路径
+    /\[System\.IO\.File\]::(?:WriteAllText|WriteAllBytes|AppendAllText|WriteAllLines|Copy|Move|Delete)\s*\(\s*["']([^"']+)["']/gi,
+    // shell 重定向(命令边界后)
+    /(?:^|[;\s|&])(?:>>|>)\s*["']?([^"'\s;|&]+)/gi,
+  ];
+  for (const re of patterns) {
+    let m;
+    while ((m = re.exec(command)) !== null) {
+      const t = m[1] && m[1].trim();
+      if (t && t !== 'NUL' && t !== '/dev/null') targets.push(t);
+    }
+  }
+  return targets;
+}
+
+// writeWhitelist 路径支持 <change-id> 占位符(与 artifacts paths 同机制——协议复用自动适配
+// 当前 change;无 activeChange 时字面匹配保底)
+function replaceChangeId(prefix, activeChange) {
+  return (typeof prefix === 'string' && prefix.includes('<change-id>') && activeChange)
+    ? prefix.replaceAll('<change-id>', activeChange)
+    : prefix;
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1742,19 +1780,38 @@ async function main() {
   // execute 收窄规则对缺省/声明表同样生效（subagent → ['.specs/'] 协调者；direct → 声明/缺省值）
   const { whitelist: PHASE_WRITE_WHITELIST, declared } = await resolvePhaseWriteWhitelist(executionMode);
 
-  const target = writeTargetFromHookInput(await readHookInput());
+  const hookInput = await readHookInput();
+  const target = writeTargetFromHookInput(hookInput);
+
+  // Codex 平台写路径适配:Bash 工具的 command 字符串(无 file_path)——解析写入目标按当前节点
+  // 白名单判定(与 file_path 判定同语义);未命中写入模式 = 无写入语义,放行
+  if (isCodex && hookInput && typeof hookInput === 'object' && hookInput.tool_name === 'Bash') {
+    const command = hookInput.tool_input && typeof hookInput.tool_input === 'object' ? hookInput.tool_input.command : null;
+    const writeTargets = codexWriteTargetsFromCommand(command);
+    if (writeTargets.length > 0 && currentNode) {
+      const whitelist = PHASE_WRITE_WHITELIST[currentNode];
+      // 声明模式未列出节点 → fail-closed(同 file_path 判定);缺省表无此节点 → 协调者默认 .specs/
+      const effectiveWhitelist = whitelist || (declared ? null : ['.specs/']);
+      for (const t of writeTargets) {
+        const absolute = path.resolve(runRoot, t);
+        const rel = path.relative(runRoot, absolute);
+        const targetRel = (path.isAbsolute(rel) || rel === '..' || rel.startsWith('..' + path.sep)) ? null : rel.replaceAll('\\', '/');
+        const allowed = targetRel !== null && effectiveWhitelist !== null && effectiveWhitelist.some(prefix => {
+          const p = replaceChangeId(prefix, activeChange);
+          return p === '' || targetRel.startsWith(p);
+        });
+        if (!allowed) {
+          hookBlock(`BLOCKED: codex 写入 "${t}" 不在当前节点 "${currentNode}" 允许范围`, `允许范围: ${(effectiveWhitelist || []).join(', ')}`);
+        }
+      }
+    }
+  }
+
   if (currentNode && target) {
     const whitelist = PHASE_WRITE_WHITELIST[currentNode];
     if (whitelist) {
-      // writeWhitelist 路径支持 <change-id> 占位符（与 artifacts paths 同机制——
-      // 协议复用自动适配当前 change；无 activeChange 时字面匹配保底）
-      const replaceChangeId = (prefix) => (
-        typeof prefix === 'string' && prefix.includes('<change-id>') && activeChange
-          ? prefix.replaceAll('<change-id>', activeChange)
-          : prefix
-      );
       const allowed = whitelist.some(prefix => {
-        const p = replaceChangeId(prefix);
+        const p = replaceChangeId(prefix, activeChange);
         return p === '' || target.startsWith(p);
       });
       if (!allowed) {

@@ -348,7 +348,10 @@ function injectSettingsHook(claudeDir) {
 /**
  * 注入 comet hook 到 .codex/hooks.json（Codex 平台）：
  * 读现有 hooks（缺失 → {}）→ 过滤已管理 comet hook（命令含 comet-hook-guard.mjs）→
- * 合并新组（matcher apply_patch——Codex 写工具事件；命令带 --platform codex 平台标记）→ 写回。
+ * 合并新组（matcher "*"——Codex PreToolUse 只拦截 Bash 工具,写路径经 PowerShell/Bash 命令,
+ * 必须匹配所有 Bash 调用;命令带 --platform codex 平台标记）→ 写回。
+ * 结构：顶层 "hooks" 包裹层（Codex 与 Claude Code 同构——{"hooks":{"PreToolUse":[...]}};
+ * 实测缺包裹层 hook 不加载）。
  * fail-safe：文件存在但 JSON 非法 → 抛错退出（保护用户配置）。
  */
 function injectCodexHook(codexDir) {
@@ -372,9 +375,12 @@ function injectCodexHook(codexDir) {
     }
     hooks = {};
   }
-  const existingGroups = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse : [];
+  const existingHooks = hooks.hooks && typeof hooks.hooks === 'object' && !Array.isArray(hooks.hooks)
+    ? hooks.hooks
+    : {};
+  const existingGroups = Array.isArray(existingHooks.PreToolUse) ? existingHooks.PreToolUse : [];
   const newGroup = {
-    matcher: 'apply_patch',
+    matcher: '*',
     hooks: [
       {
         type: 'command',
@@ -383,10 +389,37 @@ function injectCodexHook(codexDir) {
     ],
   };
   const merged = mergeHookGroups(existingGroups, [newGroup]);
-  hooks.PreToolUse = merged;
+  hooks.hooks = { ...existingHooks, PreToolUse: merged };
   fs.mkdirSync(codexDir, { recursive: true });
   fs.writeFileSync(hooksPath, JSON.stringify(hooks, null, 2) + '\n', 'utf8');
   return hooks;
+}
+
+/**
+ * 注入 Codex hook 启用配置到 .codex/config.toml（Codex 平台）：
+ * hooks 默认关闭——需 [features] hooks = true（部分版本 codex_hooks = true;双写兼容）。
+ * 幂等：已有 [features] 段时合并缺失键,不覆盖用户其他配置。
+ */
+function injectCodexConfig(codexDir) {
+  const configPath = path.join(codexDir, 'config.toml');
+  let content = '';
+  try {
+    content = fs.readFileSync(configPath, 'utf8');
+  } catch { /* 文件缺失 = 首次安装 */ }
+  if (content.includes('[features]')) {
+    // 已有 [features] 段:补 hooks 键(未设置时)
+    if (!/^hooks\s*=/m.test(content)) {
+      content = content.replace(/\[features\]\n/, '[features]\nhooks = true\n');
+    }
+    if (!/^codex_hooks\s*=/m.test(content)) {
+      content = content.replace(/\[features\]\n/, '[features]\ncodex_hooks = true\n');
+    }
+  } else {
+    const trimmed = content.trim();
+    content = (trimmed ? trimmed + '\n\n' : '') + '[features]\nhooks = true\ncodex_hooks = true\n';
+  }
+  fs.mkdirSync(codexDir, { recursive: true });
+  fs.writeFileSync(configPath, content, 'utf8');
 }
 
 /**
@@ -431,15 +464,18 @@ function removeManagedCodexHooks(codexDir) {
   try {
     hooks = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
   } catch { return; } // 非法 JSON 不触碰（保护用户配置）
-  if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks) || !Array.isArray(hooks.PreToolUse)) return;
-  hooks.PreToolUse = hooks.PreToolUse
+  const outer = hooks && typeof hooks === 'object' && !Array.isArray(hooks) ? hooks : {};
+  const inner = outer.hooks && typeof outer.hooks === 'object' && !Array.isArray(outer.hooks) ? outer.hooks : {};
+  if (!Array.isArray(inner.PreToolUse)) return;
+  inner.PreToolUse = inner.PreToolUse
     .map((group) => (
       group && typeof group === 'object' && !Array.isArray(group) && Array.isArray(group.hooks)
         ? { ...group, hooks: group.hooks.filter((hook) => !isManagedHookCommand(hook && hook.command)) }
         : group
     ))
     .filter((group) => group && typeof group === 'object' && Array.isArray(group.hooks) && group.hooks.length > 0);
-  fs.writeFileSync(hooksPath, JSON.stringify(hooks, null, 2) + '\n', 'utf8');
+  outer.hooks = inner;
+  fs.writeFileSync(hooksPath, JSON.stringify(outer, null, 2) + '\n', 'utf8');
 }
 
 function escapeRegExp(value) {
@@ -533,6 +569,7 @@ async function main() {
   } else {
     console.log(`  - ${path.join(target, 'AGENTS.md')}（托管区注入：保留托管区外用户内容）`);
     console.log(`  - ${path.join(target, '.codex', 'hooks.json')}（注入方式：保留既有字段，仅更新托管 hook 条目）`);
+    console.log(`  - ${path.join(target, '.codex', 'config.toml')}（注入方式：补 [features] hooks 启用键）`);
   }
 
   // 1. hook 注入（平台化）
@@ -545,9 +582,11 @@ async function main() {
     stats.files++;
     console.log(`[prepare-env] settings.local.json ${injected ? '注入完成（保留既有字段）' : '已生成'}`);
   } else {
-    injectCodexHook(path.join(target, '.codex'));
-    stats.files++;
-    console.log('[prepare-env] .codex/hooks.json 注入完成（保留既有字段）');
+    const codexDir = path.join(target, '.codex');
+    injectCodexHook(codexDir);
+    injectCodexConfig(codexDir);
+    stats.files += 2;
+    console.log('[prepare-env] .codex/hooks.json + config.toml 注入完成（hooks 启用，保留既有字段）');
   }
 
   // 2. rules 注入（平台化：CC 复制到 .claude/rules/ 自动加载；Codex 走 AGENTS.md 托管区）
