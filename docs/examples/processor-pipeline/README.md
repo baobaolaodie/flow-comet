@@ -6,7 +6,7 @@
 
 # flow-comet artifact examples — processor-pipeline
 
-**This is a real archived change** — the complete artifact set of a full 8-node flow-comet run (open → design → plan → execute → subagent-execute → review → verify → archive) in the flow-comet-e2e fake project, archived on 2026-08-13. Use it as the quality reference for what a complete change's artifacts look like under the current artifact system (six-section SUMMARYs, review disposition markers, skill-load declaration markers).
+**This is a real archived change** — the complete artifact set of a full 8-node flow-comet run (open → design → plan → execute → subagent-execute → review → verify → archive) in the flow-comet-e2e fake project, archived on 2026-08-13. Use it as the quality reference for what a complete change's artifacts look like under the current artifact system (six-section summaries, review disposition markers, skill-load declaration markers).
 
 ## Scenario: processor package pipeline enhancement
 
@@ -36,7 +36,7 @@ A brownfield change to the e2e project's `processor/` package (pure-Python data-
 
 - **Quality reference**: compare new change artifacts section-by-section to confirm required sections
 - **Understand flow-kit templates**: the example is a filled instance of the `flow-kit/templates/` templates
-- **Verify flow-comet guard**: this example passed all guard validations with no warnings — open/design/plan/execute/review exits all PASS; verify exit really executed `pytest -q` (101 passed); SUMMARYs declare the self-check method, review findings carry disposition markers
+- **Verify flow-comet guard**: this example passed all guard validations with no warnings — open/design/plan/execute/review exits all PASS; verify exit really executed `pytest -q` (101 passed); summaries declare the self-check method, review findings carry disposition markers
 
 ## Notes
 

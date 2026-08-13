@@ -137,12 +137,12 @@ The engine routes between nodes by deriving state from `.specs/` artifacts (dete
 
 ## Real-run artifacts
 
-A complete 8-node run produces the full artifact trail shown in [docs/examples/processor-pipeline](docs/examples/processor-pipeline/) — a real archived change (e2e fake project, 2026-08-13): CHANGE / REQUIREMENT / DESIGN / TASK / six-section SUMMARYs / REVIEW with disposition markers / TEST / UAT / KNOWN-ISSUES / skill-load declaration markers.
+A complete 8-node run produces the full artifact trail shown in [docs/examples/processor-pipeline](docs/examples/processor-pipeline/) — a real archived change (e2e fake project, 2026-08-13): CHANGE / REQUIREMENT / DESIGN / TASK / six-section summaries / REVIEW with disposition markers / TEST / UAT / KNOWN-ISSUES / skill-load declaration markers.
 
 ```
 processor-pipeline/            (archived change, full artifact set)
 ├── CHANGE.md / REQUIREMENT.md / DESIGN.md / TASK.md
-├── T01~T06-SUMMARY.md          (six-section SUMMARYs)
+├── T01~T06-SUMMARY.md          (six-section summaries)
 ├── REVIEW.md                   (findings with disposition markers)
 ├── TEST.md / UAT.md            (verify actually executes the test command)
 ├── KNOWN-ISSUES.md
