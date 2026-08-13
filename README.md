@@ -43,7 +43,7 @@ If you use skill-based disciplines like [superpowers](https://github.com/obra/su
 
 ## Quick Start
 
-Requires [Claude Code](https://claude.ai/code) (or [Codex](https://github.com/openai/codex), experimental) and [flow-kit](https://github.com/rihebty/flow-kit) in the target project (see [Installation](docs/INSTALLATION.md)).
+Requires [Claude Code](https://claude.ai/code) (or [Codex](https://github.com/openai/codex)) and [flow-kit](https://github.com/rihebty/flow-kit) in the target project (see [Installation](docs/INSTALLATION.md)).
 
 ```bash
 # 1. Install from this repository (option A: prepare-env installer)

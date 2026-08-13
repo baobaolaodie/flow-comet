@@ -9,7 +9,7 @@
 ## 前置依赖
 
 - [Claude Code](https://claude.ai/code)（已安装并认证，默认平台）
-- [Codex](https://github.com/openai/codex) CLI（已安装，实验性平台——技能/规则/hook 支持见下文[平台](#平台)）
+- [Codex](https://github.com/openai/codex) CLI（已安装——技能/规则/hook 支持见下文[平台](#平台)）
 - 目标项目已安装 [flow-kit](https://github.com/rihebty/flow-kit)：
 
 ```bash
@@ -26,7 +26,7 @@ git clone https://github.com/rihebty/flow-kit.git flow-kit
 ```bash
 cd <flow-comet 仓库>
 node scripts/prepare-env.mjs --target <目标项目绝对路径>          # Claude Code（默认）
-node scripts/prepare-env.mjs --target <目标项目绝对路径> --platform codex   # Codex（实验性）
+node scripts/prepare-env.mjs --target <目标项目绝对路径> --platform codex   # Codex
 ```
 
 `prepare-env` 会：
@@ -54,9 +54,9 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 | 平台 | 技能 | 编排规则 | 写入守卫 hook |
 |------|------|----------|---------------|
 | Claude Code（默认） | `.claude/skills/`（不变） | `.claude/rules/`（自动加载） | `settings.local.json` → `hooks.PreToolUse`（文本输出，exit 2 拦截） |
-| Codex（实验性） | `.agents/skills/`（Codex 自动发现） | `AGENTS.md` 托管区（安装时内联；Codex 的 `rules/` 目录服务于命令批准策略，非指令文件） | `.codex/hooks.json`（matcher `apply_patch`；JSON 契约——拦截 `{"decision":"block"}` / 放行 `{}`） |
+| Codex | `.agents/skills/`（Codex 自动发现） | `AGENTS.md` 托管区（安装时内联；Codex 的 `rules/` 目录服务于命令批准策略，非指令文件） | `.codex/hooks.json`（matcher `*`——Codex PreToolUse 拦截 Bash 工具调用；经 `{"decision":"block"}` 拒绝） |
 
-非默认平台上，SKILL/GUIDANCE 内的命令路径在安装时按平台实际技能位置重写（权威源保持 `.claude` 形态）。Codex 支持为实验性：8 节点流程尚未在 Codex 上完成端到端演练。
+非默认平台上，SKILL/GUIDANCE 内的命令路径在安装时按平台实际技能位置重写（权威源保持 `.claude` 形态）。Codex 支持已完成端到端演练（Codex CLI 0.146.0 上 8 节点流程）；写入守卫 hook 拦截 Bash 写命令（PowerShell cmdlet、.NET File API、重定向）——命令级拦截覆盖主流模式，换写法可能绕过（Codex 平台限制）。
 
 ### 验证安装（无副作用，不创建 change）
 
@@ -68,7 +68,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 > 命令为 POSIX 风格（Git Bash / WSL / macOS 终端）；Windows 用户请在 Git Bash 中执行。
 > **注意**：`guard-self-test.mjs`（114 场景）是**作者回归基线**（沙箱环境自测脚本逻辑——不依赖安装完整性，不是安装验证判据）。
 
-### 验证 Codex 安装（实验性）
+### 验证 Codex 安装
 
 1. **结构检查**：`<目标项目>/.agents/skills/` 下 `flow-comet*` skill 目录（19 个）+ `AGENTS.md` 托管区（`grep "Managed by flow-comet" <目标项目>/AGENTS.md`）+ `.codex/hooks.json` 托管 hook 条目 + `<目标项目>/.agents/skills/flow-comet/INSTALLED_VERSION`
 2. **命令路径已重写**：`grep -c "\.claude/skills/flow-comet/scripts/" <目标项目>/.agents/skills/flow-comet/SKILL.md` → 0；`grep -c "\.agents/skills/flow-comet/scripts/" <目标项目>/.agents/skills/flow-comet/SKILL.md` → 非 0

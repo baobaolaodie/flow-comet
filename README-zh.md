@@ -43,7 +43,7 @@
 
 ## 快速开始
 
-需要目标项目安装 [Claude Code](https://claude.ai/code)（或 [Codex](https://github.com/openai/codex)，实验性）与 [flow-kit](https://github.com/rihebty/flow-kit)（见[安装](docs/INSTALLATION-zh.md)）。
+需要目标项目安装 [Claude Code](https://claude.ai/code)（或 [Codex](https://github.com/openai/codex)）与 [flow-kit](https://github.com/rihebty/flow-kit)（见[安装](docs/INSTALLATION-zh.md)）。
 
 ```bash
 # 1. 从本仓库安装（方案 A：prepare-env 安装器）
