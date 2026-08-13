@@ -531,12 +531,16 @@ async function main() {
         fs.rmSync(claudeDir, { recursive: true, force: true });
       }
     } else {
-      const agentsDir = platform.purgeRoot(target);
-      if (fs.existsSync(agentsDir)) {
-        for (const entry of fs.readdirSync(agentsDir)) {
-          console.error(`  - ${path.join(agentsDir, entry)}`);
+      // purge 只清理 flow-comet 管理的技能目录——.agents/ 为多工具共享位置
+      //（.agents/skills/ 下可能有其他工具/用户的技能），非 flow-comet 条目保留
+      const agentsSkillsDir = path.join(target, '.agents', 'skills');
+      if (fs.existsSync(agentsSkillsDir)) {
+        for (const entry of fs.readdirSync(agentsSkillsDir)) {
+          if (!/^flow-comet/.test(entry)) continue;
+          const managed = path.join(agentsSkillsDir, entry);
+          console.error(`  - ${managed}`);
+          fs.rmSync(managed, { recursive: true, force: true });
         }
-        fs.rmSync(agentsDir, { recursive: true, force: true });
       }
       const hooksPath = path.join(target, '.codex', 'hooks.json');
       if (fs.existsSync(hooksPath)) {

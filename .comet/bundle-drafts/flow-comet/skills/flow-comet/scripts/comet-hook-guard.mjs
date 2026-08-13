@@ -89,6 +89,15 @@ function replaceChangeId(prefix, activeChange) {
     : prefix;
 }
 
+// 白名单判定(共享):目标相对路径前缀匹配(含 <change-id> 占位符替换)——file_path 路径与
+// Codex Bash 命令写入路径两条判定共用,避免两处逻辑漂移
+function targetAllowed(targetRel, whitelist, activeChange) {
+  return whitelist.some(prefix => {
+    const p = replaceChangeId(prefix, activeChange);
+    return p === '' || targetRel.startsWith(p);
+  });
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..');
 const runRoot = process.env.COMET_RUN_ROOT ? path.resolve(process.env.COMET_RUN_ROOT) : process.cwd();
@@ -1796,12 +1805,14 @@ async function main() {
         const absolute = path.resolve(runRoot, t);
         const rel = path.relative(runRoot, absolute);
         const targetRel = (path.isAbsolute(rel) || rel === '..' || rel.startsWith('..' + path.sep)) ? null : rel.replaceAll('\\', '/');
-        const allowed = targetRel !== null && effectiveWhitelist !== null && effectiveWhitelist.some(prefix => {
-          const p = replaceChangeId(prefix, activeChange);
-          return p === '' || targetRel.startsWith(p);
-        });
+        const allowed = targetRel !== null && effectiveWhitelist !== null && targetAllowed(targetRel, effectiveWhitelist, activeChange);
         if (!allowed) {
-          hookBlock(`BLOCKED: codex 写入 "${t}" 不在当前节点 "${currentNode}" 允许范围`, `允许范围: ${(effectiveWhitelist || []).join(', ')}`);
+          hookBlock(
+            `BLOCKED: codex 写入 "${t}" 不在当前节点 "${currentNode}" 允许范围`,
+            effectiveWhitelist === null
+              ? `请在协议 writeWhitelist 中为节点 "${currentNode}" 声明允许的路径前缀`
+              : `允许范围: ${effectiveWhitelist.join(', ')}`
+          );
         }
       }
     }
@@ -1810,10 +1821,7 @@ async function main() {
   if (currentNode && target) {
     const whitelist = PHASE_WRITE_WHITELIST[currentNode];
     if (whitelist) {
-      const allowed = whitelist.some(prefix => {
-        const p = replaceChangeId(prefix, activeChange);
-        return p === '' || target.startsWith(p);
-      });
+      const allowed = targetAllowed(target, whitelist, activeChange);
       if (!allowed) {
         hookBlock(`BLOCKED: phase "${currentNode}" 不允许写入 "${target}"`, `允许范围: ${whitelist.join(', ')}`);
       }
