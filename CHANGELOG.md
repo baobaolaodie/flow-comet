@@ -23,7 +23,7 @@ Multi-platform installer framework, platform modularization, and real-artifact e
 
 ### Changed
 
-- **Regression suite expanded to 136 scenarios**: `init` rejects unknown flag-like arguments (e.g. `--help`) instead of treating them as a change name; covering skill-load declarations, record validation, exit protocol checks, cross-consistency timestamps, legacy compatibility, review finding disposition, artifact completeness, delegation attribution, recovery guidance, wave-wording consistency, self-check-method section enforcement for new changes, and per-change verification-failure isolation.
+- **Regression suite expanded to 137 scenarios**: `init` rejects unknown flag-like arguments (e.g. `--help`) instead of treating them as a change name; covering skill-load declarations, record validation, exit protocol checks, cross-consistency timestamps, legacy compatibility, review finding disposition, artifact completeness, delegation attribution, recovery guidance, wave-wording consistency, self-check-method section enforcement for new changes, and per-change verification-failure isolation.
 - **CI**: process-code checks moved from the server-side PR policy to local hooks; PR/issue templates reworked for practice (deduplicated checkboxes, related-issue section, based-on version, protocol and installed-version fields).
 - **Commit history made jargon-free**: 52 historical commit messages rewritten to plain descriptions (tree unchanged); duplicate commits deduplicated.
 - **Docs**: README reorganized (quick start moved up) with recognizable anchors (GSD link, pain-point intro, fit boundary); installation guide gained an uninstall section; release checklist deduplicated to a single source; terminology unified across docs.

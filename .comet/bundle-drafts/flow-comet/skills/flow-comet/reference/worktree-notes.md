@@ -33,6 +33,10 @@ git worktree list                # 确认 worktree 挂在哪个仓库/分支（�
 git ls-tree <branch> <path>      # 确认产物在目标仓库哪个分支、路径是否存在
 ```
 
+## 4.2. 运行时状态文件的跟踪风险(测试载体实证 2026-08-15)
+
+测试载体(如 dogfood 项目)若 git 跟踪 `.comet/flow-comet-state.json`(主仓 gitignore 它,载体可能不同),**恢复/回退操作不得用 `git reset --hard`**——会连带把运行时状态回退到历史版本,状态机倒退(等级 4 实证事故:回退后重跑 init + 重录证据恢复,耗时约 10 分钟)。恢复工件用精确 `git checkout -- <path>`(只回退指定文件),不用整树 reset。
+
 ## 4.5. Codex 平台的 worktree 委托差异(实测 2026-08-14)
 
 Codex 环境的子代理(spawn_agent)无 `isolation:"worktree"` 参数——自动 worktree 假定仅 Claude Code 适用。Codex 协调者委托并行任务时须**手动** `git worktree add <路径> -b <分支>` + 在 worktree 内 `codex exec` 委托,或对并行任务串行收敛(写边界仍互斥)。worktree-notes 第 3 节的"委托 prompt 内联全部上游上下文"在 Codex 同样适用且是唯一可靠路径。**注意**:worktree 同样不含 `flow-kit/` 与 `.agents/`(它们是目标仓库内容,不在 worktree 快照内)——委托 prompt 内联必须覆盖这些依赖。

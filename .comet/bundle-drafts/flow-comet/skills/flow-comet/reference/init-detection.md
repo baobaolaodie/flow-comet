@@ -55,3 +55,4 @@ workflow-state.mjs init <change-id> [--init-context | --init-skip]
 - 不新增命令（init 的参数扩展）；无参数行为 = 原行为 + 检测提示
 - 已存在 CONTEXT.md 的项目（90 天内）完全静默，行为零变化
 - 生成文件位于 `.specs/`（流程工件目录），既有文档零写入
+- **空仓库（无提交）**：init 输出 `INIT EMPTY-REPO WARN`（分支创建不可行，跳过分支创建，纯文件模式继续；`BRANCH: none` 如实输出）——与上下文检测独立，属分支创建边界（M8）。无安装副本的仓库会先命中协议路径防御（"workflow protocol file must stay inside the project root"），属预期防护

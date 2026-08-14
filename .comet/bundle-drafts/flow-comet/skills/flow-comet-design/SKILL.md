@@ -21,6 +21,8 @@ Responsibility: 技术栈选型 + ADR + 数据流。生成 DESIGN.md。
 |------|-------------------------------|-----------------------------------|
 | DESIGN.md | `## 0.` 技术栈段 / `## 决策清单` | `## 0.5 架构对齐` / `## 风险` / `## 数据流` 等 |
 
+> **决策清单段名须与模板精确一致**:guard 按 flow-kit 模板段名派生校验——模板段为 `## 1. 决策清单`(编号可选),**不要写成"技术决策清单"等变体**(2-design.md 指引的"技术决策"是内容要求,不是段名;dogfood 实证:写变体段名会被拦截)。
+
 guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / templateSectionPatterns；「填得好不好」由 review 把关。
 
 # Design
