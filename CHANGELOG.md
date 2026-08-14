@@ -10,26 +10,7 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded in git tags, this document, the README badge, [docs/VERSIONS.md](docs/VERSIONS.md) and the authoritative `skills/flow-comet/INSTALLED_VERSION`; `bundle.yaml` version stays 1.0.0 (decoupled from release versioning).
 
-## Unreleased
-
-### Changed
-
-- **Documentation overhaul**: skill instructions deduplicated (generator-template remnants and mid-file frontmatter removed), Comet-positioning claims replaced with flow-comet's own mechanism descriptions, per-node guardrail tables aligned with the actual guard implementation (unimplemented items now marked as review-checked execution discipline), dual-platform (Claude Code / Codex) adaptation for brooks-lint invocation, user entries, and installation docs, the regression baseline promoted to the two-tier suite (guard self-test + system test) across all docs, and timeliness updates (roadmap state, design-doc backfill, archived handover notes).
-
-### Changed
-
-
-- **Strict mode for new changes**: changes created via `init` are marked new (`newChange`) and enforce all content-level checks as blocking (disposition markers, builtin self-check evidence, wave-wording consistency, overreach delegation, append placement, entry evidence); legacy changes keep the progressive warnings.
-- **Execution-omission protection**: node entry is now recorded (exit warns if a node was exited without entering it); completed tasks require their summary for new changes (blocked — legacy changes keep the progressive warning); handoff results require TDD RED evidence for new changes; record auto-fills skill-load declaration markers; execute gains an explicit empty-exit exemption; init detects commit-less repositories.
-
-### Fixed
-
-- Skill commands that lacked the install-path prefix now carry the authoritative-source path — executable on both platforms after installation.
-- Process-code detection regex now covers 1-3 digit scenario numbers (previously only two digits); the doc-scanner regex is back in sync with the single source; POSIX hook files get their executable bits set at install time.
-- CI bilingual-mirror check now covers SECURITY (CoC excluded by design, matching the local checker); the version-expected extraction no longer relies on a dead fallback.
-- Bundle metadata aligned: skills list, references, and script side effects match the actual distribution.
-
-## [1.4.0] - 2026-08-13
+## [1.4.0] - 2026-08-14
 
 Multi-platform installer framework, platform modularization, and real-artifact examples. ([#45](https://github.com/baobaolaodie/flow-comet/pull/45), [#46](https://github.com/baobaolaodie/flow-comet/pull/46), [#47](https://github.com/baobaolaodie/flow-comet/pull/47), [#48](https://github.com/baobaolaodie/flow-comet/pull/48), [#50](https://github.com/baobaolaodie/flow-comet/pull/50))
 
@@ -49,6 +30,9 @@ Multi-platform installer framework, platform modularization, and real-artifact e
 - **System test suite expanded to 50 items** (installer version-marker check, multi-platform installer scenarios: Codex install smoke, hook platform contract, platform selection chain, purge semantics, platform-descriptor-driven install smoke).
 - **Merge gate changed to CI status checks**: branch protection no longer requires an approving review (single-account repo cannot self-approve); required checks are the CI jobs; bot reviewers (CodeRabbit / Sourcery) are advisory — contributing guide gains a bot-reviewers section (advisory-only, threaded replies, resolve before merge).
 - **Examples rebuilt from a real archived run**: `docs/examples/` now carries the complete artifact set of a real 8-node change (processor-pipeline, run in the e2e fake project) — six-section summaries, review findings with disposition markers, skill-load declaration markers, actually-executed verify; the simulated example and outdated artifact screenshots were removed, and the README showcase now points at the real artifacts.
+- **Documentation overhaul**: skill instructions deduplicated (generator-template remnants and mid-file frontmatter removed), Comet-positioning claims replaced with flow-comet's own mechanism descriptions, per-node guardrail tables aligned with the actual guard implementation (unimplemented items now marked as review-checked execution discipline), dual-platform (Claude Code / Codex) adaptation for brooks-lint invocation, user entries, and installation docs, the regression baseline promoted to the two-tier suite (guard self-test + system test) across all docs, and timeliness updates (roadmap state, design-doc backfill, archived handover notes).
+- **Strict mode for new changes**: changes created via `init` are marked new (`newChange`) and enforce all content-level checks as blocking (disposition markers, builtin self-check evidence, wave-wording consistency, overreach delegation, append placement, entry evidence, self-check-method section); legacy changes keep the progressive warnings.
+- **Execution-omission protection**: node entry is now recorded (exit blocks on new changes when a node was exited without entering it); completed tasks require their summary for new changes (blocked — legacy changes keep the progressive warning); handoff results require TDD RED evidence for new changes; record auto-fills skill-load declaration markers; execute gains an explicit empty-exit exemption; init detects commit-less repositories; the installer cleans up stale empty hook groups when the hook matcher evolves.
 
 ### Fixed
 
@@ -59,6 +43,11 @@ Multi-platform installer framework, platform modularization, and real-artifact e
 - Wave-wording consistency: prose marking a task parallel without the matching task attribute warns progressively.
 - `init` command rejects arguments starting with `--` (e.g. `--help`) — previously treated as the change name, which auto-created a change, a branch, and state.
 - dev-main sync check: files deliberately deleted on dev (e.g. the template md → forms migration) no longer counted as drift.
+- Skill commands that lacked the install-path prefix now carry the authoritative-source path — executable on both platforms after installation.
+- Process-code detection regex now covers 1-3 digit scenario numbers (previously only two digits); the doc-scanner regex is back in sync with the single source; POSIX hook files get their executable bits set at install time.
+- CI bilingual-mirror check now covers SECURITY (CoC excluded by design, matching the local checker); the version-expected extraction no longer relies on a dead fallback.
+- Bundle metadata aligned: skills list, references, and script side effects match the actual distribution.
+- Mechanism docs and the skill guidance now state the strict-mode rules explicitly (entry enforcement, summary enforcement, and command-level write interception in the Red Flags).
 
 ## [1.3.1] - 2026-08-11
 

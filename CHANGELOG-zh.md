@@ -10,26 +10,7 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号记录于 git tag、本文档、README 徽章、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 与权威源 `skills/flow-comet/INSTALLED_VERSION`；`bundle.yaml` 的 version 保持 1.0.0（与发布流程解耦）。
 
-## Unreleased
-
-### 变更
-
-- **全库文档检修**：技能指令去重（删除生成器模板残留与中部 frontmatter）、Comet 定位声称替换为 flow-comet 自身机制表述、逐节点门禁表对齐实际实现（未实现项标注为 review 把关的执行纪律）、双平台（Claude Code / Codex）适配（brooks-lint 调用方式、用户入口、安装文档）、回归基线在全部文档中提升为两级（引擎回归 + 系统测试集）、时效性更新（路线图状态、设计文档回填、交接文档归档）。
-
-### 变更
-
-
-- **新 change 严格模式**:`init` 创建的 change 标记为"新"(`newChange`),全部内容级检查升级为拦截(处置标记/builtin 自检证据/波次散文一致性/越权委托/追加位置/进入证据);旧 change 保持渐进警告。
-- **执行遗漏防护**:节点进入被记录(未 entry 直接 exit 触发警告);新 change 的已完成任务必须有对应 SUMMARY(拦截;旧 change 保持渐进警告);新 change 的交接结果必须有 TDD RED 证据;record 自动补写技能加载声明标记;execute 新增显式空退出豁免;init 检测无提交仓库。
-
-### 修复
-
-- 技能内缺失安装路径前缀的命令补全为权威源路径——两平台安装后均可执行。
-- 过程代号检测正则覆盖 1~3 位场景编号（原先只拦两位）；文档扫描正则与单一来源重新同步；POSIX hook 文件在安装时补齐执行位。
-- CI 双语镜像检查补 SECURITY 对（CoC 按设计豁免，与本地检查一致）；版本期望提取不再依赖失效的回退。
-- 包元数据对齐：技能清单、references 与脚本 sideEffect 与实际分发一致。
-
-## [1.4.0] - 2026-08-13
+## [1.4.0] - 2026-08-14
 
 多平台安装器框架、平台模块化与真实产物示例。([#45](https://github.com/baobaolaodie/flow-comet/pull/45)、[#46](https://github.com/baobaolaodie/flow-comet/pull/46)、[#47](https://github.com/baobaolaodie/flow-comet/pull/47)、[#48](https://github.com/baobaolaodie/flow-comet/pull/48)、[#50](https://github.com/baobaolaodie/flow-comet/pull/50))
 
@@ -49,6 +30,9 @@
 - **系统测试集扩展至 50 项**（安装器版本标识、多平台安装器场景：Codex 安装冒烟、hook 平台分支契约、平台选择链、清理语义、平台描述符驱动安装冒烟）。
 - **合并门禁改为 CI status checks**：分支保护不再要求 approving review（单人账号无法自 approve）；required checks 为 CI 各 job；bot 审查（CodeRabbit / Sourcery）为意见层——贡献指南新增 bot 审查实践节（仅供参考、行内线程回复、合并前处理）。
 - **示例重构为真实归档产物**：`docs/examples/` 现包含一次真实完整 8 节点 change 的全部工件（processor-pipeline，e2e 假项目运行）——六段 SUMMARY、REVIEW 发现区处置标记、skill-load 声明标记、verify 出口真实执行；移除旧模拟示例与过时产物截图，README 展示区指向真实产物。
+- **全库文档检修**：技能指令去重（删除生成器模板残留与中部 frontmatter）、Comet 定位声称替换为 flow-comet 自身机制表述、逐节点门禁表对齐实际实现（未实现项标注为 review 把关的执行纪律）、双平台（Claude Code / Codex）适配（brooks-lint 调用方式、用户入口、安装文档）、回归基线在全部文档中提升为两级（引擎回归 + 系统测试集）、时效性更新（路线图状态、设计文档回填、交接文档归档）。
+- **新 change 严格模式**：`init` 创建的 change 标记为"新"（`newChange`），全部内容级检查升级为拦截（处置标记/builtin 自检证据/波次散文一致性/越权委托/追加位置/进入证据/自检方法段）；旧 change 保持渐进警告。
+- **执行遗漏防护**：节点进入被记录（新 change 未 entry 直接 exit 拦截；旧 change 渐进警告）；新 change 的已完成任务必须有对应 SUMMARY（拦截；旧 change 保持渐进警告）；新 change 的交接结果必须有 TDD RED 证据；record 自动补写技能加载声明标记；execute 新增显式空退出豁免；init 检测无提交仓库；安装器在 hook matcher 演进时清理残留的空 hook 组。
 
 ### 修复
 
@@ -59,6 +43,11 @@
 - 波次散文一致性：散文标记并行但任务标签缺并行属性时渐进 WARN。
 - `init` 命令拒绝以 `--` 开头的参数（如 `--help`）——此前会被当作 change 名执行，自动开 change、建分支并写状态。
 - dev-main 同步检查：dev 上有意删除的文件（如模板 md → forms 迁移）不再被误判为 dev 落后。
+- 技能内缺失安装路径前缀的命令补全为权威源路径——两平台安装后均可执行。
+- 过程代号检测正则覆盖 1~3 位场景编号（原先只拦两位）；文档扫描正则与单一来源重新同步；POSIX hook 文件在安装时补齐执行位。
+- CI 双语镜像检查补 SECURITY 对（CoC 按设计豁免，与本地检查一致）；版本期望提取不再依赖失效的回退。
+- 包元数据对齐：技能清单、references 与脚本 sideEffect 与实际分发一致。
+- 机制文档与技能指引补严格模式显式表述（进入强制、SUMMARY 强制、命令级写入拦截进入 Red Flags）。
 
 ## [1.3.1] - 2026-08-11
 
