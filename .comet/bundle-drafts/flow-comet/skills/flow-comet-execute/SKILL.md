@@ -21,6 +21,8 @@ In subagent mode (default) this node is a coordinator: it does not write impleme
 |------|-------------------------------|-----------------------------------|
 | SUMMARY.md | `## verify 输出` / `## 6 维自查`（须含实质内容）/ `## 越界检查` / `## 自检方法` | `## 做了什么` / `## 改动文件` 等（执行纪律，review 把关） |
 
+> **注意**：flow-kit 的 SUMMARY 模板**不含 `## 自检方法` 段**——该段是 flow-comet 的强制增量（guard 校验自检方法声明）。使用 `flow-kit/templates/SUMMARY.md` 填写后，**必须按上方必填段清单补写 `## 自检方法` 段**（声明 brooks-review / cache-brooks / builtin-quickcheck 三值之一及降级证据），否则新 change 的 exit 会被 BLOCKED。
+
 guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
 
 ### 执行模型（按 executionMode，用户显式选择）
