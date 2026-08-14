@@ -22,7 +22,7 @@ This node performs the final integration verification: running all automated tes
 | TEST.md | `## 验证命令`（exit verify 真实执行） | `## 测试矩阵` 等段（5 轮金字塔，review 把关） |
 | UAT.md | `## 验收结果` | 其余（执行纪律，review 把关） |
 
-> **注意**：flow-kit 的 TEST 模板**不含 `## 验证命令` 段**——该段是 flow-comet 的强制增量（exit verify 会真实执行其中的命令并计数失败）。使用 `flow-kit/templates/TEST.md` 填写后，**必须按上方必填段清单补写 `## 验证命令` 段**（代码块内含一条可执行的测试命令），否则 exit verify 会被 BLOCKED。UAT.md 同理：flow-kit 无独立 UAT 模板（UAT 脚本格式见 5-test.md 1.2 节），产出时按上方必填段清单写 `## 验收结果` 段。
+> **注意**：flow-kit 的 TEST 模板**不含 `## 验证命令` 段**——该段是 flow-comet 的强制增量（exit verify 会真实执行其中的命令并计数失败）。使用 `flow-kit/templates/TEST.md` 填写后，**必须按上方必填段清单补写 `## 验证命令` 段**，否则 exit verify 会被 BLOCKED。**排版约束**：`## 验证命令` 标题后必须**紧跟**代码块（` ``` `），标题与代码块之间**不得插入任何说明行**（如 blockquote 说明——guard 正则要求标题后直接是代码块）；段名可带括号后缀。UAT.md 同理：flow-kit 无独立 UAT 模板（UAT 脚本格式见 5-test.md 1.2 节），产出时按上方必填段清单写 `## 验收结果` 段。
 
 guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
 

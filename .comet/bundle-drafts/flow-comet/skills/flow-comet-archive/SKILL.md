@@ -50,6 +50,7 @@ This node finalizes a completed change by extracting reusable lessons from the d
    - Move `.specs/<change-id>/` to `.specs/archive/<YYYY-MM-DD>-<change-id>/`.
    - Date format: YYYY-MM-DD of the archive date.
    - Verify the move completed successfully (source no longer exists, destination has all files).
+   - **git 索引同步**:移动含 `.skill-loads/` 等隐藏目录时,用 `git mv` 逐项移动或移动后用 `git add -A .specs/` 同步索引——文件系统 `mv` 后 git 索引不同步,`git checkout` 会从树恢复残留文件(实测:归档后 checkout 恢复 9 个 .skill-loads 源路径文件)。
 
 7. **Update CHANGELOG.md**: 在 `.specs/CHANGELOG.md` **顶部**按日期倒序插入新条目（倒序约定：新条目永远在最新日期行之上；文件不存在则从模板创建）。若项目既有 CHANGELOG 采用其他格式（如 `## 日期 + 列表`），**跟随项目既有格式**在顶部插入（不强制转表格——保持仓库一致性；guard 的倒序检测只针对表格格式行）:
    - 表格格式: `| YYYY-MM-DD | <change-id> | one-line summary | PR link | new L-NNN entries |`

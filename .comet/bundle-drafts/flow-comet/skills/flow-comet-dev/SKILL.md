@@ -22,6 +22,7 @@ description: "flow-kit DEV 阶段协议：TDD + 6 维自查 + diff 边界 verify
    - **第 3 级**：缓存文件也不可读/不存在时，才用内置 R1~R6 快查
    - SUMMARY `## 自检方法` 必须声明三要素：尝试方式 / 失败原因 / 替代方法；回传 Return Contract 时 `selfReview` 字段必填三值之一：`brooks-review`（成功）/ `cache-brooks`（读缓存手动执行）/ `builtin-quickcheck`（最终降级——guard 校验须含缓存尝试证据，新 change 缺失 BLOCKED，旧 change WARN 渐进）。
    - **`## 6 维自查` 段内也须出现自检方法名**（`brooks-review` / `cache-brooks` 字样，如「- 功能: 通过（brooks-review 已跑）」）——guard 校验 6 维自查段是否声明了自检方法（新 change 缺失 BLOCKED，旧 change WARN 渐进）。
+   - **纯测试/纯文档任务**（无生产代码改动，6 维自查非必跑）仍须满足自检方法声明与 builtin 缓存证据——可**引用同 change 其他 SUMMARY 已声明的缓存尝试**（如「自检证据见 T01-SUMMARY（cache-brooks 已读插件缓存）」）满足 guard 校验。
 5. **diff 边界 verify（R6.5）**：`git diff --name-only` 与 TASK write_files 比对，越界必须回滚
 6. **原子提交**：`<type>(<change-id>): <task-id> <subject>`
 

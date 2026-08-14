@@ -75,6 +75,7 @@ Division of labor: `execute` node handles serial delegation (non-parallel tasks,
    - Explicit requirement to return `completedChecks` in the Return Contract containing `required-skill:subagent-execute.flow-comet-dev`（证明已加载 implementation skill；guard W1-D 严格校验，缺失 → exit BLOCKED，无旧 change 豁免）。
    - The task's `read_files` and `write_files` boundaries.
    - Instruction to produce `<task-id>-SUMMARY.md` in `.specs/<change-id>/`.
+   - **提交边界警告**:提交**只含该任务 write_files 范围内的文件**(含测试文件)——不得包含 TASK.md/.specs 工件(由协调者维护,新 change 提交越界 BLOCKED;实测子代理提交含 TASK.md 被 W2-D 拦截)。
 
 3. **Delegate to subagents**（强制 worktree isolation）: 所有并行子代理**必须**使用 `Agent` 工具的 `isolation: "worktree"`，**禁止共享 cwd 直接委托**——hook 白名单依赖 worktree 隔离：子代理 cwd 无 `.comet/flow-comet-state.json`（.gitignore 排除）时 hook 放行源码写入，共享 cwd 的子代理会被 subagent-execute 白名单误拦。Each subagent:
    - Reads TASK.md for its specific task block.
