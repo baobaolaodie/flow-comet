@@ -103,6 +103,11 @@ async function main() {
           // 真实项目端到端验证实证：*-SUMMARY.md 是 flow-comet 强制产物（execute 证据），非越界——豁免
           const violations = committedFiles.filter(f => !f.endsWith('-SUMMARY.md') && !allowed.some(a => f.startsWith(a.replace('*', ''))));
           if (violations.length > 0) {
+            const currentState = await readState();
+            if (currentState?.newChange === true) {
+              console.error('BLOCKED: 提交文件超出 writeFiles 范围: ' + violations.join(', ') + '——新 change 强制委托边界;恢复: 回退越界文件或扩展 write_files');
+              process.exit(1);
+            }
             console.error('HANDOFF WARN: 提交文件超出 writeFiles 范围: ' + violations.join(', '));
           }
         }

@@ -2451,7 +2451,11 @@ async function main() {
           // 过渡规则：旧格式 SUMMARY 无 ## 自检方法 段——
           // 若全文已声明 brooks-review/cache-brooks/builtin（旧模板行为），WARN 兼容不 BLOCKED；无任何自检声明才 BLOCKED
           if (/brooks.?review|cache.?brooks|builtin.?quickcheck/i.test(content)) {
-            console.error('BROOKS-LINT WARN: ' + f + ' 缺 ## 自检方法 段（旧格式），6 维自查已声明自检方法——兼容通过，建议补全');
+            if (isNewChange(state)) {
+              violations.push(f + ' 缺 ## 自检方法 段（新 change 强制声明自检方法）');
+            } else {
+              console.error('BROOKS-LINT WARN: ' + f + ' 缺 ## 自检方法 段（旧格式），6 维自查已声明自检方法——兼容通过，建议补全');
+            }
           } else {
             violations.push(f + ' 缺 ## 自检方法 字段（必须声明 brooks-review 或 builtin-quickcheck）');
           }

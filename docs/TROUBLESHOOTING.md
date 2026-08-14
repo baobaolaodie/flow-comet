@@ -32,7 +32,7 @@
 | `C4-CHECK SKIP: <reason>` | worktree dirty-check skipped (not a git repo, or git command failed) | expected in non-git projects; if it appears in a git repo, the git command failed — check the reason |
 | `WARN COUNT: N` | summary line on entry/exit — N warns were emitted this call | review each WARN above this line |
 | `Unexpected token ... is not valid JSON` (state) | state file carries a UTF-8 BOM or corrupted content | rewrite the state file without BOM (scripts tolerate BOM since 1.2.1) |
-| `ENTER WARN: 节点 <node> 未执行 entry 直接 exit` | the node was exited without entering it first — entry checks (coordinator prohibition / pre-delegation commit check / signature recording) were skipped | run `workflow-guard.mjs entry <node>` first, then exit (progressive, not blocking) |
+| `BLOCKED: 节点 <node> 未执行 entry 直接 exit`（新 change）/ `ENTER WARN: 节点 <node> 未执行 entry 直接 exit`（旧 change） | the node was exited without entering it first — entry checks (coordinator prohibition / pre-delegation commit check / signature recording) were skipped (new changes: BLOCKED; legacy: WARN) | run `workflow-guard.mjs entry <node>` first, then exit |
 | `BLOCKED: done 任务 <id> 缺少 <id>-SUMMARY.md` | a completed task lacks its summary (new changes enforced; legacy changes warn progressively) | produce the matching `<id>-SUMMARY.md` before exiting |
 | `INIT EMPTY-REPO WARN: 仓库无提交` | the git repository has no commits — branch creation is impossible | commit an initial commit, or continue in file-only mode |
 | `PreToolUse:Write hook error: ... non-blocking` (claude -p) | SDK CLI mode downgrades hook exit codes to non-blocking | expected in `claude -p`; main TUI session blocks writes (exit 2) |

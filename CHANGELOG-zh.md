@@ -18,6 +18,8 @@
 
 ### 变更
 
+
+- **新 change 严格模式**:`init` 创建的 change 标记为"新"(`newChange`),全部内容级检查升级为拦截(处置标记/builtin 自检证据/波次散文一致性/越权委托/追加位置/进入证据);旧 change 保持渐进警告。
 - **执行遗漏防护**:节点进入被记录(未 entry 直接 exit 触发警告);新 change 的已完成任务必须有对应 SUMMARY(拦截;旧 change 保持渐进警告);新 change 的交接结果必须有 TDD RED 证据;record 自动补写技能加载声明标记;execute 新增显式空退出豁免;init 检测无提交仓库。
 
 ### 修复

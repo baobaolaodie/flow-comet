@@ -18,6 +18,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ### Changed
 
+
+- **Strict mode for new changes**: changes created via `init` are marked new (`newChange`) and enforce all content-level checks as blocking (disposition markers, builtin self-check evidence, wave-wording consistency, overreach delegation, append placement, entry evidence); legacy changes keep the progressive warnings.
 - **Execution-omission protection**: node entry is now recorded (exit warns if a node was exited without entering it); completed tasks require their summary for new changes (blocked — legacy changes keep the progressive warning); handoff results require TDD RED evidence for new changes; record auto-fills skill-load declaration markers; execute gains an explicit empty-exit exemption; init detects commit-less repositories.
 
 ### Fixed

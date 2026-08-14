@@ -32,7 +32,7 @@
 | `C4-CHECK SKIP: <原因>` | worktree 脏检查被跳过（非 git 仓库，或 git 命令失败） | 非 git 项目下属预期；git 仓库中出现则 git 命令失败——按原因排查 |
 | `WARN COUNT: N` | entry/exit 汇总行——本次调用共 N 条 WARN | 逐条检查该行上方的 WARN |
 | `Unexpected token ... is not valid JSON`（state） | state 文件带 UTF-8 BOM 或内容损坏 | 重写 state 文件（无 BOM；脚本自 1.2.1 起容忍 BOM） |
-| `ENTER WARN: 节点 <node> 未执行 entry 直接 exit` | 节点未 entry 直接 exit——entry 的进入检查(协调者禁令/委托前 commit 检查/签名记录)被跳过 | 先运行 `workflow-guard.mjs entry <node>` 再 exit(渐进,不阻断) |
+| `BLOCKED: 节点 <node> 未执行 entry 直接 exit`（新 change）/ `ENTER WARN: 节点 <node> 未执行 entry 直接 exit`（旧 change） | 节点未 entry 直接 exit——entry 的进入检查(协调者禁令/委托前 commit 检查/签名记录)被跳过(新 change BLOCKED;旧 change WARN) | 先运行 `workflow-guard.mjs entry <node>` 再 exit |
 | `BLOCKED: done 任务 <id> 缺少 <id>-SUMMARY.md` | 已完成任务缺对应 SUMMARY(新 change 强制;旧 change 渐进 WARN) | 补写 `<id>-SUMMARY.md` 后再 exit |
 | `INIT EMPTY-REPO WARN: 仓库无提交` | git 仓库无提交——分支创建不可行 | 先初始提交,或继续纯文件模式 |
 | `PreToolUse:Write hook error: ... non-blocking`（claude -p） | SDK CLI 模式把 hook 退出码降级为 non-blocking | `claude -p` 下属预期；主会话 TUI 会阻止写入（exit 2） |
