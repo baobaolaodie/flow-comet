@@ -503,6 +503,20 @@ const TEST_ITEMS = [
       const rfBad = runState(['record', 'open', '--json-file', outsideFile], dir);
       assertExit(rfBad, 1);
       assertOut(rfBad, '必须在项目根内');
+      // --json-file 符号链接越界(realpath 校验):链接到项目根外的符号链接 → 拒绝。
+      // 平台限制:Windows 创建符号链接需开发者模式/管理员——创建失败时显式跳过并说明,
+      // 不静默(POSIX/CI 真实覆盖该负例)
+      const outsideTarget = path.join(dir, '..', 'outside-symlink-target.json');
+      fs.writeFileSync(outsideTarget, '{"summary":"outside"}', 'utf8');
+      const symlinkPath = path.join(dir, 'payload-link.json');
+      try {
+        fs.symlinkSync(outsideTarget, symlinkPath);
+        const rfSym = runState(['record', 'open', '--json-file', 'payload-link.json'], dir);
+        assertExit(rfSym, 1);
+        assertOut(rfSym, '符号链接');
+      } catch (e) {
+        console.log('  (symlink 负例跳过——当前平台不支持创建符号链接: ' + e.code + ')');
+      }
       // 缺 node 参数 → 拒绝
       const noNode = runState(['record'], dir);
       assertExit(noNode, 1);
@@ -708,7 +722,8 @@ const TEST_ITEMS = [
       assertExit(blocked, 1);
       assertOut(blocked, 'BLOCKED');
       assertOut(blocked, '无委托记录');
-      // 委托并回传契约后 → 通过
+      // 委托并回传契约后 → 通过(request 声明边界——新 change 强制 write_files 来源)
+      assertExit(runHandoff(['request', 'T01', 'T01 委托', '--write-files', 'src/t1.mjs'], dir), 0);
       assertExit(runHandoff(['result', 'T01', JSON.stringify({
         commitHash: 'deadbeef',
         completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],

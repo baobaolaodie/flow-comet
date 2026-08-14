@@ -142,17 +142,18 @@ async function main() {
     // W2-D: 完整版 hash 校验——提交文件 ⊆ writeFiles 允许范围（子集，前缀匹配；越界仅 WARN）
     if (typeof parsed === 'object' && parsed !== null && parsed.commitHash && /^[0-9a-f]{7,40}$/i.test(String(parsed.commitHash))) {
       const commitHash = String(parsed.commitHash);
+      const allowed = state.evidence['subagent-execute'].handoffRequests?.[taskId]?.writeFiles || [];
+      // 新 change 空允许列表 → BLOCK(独立于 git show 成败):委托边界必须有解析来源
+      // (TASK.md 的 write_files 或 request 显式 --write-files)——空列表跳过校验会让
+      // 新 change 绕过写边界检查;跨仓库降级(git show 失败)也不应跳过边界来源检查
+      if (allowed.length === 0 && state?.newChange === true) {
+        console.error('BLOCKED: 委托 ' + taskId + ' 的 write_files 允许列表为空——新 change 强制委托边界(检查 TASK.md 的 write_files 或 request 显式传 --write-files)');
+        process.exit(1);
+      }
       const { execSync } = await import('child_process');
       try {
         const out = execSync(`git show ${commitHash} --name-only --format=`, { cwd: runRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
         const committedFiles = out.split('\n').map(s => s.trim()).filter(Boolean);
-        const allowed = state.evidence['subagent-execute'].handoffRequests?.[taskId]?.writeFiles || [];
-        // 新 change 空允许列表 → BLOCK:委托边界必须有解析来源(TASK.md 的 write_files 或
-        // request 显式 --write-files)——空列表跳过校验会让新 change 绕过写边界检查
-        if (allowed.length === 0 && state?.newChange === true) {
-          console.error('BLOCKED: 委托 ' + taskId + ' 的 write_files 允许列表为空——新 change 强制委托边界(检查 TASK.md 的 write_files 或 request 显式传 --write-files)');
-          process.exit(1);
-        }
         // 旧 change 空允许列表:保持跳过(兼容路径,避免历史噪音)
         if (allowed.length > 0) {
           // 段感知精确匹配(writeFiles 条目按路径段 glob——src/foo 不匹配 src/foobar,
