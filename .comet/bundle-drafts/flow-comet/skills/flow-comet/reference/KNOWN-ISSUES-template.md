@@ -1,6 +1,6 @@
 # KNOWN-ISSUES（归档遗留清单模板）
 
-> 用途：归档节点使用——REVIEW.md 发现区标记为 `[转待办]` 的 Minor 发现 + 已知限制 → 归档时生成 KNOWN-ISSUES.md 置于 `.specs/archive/<日期>-<change-id>/` 下（归档输出 Schema 的可选产物）。
+> 用途：归档节点使用——REVIEW.md 发现区标记为 `[转待办]` 的 Minor 发现 + 已知限制 → 归档时生成 KNOWN-ISSUES.md 置于 `.specs/archive/<日期>-<change-id>/` 下（归档输出 Schema 的必选产物；无遗留也显式写「无遗留问题」）。
 > 用法：按实际 change 修订本模板；「遗留清单」节记录本 change 结束后仍需跟进的事项，每项标注跟进动作与责任批次。
 > 纪律：本模板为分发产物——零过程代号；归档实例（.specs/archive/ 下）不受此限。
 

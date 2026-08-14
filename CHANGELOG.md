@@ -48,6 +48,12 @@ Multi-platform installer framework, platform modularization, and real-artifact e
 - CI bilingual-mirror check now covers SECURITY (CoC excluded by design, matching the local checker); the version-expected extraction no longer relies on a dead fallback.
 - Bundle metadata aligned: skills list, references, and script side effects match the actual distribution.
 - Mechanism docs and the skill guidance now state the strict-mode rules explicitly (entry enforcement, summary enforcement, and command-level write interception in the Red Flags).
+- Verification-failure counting is now isolated per change — switching changes no longer carries over another change's failure count (legacy states migrate automatically).
+- Archived changes now require the leftover-issues list (explicitly stating "no leftovers" when none); declaration-marker auto-fill no longer rebuilds an archived change's active directory.
+- The empty-repository branch hint now matches behavior — no branch is claimed when none can be created.
+- Review field-label exemption matches full labels only (a finding titled like "Source maps expose paths" is no longer mis-exempted from disposition validation).
+- `--json-file` reads are restricted to paths inside the project root (record and handoff).
+- The hook installer fails explicitly when POSIX executable bits cannot be set (previously silent — git would skip non-executable hooks).
 
 ## [1.3.1] - 2026-08-11
 
