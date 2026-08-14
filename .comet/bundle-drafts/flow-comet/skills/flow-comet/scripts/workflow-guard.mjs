@@ -2206,12 +2206,14 @@ async function main() {
       const headings = [...content.matchAll(/^###\s*L-(\d+)/gm)];
       if (zoneIndex !== -1) {
         const outside = headings.some(h => h.index < zoneIndex);
-        if (outside)         if (isNewChange(state)) {
-          console.error('BLOCKED: LESSONS.md 有条目在条目区外（新 change 强制条目插入条目区）;恢复: 移入条目区');
-          process.exit(1);
+        if (outside) {
+          if (isNewChange(state)) {
+            console.error('BLOCKED: LESSONS.md 有条目在条目区外（新 change 强制条目插入条目区）;恢复: 移入条目区');
+            process.exit(1);
+          }
+          // 诊断信息附带 zoneIndex/条目位置——偶发 WARN 排查时可直接定位(文件时序/编码差异兜底)
+          console.error('WARN: LESSONS.md 有条目在条目区外(zoneIndex=' + zoneIndex + ', 条目数=' + headings.length + ', 区外条目: ' + headings.filter(h => h.index < zoneIndex).map(h => 'L-' + h[1]).join(',') + ')');
         }
-        // 诊断信息附带 zoneIndex/条目位置——偶发 WARN 排查时可直接定位(文件时序/编码差异兜底)
-        console.error('WARN: LESSONS.md 有条目在条目区外(zoneIndex=' + zoneIndex + ', 条目数=' + headings.length + ', 区外条目: ' + headings.filter(h => h.index < zoneIndex).map(h => 'L-' + h[1]).join(',') + ')');
       }
       const nums = headings.map(h => parseInt(h[1], 10));
       // 分段检测：按 ## 标题分段，仅同段内比较编号递增（多段 LESSONS 如「活跃条目/已解决条目」编号体系可独立）

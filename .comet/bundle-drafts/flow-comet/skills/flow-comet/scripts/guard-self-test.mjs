@@ -729,6 +729,9 @@ const SCENARIOS = [
       const res = runGuard(['exit', 'verify'], dir);
       assertExit(res, 0);
       assertOut(res, 'WARN: LESSONS.md 条目编号乱序');
+      // 子断言:无区外条目时不得打印"条目在条目区外"WARN(误报修复——修复前
+      // console.error 在 if(outside) 之外无条件执行,每次 exit 都刷一条空 WARN)
+      assertNotOut(res, '条目在条目区外');
       // 子断言:## 验证命令 段标题带括号后缀(与 ## 自检方法 段括号后缀兼容风格一致)不误 BLOCK
       writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令（必填 · exit verify 真实执行）\n\n```bash\nnode -e "1"\n```\n');
       const resBracket = runGuard(['exit', 'verify'], dir);
