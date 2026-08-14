@@ -74,7 +74,9 @@ flow-kit 9 阶段工作流的 workflow-kernel 实现。保留 flow-kit 的全部
 | "LESSONS.md 不用扫" | R1.8：每个 DEV 任务必须扫描 |
 | "测试从实现派生就行" | R5.1：测试必须从 AC 派生 |
 | "guard 失败了，让用户决定" | 先自动诊断并执行唯一安全修复；无合法动作时才报告停止条件 |
-| "subagent-execute 阶段，我直接改源码更快" | 协调者禁令：subagent-execute 阶段主会话禁止写源码（hook 白名单只允许 .specs/），必须 worktree 委托子代理 |
+| "跳过 entry 直接 exit，反正没检查" | 新 change 未 entry 直接 exit → BLOCKED（进入检查不可跳过）；旧 change WARN 渐进 |
+| "SUMMARY 不写，任务先标 done" | 新 change done 任务缺 SUMMARY → BLOCKED（产物完整性强制）；旧 change WARN 渐进 |
+| "subagent-execute 阶段，我直接改源码更快" | 协调者禁令：subagent-execute 阶段主会话禁止写源码（hook 白名单只允许 .specs/，Write/Edit 与 Bash 写命令均物理拦截），必须 worktree 委托子代理 |
 
 ## Workflow Nodes
 
