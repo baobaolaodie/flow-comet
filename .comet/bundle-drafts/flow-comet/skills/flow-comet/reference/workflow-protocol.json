@@ -285,7 +285,7 @@
       "guardrails": [
         {
           "id": "verify-evidence",
-          "label": "TEST.md or UAT.md exists",
+          "label": "TEST.md + UAT.md exist",
           "validation": "artifact-exists"
         }
       ],
