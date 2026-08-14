@@ -64,7 +64,7 @@
 
 覆盖：验证命令真实执行与超时配置、归档完整流程（遗留清单 + 目录移动 + 完成态）、归档路径声明标记查找（先移目录后 exit 顺序下标记只存归档路径）。
 
-测试项（3）：H1 验证命令真实执行与超时 / H2 归档完整流程 / H3 归档路径声明标记查找。
+测试项（4）：H1 验证命令真实执行与超时 / H2 归档完整流程 / H3 归档路径声明标记查找 / H4 归档后自动补声明标记写归档路径（不重建活动目录）。
 
 ### I. 异常路径
 
@@ -83,6 +83,12 @@
 覆盖：prepare-env 生成的版本标识（优先源仓库 git describe：发布版 = 精确 tag、开发态 = `<tag>-N-g<hash>`；无 git 时回退权威源随技能包分发的 INSTALLED_VERSION）精确反映源仓库状态；权威源文件与 CHANGELOG 首个版本段一致（CI release-consistency 同规则）；多平台安装（平台描述符驱动：claude-code 默认零变化 / codex——技能落 `.agents/skills/`、SKILL 命令路径平台化替换、`.codex/hooks.json`（顶层 hooks 包裹层 + matcher `*`）注入、`config.toml [features] hooks` 启用、AGENTS.md 托管区、纯 codex 不生成 `.claude/`）；hook 平台分支输出契约（codex = `{"decision":"block"}` deny 通道 + Bash 命令写入检测（PowerShell cmdlet / .NET File API / 重定向）、放行 `{}`；claude-code 文本输出不变）；平台选择链（`--platform` 显式 / TTY 交互 / 无 TTY 探测 `.codex/`·`.claude/` / 默认 claude-code）；purge 语义（缺 `--yes` 拒绝 / 重建 / 用户内容保留）；平台描述符驱动防回归（main 统一调度——源码无平台分支标识，安装/清理逻辑全部封装在描述符条目；从源码提取平台逐一安装冒烟，未来新增平台自动纳入测试）。
 
 测试项（6）：K1 安装器版本标识 / K2 codex 平台安装冒烟（技能/路径替换/hooks.json/AGENTS 托管区 + 非法 hooks.json fail-safe）/ K3 hook 平台分支 JSON 契约 + CC 分支不变 / K4 平台选择链（显式/无 TTY 探测/默认/未知平台拒绝）/ K5 purge 语义（缺 --yes 拒绝/重建/用户内容保留）/ K6 平台描述符驱动（全平台安装冒烟 + main 统一调度断言）。
+
+### L. 执行遗漏防护（M1~M8 真实链路）
+
+覆盖：进入证据（entry 记录 enteredNodes、exit 未 entry 触发渐进警告）、空退出豁免（显式 emptyExitApproved 通过 / 无豁免仍拦截）、空仓库提示（init 在无提交仓库输出 EMPTY-REPO）。
+
+测试项（3）：L1 进入证据 / L2 空退出豁免 / L3 空仓库。
 
 ## 四、附：design 节点 required 自指核验结论
 
