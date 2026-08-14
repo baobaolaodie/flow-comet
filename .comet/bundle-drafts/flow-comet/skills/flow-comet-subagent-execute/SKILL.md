@@ -180,7 +180,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record subagent-execut
 |--------------|-------|-----------------|
 | `handoff-evidence` | Handoff evidence recorded for each task | evidence-only |
 | `parallel-only` | Only parallel="true" tasks delegated | 执行纪律（review 把关），guard 不校验 |
-| `boundary-safe` | No subagent exceeded write_files | 执行纪律（review 把关），guard 不校验 |
+| `boundary-safe` | No subagent exceeded write_files | 新 change 提交越界 BLOCKED（handoff 记录时校验），旧 change WARN 渐进 |
 | `summaries-exist` | SUMMARY.md exists for each delegated task | artifact-exists |
 
 ## Exit Check

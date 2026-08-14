@@ -766,6 +766,26 @@ const TEST_ITEMS = [
       assertExit(result, 0);
       assertOut(result, 'HANDOFF RESULT: T01');
       assertNotOut(result, 'HANDOFF WARN');
+      // 新 change 提交越界(writeFiles 范围外文件)→ BLOCKED(记录时校验)
+      const stForP4 = readStateFile(dir);
+      stForP4.newChange = true;
+      writeState(dir, stForP4);
+      writeFile(dir, 'src/evil.mjs', 'export const evil = 1;\n');
+      execFileSync('git', ['add', 'src/evil.mjs'], { cwd: dir });
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'chore: out-of-bound file'], { cwd: dir });
+      const evilHash = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+      const reqT02 = runHandoff(['request', 'T02', 'T02 委托', '--write-files', 'src/t2.mjs'], dir);
+      assertExit(reqT02, 0);
+      const overBound = runHandoff(['result', 'T02', JSON.stringify({
+        status: 'DONE', taskId: 'T02', commitHash: evilHash,
+        changedFiles: ['src/evil.mjs'],
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        greenEvidence: { command: 'node --check src/evil.mjs', output: 'ok' },
+        redEvidence: { command: 'node --check src/evil.mjs' },
+      })], dir);
+      assertExit(overBound, 1);
+      assertOut(overBound, 'BLOCKED');
+      assertOut(overBound, 'writeFiles');
       // ③ 状态：请求与结果齐可见
       const status = runHandoff(['status'], dir);
       assertExit(status, 0);
