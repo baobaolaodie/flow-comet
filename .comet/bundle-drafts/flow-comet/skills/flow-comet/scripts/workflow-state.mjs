@@ -912,8 +912,18 @@ async function main() {
     const recordNodeDef = (protocol.nodes ?? []).find((n) => n.id === nodeId);
     if (recordNodeDef && markerChange) {
       const recordProtoFiles = NODE_PROTOCOL_FILES[nodeId] ?? [];
+      // M5 标记目录解析:活动路径优先;change 已归档(活动目录不存在但归档目录存在)
+      // 时写归档路径——防重建已归档的活动目录(归档移动语义;与 findSkillLoadsDir 双路径一致)
+      const activeLoadsDir = path.join(runRoot, '.specs', markerChange, '.skill-loads');
+      let targetLoadsDir = activeLoadsDir;
+      if (!(await fileExists(activeLoadsDir))) {
+        const archived = await findSkillLoadsDir(markerChange);
+        if (archived !== null && archived.dir !== activeLoadsDir) {
+          targetLoadsDir = archived.dir;
+        }
+      }
       for (const binding of recordNodeDef.requiredSkillCalls ?? []) {
-        const markerFile = path.join(runRoot, '.specs', markerChange, '.skill-loads', nodeId + '-' + binding.skill + '.json');
+        const markerFile = path.join(targetLoadsDir, nodeId + '-' + binding.skill + '.json');
         let markerExists = false;
         try { await fs.access(markerFile); markerExists = true; } catch { /* 标记不存在 */ }
         if (!markerExists) {

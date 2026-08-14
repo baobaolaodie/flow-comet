@@ -1240,6 +1240,38 @@ const TEST_ITEMS = [
     },
   },
 
+  {
+    name: 'H4 归档:M5 自动补标记写归档路径,不重建活动目录',
+    run: (dir) => {
+      // 归档顺序(先移目录后 record)下,record archive 的 M5 自动补声明标记应写归档路径
+      // (.skill-loads/ 随目录移动),不得重建已归档的活动目录(归档移动语义)
+      assertExit(runState(['init', 'arch-m5'], dir), 0);
+      writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
+      writeFile(dir, 'flow-kit/prompts/7-integration.md', '# 阶段 7 · INTEGRATION\n\n## 角色\n\n你是 Integrationer。\n');
+      // 手动 skill-load(活动路径标记,随目录移动进归档)
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
+      // 推进到 archive
+      const st0 = readStateFile(dir);
+      st0.currentNode = 'archive';
+      writeState(dir, st0);
+      // 移动目录到归档(真实归档流程:先移动后 record/exit)
+      fs.mkdirSync(path.join(dir, '.specs', 'archive'), { recursive: true });
+      fs.renameSync(path.join(dir, '.specs', 'arch-m5'), path.join(dir, '.specs', 'archive', '2026-08-14-arch-m5'));
+      // record archive(移动后)——M5 自动补 archive 声明标记
+      const rec = runState(['record', 'archive', '{"summary":"archived"}'], dir);
+      assertExit(rec, 0);
+      // 断言 1:活动目录不得重建(归档移动语义——M5 不得重建已归档的活动目录)
+      if (fs.existsSync(path.join(dir, '.specs', 'arch-m5'))) {
+        throw new Error('M5 在归档后重建了活动目录(残留): .specs/arch-m5/');
+      }
+      // 断言 2:归档路径有 M5 自动补的 archive 标记(标记随目录移动后的归属路径)
+      const markerInArchive = path.join(dir, '.specs', 'archive', '2026-08-14-arch-m5', '.skill-loads', 'archive-flow-comet-integration.json');
+      if (!fs.existsSync(markerInArchive)) {
+        throw new Error('归档路径缺 M5 自动补标记: ' + markerInArchive);
+      }
+    },
+  },
+
   // ---------- I. 异常路径 ----------
 
   {
