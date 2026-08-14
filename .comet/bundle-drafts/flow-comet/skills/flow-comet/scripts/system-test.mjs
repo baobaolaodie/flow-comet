@@ -841,6 +841,7 @@ const TEST_ITEMS = [
       assertOut(badHash, 'HANDOFF ERROR: commitHash 无效或 git show 失败');
       // ⑤ --json-file 读取 JSON payload(与 record 对齐——规避 Windows PowerShell
       // 引号剥离导致 JSON 损坏;须正确解析为对象而非存成字符串)
+      assertExit(runHandoff(['request', 'T03', 'T03 委托', '--write-files', 'src/t1.mjs'], dir), 0);
       const payloadFile = path.join(dir, 'contract.json');
       fs.writeFileSync(payloadFile, JSON.stringify({
         status: 'DONE', taskId: 'T03', commitHash: hash,
@@ -862,6 +863,34 @@ const TEST_ITEMS = [
       const viaBad = runHandoff(['result', 'T04', '--json-file', outsideContract], dir);
       assertExit(viaBad, 1);
       assertOut(viaBad, '必须在项目根内');
+      // ⑦ 新 change 空 write_files 允许列表 → BLOCK(委托边界必须有解析来源——TASK.md
+      // 无 write_files 块且 request 未显式传 --write-files;空列表跳过校验会让新 change 绕过)
+      const stEmpty = readStateFile(dir);
+      stEmpty.newChange = true;
+      writeState(dir, stEmpty);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="T05" status="pending"><action>无边界任务</action><verify>echo ok</verify></task>\n');
+      assertExit(runHandoff(['request', 'T05'], dir), 0);
+      const resEmpty = runHandoff(['result', 'T05', JSON.stringify({
+        status: 'DONE', taskId: 'T05', commitHash: hash,
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        greenEvidence: { command: 'echo ok', output: 'ok' },
+      })], dir);
+      assertExit(resEmpty, 1);
+      assertOut(resEmpty, '允许列表为空');
+      // ⑧ 段感知精确匹配:allowed=[src/foo] 不匹配提交 src/foobar.mjs(前缀匹配会放行,
+      // 精确匹配判越界——修复前前缀匹配误放行,此处应 RED)
+      writeFile(dir, 'src/foobar.mjs', 'export const x = 1;\n');
+      execFileSync('git', ['add', 'src/foobar.mjs'], { cwd: dir });
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'chore: foobar'], { cwd: dir });
+      const foobarHash = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+      assertExit(runHandoff(['request', 'T06', '--write-files', 'src/foo'], dir), 0);
+      const resExact = runHandoff(['result', 'T06', JSON.stringify({
+        status: 'DONE', taskId: 'T06', commitHash: foobarHash,
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        greenEvidence: { command: 'echo ok', output: 'ok' },
+      })], dir);
+      assertExit(resExact, 1);
+      assertOut(resExact, '超出 writeFiles 范围');
     },
   },
 
@@ -915,20 +944,24 @@ const TEST_ITEMS = [
       const blocked = runGuard(['exit', 'subagent-execute'], dir);
       assertExit(blocked, 1);
       assertOut(blocked, 'requires evidence: handoff-result');
-      // ② 真实委托链路：handoff result 回传完整契约（键名契约：嵌套 handoffResult 识别 +
-      // Return Contract 校验）→ 出口通过
+      // ② 真实委托链路：request 声明边界(新 change 强制 write_files 来源)→ handoff result
+      // 回传完整契约（键名契约：嵌套 handoffResult 识别 + Return Contract 校验）→ 出口通过
       const st2 = readStateFile(dir);
       st2.evidence['subagent-execute'] = { summary: 'delegated and collected' };
       writeState(dir, st2);
+      const reqP01 = runHandoff(['request', 'P01', '委托实现 P01', '--write-files', 'src/p1.mjs'], dir);
+      assertExit(reqP01, 0);
       const result = runHandoff(['result', 'P01', fullContract(hash, 'P01')], dir);
       assertExit(result, 0);
       assertOut(result, 'HANDOFF RESULT: P01');
       const pass = runGuard(['exit', 'subagent-execute'], dir);
       assertExit(pass, 0);
       assertOut(pass, 'ALL CHECKS PASSED');
-      // ③ 契约缺完成检查清单 → 出口拦截（严格校验无豁免）
+      // ③ 契约缺完成检查清单 → 出口拦截（严格校验无豁免）——重写证据时保留委托请求
+      // (新 change 强制 write_files 边界来源;直接 result 无 request 会被边界检查拦截)
       const st3 = readStateFile(dir);
-      st3.evidence['subagent-execute'] = { summary: 'delegated' };
+      const keepRequests = st3.evidence['subagent-execute'].handoffRequests;
+      st3.evidence['subagent-execute'] = { summary: 'delegated', ...(keepRequests ? { handoffRequests: keepRequests } : {}) };
       writeState(dir, st3);
       const weak = JSON.parse(fullContract(hash, 'P01'));
       delete weak.completedChecks;

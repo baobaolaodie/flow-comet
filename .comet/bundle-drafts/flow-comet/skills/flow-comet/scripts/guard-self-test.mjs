@@ -2138,8 +2138,9 @@ const SCENARIOS = [
     },
   },
 
-  // 97: handoff changedFiles 含 *-SUMMARY.md（强制产物）→ 不报越界 WARN
-  // （修复前 W2-D 子集校验把强制产物当越界 = RED；真实 commitHash 供 git show 校验）
+  // 97: handoff changedFiles 含任务专属 SUMMARY(.specs/<change-id>/<task-id>-SUMMARY.md,
+  // 精确豁免路径)→ 不报越界 WARN;其他 *-SUMMARY.md(非本任务路径)仍判越界
+  // (修复前 W2-D 以 endsWith('-SUMMARY.md') 全量豁免 + 前缀匹配 = RED;真实 commitHash 供 git show 校验)
   {
     name: '97 handoff 含 SUMMARY 文件 → 无越界 WARN',
     run: (dir) => {
@@ -2148,9 +2149,9 @@ const SCENARIOS = [
       g(['config', 'user.email', 't@t']);
       g(['config', 'user.name', 't']);
       writeFile(dir, 'test_stats.py', 'def f():\n    pass\n');
-      writeFile(dir, 'T01-SUMMARY.md', '# T01-SUMMARY\n## 做了什么\nx\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', '# T01-SUMMARY\n## 做了什么\nx\n');
       // 只提交指定文件（场景运行器预置的 reference/ 协议文件不入提交集）
-      g(['add', 'test_stats.py', 'T01-SUMMARY.md']);
+      g(['add', 'test_stats.py', '.specs/' + CHANGE_ID + '/T01-SUMMARY.md']);
       g(['commit', '-qm', 'init']);
       const hash = g(['rev-parse', 'HEAD']).stdout.trim();
       const st = baseState('subagent-execute');
@@ -2161,12 +2162,12 @@ const SCENARIOS = [
       writeState(dir, st);
       const res = runHandoff(['result', 'T01', JSON.stringify({
         status: 'DONE', taskId: 'T01', commitHash: hash,
-        changedFiles: ['test_stats.py', 'T01-SUMMARY.md'],
+        changedFiles: ['test_stats.py', '.specs/' + CHANGE_ID + '/T01-SUMMARY.md'],
         completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
         greenEvidence: { command: 'node --check test_stats.py', output: 'ok' },
       })], dir);
       assertExit(res, 0);
-      if (res.output.includes('超出 writeFiles 范围')) throw new Error('SUMMARY 为强制产物不应报越界 WARN');
+      if (res.output.includes('超出 writeFiles 范围')) throw new Error('任务专属 SUMMARY 不应报越界 WARN');
     },
   },
 
@@ -2842,6 +2843,12 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="T01" parallel="true" status="pending" depends_on="">\n  <name>p</name>\n  <write_files>a</write_files>\n  <action>p</action>\n  <verify>t</verify>\n  <done>d</done>\n</task>');
       const res = runGuard(['exit', 'execute'], dir);
       assertExit(res, 0);
+      // 子断言:豁免不适用于存在未完成串行任务——防规划错误被豁免掩盖
+      // (修复前 emptyExitApproved 会跳过串行 pending 阻断,此处应 RED)
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="T02" status="pending"><action>串行任务</action><write_files>f</write_files><verify>v</verify></task>\n');
+      const resSerial = runGuard(['exit', 'execute'], dir);
+      assertExit(resSerial, 1);
+      assertOut(resSerial, '串行 pending');
     },
   },
 

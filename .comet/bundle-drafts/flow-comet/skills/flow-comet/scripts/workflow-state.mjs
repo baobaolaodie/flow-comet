@@ -40,12 +40,21 @@ async function fileExists(file) {
 
 // --json-file 路径校验:解析后必须位于项目根内(拒绝相对/绝对形式的越界路径,
 // 如 ../..、其他盘符——防读取任意文件内容进 evidence)。runRoot 内的绝对路径合法
-// (场景内文件常见写法,与 record/handoff 的既有用法一致)
-function resolveJsonFileWithinRunRoot(jsonFile) {
+// (场景内文件常见写法,与 record/handoff 的既有用法一致)。符号链接解析后的实际路径
+// 同样必须在项目根内(词法校验不防 symlink 穿越——realpath 后再次校验)
+async function resolveJsonFileWithinRunRoot(jsonFile) {
   const abs = path.resolve(runRoot, jsonFile);
   const rel = path.relative(runRoot, abs);
   if (path.isAbsolute(rel) || rel === '..' || rel.startsWith('..' + path.sep)) {
     throw new Error('--json-file 路径必须在项目根内: ' + jsonFile);
+  }
+  // 统一对 runRoot 也 realpath——Windows 上 runRoot 可能是 8.3 短路径(如 LONGYI~1),
+  // realpath 会展开为长路径,两者直接 relative 会误判越界
+  const realRoot = await fs.realpath(runRoot);
+  const real = await fs.realpath(abs);
+  const realRel = path.relative(realRoot, real);
+  if (path.isAbsolute(realRel) || realRel === '..' || realRel.startsWith('..' + path.sep)) {
+    throw new Error('--json-file 路径经符号链接解析后越出项目根: ' + jsonFile);
   }
   return abs;
 }
@@ -899,7 +908,7 @@ async function main() {
       payloadArgs.push(arg);
     }
     const raw = jsonFile !== null
-      ? await fs.readFile(resolveJsonFileWithinRunRoot(jsonFile), 'utf8')
+      ? await fs.readFile(await resolveJsonFileWithinRunRoot(jsonFile), 'utf8')
       : payloadArgs.join(' ');
     try {
       parsed = raw ? JSON.parse(raw) : {};

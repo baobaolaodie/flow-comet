@@ -17,14 +17,38 @@ const statePath = path.join(runRoot, '.comet', 'flow-comet-state.json');
 async function fileExists(f) { try { await fs.access(f); return true; } catch { return false; } }
 
 // --json-file 路径校验:解析后必须位于项目根内(与 record 同规则——拒绝越界路径,
-// 防读取任意文件内容进 evidence;runRoot 内绝对路径合法)
-function resolveJsonFileWithinRunRoot(jsonFile) {
+// 防读取任意文件内容进 evidence;runRoot 内绝对路径合法)。符号链接解析后的实际路径
+// 同样必须在项目根内(词法校验不防 symlink 穿越——realpath 后再次校验)
+async function resolveJsonFileWithinRunRoot(jsonFile) {
   const abs = path.resolve(runRoot, jsonFile);
   const rel = path.relative(runRoot, abs);
   if (path.isAbsolute(rel) || rel === '..' || rel.startsWith('..' + path.sep)) {
     throw new Error('--json-file 路径必须在项目根内: ' + jsonFile);
   }
+  // 统一对 runRoot 也 realpath——Windows 上 runRoot 可能是 8.3 短路径(如 LONGYI~1),
+  // realpath 会展开为长路径,两者直接 relative 会误判越界
+  const realRoot = await fs.realpath(runRoot);
+  const real = await fs.realpath(abs);
+  const realRel = path.relative(realRoot, real);
+  if (path.isAbsolute(realRel) || realRel === '..' || realRel.startsWith('..' + path.sep)) {
+    throw new Error('--json-file 路径经符号链接解析后越出项目根: ' + jsonFile);
+  }
   return abs;
+}
+
+// writeFiles 段感知 glob 匹配:按 / 分段,`*` 只匹配单段(不跨段);精确条目要求完全相等
+// (不再用前缀匹配——src/foo 不得匹配 src/foobar;src/*.test.js 只匹配 src/ 下一层)
+function matchWriteFilePattern(file, pattern) {
+  const f = String(file).replace(/\\/g, '/');
+  const p = String(pattern).replace(/\\/g, '/');
+  const fp = f.split('/');
+  const pp = p.split('/');
+  if (fp.length !== pp.length) return false;
+  for (let i = 0; i < pp.length; i++) {
+    if (pp[i] === '*') continue;
+    if (pp[i] !== fp[i]) return false;
+  }
+  return true;
 }
 
 async function readState() {
@@ -106,7 +130,7 @@ async function main() {
     }
     let raw = resultArgs.join(' ');
     if (jsonFile !== null) {
-      raw = await fs.readFile(resolveJsonFileWithinRunRoot(jsonFile), 'utf8');
+      raw = await fs.readFile(await resolveJsonFileWithinRunRoot(jsonFile), 'utf8');
     }
     if (!taskId) { console.error('Usage: workflow-handoff.mjs result <task-id> <result>'); process.exit(1); }
     // W1-D: 尝试解析 JSON（Return Contract）——解析失败则存原始字符串
@@ -123,10 +147,19 @@ async function main() {
         const out = execSync(`git show ${commitHash} --name-only --format=`, { cwd: runRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
         const committedFiles = out.split('\n').map(s => s.trim()).filter(Boolean);
         const allowed = state.evidence['subagent-execute'].handoffRequests?.[taskId]?.writeFiles || [];
-        // 空 writeFiles（request 未带 --write-files）时跳过子集校验——避免全量越界误报噪音
+        // 新 change 空允许列表 → BLOCK:委托边界必须有解析来源(TASK.md 的 write_files 或
+        // request 显式 --write-files)——空列表跳过校验会让新 change 绕过写边界检查
+        if (allowed.length === 0 && state?.newChange === true) {
+          console.error('BLOCKED: 委托 ' + taskId + ' 的 write_files 允许列表为空——新 change 强制委托边界(检查 TASK.md 的 write_files 或 request 显式传 --write-files)');
+          process.exit(1);
+        }
+        // 旧 change 空允许列表:保持跳过(兼容路径,避免历史噪音)
         if (allowed.length > 0) {
-          // 真实项目端到端验证实证：*-SUMMARY.md 是 flow-comet 强制产物（execute 证据），非越界——豁免
-          const violations = committedFiles.filter(f => !f.endsWith('-SUMMARY.md') && !allowed.some(a => f.startsWith(a.replace('*', ''))));
+          // 段感知精确匹配(writeFiles 条目按路径段 glob——src/foo 不匹配 src/foobar,
+          // src/*.test.js 只匹配 src/ 下一层);*-SUMMARY.md 豁免收窄为精确的任务摘要路径
+          // (.specs/<change-id>/<task-id>-SUMMARY.md——flow-comet 强制产物,非越界)
+          const summaryExact = '.specs/' + state.activeChange + '/' + taskId + '-SUMMARY.md';
+          const violations = committedFiles.filter(f => f !== summaryExact && !allowed.some(a => matchWriteFilePattern(f, a)));
           if (violations.length > 0) {
             const currentState = await readState();
             if (currentState?.newChange === true) {

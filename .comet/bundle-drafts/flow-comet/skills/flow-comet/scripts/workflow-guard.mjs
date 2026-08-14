@@ -2513,17 +2513,16 @@ async function main() {
         parallel: /parallel="true"/.test(block),
       })).filter(t => t.id);
 
-      // 串行 pending → BLOCKED（execute 任务没做完）
-      // M6/R4: 显式空退出豁免(evidence.execute.emptyExitApproved)——全 parallel 任务无串行可做时,
-      // 协调者显式声明后允许空退出(替代自动路由/parallelTakeoverApproved;防规划错误仍默认 BLOCKED)
-      // R4: 豁免审计——exit 时输出 EMPTY-EXIT 提示(豁免记录可审计)
+      // 串行 pending → BLOCKED（execute 任务没做完）——emptyExitApproved 不豁免串行 pending:
+      // 豁免语义是"全 parallel 无串行可做时空退出";存在未完成串行任务时豁免不应生效
+      // (防规划错误被豁免掩盖;豁免仅作用于后续产物校验跳过,审计提示保留)
       const emptyExitApproved = !!(state.evidence?.execute && state.evidence.execute.emptyExitApproved);
       if (emptyExitApproved) {
         console.error('EMPTY-EXIT: execute 空退出豁免已生效(evidence.execute.emptyExitApproved)——审计记录:该 change 在无串行任务时显式豁免空退出');
       }
       const serialPending = tasks.filter(t => !t.parallel && t.status !== 'done');
-      if (serialPending.length > 0 && !emptyExitApproved) {
-        console.error('BLOCKED: execute 出口仍有串行 pending 任务: ' + serialPending.map(t => t.id).join(', '));
+      if (serialPending.length > 0) {
+        console.error('BLOCKED: execute 出口仍有串行 pending 任务: ' + serialPending.map(t => t.id).join(', ') + '——空退出豁免不适用于存在未完成串行任务的情况(先完成串行任务,或修正任务标记)');
         process.exit(1);
       }
 
