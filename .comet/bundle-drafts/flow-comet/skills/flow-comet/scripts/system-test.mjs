@@ -3,7 +3,7 @@
 //
 // 定位：guard-self-test 是引擎脚本的单元/场景级回归（135 场景，fixture 构造为主）；
 // 本套件是**系统级**测试——每个测试项走真实命令序列（init → record → guard exit → handoff →
-// hook …），覆盖 flow-comet 全部机制面（A~K 十一类）：
+// hook …），覆盖 flow-comet 全部机制面（A~L 十二类）：
 //   A. 状态机与路由（init/status/next/select/advance/record/execution-mode/config）
 //   B. 声明机制（skill-load 标记/record 校验/时间序/损坏 fail-closed/委托范围豁免/exit 协议标记/旧兼容）
 //   C. 委托链路（handoff request/result/status、RED 先于 GREEN、Return Contract、证据键名契约）
@@ -316,7 +316,7 @@ function runLocalTool(checker, repoRoot) {
   return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
 }
 
-// ---------- 系统测试项（A~K 十一类） ----------
+// ---------- 系统测试项（A~L 十二类） ----------
 
 const TEST_ITEMS = [
   // ---------- A. 状态机与路由 ----------
@@ -497,6 +497,12 @@ const TEST_ITEMS = [
       assertExit(rf, 0);
       const st3 = readStateFile(dir);
       if (st3.evidence.open.summary !== 'from-file') throw new Error('--json-file payload 未生效');
+      // --json-file 越界路径(解析后出项目根)→ 拒绝(防读取任意文件进 evidence)
+      const outsideFile = path.join(dir, '..', 'outside.json');
+      fs.writeFileSync(outsideFile, '{"summary":"outside"}', 'utf8');
+      const rfBad = runState(['record', 'open', '--json-file', outsideFile], dir);
+      assertExit(rfBad, 1);
+      assertOut(rfBad, '必须在项目根内');
       // 缺 node 参数 → 拒绝
       const noNode = runState(['record'], dir);
       assertExit(noNode, 1);
@@ -550,6 +556,39 @@ const TEST_ITEMS = [
       const unknown = runState(['config', 'set', 'foo', 'bar'], dir);
       assertExit(unknown, 1);
       assertOut(unknown, 'BLOCKED: 未知配置键');
+    },
+  },
+
+  {
+    name: 'A12 verifyFailures:切换 change 后计数独立(按 change 存储)',
+    run: (dir) => {
+      // ① init ch-a + verify-fail 两次(2/3,未超限)
+      assertExit(runState(['init', 'ch-a', '--init-skip'], dir), 0);
+      assertExit(runState(['verify-fail'], dir), 0);
+      const r2 = runState(['verify-fail'], dir);
+      assertExit(r2, 0);
+      assertOut(r2, 'VERIFY-FAIL: 2/3');
+      // ② 切换到 ch-b(目录需存在)→ verify-fail 从 1 起——按 change 存储后计数独立
+      // (若实现仍用全局计数 2,此处输出 3/3——断言 1/3 即 RED)
+      writeFile(dir, '.specs/ch-b/CHANGE.md', '# CHANGE\n## Why\nx\n');
+      assertExit(runState(['select', 'ch-b'], dir), 0);
+      const r3 = runState(['verify-fail'], dir);
+      assertExit(r3, 0);
+      assertOut(r3, 'VERIFY-FAIL: 1/3');
+      // ③ ch-b 独立计数:连续 3 次后第 4 次 BLOCK
+      assertExit(runState(['verify-fail'], dir), 0);
+      assertExit(runState(['verify-fail'], dir), 0);
+      const r7 = runState(['verify-fail'], dir);
+      assertExit(r7, 1);
+      assertOut(r7, '超限');
+      // ④ 切回 ch-a:原计数保留(2 → 可再失败 1 次,第 4 次 BLOCK;不串扰不回零)
+      assertExit(runState(['select', 'ch-a'], dir), 0);
+      const r8 = runState(['verify-fail'], dir);
+      assertExit(r8, 0);
+      assertOut(r8, 'VERIFY-FAIL: 3/3');
+      const r9 = runState(['verify-fail'], dir);
+      assertExit(r9, 1);
+      assertOut(r9, '超限');
     },
   },
 
@@ -817,6 +856,12 @@ const TEST_ITEMS = [
       if (!rec5 || typeof rec5.result !== 'object' || rec5.result.commitHash !== hash) {
         throw new Error('--json-file 未正确解析契约(应存为对象): ' + JSON.stringify(rec5));
       }
+      // ⑥ --json-file 越界路径 → 拒绝(与 record 同规则)
+      const outsideContract = path.join(dir, '..', 'outside-contract.json');
+      fs.writeFileSync(outsideContract, '{"summary":"outside"}', 'utf8');
+      const viaBad = runHandoff(['result', 'T04', '--json-file', outsideContract], dir);
+      assertExit(viaBad, 1);
+      assertOut(viaBad, '必须在项目根内');
     },
   },
 
@@ -1234,6 +1279,8 @@ const TEST_ITEMS = [
       assertExit(runState(['init', 'arch-mk'], dir), 0);
       writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
       writeFile(dir, 'flow-kit/prompts/7-integration.md', '# 阶段 7 · INTEGRATION\n\n## 角色\n\n你是 Integrationer。\n');
+      // 遗留清单(协议 required 产物——随目录移动进归档)
+      writeFile(dir, '.specs/arch-mk/KNOWN-ISSUES.md', '# KNOWN-ISSUES\n\n无遗留问题\n');
       // 归档前声明标记（open + archive 节点）
       assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
       assertExit(runState(['skill-load', 'archive', 'flow-comet-integration', '--prompt', 'flow-kit/prompts/7-integration.md'], dir), 0);
@@ -1285,6 +1332,18 @@ const TEST_ITEMS = [
       const markerInArchive = path.join(dir, '.specs', 'archive', '2026-08-14-arch-m5', '.skill-loads', 'archive-flow-comet-integration.json');
       if (!fs.existsSync(markerInArchive)) {
         throw new Error('归档路径缺 M5 自动补标记: ' + markerInArchive);
+      }
+      // 变体:change 从未 skill-load(活动与归档路径皆无 .skill-loads)→ record 不得重建
+      // 活动目录(修复前 targetLoadsDir 回退活动路径,writeJson 的 mkdir 会重建已归档目录)
+      assertExit(runState(['init', 'arch-m5b'], dir), 0);
+      const stB = readStateFile(dir);
+      stB.currentNode = 'archive';
+      writeState(dir, stB);
+      fs.renameSync(path.join(dir, '.specs', 'arch-m5b'), path.join(dir, '.specs', 'archive', '2026-08-14-arch-m5b'));
+      const recB = runState(['record', 'archive', '{"summary":"archived"}'], dir);
+      assertExit(recB, 0);
+      if (fs.existsSync(path.join(dir, '.specs', 'arch-m5b'))) {
+        throw new Error('M5 在双路径皆无时重建了活动目录(残留): .specs/arch-m5b/');
       }
     },
   },
@@ -1748,7 +1807,7 @@ const TEST_ITEMS = [
   // ---------- L. 执行遗漏防护（M1~M8 真实链路） ----------
 
   {
-    name: 'L1 进入证据:entry 记录 enteredNodes,exit 未 entry 触发 ENTER WARN',
+    name: 'L1 进入证据:entry 记录 enteredNodes,正常流程 exit 无误报',
     run: (dir) => {
       gitInit(dir);
       assertExit(runState(['init', CHANGE_ID, '--init-skip'], dir), 0);

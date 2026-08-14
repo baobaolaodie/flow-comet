@@ -756,7 +756,8 @@ const SCENARIOS = [
     },
   },
 
-  // 22: exit archive——CHANGELOG.md 表格日期非倒序 → WARN 不 BLOCK
+  // 22: exit archive——CHANGELOG.md 表格日期非倒序 → WARN 不 BLOCK;
+  // 子断言:归档缺 KNOWN-ISSUES.md(遗留清单,协议 required 产物)→ BLOCKED
   {
     name: '22 exit archive WARN：CHANGELOG.md 表格日期非倒序',
     run: (dir) => {
@@ -764,10 +765,16 @@ const SCENARIOS = [
       st.evidence.archive = { summary: 'archived' };
       writeState(dir, st);
       writeFile(dir, '.specs/archive/foo-' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n');
+      writeFile(dir, '.specs/archive/foo-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# KNOWN-ISSUES\n\n无遗留问题\n');
       writeFile(dir, '.specs/CHANGELOG.md', '# CHANGELOG\n\n| 日期 | 说明 |\n|------|------|\n| 2026-08-03 | a |\n| 2026-08-04 | b |\n');
       const res = runGuard(['exit', 'archive'], dir);
       assertExit(res, 0);
       assertOut(res, 'WARN: CHANGELOG.md 表格日期非倒序');
+      // 子断言:归档缺 KNOWN-ISSUES.md(遗留清单为强制产物)→ BLOCKED
+      fs.rmSync(path.join(dir, '.specs/archive/foo-' + CHANGE_ID, 'KNOWN-ISSUES.md'));
+      const resMissing = runGuard(['exit', 'archive'], dir);
+      assertExit(resMissing, 1);
+      assertOut(resMissing, 'missing Output Schema artifacts');
     },
   },
 
@@ -2835,7 +2842,8 @@ const SCENARIOS = [
     },
   },
 
-  // 123: M8——init 在无提交(空)仓库时输出提示(分支创建边界)
+  // 123: M8——init 在无提交(空)仓库时输出提示且跳过分支创建(行为一致:
+  // 修复前 WARN"无法创建分支"后仍 checkout -b 实际创建——声称与行为矛盾)
   {
     name: '123 init 空仓库提示：无提交仓库的分支创建边界（M8）',
     run: (dir) => {
@@ -2843,6 +2851,15 @@ const SCENARIOS = [
       const res = runState(['init', 'empty-repo'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
       assertExit(res, 0);
       assertOut(res, 'EMPTY-REPO');
+      // 子断言 ①:警告后不得实际创建分支(unborn HEAD 下 rev-parse 失败 → currentBranch=null
+      // → checkout -b 被跳过——分支列表应保持为空)
+      const branches = execFileSync('git', ['branch', '--list'], { cwd: dir, encoding: 'utf8' });
+      if (branches.includes('change/empty-repo')) {
+        throw new Error('空仓库警告后仍创建了 change/empty-repo 分支: ' + branches);
+      }
+      // 子断言 ②:BRANCH 输出不得声称分支已创建(修复前输出 'BRANCH: change/empty-repo'
+      // 但分支实际未创建——声称与行为矛盾,此处应 RED)
+      assertNotOut(res, 'BRANCH: change/empty-repo');
     },
   },
 
@@ -2883,6 +2900,17 @@ const SCENARIOS = [
       const resOk = runGuard(['exit', 'review'], dir);
       assertExit(resOk, 0);
       assertOut(resOk, 'ALL CHECKS PASSED');
+      // 子断言:字段豁免必须精确匹配完整标签(允许尾冒号)——"Source maps expose paths"
+      // 这类以 Source 开头的真实发现标题不得被误豁免(修复前前缀匹配会跳过其处置校验)
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## Critical\n\n无。\n\n## 发现\n\n- **Source maps expose paths**: 某处泄露文件路径,未给出任何处置结论\n\n## 结论\n\n通过\n');
+      const resSource = runGuard(['exit', 'review'], dir);
+      assertExit(resSource, 1);
+      assertOut(resSource, '处置状态标记');
+      // 负例对照:完整标签行(Symptom:/Source:)仍豁免(字段行不是发现条目)
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## Critical\n\n无。\n\n## 发现\n\n- **问题C**: 某处问题 **[已修]**\n  - **Symptom**: 现象\n  - **Source**: 某书\n\n## 结论\n\n通过\n');
+      const resOk2 = runGuard(['exit', 'review'], dir);
+      assertExit(resOk2, 0);
+      assertOut(resOk2, 'ALL CHECKS PASSED');
     },
   },
 
@@ -3068,6 +3096,55 @@ const SCENARIOS = [
       const resOld = runGuard(['exit', 'execute'], dir);
       assertExit(resOld, 0);
       assertOut(resOld, 'BROOKS-LINT WARN');
+    },
+  },
+
+  // 136: verifyFailures 按 change 隔离——切换 change 后计数独立(串扰修复:全局计数会让
+  // change B 继承 change A 的失败次数,误触发"超限需用户决策");旧顶层字段
+  // (verifyFailures)迁移并入当前 change 计数(旧 state 兼容)
+  {
+    name: '136 verifyFailures 按 change 隔离:切换计数独立 + 旧字段迁移',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      // ① 旧字段迁移:旧 state(顶层 verifyFailures=2)→ verify-fail 并入当前 change(2+1=3)不超限
+      const st = baseState('verify');
+      st.verifyFailures = 2;
+      writeState(dir, st);
+      // 场景内 ch/ch2 目录(select 要求 change 目录存在)
+      fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
+      const r1 = runState(['verify-fail'], dir, env);
+      assertExit(r1, 0);
+      assertOut(r1, 'VERIFY-FAIL: 3/3');
+      const stAfter = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      if (!stAfter.verifyFailuresByChange || stAfter.verifyFailuresByChange['ch'] !== 3) {
+        throw new Error('旧字段未迁移并入 change 计数: ' + JSON.stringify(stAfter.verifyFailuresByChange));
+      }
+      if (stAfter.verifyFailures !== undefined) {
+        throw new Error('旧顶层字段应已清除: ' + JSON.stringify(stAfter.verifyFailures));
+      }
+      // ② 同 change 第 4 次 → BLOCK(3 >= 3)
+      const r2 = runState(['verify-fail'], dir, env);
+      assertExit(r2, 1);
+      assertOut(r2, '超限');
+      // ③ 切换 change:select ch2 → 计数独立(若实现仍用全局计数 3,此处会误 BLOCK = RED)
+      writeFile(dir, '.specs/ch2/CHANGE.md', '# CHANGE\n## Why\nx\n');
+      const r3 = runState(['select', 'ch2'], dir, env);
+      assertExit(r3, 0);
+      const r4 = runState(['verify-fail'], dir, env);
+      assertExit(r4, 0);
+      assertOut(r4, 'VERIFY-FAIL: 1/3');
+      // ④ ch2 独立计数:连续 3 次后第 4 次 BLOCK
+      assertExit(runState(['verify-fail'], dir, env), 0);
+      assertExit(runState(['verify-fail'], dir, env), 0);
+      const r7 = runState(['verify-fail'], dir, env);
+      assertExit(r7, 1);
+      assertOut(r7, '超限');
+      // ⑤ 切回 ch:原计数保留(3 → 仍超限,不串扰不回零)
+      const r8 = runState(['select', 'ch'], dir, env);
+      assertExit(r8, 0);
+      const r9 = runState(['verify-fail'], dir, env);
+      assertExit(r9, 1);
+      assertOut(r9, '超限');
     },
   },
 ];

@@ -4,7 +4,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES } from './protocol-utils.mjs';
-import { validateStateFields } from './state-schema.mjs';
+import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor } from './state-schema.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide, skipInit } from './context-init.mjs';
 
 const command = process.argv[2] ?? 'status';
@@ -36,6 +36,18 @@ async function writeJson(file, value) {
 
 async function fileExists(file) {
   try { await fs.access(file); return true; } catch { return false; }
+}
+
+// --json-file 路径校验:解析后必须位于项目根内(拒绝相对/绝对形式的越界路径,
+// 如 ../..、其他盘符——防读取任意文件内容进 evidence)。runRoot 内的绝对路径合法
+// (场景内文件常见写法,与 record/handoff 的既有用法一致)
+function resolveJsonFileWithinRunRoot(jsonFile) {
+  const abs = path.resolve(runRoot, jsonFile);
+  const rel = path.relative(runRoot, abs);
+  if (path.isAbsolute(rel) || rel === '..' || rel.startsWith('..' + path.sep)) {
+    throw new Error('--json-file 路径必须在项目根内: ' + jsonFile);
+  }
+  return abs;
 }
 
 async function findActiveChange() {
@@ -663,6 +675,8 @@ async function main() {
       completedNodes: [],
       evidence: {},
       verifyFailures: 0,
+      // verifyFailures 按 change 存储——init 新 change 从零计数(切换 change 不串扰)
+      verifyFailuresByChange: {},
       executionMode: 'subagent',
       directOverride: false,
       branchMode,
@@ -691,10 +705,13 @@ async function main() {
     // 前缀由 --branch-prefix 指定（缺省 'change/'，向后兼容；可适配仓库自身分支规范如 feat/）
     // 失败 → WARN 不 BLOCK，继续纯文件模式（向后兼容）
     const expectedBranch = branchPrefix + changeName;
+    // 空仓库状态(带到 BRANCH 输出——声称与实际一致:空仓库无分支)
+    let emptyRepo = false;
     if (branchMode) {
       const currentBranch = gitBranchName();
-      // M8: 空仓库检测——无提交(git rev-parse HEAD 失败)时分支创建不可行,输出提示(不 BLOCK;纯文件模式继续)
-      let emptyRepo = false;
+      // M8: 空仓库检测——无提交(git rev-parse HEAD 失败)时分支创建不可行,输出提示
+      // (不 BLOCK;纯文件模式继续)并跳过分支创建——警告与行为一致(修复前 BRANCH 行
+      // 仍声称分支已创建,与实际矛盾)
       try {
         execFileSync('git', ['rev-parse', 'HEAD'], { cwd: runRoot, stdio: 'pipe' });
       } catch {
@@ -702,8 +719,7 @@ async function main() {
       }
       if (emptyRepo) {
         console.error('INIT EMPTY-REPO WARN: 仓库无提交(git 空仓库),无法创建 ' + expectedBranch + ' 分支——先 git commit 初始提交再 init 启用分支模式,或继续纯文件模式');
-      }
-      if (currentBranch !== null && currentBranch !== expectedBranch && !branchExists(expectedBranch)) {
+      } else if (currentBranch !== null && currentBranch !== expectedBranch && !branchExists(expectedBranch)) {
         try {
           execFileSync('git', ['checkout', '-b', expectedBranch], { cwd: runRoot, stdio: 'pipe' });
         } catch {
@@ -712,7 +728,7 @@ async function main() {
       }
     }
     console.log('Initialized: ' + changeName);
-    console.log('BRANCH: ' + (branchMode ? expectedBranch : 'none（非 git 仓库）'));
+    console.log('BRANCH: ' + (branchMode && !emptyRepo ? expectedBranch : 'none（非 git 仓库或空仓库）'));
     // init 输出取协议首节点（与  的 state.currentNode 一致——内置协议 = open，行为不变）
     printNext(protocol, route(protocol)[0]?.id ?? 'open');
     return;
@@ -883,7 +899,7 @@ async function main() {
       payloadArgs.push(arg);
     }
     const raw = jsonFile !== null
-      ? await fs.readFile(path.resolve(runRoot, jsonFile), 'utf8')
+      ? await fs.readFile(resolveJsonFileWithinRunRoot(jsonFile), 'utf8')
       : payloadArgs.join(' ');
     try {
       parsed = raw ? JSON.parse(raw) : {};
@@ -913,27 +929,34 @@ async function main() {
     if (recordNodeDef && markerChange) {
       const recordProtoFiles = NODE_PROTOCOL_FILES[nodeId] ?? [];
       // M5 标记目录解析:活动路径优先;change 已归档(活动目录不存在但归档目录存在)
-      // 时写归档路径——防重建已归档的活动目录(归档移动语义;与 findSkillLoadsDir 双路径一致)
-      const activeLoadsDir = path.join(runRoot, '.specs', markerChange, '.skill-loads');
+      // 时写归档路径——防重建已归档的活动目录(归档移动语义;与 findSkillLoadsDir 双路径一致)。
+      // 跳过条件:活动与归档均无 .skill-loads **且活动 change 目录已不存在**(归档移动后)
+      // ——此时 writeJson 的 mkdir recursive 会把已归档的活动目录残留回来(修复前实测缺陷);
+      // 活动 change 目录仍存在(正常流程)时创建 .skill-loads 子目录是 M5 的正常职责,不跳过
+      const activeLoadsDir = path.join(specsRoot, markerChange, '.skill-loads');
       let targetLoadsDir = activeLoadsDir;
       if (!(await fileExists(activeLoadsDir))) {
         const archived = await findSkillLoadsDir(markerChange);
         if (archived !== null && archived.dir !== activeLoadsDir) {
           targetLoadsDir = archived.dir;
+        } else if (archived === null && !(await fileExists(path.join(runRoot, '.specs', markerChange)))) {
+          targetLoadsDir = null;
         }
       }
-      for (const binding of recordNodeDef.requiredSkillCalls ?? []) {
-        const markerFile = path.join(targetLoadsDir, nodeId + '-' + binding.skill + '.json');
-        let markerExists = false;
-        try { await fs.access(markerFile); markerExists = true; } catch { /* 标记不存在 */ }
-        if (!markerExists) {
-          await writeJson(markerFile, {
-            node: nodeId,
-            skill: binding.skill,
-            protocol: recordProtoFiles.length > 0 ? recordProtoFiles[0] : null,
-            at: recordedAt,
-            auto: true,
-          });
+      if (targetLoadsDir !== null) {
+        for (const binding of recordNodeDef.requiredSkillCalls ?? []) {
+          const markerFile = path.join(targetLoadsDir, nodeId + '-' + binding.skill + '.json');
+          let markerExists = false;
+          try { await fs.access(markerFile); markerExists = true; } catch { /* 标记不存在 */ }
+          if (!markerExists) {
+            await writeJson(markerFile, {
+              node: nodeId,
+              skill: binding.skill,
+              protocol: recordProtoFiles.length > 0 ? recordProtoFiles[0] : null,
+              at: recordedAt,
+              auto: true,
+            });
+          }
         }
       }
     }
@@ -994,15 +1017,17 @@ async function main() {
 
   if (command === 'verify-fail') {
     const state = await readState();
-    state.verifyFailures = state.verifyFailures ?? 0;
     // W2-A: 机器计数——连续 3 次失败后（第 4 次）BLOCKED，要求用户决策（继续修 / 停止）
-    if (state.verifyFailures >= 3) {
-      console.error('verify 失败超限，需用户决策（verifyFailures=' + state.verifyFailures + '）。继续修 / 停止？');
+    // 计数按当前 change 存储(verifyFailuresByChange)——切换 change 后计数独立,互不串扰;
+    // 旧顶层字段首次读取时迁移并入当前 change(旧 state 兼容)
+    const count = verifyFailuresFor(state);
+    if (count >= 3) {
+      console.error('verify 失败超限，需用户决策（verifyFailures=' + count + '）。继续修 / 停止？');
       process.exit(1);
     }
-    state.verifyFailures += 1;
+    setVerifyFailuresFor(state, count + 1);
     await writeState(state);
-    console.log('VERIFY-FAIL: ' + state.verifyFailures + '/3');
+    console.log('VERIFY-FAIL: ' + (count + 1) + '/3');
     return;
   }
 

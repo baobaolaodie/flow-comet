@@ -9,6 +9,8 @@ export const STATE_FIELD_VALIDATORS = [
   { field: 'completedNodes', check: (v) => Array.isArray(v) && v.every((x) => typeof x === 'string') },
   { field: 'evidence', check: (v) => typeof v === 'object' && v !== null && !Array.isArray(v) },
   { field: 'verifyFailures', check: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 },
+  // verifyFailures 按 change 存储:change-id → 非负整数计数(旧顶层字段为迁移通道,新 state 用本字段)
+  { field: 'verifyFailuresByChange', check: (v) => (typeof v === 'object' && v !== null && !Array.isArray(v) && Object.values(v).every((x) => typeof x === 'number' && Number.isFinite(x) && x >= 0)) || v === undefined || v === null },
   { field: 'executionMode', check: (v) => v === 'subagent' || v === 'direct' },
   { field: 'directOverride', check: (v) => typeof v === 'boolean' },
   { field: 'taskHash', check: (v) => typeof v === 'string' || v === undefined },
@@ -38,4 +40,35 @@ export function validateStateFields(state) {
     }
   }
   return bad;
+}
+
+// ---------- verifyFailures 按 change 读写(单一来源——workflow-state verify-fail 与
+// workflow-guard exit verify 共用) ----------
+
+// 读取当前 change 的 verifyFailures 计数;旧顶层字段(verifyFailures,迁移通道)首次读取时
+// 并入当前 change 的计数并清除(旧 state 兼容,不丢历史失败次数)。无 activeChange 时
+// 保持旧语义(顶层字段)——verify-fail 只在运行中 workflow 使用,该分支为兼容兜底。
+export function verifyFailuresFor(state) {
+  if (!state.activeChange) return state.verifyFailures ?? 0;
+  if (state.verifyFailuresByChange === undefined || state.verifyFailuresByChange === null) {
+    state.verifyFailuresByChange = {};
+  }
+  if (typeof state.verifyFailures === 'number' && state.verifyFailures > 0) {
+    state.verifyFailuresByChange[state.activeChange] = (state.verifyFailuresByChange[state.activeChange] ?? 0) + state.verifyFailures;
+  }
+  delete state.verifyFailures;
+  return state.verifyFailuresByChange[state.activeChange] ?? 0;
+}
+
+// 写入当前 change 的 verifyFailures 计数(迁移完成后旧顶层字段不再出现)
+export function setVerifyFailuresFor(state, value) {
+  if (!state.activeChange) {
+    state.verifyFailures = value;
+    return;
+  }
+  if (state.verifyFailuresByChange === undefined || state.verifyFailuresByChange === null) {
+    state.verifyFailuresByChange = {};
+  }
+  state.verifyFailuresByChange[state.activeChange] = value;
+  delete state.verifyFailures;
 }

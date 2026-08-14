@@ -3,7 +3,7 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
-import { validateStateFields } from './state-schema.mjs';
+import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor } from './state-schema.mjs';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES } from './protocol-utils.mjs';
 
 const command = process.argv[2] ?? 'verify';
@@ -64,8 +64,10 @@ function reviewFindingsMissingDisposition(text) {
       if (/^无/.test(m[1].trim())) continue; // "无" 条目豁免
       // 四要素字段行豁免:REVIEW 发现条目的 Symptom/Source/Consequence/Remedy
       // 是 brooks 审查输出格式的字段行(带 ** 加粗),不是发现条目本身——不豁免会误判
-      // 为"发现项缺处置标记"(执行者按 4 要素格式书写时被误 BLOCKED)
-      if (/^(Symptom|Source|Consequence|Remedy)/i.test(m[1].trim())) continue;
+      // 为"发现项缺处置标记"(执行者按 4 要素格式书写时被误 BLOCKED)。
+      // 精确匹配完整标签(允许尾冒号)——"Source maps expose paths" 这类以 Source 开头的
+      // 真实发现标题不得被前缀匹配误豁免(其处置校验必须照常进行)
+      if (/^(?:Symptom|Source|Consequence|Remedy)\s*:?\s*$/i.test(m[1].trim())) continue;
       if (!/\[已修\]|\[升级\]|\[转待办\]/.test(line)) missing.push(m[1]);
     }
   }
@@ -2646,20 +2648,22 @@ async function main() {
     try {
       execSync(verifyCommand, { cwd: runRoot, stdio: 'pipe', timeout: verifyTimeoutMs });
     } catch (e) {
-      // verify-fail 自动递增（无需 LLM 主动调用）
-      state.verifyFailures = (state.verifyFailures || 0) + 1;
+      // verify-fail 自动递增（无需 LLM 主动调用）——计数按当前 change 存储
+      // （verifyFailuresByChange，切换 change 不串扰；旧顶层字段迁移并入）
+      const count = verifyFailuresFor(state) + 1;
+      setVerifyFailuresFor(state, count);
       const file = await statePath(protocol);
       const bad = validateStateFields(state);
       if (bad.length) { console.error('BLOCKED: state 字段类型非法: ' + bad[0]); process.exit(1); }
       await writeJson(file, state);
-      if (state.verifyFailures >= 4) {
-        console.error('BLOCKED: verify 已失败 ' + state.verifyFailures + ' 次，需用户决策（继续修/停止）。');
+      if (count >= 4) {
+        console.error('BLOCKED: verify 已失败 ' + count + ' 次，需用户决策（继续修/停止）。');
       } else {
         // stdout 为空（如超时被 kill 时 stdout 是空 Buffer——truthy）→ 显示错误消息；
         // 消息中带实际应用的 timeout（超时可诊断，且与 Node 版本无关）
         const detail = (e.stdout && e.stdout.length) ? e.stdout : e.message;
         console.error('BLOCKED: verify 命令失败（timeout ' + verifyTimeoutMs + 'ms）: ' + verifyCommand + '\n' + String(detail).slice(0, 500));
-        console.error('VERIFY-FAIL: ' + state.verifyFailures + '/3');
+        console.error('VERIFY-FAIL: ' + count + '/3');
       }
       process.exit(1);
     }
@@ -2811,8 +2815,8 @@ async function main() {
   if (apply) {
     const completed = completedSet(state);
     completed.add(node.id);
-    // W2-A: verify exit --apply 成功 → verifyFailures 清零
-    if (node.id === 'verify') state.verifyFailures = 0;
+    // W2-A: verify exit --apply 成功 → 当前 change 的 verifyFailures 清零
+    if (node.id === 'verify') setVerifyFailuresFor(state, 0);
     state.completedNodes = route(protocol).filter((item) => completed.has(item.id)).map((item) => item.id);
     // archive 节点完成后 change 已归档 → 清空活跃 change（flow-comet 回到无活跃状态）
     const isArchive = node.id === 'archive';

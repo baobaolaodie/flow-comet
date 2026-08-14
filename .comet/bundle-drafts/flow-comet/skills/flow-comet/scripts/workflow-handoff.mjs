@@ -16,6 +16,17 @@ const statePath = path.join(runRoot, '.comet', 'flow-comet-state.json');
 
 async function fileExists(f) { try { await fs.access(f); return true; } catch { return false; } }
 
+// --json-file 路径校验:解析后必须位于项目根内(与 record 同规则——拒绝越界路径,
+// 防读取任意文件内容进 evidence;runRoot 内绝对路径合法)
+function resolveJsonFileWithinRunRoot(jsonFile) {
+  const abs = path.resolve(runRoot, jsonFile);
+  const rel = path.relative(runRoot, abs);
+  if (path.isAbsolute(rel) || rel === '..' || rel.startsWith('..' + path.sep)) {
+    throw new Error('--json-file 路径必须在项目根内: ' + jsonFile);
+  }
+  return abs;
+}
+
 async function readState() {
   if (await fileExists(statePath)) return JSON.parse(await fs.readFile(statePath, 'utf8'));
   return { activeChange: null, currentNode: null, completedNodes: [], evidence: {} };
@@ -95,7 +106,7 @@ async function main() {
     }
     let raw = resultArgs.join(' ');
     if (jsonFile !== null) {
-      raw = await fs.readFile(path.resolve(runRoot, jsonFile), 'utf8');
+      raw = await fs.readFile(resolveJsonFileWithinRunRoot(jsonFile), 'utf8');
     }
     if (!taskId) { console.error('Usage: workflow-handoff.mjs result <task-id> <result>'); process.exit(1); }
     // W1-D: 尝试解析 JSON（Return Contract）——解析失败则存原始字符串
