@@ -347,8 +347,12 @@ function mergeHookGroups(existingGroups, newGroups) {
     if (!group || typeof group !== 'object' || Array.isArray(group) || !Array.isArray(group.hooks)) {
       return group;
     }
-    return { ...group, hooks: group.hooks.filter((hook) => !isManagedHookCommand(hook && hook.command)) };
-  });
+    const filtered = group.hooks.filter((hook) => !isManagedHookCommand(hook && hook.command));
+    // 空组统一删除:matcher 演进(如 Write|Edit → Write|Edit|Bash)会使旧托管组过滤为空,
+    // 历史残留的空组也无任何作用——统一删除防配置污染(与 Codex purge 路径的空组过滤一致;
+    // 含用户 hook 的组保留,不动用户配置)
+    return filtered.length === 0 ? null : { ...group, hooks: filtered };
+  }).filter(Boolean);
   for (const newGroup of newGroups) {
     const existingIndex = mergedGroups.findIndex(
       (group) =>

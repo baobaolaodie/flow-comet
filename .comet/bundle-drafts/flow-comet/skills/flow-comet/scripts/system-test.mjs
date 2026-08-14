@@ -1612,6 +1612,39 @@ const TEST_ITEMS = [
       const ccFirst = run(tcc, []);
       if (ccFirst.status !== 0) throw new Error('claude-code 首次安装失败: ' + (ccFirst.stderr || JSON.stringify(ccFirst.output)));
       fs.writeFileSync(path.join(tcc, 'USER_KEEP.md'), '# 用户内容(保留)\n', 'utf8');
+      // ⑤ matcher 演进幂等:把托管组 matcher 改为旧形态(Write|Edit——模拟历史版本注入),
+      //    重装(非 purge)后旧托管组应被清理——settings 仅剩当前 matcher 组、无空 hooks 组
+      const settingsPath = path.join(tcc, '.claude', 'settings.local.json');
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      for (const g of settings.hooks.PreToolUse) {
+        if (g.matcher === 'Write|Edit|Bash') g.matcher = 'Write|Edit';
+      }
+      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+      const reinstall = run(tcc, []);
+      if (reinstall.status !== 0) throw new Error('matcher 演进重装失败: ' + (reinstall.stderr || JSON.stringify(reinstall.output)));
+      const after = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      const groups = after.hooks.PreToolUse;
+      if (groups.some((g) => Array.isArray(g.hooks) && g.hooks.length === 0)) {
+        throw new Error('重装后存在空 hooks 组(matcher 演进残留): ' + JSON.stringify(groups));
+      }
+      if (!groups.some((g) => g.matcher === 'Write|Edit|Bash' && Array.isArray(g.hooks) && g.hooks.length > 0)) {
+        throw new Error('重装后缺当前 matcher 组(Write|Edit|Bash)');
+      }
+      // ⑥ 历史残留空组清理:手动把当前组 hooks 清空(模拟历史版本残留的空组),
+      //    再次重装后空组应被删除,settings 仅剩有效组
+      const settings2 = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      for (const g of settings2.hooks.PreToolUse) g.hooks = [];
+      fs.writeFileSync(settingsPath, JSON.stringify(settings2, null, 2) + '\n', 'utf8');
+      const reinstall2 = run(tcc, []);
+      if (reinstall2.status !== 0) throw new Error('空组清理重装失败: ' + (reinstall2.stderr || JSON.stringify(reinstall2.output)));
+      const after2 = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      const groups2 = after2.hooks.PreToolUse;
+      if (groups2.some((g) => Array.isArray(g.hooks) && g.hooks.length === 0)) {
+        throw new Error('重装后仍存在空 hooks 组(历史残留未清理): ' + JSON.stringify(groups2));
+      }
+      if (!groups2.some((g) => g.matcher === 'Write|Edit|Bash' && Array.isArray(g.hooks) && g.hooks.length > 0)) {
+        throw new Error('空组清理后缺当前 matcher 组(Write|Edit|Bash)');
+      }
       const ccDry = run(tcc, ['--purge']);
       if (ccDry.status === 0) throw new Error('claude-code --purge 缺 --yes 应失败');
       if (!fs.existsSync(path.join(tcc, '.claude', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('claude-code --purge 拒绝后生成物不应被删除');
