@@ -33,6 +33,10 @@ git worktree list                # 确认 worktree 挂在哪个仓库/分支（�
 git ls-tree <branch> <path>      # 确认产物在目标仓库哪个分支、路径是否存在
 ```
 
+## 4.5. Codex 平台的 worktree 委托差异(实测 2026-08-14)
+
+Codex 环境的子代理(spawn_agent)无 `isolation:"worktree"` 参数——自动 worktree 假定仅 Claude Code 适用。Codex 协调者委托并行任务时须**手动** `git worktree add <路径> -b <分支>` + 在 worktree 内 `codex exec` 委托,或对并行任务串行收敛(写边界仍互斥)。worktree-notes 第 3 节的"委托 prompt 内联全部上游上下文"在 Codex 同样适用且是唯一可靠路径。
+
 ## 5. change 分支 + worktree 组合
 
 分支模式（`branchMode=true`，git 仓库 + init 自动创建 `change/<id>` 分支）下：

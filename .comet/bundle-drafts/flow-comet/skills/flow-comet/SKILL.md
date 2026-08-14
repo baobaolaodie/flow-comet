@@ -87,6 +87,8 @@ description: "Use when the user wants the flow-comet managed workflow for flow-k
 | verify | control | 集成验证 + UAT | flowkit.verify.v1 |
 | archive | control | 归档 + LESSONS | flowkit.archive.v1 |
 
+> **并行任务路由（节点顺序是动态的）**：TASK 含依赖已满足的 `parallel="true" status="pending"` 任务时，plan exit 后**直接路由到 subagent-execute**（execute 在其后收尾退出）；全部为串行任务时才走 execute。`next` 的输出始终是权威——以 `NODE:` 输出为准，不按静态顺序推断。
+
 ## Skill Bindings
 
 | 节点 | Implementation | Required Calls | Enforcement |
