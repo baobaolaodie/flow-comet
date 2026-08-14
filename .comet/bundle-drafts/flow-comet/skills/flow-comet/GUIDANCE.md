@@ -112,7 +112,7 @@ flow-kit 9 阶段工作流的 workflow-kernel 实现。保留 flow-kit 的全部
 node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <skill> --prompt flow-kit/prompts/<阶段>.md
 ```
 
-节点退出（exit）与证据记录（record）会核对声明标记。声明如实记录执行者动作——加载了哪个 skill、按哪份协议工作——**不等于产出证明**；产出是否正确由产物结构校验与门禁把关。advisory 条目（如 flow-comet-ui-design，仅前端触发）不要求 skill-load 声明——record D3 只校验执行者实际声明的条目。
+节点退出（exit）与证据记录（record）会核对声明标记。声明如实记录执行者动作——加载了哪个 skill、按哪份协议工作——**不等于产出证明**；产出是否正确由产物结构校验与门禁把关。**record 会自动补写缺失的声明标记**（按协议 requiredSkillCalls 代记，标记带 `auto: true`）——手动声明仍推荐（如实记录加载动作与协议文件），自动补是兜底。advisory 条目（如 flow-comet-ui-design，仅前端触发）不要求 skill-load 声明——record 只校验执行者实际声明的条目。
 
 ## Guardrails And Evidence
 
@@ -124,7 +124,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <ski
 | execute | build-evidence | artifact-exists | At least one SUMMARY.md |
 | subagent-execute | handoff-evidence | evidence-only | Handoff evidence recorded |
 | review | review-evidence | artifact-exists | REVIEW.md exists |
-| verify | verify-evidence | artifact-exists | TEST.md or UAT.md exists |
+| verify | verify-evidence | artifact-exists | TEST.md + UAT.md exist |
 | archive | archive-evidence | state-transition | Archive completed |
 
 ## Runtime And Recovery

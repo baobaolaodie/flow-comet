@@ -12,7 +12,7 @@
 
 ## [1.4.0] - 2026-08-14
 
-多平台安装器框架、平台模块化与真实产物示例。([#45](https://github.com/baobaolaodie/flow-comet/pull/45)、[#46](https://github.com/baobaolaodie/flow-comet/pull/46)、[#47](https://github.com/baobaolaodie/flow-comet/pull/47)、[#48](https://github.com/baobaolaodie/flow-comet/pull/48)、[#50](https://github.com/baobaolaodie/flow-comet/pull/50))
+多平台安装器框架、平台模块化与真实产物示例。([#45](https://github.com/baobaolaodie/flow-comet/pull/45)、[#46](https://github.com/baobaolaodie/flow-comet/pull/46)、[#47](https://github.com/baobaolaodie/flow-comet/pull/47)、[#48](https://github.com/baobaolaodie/flow-comet/pull/48)、[#50](https://github.com/baobaolaodie/flow-comet/pull/50)、[#51](https://github.com/baobaolaodie/flow-comet/pull/51))
 
 ### 新增
 
@@ -23,11 +23,11 @@
 
 ### 变更
 
-- **回归套件扩展至 135 场景**：`init` 拒绝以 `--` 开头的未知参数（如 `--help`），不再当作 change 名执行；覆盖 skill-load 声明、record 校验、exit 协议校验、交叉自洽时间序、旧兼容、审查发现项处置、产物完整性、委托归属、恢复指引、波次一致性、新 change 自检方法段强制。
+- **回归套件扩展至 136 场景**：`init` 拒绝以 `--` 开头的未知参数（如 `--help`），不再当作 change 名执行；覆盖 skill-load 声明、record 校验、exit 协议校验、交叉自洽时间序、旧兼容、审查发现项处置、产物完整性、委托归属、恢复指引、波次一致性、新 change 自检方法段强制、按 change 隔离的验证失败计数。
 - **CI**：过程代号检查从服务端 PR 策略移至本地 hook；PR/issue 模板按实践重构（勾选项去重、关联 issue 段、基于版本、协议与安装版本字段）；覆盖 skill-load 声明、record 校验、exit 协议校验、交叉自洽时间序、旧兼容、审查发现项处置、产物完整性、委托归属、恢复指引、波次一致性。
 - **提交历史平实化**：52 条历史提交消息重写为纯描述（树不变）；重复提交去重。
 - **文档**：README 布局重组（快速开始前置）与借势增强（GSD 链接、痛点引导、适用边界）；安装指南补卸载小节；发布清单去重为单一权威；术语全库统一。
-- **系统测试集扩展至 50 项**（安装器版本标识、多平台安装器场景：Codex 安装冒烟、hook 平台分支契约、平台选择链、清理语义、平台描述符驱动安装冒烟）。
+- **系统测试集扩展至 55 项**（安装器版本标识、多平台安装器场景：Codex 安装冒烟、hook 平台分支契约、平台选择链、清理语义、平台描述符驱动安装冒烟、按 change 隔离的验证失败计数）。
 - **合并门禁改为 CI status checks**：分支保护不再要求 approving review（单人账号无法自 approve）；required checks 为 CI 各 job；bot 审查（CodeRabbit / Sourcery）为意见层——贡献指南新增 bot 审查实践节（仅供参考、行内线程回复、合并前处理）。
 - **示例重构为真实归档产物**：`docs/examples/` 现包含一次真实完整 8 节点 change 的全部工件（processor-pipeline，e2e 假项目运行）——六段 SUMMARY、REVIEW 发现区处置标记、skill-load 声明标记、verify 出口真实执行；移除旧模拟示例与过时产物截图，README 展示区指向真实产物。
 - **全库文档检修**：技能指令去重（删除生成器模板残留与中部 frontmatter）、Comet 定位声称替换为 flow-comet 自身机制表述、逐节点门禁表对齐实际实现（未实现项标注为 review 把关的执行纪律）、双平台（Claude Code / Codex）适配（brooks-lint 调用方式、用户入口、安装文档）、回归基线在全部文档中提升为两级（引擎回归 + 系统测试集）、时效性更新（路线图状态、设计文档回填、交接文档归档）。

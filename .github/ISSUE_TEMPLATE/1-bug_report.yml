@@ -46,6 +46,16 @@ body:
         - label: 我已搜索既有 issue / I have searched existing issues
           required: true
   - type: dropdown
+    id: platform
+    attributes:
+      label: 平台 / Platform
+      description: 运行 flow-comet 的平台 / Platform flow-comet runs on
+      options:
+        - claude-code
+        - codex
+    validations:
+      required: true
+  - type: dropdown
     id: impact
     attributes:
       label: 影响 / Impact
@@ -60,9 +70,8 @@ body:
       label: 环境 / Environment
       description: 用于定位问题的上下文 / Context for reproducing the issue
       placeholder: |
-        - 平台 / Platform(claude-code / codex):
         - Node 版本 / Node version:
-        - flow-comet 版本 / flow-comet version(`cat .claude/skills/flow-comet/INSTALLED_VERSION`；开发态源安装请补 `git -C 源仓库 describe --tags`):
+        - flow-comet 版本 / flow-comet version(`cat .claude/skills/flow-comet/INSTALLED_VERSION`；Codex 安装为 `.agents/skills/flow-comet/INSTALLED_VERSION`；开发态源安装请补 `git -C 源仓库 describe --tags`):
         - 安装方式 / Install method(prepare-env 安装器 / 手动复制):
         - 协议 / Protocol(内置 8 节点 / 自定义 compose):
         - 是否使用分支模式 / Branch mode used:

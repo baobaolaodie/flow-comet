@@ -71,7 +71,7 @@ description: "Use when the user wants the flow-comet managed workflow for flow-k
 | "测试从实现派生就行" | R5.1：测试必须从 AC 派生 |
 | "guard 失败了，让用户决定" | 先自动诊断并执行唯一安全修复；无合法动作时才报告停止条件 |
 | "跳过 entry 直接 exit,反正没检查" | 新 change 未 entry 直接 exit → BLOCKED(进入检查不可跳过);旧 change WARN 渐进 |
-| "SUMMARY 不写,任务先标 done" | 新 change done 任务缺 SUMMARY → BLOCKED(产物完整性强制) |
+| "SUMMARY 不写,任务先标 done" | 新 change done 任务缺 SUMMARY → BLOCKED(产物完整性强制);旧 change WARN 渐进 |
 | "subagent-execute 阶段，我直接改源码更快" | 协调者禁令：subagent-execute 阶段主会话禁止写源码（hook 白名单只允许 .specs/，Write/Edit 与 Bash 写命令均物理拦截），必须 worktree 委托子代理 |
 
 ## Workflow Nodes
@@ -122,7 +122,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <ski
 | execute | build-evidence | artifact-exists | At least one SUMMARY.md |
 | subagent-execute | handoff-evidence | evidence-only | Handoff evidence recorded |
 | review | review-evidence | artifact-exists | REVIEW.md exists |
-| verify | verify-evidence | artifact-exists | UAT.md exists |
+| verify | verify-evidence | artifact-exists | TEST.md + UAT.md exist |
 | archive | archive-evidence | state-transition | Archive completed |
 
 ## Runtime And Recovery
@@ -163,10 +163,10 @@ All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT
 
 | 脚本 | 用途 |
 |------|------|
-| `workflow-state.mjs` | 状态管理：init/status/next/select/record/advance/skill-load/execution-mode/verify-fail（verify 失败计数，第 4 次 BLOCKED） |
+| `workflow-state.mjs` | 状态管理：init/status/next/select/record/advance/skill-load/execution-mode/config/verify-fail（verify 失败计数，第 4 次 BLOCKED） |
 | `workflow-guard.mjs` | 节点门禁：entry/exit/verify 检查 |
 | `workflow-handoff.mjs` | 子代理交接：request/result/status |
-| `comet-plan.mjs` | plan 状态查询 |
+| `comet-plan.mjs` | 兼容别名入口（内容为 workflow-state 的别名壳） |
 | `comet-check.mjs` | workflow contract 检查 |
 | `comet-hook-guard.mjs` | 文件写入边界守卫（phase 白名单：subagent-execute 阶段只允许 .specs/） |
 

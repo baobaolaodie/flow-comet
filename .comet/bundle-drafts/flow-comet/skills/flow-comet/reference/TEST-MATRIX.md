@@ -6,7 +6,7 @@
 ## 一、测试载体说明
 
 - **载体**：每个测试项 = 一个独立临时目录（`fs.mkdtemp`）+ 内置协议副本复制到 `<tmp>/reference/`（受保护路径要求协议文件位于 runRoot 内）+ **真实命令序列**（`init → record → guard entry/exit → handoff → hook` 的 `spawnSync` 调用）+ 断言退出码与输出关键词；测试项跑完 `rmSync` 清理。
-- **与引擎回归的关系**：`guard-self-test.mjs` 是引擎脚本的单元/场景级回归（fixture 构造为主，135 场景）；本系统测试集是**系统级**——每个测试项走真实命令链路，验证机制在真实调用序列下生效（行为锚定归场景回归，集成正确性归系统测试）。
+- **与引擎回归的关系**：`guard-self-test.mjs` 是引擎脚本的单元/场景级回归（fixture 构造为主，136 场景）；本系统测试集是**系统级**——每个测试项走真实命令链路，验证机制在真实调用序列下生效（行为锚定归场景回归，集成正确性归系统测试）。
 - **运行环境**：仅 node 内置模块（child_process/fs/os/path），无网络、无第三方依赖。
 - **输出纪律**：逐项 PASS/FAIL + 汇总（`SYSTEM TEST: N/M passed`）；全过 exit 0，有 FAIL exit 1。测试项命名为公开面——零过程代号。
 
@@ -16,13 +16,13 @@
 - **任一 FAIL**：修复后重跑（修复只改权威源一处，重跑至全绿）。
 - **误通过 = 测试无效，必须修**：该拦截未拦截 / 该放行未放行，说明测试自身没守住机制边界——测试先于功能守边界，不许自欺（"当时能过"不等于"现在正确"）。
 
-## 三、机制面覆盖矩阵（A~K 十一类）
+## 三、机制面覆盖矩阵（A~L 十二类）
 
 ### A. 状态机与路由
 
 覆盖：init 全分支（状态写入/工件目录/同 id 重跑防护/分支模式）、status 节点推导与无活跃兜底、next 推进与状态漂移校正、next 未出口节点严格拦截、select 切换、advance 推进、record 基础证据、execution-mode 切换与记录、config 设置与非法值拒绝。
 
-测试项（11）：A1 init 状态写入与工件目录创建 / A2 init 分支模式与非法前缀拒绝 / A3 init 同 id 重跑防护 / A4 status 节点推导与无活跃兜底 / A5 next 推进与状态漂移校正 / A6 next 未出口节点严格拦截 / A7 select 切换与缺失拒绝 / A8 advance 节点推进 / A9 record 基础证据记录 / A10 execution-mode 切换与记录 / A11 config 配置与非法值拒绝。
+测试项（12）：A1 init 状态写入与工件目录创建 / A2 init 分支模式与非法前缀拒绝 / A3 init 同 id 重跑防护 / A4 status 节点推导与无活跃兜底 / A5 next 推进与状态漂移校正 / A6 next 未出口节点严格拦截 / A7 select 切换与缺失拒绝 / A8 advance 节点推进 / A9 record 基础证据记录 / A10 execution-mode 切换与记录 / A11 config 配置与非法值拒绝 / A12 验证失败计数按 change 隔离（切换 change 后计数独立）。
 
 ### B. 声明机制
 
@@ -86,7 +86,7 @@
 
 ### L. 执行遗漏防护（M1~M8 真实链路）
 
-覆盖：进入证据（entry 记录 enteredNodes、exit 未 entry 触发渐进警告）、空退出豁免（显式 emptyExitApproved 通过 / 无豁免仍拦截）、空仓库提示（init 在无提交仓库输出 EMPTY-REPO）。
+覆盖：进入证据（entry 记录 enteredNodes、正常流程 exit 无误报——真实链路中节点顺序检查先于进入警告，未 entry 场景由引擎回归覆盖）、空退出豁免（显式 emptyExitApproved 通过 / 无豁免仍拦截）、空仓库提示（init 在无提交仓库输出 EMPTY-REPO）。
 
 测试项（3）：L1 进入证据 / L2 空退出豁免 / L3 空仓库。
 

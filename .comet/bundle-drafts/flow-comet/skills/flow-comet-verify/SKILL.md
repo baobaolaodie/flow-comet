@@ -138,7 +138,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record verify '{"summa
 | `verify-evidence` | UAT.md exists | artifact-exists |
 | `automation-passed` | All automated checks pass (real output) | 执行纪律（review 把关），guard 不校验 |
 | `retry-limit` | No more than 3 auto-retries（机器计数 verifyFailures，第 4 次 BLOCKED） | process-check |
-| `lessons-nominated` | LESSONS.md updated with new entries | 执行纪律（review 把关），guard 不校验 |
+| `lessons-nominated` | LESSONS.md updated with new entries（完成提名扫描；仅当有合格条目时更新——无合格条目不强制新增，避免噪音条目） | 执行纪律（review 把关），guard 不校验 |
 
 ## Exit Check
 

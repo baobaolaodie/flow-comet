@@ -151,7 +151,7 @@ Schema: `flowkit.archive.v1`
 | Schema ID | Artifact Kind | Required | Path |
 |-----------|--------------|----------|------|
 | `archive-dir` | directory | yes | `.specs/archive/<YYYY-MM-DD>-<change-id>/` |
-| `known-issues` | file | optional | `.specs/archive/<YYYY-MM-DD>-<change-id>/KNOWN-ISSUES.md` (leftover issues list, archived with the change) |
+| `known-issues` | file | required | `.specs/archive/<YYYY-MM-DD>-<change-id>/KNOWN-ISSUES.md` (leftover issues list, archived with the change; 无遗留也显式写「无遗留问题」——guard 强制存在) |
 | `changelog-entry` | file | yes | `.specs/CHANGELOG.md` (inserted at the top, reverse-chronological) |
 | `lessons-updated` | file | conditional | `.specs/LESSONS.md` (if new lessons nominated) |
 
