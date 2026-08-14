@@ -75,6 +75,14 @@ node .claude/skills/flow-comet/scripts/guard-self-test.mjs
 
 显式参数授权（无阻塞提示，无头兼容）：`--init-context` 执行全量生成（约 15-30k tokens，仅首次，提示中如实告知）；`--init-skip` 记录 `ai_context_doc: none` 并静默后续提示。项目级字段（`ai_context_doc` / `last_intel_scan`）跨 change 保留；state-schema 校验（fail-closed，旧 state 缺省为 null）。
 
+
+## 8 执行遗漏防护
+
+- **节点进入证据**:进入节点会被记录;未 entry 直接 exit(机制激活的 change)渐进警告——进入检查(协调者禁令/委托前 commit 检查/签名记录)不得被静默跳过。
+- **新 change 强制**:新 change(进入机制激活)的已完成任务必须有对应 SUMMARY、交接结果必须有 TDD RED 证据——拦截;旧 change 保持渐进警告。
+- **声明自动化**:`record` 自动补写缺失的技能加载声明标记(手动声明仍推荐)。
+- **显式空退出豁免**:execute 在显式声明(`emptyExitApproved`)后可在无串行任务时空退出;默认仍拦截。
+
 ## 设计原理
 
 - **文件即真相，不做事件溯源**：单文件状态机 + 从 `.specs/` 推导节点——简单且恢复不依赖历史

@@ -146,7 +146,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record execute '{"summ
 | Guardrail ID | Label | Validation Type |
 |--------------|-------|-----------------|
 | `build-evidence` | At least one SUMMARY.md produced | artifact-exists |
-| `all-tasks-done` | All tasks in TASK.md have status="done"（pending 串行任务 → BLOCKED） | content-check |
+| `all-tasks-done` | All tasks in TASK.md have status="done"（pending 串行任务 → BLOCKED）；done 任务须有对应 SUMMARY（新 change 强制 BLOCKED，旧 change WARN 渐进） | content-check |
 | `verify-output-real` | Every SUMMARY.md has verify output (not fabricated) | 执行纪律（review 把关），guard 不校验 |
 | `no-design-changes` | REQUIREMENT.md and DESIGN.md not modified | 执行纪律（review 把关），guard 不校验 |
 | `self-check-method` | Every SUMMARY.md declares `## 自检方法`（brooks-review / cache-brooks / builtin-quickcheck） | W1-B 段级校验 |

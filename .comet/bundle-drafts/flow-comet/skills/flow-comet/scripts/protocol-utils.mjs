@@ -344,3 +344,17 @@ export function parseProtocolWriteWhitelist(protocol) {
   }
   return checkWriteWhitelistShape(protocol.writeWhitelist);
 }
+
+// 节点 → flow-kit/prompts/ 协议文件映射(单一来源——workflow-guard 的 exit 协议声明校验与
+// workflow-state 的 M5 record 自动补声明共用;改动词表仅此一处)
+// 注释约定:以 flow-kit/prompts/ 实文件为准(0-change.md ~ 7-integration.md,随 flow-kit 仓库同步)
+export const NODE_PROTOCOL_FILES = {
+  open: ['0-change.md', '1-requirement.md'],
+  design: ['2-design.md'],
+  plan: ['3-task.md'],
+  execute: ['4-dev.md'],
+  'subagent-execute': ['4-dev.md'],
+  review: ['6-review.md', '5-test.md'],
+  verify: ['7-integration.md'],
+  archive: ['7-integration.md'],
+};

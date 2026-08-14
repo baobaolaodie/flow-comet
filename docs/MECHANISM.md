@@ -75,6 +75,14 @@ On `init`, the workflow automatically detects whether a project context (`.specs
 
 Explicit parameter authorization (no blocking prompts, headless-safe): `--init-context` runs the full generation (≈15-30k tokens, first use only, stated in the prompt); `--init-skip` records `ai_context_doc: none` and silences future prompts. Project-level fields (`ai_context_doc`, `last_intel_scan`) persist across changes; state-schema validates them (fail-closed, legacy states default to null).
 
+
+## 8. Execution-omission protection
+
+- **Node entry evidence**: entering a node records it; exiting a node that was never entered (on changes where the mechanism is active) warns progressively — entry checks (coordinator prohibition, pre-delegation commit check, signature recording) must not be skipped silently.
+- **New-change enforcement**: on new changes (entry mechanism active), completed tasks require their matching summary and handoff results require TDD RED evidence — blocked; legacy changes keep the progressive warnings.
+- **Declaration automation**: `record` auto-fills missing skill-load declaration markers (manual declarations still recommended).
+- **Explicit empty-exit exemption**: execute may exit with no serial tasks when explicitly declared (`emptyExitApproved`); otherwise blocked by default.
+
 ## Design principles
 
 - **File-as-truth, no event sourcing**: single-file state machine + node derivation from `.specs/` — simple, recovery never depends on history

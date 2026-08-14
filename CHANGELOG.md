@@ -16,6 +16,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 - **Documentation overhaul**: skill instructions deduplicated (generator-template remnants and mid-file frontmatter removed), Comet-positioning claims replaced with flow-comet's own mechanism descriptions, per-node guardrail tables aligned with the actual guard implementation (unimplemented items now marked as review-checked execution discipline), dual-platform (Claude Code / Codex) adaptation for brooks-lint invocation, user entries, and installation docs, the regression baseline promoted to the two-tier suite (guard self-test + system test) across all docs, and timeliness updates (roadmap state, design-doc backfill, archived handover notes).
 
+### Changed
+
+- **Execution-omission protection**: node entry is now recorded (exit warns if a node was exited without entering it); completed tasks require their summary for new changes (blocked — legacy changes keep the progressive warning); handoff results require TDD RED evidence for new changes; record auto-fills skill-load declaration markers; execute gains an explicit empty-exit exemption; init detects commit-less repositories.
+
 ### Fixed
 
 - Skill commands that lacked the install-path prefix now carry the authoritative-source path — executable on both platforms after installation.

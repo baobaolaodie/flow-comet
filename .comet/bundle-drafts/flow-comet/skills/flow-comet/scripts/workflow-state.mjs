@@ -3,7 +3,7 @@ import { execFileSync } from 'child_process';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { resolveProtocol, readProtocolFile, validateProtocolSchema } from './protocol-utils.mjs';
+import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES } from './protocol-utils.mjs';
 import { validateStateFields } from './state-schema.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide, skipInit } from './context-init.mjs';
 
@@ -22,18 +22,7 @@ const specsRoot = path.join(runRoot, '.specs');
 // 参数校验已改为当前协议节点集合动态读取——compose 自定义协议节点可声明）
 const BUILTIN_NODES = ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review', 'verify', 'archive'];
 
-// 节点 → flow-kit/prompts/ 协议文件映射(M5 record 自动补声明标记的 protocol 归属;
-// 与 workflow-guard.mjs 的 NODE_PROTOCOL_FILES 保持一致——单一来源约定,改动词表两份同改)
-const NODE_PROTOCOL_FILES = {
-  open: ['0-change.md', '1-requirement.md'],
-  design: ['2-design.md'],
-  plan: ['3-task.md'],
-  execute: ['4-dev.md'],
-  'subagent-execute': ['4-dev.md'],
-  review: ['6-review.md', '5-test.md'],
-  verify: ['7-integration.md'],
-  archive: ['7-integration.md'],
-};
+// 节点协议映射(单一来源): NODE_PROTOCOL_FILES 来自 protocol-utils.mjs(M5 record 自动补声明标记的 protocol 归属)
 
 async function readJson(file) {
   // 容忍 UTF-8 BOM（外部写入如会话 Write 可能带 BOM）

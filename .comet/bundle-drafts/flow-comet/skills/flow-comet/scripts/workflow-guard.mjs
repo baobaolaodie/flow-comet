@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import { validateStateFields } from './state-schema.mjs';
-import { resolveProtocol, readProtocolFile, validateProtocolSchema } from './protocol-utils.mjs';
+import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES } from './protocol-utils.mjs';
 
 const command = process.argv[2] ?? 'verify';
 const nodeId = process.argv[3] ?? null;
@@ -32,19 +32,7 @@ const NODE_TRANSITION_GATES = {
   archive:          { evidence: ['archive-summary'] },
 };
 
-// 节点协议映射: 内置节点 → flow-kit/prompts/ 协议文件映射（completedChecks 真实性声明机制：exit 校验
-// 声明标记的 protocol 归属）。注释约定：以 flow-kit/prompts/ 实文件为准（0-change.md ~
-// 7-integration.md，随 flow-kit 仓库同步）；新增/重命名协议文件需同步本表。
-const NODE_PROTOCOL_FILES = {
-  open: ['0-change.md', '1-requirement.md'],
-  design: ['2-design.md'],
-  plan: ['3-task.md'],
-  execute: ['4-dev.md'],
-  'subagent-execute': ['4-dev.md'],
-  review: ['6-review.md', '5-test.md'],
-  verify: ['7-integration.md'],
-  archive: ['7-integration.md'],
-};
+// 节点协议映射(单一来源): NODE_PROTOCOL_FILES 已移入 protocol-utils.mjs(exit 协议声明校验 + record 自动补声明共用)
 
 // 声明标记 protocol → basename 提取（exit 校验与 节点协议映射表 basename 精确比对）。
 // 兼容新旧两种格式：新格式（skill-load 写入）= 纯 basename（如 0-change.md），原样返回；
