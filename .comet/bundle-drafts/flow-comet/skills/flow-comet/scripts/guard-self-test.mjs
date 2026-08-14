@@ -2825,8 +2825,23 @@ const SCENARIOS = [
       const res = runState(['record', 'open', '{"summary":"done"}'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
       assertExit(res, 0);
       const loads = path.join(dir, '.specs', CHANGE_ID, '.skill-loads');
-      if (!fs.existsSync(path.join(loads, 'open-flow-comet-change.json'))) {
+      const changeMarker = path.join(loads, 'open-flow-comet-change.json');
+      const requirementMarker = path.join(loads, 'open-flow-comet-requirement.json');
+      if (!fs.existsSync(changeMarker)) {
         throw new Error('record 自动声明标记缺失: open-flow-comet-change.json');
+      }
+      // 子断言:自动补标记的 protocol 字段按 skill 归属协议文件(修复前所有 skill 都写节点
+      // 首文件 0-change.md——requirement 标记的协议归属语义错误,此处应 RED)
+      const changeMeta = JSON.parse(fs.readFileSync(changeMarker, 'utf8'));
+      if (changeMeta.protocol !== '0-change.md') {
+        throw new Error('change 自动标记 protocol 应为 0-change.md: ' + JSON.stringify(changeMeta.protocol));
+      }
+      if (!fs.existsSync(requirementMarker)) {
+        throw new Error('record 自动声明标记缺失: open-flow-comet-requirement.json');
+      }
+      const requirementMeta = JSON.parse(fs.readFileSync(requirementMarker, 'utf8'));
+      if (requirementMeta.protocol !== '1-requirement.md') {
+        throw new Error('requirement 自动标记 protocol 应为 1-requirement.md(修复前误写 0-change.md): ' + JSON.stringify(requirementMeta.protocol));
       }
     },
   },
@@ -3175,6 +3190,44 @@ const SCENARIOS = [
       const r9 = runState(['verify-fail'], dir, env);
       assertExit(r9, 1);
       assertOut(r9, '超限');
+    },
+  },
+
+  // 137: next 漂移校正不得推走"已记录证据但未 exit"的进行中节点——exit 被拦截(如
+  // 内容级 BLOCKED)后执行者跑 next,校正把 currentNode 推到下一节点,被拦截节点无法
+  // 重跑(exit 前置 currentNode 校验拦截),advance/select 均不恢复 → 死结(实测教训)。
+  // 修复:evidence 存在且节点未 exit → 视为进行中,next 不校正(currentNode 保持原节点)
+  {
+    name: '137 next 不推走进行中节点:exit 被拦截后重跑路径保留',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const st = baseState('review');
+      st.completedNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute'];
+      st.evidence.review = { summary: 'reviewed' }; // record 过但 exit 被拦截
+      st.newChange = true;
+      writeState(dir, st);
+      // 前序产物(execute 产物门控需 *-SUMMARY.md)
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why（为什么做）\nx');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\nx\n\n## 验收准则（AC）\n- Given x When y Then z');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n## 0. 技术栈\npython\n\n## 决策清单\n- d1: x\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="T01" status="done"><action>x</action><write_files>f</write_files><verify>v</verify></task>\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', '# T01-SUMMARY\n## verify 输出\nx\n## 6 维自查\nx\n## 越界检查\nx\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## Critical\n\n无。\n\n## 发现\n\n- **问题A**: 某处问题 **[已修]**\n\n## 结论\n\n通过\n');
+      // ① next:进行中节点(evidence 存在且未 exit)不被漂移校正推走(修复前校正到 verify = RED)
+      const r1 = runState(['next'], dir, env);
+      assertExit(r1, 0);
+      assertOut(r1, 'NODE: review');
+      assertNotOut(r1, 'NODE: verify');
+      // ② exit review 重跑路径保留:缺处置标记 → BLOCKED(新 change),补标记后通过
+      assertExit(runGuard(['entry', 'review'], dir, env), 0); // 新 change 强制先 entry
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## Critical\n\n无。\n\n## 发现\n\n- **问题B**: 某处问题无处置标记\n\n## 结论\n\n通过\n');
+      const rBlock = runGuard(['exit', 'review'], dir, env);
+      assertExit(rBlock, 1);
+      assertOut(rBlock, '处置状态标记');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## Critical\n\n无。\n\n## 发现\n\n- **问题B**: 某处问题 **[已修]**\n\n## 结论\n\n通过\n');
+      const rPass = runGuard(['exit', 'review', '--apply'], dir, env);
+      assertExit(rPass, 0);
+      assertOut(rPass, 'ALL CHECKS PASSED');
     },
   },
 ];

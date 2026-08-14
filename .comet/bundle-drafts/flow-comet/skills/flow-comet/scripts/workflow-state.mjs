@@ -3,7 +3,7 @@ import { execFileSync } from 'child_process';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES } from './protocol-utils.mjs';
+import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, SKILL_PROTOCOL_FILES } from './protocol-utils.mjs';
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor } from './state-schema.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide, skipInit } from './context-init.mjs';
 
@@ -807,12 +807,34 @@ async function main() {
       }
     }
     const detectedNode = await determineNode(changeName, protocol, state.completedNodes);
-    // 状态漂移自动校正——以文件产物为准（determineNode），校正 state.currentNode
-    if (state.currentNode !== detectedNode) {
+    // 状态漂移自动校正——以文件产物为准（determineNode）校正 state.currentNode。
+    // 进行中节点保护:currentNode 未 exit(不在 completedNodes)且已记录 evidence(record 过)
+    // → 视为节点进行中(可能 exit 被内容级拦截后重跑),不校正推走——否则被拦截节点
+    // 的 exit 前置校验(currentNode 匹配)无法重跑,advance/select 均不恢复 → 死结(实测教训)
+    const currentNodeEvidence = state.currentNode && state.evidence && typeof state.evidence === 'object'
+      ? state.evidence[state.currentNode]
+      : null;
+    const routeIds = route(protocol).map((n) => n.id);
+    const currentNodeIdx = state.currentNode ? routeIds.indexOf(state.currentNode) : -1;
+    // 推导为 currentNode 的直接后继 → 该节点产物已齐待 exit(内容级拦截重跑场景)→ 保护;
+    // 推导跳跃(跨节点,如"部分完成但产物全齐")或回退 → 产物权威校正(漂移,防过度修复)
+    const derivedIsDirectSuccessor = currentNodeIdx >= 0
+      && currentNodeIdx + 1 < routeIds.length
+      && routeIds[currentNodeIdx + 1] === detectedNode;
+    const inProgress = !!(
+      state.currentNode
+      && !completedArr.includes(state.currentNode)
+      && currentNodeEvidence && typeof currentNodeEvidence === 'object' && !Array.isArray(currentNodeEvidence)
+      && derivedIsDirectSuccessor
+    );
+    if (!inProgress && state.currentNode !== detectedNode) {
       state.currentNode = detectedNode;
       await writeState(state);
     }
-    printNext(protocol, detectedNode, state.executionMode ?? 'subagent');
+    // 进行中节点保护:不校正时输出也跟随 currentNode(而非产物推导的 detectedNode——
+    // 否则 state 保持 review 但输出 NODE: verify,执行者按输出 action 仍然死结)
+    const printNode = inProgress ? state.currentNode : detectedNode;
+    printNext(protocol, printNode, state.executionMode ?? 'subagent');
     printBranchLine(changeName, state.branchPrefix ?? 'change/');
     return;
   }
@@ -960,10 +982,14 @@ async function main() {
           let markerExists = false;
           try { await fs.access(markerFile); markerExists = true; } catch { /* 标记不存在 */ }
           if (!markerExists) {
+            // 自动补的 protocol 字段按 skill 归属协议文件(如 open 的 requirement 标记应写
+            // 1-requirement.md 而非节点首文件 0-change.md——修复前所有 skill 都写首文件,
+            // 标记的协议归属语义错误;exit 校验只查归属集合故能通过,但标记不可信)
+            const skillProtoFiles = SKILL_PROTOCOL_FILES[binding.skill] ?? [];
             await writeJson(markerFile, {
               node: nodeId,
               skill: binding.skill,
-              protocol: recordProtoFiles.length > 0 ? recordProtoFiles[0] : null,
+              protocol: skillProtoFiles.length > 0 ? skillProtoFiles[0] : null,
               at: recordedAt,
               auto: true,
             });
