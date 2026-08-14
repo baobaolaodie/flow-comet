@@ -669,6 +669,10 @@ async function main() {
       enablePrReview: false,
       branchPrefix,
       status: 'running',
+      // R6: 新 change 标记——init 即新 change(严格模式开启,不依赖 entry;旧 change 无此字段渐进兼容)
+      newChange: true,
+      // M1: 进入证据容器——entry 追加节点;R2 检测未 entry(新 change 强制)
+      enteredNodes: [],
       createdAt: new Date().toISOString(),
       // 项目级上下文字段跨 change 保留（迁移旧 state；--init-context 刷新扫描时间；--init-skip 记拒绝）
       ...(prevState?.ai_context_doc !== undefined ? { ai_context_doc: prevState.ai_context_doc } : {}),

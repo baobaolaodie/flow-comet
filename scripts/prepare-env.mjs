@@ -406,7 +406,9 @@ function injectSettingsHook(claudeDir) {
     ? settings.hooks
     : {};
   const newGroup = {
-    matcher: 'Write|Edit',
+    // R5: matcher 含 Bash——协调者禁令物理化(Bash 写源码命令同样被 hook 检测拦截;
+    // hook 对无写路径的 Bash 命令(如 git/查询)放行)
+    matcher: 'Write|Edit|Bash',
     hooks: [
       {
         type: 'command',

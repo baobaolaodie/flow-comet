@@ -12,9 +12,10 @@ export const STATE_FIELD_VALIDATORS = [
   { field: 'executionMode', check: (v) => v === 'subagent' || v === 'direct' },
   { field: 'directOverride', check: (v) => typeof v === 'boolean' },
   { field: 'taskHash', check: (v) => typeof v === 'string' || v === undefined },
-  // M1/M7: 节点进入标记（entry 写入,exit 检测未 entry;enteredNodes 非空 = enter 机制激活 = 新 change,
-  // 供渐进 WARN 的新旧区分与 enter 证据检测使用;旧 state 缺失放行)
+  // M1: 节点进入标记（entry 写入,exit 检测未 entry;旧 state 缺失放行)
   { field: 'enteredNodes', check: (v) => (Array.isArray(v) && v.every((x) => typeof x === 'string')) || v === undefined || v === null },
+  // R6: 新 change 标记（init 写入 true——新旧判定的确定性依据,不依赖 entry;旧 state 缺失 = 旧 change 渐进兼容)
+  { field: 'newChange', check: (v) => v === true || v === undefined || v === null },
   // E5: 批次 E 新增字段（readState 默认补后类型校验；旧 state 缺失字段放行）
   { field: 'branchMode', check: (v) => typeof v === 'boolean' },
   { field: 'enablePrReview', check: (v) => typeof v === 'boolean' },

@@ -399,6 +399,7 @@ const TEST_ITEMS = [
       writeIntakeArtifacts(dir);
       assertExit(runState(['record', 'open', '{"summary":"intake complete"}'], dir), 0);
       // 真实出口：exit open --apply（未激活声明机制 → 兼容警告 + 通过）
+      assertExit(runGuard(['entry', 'open'], dir), 0);
       const exitRes = runGuard(['exit', 'open', '--apply'], dir);
       assertExit(exitRes, 0);
       assertOut(exitRes, 'ALL CHECKS PASSED');
@@ -691,6 +692,7 @@ const TEST_ITEMS = [
       assertExit(runState(['record', 'open', '{"summary":"intake complete"}'], dir), 0);
       const autoMarker = path.join(dir, '.specs', CHANGE_ID, '.skill-loads', 'open-flow-comet-change.json');
       if (!fs.existsSync(autoMarker)) throw new Error('record 自动声明标记缺失: open-flow-comet-change.json');
+      assertExit(runGuard(['entry', 'open'], dir), 0);
       const rAuto = runGuard(['exit', 'open'], dir);
       assertExit(rAuto, 0);
       assertOut(rAuto, 'ALL CHECKS PASSED');
@@ -728,6 +730,7 @@ const TEST_ITEMS = [
       assertExit(runState(['record', 'open', JSON.stringify({ summary: 'plain' })], dir), 0);
       // 出口：record 已自动补标记 → 无兼容警告,正常通过
       writeIntakeArtifacts(dir);
+      assertExit(runGuard(['entry', 'open'], dir), 0);
       const rC = runGuard(['exit', 'open'], dir);
       assertExit(rC, 0);
       assertOut(rC, 'ALL CHECKS PASSED');
@@ -826,6 +829,7 @@ const TEST_ITEMS = [
       const stEmpty = readStateFile(dir);
       stEmpty.currentNode = 'subagent-execute';
       writeState(dir, stEmpty);
+      assertExit(runGuard(['entry', 'subagent-execute'], dir), 0);
       const blocked = runGuard(['exit', 'subagent-execute'], dir);
       assertExit(blocked, 1);
       assertOut(blocked, 'requires evidence: handoff-result');
@@ -975,6 +979,7 @@ const TEST_ITEMS = [
       writeFile(dir, '.specs/cp-skill/notes.md', '# notes\n');
       writeFile(dir, '.specs/cp-skill/CHANGE.md', '# CHANGE\n\n## 变更目标\n\n## 方案\n');
       writeFile(dir, '.specs/cp-skill/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\n## 需求分析\n');
+      assertExit(runGuard(['entry', 'brainstorm'], dir, env), 0);
       const exitRes = runGuard(['exit', 'brainstorm', '--apply'], dir, env);
       assertExit(exitRes, 0);
       assertOut(exitRes, 'ALL CHECKS PASSED');
@@ -1124,6 +1129,7 @@ const TEST_ITEMS = [
       writeState(dir, st);
       // ① 快速命令 → 出口通过
       writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```bash\nnode -e "1"\n```\n');
+      assertExit(runGuard(['entry', 'verify'], dir), 0);
       const pass = runGuard(['exit', 'verify'], dir);
       assertExit(pass, 0);
       assertOut(pass, 'ALL CHECKS PASSED');
@@ -1158,6 +1164,7 @@ const TEST_ITEMS = [
       writeState(dir, st0);
       assertExit(runState(['record', 'archive', '{"summary":"archived"}'], dir), 0);
       // ① 未移动（无归档目录）→ 出口拦截（缺归档产物）
+      assertExit(runGuard(['entry', 'archive'], dir), 0);
       const blocked = runGuard(['exit', 'archive'], dir);
       assertExit(blocked, 1);
       assertOut(blocked, 'missing Output Schema artifacts');
@@ -1204,6 +1211,7 @@ const TEST_ITEMS = [
       const markerInArchive = path.join(dir, '.specs', 'archive', '2026-08-11-arch-mk', '.skill-loads', 'archive-flow-comet-integration.json');
       if (!fs.existsSync(markerInArchive)) throw new Error('声明标记应随目录移入归档路径');
       // 出口：标记经归档路径解析命中（活动路径已不存在）→ 通过且无兼容警告
+      assertExit(runGuard(['entry', 'archive'], dir), 0);
       const pass = runGuard(['exit', 'archive', '--apply'], dir);
       assertExit(pass, 0);
       assertOut(pass, 'ALL CHECKS PASSED');

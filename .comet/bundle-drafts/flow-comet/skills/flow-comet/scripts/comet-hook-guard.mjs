@@ -1802,9 +1802,10 @@ async function main() {
   const hookInput = await readHookInput();
   const target = writeTargetFromHookInput(hookInput);
 
-  // Codex 平台写路径适配:Bash 工具的 command 字符串(无 file_path)——解析写入目标按当前节点
-  // 白名单判定(与 file_path 判定同语义);未命中写入模式 = 无写入语义,放行
-  if (isCodex && hookInput && typeof hookInput === 'object' && hookInput.tool_name === 'Bash') {
+  // R5: Bash 工具写路径适配(CC 与 Codex 通用)——Bash 工具的 command 字符串(无 file_path),
+  // 解析写入目标按当前节点白名单判定(与 file_path 判定同语义);未命中写入模式 = 无写入语义,放行。
+  // CC 侧 settings.local.json 的 matcher 含 Bash(协调者禁令物理化——Bash 写源码同样被拦截)
+  if (hookInput && typeof hookInput === 'object' && hookInput.tool_name === 'Bash') {
     const command = hookInput.tool_input && typeof hookInput.tool_input === 'object' ? hookInput.tool_input.command : null;
     const writeTargets = codexWriteTargetsFromCommand(command);
     if (writeTargets.length > 0 && currentNode) {
@@ -1818,7 +1819,7 @@ async function main() {
         const allowed = targetRel !== null && effectiveWhitelist !== null && targetAllowed(targetRel, effectiveWhitelist, activeChange);
         if (!allowed) {
           hookBlock(
-            `BLOCKED: codex 写入 "${t}" 不在当前节点 "${currentNode}" 允许范围`,
+            `BLOCKED: 命令写入 "${t}" 不在当前节点 "${currentNode}" 允许范围`,
             effectiveWhitelist === null
               ? `请在协议 writeWhitelist 中为节点 "${currentNode}" 声明允许的路径前缀`
               : `允许范围: ${effectiveWhitelist.join(', ')}`
