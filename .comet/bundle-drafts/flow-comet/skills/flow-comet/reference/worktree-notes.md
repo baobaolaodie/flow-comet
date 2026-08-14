@@ -35,7 +35,7 @@ git ls-tree <branch> <path>      # 确认产物在目标仓库哪个分支、路
 
 ## 4.2. 运行时状态文件的跟踪风险(测试载体实证 2026-08-15)
 
-测试载体(如 dogfood 项目)若 git 跟踪 `.comet/flow-comet-state.json`(主仓 gitignore 它,载体可能不同),**恢复/回退操作不得用 `git reset --hard`**——会连带把运行时状态回退到历史版本,状态机倒退(等级 4 实证事故:回退后重跑 init + 重录证据恢复,耗时约 10 分钟)。恢复工件用精确 `git checkout -- <path>`(只回退指定文件),不用整树 reset。
+测试载体(如演练项目)若 git 跟踪 `.comet/flow-comet-state.json`(主仓 gitignore 它,载体可能不同),**恢复/回退操作不得用 `git reset --hard`**——会连带把运行时状态回退到历史版本,状态机倒退(端到端验证实证事故:回退后重跑 init + 重录证据恢复,耗时约 10 分钟)。恢复工件用精确 `git checkout -- <path>`(只回退指定文件),不用整树 reset。
 
 ## 4.5. Codex 平台的 worktree 委托差异(实测 2026-08-14)
 

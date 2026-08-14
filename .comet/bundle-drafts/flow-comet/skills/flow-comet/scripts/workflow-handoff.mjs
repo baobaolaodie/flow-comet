@@ -18,8 +18,12 @@ async function fileExists(f) { try { await fs.access(f); return true; } catch { 
 
 // --json-file 路径校验:解析后必须位于项目根内(与 record 同规则——拒绝越界路径,
 // 防读取任意文件内容进 evidence;runRoot 内绝对路径合法)。符号链接解析后的实际路径
-// 同样必须在项目根内(词法校验不防 symlink 穿越——realpath 后再次校验)
+// 同样必须在项目根内(词法校验不防 symlink 穿越——realpath 后再次校验)。
+// 非字符串/空值(如 --json-file 为最后一个参数)→ 用法错误,与 record 同消息
 async function resolveJsonFileWithinRunRoot(jsonFile) {
+  if (typeof jsonFile !== 'string' || jsonFile.trim() === '') {
+    throw new Error('--json-file requires a path argument');
+  }
   const abs = path.resolve(runRoot, jsonFile);
   const rel = path.relative(runRoot, abs);
   if (path.isAbsolute(rel) || rel === '..' || rel.startsWith('..' + path.sep)) {
@@ -36,8 +40,9 @@ async function resolveJsonFileWithinRunRoot(jsonFile) {
   return abs;
 }
 
-// writeFiles 段感知 glob 匹配:按 / 分段,`*` 只匹配单段(不跨段);精确条目要求完全相等
-// (不再用前缀匹配——src/foo 不得匹配 src/foobar;src/*.test.js 只匹配 src/ 下一层)
+// writeFiles 段感知 glob 匹配:按 / 分段,`*` 只匹配段内任意字符(不跨段);
+// 精确条目要求完全相等(不用前缀匹配——src/foo 不得匹配 src/foobar);
+// 段内含 * 的部分通配(如 src/*.test.js、src/*.mjs)转锚定正则匹配
 function matchWriteFilePattern(file, pattern) {
   const f = String(file).replace(/\\/g, '/');
   const p = String(pattern).replace(/\\/g, '/');
@@ -46,7 +51,15 @@ function matchWriteFilePattern(file, pattern) {
   if (fp.length !== pp.length) return false;
   for (let i = 0; i < pp.length; i++) {
     if (pp[i] === '*') continue;
-    if (pp[i] !== fp[i]) return false;
+    if (!pp[i].includes('*')) {
+      if (pp[i] !== fp[i]) return false;
+      continue;
+    }
+    // 段内 glob:`*` 匹配段内任意字符(不跨 /),其余字符字面匹配(锚定)
+    const seg = new RegExp('^' + pp[i].split('*')
+      .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('[^/]*') + '$');
+    if (!seg.test(fp[i])) return false;
   }
   return true;
 }

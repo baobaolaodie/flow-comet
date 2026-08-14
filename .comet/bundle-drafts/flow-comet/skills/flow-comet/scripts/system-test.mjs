@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // system-test.mjs — flow-comet 系统测试集（与 guard-self-test 同构的载体，测试内容为系统级全链路）
 //
-// 定位：guard-self-test 是引擎脚本的单元/场景级回归（136 场景，fixture 构造为主）；
+// 定位：guard-self-test 是引擎脚本的单元/场景级回归（137 场景，fixture 构造为主）；
 // 本套件是**系统级**测试——每个测试项走真实命令序列（init → record → guard exit → handoff →
 // hook …），覆盖 flow-comet 全部机制面（A~L 十二类）：
 //   A. 状态机与路由（init/status/next/select/advance/record/execution-mode/config）
@@ -521,6 +521,14 @@ const TEST_ITEMS = [
       const noNode = runState(['record'], dir);
       assertExit(noNode, 1);
       assertOut(noNode, 'record requires a Node id.');
+      // --json-file 缺值(最后一个参数)→ 用法错误而非类型错误(修复前 path.resolve
+      // 对 undefined 抛 TypeError——报类型错误而非用法错误,此处应 RED)
+      const missingVal = runState(['record', 'open', '--json-file'], dir);
+      assertExit(missingVal, 1);
+      assertOut(missingVal, '--json-file requires a path argument');
+      if (missingVal.output.includes('ERR_INVALID_ARG_TYPE')) {
+        throw new Error('--json-file 缺值不应报内部 TypeError');
+      }
     },
   },
 
@@ -906,6 +914,24 @@ const TEST_ITEMS = [
       })], dir);
       assertExit(resExact, 1);
       assertOut(resExact, '超出 writeFiles 范围');
+      // ⑨ --json-file 缺值(最后一个参数)→ 用法错误(与 record 对齐;修复前报类型 TypeError)
+      const missingVal = runHandoff(['result', 'T07', '--json-file'], dir);
+      assertExit(missingVal, 1);
+      assertOut(missingVal, '--json-file requires a path argument');
+      // ⑩ 部分段通配:allowed=[src/*.mjs] 应匹配提交 src/a.mjs → 无越界(修复前
+      // 段内 glob 被字面比较,新 change 误 BLOCKED——此处应 RED)
+      writeFile(dir, 'src/a.mjs', 'export const a = 1;\n');
+      execFileSync('git', ['add', 'src/a.mjs'], { cwd: dir });
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'chore: a.mjs'], { cwd: dir });
+      const aHash = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+      assertExit(runHandoff(['request', 'T07', '--write-files', 'src/*.mjs'], dir), 0);
+      const resGlob = runHandoff(['result', 'T07', JSON.stringify({
+        status: 'DONE', taskId: 'T07', commitHash: aHash,
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        greenEvidence: { command: 'echo ok', output: 'ok' },
+      })], dir);
+      assertExit(resGlob, 0);
+      assertNotOut(resGlob, '超出 writeFiles 范围');
     },
   },
 

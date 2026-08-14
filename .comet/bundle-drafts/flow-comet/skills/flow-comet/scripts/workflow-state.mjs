@@ -41,8 +41,13 @@ async function fileExists(file) {
 // --json-file 路径校验:解析后必须位于项目根内(拒绝相对/绝对形式的越界路径,
 // 如 ../..、其他盘符——防读取任意文件内容进 evidence)。runRoot 内的绝对路径合法
 // (场景内文件常见写法,与 record/handoff 的既有用法一致)。符号链接解析后的实际路径
-// 同样必须在项目根内(词法校验不防 symlink 穿越——realpath 后再次校验)
+// 同样必须在项目根内(词法校验不防 symlink 穿越——realpath 后再次校验)。
+// 非字符串/空值(如 --json-file 为最后一个参数)→ 用法错误,不落 path.resolve
+// (修复前 undefined 抛 TypeError、空串解析为 runRoot 报 EISDIR——报类型错误而非用法错误)
 async function resolveJsonFileWithinRunRoot(jsonFile) {
+  if (typeof jsonFile !== 'string' || jsonFile.trim() === '') {
+    throw new Error('--json-file requires a path argument');
+  }
   const abs = path.resolve(runRoot, jsonFile);
   const rel = path.relative(runRoot, abs);
   if (path.isAbsolute(rel) || rel === '..' || rel.startsWith('..' + path.sep)) {
