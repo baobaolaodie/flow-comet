@@ -2129,6 +2129,8 @@ async function main() {
       const bad = validateStateFields(state);
       if (bad.length) { console.error('BLOCKED: state 字段类型非法: ' + bad[0]); process.exit(1); }
       await writeJson(file, state);
+      // G13: 进入已记录提示(执行者可知 entry 有副作用——进入证据写入)
+      console.log('ENTER RECORDED: ' + node.id + ' 进入已记录(enteredNodes)');
     }
     console.log('ENTRY OK: ' + node.id);
     return;

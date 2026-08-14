@@ -34,6 +34,10 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 | handoff completedChecks | 子代理 Return Contract 必须含 required-skill completedChecks（skill 加载证据），缺失 → BLOCKED | exit subagent-execute |
 | redEvidence 时序 | redEvidence 必须先于 greenEvidence 真实存在；已记录 greenEvidence 后补录 redEvidence → BLOCKED | workflow-handoff result |
 | SUMMARY 六段 | verify 输出 / 6 维自查（非空）/ 越界检查 + 强制 `## 自检方法`——6 维自查两级降级：`brooks-review`（Skill 工具）→ 仅返回 "Launching skill" 占位时 Read 插件缓存协议文件手动执行完整审查（`cache-brooks`）→ 最后才是内置 6 维快查（`builtin-quickcheck` 须声明不可用原因**和**缓存尝试证据；缺证据 → 渐进 WARN） | exit execute |
+| 处置标记 | REVIEW.md 发现区条目须带 `[已修]`/`[升级]`/`[转待办]`(新 change 缺失 BLOCKED;旧 change WARN) | exit review |
+| builtin 自检证据 | `builtin-quickcheck` 须声明不可用原因与插件缓存尝试证据(新 change 缺失 BLOCKED;旧 change WARN) | exit execute |
+| 波次散文一致性 | 散文 `[P]` 标记须与任务 `parallel="true"` 一致(新 change 不一致 BLOCKED;旧 change WARN) | exit plan |
+| 越权委托 | 并行 done 任务须经委托节点(新 change 未委托 BLOCKED;旧 change WARN) | exit execute/verify |
 | verify 真实执行 | TEST.md `## 验证命令` 真实运行（支持多行 `&&`）；verifyFailures 机器计数，第 4 次 → BLOCKED（超时可用 `FLOW_COMET_VERIFY_TIMEOUT_MS` 配置，默认 300s） | exit verify |
 | 追加位置检测 | CONTEXT 孤立追加段 / LESSONS 编号乱序 / STATE+CHANGELOG 非倒序 → WARN（渐进） | exit open/verify/archive |
 | 任务完成产物 | 每个 done 任务须有对应 <id>-SUMMARY.md；缺失 → WARN（渐进）（任务声称完成但产物不齐） | exit execute |
@@ -56,11 +60,11 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 
 ## 6. guard 自测套件（作者回归基线）
 
-`scripts/guard-self-test.mjs`：**124 场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（50 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
+`scripts/guard-self-test.mjs`：**134 场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（50 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
 
 ```bash
 node .claude/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 124 SCENARIOS PASSED
+# → ALL 134 SCENARIOS PASSED
 ```
 
 ## 7 自动初始化检测（init 前置步骤）

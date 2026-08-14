@@ -114,7 +114,7 @@ Division of labor: `execute` node handles serial delegation (non-parallel tasks,
 ```
 
 - `status=DONE` 才视为完成；`BLOCKED` / `NEEDS_CONTEXT` 需 orchestrator 处理。
-- `redEvidence` / `greenEvidence` 缺任一 → 视为未执行 TDD，orchestrator 拒绝记录。
+- `redEvidence` / `greenEvidence` 缺任一 → 视为未执行 TDD，orchestrator 拒绝记录；**新 change 下 guard 强制 BLOCKED**（旧 change WARN 渐进）。
 - `completedChecks` 必须含 `required-skill:subagent-execute.flow-comet-dev`（子代理加载 implementation skill 的证明）；缺任一项 → guard exit 严格 BLOCKED（W1-D，无旧 change 豁免），orchestrator 不得以旧格式/补录方式绕过。
 - `riskSignals` 非 `none` 时，orchestrator 应将该任务标记为 review 节点的高优先级审查对象。
 - 子代理回传后，orchestrator 用 `workflow-handoff.mjs result <task-id> '<JSON>'` 记录；guard exit subagent-execute 会校验 commitHash + greenEvidence + completedChecks（W1-D，严格）。

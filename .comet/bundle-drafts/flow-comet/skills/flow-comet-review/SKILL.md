@@ -19,7 +19,7 @@ This node performs a structured multi-round review of the implemented change, ch
 
 | 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
 |------|-------------------------------|-----------------------------------|
-| REVIEW.md | 文件 ≥ 100 字节 | `## Critical` / `## 发现` / `## 结论` 等段（发现区条目须带处置标记 `[已修]` / `[升级]` / `[转待办]`——缺失 WARN 渐进） |
+| REVIEW.md | 文件 ≥ 100 字节 | `## Critical` / `## 发现` / `## 结论` 等段（发现区条目须带处置标记 `[已修]` / `[升级]` / `[转待办]`——新 change 缺失 BLOCKED,旧 change WARN 渐进） |
 
 guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
 

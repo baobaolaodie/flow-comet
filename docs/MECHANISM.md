@@ -34,6 +34,10 @@ Hook blocking semantics (see Limitations): PreToolUse hook exit 2 blocks in the 
 | handoff completedChecks | subagent Return Contract must carry required-skill completedChecks (skill-load evidence), missing → BLOCKED | exit subagent-execute |
 | redEvidence ordering | redEvidence must exist before greenEvidence; recording redEvidence after greenEvidence → BLOCKED | workflow-handoff result |
 | SUMMARY six sections | verify output / 6-dimension self-check (non-empty) / boundary check + mandatory `## 自检方法` — self-review two-tier fallback: `brooks-review` (Skill tool) → if only a "Launching skill" placeholder is returned, Read the plugin-cache protocol files and execute the full review manually (`cache-brooks`) → built-in 6-dimension quick check last (`builtin-quickcheck` must state the unavailable reason AND the cache-attempt evidence; missing evidence → progressive WARN) | exit execute |
+| Disposition markers | REVIEW.md findings must carry `[已修]`/`[升级]`/`[转待办]` (new changes blocked; legacy warned) | exit review |
+| builtin self-check evidence | `builtin-quickcheck` must state the unavailable reason AND the plugin-cache attempt (new changes blocked; legacy warned) | exit execute |
+| Wave-wording consistency | prose `[P]` markers must match task `parallel="true"` (new changes blocked; legacy warned) | exit plan |
+| Overreach delegation | parallel done tasks require the delegation node exited (new changes blocked; legacy warned) | exit execute/verify |
 | verify real execution | TEST.md `## 验证命令` actually runs (multi-line `&&` supported); verifyFailures machine-counted, 4th → BLOCKED (timeout configurable via `FLOW_COMET_VERIFY_TIMEOUT_MS`, default 300s) | exit verify |
 | Append placement | CONTEXT orphan sections / LESSONS numbering-out-of-order / STATE+CHANGELOG non-reverse-order → WARN (progressive) | exit open/verify/archive |
 | Task completion artifacts | every `done` task must have a matching `<id>-SUMMARY.md`; missing → progressive WARN (artifacts incomplete — the task claims done without its summary) | exit execute |
@@ -56,11 +60,11 @@ Hook blocking semantics (see Limitations): PreToolUse hook exit 2 blocks in the 
 
 ## 6. Guard self-test suite (author regression baseline)
 
-`scripts/guard-self-test.mjs`: **124 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (50 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
+`scripts/guard-self-test.mjs`: **134 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (50 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
 
 ```bash
 node .claude/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 124 SCENARIOS PASSED
+# → ALL 134 SCENARIOS PASSED
 ```
 
 ## 7. Automatic initialization detection (init pre-step)

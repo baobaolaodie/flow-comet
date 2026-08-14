@@ -23,6 +23,8 @@ Responsibility: 拆原子任务（XML 格式）+ 波次划分。生成 TASK.md�
 
 guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
 
+波次散文一致性：`## 波次划分` 中标记为并行（[P]）的任务必须与 XML 任务 `parallel="true"` 一致——新 change 不一致 BLOCKED（旧 change WARN 渐进）。
+
 # Plan
 
 ## Node Goal

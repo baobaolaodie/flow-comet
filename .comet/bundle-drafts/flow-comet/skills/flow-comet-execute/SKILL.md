@@ -42,8 +42,8 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 - execute 遍历 TASK.md 时，遇到 `parallel="true" status="pending"` 的任务块应**跳过**
 - **全 parallel 任务时 execute 不得空退出（除非显式豁免）**：guard 的 exit 校验（evidence 前置 → 串行 pending 检测 → Output Schema 产物）会 BLOCKED——「空退出」默认不可达（实测确认）。正确路径：
   1. 正常流程下 determineNode 的 路由逻辑会**直接路由到 subagent-execute**（无需经过 execute 空退出）——协调者确认 路由逻辑生效（`NODE: subagent-execute`）后直接进入该节点
-  2. 若已进入 execute 且确认无串行任务可做：按正常 exit 流程处理（record execute evidence + 满足产物校验），需要豁免越俎代庖检测时用 `record execute '{"parallelTakeoverApproved":true}'` 显式声明
-  3. **显式空退出豁免（新 change 可用）**：确认全 parallel 无串行可做且无法路由时，用 `record execute '{"emptyExitApproved":true}'` 显式声明后 exit 通过（跳过串行 pending 与产物校验；防规划错误仍默认 BLOCKED——豁免须显式声明）
+  2. 若已进入 execute 且确认无串行任务可做：按正常 exit 流程处理（record execute evidence + 满足产物校验），需要豁免越俎代庖检测时用 `record execute '{"parallelTakeoverApproved":true}'` 显式声明；[P] 任务由 execute 完成属越权委托——新 change BLOCKED（旧 change WARN 渐进）
+  3. **显式空退出豁免（新 change 可用）**：确认全 parallel 无串行可做且无法路由时，用 `record execute '{"emptyExitApproved":true}'` 显式声明后 exit 通过（跳过串行 pending 与产物校验；防规划错误仍默认 BLOCKED——豁免须显式声明；exit 输出 EMPTY-EXIT 审计提示）
 - determineNode 路由逻辑会优先检测 parallel 任务并路由到 subagent-execute；若 determineNode 路由到了 execute，说明存在需要 execute 处理的串行任务（此时应执行而非空退出）
 
 ### Prerequisites

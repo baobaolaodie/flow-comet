@@ -26,7 +26,7 @@
 
 - 旧 change/旧 state 自动补默认字段（executionMode/branchMode/enablePrReview）；无分支 change 照常运行——向后兼容
 - 旧 change 重入渐进 WARN 不 BLOCK（redEvidence/greenEvidence 缺失、纯字符串 handoff）
-- 回归基线（两级）：`guard-self-test.mjs` 124 场景 + `system-test.mjs` 50 项全绿（每次改动后必须）
+- 回归基线（两级）：`guard-self-test.mjs` 134 场景 + `system-test.mjs` 50 项全绿（每次改动后必须）
 
 ## 发布 checklist（每次发布收尾）
 

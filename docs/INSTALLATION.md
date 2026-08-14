@@ -67,7 +67,7 @@ On non-default platforms, command paths inside SKILL/GUIDANCE files are rewritte
 4. **Smoke test** (run inside the target project): `cd <target> && node .claude/skills/flow-comet/scripts/workflow-state.mjs status` — expected output is a JSON state object (`{"status":"no-change",...}` for a fresh project, `{"status":"running","change":...}` when a workflow is active)
 
 > Commands are POSIX-style (Git Bash / WSL / macOS terminal); Windows users should run them in Git Bash.
-> **Note**: `guard-self-test.mjs` (124 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
+> **Note**: `guard-self-test.mjs` (134 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
 
 ### Using flow-comet on Codex
 
@@ -79,6 +79,10 @@ Measured on Codex CLI 0.146.0 — the 8-node flow runs end-to-end.
 - **Windows PowerShell argument quoting**: `node … '{"summary":"…"}'` loses embedded double quotes through PowerShell 5.1 — run such commands via .NET `ProcessStartInfo`/`ArgumentList`, or from Git Bash.
 - **Commit discipline**: the workflow scripts validate artifacts, not git commits — mark tasks `status="done"` in TASK.md and commit as part of the execute node protocol.
 - **Archive order**: run `skill-load archive flow-comet-integration --prompt flow-kit/prompts/7-integration.md` **before** copying the archive directory (declaration markers travel with the directory copy).
+- **Chinese artifact writing (measured)**: session Bash writing Chinese via the PowerShell pipeline may corrupt it into literal `?` (`$OutputEncoding` encoding) — write via Python with `encoding='utf-8'`, set `$OutputEncoding=UTF8`, or use full `\uXXXX` escapes; `python -c` with embedded Chinese is lossless.
+- **JSON argument quoting (measured)**: PowerShell 5.1 strips embedded double quotes when passing arguments to native commands (`handoff result` / `record` may store dirty strings) — use `--json-file` to read the JSON payload from a file, or run from Git Bash.
+- **Git proxy operations (measured)**: git is restricted inside the codex sandbox (init branch creation fails, worktree subagents cannot self-commit) — init branch failure degrading to file-only mode is expected; commits from delegated subagents are made by the coordinator outside the sandbox, and the Return Contract's commitHash remains verifiable.
+- **Leading `>` misdetection (measured)**: the hook treats a command-line leading `>` as a shell redirection (markdown quote lines get blocked) — escape and restore with `>`.
 
 ### Verifying a Codex installation
 

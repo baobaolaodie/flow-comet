@@ -737,7 +737,9 @@ async function main() {
       branchMode: isInsideWorkTree(),
       enablePrReview: state.enablePrReview ?? false,
       artifactRoot: '.specs/' + changeName,
-      coordinatorMode: ['execute', 'subagent-execute'].includes(detectedNode)
+      coordinatorMode: ['execute', 'subagent-execute'].includes(detectedNode),
+      // G14: 新旧 change 标记——newChange true = 新 change(严格模式);false/缺失 = 旧 change(渐进)
+      newChange: state.newChange === true
     }, null, 2));
     printBranchLine(changeName, state.branchPrefix ?? 'change/');
     return;

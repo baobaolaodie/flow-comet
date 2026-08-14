@@ -70,7 +70,9 @@ description: "Use when the user wants the flow-comet managed workflow for flow-k
 | "LESSONS.md 不用扫" | R1.8：每个 DEV 任务必须扫描 |
 | "测试从实现派生就行" | R5.1：测试必须从 AC 派生 |
 | "guard 失败了，让用户决定" | 先自动诊断并执行唯一安全修复；无合法动作时才报告停止条件 |
-| "subagent-execute 阶段，我直接改源码更快" | 协调者禁令：subagent-execute 阶段主会话禁止写源码（hook 白名单只允许 .specs/），必须 worktree 委托子代理 |
+| "跳过 entry 直接 exit,反正没检查" | 新 change 未 entry 直接 exit → BLOCKED(进入检查不可跳过);旧 change WARN 渐进 |
+| "SUMMARY 不写,任务先标 done" | 新 change done 任务缺 SUMMARY → BLOCKED(产物完整性强制) |
+| "subagent-execute 阶段，我直接改源码更快" | 协调者禁令：subagent-execute 阶段主会话禁止写源码（hook 白名单只允许 .specs/，Write/Edit 与 Bash 写命令均物理拦截），必须 worktree 委托子代理 |
 
 ## Workflow Nodes
 
@@ -97,6 +99,8 @@ description: "Use when the user wants the flow-comet managed workflow for flow-k
 | review | flow-comet-review | flow-comet-review, flow-comet-test | guarded |
 | verify | flow-comet-verify | flow-comet-integration | guarded |
 | archive | flow-comet-archive | flow-comet-integration | guarded |
+
+**新 change 严格模式**：`init` 创建的 change 标记为"新"（`newChange: true`）——新 change 下全部内容级检查强制 BLOCKED（处置标记/缓存证据/波次散文/越权委托/SUMMARY 完整性/进入证据等）；旧 change（历史遗留,无标记）保持渐进 WARN。执行者可通过 `status` 确认当前 change 的新旧。
 
 **节点 skill 加载声明**：进入节点、加载节点 skill 后**立即**运行声明命令，记录本次加载使用的 skill 与协议文件（open/review 等涉及多个协议文件的节点，每个协议文件对应一条声明命令）：
 
@@ -135,7 +139,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <ski
 
 ### Node Boundary Rules
 
-- Before leaving a Node, run `node .claude/skills/flow-comet/scripts/workflow-guard.mjs exit <node> --apply` to advance state.
+- Before leaving a Node, run `node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry <node>` then `exit <node> --apply` to advance state. **新 change 未 entry 直接 exit → BLOCKED**（旧 change WARN 渐进）——entry 的进入检查（协调者禁令/委托前检查/签名记录）不可跳过。
 - If the guard fails, do not proceed — present the guard output and ask the user how to fix it.
 - If the user wants to redo a completed Node, reset its completion state and re-enter rather than creating a parallel path.
 
