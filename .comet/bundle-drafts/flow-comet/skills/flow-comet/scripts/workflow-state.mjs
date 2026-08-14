@@ -863,7 +863,9 @@ async function main() {
     // 同 node-skill 重复调用覆盖（记录最新声明）
     const changeName = await findActiveChange();
     if (!changeName) {
-      throw new Error('skill-load requires an active change（先运行 init <change-id>）');
+      // 归档后场景:change 目录已移入 .specs/archive/(无活跃 change)——skill-load 不可用,
+      // 但 record 的声明自动化(M5)仍可写归档路径标记——消息如实引导(级 4 实证反馈)
+      throw new Error('skill-load requires an active change（先运行 init <change-id>;若该 change 已归档,声明标记由 record 自动补写——M5 会写入归档路径的 .skill-loads/）');
     }
     // 标记 protocol 字段 = --prompt 参数的 basename（如 0-change.md）——与 guard exit
     // 校验的 节点协议映射 表 basename 精确比对同值（真实链路 skill-load → exit 一致）；未传 --prompt →

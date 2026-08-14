@@ -2474,13 +2474,13 @@ async function main() {
           // 关键词声明级校验（设计边界：不做语义判断）；缺失 → WARN 渐进（不 BLOCK，向后兼容旧 SUMMARY）
           if (!/brooks-lint 不可用|插件不可用|unavailable|N\/A/i.test(content)) {
                     if (isNewChange(state)) {
-          console.error('BLOCKED: SUMMARY 使用 builtin-quickcheck 未声明 brooks-lint 不可用原因（新 change 强制）;恢复: 在 ## 自检方法 段补原因');
+          console.error('BLOCKED: SUMMARY 使用 builtin-quickcheck 未声明 brooks-lint 不可用原因（新 change 强制）;恢复: 在 ## 自检方法 段补原因（声明级校验——须含关键词: brooks-lint 不可用 / 插件不可用 / unavailable / N/A,如「brooks-lint 不可用(Skill 仅返回占位,插件执行体未加载)」）');
           process.exit(1);
         }
         console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明 brooks-lint 不可用原因');
           } else if (!/插件缓存|缓存协议|协议文件|plugins\/cache/i.test(content)) {
                     if (isNewChange(state)) {
-          console.error('BLOCKED: SUMMARY 使用 builtin-quickcheck 未声明缓存尝试证据（新 change 强制先 Read 插件缓存协议文件）;恢复: 在 ## 自检方法 段声明缓存尝试');
+          console.error('BLOCKED: SUMMARY 使用 builtin-quickcheck 未声明缓存尝试证据（新 change 强制先 Read 插件缓存协议文件）;恢复: 在 ## 自检方法 段声明缓存尝试（须含关键词: 插件缓存 / 缓存协议 / 协议文件 / plugins/cache,如「已 Read 插件缓存协议文件(~/.claude/plugins/cache/...)手动执行仍不可行」）');
           process.exit(1);
         }
         console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明缓存尝试证据（应先 Read 插件缓存协议文件手动执行完整 brooks 流程）');

@@ -1383,6 +1383,11 @@ const TEST_ITEMS = [
       if (fs.existsSync(path.join(dir, '.specs', 'arch-m5b'))) {
         throw new Error('M5 在双路径皆无时重建了活动目录(残留): .specs/arch-m5b/');
       }
+      // 变体:归档后 skill-load 报错须引导 record 自动补路径(级 4 实证:归档后手动声明
+      // 不可行,消息须指明 M5 自动补仍可写归档路径标记)
+      const slArchive = runState(['skill-load', 'archive', 'flow-comet-integration'], dir);
+      assertExit(slArchive, 1);
+      assertOut(slArchive, 'record 自动补写');
     },
   },
 

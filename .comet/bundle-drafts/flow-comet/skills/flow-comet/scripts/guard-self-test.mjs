@@ -2959,6 +2959,9 @@ const SCENARIOS = [
       const res = runGuard(['exit', 'execute'], dir);
       assertExit(res, 1);
       assertOut(res, '缓存');
+      // 子断言:拦截消息须含关键词引导(声明级校验的执行者体验——级 4 实证:语义完整但
+      // 缺关键词被拦,消息应指明所需关键词,防执行者无从下手)
+      assertOut(res, '须含关键词');
     },
   },
 
