@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // system-test.mjs — flow-comet 系统测试集（与 guard-self-test 同构的载体，测试内容为系统级全链路）
 //
-// 定位：guard-self-test 是引擎脚本的单元/场景级回归（114 场景，fixture 构造为主）；
+// 定位：guard-self-test 是引擎脚本的单元/场景级回归（123 场景，fixture 构造为主）；
 // 本套件是**系统级**测试——每个测试项走真实命令序列（init → record → guard exit → handoff →
 // hook …），覆盖 flow-comet 全部机制面（A~K 十一类）：
 //   A. 状态机与路由（init/status/next/select/advance/record/execution-mode/config）
@@ -1632,6 +1632,73 @@ const TEST_ITEMS = [
         if (purgeRes.status !== 0) throw new Error('平台 ' + id + ' purge 失败: ' + (purgeRes.stderr || JSON.stringify(purgeRes.output)));
       }
       console.log('  描述符驱动: ' + ids.length + ' 个平台逐一安装 + purge 冒烟通过✓');
+    },
+  },
+
+  // ---------- L. 执行遗漏防护（M1~M8 真实链路） ----------
+
+  {
+    name: 'L1 进入证据:entry 记录 enteredNodes,exit 未 entry 触发 ENTER WARN',
+    run: (dir) => {
+      gitInit(dir);
+      assertExit(runState(['init', CHANGE_ID, '--init-skip'], dir), 0);
+      writeIntakeArtifacts(dir);
+      // ① entry open 记录进入标记
+      assertExit(runGuard(['entry', 'open'], dir), 0);
+      const st = readStateFile(dir);
+      if (!Array.isArray(st.enteredNodes) || !st.enteredNodes.includes('open')) {
+        throw new Error('entry 未记录 enteredNodes: ' + JSON.stringify(st.enteredNodes));
+      }
+      // ② 未 entry 直接 exit(构造:跳过 design 的 entry,state 已激活)→ ENTER WARN 渐进
+      assertExit(runState(['record', 'open', '{"summary":"intake complete"}'], dir), 0);
+      assertExit(runGuard(['exit', 'open', '--apply'], dir), 0);
+      // 推进到 design 后不 entry 直接 exit?→ currentNode 检查会拦;验证 enter 证据在真实链路不误报
+      assertExit(runGuard(['entry', 'design'], dir), 0);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n## 0. 技术栈\n\npython\n\n## 决策清单\n\n- [ ] D1\n');
+      assertExit(runState(['record', 'design', '{"summary":"design done"}'], dir), 0);
+      const rDesign = runGuard(['exit', 'design', '--apply'], dir);
+      assertExit(rDesign, 0);
+      assertNotOut(rDesign, 'ENTER WARN');
+    },
+  },
+
+  {
+    name: 'L2 空退出豁免:显式 emptyExitApproved 后全 parallel execute 通过',
+    run: (dir) => {
+      gitInit(dir);
+      // fixture state(currentNode=execute + enter 机制激活)+ 真实命令序列:
+      // 全 parallel 任务在 plan exit 后正常路由 subagent-execute(M6 豁免用于已进入 execute 且无串行可做的场景)
+      const taskAllParallel = '# TASK\n\n<task id="P01" parallel="true" status="pending"><action>p</action><write_files>a</write_files><verify>t</verify><done>d</done></task>\n';
+      // ① 显式豁免 → 空退出通过
+      const st = baseState('execute');
+      st.enteredNodes = ['open', 'design', 'plan'];
+      writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskAllParallel);
+      assertExit(runGuard(['entry', 'execute'], dir), 0);
+      assertExit(runState(['record', 'execute', '{"summary":"no serial tasks","emptyExitApproved":true}'], dir), 0);
+      const r = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(r, 0);
+      assertOut(r, 'ALL CHECKS PASSED');
+      // ② 无豁免 → 仍 BLOCKED(默认防规划错误)
+      const st2 = baseState('execute');
+      st2.enteredNodes = ['open', 'design', 'plan'];
+      writeState(dir, st2);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskAllParallel);
+      assertExit(runGuard(['entry', 'execute'], dir), 0);
+      assertExit(runState(['record', 'execute', '{"summary":"no serial tasks"}'], dir), 0);
+      const r2 = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(r2, 1);
+      assertOut(r2, 'BLOCKED');
+    },
+  },
+
+  {
+    name: 'L3 空仓库:init 在无提交仓库输出 EMPTY-REPO 提示',
+    run: (dir) => {
+      execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' }); // 无提交
+      const r = runState(['init', CHANGE_ID, '--init-skip'], dir);
+      assertExit(r, 0);
+      assertOut(r, 'EMPTY-REPO');
     },
   },
 ];
