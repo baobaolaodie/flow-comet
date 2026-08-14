@@ -80,7 +80,7 @@ console.log('protocol valid');
 - 校验不通过 → 修复字段 → 重跑，直到输出 `protocol valid`
 - 校验通过后，把校验命令与输出写入该协议所在目录的验证记录（或直接回显给用户），作为协议生效证据
 
-## 强制最小规则（US-3 质量语义，不可跳过）
+## 强制最小规则（质量语义，不可跳过）
 
 1. **每节点必须有产物**：节点 `outputSchemas` 引用的 schema 必须存在于顶层 `outputSchemas[]`，且含非空 `artifacts[].paths`。禁止无产物节点——没有产物就无法做 guard 校验与恢复。
 2. **每节点必须有 evidence 字段**：每个 outputSchema 必须带 `evidence: [{ id, required }]`（flowkit.*.v1 风格），供 `workflow-state.mjs record` 记录节点证据。
