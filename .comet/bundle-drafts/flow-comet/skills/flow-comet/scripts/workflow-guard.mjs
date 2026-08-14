@@ -62,6 +62,10 @@ function reviewFindingsMissingDisposition(text) {
       const m = line.match(/^\s*-\s*\*\*(.+?)\*\*/);
       if (!m) continue;
       if (/^无/.test(m[1].trim())) continue; // "无" 条目豁免
+      // 四要素字段行豁免:REVIEW 发现条目的 Symptom/Source/Consequence/Remedy
+      // 是 brooks 审查输出格式的字段行(带 ** 加粗),不是发现条目本身——不豁免会误判
+      // 为"发现项缺处置标记"(执行者按 4 要素格式书写时被误 BLOCKED)
+      if (/^(Symptom|Source|Consequence|Remedy)/i.test(m[1].trim())) continue;
       if (!/\[已修\]|\[升级\]|\[转待办\]/.test(line)) missing.push(m[1]);
     }
   }
@@ -2206,7 +2210,8 @@ async function main() {
           console.error('BLOCKED: LESSONS.md 有条目在条目区外（新 change 强制条目插入条目区）;恢复: 移入条目区');
           process.exit(1);
         }
-        console.error('WARN: LESSONS.md 有条目在条目区外');
+        // 诊断信息附带 zoneIndex/条目位置——偶发 WARN 排查时可直接定位(文件时序/编码差异兜底)
+        console.error('WARN: LESSONS.md 有条目在条目区外(zoneIndex=' + zoneIndex + ', 条目数=' + headings.length + ', 区外条目: ' + headings.filter(h => h.index < zoneIndex).map(h => 'L-' + h[1]).join(',') + ')');
       }
       const nums = headings.map(h => parseInt(h[1], 10));
       // 分段检测：按 ## 标题分段，仅同段内比较编号递增（多段 LESSONS 如「活跃条目/已解决条目」编号体系可独立）
@@ -2617,7 +2622,9 @@ async function main() {
     const testDoc = path.join(runRoot, '.specs', state.activeChange ?? '', 'TEST.md');
     if (await fileExists(testDoc)) {
       const text = await fs.readFile(testDoc, 'utf8');
-      const m = text.match(/##\s*验证命令\s*\n\s*```[^\n]*\n([\s\S]*?)```/);
+      // 段名允许括号后缀(与 ## 自检方法 段的括号后缀兼容风格一致——执行者按
+      // 模板标题原样书写或补充说明时不被误 BLOCKED)
+      const m = text.match(/##\s*验证命令(?:[（(][^）)\n]*[）)])?\s*\n\s*```[^\n]*\n([\s\S]*?)```/);
       if (m) verifyCommand = m[1].trim().split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).join(' && ');
     }
     // 2) state 的 verifyCommand

@@ -82,7 +82,21 @@ async function main() {
 
   if (action === 'result') {
     const taskId = process.argv[3];
-    const raw = process.argv.slice(4).join(' ');
+    // --json-file <path>(或 --json-file=<path>):从文件读 JSON payload——与 record 对齐,
+    // 规避 Windows PowerShell 剥离内嵌双引号导致 JSON 损坏(存成脏字符串)
+    let jsonFile = null;
+    const resultArgs = [];
+    const rawArgs = process.argv.slice(4);
+    for (let i = 0; i < rawArgs.length; i++) {
+      const arg = rawArgs[i];
+      if (arg === '--json-file') { jsonFile = rawArgs[i + 1]; i += 1; continue; }
+      if (typeof arg === 'string' && arg.startsWith('--json-file=')) { jsonFile = arg.slice('--json-file='.length); continue; }
+      resultArgs.push(arg);
+    }
+    let raw = resultArgs.join(' ');
+    if (jsonFile !== null) {
+      raw = await fs.readFile(path.resolve(runRoot, jsonFile), 'utf8');
+    }
     if (!taskId) { console.error('Usage: workflow-handoff.mjs result <task-id> <result>'); process.exit(1); }
     // W1-D: 尝试解析 JSON（Return Contract）——解析失败则存原始字符串
     let parsed = raw;

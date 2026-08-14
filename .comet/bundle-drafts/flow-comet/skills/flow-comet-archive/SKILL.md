@@ -51,8 +51,8 @@ This node finalizes a completed change by extracting reusable lessons from the d
    - Date format: YYYY-MM-DD of the archive date.
    - Verify the move completed successfully (source no longer exists, destination has all files).
 
-7. **Update CHANGELOG.md**: 在 `.specs/CHANGELOG.md` 表格**顶部**按日期倒序插入一行（倒序约定：新条目永远在最新日期行之上；文件不存在则从模板创建）:
-   - Format: `| YYYY-MM-DD | <change-id> | one-line summary | PR link | new L-NNN entries |`
+7. **Update CHANGELOG.md**: 在 `.specs/CHANGELOG.md` **顶部**按日期倒序插入新条目（倒序约定：新条目永远在最新日期行之上；文件不存在则从模板创建）。若项目既有 CHANGELOG 采用其他格式（如 `## 日期 + 列表`），**跟随项目既有格式**在顶部插入（不强制转表格——保持仓库一致性；guard 的倒序检测只针对表格格式行）:
+   - 表格格式: `| YYYY-MM-DD | <change-id> | one-line summary | PR link | new L-NNN entries |`
 
 8. **Update STATE.md（可选决策日志）**: 若项目维护 `STATE.md`，新决策日志条目**顶部**插入（倒序约定，**禁止文件尾追加**）。flow-comet 的活动 change 状态由 `.comet/flow-comet-state.json` 管理——STATE.md 无 active change 字段，不需要也不应手动清除。
 
@@ -80,7 +80,7 @@ This node finalizes a completed change by extracting reusable lessons from the d
 分支模式下（`branchMode=true`，git 仓库 + init 已建 `change/<id>` 分支）在完成上述归档提交后执行收尾：
 
 1. 确认当前分支 = `change/<id>`（`git branch --show-current`；entry archive 已校验，异常先切回）
-2. `git checkout main && git merge change/<id>`——冲突时**提示用户处理，禁止自动解决冲突**
+2. `git checkout <默认分支> && git merge change/<id>`——冲突时**提示用户处理，禁止自动解决冲突**。默认分支不一定是 `main`（如 e2e 项目是 `master`）——先探测：`git symbolic-ref refs/remotes/origin/HEAD`（取 `origin/xxx` 的 xxx；无远端时 `git symbolic-ref --short HEAD` 的默认分支或 `git branch` 列第一个非 change 分支）
 3. `git branch -d change/<id>` 删除已合并分支
 4. `.specs/archive/` 归档照旧——分支合并是收尾动作，不是新节点
 

@@ -729,6 +729,11 @@ const SCENARIOS = [
       const res = runGuard(['exit', 'verify'], dir);
       assertExit(res, 0);
       assertOut(res, 'WARN: LESSONS.md 条目编号乱序');
+      // 子断言:## 验证命令 段标题带括号后缀(与 ## 自检方法 段括号后缀兼容风格一致)不误 BLOCK
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令（必填 · exit verify 真实执行）\n\n```bash\nnode -e "1"\n```\n');
+      const resBracket = runGuard(['exit', 'verify'], dir);
+      assertExit(resBracket, 0);
+      assertOut(resBracket, 'ALL CHECKS PASSED');
       // ① 缺省 timeout（未设 env）保持大值：1.5s 耗时命令通过（若缺省被误改小 → 超时 RED）
       writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```bash\nnode -e "setTimeout(()=>{}, 1500)"\n```\n');
       const resDefault = runGuard(['exit', 'verify'], dir);
@@ -2869,6 +2874,12 @@ const SCENARIOS = [
       const res = runGuard(['exit', 'review'], dir);
       assertExit(res, 1);
       assertOut(res, '处置状态标记');
+      // 子断言:四要素字段行(Symptom/Source/Consequence/Remedy)不误判为发现条目——
+      // 执行者按 brooks 输出格式书写(带处置标记的条目)应正常通过
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## Critical\n\n无。\n\n## 发现\n\n- **问题B**: 某处问题 **[已修]**\n  - **Symptom**: 具体现象\n  - **Source**: 某书某节\n  - **Consequence**: 若不修会怎样\n  - **Remedy**: 怎么改\n\n## 结论\n\n通过\n');
+      const resOk = runGuard(['exit', 'review'], dir);
+      assertExit(resOk, 0);
+      assertOut(resOk, 'ALL CHECKS PASSED');
     },
   },
 

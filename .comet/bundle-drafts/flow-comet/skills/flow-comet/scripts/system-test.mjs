@@ -800,6 +800,23 @@ const TEST_ITEMS = [
       })], dir);
       assertExit(badHash, 0);
       assertOut(badHash, 'HANDOFF ERROR: commitHash 无效或 git show 失败');
+      // ⑤ --json-file 读取 JSON payload(与 record 对齐——规避 Windows PowerShell
+      // 引号剥离导致 JSON 损坏;须正确解析为对象而非存成字符串)
+      const payloadFile = path.join(dir, 'contract.json');
+      fs.writeFileSync(payloadFile, JSON.stringify({
+        status: 'DONE', taskId: 'T03', commitHash: hash,
+        changedFiles: ['src/t1.mjs'],
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        greenEvidence: { command: 'node --check src/t1.mjs', output: 'ok' },
+      }), 'utf8');
+      const viaFile = runHandoff(['result', 'T03', '--json-file', payloadFile], dir);
+      assertExit(viaFile, 0);
+      assertOut(viaFile, 'HANDOFF RESULT: T03');
+      const st5 = readStateFile(dir);
+      const rec5 = st5.evidence['subagent-execute'].handoffResult['T03'];
+      if (!rec5 || typeof rec5.result !== 'object' || rec5.result.commitHash !== hash) {
+        throw new Error('--json-file 未正确解析契约(应存为对象): ' + JSON.stringify(rec5));
+      }
     },
   },
 
