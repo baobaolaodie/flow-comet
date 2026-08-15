@@ -257,7 +257,8 @@ async function promptPlatformSelection(probe, dualTrace) {
 // 显式 --platform 仅接受 claude-code/codex（both 为交互专属选项——设计文档 §4.2 无显式 both）。
 async function resolvePlatform(target, platformArg) {
   if (platformArg) {
-    if (!PLATFORMS[platformArg]) {
+    // hasOwnProperty 防原型链属性(如 toString/__proto__)通过查找——仅接受自有描述符键
+    if (!Object.prototype.hasOwnProperty.call(PLATFORMS, platformArg)) {
       throw new Error(`未知平台: ${platformArg}（可用: ${Object.keys(PLATFORMS).join(', ')}）`);
     }
     return [PLATFORMS[platformArg]];

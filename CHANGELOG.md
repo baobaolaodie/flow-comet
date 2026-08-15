@@ -14,7 +14,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ### Fixed
 
-- **Installer platform selection**: the interactive prompt now offers `3) both` (install to both Claude Code and Codex); no-TTY auto-detection no longer arbitrarily picks Codex when the target project has both `.claude/` and `.codex/` traces — it defaults to Claude Code (primary) with a hint, while Codex or both remain reachable interactively or via `--platform`.
+- **Installer platform selection**: the interactive prompt now offers `3) both` (install to both Claude Code and Codex — an interactive-only option; `--platform` still accepts only `claude-code` or `codex`); no-TTY auto-detection no longer arbitrarily picks Codex when the target project has both `.claude/` and `.codex/` traces — it defaults to Claude Code (primary) with a hint; Codex remains reachable via `--platform codex`, and both via an interactive terminal.
 
 ## [1.4.0] - 2026-08-14
 

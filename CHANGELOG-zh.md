@@ -14,7 +14,7 @@
 
 ### 修复
 
-- **安装器平台选择**：交互提示新增 `3) both`（两个平台都装）；目标项目同时有 `.claude/` 与 `.codex/` 痕迹时，无 TTY 自动探测不再武断只装 Codex——默认安装 Claude Code（主平台）并输出提示，Codex 或 both 仍可通过交互终端或 `--platform` 选择。
+- **安装器平台选择**：交互提示新增 `3) both`（两个平台都装——交互专属选项，`--platform` 仍仅接受 `claude-code` 或 `codex`）；目标项目同时有 `.claude/` 与 `.codex/` 痕迹时，无 TTY 自动探测不再武断只装 Codex——默认安装 Claude Code（主平台）并输出提示；Codex 经 `--platform codex` 显式选择，both 经交互终端选择。
 
 ## [1.4.0] - 2026-08-14
 
