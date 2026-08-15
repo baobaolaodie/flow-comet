@@ -1,6 +1,6 @@
 <div align="right">
 
-[English](SECURITY.md)
+[English](SECURITY.md) · [中文](SECURITY-zh.md)
 
 </div>
 
@@ -14,7 +14,7 @@
 2. 描述问题、受影响版本(安装副本的 `INSTALLED_VERSION`,或源仓库的 `git describe --tags`)与复现步骤。
 3. 在修复发布前,请勿公开披露漏洞。
 
-我们目标在 72 小时内确认报告,并尽快给出修复计划或评估。
+我们以 72 小时内确认报告为目标,并尽快给出修复计划或评估。
 
 ## 范围
 

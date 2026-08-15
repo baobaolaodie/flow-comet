@@ -1,11 +1,11 @@
 ---
 name: flow-comet-change
-description: "flow-kit CHANGE 阶段协议：反问澄清、change-id 自动生成、架构级变更检测、视觉调性预选。Comet open 阶段的 flow-kit 增强。"
+description: "flow-kit CHANGE 阶段协议：反问澄清、change-id 自动生成、架构级变更检测、视觉调性预选。flow-comet open 节点的 flow-kit 增强。"
 ---
 
 # flow-kit CHANGE Protocol
 
-本 Skill 为 Comet open 阶段提供 flow-kit 的 CHANGE 反问协议。
+本 Skill 为 flow-comet 的 open 节点提供 flow-kit 的 CHANGE 反问协议。
 
 ## 加载
 
@@ -24,6 +24,6 @@ description: "flow-kit CHANGE 阶段协议：反问澄清、change-id 自动生�
 
 - `.specs/<change-id>/CHANGE.md`
 
-## Comet 集成
+## 状态推进
 
-CHANGE.md 生成后，由 Comet open 阶段接管状态推进。不需要手动维护 STATE.md。
+CHANGE.md 生成后，由 flow-comet 状态机（workflow-state/guard）推进节点。不需要手动维护 STATE.md。

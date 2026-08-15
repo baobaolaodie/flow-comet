@@ -19,7 +19,7 @@
 ## 验证（勾选已执行）/ Verification (check executed)
 
 <!-- 关键验证输出请粘贴到验证段下方(如回归结果/失败日志),reviewer 可直接核验 / Paste key verification output below (e.g. regression result, failure logs) so reviewers can check directly -->
-- [ ] 回归测试 / Regression：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → ALL 114 SCENARIOS PASSED + `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/system-test.mjs` → ALL SYSTEM TESTS PASSED
+- [ ] 回归测试 / Regression：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → ALL 137 SCENARIOS PASSED + `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/system-test.mjs` → ALL SYSTEM TESTS PASSED
 - [ ] 脚本改动：先写失败测试（确认测试因缺陷失败）再实现 / Script changes: write a failing test first (confirm it fails for the right reason) before implementing
 - [ ] 文档改动：中英双语同步 / Doc changes: EN and ZH mirrored
 - [ ] 发布验证：各安装副本回归通过 / Release check: regression passes in all installed copies
@@ -35,7 +35,7 @@
 
 ## 基于版本 / Based on
 
-<!-- 基于哪个基线开发：main v1.3.1 / 最新 dev / 具体 commit / Which baseline (e.g. main v1.3.1, latest dev, specific commit) -->
+<!-- 基于哪个基线开发：main 最近发布版本 / 最新 dev / 具体 commit / Which baseline (e.g. latest release on main, latest dev, specific commit) -->
 
 ## 关联（可选）/ Related (optional)
 

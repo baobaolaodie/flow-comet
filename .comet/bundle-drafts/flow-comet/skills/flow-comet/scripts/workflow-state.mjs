@@ -3,8 +3,8 @@ import { execFileSync } from 'child_process';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { resolveProtocol, readProtocolFile, validateProtocolSchema } from './protocol-utils.mjs';
-import { validateStateFields } from './state-schema.mjs';
+import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, SKILL_PROTOCOL_FILES } from './protocol-utils.mjs';
+import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor } from './state-schema.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide, skipInit } from './context-init.mjs';
 
 const command = process.argv[2] ?? 'status';
@@ -22,6 +22,8 @@ const specsRoot = path.join(runRoot, '.specs');
 // 参数校验已改为当前协议节点集合动态读取——compose 自定义协议节点可声明）
 const BUILTIN_NODES = ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review', 'verify', 'archive'];
 
+// 节点协议映射(单一来源): NODE_PROTOCOL_FILES 来自 protocol-utils.mjs(M5 record 自动补声明标记的 protocol 归属)
+
 async function readJson(file) {
   // 容忍 UTF-8 BOM（外部写入如会话 Write 可能带 BOM）
   return JSON.parse((await fs.readFile(file, 'utf8')).replace(/^﻿/, ''));
@@ -34,6 +36,32 @@ async function writeJson(file, value) {
 
 async function fileExists(file) {
   try { await fs.access(file); return true; } catch { return false; }
+}
+
+// --json-file 路径校验:解析后必须位于项目根内(拒绝相对/绝对形式的越界路径,
+// 如 ../..、其他盘符——防读取任意文件内容进 evidence)。runRoot 内的绝对路径合法
+// (场景内文件常见写法,与 record/handoff 的既有用法一致)。符号链接解析后的实际路径
+// 同样必须在项目根内(词法校验不防 symlink 穿越——realpath 后再次校验)。
+// 非字符串/空值(如 --json-file 为最后一个参数)→ 用法错误,不落 path.resolve
+// (修复前 undefined 抛 TypeError、空串解析为 runRoot 报 EISDIR——报类型错误而非用法错误)
+async function resolveJsonFileWithinRunRoot(jsonFile) {
+  if (typeof jsonFile !== 'string' || jsonFile.trim() === '') {
+    throw new Error('--json-file requires a path argument');
+  }
+  const abs = path.resolve(runRoot, jsonFile);
+  const rel = path.relative(runRoot, abs);
+  if (path.isAbsolute(rel) || rel === '..' || rel.startsWith('..' + path.sep)) {
+    throw new Error('--json-file 路径必须在项目根内: ' + jsonFile);
+  }
+  // 统一对 runRoot 也 realpath——Windows 上 runRoot 可能是 8.3 短路径(如 LONGYI~1),
+  // realpath 会展开为长路径,两者直接 relative 会误判越界
+  const realRoot = await fs.realpath(runRoot);
+  const real = await fs.realpath(abs);
+  const realRel = path.relative(realRoot, real);
+  if (path.isAbsolute(realRel) || realRel === '..' || realRel.startsWith('..' + path.sep)) {
+    throw new Error('--json-file 路径经符号链接解析后越出项目根: ' + jsonFile);
+  }
+  return abs;
 }
 
 async function findActiveChange() {
@@ -661,12 +689,18 @@ async function main() {
       completedNodes: [],
       evidence: {},
       verifyFailures: 0,
+      // verifyFailures 按 change 存储——init 新 change 从零计数(切换 change 不串扰)
+      verifyFailuresByChange: {},
       executionMode: 'subagent',
       directOverride: false,
       branchMode,
       enablePrReview: false,
       branchPrefix,
       status: 'running',
+      // R6: 新 change 标记——init 即新 change(严格模式开启,不依赖 entry;旧 change 无此字段渐进兼容)
+      newChange: true,
+      // M1: 进入证据容器——entry 追加节点;R2 检测未 entry(新 change 强制)
+      enteredNodes: [],
       createdAt: new Date().toISOString(),
       // 项目级上下文字段跨 change 保留（迁移旧 state；--init-context 刷新扫描时间；--init-skip 记拒绝）
       ...(prevState?.ai_context_doc !== undefined ? { ai_context_doc: prevState.ai_context_doc } : {}),
@@ -685,9 +719,21 @@ async function main() {
     // 前缀由 --branch-prefix 指定（缺省 'change/'，向后兼容；可适配仓库自身分支规范如 feat/）
     // 失败 → WARN 不 BLOCK，继续纯文件模式（向后兼容）
     const expectedBranch = branchPrefix + changeName;
+    // 空仓库状态(带到 BRANCH 输出——声称与实际一致:空仓库无分支)
+    let emptyRepo = false;
     if (branchMode) {
       const currentBranch = gitBranchName();
-      if (currentBranch !== null && currentBranch !== expectedBranch && !branchExists(expectedBranch)) {
+      // M8: 空仓库检测——无提交(git rev-parse HEAD 失败)时分支创建不可行,输出提示
+      // (不 BLOCK;纯文件模式继续)并跳过分支创建——警告与行为一致(修复前 BRANCH 行
+      // 仍声称分支已创建,与实际矛盾)
+      try {
+        execFileSync('git', ['rev-parse', 'HEAD'], { cwd: runRoot, stdio: 'pipe' });
+      } catch {
+        emptyRepo = true;
+      }
+      if (emptyRepo) {
+        console.error('INIT EMPTY-REPO WARN: 仓库无提交(git 空仓库),无法创建 ' + expectedBranch + ' 分支——先 git commit 初始提交再 init 启用分支模式,或继续纯文件模式');
+      } else if (currentBranch !== null && currentBranch !== expectedBranch && !branchExists(expectedBranch)) {
         try {
           execFileSync('git', ['checkout', '-b', expectedBranch], { cwd: runRoot, stdio: 'pipe' });
         } catch {
@@ -696,7 +742,7 @@ async function main() {
       }
     }
     console.log('Initialized: ' + changeName);
-    console.log('BRANCH: ' + (branchMode ? expectedBranch : 'none（非 git 仓库）'));
+    console.log('BRANCH: ' + (branchMode && !emptyRepo ? expectedBranch : 'none（非 git 仓库或空仓库）'));
     // init 输出取协议首节点（与  的 state.currentNode 一致——内置协议 = open，行为不变）
     printNext(protocol, route(protocol)[0]?.id ?? 'open');
     return;
@@ -721,7 +767,9 @@ async function main() {
       branchMode: isInsideWorkTree(),
       enablePrReview: state.enablePrReview ?? false,
       artifactRoot: '.specs/' + changeName,
-      coordinatorMode: ['execute', 'subagent-execute'].includes(detectedNode)
+      coordinatorMode: ['execute', 'subagent-execute'].includes(detectedNode),
+      // G14: 新旧 change 标记——newChange true = 新 change(严格模式);false/缺失 = 旧 change(渐进)
+      newChange: state.newChange === true
     }, null, 2));
     printBranchLine(changeName, state.branchPrefix ?? 'change/');
     return;
@@ -764,12 +812,34 @@ async function main() {
       }
     }
     const detectedNode = await determineNode(changeName, protocol, state.completedNodes);
-    // 状态漂移自动校正——以文件产物为准（determineNode），校正 state.currentNode
-    if (state.currentNode !== detectedNode) {
+    // 状态漂移自动校正——以文件产物为准（determineNode）校正 state.currentNode。
+    // 进行中节点保护:currentNode 未 exit(不在 completedNodes)且已记录 evidence(record 过)
+    // → 视为节点进行中(可能 exit 被内容级拦截后重跑),不校正推走——否则被拦截节点
+    // 的 exit 前置校验(currentNode 匹配)无法重跑,advance/select 均不恢复 → 死结(实测教训)
+    const currentNodeEvidence = state.currentNode && state.evidence && typeof state.evidence === 'object'
+      ? state.evidence[state.currentNode]
+      : null;
+    const routeIds = route(protocol).map((n) => n.id);
+    const currentNodeIdx = state.currentNode ? routeIds.indexOf(state.currentNode) : -1;
+    // 推导为 currentNode 的直接后继 → 该节点产物已齐待 exit(内容级拦截重跑场景)→ 保护;
+    // 推导跳跃(跨节点,如"部分完成但产物全齐")或回退 → 产物权威校正(漂移,防过度修复)
+    const derivedIsDirectSuccessor = currentNodeIdx >= 0
+      && currentNodeIdx + 1 < routeIds.length
+      && routeIds[currentNodeIdx + 1] === detectedNode;
+    const inProgress = !!(
+      state.currentNode
+      && !completedArr.includes(state.currentNode)
+      && currentNodeEvidence && typeof currentNodeEvidence === 'object' && !Array.isArray(currentNodeEvidence)
+      && derivedIsDirectSuccessor
+    );
+    if (!inProgress && state.currentNode !== detectedNode) {
       state.currentNode = detectedNode;
       await writeState(state);
     }
-    printNext(protocol, detectedNode, state.executionMode ?? 'subagent');
+    // 进行中节点保护:不校正时输出也跟随 currentNode(而非产物推导的 detectedNode——
+    // 否则 state 保持 review 但输出 NODE: verify,执行者按输出 action 仍然死结)
+    const printNode = inProgress ? state.currentNode : detectedNode;
+    printNext(protocol, printNode, state.executionMode ?? 'subagent');
     printBranchLine(changeName, state.branchPrefix ?? 'change/');
     return;
   }
@@ -820,7 +890,9 @@ async function main() {
     // 同 node-skill 重复调用覆盖（记录最新声明）
     const changeName = await findActiveChange();
     if (!changeName) {
-      throw new Error('skill-load requires an active change（先运行 init <change-id>）');
+      // 归档后场景:change 目录已移入 .specs/archive/(无活跃 change)——skill-load 不可用,
+      // 但 record 的声明自动化(M5)仍可写归档路径标记——消息如实引导(级 4 实证反馈)
+      throw new Error('skill-load requires an active change（先运行 init <change-id>;若该 change 已归档,声明标记由 record 自动补写——M5 会写入归档路径的 .skill-loads/）');
     }
     // 标记 protocol 字段 = --prompt 参数的 basename（如 0-change.md）——与 guard exit
     // 校验的 节点协议映射 表 basename 精确比对同值（真实链路 skill-load → exit 一致）；未传 --prompt →
@@ -865,7 +937,7 @@ async function main() {
       payloadArgs.push(arg);
     }
     const raw = jsonFile !== null
-      ? await fs.readFile(path.resolve(runRoot, jsonFile), 'utf8')
+      ? await fs.readFile(await resolveJsonFileWithinRunRoot(jsonFile), 'utf8')
       : payloadArgs.join(' ');
     try {
       parsed = raw ? JSON.parse(raw) : {};
@@ -887,6 +959,51 @@ async function main() {
     if (!markerCheck.ok) {
       console.error('BLOCKED: ' + markerCheck.reason);
       process.exit(1);
+    }
+    // M5: 声明自动化——record 时按协议 requiredSkillCalls 自动补写缺失的声明标记
+    // (执行者无需手动 skill-load;标记如实记录"节点完成即视为其实现/协议技能已加载",
+    // 由 record 代记;与手动 skill-load 标记同体系,exit 协议声明校验共用)
+    const recordNodeDef = (protocol.nodes ?? []).find((n) => n.id === nodeId);
+    if (recordNodeDef && markerChange) {
+      const recordProtoFiles = NODE_PROTOCOL_FILES[nodeId] ?? [];
+      // M5 标记目录解析:活动路径优先;change 已归档(活动目录不存在但归档目录存在)
+      // 时写归档路径——防重建已归档的活动目录(归档移动语义;与 findSkillLoadsDir 双路径一致)。
+      // 跳过条件:活动与归档均无 .skill-loads **且活动 change 目录已不存在**(归档移动后)
+      // ——此时 writeJson 的 mkdir recursive 会把已归档的活动目录残留回来(修复前实测缺陷);
+      // 活动 change 目录仍存在(正常流程)时创建 .skill-loads 子目录是 M5 的正常职责,不跳过
+      const activeLoadsDir = path.join(specsRoot, markerChange, '.skill-loads');
+      let targetLoadsDir = activeLoadsDir;
+      if (!(await fileExists(activeLoadsDir))) {
+        const archived = await findSkillLoadsDir(markerChange);
+        if (archived !== null && archived.dir !== activeLoadsDir) {
+          targetLoadsDir = archived.dir;
+        } else if (archived === null && !(await fileExists(path.join(runRoot, '.specs', markerChange)))) {
+          targetLoadsDir = null;
+        }
+      }
+      if (targetLoadsDir !== null) {
+        for (const binding of recordNodeDef.requiredSkillCalls ?? []) {
+          // handoff scope 技能由子代理加载(协调者不声明)——不自动补协调者标记
+          // (2026-08-16 修复:此前无条件写标记,与 verifySkillLoadMarkers 的 scope 豁免不一致)
+          if (binding.scope === 'handoff') continue;
+          const markerFile = path.join(targetLoadsDir, nodeId + '-' + binding.skill + '.json');
+          let markerExists = false;
+          try { await fs.access(markerFile); markerExists = true; } catch { /* 标记不存在 */ }
+          if (!markerExists) {
+            // 自动补的 protocol 字段按 skill 归属协议文件(如 open 的 requirement 标记应写
+            // 1-requirement.md 而非节点首文件 0-change.md——修复前所有 skill 都写首文件,
+            // 标记的协议归属语义错误;exit 校验只查归属集合故能通过,但标记不可信)
+            const skillProtoFiles = SKILL_PROTOCOL_FILES[binding.skill] ?? [];
+            await writeJson(markerFile, {
+              node: nodeId,
+              skill: binding.skill,
+              protocol: skillProtoFiles.length > 0 ? skillProtoFiles[0] : null,
+              at: recordedAt,
+              auto: true,
+            });
+          }
+        }
+      }
     }
     state.evidence[nodeId] = {
       ...(state.evidence[nodeId] || {}),
@@ -945,15 +1062,17 @@ async function main() {
 
   if (command === 'verify-fail') {
     const state = await readState();
-    state.verifyFailures = state.verifyFailures ?? 0;
     // W2-A: 机器计数——连续 3 次失败后（第 4 次）BLOCKED，要求用户决策（继续修 / 停止）
-    if (state.verifyFailures >= 3) {
-      console.error('verify 失败超限，需用户决策（verifyFailures=' + state.verifyFailures + '）。继续修 / 停止？');
+    // 计数按当前 change 存储(verifyFailuresByChange)——切换 change 后计数独立,互不串扰;
+    // 旧顶层字段首次读取时迁移并入当前 change(旧 state 兼容)
+    const count = verifyFailuresFor(state);
+    if (count >= 3) {
+      console.error('verify 失败超限，需用户决策（verifyFailures=' + count + '）。继续修 / 停止？');
       process.exit(1);
     }
-    state.verifyFailures += 1;
+    setVerifyFailuresFor(state, count + 1);
     await writeState(state);
-    console.log('VERIFY-FAIL: ' + state.verifyFailures + '/3');
+    console.log('VERIFY-FAIL: ' + (count + 1) + '/3');
     return;
   }
 

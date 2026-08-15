@@ -52,11 +52,13 @@ cd <flow-comet repo>
 node scripts/prepare-env.mjs --target <absolute path to your project>
 ```
 
-By default the installer targets Claude Code (unchanged behavior). For Codex: `node scripts/prepare-env.mjs --target <path> --platform codex` — skills install to `.agents/skills/` (auto-discovered), orchestration rules are injected into an `AGENTS.md` managed block, and the write-guard hook intercepts Bash write commands via Codex's PreToolUse (trust the hook on first use: `/hooks`). The platform can also be chosen interactively (TTY) or detected from an existing `.claude/` / `.codex/` in the target project.
+By default the installer targets Claude Code (unchanged behavior). For Codex: `node scripts/prepare-env.mjs --target <path> --platform codex` — skills install to `.agents/skills/` (auto-discovered), orchestration rules are injected into an `AGENTS.md` managed block, and the write-guard hook intercepts Bash write commands via Codex's PreToolUse (trust the hook on first use: `/hooks`). The platform can also be chosen interactively on a terminal (TTY); in non-interactive environments (CI/scripts) an existing `.claude/` / `.codex/` in the target project is detected, falling back to Claude Code.
 
 ```bash
 # 2. Open your project in a new Claude Code session and run:
 /flow-comet
+#    (Codex: invoke the skill in a Codex session — `/use flow-comet` or natural language;
+#     same workflow, see Installation → "Using flow-comet on Codex")
 ```
 
 The first call confirms scope, then automatically creates the `change/<id>` branch, initializes state, enters the open node, and produces `CHANGE.md` / `REQUIREMENT.md`. Every subsequent stage is routed automatically — you only answer decision points (scope, tech stack, destructive changes, review findings, archive confirmation).
@@ -70,7 +72,7 @@ On first use in a project, the workflow automatically detects whether a project 
 - **[Core mechanisms](docs/MECHANISM.md)** — state machine, three defense layers, guard validation, execution model
 - **[Troubleshooting](docs/TROUBLESHOOTING.md)** — BLOCKED/WARN messages and their fixes
 
-The entry point is the `/flow-comet` command; state is inspected and advanced from the command line:
+The entry point is the `/flow-comet` command; state is inspected and advanced from the command line (paths below assume the Claude Code install `.claude/skills/`; Codex installs to `.agents/skills/` — see [Installation](docs/INSTALLATION.md)):
 
 ```bash
 node .claude/skills/flow-comet/scripts/workflow-state.mjs status   # current change + node
@@ -123,7 +125,7 @@ The engine routes between nodes by deriving state from `.specs/` artifacts (dete
 | Discipline enforcement | Rules are markdown text the model may ignore | Three defense layers: write whitelist physically blocks out-of-scope writes / coordinator prohibition / exit takeover detection |
 | Recovery | Depends on conversation memory; progress is lost across sessions | File-as-truth: re-derive the node from `.specs/` and auto-correct state; any session resumes correctly |
 | Parallel implementation | Humans coordinate multiple windows, easy to overstep | Subagents implement in isolated worktrees (coordinators cannot write source) and must return a verified contract (commit hash + evidence) |
-| Decision burden | A confirmation point at every stage, humans answer everything | Decisions classified into four kinds; humans only intervene at key points (scope, tech stack, breaking changes, review findings, archive) |
+| Decision burden | A confirmation point at every stage, humans answer everything | Decisions are classified (user-decided / auto-handled / stop conditions / manual handover); humans only intervene at key points (scope, tech stack, breaking changes, review findings, archive) |
 
 ### Why pick flow-comet
 
@@ -137,7 +139,7 @@ The engine routes between nodes by deriving state from `.specs/` artifacts (dete
 
 ## Real-run artifacts
 
-A complete 8-node run produces the full artifact trail shown in [docs/examples/processor-pipeline](docs/examples/processor-pipeline/) — a real archived change (e2e fake project, 2026-08-13): CHANGE / REQUIREMENT / DESIGN / TASK / six-section summaries / REVIEW with disposition markers / TEST / UAT / KNOWN-ISSUES / skill-load declaration markers.
+A complete 8-node run produces the full artifact trail shown in [docs/examples/processor-pipeline](docs/examples/processor-pipeline/) — a real archived change (end-to-end test project, 2026-08-13): CHANGE / REQUIREMENT / DESIGN / TASK / six-section summaries / REVIEW with disposition markers / TEST / UAT / KNOWN-ISSUES / skill-load declaration markers.
 
 ```
 processor-pipeline/            (archived change, full artifact set)
@@ -204,6 +206,8 @@ flow-comet/
 | [Versions](docs/VERSIONS.md) | SemVer policy, compatibility |
 | [Examples](docs/examples/) | Full workflow artifact examples |
 | [Changelog](CHANGELOG.md) | Version history (Keep a Changelog) |
+| [Security](SECURITY.md) | How to report vulnerabilities |
+| [Code of Conduct](CODE_OF_CONDUCT.md) | Community guidelines |
 
 ## Contributing
 
@@ -211,7 +215,7 @@ Full guide in [CONTRIBUTING.md](CONTRIBUTING.md) — branch model (`feature → 
 
 1. Branch from `dev`: `git checkout dev && git checkout -b feat/<description>`
 2. Edit skills/scripts under `.comet/bundle-drafts/flow-comet/skills/` (authoritative source); TDD with RED scenario first
-3. Run regression: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 114 SCENARIOS PASSED`
+3. Run regression: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 137 SCENARIOS PASSED`
 4. Open a PR into `dev` (squash — one change-level commit); release PR `dev → main` (squash — one release commit)
 
 CI enforces the repository conventions automatically on every PR and push (regression, PR discipline, version consistency, dead links). Local hooks (commit/push message checks) install with `node scripts/install-commit-hook.mjs` — see [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.

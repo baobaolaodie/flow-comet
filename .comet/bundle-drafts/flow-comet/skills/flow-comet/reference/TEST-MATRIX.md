@@ -6,7 +6,7 @@
 ## 一、测试载体说明
 
 - **载体**：每个测试项 = 一个独立临时目录（`fs.mkdtemp`）+ 内置协议副本复制到 `<tmp>/reference/`（受保护路径要求协议文件位于 runRoot 内）+ **真实命令序列**（`init → record → guard entry/exit → handoff → hook` 的 `spawnSync` 调用）+ 断言退出码与输出关键词；测试项跑完 `rmSync` 清理。
-- **与引擎回归的关系**：`guard-self-test.mjs` 是引擎脚本的单元/场景级回归（fixture 构造为主，114 场景）；本系统测试集是**系统级**——每个测试项走真实命令链路，验证机制在真实调用序列下生效（行为锚定归场景回归，集成正确性归系统测试）。
+- **与引擎回归的关系**：`guard-self-test.mjs` 是引擎脚本的单元/场景级回归（fixture 构造为主，137 场景）；本系统测试集是**系统级**——每个测试项走真实命令链路，验证机制在真实调用序列下生效（行为锚定归场景回归，集成正确性归系统测试）。
 - **运行环境**：仅 node 内置模块（child_process/fs/os/path），无网络、无第三方依赖。
 - **输出纪律**：逐项 PASS/FAIL + 汇总（`SYSTEM TEST: N/M passed`）；全过 exit 0，有 FAIL exit 1。测试项命名为公开面——零过程代号。
 
@@ -16,13 +16,13 @@
 - **任一 FAIL**：修复后重跑（修复只改权威源一处，重跑至全绿）。
 - **误通过 = 测试无效，必须修**：该拦截未拦截 / 该放行未放行，说明测试自身没守住机制边界——测试先于功能守边界，不许自欺（"当时能过"不等于"现在正确"）。
 
-## 三、机制面覆盖矩阵（A~K 十一类）
+## 三、机制面覆盖矩阵（A~L 十二类）
 
 ### A. 状态机与路由
 
 覆盖：init 全分支（状态写入/工件目录/同 id 重跑防护/分支模式）、status 节点推导与无活跃兜底、next 推进与状态漂移校正、next 未出口节点严格拦截、select 切换、advance 推进、record 基础证据、execution-mode 切换与记录、config 设置与非法值拒绝。
 
-测试项（11）：A1 init 状态写入与工件目录创建 / A2 init 分支模式与非法前缀拒绝 / A3 init 同 id 重跑防护 / A4 status 节点推导与无活跃兜底 / A5 next 推进与状态漂移校正 / A6 next 未出口节点严格拦截 / A7 select 切换与缺失拒绝 / A8 advance 节点推进 / A9 record 基础证据记录 / A10 execution-mode 切换与记录 / A11 config 配置与非法值拒绝。
+测试项（12）：A1 init 状态写入与工件目录创建 / A2 init 分支模式与非法前缀拒绝 / A3 init 同 id 重跑防护 / A4 status 节点推导与无活跃兜底 / A5 next 推进与状态漂移校正（进行中节点保护由引擎回归覆盖）/ A6 next 未出口节点严格拦截 / A7 select 切换与缺失拒绝 / A8 advance 节点推进 / A9 record 基础证据记录 / A10 execution-mode 切换与记录 / A11 config 配置与非法值拒绝 / A12 验证失败计数按 change 隔离（切换 change 后计数独立）。
 
 ### B. 声明机制
 
@@ -64,7 +64,7 @@
 
 覆盖：验证命令真实执行与超时配置、归档完整流程（遗留清单 + 目录移动 + 完成态）、归档路径声明标记查找（先移目录后 exit 顺序下标记只存归档路径）。
 
-测试项（3）：H1 验证命令真实执行与超时 / H2 归档完整流程 / H3 归档路径声明标记查找。
+测试项（4）：H1 验证命令真实执行与超时 / H2 归档完整流程 / H3 归档路径声明标记查找 / H4 归档后自动补声明标记写归档路径（不重建活动目录）。
 
 ### I. 异常路径
 
@@ -84,9 +84,15 @@
 
 测试项（6）：K1 安装器版本标识 / K2 codex 平台安装冒烟（技能/路径替换/hooks.json/AGENTS 托管区 + 非法 hooks.json fail-safe）/ K3 hook 平台分支 JSON 契约 + CC 分支不变 / K4 平台选择链（显式/无 TTY 探测/默认/未知平台拒绝）/ K5 purge 语义（缺 --yes 拒绝/重建/用户内容保留）/ K6 平台描述符驱动（全平台安装冒烟 + main 统一调度断言）。
 
+### L. 执行遗漏防护（真实链路）
+
+覆盖：进入证据（entry 记录 enteredNodes、正常流程 exit 无误报——真实链路中节点顺序检查先于进入警告，未 entry 场景由引擎回归覆盖）、空退出豁免（显式 emptyExitApproved 通过 / 无豁免仍拦截）、空仓库提示（init 在无提交仓库输出 EMPTY-REPO）。
+
+测试项（3）：L1 进入证据 / L2 空退出豁免 / L3 空仓库。
+
 ## 四、附：design 节点 required 自指核验结论
 
-**核验对象**：`workflow-protocol.json` 的 design 节点——`requiredSkillCalls` 含与 `implementation` 相同的技能（自指），对照 open / review 两模式核验（本批次遗留核验项）。
+**核验对象**：`workflow-protocol.json` 的 design 节点——`requiredSkillCalls` 含与 `implementation` 相同的技能（自指），对照 open / review 两模式核验（遗留核验项）。
 
 **三模式对照**：
 

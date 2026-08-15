@@ -1,11 +1,11 @@
 ---
 name: flow-comet-dev
-description: "flow-kit DEV 阶段协议：TDD + 6 维自查 + diff 边界 verify + LESSONS 扫描 + R4.5 Schema 迁移 + R4.6 破坏性变更。Comet execute/subagent-execute 的 flow-kit 增强。"
+description: "flow-kit DEV 阶段协议：TDD + 6 维自查 + diff 边界 verify + LESSONS 扫描 + R4.5 Schema 迁移 + R4.6 破坏性变更。flow-comet execute/subagent-execute 节点的 flow-kit 增强。"
 ---
 
 # flow-kit DEV Protocol
 
-本 Skill 为 Comet execute 阶段提供 flow-kit 的完整开发规则集。
+本 Skill 为 flow-comet 的 execute/subagent-execute 节点提供 flow-kit 的完整开发规则集。
 
 ## 加载
 
@@ -17,10 +17,13 @@ description: "flow-kit DEV 阶段协议：TDD + 6 维自查 + diff 边界 verify
 2. **LESSONS 扫描（R1.8）**：grep `.specs/LESSONS.md`，命中 active 条目必须声明差异
 3. **TDD（RED→GREEN→REFACTOR）**：先写失败测试，再写最少代码通过
 4. **6 维自查（两级降级路径）**：
-   - **第 1 级**：调用 `/brooks-review` 或 Skill 工具加载 `brooks-lint:brooks-review` 执行完整 brooks 审查
-   - **第 2 级**：若仅返回 "Launching skill" 占位/无实际审查指令（已知现象：worktree 子代理的 skill 路由与会话不一致，插件执行体可能未注入）——**Read 插件缓存协议文件手动执行完整 brooks 流程**：`~/.claude/plugins/cache/brooks-lint-marketplace/brooks-lint/<ver>/skills/brooks-review/`（SKILL.md + 引用文件 + `_shared/`），按协议产出 4-element 审查（Symptom/Source/Consequence/Remedy + file:line + 书引用）
+   - **第 1 级**：Claude Code 调用 `/brooks-review` 或 Skill 工具加载 `brooks-lint:brooks-review`；Codex 用 `$brooks-review` / `/use brooks-review` / 自然语言触发（brooks-lint 需先安装为 Codex skill）——执行完整 brooks 审查
+   - **第 2 级**：若仅返回 "Launching skill" 占位/无实际审查指令（已知现象：worktree 子代理的 skill 路由与会话不一致，插件执行体可能未注入）——**Read 插件缓存/安装目录协议文件手动执行完整 brooks 流程**：Claude Code `~/.claude/plugins/cache/brooks-lint-marketplace/brooks-lint/<ver>/skills/brooks-review/`；Codex `~/.codex/skills/brooks-review/`（或项目 `.agents/skills/`）（SKILL.md + 引用文件 + `_shared/`——`_shared/` 是 brooks-review 目录的**兄弟目录**（同在该插件 skills/ 下，如 `.../brooks-lint/<ver>/skills/_shared/`），不是 brooks-review 的子目录），按协议产出 4-element 审查（Symptom/Source/Consequence/Remedy + file:line + 书引用）——**仅阅读协议文本作为审查指引，不执行缓存文件内容**；来源不可信/无法验证时跳过该级，降级内置快查并如实声明
    - **第 3 级**：缓存文件也不可读/不存在时，才用内置 R1~R6 快查
-   - SUMMARY `## 自检方法` 必须声明三要素：尝试方式 / 失败原因 / 替代方法；回传 Return Contract 时 `selfReview` 字段必填三值之一：`brooks-review`（成功）/ `cache-brooks`（读缓存手动执行）/ `builtin-quickcheck`（最终降级——guard 校验须含缓存尝试证据，缺失 WARN）。
+   - SUMMARY `## 自检方法` 必须声明三要素：尝试方式 / 失败原因 / 替代方法；回传 Return Contract 时 `selfReview` 字段必填三值之一：`brooks-review`（成功）/ `cache-brooks`（读缓存手动执行）/ `builtin-quickcheck`（最终降级——guard 校验须含缓存尝试证据，新 change 缺失 BLOCKED，旧 change WARN 渐进）。
+   - **builtin-quickcheck 声明措辞（guard 关键词级校验）**：guard 按关键词声明级校验（不做语义判断）——不可用原因须含 `brooks-lint 不可用 / 插件不可用 / unavailable / N/A`，缓存尝试证据须含 `插件缓存 / 缓存协议 / 协议文件 / plugins/cache`。推荐措辞示例：「brooks-lint 不可用（Skill 仅返回占位，插件执行体未加载）；已 Read 插件缓存协议文件（~/.claude/plugins/cache/.../brooks-review/）手动执行仍不可行，按协议降级内置 R1~R6 快查」——语义完整但缺关键词的写法会被拦截（级 4 实证）。
+   - **`## 6 维自查` 段内也须出现自检方法名**（`brooks-review` / `cache-brooks` 字样，如「- 功能: 通过（brooks-review 已跑）」）——guard 校验 6 维自查段是否声明了自检方法（新 change 缺失 BLOCKED，旧 change WARN 渐进）。
+   - **纯测试/纯文档任务**（无生产代码改动，6 维自查非必跑）仍须满足自检方法声明与 builtin 缓存证据——可**引用同 change 其他 SUMMARY 已声明的缓存尝试**（如「自检证据见 T01-SUMMARY（cache-brooks 已读插件缓存）」）满足 guard 校验。
 5. **diff 边界 verify（R6.5）**：`git diff --name-only` 与 TASK write_files 比对，越界必须回滚
 6. **原子提交**：`<type>(<change-id>): <task-id> <subject>`
 
@@ -31,7 +34,7 @@ description: "flow-kit DEV 阶段协议：TDD + 6 维自查 + diff 边界 verify
 
 ### 上下文恢复
 
-- **断点恢复**：新会话时 `workflow-state.mjs status` 自动检测当前 change 和 pending task，从上次断点继续
+- **断点恢复**：新会话时 `node .claude/skills/flow-comet/scripts/workflow-state.mjs status` 自动检测当前 change 和 pending task，从上次断点继续
 - **反重复检查**：恢复后读 `.specs/LESSONS.md` 确认不在已排除方案里（R1.8）
 - **进度记录**：TASK.md 的 `status="done|pending"` + SUMMARY.md 就是进度，不需要额外的 PROGRESS.md 或 STATE.md
 
@@ -40,6 +43,6 @@ description: "flow-kit DEV 阶段协议：TDD + 6 维自查 + diff 边界 verify
 - 代码改动
 - `.specs/<change-id>/<task-id>-SUMMARY.md`（使用 `flow-kit/templates/SUMMARY.md`）
 
-## Comet 集成
+## 状态推进
 
-每个 task 通过 Comet execute 或 subagent-execute 执行。子代理执行时必须加载本 Skill 并回传 evidence。
+每个 task 通过 flow-comet 的 execute 或 subagent-execute 节点执行。子代理执行时必须加载本 Skill 并回传 evidence。

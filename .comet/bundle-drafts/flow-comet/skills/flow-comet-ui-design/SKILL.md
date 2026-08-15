@@ -21,6 +21,6 @@ description: "flow-kit 2a UI-DESIGN 阶段协议：美学方向 + design tokens 
 
 - `.specs/<change-id>/UI-DESIGN.md`（含 design tokens frontmatter）
 
-## Comet 集成
+## 触发范围
 
 仅前端项目触发。非前端项目跳过。

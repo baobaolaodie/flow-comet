@@ -1,11 +1,11 @@
 ---
 name: flow-comet-requirement
-description: "flow-kit REQUIREMENT 阶段协议：AC（Given/When/Then）+ v1·v2·out 范围切分 + 术语提取。Comet open 阶段的 flow-kit 增强。"
+description: "flow-kit REQUIREMENT 阶段协议：AC（Given/When/Then）+ v1·v2·out 范围切分 + 术语提取。flow-comet open 节点的 flow-kit 增强。"
 ---
 
 # flow-kit REQUIREMENT Protocol
 
-本 Skill 为 Comet open 阶段提供 flow-kit 的 REQUIREMENT 需求分析。
+本 Skill 为 flow-comet 的 open 节点提供 flow-kit 的 REQUIREMENT 需求分析。
 
 ## 加载
 
@@ -22,6 +22,6 @@ description: "flow-kit REQUIREMENT 阶段协议：AC（Given/When/Then）+ v1·v
 - `.specs/<change-id>/REQUIREMENT.md`
 - `.specs/CONTEXT.md`（首次或需更新时）
 
-## Comet 集成
+## 状态推进
 
-REQUIREMENT.md 是 Comet design 阶段的前置依赖。由 Comet guard 检查产物完整性。
+REQUIREMENT.md 是 design 节点的前置依赖。由 workflow-guard 检查产物完整性。

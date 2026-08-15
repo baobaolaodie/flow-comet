@@ -21,12 +21,9 @@ Responsibility: 技术栈选型 + ADR + 数据流。生成 DESIGN.md。
 |------|-------------------------------|-----------------------------------|
 | DESIGN.md | `## 0.` 技术栈段 / `## 决策清单` | `## 0.5 架构对齐` / `## 风险` / `## 数据流` 等 |
 
-guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / templateSectionPatterns；「填得好不好」由 review 把关。
+> **决策清单段名须与模板精确一致**:guard 按 flow-kit 模板段名派生校验——模板段为 `## 1. 决策清单`(编号可选),**不要写成"技术决策清单"等变体**(2-design.md 指引的"技术决策"是内容要求,不是段名;实测:写变体段名会被拦截)。
 
----
-name: flow-comet-design
-description: "Design node for flow-comet: produces DESIGN.md (and UI-DESIGN.md for frontend) via tech stack selection, ADR, and architecture alignment. Do not use for ordinary standalone tasks."
----
+guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / templateSectionPatterns；「填得好不好」由 review 把关。
 
 # Design
 
@@ -139,8 +136,8 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record design '{"summa
 | Guardrail ID | Label | Validation Type |
 |--------------|-------|-----------------|
 | `design-artifacts` | DESIGN.md exists with section 0 | artifact-exists |
-| `architecture-aligned` | Section 0.5 populated for brownfield | content-check |
-| `ui-design-artifacts` | UI-DESIGN.md exists for frontend projects | artifact-exists (conditional) |
+| `architecture-aligned` | Section 0.5 populated for brownfield | 执行纪律（review 把关），guard 不校验 |
+| `ui-design-artifacts` | UI-DESIGN.md exists for frontend projects | 执行纪律（review 把关），guard 不校验 |
 
 ## Exit Check
 
@@ -157,55 +154,3 @@ If the script prints `SKILL: flow-comet-plan`, load that Skill next.
 3. If DESIGN.md exists but incomplete, resume from the first missing section (check 0, 0.5, 1-5, 9).
 4. If frontend project: check `.specs/<change-id>/UI-DESIGN.md` existence.
 5. Do not repeat confirmed decisions. Resume from the first incomplete artifact.
-
-
-## Entry Check
-
-```bash
-node flow-comet/scripts/workflow-guard.mjs entry design
-```
-
-## Skill Implementation
-
-Load `flow-comet-design` for this Node. Operation: `require`.
-
-## Required Skill Calls
-
-- Load `flow-comet-design` during this Node and record completed check `required-skill:design.flow-comet-design`. Reason: 技术栈选型 + ADR
-- Load `flow-comet-ui-design` during this Node and record completed check `required-skill:design.flow-comet-ui-design`. Reason: UI-DESIGN（仅前端）——**advisory 条目，不要求 skill-load 声明**：record D3 只校验执行者实际声明的条目，非前端项目不加载不声明；若声明该条目则须先运行 `skill-load design flow-comet-ui-design --prompt flow-kit/prompts/2a-ui-design.md`（exit 的 required-skill 自动补全不触发 per-skill 标记校验——D4 为节点级协议声明）
-
-**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
-
-```bash
-node flow-comet/scripts/workflow-state.mjs skill-load design flow-comet-design --prompt flow-kit/prompts/2-design.md
-```
-
-## Augmentations
-
-- This Node has no declared augmentations.
-
-## Output Schemas
-
-- `flowkit.design.v1`: DESIGN.md Required evidence: `design-summary`. Required artifacts: `design-doc` at `<change-id>/DESIGN.md` or `<change-id>/DESIGN-lite.md`.
-
-## Evidence Record
-
-```bash
-node flow-comet/scripts/workflow-state.mjs record design '{"summary":"record the real Node result","completedChecks":[]}'
-```
-
-## Guardrails
-
-- `design-artifacts`: DESIGN.md exists (artifact-exists).
-
-## Exit Check
-
-```bash
-node flow-comet/scripts/workflow-guard.mjs exit design --apply
-```
-
-If the script prints `SKILL: flow-comet-plan`, load that Skill next.
-
-## Recovery
-
-Read `reference/workflow-protocol.json` and the configured workflow state. Resume the first Node that is not listed in `completedNodes`.

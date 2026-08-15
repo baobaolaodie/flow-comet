@@ -55,7 +55,7 @@ dev ──PR(squash)──▶ main   (release branch — one squash commit per r
 
 ```bash
 git checkout dev
-git merge --no-ff main -m "sync: main → dev（<summary>）"
+git merge --no-ff main -m "sync: main → dev(<summary>)"
 git push origin dev
 ```
 
@@ -67,7 +67,7 @@ git checkout -b hotfix/<description>
 # fix → commit (fix: subject) → test
 # hotfix merges via squash — one clean commit into main, consistent with the release squash policy
 git checkout main && git merge --squash hotfix/<description> && git commit -m "fix: hotfix <description>"
-git checkout dev && git merge --no-ff main -m "sync: main → dev（hotfix <description>）"
+git checkout dev && git merge --no-ff main -m "sync: main → dev(hotfix <description>)"
 git branch -d hotfix/<description>
 ```
 
@@ -83,7 +83,7 @@ git branch -d hotfix/<description>
 
 - **Runtime**: Node.js ≥ 18 (ESM)
 - **Repo**: clone, then verify the regression baseline runs:
-  `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 114 SCENARIOS PASSED`
+  `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 137 SCENARIOS PASSED` (two-tier baseline; also run `system-test.mjs` → `ALL SYSTEM TESTS PASSED`, 55 items)
 - **Authoring environment**: Claude Code (skills/hooks run in Claude Code sessions); the hook is installed via `prepare-env` into your project's `.claude/`
 - **For mechanism work**: read [docs/MECHANISM.md](docs/MECHANISM.md) for the mechanism semantics (behavior layer) before touching scripts
 
@@ -102,7 +102,7 @@ The hooks reject commits and pushes whose messages carry process codes — proje
 Before pushing, run the regression baseline:
 
 ```bash
-node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 114 SCENARIOS PASSED
+node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 137 SCENARIOS PASSED
 ```
 
 CI handles the rest.
@@ -120,7 +120,7 @@ After the issue is confirmed: bug fixes use a `fix/` branch, features use a `fea
 
 - **Authoritative source**: edit skills/scripts under `.comet/bundle-drafts/flow-comet/skills/` (the single source; `.claude/` copies are install artifacts — update them via `prepare-env`, never by hand)
 - **TDD**: every mechanism fix starts with a RED scenario in `guard-self-test.mjs` (watch it fail for the right reason), then GREEN, then full regression
-- **Regression baseline**: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 114 SCENARIOS PASSED` (mandatory after every change)
+- **Regression baseline**: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 137 SCENARIOS PASSED` (two-tier baseline; also run `system-test.mjs` → `ALL SYSTEM TESTS PASSED`, 55 items) (mandatory after every change)
 - **Documentation sync**: behavior-layer docs live in `docs/` (bilingual EN/zh — keep both in sync when a doc changes); implementation details stay out of public docs
 - **Bilingual discipline**: English docs contain no Chinese (except the language switcher, flow-kit artifact section names, and runtime message quotes); Chinese docs contain no long English sentences (except commands, URLs, and proper terms)
 - **Backward compatibility**: old changes/states keep working — progressive WARN over BLOCK
@@ -161,9 +161,10 @@ test: BOM-tolerance scenarios — state/evidence files with UTF-8 BOM parse norm
 - **Through the flow-comet workflow**: `init` creates the branch for you — specify the matching prefix:
 
 ```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix feat/   # feature work
-node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix fix/    # bug fixes
-node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix docs/   # documentation
+# Authoritative-source path (development); installed copies: Claude Code .claude/skills/ / Codex .agents/skills/
+node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix feat/   # feature work
+node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix fix/    # bug fixes
+node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix docs/   # documentation
 ```
 
 The built-in default prefix is `change/` (backward-compatible with existing changes); this repository's convention is to specify the type prefix explicitly so the branch matches the change type — same convention as the manual `feat/`/`fix/` branches.
@@ -212,7 +213,7 @@ Force push is allowed on your own feature branch (no protection); a new push inv
 ## Release approval sheet
 
 - Changes: PR list + one-line summary each
-- Verification: regression (114 scenarios) / installed-copy checks
+- Verification: regression (137 scenarios) / installed-copy checks
 - Version: X.Y.Z (doc-only batches may skip the bump)
 ```
 

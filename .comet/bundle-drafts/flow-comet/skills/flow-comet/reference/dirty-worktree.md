@@ -2,7 +2,7 @@
 
 ## 触发
 
-进入 execute / verify 节点前，运行：
+进入 execute / subagent-execute / verify 节点前，运行：
 
 > **强制上下文**（实测）：委托 worktree 子代理前**必须**先执行本协议——未 commit 的工件不会被 worktree 子代理看到（harness 从已提交 HEAD 创建 worktree），曾有 8 个排查任务因工件未 commit 全部空上下文运行。本协议是委托前的前置步骤，不是可选项。
 
@@ -21,7 +21,7 @@ git ls-files --others --exclude-standard
 
 ## 构建产物排除
 
-`??` 匹配 .gitignore（node_modules/dist/__pycache__ 等）自动跳过归属。
+被 .gitignore 忽略的文件（node_modules/dist/__pycache__ 等）不会出现在未跟踪列表，自动排除。
 
 ## 禁令
 

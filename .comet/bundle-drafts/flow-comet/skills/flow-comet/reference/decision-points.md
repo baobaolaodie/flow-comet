@@ -6,7 +6,7 @@
 
 | 分类 | 定义 | 处理 |
 |------|------|------|
-| 用户决策 | ≥2 个会改变范围/行为/风险/不可逆结果的合法选项 | 用 AskUserQuestion 问（优先）或文本回退；相邻选择合并为一个问题，不重问已持久化选择 |
+| 用户决策 | ≥2 个会改变范围/行为/风险/不可逆结果的合法选项 | 用交互确认问（Claude Code 用 AskUserQuestion 优先；Codex 用文本提问+内联确认）或文本回退；相邻选择合并为一个问题，不重问已持久化选择 |
 | 自动处理 | 唯一安全下一步 | 直接执行并汇报，不许制造确认 |
 | 停止条件 | guard 失败 / 缺依赖 / 状态损坏 | 报告阻塞与恢复条件，无合法动作时才升级为用户决策 |
 | 手动交接 | `NEXT: manual`（若有） | 不是用户决策，直接继续 |
@@ -52,4 +52,13 @@
 
 ## 与节点 skill 的一致性
 
-本清单作者化自节点 skill 内嵌确认点（open 调性预选 / design 技术栈 / execute 破坏性变更与 Schema 迁移与 direct 模式 / review Critical / verify 第 4 次失败 / archive 不可逆操作），与主 SKILL.md 决策点清单一一对应；新增/调整节点 skill 确认点时同步本文件。
+本清单作者化自节点 skill 内嵌确认点（open 调性预选——仅前端触发，记于节点技能 flow-comet-change，主 SKILL 清单不含 / design 技术栈 / execute 破坏性变更与 Schema 迁移与 direct 模式 / review Critical / verify 第 4 次失败 / archive 不可逆操作），与主 SKILL.md 决策点清单对应（主 SKILL 为汇总视角，前端专属确认点记于节点技能）；新增/调整节点 skill 确认点时同步本文件与主 SKILL。
+
+### 机制性决策点（严格模式相关,非用户交互确认——机制自动判定,执行者须知）
+
+| 节点 | 决策点 | 判定 |
+|------|--------|------|
+| execute | 空退出豁免 | 全 parallel 无串行可做时,须显式声明 `emptyExitApproved`(否则 BLOCKED);exit 输出 EMPTY-EXIT 审计 |
+| execute | 越权委托豁免 | [P] 任务在 execute 完成属越权委托(新 change BLOCKED),须经 subagent-execute 委托或显式说明 |
+| 各节点 | entry 强制 | 新 change 未 entry 直接 exit → BLOCKED(旧 change WARN 渐进) |
+| 各节点 | 新旧判定 | init 写入 `newChange: true` = 新 change(严格模式);旧 change(无标记)渐进 WARN |

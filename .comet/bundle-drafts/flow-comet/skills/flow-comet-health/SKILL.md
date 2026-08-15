@@ -11,7 +11,7 @@ description: "Use only when explicitly invoked as /flow-comet-health; periodic c
 
 ## 前置依赖
 
-- 装了 brooks-lint → 优先 `/brooks-health`（4 维综合体检）
+- 装了 brooks-lint → 优先 `/brooks-health`（4 维综合体检；Codex 用 `$brooks-health`）
 - 未装 brooks-lint → 用内置巡检清单降级
 
 ## 流程

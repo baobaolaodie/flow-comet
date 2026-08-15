@@ -52,11 +52,13 @@ cd <flow-comet 仓库>
 node scripts/prepare-env.mjs --target <目标项目绝对路径>
 ```
 
-安装器默认面向 Claude Code（行为不变）。面向 Codex：`node scripts/prepare-env.mjs --target <路径> --platform codex`——技能安装到自动发现的 `.agents/skills/`，编排规则注入 `AGENTS.md` 托管区，写入守卫 hook 经 Codex PreToolUse 拦截 Bash 写命令（首次使用需信任 hook：`/hooks`）。平台也可在终端交互选择（TTY），或按目标项目既有 `.claude/` / `.codex/` 自动探测。
+安装器默认面向 Claude Code（行为不变）。面向 Codex：`node scripts/prepare-env.mjs --target <路径> --platform codex`——技能安装到自动发现的 `.agents/skills/`，编排规则注入 `AGENTS.md` 托管区，写入守卫 hook 经 Codex PreToolUse 拦截 Bash 写命令（首次使用需信任 hook：`/hooks`）。平台也可在终端交互选择（TTY）；非交互环境（CI/脚本）按目标项目既有 `.claude/` / `.codex/` 自动探测，均无则默认 Claude Code。
 
 ```bash
-# 2. 在目标项目新开会话，输入：
+# 2. 在目标项目新开 Claude Code 会话，输入：
 /flow-comet
+#    （Codex：在 Codex 会话中调用技能——`/use flow-comet` 或自然语言；
+#     同一工作流，见安装指南「在 Codex 上使用 flow-comet」）
 ```
 
 首次调用先确认范围，然后自动完成：创建 `change/<id>` 分支 → 初始化状态 → 进入 open 节点 → 产出 `CHANGE.md` / `REQUIREMENT.md`。之后每个阶段自动路由——你只需要回答决策点（范围确认、技术栈选型、破坏性变更、REVIEW 结论、归档确认）。
@@ -70,7 +72,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径>
 - **[核心机制](docs/MECHANISM-zh.md)**——状态机、三层防线、guard 校验、执行模型
 - **[故障排查](docs/TROUBLESHOOTING-zh.md)**——BLOCKED/WARN 信息与处理
 
-入口是 `/flow-comet` 命令；状态查看与推进可从命令行完成：
+入口是 `/flow-comet` 命令；状态查看与推进可从命令行完成（下方路径为 Claude Code 安装形态 `.claude/skills/`；Codex 安装于 `.agents/skills/`——见[安装](docs/INSTALLATION-zh.md)）：
 
 ```bash
 node .claude/skills/flow-comet/scripts/workflow-state.mjs status   # 当前 change + 节点
@@ -123,7 +125,7 @@ graph LR
 | 纪律强制 | 规则是 markdown 文字，模型可能忽略 | 三层防御：写文件白名单物理拦截越权 / 协调者禁令 / 退出接管检测 |
 | 恢复 | 依赖对话记忆，换会话易丢进度 | 文件即真相：从 `.specs/` 重新推导节点并纠偏，任何会话/断线可恢复 |
 | 并行实现 | 人协调多窗口，易越界 | 子代理在独立工作树隔离实现（协调者写不了源码），返回经验证的契约（提交哈希 + 证据） |
-| 决策负担 | 每阶段都有确认点，人疲于应答 | 决策分四类，人只在关键点介入：范围、技术栈、破坏性变更、评审结论、归档确认 |
+| 决策负担 | 每阶段都有确认点，人疲于应答 | 决策分类（用户决策/自动处理/停止条件/手动交接），人只在关键点介入：范围、技术栈、破坏性变更、评审结论、归档确认 |
 
 ### 为什么选 flow-comet
 
@@ -137,7 +139,7 @@ graph LR
 
 ## 真实运行产物展示
 
-一次完整 8 节点运行的全部流程工件见 [docs/examples/processor-pipeline](docs/examples/processor-pipeline/)——真实归档的 change（e2e 假项目，2026-08-13）：CHANGE / REQUIREMENT / DESIGN / TASK / 六段 SUMMARY / 带处置标记的 REVIEW / TEST / UAT / KNOWN-ISSUES / skill-load 声明标记。
+一次完整 8 节点运行的全部流程工件见 [docs/examples/processor-pipeline](docs/examples/processor-pipeline/)——真实归档的 change（端到端测试项目，2026-08-13）：CHANGE / REQUIREMENT / DESIGN / TASK / 六段 SUMMARY / 带处置标记的 REVIEW / TEST / UAT / KNOWN-ISSUES / skill-load 声明标记。
 
 ```
 processor-pipeline/            （归档 change，完整产物集）
@@ -204,6 +206,8 @@ flow-comet/
 | [版本](docs/VERSIONS-zh.md) | SemVer 策略、兼容性 |
 | [产物示例](docs/examples/) | 全流程工件示例 |
 | [变更日志](CHANGELOG-zh.md) | 版本历史（Keep a Changelog） |
+| [安全](SECURITY-zh.md) | 如何报告漏洞 |
+| [行为准则](CODE_OF_CONDUCT-zh.md) | 社区准则 |
 
 ## 贡献
 
@@ -211,7 +215,7 @@ flow-comet/
 
 1. 从 `dev` 开分支：`git checkout dev && git checkout -b feat/<描述>`
 2. 修改 skill/脚本请改 `.comet/bundle-drafts/flow-comet/skills/`（权威源）；TDD——先写 RED 场景
-3. 运行回归：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 114 SCENARIOS PASSED`
+3. 运行回归：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 137 SCENARIOS PASSED`
 4. 开 PR 合入 `dev`（squash——change 级提交）；发布 PR `dev → main`（squash——发布级提交）
 
 CI 在每个 PR 与 push 时自动强制仓库约定（回归、PR 纪律、版本一致性、死链）。本地 hook（提交/推送消息检测）通过 `node scripts/install-commit-hook.mjs` 安装——完整指南见 [CONTRIBUTING-zh.md](CONTRIBUTING-zh.md)。

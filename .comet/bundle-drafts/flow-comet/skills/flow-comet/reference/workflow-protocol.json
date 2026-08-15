@@ -285,7 +285,7 @@
       "guardrails": [
         {
           "id": "verify-evidence",
-          "label": "TEST.md or UAT.md exists",
+          "label": "TEST.md + UAT.md exist",
           "validation": "artifact-exists"
         }
       ],
@@ -631,7 +631,7 @@
         {
           "id": "known-issues",
           "kind": "file",
-          "required": false,
+          "required": true,
           "paths": [
             "archive/*-<change-id>/KNOWN-ISSUES.md"
           ],

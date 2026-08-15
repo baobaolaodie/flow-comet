@@ -34,7 +34,7 @@ node scripts/prepare-env.mjs --target <absolute path to target project> --platfo
 1. **Generates/overwrites `rules/` and `skills/`** — all flow-comet* skills, from the authoritative source `.comet/bundle-drafts/flow-comet/`
 2. **Injects the hook into `settings.local.json`** — read-merge-write: preserves everything already in the target project (`permissions`, custom hooks, other matcher groups), only injects/updates the comet-hook-guard entry under `hooks.PreToolUse` (existing comet hooks are replaced, not duplicated — idempotent). First-time creation writes only the hook entry; existing files are merged.
 
-**Non-destructive by default**: nothing under the target project's `.claude/` is deleted (`commands/`, custom skills, custom config all preserved). Explicit `--purge --yes` deletes the entire `.claude/` and rebuilds (prints the deletion list + warning; `--yes` is a second confirmation).
+**Non-destructive by default**: nothing under the target project's install root (`.claude/` for Claude Code, `.agents/` for Codex) is deleted (`commands/`, custom skills, custom config all preserved). Explicit `--purge --yes` deletes the generated files and rebuilds — on Claude Code the entire `.claude/` is removed; on Codex only the flow-comet skills + managed hook entries + AGENTS.md managed block are removed (`.agents/` is shared with other tools; user entries are preserved). Prints the deletion list + warning; `--yes` is a second confirmation.
 
 ```bash
 # View the overwrite list, then confirm (non-destructive, safe)
@@ -67,7 +67,7 @@ On non-default platforms, command paths inside SKILL/GUIDANCE files are rewritte
 4. **Smoke test** (run inside the target project): `cd <target> && node .claude/skills/flow-comet/scripts/workflow-state.mjs status` — expected output is a JSON state object (`{"status":"no-change",...}` for a fresh project, `{"status":"running","change":...}` when a workflow is active)
 
 > Commands are POSIX-style (Git Bash / WSL / macOS terminal); Windows users should run them in Git Bash.
-> **Note**: `guard-self-test.mjs` (114 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
+> **Note**: `guard-self-test.mjs` (137 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
 
 ### Using flow-comet on Codex
 
@@ -79,6 +79,10 @@ Measured on Codex CLI 0.146.0 — the 8-node flow runs end-to-end.
 - **Windows PowerShell argument quoting**: `node … '{"summary":"…"}'` loses embedded double quotes through PowerShell 5.1 — run such commands via .NET `ProcessStartInfo`/`ArgumentList`, or from Git Bash.
 - **Commit discipline**: the workflow scripts validate artifacts, not git commits — mark tasks `status="done"` in TASK.md and commit as part of the execute node protocol.
 - **Archive order**: run `skill-load archive flow-comet-integration --prompt flow-kit/prompts/7-integration.md` **before** copying the archive directory (declaration markers travel with the directory copy).
+- **Chinese artifact writing (measured)**: session Bash writing Chinese via the PowerShell pipeline may corrupt it into literal `?` (`$OutputEncoding` encoding) — write via Python with `encoding='utf-8'`, set `$OutputEncoding` to `[System.Text.Encoding]::UTF8`, or use full `\uXXXX` escapes; `python` with the `-c` argument and embedded Chinese is lossless.
+- **JSON argument quoting (measured)**: PowerShell 5.1 strips embedded double quotes when passing arguments to native commands (`handoff result` / `record` may store dirty strings) — use `--json-file` to read the JSON payload from a file, or run from Git Bash.
+- **Git proxy operations (measured)**: git is restricted inside the codex sandbox (init branch creation fails, worktree subagents cannot self-commit) — init branch failure degrading to file-only mode is expected; commits from delegated subagents are made by the coordinator outside the sandbox, and the Return Contract's commitHash remains verifiable.
+- **Leading `>` misdetection (measured)**: the hook treats a command-line leading `>` as a shell redirection (markdown quote lines get blocked) — escape and restore with `>`.
 
 ### Verifying a Codex installation
 
@@ -87,11 +91,9 @@ Measured on Codex CLI 0.146.0 — the 8-node flow runs end-to-end.
 3. **Hook contract smoke** (run inside the target project): feed the guard an out-of-scope write target and expect a JSON block decision — `echo '{"tool_name":"Write","tool_input":{"file_path":"src/evil.py"}}' | node .agents/skills/flow-comet/scripts/comet-hook-guard.mjs before_tool --platform codex` → `{"decision":"block",...}`
 4. **Smoke test** (run inside the target project): `cd <target> && node .agents/skills/flow-comet/scripts/workflow-state.mjs status` → JSON state object
 
-> **Note**: Codex support targets full parity with Claude Code (measured on Codex CLI 0.146.0): skill auto-discovery, AGENTS.md loading, the workflow scripts, and the write-guard hook all work — the hook intercepts Bash write commands (PowerShell cmdlets, .NET File API, redirection) via PreToolUse `decision:"block"`. First use in a project requires trusting the hook (run `/hooks` in an interactive session, or pass `--dangerously-bypass-hook-trust` for scripted automation). Interception is command-level — alternate write spellings (other File APIs) can bypass it, a Codex platform limit; the mainstream patterns are covered.
-
 ## Option B · Manual copy (fallback)
 
-When prepare-env cannot be run:
+When prepare-env cannot be run (Claude Code target; Codex users should prefer Option A — manual copy does not run the platform path replacement):
 
 ```bash
 cd <flow-comet repo>
@@ -112,7 +114,7 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Write|Edit",
+        "matcher": "Write|Edit|Bash",
         "hooks": [
           {
             "type": "command",

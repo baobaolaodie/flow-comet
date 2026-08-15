@@ -347,8 +347,14 @@ function mergeHookGroups(existingGroups, newGroups) {
     if (!group || typeof group !== 'object' || Array.isArray(group) || !Array.isArray(group.hooks)) {
       return group;
     }
-    return { ...group, hooks: group.hooks.filter((hook) => !isManagedHookCommand(hook && hook.command)) };
-  });
+    const hadManagedHook = group.hooks.some((hook) => isManagedHookCommand(hook && hook.command));
+    const filtered = group.hooks.filter((hook) => !isManagedHookCommand(hook && hook.command));
+    // 只删除「含托管 hook 且过滤后为空」的组:matcher 演进(如 Write|Edit → Write|Edit|Bash)
+    // 会使旧托管组过滤为空,此时删除防配置污染(与 Codex purge 路径一致);
+    // 用户空组/纯用户组保留(不动用户配置——2026-08-16 修复:此前统一删空组会误删用户空 matcher 组)
+    if (hadManagedHook && filtered.length === 0) return null;
+    return { ...group, hooks: filtered };
+  }).filter(Boolean);
   for (const newGroup of newGroups) {
     const existingIndex = mergedGroups.findIndex(
       (group) =>
@@ -406,7 +412,9 @@ function injectSettingsHook(claudeDir) {
     ? settings.hooks
     : {};
   const newGroup = {
-    matcher: 'Write|Edit',
+    // R5: matcher 含 Bash——协调者禁令物理化(Bash 写源码命令同样被 hook 检测拦截;
+    // hook 对无写路径的 Bash 命令(如 git/查询)放行)
+    matcher: 'Write|Edit|Bash',
     hooks: [
       {
         type: 'command',

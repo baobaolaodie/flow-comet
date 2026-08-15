@@ -13,7 +13,7 @@
 | 方式 | 说明 |
 |------|------|
 | `--protocol <path>`（或 `--protocol=<path>`） | CLI 参数——由 Claude 在流程中自动附带 |
-| `FLOW_COMET_PROTOCOL` | 环境变量——写入项目环境（如 `.claude/settings.json` 的 `env`）可持久生效 |
+| `FLOW_COMET_PROTOCOL` | 环境变量——写入项目环境可持久生效（Claude Code 如 `.claude/settings.json` 的 `env`；Codex 经 shell 环境或 `config.toml`） |
 
 优先级：`--protocol` CLI > `FLOW_COMET_PROTOCOL` 环境变量 > 内置默认（resolveProtocol）。未显式指定时一切行为与内置协议完全一致。
 
