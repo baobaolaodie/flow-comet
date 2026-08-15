@@ -53,9 +53,9 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 
 安装器默认面向 **Claude Code**（行为不变）。目标平台按以下顺序确定：
 
-1. **显式指定**：`--platform <claude-code|codex>` 优先（无头/CI 兼容）。
-2. **交互选择**：在交互式终端（有 TTY）运行且未指定 `--platform` 时，会提示选择——`1) Claude Code（默认） 2) Codex`，回车取默认；若目标项目已探测到 `.codex/` 或 `.claude/` 痕迹，默认推荐对应平台。
-3. **自动探测**：无 TTY（CI/脚本/管道）时按目标项目既有 `.codex/`（优先）或 `.claude/` 探测。
+1. **显式指定**：`--platform <claude-code|codex>` 优先（无头/CI 兼容）；显式参数仅接受 `claude-code` 或 `codex`——`both` 是交互专属选项。
+2. **交互选择**：在交互式终端（有 TTY）运行且未指定 `--platform` 时，会提示选择——`1) Claude Code（默认） 2) Codex 3) both（两个平台都装）`，回车取默认；若目标项目已探测到 `.codex/` 或 `.claude/` 痕迹，默认推荐对应平台；双痕迹时默认推荐 Claude Code。
+3. **自动探测**：无 TTY（CI/脚本/管道）时按目标项目既有痕迹探测——仅 `.codex/` → Codex；含 `.claude/` → Claude Code；**两者皆有 → 默认 Claude Code（主平台）并输出提示**（如需 Codex 或 both：交互终端运行——提示含 both 选项；或显式 `--platform codex`）。
 4. **默认兜底**：两者皆无 → Claude Code。
 
 | 平台 | 技能 | 编排规则 | 写入守卫 hook |
