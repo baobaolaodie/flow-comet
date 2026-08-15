@@ -1816,6 +1816,36 @@ const TEST_ITEMS = [
       if (r6.status === 0) throw new Error('未知平台应报错拒绝');
       const out6 = String(r6.stderr || '') + String(r6.stdout || '');
       if (!out6.includes('未知平台')) throw new Error('未知平台错误信息应含"未知平台": ' + out6);
+      // ⑦ 无 --platform + 目标同时有 .claude/ 与 .codex/ 痕迹 → 不武断二选一:
+      //    默认 claude-code(主平台)+ 输出双痕迹提示(修复前探测 .codex/ 优先会武断只装 codex)
+      const t7 = path.join(dir, 'k4-dual-trace');
+      fs.mkdirSync(path.join(t7, '.claude'), { recursive: true });
+      fs.mkdirSync(path.join(t7, '.codex'), { recursive: true });
+      const r7 = run(t7);
+      if (r7.status !== 0) throw new Error('双痕迹项目安装失败: ' + (r7.stderr || JSON.stringify(r7.output)));
+      if (!fs.existsSync(path.join(t7, '.claude', 'skills', 'flow-comet', 'SKILL.md'))) {
+        throw new Error('双痕迹项目应默认安装 claude-code(主平台),而非武断只装 codex');
+      }
+      if (fs.existsSync(path.join(t7, '.agents'))) throw new Error('双痕迹项目默认 claude-code 时不应生成 .agents/');
+      const out7 = String(r7.stdout || '') + String(r7.stderr || '');
+      if (!out7.includes('同时有 .claude/ 与 .codex/ 痕迹')) throw new Error('双痕迹无 TTY 应输出双痕迹提示: ' + out7);
+      // ⑧ both 安装路径(交互模拟):覆盖 stdin.isTTY + 喂入答案 3 → 双平台产物同时生成,
+      //    codex 副本命令路径平台化(.agents 形态,不含 .claude 路径);claude-code 先装、codex 后装
+      const t8 = path.join(dir, 'k4-both');
+      fs.mkdirSync(t8, { recursive: true });
+      const installerUrl = 'file:///' + installer.split(path.sep).join('/');
+      const bothScript =
+        `Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });` +
+        `process.argv = ['node', 'prepare-env', '--target', ${JSON.stringify(t8)}];` +
+        `await import(${JSON.stringify(installerUrl)});`;
+      const r8 = spawnSync(process.execPath, ['--input-type=module', '-e', bothScript], { cwd: repoRoot, encoding: 'utf8', input: '3\n', timeout: 120000 });
+      if (r8.status !== 0) throw new Error('both 选择安装失败: ' + (r8.stderr || JSON.stringify(r8.output)));
+      if (!fs.existsSync(path.join(t8, '.claude', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('both 安装后 .claude/skills 应生成');
+      if (!fs.existsSync(path.join(t8, '.agents', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('both 安装后 .agents/skills 应生成');
+      const codexSkillText = fs.readFileSync(path.join(t8, '.agents', 'skills', 'flow-comet', 'SKILL.md'), 'utf8');
+      if (codexSkillText.includes('.claude/skills/flow-comet/scripts/')) {
+        throw new Error('both 安装后 codex 副本命令路径应为 .agents 形态');
+      }
     },
   },
 

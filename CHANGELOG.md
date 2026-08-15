@@ -10,6 +10,12 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded in git tags, this document, the README badge, [docs/VERSIONS.md](docs/VERSIONS.md) and the authoritative `skills/flow-comet/INSTALLED_VERSION`; `bundle.yaml` version stays 1.0.0 (decoupled from release versioning).
 
+## [Unreleased]
+
+### Fixed
+
+- **Installer platform selection**: the interactive prompt now offers `3) both` (install to both Claude Code and Codex); no-TTY auto-detection no longer arbitrarily picks Codex when the target project has both `.claude/` and `.codex/` traces — it defaults to Claude Code (primary) with a hint, while Codex or both remain reachable interactively or via `--platform`.
+
 ## [1.4.0] - 2026-08-14
 
 Multi-platform installer framework, platform modularization, and real-artifact examples. ([#45](https://github.com/baobaolaodie/flow-comet/pull/45), [#46](https://github.com/baobaolaodie/flow-comet/pull/46), [#47](https://github.com/baobaolaodie/flow-comet/pull/47), [#48](https://github.com/baobaolaodie/flow-comet/pull/48), [#50](https://github.com/baobaolaodie/flow-comet/pull/50), [#52](https://github.com/baobaolaodie/flow-comet/pull/52))

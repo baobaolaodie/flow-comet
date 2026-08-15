@@ -54,8 +54,8 @@ node scripts/prepare-env.mjs --target <absolute path to target project> --purge 
 The installer targets **Claude Code** by default (unchanged behavior). The target platform is chosen in this order:
 
 1. **Explicit flag**: `--platform <claude-code|codex>` always wins (headless/CI compatible).
-2. **Interactive prompt**: when run on an interactive terminal (TTY) without `--platform`, the installer prompts — `1) Claude Code (default) 2) Codex`; press Enter to accept the default. If the target project already has `.codex/` or `.claude/` traces, the corresponding platform is the recommended default.
-3. **Auto-detection**: without a TTY (CI, scripts, pipelines), an existing `.codex/` (preferred) or `.claude/` in the target project is detected.
+2. **Interactive prompt**: when run on an interactive terminal (TTY) without `--platform`, the installer prompts — `1) Claude Code (default) 2) Codex 3) both (install to both platforms)`; press Enter to accept the default. If the target project already has `.codex/` or `.claude/` traces, the corresponding platform is the recommended default; with both traces, Claude Code is the recommended default.
+3. **Auto-detection**: without a TTY (CI, scripts, pipelines), traces in the target project are detected — `.codex/` only → Codex; `.claude/` present → Claude Code; **both traces → Claude Code (primary) with a hint** (choose Codex or both in an interactive terminal or via `--platform`).
 4. **Fallback**: if neither exists, Claude Code is used.
 
 | Platform | Skills | Orchestration rule | Write-guard hook |
