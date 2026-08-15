@@ -22,7 +22,7 @@
 
 覆盖：init 全分支（状态写入/工件目录/同 id 重跑防护/分支模式）、status 节点推导与无活跃兜底、next 推进与状态漂移校正、next 未出口节点严格拦截、select 切换、advance 推进、record 基础证据、execution-mode 切换与记录、config 设置与非法值拒绝。
 
-测试项（12）：A1 init 状态写入与工件目录创建 / A2 init 分支模式与非法前缀拒绝 / A3 init 同 id 重跑防护 / A4 status 节点推导与无活跃兜底 / A5 next 推进与状态漂移校正 / A6 next 未出口节点严格拦截 / A7 select 切换与缺失拒绝 / A8 advance 节点推进 / A9 record 基础证据记录 / A10 execution-mode 切换与记录 / A11 config 配置与非法值拒绝 / A12 验证失败计数按 change 隔离（切换 change 后计数独立）。
+测试项（12）：A1 init 状态写入与工件目录创建 / A2 init 分支模式与非法前缀拒绝 / A3 init 同 id 重跑防护 / A4 status 节点推导与无活跃兜底 / A5 next 推进与状态漂移校正（进行中节点保护由引擎回归覆盖）/ A6 next 未出口节点严格拦截 / A7 select 切换与缺失拒绝 / A8 advance 节点推进 / A9 record 基础证据记录 / A10 execution-mode 切换与记录 / A11 config 配置与非法值拒绝 / A12 验证失败计数按 change 隔离（切换 change 后计数独立）。
 
 ### B. 声明机制
 
