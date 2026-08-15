@@ -1,5 +1,7 @@
 # Workflow Recovery
 
+> 正文为中文;结构标题保留协议英文概念名（workflow-run / overlay）便于与协议字段对应。
+
 ## 状态模型：workflow-run（主）
 
 - State model: `workflow-run`（protocol `state.kind` 定义，flow-comet 实际使用）

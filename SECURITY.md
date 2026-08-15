@@ -1,6 +1,6 @@
 <div align="right">
 
-[中文](SECURITY-zh.md)
+[English](SECURITY.md) · [中文](SECURITY-zh.md)
 
 </div>
 

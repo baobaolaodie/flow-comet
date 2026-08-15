@@ -126,6 +126,7 @@ jobs:
             const P = [];
 
             // Feature-branch prefix (release PR head=dev is exempt)
+            // 分支前缀从宽(6 类)、提交/标题从紧(10 类)——刻意设计:分支命名门槛低于提交规范
             if (!isRelease && !/^(feat|fix|docs|chore|hotfix|ci)\//.test(pr.head.ref))
               P.push(`dev PR head branch must carry a feat/fix/docs/chore/hotfix/ci prefix, got ${pr.head.ref}`);
 

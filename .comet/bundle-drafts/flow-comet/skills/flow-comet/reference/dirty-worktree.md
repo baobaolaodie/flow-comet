@@ -21,7 +21,7 @@ git ls-files --others --exclude-standard
 
 ## 构建产物排除
 
-`??` 匹配 .gitignore（node_modules/dist/__pycache__ 等）自动跳过归属。
+被 .gitignore 忽略的文件（node_modules/dist/__pycache__ 等）不会出现在未跟踪列表，自动排除。
 
 ## 禁令
 
