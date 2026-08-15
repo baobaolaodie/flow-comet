@@ -52,7 +52,9 @@ cd <flow-comet 仓库>
 node scripts/prepare-env.mjs --target <目标项目绝对路径>
 ```
 
-安装器默认面向 Claude Code（行为不变）。面向 Codex：`node scripts/prepare-env.mjs --target <路径> --platform codex`——技能安装到自动发现的 `.agents/skills/`，编排规则注入 `AGENTS.md` 托管区，写入守卫 hook 经 Codex PreToolUse 拦截 Bash 写命令（首次使用需信任 hook：`/hooks`）。平台也可在终端交互选择（TTY）；非交互环境（CI/脚本）按目标项目既有 `.claude/` / `.codex/` 自动探测，均无则默认 Claude Code。
+首次在交互终端运行会提示选择平台（回车默认 Claude Code）；目标为 Codex 时直接加 `--platform codex`。
+
+安装器默认面向 Claude Code（行为不变）。面向 Codex：`node scripts/prepare-env.mjs --target <路径> --platform codex`——技能安装到自动发现的 `.agents/skills/`，编排规则注入 `AGENTS.md` 托管区，写入守卫 hook 经 Codex PreToolUse 拦截 Bash 写命令（首次使用需信任 hook：`/hooks`）。在交互式终端（有 TTY）运行且未指定 `--platform` 时，会提示选择目标平台（默认 Claude Code，回车即选；目标项目已有平台痕迹时默认推荐该平台）；无 TTY（CI/脚本）自动探测，均无则默认 Claude Code。
 
 ```bash
 # 2. 在目标项目新开 Claude Code 会话，输入：
