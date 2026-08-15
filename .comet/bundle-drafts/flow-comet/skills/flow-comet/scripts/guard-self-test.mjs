@@ -36,12 +36,14 @@ const HANDOFF = path.join(__dirname, 'workflow-handoff.mjs');
 const BUILTIN_PROTOCOL_SOURCE = path.join(__dirname, '..', 'reference', 'workflow-protocol.json');
 const CHANGE_ID = 'ch';
 
-// 场景数一致性自检清单（22 文件，全变体：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n）——
-// 场景数自检与底部自检共用同一清单（自检常量同步：SCENARIOS.length 变更 → 22 文件须同步）
+// 场景数一致性自检清单（21 文件，全变体：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n）——
+// 场景数自检与底部自检共用同一清单（自检常量同步：SCENARIOS.length 变更 → 21 文件须同步）。
+// CLAUDE.md 为主仓私有指导文件（gitignore 不随 clone 分发）——不在自检清单内（2026-08-16 决策：
+// 清单只针对随仓库分发的文件；CLAUDE.md 场景数由人工维护）
 const SCENARIO_COUNT_FILES = [
   'README.md', 'README-zh.md', 'CONTRIBUTING.md', 'CONTRIBUTING-zh.md',
   'docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
-  'docs/VERSIONS.md', 'docs/VERSIONS-zh.md', 'CLAUDE.md', '.github/PULL_REQUEST_TEMPLATE.md',
+  'docs/VERSIONS.md', 'docs/VERSIONS-zh.md', '.github/PULL_REQUEST_TEMPLATE.md',
   'CHANGELOG.md', 'CHANGELOG-zh.md',
   'docs/internal/ARCHITECTURE.md', 'docs/internal/DOC-CHECKLIST.md', 'docs/internal/MECHANISM.md',
   'docs/internal/next-change-prompt.md', 'docs/internal/ROADMAP.md', 'docs/internal/WORKING-METHOD.md',
@@ -2413,11 +2415,11 @@ const SCENARIOS = [
     },
   },
 
-  // 105: 场景数一致性自检同步（AC-8）——SCENARIOS.length 变更时 SCENARIO_COUNT_FILES 22 文件须同步
+  // 105: 场景数一致性自检同步（AC-8）——SCENARIOS.length 变更时 SCENARIO_COUNT_FILES 21 文件须同步
   // （ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n 变体）。本场景直接读取权威源仓库的
-  // 22 文件断言含当前场景数变体——文档漏同步即 RED（与底部自检同判据；安装副本无文档跳过）
+  // 21 文件断言含当前场景数变体——文档漏同步即 RED（与底部自检同判据；安装副本无文档跳过）
   {
-    name: '105 场景数自检同步：22 文件含当前场景数变体（AC-8）',
+    name: '105 场景数自检同步：21 文件含当前场景数变体（AC-8）',
     run: (dir) => {
       const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
       if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无 flow-comet 文档
@@ -2428,12 +2430,7 @@ const SCENARIOS = [
         try {
           text = fs.readFileSync(path.join(repoRoot, rel), 'utf8');
         } catch (e) {
-          // CLAUDE.md 为主仓私有指导文件——缺失时显式 FAIL(防「22 文件」承诺名不副实,
-          // 与底部自检一致);其余文件缺失静默跳过(历史兼容)
-          if (e.code === 'ENOENT' && rel === 'CLAUDE.md') {
-            throw new Error('CLAUDE.md 缺失——主仓私有指导文件缺失时自检显式 FAIL');
-          }
-          if (e.code === 'ENOENT') continue;
+          if (e.code === 'ENOENT') continue; // 文件不存在跳过（与底部自检一致）
           throw e;
         }
         const ok = text.includes('ALL ' + n + ' SCENARIOS PASSED')
@@ -3291,12 +3288,7 @@ if (isAuthoritativeSource) {
         || text.includes(n + '/' + n);
       if (!ok) throw new Error(rel + ' 场景数未同步（应为 ' + n + '）');
     } catch (e) {
-      // CLAUDE.md 为主仓私有指导文件——缺失时显式 FAIL(防「22 文件」承诺名不副实);
-      // 其余文件缺失静默跳过(历史兼容)
-      if (e.code === 'ENOENT' && rel === 'CLAUDE.md') {
-        failures.push({ name: '场景数一致性(' + rel + ')', error: rel + ' 缺失——主仓私有指导文件缺失时自检显式 FAIL' });
-        console.error('FAIL: 场景数一致性(' + rel + ')\n' + rel + ' 缺失——主仓私有指导文件缺失时自检显式 FAIL');
-      } else if (e.code !== 'ENOENT') {
+      if (e.code !== 'ENOENT') {
         failures.push({ name: '场景数一致性(' + rel + ')', error: e.message });
         console.error('FAIL: 场景数一致性(' + rel + ')\n' + e.message);
       }
