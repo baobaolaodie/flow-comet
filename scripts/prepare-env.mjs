@@ -212,20 +212,14 @@ function printUsage() {
   console.log('  --purge   破坏性：先删除目标平台生成物再重新生成（默认不删除；需 --yes 确认）');
 }
 
-// 探测目标项目既有平台痕迹（三态）：仅 .codex/ → codex；含 .claude/（仅 .claude/ 或双痕迹）→ claude-code；
-// 两者皆无 → null。双痕迹（既有 .claude/ 又有 .codex/）不武断二选一——默认主平台 claude-code，
-// 由 resolvePlatform 输出提示（用户可改用交互终端或显式 --platform 指定）。
-function probePlatform(target) {
+// 探测目标项目既有平台痕迹(三态,一次计算复用于探测与双痕迹判定):
+// 仅 .codex/ → codex;含 .claude/(仅 .claude/ 或双痕迹)→ claude-code;两者皆无 → probe=null。
+// 双痕迹(既有 .claude/ 又有 .codex/)不武断二选一——默认主平台 claude-code,resolvePlatform 输出提示。
+function detectTraces(target) {
   const hasCodex = fs.existsSync(path.join(target, '.codex'));
   const hasClaude = fs.existsSync(path.join(target, '.claude'));
-  if (hasCodex && !hasClaude) return 'codex';
-  if (hasClaude) return 'claude-code';
-  return null;
-}
-
-// 双痕迹检测：目标项目同时有 .claude/ 与 .codex/
-function hasBothTraces(target) {
-  return fs.existsSync(path.join(target, '.codex')) && fs.existsSync(path.join(target, '.claude'));
+  const probe = hasCodex && !hasClaude ? 'codex' : hasClaude ? 'claude-code' : null;
+  return { probe, dualTrace: hasCodex && hasClaude };
 }
 
 // TTY 交互选择（缺省路径——用户裁决：交互式选择为主；无 TTY 自动走探测/默认）。
@@ -268,16 +262,16 @@ async function resolvePlatform(target, platformArg) {
     }
     return [PLATFORMS[platformArg]];
   }
-  const dualTrace = hasBothTraces(target);
+  const { probe, dualTrace } = detectTraces(target);
   if (process.stdin.isTTY) {
-    const selected = await promptPlatformSelection(probePlatform(target), dualTrace);
+    const selected = await promptPlatformSelection(probe, dualTrace);
     const ids = selected === 'both' ? ['claude-code', 'codex'] : [selected];
     return ids.map((id) => PLATFORMS[id]);
   }
   if (dualTrace) {
-    console.log('[prepare-env] 检测到目标项目同时有 .claude/ 与 .codex/ 痕迹——本次默认安装 Claude Code；如需 Codex 或 both，请在交互终端运行或显式 --platform');
+    console.log('[prepare-env] 检测到目标项目同时有 .claude/ 与 .codex/ 痕迹——默认安装 Claude Code。');
+    console.log('          如需 Codex 或 both:交互终端运行,或显式 --platform codex。');
   }
-  const probe = probePlatform(target);
   return [PLATFORMS[probe ?? 'claude-code']];
 }
 

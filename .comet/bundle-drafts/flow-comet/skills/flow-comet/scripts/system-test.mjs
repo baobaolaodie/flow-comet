@@ -1846,6 +1846,20 @@ const TEST_ITEMS = [
       if (codexSkillText.includes('.claude/skills/flow-comet/scripts/')) {
         throw new Error('both 安装后 codex 副本命令路径应为 .agents 形态');
       }
+      // both 流程的 codex 专属产物断言: hooks 配置(.codex/hooks.json + config.toml 启用,
+      // Codex 官方 hooks 位置为用户级 ~/.codex/ 与项目级 .codex/——实测 0.146.0 项目级生效)
+      // + 规则托管区(项目根 AGENTS.md)——不只验技能复制与路径替换
+      if (!fs.existsSync(path.join(t8, '.codex', 'hooks.json'))) {
+        throw new Error('both 安装后 .codex/hooks.json 应生成以承载 codex 钩子配置');
+      }
+      const codexConfigText = fs.readFileSync(path.join(t8, '.codex', 'config.toml'), 'utf8');
+      if (!/\[features\]/.test(codexConfigText) || !/hooks\s*=\s*true/.test(codexConfigText)) {
+        throw new Error('both 安装后 .codex/config.toml 应启用 hooks(features)');
+      }
+      const agentsText = fs.readFileSync(path.join(t8, 'AGENTS.md'), 'utf8');
+      if (!agentsText.includes('Managed by flow-comet')) {
+        throw new Error('both 安装后 AGENTS.md 应含规则托管区');
+      }
     },
   },
 
