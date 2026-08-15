@@ -78,7 +78,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 - **Windows PowerShell 引号**：`node … '{"summary":"…"}'` 经 PowerShell 5.1 会丢失内嵌双引号——用 .NET `ProcessStartInfo`/`ArgumentList` 执行，或改用 Git Bash。
 - **提交纪律**：工作流脚本校验产物而非 git 提交——execute 节点协议要求把任务标记 `status="done"` 并提交。
 - **归档顺序**：`skill-load archive flow-comet-integration --prompt flow-kit/prompts/7-integration.md` 须在**复制归档目录之前**运行（声明标记随目录复制）。
-- **中文工件写入（实测）**：会话 Bash 写中文经 PowerShell 管道可能损坏为字面 `?`（$OutputEncoding 编码）——用 Python 以 `encoding='utf-8'` 写文件、设置 `$OutputEncoding = [System.Text.Encoding]::UTF8`、或全 `\uXXXX` 转义规避；`python -c` 内嵌中文无损。
+- **中文工件写入（实测）**：会话 Bash 写中文经 PowerShell 管道可能损坏为字面 `?`（$OutputEncoding 编码）——用 Python 以 `encoding='utf-8'` 写文件、设置 `$OutputEncoding` 为 `[System.Text.Encoding]::UTF8`、或全 `\uXXXX` 转义规避；使用 `python` 的 `-c` 参数内嵌中文无损。
 - **JSON 参数引号（实测）**：PowerShell 5.1 对原生命令传参剥离 JSON 内嵌双引号（handoff result / record 可能存成脏字符串）——用 `--json-file` 从文件读 JSON payload，或用 Git Bash 执行。
 - **git 代操作（实测）**：codex 沙箱内 git 受限（init 分支创建失败、worktree 内无法自提交）——init 分支失败降级纯文件模式属预期；委托子代理的提交由协调者在沙箱外代操作，Return Contract 的 commitHash 仍可校验。
 - **行首 `>` 误判（实测）**：hook 把命令行首 `>` 判为 shell 重定向（markdown 引用行被拦）——用 `>` 转义还原。
