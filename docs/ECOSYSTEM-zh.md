@@ -32,7 +32,7 @@ flow-kit 是**纯 markdown 方法论包**（不是工具——"clone 到项目�
 
 ### flow-comet 明确不吸收
 
-- **PROGRESS.md / STATE.md 文件**：跨会话状态跟踪被状态机替代——flow-comet-dev 明确「TASK.md 的 status + SUMMARY.md 就是进度」；任务中途清窗快照（`<task-id>-PROGRESS.md`）保留用于断点恢复，完成后删除
+- **PROGRESS.md / STATE.md 文件**：跨会话状态跟踪被状态机替代——flow-comet-dev 明确「TASK.md 的 status + SUMMARY.md 就是进度」；任务中途清窗快照（`.specs/<change-id>/<task-id>-PROGRESS.md`）保留用于断点恢复，完成后删除
 - **横向命令**：仅 evolve/health 以独立 skill 存在；intel-scan/architect 类命令未移植
 - **多 IDE 适配层**（`.windsurfrules`/`.cursorrules` 安装路径）
 - **Token 预算表**（flow-kit 的成本模型未继承）

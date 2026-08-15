@@ -347,11 +347,13 @@ function mergeHookGroups(existingGroups, newGroups) {
     if (!group || typeof group !== 'object' || Array.isArray(group) || !Array.isArray(group.hooks)) {
       return group;
     }
+    const hadManagedHook = group.hooks.some((hook) => isManagedHookCommand(hook && hook.command));
     const filtered = group.hooks.filter((hook) => !isManagedHookCommand(hook && hook.command));
-    // 空组统一删除:matcher 演进(如 Write|Edit → Write|Edit|Bash)会使旧托管组过滤为空,
-    // 历史残留的空组也无任何作用——统一删除防配置污染(与 Codex purge 路径的空组过滤一致;
-    // 含用户 hook 的组保留,不动用户配置)
-    return filtered.length === 0 ? null : { ...group, hooks: filtered };
+    // 只删除「含托管 hook 且过滤后为空」的组:matcher 演进(如 Write|Edit → Write|Edit|Bash)
+    // 会使旧托管组过滤为空,此时删除防配置污染(与 Codex purge 路径一致);
+    // 用户空组/纯用户组保留(不动用户配置——2026-08-16 修复:此前统一删空组会误删用户空 matcher 组)
+    if (hadManagedHook && filtered.length === 0) return null;
+    return { ...group, hooks: filtered };
   }).filter(Boolean);
   for (const newGroup of newGroups) {
     const existingIndex = mergedGroups.findIndex(

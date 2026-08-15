@@ -89,7 +89,7 @@ This node finalizes a completed change by extracting reusable lessons from the d
 
 1. `git push -u origin change/<id>` 推送分支
 2. 创建 PR：`gh pr create` 或提示用户手动在 GitHub 创建
-3. PR approve 后回到第 2 步的合并流程（`git checkout main && git merge change/<id>`）
+3. PR approve 后回到第 2 步的合并流程（`git checkout <默认分支> && git merge change/<id>`——默认分支按第 2 步探测逻辑，不假设 `main`）
 
 The full archive protocol and templates are in:
 - `flow-kit/prompts/7-integration.md` (INTEGRATION phase, archive + LESSONS sections)
@@ -124,7 +124,7 @@ node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry archive
 
 Load `flow-comet-archive` for this Node. Operation: `require`.
 
-The archive node scans all SUMMARY.md files for lessons (applying > 30min debugging / cross-task applicability / 6-month retry criteria), adds qualifying lessons to `.specs/LESSONS.md`, moves the change directory to `.specs/archive/`, and updates `.specs/CHANGELOG.md`. It requires user confirmation before the irreversible file move.
+The archive node scans all SUMMARY.md files for lessons (applying more than 30 minutes of debugging / cross-task applicability / 6-month retry criteria), adds qualifying lessons to `.specs/LESSONS.md`, moves the change directory to `.specs/archive/`, and updates `.specs/CHANGELOG.md`. It requires user confirmation before the irreversible file move.
 
 ## Required Skill Calls
 

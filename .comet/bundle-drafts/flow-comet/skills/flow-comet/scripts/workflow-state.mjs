@@ -983,6 +983,9 @@ async function main() {
       }
       if (targetLoadsDir !== null) {
         for (const binding of recordNodeDef.requiredSkillCalls ?? []) {
+          // handoff scope 技能由子代理加载(协调者不声明)——不自动补协调者标记
+          // (2026-08-16 修复:此前无条件写标记,与 verifySkillLoadMarkers 的 scope 豁免不一致)
+          if (binding.scope === 'handoff') continue;
           const markerFile = path.join(targetLoadsDir, nodeId + '-' + binding.skill + '.json');
           let markerExists = false;
           try { await fs.access(markerFile); markerExists = true; } catch { /* 标记不存在 */ }

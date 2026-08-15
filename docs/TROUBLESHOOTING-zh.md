@@ -9,7 +9,7 @@
 | 现象 | 原因 | 处理 |
 |------|------|------|
 | `BLOCKED: 归档必须在 <prefix><id> 分支上进行`（前缀默认 `change/`） | 在错误分支执行 archive（分支模式） | `git checkout <prefix><id>`（默认 `change/<id>`）后重试 |
-| `WARN: 分支与 activeChange 不一致` | 分支与状态漂移 | `git checkout change/<activeChange>`（按 WARN 提示）后继续 |
+| `WARN: 分支与 activeChange 不一致` | 分支与状态漂移 | `git checkout <prefix><activeChange>`（按 WARN 提示；前缀为 init 时配置的 `--branch-prefix`，默认 `change/`）后继续 |
 | `WORKTREE WARN: .specs/<change>/ 有未提交工件` | 委托前工件未 commit | commit 工件，或在委托 prompt 内联上下文 |
 | `BLOCKED: TASK.md 任务集被修改` | execute 期间增删任务/改 action/改边界 | 回退 TASK.md 到 enter 时内容（仅标记 done 合法） |
 | `BLOCKED: state 字段类型非法` | state 文件被直改坏 | 修复字段类型或从备份/git 历史恢复 `.comet/flow-comet-state.json` |

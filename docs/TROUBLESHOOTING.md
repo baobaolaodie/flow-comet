@@ -9,7 +9,7 @@
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `BLOCKED: 归档必须在 <prefix><id> 分支上进行`（前缀默认 `change/`） | archive executed on the wrong branch (branch mode) | `git checkout <prefix><id>`（默认 `change/<id>`）then retry |
-| `WARN: 分支与 activeChange 不一致` | branch/state drift | `git checkout change/<activeChange>` (per WARN hint) then continue |
+| `WARN: 分支与 activeChange 不一致` | branch/state drift | `git checkout <prefix><activeChange>` (per WARN hint; prefix is the init `--branch-prefix`, default `change/`) then continue |
 | `WORKTREE WARN: .specs/<change>/ 有未提交工件` | artifacts uncommitted before delegation | commit artifacts, or inline context in the delegation prompt |
 | `BLOCKED: TASK.md 任务集被修改` | tasks added/removed, action/boundary changed during execute | revert TASK.md to its enter-time content (marking done is legal) |
 | `BLOCKED: state 字段类型非法` | state file edited directly | fix field types or restore `.comet/flow-comet-state.json` from backup/git |

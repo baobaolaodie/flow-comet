@@ -509,13 +509,19 @@ const TEST_ITEMS = [
       const outsideTarget = path.join(dir, '..', 'outside-symlink-target.json');
       fs.writeFileSync(outsideTarget, '{"summary":"outside"}', 'utf8');
       const symlinkPath = path.join(dir, 'payload-link.json');
+      // 仅 symlink 创建包在 try 内——断言移出 catch,防断言失败被误报为平台跳过
+      // (修复前 try 包住 runState/断言,真实回归会被吞为"平台不支持跳过")
+      let symlinkCreated = false;
       try {
         fs.symlinkSync(outsideTarget, symlinkPath);
+        symlinkCreated = true;
+      } catch (e) {
+        console.log('  (symlink 负例跳过——当前平台不支持创建符号链接: ' + e.code + ')');
+      }
+      if (symlinkCreated) {
         const rfSym = runState(['record', 'open', '--json-file', 'payload-link.json'], dir);
         assertExit(rfSym, 1);
         assertOut(rfSym, '符号链接');
-      } catch (e) {
-        console.log('  (symlink 负例跳过——当前平台不支持创建符号链接: ' + e.code + ')');
       }
       // 缺 node 参数 → 拒绝
       const noNode = runState(['record'], dir);
@@ -1020,6 +1026,10 @@ const TEST_ITEMS = [
       const pass = runGuard(['exit', 'subagent-execute'], dir);
       assertExit(pass, 0);
       assertOut(pass, 'ALL CHECKS PASSED');
+      // ② M5 自动补不得为 handoff scope 技能写协调者标记(flow-comet-dev 由子代理加载,
+      // 协调者不声明——修复前 record 无条件写标记,语义误导;此处应 RED)
+      const markerDev = path.join(dir, '.specs', CHANGE_ID, '.skill-loads', 'subagent-execute-flow-comet-dev.json');
+      if (fs.existsSync(markerDev)) throw new Error('M5 不应为 handoff scope 技能自动补标记');
       // ③ 契约缺完成检查清单 → 出口拦截（严格校验无豁免）——重写证据时保留委托请求
       // (新 change 强制 write_files 边界来源;直接 result 无 request 会被边界检查拦截)
       const st3 = readStateFile(dir);
@@ -1100,6 +1110,12 @@ const TEST_ITEMS = [
         { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', CHANGE_ID, 'KNOWN-ISSUES.md') } });
       assertExit(okChange, 0);
       assertOut(okChange, 'NODE: archive');
+      // 白名单收窄:归档阶段仅遗留清单可写——change 目录其他工件(如 TASK.md)应 BLOCK
+      // (放宽到整个 change 目录会让归档阶段可改任意工件且无校验——防线变宽)
+      const blockedArtifact = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', CHANGE_ID, 'TASK.md') } });
+      assertExit(blockedArtifact, 2);
+      assertOut(blockedArtifact, 'BLOCKED');
       // 归档阶段写源码拦截
       const blocked = runHook(['before_tool'], dir,
         { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'src', 'evil.py') } });
