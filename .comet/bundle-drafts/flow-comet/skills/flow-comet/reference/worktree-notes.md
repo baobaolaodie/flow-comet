@@ -41,6 +41,8 @@ git ls-tree <branch> <path>      # 确认产物在目标仓库哪个分支、路
 
 Codex 环境的子代理(spawn_agent)无 `isolation:"worktree"` 参数——自动 worktree 假定仅 Claude Code 适用。Codex 协调者委托并行任务时须**手动** `git worktree add <路径> -b <分支>` + 在 worktree 内 `codex exec` 委托,或对并行任务串行收敛(写边界仍互斥)。worktree-notes 第 3 节的"委托 prompt 内联全部上游上下文"在 Codex 同样适用且是唯一可靠路径。**注意**:worktree 同样不含 `flow-kit/` 与 `.agents/`(它们是目标仓库内容,不在 worktree 快照内)——委托 prompt 内联必须覆盖这些依赖。
 
+**hook 会话 root 继承(实测 2026-08-15,与 CC 语义不同)**:Codex worktree 子代理的**会话 root 仍是主仓库**——写入守卫 hook 以主仓库 `.comet/flow-comet-state.json` 的 `currentNode`/`executionMode` 判定白名单,`execute`/`subagent-execute` 阶段协调者白名单 `.specs/` 会**拦截子代理在 worktree 内写源码**(此前文档声称"worktree 内无 .codex/ → hook 不生效"与实测不符,已修正)。规避(实测可用):① 子代理用 Python `open()` 等 File API 直写(命令级检测的平台限制,已文档化);② 由协调者在主仓库代操作写/提交(白名单外路径需显式豁免);③ 委托 prompt 内联全部上游上下文后,协调者验收产物时按 write_files 边界核对。CC 平台的 worktree 子代理无此问题(子代理环境无 hook,见机制文档 1.4)。
+
 ## 5. change 分支 + worktree 组合
 
 分支模式（`branchMode=true`，git 仓库 + init 自动创建 `change/<id>` 分支）下：

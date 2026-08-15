@@ -2263,6 +2263,12 @@ async function main() {
           break;
         }
       }
+      // 归档收尾登记兜底(WARN 渐进,新旧一致)——CHANGELOG 未含本 change 标识
+      // (change-id)→ 提示补登记,防静默遗漏(实测:提交信息声称已登记但实际未改,
+      // 机制无兜底;检测为存在级——含 change-id 字样即视为已登记)
+      if (state.activeChange && !content.includes(state.activeChange)) {
+        console.error('WARN: CHANGELOG.md 未登记本 change(' + state.activeChange + ')——归档收尾应在 CHANGELOG 顶部插入本 change 条目(跟随项目既有格式)');
+      }
     } catch {}
   }
   // W1-A: 每个节点合法 exit 必须满足前置 evidence（对应 flowkit.*.v1 的 evidence）

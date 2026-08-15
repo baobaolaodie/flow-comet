@@ -1768,7 +1768,10 @@ async function resolvePhaseWriteWhitelist(executionMode) {
       'subagent-execute': ['.specs/'],      // 始终协调者（parallel 仍委托，防 execute 吞 parallel 回归）
       'review':           ['.specs/'],
       'verify':           ['.specs/'],
-      'archive':          ['.specs/archive/', '.specs/CHANGELOG.md', '.specs/LESSONS.md', 'STATE.md'],
+      // archive 白名单含 .specs/<change-id>/——归档流程先写 change 目录内遗留清单
+      // (KNOWN-ISSUES.md)再移动到 archive/;<change-id> 占位符由 targetAllowed 替换为
+      // 当前 change(2026-08-15 修复:此前仅 .specs/archive/ 导致按文档流程被 BLOCK)
+      'archive':          ['.specs/archive/', '.specs/<change-id>/', '.specs/CHANGELOG.md', '.specs/LESSONS.md', 'STATE.md'],
     },
     declared: false,
   };

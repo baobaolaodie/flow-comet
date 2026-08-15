@@ -790,6 +790,14 @@ const SCENARIOS = [
       const res = runGuard(['exit', 'archive'], dir);
       assertExit(res, 0);
       assertOut(res, 'WARN: CHANGELOG.md 表格日期非倒序');
+      // 子断言:CHANGELOG 未登记本 change → WARN 渐进(归档收尾登记兜底——
+      // 修复前无检测,执行者遗漏登记可静默进归档,此处应 RED)
+      assertOut(res, '未登记本 change');
+      // 子断言:登记后无未登记 WARN
+      writeFile(dir, '.specs/CHANGELOG.md', '# CHANGELOG\n\n| 日期 | 说明 |\n|------|------|\n| 2026-08-15 | ' + CHANGE_ID + ' | 归档登记 |\n');
+      const resRegistered = runGuard(['exit', 'archive'], dir);
+      assertExit(resRegistered, 0);
+      assertNotOut(resRegistered, '未登记本 change');
       // 子断言:归档缺 KNOWN-ISSUES.md(遗留清单为强制产物)→ BLOCKED
       fs.rmSync(path.join(dir, '.specs/archive/foo-' + CHANGE_ID, 'KNOWN-ISSUES.md'));
       const resMissing = runGuard(['exit', 'archive'], dir);

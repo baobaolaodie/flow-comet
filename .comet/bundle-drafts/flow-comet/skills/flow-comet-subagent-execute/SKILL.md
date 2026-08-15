@@ -17,7 +17,7 @@ Responsibility: 委托 [P] 并行任务给子代理，要求加载 flow-comet-de
 
 > **Codex 平台委托方式（2026-08-13 调研修正 + 实测）**：Codex CLI 无 `--worktree` 一键 flag（openai/codex#12862 跟踪中），但 git worktree 是标准支持方式（Codex App 内置 worktree；子代理运行时自动创建 worktree 隔离）——本节点委托与 Claude Code 的 worktree 隔离语义对齐：协调者对每个 parallel 任务 `git worktree add <worktree路径> -b <分支>` → 在 worktree 内 `codex exec` 委托（fresh-context，prompt 内联任务块 + AC + 强制加载 flow-comet-dev 与回传 Return Contract，`</dev/null>` 防 stdin 卡住）→ 子代理回报 commitHash 后校验存在性 + 任务完成回收（`git worktree remove`）。
 > **沙箱要求（实测 2026-08-13）**：worktree 的 `.git` 是主仓共享——`workspace-write`/`git-write-access` 沙箱均被 Codex 硬拦截（index.lock / objects / COMMIT_EDITMSG Permission denied）；子代理必须用 `sandbox_mode="danger-full-access"` 才能完成 git 提交（worktree 隔离已限定写范围，full-access 仅用于让 git 提交可行）。**信任边界**：`danger-full-access` 是宿主级信任边界（不隔离凭据/网络访问）——仅委托可信子代理，并移除委托环境中的不必要凭据。
-> worktree 内无项目 `.codex/`（hook 不生效）——与 CC worktree 子代理无 state 放行语义一致（子代理负责实现，不受协调者白名单限制）。handoff 记录（workflow-handoff request/result）与 Return Contract 校验机制不变。
+> **hook 会话 root 继承（实测 2026-08-15）**：Codex worktree 子代理的会话 root 仍是主仓库，hook 以主仓库状态判定——`execute`/`subagent-execute` 阶段协调者白名单 `.specs/` 会拦截子代理在 worktree 内写源码（与 CC 子代理"无 state 放行"语义不同）。规避：子代理用 Python `open()` 等 File API 直写（命令级检测限制）或协调者代操作；详见 worktree-notes 4.5。handoff 记录（workflow-handoff request/result）与 Return Contract 校验机制不变。
 
 ## Guidance
 

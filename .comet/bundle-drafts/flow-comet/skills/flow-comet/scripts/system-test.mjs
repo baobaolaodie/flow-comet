@@ -1094,6 +1094,12 @@ const TEST_ITEMS = [
         { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', 'archive', '2026-08-11-' + CHANGE_ID, 'CHANGE.md') } });
       assertExit(ok, 0);
       assertOut(ok, 'NODE: archive');
+      // 归档流程写 change 目录工件(遗留清单 KNOWN-ISSUES.md 先写后移)放行——
+      // 修复前白名单仅 .specs/archive/ 导致按文档流程被 BLOCK(此处应 RED)
+      const okChange = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', CHANGE_ID, 'KNOWN-ISSUES.md') } });
+      assertExit(okChange, 0);
+      assertOut(okChange, 'NODE: archive');
       // 归档阶段写源码拦截
       const blocked = runHook(['before_tool'], dir,
         { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'src', 'evil.py') } });
