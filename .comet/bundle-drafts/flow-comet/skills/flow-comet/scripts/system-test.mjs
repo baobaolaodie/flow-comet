@@ -1042,6 +1042,22 @@ const TEST_ITEMS = [
       const reenter = runGuard(['exit', 'subagent-execute'], dir);
       assertExit(reenter, 1);
       assertOut(reenter, 'Return Contract 校验失败');
+      // ⑫ 声明机制激活下的 subagent-execute 声明要求(自动补标记跳过 handoff scope 后的
+      // 固化行为):有 open 标记(声明机制已激活)但无 subagent-execute 声明 → exit BLOCKED;
+      // 手动 skill-load 声明(协调者按 4-dev.md 构造 handoff prompt 的真实动作)后 → 通过
+      writeFile(dir, 'flow-kit/prompts/4-dev.md', '# 阶段 4 · DEV\n\n## 角色\n\n你是 Developer。\n');
+      const stDecl = readStateFile(dir);
+      stDecl.evidence['subagent-execute'] = { summary: 'delegated', handoffResult: { P01: { result: JSON.parse(fullContract(hash, 'P01')) } } };
+      writeState(dir, stDecl);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-change.json',
+        JSON.stringify({ node: 'open', skill: 'flow-comet-change', protocol: '0-change.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+      const rDeclBlock = runGuard(['exit', 'subagent-execute'], dir);
+      assertExit(rDeclBlock, 1);
+      assertOut(rDeclBlock, 'exit 缺协议声明标记');
+      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
+      const rDeclPass = runGuard(['exit', 'subagent-execute'], dir);
+      assertExit(rDeclPass, 0);
+      assertOut(rDeclPass, 'ALL CHECKS PASSED');
     },
   },
 

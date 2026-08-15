@@ -31,6 +31,12 @@ Responsibility: 委托 [P] 并行任务给子代理，要求加载 flow-comet-de
 >
 > **无 parallel 任务时**：若路由到此节点但 TASK.md 无 `parallel="true" status="pending"` 任务（如全部任务已被 execute 串行处理），按常规流程记录证据后直接退出（entry → record → exit），不要空转等待。
 
+**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）。本节点的 `flow-comet-dev` 为 handoff scope——由子代理加载，**M5 自动补标记不覆盖 handoff scope（2026-08-16）**，协调者必须手动声明（协调者构造 handoff prompt 时按 4-dev.md 协议引用子代理的 dev 协议，声明是真实动作）：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load subagent-execute flow-comet-dev --prompt flow-kit/prompts/4-dev.md
+```
+
 guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
 
 # Subagent Execute
