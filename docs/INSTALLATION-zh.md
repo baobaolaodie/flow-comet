@@ -29,6 +29,8 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径>          # Clau
 node scripts/prepare-env.mjs --target <目标项目绝对路径> --platform codex   # Codex
 ```
 
+首次在交互终端运行会提示选择平台（回车默认 Claude Code；目标项目已有平台痕迹时默认推荐该平台）；目标 Codex 直接加 `--platform codex`（平台选择链见[平台](#平台)）。
+
 `prepare-env` 会：
 
 1. **生成/覆盖 `rules/` 与 `skills/`**——全部 flow-comet* skill，来源为权威源 `.comet/bundle-drafts/flow-comet/`
@@ -49,7 +51,12 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 
 ### 平台
 
-安装器默认面向 **Claude Code**（行为不变）。目标平台按以下顺序确定：显式 `--platform <claude-code|codex>` 优先；否则在交互式终端（TTY）提示选择；非交互环境（CI/脚本）探测目标项目既有 `.codex/` 或 `.claude/`，均无则默认 Claude Code。
+安装器默认面向 **Claude Code**（行为不变）。目标平台按以下顺序确定：
+
+1. **显式指定**：`--platform <claude-code|codex>` 优先（无头/CI 兼容）。
+2. **交互选择**：在交互式终端（有 TTY）运行且未指定 `--platform` 时，会提示选择——`1) Claude Code（默认） 2) Codex`，回车取默认；若目标项目已探测到 `.codex/` 或 `.claude/` 痕迹，默认推荐对应平台。
+3. **自动探测**：无 TTY（CI/脚本/管道）时按目标项目既有 `.codex/`（优先）或 `.claude/` 探测。
+4. **默认兜底**：两者皆无 → Claude Code。
 
 | 平台 | 技能 | 编排规则 | 写入守卫 hook |
 |------|------|----------|---------------|

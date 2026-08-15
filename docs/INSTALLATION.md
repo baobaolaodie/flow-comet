@@ -29,6 +29,8 @@ node scripts/prepare-env.mjs --target <absolute path to target project>         
 node scripts/prepare-env.mjs --target <absolute path to target project> --platform codex   # Codex
 ```
 
+On an interactive terminal, the first run prompts for the platform (press Enter for the default, Claude Code; if the target project already has platform traces, that platform is the recommended default); for Codex, add `--platform codex` (see the selection chain under [Platforms](#platforms)).
+
 `prepare-env` does:
 
 1. **Generates/overwrites `rules/` and `skills/`** — all flow-comet* skills, from the authoritative source `.comet/bundle-drafts/flow-comet/`
@@ -49,7 +51,12 @@ node scripts/prepare-env.mjs --target <absolute path to target project> --purge 
 
 ### Platforms
 
-The installer targets **Claude Code** by default (unchanged behavior). The target platform is chosen as follows: an explicit `--platform <claude-code|codex>` wins; otherwise, on an interactive terminal you are asked to pick; in non-interactive environments (CI, scripts) an existing `.codex/` or `.claude/` in the target project is detected, falling back to Claude Code.
+The installer targets **Claude Code** by default (unchanged behavior). The target platform is chosen in this order:
+
+1. **Explicit flag**: `--platform <claude-code|codex>` always wins (headless/CI compatible).
+2. **Interactive prompt**: when run on an interactive terminal (TTY) without `--platform`, the installer prompts — `1) Claude Code (default) 2) Codex`; press Enter to accept the default. If the target project already has `.codex/` or `.claude/` traces, the corresponding platform is the recommended default.
+3. **Auto-detection**: without a TTY (CI, scripts, pipelines), an existing `.codex/` (preferred) or `.claude/` in the target project is detected.
+4. **Fallback**: if neither exists, Claude Code is used.
 
 | Platform | Skills | Orchestration rule | Write-guard hook |
 |----------|--------|--------------------|-------------------|

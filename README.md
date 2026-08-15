@@ -52,7 +52,9 @@ cd <flow-comet repo>
 node scripts/prepare-env.mjs --target <absolute path to your project>
 ```
 
-By default the installer targets Claude Code (unchanged behavior). For Codex: `node scripts/prepare-env.mjs --target <path> --platform codex` — skills install to `.agents/skills/` (auto-discovered), orchestration rules are injected into an `AGENTS.md` managed block, and the write-guard hook intercepts Bash write commands via Codex's PreToolUse (trust the hook on first use: `/hooks`). The platform can also be chosen interactively on a terminal (TTY); in non-interactive environments (CI/scripts) an existing `.claude/` / `.codex/` in the target project is detected, falling back to Claude Code.
+On an interactive terminal, the first run prompts for the platform (press Enter for the default, Claude Code); for Codex, add `--platform codex`.
+
+By default the installer targets Claude Code (unchanged behavior). For Codex: `node scripts/prepare-env.mjs --target <path> --platform codex` — skills install to `.agents/skills/` (auto-discovered), orchestration rules are injected into an `AGENTS.md` managed block, and the write-guard hook intercepts Bash write commands via Codex's PreToolUse (trust the hook on first use: `/hooks`). When run on an interactive terminal (TTY) without `--platform`, the installer prompts for the target platform (default Claude Code — press Enter to accept; if the target project already has platform traces, that platform is the recommended default); without a TTY (CI/scripts) an existing `.claude/` / `.codex/` in the target project is detected, falling back to Claude Code.
 
 ```bash
 # 2. Open your project in a new Claude Code session and run:
