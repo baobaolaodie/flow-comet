@@ -35,7 +35,7 @@ This node finalizes a completed change by extracting reusable lessons from the d
 3. **Add qualifying lessons to LESSONS.md**: For each nominated lesson:
    - Assign next `L-NNN` number (continuing from existing).
    - Fill required fields: label, keywords, applicable tech stack, status (active).
-   - Save to `.specs/LESSONS.md` — 新条目插入 `## 条目区` 内**按 L-NNN 编号顺序**（继续现有编号），**禁止文件尾追加**。
+   - Save to `.specs/LESSONS.md` — 新条目编号 = 当前最大编号 + 1,插入 `## 条目区` 末尾(文件内升序,继续现有编号),**禁止文件尾追加与乱序插入**。
    - **Do NOT archive LESSONS.md** — it is a project-level permanent file that accumulates across changes.
 
 4. **Check existing lessons for superseded/deprecated**: Scan existing active lessons in `.specs/LESSONS.md`. If this change's lessons or outcomes supersede or deprecate existing entries, update their status accordingly.

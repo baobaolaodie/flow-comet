@@ -65,7 +65,7 @@ Division of labor: `execute` node handles serial delegation (non-parallel tasks,
 
 1. **Identify parallel tasks**: Read TASK.md and find all tasks with `parallel="true"` and `status="pending"`. Verify they are genuinely independent (no file conflicts between them — check `write_files` do not overlap).
 
-2. **For each parallel task, create handoff request**: Use `workflow-handoff.mjs request <task-id>` to register the handoff.
+2. **For each parallel task, create handoff request**: Use `workflow-handoff.mjs request <task-id>` to register the handoff. **委托即记 request**——直接记录 result 而无对应 request 时,write_files 允许列表为空会被 BLOCKED(新 change 强制委托边界),补 request 后再重录 result 即可。
    > 若不传 `--write-files`，脚本会自动从 TASK.md 对应 task 的 `<write_files>` 块解析（orchestrator 无需手动从 TASK.md 提取文件列表）。
    The handoff prompt must include:
    - The task's full XML block from TASK.md.

@@ -60,7 +60,7 @@ guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好�
    - Error is not task-specific, other tasks would hit it too -> nominate.
    - Reasonable probability of retry within 6 months -> nominate.
    - Otherwise do not nominate (avoid pollution).
-   - Add qualifying lessons to `.specs/LESSONS.md` with next L-NNN number — 新条目插入 `## 条目区` 内**按 L-NNN 编号顺序**（继续现有编号），**禁止文件尾追加**.
+   - Add qualifying lessons to `.specs/LESSONS.md` with next L-NNN number — 新条目编号 = 当前最大编号 + 1,插入 `## 条目区` 末尾(文件内升序,继续现有编号),**禁止文件尾追加与乱序插入**.
    - Check existing active lessons for superseded/deprecated status.
 
 The full verification protocol, UAT format, and failure diagnosis are in:
