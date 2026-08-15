@@ -527,8 +527,12 @@ const TEST_ITEMS = [
       assertExit(missingVal, 1);
       assertOut(missingVal, '--json-file requires a path argument');
       if (missingVal.output.includes('ERR_INVALID_ARG_TYPE')) {
-        throw new Error('--json-file 缺值不应报内部 TypeError');
+        throw new Error('--json-file 缺值不应报类型错误');
       }
+      // --json-file 空串(--json-file= 形式)→ 同样用法错误(修复前解析为项目根报 EISDIR)
+      const emptyVal = runState(['record', 'open', '--json-file='], dir);
+      assertExit(emptyVal, 1);
+      assertOut(emptyVal, '--json-file requires a path argument');
     },
   },
 
@@ -918,6 +922,24 @@ const TEST_ITEMS = [
       const missingVal = runHandoff(['result', 'T07', '--json-file'], dir);
       assertExit(missingVal, 1);
       assertOut(missingVal, '--json-file requires a path argument');
+      // ⑨b --json-file 空串(--json-file= 形式)→ 同样用法错误(修复前解析为 runRoot 报 EISDIR)
+      const emptyVal = runHandoff(['result', 'T07', '--json-file='], dir);
+      assertExit(emptyVal, 1);
+      assertOut(emptyVal, '--json-file requires a path argument');
+      // ⑪ 部分通配负例:allowed=[src/*.mjs] 不得匹配 src/b.ts(段内正则锚定,
+      // 扩展名不匹配 → 新 change BLOCKED;若实现放宽为任意匹配即 RED)
+      writeFile(dir, 'src/b.ts', 'export const b = 1;\n');
+      execFileSync('git', ['add', 'src/b.ts'], { cwd: dir });
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'chore: b.ts'], { cwd: dir });
+      const bHash = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+      assertExit(runHandoff(['request', 'T08', '--write-files', 'src/*.mjs'], dir), 0);
+      const resGlobNeg = runHandoff(['result', 'T08', JSON.stringify({
+        status: 'DONE', taskId: 'T08', commitHash: bHash,
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        greenEvidence: { command: 'echo ok', output: 'ok' },
+      })], dir);
+      assertExit(resGlobNeg, 1);
+      assertOut(resGlobNeg, '超出 writeFiles 范围');
       // ⑩ 部分段通配:allowed=[src/*.mjs] 应匹配提交 src/a.mjs → 无越界(修复前
       // 段内 glob 被字面比较,新 change 误 BLOCKED——此处应 RED)
       writeFile(dir, 'src/a.mjs', 'export const a = 1;\n');

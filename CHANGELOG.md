@@ -54,6 +54,10 @@ Multi-platform installer framework, platform modularization, and real-artifact e
 - Review field-label exemption matches full labels only (a finding titled like "Source maps expose paths" is no longer mis-exempted from disposition validation).
 - `--json-file` reads are restricted to paths inside the project root (record and handoff).
 - The hook installer fails explicitly when POSIX executable bits cannot be set (previously silent — git would skip non-executable hooks).
+- Delegation writeFiles matching supports partial-segment globs (e.g. `src/*.mjs`) with anchored per-segment matching — `*` never crosses `/` and literal segments stay exact (previously a partial glob was compared literally and blocked valid delegations).
+- `--json-file` with a missing or empty value now reports a usage error instead of an internal type error (record and handoff).
+- Stale scenario-count references (136) in the suite headers and the test-matrix / known-issues templates are synced to 137.
+- PowerShell output-encoding guidance uses the explicit `[System.Text.Encoding]::UTF8` expression (bilingual).
 
 ## [1.3.1] - 2026-08-11
 
