@@ -161,7 +161,7 @@ test: BOM-tolerance scenarios — state/evidence files with UTF-8 BOM parse norm
 - **Through the flow-comet workflow**: `init` creates the branch for you — specify the matching prefix:
 
 ```bash
-# Authoritative-source path (development); installed copies: CC .claude/skills/ / Codex .agents/skills/
+# Authoritative-source path (development); installed copies: Claude Code .claude/skills/ / Codex .agents/skills/
 node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix feat/   # feature work
 node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix fix/    # bug fixes
 node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix docs/   # documentation

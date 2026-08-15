@@ -16,6 +16,7 @@
 | `WARN: CONTEXT.md 检测到孤立追加段` | 术语/决策被尾部追加成新段 | 把内容移入术语表表格/已锁决策清单 |
 | `WARN: LESSONS.md 条目编号乱序/区外` | 新条目未按 L-NNN 插入条目区 | 按编号插入 `## 条目区`（或 `## 活跃条目`） |
 | `WARN: CHANGELOG.md 非倒序` | 新变更日志条目追加在表格尾部而非顶部 | 表格顶部按日期倒序插入（新条目永远在最新日期行之上） |
+| `WARN: CHANGELOG.md 未登记本 change(<id>)` | 归档收尾未在 CHANGELOG 顶部登记本 change 条目（渐进提示，新旧 change 一致） | 在 CHANGELOG 顶部插入本 change 条目（跟随项目既有格式） |
 | `WARN: STATE.md 决策日志非倒序` | 新决策日志条目追加在尾部 | 顶部插入（倒序约定），禁止文件尾追加 |
 | `WARN: PROGRESS.md 存在（恢复警告）` | 恢复时残留任务中途清窗快照 | 读取「已排除方案」段避免重复失败（R1.6），完成后删除 |
 | `BROOKS-LINT WARN: 使用 builtin-quickcheck 未声明原因` | SUMMARY 缺"插件不可用"说明 | 在 SUMMARY 的 `## 自检方法` 段补原因 |
@@ -31,6 +32,7 @@
 | `ROUTE WARN: 未找到 parallel="true" status="pending" 的任务块` | TASK.md task 标签缺 `status="pending"` 属性（或属性顺序错） | 在每个 task 标签中 `parallel="true"` 之后补 `status="pending"`（属性顺序：parallel 在 status 前） |
 | `C4-CHECK SKIP: <原因>` | worktree 脏检查被跳过（非 git 仓库，或 git 命令失败） | 非 git 项目下属预期；git 仓库中出现则 git 命令失败——按原因排查 |
 | `WARN COUNT: N` | entry/exit 汇总行——本次调用共 N 条 WARN | 逐条检查该行上方的 WARN |
+| `--json-file requires a path argument` | `--json-file` 缺路径参数（如作为最后一个参数）或为空值（record 与 handoff 统一用法错误） | 补路径参数：`--json-file <文件>`（Windows PowerShell 下推荐用 `--json-file` 从文件读 JSON，规避引号剥离） |
 | `Unexpected token ... is not valid JSON`（state） | state 文件带 UTF-8 BOM 或内容损坏 | 重写 state 文件（无 BOM；脚本自 1.2.1 起容忍 BOM） |
 | `BLOCKED: 节点 <node> 未执行 entry 直接 exit`（新 change）/ `ENTER WARN: 节点 <node> 未执行 entry 直接 exit`（旧 change） | 节点未 entry 直接 exit——entry 的进入检查(协调者禁令/委托前 commit 检查/签名记录)被跳过(新 change BLOCKED;旧 change WARN) | 先运行 `workflow-guard.mjs entry <node>` 再 exit |
 | `BLOCKED: done 任务 <id> 缺少 <id>-SUMMARY.md` | 已完成任务缺对应 SUMMARY(新 change 强制;旧 change 渐进 WARN) | 补写 `<id>-SUMMARY.md` 后再 exit |

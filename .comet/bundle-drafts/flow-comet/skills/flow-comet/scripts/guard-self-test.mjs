@@ -2428,7 +2428,12 @@ const SCENARIOS = [
         try {
           text = fs.readFileSync(path.join(repoRoot, rel), 'utf8');
         } catch (e) {
-          if (e.code === 'ENOENT') continue; // 文件不存在跳过（与底部自检一致）
+          // CLAUDE.md 为主仓私有指导文件——缺失时显式 FAIL(防「22 文件」承诺名不副实,
+          // 与底部自检一致);其余文件缺失静默跳过(历史兼容)
+          if (e.code === 'ENOENT' && rel === 'CLAUDE.md') {
+            throw new Error('CLAUDE.md 缺失——主仓私有指导文件缺失时自检显式 FAIL');
+          }
+          if (e.code === 'ENOENT') continue;
           throw e;
         }
         const ok = text.includes('ALL ' + n + ' SCENARIOS PASSED')
@@ -3286,7 +3291,12 @@ if (isAuthoritativeSource) {
         || text.includes(n + '/' + n);
       if (!ok) throw new Error(rel + ' 场景数未同步（应为 ' + n + '）');
     } catch (e) {
-      if (e.code !== 'ENOENT') {
+      // CLAUDE.md 为主仓私有指导文件——缺失时显式 FAIL(防「22 文件」承诺名不副实);
+      // 其余文件缺失静默跳过(历史兼容)
+      if (e.code === 'ENOENT' && rel === 'CLAUDE.md') {
+        failures.push({ name: '场景数一致性(' + rel + ')', error: rel + ' 缺失——主仓私有指导文件缺失时自检显式 FAIL' });
+        console.error('FAIL: 场景数一致性(' + rel + ')\n' + rel + ' 缺失——主仓私有指导文件缺失时自检显式 FAIL');
+      } else if (e.code !== 'ENOENT') {
         failures.push({ name: '场景数一致性(' + rel + ')', error: e.message });
         console.error('FAIL: 场景数一致性(' + rel + ')\n' + e.message);
       }

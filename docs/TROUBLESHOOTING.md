@@ -16,6 +16,7 @@
 | `WARN: CONTEXT.md 检测到孤立追加段` | terms/decisions appended as a new tail section | move content into the glossary table / locked-decision list |
 | `WARN: LESSONS.md 条目编号乱序/区外` | new entry not inserted by L-NNN in the entries section | insert by number into `## 条目区` (or `## 活跃条目`) |
 | `WARN: CHANGELOG.md 非倒序` | new change-log entry appended at the bottom instead of the top | insert at the top of the table, newest date first |
+| `WARN: CHANGELOG.md 未登记本 change(<id>)` | archive wrap-up did not register this change in the project CHANGELOG (progressive, new and legacy changes alike) | insert a CHANGELOG entry for this change at the top (follow the project's existing format) |
 | `WARN: STATE.md 决策日志非倒序` | new decision-log entry appended at the bottom | insert at the top (reverse-chronological), never append at the tail |
 | `WARN: PROGRESS.md 存在（恢复警告）` | a mid-task context-window snapshot remains on resume | read its "excluded solutions" section to avoid repeating failures (R1.6), then delete it after completion |
 | `BROOKS-LINT WARN: 使用 builtin-quickcheck 未声明原因` | SUMMARY missing "plugin unavailable" note | add the reason in SUMMARY's `## 自检方法` |
@@ -31,6 +32,7 @@
 | `ROUTE WARN: 未找到 parallel="true" status="pending" 的任务块` | TASK.md task tags lack the `status="pending"` attribute (or wrong attribute order) | add `status="pending"` after `parallel="true"` in each task tag (attribute order matters: parallel before status) |
 | `C4-CHECK SKIP: <reason>` | worktree dirty-check skipped (not a git repo, or git command failed) | expected in non-git projects; if it appears in a git repo, the git command failed — check the reason |
 | `WARN COUNT: N` | summary line on entry/exit — N warns were emitted this call | review each WARN above this line |
+| `--json-file requires a path argument` | `--json-file` is missing its path argument (e.g. used as the last argument) or empty (record and handoff share this usage error) | provide a path: `--json-file <file>` (on Windows PowerShell, prefer `--json-file` to read the JSON payload from a file and avoid quote stripping) |
 | `Unexpected token ... is not valid JSON` (state) | state file carries a UTF-8 BOM or corrupted content | rewrite the state file without BOM (scripts tolerate BOM since 1.2.1) |
 | `BLOCKED: 节点 <node> 未执行 entry 直接 exit`（新 change）/ `ENTER WARN: 节点 <node> 未执行 entry 直接 exit`（旧 change） | the node was exited without entering it first — entry checks (coordinator prohibition / pre-delegation commit check / signature recording) were skipped (new changes: BLOCKED; legacy: WARN) | run `workflow-guard.mjs entry <node>` first, then exit |
 | `BLOCKED: done 任务 <id> 缺少 <id>-SUMMARY.md` | a completed task lacks its summary (new changes enforced; legacy changes warn progressively) | produce the matching `<id>-SUMMARY.md` before exiting |

@@ -58,6 +58,8 @@ Multi-platform installer framework, platform modularization, and real-artifact e
 - `--json-file` with a missing or empty value now reports a usage error instead of an internal type error (record and handoff).
 - Stale scenario-count references (136) in the suite headers and the test-matrix / known-issues templates are synced to 137.
 - PowerShell output-encoding guidance uses the explicit `[System.Text.Encoding]::UTF8` expression (bilingual).
+- The archive-stage hook whitelist includes `.specs/<change-id>/` so the leftover-issues list can be written into the change directory before archiving (previously blocked).
+- Archive exit warns when the project CHANGELOG has no entry for the change being archived (progressive, both new and legacy changes).
 
 ## [1.3.1] - 2026-08-11
 

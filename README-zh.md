@@ -139,7 +139,7 @@ graph LR
 
 ## 真实运行产物展示
 
-一次完整 8 节点运行的全部流程工件见 [docs/examples/processor-pipeline](docs/examples/processor-pipeline/)——真实归档的 change（e2e 假项目，2026-08-13）：CHANGE / REQUIREMENT / DESIGN / TASK / 六段 SUMMARY / 带处置标记的 REVIEW / TEST / UAT / KNOWN-ISSUES / skill-load 声明标记。
+一次完整 8 节点运行的全部流程工件见 [docs/examples/processor-pipeline](docs/examples/processor-pipeline/)——真实归档的 change（端到端测试项目，2026-08-13）：CHANGE / REQUIREMENT / DESIGN / TASK / 六段 SUMMARY / 带处置标记的 REVIEW / TEST / UAT / KNOWN-ISSUES / skill-load 声明标记。
 
 ```
 processor-pipeline/            （归档 change，完整产物集）
@@ -206,6 +206,8 @@ flow-comet/
 | [版本](docs/VERSIONS-zh.md) | SemVer 策略、兼容性 |
 | [产物示例](docs/examples/) | 全流程工件示例 |
 | [变更日志](CHANGELOG-zh.md) | 版本历史（Keep a Changelog） |
+| [安全](SECURITY-zh.md) | 如何报告漏洞 |
+| [行为准则](CODE_OF_CONDUCT-zh.md) | 社区准则 |
 
 ## 贡献
 

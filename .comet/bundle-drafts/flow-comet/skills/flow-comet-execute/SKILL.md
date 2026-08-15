@@ -57,6 +57,7 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 - `.specs/LESSONS.md` must exist (or be created from template if missing).
 - For frontend/UI tasks: `.specs/<change-id>/UI-DESIGN.md` must exist.
 - 若 `.specs/<change>/PROGRESS.md` 存在，必须先读取"已排除方案"段（R1.6 反重复），确认当前计划不在排除列表中。完成后删除 PROGRESS.md，有用信息迁移至 SUMMARY。
+- 委托前按 `reference/dirty-worktree.md` 检查脏工作树（`.specs/<change-id>/` 未提交工件会触发 entry execute 的 WORKTREE WARN；verify 前为自查建议，无 guard 检查）。
 
 ### Steps（subagent 模式 · 协调者流程，统一委托子代理）
 

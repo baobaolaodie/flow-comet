@@ -32,7 +32,7 @@ flow-kit is a **pure-markdown methodology package** (not a tool — "clone it in
 
 ### What flow-comet deliberately does not absorb
 
-- **PROGRESS.md / STATE.md files**: their semantics (context-window snapshot, cross-session state) are replaced by the state machine — flow-comet-dev explicitly states "TASK.md status + SUMMARY.md are the progress"
+- **PROGRESS.md / STATE.md files**: cross-session state tracking is replaced by the state machine — flow-comet-dev explicitly states "TASK.md status + SUMMARY.md are the progress"; a temporary context-window snapshot (`<task-id>-PROGRESS.md`) remains for mid-task recovery and is deleted on completion
 - **Side commands**: only evolve/health exist as separate skills; intel-scan/architect-style commands are not ported
 - **Multi-IDE adapter layer** (`.windsurfrules`/`.cursorrules` installation paths)
 - **Token budget tables** (flow-kit's cost modeling is not inherited)

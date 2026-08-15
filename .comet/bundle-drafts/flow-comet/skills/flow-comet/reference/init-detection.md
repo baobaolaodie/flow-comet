@@ -29,7 +29,7 @@ workflow-state.mjs init <change-id> [--init-context | --init-skip]
 
 - **职责拆分**：脚本只做确定性部分——探测 / 判决 / 提示 / 7 段结构校验 / `last_intel_scan` 写入；**生成由 agent 执行**（intel-scan 全量阅读语义，脚本不做智能整合）
 - **生成流程**：`--init-context` 且 CONTEXT 缺失 → 脚本输出 `INIT-GENERATE` 指引（源文档列表 + 代码信号）→ agent 全量阅读既有文档与代码，生成 `.specs/CONTEXT.md` → 重跑 `init <id> --init-context` → 脚本校验 7 段 → 通过输出 `INIT-DONE` 并写 `last_intel_scan`；缺段输出 `INIT-VALIDATE-FAILED`（不写扫描时间，补全后重跑）
-- `.specs/CONTEXT.md`：项目概要 / 技术栈 / 域语言 / 已锁决策 / 默认偏好 / 既有抽象索引 / 扫描元数据 七段（模板对齐）
+- `.specs/CONTEXT.md`：项目概要 / 技术栈 / 域语言 / 已锁决策 / 默认偏好 / 既有抽象索引 / intel-scan 元数据 七段（模板对齐）
 - 既有文档整合（agent 执行）：关键决策映射进对应段，出处标注 `来自 <文档>:<行号>`；文件顶部「源文档」段列出引用；**既有文档本身不改动**；既有 CONTEXT 的累积术语/决策在刷新时保留（跨 change 长期累积语义）
 - 代码探测（agent 执行）：依赖文件识别（package.json 等 → 技术栈）、常见目录探测（抽象索引）
 - 成本：约 15-30k tokens（仅首次；提示中如实告知）
@@ -55,4 +55,4 @@ workflow-state.mjs init <change-id> [--init-context | --init-skip]
 - 不新增命令（init 的参数扩展）；无参数行为 = 原行为 + 检测提示
 - 已存在 CONTEXT.md 的项目（90 天内）完全静默，行为零变化
 - 生成文件位于 `.specs/`（流程工件目录），既有文档零写入
-- **空仓库（无提交）**：init 输出 `INIT EMPTY-REPO WARN`（分支创建不可行，跳过分支创建，纯文件模式继续；`BRANCH: none` 如实输出）——与上下文检测独立，属分支创建边界（M8）。无安装副本的仓库会先命中协议路径防御（"workflow protocol file must stay inside the project root"），属预期防护
+- **空仓库（无提交）**：init 输出 `INIT EMPTY-REPO WARN`（分支创建不可行，跳过分支创建，纯文件模式继续；`BRANCH: none` 如实输出）——与上下文检测独立，属分支创建边界。无安装副本的仓库会先命中协议路径防御（"workflow protocol file must stay inside the project root"），属预期防护

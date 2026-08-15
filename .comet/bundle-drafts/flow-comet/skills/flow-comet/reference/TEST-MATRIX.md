@@ -84,7 +84,7 @@
 
 测试项（6）：K1 安装器版本标识 / K2 codex 平台安装冒烟（技能/路径替换/hooks.json/AGENTS 托管区 + 非法 hooks.json fail-safe）/ K3 hook 平台分支 JSON 契约 + CC 分支不变 / K4 平台选择链（显式/无 TTY 探测/默认/未知平台拒绝）/ K5 purge 语义（缺 --yes 拒绝/重建/用户内容保留）/ K6 平台描述符驱动（全平台安装冒烟 + main 统一调度断言）。
 
-### L. 执行遗漏防护（M1~M8 真实链路）
+### L. 执行遗漏防护（真实链路）
 
 覆盖：进入证据（entry 记录 enteredNodes、正常流程 exit 无误报——真实链路中节点顺序检查先于进入警告，未 entry 场景由引擎回归覆盖）、空退出豁免（显式 emptyExitApproved 通过 / 无豁免仍拦截）、空仓库提示（init 在无提交仓库输出 EMPTY-REPO）。
 
@@ -92,7 +92,7 @@
 
 ## 四、附：design 节点 required 自指核验结论
 
-**核验对象**：`workflow-protocol.json` 的 design 节点——`requiredSkillCalls` 含与 `implementation` 相同的技能（自指），对照 open / review 两模式核验（本批次遗留核验项）。
+**核验对象**：`workflow-protocol.json` 的 design 节点——`requiredSkillCalls` 含与 `implementation` 相同的技能（自指），对照 open / review 两模式核验（遗留核验项）。
 
 **三模式对照**：
 

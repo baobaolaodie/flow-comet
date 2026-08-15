@@ -16,6 +16,7 @@ docs/internal/
 
 flow-kit/
 
+# 主仓私有指导文件（含内部文档入口/批次纪律等主仓私有细节,不随发布分发——与公开 CONTRIBUTING 互补;guard-self-test 对缺失显式 FAIL 保证「22 文件自检」名实相符）
 CLAUDE.md
 # 本地测试集（验证阶梯工具，不随发布分发）
 scripts/reset-dogfood.mjs

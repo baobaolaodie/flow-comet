@@ -49,4 +49,4 @@ Codex 环境的子代理(spawn_agent)无 `isolation:"worktree"` 参数——自�
 
 - **子代理 worktree 从 change 分支分出**：`isolation: "worktree"` 基于**当前分支**（change/<id>）快照创建，子代理看到的是该分支内容——委托前必须 commit 上游工件，否则子代理看不到未提交改动（同第 3 节规避方式）
 - **协调者产物提取路径不变**：仍用 `git show <branch>:<path>` 从 worktree 取回产物，`<branch>` 此时是 `change/<id>`（可用 `git ls-tree change/<id> <path>` 确认存在）
-- **分支模式下归档前必须已切回主分支**：归档收尾在 main 上执行（`git checkout main && git merge change/<id>`）；entry archive 校验当前分支 = `change/<id>`，**合并前不得提前切走**，合并完成后 `git branch -d change/<id>` 删除分支
+- **分支模式下归档全程在 change/<id> 分支上执行**：entry/exit archive 校验当前分支 = `change/<id>`（提前切走会被 BLOCKED）；**归档 exit 完成后**再做合并收尾——切到默认分支（先探测，不假设 main，如 e2e 项目是 master）`git checkout <默认分支> && git merge change/<id>`，合并完成后 `git branch -d change/<id>` 删除分支

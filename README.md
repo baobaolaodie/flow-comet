@@ -125,7 +125,7 @@ The engine routes between nodes by deriving state from `.specs/` artifacts (dete
 | Discipline enforcement | Rules are markdown text the model may ignore | Three defense layers: write whitelist physically blocks out-of-scope writes / coordinator prohibition / exit takeover detection |
 | Recovery | Depends on conversation memory; progress is lost across sessions | File-as-truth: re-derive the node from `.specs/` and auto-correct state; any session resumes correctly |
 | Parallel implementation | Humans coordinate multiple windows, easy to overstep | Subagents implement in isolated worktrees (coordinators cannot write source) and must return a verified contract (commit hash + evidence) |
-| Decision burden | A confirmation point at every stage, humans answer everything | Decisions classified into four kinds; humans only intervene at key points (scope, tech stack, breaking changes, review findings, archive) |
+| Decision burden | A confirmation point at every stage, humans answer everything | Decisions are classified (user-decided / auto-handled / stop conditions / manual handover); humans only intervene at key points (scope, tech stack, breaking changes, review findings, archive) |
 
 ### Why pick flow-comet
 
@@ -139,7 +139,7 @@ The engine routes between nodes by deriving state from `.specs/` artifacts (dete
 
 ## Real-run artifacts
 
-A complete 8-node run produces the full artifact trail shown in [docs/examples/processor-pipeline](docs/examples/processor-pipeline/) — a real archived change (e2e fake project, 2026-08-13): CHANGE / REQUIREMENT / DESIGN / TASK / six-section summaries / REVIEW with disposition markers / TEST / UAT / KNOWN-ISSUES / skill-load declaration markers.
+A complete 8-node run produces the full artifact trail shown in [docs/examples/processor-pipeline](docs/examples/processor-pipeline/) — a real archived change (end-to-end test project, 2026-08-13): CHANGE / REQUIREMENT / DESIGN / TASK / six-section summaries / REVIEW with disposition markers / TEST / UAT / KNOWN-ISSUES / skill-load declaration markers.
 
 ```
 processor-pipeline/            (archived change, full artifact set)
@@ -206,6 +206,8 @@ flow-comet/
 | [Versions](docs/VERSIONS.md) | SemVer policy, compatibility |
 | [Examples](docs/examples/) | Full workflow artifact examples |
 | [Changelog](CHANGELOG.md) | Version history (Keep a Changelog) |
+| [Security](SECURITY.md) | How to report vulnerabilities |
+| [Code of Conduct](CODE_OF_CONDUCT.md) | Community guidelines |
 
 ## Contributing
 

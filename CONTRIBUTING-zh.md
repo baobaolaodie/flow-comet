@@ -161,8 +161,7 @@ test: BOM 容忍场景——带 UTF-8 BOM 的 state/evidence 文件正常解析
 - **经 flow-comet 工作流开发**：`init` 自动建分支——指定匹配的前缀：
 
 ```bash
-# 权威源路径（开发态）；安装副本路径随平台：CC .claude/skills/ / Codex .agents/skills/
-
+# 权威源路径（开发态）；安装副本路径随平台：Claude Code .claude/skills/ / Codex .agents/skills/
 node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix feat/   # 功能开发
 node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix fix/    # bug 修复
 node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix docs/   # 文档
