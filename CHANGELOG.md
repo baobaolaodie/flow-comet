@@ -12,7 +12,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [1.4.0] - 2026-08-14
 
-Multi-platform installer framework, platform modularization, and real-artifact examples. ([#45](https://github.com/baobaolaodie/flow-comet/pull/45), [#46](https://github.com/baobaolaodie/flow-comet/pull/46), [#47](https://github.com/baobaolaodie/flow-comet/pull/47), [#48](https://github.com/baobaolaodie/flow-comet/pull/48), [#50](https://github.com/baobaolaodie/flow-comet/pull/50), [#51](https://github.com/baobaolaodie/flow-comet/pull/51))
+Multi-platform installer framework, platform modularization, and real-artifact examples. ([#45](https://github.com/baobaolaodie/flow-comet/pull/45), [#46](https://github.com/baobaolaodie/flow-comet/pull/46), [#47](https://github.com/baobaolaodie/flow-comet/pull/47), [#48](https://github.com/baobaolaodie/flow-comet/pull/48), [#50](https://github.com/baobaolaodie/flow-comet/pull/50), [#52](https://github.com/baobaolaodie/flow-comet/pull/52))
 
 ### Added
 

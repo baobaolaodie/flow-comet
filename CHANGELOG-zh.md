@@ -12,7 +12,7 @@
 
 ## [1.4.0] - 2026-08-14
 
-多平台安装器框架、平台模块化与真实产物示例。([#45](https://github.com/baobaolaodie/flow-comet/pull/45)、[#46](https://github.com/baobaolaodie/flow-comet/pull/46)、[#47](https://github.com/baobaolaodie/flow-comet/pull/47)、[#48](https://github.com/baobaolaodie/flow-comet/pull/48)、[#50](https://github.com/baobaolaodie/flow-comet/pull/50)、[#51](https://github.com/baobaolaodie/flow-comet/pull/51))
+多平台安装器框架、平台模块化与真实产物示例。([#45](https://github.com/baobaolaodie/flow-comet/pull/45)、[#46](https://github.com/baobaolaodie/flow-comet/pull/46)、[#47](https://github.com/baobaolaodie/flow-comet/pull/47)、[#48](https://github.com/baobaolaodie/flow-comet/pull/48)、[#50](https://github.com/baobaolaodie/flow-comet/pull/50)、[#52](https://github.com/baobaolaodie/flow-comet/pull/52))
 
 ### 新增
 
