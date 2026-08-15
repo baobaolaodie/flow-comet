@@ -22,12 +22,12 @@ open → design → plan → execute ⇄ subagent-execute → review → verify 
 |------|------|---------|------------------|
 | **open** | CHANGE 反问 + 需求分析（AC 推导） | `CHANGE.md` / `REQUIREMENT.md` / CONTEXT 术语更新 | 必填段（模板派生）：`## Why` / `## 用户故事` / 验收段；CONTEXT 孤立追加段检测 |
 | **design** | 技术栈选型 + 架构对齐 + 决策 | `DESIGN.md`（§0 技术栈 / §0.5 架构对齐 / 决策清单 / 风险） | §0 段 + `## 决策清单`（模板派生，支持编号） |
-| **plan** | 原子任务拆分（XML）+ 波次划分 | `TASK.md`（`<task>` 块含 7 字段 + parallel 标记） | task 块存在 + verify 字段；TASK 签名哈希（enter 记录） |
-| **execute** | 串行任务执行（协调者委托子代理） | `<task-id>-SUMMARY.md` | SUMMARY 六段 + 6 维自查 + 强制 `## 自检方法`；TASK 签名比对；越俎代庖检测 |
+| **plan** | 原子任务拆分（XML）+ 波次划分 | `TASK.md`（`<task>` 块含 7 字段 + parallel 标记） | task 块存在 + verify 字段 |
+| **execute** | 串行任务执行（协调者委托子代理） | `<task-id>-SUMMARY.md` | SUMMARY 六段 + 6 维自查 + 强制 `## 自检方法`；TASK 签名哈希（enter 记录、exit 比对）；越俎代庖检测 |
 | **subagent-execute** | parallel 任务并行委托（wave） | 同上（每任务一份 SUMMARY） | 同上 + handoff evidence（Return Contract） |
 | **review** | 4 轮审查（spec 合规 / 代码质量 / UI 视觉 / 可选） | `REVIEW.md`（Critical/发现/结论） | ≥100B + 必填段 |
-| **verify** | 集成验证 + UAT + 失败诊断（≤3 轮） | `TEST.md` / `UAT.md` / LESSONS 提名 | 验证命令真实执行；UAT 必填段；LESSONS 编号/位置检测 |
-| **archive** | LESSONS 提名 + 归档 + 分支收尾 | `.specs/archive/<date>-<id>/` / CHANGELOG | 分支校验（新模式）；CHANGELOG 倒序检测 |
+| **verify** | 集成验证 + UAT + 失败诊断（≤3 轮） | `TEST.md` / `UAT.md` / LESSONS 提名 | 验证命令真实执行；UAT.md 存在；LESSONS 编号/位置检测 |
+| **archive** | LESSONS 提名 + 归档 + 分支收尾 | `.specs/archive/<date>-<id>/` / CHANGELOG | 分支校验（新模式）；CHANGELOG 倒序检测 + 未登记本 change 提示 |
 
 ## 工件体系
 
@@ -40,7 +40,7 @@ open → design → plan → execute ⇄ subagent-execute → review → verify 
 | `DESIGN.md` | change 目录 | 技术决策（§0 技术栈/§0.5 架构对齐/决策清单/风险） | design |
 | `TASK.md` | change 目录 | 原子任务（XML 7 字段 + parallel 标记 + 波次划分） | plan |
 | `<task-id>-SUMMARY.md` | change 目录 | 每任务完成报告（六段：做了什么/改动文件/verify 输出/6 维自查/越界检查/自检方法） | execute / subagent-execute |
-| `<task-id>-PROGRESS.md` | change 目录 | 任务中途清窗快照（临时，恢复后删除） | execute（临时） |
+| `<task-id>-PROGRESS.md` | change 目录 | 任务中途清窗快照（临时，完成后删除，有用信息迁移至 SUMMARY） | execute（临时） |
 | `TEST.md` | change 目录 | 5 轮测试金字塔 + 验证命令 + UAT 脚本 | review |
 | `REVIEW.md` | change 目录 | 审查报告（Critical/发现/结论） | review |
 | `UAT.md` | change 目录 | 验收结果（每项 pass/fail） | verify |
@@ -55,7 +55,7 @@ open → design → plan → execute ⇄ subagent-execute → review → verify 
 
 以下分支操作均由 Claude 在 skill 协议下**自动执行**（无需手动 git）：
 
-- 首次 `/flow-comet` 调用自动创建 `change/<change-id>` 分支（git 仓库时），全流程在分支上进行；分支前缀可配置（`init --branch-prefix <prefix>`，如 `feat/`，须以 `/` 结尾，默认 `change/`）
+- 首次 `/flow-comet` 调用自动创建 `change/<id>` 分支（git 仓库时），全流程在分支上进行；分支前缀可配置（`init --branch-prefix <prefix>`，如 `feat/`；缺尾部 `/` 时自动补，默认 `change/`）
 - 归档时收尾：自动合并回主分支 + 删除分支（`enablePrReview=true` 时先推送 + PR；**merge 前暂停等你确认**）
 - 分支-状态一致性：`status`/`next` 检测分支与 activeChange 不符 → WARN（不 BLOCK）
 - **向后兼容**：无分支的旧 change 照常运行（分支校验仅新模式生效）
@@ -69,16 +69,9 @@ open → design → plan → execute ⇄ subagent-execute → review → verify 
 
 `directOverride` 记录"当前处于用户确认的 direct"，切回 subagent 时自动清除。
 
-## Express 路径（低风险降级）
-
-CHANGE.md 头部含 `express: true`（低风险判定：改动 ≤3 文件、无后端 schema/API/数据库变更、无安全/认证/并发、纯前端重构/文案/简单 bug 修复）时自动降级：
-
-- **review** 只执行 Round 1（spec 合规）+ Round 1.5（契约核对），跳过代码质量轮与 UI 轮
-- **TEST/UAT** 用最小矩阵（只第 1 轮功能 + 核心 AC 手动确认）；REVIEW.md 标注 "express 审查"
-
 ## 用户入口
 
-在目标项目打开 Claude Code，输入：
+在目标项目打开 Claude Code 会话，输入（Codex：经 `/use flow-comet` 或自然语言调用技能——入口语义一致）：
 
 | 入口 | 用途 |
 |------|------|
@@ -103,17 +96,19 @@ flow-comet 在以下节点**暂停并向你确认**（其余全部自动推进�
 
 ## 脚本速查（Claude 自动执行）
 
-以下脚本由 flow-comet skill 在流程中**自动运行**——正常使用无需手动执行，仅在故障排查或高级场景使用。路径：`<目标项目>/.claude/skills/flow-comet/scripts/`：
+以下脚本由 flow-comet skill 在流程中**自动运行**——正常使用无需手动执行，仅在故障排查或高级场景使用。路径：`<目标项目>/.claude/skills/flow-comet/scripts/`（Claude Code；Codex：`<目标项目>/.agents/skills/flow-comet/scripts/`）：
 
 ```bash
 node workflow-state.mjs status             # 当前状态 + 分支一致性
 node workflow-state.mjs init <id> [--branch-prefix <prefix>] [--init-context|--init-skip]   # 初始化 change（自动建分支，前缀默认 change/；--init-context 触发上下文生成——agent 读取既有文档生成 CONTEXT.md，生成后重跑以校验并记录扫描时间；--init-skip 记录跳过）
 node workflow-state.mjs next               # 获取下一节点与 SKILL
-node workflow-state.mjs record <node> '{...}'                  # 记录节点证据
+node workflow-state.mjs record <node> '{...}' [--json-file <path>]   # 记录节点证据（--json-file 从文件读 JSON，规避 Windows PowerShell 引号剥离）
 node workflow-state.mjs config set enablePrReview true         # 开启 PR 审查
 node workflow-state.mjs execution-mode <subagent|direct>       # 切换执行模式（direct 需确认）
 node workflow-guard.mjs entry/exit <node> [--apply]            # 节点门禁
-node workflow-handoff.mjs request|result|status                # 子代理委托交接
+node workflow-handoff.mjs request|result|status [--json-file <path>]  # 子代理委托交接（--json-file 同 record）
+node workflow-state.mjs skill-load <node> <skill> [--prompt <path>]  # 技能加载声明（由 Claude 执行；--prompt 指向 flow-kit/prompts/）
+node workflow-state.mjs verify-fail                            # verify 失败计数（重试 3 次，第 4 次 BLOCKED）
 ```
 
 **子代理委托**（execute/subagent-execute 节点，由 Claude 自动执行）：按 TASK.md 解析 write_files → `workflow-handoff.mjs request` → Agent 工具（`isolation: "worktree"`）委托并回传 Return Contract → `result` 记录证据 → guard 校验委托合法性。

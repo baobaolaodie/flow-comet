@@ -38,6 +38,8 @@ protocol valid
 
 | change | 协议形态 | 结果 |
 |--------|---------|------|
+> 下方 passed 数为**当时目标项目（calc 仓库）的测试计数**，非 flow-comet 场景数（2026-08-08 实证时 calc 114、flow-comet 场景 123；flow-comet 场景数现为 137）；为 2026-08-08 实证记录。
+
 | sci-notation（科学计数法） | 同构协议 + 声明白名单 | 87 passed 零回归，完整流程+归档 |
 | calc-mod（取模） | 声明白名单（含 `<change-id>` 适配） | 101 passed，guard 全过 |
 | calc-min（min 函数） | **未声明白名单**（协调者默认） | 168 passed，流程不卡，协调者默认白名单语义验证 |

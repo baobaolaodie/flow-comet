@@ -10,13 +10,13 @@ flow-comet 站在两个上游项目之上：**flow-kit** 提供方法论与工�
 
 ## 1. flow-kit——方法论层（依赖）
 
-flow-kit 是**纯 markdown 方法论包**（不是工具——"clone 到项目根目录就用，没有运行时"）。它定义了 9 阶段流程、R1-R8 行为规则与 14 个工件模板。
+flow-kit 是**纯 markdown 方法论包**（不是工具——"clone 到项目根目录就用，没有运行时"）。它定义了 9 阶段流程、R1-R8 行为规则与 13 个工件模板。
 
 ### flow-comet 依赖了什么
 
 | flow-kit | flow-comet 的用法 |
 |----------|------------------|
-| **阶段协议**（prompts/0-change、1-requirement、3-task、4-dev、5-test、7-integration、2a-ui-design） | 8 节点一一对应；节点 skill 自述「flow-kit \<阶段\> 阶段协议」，执行时读取 flow-kit prompt 文件 |
+| **阶段协议**（prompts/0-change、1-requirement、2-design、3-task、4-dev、5-test、6-review、7-integration、2a-ui-design） | 8 节点映射到阶段协议（open 组合 0-change + 1-requirement；2a-ui-design 为前端可选附加）；节点 skill 自述「flow-kit \<阶段\> 阶段协议」，执行时读取 flow-kit prompt 文件 |
 | **工件模板**（CHANGE/REQUIREMENT/DESIGN/TASK/SUMMARY/TEST/REVIEW/UAT/LESSONS/CONTEXT/…） | 工件路径与必填段完全遵循模板 |
 | **R1-R8 行为规则**（fresh-context、工件门禁、反幻觉 grep、破坏性变更协议、测试纪律） | flow-comet skill 中按编号逐条引用（R1.8、R4.5、R4.6、R5.1、R6.4、R6.5…） |
 | **Artifact Preflight Gate**（GO.md / R2.7） | 移植为节点产物门禁表（design 需 CHANGE+REQUIREMENT、plan 需 DESIGN、…） |
@@ -32,7 +32,7 @@ flow-kit 是**纯 markdown 方法论包**（不是工具——"clone 到项目�
 
 ### flow-comet 明确不吸收
 
-- **PROGRESS.md / STATE.md 文件**：其语义（清窗快照、跨会话状态）被状态机替代——flow-comet-dev 明确「TASK.md 的 status + SUMMARY.md 就是进度」
+- **PROGRESS.md / STATE.md 文件**：跨会话状态跟踪被状态机替代——flow-comet-dev 明确「TASK.md 的 status + SUMMARY.md 就是进度」；任务中途清窗快照（`.specs/<change-id>/<task-id>-PROGRESS.md`）保留用于断点恢复，完成后删除
 - **横向命令**：仅 evolve/health 以独立 skill 存在；intel-scan/architect 类命令未移植
 - **多 IDE 适配层**（`.windsurfrules`/`.cursorrules` 安装路径）
 - **Token 预算表**（flow-kit 的成本模型未继承）

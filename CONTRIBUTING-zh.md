@@ -11,18 +11,18 @@
 ## 分支模型
 
 ```
-feat/xxx ──PR（merge commit）──▶ dev        （集成分支——历史完整）
+feat/xxx ──PR（squash）──▶ dev          （集成分支——change 级提交）
                                           │
-dev ──PR（squash）──▶ main               （发布分支——历史干净）
+dev ──PR(squash)──▶ main    （发布分支——每次发布 1 个 squash 发布提交）
 ```
 
 | 分支 | 角色 | 合并方式 | 历史 |
 |------|------|---------|------|
-| `main` | 发布分支 | **squash** | 干净——每次发布一条 |
-| `dev` | 集成分支 | **merge commit** | 完整——每个 feature 提交保留、可追溯 |
+| `main` | 发布分支 | **squash** | 每次发布 squash 成 1 个发布提交(消息概括 dev 的 change 级提交) |
+| `dev` | 集成分支 | **squash** | 每个 PR 一条 change 级提交——PR 的修复明细在该 PR 的 Commits 列表可查 |
 | `feat/*` | 开发分支 | — | 工作历史，合并后删除 |
 
-**为什么这样拆分**：`dev` 保留每个 TDD 修复的完整历史（可追溯性——每个提交是一个 RED→GREEN 闭环）；`main` 保持干净，便于发布与变更日志管理。
+**为什么这样拆分**：`dev` 承载每个 PR 的**一条 change 级提交**（squash）——稳定、可读的提交序列，每个 PR 是一个单元；PR 的提交历史（每个 TDD 修复）仍可在该 PR 的 Commits 列表查看。`main` 每次发布获得**一个 squash 发布提交**——main 历史为发布级干净序列，change 粒度细节留在 dev 与各 PR 的 Commits 列表。
 
 ## PR 流程
 
@@ -35,9 +35,9 @@ dev ──PR（squash）──▶ main               （发布分支——历史
 
 2. **在功能分支上开发**——遵循下方[开发规范](#开发规范)。
 3. **开 PR 合入 `dev`**（base `dev`，head `feat/<描述>`）。**使用仓库 PR 模板**（`.github/PULL_REQUEST_TEMPLATE.md`——改动范围/验证/自查勾选）。PR 描述写明改了什么、为什么、验证证据。**保留完整清单**：涉及项勾 `[x]`、未涉及项留 `[ ]`——**不要删除未勾选项**（清单是 reviewer 判断完整性的依据）。
-4. **获得审核 approve**——需要 1 个 approving review（分支保护）。
-5. **合入 `dev`**——用 **merge commit**（保留 feature 历史）。`dev` **积累改动**——不要每个改动都发布。
-6. **发布 PR（批次）**——`dev` 积累一批后（一组相关改动，或维护批次），开**一个**发布 PR 合入 `main`（base `main`，head `dev`）。用 **squash** 合并——每个发布批次一条干净提交。
+4. **合并门禁通过**——required CI checks 必须通过（见下方审核要求）；合并前由用户（维护者）审核批准。
+5. **合入 `dev`**——用 **squash** 合并：每个 PR 一条 **change 级提交**（PR 的提交仍可在该 PR 的 Commits 列表查看）。`dev` **积累改动**——不要每个改动都发布。
+6. **发布 PR（批次）**——`dev` 积累一组相关改动（功能批次或维护批次）后，开**一个**发布 PR 合入 `main`（base `main`，head `dev`）。以 **squash** 合并——1 个发布提交，消息概括 dev 积累的 change 级提交。
 7. 合并后删除 feature 分支。
 
 **维护批次**：纯文档/清理类改动（无行为影响）可积累在一个分支（如 `docs/maintenance-<日期>`）作为**一个** PR 合入 `dev`——减少 PR 数量且不丢可追溯性。
@@ -46,12 +46,12 @@ dev ──PR（squash）──▶ main               （发布分支——历史
 
 | 规则 | `main` | `dev` |
 |------|--------|-------|
-| require pull request reviews | ✅（1 approve） | ✅（1 approve） |
+| require status checks（CI job） | ✅（regression / pr-policy / quality / installer / docs-links——合并必需；release-consistency 仅发布面运行，不 required） | ✅（同上） |
 | 禁 force push | ✅ | ✅ |
 | 禁删除 | ✅ | ✅ |
 | stale review 失效 | ✅ | ✅ |
 
-**dev 同步 main**（每次 main 有新 squash 提交后执行）：
+**dev 同步 main**（每次发布合入 main 后执行）：
 
 ```bash
 git checkout dev
@@ -65,31 +65,47 @@ git push origin dev
 git checkout main
 git checkout -b hotfix/<描述>
 # 修复 → 提交（fix: subject）→ 测试
-# 直合 main（merge commit）→ 同步 dev
-git checkout main && git merge --no-ff hotfix/<描述>
+# hotfix 以 squash 合并——1 个干净提交进 main,与发布 squash 策略一致
+git checkout main && git merge --squash hotfix/<描述> && git commit -m "fix: hotfix <描述>"
 git checkout dev && git merge --no-ff main -m "sync: main → dev（hotfix <描述>）"
 git branch -d hotfix/<描述>
 ```
+
+## 新贡献者入门
+
+1. **读 README** —— 快速开始展示了一个最小工作流。
+2. **选一个入门 issue** —— 标记为 `good first issue` 的 issue 适合新贡献者。
+3. **准备环境** —— Node.js ≥ 18；clone 仓库；运行一次 `node scripts/install-commit-hook.mjs`（本地提交/推送消息检查）。
+4. **验证基线** —— 运行回归套件（见下方开发环境）。
+5. **不确定改动是否被需要？** 先开 issue —— issue 模板会引导你提供所需上下文。
 
 ## 开发环境
 
 - **运行时**：Node.js ≥ 18（ESM）
 - **仓库**：clone 后先验证回归基线可跑：
-  `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 97 SCENARIOS PASSED`
+  `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 137 SCENARIOS PASSED`（统一测试集两级基线，另需 `system-test.mjs` → `ALL SYSTEM TESTS PASSED`，55 项）
 - **创作环境**：Claude Code（skill/hook 在 Claude Code 会话中运行）；hook 通过 `prepare-env` 安装到你的项目 `.claude/`
 - **机制相关工作**：动手改脚本前先读 [docs/MECHANISM.md](docs/MECHANISM.md) 了解机制语义（行为层）
 
-### CI 强制检查（无需本地配置）
+### CI 强制检查与本地 hook
 
-CI 在每个 PR 与 push 时自动运行——服务端强制仓库约定（回归套件含场景数与公开产物代号自检、脚本语法、BOM 防线、安装器可复现性、workflow yaml 有效性、PR 模板完整性、版本一致性、CHANGELOG PR 链接、死链）。无需本地安装或配置。
+CI 在每个 PR 与 push 时自动运行——服务端强制仓库约定（回归套件含场景数与公开产物代号自检、脚本语法、BOM 防线、安装器可复现性、workflow yaml 有效性、PR 模板完整性、提交规范（Conventional Commits）、版本一致性、CHANGELOG PR 链接、死链）。
 
-推送前唯一需要的本地预检是回归基线：
+**本地 hook**（clone 后安装一次）：
 
 ```bash
-node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 97 SCENARIOS PASSED
+node scripts/install-commit-hook.mjs   # 设置 core.hooksPath → .githooks/
 ```
 
-其余全部由 CI 处理。
+hook 在提交与推送时拒绝含过程代号（修复编号、批次代号、场景编号等——本项目的工程约定，非通用词表）的提交信息。提交信息是公开产物，请保持平实描述（见下方提交规范）。
+
+推送前运行回归基线：
+
+```bash
+node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 137 SCENARIOS PASSED
+```
+
+其余由 CI 处理。
 
 ## Issues（报告 bug / 提 feature）
 
@@ -104,9 +120,9 @@ Issue 确认后：bug 用 `fix/` 分支、feature 用 `feat/` 分支——都按
 
 - **权威源**：skill/脚本改动在 `.comet/bundle-drafts/flow-comet/skills/`（单一权威源；`.claude/` 副本是安装产物——用 `prepare-env` 更新，勿手改）
 - **TDD**：每个机制修复先写 RED 场景（`guard-self-test.mjs`——确认以正确原因失败）→ GREEN → 全量回归
-- **回归基线**：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 97 SCENARIOS PASSED`（每次改动后必须）
+- **回归基线**：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 137 SCENARIOS PASSED`（统一测试集两级基线，另需 `system-test.mjs` → `ALL SYSTEM TESTS PASSED`，55 项）（每次改动后必须）
 - **文档同步**：行为层文档在 `docs/`（中英双语——改文档时两语同步）；实现细节不进公开文档
-- **双语纪律**：英文文档不含中文（语言切换器、flow-kit 工件段名、运行时消息原文除外）；中文文档不含英文长句（命令、URL、专有术语除外）。本地可选检查：`node scripts/check-docs-local.mjs`（gitignore 本地工具——英文文档零中文 / 中文文档零英文长句 / 双语对称 / 版本场景数一致）
+- **双语纪律**：英文文档不含中文（语言切换器、flow-kit 工件段名、运行时消息原文除外）；中文文档不含英文长句（命令、URL、专有术语除外）
 - **向后兼容**：旧 change/旧 state 照常工作——渐进 WARN 优先于 BLOCK
 - **公开文档不使用代号、编号或行话**：README/docs/CHANGELOG/提交信息保持一致
 
@@ -145,9 +161,10 @@ test: BOM 容忍场景——带 UTF-8 BOM 的 state/evidence 文件正常解析
 - **经 flow-comet 工作流开发**：`init` 自动建分支——指定匹配的前缀：
 
 ```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix feat/   # 功能开发
-node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix fix/    # bug 修复
-node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix docs/   # 文档
+# 权威源路径（开发态）；安装副本路径随平台：Claude Code .claude/skills/ / Codex .agents/skills/
+node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix feat/   # 功能开发
+node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix fix/    # bug 修复
+node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --branch-prefix docs/   # 文档
 ```
 
 内置默认前缀是 `change/`（与既有 change 向后兼容）；本仓库规范要求显式指定类型前缀，使分支与改动类型一致——与手动 `feat/`/`fix/` 分支同一惯例。
@@ -156,7 +173,23 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-id> --bra
 
 - **PR 描述**：改了什么、为什么、验证证据（测试输出、真实会话证据）
 - **范围**：代码改动 → 伴随测试 + 回归；文档改动 → 两语同步
-- **1 个 approving review**（分支保护）；新推送使旧 approve 失效（dismiss stale reviews）
+- **合并门禁**：required CI checks 必须通过；合并前由用户（维护者）审核批准。
+
+## Bot 审查（CodeRabbit / Sourcery）
+
+- **仅供参考**：bot 评论是建议而非要求——bot 也会出错。以你自己的判断（与维护者审核）为准，不要盲从 bot 建议。
+- **可执行 vs 信息性**：bot 评论提出具体修改要求（修复、澄清、补测试）才算*可执行*；信息性评论（总结、提问、赞许）无需处理。
+- **合并前处理**：每条可执行的 bot 评论必须处理——修复它，或在其线程内回复说明拒绝理由。完成后解决线程。
+- **保持 PR 时间线干净**：在 bot 评论的线程内回复，不要在时间线新开 @ 评论。行内评论用线程回复；整体 review（无线程）用引用原文的 quote reply。
+- **Bot checks 与 required CI checks**：只有 CI job（regression / pr-policy / quality / installer / docs-links）是合并必需。Bot checks（CodeRabbit / Sourcery）是信息性的——在 checks 面板可能显示 pending 或被限流，不阻塞合并。
+
+## CHANGELOG 写作规范
+
+- **开发 PR（→ dev）**：行为变化记入 CHANGELOG 的 `Unreleased` 段（新增/变更/修复，双语）——PR 自身更新 CHANGELOG。
+- **发布前（dev 上）**：版本号在 dev 上定好——`Unreleased` 整理为 `[X.Y.Z] - 日期` 版本段，链接该批次已合并的开发 PR。
+- **发布 PR（dev → main）**：不更新 CHANGELOG——版本段已在 dev 上；发布 PR 只把它合并进 main。
+- **main**：从不单独编辑 CHANGELOG——通过发布 PR 合并获得版本段。
+- **发布后**：dev 同步 main（树一致），重新开启 `Unreleased` 段积累下一批次。
 
 ## 保持 PR 更新
 
@@ -180,17 +213,12 @@ git push --force-with-lease origin feat/<描述>            # feature 分支允�
 ## 发布审批单
 
 - 包含改动：PR 列表 + 每项一句话摘要
-- 验证结果：回归（97 场景）/ 安装副本验证
+- 验证结果：回归（137 场景）/ 安装副本验证
 - 版本：X.Y.Z（文档批次可不 bump）
 ```
 
-每次发布（见 [VERSIONS-zh.md](docs/VERSIONS-zh.md)）：
-
-1. 更新 CHANGELOG（Added/Changed/Fixed——双语）
-2. 更新 README 版本徽章
-3. `git tag vX.Y.Z` + push --tags（发布 PR 合入 main 后）
-4. prepare-env 发布到全部已安装副本（主仓 `.claude/` + 各目标项目）——发布后逐一验证各副本 `guard-self-test`
+**发布步骤**：五步清单（CHANGELOG → README 徽章 → tag → prepare-env 分发 → dev 同步）见 [VERSIONS-zh.md](docs/VERSIONS-zh.md)。
 
 **发布 PR 要点**：
-- 发布 PR（dev → main）天然列出 dev 的全部未发布原始提交（dev 保留完整历史、main 每次发布 squash）——这是设计，不是问题
-- 合并时用**自定义 squash 消息**（`gh pr merge --squash --subject "<发布摘要>" --body "<验证摘要>"`）——GitHub 默认 squash 消息会列出全部 commit，把历史提交的过程代号带进 main 的公开提交历史
+- 发布 PR（dev → main）天然列出 dev 的全部未发布 change 级提交（dev 是 change 级提交序列）——这是设计，不是问题；合并后 main 获得一个 squash 发布提交
+- 用 `gh pr merge --squash` 合并——squash 消息用公开面语言（发布摘要），过程细节不会进入 main 的历史

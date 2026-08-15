@@ -1,7 +1,7 @@
 ---
 name: 任务 / Task
 about: 追踪已确认要执行的具体工作项 / Track a confirmed piece of work
-title: "[task] "
+title: "[task]: "
 labels: task
 ---
 

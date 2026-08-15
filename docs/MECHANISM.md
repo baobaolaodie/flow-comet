@@ -22,7 +22,7 @@ This document describes what flow-comet **does** — the behaviors and rules you
 | ② Coordinator prohibition | `next`/`entry` inject "you are the coordinator, not the executor" each time (direct-mode execute exempt) | output injection |
 | ③ Exit takeover detection | parallel tasks done must have handoffResult, otherwise BLOCKED (`parallelTakeoverApproved` explicit exemption) | TASK.md + handoff evidence |
 
-Hook blocking semantics: PreToolUse hook exit 2 (blocking — prevents the tool call) is **verified working in the main TUI session**; in `claude -p` (SDK CLI mode) non-zero exits are downgraded to non-blocking — the write is logged but not prevented.
+Hook blocking semantics (see Limitations): PreToolUse hook exit 2 blocks in the main TUI session; in `claude -p` non-zero exits are downgraded to non-blocking.
 
 ## 3. Guard validation (evidence-driven advancement)
 
@@ -33,9 +33,14 @@ Hook blocking semantics: PreToolUse hook exit 2 (blocking — prevents the tool 
 | Node order BLOCK | next when currentNode not exited (non-normal successor) → BLOCKED; normal next after exit advancement exempt; rollback exempt (pending rollback task in TASK) | next |
 | handoff completedChecks | subagent Return Contract must carry required-skill completedChecks (skill-load evidence), missing → BLOCKED | exit subagent-execute |
 | redEvidence ordering | redEvidence must exist before greenEvidence; recording redEvidence after greenEvidence → BLOCKED | workflow-handoff result |
-| SUMMARY six sections | verify output / 6-dimension self-check (non-empty) / boundary check + mandatory `## 自检方法` — self-review two-tier fallback: `brooks-review` (Skill tool) → if only a "Launching skill" placeholder is returned, Read the plugin-cache protocol files and execute the full review manually (`cache-brooks`) → builtin R1~R6 quick-check last (`builtin-quickcheck` must state the unavailable reason AND the cache-attempt evidence; missing evidence → progressive WARN) | exit execute |
-| verify real execution | TEST.md `## 验证命令` actually runs (multi-line `&&` supported); verifyFailures machine-counted, 4th → BLOCKED | exit verify |
+| SUMMARY six sections | verify output / 6-dimension self-check (non-empty) / boundary check + mandatory `## 自检方法` — the 6-dimension section must declare `brooks-review` or `cache-brooks` (two-tier fallback: Skill tool → if only a "Launching skill" placeholder is returned, Read the plugin-cache protocol files and execute the full review manually); `builtin-quickcheck` appears only under `## 自检方法` with the unavailable reason AND the cache-attempt evidence (new changes blocked; legacy warned) | exit execute |
+| Disposition markers | REVIEW.md findings must carry a disposition marker (fixed/upgraded/deferred; new changes blocked; legacy warned) | exit review |
+| builtin self-check evidence | `builtin-quickcheck` must state the unavailable reason AND the plugin-cache attempt (new changes blocked; legacy warned) | exit execute |
+| Wave-wording consistency | prose `[P]` markers must match task `parallel="true"` (new changes blocked; legacy warned) | exit plan |
+| Overreach delegation | parallel done tasks require the delegation node exited (new changes blocked; legacy warned) | exit execute/verify |
+| verify real execution | TEST.md `## 验证命令` actually runs (multi-line `&&` supported); verifyFailures machine-counted **per change** (switching changes does not carry over another change's count), 4th → BLOCKED (timeout configurable via `FLOW_COMET_VERIFY_TIMEOUT_MS`, default 300s) | exit verify |
 | Append placement | CONTEXT orphan sections / LESSONS numbering-out-of-order / STATE+CHANGELOG non-reverse-order → WARN (progressive) | exit open/verify/archive |
+| Task completion artifacts | every `done` task must have a matching `<id>-SUMMARY.md`; missing → progressive WARN (artifacts incomplete — the task claims done without its summary) | exit execute |
 | Pre-delegation check | uncommitted artifacts in `.specs/<change>/` → WORKTREE WARN; PROGRESS.md present → recovery warning | entry execute |
 | state schema validation | writeState field types fail-closed (state-schema.mjs single source, shared by three scripts) | all state writes |
 
@@ -53,14 +58,14 @@ Hook blocking semantics: PreToolUse hook exit 2 (blocking — prevents the tool 
 
 ## 6. Guard self-test suite (author regression baseline)
 
-`scripts/guard-self-test.mjs`: **97 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — the author's regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
+`scripts/guard-self-test.mjs`: **137 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (55 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
 
 ```bash
 node .claude/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 97 SCENARIOS PASSED
+# → ALL 137 SCENARIOS PASSED
 ```
 
-## 6.5 Automatic initialization detection (init pre-step)
+## 7. Automatic initialization detection (init pre-step)
 
 On `init`, the workflow automatically detects whether a project context (`.specs/CONTEXT.md`) exists and classifies the project (A~F):
 
@@ -72,6 +77,14 @@ On `init`, the workflow automatically detects whether a project context (`.specs
 
 Explicit parameter authorization (no blocking prompts, headless-safe): `--init-context` runs the full generation (≈15-30k tokens, first use only, stated in the prompt); `--init-skip` records `ai_context_doc: none` and silences future prompts. Project-level fields (`ai_context_doc`, `last_intel_scan`) persist across changes; state-schema validates them (fail-closed, legacy states default to null).
 
+
+## 8. Execution-omission protection
+
+- **Node entry evidence**: entering a node records it; exiting a node that was never entered — blocked on new changes (entry checks must not be skipped: coordinator prohibition, pre-delegation commit check, signature recording), progressive warning for legacy changes.
+- **New-change enforcement**: changes created via `init` are marked new (`newChange`) and enforce all content-level checks as blocking — completed tasks require their matching summary, handoff results require TDD RED evidence, disposition markers, builtin self-check evidence, wave-wording consistency, overreach delegation, and append placement; legacy changes keep the progressive warnings.
+- **Declaration automation**: `record` auto-fills missing skill-load declaration markers (manual declarations still recommended).
+- **Explicit empty-exit exemption**: execute may exit with no serial tasks when explicitly declared (`emptyExitApproved`); otherwise blocked by default.
+
 ## Design principles
 
 - **File-as-truth, no event sourcing**: single-file state machine + node derivation from `.specs/` — simple, recovery never depends on history
@@ -82,7 +95,7 @@ Explicit parameter authorization (no blocking prompts, headless-safe): `--init-c
 
 ## Limitations
 
-- **Claude Code only**: other platforms (Codex/Gemini/Cursor) not guaranteed
+- **Platforms**: Claude Code (default) and Codex (skills/rules/hook via the multi-platform installer, see [Installation](INSTALLATION.md#platforms)) are supported; other platforms (Gemini/Cursor) not guaranteed
 - **Return Contract transition rule**: legacy pure-string handoffs are exempt as WARN; missing redEvidence/greenEvidence is progressive WARN (not BLOCK) to avoid blocking legacy change re-entry
 - **Not interoperable with Comet Classic**: workflow-kernel state is independent of classic (design decision, not a defect)
 - **Hook allows writes when no active change**: when `.comet/flow-comet-state.json` is absent, the hook guard allows all writes (design decision: no workflow, no write restrictions)

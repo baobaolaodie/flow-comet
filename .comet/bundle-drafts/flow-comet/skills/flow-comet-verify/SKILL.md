@@ -9,20 +9,22 @@ description: "Use only when explicitly invoked as /flow-comet-verify or routed b
 
 Complete the `verify` Node for `flow-comet`.
 
-Responsibility: 集成验证 + UAT + 失败诊断（自动重试 ≤ 3 次，第 4 次失败暂停）。生成 TEST.md + UAT.md。
+Responsibility: 集成验证 + UAT + 失败诊断（自动重试 ≤ 3 次，第 4 次失败暂停）。生成 UAT.md（TEST.md 前置已有）。
 
 This node performs the final integration verification: running all automated tests, type checks, and builds, then guiding the human through UAT scripts from TEST.md. It produces UAT.md with pass/fail results for each item. If failures occur, it diagnoses root causes, generates fix tasks, and auto-retries ≤ 3 times (machine-counted verifyFailures); on the 4th failure it must pause and ask the user「继续修 / 停止」. This node is the final quality gate before archiving.
 
 ## Guidance
 
-### 必填段清单（exit guard 校验，结构+存在级）
+### 必填段清单（结构+存在级）
 
-| 文件 | 必填段 |
-|------|--------|
-| TEST.md | `## 测试矩阵` / `## 验证命令` |
-| UAT.md | `## 验收结果` |
+| 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
+|------|-------------------------------|-----------------------------------|
+| TEST.md | `## 验证命令`（exit verify 真实执行） | `## 测试矩阵` 等段（5 轮金字塔，review 把关） |
+| UAT.md | `## 验收结果` | 其余（执行纪律，review 把关） |
 
-**缺失任一必填段 = 节点未完成**，exit guard 校验（见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B）。
+> **注意**：flow-kit 的 TEST 模板**不含 `## 验证命令` 段**——该段是 flow-comet 的强制增量（exit verify 会真实执行其中的命令并计数失败）。使用 `flow-kit/templates/TEST.md` 填写后，**必须按上方必填段清单补写 `## 验证命令` 段**，否则 exit verify 会被 BLOCKED。**排版约束**：`## 验证命令` 标题后必须**紧跟**代码块（` ``` `），标题与代码块之间**不得插入任何说明行**（如 blockquote 说明——guard 正则要求标题后直接是代码块）；段名可带括号后缀。UAT.md 同理：flow-kit 无独立 UAT 模板（UAT 脚本格式见 5-test.md 1.2 节），产出时按上方必填段清单写 `## 验收结果` 段。
+
+guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
 
 ### Prerequisites
 
@@ -32,8 +34,6 @@ This node performs the final integration verification: running all automated tes
 - `.specs/<change-id>/REQUIREMENT.md` must exist for AC reference.
 
 ### Steps
-
-**Express 路径（低风险 change，P1）**：若 CHANGE.md 头部含 `express: true`，则 TEST.md 用最小矩阵（只第 1 轮功能，2-5 轮声明 N/A）、UAT 用简化脚本（核心 AC 手动确认 + 其余单测覆盖）；否则完整 5 轮金字塔 + 全 UAT。
 
 1. **Run full automation**: Execute all automated checks and paste real output:
    - Full unit tests: `pytest tests/ -q` (or equivalent).
@@ -60,7 +60,7 @@ This node performs the final integration verification: running all automated tes
    - Error is not task-specific, other tasks would hit it too -> nominate.
    - Reasonable probability of retry within 6 months -> nominate.
    - Otherwise do not nominate (avoid pollution).
-   - Add qualifying lessons to `.specs/LESSONS.md` with next L-NNN number — 新条目插入 `## 条目区` 内**按 L-NNN 编号顺序**（继续现有编号），**禁止文件尾追加**.
+   - Add qualifying lessons to `.specs/LESSONS.md` with next L-NNN number — 新条目编号 = 当前最大编号 + 1,插入 `## 条目区` 末尾(文件内升序,继续现有编号),**禁止文件尾追加与乱序插入**.
    - Check existing active lessons for superseded/deprecated status.
 
 The full verification protocol, UAT format, and failure diagnosis are in:
@@ -103,6 +103,12 @@ The verify node loads `flow-comet-integration` for the verification protocol. It
 
 Load `flow-comet-integration` during this Node and record completed check `required-skill:verify.flow-comet-integration`. Reason: 集成验证 + UAT + LESSONS 提名
 
+**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load verify flow-comet-integration --prompt flow-kit/prompts/7-integration.md
+```
+
 ## Augmentations
 
 This Node has no declared augmentations.
@@ -125,19 +131,14 @@ Evidence: `verification-result` (required)
 node .claude/skills/flow-comet/scripts/workflow-state.mjs record verify '{"summary":"All automation passed, N UAT items verified (X pass, Y fail), Z lessons nominated"}'
 ```
 
-Generic template:
-```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs record verify '{"summary":"record the real Node result","completedChecks":[]}'
-```
-
 ## Guardrails
 
 | Guardrail ID | Label | Validation Type |
 |--------------|-------|-----------------|
-| `verify-evidence` | UAT.md exists with results | artifact-exists |
-| `automation-passed` | All automated checks pass (real output) | content-check |
-| `retry-limit` | No more than 3 auto-retries (4th failure pauses) | process-check |
-| `lessons-nominated` | LESSONS.md updated with new entries | artifact-exists |
+| `verify-evidence` | UAT.md exists | artifact-exists |
+| `automation-passed` | All automated checks pass (real output) | 执行纪律（review 把关），guard 不校验 |
+| `retry-limit` | No more than 3 auto-retries（机器计数 verifyFailures，第 4 次 BLOCKED） | process-check |
+| `lessons-nominated` | LESSONS.md updated with new entries（完成提名扫描；仅当有合格条目时更新——无合格条目不强制新增，避免噪音条目） | 执行纪律（review 把关），guard 不校验 |
 
 ## Exit Check
 
@@ -156,5 +157,3 @@ If the script prints `SKILL: flow-comet-archive`, load that Skill next.
 5. If fix tasks exist but not executed, return to execute node.
 6. Count previous auto-retries (from UAT.md / machine-counted verifyFailures) to enforce R2.6 limit.
 7. Resume from the first incomplete verification step.
-
-Generic fallback: read `.claude/skills/flow-comet/reference/workflow-protocol.json` and the configured workflow state; resume the first Node not listed in `completedNodes`.

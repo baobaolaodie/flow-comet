@@ -3,8 +3,8 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
-import { validateStateFields } from './state-schema.mjs';
-import { resolveProtocol, readProtocolFile, validateProtocolSchema } from './protocol-utils.mjs';
+import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor } from './state-schema.mjs';
+import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES } from './protocol-utils.mjs';
 
 const command = process.argv[2] ?? 'verify';
 const nodeId = process.argv[3] ?? null;
@@ -31,6 +31,48 @@ const NODE_TRANSITION_GATES = {
   verify:           { evidence: ['verification-result'] },
   archive:          { evidence: ['archive-summary'] },
 };
+
+// 节点协议映射(单一来源): NODE_PROTOCOL_FILES 已移入 protocol-utils.mjs(exit 协议声明校验 + record 自动补声明共用)
+
+// 声明标记 protocol → basename 提取（exit 校验与 节点协议映射表 basename 精确比对）。
+// 兼容新旧两种格式：新格式（skill-load 写入）= 纯 basename（如 0-change.md），原样返回；
+// 旧格式（缺陷修复前写入）= resolveProtocol 解析后的完整绝对路径（Windows 反斜杠 /
+// POSIX 斜杠），提取最后一段后可比对。非字符串（null——skill-load 未传 --protocol 的
+// 新格式缺省）→ null（协议集内无 null，fail-closed 由 includes 比对兜底）。
+// R6: 新旧 change 区分——init 写入的 newChange: true = 新 change(严格,不依赖 entry——防系统性
+// 跳 entry 绕过);缺失/非 true(旧 change) = 渐进 WARN 兼容。供 R1/R2 升级与 M 机制使用。
+function isNewChange(state) {
+  return state.newChange === true;
+}
+
+function markerProtocolBasename(value) {
+  if (typeof value !== 'string' || value === '') return null;
+  return String(value).replaceAll('\\', '/').split('/').pop() || null;
+}
+
+// REVIEW.md 发现区条目处置状态提取——"## 发现" 段下 Critical/Major/Minor
+// 子区的发现项 = 以 "- **" 开头的列表项（加粗标题）；"无" 条目（"- 无" / "无（...）"）表示
+// 该级别无发现，豁免。返回缺处置状态标记（[已修]/[升级]/[转待办]）的条目标题列表——
+// 结构级校验（不做语义判断：标记存在即视为已处置）。发现项（含 Minor）不得"记录后无声消失"。
+function reviewFindingsMissingDisposition(text) {
+  const missing = [];
+  for (const section of text.split(/\n##\s+/)) {
+    if (!/^发现/.test(section)) continue;
+    for (const line of section.split('\n')) {
+      const m = line.match(/^\s*-\s*\*\*(.+?)\*\*/);
+      if (!m) continue;
+      if (/^无/.test(m[1].trim())) continue; // "无" 条目豁免
+      // 四要素字段行豁免:REVIEW 发现条目的 Symptom/Source/Consequence/Remedy
+      // 是 brooks 审查输出格式的字段行(带 ** 加粗),不是发现条目本身——不豁免会误判
+      // 为"发现项缺处置标记"(执行者按 4 要素格式书写时被误 BLOCKED)。
+      // 精确匹配完整标签(允许尾冒号)——"Source maps expose paths" 这类以 Source 开头的
+      // 真实发现标题不得被前缀匹配误豁免(其处置校验必须照常进行)
+      if (/^(?:Symptom|Source|Consequence|Remedy)\s*:?\s*$/i.test(m[1].trim())) continue;
+      if (!/\[已修\]|\[升级\]|\[转待办\]/.test(line)) missing.push(m[1]);
+    }
+  }
+  return missing;
+}
 
 // W1-B: flow-kit SUMMARY 模板必填段（正则匹配，大小写不敏感 + 变体兼容）
 const SUMMARY_REQUIRED_SECTIONS = [
@@ -1682,6 +1724,20 @@ function hasEvidenceField(evidence, id) {
   );
 }
 
+// 共用证据库 handoffResult 识别——subagent-execute 的委托结果由 workflow-handoff
+// result 写入嵌套 handoffResult（{ <taskId>: { result, completedAt } }），非顶层
+// handoff-result 字段；嵌套对象存在且非空（至少一个任务记录）视为该 evidence 已产生
+// （gate 只认存在性，内容严格校验由 W1-D Return Contract 校验负责）。
+function hasNonEmptyHandoffResult(evidence) {
+  const handoff = evidence?.handoffResult;
+  return !!(
+    handoff &&
+    typeof handoff === 'object' &&
+    !Array.isArray(handoff) &&
+    Object.keys(handoff).length > 0
+  );
+}
+
 function schemaMap(protocol) {
   return new Map((protocol.outputSchemas ?? []).map((schema) => [schema.id, schema]));
 }
@@ -1702,7 +1758,7 @@ function missingRequiredSchemaEvidence(protocol, node, evidence) {
   return missing;
 }
 
-// P2: 并行冲突检测——解析 TASK.md 中 parallel=pending 任务的 write_files，找交集（防同 wave 并行写冲突）
+// 并行冲突检测——解析 TASK.md 中 parallel=pending 任务的 write_files，找交集（防同 wave 并行写冲突）
 async function findParallelWriteConflicts(changeDir) {
   const taskFile = path.join(changeDir, 'TASK.md');
   let text;
@@ -1823,6 +1879,28 @@ async function isArchivedChange(changeName) {
   return entries.some(e => e === changeName || e.endsWith('-' + changeName));
 }
 
+// 声明标记目录解析——活动路径 .specs/<change-id>/.skill-loads/ 优先；归档路径兜底
+// （archive 节点「先移目录后 record/exit」顺序下 change 目录已在 .specs/archive/<前缀>-<change-id>/，
+// 标记只随目录移动——只查活动路径会把「标记存在」误判成「机制未激活」）。归档扫描匹配后缀
+// -<change-id>（前缀可含日期等，与协议 flowkit.archive.v1 的 archive/*-<change-id> 同构）。
+// 两者皆无 → null（声明机制从未激活，调用方按旧 change 兼容跳过）。
+async function findSkillLoadsDir(root, changeName) {
+  const activeDir = path.join(root, '.specs', changeName, '.skill-loads');
+  if (await fileExists(activeDir)) {
+    return { dir: activeDir, display: '.specs/' + changeName + '/.skill-loads/' };
+  }
+  const archiveRoot = path.join(root, '.specs', 'archive');
+  const entries = await fs.readdir(archiveRoot).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.endsWith('-' + changeName)) continue;
+    const candidate = path.join(archiveRoot, entry, '.skill-loads');
+    if (await fileExists(candidate)) {
+      return { dir: candidate, display: '.specs/archive/' + entry + '/.skill-loads/' };
+    }
+  }
+  return null;
+}
+
 // C2: 段名校验从模板自动派生——读 <runRoot>/flow-kit/templates/{CHANGE,REQUIREMENT,DESIGN}.md
 // 提取全部 ^## 段名，正则化生成宽松匹配模式；模板目录/文件缺失时 fallback 内置段名
 let templateSectionPatternsCacheRoot = null;
@@ -1941,6 +2019,7 @@ async function main() {
     const evidence = evidenceFor(evidenceState, node.id);
     if (!evidence) {
       console.error('BLOCKED: missing evidence for Node ' + node.id + '.');
+      console.error('恢复: 该节点已完成但缺证据记录 → 用 workflow-state.mjs record ' + node.id + ' \'{"summary":"<完成摘要>"}\' 补证据后重试；禁止手改 state 机器字段');
       process.exit(1);
     }
     const missingSchemaEvidence = missingRequiredSchemaEvidence(protocol, node, evidence);
@@ -1997,7 +2076,7 @@ async function main() {
         // git 不可用 → 跳过分支校验（旧模式兼容）
       }
     }
-    // P2: 并行冲突检测——subagent-execute 委托前校验 wave 内 parallel 任务 write_files 无交集
+    // 并行冲突检测——subagent-execute 委托前校验 wave 内 parallel 任务 write_files 无交集
     if (node.id === 'subagent-execute' && state.activeChange) {
       const conflicts = await findParallelWriteConflicts(path.join(runRoot, '.specs', state.activeChange));
       if (conflicts.length > 0) {
@@ -2019,7 +2098,7 @@ async function main() {
           console.error('WORKTREE WARN: .specs/' + state.activeChange + '/ 有未提交工件，worktree isolation 子代理将看不到它们——建议先 commit 或 prompt 内联上下文');
         }
       } catch (err) {
-        //  (P4): 检测失败可见化——非 git 仓库/路径不可查时提示 SKIP 原因（防静默失效）
+        // 检测失败可见化——非 git 仓库/路径不可查时提示 SKIP 原因（防静默失效）
         console.error('C4-CHECK SKIP: ' + (err && err.message ? String(err.message).split('\n')[0] : String(err)));
       }
     }
@@ -2049,18 +2128,41 @@ async function main() {
         console.log('COORDINATOR: 你是协调者，不是执行者。禁止在主会话直接修改源码；只能通过 Agent 工具 worktree isolation 委托子代理；子代理回传后仅更新 TASK.md / SUMMARY / handoff evidence。');
       }
     }
+    // M1: enter 证据——entry 记录节点进入标记(enteredNodes),exit 检测未 entry(防跳过 entry 无痕)
+    state.enteredNodes = Array.isArray(state.enteredNodes) ? state.enteredNodes : [];
+    if (!state.enteredNodes.includes(node.id)) {
+      state.enteredNodes.push(node.id);
+      const bad = validateStateFields(state);
+      if (bad.length) { console.error('BLOCKED: state 字段类型非法: ' + bad[0]); process.exit(1); }
+      await writeJson(file, state);
+      // G13: 进入已记录提示(执行者可知 entry 有副作用——进入证据写入)
+      console.log('ENTER RECORDED: ' + node.id + ' 进入已记录(enteredNodes)');
+    }
     console.log('ENTRY OK: ' + node.id);
     return;
   }
   const evidence = evidenceFor(state, node.id);
   if (!evidence) {
     console.error('BLOCKED: missing evidence for Node ' + node.id + '.');
+    console.error('恢复: 该节点已完成但缺证据记录 → 用 workflow-state.mjs record ' + node.id + ' \'{"summary":"<完成摘要>"}\' 补证据后重试；状态漂移 → advance/select；禁止手改 state 机器字段');
     process.exit(1);
   }
   // W1-A: 转移前置约束——currentNode 必须等于被 exit 的节点（防跳阶段）
   if (state.currentNode !== node.id) {
     console.error('BLOCKED: currentNode is ' + String(state.currentNode) + ', cannot exit ' + node.id + '.');
+    console.error('恢复: 若节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进，确认节点实际已完成后再用）或 select（切换 change）；禁止手改 state 机器字段');
     process.exit(1);
+  }
+  // M1/R2: enter 证据检测——未 entry 直接 exit:新 change(init 标记)强制 BLOCKED,旧 change 渐进 WARN
+  // 跳过 entry 会漏掉进入检查(协调者禁令/C4 WORKTREE/PROGRESS/签名记录)
+  if (isNewChange(state)) {
+    if (!Array.isArray(state.enteredNodes) || !state.enteredNodes.includes(node.id)) {
+      console.error('BLOCKED: 节点 ' + node.id + ' 未执行 entry 直接 exit——新 change 强制先 entry(进入检查/协调者禁令/签名记录)');
+      console.error('恢复: 先运行 workflow-guard.mjs entry ' + node.id + ' 再重试 exit;状态漂移 → advance/select');
+      process.exit(1);
+    }
+  } else if (Array.isArray(state.enteredNodes) && !state.enteredNodes.includes(node.id)) {
+    console.error('ENTER WARN: 节点 ' + node.id + ' 未执行 entry 直接 exit——entry 的进入检查(协调者禁令/C4 委托前检查/签名记录)被跳过,请先 entry 该节点再 exit(旧 change 渐进不阻断)');
   }
   // E2: exit archive 分支合并检查（WARN 不 BLOCK）——分支未合并到 main 允许"归档先行、合并后补"
   if (node.id === 'archive' && state.branchMode === true && state.activeChange) {
@@ -2084,6 +2186,10 @@ async function main() {
       const content = await fs.readFile(contextFile, 'utf8');
       const m = content.match(/^## (术语|已锁决策|决策|术语表)[（(][^\n]*(?:追加|update)[^\n]*$/im);
       if (m) {
+                if (isNewChange(state)) {
+          console.error('BLOCKED: CONTEXT.md 检测到孤立追加段（新 change 强制插入既有结构段）;恢复: 把内容移入术语表/已锁决策段');
+          process.exit(1);
+        }
         console.error('WARN: CONTEXT.md 检测到孤立追加段（术语/决策应插入既有结构段）：' + m[0].replace(/^##\s*/, '').trim());
       }
     } catch {}
@@ -2092,7 +2198,7 @@ async function main() {
     const lessonsFile = path.join(runRoot, '.specs', 'LESSONS.md');
     try {
       const content = await fs.readFile(lessonsFile, 'utf8');
-      // 条目区锚点兼容：## 条目区（模板）/ ## 活跃条目 + ## 已解决条目（赛事系统实际结构）——取最早条目段
+      // 条目区锚点兼容：## 条目区（模板）/ ## 活跃条目 + ## 已解决条目（实际项目结构）——取最早条目段
       const zoneIndex = (() => {
         const hits = ['条目区', '活跃条目', '已解决条目']
           .map(s => content.search(new RegExp('^##\\s*' + s + '\\s*$', 'm')))
@@ -2102,7 +2208,14 @@ async function main() {
       const headings = [...content.matchAll(/^###\s*L-(\d+)/gm)];
       if (zoneIndex !== -1) {
         const outside = headings.some(h => h.index < zoneIndex);
-        if (outside) console.error('WARN: LESSONS.md 有条目在条目区外');
+        if (outside) {
+          if (isNewChange(state)) {
+            console.error('BLOCKED: LESSONS.md 有条目在条目区外（新 change 强制条目插入条目区）;恢复: 移入条目区');
+            process.exit(1);
+          }
+          // 诊断信息附带 zoneIndex/条目位置——偶发 WARN 排查时可直接定位(文件时序/编码差异兜底)
+          console.error('WARN: LESSONS.md 有条目在条目区外(zoneIndex=' + zoneIndex + ', 条目数=' + headings.length + ', 区外条目: ' + headings.filter(h => h.index < zoneIndex).map(h => 'L-' + h[1]).join(',') + ')');
+        }
       }
       const nums = headings.map(h => parseInt(h[1], 10));
       // 分段检测：按 ## 标题分段，仅同段内比较编号递增（多段 LESSONS 如「活跃条目/已解决条目」编号体系可独立）
@@ -2110,7 +2223,11 @@ async function main() {
       for (let i = 1; i < nums.length; i++) {
         const sameSection = !sectionStarts.some(s => s > headings[i - 1].index && s < headings[i].index);
         if (sameSection && nums[i] <= nums[i - 1]) {
-          console.error('WARN: LESSONS.md 条目编号乱序（L-' + String(nums[i]).padStart(3, '0') + ' 应按序插入条目区）');
+                  if (isNewChange(state)) {
+          console.error('BLOCKED: LESSONS.md 条目编号乱序（新 change 强制按编号插入条目区）;恢复: 按 L-NNN 顺序插入');
+          process.exit(1);
+        }
+        console.error('WARN: LESSONS.md 条目编号乱序（L-' + String(nums[i]).padStart(3, '0') + ' 应按序插入条目区）');
           break;
         }
       }
@@ -2123,7 +2240,11 @@ async function main() {
       const dates = [...content.matchAll(/^- `?\[(\d{4}-\d{2}-\d{2})\]/gm)].map(m => m[1]);
       for (let i = 1; i < dates.length; i++) {
         if (dates[i] > dates[i - 1]) {
-          console.error('WARN: STATE.md 决策日志非倒序（新决策应插入顶部）');
+                  if (isNewChange(state)) {
+          console.error('BLOCKED: STATE.md 决策日志非倒序（新 change 强制顶部插入）;恢复: 顶部插入新决策');
+          process.exit(1);
+        }
+        console.error('WARN: STATE.md 决策日志非倒序（新决策应插入顶部）');
           break;
         }
       }
@@ -2134,9 +2255,19 @@ async function main() {
       const dates = [...content.matchAll(/^\| (\d{4}-\d{2}-\d{2}) \|/gm)].map(m => m[1]);
       for (let i = 1; i < dates.length; i++) {
         if (dates[i] > dates[i - 1]) {
-          console.error('WARN: CHANGELOG.md 表格日期非倒序（新条目应插入表格顶部）');
+                  if (isNewChange(state)) {
+          console.error('BLOCKED: CHANGELOG.md 表格日期非倒序（新 change 强制顶部插入）;恢复: 表格顶部插入新条目');
+          process.exit(1);
+        }
+        console.error('WARN: CHANGELOG.md 表格日期非倒序（新条目应插入表格顶部）');
           break;
         }
+      }
+      // 归档收尾登记兜底(WARN 渐进,新旧一致)——CHANGELOG 未含本 change 标识
+      // (change-id)→ 提示补登记,防静默遗漏(实测:提交信息声称已登记但实际未改,
+      // 机制无兜底;检测为存在级——含 change-id 字样即视为已登记)
+      if (state.activeChange && !content.includes(state.activeChange)) {
+        console.error('WARN: CHANGELOG.md 未登记本 change(' + state.activeChange + ')——归档收尾应在 CHANGELOG 顶部插入本 change 条目(跟随项目既有格式)');
       }
     } catch {}
   }
@@ -2145,8 +2276,12 @@ async function main() {
   const gate = NODE_TRANSITION_GATES[node.id];
   if (gate) {
     for (const ev of gate.evidence) {
+      // subagent-execute 的 handoff-result gate 兼容共用证据库——委托结果记录在
+      // 嵌套 handoffResult（键名契约 handoff-result vs handoffResult 错位），非空即满足
+      // （存在性校验；每个委托内容的 Return Contract 严格校验由 W1-D 负责）
       const satisfied = hasEvidenceField(evidence, ev) ||
-        (typeof evidence.summary === 'string' && evidence.summary.trim() !== '');
+        (typeof evidence.summary === 'string' && evidence.summary.trim() !== '') ||
+        (node.id === 'subagent-execute' && ev === 'handoff-result' && hasNonEmptyHandoffResult(evidence));
       if (!satisfied) {
         console.error('BLOCKED: node ' + node.id + ' exit requires evidence: ' + ev);
         process.exit(1);
@@ -2168,7 +2303,7 @@ async function main() {
       }
     }
   }
-  // P1-A: open exit 校验 REQUIREMENT 含 AC 段（段名基准从 REQUIREMENT 模板派生，模板缺失 fallback 内置段名）
+  // open exit 校验 REQUIREMENT 含 AC 段（段名基准从 REQUIREMENT 模板派生，模板缺失 fallback 内置段名）
   if (node.id === 'open' && state.activeChange) {
     const reqFile = path.join(runRoot, '.specs', state.activeChange, 'REQUIREMENT.md');
     try {
@@ -2180,7 +2315,7 @@ async function main() {
       }
     } catch {}
   }
-  // P1-A: design exit 校验 DESIGN 含技术栈段
+  // design exit 校验 DESIGN 含技术栈段
   if (node.id === 'design' && state.activeChange) {
     const designFile = path.join(runRoot, '.specs', state.activeChange, 'DESIGN.md');
     const designLite = path.join(runRoot, '.specs', state.activeChange, 'DESIGN-lite.md');
@@ -2233,7 +2368,7 @@ async function main() {
       } catch {}
     }
   }
-  // P1-A: plan exit 校验 TASK 含 task 块和 verify 字段
+  // plan exit 校验 TASK 含 task 块和 verify 字段
   if (node.id === 'plan' && state.activeChange) {
     const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
     try {
@@ -2248,9 +2383,34 @@ async function main() {
         console.error('BLOCKED: TASK.md 中 ' + missingVerify.length + ' 个 task 缺 <verify> 字段');
         process.exit(1);
       }
+      // 波次散文一致性检测: 波次散文一致性检测（WARN 渐进）——## 波次划分 的 Wave 行任务带 [P] 标记
+      // （并行语义）但 XML 任务无 parallel="true" → WARN（散文与机器路由依据不一致,以任务
+      // 标记为准）。容错:无并行语义的 Wave 行不参与比对;解析不到波次段跳过（不误报）。
+      const waveSection = content.match(/##\s*波次划分\s*\n([\s\S]*?)(?=\n##\s|\n---|\Z)/);
+      if (waveSection) {
+        const proseParallelIds = [];
+        for (const line of waveSection[1].split('\n')) {
+          if (!/(Wave|\d+\s*波|parallel|并行)/i.test(line)) continue; // 无并行语义行跳过
+          for (const m of line.matchAll(/([A-Z][A-Z0-9-]*)\[P\]/g)) proseParallelIds.push(m[1]);
+        }
+        if (proseParallelIds.length > 0) {
+          const xmlParallelIds = taskBlocks
+            .filter(b => /parallel="true"/.test(b))
+            .map(b => (b.match(/id="([^"]+)"/) || [])[1])
+            .filter(Boolean);
+          const missing = proseParallelIds.filter(id => !xmlParallelIds.includes(id));
+          if (missing.length > 0) {
+                    if (isNewChange(state)) {
+          console.error('BLOCKED: 波次散文标记任务为并行（[P]）但任务无 parallel="true"（新 change 强制散文与任务标记一致）;恢复: 对齐散文或任务标记');
+          process.exit(1);
+        }
+        console.error('WARN: 波次散文标记为并行（[P]）但任务无 parallel="true"——散文与任务标记不一致（以任务标记为准）: ' + missing.join(', '));
+          }
+        }
+      }
     } catch {}
   }
-  // P1-A: review exit 校验 REVIEW 含实质内容
+  // review exit 校验 REVIEW 含实质内容 + 发现区条目处置状态结构级校验
   if (node.id === 'review' && state.activeChange) {
     const reviewFile = path.join(runRoot, '.specs', state.activeChange, 'REVIEW.md');
     try {
@@ -2258,6 +2418,20 @@ async function main() {
       if (stat.size < 100) {
         console.error('BLOCKED: REVIEW.md 内容不足（' + stat.size + ' 字节，需 ≥ 100）');
         process.exit(1);
+      }
+      // L3-1: 发现项（含 Minor）须有处置状态标记——[已修]（对应 fix 任务）/ [升级]（用户决策：
+      // 接受+理由）/ [转待办]（归档时进 KNOWN-ISSUES）。结构级校验，WARN 渐进不 BLOCK：
+      // 旧 REVIEW 未按新格式写标记只警告不阻断（防旧 REVIEW 卡死），执行者补标记后可消除。
+      const missingDisposition = reviewFindingsMissingDisposition(await fs.readFile(reviewFile, 'utf8'));
+      if (missingDisposition.length > 0) {
+        if (isNewChange(state)) {
+          console.error('BLOCKED: REVIEW.md 发现区 ' + missingDisposition.length + ' 项条目缺处置状态标记（[已修]/[升级]/[转待办]）——新 change 强制每项发现须有处置');
+          console.error('恢复: 为发现区条目补处置标记后重试;未处置的发现(含 Minor)不应无声消失');
+          process.exit(1);
+        }
+        console.error('REVIEW WARN: REVIEW.md 发现区 ' + missingDisposition.length +
+          ' 项条目缺处置状态标记（[已修]/[升级]/[转待办]）: ' + missingDisposition.join('、') +
+          '——未处置的发现（含 Minor）不应无声消失，补标记后本警告消除（渐进不阻断）');
       }
     } catch {}
   }
@@ -2280,17 +2454,23 @@ async function main() {
         }
         // 生产代码任务必填 ## 自检方法，声明 brooks-review 或 builtin-quickcheck
         // 格式兼容：方法名行允许中文前缀/括号说明（如 "方法：brooks-review"），按关键词搜索而非 [a-z-]+ 硬匹配
+        // 段名允许带括号后缀（如 "## 自检方法（声明 brooks-review 或 builtin-quickcheck）"——括号为说明非段名部分，
+        // 执行者常按模板标题原样书写导致旧正则不匹配落入"旧格式 WARN"；括号后缀与段名等价）
         // 分隔符用 .?（任意字符）而非 \.?（字面点）：canonical 名 "brooks-review"/"builtin-quickcheck" 是连字符，与既有 /brooks.?review/ 约定一致
-        // S97（dogfood 实证）：方法名可能在段内后续行（子代理列表写法）——段内全文搜索而非仅第一行
+        // 真实项目端到端验证实证：方法名可能在段内后续行（子代理列表写法）——段内全文搜索而非仅第一行
         // 段内容截取到下一个段标题（\n## ）或分隔线（\n---）或文件尾（split 处理,避免 JS 无 \Z 的问题）
-        const methodMatch = content.match(/##\s*自检方法\s*\n([\s\S]*)/i);
+        const methodMatch = content.match(/##\s*自检方法(?:[（(][^）)\n]*[）)])?\s*\n([\s\S]*)/i);
         const methodSection = methodMatch ? methodMatch[1].split(/\n##\s|\n---/)[0] : null;
         const method = methodSection ? /brooks.?review|cache.?brooks|builtin.?quickcheck/i.exec(methodSection) : null;
         if (!method) {
           // 过渡规则：旧格式 SUMMARY 无 ## 自检方法 段——
           // 若全文已声明 brooks-review/cache-brooks/builtin（旧模板行为），WARN 兼容不 BLOCKED；无任何自检声明才 BLOCKED
           if (/brooks.?review|cache.?brooks|builtin.?quickcheck/i.test(content)) {
-            console.error('BROOKS-LINT WARN: ' + f + ' 缺 ## 自检方法 段（旧格式），6 维自查已声明自检方法——兼容通过，建议补全');
+            if (isNewChange(state)) {
+              violations.push(f + ' 缺 ## 自检方法 段（新 change 强制声明自检方法）');
+            } else {
+              console.error('BROOKS-LINT WARN: ' + f + ' 缺 ## 自检方法 段（旧格式），6 维自查已声明自检方法——兼容通过，建议补全');
+            }
           } else {
             violations.push(f + ' 缺 ## 自检方法 字段（必须声明 brooks-review 或 builtin-quickcheck）');
           }
@@ -2299,13 +2479,25 @@ async function main() {
           // （已尝试 Read 插件缓存协议文件手动执行仍不可行——两级降级路径第 2 级；防「未尝试读缓存」的偷懒降级）
           // 关键词声明级校验（设计边界：不做语义判断）；缺失 → WARN 渐进（不 BLOCK，向后兼容旧 SUMMARY）
           if (!/brooks-lint 不可用|插件不可用|unavailable|N\/A/i.test(content)) {
-            console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明 brooks-lint 不可用原因');
+                    if (isNewChange(state)) {
+          console.error('BLOCKED: SUMMARY 使用 builtin-quickcheck 未声明 brooks-lint 不可用原因（新 change 强制）;恢复: 在 ## 自检方法 段补原因（声明级校验——须含关键词: brooks-lint 不可用 / 插件不可用 / unavailable / N/A,如「brooks-lint 不可用(Skill 仅返回占位,插件执行体未加载)」）');
+          process.exit(1);
+        }
+        console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明 brooks-lint 不可用原因');
           } else if (!/插件缓存|缓存协议|协议文件|plugins\/cache/i.test(content)) {
-            console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明缓存尝试证据（应先 Read 插件缓存协议文件手动执行完整 brooks 流程）');
+                    if (isNewChange(state)) {
+          console.error('BLOCKED: SUMMARY 使用 builtin-quickcheck 未声明缓存尝试证据（新 change 强制先 Read 插件缓存协议文件）;恢复: 在 ## 自检方法 段声明缓存尝试（须含关键词: 插件缓存 / 缓存协议 / 协议文件 / plugins/cache,如「已 Read 插件缓存协议文件(~/.claude/plugins/cache/...)手动执行仍不可行」）');
+          process.exit(1);
+        }
+        console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明缓存尝试证据（应先 Read 插件缓存协议文件手动执行完整 brooks 流程）');
           }
         }
         if (sixDim && !/brooks.?review|cache.?brooks/i.test(sixDim[0])) {
-          console.error('BROOKS-LINT WARN: ' + f + ' 的 6 维自查未声明使用 /brooks-review（可能使用了内置快查）');
+                  if (isNewChange(state)) {
+          console.error('BLOCKED: SUMMARY 的 6 维自查未声明使用 /brooks-review（新 change 强制声明自检方法）;恢复: 在 6 维自查段声明 /brooks-review 或理由');
+          process.exit(1);
+        }
+        console.error('BROOKS-LINT WARN: ' + f + ' 的 6 维自查未声明使用 /brooks-review（可能使用了内置快查）');
         }
       } catch {}
     }
@@ -2327,11 +2519,32 @@ async function main() {
         parallel: /parallel="true"/.test(block),
       })).filter(t => t.id);
 
-      // 串行 pending → BLOCKED（execute 任务没做完）
+      // 串行 pending → BLOCKED（execute 任务没做完）——emptyExitApproved 不豁免串行 pending:
+      // 豁免语义是"全 parallel 无串行可做时空退出";存在未完成串行任务时豁免不应生效
+      // (防规划错误被豁免掩盖;豁免仅作用于后续产物校验跳过,审计提示保留)
+      const emptyExitApproved = !!(state.evidence?.execute && state.evidence.execute.emptyExitApproved);
+      if (emptyExitApproved) {
+        console.error('EMPTY-EXIT: execute 空退出豁免已生效(evidence.execute.emptyExitApproved)——审计记录:该 change 在无串行任务时显式豁免空退出');
+      }
       const serialPending = tasks.filter(t => !t.parallel && t.status !== 'done');
       if (serialPending.length > 0) {
-        console.error('BLOCKED: execute 出口仍有串行 pending 任务: ' + serialPending.map(t => t.id).join(', '));
+        console.error('BLOCKED: execute 出口仍有串行 pending 任务: ' + serialPending.map(t => t.id).join(', ') + '——空退出豁免不适用于存在未完成串行任务的情况(先完成串行任务,或修正任务标记)');
         process.exit(1);
+      }
+
+      // done 任务 ↔ SUMMARY 完整性: done 任务 ↔ <id>-SUMMARY.md 存在（WARN 渐进不 BLOCK——防旧 change 卡死；
+      // 结构级校验与 TASK 签名同源：任务完成声明须有对应产物）
+      // M2: 新 change(enter 机制激活)升级为 BLOCKED——执行遗漏(声称完成但无产物)不静默进归档;旧 change 保持渐进
+      const ki8ChangeDir = path.join(runRoot, '.specs', state.activeChange ?? '');
+      for (const tid of tasks.filter(t => t.status === 'done').map(t => t.id)) {
+        if (!(await fileExists(path.join(ki8ChangeDir, tid + '-SUMMARY.md')))) {
+          if (isNewChange(state)) {
+            console.error('BLOCKED: done 任务 ' + tid + ' 缺少 ' + tid + '-SUMMARY.md——execute 产物不完整（新 change 强制任务完成须有对应 SUMMARY;旧 change 渐进 WARN）');
+            console.error('恢复: 补写 ' + tid + '-SUMMARY.md 后重试 exit;任务完成后补产物即可');
+            process.exit(1);
+          }
+          console.error('WARN: done 任务 ' + tid + ' 缺少 ' + tid + '-SUMMARY.md——execute 产物不完整（任务完成须有对应 SUMMARY）');
+        }
       }
 
       // 豁免机制：evidence（当前节点 execute）含 parallelTakeoverApproved: true 时跳过越俎代庖检测（只保留串行 pending 检测）
@@ -2358,17 +2571,69 @@ async function main() {
         }
         // parallel 仍 pending → 合法（下一步 determineNode 路由到 subagent-execute）
       }
+
+      // 越权委托检测（execute 出口）: 越权委托检测（execute 出口第一道）——TASK 有 parallel done 任务 +
+      // completedNodes 无 subagent-execute + 非 direct 模式 + 协议含 subagent-execute 节点
+      // → WARN 渐进（[P] 任务应由 subagent-execute 节点委托——execute 阶段完成 [P] 是
+      // 越权委托痕迹；handoff 记录存在但节点未 exit——上轮真实项目端到端验证实证）
+      const ki10ParallelDone = tasks.filter(t => t.parallel && t.status === 'done').map(t => t.id);
+      const ki10ProtocolHasSubagent = (protocol.nodes ?? []).some(n => n.id === 'subagent-execute');
+      if (ki10ParallelDone.length > 0
+          && !(state.completedNodes ?? []).includes('subagent-execute')
+          && (state.executionMode ?? 'subagent') !== 'direct'
+          && !takeoverApproved
+          && ki10ProtocolHasSubagent) {
+        if (isNewChange(state)) {
+          console.error('BLOCKED: TASK 有 parallel done 任务（' + ki10ParallelDone.join(', ')
+            + '）但 subagent-execute 节点未 exit——新 change 强制 [P] 任务由 subagent-execute 节点委托');
+          console.error('恢复: 经 subagent-execute 节点完成委托后再 exit;或说明越权委托原因');
+          process.exit(1);
+        }
+        console.error('WARN: TASK 有 parallel done 任务（' + ki10ParallelDone.join(', ')
+          + '）但 subagent-execute 节点未 exit——疑似 execute 阶段越权委托，[P] 任务应由 subagent-execute 节点委托');
+      }
     } catch {}
   }
   // W1-C: verify 出口必须真实跑命令（严格版）——历史归档 change 豁免（过渡规则）
   if (node.id === 'verify' && !(await isArchivedChange(state.activeChange))) {
+    // 越权委托兜底检测（verify 出口）: 越权委托兜底检测（verify 出口）——同 KI-10 判定（TASK parallel done +
+    // completedNodes 无 subagent-execute + 非 direct + 协议含 subagent-execute 节点）,
+    // verify 时仍未 exit → WARN 兜底（execute 出口未拦截的提示）
+    try {
+      const ki9TaskText = await fs.readFile(path.join(runRoot, '.specs', state.activeChange ?? '', 'TASK.md'), 'utf8');
+      const ki9TaskBlocks = [...ki9TaskText.matchAll(/<task\b[^>]*>[\s\S]*?<\/task>/g)].map(m => m[0]);
+      const ki9Tasks = ki9TaskBlocks.map(block => ({
+        id: (block.match(/id="([^"]+)"/) || [])[1] || null,
+        status: (block.match(/status="([^"]+)"/) || [])[1] || null,
+        parallel: /parallel="true"/.test(block),
+      })).filter(t => t.id);
+      const ki9ParallelDone = ki9Tasks.filter(t => t.parallel && t.status === 'done').map(t => t.id);
+      const ki9ProtocolHasSubagent = (protocol.nodes ?? []).some(n => n.id === 'subagent-execute');
+      const ki9TakeoverApproved = !!(state.evidence?.execute && state.evidence.execute.parallelTakeoverApproved);
+      if (ki9ParallelDone.length > 0
+          && !(state.completedNodes ?? []).includes('subagent-execute')
+          && (state.executionMode ?? 'subagent') !== 'direct'
+          && !ki9TakeoverApproved
+          && ki9ProtocolHasSubagent) {
+        if (isNewChange(state)) {
+          console.error('BLOCKED: TASK 有 parallel done 任务（' + ki9ParallelDone.join(', ')
+            + '）但 subagent-execute 节点未 exit——新 change 强制(verify 兜底拦截)');
+          console.error('恢复: 经 subagent-execute 节点完成委托后再 exit;或说明越权委托原因');
+          process.exit(1);
+        }
+        console.error('WARN: TASK 有 parallel done 任务（' + ki9ParallelDone.join(', ')
+          + '）但 subagent-execute 节点未 exit——疑似越权委托（execute 出口未拦截,verify 兜底提示）');
+      }
+    } catch {}
     const { execSync } = await import('child_process');
     let verifyCommand = null;
     // 1) TEST.md 的 ## 验证命令 段（首行代码块首行）
     const testDoc = path.join(runRoot, '.specs', state.activeChange ?? '', 'TEST.md');
     if (await fileExists(testDoc)) {
       const text = await fs.readFile(testDoc, 'utf8');
-      const m = text.match(/##\s*验证命令\s*\n\s*```[^\n]*\n([\s\S]*?)```/);
+      // 段名允许括号后缀(与 ## 自检方法 段的括号后缀兼容风格一致——执行者按
+      // 模板标题原样书写或补充说明时不被误 BLOCKED)
+      const m = text.match(/##\s*验证命令(?:[（(][^）)\n]*[）)])?\s*\n\s*```[^\n]*\n([\s\S]*?)```/);
       if (m) verifyCommand = m[1].trim().split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).join(' && ');
     }
     // 2) state 的 verifyCommand
@@ -2382,20 +2647,28 @@ async function main() {
       console.error('BLOCKED: TEST.md 需声明 ## 验证命令 段（严格版要求）');
       process.exit(1);
     }
+    // verify 命令 timeout 可配置——FLOW_COMET_VERIFY_TIMEOUT_MS 环境变量优先，
+    // 缺省 300000ms（300s；后端测试耗时可超 300s，用 env 调大）；非数字/0 → 回退缺省
+    const verifyTimeoutMs = Number.parseInt(process.env.FLOW_COMET_VERIFY_TIMEOUT_MS ?? '300000', 10) || 300000;
     try {
-      execSync(verifyCommand, { cwd: runRoot, stdio: 'pipe', timeout: 300000 });
+      execSync(verifyCommand, { cwd: runRoot, stdio: 'pipe', timeout: verifyTimeoutMs });
     } catch (e) {
-      // verify-fail 自动递增（无需 LLM 主动调用）
-      state.verifyFailures = (state.verifyFailures || 0) + 1;
+      // verify-fail 自动递增（无需 LLM 主动调用）——计数按当前 change 存储
+      // （verifyFailuresByChange，切换 change 不串扰；旧顶层字段迁移并入）
+      const count = verifyFailuresFor(state) + 1;
+      setVerifyFailuresFor(state, count);
       const file = await statePath(protocol);
       const bad = validateStateFields(state);
       if (bad.length) { console.error('BLOCKED: state 字段类型非法: ' + bad[0]); process.exit(1); }
       await writeJson(file, state);
-      if (state.verifyFailures >= 4) {
-        console.error('BLOCKED: verify 已失败 ' + state.verifyFailures + ' 次，需用户决策（继续修/停止）。');
+      if (count >= 4) {
+        console.error('BLOCKED: verify 已失败 ' + count + ' 次，需用户决策（继续修/停止）。');
       } else {
-        console.error('BLOCKED: verify 命令失败: ' + verifyCommand + '\n' + String(e.stdout || e.message).slice(0, 500));
-        console.error('VERIFY-FAIL: ' + state.verifyFailures + '/3');
+        // stdout 为空（如超时被 kill 时 stdout 是空 Buffer——truthy）→ 显示错误消息；
+        // 消息中带实际应用的 timeout（超时可诊断，且与 Node 版本无关）
+        const detail = (e.stdout && e.stdout.length) ? e.stdout : e.message;
+        console.error('BLOCKED: verify 命令失败（timeout ' + verifyTimeoutMs + 'ms）: ' + verifyCommand + '\n' + String(detail).slice(0, 500));
+        console.error('VERIFY-FAIL: ' + count + '/3');
       }
       process.exit(1);
     }
@@ -2416,9 +2689,13 @@ async function main() {
       if (!r) { violations.push(taskId + ' 非 Return Contract（旧格式，缺 completedChecks）'); continue; }
       if (!r.commitHash) violations.push(taskId + ' 缺 commitHash');
       if (!r.greenEvidence || !r.greenEvidence.command) violations.push(taskId + ' 缺 greenEvidence');
-      // P2-B: redEvidence 缺失警告（过渡期不阻断）
+      // redEvidence 缺失警告（过渡期不阻断）——M3: 新 change(enter 机制激活)升级为 BLOCKED(TDD RED 证据强制)
       if (r && !r.redEvidence) {
-        console.error('HANDOFF WARN: ' + taskId + ' 缺 redEvidence（可能未执行 TDD RED 阶段）');
+        if (isNewChange(state)) {
+          violations.push(taskId + ' 缺 redEvidence（新 change 强制 TDD RED 证据;旧 change 渐进 WARN）');
+        } else {
+          console.error('HANDOFF WARN: ' + taskId + ' 缺 redEvidence（可能未执行 TDD RED 阶段）');
+        }
       }
       // completedChecks 严格校验（无旧 change 豁免）
       if (requiredChecks.length > 0) {
@@ -2431,7 +2708,82 @@ async function main() {
     }
     if (violations.length > 0) {
       console.error('BLOCKED: Return Contract 校验失败: ' + violations.join('; '));
+      console.error('恢复: 子代理回传完整契约(含缺失字段)后用 workflow-handoff.mjs result 重录——新 change 强制 TDD RED/GREEN 证据与 completedChecks;注意:若已记录 greenEvidence 而缺 redEvidence,时序防护会拦截事后补录(防掩盖缺 RED)——确认子代理真实执行过 TDD RED 且证据在对应 SUMMARY 中时,用 workflow-state.mjs record subagent-execute 合并写入真实 redEvidence(证据可溯源),或重新委托任务获取完整契约');
       process.exit(1);
+    }
+  }
+  // M2: subagent-execute 出口——done 任务缺 SUMMARY(新 change BLOCKED;旧 change 渐进 WARN)
+  // 此前为已知边界(W1-B 只查存在 SUMMARY 的段内容);执行遗漏(声称完成无产物)不应静默进归档
+  if (node.id === 'subagent-execute' && state.activeChange) {
+    const saTaskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
+    try {
+      const saContent = await fs.readFile(saTaskFile, 'utf8');
+      const saTasks = (saContent.match(/<task[^>]*>[\s\S]*?<\/task>/g) || [])
+        .map(block => ({ id: (block.match(/id="([^"]+)"/) || [])[1] || null, status: (block.match(/status="([^"]+)"/) || [])[1] || null }))
+        .filter(t => t.id);
+      const saDir = path.join(runRoot, '.specs', state.activeChange ?? '');
+      for (const t of saTasks.filter(t => t.status === 'done')) {
+        if (!(await fileExists(path.join(saDir, t.id + '-SUMMARY.md')))) {
+          if (isNewChange(state)) {
+            console.error('BLOCKED: done 任务 ' + t.id + ' 缺少 ' + t.id + '-SUMMARY.md——subagent-execute 产物不完整（新 change 强制任务完成须有对应 SUMMARY;旧 change 渐进 WARN）');
+            console.error('恢复: 补写 ' + t.id + '-SUMMARY.md 后重试 exit;任务完成后补产物即可');
+            process.exit(1);
+          }
+          console.error('WARN: done 任务 ' + t.id + ' 缺少 ' + t.id + '-SUMMARY.md——subagent-execute 产物不完整（任务完成须有对应 SUMMARY）');
+        }
+      }
+    } catch {}
+  }
+  // exit 协议声明标记校验——节点 exit 时扫描 .specs/<change-id>/.skill-loads/ 下该节点标记
+  // （<node>-*.json，执行者加载节点 skill 后经 skill-load 写入，含 protocol 字段——指向
+  // flow-kit/prompts/ 协议文件，只读引用），校验至少一个标记的 protocol ∈ 该节点协议集（节点协议映射表）。
+  // 缺失 → BLOCKED（提示缺协议声明标记 + 指引 skill-load --prompt）；有 → 通过。
+  // 诚实边界：标记是执行者的自我声明——校验只确认「声明存在且 protocol 归属节点」，
+  // 无法证明执行者真的阅读了协议（声明非物理证明，仅保证协议阅读声明可追溯）。
+  // 旧 change 兼容：旧 change/旧 evidence 不追溯——.skill-loads/ 目录不存在（该 change 从未运行过
+  // skill-load，声明机制未激活）→ 跳过校验；节点已 exit 不重验（校验只在当前 exit 时执行）；
+  // 节点重新 exit（重入后再退）时按新规则要求，无豁免。
+  if (state.activeChange && NODE_PROTOCOL_FILES[node.id]) {
+    // 标记目录活动/归档双路径解析（archive 节点「先移目录后 exit」顺序下标记只在
+    // 归档路径——单查活动路径会误报「机制未激活」静默放行）；两处皆无才走旧 change 兼容
+    const loadsDir = await findSkillLoadsDir(runRoot, state.activeChange);
+    if (loadsDir) {
+      const prefix = node.id + '-';
+      const protocolSet = NODE_PROTOCOL_FILES[node.id];
+      const markers = (await fs.readdir(loadsDir.dir).catch(() => []))
+        .filter((f) => f.startsWith(prefix) && f.endsWith('.json'));
+      const malformed = [];
+      let declared = false;
+      for (const f of markers) {
+        try {
+          const marker = JSON.parse(await fs.readFile(path.join(loadsDir.dir, f), 'utf8'));
+          // 比对 basename——新格式（skill-load 写入 basename）与旧格式（完整绝对路径）
+          // 经 markerProtocolBasename 提取后统一比对；损坏值（null/非字符串/超集外 basename）
+          // 提取为 null 或不匹配 → 不进 declared，fail-closed
+          if (marker && typeof marker === 'object' && protocolSet.includes(markerProtocolBasename(marker.protocol))) {
+            declared = true;
+            // R3: auto 标记提示——record 自动补的标记(auto:true)不证明手动加载,提示建议手动声明
+            if (marker.auto === true) {
+              console.error('SKILL-LOAD HINT: ' + f + ' 为 record 自动补写标记(auto)——建议手动 skill-load 声明(如实记录加载动作与协议文件)');
+            }
+            break;
+          }
+        } catch {
+          malformed.push(f);
+        }
+      }
+      if (!declared) {
+        console.error('BLOCKED: 节点 ' + node.id + ' exit 缺协议声明标记——' + loadsDir.display +
+          ' 下需有 ' + prefix + '*.json 且 protocol ∈ [' + protocolSet.join(', ') +
+          ']；执行 skill-load --prompt <flow-kit/prompts/ 协议文件> 声明已阅读协议（声明非物理证明，仅可追溯）' +
+          (malformed.length > 0 ? '；不可解析标记: ' + malformed.join(', ') : ''));
+        process.exit(1);
+      }
+    } else {
+      // 旧 change 兼容 过渡规则：旧 change 兼容——活动与归档路径均无声明标记目录（机制未激活）不追溯；
+      // 首个 skill-load 写入后新规则生效（该 change 后续节点 exit 均需声明标记）
+      console.error('SKILL-LOAD WARN: 旧 change 兼容——.specs/' + state.activeChange +
+        '/.skill-loads/（活动与归档路径）不存在，协议声明校验跳过（机制未激活；首个 skill-load 后新规则生效）');
     }
   }
   // 自动补 required-skill completedChecks——节点被完成即视为其实现 skill 已加载
@@ -2448,7 +2800,9 @@ async function main() {
     console.error('BLOCKED: missing Output Schema evidence: ' + missingSchemaEvidence.join(', '));
     process.exit(1);
   }
-  const missingArtifacts = await missingRequiredArtifacts(protocol, node, state.activeChange);
+  // M6: execute 显式空退出豁免——evidence.execute.emptyExitApproved 时跳过产物校验(全 parallel 无 SUMMARY 属预期)
+  const missingArtifacts = (node.id === 'execute' && state.evidence?.execute?.emptyExitApproved)
+    ? [] : await missingRequiredArtifacts(protocol, node, state.activeChange);
   if (missingArtifacts.length > 0) {
     console.error('BLOCKED: missing Output Schema artifacts: ' + missingArtifacts.join(', '));
     process.exit(1);
@@ -2466,8 +2820,8 @@ async function main() {
   if (apply) {
     const completed = completedSet(state);
     completed.add(node.id);
-    // W2-A: verify exit --apply 成功 → verifyFailures 清零
-    if (node.id === 'verify') state.verifyFailures = 0;
+    // W2-A: verify exit --apply 成功 → 当前 change 的 verifyFailures 清零
+    if (node.id === 'verify') setVerifyFailuresFor(state, 0);
     state.completedNodes = route(protocol).filter((item) => completed.has(item.id)).map((item) => item.id);
     // archive 节点完成后 change 已归档 → 清空活跃 change（flow-comet 回到无活跃状态）
     const isArchive = node.id === 'archive';
@@ -2485,7 +2839,7 @@ async function main() {
           .filter(Boolean));
         // 检查 pending parallel 任务中是否有依赖已满足的
         const parallelBlocks = taskContent.match(/<task[^>]*parallel="true"[^>]*status="pending"[\s\S]*?<\/task>/g) || [];
-        //  (P3): 路由无匹配时输出诊断——结构校验保持严格（不放松正则），检测失败纠偏可见
+        // 路由无匹配时输出诊断——结构校验保持严格（不放松正则），检测失败纠偏可见
         // 旧模板（task 标签无 status 属性）产出的 TASK.md 无法匹配——明确提示而非静默卡在 execute
         if (parallelBlocks.length === 0 && /<task[^>]*parallel="true"/.test(taskContent)) {
           console.error('ROUTE WARN: 未找到 parallel="true" status="pending" 的任务块——检查 task 标签属性（属性顺序：parallel 在 status 前；缺 status 不视为 pending）');

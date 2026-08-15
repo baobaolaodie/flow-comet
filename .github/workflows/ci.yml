@@ -4,17 +4,19 @@
 # (All checks are enforced server-side and independently.)
 #
 # 检查映射 / Check mapping:
-#   regression           guard self-test (97 scenarios incl. scenario-count & public-artifact
-#                        code self-checks) / script syntax / BOM guard / installer
-#                        reproducibility / workflow yaml validity
+#   regression           guard self-test (137 scenarios incl. scenario-count & public-artifact
+#                        code self-checks) / script syntax / BOM guard
+#   installer            prepare-env reproducibility + installed-copy smoke test
+#   quality              workflow yaml validity (actionlint) + bilingual mirror symmetry
 #   pr-policy            PR template completeness (5 bilingual sections + 17 checkboxes,
 #                        deletion = fail) / feature-branch prefix / dev-main sync /
-#                        zero internal codes in title, body, public-file diffs
-#   release-consistency  version consistency (6 spots) + tag reconciliation +
+#                        CHANGELOG self-check verification /
+#                        Conventional Commits (title + dev-PR commit messages)
+#   release-consistency  version consistency (7 spots) + tag reconciliation +
 #                        CHANGELOG per-version PR links
 #   docs-links           dead links + language switchers (lychee; pull/N and claude.ai excluded)
 #
-# Required checks are enabled only after 2-3 observed runs (avoid CI issues blocking releases).
+# Historical note: required checks were enabled after 2-3 observed runs (avoid CI issues blocking releases).
 
 name: ci
 on:
@@ -92,7 +94,9 @@ jobs:
                    ('CHANGELOG.md','CHANGELOG-zh.md'),('docs/INSTALLATION.md','docs/INSTALLATION-zh.md'),
                    ('docs/USAGE.md','docs/USAGE-zh.md'),('docs/PROTOCOL.md','docs/PROTOCOL-zh.md'),
                    ('docs/MECHANISM.md','docs/MECHANISM-zh.md'),('docs/TROUBLESHOOTING.md','docs/TROUBLESHOOTING-zh.md'),
-                   ('docs/VERSIONS.md','docs/VERSIONS-zh.md'),('docs/ECOSYSTEM.md','docs/ECOSYSTEM-zh.md')]
+                   ('docs/VERSIONS.md','docs/VERSIONS-zh.md'),('docs/ECOSYSTEM.md','docs/ECOSYSTEM-zh.md'),
+                   ('SECURITY.md','SECURITY-zh.md')]
+          # CODE_OF_CONDUCT 除外:标准模板(Contributor Covenant)与官方翻译的段落行数天然不对齐(与本地 check-docs-local 一致)
           for en, zh in pairs:
               if not os.path.isfile(en) or not os.path.isfile(zh):
                   raise SystemExit('missing bilingual pair: %s / %s' % (en, zh))
@@ -100,11 +104,11 @@ jobs:
               nz = sum(1 for _ in io.open(zh, encoding='utf-8'))
               if abs(ne - nz) > 10:
                   raise SystemExit('bilingual asymmetry: %s %d vs %s %d' % (en, ne, zh, nz))
-          print('10 bilingual pairs OK')
+          print('11 bilingual pairs OK')
           EOF
 
 
-  # ── PR 纪律: 分支规范 + 模板完整 + 零过程代号 / PR policy ──
+  # ── PR 纪律: 分支规范 + 模板完整 + 提交规范 / PR policy ──
   pr-policy:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -122,6 +126,7 @@ jobs:
             const P = [];
 
             // Feature-branch prefix (release PR head=dev is exempt)
+            // 分支前缀从宽(6 类)、提交/标题从紧(10 类)——刻意设计:分支命名门槛低于提交规范
             if (!isRelease && !/^(feat|fix|docs|chore|hotfix|ci)\//.test(pr.head.ref))
               P.push(`dev PR head branch must carry a feat/fix/docs/chore/hotfix/ci prefix, got ${pr.head.ref}`);
 
@@ -129,8 +134,15 @@ jobs:
             // Tree-level, main-relative: only files main ADDED that dev lacks mean dev
             // is behind. dev may legitimately lead main with unpublished batch changes
             // (those appear as deletions on the main side and must not count).
+            // Files dev deliberately deleted (present in dev's history, removed by an
+            // unpublished evolution — e.g. template md → forms migration) are not drift.
             const drift = execSync('git diff --name-only origin/dev origin/main --diff-filter=A')
-              .toString().trim();
+              .toString().trim().split('\n').filter(Boolean)
+              .filter((f) => {
+                try { execSync(`git cat-file -e origin/dev:${f}`); return true; } catch { /* dev lacks it */ }
+                return !execSync(`git log --oneline origin/dev -- ${f}`).toString().trim();
+              })
+              .join('\n');
             if (isRelease && drift)
               P.push(`dev lacks ${drift.split('\n').length} file(s) that main added — sync dev before creating the release PR`);
             if (!isRelease && drift)
@@ -155,16 +167,22 @@ jobs:
                 P.push(`PR body deleted or omitted checkbox "${it.slice(0, 24)}…" (keep unchecked items)`);
             }
 
+            // CHANGELOG self-check verification: when the PR claims "Behavior changes
+            // recorded in CHANGELOG (Unreleased)" (checked), the branch must actually
+            // change CHANGELOG relative to its base. Development PRs compare against
+            // dev; release PRs (dev -> main) compare against main and pass naturally
+            // because the version section is settled on dev before the release.
+            if (body.includes('- [x] 行为变化已记入 CHANGELOG（Unreleased）/ Behavior changes recorded in CHANGELOG (Unreleased)')) {
+              const base = pr.base.ref === 'main' ? 'origin/main' : 'origin/dev';
+              const clDiff = execSync(`git diff --name-only ${base} HEAD -- CHANGELOG.md CHANGELOG-zh.md`).toString().trim();
+              if (!clDiff) P.push('self-check claims CHANGELOG updated (Unreleased) but no CHANGELOG diff against base');
+            }
+
             // PR title must follow Conventional Commits (type: subject)
             const titleConv = /^(feat|fix|docs|chore|test|ci|refactor|perf|build|revert)(\([^)]+\))?: .+/;
             if (!titleConv.test(pr.title)) P.push(`PR title not Conventional Commits: "${pr.title}"`);
 
-            // Zero process codes in title/body
-            const banned = /T-FIX|batch-|D-\d+|P0|dogfood|round\s*\d/;
-            if (banned.test(pr.title)) P.push(`PR title contains a process code: "${pr.title}"`);
-            if (banned.test(body)) P.push('PR body contains process codes (T-FIX/batch/D-NN/P0/dogfood/round)');
-
-            // Commit-message convention: Conventional Commits prefix + zero process codes
+            // Commit-message convention: Conventional Commits prefix
             // Development PRs only — a release PR (dev -> main) carries the accumulated
             // history of past batches (already reviewed/merged under their own PRs);
             // rewriting history is not an option, so those commits are not re-audited.
@@ -177,26 +195,7 @@ jobs:
                 const msg = c.commit.message.split('\n')[0];
                 if (/^Merge /.test(msg)) continue;
                 if (!conv.test(msg)) P.push(`commit message not Conventional Commits: "${msg.slice(0, 60)}"`);
-                if (banned.test(msg)) P.push(`commit message contains a process code: "${msg.slice(0, 60)}"`);
               }
-            }
-
-            // Zero internal codes in added lines of public files
-            // Fork-PR compatibility: head branch lives in the fork (not origin) — skip the diff check then
-            let files = [];
-            try {
-              files = execSync(`git diff --name-only origin/${pr.base.ref}...origin/${pr.head.ref}`)
-                .toString().trim().split('\n').filter(Boolean);
-            } catch { /* fork PR: head not on origin, skip public-diff check */ }
-            const pub = files.filter(f =>
-              /^(README|CONTRIBUTING|CHANGELOG)[^/]*\.md$|^docs\/.+\.md$|^\.github\/.+\.md$/.test(f));
-            for (const f of pub) {
-              let add = '';
-              try {
-                add = execSync(`git diff origin/${pr.base.ref}...origin/${pr.head.ref} -- "${f}"`)
-                  .toString().split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).join('\n');
-              } catch { continue; }
-              if (banned.test(add)) P.push(`public doc added lines contain process codes: ${f}`);
             }
 
             if (P.length) core.setFailed('Convention violations:\n' + P.join('\n'));
@@ -222,12 +221,17 @@ jobs:
           V2=$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' docs/VERSIONS-zh.md | head -1 | tr -d 'v')
           C1=$(grep -m1 '^## \[[0-9]' CHANGELOG.md | sed -E 's/## \[([0-9.]+).*/\1/')
           C2=$(grep -m1 '^## \[[0-9]' CHANGELOG-zh.md | sed -E 's/## \[([0-9.]+).*/\1/')
-          echo "README=$R1/$R2 VERSIONS=$V1/$V2 CHANGELOG=$C1/$C2"
+          # 安装版本标识:权威源文件须等于 CHANGELOG 首个版本段(无版本段 = unreleased)
+          IV=$(tr -d '\r\n' < .comet/bundle-drafts/flow-comet/skills/flow-comet/INSTALLED_VERSION)
+          IV_EXPECTED=$(grep -m1 '^## \[[0-9]' CHANGELOG.md | sed -nE 's/## \[([0-9.]+).*/\1/p' | head -1)
+          IV_EXPECTED=${IV_EXPECTED:-unreleased}
+          echo "README=$R1/$R2 VERSIONS=$V1/$V2 CHANGELOG=$C1/$C2 INSTALLED_VERSION=$IV"
           if [ "$R1" = "$R2" ] && [ "$R1" = "$V1" ] && [ "$R1" = "$V2" ] && [ "$R1" = "$C1" ] && [ "$R1" = "$C2" ]; then
             :
           else
             echo "版本不一致 / version mismatch across docs"; exit 1
           fi
+          [ "$IV" = "$IV_EXPECTED" ] || { echo "安装版本标识不一致 / INSTALLED_VERSION($IV) != CHANGELOG 版本($IV_EXPECTED)"; exit 1; }
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             TAG=${GITHUB_REF#refs/tags/v}
             [ "$TAG" = "$R1" ] || { echo "tag 与文档版本不一致 / tag v$TAG != documented version $R1"; exit 1; }
@@ -250,4 +254,4 @@ jobs:
         uses: lycheeverse/lychee-action@v2
         with:
           # Exclude: unmerged-PR 404 false positives / claude.ai anti-bot 403 (Actions IP blocked by Cloudflare; browser works)
-          args: --no-progress --exclude 'https?://github\.com/baobaolaodie/flow-comet/pull/|https?://claude\.ai/' README.md README-zh.md CONTRIBUTING.md CONTRIBUTING-zh.md CHANGELOG.md CHANGELOG-zh.md docs/ .github/
+          args: --no-progress --exclude 'https?://github\.com/baobaolaodie/flow-comet/pull/|https?://claude\.ai/' README.md README-zh.md CONTRIBUTING.md CONTRIBUTING-zh.md SECURITY.md SECURITY-zh.md CODE_OF_CONDUCT.md CODE_OF_CONDUCT-zh.md CHANGELOG.md CHANGELOG-zh.md docs/ .github/

@@ -8,11 +8,62 @@
 
 本项目的所有显著变更都记录在此文件中。
 
-格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号仅记录于 git tag 与本文档；`bundle.yaml` 的 version 保持 1.0.0（与发布流程解耦，见 README「版本与兼容性」）。
+格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号记录于 git tag、本文档、README 徽章、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 与权威源 `skills/flow-comet/INSTALLED_VERSION`；`bundle.yaml` 的 version 保持 1.0.0（与发布流程解耦）。
+
+## [1.4.0] - 2026-08-14
+
+多平台安装器框架、平台模块化与真实产物示例。([#45](https://github.com/baobaolaodie/flow-comet/pull/45)、[#46](https://github.com/baobaolaodie/flow-comet/pull/46)、[#47](https://github.com/baobaolaodie/flow-comet/pull/47)、[#48](https://github.com/baobaolaodie/flow-comet/pull/48)、[#50](https://github.com/baobaolaodie/flow-comet/pull/50)、[#52](https://github.com/baobaolaodie/flow-comet/pull/52))
+
+### 新增
+
+- **skill-load 声明机制**：子代理按节点声明已加载的工作流技能；record 按协议要求的技能调用校验声明；exit 校验协议声明标记；交叉自洽时间序校验；与旧 change 向后兼容。
+- **安装版本标识**：`prepare-env` 写入 `<项目>/.claude/skills/flow-comet/INSTALLED_VERSION`（取自源仓库 git 状态：发布 tag 上为 `1.4.0`，积累中的 dev 为 `1.4.0-N-g<hash>`）——issue 与 PR 可据此说明精确版本，含 dev 自上次发布以来的积累程度。
+- **本地提交/推送 hook**：`install-commit-hook.mjs` 配置 commit-msg 与 pre-push hook，拒绝含过程代号的提交/推送消息（本项目的工程约定，非通用词表）。
+- **多平台安装器框架**：`prepare-env` 现支持 Claude Code（默认，行为不变）与 Codex——平台描述符表驱动；TTY 交互式平台选择 + 显式 `--platform` 覆盖 + 自动探测既有 `.claude/` / `.codex/`；技能安装到各平台原生位置（Codex 为自动发现的 `.agents/skills/`）；SKILL/GUIDANCE 命令路径在安装时按平台重写（权威源保持 `.claude` 形态）；Codex 规则注入 AGENTS.md 托管区（Codex 的 `rules/` 目录服务于命令批准策略，非指令文件）；写入守卫 hook 完成 Codex 完全适配——Codex PreToolUse 拦截 Bash 工具调用，hook 从命令解析写入目标（PowerShell cmdlet、.NET File API、重定向）并经 `{"decision":"block"}` 拒绝越权写入（实测 Codex CLI 0.146.0；首次使用经 `/hooks` 信任 hook），Claude Code 输出保持不变。
+
+### 变更
+
+- **回归套件扩展至 137 场景**：`init` 拒绝以 `--` 开头的未知参数（如 `--help`），不再当作 change 名执行；覆盖 skill-load 声明、record 校验、exit 协议校验、交叉自洽时间序、旧兼容、审查发现项处置、产物完整性、委托归属、恢复指引、波次一致性、新 change 自检方法段强制、按 change 隔离的验证失败计数。
+- **CI**：过程代号检查从服务端 PR 策略移至本地 hook；PR/issue 模板按实践重构（勾选项去重、关联 issue 段、基于版本、协议与安装版本字段）。
+- **提交历史平实化**：52 条历史提交消息重写为纯描述（树不变）；重复提交去重。
+- **文档**：README 布局重组（快速开始前置）与借势增强（GSD 链接、痛点引导、适用边界）；安装指南补卸载小节；发布清单去重为单一权威；术语全库统一。
+- **系统测试集扩展至 55 项**（安装器版本标识、多平台安装器场景：Codex 安装冒烟、hook 平台分支契约、平台选择链、清理语义、平台描述符驱动安装冒烟、按 change 隔离的验证失败计数）。
+- **合并门禁改为 CI status checks**：分支保护不再要求 approving review（单人账号无法自 approve）；required checks 为 CI 各 job；bot 审查（CodeRabbit / Sourcery）为意见层——贡献指南新增 bot 审查实践节（仅供参考、行内线程回复、合并前处理）。
+- **示例重构为真实归档产物**：`docs/examples/` 现包含一次真实完整 8 节点 change 的全部工件（processor-pipeline，e2e 假项目运行）——六段 SUMMARY、REVIEW 发现区处置标记、skill-load 声明标记、verify 出口真实执行；移除旧模拟示例与过时产物截图，README 展示区指向真实产物。
+- **全库文档检修**：技能指令去重（删除生成器模板残留与中部 frontmatter）、Comet 定位声称替换为 flow-comet 自身机制表述、逐节点门禁表对齐实际实现（未实现项标注为 review 把关的执行纪律）、双平台（Claude Code / Codex）适配（brooks-lint 调用方式、用户入口、安装文档）、回归基线在全部文档中提升为两级（引擎回归 + 系统测试集）、时效性更新（路线图状态、设计文档回填、交接文档归档）。
+- **新 change 严格模式**：`init` 创建的 change 标记为"新"（`newChange`），全部内容级检查升级为拦截（处置标记/builtin 自检证据/波次散文一致性/越权委托/追加位置/进入证据/自检方法段）；旧 change 保持渐进警告。
+- **执行遗漏防护**：节点进入被记录（新 change 未 entry 直接 exit 拦截；旧 change 渐进警告）；新 change 的已完成任务必须有对应 SUMMARY（拦截；旧 change 保持渐进警告）；新 change 的交接结果必须有 TDD RED 证据；record 自动补写技能加载声明标记；execute 新增显式空退出豁免；init 检测无提交仓库；安装器在 hook matcher 演进时清理残留的空 hook 组。
+
+### 修复
+
+- 产物路径推导尊重协议 `pathBase`（自定义协议声明项目根工件时正确推进）；不支持的根类型 fail-fast。
+- 已完成任务须有对应任务摘要（渐进 WARN，不 BLOCK）。
+- 委托的并行任务越权检测（execute 与 verify 出口）。
+- BLOCKED 消息补恢复指引（advance / select / record）。
+- 波次散文一致性：散文标记并行但任务标签缺并行属性时渐进 WARN。
+- `init` 命令拒绝以 `--` 开头的参数（如 `--help`）——此前会被当作 change 名执行，自动开 change、建分支并写状态。
+- dev-main 同步检查：dev 上有意删除的文件（如模板 md → forms 迁移）不再被误判为 dev 落后。
+- 技能内缺失安装路径前缀的命令补全为权威源路径——两平台安装后均可执行。
+- 过程代号检测正则覆盖 1~3 位场景编号（原先只拦两位）；文档扫描正则与单一来源重新同步；POSIX hook 文件在安装时补齐执行位。
+- CI 双语镜像检查补 SECURITY 对（CoC 按设计豁免，与本地检查一致）；版本期望提取不再依赖失效的回退。
+- 包元数据对齐：技能清单、references 与脚本 sideEffect 与实际分发一致。
+- 机制文档与技能指引补严格模式显式表述（进入强制、SUMMARY 强制、命令级写入拦截进入 Red Flags）。
+- 验证失败计数按变更隔离——切换变更不再继承另一变更的失败次数（旧状态自动迁移）。
+- 归档强制遗留清单（无遗留也显式声明）；声明标记自动补录不再重建已归档的活动目录。
+- 空仓库分支提示与行为一致——无法创建分支时不再声称已创建。
+- 审查字段标签豁免精确到完整标签（如 "Source maps expose paths" 这类标题不再被误豁免处置校验）。
+- `--json-file` 读取限定项目根内（record 与 handoff）。
+- 安装器在 POSIX 执行位设置失败时显式报错（此前静默——git 会跳过不可执行的 hook）。
+- 委托边界 writeFiles 匹配支持部分通配（如 `src/*.mjs`）——`*` 不跨 `/`、字面段保持精确（此前部分通配被字面比较，合法委托被误拦截）。
+- `--json-file` 缺值/空值时报用法错误而非类型错误（record 与 handoff 一致）。
+- 套件头注释与测试矩阵/遗留清单模板中的过时场景数引用（136）同步为 137。
+- 平台文档的 PowerShell 输出编码指引改为显式 `[System.Text.Encoding]::UTF8` 表达式（双语）。
+- 归档阶段 hook 白名单含 `.specs/<change-id>/`——遗留清单可在归档移动前写入变更目录（此前被拦截）。
+- 归档出口新增 WARN：项目 CHANGELOG 未登记本 change 时提示补登记（渐进，新旧 change 一致）。
 
 ## [1.3.1] - 2026-08-11
 
-文档与 CI 维护批次——无行为变更。([#31](https://github.com/baobaolaodie/flow-comet/pull/31)、[#33](https://github.com/baobaolaodie/flow-comet/pull/33)、[#34](https://github.com/baobaolaodie/flow-comet/pull/34)、[#35](https://github.com/baobaolaodie/flow-comet/pull/35)、[#36](https://github.com/baobaolaodie/flow-comet/pull/36)）、[#37](https://github.com/baobaolaodie/flow-comet/pull/37)）
+文档与 CI 维护批次——无行为变更。([#31](https://github.com/baobaolaodie/flow-comet/pull/31)、[#33](https://github.com/baobaolaodie/flow-comet/pull/33)、[#34](https://github.com/baobaolaodie/flow-comet/pull/34)、[#35](https://github.com/baobaolaodie/flow-comet/pull/35)、[#36](https://github.com/baobaolaodie/flow-comet/pull/36)、[#37](https://github.com/baobaolaodie/flow-comet/pull/37)）
 
 ### 新增
 
@@ -27,9 +78,7 @@
 
 ## [1.3.0] - 2026-08-10
 
-自动项目上下文初始化（init 前置步骤）。([#30](https://github.com/baobaolaodie/flow-comet/pull/30)、[#32](https://github.com/baobaolaodie/flow-comet/pull/32))
-
-自动项目上下文初始化（init 前置步骤）。
+自动项目上下文初始化（init 前置步骤）。([#30](https://github.com/baobaolaodie/flow-comet/pull/30)关闭未合并、[#32](https://github.com/baobaolaodie/flow-comet/pull/32)实际合入)
 
 ### 新增
 
@@ -46,6 +95,8 @@
 - 新项目骨架 CONTEXT（占位段）通过校验，不再被拒绝。
 - 对已存在的 change id 重跑 `init` 时先警告再重置（防误操作丢进度）。
 - agent 生成的 CONTEXT 条目格式错误（如反引号包裹日期）会被格式校验拦截并给出精确的重写提示。
+
+> 注：1.2.4 及更早条目保留英文小节标题（Added/Changed/Fixed），为历史条目原文。
 
 ## [1.2.4] - 2026-08-09
 

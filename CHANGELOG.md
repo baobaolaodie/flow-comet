@@ -8,7 +8,58 @@
 
 All notable changes to this project are documented in this file.
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded only in git tags and this document; `bundle.yaml` version stays 1.0.0 (decoupled from release versioning — see the README's version section).
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded in git tags, this document, the README badge, [docs/VERSIONS.md](docs/VERSIONS.md) and the authoritative `skills/flow-comet/INSTALLED_VERSION`; `bundle.yaml` version stays 1.0.0 (decoupled from release versioning).
+
+## [1.4.0] - 2026-08-14
+
+Multi-platform installer framework, platform modularization, and real-artifact examples. ([#45](https://github.com/baobaolaodie/flow-comet/pull/45), [#46](https://github.com/baobaolaodie/flow-comet/pull/46), [#47](https://github.com/baobaolaodie/flow-comet/pull/47), [#48](https://github.com/baobaolaodie/flow-comet/pull/48), [#50](https://github.com/baobaolaodie/flow-comet/pull/50), [#52](https://github.com/baobaolaodie/flow-comet/pull/52))
+
+### Added
+
+- **skill-load declaration mechanism**: subagents declare loaded workflow skills per node; record validates declarations against the protocol's required skill calls; exit checks protocol declaration markers; cross-consistency timestamp checks; backward compatible with legacy changes.
+- **Installed version marker**: `prepare-env` writes `<project>/.claude/skills/flow-comet/INSTALLED_VERSION` from the source repo's git state (`1.4.0` on a release tag; `1.4.0-N-g<hash>` on accumulated dev) so issues and PRs can state the exact version — including how far dev has accumulated since the last release.
+- **Local commit/push hooks**: `install-commit-hook.mjs` sets up commit-msg and pre-push hooks that reject messages carrying process codes (this project's own convention, not a universal list).
+- **Multi-platform installer framework**: `prepare-env` now targets Claude Code (default, unchanged) or Codex via a platform-descriptor table — interactive platform selection (TTY) with an explicit `--platform` override and automatic detection of an existing `.claude/` / `.codex/`; skills install to each platform's native location (`.agents/skills/` for Codex, auto-discovered); SKILL/GUIDANCE command paths are rewritten at install time for non-default platforms (authoritative source stays in `.claude` form); Codex rules are injected into an AGENTS.md managed block (Codex's `rules/` directory serves command-approval policies, not instruction files); the write-guard hook gains full Codex adaptation — Codex PreToolUse intercepts Bash tool calls, the hook parses write targets from the command (PowerShell cmdlets, .NET File API, redirection) and denies out-of-scope writes via `{"decision":"block"}` (measured on Codex CLI 0.146.0; trust the hook on first use via `/hooks`), while the Claude Code output stays unchanged.
+
+### Changed
+
+- **Regression suite expanded to 137 scenarios**: `init` rejects unknown flag-like arguments (e.g. `--help`) instead of treating them as a change name; covering skill-load declarations, record validation, exit protocol checks, cross-consistency timestamps, legacy compatibility, review finding disposition, artifact completeness, delegation attribution, recovery guidance, wave-wording consistency, self-check-method section enforcement for new changes, and per-change verification-failure isolation.
+- **CI**: process-code checks moved from the server-side PR policy to local hooks; PR/issue templates reworked for practice (deduplicated checkboxes, related-issue section, based-on version, protocol and installed-version fields).
+- **Commit history made jargon-free**: 52 historical commit messages rewritten to plain descriptions (tree unchanged); duplicate commits deduplicated.
+- **Docs**: README reorganized (quick start moved up) with recognizable anchors (GSD link, pain-point intro, fit boundary); installation guide gained an uninstall section; release checklist deduplicated to a single source; terminology unified across docs.
+- **System test suite expanded to 55 items** (installer version-marker check, multi-platform installer scenarios: Codex install smoke, hook platform contract, platform selection chain, purge semantics, platform-descriptor-driven install smoke, per-change verification-failure isolation).
+- **Merge gate changed to CI status checks**: branch protection no longer requires an approving review (single-account repo cannot self-approve); required checks are the CI jobs; bot reviewers (CodeRabbit / Sourcery) are advisory — contributing guide gains a bot-reviewers section (advisory-only, threaded replies, resolve before merge).
+- **Examples rebuilt from a real archived run**: `docs/examples/` now carries the complete artifact set of a real 8-node change (processor-pipeline, run in the e2e fake project) — six-section summaries, review findings with disposition markers, skill-load declaration markers, actually-executed verify; the simulated example and outdated artifact screenshots were removed, and the README showcase now points at the real artifacts.
+- **Documentation overhaul**: skill instructions deduplicated (generator-template remnants and mid-file frontmatter removed), Comet-positioning claims replaced with flow-comet's own mechanism descriptions, per-node guardrail tables aligned with the actual guard implementation (unimplemented items now marked as review-checked execution discipline), dual-platform (Claude Code / Codex) adaptation for brooks-lint invocation, user entries, and installation docs, the regression baseline promoted to the two-tier suite (guard self-test + system test) across all docs, and timeliness updates (roadmap state, design-doc backfill, archived handover notes).
+- **Strict mode for new changes**: changes created via `init` are marked new (`newChange`) and enforce all content-level checks as blocking (disposition markers, built-in self-check evidence, wave-wording consistency, overreach delegation, append placement, entry evidence, self-check-method section); legacy changes keep the progressive warnings.
+- **Execution-omission protection**: node entry is now recorded (exit blocks on new changes when a node was exited without entering it); completed tasks require their summary for new changes (blocked — legacy changes keep the progressive warning); handoff results require TDD RED evidence for new changes; record auto-fills skill-load declaration markers; execute gains an explicit empty-exit exemption; init detects commit-less repositories; the installer cleans up stale empty hook groups when the hook matcher evolves.
+
+### Fixed
+
+- Artifact-path derivation respects protocol `pathBase` (custom protocols with project-root artifacts now advance correctly); fail-fast for unsupported roots.
+- Done tasks require matching per-task summaries (progressive warning, not block).
+- Overreach detection for delegated parallel tasks (execute and verify exits).
+- Recovery guidance added to blocked messages (advance / select / record).
+- Wave-wording consistency: prose marking a task parallel without the matching task attribute warns progressively.
+- `init` command rejects arguments starting with `--` (e.g. `--help`) — previously treated as the change name, which auto-created a change, a branch, and state.
+- dev-main sync check: files deliberately deleted on dev (e.g. the template md → forms migration) no longer counted as drift.
+- Skill commands that lacked the install-path prefix now carry the authoritative-source path — executable on both platforms after installation.
+- Process-code detection regex now covers 1-3 digit scenario numbers (previously only two digits); the doc-scanner regex is back in sync with the single source; POSIX hook files get their executable bits set at install time.
+- CI bilingual-mirror check now covers SECURITY (CoC excluded by design, matching the local checker); the version-expected extraction no longer relies on a dead fallback.
+- Bundle metadata aligned: skills list, references, and script side effects match the actual distribution.
+- Mechanism docs and the skill guidance now state the strict-mode rules explicitly (entry enforcement, summary enforcement, and command-level write interception in the Red Flags).
+- Verification-failure counting is now isolated per change — switching changes no longer carries over another change's failure count (legacy states migrate automatically).
+- Archived changes now require the leftover-issues list (explicitly stating "no leftovers" when none); declaration-marker auto-fill no longer rebuilds an archived change's active directory.
+- The empty-repository branch hint now matches behavior — no branch is claimed when none can be created.
+- Review field-label exemption matches full labels only (a finding titled like "Source maps expose paths" is no longer mis-exempted from disposition validation).
+- `--json-file` reads are restricted to paths inside the project root (record and handoff).
+- The hook installer fails explicitly when POSIX executable bits cannot be set (previously silent — git would skip non-executable hooks).
+- Delegation writeFiles matching supports partial-segment globs (e.g. `src/*.mjs`) with anchored per-segment matching — `*` never crosses `/` and literal segments stay exact (previously a partial glob was compared literally and blocked valid delegations).
+- `--json-file` with a missing or empty value now reports a usage error instead of an internal type error (record and handoff).
+- Stale scenario-count references (136) in the suite headers and the test-matrix / known-issues templates are synced to 137.
+- PowerShell output-encoding guidance uses the explicit `[System.Text.Encoding]::UTF8` expression (bilingual).
+- The archive-stage hook whitelist includes `.specs/<change-id>/` so the leftover-issues list can be written into the change directory before archiving (previously blocked).
+- Archive exit warns when the project CHANGELOG has no entry for the change being archived (progressive, both new and legacy changes).
 
 ## [1.3.1] - 2026-08-11
 

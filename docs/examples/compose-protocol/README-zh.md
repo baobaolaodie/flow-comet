@@ -1,3 +1,9 @@
+<div align="right">
+
+[English](README.md) · [中文](README-zh.md)
+
+</div>
+
 # compose-protocol 示例：自定义协议（brainstorm → tdd → codereview）
 
 > 用 `/flow-comet-compose` 组合三个已安装 skill 生成自定义工作流的**完整示例**——协议 JSON + 冒烟验证记录。节点 id 避开内置 8 节点 id（`brainstorm`/`tdd`/`codereview`），特化校验不误触发。

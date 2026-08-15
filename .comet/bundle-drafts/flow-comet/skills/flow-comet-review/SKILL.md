@@ -15,13 +15,13 @@ This node performs a structured multi-round review of the implemented change, ch
 
 ## Guidance
 
-### 必填段清单（exit guard 校验，结构+存在级）
+### 必填段清单（结构+存在级）
 
-| 文件 | 必填段 |
-|------|--------|
-| REVIEW.md | `## Critical` / `## 发现` / `## 结论` |
+| 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
+|------|-------------------------------|-----------------------------------|
+| REVIEW.md | 文件 ≥ 100 字节；发现区条目处置标记（`[已修]` / `[升级]` / `[转待办]`——新 change 缺失 BLOCKED,旧 change WARN 渐进） | `## Critical` / `## 发现` / `## 结论` 等段（结构要求，guard 不拦段名） |
 
-**缺失任一必填段 = 节点未完成**，exit guard 校验（见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B）。
+guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
 
 ### Prerequisites
 
@@ -33,8 +33,6 @@ This node performs a structured multi-round review of the implemented change, ch
 - The reviewer agent must NOT modify code directly (R3.3) — only produce reports and fix tasks.
 
 ### Steps
-
-**Express 路径（低风险 change 降级，P1）**：若 CHANGE.md 头部含 `express: true`（低风险判定：改动 ≤3 文件、无后端 schema/API/数据库变更、无安全/认证/并发、纯前端重构/文案/简单 bug 修复），则只执行 **Round 1（spec 合规）+ Round 1.5（契约核对）**，跳过 Round 2（完整 6 维）、Round 2.0/2.2、Round 3（UI）、Round 4；REVIEW.md 标注 "express 审查"。否则执行完整轮次。
 
 1. **Round 1 — Spec compliance**: For each AC in REQUIREMENT.md:
    - Check if implemented (link to code/file).
@@ -57,9 +55,9 @@ This node performs a structured multi-round review of the implemented change, ch
    - **R5 Dependency Disorder**: Do dependencies flow consistently (high -> low layer)?
    - **R6 Domain Model Distortion**: Does the code faithfully reflect the business domain?
 
-   Prefer `/brooks-review` (main session has brooks-lint installed) and paste output verbatim. The built-in 6-dimension quick check is a FALLBACK ONLY when brooks-lint is genuinely unavailable (e.g. subagent environment without the plugin) — then diagnose with 4-element format (Symptom/Source/Consequence/Remedy) with file:line references and book citations, and record "brooks-lint unavailable" in the review.
+   Prefer `/brooks-review` (Claude Code; Codex: `$brooks-review` / `/use brooks-review` — brooks-lint installed) and paste output verbatim. The built-in 6-dimension quick check is a FALLBACK ONLY when brooks-lint is genuinely unavailable (e.g. subagent environment without the plugin) — then diagnose with 4-element format (Symptom/Source/Consequence/Remedy) with file:line references and book citations, and record "brooks-lint unavailable" in the review.
 
-3. **Round 2.0 — TEST.md 5-round pyramid completeness**: Before code quality, verify TEST.md:
+3.5. **Round 2.0 — TEST.md 5-round pyramid completeness**: Before code quality, verify TEST.md:
    - All 5 rounds have clear status (no unfilled).
    - Skipped rounds have reasons.
    - Round 1 (functional): every AC has coverage.
@@ -69,7 +67,7 @@ This node performs a structured multi-round review of the implemented change, ch
    - Round 5 (observability): if required, has log/metric/alert/health check.
    - Any gap -> mark Critical, return to 5-test first.
 
-4. **Round 2.2 — Architecture dependency check (large changes)**: If change adds top-level modules, has dangerous imports, introduces new middleware/services, or spans >= 5 modules: run `/brooks-audit` (or draw simplified Mermaid dependency graph). Check for circular dependencies, reverse dependencies, cross-boundary imports.
+4. **Round 2.2 — Architecture dependency check (large changes)**: If change adds top-level modules, has dangerous imports, introduces new middleware/services, or spans >= 5 modules: run `/brooks-audit` (Codex: `$brooks-audit`; or draw simplified Mermaid dependency graph). Check for circular dependencies, reverse dependencies, cross-boundary imports.
 
 5. **Round 3 — UI visual review (frontend only)**: If change has UI-DESIGN.md or touches UI files:
    - **3.1 Design tokens**: All colors from UI-DESIGN.md CSS variables? No hardcoded hex/font-size/spacing?
@@ -78,7 +76,7 @@ This node performs a structured multi-round review of the implemented change, ch
    - **3.4 Accessibility quick check**: WCAG 2.1 AA contrast, keyboard reachable, focus ring visible, reduced-motion support, form label association, image alt text.
 
 6. **Round 4 — Optional supplements**:
-   - **4.1 Tech debt assessment**: If milestone/quarterly release, run `/brooks-debt`. Categorize findings into Critical (fix now) / Scheduled (next 1-3 iterations) / Monitored (record only).
+   - **4.1 Tech debt assessment**: If milestone/quarterly release, run `/brooks-debt` (Codex: `$brooks-debt`). Categorize findings into Critical (fix now) / Scheduled (next 1-3 iterations) / Monitored (record only).
    - **4.2 Cross-model spot-check**: If involves security/auth/concurrency/single function >80 lines/coverage drop: run same review with another model, record divergence.
 
 7. **Severity grading**: Each finding gets:
@@ -88,6 +86,12 @@ This node performs a structured multi-round review of the implemented change, ch
 
 8. **Generate fix tasks**: For all Critical and decided-to-fix Major findings, append to `.specs/<change-id>/TASK.md` as numbered fix tasks with full 7 fields — 追加到 TASK.md 的 `## Fix 任务` 段内（**禁止文件尾追加**）, then trigger return to execute node.
 
+9. **Disposition markers (problem-handling principle)**: Every finding entry in the `## 发现` section of REVIEW.md — including Minor — must carry a **disposition marker** so findings never silently disappear after being recorded:
+   - `[已修]` — fixed via a fix task (linked in the entry)
+   - `[升级]` — escalated to the user for a decision (accept + reason recorded)
+   - `[转待办]` — deferred to `.specs/<change-id>/KNOWN-ISSUES.md` at archive time
+   The exit guard structurally checks these markers on the findings area (missing marker → non-blocking warning, to avoid deadlocking legacy reviews; add markers to clear it).
+
 The full review protocol, templates, and checklists are in:
 - `flow-kit/prompts/6-review.md` (REVIEW phase)
 - `flow-kit/prompts/5-test.md` (TEST phase, for test pyramid completeness)
@@ -96,7 +100,7 @@ The full review protocol, templates, and checklists are in:
 
 This node is truly done when:
 - `.specs/<change-id>/REVIEW.md` exists with all 3 mandatory rounds completed.
-- Every finding has a severity label and file:line reference.
+- Every finding has a severity label, file:line reference, and a disposition marker (`[已修]` / `[升级]` / `[转待办]`).
 - All Critical items are either fixed (fix tasks generated) or explicitly accepted with user confirmation.
 - 0 unacknowledged Critical items remain.
 - TEST.md 5-round pyramid completeness has been verified.
@@ -109,6 +113,7 @@ This node is truly done when:
 - **Agent thought**: "I'll fix this small issue directly." **Actual risk**: Reviewer modifying code violates R3.3. Must generate fix tasks instead.
 - **Agent thought**: "Round 3 (UI) is optional." **Actual risk**: For frontend projects with UI changes, Round 3 is mandatory. Only non-frontend projects skip it.
 - **Agent thought**: "6-dimension review is just a checklist." **Actual risk**: Without file:line references and book citations (when using built-in path), the review lacks rigor and fixability.
+- **Agent thought**: "I'll record this Minor and move on." **Actual risk**: Findings (especially Minor) that are recorded without a disposition marker silently disappear — the exit guard warns on missing markers; every finding must be `[已修]`, `[升级]` (user decision), or `[转待办]` (tracked for archive).
 
 ## Entry Check
 
@@ -133,6 +138,13 @@ The review node performs a structured 4-round review: spec compliance (Round 1),
 
 Load `flow-comet-test` during this Node and record completed check `required-skill:review.flow-comet-test`. Reason: 测试金字塔完整性
 
+**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load review flow-comet-review --prompt flow-kit/prompts/6-review.md
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load review flow-comet-test --prompt flow-kit/prompts/5-test.md
+```
+
 ## Augmentations
 
 This Node has no declared augmentations.
@@ -154,19 +166,14 @@ Evidence: `review-summary` (required)
 node .claude/skills/flow-comet/scripts/workflow-state.mjs record review '{"summary":"REVIEW.md produced: N Critical, M Major, K Minor. X fix tasks generated."}'
 ```
 
-Generic template:
-```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs record review '{"summary":"record the real Node result","completedChecks":[]}'
-```
-
 ## Guardrails
 
 | Guardrail ID | Label | Validation Type |
 |--------------|-------|-----------------|
 | `review-evidence` | REVIEW.md exists | artifact-exists |
-| `critical-resolved` | 0 unacknowledged Critical items | content-check |
-| `no-code-changes` | Reviewer did not modify code files | file-unchanged |
-| `test-pyramid-checked` | TEST.md 5-round completeness verified | content-check |
+| `critical-resolved` | 0 unacknowledged Critical items | 执行纪律（review 把关），guard 不校验 |
+| `no-code-changes` | Reviewer did not modify code files | 执行纪律（review 把关），guard 不校验 |
+| `test-pyramid-checked` | TEST.md 5-round completeness verified | 执行纪律（review 把关），guard 不校验 |
 
 ## Exit Check
 
@@ -184,5 +191,3 @@ If the script prints `SKILL: flow-comet-verify`, load that Skill next.
 4. If Critical items were found but fix tasks not yet generated, generate them now.
 5. If fix tasks were generated but not executed, return to execute node.
 6. Do not repeat completed review rounds.
-
-Generic fallback: read `.claude/skills/flow-comet/reference/workflow-protocol.json` and the configured workflow state; resume the first Node not listed in `completedNodes`.

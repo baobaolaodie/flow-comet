@@ -15,20 +15,29 @@ Responsibility: 委托 [P] 并行任务给子代理，要求加载 flow-comet-de
 
 职责分工：execute 节点负责**串行委托**（非 parallel 任务，一次一个），本节点负责**并行委托**（`parallel="true"` 任务，同 wave 多任务同时发）。两者共用同一委托证据库（handoff 记录在 subagent-execute evidence）。
 
+> **Codex 平台委托方式（2026-08-13 调研修正 + 实测）**：Codex CLI 无 `--worktree` 一键 flag（openai/codex#12862 跟踪中），但 git worktree 是标准支持方式（Codex App 内置 worktree；子代理运行时自动创建 worktree 隔离）——本节点委托与 Claude Code 的 worktree 隔离语义对齐：协调者对每个 parallel 任务 `git worktree add <worktree路径> -b <分支>` → 在 worktree 内 `codex exec` 委托（fresh-context，prompt 内联任务块 + AC + 强制加载 flow-comet-dev 与回传 Return Contract，`</dev/null>` 防 stdin 卡住）→ 子代理回报 commitHash 后校验存在性 + 任务完成回收（`git worktree remove`）。
+> **沙箱要求（实测 2026-08-13）**：worktree 的 `.git` 是主仓共享——`workspace-write`/`git-write-access` 沙箱均被 Codex 硬拦截（index.lock / objects / COMMIT_EDITMSG Permission denied）；子代理必须用 `sandbox_mode="danger-full-access"` 才能完成 git 提交（worktree 隔离已限定写范围，full-access 仅用于让 git 提交可行）。**信任边界**：`danger-full-access` 是宿主级信任边界（不隔离凭据/网络访问）——仅委托可信子代理，并移除委托环境中的不必要凭据。
+> **hook 会话 root 继承（实测 2026-08-15）**：Codex worktree 子代理的会话 root 仍是主仓库，hook 以主仓库状态判定——`execute`/`subagent-execute` 阶段协调者白名单 `.specs/` 会拦截子代理在 worktree 内写源码（与 CC 子代理"无 state 放行"语义不同）。规避：子代理用 Python `open()` 等 File API 直写（命令级检测限制）或协调者代操作；详见 worktree-notes 4.5。handoff 记录（workflow-handoff request/result）与 Return Contract 校验机制不变。
+
 ## Guidance
 
-### 必填段清单（exit guard 校验，结构+存在级）
+### 必填段清单（结构+存在级）
 
-| 文件 | 必填段 |
-|------|--------|
-| SUMMARY.md | `## 做了什么` / `## 改动文件` / `## verify 输出` / `## 6 维自查` / `## 越界检查` / `## 自检方法` |
+| 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
+|------|-------------------------------|-----------------------------------|
+| SUMMARY.md | `## verify 输出` / `## 6 维自查`（须含实质内容）/ `## 越界检查` / `## 自检方法` | `## 做了什么` / `## 改动文件` 等（执行纪律，review 把关） |
 
-**缺失任一必填段 = 节点未完成**，exit guard 校验（见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B）。
+> **注意**：flow-kit 的 SUMMARY 模板**不含 `## 自检方法` 段**——该段是 flow-comet 的强制增量（guard 校验自检方法声明）。使用 `flow-kit/templates/SUMMARY.md` 填写后，**必须按上方必填段清单补写 `## 自检方法` 段**，否则新 change 的 exit 会被 BLOCKED。
+>
+> **无 parallel 任务时**：若路由到此节点但 TASK.md 无 `parallel="true" status="pending"` 任务（如全部任务已被 execute 串行处理），按常规流程记录证据后直接退出（entry → record → exit），不要空转等待。
 
----
-name: flow-comet-subagent-execute
-description: "Subagent Execute node for flow-comet: delegates parallel (parallel=true) tasks to subagents with flow-comet-dev loaded, collecting handoff evidence. Do not use for ordinary standalone tasks."
----
+**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）。本节点的 `flow-comet-dev` 为 handoff scope——由子代理加载，**M5 自动补标记不覆盖 handoff scope（2026-08-16）**，协调者必须手动声明（协调者构造 handoff prompt 时按 4-dev.md 协议引用子代理的 dev 协议，声明是真实动作）：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load subagent-execute flow-comet-dev --prompt flow-kit/prompts/4-dev.md
+```
+
+guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
 
 # Subagent Execute
 
@@ -62,7 +71,7 @@ Division of labor: `execute` node handles serial delegation (non-parallel tasks,
 
 1. **Identify parallel tasks**: Read TASK.md and find all tasks with `parallel="true"` and `status="pending"`. Verify they are genuinely independent (no file conflicts between them — check `write_files` do not overlap).
 
-2. **For each parallel task, create handoff request**: Use `workflow-handoff.mjs request <task-id>` to register the handoff.
+2. **For each parallel task, create handoff request**: Use `workflow-handoff.mjs request <task-id>` to register the handoff. **委托即记 request**——直接记录 result 而无对应 request 时,write_files 允许列表为空会被 BLOCKED(新 change 强制委托边界),补 request 后再重录 result 即可。
    > 若不传 `--write-files`，脚本会自动从 TASK.md 对应 task 的 `<write_files>` 块解析（orchestrator 无需手动从 TASK.md 提取文件列表）。
    The handoff prompt must include:
    - The task's full XML block from TASK.md.
@@ -72,6 +81,7 @@ Division of labor: `execute` node handles serial delegation (non-parallel tasks,
    - Explicit requirement to return `completedChecks` in the Return Contract containing `required-skill:subagent-execute.flow-comet-dev`（证明已加载 implementation skill；guard W1-D 严格校验，缺失 → exit BLOCKED，无旧 change 豁免）。
    - The task's `read_files` and `write_files` boundaries.
    - Instruction to produce `<task-id>-SUMMARY.md` in `.specs/<change-id>/`.
+   - **提交边界警告**:提交**只含该任务 write_files 范围内的文件**(含测试文件)——不得包含 TASK.md 与其他协调者维护的 .specs 工件(新 change 提交越界 BLOCKED;实测子代理提交含 TASK.md 被 W2-D 拦截)。**例外**:任务专属的 `<task-id>-SUMMARY.md`(位于 `.specs/<change-id>/`,是 flow-comet 强制产物)允许随任务提交——W2-D 对 `*-SUMMARY.md` 有显式豁免。
 
 3. **Delegate to subagents**（强制 worktree isolation）: 所有并行子代理**必须**使用 `Agent` 工具的 `isolation: "worktree"`，**禁止共享 cwd 直接委托**——hook 白名单依赖 worktree 隔离：子代理 cwd 无 `.comet/flow-comet-state.json`（.gitignore 排除）时 hook 放行源码写入，共享 cwd 的子代理会被 subagent-execute 白名单误拦。Each subagent:
    - Reads TASK.md for its specific task block.
@@ -92,7 +102,7 @@ Division of labor: `execute` node handles serial delegation (non-parallel tasks,
 
 5. **Mark done**: Update TASK.md — set `status="done"` for all completed parallel tasks.
 
-6. **Record overall evidence**: Run workflow-state.mjs to record completion.
+6. **Record overall evidence**: Run `node .claude/skills/flow-comet/scripts/workflow-state.mjs record subagent-execute '<evidence JSON>'` to record completion.
 
 7. **Exit check**: Run exit check.
 
@@ -115,7 +125,7 @@ Division of labor: `execute` node handles serial delegation (non-parallel tasks,
 ```
 
 - `status=DONE` 才视为完成；`BLOCKED` / `NEEDS_CONTEXT` 需 orchestrator 处理。
-- `redEvidence` / `greenEvidence` 缺任一 → 视为未执行 TDD，orchestrator 拒绝记录。
+- `redEvidence` / `greenEvidence` 缺任一 → 视为未执行 TDD，orchestrator 拒绝记录；**新 change 下 guard 强制 BLOCKED**（旧 change WARN 渐进）。
 - `completedChecks` 必须含 `required-skill:subagent-execute.flow-comet-dev`（子代理加载 implementation skill 的证明）；缺任一项 → guard exit 严格 BLOCKED（W1-D，无旧 change 豁免），orchestrator 不得以旧格式/补录方式绕过。
 - `riskSignals` 非 `none` 时，orchestrator 应将该任务标记为 review 节点的高优先级审查对象。
 - 子代理回传后，orchestrator 用 `workflow-handoff.mjs result <task-id> '<JSON>'` 记录；guard exit subagent-execute 会校验 commitHash + greenEvidence + completedChecks（W1-D，严格）。
@@ -151,7 +161,12 @@ The subagent-execute node identifies all `parallel="true"` pending tasks in TASK
 | Skill | Enforcement | Reason |
 |-------|-------------|--------|
 | `flow-comet-dev` | Required in each subagent's prompt | Provides TDD, LESSONS scan, diff boundary, self-review protocol for each parallel task |
-| `superpowers:subagent-driven-development` | Required for delegation pattern | Provides the Agent tool invocation pattern for parallel task execution |
+
+**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load subagent-execute flow-comet-dev --prompt flow-kit/prompts/4-dev.md
+```
 
 ## Output Schemas
 
@@ -175,8 +190,8 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record subagent-execut
 | Guardrail ID | Label | Validation Type |
 |--------------|-------|-----------------|
 | `handoff-evidence` | Handoff evidence recorded for each task | evidence-only |
-| `parallel-only` | Only parallel="true" tasks delegated | content-check |
-| `boundary-safe` | No subagent exceeded write_files | content-check |
+| `parallel-only` | Only parallel="true" tasks delegated | 执行纪律（review 把关），guard 不校验 |
+| `boundary-safe` | No subagent exceeded write_files | 新 change 提交越界 BLOCKED（handoff 记录时校验），旧 change WARN 渐进 |
 | `summaries-exist` | SUMMARY.md exists for each delegated task | artifact-exists |
 
 ## Exit Check
@@ -194,48 +209,3 @@ If the script prints `SKILL: flow-comet-review`, load that Skill next.
 3. Check for existing `<task-id>-SUMMARY.md` files — tasks with summaries are done even if TASK.md not updated.
 4. Re-delegate only the remaining pending parallel tasks.
 5. If a subagent failed mid-execution, check for `<task-id>-PROGRESS.md` and use its "excluded solutions" to avoid repeating failures.
-
-
-## Entry Check
-
-```bash
-node flow-comet/scripts/workflow-guard.mjs entry subagent-execute
-```
-
-## Skill Implementation
-
-Load `flow-comet-subagent-execute` for this Node. Operation: `require`.
-
-## Required Skill Calls
-
-- When delegating this Node, the handoff prompt must require loading `flow-comet-dev` and returning evidence with completed check `required-skill:subagent-execute.flow-comet-dev`. Reason: 子代理加载 DEV 规则并回传 evidence
-
-## Augmentations
-
-- This Node has no declared augmentations.
-
-## Output Schemas
-
-- `flowkit.handoff.v1`: Subagent handoff Required evidence: `handoff-request`, `handoff-result`. Required artifacts: none.
-
-## Evidence Record
-
-```bash
-node flow-comet/scripts/workflow-state.mjs record subagent-execute '{"summary":"record the real Node result","completedChecks":[]}'
-```
-
-## Guardrails
-
-- `handoff-evidence`: Handoff evidence recorded (evidence-only).
-
-## Exit Check
-
-```bash
-node flow-comet/scripts/workflow-guard.mjs exit subagent-execute --apply
-```
-
-If the script prints `SKILL: flow-comet-review`, load that Skill next.
-
-## Recovery
-
-Read `reference/workflow-protocol.json` and the configured workflow state. Resume the first Node that is not listed in `completedNodes`.

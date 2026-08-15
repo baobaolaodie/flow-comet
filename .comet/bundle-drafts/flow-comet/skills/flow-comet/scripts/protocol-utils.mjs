@@ -344,3 +344,33 @@ export function parseProtocolWriteWhitelist(protocol) {
   }
   return checkWriteWhitelistShape(protocol.writeWhitelist);
 }
+
+// 节点 → flow-kit/prompts/ 协议文件映射(单一来源——workflow-guard 的 exit 协议声明校验与
+// workflow-state 的 M5 record 自动补声明共用;改动词表仅此一处)
+// 注释约定:以 flow-kit/prompts/ 实文件为准(0-change.md ~ 7-integration.md,随 flow-kit 仓库同步)
+export const NODE_PROTOCOL_FILES = {
+  open: ['0-change.md', '1-requirement.md'],
+  design: ['2-design.md'],
+  plan: ['3-task.md'],
+  execute: ['4-dev.md'],
+  'subagent-execute': ['4-dev.md'],
+  review: ['6-review.md', '5-test.md'],
+  verify: ['7-integration.md'],
+  archive: ['7-integration.md'],
+};
+
+// skill → flow-kit/prompts/ 协议文件映射(单一来源——M5 record 自动补声明按 skill 归属
+// 协议文件;手动 skill-load 仍以 --prompt 的 basename 为准,不受此表影响)
+// 与 NODE_PROTOCOL_FILES 的关系:节点级(exit 校验用)与 skill 级(M5 自动补用)两表并存;
+// skill 级取该 skill 承载的协议文件(多节点共用的 skill 如 flow-comet-dev/integration 恒映射同一文件)
+export const SKILL_PROTOCOL_FILES = {
+  'flow-comet-change': ['0-change.md'],
+  'flow-comet-requirement': ['1-requirement.md'],
+  'flow-comet-design': ['2-design.md'],
+  'flow-comet-ui-design': ['2a-ui-design.md'],
+  'flow-comet-task': ['3-task.md'],
+  'flow-comet-dev': ['4-dev.md'],
+  'flow-comet-test': ['5-test.md'],
+  'flow-comet-review': ['6-review.md'],
+  'flow-comet-integration': ['7-integration.md'],
+};

@@ -15,19 +15,14 @@ Responsibility: CHANGE 反问 + REQUIREMENT 需求分析。生成 CHANGE.md 和 
 
 ## Guidance
 
-### 必填段清单（exit guard 校验，结构+存在级）
+### 必填段清单（结构+存在级）
 
-| 文件 | 必填段 |
-|------|--------|
-| CHANGE.md | `## 变更目标` / `## 变更范围` / `## 影响面` / `## 风险` |
-| REQUIREMENT.md | `## 用户故事` / `## 验收标准` / `## 范围切分` |
+| 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
+|------|-------------------------------|-----------------------------------|
+| CHANGE.md | `## Why（为什么做）` | `## 影响面` / `## 范围排除` / `## 风险与未知` 等 |
+| REQUIREMENT.md | `## 用户故事` / `## 验收准则（AC）` | `## 范围切分` / `## 非功能性需求` 等 |
 
-**缺失任一必填段 = 节点未完成**，exit guard 校验（见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B）。
-
----
-name: flow-comet-open
-description: "Open node for flow-comet: produces CHANGE.md + REQUIREMENT.md via structured questioning and AC derivation. First node in the flow — no upstream artifacts needed. Do not use for ordinary standalone tasks."
----
+guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / templateSectionPatterns；「填得好不好」由 review 把关。
 
 # Open
 
@@ -111,6 +106,13 @@ The open node loads `flow-comet-change` for the CHANGE phase (structured questio
 | `flow-comet-change` | Required before CHANGE.md generation | Provides structured questioning protocol, architecture detection, and tone preselection |
 | `flow-comet-requirement` | Required before REQUIREMENT.md generation | Provides AC format (Given/When/Then), scope split, and terminology extraction rules |
 
+**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-change --prompt flow-kit/prompts/0-change.md
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-requirement --prompt flow-kit/prompts/1-requirement.md
+```
+
 ## Output Schemas
 
 Schema: `flowkit.intake.v1`
@@ -134,8 +136,8 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record open '{"summary
 | Guardrail ID | Label | Validation Type |
 |--------------|-------|-----------------|
 | `intake-artifacts` | CHANGE.md + REQUIREMENT.md exist | artifact-exists |
-| `context-updated` | CONTEXT.md has new terms/decisions | artifact-exists |
-| `scope-exclusion` | At least 1 out-of-scope item in CHANGE.md | content-check |
+| `context-updated` | CONTEXT.md has new terms/decisions | 执行纪律（review 把关），guard 不校验 |
+| `scope-exclusion` | At least 1 out-of-scope item in CHANGE.md | 执行纪律（review 把关），guard 不校验 |
 
 ## Exit Check
 
@@ -152,49 +154,3 @@ If the script prints `SKILL: flow-comet-design`, load that Skill next.
 3. Read `.specs/<change-id>/REQUIREMENT.md` — if exists and confirmed, skip REQUIREMENT phase.
 4. Resume from the first incomplete artifact. Do not repeat confirmed phases.
 5. If CHANGE.md exists but REQUIREMENT.md does not, continue from REQUIREMENT phase only.
-
-
-## Entry Check
-
-```bash
-node flow-comet/scripts/workflow-guard.mjs entry open
-```
-
-## Skill Implementation
-
-Load `flow-comet-open` for this Node. Operation: `require`.
-
-## Required Skill Calls
-
-- Load `flow-comet-change` during this Node and record completed check `required-skill:open.flow-comet-change`. Reason: CHANGE 反问协议
-- Load `flow-comet-requirement` during this Node and record completed check `required-skill:open.flow-comet-requirement`. Reason: REQUIREMENT 需求分析
-
-## Augmentations
-
-- This Node has no declared augmentations.
-
-## Output Schemas
-
-- `flowkit.intake.v1`: CHANGE.md + REQUIREMENT.md Required evidence: `intake-summary`. Required artifacts: `change-doc` at `<change-id>/CHANGE.md`; `requirement-doc` at `<change-id>/REQUIREMENT.md`.
-
-## Evidence Record
-
-```bash
-node flow-comet/scripts/workflow-state.mjs record open '{"summary":"record the real Node result","completedChecks":[]}'
-```
-
-## Guardrails
-
-- `intake-artifacts`: CHANGE.md + REQUIREMENT.md exist (artifact-exists).
-
-## Exit Check
-
-```bash
-node flow-comet/scripts/workflow-guard.mjs exit open --apply
-```
-
-If the script prints `SKILL: flow-comet-design`, load that Skill next.
-
-## Recovery
-
-Read `reference/workflow-protocol.json` and the configured workflow state. Resume the first Node that is not listed in `completedNodes`.

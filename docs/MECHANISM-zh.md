@@ -22,7 +22,7 @@
 | ② 协调者禁令 | `next`/`entry` 每次注入"你是协调者不是执行者"（direct 模式 execute 豁免） | 输出注入 |
 | ③ exit 越俎代庖检测 | parallel 任务 done 必须有 handoffResult，否则 BLOCKED（`parallelTakeoverApproved` 显式豁免） | TASK.md + handoff evidence |
 
-hook blocking 语义：PreToolUse hook 的 exit 2（blocking——阻止工具调用）在**主会话 TUI 实测生效**；`claude -p`（SDK CLI 模式）下非零退出被降级为 non-blocking——写入被记录但不阻止。
+hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会话 TUI 阻止工具调用；`claude -p`（SDK CLI 模式）下非零退出被降级为 non-blocking。
 
 ## 3. guard 校验体系（证据驱动推进）
 
@@ -33,9 +33,14 @@ hook blocking 语义：PreToolUse hook 的 exit 2（blocking——阻止工具�
 | 节点顺序 BLOCK | next 时 currentNode 未 exit（非正常推进后继）→ BLOCKED；exit 推进后正常 next 豁免；回退豁免 | next |
 | handoff completedChecks | 子代理 Return Contract 必须含 required-skill completedChecks（skill 加载证据），缺失 → BLOCKED | exit subagent-execute |
 | redEvidence 时序 | redEvidence 必须先于 greenEvidence 真实存在；已记录 greenEvidence 后补录 redEvidence → BLOCKED | workflow-handoff result |
-| SUMMARY 六段 | verify 输出 / 6 维自查（非空）/ 越界检查 + 强制 `## 自检方法`——6 维自查两级降级：`brooks-review`（Skill 工具）→ 仅返回 "Launching skill" 占位时 Read 插件缓存协议文件手动执行完整审查（`cache-brooks`）→ 最后才是内置 R1~R6 快查（`builtin-quickcheck` 须声明不可用原因**和**缓存尝试证据；缺证据 → 渐进 WARN） | exit execute |
-| verify 真实执行 | TEST.md `## 验证命令` 真实运行（支持多行 `&&`）；verifyFailures 机器计数，第 4 次 → BLOCKED | exit verify |
+| SUMMARY 六段 | verify 输出 / 6 维自查（非空）/ 越界检查 + 强制 `## 自检方法`——6 维自查段须声明 `brooks-review` 或 `cache-brooks`（两级降级：Skill 工具 → 仅返回 "Launching skill" 占位时 Read 插件缓存协议文件手动执行完整审查）；`builtin-quickcheck` 只出现在 `## 自检方法` 段（须声明不可用原因**和**缓存尝试证据；新 change 缺失 BLOCKED；旧 change WARN） | exit execute |
+| 处置标记 | REVIEW.md 发现区条目须带 `[已修]`/`[升级]`/`[转待办]`(新 change 缺失 BLOCKED;旧 change WARN) | exit review |
+| builtin 自检证据 | `builtin-quickcheck` 须声明不可用原因与插件缓存尝试证据(新 change 缺失 BLOCKED;旧 change WARN) | exit execute |
+| 波次散文一致性 | 散文 `[P]` 标记须与任务 `parallel="true"` 一致(新 change 不一致 BLOCKED;旧 change WARN) | exit plan |
+| 越权委托 | 并行 done 任务须经委托节点(新 change 未委托 BLOCKED;旧 change WARN) | exit execute/verify |
+| verify 真实执行 | TEST.md `## 验证命令` 真实运行（支持多行 `&&`）；verifyFailures 机器计数**按变更隔离**（切换变更不继承另一变更的失败次数），第 4 次 → BLOCKED（超时可用 `FLOW_COMET_VERIFY_TIMEOUT_MS` 配置，默认 300s） | exit verify |
 | 追加位置检测 | CONTEXT 孤立追加段 / LESSONS 编号乱序 / STATE+CHANGELOG 非倒序 → WARN（渐进） | exit open/verify/archive |
+| 任务完成产物 | 每个 done 任务须有对应 <id>-SUMMARY.md；缺失 → WARN（渐进）（任务声称完成但产物不齐） | exit execute |
 | 委托前检查 | `.specs/<change>/` 未提交工件 → WORKTREE WARN；PROGRESS.md 存在 → 恢复警告 | entry execute |
 | state schema 校验 | writeState 字段类型 fail-closed（state-schema.mjs 单一来源，三脚本共用） | 全部 state 写入 |
 
@@ -53,14 +58,14 @@ hook blocking 语义：PreToolUse hook 的 exit 2（blocking——阻止工具�
 
 ## 6. guard 自测套件（作者回归基线）
 
-`scripts/guard-self-test.mjs`：**97 场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——作者每次改动后的回归基线（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
+`scripts/guard-self-test.mjs`：**137 场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（55 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
 
 ```bash
 node .claude/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 97 SCENARIOS PASSED
+# → ALL 137 SCENARIOS PASSED
 ```
 
-## 6·5 自动初始化检测（init 前置步骤）
+## 7. 自动初始化检测（init 前置步骤）
 
 `init` 时工作流自动检测项目上下文（`.specs/CONTEXT.md`）是否存在，按 A~F 判决：
 
@@ -72,6 +77,13 @@ node .claude/skills/flow-comet/scripts/guard-self-test.mjs
 
 显式参数授权（无阻塞提示，无头兼容）：`--init-context` 执行全量生成（约 15-30k tokens，仅首次，提示中如实告知）；`--init-skip` 记录 `ai_context_doc: none` 并静默后续提示。项目级字段（`ai_context_doc` / `last_intel_scan`）跨 change 保留；state-schema 校验（fail-closed，旧 state 缺省为 null）。
 
+## 8. 执行遗漏防护
+
+- **节点进入证据**：进入节点会被记录；未 entry 直接 exit——新 change BLOCKED（进入检查不可跳过：协调者禁令/委托前 commit 检查/签名记录），旧 change 渐进警告。
+- **新 change 强制**：`init` 创建的 change 标记为"新"（`newChange`），内容级检查全面强制——已完成任务必须有对应 SUMMARY、交接结果必须有 TDD RED 证据、处置标记、builtin 自检证据、波次散文一致性、越权委托、追加位置；旧 change 保持渐进警告。
+- **声明自动化**：`record` 自动补写缺失的技能加载声明标记（手动声明仍推荐）。
+- **显式空退出豁免**：execute 在显式声明（`emptyExitApproved`）后可在无串行任务时空退出；默认仍拦截。
+
 ## 设计原理
 
 - **文件即真相，不做事件溯源**：单文件状态机 + 从 `.specs/` 推导节点——简单且恢复不依赖历史
@@ -82,7 +94,7 @@ node .claude/skills/flow-comet/scripts/guard-self-test.mjs
 
 ## 已知限制
 
-- **仅 Claude Code 平台**：不保证 Codex/Gemini/Cursor
+- **平台**：Claude Code（默认）与 Codex（技能/规则/hook 经多平台安装器，见[安装](INSTALLATION-zh.md#平台)）受支持；其他平台（Gemini/Cursor）不保证
 - **Return Contract 过渡规则**：旧格式纯字符串 handoff 豁免为 WARN；redEvidence/greenEvidence 缺失渐进 WARN（不 BLOCK），避免旧 change 重入被卡死
 - **与 Comet Classic 不互通**：workflow-kernel 状态独立于 classic（设计决策，非缺陷）
 - **无活跃 change 时 hook 放行**：`.comet/flow-comet-state.json` 不存在时 hook guard 放行所有写入（设计决策：无 workflow 时不限制文件操作）

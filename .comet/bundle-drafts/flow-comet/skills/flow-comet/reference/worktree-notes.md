@@ -24,6 +24,7 @@ W2-D 用 `git show <commitHash>` 校验提交文件子集。当产物 commit 属
 1. **委托 prompt 内联全部上游上下文**：AC / 设计 / 任务块全文写进委托 prompt，子代理不依赖 worktree 里的工件
 2. **委托前 commit 上游工件**：把 `.specs/<change>/` 工件先 commit，配合脏检查 WORKTREE WARN（entry execute / entry subagent-execute 检测未提交工件并提示）
 3. **单仓库场景不受影响**：worktree 与目标项目同根（同一仓库）时无此问题
+4. **委托回报后立即提取**：子代理回报 commitHash 后**立即**用 `git show <branch>:<path>` 提取产物到目标仓库——worktree 任务结束清理后，提交对象可能不可见（悬挂对象被回收/分支删除），回报时提取可避免产物丢失
 
 ## 4. 验证方法
 
@@ -32,10 +33,20 @@ git worktree list                # 确认 worktree 挂在哪个仓库/分支（�
 git ls-tree <branch> <path>      # 确认产物在目标仓库哪个分支、路径是否存在
 ```
 
-## 5. change 分支 + worktree 组合（）
+## 4.2. 运行时状态文件的跟踪风险(测试载体实证 2026-08-15)
+
+测试载体(如演练项目)若 git 跟踪 `.comet/flow-comet-state.json`(主仓 gitignore 它,载体可能不同),**恢复/回退操作不得用 `git reset --hard`**——会连带把运行时状态回退到历史版本,状态机倒退(端到端验证实证事故:回退后重跑 init + 重录证据恢复,耗时约 10 分钟)。恢复工件用精确 `git checkout -- <path>`(只回退指定文件),不用整树 reset。
+
+## 4.5. Codex 平台的 worktree 委托差异(实测 2026-08-14)
+
+Codex 环境的子代理(spawn_agent)无 `isolation:"worktree"` 参数——自动 worktree 假定仅 Claude Code 适用。Codex 协调者委托并行任务时须**手动** `git worktree add <路径> -b <分支>` + 在 worktree 内 `codex exec` 委托,或对并行任务串行收敛(写边界仍互斥)。worktree-notes 第 3 节的"委托 prompt 内联全部上游上下文"在 Codex 同样适用且是唯一可靠路径。**注意**:worktree 同样不含 `flow-kit/` 与 `.agents/`(它们是目标仓库内容,不在 worktree 快照内)——委托 prompt 内联必须覆盖这些依赖。
+
+**hook 会话 root 继承(实测 2026-08-15,与 CC 语义不同)**:Codex worktree 子代理的**会话 root 仍是主仓库**——写入守卫 hook 以主仓库 `.comet/flow-comet-state.json` 的 `currentNode`/`executionMode` 判定白名单,`execute`/`subagent-execute` 阶段协调者白名单 `.specs/` 会**拦截子代理在 worktree 内写源码**(此前文档声称"worktree 内无 .codex/ → hook 不生效"与实测不符,已修正)。规避(实测可用):① 子代理用 Python `open()` 等 File API 直写(命令级检测的平台限制,已文档化);② 由协调者在主仓库代操作写/提交(白名单外路径需显式豁免);③ 委托 prompt 内联全部上游上下文后,协调者验收产物时按 write_files 边界核对。CC 平台的 worktree 子代理无此问题(子代理环境无 hook,见机制文档 1.4)。
+
+## 5. change 分支 + worktree 组合
 
 分支模式（`branchMode=true`，git 仓库 + init 自动创建 `change/<id>` 分支）下：
 
 - **子代理 worktree 从 change 分支分出**：`isolation: "worktree"` 基于**当前分支**（change/<id>）快照创建，子代理看到的是该分支内容——委托前必须 commit 上游工件，否则子代理看不到未提交改动（同第 3 节规避方式）
 - **协调者产物提取路径不变**：仍用 `git show <branch>:<path>` 从 worktree 取回产物，`<branch>` 此时是 `change/<id>`（可用 `git ls-tree change/<id> <path>` 确认存在）
-- **分支模式下归档前必须已切回主分支**：归档收尾在 main 上执行（`git checkout main && git merge change/<id>`）；entry archive 校验当前分支 = `change/<id>`，**合并前不得提前切走**，合并完成后 `git branch -d change/<id>` 删除分支
+- **分支模式下归档全程在 change/<id> 分支上执行**：entry/exit archive 校验当前分支 = `change/<id>`（提前切走会被 BLOCKED）；**归档 exit 完成后**再做合并收尾——切到默认分支（先探测，不假设 main，如 e2e 项目是 master）`git checkout <默认分支> && git merge change/<id>`，合并完成后 `git branch -d change/<id>` 删除分支

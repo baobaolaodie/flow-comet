@@ -56,6 +56,15 @@ skills:
   - id: flow-comet-integration
     path: skills/flow-comet-integration
     visibility: internal
+  - id: flow-comet-evolve
+    path: skills/flow-comet-evolve
+    visibility: internal
+  - id: flow-comet-health
+    path: skills/flow-comet-health
+    visibility: internal
+  - id: flow-comet-compose
+    path: skills/flow-comet-compose
+    visibility: internal
 resources:
   rules:
     - id: flow-comet-orchestration
@@ -71,11 +80,16 @@ resources:
     - skills/flow-comet/reference/resolved-skills.json
     - skills/flow-comet/reference/workflow-protocol.json
     - skills/flow-comet/reference/decision-points.md
+    - skills/flow-comet/reference/dirty-worktree.md
+    - skills/flow-comet/reference/init-detection.md
     - skills/flow-comet/reference/recovery.md
+    - skills/flow-comet/reference/worktree-notes.md
     - skills/flow-comet/reference/authoring-lanes.json
     - skills/flow-comet/reference/skill-review.md
     - skills/flow-comet/reference/composition-report.md
     - skills/flow-comet/reference/subagents/script-author.md
+    - skills/flow-comet/reference/TEST-MATRIX.md
+    - skills/flow-comet/reference/KNOWN-ISSUES-template.md
   scripts:
     - id: comet-plan
       path: skills/flow-comet/scripts/comet-plan.mjs
@@ -95,11 +109,11 @@ resources:
       runtime: node
     - id: workflow-guard
       path: skills/flow-comet/scripts/workflow-guard.mjs
-      sideEffect: read
+      sideEffect: write
       runtime: node
     - id: workflow-handoff
       path: skills/flow-comet/scripts/workflow-handoff.mjs
-      sideEffect: read
+      sideEffect: write
       runtime: node
   assets: []
   agents: []

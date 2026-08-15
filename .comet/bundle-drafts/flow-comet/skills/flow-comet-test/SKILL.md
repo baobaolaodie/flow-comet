@@ -1,11 +1,11 @@
 ---
 name: flow-comet-test
-description: "flow-kit TEST 阶段协议：5 轮测试金字塔（功能/性能/安全/兼容/可观测）+ 测试质量 6 维自检。Comet execute 阶段的 flow-kit 增强。"
+description: "flow-kit TEST 阶段协议：5 轮测试金字塔（功能/性能/安全/兼容/可观测）+ 测试质量 6 维自检。flow-comet review 节点的 flow-kit 增强。"
 ---
 
 # flow-kit TEST Protocol
 
-本 Skill 为 Comet execute 阶段提供 flow-kit 的 5 轮测试金字塔。
+本 Skill 为 flow-comet 的 review 节点提供 flow-kit 的 5 轮测试金字塔。
 
 ## 加载
 
@@ -36,6 +36,6 @@ description: "flow-kit TEST 阶段协议：5 轮测试金字塔（功能/性能/
 
 - `.specs/<change-id>/TEST.md`（使用 `flow-kit/templates/TEST.md`）
 
-## Comet 集成
+## 使用范围
 
-TEST.md 完成后触发 review 阶段。brooks-lint 已装时用 `/brooks-test`，未装时用内置清单。
+TEST.md 的完整性由 review 节点第 2 轮检查。brooks-lint 已装时用 `/brooks-test`（Codex 用 `$brooks-test`），未装时用内置清单。

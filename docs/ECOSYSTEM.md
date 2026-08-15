@@ -10,13 +10,13 @@ flow-comet stands on two upstream projects: **flow-kit** provides the methodolog
 
 ## 1. flow-kit — the methodology layer (dependency)
 
-flow-kit is a **pure-markdown methodology package** (not a tool — "clone it into the project root and it works, no runtime"). It defines the 9-stage flow, the R1-R8 behavior rules, and 14 artifact templates.
+flow-kit is a **pure-markdown methodology package** (not a tool — "clone it into the project root and it works, no runtime"). It defines the 9-stage flow, the R1-R8 behavior rules, and 13 artifact templates.
 
 ### What flow-comet depends on
 
 | flow-kit | flow-comet usage |
 |----------|------------------|
-| **Stage protocols** (prompts/0-change, 1-requirement, 3-task, 4-dev, 5-test, 7-integration, 2a-ui-design) | The 8 nodes map one-to-one; node skills state "flow-kit `<stage>` stage protocol" and read the flow-kit prompt files at execution time |
+| **Stage protocols** (prompts/0-change, 1-requirement, 2-design, 3-task, 4-dev, 5-test, 6-review, 7-integration, 2a-ui-design) | The 8 nodes map onto the stage protocols (open combines 0-change + 1-requirement; 2a-ui-design is the optional frontend add-on); node skills state "flow-kit `<stage>` stage protocol" and read the flow-kit prompt files at execution time |
 | **Artifact templates** (CHANGE/REQUIREMENT/DESIGN/TASK/SUMMARY/TEST/REVIEW/UAT/LESSONS/CONTEXT/…) | Artifact paths and required sections follow the templates exactly |
 | **R1-R8 behavior rules** (fresh-context, artifact gates, anti-hallucination grep, destructive-change protocol, test discipline) | Rules are cited by number throughout flow-comet skills (R1.8, R4.5, R4.6, R5.1, R6.4, R6.5…) |
 | **Artifact Preflight Gate** (GO.md / R2.7) | Ported as the node product-gate table (design requires CHANGE+REQUIREMENT, plan requires DESIGN, …) |
@@ -32,7 +32,7 @@ flow-kit is a **pure-markdown methodology package** (not a tool — "clone it in
 
 ### What flow-comet deliberately does not absorb
 
-- **PROGRESS.md / STATE.md files**: their semantics (context-window snapshot, cross-session state) are replaced by the state machine — flow-comet-dev explicitly states "TASK.md status + SUMMARY.md are the progress"
+- **PROGRESS.md / STATE.md files**: cross-session state tracking is replaced by the state machine — flow-comet-dev explicitly states "TASK.md status + SUMMARY.md are the progress"; a temporary context-window snapshot (`.specs/<change-id>/<task-id>-PROGRESS.md`) remains for mid-task recovery and is deleted on completion
 - **Side commands**: only evolve/health exist as separate skills; intel-scan/architect-style commands are not ported
 - **Multi-IDE adapter layer** (`.windsurfrules`/`.cursorrules` installation paths)
 - **Token budget tables** (flow-kit's cost modeling is not inherited)

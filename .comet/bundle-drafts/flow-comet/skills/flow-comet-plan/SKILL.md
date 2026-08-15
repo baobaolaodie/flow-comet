@@ -15,18 +15,15 @@ Responsibility: 拆原子任务（XML 格式）+ 波次划分。生成 TASK.md�
 
 ## Guidance
 
-### 必填段清单（exit guard 校验，结构+存在级）
+### 必填段清单（结构+存在级）
 
-| 文件 | 必填段 |
-|------|--------|
-| TASK.md | 每个 `<task>` 含 `id` / `name` / `read_files` / `write_files` / `action` / `verify` / `done` 7 字段 |
+| 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
+|------|-------------------------------|-----------------------------------|
+| TASK.md | 至少一个 `<task>` 块 + 每个任务含 `<verify>` 字段 | `id` / `name` / `read_files` / `write_files` / `action` / `done` 等字段（执行纪律，review 把关） |
 
-**缺失任一必填段 = 节点未完成**，exit guard 校验（见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B）。
+guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
 
----
-name: flow-comet-plan
-description: "Plan node for flow-comet: produces TASK.md with atomic tasks, wave division, and parallel markers. Do not use for ordinary standalone tasks."
----
+波次散文一致性：`## 波次划分` 中标记为并行（[P]）的任务必须与 XML 任务 `parallel="true"` 一致——新 change 不一致 BLOCKED（旧 change WARN 渐进）。
 
 # Plan
 
@@ -79,7 +76,7 @@ The full task decomposition protocol, XML template, and constraints are in:
 
 This node is truly done when:
 - `.specs/<change-id>/TASK.md` exists in XML format.
-- Every task has all 7 required fields (id, name, read_files, write_files, action, verify, done).
+- At least one `<task>` block exists; every task carries a `<verify>` field (the full seven-field shape — id/name/read_files/write_files/action/verify/done — is the execution discipline, review-checked; guard enforces the subset).
 - Every `verify` field is an executable command (not a description).
 - Every `write_files` is strictly within DESIGN.md touched + new modules range (not in forbidden list).
 - At least 1 task is marked `[P]` (parallel), unless all tasks are genuinely serial.
@@ -110,6 +107,12 @@ The plan node loads `flow-comet-task` to perform task decomposition. It reads DE
 |-------|-------------|--------|
 | `flow-comet-task` | Required for task decomposition | Provides XML template, wave division protocol, and file boundary rules |
 
+**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load plan flow-comet-task --prompt flow-kit/prompts/3-task.md
+```
+
 ## Output Schemas
 
 Schema: `flowkit.plan.v1`
@@ -131,9 +134,9 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record plan '{"summary
 | Guardrail ID | Label | Validation Type |
 |--------------|-------|-----------------|
 | `plan-artifacts` | TASK.md exists with XML tasks | artifact-exists |
-| `task-fields-complete` | All tasks have 7 required fields | content-check |
-| `write-files-safe` | No write_files in DESIGN forbidden list | content-check |
-| `has-parallel` | At least 1 [P] task (if applicable) | content-check |
+| `task-fields-complete` | All tasks have 7 required fields | 执行纪律（review 把关），guard 不校验 |
+| `write-files-safe` | No write_files in DESIGN forbidden list | 执行纪律（review 把关），guard 不校验 |
+| `has-parallel` | At least 1 [P] task (if applicable) | 执行纪律（review 把关），guard 不校验 |
 
 ## Exit Check
 
@@ -149,48 +152,3 @@ If the script prints `SKILL: flow-comet-execute`, load that Skill next.
 2. Read `.specs/<change-id>/TASK.md` — if exists with all tasks having 7 fields and wave diagram, plan phase is done.
 3. If TASK.md exists but incomplete (missing fields, no wave diagram), resume from the first incomplete task.
 4. Do not repeat completed decomposition. Resume from the first incomplete artifact.
-
-
-## Entry Check
-
-```bash
-node flow-comet/scripts/workflow-guard.mjs entry plan
-```
-
-## Skill Implementation
-
-Load `flow-comet-task` for this Node. Operation: `require`.
-
-## Required Skill Calls
-
-- Load `flow-comet-task` during this Node and record completed check `required-skill:plan.flow-comet-task`. Reason: 拆原子任务
-
-## Augmentations
-
-- This Node has no declared augmentations.
-
-## Output Schemas
-
-- `flowkit.plan.v1`: TASK.md Required evidence: `plan-summary`. Required artifacts: `task-plan` at `<change-id>/TASK.md`.
-
-## Evidence Record
-
-```bash
-node flow-comet/scripts/workflow-state.mjs record plan '{"summary":"record the real Node result","completedChecks":[]}'
-```
-
-## Guardrails
-
-- `plan-artifacts`: TASK.md exists (artifact-exists).
-
-## Exit Check
-
-```bash
-node flow-comet/scripts/workflow-guard.mjs exit plan --apply
-```
-
-If the script prints `SKILL: flow-comet-execute`, load that Skill next.
-
-## Recovery
-
-Read `reference/workflow-protocol.json` and the configured workflow state. Resume the first Node that is not listed in `completedNodes`.
