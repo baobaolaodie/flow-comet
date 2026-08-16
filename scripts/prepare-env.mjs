@@ -30,8 +30,9 @@
  * 用法：node scripts/prepare-env.mjs [--target <dir>] [--platform <claude-code|codex>] [--purge --yes]
  *   --target 缺省 = 当前工作目录（cwd）。脚本自身定位：__dirname 上一级 = 仓库根
  *   （scripts/ 与 .comet/ 同级），据此解析权威源。
- *   --platform 显式指定平台；缺省走选择链：TTY 交互选择 > 探测目标项目
- *   (.codex/ → codex；.claude/ → claude-code) > 默认 claude-code。
+ *   --platform 显式指定平台（仅 claude-code/codex，未知报错）；缺省走选择链：
+ *     TTY 交互选择（1 Claude Code / 2 Codex / 3 both 双平台同装）> 探测目标项目
+ *     （仅 .codex/ → codex；含 .claude/ → claude-code；双痕迹默认 claude-code 并输出提示）> 默认 claude-code。
  *   --purge 破坏性：删除目标平台生成物后重新生成（打印清单 + 警告 + --yes 确认）。
  *
  * 输出：打印生成摘要（平台 / 目录数 / 文件数 / skills 数 / 注入状态），exit 0；失败 exit 1。
@@ -207,56 +208,72 @@ function printUsage() {
   console.log('用法: node scripts/prepare-env.mjs [--target <dir>] [--platform <claude-code|codex>] [--purge --yes]');
   console.log('  从权威源 .comet/bundle-drafts/flow-comet/ 安装/更新 <dir> 环境');
   console.log('  --target 缺省 = 当前工作目录（cwd）');
-  console.log('  --platform 指定平台（claude-code / codex）；缺省 = TTY 交互选择 > 探测目标项目 > 默认 claude-code');
+  console.log('  --platform 指定平台（claude-code / codex）；缺省 = TTY 交互选择（含 both 双平台）> 探测目标项目 > 默认 claude-code');
   console.log('  --purge   破坏性：先删除目标平台生成物再重新生成（默认不删除；需 --yes 确认）');
 }
 
-// 探测目标项目既有平台痕迹（.codex/ 优先——新平台安装后再次安装保持选择）
-function probePlatform(target) {
-  if (fs.existsSync(path.join(target, '.codex'))) return 'codex';
-  if (fs.existsSync(path.join(target, '.claude'))) return 'claude-code';
-  return null;
+// 探测目标项目既有平台痕迹(三态,一次计算复用于探测与双痕迹判定):
+// 仅 .codex/ → codex;含 .claude/(仅 .claude/ 或双痕迹)→ claude-code;两者皆无 → probe=null。
+// 双痕迹(既有 .claude/ 又有 .codex/)不武断二选一——默认主平台 claude-code,resolvePlatform 输出提示。
+function detectTraces(target) {
+  const hasCodex = fs.existsSync(path.join(target, '.codex'));
+  const hasClaude = fs.existsSync(path.join(target, '.claude'));
+  const probe = hasCodex && !hasClaude ? 'codex' : hasClaude ? 'claude-code' : null;
+  return { probe, dualTrace: hasCodex && hasClaude };
 }
 
 // TTY 交互选择（缺省路径——用户裁决：交互式选择为主；无 TTY 自动走探测/默认）。
-// 探测结果影响默认值：检测到 .codex/ 痕迹时回车默认 Codex（而非恒默认 Claude Code）。
-async function promptPlatformSelection(probe) {
+// 选项：1 Claude Code / 2 Codex / 3 both（两个平台都装）——回车取默认（基于探测推荐；
+// 双痕迹默认 Claude Code，不武断推荐）。探测结果影响默认值：检测到 .codex/ 痕迹时回车默认 Codex。
+async function promptPlatformSelection(probe, dualTrace) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     const defaultChoice = probe === 'codex' ? 'codex' : 'claude-code';
     const defaultLabel = probe === 'codex' ? 'Codex' : 'Claude Code';
-    const probeNote = probe
-      ? `（检测到目标项目已有 ${probe === 'codex' ? '.codex/' : '.claude/'} 痕迹——默认 ${defaultLabel}）`
-      : '';
+    const probeNote = dualTrace
+      ? '（检测到目标项目同时有 .claude/ 与 .codex/ 痕迹——默认 Claude Code）'
+      : probe
+        ? `（检测到目标项目已有 ${probe === 'codex' ? '.codex/' : '.claude/'} 痕迹——默认 ${defaultLabel}）`
+        : '';
     const answer = await rl.question(
       `[prepare-env] 选择安装平台 ${probeNote}:\n` +
       `  1) Claude Code${defaultChoice === 'claude-code' ? '（默认）' : ''}\n` +
       `  2) Codex${defaultChoice === 'codex' ? '（默认）' : ''}\n` +
+      `  3) both（两个平台都装）\n` +
       `  输入序号或回车（默认 ${defaultChoice === 'codex' ? '2' : '1'}）: `
     );
     const choice = String(answer ?? '').trim().toLowerCase();
     if (choice === '') return defaultChoice;
     if (choice === '2' || choice === 'codex') return 'codex';
+    if (choice === '3' || choice === 'both') return 'both';
     return 'claude-code';
   } finally {
     rl.close();
   }
 }
 
-// 平台解析链：--platform 显式 > TTY 交互 > 探测 > 默认 claude-code
+// 平台解析链：--platform 显式 > TTY 交互 > 探测 > 默认 claude-code。
+// 返回平台描述符数组：显式/探测 = 单元素；交互 both = 双元素（安装顺序 claude-code 先、codex 后）。
+// 显式 --platform 仅接受 claude-code/codex（both 为交互专属选项——设计文档 §4.2 无显式 both）。
 async function resolvePlatform(target, platformArg) {
   if (platformArg) {
-    if (!PLATFORMS[platformArg]) {
+    // hasOwnProperty 防原型链属性(如 toString/__proto__)通过查找——仅接受自有描述符键
+    if (!Object.prototype.hasOwnProperty.call(PLATFORMS, platformArg)) {
       throw new Error(`未知平台: ${platformArg}（可用: ${Object.keys(PLATFORMS).join(', ')}）`);
     }
-    return PLATFORMS[platformArg];
+    return [PLATFORMS[platformArg]];
   }
+  const { probe, dualTrace } = detectTraces(target);
   if (process.stdin.isTTY) {
-    const selected = await promptPlatformSelection(probePlatform(target));
-    return PLATFORMS[selected];
+    const selected = await promptPlatformSelection(probe, dualTrace);
+    const ids = selected === 'both' ? ['claude-code', 'codex'] : [selected];
+    return ids.map((id) => PLATFORMS[id]);
   }
-  const probe = probePlatform(target);
-  return PLATFORMS[probe ?? 'claude-code'];
+  if (dualTrace) {
+    console.log('[prepare-env] 检测到目标项目同时有 .claude/ 与 .codex/ 痕迹——默认安装 Claude Code。');
+    console.log('          如需 Codex 或 both:交互终端运行,或显式 --platform codex。');
+  }
+  return [PLATFORMS[probe ?? 'claude-code']];
 }
 
 // ---------- 文件工具 ----------
@@ -601,69 +618,74 @@ function resolveInstalledVersion() {
 
 async function main() {
   const { target, purge, yes, platform: platformArg } = parseArgs(process.argv);
-  const platform = await resolvePlatform(target, platformArg);
+  const platforms = await resolvePlatform(target, platformArg);
   const skillsSrc = path.join(BUNDLE_DRAFTS, 'skills');
   if (!fs.existsSync(skillsSrc)) {
     throw new Error(`权威源 skills 目录不存在: ${skillsSrc}`);
   }
+  const platformsLabel = platforms.map((p) => p.label).join(' + ');
 
-  const skillRoot = platform.skillRoot(target);
-  const stats = { dirs: 0, files: 0, skills: [] };
-
-  // --purge：必须配合 --yes 二次确认（防误传导致整删）；删除平台生成物后重新生成
+  // --purge：必须配合 --yes 二次确认（防误传导致整删）；逐平台删除生成物后重新生成
   if (purge) {
     if (!yes) {
-      throw new Error('--purge 是破坏性操作，需显式 --yes 确认：node scripts/prepare-env.mjs --target <dir> --platform <id> --purge --yes');
+      throw new Error('--purge 是破坏性操作，需显式 --yes 确认：node scripts/prepare-env.mjs --target <dir> --purge --yes');
     }
-    console.error(`[prepare-env] 警告: --purge 将删除 ${platform.label} 平台的以下生成物（不可恢复）：`);
-    for (const entry of platform.purge(target)) {
-      console.error(`  - ${entry}`);
+    console.error(`[prepare-env] 警告: --purge 将删除 ${platformsLabel} 平台的以下生成物（不可恢复）：`);
+    for (const platform of platforms) {
+      for (const entry of platform.purge(target)) {
+        console.error(`  - ${entry}`);
+      }
     }
     console.error('[prepare-env] 已删除，开始重新生成。');
   }
 
-  // 覆盖前打印将覆盖的生成物清单（默认非破坏：只覆盖生成物）
-  console.log(`[prepare-env] 平台: ${platform.label} — 将覆盖以下生成物（其他内容保留）：`);
-  console.log(`  - ${skillRoot}`);
-  for (const line of platform.overwriteDescription(target)) {
-    console.log(`  - ${line}`);
+  for (const platform of platforms) {
+    const skillRoot = platform.skillRoot(target);
+    const stats = { dirs: 0, files: 0, skills: [] };
+
+    // 覆盖前打印将覆盖的生成物清单（默认非破坏：只覆盖生成物）
+    console.log(`[prepare-env] 平台: ${platform.label} — 将覆盖以下生成物（其他内容保留）：`);
+    console.log(`  - ${skillRoot}`);
+    for (const line of platform.overwriteDescription(target)) {
+      console.log(`  - ${line}`);
+    }
+
+    // 1. hook 注入（平台化：描述符驱动——CC=settings.local.json；Codex=hooks.json+config.toml）
+    platform.installHooks(target, stats);
+
+    // 2. rules 注入（平台化：描述符驱动——CC=.claude/rules/ 复制；Codex=AGENTS.md 托管区）
+    platform.installRules(target, stats);
+
+    // 3. skills/（复制全部 flow-comet* 目录 + 平台路径替换）
+    const skillNames = fs
+      .readdirSync(skillsSrc, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && /^flow-comet/.test(e.name))
+      .map((e) => e.name)
+      .sort();
+    if (skillNames.length === 0) {
+      throw new Error(`权威源中未找到任何 flow-comet* skill 目录: ${skillsSrc}`);
+    }
+    for (const name of skillNames) {
+      copyTree(path.join(skillsSrc, name), path.join(skillRoot, name), stats);
+      stats.skills.push(name);
+    }
+    const replacedFiles = applyPathReplacements(skillRoot, platform.pathReplacements);
+    if (replacedFiles > 0) {
+      console.log(`[prepare-env] 平台路径替换: ${replacedFiles} 个 .md 文件（${platform.label} 命令路径）`);
+    }
+
+    // 4. 版本标识（写入平台技能根,随技能包分发）
+    const installedVersion = resolveInstalledVersion();
+    fs.writeFileSync(path.join(skillRoot, 'flow-comet', 'INSTALLED_VERSION'), installedVersion + '\n', 'utf8');
+    stats.files++;
+
+    // 摘要（逐平台）
+    console.log(`[prepare-env] 已准备环境: ${target}（${platform.label}）`);
+    console.log(
+      `[prepare-env] 目录 ${stats.dirs} 个、文件 ${stats.files} 个、skills ${stats.skills.length} 个`
+    );
+    console.log(`[prepare-env] skills: ${stats.skills.join(', ')}`);
   }
-
-  // 1. hook 注入（平台化：描述符驱动——CC=settings.local.json；Codex=hooks.json+config.toml）
-  platform.installHooks(target, stats);
-
-  // 2. rules 注入（平台化：描述符驱动——CC=.claude/rules/ 复制；Codex=AGENTS.md 托管区）
-  platform.installRules(target, stats);
-
-  // 3. skills/（复制全部 flow-comet* 目录 + 平台路径替换）
-  const skillNames = fs
-    .readdirSync(skillsSrc, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && /^flow-comet/.test(e.name))
-    .map((e) => e.name)
-    .sort();
-  if (skillNames.length === 0) {
-    throw new Error(`权威源中未找到任何 flow-comet* skill 目录: ${skillsSrc}`);
-  }
-  for (const name of skillNames) {
-    copyTree(path.join(skillsSrc, name), path.join(skillRoot, name), stats);
-    stats.skills.push(name);
-  }
-  const replacedFiles = applyPathReplacements(skillRoot, platform.pathReplacements);
-  if (replacedFiles > 0) {
-    console.log(`[prepare-env] 平台路径替换: ${replacedFiles} 个 .md 文件（${platform.label} 命令路径）`);
-  }
-
-  // 4. 版本标识（写入平台技能根,随技能包分发）
-  const installedVersion = resolveInstalledVersion();
-  fs.writeFileSync(path.join(skillRoot, 'flow-comet', 'INSTALLED_VERSION'), installedVersion + '\n', 'utf8');
-  stats.files++;
-
-  // 摘要
-  console.log(`[prepare-env] 已准备环境: ${target}（${platform.label}）`);
-  console.log(
-    `[prepare-env] 目录 ${stats.dirs} 个、文件 ${stats.files} 个、skills ${stats.skills.length} 个`
-  );
-  console.log(`[prepare-env] skills: ${stats.skills.join(', ')}`);
 }
 
 try {

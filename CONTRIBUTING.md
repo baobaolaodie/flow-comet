@@ -13,16 +13,16 @@ Thanks for contributing to flow-comet. This guide covers the branch model, pull-
 ```
 feat/xxx ──PR(squash)──▶ dev          (integration branch — change-level commits)
                                       │
-dev ──PR(squash)──▶ main   (release branch — one squash commit per release)
+dev ──PR(merge)──▶ main   (release branch — one merge commit per release; dev's change-level commits enter main)
 ```
 
 | Branch | Role | Merge style | History |
 |--------|------|-------------|---------|
-| `main` | Release branch | **squash** | One release commit per PR (message summarizes dev change-level commits) |
+| `main` | Release branch | **merge** | Release PRs merge dev's change-level commits into main (one merge commit per release); every PR's commits stay in main permanently |
 | `dev` | Integration branch | **squash** | One change-level commit per PR — internal fix detail lives in the PR's Commits list |
 | `feat/*` | Development branch | — | Working history, deleted after merge |
 
-**Why this split**: `dev` carries one **change-level commit per PR** (squash) — a clean, stable sequence where each PR is one unit; the PR's internal commit history (each TDD fix) remains browsable in that PR's Commits list. `main` receives **one squash commit per release** — the release commit message summarizes dev's accumulated change-level commits; release history stays clean with no internal process detail.
+**Why this split**: `dev` carries one **change-level commit per PR** (squash) — a clean, stable sequence where each PR is one unit; the PR's internal commit history (each TDD fix) remains browsable in that PR's Commits list. `main` receives dev's change-level commits via **one merge commit per release** — PR history becomes part of main permanently, and after the release merge dev's tip is an ancestor of main, so dev stops leading main (no accumulated release history on dev).
 
 ## Pull-request workflow
 
@@ -37,7 +37,7 @@ dev ──PR(squash)──▶ main   (release branch — one squash commit per r
 3. **Open a PR** into `dev` (base `dev`, head `feat/<description>`). **Use the repository PR template** (`.github/PULL_REQUEST_TEMPLATE.md` — scope / verification / self-check checklists). Fill in what changed, why, and verification evidence. **Keep the full checklist visible**: mark involved items `[x]` and leave non-involved items `[ ]` — do not delete unchecked items (the checklist is the reviewer's completeness signal).
 4. **Get the merge gate green** — required CI checks must pass (see Review requirements below); the user (maintainer) reviews and approves before merging.
 5. **Merge into `dev`** — **squash** merge: one **change-level commit** per PR (the PR's internal commits remain browsable in its Commits list). `dev` **accumulates** changes — do not release after every change.
-6. **Release PR (batched)** — when `dev` has accumulated a set of related changes (a feature batch or a maintenance batch), open **one** release PR into `main` (base `main`, head `dev`). Merge with **squash** — one release commit whose message summarizes dev's accumulated change-level commits; each change's internal detail stays browsable in its PR Commits list.
+6. **Release PR (batched)** — when `dev` has accumulated a set of related changes (a feature batch or a maintenance batch), open **one** release PR into `main` (base `main`, head `dev`). Merge with **merge** — the merge commit brings all of dev's change-level commits into main; dev's tip becomes an ancestor of main, so dev no longer leads main after the release. The release PR title/body carries the public-facing release summary.
 7. After merge, delete the feature branch.
 
 **Maintenance batches**: pure-documentation or cleanup changes without behavior impact may accumulate on a single branch (e.g. `docs/maintenance-<date>`) and ship as **one** PR into `dev` — reducing PR count without losing traceability.
@@ -51,11 +51,13 @@ dev ──PR(squash)──▶ main   (release branch — one squash commit per r
 | Block deletions | ✅ | ✅ |
 | Dismiss stale reviews | ✅ | ✅ |
 
-**Dev syncs main** (after each release merge into `main`):
+**After a release**: no explicit sync step — the release PR merges dev's change-level commits into main, and dev's tip becomes an ancestor of main's release commit (dev stops leading and the trees are identical).
+
+**After a hotfix** (squashed directly into `main`), sync dev so it does not fall behind main:
 
 ```bash
 git checkout dev
-git merge --no-ff main -m "sync: main → dev(<summary>)"
+git merge --no-ff main -m "sync: main → dev(hotfix <description>)"
 git push origin dev
 ```
 
@@ -65,7 +67,7 @@ git push origin dev
 git checkout main
 git checkout -b hotfix/<description>
 # fix → commit (fix: subject) → test
-# hotfix merges via squash — one clean commit into main, consistent with the release squash policy
+# hotfix merges via squash — one clean commit into main (release PRs merge; hotfixes squash to keep emergency fixes atomic)
 git checkout main && git merge --squash hotfix/<description> && git commit -m "fix: hotfix <description>"
 git checkout dev && git merge --no-ff main -m "sync: main → dev(hotfix <description>)"
 git branch -d hotfix/<description>
@@ -189,7 +191,7 @@ The built-in default prefix is `change/` (backward-compatible with existing chan
 - **Before a release (on dev)**: the version number is settled on dev — `Unreleased` is turned into the `[X.Y.Z] - date` section linking the batch's merged development PRs.
 - **Release PR (dev → main)**: does not update CHANGELOG — the version section already exists on dev; the release PR only merges it into main.
 - **main**: never edits CHANGELOG separately — it receives the version section via the release PR merge.
-- **After a release**: dev syncs to main (tree-identical) and a fresh `Unreleased` section starts accumulating the next batch.
+- **After a release**: dev is automatically tree-identical to main (the release PR merges dev into main's history) and a fresh `Unreleased` section starts accumulating the next batch.
 
 ## Keeping a PR current
 
@@ -220,5 +222,5 @@ Force push is allowed on your own feature branch (no protection); a new push inv
 **Release steps**: the five-step checklist (CHANGELOG → README badge → tag → prepare-env distribution → dev sync) lives in [VERSIONS.md](docs/VERSIONS.md).
 
 **Release PR specifics**:
-- The release PR (dev → main) lists dev's change-level commits (by design — each PR = one change); merging it produces one clean squash release commit on main
-- Merge with `gh pr merge --squash` — the squash message is written in public-facing language (release summary), so internal process detail never enters main's history
+- The release PR (dev → main) lists dev's change-level commits (by design — each PR = one change); merging it brings those commits into main via one merge commit per release
+- Merge with `gh pr merge --merge` — the merge commit message is GitHub's default (`Merge pull request #N from dev`, public-facing language); the release PR title and body carry the release summary, so no internal process detail enters main
