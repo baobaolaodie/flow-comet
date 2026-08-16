@@ -12,7 +12,7 @@
 
 ## [1.4.1] - 2026-08-16
 
-安装器平台选择修复与发布模型变更（发布 PR 改 merge 合并）。([#56](https://github.com/baobaolaodie/flow-comet/pull/56))
+安装器平台选择修复与发布模型变更（发布 PR 改 merge 合并）。([#56](https://github.com/baobaolaodie/flow-comet/pull/56)、[#57](https://github.com/baobaolaodie/flow-comet/pull/57))
 
 ### 修复
 

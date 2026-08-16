@@ -12,7 +12,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [1.4.1] - 2026-08-16
 
-Installer platform-selection fix and release-model change (release PRs now merge). ([#56](https://github.com/baobaolaodie/flow-comet/pull/56))
+Installer platform-selection fix and release-model change (release PRs now merge). ([#56](https://github.com/baobaolaodie/flow-comet/pull/56), [#57](https://github.com/baobaolaodie/flow-comet/pull/57))
 
 ### Fixed
 
