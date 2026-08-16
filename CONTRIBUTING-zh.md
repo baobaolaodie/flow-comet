@@ -51,7 +51,15 @@ dev ──PR(merge)──▶ main    （发布分支——每次发布 1 个 mer
 | 禁删除 | ✅ | ✅ |
 | stale review 失效 | ✅ | ✅ |
 
-**发布后**：无需显式同步——发布 PR 把 dev 的 change 级提交合入 main，dev 的 tip 成为 main 发布提交的祖先（dev 不再领先，树一致）。
+**发布后**：将 `dev` fast-forward 同步到 `main`——发布 PR merge 后 dev 的 tip 是 main 的祖先，一次零提交的 fast-forward 即可让 dev 与 main 完全一致（在下一个开发 PR 合入 dev 之前立即执行）：
+
+```bash
+git checkout dev
+git merge main        # fast-forward——dev 与 main 完全一致
+git push origin dev
+```
+
+dev tip 是 main 祖先正是 fast-forward 成立的原因：不会产生 sync merge 提交。
 
 **hotfix 之后**（hotfix 直接 squash 进 `main`），同步 dev 以免落后 main：
 
