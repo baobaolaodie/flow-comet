@@ -10,11 +10,17 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号记录于 git tag、本文档、README 徽章、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 与权威源 `skills/flow-comet/INSTALLED_VERSION`；`bundle.yaml` 的 version 保持 1.0.0（与发布流程解耦）。
 
-## [Unreleased]
+## [1.4.1] - 2026-08-16
+
+安装器平台选择修复与发布模型变更（发布 PR 改 merge 合并）。([#56](https://github.com/baobaolaodie/flow-comet/pull/56))
 
 ### 修复
 
 - **安装器平台选择**：交互提示新增 `3) both`（两个平台都装——交互专属选项，`--platform` 仍仅接受 `claude-code` 或 `codex`）；目标项目同时有 `.claude/` 与 `.codex/` 痕迹时，无 TTY 自动探测不再武断只装 Codex——默认安装 Claude Code（主平台）并输出提示；Codex 经 `--platform codex` 显式选择，both 经交互终端选择。
+
+### 变更
+
+- **发布模型**：发布 PR（`dev → main`）改为 merge 合并——dev 的 change 级提交永久进入 main，每次发布后 dev 不再累积领先 main。
 
 ## [1.4.0] - 2026-08-14
 

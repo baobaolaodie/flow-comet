@@ -10,7 +10,7 @@
 
 | Item | Description |
 |------|-------------|
-| **Current version** | v1.4.0. Release truth: [CHANGELOG.md](../CHANGELOG.md) + git tag (created at the release step); README badge mirrors it; `skills/flow-comet/INSTALLED_VERSION` is checked installed-copy metadata (git describe of the source repo). v1.0.0 = first stable: 8-node workflow + three defense layers + guard validation |
+| **Current version** | v1.4.1. Release truth: [CHANGELOG.md](../CHANGELOG.md) + git tag (created at the release step); README badge mirrors it; `skills/flow-comet/INSTALLED_VERSION` is checked installed-copy metadata (git describe of the source repo). v1.0.0 = first stable: 8-node workflow + three defense layers + guard validation |
 | **Versioning** | Semantic Versioning: feature release → minor (1.2.0), bug fix → patch (1.1.1), breaking change → major (2.0.0); bump at the end of each feature release |
 | **Bundle version decoupling** | `bundle.yaml`/`skill.yaml` version stays 1.0.0 (decoupled from release versioning); git tag + CHANGELOG are the single source of truth |
 
@@ -36,4 +36,4 @@ Releases are **batched**: `dev` accumulates feature changes; one release PR ship
 2. Update README version badge + version status
 3. `git tag vX.Y.Z` + push --tags
 4. prepare-env release to all installed copies (main `.claude/` + target projects) when functionality changed
-5. Sync `dev` to `main` after the release PR merges
+5. No explicit sync — release PRs merge since 1.4.1: dev's change-level commits enter main, and dev stops leading main automatically after each release
