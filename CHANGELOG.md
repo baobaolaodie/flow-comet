@@ -10,11 +10,17 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded in git tags, this document, the README badge, [docs/VERSIONS.md](docs/VERSIONS.md) and the authoritative `skills/flow-comet/INSTALLED_VERSION`; `bundle.yaml` version stays 1.0.0 (decoupled from release versioning).
 
-## [Unreleased]
+## [1.4.1] - 2026-08-16
+
+Installer platform-selection fix and release-model change (release PRs now merge). ([#56](https://github.com/baobaolaodie/flow-comet/pull/56), [#57](https://github.com/baobaolaodie/flow-comet/pull/57))
 
 ### Fixed
 
 - **Installer platform selection**: the interactive prompt now offers `3) both` (install to both Claude Code and Codex — an interactive-only option; `--platform` still accepts only `claude-code` or `codex`); no-TTY auto-detection no longer arbitrarily picks Codex when the target project has both `.claude/` and `.codex/` traces — it defaults to Claude Code (primary) with a hint; Codex remains reachable via `--platform codex`, and both via an interactive terminal.
+
+### Changed
+
+- **Release model**: release PRs (`dev → main`) now merge instead of squash — dev's change-level commits enter main permanently, and dev stops accumulating a lead over main after each release.
 
 ## [1.4.0] - 2026-08-14
 
