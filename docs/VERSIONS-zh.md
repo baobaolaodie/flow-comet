@@ -36,4 +36,4 @@
 2. 更新 README 版本徽章 + 版本状态
 3. `git tag vX.Y.Z` + push --tags
 4. prepare-env 发布到全部已安装副本（主仓 `.claude/` + 各目标项目）——功能改动时
-5. 无需显式同步——1.4.1 起发布 PR 用 merge 合并：dev 的 change 级提交进入 main，每次发布后 dev 自动不再领先 main
+5. 将 `dev` fast-forward 同步到 `main`（发布 merge 后立即执行）——发布 PR merge 使 dev tip 成为 main 祖先，dev 上 `git merge main` 为零提交 fast-forward，dev 与 main 完全一致（无 sync merge 提交）

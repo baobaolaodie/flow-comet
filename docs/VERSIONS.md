@@ -36,4 +36,4 @@ Releases are **batched**: `dev` accumulates feature changes; one release PR ship
 2. Update README version badge + version status
 3. `git tag vX.Y.Z` + push --tags
 4. prepare-env release to all installed copies (main `.claude/` + target projects) when functionality changed
-5. No explicit sync — release PRs merge since 1.4.1: dev's change-level commits enter main, and dev stops leading main automatically after each release
+5. Fast-forward `dev` to `main` (right after the release merge): the release PR merge makes dev's tip an ancestor of main, so `git merge main` on dev is a zero-commit fast-forward — dev becomes identical to main (no sync merge commit)

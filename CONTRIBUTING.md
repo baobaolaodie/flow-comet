@@ -51,7 +51,15 @@ dev ──PR(merge)──▶ main   (release branch — one merge commit per rel
 | Block deletions | ✅ | ✅ |
 | Dismiss stale reviews | ✅ | ✅ |
 
-**After a release**: no explicit sync step — the release PR merges dev's change-level commits into main, and dev's tip becomes an ancestor of main's release commit (dev stops leading and the trees are identical).
+**After a release**: fast-forward `dev` to `main` — the release PR merge makes dev's tip an ancestor of main, so a zero-commit fast-forward syncs dev to main exactly (run it right after the release merge, before the next development PR lands on dev):
+
+```bash
+git checkout dev
+git merge main        # fast-forward — dev becomes identical to main
+git push origin dev
+```
+
+Dev's tip being an ancestor of main is what makes this a fast-forward: no sync merge commit is created.
 
 **After a hotfix** (squashed directly into `main`), sync dev so it does not fall behind main:
 
