@@ -13,16 +13,16 @@
 ```
 feat/xxx ──PR（squash）──▶ dev          （集成分支——change 级提交）
                                           │
-dev ──PR(squash)──▶ main    （发布分支——每次发布 1 个 squash 发布提交）
+dev ──PR(merge)──▶ main    （发布分支——每次发布 1 个 merge 提交；dev 的 change 级提交进入 main）
 ```
 
 | 分支 | 角色 | 合并方式 | 历史 |
 |------|------|---------|------|
-| `main` | 发布分支 | **squash** | 每次发布 squash 成 1 个发布提交(消息概括 dev 的 change 级提交) |
+| `main` | 发布分支 | **merge** | 发布 PR 把 dev 的 change 级提交合入 main（每次发布 1 个 merge 提交）；每个 PR 的提交永久保留在 main |
 | `dev` | 集成分支 | **squash** | 每个 PR 一条 change 级提交——PR 的修复明细在该 PR 的 Commits 列表可查 |
 | `feat/*` | 开发分支 | — | 工作历史，合并后删除 |
 
-**为什么这样拆分**：`dev` 承载每个 PR 的**一条 change 级提交**（squash）——稳定、可读的提交序列，每个 PR 是一个单元；PR 的提交历史（每个 TDD 修复）仍可在该 PR 的 Commits 列表查看。`main` 每次发布获得**一个 squash 发布提交**——main 历史为发布级干净序列，change 粒度细节留在 dev 与各 PR 的 Commits 列表。
+**为什么这样拆分**：`dev` 承载每个 PR 的**一条 change 级提交**（squash）——稳定、可读的提交序列，每个 PR 是一个单元；PR 的提交历史（每个 TDD 修复）仍可在该 PR 的 Commits 列表查看。`main` 通过**每次发布一个 merge 提交**获得 dev 的全部 change 级提交——PR 历史永久成为 main 的一部分；发布 merge 后 dev 的 tip 成为 main 的祖先，dev 不再领先 main（dev 上不累积已发布历史）。
 
 ## PR 流程
 
@@ -37,7 +37,7 @@ dev ──PR(squash)──▶ main    （发布分支——每次发布 1 个 sq
 3. **开 PR 合入 `dev`**（base `dev`，head `feat/<描述>`）。**使用仓库 PR 模板**（`.github/PULL_REQUEST_TEMPLATE.md`——改动范围/验证/自查勾选）。PR 描述写明改了什么、为什么、验证证据。**保留完整清单**：涉及项勾 `[x]`、未涉及项留 `[ ]`——**不要删除未勾选项**（清单是 reviewer 判断完整性的依据）。
 4. **合并门禁通过**——required CI checks 必须通过（见下方审核要求）；合并前由用户（维护者）审核批准。
 5. **合入 `dev`**——用 **squash** 合并：每个 PR 一条 **change 级提交**（PR 的提交仍可在该 PR 的 Commits 列表查看）。`dev` **积累改动**——不要每个改动都发布。
-6. **发布 PR（批次）**——`dev` 积累一组相关改动（功能批次或维护批次）后，开**一个**发布 PR 合入 `main`（base `main`，head `dev`）。以 **squash** 合并——1 个发布提交，消息概括 dev 积累的 change 级提交。
+6. **发布 PR（批次）**——`dev` 积累一组相关改动（功能批次或维护批次）后，开**一个**发布 PR 合入 `main`（base `main`，head `dev`）。以 **merge** 合并——merge 提交把 dev 的全部 change 级提交带入 main；dev 的 tip 成为 main 的祖先，发布后 dev 不再领先 main。发布 PR 标题/正文承载公开面发布摘要。
 7. 合并后删除 feature 分支。
 
 **维护批次**：纯文档/清理类改动（无行为影响）可积累在一个分支（如 `docs/maintenance-<日期>`）作为**一个** PR 合入 `dev`——减少 PR 数量且不丢可追溯性。
@@ -51,11 +51,13 @@ dev ──PR(squash)──▶ main    （发布分支——每次发布 1 个 sq
 | 禁删除 | ✅ | ✅ |
 | stale review 失效 | ✅ | ✅ |
 
-**dev 同步 main**（每次发布合入 main 后执行）：
+**发布后**：无需显式同步——发布 PR 把 dev 的 change 级提交合入 main，dev 的 tip 成为 main 发布提交的祖先（dev 不再领先，树一致）。
+
+**hotfix 之后**（hotfix 直接 squash 进 `main`），同步 dev 以免落后 main：
 
 ```bash
 git checkout dev
-git merge --no-ff main -m "sync: main → dev（<摘要>）"
+git merge --no-ff main -m "sync: main → dev（hotfix <描述>）"
 git push origin dev
 ```
 
@@ -65,7 +67,7 @@ git push origin dev
 git checkout main
 git checkout -b hotfix/<描述>
 # 修复 → 提交（fix: subject）→ 测试
-# hotfix 以 squash 合并——1 个干净提交进 main,与发布 squash 策略一致
+# hotfix 以 squash 合并——1 个干净提交进 main（发布 PR 用 merge；hotfix 用 squash 保持紧急修复原子性）
 git checkout main && git merge --squash hotfix/<描述> && git commit -m "fix: hotfix <描述>"
 git checkout dev && git merge --no-ff main -m "sync: main → dev（hotfix <描述>）"
 git branch -d hotfix/<描述>
@@ -189,7 +191,7 @@ node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/workflow-state.mj
 - **发布前（dev 上）**：版本号在 dev 上定好——`Unreleased` 整理为 `[X.Y.Z] - 日期` 版本段，链接该批次已合并的开发 PR。
 - **发布 PR（dev → main）**：不更新 CHANGELOG——版本段已在 dev 上；发布 PR 只把它合并进 main。
 - **main**：从不单独编辑 CHANGELOG——通过发布 PR 合并获得版本段。
-- **发布后**：dev 同步 main（树一致），重新开启 `Unreleased` 段积累下一批次。
+- **发布后**：dev 自动与 main 树一致（发布 PR 把 dev 合入 main 历史），重新开启 `Unreleased` 段积累下一批次。
 
 ## 保持 PR 更新
 
@@ -220,5 +222,5 @@ git push --force-with-lease origin feat/<描述>            # feature 分支允�
 **发布步骤**：五步清单（CHANGELOG → README 徽章 → tag → prepare-env 分发 → dev 同步）见 [VERSIONS-zh.md](docs/VERSIONS-zh.md)。
 
 **发布 PR 要点**：
-- 发布 PR（dev → main）天然列出 dev 的全部未发布 change 级提交（dev 是 change 级提交序列）——这是设计，不是问题；合并后 main 获得一个 squash 发布提交
-- 用 `gh pr merge --squash` 合并——squash 消息用公开面语言（发布摘要），过程细节不会进入 main 的历史
+- 发布 PR（dev → main）天然列出 dev 的全部 change 级提交（dev 是 change 级提交序列）——这是设计；合并后这些提交经每次发布的一个 merge 提交进入 main
+- 用 `gh pr merge --merge` 合并——merge 提交消息为 GitHub 默认（`Merge pull request #N from dev`，公开面语言）；发布 PR 标题与正文承载发布摘要，过程细节不会进入 main 的历史
