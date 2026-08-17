@@ -13,8 +13,8 @@
 #                        CHANGELOG self-check verification /
 #                        Conventional Commits (title + dev-PR commit messages)
 #   release-consistency  version consistency (8 spots) + tag reconciliation +
-#                        CHANGELOG per-version PR links + dsh-plugin package version
-#                        + dsh-plugin copy diff (build --check)
+#                        CHANGELOG per-version PR links + dsh platform artifact
+#                        (bridge presence & syntax)
 #   docs-links           dead links + language switchers (lychee; pull/N and claude.ai excluded)
 #
 # Historical note: required checks were enabled after 2-3 observed runs (avoid CI issues blocking releases).
@@ -233,16 +233,14 @@ jobs:
             echo "版本不一致 / version mismatch across docs"; exit 1
           fi
           [ "$IV" = "$IV_EXPECTED" ] || { echo "安装版本标识不一致 / INSTALLED_VERSION($IV) != CHANGELOG 版本($IV_EXPECTED)"; exit 1; }
-          # npm 包版本一致性: dsh-plugin/package.json = CHANGELOG 首个版本段 = 权威源 INSTALLED_VERSION
-          DP=$(node -e "console.log(require('./dsh-plugin/package.json').version)")
-          [ "$DP" = "$C1" ] || { echo "npm 包版本不一致 / dsh-plugin package version($DP) != CHANGELOG 版本($C1)"; exit 1; }
-          [ "$DP" = "$IV" ] || { echo "npm 包版本与安装版本标识不一致 / dsh-plugin package version($DP) != INSTALLED_VERSION($IV)"; exit 1; }
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             TAG=${GITHUB_REF#refs/tags/v}
             [ "$TAG" = "$R1" ] || { echo "tag 与文档版本不一致 / tag v$TAG != documented version $R1"; exit 1; }
           fi
-      - name: 'dsh 包副本一致性 / dsh plugin copy diff'
-        run: node scripts/build-dsh-plugin.mjs --check
+      - name: 'dsh 平台产物校验 / dsh platform artifact'
+        run: |
+          [ -f scripts/dsh-bridge.mjs ] || { echo "dsh 桥接器缺失 / scripts/dsh-bridge.mjs missing"; exit 1; }
+          node --check scripts/dsh-bridge.mjs || { echo "dsh 桥接器语法错误 / scripts/dsh-bridge.mjs has syntax errors"; exit 1; }
       - name: 'CHANGELOG 每版本段 PR 链接 / CHANGELOG per-version PR links'
         run: |
           for f in CHANGELOG.md CHANGELOG-zh.md; do
