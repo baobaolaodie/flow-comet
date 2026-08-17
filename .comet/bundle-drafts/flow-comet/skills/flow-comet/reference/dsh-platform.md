@@ -43,7 +43,17 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 - `DSH_HOME` 解析（与 dsh CLI 同款默认，**两态**）：`$DSH_HOME` 环境变量 > `~/.dsh`。dsh-home-paths 库 API 支持显式配置参数（configured），但 dsh CLI 0.1.0-rc.6 实际无参调用（profile-boot 调 `resolveDshHome()` 不传 configured），该层不生效；prepare-env 安装器与 dsh CLI 行为一致（两态）。
 - **`DSH_` 前缀 bootstrap-only**：项目 `.env` 中设置 `DSH_HOME` 被直接拒绝——`.env` 方案不可行，文档明确不推荐（ADR-005 源码实证）。
 - `$DSH_HOME/cordis.patch.yml` 为 home 级 patch，对所有 profile 生效——dsh 加载链 `bundles → profile → home → overlays`（ADR-005 源码核实）。
-- flow-comet 托管块：`# --- flow-comet managed ---` … `# --- end flow-comet managed ---`（`- id: dsh-flow-comet-bridge` + `name: 'file:///<abs 路径>'`——参照本机既有惯例 dsh-skin 托管块）；读-合并-写保留既有块；文件存在但内容无法识别为 YAML → fail-safe 报错退出不覆盖。
+- flow-comet 托管块：`# --- flow-comet managed ---` … `# --- end flow-comet managed ---`，内容为 **insert 形态**（无 id 顶层 `- insert:` 条目内嵌插件行——追加到条目列表，而非覆盖既有条目）：
+
+```yaml
+# --- flow-comet managed ---
+- insert:
+    - id: dsh-flow-comet-bridge
+      name: 'file:///<loader 绝对路径>'
+# --- end flow-comet managed ---
+```
+
+- **机制事实（为何必须 insert 形态）**：cordis.patch.yml 是 **id-targeted patch 层**——dsh-app-boot 的 `applyEntryPatches` 对 `{id, ...overrides}` 仅能覆盖已存在条目，id 不存在报 `entry not found` 跳过（旧 `- id: … + name:` patch 形态对不存在的 id 即跳过，loader 从不加载——拦截整链静默失效）；**新增插件必须用无 id 顶层 `- insert:` 条目**。读-合并-写保留既有块；文件存在但内容无法识别为 YAML → fail-safe 报错退出不覆盖。
 
 ## 5. fs/write-intent（single-slot 守卫瀑布）
 
