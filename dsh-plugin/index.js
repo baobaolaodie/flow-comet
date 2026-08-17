@@ -34,7 +34,7 @@ const AUDIT_FILE = 'flow-comet-audit.jsonl';
 
 // 插件元信息：Cordis 插件形态（name / inject / apply）。
 export const name = 'dsh-flow-comet';
-export const inject = ['skills'];
+export const inject = ['skills', 'config'];
 
 // 已激活项目根（仅含已成功注入的 flow-comet 痕迹项目）。
 const activatedProjects = new Set();
