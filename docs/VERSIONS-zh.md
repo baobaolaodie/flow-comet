@@ -10,7 +10,7 @@
 
 | 项 | 说明 |
 |----|------|
-| **当前版本** | v1.4.1。发布真相：[CHANGELOG-zh.md](../CHANGELOG-zh.md) + git tag（发布步骤创建）；README 徽章镜像；`skills/flow-comet/INSTALLED_VERSION` 为安装副本元数据（源仓库 git describe）。v1.0.0 = 首个稳定版：8 节点工作流 + 三层防线 + guard 校验体系 |
+| **当前版本** | v1.4.2。发布真相：[CHANGELOG-zh.md](../CHANGELOG-zh.md) + git tag（发布步骤创建）；README 徽章镜像；`skills/flow-comet/INSTALLED_VERSION` 为安装副本元数据（源仓库 git describe）；dsh 插件包 `dsh-flow-comet` 版本同步为 1.4.2。v1.0.0 = 首个稳定版：8 节点工作流 + 三层防线 + guard 校验体系 |
 | **版本策略** | 语义化版本：新功能发布 → minor（1.2.0）、bug 修复 → patch（1.1.1）、破坏性变更 → major（2.0.0）；每次功能发布完成时 bump |
 | **bundle 版本解耦** | `bundle.yaml`/`skill.yaml` 的 version 保持 1.0.0（与发布版本解耦）；git tag + CHANGELOG 是版本唯一事实来源 |
 
@@ -19,14 +19,15 @@
 | 类型 | 项 |
 |------|-----|
 | **必需** | [flow-kit](https://github.com/rihebty/flow-kit)（方法论与工件模板）；Claude Code |
-| **平台** | Claude Code（skill 体系，默认）；Codex（技能/规则/hook 经 `prepare-env --platform codex`，见[安装](INSTALLATION-zh.md#平台)）；不保证 Gemini/Cursor |
+| **平台** | Claude Code（skill 体系，默认）；Codex（技能/规则/hook 经 `prepare-env --platform codex`，见[安装](INSTALLATION-zh.md#平台)）；DeepSeek Harness（dsh 插件 `dsh-flow-comet`，见[安装](INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-插件)）；不保证 Gemini/Cursor |
 | **运行时** | Node.js ESM（Node ≥ 18）；工件语言与项目主语言一致 |
 
 ## 兼容策略
 
 - 旧 change/旧 state 自动补默认字段（executionMode/branchMode/enablePrReview）；无分支 change 照常运行——向后兼容
 - 旧 change 重入渐进 WARN 不 BLOCK（redEvidence/greenEvidence 缺失、纯字符串 handoff）
-- 回归基线（两级）：`guard-self-test.mjs` 137 场景 + `system-test.mjs` 55 项全绿（每次改动后必须）
+- 回归基线（两级）：`guard-self-test.mjs` 137 场景 + `system-test.mjs` 59 项全绿（每次改动后必须）
+- dsh 插件包 `dsh-flow-comet` 与 flow-comet 发布版本同步；卸载先运行随包 `scripts/cleanup.mjs`（见[安装](INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-插件)）
 
 ## 发布 checklist（每次发布收尾）
 

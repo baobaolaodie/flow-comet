@@ -10,6 +10,7 @@
 
 - [Claude Code](https://claude.ai/code), installed and authenticated (default platform)
 - [Codex](https://github.com/openai/codex) CLI, installed (skills/rules/hook support as described under [Platforms](#platforms))
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) CLI `0.1.0-rc.6` or newer for the dsh plugin option (optional; see [Option C](#option-c--deepseek-harness-dsh-plugin))
 - [flow-kit](https://github.com/rihebty/flow-kit) installed in the target project:
 
 ```bash
@@ -135,6 +136,33 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
 ```
 
 **4. Runtime state**: `.comet/flow-comet-state.json` is created by `init` (or the first `/flow-comet` call).
+
+## Option C · DeepSeek Harness (dsh) plugin
+
+DeepSeek Harness (dsh) is supported as a **pure plugin** — `prepare-env` is not involved. Install, activate, and uninstall through the official dsh CLI:
+
+```bash
+dsh plugin --profile <name> add dsh-flow-comet
+```
+
+- **Minimum dsh version**: `0.1.0-rc.6` (dev preview; API signatures may change).
+- **Project-level default**: skills are activated when the session project root contains `.comet/` or `.specs/` traces; global activation is opt-in through plugin config.
+- **AGENTS.md managed block**: on activation, dsh-flow-comet injects the orchestration rule into `<project>/AGENTS.md` inside the managed block:
+
+  ```html
+  <!-- Managed by flow-comet prepare-env -->
+  ```
+
+  This is the same managed-block format used by the Claude Code / Codex installer, so any platform's uninstall flow can remove the block — dsh users never run `prepare-env`. Because the block contains absolute paths to the locally installed plugin bundle, do not commit it to a shared repository; re-activating the plugin or reinstalling a newer version automatically re-injects the block with the current paths.
+- **Protocol copy**: on activation, the plugin copies the workflow protocol to `<project>/reference/.flow-comet-workflow-protocol.json` (idempotent overwrite) and points `FLOW_COMET_PROTOCOL` at it; cleanup removes this copy.
+- **Uninstall**: run the bundled cleanup script first, then remove the bundle:
+
+  ```bash
+  node <plugin-path>/scripts/cleanup.mjs
+  dsh plugin --profile <name> remove dsh-flow-comet
+  ```
+
+  `cleanup.mjs` strips the managed block and removes the protocol copy, preserving user content outside the block. It does **not** delete the audit log at `$DSH_HOME/flow-comet-audit.jsonl` — that file is append-only and is kept for manual deletion.
 
 ## Uninstalling
 

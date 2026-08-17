@@ -58,12 +58,23 @@ Hook blocking semantics (see Limitations): PreToolUse hook exit 2 blocks in the 
 
 ## 6. Guard self-test suite (author regression baseline)
 
-`scripts/guard-self-test.mjs`: **137 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (55 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
+`scripts/guard-self-test.mjs`: **137 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (59 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
 
 ```bash
 node .claude/skills/flow-comet/scripts/guard-self-test.mjs
 # → ALL 137 SCENARIOS PASSED
 ```
+
+## 6.5 DeepSeek Harness (dsh) platform
+
+On DeepSeek Harness, flow-comet runs as the `dsh-flow-comet` plugin — no `prepare-env` installer is involved:
+
+- **Installation**: `dsh plugin --profile <name> add dsh-flow-comet` (minimum dsh `0.1.0-rc.6`; dev preview).
+- **Skill registration**: the plugin exposes a local skill provider (`ctx.skills.registerProvider`) that reads the bundled `skills/` tree and injects command paths to the installed package location.
+- **Activation scope**: project-level by default — the plugin activates when the session project root contains `.comet/` or `.specs/` traces; global mode is opt-in. Non-flow-comet projects are not touched.
+- **Interception**: `tools/pre-execute` maps tool arguments to the same guard contract (`Write`/`Edit` → `file_path`, `Bash` → `command`), calls the bundled `comet-hook-guard.mjs` in a child process, and returns `PreToolDecision.deny` for out-of-scope writes.
+- **Managed rule injection**: activation injects the orchestration rule into `AGENTS.md` inside the `<!-- Managed by flow-comet prepare-env -->` block and copies the workflow protocol to `<project>/reference/.flow-comet-workflow-protocol.json`.
+- **Audit trail**: write/edit observations are appended to `$DSH_HOME/flow-comet-audit.jsonl`; cleanup keeps this file (append-only).
 
 ## 7. Automatic initialization detection (init pre-step)
 
@@ -95,7 +106,7 @@ Explicit parameter authorization (no blocking prompts, headless-safe): `--init-c
 
 ## Limitations
 
-- **Platforms**: Claude Code (default) and Codex (skills/rules/hook via the multi-platform installer, see [Installation](INSTALLATION.md#platforms)) are supported; other platforms (Gemini/Cursor) not guaranteed
+- **Platforms**: Claude Code (default), Codex (skills/rules/hook via the multi-platform installer), and DeepSeek Harness (dsh plugin, see [Installation](INSTALLATION.md#option-c--deepseek-harness-dsh-plugin)) are supported; other platforms (Gemini/Cursor) not guaranteed
 - **Return Contract transition rule**: legacy pure-string handoffs are exempt as WARN; missing redEvidence/greenEvidence is progressive WARN (not BLOCK) to avoid blocking legacy change re-entry
 - **Not interoperable with Comet Classic**: workflow-kernel state is independent of classic (design decision, not a defect)
 - **Hook allows writes when no active change**: when `.comet/flow-comet-state.json` is absent, the hook guard allows all writes (design decision: no workflow, no write restrictions)

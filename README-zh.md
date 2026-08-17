@@ -7,7 +7,7 @@
 <h1 align="center">flow-comet</h1>
 
 <p align="center">
-  <strong>把 AI 编码纪律变成可验证状态机的自动化执行引擎 —— 面向 flow-kit 9 阶段工作流,为 Claude Code 与 Codex 构建。</strong>
+  <strong>把 AI 编码纪律变成可验证状态机的自动化执行引擎 —— 面向 flow-kit 9 阶段工作流,为 Claude Code、Codex 与 DeepSeek Harness 构建。</strong>
   <br />
   <em>面向 AI 编码工作流——确定性状态机 · 协议驱动 · guard 校验 · 子代理隔离执行</em>
 </p>
@@ -20,6 +20,7 @@
 <p align="center">
   <a href="https://claude.ai/code"><img src="https://img.shields.io/badge/Claude_Code-D97757?style=flat&logo=claude&logoColor=white" alt="Claude Code" /></a>
   <a href="https://github.com/openai/codex"><img src="https://img.shields.io/badge/Codex-10A37F?style=flat&logoColor=white" alt="Codex" /></a>
+  <a href="https://github.com/deepseek-ai/deepseek-harness"><img src="https://img.shields.io/badge/DeepSeek_Harness-4D6BFE?style=flat&logoColor=white" alt="DeepSeek Harness" /></a>
   <a href="https://github.com/rihebty/flow-kit"><img src="https://img.shields.io/badge/flow--kit-4CAF50?style=flat" alt="flow-kit" /></a>
   <a href="https://github.com/rpamis/comet"><img src="https://img.shields.io/badge/comet-4CAF50?style=flat" alt="comet" /></a>
 </p>
@@ -55,6 +56,14 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径>
 首次在交互终端运行会提示选择平台（回车默认 Claude Code）；目标为 Codex 时直接加 `--platform codex`。
 
 安装器默认面向 Claude Code（行为不变）。面向 Codex：`node scripts/prepare-env.mjs --target <路径> --platform codex`——技能安装到自动发现的 `.agents/skills/`，编排规则注入 `AGENTS.md` 托管区，写入守卫 hook 经 Codex PreToolUse 拦截 Bash 写命令（首次使用需信任 hook：`/hooks`）。在交互式终端（有 TTY）运行且未指定 `--platform` 时，会提示选择目标平台（默认 Claude Code，回车即选；目标项目已有平台痕迹时默认推荐该平台）；无 TTY（CI/脚本）自动探测，均无则默认 Claude Code。
+
+面向 DeepSeek Harness（dsh）时直接安装插件——**无安装脚本参与**：
+
+```bash
+dsh plugin --profile <name> add dsh-flow-comet
+```
+
+插件默认项目级激活：会话项目根含 `.comet/` 或 `.specs/` 痕迹时生效；见[安装 → 方案 C](docs/INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-插件)。
 
 ```bash
 # 2. 在目标项目新开 Claude Code 会话，输入：
@@ -137,7 +146,7 @@ graph LR
 4. **flow-kit 方法论的原生自动化层**——不是另起炉灶：工件格式、规则、阶段与 flow-kit 完全一致；装了 flow-kit 的项目装上 flow-comet 即升级为机器化流程，无需迁移。
 5. **协议驱动、零依赖、拷贝即用**——内置 8 节点流程开箱即用；任意已装技能可组合成自定义协议跑在同一引擎；Node.js 18+、无第三方依赖、一条命令装入目标项目。
 
-**适用场景**：flow-comet 面向 Claude Code 上耗时数小时、跨多会话的开发 change——纪律自动化的价值在长任务中体现。它不是通用 CI/CD 或项目管理工具；Codex 受支持（见[安装](docs/INSTALLATION-zh.md#平台)），其他平台（Gemini / Cursor）不保证支持。
+**适用场景**：flow-comet 面向 Claude Code 上耗时数小时、跨多会话的开发 change——纪律自动化的价值在长任务中体现。它不是通用 CI/CD 或项目管理工具；Codex 与 DeepSeek Harness 受支持（见[安装](docs/INSTALLATION-zh.md#平台)），其他平台（Gemini / Cursor）不保证支持。
 
 ## 真实运行产物展示
 
@@ -192,7 +201,7 @@ flow-comet/
 | 层 | 技术 |
 |----|------|
 | 运行时 | Node.js ≥ 18（ESM，零第三方依赖） |
-| 平台 | Claude Code（默认——skill 体系、`.claude/` 安装、hooks）；Codex（`.agents/skills/`、AGENTS.md 托管规则、PreToolUse 写拦截） |
+| 平台 | Claude Code（默认——skill 体系、`.claude/` 安装、hooks）；Codex（`.agents/skills/`、AGENTS.md 托管规则、PreToolUse 写拦截）；DeepSeek Harness（`dsh-flow-comet` 插件、AGENTS.md 托管规则、`tools/pre-execute` 拦截） |
 | 方法论 | [flow-kit](https://github.com/rihebty/flow-kit)（产物、规则、模板） |
 
 ## 文档

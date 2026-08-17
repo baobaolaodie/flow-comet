@@ -58,12 +58,23 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 
 ## 6. guard 自测套件（作者回归基线）
 
-`scripts/guard-self-test.mjs`：**137 场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（55 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
+`scripts/guard-self-test.mjs`：**137 场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（59 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
 
 ```bash
 node .claude/skills/flow-comet/scripts/guard-self-test.mjs
 # → ALL 137 SCENARIOS PASSED
 ```
+
+## 6.5 DeepSeek Harness（dsh）平台
+
+在 DeepSeek Harness 上，flow-comet 以 `dsh-flow-comet` 插件运行——**不经过 `prepare-env` 安装器**：
+
+- **安装**：`dsh plugin --profile <name> add dsh-flow-comet`（最低 dsh `0.1.0-rc.6`；dev preview）。
+- **技能注册**：插件通过本地技能 provider（`ctx.skills.registerProvider`）读取随包 `skills/` 树，并把命令路径注入到已安装包的实际位置。
+- **激活范围**：项目级默认——会话项目根含 `.comet/` 或 `.specs/` 痕迹时激活；全局模式需显式开启。非 flow-comet 项目零侵入。
+- **拦截**：`tools/pre-execute` 把工具参数映射到同一 guard 契约（`Write`/`Edit` → `file_path`，`Bash` → `command`），子进程调用随包 `comet-hook-guard.mjs`，越权写入返回 `PreToolDecision.deny`。
+- **托管规则注入**：激活时把编排规则注入 `AGENTS.md` 的 `<!-- Managed by flow-comet prepare-env -->` 托管区，并复制工作流协议到 `<项目根>/reference/.flow-comet-workflow-protocol.json`。
+- **审计轨迹**：write/edit 观察事件追加到 `$DSH_HOME/flow-comet-audit.jsonl`；cleanup 保留该文件（append-only）。
 
 ## 7. 自动初始化检测（init 前置步骤）
 
@@ -94,7 +105,7 @@ node .claude/skills/flow-comet/scripts/guard-self-test.mjs
 
 ## 已知限制
 
-- **平台**：Claude Code（默认）与 Codex（技能/规则/hook 经多平台安装器，见[安装](INSTALLATION-zh.md#平台)）受支持；其他平台（Gemini/Cursor）不保证
+- **平台**：Claude Code（默认）、Codex（技能/规则/hook 经多平台安装器）与 DeepSeek Harness（dsh 插件，见[安装](INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-插件)）受支持；其他平台（Gemini/Cursor）不保证
 - **Return Contract 过渡规则**：旧格式纯字符串 handoff 豁免为 WARN；redEvidence/greenEvidence 缺失渐进 WARN（不 BLOCK），避免旧 change 重入被卡死
 - **与 Comet Classic 不互通**：workflow-kernel 状态独立于 classic（设计决策，非缺陷）
 - **无活跃 change 时 hook 放行**：`.comet/flow-comet-state.json` 不存在时 hook guard 放行所有写入（设计决策：无 workflow 时不限制文件操作）

@@ -10,6 +10,7 @@
 
 - [Claude Code](https://claude.ai/code)（已安装并认证，默认平台）
 - [Codex](https://github.com/openai/codex) CLI（已安装——技能/规则/hook 支持见下文[平台](#平台)）
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）CLI `0.1.0-rc.6` 或更新（dsh 插件方案可选，见[方案 C](#方案-c--deepseek-harnessdsh-插件)）
 - 目标项目已安装 [flow-kit](https://github.com/rihebty/flow-kit)：
 
 ```bash
@@ -134,6 +135,33 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
 ```
 
 **4. 运行状态**：`.comet/flow-comet-state.json` 由 `init`（或首个 `/flow-comet` 调用）自动创建。
+
+## 方案 C · DeepSeek Harness（dsh）插件
+
+DeepSeek Harness（dsh）以**纯插件**方式支持——**不经过 `prepare-env` 安装器**。安装、激活、卸载全部走官方 dsh CLI：
+
+```bash
+dsh plugin --profile <name> add dsh-flow-comet
+```
+
+- **最低 dsh 版本**：`0.1.0-rc.6`（dev preview，API 签名可能变化）。
+- **项目级默认**：会话项目根含 `.comet/` 或 `.specs/` 痕迹时激活技能；全局激活需通过插件配置显式开启。
+- **AGENTS.md 托管区**：激活时 dsh-flow-comet 把编排规则注入 `<项目>/AGENTS.md` 的托管区：
+
+  ```html
+  <!-- Managed by flow-comet prepare-env -->
+  ```
+
+  该标记与 Claude Code / Codex 安装器共用的托管区格式一致，任一平台卸载流程均可清理该区——dsh 用户无需运行 `prepare-env`。托管区包含本机安装包的**绝对路径**，建议不要提交到共享仓库；重新激活插件或重装新版本会自动按当前路径重注入。
+- **协议副本**：激活时插件把工作流协议复制到 `<项目根>/reference/.flow-comet-workflow-protocol.json`（幂等覆盖）并让 `FLOW_COMET_PROTOCOL` 指向它；cleanup 会移除该副本。
+- **卸载**：先运行随包提供的清理脚本，再移除 bundle：
+
+  ```bash
+  node <插件路径>/scripts/cleanup.mjs
+  dsh plugin --profile <name> remove dsh-flow-comet
+  ```
+
+  `cleanup.mjs` 会移除托管区与协议副本，保留托管区外的用户内容；**不会**删除 `$DSH_HOME/flow-comet-audit.jsonl` 审计日志——该文件为 append-only 保留物，需要删除时请手动处理。
 
 ## 卸载
 

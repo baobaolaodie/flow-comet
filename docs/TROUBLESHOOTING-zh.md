@@ -41,6 +41,10 @@
 | `{"decision":"block",...}`（Codex） | 越权写入被 Codex PreToolUse（Bash 工具）拦截 | 属预期——该写入被设计性拒绝；源码改动走 worktree 委托或切换执行模式 |
 | hook 静默不拦截（Codex） | hook 尚未信任，或 `[features] hooks` 未启用 | 信任 hook（交互会话 `/hooks`；脚本化自动化传 `--dangerously-bypass-hook-trust`）；`config.toml` 含 `[features] hooks = true` |
 | 换写法绕过 hook（Codex） | Codex 拦截为命令级——其他 File API 写法可能绕过 | 平台限制；主流模式（PowerShell cmdlet、.NET File API、重定向）已覆盖 |
+| dsh 会话中技能不可见 | dsh-flow-comet 未安装/未对该项目激活，或 dsh 低于 `0.1.0-rc.6` | 运行 `dsh plugin --profile <name> add dsh-flow-comet`；确认会话项目根含 `.comet/` 或 `.specs/` 痕迹（项目级默认）；升级 dsh 到 `0.1.0-rc.6`+ |
+| dsh 拦截不生效 | 插件未加载、项目未激活，或 `tools/pre-execute` 签名不匹配 | 确认插件已安装且会话项目已激活；确认 dsh 为 `0.1.0-rc.6`+；重装或重新激活插件 |
+| dsh 卸载残留（AGENTS.md 托管区 / 协议副本仍在） | 仅执行 `dsh plugin remove` 不会触发插件清理通道 | 先运行 `node <插件路径>/scripts/cleanup.mjs`（移除 AGENTS.md 托管区 + `<项目根>/reference/.flow-comet-workflow-protocol.json`），再 `dsh plugin --profile <name> remove dsh-flow-comet` |
+| dsh 审计日志持续增长 | `$DSH_HOME/flow-comet-audit.jsonl` 为 append-only，cleanup 刻意不自动删除 | 属预期；不再需要审计轨迹时手动删除该文件 |
 | `INIT-NEEDED: 项目上下文（CONTEXT.md）尚未初始化` | 项目首次使用——尚无项目上下文 | 执行 `init <id> --init-context` 生成（读取既有 AI 上下文文档并带出处整合；约 15-30k tokens，仅首次），或 `--init-skip` 记录跳过并在后续 init 保持静默 |
 | `INIT-HINT: 项目上下文（CONTEXT.md）已就绪（7 段 + 模板格式校验通过）但尚未记录扫描时间` / `INIT-HINT: 上次扫描已 X 天` | 上下文已存在但未记录扫描：CONTEXT 满足模板但无扫描记录（生成后未重跑），或上次扫描超过 90 天 | 就绪态：运行 `init <id> --init-context` 记录扫描时间（此后 90 天内不再提示）；过期态：可选重跑刷新，非强制 |
 | `INIT-GENERATE: 项目上下文未初始化——请生成 .specs/CONTEXT.md`（后附模板指引：已检测到 flow-kit/templates/CONTEXT.md 时严格对照模板段名与条目格式；未检测到时按 7 段基准） | `--init-context` 时 CONTEXT.md 缺失——生成协作第一步 | 按指引全量阅读源文档并整合（出处标注 `来自 <doc>:<line>`，原文档零写入）+ 代码探测（技术栈/既有抽象索引），对照模板生成 7 段；生成后重跑 `init <id> --init-context` 由脚本校验并记录扫描时间 |
