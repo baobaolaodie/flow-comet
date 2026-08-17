@@ -556,6 +556,14 @@ export function apply(ctx, config) {
         });
         return { kind: 'deny', reason };
       }
+      // 已通过项目根包含性校验后，把 Write/Edit 目标替换为 realpath 展开后的
+      // 规范化绝对长路径再交给 guard。guard 的 writeTargetFromHookInput 只做词法
+      // path.relative(runRoot, file_path)，Windows 8.3 短路径（如 LONGYI~1）与长路径
+      // 词法不同会解析出 null 从而跳过白名单判定（fail-open）；这里统一用长路径
+      // 确保 guard 能正确识别项目内短路径写入并执行白名单拦截。
+      const normalizedTarget = realpathExistingPath(path.resolve(projectRoot, mapped.target));
+      mapped.target = normalizedTarget;
+      mapped.input.file_path = normalizedTarget;
     }
 
     const decision = await runGuard(projectRoot, canonicalName, mapped.input);
