@@ -12,6 +12,14 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **DeepSeek Harness（dsh）平台支持**：dsh 用户一条命令安装 flow-comet（`dsh plugin add dsh-flow-comet`）——npm 插件 `dsh-flow-comet` 全打包技能、写入守卫判定脚本、协议副本、编排规则与显式卸载清理脚本；默认项目级激活（全局可选）、AGENTS.md 托管区注入、协议副本写入 `<项目根>/reference/.flow-comet-workflow-protocol.json`、原生 `tools/pre-execute` 拦截映射为 `PreToolDecision.deny`、`fs/observed` 写入审计记录到 `$DSH_HOME/flow-comet-audit.jsonl`。版本锚定：dsh `0.1.0-rc.6`。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+
+### 变更
+
+- **系统测试集从 55 项扩展至 59 项**：新增 dsh 包断言（bundle manifest、技能完整性、打包可复现、整树 diff）。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+
 ## [1.4.1] - 2026-08-16
 
 安装器平台选择修复与发布模型变更（发布 PR 改 merge 合并）。([#56](https://github.com/baobaolaodie/flow-comet/pull/56)、[#57](https://github.com/baobaolaodie/flow-comet/pull/57))

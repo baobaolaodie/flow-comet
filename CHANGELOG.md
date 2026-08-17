@@ -12,6 +12,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added
+
+- **DeepSeek Harness (dsh) platform support**: install flow-comet on dsh with a single command (`dsh plugin add dsh-flow-comet`) — the npm plugin `dsh-flow-comet` bundles the skills, write-guard decision script, protocol copy, orchestration rules, and an explicit cleanup script; project-level activation by default (global optional), AGENTS.md managed-block injection, protocol copy at `<project>/reference/.flow-comet-workflow-protocol.json`, native `tools/pre-execute` interception mapped to `PreToolDecision.deny`, and `fs/observed` write-audit records in `$DSH_HOME/flow-comet-audit.jsonl`. Version anchor: dsh `0.1.0-rc.6`. ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+
+### Changed
+
+- **System test suite expanded from 55 to 59 items** with dsh bundle assertions (bundle manifest, skill completeness, reproducible packaging, whole-tree diff). ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+
 ## [1.4.1] - 2026-08-16
 
 Installer platform-selection fix and release-model change (release PRs now merge). ([#56](https://github.com/baobaolaodie/flow-comet/pull/56), [#57](https://github.com/baobaolaodie/flow-comet/pull/57))
