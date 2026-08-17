@@ -34,7 +34,7 @@ const AUDIT_FILE = 'flow-comet-audit.jsonl';
 
 // 插件元信息：Cordis 插件形态（name / inject / apply）。
 export const name = 'dsh-flow-comet';
-export const inject = ['skills', 'config'];
+export const inject = ['skills'];
 
 // 已激活项目根（仅含已成功注入的 flow-comet 痕迹项目）。
 const activatedProjects = new Set();
@@ -198,8 +198,8 @@ function hasFlowCometTraces(projectRoot) {
   );
 }
 
-function pluginMode(ctx) {
-  return ctx?.config?.mode === 'global' ? 'global' : 'project';
+function pluginMode(config) {
+  return config?.mode === 'global' ? 'global' : 'project';
 }
 
 function shouldProvideSkill(projectRoot, mode) {
@@ -447,14 +447,14 @@ function assertPackageResources() {
   }
 }
 
-export function apply(ctx) {
+export function apply(ctx, config) {
   assertPackageResources();
   if (applied) {
     console.log('[dsh-flow-comet] apply skipped: already applied in this process');
     return;
   }
   applied = true;
-  const mode = pluginMode(ctx);
+  const mode = pluginMode(config);
   console.log('[dsh-flow-comet] apply mode=' + mode);
 
   registerSkillProvider(ctx, mode);
