@@ -45,7 +45,7 @@
 
 ## 快速开始
 
-需要目标项目安装 [Claude Code](https://claude.ai/code)（或 [Codex](https://github.com/openai/codex)）与 [flow-kit](https://github.com/rihebty/flow-kit)（见[安装](docs/INSTALLATION-zh.md)）。
+需要目标项目安装 [Claude Code](https://claude.ai/code)、[Codex](https://github.com/openai/codex) 或 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）与 [flow-kit](https://github.com/rihebty/flow-kit)（见[安装](docs/INSTALLATION-zh.md)）。
 
 ```bash
 # 1. 从本仓库安装（方案 A：prepare-env 安装器）
@@ -53,27 +53,17 @@ cd <flow-comet 仓库>
 node scripts/prepare-env.mjs --target <目标项目绝对路径>
 ```
 
-首次在交互终端运行会提示选择平台（回车默认 Claude Code）；目标为 Codex 时直接加 `--platform codex`。
+首次在交互终端运行会以多选方式提示选择平台（方向键 + 空格勾选，回车确认；默认 Claude Code）；非交互场景直接加 `--platform codex` / `--platform dsh` / `--platform claude-code,dsh`（逗号分隔多选）/ `--platform all`。
 
-安装器默认面向 Claude Code（行为不变）。面向 Codex：`node scripts/prepare-env.mjs --target <路径> --platform codex`——技能安装到自动发现的 `.agents/skills/`，编排规则注入 `AGENTS.md` 托管区，写入守卫 hook 经 Codex PreToolUse 拦截 Bash 写命令（首次使用需信任 hook：`/hooks`）。在交互式终端（有 TTY）运行且未指定 `--platform` 时，会提示选择目标平台（默认 Claude Code，回车即选；目标项目已有平台痕迹时默认推荐该平台）；无 TTY（CI/脚本）自动探测，均无则默认 Claude Code。
+安装器默认面向 Claude Code（行为不变）。面向 Codex：`node scripts/prepare-env.mjs --target <路径> --platform codex`——技能安装到自动发现的 `.agents/skills/`，编排规则注入 `AGENTS.md` 托管区，写入守卫 hook 经 Codex PreToolUse 拦截 Bash 写命令（首次使用需信任 hook：`/hooks`）。面向 DeepSeek Harness：`node scripts/prepare-env.mjs --target <路径> --platform dsh`——技能安装到 `.dsh/skills/flow-comet`（rank 100 自动发现、免重启），编排规则注入 `AGENTS.md` 托管区，并在 `$DSH_HOME` 全局挂载薄桥接 loader（见[安装 → 方案 C](docs/INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-平台)）。在交互式终端（有 TTY）运行且未指定 `--platform` 时，会以多选提示选择目标平台（按目标项目既有痕迹预勾选，默认 Claude Code，回车即选）；无 TTY（CI/脚本）自动探测 `.claude/` / `.codex/` / `.dsh/`，均无则默认 Claude Code。
 
-面向 DeepSeek Harness（dsh）时直接安装插件——**无安装脚本参与**：
+面向 DeepSeek Harness（dsh）时走同一个安装器——**无插件包、无 npm 包**：
 
 ```bash
-dsh plugin --profile <name> add dsh-flow-comet
+node scripts/prepare-env.mjs --target <目标项目绝对路径> --platform dsh
 ```
 
-插件默认项目级激活：会话项目根含 `.comet/` 或 `.specs/` 痕迹时生效；见[安装 → 方案 C](docs/INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-插件)。
-
-官方实证的 dsh 安装形态：
-
-- **npm registry**（发布分发）：`dsh plugin --profile <name> add dsh-flow-comet`
-- **本地目录**（开发/源码）：`dsh plugin --profile <name> add ./dsh-plugin`
-- **本地 tarball**（pnpm pack 产物）：`dsh plugin --profile <name> add ./dsh-flow-comet-1.4.2.tgz`
-- **`github:owner/repo#<sha>` 直装暂不支持**：`dsh-plugin/` 当前是 flow-comet 仓库的子目录，git 安装按仓库根解析；独立仓库化留 1.5.0。
-- **远程 https tarball URL 不主推**：未获官方 dsh publish 指南实证。
-
-`dsh-flow-comet` 为纯 ESM、无构建依赖，通常**不需要** `allowBuilds`（仅 git 依赖 + prepare 脚本时需要）。审计记录保存在 `$DSH_HOME/flow-comet-audit.jsonl`（append-only），cleanup 不会删除。完整 dsh 平台安装章节见[安装 → 方案 C](docs/INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-插件)。
+这会项目级安装技能树到 `<项目>/.dsh/skills/flow-comet`（dsh 以 rank 100 自动发现、免重启——未安装该目录的项目不可见该技能，因此激活天然是项目级的），把编排规则注入 `AGENTS.md` 托管区（非破坏合并），并在 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 全局挂载薄桥接 loader（托管块写入 `$DSH_HOME/cordis.patch.yml`——读-合并-写，保留 dsh-skin 等既有块，对所有 profile 生效）。桥接经 dsh 的 `tools/pre-execute` 事件拦截写工具。最低 dsh `0.1.0-rc.6`；npm 包暂不发布（1.5.0 一并处理）。完整 dsh 平台安装章节见[安装 → 方案 C](docs/INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-平台)。
 
 ```bash
 # 2. 在目标项目新开 Claude Code 会话，输入：
@@ -93,7 +83,7 @@ dsh plugin --profile <name> add dsh-flow-comet
 - **[核心机制](docs/MECHANISM-zh.md)**——状态机、三层防线、guard 校验、执行模型
 - **[故障排查](docs/TROUBLESHOOTING-zh.md)**——BLOCKED/WARN 信息与处理
 
-入口是 `/flow-comet` 命令；状态查看与推进可从命令行完成（下方路径为 Claude Code 安装形态 `.claude/skills/`；Codex 安装于 `.agents/skills/`——见[安装](docs/INSTALLATION-zh.md)）：
+入口是 `/flow-comet` 命令；状态查看与推进可从命令行完成（下方路径为 Claude Code 安装形态 `.claude/skills/`；Codex 安装于 `.agents/skills/`，dsh 安装于 `.dsh/skills/`——见[安装](docs/INSTALLATION-zh.md)）：
 
 ```bash
 node .claude/skills/flow-comet/scripts/workflow-state.mjs status   # 当前 change + 节点
@@ -211,7 +201,7 @@ flow-comet/
 | 层 | 技术 |
 |----|------|
 | 运行时 | Node.js ≥ 18（ESM，零第三方依赖） |
-| 平台 | Claude Code（默认——skill 体系、`.claude/` 安装、hooks）；Codex（`.agents/skills/`、AGENTS.md 托管规则、PreToolUse 写拦截）；DeepSeek Harness（`dsh-flow-comet` 插件、AGENTS.md 托管规则、`tools/pre-execute` 拦截） |
+| 平台 | Claude Code（默认——skill 体系、`.claude/` 安装、hooks）；Codex（`.agents/skills/`、AGENTS.md 托管规则、PreToolUse 写拦截）；DeepSeek Harness（`.dsh/skills/flow-comet` 项目级技能、AGENTS.md 托管规则、桥接 loader + `tools/pre-execute` 拦截） |
 | 方法论 | [flow-kit](https://github.com/rihebty/flow-kit)（产物、规则、模板） |
 
 ## 文档
@@ -219,7 +209,7 @@ flow-comet/
 | 文档 | 说明 |
 |------|------|
 | [生态](docs/ECOSYSTEM-zh.md) | flow-kit 与 Comet 的作用、flow-comet 借鉴什么与明确不吸收什么 |
-| [安装](docs/INSTALLATION-zh.md) | 前置依赖、prepare-env 方案 A/B、安装验证 |
+| [安装](docs/INSTALLATION-zh.md) | 前置依赖、prepare-env 方案 A/B/C、安装验证 |
 | [使用](docs/USAGE-zh.md) | 8 节点工作流、分支模式、执行模式、决策点 |
 | [自定义协议](docs/PROTOCOL-zh.md) | 组合 skill 成自定义工作流 |
 | [核心机制](docs/MECHANISM-zh.md) | 状态机、防线、guard 校验 |

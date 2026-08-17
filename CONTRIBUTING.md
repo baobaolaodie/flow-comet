@@ -94,12 +94,12 @@ git branch -d hotfix/<description>
 - **Runtime**: Node.js ≥ 18 (ESM)
 - **Repo**: clone, then verify the regression baseline runs:
   `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 144 SCENARIOS PASSED` (two-tier baseline; also run `system-test.mjs` → `ALL SYSTEM TESTS PASSED`, 59 items)
-- **Authoring environment**: Claude Code (skills/hooks run in Claude Code sessions); the hook is installed via `prepare-env` into your project's `.claude/`
+- **Authoring environment**: Claude Code (skills/hooks run in Claude Code sessions); the hook is installed via `prepare-env` into your project's `.claude/` (the same installer serves Codex via `--platform codex` and DeepSeek Harness (dsh) via `--platform dsh` — project-level skill tree, AGENTS.md managed rules, and a global bridge loader)
 - **For mechanism work**: read [docs/MECHANISM.md](docs/MECHANISM.md) for the mechanism semantics (behavior layer) before touching scripts
 
 ### CI enforcement and local hooks
 
-CI runs automatically on every PR and push — it enforces the repository conventions server-side (regression suite with scenario-count and public-artifact code self-checks, script syntax, BOM guard, installer reproducibility, workflow yaml validity, PR template completeness, commit-message conventions, version consistency, CHANGELOG PR links, dead links).
+CI runs automatically on every PR and push — it enforces the repository conventions server-side (regression suite with scenario-count and public-artifact code self-checks, script syntax, BOM guard, installer reproducibility across all three platforms — Claude Code / Codex / DeepSeek Harness (dsh) — workflow yaml validity, PR template completeness, commit-message conventions, version consistency, CHANGELOG PR links, dead links).
 
 **Local hooks** (install once after cloning):
 

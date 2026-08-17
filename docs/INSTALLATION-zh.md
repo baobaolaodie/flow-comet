@@ -10,7 +10,7 @@
 
 - [Claude Code](https://claude.ai/code)（已安装并认证，默认平台）
 - [Codex](https://github.com/openai/codex) CLI（已安装——技能/规则/hook 支持见下文[平台](#平台)）
-- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）CLI `0.1.0-rc.6` 或更新（dsh 插件方案可选，见[方案 C](#方案-c--deepseek-harnessdsh-插件)）
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）CLI `0.1.0-rc.6` 或更新（dsh 平台可选，见[方案 C](#方案-c--deepseek-harnessdsh-平台)）
 - 目标项目已安装 [flow-kit](https://github.com/rihebty/flow-kit)：
 
 ```bash
@@ -28,9 +28,12 @@ git clone https://github.com/rihebty/flow-kit.git flow-kit
 cd <flow-comet 仓库>
 node scripts/prepare-env.mjs --target <目标项目绝对路径>          # Claude Code（默认）
 node scripts/prepare-env.mjs --target <目标项目绝对路径> --platform codex   # Codex
+node scripts/prepare-env.mjs --target <目标项目绝对路径> --platform dsh     # DeepSeek Harness
+node scripts/prepare-env.mjs --target <目标项目绝对路径> --platform claude-code,dsh   # 多平台，逗号分隔
+node scripts/prepare-env.mjs --target <目标项目绝对路径> --platform all     # 全部平台
 ```
 
-首次在交互终端运行会提示选择平台（回车默认 Claude Code；目标项目已有平台痕迹时默认推荐该平台）；目标 Codex 直接加 `--platform codex`（平台选择链见[平台](#平台)）。
+首次在交互终端运行会以多选提示选择平台（方向键 + 空格勾选，回车确认；按目标项目既有痕迹预勾选——平台选择链见[平台](#平台)）。
 
 `prepare-env` 会：
 
@@ -54,17 +57,18 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 
 安装器默认面向 **Claude Code**（行为不变）。目标平台按以下顺序确定：
 
-1. **显式指定**：`--platform <claude-code|codex>` 优先（无头/CI 兼容）；显式参数仅接受 `claude-code` 或 `codex`——`both` 是交互专属选项。
-2. **交互选择**：在交互式终端（有 TTY）运行且未指定 `--platform` 时，会提示选择——`1) Claude Code（默认） 2) Codex 3) both（两个平台都装）`，回车取默认；若目标项目已探测到 `.codex/` 或 `.claude/` 痕迹，默认推荐对应平台；双痕迹时默认推荐 Claude Code。
-3. **自动探测**：无 TTY（CI/脚本/管道）时按目标项目既有痕迹探测——仅 `.codex/` → Codex；含 `.claude/` → Claude Code；**两者皆有 → 默认 Claude Code（主平台）并输出提示**（如需 Codex 或 both：交互终端运行——提示含 both 选项；或显式 `--platform codex`）。
-4. **默认兜底**：两者皆无 → Claude Code。
+1. **显式指定**：`--platform <claude-code|codex|dsh|claude-code,dsh|all>` 优先（无头/CI 兼容）。接受单平台、逗号分隔列表（按参数顺序安装）或 `all`（全部平台，按表格顺序）。未知平台报错（含逗号列表中的任一未知项——不得部分安装）。旧 `both` 已移除——`--platform both` 报错并提示改用逗号列表或 all。
+2. **交互选择**：在交互式终端（有 TTY）运行且未指定 `--platform` 时，会以多选提示（方向键 + 空格勾选，回车确认；可选 `@clack/prompts` 依赖，未安装自动回退 readline 数字/逗号多选）——Claude Code / Codex / dsh，按 `.claude/` / `.codex/` / `.dsh/` 痕迹预勾选；回车接受预勾选结果（兜底默认 Claude Code）。
+3. **自动探测**：无 TTY（CI/脚本/管道）时按目标项目既有痕迹探测——仅 `.codex/` → Codex；仅 `.dsh/` → dsh；含 `.claude/` → Claude Code；**多痕迹并存 → 默认 Claude Code（主平台）并输出提示**（如需其它组合：交互终端运行多选，或显式 `--platform`）。
+4. **默认兜底**：皆无痕迹 → Claude Code。
 
 | 平台 | 技能 | 编排规则 | 写入守卫 hook |
 |------|------|----------|---------------|
 | Claude Code（默认） | `.claude/skills/`（不变） | `.claude/rules/`（自动加载） | `settings.local.json` → `hooks.PreToolUse`（文本输出，exit 2 拦截） |
 | Codex | `.agents/skills/`（Codex 自动发现） | `AGENTS.md` 托管区（安装时内联；Codex 的 `rules/` 目录服务于命令批准策略，非指令文件） | `.codex/hooks.json`（matcher `*`——Codex PreToolUse 拦截 Bash 工具调用；经 `{"decision":"block"}` 拒绝） |
+| dsh | `.dsh/skills/flow-comet`（dsh 以 rank 100 自动发现，免重启） | `AGENTS.md` 托管区（非破坏合并） | 全局桥接 loader——`$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` + `$DSH_HOME/cordis.patch.yml` 托管块（`tools/pre-execute` 拦截，所有 profile 生效） |
 
-非默认平台上，SKILL/GUIDANCE 内的命令路径在安装时按平台实际技能位置重写（权威源保持 `.claude` 形态）。Codex 支持已完成端到端演练（Codex CLI 0.146.0 上 8 节点流程）；写入守卫 hook 拦截 Bash 写命令（PowerShell cmdlet、.NET File API、重定向）——命令级拦截覆盖主流模式，换写法可能绕过（Codex 平台限制）。
+非默认平台上，SKILL/GUIDANCE 内的命令路径在安装时按平台实际技能位置重写（权威源保持 `.claude` 形态）。Codex 支持已完成端到端演练（Codex CLI 0.146.0 上 8 节点流程）；写入守卫 hook 拦截 Bash 写命令（PowerShell cmdlet、.NET File API、重定向）——命令级拦截覆盖主流模式，换写法可能绕过（Codex 平台限制）。dsh 平台在 `$DSH_HOME` 全局挂载薄桥接 loader（见[方案 C](#方案-c--deepseek-harnessdsh-平台)）——引擎零改动，guard 判定核心经子进程调用原样复用。
 
 ### 验证安装（无副作用，不创建 change）
 
@@ -136,67 +140,56 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
 
 **4. 运行状态**：`.comet/flow-comet-state.json` 由 `init`（或首个 `/flow-comet` 调用）自动创建。
 
-## 方案 C · DeepSeek Harness（dsh）插件
+## 方案 C · DeepSeek Harness（dsh）平台
 
-DeepSeek Harness（dsh）以**纯插件**方式支持——**不经过 `prepare-env` 安装器**。安装、激活、卸载全部走官方 dsh CLI：
-
-```bash
-# 规范安装（默认/当前 profile）
-dsh plugin add dsh-flow-comet
-
-# 使用命名 profile
-dsh plugin --profile <name> add dsh-flow-comet
-```
-
-- **最低 dsh 版本**：`0.1.0-rc.6`（dev preview，API 签名可能变化）。
-- **项目级默认**：会话项目根含 `.comet/` 或 `.specs/` 痕迹时激活技能；全局激活需通过插件配置显式开启。
-- **AGENTS.md 托管区**：激活时 dsh-flow-comet 把编排规则注入 `<项目>/AGENTS.md` 的托管区：
-
-  ```html
-  <!-- Managed by flow-comet prepare-env -->
-  ```
-
-  该标记与 Claude Code / Codex 安装器共用的托管区格式一致，任一平台卸载流程均可清理该区——dsh 用户无需运行 `prepare-env`。托管区包含本机安装包的**绝对路径**，建议不要提交到共享仓库；重新激活插件或重装新版本会自动按当前路径重注入。
-- **协议副本**：激活时插件把工作流协议复制到 `<项目根>/reference/.flow-comet-workflow-protocol.json`（幂等覆盖）并让 `FLOW_COMET_PROTOCOL` 指向它；cleanup 会移除该副本。
-- **卸载**：先运行随包提供的清理脚本，再移除 bundle：
-
-  ```bash
-  node <插件路径>/scripts/cleanup.mjs
-  dsh plugin --profile <name> remove dsh-flow-comet
-  ```
-
-  `cleanup.mjs` 会移除托管区与协议副本，保留托管区外的用户内容；**不会**删除 `$DSH_HOME/flow-comet-audit.jsonl` 审计日志——该文件为 append-only 保留物，需要删除时请手动处理。
-
-### 官方实证安装形态
-
-以下形态经官方 dsh publish 指南实证：
+DeepSeek Harness（dsh）经 **prepare-env 安装器**支持——与 Claude Code / Codex 同一入口，新增 dsh 平台描述符。无插件包、无 npm 包（npm 分发留后续 / 1.5.0）：
 
 ```bash
-# npm registry（发布分发——推荐）
-dsh plugin --profile <name> add dsh-flow-comet
-
-# 本地目录（开发/源码，flow-comet 仓库内的 dsh-plugin）
-dsh plugin --profile <name> add ./dsh-plugin
-
-# 本地 tarball（pnpm pack 产物）
-pnpm pack ./dsh-plugin
-dsh plugin --profile <name> add ./dsh-flow-comet-1.4.2.tgz
+cd <flow-comet 仓库>
+node scripts/prepare-env.mjs --target <目标项目绝对路径> --platform dsh
 ```
 
-- **`github:owner/repo#<sha>` 直装暂不支持**。`dsh-plugin/` 当前是 flow-comet 仓库的子目录，git 安装按仓库根解析而不是插件包；独立仓库化留后续决策/1.5.0。
-- **远程 https tarball URL 不主推**。未获官方 dsh publish 指南实证；请使用上面的 npm registry、本地目录或本地 tarball 形态。
+交互终端中 dsh 是多选选项之一（见[平台](#平台)）。
 
-### allowBuilds
+**最低 dsh 版本**：`0.1.0-rc.6`（dev preview；API 签名与技能发现 rank 可能变化——低于锚定版本时拦截可能静默失效）。
 
-`dsh-flow-comet` 为纯 ESM、零第三方依赖、无构建步骤。在基于 pnpm 的 dsh 环境中，`allowBuilds` 授权仅在包含 install/prepare 脚本或 git 依赖时需要；本包通常**不需要**。若你的环境仍要求批准构建（例如从 git 源安装且运行 `prepare`），请按你的 pnpm/dsh 版本指引，将本包加入 `pnpm-workspace.yaml` 的 `allowBuilds` 列表。
+### 安装内容
 
-### 审计日志保留
+1. **项目级技能树**——`<项目>/.dsh/skills/flow-comet`（含路径替换 `.claude/skills/flow-comet/scripts/` → `.dsh/skills/flow-comet/scripts/`（仅 `.md` 文件）与 `INSTALLED_VERSION` 版本标识）。dsh 经文件监听在 `<项目>/.dsh/skills/` 下以 **rank 100** 自动发现——免重启，且**未安装该目录的项目不可见该技能**，因此激活天然是项目级的（无运行时痕迹判定、无 chicken-and-egg）。
+2. **AGENTS.md 托管区**——把编排规则注入 `<项目>/AGENTS.md` 的托管区（`<!-- Managed by flow-comet prepare-env -->` … `<!-- /Managed by flow-comet prepare-env -->`），非破坏合并——托管区外的用户内容保留。标记与 Codex 平台共用，任一平台卸载流程均可清理该区。
+3. **全局桥接 loader**——在 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 挂载薄 loader，并在 `$DSH_HOME/cordis.patch.yml` 注入托管块（读-合并-写——保留 dsh-skin 等既有块；home patch 对所有 profile 生效）。loader 监听 dsh 原生 `tools/pre-execute` waterfall 事件，把工具参数映射到 guard 契约（`Write`/`Edit` → `file_path`，`Bash` → `command`），子进程调用项目本地 `comet-hook-guard.mjs`，越权写入返回 `{kind:'deny', reason}`（BLOCK 消息 + 恢复指引）。仅当会话项目根含 `.dsh/skills/flow-comet` 时才处理（窄监听——非 flow-comet 项目零拦截）。参数形状不符与异常退出 fail-closed。
 
-插件把 append-only 审计记录写入 `$DSH_HOME/flow-comet-audit.jsonl`。`cleanup.mjs` **永不删除**该文件——它由多 profile 共享，保留供手动删除。更多见[故障排查](TROUBLESHOOTING-zh.md)。
+> **注意——安装器会写你的 home 目录**：挂载桥接 loader 需写入 `$DSH_HOME`（默认 `~/.dsh`；解析：显式配置 > `$DSH_HOME` 环境变量 > `~/.dsh`）。这是设计内且**非破坏**的：`cordis.patch.yml` 读-合并-写（dsh-skin 等既有块保留；文件无法解析时安全报错退出而非覆盖），loader 文件按名添加/移除。恢复方式见下方 purge——只移除托管块与 loader 文件，其余全部保留。
+
+### 在 dsh 上使用 flow-comet
+
+- **首次使用**：无需信任 hook 步骤——桥接 loader 是安装器挂载的全局插件；在目标项目启动 dsh 会话并按名调用技能即可（rank 100 自动发现）。桥接仅当会话项目根含 `.dsh/skills/flow-comet` 时拦截——未安装项目零侵入。
+- **版本锚定**：dsh `0.1.0-rc.6` 为实测最低版本；低于它技能发现或拦截可能静默失效——请升级 dsh。
+- **Windows**：包含性校验前先展开 8.3 短路径（项目内短路径不会被误判为越界）。
+
+### 验证 dsh 安装
+
+1. **结构检查**：`<目标项目>/.dsh/skills/` 下存在 `flow-comet` 技能目录 + `AGENTS.md` 托管区（`grep "Managed by flow-comet" <目标项目>/AGENTS.md`）+ `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` + `$DSH_HOME/cordis.patch.yml` 托管块 + `<目标项目>/.dsh/skills/flow-comet/INSTALLED_VERSION`
+2. **命令路径已重写**：`grep -c "\.claude/skills/flow-comet/scripts/" <目标项目>/.dsh/skills/flow-comet/SKILL.md` → 0；`grep -c "\.dsh/skills/flow-comet/scripts/" <目标项目>/.dsh/skills/flow-comet/SKILL.md` → 非零
+3. **真实环境冒烟**（在目标项目目录内执行）：`cd <目标项目> && node .dsh/skills/flow-comet/scripts/workflow-state.mjs status`——期望输出 JSON 状态对象
+
+### 卸载（purge）
+
+```bash
+node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --platform dsh --yes
+```
+
+purge 会移除：
+
+- `<项目>/.dsh/skills/` 下 `flow-comet*` 条目（非 flow-comet 条目保留；空 `.dsh` 目录移除）
+- AGENTS.md 托管区（文件与用户内容保留）
+- `$DSH_HOME/cordis.patch.yml` 托管块（dsh-skin 等既有块保留；移除后文件为空则删除文件本身）与 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` loader 文件
+
+**多项目语义**：每项目独立安装技能树（未安装项目不可见该技能）；桥接 loader 全局一份，服务多个 flow-comet 项目（按会话项目判定——与 Claude Code 项目级 hook 等价）。
 
 ## 卸载
 
-从目标项目移除 flow-comet：
+从目标项目移除 flow-comet（Claude Code / Codex 见下；DeepSeek Harness（dsh）见[方案 C](#方案-c--deepseek-harnessdsh-平台)的 purge 命令）：
 
 ```bash
 # 1. 删除 skill 目录与编排规则

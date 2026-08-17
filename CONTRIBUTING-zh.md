@@ -94,12 +94,12 @@ git branch -d hotfix/<描述>
 - **运行时**：Node.js ≥ 18（ESM）
 - **仓库**：clone 后先验证回归基线可跑：
   `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 144 SCENARIOS PASSED`（统一测试集两级基线，另需 `system-test.mjs` → `ALL SYSTEM TESTS PASSED`，59 项）
-- **创作环境**：Claude Code（skill/hook 在 Claude Code 会话中运行）；hook 通过 `prepare-env` 安装到你的项目 `.claude/`
+- **创作环境**：Claude Code（skill/hook 在 Claude Code 会话中运行）；hook 通过 `prepare-env` 安装到你的项目 `.claude/`（同一安装器服务 Codex（`--platform codex`）与 DeepSeek Harness（dsh，`--platform dsh`）——项目级技能树、AGENTS.md 托管规则与全局桥接 loader）
 - **机制相关工作**：动手改脚本前先读 [docs/MECHANISM.md](docs/MECHANISM.md) 了解机制语义（行为层）
 
 ### CI 强制检查与本地 hook
 
-CI 在每个 PR 与 push 时自动运行——服务端强制仓库约定（回归套件含场景数与公开产物代号自检、脚本语法、BOM 防线、安装器可复现性、workflow yaml 有效性、PR 模板完整性、提交规范（Conventional Commits）、版本一致性、CHANGELOG PR 链接、死链）。
+CI 在每个 PR 与 push 时自动运行——服务端强制仓库约定（回归套件含场景数与公开产物代号自检、脚本语法、BOM 防线、安装器可复现性——覆盖 Claude Code / Codex / DeepSeek Harness（dsh）三个平台、workflow yaml 有效性、PR 模板完整性、提交规范（Conventional Commits）、版本一致性、CHANGELOG PR 链接、死链）。
 
 **本地 hook**（clone 后安装一次）：
 
