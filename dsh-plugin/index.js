@@ -13,7 +13,7 @@
 // 纯 ESM、零第三方依赖，仅使用 Node.js 内置模块。
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, appendFileSync } from 'node:fs';
+import { existsSync, mkdirSync, appendFileSync, realpathSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -169,11 +169,34 @@ function mapToolInput(canonicalName, args) {
 // 项目根包含性：Write/Edit 的 file_path 必须解析后仍位于 projectRoot 内。
 // 越界路径若交给 guard 子进程，writeTargetFromHookInput 会因 target=null
 // 跳过白名单判定（fail-open），因此必须在插件侧直接 fail-closed deny。
+// Windows 8.3 短路径（如 LONGYI~1）与长路径在词法上不同，直接 path.relative
+// 会把项目内短路径误判为越界；因此先 realpath 展开已存在部分，再执行包含性判断。
 // ---------------------------------------------------------------------------
+function realpathExistingPath(p) {
+  try {
+    // 使用 native 变体：Windows 上 fs.realpathSync（libuv）不展开 8.3 短名，
+    // realpathSync.native 才会把 LONGYI~1 规范化为 LongYinHaHa。
+    return realpathSync.native(p);
+  } catch (error) {
+    if (error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
+      const parent = path.dirname(p);
+      if (parent === p) return p;
+      try {
+        return path.join(realpathExistingPath(parent), path.basename(p));
+      } catch {
+        return p;
+      }
+    }
+    return p;
+  }
+}
+
 export function isPathInsideProjectRoot(projectRoot, filePath) {
   const root = path.resolve(projectRoot);
   const resolved = path.resolve(root, filePath);
-  const relative = path.relative(root, resolved);
+  const realRoot = realpathExistingPath(root);
+  const realTarget = realpathExistingPath(resolved);
+  const relative = path.relative(realRoot, realTarget);
   return (
     relative === '' ||
     (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative))
