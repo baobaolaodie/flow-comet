@@ -37,6 +37,11 @@ export const inject = ['skills'];
 // 已激活项目根（仅含已成功注入的 flow-comet 痕迹项目）。
 const activatedProjects = new Set();
 
+// 模块级幂等标记：dsh 生命周期若保证每次 apply 都是新进程，本标记为防御性冗余；
+// 若同一进程内 apply() 被重复调用（热重载/多会话/插件重入），跳过已注册的
+// registerProvider / tools/pre-execute / fs/observed，避免重复监听与重复注册。
+let applied = false;
+
 // ---------------------------------------------------------------------------
 // $DSH_HOME 解析（index.js 与 cleanup.mjs 共用同一规则）
 // ---------------------------------------------------------------------------
@@ -417,6 +422,11 @@ function assertPackageResources() {
 
 export function apply(ctx) {
   assertPackageResources();
+  if (applied) {
+    console.log('[dsh-flow-comet] apply skipped: already applied in this process');
+    return;
+  }
+  applied = true;
   const mode = pluginMode(ctx);
   console.log('[dsh-flow-comet] apply mode=' + mode);
 
