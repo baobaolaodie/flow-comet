@@ -1,0 +1,1909 @@
+#!/usr/bin/env node
+  import { constants as fsConstants, promises as fs } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import {
+  parseProtocolWriteWhitelist,
+  readProtocolFile,
+  resolveProtocol,
+  validateProtocolSchema,
+} from './protocol-utils.mjs';
+
+const event = process.argv[2] ?? 'before_tool';
+// 平台识别（1.4.0 多平台）：--platform codex argv 参数（prepare-env 注入 hook 命令时带平台标记）。
+// 缺省 claude-code = 既有行为（stdout 自由文本 + exit 2 block）。
+// Codex 分支：stdout 严格 JSON schema（拦截输出 {"decision":"block"}，放行输出 {}），exit 0。
+function platformFromArgs(argv) {
+  for (let index = 0; index < argv.length; index++) {
+    if (argv[index] === '--platform') {
+      if (typeof argv[index + 1] === 'string' && argv[index + 1] !== '') return argv[index + 1];
+    }
+    if (typeof argv[index] === 'string' && argv[index].startsWith('--platform=')) {
+      const value = argv[index].slice('--platform='.length);
+      if (value !== '') return value;
+    }
+  }
+  return null;
+}
+const platform = platformFromArgs(process.argv.slice(2)) ?? 'claude-code';
+const isCodex = platform === 'codex';
+
+// 放行输出：Codex 分支只输出 {}（Codex 对 hook stdout 严格 schema 校验,额外字段整体无效）;
+// Claude Code 分支输出既有文本（workflow-hook-guard-ok + EVENT + 可选标注）。
+function hookOk(extra) {
+  if (isCodex) {
+    console.log('{}');
+    return;
+  }
+  console.log('workflow-hook-guard-ok');
+  console.log('EVENT: ' + event + (extra ? ' ' + extra : ''));
+}
+
+// 拦截输出：Codex 分支输出 {"decision":"block",reason} + exit 0（实测确认的 Codex deny 通道——
+// 2026-08-13 Codex 0.146：exit 2 / permissionDecision:"deny" 均不被 enforce,decision:"block"+exit 0 生效）;
+// Claude Code 分支既有文本 + exit 2。
+function hookBlock(mainLine, detailLine) {
+  if (isCodex) {
+    console.log(JSON.stringify({ decision: 'block', reason: mainLine + (detailLine ? ' ' + detailLine : '') }));
+    process.exit(0);
+  }
+  console.error(mainLine);
+  if (detailLine) console.error(detailLine);
+  process.exit(2);
+}
+
+// Codex 平台写路径适配：PreToolUse 只拦截 shell(Bash)工具,Codex 在 Windows 经 PowerShell 写文件——
+// tool_input 为 command 字符串(无 file_path)。按常见写入模式解析命令中的目标路径:
+//  ① PowerShell cmdlet 的 -Path/-LiteralPath 参数
+//  ② .NET File API 的第一个参数(路径)
+//  ③ shell 重定向 > / >>
+// 命中任一模式即提取路径(供白名单判定);未命中 = 无写入语义,放行。
+// 边界:检测为命令级——换写法(如其他 File API)可绕过,属平台限制;覆盖主流模式后越权写入
+// 对执行者的阻力与可见性已足够(每次绕过都留下试错痕迹)。
+function codexWriteTargetsFromCommand(command) {
+  if (typeof command !== 'string' || command.trim() === '') return [];
+  const targets = [];
+  const patterns = [
+    // PowerShell 写类 cmdlet 的 -Path/-LiteralPath(引号内空格整体捕获并剥引号;
+    // 只匹配写类 cmdlet——读类(Get-Content 等)的 -Path 不提取;同一命令内 [^;|&]*? 防跨命令)
+    /(?:Set-Content|Add-Content|New-Item|Out-File|Copy-Item|Move-Item|Remove-Item|Set-Item|Export-Csv)[^;|&]*?-(?:Path|LiteralPath)\s+("[^"]*"|'[^']*'|[^\s;|&]+)/gi,
+    // shell 重定向(含描述符变体:> / >> / 2> / 1>>)
+    /(?:^|[;\s|&])(?:[0-9]*>>?)\s*("[^"]*"|'[^']*'|[^\s;|&]+)/gi,
+  ];
+  for (const re of patterns) {
+    let m;
+    while ((m = re.exec(command)) !== null) {
+      let t = m[1] && m[1].trim();
+      if (t) t = t.replace(/^["']|["']$/g, ''); // 剥引号
+      if (t && t !== 'NUL' && t !== '/dev/null' && !targets.includes(t)) targets.push(t); // 去重
+    }
+  }
+  // .NET File API:写 API 的目标参数按语义区分——WriteAll*/AppendAll*/Delete 目标 = 第一参数;
+  // Copy(source, destination) / Move(source, destination) 目标 = 第二参数(第一参数是源路径,守卫应检查写入目标)
+  const apiRe = /\[System\.IO\.File\]::(WriteAllText|WriteAllBytes|AppendAllText|WriteAllLines|Copy|Move|Delete)\s*\(\s*("[^"]*"|'[^']*'|[^,\s)]+)(?:\s*,\s*("[^"]*"|'[^']*'|[^,\s)]+))?/gi;
+  let m;
+  while ((m = apiRe.exec(command)) !== null) {
+    const isCopyMove = m[1] === 'Copy' || m[1] === 'Move';
+    let t = (isCopyMove ? m[3] : m[2]) || '';
+    t = t.trim().replace(/^["']|["']$/g, '');
+    if (t && t !== 'NUL' && t !== '/dev/null' && !targets.includes(t)) targets.push(t);
+  }
+  return targets;
+}
+
+// writeWhitelist 路径支持 <change-id> 占位符(与 artifacts paths 同机制——协议复用自动适配
+// 当前 change;无 activeChange 时字面匹配保底)
+function replaceChangeId(prefix, activeChange) {
+  return (typeof prefix === 'string' && prefix.includes('<change-id>') && activeChange)
+    ? prefix.replaceAll('<change-id>', activeChange)
+    : prefix;
+}
+
+// 白名单判定(共享):目标相对路径前缀匹配(含 <change-id> 占位符替换)——file_path 路径与
+// Codex Bash 命令写入路径两条判定共用,避免两处逻辑漂移
+function targetAllowed(targetRel, whitelist, activeChange) {
+  return whitelist.some(prefix => {
+    const p = replaceChangeId(prefix, activeChange);
+    return p === '' || targetRel.startsWith(p);
+  });
+}
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const packageRoot = path.resolve(__dirname, '..');
+const runRoot = process.env.COMET_RUN_ROOT ? path.resolve(process.env.COMET_RUN_ROOT) : process.cwd();
+// hook 由 settings.json 静态命令调用，不支持 CLI 参数（cliArgs 传 []）：
+// 协议路径取 env FLOW_COMET_PROTOCOL 或默认 <packageRoot>/reference/workflow-protocol.json
+const protocolPath = resolveProtocol(packageRoot, runRoot, []);
+
+
+const WORKFLOW_PROJECT_CONFIG_MAX_BYTES = 64 * 1024;
+const WORKFLOW_PROJECT_FILE_MAX_BYTES = 2 * 1024 * 1024;
+
+// Phase 写入白名单：currentNode → 允许写入的（相对 runRoot 的）路径前缀
+// '.specs/' 前缀表示只允许 .specs 目录下的文件（subagent-execute 始终协调者，只写工件；源码由 worktree 子代理写）
+// 其他路径前缀精确匹配
+// 注：白名单已声明化（协议 writeWhitelist 优先，缺失/读取失败时回退下方缺省表）；
+// execute 的名单由 state.executionMode 动态收窄（subagent=协调者 .specs/；direct=逃生口允许主代理直写源码），
+// 收窄规则对缺省/声明表同样生效，见 resolvePhaseWriteWhitelist()
+
+function workflowProjectRelativeSegments(value, label) {
+  if (typeof value !== 'string') throw new Error(label + ' must be a string');
+  const trimmed = value.trim();
+  if (
+    trimmed.length === 0 ||
+    path.posix.isAbsolute(trimmed) ||
+    path.win32.isAbsolute(trimmed) ||
+    trimmed.startsWith('~') ||
+    trimmed.startsWith('/') ||
+    trimmed.startsWith('\\')
+  ) {
+    throw new Error(label + ' must be a project-relative path');
+  }
+  if (trimmed === '.') return [];
+  const segments = trimmed.replaceAll('\\', '/').split('/');
+  if (segments.some((segment) => segment === '..')) {
+    throw new Error(label + ' must stay inside the project root');
+  }
+  if (segments.some((segment) => segment === '' || segment === '.')) {
+    throw new Error(label + ' must not contain empty or dot path segments');
+  }
+  return segments;
+}
+
+function normalizeWorkflowArtifactRoot(value) {
+  const segments = workflowProjectRelativeSegments(value, 'native.artifact_root');
+  return segments.length === 0 ? '.' : segments.join('/');
+}
+
+function normalizeClassicArtifactLayout(value, fallback = 'docs') {
+  const resolved = value ?? fallback;
+  if (resolved !== 'legacy' && resolved !== 'docs') {
+    throw new Error('classic.artifact_layout must be legacy or docs');
+  }
+  return resolved;
+}
+
+function workflowPathInside(root, target) {
+  const relative = path.relative(root, target);
+  return (
+    relative === '' ||
+    (!path.isAbsolute(relative) &&
+      relative !== '..' &&
+      !relative.startsWith('..' + path.sep))
+  );
+}
+
+async function inspectWorkflowProtectedPath(
+  projectRoot,
+  target,
+  label,
+  expected = 'any',
+) {
+  const lexicalRoot = path.resolve(projectRoot);
+  const lexicalTarget = path.resolve(target);
+  if (!workflowPathInside(lexicalRoot, lexicalTarget)) {
+    throw new Error(label + ' must stay inside the project root');
+  }
+  const rootStat = await fs.lstat(lexicalRoot);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+    throw new Error(label + ' project root must be a real directory');
+  }
+  const realRoot = await fs.realpath(lexicalRoot);
+  const relative = path.relative(lexicalRoot, lexicalTarget);
+  const segments = relative === '' ? [] : relative.split(path.sep);
+  let cursor = lexicalRoot;
+  for (let index = 0; index < segments.length; index++) {
+    cursor = path.join(cursor, segments[index]);
+    let stat;
+    try {
+      stat = await fs.lstat(cursor);
+    } catch (error) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+      ) {
+        return { target: lexicalTarget, exists: false };
+      }
+      throw error;
+    }
+    const display = path.relative(lexicalRoot, cursor).replaceAll('\\', '/');
+    if (stat.isSymbolicLink()) {
+      throw new Error(label + ' crosses a symbolic link or junction at ' + display);
+    }
+    const final = index === segments.length - 1;
+    if (!final && !stat.isDirectory()) {
+      throw new Error(label + ' ancestor ' + display + ' must be a real directory');
+    }
+    if (
+      final &&
+      ((expected === 'file' && !stat.isFile()) ||
+        (expected === 'directory' && !stat.isDirectory()) ||
+        (expected === 'any' && !stat.isFile() && !stat.isDirectory()))
+    ) {
+      throw new Error(label + ' must be a real ' + expected);
+    }
+    const physical = await fs.realpath(cursor);
+    if (!workflowPathInside(realRoot, physical)) {
+      throw new Error(label + ' resolves outside the project root');
+    }
+  }
+  return { target: lexicalTarget, exists: true };
+}
+
+function workflowFileObjectIdentity(stat) {
+  return {
+    dev: stat.dev,
+    ino: stat.ino,
+    birthtime: typeof stat.birthtimeNs === 'bigint' ? stat.birthtimeNs : stat.birthtimeMs,
+  };
+}
+
+function workflowHasIdentity(value) {
+  return value !== 0 && value !== 0n && value !== '0';
+}
+
+function workflowSameFileObject(left, right) {
+  const comparableDevice = workflowHasIdentity(left.dev) && workflowHasIdentity(right.dev);
+  const comparableInode = workflowHasIdentity(left.ino) && workflowHasIdentity(right.ino);
+  if (comparableDevice && left.dev !== right.dev) return false;
+  if (comparableInode && left.ino !== right.ino) return false;
+  if (comparableDevice && comparableInode) return true;
+  return left.birthtime === right.birthtime;
+}
+
+function workflowSameFileStat(left, right) {
+  return (
+    workflowSameFileObject(
+      workflowFileObjectIdentity(left),
+      workflowFileObjectIdentity(right),
+    ) &&
+    left.size === right.size &&
+    left.ctimeNs === right.ctimeNs
+  );
+}
+
+async function readWorkflowProtectedFile(
+  projectRoot,
+  file,
+  label,
+  maxBytes,
+  hooks = {},
+) {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+    throw new Error(label + ' byte limit must be a positive integer');
+  }
+  const inspection = await inspectWorkflowProtectedPath(
+    projectRoot,
+    file,
+    label,
+    'file',
+  );
+  if (!inspection.exists) {
+    const error = new Error(label + ' does not exist');
+    error.code = 'ENOENT';
+    throw error;
+  }
+  const before = await fs.lstat(file, { bigint: true });
+  if (!before.isFile() || before.isSymbolicLink()) {
+    throw new Error(label + ' must be a real file');
+  }
+  if (before.size > BigInt(maxBytes)) {
+    throw new Error(label + ' exceeds ' + String(maxBytes) + ' bytes');
+  }
+  const beforeRealPath = await fs.realpath(file);
+  await hooks.afterLstat?.();
+  const flags =
+    process.platform === 'win32'
+      ? fsConstants.O_RDONLY
+      : fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK;
+  let handle;
+  try {
+    handle = await fs.open(file, flags);
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ELOOP') {
+      throw new Error(label + ' must be a real file');
+    }
+    throw error;
+  }
+  try {
+    const [opened, afterOpen, afterOpenRealPath] = await Promise.all([
+      handle.stat({ bigint: true }),
+      fs.lstat(file, { bigint: true }),
+      fs.realpath(file),
+    ]);
+    if (
+      !opened.isFile() ||
+      !afterOpen.isFile() ||
+      afterOpen.isSymbolicLink() ||
+      afterOpenRealPath !== beforeRealPath ||
+      !workflowSameFileStat(before, opened) ||
+      !workflowSameFileStat(before, afterOpen)
+    ) {
+      throw new Error(label + ' changed while opening');
+    }
+    await inspectWorkflowProtectedPath(projectRoot, file, label, 'file');
+    await hooks.afterOpen?.();
+    const chunks = [];
+    let total = 0;
+    const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, maxBytes + 1));
+    for (;;) {
+      const remaining = maxBytes + 1 - total;
+      const { bytesRead } = await handle.read(
+        buffer,
+        0,
+        Math.min(buffer.length, remaining),
+        null,
+      );
+      if (bytesRead === 0) break;
+      total += bytesRead;
+      if (total > maxBytes) {
+        throw new Error(label + ' exceeds ' + String(maxBytes) + ' bytes');
+      }
+      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
+    }
+    await hooks.beforeFinalCheck?.();
+    const [afterHandle, afterPath, afterRealPath] = await Promise.all([
+      handle.stat({ bigint: true }),
+      fs.lstat(file, { bigint: true }),
+      fs.realpath(file),
+    ]);
+    if (
+      !afterPath.isFile() ||
+      afterPath.isSymbolicLink() ||
+      afterRealPath !== beforeRealPath ||
+      !workflowSameFileStat(before, afterHandle) ||
+      !workflowSameFileStat(before, afterPath)
+    ) {
+      throw new Error(label + ' changed while reading');
+    }
+    await inspectWorkflowProtectedPath(projectRoot, file, label, 'file');
+    return Buffer.concat(chunks, total);
+  } finally {
+    await handle.close();
+  }
+}
+
+function workflowRelativeSegments(value, label, allowWildcards = false) {
+  if (typeof value !== 'string') throw new Error(label + ' must be a string');
+  const trimmed = value.trim().replaceAll('\\', '/');
+  if (
+    trimmed.length === 0 ||
+    path.posix.isAbsolute(trimmed) ||
+    path.win32.isAbsolute(trimmed) ||
+    trimmed.startsWith('~') ||
+    trimmed.startsWith('/') ||
+    trimmed.startsWith('\\')
+  ) {
+    throw new Error(label + ' must be relative to its declared path base');
+  }
+  const segments = trimmed.split('/');
+  if (segments.some((segment) => segment === '..')) {
+    const boundary = label === 'workflow-run statePath' ? 'the project root' : 'its declared path base';
+    throw new Error(label + ' must stay inside ' + boundary);
+  }
+  if (segments.some((segment) => segment === '' || segment === '.')) {
+    throw new Error(label + ' must not contain empty or dot path segments');
+  }
+  if (!allowWildcards && (trimmed.includes('*') || trimmed.includes('?'))) {
+    throw new Error(label + ' cannot contain wildcards');
+  }
+  return segments;
+}
+
+function workflowYamlError(message, line) {
+  const suffix = Number.isInteger(line) ? ' at line ' + String(line) : '';
+  throw new Error('Invalid .comet/config.yaml: ' + message + suffix);
+}
+
+function workflowYamlStripComment(value) {
+  let quote = null;
+  for (let index = 0; index < value.length; index++) {
+    const character = value[index];
+    if (quote) {
+      if (quote === "'" && character === "'" && value[index + 1] === "'") {
+        index++;
+        continue;
+      }
+      if (character === quote) {
+        quote = null;
+      } else if (quote === '"' && character === '\\') {
+        index++;
+      }
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === '#' && (index === 0 || /\s/u.test(value[index - 1]))) {
+      return value.slice(0, index);
+    }
+  }
+  return value;
+}
+
+function workflowYamlMappingColon(value) {
+  let quote = null;
+  let flowDepth = 0;
+  for (let index = 0; index < value.length; index++) {
+    const character = value[index];
+    if (quote) {
+      if (quote === "'" && character === "'" && value[index + 1] === "'") {
+        index++;
+        continue;
+      }
+      if (character === quote) {
+        quote = null;
+      } else if (quote === '"' && character === '\\') {
+        index++;
+      }
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === '[' || character === '{') {
+      flowDepth++;
+      continue;
+    }
+    if (character === ']' || character === '}') {
+      flowDepth--;
+      if (flowDepth < 0) workflowYamlError('unexpected flow collection terminator');
+      continue;
+    }
+    if (
+      character === ':' &&
+      flowDepth === 0 &&
+      (index + 1 === value.length || /\s/u.test(value[index + 1]))
+    ) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function workflowYamlDoubleQuoted(value, line) {
+  let output = '';
+  const escapes = {
+    '0': '\0',
+    a: '\u0007',
+    b: '\b',
+    t: '\t',
+    n: '\n',
+    v: '\u000b',
+    f: '\f',
+    r: '\r',
+    e: '\u001b',
+    ' ': ' ',
+    '"': '"',
+    '/': '/',
+    '\\': '\\',
+    N: '\u0085',
+    _: '\u00a0',
+    L: '\u2028',
+    P: '\u2029',
+  };
+  for (let index = 1; index < value.length; index++) {
+    const character = value[index];
+    if (character === '"') {
+      if (value.slice(index + 1).trim() !== '') {
+        workflowYamlError('unexpected content after quoted scalar', line);
+      }
+      return output;
+    }
+    if (character !== '\\') {
+      output += character;
+      continue;
+    }
+    index++;
+    const escape = value[index];
+    if (escape === undefined) workflowYamlError('unterminated quoted scalar', line);
+    if (Object.prototype.hasOwnProperty.call(escapes, escape)) {
+      output += escapes[escape];
+      continue;
+    }
+    const widths = { x: 2, u: 4, U: 8 };
+    const width = widths[escape];
+    if (width) {
+      const digits = value.slice(index + 1, index + 1 + width);
+      if (!new RegExp('^[a-fA-F0-9]{' + String(width) + '}$', 'u').test(digits)) {
+        workflowYamlError('invalid Unicode escape', line);
+      }
+      const point = Number.parseInt(digits, 16);
+      try {
+        output += String.fromCodePoint(point);
+      } catch {
+        workflowYamlError('invalid Unicode code point', line);
+      }
+      index += width;
+      continue;
+    }
+    workflowYamlError('unsupported quoted-scalar escape', line);
+  }
+  workflowYamlError('unterminated quoted scalar', line);
+}
+
+function workflowYamlSingleQuoted(value, line) {
+  let output = '';
+  for (let index = 1; index < value.length; index++) {
+    const character = value[index];
+    if (character !== "'") {
+      output += character;
+      continue;
+    }
+    if (value[index + 1] === "'") {
+      output += "'";
+      index++;
+      continue;
+    }
+    if (value.slice(index + 1).trim() !== '') {
+      workflowYamlError('unexpected content after quoted scalar', line);
+    }
+    return output;
+  }
+  workflowYamlError('unterminated quoted scalar', line);
+}
+
+function workflowYamlPlainScalar(value) {
+  if (/^(?:null|Null|NULL|~)$/u.test(value)) return null;
+  if (/^(?:true|True|TRUE)$/u.test(value)) return true;
+  if (/^(?:false|False|FALSE)$/u.test(value)) return false;
+  if (/^[-+]?(?:0|[1-9][0-9_]*)$/u.test(value)) {
+    const parsed = Number(value.replaceAll('_', ''));
+    if (Number.isSafeInteger(parsed)) return parsed;
+  }
+  if (
+    /^[-+]?(?:(?:0|[1-9][0-9_]*)\.[0-9_]+|(?:0|[1-9][0-9_]*)(?:[eE][-+]?[0-9]+))$/u.test(
+      value,
+    )
+  ) {
+    const parsed = Number(value.replaceAll('_', ''));
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  if (/^[&*!]/u.test(value)) {
+    workflowYamlError('anchors, aliases, and tags are not supported in project config');
+  }
+  return value;
+}
+
+function workflowYamlFlowParser(source, line) {
+  let cursor = 0;
+  const skip = () => {
+    while (/\s/u.test(source[cursor] ?? '')) cursor++;
+  };
+  const quoted = () => {
+    const start = cursor;
+    const quote = source[cursor++];
+    while (cursor < source.length) {
+      if (quote === "'" && source[cursor] === "'" && source[cursor + 1] === "'") {
+        cursor += 2;
+        continue;
+      }
+      if (source[cursor] === quote) {
+        cursor++;
+        const token = source.slice(start, cursor);
+        return quote === '"'
+          ? workflowYamlDoubleQuoted(token, line)
+          : workflowYamlSingleQuoted(token, line);
+      }
+      if (quote === '"' && source[cursor] === '\\') cursor++;
+      cursor++;
+    }
+    workflowYamlError('unterminated quoted scalar', line);
+  };
+  const value = (stops) => {
+    skip();
+    const character = source[cursor];
+    if (character === '[') return sequence();
+    if (character === '{') return mapping();
+    if (character === '"' || character === "'") return quoted();
+    const start = cursor;
+    while (cursor < source.length && !stops.includes(source[cursor])) cursor++;
+    const token = source.slice(start, cursor).trim();
+    if (!token) workflowYamlError('missing flow collection value', line);
+    return workflowYamlPlainScalar(token);
+  };
+  const sequence = () => {
+    cursor++;
+    const output = [];
+    skip();
+    if (source[cursor] === ']') {
+      cursor++;
+      return output;
+    }
+    for (;;) {
+      output.push(value([',', ']']));
+      skip();
+      if (source[cursor] === ']') {
+        cursor++;
+        return output;
+      }
+      if (source[cursor] !== ',') workflowYamlError('expected , or ] in flow sequence', line);
+      cursor++;
+    }
+  };
+  const mapping = () => {
+    cursor++;
+    const output = {};
+    skip();
+    if (source[cursor] === '}') {
+      cursor++;
+      return output;
+    }
+    for (;;) {
+      skip();
+      let key;
+      if (source[cursor] === '"' || source[cursor] === "'") {
+        key = String(quoted());
+      } else {
+        const start = cursor;
+        while (cursor < source.length && source[cursor] !== ':') cursor++;
+        key = source.slice(start, cursor).trim();
+      }
+      if (!key || source[cursor] !== ':') {
+        workflowYamlError('expected mapping key and : in flow mapping', line);
+      }
+      if (Object.prototype.hasOwnProperty.call(output, key)) {
+        workflowYamlError('duplicate key ' + key, line);
+      }
+      cursor++;
+      output[key] = value([',', '}']);
+      skip();
+      if (source[cursor] === '}') {
+        cursor++;
+        return output;
+      }
+      if (source[cursor] !== ',') workflowYamlError('expected , or } in flow mapping', line);
+      cursor++;
+    }
+  };
+  const parsed = value([]);
+  skip();
+  if (cursor !== source.length) workflowYamlError('unexpected flow collection content', line);
+  return parsed;
+}
+
+function workflowYamlFlowDepth(value, line) {
+  const stack = [];
+  let quote = null;
+  for (let index = 0; index < value.length; index++) {
+    const character = value[index];
+    if (quote) {
+      if (quote === "'" && character === "'" && value[index + 1] === "'") {
+        index++;
+        continue;
+      }
+      if (character === quote) {
+        quote = null;
+      } else if (quote === '"' && character === '\\') {
+        index++;
+      }
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === '[' || character === '{') {
+      stack.push(character);
+      continue;
+    }
+    if (character === ']' || character === '}') {
+      const expected = character === ']' ? '[' : '{';
+      if (stack.pop() !== expected) workflowYamlError('mismatched flow collection', line);
+    }
+  }
+  return stack.length;
+}
+
+function workflowYamlScalar(value, line) {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+    return workflowYamlFlowParser(trimmed, line);
+  }
+  if (trimmed.startsWith('"')) return workflowYamlDoubleQuoted(trimmed, line);
+  if (trimmed.startsWith("'")) return workflowYamlSingleQuoted(trimmed, line);
+  if (/[\[\]{}]/u.test(trimmed)) {
+    workflowYamlError('malformed flow collection', line);
+  }
+  return workflowYamlPlainScalar(trimmed);
+}
+
+function parseWorkflowProjectYaml(source) {
+  const lines = String(source).replace(/^\uFEFF/u, '').split(/\r?\n/u);
+  let cursor = 0;
+  const info = (index) => {
+    const raw = lines[index] ?? '';
+    if (raw.includes('\t')) workflowYamlError('tabs are not supported', index + 1);
+    let indent = 0;
+    while (raw[indent] === ' ') indent++;
+    return {
+      raw,
+      indent,
+      content: workflowYamlStripComment(raw.slice(indent)).trimEnd(),
+      line: index + 1,
+    };
+  };
+  const skipEmpty = () => {
+    while (cursor < lines.length && info(cursor).content.trim() === '') cursor++;
+  };
+  const nextContent = () => {
+    let index = cursor;
+    while (index < lines.length && info(index).content.trim() === '') index++;
+    return index < lines.length ? info(index) : null;
+  };
+  const flowValue = (initial, line) => {
+    let combined = initial;
+    let depth = workflowYamlFlowDepth(combined, line);
+    while (depth > 0) {
+      if (cursor >= lines.length) workflowYamlError('unterminated flow collection', line);
+      const current = info(cursor);
+      cursor++;
+      combined += ' ' + current.content.trim();
+      depth = workflowYamlFlowDepth(combined, line);
+    }
+    return workflowYamlScalar(combined, line);
+  };
+  const blockScalar = (style, parentIndent) => {
+    const output = [];
+    let contentIndent = null;
+    while (cursor < lines.length) {
+      const raw = lines[cursor];
+      if (raw.trim() === '') {
+        output.push('');
+        cursor++;
+        continue;
+      }
+      const current = info(cursor);
+      if (current.indent <= parentIndent) break;
+      contentIndent ??= current.indent;
+      if (current.indent < contentIndent) break;
+      output.push(raw.slice(contentIndent));
+      cursor++;
+    }
+    const text = style === '>' ? output.join('\n').replace(/([^\n])\n([^\n])/gu, '$1 $2') : output.join('\n');
+    return text + '\n';
+  };
+  const parseKey = (value, line) => {
+    const trimmed = value.trim();
+    if (!trimmed) workflowYamlError('mapping key is empty', line);
+    if (trimmed.startsWith('"')) return workflowYamlDoubleQuoted(trimmed, line);
+    if (trimmed.startsWith("'")) return workflowYamlSingleQuoted(trimmed, line);
+    if (/^[?[\]{}&,*!|>@\x60]/u.test(trimmed)) {
+      workflowYamlError('unsupported complex mapping key', line);
+    }
+    return trimmed;
+  };
+  const parseFollowingValue = (rawValue, keyIndent, line) => {
+    const trimmed = rawValue.trim();
+    if (/^[|>][+-]?[0-9]?$/u.test(trimmed)) {
+      return blockScalar(trimmed[0], keyIndent);
+    }
+    if (trimmed !== '') {
+      return trimmed.startsWith('[') || trimmed.startsWith('{')
+        ? flowValue(trimmed, line)
+        : workflowYamlScalar(trimmed, line);
+    }
+    const next = nextContent();
+    if (!next || next.indent <= keyIndent || next.content === '...') return null;
+    return parseBlock(next.indent);
+  };
+  const mapEntry = (output, content, keyIndent, line) => {
+    const colon = workflowYamlMappingColon(content);
+    if (colon < 0) workflowYamlError('expected mapping key followed by :', line);
+    const key = String(parseKey(content.slice(0, colon), line));
+    if (Object.prototype.hasOwnProperty.call(output, key)) {
+      workflowYamlError('duplicate key ' + key, line);
+    }
+    output[key] = parseFollowingValue(content.slice(colon + 1), keyIndent, line);
+  };
+  const parseMapping = (indent) => {
+    const output = {};
+    for (;;) {
+      skipEmpty();
+      if (cursor >= lines.length) return output;
+      const current = info(cursor);
+      if (current.content === '...') return output;
+      if (current.indent < indent) return output;
+      if (current.indent > indent) workflowYamlError('unexpected indentation', current.line);
+      if (current.content === '-' || current.content.startsWith('- ')) return output;
+      cursor++;
+      mapEntry(output, current.content, indent, current.line);
+    }
+  };
+  const parseSequence = (indent) => {
+    const output = [];
+    for (;;) {
+      skipEmpty();
+      if (cursor >= lines.length) return output;
+      const current = info(cursor);
+      if (current.content === '...') return output;
+      if (current.indent < indent) return output;
+      if (current.indent > indent) workflowYamlError('unexpected indentation', current.line);
+      if (current.content !== '-' && !current.content.startsWith('- ')) return output;
+      const item = current.content === '-' ? '' : current.content.slice(2);
+      cursor++;
+      if (item === '') {
+        const next = nextContent();
+        output.push(!next || next.indent <= indent ? null : parseBlock(next.indent));
+        continue;
+      }
+      const colon = workflowYamlMappingColon(item);
+      if (colon >= 0) {
+        const mapping = {};
+        mapEntry(mapping, item, indent + 2, current.line);
+        const next = nextContent();
+        if (next && next.indent > indent) {
+          const remainder = parseMapping(next.indent);
+          for (const [key, value] of Object.entries(remainder)) {
+            if (Object.prototype.hasOwnProperty.call(mapping, key)) {
+              workflowYamlError('duplicate key ' + key, next.line);
+            }
+            mapping[key] = value;
+          }
+        }
+        output.push(mapping);
+      } else {
+        output.push(
+          item.startsWith('[') || item.startsWith('{')
+            ? flowValue(item, current.line)
+            : workflowYamlScalar(item, current.line),
+        );
+      }
+    }
+  };
+  const parseBlock = (indent) => {
+    skipEmpty();
+    const current = info(cursor);
+    if (current.indent !== indent) workflowYamlError('unexpected indentation', current.line);
+    return current.content === '-' || current.content.startsWith('- ')
+      ? parseSequence(indent)
+      : parseMapping(indent);
+  };
+
+  skipEmpty();
+  if (cursor < lines.length && info(cursor).content === '---') {
+    cursor++;
+    skipEmpty();
+  }
+  if (cursor >= lines.length || info(cursor).content === '...') return {};
+  if (info(cursor).indent !== 0) workflowYamlError('root must start at indentation 0', info(cursor).line);
+  const value = parseBlock(0);
+  skipEmpty();
+  if (cursor < lines.length && info(cursor).content === '...') {
+    cursor++;
+    skipEmpty();
+  }
+  if (cursor < lines.length) workflowYamlError('multiple YAML documents are not supported', info(cursor).line);
+  return value;
+}
+
+function workflowConfigRecord(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(label + ' must be a mapping');
+  }
+  return value;
+}
+
+function workflowConfigLanguage(value, fallback, label) {
+  const resolved = value ?? fallback;
+  if (resolved !== 'en' && resolved !== 'zh-CN') {
+    throw new Error(label + ' must be en or zh-CN');
+  }
+  return resolved;
+}
+
+function workflowSnapshotPattern(value, label) {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.includes('\\') ||
+    value.includes('\0') ||
+    value.startsWith('/') ||
+    value.split('/').includes('..')
+  ) {
+    throw new Error(label + ' contains an unsafe pattern');
+  }
+  if (value.length > 1024) throw new Error(label + ' exceeds 1024 characters');
+  let wildcardTokens = 0;
+  for (let index = 0; index < value.length; index++) {
+    if (value[index] === '?') {
+      wildcardTokens++;
+    } else if (value[index] === '*') {
+      wildcardTokens++;
+      if (value[index + 1] === '*') index++;
+    }
+  }
+  if (wildcardTokens > 64) {
+    throw new Error(label + ' contains more than 64 wildcard tokens');
+  }
+}
+
+function validateWorkflowSnapshot(value) {
+  if (value === undefined) return;
+  const snapshot = workflowConfigRecord(value, 'native.snapshot');
+  for (const key of ['include', 'exclude']) {
+    if (snapshot[key] === undefined) continue;
+    if (!Array.isArray(snapshot[key])) {
+      throw new Error('native.snapshot.' + key + ' contains an unsafe pattern');
+    }
+    for (const pattern of snapshot[key]) {
+      workflowSnapshotPattern(pattern, 'native.snapshot.' + key);
+    }
+  }
+  for (const key of ['max_files', 'max_total_bytes', 'max_duration_ms']) {
+    if (
+      snapshot[key] !== undefined &&
+      (!Number.isSafeInteger(snapshot[key]) || snapshot[key] < 1)
+    ) {
+      throw new Error('native.snapshot.' + key + ' must be a positive integer');
+    }
+  }
+}
+
+function validateWorkflowPendingRootMove(value) {
+  if (value === undefined) return;
+  const pending = workflowConfigRecord(value, 'native.pending_root_move');
+  if (typeof pending.id !== 'string' || !/^[a-f0-9-]{8,}$/u.test(pending.id)) {
+    throw new Error('native.pending_root_move.id is invalid');
+  }
+  if (
+    typeof pending.from_artifact_root !== 'string' ||
+    typeof pending.to_artifact_root !== 'string'
+  ) {
+    throw new Error('native.pending_root_move roots must be strings');
+  }
+  normalizeWorkflowArtifactRoot(pending.from_artifact_root);
+  normalizeWorkflowArtifactRoot(pending.to_artifact_root);
+  if (!['copying', 'ready', 'switched'].includes(pending.stage)) {
+    throw new Error('native.pending_root_move.stage is invalid');
+  }
+  if (pending.cleanup !== undefined) {
+    const cleanup = workflowConfigRecord(
+      pending.cleanup,
+      'native.pending_root_move.cleanup',
+    );
+    if (
+      ![
+        'forward-source',
+        'restart-staging',
+        'rollback-destination',
+        'rollback-staging',
+      ].includes(cleanup.kind)
+    ) {
+      throw new Error('native.pending_root_move.cleanup.kind is invalid');
+    }
+    if (!['prepared', 'quarantined', 'deleting'].includes(cleanup.state)) {
+      throw new Error('native.pending_root_move.cleanup.state is invalid');
+    }
+    if (
+      typeof cleanup.manifest_hash !== 'string' ||
+      !/^[a-f0-9]{64}$/u.test(cleanup.manifest_hash)
+    ) {
+      throw new Error('native.pending_root_move.cleanup.manifest_hash is invalid');
+    }
+  }
+}
+
+function managedWorkflowConfigFields(source) {
+  const root = workflowConfigRecord(parseWorkflowProjectYaml(source), '.comet/config.yaml');
+  const hasProjectMarker =
+    root.schema !== undefined ||
+    root.default_workflow !== undefined ||
+    root.workflows !== undefined ||
+    root.native !== undefined;
+  if (hasProjectMarker && root.schema !== 'comet.project.v1') {
+    throw new Error('Unsupported Comet project schema');
+  }
+  if (
+    root.schema === 'comet.project.v1' &&
+    root.default_workflow !== 'native' &&
+    root.default_workflow !== 'classic'
+  ) {
+    throw new Error('default_workflow must be native or classic');
+  }
+  const workflows =
+    root.workflows ?? (root.default_workflow === undefined ? undefined : [root.default_workflow]);
+  if (
+    workflows !== undefined &&
+    (!Array.isArray(workflows) ||
+      workflows.length === 0 ||
+      workflows.some((workflow) => workflow !== 'native' && workflow !== 'classic'))
+  ) {
+    throw new Error('workflows must contain native and/or classic');
+  }
+  if (
+    workflows !== undefined &&
+    root.default_workflow !== undefined &&
+    !workflows.includes(root.default_workflow)
+  ) {
+    throw new Error('workflows must include default_workflow');
+  }
+  if (root.ambient_resume !== undefined && typeof root.ambient_resume !== 'boolean') {
+    throw new Error('ambient_resume must be true or false');
+  }
+
+  let nativeArtifactRoot = null;
+  if (root.native !== undefined) {
+    const native = workflowConfigRecord(root.native, 'native');
+    if (typeof native.artifact_root !== 'string') {
+      throw new Error('native.artifact_root must be a string');
+    }
+    nativeArtifactRoot = normalizeWorkflowArtifactRoot(native.artifact_root);
+    workflowConfigLanguage(native.language, 'en', 'native.language');
+    const clarificationMode = native.clarification_mode ?? 'sequential';
+    if (clarificationMode !== 'sequential' && clarificationMode !== 'batch') {
+      throw new Error('native.clarification_mode must be sequential or batch');
+    }
+    const archiveConfirmation = native.archive_confirmation ?? 'automatic';
+    if (archiveConfirmation !== 'automatic' && archiveConfirmation !== 'required') {
+      throw new Error('native.archive_confirmation must be automatic or required');
+    }
+    const maxVerifyFailures = native.max_verify_failures ?? 5;
+    if (!Number.isSafeInteger(maxVerifyFailures) || maxVerifyFailures < 1) {
+      throw new Error('native.max_verify_failures must be a positive integer');
+    }
+    validateWorkflowSnapshot(native.snapshot);
+    validateWorkflowPendingRootMove(native.pending_root_move);
+  }
+
+  let classicArtifactLayout = null;
+  if (root.classic !== undefined) {
+    const classic = workflowConfigRecord(root.classic, 'classic');
+    classicArtifactLayout = normalizeClassicArtifactLayout(
+      classic.artifact_layout,
+      'legacy',
+    );
+    workflowConfigLanguage(classic.language, 'zh-CN', 'classic.language');
+    const compression = classic.context_compression ?? 'off';
+    if (compression !== 'off' && compression !== 'beta') {
+      throw new Error('classic.context_compression must be off or beta');
+    }
+    const reviewMode = classic.review_mode ?? 'standard';
+    if (!['off', 'standard', 'thorough'].includes(reviewMode)) {
+      throw new Error('classic.review_mode must be off, standard, or thorough');
+    }
+    const autoTransition = classic.auto_transition ?? true;
+    if (typeof autoTransition !== 'boolean') {
+      throw new Error('classic.auto_transition must be true or false');
+    }
+  }
+  const nativeEnabled = Array.isArray(workflows) && workflows.includes('native');
+  const classicEnabled = Array.isArray(workflows) && workflows.includes('classic');
+  if (nativeEnabled && root.native === undefined) {
+    throw new Error('native must be a mapping');
+  }
+  if (classicEnabled && classicArtifactLayout === null) {
+    classicArtifactLayout = 'legacy';
+  }
+  return { nativeArtifactRoot, classicArtifactLayout, nativeEnabled, classicEnabled };
+}
+
+async function readWorkflowProjectPathConfig(projectRoot) {
+  const file = path.join(projectRoot, '.comet', 'config.yaml');
+  let inspection;
+  try {
+    inspection = await inspectWorkflowProtectedPath(
+      projectRoot,
+      file,
+      '.comet/config.yaml',
+      'file',
+    );
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ENOENT') {
+      return {
+        nativeArtifactRoot: null,
+        classicArtifactLayout: null,
+        nativeEnabled: false,
+        classicEnabled: false,
+      };
+    }
+    throw error;
+  }
+  if (!inspection.exists) {
+    return {
+      nativeArtifactRoot: null,
+      classicArtifactLayout: null,
+      nativeEnabled: false,
+      classicEnabled: false,
+    };
+  }
+  const source = await readWorkflowProtectedFile(
+    projectRoot,
+    file,
+    '.comet/config.yaml',
+    WORKFLOW_PROJECT_CONFIG_MAX_BYTES,
+  );
+  return managedWorkflowConfigFields(source.toString('utf8'));
+}
+
+function resolveWorkflowRelativePath(base, value, label, allowWildcards = false) {
+  const segments = workflowRelativeSegments(value, label, allowWildcards);
+  const target = path.resolve(base, ...segments);
+  const relative = path.relative(path.resolve(base), target);
+  if (
+    path.isAbsolute(relative) ||
+    relative === '..' ||
+    relative.startsWith('..' + path.sep)
+  ) {
+    const boundary = label === 'workflow-run statePath' ? 'the project root' : 'its declared path base';
+    throw new Error(label + ' must stay inside ' + boundary);
+  }
+  return { target, segments };
+}
+
+
+function isCometOverlay(protocol) {
+  return protocol.kind === 'comet-five-phase-overlay';
+}
+
+function parseSimpleYaml(raw) {
+  const state = {};
+  for (const line of String(raw).split(/\r?\n/u)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const match = /^([^:#][^:]*):\s*(.*)$/u.exec(line);
+    if (!match) continue;
+    const key = match[1].trim();
+    let value = match[2].trim();
+    const commentIndex = value.indexOf(' #');
+    if (commentIndex >= 0) value = value.slice(0, commentIndex).trim();
+    if (value === 'true') state[key] = true;
+    else if (value === 'false') state[key] = false;
+    else if (value === 'null') state[key] = null;
+    else if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      state[key] = value.slice(1, -1);
+    } else {
+      state[key] = value;
+    }
+  }
+  return state;
+}
+
+async function workflowPathBaseRoot(pathBase) {
+  if (pathBase === undefined || pathBase === 'project') {
+    await inspectWorkflowProtectedPath(runRoot, runRoot, 'workflow path base', 'directory');
+    return runRoot;
+  }
+  const config = await readWorkflowProjectPathConfig(runRoot);
+  let resolved;
+  let configuredClassicRoot = null;
+  let alternateClassicRoot = null;
+  if (pathBase === 'classic-openspec-root' || pathBase === 'classic-superpowers-root') {
+    if (!config.classicEnabled || config.classicArtifactLayout === null) {
+      throw new Error('Classic workflow is not enabled by .comet/config.yaml');
+    }
+    configuredClassicRoot = config.classicArtifactLayout === 'docs'
+      ? path.join(runRoot, 'docs', 'openspec')
+      : path.join(runRoot, 'openspec');
+    alternateClassicRoot = config.classicArtifactLayout === 'docs'
+      ? path.join(runRoot, 'openspec')
+      : path.join(runRoot, 'docs', 'openspec');
+  }
+  if (pathBase === 'classic-openspec-root') {
+    resolved = configuredClassicRoot;
+  } else if (pathBase === 'classic-superpowers-root') {
+    resolved = path.join(runRoot, 'docs', 'superpowers');
+  } else if (pathBase === 'native-root') {
+    if (!config.nativeEnabled || config.nativeArtifactRoot === null) {
+      throw new Error('Native workflow is not enabled by .comet/config.yaml');
+    }
+    resolved = resolveWorkflowRelativePath(
+      runRoot,
+      config.nativeArtifactRoot,
+      'native.artifact_root',
+    ).target;
+  } else {
+    resolved = runRoot;
+  }
+  if (configuredClassicRoot !== null && alternateClassicRoot !== null) {
+    const [configuredInspection, alternateInspection] = await Promise.all([
+      inspectWorkflowProtectedPath(
+        runRoot,
+        configuredClassicRoot,
+        'configured Classic OpenSpec root',
+        'directory',
+      ),
+      inspectWorkflowProtectedPath(
+        runRoot,
+        alternateClassicRoot,
+        'alternate Classic OpenSpec root',
+        'directory',
+      ),
+    ]);
+    if (!configuredInspection.exists) {
+      throw new Error('Configured Classic OpenSpec root does not exist: ' + configuredClassicRoot);
+    }
+    if (alternateInspection.exists) {
+      throw new Error('Classic layout conflict: both configured and alternate OpenSpec roots exist');
+    }
+  }
+  const rootInspection = await inspectWorkflowProtectedPath(
+    runRoot,
+    resolved,
+    'workflow path base',
+    'directory',
+  );
+  if (!rootInspection.exists) {
+    const label =
+      pathBase === 'classic-openspec-root'
+        ? 'Configured Classic OpenSpec root'
+        : pathBase === 'classic-superpowers-root'
+          ? 'Configured Classic Superpowers root'
+          : pathBase === 'native-root'
+            ? 'Configured Native artifact root'
+            : 'Workflow path base';
+    throw new Error(label + ' does not exist: ' + resolved);
+  }
+  return resolved;
+}
+
+async function activeCometChanges() {
+  const changesRoot = path.join(await workflowPathBaseRoot('classic-openspec-root'), 'changes');
+  const inspection = await inspectWorkflowProtectedPath(
+    runRoot,
+    changesRoot,
+    'Classic changes root',
+    'directory',
+  );
+  if (!inspection.exists) return [];
+  let entries;
+  try {
+    entries = await fs.readdir(changesRoot, { withFileTypes: true });
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ENOENT') return [];
+    throw error;
+  }
+  const changes = [];
+  for (const entry of entries) {
+    if (entry.isSymbolicLink()) {
+      throw new Error(
+        'Classic changes root crosses a symbolic link or junction at ' + entry.name,
+      );
+    }
+    if (!entry.isDirectory()) continue;
+    const changeRoot = path.join(changesRoot, entry.name);
+    await inspectWorkflowProtectedPath(
+      runRoot,
+      changeRoot,
+      'Classic change directory',
+      'directory',
+    );
+    const statePath = path.join(changeRoot, '.comet.yaml');
+    const stateInspection = await inspectWorkflowProtectedPath(
+      runRoot,
+      statePath,
+      'Classic change state',
+      'file',
+    );
+    if (!stateInspection.exists) continue;
+    let state;
+    try {
+      state = parseSimpleYaml(
+        (
+          await readWorkflowProtectedFile(
+            runRoot,
+            statePath,
+            'Classic change state',
+            WORKFLOW_PROJECT_FILE_MAX_BYTES,
+          )
+        ).toString('utf8'),
+      );
+      await inspectWorkflowProtectedPath(
+        runRoot,
+        statePath,
+        'Classic change state',
+        'file',
+      );
+    } catch (error) {
+      if (error && typeof error === 'object' && error.code === 'ENOENT') continue;
+      throw error;
+    }
+    const archived = state.archived === true || String(state.archived ?? '').toLowerCase() === 'true';
+    if (!archived) changes.push({ name: entry.name, statePath, state });
+  }
+  return changes.sort((left, right) => left.name.localeCompare(right.name));
+}
+
+async function resolveCometOverlayChange() {
+  const changes = await activeCometChanges();
+  if (changes.length === 0) {
+    throw new Error(
+      'No active Comet change; use /comet-open or the permanent /comet-classic entry to create one.',
+    );
+  }
+  if (changes.length > 1) {
+    throw new Error(
+      'Multiple active Comet changes: ' +
+        changes.map((change) => change.name).join(', ') +
+        '. Ask the user which change to resume.',
+    );
+  }
+  return changes[0];
+}
+
+function hasOverlayEvidence(evidence, nodeId) {
+  const value = evidence && typeof evidence === 'object' ? evidence[nodeId] : null;
+  return !!(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function hasGeneratedPlan(state) {
+  if (!Object.prototype.hasOwnProperty.call(state, 'plan')) return false;
+  const value = state.plan;
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    return normalized !== '' && normalized !== 'null';
+  }
+  return true;
+}
+
+function overlayBuildExecutionNode(state) {
+  if (
+    state.build_mode === 'subagent-driven-development' &&
+    state.subagent_dispatch === 'confirmed'
+  ) {
+    return 'subagent-execute';
+  }
+  return 'execute';
+}
+
+function overlayNodeFromState(state, evidence = {}) {
+  const phase = String(state.phase ?? '').trim();
+  if (phase === 'open') return 'open';
+  if (phase === 'design') return 'design';
+  if (phase === 'build') {
+    if (state.build_pause === 'plan-ready' || !hasGeneratedPlan(state)) {
+      return 'plan';
+    }
+    const executionNode = overlayBuildExecutionNode(state);
+    if (!hasOverlayEvidence(evidence, executionNode)) return executionNode;
+    if (String(state.review_mode ?? 'off') !== 'off') return 'review';
+    return executionNode;
+  }
+  if (phase === 'verify') return 'verify';
+  if (phase === 'archive') return 'archive';
+  return null;
+}
+
+function evidencePathFor(protocol, change) {
+  const changeName = typeof change === 'string' ? change : change.name;
+  return resolveWorkflowRelativePath(
+    runRoot,
+    ['.comet', 'workflow-evidence', changeName, protocol.name + '.json'].join('/'),
+    'workflow evidence path',
+  ).target;
+}
+
+async function readOverlayEvidence(protocol, change) {
+  const file = evidencePathFor(protocol, change);
+  try {
+    const inspection = await inspectWorkflowProtectedPath(
+      runRoot,
+      file,
+      'workflow evidence file',
+      'file',
+    );
+    if (!inspection.exists) return {};
+    const parsed = JSON.parse(
+      (
+        await readWorkflowProtectedFile(
+          runRoot,
+          file,
+          'workflow evidence file',
+          WORKFLOW_PROJECT_FILE_MAX_BYTES,
+        )
+      ).toString('utf8'),
+    );
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ENOENT') return {};
+    throw error;
+  }
+}
+
+async function workflowProtectedDirectorySnapshot(projectRoot, directory, label) {
+  const inspection = await inspectWorkflowProtectedPath(
+    projectRoot,
+    directory,
+    label,
+    'directory',
+  );
+  if (!inspection.exists) {
+    throw new Error(label + ' does not exist');
+  }
+  const stat = await fs.lstat(directory, { bigint: true });
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new Error(label + ' must be a real directory');
+  }
+  return {
+    stat,
+    realPath: await fs.realpath(directory),
+  };
+}
+
+async function assertWorkflowProtectedDirectorySnapshot(
+  projectRoot,
+  directory,
+  label,
+  expected,
+) {
+  const actual = await workflowProtectedDirectorySnapshot(
+    projectRoot,
+    directory,
+    label,
+  );
+  if (
+    actual.realPath !== expected.realPath ||
+    !workflowSameFileObject(
+      workflowFileObjectIdentity(actual.stat),
+      workflowFileObjectIdentity(expected.stat),
+    )
+  ) {
+    throw new Error(label + ' changed before commit');
+  }
+}
+
+async function ensureWorkflowProtectedDirectory(projectRoot, directory, label) {
+  const root = path.resolve(projectRoot);
+  const target = path.resolve(directory);
+  if (!workflowPathInside(root, target)) {
+    throw new Error(label + ' must stay inside the project root');
+  }
+  const relative = path.relative(root, target);
+  const segments = relative === '' ? [] : relative.split(path.sep);
+  let cursor = root;
+  await inspectWorkflowProtectedPath(root, cursor, label, 'directory');
+  for (const segment of segments) {
+    const parent = cursor;
+    cursor = path.join(cursor, segment);
+    const inspection = await inspectWorkflowProtectedPath(
+      root,
+      cursor,
+      label,
+      'directory',
+    );
+    if (!inspection.exists) {
+      const parentSnapshot = await workflowProtectedDirectorySnapshot(
+        root,
+        parent,
+        label + ' parent',
+      );
+      try {
+        await fs.mkdir(cursor);
+      } catch (error) {
+        if (!error || typeof error !== 'object' || error.code !== 'EEXIST') {
+          throw error;
+        }
+      }
+      await assertWorkflowProtectedDirectorySnapshot(
+        root,
+        parent,
+        label + ' parent',
+        parentSnapshot,
+      );
+    }
+    const created = await inspectWorkflowProtectedPath(
+      root,
+      cursor,
+      label,
+      'directory',
+    );
+    if (!created.exists) {
+      throw new Error(label + ' could not be created safely');
+    }
+  }
+}
+
+async function workflowProtectedTargetSnapshot(projectRoot, file, label) {
+  const inspection = await inspectWorkflowProtectedPath(
+    projectRoot,
+    file,
+    label,
+    'file',
+  );
+  if (!inspection.exists) return { exists: false };
+  const stat = await fs.lstat(file, { bigint: true });
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error(label + ' must be a real file');
+  }
+  return {
+    exists: true,
+    stat,
+    realPath: await fs.realpath(file),
+  };
+}
+
+async function assertWorkflowProtectedTargetSnapshot(
+  projectRoot,
+  file,
+  label,
+  expected,
+) {
+  const actual = await workflowProtectedTargetSnapshot(projectRoot, file, label);
+  if (actual.exists !== expected.exists) {
+    throw new Error(label + ' changed before commit');
+  }
+  if (
+    actual.exists &&
+    expected.exists &&
+    (actual.realPath !== expected.realPath ||
+      !workflowSameFileStat(actual.stat, expected.stat))
+  ) {
+    throw new Error(label + ' changed before commit');
+  }
+}
+
+async function writeWorkflowProtectedFile(
+  projectRoot,
+  file,
+  label,
+  value,
+  maxBytes,
+) {
+  const bytes = Buffer.isBuffer(value) ? value : Buffer.from(String(value), 'utf8');
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+    throw new Error(label + ' byte limit must be a positive integer');
+  }
+  if (bytes.length > maxBytes) {
+    throw new Error(label + ' exceeds ' + String(maxBytes) + ' bytes');
+  }
+  const root = path.resolve(projectRoot);
+  const target = path.resolve(file);
+  const directory = path.dirname(target);
+  await ensureWorkflowProtectedDirectory(root, directory, label + ' directory');
+  const directorySnapshot = await workflowProtectedDirectorySnapshot(
+    root,
+    directory,
+    label + ' directory',
+  );
+  const targetSnapshot = await workflowProtectedTargetSnapshot(root, target, label);
+  await assertWorkflowProtectedDirectorySnapshot(
+    root,
+    directory,
+    label + ' directory',
+    directorySnapshot,
+  );
+  await assertWorkflowProtectedTargetSnapshot(root, target, label, targetSnapshot);
+
+  const temporary = path.join(
+    directory,
+    '.' +
+      path.basename(target) +
+      '.' +
+      String(process.pid) +
+      '.' +
+      String(Date.now()) +
+      '.' +
+      Math.random().toString(16).slice(2) +
+      '.tmp',
+  );
+  const flags =
+    fsConstants.O_WRONLY |
+    fsConstants.O_CREAT |
+    fsConstants.O_EXCL |
+    (process.platform === 'win32' ? 0 : fsConstants.O_NOFOLLOW);
+  let handle;
+  let committed = false;
+  try {
+    await assertWorkflowProtectedDirectorySnapshot(
+      root,
+      directory,
+      label + ' directory',
+      directorySnapshot,
+    );
+    handle = await fs.open(temporary, flags, 0o600);
+    await handle.writeFile(bytes);
+    await handle.sync();
+    const temporaryStat = await handle.stat({ bigint: true });
+    if (!temporaryStat.isFile()) {
+      throw new Error(label + ' temporary path must be a real file');
+    }
+    await handle.close();
+    handle = undefined;
+    await inspectWorkflowProtectedPath(
+      root,
+      temporary,
+      label + ' temporary file',
+      'file',
+    );
+    await assertWorkflowProtectedDirectorySnapshot(
+      root,
+      directory,
+      label + ' directory',
+      directorySnapshot,
+    );
+    await assertWorkflowProtectedTargetSnapshot(root, target, label, targetSnapshot);
+    await fs.rename(temporary, target);
+    committed = true;
+    await inspectWorkflowProtectedPath(root, target, label, 'file');
+    await assertWorkflowProtectedDirectorySnapshot(
+      root,
+      directory,
+      label + ' directory',
+      directorySnapshot,
+    );
+  } finally {
+    if (handle) {
+      await handle.close().catch(() => {});
+    }
+    if (!committed) {
+      try {
+        await assertWorkflowProtectedDirectorySnapshot(
+          root,
+          directory,
+          label + ' directory',
+          directorySnapshot,
+        );
+        await fs.rm(temporary, { force: true });
+      } catch {
+        // Do not follow a replaced parent during cleanup.
+      }
+    }
+  }
+}
+
+async function writeOverlayEvidence(protocol, change, value) {
+  const file = evidencePathFor(protocol, change);
+  await writeWorkflowProtectedFile(
+    runRoot,
+    file,
+    'workflow evidence file',
+    JSON.stringify(value, null, 2) + '\n',
+    WORKFLOW_PROJECT_FILE_MAX_BYTES,
+  );
+}
+
+
+async function statePath(protocol) {
+  // 协议未声明 state.statePath（最小 schema 协议）→ 回退默认 .comet/flow-comet-state.json
+  // （与 workflow-state.mjs 写 state 的硬编码路径一致——防最小协议在 hook 下全量崩溃，
+  //  顺带消除"相位白名单读硬编码路径 vs 主流程读协议路径"的两段不一致）
+  const preferred = String(protocol.state?.statePath ?? '') || '.comet/flow-comet-state.json';
+  const target = resolveWorkflowRelativePath(
+    runRoot,
+    preferred,
+    'workflow-run statePath',
+  ).target;
+  await inspectWorkflowProtectedPath(
+    runRoot,
+    target,
+    'workflow-run statePath',
+    'file',
+  );
+  return target;
+}
+
+async function readStateJson(file) {
+  // 容忍 UTF-8 BOM（外部写入可能带 BOM）
+  return JSON.parse(
+    (
+      await readWorkflowProtectedFile(
+        runRoot,
+        file,
+        'workflow-run state',
+        WORKFLOW_PROJECT_FILE_MAX_BYTES,
+      )
+    ).toString('utf8').replace(/^﻿/, ''),
+  );
+}
+
+function route(protocol) {
+  return (protocol.nodes ?? []).filter((node) => !node.disabled);
+}
+
+function completedSet(state) {
+  return new Set(Array.isArray(state.completedNodes) ? state.completedNodes : []);
+}
+
+function nextNode(protocol, state) {
+  const completed = completedSet(state);
+  return route(protocol).find((node) => !completed.has(node.id)) ?? null;
+}
+
+// PreToolUse hook 输入从 stdin 传入（JSON：{ tool_name, tool_input: { file_path, ... } }）。
+// 解析失败 / 无输入时返回 null，phase 写入控制因此跳过（不阻断）。
+async function readHookInput() {
+  try {
+    const chunks = [];
+    for await (const chunk of process.stdin) chunks.push(chunk);
+    const text = Buffer.concat(chunks).toString('utf8').trim();
+    return text ? JSON.parse(text.replace(/^﻿/, '')) : null;
+  } catch {
+    return null;
+  }
+}
+
+// 计算写入目标相对 runRoot 的路径（正斜杠分隔，供 PHASE_WRITE_WHITELIST 前缀匹配）。
+// 无法解析或目标在项目根之外时返回 null。
+function writeTargetFromHookInput(input) {
+  if (!input || typeof input !== 'object') return null;
+  const toolInput =
+    input.tool_input && typeof input.tool_input === 'object' ? input.tool_input : null;
+  const filePath =
+    toolInput && typeof toolInput.file_path === 'string' ? toolInput.file_path : null;
+  if (!filePath) return null;
+  const absolute = path.resolve(filePath);
+  const relative = path.relative(runRoot, absolute);
+  if (path.isAbsolute(relative) || relative === '..' || relative.startsWith('..' + path.sep)) {
+    return null;
+  }
+  return relative === '' ? '.' : relative.replaceAll('\\', '/');
+}
+
+// 声明化写入白名单：协议 writeWhitelist（节点 id → 路径前缀数组）优先；
+// 协议读取/解析失败或未声明 writeWhitelist 时静默回退缺省表（fail-closed，不 throw、不阻断 hook 主体流程——
+// 与 state 读取失败放行不同：白名单缺失会出洞，缺省表是最小安全兜底）
+// execute 收窄为通用规则：无论 execute 来自缺省还是协议，subagent 模式一律收窄为 ['.specs/']（协调者只写工件），
+// direct 模式用声明/缺省值（缺省 direct 允许所有 = 主代理直写源码）
+async function resolvePhaseWriteWhitelist(executionMode) {
+  try {
+    const protocol = await readProtocolFile(runRoot, protocolPath);
+    validateProtocolSchema(protocol);
+    const declared = parseProtocolWriteWhitelist(protocol);
+    if (declared !== null) {
+      // 协议声明模式：返回声明表 + declared=true（main 中对未列出节点 fail-closed 拒绝）
+      return {
+        whitelist: executionMode === 'subagent'
+          ? { ...declared, execute: ['.specs/'] }
+          : declared,
+        declared: true,
+      };
+    }
+  } catch {
+    // 协议读取/解析失败 → 静默回退缺省表（不 throw）
+  }
+  const executeWhitelist = executionMode === 'direct' ? [''] : ['.specs/'];
+  return {
+    whitelist: {
+      'open':             ['.specs/'],
+      'design':           ['.specs/', '.specs/adr/'],
+      'plan':             ['.specs/'],
+      'execute':          executeWhitelist, // subagent: .specs/（协调者）；direct: 允许所有（主代理直写）
+      'subagent-execute': ['.specs/'],      // 始终协调者（parallel 仍委托，防 execute 吞 parallel 回归）
+      'review':           ['.specs/'],
+      'verify':           ['.specs/'],
+      // archive 白名单:归档阶段仅遗留清单(KNOWN-ISSUES.md)可写入 change 目录(先写后移),
+      // 其余 change 工件不可改(收窄为精确文件——放宽到整个目录会让归档阶段可改任意
+      // 工件且无校验,防线变宽);<change-id> 占位符由 targetAllowed 替换为当前 change;
+      // 目录移动由 .specs/archive/ 覆盖(2026-08-15 修复:此前仅 .specs/archive/ 导致按文档
+      // 流程被 BLOCK;2026-08-16 收窄为精确文件)
+      'archive':          ['.specs/archive/', '.specs/<change-id>/KNOWN-ISSUES.md', '.specs/CHANGELOG.md', '.specs/LESSONS.md', 'STATE.md'],
+    },
+    declared: false,
+  };
+}
+
+async function main() {
+  const protocol = await readProtocolFile(runRoot, protocolPath);
+  validateProtocolSchema(protocol);
+  const nodes = route(protocol);
+  if (nodes.length === 0) {
+    throw new Error('workflow protocol has no enabled nodes');
+  }
+  // Phase 写入控制：按 .comet/flow-comet-state.json 的 currentNode 检查写入目标是否在白名单内
+  // state 文件读取失败时不阻断（state 可能不存在），继续执行后续安全检查
+  const stateFile = path.join(runRoot, '.comet', 'flow-comet-state.json');
+  let currentNode = null;
+  let executionMode = 'subagent';
+  let activeChange = null;
+  try {
+    const stateContent = await fs.readFile(stateFile, 'utf8');
+    const state = JSON.parse(stateContent);
+    currentNode = state.currentNode;
+    executionMode = state.executionMode ?? 'subagent';
+    activeChange = state.activeChange ?? null;
+  } catch {}
+
+  // 白名单声明化：协议 writeWhitelist 优先（节点 id → 路径前缀数组），缺失/读取失败时静默回退缺省表（fail-closed）
+  // execute 收窄规则对缺省/声明表同样生效（subagent → ['.specs/'] 协调者；direct → 声明/缺省值）
+  const { whitelist: PHASE_WRITE_WHITELIST, declared } = await resolvePhaseWriteWhitelist(executionMode);
+
+  const hookInput = await readHookInput();
+  const target = writeTargetFromHookInput(hookInput);
+
+  // R5: Bash 工具写路径适配(CC 与 Codex 通用)——Bash 工具的 command 字符串(无 file_path),
+  // 解析写入目标按当前节点白名单判定(与 file_path 判定同语义);未命中写入模式 = 无写入语义,放行。
+  // CC 侧 settings.local.json 的 matcher 含 Bash(协调者禁令物理化——Bash 写源码同样被拦截)
+  if (hookInput && typeof hookInput === 'object' && hookInput.tool_name === 'Bash') {
+    const command = hookInput.tool_input && typeof hookInput.tool_input === 'object' ? hookInput.tool_input.command : null;
+    const writeTargets = codexWriteTargetsFromCommand(command);
+    if (writeTargets.length > 0 && currentNode) {
+      const whitelist = PHASE_WRITE_WHITELIST[currentNode];
+      // 声明模式未列出节点 → fail-closed(同 file_path 判定);缺省表无此节点 → 协调者默认 .specs/
+      const effectiveWhitelist = whitelist || (declared ? null : ['.specs/']);
+      for (const t of writeTargets) {
+        const absolute = path.resolve(runRoot, t);
+        const rel = path.relative(runRoot, absolute);
+        const targetRel = (path.isAbsolute(rel) || rel === '..' || rel.startsWith('..' + path.sep)) ? null : rel.replaceAll('\\', '/');
+        const allowed = targetRel !== null && effectiveWhitelist !== null && targetAllowed(targetRel, effectiveWhitelist, activeChange);
+        if (!allowed) {
+          hookBlock(
+            `BLOCKED: 命令写入 "${t}" 不在当前节点 "${currentNode}" 允许范围`,
+            effectiveWhitelist === null
+              ? `请在协议 writeWhitelist 中为节点 "${currentNode}" 声明允许的路径前缀`
+              : `允许范围: ${effectiveWhitelist.join(', ')}`
+          );
+        }
+      }
+    }
+  }
+
+  if (currentNode && target) {
+    const whitelist = PHASE_WRITE_WHITELIST[currentNode];
+    if (whitelist) {
+      const allowed = targetAllowed(target, whitelist, activeChange);
+      if (!allowed) {
+        hookBlock(`BLOCKED: phase "${currentNode}" 不允许写入 "${target}"`, `允许范围: ${whitelist.join(', ')}`);
+      }
+    } else if (declared) {
+      // 审查补充（2026-08-08）：协议声明了 writeWhitelist 但未列出当前节点 → fail-closed 拒绝
+      // （漏声明节点不放行——防协议作者漏列导致防线出洞）
+      hookBlock(`BLOCKED: phase "${currentNode}" 未在协议 writeWhitelist 中声明，默认拒绝写入 "${target}"`, `请在协议 writeWhitelist 中为节点 "${currentNode}" 声明允许的路径前缀`);
+    } else {
+      // ：未声明 writeWhitelist 时，非内置节点（缺省表无此 id）→ 协调者默认 ['.specs/']
+      // ——与内置 execute/subagent-execute 协调者语义统一（写源码必须显式声明，防 fail-open 防线出洞）
+      const coordDefault = ['.specs/'];
+      const allowed = coordDefault.some(prefix => prefix === '' || target.startsWith(prefix));
+      if (!allowed) {
+        hookBlock(`BLOCKED: phase "${currentNode}" 不允许写入 "${target}"`, `允许范围: ${coordDefault.join(', ')}（未声明 writeWhitelist 的协调者默认）`);
+      }
+    }
+  }
+  if (isCometOverlay(protocol)) {
+    const change = await resolveCometOverlayChange();
+    const evidence = await readOverlayEvidence(protocol, change);
+    const current = overlayNodeFromState(change.state, evidence);
+    if (!current || !nodes.some((node) => node.id === current)) {
+      throw new Error('active Comet change has no valid workflow Node');
+    }
+    hookOk();
+    if (isCodex) return;
+    console.log('NODE: ' + current);
+    return;
+  }
+  let state;
+  try {
+    state = await readStateJson(await statePath(protocol));
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ENOENT') {
+      // 无 state 文件（无活跃 workflow / 新克隆仓库）→ 放行，不阻断写入
+      hookOk('(no active workflow)');
+      return;
+    }
+    throw error;
+  }
+  //  判定语义——
+  // ① 无 activeChange（无论 status；与"无 state 文件"同语义，覆盖旧 state 归档后）→ 放行
+  // ② running（含旧 state 无 status 但有 activeChange，fail-closed 向后兼容）→ 白名单校验
+  // ③ completed（归档后）→ 放行；其他 → 拦截
+  if (!state.activeChange) {
+    hookOk('(no active workflow)');
+    return;
+  }
+  const running = state.status === 'running' || state.status === undefined;
+  if (!running) {
+    if (state.status === 'completed') {
+      hookOk('(workflow completed)');
+      return;
+    }
+    throw new Error('workflow is not running; current status is ' + String(state.status));
+  }
+  const current = state.currentNode ?? nextNode(protocol, state)?.id ?? null;
+  if (!current || !nodes.some((node) => node.id === current)) {
+    throw new Error('workflow state has no valid current Node');
+  }
+  hookOk();
+  if (isCodex) return;
+  console.log('NODE: ' + current);
+}
+
+main().catch((error) => {
+  console.error(error.message);
+  process.exit(1);
+});
