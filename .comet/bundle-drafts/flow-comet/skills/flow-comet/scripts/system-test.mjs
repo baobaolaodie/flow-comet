@@ -14,6 +14,8 @@
 //   H. verify 与归档（验证命令真实执行 + 超时配置/完整归档流程/归档路径声明标记查找）
 //   I. 异常路径（损坏状态/缺工件出口/非法参数/状态字段类型非法）
 //   J. 文档一致性（双语健康检查/公开产物零代号检查——调用仓库本地工具）
+//   K. 分发物一致性（安装器/打包脚本/dsh bundle manifest/技能整树 diff）
+//   L. 执行遗漏防护（enter 证据/空退出豁免/空仓库提示）
 //
 // 载体（与 guard-self-test 同构）：每项 = 独立临时目录（fs.mkdtemp）+ 内置协议副本复制到
 // <tmp>/reference/（受保护路径要求协议文件位于 runRoot 内）+ spawnSync 真实命令序列 +
@@ -314,6 +316,19 @@ function fullContract(commitHash, taskId) {
 function runLocalTool(checker, repoRoot) {
   const res = spawnSync(process.execPath, [checker], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
   return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+}
+// 递归收集目录下相对文件清单（排序稳定，供 K8/K10 技能整树清单/内容比对）
+function collectTreeFiles(root) {
+  const files = [];
+  if (!fs.existsSync(root)) return files;
+  (function walk(dir) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const absolute = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(absolute);
+      else if (entry.isFile()) files.push(path.relative(root, absolute));
+    }
+  })(root);
+  return files.sort();
 }
 
 // ---------- 系统测试项（A~L 十二类） ----------
@@ -1989,6 +2004,86 @@ const TEST_ITEMS = [
         if (purgeRes.status !== 0) throw new Error('平台 ' + id + ' purge 失败: ' + (purgeRes.stderr || JSON.stringify(purgeRes.output)));
       }
       console.log('  描述符驱动: ' + ids.length + ' 个平台逐一安装 + purge 冒烟通过✓');
+    },
+  },
+// ---------- K 扩展:dsh 包产物断言（1.4.2 deepseek-harness-platform） ----------
+
+  // K7: bundle manifest 结构断言——name=dsh-flow-comet/version=1.4.2/dsh.bundle
+  {
+    name: 'K7 dsh 包:bundle manifest 结构(name=dsh-flow-comet/version=1.4.2/dsh.bundle)',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const packageFile = path.join(repoRoot, 'dsh-plugin', 'package.json');
+      if (!fs.existsSync(packageFile)) throw new Error('缺少 dsh-plugin/package.json');
+      const pkg = JSON.parse(fs.readFileSync(packageFile, 'utf8'));
+      if (pkg.name !== 'dsh-flow-comet') throw new Error('dsh bundle name 应为 dsh-flow-comet: ' + pkg.name);
+      if (pkg.version !== '1.4.2') throw new Error('dsh bundle version 应为 1.4.2: ' + pkg.version);
+      if (!pkg.dsh || !pkg.dsh.bundle) throw new Error('package.json 缺 dsh.bundle manifest');
+      if (!pkg.dsh.bundle.patch) throw new Error('dsh.bundle.patch 缺失');
+      console.log('  bundle manifest = ' + pkg.name + '@' + pkg.version + ' ✓');
+    },
+  },
+
+  // K8: 技能完整性断言——dsh-plugin/skills/ 清单与权威源技能清单一致 + SKILL.md 存在
+  {
+    name: 'K8 dsh 包:技能完整性(权威源技能清单一致 + SKILL.md 存在)',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const authoritative = path.join(repoRoot, '.comet', 'bundle-drafts', 'flow-comet', 'skills', 'flow-comet');
+      const packageSkills = path.join(repoRoot, 'dsh-plugin', 'skills', 'flow-comet');
+      if (!fs.existsSync(path.join(packageSkills, 'SKILL.md'))) throw new Error('dsh-plugin/skills/flow-comet/SKILL.md 不存在');
+      const srcFiles = collectTreeFiles(authoritative);
+      const pkgFiles = collectTreeFiles(packageSkills);
+      if (srcFiles.length === 0) throw new Error('权威源技能目录为空');
+      if (JSON.stringify(srcFiles) !== JSON.stringify(pkgFiles)) {
+        throw new Error('dsh-plugin/skills/flow-comet 清单与权威源不一致\n权威源: ' + srcFiles.join(', ') + '\n包内: ' + pkgFiles.join(', '));
+      }
+      console.log('  技能清单 = ' + pkgFiles.length + ' files 一致 ✓');
+    },
+  },
+
+  // K9: 打包脚本可复现断言——先运行 build 再 --check（覆盖 T05 同波新增 reference 的时序）
+  {
+    name: 'K9 dsh 包:打包脚本可复现(build 后 --check)',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const builder = path.join(repoRoot, 'scripts', 'build-dsh-plugin.mjs');
+      if (!fs.existsSync(builder)) throw new Error('缺少 scripts/build-dsh-plugin.mjs');
+      const build = spawnSync(process.execPath, [builder], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      if (build.status !== 0) throw new Error('build-dsh-plugin.mjs 失败: ' + (build.stderr || JSON.stringify(build.output)));
+      const check = spawnSync(process.execPath, [builder, '--check'], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      if (check.status !== 0) throw new Error('build-dsh-plugin.mjs --check 失败: ' + (check.stderr || JSON.stringify(check.output)));
+      console.log('  build + --check 可复现 ✓');
+    },
+  },
+
+  // K10: skills/ 整树 diff 断言——dsh-plugin/skills/flow-comet/** 与权威源 skills/flow-comet/** 逐字节一致
+  {
+    name: 'K10 dsh 包:skills/ 整树 diff 与权威源一致',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const authoritative = path.join(repoRoot, '.comet', 'bundle-drafts', 'flow-comet', 'skills', 'flow-comet');
+      const packageSkills = path.join(repoRoot, 'dsh-plugin', 'skills', 'flow-comet');
+      const srcFiles = collectTreeFiles(authoritative);
+      const pkgFiles = collectTreeFiles(packageSkills);
+      const problems = [];
+      const pkgSet = new Set(pkgFiles);
+      for (const rel of srcFiles) {
+        if (!pkgSet.has(rel)) { problems.push('missing: ' + rel); continue; }
+        const sourceBuf = fs.readFileSync(path.join(authoritative, rel));
+        const targetBuf = fs.readFileSync(path.join(packageSkills, rel));
+        if (!sourceBuf.equals(targetBuf)) problems.push('changed: ' + rel);
+      }
+      const srcSet = new Set(srcFiles);
+      for (const rel of pkgFiles) {
+        if (!srcSet.has(rel)) problems.push('extra: ' + rel);
+      }
+      if (problems.length > 0) throw new Error('skills/ 整树 diff 不一致:\n' + problems.join('\n'));
+      console.log('  skills/ 整树 = ' + srcFiles.length + ' files 完全一致 ✓');
     },
   },
 
