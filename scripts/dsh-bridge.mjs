@@ -50,10 +50,14 @@ export function normalizeToolName(toolName) {
   const lower = toolName.toLowerCase();
   if (lower === 'write' || lower === 'writefile' || lower === 'file-write') return 'Write';
   if (lower === 'edit' || lower === 'editfile' || lower === 'file-edit') return 'Edit';
+  // Bash 写命令拦截必须覆盖 Windows 默认 PowerShell 工具形态——dsh 注册名为
+  // 'pwsh'(dsh-tool-pwsh 源码实证),缺失会 canonicalName=null → next() 放行,
+  // 模型用 Set-Content 等 PowerShell 写命令即可绕过整链拦截(fail-open 缺口)。
   if (
     lower === 'bash' ||
     lower === 'shell' ||
     lower === 'powershell' ||
+    lower === 'pwsh' ||
     lower === 'run_command' ||
     lower === 'run-command'
   ) {

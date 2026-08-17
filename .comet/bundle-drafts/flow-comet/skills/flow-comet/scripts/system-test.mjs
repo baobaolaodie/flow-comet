@@ -2225,7 +2225,7 @@ const TEST_ITEMS = [
       for (const alias of ['edit', 'Edit', 'editfile', 'file-edit']) {
         if (bridge.normalizeToolName(alias) !== 'Edit') throw new Error('normalizeToolName 别名未归一化: ' + alias);
       }
-      for (const alias of ['bash', 'Bash', 'shell', 'powershell', 'run_command', 'run-command']) {
+      for (const alias of ['bash', 'Bash', 'shell', 'powershell', 'pwsh', 'Pwsh', 'PWSH', 'run_command', 'run-command']) {
         if (bridge.normalizeToolName(alias) !== 'Bash') throw new Error('normalizeToolName 别名未归一化: ' + alias);
       }
       // 非 Write/Edit/Bash 或非字符串 → null(监听侧按放行语义跳过)
