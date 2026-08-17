@@ -26,7 +26,7 @@
 
 - Old changes / old states auto-fill default fields (executionMode/branchMode/enablePrReview); changes without a branch run unchanged — backward compatible
 - Progressive WARN (not BLOCK) for legacy change re-entry (missing redEvidence/greenEvidence, pure-string handoff)
-- Regression baseline (two-tier): `guard-self-test.mjs` 137 scenarios + `system-test.mjs` 59 items green (required after every change)
+- Regression baseline (two-tier): `guard-self-test.mjs` 144 scenarios + `system-test.mjs` 59 items green (required after every change)
 - dsh plugin package `dsh-flow-comet` is version-synced with flow-comet releases; uninstall uses the bundled `scripts/cleanup.mjs` first (see [Installation](INSTALLATION.md#option-c--deepseek-harness-dsh-plugin))
 
 ## Release checklist (per release)
