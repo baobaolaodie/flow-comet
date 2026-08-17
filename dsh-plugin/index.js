@@ -159,6 +159,21 @@ function mapToolInput(canonicalName, args) {
 }
 
 // ---------------------------------------------------------------------------
+// 项目根包含性：Write/Edit 的 file_path 必须解析后仍位于 projectRoot 内。
+// 越界路径若交给 guard 子进程，writeTargetFromHookInput 会因 target=null
+// 跳过白名单判定（fail-open），因此必须在插件侧直接 fail-closed deny。
+// ---------------------------------------------------------------------------
+export function isPathInsideProjectRoot(projectRoot, filePath) {
+  const root = path.resolve(projectRoot);
+  const resolved = path.resolve(root, filePath);
+  const relative = path.relative(root, resolved);
+  return (
+    relative === '' ||
+    (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative))
+  );
+}
+
+// ---------------------------------------------------------------------------
 // 会话 cwd 与激活范围
 // ---------------------------------------------------------------------------
 function sessionCwd(exec) {
@@ -463,6 +478,24 @@ export function apply(ctx) {
         decision: 'deny',
       });
       return { kind: 'deny', reason };
+    }
+
+    if (canonicalName === 'Write' || canonicalName === 'Edit') {
+      if (!isPathInsideProjectRoot(projectRoot, mapped.target)) {
+        const reason =
+          'dsh-flow-comet: 写入目标 "' +
+          mapped.target +
+          '" 不在项目根 "' +
+          projectRoot +
+          '" 内——越界写入已拒绝，未进入 guard 判定';
+        console.warn(reason);
+        appendAudit(resolveDshHome(), {
+          tool: canonicalName,
+          target: mapped.target,
+          decision: 'deny',
+        });
+        return { kind: 'deny', reason };
+      }
     }
 
     const decision = await runGuard(projectRoot, canonicalName, mapped.input);
