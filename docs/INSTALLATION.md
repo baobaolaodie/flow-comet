@@ -40,7 +40,7 @@ On an interactive terminal, the first run prompts for the platform with a multi-
 1. **Generates/overwrites `rules/` and `skills/`** — all flow-comet* skills, from the authoritative source `.comet/bundle-drafts/flow-comet/`
 2. **Injects the hook into `settings.local.json`** — read-merge-write: preserves everything already in the target project (`permissions`, custom hooks, other matcher groups), only injects/updates the comet-hook-guard entry under `hooks.PreToolUse` (existing comet hooks are replaced, not duplicated — idempotent). First-time creation writes only the hook entry; existing files are merged.
 
-**Non-destructive by default**: nothing under the target project's install root (`.claude/` for Claude Code, `.agents/` for Codex) is deleted (`commands/`, custom skills, custom config all preserved). Explicit `--purge --yes` deletes the generated files and rebuilds — on Claude Code the entire `.claude/` is removed; on Codex only the flow-comet skills + managed hook entries + AGENTS.md managed block are removed (`.agents/` is shared with other tools; user entries are preserved). Prints the deletion list + warning; `--yes` is a second confirmation.
+**Non-destructive by default**: nothing under the target project's install root (`.claude/` for Claude Code, `.agents/` for Codex) is deleted (`commands/`, custom skills, custom config all preserved). Explicit `--purge --yes` resets the install — deletes the generated files and regenerates them to a full install state (purge is delete-and-rebuild, **not uninstall**): on Claude Code the entire `.claude/` is removed; on Codex only the flow-comet skills + managed hook entries + AGENTS.md managed block are removed (`.agents/` is shared with other tools; user entries are preserved). Prints the deletion list + warning; `--yes` is a second confirmation.
 
 ```bash
 # View the overwrite list, then confirm (non-destructive, safe)
@@ -157,10 +157,10 @@ On an interactive terminal, dsh is one of the multi-select options (see [Platfor
 ### What gets installed
 
 1. **Project-level skill tree** — `<project>/.dsh/skills/flow-comet` (with path replacement `.claude/skills/flow-comet/scripts/` → `.dsh/skills/flow-comet/scripts/` in `.md` files, and an `INSTALLED_VERSION` version marker). dsh auto-discovers skills under `<project>/.dsh/skills/` at **rank 100** via file watching — no restart, and projects **without that directory cannot see the skill**, so activation is naturally project-level (no runtime trace detection, no chicken-and-egg).
-2. **AGENTS.md managed block** — the orchestration rule is injected into `<project>/AGENTS.md` inside the managed block (`<!-- Managed by flow-comet prepare-env -->` … `<!-- /Managed by flow-comet prepare-env -->`), merged non-destructively — user content outside the block is preserved. The marker is shared with the Codex platform, so either platform's uninstall can clean the block.
+2. **AGENTS.md managed block** — the orchestration rule is injected into `<project>/AGENTS.md` inside the managed block (`<!-- Managed by flow-comet prepare-env -->` … `<!-- /Managed by flow-comet prepare-env -->`), merged non-destructively — user content outside the block is preserved. The marker is shared with the Codex platform, so either platform's removal flow can clean the block.
 3. **Global bridge loader** — a thin loader is mounted at `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` plus a managed block in `$DSH_HOME/cordis.patch.yml` (read-merge-write — existing blocks such as dsh-skin are preserved; the home patch applies to all profiles). The loader listens on dsh's native `tools/pre-execute` waterfall event, maps tool arguments to the guard contract (`Write`/`Edit` → `file_path`, `Bash` → `command`), calls the project-local `comet-hook-guard.mjs` in a child process, and returns `{kind:'deny', reason}` with a BLOCK message and recovery guidance for out-of-scope writes. It only engages when the session project root contains `.dsh/skills/flow-comet` (narrow listening — non-flow-comet projects are untouched). Shape mismatches and abnormal exits fail closed.
 
-> **Note — the installer writes to your home directory**: mounting the bridge loader writes to `$DSH_HOME` (default `~/.dsh`; resolution: explicit config > `$DSH_HOME` env var > `~/.dsh`). This is the intended, **non-destructive** design: `cordis.patch.yml` is read-merged (existing blocks such as dsh-skin preserved; an unparseable file fails safely instead of being overwritten) and the loader file is added/removed by name. Restore via purge (below), which removes the managed block and the loader file while keeping everything else.
+> **Note — the installer writes to your home directory**: mounting the bridge loader writes to `$DSH_HOME` (default `~/.dsh`; resolution: `$DSH_HOME` env var > `~/.dsh`). This is the intended, **non-destructive** design: `cordis.patch.yml` is read-merged (existing blocks such as dsh-skin preserved; an unparseable file fails safely instead of being overwritten) and the loader file is added/removed by name. Restore via purge (below), which removes the managed block and the loader file while keeping everything else.
 
 ### Using flow-comet on dsh
 
@@ -174,23 +174,40 @@ On an interactive terminal, dsh is one of the multi-select options (see [Platfor
 2. **Command paths rewritten**: `grep -c "\.claude/skills/flow-comet/scripts/" <target>/.dsh/skills/flow-comet/SKILL.md` → 0; `grep -c "\.dsh/skills/flow-comet/scripts/" <target>/.dsh/skills/flow-comet/SKILL.md` → non-zero
 3. **Smoke test** (run inside the target project): `cd <target> && node .dsh/skills/flow-comet/scripts/workflow-state.mjs status` → JSON state object
 
-### Uninstall (purge)
+### Reset and regenerate (purge — not uninstall)
 
 ```bash
 node scripts/prepare-env.mjs --target <absolute path to target project> --purge --platform dsh --yes
 ```
 
-Purge removes:
+`--purge` removes the generated files and then **regenerates them** — after a purge, flow-comet is **still fully installed** (skills regenerated, AGENTS.md managed block re-injected, the global bridge loader re-mounted). Purge is a delete-and-rebuild reset for clean re-installation, **not an uninstall**.
+
+During the reset, the following generated artifacts are removed (then regenerated):
 
 - `<project>/.dsh/skills/` entries for `flow-comet*` (non-flow-comet entries are kept; empty `.dsh` directories are removed)
 - the AGENTS.md managed block (file and user content preserved)
 - the `$DSH_HOME/cordis.patch.yml` managed block (other blocks such as dsh-skin kept; the file itself is deleted when it becomes empty) and the `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` loader file
 
-**Multi-project semantics**: each project installs its own skill tree (an uninstalled project cannot see the skill); the bridge loader is a single global copy serving all flow-comet projects (per-session project detection — equivalent to the Claude Code project-level hook).
+**To fully uninstall dsh platform support, remove the artifacts manually** (purge is not an uninstall path):
+
+```bash
+# 1. Remove the project-level skill tree
+rm -rf <target>/.dsh/skills/flow-comet*
+
+# 2. Remove the AGENTS.md managed block
+#    (delete only the `<!-- Managed by flow-comet prepare-env -->` … `<!-- /Managed by flow-comet prepare-env -->` block,
+#     keeping everything else in the file)
+
+# 3. Remove the global bridge loader and the home-patch managed block
+#    (delete the `# --- flow-comet managed ---` … `# --- end flow-comet managed ---` block in $DSH_HOME/cordis.patch.yml
+#     and the file $DSH_HOME/plugins/dsh-flow-comet-bridge.mjs)
+```
+
+**Multi-project semantics**: each project installs its own skill tree (a project that has not installed the skill cannot see it); the bridge loader is a single global copy serving all flow-comet projects (per-session project detection — equivalent to the Claude Code project-level hook).
 
 ## Uninstalling
 
-Remove flow-comet from a target project (Claude Code / Codex below; for DeepSeek Harness (dsh), see the purge command in [Option C](#option-c--deepseek-harness-dsh-platform)):
+Remove flow-comet from a target project (Claude Code / Codex below; for DeepSeek Harness (dsh), see the manual uninstall steps in [Option C](#option-c--deepseek-harness-dsh-platform)):
 
 ```bash
 # 1. Remove the skill directories and the orchestration rule

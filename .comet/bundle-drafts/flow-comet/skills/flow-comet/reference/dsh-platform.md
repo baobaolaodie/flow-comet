@@ -10,7 +10,7 @@
 |---|---|
 | 最低 dsh 版本 | `0.1.0-rc.6` |
 | 安装入口 | `node scripts/prepare-env.mjs --target <项目> --platform dsh`（或交互终端多选勾选 dsh）——唯一入口（D1） |
-| 卸载 | `node scripts/prepare-env.mjs --target <项目> --purge --platform dsh --yes` |
+| 重置/重新生成（purge——删除后重建到完整安装态，**不是卸载**） | `node scripts/prepare-env.mjs --target <项目> --purge --platform dsh --yes` |
 | npm 包 | 暂不发布（D8——1.5.0 一并处理）；旧 npm 插件包安装形态已废弃（verify 阶段推翻，见 ADR-005） |
 | 破坏性变更 | dev-preview 中 `tools/pre-execute` 签名 / skill 发现 rank / `DSH_HOME` 语义可能变化；低于锚定版本时拦截/发现可能失效 |
 
@@ -40,7 +40,7 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 
 ## 4. DSH_HOME 与 home patch
 
-- `DSH_HOME` 解析（与 dsh CLI 同款默认）：显式配置 > `$DSH_HOME` 环境变量 > `~/.dsh`。
+- `DSH_HOME` 解析（与 dsh CLI 同款默认，**两态**）：`$DSH_HOME` 环境变量 > `~/.dsh`。dsh-home-paths 库 API 支持显式配置参数（configured），但 dsh CLI 0.1.0-rc.6 实际无参调用（profile-boot 调 `resolveDshHome()` 不传 configured），该层不生效；prepare-env 安装器与 dsh CLI 行为一致（两态）。
 - **`DSH_` 前缀 bootstrap-only**：项目 `.env` 中设置 `DSH_HOME` 被直接拒绝——`.env` 方案不可行，文档明确不推荐（ADR-005 源码实证）。
 - `$DSH_HOME/cordis.patch.yml` 为 home 级 patch，对所有 profile 生效——dsh 加载链 `bundles → profile → home → overlays`（ADR-005 源码核实）。
 - flow-comet 托管块：`# --- flow-comet managed ---` … `# --- end flow-comet managed ---`（`- id: dsh-flow-comet-bridge` + `name: 'file:///<abs 路径>'`——参照本机既有惯例 dsh-skin 托管块）；读-合并-写保留既有块；文件存在但内容无法识别为 YAML → fail-safe 报错退出不覆盖。
@@ -56,7 +56,7 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 - **flow-comet 不注册该槽位**（避免 shadow 官方 `dsh-fs-observation-policy` 的 freshness 检查）；拦截能力由 `tools/pre-execute` 全覆盖（D6）。
 - `fs/observed` 审计通道设计上不采用（v1 桥接 loader 极薄——D6；v2 可按需加）。
 
-## 6. 安装 / 激活 / 卸载（prepare-env 平台描述符——唯一入口）
+## 6. 安装 / 激活 / 重置（prepare-env 平台描述符——唯一入口）
 
 ### 安装
 
@@ -65,7 +65,7 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 - 交互（缺省选择链）：显式 `--platform` > TTY 交互多选 > 探测 > 默认 claude-code。TTY 多选 = @clack/prompts 方向键多选（可选依赖，未安装自动回退 readline 数字/逗号多选），按目标项目痕迹 `.claude/`/`.codex/`/`.dsh/` 预勾选，回车默认 = 探测推荐；无 TTY 探测：仅 `.codex/` → codex、仅 `.dsh/` → dsh、含 `.claude/` → claude-code、皆无 → 默认 claude-code；多痕迹（≥2 并存）不武断二选一——默认主平台 claude-code 并输出提示。
 - 安装动作（dsh 描述符）：
   1. `installHooks`：复制 `scripts/dsh-bridge.mjs` → `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs`（全局挂载——home patch 对所有 profile 生效）+ `$DSH_HOME/cordis.patch.yml` 托管块注入（读-合并-写，保留既有块；源文件缺失时 WARN 跳过 loader 复制，其余安装照常）。
-  2. `installRules`：AGENTS.md 托管区注入（`<!-- Managed by flow-comet prepare-env -->` … `<!-- /Managed by flow-comet prepare-env -->` 包裹编排规则全文；非破坏合并，保留托管区外用户内容；codex/dsh 共用标记——任一平台卸载可清）。
+  2. `installRules`：AGENTS.md 托管区注入（`<!-- Managed by flow-comet prepare-env -->` … `<!-- /Managed by flow-comet prepare-env -->` 包裹编排规则全文；非破坏合并，保留托管区外用户内容；codex/dsh 共用标记——任一平台的移除流程均可清理该区）。
   3. skills：复制权威源 `skills/flow-comet/**` → `<项目>/.dsh/skills/flow-comet/` + pathReplacements（包内命令路径 `.claude/skills/flow-comet/scripts/` → `.dsh/skills/flow-comet/scripts/`，仅 .md，幂等）+ INSTALLED_VERSION 版本标识。
 
 ### 激活（天然项目级）
@@ -73,12 +73,14 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 - 目录物理存在即激活——dsh 启动自动发现 `/flow-comet`（rank 100，chokidar 热发现免重启）；未安装该目录的项目不可见（无痕迹判定、无 chicken-and-egg）。
 - dsh 对项目 AGENTS.md 的注入行为未实测（R2 遗留）——级 3 必测项；若 dsh 不注入则备选同时写 CLAUDE.md（symlink 同内容）并如实文档化。
 
-### 卸载（prepare-env --purge --yes）
+### 重置/重新生成（prepare-env --purge --yes——删除后重建，**不是卸载**）
 
-- `node scripts/prepare-env.mjs --target <项目> --purge --platform dsh --yes`：
+- `node scripts/prepare-env.mjs --target <项目> --purge --platform dsh --yes`：**先删除生成物、随后重新生成**（与 claude-code/codex 平台同一 main 模式）：
   1. 删 `<项目>/.dsh/skills/` 下全部 `flow-comet*` 条目（非 flow-comet 条目保留）+ 空 `.dsh` 目录（有内容保留）。
-  2. AGENTS.md 托管区移除（保留文件与用户内容）。
-  3. `$DSH_HOME/cordis.patch.yml` 托管块移除（保留 dsh-skin 等既有块；移除后文件为空 → 删除文件本身）+ `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 删除。
+  2. AGENTS.md 托管区移除（保留文件与用户内容）——重建流程随后重新注入新托管区（purge = 移除旧生成物后重建）。
+  3. `$DSH_HOME/cordis.patch.yml` 托管块移除（保留 dsh-skin 等既有块；移除后文件为空 → 删除文件本身）+ `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 删除——重建流程随后重新挂载 loader。
+- **重置 ≠ 卸载（安全面警示）**：purge 后 flow-comet **仍完整安装**——skill 重新生成、AGENTS.md 托管区重新注入、全局 loader 继续挂载（所有 profile 拦截恢复）。用户想「卸载」而执行 purge 会得到完整安装态，不是移除。
+- **真实卸载需手动**（purge 不是卸载途径）：删 `<项目>/.dsh/skills/flow-comet*` + AGENTS.md 托管区（`<!-- Managed by flow-comet prepare-env -->` … `<!-- /Managed by flow-comet prepare-env -->`）+ `$DSH_HOME/cordis.patch.yml` 托管块 + `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs`；AGENTS.md 与 cordis.patch.yml 的托管区/托管块之外的用户内容保留。
 - 多项目语义：每项目独立安装 skill（未安装项目不可见）；loader 全局一份（按会话项目判定——与 claude-code 项目级 hook 等价）；同一 loader 服务多个 flow-comet 项目。
 
 ## 7. 桥接 loader 契约（$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs）
@@ -121,7 +123,7 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 | 10 | 8.3 短路径包含性（realpath 展开——迁移复测） |  |  |
 | 11 | spawn cwd = 会话项目根（负向：cwd≠项目根不可接受） |  |  |
 | 12 | 协议文件随 skill 树（无 FLOW_COMET_PROTOCOL 机制） |  |  |
-| 13 | purge 恢复：skill 不可见 / AGENTS.md 托管区清除 / loader 卸载 / 用户内容保留 / dsh-skin 块保留 |  |  |
+| 13 | purge 重置：删除后重新生成到完整安装态（skill 重新可见 / 托管区重新注入 / loader 重新挂载）/ 用户内容与 dsh-skin 块保留 |  |  |
 | 14 | 多项目切换：A 项目装 B 项目不装——A 拦截 B 放行 |  |  |
 | 15 | 幂等重装：重复安装结果一致（托管区/托管块读-合并-写幂等） |  |  |
 
