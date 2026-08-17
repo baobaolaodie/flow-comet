@@ -1,6 +1,0 @@
-runtime:
-  - id: completed
-    scope: completion
-    type: state_equals
-    field: status
-    equals: completed

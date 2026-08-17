@@ -1,5 +1,0 @@
-- insert:
-    - id: flow-comet-guard
-      name: dsh-flow-comet
-      config:
-        mode: project
