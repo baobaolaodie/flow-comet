@@ -141,6 +141,10 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
 DeepSeek Harness（dsh）以**纯插件**方式支持——**不经过 `prepare-env` 安装器**。安装、激活、卸载全部走官方 dsh CLI：
 
 ```bash
+# 规范安装（默认/当前 profile）
+dsh plugin add dsh-flow-comet
+
+# 使用命名 profile
 dsh plugin --profile <name> add dsh-flow-comet
 ```
 
@@ -162,6 +166,33 @@ dsh plugin --profile <name> add dsh-flow-comet
   ```
 
   `cleanup.mjs` 会移除托管区与协议副本，保留托管区外的用户内容；**不会**删除 `$DSH_HOME/flow-comet-audit.jsonl` 审计日志——该文件为 append-only 保留物，需要删除时请手动处理。
+
+### 官方实证安装形态
+
+以下形态经官方 dsh publish 指南实证：
+
+```bash
+# npm registry（发布分发——推荐）
+dsh plugin --profile <name> add dsh-flow-comet
+
+# 本地目录（开发/源码，flow-comet 仓库内的 dsh-plugin）
+dsh plugin --profile <name> add ./dsh-plugin
+
+# 本地 tarball（pnpm pack 产物）
+pnpm pack ./dsh-plugin
+dsh plugin --profile <name> add ./dsh-flow-comet-1.4.2.tgz
+```
+
+- **`github:owner/repo#<sha>` 直装暂不支持**。`dsh-plugin/` 当前是 flow-comet 仓库的子目录，git 安装按仓库根解析而不是插件包；独立仓库化留后续决策/1.5.0。
+- **远程 https tarball URL 不主推**。未获官方 dsh publish 指南实证；请使用上面的 npm registry、本地目录或本地 tarball 形态。
+
+### allowBuilds
+
+`dsh-flow-comet` 为纯 ESM、零第三方依赖、无构建步骤。在基于 pnpm 的 dsh 环境中，`allowBuilds` 授权仅在包含 install/prepare 脚本或 git 依赖时需要；本包通常**不需要**。若你的环境仍要求批准构建（例如从 git 源安装且运行 `prepare`），请按你的 pnpm/dsh 版本指引，将本包加入 `pnpm-workspace.yaml` 的 `allowBuilds` 列表。
+
+### 审计日志保留
+
+插件把 append-only 审计记录写入 `$DSH_HOME/flow-comet-audit.jsonl`。`cleanup.mjs` **永不删除**该文件——它由多 profile 共享，保留供手动删除。更多见[故障排查](TROUBLESHOOTING-zh.md)。
 
 ## 卸载
 

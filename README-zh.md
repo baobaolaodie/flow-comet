@@ -65,6 +65,16 @@ dsh plugin --profile <name> add dsh-flow-comet
 
 插件默认项目级激活：会话项目根含 `.comet/` 或 `.specs/` 痕迹时生效；见[安装 → 方案 C](docs/INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-插件)。
 
+官方实证的 dsh 安装形态：
+
+- **npm registry**（发布分发）：`dsh plugin --profile <name> add dsh-flow-comet`
+- **本地目录**（开发/源码）：`dsh plugin --profile <name> add ./dsh-plugin`
+- **本地 tarball**（pnpm pack 产物）：`dsh plugin --profile <name> add ./dsh-flow-comet-1.4.2.tgz`
+- **`github:owner/repo#<sha>` 直装暂不支持**：`dsh-plugin/` 当前是 flow-comet 仓库的子目录，git 安装按仓库根解析；独立仓库化留 1.5.0。
+- **远程 https tarball URL 不主推**：未获官方 dsh publish 指南实证。
+
+`dsh-flow-comet` 为纯 ESM、无构建依赖，通常**不需要** `allowBuilds`（仅 git 依赖 + prepare 脚本时需要）。审计记录保存在 `$DSH_HOME/flow-comet-audit.jsonl`（append-only），cleanup 不会删除。完整 dsh 平台安装章节见[安装 → 方案 C](docs/INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-插件)。
+
 ```bash
 # 2. 在目标项目新开 Claude Code 会话，输入：
 /flow-comet

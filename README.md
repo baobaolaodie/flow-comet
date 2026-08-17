@@ -65,6 +65,16 @@ dsh plugin --profile <name> add dsh-flow-comet
 
 The plugin activates project-level by default when the session project root contains `.comet/` or `.specs/` traces; see [Installation → Option C](docs/INSTALLATION.md#option-c--deepseek-harness-dsh-plugin).
 
+The officially validated dsh install forms are:
+
+- **npm registry** (published distribution): `dsh plugin --profile <name> add dsh-flow-comet`
+- **Local directory** (development / source): `dsh plugin --profile <name> add ./dsh-plugin`
+- **Local tarball** (pnpm pack output): `dsh plugin --profile <name> add ./dsh-flow-comet-1.4.2.tgz`
+- **`github:owner/repo#<sha>` direct install is not supported yet**: `dsh-plugin/` is a subdirectory of the flow-comet repository, so git installs resolve at the repository root; a standalone `dsh-plugin` repository is left for 1.5.0.
+- **Remote https tarball URLs are not promoted**: they are not evidenced by the official dsh publish guide.
+
+`dsh-flow-comet` is pure ESM with no build dependencies, so `allowBuilds` is normally not required (only git dependencies with `prepare` scripts need it). Audit records are kept in `$DSH_HOME/flow-comet-audit.jsonl` (append-only) and are not deleted by cleanup. See [Installation → Option C](docs/INSTALLATION.md#option-c--deepseek-harness-dsh-plugin) for the full dsh platform installation section.
+
 ```bash
 # 2. Open your project in a new Claude Code session and run:
 /flow-comet

@@ -142,6 +142,10 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
 DeepSeek Harness (dsh) is supported as a **pure plugin** — `prepare-env` is not involved. Install, activate, and uninstall through the official dsh CLI:
 
 ```bash
+# Canonical install (default/current profile)
+dsh plugin add dsh-flow-comet
+
+# With a named profile
 dsh plugin --profile <name> add dsh-flow-comet
 ```
 
@@ -163,6 +167,33 @@ dsh plugin --profile <name> add dsh-flow-comet
   ```
 
   `cleanup.mjs` strips the managed block and removes the protocol copy, preserving user content outside the block. It does **not** delete the audit log at `$DSH_HOME/flow-comet-audit.jsonl` — that file is append-only and is kept for manual deletion.
+
+### Official install forms
+
+The following forms are validated by the official dsh publish guide:
+
+```bash
+# npm registry (published distribution — recommended)
+dsh plugin --profile <name> add dsh-flow-comet
+
+# Local directory (development, source bundle in the flow-comet repository)
+dsh plugin --profile <name> add ./dsh-plugin
+
+# Local tarball (pnpm pack output)
+pnpm pack ./dsh-plugin
+dsh plugin --profile <name> add ./dsh-flow-comet-1.4.2.tgz
+```
+
+- **`github:owner/repo#<sha>` direct install is not supported yet.** `dsh-plugin/` is currently a subdirectory of the flow-comet repository, so git installs resolve at the repository root instead of the plugin package. A standalone `dsh-plugin` repository is a later decision / 1.5.0 item.
+- **Remote https tarball URLs are not promoted.** They are not evidenced by the official dsh publish guide; use the npm registry, local directory, or local tarball forms above.
+
+### allowBuilds
+
+`dsh-flow-comet` is pure ESM with zero third-party dependencies and no build step. In pnpm-based dsh environments, `allowBuilds` authorization is only required for packages with install/prepare scripts or git dependencies; for this package it is normally not needed. If your environment still asks you to approve builds (for example when installing from a git source that runs `prepare`), add the package to the `allowBuilds` list in `pnpm-workspace.yaml` as instructed by your pnpm/dsh version.
+
+### Audit log retention
+
+The plugin writes append-only audit records to `$DSH_HOME/flow-comet-audit.jsonl`. `cleanup.mjs` never deletes this file — it is shared across profiles and intentionally retained for manual deletion. See [Troubleshooting](TROUBLESHOOTING.md) for more.
 
 ## Uninstalling
 
