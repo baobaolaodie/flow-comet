@@ -1,6 +1,6 @@
 # dsh 平台锚定参考（dsh-platform）
 
-> 内部参考文档：dsh 平台适配的版本锚定、API 签名、安装/激活/卸载与验证记录模板。
+> 维护者参考文档：dsh 平台适配的版本锚定、API 签名、安装/激活/卸载与验证记录模板。
 > 权威依据：`@.specs/deepseek-harness-platform/DESIGN.md`（D7 / 7.1 / 7.2）、`@.specs/deepseek-harness-platform/REQUIREMENT.md`（AC-1~AC-7）、T03 action。
 > dsh 为 dev-preview：本文件锚定实测版本；破坏性变更风险显式声明。
 
