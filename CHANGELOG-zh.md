@@ -19,7 +19,7 @@
 ### 变更
 
 - **回归套件扩展至 144 场景**：新增安装器平台选择链场景（显式单平台/逗号多平台/all/TTY 多选预勾选/痕迹探测/未知平台报错/both 拒绝/幂等重装）；dsh 适配保持引擎零改动——guard 判定核心经子进程调用原样复用。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
-- **系统测试集从 55 项扩展至 59 项**：新增 dsh 平台断言（项目级 skill 安装与路径替换、版本标识、AGENTS.md 托管区用户内容保留、桥接 loader 语法与 home patch 读-合并-写注入、purge 清理恢复）。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+- **系统测试集从 55 项扩展至 60 项**：新增 dsh 平台断言（项目级 skill 安装与路径替换、版本标识、AGENTS.md 托管区用户内容保留、桥接 loader 语法与 home patch 读-合并-写注入、purge 清理恢复）。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
 
 ### 修复
 

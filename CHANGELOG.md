@@ -19,7 +19,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 ### Changed
 
 - **Regression suite expanded to 144 scenarios** with installer platform-selection chains (explicit single platform, comma-separated multi-platform, `all`, TTY multi-select with trace pre-checking, trace detection, unknown-platform errors, `both` rejection, idempotent re-install); the dsh adaptation keeps the engine untouched — the guard decision core is reused unchanged via subprocess calls. ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
-- **System test suite expanded from 55 to 59 items** with dsh platform assertions (project-level skill install with path replacement and version marker, AGENTS.md managed block with user-content preservation, bridge loader syntax and home patch injection with read-merge-write, purge recovery). ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+- **System test suite expanded from 55 to 60 items** with dsh platform assertions (project-level skill install with path replacement and version marker, AGENTS.md managed block with user-content preservation, bridge loader syntax and home patch injection with read-merge-write, purge recovery). ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
 
 ### Fixed
 
