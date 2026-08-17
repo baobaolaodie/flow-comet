@@ -228,83 +228,92 @@ export function apply(ctx) {
   applied = true;
 
   ctx.on('tools/pre-execute', async (exec, next) => {
-    // 1. 工具名归一化：非 Write/Edit/Bash 不处理（放行）。
-    const canonicalName = normalizeToolName(exec?.name);
-    if (!canonicalName) {
-      return next();
-    }
+    // 整链 try/catch（fail-closed 语义延伸）：从会话项目判定到 spawn 决策映射的任何
+    // 内部异常（如 spawn 异常竞态下 child.stdin.end 抛 TypeError）→ WARN + fail-closed
+    // deny——不静默、不挂起、不放行（监听器未捕获异常对 dsh 未定义，可能挂起或 fail-open）。
+    try {
+      // 1. 工具名归一化：非 Write/Edit/Bash 不处理（放行）。
+      const canonicalName = normalizeToolName(exec?.name);
+      if (!canonicalName) {
+        return next();
+      }
 
-    // 2. 会话 cwd：无法确定 -> next()（窄监听 fail-open 于非判定场景）。
-    const cwd = sessionCwd(exec);
-    if (!cwd) {
-      return next();
-    }
+      // 2. 会话 cwd：无法确定 -> next()（窄监听 fail-open 于非判定场景）。
+      const cwd = sessionCwd(exec);
+      if (!cwd) {
+        return next();
+      }
 
-    // 3. 项目判定：最近 .git 祖先 = 项目根；根下必须存在 .dsh/skills/flow-comet
-    //    （安装器安装的项目级 skill）才处理；不存在 -> next()（窄监听硬性契约——
-    //    非 flow-comet 项目零拦截零开销）。
-    const projectRoot = findProjectRoot(cwd);
-    if (!existsSync(path.join(projectRoot, '.dsh', 'skills', 'flow-comet'))) {
-      return next();
-    }
+      // 3. 项目判定：最近 .git 祖先 = 项目根；根下必须存在 .dsh/skills/flow-comet
+      //    （安装器安装的项目级 skill）才处理；不存在 -> next()（窄监听硬性契约——
+      //    非 flow-comet 项目零拦截零开销）。
+      const projectRoot = findProjectRoot(cwd);
+      if (!existsSync(path.join(projectRoot, '.dsh', 'skills', 'flow-comet'))) {
+        return next();
+      }
 
-    // 4. 参数映射：形状不符/缺关键字段 -> WARN + fail-closed deny（不静默放行）。
-    const mapped = mapToolInput(canonicalName, exec?.arguments);
-    if (!mapped.ok) {
-      const reason =
-        'dsh-flow-comet-bridge: 工具 ' +
-        String(exec?.name) +
-        ' 参数形状不符（' +
-        mapped.reason +
-        '）——fail-closed 拒绝';
-      console.warn(reason);
-      return { kind: 'deny', reason };
-    }
-
-    // 5. 包含性校验（Write/Edit）：越界直接 deny，不进 guard（T-FIX-01）。
-    if (canonicalName === 'Write' || canonicalName === 'Edit') {
-      if (!isPathInsideProjectRoot(projectRoot, mapped.target)) {
+      // 4. 参数映射：形状不符/缺关键字段 -> WARN + fail-closed deny（不静默放行）。
+      const mapped = mapToolInput(canonicalName, exec?.arguments);
+      if (!mapped.ok) {
         const reason =
-          'dsh-flow-comet-bridge: 写入目标 "' +
-          mapped.target +
-          '" 不在项目根 "' +
-          projectRoot +
-          '" 内——越界写入已拒绝，未进入 guard 判定';
+          'dsh-flow-comet-bridge: 工具 ' +
+          String(exec?.name) +
+          ' 参数形状不符（' +
+          mapped.reason +
+          '）——fail-closed 拒绝';
         console.warn(reason);
         return { kind: 'deny', reason };
       }
-      // 通过后传规范化长路径（realpath 展开 8.3 短路径）——guard 的
-      // writeTargetFromHookInput 只做词法 path.relative，短路径会解析出
-      // target=null 从而跳过白名单判定（fail-open，T-FIX-08 经验）。
-      const normalizedTarget = realpathExistingPath(path.resolve(projectRoot, mapped.target));
-      mapped.target = normalizedTarget;
-      mapped.input.file_path = normalizedTarget;
-    }
 
-    // 6. 项目本地 guard 调用。guard 文件缺失（安装未完成/被删除）-> WARN +
-    //    next() 放行（不阻断非 flow-comet 语义）；spawn 异常（ENOENT 等）->
-    //    fail-closed deny + WARN（与错误即阻断语义对齐）。
-    const guardPath = resolveGuardPath(projectRoot);
-    if (!existsSync(guardPath)) {
-      console.warn(
-        '[dsh-flow-comet-bridge] WARN: 项目本地 guard 缺失（安装未完成或已被删除）——放行: ' +
-          guardPath,
-      );
-      return next();
-    }
+      // 5. 包含性校验（Write/Edit）：越界直接 deny，不进 guard（T-FIX-01）。
+      if (canonicalName === 'Write' || canonicalName === 'Edit') {
+        if (!isPathInsideProjectRoot(projectRoot, mapped.target)) {
+          const reason =
+            'dsh-flow-comet-bridge: 写入目标 "' +
+            mapped.target +
+            '" 不在项目根 "' +
+            projectRoot +
+            '" 内——越界写入已拒绝，未进入 guard 判定';
+          console.warn(reason);
+          return { kind: 'deny', reason };
+        }
+        // 通过后传规范化长路径（realpath 展开 8.3 短路径）——guard 的
+        // writeTargetFromHookInput 只做词法 path.relative，短路径会解析出
+        // target=null 从而跳过白名单判定（fail-open，T-FIX-08 经验）。
+        const normalizedTarget = realpathExistingPath(path.resolve(projectRoot, mapped.target));
+        mapped.target = normalizedTarget;
+        mapped.input.file_path = normalizedTarget;
+      }
 
-    const decision = await runGuard(projectRoot, canonicalName, mapped.input);
-    if (decision.kind === 'allow') {
-      return next();
-    }
-    if (decision.kind === 'deny') {
-      return { kind: 'deny', reason: decision.reason };
-    }
+      // 6. 项目本地 guard 调用。guard 文件缺失（安装未完成/被删除）-> WARN +
+      //    next() 放行（不阻断非 flow-comet 语义）；spawn 异常（ENOENT 等）->
+      //    fail-closed deny + WARN（与错误即阻断语义对齐）。
+      const guardPath = resolveGuardPath(projectRoot);
+      if (!existsSync(guardPath)) {
+        console.warn(
+          '[dsh-flow-comet-bridge] WARN: 项目本地 guard 缺失（安装未完成或已被删除）——放行: ' +
+            guardPath,
+        );
+        return next();
+      }
 
-    // 其它错误态：fail-closed deny + WARN。
-    const reason =
-      'dsh-flow-comet-bridge: 判定核心调用失败（fail-closed 拒绝）: ' + decision.message;
-    console.warn(reason);
-    return { kind: 'deny', reason };
+      const decision = await runGuard(projectRoot, canonicalName, mapped.input);
+      if (decision.kind === 'allow') {
+        return next();
+      }
+      if (decision.kind === 'deny') {
+        return { kind: 'deny', reason: decision.reason };
+      }
+
+      // 其它错误态：fail-closed deny + WARN。
+      const reason =
+        'dsh-flow-comet-bridge: 判定核心调用失败（fail-closed 拒绝）: ' + decision.message;
+      console.warn(reason);
+      return { kind: 'deny', reason };
+    } catch (error) {
+      const detail = error && error.message ? error.message : String(error);
+      console.warn('[dsh-flow-comet-bridge] WARN: 桥接器内部异常: ' + detail);
+      return { kind: 'deny', reason: '桥接器内部异常' };
+    }
   });
 }

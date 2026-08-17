@@ -193,17 +193,19 @@ const PLATFORMS = {
         fs.copyFileSync(loaderSrc, loaderDst);
         stats.files++;
         console.log('[prepare-env] 桥接 loader 已复制到 $DSH_HOME/plugins/dsh-flow-comet-bridge.mjs');
+        injectDshCordisPatch(dshHome, loaderDst);
+        stats.files++;
+        console.log('[prepare-env] $DSH_HOME/cordis.patch.yml 托管块注入完成（读-合并-写,保留既有块）');
       } else {
-        // 容错：scripts/dsh-bridge.mjs 由并行任务新建——源缺失时 WARN 跳过 loader 复制,
-        // 仍完成其余安装（AGENTS.md 托管区 / skills 复制照常）
+        // 容错：scripts/dsh-bridge.mjs 由并行任务新建——源缺失时 WARN 跳过 loader 复制
+        // **并跳过 cordis.patch.yml 托管块注入**（避免注入指向不存在文件的 file:// 引用,
+        // 导致 dsh 每次启动尝试加载不存在的插件）;仍完成其余安装
+        // （AGENTS.md 托管区 / skills 复制照常）
         console.warn(
-          '[prepare-env] 警告: scripts/dsh-bridge.mjs 不存在——跳过 loader 复制' +
+          '[prepare-env] 警告: scripts/dsh-bridge.mjs 不存在——跳过 loader 复制与 cordis.patch.yml 托管块注入' +
             '（dsh 桥接拦截暂不生效,待源文件就位后重跑 prepare-env）'
         );
       }
-      injectDshCordisPatch(dshHome, loaderDst);
-      stats.files++;
-      console.log('[prepare-env] $DSH_HOME/cordis.patch.yml 托管块注入完成（读-合并-写,保留既有块）');
     },
     // rules 注入：AGENTS.md 托管区（与 codex 共用注入函数与托管区标记——任一平台卸载可清）
     installRules(target, stats) {
@@ -254,6 +256,12 @@ const PLATFORMS = {
       if (fs.existsSync(loaderPath)) {
         removed.push(loaderPath + '（$DSH_HOME/plugins/ loader）');
         fs.rmSync(loaderPath, { force: true });
+        // 全局挂载语义警示：loader 位于 $DSH_HOME（所有 profile / 所有项目共享）——
+        // 任一项目 purge 都会连带移除，其它已安装 flow-comet 的项目将静默失去拦截
+        console.warn(
+          '[prepare-env] 全局桥接 loader 被移除，其它已安装 flow-comet 的项目将停止拦截' +
+            '（$DSH_HOME 全局挂载——如需恢复请重跑 prepare-env --platform dsh）'
+        );
       }
       return removed;
     },
@@ -403,7 +411,8 @@ async function promptPlatformSelectionReadline(probe, traces, multiTrace) {
 }
 
 // 显式 --platform 参数解析：单平台 / 逗号分隔多平台 / all（全部平台,顺序 = PLATFORMS 表顺序）。
-// 任一未知报错（含逗号列表中任一未知）；旧 both 语义已移除——显式 both 报错提示改用逗号列表或 all。
+// 重复 id 去重（claude-code,claude-code 只装一次）；任一未知报错（含逗号列表中任一未知）；
+// 旧 both 语义已移除——显式 both 报错提示改用逗号列表或 all。
 function parsePlatformArg(value) {
   const raw = String(value ?? '').trim();
   if (raw === '') {
@@ -423,7 +432,7 @@ function parsePlatformArg(value) {
       throw new Error(`未知平台: ${id}（可用: ${Object.keys(PLATFORMS).join(', ')}；逗号分隔多选或 all）`);
     }
   }
-  return ids;
+  return [...new Set(ids)];
 }
 
 // 平台解析链：--platform 显式（逗号多选/all）> TTY 交互多选（@clack/prompts,回退 readline）> 探测 > 默认 claude-code。
