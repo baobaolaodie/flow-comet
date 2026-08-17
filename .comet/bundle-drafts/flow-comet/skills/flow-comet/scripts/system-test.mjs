@@ -2101,7 +2101,9 @@ const TEST_ITEMS = [
   },
 
   // K9: 桥接 loader 就位——权威源文件存在 + node --check 语法 + 安装时复制到
-  // $DSH_HOME/plugins/ + cordis.patch.yml 托管块注入(file:// 引用,读-合并-写保留既有块;
+  // $DSH_HOME/plugins/ + cordis.patch.yml 托管块注入(insert 形态 + file:// 引用 loader 路径,
+  // 读-合并-写保留既有块;insert 形态是 home patch 追加新插件的唯一正确形态——patch 形态
+  // id-targeted 对不存在的 id 报 entry not found 跳过,loader 不加载,拦截整链静默失效;
   // $DSH_HOME 解析 = 显式 DSH_HOME > ~/.dsh——测试隔离到临时目录)
   {
     name: 'K9 桥接 loader:源文件/语法/复制与托管块注入(读-合并-写)',
@@ -2131,8 +2133,12 @@ const TEST_ITEMS = [
       if (!patch.includes('# --- flow-comet managed ---') || !patch.includes('# --- end flow-comet managed ---')) {
         throw new Error('cordis.patch.yml 无托管块标记');
       }
-      if (!patch.includes('- id: dsh-flow-comet-bridge')) throw new Error('cordis.patch.yml 缺 loader 条目');
-      if (!patch.includes('file:///')) throw new Error('cordis.patch.yml 托管块应含 file:// 引用');
+      // insert 形态断言（L-015 教训：套件全绿 ≠ 真实 dsh 生效——patch 形态 id-targeted 语义对
+      // 不存在的 id 输出 entry not found 并跳过，loader 从不加载；insert 形态才追加新插件行）
+      if (!patch.includes('- insert:')) throw new Error('cordis.patch.yml 托管块应为 insert 形态(- insert: 顶层条目)');
+      if (!patch.includes('dsh-flow-comet-bridge')) throw new Error('cordis.patch.yml 缺 loader 条目');
+      const loaderUrl = 'file:///' + path.join(dshHome, 'plugins', 'dsh-flow-comet-bridge.mjs').replace(/\\/g, '/');
+      if (!patch.includes(loaderUrl)) throw new Error('cordis.patch.yml 托管块应 file:// 引用 loader 路径: ' + loaderUrl);
       // ③ 读-合并-写非破坏:预置 dsh-skin 既有块 → 重装后保留(托管块幂等唯一)
       fs.writeFileSync(patchPath, '# --- dsh-skin managed ---\n- id: dsh-skin\n  name: file:///skin\n# --- end dsh-skin managed ---\n' + patch, 'utf8');
       const re = spawnSync(process.execPath, [installer, '--target', target, '--platform', 'dsh'], {

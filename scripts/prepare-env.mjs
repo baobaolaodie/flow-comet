@@ -796,8 +796,12 @@ function isSimpleYamlText(text) {
  * 注入桥接 loader 托管块到 $DSH_HOME/cordis.patch.yml（dsh 平台 home patch——
  * 读-合并-写，L-008 非破坏）：
  * 读现有 cordis.patch.yml（缺失 → 空）→ 移除旧托管块（幂等）→ 托管块内联 loader 的
- * file:// 引用（`- id: dsh-flow-comet-bridge` + `name: 'file:///<abs 路径>'`——参照
- * 本机既有惯例：# --- dsh-skin managed --- ... # --- end dsh-skin managed ---）
+ * file:// 引用（**insert 形态**：无 id 的顶层 `- insert:` 条目内嵌插件行
+ * `- id: dsh-flow-comet-bridge` + `name: 'file:///<abs 路径>'`——dsh-app-boot 的
+ * applyEntryPatches 语义是 id-targeted patch（id 必须已存在于配置树）；无 id 的
+ * `insert:` 顶层条目才执行 data.push 追加新插件行，是 home patch 新增插件的唯一正确形态；
+ * 旧的 `- id: ... + name:` patch 形态对不存在的 id 报 entry not found 并跳过——
+ * loader 从不加载 → 拦截整链静默失效）
  * → 保留托管块外既有块（dsh-skin 等）→ 写回。
  * fail-safe：文件存在但内容无法识别为 YAML → 抛错退出不覆盖（参照 injectSettingsHook 模式）。
  */
@@ -819,8 +823,9 @@ function injectDshCordisPatch(dshHome, loaderPath) {
   const fileUrl = `file:///${loaderPath.replace(/\\/g, '/')}`;
   const managedBlock =
     MANAGED_CORDIS_START + '\n' +
-    '- id: dsh-flow-comet-bridge\n' +
-    `  name: '${fileUrl.replace(/'/g, "''")}'\n` +
+    '- insert:\n' +
+    '    - id: dsh-flow-comet-bridge\n' +
+    `      name: '${fileUrl.replace(/'/g, "''")}'\n` +
     MANAGED_CORDIS_END + '\n';
   const merged = (stripped.trim() ? stripped.trim() + '\n\n' : '') + managedBlock;
   fs.mkdirSync(dshHome, { recursive: true });
