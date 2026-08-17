@@ -32,7 +32,7 @@ import { execFileSync, spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GUARD = path.join(__dirname, 'workflow-guard.mjs');
@@ -2199,6 +2199,114 @@ const TEST_ITEMS = [
     },
   },
 
+  // K11: 桥接 loader 纯函数行为断言（dsh-bridge.mjs export 直测——参数映射别名矩阵/
+  // 形状不符 fail-closed/项目根包含性含 8.3 短路径/退出码映射/guard 路径存在漂移防护；
+  // 覆盖 REVIEW M1「纯函数零行为测试」与 M4「HOOK_GUARD_REL 跨文件知识重复」）
+  {
+    name: 'K11 桥接 loader:纯函数行为断言(参数映射/包含性/退出映射/guard 路径存在)',
+    run: async (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      // 动态 import(套件运行器逐项 await)——dsh-bridge.mjs 仅在权威源仓库根 scripts/,
+      // 安装副本缺失时整体跳过(与 K 组其余项同语义);静态 import 会让安装副本套件整体崩
+      const loader = path.join(__dirname, '..', '..', '..', '..', '..', '..', 'scripts', 'dsh-bridge.mjs');
+      if (!fs.existsSync(loader)) throw new Error('缺少 scripts/dsh-bridge.mjs');
+      const bridge = await import(pathToFileURL(loader).href);
+      // ① 工具名归一化别名矩阵:write/edit/bash 全部别名 → Write/Edit/Bash
+      for (const alias of ['write', 'Write', 'WRITE', 'writefile', 'file-write']) {
+        if (bridge.normalizeToolName(alias) !== 'Write') throw new Error('normalizeToolName 别名未归一化: ' + alias);
+      }
+      for (const alias of ['edit', 'Edit', 'editfile', 'file-edit']) {
+        if (bridge.normalizeToolName(alias) !== 'Edit') throw new Error('normalizeToolName 别名未归一化: ' + alias);
+      }
+      for (const alias of ['bash', 'Bash', 'shell', 'powershell', 'run_command', 'run-command']) {
+        if (bridge.normalizeToolName(alias) !== 'Bash') throw new Error('normalizeToolName 别名未归一化: ' + alias);
+      }
+      // 非 Write/Edit/Bash 或非字符串 → null(监听侧按放行语义跳过)
+      for (const v of ['read', 'grep', '', null, undefined, 123, {}]) {
+        if (bridge.normalizeToolName(v) !== null) throw new Error('非写工具应归一化为 null: ' + JSON.stringify(v));
+      }
+      // ② 参数映射别名提取:Write/Edit 的 file_path/filePath/path;Bash 的 command/cmd/script
+      const m1 = bridge.mapToolInput('Write', { file_path: 'a.md' });
+      if (!m1.ok || m1.target !== 'a.md' || m1.input.file_path !== 'a.md') throw new Error('Write file_path 映射失败: ' + JSON.stringify(m1));
+      const m2 = bridge.mapToolInput('Edit', { filePath: 'b.md' });
+      if (!m2.ok || m2.target !== 'b.md') throw new Error('Edit filePath 别名映射失败: ' + JSON.stringify(m2));
+      const m3 = bridge.mapToolInput('Write', { path: 'c.md' });
+      if (!m3.ok || m3.target !== 'c.md') throw new Error('Write path 别名映射失败: ' + JSON.stringify(m3));
+      const mPrec = bridge.mapToolInput('Write', { file_path: 'a.md', filePath: 'b.md', path: 'c.md' });
+      if (!mPrec.ok || mPrec.target !== 'a.md') throw new Error('file_path 应优先于 filePath/path: ' + JSON.stringify(mPrec));
+      for (const alias of ['command', 'cmd', 'script']) {
+        const mb = bridge.mapToolInput('Bash', { [alias]: 'npm test' });
+        if (!mb.ok || mb.target !== 'npm test' || mb.input.command !== 'npm test') {
+          throw new Error('Bash ' + alias + ' 映射失败: ' + JSON.stringify(mb));
+        }
+      }
+      // ②b 形状不符/缺关键字段 → ok:false 可识别(fail-closed 前置,不静默放行)
+      const bad1 = bridge.mapToolInput('Write', {});
+      if (bad1.ok || !bad1.reason.includes('缺少 file_path')) throw new Error('Write 缺 file_path 应 fail-closed 且原因可识别: ' + JSON.stringify(bad1));
+      const bad2 = bridge.mapToolInput('Bash', {});
+      if (bad2.ok || !bad2.reason.includes('缺少 command')) throw new Error('Bash 缺 command 应 fail-closed 且原因可识别: ' + JSON.stringify(bad2));
+      if (bridge.mapToolInput('Write', { file_path: '   ' }).ok) throw new Error('空白 file_path 应 fail-closed');
+      if (bridge.mapToolInput('Bash', null).ok) throw new Error('null 参数应 fail-closed');
+      if (bridge.mapToolInput('Bash', ['x']).ok) throw new Error('数组参数应 fail-closed');
+      if (bridge.mapToolInput('Read', { file_path: 'a.md' }).ok) throw new Error('未支持工具名应 fail-closed');
+      // ③ isPathInsideProjectRoot:项目内长路径 true / 项目外 false(含 .. 越界)
+      const projRoot = path.join(dir, 'k11-proj');
+      fs.mkdirSync(projRoot, { recursive: true });
+      if (!bridge.isPathInsideProjectRoot(projRoot, path.join(projRoot, 'src', 'a.md'))) throw new Error('项目内长路径应判定为 true');
+      if (!bridge.isPathInsideProjectRoot(projRoot, 'src/a.md')) throw new Error('项目内相对路径应判定为 true');
+      const outside = path.join(dir, 'k11-out');
+      fs.mkdirSync(outside, { recursive: true });
+      if (bridge.isPathInsideProjectRoot(projRoot, path.join(outside, 'x.md'))) throw new Error('项目外绝对路径应判定为 false');
+      if (bridge.isPathInsideProjectRoot(projRoot, path.join(projRoot, '..', 'k11-out', 'x.md'))) throw new Error('.. 越界路径应判定为 false');
+      // ③b 8.3 短路径别名(Windows 8dot3name):os.tmpdir() 本机为 C:\Users\LONGYI~1
+      //    短形态,realpathSync.native 归一化为长形态——词法不同但实路径相同;
+      //    短形态不可解析的平台(禁用 8dot3name/POSIX)显式跳过
+      const realRoot = bridge.realpathExistingPath(projRoot);
+      if (realRoot !== projRoot) {
+        const longFormTarget = path.join(realRoot, 'src', 'a.md');
+        if (!bridge.isPathInsideProjectRoot(projRoot, longFormTarget)) {
+          throw new Error('8.3 短路径别名(长形态目标)应归一化后判定为 true');
+        }
+        const normalized = bridge.realpathExistingPath(path.join(projRoot, 'src'));
+        if (normalized !== path.join(realRoot, 'src')) {
+          throw new Error('realpathExistingPath 应返回规范化长路径: ' + normalized + ' ≠ ' + path.join(realRoot, 'src'));
+        }
+        console.log('  8.3 短路径别名经 realpath 归一化为长形态判定 ✓');
+      } else {
+        console.log('  (8.3 短路径别名不可解析——平台跳过)');
+      }
+      // ④ mapGuardExit:exit 0 → allow / exit 2 → deny(恢复指引 + detail 透传)/ 其它 → fail-closed
+      if (bridge.mapGuardExit(0, '', '').kind !== 'allow') throw new Error('exit 0 应 allow');
+      const d2 = bridge.mapGuardExit(2, 'BLOCKED detail', '');
+      if (d2.kind !== 'deny') throw new Error('exit 2 应 deny');
+      if (!d2.reason.includes('白名单拦截') || !d2.reason.includes('BLOCKED detail')) {
+        throw new Error('exit 2 deny 应透传恢复指引与 detail: ' + JSON.stringify(d2));
+      }
+      for (const code of [1, 3, null, '0']) {
+        const err = bridge.mapGuardExit(code, 'boom', '');
+        if (err.kind !== 'error') throw new Error('其它退出码应 fail-closed error: code=' + String(code));
+        if (!err.message.includes('code=' + String(code))) throw new Error('error 消息应含退出码: ' + JSON.stringify(err));
+      }
+      // ⑤ guard 路径存在断言(M4 漂移防护):HOOK_GUARD_REL('.dsh/skills/flow-comet/scripts/
+      //    comet-hook-guard.mjs')与安装器独立维护同一知识——任一侧漂移(常量改/安装布局改)
+      //    → 此断言失败,拦截层即失效(guard 缺失 → 桥接 WARN + 放行 fail-open)
+      const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
+      const dshHome = path.join(dir, 'k11-dsh-home');
+      const target = path.join(dir, 'k11-target');
+      fs.mkdirSync(target, { recursive: true });
+      const res = spawnSync(process.execPath, [installer, '--target', target, '--platform', 'dsh'], {
+        cwd: repoRoot, encoding: 'utf8', timeout: 120000, env: { ...process.env, DSH_HOME: dshHome },
+      });
+      if (res.status !== 0) throw new Error('dsh 安装失败: ' + (res.stderr || JSON.stringify(res.output)));
+      const guardRel = '.dsh/skills/flow-comet/scripts/comet-hook-guard.mjs';
+      if (!fs.existsSync(path.join(target, guardRel))) {
+        throw new Error('HOOK_GUARD_REL 相对项目根解析的 guard 不存在(安装布局漂移): ' + path.join(target, guardRel));
+      }
+      console.log('  HOOK_GUARD_REL guard 安装后存在(与安装产物绑定)✓');
+    },
+  },
+
   // ---------- L. 执行遗漏防护（M1~M8 真实链路） ----------
 
   {
@@ -2272,7 +2380,7 @@ const TEST_ITEMS = [
 for (const item of TEST_ITEMS) {
   const dir = makeTmp();
   try {
-    item.run(dir);
+    await item.run(dir);
     passed += 1;
     console.log('PASS: ' + item.name);
   } catch (e) {
