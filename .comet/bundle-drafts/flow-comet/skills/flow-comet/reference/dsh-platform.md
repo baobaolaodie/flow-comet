@@ -1,20 +1,20 @@
 # dsh 平台锚定参考（dsh-platform）
 
-> 维护者参考文档：dsh 平台适配的版本锚定、API 签名、安装/激活/卸载与验证记录模板。
-> 权威依据：`@.specs/deepseek-harness-platform/DESIGN.md`（D7 / 7.1 / 7.2）、`@.specs/deepseek-harness-platform/REQUIREMENT.md`（AC-1~AC-7）、T03 action。
-> dsh 为 dev-preview：本文件锚定实测版本；破坏性变更风险显式声明。
+> 维护者参考文档：dsh 平台适配的版本锚定、安装形态、API 签名、桥接 loader 契约与验证记录模板。
+> 权威依据：`@.specs/deepseek-harness-platform/DESIGN.md`（D1~D10 / 7.1 / 7.2 / 7.3）、`@.specs/deepseek-harness-platform/REQUIREMENT.md`（AC-1~AC-7）、`@.specs/adr/ADR-005-dsh-install-via-installer.md`。
+> dsh 为 dev-preview：本文件锚定实测版本（0.1.0-rc.6）；破坏性变更风险显式声明。
 
 ## 1. 版本锚定
 
 | 项 | 值 |
 |---|---|
 | 最低 dsh 版本 | `0.1.0-rc.6` |
-| 插件包 | `dsh-flow-comet`（npm，版本与 flow-comet 同步 1.4.2） |
-| 安装命令 | `dsh plugin --profile <name> add dsh-flow-comet` |
-| 卸载双步 | `node …/scripts/cleanup.mjs` → `dsh plugin --profile <name> remove dsh-flow-comet` |
-| 破坏性变更 | dev-preview 中 `tools/pre-execute` / `ctx.skills.registerProvider` 签名可能变化；低于锚定版本时拦截/注册可能失效 |
+| 安装入口 | `node scripts/prepare-env.mjs --target <项目> --platform dsh`（或交互终端多选勾选 dsh）——唯一入口（D1） |
+| 卸载 | `node scripts/prepare-env.mjs --target <项目> --purge --platform dsh --yes` |
+| npm 包 | 暂不发布（D8——1.5.0 一并处理）；旧 npm 插件包安装形态已废弃（verify 阶段推翻，见 ADR-005） |
+| 破坏性变更 | dev-preview 中 `tools/pre-execute` 签名 / skill 发现 rank / `DSH_HOME` 语义可能变化；低于锚定版本时拦截/发现可能失效 |
 
-> 版本不匹配时拦截可能失效——必须文档警示 + 级 3 实测兜底（D7）。
+> 版本不匹配时拦截可能失效——必须文档警示 + 级 3 实测兜底（D9）。
 
 ## 2. tools/pre-execute 签名
 
@@ -29,10 +29,23 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 ```
 
 - PreToolDecision 形状：`{kind:'allow'}` | `{kind:'deny', reason}` | `{kind:'ask', reason?}`；deny 必须带 `kind` 字段。
-- 不调 `next()` 即短路；`deny` 使工具体跳过。
-- 会话 cwd：`exec.agent.session.header.cwd`（逐会话；Web UI 切换 workspace 时按会话判定，非进程 cwd）。
+- 不调 `next()` 即否决（waterfall 事件——监听方不续传则工具被短路）。
+- 会话 cwd 锚定：`exec.agent.session.header.cwd`（逐会话；缺失时逐级回退 exec 上下文其它路径字段——见桥接 loader sessionCwd；Web UI 切换 workspace 时按会话判定，非进程 cwd）。
 
-## 3. fs/write-intent（single-slot 守卫瀑布）
+## 3. skill 发现（文件系统级——取代 provider 注册模型）
+
+- dsh skill 发现 rank 区间 100~500；**rank 100（最高）= `<项目根>/.dsh/skills`**（0.1.0-rc.6 源码核实）——目录存在于项目根下即自动发现（chokidar 热发现，免重启）；未安装该目录的项目不可见该 skill → **天然项目级**（无运行时痕迹判定、无 chicken-and-egg）。
+- 项目根 = 会话 cwd 的最近 `.git` 祖先（`.git` 可为目录或文件——worktree/submodule 形态）。
+- 旧 provider 注册模型（`ctx.skills.registerProvider`）已废弃——skill 不再运行时注册，由文件系统发现 + 安装器物理安装（D3/D6）。
+
+## 4. DSH_HOME 与 home patch
+
+- `DSH_HOME` 解析（与 dsh CLI 同款默认）：显式配置 > `$DSH_HOME` 环境变量 > `~/.dsh`。
+- **`DSH_` 前缀 bootstrap-only**：项目 `.env` 中设置 `DSH_HOME` 被直接拒绝——`.env` 方案不可行，文档明确不推荐（ADR-005 源码实证）。
+- `$DSH_HOME/cordis.patch.yml` 为 home 级 patch，对所有 profile 生效——dsh 加载链 `bundles → profile → home → overlays`（ADR-005 源码核实）。
+- flow-comet 托管块：`# --- flow-comet managed ---` … `# --- end flow-comet managed ---`（`- id: dsh-flow-comet-bridge` + `name: 'file:///<abs 路径>'`——参照本机既有惯例 dsh-skin 托管块）；读-合并-写保留既有块；文件存在但内容无法识别为 YAML → fail-safe 报错退出不覆盖。
+
+## 5. fs/write-intent（single-slot 守卫瀑布）
 
 ```ts
 (target: FsTarget, actor: object | undefined, next) => FsWriteIntent | undefined
@@ -40,60 +53,47 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 
 - 决策形状：`{kind:'createIfAbsent'}` | `{kind:'replaceIfVersion', version}`——守卫，**无 deny 决策面**。
 - single-slot：first-wins by registration order。
-- **flow-comet 不注册该槽位**（避免 shadow 官方 `dsh-fs-observation-policy` 的 freshness 检查）；拦截能力由 `tools/pre-execute` 全覆盖。
+- **flow-comet 不注册该槽位**（避免 shadow 官方 `dsh-fs-observation-policy` 的 freshness 检查）；拦截能力由 `tools/pre-execute` 全覆盖（D6）。
+- `fs/observed` 审计通道设计上不采用（v1 桥接 loader 极薄——D6；v2 可按需加）。
 
-## 4. fs/observed（观察/审计通道）
-
-- 事件：`fs/observed` 为 emit 记录事件（FsObservation：present/absent）。
-- 监听必须**同步、side-effect-only**；append 失败仅 WARN、不得 throw（throw 会替换读错误或使工具 isError）。
-- flow-comet 用途：记录写入观察事件到 `$DSH_HOME/flow-comet-audit.jsonl`（append-only）。
-- 过滤：仅记录 actor 工具名 `write`/`edit` 的写入观察（read 不记）；Bash 放行写入不经 fs/* 事件不入审计；deny 事件由 tools/pre-execute 分支同步记录。
-- `$DSH_HOME` 解析：优先 `DSH_HOME` 环境变量，未设置时用 dsh CLI 同款默认 `~/.dsh`。
-
-## 5. ctx.skills 注册（provider 注册模型）
-
-```ts
-ctx.skills.registerProvider(create)
-// SkillProvider = {
-//   name: string,
-//   list({cwd, signal}),
-//   get(candidate, {cwd, signal})
-// }
-```
-
-- 主选：`registerProvider`（provider 注册模型），**非直接 `register` 技能内容**。
-- 本地发现目录（`.agents/skills` rank 200 / customSkillDirs rank 300）由 skill-filesystem 提供。
-- 包内技能命令路径在注册时注入包内实际路径（`import.meta.url` 解析）。
-
-## 6. 安装 / 激活 / 卸载
+## 6. 安装 / 激活 / 卸载（prepare-env 平台描述符——唯一入口）
 
 ### 安装
 
-- 正式：`dsh plugin --profile <name> add dsh-flow-comet`（npm registry）。
-- 开发/级 3 冒烟：`dsh plugin add ./dsh-flow-comet-1.4.2.tgz`（pnpm pack 产物等价）。
-- 无 prepare-env / 无安装脚本参与。
+- 正式：`node scripts/prepare-env.mjs --target <项目> --platform dsh`。
+- 多平台：`--platform claude-code,dsh`（逗号分隔，按参数顺序安装）/ `--platform all`（全部平台，按 PLATFORMS 表顺序：claude-code → codex → dsh）；旧 `both` 已移除——`--platform both` 报错并提示用逗号列表或 all；未知平台报错（含逗号列表中的未知项——不得部分安装）。
+- 交互（缺省选择链）：显式 `--platform` > TTY 交互多选 > 探测 > 默认 claude-code。TTY 多选 = @clack/prompts 方向键多选（可选依赖，未安装自动回退 readline 数字/逗号多选），按目标项目痕迹 `.claude/`/`.codex/`/`.dsh/` 预勾选，回车默认 = 探测推荐；无 TTY 探测：仅 `.codex/` → codex、仅 `.dsh/` → dsh、含 `.claude/` → claude-code、皆无 → 默认 claude-code；多痕迹（≥2 并存）不武断二选一——默认主平台 claude-code 并输出提示。
+- 安装动作（dsh 描述符）：
+  1. `installHooks`：复制 `scripts/dsh-bridge.mjs` → `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs`（全局挂载——home patch 对所有 profile 生效）+ `$DSH_HOME/cordis.patch.yml` 托管块注入（读-合并-写，保留既有块；源文件缺失时 WARN 跳过 loader 复制，其余安装照常）。
+  2. `installRules`：AGENTS.md 托管区注入（`<!-- Managed by flow-comet prepare-env -->` … `<!-- /Managed by flow-comet prepare-env -->` 包裹编排规则全文；非破坏合并，保留托管区外用户内容；codex/dsh 共用标记——任一平台卸载可清）。
+  3. skills：复制权威源 `skills/flow-comet/**` → `<项目>/.dsh/skills/flow-comet/` + pathReplacements（包内命令路径 `.claude/skills/flow-comet/scripts/` → `.dsh/skills/flow-comet/scripts/`，仅 .md，幂等）+ INSTALLED_VERSION 版本标识。
 
-### 激活（项目级默认 / 全局可选）
+### 激活（天然项目级）
 
-- 项目级默认：会话 cwd 含 `.comet/` 或 `.specs/` 痕迹才激活（技能/拦截/注入）。
-- 全局：显式配置启用后所有项目技能可见；**注入（AGENTS.md 托管区 + 协议副本）仍仅对含痕迹项目**。
-- 激活动作：
-  - AGENTS.md 托管区注入（`<!-- Managed by flow-comet prepare-env -->` 包裹 flow-comet-orchestration.md 全文；非破坏合并；orchestration 中 `skills/flow-comet/…` 相对指针改写为包内实际路径）。
-  - 协议副本复制：`<项目根>/reference/.flow-comet-workflow-protocol.json`（幂等覆盖）。
-  - spawn 判定时设 `FLOW_COMET_PROTOCOL=<项目根>/reference/.flow-comet-workflow-protocol.json`。
-  - **spawn cwd 必须 = 会话项目根**（`exec.agent.session.header.cwd`）——相对 file_path 按 cwd 解析；cwd≠项目根 = fail-open 不可接受。
-  - 注入项目记录持久化到 `$DSH_HOME/flow-comet-injected.json`（`{ "version": 1, "projects": [{ "cwd": "<abs>", "injectedAt": "<iso>" }] }`，按 cwd 幂等 upsert）。
+- 目录物理存在即激活——dsh 启动自动发现 `/flow-comet`（rank 100，chokidar 热发现免重启）；未安装该目录的项目不可见（无痕迹判定、无 chicken-and-egg）。
+- dsh 对项目 AGENTS.md 的注入行为未实测（R2 遗留）——级 3 必测项；若 dsh 不注入则备选同时写 CLAUDE.md（symlink 同内容）并如实文档化。
 
-### 卸载（显式双步）
+### 卸载（prepare-env --purge --yes）
 
-1. `node …/scripts/cleanup.mjs`：读 `$DSH_HOME/flow-comet-injected.json` → 逐个 strip AGENTS.md 托管区（保留托管区外用户内容）→ 移除 `<项目根>/reference/.flow-comet-workflow-protocol.json` → 清空记录。
-2. `dsh plugin --profile <name> remove dsh-flow-comet`：官方 CLI 移除 bundle 层。
+- `node scripts/prepare-env.mjs --target <项目> --purge --platform dsh --yes`：
+  1. 删 `<项目>/.dsh/skills/` 下全部 `flow-comet*` 条目（非 flow-comet 条目保留）+ 空 `.dsh` 目录（有内容保留）。
+  2. AGENTS.md 托管区移除（保留文件与用户内容）。
+  3. `$DSH_HOME/cordis.patch.yml` 托管块移除（保留 dsh-skin 等既有块；移除后文件为空 → 删除文件本身）+ `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 删除。
+- 多项目语义：每项目独立安装 skill（未安装项目不可见）；loader 全局一份（按会话项目判定——与 claude-code 项目级 hook 等价）；同一 loader 服务多个 flow-comet 项目。
 
-- 幂等容错：AGENTS.md 已被删除/无托管区、协议副本不存在 → 跳过不报错。
-- `$DSH_HOME/flow-comet-audit.jsonl` 为 append-only 保留物：cleanup 在最后一份注入记录清空时提示「审计日志保留于 $DSH_HOME/flow-comet-audit.jsonl，如需删除请手动处理」。
-- 不依赖插件 disposer（官方实证：remove 不 boot、不加载插件）。
+## 7. 桥接 loader 契约（$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs）
 
-## 7. 验证记录模板
+- 形态：dsh 官方插件形态——ESM 模块导出 `{ name: 'dsh-flow-comet-bridge', apply(ctx) }`，ctx 由 dsh 注入；纯 ESM 零第三方依赖；模块级幂等（同进程重复 apply 跳过已注册监听）。
+- 职责链：`tools/pre-execute` 监听 → 会话项目判定 → 参数映射 → 包含性校验 → 子进程调项目本地 guard → 决策映射。
+  1. **窄监听（硬性契约）**：工具名归一化（非 Write/Edit/Bash 直接 `next()`）；会话 cwd（`exec.agent.session.header.cwd` 锚定，缺失回退）的最近 `.git` 项目根下**存在 `.dsh/skills/flow-comet` 才处理**，否则直接 `next()`——非 flow-comet 项目零拦截零开销（D6/R7）。
+  2. **参数映射（fail-closed）**：dsh 工具名归一化到 guard CLI 契约名（Write/Edit/Bash；别名：write/writefile/file-write、edit/editfile/file-edit、bash/shell/powershell/run_command/run-command）；Write/Edit → `file_path`、Bash → `command`；形状不符/缺关键字段 → WARN + fail-closed deny（不静默放行）。
+  3. **包含性校验**：Write/Edit 的 `file_path` 必须解析后位于项目根内——`realpathSync.native` 展开 Windows 8.3 短路径（词法 path.relative 会把项目内短路径误判为越界）；越界直接 deny（不进 guard——guard 侧 target=null 会跳过白名单判定 = fail-open）；通过后传规范化长路径。
+  4. **判定调用**：`spawn node <项目根>/.dsh/skills/flow-comet/scripts/comet-hook-guard.mjs before_tool`，stdin JSON `{tool_name, tool_input}`；**spawn cwd 必须 = 会话项目根（硬性——相对 file_path 按 cwd 解析，cwd≠项目根 = fail-open；不得以设 env 替代 cwd）**；guard 文件缺失（安装未完成/被删除）→ WARN + `next()` 放行（不阻断非 flow-comet 语义）；spawn 异常 → fail-closed deny + WARN。
+  5. **决策映射**：exit 0 → `next()` 放行；exit 2 → `{kind:'deny', reason}`（BLOCK 消息 + 恢复指引透传）；其它/异常 → fail-closed deny + WARN。
+- 协议文件：天然在项目内（skill 包 `reference/` 随树复制）——受保护读取满足，**无 FLOW_COMET_PROTOCOL 机制**。
+- 明确不做（D6——旧完整插件功能废弃）：不注册 `fs/write-intent` 槽位；不做 `fs/observed` 审计；不做技能注册/AGENTS.md 运行时注入（安装器职责）。
+
+## 8. 验证记录模板
 
 > 级 3 / 级 4 执行后按此模板回填；发布前逐项闭环（DESIGN 7.3）。
 
@@ -101,29 +101,29 @@ ctx.skills.registerProvider(create)
 
 - 日期：
 - dsh 版本：
-- 插件包版本/来源（npm / tgz / 本地目录）：
+- prepare-env / 仓库版本：
 - profile：
 - 临时项目路径：
 
-### 检查项
+### 检查项（级 3 新形态命令——非旧插件冒烟形态）
 
 | # | 检查 | 结果 | 证据（命令/输出摘要） |
 |---|---|---|---|
-| 1 | `dsh plugin add` 安装成功（bundle manifest 生效） |  |  |
-| 2 | 技能 provider 注册与命令路径注入 |  |  |
-| 3 | 项目级激活：痕迹项目激活 / 非痕迹项目零写入 |  |  |
-| 4 | 全局模式：痕迹项目注入 / 无痕迹项目不写文件 |  |  |
-| 5 | 越权 Write deny（PreToolDecision `{kind:'deny', reason}`）+ BLOCK 消息 |  |  |
-| 6 | 参数形状不符 → fail-closed deny + WARN |  |  |
+| 1 | `prepare-env --platform dsh` 安装成功（skill 落 `.dsh/skills/flow-comet` + INSTALLED_VERSION + pathReplacements 生效） |  |  |
+| 2 | 平台选择链：`--platform dsh` / `claude-code,dsh` / `all` / TTY 多选预勾选 / 未知平台报错 / `both` 已移除 |  |  |
+| 3 | skill 可见断言：项目内 dsh 会话查询 `/flow-comet`（未安装项目不可见负向） |  |  |
+| 4 | AGENTS.md 托管区注入 + 用户内容保留 + dsh 实际注入行为（R2 必测） |  |  |
+| 5 | 桥接 loader 就位：`$DSH_HOME/plugins/` 文件 + `cordis.patch.yml` 托管块读-合并-写（dsh-skin 块保留断言） |  |  |
+| 6 | 越权 Write deny（PreToolDecision `{kind:'deny', reason}`）+ BLOCK 消息 + 恢复指引 |  |  |
 | 7 | 合法写放行 |  |  |
-| 8 | 协议副本存在 + FLOW_COMET_PROTOCOL 指向生效 + spawn exit 非 1 |  |  |
-| 9 | spawn cwd = 会话项目根（负向：cwd≠项目根不可接受） |  |  |
-| 10 | AGENTS.md 托管区注入 + 用户内容保留 |  |  |
-| 11 | fs 槽位竞争：未注册 fs/write-intent（官方 policy 未被 shadow） |  |  |
-| 12 | audit.jsonl 写入 + write/edit 过滤 + Bash 不入审计 + append 失败仅 WARN |  |  |
-| 13 | cleanup 后托管区/协议副本移除 + 用户内容保留 + audit 保留提示 |  |  |
-| 14 | remove 后技能不可见 / 拦截不再生效 |  |  |
-| 15 | 升级重装：幂等重注册/重注入 + 协议副本随版本刷新 |  |  |
+| 8 | 非 flow-comet 项目 `next()` 负向（窄监听零拦截） |  |  |
+| 9 | 参数形状不符 → fail-closed deny + WARN |  |  |
+| 10 | 8.3 短路径包含性（realpath 展开——迁移复测） |  |  |
+| 11 | spawn cwd = 会话项目根（负向：cwd≠项目根不可接受） |  |  |
+| 12 | 协议文件随 skill 树（无 FLOW_COMET_PROTOCOL 机制） |  |  |
+| 13 | purge 恢复：skill 不可见 / AGENTS.md 托管区清除 / loader 卸载 / 用户内容保留 / dsh-skin 块保留 |  |  |
+| 14 | 多项目切换：A 项目装 B 项目不装——A 拦截 B 放行 |  |  |
+| 15 | 幂等重装：重复安装结果一致（托管区/托管块读-合并-写幂等） |  |  |
 
 ### 结论
 

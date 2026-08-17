@@ -14,11 +14,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ### Added
 
-- **DeepSeek Harness (dsh) platform support**: install flow-comet on dsh with a single command (`dsh plugin add dsh-flow-comet`) — the npm plugin `dsh-flow-comet` bundles the skills, write-guard decision script, protocol copy, orchestration rules, and an explicit cleanup script; project-level activation by default (global optional), AGENTS.md managed-block injection, protocol copy at `<project>/reference/.flow-comet-workflow-protocol.json`, native `tools/pre-execute` interception mapped to `PreToolDecision.deny`, and `fs/observed` write-audit records in `$DSH_HOME/flow-comet-audit.jsonl`. Version anchor: dsh `0.1.0-rc.6`. ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+- **DeepSeek Harness (dsh) platform support**: flow-comet now installs on dsh through the installer — `prepare-env --platform dsh` installs the skill tree project-locally at `<project>/.dsh/skills/flow-comet` (dsh auto-discovers skills there at rank 100 without a restart, and projects without that directory cannot see the skill — naturally project-level), injects the orchestration rules into an AGENTS.md managed block (non-destructive merge), and mounts a thin bridge loader globally at `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` with a managed block in `$DSH_HOME/cordis.patch.yml` (read-merge-write, preserves existing blocks such as dsh-skin, effective for all profiles). The bridge listens on the native `tools/pre-execute` waterfall event, maps dsh tool calls to the project-local guard decision script (allow / deny with BLOCK message and recovery guidance / fail-closed on shape mismatch or abnormal exit, Windows 8.3 short paths normalized), and only engages when the session's project root contains `.dsh/skills/flow-comet` (narrow listening — non flow-comet projects are untouched). Platform selection supports interactive multi-select (arrow keys, pre-checked from project traces) and explicit comma-separated platforms (`--platform dsh` / `claude-code,dsh` / `all`; the previous `both` option is removed). Version anchor: dsh `0.1.0-rc.6`. ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
 
 ### Changed
 
-- **System test suite expanded from 55 to 59 items** with dsh bundle assertions (bundle manifest, skill completeness, reproducible packaging, whole-tree diff). ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+- **Regression suite expanded to 144 scenarios** with installer platform-selection chains (explicit single platform, comma-separated multi-platform, `all`, TTY multi-select with trace pre-checking, trace detection, unknown-platform errors, `both` rejection, idempotent re-install); the dsh adaptation keeps the engine untouched — the guard decision core is reused unchanged via subprocess calls. ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+- **System test suite expanded from 55 to 59 items** with dsh platform assertions (project-level skill install with path replacement and version marker, AGENTS.md managed block with user-content preservation, bridge loader syntax and home patch injection with read-merge-write, purge recovery). ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+
+### Fixed
+
+- **Write containment on dsh**: writes whose target resolves outside the project root are now denied before reaching the guard decision (previously a non-resolved target skipped the whitelist judgment — fail-open); Windows 8.3 short paths are normalized before judgment. ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+- **Fail-closed on dsh tool arguments**: argument shape mismatches (missing `file_path` / `command`, non-object arguments) now produce a deny with WARN instead of being silently passed through. ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
 
 ## [1.4.1] - 2026-08-16
 

@@ -14,11 +14,17 @@
 
 ### 新增
 
-- **DeepSeek Harness（dsh）平台支持**：dsh 用户一条命令安装 flow-comet（`dsh plugin add dsh-flow-comet`）——npm 插件 `dsh-flow-comet` 全打包技能、写入守卫判定脚本、协议副本、编排规则与显式卸载清理脚本；默认项目级激活（全局可选）、AGENTS.md 托管区注入、协议副本写入 `<项目根>/reference/.flow-comet-workflow-protocol.json`、原生 `tools/pre-execute` 拦截映射为 `PreToolDecision.deny`、`fs/observed` 写入审计记录到 `$DSH_HOME/flow-comet-audit.jsonl`。版本锚定：dsh `0.1.0-rc.6`。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+- **DeepSeek Harness（dsh）平台支持**：flow-comet 现经安装器安装到 dsh——`prepare-env --platform dsh` 把技能树项目级安装到 `<项目>/.dsh/skills/flow-comet`（dsh 以 rank 100 自动发现该目录、免重启，未安装该目录的项目不可见该技能——天然项目级），编排规则注入 AGENTS.md 托管区（非破坏合并），薄桥接 loader 全局挂载于 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 并在 `$DSH_HOME/cordis.patch.yml` 注入托管块（读-合并-写、保留 dsh-skin 等既有块、对所有 profile 生效）。桥接 loader 监听原生 `tools/pre-execute` waterfall 事件，把 dsh 工具调用映射到项目本地 guard 判定脚本（放行 / deny + BLOCK 消息与恢复指引 / 形状不符或异常退出 fail-closed 拒绝，Windows 8.3 短路径规范化），且仅当会话项目根存在 `.dsh/skills/flow-comet` 时才介入（窄监听——非 flow-comet 项目零拦截）。平台选择支持交互多选（方向键、按项目痕迹预勾选）与显式逗号多平台（`--platform dsh` / `claude-code,dsh` / `all`；旧 `both` 选项移除）。版本锚定：dsh `0.1.0-rc.6`。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
 
 ### 变更
 
-- **系统测试集从 55 项扩展至 59 项**：新增 dsh 包断言（bundle manifest、技能完整性、打包可复现、整树 diff）。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+- **回归套件扩展至 144 场景**：新增安装器平台选择链场景（显式单平台/逗号多平台/all/TTY 多选预勾选/痕迹探测/未知平台报错/both 拒绝/幂等重装）；dsh 适配保持引擎零改动——guard 判定核心经子进程调用原样复用。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+- **系统测试集从 55 项扩展至 59 项**：新增 dsh 平台断言（项目级 skill 安装与路径替换、版本标识、AGENTS.md 托管区用户内容保留、桥接 loader 语法与 home patch 读-合并-写注入、purge 清理恢复）。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+
+### 修复
+
+- **dsh 平台写入包含性**：解析后越界项目根的写入目标在进入 guard 判定前即被拒绝（此前未解析目标会跳过白名单判定——fail-open）；Windows 8.3 短路径在判定前规范化。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+- **dsh 工具参数 fail-closed**：参数形状不符（缺 `file_path` / `command`、非对象参数）时输出 deny + WARN，不再静默放行。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
 
 ## [1.4.1] - 2026-08-16
 
