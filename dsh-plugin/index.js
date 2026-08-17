@@ -4,7 +4,9 @@
 //   1. tools/pre-execute 拦截：把 dsh 工具名归一化到 guard CLI 契约名（Write/Edit/Bash），
 //      子进程调用包内 comet-hook-guard.mjs 判定，exit 2 -> PreToolDecision.deny。
 //   2. fs/observed 审计：只记录 write/edit 写入观察事件到 $DSH_HOME/flow-comet-audit.jsonl。
-//   3. 技能 provider 注册：通过 ctx.skills.registerProvider 暴露包内 skills/flow-comet。
+//   3. 技能 provider 注册：通过 ctx.skills.registerProvider 暴露包内 skills/flow-comet，
+//      并对 SKILL.md 命令路径做包内实际路径重写，同时为 GUIDANCE.md/reference 文档
+//      注入 dsh 会话路径说明（这些文件保持权威源形态，读取时按包内路径解析）。
 //   4. 项目激活：按会话 cwd 检测 .comet/ 或 .specs/ 痕迹，幂等注入 AGENTS.md 托管区
 //      与 <项目根>/reference/.flow-comet-workflow-protocol.json。
 //
@@ -216,6 +218,26 @@ function rewriteSkillPaths(text, skillDir) {
   );
 }
 
+// dsh 会话补充路径说明：GUIDANCE.md 与 reference/*.md 由 provider 通过
+// resourceBase（包内目录）暴露，文件本身保持权威源形态（.claude/…）。
+// 模型读取这些资源时，本说明告诉它把其中的 skills/flow-comet/… 相对指针
+// 一律按包内实际绝对路径解析，避免在 dsh 项目内虚构 .claude/.agents 目录。
+function buildDshResourcePathNote(skillDir) {
+  const absoluteSkillDir = skillDir.replaceAll('\\', '/');
+  return [
+    '',
+    '> **dsh 会话路径说明（flow-comet provider 自动注入）**',
+    '>',
+    '> 本技能包内的 `GUIDANCE.md` 与 `reference/*.md` 由 dsh provider 以资源目录暴露，',
+    '> 基目录为：`' + absoluteSkillDir + '`。',
+    '> 这些文档中的 `skills/flow-comet/…` 相对指针在 dsh 项目内不存在；',
+    '> 读取时请一律按包内实际绝对路径解析，即 `' + absoluteSkillDir + '/…`。',
+    '> 例如 `node .claude/skills/flow-comet/scripts/workflow-state.mjs` 应视作 `node ' +
+      path.join(absoluteSkillDir, 'scripts', 'workflow-state.mjs') +
+      '`。',
+  ].join('\n');
+}
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -372,9 +394,14 @@ async function loadSkillDefinition(candidate) {
   } catch {
     return undefined;
   }
+  const content =
+    rewriteSkillPaths(raw, SKILL_DIR).trimEnd() +
+    '\n' +
+    buildDshResourcePathNote(SKILL_DIR) +
+    '\n';
   return {
     ...candidate,
-    content: rewriteSkillPaths(raw, SKILL_DIR),
+    content,
     path: skillFile,
   };
 }
@@ -534,24 +561,40 @@ export function apply(ctx) {
   });
 
   // fs/observed：只审计 write/edit 写入观察事件（read 不记、Bash 不入审计）。
-  ctx.on('fs/observed', (observation) => {
+  // dsh 官方签名：fs/observed(target: FsTarget, observation: FsObservation, actor: object | undefined)。
+  // actor 即 ToolExecution，可用 sessionCwd(actor) 取会话项目根；相对 target 必须按会话项目根解析，
+  // 不能按插件进程 cwd 解析（否则多项目/Web UI 切换 workspace 时会漏审计或误记）。
+  ctx.on('fs/observed', (target, observation, actor) => {
     const actorName =
-      observation?.actor?.name ||
-      observation?.tool?.name ||
-      observation?.toolName ||
+      actor?.name ||
+      actor?.tool?.name ||
+      actor?.toolName ||
       null;
     const canonicalName = normalizeToolName(actorName);
     if (canonicalName !== 'Write' && canonicalName !== 'Edit') return;
 
-    const target =
-      observation?.target ||
-      observation?.path ||
-      observation?.filePath ||
+    const rawTarget =
+      (typeof target === 'string' ? target : target?.displayPath) ||
+      target?.path ||
+      target?.filePath ||
       null;
-    if (!target) return;
+    if (!rawTarget) return;
+
+    const cwd = sessionCwd(actor);
+    if (!cwd || typeof cwd !== 'string' || cwd.trim() === '') {
+      console.warn(
+        '[dsh-flow-comet] WARN: fs/observed 无法确定会话项目根（sessionCwd），跳过审计记录: ' +
+          String(rawTarget),
+      );
+      return;
+    }
+
+    const projectRoot = path.resolve(cwd);
+    const absTarget = path.isAbsolute(String(rawTarget))
+      ? path.resolve(String(rawTarget))
+      : path.resolve(projectRoot, String(rawTarget));
 
     // 仅记录已激活 flow-comet 项目内的写入观察。
-    const absTarget = path.resolve(String(target));
     const active = [...activatedProjects].some(
       (root) => absTarget === root || absTarget.startsWith(root + path.sep),
     );
@@ -559,7 +602,7 @@ export function apply(ctx) {
 
     appendAudit(resolveDshHome(), {
       tool: canonicalName,
-      target: String(target),
+      target: String(rawTarget),
       decision: 'allow',
     });
   });
