@@ -2205,11 +2205,11 @@ const TEST_ITEMS = [
     },
   },
 
-  // K11: 桥接 loader 纯函数行为断言（dsh-bridge.mjs export 直测——参数映射别名矩阵/
+  // K11: 桥接 loader 行为断言（dsh-bridge.mjs export 直测——参数映射别名矩阵/
   // 形状不符 fail-closed/项目根包含性含 8.3 短路径/退出码映射/guard 路径存在漂移防护；
-  // 覆盖 REVIEW M1「纯函数零行为测试」与 M4「HOOK_GUARD_REL 跨文件知识重复」）
+  // apply 集成：tools/pre-execute 监听器分派——子代理放行/协调者走 guard/越界·形状 deny 不受身份）
   {
-    name: 'K11 桥接 loader:纯函数行为断言(参数映射/包含性/退出映射/guard 路径存在)',
+    name: 'K11 桥接 loader:纯函数与 apply 分派断言(映射/包含性/退出映射/身份分派)',
     run: async (dir) => {
       const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
       if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
@@ -2348,6 +2348,89 @@ const TEST_ITEMS = [
         }
       }
       console.log('  delegationDepth 代理身份分派(子代理=执行者/协调者原链)✓');
+      // ⑦ apply 集成喂测（5.5 分派分支自动化回归——此前仅级 3 真实会话人工覆盖）：
+      //   mock ctx 捕获 tools/pre-execute 监听器，构造 exec 断言插件级行为、
+      //   子代理(agentDepth>0)写源码放行 / 协调者走 guard 白名单 / 越界·形状 deny 不受身份、
+      //   非 flow-comet 项目窄监听放行。复用 ⑤ 安装产物(target 为真实 dsh flow-comet 项目)：
+      //   写活跃 execute 态 state → 协调者写源码被真实 guard 子进程拦（BLOCK 链真实执行）。
+      const applyEvents = {};
+      bridge.apply({ on: (event, fn) => { applyEvents[event] = fn; } });
+      const preExec = applyEvents['tools/pre-execute'];
+      if (typeof preExec !== 'function') throw new Error('bridge.apply 应注册 tools/pre-execute 监听器');
+      gitInit(target);
+      fs.mkdirSync(path.join(target, 'src'), { recursive: true });
+      writeState(target, {
+        activeChange: 'apply-lock',
+        currentNode: 'execute',
+        completedNodes: [],
+        evidence: {},
+        verifyFailures: 0,
+        status: 'running',
+        executionMode: 'subagent',
+        directOverride: false,
+      });
+      // 项目根用 realpath 长形态（对应真实 dsh 会话的规范 cwd）：短形态 tmp 路径会让
+      // guard 的 path.relative 词法解析出 target=null → 白名单跳过 fail-open（路径形态陷阱）。
+      const longTarget = bridge.realpathExistingPath(target); // realpathSync.native——展开 8.3 短名
+      // ⑦a 子代理（depth=1）写项目内源码 → next() 被调（跳过 guard 白名单放行）
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'Write', arguments: { file_path: path.join(longTarget, 'src', 'a.mjs') }, agent: { cwd: longTarget, session: { header: { delegationDepth: 1 } } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('子代理写源码应放行(next 被调)——5.5 分派分支缺失');
+        if (res) throw new Error('子代理写源码不应返回 deny: ' + JSON.stringify(res));
+      }
+      // ⑦b 协调者（delegationDepth 缺失=0）同目标写 → 走真实 guard 白名单 → BLOCK deny
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'Write', arguments: { file_path: path.join(longTarget, 'src', 'a.mjs') }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('协调者写源码不应 next——协调者禁令物理拦截保留');
+        if (!res || res.kind !== 'deny') throw new Error('协调者写源码应走 guard 白名单拦截(deny): ' + JSON.stringify(res));
+        if (!res.reason.includes('白名单拦截')) throw new Error('协调者 deny 应含白名单拦截语义: ' + JSON.stringify(res));
+      }
+      // ⑦c 非 flow-comet 项目(无 .dsh/skills/flow-comet) → 窄监听放行(不分身份)
+      {
+        const plain = path.join(dir, 'k11-plain');
+        fs.mkdirSync(plain, { recursive: true });
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'Write', arguments: { file_path: path.join(plain, 'x.md') }, agent: { cwd: plain, session: { header: { delegationDepth: 1 } } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('非 flow-comet 项目应窄监听放行(next)');
+      }
+      // ⑦d 越界写不受身份影响：子代理(depth=1)写项目根外 → 包含性 fail-closed deny
+      {
+        const outside = path.join(dir, 'k11-out2');
+        fs.mkdirSync(outside, { recursive: true });
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'Write', arguments: { file_path: path.join(outside, 'evil.md') }, agent: { cwd: longTarget, session: { header: { delegationDepth: 1 } } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('子代理越界写不应 next——包含性不因身份放宽');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('不在项目根')) {
+          throw new Error('子代理越界写应 fail-closed deny(含越界语义): ' + JSON.stringify(res));
+        }
+      }
+      // ⑦e 形状不符不受身份影响：子代理(depth=1)参数形状不符 → fail-closed deny
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'Write', arguments: {}, agent: { cwd: longTarget, session: { header: { delegationDepth: 1 } } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('子代理形状不符不应 next——形状校验不因身份放宽');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('参数形状不符')) {
+          throw new Error('子代理形状不符应 fail-closed deny(含形状语义): ' + JSON.stringify(res));
+        }
+      }
+      console.log('  bridge.apply 分派集成(子代理放行/协调者拦/越界·形状 deny 不受身份)✓');
     },
   },
 
