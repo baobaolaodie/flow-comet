@@ -167,7 +167,7 @@ On an interactive terminal, dsh is one of the multi-select options (see [Platfor
 - **First use**: no hook-trust step — the bridge loader is a global plugin mounted by the installer; start a dsh session in the target project and invoke the skill by name (rank 100, auto-discovered). The bridge only intercepts when the session's project root contains `.dsh/skills/flow-comet` — projects without it are untouched.
 - **Version anchor**: dsh `0.1.0-rc.6` is the tested minimum; below it, skill discovery or interception may silently fail — upgrade dsh.
 - **Subagent execution**: delegated subagents (identified by the session's subagent delegation depth) write source code as the executor — matching the worktree-isolation semantics of the other platforms — while the coordinating agent remains subject to the phase write whitelist. Out-of-project writes and malformed tool arguments stay denied for both. The subagent tool suite ships with dsh and is available in every session form.
-- **Windows**: 8.3 short paths are normalized before containment checks (a short path inside the project is not misjudged as out-of-scope).
+- **Windows**: 8.3 short paths are normalized before containment checks (a short path inside the project is not misjudged as out-of-scope); the project root is canonicalized to its long form before the guard decision, so a short-form root and the normalized write target can never diverge into a fail-open.
 
 ### Verifying a dsh installation
 
