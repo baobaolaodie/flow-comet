@@ -147,6 +147,17 @@ export function sessionCwd(exec) {
   return null;
 }
 
+// 代理身份分派（B1——dsh 子代理=执行者）：dsh 子代理 spawn/fork provider 的
+// childSessionMeta 把 delegationDepth=parentDepth+1 写入子代理 session header
+// （dsh-subagent 源码锚定，rc.6）——协调者=0/缺失，子代理>0。从 exec.agent.session
+// 读取（与 sessionCwd 同级字段），供监听侧区分执行者与协调者——子代理写源码是
+// 执行者职责（对应 CC worktree 子代理物理自由写），协调者走 guard 白名单拦截。
+// 非法值（NaN/负数/字符串/null/缺字段）一律按协调者处理（fail-closed 语义）。
+export function agentDepth(exec) {
+  const depth = exec?.agent?.session?.header?.delegationDepth;
+  return typeof depth === 'number' && Number.isFinite(depth) && depth > 0 ? depth : 0;
+}
+
 // 最近 .git 祖先 = 项目根（.git 可为目录或文件——worktree/submodule 形态）。
 // 上溯到文件系统根仍未找到 -> cwd 本身。
 export function findProjectRoot(cwd) {
@@ -287,6 +298,15 @@ export function apply(ctx) {
         const normalizedTarget = realpathExistingPath(path.resolve(projectRoot, mapped.target));
         mapped.target = normalizedTarget;
         mapped.input.file_path = normalizedTarget;
+      }
+
+      // 5.5 代理身份分派（B1）：delegationDepth > 0 = 子代理（执行者）——其写源码是
+      //     执行者职责（对应 CC worktree 子代理物理隔离），跳过 guard 白名单判定直接
+      //     放行；协调者（0/缺失）走原 guard 白名单（协调者禁令物理拦截保留）。
+      //     形状 fail-closed 与项目根包含性校验在上方已对子代理同样执行——子代理也不得
+      //     越界写项目根外/参数形状不符（fail-closed 纪律不因身份放宽）。
+      if (agentDepth(exec) > 0) {
+        return next();
       }
 
       // 6. 项目本地 guard 调用。guard 文件缺失（安装未完成/被删除）-> WARN +

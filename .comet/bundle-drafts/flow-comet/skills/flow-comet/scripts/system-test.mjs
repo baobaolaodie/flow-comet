@@ -2310,6 +2310,44 @@ const TEST_ITEMS = [
         throw new Error('HOOK_GUARD_REL 相对项目根解析的 guard 不存在(安装布局漂移): ' + path.join(target, guardRel));
       }
       console.log('  HOOK_GUARD_REL guard 安装后存在(与安装产物绑定)✓');
+      // ⑥ delegationDepth 代理身份分派（B1——dsh 子代理=执行者）：dsh 子代理 spawn
+      //    provider 的 childSessionMeta 把 delegationDepth=parentDepth+1 写入子代理 session
+      //    header —— 协调者=0/缺失，子代理>0。桥接层据此分派：子代理写源码=执行者职责
+      //    （对应 CC worktree 物理隔离），协调者走 guard 白名单拦截。旧桥接对所有工具
+      //    一视同仁送 guard → subagent 模式子代理写源码被 .specs/ 白名单误拦 = B1 根因。
+      //    本断言锚定 agentDepth 纯函数（守 exec 结构读取语义——header.delegationDepth）。
+      if (typeof bridge.agentDepth !== 'function') {
+        throw new Error('bridge.agentDepth 未导出（B1 修复应新增代理身份读取纯函数）');
+      }
+      // ① 子代理（depth=1）→ 识别为执行者（返回 1）
+      if (bridge.agentDepth({ agent: { session: { header: { delegationDepth: 1 } } } }) !== 1) {
+        throw new Error('子代理 delegationDepth=1 应识别为执行者: ' + String(bridge.agentDepth({ agent: { session: { header: { delegationDepth: 1 } } } })));
+      }
+      // ② 深层子代理（depth=2）→ 识别为执行者
+      if (bridge.agentDepth({ agent: { session: { header: { delegationDepth: 2 } } } }) !== 2) {
+        throw new Error('子代理 delegationDepth=2 应识别为执行者');
+      }
+      // ③ 协调者（depth=0）→ 协调者（非执行者）
+      if (bridge.agentDepth({ agent: { session: { header: { delegationDepth: 0 } } } }) !== 0) {
+        throw new Error('协调者 delegationDepth=0 应返回 0');
+      }
+      // ④ 缺省（undefined/缺字段）→ 协调者（旧语义兼容——协调者 depth 缺失按 0）
+      if (bridge.agentDepth({ agent: { session: { header: {} } } }) !== 0) {
+        throw new Error('缺 delegationDepth 应按协调者处理(0)');
+      }
+      if (bridge.agentDepth({}) !== 0) {
+        throw new Error('空 exec 应按协调者处理(0)');
+      }
+      if (bridge.agentDepth(undefined) !== 0) {
+        throw new Error('undefined exec 应按协调者处理(0)');
+      }
+      // ⑤ 非数字/负数/非法值 → 0（fail-closed 协调者语义，防 NaN/字符串穿透）
+      for (const bad of [null, '1', -1, NaN, Infinity, {}, 'abc']) {
+        if (bridge.agentDepth({ agent: { session: { header: { delegationDepth: bad } } } }) !== 0) {
+          throw new Error('非法 delegationDepth 应按协调者处理(0): ' + JSON.stringify(bad));
+        }
+      }
+      console.log('  delegationDepth 代理身份分派(子代理=执行者/协调者原链)✓');
     },
   },
 
