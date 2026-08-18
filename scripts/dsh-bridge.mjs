@@ -262,7 +262,9 @@ export function apply(ctx) {
       // 3. 项目判定：最近 .git 祖先 = 项目根；根下必须存在 .dsh/skills/flow-comet
       //    （安装器安装的项目级 skill）才处理；不存在 -> next()（窄监听硬性契约——
       //    非 flow-comet 项目零拦截零开销）。
-      const projectRoot = findProjectRoot(cwd);
+      // 项目根同样归一化为长形态：短形态(8.3)项目根 + 长形态 file_path 会让 guard 的
+      // 词法 path.relative 解析出 target=null → 白名单跳过 = 协调者写源码 fail-open。
+      const projectRoot = realpathExistingPath(findProjectRoot(cwd));
       if (!existsSync(path.join(projectRoot, '.dsh', 'skills', 'flow-comet'))) {
         return next();
       }

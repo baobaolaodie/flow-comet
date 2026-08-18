@@ -2369,8 +2369,8 @@ const TEST_ITEMS = [
         executionMode: 'subagent',
         directOverride: false,
       });
-      // 项目根用 realpath 长形态（对应真实 dsh 会话的规范 cwd）：短形态 tmp 路径会让
-      // guard 的 path.relative 词法解析出 target=null → 白名单跳过 fail-open（路径形态陷阱）。
+      // 项目根常规用长形态（与桥接对 file_path 的规范化一致，对应真实会话规范 cwd）；
+      // 短形态 cwd 的场景由桥接的项目根规范化修复，⑦f 断言锁死（fail-open 已封闭）。
       const longTarget = bridge.realpathExistingPath(target); // realpathSync.native——展开 8.3 短名
       // ⑦a 子代理（depth=1）写项目内源码 → next() 被调（跳过 guard 白名单放行）
       {
@@ -2428,6 +2428,20 @@ const TEST_ITEMS = [
         if (usedNext) throw new Error('子代理形状不符不应 next——形状校验不因身份放宽');
         if (!res || res.kind !== 'deny' || !res.reason.includes('参数形状不符')) {
           throw new Error('子代理形状不符应 fail-closed deny(含形状语义): ' + JSON.stringify(res));
+        }
+      }
+      // ⑦f 短形态项目根不得 fail-open：会话 cwd 为 8.3 短路径时，桥接须把项目根
+      //    归一化为长形态再送 guard——否则 guard 词法 path.relative 得 target=null
+      //    跳过白名单（协调者写源码被放行）。本断言在短形态 TMP 机器上即回归锁死。
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'Write', arguments: { file_path: path.join(target, 'src', 'b.mjs') }, agent: { cwd: target, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('短形态 cwd 协调者写源码不应 next——8.3 短路径不得绕过白名单(fail-open 已封闭)');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('白名单拦截')) {
+          throw new Error('短形态 cwd 协调者写源码应走 guard 白名单拦截(deny): ' + JSON.stringify(res));
         }
       }
       console.log('  bridge.apply 分派集成(子代理放行/协调者拦/越界·形状 deny 不受身份)✓');
