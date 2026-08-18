@@ -25,6 +25,7 @@
 
 - **dsh 平台写入包含性**：解析后越界项目根的写入目标在进入 guard 判定前即被拒绝（此前未解析目标会跳过白名单判定——fail-open）；Windows 8.3 短路径在判定前规范化。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
 - **dsh 工具参数 fail-closed**：参数形状不符（缺 `file_path` / `command`、非对象参数）时输出 deny + WARN，不再静默放行。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+- **dsh 子代理执行**：工作流把任务委托给子代理时，被委托的子代理（以会话的子代理委托深度识别）作为执行者可写入源码——与其他平台 worktree 隔离语义一致；协调者仍受阶段写白名单约束。越界写入与参数形状不符对两者一律拒绝。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
 
 ## [1.4.1] - 2026-08-16
 

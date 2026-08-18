@@ -25,6 +25,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 - **Write containment on dsh**: writes whose target resolves outside the project root are now denied before reaching the guard decision (previously a non-resolved target skipped the whitelist judgment — fail-open); Windows 8.3 short paths are normalized before judgment. ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
 - **Fail-closed on dsh tool arguments**: argument shape mismatches (missing `file_path` / `command`, non-object arguments) now produce a deny with WARN instead of being silently passed through. ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+- **Subagent execution on dsh**: when a workflow delegates tasks to subagents, delegated agents (identified by the session's subagent delegation depth) can write source code as the executor — matching the worktree-isolation semantics of the other platforms — while the coordinating agent remains subject to the phase write whitelist. Out-of-project writes and malformed tool arguments stay denied for both. ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
 
 ## [1.4.1] - 2026-08-16
 

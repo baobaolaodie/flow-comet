@@ -1,6 +1,6 @@
 // dsh-flow-comet-bridge —— 薄桥接 loader。
 //
-// 职责（DESIGN D4/D6——迁移旧 dsh-plugin 拦截经验）：
+// 职责（迁移既有 dsh 插件拦截经验）：
 //   1. 监听 tools/pre-execute（dsh 官方 waterfall 事件）。
 //   2. 会话项目判定：仅当会话 cwd 的最近 .git 项目根下存在
 //      .dsh/skills/flow-comet 目录时才处理；否则直接 next()——
@@ -8,8 +8,8 @@
 //   3. 参数映射：把 dsh 工具名归一化到 guard CLI 契约名（Write/Edit/Bash），
 //      形状不符/缺关键字段 → WARN + fail-closed deny（不静默放行）。
 //   4. 包含性校验：Write/Edit 的 file_path 必须解析后位于项目根内——
-//      realpathSync.native 展开 Windows 8.3 短路径（T-FIX-07），越界直接
-//      deny（T-FIX-01）；通过后传规范化长路径给 guard（T-FIX-08：
+//      realpathSync.native 展开 Windows 8.3 短路径，越界直接
+//      deny；通过后传规范化长路径给 guard：
 //      避免短路径导致 guard 侧 target=null 跳过白名单判定 = fail-open）。
 //   5. 子进程调用项目本地 guard：node <项目根>/.dsh/skills/flow-comet/scripts/
 //      comet-hook-guard.mjs + stdin JSON {tool_name, tool_input}；
@@ -19,7 +19,7 @@
 //   6. 决策映射：exit 0 → next() 放行；exit 2 → deny（BLOCK 消息 + 恢复指引
 //      透传）；其它/异常 → fail-closed deny + WARN。
 //
-// 明确不做的（D6——旧 dsh-plugin 功能废弃）：
+// 明确不做的（旧 dsh 插件功能废弃）：
 //   - 不注册 fs/write-intent 槽位（single-slot 守卫瀑布无 deny 面，
 //     不 shadow 官方 dsh-fs-observation-policy）；
 //   - 不做 fs/observed 审计（v1 极薄）；
@@ -39,7 +39,7 @@ export const name = 'dsh-flow-comet-bridge';
 const HOOK_GUARD_REL = '.dsh/skills/flow-comet/scripts/comet-hook-guard.mjs';
 
 // 模块级幂等标记：同一进程内 apply() 被重复调用（热重载/多会话/插件重入）时
-// 跳过已注册的监听，避免重复监听（T-FIX-03 经验）。
+// 跳过已注册的监听，避免重复监听（幂等防重入）。
 let applied = false;
 
 // ---------------------------------------------------------------------------
@@ -96,7 +96,7 @@ export function mapToolInput(canonicalName, args) {
 // Windows 8.3 短路径（如 LONGYI~1）与长路径在词法上不同，直接 path.relative
 // 会把项目内短路径误判为越界；因此先 realpath 展开已存在部分再执行包含性
 // 判断。realpathSync.native：Windows 上 fs.realpathSync（libuv）不展开 8.3
-// 短名，native 变体才会把 LONGYI~1 规范化为 LongYinHaHa（T-FIX-07 实证）。
+// 短名，native 变体才会把 LONGYI~1 规范化为 LongYinHaHa（Windows 实证）。
 // ---------------------------------------------------------------------------
 export function realpathExistingPath(p) {
   try {
@@ -147,7 +147,7 @@ export function sessionCwd(exec) {
   return null;
 }
 
-// 代理身份分派（B1——dsh 子代理=执行者）：dsh 子代理 spawn/fork provider 的
+// 代理身份分派（dsh 子代理=执行者）：dsh 子代理 spawn/fork provider 的
 // childSessionMeta 把 delegationDepth=parentDepth+1 写入子代理 session header
 // （dsh-subagent 源码锚定，rc.6）——协调者=0/缺失，子代理>0。从 exec.agent.session
 // 读取（与 sessionCwd 同级字段），供监听侧区分执行者与协调者——子代理写源码是
@@ -280,7 +280,7 @@ export function apply(ctx) {
         return { kind: 'deny', reason };
       }
 
-      // 5. 包含性校验（Write/Edit）：越界直接 deny，不进 guard（T-FIX-01）。
+      // 5. 包含性校验（Write/Edit）：越界直接 deny，不进 guard。
       if (canonicalName === 'Write' || canonicalName === 'Edit') {
         if (!isPathInsideProjectRoot(projectRoot, mapped.target)) {
           const reason =
@@ -294,13 +294,13 @@ export function apply(ctx) {
         }
         // 通过后传规范化长路径（realpath 展开 8.3 短路径）——guard 的
         // writeTargetFromHookInput 只做词法 path.relative，短路径会解析出
-        // target=null 从而跳过白名单判定（fail-open，T-FIX-08 经验）。
+        // target=null 从而跳过白名单判定（fail-open）。
         const normalizedTarget = realpathExistingPath(path.resolve(projectRoot, mapped.target));
         mapped.target = normalizedTarget;
         mapped.input.file_path = normalizedTarget;
       }
 
-      // 5.5 代理身份分派（B1）：delegationDepth > 0 = 子代理（执行者）——其写源码是
+      // 5.5 代理身份分派：delegationDepth > 0 = 子代理（执行者）——其写源码是
       //     执行者职责（对应 CC worktree 子代理物理隔离），跳过 guard 白名单判定直接
       //     放行；协调者（0/缺失）走原 guard 白名单（协调者禁令物理拦截保留）。
       //     形状 fail-closed 与项目根包含性校验在上方已对子代理同样执行——子代理也不得
