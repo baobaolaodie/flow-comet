@@ -10,6 +10,8 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded in git tags, this document, the README badge, [docs/VERSIONS.md](docs/VERSIONS.md) and the authoritative `skills/flow-comet/INSTALLED_VERSION`; `bundle.yaml` version stays 1.0.0 (decoupled from release versioning).
 
+## [Unreleased]
+
 ## [1.4.2] - 2026-08-18
 
 DeepSeek Harness (dsh) platform support with bridge-based write enforcement, expanded regression coverage (144 scenarios / 60 system tests), and dsh write-guard hardening. ([#60](https://github.com/baobaolaodie/flow-comet/pull/60))
