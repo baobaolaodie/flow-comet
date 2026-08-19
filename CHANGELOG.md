@@ -12,6 +12,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added
+
+- **DeepSeek Harness (dsh) platform support**: flow-comet now installs on dsh through the installer — `prepare-env --platform dsh` installs the skill tree project-locally at `<project>/.dsh/skills/flow-comet` (dsh auto-discovers skills there at rank 100 without a restart, and projects without that directory cannot see the skill — naturally project-level), injects the orchestration rules into an AGENTS.md managed block (non-destructive merge), and mounts a thin bridge loader globally at `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` with a managed block in `$DSH_HOME/cordis.patch.yml` (read-merge-write, preserves existing blocks such as dsh-skin, effective for all profiles). The bridge listens on the native `tools/pre-execute` waterfall event, maps dsh tool calls to the project-local guard decision script (allow / deny with BLOCK message and recovery guidance / fail-closed on shape mismatch or abnormal exit, Windows 8.3 short paths normalized), and only engages when the session's project root contains `.dsh/skills/flow-comet` (narrow listening — non flow-comet projects are untouched). Platform selection supports interactive multi-select (arrow keys, pre-checked from project traces) and explicit comma-separated platforms (`--platform dsh` / `claude-code,dsh` / `all`; the previous `both` option is removed). Version anchor: dsh `0.1.0-rc.6`. ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+
+### Changed
+
+- **Regression suite expanded to 144 scenarios** with installer platform-selection chains (explicit single platform, comma-separated multi-platform, `all`, TTY multi-select with trace pre-checking, trace detection, unknown-platform errors, `both` rejection, idempotent re-install); the dsh adaptation keeps the engine untouched — the guard decision core is reused unchanged via subprocess calls. ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+- **System test suite expanded from 55 to 60 items** with dsh platform assertions (project-level skill install with path replacement and version marker, AGENTS.md managed block with user-content preservation, bridge loader syntax and home patch injection with read-merge-write, purge recovery). ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+
+### Fixed
+
+- **Write containment on dsh**: writes whose target resolves outside the project root are now denied before reaching the guard decision (previously a non-resolved target skipped the whitelist judgment — fail-open); Windows 8.3 short paths are normalized before judgment. ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+- **Fail-closed on dsh tool arguments**: argument shape mismatches (missing `file_path` / `command`, non-object arguments) now produce a deny with WARN instead of being silently passed through. ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+- **Subagent execution on dsh**: when a workflow delegates tasks to subagents, delegated agents (identified by the session's subagent delegation depth) can write source code as the executor — matching the worktree-isolation semantics of the other platforms — while the coordinating agent remains subject to the phase write whitelist. Out-of-project writes and malformed tool arguments stay denied for both. ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+- **8.3 path normalization before the guard decision on dsh**: the project root is canonicalized to its long path form before the project-local guard is invoked, closing a fail-open where an 8.3 short-form project root made the guard's lexical path resolution skip the phase write whitelist (out-of-whitelist coordinator writes were allowed). ([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+
 ## [1.4.1] - 2026-08-16
 
 Installer platform-selection fix and release-model change (release PRs now merge). ([#56](https://github.com/baobaolaodie/flow-comet/pull/56), [#57](https://github.com/baobaolaodie/flow-comet/pull/57))

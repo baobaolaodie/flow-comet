@@ -58,12 +58,23 @@ Hook blocking semantics (see Limitations): PreToolUse hook exit 2 blocks in the 
 
 ## 6. Guard self-test suite (author regression baseline)
 
-`scripts/guard-self-test.mjs`: **137 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (55 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
+`scripts/guard-self-test.mjs`: **144 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (60 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
 
 ```bash
-node .claude/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 137 SCENARIOS PASSED
+node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
+# → ALL 144 SCENARIOS PASSED
 ```
+
+## 6.5 DeepSeek Harness (dsh) platform
+
+On DeepSeek Harness, flow-comet is installed through the **prepare-env installer** (`--platform dsh`) — no plugin bundle, no npm package (a later / 1.5.0 item); the engine itself is untouched, the guard decision core is reused unchanged via subprocess calls:
+
+- **Installation**: `node scripts/prepare-env.mjs --target <project> --platform dsh` (minimum dsh `0.1.0-rc.6`; dev preview).
+- **Project-level skill discovery**: the skill tree is installed at `<project>/.dsh/skills/flow-comet`; dsh auto-discovers skills under `<project>/.dsh/skills/` at rank 100 (file watching, no restart) — projects **without that directory cannot see the skill**, so activation is naturally project-level (no runtime trace detection, no chicken-and-egg).
+- **Interception**: a thin bridge loader mounted globally at `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` (managed block in `$DSH_HOME/cordis.patch.yml`, effective for all profiles) listens on dsh's `tools/pre-execute` waterfall event, maps tool arguments to the same guard contract (`Write`/`Edit` → `file_path`, `Bash` → `command`), calls the project-local `comet-hook-guard.mjs` in a child process, and returns `{kind:'deny', reason}` (BLOCK message + recovery guidance) for out-of-scope writes; shape mismatches and abnormal exits fail closed. On Windows 8.3 paths the project root is canonicalized to its long form before the guard decision, preventing the guard's lexical path resolution from skipping the whitelist (fail-open).
+- **Activation scope**: the bridge only engages when the session project root contains `.dsh/skills/flow-comet` (narrow listening) — non-flow-comet projects are untouched.
+- **Executor passthrough**: when the coordinator delegates tasks to subagents, the delegated agent (identified by the session's subagent delegation depth) writes source code as the executor and bypasses the phase whitelist — matching the worktree-isolation semantics of the other platforms — while the coordinating agent remains subject to the whitelist. Out-of-project writes and malformed tool arguments stay denied for both.
+- **Managed rule injection**: installation injects the orchestration rule into `AGENTS.md` inside the `<!-- Managed by flow-comet prepare-env -->` block (non-destructive merge, marker shared with Codex).
 
 ## 7. Automatic initialization detection (init pre-step)
 
@@ -95,7 +106,7 @@ Explicit parameter authorization (no blocking prompts, headless-safe): `--init-c
 
 ## Limitations
 
-- **Platforms**: Claude Code (default) and Codex (skills/rules/hook via the multi-platform installer, see [Installation](INSTALLATION.md#platforms)) are supported; other platforms (Gemini/Cursor) not guaranteed
+- **Platforms**: Claude Code (default), Codex (skills/rules/hook via the multi-platform installer), and DeepSeek Harness (dsh — project-level skill + global bridge loader via `prepare-env --platform dsh`, see [Installation](INSTALLATION.md#option-c--deepseek-harness-dsh-platform)) are supported; other platforms (Gemini/Cursor) not guaranteed
 - **Return Contract transition rule**: legacy pure-string handoffs are exempt as WARN; missing redEvidence/greenEvidence is progressive WARN (not BLOCK) to avoid blocking legacy change re-entry
 - **Not interoperable with Comet Classic**: workflow-kernel state is independent of classic (design decision, not a defect)
 - **Hook allows writes when no active change**: when `.comet/flow-comet-state.json` is absent, the hook guard allows all writes (design decision: no workflow, no write restrictions)

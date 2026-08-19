@@ -12,6 +12,22 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **DeepSeek Harness（dsh）平台支持**：flow-comet 现经安装器安装到 dsh——`prepare-env --platform dsh` 把技能树项目级安装到 `<项目>/.dsh/skills/flow-comet`（dsh 以 rank 100 自动发现该目录、免重启，未安装该目录的项目不可见该技能——天然项目级），编排规则注入 AGENTS.md 托管区（非破坏合并），薄桥接 loader 全局挂载于 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 并在 `$DSH_HOME/cordis.patch.yml` 注入托管块（读-合并-写、保留 dsh-skin 等既有块、对所有 profile 生效）。桥接 loader 监听原生 `tools/pre-execute` waterfall 事件，把 dsh 工具调用映射到项目本地 guard 判定脚本（放行 / deny + BLOCK 消息与恢复指引 / 形状不符或异常退出 fail-closed 拒绝，Windows 8.3 短路径规范化），且仅当会话项目根存在 `.dsh/skills/flow-comet` 时才介入（窄监听——非 flow-comet 项目零拦截）。平台选择支持交互多选（方向键、按项目痕迹预勾选）与显式逗号多平台（`--platform dsh` / `claude-code,dsh` / `all`；旧 `both` 选项移除）。版本锚定：dsh `0.1.0-rc.6`。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+
+### 变更
+
+- **回归套件扩展至 144 场景**：新增安装器平台选择链场景（显式单平台/逗号多平台/all/TTY 多选预勾选/痕迹探测/未知平台报错/both 拒绝/幂等重装）；dsh 适配保持引擎零改动——guard 判定核心经子进程调用原样复用。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+- **系统测试集从 55 项扩展至 60 项**：新增 dsh 平台断言（项目级 skill 安装与路径替换、版本标识、AGENTS.md 托管区用户内容保留、桥接 loader 语法与 home patch 读-合并-写注入、purge 清理恢复）。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+
+### 修复
+
+- **dsh 平台写入包含性**：解析后越界项目根的写入目标在进入 guard 判定前即被拒绝（此前未解析目标会跳过白名单判定——fail-open）；Windows 8.3 短路径在判定前规范化。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+- **dsh 工具参数 fail-closed**：参数形状不符（缺 `file_path` / `command`、非对象参数）时输出 deny + WARN，不再静默放行。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+- **dsh 子代理执行**：工作流把任务委托给子代理时，被委托的子代理（以会话的子代理委托深度识别）作为执行者可写入源码——与其他平台 worktree 隔离语义一致；协调者仍受阶段写白名单约束。越界写入与参数形状不符对两者一律拒绝。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+- **dsh 判定前项目根 8.3 归一化**：调用项目本地 guard 前先把项目根规范化为长路径形态，修复一处 fail-open——8.3 短形态项目根曾使 guard 的词法路径解析跳过阶段写白名单（越权的协调者写入被放行）。([#PR](https://github.com/baobaolaodie/flow-comet/pull/PR))
+
 ## [1.4.1] - 2026-08-16
 
 安装器平台选择修复与发布模型变更（发布 PR 改 merge 合并）。([#56](https://github.com/baobaolaodie/flow-comet/pull/56)、[#57](https://github.com/baobaolaodie/flow-comet/pull/57))

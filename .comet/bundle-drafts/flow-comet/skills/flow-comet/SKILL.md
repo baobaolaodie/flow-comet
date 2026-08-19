@@ -180,6 +180,7 @@ All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT
 | `completedNodes` | 已完成节点列表 | workflow-guard.mjs exit --apply |
 | `evidence` | 节点证据记录 | workflow-state.mjs record |
 | `verifyFailures` | verify 失败计数 | workflow-guard.mjs (auto-increment) |
+| `verifyFailuresByChange` | 按 change 隔离的失败计数（keyed by change-id） | workflow-state.mjs / state-schema.mjs helper |
 | `status` | 运行状态 | workflow-guard.mjs exit --apply |
 | `executionMode` | subagent/direct，execute 执行模式 | workflow-state.mjs execution-mode |
 | `directOverride` | direct 是否用户显式确认 | workflow-state.mjs execution-mode direct |

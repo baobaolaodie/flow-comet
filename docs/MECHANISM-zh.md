@@ -58,12 +58,23 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 
 ## 6. guard 自测套件（作者回归基线）
 
-`scripts/guard-self-test.mjs`：**137 场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（55 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
+`scripts/guard-self-test.mjs`：**144 场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（60 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
 
 ```bash
 node .claude/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 137 SCENARIOS PASSED
+# → ALL 144 SCENARIOS PASSED
 ```
+
+## 6.5 DeepSeek Harness（dsh）平台
+
+在 DeepSeek Harness 上，flow-comet 经 **prepare-env 安装器**（`--platform dsh`）安装——无插件包、无 npm 包（留后续 / 1.5.0）；引擎零改动，guard 判定核心经子进程调用原样复用：
+
+- **安装**：`node scripts/prepare-env.mjs --target <项目> --platform dsh`（最低 dsh `0.1.0-rc.6`；dev preview）。
+- **项目级技能发现**：技能树安装到 `<项目>/.dsh/skills/flow-comet`；dsh 在 `<项目>/.dsh/skills/` 下以 rank 100 自动发现（文件监听、免重启）——**未安装该目录的项目不可见该技能**，因此激活天然是项目级的（无运行时痕迹判定、无 chicken-and-egg）。
+- **拦截**：全局挂载在 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 的薄桥接 loader（`$DSH_HOME/cordis.patch.yml` 托管块，所有 profile 生效）监听 dsh 的 `tools/pre-execute` waterfall 事件，把工具参数映射到同一 guard 契约（`Write`/`Edit` → `file_path`，`Bash` → `command`），子进程调用项目本地 `comet-hook-guard.mjs`，越权写入返回 `{kind:'deny', reason}`（BLOCK 消息 + 恢复指引）；参数形状不符与异常退出 fail-closed。Windows 8.3 路径下判定前把项目根规范化为长形态，避免 guard 的词法路径解析跳过白名单（fail-open）。
+- **激活范围**：桥接仅当会话项目根含 `.dsh/skills/flow-comet` 时处理（窄监听）——非 flow-comet 项目零侵入。
+- **执行者放行**：协调者把任务委托给子代理时，被委托的子代理（以会话的子代理委托深度识别）作为执行者写入源码、跳过阶段白名单——与其他平台 worktree 隔离语义一致；协调者仍受白名单约束。越界写入与参数形状不符对两者一律拒绝。
+- **托管规则注入**：安装时把编排规则注入 `AGENTS.md` 的 `<!-- Managed by flow-comet prepare-env -->` 托管区（非破坏合并，标记与 Codex 共用）。
 
 ## 7. 自动初始化检测（init 前置步骤）
 
@@ -94,7 +105,7 @@ node .claude/skills/flow-comet/scripts/guard-self-test.mjs
 
 ## 已知限制
 
-- **平台**：Claude Code（默认）与 Codex（技能/规则/hook 经多平台安装器，见[安装](INSTALLATION-zh.md#平台)）受支持；其他平台（Gemini/Cursor）不保证
+- **平台**：Claude Code（默认）、Codex（技能/规则/hook 经多平台安装器）与 DeepSeek Harness（dsh——项目级技能 + 全局桥接 loader，经 `prepare-env --platform dsh`，见[安装](INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-平台)）受支持；其他平台（Gemini/Cursor）不保证
 - **Return Contract 过渡规则**：旧格式纯字符串 handoff 豁免为 WARN；redEvidence/greenEvidence 缺失渐进 WARN（不 BLOCK），避免旧 change 重入被卡死
 - **与 Comet Classic 不互通**：workflow-kernel 状态独立于 classic（设计决策，非缺陷）
 - **无活跃 change 时 hook 放行**：`.comet/flow-comet-state.json` 不存在时 hook guard 放行所有写入（设计决策：无 workflow 时不限制文件操作）

@@ -93,13 +93,13 @@ git branch -d hotfix/<描述>
 
 - **运行时**：Node.js ≥ 18（ESM）
 - **仓库**：clone 后先验证回归基线可跑：
-  `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 137 SCENARIOS PASSED`（统一测试集两级基线，另需 `system-test.mjs` → `ALL SYSTEM TESTS PASSED`，55 项）
-- **创作环境**：Claude Code（skill/hook 在 Claude Code 会话中运行）；hook 通过 `prepare-env` 安装到你的项目 `.claude/`
+  `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 144 SCENARIOS PASSED`（统一测试集两级基线，另需 `system-test.mjs` → `ALL SYSTEM TESTS PASSED`，60 项）
+- **创作环境**：Claude Code（skill/hook 在 Claude Code 会话中运行）；hook 通过 `prepare-env` 安装到你的项目 `.claude/`（同一安装器服务 Codex（`--platform codex`）与 DeepSeek Harness（dsh，`--platform dsh`）——项目级技能树、AGENTS.md 托管规则与全局桥接 loader）
 - **机制相关工作**：动手改脚本前先读 [docs/MECHANISM.md](docs/MECHANISM.md) 了解机制语义（行为层）
 
 ### CI 强制检查与本地 hook
 
-CI 在每个 PR 与 push 时自动运行——服务端强制仓库约定（回归套件含场景数与公开产物代号自检、脚本语法、BOM 防线、安装器可复现性、workflow yaml 有效性、PR 模板完整性、提交规范（Conventional Commits）、版本一致性、CHANGELOG PR 链接、死链）。
+CI 在每个 PR 与 push 时自动运行——服务端强制仓库约定（回归套件含场景数与公开产物代号自检、脚本语法、BOM 防线、安装器可复现性（覆盖 Claude Code / Codex / DeepSeek Harness（dsh）三个平台）、workflow yaml 有效性、PR 模板完整性、提交规范（Conventional Commits）、版本一致性、CHANGELOG PR 链接、死链）。
 
 **本地 hook**（clone 后安装一次）：
 
@@ -112,7 +112,7 @@ hook 在提交与推送时拒绝含过程代号（修复编号、批次代号、
 推送前运行回归基线：
 
 ```bash
-node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 137 SCENARIOS PASSED
+node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 144 SCENARIOS PASSED
 ```
 
 其余由 CI 处理。
@@ -130,7 +130,7 @@ Issue 确认后：bug 用 `fix/` 分支、feature 用 `feat/` 分支——都按
 
 - **权威源**：skill/脚本改动在 `.comet/bundle-drafts/flow-comet/skills/`（单一权威源；`.claude/` 副本是安装产物——用 `prepare-env` 更新，勿手改）
 - **TDD**：每个机制修复先写 RED 场景（`guard-self-test.mjs`——确认以正确原因失败）→ GREEN → 全量回归
-- **回归基线**：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 137 SCENARIOS PASSED`（统一测试集两级基线，另需 `system-test.mjs` → `ALL SYSTEM TESTS PASSED`，55 项）（每次改动后必须）
+- **回归基线**：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 144 SCENARIOS PASSED`（统一测试集两级基线，另需 `system-test.mjs` → `ALL SYSTEM TESTS PASSED`，60 项）（每次改动后必须）
 - **文档同步**：行为层文档在 `docs/`（中英双语——改文档时两语同步）；实现细节不进公开文档
 - **双语纪律**：英文文档不含中文（语言切换器、flow-kit 工件段名、运行时消息原文除外）；中文文档不含英文长句（命令、URL、专有术语除外）
 - **向后兼容**：旧 change/旧 state 照常工作——渐进 WARN 优先于 BLOCK
@@ -223,7 +223,7 @@ git push --force-with-lease origin feat/<描述>            # feature 分支允�
 ## 发布审批单
 
 - 包含改动：PR 列表 + 每项一句话摘要
-- 验证结果：回归（137 场景）/ 安装副本验证
+- 验证结果：回归（144 场景）/ 安装副本验证
 - 版本：X.Y.Z（文档批次可不 bump）
 ```
 

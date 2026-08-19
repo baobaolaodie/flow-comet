@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // system-test.mjs — flow-comet 系统测试集（与 guard-self-test 同构的载体，测试内容为系统级全链路）
 //
-// 定位：guard-self-test 是引擎脚本的单元/场景级回归（137 场景，fixture 构造为主）；
+// 定位：guard-self-test 是引擎脚本的单元/场景级回归（144 场景，fixture 构造为主）；
 // 本套件是**系统级**测试——每个测试项走真实命令序列（init → record → guard exit → handoff →
 // hook …），覆盖 flow-comet 全部机制面（A~L 十二类）：
 //   A. 状态机与路由（init/status/next/select/advance/record/execution-mode/config）
@@ -14,6 +14,9 @@
 //   H. verify 与归档（验证命令真实执行 + 超时配置/完整归档流程/归档路径声明标记查找）
 //   I. 异常路径（损坏状态/缺工件出口/非法参数/状态字段类型非法）
 //   J. 文档一致性（双语健康检查/公开产物零代号检查——调用仓库本地工具）
+//   K. 安装器与平台（版本标识/多平台安装与平台化路径/codex hook JSON 契约/平台选择链/
+//      purge 语义/描述符驱动/dsh 平台断言）
+//   L. 执行遗漏防护（entry 进入证据/空退出豁免/空仓库提示）
 //
 // 载体（与 guard-self-test 同构）：每项 = 独立临时目录（fs.mkdtemp）+ 内置协议副本复制到
 // <tmp>/reference/（受保护路径要求协议文件位于 runRoot 内）+ spawnSync 真实命令序列 +
@@ -29,7 +32,7 @@ import { execFileSync, spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GUARD = path.join(__dirname, 'workflow-guard.mjs');
@@ -314,6 +317,19 @@ function fullContract(commitHash, taskId) {
 function runLocalTool(checker, repoRoot) {
   const res = spawnSync(process.execPath, [checker], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
   return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+}
+// 递归收集目录下相对文件清单（排序稳定，供 K8/K10 技能整树清单/内容比对）
+function collectTreeFiles(root) {
+  const files = [];
+  if (!fs.existsSync(root)) return files;
+  (function walk(dir) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const absolute = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(absolute);
+      else if (entry.isFile()) files.push(path.relative(root, absolute));
+    }
+  })(root);
+  return files.sort();
 }
 
 // ---------- 系统测试项（A~L 十二类） ----------
@@ -1775,7 +1791,7 @@ const TEST_ITEMS = [
       const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
       if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return;
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
-      const run = (target) => spawnSync(process.execPath, [installer, '--target', target], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      const run = (target, envOverrides = {}) => spawnSync(process.execPath, [installer, '--target', target], { cwd: repoRoot, encoding: 'utf8', timeout: 120000, env: { ...process.env, ...envOverrides } });
       // ① --platform claude-code 显式 → .claude/skills 生成,.agents 不生成
       const t1 = path.join(dir, 'k4-cc');
       fs.mkdirSync(t1, { recursive: true });
@@ -1817,7 +1833,7 @@ const TEST_ITEMS = [
       const out6 = String(r6.stderr || '') + String(r6.stdout || '');
       if (!out6.includes('未知平台')) throw new Error('未知平台错误信息应含"未知平台": ' + out6);
       // ⑦ 无 --platform + 目标同时有 .claude/ 与 .codex/ 痕迹 → 不武断二选一:
-      //    默认 claude-code(主平台)+ 输出双痕迹提示(修复前探测 .codex/ 优先会武断只装 codex)
+      //    默认 claude-code(主平台)+ 输出多痕迹提示(修复前探测 .codex/ 优先会武断只装 codex)
       const t7 = path.join(dir, 'k4-dual-trace');
       fs.mkdirSync(path.join(t7, '.claude'), { recursive: true });
       fs.mkdirSync(path.join(t7, '.codex'), { recursive: true });
@@ -1828,38 +1844,45 @@ const TEST_ITEMS = [
       }
       if (fs.existsSync(path.join(t7, '.agents'))) throw new Error('双痕迹项目默认 claude-code 时不应生成 .agents/');
       const out7 = String(r7.stdout || '') + String(r7.stderr || '');
-      if (!out7.includes('同时有 .claude/ 与 .codex/ 痕迹')) throw new Error('双痕迹无 TTY 应输出双痕迹提示: ' + out7);
-      // ⑧ both 安装路径(交互模拟):覆盖 stdin.isTTY + 喂入答案 3 → 双平台产物同时生成,
-      //    codex 副本命令路径平台化(.agents 形态,不含 .claude 路径);claude-code 先装、codex 后装
-      const t8 = path.join(dir, 'k4-both');
+      if (!out7.includes('同时有 .claude/、.codex/ 或 .dsh/ 中的多个痕迹')) throw new Error('多痕迹无 TTY 应输出多痕迹提示: ' + out7);
+      // ⑧ TTY 多选(交互模拟——平台选择链缺省路径):覆盖 stdin.isTTY + 管道喂入 '1,3'
+      //    (Claude Code + dsh——三平台选项,旧 both 已移除)→ 双平台产物同时生成;
+      //    dsh 副本命令路径平台化(.dsh 形态,不含 .claude 路径);DSH_HOME 指向临时目录
+      //    (断言全程不写真实 ~/.dsh)
+      const t8 = path.join(dir, 'k4-multiselect');
       fs.mkdirSync(t8, { recursive: true });
-      const installerUrl = 'file:///' + installer.split(path.sep).join('/');
-      const bothScript =
+      const dshHome8 = path.join(dir, 'k4-dsh-home');
+      const installerUrl = pathToFileURL(installer).href;
+      const selectScript =
         `Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });` +
         `process.argv = ['node', 'prepare-env', '--target', ${JSON.stringify(t8)}];` +
         `await import(${JSON.stringify(installerUrl)});`;
-      const r8 = spawnSync(process.execPath, ['--input-type=module', '-e', bothScript], { cwd: repoRoot, encoding: 'utf8', input: '3\n', timeout: 120000 });
-      if (r8.status !== 0) throw new Error('both 选择安装失败: ' + (r8.stderr || JSON.stringify(r8.output)));
-      if (!fs.existsSync(path.join(t8, '.claude', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('both 安装后 .claude/skills 应生成');
-      if (!fs.existsSync(path.join(t8, '.agents', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('both 安装后 .agents/skills 应生成');
-      const codexSkillText = fs.readFileSync(path.join(t8, '.agents', 'skills', 'flow-comet', 'SKILL.md'), 'utf8');
-      if (codexSkillText.includes('.claude/skills/flow-comet/scripts/')) {
-        throw new Error('both 安装后 codex 副本命令路径应为 .agents 形态');
+      const r8 = spawnSync(process.execPath, ['--input-type=module', '-e', selectScript], { cwd: repoRoot, encoding: 'utf8', input: '1,3\n', timeout: 120000, env: { ...process.env, DSH_HOME: dshHome8 } });
+      if (r8.status !== 0) throw new Error('TTY 多选安装失败: ' + (r8.stderr || JSON.stringify(r8.output)));
+      if (!fs.existsSync(path.join(t8, '.claude', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('TTY 多选后 .claude/skills 应生成');
+      if (!fs.existsSync(path.join(t8, '.dsh', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('TTY 多选后 .dsh/skills 应生成');
+      if (fs.existsSync(path.join(t8, '.agents'))) throw new Error('TTY 多选(1,3)不应生成 .agents/(未选 codex)');
+      const dshSkillText8 = fs.readFileSync(path.join(t8, '.dsh', 'skills', 'flow-comet', 'SKILL.md'), 'utf8');
+      if (dshSkillText8.includes('.claude/skills/flow-comet/scripts/')) {
+        throw new Error('TTY 多选后 dsh 副本命令路径应为 .dsh 形态');
       }
-      // both 流程的 codex 专属产物断言: hooks 配置(.codex/hooks.json + config.toml 启用,
-      // Codex 官方 hooks 位置为用户级 ~/.codex/ 与项目级 .codex/——实测 0.146.0 项目级生效)
-      // + 规则托管区(项目根 AGENTS.md)——不只验技能复制与路径替换
-      if (!fs.existsSync(path.join(t8, '.codex', 'hooks.json'))) {
-        throw new Error('both 安装后 .codex/hooks.json 应生成以承载 codex 钩子配置');
+      if (!fs.existsSync(path.join(dshHome8, 'plugins', 'dsh-flow-comet-bridge.mjs'))) {
+        throw new Error('TTY 多选后桥接 loader 应复制到临时 DSH_HOME(不写真实 ~/.dsh)');
       }
-      const codexConfigText = fs.readFileSync(path.join(t8, '.codex', 'config.toml'), 'utf8');
-      if (!/\[features\]/.test(codexConfigText) || !/hooks\s*=\s*true/.test(codexConfigText)) {
-        throw new Error('both 安装后 .codex/config.toml 应启用 hooks(features)');
-      }
-      const agentsText = fs.readFileSync(path.join(t8, 'AGENTS.md'), 'utf8');
-      if (!agentsText.includes('Managed by flow-comet')) {
-        throw new Error('both 安装后 AGENTS.md 应含规则托管区');
-      }
+      // ⑨ 仅 .dsh/ 痕迹 → 无 TTY 探测为 dsh(三痕迹探测语义)
+      const t9 = path.join(dir, 'k4-probe-dsh');
+      fs.mkdirSync(path.join(t9, '.dsh'), { recursive: true });
+      const r9 = run(t9, { DSH_HOME: path.join(dir, 'k4-probe-dsh-home') });
+      if (r9.status !== 0) throw new Error('探测 dsh 安装失败: ' + (r9.stderr || JSON.stringify(r9.output)));
+      if (!fs.existsSync(path.join(t9, '.dsh', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('已有 .dsh/ 的项目应探测为 dsh 平台');
+      // ⑩ 显式逗号多平台:--platform claude-code,dsh → 两平台产物同时生成(CI/无 TTY 路径)
+      const t10 = path.join(dir, 'k4-comma');
+      fs.mkdirSync(t10, { recursive: true });
+      const r10 = spawnSync(process.execPath, [installer, '--target', t10, '--platform', 'claude-code,dsh'], { cwd: repoRoot, encoding: 'utf8', timeout: 120000, env: { ...process.env, DSH_HOME: path.join(dir, 'k4-comma-home') } });
+      if (r10.status !== 0) throw new Error('--platform claude-code,dsh 失败: ' + (r10.stderr || JSON.stringify(r10.output)));
+      if (!fs.existsSync(path.join(t10, '.claude', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('逗号多平台应生成 .claude/skills');
+      if (!fs.existsSync(path.join(t10, '.dsh', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('逗号多平台应生成 .dsh/skills');
+      if (fs.existsSync(path.join(t10, '.agents'))) throw new Error('逗号多平台(claude-code,dsh)不应生成 .agents/');
     },
   },
 
@@ -1979,16 +2002,449 @@ const TEST_ITEMS = [
         if (!platformBlock[0].includes(fn)) throw new Error('描述符缺平台函数: ' + fn);
       }
       // ③ 全平台逐一安装 + purge 冒烟(从描述符块提取 id——未来新增平台自动纳入;
-      // purge 冒烟验证清理函数真实可用,缺函数/清理失败即红)
+      // purge 冒烟验证清理函数真实可用,缺函数/清理失败即红);
+      // DSH_HOME 指向临时目录——dsh 平台 installHooks 写 $DSH_HOME(plugins/loader +
+      // cordis.patch.yml 托管块),断言全程不污染真实 ~/.dsh
+      const dshHome = path.join(dir, 'k6-dsh-home');
       for (const id of ids) {
         const target = path.join(dir, 'k6-' + id);
         fs.mkdirSync(target, { recursive: true });
-        const res = spawnSync(process.execPath, [installer, '--target', target, '--platform', id], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+        const env = { ...process.env, DSH_HOME: dshHome };
+        const res = spawnSync(process.execPath, [installer, '--target', target, '--platform', id], { cwd: repoRoot, encoding: 'utf8', timeout: 120000, env });
         if (res.status !== 0) throw new Error('平台 ' + id + ' 安装失败: ' + (res.stderr || JSON.stringify(res.output)));
-        const purgeRes = spawnSync(process.execPath, [installer, '--target', target, '--platform', id, '--purge', '--yes'], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+        const purgeRes = spawnSync(process.execPath, [installer, '--target', target, '--platform', id, '--purge', '--yes'], { cwd: repoRoot, encoding: 'utf8', timeout: 120000, env });
         if (purgeRes.status !== 0) throw new Error('平台 ' + id + ' purge 失败: ' + (purgeRes.stderr || JSON.stringify(purgeRes.output)));
       }
       console.log('  描述符驱动: ' + ids.length + ' 个平台逐一安装 + purge 冒烟通过✓');
+    },
+  },
+// ---------- K 扩展:dsh 平台断言（1.4.2 deepseek-harness-platform——安装器多平台） ----------
+// 旧 dsh-plugin npm 包已废弃(对象 dsh-plugin/ 目录另行废弃清理)——以下断言覆盖
+// prepare-env --platform dsh 的项目级安装/AGENTS.md 托管区/桥接 loader/purge 清理恢复;
+// 断言全程 DSH_HOME=临时目录环境变量,禁止污染真实 ~/.dsh(AC-1/AC-4)
+
+  // K7: dsh 描述符安装产物——--platform dsh 项目级安装(.dsh/skills rank 100 自动发现) +
+  // pathReplacements 平台化(.dsh/skills/flow-comet/scripts/ 形态) + INSTALLED_VERSION +
+  // 安装树清单与权威源一致;全程 DSH_HOME=临时目录(AC-1)
+  {
+    name: 'K7 安装器:dsh 平台安装(技能/pathReplacements/版本标识/树一致)',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
+      const dshHome = path.join(dir, 'k7-dsh-home');
+      const target = path.join(dir, 'k7-target');
+      fs.mkdirSync(target, { recursive: true });
+      const res = spawnSync(process.execPath, [installer, '--target', target, '--platform', 'dsh'], {
+        cwd: repoRoot, encoding: 'utf8', timeout: 120000, env: { ...process.env, DSH_HOME: dshHome },
+      });
+      if (res.status !== 0) throw new Error('prepare-env --platform dsh 失败: ' + (res.stderr || JSON.stringify(res.output)));
+      // ① 技能安装到 <项目>/.dsh/skills/flow-comet/(dsh rank 100 项目级发现位置)
+      const skillMd = path.join(target, '.dsh', 'skills', 'flow-comet', 'SKILL.md');
+      if (!fs.existsSync(skillMd)) throw new Error('dsh 平台技能未安装到 .dsh/skills/flow-comet/');
+      // ② guard 判定核心随技能分发(comet-hook-guard 平台无关 CLI,一行不动)
+      if (!fs.existsSync(path.join(target, '.dsh', 'skills', 'flow-comet', 'scripts', 'comet-hook-guard.mjs'))) {
+        throw new Error('comet-hook-guard.mjs 未随技能分发到 .dsh/skills/flow-comet/scripts/');
+      }
+      // ③ 版本标识写入(随技能包分发)
+      const verFile = path.join(target, '.dsh', 'skills', 'flow-comet', 'INSTALLED_VERSION');
+      if (!fs.existsSync(verFile)) throw new Error('缺少 INSTALLED_VERSION(版本标识文件)');
+      if (!fs.readFileSync(verFile, 'utf8').trim()) throw new Error('版本标识为空');
+      // ④ pathReplacements 生效:SKILL 命令路径为 .dsh 形态,无 .claude 残留
+      const text = fs.readFileSync(skillMd, 'utf8');
+      if (!text.includes('.dsh/skills/flow-comet/scripts/')) throw new Error('SKILL 命令路径未替换为 .dsh/skills/flow-comet/scripts/');
+      if (text.includes('.claude/skills/flow-comet/scripts/')) throw new Error('SKILL 仍含 .claude/skills/flow-comet/scripts/ 命令路径');
+      // ⑤ 安装树文件清单与权威源一致(pathReplacements 只改内容不改清单)
+      const authoritative = path.join(repoRoot, '.comet', 'bundle-drafts', 'flow-comet', 'skills', 'flow-comet');
+      const installedTree = collectTreeFiles(path.join(target, '.dsh', 'skills', 'flow-comet'));
+      const srcTree = collectTreeFiles(authoritative);
+      if (installedTree.length === 0) throw new Error('安装技能树为空');
+      if (JSON.stringify(installedTree) !== JSON.stringify(srcTree)) {
+        throw new Error('安装树清单与权威源不一致\n权威源: ' + srcTree.join(', ') + '\n安装: ' + installedTree.join(', '));
+      }
+      console.log('  .dsh/skills/flow-comet 安装树 = ' + installedTree.length + ' files 与权威源一致 ✓');
+    },
+  },
+
+  // K8: AGENTS.md 托管区注入——托管区存在 + 托管区外用户内容保留 + 幂等重装不重复
+  // (codex/dsh 共用注入函数与托管区标记——AC-4)
+  {
+    name: 'K8 安装器:dsh AGENTS.md 托管区(用户内容保留 + 幂等重装)',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
+      const dshHome = path.join(dir, 'k8-dsh-home');
+      const target = path.join(dir, 'k8-target');
+      fs.mkdirSync(target, { recursive: true });
+      // 预置用户内容(托管区外,安装不得覆盖)
+      fs.writeFileSync(path.join(target, 'AGENTS.md'), '# 用户自定义指令\n\n保留这段内容。\n', 'utf8');
+      const run = () => spawnSync(process.execPath, [installer, '--target', target, '--platform', 'dsh'], {
+        cwd: repoRoot, encoding: 'utf8', timeout: 120000, env: { ...process.env, DSH_HOME: dshHome },
+      });
+      // ① 首次安装:托管区注入(内联 orchestration 全文)+ 用户内容保留
+      const first = run();
+      if (first.status !== 0) throw new Error('dsh 安装失败: ' + (first.stderr || JSON.stringify(first.output)));
+      let agents = fs.readFileSync(path.join(target, 'AGENTS.md'), 'utf8');
+      if (!agents.includes('<!-- Managed by flow-comet prepare-env -->')) throw new Error('AGENTS.md 无托管区标记');
+      if (!agents.includes('flow-comet Orchestration')) throw new Error('AGENTS.md 未内联 orchestration 内容');
+      if (!agents.includes('用户自定义指令') || !agents.includes('保留这段内容。')) throw new Error('托管区外用户内容被覆盖');
+      // ② 幂等重装:托管区不重复注入(start+end 标记合计 2 处 = 1 个托管区)
+      const second = run();
+      if (second.status !== 0) throw new Error('dsh 重装失败: ' + (second.stderr || JSON.stringify(second.output)));
+      agents = fs.readFileSync(path.join(target, 'AGENTS.md'), 'utf8');
+      if (!agents.includes('保留这段内容。')) throw new Error('重装后用户内容丢失');
+      const markerCount = (agents.match(/Managed by flow-comet prepare-env/g) || []).length;
+      if (markerCount !== 2) throw new Error('幂等重装后托管区应只有 1 组标记(实际 ' + markerCount + ' 个)——重复注入');
+      console.log('  AGENTS.md 托管区注入 + 幂等重装不重复 ✓');
+    },
+  },
+
+  // K9: 桥接 loader 就位——权威源文件存在 + node --check 语法 + 安装时复制到
+  // $DSH_HOME/plugins/ + cordis.patch.yml 托管块注入(insert 形态 + file:// 引用 loader 路径,
+  // 读-合并-写保留既有块;insert 形态是 home patch 追加新插件的唯一正确形态——patch 形态
+  // id-targeted 对不存在的 id 报 entry not found 跳过,loader 不加载,拦截整链静默失效;
+  // $DSH_HOME 解析 = 显式 DSH_HOME > ~/.dsh——测试隔离到临时目录)
+  {
+    name: 'K9 桥接 loader:源文件/语法/复制与托管块注入(读-合并-写)',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      // ① 权威源 loader 存在 + 语法检查
+      const loader = path.join(repoRoot, 'scripts', 'dsh-bridge.mjs');
+      if (!fs.existsSync(loader)) throw new Error('缺少 scripts/dsh-bridge.mjs');
+      const check = spawnSync(process.execPath, ['--check', loader], { encoding: 'utf8', timeout: 60000 });
+      if (check.status !== 0) throw new Error('dsh-bridge.mjs 语法检查失败: ' + (check.stderr || ''));
+      // ② 安装后:loader 复制到 $DSH_HOME/plugins/dsh-flow-comet-bridge.mjs + 托管块注入
+      const dshHome = path.join(dir, 'k9-dsh-home');
+      const target = path.join(dir, 'k9-target');
+      fs.mkdirSync(target, { recursive: true });
+      const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
+      const res = spawnSync(process.execPath, [installer, '--target', target, '--platform', 'dsh'], {
+        cwd: repoRoot, encoding: 'utf8', timeout: 120000, env: { ...process.env, DSH_HOME: dshHome },
+      });
+      if (res.status !== 0) throw new Error('dsh 安装失败: ' + (res.stderr || JSON.stringify(res.output)));
+      if (!fs.existsSync(path.join(dshHome, 'plugins', 'dsh-flow-comet-bridge.mjs'))) {
+        throw new Error('loader 未复制到 $DSH_HOME/plugins/');
+      }
+      const patchPath = path.join(dshHome, 'cordis.patch.yml');
+      if (!fs.existsSync(patchPath)) throw new Error('缺少 $DSH_HOME/cordis.patch.yml');
+      const patch = fs.readFileSync(patchPath, 'utf8');
+      if (!patch.includes('# --- flow-comet managed ---') || !patch.includes('# --- end flow-comet managed ---')) {
+        throw new Error('cordis.patch.yml 无托管块标记');
+      }
+      // insert 形态断言（L-015 教训：套件全绿 ≠ 真实 dsh 生效——patch 形态 id-targeted 语义对
+      // 不存在的 id 输出 entry not found 并跳过，loader 从不加载；insert 形态才追加新插件行）
+      if (!patch.includes('- insert:')) throw new Error('cordis.patch.yml 托管块应为 insert 形态(- insert: 顶层条目)');
+      if (!patch.includes('dsh-flow-comet-bridge')) throw new Error('cordis.patch.yml 缺 loader 条目');
+      const loaderUrl = pathToFileURL(path.join(dshHome, 'plugins', 'dsh-flow-comet-bridge.mjs')).href;
+      if (!patch.includes(loaderUrl)) throw new Error('cordis.patch.yml 托管块应 file:// 引用 loader 路径: ' + loaderUrl);
+      // ③ 读-合并-写非破坏:预置 dsh-skin 既有块 → 重装后保留(托管块幂等唯一)
+      fs.writeFileSync(patchPath, '# --- dsh-skin managed ---\n- id: dsh-skin\n  name: file:///skin\n# --- end dsh-skin managed ---\n' + patch, 'utf8');
+      const re = spawnSync(process.execPath, [installer, '--target', target, '--platform', 'dsh'], {
+        cwd: repoRoot, encoding: 'utf8', timeout: 120000, env: { ...process.env, DSH_HOME: dshHome },
+      });
+      if (re.status !== 0) throw new Error('dsh 重装失败: ' + (re.stderr || JSON.stringify(re.output)));
+      const after = fs.readFileSync(patchPath, 'utf8');
+      if (!after.includes('dsh-skin managed')) throw new Error('重装后 dsh-skin 既有块丢失(读-合并-写非破坏)');
+      if ((after.match(/flow-comet managed/g) || []).length !== 2) {
+        throw new Error('重装后 flow-comet 托管块应幂等唯一: ' + after);
+      }
+      console.log('  loader 复制 + cordis.patch.yml 托管块(读-合并-写保留既有块)✓');
+    },
+  },
+
+  // K10: dsh purge 清理恢复——缺 --yes 拒绝(不破坏)/ --purge --yes 删除后重新生成
+  // (既有 main 语义:purge 后重新生成到最终态)/ 用户内容保留 / 空 .dsh 目录清理
+  // (唯一 flow-comet 技能移除后 .dsh/skills 与 .dsh 变空 → 一并清理)
+  {
+    name: 'K10 安装器:dsh purge 清理恢复(缺 --yes 拒绝/删除后重建/用户内容保留/空目录清理)',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
+      const dshHome = path.join(dir, 'k10-dsh-home');
+      const run = (target, extra) => spawnSync(process.execPath, [installer, '--target', target, '--platform', 'dsh', ...extra], {
+        cwd: repoRoot, encoding: 'utf8', timeout: 120000, env: { ...process.env, DSH_HOME: dshHome },
+      });
+      // ① 首次安装 + 用户内容(项目根,非生成物)
+      const target = path.join(dir, 'k10-target');
+      fs.mkdirSync(target, { recursive: true });
+      const first = run(target, []);
+      if (first.status !== 0) throw new Error('dsh 首次安装失败: ' + (first.stderr || JSON.stringify(first.output)));
+      fs.writeFileSync(path.join(target, 'USER_KEEP.md'), '# 用户内容(保留)\n', 'utf8');
+      // ② 缺 --yes → 拒绝且不破坏(错误提示含 --yes;生成物与用户内容仍在)
+      const dry = run(target, ['--purge']);
+      if (dry.status === 0) throw new Error('--purge 缺 --yes 应失败');
+      const dryOut = String(dry.stderr || '') + String(dry.stdout || '');
+      if (!dryOut.includes('--yes')) throw new Error('--purge 缺 --yes 错误信息应提示 --yes: ' + dryOut);
+      if (!fs.existsSync(path.join(target, '.dsh', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('--purge 拒绝后生成物不应被删除');
+      if (!fs.existsSync(path.join(target, 'USER_KEEP.md'))) throw new Error('--purge 拒绝后用户内容不应被删除');
+      // ③ --purge --yes → 删除后重新生成(最终态 = 重新生成的安装态);移除清单含空 .dsh 目录
+      //    清理条目(.dsh/skills 移除后 .dsh 变空——行尾锚定防与 skillRoot 打印行混淆)
+      const ok = run(target, ['--purge', '--yes']);
+      if (ok.status !== 0) throw new Error('--purge --yes 失败: ' + (ok.stderr || JSON.stringify(ok.output)));
+      const okOut = String(ok.stderr || '') + String(ok.stdout || '');
+      const dshDirLine = '- ' + path.join(target, '.dsh');
+      if (!okOut.includes(dshDirLine + '\r\n') && !okOut.includes(dshDirLine + '\n')) {
+        throw new Error('purge 移除清单应含空 .dsh 目录清理条目: ' + okOut);
+      }
+      if (!fs.existsSync(path.join(target, '.dsh', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('--purge --yes 后技能应重新生成(删除后重新生成语义)');
+      if (!fs.existsSync(path.join(target, 'USER_KEEP.md'))) throw new Error('--purge --yes 后用户内容应保留');
+      const agents = fs.readFileSync(path.join(target, 'AGENTS.md'), 'utf8');
+      if (!agents.includes('<!-- Managed by flow-comet prepare-env -->')) throw new Error('--purge --yes 后 AGENTS.md 托管区应重建');
+      if (!fs.existsSync(path.join(dshHome, 'plugins', 'dsh-flow-comet-bridge.mjs'))) throw new Error('--purge --yes 后桥接 loader 应重建');
+      // ④ 共享位置边界:.dsh/skills 用户技能(purge 只清 flow-comet*,其余保留)
+      fs.mkdirSync(path.join(target, '.dsh', 'skills', 'user-own-skill'), { recursive: true });
+      fs.writeFileSync(path.join(target, '.dsh', 'skills', 'user-own-skill', 'SKILL.md'), '# user skill\n', 'utf8');
+      const ok2 = run(target, ['--purge', '--yes']);
+      if (ok2.status !== 0) throw new Error('--purge --yes(第二次) 失败: ' + (ok2.stderr || JSON.stringify(ok2.output)));
+      if (!fs.existsSync(path.join(target, '.dsh', 'skills', 'user-own-skill', 'SKILL.md'))) throw new Error('--purge --yes 后用户技能应保留(.dsh/skills 共享位置)');
+      if (!fs.existsSync(path.join(target, '.dsh', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('--purge --yes(第二次) 后 flow-comet 技能应重新生成');
+      console.log('  dsh purge 缺 --yes 拒绝 + 删除后重建 + 用户内容保留 + 空目录清理 ✓');
+    },
+  },
+
+  // K11: 桥接 loader 行为断言（dsh-bridge.mjs export 直测——参数映射别名矩阵/
+  // 形状不符 fail-closed/项目根包含性含 8.3 短路径/退出码映射/guard 路径存在漂移防护；
+  // apply 集成：tools/pre-execute 监听器分派——子代理放行/协调者走 guard/越界·形状 deny 不受身份）
+  {
+    name: 'K11 桥接 loader:纯函数与 apply 分派断言(映射/包含性/退出映射/身份分派)',
+    run: async (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      // 动态 import(套件运行器逐项 await)——dsh-bridge.mjs 仅在权威源仓库根 scripts/,
+      // 安装副本缺失时整体跳过(与 K 组其余项同语义);静态 import 会让安装副本套件整体崩
+      const loader = path.join(__dirname, '..', '..', '..', '..', '..', '..', 'scripts', 'dsh-bridge.mjs');
+      if (!fs.existsSync(loader)) throw new Error('缺少 scripts/dsh-bridge.mjs');
+      const bridge = await import(pathToFileURL(loader).href);
+      // ① 工具名归一化别名矩阵:write/edit/bash 全部别名 → Write/Edit/Bash
+      for (const alias of ['write', 'Write', 'WRITE', 'writefile', 'file-write']) {
+        if (bridge.normalizeToolName(alias) !== 'Write') throw new Error('normalizeToolName 别名未归一化: ' + alias);
+      }
+      for (const alias of ['edit', 'Edit', 'editfile', 'file-edit']) {
+        if (bridge.normalizeToolName(alias) !== 'Edit') throw new Error('normalizeToolName 别名未归一化: ' + alias);
+      }
+      for (const alias of ['bash', 'Bash', 'shell', 'powershell', 'pwsh', 'Pwsh', 'PWSH', 'run_command', 'run-command']) {
+        if (bridge.normalizeToolName(alias) !== 'Bash') throw new Error('normalizeToolName 别名未归一化: ' + alias);
+      }
+      // 非 Write/Edit/Bash 或非字符串 → null(监听侧按放行语义跳过)
+      for (const v of ['read', 'grep', '', null, undefined, 123, {}]) {
+        if (bridge.normalizeToolName(v) !== null) throw new Error('非写工具应归一化为 null: ' + JSON.stringify(v));
+      }
+      // ② 参数映射别名提取:Write/Edit 的 file_path/filePath/path;Bash 的 command/cmd/script
+      const m1 = bridge.mapToolInput('Write', { file_path: 'a.md' });
+      if (!m1.ok || m1.target !== 'a.md' || m1.input.file_path !== 'a.md') throw new Error('Write file_path 映射失败: ' + JSON.stringify(m1));
+      const m2 = bridge.mapToolInput('Edit', { filePath: 'b.md' });
+      if (!m2.ok || m2.target !== 'b.md') throw new Error('Edit filePath 别名映射失败: ' + JSON.stringify(m2));
+      const m3 = bridge.mapToolInput('Write', { path: 'c.md' });
+      if (!m3.ok || m3.target !== 'c.md') throw new Error('Write path 别名映射失败: ' + JSON.stringify(m3));
+      const mPrec = bridge.mapToolInput('Write', { file_path: 'a.md', filePath: 'b.md', path: 'c.md' });
+      if (!mPrec.ok || mPrec.target !== 'a.md') throw new Error('file_path 应优先于 filePath/path: ' + JSON.stringify(mPrec));
+      for (const alias of ['command', 'cmd', 'script']) {
+        const mb = bridge.mapToolInput('Bash', { [alias]: 'npm test' });
+        if (!mb.ok || mb.target !== 'npm test' || mb.input.command !== 'npm test') {
+          throw new Error('Bash ' + alias + ' 映射失败: ' + JSON.stringify(mb));
+        }
+      }
+      // ②b 形状不符/缺关键字段 → ok:false 可识别(fail-closed 前置,不静默放行)
+      const bad1 = bridge.mapToolInput('Write', {});
+      if (bad1.ok || !bad1.reason.includes('缺少 file_path')) throw new Error('Write 缺 file_path 应 fail-closed 且原因可识别: ' + JSON.stringify(bad1));
+      const bad2 = bridge.mapToolInput('Bash', {});
+      if (bad2.ok || !bad2.reason.includes('缺少 command')) throw new Error('Bash 缺 command 应 fail-closed 且原因可识别: ' + JSON.stringify(bad2));
+      if (bridge.mapToolInput('Write', { file_path: '   ' }).ok) throw new Error('空白 file_path 应 fail-closed');
+      if (bridge.mapToolInput('Bash', null).ok) throw new Error('null 参数应 fail-closed');
+      if (bridge.mapToolInput('Bash', ['x']).ok) throw new Error('数组参数应 fail-closed');
+      if (bridge.mapToolInput('Read', { file_path: 'a.md' }).ok) throw new Error('未支持工具名应 fail-closed');
+      // ③ isPathInsideProjectRoot:项目内长路径 true / 项目外 false(含 .. 越界)
+      const projRoot = path.join(dir, 'k11-proj');
+      fs.mkdirSync(projRoot, { recursive: true });
+      if (!bridge.isPathInsideProjectRoot(projRoot, path.join(projRoot, 'src', 'a.md'))) throw new Error('项目内长路径应判定为 true');
+      if (!bridge.isPathInsideProjectRoot(projRoot, 'src/a.md')) throw new Error('项目内相对路径应判定为 true');
+      const outside = path.join(dir, 'k11-out');
+      fs.mkdirSync(outside, { recursive: true });
+      if (bridge.isPathInsideProjectRoot(projRoot, path.join(outside, 'x.md'))) throw new Error('项目外绝对路径应判定为 false');
+      if (bridge.isPathInsideProjectRoot(projRoot, path.join(projRoot, '..', 'k11-out', 'x.md'))) throw new Error('.. 越界路径应判定为 false');
+      // ③b 8.3 短路径别名(Windows 8dot3name):os.tmpdir() 本机为 C:\Users\LONGYI~1
+      //    短形态,realpathSync.native 归一化为长形态——词法不同但实路径相同;
+      //    短形态不可解析的平台(禁用 8dot3name/POSIX)显式跳过
+      const realRoot = bridge.realpathExistingPath(projRoot);
+      if (realRoot !== projRoot) {
+        const longFormTarget = path.join(realRoot, 'src', 'a.md');
+        if (!bridge.isPathInsideProjectRoot(projRoot, longFormTarget)) {
+          throw new Error('8.3 短路径别名(长形态目标)应归一化后判定为 true');
+        }
+        const normalized = bridge.realpathExistingPath(path.join(projRoot, 'src'));
+        if (normalized !== path.join(realRoot, 'src')) {
+          throw new Error('realpathExistingPath 应返回规范化长路径: ' + normalized + ' ≠ ' + path.join(realRoot, 'src'));
+        }
+        console.log('  8.3 短路径别名经 realpath 归一化为长形态判定 ✓');
+      } else {
+        console.log('  (8.3 短路径别名不可解析——平台跳过)');
+      }
+      // ④ mapGuardExit:exit 0 → allow / exit 2 → deny(恢复指引 + detail 透传)/ 其它 → fail-closed
+      if (bridge.mapGuardExit(0, '', '').kind !== 'allow') throw new Error('exit 0 应 allow');
+      const d2 = bridge.mapGuardExit(2, 'BLOCKED detail', '');
+      if (d2.kind !== 'deny') throw new Error('exit 2 应 deny');
+      if (!d2.reason.includes('白名单拦截') || !d2.reason.includes('BLOCKED detail')) {
+        throw new Error('exit 2 deny 应透传恢复指引与 detail: ' + JSON.stringify(d2));
+      }
+      for (const code of [1, 3, null, '0']) {
+        const err = bridge.mapGuardExit(code, 'boom', '');
+        if (err.kind !== 'error') throw new Error('其它退出码应 fail-closed error: code=' + String(code));
+        if (!err.message.includes('code=' + String(code))) throw new Error('error 消息应含退出码: ' + JSON.stringify(err));
+      }
+      // ⑤ guard 路径存在断言(M4 漂移防护):HOOK_GUARD_REL('.dsh/skills/flow-comet/scripts/
+      //    comet-hook-guard.mjs')与安装器独立维护同一知识——任一侧漂移(常量改/安装布局改)
+      //    → 此断言失败,拦截层即失效(guard 缺失 → 桥接 WARN + 放行 fail-open)
+      const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
+      const dshHome = path.join(dir, 'k11-dsh-home');
+      const target = path.join(dir, 'k11-target');
+      fs.mkdirSync(target, { recursive: true });
+      const res = spawnSync(process.execPath, [installer, '--target', target, '--platform', 'dsh'], {
+        cwd: repoRoot, encoding: 'utf8', timeout: 120000, env: { ...process.env, DSH_HOME: dshHome },
+      });
+      if (res.status !== 0) throw new Error('dsh 安装失败: ' + (res.stderr || JSON.stringify(res.output)));
+      const guardRel = '.dsh/skills/flow-comet/scripts/comet-hook-guard.mjs';
+      if (!fs.existsSync(path.join(target, guardRel))) {
+        throw new Error('HOOK_GUARD_REL 相对项目根解析的 guard 不存在(安装布局漂移): ' + path.join(target, guardRel));
+      }
+      console.log('  HOOK_GUARD_REL guard 安装后存在(与安装产物绑定)✓');
+      // ⑥ delegationDepth 代理身份分派（B1——dsh 子代理=执行者）：dsh 子代理 spawn
+      //    provider 的 childSessionMeta 把 delegationDepth=parentDepth+1 写入子代理 session
+      //    header —— 协调者=0/缺失，子代理>0。桥接层据此分派：子代理写源码=执行者职责
+      //    （对应 CC worktree 物理隔离），协调者走 guard 白名单拦截。旧桥接对所有工具
+      //    一视同仁送 guard → subagent 模式子代理写源码被 .specs/ 白名单误拦 = B1 根因。
+      //    本断言锚定 agentDepth 纯函数（守 exec 结构读取语义——header.delegationDepth）。
+      if (typeof bridge.agentDepth !== 'function') {
+        throw new Error('bridge.agentDepth 未导出（B1 修复应新增代理身份读取纯函数）');
+      }
+      // ① 子代理（depth=1）→ 识别为执行者（返回 1）
+      if (bridge.agentDepth({ agent: { session: { header: { delegationDepth: 1 } } } }) !== 1) {
+        throw new Error('子代理 delegationDepth=1 应识别为执行者: ' + String(bridge.agentDepth({ agent: { session: { header: { delegationDepth: 1 } } } })));
+      }
+      // ② 深层子代理（depth=2）→ 识别为执行者
+      if (bridge.agentDepth({ agent: { session: { header: { delegationDepth: 2 } } } }) !== 2) {
+        throw new Error('子代理 delegationDepth=2 应识别为执行者');
+      }
+      // ③ 协调者（depth=0）→ 协调者（非执行者）
+      if (bridge.agentDepth({ agent: { session: { header: { delegationDepth: 0 } } } }) !== 0) {
+        throw new Error('协调者 delegationDepth=0 应返回 0');
+      }
+      // ④ 缺省（undefined/缺字段）→ 协调者（旧语义兼容——协调者 depth 缺失按 0）
+      if (bridge.agentDepth({ agent: { session: { header: {} } } }) !== 0) {
+        throw new Error('缺 delegationDepth 应按协调者处理(0)');
+      }
+      if (bridge.agentDepth({}) !== 0) {
+        throw new Error('空 exec 应按协调者处理(0)');
+      }
+      if (bridge.agentDepth(undefined) !== 0) {
+        throw new Error('undefined exec 应按协调者处理(0)');
+      }
+      // ⑤ 非数字/负数/非法值 → 0（fail-closed 协调者语义，防 NaN/字符串穿透）
+      for (const bad of [null, '1', -1, NaN, Infinity, {}, 'abc']) {
+        if (bridge.agentDepth({ agent: { session: { header: { delegationDepth: bad } } } }) !== 0) {
+          throw new Error('非法 delegationDepth 应按协调者处理(0): ' + JSON.stringify(bad));
+        }
+      }
+      console.log('  delegationDepth 代理身份分派(子代理=执行者/协调者原链)✓');
+      // ⑦ apply 集成喂测（5.5 分派分支自动化回归——此前仅级 3 真实会话人工覆盖）：
+      //   mock ctx 捕获 tools/pre-execute 监听器，构造 exec 断言插件级行为、
+      //   子代理(agentDepth>0)写源码放行 / 协调者走 guard 白名单 / 越界·形状 deny 不受身份、
+      //   非 flow-comet 项目窄监听放行。复用 ⑤ 安装产物(target 为真实 dsh flow-comet 项目)：
+      //   写活跃 execute 态 state → 协调者写源码被真实 guard 子进程拦（BLOCK 链真实执行）。
+      const applyEvents = {};
+      bridge.apply({ on: (event, fn) => { applyEvents[event] = fn; } });
+      const preExec = applyEvents['tools/pre-execute'];
+      if (typeof preExec !== 'function') throw new Error('bridge.apply 应注册 tools/pre-execute 监听器');
+      gitInit(target);
+      fs.mkdirSync(path.join(target, 'src'), { recursive: true });
+      writeState(target, {
+        activeChange: 'apply-lock',
+        currentNode: 'execute',
+        completedNodes: [],
+        evidence: {},
+        verifyFailures: 0,
+        status: 'running',
+        executionMode: 'subagent',
+        directOverride: false,
+      });
+      // 项目根常规用长形态（与桥接对 file_path 的规范化一致，对应真实会话规范 cwd）；
+      // 短形态 cwd 的场景由桥接的项目根规范化修复，⑦f 断言锁死（fail-open 已封闭）。
+      const longTarget = bridge.realpathExistingPath(target); // realpathSync.native——展开 8.3 短名
+      // ⑦a 子代理（depth=1）写项目内源码 → next() 被调（跳过 guard 白名单放行）
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'Write', arguments: { file_path: path.join(longTarget, 'src', 'a.mjs') }, agent: { cwd: longTarget, session: { header: { delegationDepth: 1 } } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('子代理写源码应放行(next 被调)——5.5 分派分支缺失');
+        if (res) throw new Error('子代理写源码不应返回 deny: ' + JSON.stringify(res));
+      }
+      // ⑦b 协调者（delegationDepth 缺失=0）同目标写 → 走真实 guard 白名单 → BLOCK deny
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'Write', arguments: { file_path: path.join(longTarget, 'src', 'a.mjs') }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('协调者写源码不应 next——协调者禁令物理拦截保留');
+        if (!res || res.kind !== 'deny') throw new Error('协调者写源码应走 guard 白名单拦截(deny): ' + JSON.stringify(res));
+        if (!res.reason.includes('白名单拦截')) throw new Error('协调者 deny 应含白名单拦截语义: ' + JSON.stringify(res));
+      }
+      // ⑦c 非 flow-comet 项目(无 .dsh/skills/flow-comet) → 窄监听放行(不分身份)
+      {
+        const plain = path.join(dir, 'k11-plain');
+        fs.mkdirSync(plain, { recursive: true });
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'Write', arguments: { file_path: path.join(plain, 'x.md') }, agent: { cwd: plain, session: { header: { delegationDepth: 1 } } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('非 flow-comet 项目应窄监听放行(next)');
+      }
+      // ⑦d 越界写不受身份影响：子代理(depth=1)写项目根外 → 包含性 fail-closed deny
+      {
+        const outside = path.join(dir, 'k11-out2');
+        fs.mkdirSync(outside, { recursive: true });
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'Write', arguments: { file_path: path.join(outside, 'evil.md') }, agent: { cwd: longTarget, session: { header: { delegationDepth: 1 } } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('子代理越界写不应 next——包含性不因身份放宽');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('不在项目根')) {
+          throw new Error('子代理越界写应 fail-closed deny(含越界语义): ' + JSON.stringify(res));
+        }
+      }
+      // ⑦e 形状不符不受身份影响：子代理(depth=1)参数形状不符 → fail-closed deny
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'Write', arguments: {}, agent: { cwd: longTarget, session: { header: { delegationDepth: 1 } } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('子代理形状不符不应 next——形状校验不因身份放宽');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('参数形状不符')) {
+          throw new Error('子代理形状不符应 fail-closed deny(含形状语义): ' + JSON.stringify(res));
+        }
+      }
+      // ⑦f 短形态项目根不得 fail-open：会话 cwd 为 8.3 短路径时，桥接须把项目根
+      //    归一化为长形态再送 guard——否则 guard 词法 path.relative 得 target=null
+      //    跳过白名单（协调者写源码被放行）。本断言在短形态 TMP 机器上即回归锁死。
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'Write', arguments: { file_path: path.join(target, 'src', 'b.mjs') }, agent: { cwd: target, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('短形态 cwd 协调者写源码不应 next——8.3 短路径不得绕过白名单(fail-open 已封闭)');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('白名单拦截')) {
+          throw new Error('短形态 cwd 协调者写源码应走 guard 白名单拦截(deny): ' + JSON.stringify(res));
+        }
+      }
+      console.log('  bridge.apply 分派集成(子代理放行/协调者拦/越界·形状 deny 不受身份)✓');
     },
   },
 
@@ -2065,7 +2521,7 @@ const TEST_ITEMS = [
 for (const item of TEST_ITEMS) {
   const dir = makeTmp();
   try {
-    item.run(dir);
+    await item.run(dir);
     passed += 1;
     console.log('PASS: ' + item.name);
   } catch (e) {

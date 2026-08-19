@@ -10,6 +10,7 @@
 
 - [Claude Code](https://claude.ai/code), installed and authenticated (default platform)
 - [Codex](https://github.com/openai/codex) CLI, installed (skills/rules/hook support as described under [Platforms](#platforms))
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) CLI `0.1.0-rc.6` or newer for the dsh platform (optional; see [Option C](#option-c--deepseek-harness-dsh-platform))
 - [flow-kit](https://github.com/rihebty/flow-kit) installed in the target project:
 
 ```bash
@@ -27,16 +28,19 @@ Automated installation from this repository (no Comet CLI required):
 cd <flow-comet repo>
 node scripts/prepare-env.mjs --target <absolute path to target project>          # Claude Code (default)
 node scripts/prepare-env.mjs --target <absolute path to target project> --platform codex   # Codex
+node scripts/prepare-env.mjs --target <absolute path to target project> --platform dsh     # DeepSeek Harness
+node scripts/prepare-env.mjs --target <absolute path to target project> --platform claude-code,dsh   # multi-platform, comma-separated
+node scripts/prepare-env.mjs --target <absolute path to target project> --platform all     # all platforms
 ```
 
-On an interactive terminal, the first run prompts for the platform (press Enter for the default, Claude Code; if the target project already has platform traces, that platform is the recommended default); for Codex, add `--platform codex` (see the selection chain under [Platforms](#platforms)).
+On an interactive terminal, the first run prompts for the platform with a multi-select (arrow keys + space to toggle, Enter to confirm; pre-checked from existing traces — see the selection chain under [Platforms](#platforms)).
 
 `prepare-env` does:
 
 1. **Generates/overwrites `rules/` and `skills/`** — all flow-comet* skills, from the authoritative source `.comet/bundle-drafts/flow-comet/`
 2. **Injects the hook into `settings.local.json`** — read-merge-write: preserves everything already in the target project (`permissions`, custom hooks, other matcher groups), only injects/updates the comet-hook-guard entry under `hooks.PreToolUse` (existing comet hooks are replaced, not duplicated — idempotent). First-time creation writes only the hook entry; existing files are merged.
 
-**Non-destructive by default**: nothing under the target project's install root (`.claude/` for Claude Code, `.agents/` for Codex) is deleted (`commands/`, custom skills, custom config all preserved). Explicit `--purge --yes` deletes the generated files and rebuilds — on Claude Code the entire `.claude/` is removed; on Codex only the flow-comet skills + managed hook entries + AGENTS.md managed block are removed (`.agents/` is shared with other tools; user entries are preserved). Prints the deletion list + warning; `--yes` is a second confirmation.
+**Non-destructive by default**: nothing under the target project's install root (`.claude/` for Claude Code, `.agents/` for Codex) is deleted (`commands/`, custom skills, custom config all preserved). Explicit `--purge --yes` resets the install — deletes the generated files and regenerates them to a full install state (purge is delete-and-rebuild, **not uninstall**): on Claude Code the entire `.claude/` is removed; on Codex only the flow-comet skills + managed hook entries + AGENTS.md managed block are removed (`.agents/` is shared with other tools; user entries are preserved). Prints the deletion list + warning; `--yes` is a second confirmation.
 
 ```bash
 # View the overwrite list, then confirm (non-destructive, safe)
@@ -53,17 +57,18 @@ node scripts/prepare-env.mjs --target <absolute path to target project> --purge 
 
 The installer targets **Claude Code** by default (unchanged behavior). The target platform is chosen in this order:
 
-1. **Explicit flag**: `--platform <claude-code|codex>` always wins (headless/CI compatible); the explicit flag accepts only `claude-code` or `codex` — `both` is an interactive-only option.
-2. **Interactive prompt**: when run on an interactive terminal (TTY) without `--platform`, the installer prompts — `1) Claude Code (default) 2) Codex 3) both (install to both platforms)`; press Enter to accept the default. If the target project already has `.codex/` or `.claude/` traces, the corresponding platform is the recommended default; with both traces, Claude Code is the recommended default.
-3. **Auto-detection**: without a TTY (CI, scripts, pipelines), traces in the target project are detected — `.codex/` only → Codex; `.claude/` present → Claude Code; **both traces → Claude Code (primary) with a hint** (for Codex or both, run in an interactive terminal — the prompt includes `both` — or pass `--platform codex` explicitly).
-4. **Fallback**: if neither exists, Claude Code is used.
+1. **Explicit flag**: `--platform <claude-code|codex|dsh|claude-code,dsh|all>` always wins (headless/CI compatible). It accepts a single platform, a comma-separated list (installed in argument order), or `all` (all platforms in table order). Unknown platforms error out (including any unknown item inside a comma list — no partial install). The old `both` option is removed — `--platform both` errors with a hint to use a comma list or `all`.
+2. **Interactive prompt**: when run on an interactive terminal (TTY) without `--platform`, the installer shows a multi-select (arrow keys + space to toggle, Enter to confirm; optional `@clack/prompts` dependency with a readline number/comma fallback) — Claude Code / Codex / dsh, pre-checked from existing `.claude/` / `.codex/` / `.dsh/` traces; press Enter to accept the pre-checked selection (fallback default Claude Code).
+3. **Auto-detection**: without a TTY (CI, scripts, pipelines), traces in the target project are detected — `.codex/` only → Codex; `.dsh/` only → dsh; `.claude/` present → Claude Code; **multiple traces → Claude Code (primary) with a hint** (for another set, run in an interactive terminal for the multi-select, or pass `--platform` explicitly).
+4. **Fallback**: if no trace exists, Claude Code is used.
 
 | Platform | Skills | Orchestration rule | Write-guard hook |
 |----------|--------|--------------------|-------------------|
 | Claude Code (default) | `.claude/skills/` (unchanged) | `.claude/rules/` (auto-loaded) | `settings.local.json` → `hooks.PreToolUse` (text output, exit 2 blocks) |
 | Codex | `.agents/skills/` (auto-discovered by Codex) | `AGENTS.md` managed block (inlined at install; Codex's `rules/` directory serves command-approval policies, not instruction files) | `.codex/hooks.json` (matcher `*` — Codex PreToolUse intercepts Bash tool calls; deny via `{"decision":"block"}`) |
+| dsh | `.dsh/skills/flow-comet` (auto-discovered by dsh at rank 100, no restart) | `AGENTS.md` managed block (non-destructive merge) | global bridge loader — `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` + `$DSH_HOME/cordis.patch.yml` managed block (`tools/pre-execute` interception, all profiles) |
 
-On non-default platforms, command paths inside SKILL/GUIDANCE files are rewritten at install time to the platform's actual skill location (the authoritative source stays in `.claude` form). Codex support has been exercised end-to-end (8-node flow on Codex CLI 0.146.0); the write-guard hook intercepts Bash write commands (PowerShell cmdlets, .NET File API, redirection) — command-level interception covers the mainstream patterns, alternate spellings may bypass it (Codex platform limit).
+On non-default platforms, command paths inside SKILL/GUIDANCE files are rewritten at install time to the platform's actual skill location (the authoritative source stays in `.claude` form). Codex support has been exercised end-to-end (8-node flow on Codex CLI 0.146.0); the write-guard hook intercepts Bash write commands (PowerShell cmdlets, .NET File API, redirection) — command-level interception covers the mainstream patterns, alternate spellings may bypass it (Codex platform limit). The dsh platform installs a thin bridge loader globally in `$DSH_HOME` (see [Option C](#option-c--deepseek-harness-dsh-platform)) — the engine is untouched; the guard decision core is reused unchanged via subprocess calls.
 
 ### Verifying installation (no side effects, no change created)
 
@@ -74,7 +79,7 @@ On non-default platforms, command paths inside SKILL/GUIDANCE files are rewritte
 4. **Smoke test** (run inside the target project): `cd <target> && node .claude/skills/flow-comet/scripts/workflow-state.mjs status` — expected output is a JSON state object (`{"status":"no-change",...}` for a fresh project, `{"status":"running","change":...}` when a workflow is active)
 
 > Commands are POSIX-style (Git Bash / WSL / macOS terminal); Windows users should run them in Git Bash.
-> **Note**: `guard-self-test.mjs` (137 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
+> **Note**: `guard-self-test.mjs` (144 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
 
 ### Using flow-comet on Codex
 
@@ -136,9 +141,74 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
 
 **4. Runtime state**: `.comet/flow-comet-state.json` is created by `init` (or the first `/flow-comet` call).
 
+## Option C · DeepSeek Harness (dsh) platform
+
+DeepSeek Harness (dsh) is supported through the **prepare-env installer** — the same entry point as Claude Code / Codex, with a dedicated dsh platform descriptor. There is no plugin bundle and no npm package (the npm distribution is a later / 1.5.0 item):
+
+```bash
+cd <flow-comet repo>
+node scripts/prepare-env.mjs --target <absolute path to target project> --platform dsh
+```
+
+On an interactive terminal, dsh is one of the multi-select options (see [Platforms](#platforms)).
+
+**Minimum dsh version**: `0.1.0-rc.6` (dev preview; API signatures and skill-discovery rank may change — below the anchor, interception may silently fail).
+
+### What gets installed
+
+1. **Project-level skill tree** — `<project>/.dsh/skills/flow-comet` (with path replacement `.claude/skills/flow-comet/scripts/` → `.dsh/skills/flow-comet/scripts/` in `.md` files, and an `INSTALLED_VERSION` version marker). dsh auto-discovers skills under `<project>/.dsh/skills/` at **rank 100** via file watching — no restart, and projects **without that directory cannot see the skill**, so activation is naturally project-level (no runtime trace detection, no chicken-and-egg).
+2. **AGENTS.md managed block** — the orchestration rule is injected into `<project>/AGENTS.md` inside the managed block (`<!-- Managed by flow-comet prepare-env -->` … `<!-- /Managed by flow-comet prepare-env -->`), merged non-destructively — user content outside the block is preserved. The marker is shared with the Codex platform, so either platform's removal flow can clean the block — when uninstalling, remove the shared block only if no other platform still uses it.
+3. **Global bridge loader** — a thin loader is mounted at `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` plus a managed block in `$DSH_HOME/cordis.patch.yml` (read-merge-write — existing blocks such as dsh-skin are preserved; the home patch applies to all profiles). The loader listens on dsh's native `tools/pre-execute` waterfall event, maps tool arguments to the guard contract (`Write`/`Edit` → `file_path`, `Bash` → `command`), calls the project-local `comet-hook-guard.mjs` in a child process, and returns `{kind:'deny', reason}` with a BLOCK message and recovery guidance for out-of-scope writes. It only engages when the session project root contains `.dsh/skills/flow-comet` (narrow listening — non-flow-comet projects are untouched). Shape mismatches and abnormal exits fail closed.
+
+> **Note — the installer writes to your home directory**: mounting the bridge loader writes to `$DSH_HOME` (default `~/.dsh`; resolution: `$DSH_HOME` env var > `~/.dsh`). This is the intended, **non-destructive** design: `cordis.patch.yml` is read-merged (existing blocks such as dsh-skin preserved; an unparseable file fails safely instead of being overwritten) and the loader file is added/removed by name. Restore via purge (below), which removes the managed block and the loader file while keeping everything else.
+
+### Using flow-comet on dsh
+
+- **First use**: no hook-trust step — the bridge loader is a global plugin mounted by the installer; start a dsh session in the target project and invoke the skill by name (rank 100, auto-discovered). The bridge only intercepts when the session's project root contains `.dsh/skills/flow-comet` — projects without it are untouched.
+- **Version anchor**: dsh `0.1.0-rc.6` is the tested minimum; below it, skill discovery or interception may silently fail — upgrade dsh.
+- **Subagent execution**: delegated subagents (identified by the session's subagent delegation depth) write source code as the executor — matching the worktree-isolation semantics of the other platforms — while the coordinating agent remains subject to the phase write whitelist. Out-of-project writes and malformed tool arguments stay denied for both. The subagent tool suite ships with dsh and is available in every session form.
+- **Windows**: 8.3 short paths are normalized before containment checks (a short path inside the project is not misjudged as out-of-scope); the project root is canonicalized to its long form before the guard decision, so a short-form root and the normalized write target can never diverge into a fail-open.
+
+### Verifying a dsh installation
+
+1. **Structure**: `flow-comet` skill directory under `<target>/.dsh/skills/` + `AGENTS.md` managed block (`grep "Managed by flow-comet" <target>/AGENTS.md`) + `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` + the managed block in `$DSH_HOME/cordis.patch.yml` + `<target>/.dsh/skills/flow-comet/INSTALLED_VERSION`
+2. **Command paths rewritten**: `grep -c "\.claude/skills/flow-comet/scripts/" <target>/.dsh/skills/flow-comet/SKILL.md` → 0; `grep -c "\.dsh/skills/flow-comet/scripts/" <target>/.dsh/skills/flow-comet/SKILL.md` → non-zero
+3. **Smoke test** (run inside the target project): `cd <target> && node .dsh/skills/flow-comet/scripts/workflow-state.mjs status` → JSON state object
+
+### Reset and regenerate (purge — not uninstall)
+
+```bash
+node scripts/prepare-env.mjs --target <absolute path to target project> --purge --platform dsh --yes
+```
+
+`--purge` removes the generated files and then **regenerates them** — after a purge, flow-comet is **still fully installed** (skills regenerated, AGENTS.md managed block re-injected, the global bridge loader re-mounted). Purge is a delete-and-rebuild reset for clean re-installation, **not an uninstall**.
+
+During the reset, the following generated artifacts are removed (then regenerated):
+
+- `<project>/.dsh/skills/` entries for `flow-comet*` (non-flow-comet entries are kept; empty `.dsh` directories are removed)
+- the AGENTS.md managed block (file and user content preserved; only when no other platform still uses the shared marker)
+- the `$DSH_HOME/cordis.patch.yml` managed block (other blocks such as dsh-skin kept; the file itself is deleted when it becomes empty) and the `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` loader file — only when no other flow-comet project uses dsh (loader and home patch are global)
+
+**To fully uninstall dsh platform support, remove the artifacts manually** (purge is not an uninstall path):
+
+```bash
+# 1. Remove the project-level skill tree
+rm -rf <target>/.dsh/skills/flow-comet*
+
+# 2. Remove the AGENTS.md managed block
+#    (delete only the `<!-- Managed by flow-comet prepare-env -->` … `<!-- /Managed by flow-comet prepare-env -->` block,
+#     keeping everything else in the file)
+
+# 3. Remove the global bridge loader and the home-patch managed block
+#    (delete the `# --- flow-comet managed ---` … `# --- end flow-comet managed ---` block in $DSH_HOME/cordis.patch.yml
+#     and the file $DSH_HOME/plugins/dsh-flow-comet-bridge.mjs)
+```
+
+**Multi-project semantics**: each project installs its own skill tree (a project that has not installed the skill cannot see it); the bridge loader is a single global copy serving all flow-comet projects (per-session project detection — equivalent to the Claude Code project-level hook).
+
 ## Uninstalling
 
-Remove flow-comet from a target project:
+Remove flow-comet from a target project (Claude Code / Codex below; for DeepSeek Harness (dsh), see the manual uninstall steps in [Option C](#option-c--deepseek-harness-dsh-platform)):
 
 ```bash
 # 1. Remove the skill directories and the orchestration rule
