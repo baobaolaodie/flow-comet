@@ -51,7 +51,15 @@ dev ──PR(merge)──▶ main   (release branch — one merge commit per rel
 | Block deletions | ✅ | ✅ |
 | Dismiss stale reviews | ✅ | ✅ |
 
-**After a release**: no explicit sync step — the release PR merges dev's change-level commits into main, and dev's tip becomes an ancestor of main's release commit (dev stops leading and the trees are identical).
+**After a release**: fast-forward `dev` to `main` — the release PR merge makes dev's tip an ancestor of main, so a zero-commit fast-forward syncs dev to main exactly (run it right after the release merge, before the next development PR lands on dev):
+
+```bash
+git checkout dev
+git merge main        # fast-forward — dev becomes identical to main
+git push origin dev
+```
+
+Dev's tip being an ancestor of main is what makes this a fast-forward: no sync merge commit is created.
 
 **After a hotfix** (squashed directly into `main`), sync dev so it does not fall behind main:
 
@@ -85,13 +93,13 @@ git branch -d hotfix/<description>
 
 - **Runtime**: Node.js ≥ 18 (ESM)
 - **Repo**: clone, then verify the regression baseline runs:
-  `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 137 SCENARIOS PASSED` (two-tier baseline; also run `system-test.mjs` → `ALL SYSTEM TESTS PASSED`, 55 items)
-- **Authoring environment**: Claude Code (skills/hooks run in Claude Code sessions); the hook is installed via `prepare-env` into your project's `.claude/`
+  `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 144 SCENARIOS PASSED` (two-tier baseline; also run `system-test.mjs` → `ALL SYSTEM TESTS PASSED`, 60 items)
+- **Authoring environment**: Claude Code (skills/hooks run in Claude Code sessions); the hook is installed via `prepare-env` into your project's `.claude/` (the same installer serves Codex via `--platform codex` and DeepSeek Harness (dsh) via `--platform dsh` — project-level skill tree, AGENTS.md managed rules, and a global bridge loader)
 - **For mechanism work**: read [docs/MECHANISM.md](docs/MECHANISM.md) for the mechanism semantics (behavior layer) before touching scripts
 
 ### CI enforcement and local hooks
 
-CI runs automatically on every PR and push — it enforces the repository conventions server-side (regression suite with scenario-count and public-artifact code self-checks, script syntax, BOM guard, installer reproducibility, workflow yaml validity, PR template completeness, commit-message conventions, version consistency, CHANGELOG PR links, dead links).
+CI runs automatically on every PR and push — it enforces the repository conventions server-side (regression suite with scenario-count and public-artifact code self-checks, script syntax, BOM guard, installer reproducibility across all three platforms — Claude Code / Codex / DeepSeek Harness (dsh) — workflow yaml validity, PR template completeness, commit-message conventions, version consistency, CHANGELOG PR links, dead links).
 
 **Local hooks** (install once after cloning):
 
@@ -104,7 +112,7 @@ The hooks reject commits and pushes whose messages carry process codes — proje
 Before pushing, run the regression baseline:
 
 ```bash
-node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 137 SCENARIOS PASSED
+node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 144 SCENARIOS PASSED
 ```
 
 CI handles the rest.
@@ -122,7 +130,7 @@ After the issue is confirmed: bug fixes use a `fix/` branch, features use a `fea
 
 - **Authoritative source**: edit skills/scripts under `.comet/bundle-drafts/flow-comet/skills/` (the single source; `.claude/` copies are install artifacts — update them via `prepare-env`, never by hand)
 - **TDD**: every mechanism fix starts with a RED scenario in `guard-self-test.mjs` (watch it fail for the right reason), then GREEN, then full regression
-- **Regression baseline**: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 137 SCENARIOS PASSED` (two-tier baseline; also run `system-test.mjs` → `ALL SYSTEM TESTS PASSED`, 55 items) (mandatory after every change)
+- **Regression baseline**: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 144 SCENARIOS PASSED` (two-tier baseline; also run `system-test.mjs` → `ALL SYSTEM TESTS PASSED`, 60 items) (mandatory after every change)
 - **Documentation sync**: behavior-layer docs live in `docs/` (bilingual EN/zh — keep both in sync when a doc changes); implementation details stay out of public docs
 - **Bilingual discipline**: English docs contain no Chinese (except the language switcher, flow-kit artifact section names, and runtime message quotes); Chinese docs contain no long English sentences (except commands, URLs, and proper terms)
 - **Backward compatibility**: old changes/states keep working — progressive WARN over BLOCK
@@ -215,7 +223,7 @@ Force push is allowed on your own feature branch (no protection); a new push inv
 ## Release approval sheet
 
 - Changes: PR list + one-line summary each
-- Verification: regression (137 scenarios) / installed-copy checks
+- Verification: regression (144 scenarios) / installed-copy checks
 - Version: X.Y.Z (doc-only batches may skip the bump)
 ```
 
