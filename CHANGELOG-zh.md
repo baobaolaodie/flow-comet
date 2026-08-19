@@ -10,6 +10,8 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号记录于 git tag、本文档、README 徽章、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 与权威源 `skills/flow-comet/INSTALLED_VERSION`；`bundle.yaml` 的 version 保持 1.0.0（与发布流程解耦）。
 
+## [Unreleased]
+
 ## [1.4.2] - 2026-08-18
 
 新增 DeepSeek Harness（dsh）平台支持（安装器 + 桥接写拦截），回归套件扩展至 144 场景 / 系统测试 60 项，并修复 dsh 写入防护边界。([#60](https://github.com/baobaolaodie/flow-comet/pull/60))
