@@ -200,7 +200,7 @@ export function mapGuardExit(code, stderr, stdout) {
 // ---------------------------------------------------------------------------
 // 判定核心子进程调用（stdin JSON {tool_name, tool_input} -> exit code）
 // ---------------------------------------------------------------------------
-function runGuard(projectRoot, canonicalName, toolInput) {
+function runGuard(projectRoot, canonicalName, toolInput, signal) {
   return new Promise((resolve) => {
     const guardPath = resolveGuardPath(projectRoot);
     const child = spawn(
@@ -212,21 +212,38 @@ function runGuard(projectRoot, canonicalName, toolInput) {
         cwd: projectRoot,
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
+        signal,
       },
     );
     let stdout = '';
     let stderr = '';
+    // 超时与中止 fail-closed：guard 阻塞 / 调用方取消 → error 决策（不静默、不永久挂起；EPIPE 兜底防宿主崩溃）
+    const GUARD_TIMEOUT_MS = 15000;
+    let settled = false;
+    const finish = (decision) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(decision);
+    };
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      finish({ kind: 'error', message: '判定脚本超时（' + GUARD_TIMEOUT_MS + 'ms）' });
+    }, GUARD_TIMEOUT_MS);
+    timer.unref?.();
     child.stdout.on('data', (chunk) => {
       stdout += chunk.toString();
     });
     child.stderr.on('data', (chunk) => {
       stderr += chunk.toString();
     });
+    // 子进程先退出时 stdin 异步抛 EPIPE——兜底监听，避免未处理流错误
+    child.stdin.on('error', () => { /* 写入失败可忽略——close 兜底决策 */ });
     child.on('error', (error) => {
-      resolve({ kind: 'error', message: error.message });
+      finish({ kind: 'error', message: error.message });
     });
     child.on('close', (code) => {
-      resolve(mapGuardExit(code, stderr, stdout));
+      finish(mapGuardExit(code, stderr, stdout));
     });
     child.stdin.end(JSON.stringify({ tool_name: canonicalName, tool_input: toolInput }));
   });
@@ -323,7 +340,7 @@ export function apply(ctx) {
         return next();
       }
 
-      const decision = await runGuard(projectRoot, canonicalName, mapped.input);
+      const decision = await runGuard(projectRoot, canonicalName, mapped.input, exec?.signal);
       if (decision.kind === 'allow') {
         return next();
       }

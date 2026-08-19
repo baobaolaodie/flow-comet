@@ -61,7 +61,7 @@ Hook blocking semantics (see Limitations): PreToolUse hook exit 2 blocks in the 
 `scripts/guard-self-test.mjs`: **144 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (60 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
 
 ```bash
-node .claude/skills/flow-comet/scripts/guard-self-test.mjs
+node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
 # → ALL 144 SCENARIOS PASSED
 ```
 

@@ -47,7 +47,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -448,7 +448,8 @@ async function resolvePlatform(target, platformArg) {
     return selected.map((id) => PLATFORMS[id]);
   }
   if (multiTrace) {
-    console.log('[prepare-env] 检测到目标项目同时有 .claude/、.codex/ 或 .dsh/ 中的多个痕迹——默认安装 Claude Code。');
+    const fallbackId = probe ?? 'claude-code';
+    console.log(`[prepare-env] 检测到目标项目同时有 .claude/、.codex/ 或 .dsh/ 中的多个痕迹——默认安装 ${PLATFORMS[fallbackId].label}。`);
     console.log('          如需其它平台或组合:交互终端运行,或显式 --platform dsh / claude-code,dsh / all。');
   }
   return [PLATFORMS[probe ?? 'claude-code']];
@@ -787,7 +788,7 @@ function isSimpleYamlText(text) {
     if (/^\s*#/.test(t)) return true; // 注释
     if (/^\s*---\s*$/.test(t)) return true; // 文档分隔符
     if (/^\s*-\s+\S/.test(t)) return true; // 顶层列表条目
-    if (/^\s{2,}\S/.test(t)) return true; // 条目下缩进内容（键值/嵌套列表）
+    if (/^\s+\S/.test(t)) return true; // 条目下缩进内容（键值/嵌套列表；YAML 允许 1 空格缩进）
     return false;
   });
 }
@@ -820,7 +821,7 @@ function injectDshCordisPatch(dshHome, loaderPath) {
     );
   }
   const stripped = stripManagedBlock(existing, MANAGED_CORDIS_START, MANAGED_CORDIS_END);
-  const fileUrl = `file:///${loaderPath.replace(/\\/g, '/')}`;
+  const fileUrl = pathToFileURL(loaderPath).href;
   const managedBlock =
     MANAGED_CORDIS_START + '\n' +
     '- insert:\n' +

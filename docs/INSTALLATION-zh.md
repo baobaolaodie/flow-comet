@@ -156,7 +156,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --platform dsh
 ### 安装内容
 
 1. **项目级技能树**——`<项目>/.dsh/skills/flow-comet`（含路径替换 `.claude/skills/flow-comet/scripts/` → `.dsh/skills/flow-comet/scripts/`（仅 `.md` 文件）与 `INSTALLED_VERSION` 版本标识）。dsh 经文件监听在 `<项目>/.dsh/skills/` 下以 **rank 100** 自动发现——免重启，且**未安装该目录的项目不可见该技能**，因此激活天然是项目级的（无运行时痕迹判定、无 chicken-and-egg）。
-2. **AGENTS.md 托管区**——把编排规则注入 `<项目>/AGENTS.md` 的托管区（`<!-- Managed by flow-comet prepare-env -->` … `<!-- /Managed by flow-comet prepare-env -->`），非破坏合并——托管区外的用户内容保留。标记与 Codex 平台共用，任一平台的移除流程均可清理该区。
+2. **AGENTS.md 托管区**——把编排规则注入 `<项目>/AGENTS.md` 的托管区（`<!-- Managed by flow-comet prepare-env -->` … `<!-- /Managed by flow-comet prepare-env -->`），非破坏合并——托管区外的用户内容保留。标记与 Codex 平台共用，任一平台的移除流程均可清理该区——卸载时仅在无其它平台仍使用该共用标记时才移除。
 3. **全局桥接 loader**——在 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 挂载薄 loader，并在 `$DSH_HOME/cordis.patch.yml` 注入托管块（读-合并-写——保留 dsh-skin 等既有块；home patch 对所有 profile 生效）。loader 监听 dsh 原生 `tools/pre-execute` waterfall 事件，把工具参数映射到 guard 契约（`Write`/`Edit` → `file_path`，`Bash` → `command`），子进程调用项目本地 `comet-hook-guard.mjs`，越权写入返回 `{kind:'deny', reason}`（BLOCK 消息 + 恢复指引）。仅当会话项目根含 `.dsh/skills/flow-comet` 时才处理（窄监听——非 flow-comet 项目零拦截）。参数形状不符与异常退出 fail-closed。
 
 > **注意——安装器会写你的 home 目录**：挂载桥接 loader 需写入 `$DSH_HOME`（默认 `~/.dsh`；解析：`$DSH_HOME` 环境变量 > `~/.dsh`）。这是设计内且**非破坏**的：`cordis.patch.yml` 读-合并-写（dsh-skin 等既有块保留；文件无法解析时安全报错退出而非覆盖），loader 文件按名添加/移除。恢复方式见下方 purge——只移除托管块与 loader 文件，其余全部保留。
@@ -185,8 +185,8 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --platf
 重置过程中会移除以下生成物（随后重新生成）：
 
 - `<项目>/.dsh/skills/` 下 `flow-comet*` 条目（非 flow-comet 条目保留；空 `.dsh` 目录移除）
-- AGENTS.md 托管区（文件与用户内容保留）
-- `$DSH_HOME/cordis.patch.yml` 托管块（dsh-skin 等既有块保留；移除后文件为空则删除文件本身）与 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` loader 文件
+- AGENTS.md 托管区（文件与用户内容保留；仅在无其它平台仍使用该共用标记时移除）
+- `$DSH_HOME/cordis.patch.yml` 托管块（dsh-skin 等既有块保留；移除后文件为空则删除文件本身）与 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` loader 文件（仅在无其它 flow-comet 项目使用 dsh 时移除——loader 与 home patch 为全局产物）
 
 **真实卸载需手动**（purge 不是卸载途径）：
 

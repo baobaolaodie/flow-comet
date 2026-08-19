@@ -157,7 +157,7 @@ On an interactive terminal, dsh is one of the multi-select options (see [Platfor
 ### What gets installed
 
 1. **Project-level skill tree** — `<project>/.dsh/skills/flow-comet` (with path replacement `.claude/skills/flow-comet/scripts/` → `.dsh/skills/flow-comet/scripts/` in `.md` files, and an `INSTALLED_VERSION` version marker). dsh auto-discovers skills under `<project>/.dsh/skills/` at **rank 100** via file watching — no restart, and projects **without that directory cannot see the skill**, so activation is naturally project-level (no runtime trace detection, no chicken-and-egg).
-2. **AGENTS.md managed block** — the orchestration rule is injected into `<project>/AGENTS.md` inside the managed block (`<!-- Managed by flow-comet prepare-env -->` … `<!-- /Managed by flow-comet prepare-env -->`), merged non-destructively — user content outside the block is preserved. The marker is shared with the Codex platform, so either platform's removal flow can clean the block.
+2. **AGENTS.md managed block** — the orchestration rule is injected into `<project>/AGENTS.md` inside the managed block (`<!-- Managed by flow-comet prepare-env -->` … `<!-- /Managed by flow-comet prepare-env -->`), merged non-destructively — user content outside the block is preserved. The marker is shared with the Codex platform, so either platform's removal flow can clean the block — when uninstalling, remove the shared block only if no other platform still uses it.
 3. **Global bridge loader** — a thin loader is mounted at `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` plus a managed block in `$DSH_HOME/cordis.patch.yml` (read-merge-write — existing blocks such as dsh-skin are preserved; the home patch applies to all profiles). The loader listens on dsh's native `tools/pre-execute` waterfall event, maps tool arguments to the guard contract (`Write`/`Edit` → `file_path`, `Bash` → `command`), calls the project-local `comet-hook-guard.mjs` in a child process, and returns `{kind:'deny', reason}` with a BLOCK message and recovery guidance for out-of-scope writes. It only engages when the session project root contains `.dsh/skills/flow-comet` (narrow listening — non-flow-comet projects are untouched). Shape mismatches and abnormal exits fail closed.
 
 > **Note — the installer writes to your home directory**: mounting the bridge loader writes to `$DSH_HOME` (default `~/.dsh`; resolution: `$DSH_HOME` env var > `~/.dsh`). This is the intended, **non-destructive** design: `cordis.patch.yml` is read-merged (existing blocks such as dsh-skin preserved; an unparseable file fails safely instead of being overwritten) and the loader file is added/removed by name. Restore via purge (below), which removes the managed block and the loader file while keeping everything else.
@@ -186,8 +186,8 @@ node scripts/prepare-env.mjs --target <absolute path to target project> --purge 
 During the reset, the following generated artifacts are removed (then regenerated):
 
 - `<project>/.dsh/skills/` entries for `flow-comet*` (non-flow-comet entries are kept; empty `.dsh` directories are removed)
-- the AGENTS.md managed block (file and user content preserved)
-- the `$DSH_HOME/cordis.patch.yml` managed block (other blocks such as dsh-skin kept; the file itself is deleted when it becomes empty) and the `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` loader file
+- the AGENTS.md managed block (file and user content preserved; only when no other platform still uses the shared marker)
+- the `$DSH_HOME/cordis.patch.yml` managed block (other blocks such as dsh-skin kept; the file itself is deleted when it becomes empty) and the `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` loader file — only when no other flow-comet project uses dsh (loader and home patch are global)
 
 **To fully uninstall dsh platform support, remove the artifacts manually** (purge is not an uninstall path):
 

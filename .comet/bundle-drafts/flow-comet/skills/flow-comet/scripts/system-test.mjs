@@ -1852,7 +1852,7 @@ const TEST_ITEMS = [
       const t8 = path.join(dir, 'k4-multiselect');
       fs.mkdirSync(t8, { recursive: true });
       const dshHome8 = path.join(dir, 'k4-dsh-home');
-      const installerUrl = 'file:///' + installer.split(path.sep).join('/');
+      const installerUrl = pathToFileURL(installer).href;
       const selectScript =
         `Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });` +
         `process.argv = ['node', 'prepare-env', '--target', ${JSON.stringify(t8)}];` +
@@ -2137,7 +2137,7 @@ const TEST_ITEMS = [
       // 不存在的 id 输出 entry not found 并跳过，loader 从不加载；insert 形态才追加新插件行）
       if (!patch.includes('- insert:')) throw new Error('cordis.patch.yml 托管块应为 insert 形态(- insert: 顶层条目)');
       if (!patch.includes('dsh-flow-comet-bridge')) throw new Error('cordis.patch.yml 缺 loader 条目');
-      const loaderUrl = 'file:///' + path.join(dshHome, 'plugins', 'dsh-flow-comet-bridge.mjs').replace(/\\/g, '/');
+      const loaderUrl = pathToFileURL(path.join(dshHome, 'plugins', 'dsh-flow-comet-bridge.mjs')).href;
       if (!patch.includes(loaderUrl)) throw new Error('cordis.patch.yml 托管块应 file:// 引用 loader 路径: ' + loaderUrl);
       // ③ 读-合并-写非破坏:预置 dsh-skin 既有块 → 重装后保留(托管块幂等唯一)
       fs.writeFileSync(patchPath, '# --- dsh-skin managed ---\n- id: dsh-skin\n  name: file:///skin\n# --- end dsh-skin managed ---\n' + patch, 'utf8');

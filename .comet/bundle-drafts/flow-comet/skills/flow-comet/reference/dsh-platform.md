@@ -74,7 +74,7 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 - 多平台：`--platform claude-code,dsh`（逗号分隔，按参数顺序安装）/ `--platform all`（全部平台，按 PLATFORMS 表顺序：claude-code → codex → dsh）；旧 `both` 已移除——`--platform both` 报错并提示用逗号列表或 all；未知平台报错（含逗号列表中的未知项——不得部分安装）。
 - 交互（缺省选择链）：显式 `--platform` > TTY 交互多选 > 探测 > 默认 claude-code。TTY 多选 = @clack/prompts 方向键多选（可选依赖，未安装自动回退 readline 数字/逗号多选），按目标项目痕迹 `.claude/`/`.codex/`/`.dsh/` 预勾选，回车默认 = 探测推荐；无 TTY 探测：仅 `.codex/` → codex、仅 `.dsh/` → dsh、含 `.claude/` → claude-code、皆无 → 默认 claude-code；多痕迹（≥2 并存）不武断二选一——默认主平台 claude-code 并输出提示。
 - 安装动作（dsh 描述符）：
-  1. `installHooks`：复制 `scripts/dsh-bridge.mjs` → `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs`（全局挂载——home patch 对所有 profile 生效）+ `$DSH_HOME/cordis.patch.yml` 托管块注入（读-合并-写，保留既有块；源文件缺失时 WARN 跳过 loader 复制，其余安装照常）。
+  1. `installHooks`：复制 `scripts/dsh-bridge.mjs` → `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs`（全局挂载——home patch 对所有 profile 生效）+ `$DSH_HOME/cordis.patch.yml` 托管块注入（读-合并-写，保留既有块；源文件缺失时 WARN 同时跳过 loader 复制与托管块注入（避免注入指向不存在文件的 file:// 引用），其余安装照常
   2. `installRules`：AGENTS.md 托管区注入（`<!-- Managed by flow-comet prepare-env -->` … `<!-- /Managed by flow-comet prepare-env -->` 包裹编排规则全文；非破坏合并，保留托管区外用户内容；codex/dsh 共用标记——任一平台的移除流程均可清理该区）。
   3. skills：复制权威源 `skills/flow-comet/**` → `<项目>/.dsh/skills/flow-comet/` + pathReplacements（包内命令路径 `.claude/skills/flow-comet/scripts/` → `.dsh/skills/flow-comet/scripts/`，仅 .md，幂等）+ INSTALLED_VERSION 版本标识。
 

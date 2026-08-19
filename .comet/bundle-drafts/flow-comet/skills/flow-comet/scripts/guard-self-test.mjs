@@ -3401,11 +3401,13 @@ const SCENARIOS = [
       const args = ['--target', proj, '--platform', 'dsh'];
       const r1 = runPrepareEnv(args, dir, { DSH_HOME: dshHome });
       assertExit(r1, 0);
+      // 首次安装后立即快照——与二次安装后逐字节比较（此前二次后连读恒真，漂移检测失效）
+      const skillPath = path.join(proj, '.dsh', 'skills', 'flow-comet', 'SKILL.md');
+      const sk1 = fs.readFileSync(skillPath, 'utf8');
       const r2 = runPrepareEnv(args, dir, { DSH_HOME: dshHome });
       assertExit(r2, 0);
       // 路径替换结果一致:重复安装后 .dsh/skills 内 SKILL.md 与首次逐字节一致
-      const sk1 = fs.readFileSync(path.join(proj, '.dsh', 'skills', 'flow-comet', 'SKILL.md'), 'utf8');
-      const sk2 = fs.readFileSync(path.join(proj, '.dsh', 'skills', 'flow-comet', 'SKILL.md'), 'utf8');
+      const sk2 = fs.readFileSync(skillPath, 'utf8');
       if (sk1 !== sk2) throw new Error('重复安装 SKILL.md 不一致');
       // AGENTS.md 托管区幂等（不重复叠加）
       const agents = fs.readFileSync(path.join(proj, 'AGENTS.md'), 'utf8');
