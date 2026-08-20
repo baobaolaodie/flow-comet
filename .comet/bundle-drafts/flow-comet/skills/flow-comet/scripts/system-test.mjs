@@ -2448,6 +2448,115 @@ const TEST_ITEMS = [
     },
   },
 
+  // K12: 桥接 loader 流程态门断言（B 方案 TDD RED 载体——空闲/异常态行为面，与 K11 运行态分开）：
+  //   AC-1 无 state 文件 / AC-2 activeChange 缺失 / AC-3 status completed → 项目外 Write 应
+  //   next() 放行（空闲放行语义由流程态门实现）；AC-7 非法 JSON / AC-8 未知 status →
+  //   fail-closed deny（reason 含拒绝语义；解析失败/未知状态不得当空闲放行）。
+  //   复用 K11 安装产物形态：target 为真实 dsh flow-comet 项目（.dsh/skills/flow-comet 就位，
+  //   窄监听不跳过——保证当前实现走到包含性 deny 而非被窄监听放行）；mock exec 取协调者身份
+  //   （delegationDepth 缺失=0，与 K11 ⑦b 同语义）。import 用 ?query 缓存破除——K11 已在本进程
+  //   apply 过，模块级幂等标记会让二次 apply 跳过（applied=true），必须全新模块实例才能捕获监听器。
+  {
+    name: 'K12 桥接 loader:流程态门断言(无state/无activeChange/completed放行·非法JSON/未知status deny)',
+    run: async (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const loader = path.join(repoRoot, 'scripts', 'dsh-bridge.mjs');
+      if (!fs.existsSync(loader)) throw new Error('缺少 scripts/dsh-bridge.mjs');
+      const bridge = await import(pathToFileURL(loader).href + '?k12=' + Date.now()); // 全新模块实例(applied=false)
+      const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
+      const dshHome = path.join(dir, 'k12-dsh-home');
+      const target = path.join(dir, 'k12-target');
+      fs.mkdirSync(target, { recursive: true });
+      const res = spawnSync(process.execPath, [installer, '--target', target, '--platform', 'dsh'], {
+        cwd: repoRoot, encoding: 'utf8', timeout: 120000, env: { ...process.env, DSH_HOME: dshHome },
+      });
+      if (res.status !== 0) throw new Error('dsh 安装失败: ' + (res.stderr || JSON.stringify(res.output)));
+      // 窄监听不跳过前置：目标项目必须真的装有 .dsh/skills/flow-comet——否则当前实现会因窄监听
+      // 直接 next()，空闲态断言假绿，RED 失真
+      if (!fs.existsSync(path.join(target, '.dsh', 'skills', 'flow-comet', 'SKILL.md'))) {
+        throw new Error('dsh flow-comet 项目安装缺失(.dsh/skills/flow-comet/SKILL.md 不存在)');
+      }
+      gitInit(target);
+      const longTarget = bridge.realpathExistingPath(target); // 8.3 短形态归一为长形态(与 K11 一致)
+      const outside = path.join(dir, 'k12-out');
+      fs.mkdirSync(outside, { recursive: true });
+      // 项目外 Write（协调者身份——delegationDepth 缺失=0）
+      const mkOutsideWrite = () => ({
+        name: 'Write',
+        arguments: { file_path: path.join(outside, 'idle-leak.md') },
+        agent: { cwd: longTarget, session: { header: {} } },
+      });
+      const ctxEvents = {};
+      bridge.apply({ on: (event, fn) => { ctxEvents[event] = fn; } });
+      const preExec = ctxEvents['tools/pre-execute'];
+      if (typeof preExec !== 'function') throw new Error('bridge.apply 应注册 tools/pre-execute 监听器');
+      const statePath = path.join(target, '.comet', 'flow-comet-state.json');
+      // AC-1 无 state：无 .comet/flow-comet-state.json + 项目外 Write → next() 放行（当前 RED）
+      {
+        if (fs.existsSync(statePath)) throw new Error('AC-1 前置:目标项目不应有 state 文件');
+        let usedNext = false;
+        const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
+        if (!usedNext) throw new Error('AC-1 无 state 应放行(next 被调): ' + JSON.stringify(r));
+        if (r) throw new Error('AC-1 无 state 不应返回 deny: ' + JSON.stringify(r));
+      }
+      // AC-2 无 activeChange：writeState { activeChange:null, status:'running' } + 项目外 Write → next()（当前 RED）
+      {
+        writeState(target, { activeChange: null, status: 'running' });
+        let usedNext = false;
+        const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
+        if (!usedNext) throw new Error('AC-2 activeChange 为空应放行(next 被调): ' + JSON.stringify(r));
+        if (r) throw new Error('AC-2 无 activeChange 不应返回 deny: ' + JSON.stringify(r));
+      }
+      // AC-3 completed：writeState { activeChange:'x', status:'completed' } + 项目外 Write → next()（当前 RED）
+      {
+        writeState(target, { activeChange: 'x', status: 'completed' });
+        let usedNext = false;
+        const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
+        if (!usedNext) throw new Error('AC-3 status completed 应放行(next 被调): ' + JSON.stringify(r));
+        if (r) throw new Error('AC-3 completed 不应返回 deny: ' + JSON.stringify(r));
+      }
+      // AC-7 解析失败：state 写成非法 JSON + 项目外 Write → deny（reason 含 fail-closed 拒绝语义；
+      //   当前无条件 deny 已通过、T02 流程态门落地后必须保持 deny，不得当空闲放行）
+      {
+        writeFile(target, '.comet/flow-comet-state.json', '{ not-valid-json ');
+        let usedNext = false;
+        const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
+        if (usedNext) throw new Error('AC-7 非法 JSON 不应 next——解析失败必须 fail-closed deny');
+        if (!r || r.kind !== 'deny') throw new Error('AC-7 非法 JSON 应 deny: ' + JSON.stringify(r));
+        if (!r.reason.includes('拒绝')) throw new Error('AC-7 deny 应含 fail-closed(拒绝)语义: ' + JSON.stringify(r.reason));
+      }
+      // AC-8 未知 status：writeState { activeChange:'x', status:'weird' } + 项目外 Write → deny
+      //   （当前通过、T02 流程态门落地后必须保持 deny，不得当空闲放行）
+      {
+        writeState(target, { activeChange: 'x', status: 'weird' });
+        let usedNext = false;
+        const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
+        if (usedNext) throw new Error('AC-8 未知 status 不应 next——未知 status 必须 fail-closed deny');
+        if (!r || r.kind !== 'deny') throw new Error('AC-8 未知 status 应 deny: ' + JSON.stringify(r));
+        if (!r.reason.includes('拒绝')) throw new Error('AC-8 deny 应含 fail-closed(拒绝)语义: ' + JSON.stringify(r.reason));
+      }
+      // AC-7b 非对象 JSON（null/标量/数组/字符串）：合法 JSON 但非对象 = 损坏 state → deny（fail-closed）
+      for (const bad of [null, 123, ['x'], 'str']) {
+        writeFile(target, '.comet/flow-comet-state.json', JSON.stringify(bad));
+        let usedNext = false;
+        const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
+        if (usedNext) throw new Error('AC-7b 非对象 state(' + JSON.stringify(bad) + ') 不应 next——必须 fail-closed deny');
+        if (!r || r.kind !== 'deny') throw new Error('AC-7b 非对象 state 应 deny: ' + JSON.stringify(r));
+        if (!r.reason.includes('拒绝')) throw new Error('AC-7b deny 应含 fail-closed(拒绝)语义: ' + JSON.stringify(r.reason));
+      }
+      // AC-3b BOM 前缀 + completed：BOM 容错断言——应被解析并视为空闲放行
+      {
+        writeFile(target, '.comet/flow-comet-state.json', '\uFEFF' + JSON.stringify({ activeChange: 'x', status: 'completed' }));
+        let usedNext = false;
+        const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
+        if (!usedNext) throw new Error('AC-3b BOM+completed 应放行(next 被调)——BOM 容错: ' + JSON.stringify(r));
+        if (r) throw new Error('AC-3b BOM+completed 不应返回 deny: ' + JSON.stringify(r));
+      }
+      console.log('  流程态门断言:AC-1/2/3 空闲放行·AC-3b BOM 容错·AC-7/8/7b 异常态 fail-closed deny✓');
+    },
+  },
+
   // ---------- L. 执行遗漏防护（M1~M8 真实链路） ----------
 
   {

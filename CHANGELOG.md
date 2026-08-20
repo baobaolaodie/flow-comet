@@ -12,6 +12,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Changed
+
+- **dsh write containment now applies only while the flow is running**: in the idle state (no state / no `activeChange` / `completed`) writes outside the project root are no longer intercepted by the bridge, matching Claude Code / Codex semantics; parse failures or unknown status stay fail-closed deny. ([#65](https://github.com/baobaolaodie/flow-comet/pull/65))
+- **System test suite expanded to 61 items** with dsh bridge flow-state-gate assertions (idle pass / parse-failure & unknown-status fail-closed). ([#65](https://github.com/baobaolaodie/flow-comet/pull/65))
+
 ## [1.4.2] - 2026-08-18
 
 DeepSeek Harness (dsh) platform support with bridge-based write enforcement, expanded regression coverage (144 scenarios / 60 system tests), and dsh write-guard hardening. ([#60](https://github.com/baobaolaodie/flow-comet/pull/60))
