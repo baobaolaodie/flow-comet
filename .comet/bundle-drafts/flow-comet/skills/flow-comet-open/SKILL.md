@@ -106,12 +106,17 @@ The open node loads `flow-comet-change` for the CHANGE phase (structured questio
 | `flow-comet-change` | Required before CHANGE.md generation | Provides structured questioning protocol, architecture detection, and tone preselection |
 | `flow-comet-requirement` | Required before REQUIREMENT.md generation | Provides AC format (Given/When/Then), scope split, and terminology extraction rules |
 
-**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+**加载声明（双步硬规则）**：进入 open 节点后，以下两步**都不可跳过**：
+
+1. **用 Skill 工具加载** `flow-comet-change` 与 `flow-comet-requirement`（本节点 Required Skill Calls）。**不得跳过**——只读取 SKILL.md 文件不叫加载；真正让这两个 skill 的指令生效的是 Skill 工具把它们注入本次会话。
+2. 加载完成后**立即**运行声明命令，每个协议文件对应一条（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
 
 ```bash
 node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-change --prompt flow-kit/prompts/0-change.md
 node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-requirement --prompt flow-kit/prompts/1-requirement.md
 ```
+
+> **跑 skill-load 声明命令 ≠ 加载**：声明只把“哪次会话加载了哪个 skill、按哪份协议工作”写进状态供 exit/record 核对；真正加载只有第 1 步的 Skill 工具能做到。
 
 ## Output Schemas
 
