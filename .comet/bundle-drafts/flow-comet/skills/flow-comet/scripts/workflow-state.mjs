@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, SKILL_PROTOCOL_FILES } from './protocol-utils.mjs';
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor } from './state-schema.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide, skipInit } from './context-init.mjs';
+import { taskOpeningAttrs, taskBlocks } from './task-parsing.mjs';
 
 const command = process.argv[2] ?? 'status';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -36,6 +37,15 @@ async function writeJson(file, value) {
 
 async function fileExists(file) {
   try { await fs.access(file); return true; } catch { return false; }
+}
+
+// 契约解析失败判定（DESIGN 决策）:trim 后以 {/[ 开头 → 视作"形似对象字面量"
+// （常见于 PowerShell/cmd 剥离内嵌引号后的损坏 JSON 形态）。若形似对象却 JSON.parse 失败
+// → fail-closed（报错含 --json-file 提示、退出、不写 state）,避免"以为记了实际没记"。
+// 收窄（bot 审查）：仅保留「{/[ 开头」一条——移除 :/; 包含判定，避免拒绝普通纯文本 payload。
+function looksLikeObjectLiteral(raw) {
+  const text = String(raw ?? '').trim();
+  return text.startsWith('{') || text.startsWith('[');
 }
 
 // --json-file 路径校验:解析后必须位于项目根内(拒绝相对/绝对形式的越界路径,
@@ -402,23 +412,29 @@ async function determineNode(changeName, protocol, completedNodes = []) {
     return orderedNodes.length > 0 ? orderedNodes[orderedNodes.length - 1].id : 'archive';
   }
 
-  // execute/subagent-execute 特判：解析任务文件 <task> 块 pending/done/parallel/depends_on（沿用现逻辑）
+  // execute/subagent-execute 特判：解析任务文件 <task> 块 pending/done/parallel/depends_on。
+  // 属性解析统一走 task-parsing.mjs 的 taskOpeningAttrs——只读 <task ...> 开标签（属性序无关、
+  // 不受 <action>/<verify> 内容文本干扰），与 workflow-guard 的校验共享同一语义。
   try {
     const taskContent = await fs.readFile(taskPath, 'utf8');
-    // Use <task ... status="..." to match only task tags, not documentation text
-    const pending = (taskContent.match(/<task[^>]*status="pending"/g) || []).length;
-    const done = (taskContent.match(/<task[^>]*status="done"/g) || []).length;
+    const taskList = taskBlocks(taskContent);
+    const attrsList = taskList.map(taskOpeningAttrs).filter(Boolean);
+    const pending = attrsList.filter((a) => a.status === 'pending').length;
+    const done = attrsList.filter((a) => a.status === 'done').length;
     if (pending > 0) {
       // 只检测依赖已满足的 parallel 任务，避免 Wave N+1 的 parallel 任务
-      // 在 Wave N 串行任务未完成时就被路由到 subagent-execute
+      // 在 Wave N 串行任务未完成时就被路由到 subagent-execute。
+      // subagent-execute 已完成（第一波委托 exit）后第二波 parallel 不再路由回
+      // 该节点（防死循环）——与 workflow-guard 平行路由的 !completed 判定一致。
       const hasSubagentNode = route(protocol).some((n) => n.id === 'subagent-execute');
-      if (hasSubagentNode) {
-        // 收集所有 done 任务的 id
-        const doneIds = new Set((taskContent.match(/<task[^>]*id="([^"]+)"[^>]*status="done"/g) || [])
-          .map((m) => { const id = m.match(/id="([^"]+)"/); return id ? id[1] : null; })
-          .filter(Boolean));
-        // 检查 pending parallel 任务中是否有依赖已满足的
-        const parallelBlocks = taskContent.match(/<task[^>]*parallel="true"[^>]*status="pending"[\s\S]*?<\/task>/g) || [];
+      if (hasSubagentNode && !completedNodes.includes('subagent-execute')) {
+        // 收集所有 done 任务的 id（开标签属性序无关）
+        const doneIds = new Set(attrsList.filter((a) => a.status === 'done' && a.id).map((a) => a.id));
+        // 检查 pending parallel 任务中是否有依赖已满足的（开标签 parallel="true" 且 status="pending"）
+        const parallelBlocks = taskList.filter((block) => {
+          const a = taskOpeningAttrs(block);
+          return a && a.parallel && a.status === 'pending';
+        });
         const eligibleParallel = parallelBlocks.filter((block) => {
           const depsMatch = block.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
           if (!depsMatch || !depsMatch[1].trim()) return true; // 无依赖
@@ -453,7 +469,11 @@ async function tFixRollbackExempt(changeName, protocol, currentNode, completedNo
   const taskPath = path.join(specsRoot, changeName, 'TASK.md');
   try {
     const taskContent = await fs.readFile(taskPath, 'utf8');
-    if (!/<task[^>]*status="pending"/.test(taskContent)) return false;
+    // 开标签解析（与 determineNode 同一语义）：存在任一 status="pending" 任务块
+    if (!taskBlocks(taskContent).some((b) => {
+      const a = taskOpeningAttrs(b);
+      return a && a.status === 'pending';
+    })) return false;
     return (await determineNode(changeName, protocol, completedNodes)) === 'execute';
   } catch {
     return false;
@@ -943,6 +963,15 @@ async function main() {
       parsed = raw ? JSON.parse(raw) : {};
       if (typeof parsed !== 'object' || Array.isArray(parsed)) parsed = { summary: String(parsed) };
     } catch {
+      // 契约解析失败 fail-closed:payload 形似对象但 JSON.parse 失败 → 报错(含
+      // --json-file 提示与原因)并 process.exit(1),不写 evidence——防状态污染
+      // （旧语义把不可解析 raw 静默作 summary 字符串落库 = 静默落脏;--json-file 是
+      // 正路径,规避 Windows 传参剥离内嵌双引号导致的 JSON 损坏）
+      // 安全(bot 审查):错误消息只含固定前缀 + 长度元数据,绝不打印 raw 内容(含截断)
+      if (looksLikeObjectLiteral(raw)) {
+        console.error('payload looks like an object literal but is not valid JSON (length=' + String(raw ?? '').length + '); use --json-file <path> to pass the payload');
+        process.exit(1);
+      }
       parsed = { summary: raw || 'recorded' };
     }
     // completedChecks 真实性校验（skill-load 声明标记）——解析本次 record 写入的

@@ -16,6 +16,8 @@
 
 - **dsh 写入包含性改为仅在流程运行中生效**：空闲态（无 state / 无 `activeChange` / `completed`）项目根外写入不再被桥接拦截，与 Claude Code / Codex 语义一致；解析失败或未知状态保持 fail-closed 拒绝。([#65](https://github.com/baobaolaodie/flow-comet/pull/65))
 - **系统测试集扩展至 61 项**：新增 dsh 桥接流程态门断言（空闲放行 / 解析失败与未知状态 fail-closed）。([#65](https://github.com/baobaolaodie/flow-comet/pull/65))
+- **回归套件扩展至 153 场景**：新增波次分组一致性校验与契约解析失败检测场景。([#66](https://github.com/baobaolaodie/flow-comet/pull/66))
+- plan 出口新增波次分组一致性校验（混排 WARN(旧)/BLOCK(新)+恢复指引）；record/workflow-handoff 对解析失败的契约 payload fail-closed（报错提示 --json-file、不落脏数据）。([#66](https://github.com/baobaolaodie/flow-comet/pull/66))
 
 ## [1.4.2] - 2026-08-18
 

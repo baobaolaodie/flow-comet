@@ -16,6 +16,15 @@ const statePath = path.join(runRoot, '.comet', 'flow-comet-state.json');
 
 async function fileExists(f) { try { await fs.access(f); return true; } catch { return false; } }
 
+// 契约解析失败判定（DESIGN 决策）:trim 后以 {/[ 开头 → 视作"形似对象字面量"
+// （常见于 Windows 传参剥离内嵌引号后的损坏 JSON / Return Contract 形态）。若形似对象却
+// JSON.parse 失败 → fail-closed（报错含 --json-file 提示、退出、不写 handoffResult）。
+// 收窄（bot 审查）:仅保留「{/[ 开头」一条——移除 :/; 包含判定，避免拒绝普通纯文本 payload。
+function looksLikeObjectLiteral(raw) {
+  const text = String(raw ?? '').trim();
+  return text.startsWith('{') || text.startsWith('[');
+}
+
 // --json-file 路径校验:解析后必须位于项目根内(与 record 同规则——拒绝越界路径,
 // 防读取任意文件内容进 evidence;runRoot 内绝对路径合法)。符号链接解析后的实际路径
 // 同样必须在项目根内(词法校验不防 symlink 穿越——realpath 后再次校验)。
@@ -148,7 +157,18 @@ async function main() {
     if (!taskId) { console.error('Usage: workflow-handoff.mjs result <task-id> <result>'); process.exit(1); }
     // W1-D: 尝试解析 JSON（Return Contract）——解析失败则存原始字符串
     let parsed = raw;
-    try { parsed = JSON.parse(raw); } catch {}
+    try { parsed = JSON.parse(raw); } catch {
+      // 契约解析失败 fail-closed:payload 形似对象但 JSON.parse 失败 → 报错(含
+      // --json-file 提示与原因)并 process.exit(1),不写 handoffResult——Return Contract
+      // 应为合法 JSON（旧语义把不可解析 raw 静默存字符串 = 静默落脏,guard exit 误报
+      // "非 Return Contract"掩盖真因;--json-file 是正路径,规避传参层 JSON 损坏）
+      // 安全(bot 审查):错误消息与 workflow-state record 统一——只含固定前缀 + 长度元数据,
+      // 绝不打印 raw 内容(含截断)
+      if (looksLikeObjectLiteral(raw)) {
+        console.error('payload looks like an object literal but is not valid JSON (length=' + String(raw ?? '').length + '); use --json-file <path> to pass the payload');
+        process.exit(1);
+      }
+    }
     state.evidence = state.evidence || {};
     state.evidence['subagent-execute'] = state.evidence['subagent-execute'] || {};
     state.evidence['subagent-execute'].handoffResult = state.evidence['subagent-execute'].handoffResult || {};
