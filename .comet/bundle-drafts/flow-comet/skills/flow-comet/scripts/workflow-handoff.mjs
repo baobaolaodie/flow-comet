@@ -2,7 +2,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { validateStateFields } from './state-schema.mjs';
+import { validateStateFields, looksLikeObjectLiteral } from './state-schema.mjs';
 
 // workflow-handoff.mjs: Record subagent handoff evidence
 // evidence 统一记录在 subagent-execute 名下作为委托证据库——execute（串行委托）与 subagent-execute（并行委托）共用。不改成节点参数，保持最小改动。
@@ -16,14 +16,8 @@ const statePath = path.join(runRoot, '.comet', 'flow-comet-state.json');
 
 async function fileExists(f) { try { await fs.access(f); return true; } catch { return false; } }
 
-// 契约解析失败判定（DESIGN 决策）:trim 后以 {/[ 开头 → 视作"形似对象字面量"
-// （常见于 Windows 传参剥离内嵌引号后的损坏 JSON / Return Contract 形态）。若形似对象却
-// JSON.parse 失败 → fail-closed（报错含 --json-file 提示、退出、不写 handoffResult）。
-// 收窄（bot 审查）:仅保留「{/[ 开头」一条——移除 :/; 包含判定，避免拒绝普通纯文本 payload。
-function looksLikeObjectLiteral(raw) {
-  const text = String(raw ?? '').trim();
-  return text.startsWith('{') || text.startsWith('[');
-}
+// 契约解析失败判定（单一来源）：looksLikeObjectLiteral 由 state-schema.mjs 导出——
+// trim 后以 {/[ 开头 → 视作"形似对象字面量"；若 JSON.parse 失败 → fail-closed。
 
 // --json-file 路径校验:解析后必须位于项目根内(与 record 同规则——拒绝越界路径,
 // 防读取任意文件内容进 evidence;runRoot 内绝对路径合法)。符号链接解析后的实际路径
@@ -158,14 +152,20 @@ async function main() {
     // W1-D: 尝试解析 JSON（Return Contract）——解析失败则存原始字符串
     let parsed = raw;
     try { parsed = JSON.parse(raw); } catch {
-      // 契约解析失败 fail-closed:payload 形似对象但 JSON.parse 失败 → 报错(含
-      // --json-file 提示与原因)并 process.exit(1),不写 handoffResult——Return Contract
-      // 应为合法 JSON（旧语义把不可解析 raw 静默存字符串 = 静默落脏,guard exit 误报
-      // "非 Return Contract"掩盖真因;--json-file 是正路径,规避传参层 JSON 损坏）
-      // 安全(bot 审查):错误消息与 workflow-state record 统一——只含固定前缀 + 长度元数据,
-      // 绝不打印 raw 内容(含截断)
+      // 契约解析失败 fail-closed:payload 形似对象但 JSON.parse 失败 → 报错并
+      // process.exit(1),不写 handoffResult——Return Contract 应为合法 JSON
+      // （旧语义把不可解析 raw 静默存字符串 = 静默落脏,guard exit 误报
+      // "非 Return Contract"掩盖真因）
+      // 消息按参数来源分级（DESIGN D2 / AC-3）:--json-file 传入且文件内容损坏 →
+      // "文件内容不是合法 JSON" + 长度元数据;内联传参损坏 → 保留 --json-file 建议。
+      // 安全(bot 审查):错误消息与 workflow-state record 统一——只含固定前缀 +
+      // 长度元数据,绝不打印 raw 内容(含截断)。
       if (looksLikeObjectLiteral(raw)) {
-        console.error('payload looks like an object literal but is not valid JSON (length=' + String(raw ?? '').length + '); use --json-file <path> to pass the payload');
+        if (jsonFile !== null) {
+          console.error('文件内容不是合法 JSON (length=' + String(raw ?? '').length + ')');
+        } else {
+          console.error('payload looks like an object literal but is not valid JSON (length=' + String(raw ?? '').length + '); use --json-file <path> to pass the payload');
+        }
         process.exit(1);
       }
     }

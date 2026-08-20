@@ -4,7 +4,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, SKILL_PROTOCOL_FILES } from './protocol-utils.mjs';
-import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor } from './state-schema.mjs';
+import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, looksLikeObjectLiteral } from './state-schema.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide, skipInit } from './context-init.mjs';
 import { taskOpeningAttrs, taskBlocks } from './task-parsing.mjs';
 
@@ -39,14 +39,8 @@ async function fileExists(file) {
   try { await fs.access(file); return true; } catch { return false; }
 }
 
-// 契约解析失败判定（DESIGN 决策）:trim 后以 {/[ 开头 → 视作"形似对象字面量"
-// （常见于 PowerShell/cmd 剥离内嵌引号后的损坏 JSON 形态）。若形似对象却 JSON.parse 失败
-// → fail-closed（报错含 --json-file 提示、退出、不写 state）,避免"以为记了实际没记"。
-// 收窄（bot 审查）：仅保留「{/[ 开头」一条——移除 :/; 包含判定，避免拒绝普通纯文本 payload。
-function looksLikeObjectLiteral(raw) {
-  const text = String(raw ?? '').trim();
-  return text.startsWith('{') || text.startsWith('[');
-}
+// 契约解析失败判定（单一来源）：looksLikeObjectLiteral 由 state-schema.mjs 导出——
+// trim 后以 {/[ 开头 → 视作"形似对象字面量"；若 JSON.parse 失败 → fail-closed。
 
 // --json-file 路径校验:解析后必须位于项目根内(拒绝相对/绝对形式的越界路径,
 // 如 ../..、其他盘符——防读取任意文件内容进 evidence)。runRoot 内的绝对路径合法
@@ -963,13 +957,18 @@ async function main() {
       parsed = raw ? JSON.parse(raw) : {};
       if (typeof parsed !== 'object' || Array.isArray(parsed)) parsed = { summary: String(parsed) };
     } catch {
-      // 契约解析失败 fail-closed:payload 形似对象但 JSON.parse 失败 → 报错(含
-      // --json-file 提示与原因)并 process.exit(1),不写 evidence——防状态污染
-      // （旧语义把不可解析 raw 静默作 summary 字符串落库 = 静默落脏;--json-file 是
-      // 正路径,规避 Windows 传参剥离内嵌双引号导致的 JSON 损坏）
-      // 安全(bot 审查):错误消息只含固定前缀 + 长度元数据,绝不打印 raw 内容(含截断)
+      // 契约解析失败 fail-closed:payload 形似对象但 JSON.parse 失败 → 报错并
+      // process.exit(1),不写 evidence——防状态污染（旧语义把不可解析 raw 静默作
+      // summary 字符串落库 = 静默落脏）
+      // 消息按参数来源分级（DESIGN D2 / AC-3）:--json-file 传入且文件内容损坏 →
+      // "文件内容不是合法 JSON" + 长度元数据;内联传参损坏 → 保留 --json-file 建议。
+      // 安全(bot 审查):错误消息只含固定前缀 + 长度元数据,绝不打印 raw 内容(含截断)。
       if (looksLikeObjectLiteral(raw)) {
-        console.error('payload looks like an object literal but is not valid JSON (length=' + String(raw ?? '').length + '); use --json-file <path> to pass the payload');
+        if (jsonFile !== null) {
+          console.error('文件内容不是合法 JSON (length=' + String(raw ?? '').length + ')');
+        } else {
+          console.error('payload looks like an object literal but is not valid JSON (length=' + String(raw ?? '').length + '); use --json-file <path> to pass the payload');
+        }
         process.exit(1);
       }
       parsed = { summary: raw || 'recorded' };
