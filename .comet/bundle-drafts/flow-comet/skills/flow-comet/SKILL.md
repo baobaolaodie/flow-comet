@@ -104,11 +104,16 @@ description: "Use when the user wants the flow-comet managed workflow for flow-k
 
 **新 change 严格模式**：`init` 创建的 change 标记为"新"（`newChange: true`）——新 change 下全部内容级检查强制 BLOCKED（处置标记/缓存证据/波次散文/越权委托/SUMMARY 完整性/进入证据等）；旧 change（历史遗留,无标记）保持渐进 WARN。执行者可通过 `status` 确认当前 change 的新旧。
 
-**节点 skill 加载声明**：进入节点、加载节点 skill 后**立即**运行声明命令，记录本次加载使用的 skill 与协议文件（open/review 等涉及多个协议文件的节点，每个协议文件对应一条声明命令）：
+**节点 skill 加载声明（双步硬规则）**：进入节点后，以下两步**都不可跳过**：
+
+1. **用 Skill 工具加载** <该节点 skill>（<该节点 skill> 见上方 Required Calls 表，如 execute → flow-comet-dev）。**不得跳过**——只读取 SKILL.md 文件不叫加载；真正让该 skill 的指令生效的是 Skill 工具把 <该节点 skill> 注入本次会话。
+2. 加载完成后**立即**运行声明命令，如实记录本次加载使用的 skill 与协议文件（open/review 等涉及多个协议文件的节点，每个协议文件对应一条声明命令）：
 
 ```bash
 node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <skill> --prompt flow-kit/prompts/<阶段>.md
 ```
+
+> **跑声明命令 ≠ 加载**：声明只把“哪次会话加载了哪个 skill、按哪份协议工作”写进状态供 exit/record 核对；真正加载只有第 1 步的 Skill 工具能做到。协议的引用示例：execute / subagent-execute 节点加载 flow-comet-dev 时用 `--prompt flow-kit/prompts/4-dev.md`（DEV 阶段协议），交付物按 `flow-kit/templates/SUMMARY.md` 模板填写并补写 `## 自检方法` 段。
 
 节点退出（exit）与证据记录（record）会核对声明标记。声明如实记录执行者动作——加载了哪个 skill、按哪份协议工作——**不等于产出证明**；产出是否正确由产物结构校验与门禁把关。**record 会自动补写缺失的声明标记**（按协议 requiredSkillCalls 代记，标记带 `auto: true`）——手动声明仍推荐（如实记录加载动作与协议文件），自动补是兜底。
 

@@ -23,6 +23,11 @@ This node performs a structured multi-round review of the implemented change, ch
 
 guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
 
+### 必查清单（review 逐项核对 · 执行者交付纪律）
+
+- [ ] **工件模板保真**：每份交付工件（`*-SUMMARY.md` / TASK / CHANGE / REQUIREMENT / DESIGN）的**标题 / 首部字段 / 段序**与对应模板一致——SUMMARY 按 `flow-kit/templates/SUMMARY.md` 填写并含 `## 自检方法` 段；执行者按 `flow-kit/prompts/4-dev.md` 协议交付。
+- [ ] **Skill 工具触发可见**：检查执行者交付的 transcript，**逐节点可见本节点 skill 用 Skill 工具加载**的触发记录——声明标记在 ≠ 已加载；只看到 `skill-load` 声明命令、看不到 Skill 工具触发 → 反馈并要求补证/重做。
+
 ### Prerequisites
 
 - All tasks in TASK.md must have `status="done"`.
@@ -40,6 +45,7 @@ guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好�
    - Check no out-of-scope content was introduced.
    - Check no unplanned features were added.
    - Check no DESIGN.md architecture was violated.
+   - Check every `*-SUMMARY.md` is **模板保真**（标题 `# SUMMARY:` / 首部 4 字段 / 段序一致，含 `## 自检方法` 段）——见下方「必查清单」。
 
 2. **Round 1.5 — Contract consistency check (O-8)**: For changes touching API contracts, state machines, or form validation, verify frontend/backend consistency — this catches silent enum/value mismatches that unit tests on each side miss:
    - **Enum/state values**: Backend status/type enums must match frontend maps (e.g. `ScheduleConfig.status` 0/2/3/4 vs frontend `SCHEDULE_STATUS_MAP`) — grep both sides, confirm the same values mean the same thing.
@@ -138,12 +144,17 @@ The review node performs a structured 4-round review: spec compliance (Round 1),
 
 Load `flow-comet-test` during this Node and record completed check `required-skill:review.flow-comet-test`. Reason: 测试金字塔完整性
 
-**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+**加载声明（双步硬规则）**：进入 review 节点后，以下两步**都不可跳过**：
+
+1. **用 Skill 工具加载** 本节点 skill（`flow-comet-review`；涉及测试金字塔完整性时还要加载 `flow-comet-test`）。**不得跳过**——只读取 SKILL.md 文件不叫加载；真正让 skill 指令生效的是 Skill 工具把它注入本次会话。
+2. 加载完成后**立即**运行声明命令，每个协议文件对应一条（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
 
 ```bash
 node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load review flow-comet-review --prompt flow-kit/prompts/6-review.md
 node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load review flow-comet-test --prompt flow-kit/prompts/5-test.md
 ```
+
+> **跑 skill-load 声明命令 ≠ 加载**：声明只把“哪次会话加载了哪个 skill、按哪份协议工作”写进状态供 exit/record 核对；真正加载只有第 1 步的 Skill 工具能做到。
 
 ## Augmentations
 
