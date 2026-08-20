@@ -124,7 +124,10 @@ async function main() {
     }
     state.evidence['subagent-execute'].handoffRequests[taskId] = {
       description, requestedAt: new Date().toISOString(),
-      ...(writeFiles.length ? { writeFiles } : {})
+      ...(writeFiles.length ? { writeFiles } : {}),
+      // 零提交任务：写文件列表为空（无 tracked 写意图）→ request 记录 noCommit 标记，
+      // 供 result 侧判定并跳过提交文件子集校验（正式语义，可审计）
+      ...(writeFiles.length === 0 ? { noCommit: true } : {})
     };
     await writeState(state);
     console.log('HANDOFF REQUEST: ' + taskId);
@@ -172,28 +175,35 @@ async function main() {
     state.evidence = state.evidence || {};
     state.evidence['subagent-execute'] = state.evidence['subagent-execute'] || {};
     state.evidence['subagent-execute'].handoffResult = state.evidence['subagent-execute'].handoffResult || {};
-    // W2-D: 完整版 hash 校验——提交文件 ⊆ writeFiles 允许范围（子集，前缀匹配；越界仅 WARN）
+    // 零提交任务语义：已有 request 记录且其写文件列表为空（无 tracked 写意图）或带 noCommit
+    // 标记时，判定为零提交——跳过提交文件子集校验并输出可审计提示。契约侧 noCommit 声明仅作
+    // 审计线索：写文件列表非空的任务即使契约声称零提交，仍执行完整提交文件子集校验（不可借
+    // 零提交声明绕过真实提交检查）。无 request 记录的任务不适用零提交（保持既有完整校验）。
+    const handoffReq = state.evidence['subagent-execute'].handoffRequests?.[taskId];
+    const hasRequest = !!handoffReq && typeof handoffReq === 'object';
+    const reqWriteFiles = hasRequest ? (handoffReq.writeFiles || []) : [];
+    const reqNoCommit = hasRequest && handoffReq.noCommit === true;
+    const contractNoCommit = typeof parsed === 'object' && parsed !== null && parsed.noCommit === true;
+    const isZeroCommit = hasRequest && (reqWriteFiles.length === 0 || reqNoCommit);
+    if (isZeroCommit) {
+      console.error('HANDOFF 零提交: ' + taskId + ' — 无 tracked 写文件（write_files 为空），已跳过提交文件子集校验');
+    } else if (contractNoCommit) {
+      console.error('HANDOFF WARN: ' + taskId + ' — 契约声明零提交但 write_files 非空，仍执行完整提交文件子集校验（零提交声明不能绕过真实提交检查）');
+    }
+    // W2-D: 完整版 hash 校验——提交文件 ⊆ writeFiles 允许范围（子集，段感知匹配；越界仅 WARN）。
+    // 零提交任务已在上方跳过（并输出可审计提示），此处只处理有提交哈希的常规任务。
     if (typeof parsed === 'object' && parsed !== null && parsed.commitHash && /^[0-9a-f]{7,40}$/i.test(String(parsed.commitHash))) {
       const commitHash = String(parsed.commitHash);
-      const allowed = state.evidence['subagent-execute'].handoffRequests?.[taskId]?.writeFiles || [];
-      // 新 change 空允许列表 → BLOCK(独立于 git show 成败):委托边界必须有解析来源
-      // (TASK.md 的 write_files 或 request 显式 --write-files)——空列表跳过校验会让
-      // 新 change 绕过写边界检查;跨仓库降级(git show 失败)也不应跳过边界来源检查
-      if (allowed.length === 0 && state?.newChange === true) {
-        console.error('BLOCKED: 委托 ' + taskId + ' 的 write_files 允许列表为空——新 change 强制委托边界(检查 TASK.md 的 write_files 或 request 显式传 --write-files)');
-        process.exit(1);
-      }
-      const { execSync } = await import('child_process');
-      try {
-        const out = execSync(`git show ${commitHash} --name-only --format=`, { cwd: runRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-        const committedFiles = out.split('\n').map(s => s.trim()).filter(Boolean);
-        // 旧 change 空允许列表:保持跳过(兼容路径,避免历史噪音)
-        if (allowed.length > 0) {
+      if (!isZeroCommit) {
+        const { execSync } = await import('child_process');
+        try {
+          const out = execSync(`git show ${commitHash} --name-only --format=`, { cwd: runRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+          const committedFiles = out.split('\n').map(s => s.trim()).filter(Boolean);
           // 段感知精确匹配(writeFiles 条目按路径段 glob——src/foo 不匹配 src/foobar,
           // src/*.test.js 只匹配 src/ 下一层);*-SUMMARY.md 豁免收窄为精确的任务摘要路径
           // (.specs/<change-id>/<task-id>-SUMMARY.md——flow-comet 强制产物,非越界)
           const summaryExact = '.specs/' + state.activeChange + '/' + taskId + '-SUMMARY.md';
-          const violations = committedFiles.filter(f => f !== summaryExact && !allowed.some(a => matchWriteFilePattern(f, a)));
+          const violations = committedFiles.filter(f => f !== summaryExact && !reqWriteFiles.some(a => matchWriteFilePattern(f, a)));
           if (violations.length > 0) {
             const currentState = await readState();
             if (currentState?.newChange === true) {
@@ -202,9 +212,9 @@ async function main() {
             }
             console.error('HANDOFF WARN: 提交文件超出 writeFiles 范围: ' + violations.join(', '));
           }
+        } catch {
+          console.error('HANDOFF ERROR: commitHash 无效或 git show 失败: ' + commitHash + '——协调者需确认原因(跨仓库 worktree 提交校验降级属预期,确认后继续)');
         }
-      } catch {
-        console.error('HANDOFF ERROR: commitHash 无效或 git show 失败: ' + commitHash + '——协调者需确认原因(跨仓库 worktree 提交校验降级属预期,确认后继续)');
       }
     } else if (typeof parsed === 'object' && parsed !== null && parsed.commitHash) {
       console.error('HANDOFF ERROR: commitHash 格式非法: ' + String(parsed.commitHash) + '——协调者需确认原因并记录(提交对象不可校验时,确认后继续)');
