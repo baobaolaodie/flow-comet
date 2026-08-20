@@ -2450,8 +2450,8 @@ const TEST_ITEMS = [
 
   // K12: 桥接 loader 流程态门断言（B 方案 TDD RED 载体——空闲/异常态行为面，与 K11 运行态分开）：
   //   AC-1 无 state 文件 / AC-2 activeChange 缺失 / AC-3 status completed → 项目外 Write 应
-  //   next() 放行（v1 桥接无条件包含性 deny —— 预期 RED）；AC-7 非法 JSON / AC-8 未知 status →
-  //   fail-closed deny（reason 含拒绝语义；当前无条件 deny 已通过、T02 流程态门落地后必须保持 deny）。
+  //   next() 放行（空闲放行语义由流程态门实现）；AC-7 非法 JSON / AC-8 未知 status →
+  //   fail-closed deny（reason 含拒绝语义；解析失败/未知状态不得当空闲放行）。
   //   复用 K11 安装产物形态：target 为真实 dsh flow-comet 项目（.dsh/skills/flow-comet 就位，
   //   窄监听不跳过——保证当前实现走到包含性 deny 而非被窄监听放行）；mock exec 取协调者身份
   //   （delegationDepth 缺失=0，与 K11 ⑦b 同语义）。import 用 ?query 缓存破除——K11 已在本进程
@@ -2497,7 +2497,7 @@ const TEST_ITEMS = [
         if (fs.existsSync(statePath)) throw new Error('AC-1 前置:目标项目不应有 state 文件');
         let usedNext = false;
         const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
-        if (!usedNext) throw new Error('AC-1 无 state 应放行(next 被调)——当前实现无条件 deny 即预期 RED: ' + JSON.stringify(r));
+        if (!usedNext) throw new Error('AC-1 无 state 应放行(next 被调): ' + JSON.stringify(r));
         if (r) throw new Error('AC-1 无 state 不应返回 deny: ' + JSON.stringify(r));
       }
       // AC-2 无 activeChange：writeState { activeChange:null, status:'running' } + 项目外 Write → next()（当前 RED）
@@ -2505,7 +2505,7 @@ const TEST_ITEMS = [
         writeState(target, { activeChange: null, status: 'running' });
         let usedNext = false;
         const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
-        if (!usedNext) throw new Error('AC-2 activeChange 为空应放行(next 被调)——当前实现无条件 deny 即预期 RED: ' + JSON.stringify(r));
+        if (!usedNext) throw new Error('AC-2 activeChange 为空应放行(next 被调): ' + JSON.stringify(r));
         if (r) throw new Error('AC-2 无 activeChange 不应返回 deny: ' + JSON.stringify(r));
       }
       // AC-3 completed：writeState { activeChange:'x', status:'completed' } + 项目外 Write → next()（当前 RED）
@@ -2513,7 +2513,7 @@ const TEST_ITEMS = [
         writeState(target, { activeChange: 'x', status: 'completed' });
         let usedNext = false;
         const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
-        if (!usedNext) throw new Error('AC-3 status completed 应放行(next 被调)——当前实现无条件 deny 即预期 RED: ' + JSON.stringify(r));
+        if (!usedNext) throw new Error('AC-3 status completed 应放行(next 被调): ' + JSON.stringify(r));
         if (r) throw new Error('AC-3 completed 不应返回 deny: ' + JSON.stringify(r));
       }
       // AC-7 解析失败：state 写成非法 JSON + 项目外 Write → deny（reason 含 fail-closed 拒绝语义；
@@ -2536,7 +2536,24 @@ const TEST_ITEMS = [
         if (!r || r.kind !== 'deny') throw new Error('AC-8 未知 status 应 deny: ' + JSON.stringify(r));
         if (!r.reason.includes('拒绝')) throw new Error('AC-8 deny 应含 fail-closed(拒绝)语义: ' + JSON.stringify(r.reason));
       }
-      console.log('  流程态门断言:AC-1/2/3 空闲放行(当前 RED)·AC-7/8 异常态 fail-closed deny✓');
+      // AC-7b 非对象 JSON（null/标量/数组/字符串）：合法 JSON 但非对象 = 损坏 state → deny（fail-closed）
+      for (const bad of [null, 123, ['x'], 'str']) {
+        writeFile(target, '.comet/flow-comet-state.json', JSON.stringify(bad));
+        let usedNext = false;
+        const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
+        if (usedNext) throw new Error('AC-7b 非对象 state(' + JSON.stringify(bad) + ') 不应 next——必须 fail-closed deny');
+        if (!r || r.kind !== 'deny') throw new Error('AC-7b 非对象 state 应 deny: ' + JSON.stringify(r));
+        if (!r.reason.includes('拒绝')) throw new Error('AC-7b deny 应含 fail-closed(拒绝)语义: ' + JSON.stringify(r.reason));
+      }
+      // AC-3b BOM 前缀 + completed：BOM 容错断言——应被解析并视为空闲放行
+      {
+        writeFile(target, '.comet/flow-comet-state.json', '\uFEFF' + JSON.stringify({ activeChange: 'x', status: 'completed' }));
+        let usedNext = false;
+        const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
+        if (!usedNext) throw new Error('AC-3b BOM+completed 应放行(next 被调)——BOM 容错: ' + JSON.stringify(r));
+        if (r) throw new Error('AC-3b BOM+completed 不应返回 deny: ' + JSON.stringify(r));
+      }
+      console.log('  流程态门断言:AC-1/2/3 空闲放行·AC-3b BOM 容错·AC-7/8/7b 异常态 fail-closed deny✓');
     },
   },
 

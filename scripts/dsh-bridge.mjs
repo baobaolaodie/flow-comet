@@ -142,6 +142,12 @@ export function isPathInsideProjectRoot(projectRoot, filePath) {
 // JSON 解析失败 / 其它读失败 -> { ok:false, reason:'parse-error' }（fail-closed 标记，
 // 不静默当作无 state 放行）。
 // ---------------------------------------------------------------------------
+/**
+ * Read the project flow state with UTF-8 BOM tolerance (mirrors guard readStateJson).
+ * Returns { ok:false, reason:'no-state' } when the file is absent, or
+ * { ok:false, reason:'parse-error' } on read/parse failure or non-object JSON
+ * (fail-closed — never treated as idle), else { ok:true, state }.
+ */
 export function readFlowState(projectRoot) {
   const stateFile = path.join(projectRoot, '.comet', 'flow-comet-state.json');
   let raw;
@@ -157,13 +163,22 @@ export function readFlowState(projectRoot) {
   }
   try {
     // 容忍 UTF-8 BOM（对齐 guard readStateJson L1682-1694 的 BOM strip）
-    return { ok: true, state: JSON.parse(raw.toString('utf8').replace(/^\uFEFF/, '')) };
+    const parsed = JSON.parse(raw.toString('utf8').replace(/^\uFEFF/, ''));
+    // 非对象（null/标量/数组）= 损坏 state：fail-closed，不得当空闲放行
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { ok: false, reason: 'parse-error' };
+    }
+    return { ok: true, state: parsed };
   } catch {
     return { ok: false, reason: 'parse-error' };
   }
 }
 
 // 判定：复用 guard L1882-1895 规则 -> 'idle' | 'running' | 'error'（fail-closed）。
+/**
+ * Classify flow state into 'idle' | 'running' | 'error' (fail-closed),
+ * mirroring comet-hook-guard.mjs L1882-1895.
+ */
 export function judgeFlowState(readResult) {
   if (!readResult.ok) {
     // 无 state 文件 = 无活跃 workflow -> idle；JSON 解析失败 -> error（fail-closed 不视为空闲）
