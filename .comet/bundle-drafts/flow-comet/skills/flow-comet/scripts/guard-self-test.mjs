@@ -3623,6 +3623,433 @@ const SCENARIOS = [
       }
     },
   },
+
+  // ---------- 场景（mechanism-skill-robustness 试先行 RED：共享判定单一来源 / --json-file 消息分级 /
+  // 启发式安全侧边界锚定 / 零提交正式语义 / SUMMARY·TASK7·三文档模板保真 / 技能加载前置门 /
+  // next·entry 输出点名 / 技能加载措辞 / next 进行中节点保护扩展） ----------
+
+  // 154: 疑似对象判定单一来源（DESIGN D1 / AC-1）——workflow-state.mjs 与 workflow-handoff.mjs
+  // 不得各自定义 looksLikeObjectLiteral，必须从 state-schema.mjs import（单一来源 fail-closed）。
+  // 当前两脚本各有一份逐字重复定义、state-schema 无导出 → 预期 RED。
+  {
+    name: '154 疑似对象判定单一来源：state/handoff 从 state-schema import（禁止各自定义）',
+    run: (dir) => {
+      const schemaPath = path.join(__dirname, 'state-schema.mjs');
+      const script = `
+        const fs = require('fs');
+        const state = fs.readFileSync(process.argv[1], 'utf8');
+        const handoff = fs.readFileSync(process.argv[2], 'utf8');
+        const schema = fs.readFileSync(process.argv[3], 'utf8');
+        const issues = [];
+        if (/function\\s+looksLikeObjectLiteral\\s*\\(/.test(state)) issues.push('workflow-state.mjs 仍自带 looksLikeObjectLiteral 定义');
+        if (/function\\s+looksLikeObjectLiteral\\s*\\(/.test(handoff)) issues.push('workflow-handoff.mjs 仍自带 looksLikeObjectLiteral 定义');
+        if (!/looksLikeObjectLiteral/.test(schema)) issues.push('state-schema.mjs 未导出共享判定');
+        if (!/import\\s*\\{[^}]*looksLikeObjectLiteral[^}]*\\}\\s*from\\s*['"]\\.\\/state-schema\\.mjs['"]/.test(state)) issues.push('workflow-state.mjs 未从 state-schema.mjs import');
+        if (!/import\\s*\\{[^}]*looksLikeObjectLiteral[^}]*\\}\\s*from\\s*['"]\\.\\/state-schema\\.mjs['"]/.test(handoff)) issues.push('workflow-handoff.mjs 未从 state-schema.mjs import');
+        if (issues.length > 0) { console.error(issues.join('; ')); process.exit(1); }
+        console.log('SINGLE SOURCE OK');
+      `;
+      const res = spawnSync(process.execPath, ['-e', script, STATE, HANDOFF, schemaPath], { encoding: 'utf8', timeout: 60000 });
+      assertExit(res, 0);
+      assertOut(res, 'SINGLE SOURCE OK');
+    },
+  },
+
+  // 155: record 契约解析失败消息分级（DESIGN D2 / AC-3）——--json-file 传入损坏 JSON（以 { 开头）
+  // → 报"文件内容不是合法 JSON" + 长度元数据，且不再建议使用 --json-file；内联传参损坏仍建议
+  // --json-file。当前两分支同一英文文案（都建议 use --json-file）→ ① 断言 RED。
+  {
+    name: '155 record 契约解析失败消息分级：--json-file 损坏提示非合法；内联仍提示 --json-file',
+    run: (dir) => {
+      const st = baseState('open');
+      st.evidence.open = { summary: 'intake complete' };
+      writeState(dir, st);
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      // ① --json-file 指向损坏 JSON（以 { 开头）→ "不是合法 JSON" + 长度元数据，不再建议 --json-file
+      writeFile(dir, 'payload.json', '{summary: "broken", completedChecks: ["x"]');
+      const resFile = runState(['record', 'open', '--json-file', 'payload.json'], dir, env);
+      assertExit(resFile, 1);
+      assertNotOut(resFile, '--json-file');
+      assertOut(resFile, '不是合法 JSON');
+      assertOut(resFile, 'length=');
+      // ② 内联传参损坏（以 { 开头）→ 仍建议 --json-file（既有语义保留）
+      const bad = '{summary: "broken"';
+      const resInline = runState(['record', 'open', bad], dir, env);
+      assertExit(resInline, 1);
+      assertOut(resInline, '--json-file');
+    },
+  },
+
+  // 156: 疑似对象启发式安全侧边界锚定（DESIGN D3 / AC-4）——内联纯文本恰好以 [ 开头 → 启发式判为
+  // 疑似对象、JSON.parse 失败 → fail-closed（exit 1 + 提示、不落库）。当前即如此 → 本场景 GREEN
+  // （只锚定现状，不改行为）。
+  {
+    name: '156 启发式安全侧边界：内联纯文本以 [ 开头 → fail-closed（锚定现状）',
+    run: (dir) => {
+      const st = baseState('open');
+      st.evidence.open = { summary: 'intake complete' };
+      writeState(dir, st);
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const res = runState(['record', 'open', '[plain-text-not-json'], dir, env);
+      assertExit(res, 1);
+      if (!/--json-file|not valid JSON|不是合法 JSON/.test(res.output)) {
+        throw new Error('fail-closed 应有提示（--json-file / not valid JSON / 不是合法 JSON），实际输出: ' + res.output);
+      }
+      // fail-closed：evidence 不被污染
+      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      if (!st2.evidence.open || st2.evidence.open.summary !== 'intake complete') {
+        throw new Error('纯文本以 [ 开头应 fail-closed 不落库，state 被污染: ' + JSON.stringify(st2.evidence.open));
+      }
+    },
+  },
+
+  // 157: 零提交任务正例（DESIGN D4 / AC-5）——request write_files 为空 + 契约显式 noCommit + result
+  // 无任何提交 → 跳过提交文件子集校验并输出可审计"零提交"提示（不误 BLOCK）。当前无 noCommit 概念：
+  // 新 change 空 write_files 结果反而被"允许列表为空"拦 BLOCK → 预期 RED。
+  {
+    name: '157 零提交正例：write_files 空 + 契约 noCommit → 跳过提交校验 + 可审计提示',
+    run: (dir) => {
+      const st = baseState('subagent-execute');
+      st.newChange = true;
+      st.evidence['subagent-execute'] = { handoffRequests: { T01: { description: 'zero-commit task', writeFiles: [] } } };
+      writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="T01" status="done"><action>only docs already tracked</action><write_files></write_files><verify>node --check src/t1.mjs</verify></task>\n');
+      const res = runHandoff(['result', 'T01', JSON.stringify({
+        status: 'DONE', taskId: 'T01', noCommit: true,
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        redEvidence: { command: 'node --check src/t1.mjs', output: 'no output（RED 锚点）' },
+        greenEvidence: { command: 'node --check src/t1.mjs', output: 'ok' },
+      })], dir);
+      assertExit(res, 0);
+      assertOut(res, '零提交');
+    },
+  },
+
+  // 158: 零提交滥用负例（DESIGN D5 / AC-6）——write_files 非空任务的结果契约声称 noCommit →
+  // 不得借零提交声明绕过真实提交检查：仍走完整提交文件子集校验（越界 → 新 change BLOCK），且输出
+  // 可审计的"零提交声明与 write_files 非空矛盾"提示。当前无 noCommit 概念（完整校验本身已生效，
+  // RED 来自缺失的机制审计提示）→ 预期 RED。
+  {
+    name: '158 零提交滥用负例：write_files 非空 + 声称 noCommit → 仍完整校验 + 矛盾审计提示',
+    run: (dir) => {
+      const g = (args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
+      g(['init', '-q']);
+      g(['config', 'user.email', 't@t']);
+      g(['config', 'user.name', 't']);
+      writeFile(dir, 'allowed.js', 'export const allowed = 1;\n');
+      writeFile(dir, 'rogue.js', 'export const rogue = 1;\n');
+      g(['add', 'allowed.js', 'rogue.js']);
+      g(['commit', '-qm', 'init']);
+      const hash = g(['rev-parse', 'HEAD']).stdout.trim();
+      const st = baseState('subagent-execute');
+      st.newChange = true;
+      st.evidence['subagent-execute'] = { handoffRequests: { T01: { description: 'normal task', writeFiles: ['allowed.js'] } } };
+      writeState(dir, st);
+      const res = runHandoff(['result', 'T01', JSON.stringify({
+        status: 'DONE', taskId: 'T01', noCommit: true, commitHash: hash,
+        changedFiles: ['allowed.js', 'rogue.js'],
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        redEvidence: { command: 'node --check allowed.js', output: 'no output（RED 锚点）' },
+        greenEvidence: { command: 'node --check allowed.js', output: 'ok' },
+      })], dir);
+      assertExit(res, 1);
+      assertOut(res, '超出 writeFiles 范围');
+      assertOut(res, '零提交');
+    },
+  },
+
+  // 159: SUMMARY 模板保真（DESIGN D6 / AC-7）——execute 出口每份 *-SUMMARY.md 须含 `# SUMMARY:` 标题 +
+  // 首部 4 字段（Change ID/Task ID/完成时间/AI 角色）+ 段序（含 flow-comet 增量 ## 自检方法 段）。
+  // 缺任一：新 change BLOCK（exit 1 + 缺失点与恢复指引）；合法变体（编号前缀/括号后缀/大小写）通过；
+  // 旧 change → WARN 渐进。当前 guard 只查 verify输出/6维自查/越界检查 3 段存在 → 缺标题等场景 RED。
+  {
+    name: '159 execute exit SUMMARY 模板保真：缺标题/首部/段序新 BLOCK，合法变体通过，旧 WARN',
+    run: (dir) => {
+      const marker = () => {
+        fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
+        writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/execute-flow-comet-dev.json',
+          JSON.stringify({ node: 'execute', skill: 'flow-comet-dev', protocol: '4-dev.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+      };
+      const header = [
+        '- **Change ID**: ' + CHANGE_ID,
+        '- **Task ID**: T01',
+        '- **完成时间**: 2026-08-20 10:00',
+        '- **AI 角色**: Dev',
+      ].join('\n');
+      const sections = [
+        '## 做了什么\n\n实现 T01（TDD：先写失败场景再实现）。',
+        '## 改动文件\n\n| 文件 | 性质 | 说明 |\n|---|---|---|\n| src/t1.mjs | 修改 | 实现 T01 |',
+        '## verify 输出\n\n```\nnode --check src/t1.mjs\n```',
+        '## 6 维自查\n\n- 功能: 通过（brooks-review 已跑）\n- 性能: 无影响\n- 安全: 无影响\n- 兼容: 通过\n- 可观测: 通过\n- 可维护: 通过',
+        '## 越界检查\n\n仅修改 src/t1.mjs，无越界。',
+        '## 自检方法\n\nbrooks-review',
+      ];
+      const compose = (title, order) =>
+        [title, '', header, '', '---', '', order.join('\n\n')].join('\n');
+      const setupExecute = (newChange) => {
+        const st = baseState('execute');
+        st.evidence.execute = { summary: 'executed' };
+        st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
+        if (newChange) { st.newChange = true; st.enteredNodes = ['execute']; }
+        writeState(dir, st);
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
+        marker();
+      };
+      // ① 新 change：缺 `# SUMMARY:` 标题（段齐全）→ BLOCK
+      setupExecute(true);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# T01-SUMMARY', sections));
+      const res1 = runGuard(['exit', 'execute'], dir);
+      assertExit(res1, 1);
+      assertOut(res1, 'BLOCKED');
+      assertOut(res1, '# SUMMARY:');
+      // ② 新 change：标题在但首部缺字段（仅 2 字段）→ BLOCK
+      const headerMissing = [
+        '- **Change ID**: ' + CHANGE_ID,
+        '- **Task ID**: T01',
+      ].join('\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md',
+        ['# SUMMARY: T01 - 实现 T01', '', headerMissing, '', '---', '', sections.join('\n\n')].join('\n'));
+      const res2 = runGuard(['exit', 'execute'], dir);
+      assertExit(res2, 1);
+      assertOut(res2, 'BLOCKED');
+      // ③ 新 change：段序乱（自检方法提前、做了什么滞后）→ BLOCK
+      const scrambled = [sections[2], sections[4], sections[3], sections[5], sections[0], sections[1]];
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# SUMMARY: T01 - 实现 T01', scrambled));
+      const res3 = runGuard(['exit', 'execute'], dir);
+      assertExit(res3, 1);
+      assertOut(res3, 'BLOCKED');
+      // ④ 合法变体：大小写（# Summary: …）→ 通过
+      setupExecute(true);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# Summary: T01 - 实现 T01', sections));
+      const res4 = runGuard(['exit', 'execute'], dir);
+      assertExit(res4, 0);
+      assertOut(res4, 'ALL CHECKS PASSED');
+      // ⑤ 合法变体：括号后缀 → 通过
+      setupExecute(true);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# SUMMARY: T01 - 实现 T01（含说明括号）', sections));
+      const res5 = runGuard(['exit', 'execute'], dir);
+      assertExit(res5, 0);
+      assertOut(res5, 'ALL CHECKS PASSED');
+      // ⑥ 旧 change：缺标题 → WARN 渐进不阻断
+      setupExecute(false);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# T01-SUMMARY', sections));
+      const res6 = runGuard(['exit', 'execute'], dir);
+      assertExit(res6, 0);
+      assertOut(res6, 'WARN');
+    },
+  },
+
+  // 160: plan exit TASK 7 字段完整性（DESIGN D7 / AC-8）——每个 <task> 须含 name/read_files/
+  // write_files/action/verify/done/depends_on。缺任一：新 BLOCK；旧 WARN。当前 guard 只查
+  // <verify> 存在 → 缺 write_files 场景新 change 应 BLOCK 却放行 → 预期 RED。
+  {
+    name: '160 plan exit TASK 7 字段：缺 write_files 新 BLOCK / 旧 WARN',
+    run: (dir) => {
+      const missingWrite =
+        '<task id="T01" status="pending"><name>任务一</name><read_files>src/*</read_files><action>实现 T01</action><verify>node --check src/t1.mjs</verify><done>AC-1</done><depends_on></depends_on></task>\n';
+      const addPlanMarker = () => {
+        fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
+        writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/plan-flow-comet-task.json',
+          JSON.stringify({ node: 'plan', skill: 'flow-comet-task', protocol: '3-task.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+      };
+      // ① 新 change：缺 write_files → BLOCK（含字段名）
+      const st = baseState('plan');
+      st.evidence.plan = { summary: 'plan done' };
+      st.newChange = true;
+      writeState(dir, st);
+      addPlanMarker();
+      const res = runPlanExit(dir, missingWrite);
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, 'write_files');
+      // ② 旧 change：同构造 → WARN 渐进不阻断
+      const stOld = baseState('plan');
+      stOld.evidence.plan = { summary: 'plan done' };
+      writeState(dir, stOld);
+      addPlanMarker();
+      const resOld = runPlanExit(dir, missingWrite);
+      assertExit(resOld, 0);
+      assertOut(resOld, 'WARN');
+    },
+  },
+
+  // 161: open/design 出口 CHANGE/REQUIREMENT/DESIGN 模板保真（DESIGN D8 / AC-9）——标题
+  // （# CHANGE: / # REQUIREMENT: / # DESIGN:）+ 首部 + 段序（模板派生宽松匹配，编号前缀/括号
+  // 后缀/大小写兼容，防误拦）。缺任一：新 BLOCK；旧 WARN。当前 guard 只查 Why/用户故事/AC/
+  // 决策清单等单段存在 → 缺标题场景新 change 应 BLOCK 却放行 → 预期 RED。
+  {
+    name: '161 open/design 出口三文档模板保真：缺标题新 BLOCK / 旧 WARN',
+    run: (dir) => {
+      const addOpenMarker = () => {
+        fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
+        writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-change.json',
+          JSON.stringify({ node: 'open', skill: 'flow-comet-change', protocol: '0-change.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+      };
+      const addDesignMarker = () => {
+        fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
+        writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/design-flow-comet-design.json',
+          JSON.stringify({ node: 'design', skill: 'flow-comet-design', protocol: '2-design.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+      };
+      // ① open 出口 新 change：REQUIREMENT 缺 `# REQUIREMENT:` 标题（段齐全）→ BLOCK
+      const stOpen = baseState('open');
+      stOpen.evidence.open = { summary: 'intake complete' };
+      stOpen.newChange = true;
+      stOpen.enteredNodes = ['open'];
+      writeState(dir, stOpen);
+      addOpenMarker();
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# 变更文档\n\n## Why（为什么做）\n\n原因。\n\n## 范围（Scope）\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# 需求文档\n\n## 用户故事\n\n- US-1 作为维护者……\n\n## 验收准则（AC）\n\n- Given X When Y Then Z\n');
+      const resOpen = runGuard(['exit', 'open'], dir);
+      assertExit(resOpen, 1);
+      assertOut(resOpen, 'BLOCKED');
+      assertOut(resOpen, 'REQUIREMENT');
+      // ② design 出口 新 change：DESIGN 缺 `# DESIGN:` 标题（段齐全）→ BLOCK
+      const stDesign = baseState('design');
+      stDesign.evidence.design = { summary: 'design done' };
+      stDesign.newChange = true;
+      stDesign.enteredNodes = ['design'];
+      writeState(dir, stDesign);
+      addDesignMarker();
+      writeFile(dir, 'flow-kit/templates/DESIGN.md', '# DESIGN 模板\n\n## 0. 技术栈选型\n## 1. 技术决策清单\n## 2. 数据流\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# 设计文档\n\n## 0. 技术栈选型\n\n- 选定：Node.js\n\n## 决策清单\n\n| # | 决策 | 选择 | 理由 |\n|---|---|---|---|\n| D1 | X | Y | Z |\n');
+      const resDesign = runGuard(['exit', 'design'], dir);
+      assertExit(resDesign, 1);
+      assertOut(resDesign, 'BLOCKED');
+      assertOut(resDesign, 'DESIGN');
+      // ③ 旧 change open 同构造（REQUIREMENT 缺标题）→ WARN 渐进不阻断
+      const stOld = baseState('open');
+      stOld.evidence.open = { summary: 'intake complete' };
+      writeState(dir, stOld);
+      addOpenMarker();
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# 变更文档\n\n## Why（为什么做）\n\n原因。\n\n## 范围（Scope）\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# 需求文档\n\n## 用户故事\n\n- US-1 作为维护者……\n\n## 验收准则（AC）\n\n- Given X When Y Then Z\n');
+      const resOld = runGuard(['exit', 'open'], dir);
+      assertExit(resOld, 0);
+      assertOut(resOld, 'WARN');
+    },
+  },
+
+  // 162: 技能加载前置门（DESIGN D9/D10 / AC-10）——新 change：handoff request 无本节点声明标记
+  // 应 BLOCK；record 无声明（payload 不含 completedChecks）应 BLOCK；旧 change → WARN 渐进。
+  // 当前 request 不查声明、record 靠 M5 自动补 → 不拦 → 预期 RED。
+  {
+    name: '162 技能加载前置门：request/record 无声明新 BLOCK / 旧 WARN',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      // ① handoff request 前置门：新 change、subagent-execute 节点无声明标记 → BLOCK
+      const stReq = baseState('subagent-execute');
+      stReq.newChange = true;
+      writeState(dir, stReq);
+      const resReq = runHandoff(['request', 'T01', 'delegate parallel task'], dir);
+      assertExit(resReq, 1);
+      assertOut(resReq, '先加载技能');
+      // ② record 前置门：新 change、plan 节点无声明标记、payload 不含 completedChecks → BLOCK
+      const stRec = baseState('plan');
+      stRec.newChange = true;
+      writeState(dir, stRec);
+      const resRec = runState(['record', 'plan', '{"summary":"plan done"}'], dir, env);
+      assertExit(resRec, 1);
+      assertOut(resRec, '先加载技能');
+      // ③ 旧 change：record 无声明 → WARN 渐进不阻断
+      const stOld = baseState('plan');
+      writeState(dir, stOld);
+      const resOld = runState(['record', 'plan', '{"summary":"plan done"}'], dir, env);
+      assertExit(resOld, 0);
+      assertOut(resOld, 'WARN');
+    },
+  },
+
+  // 163: next / guard entry 输出点名加载（DESIGN D15 / AC-17）——`workflow-state next` 与
+  // `workflow-guard entry` 输出应含 `LOAD SKILL: <skill>（用 Skill 工具，禁止跳过）`。
+  // 当前 printNext / entry 无该行 → 预期 RED。
+  {
+    name: '163 next / entry 输出点名 LOAD SKILL：用 Skill 工具，禁止跳过',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      // ① next：open 节点 → 输出点名 flow-comet-open
+      fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
+      const st = baseState('open');
+      st.evidence.open = { summary: 'intake complete' };
+      writeState(dir, st);
+      const resNext = runState(['next'], dir, env);
+      assertExit(resNext, 0);
+      assertOut(resNext, 'LOAD SKILL: flow-comet-open');
+      assertOut(resNext, '禁止跳过');
+      // ② guard entry：plan 节点 → 输出点名 flow-comet-plan
+      const st2 = baseState('plan');
+      writeState(dir, st2);
+      const resEntry = runGuard(['entry', 'plan'], dir, env);
+      assertExit(resEntry, 0);
+      assertOut(resEntry, 'LOAD SKILL: flow-comet-plan');
+      assertOut(resEntry, '禁止跳过');
+    },
+  },
+
+  // 164: 技能加载措辞（DESIGN D15 / AC-16）——主 SKILL（SKILL.md / GUIDANCE.md）与节点 SKILL
+  // 须含「Skill 工具」与「不得跳过/禁止跳过」。当前主 SKILL 已含、部分节点 SKILL 已含，但
+  // open/design/plan/verify/archive 等节点 SKILL 缺 → 预期 RED。
+  {
+    name: '164 技能加载措辞：主 SKILL 与节点 SKILL 含 Skill 工具 + 不得/禁止跳过',
+    run: (dir) => {
+      const files = [
+        path.join(__dirname, '..', 'SKILL.md'),
+        path.join(__dirname, '..', 'GUIDANCE.md'),
+        ...['flow-comet-open', 'flow-comet-design', 'flow-comet-plan', 'flow-comet-execute',
+          'flow-comet-subagent-execute', 'flow-comet-review', 'flow-comet-verify', 'flow-comet-archive']
+          .map((s) => path.join(__dirname, '..', '..', s, 'SKILL.md')),
+      ];
+      const relativeBase = path.join(__dirname, '..', '..', '..');
+      const missing = [];
+      for (const f of files) {
+        const text = fs.readFileSync(f, 'utf8');
+        const hasTool = text.includes('Skill 工具');
+        const hasSkip = text.includes('不得跳过') || text.includes('禁止跳过');
+        if (!hasTool || !hasSkip) {
+          const why = !hasTool && !hasSkip ? '缺「Skill 工具」与「不得/禁止跳过」' : (hasTool ? '缺「不得/禁止跳过」' : '缺「Skill 工具」');
+          missing.push(path.relative(relativeBase, f) + ' ' + why);
+        }
+      }
+      if (missing.length > 0) {
+        throw new Error('技能加载措辞缺失: ' + missing.join('; '));
+      }
+    },
+  },
+
+  // 165: next 进行中节点保护扩展（承接 S137）——已 entry 但未 record 的节点（enteredNodes 含 plan、
+  // TASK.md 存在、无 evidence.plan）跑 next → 不得把 currentNode 推走（保持 plan，输出 NODE: plan）。
+  // 当前保护只看 evidence（record 过）→ 会把 currentNode 推到 execute → 预期 RED。
+  {
+    name: '165 next 保护扩展：entered 未 record 节点不推走（保持 plan）',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why（为什么做）\n\nx');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\nx\n\n## 验收准则（AC）\n\n- Given x When y Then z');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n## 0. 技术栈选型\n\n- 选定：Node\n\n## 1. 技术决策清单\n\n| # | D | R |\n|---|---|---|\n| D1 | x | y |');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_SERIAL_PENDING);
+      const st = {
+        activeChange: CHANGE_ID,
+        currentNode: 'plan',
+        completedNodes: ['open', 'design'],
+        enteredNodes: ['open', 'design', 'plan'],
+        evidence: {
+          open: { summary: 'intake complete' },
+          design: { summary: 'design done' },
+        },
+        verifyFailures: 0,
+        executionMode: 'subagent',
+        directOverride: false,
+      };
+      writeState(dir, st);
+      const res = runState(['next'], dir, env);
+      assertExit(res, 0);
+      assertOut(res, 'NODE: plan');
+      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      if (st2.currentNode !== 'plan') {
+        throw new Error('entered 未 record 的节点不应被推进，currentNode 应为 plan，实际: ' + st2.currentNode);
+      }
+    },
+  },
 ];
 
 // ---------- 运行 ----------
