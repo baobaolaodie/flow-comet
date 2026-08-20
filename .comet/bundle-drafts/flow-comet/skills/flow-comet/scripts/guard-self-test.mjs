@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · flow-comet 引擎自测套件（144 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、场景数一致性自检、prepare-env 平台选择链）
+// C1 · flow-comet 引擎自测套件（153 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、波次分组合法性与契约解析失败检测、场景数一致性自检、prepare-env 平台选择链）
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -7,7 +7,7 @@
 // （COMET_RUN_ROOT=<临时目录>）→ 断言退出码与输出关键词。场景跑完 rmSync 清理。
 //
 // 运行: node scripts/guard-self-test.mjs
-// 全过 → exit 0，输出 ALL 144 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
+// 全过 → exit 0，输出 ALL 153 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
 //
 // 仅 node 内置模块（child_process/fs/os/path）；无网络；不依赖 flow-kit 模板目录
 // 存在（fallback 场景用内置段名；部分场景复制模板文件进临时目录验证 C2 模板派生）。
@@ -384,6 +384,50 @@ const TASK_T03_PENDING =
 // review/verify 阶段追加的 pending 修复任务（标准回退路径触发源）
 const TASK_TFIX =
   '<task id="T-FIX-01" status="pending"><action>修复 verify 发现的缺陷</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n';
+
+// ---------- 波次分组合法性场景任务集（T01 新增） ----------
+// parallel="true" = 并行任务，parallel="false"/缺省 = 串行任务；序列判定以 <task> 块出现顺序为准。
+// 串→并→串（S→P→S）：串行 T01 → 并行 P01/P02 → 串行 T02（混排，禁止）
+const TASK_MIXED_SPS =
+  '<task id="T01" parallel="false" status="pending"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n' +
+  '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify><depends_on>T01</depends_on></task>\n' +
+  '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>src/p2.mjs</write_files><verify>node --check src/p2.mjs</verify><depends_on>T01</depends_on></task>\n' +
+  '<task id="T02" parallel="false" status="pending"><action>实现 T02</action><write_files>src/t2.mjs</write_files><verify>node --check src/t2.mjs</verify><depends_on>P01,P02</depends_on></task>\n';
+// 并→串→并（P→S→P）：并行 P01/P02 → 串行 T01 → 并行 P03/P04（混排，禁止）
+const TASK_MIXED_PSP =
+  '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n' +
+  '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>src/p2.mjs</write_files><verify>node --check src/p2.mjs</verify></task>\n' +
+  '<task id="T01" parallel="false" status="pending"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify><depends_on>P01,P02</depends_on></task>\n' +
+  '<task id="P03" parallel="true" status="pending"><action>实现 P03</action><write_files>src/p3.mjs</write_files><verify>node --check src/p3.mjs</verify><depends_on>T01</depends_on></task>\n' +
+  '<task id="P04" parallel="true" status="pending"><action>实现 P04</action><write_files>src/p4.mjs</write_files><verify>node --check src/p4.mjs</verify><depends_on>T01</depends_on></task>\n';
+// 并存前+串在后（P→S）：并行 P01/P02 → 串行 T01（合法成组）
+const TASK_VALID_PS =
+  '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n' +
+  '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>src/p2.mjs</write_files><verify>node --check src/p2.mjs</verify></task>\n' +
+  '<task id="T01" parallel="false" status="pending"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify><depends_on>P01,P02</depends_on></task>\n';
+// 串在前+并在后（S→P）：串行 T01 → 并行 P01/P02（合法成组）
+const TASK_VALID_SP =
+  '<task id="T01" parallel="false" status="pending"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n' +
+  '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify><depends_on>T01</depends_on></task>\n' +
+  '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>src/p2.mjs</write_files><verify>node --check src/p2.mjs</verify><depends_on>T01</depends_on></task>\n';
+// 全串行（全 S）
+const TASK_VALID_ALL_SERIAL =
+  '<task id="T01" parallel="false" status="pending"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n' +
+  '<task id="T02" parallel="false" status="pending"><action>实现 T02</action><write_files>src/t2.mjs</write_files><verify>node --check src/t2.mjs</verify><depends_on>T01</depends_on></task>\n';
+// 全并行（全 P，单连续并行块）
+const TASK_VALID_ALL_PARALLEL =
+  '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n' +
+  '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>src/p2.mjs</write_files><verify>node --check src/p2.mjs</verify></task>\n' +
+  '<task id="P03" parallel="true" status="pending"><action>实现 P03</action><write_files>src/p3.mjs</write_files><verify>node --check src/p3.mjs</verify></task>\n' +
+  '<task id="P04" parallel="true" status="pending"><action>实现 P04</action><write_files>src/p4.mjs</write_files><verify>node --check src/p4.mjs</verify></task>\n';
+
+// 波次分组场景公共路径：注入 TASK.md → entry plan（记录 enteredNodes，新 change 强制先 entry；
+// 旧 change 亦先 entry 避免 ENTER WARN 干扰断言）→ exit plan。返回 exit plan 结果。
+function runPlanExit(dir, taskContent) {
+  writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n## 任务清单\n\n' + taskContent);
+  assertExit(runGuard(['entry', 'plan'], dir), 0);
+  return runGuard(['exit', 'plan'], dir);
+}
 
 // ---------- 17 个场景 ----------
 
@@ -3417,6 +3461,155 @@ const SCENARIOS = [
       const patch = fs.readFileSync(path.join(dshHome, 'cordis.patch.yml'), 'utf8');
       const patchBlocks = patch.split('# --- flow-comet managed ---').length - 1;
       if (patchBlocks !== 1) throw new Error('cordis.patch.yml 托管块重复注入: ' + patchBlocks);
+    },
+  },
+
+  // ----------  场景（波次分组合法性——plan exit——T01 新增：新 change 混排 BLOCK / 合法成组放行 / 旧 change 渐进） ----------
+
+  // 145: 新 change（newChange:true）+ 串→并→串（S→P→S）TASK → exit plan 应 BLOCK（含恢复指引）。
+  // 当前实现无波次分组一致性校验 → exit 0 静默放行 = 预期 RED（波次混排被放行，AC-1 需求未实现）
+  {
+    name: '145 plan exit BLOCKED：新 change 串→并→串波次混排',
+    run: (dir) => {
+      const st = baseState('plan');
+      st.evidence.plan = { summary: 'plan done' };
+      st.newChange = true;
+      writeState(dir, st);
+      const res = runPlanExit(dir, TASK_MIXED_SPS);
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, '波次');
+    },
+  },
+
+  // 146: 新 change + 并→串→并（P→S→P）TASK → exit plan 应 BLOCK。当前实现同样静默放行 = RED
+  {
+    name: '146 plan exit BLOCKED：新 change 并→串→并波次混排',
+    run: (dir) => {
+      const st = baseState('plan');
+      st.evidence.plan = { summary: 'plan done' };
+      st.newChange = true;
+      writeState(dir, st);
+      const res = runPlanExit(dir, TASK_MIXED_PSP);
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, '波次');
+    },
+  },
+
+  // 147: 新 change + 并在前+串在后（P→S）→ 放行（合法成组，不误报；T02 实现后也必须通过）
+  {
+    name: '147 plan exit 通过：新 change 并存前+串在后（P→S）',
+    run: (dir) => {
+      const st = baseState('plan');
+      st.evidence.plan = { summary: 'plan done' };
+      st.newChange = true;
+      writeState(dir, st);
+      const res = runPlanExit(dir, TASK_VALID_PS);
+      assertExit(res, 0);
+      assertOut(res, 'ALL CHECKS PASSED');
+    },
+  },
+
+  // 148: 新 change + 串在前+并在后（S→P）→ 放行（合法成组）
+  {
+    name: '148 plan exit 通过：新 change 串在前+并在后（S→P）',
+    run: (dir) => {
+      const st = baseState('plan');
+      st.evidence.plan = { summary: 'plan done' };
+      st.newChange = true;
+      writeState(dir, st);
+      const res = runPlanExit(dir, TASK_VALID_SP);
+      assertExit(res, 0);
+      assertOut(res, 'ALL CHECKS PASSED');
+    },
+  },
+
+  // 149: 新 change + 全串行 → 放行（合法成组）
+  {
+    name: '149 plan exit 通过：新 change 全串行',
+    run: (dir) => {
+      const st = baseState('plan');
+      st.evidence.plan = { summary: 'plan done' };
+      st.newChange = true;
+      writeState(dir, st);
+      const res = runPlanExit(dir, TASK_VALID_ALL_SERIAL);
+      assertExit(res, 0);
+      assertOut(res, 'ALL CHECKS PASSED');
+    },
+  },
+
+  // 150: 新 change + 全并行 → 放行（单连续并行块，合法成组）
+  {
+    name: '150 plan exit 通过：新 change 全并行',
+    run: (dir) => {
+      const st = baseState('plan');
+      st.evidence.plan = { summary: 'plan done' };
+      st.newChange = true;
+      writeState(dir, st);
+      const res = runPlanExit(dir, TASK_VALID_ALL_PARALLEL);
+      assertExit(res, 0);
+      assertOut(res, 'ALL CHECKS PASSED');
+    },
+  },
+
+  // 151: 旧 change（无 newChange）+ 混排 → 不 BLOCK（渐进 WARN——T02 实现后输出 WARN 不阻断；
+  // T01 阶段当前无波次校验即 exit 0 放行，断言锁"不阻断"防 T02 误升级 BLOCK 回归）
+  {
+    name: '151 plan exit 兼容：旧 change 波次混排不 BLOCK（渐进）',
+    run: (dir) => {
+      const st = baseState('plan');
+      st.evidence.plan = { summary: 'plan done' };
+      // 无 newChange（旧 change）
+      writeState(dir, st);
+      const res = runPlanExit(dir, TASK_MIXED_SPS);
+      assertExit(res, 0);
+      assertNotOut(res, 'BLOCKED');
+    },
+  },
+
+  // ----------  场景（契约解析失败检测——record / workflow-handoff result——T01 新增：疑似对象解析失败 fail-closed） ----------
+
+  // 152: record 收到形似对象字面量（{ 开头 / 含 : 或 [）但 JSON.parse 失败的 payload → 应报错含
+  // --json-file 提示且不写 evidence。当前实现把不可解析 raw 静默作 summary 字符串落库 = 预期 RED（静默落脏）
+  {
+    name: '152 record 疑似对象解析失败 → 报错含 --json-file 且不写 evidence',
+    run: (dir) => {
+      const st = baseState('open');
+      st.evidence.open = { summary: 'intake complete' };
+      writeState(dir, st);
+      // 形似对象字面量但未闭合（PowerShell 剥离内嵌引号后常见的损坏 JSON 形态）
+      const bad = '{summary: "intake", completedChecks: ["unit-tests"]';
+      const res = runState(['record', 'open', bad], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 1);
+      assertOut(res, '--json-file');
+      // fail-closed：state 文件须保持原样（evidence.open 未被脏字符串污染）
+      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      if (!st2.evidence.open || st2.evidence.open.summary !== 'intake complete') {
+        throw new Error('record 解析失败后仍写入了 evidence（应 fail-closed 不落库）: ' + JSON.stringify(st2.evidence.open));
+      }
+    },
+  },
+
+  // 153: workflow-handoff result 收到形似对象但 JSON.parse 失败的 payload → 应报错含 --json-file
+  // 且不写 handoffResult。当前实现把不可解析 raw 静默作字符串存入 handoffResult = 预期 RED（静默落脏）
+  {
+    name: '153 handoff result 疑似对象解析失败 → 报错含 --json-file 且不写 handoffResult',
+    run: (dir) => {
+      const st = baseState('subagent-execute');
+      st.evidence['subagent-execute'] = { handoffRequest: { T01: { taskId: 'T01' } } };
+      writeState(dir, st);
+      // 形似对象字面量但未闭合（损坏的 Return Contract JSON）
+      const bad = '{"commitHash": "abcd1234", "completedChecks": ["required-skill:';
+      const res = runHandoff(['result', 'T01', bad], dir);
+      assertExit(res, 1);
+      assertOut(res, '--json-file');
+      // fail-closed：handoffResult 不得写入
+      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const hr = st2.evidence && st2.evidence['subagent-execute'] && st2.evidence['subagent-execute'].handoffResult;
+      if (hr && hr.T01) {
+        throw new Error('handoff result 解析失败后仍写入了 handoffResult（应 fail-closed 不落库）: ' + JSON.stringify(hr.T01));
+      }
     },
   },
 ];
