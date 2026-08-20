@@ -38,9 +38,9 @@ async function fileExists(file) {
   try { await fs.access(file); return true; } catch { return false; }
 }
 
-// 契约解析失败判定（DESIGN D3）:trim 后以 {/[ 开头,或含 :/; → 视作"形似对象字面量"
+// 契约解析失败判定（DESIGN 决策）:trim 后以 {/[ 开头,或含 :/; → 视作"形似对象字面量"
 // （常见于 PowerShell/cmd 剥离内嵌引号后的损坏 JSON 形态）。若形似对象却 JSON.parse 失败
-// → fail-closed（D4:报错含 --json-file 提示、退出、不写 state）,避免"以为记了实际没记"
+// → fail-closed（报错含 --json-file 提示、退出、不写 state）,避免"以为记了实际没记"
 function looksLikeObjectLiteral(raw) {
   const text = String(raw ?? '').trim();
   if (text.startsWith('{') || text.startsWith('[')) return true;
@@ -952,7 +952,7 @@ async function main() {
       parsed = raw ? JSON.parse(raw) : {};
       if (typeof parsed !== 'object' || Array.isArray(parsed)) parsed = { summary: String(parsed) };
     } catch {
-      // D4 契约解析失败 fail-closed:payload 形似对象但 JSON.parse 失败 → 报错(含
+      // 契约解析失败 fail-closed:payload 形似对象但 JSON.parse 失败 → 报错(含
       // --json-file 提示与原因)并 process.exit(1),不写 evidence——防状态污染
       // （旧语义把不可解析 raw 静默作 summary 字符串落库 = 静默落脏;--json-file 是
       // 正路径,规避 Windows 传参剥离内嵌双引号导致的 JSON 损坏）

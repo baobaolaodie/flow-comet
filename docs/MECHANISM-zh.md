@@ -33,10 +33,12 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 | 节点顺序 BLOCK | next 时 currentNode 未 exit（非正常推进后继）→ BLOCKED；exit 推进后正常 next 豁免；回退豁免 | next |
 | handoff completedChecks | 子代理 Return Contract 必须含 required-skill completedChecks（skill 加载证据），缺失 → BLOCKED | exit subagent-execute |
 | redEvidence 时序 | redEvidence 必须先于 greenEvidence 真实存在；已记录 greenEvidence 后补录 redEvidence → BLOCKED | workflow-handoff result |
+| 契约解析失败检测 | record / workflow-handoff result：形似对象字面量的 payload 却 JSON 解析失败 → 报错并提示 `--json-file`，**不写** state（fail-closed，不落脏数据） | record / workflow-handoff result |
 | SUMMARY 六段 | verify 输出 / 6 维自查（非空）/ 越界检查 + 强制 `## 自检方法`——6 维自查段须声明 `brooks-review` 或 `cache-brooks`（两级降级：Skill 工具 → 仅返回 "Launching skill" 占位时 Read 插件缓存协议文件手动执行完整审查）；`builtin-quickcheck` 只出现在 `## 自检方法` 段（须声明不可用原因**和**缓存尝试证据；新 change 缺失 BLOCKED；旧 change WARN） | exit execute |
 | 处置标记 | REVIEW.md 发现区条目须带 `[已修]`/`[升级]`/`[转待办]`(新 change 缺失 BLOCKED;旧 change WARN) | exit review |
 | builtin 自检证据 | `builtin-quickcheck` 须声明不可用原因与插件缓存尝试证据(新 change 缺失 BLOCKED;旧 change WARN) | exit execute |
 | 波次散文一致性 | 散文 `[P]` 标记须与任务 `parallel="true"` 一致(新 change 不一致 BLOCKED;旧 change WARN) | exit plan |
+| 波次分组一致性 | `[P]` 并行块须构成单个连续块、置于串行序列首/尾；`[P]` 与串行混排（穿插）违规——新 change BLOCK（含恢复指引：调整分组或显式豁免），旧 change WARN | exit plan |
 | 越权委托 | 并行 done 任务须经委托节点(新 change 未委托 BLOCKED;旧 change WARN) | exit execute/verify |
 | verify 真实执行 | TEST.md `## 验证命令` 真实运行（支持多行 `&&`）；verifyFailures 机器计数**按变更隔离**（切换变更不继承另一变更的失败次数），第 4 次 → BLOCKED（超时可用 `FLOW_COMET_VERIFY_TIMEOUT_MS` 配置，默认 300s） | exit verify |
 | 追加位置检测 | CONTEXT 孤立追加段 / LESSONS 编号乱序 / STATE+CHANGELOG 非倒序 → WARN（渐进） | exit open/verify/archive |
@@ -58,11 +60,11 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 
 ## 6. guard 自测套件（作者回归基线）
 
-`scripts/guard-self-test.mjs`：**144 个场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（61 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
+`scripts/guard-self-test.mjs`：**153 个场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（61 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
 
 ```bash
 node .claude/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 144 SCENARIOS PASSED
+# → ALL 153 SCENARIOS PASSED
 ```
 
 ## 6.5 DeepSeek Harness（dsh）平台

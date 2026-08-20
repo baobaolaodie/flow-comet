@@ -16,6 +16,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 - **dsh write containment now applies only while the flow is running**: in the idle state (no state / no `activeChange` / `completed`) writes outside the project root are no longer intercepted by the bridge, matching Claude Code / Codex semantics; parse failures or unknown status stay fail-closed deny. ([#65](https://github.com/baobaolaodie/flow-comet/pull/65))
 - **System test suite expanded to 61 items** with dsh bridge flow-state-gate assertions (idle pass / parse-failure & unknown-status fail-closed). ([#65](https://github.com/baobaolaodie/flow-comet/pull/65))
+- **Regression suite expanded to 153 scenarios** with wave-grouping consistency validation and contract payload parse-failure detection scenarios. ([#PR](https://github.com/baobaolaodie/flow-comet/pull/))
+- **Wave-grouping consistency check added at plan exit** (interleaved `[P]`/serial mixing warns on legacy changes and blocks on new changes, with recovery guidance); **record / workflow-handoff now fail closed on unparseable contract payloads** (error with a `--json-file` hint, nothing written to state). ([#PR](https://github.com/baobaolaodie/flow-comet/pull/))
 
 ## [1.4.2] - 2026-08-18
 

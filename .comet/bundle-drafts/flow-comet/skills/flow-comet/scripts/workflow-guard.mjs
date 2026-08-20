@@ -2408,7 +2408,7 @@ async function main() {
           }
         }
       }
-      // 波次分组一致性检测（DESIGN D1）——任务的 parallel 序列必须构成单个连续并行块且位于
+      // 波次分组一致性检测（DESIGN 波次分组小节）——任务的 parallel 序列必须构成单个连续并行块且位于
       // 串行任务序列首或尾（含全串行/全并行）。违规即混排：新 change 强制 BLOCK（含恢复指引），
       // 旧 change 渐进 WARN。复用 taskSetSignature 同族 <task> 块解析（提取 id/parallel，
       // status 等标记属性归一，仅参与 block 提取不参与分组判定）。

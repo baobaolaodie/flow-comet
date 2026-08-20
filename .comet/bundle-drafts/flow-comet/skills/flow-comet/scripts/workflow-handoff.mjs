@@ -16,9 +16,9 @@ const statePath = path.join(runRoot, '.comet', 'flow-comet-state.json');
 
 async function fileExists(f) { try { await fs.access(f); return true; } catch { return false; } }
 
-// 契约解析失败判定（DESIGN D3）:trim 后以 {/[ 开头,或含 :/; → 视作"形似对象字面量"
+// 契约解析失败判定（DESIGN 决策）:trim 后以 {/[ 开头,或含 :/; → 视作"形似对象字面量"
 // （常见于 Windows 传参剥离内嵌引号后的损坏 JSON / Return Contract 形态）。若形似对象却
-// JSON.parse 失败 → fail-closed（D4:报错含 --json-file 提示、退出、不写 handoffResult）
+// JSON.parse 失败 → fail-closed（报错含 --json-file 提示、退出、不写 handoffResult）
 function looksLikeObjectLiteral(raw) {
   const text = String(raw ?? '').trim();
   if (text.startsWith('{') || text.startsWith('[')) return true;
@@ -158,7 +158,7 @@ async function main() {
     // W1-D: 尝试解析 JSON（Return Contract）——解析失败则存原始字符串
     let parsed = raw;
     try { parsed = JSON.parse(raw); } catch {
-      // D4 契约解析失败 fail-closed:payload 形似对象但 JSON.parse 失败 → 报错(含
+      // 契约解析失败 fail-closed:payload 形似对象但 JSON.parse 失败 → 报错(含
       // --json-file 提示与原因)并 process.exit(1),不写 handoffResult——Return Contract
       // 应为合法 JSON（旧语义把不可解析 raw 静默存字符串 = 静默落脏,guard exit 误报
       // "非 Return Contract"掩盖真因;--json-file 是正路径,规避传参层 JSON 损坏）
