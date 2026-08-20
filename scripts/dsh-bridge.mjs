@@ -29,7 +29,7 @@
 // ESM 模块导出 { name, apply }，ctx 由 dsh 注入。
 
 import { spawn } from 'node:child_process';
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 
 // 插件元信息：dsh 官方插件形态（name / apply；ctx 由 dsh 注入）。
@@ -125,6 +125,59 @@ export function isPathInsideProjectRoot(projectRoot, filePath) {
     relative === '' ||
     (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative))
   );
+}
+
+// ---------------------------------------------------------------------------
+// 流程态门（DESIGN D1/D2——空闲态项目外写放行、运行态维持现状、解析失败/未知状态
+// fail-closed）。
+//
+// 语义锚定 guard comet-hook-guard.mjs L1882-1895 判定规则（DESIGN D3 复用，不另造一套）：
+//   ① 无 activeChange（无论 status；与「无 state 文件」同语义，覆盖旧 state 归档后）→ 放行
+//   ② running（status==='running' || undefined，且有 activeChange，fail-closed 向后兼容）→ 白名单校验
+//   ③ completed（归档后）→ 放行；其它 status → fail-closed
+//
+// 读状态对齐 guard readStateJson（comet-hook-guard.mjs L1682-1694）：
+// BOM 容错（外部写入可能带 UTF-8 BOM -> .toString('utf8').replace(/^\uFEFF/,'')）+ JSON.parse。
+// 返回 { ok:true, state }；无文件 -> { ok:false, reason:'no-state' }；
+// JSON 解析失败 / 其它读失败 -> { ok:false, reason:'parse-error' }（fail-closed 标记，
+// 不静默当作无 state 放行）。
+// ---------------------------------------------------------------------------
+export function readFlowState(projectRoot) {
+  const stateFile = path.join(projectRoot, '.comet', 'flow-comet-state.json');
+  let raw;
+  try {
+    raw = readFileSync(stateFile);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      // 无 state 文件（无活跃 workflow / 新克隆仓库）——与 guard「(no active workflow)」同语义
+      return { ok: false, reason: 'no-state' };
+    }
+    // 其它读失败（EISDIR 目录等）同样 fail-closed，不当作空闲放行
+    return { ok: false, reason: 'parse-error' };
+  }
+  try {
+    // 容忍 UTF-8 BOM（对齐 guard readStateJson L1682-1694 的 BOM strip）
+    return { ok: true, state: JSON.parse(raw.toString('utf8').replace(/^\uFEFF/, '')) };
+  } catch {
+    return { ok: false, reason: 'parse-error' };
+  }
+}
+
+// 判定：复用 guard L1882-1895 规则 -> 'idle' | 'running' | 'error'（fail-closed）。
+export function judgeFlowState(readResult) {
+  if (!readResult.ok) {
+    // 无 state 文件 = 无活跃 workflow -> idle；JSON 解析失败 -> error（fail-closed 不视为空闲）
+    return readResult.reason === 'no-state' ? 'idle' : 'error';
+  }
+  const state = readResult.state;
+  // ① 无 activeChange（无论 status；与「无 state 文件」同语义）-> idle
+  if (!state.activeChange) return 'idle';
+  // ② running（status==='running' || undefined，且有 activeChange）-> running
+  const running = state.status === 'running' || state.status === undefined;
+  if (running) return 'running';
+  // ③ completed（归档后）-> idle；其它未知 status -> error（fail-closed）
+  if (state.status === 'completed') return 'idle';
+  return 'error';
 }
 
 // ---------------------------------------------------------------------------
@@ -287,6 +340,7 @@ export function apply(ctx) {
       }
 
       // 4. 参数映射：形状不符/缺关键字段 -> WARN + fail-closed deny（不静默放行）。
+      //    D5：形状 fail-closed 任意态生效（含空闲态）——与流程态无关，保持现状。
       const mapped = mapToolInput(canonicalName, exec?.arguments);
       if (!mapped.ok) {
         const reason =
@@ -298,6 +352,29 @@ export function apply(ctx) {
         console.warn(reason);
         return { kind: 'deny', reason };
       }
+
+      // 4.5 流程态门（DESIGN D1/D2，2026-08-20）——修复 v1「包含性校验无条件生效」的
+      //     设计偏差：空闲态的项目外写入本应对齐 CC/Codex 的 active-change 门语义放行，
+      //     却因无条件包含性校验被误 deny。现仅运行中的活跃 workflow 才参与包含性/guard
+      //     拦截；解析失败/未知状态 fail-closed 不视为空闲放行。
+      //     语义锚定 guard comet-hook-guard.mjs L1882-1895（①无 activeChange 放行 /
+      //     ② activeChange+running/undefined 走白名单校验 / ③ completed 放行、其它 fail-closed）
+      //     ——判定逻辑在 readFlowState/judgeFlowState 中以等价小工具复用（D3），注释锚定防漂移。
+      const flowState = judgeFlowState(readFlowState(projectRoot));
+      if (flowState === 'idle') {
+        // 空闲态（无 state / 无 activeChange / completed）：直接放行，跳过包含性 deny 与
+        // guard 白名单（D4——与 CC/Codex 一致，空闲态零拦截开销）。
+        return next();
+      }
+      if (flowState === 'error') {
+        // 解析失败 / 状态异常：fail-closed deny，不得当空闲放行（D2/R2 缓解——防异常被静默放行）。
+        const reason =
+          'dsh-flow-comet-bridge: .comet/flow-comet-state.json 解析失败或状态异常——fail-closed 拒绝';
+        console.warn(reason);
+        return { kind: 'deny', reason };
+      }
+      // running（activeChange + status running/undefined）：继续走既有第 5 步包含性校验、
+      // 5.5 身份分派、第 6 步 guard 白名单——全部现状不变。
 
       // 5. 包含性校验（Write/Edit）：越界直接 deny，不进 guard。
       if (canonicalName === 'Write' || canonicalName === 'Edit') {
