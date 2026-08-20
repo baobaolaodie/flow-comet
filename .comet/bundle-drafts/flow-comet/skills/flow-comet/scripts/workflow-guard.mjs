@@ -2408,6 +2408,27 @@ async function main() {
           }
         }
       }
+      // 波次分组一致性检测（DESIGN D1）——任务的 parallel 序列必须构成单个连续并行块且位于
+      // 串行任务序列首或尾（含全串行/全并行）。违规即混排：新 change 强制 BLOCK（含恢复指引），
+      // 旧 change 渐进 WARN。复用 taskSetSignature 同族 <task> 块解析（提取 id/parallel，
+      // status 等标记属性归一，仅参与 block 提取不参与分组判定）。
+      // 合法序列：P+S+（并在前+串在后）/ S+P+（串在前+并在后）/ 全并行 / 全串行;
+      // 非法即 S→P→S、P→S→P 或离散多并行块（混排）。
+      const groupFlag = taskBlocks.map(b => (/parallel="true"/.test(b) ? 'P' : 'S')).join('');
+      const groupingValid = !groupFlag.includes('P') || !groupFlag.includes('S') ||
+        /^P+S+$/.test(groupFlag) || /^S+P+$/.test(groupFlag);
+      if (!groupingValid) {
+        const groupedIds = taskBlocks
+          .map(b => (b.match(/id="([^"]+)"/) || [])[1])
+          .filter(Boolean)
+          .join(',');
+        if (isNewChange(state)) {
+          console.error('BLOCKED: TASK.md 波次分组混排（并行块必须为单个连续块且位于串行序列首或尾,当前序列 ' + groupFlag + '，任务: ' + groupedIds + '）——并行任务不成组' +
+            ';恢复: 调整波次分组——把并行块移到串行任务前/后（保持并行任务单个连续块），或显式豁免');
+          process.exit(1);
+        }
+        console.error('WARN: TASK.md 波次分组混排（并行块必须为单个连续块且位于串行序列首或尾,当前序列 ' + groupFlag + '，任务: ' + groupedIds + '）——建议把并行块移到串行任务前/后（旧 change 渐进不阻断）');
+      }
     } catch {}
   }
   // review exit 校验 REVIEW 含实质内容 + 发现区条目处置状态结构级校验
