@@ -156,15 +156,26 @@ function assertExit(res, expected) {
   }
 }
 
+// 输出字符串归一化：spawnSync 原始结果的 .output 恒为数组 [null, stdout, stderr]
+// （.includes 逐元素比较永不中关键字）；run* 助手已归一化为字符串。两种形态都归一后再
+// 断言，保证共享助手对「数组（stdout+stderr 拼接）」与「既有字符串」形态都成立（回归兼容）。
+function outputText(res) {
+  return Array.isArray(res?.output)
+    ? String(res.stdout || '') + String(res.stderr || '')
+    : String(res?.output || '');
+}
+
 function assertOut(res, keyword) {
-  if (!res.output.includes(keyword)) {
-    throw new Error('输出缺少关键词 ' + JSON.stringify(keyword) + '（exit ' + res.status + '）\n实际输出:\n' + res.output);
+  const text = outputText(res);
+  if (!text.includes(keyword)) {
+    throw new Error('输出缺少关键词 ' + JSON.stringify(keyword) + '（exit ' + res.status + '）\n实际输出:\n' + text);
   }
 }
 
 function assertNotOut(res, keyword) {
-  if (res.output.includes(keyword)) {
-    throw new Error('输出不应包含关键词 ' + JSON.stringify(keyword) + '（exit ' + res.status + '）\n实际输出:\n' + res.output);
+  const text = outputText(res);
+  if (text.includes(keyword)) {
+    throw new Error('输出不应包含关键词 ' + JSON.stringify(keyword) + '（exit ' + res.status + '）\n实际输出:\n' + text);
   }
 }
 
