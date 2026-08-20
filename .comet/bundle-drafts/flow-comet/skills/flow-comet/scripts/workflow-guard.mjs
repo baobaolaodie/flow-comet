@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor } from './state-schema.mjs';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES } from './protocol-utils.mjs';
+import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from './task-parsing.mjs';
 
 const command = process.argv[2] ?? 'verify';
 const nodeId = process.argv[3] ?? null;
@@ -1758,19 +1759,23 @@ function missingRequiredSchemaEvidence(protocol, node, evidence) {
   return missing;
 }
 
-// 并行冲突检测——解析 TASK.md 中 parallel=pending 任务的 write_files，找交集（防同 wave 并行写冲突）
+// 并行冲突检测——解析 TASK.md 中 parallel=pending 任务的 write_files，找交集（防同 wave 并行写冲突）。
+// 开标签属性解析与 workflow-state 路由共享 taskOpeningAttrs（属性序无关；不读块内文本）。
 async function findParallelWriteConflicts(changeDir) {
   const taskFile = path.join(changeDir, 'TASK.md');
   let text;
   try { text = await fs.readFile(taskFile, 'utf8'); } catch { return []; }
-  const blocks = [...text.matchAll(/<task[^>]*parallel="true"[^>]*status="pending"[\s\S]*?<\/task>/g)];
+  const blocks = extractTaskBlocks(text).filter((b) => {
+    const a = taskOpeningAttrs(b);
+    return a && a.parallel && a.status === 'pending';
+  });
   const perTask = [];
   for (const b of blocks) {
-    const idMatch = b[0].match(/<task[^>]*id="([^"]+)"/);
-    const wf = b[0].match(/<write_files>([\s\S]*?)<\/write_files>/);
-    if (!idMatch || !wf) continue;
+    const a = taskOpeningAttrs(b);
+    const wf = b.match(/<write_files>([\s\S]*?)<\/write_files>/);
+    if (!a || !a.id || !wf) continue;
     const files = [...wf[1].matchAll(/([A-Za-z0-9_./@*-]+\.(?:ts|tsx|py|js|mjs|json|css|md))/g)].map((m) => m[1]);
-    perTask.push({ id: idMatch[1], files: new Set(files) });
+    perTask.push({ id: a.id, files: new Set(files) });
   }
   const conflicts = [];
   for (let i = 0; i < perTask.length; i++) {
@@ -2373,12 +2378,13 @@ async function main() {
     const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
     try {
       const content = await fs.readFile(taskFile, 'utf8');
-      const taskBlocks = content.match(/<task[\s\S]*?<\/task>/g) || [];
-      if (taskBlocks.length === 0) {
+      // <task> 块提取与属性解析统一走 task-parsing.mjs（开标签语义，属性序无关）
+      const taskList = extractTaskBlocks(content);
+      if (taskList.length === 0) {
         console.error('BLOCKED: TASK.md 无 <task> 块');
         process.exit(1);
       }
-      const missingVerify = taskBlocks.filter(b => !/<verify>/.test(b));
+      const missingVerify = taskList.filter(b => !/<verify>/.test(b));
       if (missingVerify.length > 0) {
         console.error('BLOCKED: TASK.md 中 ' + missingVerify.length + ' 个 task 缺 <verify> 字段');
         process.exit(1);
@@ -2394,9 +2400,9 @@ async function main() {
           for (const m of line.matchAll(/([A-Z][A-Z0-9-]*)\[P\]/g)) proseParallelIds.push(m[1]);
         }
         if (proseParallelIds.length > 0) {
-          const xmlParallelIds = taskBlocks
-            .filter(b => /parallel="true"/.test(b))
-            .map(b => (b.match(/id="([^"]+)"/) || [])[1])
+          const xmlParallelIds = taskList
+            .filter(b => { const a = taskOpeningAttrs(b); return a && a.parallel; })
+            .map(b => (taskOpeningAttrs(b) || {}).id)
             .filter(Boolean);
           const missing = proseParallelIds.filter(id => !xmlParallelIds.includes(id));
           if (missing.length > 0) {
@@ -2410,16 +2416,19 @@ async function main() {
       }
       // 波次分组一致性检测（DESIGN 波次分组小节）——任务的 parallel 序列必须构成单个连续并行块且位于
       // 串行任务序列首或尾（含全串行/全并行）。违规即混排：新 change 强制 BLOCK（含恢复指引），
-      // 旧 change 渐进 WARN。复用 taskSetSignature 同族 <task> 块解析（提取 id/parallel，
-      // status 等标记属性归一，仅参与 block 提取不参与分组判定）。
+      // 旧 change 渐进 WARN。复用 task-parsing.mjs 共享开标签解析（与 workflow-state 路由同语义：
+      // 开标签中 parallel="true" 且 status="pending" 判为并行，属性序无关、不读块内文本）。
       // 合法序列：P+S+（并在前+串在后）/ S+P+（串在前+并在后）/ 全并行 / 全串行;
       // 非法即 S→P→S、P→S→P 或离散多并行块（混排）。
-      const groupFlag = taskBlocks.map(b => (/parallel="true"/.test(b) ? 'P' : 'S')).join('');
+      const groupFlag = taskList.map(b => {
+        const a = taskOpeningAttrs(b);
+        return a && a.parallel && a.status === 'pending' ? 'P' : 'S';
+      }).join('');
       const groupingValid = !groupFlag.includes('P') || !groupFlag.includes('S') ||
         /^P+S+$/.test(groupFlag) || /^S+P+$/.test(groupFlag);
       if (!groupingValid) {
-        const groupedIds = taskBlocks
-          .map(b => (b.match(/id="([^"]+)"/) || [])[1])
+        const groupedIds = taskList
+          .map(b => (taskOpeningAttrs(b) || {}).id)
           .filter(Boolean)
           .join(',');
         if (isNewChange(state)) {
@@ -2532,13 +2541,13 @@ async function main() {
     const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
     try {
       const taskContent = await fs.readFile(taskFile, 'utf8');
-      // 解析 TASK.md 全部 task 的 {id, status, parallel}
-      const taskBlocks = taskContent.match(/<task[^>]*>[\s\S]*?<\/task>/g) || [];
-      const tasks = taskBlocks.map(block => ({
-        id: (block.match(/id="([^"]+)"/) || [])[1] || null,
-        status: (block.match(/status="([^"]+)"/) || [])[1] || null,
-        parallel: /parallel="true"/.test(block),
-      })).filter(t => t.id);
+      // 解析 TASK.md 全部 task 的 {id, status, parallel}——开标签属性解析共享 task-parsing.mjs
+      // （属性序无关、不读块内文本；与 workflow-state 路由同语义）
+      const taskList = extractTaskBlocks(taskContent);
+      const tasks = taskList.map(block => {
+        const a = taskOpeningAttrs(block) || {};
+        return { id: a.id, status: a.status, parallel: a.parallel };
+      }).filter(t => t.id);
 
       // 串行 pending → BLOCKED（execute 任务没做完）——emptyExitApproved 不豁免串行 pending:
       // 豁免语义是"全 parallel 无串行可做时空退出";存在未完成串行任务时豁免不应生效
@@ -2622,12 +2631,11 @@ async function main() {
     // verify 时仍未 exit → WARN 兜底（execute 出口未拦截的提示）
     try {
       const ki9TaskText = await fs.readFile(path.join(runRoot, '.specs', state.activeChange ?? '', 'TASK.md'), 'utf8');
-      const ki9TaskBlocks = [...ki9TaskText.matchAll(/<task\b[^>]*>[\s\S]*?<\/task>/g)].map(m => m[0]);
-      const ki9Tasks = ki9TaskBlocks.map(block => ({
-        id: (block.match(/id="([^"]+)"/) || [])[1] || null,
-        status: (block.match(/status="([^"]+)"/) || [])[1] || null,
-        parallel: /parallel="true"/.test(block),
-      })).filter(t => t.id);
+      const ki9TaskBlocks = extractTaskBlocks(ki9TaskText);
+      const ki9Tasks = ki9TaskBlocks.map(block => {
+        const a = taskOpeningAttrs(block) || {};
+        return { id: a.id, status: a.status, parallel: a.parallel };
+      }).filter(t => t.id);
       const ki9ParallelDone = ki9Tasks.filter(t => t.parallel && t.status === 'done').map(t => t.id);
       const ki9ProtocolHasSubagent = (protocol.nodes ?? []).some(n => n.id === 'subagent-execute');
       const ki9TakeoverApproved = !!(state.evidence?.execute && state.evidence.execute.parallelTakeoverApproved);
@@ -2854,16 +2862,25 @@ async function main() {
       const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
       try {
         const taskContent = await fs.readFile(taskFile, 'utf8');
+        // 开标签属性解析共享 task-parsing.mjs——与 workflow-state determineNode 同语义（属性序无关）
+        const taskList = extractTaskBlocks(taskContent);
         // 收集所有 done 任务的 id
-        const doneIds = new Set((taskContent.match(/<task[^>]*id="([^"]+)"[^>]*status="done"/g) || [])
-          .map(m => { const id = m.match(/id="([^"]+)"/); return id ? id[1] : null; })
-          .filter(Boolean));
-        // 检查 pending parallel 任务中是否有依赖已满足的
-        const parallelBlocks = taskContent.match(/<task[^>]*parallel="true"[^>]*status="pending"[\s\S]*?<\/task>/g) || [];
-        // 路由无匹配时输出诊断——结构校验保持严格（不放松正则），检测失败纠偏可见
+        const doneIds = new Set(taskList
+          .map(taskOpeningAttrs)
+          .filter(a => a && a.status === 'done' && a.id)
+          .map(a => a.id));
+        // 检查 pending parallel 任务中是否有依赖已满足的（开标签 parallel="true" 且 status="pending"）
+        const parallelBlocks = taskList.filter((block) => {
+          const a = taskOpeningAttrs(block);
+          return a && a.parallel && a.status === 'pending';
+        });
+        // 路由无匹配时输出诊断——结构校验保持严格，检测失败纠偏可见
         // 旧模板（task 标签无 status 属性）产出的 TASK.md 无法匹配——明确提示而非静默卡在 execute
-        if (parallelBlocks.length === 0 && /<task[^>]*parallel="true"/.test(taskContent)) {
-          console.error('ROUTE WARN: 未找到 parallel="true" status="pending" 的任务块——检查 task 标签属性（属性顺序：parallel 在 status 前；缺 status 不视为 pending）');
+        if (parallelBlocks.length === 0 && taskList.some((block) => {
+          const a = taskOpeningAttrs(block);
+          return a && a.parallel;
+        })) {
+          console.error('ROUTE WARN: 未找到 parallel="true" status="pending" 的任务块——检查 task 开标签的 parallel/status 属性（属性序无关；缺 status 不视为 pending）');
         }
         const eligibleParallel = parallelBlocks.filter(block => {
           const depsMatch = block.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
