@@ -15,6 +15,7 @@
 ### 变更
 
 - **dsh 写入包含性改为仅在流程运行中生效**：空闲态（无 state / 无 `activeChange` / `completed`）项目根外写入不再被桥接拦截，与 Claude Code / Codex 语义一致；解析失败或未知状态保持 fail-closed 拒绝。([#PR](https://github.com/baobaolaodie/flow-comet/pull/))
+- **系统测试集扩展至 61 项**：新增 dsh 桥接流程态门断言（空闲放行 / 解析失败与未知状态 fail-closed）。([#PR](https://github.com/baobaolaodie/flow-comet/pull/))
 
 ## [1.4.2] - 2026-08-18
 
