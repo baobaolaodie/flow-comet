@@ -71,9 +71,10 @@ node .claude/skills/flow-comet/scripts/guard-self-test.mjs
 
 - **安装**：`node scripts/prepare-env.mjs --target <项目> --platform dsh`（最低 dsh `0.1.0-rc.6`；dev preview）。
 - **项目级技能发现**：技能树安装到 `<项目>/.dsh/skills/flow-comet`；dsh 在 `<项目>/.dsh/skills/` 下以 rank 100 自动发现（文件监听、免重启）——**未安装该目录的项目不可见该技能**，因此激活天然是项目级的（无运行时痕迹判定、无 chicken-and-egg）。
-- **拦截**：全局挂载在 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 的薄桥接 loader（`$DSH_HOME/cordis.patch.yml` 托管块，所有 profile 生效）监听 dsh 的 `tools/pre-execute` waterfall 事件，把工具参数映射到同一 guard 契约（`Write`/`Edit` → `file_path`，`Bash` → `command`），子进程调用项目本地 `comet-hook-guard.mjs`，越权写入返回 `{kind:'deny', reason}`（BLOCK 消息 + 恢复指引）；参数形状不符与异常退出 fail-closed。Windows 8.3 路径下判定前把项目根规范化为长形态，避免 guard 的词法路径解析跳过白名单（fail-open）。
+- **拦截**：全局挂载在 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 的薄桥接 loader（`$DSH_HOME/cordis.patch.yml` 托管块，所有 profile 生效）监听 dsh 的 `tools/pre-execute` waterfall 事件，把工具参数映射到同一 guard 契约（`Write`/`Edit` → `file_path`，`Bash` → `command`），子进程调用项目本地 `comet-hook-guard.mjs`，流程运行中越权写入返回 `{kind:'deny', reason}`（BLOCK 消息 + 恢复指引）；参数形状不符与异常退出 fail-closed。Windows 8.3 路径下判定前把项目根规范化为长形态，避免 guard 的词法路径解析跳过白名单（fail-open）。
 - **激活范围**：桥接仅当会话项目根含 `.dsh/skills/flow-comet` 时处理（窄监听）——非 flow-comet 项目零侵入。
-- **执行者放行**：协调者把任务委托给子代理时，被委托的子代理（以会话的子代理委托深度识别）作为执行者写入源码、跳过阶段白名单——与其他平台 worktree 隔离语义一致；协调者仍受白名单约束。越界写入与参数形状不符对两者一律拒绝。
+- **执行者放行**：协调者把任务委托给子代理时，被委托的子代理（以会话的子代理委托深度识别）作为执行者写入源码、跳过阶段白名单——与其他平台 worktree 隔离语义一致；协调者仍受白名单约束。流程运行中越界写入与参数形状不符对两者一律拒绝。
+- **包含性仅流程运行中生效**：空闲态（无 state / 无 `activeChange` / `completed`）项目根外写放行；解析失败 / 未知状态保持 fail-closed（拒绝）。
 - **托管规则注入**：安装时把编排规则注入 `AGENTS.md` 的 `<!-- Managed by flow-comet prepare-env -->` 托管区（非破坏合并，标记与 Codex 共用）。
 
 ## 7. 自动初始化检测（init 前置步骤）

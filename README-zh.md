@@ -63,7 +63,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径>
 node scripts/prepare-env.mjs --target <目标项目绝对路径> --platform dsh
 ```
 
-这会项目级安装技能树到 `<项目>/.dsh/skills/flow-comet`（dsh 以 rank 100 自动发现、免重启——未安装该目录的项目不可见该技能，因此激活天然是项目级的），把编排规则注入 `AGENTS.md` 托管区（非破坏合并），并在 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 全局挂载薄桥接 loader（托管块写入 `$DSH_HOME/cordis.patch.yml`——读-合并-写，保留 dsh-skin 等既有块，对所有 profile 生效）。桥接经 dsh 的 `tools/pre-execute` 事件拦截写工具。最低 dsh `0.1.0-rc.6`；npm 包暂不发布（1.5.0 一并处理）。完整 dsh 平台安装章节见[安装 → 方案 C](docs/INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-平台)。
+这会项目级安装技能树到 `<项目>/.dsh/skills/flow-comet`（dsh 以 rank 100 自动发现、免重启——未安装该目录的项目不可见该技能，因此激活天然是项目级的），把编排规则注入 `AGENTS.md` 托管区（非破坏合并），并在 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 全局挂载薄桥接 loader（托管块写入 `$DSH_HOME/cordis.patch.yml`——读-合并-写，保留 dsh-skin 等既有块，对所有 profile 生效）。桥接经 dsh 的 `tools/pre-execute` 事件拦截写工具。拦截仅在流程运行中生效；空闲会话项目根外写不会被打断。最低 dsh `0.1.0-rc.6`；npm 包暂不发布（1.5.0 一并处理）。完整 dsh 平台安装章节见[安装 → 方案 C](docs/INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-平台)。
 
 ```bash
 # 2. 在目标项目新开 Claude Code 会话，输入：

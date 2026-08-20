@@ -12,6 +12,10 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **dsh 写入包含性改为仅在流程运行中生效**：空闲态（无 state / 无 `activeChange` / `completed`）项目根外写入不再被桥接拦截，与 Claude Code / Codex 语义一致；解析失败或未知状态保持 fail-closed 拒绝。([#PR](https://github.com/baobaolaodie/flow-comet/pull/))
+
 ## [1.4.2] - 2026-08-18
 
 新增 DeepSeek Harness（dsh）平台支持（安装器 + 桥接写拦截），回归套件扩展至 144 场景 / 系统测试 60 项，并修复 dsh 写入防护边界。([#60](https://github.com/baobaolaodie/flow-comet/pull/60))
