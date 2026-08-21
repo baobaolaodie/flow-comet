@@ -32,11 +32,14 @@ Hook blocking semantics (see Limitations): PreToolUse hook exit 2 blocks in the 
 | TASK signature hash | enter records task-set signature (line-ending normalized + marker attributes stripped) → exit compares: add/remove tasks, change action/boundaries → BLOCKED; marking done/adding marker attributes → legal | enter/exit execute |
 | Node order BLOCK | next when currentNode not exited (non-normal successor) → BLOCKED; normal next after exit advancement exempt; rollback exempt (pending rollback task in TASK) | next |
 | handoff completedChecks | subagent Return Contract must carry required-skill completedChecks (skill-load evidence), missing → BLOCKED | exit subagent-execute |
+| Skill-load front gate | new changes require the node's skill-load declaration marker to exist before handoff request / record; the declaration must follow loading the skill with the Skill tool (reading the SKILL.md file is not enough) | handoff request / record |
 | redEvidence ordering | redEvidence must exist before greenEvidence; recording redEvidence after greenEvidence → BLOCKED | workflow-handoff result |
 | Contract payload parse failure | record / workflow-handoff result: a payload that looks like an object literal but fails JSON parsing → error with a `--json-file` hint, and nothing is written to state (fail-closed, no dirty data) | record / workflow-handoff result |
+| Suspicious-object heuristic boundary | a payload starting with `{`/`[` or containing `:`/`;` is treated as a likely object literal; if parsing then fails, the operation fails closed with a `--json-file` hint — a legitimate plain-text value at this boundary is conservatively rejected (safe-side design, no dirty state) | record / workflow-handoff result |
 | SUMMARY six sections | verify output / 6-dimension self-check (non-empty) / boundary check + mandatory `## 自检方法` — the 6-dimension section must declare `brooks-review` or `cache-brooks` (two-tier fallback: Skill tool → if only a "Launching skill" placeholder is returned, Read the plugin-cache protocol files and execute the full review manually); `builtin-quickcheck` appears only under `## 自检方法` with the unavailable reason AND the cache-attempt evidence (new changes blocked; legacy warned) | exit execute |
 | Disposition markers | REVIEW.md findings must carry a disposition marker (fixed/upgraded/deferred; new changes blocked; legacy warned) | exit review |
 | builtin self-check evidence | `builtin-quickcheck` must state the unavailable reason AND the plugin-cache attempt (new changes blocked; legacy warned) | exit execute |
+| Artifact template fidelity | SUMMARY / TASK / CHANGE / REQUIREMENT / DESIGN must keep the template title, header fields, and section order; new changes missing any part are blocked with recovery guidance, legacy changes warned | exit execute / plan / open / design |
 | Wave-wording consistency | prose `[P]` markers must match task `parallel="true"` (new changes blocked; legacy warned) | exit plan |
 | Wave grouping consistency | `[P]` blocks must form a single contiguous group placed before or after the serial chain; interleaving `[P]` and serial tasks (mixing) violates grouping — new changes BLOCK with recovery guidance (re-group or explicit exemption), legacy WARN | exit plan |
 | Overreach delegation | parallel done tasks require the delegation node exited (new changes blocked; legacy warned) | exit execute/verify |
@@ -50,6 +53,7 @@ Hook blocking semantics (see Limitations): PreToolUse hook exit 2 blocks in the 
 
 - **Return Contract**: subagents return `{status, commitHash, redEvidence, greenEvidence, completedChecks, riskSignals}` — missing commitHash/greenEvidence/completedChecks → BLOCK; missing redEvidence → progressive WARN; redEvidence recorded after the fact → BLOCK
 - **handoff hash provenance**: `git show <commitHash>` verifies committed files ⊆ write_files (auto-parsed from TASK.md, XML comments stripped)
+- **Zero-commit tasks**: when a task's `write_files` list is empty and the contract explicitly declares `noCommit`, the commit-subset check is skipped with an auditable prompt; if `write_files` is non-empty, a `noCommit` claim still runs the full check (cannot bypass out-of-scope detection)
 - **write_files conflict detection**: parallel tasks may share a wave only if their write_files do not overlap
 
 ## 5. Recovery protocol
@@ -60,11 +64,11 @@ Hook blocking semantics (see Limitations): PreToolUse hook exit 2 blocks in the 
 
 ## 6. Guard self-test suite (author regression baseline)
 
-`scripts/guard-self-test.mjs`: **153 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (61 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
+`scripts/guard-self-test.mjs`: **165 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (61 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
 
 ```bash
 node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 153 SCENARIOS PASSED
+# → ALL 165 SCENARIOS PASSED
 ```
 
 ## 6.5 DeepSeek Harness (dsh) platform

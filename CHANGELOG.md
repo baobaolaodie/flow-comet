@@ -16,8 +16,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 - **dsh write containment now applies only while the flow is running**: in the idle state (no state / no `activeChange` / `completed`) writes outside the project root are no longer intercepted by the bridge, matching Claude Code / Codex semantics; parse failures or unknown status stay fail-closed deny. ([#65](https://github.com/baobaolaodie/flow-comet/pull/65))
 - **System test suite expanded to 61 items** with dsh bridge flow-state-gate assertions (idle pass / parse-failure & unknown-status fail-closed). ([#65](https://github.com/baobaolaodie/flow-comet/pull/65))
-- **Regression suite expanded to 153 scenarios** with wave-grouping consistency validation and contract payload parse-failure detection scenarios. ([#66](https://github.com/baobaolaodie/flow-comet/pull/66))
+- **Regression suite expanded to 165 scenarios** with wave-grouping consistency validation and contract payload parse-failure detection scenarios. ([#66](https://github.com/baobaolaodie/flow-comet/pull/66))
 - **Wave-grouping consistency check added at plan exit** (interleaved `[P]`/serial mixing warns on legacy changes and blocks on new changes, with recovery guidance); **record / workflow-handoff now fail closed on unparseable contract payloads** (error with a `--json-file` hint, nothing written to state). ([#66](https://github.com/baobaolaodie/flow-comet/pull/66))
+- **Artifact template fidelity and skill-load front gate**: new changes must keep the template title, header fields, and section order for SUMMARY / TASK / CHANGE / REQUIREMENT / DESIGN; handoff requests and records now require the node's skill-load declaration, made after loading the skill with the Skill tool (reading the SKILL.md file is not loading). ([#67](https://github.com/baobaolaodie/flow-comet/pull/67))
+- **Zero-commit task formal semantics**: a task with an empty `write_files` list and an explicit `noCommit` contract skips the commit-subset check with an auditable prompt; a non-empty task claiming `noCommit` still runs the full check. ([#67](https://github.com/baobaolaodie/flow-comet/pull/67))
 
 ## [1.4.2] - 2026-08-18
 
