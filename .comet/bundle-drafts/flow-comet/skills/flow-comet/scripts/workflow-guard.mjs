@@ -2229,6 +2229,14 @@ async function main() {
       // G13: 进入已记录提示(执行者可知 entry 有副作用——进入证据写入)
       console.log('ENTER RECORDED: ' + node.id + ' 进入已记录(enteredNodes)');
     }
+    // 输出点名（机器点名节点技能）：进入节点时机器点名该节点实现技能必须经 Skill 工具加载——
+    // skill 名取节点实现 skill（内置协议 = flow-comet-plan 等，与 SKILL: 行一致）
+    const entryImplSkill = node.implementation && typeof node.implementation === 'object' && node.implementation.skill
+      ? node.implementation.skill
+      : null;
+    if (entryImplSkill) {
+      console.log('LOAD SKILL: ' + entryImplSkill + '（用 Skill 工具，禁止跳过）');
+    }
     console.log('ENTRY OK: ' + node.id);
     return;
   }

@@ -16,6 +16,33 @@ const statePath = path.join(runRoot, '.comet', 'flow-comet-state.json');
 
 async function fileExists(f) { try { await fs.access(f); return true; } catch { return false; } }
 
+// 技能加载声明标记存在性（技能加载前置门·方案 A）：校验 .skill-loads/ 下
+// 是否有该节点的声明标记 <node>-*.json（任一 skill 标记即算已声明——与 guard exit 侧
+// 的 exit 协议声明标记校验、workflow-state record 前置门同构：按 <node>- 前缀扫描；
+// 活动路径优先，归档路径兜底）。委托前置门在「先加载技能（Skill 工具）并 skill-load
+// 声明」之前拦截"先干活后补声明"。诚实边界：标记是自我声明，非物理证明。
+async function nodeSkillDeclared(nodeId, changeName) {
+  if (!nodeId || !changeName) return false;
+  const prefix = nodeId + '-';
+  const scan = async (dir) => {
+    try {
+      const entries = await fs.readdir(dir);
+      return entries.some((f) => f.startsWith(prefix) && f.endsWith('.json'));
+    } catch {
+      return false;
+    }
+  };
+  const activeDir = path.join(runRoot, '.specs', changeName, '.skill-loads');
+  if (await scan(activeDir)) return true;
+  const archiveRoot = path.join(runRoot, '.specs', 'archive');
+  const archiveEntries = await fs.readdir(archiveRoot).catch(() => []);
+  for (const entry of archiveEntries) {
+    if (!entry.endsWith('-' + changeName)) continue;
+    if (await scan(path.join(archiveRoot, entry, '.skill-loads'))) return true;
+  }
+  return false;
+}
+
 // 契约解析失败判定（单一来源）：looksLikeObjectLiteral 由 state-schema.mjs 导出——
 // trim 后以 {/[ 开头 → 视作"形似对象字面量"；若 JSON.parse 失败 → fail-closed。
 
@@ -91,6 +118,22 @@ async function main() {
     const taskId = process.argv[3];
     const args = process.argv.slice(4);
     if (!taskId) { console.error('Usage: workflow-handoff.mjs request <task-id> <description> [--write-files <files...>]'); process.exit(1); }
+    // 技能加载前置门（方案 A）：发起委托前校验 execute/subagent-execute
+    // 本节点 skill-load 声明标记已存在（.skill-loads/<node>-*.json）——先加载节点技能（Skill 工具）
+    // 并 skill-load 声明，再发起委托。缺失 → 新 change BLOCK / 旧 change 渐进 WARN。
+    // 与零提交语义独立共存：本门只校验节点技能声明，不依赖任务 write_files 内容。
+    const requestNode = state.currentNode;
+    if (requestNode && (requestNode === 'execute' || requestNode === 'subagent-execute')) {
+      const declared = await nodeSkillDeclared(requestNode, state.activeChange);
+      if (!declared) {
+        const loadGuide = '先加载技能（用 Skill 工具，禁止跳过）并运行 workflow-state.mjs skill-load ' + requestNode + ' <skill> 再发起委托';
+        if (state.newChange === true) {
+          console.error('BLOCKED: 节点 ' + requestNode + ' 缺少技能加载声明标记（.skill-loads/' + requestNode + '-*.json）——' + loadGuide);
+          process.exit(1);
+        }
+        console.error('WARN: 节点 ' + requestNode + ' 缺少技能加载声明标记（.skill-loads/' + requestNode + '-*.json）——' + loadGuide + '（旧 change 渐进不阻断）');
+      }
+    }
     // W2-D: 可选 --write-files 记录该 task 允许写入的文件列表（含 glob），供 result 的提交文件子集校验
     let description = 'pending';
     let writeFiles = [];
