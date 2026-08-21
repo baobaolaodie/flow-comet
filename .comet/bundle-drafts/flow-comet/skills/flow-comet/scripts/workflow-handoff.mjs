@@ -202,7 +202,7 @@ async function main() {
       // process.exit(1),不写 handoffResult——Return Contract 应为合法 JSON
       // （旧语义把不可解析 raw 静默存字符串 = 静默落脏,guard exit 误报
       // "非 Return Contract"掩盖真因）
-      // 消息按参数来源分级（DESIGN D2 / AC-3）:--json-file 传入且文件内容损坏 →
+      // 消息按参数来源分级（设计语义 / AC-3）:--json-file 传入且文件内容损坏 →
       // "文件内容不是合法 JSON" + 长度元数据;内联传参损坏 → 保留 --json-file 建议。
       // 安全(bot 审查):错误消息与 workflow-state record 统一——只含固定前缀 +
       // 长度元数据,绝不打印 raw 内容(含截断)。

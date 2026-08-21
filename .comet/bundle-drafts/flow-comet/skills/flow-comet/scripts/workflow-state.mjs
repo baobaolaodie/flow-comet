@@ -1000,7 +1000,7 @@ async function main() {
       // 契约解析失败 fail-closed:payload 形似对象但 JSON.parse 失败 → 报错并
       // process.exit(1),不写 evidence——防状态污染（旧语义把不可解析 raw 静默作
       // summary 字符串落库 = 静默落脏）
-      // 消息按参数来源分级（DESIGN D2 / AC-3）:--json-file 传入且文件内容损坏 →
+      // 消息按参数来源分级（设计语义 / AC-3）:--json-file 传入且文件内容损坏 →
       // "文件内容不是合法 JSON" + 长度元数据;内联传参损坏 → 保留 --json-file 建议。
       // 安全(bot 审查):错误消息只含固定前缀 + 长度元数据,绝不打印 raw 内容(含截断)。
       if (looksLikeObjectLiteral(raw)) {

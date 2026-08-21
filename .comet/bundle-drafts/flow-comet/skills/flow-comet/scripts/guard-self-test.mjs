@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · flow-comet 引擎自测套件（153 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、波次分组合法性与契约解析失败检测、场景数一致性自检、prepare-env 平台选择链）
+// C1 · flow-comet 引擎自测套件（165 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、波次分组合法性与契约解析失败检测、场景数一致性自检、prepare-env 平台选择链）
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -7,7 +7,7 @@
 // （COMET_RUN_ROOT=<临时目录>）→ 断言退出码与输出关键词。场景跑完 rmSync 清理。
 //
 // 运行: node scripts/guard-self-test.mjs
-// 全过 → exit 0，输出 ALL 153 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
+// 全过 → exit 0，输出 ALL 165 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
 //
 // 仅 node 内置模块（child_process/fs/os/path）；无网络；不依赖 flow-kit 模板目录
 // 存在（fallback 场景用内置段名；部分场景复制模板文件进临时目录验证 C2 模板派生）。
@@ -3641,7 +3641,7 @@ const SCENARIOS = [
   // 启发式安全侧边界锚定 / 零提交正式语义 / SUMMARY·TASK7·三文档模板保真 / 技能加载前置门 /
   // next·entry 输出点名 / 技能加载措辞 / next 进行中节点保护扩展） ----------
 
-  // 154: 疑似对象判定单一来源（DESIGN D1 / AC-1）——workflow-state.mjs 与 workflow-handoff.mjs
+  // 154: 疑似对象判定单一来源（设计语义 / AC-1）——workflow-state.mjs 与 workflow-handoff.mjs
   // 不得各自定义 looksLikeObjectLiteral，必须从 state-schema.mjs import（单一来源 fail-closed）。
   // 当前两脚本各有一份逐字重复定义、state-schema 无导出 → 预期 RED。
   {
@@ -3668,7 +3668,7 @@ const SCENARIOS = [
     },
   },
 
-  // 155: record 契约解析失败消息分级（DESIGN D2 / AC-3）——--json-file 传入损坏 JSON（以 { 开头）
+  // 155: record 契约解析失败消息分级（设计语义 / AC-3）——--json-file 传入损坏 JSON（以 { 开头）
   // → 报"文件内容不是合法 JSON" + 长度元数据，且不再建议使用 --json-file；内联传参损坏仍建议
   // --json-file。当前两分支同一英文文案（都建议 use --json-file）→ ① 断言 RED。
   {
@@ -3693,7 +3693,7 @@ const SCENARIOS = [
     },
   },
 
-  // 156: 疑似对象启发式安全侧边界锚定（DESIGN D3 / AC-4）——内联纯文本恰好以 [ 开头 → 启发式判为
+  // 156: 疑似对象启发式安全侧边界锚定（设计语义 / AC-4）——内联纯文本恰好以 [ 开头 → 启发式判为
   // 疑似对象、JSON.parse 失败 → fail-closed（exit 1 + 提示、不落库）。当前即如此 → 本场景 GREEN
   // （只锚定现状，不改行为）。
   {
@@ -3716,7 +3716,7 @@ const SCENARIOS = [
     },
   },
 
-  // 157: 零提交任务正例（DESIGN D4 / AC-5）——request write_files 为空 + 契约显式 noCommit + result
+  // 157: 零提交任务正例（设计语义 / AC-5）——request write_files 为空 + 契约显式 noCommit + result
   // 无任何提交 → 跳过提交文件子集校验并输出可审计"零提交"提示（不误 BLOCK）。当前无 noCommit 概念：
   // 新 change 空 write_files 结果反而被"允许列表为空"拦 BLOCK → 预期 RED。
   {
@@ -3738,7 +3738,7 @@ const SCENARIOS = [
     },
   },
 
-  // 158: 零提交滥用负例（DESIGN D5 / AC-6）——write_files 非空任务的结果契约声称 noCommit →
+  // 158: 零提交滥用负例（设计语义 / AC-6）——write_files 非空任务的结果契约声称 noCommit →
   // 不得借零提交声明绕过真实提交检查：仍走完整提交文件子集校验（越界 → 新 change BLOCK），且输出
   // 可审计的"零提交声明与 write_files 非空矛盾"提示。当前无 noCommit 概念（完整校验本身已生效，
   // RED 来自缺失的机制审计提示）→ 预期 RED。
@@ -3771,7 +3771,7 @@ const SCENARIOS = [
     },
   },
 
-  // 159: SUMMARY 模板保真（DESIGN D6 / AC-7）——execute 出口每份 *-SUMMARY.md 须含 `# SUMMARY:` 标题 +
+  // 159: SUMMARY 模板保真（设计语义 / AC-7）——execute 出口每份 *-SUMMARY.md 须含 `# SUMMARY:` 标题 +
   // 首部 4 字段（Change ID/Task ID/完成时间/AI 角色）+ 段序（含 flow-comet 增量 ## 自检方法 段）。
   // 缺任一：新 change BLOCK（exit 1 + 缺失点与恢复指引）；合法变体（编号前缀/括号后缀/大小写）通过；
   // 旧 change → WARN 渐进。当前 guard 只查 verify输出/6维自查/越界检查 3 段存在 → 缺标题等场景 RED。
@@ -3852,7 +3852,7 @@ const SCENARIOS = [
     },
   },
 
-  // 160: plan exit TASK 7 字段完整性（DESIGN D7 / AC-8）——每个 <task> 须含 name/read_files/
+  // 160: plan exit TASK 7 字段完整性（设计语义 / AC-8）——每个 <task> 须含 name/read_files/
   // write_files/action/verify/done/depends_on。缺任一：新 BLOCK；旧 WARN。当前 guard 只查
   // <verify> 存在 → 缺 write_files 场景新 change 应 BLOCK 却放行 → 预期 RED。
   {
@@ -3886,7 +3886,7 @@ const SCENARIOS = [
     },
   },
 
-  // 161: open/design 出口 CHANGE/REQUIREMENT/DESIGN 模板保真（DESIGN D8 / AC-9）——标题
+  // 161: open/design 出口 CHANGE/REQUIREMENT/DESIGN 模板保真（设计语义 / AC-9）——标题
   // （# CHANGE: / # REQUIREMENT: / # DESIGN:）+ 首部 + 段序（模板派生宽松匹配，编号前缀/括号
   // 后缀/大小写兼容，防误拦）。缺任一：新 BLOCK；旧 WARN。当前 guard 只查 Why/用户故事/AC/
   // 决策清单等单段存在 → 缺标题场景新 change 应 BLOCK 却放行 → 预期 RED。
@@ -3942,7 +3942,7 @@ const SCENARIOS = [
     },
   },
 
-  // 162: 技能加载前置门（DESIGN D9/D10 / AC-10）——新 change：handoff request 无本节点声明标记
+  // 162: 技能加载前置门（设计语义 / AC-10）——新 change：handoff request 无本节点声明标记
   // 应 BLOCK；record 无声明（payload 不含 completedChecks）应 BLOCK；旧 change → WARN 渐进。
   // 当前 request 不查声明、record 靠 M5 自动补 → 不拦 → 预期 RED。
   {
@@ -3972,7 +3972,7 @@ const SCENARIOS = [
     },
   },
 
-  // 163: next / guard entry 输出点名加载（DESIGN D15 / AC-17）——`workflow-state next` 与
+  // 163: next / guard entry 输出点名加载（设计语义 / AC-17）——`workflow-state next` 与
   // `workflow-guard entry` 输出应含 `LOAD SKILL: <skill>（用 Skill 工具，禁止跳过）`。
   // 当前 printNext / entry 无该行 → 预期 RED。
   {
@@ -3998,7 +3998,7 @@ const SCENARIOS = [
     },
   },
 
-  // 164: 技能加载措辞（DESIGN D15 / AC-16）——主 SKILL（SKILL.md / GUIDANCE.md）与节点 SKILL
+  // 164: 技能加载措辞（设计语义 / AC-16）——主 SKILL（SKILL.md / GUIDANCE.md）与节点 SKILL
   // 须含「Skill 工具」与「不得跳过/禁止跳过」。当前主 SKILL 已含、部分节点 SKILL 已含，但
   // open/design/plan/verify/archive 等节点 SKILL 缺 → 预期 RED。
   {
@@ -4028,7 +4028,7 @@ const SCENARIOS = [
     },
   },
 
-  // 165: next 进行中节点保护扩展（承接 S137）——已 entry 但未 record 的节点（enteredNodes 含 plan、
+  // 165: next 进行中节点保护扩展（承接既有保护场景）——已 entry 但未 record 的节点（enteredNodes 含 plan、
   // TASK.md 存在、无 evidence.plan）跑 next → 不得把 currentNode 推走（保持 plan，输出 NODE: plan）。
   // 当前保护只看 evidence（record 过）→ 会把 currentNode 推到 execute → 预期 RED。
   {

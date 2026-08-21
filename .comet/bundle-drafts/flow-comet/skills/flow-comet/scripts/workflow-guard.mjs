@@ -1966,7 +1966,7 @@ async function templateSectionPatterns() {
   return result;
 }
 
-  // ===== 模板保真（M1/M2/M3·DESIGN D6~D8 / AC-7~AC-9）=====
+  // ===== 模板保真（M1/M2/M3·设计语义 / AC-7~AC-9）=====
   // 段名归一化：去标题标记 + 去尾部括号（如 Why（为什么做）→ Why）+ 去编号前缀（如 1. 决策清单 → 决策清单）
   // + 去首尾空白 + ASCII 小写（中文无大小写；英文侧大小写不敏感）——沿用 C2 宽容匹配风格
   function normalizeTemplateHeading(raw) {
@@ -2910,7 +2910,7 @@ async function main() {
     }
   }
 
-    // ===== M1: SUMMARY 模板保真（execute / subagent-execute 出口·DESIGN D6 / AC-7）=====
+    // ===== M1: SUMMARY 模板保真（execute / subagent-execute 出口·设计语义 / AC-7）=====
     // 每份 *-SUMMARY.md 校 ① 标题首行 # SUMMARY: ② 首部 4 字段（Change ID/Task ID/完成时间/AI 角色）
     // ③ 段序（做了什么→改动文件→verify 输出→6 维自查→…→自检方法）；宽容匹配（大小写/编号前缀/括号后缀）。
     // 新 change 任一缺失 → BLOCK（含缺失点 + 恢复指引）；旧 change/归档批 → WARN 渐进。
@@ -2952,7 +2952,7 @@ async function main() {
       }
     }
 
-    // ===== M2: TASK 7 字段完整性（plan 出口·DESIGN D7 / AC-8）=====
+    // ===== M2: TASK 7 字段完整性（plan 出口·设计语义 / AC-8）=====
     // 每个 <task> 块须含 name/read_files/write_files/action/verify/done/depends_on；缺任一 → 新 BLOCK / 旧 WARN。
     // 开标签解析/整块提取沿用 task-parsing.mjs（属性序无关）。宽容：任务块采用旧式一字段形态（无 <name> 标记）
     // 的 TASK 视为旧格式 → 仅渐进 WARN（不误拦既有波次/路由回归载体）；采用新模板形态（含 <name>）则按 7 字段强校验。
@@ -2986,7 +2986,7 @@ async function main() {
       } catch {}
     }
 
-    // ===== M3: CHANGE/REQUIREMENT/DESIGN 模板保真（open / design 出口·DESIGN D8 / AC-9）=====
+    // ===== M3: CHANGE/REQUIREMENT/DESIGN 模板保真（open / design 出口·设计语义 / AC-9）=====
     // 标题与模板一致（# CHANGE: / # REQUIREMENT: / # DESIGN:，大小写不敏感、冒号可省）+ 段序按模板派生骨架宽容匹配
     // （编号前缀/括号后缀兼容）；首部必要字段（Change ID）缺失 → 渐进 WARN。新 change 标题/段序失配 → BLOCK + 恢复指引；
     // 旧 change/归档批 → WARN 渐进。
