@@ -2748,7 +2748,7 @@ async function main() {
           + '）但 subagent-execute 节点未 exit——疑似越权委托（execute 出口未拦截,verify 兜底提示）');
       }
     } catch {}
-    const { execSync } = await import('child_process');
+    const { spawnSync } = await import('child_process');
     let verifyCommand = null;
     // 1) TEST.md 的 ## 验证命令 段（首行代码块首行）
     const testDoc = path.join(runRoot, '.specs', state.activeChange ?? '', 'TEST.md');
@@ -2773,8 +2773,32 @@ async function main() {
     // verify 命令 timeout 可配置——FLOW_COMET_VERIFY_TIMEOUT_MS 环境变量优先，
     // 缺省 300000ms（300s；后端测试耗时可超 300s，用 env 调大）；非数字/0 → 回退缺省
     const verifyTimeoutMs = Number.parseInt(process.env.FLOW_COMET_VERIFY_TIMEOUT_MS ?? '300000', 10) || 300000;
+    // 二段式执行（受限沙箱兼容）：首选管道式捕获（输出可用、行为与既有等价）；仅当管道式
+    // 执行在 spawn 层被拒（EPERM——如受限沙箱会话，此时子进程根本不启动）时降级：以继承
+    // stdio 重试同一命令（真实执行保持、退出码判定不变），VERIFY-DEGRADED 行标记降级捕获；
+    // 非 EPERM 失败维持现状路径（不降级，避免吞掉真实测试失败）。
     try {
-      execSync(verifyCommand, { cwd: runRoot, stdio: 'pipe', timeout: verifyTimeoutMs });
+      // 测试钩子（仅测试用途）：FLOW_COMET_VERIFY_FORCE_EPERM=1 使首次管道执行模拟 EPERM
+      // 拒绝——真实受限会话中命令在管道阶段不会启动，故跳过管道阶段直接产生 EPERM 结果，
+      // 让降级路径可确定性自动化断言（生产触发条件是真实 spawn 层 EPERM，不经此钩子）
+      const forceEperm = process.env.FLOW_COMET_VERIFY_FORCE_EPERM === '1';
+      const first = forceEperm
+        ? { status: null, error: Object.assign(new Error('spawn verify EPERM（FLOW_COMET_VERIFY_FORCE_EPERM=1 模拟受限沙箱拒绝）'), { code: 'EPERM' }), stdout: '', stderr: '' }
+        : spawnSync(verifyCommand, { cwd: runRoot, shell: true, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: verifyTimeoutMs });
+      const firstFailed = first.error != null || first.status !== 0;
+      const epermDenied = first.error != null && (first.error.code === 'EPERM' || String(first.error.message ?? '').includes('EPERM'));
+      if (firstFailed && epermDenied) {
+        console.error('VERIFY-DEGRADED: ' + verifyCommand + '（沙箱管道受限，以 inherit 重试）');
+        const r2 = spawnSync(verifyCommand, { cwd: runRoot, shell: true, stdio: 'inherit', timeout: verifyTimeoutMs });
+        if (!(r2.error == null && r2.status === 0)) {
+          throw new Error(r2.error != null ? String(r2.error.message) : ('exit code ' + r2.status));
+        }
+      } else if (firstFailed) {
+        // 非 EPERM 失败维持现状路径——抛出与既有 execSync 形态兼容的错误对象（stdout 优先展示）
+        const e = new Error('Command failed: ' + verifyCommand + '\n' + String(first.stderr ?? ''));
+        e.stdout = first.stdout;
+        throw e;
+      }
     } catch (e) {
       // verify-fail 自动递增（无需 LLM 主动调用）——计数按当前 change 存储
       // （verifyFailuresByChange，切换 change 不串扰；旧顶层字段迁移并入）
