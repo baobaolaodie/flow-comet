@@ -4157,7 +4157,7 @@ const SCENARIOS = [
 
   // 169: 非 EPERM 失败不降级——验证命令真实失败（非零退出、无 EPERM、无钩子）时行为与
   // 现状一致：VERIFY-FAIL 计数语义输出、不含 VERIFY-DEGRADED 行、guard exit≠0。
-  // （锚定场景：防止降级逻辑扩大化吞掉真实测试失败——D2 边界）
+  // （锚定场景：防止降级逻辑扩大化吞掉真实测试失败——降级边界）
   {
     name: '169 非 EPERM 失败不降级：VERIFY-FAIL 照常且无 VERIFY-DEGRADED 行',
     run: (dir) => {
