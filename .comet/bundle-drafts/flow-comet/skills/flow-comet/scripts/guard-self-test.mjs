@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · flow-comet 引擎自测套件（165 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、波次分组合法性与契约解析失败检测、场景数一致性自检、prepare-env 平台选择链）
+// C1 · flow-comet 引擎自测套件（167 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、波次分组合法性与契约解析失败检测、场景数一致性自检、prepare-env 平台选择链）
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -7,7 +7,7 @@
 // （COMET_RUN_ROOT=<临时目录>）→ 断言退出码与输出关键词。场景跑完 rmSync 清理。
 //
 // 运行: node scripts/guard-self-test.mjs
-// 全过 → exit 0，输出 ALL 165 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
+// 全过 → exit 0，输出 ALL 167 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
 //
 // 仅 node 内置模块（child_process/fs/os/path）；无网络；不依赖 flow-kit 模板目录
 // 存在（fallback 场景用内置段名；部分场景复制模板文件进临时目录验证 C2 模板派生）。
@@ -4061,6 +4061,70 @@ const SCENARIOS = [
       if (st2.currentNode !== 'plan') {
         throw new Error('entered 未 record 的节点不应被推进，currentNode 应为 plan，实际: ' + st2.currentNode);
       }
+    },
+  },
+
+  // 166: 节点 SKILL 加载声明与协议一致（防回归锁）——每个节点 SKILL.md 必须含
+  // requiredSkillCalls（非 advisory）对应的完整 skill-load 声明命令行与协议文件映射。
+  {
+    name: '166 节点 SKILL 声明命令与 workflow-protocol.json 一致',
+    run: () => {
+      const protocol = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'reference', 'workflow-protocol.json'), 'utf8'));
+      const promptBySkill = {
+        'flow-comet-change': '0-change.md',
+        'flow-comet-requirement': '1-requirement.md',
+        'flow-comet-design': '2-design.md',
+        'flow-comet-task': '3-task.md',
+        'flow-comet-dev': '4-dev.md',
+        'flow-comet-review': '6-review.md',
+        'flow-comet-test': '5-test.md',
+        'flow-comet-integration': '7-integration.md',
+      };
+      const advisory = new Set(['flow-comet-ui-design']);
+      const problems = [];
+      for (const node of protocol.nodes) {
+        const impl = node.implementation && node.implementation.skill;
+        if (!impl) continue;
+        const text = fs.readFileSync(path.join(__dirname, '..', '..', impl, 'SKILL.md'), 'utf8');
+        for (const call of node.requiredSkillCalls || []) {
+          if (advisory.has(call.skill)) continue;
+          const promptFile = promptBySkill[call.skill];
+          if (!promptFile) { problems.push(impl + ' 缺 ' + call.skill + ' 的 prompt 映射'); continue; }
+          const line = 'skill-load ' + node.id + ' ' + call.skill + ' --prompt flow-kit/prompts/' + promptFile;
+          if (!text.includes(line)) problems.push(impl + ' 缺声明命令: ' + line);
+        }
+      }
+      if (problems.length > 0) throw new Error('节点 SKILL 声明命令与协议不一致: ' + problems.join('; '));
+    },
+  },
+
+  // 167: 两层加载模型措辞——阶段层禁止在节点 SKILL 内指示用 Skill 工具加载任何节点实现技能
+  //（本节点技能已由入口路由经 Skill 工具加载）；入口层禁止 Implementation/Required 混淆句式；
+  // 全部 10 文件禁止无限定「record 会自动补写缺失的声明标记」表述（与新 change 技能加载前置门矛盾）。
+  {
+    name: '167 两层加载模型措辞：禁自加载句式/禁混淆句式/自动补分新旧',
+    run: () => {
+      const nodeDirs = ['flow-comet-open', 'flow-comet-design', 'flow-comet-plan', 'flow-comet-execute',
+        'flow-comet-subagent-execute', 'flow-comet-review', 'flow-comet-verify', 'flow-comet-archive'];
+      const implPattern = /用\s*Skill\s*工具加载[^。\n]{0,60}flow-comet-(open|design|plan|execute|subagent-execute|review|verify|archive)/;
+      const autoFill = 'record 会自动补写缺失的声明标记';
+      const stageAnchor = '本节点技能已由入口路由经 Skill 工具加载';
+      const entryAnchor = 'Skill 工具加载该节点的 Implementation 技能';
+      const problems = [];
+      for (const id of nodeDirs) {
+        const text = fs.readFileSync(path.join(__dirname, '..', '..', id, 'SKILL.md'), 'utf8');
+        if (implPattern.test(text)) problems.push(id + ' 含「用 Skill 工具加载节点实现技能」句式');
+        if (text.includes(autoFill)) problems.push(id + ' 含无限定自动补表述');
+        if (!text.includes(stageAnchor)) problems.push(id + ' 缺阶段层锚点句');
+      }
+      for (const name of ['SKILL.md', 'GUIDANCE.md']) {
+        const text = fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
+        if (text.includes('见上方 Required Calls 表')) problems.push(name + ' 含 Implementation/Required 混淆句式');
+        if (text.includes(autoFill)) problems.push(name + ' 含无限定自动补表述');
+        if (!text.includes(entryAnchor)) problems.push(name + ' 缺入口层锚点句');
+        if (!text.includes('前置门')) problems.push(name + ' 缺前置门表述');
+      }
+      if (problems.length > 0) throw new Error('两层加载模型措辞不符: ' + problems.join('; '));
     },
   },
 ];
