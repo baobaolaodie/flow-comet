@@ -3149,8 +3149,10 @@ const SCENARIOS = [
   {
     name: '132 exit 对 auto 声明标记输出提示（R3）',
     run: (dir) => {
+      // 技能加载前置门对齐：record 无声明标记在新 change 下 BLOCK——本场景测 exit 的
+      // auto 标记提示，改用旧 change(无 newChange)构造，保留 record 通过 + exit auto 提示
+      // 的测试意图（新 change 无声明记录由前置门场景覆盖）。
       const st = baseState('open');
-      st.newChange = true;
       writeState(dir, st);
       assertExit(runGuard(['entry', 'open'], dir), 0);
       assertExit(runState(['record', 'open', '{"summary":"intake"}'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') }), 0);
