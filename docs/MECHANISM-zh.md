@@ -64,11 +64,11 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 
 ## 6. guard 自测套件（作者回归基线）
 
-`scripts/guard-self-test.mjs`：**165 个场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（61 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
+`scripts/guard-self-test.mjs`：**167 个场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（61 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
 
 ```bash
 node .claude/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 165 SCENARIOS PASSED
+# → ALL 167 SCENARIOS PASSED
 ```
 
 ## 6.5 DeepSeek Harness（dsh）平台
@@ -99,7 +99,7 @@ node .claude/skills/flow-comet/scripts/guard-self-test.mjs
 
 - **节点进入证据**：进入节点会被记录；未 entry 直接 exit——新 change BLOCKED（进入检查不可跳过：协调者禁令/委托前 commit 检查/签名记录），旧 change 渐进警告。
 - **新 change 强制**：`init` 创建的 change 标记为"新"（`newChange`），内容级检查全面强制——已完成任务必须有对应 SUMMARY、交接结果必须有 TDD RED 证据、处置标记、builtin 自检证据、波次散文一致性、越权委托、追加位置；旧 change 保持渐进警告。
-- **声明自动化**：`record` 自动补写缺失的技能加载声明标记（手动声明仍推荐）。
+- **声明自动化**：旧 change 由 `record` 自动补写缺失的技能加载声明标记作兜底；新 change 必须先有本节点声明标记（技能加载前置门——无声明时委托请求与完成记录都会被拦截）。
 - **显式空退出豁免**：execute 在显式声明（`emptyExitApproved`）后可在无串行任务时空退出；默认仍拦截。
 
 ## 设计原理

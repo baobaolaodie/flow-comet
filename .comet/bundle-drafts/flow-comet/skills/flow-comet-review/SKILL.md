@@ -144,9 +144,9 @@ The review node performs a structured 4-round review: spec compliance (Round 1),
 
 Load `flow-comet-test` during this Node and record completed check `required-skill:review.flow-comet-test`. Reason: 测试金字塔完整性
 
-**加载声明（双步硬规则）**：进入 review 节点后，以下两步**都不可跳过**：
+**加载声明（阶段层 · 双步硬规则）**：本节点技能已由入口路由经 Skill 工具加载（你正在阅读的就是它）；本节点 Required Skill Calls 的加载与声明同样不可跳过：
 
-1. **用 Skill 工具加载** 本节点 skill（`flow-comet-review`；涉及测试金字塔完整性时还要加载 `flow-comet-test`）。**不得跳过**——只读取 SKILL.md 文件不叫加载；真正让 skill 指令生效的是 Skill 工具把它注入本次会话。
+1. 本节点的同名条目已随路由加载——同名 required 条目（`flow-comet-review`）无需重复加载，仅需运行下方对应声明命令（只读取 SKILL.md 文件不叫加载，**不得跳过**真正的 Skill 工具注入步骤）；涉及测试金字塔完整性时，还要**用 Skill 工具加载** `flow-comet-test`。
 2. 加载完成后**立即**运行声明命令，每个协议文件对应一条（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
 
 ```bash
