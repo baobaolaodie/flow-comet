@@ -230,6 +230,34 @@ async function main() {
     const isZeroCommit = hasRequest && (reqWriteFiles.length === 0 || reqNoCommit);
     if (isZeroCommit) {
       console.error('HANDOFF 零提交: ' + taskId + ' — 无 tracked 写文件（write_files 为空），已跳过提交文件子集校验');
+      // 零提交边界收紧（bot 评审实证逃逸口）：声明零提交的结果若携带含 tracked 文件的提交，
+      // 等于从「空 write_files」旁路逃逸——新 change BLOCK / 旧 change WARN。探测异常降级
+      // WARN 不阻断（对齐 M4 提交对象确认提示先例）。
+      const zeroHash = (typeof parsed === 'object' && parsed !== null && parsed.commitHash && /^[0-9a-f]{7,40}$/i.test(String(parsed.commitHash)))
+        ? String(parsed.commitHash) : null;
+      if (zeroHash) {
+        const { execSync } = await import('child_process');
+        let committed = null;
+        let probeFail = false;
+        try {
+          const out = execSync('git show ' + zeroHash + ' --name-only --format=', { cwd: runRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+          committed = out.split('\n').map((s) => s.trim()).filter(Boolean);
+        } catch {
+          probeFail = true;
+        }
+        if (probeFail) {
+          console.error('HANDOFF WARN: ' + taskId + ' 零提交提交对象不可校验——按确认提示语义不阻断');
+        } else if (committed.length > 0) {
+          const msg = taskId + ' 声明零提交但提交携带 tracked 文件: ' + committed.join(', ');
+          if (state.newChange === true) {
+            console.error('BLOCKED: ' + msg + '——回退越界文件或改按常规任务申报 write_files');
+            process.exit(1);
+          }
+          console.error('HANDOFF WARN: ' + msg + '（旧 change 渐进，不阻断）');
+        } else {
+          console.error('HANDOFF 零提交: ' + taskId + ' — 提交为空，校验通过');
+        }
+      }
     } else if (contractNoCommit) {
       console.error('HANDOFF WARN: ' + taskId + ' — 契约声明零提交但 write_files 非空，仍执行完整提交文件子集校验（零提交声明不能绕过真实提交检查）');
     }

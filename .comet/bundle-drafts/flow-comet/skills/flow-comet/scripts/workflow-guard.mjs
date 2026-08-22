@@ -2834,7 +2834,11 @@ async function main() {
     for (const [taskId, rec] of Object.entries(results)) {
       const r = typeof rec.result === 'object' && rec.result !== null ? rec.result : null;
       if (!r) { violations.push(taskId + ' 非 Return Contract（旧格式，缺 completedChecks）'); continue; }
-      if (!r.commitHash) violations.push(taskId + ' 缺 commitHash');
+      // 零提交语义对齐：request 记录 noCommit（write_files 空）的任务无提交可回传，
+      // 豁免 commitHash 缺失断言（其余契约校验不变）——与 workflow-handoff 零提交跳过同构
+      const taskReq = he.handoffRequests ? he.handoffRequests[taskId] : null;
+      const noCommitTask = !!(taskReq && taskReq.noCommit === true);
+      if (!r.commitHash && !noCommitTask) violations.push(taskId + ' 缺 commitHash');
       if (!r.greenEvidence || !r.greenEvidence.command) violations.push(taskId + ' 缺 greenEvidence');
       // redEvidence 缺失警告（过渡期不阻断）——M3: 新 change(enter 机制激活)升级为 BLOCKED(TDD RED 证据强制)
       if (r && !r.redEvidence) {
@@ -3032,8 +3036,11 @@ async function main() {
         if (viol) {
           hardProblems.push(file + ' 段序乱（「' + viol.raw.replace(/^##\s*/, '') + '」偏离 ' + label + ' 模板段序）');
         }
-        if (!/\*\*\s*Change\s+ID\s*\*\*/i.test(text.split(/\n##\s/)[0])) {
-          softWarnings.push(file + ' 首部缺 Change ID 字段（' + label + ' 模板首部含 `- **Change ID**: <id>`）');
+        const changeIdMissing = !/\*\*\s*Change\s+ID\s*\*\*/i.test(text.split(/\n##\s/)[0]);
+        const intakeMsg = file + ' 首部缺 Change ID 字段（' + label + ' 模板首部含 `- **Change ID**: <id>`）';
+        if (changeIdMissing) {
+          if (isNewChange(state)) hardProblems.push(intakeMsg);
+          else softWarnings.push(intakeMsg + '（渐进提示；新 change 将强制）');
         }
       };
       if (node.id === 'open') {
