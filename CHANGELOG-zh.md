@@ -21,7 +21,8 @@
 - **工件模板保真与技能加载前置门**：新 change 的 SUMMARY / TASK / CHANGE / REQUIREMENT / DESIGN 须保持模板标题、首部字段与段序；handoff request / record 前须已有本节点 skill-load 声明（用 Skill 工具加载技能后声明，读 SKILL.md 文件不算加载）。([#67](https://github.com/baobaolaodie/flow-comet/pull/67))
 - **零提交任务正式语义**：任务 `write_files` 为空且契约显式声明 `noCommit` 时跳过提交文件子集校验并输出可审计提示；`write_files` 非空任务即使声称零提交仍执行完整校验。([#67](https://github.com/baobaolaodie/flow-comet/pull/67))
 - **回归套件新增两层技能加载模型守卫场景**；**工作流技能文档改为两层技能加载模型**：入口层先经 Skill 工具加载路由命中的节点实现技能、再加载协议技能；节点技能声明自身已由路由加载（同名 required 仅需声明）；旧自动补表述限定为旧 change 兜底并置于声明前置门之下；新增两个回归场景锁定声明命令一致性并禁止自加载与混淆句式。([#67](https://github.com/baobaolaodie/flow-comet/pull/67))
-- **验证出口命令执行兼容 dsh headless 受限沙箱形态**：管道式执行被拒（EPERM，实测见于 dsh headless 一次性 runner 会话）时，guard 以继承 stdio 重试同一命令——真实执行与退出码判定不变，降级捕获以 VERIFY-DEGRADED 行标记；非 EPERM 失败不降级。回归套件扩展至 169 场景。([#67](https://github.com/baobaolaodie/flow-comet/pull/67))
+- **验证出口命令执行兼容 dsh headless 受限沙箱形态**：管道式执行被拒（EPERM，实测见于 dsh headless 一次性 runner 会话）时，guard 以继承 stdio 重试同一命令——真实执行与退出码判定不变，降级捕获以 VERIFY-DEGRADED 行标记；非 EPERM 失败不降级。([#67](https://github.com/baobaolaodie/flow-comet/pull/67))
+- **零提交任务不得携带 tracked 提交**：声明 noCommit 的结果若提交包含 tracked 文件，新 change 予以拒绝（旧 change 告警），封堵提交子集边界的逃逸口；**入口文档在新 change 强制 Change ID 首部**（此前仅告警）。回归套件扩展至 171 场景。([#67](https://github.com/baobaolaodie/flow-comet/pull/67))
 
 ## [1.4.2] - 2026-08-18
 

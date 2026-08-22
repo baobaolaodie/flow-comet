@@ -180,8 +180,8 @@ function baseState(node) {
 
 // open 阶段工件（CHANGE 含 Why；REQUIREMENT 含 用户故事 + 验收准则——通过出口校验的完整形态）
 function writeIntakeArtifacts(root, changeId = CHANGE_ID) {
-  writeFile(root, '.specs/' + changeId + '/CHANGE.md', '# CHANGE\n\n## Why（为什么做）\n\n变更目标。\n');
-  writeFile(root, '.specs/' + changeId + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事（User Story）\n\n用户需求。\n\n## 验收准则（AC）\n\n- 通过标准\n');
+  writeFile(root, '.specs/' + changeId + '/CHANGE.md', '# CHANGE\n\n- **Change ID**: ' + changeId + '\n\n## Why（为什么做）\n\n变更目标。\n');
+  writeFile(root, '.specs/' + changeId + '/REQUIREMENT.md', '# REQUIREMENT\n\n- **Change ID**: ' + changeId + '\n\n## 用户故事（User Story）\n\n用户需求。\n\n## 验收准则（AC）\n\n- 通过标准\n');
 }
 
 // 自定义协议（compose-demo）：3 节点 brainstorm/tdd/codereview（避开内置 8 节点 id）——
@@ -2615,7 +2615,7 @@ const TEST_ITEMS = [
       assertExit(runGuard(['exit', 'open', '--apply'], dir), 0);
       // 推进到 design 后不 entry 直接 exit?→ currentNode 检查会拦;验证 enter 证据在真实链路不误报
       assertExit(runGuard(['entry', 'design'], dir), 0);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n## 0. 技术栈\n\npython\n\n## 决策清单\n\n- [ ] D1\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 0. 技术栈\n\npython\n\n## 决策清单\n\n- [ ] D1\n');
       assertExit(runState(['record', 'design', '{"summary":"design done"}'], dir), 0);
       const rDesign = runGuard(['exit', 'design', '--apply'], dir);
       assertExit(rDesign, 0);
