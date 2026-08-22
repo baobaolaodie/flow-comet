@@ -10,7 +10,7 @@
 
 | Item | Description |
 |------|-------------|
-| **Current version** | v1.4.2. Release truth: [CHANGELOG.md](../CHANGELOG.md) + git tag (created at the release step); README badge mirrors it; `skills/flow-comet/INSTALLED_VERSION` is checked installed-copy metadata (git describe of the source repo). The dsh platform (via `prepare-env --platform dsh`) carries the same version marker in its project-level skill copy; there is no separate npm package (a later / 1.5.0 item). v1.0.0 = first stable: 8-node workflow + three defense layers + guard validation |
+| **Current version** | v1.5.0-rc.1. Release truth: [CHANGELOG.md](../CHANGELOG.md) + git tag (created at the release step); README badge mirrors it; `skills/flow-comet/INSTALLED_VERSION` is checked installed-copy metadata (git describe of the source repo). The dsh platform (via `prepare-env --platform dsh`) carries the same version marker in its project-level skill copy; there is no separate npm package (a later item). v1.0.0 = first stable: 8-node workflow + three defense layers + guard validation |
 | **Versioning** | Semantic Versioning: feature release → minor (1.2.0), bug fix → patch (1.1.1), breaking change → major (2.0.0); bump at the end of each feature release |
 | **Bundle version decoupling** | `bundle.yaml`/`skill.yaml` version stays 1.0.0 (decoupled from release versioning); git tag + CHANGELOG are the single source of truth |
 
