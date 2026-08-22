@@ -10,7 +10,7 @@
 
 | 项 | 说明 |
 |----|------|
-| **当前版本** | v1.5.0-rc.1。发布真相：[CHANGELOG-zh.md](../CHANGELOG-zh.md) + git tag（发布步骤创建）；README 徽章镜像；`skills/flow-comet/INSTALLED_VERSION` 为安装副本元数据（源仓库 git describe）。dsh 平台（经 `prepare-env --platform dsh`）在项目级技能副本中携带同一版本标识；无独立 npm 包（留后续）。v1.0.0 = 首个稳定版：8 节点工作流 + 三层防线 + guard 校验体系 |
+| **当前版本** | v1.4.2。发布真相：[CHANGELOG-zh.md](../CHANGELOG-zh.md) + git tag（发布步骤创建）；README 徽章镜像；`skills/flow-comet/INSTALLED_VERSION` 为安装副本元数据（源仓库 git describe）。dsh 平台（经 `prepare-env --platform dsh`）在项目级技能副本中携带同一版本标识；无独立 npm 包（留后续 / 1.5.0）。v1.0.0 = 首个稳定版：8 节点工作流 + 三层防线 + guard 校验体系 |
 | **版本策略** | 语义化版本：新功能发布 → minor（1.2.0）、bug 修复 → patch（1.1.1）、破坏性变更 → major（2.0.0）；每次功能发布完成时 bump |
 | **bundle 版本解耦** | `bundle.yaml`/`skill.yaml` 的 version 保持 1.0.0（与发布版本解耦）；git tag + CHANGELOG 是版本唯一事实来源 |
 
