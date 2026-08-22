@@ -10,6 +10,10 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号记录于 git tag、本文档、README 徽章、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 与权威源 `skills/flow-comet/INSTALLED_VERSION`；`bundle.yaml` 的 version 保持 1.0.0（与发布流程解耦）。
 
+## [Unreleased]
+
+### 变更
+
 ## [1.5.0-rc.1] - 2026-08-23
 
 预发布版本，收口机制与技能健壮性批次：工件模板保真、技能加载前置门、两层技能加载模型、零提交正式语义、验证出口沙箱兼容，外加 dsh 桥接空闲态包含性与 plan 波次分组校验。([#64](https://github.com/baobaolaodie/flow-comet/pull/64)) ([#65](https://github.com/baobaolaodie/flow-comet/pull/65)) ([#66](https://github.com/baobaolaodie/flow-comet/pull/66)) ([#67](https://github.com/baobaolaodie/flow-comet/pull/67))
