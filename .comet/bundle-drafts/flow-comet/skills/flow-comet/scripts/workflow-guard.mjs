@@ -1966,6 +1966,92 @@ async function templateSectionPatterns() {
   return result;
 }
 
+  // ===== 模板保真（M1/M2/M3·设计语义 / AC-7~AC-9）=====
+  // 段名归一化：去标题标记 + 去尾部括号（如 Why（为什么做）→ Why）+ 去编号前缀（如 1. 决策清单 → 决策清单）
+  // + 去首尾空白 + ASCII 小写（中文无大小写；英文侧大小写不敏感）——沿用 C2 宽容匹配风格
+  function normalizeTemplateHeading(raw) {
+    return String(raw)
+      .replace(/\r/g, '')
+      .replace(/^#{1,6}\s*/, '')
+      .replace(/[（(][^）)\n]*[）)]\s*$/u, '')
+      .replace(/^\d+(?:\.\d+)?\.?\s*/u, '')
+      .trim()
+      .toLowerCase();
+  }
+
+  // 提取文档全部 ^## 段（归一化后），供段序/缺段校验
+  function documentSectionHeadings(content) {
+    const out = [];
+    for (const m of String(content).matchAll(/^##\s+(.+)$/gmu)) {
+      out.push({ raw: m[1].trim(), norm: normalizeTemplateHeading(m[1]) });
+    }
+    return out;
+  }
+
+  // 模板段序骨架：段名从 flow-kit/templates 派生（与 C2 同源，模板缺失 fallback 内置骨架）
+  const TEMPLATE_FIDELITY_FALLBACK_SKELETON = {
+    change: ['why', 'what', '视觉调性', '影响面', '范围排除', '验收线', '风险与未知'],
+    requirement: ['用户故事', '验收准则', '范围切分', '非功能性需求', '依赖与假设'],
+    design: ['技术栈选定', '既有架构对齐', '决策清单', '数据流', '关键状态机', 'adr 索引', '风险', '不在范围', '架构沉淀建议'],
+  };
+
+  async function templateSkeleton(key) {
+    const tpl = await templateSectionPatterns(); // 复用 C2 模板缓存（runRoot 内模板）
+    const src = tpl[key] ?? [];
+    if (src.length > 0) return src.map((s) => normalizeTemplateHeading(s.name));
+    return TEMPLATE_FIDELITY_FALLBACK_SKELETON[key] ?? [];
+  }
+
+  // 段序校核（宽容）：模板骨架段里「实际出现」的段须按模板先后出现；返回乱序描述（无则 null）
+  function templateOrderViolation(skeletons, headings) {
+    let last = -1;
+    for (const h of headings) {
+      const idx = skeletons.indexOf(h.norm);
+      if (idx === -1) continue;
+      if (idx < last) return h.raw;
+      last = idx;
+    }
+    return null;
+  }
+
+  // M1: SUMMARY 模板保真——标题 # SUMMARY: + 首部 4 字段 + 段序（含 flow-comet 增量 ## 自检方法）。
+  // 返回各维度缺口；调用方按新 BLOCK / 旧 WARN 渐进处置
+  const SUMMARY_TEMPLATE_HEADER_FIELDS = [
+    { label: 'Change ID', re: /\*\*\s*Change\s+ID\s*\*\*/i },
+    { label: 'Task ID', re: /\*\*\s*Task\s+ID\s*\*\*/i },
+    { label: '完成时间', re: /\*\*\s*完成时间\s*\*\*/ },
+    { label: 'AI 角色', re: /\*\*\s*AI\s*角色\s*\*\*/ },
+  ];
+  // 段序（含 flow-comet 增量段；越界检查在模板中位于 6 维自查 与 自检方法 之间）
+  const SUMMARY_ORDERED_SECTIONS = ['做了什么', '改动文件', 'verify 输出', '6 维自查', '越界检查', '自检方法']
+    .map(normalizeTemplateHeading);
+
+  function summaryTemplateFidelity(content) {
+    const text = String(content).replace(/\uFEFF/g, '');
+    const firstRealLine = (text.split('\n').find((l) => l.trim().length > 0) || '').trim();
+    const titleMissing = !/^#\s*summary\s*:/i.test(firstRealLine);
+    const headerRegion = text.split(/\n##\s/)[0];
+    const headerMissing = SUMMARY_TEMPLATE_HEADER_FIELDS
+      .filter((f) => !f.re.test(headerRegion))
+      .map((f) => f.label);
+    const headings = documentSectionHeadings(text);
+    const seen = new Set();
+    let last = -1;
+    let orderIssue = null;
+    for (const h of headings) {
+      const idx = SUMMARY_ORDERED_SECTIONS.indexOf(normalizeTemplateHeading(h.raw));
+      if (idx === -1) continue;
+      if (idx < last) { orderIssue = h.raw; break; }
+      last = idx;
+      seen.add(idx);
+    }
+    const missingSections = [];
+    for (let i = 0; i < SUMMARY_ORDERED_SECTIONS.length; i++) {
+      if (!seen.has(i)) missingSections.push(SUMMARY_ORDERED_SECTIONS[i]);
+    }
+    return { titleMissing, headerMissing, orderIssue, missingSections };
+  }
+
 // C3: TASK.md 任务集签名——提取全部 <task> 块，剥离开标签上的标记类属性（仅保留 id/parallel），排序防顺序漂移，拼接后 sha256
 // 行尾规范化——Windows 下 bash heredoc 写 LF、python 写 CRLF（os.linesep），跨工具编辑
 // 导致"任务集逻辑未变但字节变"的误报 BLOCK；签名前统一 CRLF → LF（仅归一化行尾，不改变内容语义）
@@ -2142,6 +2228,14 @@ async function main() {
       await writeJson(file, state);
       // G13: 进入已记录提示(执行者可知 entry 有副作用——进入证据写入)
       console.log('ENTER RECORDED: ' + node.id + ' 进入已记录(enteredNodes)');
+    }
+    // 输出点名（机器点名节点技能）：进入节点时机器点名该节点实现技能必须经 Skill 工具加载——
+    // skill 名取节点实现 skill（内置协议 = flow-comet-plan 等，与 SKILL: 行一致）
+    const entryImplSkill = node.implementation && typeof node.implementation === 'object' && node.implementation.skill
+      ? node.implementation.skill
+      : null;
+    if (entryImplSkill) {
+      console.log('LOAD SKILL: ' + entryImplSkill + '（用 Skill 工具，禁止跳过）');
     }
     console.log('ENTRY OK: ' + node.id);
     return;
@@ -2654,7 +2748,7 @@ async function main() {
           + '）但 subagent-execute 节点未 exit——疑似越权委托（execute 出口未拦截,verify 兜底提示）');
       }
     } catch {}
-    const { execSync } = await import('child_process');
+    const { spawnSync } = await import('child_process');
     let verifyCommand = null;
     // 1) TEST.md 的 ## 验证命令 段（首行代码块首行）
     const testDoc = path.join(runRoot, '.specs', state.activeChange ?? '', 'TEST.md');
@@ -2679,8 +2773,32 @@ async function main() {
     // verify 命令 timeout 可配置——FLOW_COMET_VERIFY_TIMEOUT_MS 环境变量优先，
     // 缺省 300000ms（300s；后端测试耗时可超 300s，用 env 调大）；非数字/0 → 回退缺省
     const verifyTimeoutMs = Number.parseInt(process.env.FLOW_COMET_VERIFY_TIMEOUT_MS ?? '300000', 10) || 300000;
+    // 二段式执行（受限沙箱兼容）：首选管道式捕获（输出可用、行为与既有等价）；仅当管道式
+    // 执行在 spawn 层被拒（EPERM——如受限沙箱会话，此时子进程根本不启动）时降级：以继承
+    // stdio 重试同一命令（真实执行保持、退出码判定不变），VERIFY-DEGRADED 行标记降级捕获；
+    // 非 EPERM 失败维持现状路径（不降级，避免吞掉真实测试失败）。
     try {
-      execSync(verifyCommand, { cwd: runRoot, stdio: 'pipe', timeout: verifyTimeoutMs });
+      // 测试钩子（仅测试用途）：FLOW_COMET_VERIFY_FORCE_EPERM=1 使首次管道执行模拟 EPERM
+      // 拒绝——真实受限会话中命令在管道阶段不会启动，故跳过管道阶段直接产生 EPERM 结果，
+      // 让降级路径可确定性自动化断言（生产触发条件是真实 spawn 层 EPERM，不经此钩子）
+      const forceEperm = process.env.FLOW_COMET_VERIFY_FORCE_EPERM === '1';
+      const first = forceEperm
+        ? { status: null, error: Object.assign(new Error('spawn verify EPERM（FLOW_COMET_VERIFY_FORCE_EPERM=1 模拟受限沙箱拒绝）'), { code: 'EPERM' }), stdout: '', stderr: '' }
+        : spawnSync(verifyCommand, { cwd: runRoot, shell: true, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: verifyTimeoutMs });
+      const firstFailed = first.error != null || first.status !== 0;
+      const epermDenied = first.error != null && (first.error.code === 'EPERM' || String(first.error.message ?? '').includes('EPERM'));
+      if (firstFailed && epermDenied) {
+        console.error('VERIFY-DEGRADED: ' + verifyCommand + '（沙箱管道受限，以 inherit 重试）');
+        const r2 = spawnSync(verifyCommand, { cwd: runRoot, shell: true, stdio: 'inherit', timeout: verifyTimeoutMs });
+        if (!(r2.error == null && r2.status === 0)) {
+          throw new Error(r2.error != null ? String(r2.error.message) : ('exit code ' + r2.status));
+        }
+      } else if (firstFailed) {
+        // 非 EPERM 失败维持现状路径——抛出与既有 execSync 形态兼容的错误对象（stdout 优先展示）
+        const e = new Error('Command failed: ' + verifyCommand + '\n' + String(first.stderr ?? ''));
+        e.stdout = first.stdout;
+        throw e;
+      }
     } catch (e) {
       // verify-fail 自动递增（无需 LLM 主动调用）——计数按当前 change 存储
       // （verifyFailuresByChange，切换 change 不串扰；旧顶层字段迁移并入）
@@ -2716,7 +2834,11 @@ async function main() {
     for (const [taskId, rec] of Object.entries(results)) {
       const r = typeof rec.result === 'object' && rec.result !== null ? rec.result : null;
       if (!r) { violations.push(taskId + ' 非 Return Contract（旧格式，缺 completedChecks）'); continue; }
-      if (!r.commitHash) violations.push(taskId + ' 缺 commitHash');
+      // 零提交语义对齐：request 记录 noCommit（write_files 空）的任务无提交可回传，
+      // 豁免 commitHash 缺失断言（其余契约校验不变）——与 workflow-handoff 零提交跳过同构
+      const taskReq = he.handoffRequests ? he.handoffRequests[taskId] : null;
+      const noCommitTask = !!(taskReq && taskReq.noCommit === true);
+      if (!r.commitHash && !noCommitTask) violations.push(taskId + ' 缺 commitHash');
       if (!r.greenEvidence || !r.greenEvidence.command) violations.push(taskId + ' 缺 greenEvidence');
       // redEvidence 缺失警告（过渡期不阻断）——M3: 新 change(enter 机制激活)升级为 BLOCKED(TDD RED 证据强制)
       if (r && !r.redEvidence) {
@@ -2815,6 +2937,133 @@ async function main() {
         '/.skill-loads/（活动与归档路径）不存在，协议声明校验跳过（机制未激活；首个 skill-load 后新规则生效）');
     }
   }
+
+    // ===== M1: SUMMARY 模板保真（execute / subagent-execute 出口·设计语义 / AC-7）=====
+    // 每份 *-SUMMARY.md 校 ① 标题首行 # SUMMARY: ② 首部 4 字段（Change ID/Task ID/完成时间/AI 角色）
+    // ③ 段序（做了什么→改动文件→verify 输出→6 维自查→…→自检方法）；宽容匹配（大小写/编号前缀/括号后缀）。
+    // 新 change 任一缺失 → BLOCK（含缺失点 + 恢复指引）；旧 change/归档批 → WARN 渐进。
+    if (node.id === 'execute' || node.id === 'subagent-execute') {
+      const summaryChangeDir = path.join(runRoot, '.specs', state.activeChange ?? '');
+      const summaryFiles = (await fs.readdir(summaryChangeDir).catch(() => [])).filter((f) => f.endsWith('-SUMMARY.md'));
+      const hardIssues = [];
+      for (const f of summaryFiles) {
+        try {
+          const fidelity = summaryTemplateFidelity(await fs.readFile(path.join(summaryChangeDir, f), 'utf8'));
+          const problems = [];
+          if (fidelity.titleMissing) {
+            problems.push('首行缺 `# SUMMARY: <Task>-<名>` 标题（大小写不敏感，标题可带括号说明后缀）');
+          }
+          if (fidelity.headerMissing.length > 0) {
+            problems.push('首部缺字段: ' + fidelity.headerMissing.join('、'));
+          }
+          if (fidelity.orderIssue) {
+            problems.push('段序乱（「' + fidelity.orderIssue.replace(/^##\s*/, '') +
+              '」偏离模板段序——应为 做了什么→改动文件→verify 输出→6 维自查→越界检查→自检方法）');
+          }
+          if (fidelity.missingSections.length > 0) {
+            problems.push('缺段: ' + fidelity.missingSections.join('、'));
+          }
+          if (problems.length > 0) {
+            if (isNewChange(state)) {
+              hardIssues.push(f + ' 模板保真校验失败: ' + problems.join('; '));
+            } else {
+              console.error('SUMMARY TEMPLATE WARN: ' + f + ' ' + problems.join('; ') +
+                '（旧 change/归档批渐进，不阻断；新 change 将强制）');
+            }
+          }
+        } catch {}
+      }
+      if (hardIssues.length > 0) {
+        console.error('BLOCKED: SUMMARY 模板保真校验失败: ' + hardIssues.join('; '));
+        console.error('恢复: 对照 flow-kit/templates/SUMMARY.md 修正标题/首部/段序（含 flow-comet 增量 ## 自检方法 段）后重试 exit；新 change 强制模板保真');
+        process.exit(1);
+      }
+    }
+
+    // ===== M2: TASK 7 字段完整性（plan 出口·设计语义 / AC-8）=====
+    // 每个 <task> 块须含 name/read_files/write_files/action/verify/done/depends_on；缺任一 → 新 BLOCK / 旧 WARN。
+    // 开标签解析/整块提取沿用 task-parsing.mjs（属性序无关）。宽容：任务块采用旧式一字段形态（无 <name> 标记）
+    // 的 TASK 视为旧格式 → 仅渐进 WARN（不误拦既有波次/路由回归载体）；采用新模板形态（含 <name>）则按 7 字段强校验。
+    if (node.id === 'plan' && state.activeChange) {
+      const task7File = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
+      try {
+        const task7Blocks = extractTaskBlocks(await fs.readFile(task7File, 'utf8'));
+        const TASK7_REQUIRED = ['name', 'read_files', 'write_files', 'action', 'verify', 'done', 'depends_on'];
+        const planNewFormat = task7Blocks.some((b) => /<name\b/i.test(b));
+        const broken = [];
+        for (const b of task7Blocks) {
+          const missing = TASK7_REQUIRED.filter((field) => !new RegExp('</?' + field + '\\b', 'i').test(b));
+          if (missing.length > 0) {
+            const idAttr = (taskOpeningAttrs(b) || {})?.id || '?';
+            broken.push((idAttr && idAttr !== '?' ? idAttr + ' ' : '') + '缺 ' + missing.join('/'));
+          }
+        }
+        if (broken.length > 0) {
+          if (planNewFormat) {
+            if (isNewChange(state)) {
+              console.error('BLOCKED: TASK.md 任务缺 7 字段（name/read_files/write_files/action/verify/done/depends_on）: ' + broken.join('; '));
+              console.error('恢复: 对照 flow-kit/templates/TASK.md 补齐每个 <task> 的缺字段后重试 exit；新 change 强制任务块结构完整');
+              process.exit(1);
+            }
+            console.error('TASK-7FIELD WARN: TASK.md ' + broken.join('; ') + '（旧 change 渐进，不阻断；新 change 将强制补齐 7 字段）');
+          } else {
+            console.error('TASK-7FIELD WARN: TASK.md 任务为旧式一字段模板形态（' + broken.join('; ') +
+              '）——建议按 flow-kit/templates/TASK.md 补全 7 字段（渐进不阻断）');
+          }
+        }
+      } catch {}
+    }
+
+    // ===== M3: CHANGE/REQUIREMENT/DESIGN 模板保真（open / design 出口·设计语义 / AC-9）=====
+    // 标题与模板一致（# CHANGE: / # REQUIREMENT: / # DESIGN:，大小写不敏感、冒号可省）+ 段序按模板派生骨架宽容匹配
+    // （编号前缀/括号后缀兼容）；首部必要字段（Change ID）缺失 → 渐进 WARN。新 change 标题/段序失配 → BLOCK + 恢复指引；
+    // 旧 change/归档批 → WARN 渐进。
+    if ((node.id === 'open' || node.id === 'design') && state.activeChange) {
+      const intakeDir = path.join(runRoot, '.specs', state.activeChange);
+      const skeletonsCache = {};
+      const hardProblems = [];
+      const softWarnings = [];
+      const checkIntakeDoc = async (file, key, label, titleRe) => {
+        const p = path.join(intakeDir, file);
+        if (!(await fileExists(p))) return; // 文件缺失由产物校验兜底
+        const text = await fs.readFile(p, 'utf8');
+        const firstLine = (text.replace(/\uFEFF/g, '').split('\n').find((l) => l.trim().length > 0) || '').trim();
+        if (!titleRe.test(firstLine)) {
+          hardProblems.push(file + ' 标题应以 # ' + label + ' 开头（如 `# ' + label + ': <标题>`，大小写不敏感、冒号可省）');
+        }
+        if (!skeletonsCache[key]) skeletonsCache[key] = await templateSkeleton(key);
+        const viol = templateOrderViolation(skeletonsCache[key], documentSectionHeadings(text));
+        if (viol) {
+          hardProblems.push(file + ' 段序乱（「' + String(viol).replace(/^##\s*/, '') + '」偏离 ' + label + ' 模板段序）');
+        }
+        const changeIdMissing = !/\*\*\s*Change\s+ID\s*\*\*/i.test(text.split(/\n##\s/)[0]);
+        const intakeMsg = file + ' 首部缺 Change ID 字段（' + label + ' 模板首部含 `- **Change ID**: <id>`）';
+        if (changeIdMissing) {
+          if (isNewChange(state)) hardProblems.push(intakeMsg);
+          else softWarnings.push(intakeMsg + '（渐进提示；新 change 将强制）');
+        }
+      };
+      if (node.id === 'open') {
+        await checkIntakeDoc('CHANGE.md', 'change', 'CHANGE', /^#\s*change\b/i);
+        await checkIntakeDoc('REQUIREMENT.md', 'requirement', 'REQUIREMENT', /^#\s*requirement\b/i);
+      } else {
+        // design：与既有校验一致的 target 选择（DESIGN.md 优先，DESIGN-lite 兜底）
+        const designFile = path.join(intakeDir, 'DESIGN.md');
+        const designLite = path.join(intakeDir, 'DESIGN-lite.md');
+        const chosen = (await fileExists(designFile)) ? 'DESIGN.md' : ((await fileExists(designLite)) ? 'DESIGN-lite.md' : null);
+        if (chosen) await checkIntakeDoc(chosen, 'design', 'DESIGN', /^#\s*design\b/i);
+      }
+      for (const w of softWarnings) console.error('INTAKE-DOC WARN: ' + w + '（渐进提示，不阻断；新 change 同）');
+      if (hardProblems.length > 0) {
+        if (isNewChange(state)) {
+          console.error('BLOCKED: 入口文档模板保真校验失败: ' + hardProblems.join('; '));
+          console.error('恢复: 对照 flow-kit/templates/{CHANGE,REQUIREMENT,DESIGN}.md 修正标题与段序后重试 exit；新 change 强制模板保真');
+          process.exit(1);
+        }
+        for (const h of hardProblems) console.error('INTAKE-DOC WARN: ' + h + '（旧 change/归档批渐进，不阻断；新 change 将强制）');
+      }
+    }
+
   // 自动补 required-skill completedChecks——节点被完成即视为其实现 skill 已加载
   if ((node.requiredSkillCalls ?? []).length > 0) {
     const checks = Array.isArray(evidence.completedChecks) ? evidence.completedChecks : [];

@@ -31,11 +31,7 @@ Responsibility: 委托 [P] 并行任务给子代理，要求加载 flow-comet-de
 >
 > **无 parallel 任务时**：若路由到此节点但 TASK.md 无 `parallel="true" status="pending"` 任务（如全部任务已被 execute 串行处理），按常规流程记录证据后直接退出（entry → record → exit），不要空转等待。
 
-**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）。本节点的 `flow-comet-dev` 为 handoff scope——由子代理加载，**M5 自动补标记不覆盖 handoff scope（2026-08-16）**，协调者必须手动声明（协调者构造 handoff prompt 时按 4-dev.md 协议引用子代理的 dev 协议，声明是真实动作）：
-
-```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load subagent-execute flow-comet-dev --prompt flow-kit/prompts/4-dev.md
-```
+加载声明（阶段层 · 双步硬规则）见下文 Required Skill Calls 节。
 
 guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
 
@@ -77,15 +73,15 @@ Division of labor: `execute` node handles serial delegation (non-parallel tasks,
    - The task's full XML block from TASK.md.
    - DESIGN.md sections 0 and 0.5 for context.
    - REQUIREMENT.md ACs relevant to this task.
-   - Explicit instruction to load `flow-comet-dev` and follow its full protocol.
+   - Explicit instruction to **use the Skill 工具** to load `flow-comet-dev` and follow its full protocol `flow-kit/prompts/4-dev.md`（不得跳过——读取 SKILL.md 文件不叫加载，跑声明命令也不叫加载；加载 = Skill 工具把 skill 注入会话）。
    - Explicit requirement to return `completedChecks` in the Return Contract containing `required-skill:subagent-execute.flow-comet-dev`（证明已加载 implementation skill；guard W1-D 严格校验，缺失 → exit BLOCKED，无旧 change 豁免）。
    - The task's `read_files` and `write_files` boundaries.
-   - Instruction to produce `<task-id>-SUMMARY.md` in `.specs/<change-id>/`.
+   - Instruction to produce `<task-id>-SUMMARY.md` in `.specs/<change-id>/` following the `flow-kit/templates/SUMMARY.md` template（标题/首部/段序保真，另补 flow-comet 增量 `## 自检方法` 段）。
    - **提交边界警告**:提交**只含该任务 write_files 范围内的文件**(含测试文件)——不得包含 TASK.md 与其他协调者维护的 .specs 工件(新 change 提交越界 BLOCKED;实测子代理提交含 TASK.md 被 W2-D 拦截)。**例外**:任务专属的 `<task-id>-SUMMARY.md`(位于 `.specs/<change-id>/`,是 flow-comet 强制产物)允许随任务提交——W2-D 对 `*-SUMMARY.md` 有显式豁免。
 
 3. **Delegate to subagents**（强制 worktree isolation）: 所有并行子代理**必须**使用 `Agent` 工具的 `isolation: "worktree"`，**禁止共享 cwd 直接委托**——hook 白名单依赖 worktree 隔离：子代理 cwd 无 `.comet/flow-comet-state.json`（.gitignore 排除）时 hook 放行源码写入，共享 cwd 的子代理会被 subagent-execute 白名单误拦。Each subagent:
    - Reads TASK.md for its specific task block.
-   - Executes the full TDD protocol (RED/GREEN/REFACTOR).
+   - Executes the full TDD protocol (RED/GREEN/REFACTOR). **纯文档/纯配置任务无生产代码可测时，`redEvidence` 与 `greenEvidence` 均允许 `{"command":"N/A (non-code task)","output":"..."}` 形态**（guard W1-D 接受此形状；不得伪造测试输出）。
    - Greps existing abstractions (R6.4).
    - Scans LESSONS (R1.8).
    - Runs verify command and records real output.
@@ -96,7 +92,7 @@ Division of labor: `execute` node handles serial delegation (non-parallel tasks,
    - Returns evidence via `workflow-handoff.mjs result <task-id>`.
 
 4. **Collect evidence**: After all subagents complete, verify each returned:
-   - SUMMARY.md exists in `.specs/<change-id>/`.
+   - SUMMARY.md exists in `.specs/<change-id>/` and is **模板保真**（按 `flow-kit/templates/SUMMARY.md`：标题 `# SUMMARY:` / 首部 4 字段 / 段序一致，含 `## 自检方法` 段）。
    - Verify output is real (not fabricated).
    - Handoff evidence is recorded.
 
@@ -134,7 +130,7 @@ Division of labor: `execute` node handles serial delegation (non-parallel tasks,
 
 This node is truly done when:
 - All delegated parallel tasks have `status="done"` in TASK.md.
-- Every delegated task has a `<task-id>-SUMMARY.md` in `.specs/<change-id>/`.
+- Every delegated task has a `<task-id>-SUMMARY.md` that is template-faithful (title `# SUMMARY:`, header fields, section order — per `flow-kit/templates/SUMMARY.md`, plus the `## 自检方法` section) in `.specs/<change-id>/`.
 - Handoff evidence (request + result) is recorded for each task.
 - No subagent exceeded its `write_files` boundary.
 - No serial tasks were delegated (only `parallel="true"` tasks).
@@ -162,11 +158,16 @@ The subagent-execute node identifies all `parallel="true"` pending tasks in TASK
 |-------|-------------|--------|
 | `flow-comet-dev` | Required in each subagent's prompt | Provides TDD, LESSONS scan, diff boundary, self-review protocol for each parallel task |
 
-**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+**加载声明（阶段层 · 双步硬规则）**：本节点技能已由入口路由经 Skill 工具加载（你正在阅读的就是它）；本节点 Required Skill Calls 的加载与声明同样不可跳过：
+
+1. **用 Skill 工具加载** `flow-comet-dev`。**不得跳过**——只读取 SKILL.md 文件不叫加载；真正让 flow-comet-dev 指令生效的是 Skill 工具把它注入本次会话。本节点的 flow-comet-dev 为 handoff scope——协调者在此声明（声明标记的自动补写不覆盖 handoff scope，必须手动声明），各子代理在各自会话按 `flow-kit/prompts/4-dev.md` 协议用 Skill 工具加载并执行；协调者构造 handoff prompt 时按 `flow-kit/prompts/4-dev.md` + `flow-kit/templates/SUMMARY.md` 引用子代理的 dev 协议与交付模板。
+2. 加载完成后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
 
 ```bash
 node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load subagent-execute flow-comet-dev --prompt flow-kit/prompts/4-dev.md
 ```
+
+> **跑 skill-load 声明命令 ≠ 加载**：声明只把“哪次会话加载了哪个 skill、按哪份协议工作”写进状态供 exit/record 核对；真正加载只有第 1 步的 Skill 工具能做到。
 
 ## Output Schemas
 
