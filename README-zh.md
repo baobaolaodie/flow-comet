@@ -28,7 +28,7 @@
 <p align="center">
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js_%E2%89%A518-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js 18+" /></a>
   <a href="https://github.com/baobaolaodie/flow-comet/actions"><img src="https://img.shields.io/github/actions/workflow/status/baobaolaodie/flow-comet/ci.yml?style=flat" alt="CI" /></a>
-  <a href="CHANGELOG-zh.md"><img src="https://img.shields.io/badge/version-1.5.0-rc.1-blue.svg" alt="Version" /></a>
+  <a href="CHANGELOG-zh.md"><img src="https://img.shields.io/badge/version-1.4.2-blue.svg" alt="Version" /></a>
 </p>
 
 ---

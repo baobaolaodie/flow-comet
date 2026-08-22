@@ -216,16 +216,15 @@ jobs:
           fetch-depth: 0
       - name: '版本全库一致 / Version consistency'
         run: |
-          # 版本号可带 prerelease 后缀(如 -rc.1)——捕获完整 X.Y.Z(-prerelease),各文件一致
-          R1=$(grep -oE 'version-[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?' README.md | head -1 | sed 's/version-//')
-          R2=$(grep -oE 'version-[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?' README-zh.md | head -1 | sed 's/version-//')
-          V1=$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?' docs/VERSIONS.md | head -1 | tr -d 'v')
-          V2=$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?' docs/VERSIONS-zh.md | head -1 | tr -d 'v')
-          C1=$(grep -m1 '^## \[[0-9]' CHANGELOG.md | sed -E 's/## \[([0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?)\].*/\1/')
-          C2=$(grep -m1 '^## \[[0-9]' CHANGELOG-zh.md | sed -E 's/## \[([0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?)\].*/\1/')
+          R1=$(grep -oE 'version-[0-9]+\.[0-9]+\.[0-9]+' README.md | head -1 | sed 's/version-//')
+          R2=$(grep -oE 'version-[0-9]+\.[0-9]+\.[0-9]+' README-zh.md | head -1 | sed 's/version-//')
+          V1=$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' docs/VERSIONS.md | head -1 | tr -d 'v')
+          V2=$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' docs/VERSIONS-zh.md | head -1 | tr -d 'v')
+          C1=$(grep -m1 '^## \[[0-9]' CHANGELOG.md | sed -E 's/## \[([0-9.]+).*/\1/')
+          C2=$(grep -m1 '^## \[[0-9]' CHANGELOG-zh.md | sed -E 's/## \[([0-9.]+).*/\1/')
           # 安装版本标识:权威源文件须等于 CHANGELOG 首个版本段(无版本段 = unreleased)
           IV=$(tr -d '\r\n' < .comet/bundle-drafts/flow-comet/skills/flow-comet/INSTALLED_VERSION)
-          IV_EXPECTED=$(grep -m1 '^## \[[0-9]' CHANGELOG.md | sed -nE 's/## \[([0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?)\].*/\1/p' | head -1)
+          IV_EXPECTED=$(grep -m1 '^## \[[0-9]' CHANGELOG.md | sed -nE 's/## \[([0-9.]+).*/\1/p' | head -1)
           IV_EXPECTED=${IV_EXPECTED:-unreleased}
           echo "README=$R1/$R2 VERSIONS=$V1/$V2 CHANGELOG=$C1/$C2 INSTALLED_VERSION=$IV"
           if [ "$R1" = "$R2" ] && [ "$R1" = "$V1" ] && [ "$R1" = "$V2" ] && [ "$R1" = "$C1" ] && [ "$R1" = "$C2" ]; then
