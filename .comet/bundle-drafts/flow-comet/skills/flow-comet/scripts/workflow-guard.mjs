@@ -3034,7 +3034,7 @@ async function main() {
         if (!skeletonsCache[key]) skeletonsCache[key] = await templateSkeleton(key);
         const viol = templateOrderViolation(skeletonsCache[key], documentSectionHeadings(text));
         if (viol) {
-          hardProblems.push(file + ' 段序乱（「' + viol.raw.replace(/^##\s*/, '') + '」偏离 ' + label + ' 模板段序）');
+          hardProblems.push(file + ' 段序乱（「' + String(viol).replace(/^##\s*/, '') + '」偏离 ' + label + ' 模板段序）');
         }
         const changeIdMissing = !/\*\*\s*Change\s+ID\s*\*\*/i.test(text.split(/\n##\s/)[0]);
         const intakeMsg = file + ' 首部缺 Change ID 字段（' + label + ' 模板首部含 `- **Change ID**: <id>`）';
