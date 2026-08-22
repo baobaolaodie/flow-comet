@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // system-test.mjs — flow-comet 系统测试集（与 guard-self-test 同构的载体，测试内容为系统级全链路）
 //
-// 定位：guard-self-test 是引擎脚本的单元/场景级回归（144 场景，fixture 构造为主）；
+// 定位：guard-self-test 是引擎脚本的单元/场景级回归（171 场景，fixture 构造为主）；
 // 本套件是**系统级**测试——每个测试项走真实命令序列（init → record → guard exit → handoff →
 // hook …），覆盖 flow-comet 全部机制面（A~L 十二类）：
 //   A. 状态机与路由（init/status/next/select/advance/record/execution-mode/config）
@@ -180,8 +180,8 @@ function baseState(node) {
 
 // open 阶段工件（CHANGE 含 Why；REQUIREMENT 含 用户故事 + 验收准则——通过出口校验的完整形态）
 function writeIntakeArtifacts(root, changeId = CHANGE_ID) {
-  writeFile(root, '.specs/' + changeId + '/CHANGE.md', '# CHANGE\n\n## Why（为什么做）\n\n变更目标。\n');
-  writeFile(root, '.specs/' + changeId + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事（User Story）\n\n用户需求。\n\n## 验收准则（AC）\n\n- 通过标准\n');
+  writeFile(root, '.specs/' + changeId + '/CHANGE.md', '# CHANGE\n\n- **Change ID**: ' + changeId + '\n\n## Why（为什么做）\n\n变更目标。\n');
+  writeFile(root, '.specs/' + changeId + '/REQUIREMENT.md', '# REQUIREMENT\n\n- **Change ID**: ' + changeId + '\n\n## 用户故事（User Story）\n\n用户需求。\n\n## 验收准则（AC）\n\n- 通过标准\n');
 }
 
 // 自定义协议（compose-demo）：3 节点 brainstorm/tdd/codereview（避开内置 8 节点 id）——
@@ -412,6 +412,7 @@ const TEST_ITEMS = [
     name: 'A5 next：推进与状态漂移校正',
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
       writeIntakeArtifacts(dir);
       assertExit(runState(['record', 'open', '{"summary":"intake complete"}'], dir), 0);
       // 真实出口：exit open --apply（未激活声明机制 → 兼容警告 + 通过）
@@ -493,6 +494,7 @@ const TEST_ITEMS = [
     name: 'A9 record：基础证据记录',
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change'], dir), 0);
       // JSON payload → evidence 写入 + next 提示
       const res = runState(['record', 'open', '{"summary":"recorded"}'], dir);
       assertExit(res, 0);
@@ -750,6 +752,7 @@ const TEST_ITEMS = [
     name: 'B7 record：委托范围条目豁免（有委托通过 / 无委托拦截）',
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
+      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev'], dir), 0);
       const payload = JSON.stringify({ summary: 'delegated', completedChecks: ['required-skill:subagent-execute.flow-comet-dev'] });
       // 无委托记录 → 拦截（handoff scope 条目以共用证据库的委托记录为证据）
       const blocked = runState(['record', 'subagent-execute', payload], dir);
@@ -774,6 +777,7 @@ const TEST_ITEMS = [
     name: 'B8 exit：协议声明标记校验（record 自动补通过 / 手动声明 / 空协议·损坏拦截）',
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
       writeIntakeArtifacts(dir);
       writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
       // ① M5: record 自动补声明标记 → 出口通过（无需手动 skill-load）
@@ -810,6 +814,7 @@ const TEST_ITEMS = [
     name: 'B9 旧项目兼容：record 自动补声明后照常通过',
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
       // 旧格式记录：completedChecks 无 required-skill 条目 → 不校验标记,通过
       const rA = runState(['record', 'open', JSON.stringify({ summary: 'legacy', completedChecks: ['unit-tests'] })], dir);
       assertExit(rA, 0);
@@ -835,6 +840,7 @@ const TEST_ITEMS = [
       writeState(dir, baseState('execute'));
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
         '# TASK\n\n<task id="T01" status="done" parallel="true">\n  <action>实现 T01</action>\n  <write_files>src/t1.mjs</write_files>\n  <verify>node --check src/t1.mjs</verify>\n</task>\n');
+      assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
       writeFile(dir, 'src/t1.mjs', 'export const x = 1;\n');
       execFileSync('git', ['add', 'src/t1.mjs'], { cwd: dir });
       execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'feat: t1'], { cwd: dir });
@@ -912,20 +918,41 @@ const TEST_ITEMS = [
       const viaBad = runHandoff(['result', 'T04', '--json-file', outsideContract], dir);
       assertExit(viaBad, 1);
       assertOut(viaBad, '必须在项目根内');
-      // ⑦ 新 change 空 write_files 允许列表 → BLOCK(委托边界必须有解析来源——TASK.md
-      // 无 write_files 块且 request 未显式传 --write-files;空列表跳过校验会让新 change 绕过)
+      // ⑦ 零提交正式语义：write_files 为空 + 显式零提交 → 跳过提交子集校验 + 可审计提示；
+      //    write_files 非空 + 声称 noCommit → 仍完整提交子集校验（不可借零提交绕过越界检查）
       const stEmpty = readStateFile(dir);
       stEmpty.newChange = true;
       writeState(dir, stEmpty);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="T05" status="pending"><action>无边界任务</action><verify>echo ok</verify></task>\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="T05" status="pending"><action>无边界任务</action><write_files></write_files><verify>echo ok</verify></task>\n');
       assertExit(runHandoff(['request', 'T05'], dir), 0);
-      const resEmpty = runHandoff(['result', 'T05', JSON.stringify({
-        status: 'DONE', taskId: 'T05', commitHash: hash,
+      const resZero = runHandoff(['result', 'T05', JSON.stringify({
+        status: 'DONE', taskId: 'T05', noCommit: true,
         completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        redEvidence: { command: 'echo ok' },
         greenEvidence: { command: 'echo ok', output: 'ok' },
       })], dir);
-      assertExit(resEmpty, 1);
-      assertOut(resEmpty, '允许列表为空');
+      assertExit(resZero, 0);
+      assertOut(resZero, 'HANDOFF RESULT: T05');
+      assertOut(resZero, '零提交');
+      // ⑦b 零提交滥用负例：write_files 非空 + 契约声称 noCommit → 仍完整校验（越界 BLOCK + 矛盾提示）
+      const stNonEmpty = readStateFile(dir);
+      stNonEmpty.newChange = true;
+      writeState(dir, stNonEmpty);
+      writeFile(dir, 'src/rogue-zero.mjs', 'export const rogue = 1;\n');
+      execFileSync('git', ['add', 'src/rogue-zero.mjs'], { cwd: dir });
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'chore: rogue zero'], { cwd: dir });
+      const rogueHash = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+      assertExit(runHandoff(['request', 'T05b', 'T05b 委托', '--write-files', 'src/t2.mjs'], dir), 0);
+      const resAbuse = runHandoff(['result', 'T05b', JSON.stringify({
+        status: 'DONE', taskId: 'T05b', noCommit: true, commitHash: rogueHash,
+        changedFiles: ['src/rogue-zero.mjs'],
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        redEvidence: { command: 'echo ok' },
+        greenEvidence: { command: 'echo ok', output: 'ok' },
+      })], dir);
+      assertExit(resAbuse, 1);
+      assertOut(resAbuse, '超出 writeFiles 范围');
+      assertOut(resAbuse, '零提交');
       // ⑧ 段感知精确匹配:allowed=[src/foo] 不匹配提交 src/foobar.mjs(前缀匹配会放行,
       // 精确匹配判越界——修复前前缀匹配误放行,此处应 RED)
       writeFile(dir, 'src/foobar.mjs', 'export const x = 1;\n');
@@ -1021,6 +1048,7 @@ const TEST_ITEMS = [
       const hash = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
       // ① 空交接拦截：record 仅写空 handoffResult → 出口缺证据（无委托不可 exit）
       assertExit(runState(['init', CHANGE_ID], dir), 0);
+      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
       assertExit(runState(['record', 'subagent-execute', '{"handoffResult":{}}'], dir), 0);
       const stEmpty = readStateFile(dir);
       stEmpty.currentNode = 'subagent-execute';
@@ -1045,7 +1073,10 @@ const TEST_ITEMS = [
       // ② M5 自动补不得为 handoff scope 技能写协调者标记(flow-comet-dev 由子代理加载,
       // 协调者不声明——修复前 record 无条件写标记,语义误导;此处应 RED)
       const markerDev = path.join(dir, '.specs', CHANGE_ID, '.skill-loads', 'subagent-execute-flow-comet-dev.json');
-      if (fs.existsSync(markerDev)) throw new Error('M5 不应为 handoff scope 技能自动补标记');
+      if (fs.existsSync(markerDev)) {
+        const markerDevObj = JSON.parse(fs.readFileSync(markerDev, 'utf8'));
+        if (markerDevObj.auto === true) throw new Error('M5 不应为 handoff scope 技能自动补标记');
+      }
       // ③ 契约缺完成检查清单 → 出口拦截（严格校验无豁免）——重写证据时保留委托请求
       // (新 change 强制 write_files 边界来源;直接 result 无 request 会被边界检查拦截)
       const st3 = readStateFile(dir);
@@ -1058,6 +1089,8 @@ const TEST_ITEMS = [
       const reenter = runGuard(['exit', 'subagent-execute'], dir);
       assertExit(reenter, 1);
       assertOut(reenter, 'Return Contract 校验失败');
+      // 移除手动声明标记，回到「仅有 open 声明、无 subagent-execute 声明」的激活机制形态
+      fs.rmSync(markerDev, { force: true });
       // ⑫ 声明机制激活下的 subagent-execute 声明要求(自动补标记跳过 handoff scope 后的
       // 固化行为):有 open 标记(声明机制已激活)但无 subagent-execute 声明 → exit BLOCKED;
       // 手动 skill-load 声明(协调者按 4-dev.md 构造 handoff prompt 的真实动作)后 → 通过
@@ -1354,6 +1387,7 @@ const TEST_ITEMS = [
     name: 'H1 verify：验证命令真实执行与超时配置',
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
+      assertExit(runState(['skill-load', 'verify', 'flow-comet-integration', '--prompt', 'flow-kit/prompts/7-integration.md'], dir), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/UAT.md', '# UAT\n\n通过\n');
       assertExit(runState(['record', 'verify', '{"summary":"verified"}'], dir), 0);
       const st = readStateFile(dir);
@@ -1395,6 +1429,7 @@ const TEST_ITEMS = [
     name: 'H2 归档：完整流程（遗留清单 + 移动 + 完成态）',
     run: (dir) => {
       assertExit(runState(['init', 'arch-demo'], dir), 0);
+      assertExit(runState(['skill-load', 'archive', 'flow-comet-integration', '--prompt', 'flow-kit/prompts/7-integration.md'], dir), 0);
       // 节点推进到归档（模拟前序节点出口已完成的状态——被测机制是归档出口本身）
       const st0 = readStateFile(dir);
       st0.currentNode = 'archive';
@@ -1469,6 +1504,7 @@ const TEST_ITEMS = [
       writeFile(dir, 'flow-kit/prompts/7-integration.md', '# 阶段 7 · INTEGRATION\n\n## 角色\n\n你是 Integrationer。\n');
       // 手动 skill-load(活动路径标记,随目录移动进归档)
       assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
+      assertExit(runState(['skill-load', 'archive', 'flow-comet-integration', '--prompt', 'flow-kit/prompts/7-integration.md'], dir), 0);
       // 推进到 archive
       const st0 = readStateFile(dir);
       st0.currentNode = 'archive';
@@ -1491,6 +1527,7 @@ const TEST_ITEMS = [
       // 变体:change 从未 skill-load(活动与归档路径皆无 .skill-loads)→ record 不得重建
       // 活动目录(修复前 targetLoadsDir 回退活动路径,writeJson 的 mkdir 会重建已归档目录)
       assertExit(runState(['init', 'arch-m5b'], dir), 0);
+      assertExit(runState(['skill-load', 'archive', 'flow-comet-integration'], dir), 0);
       const stB = readStateFile(dir);
       stB.currentNode = 'archive';
       writeState(dir, stB);
@@ -1637,17 +1674,18 @@ const TEST_ITEMS = [
       if (!fs.existsSync(srcVersionFile)) throw new Error('缺少权威源 INSTALLED_VERSION(随技能包分发)');
       const srcVersion = fs.readFileSync(srcVersionFile, 'utf8').trim();
       if (!srcVersion) throw new Error('权威源版本标识为空');
-      // 权威源须与 CHANGELOG 首个版本段一致(发布批次更新;CI release-consistency 同规则)
+      // 权威源须与 CHANGELOG 首个版本段一致(发布批次更新;CI release-consistency 同规则);
+      // 版本段可带 prerelease 后缀(如 -rc.1 / -beta-1)
       const changelog = fs.readFileSync(path.join(repoRoot, 'CHANGELOG.md'), 'utf8');
-      const m = changelog.match(/^## \[(\d+\.\d+\.\d+)\]/m);
+      const m = changelog.match(/^## \[(\d+\.\d+\.\d+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?)\]/m);
       const expected = m ? m[1] : 'unreleased';
       if (srcVersion !== expected) throw new Error('权威源版本标识不符: ' + srcVersion + ' ≠ CHANGELOG 版本 ' + expected);
       const versionFile = path.join(target, '.claude', 'skills', 'flow-comet', 'INSTALLED_VERSION');
       if (!fs.existsSync(versionFile)) throw new Error('缺少 INSTALLED_VERSION(版本标识文件)');
       const installed = fs.readFileSync(versionFile, 'utf8').trim();
       if (!installed) throw new Error('版本标识为空');
-      // 格式:发布版本号(1.3.1) / git describe 开发态(1.3.1-N-g<hash>) / unreleased(无 tag 兜底)
-      const ok = /^\d+\.\d+\.\d+(-\d+-g[0-9a-f]+)?$/.test(installed) || installed === 'unreleased';
+      // 格式:发布版本号(1.3.1) / prerelease(1.5.0-rc.1 或 1.5.0-beta-1) / git describe 开发态(1.3.1-N-g<hash>) / unreleased(无 tag 兜底)
+      const ok = /^\d+\.\d+\.\d+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(-\d+-g[0-9a-f]+)?$/.test(installed) || installed === 'unreleased';
       if (!ok) throw new Error('版本标识格式异常: ' + installed);
       console.log('  版本标识 = ' + installed + '(git describe 或权威源兜底——多人协作精确检测)✓');
     },
@@ -2448,6 +2486,115 @@ const TEST_ITEMS = [
     },
   },
 
+  // K12: 桥接 loader 流程态门断言（B 方案 TDD RED 载体——空闲/异常态行为面，与 K11 运行态分开）：
+  //   AC-1 无 state 文件 / AC-2 activeChange 缺失 / AC-3 status completed → 项目外 Write 应
+  //   next() 放行（空闲放行语义由流程态门实现）；AC-7 非法 JSON / AC-8 未知 status →
+  //   fail-closed deny（reason 含拒绝语义；解析失败/未知状态不得当空闲放行）。
+  //   复用 K11 安装产物形态：target 为真实 dsh flow-comet 项目（.dsh/skills/flow-comet 就位，
+  //   窄监听不跳过——保证当前实现走到包含性 deny 而非被窄监听放行）；mock exec 取协调者身份
+  //   （delegationDepth 缺失=0，与 K11 ⑦b 同语义）。import 用 ?query 缓存破除——K11 已在本进程
+  //   apply 过，模块级幂等标记会让二次 apply 跳过（applied=true），必须全新模块实例才能捕获监听器。
+  {
+    name: 'K12 桥接 loader:流程态门断言(无state/无activeChange/completed放行·非法JSON/未知status deny)',
+    run: async (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const loader = path.join(repoRoot, 'scripts', 'dsh-bridge.mjs');
+      if (!fs.existsSync(loader)) throw new Error('缺少 scripts/dsh-bridge.mjs');
+      const bridge = await import(pathToFileURL(loader).href + '?k12=' + Date.now()); // 全新模块实例(applied=false)
+      const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
+      const dshHome = path.join(dir, 'k12-dsh-home');
+      const target = path.join(dir, 'k12-target');
+      fs.mkdirSync(target, { recursive: true });
+      const res = spawnSync(process.execPath, [installer, '--target', target, '--platform', 'dsh'], {
+        cwd: repoRoot, encoding: 'utf8', timeout: 120000, env: { ...process.env, DSH_HOME: dshHome },
+      });
+      if (res.status !== 0) throw new Error('dsh 安装失败: ' + (res.stderr || JSON.stringify(res.output)));
+      // 窄监听不跳过前置：目标项目必须真的装有 .dsh/skills/flow-comet——否则当前实现会因窄监听
+      // 直接 next()，空闲态断言假绿，RED 失真
+      if (!fs.existsSync(path.join(target, '.dsh', 'skills', 'flow-comet', 'SKILL.md'))) {
+        throw new Error('dsh flow-comet 项目安装缺失(.dsh/skills/flow-comet/SKILL.md 不存在)');
+      }
+      gitInit(target);
+      const longTarget = bridge.realpathExistingPath(target); // 8.3 短形态归一为长形态(与 K11 一致)
+      const outside = path.join(dir, 'k12-out');
+      fs.mkdirSync(outside, { recursive: true });
+      // 项目外 Write（协调者身份——delegationDepth 缺失=0）
+      const mkOutsideWrite = () => ({
+        name: 'Write',
+        arguments: { file_path: path.join(outside, 'idle-leak.md') },
+        agent: { cwd: longTarget, session: { header: {} } },
+      });
+      const ctxEvents = {};
+      bridge.apply({ on: (event, fn) => { ctxEvents[event] = fn; } });
+      const preExec = ctxEvents['tools/pre-execute'];
+      if (typeof preExec !== 'function') throw new Error('bridge.apply 应注册 tools/pre-execute 监听器');
+      const statePath = path.join(target, '.comet', 'flow-comet-state.json');
+      // AC-1 无 state：无 .comet/flow-comet-state.json + 项目外 Write → next() 放行（空闲放行已生效）
+      {
+        if (fs.existsSync(statePath)) throw new Error('AC-1 前置:目标项目不应有 state 文件');
+        let usedNext = false;
+        const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
+        if (!usedNext) throw new Error('AC-1 无 state 应放行(next 被调): ' + JSON.stringify(r));
+        if (r) throw new Error('AC-1 无 state 不应返回 deny: ' + JSON.stringify(r));
+      }
+      // AC-2 无 activeChange：writeState { activeChange:null, status:'running' } + 项目外 Write → next()（空闲放行已生效）
+      {
+        writeState(target, { activeChange: null, status: 'running' });
+        let usedNext = false;
+        const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
+        if (!usedNext) throw new Error('AC-2 activeChange 为空应放行(next 被调): ' + JSON.stringify(r));
+        if (r) throw new Error('AC-2 无 activeChange 不应返回 deny: ' + JSON.stringify(r));
+      }
+      // AC-3 completed：writeState { activeChange:'x', status:'completed' } + 项目外 Write → next()（空闲放行已生效）
+      {
+        writeState(target, { activeChange: 'x', status: 'completed' });
+        let usedNext = false;
+        const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
+        if (!usedNext) throw new Error('AC-3 status completed 应放行(next 被调): ' + JSON.stringify(r));
+        if (r) throw new Error('AC-3 completed 不应返回 deny: ' + JSON.stringify(r));
+      }
+      // AC-7 解析失败：state 写成非法 JSON + 项目外 Write → deny（reason 含 fail-closed 拒绝语义；
+      //   当前无条件 deny 已通过、T02 流程态门落地后必须保持 deny，不得当空闲放行）
+      {
+        writeFile(target, '.comet/flow-comet-state.json', '{ not-valid-json ');
+        let usedNext = false;
+        const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
+        if (usedNext) throw new Error('AC-7 非法 JSON 不应 next——解析失败必须 fail-closed deny');
+        if (!r || r.kind !== 'deny') throw new Error('AC-7 非法 JSON 应 deny: ' + JSON.stringify(r));
+        if (!r.reason.includes('拒绝')) throw new Error('AC-7 deny 应含 fail-closed(拒绝)语义: ' + JSON.stringify(r.reason));
+      }
+      // AC-8 未知 status：writeState { activeChange:'x', status:'weird' } + 项目外 Write → deny
+      //   （当前通过、T02 流程态门落地后必须保持 deny，不得当空闲放行）
+      {
+        writeState(target, { activeChange: 'x', status: 'weird' });
+        let usedNext = false;
+        const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
+        if (usedNext) throw new Error('AC-8 未知 status 不应 next——未知 status 必须 fail-closed deny');
+        if (!r || r.kind !== 'deny') throw new Error('AC-8 未知 status 应 deny: ' + JSON.stringify(r));
+        if (!r.reason.includes('拒绝')) throw new Error('AC-8 deny 应含 fail-closed(拒绝)语义: ' + JSON.stringify(r.reason));
+      }
+      // AC-7b 非对象 JSON（null/标量/数组/字符串）：合法 JSON 但非对象 = 损坏 state → deny（fail-closed）
+      for (const bad of [null, 123, ['x'], 'str']) {
+        writeFile(target, '.comet/flow-comet-state.json', JSON.stringify(bad));
+        let usedNext = false;
+        const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
+        if (usedNext) throw new Error('AC-7b 非对象 state(' + JSON.stringify(bad) + ') 不应 next——必须 fail-closed deny');
+        if (!r || r.kind !== 'deny') throw new Error('AC-7b 非对象 state 应 deny: ' + JSON.stringify(r));
+        if (!r.reason.includes('拒绝')) throw new Error('AC-7b deny 应含 fail-closed(拒绝)语义: ' + JSON.stringify(r.reason));
+      }
+      // AC-3b BOM 前缀 + completed：BOM 容错断言——应被解析并视为空闲放行
+      {
+        writeFile(target, '.comet/flow-comet-state.json', '\uFEFF' + JSON.stringify({ activeChange: 'x', status: 'completed' }));
+        let usedNext = false;
+        const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
+        if (!usedNext) throw new Error('AC-3b BOM+completed 应放行(next 被调)——BOM 容错: ' + JSON.stringify(r));
+        if (r) throw new Error('AC-3b BOM+completed 不应返回 deny: ' + JSON.stringify(r));
+      }
+      console.log('  流程态门断言:AC-1/2/3 空闲放行·AC-3b BOM 容错·AC-7/8/7b 异常态 fail-closed deny✓');
+    },
+  },
+
   // ---------- L. 执行遗漏防护（M1~M8 真实链路） ----------
 
   {
@@ -2455,6 +2602,8 @@ const TEST_ITEMS = [
     run: (dir) => {
       gitInit(dir);
       assertExit(runState(['init', CHANGE_ID, '--init-skip'], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
+      assertExit(runState(['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md'], dir), 0);
       writeIntakeArtifacts(dir);
       // ① entry open 记录进入标记
       assertExit(runGuard(['entry', 'open'], dir), 0);
@@ -2467,7 +2616,7 @@ const TEST_ITEMS = [
       assertExit(runGuard(['exit', 'open', '--apply'], dir), 0);
       // 推进到 design 后不 entry 直接 exit?→ currentNode 检查会拦;验证 enter 证据在真实链路不误报
       assertExit(runGuard(['entry', 'design'], dir), 0);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n## 0. 技术栈\n\npython\n\n## 决策清单\n\n- [ ] D1\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 0. 技术栈\n\npython\n\n## 决策清单\n\n- [ ] D1\n');
       assertExit(runState(['record', 'design', '{"summary":"design done"}'], dir), 0);
       const rDesign = runGuard(['exit', 'design', '--apply'], dir);
       assertExit(rDesign, 0);

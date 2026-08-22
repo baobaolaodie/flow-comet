@@ -32,11 +32,16 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 | TASK 签名哈希 | enter 记录任务集签名（行尾规范化 + 剥离标记类属性）→ exit 比对：增删任务/改 action/改边界 → BLOCKED；标记 done/加标记属性合法 | enter/exit execute |
 | 节点顺序 BLOCK | next 时 currentNode 未 exit（非正常推进后继）→ BLOCKED；exit 推进后正常 next 豁免；回退豁免 | next |
 | handoff completedChecks | 子代理 Return Contract 必须含 required-skill completedChecks（skill 加载证据），缺失 → BLOCKED | exit subagent-execute |
+| 技能加载前置门 | 新 change 的 handoff request / record 前必须已有本节点 skill-load 声明标记；声明须在用 **Skill 工具**加载技能之后（读 SKILL.md 文件不算加载） | handoff request / record |
 | redEvidence 时序 | redEvidence 必须先于 greenEvidence 真实存在；已记录 greenEvidence 后补录 redEvidence → BLOCKED | workflow-handoff result |
+| 契约解析失败检测 | record / workflow-handoff result：形似对象字面量的 payload 却 JSON 解析失败 → 报错并提示 `--json-file`，**不写** state（fail-closed，不落脏数据） | record / workflow-handoff result |
+| 疑似对象启发式边界 | 以 `{`/`[` 开头或含 `:`/`;` 的 payload 会被判为疑似对象字面量；若随后解析失败则 fail-closed 拒绝并提示 `--json-file`——处于该边界的合法纯文本会被保守拒绝（安全侧设计，不落脏数据） | record / workflow-handoff result |
 | SUMMARY 六段 | verify 输出 / 6 维自查（非空）/ 越界检查 + 强制 `## 自检方法`——6 维自查段须声明 `brooks-review` 或 `cache-brooks`（两级降级：Skill 工具 → 仅返回 "Launching skill" 占位时 Read 插件缓存协议文件手动执行完整审查）；`builtin-quickcheck` 只出现在 `## 自检方法` 段（须声明不可用原因**和**缓存尝试证据；新 change 缺失 BLOCKED；旧 change WARN） | exit execute |
 | 处置标记 | REVIEW.md 发现区条目须带 `[已修]`/`[升级]`/`[转待办]`(新 change 缺失 BLOCKED;旧 change WARN) | exit review |
 | builtin 自检证据 | `builtin-quickcheck` 须声明不可用原因与插件缓存尝试证据(新 change 缺失 BLOCKED;旧 change WARN) | exit execute |
+| 工件模板保真 | SUMMARY / TASK / CHANGE / REQUIREMENT / DESIGN 须保持模板标题、首部字段与段序；新 change 任一缺失 → 阻断 + 恢复指引，旧 change 仅告警 | exit execute / plan / open / design |
 | 波次散文一致性 | 散文 `[P]` 标记须与任务 `parallel="true"` 一致(新 change 不一致 BLOCKED;旧 change WARN) | exit plan |
+| 波次分组一致性 | `[P]` 并行块须构成单个连续块、置于串行序列首/尾；`[P]` 与串行混排（穿插）违规——新 change BLOCK（含恢复指引：调整分组或显式豁免），旧 change WARN | exit plan |
 | 越权委托 | 并行 done 任务须经委托节点(新 change 未委托 BLOCKED;旧 change WARN) | exit execute/verify |
 | verify 真实执行 | TEST.md `## 验证命令` 真实运行（支持多行 `&&`）；verifyFailures 机器计数**按变更隔离**（切换变更不继承另一变更的失败次数），第 4 次 → BLOCKED（超时可用 `FLOW_COMET_VERIFY_TIMEOUT_MS` 配置，默认 300s） | exit verify |
 | 追加位置检测 | CONTEXT 孤立追加段 / LESSONS 编号乱序 / STATE+CHANGELOG 非倒序 → WARN（渐进） | exit open/verify/archive |
@@ -48,6 +53,7 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 
 - **Return Contract**：子代理回传 `{status, commitHash, redEvidence, greenEvidence, completedChecks, riskSignals}`——缺 commitHash/greenEvidence/completedChecks → BLOCK；缺 redEvidence → 渐进 WARN；redEvidence 事后补录 → BLOCK
 - **handoff hash 溯源**：`git show <commitHash>` 校验提交文件 ⊆ write_files（从 TASK.md 自动解析，剥 XML 注释）
+- **零提交任务**：request 侧 `write_files` 为空（或 request 记录了 `noCommit` 标记）即判定为零提交——result 跳过提交文件子集校验并输出可审计提示；零提交结果若携带 tracked 提交，新 change 阻断、旧 change 告警
 - **write_files 冲突检测**：parallel 任务 write_files 不重叠才可同 wave 并行
 
 ## 5. 恢复协议
@@ -58,11 +64,11 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 
 ## 6. guard 自测套件（作者回归基线）
 
-`scripts/guard-self-test.mjs`：**144 场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（60 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
+`scripts/guard-self-test.mjs`：**171 个场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（61 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
 
 ```bash
 node .claude/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 144 SCENARIOS PASSED
+# → ALL 171 SCENARIOS PASSED
 ```
 
 ## 6.5 DeepSeek Harness（dsh）平台
@@ -71,9 +77,10 @@ node .claude/skills/flow-comet/scripts/guard-self-test.mjs
 
 - **安装**：`node scripts/prepare-env.mjs --target <项目> --platform dsh`（最低 dsh `0.1.0-rc.6`；dev preview）。
 - **项目级技能发现**：技能树安装到 `<项目>/.dsh/skills/flow-comet`；dsh 在 `<项目>/.dsh/skills/` 下以 rank 100 自动发现（文件监听、免重启）——**未安装该目录的项目不可见该技能**，因此激活天然是项目级的（无运行时痕迹判定、无 chicken-and-egg）。
-- **拦截**：全局挂载在 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 的薄桥接 loader（`$DSH_HOME/cordis.patch.yml` 托管块，所有 profile 生效）监听 dsh 的 `tools/pre-execute` waterfall 事件，把工具参数映射到同一 guard 契约（`Write`/`Edit` → `file_path`，`Bash` → `command`），子进程调用项目本地 `comet-hook-guard.mjs`，越权写入返回 `{kind:'deny', reason}`（BLOCK 消息 + 恢复指引）；参数形状不符与异常退出 fail-closed。Windows 8.3 路径下判定前把项目根规范化为长形态，避免 guard 的词法路径解析跳过白名单（fail-open）。
+- **拦截**：全局挂载在 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 的薄桥接 loader（`$DSH_HOME/cordis.patch.yml` 托管块，所有 profile 生效）监听 dsh 的 `tools/pre-execute` waterfall 事件，把工具参数映射到同一 guard 契约（`Write`/`Edit` → `file_path`，`Bash` → `command`），子进程调用项目本地 `comet-hook-guard.mjs`，流程运行中越权写入返回 `{kind:'deny', reason}`（BLOCK 消息 + 恢复指引）；参数形状不符与异常退出 fail-closed。Windows 8.3 路径下判定前把项目根规范化为长形态，避免 guard 的词法路径解析跳过白名单（fail-open）。
 - **激活范围**：桥接仅当会话项目根含 `.dsh/skills/flow-comet` 时处理（窄监听）——非 flow-comet 项目零侵入。
-- **执行者放行**：协调者把任务委托给子代理时，被委托的子代理（以会话的子代理委托深度识别）作为执行者写入源码、跳过阶段白名单——与其他平台 worktree 隔离语义一致；协调者仍受白名单约束。越界写入与参数形状不符对两者一律拒绝。
+- **执行者放行**：协调者把任务委托给子代理时，被委托的子代理（以会话的子代理委托深度识别）作为执行者写入源码、跳过阶段白名单——与其他平台 worktree 隔离语义一致；协调者仍受白名单约束。流程运行中越界写入与参数形状不符对两者一律拒绝。
+- **包含性仅流程运行中生效**：空闲态（无 state / 无 `activeChange` / `completed`）项目根外写放行；解析失败 / 未知状态保持 fail-closed（拒绝）。
 - **托管规则注入**：安装时把编排规则注入 `AGENTS.md` 的 `<!-- Managed by flow-comet prepare-env -->` 托管区（非破坏合并，标记与 Codex 共用）。
 
 ## 7. 自动初始化检测（init 前置步骤）
@@ -92,7 +99,7 @@ node .claude/skills/flow-comet/scripts/guard-self-test.mjs
 
 - **节点进入证据**：进入节点会被记录；未 entry 直接 exit——新 change BLOCKED（进入检查不可跳过：协调者禁令/委托前 commit 检查/签名记录），旧 change 渐进警告。
 - **新 change 强制**：`init` 创建的 change 标记为"新"（`newChange`），内容级检查全面强制——已完成任务必须有对应 SUMMARY、交接结果必须有 TDD RED 证据、处置标记、builtin 自检证据、波次散文一致性、越权委托、追加位置；旧 change 保持渐进警告。
-- **声明自动化**：`record` 自动补写缺失的技能加载声明标记（手动声明仍推荐）。
+- **声明自动化**：旧 change 由 `record` 自动补写缺失的技能加载声明标记作兜底；新 change 必须先有本节点声明标记（技能加载前置门——无声明时委托请求与完成记录都会被拦截）。
 - **显式空退出豁免**：execute 在显式声明（`emptyExitApproved`）后可在无串行任务时空退出；默认仍拦截。
 
 ## 设计原理

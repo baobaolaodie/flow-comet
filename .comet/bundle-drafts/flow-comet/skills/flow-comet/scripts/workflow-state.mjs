@@ -4,8 +4,9 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, SKILL_PROTOCOL_FILES } from './protocol-utils.mjs';
-import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor } from './state-schema.mjs';
+import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, looksLikeObjectLiteral } from './state-schema.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide, skipInit } from './context-init.mjs';
+import { taskOpeningAttrs, taskBlocks } from './task-parsing.mjs';
 
 const command = process.argv[2] ?? 'status';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -37,6 +38,9 @@ async function writeJson(file, value) {
 async function fileExists(file) {
   try { await fs.access(file); return true; } catch { return false; }
 }
+
+// 契约解析失败判定（单一来源）：looksLikeObjectLiteral 由 state-schema.mjs 导出——
+// trim 后以 {/[ 开头 → 视作"形似对象字面量"；若 JSON.parse 失败 → fail-closed。
 
 // --json-file 路径校验:解析后必须位于项目根内(拒绝相对/绝对形式的越界路径,
 // 如 ../..、其他盘符——防读取任意文件内容进 evidence)。runRoot 内的绝对路径合法
@@ -184,6 +188,29 @@ async function findSkillLoadsDir(changeName) {
 // 同样不是物理证明——它是子代理回传的 Return Contract 委托声明（子代理自称已加载并执行），
 // 由 handoff result 的 commitHash/greenEvidence 审计性兜底。
 // 返回 { ok: true } 或 { ok: false, reason }（fail-closed：无 active change / 标记损坏同样 BLOCK）。
+// 节点技能加载声明标记存在性（技能加载前置门·方案 A）：校验 .skill-loads/ 下
+// 是否有该节点的声明标记 <node>-*.json（任一 skill 标记即算已声明——与 guard exit 侧的
+// 「exit 协议声明标记校验」同构：按 <node>- 前缀扫描；活动路径优先，归档路径兜底）。
+// 记录/委托前置门在「先加载技能（Skill 工具）并 skill-load 声明」之前拦截"先干活后补声明"。
+// 诚实边界：标记是执行者自我声明，非物理证明（与 verifySkillLoadMarkers 同语义）。
+async function hasNodeSkillDeclaration(nodeId, changeName) {
+  if (!nodeId || !changeName) return false;
+  const activeDir = path.join(specsRoot, changeName, '.skill-loads');
+  const prefix = nodeId + '-';
+  const scan = async (dir) => {
+    try {
+      const entries = await fs.readdir(dir);
+      return entries.some((f) => f.startsWith(prefix) && f.endsWith('.json'));
+    } catch {
+      return false;
+    }
+  };
+  if (await scan(activeDir)) return true;
+  const archived = await findSkillLoadsDir(changeName);
+  if (archived !== null && archived.dir !== activeDir) return scan(archived.dir);
+  return false;
+}
+
 async function verifySkillLoadMarkers(completedChecks, changeName, recordTime, protocol, state) {
   if (!Array.isArray(completedChecks)) return { ok: true };
   const required = [];
@@ -402,23 +429,29 @@ async function determineNode(changeName, protocol, completedNodes = []) {
     return orderedNodes.length > 0 ? orderedNodes[orderedNodes.length - 1].id : 'archive';
   }
 
-  // execute/subagent-execute 特判：解析任务文件 <task> 块 pending/done/parallel/depends_on（沿用现逻辑）
+  // execute/subagent-execute 特判：解析任务文件 <task> 块 pending/done/parallel/depends_on。
+  // 属性解析统一走 task-parsing.mjs 的 taskOpeningAttrs——只读 <task ...> 开标签（属性序无关、
+  // 不受 <action>/<verify> 内容文本干扰），与 workflow-guard 的校验共享同一语义。
   try {
     const taskContent = await fs.readFile(taskPath, 'utf8');
-    // Use <task ... status="..." to match only task tags, not documentation text
-    const pending = (taskContent.match(/<task[^>]*status="pending"/g) || []).length;
-    const done = (taskContent.match(/<task[^>]*status="done"/g) || []).length;
+    const taskList = taskBlocks(taskContent);
+    const attrsList = taskList.map(taskOpeningAttrs).filter(Boolean);
+    const pending = attrsList.filter((a) => a.status === 'pending').length;
+    const done = attrsList.filter((a) => a.status === 'done').length;
     if (pending > 0) {
       // 只检测依赖已满足的 parallel 任务，避免 Wave N+1 的 parallel 任务
-      // 在 Wave N 串行任务未完成时就被路由到 subagent-execute
+      // 在 Wave N 串行任务未完成时就被路由到 subagent-execute。
+      // subagent-execute 已完成（第一波委托 exit）后第二波 parallel 不再路由回
+      // 该节点（防死循环）——与 workflow-guard 平行路由的 !completed 判定一致。
       const hasSubagentNode = route(protocol).some((n) => n.id === 'subagent-execute');
-      if (hasSubagentNode) {
-        // 收集所有 done 任务的 id
-        const doneIds = new Set((taskContent.match(/<task[^>]*id="([^"]+)"[^>]*status="done"/g) || [])
-          .map((m) => { const id = m.match(/id="([^"]+)"/); return id ? id[1] : null; })
-          .filter(Boolean));
-        // 检查 pending parallel 任务中是否有依赖已满足的
-        const parallelBlocks = taskContent.match(/<task[^>]*parallel="true"[^>]*status="pending"[\s\S]*?<\/task>/g) || [];
+      if (hasSubagentNode && !completedNodes.includes('subagent-execute')) {
+        // 收集所有 done 任务的 id（开标签属性序无关）
+        const doneIds = new Set(attrsList.filter((a) => a.status === 'done' && a.id).map((a) => a.id));
+        // 检查 pending parallel 任务中是否有依赖已满足的（开标签 parallel="true" 且 status="pending"）
+        const parallelBlocks = taskList.filter((block) => {
+          const a = taskOpeningAttrs(block);
+          return a && a.parallel && a.status === 'pending';
+        });
         const eligibleParallel = parallelBlocks.filter((block) => {
           const depsMatch = block.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
           if (!depsMatch || !depsMatch[1].trim()) return true; // 无依赖
@@ -453,7 +486,11 @@ async function tFixRollbackExempt(changeName, protocol, currentNode, completedNo
   const taskPath = path.join(specsRoot, changeName, 'TASK.md');
   try {
     const taskContent = await fs.readFile(taskPath, 'utf8');
-    if (!/<task[^>]*status="pending"/.test(taskContent)) return false;
+    // 开标签解析（与 determineNode 同一语义）：存在任一 status="pending" 任务块
+    if (!taskBlocks(taskContent).some((b) => {
+      const a = taskOpeningAttrs(b);
+      return a && a.status === 'pending';
+    })) return false;
     return (await determineNode(changeName, protocol, completedNodes)) === 'execute';
   } catch {
     return false;
@@ -582,6 +619,15 @@ function printNext(protocol, nodeId, executionMode = 'subagent') {
   console.log('NEXT: auto');
   console.log('NODE: ' + nodeId);
   console.log('SKILL: ' + generatedNodeSkillName(protocol, nodeId));
+  // 输出点名（机器点名下一节点技能）：下一节点实现技能必须经 Skill 工具加载——
+  // skill 名取节点实现 skill（与 SKILL: 行一致；内置协议 = flow-comet-open 等）
+  const implNode = (protocol.nodes ?? []).find((n) => n.id === nodeId);
+  const implSkill = implNode && typeof implNode.implementation === 'object' && implNode.implementation !== null
+    ? implNode.implementation.skill
+    : null;
+  if (implSkill) {
+    console.log('LOAD SKILL: ' + implSkill + '（用 Skill 工具，禁止跳过）');
+  }
   if (nodeId === 'execute' || nodeId === 'subagent-execute') {
     if (executionMode === 'direct' && nodeId === 'execute') {
       console.log('EXECUTION-MODE: direct（主代理直接执行串行任务，必须加载 flow-comet-dev 完整协议；parallel 任务仍由 subagent-execute 委托）');
@@ -819,6 +865,13 @@ async function main() {
     const currentNodeEvidence = state.currentNode && state.evidence && typeof state.evidence === 'object'
       ? state.evidence[state.currentNode]
       : null;
+    // 进行中节点保护扩展：保护从"已 record"扩展为"已 entry（enteredNodes 含该节点）且未 exit"。
+    // 已 entry 但未 record 的节点（如刚进入、产物已齐、premature next）同样视为进行中——
+    // 不校正推走（否则该节点 exit 前置 currentNode 校验无法重跑 → 死结）。旧 state 无
+    // enteredNodes 时回退到 evidence 判定（既有语义不回归）。
+    const currentNodeEntered = !!(
+      state.enteredNodes && Array.isArray(state.enteredNodes) && state.enteredNodes.includes(state.currentNode)
+    );
     const routeIds = route(protocol).map((n) => n.id);
     const currentNodeIdx = state.currentNode ? routeIds.indexOf(state.currentNode) : -1;
     // 推导为 currentNode 的直接后继 → 该节点产物已齐待 exit(内容级拦截重跑场景)→ 保护;
@@ -829,7 +882,8 @@ async function main() {
     const inProgress = !!(
       state.currentNode
       && !completedArr.includes(state.currentNode)
-      && currentNodeEvidence && typeof currentNodeEvidence === 'object' && !Array.isArray(currentNodeEvidence)
+      && (currentNodeEntered
+        || (currentNodeEvidence && typeof currentNodeEvidence === 'object' && !Array.isArray(currentNodeEvidence)))
       && derivedIsDirectSuccessor
     );
     if (!inProgress && state.currentNode !== detectedNode) {
@@ -943,6 +997,20 @@ async function main() {
       parsed = raw ? JSON.parse(raw) : {};
       if (typeof parsed !== 'object' || Array.isArray(parsed)) parsed = { summary: String(parsed) };
     } catch {
+      // 契约解析失败 fail-closed:payload 形似对象但 JSON.parse 失败 → 报错并
+      // process.exit(1),不写 evidence——防状态污染（旧语义把不可解析 raw 静默作
+      // summary 字符串落库 = 静默落脏）
+      // 消息按参数来源分级（设计语义 / AC-3）:--json-file 传入且文件内容损坏 →
+      // "文件内容不是合法 JSON" + 长度元数据;内联传参损坏 → 保留 --json-file 建议。
+      // 安全(bot 审查):错误消息只含固定前缀 + 长度元数据,绝不打印 raw 内容(含截断)。
+      if (looksLikeObjectLiteral(raw)) {
+        if (jsonFile !== null) {
+          console.error('文件内容不是合法 JSON (length=' + String(raw ?? '').length + ')');
+        } else {
+          console.error('payload looks like an object literal but is not valid JSON (length=' + String(raw ?? '').length + '); use --json-file <path> to pass the payload');
+        }
+        process.exit(1);
+      }
       parsed = { summary: raw || 'recorded' };
     }
     // completedChecks 真实性校验（skill-load 声明标记）——解析本次 record 写入的
@@ -960,11 +1028,31 @@ async function main() {
       console.error('BLOCKED: ' + markerCheck.reason);
       process.exit(1);
     }
+    // 技能加载前置门（方案 A）：节点完成记录必须先有本节点
+    // skill-load 声明标记——无论 payload 是否含 completedChecks 都校验（堵"先干活后补
+    // 声明"旁路）：缺失 → 新 change BLOCK / 旧 change 渐进 WARN。指引先加载技能并运行
+    // skill-load 再重试。handoff scope 技能（子代理加载）不要求协调者声明（与
+    // verifySkillLoadMarkers 的 scope 豁免一致）——本门按 <node>-*.json 存在性判定，
+    // 与 guard exit 侧协议声明标记校验同构。仅对存在于当前协议的节点生效（协议外节点名
+    // 的记录不适用前置门），无 active change 时无法定位标记而不重复报错（遗留兼容）。
+    const recordNodeDef = (protocol.nodes ?? []).find((n) => n.id === nodeId);
+    if (recordNodeDef && markerChange) {
+      const declaredForNode = await hasNodeSkillDeclaration(nodeId, markerChange);
+      if (!declaredForNode) {
+        const loadGuide = '先加载技能（用 Skill 工具，禁止跳过）并运行 workflow-state.mjs skill-load ' + nodeId + ' <skill> 再重试';
+        if (state.newChange === true) {
+          console.error('BLOCKED: 节点 ' + nodeId + ' 缺少技能加载声明标记（.skill-loads/' + nodeId + '-*.json）——' + loadGuide);
+          process.exit(1);
+        }
+        console.error('WARN: 节点 ' + nodeId + ' 缺少技能加载声明标记（.skill-loads/' + nodeId + '-*.json）——' + loadGuide + '（旧 change 渐进不阻断，记录继续）');
+      }
+    }
     // M5: 声明自动化——record 时按协议 requiredSkillCalls 自动补写缺失的声明标记
     // (执行者无需手动 skill-load;标记如实记录"节点完成即视为其实现/协议技能已加载",
     // 由 record 代记;与手动 skill-load 标记同体系,exit 协议声明校验共用)
-    const recordNodeDef = (protocol.nodes ?? []).find((n) => n.id === nodeId);
-    if (recordNodeDef && markerChange) {
+    // 新 change 下 required 条目停用自动补写(手动声明唯一路径,否则抵消前置门);
+    // 旧 change 保留 M5 兜底(渐进兼容)。
+    if (recordNodeDef && markerChange && state.newChange !== true) {
       const recordProtoFiles = NODE_PROTOCOL_FILES[nodeId] ?? [];
       // M5 标记目录解析:活动路径优先;change 已归档(活动目录不存在但归档目录存在)
       // 时写归档路径——防重建已归档的活动目录(归档移动语义;与 findSkillLoadsDir 双路径一致)。

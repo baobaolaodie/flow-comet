@@ -3,6 +3,16 @@
 // 语义（与批次 C C6 完全一致）：存在字段逐一校验；未知字段放行（前向兼容）；缺字段放行（readState 默认补）；
 // 只校验存在字段的类型。调用方负责 BLOCKED / exit(1) 处理。
 
+// 疑似对象字面量判定（单一来源——设计语义 / AC-1：workflow-state record 与
+// workflow-handoff result 共用，两脚本不再各自定义）：trim 后以 {/[ 开头 → 视作
+// "形似对象字面量"（常见于 Windows 传参剥离内嵌引号后的损坏 JSON 形态）。
+// 收窄（bot 审查）：仅保留「{/[ 开头」一条——移除 :/; 包含判定，避免拒绝普通纯文本 payload。
+// 行为契约（逐字等价）：raw 为 null/undefined 时按空串处理（String(raw ?? '')）。调用方负责 fail-closed。
+export function looksLikeObjectLiteral(raw) {
+  const text = String(raw ?? '').trim();
+  return text.startsWith('{') || text.startsWith('[');
+}
+
 export const STATE_FIELD_VALIDATORS = [
   { field: 'activeChange', check: (v) => typeof v === 'string' || v === null },
   { field: 'currentNode', check: (v) => typeof v === 'string' || v === null },

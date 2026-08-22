@@ -78,7 +78,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 4. **真实环境冒烟**（在目标项目目录内执行）：`cd <目标项目> && node .claude/skills/flow-comet/scripts/workflow-state.mjs status`——期望输出 JSON 状态对象（全新项目为 `{"status":"no-change",...}`，运行中为 `{"status":"running","change":...}`）
 
 > 命令为 POSIX 风格（Git Bash / WSL / macOS 终端）；Windows 用户请在 Git Bash 中执行。
-> **注意**：`guard-self-test.mjs`（144 场景）是**作者回归基线**（沙箱环境自测脚本逻辑——不依赖安装完整性，不是安装验证判据）。
+> **注意**：`guard-self-test.mjs`（171 场景）是**作者回归基线**（沙箱环境自测脚本逻辑——不依赖安装完整性，不是安装验证判据）。
 
 ### 在 Codex 上使用 flow-comet
 
@@ -157,13 +157,13 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --platform dsh
 
 1. **项目级技能树**——`<项目>/.dsh/skills/flow-comet`（含路径替换 `.claude/skills/flow-comet/scripts/` → `.dsh/skills/flow-comet/scripts/`（仅 `.md` 文件）与 `INSTALLED_VERSION` 版本标识）。dsh 经文件监听在 `<项目>/.dsh/skills/` 下以 **rank 100** 自动发现——免重启，且**未安装该目录的项目不可见该技能**，因此激活天然是项目级的（无运行时痕迹判定、无 chicken-and-egg）。
 2. **AGENTS.md 托管区**——把编排规则注入 `<项目>/AGENTS.md` 的托管区（`<!-- Managed by flow-comet prepare-env -->` … `<!-- /Managed by flow-comet prepare-env -->`），非破坏合并——托管区外的用户内容保留。标记与 Codex 平台共用，任一平台的移除流程均可清理该区——卸载时仅在无其它平台仍使用该共用标记时才移除。
-3. **全局桥接 loader**——在 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 挂载薄 loader，并在 `$DSH_HOME/cordis.patch.yml` 注入托管块（读-合并-写——保留 dsh-skin 等既有块；home patch 对所有 profile 生效）。loader 监听 dsh 原生 `tools/pre-execute` waterfall 事件，把工具参数映射到 guard 契约（`Write`/`Edit` → `file_path`，`Bash` → `command`），子进程调用项目本地 `comet-hook-guard.mjs`，越权写入返回 `{kind:'deny', reason}`（BLOCK 消息 + 恢复指引）。仅当会话项目根含 `.dsh/skills/flow-comet` 时才处理（窄监听——非 flow-comet 项目零拦截）。参数形状不符与异常退出 fail-closed。
+3. **全局桥接 loader**——在 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 挂载薄 loader，并在 `$DSH_HOME/cordis.patch.yml` 注入托管块（读-合并-写——保留 dsh-skin 等既有块；home patch 对所有 profile 生效）。loader 监听 dsh 原生 `tools/pre-execute` waterfall 事件，把工具参数映射到 guard 契约（`Write`/`Edit` → `file_path`，`Bash` → `command`），子进程调用项目本地 `comet-hook-guard.mjs`，流程运行中越权写入返回 `{kind:'deny', reason}`（BLOCK 消息 + 恢复指引）。仅当会话项目根含 `.dsh/skills/flow-comet` 时才处理（窄监听——非 flow-comet 项目零拦截）。参数形状不符与异常退出 fail-closed。写入包含性仅流程运行中生效：空闲态（无 state / 无 `activeChange` / `completed`）项目根外写放行；解析失败 / 未知状态保持 fail-closed。
 
 > **注意——安装器会写你的 home 目录**：挂载桥接 loader 需写入 `$DSH_HOME`（默认 `~/.dsh`；解析：`$DSH_HOME` 环境变量 > `~/.dsh`）。这是设计内且**非破坏**的：`cordis.patch.yml` 读-合并-写（dsh-skin 等既有块保留；文件无法解析时安全报错退出而非覆盖），loader 文件按名添加/移除。恢复方式见下方 purge——只移除托管块与 loader 文件，其余全部保留。
 
 ### 在 dsh 上使用 flow-comet
 
-- **首次使用**：无需信任 hook 步骤——桥接 loader 是安装器挂载的全局插件；在目标项目启动 dsh 会话并按名调用技能即可（rank 100 自动发现）。桥接仅当会话项目根含 `.dsh/skills/flow-comet` 时拦截——未安装项目零侵入。
+- **首次使用**：无需信任 hook 步骤——桥接 loader 是安装器挂载的全局插件；在目标项目启动 dsh 会话并按名调用技能即可（rank 100 自动发现）。桥接仅当会话项目根含 `.dsh/skills/flow-comet` 时拦截——未安装项目零侵入。拦截仅流程运行中生效——空闲态（无 state / 无 `activeChange` / `completed`）项目根外写放行；解析失败 / 未知状态保持 fail-closed。
 - **版本锚定**：dsh `0.1.0-rc.6` 为实测最低版本；低于它技能发现或拦截可能静默失效——请升级 dsh。
 - **子代理执行**：被委托的子代理（以会话的子代理委托深度识别）作为执行者可写入源码——与其他平台 worktree 隔离语义一致；协调者仍受阶段写白名单约束。越界写入与参数形状不符对两者一律拒绝。子代理工具随 dsh 自带，全 profile 可用。
 - **Windows**：包含性校验前先展开 8.3 短路径（项目内短路径不会被误判为越界）；判定前把项目根规范化为长形态，短形态项目根与规范化的写入目标不会错位成 fail-open。
