@@ -1676,15 +1676,15 @@ const TEST_ITEMS = [
       if (!srcVersion) throw new Error('权威源版本标识为空');
       // 权威源须与 CHANGELOG 首个版本段一致(发布批次更新;CI release-consistency 同规则)
       const changelog = fs.readFileSync(path.join(repoRoot, 'CHANGELOG.md'), 'utf8');
-      const m = changelog.match(/^## \[(\d+\.\d+\.\d+)\]/m);
+      const m = changelog.match(/^## \[(\d+\.\d+\.\d+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?)\]/m);
       const expected = m ? m[1] : 'unreleased';
       if (srcVersion !== expected) throw new Error('权威源版本标识不符: ' + srcVersion + ' ≠ CHANGELOG 版本 ' + expected);
       const versionFile = path.join(target, '.claude', 'skills', 'flow-comet', 'INSTALLED_VERSION');
       if (!fs.existsSync(versionFile)) throw new Error('缺少 INSTALLED_VERSION(版本标识文件)');
       const installed = fs.readFileSync(versionFile, 'utf8').trim();
       if (!installed) throw new Error('版本标识为空');
-      // 格式:发布版本号(1.3.1) / git describe 开发态(1.3.1-N-g<hash>) / unreleased(无 tag 兜底)
-      const ok = /^\d+\.\d+\.\d+(-\d+-g[0-9a-f]+)?$/.test(installed) || installed === 'unreleased';
+      // 格式:发布版本号(1.3.1) / prerelease(1.5.0-rc.1) / git describe 开发态(1.3.1-N-g<hash>) / unreleased(无 tag 兜底)
+      const ok = /^\d+\.\d+\.\d+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?(-\d+-g[0-9a-f]+)?$/.test(installed) || installed === 'unreleased';
       if (!ok) throw new Error('版本标识格式异常: ' + installed);
       console.log('  版本标识 = ' + installed + '(git describe 或权威源兜底——多人协作精确检测)✓');
     },
