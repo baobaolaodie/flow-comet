@@ -144,33 +144,47 @@ async function main() {
     } else {
       description = args.join(' ') || 'pending';
     }
-    // 若未显式传 --write-files，从 TASK.md 自动解析（orchestrator 无需手动提取文件列表）
+    // 若未显式传 --write-files，从 TASK.md 自动解析（orchestrator 无需手动提取文件列表）。
+    // 解析三态（bot 评审收紧）：① 匹配到任务块且 <write_files> 存在 → 按内容分类；
+    // ② 任务块缺失或块内无 <write_files> 元素 → 任务不可解析，新 change BLOCK，旧 change
+    // WARN 且不设 noCommit（防未解析任务静默变零提交逃逸口）；③ TASK.md 读不到同 ②。
+    let taskResolved = false;
+    let emptyWriteFilesElement = false;
     if (!writeFiles || writeFiles.length === 0) {
       try {
         const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
         const taskContent = await fs.readFile(taskFile, 'utf8');
-        // 找到对应 task 块的 <write_files> 内容
-        const taskRegex = new RegExp(`<task[^>]*id="${taskId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[\\s\\S]*?<write_files>([\\s\\S]*?)</write_files>`, 'i');
+        const taskRegex = new RegExp(`<task[^>]*id="${taskId.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}"[\\s\\S]*?<write_files>([\\s\\S]*?)</write_files>`, 'i');
         const match = taskContent.match(taskRegex);
         if (match) {
-          const files = match[1].trim().split(/\s*\n\s*/).filter(f => f.trim());
-          // 剥离 XML 注释（<!-- … -->）：TASK.md 模板 write_files 每行可带注释，保留会导致
-          // W2-D 提交文件子集校验误报（f.startsWith('path  <!-- 注释 -->') 恒 false）
-          writeFiles = files.map(f => f.trim().replace(/<!--[\s\S]*?-->/g, '').trim()).filter(Boolean);
+          taskResolved = true;
+          const files = match[1].trim().split(/\s*\n\s*/).map(f => f.trim().replace(/<!--[\s\S]*?-->/g, '').trim()).filter(Boolean);
+          if (files.length > 0) { writeFiles = files; }
+          else { emptyWriteFilesElement = true; }
         }
       } catch {}
+      if (wfIdx >= 0) { taskResolved = true; emptyWriteFilesElement = false; }
+    } else {
+      taskResolved = true;
+    }
+    if (!taskResolved) {
+      const msg = '委托任务不可解析：TASK.md 缺失、无匹配 <task id=' + taskId + '> 或任务缺 <write_files> 元素——无法判定零提交语义；修正 TASK.md 后重试';
+      if (state.newChange === true) {
+        console.error('BLOCKED: ' + msg);
+        process.exit(1);
+      }
+      console.error('WARN: ' + msg + '（旧 change 渐进，不阻断，不记录 noCommit）');
     }
     state.evidence = state.evidence || {};
     state.evidence['subagent-execute'] = state.evidence['subagent-execute'] || {};
     if (!state.evidence['subagent-execute'].handoffRequests) {
       state.evidence['subagent-execute'].handoffRequests = {};
     }
+    const zeroEligible = taskResolved && emptyWriteFilesElement && writeFiles.length === 0;
     state.evidence['subagent-execute'].handoffRequests[taskId] = {
       description, requestedAt: new Date().toISOString(),
       ...(writeFiles.length ? { writeFiles } : {}),
-      // 零提交任务：写文件列表为空（无 tracked 写意图）→ request 记录 noCommit 标记，
-      // 供 result 侧判定并跳过提交文件子集校验（正式语义，可审计）
-      ...(writeFiles.length === 0 ? { noCommit: true } : {})
+      ...(zeroEligible ? { noCommit: true } : {})
     };
     await writeState(state);
     console.log('HANDOFF REQUEST: ' + taskId);
