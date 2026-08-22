@@ -53,7 +53,7 @@ Hook blocking semantics (see Limitations): PreToolUse hook exit 2 blocks in the 
 
 - **Return Contract**: subagents return `{status, commitHash, redEvidence, greenEvidence, completedChecks, riskSignals}` — missing commitHash/greenEvidence/completedChecks → BLOCK; missing redEvidence → progressive WARN; redEvidence recorded after the fact → BLOCK
 - **handoff hash provenance**: `git show <commitHash>` verifies committed files ⊆ write_files (auto-parsed from TASK.md, XML comments stripped)
-- **Zero-commit tasks**: when a task's `write_files` list is empty and the contract explicitly declares `noCommit`, the commit-subset check is skipped with an auditable prompt; if `write_files` is non-empty, a `noCommit` claim still runs the full check (cannot bypass out-of-scope detection)
+- **Zero-commit tasks**: a request-side empty `write_files` list (or request-side `noCommit` marker) classifies the task as zero-commit — results skip the commit-subset check with an auditable prompt; zero-commit results carrying tracked files are blocked on new changes and warned on legacy changes
 - **write_files conflict detection**: parallel tasks may share a wave only if their write_files do not overlap
 
 ## 5. Recovery protocol

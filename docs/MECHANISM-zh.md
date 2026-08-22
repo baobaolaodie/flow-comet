@@ -53,7 +53,7 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 
 - **Return Contract**：子代理回传 `{status, commitHash, redEvidence, greenEvidence, completedChecks, riskSignals}`——缺 commitHash/greenEvidence/completedChecks → BLOCK；缺 redEvidence → 渐进 WARN；redEvidence 事后补录 → BLOCK
 - **handoff hash 溯源**：`git show <commitHash>` 校验提交文件 ⊆ write_files（从 TASK.md 自动解析，剥 XML 注释）
-- **零提交任务**：任务 `write_files` 为空且契约显式声明 `noCommit` 时，跳过提交文件子集校验并输出可审计提示；`write_files` 非空时即使契约声称零提交，仍执行完整校验（不可借零提交绕过越界检测）
+- **零提交任务**：request 侧 `write_files` 为空（或 request 记录了 `noCommit` 标记）即判定为零提交——result 跳过提交文件子集校验并输出可审计提示；零提交结果若携带 tracked 提交，新 change 阻断、旧 change 告警
 - **write_files 冲突检测**：parallel 任务 write_files 不重叠才可同 wave 并行
 
 ## 5. 恢复协议
