@@ -10,10 +10,6 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded in git tags, this document, the README badge, [docs/VERSIONS.md](docs/VERSIONS.md) and the authoritative `skills/flow-comet/INSTALLED_VERSION`; `bundle.yaml` version stays 1.0.0 (decoupled from release versioning).
 
-## [Unreleased]
-
-### Changed
-
 ## [1.5.0-rc.1] - 2026-08-23
 
 Release candidate consolidating the mechanism and skill robustness batch: artifact template fidelity, skill-load declaration front gate, the two-layer skill-loading model, formal zero-commit semantics, and verify-exit sandbox compatibility, plus dsh bridge idle-state containment and plan wave-grouping validation. ([#64](https://github.com/baobaolaodie/flow-comet/pull/64)) ([#65](https://github.com/baobaolaodie/flow-comet/pull/65)) ([#66](https://github.com/baobaolaodie/flow-comet/pull/66)) ([#67](https://github.com/baobaolaodie/flow-comet/pull/67))
