@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · flow-comet 引擎自测套件（169 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、波次分组合法性与契约解析失败检测、场景数一致性自检、prepare-env 平台选择链）
+// C1 · flow-comet 引擎自测套件（171 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、波次分组合法性与契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制）
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -7,7 +7,7 @@
 // （COMET_RUN_ROOT=<临时目录>）→ 断言退出码与输出关键词。场景跑完 rmSync 清理。
 //
 // 运行: node scripts/guard-self-test.mjs
-// 全过 → exit 0，输出 ALL 169 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
+// 全过 → exit 0，输出 ALL 171 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
 //
 // 仅 node 内置模块（child_process/fs/os/path）；无网络；不依赖 flow-kit 模板目录
 // 存在（fallback 场景用内置段名；部分场景复制模板文件进临时目录验证 C2 模板派生）。
@@ -4170,6 +4170,98 @@ const SCENARIOS = [
       assertExit(res, 1);
       assertOut(res, 'VERIFY-FAIL');
       assertNotOut(res, 'VERIFY-DEGRADED');
+    },
+  },
+
+  // 170: 零提交旁路收紧——noCommit 结果若携带 tracked 提交：新 change BLOCKED / 旧 change
+  // HANDOFF WARN；空提交（--allow-empty）正例通过。锚定 AC-1（防「空 write_files 声明」
+  // 成为携带任意提交的逃逸口——bot 评审 Major）。
+  {
+    name: '170 零提交旁路：携带 tracked 提交新 BLOCK / 旧 WARN / 空提交通过',
+    run: (dir) => {
+      execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore' });
+      const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '-A');
+      writeFile(dir, 'src/x.js', 'x');
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'add', 'src/x.js');
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'tracked');
+      const hashTracked = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+      const mkState = (isNew) => {
+        const st = baseState('subagent-execute');
+        if (isNew) st.newChange = true;
+        st.evidence['subagent-execute'] = st.evidence['subagent-execute'] || {};
+        st.evidence['subagent-execute'].handoffRequests = {
+          T9: { description: 'zero-commit', noCommit: true },
+          T10: { description: 'zero-commit legacy', noCommit: true },
+          T11: { description: 'zero-commit empty', noCommit: true },
+        };
+        writeState(dir, st);
+      };
+      const payload = (id, hash) => JSON.stringify({ status: 'DONE', taskId: id, commitHash: hash,
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        greenEvidence: { command: 'n', output: 'n' }, redEvidence: { command: 'r', output: 'r' } });
+      // ① 新 change + 含 tracked 文件的提交 → BLOCKED
+      mkState(true);
+      const res1 = runHandoff(['result', 'T9', payload('T9', hashTracked)], dir);
+      assertExit(res1, 1);
+      assertOut(res1, '声明零提交但提交携带');
+      // ② 旧 change 同构造 → WARN 不阻断
+      mkState(false);
+      const res2 = runHandoff(['result', 'T10', payload('T10', hashTracked)], dir);
+      assertExit(res2, 0);
+      assertOut(res2, 'HANDOFF WARN');
+      // ③ 新 change + 空提交 → 通过
+      mkState(true);
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'empty');
+      const hashEmpty = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+      const res3 = runHandoff(['result', 'T11', payload('T11', hashEmpty)], dir);
+      assertExit(res3, 0);
+      assertOut(res3, '提交为空，校验通过');
+    },
+  },
+
+  // 171: 入口文档首部 Change ID 新 change 强制——标题/段序合规但缺 `- **Change ID**:`
+  // 首部字段：新 change open 出口 BLOCKED（文案「首部缺 Change ID」）；旧 change WARN 渐进。
+  // （对齐 AC「标题·首部·段序」统一强制口径——bot 评审指出此前仅 softWarning 与承诺不符。）
+  {
+    name: '171 入口首部 Change ID 新 BLOCK / 旧 WARN',
+    run: (dir) => {
+      const addOpenMarker = () => {
+        fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
+        writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-change.json',
+          JSON.stringify({ node: 'open', skill: 'flow-comet-change', protocol: '0-change.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+      };
+      const writeChange = (withId) => {
+        const head = withId ? '- **Change ID**: ' + CHANGE_ID + '\n' : '';
+        writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE: 标题\n\n' + head + '\n## Why（为什么做）\n\n原因。\n');
+        writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT: 标题\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 用户故事\n\n- US-1\n\n## 验收准则（AC）\n\n- Given a When b Then c\n');
+      };
+      // ① 新 change 缺首部字段 → BLOCK
+      const stNew = baseState('open');
+      stNew.evidence.open = { summary: 'intake complete' };
+      stNew.newChange = true;
+      stNew.enteredNodes = ['open'];
+      writeState(dir, stNew);
+      addOpenMarker();
+      writeChange(false);
+      const resBad = runGuard(['exit', 'open'], dir);
+      assertExit(resBad, 1);
+      assertOut(resBad, 'BLOCKED');
+      assertOut(resBad, '首部缺 Change ID');
+      // ② 新 change 含首部字段 → 通过
+      writeChange(true);
+      const resGood = runGuard(['exit', 'open'], dir);
+      assertExit(resGood, 0);
+      assertOut(resGood, 'ALL CHECKS PASSED');
+      // ③ 旧 change 缺首部字段 → WARN 渐进不阻断
+      const stOld = baseState('open');
+      stOld.evidence.open = { summary: 'intake complete' };
+      writeState(dir, stOld);
+      addOpenMarker();
+      writeChange(false);
+      const resOld = runGuard(['exit', 'open'], dir);
+      assertExit(resOld, 0);
+      assertOut(resOld, 'WARN');
     },
   },
 ];
