@@ -146,7 +146,7 @@ Load `flow-comet-test` during this Node and record completed check `required-ski
 
 **加载声明（阶段层 · 双步硬规则）**：本节点技能已由入口路由经 Skill 工具加载（你正在阅读的就是它）；本节点 Required Skill Calls 的加载与声明同样不可跳过：
 
-1. 本节点的同名条目已随路由加载——同名 required 条目（`flow-comet-review`）无需重复加载，仅需运行下方对应声明命令（只读取 SKILL.md 文件不叫加载，**不得跳过**真正的 Skill 工具注入步骤）；涉及测试金字塔完整性时，还要**用 Skill 工具加载** `flow-comet-test`。
+1. 本节点的同名条目已随路由加载——同名 required 条目（`flow-comet-review`）无需重复加载，仅需运行下方对应声明命令（只读取 SKILL.md 文件不叫加载，**不得跳过**真正的 Skill 工具注入步骤）。`flow-comet-test` 为本节点 Required Skill Call，每次 review **必须用 Skill 工具加载**。
 2. 加载完成后**立即**运行声明命令，每个协议文件对应一条（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
 
 ```bash

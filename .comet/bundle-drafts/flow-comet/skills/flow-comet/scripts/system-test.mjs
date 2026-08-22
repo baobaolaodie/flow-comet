@@ -923,7 +923,7 @@ const TEST_ITEMS = [
       const stEmpty = readStateFile(dir);
       stEmpty.newChange = true;
       writeState(dir, stEmpty);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="T05" status="pending"><action>无边界任务</action><verify>echo ok</verify></task>\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="T05" status="pending"><action>无边界任务</action><write_files></write_files><verify>echo ok</verify></task>\n');
       assertExit(runHandoff(['request', 'T05'], dir), 0);
       const resZero = runHandoff(['result', 'T05', JSON.stringify({
         status: 'DONE', taskId: 'T05', noCommit: true,
