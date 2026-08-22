@@ -46,6 +46,7 @@
 | dsh 卸载残留（技能 / AGENTS.md 托管区 / loader 仍在） | 未执行 `prepare-env --purge --platform dsh --yes`（例如只手工删了 `.dsh/skills` 目录） | 运行 `node scripts/prepare-env.mjs --target <项目> --purge --platform dsh --yes`——移除 `.dsh/skills/flow-comet*`、AGENTS.md 托管区、`$DSH_HOME/cordis.patch.yml` 托管块与 loader 文件（非 flow-comet 条目与 dsh-skin 等既有块保留） |
 | dsh 无审计轨迹 | v1 桥接刻意不写审计日志（v1 不采用审计观察——旧插件的 `$DSH_HOME` 审计文件已不存在） | 属预期——拦截决策呈现在会话 WARN 输出中；项目级技能安装使旧全局审计轨迹失去意义 |
 | dsh 在 Windows 短路径项目根下写被放行 | （已修复）会话项目根为 8.3 短路径时，guard 的词法路径解析可能跳过白名单 | 当前版本在判定前把项目根规范化为长形态——若为旧副本请重跑 `prepare-env --platform dsh` 刷新 |
+| dsh 项目根外写被放行 | 流程处于空闲态（无 state / 无 `activeChange` / `completed`） | 属预期——包含性仅在流程运行中生效（存在 `activeChange` 且 `status` 为 `running` 或缺省时视为运行中；解析失败或未知状态会被拒绝，不当作空闲）。如需核实请检查 `.comet/flow-comet-state.json` 的 `activeChange` 与 `status` |
 | `INIT-NEEDED: 项目上下文（CONTEXT.md）尚未初始化` | 项目首次使用——尚无项目上下文 | 执行 `init <id> --init-context` 生成（读取既有 AI 上下文文档并带出处整合；约 15-30k tokens，仅首次），或 `--init-skip` 记录跳过并在后续 init 保持静默 |
 | `INIT-HINT: 项目上下文（CONTEXT.md）已就绪（7 段 + 模板格式校验通过）但尚未记录扫描时间` / `INIT-HINT: 上次扫描已 X 天` | 上下文已存在但未记录扫描：CONTEXT 满足模板但无扫描记录（生成后未重跑），或上次扫描超过 90 天 | 就绪态：运行 `init <id> --init-context` 记录扫描时间（此后 90 天内不再提示）；过期态：可选重跑刷新，非强制 |
 | `INIT-GENERATE: 项目上下文未初始化——请生成 .specs/CONTEXT.md`（后附模板指引：已检测到 flow-kit/templates/CONTEXT.md 时严格对照模板段名与条目格式；未检测到时按 7 段基准） | `--init-context` 时 CONTEXT.md 缺失——生成协作第一步 | 按指引全量阅读源文档并整合（出处标注 `来自 <doc>:<line>`，原文档零写入）+ 代码探测（技术栈/既有抽象索引），对照模板生成 7 段；生成后重跑 `init <id> --init-context` 由脚本校验并记录扫描时间 |

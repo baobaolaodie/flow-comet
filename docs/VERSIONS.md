@@ -10,7 +10,7 @@
 
 | Item | Description |
 |------|-------------|
-| **Current version** | v1.4.2. Release truth: [CHANGELOG.md](../CHANGELOG.md) + git tag (created at the release step); README badge mirrors it; `skills/flow-comet/INSTALLED_VERSION` is checked installed-copy metadata (git describe of the source repo). The dsh platform (via `prepare-env --platform dsh`) carries the same version marker in its project-level skill copy; there is no separate npm package (a later / 1.5.0 item). v1.0.0 = first stable: 8-node workflow + three defense layers + guard validation |
+| **Current version** | v1.5.0-rc.1. Release truth: [CHANGELOG.md](../CHANGELOG.md) + git tag (created at the release step); README badge mirrors it; `skills/flow-comet/INSTALLED_VERSION` is checked installed-copy metadata (git describe of the source repo). The dsh platform (via `prepare-env --platform dsh`) carries the same version marker in its project-level skill copy; there is no separate npm package (a later item). v1.0.0 = first stable: 8-node workflow + three defense layers + guard validation |
 | **Versioning** | Semantic Versioning: feature release → minor (1.2.0), bug fix → patch (1.1.1), breaking change → major (2.0.0); bump at the end of each feature release |
 | **Bundle version decoupling** | `bundle.yaml`/`skill.yaml` version stays 1.0.0 (decoupled from release versioning); git tag + CHANGELOG are the single source of truth |
 
@@ -26,7 +26,7 @@
 
 - Old changes / old states auto-fill default fields (executionMode/branchMode/enablePrReview); changes without a branch run unchanged — backward compatible
 - Progressive WARN (not BLOCK) for legacy change re-entry (missing redEvidence/greenEvidence, pure-string handoff)
-- Regression baseline (two-tier): `guard-self-test.mjs` 144 scenarios + `system-test.mjs` 60 items green (required after every change)
+- Regression baseline (two-tier): `guard-self-test.mjs` 171 scenarios + `system-test.mjs` 61 items green (required after every change)
 - dsh platform: the project-level skill copy carries an `INSTALLED_VERSION` marker synced with flow-comet releases; uninstall via `prepare-env --purge --platform dsh --yes` (see [Installation](INSTALLATION.md#option-c--deepseek-harness-dsh-platform))
 
 ## Release checklist (per release)

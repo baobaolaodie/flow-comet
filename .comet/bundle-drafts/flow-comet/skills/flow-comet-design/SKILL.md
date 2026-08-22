@@ -107,11 +107,16 @@ The design node reads CHANGE.md and REQUIREMENT.md, then produces DESIGN.md thro
 |-------|-------------|--------|
 | `flow-comet-ui-design` | Advisory（仅前端项目触发） | Produces UI-DESIGN.md with design tokens, anti-AI-slop check, visual north star——advisory 条目不要求 skill-load 声明（record D3 只校验执行者实际声明的 guarded 条目） |
 
-**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）。`flow-comet-ui-design` 为 advisory 条目——仅前端项目加载，且**不要求**对应的 skill-load 声明标记（非前端项目不加载不声明；前端项目加载后若把 `required-skill:design.flow-comet-ui-design` 记入 completedChecks，则必须先运行 skill-load 声明，D3 校验声明过的条目）：
+**加载声明（阶段层 · 双步硬规则）**：本节点技能已由入口路由经 Skill 工具加载（你正在阅读的就是它）；本节点 Required Skill Calls 的加载与声明同样不可跳过：
+
+1. 本节点的同名条目已随路由加载——同名 required 条目（`flow-comet-design`）无需重复加载，仅需运行下方声明命令（只读取 SKILL.md 文件不叫加载，**不得跳过**真正的 Skill 工具注入步骤）。`flow-comet-ui-design` 为 advisory 条目——仅前端项目用 Skill 工具加载其已装副本，非前端项目不加载不声明；若前端项目把 `required-skill:design.flow-comet-ui-design` 记入 completedChecks，也必须先运行对应 skill-load 声明（D3 校验声明过的条目）。
+2. 加载完成后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
 
 ```bash
 node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load design flow-comet-design --prompt flow-kit/prompts/2-design.md
 ```
+
+> **跑 skill-load 声明命令 ≠ 加载**：声明只把“哪次会话加载了哪个 skill、按哪份协议工作”写进状态供 exit/record 核对；真正加载只有第 1 步的 Skill 工具能做到。
 
 ## Output Schemas
 

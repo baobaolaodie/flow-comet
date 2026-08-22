@@ -28,7 +28,7 @@
 <p align="center">
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js_%E2%89%A518-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js 18+" /></a>
   <a href="https://github.com/baobaolaodie/flow-comet/actions"><img src="https://img.shields.io/github/actions/workflow/status/baobaolaodie/flow-comet/ci.yml?style=flat" alt="CI" /></a>
-  <a href="CHANGELOG-zh.md"><img src="https://img.shields.io/badge/version-1.4.2-blue.svg" alt="Version" /></a>
+  <a href="CHANGELOG-zh.md"><img src="https://img.shields.io/badge/version-1.5.0--rc.1-blue.svg" alt="Version" /></a>
 </p>
 
 ---
@@ -63,7 +63,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径>
 node scripts/prepare-env.mjs --target <目标项目绝对路径> --platform dsh
 ```
 
-这会项目级安装技能树到 `<项目>/.dsh/skills/flow-comet`（dsh 以 rank 100 自动发现、免重启——未安装该目录的项目不可见该技能，因此激活天然是项目级的），把编排规则注入 `AGENTS.md` 托管区（非破坏合并），并在 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 全局挂载薄桥接 loader（托管块写入 `$DSH_HOME/cordis.patch.yml`——读-合并-写，保留 dsh-skin 等既有块，对所有 profile 生效）。桥接经 dsh 的 `tools/pre-execute` 事件拦截写工具。最低 dsh `0.1.0-rc.6`；npm 包暂不发布（1.5.0 一并处理）。完整 dsh 平台安装章节见[安装 → 方案 C](docs/INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-平台)。
+这会项目级安装技能树到 `<项目>/.dsh/skills/flow-comet`（dsh 以 rank 100 自动发现、免重启——未安装该目录的项目不可见该技能，因此激活天然是项目级的），把编排规则注入 `AGENTS.md` 托管区（非破坏合并），并在 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 全局挂载薄桥接 loader（托管块写入 `$DSH_HOME/cordis.patch.yml`——读-合并-写，保留 dsh-skin 等既有块，对所有 profile 生效）。桥接经 dsh 的 `tools/pre-execute` 事件拦截写工具。拦截仅在流程运行中生效；空闲会话项目根外写不会被打断。最低 dsh `0.1.0-rc.6`；npm 包暂不发布（1.5.0 一并处理）。完整 dsh 平台安装章节见[安装 → 方案 C](docs/INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-平台)。
 
 ```bash
 # 2. 在目标项目新开 Claude Code 会话，输入：
@@ -226,7 +226,7 @@ flow-comet/
 
 1. 从 `dev` 开分支：`git checkout dev && git checkout -b feat/<描述>`
 2. 修改 skill/脚本请改 `.comet/bundle-drafts/flow-comet/skills/`（权威源）；TDD——先写 RED 场景
-3. 运行回归：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 144 SCENARIOS PASSED`
+3. 运行回归：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 171 SCENARIOS PASSED`
 4. 开 PR 合入 `dev`（squash——change 级提交）；发布 PR `dev → main`（merge——change 级提交进入 main，每次发布后 dev 不再领先）
 
 CI 在每个 PR 与 push 时自动强制仓库约定（回归、PR 纪律、版本一致性、死链）。本地 hook（提交/推送消息检测）通过 `node scripts/install-commit-hook.mjs` 安装——完整指南见 [CONTRIBUTING-zh.md](CONTRIBUTING-zh.md)。

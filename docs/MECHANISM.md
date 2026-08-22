@@ -32,11 +32,16 @@ Hook blocking semantics (see Limitations): PreToolUse hook exit 2 blocks in the 
 | TASK signature hash | enter records task-set signature (line-ending normalized + marker attributes stripped) → exit compares: add/remove tasks, change action/boundaries → BLOCKED; marking done/adding marker attributes → legal | enter/exit execute |
 | Node order BLOCK | next when currentNode not exited (non-normal successor) → BLOCKED; normal next after exit advancement exempt; rollback exempt (pending rollback task in TASK) | next |
 | handoff completedChecks | subagent Return Contract must carry required-skill completedChecks (skill-load evidence), missing → BLOCKED | exit subagent-execute |
+| Skill-load front gate | new changes require the node's skill-load declaration marker to exist before handoff request / record; the declaration must follow loading the skill with the Skill tool (reading the SKILL.md file is not enough) | handoff request / record |
 | redEvidence ordering | redEvidence must exist before greenEvidence; recording redEvidence after greenEvidence → BLOCKED | workflow-handoff result |
+| Contract payload parse failure | record / workflow-handoff result: a payload that looks like an object literal but fails JSON parsing → error with a `--json-file` hint, and nothing is written to state (fail-closed, no dirty data) | record / workflow-handoff result |
+| Suspicious-object heuristic boundary | a payload starting with `{`/`[` or containing `:`/`;` is treated as a likely object literal; if parsing then fails, the operation fails closed with a `--json-file` hint — a legitimate plain-text value at this boundary is conservatively rejected (safe-side design, no dirty state) | record / workflow-handoff result |
 | SUMMARY six sections | verify output / 6-dimension self-check (non-empty) / boundary check + mandatory `## 自检方法` — the 6-dimension section must declare `brooks-review` or `cache-brooks` (two-tier fallback: Skill tool → if only a "Launching skill" placeholder is returned, Read the plugin-cache protocol files and execute the full review manually); `builtin-quickcheck` appears only under `## 自检方法` with the unavailable reason AND the cache-attempt evidence (new changes blocked; legacy warned) | exit execute |
 | Disposition markers | REVIEW.md findings must carry a disposition marker (fixed/upgraded/deferred; new changes blocked; legacy warned) | exit review |
 | builtin self-check evidence | `builtin-quickcheck` must state the unavailable reason AND the plugin-cache attempt (new changes blocked; legacy warned) | exit execute |
+| Artifact template fidelity | SUMMARY / TASK / CHANGE / REQUIREMENT / DESIGN must keep the template title, header fields, and section order; new changes missing any part are blocked with recovery guidance, legacy changes warned | exit execute / plan / open / design |
 | Wave-wording consistency | prose `[P]` markers must match task `parallel="true"` (new changes blocked; legacy warned) | exit plan |
+| Wave grouping consistency | `[P]` blocks must form a single contiguous group placed before or after the serial chain; interleaving `[P]` and serial tasks (mixing) violates grouping — new changes BLOCK with recovery guidance (re-group or explicit exemption), legacy WARN | exit plan |
 | Overreach delegation | parallel done tasks require the delegation node exited (new changes blocked; legacy warned) | exit execute/verify |
 | verify real execution | TEST.md `## 验证命令` actually runs (multi-line `&&` supported); verifyFailures machine-counted **per change** (switching changes does not carry over another change's count), 4th → BLOCKED (timeout configurable via `FLOW_COMET_VERIFY_TIMEOUT_MS`, default 300s) | exit verify |
 | Append placement | CONTEXT orphan sections / LESSONS numbering-out-of-order / STATE+CHANGELOG non-reverse-order → WARN (progressive) | exit open/verify/archive |
@@ -48,6 +53,7 @@ Hook blocking semantics (see Limitations): PreToolUse hook exit 2 blocks in the 
 
 - **Return Contract**: subagents return `{status, commitHash, redEvidence, greenEvidence, completedChecks, riskSignals}` — missing commitHash/greenEvidence/completedChecks → BLOCK; missing redEvidence → progressive WARN; redEvidence recorded after the fact → BLOCK
 - **handoff hash provenance**: `git show <commitHash>` verifies committed files ⊆ write_files (auto-parsed from TASK.md, XML comments stripped)
+- **Zero-commit tasks**: a request-side empty `write_files` list (or request-side `noCommit` marker) classifies the task as zero-commit — results skip the commit-subset check with an auditable prompt; zero-commit results carrying tracked files are blocked on new changes and warned on legacy changes
 - **write_files conflict detection**: parallel tasks may share a wave only if their write_files do not overlap
 
 ## 5. Recovery protocol
@@ -58,11 +64,11 @@ Hook blocking semantics (see Limitations): PreToolUse hook exit 2 blocks in the 
 
 ## 6. Guard self-test suite (author regression baseline)
 
-`scripts/guard-self-test.mjs`: **144 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (60 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
+`scripts/guard-self-test.mjs`: **171 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (61 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
 
 ```bash
 node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 144 SCENARIOS PASSED
+# → ALL 171 SCENARIOS PASSED
 ```
 
 ## 6.5 DeepSeek Harness (dsh) platform
@@ -71,9 +77,10 @@ On DeepSeek Harness, flow-comet is installed through the **prepare-env installer
 
 - **Installation**: `node scripts/prepare-env.mjs --target <project> --platform dsh` (minimum dsh `0.1.0-rc.6`; dev preview).
 - **Project-level skill discovery**: the skill tree is installed at `<project>/.dsh/skills/flow-comet`; dsh auto-discovers skills under `<project>/.dsh/skills/` at rank 100 (file watching, no restart) — projects **without that directory cannot see the skill**, so activation is naturally project-level (no runtime trace detection, no chicken-and-egg).
-- **Interception**: a thin bridge loader mounted globally at `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` (managed block in `$DSH_HOME/cordis.patch.yml`, effective for all profiles) listens on dsh's `tools/pre-execute` waterfall event, maps tool arguments to the same guard contract (`Write`/`Edit` → `file_path`, `Bash` → `command`), calls the project-local `comet-hook-guard.mjs` in a child process, and returns `{kind:'deny', reason}` (BLOCK message + recovery guidance) for out-of-scope writes; shape mismatches and abnormal exits fail closed. On Windows 8.3 paths the project root is canonicalized to its long form before the guard decision, preventing the guard's lexical path resolution from skipping the whitelist (fail-open).
+- **Interception**: a thin bridge loader mounted globally at `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` (managed block in `$DSH_HOME/cordis.patch.yml`, effective for all profiles) listens on dsh's `tools/pre-execute` waterfall event, maps tool arguments to the same guard contract (`Write`/`Edit` → `file_path`, `Bash` → `command`), calls the project-local `comet-hook-guard.mjs` in a child process, and returns `{kind:'deny', reason}` (BLOCK message + recovery guidance) for out-of-scope writes while the flow is running; shape mismatches and abnormal exits fail closed. On Windows 8.3 paths the project root is canonicalized to its long form before the guard decision, preventing the guard's lexical path resolution from skipping the whitelist (fail-open).
 - **Activation scope**: the bridge only engages when the session project root contains `.dsh/skills/flow-comet` (narrow listening) — non-flow-comet projects are untouched.
-- **Executor passthrough**: when the coordinator delegates tasks to subagents, the delegated agent (identified by the session's subagent delegation depth) writes source code as the executor and bypasses the phase whitelist — matching the worktree-isolation semantics of the other platforms — while the coordinating agent remains subject to the whitelist. Out-of-project writes and malformed tool arguments stay denied for both.
+- **Executor passthrough**: when the coordinator delegates tasks to subagents, the delegated agent (identified by the session's subagent delegation depth) writes source code as the executor and bypasses the phase whitelist — matching the worktree-isolation semantics of the other platforms — while the coordinating agent remains subject to the whitelist. Out-of-project writes and malformed tool arguments stay denied for both while the flow is running.
+- **Containment is active only while the flow is running**: in the idle state (no state / no `activeChange` / `completed`) writes outside the project root are allowed; parse failures or unknown workflow status stay fail-closed (deny).
 - **Managed rule injection**: installation injects the orchestration rule into `AGENTS.md` inside the `<!-- Managed by flow-comet prepare-env -->` block (non-destructive merge, marker shared with Codex).
 
 ## 7. Automatic initialization detection (init pre-step)
@@ -93,7 +100,7 @@ Explicit parameter authorization (no blocking prompts, headless-safe): `--init-c
 
 - **Node entry evidence**: entering a node records it; exiting a node that was never entered — blocked on new changes (entry checks must not be skipped: coordinator prohibition, pre-delegation commit check, signature recording), progressive warning for legacy changes.
 - **New-change enforcement**: changes created via `init` are marked new (`newChange`) and enforce all content-level checks as blocking — completed tasks require their matching summary, handoff results require TDD RED evidence, disposition markers, builtin self-check evidence, wave-wording consistency, overreach delegation, and append placement; legacy changes keep the progressive warnings.
-- **Declaration automation**: `record` auto-fills missing skill-load declaration markers (manual declarations still recommended).
+- **Declaration automation**: for legacy changes `record` auto-fills missing skill-load declaration markers as a fallback; new changes require the node's declaration markers to exist first (the skill-load front gate blocks handoff requests and records without them).
 - **Explicit empty-exit exemption**: execute may exit with no serial tasks when explicitly declared (`emptyExitApproved`); otherwise blocked by default.
 
 ## Design principles

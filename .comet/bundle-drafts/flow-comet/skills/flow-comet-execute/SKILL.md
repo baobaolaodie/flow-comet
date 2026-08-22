@@ -64,13 +64,13 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 对 TASK.md 每个 pending 串行任务，协调者执行：
 
 1. **读 task 块，构造 handoff request**：读 `<task>` XML 块（`action` / `read_files` / `write_files` / `verify` / `done`）。若内容有歧义，停下询问——不要猜。构造 handoff request 内容：task 全文 + DESIGN §0/§0.5 + AC + read/write_files 边界。运行 `node .claude/skills/flow-comet/scripts/workflow-handoff.mjs request <task-id>` 记录。**委托即记 request**——直接记录 result 而无对应 request 时,write_files 允许列表为空会被 BLOCKED(新 change 强制委托边界),补 request 后再重录 result 即可(执行者实证)。
-2. **委托子代理**：用 Agent 工具（`isolation: "worktree"`）委托 fresh-context 子代理。handoff prompt 强制协议：加载 flow-comet-dev、执行 TDD（RED/GREEN/REFACTOR）、LESSONS 扫描、既有抽象 grep、verify、6 维自查、越界检查、原子 commit（`<type>(<change-id>): <task-id> <subject>`），写 `.specs/<change-id>/<task-id>-SUMMARY.md`，回传 Return Contract（含 commitHash + greenEvidence + completedChecks + selfReview）。**SUMMARY 自引用 hash 注**：提交内容无法包含自身 hash——若子代理 amend 提交,SUMMARY 内记录的 commitHash 为 amend 前值属预期(文件集一致即可,以实际提交对象为准)。
+2. **委托子代理**：用 Agent 工具（`isolation: "worktree"`）委托 fresh-context 子代理。handoff prompt 强制协议：子代理用 **Skill 工具**加载 flow-comet-dev 并按 `flow-kit/prompts/4-dev.md` 协议执行（TDD RED/GREEN/REFACTOR、LESSONS 扫描、既有抽象 grep、verify、6 维自查、越界检查、原子 commit `<type>(<change-id>): <task-id> <subject>`），按 `flow-kit/templates/SUMMARY.md` 模板写 `.specs/<change-id>/<task-id>-SUMMARY.md`（标题/首部/段序保真，另补 flow-comet 增量 `## 自检方法` 段），回传 Return Contract（含 commitHash + greenEvidence + completedChecks + selfReview）。**SUMMARY 自引用 hash 注**：提交内容无法包含自身 hash——若子代理 amend 提交,SUMMARY 内记录的 commitHash 为 amend 前值属预期(文件集一致即可,以实际提交对象为准)。
 3. **记录 handoff result**：子代理回传后，运行 `node .claude/skills/flow-comet/scripts/workflow-handoff.mjs result <task-id> '<JSON>'` 记录（Return Contract 含 commitHash + greenEvidence + completedChecks + selfReview）。
-4. **验收 SUMMARY，TASK.md 标 done**：确认 SUMMARY 含 `## 自检方法` 段（声明 brooks-review / cache-brooks / builtin-quickcheck 三值之一）、verify 输出真实、6 维自查与越界检查有实质内容；通过后在 TASK.md 将任务标 `status="done"` 并加时间戳。
+4. **验收 SUMMARY，TASK.md 标 done**：确认 SUMMARY 按 `flow-kit/templates/SUMMARY.md` 填写且**模板保真**（标题 `# SUMMARY:` / 首部 4 字段 / 段序一致）、含 `## 自检方法` 段（声明 brooks-review / cache-brooks / builtin-quickcheck 三值之一）、verify 输出真实、6 维自查与越界检查有实质内容；通过后在 TASK.md 将任务标 `status="done"` 并加时间戳。
 5. **下一个 pending 任务**：重复步骤 1-4。
 
 > 原 Steps 的 TDD / LESSONS / verify / 6 维自查 / 越界检查 / commit 协议**移入 handoff prompt 作为子代理的强制协议**，协调者不亲自执行。
-> **Return Contract 非代码任务**：纯文档 / 纯配置任务子代理回传时，`greenEvidence` 允许 `{"command":"N/A (non-code task)","output":"..."}`（command 字段存在即可通过 W1-D 校验）。
+> **Return Contract 非代码任务**：纯文档 / 纯配置任务子代理回传时，`greenEvidence` 与 `redEvidence` 均允许 `{"command":"N/A (non-code task)","output":"..."}` 形态（command 字段存在即可通过 W1-D 校验；redEvidence 缺失在新 change 下仍会被 W1-D 拦截，因此必须显式提供此形态而非省略字段）。
 > **Return Contract 的 completedChecks 统一契约**：子代理回传的 `completedChecks` 必须包含 `required-skill:subagent-execute.flow-comet-dev`——execute（串行委托）与 subagent-execute（并行委托）的 handoff 统一记录在 subagent-execute 证据库（共用证据库语义），guard 的 W1-D 对全部委托结果统一校验该契约。取值与节点自证命名（本节点自身证据用的 `required-skill:execute.flow-comet-dev`，见 Required Skill Calls）无关。**格式要求**：`completedChecks` 必须是**字符串数组**（如 `["required-skill:subagent-execute.flow-comet-dev"]`）——对象数组（如 `[{id, status}]`）会被 guard 的严格比较判"缺"→ exit BLOCKED。示例：
 >
 > - 正确：`"completedChecks": ["required-skill:subagent-execute.flow-comet-dev"]`
@@ -78,14 +78,15 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 > - 错误：`"completedChecks": [{"id": "required-skill:subagent-execute.flow-comet-dev", "status": "done"}]` —— 对象数组会被严格比较判"缺"（必须为字符串数组）
 
 The full dev protocol, templates, and constraints are in:
-- `flow-kit/prompts/4-dev.md` (DEV phase) — 作为 handoff prompt 的子代理强制协议引用
+- `flow-kit/prompts/4-dev.md` (DEV phase) — handoff prompt 的子代理强制协议（不再以“参照前一产物”转述——子代理必须显式按此协议执行并加载 flow-comet-dev）
+- `flow-kit/templates/SUMMARY.md` (SUMMARY template) — 每份 `<task-id>-SUMMARY.md` 的填写模板（标题/首部/段序保真，另补 `## 自检方法` 段）
 
 ### Completion reasoning
 
 This node is truly done when:
 - All tasks in TASK.md have `status="done"`.
 - Every done task has a corresponding `<task-id>-SUMMARY.md` in `.specs/<change-id>/`.
-- Every SUMMARY.md contains: verify output (real, not fabricated), 6-dimension self-check, boundary check, and a declared `## 自检方法` (brooks-review / cache-brooks / builtin-quickcheck).
+- Every SUMMARY.md is template-faithful (title `# SUMMARY:`, header fields, section order — per `flow-kit/templates/SUMMARY.md`, plus the `## 自检方法` section) and contains: verify output (real, not fabricated), 6-dimension self-check, and boundary check.
 - No REQUIREMENT.md or DESIGN.md has been modified during execution.
 - No out-of-boundary files have been changed without explicit approval.
 
@@ -118,11 +119,16 @@ The execute node loads `flow-comet-dev` for each task execution. It iterates thr
 
 Load `flow-comet-dev` during this Node and record completed check `required-skill:execute.flow-comet-dev`. Reason: TDD + 6 维自查 + R4.5 + R4.6
 
-**加载声明**：加载本 skill 后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+**加载声明（阶段层 · 双步硬规则）**：本节点技能已由入口路由经 Skill 工具加载（你正在阅读的就是它）；本节点 Required Skill Calls 的加载与声明同样不可跳过：
+
+1. **用 Skill 工具加载** `flow-comet-dev`（本节点 Required Skill Call）。**不得跳过**——只读取 SKILL.md 文件不叫加载；真正让 flow-comet-dev 指令生效的是 Skill 工具把它注入本次会话。委托子代理时，子代理同样必须用 Skill 工具加载 flow-comet-dev（按 `flow-kit/prompts/4-dev.md` 协议执行）。
+2. 加载完成后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
 
 ```bash
 node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load execute flow-comet-dev --prompt flow-kit/prompts/4-dev.md
 ```
+
+> **跑 skill-load 声明命令 ≠ 加载**：声明只把“哪次会话加载了哪个 skill、按哪份协议工作”写进状态供 exit/record 核对；真正加载只有第 1 步的 Skill 工具能做到。
 
 ## Augmentations
 

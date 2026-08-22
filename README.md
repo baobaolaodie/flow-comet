@@ -28,7 +28,7 @@
 <p align="center">
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js_%E2%89%A518-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js 18+" /></a>
   <a href="https://github.com/baobaolaodie/flow-comet/actions"><img src="https://img.shields.io/github/actions/workflow/status/baobaolaodie/flow-comet/ci.yml?style=flat" alt="CI" /></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.4.2-blue.svg" alt="Version" /></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.5.0--rc.1-blue.svg" alt="Version" /></a>
 </p>
 
 ---
@@ -63,7 +63,7 @@ For DeepSeek Harness (dsh), install through the same installer — no plugin bun
 node scripts/prepare-env.mjs --target <absolute path to your project> --platform dsh
 ```
 
-This installs the skill tree project-locally at `<project>/.dsh/skills/flow-comet` (dsh auto-discovers skills there at rank 100 without a restart — projects without that directory cannot see the skill, which makes activation naturally project-level), injects the orchestration rules into an `AGENTS.md` managed block (non-destructive merge), and mounts a thin bridge loader globally at `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` with a managed block in `$DSH_HOME/cordis.patch.yml` (read-merge-write, preserves existing blocks such as dsh-skin, effective for all profiles). The bridge intercepts write tools via dsh's `tools/pre-execute` event. Minimum dsh `0.1.0-rc.6`; the npm package is not published yet (planned for 1.5.0). See [Installation → Option C](docs/INSTALLATION.md#option-c--deepseek-harness-dsh-platform) for the full dsh platform section.
+This installs the skill tree project-locally at `<project>/.dsh/skills/flow-comet` (dsh auto-discovers skills there at rank 100 without a restart — projects without that directory cannot see the skill, which makes activation naturally project-level), injects the orchestration rules into an `AGENTS.md` managed block (non-destructive merge), and mounts a thin bridge loader globally at `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` with a managed block in `$DSH_HOME/cordis.patch.yml` (read-merge-write, preserves existing blocks such as dsh-skin, effective for all profiles). The bridge intercepts write tools via dsh's `tools/pre-execute` event. Interception only applies while a flow is running — in an idle session, writes outside the project root are not interrupted. Minimum dsh `0.1.0-rc.6`; the npm package is not published yet (planned for 1.5.0). See [Installation → Option C](docs/INSTALLATION.md#option-c--deepseek-harness-dsh-platform) for the full dsh platform section.
 
 ```bash
 # 2. Open your project in a new Claude Code session and run:
@@ -226,7 +226,7 @@ Full guide in [CONTRIBUTING.md](CONTRIBUTING.md) — branch model (`feature → 
 
 1. Branch from `dev`: `git checkout dev && git checkout -b feat/<description>`
 2. Edit skills/scripts under `.comet/bundle-drafts/flow-comet/skills/` (authoritative source); TDD with RED scenario first
-3. Run regression: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 144 SCENARIOS PASSED`
+3. Run regression: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 171 SCENARIOS PASSED`
 4. Open a PR into `dev` (squash — one change-level commit); release PR `dev → main` (merge — dev's change-level commits enter main, and dev stops leading after each release)
 
 CI enforces the repository conventions automatically on every PR and push (regression, PR discipline, version consistency, dead links). Local hooks (commit/push message checks) install with `node scripts/install-commit-hook.mjs` — see [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
