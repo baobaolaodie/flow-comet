@@ -436,7 +436,7 @@ const TASK_VALID_ALL_PARALLEL =
   '<task id="P03" parallel="true" status="pending"><action>实现 P03</action><write_files>src/p3.mjs</write_files><verify>node --check src/p3.mjs</verify></task>\n' +
   '<task id="P04" parallel="true" status="pending"><action>实现 P04</action><write_files>src/p4.mjs</write_files><verify>node --check src/p4.mjs</verify></task>\n';
 
-// ---------- 多趟路由场景任务集（多趟语义批次：S145/S146 原位重写 + 尾部新增） ----------
+// ---------- 多趟路由场景任务集（多趟语义批次：依赖环拦截与缺失依赖拦截场景原位重写 + 尾部新增场景族） ----------
 // 依赖环：P01↔P02 互为 depends_on（依赖图有环 → plan 出口 BLOCKED 含「依赖环」+ depends_on 恢复指引）
 const TASK_DEP_CYCLE =
   '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify><depends_on>P02</depends_on></task>\n' +
@@ -4358,7 +4358,7 @@ const SCENARIOS = [
     },
   },
 
-  // 173: 单趟零进展防呆（D4②·状态机侧）——TASK 仅剩依赖无法满足的孤儿并行任务（depends_on 引用
+  // 173: 单趟零进展防呆（三重防呆决策之二·状态机侧）——TASK 仅剩依赖无法满足的孤儿并行任务（depends_on 引用
   // 不存在的 T99）：既无可委托并行又无串行 pending 且 TASK 未全 done → next 应 BLOCKED 防静默死锁。
   // 旧引擎无防呆静默路由 execute = 预期 RED。
   {

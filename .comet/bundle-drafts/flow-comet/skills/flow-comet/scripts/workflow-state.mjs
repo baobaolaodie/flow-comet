@@ -450,7 +450,7 @@ async function determineNode(changeName, protocol, completedNodes = []) {
     const pending = attrsList.filter((a) => a.status === 'pending').length;
     const done = attrsList.filter((a) => a.status === 'done').length;
     if (pending > 0) {
-      // 多趟循环路由（D1/ADR-009）：委托进入谓词每趟重新求值——∃ p ∈ tasks：p.parallel ∧
+      // 多趟循环路由（循环路由形态决策 · 多趟路由架构决策记录）：委托进入谓词每趟重新求值——∃ p ∈ tasks：p.parallel ∧
       // p.status=pending ∧ deps(p) ⊆ doneIds → 路由 subagent-execute（第 N 趟，节点可多次进入）。
       // 旧「首趟委托完成后即固定单趟」的防死循环限制移除；死循环防护改由三重保险承担：
       // plan 出口依赖图前置拦截（guard）/ next 单趟零进展防呆（本脚本）/ 每趟重入完整 entry 检查
@@ -871,7 +871,7 @@ async function main() {
       }
     }
     const detectedNode = await determineNode(changeName, protocol, state.completedNodes);
-    // 单趟零进展防呆（D4②·状态机侧）：路由落在 execute/subagent-execute，但既无可委托的并行任务
+    // 单趟零进展防呆（三重防呆决策之二·状态机侧）：路由落在 execute/subagent-execute，但既无可委托的并行任务
     // （依赖已满足集合为空）又无串行 pending，且 TASK 未全 done——剩余 pending 全部是依赖无法满足的
     // 孤儿并行任务（数据异常：depends_on 引用不存在的任务 id 或执行期出现依赖环）→ BLOCKED，
     // 防止静默路由到无法推进的节点造成死循环/死等。协议无 subagent-execute 节点时不适用

@@ -1684,7 +1684,7 @@ function nextNode(protocol, state) {
   return route(protocol).find((node) => !completed.has(node.id)) ?? null;
 }
 
-// ---------- 多趟路由共享判定（D2/D3 · ADR-009） ----------
+// ---------- 多趟路由共享判定（依赖图校验决策与完成判定谓词决策 · 多趟路由架构决策记录） ----------
 
 // <depends_on> 提取（逗号/空白分隔）。DESIGN 0.5.2：与 workflow-state.mjs 各自保留既有正则实现、
 // 不提取到共享解析层（task-parsing/state-schema 冻结为只消费）——两处语义由场景族锚定一致。
@@ -1709,7 +1709,7 @@ function eligibleParallelBlocks(blocks, doneIds) {
 // 依赖图分析：对全部 <task> 块建依赖图（deps 边），Kahn 拓扑排序判环 + 缺失依赖收集。
 // 返回 { ids, depsById, missing: [{id, dep}], cyclic, cycleIds }（cycleIds = 拓扑排序无解的
 // 任务集合，含被环传递拖累的下游任务）。plan 出口波次校验与 subagent-execute 出口孤儿检测
-// 共用同一实现（单一语义，D2「依赖图无环 + 依赖链可满足」）。
+// 共用同一实现（单一语义：依赖图无环 + 依赖链可满足）。
 function analyzeDependencyGraph(blocks) {
   const parsed = blocks
     .map((block) => ({ block, attrs: taskOpeningAttrs(block) }))
@@ -2572,12 +2572,12 @@ async function main() {
           }
         }
       }
-      // 波次分组校验重定义（D2 · 混排合法化）：原「并行块必须单个连续且居首/尾」形态约束废除——
+      // 波次分组校验重定义（依赖图校验决策 · 混排合法化）：原「并行块必须单个连续且居首/尾」形态约束废除——
       // 串行任务位置不再受限，串→并→串 / 并→串→并 / 多波混合均合法（多趟循环路由按依赖拓扑分趟）。
       // 改为依赖图校验：① 全部任务建依赖图（deps 边）做 Kahn 拓扑排序判环——有环即规划结构性死锁；
       // ② 全部引用的任务 id 必须存在（无环图下「每个 parallel 任务的全部传递依赖存在且非环」
       // ⟺ 直接引用都存在）。违规分级：新 change BLOCKED（含「依赖环」/缺失依赖明细 + depends_on
-      // 调整恢复指引）；旧 change 渐进 WARN 不阻断。波次散文一致性检测保留不动（D10 正交）。
+      // 调整恢复指引）；旧 change 渐进 WARN 不阻断。波次散文一致性检测保留不动（与形态约束正交的既有独立检测，维持不变）。
       const depGraph = analyzeDependencyGraph(taskList);
       if (depGraph.cyclic || depGraph.missing.length > 0) {
         const detail = depGraph.cyclic
@@ -2943,12 +2943,12 @@ async function main() {
       }
     } catch {}
   }
-  // 多趟完成判定（D3 合取 · 契约 #2）——subagent-execute 每趟出口校验：
+  // 多趟完成判定（完成判定谓词决策·合取语义）——subagent-execute 每趟出口校验：
   // ① 可委托集合必须为空：仍存在 p（parallel ∧ pending ∧ deps⊆done）→ 本趟未委派完即退 →
   //    BLOCK「尚有可委托并行任务（继续委托）」（AC-1：每趟委托全部依赖已满足的并行任务）；
   // ② 孤儿并行单独区分文案：parallel ∧ pending 且依赖链无法满足（直接依赖缺失，或陷入依赖环/
   //    被环传递拖累）→ BLOCK「孤儿并行任务依赖无法满足（检查 depends_on）」——数据异常 fail-closed，
-  //    防静默跳过（D4 防呆之二）。
+  //    防静默跳过（三重防呆决策之二）。
   // serial pending 不阻断：合法趟间态（回 execute 消化串行）——最终完成的另一支「无 serial pending」
   // 由 execute 出口的串行 pending 校验把关，两支在流程推进中自然合取。
   if (node.id === 'subagent-execute' && state.activeChange) {
@@ -3220,12 +3220,12 @@ async function main() {
     const isArchive = node.id === 'archive';
     if (isArchive) state.activeChange = null;
     let next = isArchive ? null : nextNode(protocol, state);
-    // parallel-aware 路由镜像（多趟语义 · 契约 #1）——exit 推进后的下一候选若仍有依赖已满足的
+    // parallel-aware 路由镜像（多趟语义）——exit 推进后的下一候选若仍有依赖已满足的
     // pending parallel 任务，则委托优先：路由到 subagent-execute（与 workflow-state.mjs 的
     // determineNode 同谓词、每趟重新求值）。旧「subagent-execute 已完成则不再回流」的单趟限制
-    // 移除（D1 循环路由）；触发面从「下一候选为 execute」扩为任意非 subagent-execute 候选——否则
+    // 移除（多趟循环路由形态决策）；触发面从「下一候选为 execute」扩为任意非 subagent-execute 候选——否则
     // execute 完成后 nextNode 直接落到 review，第二波并行会被静默跳过（AC-1 全自动分趟）。
-    // 上一趟出口的多趟完成判定（D3 合取）保证走到这里时可委托集合必为空或本趟已被拦，
+    // 上一趟出口的多趟完成判定（合取语义）保证走到这里时可委托集合必为空或本趟已被拦，
     // 故本镜像不会与出口校验形成循环放行。
     if (next && next.id !== 'subagent-execute' && state.activeChange) {
       const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
