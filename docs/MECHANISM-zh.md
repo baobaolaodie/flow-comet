@@ -68,7 +68,7 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 
 ```bash
 node .claude/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 175 SCENARIOS PASSED
+# → ALL 176 SCENARIOS PASSED
 ```
 
 ## 6.5 DeepSeek Harness（dsh）平台

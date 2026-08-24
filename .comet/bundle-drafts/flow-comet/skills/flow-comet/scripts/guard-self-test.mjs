@@ -4484,6 +4484,38 @@ const SCENARIOS = [
       assertOut(res, 'NODE: execute');
     },
   },
+
+  // 176: 伪并行检测（多趟混排合法化后的语义盲区兜底）——并行任务 write_files 仅声明测试产物
+  // 而无任何生产代码文件时，plan 出口输出 WARN（列任务 id 并给出 depends_on/垂直切片建议）
+  // 且不阻断——渐进提示语义本身即断言点；write_files 混有生产文件的并行任务不触发。
+  {
+    name: '176 伪并行 WARN：仅写测试产物的并行任务提示依赖嫌疑且不阻断',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      writeIntakeArtifacts(dir);
+      writeState(dir, {
+        activeChange: CHANGE_ID,
+        currentNode: 'plan',
+        completedNodes: ['open', 'design'],
+        evidence: { open: { summary: 'o' }, design: { summary: 'd' }, plan: { summary: 'p' } },
+        verifyFailures: 0,
+        executionMode: 'subagent',
+        directOverride: false,
+      });
+      // 正例：纯测试面并行任务 → WARN 列 id 并建议 depends_on；plan 出口仍通过
+      let res = runPlanExit(dir,
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>tests/test_p1.mjs</write_files><verify>node --check tests/test_p1.mjs</verify></task>\n');
+      assertExit(res, 0);
+      assertOut(res, 'WARN: 伪并行检测');
+      assertOut(res, 'P01');
+      assertOut(res, 'depends_on');
+      // 反例：write_files 混有生产文件 → 不触发
+      res = runPlanExit(dir,
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>src/p2.mjs\ntests/test_p2.mjs</write_files><verify>node --check src/p2.mjs</verify></task>\n');
+      assertExit(res, 0);
+      assertNotOut(res, '伪并行检测');
+    },
+  },
 ];
 
 // ---------- 运行 ----------
