@@ -66,6 +66,8 @@ const MANAGED_CORDIS_START = '# --- flow-comet managed ---';
 const MANAGED_CORDIS_END = '# --- end flow-comet managed ---';
 
 // ---------- 平台描述符表（单一来源——新增平台 = 描述符条目 + 安装/清理函数，main 零改动） ----------
+// D6：flow-kit 永不纳入清理域——下述各平台 purge 清单均不含 <target>/flow-kit/（含 --purge --yes）；
+//     它不是本安装器的生成物域（ADR-008），由安装器首次创建的 flow-kit 残留属预期。
 
 const PLATFORMS = {
   'claude-code': {
@@ -896,6 +898,112 @@ function resolveInstalledVersion() {
   return installedVersion;
 }
 
+// ---------- flow-kit 获取链路（ADR-008 / DESIGN D1~D6——平台无关,main 平台循环前调用一次） ----------
+
+// 锁定点常量（D2）：上游 github.com/rihebty/flow-kit 实测无 tag,commit 是唯一精确锚;
+// 升级锁定点 = 显式修改此常量并记 CHANGELOG,不做自动跟随（2026-08-23 ls-remote 实测 == 上游 HEAD）。
+const FLOW_KIT_UPSTREAM_URL = 'https://github.com/rihebty/flow-kit.git';
+const FLOW_KIT_LOCKED_COMMIT = '9b5dda7206ae841230f118348d660ad8d0ae2830';
+// git 网络调用统一超时（D5——沿用 resolveInstalledVersion 的 execFileSync timeout 先例风格）
+const FLOW_KIT_GIT_TIMEOUT_MS = 60000;
+// 摘要展示用短 sha 长度（git 短哈希惯例——单一来源,clone 成功/已有/指引三处引用）
+const FLOW_KIT_SHORT_SHA_LEN = 7;
+
+/** 提取 git 调用失败信息首行（execFileSync 错误消息含多行 stderr——警告只留首行） */
+function gitErrorFirstLine(err) {
+  return String(err && err.message ? err.message : err).split('\n')[0].trim();
+}
+
+/** 手动获取指引（clone/checkout 失败或目录非上游克隆时打印——含上游 URL 与目标路径;不抛错） */
+function printFlowKitManualGuide(target) {
+  const flowKitDir = path.join(target, 'flow-kit');
+  console.warn(`[prepare-env] 手动获取指引: git clone ${FLOW_KIT_UPSTREAM_URL} "${flowKitDir}"`);
+  console.warn(`[prepare-env] 然后锁定快照: git -C "${flowKitDir}" checkout --detach ${FLOW_KIT_LOCKED_COMMIT.slice(0, FLOW_KIT_SHORT_SHA_LEN)}`);
+  console.warn('[prepare-env] 未获取 flow-kit 时技能协议引用悬空、guard 段名基准退化为内置 fallback——其余安装职责不受影响。');
+}
+
+/**
+ * 归属判定（D3）：origin remote URL 匹配上游——本地 config 读取,无网络。
+ * 兼容 https / ssh 形态与可选 .git 后缀;读取失败视为不匹配（保守落入"非上游克隆"分支,
+ * 绝不改动用户目录）。返回 'match' | 'mismatch' | 'unreadable'。
+ */
+function flowKitOriginStatus(flowKitDir) {
+  try {
+    const url = execFileSync(
+      'git',
+      ['-C', flowKitDir, 'config', '--get', 'remote.origin.url'],
+      { encoding: 'utf8', timeout: FLOW_KIT_GIT_TIMEOUT_MS }
+    ).trim().replace(/\.git$/i, '').replace(/\/+$/, '');
+    return /github\.com[:/]rihebty\/flow-kit$/i.test(url) ? 'match' : 'mismatch';
+  } catch {
+    return 'unreadable';
+  }
+}
+
+/**
+ * 确保 <target>/flow-kit/ 就位（ADR-008 / DESIGN D1~D6——L-008 非破坏哲学:已存在路径一律只读不动）：
+ *   路径 1 目标不存在 → execFileSync('git',…) 数组参数形态 clone 上游后 detached checkout 到锁定 commit;
+ *   路径 2 已存在且 .git 存在且 origin 匹配上游 → 只读 rev-parse HEAD 并输出与锁定点差异影响,绝不改动;
+ *   路径 3 已存在但不满足归属判定 → 摘要"非上游克隆,已跳过"+ 手动指引,不改动;
+ *   路径 4 clone/checkout 任一失败 → 警告 + 手动获取指引,**不抛错**（D5——外网故障不得绑架安装器
+ *          其余职责,进程照常 exit 0）;各平台 purge 清单永不包含 flow-kit（D6,见 PLATFORMS 表头注释）。
+ */
+function ensureFlowKit(target) {
+  const flowKitDir = path.join(target, 'flow-kit');
+  const shortLock = FLOW_KIT_LOCKED_COMMIT.slice(0, FLOW_KIT_SHORT_SHA_LEN);
+  if (!fs.existsSync(flowKitDir)) {
+    // 路径 1：目标缺失 → clone + detached checkout 到锁定 commit（D1/D2）
+    try {
+      execFileSync('git', ['clone', FLOW_KIT_UPSTREAM_URL, flowKitDir], {
+        encoding: 'utf8',
+        timeout: FLOW_KIT_GIT_TIMEOUT_MS,
+      });
+      execFileSync('git', ['-C', flowKitDir, 'checkout', '--detach', FLOW_KIT_LOCKED_COMMIT], {
+        encoding: 'utf8',
+        timeout: FLOW_KIT_GIT_TIMEOUT_MS,
+      });
+      console.log(`[prepare-env] 已获取 flow-kit（锁定 ${shortLock}）`);
+    } catch (err) {
+      // 路径 4：clone/checkout 任一失败 → WARN + 手动指引,不抛错
+      console.warn(`[prepare-env] 警告: flow-kit 自动获取失败（${gitErrorFirstLine(err)}）`);
+      printFlowKitManualGuide(target);
+    }
+    return;
+  }
+  // 目录已存在 → 归属判定（D3:.git 存在 且 origin remote 匹配上游）
+  const hasDotGit = fs.existsSync(path.join(flowKitDir, '.git'));
+  const originStatus = hasDotGit ? flowKitOriginStatus(flowKitDir) : 'mismatch';
+  if (originStatus !== 'match') {
+    // 路径 3：同名非克隆目录（或 remote 无法确认归属）→ 跳过 + 指引,绝不改动
+    if (originStatus === 'unreadable') {
+      console.warn('[prepare-env] 警告: flow-kit 目录存在且含 .git,但 origin remote 读取失败——无法确认归属');
+    }
+    console.log('[prepare-env] 目录存在但非上游克隆，已跳过');
+    printFlowKitManualGuide(target);
+    return;
+  }
+  // 路径 2：上游克隆 → 只读检测并输出差异影响（D4——绝不 fetch/checkout 改动用户克隆）
+  try {
+    const head = execFileSync('git', ['-C', flowKitDir, 'rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+      timeout: FLOW_KIT_GIT_TIMEOUT_MS,
+    }).trim();
+    const shortHead = head.slice(0, FLOW_KIT_SHORT_SHA_LEN);
+    console.log(`[prepare-env] 已有 flow-kit（HEAD=${shortHead}，推荐锁定点=${shortLock}）`);
+    if (head === FLOW_KIT_LOCKED_COMMIT) {
+      console.log('[prepare-env] 当前 HEAD 与推荐锁定点一致。');
+    } else {
+      console.warn(
+        `[prepare-env] 差异影响: 当前 HEAD 与推荐锁定点不一致——guard 段名基准与协议引用可能偏离安装器锁定内容` +
+          `（安装器绝不改动已有克隆;如需对齐请手动执行 git -C "${flowKitDir}" fetch 后 checkout --detach ${shortLock}）`
+      );
+    }
+  } catch (err) {
+    // HEAD 只读失败同样不改动、不中断安装（保守降级为警告）
+    console.warn(`[prepare-env] 警告: flow-kit HEAD 读取失败（${gitErrorFirstLine(err)}），已跳过比对`);
+  }
+}
+
 // ---------- 主流程 ----------
 
 async function main() {
@@ -920,6 +1028,10 @@ async function main() {
     }
     console.error('[prepare-env] 已删除，开始重新生成。');
   }
+
+  // flow-kit 获取链路（ADR-008 / D1~D6——平台无关,平台循环之前调用一次;
+  // 内部四条路径均不抛错、不阻断后续平台安装职责）
+  ensureFlowKit(target);
 
   for (const platform of platforms) {
     const skillRoot = platform.skillRoot(target);
