@@ -419,23 +419,23 @@ function execSummaryFixture(taskId) {
   ].join('\n');
 }
 
-// 多波混排 TASK：串行开路 → 双并行(依赖串行开路)→ 串行衔接(依赖双并行)→ 收尾并行(依赖串行衔接)。
+// 混排多波 TASK：双并行开路 → 串行衔接(依赖双并行)→ 收尾并行(依赖串行衔接)。
 // 各任务 status 由入参映射（任务 id → 'pending'|'done'）控制；status 变更不影响任务集签名
-// （签名仅保留 id/parallel 与块内容，剥离 status 类属性）。
+// （签名仅保留 id/parallel 与块内容，剥离 status 类属性）。串行衔接置于两并行波之间——
+// 引擎契约下 execute 出口要求全部串行已消化，跨趟多次交替由「并行波→串行波→并行波」承载。
 function multiWaveTaskContent(statusMap) {
   const blk = (id, parallel, deps) =>
-    '<task id="' + id + '"' + (parallel ? ' parallel="true"' : '') + (statusMap[id] === 'done' ? ' status="done"' : '') + '>' +
+    '<task id="' + id + '"' + (parallel ? ' parallel="true"' : '') + (statusMap[id] === 'done' ? ' status="done"' : ' status="pending"') + '>' +
     '<action>实现 ' + id + '</action>' +
     '<write_files>src/' + id.toLowerCase() + '.mjs</write_files>' +
     '<verify>node --check src/' + id.toLowerCase() + '.mjs</verify>' +
     (deps ? '<depends_on>' + deps + '</depends_on>' : '') +
     '</task>\n';
   return '# TASK\n\n' +
-    blk('S01', false, '') +
-    blk('P01', true, 'S01') +
-    blk('P02', true, 'S01') +
-    blk('S02', false, 'P01,P02') +
-    blk('P03', true, 'S02');
+    blk('P01', true, '') +
+    blk('P02', true, '') +
+    blk('S01', false, 'P01,P02') +
+    blk('P03', true, 'S01');
 }
 
 // 真实链路前奏（多趟/依赖环用例共用）：init → open 出口 → design 出口。
@@ -766,22 +766,24 @@ const TEST_ITEMS = [
   },
 
   {
-    name: 'A13 多趟路由真实链路:串→并→串交替与多波依赖,NODE 行在 execute/subagent-execute 间多次交替直至全部 done',
+    name: 'A13 多趟路由真实链路:并→串→并交替与多波依赖,NODE 行在 execute/subagent-execute 间多次交替直至全部 done',
     run: (dir) => {
       driveThroughDesign(dir);
-      // 混排 TASK:串行开路 → 双并行(依赖串行开路)→ 串行衔接(依赖双并行)→ 收尾并行(依赖串行衔接)——依赖驱动的
-      // 分趟序列:串行趟 → 并行趟 → 串行趟 → 并行趟 → review 门控(多趟正向行为)。
+      // 混排 TASK:双并行开路 → 串行衔接(依赖双并行)→ 收尾并行(依赖串行衔接)——依赖驱动的
+      // 分趟序列:并行趟 → 串行趟 → 并行趟 → review 门控(多趟正向行为)。
+      // 驱动遵循真实协调者流程:execute 趟内先消化其全部串行 pending(标 done 并委托留证)再 exit;
+      // 委托趟内委派全部可并行后才能退(每趟合取完成判定)。
       // 对未实现循环路由的引擎本用例 RED 属预期(单趟限制下委托节点完成后不再路由回)。
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
-        multiWaveTaskContent({ S01: 'pending', P01: 'pending', P02: 'pending', S02: 'pending', P03: 'pending' }));
+        multiWaveTaskContent({ P01: 'pending', P02: 'pending', S01: 'pending', P03: 'pending' }));
       assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md'], dir), 0);
       assertExit(runState(['record', 'plan', '{"summary":"plan done"}'], dir), 0);
       assertExit(runGuard(['entry', 'plan'], dir), 0);
       const rPlan = runGuard(['exit', 'plan', '--apply'], dir);
       assertExit(rPlan, 0);
       assertOut(rPlan, 'ALL CHECKS PASSED');
-      // 首趟路由:并行依赖未满足 → 先进 execute 消化串行
-      assertOut(rPlan, 'NODE: execute');
+      // 首趟路由:首波双并行无前置依赖 → 直接进入委托节点
+      assertOut(rPlan, 'NODE: subagent-execute');
       // 两层加载模型:执行域两节点的手动声明标记(record 前置门;一次声明后续趟次复用)
       assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
       assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
@@ -806,28 +808,24 @@ const TEST_ITEMS = [
         if (!m) throw new Error('exit ' + node + '(' + label + ')输出缺 NODE 行:\n' + res.output);
         if (m[1] !== expectNext) {
           throw new Error(label + ' 后路由期望 NODE: ' + expectNext + ',实际 NODE: ' + m[1] +
-            '(多趟循环路由未生效——委托节点应可重入直至无剩余可并行、无串行残留)\n实际输出:\n' + res.output);
+            '(多趟循环路由未生效——委托节点应可重入直至无剩余可并行)\n实际输出:\n' + res.output);
         }
       };
 
-      // 趟 1 · execute:首个串行任务完成 → 首波双并行依赖满足 → 路由回 subagent-execute
-      markDone({ S01: 'done', P01: 'pending', P02: 'pending', S02: 'pending', P03: 'pending' });
-      completeTasks(['S01']);
-      drivePass('execute', 'subagent-execute', 'serial-wave-1');
-
-      // 趟 2 · subagent-execute:首波并行任务委托完成 → 趟间回串行消化串行衔接任务
-      markDone({ S01: 'done', P01: 'done', P02: 'done', S02: 'pending', P03: 'pending' });
+      // 趟 1 · subagent-execute:首波双并行委托完成 → 趟间回串行(串行衔接依赖此时已满足)
+      markDone({ P01: 'done', P02: 'done', S01: 'pending', P03: 'pending' });
       completeTasks(['P01', 'P02']);
       drivePass('subagent-execute', 'execute', 'parallel-wave-1');
 
-      // 趟 3 · execute:串行衔接任务完成 → 收尾并行依赖满足 → 再次进入委托节点
+      // 趟 2 · execute:先消化本趟全部串行 pending(串行衔接,标 done 并委托留证)——
+      // 确认无串行残留后才 exit → 收尾并行依赖满足 → 再次进入委托节点
       // (旧引擎单趟限制下此处不再路由回——本断言即多趟语义回归锚)
-      markDone({ S01: 'done', P01: 'done', P02: 'done', S02: 'done', P03: 'pending' });
-      completeTasks(['S02']);
-      drivePass('execute', 'subagent-execute', 'serial-wave-2');
+      markDone({ P01: 'done', P02: 'done', S01: 'done', P03: 'pending' });
+      completeTasks(['S01']);
+      drivePass('execute', 'subagent-execute', 'serial-wave-1');
 
-      // 趟 4 · subagent-execute:收尾并行任务完成 → 全部 done → 出口照常门控进 review(循环终止语义不变)
-      markDone({ S01: 'done', P01: 'done', P02: 'done', S02: 'done', P03: 'done' });
+      // 趟 3 · subagent-execute:收尾并行委托完成 → 全部 done → 出口照常门控进 review(循环终止语义不变)
+      markDone({ P01: 'done', P02: 'done', S01: 'done', P03: 'done' });
       completeTasks(['P03']);
       drivePass('subagent-execute', 'review', 'parallel-wave-2');
 
@@ -835,7 +833,7 @@ const TEST_ITEMS = [
       if (st.currentNode !== 'review') {
         throw new Error('全部任务 done 后应停在 review 门控前: ' + JSON.stringify(st.currentNode));
       }
-      console.log('  多趟路由:execute→subagent-execute→execute→subagent-execute→review 四趟交替 ✓');
+      console.log('  多趟路由:subagent-execute→execute→subagent-execute→review 三趟两交替 ✓');
     },
   },
 
