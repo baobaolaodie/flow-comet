@@ -333,7 +333,7 @@ function collectTreeFiles(root) {
   return files.sort();
 }
 
-// ---------- hook 注入命令形态判定（设计 D7：断言意图 = 托管条目在场且指向本项目脚本） ----------
+// ---------- hook 注入命令形态判定（托管条目断言放宽决策：断言意图 = 托管条目在场且指向本项目脚本） ----------
 // 托管识别 = 脚本 basename(comet-hook-guard.mjs) 在位——与 prepare-env isManagedHookCommand
 // 同源语义，新旧托管形态均命中（幂等升级识别面）。
 // 项目根引用特征 = CLAUDE_PROJECT_DIR 变量引用（%VAR%/$env:/$_ENV/${VAR} 词形）或绝对路径特征
@@ -419,7 +419,7 @@ function execSummaryFixture(taskId) {
   ].join('\n');
 }
 
-// 多波混排 TASK（S01 → P01/P02(dep S01) → S02(dep P01,P02) → P03(dep S02)）。
+// 多波混排 TASK：串行开路 → 双并行(依赖串行开路)→ 串行衔接(依赖双并行)→ 收尾并行(依赖串行衔接)。
 // 各任务 status 由入参映射（任务 id → 'pending'|'done'）控制；status 变更不影响任务集签名
 // （签名仅保留 id/parallel 与块内容，剥离 status 类属性）。
 function multiWaveTaskContent(statusMap) {
@@ -769,7 +769,7 @@ const TEST_ITEMS = [
     name: 'A13 多趟路由真实链路:串→并→串交替与多波依赖,NODE 行在 execute/subagent-execute 间多次交替直至全部 done',
     run: (dir) => {
       driveThroughDesign(dir);
-      // 混排 TASK:S01 → (P01,P02 dep S01) → S02(dep P01,P02) → P03(dep S02)——依赖驱动的
+      // 混排 TASK:串行开路 → 双并行(依赖串行开路)→ 串行衔接(依赖双并行)→ 收尾并行(依赖串行衔接)——依赖驱动的
       // 分趟序列:串行趟 → 并行趟 → 串行趟 → 并行趟 → review 门控(多趟正向行为)。
       // 对未实现循环路由的引擎本用例 RED 属预期(单趟限制下委托节点完成后不再路由回)。
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
@@ -810,23 +810,23 @@ const TEST_ITEMS = [
         }
       };
 
-      // 趟 1 · execute:S01 完成 → P01/P02 依赖满足 → 路由回 subagent-execute
+      // 趟 1 · execute:首个串行任务完成 → 首波双并行依赖满足 → 路由回 subagent-execute
       markDone({ S01: 'done', P01: 'pending', P02: 'pending', S02: 'pending', P03: 'pending' });
       completeTasks(['S01']);
       drivePass('execute', 'subagent-execute', 'serial-wave-1');
 
-      // 趟 2 · subagent-execute:第一波 P01/P02 委托完成 → 趟间回串行消化 S02
+      // 趟 2 · subagent-execute:首波并行任务委托完成 → 趟间回串行消化串行衔接任务
       markDone({ S01: 'done', P01: 'done', P02: 'done', S02: 'pending', P03: 'pending' });
       completeTasks(['P01', 'P02']);
       drivePass('subagent-execute', 'execute', 'parallel-wave-1');
 
-      // 趟 3 · execute:S02 完成 → P03 依赖满足 → 再次进入委托节点
+      // 趟 3 · execute:串行衔接任务完成 → 收尾并行依赖满足 → 再次进入委托节点
       // (旧引擎单趟限制下此处不再路由回——本断言即多趟语义回归锚)
       markDone({ S01: 'done', P01: 'done', P02: 'done', S02: 'done', P03: 'pending' });
       completeTasks(['S02']);
       drivePass('execute', 'subagent-execute', 'serial-wave-2');
 
-      // 趟 4 · subagent-execute:P03 完成 → 全部 done → 出口照常门控进 review(循环终止语义不变)
+      // 趟 4 · subagent-execute:收尾并行任务完成 → 全部 done → 出口照常门控进 review(循环终止语义不变)
       markDone({ S01: 'done', P01: 'done', P02: 'done', S02: 'done', P03: 'done' });
       completeTasks(['P03']);
       drivePass('subagent-execute', 'review', 'parallel-wave-2');
@@ -1951,7 +1951,7 @@ const TEST_ITEMS = [
       const hooksParsed = JSON.parse(fs.readFileSync(hooksFile, 'utf8'));
       const preToolUse = hooksParsed.hooks && hooksParsed.hooks.PreToolUse;
       if (!Array.isArray(preToolUse) || preToolUse.length === 0) throw new Error('hooks.json 缺 hooks.PreToolUse 包裹层');
-      // 托管条目断言形态无关化(设计 D7):脚本 basename 在位 + 项目根引用特征二选一——
+      // 托管条目断言形态无关化(断言放宽决策——意图为托管条目在场且指向本项目脚本):脚本 basename 在位 + 项目根引用特征二选一——
       // 兼容新旧两种托管形态,注入命令实测微调(%VAR% 引号/变量词形)不再破坏断言
       const managedCmds = collectManagedHookCommands(hooksParsed);
       if (managedCmds.length === 0) throw new Error('hooks.json 未注入托管 hook 命令');
@@ -2831,7 +2831,7 @@ const TEST_ITEMS = [
     },
   },
 
-  // K13: hook 注入形态无关断言 + 旧条目幂等升级(设计 D7 / AC-5 / AC-7)——
+  // hook 注入形态无关断言 + 旧条目幂等升级(AC-5/AC-7;安装产物根引用特征用例 + 升级替换用例)——
   // 安装产物托管条目满足「脚本 basename 在位 + 项目根引用特征(CLAUDE_PROJECT_DIR 或绝对路径)
   // 二选一」;新旧托管形态识别兼容(basename 同源 isManagedHookCommand 语义);把托管命令改回
   // 旧相对路径形态后重跑安装器 → 被识别替换(恰余 1 条,不重复不残留)且新条目形态达标。
