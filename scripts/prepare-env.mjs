@@ -674,7 +674,7 @@ function injectSettingsHook(claudeDir) {
  * 实测缺包裹层 hook 不加载）。
  * fail-safe：文件存在但 JSON 非法 → 抛错退出（保护用户配置）。
  */
-function injectCodexHook(codexDir) {
+function injectCodexHook(codexDir, target) {
   const hooksPath = path.join(codexDir, 'hooks.json');
   let hooks = {};
   let fileExists = false;
