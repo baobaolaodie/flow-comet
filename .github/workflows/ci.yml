@@ -4,7 +4,7 @@
 # (All checks are enforced server-side and independently.)
 #
 # 检查映射 / Check mapping:
-#   regression           guard self-test (176 scenarios incl. scenario-count & public-artifact
+#   regression           guard self-test (177 scenarios incl. scenario-count & public-artifact
 #                        code self-checks) / script syntax / BOM guard
 #   installer            prepare-env reproducibility + installed-copy smoke test
 #   quality              workflow yaml validity (actionlint) + bilingual mirror symmetry

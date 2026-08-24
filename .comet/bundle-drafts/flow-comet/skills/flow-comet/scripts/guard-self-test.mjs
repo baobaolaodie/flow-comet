@@ -4516,6 +4516,54 @@ const SCENARIOS = [
       assertNotOut(res, '伪并行检测');
     },
   },
+
+  // 177: hook 项目根判定兜底链（级3 实测暴露的 H5 残留缺口收口）——会话 cwd 漂移后：
+  // ① 有 CLAUDE_PROJECT_DIR（CC hook env 注入）→ 越界写 BLOCKED / .specs 写放行；
+  // ② 无任何 env → 自 cwd 向上锚定最近含 .comet/flow-comet-state.json 的祖先，同样正确判定。
+  // 修复前两种漂移形态下协议读取失败 → exit 1 报错式放行（越界写有痕放过）。
+  {
+    name: '177 hook 根判定兜底：cwd 漂移经变量/祖先锚定后正确拦截（H5 收口）',
+    run: (dir) => {
+      // running 态（review 节点白名单 .specs/）
+      writeState(dir, {
+        activeChange: CHANGE_ID,
+        currentNode: 'review',
+        status: 'running',
+        completedNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
+        evidence: {}, verifyFailures: 0, executionMode: 'subagent', directOverride: false,
+      });
+      fs.mkdirSync(path.join(dir, 'deep'), { recursive: true });
+      const spawnDrift = (input, extraEnv) => {
+        const res = spawnSync(process.execPath, [HOOK, 'before_tool'], {
+          cwd: path.join(dir, 'deep'),
+          input: JSON.stringify(input),
+          env: {
+            ...process.env,
+            FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json'),
+            ...extraEnv,
+          },
+          encoding: 'utf8', timeout: 60000,
+        });
+        return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+      };
+      const evil = path.join(dir, 'evil', 'x.txt').split(path.sep).join('/');
+      const inspec = path.join(dir, '.specs', 'ok.txt').split(path.sep).join('/');
+      // ① CLAUDE_PROJECT_DIR 锚定
+      let r = spawnDrift({ tool_name: 'Write', tool_input: { file_path: evil } }, { CLAUDE_PROJECT_DIR: dir });
+      assertExit(r, 2);
+      assertOut(r, 'BLOCKED');
+      r = spawnDrift({ tool_name: 'Write', tool_input: { file_path: inspec } }, { CLAUDE_PROJECT_DIR: dir });
+      assertExit(r, 0);
+      assertOut(r, 'workflow-hook-guard-ok');
+      // ② 无 env → 祖先锚定（dir 含 .comet/state.json）
+      r = spawnDrift({ tool_name: 'Write', tool_input: { file_path: evil } }, {});
+      assertExit(r, 2);
+      assertOut(r, 'BLOCKED');
+      r = spawnDrift({ tool_name: 'Write', tool_input: { file_path: inspec } }, {});
+      assertExit(r, 0);
+      assertOut(r, 'workflow-hook-guard-ok');
+    },
+  },
 ];
 
 // ---------- 运行 ----------

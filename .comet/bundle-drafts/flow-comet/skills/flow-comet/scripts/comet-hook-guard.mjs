@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-  import { constants as fsConstants, promises as fs } from 'fs';
+  import { constants as fsConstants, promises as fs, existsSync as fsExistsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
@@ -110,7 +110,29 @@ function targetAllowed(targetRel, whitelist, activeChange) {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..');
-const runRoot = process.env.COMET_RUN_ROOT ? path.resolve(process.env.COMET_RUN_ROOT) : process.cwd();
+// 项目根判定兜底链（级3 cwd 漂移实测暴露的 H5 残留缺口收口）：
+// ① COMET_RUN_ROOT（测试/受限环境显式锚定）→ ② CLAUDE_PROJECT_DIR（Claude Code 在 hook env
+// 注入项目根——会话 cwd 漂移后仍可正确定位）→ ③ 自 cwd 逐级向上锚定最近祖先：含
+// .comet/flow-comet-state.json 或 .claude/skills/flow-comet 即视为项目根 → ④ 兜底 cwd。
+// 意义：漂移会话不再因“协议/状态按错误 cwd 解析失败 → 报错式放行”而漏拦；判定根与项目根一致。
+const runRoot = (() => {
+  for (const candidate of [process.env.COMET_RUN_ROOT, process.env.CLAUDE_PROJECT_DIR]) {
+    if (candidate) return path.resolve(candidate);
+  }
+  let current = path.resolve(process.cwd());
+  for (;;) {
+    if (
+      fsExistsSync(path.join(current, '.comet', 'flow-comet-state.json')) ||
+      fsExistsSync(path.join(current, '.claude', 'skills', 'flow-comet'))
+    ) {
+      return current;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return path.resolve(process.cwd());
+})();
 // hook 由 settings.json 静态命令调用，不支持 CLI 参数（cliArgs 传 []）：
 // 协议路径取 env FLOW_COMET_PROTOCOL 或默认 <packageRoot>/reference/workflow-protocol.json
 const protocolPath = resolveProtocol(packageRoot, runRoot, []);
