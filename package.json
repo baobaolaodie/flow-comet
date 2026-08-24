@@ -1,0 +1,9 @@
+{
+  "name": "flow-comet",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@clack/prompts": "1.7.0"
+  }
+}
