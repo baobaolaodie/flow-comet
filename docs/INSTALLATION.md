@@ -206,6 +206,19 @@ rm -rf <target>/.dsh/skills/flow-comet*
 
 **Multi-project semantics**: each project installs its own skill tree (a project that has not installed the skill cannot see it); the bridge loader is a single global copy serving all flow-comet projects (per-session project detection — equivalent to the Claude Code project-level hook).
 
+## Branch naming alignment
+
+By default the engine creates the workflow branch as `change/<id>`. If your project follows a different local branch convention, pass a custom prefix when initializing the change:
+
+```bash
+cd <target project>
+node .claude/skills/flow-comet/scripts/workflow-state.mjs init <id> --branch-prefix feat/
+```
+
+On Codex the same init runs against `.agents/skills/flow-comet/scripts/workflow-state.mjs`; on dsh against `.dsh/skills/flow-comet/scripts/workflow-state.mjs` (paths are rewritten at install time — see [Platforms](#platforms)). A missing trailing `/` is added automatically, so `--branch-prefix feat` and `--branch-prefix feat/` are equivalent.
+
+Branch/state consistency checks (`status`/`next`) compare the current branch with the active change and emit a `WARN:` line on mismatch. The warning is a non-blocking hint, not an error — the workflow keeps running. To clear it, check out the expected branch (`git checkout <prefix><activeChange>`); the full symptom table lives in [Troubleshooting](TROUBLESHOOTING.md). Day-to-day branch behavior once the workflow is running (automatic creation, archive wrap-up, merge-back) is described in [Usage](USAGE.md).
+
 ## Uninstalling
 
 Remove flow-comet from a target project (Claude Code / Codex below; for DeepSeek Harness (dsh), see the manual uninstall steps in [Option C](#option-c--deepseek-harness-dsh-platform)):

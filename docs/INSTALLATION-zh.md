@@ -205,6 +205,19 @@ rm -rf <目标项目>/.dsh/skills/flow-comet*
 
 **多项目语义**：每项目独立安装技能树（未安装该技能的项目不可见）；桥接 loader 全局一份，服务多个 flow-comet 项目（按会话项目判定——与 Claude Code 项目级 hook 等价）。
 
+## 分支命名本地适配
+
+引擎缺省把工作流分支建为 `change/<id>`。项目有本地分支规范时，在初始化 change 时传入自定义前缀：
+
+```bash
+cd <目标项目>
+node .claude/skills/flow-comet/scripts/workflow-state.mjs init <id> --branch-prefix feat/
+```
+
+Codex 上同一 init 针对 `.agents/skills/flow-comet/scripts/workflow-state.mjs`，dsh 上针对 `.dsh/skills/flow-comet/scripts/workflow-state.mjs`（路径在安装时重写——见[平台](#平台)）。前缀缺尾部 `/` 时自动补全，`--branch-prefix feat` 与 `--branch-prefix feat/` 等价。
+
+分支/状态一致性检查（`status`/`next`）会把当前分支与 activeChange 比对，不一致时输出一条 `WARN:`。该警告是**非阻断提示**而非错误——流程照常运行。消除方式是检出期望分支（`git checkout <prefix><activeChange>`）；完整现象表见[故障排查](TROUBLESHOOTING-zh.md)。工作流运行后的分支日常行为（自动创建、归档收尾、合并回主分支）见[使用](USAGE-zh.md)。
+
 ## 卸载
 
 从目标项目移除 flow-comet（Claude Code / Codex 见下；DeepSeek Harness（dsh）见[方案 C](#方案-c--deepseek-harnessdsh-平台)的手动卸载步骤）：
