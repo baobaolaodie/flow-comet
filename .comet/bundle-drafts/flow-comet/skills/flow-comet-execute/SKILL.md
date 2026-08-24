@@ -11,7 +11,7 @@ Complete the `execute` Node for `flow-comet`.
 
 Responsibility: 按 TASK.md 逐任务执行（**执行模式按 executionMode**：subagent 默认统一委托子代理、direct 逃生口主代理直写）。串行任务的 TDD + 6 维自查 + LESSONS 扫描 + diff 边界 verify 由执行者承担，无论哪种模式都必须加载 flow-comet-dev 协议。
 
-In subagent mode (default) this node is a coordinator: it does not write implementation code directly — it delegates all pending tasks to fresh-context subagents via the Agent tool (worktree isolation), each subagent applies the full dev protocol (TDD RED/GREEN/REFACTOR, LESSONS scan, existing abstraction grep, self-review, diff boundary verification, atomic commits) and returns a Return Contract. The coordinator records handoff evidence, verifies each SUMMARY, and marks tasks done in TASK.md. In direct mode (escape hatch, user-confirmed) the main agent implements serial tasks directly — see 执行模型 below.
+In subagent mode (default) this node is a coordinator: it does not write implementation code directly — it delegates the pending serial tasks to fresh-context subagents via the Agent tool (worktree isolation), each subagent applies the full dev protocol (TDD RED/GREEN/REFACTOR, LESSONS scan, existing abstraction grep, self-review, diff boundary verification, atomic commits) and returns a Return Contract. 趟次协作：并行委托节点（subagent-execute）可多次往返——每趟委托全部依赖已满足的并行任务，本节点在趟间消化串行任务，直至两者清空。The coordinator records handoff evidence, verifies each SUMMARY, and marks tasks done in TASK.md. In direct mode (escape hatch, user-confirmed) the main agent implements serial tasks directly — see 执行模型 below.
 
 ## Guidance
 
@@ -48,7 +48,7 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
   1. 正常流程下 determineNode 的 路由逻辑会**直接路由到 subagent-execute**（无需经过 execute 空退出）——协调者确认 路由逻辑生效（`NODE: subagent-execute`）后直接进入该节点
   2. 若已进入 execute 且确认无串行任务可做：按正常 exit 流程处理（record execute evidence + 满足产物校验），需要豁免越俎代庖检测时用 `record execute '{"parallelTakeoverApproved":true}'` 显式声明；[P] 任务由 execute 完成属越权委托——新 change BLOCKED（旧 change WARN 渐进）
   3. **显式空退出豁免（新 change 可用）**：确认全 parallel 无串行可做且无法路由时，用 `record execute '{"emptyExitApproved":true}'` 显式声明后 exit 通过（跳过串行 pending 与产物校验；防规划错误仍默认 BLOCKED——豁免须显式声明；exit 输出 EMPTY-EXIT 审计提示）
-- determineNode 路由逻辑会优先检测 parallel 任务并路由到 subagent-execute；若 determineNode 路由到了 execute，说明存在需要 execute 处理的串行任务（此时应执行而非空退出）
+- determineNode 路由逻辑会优先检测依赖已满足的 parallel 任务并路由到 subagent-execute；若 determineNode 路由到了 execute，说明当前趟存在需要 execute 处理的串行任务（此时应执行而非空退出）——串行消化完成后再次路由，剩余并行任务回到 subagent-execute 的下一趟（多趟循环直至无可并行 pending 且无串行残留）
 
 ### Prerequisites
 
