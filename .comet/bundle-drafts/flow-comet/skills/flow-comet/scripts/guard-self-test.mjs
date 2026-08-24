@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · flow-comet 引擎自测套件（171 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、波次分组合法性与契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制）
+// C1 · flow-comet 引擎自测套件（175 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制）
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -7,7 +7,7 @@
 // （COMET_RUN_ROOT=<临时目录>）→ 断言退出码与输出关键词。场景跑完 rmSync 清理。
 //
 // 运行: node scripts/guard-self-test.mjs
-// 全过 → exit 0，输出 ALL 171 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
+// 全过 → exit 0，输出 ALL 175 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
 //
 // 仅 node 内置模块（child_process/fs/os/path）；无网络；不依赖 flow-kit 模板目录
 // 存在（fallback 场景用内置段名；部分场景复制模板文件进临时目录验证 C2 模板派生）。
@@ -429,12 +429,22 @@ const TASK_VALID_SP =
 const TASK_VALID_ALL_SERIAL =
   '<task id="T01" parallel="false" status="pending"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n' +
   '<task id="T02" parallel="false" status="pending"><action>实现 T02</action><write_files>src/t2.mjs</write_files><verify>node --check src/t2.mjs</verify><depends_on>T01</depends_on></task>\n';
-// 全并行（全 P，单连续并行块）
+// 全并行（全 P，单连续块）
 const TASK_VALID_ALL_PARALLEL =
   '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n' +
   '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>src/p2.mjs</write_files><verify>node --check src/p2.mjs</verify></task>\n' +
   '<task id="P03" parallel="true" status="pending"><action>实现 P03</action><write_files>src/p3.mjs</write_files><verify>node --check src/p3.mjs</verify></task>\n' +
   '<task id="P04" parallel="true" status="pending"><action>实现 P04</action><write_files>src/p4.mjs</write_files><verify>node --check src/p4.mjs</verify></task>\n';
+
+// ---------- 多趟路由场景任务集（多趟语义批次：依赖环拦截与缺失依赖拦截场景原位重写 + 尾部新增场景族） ----------
+// 依赖环：P01↔P02 互为 depends_on（依赖图有环 → plan 出口 BLOCKED 含「依赖环」+ depends_on 恢复指引）
+const TASK_DEP_CYCLE =
+  '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify><depends_on>P02</depends_on></task>\n' +
+  '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>src/p2.mjs</write_files><verify>node --check src/p2.mjs</verify><depends_on>P01</depends_on></task>\n';
+// 依赖缺失：P01 依赖不存在的 T99（依赖链不可满足 → plan 出口 BLOCKED 含恢复指引）
+const TASK_MISSING_DEP =
+  '<task id="T01" parallel="false" status="pending"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n' +
+  '<task id="P01" status="pending" parallel="true"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify><depends_on>T99</depends_on></task>\n';
 
 // 波次分组场景公共路径：注入 TASK.md → entry plan（记录 enteredNodes，新 change 强制先 entry；
 // 旧 change 亦先 entry 避免 ENTER WARN 干扰断言）→ exit plan。返回 exit plan 结果。
@@ -442,6 +452,36 @@ function runPlanExit(dir, taskContent) {
   writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n## 任务清单\n\n' + taskContent);
   assertExit(runGuard(['entry', 'plan'], dir), 0);
   return runGuard(['exit', 'plan'], dir);
+}
+
+// 多波混合任务集：串 T01 → 并 P01/P02(dep T01) → 串 T02(dep P01,P02) → 并 P03/P04(dep T02)。
+// ≥2 个并行块被串行任务分隔（混排合法锚 / 多趟推进完成场景共用）；doneIds 控制各任务 status，
+// 模拟执行推进（next 分趟路由断言用）。
+const MULTI_WAVE_TASKS = [
+  ['T01', false, []],
+  ['P01', true, ['T01']],
+  ['P02', true, ['T01']],
+  ['T02', false, ['P01', 'P02']],
+  ['P03', true, ['T02']],
+  ['P04', true, ['T02']],
+];
+
+function renderMultiWaveTasks(doneIds = []) {
+  const done = new Set(doneIds);
+  return MULTI_WAVE_TASKS.map(([id, parallel, deps]) =>
+    '<task id="' + id + '"' + (parallel ? ' parallel="true"' : ' parallel="false"') +
+    ' status="' + (done.has(id) ? 'done' : 'pending') + '">' +
+    '<action>实现 ' + id + '</action><write_files>src/' + id.toLowerCase() + '.mjs</write_files>' +
+    '<verify>node --check src/' + id.toLowerCase() + '.mjs</verify>' +
+    (deps.length > 0 ? '<depends_on>' + deps.join(',') + '</depends_on>' : '') +
+    '</task>\n').join('');
+}
+
+// 多波 next 断言公共材料：前序产物文件（open/design/plan 的产物门控按文件推导）
+function writeIntakeArtifacts(dir) {
+  writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n\nx');
+  writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\nx\n\n## 验收准则（AC）\n\n- Given x When y Then z');
+  writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n## 0. 技术栈\n\nNode\n\n## 决策清单\n\n| # | D | R |\n|---|---|---|\n| D1 | x | y |');
 }
 
 // ---------- 17 个场景 ----------
@@ -1435,13 +1475,12 @@ const SCENARIOS = [
     },
   },
 
-  // 49: 组合盲区 B（最新版验证撞出）——路由 × 节点推进：subagent-execute 已 completed（第一波
-  // parallel 全 done + exit，completedNodes 含该节点）后，第二波 parallel 任务（P02，depends 已
-  // 满足）出现时：next 不得再路由回 subagent-execute（防死循环——已完成节点不能作为路由目标
-  // 再入），应路由到 execute 继续串行委托；而 entry subagent-execute 仍放行（completedNodes 含
-  // 该节点允许重入——第二波委托入口；exit 路径受严格校验保护，不再自动路由回）
+  // 49（多趟语义翻转）：路由 × 节点推进——subagent-execute 已 completed（第一波 parallel 全 done +
+  // exit，completedNodes 含该节点）后，第二波 parallel 任务（P02，depends 已满足）出现时：
+  // next 重新路由回 subagent-execute（多趟循环路由——委托进入谓词每趟重新求值，单趟限制已移除）；
+  // entry subagent-execute 仍放行（completedNodes 含该节点允许重入——每趟完整 entry 检查不绕过）
   {
-    name: '49 next → execute + entry subagent-execute 重入（二次并行不回流）',
+    name: '49 next 二次路由回 subagent-execute + entry 重入（多趟语义）',
     run: (dir) => {
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n');
@@ -1451,12 +1490,11 @@ const SCENARIOS = [
       st.completedNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute'];
       st.evidence['subagent-execute'] = { summary: 'wave1 delegated and collected' };
       writeState(dir, st);
-      // ① next：subagent-execute 已 completed → 第二波 parallel 不路由回该节点（防死循环）
+      // ① next：第二波 eligible 并行存在 → 多趟路由回该节点（旧单趟「不回流」行为已移除）
       const res = runState(['next'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
       assertExit(res, 0);
-      assertOut(res, 'NODE: execute');
-      assertNotOut(res, 'NODE: subagent-execute');
-      // ② entry subagent-execute：completedNodes 含该节点仍可重入（第二波委托入口）
+      assertOut(res, 'NODE: subagent-execute');
+      // ② entry subagent-execute：completedNodes 含该节点仍可重入（每趟完整 entry 检查）
       const res2 = runGuard(['entry', 'subagent-execute'], dir);
       assertExit(res2, 0);
       assertOut(res2, 'ENTRY OK');
@@ -3481,87 +3519,87 @@ const SCENARIOS = [
     },
   },
 
-  // ----------  场景（波次分组合法性——plan exit——T01 新增：新 change 混排 BLOCK / 合法成组放行 / 旧 change 渐进） ----------
+  // ---------- 场景（多趟路由 plan 出口依赖图校验——多趟语义原位重写：环 BLOCK / 缺失依赖 BLOCK / 混排合法锚 / 旧 change 渐进） ----------
 
-  // 145: 新 change（newChange:true）+ 串→并→串（S→P→S）TASK → exit plan 应 BLOCK（含恢复指引）。
-  // 当前实现无波次分组一致性校验 → exit 0 静默放行 = 预期 RED（波次混排被放行，AC-1 需求未实现）。
-  // 折叠回归（bot 审查）：TASK_MIXED_SPS 含属性序 status 在前（status="pending" parallel="true"）的
-  // P01 + 串行任务 <action> 内 literal parallel="true" 干扰——开标签解析仍应判混排并 BLOCK
+  // 145（多趟语义重写）：新 change + 依赖环（P01↔P02 互为 depends_on）→ exit plan 应 BLOCKED，
+  // 输出含「依赖环」（拓扑排序判环）与「depends_on」恢复指引。旧引擎无波次校验静默放行 = 预期 RED。
   {
-    name: '145 plan exit BLOCKED：新 change 串→并→串波次混排',
+    name: '145 plan exit BLOCKED：新 change 依赖环（P01↔P02 互为依赖）',
+    run: (dir) => {
+      const st = baseState('plan');
+      st.evidence.plan = { summary: 'plan done' };
+      st.newChange = true;
+      writeState(dir, st);
+      const res = runPlanExit(dir, TASK_DEP_CYCLE);
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, '依赖环');
+      assertOut(res, 'depends_on');
+    },
+  },
+
+  // 146（多趟语义重写）：新 change + P01 依赖不存在的 T99 → exit plan 应 BLOCKED，
+  // 输出含恢复指引（depends_on 调整）。旧引擎静默放行 = 预期 RED。
+  {
+    name: '146 plan exit BLOCKED：新 change 并行任务依赖不存在的任务（含恢复指引）',
+    run: (dir) => {
+      const st = baseState('plan');
+      st.evidence.plan = { summary: 'plan done' };
+      st.newChange = true;
+      writeState(dir, st);
+      const res = runPlanExit(dir, TASK_MISSING_DEP);
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, 'depends_on');
+      assertOut(res, 'T99');
+    },
+  },
+
+  // 147（混排合法锚）：新 change + 串→并→串 → 放行（串行任务位置不再受限，依赖图无环即合法）
+  {
+    name: '147 plan exit 通过：混排合法锚——串→并→串',
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
       st.newChange = true;
       writeState(dir, st);
       const res = runPlanExit(dir, TASK_MIXED_SPS);
-      assertExit(res, 1);
-      assertOut(res, 'BLOCKED');
-      assertOut(res, '波次');
+      assertExit(res, 0);
+      assertOut(res, 'ALL CHECKS PASSED');
     },
   },
 
-  // 146: 新 change + 并→串→并（P→S→P）TASK → exit plan 应 BLOCK。当前实现同样静默放行 = RED。
-  // 折叠回归同上：P01 属性序 status 在前 + 串行 T01 <action> 内 literal parallel="true" 干扰
+  // 148（混排合法锚）：新 change + 并→串→并 → 放行
   {
-    name: '146 plan exit BLOCKED：新 change 并→串→并波次混排',
+    name: '148 plan exit 通过：混排合法锚——并→串→并',
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
       st.newChange = true;
       writeState(dir, st);
       const res = runPlanExit(dir, TASK_MIXED_PSP);
-      assertExit(res, 1);
-      assertOut(res, 'BLOCKED');
-      assertOut(res, '波次');
-    },
-  },
-
-  // 147: 新 change + 并在前+串在后（P→S）→ 放行（合法成组，不误报；T02 实现后也必须通过）
-  {
-    name: '147 plan exit 通过：新 change 并存前+串在后（P→S）',
-    run: (dir) => {
-      const st = baseState('plan');
-      st.evidence.plan = { summary: 'plan done' };
-      st.newChange = true;
-      writeState(dir, st);
-      const res = runPlanExit(dir, TASK_VALID_PS);
       assertExit(res, 0);
       assertOut(res, 'ALL CHECKS PASSED');
     },
   },
 
-  // 148: 新 change + 串在前+并在后（S→P）→ 放行（合法成组）
+  // 149（混排合法锚）：新 change + 多波混合（≥2 个并行块被串行分隔）→ 放行
   {
-    name: '148 plan exit 通过：新 change 串在前+并在后（S→P）',
+    name: '149 plan exit 通过：混排合法锚——多波混合（两并行块被串行分隔）',
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
       st.newChange = true;
       writeState(dir, st);
-      const res = runPlanExit(dir, TASK_VALID_SP);
+      const res = runPlanExit(dir, renderMultiWaveTasks());
       assertExit(res, 0);
       assertOut(res, 'ALL CHECKS PASSED');
     },
   },
 
-  // 149: 新 change + 全串行 → 放行（合法成组）
+  // 150（兼容锚保留）：新 change + 全并行（单连续块仍是合法特例）→ 放行
   {
-    name: '149 plan exit 通过：新 change 全串行',
-    run: (dir) => {
-      const st = baseState('plan');
-      st.evidence.plan = { summary: 'plan done' };
-      st.newChange = true;
-      writeState(dir, st);
-      const res = runPlanExit(dir, TASK_VALID_ALL_SERIAL);
-      assertExit(res, 0);
-      assertOut(res, 'ALL CHECKS PASSED');
-    },
-  },
-
-  // 150: 新 change + 全并行 → 放行（单连续并行块，合法成组）
-  {
-    name: '150 plan exit 通过：新 change 全并行',
+    name: '150 plan exit 通过：全并行单连续块（合法特例）',
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
@@ -3573,22 +3611,20 @@ const SCENARIOS = [
     },
   },
 
-  // 151: 旧 change（无 newChange）+ 混排 → 不 BLOCK（渐进 WARN——T02 实现后输出 WARN 不阻断；
-  // T01 阶段当前无波次校验即 exit 0 放行，断言锁"不阻断"防 T02 误升级 BLOCK 回归）。
-  // 折叠回归（bot 审查）：断言实际 WARN 前缀文案（WARN: TASK.md 波次分组混排）已输出——
-  // 旧 change 放宽不阻断，但检测须真实发生（TASK_MIXED_SPS 含属性序 status 在前 + action 文本
-  // literal parallel="true" 的干扰，开标签解析仍判混排并 WARN）
+  // 151（渐进语义适配）：旧 change（无 newChange）+ 依赖环 → 不 BLOCK（渐进 WARN——断言锁「不阻断」，
+  // 检测须真实发生：输出 WARN 且含「依赖环」明细）。混排本身已合法化，渐进路径改由依赖图违规承载。
   {
-    name: '151 plan exit 兼容：旧 change 波次混排不 BLOCK（渐进）',
+    name: '151 plan exit 兼容：旧 change 依赖环不 BLOCK（渐进 WARN）',
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
       // 无 newChange（旧 change）
       writeState(dir, st);
-      const res = runPlanExit(dir, TASK_MIXED_SPS);
+      const res = runPlanExit(dir, TASK_DEP_CYCLE);
       assertExit(res, 0);
       assertNotOut(res, 'BLOCKED');
-      assertOut(res, 'WARN: TASK.md 波次分组混排');
+      assertOut(res, 'WARN');
+      assertOut(res, '依赖环');
     },
   },
 
@@ -4262,6 +4298,190 @@ const SCENARIOS = [
       const resOld = runGuard(['exit', 'open'], dir);
       assertExit(resOld, 0);
       assertOut(resOld, 'WARN');
+    },
+  },
+
+  // ---------- 场景（多趟路由核心——多趟推进完成 / 零进展防呆 / 委托节点二次进入完成判定 / 向后兼容等价） ----------
+
+  // 172: 多波混合推进完成（AC-1/AC-2）——多波混合 TASK 经 next 分趟自动路由直至清空：
+  // 无 eligible 并行时回串行消化（execute）；依赖满足即再入 subagent-execute（第二趟——
+  // completedNodes 已含该节点仍路由回 = 多趟循环路由）；全部 done 后经产物门控进 review。
+  // 旧引擎单趟限制下第三步会停留在 execute = 预期 RED。
+  {
+    name: '172 多波混合推进完成：分趟自动路由直至清空进 review',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      writeIntakeArtifacts(dir);
+      const goNext = (currentNode, doneIds, completedExtra = []) => {
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + renderMultiWaveTasks(doneIds));
+        writeState(dir, {
+          activeChange: CHANGE_ID,
+          currentNode,
+          completedNodes: ['open', 'design', 'plan', ...completedExtra],
+          evidence: {
+            open: { summary: 'o' },
+            design: { summary: 'd' },
+            plan: { summary: 'p' },
+            ...(completedExtra.includes('subagent-execute') ? { 'subagent-execute': { summary: 'wave delegated' } } : {}),
+            ...(completedExtra.includes('execute') ? { execute: { summary: 'serial digested' } } : {}),
+          },
+          verifyFailures: 0,
+          executionMode: 'subagent',
+          directOverride: false,
+        });
+        return runState(['next'], dir, env);
+      };
+      // 趟 0：无可委托并行（P 波依赖 T01 未完成）、串行 T01 pending → execute
+      let res = goNext('execute', []);
+      assertExit(res, 0);
+      assertOut(res, 'NODE: execute');
+      // 趟 1：T01 done → P01/P02 eligible → 第一趟委托
+      res = goNext('execute', ['T01']);
+      assertExit(res, 0);
+      assertOut(res, 'NODE: subagent-execute');
+      // 趟间：P01/P02 done（第一趟委托收集完成）→ 回 execute 消化 T02（第二波未满足不抢跑）
+      res = goNext('subagent-execute', ['T01', 'P01', 'P02'], ['subagent-execute']);
+      assertExit(res, 0);
+      assertOut(res, 'NODE: execute');
+      // 趟 2（多趟关键断言）：T02 done → P03/P04 eligible → 第二趟再入 subagent-execute
+      //（真实链路中此处由 execute exit --apply 的平行路由镜像直接落点；next 级断言同一谓词）
+      res = goNext('subagent-execute', ['T01', 'P01', 'P02', 'T02'], ['subagent-execute', 'execute']);
+      assertExit(res, 0);
+      assertOut(res, 'NODE: subagent-execute');
+      // 清空：全部 done + SUMMARY 在场 → 委托与串行均无残留 → review（产物门控照旧）。
+      // 状态取真实链路形态：completedNodes 按路由序排列（末元素 = subagent-execute，
+      // 其 exit --apply 已把 currentNode 推到 review——正常推进豁免放行 next）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      res = goNext('review', ['T01', 'P01', 'P02', 'T02', 'P03', 'P04'], ['execute', 'subagent-execute']);
+      assertExit(res, 0);
+      assertOut(res, 'NODE: review');
+    },
+  },
+
+  // 173: 单趟零进展防呆（三重防呆决策之二·状态机侧）——TASK 仅剩依赖无法满足的孤儿并行任务（depends_on 引用
+  // 不存在的 T99）：既无可委托并行又无串行 pending 且 TASK 未全 done → next 应 BLOCKED 防静默死锁。
+  // 旧引擎无防呆静默路由 execute = 预期 RED。
+  {
+    name: '173 单趟零进展 BLOCK：孤儿并行依赖无法满足（检查 depends_on）',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      writeIntakeArtifacts(dir);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify><depends_on>T99</depends_on></task>\n');
+      writeState(dir, {
+        activeChange: CHANGE_ID,
+        currentNode: 'execute',
+        completedNodes: ['open', 'design', 'plan'],
+        evidence: { open: { summary: 'o' }, design: { summary: 'd' }, plan: { summary: 'p' } },
+        verifyFailures: 0,
+        executionMode: 'subagent',
+        directOverride: false,
+      });
+      const res = runState(['next'], dir, env);
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, '孤儿并行');
+      assertOut(res, 'depends_on');
+    },
+  },
+
+  // 174: 委托节点二次进入完成判定（AC-2 合取语义）——completedNodes 含 subagent-execute：
+  // ① 仍有 eligible 并行 pending → next 返回 NODE: subagent-execute（未最终完成，继续委托）；
+  // ② 并行全 done、仅串行 pending → NODE: execute（本趟委托完成，趟间回串行）；
+  // ③ 全部 done + SUMMARY 在场 → NODE: review（可委托集合为空 ∧ 无串行 pending → 最终完成）。
+  // 旧引擎①停留 execute = 预期 RED。
+  {
+    name: '174 委托节点二次进入完成判定：eligible 再入 → 趟间串行 → 清空进 review',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      writeIntakeArtifacts(dir);
+      const pDone = (id, deps) =>
+        '<task id="' + id + '" status="done" parallel="true"><action>实现 ' + id + '</action><write_files>src/' + id.toLowerCase() + '.mjs</write_files><verify>node --check src/' + id.toLowerCase() + '.mjs</verify>' +
+        (deps ? '<depends_on>' + deps + '</depends_on>' : '') + '</task>\n';
+      const t03 = (status) =>
+        '<task id="T03"' + (status ? ' status="' + status + '"' : '') + '><action>实现 T03</action><write_files>src/t3.mjs</write_files><verify>node --check src/t3.mjs</verify><depends_on>P01,P02</depends_on></task>\n';
+      // ① 第一波 P01 done + 第二波 P02（dep P01）pending eligible + 串行 T03 pending → 二次进入委托
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1 + TASK_P2_PENDING + t03(''));
+      writeState(dir, {
+        activeChange: CHANGE_ID,
+        currentNode: 'subagent-execute',
+        completedNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
+        evidence: {
+          open: { summary: 'o' }, design: { summary: 'd' }, plan: { summary: 'p' },
+          execute: { summary: 'serial digested' }, 'subagent-execute': { summary: 'wave1 delegated' },
+        },
+        verifyFailures: 0,
+        executionMode: 'subagent',
+        directOverride: false,
+      });
+      let res = runState(['next'], dir, env);
+      assertExit(res, 0);
+      assertOut(res, 'NODE: subagent-execute');
+      // ② P02 也 done → 可委托集合为空、串行 T03 pending → 趟间回 execute
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1 + pDone('P02', 'P01') + t03(''));
+      res = runState(['next'], dir, env);
+      assertExit(res, 0);
+      assertOut(res, 'NODE: execute');
+      // ③ 全部 done + SUMMARY 在场 → 合取完成（无 eligible ∧ 无 serial pending）→ review
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1 + pDone('P02', 'P01') + t03('done'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T03-SUMMARY.md', summaryContent());
+      res = runState(['next'], dir, env);
+      assertExit(res, 0);
+      assertOut(res, 'NODE: review');
+    },
+  },
+
+  // 175: 向后兼容等价断言（AC-3）——旧合法形态在新引擎下路由结果与旧期望一致（零行为漂移）：
+  // 全串行 → execute；并→串首趟 → subagent-execute；并→串委托完成后（无新 eligible）→ execute；
+  // 串→并首趟 → execute（先串行）。旧合法序列退化为单趟，行为不变。
+  {
+    name: '175 向后兼容等价：旧合法形态路由结果与旧期望一致',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      writeIntakeArtifacts(dir);
+      const goNext = (taskContent, currentNode, completedExtra = [], withExecuteEvidence = false) => {
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + taskContent);
+        writeState(dir, {
+          activeChange: CHANGE_ID,
+          currentNode,
+          completedNodes: ['open', 'design', 'plan', ...completedExtra],
+          evidence: {
+            open: { summary: 'o' },
+            design: { summary: 'd' },
+            plan: { summary: 'p' },
+            // withExecuteEvidence：模拟首趟串行消化已 record 过 execute（证据跨重入累积——
+            // 真实链路 evidence 不清零；无标记 = 尚未进入过 execute 的干净态）
+            ...(withExecuteEvidence ? { execute: { summary: 'serial pass recorded' } } : {}),
+            ...(completedExtra.includes('subagent-execute') ? { 'subagent-execute': { summary: 'delegated' } } : {}),
+          },
+          verifyFailures: 0,
+          executionMode: 'subagent',
+          directOverride: false,
+        });
+        return runState(['next'], dir, env);
+      };
+      // ① 全串行（含依赖链）→ execute
+      let res = goNext(TASK_VALID_ALL_SERIAL, 'execute');
+      assertExit(res, 0);
+      assertOut(res, 'NODE: execute');
+      // ② 并→串（并存前+串在后）首趟 → subagent-execute（与旧引擎第一趟一致）
+      res = goNext(TASK_VALID_PS, 'execute');
+      assertExit(res, 0);
+      assertOut(res, 'NODE: subagent-execute');
+      // ③ 并→串委托完成后（并行全 done、无新 eligible）→ execute 消化串行（与旧引擎一致；
+      // execute 已 record 过——证据累积，严格顺序校验放行）
+      res = goNext(
+        '<task id="P01" status="done" parallel="true"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n' +
+        '<task id="P02" status="done" parallel="true"><action>实现 P02</action><write_files>src/p2.mjs</write_files><verify>node --check src/p2.mjs</verify></task>\n' +
+        '<task id="T01" parallel="false" status="pending"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify><depends_on>P01,P02</depends_on></task>\n',
+        'execute', ['subagent-execute'], true);
+      assertExit(res, 0);
+      assertOut(res, 'NODE: execute');
+      // ④ 串→并（串在前+并在后）首趟 → execute 先串行（与旧引擎一致）
+      res = goNext(TASK_VALID_SP, 'execute');
+      assertExit(res, 0);
+      assertOut(res, 'NODE: execute');
     },
   },
 ];
