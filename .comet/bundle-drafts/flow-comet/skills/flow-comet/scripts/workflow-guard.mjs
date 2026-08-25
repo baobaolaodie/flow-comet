@@ -2601,7 +2601,7 @@ async function main() {
         if (!attrs || !attrs.parallel || attrs.status !== 'pending') continue;
         const wfMatch = block.match(/<write_files>([\s\S]*?)<\/write_files>/);
         if (!wfMatch) continue;
-        // 分号容错：与 workflow-handoff.mjs 自动解析同源实现（multipass-exit-hardening D2）——
+        // 分号容错：与 workflow-handoff.mjs 自动解析同源实现（分号容错双点内联，与 workflow-handoff.mjs 同源互锚）——
         // 换行切分后逐段按 ';' 二次切分、trim、滤空与 HTML 注释行（路径含分号的极端形态不支持，须换行书写）
         const filePaths = wfMatch[1].trim().split(/\s*\n\s*/).map(l => l.trim().replace(/<!--[\s\S]*?-->/g, '').trim()).filter(Boolean)
           .flatMap(l => l.split(';')).map(l => l.trim()).filter(Boolean);
@@ -2734,7 +2734,7 @@ async function main() {
       if (emptyExitApproved) {
         console.error('EMPTY-EXIT: execute 空退出豁免已生效(evidence.execute.emptyExitApproved)——审计记录:该 change 在无串行任务时显式豁免空退出');
       }
-      // serialPending 收窄为「可运行串行」（multipass-exit-hardening D1）：仅 deps ⊆ doneIds 的
+      // serialPending 收窄为「可运行串行」（出口拦截集合收窄）：仅 deps ⊆ doneIds 的
       // 未完成串行计入拦截——deps 未满足的串行 pending 是等后续波次的合法中间态，放行由多趟
       // 路由按依赖拓扑分趟驱动。doneIds 就地派生；deps 提取复用 taskDependsOn（<depends_on>
       // 内容按 [,\s]+ 切分，与路由谓词同一解析口径），不新增状态。
@@ -3285,7 +3285,7 @@ async function main() {
         });
         // 路由无匹配时输出诊断——结构校验保持严格，检测失败纠偏可见
         // 旧模板（task 标签无 status 属性）产出的 TASK.md 无法匹配——明确提示而非静默卡在 execute
-        // 收尾态静默（multipass-exit-hardening D3）：全部任务已 done（无任何 status="pending"）时
+        // 收尾态静默（ROUTE WARN 前置条件）：全部任务已 done（无任何 status="pending"）时
         // 该诊断只剩噪音——仅在仍存在任一 pending 任务时输出。
         if (parallelBlocks.length === 0 && taskList.some((block) => {
           const a = taskOpeningAttrs(block);

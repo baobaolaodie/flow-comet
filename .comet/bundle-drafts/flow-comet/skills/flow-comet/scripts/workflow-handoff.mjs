@@ -158,7 +158,7 @@ async function main() {
         const match = taskContent.match(taskRegex);
         if (match) {
           taskResolved = true;
-          // 分号容错：与 workflow-guard.mjs 伪并行启发式同源实现（multipass-exit-hardening D2）
+          // 分号容错：与 workflow-guard.mjs 伪并行启发式同源实现（分号容错双点内联，与 workflow-guard.mjs 同源互锚）
           const files = match[1].trim().split(/\s*\n\s*/).map(f => f.trim().replace(/<!--[\s\S]*?-->/g, '').trim()).filter(Boolean)
             .flatMap(f => f.split(';')).map(f => f.trim()).filter(Boolean);
           if (files.length > 0) { writeFiles = files; }
