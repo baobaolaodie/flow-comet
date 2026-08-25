@@ -143,7 +143,7 @@ After the issue is confirmed: bug fixes use a `fix/` branch, features use a `fea
 > **Commit messages are public artifacts** — they are visible in the git history on GitHub. Write them as plain descriptions: **no codes, numbers, or jargon**. Use the same public-facing language as CHANGELOG and the docs. Example: `fix: brooks 6-dimension self-check two-tier fallback`.
 
 ```
-<type>: <subject>
+<type>(<scope>): <subject>
 
 feat:      new feature / mechanism
 fix:       bug fix (mechanism, script, hook)
@@ -157,7 +157,7 @@ chore:     tooling, release wrap-up
 revert:    reverts a previous commit
 ```
 
-**Scope-free form**: this repository uses `<type>: <subject>` — no `(<scope>)` segment. Task/work-item IDs go in the commit body footer as `Task: <id>` — for example, subject `feat: add import pipeline` with body `Task: T01`.
+**General optional scope**: this repository uses `<type>(<scope>): <subject>` — the scope is a short subsystem or area-of-interest noun from the ecosystem-wide Conventional Commits vocabulary (e.g. `docs`, `usage`, `installer`, `guard`, `handoff`, `selftest`). The scope is **recommended and optional**: give one for single-subsystem changes (e.g. `feat(guard): ...`, `docs(usage): ...`, `fix(installer): ...`); omit it (`<type>: <subject>`) for cross-subsystem or global changes. Management codes — change-id, dates, task numbers — must **never** be used as the scope (administrative metadata does not belong in the subject or the scope). Task/work-item IDs go in the commit body footer as `Task: <id>` — for example, subject `feat(guard): add import pipeline` with body `Task: T01`.
 
 **Workflow artifacts are never committed**: `.specs/` artifacts (SUMMARY, handoff, TASK, etc.) are gitignored workflow products and never enter the repository. If `git add` is rejected for them, that rejection is correct behavior — never bypass it with `git add -f`.
 

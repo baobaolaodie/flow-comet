@@ -87,7 +87,7 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
    - Runs verify command and records real output.
    - Performs self-review (brooks-lint or 6-dimension quick check).
    - Performs diff boundary check (R6.5).
-   - Makes atomic commit with format `<type>: <subject>` (task id goes in the commit body as a `Task: <task-id>` trailer).
+   - Makes atomic commit with format `<type>(<scope>): <subject>` (scope optional: short subsystem noun; change-id must NOT be used as scope; task id goes in the commit body as a `Task: <task-id>` trailer).
    - Writes `<task-id>-SUMMARY.md` to `.specs/<change-id>/`.
    - Returns evidence via `workflow-handoff.mjs result <task-id>`.
 
