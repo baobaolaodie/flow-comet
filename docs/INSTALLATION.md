@@ -53,6 +53,10 @@ node scripts/prepare-env.mjs --target <absolute path to target project> --purge 
 
 **Updating an installed flow-comet**: re-run the same Option A command — idempotent (overwrites generated files + merges the hook, preserves existing config).
 
+### Hook upgrade
+
+The injected hook command shape evolves across releases: newer releases reference the guard script through the host's project-root variable instead of a relative path, so interception keeps working when the session's working directory drifts away from the project root. **Re-running the same Option A installer command upgrades the managed hook entry in place** — the entry is recognized by the script it points to regardless of its command shape and replaced with the current form: no duplicates, no residue, no manual cleanup of old settings. If you installed via Option B (manual copy), update the entry by hand to match the recommended command in step 3 above. If out-of-scope writes stopped being blocked after working-directory drift (hook log shows `Cannot find module ...comet-hook-guard`), that is the legacy relative-path entry failing to resolve — the fix is the same re-run; see the matching symptom row in [Troubleshooting](TROUBLESHOOTING.md).
+
 ### Platforms
 
 The installer targets **Claude Code** by default (unchanged behavior). The target platform is chosen in this order:
@@ -79,7 +83,7 @@ On non-default platforms, command paths inside SKILL/GUIDANCE files are rewritte
 4. **Smoke test** (run inside the target project): `cd <target> && node .claude/skills/flow-comet/scripts/workflow-state.mjs status` — expected output is a JSON state object (`{"status":"no-change",...}` for a fresh project, `{"status":"running","change":...}` when a workflow is active)
 
 > Commands are POSIX-style (Git Bash / WSL / macOS terminal); Windows users should run them in Git Bash.
-> **Note**: `guard-self-test.mjs` (171 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
+> **Note**: `guard-self-test.mjs` (175 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
 
 ### Using flow-comet on Codex
 

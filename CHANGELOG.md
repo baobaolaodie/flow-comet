@@ -15,6 +15,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 ### Changed
 
 - **Documentation aligned with repository conventions**: task summaries now defer to each repository's own ignore rules and are never force-added into version control, atomic-commit guidance is scope-free and consistent across workflow skills, branch naming alignment via `init --branch-prefix` is documented in the installation guide, and planners are told the wave-grouping constraint before plan exit.
+- **Dependency-driven multi-pass parallel routing**: the delegation node can now be entered multiple times — each pass delegates every dependency-satisfied parallel task, interleaved parallel/serial sequences run in alternating passes instead of being rejected, planning exits validate dependency cycles rather than wave shapes (with recovery guidance on a cycle), and the delegation node counts as complete only when no dependency-satisfied parallel task and no serial task remains. **Write-guard hook injection hardened against directory drift**: the installer injects the hook command as a project-root-referencing form, re-running the installer upgrades older relative-path entries in place (idempotent, no residue), and the installation and troubleshooting guides document the upgrade step and the fail-open symptom signature.
+- **Regression suite expanded to 175 scenarios**; system test suite expanded to 64 items.
 
 ## [1.5.0-rc.1] - 2026-08-23
 

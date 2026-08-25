@@ -53,6 +53,10 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 
 **更新已安装的 flow-comet**：重跑同一条方案 A 命令即可（幂等——覆盖生成物 + 合并注入 hook，既有配置保留）。
 
+### hook 升级说明
+
+注入的 hook 命令形态随版本演进：新版本经宿主的项目根变量引用守卫脚本，而非相对路径——会话工作目录漂移出项目根后拦截仍然命中。**重跑同一条方案 A 安装器命令即可原地升级托管 hook 条目**——安装器按条目指向的脚本识别托管条目、无论新旧形态一律替换为当前形态：不重复、不残留、无需手工清理旧配置。若经方案 B（手动复制）安装，请按上方第 3 步手工把条目更新为推荐命令形态。若工作目录漂移后越权写入不再被拦截（hook 日志出现 `Cannot find module ...comet-hook-guard`），即旧相对路径条目解析失效——处置同为重跑安装器；现象识别见[故障排查](TROUBLESHOOTING-zh.md)对应症状行。
+
 ### 平台
 
 安装器默认面向 **Claude Code**（行为不变）。目标平台按以下顺序确定：
@@ -78,7 +82,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 4. **真实环境冒烟**（在目标项目目录内执行）：`cd <目标项目> && node .claude/skills/flow-comet/scripts/workflow-state.mjs status`——期望输出 JSON 状态对象（全新项目为 `{"status":"no-change",...}`，运行中为 `{"status":"running","change":...}`）
 
 > 命令为 POSIX 风格（Git Bash / WSL / macOS 终端）；Windows 用户请在 Git Bash 中执行。
-> **注意**：`guard-self-test.mjs`（171 场景）是**作者回归基线**（沙箱环境自测脚本逻辑——不依赖安装完整性，不是安装验证判据）。
+> **注意**：`guard-self-test.mjs`（175 场景）是**作者回归基线**（沙箱环境自测脚本逻辑——不依赖安装完整性，不是安装验证判据）。
 
 ### 在 Codex 上使用 flow-comet
 

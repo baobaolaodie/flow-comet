@@ -41,6 +41,7 @@
 | `{"decision":"block",...}`（Codex） | 越权写入被 Codex PreToolUse（Bash 工具）拦截 | 属预期——该写入被设计性拒绝；源码改动走 worktree 委托或切换执行模式 |
 | hook 静默不拦截（Codex） | hook 尚未信任，或 `[features] hooks` 未启用 | 信任 hook（交互会话 `/hooks`；脚本化自动化传 `--dangerously-bypass-hook-trust`）；`config.toml` 含 `[features] hooks = true` |
 | 换写法绕过 hook（Codex） | Codex 拦截为命令级——其他 File API 写法可能绕过 | 平台限制；主流模式（PowerShell cmdlet、.NET File API、重定向）已覆盖 |
+| hook 日志出现 `Cannot find module ...comet-hook-guard`，越权写入被静默放行 | 相对路径旧条目在会话工作目录漂移出项目根后解析失败——崩溃的 hook 被宿主降级放行（fail-open） | 重跑方案 A 安装器把条目原地升级为项目根引用形态（见[安装](INSTALLATION-zh.md)的 hook 升级说明小节） |
 | dsh 会话中技能不可见 | `.dsh/skills/flow-comet` 未对该项目安装（dsh 在 `<项目>/.dsh/skills/` 下以 rank 100 发现——未安装该目录的项目不可见该技能），或 dsh 低于 `0.1.0-rc.6` | 运行 `node scripts/prepare-env.mjs --target <项目> --platform dsh`；升级 dsh 到 `0.1.0-rc.6`+ |
 | dsh 拦截不生效 | 桥接 loader 未挂载（`$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 或 `cordis.patch.yml` 托管块缺失）、项目未安装，或 `tools/pre-execute` 签名不匹配 | 重跑 `prepare-env --platform dsh`（挂载 loader + 托管块）；确认会话项目根含 `.dsh/skills/flow-comet`（窄监听）；确认 dsh 为 `0.1.0-rc.6`+ |
 | dsh 卸载残留（技能 / AGENTS.md 托管区 / loader 仍在） | 未执行 `prepare-env --purge --platform dsh --yes`（例如只手工删了 `.dsh/skills` 目录） | 运行 `node scripts/prepare-env.mjs --target <项目> --purge --platform dsh --yes`——移除 `.dsh/skills/flow-comet*`、AGENTS.md 托管区、`$DSH_HOME/cordis.patch.yml` 托管块与 loader 文件（非 flow-comet 条目与 dsh-skin 等既有块保留） |

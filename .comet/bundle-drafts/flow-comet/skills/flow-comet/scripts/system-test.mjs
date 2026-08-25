@@ -4,7 +4,8 @@
 // 定位：guard-self-test 是引擎脚本的单元/场景级回归（171 场景，fixture 构造为主）；
 // 本套件是**系统级**测试——每个测试项走真实命令序列（init → record → guard exit → handoff →
 // hook …），覆盖 flow-comet 全部机制面（A~L 十二类）：
-//   A. 状态机与路由（init/status/next/select/advance/record/execution-mode/config）
+//   A. 状态机与路由（init/status/next/select/advance/record/execution-mode/config/
+//      多趟真实链路：串并交替 NODE 行多次交替 + plan 出口依赖环负例与恢复指引）
 //   B. 声明机制（skill-load 标记/record 校验/时间序/损坏 fail-closed/委托范围豁免/exit 协议标记/旧兼容）
 //   C. 委托链路（handoff request/result/status、RED 先于 GREEN、Return Contract、证据键名契约）
 //   D. hook 写白名单（open 阶段/execute 动态收窄/direct 放宽/归档阶段）
@@ -15,7 +16,7 @@
 //   I. 异常路径（损坏状态/缺工件出口/非法参数/状态字段类型非法）
 //   J. 文档一致性（双语健康检查/公开产物零代号检查——调用仓库本地工具）
 //   K. 安装器与平台（版本标识/多平台安装与平台化路径/codex hook JSON 契约/平台选择链/
-//      purge 语义/描述符驱动/dsh 平台断言）
+//      purge 语义/描述符驱动/dsh 平台断言/hook 注入形态无关断言与旧条目幂等升级）
 //   L. 执行遗漏防护（entry 进入证据/空退出豁免/空仓库提示）
 //
 // 载体（与 guard-self-test 同构）：每项 = 独立临时目录（fs.mkdtemp）+ 内置协议副本复制到
@@ -332,6 +333,128 @@ function collectTreeFiles(root) {
   return files.sort();
 }
 
+// ---------- hook 注入命令形态判定（托管条目断言放宽决策：断言意图 = 托管条目在场且指向本项目脚本） ----------
+// 托管识别 = 脚本 basename(comet-hook-guard.mjs) 在位——与 prepare-env isManagedHookCommand
+// 同源语义，新旧托管形态均命中（幂等升级识别面）。
+// 项目根引用特征 = CLAUDE_PROJECT_DIR 变量引用（%VAR%/$env:/$_ENV/${VAR} 词形）或绝对路径特征
+// （盘符 / 引号·空白·等号后的 POSIX 绝对段）二选一在位——cwd 漂移免疫的形态面；相对路径旧形态
+// 两者皆无 → 不达标（升级替换判据）。断言不锁定具体引号/变量写法（形态无关化，以特征断言补偿
+// 精度——注入命令实测微调不再破坏套件）。
+function isManagedHookCommand(cmd) {
+  return typeof cmd === 'string' && cmd.includes('comet-hook-guard.mjs');
+}
+
+function hasProjectRootRef(cmd) {
+  if (typeof cmd !== 'string') return false;
+  if (/CLAUDE_PROJECT_DIR/i.test(cmd)) return true;
+  return /[A-Za-z]:[\\/]/.test(cmd) || /["'\s=]\/[^\s"']/.test(cmd);
+}
+
+function assertManagedHookEntry(cmd, label) {
+  if (!isManagedHookCommand(cmd)) {
+    throw new Error(label + ' 缺托管脚本 basename(comet-hook-guard.mjs): ' + String(cmd));
+  }
+  if (!hasProjectRootRef(cmd)) {
+    throw new Error(label + ' 缺项目根引用特征(CLAUDE_PROJECT_DIR 或绝对路径二选一在位;相对路径旧形态不具备 cwd 漂移免疫): ' + String(cmd));
+  }
+}
+
+// 从 settings.local.json / hooks.json 结构提取全部托管 hook 命令(hooks.PreToolUse[].hooks[].command)
+function collectManagedHookCommands(configObj) {
+  const cmds = [];
+  const groups = configObj && configObj.hooks && Array.isArray(configObj.hooks.PreToolUse) ? configObj.hooks.PreToolUse : [];
+  for (const g of groups) {
+    for (const h of (Array.isArray(g && g.hooks) ? g.hooks : [])) {
+      if (isManagedHookCommand(h && h.command)) cmds.push(h.command);
+    }
+  }
+  return cmds;
+}
+
+// 多趟链路 SUMMARY 夹具（SUMMARY 模板保真全量满足：标题首行 # SUMMARY: + 首部 4 字段 +
+// 段序 做了什么→改动文件→verify 输出→6 维自查→越界检查→自检方法；6 维声明 brooks-review）
+function execSummaryFixture(taskId) {
+  return [
+    '# SUMMARY: ' + taskId + ' - 多趟链路任务',
+    '',
+    '- **Change ID**: ' + CHANGE_ID,
+    '- **Task ID**: ' + taskId,
+    '- **完成时间**: 2026-08-25 10:00',
+    '- **AI 角色**: Dev',
+    '',
+    '## 做了什么',
+    '',
+    '完成 ' + taskId + ' 的实现并回传证据。',
+    '',
+    '## 改动文件',
+    '',
+    '| 文件 | 性质 | 说明 |',
+    '|---|---|---|',
+    '| src/' + taskId.toLowerCase() + '.mjs | 修改 | 实现任务 |',
+    '',
+    '## verify 输出',
+    '',
+    '```text',
+    '$ node --check src/' + taskId.toLowerCase() + '.mjs',
+    'ok',
+    '```',
+    '',
+    '## 6 维自查',
+    '',
+    '- 功能: 通过（brooks-review 已跑）',
+    '- 性能: 无影响',
+    '- 安全: 无影响',
+    '- 兼容: 通过',
+    '- 可观测: 通过',
+    '- 可维护: 通过',
+    '',
+    '## 越界检查',
+    '',
+    '仅修改 write_files 范围内文件，无越界。',
+    '',
+    '## 自检方法',
+    '',
+    'brooks-review',
+    '',
+  ].join('\n');
+}
+
+// 混排多波 TASK：双并行开路 → 串行衔接(依赖双并行)→ 收尾并行(依赖串行衔接)。
+// 各任务 status 由入参映射（任务 id → 'pending'|'done'）控制；status 变更不影响任务集签名
+// （签名仅保留 id/parallel 与块内容，剥离 status 类属性）。串行衔接置于两并行波之间——
+// 引擎契约下 execute 出口要求全部串行已消化，跨趟多次交替由「并行波→串行波→并行波」承载。
+function multiWaveTaskContent(statusMap) {
+  const blk = (id, parallel, deps) =>
+    '<task id="' + id + '"' + (parallel ? ' parallel="true"' : '') + (statusMap[id] === 'done' ? ' status="done"' : ' status="pending"') + '>' +
+    '<action>实现 ' + id + '</action>' +
+    '<write_files>src/' + id.toLowerCase() + '.mjs</write_files>' +
+    '<verify>node --check src/' + id.toLowerCase() + '.mjs</verify>' +
+    (deps ? '<depends_on>' + deps + '</depends_on>' : '') +
+    '</task>\n';
+  return '# TASK\n\n' +
+    blk('P01', true, '') +
+    blk('P02', true, '') +
+    blk('S01', false, 'P01,P02') +
+    blk('P03', true, 'S01');
+}
+
+// 真实链路前奏（多趟/依赖环用例共用）：init → open 出口 → design 出口。
+// 新 change 两层加载模型下逐节点 skill-load → record → entry → exit --apply 全程驱动。
+function driveThroughDesign(dir) {
+  assertExit(runState(['init', CHANGE_ID], dir), 0);
+  assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
+  writeIntakeArtifacts(dir);
+  assertExit(runState(['record', 'open', '{"summary":"intake complete"}'], dir), 0);
+  assertExit(runGuard(['entry', 'open'], dir), 0);
+  assertExit(runGuard(['exit', 'open', '--apply'], dir), 0);
+  assertExit(runState(['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md'], dir), 0);
+  writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md',
+    '# DESIGN\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 0. 技术栈选定\n\nNode.js(ESM)\n\n## 决策清单\n\n- [ ] 循环路由\n');
+  assertExit(runState(['record', 'design', '{"summary":"design done"}'], dir), 0);
+  assertExit(runGuard(['entry', 'design'], dir), 0);
+  assertExit(runGuard(['exit', 'design', '--apply'], dir), 0);
+}
+
 // ---------- 系统测试项（A~L 十二类） ----------
 
 const TEST_ITEMS = [
@@ -639,6 +762,114 @@ const TEST_ITEMS = [
       const r9 = runState(['verify-fail'], dir);
       assertExit(r9, 1);
       assertOut(r9, '超限');
+    },
+  },
+
+  {
+    name: 'A13 多趟路由真实链路:并→串→并交替与多波依赖,NODE 行在 execute/subagent-execute 间多次交替直至全部 done',
+    run: (dir) => {
+      driveThroughDesign(dir);
+      // 混排 TASK:双并行开路 → 串行衔接(依赖双并行)→ 收尾并行(依赖串行衔接)——依赖驱动的
+      // 分趟序列:并行趟 → 串行趟 → 并行趟 → review 门控(多趟正向行为)。
+      // 驱动遵循真实协调者流程:execute 趟内先消化其全部串行 pending(标 done 并委托留证)再 exit;
+      // 委托趟内委派全部可并行后才能退(每趟合取完成判定)。
+      // 对未实现循环路由的引擎本用例 RED 属预期(单趟限制下委托节点完成后不再路由回)。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
+        multiWaveTaskContent({ P01: 'pending', P02: 'pending', S01: 'pending', P03: 'pending' }));
+      assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md'], dir), 0);
+      assertExit(runState(['record', 'plan', '{"summary":"plan done"}'], dir), 0);
+      assertExit(runGuard(['entry', 'plan'], dir), 0);
+      const rPlan = runGuard(['exit', 'plan', '--apply'], dir);
+      assertExit(rPlan, 0);
+      assertOut(rPlan, 'ALL CHECKS PASSED');
+      // 首趟路由:首波双并行无前置依赖 → 直接进入委托节点
+      assertOut(rPlan, 'NODE: subagent-execute');
+      // 两层加载模型:执行域两节点的手动声明标记(record 前置门;一次声明后续趟次复用)
+      assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
+      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
+
+      // 单趟完成动作:TASK.md 标 done(status 变更不影响任务集签名)+ SUMMARY 夹具 + 真实 handoff 委托回传
+      const completeTasks = (ids) => {
+        for (const id of ids) {
+          writeFile(dir, '.specs/' + CHANGE_ID + '/' + id + '-SUMMARY.md', execSummaryFixture(id));
+          assertExit(runHandoff(['request', id, id + ' 委托', '--write-files', 'src/' + id.toLowerCase() + '.mjs'], dir), 0);
+          assertExit(runHandoff(['result', id, fullContract('abcd1234abcd1234abcd1234abcd1234abcd1234', id)], dir), 0);
+        }
+      };
+      const markDone = (statusMap) => writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', multiWaveTaskContent(statusMap));
+      // 单趟驱动:record → entry → exit --apply,断言 NODE 行路由到期望节点(可观测性不变式)
+      const drivePass = (node, expectNext, label) => {
+        assertExit(runState(['record', node, '{"summary":"' + label + '"}'], dir), 0);
+        assertExit(runGuard(['entry', node], dir), 0);
+        const res = runGuard(['exit', node, '--apply'], dir);
+        assertExit(res, 0);
+        assertOut(res, 'ALL CHECKS PASSED');
+        const m = res.output.match(/^NODE: ([a-z-]+)\s*$/m);
+        if (!m) throw new Error('exit ' + node + '(' + label + ')输出缺 NODE 行:\n' + res.output);
+        if (m[1] !== expectNext) {
+          throw new Error(label + ' 后路由期望 NODE: ' + expectNext + ',实际 NODE: ' + m[1] +
+            '(多趟循环路由未生效——委托节点应可重入直至无剩余可并行)\n实际输出:\n' + res.output);
+        }
+      };
+
+      // 趟 1 · subagent-execute:首波双并行委托完成 → 趟间回串行(串行衔接依赖此时已满足)
+      markDone({ P01: 'done', P02: 'done', S01: 'pending', P03: 'pending' });
+      completeTasks(['P01', 'P02']);
+      drivePass('subagent-execute', 'execute', 'parallel-wave-1');
+
+      // 趟 2 · execute:先消化本趟全部串行 pending(串行衔接,标 done 并委托留证)——
+      // 确认无串行残留后才 exit → 收尾并行依赖满足 → 再次进入委托节点
+      // (旧引擎单趟限制下此处不再路由回——本断言即多趟语义回归锚)
+      markDone({ P01: 'done', P02: 'done', S01: 'done', P03: 'pending' });
+      completeTasks(['S01']);
+      drivePass('execute', 'subagent-execute', 'serial-wave-1');
+
+      // 趟 3 · subagent-execute:收尾并行委托完成 → 全部 done → 出口照常门控进 review(循环终止语义不变)
+      markDone({ P01: 'done', P02: 'done', S01: 'done', P03: 'done' });
+      completeTasks(['P03']);
+      drivePass('subagent-execute', 'review', 'parallel-wave-2');
+
+      const st = readStateFile(dir);
+      if (st.currentNode !== 'review') {
+        throw new Error('全部任务 done 后应停在 review 门控前: ' + JSON.stringify(st.currentNode));
+      }
+      console.log('  多趟路由:subagent-execute→execute→subagent-execute→review 三趟两交替 ✓');
+    },
+  },
+
+  {
+    name: 'A14 plan 出口依赖环负例:BLOCK 含 depends_on 恢复指引,按指引调环后恢复通过',
+    run: (dir) => {
+      driveThroughDesign(dir);
+      // 负例:X1↔X2 互相依赖成环(结构死锁——任何一趟都无法开工)→ plan 出口前置拦截。
+      // 校验语义:依赖图无环 + 趟次可满足;BLOCK 消息附 depends_on 调整恢复指引(恢复类断言面)。
+      const cyclic =
+        '<task id="C1" status="pending"><action>实现 C1</action><write_files>src/c1.mjs</write_files><verify>node --check src/c1.mjs</verify></task>\n' +
+        '<task id="X1" parallel="true" status="pending"><action>实现 X1</action><write_files>src/x1.mjs</write_files><verify>node --check src/x1.mjs</verify><depends_on>X2</depends_on></task>\n' +
+        '<task id="X2" parallel="true" status="pending"><action>实现 X2</action><write_files>src/x2.mjs</write_files><verify>node --check src/x2.mjs</verify><depends_on>X1</depends_on></task>\n';
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + cyclic);
+      assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md'], dir), 0);
+      assertExit(runState(['record', 'plan', '{"summary":"plan drafted"}'], dir), 0);
+      assertExit(runGuard(['entry', 'plan'], dir), 0);
+      const blocked = runGuard(['exit', 'plan', '--apply'], dir);
+      assertExit(blocked, 1);
+      assertOut(blocked, 'BLOCKED');
+      // 恢复指引关键词:指明调整 depends_on(而非笼统报错)
+      assertOut(blocked, 'depends_on');
+      if (!/(环|循环|cycle|拓扑|topolog)/i.test(blocked.output)) {
+        throw new Error('plan 出口 BLOCK 应含依赖环/拓扑校验语义关键词(环/循环/cycle/拓扑):\n' + blocked.output);
+      }
+      // 恢复类:按指引调整 depends_on(X1/X2 改依赖 C1)消环 → 同一出口重跑通过
+      const recovered =
+        '<task id="C1" status="pending"><action>实现 C1</action><write_files>src/c1.mjs</write_files><verify>node --check src/c1.mjs</verify></task>\n' +
+        '<task id="X1" parallel="true" status="pending"><action>实现 X1</action><write_files>src/x1.mjs</write_files><verify>node --check src/x1.mjs</verify><depends_on>C1</depends_on></task>\n' +
+        '<task id="X2" parallel="true" status="pending"><action>实现 X2</action><write_files>src/x2.mjs</write_files><verify>node --check src/x2.mjs</verify><depends_on>C1</depends_on></task>\n';
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + recovered);
+      const ok = runGuard(['exit', 'plan', '--apply'], dir);
+      assertExit(ok, 0);
+      assertOut(ok, 'ALL CHECKS PASSED');
+      // 恢复后路由:并行依赖未满足(C1 仍 pending)→ execute 开工
+      assertOut(ok, 'NODE: execute');
     },
   },
 
@@ -1718,9 +1949,12 @@ const TEST_ITEMS = [
       const hooksParsed = JSON.parse(fs.readFileSync(hooksFile, 'utf8'));
       const preToolUse = hooksParsed.hooks && hooksParsed.hooks.PreToolUse;
       if (!Array.isArray(preToolUse) || preToolUse.length === 0) throw new Error('hooks.json 缺 hooks.PreToolUse 包裹层');
-      const hooksText = JSON.stringify(hooksParsed);
-      if (!hooksText.includes('comet-hook-guard.mjs')) throw new Error('hooks.json 未注入托管 hook 命令');
-      if (!hooksText.includes('--platform codex')) throw new Error('hooks.json hook 命令缺平台标记');
+      // 托管条目断言形态无关化(断言放宽决策——意图为托管条目在场且指向本项目脚本):脚本 basename 在位 + 项目根引用特征二选一——
+      // 兼容新旧两种托管形态,注入命令实测微调(%VAR% 引号/变量词形)不再破坏断言
+      const managedCmds = collectManagedHookCommands(hooksParsed);
+      if (managedCmds.length === 0) throw new Error('hooks.json 未注入托管 hook 命令');
+      for (const c of managedCmds) assertManagedHookEntry(c, 'codex hooks.json 托管命令');
+      if (!JSON.stringify(hooksParsed).includes('--platform codex')) throw new Error('hooks.json hook 命令缺平台标记');
       if (preToolUse[0].matcher !== '*') throw new Error('hooks.json matcher 应为 * (Codex PreToolUse 只拦截 Bash 工具): ' + JSON.stringify(preToolUse[0]));
       // ③b .codex/config.toml hooks 启用(features——Codex hooks 默认关闭)
       const configFile = path.join(target, '.codex', 'config.toml');
@@ -2592,6 +2826,81 @@ const TEST_ITEMS = [
         if (r) throw new Error('AC-3b BOM+completed 不应返回 deny: ' + JSON.stringify(r));
       }
       console.log('  流程态门断言:AC-1/2/3 空闲放行·AC-3b BOM 容错·AC-7/8/7b 异常态 fail-closed deny✓');
+    },
+  },
+
+  // hook 注入形态无关断言 + 旧条目幂等升级(AC-5/AC-7;安装产物根引用特征用例 + 升级替换用例)——
+  // 安装产物托管条目满足「脚本 basename 在位 + 项目根引用特征(CLAUDE_PROJECT_DIR 或绝对路径)
+  // 二选一」;新旧托管形态识别兼容(basename 同源 isManagedHookCommand 语义);把托管命令改回
+  // 旧相对路径形态后重跑安装器 → 被识别替换(恰余 1 条,不重复不残留)且新条目形态达标。
+  // 断言不锁定 %VAR% 引号/变量词形——注入命令实测微调不再破坏套件。
+  {
+    name: 'K13 安装器:hook 注入形态无关断言(basename+项目根引用)+旧条目幂等升级',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
+      // ① 形态分类器:新旧托管形态均被 basename 识别;项目根引用特征仅根引用形态命中
+      for (const legacy of [
+        'node .claude/skills/flow-comet/scripts/comet-hook-guard.mjs',
+        'node .agents/skills/flow-comet/scripts/comet-hook-guard.mjs before_tool --platform codex',
+      ]) {
+        if (!isManagedHookCommand(legacy)) throw new Error('旧托管形态应被 basename 识别(幂等升级识别面): ' + legacy);
+        if (hasProjectRootRef(legacy)) throw new Error('旧相对路径形态不应命中项目根引用特征: ' + legacy);
+      }
+      for (const modern of [
+        'node "%CLAUDE_PROJECT_DIR%/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs"',
+        'node "$env:CLAUDE_PROJECT_DIR/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs"',
+        'node "${CLAUDE_PROJECT_DIR}/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs"',
+      ]) {
+        assertManagedHookEntry(modern, '变量引用形态');
+      }
+      assertManagedHookEntry(path.join(dir, 'k13-abs', '.claude', 'skills', 'flow-comet', 'scripts', 'comet-hook-guard.mjs'), '绝对路径形态');
+      // ② claude-code 安装产物:托管条目在场且指向本项目脚本(项目根引用特征在位)
+      const ccTarget = path.join(dir, 'k13-cc');
+      fs.mkdirSync(ccTarget, { recursive: true });
+      const rcc = spawnSync(process.execPath, [installer, '--target', ccTarget, '--platform', 'claude-code'], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      if (rcc.status !== 0) throw new Error('claude-code 安装失败: ' + (rcc.stderr || JSON.stringify(rcc.output)));
+      const ccSettingsPath = path.join(ccTarget, '.claude', 'settings.local.json');
+      const ccSettings = JSON.parse(fs.readFileSync(ccSettingsPath, 'utf8'));
+      const ccManaged = collectManagedHookCommands(ccSettings);
+      if (ccManaged.length === 0) throw new Error('.claude/settings.local.json 未注入托管 hook 条目');
+      for (const c of ccManaged) assertManagedHookEntry(c, 'claude-code 托管命令');
+      // ③ 幂等升级(claude-code):托管命令改回旧相对路径形态 → 重跑安装器 → 识别替换:
+      // 恰余 1 条托管条目(无重复无残留)且形态达标(项目根引用特征在位)
+      for (const g of ccSettings.hooks.PreToolUse) {
+        for (const h of (Array.isArray(g.hooks) ? g.hooks : [])) {
+          if (isManagedHookCommand(h.command)) h.command = 'node .claude/skills/flow-comet/scripts/comet-hook-guard.mjs';
+        }
+      }
+      fs.writeFileSync(ccSettingsPath, JSON.stringify(ccSettings, null, 2) + '\n', 'utf8');
+      const rccUp = spawnSync(process.execPath, [installer, '--target', ccTarget, '--platform', 'claude-code'], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      if (rccUp.status !== 0) throw new Error('claude-code 升级重装失败: ' + (rccUp.stderr || JSON.stringify(rccUp.output)));
+      const ccAfter = collectManagedHookCommands(JSON.parse(fs.readFileSync(ccSettingsPath, 'utf8')));
+      if (ccAfter.length !== 1) throw new Error('claude-code 升级后应恰余 1 条托管条目(旧条目被替换): ' + JSON.stringify(ccAfter));
+      assertManagedHookEntry(ccAfter[0], 'claude-code 升级后托管命令');
+      // ④ codex 平台同断言:安装产物形态达标 + 旧条目幂等升级
+      const cxTarget = path.join(dir, 'k13-codex');
+      fs.mkdirSync(cxTarget, { recursive: true });
+      const rcx = spawnSync(process.execPath, [installer, '--target', cxTarget, '--platform', 'codex'], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      if (rcx.status !== 0) throw new Error('codex 安装失败: ' + (rcx.stderr || JSON.stringify(rcx.output)));
+      const cxHooksPath = path.join(cxTarget, '.codex', 'hooks.json');
+      const cxHooks = JSON.parse(fs.readFileSync(cxHooksPath, 'utf8'));
+      const cxManaged = collectManagedHookCommands(cxHooks);
+      if (cxManaged.length === 0) throw new Error('.codex/hooks.json 未注入托管 hook 条目');
+      for (const c of cxManaged) assertManagedHookEntry(c, 'codex 托管命令');
+      for (const g of cxHooks.hooks.PreToolUse) {
+        for (const h of (Array.isArray(g.hooks) ? g.hooks : [])) {
+          if (isManagedHookCommand(h.command)) h.command = 'node .agents/skills/flow-comet/scripts/comet-hook-guard.mjs before_tool --platform codex';
+        }
+      }
+      fs.writeFileSync(cxHooksPath, JSON.stringify(cxHooks, null, 2) + '\n', 'utf8');
+      const rcxUp = spawnSync(process.execPath, [installer, '--target', cxTarget, '--platform', 'codex'], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      if (rcxUp.status !== 0) throw new Error('codex 升级重装失败: ' + (rcxUp.stderr || JSON.stringify(rcxUp.output)));
+      const cxAfter = collectManagedHookCommands(JSON.parse(fs.readFileSync(cxHooksPath, 'utf8')));
+      if (cxAfter.length !== 1) throw new Error('codex 升级后应恰余 1 条托管条目(旧条目被替换): ' + JSON.stringify(cxAfter));
+      assertManagedHookEntry(cxAfter[0], 'codex 升级后托管命令');
+      console.log('  hook 注入形态无关断言(basename+项目根引用特征)+ 新旧幂等升级 ✓');
     },
   },
 
