@@ -2601,7 +2601,10 @@ async function main() {
         if (!attrs || !attrs.parallel || attrs.status !== 'pending') continue;
         const wfMatch = block.match(/<write_files>([\s\S]*?)<\/write_files>/);
         if (!wfMatch) continue;
-        const filePaths = wfMatch[1].split(/\n/).map(l => l.trim()).filter(l => l !== '' && !l.startsWith('<!--'));
+        // 分号容错：与 workflow-handoff.mjs 自动解析同源实现（multipass-exit-hardening D2）——
+        // 换行切分后逐段按 ';' 二次切分、trim、滤空与 HTML 注释行（路径含分号的极端形态不支持，须换行书写）
+        const filePaths = wfMatch[1].trim().split(/\s*\n\s*/).map(l => l.trim().replace(/<!--[\s\S]*?-->/g, '').trim()).filter(Boolean)
+          .flatMap(l => l.split(';')).map(l => l.trim()).filter(Boolean);
         if (filePaths.length === 0) continue;
         const prodFiles = filePaths.filter(f => !/(?:^|\/)(?:tests?\/|test_)/.test(f));
         if (prodFiles.length === 0) {
@@ -2731,9 +2734,23 @@ async function main() {
       if (emptyExitApproved) {
         console.error('EMPTY-EXIT: execute 空退出豁免已生效(evidence.execute.emptyExitApproved)——审计记录:该 change 在无串行任务时显式豁免空退出');
       }
-      const serialPending = tasks.filter(t => !t.parallel && t.status !== 'done');
-      if (serialPending.length > 0) {
-        console.error('BLOCKED: execute 出口仍有串行 pending 任务: ' + serialPending.map(t => t.id).join(', ') + '——空退出豁免不适用于存在未完成串行任务的情况(先完成串行任务,或修正任务标记)');
+      // serialPending 收窄为「可运行串行」（multipass-exit-hardening D1）：仅 deps ⊆ doneIds 的
+      // 未完成串行计入拦截——deps 未满足的串行 pending 是等后续波次的合法中间态，放行由多趟
+      // 路由按依赖拓扑分趟驱动。doneIds 就地派生；deps 提取复用 taskDependsOn（<depends_on>
+      // 内容按 [,\s]+ 切分，与路由谓词同一解析口径），不新增状态。
+      const doneIds = new Set(tasks.filter(t => t.status === 'done').map(t => t.id));
+      const blockById = new Map();
+      for (const block of taskList) {
+        const a = taskOpeningAttrs(block);
+        if (a && a.id) blockById.set(a.id, block);
+      }
+      const serialRunnable = tasks.filter(t =>
+        !t.parallel && t.status !== 'done'
+        && taskDependsOn(blockById.get(t.id) || '').every(d => doneIds.has(d)));
+      if (serialRunnable.length > 0) {
+        console.error('BLOCKED: execute 出口仍有串行 pending 任务: ' + serialRunnable.map(t => t.id).join(', ')
+          + '——空退出豁免不适用于存在未完成可运行串行任务的情况(先完成该串行任务,或修正任务标记)'
+          + ';无可执行的常规恢复动作时，可用 workflow-state.mjs advance 渡过结构性死结（逃生口：使用后本节点须重新 entry 并重做交付记录）；常规缺产物/缺证据情形不适用');
         process.exit(1);
       }
 
@@ -3268,9 +3285,14 @@ async function main() {
         });
         // 路由无匹配时输出诊断——结构校验保持严格，检测失败纠偏可见
         // 旧模板（task 标签无 status 属性）产出的 TASK.md 无法匹配——明确提示而非静默卡在 execute
+        // 收尾态静默（multipass-exit-hardening D3）：全部任务已 done（无任何 status="pending"）时
+        // 该诊断只剩噪音——仅在仍存在任一 pending 任务时输出。
         if (parallelBlocks.length === 0 && taskList.some((block) => {
           const a = taskOpeningAttrs(block);
           return a && a.parallel;
+        }) && taskList.some((block) => {
+          const a = taskOpeningAttrs(block);
+          return a && a.status === 'pending';
         })) {
           console.error('ROUTE WARN: 未找到 parallel="true" status="pending" 的任务块——检查 task 开标签的 parallel/status 属性（属性序无关；缺 status 不视为 pending）');
         }
