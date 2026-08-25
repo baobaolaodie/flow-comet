@@ -143,7 +143,7 @@ After the issue is confirmed: bug fixes use a `fix/` branch, features use a `fea
 > **Commit messages are public artifacts** — they are visible in the git history on GitHub. Write them as plain descriptions: **no codes, numbers, or jargon**. Use the same public-facing language as CHANGELOG and the docs. Example: `fix: brooks 6-dimension self-check two-tier fallback`.
 
 ```
-<type>(<scope>): <subject>
+<type>: <subject>
 
 feat:      new feature / mechanism
 fix:       bug fix (mechanism, script, hook)
@@ -156,6 +156,10 @@ ci:        CI pipeline changes
 chore:     tooling, release wrap-up
 revert:    reverts a previous commit
 ```
+
+**Scope-free form**: this repository uses `<type>: <subject>` — no `(<scope>)` segment. Task/work-item IDs go in the commit body footer as `Task: <id>` — for example, subject `feat: add import pipeline` with body `Task: T01`.
+
+**Workflow artifacts are never committed**: `.specs/` artifacts (SUMMARY, handoff, TASK, etc.) are gitignored workflow products and never enter the repository. If `git add` is rejected for them, that rejection is correct behavior — never bypass it with `git add -f`.
 
 Examples:
 

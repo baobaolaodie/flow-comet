@@ -143,7 +143,7 @@ Issue 确认后：bug 用 `fix/` 分支、feature 用 `feat/` 分支——都按
 > **提交信息是公开产物**——在 GitHub 的 git 历史中可见。请写纯描述：**不使用代号、编号或行话**。与 CHANGELOG 和公开文档同一语言标准。示例：`fix: brooks 6 维自查两级降级路径`。
 
 ```
-<type>(<scope>): <subject>
+<type>: <subject>
 
 feat:      新功能 / 新机制
 fix:       bug 修复（机制、脚本、hook）
@@ -156,6 +156,10 @@ ci:        CI 管道改动
 chore:     工具、发布收尾
 revert:    回滚之前的提交
 ```
+
+**无 scope 形态**：本仓库使用 `<type>: <subject>`——不含 `(<scope>)` 段。任务号放提交正文尾注 `Task: <id>`——例如主题 `feat: add import pipeline` + 正文 `Task: T01`。
+
+**流程工件不入库**：`.specs/` 下的一切工件（SUMMARY、handoff、TASK 等）是 gitignored 流程产物，永不入库。`git add` 被拒即正确行为，严禁 `-f` 强加。
 
 示例：
 
