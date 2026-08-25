@@ -16,6 +16,8 @@ open → design → plan → execute ⇄ subagent-execute → review → verify 
 
 路由由脚本从 `.specs/` 工件**自动推导**（determineNode）：文件不齐 → 停在对应节点；任务未完成 → 停在 execute；全部完成 → 依次推进 review/verify/archive。
 
+**execute ⇄ subagent-execute 多趟路由**由依赖拓扑驱动：每趟进入 `subagent-execute` 委托依赖（`<depends_on>`）已满足的并行任务，回到 `execute` 处理波次间可运行的串行任务，下一波并行就绪后再入 `subagent-execute`——如此交替直至无剩余可运行任务，再推进 review。**零单趟限制**：混排拓扑（串→并→串→并）合法，按依赖拓扑分趟消化；依赖环/缺失依赖在 plan 出口被拒（见 [TROUBLESHOOTING-zh.md](TROUBLESHOOTING-zh.md)）。
+
 ### 逐节点职责
 
 | 节点 | 职责 | 关键产物 | 出口校验（guard） |
@@ -23,8 +25,8 @@ open → design → plan → execute ⇄ subagent-execute → review → verify 
 | **open** | CHANGE 反问 + 需求分析（AC 推导） | `CHANGE.md` / `REQUIREMENT.md` / CONTEXT 术语更新 | 必填段（模板派生）：`## Why` / `## 用户故事` / 验收段；CONTEXT 孤立追加段检测 |
 | **design** | 技术栈选型 + 架构对齐 + 决策 | `DESIGN.md`（§0 技术栈 / §0.5 架构对齐 / 决策清单 / 风险） | §0 段 + `## 决策清单`（模板派生，支持编号） |
 | **plan** | 原子任务拆分（XML）+ 波次划分 | `TASK.md`（`<task>` 块含 7 字段 + parallel 标记） | task 块存在 + verify 字段 |
-| **execute** | 串行任务执行（协调者委托子代理） | `<task-id>-SUMMARY.md` | SUMMARY 六段 + 6 维自查 + 强制 `## 自检方法`；TASK 签名哈希（enter 记录、exit 比对）；越俎代庖检测 |
-| **subagent-execute** | parallel 任务并行委托（wave） | 同上（每任务一份 SUMMARY） | 同上 + handoff evidence（Return Contract） |
+| **execute** | 串行任务执行（协调者委托子代理；每趟再进入） | `<task-id>-SUMMARY.md` | SUMMARY 六段 + 6 维自查 + 强制 `## 自检方法`；TASK 签名哈希（enter 记录、exit 比对）；越俎代庖检测 |
+| **subagent-execute** | parallel 任务并行委托（wave；按依赖拓扑多趟再进入） | 同上（每任务一份 SUMMARY） | 同上 + handoff evidence（Return Contract） |
 | **review** | 4 轮审查（spec 合规 / 代码质量 / UI 视觉 / 可选） | `REVIEW.md`（Critical/发现/结论） | ≥100B + 必填段 |
 | **verify** | 集成验证 + UAT + 失败诊断（≤3 轮） | `TEST.md` / `UAT.md` / LESSONS 提名 | 验证命令真实执行；UAT.md 存在；LESSONS 编号/位置检测 |
 | **archive** | LESSONS 提名 + 归档 + 分支收尾 | `.specs/archive/<date>-<id>/` / CHANGELOG | 分支校验（新模式）；CHANGELOG 倒序检测 + 未登记本 change 提示 |
@@ -50,6 +52,13 @@ open → design → plan → execute ⇄ subagent-execute → review → verify 
 | `.comet/flow-comet-state.json` | `.comet/` | 状态机（activeChange/currentNode/completedNodes/evidence/…） | 全程（脚本管理） |
 
 > **追加位置纪律**：CONTEXT 术语→术语表表格、决策→已锁决策清单；LESSONS→条目区按 L-NNN 编号；STATE/CHANGELOG→顶部倒序；回退修复→`## Fix 任务` 段——guard 检测（WARN 渐进）兜底。
+
+## 流程纪律
+
+- **`.specs/` 工件不入库**：SUMMARY / handoff / TASK 等全部流程工件留在工作区。`git add` 被拒即正确行为——**严禁 force-add（`-f`）绕过**。
+- **JSON 落盘传参**：`record` 与 `workflow-handoff` 的载荷应写入 UTF-8 文件后用 `--json-file <文件>` 传参，避免内联传参的 Windows PowerShell 引号剥离与 JSON 静默损坏。
+- **SUMMARY 模板纪律**：每份 SUMMARY 必须含 `## 自检方法` 段，置于**越界检查（`## 越界检查`）之后**；6 维自查必须声明三种自检方法之一——`brooks-review`（Skill 完整审查）/ `cache-brooks`（读插件缓存协议文件手动执行）/ `builtin-quickcheck`（内置兜底——须声明不可用原因与缓存尝试证据）。
+- **伪并行提示**：若某并行任务的 `write_files` 只有测试文件（`tests/` / `test_` 前缀）而无生产代码文件，plan 出口会输出渐进 **WARN**（不阻断）列出任务 id，并建议补 `depends_on` 声明或合并成垂直切片（一任务含实现+其测试）。
 
 ## 分支模式
 

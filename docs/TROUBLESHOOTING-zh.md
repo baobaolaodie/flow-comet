@@ -23,13 +23,16 @@
 | `BROOKS-LINT WARN/BLOCKED: 使用 builtin-quickcheck 但未声明缓存尝试证据` | builtin 降级声明但无「已读插件缓存协议文件」证据(新 change BLOCKED;旧 change WARN) | 在 SUMMARY 的 `## 自检方法` 段声明：已 Read 插件缓存协议文件（如 `~/.claude/plugins/cache/brooks-lint-marketplace/.../brooks-review/`；Codex 为 `~/.codex/skills/brooks-review/`）手动执行完整 brooks 流程后才降级 |
 | `VERIFY-FAIL: N/3`（前 3 次）/ `BLOCKED: verify 已失败 N 次，需用户决策` | 自动重试 ≤3 次；第 4 次失败（机器计数 verifyFailures，按 change 隔离）需人工决策 | 暂停，人工决策「继续修 / 停止」 |
 | `verify 失败超限，需用户决策（verifyFailures=N）` | `verify-fail` 命令输出——机器计数（verifyFailures）达上限后的决策提示 | 暂停，人工决策「继续修 / 停止」 |
+| verify 输出出现 `VERIFY-DEGRADED` | 受限会话中管道 spawn 被沙箱以 EPERM 拒绝；脚本改用 `inherit` 方式重试同一命令——真实执行与退出码判定保持，`VERIFY-DEGRADED` 标记行记录降级捕获 | 属预期——该标记不改变退出码语义（非 EPERM 失败不降级；真实失败仍按失败退出） |
 | `BLOCKED: 疑似未 exit 节点 <node>` | `next` 检测到节点顺序非法（跳节点/未 exit） | 按提示执行 `workflow-guard.mjs exit <node> --apply`（回退场景见提示）；节点实际已完成但状态卡住/漂移时，用 `workflow-state.mjs advance`（强制推进——确认节点确实完成后才用）或 `select` |
 | `BLOCKED: currentNode is <node>, cannot exit <target>` | 尝试 exit 的不是当前节点（状态漂移） | 用 `workflow-state.mjs advance`（强制推进——确认当前节点确实完成后才用）或 `select` 切换；禁止手改机器字段 |
 | `BLOCKED: missing evidence for Node <node>` | 节点已完成但缺证据记录 | 运行 `workflow-state.mjs record <node> '{"summary":"<完成摘要>"}'` 补证据后重试；状态漂移用 `advance`/`select` |
+| `BLOCKED: ...无可执行的常规恢复动作时，可用 workflow-state.mjs advance 渡过结构性死结` | 出口因存在未完成的可运行串行任务被 BLOCK，且常规恢复动作不可执行——多趟路由下的结构性死结（如该串行任务的依赖永远无法满足） | 仅对死结类 BLOCKED，按消息中的 advance 边界提示使用 `workflow-state.mjs advance`——逃生口：使用后本节点须重新 entry（`workflow-guard.mjs entry <node>`）并重做交付记录；常规缺产物/缺证据情形**不适用** |
 | `BLOCKED: workflow protocol node must have a non-empty string id` | 自定义协议 `nodes[]` 含空/非法元素 | 修复协议 JSON：每个节点 `id` 非空字符串且避开内置 8 节点 id |
 | `BLOCKED: 未在协议 writeWhitelist 中声明` | 写入路径超出自定义协议白名单（fail-closed） | 在协议 `writeWhitelist` 声明该节点允许的路径前缀，或改用内置协议 |
 | `--protocol <path> 加载失败` | 协议路径不存在 / schemaVersion 或 kind 不符 | 检查路径；确认 `schemaVersion: 1`、`kind: "workflow-kernel"` |
 | `ROUTE WARN: 未找到 parallel="true" status="pending" 的任务块` | TASK.md task 标签缺 `status="pending"` 属性（或属性顺序错） | 在每个 task 标签中 `parallel="true"` 之后补 `status="pending"`（属性顺序：parallel 在 status 前） |
+| `WARN: 伪并行检测——以下并行任务仅写测试文件而无生产代码文件: <ids>` | 并行任务的 `write_files` 只有测试文件（`tests/` / `test_` 前缀）而无生产代码文件——其测试可能隐式依赖他处产出的符号 | 补 `depends_on` 声明指向产出任务，或合并成垂直切片（一任务含实现+其测试）；渐进 WARN——不阻断 |
 | `C4-CHECK SKIP: <原因>` | worktree 脏检查被跳过（非 git 仓库，或 git 命令失败） | 非 git 项目下属预期；git 仓库中出现则 git 命令失败——按原因排查 |
 | `WARN COUNT: N` | entry/exit 汇总行——本次调用共 N 条 WARN | 逐条检查该行上方的 WARN |
 | `--json-file requires a path argument` | `--json-file` 缺路径参数（如作为最后一个参数）或为空值（record 与 handoff 统一用法错误） | 补路径参数：`--json-file <文件>`（Windows PowerShell 下推荐用 `--json-file` 从文件读 JSON，规避引号剥离） |
@@ -42,6 +45,7 @@
 | hook 静默不拦截（Codex） | hook 尚未信任，或 `[features] hooks` 未启用 | 信任 hook（交互会话 `/hooks`；脚本化自动化传 `--dangerously-bypass-hook-trust`）；`config.toml` 含 `[features] hooks = true` |
 | 换写法绕过 hook（Codex） | Codex 拦截为命令级——其他 File API 写法可能绕过 | 平台限制；主流模式（PowerShell cmdlet、.NET File API、重定向）已覆盖 |
 | hook 日志出现 `Cannot find module ...comet-hook-guard`，越权写入被静默放行 | 相对路径旧条目在会话工作目录漂移出项目根后解析失败——崩溃的 hook 被宿主降级放行（fail-open） | 重跑方案 A 安装器把条目原地升级为项目根引用形态（见[安装](INSTALLATION-zh.md)的 hook 升级说明小节） |
+| hook 在会话工作目录漂移出项目根后误判项目根 | runRoot 由兜底链解析：`COMET_RUN_ROOT` → `CLAUDE_PROJECT_DIR` → 自 cwd 逐级向上的最近祖先（含 `.comet/flow-comet-state.json` 或 `.claude/skills/flow-comet` 即视为项目根）→ `cwd`（最后兜底）；无环境变量且无祖先锚点时回退 cwd；相对路径旧条目则报 `Cannot find module ...comet-hook-guard`（宿主降级放行——fail-open） | 显式设置 `COMET_RUN_ROOT`（受限/测试环境），或让项目根含锚点（根下存在 `.comet/flow-comet-state.json` 或 `.claude/skills/flow-comet`），或在项目根内运行会话；相对路径旧条目须用方案 A 安装器升级（见上一行） |
 | dsh 会话中技能不可见 | `.dsh/skills/flow-comet` 未对该项目安装（dsh 在 `<项目>/.dsh/skills/` 下以 rank 100 发现——未安装该目录的项目不可见该技能），或 dsh 低于 `0.1.0-rc.6` | 运行 `node scripts/prepare-env.mjs --target <项目> --platform dsh`；升级 dsh 到 `0.1.0-rc.6`+ |
 | dsh 拦截不生效 | 桥接 loader 未挂载（`$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 或 `cordis.patch.yml` 托管块缺失）、项目未安装，或 `tools/pre-execute` 签名不匹配 | 重跑 `prepare-env --platform dsh`（挂载 loader + 托管块）；确认会话项目根含 `.dsh/skills/flow-comet`（窄监听）；确认 dsh 为 `0.1.0-rc.6`+ |
 | dsh 卸载残留（技能 / AGENTS.md 托管区 / loader 仍在） | 未执行 `prepare-env --purge --platform dsh --yes`（例如只手工删了 `.dsh/skills` 目录） | 运行 `node scripts/prepare-env.mjs --target <项目> --purge --platform dsh --yes`——移除 `.dsh/skills/flow-comet*`、AGENTS.md 托管区、`$DSH_HOME/cordis.patch.yml` 托管块与 loader 文件（非 flow-comet 条目与 dsh-skin 等既有块保留） |
