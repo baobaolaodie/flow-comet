@@ -14,6 +14,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ### Changed
 
+- **Documentation aligned with repository conventions**: task summaries now defer to each repository's own ignore rules and are never force-added into version control, atomic-commit guidance is scope-free and consistent across workflow skills, branch naming alignment via `init --branch-prefix` is documented in the installation guide, and planners are told the wave-grouping constraint before plan exit.
+
 ## [1.5.0-rc.1] - 2026-08-23
 
 Release candidate consolidating the mechanism and skill robustness batch: artifact template fidelity, skill-load declaration front gate, the two-layer skill-loading model, formal zero-commit semantics, and verify-exit sandbox compatibility, plus dsh bridge idle-state containment and plan wave-grouping validation. ([#64](https://github.com/baobaolaodie/flow-comet/pull/64)) ([#65](https://github.com/baobaolaodie/flow-comet/pull/65)) ([#66](https://github.com/baobaolaodie/flow-comet/pull/66)) ([#67](https://github.com/baobaolaodie/flow-comet/pull/67))

@@ -135,7 +135,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <ski
 ### Startup Protocol
 
 1. Run `node .claude/skills/flow-comet/scripts/workflow-state.mjs status` to detect active change and current node.
-2. If no active change and user wants to start new work: `node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-name>`. **init 自动检测项目上下文**：需要初始化时输出提示（同意重跑 `init <id> --init-context` 全量生成 CONTEXT.md / 拒绝 `--init-skip`）；CONTEXT.md 已存在且新鲜时完全静默——详见 `reference/init-detection.md`。
+2. If no active change and user wants to start new work: `node .claude/skills/flow-comet/scripts/workflow-state.mjs init <change-name>`. **init 自动检测项目上下文**：需要初始化时输出提示（同意重跑 `init <id> --init-context` 全量生成 CONTEXT.md / 拒绝 `--init-skip`）；CONTEXT.md 已存在且新鲜时完全静默——详见 `reference/init-detection.md`。项目本地分支规范非默认前缀时可用 `init <id> --branch-prefix <prefix>` 对齐（详见安装文档分支命名小节）。
 3. **首次路由**: `init` 输出即首次路由（NODE: 内置 open 或协议首节点）——直接加载该节点 Skill 并执行（产出工件），一次只加载一个 Skill。`next` 在节点完成（`guard exit <node> --apply` 推进）后用于获取下一节点；init 后立即 `next` 会命中节点顺序门禁（open 未 exit → BLOCKED，符合节点顺序门禁语义）。
 
 ### Resume Rules (every context resume)

@@ -14,6 +14,8 @@
 
 ### 变更
 
+- **规范文档与仓库约定对齐**：任务摘要遵循各仓库自身的忽略规则、绝不强制加入版本库，原子提交格式指引在各技能间统一且不限定作用域，通过 `init --branch-prefix` 对齐分支命名的用法已写入安装指南，规划者在规划出口前即获知波次分组约束。
+
 ## [1.5.0-rc.1] - 2026-08-23
 
 预发布版本，收口机制与技能健壮性批次：工件模板保真、技能加载前置门、两层技能加载模型、零提交正式语义、验证出口沙箱兼容，外加 dsh 桥接空闲态包含性与 plan 波次分组校验。([#64](https://github.com/baobaolaodie/flow-comet/pull/64)) ([#65](https://github.com/baobaolaodie/flow-comet/pull/65)) ([#66](https://github.com/baobaolaodie/flow-comet/pull/66)) ([#67](https://github.com/baobaolaodie/flow-comet/pull/67))
