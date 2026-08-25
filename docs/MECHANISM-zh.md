@@ -24,6 +24,8 @@
 
 hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会话 TUI 阻止工具调用；`claude -p`（SDK CLI 模式）下非零退出被降级为 non-blocking。
 
+越界拦截的项目根兜底链：会话 cwd 漂移时按 `COMET_RUN_ROOT` → `CLAUDE_PROJECT_DIR` → 含 `.comet/flow-comet-state.json` 的最近祖先 → cwd 锚定项目根，项目根外写入仍被拦截。
+
 ## 3. guard 校验体系（证据驱动推进）
 
 | 机制 | 校验点 | 触发 |
@@ -41,7 +43,8 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 | builtin 自检证据 | `builtin-quickcheck` 须声明不可用原因与插件缓存尝试证据(新 change 缺失 BLOCKED;旧 change WARN) | exit execute |
 | 工件模板保真 | SUMMARY / TASK / CHANGE / REQUIREMENT / DESIGN 须保持模板标题、首部字段与段序；新 change 任一缺失 → 阻断 + 恢复指引，旧 change 仅告警 | exit execute / plan / open / design |
 | 波次散文一致性 | 散文 `[P]` 标记须与任务 `parallel="true"` 一致(新 change 不一致 BLOCKED;旧 change WARN) | exit plan |
-| 波次分组一致性 | `[P]` 并行块须构成单个连续块、置于串行序列首/尾；`[P]` 与串行混排（穿插）违规——新 change BLOCK（含恢复指引：调整分组或显式豁免），旧 change WARN | exit plan |
+| 波次分组一致性 | 分组合法性由依赖图判定而非块位置：`depends_on` 无环且引用任务全部存在即合法；串/并混排（穿插）序列合法，由多趟路由按依赖拓扑分趟消化；仅依赖环或缺失依赖引用 BLOCK——新 change BLOCK 含 `depends_on` 调整指引，旧 change WARN | exit plan |
+| 伪并行提示 | 并行任务声明的写入仅含测试文件时，plan 出口输出不阻断的警告（任务 id + 建议：声明显式 `depends_on` 或合并为垂直切片） | exit plan |
 | 越权委托 | 并行 done 任务须经委托节点(新 change 未委托 BLOCKED;旧 change WARN) | exit execute/verify |
 | verify 真实执行 | TEST.md `## 验证命令` 真实运行（支持多行 `&&`）；verifyFailures 机器计数**按变更隔离**（切换变更不继承另一变更的失败次数），第 4 次 → BLOCKED（超时可用 `FLOW_COMET_VERIFY_TIMEOUT_MS` 配置，默认 300s） | exit verify |
 | 追加位置检测 | CONTEXT 孤立追加段 / LESSONS 编号乱序 / STATE+CHANGELOG 非倒序 → WARN（渐进） | exit open/verify/archive |
@@ -55,12 +58,14 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 - **handoff hash 溯源**：`git show <commitHash>` 校验提交文件 ⊆ write_files（从 TASK.md 自动解析，剥 XML 注释）
 - **零提交任务**：request 侧 `write_files` 为空（或 request 记录了 `noCommit` 标记）即判定为零提交——result 跳过提交文件子集校验并输出可审计提示；零提交结果若携带 tracked 提交，新 change 阻断、旧 change 告警
 - **write_files 冲突检测**：parallel 任务 write_files 不重叠才可同 wave 并行
+- **多趟路由**：串/并交互的序列在依赖语义下合法——委托节点可多次进入，每趟按依赖拓扑委派全部依赖已满足的并行任务；等待后续波次的串行任务是合法趟间态
 
 ## 5. 恢复协议
 
 - 任意入口恢复：determineNode 从文件推导 + state 自动纠偏（不依赖对话历史）
 - PROGRESS.md 恢复警告（R1.6 反重复）
 - 分支-状态一致性校验
+- `advance` 逃生口：结构性死结且无常规恢复动作时，`workflow-state.mjs advance` 强制推进（使用后须重新 entry 本节点并重做交付记录）；常规缺产物/缺证据情形不适用
 
 ## 6. guard 自测套件（作者回归基线）
 
