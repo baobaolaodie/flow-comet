@@ -26,7 +26,7 @@
 
 - Old changes / old states auto-fill default fields (executionMode/branchMode/enablePrReview); changes without a branch run unchanged — backward compatible
 - Progressive WARN (not BLOCK) for legacy change re-entry (missing redEvidence/greenEvidence, pure-string handoff)
-- Regression baseline (two-tier): `guard-self-test.mjs` 171 scenarios + `system-test.mjs` 61 items green (required after every change)
+- Regression baseline (two-tier): `guard-self-test.mjs` 184 scenarios + `system-test.mjs` 64 items green (required after every change)
 - dsh platform: the project-level skill copy carries an `INSTALLED_VERSION` marker synced with flow-comet releases; uninstall via `prepare-env --purge --platform dsh --yes` (see [Installation](INSTALLATION.md#option-c--deepseek-harness-dsh-platform))
 
 ## Release checklist (per release)

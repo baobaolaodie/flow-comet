@@ -16,6 +16,12 @@
  *   .codex/rules 为命令批准规则目录,不混用) / 清理 purge / 覆盖清单 overwriteDescription——
  *   main 统一调度,新增平台 = 描述符条目 + 安装/清理函数,main 零改动。
  *
+ * hook 命令项目根锚定:CC 命令引用 CC 注入的 CLAUDE_PROJECT_DIR 运行期展开(Windows cmd.exe
+ *   %VAR% / POSIX $VAR,单一来源常量派生,见 PROJECT_ROOT_ENV_VAR);Codex 官方 hooks 无等价
+ *   项目根变量(查证 openai/codex 上游执行层,结论与出处见 injectCodexHook 注释)→ 安装期
+ *   字面注入 target 绝对路径(迁移目录需重跑安装器)。两平台命令均不加外层引号,以保住
+ *   isManagedHookCommand 的 basename 幂等识别(含空格路径不支持,见常量区取舍说明)。
+ *
  * 非破坏设计（T-FIX-13，2026-08-08 用户裁决）：
  *   - 默认（无 --purge）：**不删除整个 .claude/（或 .agents/ / .dsh/）**——只精确覆盖生成物
  *     （rules/ + skills/ 等），保留其他一切内容（commands/、自定义 hook、自定义 skill）。
@@ -55,6 +61,27 @@ const BUNDLE_DRAFTS = path.join(REPO_ROOT, '.comet', 'bundle-drafts', 'flow-come
 
 // comet-hook-guard 的 command 特征（用于识别"已管理的 hook 命令"，注入时替换避免重复）
 const MANAGED_HOOK_COMMAND_MARKER = 'comet-hook-guard.mjs';
+
+// ---------- hook 命令项目根锚定（单一事实来源） ----------
+// Claude Code 运行 hook 时注入 CLAUDE_PROJECT_DIR 环境变量（值 = 项目根绝对路径，官方 hooks
+// 文档契约）。变量名是唯一事实来源，展开语法按宿主 OS 的 hook shell 派生：
+//   Windows：hook 经 cmd.exe 执行 → %VAR%（cmd.exe 原生展开）
+//   POSIX  ：sh 系执行 → $VAR
+// 本安装器装在本机（安装机 = 目标机），process.platform 即 hook 的执行平台。
+const PROJECT_ROOT_ENV_VAR = 'CLAUDE_PROJECT_DIR';
+
+// 两平台 hook 命令一律不加外层引号（已知取舍）：isManagedHookCommand 按空白分词提取 .mjs
+// token 后取 basename 判等（本任务契约：该函数保持不动），外层引号会并入 token 使 basename
+// 变成 comet-hook-guard.mjs" 而识别失效，破坏幂等升级（旧相对条目将无法被过滤替换）。
+// 代价：项目根路径含空格时，未加引号的命令在空格处断裂——设计允许实施期按三平台实测
+// 微调引号策略，此处以幂等识别优先；含空格路径暂不支持（需先演进识别函数再放开引号）。
+function projectRootGuardScriptRef(rootDirName) {
+  const isWindows = process.platform === 'win32';
+  const sep = isWindows ? '\\' : '/';
+  const varRef = isWindows ? `%${PROJECT_ROOT_ENV_VAR}%` : `$${PROJECT_ROOT_ENV_VAR}`;
+  const segments = [rootDirName, 'skills', 'flow-comet', 'scripts', MANAGED_HOOK_COMMAND_MARKER];
+  return `${varRef}${sep}${segments.join(sep)}`;
+}
 
 // AGENTS.md 托管区标记（Codex/dsh 平台 rules 注入共用——幂等替换边界,任一平台卸载可清）
 const MANAGED_AGENTS_START = '<!-- Managed by flow-comet prepare-env -->';
@@ -124,7 +151,7 @@ const PLATFORMS = {
     // hook 注入：.codex/hooks.json（顶层 hooks 包裹层 + matcher *）+ config.toml features 启用
     installHooks(target, stats) {
       const codexDir = path.join(target, '.codex');
-      injectCodexHook(codexDir);
+      injectCodexHook(codexDir, target);
       injectCodexConfig(codexDir);
       stats.files += 2;
       console.log('[prepare-env] .codex/hooks.json + config.toml 注入完成（hooks 启用，保留既有字段）');
@@ -616,7 +643,10 @@ function injectSettingsHook(claudeDir) {
     hooks: [
       {
         type: 'command',
-        command: 'node .claude/skills/flow-comet/scripts/comet-hook-guard.mjs',
+        // 项目根锚定：node %CLAUDE_PROJECT_DIR%\.claude\skills\...\comet-hook-guard.mjs（Windows）
+        // / node $CLAUDE_PROJECT_DIR/.claude/skills/.../comet-hook-guard.mjs（POSIX）。
+        // 运行期由 CC 注入的变量展开；单一事实来源 = PROJECT_ROOT_ENV_VAR + projectRootGuardScriptRef。
+        command: `node ${projectRootGuardScriptRef('.claude')}`,
       },
     ],
   };
@@ -646,7 +676,7 @@ function injectSettingsHook(claudeDir) {
  * 实测缺包裹层 hook 不加载）。
  * fail-safe：文件存在但 JSON 非法 → 抛错退出（保护用户配置）。
  */
-function injectCodexHook(codexDir) {
+function injectCodexHook(codexDir, target) {
   const hooksPath = path.join(codexDir, 'hooks.json');
   let hooks = {};
   let fileExists = false;
@@ -671,12 +701,26 @@ function injectCodexHook(codexDir) {
     ? hooks.hooks
     : {};
   const existingGroups = Array.isArray(existingHooks.PreToolUse) ? existingHooks.PreToolUse : [];
+  // D6 查证结论（2026-08，openai/codex 官方仓库 main 分支）：
+  // - hooks.json 的 command 经 shell 执行：Windows = %COMSPEC% 回退 cmd.exe /C；POSIX = $SHELL
+  //   回退 /bin/sh -lc（codex-rs/hooks/src/engine/command_runner.rs 的 build_command /
+  //   default_shell_command）；子进程环境 = 会话环境快照 + 条目级 env 映射，current_dir = 会话工作目录。
+  // - 无等价项目根变量：全仓 Rust 检索 CODEX_PROJECT_DIR / CLAUDE_PROJECT_DIR / project_dir
+  //   均 0 命中（GitHub code search，openai/codex）；$PWD/%CD% 展开的是"会话启动目录"而非
+  //   项目根契约，子目录启动即漂移——不构成 CLAUDE_PROJECT_DIR 的等价锚点。
+  // → 按 D6 预授权退化分支：安装期把 target 绝对路径字面注入（path.join）。
+  // ⚠️ 迁移目录需重跑安装器：绝对路径随安装位置固化，项目移动/换 checkout 后必须重新运行
+  //    本安装器刷新 hooks.json（旧条目按脚本 basename 仍被 isManagedHookCommand 识别并在
+  //    重跑时被过滤替换为新位置——幂等自愈，不会产生重复条目）。
+  // 注：上游 HookHandlerConfig::Command 另有 command_windows 平台分字段（declarations.rs）；
+  //    本安装器逐机注入，写入路径与宿主 OS 天然一致，无需分字段双写。
+  const guardAbsolutePath = path.join(target, '.agents', 'skills', 'flow-comet', 'scripts', MANAGED_HOOK_COMMAND_MARKER);
   const newGroup = {
     matcher: '*',
     hooks: [
       {
         type: 'command',
-        command: 'node .agents/skills/flow-comet/scripts/comet-hook-guard.mjs before_tool --platform codex',
+        command: `node ${guardAbsolutePath} before_tool --platform codex`,
       },
     ],
   };

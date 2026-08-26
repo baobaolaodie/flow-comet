@@ -24,6 +24,8 @@ This document describes what flow-comet **does** — the behaviors and rules you
 
 Hook blocking semantics (see Limitations): PreToolUse hook exit 2 blocks in the main TUI session; in `claude -p` non-zero exits are downgraded to non-blocking.
 
+Project-root fallback chain for interception: when the session cwd drifts, the project root is anchored via `COMET_RUN_ROOT` → `CLAUDE_PROJECT_DIR` → the nearest ancestor containing either `.comet/flow-comet-state.json` or `.claude/skills/flow-comet` → cwd, so out-of-project writes keep being intercepted.
+
 ## 3. Guard validation (evidence-driven advancement)
 
 | Mechanism | Check point | Trigger |
@@ -41,7 +43,8 @@ Hook blocking semantics (see Limitations): PreToolUse hook exit 2 blocks in the 
 | builtin self-check evidence | `builtin-quickcheck` must state the unavailable reason AND the plugin-cache attempt (new changes blocked; legacy warned) | exit execute |
 | Artifact template fidelity | SUMMARY / TASK / CHANGE / REQUIREMENT / DESIGN must keep the template title, header fields, and section order; new changes missing any part are blocked with recovery guidance, legacy changes warned | exit execute / plan / open / design |
 | Wave-wording consistency | prose `[P]` markers must match task `parallel="true"` (new changes blocked; legacy warned) | exit plan |
-| Wave grouping consistency | `[P]` blocks must form a single contiguous group placed before or after the serial chain; interleaving `[P]` and serial tasks (mixing) violates grouping — new changes BLOCK with recovery guidance (re-group or explicit exemption), legacy WARN | exit plan |
+| Wave grouping consistency | grouping validity is decided by the dependency graph, not by block position: acyclic `depends_on` with every referenced task present is legal; interleaved parallel/serial sequences are allowed and are consumed pass-by-pass by multi-pass routing in dependency-topology order; only a dependency cycle or a missing dependency reference blocks — new changes BLOCK with `depends_on` adjustment guidance, legacy changes WARN | exit plan |
+| Pseudo-parallel advisory | when a parallel task declares only test files in its writes, the plan exit emits a non-blocking warning (task id + suggestion: declare an explicit `depends_on` or merge into a vertical slice) | exit plan |
 | Overreach delegation | parallel done tasks require the delegation node exited (new changes blocked; legacy warned) | exit execute/verify |
 | verify real execution | TEST.md `## 验证命令` actually runs (multi-line `&&` supported); verifyFailures machine-counted **per change** (switching changes does not carry over another change's count), 4th → BLOCKED (timeout configurable via `FLOW_COMET_VERIFY_TIMEOUT_MS`, default 300s) | exit verify |
 | Append placement | CONTEXT orphan sections / LESSONS numbering-out-of-order / STATE+CHANGELOG non-reverse-order → WARN (progressive) | exit open/verify/archive |
@@ -55,20 +58,22 @@ Hook blocking semantics (see Limitations): PreToolUse hook exit 2 blocks in the 
 - **handoff hash provenance**: `git show <commitHash>` verifies committed files ⊆ write_files (auto-parsed from TASK.md, XML comments stripped)
 - **Zero-commit tasks**: a request-side empty `write_files` list (or request-side `noCommit` marker) classifies the task as zero-commit — results skip the commit-subset check with an auditable prompt; zero-commit results carrying tracked files are blocked on new changes and warned on legacy changes
 - **write_files conflict detection**: parallel tasks may share a wave only if their write_files do not overlap
+- **Multi-pass routing**: interleaved parallel/serial task sequences are valid under dependency semantics — the delegation node can be entered multiple times, each pass delegating every dependency-satisfied parallel task in dependency-topology order; serial tasks waiting on later passes are a legal intermediate state
 
 ## 5. Recovery protocol
 
 - Any-entry recovery: determineNode derives from files + state auto-correction (no conversation history needed)
 - PROGRESS.md recovery warning (R1.6 anti-repetition)
 - Branch-state consistency check
+- `advance` escape hatch: for structural deadlocks with no routine recovery action, `workflow-state.mjs advance` forces advancement (you must re-enter the node and redo the delivery records afterwards); not for ordinary missing-artifact/missing-evidence cases
 
 ## 6. Guard self-test suite (author regression baseline)
 
-`scripts/guard-self-test.mjs`: **171 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (61 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
+`scripts/guard-self-test.mjs`: **184 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (64 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
 
 ```bash
 node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 171 SCENARIOS PASSED
+# → ALL 184 SCENARIOS PASSED
 ```
 
 ## 6.5 DeepSeek Harness (dsh) platform

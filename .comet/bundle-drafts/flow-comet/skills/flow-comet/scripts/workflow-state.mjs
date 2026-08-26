@@ -380,6 +380,20 @@ async function nodeFlagsComplete(nodeFlags, nodeId) {
   return true;
 }
 
+// 协议任务文件路径：协议可选 taskFile 字段（相对 .specs/<change-id>/），无声明时缺省 TASK.md。
+// determineNode 与 next 的零进展防呆共用（同一解析，防两处漂移）。
+function protocolTaskFilePath(protocol, changeName) {
+  const taskFile = typeof protocol.taskFile === 'string' && protocol.taskFile !== ''
+    ? protocol.taskFile
+    : 'TASK.md';
+  return path.join(specsRoot, changeName, taskFile);
+}
+
+// 协议是否含 subagent-execute 委托节点（自定义协议可不含——此时 parallel 任务由 execute 直接消化）
+function hasSubagentNode(protocol) {
+  return route(protocol).some((n) => n.id === 'subagent-execute');
+}
+
 async function determineNode(changeName, protocol, completedNodes = []) {
   // （实测）: 全部节点已完成 → 完成态，不产出最后节点。
   // 自定义协议无 archive 节点时，completedNodes 全齐后 next 仍会输出 NODE: <最后节点>
@@ -397,10 +411,7 @@ async function determineNode(changeName, protocol, completedNodes = []) {
   const nodeFlags = buildNodeCompletionFlags(protocol, changeName);
   // 任务文件路径：协议可选 taskFile 字段（相对 changeDir），无声明时缺省 TASK.md。
   // 自定义协议无 taskFile 时 parallel 检测自然降级为串行（任务文件缺失 → 不路由 subagent-execute）。
-  const taskFile = typeof protocol.taskFile === 'string' && protocol.taskFile !== ''
-    ? protocol.taskFile
-    : 'TASK.md';
-  const taskPath = path.join(changeDir, taskFile);
+  const taskPath = protocolTaskFilePath(protocol, changeName);
 
   // 节点顺序 = 协议 nodes 顺序（disabled 过滤，见 route()）；execute/subagent-execute 由任务状态特判。
   // 按协议顺序拆分：execute/subagent-execute 之前的节点走产物门控（内置 = open → design → plan），
@@ -439,12 +450,14 @@ async function determineNode(changeName, protocol, completedNodes = []) {
     const pending = attrsList.filter((a) => a.status === 'pending').length;
     const done = attrsList.filter((a) => a.status === 'done').length;
     if (pending > 0) {
+      // 多趟循环路由（循环路由形态决策 · 多趟路由架构决策记录）：委托进入谓词每趟重新求值——∃ p ∈ tasks：p.parallel ∧
+      // p.status=pending ∧ deps(p) ⊆ doneIds → 路由 subagent-execute（第 N 趟，节点可多次进入）。
+      // 旧「首趟委托完成后即固定单趟」的防死循环限制移除；死循环防护改由三重保险承担：
+      // plan 出口依赖图前置拦截（guard）/ next 单趟零进展防呆（本脚本）/ 每趟重入完整 entry 检查
+      // （guard entry R2，不绕过）。与 workflow-guard 出口 --apply 平行路由镜像同谓词。
       // 只检测依赖已满足的 parallel 任务，避免 Wave N+1 的 parallel 任务
       // 在 Wave N 串行任务未完成时就被路由到 subagent-execute。
-      // subagent-execute 已完成（第一波委托 exit）后第二波 parallel 不再路由回
-      // 该节点（防死循环）——与 workflow-guard 平行路由的 !completed 判定一致。
-      const hasSubagentNode = route(protocol).some((n) => n.id === 'subagent-execute');
-      if (hasSubagentNode && !completedNodes.includes('subagent-execute')) {
+      if (hasSubagentNode(protocol)) {
         // 收集所有 done 任务的 id（开标签属性序无关）
         const doneIds = new Set(attrsList.filter((a) => a.status === 'done' && a.id).map((a) => a.id));
         // 检查 pending parallel 任务中是否有依赖已满足的（开标签 parallel="true" 且 status="pending"）
@@ -858,6 +871,37 @@ async function main() {
       }
     }
     const detectedNode = await determineNode(changeName, protocol, state.completedNodes);
+    // 单趟零进展防呆（三重防呆决策之二·状态机侧）：路由落在 execute/subagent-execute，但既无可委托的并行任务
+    // （依赖已满足集合为空）又无串行 pending，且 TASK 未全 done——剩余 pending 全部是依赖无法满足的
+    // 孤儿并行任务（数据异常：depends_on 引用不存在的任务 id 或执行期出现依赖环）→ BLOCKED，
+    // 防止静默路由到无法推进的节点造成死循环/死等。协议无 subagent-execute 节点时不适用
+    // （parallel 任务由 execute 直接消化，无孤儿语义）。依赖环的常规拦截点在 plan 出口（guard 前置），
+    // 此处兜底执行期数据异常（如手改 TASK 绕过签名校验的极端态）。
+    if (detectedNode === 'execute' || detectedNode === 'subagent-execute') {
+      if (hasSubagentNode(protocol)) {
+        try {
+          const zpBlocks = taskBlocks(await fs.readFile(protocolTaskFilePath(protocol, changeName), 'utf8'));
+          const zpAttrs = zpBlocks.map(taskOpeningAttrs).filter(Boolean);
+          const zpPending = zpAttrs.filter((a) => a.status === 'pending');
+          if (zpPending.length > 0) {
+            const zpDoneIds = new Set(zpAttrs.filter((a) => a.status === 'done' && a.id).map((a) => a.id));
+            const zpEligible = zpBlocks.filter((block) => {
+              const a = taskOpeningAttrs(block);
+              if (!a || !a.parallel || a.status !== 'pending') return false;
+              const depsMatch = block.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
+              if (!depsMatch || !depsMatch[1].trim()) return true;
+              return depsMatch[1].trim().split(/[,\s]+/).filter(Boolean).every((d) => zpDoneIds.has(d));
+            });
+            const zpSerial = zpPending.filter((a) => !a.parallel);
+            if (zpEligible.length === 0 && zpSerial.length === 0) {
+              console.error('BLOCKED: 路由零进展——既无可委托的并行任务（依赖已满足集合为空）也无串行 pending，但 TASK 尚有 ' + zpPending.length + ' 个未完成任务');
+              console.error('疑似孤儿并行任务依赖无法满足（检查 depends_on）：' + zpPending.map((a) => a.id).join(', ') + '——修正 depends_on 为真实存在且无环的任务 id 后重试；执行期出现此异常请核对 TASK.md 是否被手改');
+              process.exit(1);
+            }
+          }
+        } catch {}
+      }
+    }
     // 状态漂移自动校正——以文件产物为准（determineNode）校正 state.currentNode。
     // 进行中节点保护:currentNode 未 exit(不在 completedNodes)且已记录 evidence(record 过)
     // → 视为节点进行中(可能 exit 被内容级拦截后重跑),不校正推走——否则被拦截节点

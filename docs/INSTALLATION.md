@@ -53,6 +53,12 @@ node scripts/prepare-env.mjs --target <absolute path to target project> --purge 
 
 **Updating an installed flow-comet**: re-run the same Option A command — idempotent (overwrites generated files + merges the hook, preserves existing config).
 
+### Hook upgrade
+
+The injected hook command shape evolves across releases: newer releases reference the guard script through the host's project-root variable instead of a relative path, so interception keeps working when the session's working directory drifts away from the project root. **Re-running the same Option A installer command upgrades the managed hook entry in place** — the entry is recognized by the script it points to regardless of its command shape and replaced with the current form: no duplicates, no residue, no manual cleanup of old settings. If you installed via Option B (manual copy), update the entry by hand to match the recommended command in step 3 above. If out-of-scope writes stopped being blocked after working-directory drift (hook log shows `Cannot find module ...comet-hook-guard`), that is the legacy relative-path entry failing to resolve — the fix is the same re-run; see the matching symptom row in [Troubleshooting](TROUBLESHOOTING.md).
+
+> **Fail-open boundary**: a host that degrades a crashing hook to non-blocking lets the tool call through, and flow-comet cannot change that host behavior — the only fix is to remove the crash itself. The project-root reference resolves from the injected project root instead of the session's working directory, so the guard script is always found and the `Cannot find module ...comet-hook-guard` failure mode no longer occurs (crash probability for this cause drops to zero).
+
 ### Platforms
 
 The installer targets **Claude Code** by default (unchanged behavior). The target platform is chosen in this order:
@@ -73,13 +79,13 @@ On non-default platforms, command paths inside SKILL/GUIDANCE files are rewritte
 ### Verifying installation (no side effects, no change created)
 
 1. **Structure**: `flow-comet*` skill directories under `<target>/.claude/skills/` (count matches prepare-env output, currently 19) + `rules/flow-comet-orchestration.md` + `settings.local.json` + `skills/flow-comet/INSTALLED_VERSION` (version marker shipped with the skill bundle — `cat .claude/skills/flow-comet/INSTALLED_VERSION`; it equals the latest release version, or for prepare-env installs with git available, a precise `<release>-<n>-g<hash>` describing how far the source has accumulated since that release)
-2. **Config loadability**: `settings.local.json` is valid JSON; `hooks.PreToolUse[].command` points to `node .claude/skills/flow-comet/scripts/comet-hook-guard.mjs` and that file exists
+2. **Config loadability**: `settings.local.json` is valid JSON; `hooks.PreToolUse[].hooks[].command` points to the project-root reference `node %CLAUDE_PROJECT_DIR%\.claude\skills\flow-comet\scripts\comet-hook-guard.mjs` (POSIX hosts: `node $CLAUDE_PROJECT_DIR/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`) and `<target>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs` exists. Claude Code injects `CLAUDE_PROJECT_DIR` with the project root when a hook runs, so the path resolves from the project root rather than the session's working directory — it still resolves after the working directory drifts out of the project root (the recommended shape under [Hook upgrade](#hook-upgrade))
 3. **Consistency**: diff against the authoritative source (run inside the flow-comet repo; no output = identical):
    `diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/rules <target>/.claude/rules` and the same for `skills`
 4. **Smoke test** (run inside the target project): `cd <target> && node .claude/skills/flow-comet/scripts/workflow-state.mjs status` — expected output is a JSON state object (`{"status":"no-change",...}` for a fresh project, `{"status":"running","change":...}` when a workflow is active)
 
 > Commands are POSIX-style (Git Bash / WSL / macOS terminal); Windows users should run them in Git Bash.
-> **Note**: `guard-self-test.mjs` (171 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
+> **Note**: `guard-self-test.mjs` (184 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
 
 ### Using flow-comet on Codex
 
@@ -119,7 +125,7 @@ cp -r $SKILLS/flow-comet* "$TARGET/.claude/skills/"
 cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.claude/rules/"
 ```
 
-**3. Register the hook (manual)**: merge the following into the target project's `.claude/settings.local.json` (preserve existing content, e.g. `permissions`). The hook command's relative path resolves against the Claude Code project root (i.e. `<target>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`):
+**3. Register the hook (manual)**: merge the following into the target project's `.claude/settings.local.json` (preserve existing content, e.g. `permissions`). The command references the guard script through Claude Code's project-root variable (`CLAUDE_PROJECT_DIR`, injected with the project root when a hook runs; `%CLAUDE_PROJECT_DIR%` on Windows, `$CLAUDE_PROJECT_DIR` on POSIX), so it resolves from the project root instead of the session's working directory (i.e. `<target>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`):
 
 ```json
 {
@@ -130,7 +136,7 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/skills/flow-comet/scripts/comet-hook-guard.mjs"
+            "command": "node %CLAUDE_PROJECT_DIR%\\.claude\\skills\\flow-comet\\scripts\\comet-hook-guard.mjs"
           }
         ]
       }
@@ -138,6 +144,10 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
   }
 }
 ```
+
+POSIX hosts use the forward-slash command form instead: `node $CLAUDE_PROJECT_DIR/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`.
+
+> **Upgrade note**: projects that installed earlier with the legacy relative-path entry (`node .claude/skills/...`) can upgrade in place — re-running the Option A installer replaces that entry with the project-root form above (managed entries are recognized by the script name and overwritten, no manual cleanup needed).
 
 **4. Runtime state**: `.comet/flow-comet-state.json` is created by `init` (or the first `/flow-comet` call).
 
@@ -205,6 +215,19 @@ rm -rf <target>/.dsh/skills/flow-comet*
 ```
 
 **Multi-project semantics**: each project installs its own skill tree (a project that has not installed the skill cannot see it); the bridge loader is a single global copy serving all flow-comet projects (per-session project detection — equivalent to the Claude Code project-level hook).
+
+## Branch naming alignment
+
+By default the engine creates the workflow branch as `change/<id>`. If your project follows a different local branch convention, pass a custom prefix when initializing the change:
+
+```bash
+cd <target project>
+node .claude/skills/flow-comet/scripts/workflow-state.mjs init <id> --branch-prefix feat/
+```
+
+On Codex the same init runs against `.agents/skills/flow-comet/scripts/workflow-state.mjs`; on dsh against `.dsh/skills/flow-comet/scripts/workflow-state.mjs` (paths are rewritten at install time — see [Platforms](#platforms)). A missing trailing `/` is added automatically, so `--branch-prefix feat` and `--branch-prefix feat/` are equivalent.
+
+Branch/state consistency checks (`status`/`next`) compare the current branch with the active change and emit a `WARN:` line on mismatch. The warning is a non-blocking hint, not an error — the workflow keeps running. To clear it, check out the expected branch (`git checkout <prefix><activeChange>`); the full symptom table lives in [Troubleshooting](TROUBLESHOOTING.md). Day-to-day branch behavior once the workflow is running (automatic creation, archive wrap-up, merge-back) is described in [Usage](USAGE.md).
 
 ## Uninstalling
 

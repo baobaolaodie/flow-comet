@@ -53,6 +53,12 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 
 **更新已安装的 flow-comet**：重跑同一条方案 A 命令即可（幂等——覆盖生成物 + 合并注入 hook，既有配置保留）。
 
+### hook 升级说明
+
+注入的 hook 命令形态随版本演进：新版本经宿主的项目根变量引用守卫脚本，而非相对路径——会话工作目录漂移出项目根后拦截仍然命中。**重跑同一条方案 A 安装器命令即可原地升级托管 hook 条目**——安装器按条目指向的脚本识别托管条目、无论新旧形态一律替换为当前形态：不重复、不残留、无需手工清理旧配置。若经方案 B（手动复制）安装，请按上方第 3 步手工把条目更新为推荐命令形态。若工作目录漂移后越权写入不再被拦截（hook 日志出现 `Cannot find module ...comet-hook-guard`），即旧相对路径条目解析失效——处置同为重跑安装器；现象识别见[故障排查](TROUBLESHOOTING-zh.md)对应症状行。
+
+> **fail-open 边界说明**：宿主把 hook 异常降级为 non-blocking 时，该次工具调用会被放行——flow-comet 无法改变宿主行为，只能消除崩溃本身。项目根引用自注入的项目根解析而非会话工作目录，守卫脚本恒可找到，`Cannot find module ...comet-hook-guard` 这一失效模式不再出现（此类崩溃概率归零）。
+
 ### 平台
 
 安装器默认面向 **Claude Code**（行为不变）。目标平台按以下顺序确定：
@@ -73,12 +79,12 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 ### 验证安装（无副作用，不创建 change）
 
 1. **结构检查**：`<目标项目>/.claude/skills/` 下 `flow-comet*` skill 目录数量与 prepare-env 输出一致（当前 19 个）+ `rules/flow-comet-orchestration.md` + `settings.local.json` 均存在 + `skills/flow-comet/INSTALLED_VERSION`（随技能包分发的版本标识——`cat .claude/skills/flow-comet/INSTALLED_VERSION`；内容为基于的最近发布版本；prepare-env 安装且源仓库有 git 时更精确：`<发布版本>-<领先提交数>-g<hash>`）
-2. **配置可加载性**：`settings.local.json` 是合法 JSON；`hooks.PreToolUse[].command` 指向 `node .claude/skills/flow-comet/scripts/comet-hook-guard.mjs` 且该文件存在
+2. **配置可加载性**：`settings.local.json` 是合法 JSON；`hooks.PreToolUse[].hooks[].command` 指向项目根变量绝对引用 `node %CLAUDE_PROJECT_DIR%\.claude\skills\flow-comet\scripts\comet-hook-guard.mjs`（POSIX 宿主：`node $CLAUDE_PROJECT_DIR/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`）且 `<目标项目>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs` 存在。Claude Code 运行 hook 时注入 `CLAUDE_PROJECT_DIR` = 项目根，路径自项目根解析而非会话工作目录——工作目录漂移出项目根后仍命中（与[hook 升级说明](#hook-升级说明)推荐的形态一致）
 3. **一致性检查**（在 flow-comet 仓库内执行，strip 行尾后应无差异）：`diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/rules <目标项目>/.claude/rules` 与 `.../skills`——**diff 无输出即通过**
 4. **真实环境冒烟**（在目标项目目录内执行）：`cd <目标项目> && node .claude/skills/flow-comet/scripts/workflow-state.mjs status`——期望输出 JSON 状态对象（全新项目为 `{"status":"no-change",...}`，运行中为 `{"status":"running","change":...}`）
 
 > 命令为 POSIX 风格（Git Bash / WSL / macOS 终端）；Windows 用户请在 Git Bash 中执行。
-> **注意**：`guard-self-test.mjs`（171 场景）是**作者回归基线**（沙箱环境自测脚本逻辑——不依赖安装完整性，不是安装验证判据）。
+> **注意**：`guard-self-test.mjs`（184 场景）是**作者回归基线**（沙箱环境自测脚本逻辑——不依赖安装完整性，不是安装验证判据）。
 
 ### 在 Codex 上使用 flow-comet
 
@@ -118,7 +124,7 @@ cp -r $SKILLS/flow-comet* "$TARGET/.claude/skills/"
 cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.claude/rules/"
 ```
 
-**3. 注册 hook（手动）**：在目标项目 `.claude/settings.local.json` 的 `hooks` 中**合并**以下片段（保留既有内容，如 `permissions`）。hook command 的相对路径**相对于 Claude Code 的项目根**解析（即 `<目标项目>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`）：
+**3. 注册 hook（手动）**：在目标项目 `.claude/settings.local.json` 的 `hooks` 中**合并**以下片段（保留既有内容，如 `permissions`）。命令经 Claude Code 的项目根变量引用守卫脚本（`CLAUDE_PROJECT_DIR`——hook 运行时宿主注入项目根；Windows 为 `%CLAUDE_PROJECT_DIR%`，POSIX 为 `$CLAUDE_PROJECT_DIR`），自项目根解析而非会话工作目录（即 `<目标项目>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`）：
 
 ```json
 {
@@ -129,7 +135,7 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/skills/flow-comet/scripts/comet-hook-guard.mjs"
+            "command": "node %CLAUDE_PROJECT_DIR%\\.claude\\skills\\flow-comet\\scripts\\comet-hook-guard.mjs"
           }
         ]
       }
@@ -137,6 +143,10 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
   }
 }
 ```
+
+POSIX 宿主使用正斜杠命令形态：`node $CLAUDE_PROJECT_DIR/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`。
+
+> **升级说明**：以旧相对路径条目（`node .claude/skills/...`）安装的存量项目可原地升级——重跑方案 A 安装器即把旧条目替换为上面的项目根引用形态（托管条目按脚本名识别并覆盖，无需手工清理旧配置）。
 
 **4. 运行状态**：`.comet/flow-comet-state.json` 由 `init`（或首个 `/flow-comet` 调用）自动创建。
 
@@ -204,6 +214,19 @@ rm -rf <目标项目>/.dsh/skills/flow-comet*
 ```
 
 **多项目语义**：每项目独立安装技能树（未安装该技能的项目不可见）；桥接 loader 全局一份，服务多个 flow-comet 项目（按会话项目判定——与 Claude Code 项目级 hook 等价）。
+
+## 分支命名本地适配
+
+引擎缺省把工作流分支建为 `change/<id>`。项目有本地分支规范时，在初始化 change 时传入自定义前缀：
+
+```bash
+cd <目标项目>
+node .claude/skills/flow-comet/scripts/workflow-state.mjs init <id> --branch-prefix feat/
+```
+
+Codex 上同一 init 针对 `.agents/skills/flow-comet/scripts/workflow-state.mjs`，dsh 上针对 `.dsh/skills/flow-comet/scripts/workflow-state.mjs`（路径在安装时重写——见[平台](#平台)）。前缀缺尾部 `/` 时自动补全，`--branch-prefix feat` 与 `--branch-prefix feat/` 等价。
+
+分支/状态一致性检查（`status`/`next`）会把当前分支与 activeChange 比对，不一致时输出一条 `WARN:`。该警告是**非阻断提示**而非错误——流程照常运行。消除方式是检出期望分支（`git checkout <prefix><activeChange>`）；完整现象表见[故障排查](TROUBLESHOOTING-zh.md)。工作流运行后的分支日常行为（自动创建、归档收尾、合并回主分支）见[使用](USAGE-zh.md)。
 
 ## 卸载
 
