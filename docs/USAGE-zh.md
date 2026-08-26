@@ -57,7 +57,7 @@ open → design → plan → execute ⇄ subagent-execute → review → verify 
 
 - **`.specs/` 工件不入库**：SUMMARY / handoff / TASK 等全部流程工件留在工作区。`git add` 被拒即正确行为——**严禁 force-add（`-f`）绕过**。
 - **JSON 落盘传参**：`record` 与 `workflow-handoff` 的载荷应写入 UTF-8 文件后用 `--json-file <文件>` 传参，避免内联传参的 Windows PowerShell 引号剥离与 JSON 静默损坏。
-- **SUMMARY 模板纪律**：每份 SUMMARY 必须含 `## 自检方法` 段，置于**越界检查（`## 越界检查`）之后**；6 维自查必须声明三种自检方法之一——`brooks-review`（Skill 完整审查）/ `cache-brooks`（读插件缓存协议文件手动执行）/ `builtin-quickcheck`（内置兜底——须声明不可用原因与缓存尝试证据）。
+- **SUMMARY 模板纪律**：每份 SUMMARY 必须含 `## 自检方法` 段，置于**越界检查（`## 越界检查`）之后**；6 维自查必须在 `## 自检方法` 段内声明三种自检方法之一——`brooks-review`（Skill 完整审查）/ `cache-brooks`（读插件缓存协议文件手动执行）/ `builtin-quickcheck`（内置兜底——须声明不可用原因与缓存尝试证据）。
 - **伪并行提示**：若某并行任务的 `write_files` 只有测试文件（`tests/` / `test_` 前缀）而无生产代码文件，plan 出口会输出渐进 **WARN**（不阻断）列出任务 id，并建议补 `depends_on` 声明或合并成垂直切片（一任务含实现+其测试）。
 
 ## 分支模式

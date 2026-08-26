@@ -10,7 +10,7 @@
 |------|------|------|
 | `BLOCKED: 归档必须在 <prefix><id> 分支上进行`（前缀默认 `change/`） | 在错误分支执行 archive（分支模式） | `git checkout <prefix><id>`（默认 `change/<id>`）后重试 |
 | `WARN: 分支与 activeChange 不一致` | 分支与状态漂移 | `git checkout <prefix><activeChange>`（按 WARN 提示；前缀为 init 时配置的 `--branch-prefix`，默认 `change/`）后继续 |
-| `WORKTREE WARN: .specs/<change>/ 有未提交工件` | 委托前工件未 commit | commit 工件，或在委托 prompt 内联上下文 |
+| `WORKTREE WARN: .specs/<change>/ 有未提交工件` | 委托前工件未 commit | 在委托 prompt 内联所需上下文（流程工件留在工作区、永不入库） |
 | `BLOCKED: TASK.md 任务集被修改` | execute 期间增删任务/改 action/改边界 | 回退 TASK.md 到 enter 时内容（仅标记 done 合法） |
 | `BLOCKED: state 字段类型非法` | state 文件被直改坏 | 修复字段类型或从备份/git 历史恢复 `.comet/flow-comet-state.json` |
 | `WARN: CONTEXT.md 检测到孤立追加段` | 术语/决策被尾部追加成新段 | 把内容移入术语表表格/已锁决策清单 |
@@ -24,9 +24,9 @@
 | `VERIFY-FAIL: N/3`（前 3 次）/ `BLOCKED: verify 已失败 N 次，需用户决策` | 自动重试 ≤3 次；第 4 次失败（机器计数 verifyFailures，按 change 隔离）需人工决策 | 暂停，人工决策「继续修 / 停止」 |
 | `verify 失败超限，需用户决策（verifyFailures=N）` | `verify-fail` 命令输出——机器计数（verifyFailures）达上限后的决策提示 | 暂停，人工决策「继续修 / 停止」 |
 | verify 输出出现 `VERIFY-DEGRADED` | 受限会话中管道 spawn 被沙箱以 EPERM 拒绝；脚本改用 `inherit` 方式重试同一命令——真实执行与退出码判定保持，`VERIFY-DEGRADED` 标记行记录降级捕获 | 属预期——该标记不改变退出码语义（非 EPERM 失败不降级；真实失败仍按失败退出） |
-| `BLOCKED: 疑似未 exit 节点 <node>` | `next` 检测到节点顺序非法（跳节点/未 exit） | 按提示执行 `workflow-guard.mjs exit <node> --apply`（回退场景见提示）；节点实际已完成但状态卡住/漂移时，用 `workflow-state.mjs advance`（强制推进——确认节点确实完成后才用）或 `select` |
-| `BLOCKED: currentNode is <node>, cannot exit <target>` | 尝试 exit 的不是当前节点（状态漂移） | 用 `workflow-state.mjs advance`（强制推进——确认当前节点确实完成后才用）或 `select` 切换；禁止手改机器字段 |
-| `BLOCKED: missing evidence for Node <node>` | 节点已完成但缺证据记录 | 运行 `workflow-state.mjs record <node> '{"summary":"<完成摘要>"}'` 补证据后重试；状态漂移用 `advance`/`select` |
+| `BLOCKED: 疑似未 exit 节点 <node>` | `next` 检测到节点顺序非法（跳节点/未 exit） | 按提示执行 `workflow-guard.mjs exit <node> --apply`（回退场景见提示）；状态卡住/漂移用 `workflow-state.mjs select` |
+| `BLOCKED: currentNode is <node>, cannot exit <target>` | 尝试 exit 的不是当前节点（状态漂移） | 用 `workflow-state.mjs select` 切换（必要时先补 record 证据）；禁止手改机器字段 |
+| `BLOCKED: missing evidence for Node <node>` | 节点已完成但缺证据记录 | 运行 `workflow-state.mjs record <node> '{"summary":"<完成摘要>"}'` 补证据后重试；状态漂移用 `select` |
 | `BLOCKED: ...无可执行的常规恢复动作时，可用 workflow-state.mjs advance 渡过结构性死结` | 出口因存在未完成的可运行串行任务被 BLOCK，且常规恢复动作不可执行——多趟路由下的结构性死结（如该串行任务的依赖永远无法满足） | 仅对死结类 BLOCKED，按消息中的 advance 边界提示使用 `workflow-state.mjs advance`——逃生口：使用后本节点须重新 entry（`workflow-guard.mjs entry <node>`）并重做交付记录；常规缺产物/缺证据情形**不适用** |
 | `BLOCKED: workflow protocol node must have a non-empty string id` | 自定义协议 `nodes[]` 含空/非法元素 | 修复协议 JSON：每个节点 `id` 非空字符串且避开内置 8 节点 id |
 | `BLOCKED: 未在协议 writeWhitelist 中声明` | 写入路径超出自定义协议白名单（fail-closed） | 在协议 `writeWhitelist` 声明该节点允许的路径前缀，或改用内置协议 |
