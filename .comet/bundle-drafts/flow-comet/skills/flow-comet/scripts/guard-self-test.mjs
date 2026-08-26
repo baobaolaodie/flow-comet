@@ -728,7 +728,8 @@ const SCENARIOS = [
       st.evidence.execute = { summary: 'executed' };
       st.evidence['subagent-execute'] = { handoffResult: handoffFor(['P02']) };
       writeState(dir, st);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_SERIAL_PENDING + TASK_P2);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+        '<task id="T01" parallel="false" status="pending"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n' + TASK_P2);
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
       const res = runGuard(['exit', 'execute'], dir);
       assertExit(res, 1);
@@ -4522,6 +4523,30 @@ const SCENARIOS = [
       assertOut(res, 'WARN: 伪并行检测');
       assertOut(res, 'P01');
       assertOut(res, 'depends_on');
+      // 新形态 a：test 后缀文件（src/helper.test.mjs）——应 WARN
+      res = runPlanExit(dir,
+        '<task id="P01b" parallel="true" status="pending"><action>实现 P01b</action><write_files>src/helper.test.mjs</write_files><verify>node --check src/helper.test.mjs</verify></task>\n');
+      assertExit(res, 0);
+      assertOut(res, 'WARN: 伪并行检测');
+      assertOut(res, 'P01b');
+      // 新形态 b：__tests__/ 目录（__tests__/helper.test.ts）——应 WARN
+      res = runPlanExit(dir,
+        '<task id="P01c" parallel="true" status="pending"><action>实现 P01c</action><write_files>__tests__/helper.test.ts</write_files><verify>node --check __tests__/helper.test.ts</verify></task>\n');
+      assertExit(res, 0);
+      assertOut(res, 'WARN: 伪并行检测');
+      assertOut(res, 'P01c');
+      // 新形态 c：Windows 反斜杠分隔（tests\foo.test.mjs）——应 WARN
+      res = runPlanExit(dir,
+        '<task id="P01d" parallel="true" status="pending"><action>实现 P01d</action><write_files>tests\\foo.test.mjs</write_files><verify>node --check tests\\foo.test.mjs</verify></task>\n');
+      assertExit(res, 0);
+      assertOut(res, 'WARN: 伪并行检测');
+      assertOut(res, 'P01d');
+      // 新形态 d：多行注释块包裹（整块剥除后再解析，注释内容不得当生产文件）——仍 WARN
+      res = runPlanExit(dir,
+        '<task id="P01e" parallel="true" status="pending"><action>实现 P01e</action><write_files><!-- 规划备注\nsrc/fake.mjs\n-->tests/real.test.mjs</write_files><verify>node --check tests/real.test.mjs</verify></task>\n');
+      assertExit(res, 0);
+      assertOut(res, 'WARN: 伪并行检测');
+      assertOut(res, 'P01e');
       // 反例：write_files 混有生产文件 → 不触发
       res = runPlanExit(dir,
         '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>src/p2.mjs\ntests/test_p2.mjs</write_files><verify>node --check src/p2.mjs</verify></task>\n');
@@ -4547,11 +4572,15 @@ const SCENARIOS = [
       });
       fs.mkdirSync(path.join(dir, 'deep'), { recursive: true });
       const spawnDrift = (input, extraEnv) => {
+        // 封闭性：剥离宿主可能注入的锚定变量，确保用例只测显式给定的锚定形态
+        const inherited = { ...process.env };
+        delete inherited.COMET_RUN_ROOT;
+        delete inherited.CLAUDE_PROJECT_DIR;
         const res = spawnSync(process.execPath, [HOOK, 'before_tool'], {
           cwd: path.join(dir, 'deep'),
           input: JSON.stringify(input),
           env: {
-            ...process.env,
+            ...inherited,
             FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json'),
             ...extraEnv,
           },
@@ -4575,6 +4604,21 @@ const SCENARIOS = [
       r = spawnDrift({ tool_name: 'Write', tool_input: { file_path: inspec } }, {});
       assertExit(r, 0);
       assertOut(r, 'workflow-hook-guard-ok');
+      // ③ 相对 file_path 按锚定根解析（修复点：曾按漂移 cwd 解析，好写被误拦）
+      r = spawnDrift({ tool_name: 'Write', tool_input: { file_path: '.specs/ok.txt' } }, { CLAUDE_PROJECT_DIR: dir });
+      assertExit(r, 0);
+      assertOut(r, 'workflow-hook-guard-ok');
+      // ④ 相对路径在项目内但白名单外 → 拦截
+      r = spawnDrift({ tool_name: 'Write', tool_input: { file_path: 'evil-rel/x.txt' } }, { CLAUDE_PROJECT_DIR: dir });
+      assertExit(r, 2);
+      assertOut(r, 'BLOCKED');
+      // ⑤ 陈旧 CLAUDE_PROJECT_DIR（不存在的路径）→ 不采纳，落入祖先锚定仍正确判定
+      r = spawnDrift({ tool_name: 'Write', tool_input: { file_path: evil } }, { CLAUDE_PROJECT_DIR: path.join(dir, 'gone') });
+      assertExit(r, 2);
+      assertOut(r, 'BLOCKED');
+      r = spawnDrift({ tool_name: 'Write', tool_input: { file_path: inspec } }, { CLAUDE_PROJECT_DIR: path.join(dir, 'gone') });
+      assertExit(r, 0);
+      assertOut(r, 'workflow-hook-guard-ok');
     },
   },
 
@@ -4596,7 +4640,8 @@ const SCENARIOS = [
         '<task id="T01" parallel="false" status="done"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n' +
         '<task id="T02" parallel="true" status="pending"><action>实现 T02</action><write_files>src/t2.mjs</write_files><verify>node --check src/t2.mjs</verify><depends_on>T01</depends_on></task>\n' +
         '<task id="T03" parallel="true" status="pending"><action>实现 T03</action><write_files>src/t3.mjs</write_files><verify>node --check src/t3.mjs</verify><depends_on>T01</depends_on></task>\n' +
-        '<task id="T04" parallel="false" status="pending"><action>实现 T04</action><write_files>src/t4.mjs</write_files><verify>node --check src/t4.mjs</verify><depends_on>T02,T03</depends_on></task>\n');
+        '<task id="T04" parallel="false" status="pending"><action>实现 T04</action><write_files>src/t4.mjs</write_files><verify>node --check src/t4.mjs</verify><depends_on>T02,T03</depends_on></task>\n' +
+        '<task id="T05" parallel="false"><action>遗留无状态串行</action><write_files>src/t5.mjs</write_files><verify>node --check src/t5.mjs</verify></task>\n');
       assertExit(runGuard(['entry', 'execute'], dir), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
@@ -4719,7 +4764,10 @@ const SCENARIOS = [
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
       writeState(dir, st);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1 + TASK_P2);
+      // 未分类并行任务（缺 status）自初始 TASK 在场——全部可解析任务 done 后，
+      // 该任务按「缺 status 不视为 pending」文档语义保持静默（与 S78 案例锚同源），不误报路由警告。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1 + TASK_P2 +
+        '<task id="P03" parallel="true"><action>实现 P03</action><write_files>src/p3.mjs</write_files><verify>node --check src/p3.mjs</verify></task>\n');
       assertExit(runGuard(['entry', 'execute'], dir), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent());
       writeFile(dir, '.specs/' + CHANGE_ID + '/P02-SUMMARY.md', summaryContent());
@@ -4743,7 +4791,7 @@ const SCENARIOS = [
       st.evidence.execute = { summary: 'executed' };
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1 +
-        '<task id="T02"><action>实现 T02</action><write_files>src/t2.mjs</write_files><verify>node --check src/t2.mjs</verify><depends_on>P01</depends_on></task>\n');
+        '<task id="T02" parallel="false" status="pending"><action>实现 T02</action><write_files>src/t2.mjs</write_files><verify>node --check src/t2.mjs</verify><depends_on>P01</depends_on></task>\n');
       assertExit(runGuard(['entry', 'execute'], dir), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent());
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
