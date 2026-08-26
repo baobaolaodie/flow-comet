@@ -3318,7 +3318,14 @@ async function main() {
         });
         if (eligibleParallel.length > 0) {
           const subagentNode = findNode(protocol, 'subagent-execute');
-          if (subagentNode) {
+          // 顺序守卫：仅当候选位于 execute 及其后（review/archive）才镜像替换——
+          // 候选落在 execute 之前（如回退后的 design/plan 重入）时保持原候选，
+          // 避免镜像绕过前置节点的产物门禁强行委托（与 workflow-state determineNode 的
+          // preExecNodes 前置门顺序对齐）。
+          const routeNodes = route(protocol);
+          const execIdx = routeNodes.findIndex((n) => n.id === 'execute');
+          const nextIdx = routeNodes.findIndex((n) => n.id === next.id);
+          if (subagentNode && execIdx >= 0 && nextIdx >= execIdx) {
             next = subagentNode;
           }
         }
