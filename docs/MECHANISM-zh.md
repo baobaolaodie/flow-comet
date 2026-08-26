@@ -41,7 +41,7 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 | builtin 自检证据 | `builtin-quickcheck` 须声明不可用原因与插件缓存尝试证据(新 change 缺失 BLOCKED;旧 change WARN) | exit execute |
 | 工件模板保真 | SUMMARY / TASK / CHANGE / REQUIREMENT / DESIGN 须保持模板标题、首部字段与段序；新 change 任一缺失 → 阻断 + 恢复指引，旧 change 仅告警 | exit execute / plan / open / design |
 | 波次散文一致性 | 散文 `[P]` 标记须与任务 `parallel="true"` 一致(新 change 不一致 BLOCKED;旧 change WARN) | exit plan |
-| 波次分组一致性 | `[P]` 并行块须构成单个连续块、置于串行序列首/尾；`[P]` 与串行混排（穿插）违规——新 change BLOCK（含恢复指引：调整分组或显式豁免），旧 change WARN | exit plan |
+| 波次分组一致性 | 规划按依赖图校验：`depends_on` 须无环且引用存在；并行与串行的任意混排均合法，由多趟路由分趟消化——依赖环对新 change BLOCK（含恢复指引），旧 change WARN | exit plan |
 | 越权委托 | 并行 done 任务须经委托节点(新 change 未委托 BLOCKED;旧 change WARN) | exit execute/verify |
 | verify 真实执行 | TEST.md `## 验证命令` 真实运行（支持多行 `&&`）；verifyFailures 机器计数**按变更隔离**（切换变更不继承另一变更的失败次数），第 4 次 → BLOCKED（超时可用 `FLOW_COMET_VERIFY_TIMEOUT_MS` 配置，默认 300s） | exit verify |
 | 追加位置检测 | CONTEXT 孤立追加段 / LESSONS 编号乱序 / STATE+CHANGELOG 非倒序 → WARN（渐进） | exit open/verify/archive |
@@ -64,11 +64,11 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 
 ## 6. guard 自测套件（作者回归基线）
 
-`scripts/guard-self-test.mjs`：**177 个场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测、伪并行 WARN）——与 `system-test.mjs`（64 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
+`scripts/guard-self-test.mjs`：**184 个场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测、伪并行 WARN）——与 `system-test.mjs`（64 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
 
 ```bash
 node .claude/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 177 SCENARIOS PASSED
+# → ALL 184 SCENARIOS PASSED
 ```
 
 ## 6.5 DeepSeek Harness（dsh）平台

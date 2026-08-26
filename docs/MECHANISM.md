@@ -41,7 +41,7 @@ Hook blocking semantics (see Limitations): PreToolUse hook exit 2 blocks in the 
 | builtin self-check evidence | `builtin-quickcheck` must state the unavailable reason AND the plugin-cache attempt (new changes blocked; legacy warned) | exit execute |
 | Artifact template fidelity | SUMMARY / TASK / CHANGE / REQUIREMENT / DESIGN must keep the template title, header fields, and section order; new changes missing any part are blocked with recovery guidance, legacy changes warned | exit execute / plan / open / design |
 | Wave-wording consistency | prose `[P]` markers must match task `parallel="true"` (new changes blocked; legacy warned) | exit plan |
-| Wave grouping consistency | `[P]` blocks must form a single contiguous group placed before or after the serial chain; interleaving `[P]` and serial tasks (mixing) violates grouping — new changes BLOCK with recovery guidance (re-group or explicit exemption), legacy WARN | exit plan |
+| Wave grouping consistency | plans are validated as a dependency graph — `depends_on` must be acyclic and reference existing tasks; any interleaving of parallel and serial tasks is legal and digested by multi-pass routing (dependency cycles block new changes with recovery guidance; legacy warn) | exit plan |
 | Overreach delegation | parallel done tasks require the delegation node exited (new changes blocked; legacy warned) | exit execute/verify |
 | verify real execution | TEST.md `## 验证命令` actually runs (multi-line `&&` supported); verifyFailures machine-counted **per change** (switching changes does not carry over another change's count), 4th → BLOCKED (timeout configurable via `FLOW_COMET_VERIFY_TIMEOUT_MS`, default 300s) | exit verify |
 | Append placement | CONTEXT orphan sections / LESSONS numbering-out-of-order / STATE+CHANGELOG non-reverse-order → WARN (progressive) | exit open/verify/archive |
@@ -64,11 +64,11 @@ Hook blocking semantics (see Limitations): PreToolUse hook exit 2 blocks in the 
 
 ## 6. Guard self-test suite (author regression baseline)
 
-`scripts/guard-self-test.mjs`: **177 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (64 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
+`scripts/guard-self-test.mjs`: **184 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (64 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
 
 ```bash
 node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 177 SCENARIOS PASSED
+# → ALL 184 SCENARIOS PASSED
 ```
 
 ## 6.5 DeepSeek Harness (dsh) platform
