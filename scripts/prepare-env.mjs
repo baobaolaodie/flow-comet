@@ -40,8 +40,9 @@
  *   --platform 显式指定平台：单平台 / 逗号分隔多平台（claude-code,codex,dsh）/
  *   all（全部平台,安装顺序 = PLATFORMS 表顺序）；未知平台报错（旧 both 语义已移除——
  *   多平台用逗号列表或 all）；缺省走选择链：
- *     TTY 交互多选（@clack/prompts 方向键多选——可选依赖,未安装自动回退 readline
- *     数字/逗号多选;基于目标项目痕迹 .claude/ .codex/ .dsh/ 预勾选,回车默认 = 探测推荐）
+ *     TTY 交互多选（@clack/prompts 方向键多选——依赖安装后为主路径,try-import 失败
+ *     （未装/离线）自动回退 readline 数字/逗号多选;基于目标项目痕迹 .claude/ .codex/
+ *     .dsh/ 预勾选,回车默认 = 探测推荐;FLOW_COMET_FORCE_READLINE=1 仅测试面强制走回退）
  *     > 探测目标项目（仅 .codex/ → codex；仅 .dsh/ → dsh；含 .claude/ → claude-code；
  *     多痕迹默认 claude-code 并输出提示）> 默认 claude-code。
  *   --purge 破坏性：删除目标平台生成物后重新生成（打印清单 + 警告 + --yes 确认）。
@@ -373,16 +374,20 @@ function detectTraces(target) {
 
 // TTY 交互多选（缺省路径——用户裁决：交互式选择为主；无 TTY 自动走探测/默认）。
 // 首选 @clack/prompts 方向键多选（Claude Code / Codex / dsh,基于 detectTraces 痕迹预勾选：
-// .claude/ / .codex/ / .dsh/）；**可选依赖**——动态 import 失败（未安装）自动回退
-// readline 数字/逗号多选（回车默认 = 探测推荐）。保持零依赖哲学：CI 无 npm install
-// 环境可运行（本任务不引入 package.json 或依赖安装——@clack/prompts 仅为尝试加载）。
+// .claude/ / .codex/ / .dsh/）；try-import 失败（依赖未安装/离线）自动回退 readline
+// 数字/逗号多选（回车默认 = 探测推荐）。仅测试面环境开关 FLOW_COMET_FORCE_READLINE=1
+// 强制走 readline 回退分支（即便 @clack/prompts 可加载）——供自动化套件断言回退可测，
+// 不得用于生产规避。
 async function promptPlatformSelection(probe, traces, multiTrace) {
+  if (process.env.FLOW_COMET_FORCE_READLINE === '1') {
+    return promptPlatformSelectionReadline(probe, traces, multiTrace);
+  }
   const options = Object.entries(PLATFORMS).map(([id, p]) => ({ value: id, label: `${p.label} (${id})` }));
   const initialValues = options.filter((o) => traces[o.value]).map((o) => o.value);
   let clack = null;
   try {
     clack = await import('@clack/prompts');
-  } catch { /* 可选依赖未安装——回退 readline 多选 */ }
+  } catch { /* 依赖未安装/离线——自动回退 readline 多选 */ }
   if (clack && typeof clack.multiselect === 'function') {
     const selected = await clack.multiselect({
       message: '[prepare-env] 选择要安装的平台（方向键移动、空格勾选、回车确认）',
@@ -398,8 +403,8 @@ async function promptPlatformSelection(probe, traces, multiTrace) {
   return promptPlatformSelectionReadline(probe, traces, multiTrace);
 }
 
-// readline 多选回退（零依赖路径——@clack/prompts 未安装时）：数字/平台名逗号分隔多选；
-// 回车 = 探测推荐（无探测 → claude-code）。保持零依赖哲学：CI 无 npm install 环境可运行。
+// readline 多选回退（无第三方依赖路径——@clack/prompts 未安装/离线/强制开关下）：
+// 数字/平台名逗号分隔多选；回车 = 探测推荐（无探测 → claude-code）。
 async function promptPlatformSelectionReadline(probe, traces, multiTrace) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
