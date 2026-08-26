@@ -41,8 +41,9 @@
  *   all（全部平台,安装顺序 = PLATFORMS 表顺序）；未知平台报错（旧 both 语义已移除——
  *   多平台用逗号列表或 all）；缺省走选择链：
  *     TTY 交互多选（@clack/prompts 方向键多选——依赖安装后为主路径,try-import 失败
- *     （未装/离线）自动回退 readline 数字/逗号多选;基于目标项目痕迹 .claude/ .codex/
- *     .dsh/ 预勾选,回车默认 = 探测推荐;FLOW_COMET_FORCE_READLINE=1 仅测试面强制走回退）
+ *     （未装/离线）或 stdin 非真实 TTY（无 setRawMode,如管道喂入模拟）自动回退 readline
+ *     数字/逗号多选;基于目标项目痕迹 .claude/ .codex/ .dsh/ 预勾选,回车默认 = 探测推荐;
+ *     FLOW_COMET_FORCE_READLINE=1 仅测试面强制走回退）
  *     > 探测目标项目（仅 .codex/ → codex；仅 .dsh/ → dsh；含 .claude/ → claude-code；
  *     多痕迹默认 claude-code 并输出提示）> 默认 claude-code。
  *   --purge 破坏性：删除目标平台生成物后重新生成（打印清单 + 警告 + --yes 确认）。
@@ -374,7 +375,8 @@ function detectTraces(target) {
 
 // TTY 交互多选（缺省路径——用户裁决：交互式选择为主；无 TTY 自动走探测/默认）。
 // 首选 @clack/prompts 方向键多选（Claude Code / Codex / dsh,基于 detectTraces 痕迹预勾选：
-// .claude/ / .codex/ / .dsh/）；try-import 失败（依赖未安装/离线）自动回退 readline
+// .claude/ / .codex/ / .dsh/）；try-import 失败（依赖未安装/离线）或 stdin 无法 raw mode
+// （isTTY 缺失/伪真且 setRawMode 不存在——如管道喂入的自动化形态）自动回退 readline
 // 数字/逗号多选（回车默认 = 探测推荐）。仅测试面环境开关 FLOW_COMET_FORCE_READLINE=1
 // 强制走 readline 回退分支（即便 @clack/prompts 可加载）——供自动化套件断言回退可测，
 // 不得用于生产规避。
@@ -389,6 +391,11 @@ async function promptPlatformSelection(probe, traces, multiTrace) {
     clack = await import('@clack/prompts');
   } catch { /* 依赖未安装/离线——自动回退 readline 多选 */ }
   if (clack && typeof clack.multiselect === 'function') {
+    // @clack 依赖 stdin raw mode：isTTY 为真但 stdin 实为管道（无 setRawMode）时调用
+    // multiselect 会崩溃（o.setRawMode is not a function）——与强制回退同路径直接走 readline。
+    if (!process.stdin.isTTY || typeof process.stdin.setRawMode !== 'function') {
+      return promptPlatformSelectionReadline(probe, traces, multiTrace);
+    }
     const selected = await clack.multiselect({
       message: '[prepare-env] 选择要安装的平台（方向键移动、空格勾选、回车确认）',
       options,
