@@ -4552,11 +4552,15 @@ const SCENARIOS = [
       });
       fs.mkdirSync(path.join(dir, 'deep'), { recursive: true });
       const spawnDrift = (input, extraEnv) => {
+        // 封闭性：剥离宿主可能注入的锚定变量，确保用例只测显式给定的锚定形态
+        const inherited = { ...process.env };
+        delete inherited.COMET_RUN_ROOT;
+        delete inherited.CLAUDE_PROJECT_DIR;
         const res = spawnSync(process.execPath, [HOOK, 'before_tool'], {
           cwd: path.join(dir, 'deep'),
           input: JSON.stringify(input),
           env: {
-            ...process.env,
+            ...inherited,
             FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json'),
             ...extraEnv,
           },
@@ -4588,6 +4592,13 @@ const SCENARIOS = [
       r = spawnDrift({ tool_name: 'Write', tool_input: { file_path: 'evil-rel/x.txt' } }, { CLAUDE_PROJECT_DIR: dir });
       assertExit(r, 2);
       assertOut(r, 'BLOCKED');
+      // ⑤ 陈旧 CLAUDE_PROJECT_DIR（不存在的路径）→ 不采纳，落入祖先锚定仍正确判定
+      r = spawnDrift({ tool_name: 'Write', tool_input: { file_path: evil } }, { CLAUDE_PROJECT_DIR: path.join(dir, 'gone') });
+      assertExit(r, 2);
+      assertOut(r, 'BLOCKED');
+      r = spawnDrift({ tool_name: 'Write', tool_input: { file_path: inspec } }, { CLAUDE_PROJECT_DIR: path.join(dir, 'gone') });
+      assertExit(r, 0);
+      assertOut(r, 'workflow-hook-guard-ok');
     },
   },
 ];
