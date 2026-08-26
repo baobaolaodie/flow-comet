@@ -2606,7 +2606,7 @@ async function main() {
         const filePaths = wfMatch[1].trim().split(/\s*\n\s*/).map(l => l.trim().replace(/<!--[\s\S]*?-->/g, '').trim()).filter(Boolean)
           .flatMap(l => l.split(';')).map(l => l.trim()).filter(Boolean);
         if (filePaths.length === 0) continue;
-        const prodFiles = filePaths.filter(f => !/(?:^|\/)(?:tests?\/|test_)/.test(f));
+        const prodFiles = filePaths.filter(f => !/(?:^|[\/\\])(?:__tests__\/|test_|tests?\/)|\.(?:test|spec)\.(?:mjs|js|jsx|ts|tsx|cjs)$/.test(f));
         if (prodFiles.length === 0) {
           testOnlyParallelIds.push(attrs.id || 'unknown');
         }

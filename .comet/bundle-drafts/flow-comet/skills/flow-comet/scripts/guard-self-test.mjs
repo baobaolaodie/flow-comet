@@ -4522,6 +4522,24 @@ const SCENARIOS = [
       assertOut(res, 'WARN: 伪并行检测');
       assertOut(res, 'P01');
       assertOut(res, 'depends_on');
+      // 新形态 a：test 后缀文件（src/helper.test.mjs）——应 WARN
+      res = runPlanExit(dir,
+        '<task id="P01b" parallel="true" status="pending"><action>实现 P01b</action><write_files>src/helper.test.mjs</write_files><verify>node --check src/helper.test.mjs</verify></task>\n');
+      assertExit(res, 0);
+      assertOut(res, 'WARN: 伪并行检测');
+      assertOut(res, 'P01b');
+      // 新形态 b：__tests__/ 目录（__tests__/helper.test.ts）——应 WARN
+      res = runPlanExit(dir,
+        '<task id="P01c" parallel="true" status="pending"><action>实现 P01c</action><write_files>__tests__/helper.test.ts</write_files><verify>node --check __tests__/helper.test.ts</verify></task>\n');
+      assertExit(res, 0);
+      assertOut(res, 'WARN: 伪并行检测');
+      assertOut(res, 'P01c');
+      // 新形态 c：Windows 反斜杠分隔（tests\foo.test.mjs）——应 WARN
+      res = runPlanExit(dir,
+        '<task id="P01d" parallel="true" status="pending"><action>实现 P01d</action><write_files>tests\\foo.test.mjs</write_files><verify>node --check tests\\foo.test.mjs</verify></task>\n');
+      assertExit(res, 0);
+      assertOut(res, 'WARN: 伪并行检测');
+      assertOut(res, 'P01d');
       // 反例：write_files 混有生产文件 → 不触发
       res = runPlanExit(dir,
         '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>src/p2.mjs\ntests/test_p2.mjs</write_files><verify>node --check src/p2.mjs</verify></task>\n');

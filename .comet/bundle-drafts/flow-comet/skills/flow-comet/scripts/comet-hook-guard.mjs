@@ -117,7 +117,16 @@ const packageRoot = path.resolve(__dirname, '..');
 // 意义：漂移会话不再因“协议/状态按错误 cwd 解析失败 → 报错式放行”而漏拦；判定根与项目根一致。
 const runRoot = (() => {
   for (const candidate of [process.env.COMET_RUN_ROOT, process.env.CLAUDE_PROJECT_DIR]) {
-    if (candidate) return path.resolve(candidate);
+    if (!candidate) continue;
+    // 候选须真实存在且含项目标记（state 或已装技能），陈旧/无效值不采纳 → 落入祖先/cwd 兜底
+    const resolved = path.resolve(candidate);
+    if (
+      fsExistsSync(resolved) &&
+      (fsExistsSync(path.join(resolved, '.comet', 'flow-comet-state.json')) ||
+        fsExistsSync(path.join(resolved, '.claude', 'skills', 'flow-comet')))
+    ) {
+      return resolved;
+    }
   }
   let current = path.resolve(process.cwd());
   for (;;) {
@@ -1750,7 +1759,9 @@ function writeTargetFromHookInput(input) {
   const filePath =
     toolInput && typeof toolInput.file_path === 'string' ? toolInput.file_path : null;
   if (!filePath) return null;
-  const absolute = path.resolve(filePath);
+  const absolute = path.isAbsolute(filePath)
+    ? path.resolve(filePath)
+    : path.resolve(runRoot, filePath);
   const relative = path.relative(runRoot, absolute);
   if (path.isAbsolute(relative) || relative === '..' || relative.startsWith('..' + path.sep)) {
     return null;

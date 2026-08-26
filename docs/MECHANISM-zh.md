@@ -64,7 +64,7 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 
 ## 6. guard 自测套件（作者回归基线）
 
-`scripts/guard-self-test.mjs`：**184 个场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（64 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
+`scripts/guard-self-test.mjs`：**184 个场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测、伪并行 WARN）——与 `system-test.mjs`（64 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
 
 ```bash
 node .claude/skills/flow-comet/scripts/guard-self-test.mjs
