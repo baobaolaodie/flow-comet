@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · flow-comet 引擎自测套件（175 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制）
+// C1 · flow-comet 引擎自测套件（176 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制）
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -7,7 +7,7 @@
 // （COMET_RUN_ROOT=<临时目录>）→ 断言退出码与输出关键词。场景跑完 rmSync 清理。
 //
 // 运行: node scripts/guard-self-test.mjs
-// 全过 → exit 0，输出 ALL 175 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
+// 全过 → exit 0，输出 ALL 176 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
 //
 // 仅 node 内置模块（child_process/fs/os/path）；无网络；不依赖 flow-kit 模板目录
 // 存在（fallback 场景用内置段名；部分场景复制模板文件进临时目录验证 C2 模板派生）。
@@ -4482,6 +4482,56 @@ const SCENARIOS = [
       res = goNext(TASK_VALID_SP, 'execute');
       assertExit(res, 0);
       assertOut(res, 'NODE: execute');
+    },
+  },
+
+  // 176: 伪并行检测（多趟混排合法化后的语义盲区兜底）——并行任务 write_files 仅声明测试产物
+  // 而无任何生产代码文件时，plan 出口输出 WARN（列任务 id 并给出 depends_on/垂直切片建议）
+  // 且不阻断——渐进提示语义本身即断言点；write_files 混有生产文件的并行任务不触发。
+  {
+    name: '176 伪并行 WARN：仅写测试产物的并行任务提示依赖嫌疑且不阻断',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      writeIntakeArtifacts(dir);
+      writeState(dir, {
+        activeChange: CHANGE_ID,
+        currentNode: 'plan',
+        completedNodes: ['open', 'design'],
+        evidence: { open: { summary: 'o' }, design: { summary: 'd' }, plan: { summary: 'p' } },
+        verifyFailures: 0,
+        executionMode: 'subagent',
+        directOverride: false,
+      });
+      // 正例：纯测试面并行任务 → WARN 列 id 并建议 depends_on；plan 出口仍通过
+      let res = runPlanExit(dir,
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>tests/test_p1.mjs</write_files><verify>node --check tests/test_p1.mjs</verify></task>\n');
+      assertExit(res, 0);
+      assertOut(res, 'WARN: 伪并行检测');
+      assertOut(res, 'P01');
+      assertOut(res, 'depends_on');
+      // 新形态 a：test 后缀文件（src/helper.test.mjs）——旧正则漏报，扩面后应 WARN
+      res = runPlanExit(dir,
+        '<task id="P01b" parallel="true" status="pending"><action>实现 P01b</action><write_files>src/helper.test.mjs</write_files><verify>node --check src/helper.test.mjs</verify></task>\n');
+      assertExit(res, 0);
+      assertOut(res, 'WARN: 伪并行检测');
+      assertOut(res, 'P01b');
+      // 新形态 b：__tests__/ 目录（__tests__/helper.test.ts）——应 WARN
+      res = runPlanExit(dir,
+        '<task id="P01c" parallel="true" status="pending"><action>实现 P01c</action><write_files>__tests__/helper.test.ts</write_files><verify>node --check __tests__/helper.test.ts</verify></task>\n');
+      assertExit(res, 0);
+      assertOut(res, 'WARN: 伪并行检测');
+      assertOut(res, 'P01c');
+      // 新形态 c：Windows 反斜杠分隔（tests\foo.test.mjs）——应 WARN
+      res = runPlanExit(dir,
+        '<task id="P01d" parallel="true" status="pending"><action>实现 P01d</action><write_files>tests\\foo.test.mjs</write_files><verify>node --check tests\\foo.test.mjs</verify></task>\n');
+      assertExit(res, 0);
+      assertOut(res, 'WARN: 伪并行检测');
+      assertOut(res, 'P01d');
+      // 反例：write_files 混有生产文件 → 不触发
+      res = runPlanExit(dir,
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>src/p2.mjs\ntests/test_p2.mjs</write_files><verify>node --check src/p2.mjs</verify></task>\n');
+      assertExit(res, 0);
+      assertNotOut(res, '伪并行检测');
     },
   },
 ];

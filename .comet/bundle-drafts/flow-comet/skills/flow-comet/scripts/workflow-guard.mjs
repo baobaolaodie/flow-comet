@@ -2590,6 +2590,29 @@ async function main() {
         }
         console.error('WARN: TASK.md ' + detail + '——依赖图不可满足（旧 change 渐进不阻断）' + guide);
       }
+      // 伪并行检测（真实载体验证暴露的设计盲区兜底）：如果一个标记为并行的任务只写测试文件
+      // 而无任何生产代码文件，它很可能隐式依赖某个实现类并行任务的产出（如测试 import
+      // 尚未存在的函数）。这种"伪并行"在多趟路由下会导致委托后测试失败。
+      // 启发式：并行任务的 write_files 全部匹配 tests/ 或 test_ 前缀 → 视为疑似伪并行。
+      // WARN 渐进不阻断——由执行者判断是否真独立（纯测试基础设施改动可合法全测试面）。
+      const testOnlyParallelIds = [];
+      for (const block of taskList) {
+        const attrs = taskOpeningAttrs(block);
+        if (!attrs || !attrs.parallel || attrs.status !== 'pending') continue;
+        const wfMatch = block.match(/<write_files>([\s\S]*?)<\/write_files>/);
+        if (!wfMatch) continue;
+        const filePaths = wfMatch[1].split(/\n/).map(l => l.trim()).filter(l => l !== '' && !l.startsWith('<!--'));
+        if (filePaths.length === 0) continue;
+        const prodFiles = filePaths.filter(f => !/(?:^|[\/\\])(?:__tests__\/|test_|tests?\/)|\.(?:test|spec)\.(?:mjs|js|jsx|ts|tsx|cjs)$/.test(f));
+        if (prodFiles.length === 0) {
+          testOnlyParallelIds.push(attrs.id || 'unknown');
+        }
+      }
+      if (testOnlyParallelIds.length > 0) {
+        console.error('WARN: 伪并行检测——以下并行任务仅写测试文件而无生产代码文件: '
+          + testOnlyParallelIds.join(', ')
+          + '。测试通常依赖实现产出的符号，可能存在隐式依赖；建议添加 depends_on 声明或合并为垂直切片');
+      }
     } catch {}
   }
   // review exit 校验 REVIEW 含实质内容 + 发现区条目处置状态结构级校验
