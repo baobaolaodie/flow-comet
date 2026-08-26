@@ -1750,7 +1750,9 @@ function writeTargetFromHookInput(input) {
   const filePath =
     toolInput && typeof toolInput.file_path === 'string' ? toolInput.file_path : null;
   if (!filePath) return null;
-  const absolute = path.resolve(filePath);
+  const absolute = path.isAbsolute(filePath)
+    ? path.resolve(filePath)
+    : path.resolve(runRoot, filePath);
   const relative = path.relative(runRoot, absolute);
   if (path.isAbsolute(relative) || relative === '..' || relative.startsWith('..' + path.sep)) {
     return null;

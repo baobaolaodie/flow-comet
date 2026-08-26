@@ -4580,6 +4580,14 @@ const SCENARIOS = [
       r = spawnDrift({ tool_name: 'Write', tool_input: { file_path: inspec } }, {});
       assertExit(r, 0);
       assertOut(r, 'workflow-hook-guard-ok');
+      // ③ 相对 file_path 按锚定根解析（修复点：曾按漂移 cwd 解析，好写被误拦）
+      r = spawnDrift({ tool_name: 'Write', tool_input: { file_path: '.specs/ok.txt' } }, { CLAUDE_PROJECT_DIR: dir });
+      assertExit(r, 0);
+      assertOut(r, 'workflow-hook-guard-ok');
+      // ④ 相对路径在项目内但白名单外 → 拦截
+      r = spawnDrift({ tool_name: 'Write', tool_input: { file_path: 'evil-rel/x.txt' } }, { CLAUDE_PROJECT_DIR: dir });
+      assertExit(r, 2);
+      assertOut(r, 'BLOCKED');
     },
   },
 ];
