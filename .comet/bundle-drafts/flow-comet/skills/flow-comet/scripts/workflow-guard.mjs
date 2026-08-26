@@ -2603,7 +2603,7 @@ async function main() {
         if (!wfMatch) continue;
         const filePaths = wfMatch[1].split(/\n/).map(l => l.trim()).filter(l => l !== '' && !l.startsWith('<!--'));
         if (filePaths.length === 0) continue;
-        const prodFiles = filePaths.filter(f => !/(?:^|\/)(?:tests?\/|test_)/.test(f));
+        const prodFiles = filePaths.filter(f => !/(?:^|[\/\\])(?:__tests__\/|test_|tests?\/)|\.(?:test|spec)\.(?:mjs|js|jsx|ts|tsx|cjs)$/.test(f));
         if (prodFiles.length === 0) {
           testOnlyParallelIds.push(attrs.id || 'unknown');
         }
