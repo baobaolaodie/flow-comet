@@ -1829,9 +1829,22 @@ async function findParallelWriteConflicts(changeDir) {
   const taskFile = path.join(changeDir, 'TASK.md');
   let text;
   try { text = await fs.readFile(taskFile, 'utf8'); } catch { return []; }
-  const blocks = extractTaskBlocks(text).filter((b) => {
+  const allBlocks = extractTaskBlocks(text);
+  // 依赖资格收窄：仅统计「本趟可运行」的并行任务——deps ⊆ doneIds；
+  // 等待后续趟次的并行任务（依赖未满足）与已交付任务不参与同趟冲突判定，
+  // 使 A→B 同写路径的跨趟合法计划不再被首趟误拦（与路由谓词同一口径）。
+  const doneIds = new Set(allBlocks
+    .map((b) => taskOpeningAttrs(b))
+    .filter((a) => a && a.id && a.status === 'done')
+    .map((a) => a.id));
+  const dependsOnOf = (b) => {
+    const m = b.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
+    return m ? m[1].trim().split(/[,\s]+/).filter(Boolean) : [];
+  };
+  const blocks = allBlocks.filter((b) => {
     const a = taskOpeningAttrs(b);
-    return a && a.parallel && a.status === 'pending';
+    if (!a || !a.parallel || a.status !== 'pending') return false;
+    return dependsOnOf(b).every((d) => doneIds.has(d));
   });
   const perTask = [];
   for (const b of blocks) {
@@ -2603,7 +2616,8 @@ async function main() {
         if (!wfMatch) continue;
         // 分号容错：与 workflow-handoff.mjs 自动解析同源实现（分号容错双点内联，与 workflow-handoff.mjs 同源互锚）——
         // 换行切分后逐段按 ';' 二次切分、trim、滤空与 HTML 注释行（路径含分号的极端形态不支持，须换行书写）
-        const filePaths = wfMatch[1].trim().split(/\s*\n\s*/).map(l => l.trim().replace(/<!--[\s\S]*?-->/g, '').trim()).filter(Boolean)
+        const blockContent = wfMatch[1].replace(/<!--[\s\S]*?-->/g, '');
+        const filePaths = blockContent.trim().split(/\s*\n\s*/).map(l => l.trim()).filter(Boolean)
           .flatMap(l => l.split(';')).map(l => l.trim()).filter(Boolean);
         if (filePaths.length === 0) continue;
         const prodFiles = filePaths.filter(f => !/(?:^|[\/\\])(?:__tests__\/|test_|tests?\/)|\.(?:test|spec)\.(?:mjs|js|jsx|ts|tsx|cjs)$/.test(f));
@@ -2745,7 +2759,7 @@ async function main() {
         if (a && a.id) blockById.set(a.id, block);
       }
       const serialRunnable = tasks.filter(t =>
-        !t.parallel && t.status !== 'done'
+        !t.parallel && t.status === 'pending'
         && taskDependsOn(blockById.get(t.id) || '').every(d => doneIds.has(d)));
       if (serialRunnable.length > 0) {
         console.error('BLOCKED: execute 出口仍有串行 pending 任务: ' + serialRunnable.map(t => t.id).join(', ')

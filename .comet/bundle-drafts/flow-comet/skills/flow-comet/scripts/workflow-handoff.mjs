@@ -159,7 +159,8 @@ async function main() {
         if (match) {
           taskResolved = true;
           // 分号容错：与 workflow-guard.mjs 伪并行启发式同源实现（分号容错双点内联，与 workflow-guard.mjs 同源互锚）
-          const files = match[1].trim().split(/\s*\n\s*/).map(f => f.trim().replace(/<!--[\s\S]*?-->/g, '').trim()).filter(Boolean)
+          // 先剥整块 HTML 注释再拆分——多行注释内容不得混入路径条目（与 workflow-guard 同口径）
+          const files = match[1].replace(/<!--[\s\S]*?-->/g, '').trim().split(/\s*\n\s*/).map(f => f.trim()).filter(Boolean)
             .flatMap(f => f.split(';')).map(f => f.trim()).filter(Boolean);
           if (files.length > 0) { writeFiles = files; }
           else { emptyWriteFilesElement = true; }
