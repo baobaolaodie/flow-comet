@@ -219,6 +219,9 @@ const PLATFORMS = {
       const loaderDst = path.join(pluginsDir, 'dsh-flow-comet-bridge.mjs');
       if (fs.existsSync(loaderSrc)) {
         fs.mkdirSync(pluginsDir, { recursive: true });
+        // 覆盖前版本比对明示（版本戳标记契约）：输出首次安装/升级/降级/版本一致之一；
+        // 任一侧提取失败只告警不中断——覆盖照常执行（幂等语义不变）
+        reportLoaderVersionTransition(loaderSrc, loaderDst);
         fs.copyFileSync(loaderSrc, loaderDst);
         stats.files++;
         console.log('[prepare-env] 桥接 loader 已复制到 $DSH_HOME/plugins/dsh-flow-comet-bridge.mjs');
@@ -820,6 +823,103 @@ function removeManagedCodexHooks(codexDir) {
 function resolveDshHome() {
   if (process.env.DSH_HOME) return path.resolve(process.env.DSH_HOME);
   return path.join(os.homedir(), '.dsh');
+}
+
+// ---------- loader 覆盖前版本比对（全局挂载的桥接 loader 生命周期治理） ----------
+
+// 版本戳锚点正则（标记行格式契约：独立整行、行首无缩进、冒号后恰一个空格、行尾无其它字符；
+// 格式禁动——安装器与 bridge-check 双侧提取以此为准；技能包自包含，语义同值复刻不跨模块 import）。
+const BRIDGE_VERSION_RE = /^\/\/ BRIDGE_VERSION: (\S+)$/m;
+
+/**
+ * 从 loader 文件提取版本戳（同一锚点正则）。返回 { ok:true, version }；
+ * 文件缺失/读取失败/无标记行 → { ok:false, reason }（调用方告警兜底，不抛错）。
+ */
+function extractBridgeVersion(loaderPath) {
+  let text;
+  try {
+    text = fs.readFileSync(loaderPath, 'utf8');
+  } catch {
+    return { ok: false, reason: '文件读取失败' };
+  }
+  const match = BRIDGE_VERSION_RE.exec(text);
+  return match ? { ok: true, version: match[1] } : { ok: false, reason: '未提取到版本戳标记行' };
+}
+
+/**
+ * 语义化版本数值序比较（覆盖前判定方向）：major.minor.patch 逐段按数值比较
+ * （如 1.10.0 > 1.6.0——非字典序）；核心版本相等时按语义化版本规则处理预发布后缀
+ * （如 1.6.0-alpha.1 < 1.6.0）。返回 -1 / 0 / 1。
+ */
+function compareBridgeVersions(a, b) {
+  const parse = (v) => {
+    const text = String(v);
+    const dash = text.indexOf('-');
+    const core = (dash === -1 ? text : text.slice(0, dash)).split('.').map((seg) => parseInt(seg, 10));
+    return { core, pre: dash === -1 ? null : text.slice(dash + 1) };
+  };
+  const av = parse(a);
+  const bv = parse(b);
+  const coreLen = Math.max(av.core.length, bv.core.length);
+  for (let i = 0; i < coreLen; i++) {
+    const x = av.core[i] ?? 0;
+    const y = bv.core[i] ?? 0;
+    if (x !== y) return x < y ? -1 : 1;
+  }
+  const ap = av.pre !== null;
+  const bp = bv.pre !== null;
+  if (ap !== bp) return ap ? -1 : 1; // 预发布 < 正式版
+  if (!ap) return 0;
+  const ai = av.pre.split('.');
+  const bi = bv.pre.split('.');
+  const preLen = Math.max(ai.length, bi.length);
+  for (let i = 0; i < preLen; i++) {
+    if (i >= ai.length) return -1; // 更短标识符列表是更长列表的前缀 → 更小
+    if (i >= bi.length) return 1;
+    const x = ai[i];
+    const y = bi[i];
+    if (x === y) continue;
+    const xn = /^\d+$/.test(x) ? parseInt(x, 10) : null;
+    const yn = /^\d+$/.test(y) ? parseInt(y, 10) : null;
+    if (xn !== null && yn !== null) return xn < yn ? -1 : 1;
+    if (xn !== null) return -1; // 数字标识符 < 字母标识符（语义化版本规则）
+    if (yn !== null) return 1;
+    return x < y ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
+ * 覆盖前版本比对明示：从权威源 loader 与已装 loader 各提取版本戳，按数值序输出
+ * 首次安装 / 升级 A→B / 降级 A→B / 版本一致 四类结论之一（人读、带 [prepare-env] 前缀）。
+ * 任一侧提取失败（文件缺失/无标记行）→ 告警并跳过比对——不抛错、不中断安装；
+ * 覆盖动作（copyFileSync）由调用方照常执行，幂等语义不变。
+ */
+function reportLoaderVersionTransition(loaderSrc, loaderDst) {
+  if (!fs.existsSync(loaderDst)) {
+    console.log('[prepare-env] 桥接 loader 首次安装（$DSH_HOME/plugins 无已装 loader）');
+    return;
+  }
+  const src = extractBridgeVersion(loaderSrc);
+  const installed = extractBridgeVersion(loaderDst);
+  if (!src.ok || !installed.ok) {
+    const failedSide = !src.ok ? '权威源 loader' : '已装 loader';
+    const reason = !src.ok ? src.reason : installed.reason;
+    console.warn(
+      `[prepare-env] 警告: ${failedSide} 版本戳提取失败（${reason}）——跳过版本比对，继续覆盖安装`
+    );
+    return;
+  }
+  const a = installed.version;
+  const b = src.version;
+  const cmp = compareBridgeVersions(a, b);
+  if (cmp < 0) {
+    console.log(`[prepare-env] 桥接 loader 升级 ${a} → ${b}`);
+  } else if (cmp > 0) {
+    console.log(`[prepare-env] 桥接 loader 降级 ${a} → ${b}`);
+  } else {
+    console.log(`[prepare-env] 桥接 loader 版本一致（${a}）`);
+  }
 }
 
 /**
