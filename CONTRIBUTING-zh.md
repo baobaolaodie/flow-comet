@@ -157,6 +157,10 @@ chore:     工具、发布收尾
 revert:    回滚之前的提交
 ```
 
+**通用 scope 语义（推荐可选）**：本仓库使用 `<type>(<scope>): <subject>`——scope 是生态通用 Conventional Commits 的子系统/关注域短词（如 `docs`、`usage`、`installer`、`guard`、`handoff`、`selftest`）。scope 推荐但可选：单子系统改动给 scope（如 `feat(guard): ...`、`docs(usage): ...`、`fix(installer): ...`）；跨子系统或全局性改动可省略（`<type>: <subject>`）。**禁用管理代号（change-id、日期、任务号）作 scope**——管理元数据不入标题/scope。任务号放提交正文尾注 `Task: <id>`——例如主题 `feat(guard): add import pipeline` + 正文 `Task: T01`。该 `Task:` 尾注是提交信息禁数字规则的唯一豁免。
+
+**流程工件不入库**：`.specs/` 下的一切工件（SUMMARY、handoff、TASK 等）是 gitignored 流程产物，永不入库。`git add` 被拒即正确行为，严禁 `-f` 强加。
+
 示例：
 
 ```

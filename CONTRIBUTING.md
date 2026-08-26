@@ -157,6 +157,10 @@ chore:     tooling, release wrap-up
 revert:    reverts a previous commit
 ```
 
+**General optional scope**: this repository uses `<type>(<scope>): <subject>` — the scope is a short subsystem or area-of-interest noun from the ecosystem-wide Conventional Commits vocabulary (e.g. `docs`, `usage`, `installer`, `guard`, `handoff`, `selftest`). The scope is **recommended and optional**: give one for single-subsystem changes (e.g. `feat(guard): ...`, `docs(usage): ...`, `fix(installer): ...`); omit it (`<type>: <subject>`) for cross-subsystem or global changes. Management codes — change-id, dates, task numbers — must **never** be used as the scope (administrative metadata does not belong in the subject or the scope). Task/work-item IDs go in the commit body footer as `Task: <id>` — for example, subject `feat(guard): add import pipeline` with body `Task: T01`. The `Task:` footer is the sanctioned exception to the no-numbers rule.
+
+**Workflow artifacts are never committed**: `.specs/` artifacts (SUMMARY, handoff, TASK, etc.) are gitignored workflow products and never enter the repository. If `git add` is rejected for them, that rejection is correct behavior — never bypass it with `git add -f`.
+
 Examples:
 
 ```
