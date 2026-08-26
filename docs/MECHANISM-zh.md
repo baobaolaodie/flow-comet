@@ -69,11 +69,11 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 
 ## 6. guard 自测套件（作者回归基线）
 
-`scripts/guard-self-test.mjs`：**184 个场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（64 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
+`scripts/guard-self-test.mjs`：**197 个场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（67 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
 
 ```bash
 node .claude/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 184 SCENARIOS PASSED
+# → ALL 197 SCENARIOS PASSED
 ```
 
 ## 6.5 DeepSeek Harness（dsh）平台
@@ -87,6 +87,14 @@ node .claude/skills/flow-comet/scripts/guard-self-test.mjs
 - **执行者放行**：协调者把任务委托给子代理时，被委托的子代理（以会话的子代理委托深度识别）作为执行者写入源码、跳过阶段白名单——与其他平台 worktree 隔离语义一致；协调者仍受白名单约束。流程运行中越界写入与参数形状不符对两者一律拒绝。
 - **包含性仅流程运行中生效**：空闲态（无 state / 无 `activeChange` / `completed`）项目根外写放行；解析失败 / 未知状态保持 fail-closed（拒绝）。
 - **托管规则注入**：安装时把编排规则注入 `AGENTS.md` 的 `<!-- Managed by flow-comet prepare-env -->` 托管区（非破坏合并，标记与 Codex 共用）。
+
+## 6.6 安装器行为（flow-kit 获取、loader 生命周期、bridge-check）
+
+`prepare-env` 在安装中扩展了 flow-kit 获取、dsh loader 生命周期汇报与只读桥接健康检查：
+
+- **flow-kit 获取（五态）**：平台循环前安装器确保 `<目标项目>/flow-kit/` 就位——缺失 → 克隆上游并检出锁定快照 commit `9b5dda7`；已存在的上游克隆（`.git` 存在且 `origin` remote 匹配）→ 只读 HEAD-vs-锁定点比对与差异影响报告（绝不改动）；已存在的同名非克隆目录（或 origin 无法确认）→ 跳过并给出手动指引；clone/checkout 网络失败 → WARN + 手动指引，安装继续（exit 0）；purge 永不包含 `flow-kit`（含 `--purge --yes`）。
+- **dsh loader 版本迁移**：桥接 loader 携带内嵌版本戳（`// BRIDGE_VERSION: <version>`）；每次 dsh 安装先比对权威源戳与已装 loader 戳再覆盖，输出首次安装 / 升级 `A → B` / 降级 `A → B` / 版本一致。
+- **bridge-check（只读）**：`workflow-state.mjs bridge-check` 对 dsh 桥接执行零写入、零网络的健康检查，共六态——健康（exit 0）、文件缺失 / 未挂载 / 版本偏斜 / 重复注册（exit 1）、不适用（exit 0，项目未安装 dsh 平台副本）。无法识别的 YAML 形态输出近似性声明告警（只告警不定论——绝不误杀）；仅明确失配强制非零退出。
 
 ## 7. 自动初始化检测（init 前置步骤）
 

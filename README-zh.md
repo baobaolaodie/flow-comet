@@ -53,9 +53,11 @@ cd <flow-comet 仓库>
 node scripts/prepare-env.mjs --target <目标项目绝对路径>
 ```
 
-首次在交互终端运行会以多选方式提示选择平台（方向键 + 空格勾选，回车确认；默认 Claude Code）；非交互场景直接加 `--platform codex` / `--platform dsh` / `--platform claude-code,dsh`（逗号分隔多选）/ `--platform all`。
+首次在交互终端运行会以方向键多选方式提示选择平台（方向键 + 空格勾选，回车确认；默认 Claude Code）——`@clack/prompts` 为主路径，依赖未安装/离线/stdin 无 raw mode 时自动回退 readline 数字/逗号多选（`FLOW_COMET_FORCE_READLINE=1` 测试钩子强制走回退）；非交互场景直接加 `--platform codex` / `--platform dsh` / `--platform claude-code,dsh`（逗号分隔多选）/ `--platform all`。
 
-安装器默认面向 Claude Code（行为不变）。面向 Codex：`node scripts/prepare-env.mjs --target <路径> --platform codex`——技能安装到自动发现的 `.agents/skills/`，编排规则注入 `AGENTS.md` 托管区，写入守卫 hook 经 Codex PreToolUse 拦截 Bash 写命令（首次使用需信任 hook：`/hooks`）。面向 DeepSeek Harness：`node scripts/prepare-env.mjs --target <路径> --platform dsh`——技能安装到 `.dsh/skills/flow-comet`（rank 100 自动发现、免重启），编排规则注入 `AGENTS.md` 托管区，并在 `$DSH_HOME` 全局挂载薄桥接 loader（见[安装 → 方案 C](docs/INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-平台)）。在交互式终端（有 TTY）运行且未指定 `--platform` 时，会以多选提示选择目标平台（按目标项目既有痕迹预勾选，默认 Claude Code，回车即选）；无 TTY（CI/脚本）自动探测 `.claude/` / `.codex/` / `.dsh/`，均无则默认 Claude Code。
+安装器默认面向 Claude Code（行为不变）。面向 Codex：`node scripts/prepare-env.mjs --target <路径> --platform codex`——技能安装到自动发现的 `.agents/skills/`，编排规则注入 `AGENTS.md` 托管区，写入守卫 hook 经 Codex PreToolUse 拦截 Bash 写命令（首次使用需信任 hook：`/hooks`）。面向 DeepSeek Harness：`node scripts/prepare-env.mjs --target <路径> --platform dsh`——技能安装到 `.dsh/skills/flow-comet`（rank 100 自动发现、免重启），编排规则注入 `AGENTS.md` 托管区，并在 `$DSH_HOME` 全局挂载薄桥接 loader（见[安装 → 方案 C](docs/INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-平台)）。在交互式终端（有 TTY）运行且未指定 `--platform` 时，会以方向键多选提示选择目标平台（`@clack/prompts` 为主路径，按目标项目既有痕迹预勾选，默认 Claude Code，回车即选；依赖未安装/离线/stdin 无 raw mode 自动回退 readline 数字/逗号多选；`FLOW_COMET_FORCE_READLINE=1` 测试钩子强制回退）；无 TTY（CI/脚本）自动探测 `.claude/` / `.codex/` / `.dsh/`，均无则默认 Claude Code。
+
+安装器还会确保目标项目中的 `flow-kit`：缺失时自动克隆上游并检出锁定快照 `9b5dda7`；已存在的上游克隆只读检测（输出当前 HEAD 与锁定快照的差异，绝不改动）；同名非克隆目录跳过并给出手动指引；网络失败仅告警并继续；purge 永不触碰它。
 
 面向 DeepSeek Harness（dsh）时走同一个安装器——**无插件包、无 npm 包**：
 
@@ -63,7 +65,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径>
 node scripts/prepare-env.mjs --target <目标项目绝对路径> --platform dsh
 ```
 
-这会项目级安装技能树到 `<项目>/.dsh/skills/flow-comet`（dsh 以 rank 100 自动发现、免重启——未安装该目录的项目不可见该技能，因此激活天然是项目级的），把编排规则注入 `AGENTS.md` 托管区（非破坏合并），并在 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 全局挂载薄桥接 loader（托管块写入 `$DSH_HOME/cordis.patch.yml`——读-合并-写，保留 dsh-skin 等既有块，对所有 profile 生效）。桥接经 dsh 的 `tools/pre-execute` 事件拦截写工具。拦截仅在流程运行中生效；空闲会话项目根外写不会被打断。最低 dsh `0.1.0-rc.6`；npm 包暂不发布（1.5.0 一并处理）。完整 dsh 平台安装章节见[安装 → 方案 C](docs/INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-平台)。
+这会项目级安装技能树到 `<项目>/.dsh/skills/flow-comet`（dsh 以 rank 100 自动发现、免重启——未安装该目录的项目不可见该技能，因此激活天然是项目级的），把编排规则注入 `AGENTS.md` 托管区（非破坏合并），并在 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 全局挂载薄桥接 loader（托管块写入 `$DSH_HOME/cordis.patch.yml`——读-合并-写，保留 dsh-skin 等既有块，对所有 profile 生效）。桥接经 dsh 的 `tools/pre-execute` 事件拦截写工具。拦截仅在流程运行中生效；空闲会话项目根外写不会被打断。每次安装会对比 loader 内嵌版本戳输出版本迁移结论（升级 / 降级 / 版本一致），`workflow-state.mjs bridge-check` 是只读健康自检（六态：健康 / 文件缺失 / 未挂载 / 版本偏斜 / 重复注册 / 不适用）。最低 dsh `0.1.0-rc.6`；npm 包暂不发布（1.5.0 一并处理）。完整 dsh 平台安装章节见[安装 → 方案 C](docs/INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-平台)。
 
 ```bash
 # 2. 在目标项目新开 Claude Code 会话，输入：
@@ -144,7 +146,7 @@ graph LR
 2. **断了线、换了会话也不丢进度**——进行到哪一步永远从 `.specs/` 工件推导，不靠对话记忆；随时重开从正确节点继续。
 3. **实现与协调物理隔离，防止越权**——实现交给全新上下文的子代理在独立工作树完成，必须交回"提交哈希 + 验证证据 + 完成检查"才放行；协调者被禁止写源码，写文件白名单物理拦截越权。
 4. **flow-kit 方法论的原生自动化层**——不是另起炉灶：工件格式、规则、阶段与 flow-kit 完全一致；装了 flow-kit 的项目装上 flow-comet 即升级为机器化流程，无需迁移。
-5. **协议驱动、零依赖、拷贝即用**——内置 8 节点流程开箱即用；任意已装技能可组合成自定义协议跑在同一引擎；Node.js 18+、无第三方依赖、一条命令装入目标项目。
+5. **协议驱动、最小依赖、拷贝即用**——内置 8 节点流程开箱即用；任意已装技能可组合成自定义协议跑在同一引擎；Node.js 18+；第三方依赖仅 `@clack/prompts`，且仅安装器 TTY 多选使用（其余场景自动回退 readline）；一条命令装入目标项目。
 
 **适用场景**：flow-comet 面向 Claude Code 上耗时数小时、跨多会话的开发 change——纪律自动化的价值在长任务中体现。它不是通用 CI/CD 或项目管理工具；Codex 与 DeepSeek Harness 受支持（见[安装](docs/INSTALLATION-zh.md#平台)），其他平台（Gemini / Cursor）不保证支持。
 
@@ -200,7 +202,7 @@ flow-comet/
 
 | 层 | 技术 |
 |----|------|
-| 运行时 | Node.js ≥ 18（ESM，零第三方依赖） |
+| 运行时 | Node.js ≥ 18（ESM）；第三方依赖：`@clack/prompts`（精确锁版，仅安装器 TTY 多选使用——不可用时自动回退 readline） |
 | 平台 | Claude Code（默认——skill 体系、`.claude/` 安装、hooks）；Codex（`.agents/skills/`、AGENTS.md 托管规则、PreToolUse 写拦截）；DeepSeek Harness（`.dsh/skills/flow-comet` 项目级技能、AGENTS.md 托管规则、桥接 loader + `tools/pre-execute` 拦截） |
 | 方法论 | [flow-kit](https://github.com/rihebty/flow-kit)（产物、规则、模板） |
 
@@ -226,7 +228,7 @@ flow-comet/
 
 1. 从 `dev` 开分支：`git checkout dev && git checkout -b feat/<描述>`
 2. 修改 skill/脚本请改 `.comet/bundle-drafts/flow-comet/skills/`（权威源）；TDD——先写 RED 场景
-3. 运行回归：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 184 SCENARIOS PASSED`
+3. 运行回归：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 197 SCENARIOS PASSED`
 4. 开 PR 合入 `dev`（squash——change 级提交）；发布 PR `dev → main`（merge——change 级提交进入 main，每次发布后 dev 不再领先）
 
 CI 在每个 PR 与 push 时自动强制仓库约定（回归、PR 纪律、版本一致性、死链）。本地 hook（提交/推送消息检测）通过 `node scripts/install-commit-hook.mjs` 安装——完整指南见 [CONTRIBUTING-zh.md](CONTRIBUTING-zh.md)。

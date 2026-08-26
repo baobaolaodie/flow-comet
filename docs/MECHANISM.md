@@ -69,11 +69,11 @@ Project-root fallback chain for interception: when the session cwd drifts, the p
 
 ## 6. Guard self-test suite (author regression baseline)
 
-`scripts/guard-self-test.mjs`: **184 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (64 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
+`scripts/guard-self-test.mjs`: **197 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (67 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
 
 ```bash
 node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 184 SCENARIOS PASSED
+# → ALL 197 SCENARIOS PASSED
 ```
 
 ## 6.5 DeepSeek Harness (dsh) platform
@@ -87,6 +87,14 @@ On DeepSeek Harness, flow-comet is installed through the **prepare-env installer
 - **Executor passthrough**: when the coordinator delegates tasks to subagents, the delegated agent (identified by the session's subagent delegation depth) writes source code as the executor and bypasses the phase whitelist — matching the worktree-isolation semantics of the other platforms — while the coordinating agent remains subject to the whitelist. Out-of-project writes and malformed tool arguments stay denied for both while the flow is running.
 - **Containment is active only while the flow is running**: in the idle state (no state / no `activeChange` / `completed`) writes outside the project root are allowed; parse failures or unknown workflow status stay fail-closed (deny).
 - **Managed rule injection**: installation injects the orchestration rule into `AGENTS.md` inside the `<!-- Managed by flow-comet prepare-env -->` block (non-destructive merge, marker shared with Codex).
+
+## 6.6 Installer behaviors (flow-kit acquisition, loader lifecycle, bridge-check)
+
+`prepare-env` extends the install with flow-kit acquisition, dsh loader lifecycle reporting, and a read-only bridge health check:
+
+- **flow-kit acquisition (five states)**: before the platform loop the installer ensures `<target>/flow-kit/` — missing → clone the upstream and check out the locked snapshot commit `9b5dda7`; existing upstream clone (`.git` present with a matching `origin` remote) → read-only HEAD-vs-lock comparison and impact report (never modified); existing same-name non-clone directory (or an unreadable origin) → skip with manual guidance; clone/checkout network failure → WARN + manual guidance, install continues (exit 0); purge never includes `flow-kit` (including `--purge --yes`).
+- **dsh loader version transitions**: the bridge loader carries an embedded version stamp (`// BRIDGE_VERSION: <version>`); each dsh install compares the authoritative stamp with the installed loader's stamp before overwriting and reports first install / upgrade `A → B` / downgrade `A → B` / version consistent.
+- **bridge-check (read-only)**: `workflow-state.mjs bridge-check` runs a zero-write, zero-network health check over the dsh bridge with six states — healthy (exit 0), file missing / not mounted / version skew / duplicate registration (exit 1), and not applicable (exit 0, project without the dsh platform copy). Unrecognized YAML shapes produce approximation warnings (warn without deciding — never a false fail); only explicit mismatches force a non-zero exit.
 
 ## 7. Automatic initialization detection (init pre-step)
 

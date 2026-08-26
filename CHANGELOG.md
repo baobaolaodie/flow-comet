@@ -12,6 +12,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added
+
+- **Installer acquires flow-kit automatically**: `prepare-env` clones the upstream and checks out the locked snapshot commit (`9b5dda7`) when the target project lacks `flow-kit/`; an existing upstream clone is only inspected read-only (current HEAD vs the locked snapshot is reported with the difference impact); a same-name non-clone directory is skipped with guidance; a network failure warns and continues; purge never includes `flow-kit`.
+- **dsh loader version governance and read-only bridge health check**: every dsh install compares the loader's embedded version stamp with the installed copy before overwriting and reports first install / upgrade / downgrade / version consistent; `workflow-state.mjs bridge-check` reports six states (healthy / file missing / not mounted / version skew / duplicate registration / not applicable) with zero writes and zero network.
+- **Interactive platform selection upgraded to a direction-key multi-select**: `@clack/prompts` is now the primary TTY path (pinned exact version — the repository's only third-party dependency, used solely by the installer's interactive selection), with an automatic readline number/comma multi-select fallback when the dependency is not installed, offline, or stdin has no raw mode; `FLOW_COMET_FORCE_READLINE=1` forces the fallback for testing.
+
 ### Changed
 
 - **Documentation aligned with repository conventions**: task summaries now defer to each repository's own ignore rules and are never force-added into version control, the commit convention adopts general optional scope semantics (short subsystem nouns; recommended but optional; management codes such as change-id must not be used as scope, and task numbers go in the commit body footer), branch naming alignment via `init --branch-prefix` is documented in the installation guide, and planners are told the wave-grouping constraint before plan exit.
@@ -19,7 +25,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 - **Write-guard project-root resolution hardened against directory drift**: the hook now resolves its project root via `COMET_RUN_ROOT`, then `CLAUDE_PROJECT_DIR` (injected by Claude Code), then walks upward from the session working directory to the nearest project marker — a drifted session no longer degrades to an error-style pass-through for out-of-project writes.
 - **Advisory pseudo-parallel detection at planning exit**: when a parallel task's declared writes consist exclusively of test files, the planning exit emits a non-blocking warning listing the task id and suggesting an explicit `depends_on` declaration or merging into a vertical slice — closing the implicit-dependency blind spot opened by interleaved multi-pass routing.
 - **Multi-pass exit hardening**: the execute-exit serial-task check now respects declared task dependencies — serial tasks waiting on later passes no longer block progress, while genuinely runnable serial tasks still block with their ids and recovery guidance; single-line semicolon-separated write-file lists are accepted by both handoff auto-parsing and pseudo-parallel detection; the routing advisory warning stays silent once every task is done; dependency-deadlock blocks now include a boundary hint for the workflow-state `advance` escape hatch (with its re-entry obligation); and the planning and delegation skill texts now describe interleaved parallel/serial sequences as valid under dependency-graph semantics.
-- **Regression suite expanded to 184 scenarios**; the system test suite stays at 64 items.
+- **Regression suite expanded to 197 scenarios**; the system test suite now runs 67 items.
 
 ## [1.5.0-rc.1] - 2026-08-23
 
