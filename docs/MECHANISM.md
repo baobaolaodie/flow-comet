@@ -24,7 +24,7 @@ This document describes what flow-comet **does** — the behaviors and rules you
 
 Hook blocking semantics (see Limitations): PreToolUse hook exit 2 blocks in the main TUI session; in `claude -p` non-zero exits are downgraded to non-blocking.
 
-Project-root fallback chain for interception: when the session cwd drifts, the project root is anchored via `COMET_RUN_ROOT` → `CLAUDE_PROJECT_DIR` → the nearest ancestor containing `.comet/flow-comet-state.json` → cwd, so out-of-project writes keep being intercepted.
+Project-root fallback chain for interception: when the session cwd drifts, the project root is anchored via `COMET_RUN_ROOT` → `CLAUDE_PROJECT_DIR` → the nearest ancestor containing either `.comet/flow-comet-state.json` or `.claude/skills/flow-comet` → cwd, so out-of-project writes keep being intercepted.
 
 ## 3. Guard validation (evidence-driven advancement)
 

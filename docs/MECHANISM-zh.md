@@ -24,7 +24,7 @@
 
 hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会话 TUI 阻止工具调用；`claude -p`（SDK CLI 模式）下非零退出被降级为 non-blocking。
 
-越界拦截的项目根兜底链：会话 cwd 漂移时按 `COMET_RUN_ROOT` → `CLAUDE_PROJECT_DIR` → 含 `.comet/flow-comet-state.json` 的最近祖先 → cwd 锚定项目根，项目根外写入仍被拦截。
+越界拦截的项目根兜底链：会话 cwd 漂移时按 `COMET_RUN_ROOT` → `CLAUDE_PROJECT_DIR` → 含 `.comet/flow-comet-state.json` **或** `.claude/skills/flow-comet` 的最近祖先 → cwd 锚定项目根，项目根外写入仍被拦截。
 
 ## 3. guard 校验体系（证据驱动推进）
 
