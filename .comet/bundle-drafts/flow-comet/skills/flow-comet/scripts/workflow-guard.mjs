@@ -6,6 +6,7 @@ import { createHash } from 'crypto';
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor } from './state-schema.mjs';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES } from './protocol-utils.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from './task-parsing.mjs';
+import { resolveNextNode } from './route-node.mjs';
 
 const command = process.argv[2] ?? 'verify';
 const nodeId = process.argv[3] ?? null;
@@ -1679,9 +1680,18 @@ function completedSet(state) {
   return new Set(Array.isArray(state.completedNodes) ? state.completedNodes : []);
 }
 
-function nextNode(protocol, state) {
-  const completed = completedSet(state);
-  return route(protocol).find((node) => !completed.has(node.id)) ?? null;
+// 路由判定统一委托共享模块 route-node.mjs 的 resolveNextNode（单一实现——guard 与
+// workflow-state 两侧同语义，含多趟 parallel 回流与串行 pending → execute）。展示层
+// （NEXT/NODE/SKILL 行）保留在本文件（AC-6 展示文案逐字）。无活跃 change → null（完成态）。
+async function nextNode(protocol, state) {
+  if (!state.activeChange) return null;
+  const id = await resolveNextNode({
+    runRoot,
+    changeName: state.activeChange,
+    protocol,
+    completedNodes: Array.isArray(state.completedNodes) ? state.completedNodes : [],
+  });
+  return id ? findNode(protocol, id) : null;
 }
 
 // ---------- 多趟路由共享判定（依赖图校验决策与完成判定谓词决策 · 多趟路由架构决策记录） ----------
@@ -2223,7 +2233,7 @@ async function main() {
   state.completedNodes = Array.isArray(state.completedNodes) ? state.completedNodes : [];
   state.evidence = state.evidence && typeof state.evidence === 'object' ? state.evidence : {};
   if (command === 'entry') {
-    const current = state.currentNode ?? nextNode(protocol, state)?.id ?? null;
+    const current = state.currentNode ?? (await nextNode(protocol, state))?.id ?? null;
     if (current !== node.id && !state.completedNodes.includes(node.id)) {
       console.error('BLOCKED: current Node is ' + String(current) + ', cannot enter ' + node.id + '.');
       process.exit(1);
@@ -3273,61 +3283,27 @@ async function main() {
     // archive 节点完成后 change 已归档 → 清空活跃 change（flow-comet 回到无活跃状态）
     const isArchive = node.id === 'archive';
     if (isArchive) state.activeChange = null;
-    let next = isArchive ? null : nextNode(protocol, state);
-    // parallel-aware 路由镜像（多趟语义）——exit 推进后的下一候选若仍有依赖已满足的
-    // pending parallel 任务，则委托优先：路由到 subagent-execute（与 workflow-state.mjs 的
-    // determineNode 同谓词、每趟重新求值）。旧「subagent-execute 已完成则不再回流」的单趟限制
-    // 移除（多趟循环路由形态决策）；触发面从「下一候选为 execute」扩为任意非 subagent-execute 候选——否则
-    // execute 完成后 nextNode 直接落到 review，第二波并行会被静默跳过（AC-1 全自动分趟）。
-    // 上一趟出口的多趟完成判定（合取语义）保证走到这里时可委托集合必为空或本趟已被拦，
-    // 故本镜像不会与出口校验形成循环放行。
+    let next = isArchive ? null : await nextNode(protocol, state);
+    // 多趟路由诊断保留（展示层，不并入共享判定）：出口推进后下一候选非委托节点时，若任务集存在
+    // parallel 标记任务与任一 pending 任务但无 pending parallel 可委托块，输出路由诊断提示
+    // （收尾态静默：全部任务 done 时无 pending 不输出）。路由决策本身由 resolveNextNode
+    // 单一实现（不再维护第二份并行镜像）。
     if (next && next.id !== 'subagent-execute' && state.activeChange) {
       const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
       try {
         const taskContent = await fs.readFile(taskFile, 'utf8');
-        // 开标签属性解析共享 task-parsing.mjs——与 workflow-state determineNode 同语义（属性序无关）
         const taskList = extractTaskBlocks(taskContent);
-        // 收集所有 done 任务的 id
-        const doneIds = new Set(taskList
-          .map(taskOpeningAttrs)
-          .filter(a => a && a.status === 'done' && a.id)
-          .map(a => a.id));
-        // 检查 pending parallel 任务中是否有依赖已满足的（开标签 parallel="true" 且 status="pending"）
-        const parallelBlocks = taskList.filter((block) => {
-          const a = taskOpeningAttrs(block);
-          return a && a.parallel && a.status === 'pending';
-        });
-        // 路由无匹配时输出诊断——结构校验保持严格，检测失败纠偏可见
-        // 旧模板（task 标签无 status 属性）产出的 TASK.md 无法匹配——明确提示而非静默卡在 execute
-        // 收尾态静默（ROUTE WARN 前置条件）：全部任务已 done（无任何 status="pending"）时
-        // 该诊断只剩噪音——仅在仍存在任一 pending 任务时输出。
-        if (parallelBlocks.length === 0 && taskList.some((block) => {
+        if (taskList.some((block) => {
           const a = taskOpeningAttrs(block);
           return a && a.parallel;
         }) && taskList.some((block) => {
           const a = taskOpeningAttrs(block);
           return a && a.status === 'pending';
+        }) && !taskList.some((block) => {
+          const a = taskOpeningAttrs(block);
+          return a && a.parallel && a.status === 'pending';
         })) {
           console.error('ROUTE WARN: 未找到 parallel="true" status="pending" 的任务块——检查 task 开标签的 parallel/status 属性（属性序无关；缺 status 不视为 pending）');
-        }
-        const eligibleParallel = parallelBlocks.filter(block => {
-          const depsMatch = block.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
-          if (!depsMatch || !depsMatch[1].trim()) return true;
-          const deps = depsMatch[1].trim().split(/[,\s]+/).filter(Boolean);
-          return deps.every(d => doneIds.has(d));
-        });
-        if (eligibleParallel.length > 0) {
-          const subagentNode = findNode(protocol, 'subagent-execute');
-          // 顺序守卫：仅当候选位于 execute 及其后（review/archive）才镜像替换——
-          // 候选落在 execute 之前（如回退后的 design/plan 重入）时保持原候选，
-          // 避免镜像绕过前置节点的产物门禁强行委托（与 workflow-state determineNode 的
-          // preExecNodes 前置门顺序对齐）。
-          const routeNodes = route(protocol);
-          const execIdx = routeNodes.findIndex((n) => n.id === 'execute');
-          const nextIdx = routeNodes.findIndex((n) => n.id === next.id);
-          if (subagentNode && execIdx >= 0 && nextIdx >= execIdx) {
-            next = subagentNode;
-          }
         }
       } catch {}
     }

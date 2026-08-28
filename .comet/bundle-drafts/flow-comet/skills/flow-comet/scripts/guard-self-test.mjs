@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · flow-comet 引擎自测套件（200 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退））
+// C1 · flow-comet 引擎自测套件（201 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退））
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -7,7 +7,7 @@
 // （COMET_RUN_ROOT=<临时目录>）→ 断言退出码与输出关键词。场景跑完 rmSync 清理。
 //
 // 运行: node scripts/guard-self-test.mjs
-// 全过 → exit 0，输出 ALL 200 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
+// 全过 → exit 0，输出 ALL 201 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
 //
 // 仅 node 内置模块（child_process/fs/os/path）；不依赖 flow-kit 模板目录存在
 // （fallback 场景用内置段名；部分场景复制模板文件进临时目录验证 C2 模板派生）。
@@ -5158,12 +5158,143 @@ const SCENARIOS = [
     },
   },
 
-  // 198: purge 时目标无 flow-kit → 不得获取也不得创建（清理域语义：purge 只清理、不产生
+  // 时序收敛回归锚（AC-5 事故回放）：多趟拓扑（并行开路 → 串行衔接 → 并行收尾 → 串行收尾），
+  // 逐节点真实走 guard exit --apply 后运行 workflow-state next——断言两者路由结果逐节点一致。
+  // 修复前 guard 出口镜像缺「串行 pending → execute」回流（并行收尾完成后直接落到 review，
+  // 与权威 next 的 execute 回流偏差）——本场景对未修复引擎为 RED（预期中间态）。
+  {
+    name: '198 多趟出口路由时序收敛：逐节点 exit --apply 后 next 输出 NODE 与 guard 出口 NODE 一致',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const writeTask = (statusMap) => {
+        const blk = (id, parallel, deps) =>
+          '<task id="' + id + '"' + (parallel ? ' parallel="true"' : '') +
+          ' status="' + (statusMap[id] === 'done' ? 'done' : 'pending') + '">' +
+          '<action>实现 ' + id + '</action><write_files>src/' + id.toLowerCase() + '.mjs</write_files>' +
+          '<verify>node --check src/' + id.toLowerCase() + '.mjs</verify>' +
+          (deps ? '<depends_on>' + deps + '</depends_on>' : '') + '</task>\n';
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+          blk('P01', true, '') + blk('P02', true, '') +
+          blk('S01', false, 'P01,P02') +
+          blk('P03', true, 'S01') + blk('P04', true, 'S01') +
+          blk('S02', false, 'P03,P04'));
+      };
+      const readStateObj = () => JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      // appendEvidence 顶层浅合并 + handoffResult 深层合并：多趟委托下 subagent-execute 的
+      // handoffResult 是跨趟累积的委托结果库（越俎代庖检测按全部 done 任务查记录）——整体
+      // 覆盖会丢失已委托任务记录（与真实链路 handoff 逐趟追加不一致）。其它节点 evidence
+      // 为 summary 对象，浅合并语义与整体赋值等价。
+      const appendEvidence = (node, evidence) => {
+        const o = readStateObj();
+        const prev = o.evidence[node] || {};
+        const merged = { ...prev, ...evidence };
+        if (evidence.handoffResult && typeof evidence.handoffResult === 'object') {
+          merged.handoffResult = { ...(prev.handoffResult || {}), ...evidence.handoffResult };
+        }
+        o.evidence[node] = merged;
+        writeState(dir, o);
+      };
+      const writeSummary = (ids) => { for (const id of ids) writeFile(dir, '.specs/' + CHANGE_ID + '/' + id + '-SUMMARY.md', summaryContent()); };
+      const nodeOf = (out) => (out.match(/^NODE: ([a-z-]+)$/m) || [])[1] ?? null;
+      const assertConverge = (guardRes) => {
+        assertExit(guardRes, 0);
+        const gNode = nodeOf(guardRes.output);
+        const nextRes = runState(['next'], dir, env);
+        assertExit(nextRes, 0);
+        const sNode = nodeOf(nextRes.output);
+        if (gNode !== sNode) {
+          throw new Error('guard 出口 NODE(' + gNode + ') != next 输出 NODE(' + sNode +
+            ')——时序收敛断言失败\nguard 输出:\n' + guardRes.output + '\nnext 输出:\n' + nextRes.output);
+        }
+      };
+      // 预置 open 产物（CHANGE + REQUIREMENT）；design/plan 产物在各自出口前写入（真实链路时序）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## Why（为什么做）\n\nx\n\n## 范围（Scope）\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 用户故事（User Story）\n\nx\n\n## 验收准则（AC）\n\n- Given x When y Then z');
+      writeState(dir, baseState('open'));
+      assertExit(runGuard(['entry', 'open'], dir), 0);
+      // ① open 出口 → design
+      appendEvidence('open', { summary: 'intake complete' });
+      assertConverge(runGuard(['exit', 'open', '--apply'], dir));
+      // ② design 出口 → plan
+      assertExit(runGuard(['entry', 'design'], dir), 0);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 0. 技术栈选型\n\nNode（纯脚本）\n\n## 决策清单\n\n- [ ] 决策 1');
+      appendEvidence('design', { summary: 'design complete' });
+      assertConverge(runGuard(['exit', 'design', '--apply'], dir));
+      const assertExitRouted = (res, nodeId) => { assertExit(res, 0); if (nodeId) assertOut(res, 'NODE: ' + nodeId); };
+      // ③ plan 出口（首波并行可委托）→ subagent-execute（guard 路由跳转；next 侧仅对「直接后继
+      // 推进」态可确认输出，委托跳转态不在收敛断言面——收敛锚设在 next 可确认的直接后继/回流态）
+      assertExit(runGuard(['entry', 'plan'], dir), 0);
+      writeTask({ P01: 'pending', P02: 'pending', S01: 'pending', P03: 'pending', P04: 'pending', S02: 'pending' });
+      appendEvidence('plan', { summary: 'plan complete' });
+      assertExitRouted(runGuard(['exit', 'plan', '--apply'], dir), 'subagent-execute');
+      // ④ 第一波并行委托完成 → 趟间回串行（guard 路由 execute）
+      assertExit(runGuard(['entry', 'subagent-execute'], dir), 0);
+      writeTask({ P01: 'done', P02: 'done', S01: 'pending', P03: 'pending', P04: 'pending', S02: 'pending' });
+      writeSummary(['P01', 'P02']);
+      // handoff evidence 构造与既有委托出口场景一致合法形态：非空 summary 满足
+      // flowkit.handoff.v1 的 schema evidence 前置校验（missingRequiredSchemaEvidence 中
+      // summary 视同满足），handoffResult 满足越俎代庖检测的委托结果记录——guard exit 才
+      // 能通过证据前置校验并真正断言路由收敛（缺 summary 时前置 BLOCK，属场景构造缺陷）。
+      appendEvidence('subagent-execute', { summary: 'wave1 delegated and collected', handoffResult: handoffFor(['P01', 'P02']) });
+      assertExitRouted(runGuard(['exit', 'subagent-execute', '--apply'], dir), 'execute');
+      // ⑤ 串行衔接完成 → 第二波并行可委托（guard 路由 subagent-execute）
+      assertExit(runGuard(['entry', 'execute'], dir), 0);
+      writeTask({ P01: 'done', P02: 'done', S01: 'done', P03: 'pending', P04: 'pending', S02: 'pending' });
+      writeSummary(['S01']);
+      // 串行衔接任务由 execute 完成，但 subagent 统一委托语义下 execute 出口的越俎代庖检测
+      // 要求**所有** done 任务在 subagent-execute 的 handoffResult 有委托记录（真实链路
+      // completeTasks 同形态）——追加该任务记录（handoffResult 深层合并保留既有记录）。
+      appendEvidence('subagent-execute', { handoffResult: handoffFor(['S01']) });
+      appendEvidence('execute', { summary: 'serial wave complete' });
+      assertExitRouted(runGuard(['exit', 'execute', '--apply'], dir), 'subagent-execute');
+      // ⑥ 第二波并行委托完成 → 收尾串行 pending 应回流 execute（修复核心断言）
+      assertExit(runGuard(['entry', 'subagent-execute'], dir), 0);
+      writeTask({ P01: 'done', P02: 'done', S01: 'done', P03: 'done', P04: 'done', S02: 'pending' });
+      writeSummary(['P03', 'P04']);
+      // 与 ④ 同形态（既有合法委托出口形态）：非空 summary + handoffResult，guard exit 通过
+      // 证据前置校验后才能真正收敛断言（AC-5 时序收敛）。
+      appendEvidence('subagent-execute', { summary: 'wave2 delegated and collected', handoffResult: handoffFor(['P03', 'P04']) });
+      assertConverge(runGuard(['exit', 'subagent-execute', '--apply'], dir));
+      // ⑦ 收尾串行完成 → review
+      assertExit(runGuard(['entry', 'execute'], dir), 0);
+      writeTask({ P01: 'done', P02: 'done', S01: 'done', P03: 'done', P04: 'done', S02: 'done' });
+      writeSummary(['S02']);
+      // 同 ⑤：收尾串行任务委托记录追加（深层合并后全部 done 任务均在 handoffResult，
+      // execute 出口越俎代庖检测通过）。
+      appendEvidence('subagent-execute', { handoffResult: handoffFor(['S02']) });
+      appendEvidence('execute', { summary: 'final serial complete' });
+      assertConverge(runGuard(['exit', 'execute', '--apply'], dir));
+      // ⑧ review → verify
+      assertExit(runGuard(['entry', 'review'], dir), 0);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
+        '# REVIEW\n\n## 发现\n\n### Critical\n\n- 无\n\n### Major\n\n- 无\n\n### Minor\n\n- 无\n\n## 结论\n\nreview passed，无遗留问题。\n');
+      appendEvidence('review', { summary: 'review complete' });
+      assertConverge(runGuard(['exit', 'review', '--apply'], dir));
+      // ⑨ verify → archive
+      assertExit(runGuard(['entry', 'verify'], dir), 0);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```\necho ok\n```\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/UAT.md', '# UAT\n\n## 验收\n\n- 通过\n');
+      appendEvidence('verify', { summary: 'verify complete' });
+      assertConverge(runGuard(['exit', 'verify', '--apply'], dir));
+      // ⑩ archive 出口 → 全部完成（两侧均 NEXT: done）
+      assertExit(runGuard(['entry', 'archive'], dir), 0);
+      writeFile(dir, '.specs/archive/2026-08-28-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# 遗留问题\n\n无。\n');
+      appendEvidence('archive', { summary: 'archive complete' });
+      const res = runGuard(['exit', 'archive', '--apply'], dir);
+      assertExit(res, 0);
+      assertOut(res, 'NEXT: done');
+      const nextRes = runState(['next'], dir, env);
+      assertExit(nextRes, 0);
+      assertOut(nextRes, 'NEXT: done');
+    },
+  },
+
+  // 199: purge 时目标无 flow-kit → 不得获取也不得创建（清理域语义：purge 只清理、不产生
   // 新产物）。注入不可达 http.proxy（与「网络失败 WARN 继续」场景同技法）——若 purge 路径仍调 ensureFlowKit，
   // 会触发 clone 失败 WARN「flow-kit 自动获取失败」→ 断言“该 WARN 不出现 + 已获取不出现 +
   // 无 flow-kit 目录”即对当前实现 RED。
   {
-    name: '198 prepare-env purge 不触碰 flow-kit：purge 且无 flow-kit 不获取不创建',
+    name: '199 prepare-env purge 不触碰 flow-kit：purge 且无 flow-kit 不获取不创建',
     run: (dir) => {
       if (!fs.existsSync(PREPARE_ENV)) return;
       const proj = path.join(dir, 'proj');
@@ -5181,11 +5312,11 @@ const SCENARIOS = [
     },
   },
 
-  // 199: 版本戳形态校验——已装 loader 标记行非语义化版本（如 beta，无数字主形）→ 提取失败
+  // 200: 版本戳形态校验——已装 loader 标记行非语义化版本（如 beta，无数字主形）→ 提取失败
   // 警告 + 跳过版本比对 + 照常覆盖；不得作为合法版本进入 compare（畸形值 parseInt 得 NaN，
   // 会产生升/降级方向的错误结论）。
   {
-    name: '199 prepare-env 版本戳形态：畸形标记（beta）走提取失败警告而非版本比对',
+    name: '200 prepare-env 版本戳形态：畸形标记（beta）走提取失败警告而非版本比对',
     run: (dir) => {
       if (!fs.existsSync(PREPARE_ENV)) return;
       const proj = path.join(dir, 'proj');
@@ -5204,10 +5335,10 @@ const SCENARIOS = [
     },
   },
 
-  // 200: bridge-check 目标一致性——托管块 file:// 指向存在但非期望的 loader 文件
+  // 201: bridge-check 目标一致性——托管块 file:// 指向存在但非期望的 loader 文件
   // （可达性成立、目标错误）：不可报健康（必须 FAIL——解码目标与期望 loaderPath 不符，exit 1）。
   {
-    name: '200 bridge-check 可达但目标错误：file:// 指向非期望 loader FAIL exit 1',
+    name: '201 bridge-check 可达但目标错误：file:// 指向非期望 loader FAIL exit 1',
     run: (dir) => {
       const wrong = path.join(dir, 'dshhome', 'plugins', 'some-other-loader.mjs');
       fs.mkdirSync(path.dirname(wrong), { recursive: true });

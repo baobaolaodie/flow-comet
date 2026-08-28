@@ -902,6 +902,116 @@ const TEST_ITEMS = [
     },
   },
 
+  {
+    // 路由时序收敛（真实命令链路）：多趟拓扑（并行开路 → 串行衔接 → 并行收尾 → 串行收尾）逐节点
+    // guard exit --apply 后运行 workflow-state next——断言两侧 NODE 逐节点一致（修复前 guard 出口
+    // 镜像缺「串行 pending → execute」回流，并行收尾后直接落到 review，与权威 next 偏差）。
+    name: 'A15 多趟路由时序收敛：逐节点 exit --apply 后 next NODE 与 guard 出口 NODE 一致',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const writeTask = (statusMap) => {
+        const blk = (id, parallel, deps) =>
+          '<task id="' + id + '"' + (parallel ? ' parallel="true"' : '') +
+          ' status="' + (statusMap[id] === 'done' ? 'done' : 'pending') + '">' +
+          '<action>实现 ' + id + '</action><write_files>src/' + id.toLowerCase() + '.mjs</write_files>' +
+          '<verify>node --check src/' + id.toLowerCase() + '.mjs</verify>' +
+          (deps ? '<depends_on>' + deps + '</depends_on>' : '') + '</task>\n';
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+          blk('P01', true, '') + blk('P02', true, '') +
+          blk('S01', false, 'P01,P02') +
+          blk('P03', true, 'S01') + blk('P04', true, 'S01') +
+          blk('S02', false, 'P03,P04'));
+      };
+      const runNext = () => runState(['next'], dir, env);
+      const nodeOf = (out) => (out.match(/^NODE: ([a-z-]+)$/m) || [])[1] ?? null;
+      const completeTasks = (ids) => {
+        for (const id of ids) {
+          writeFile(dir, '.specs/' + CHANGE_ID + '/' + id + '-SUMMARY.md', execSummaryFixture(id));
+          assertExit(runHandoff(['request', id, id + ' 委托', '--write-files', 'src/' + id.toLowerCase() + '.mjs'], dir), 0);
+          assertExit(runHandoff(['result', id, fullContract('abcd1234abcd1234abcd1234abcd1234abcd1234', id)], dir), 0);
+        }
+      };
+      // drive 收敛面参数化：委托跳转/趟间回串行态（guard 出口 NODE 与 next 可确认面不一致——
+      // next 对「currentNode 无 evidence 且非固定路由后继」的委托跳转态按正常推进豁免不放行，
+      // 仅断言 guard 侧 NODE；直接后继/回流态（next 可确认）才做双侧收敛断言。
+      const drive = (nodeId, skill, prompt, prepare, { expectedNode, converge = true } = {}) => {
+        assertExit(runState(['skill-load', nodeId, skill, '--prompt', prompt], dir, env), 0);
+        prepare();
+        assertExit(runGuard(['entry', nodeId], dir), 0);
+        const res = runGuard(['exit', nodeId, '--apply'], dir);
+        assertExit(res, 0);
+        const n1 = nodeOf(res.output);
+        if (expectedNode && n1 !== expectedNode) {
+          throw new Error('节点 ' + nodeId + ' 出口后 guard NODE(' + n1 + ') != 期望(' + expectedNode +
+            ')\nguard:\n' + res.output);
+        }
+        if (!converge) return;
+        const nxt = runNext();
+        assertExit(nxt, 0);
+        const n2 = nodeOf(nxt.output);
+        if (n1 !== n2) {
+          throw new Error('节点 ' + nodeId + ' 出口后 guard NODE(' + n1 + ') != next NODE(' + n2 +
+            ')\nguard:\n' + res.output + '\nnext:\n' + nxt.output);
+        }
+      };
+      const writeSummary = (ids) => { for (const id of ids) writeFile(dir, '.specs/' + CHANGE_ID + '/' + id + '-SUMMARY.md', execSummaryFixture(id)); };
+      driveThroughDesign(dir);
+      // 预置多趟 TASK 并推进到 review 门控前（逐节点收敛断言）
+      writeTask({ P01: 'pending', P02: 'pending', S01: 'pending', P03: 'pending', P04: 'pending', S02: 'pending' });
+      drive('plan', 'flow-comet-plan', 'flow-kit/prompts/3-task.md', () => assertExit(runState(['record', 'plan', '{"summary":"plan complete"}'], dir, env), 0),
+        { expectedNode: 'subagent-execute', converge: false });
+      drive('subagent-execute', 'flow-comet-subagent-execute', 'flow-kit/prompts/4-dev.md', () => {
+        writeTask({ P01: 'done', P02: 'done', S01: 'pending', P03: 'pending', P04: 'pending', S02: 'pending' });
+        writeSummary(['P01', 'P02']);
+        completeTasks(['P01', 'P02']);
+        // 委托收集后按真实链路 record 节点总结（浅合并保留 handoffResult）——guard exit
+        // 的 schema evidence 前置需要非空 summary（缺则 BLOCK，与场景级委托出口同形态）。
+        assertExit(runState(['record', 'subagent-execute', '{"summary":"wave 1 delegated and collected"}'], dir, env), 0);
+      }, { expectedNode: 'execute', converge: false });
+      drive('execute', 'flow-comet-execute', 'flow-kit/prompts/4-dev.md', () => {
+        writeTask({ P01: 'done', P02: 'done', S01: 'done', P03: 'pending', P04: 'pending', S02: 'pending' });
+        writeSummary(['S01']);
+        completeTasks(['S01']);
+        // execute 节点自身证据（guard exit 校验节点 evidence 须有记录）——真实链路中
+        // 串行任务完成后协调者 record execute 节点总结。
+        assertExit(runState(['record', 'execute', '{"summary":"serial wave complete"}'], dir, env), 0);
+      }, { expectedNode: 'subagent-execute', converge: true });
+      drive('subagent-execute', 'flow-comet-subagent-execute', 'flow-kit/prompts/4-dev.md', () => {
+        writeTask({ P01: 'done', P02: 'done', S01: 'done', P03: 'done', P04: 'done', S02: 'pending' });
+        writeSummary(['P03', 'P04']);
+        completeTasks(['P03', 'P04']);
+        assertExit(runState(['record', 'subagent-execute', '{"summary":"wave 2 delegated and collected"}'], dir, env), 0);
+      }, { expectedNode: 'execute', converge: true });
+      drive('execute', 'flow-comet-execute', 'flow-kit/prompts/4-dev.md', () => {
+        writeTask({ P01: 'done', P02: 'done', S01: 'done', P03: 'done', P04: 'done', S02: 'done' });
+        writeSummary(['S02']);
+        completeTasks(['S02']);
+        assertExit(runState(['record', 'execute', '{"summary":"final serial wave complete"}'], dir, env), 0);
+      }, { expectedNode: 'review', converge: true });
+      drive('review', 'flow-comet-review', 'flow-kit/prompts/6-review.md', () => {
+        writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
+          '# REVIEW\n\n## 发现\n\n### Critical\n\n- 无\n\n### Major\n\n- 无\n\n### Minor\n\n- 无\n\n## 结论\n\nreview passed，无遗留问题。\n');
+        assertExit(runState(['record', 'review', '{"summary":"review complete"}'], dir, env), 0);
+      }, { expectedNode: 'verify', converge: true });
+      drive('verify', 'flow-comet-verify', 'flow-kit/prompts/7-integration.md', () => {
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```\necho ok\n```\n');
+        writeFile(dir, '.specs/' + CHANGE_ID + '/UAT.md', '# UAT\n\n## 验收\n\n- 通过\n');
+        assertExit(runState(['record', 'verify', '{"summary":"verify complete"}'], dir, env), 0);
+      }, { expectedNode: 'archive', converge: true });
+      // 归档出口：两侧均 NEXT: done
+      assertExit(runState(['skill-load', 'archive', 'flow-comet-archive', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
+      writeFile(dir, '.specs/archive/2026-08-28-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# 遗留问题\n\n无。\n');
+      assertExit(runState(['record', 'archive', '{"summary":"archive complete"}'], dir, env), 0);
+      assertExit(runGuard(['entry', 'archive'], dir), 0);
+      const res = runGuard(['exit', 'archive', '--apply'], dir);
+      assertExit(res, 0);
+      assertOut(res, 'NEXT: done');
+      const nxt = runNext();
+      assertExit(nxt, 0);
+      assertOut(nxt, 'NEXT: done');
+    },
+  },
+
   // ---------- B. 声明机制（skill-load / record / exit 校验） ----------
 
   {
