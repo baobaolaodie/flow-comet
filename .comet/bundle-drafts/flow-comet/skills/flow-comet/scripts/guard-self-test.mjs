@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · flow-comet 引擎自测套件（197 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退））
+// C1 · flow-comet 引擎自测套件（200 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退））
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -7,7 +7,7 @@
 // （COMET_RUN_ROOT=<临时目录>）→ 断言退出码与输出关键词。场景跑完 rmSync 清理。
 //
 // 运行: node scripts/guard-self-test.mjs
-// 全过 → exit 0，输出 ALL 197 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
+// 全过 → exit 0，输出 ALL 200 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
 //
 // 仅 node 内置模块（child_process/fs/os/path）；不依赖 flow-kit 模板目录存在
 // （fallback 场景用内置段名；部分场景复制模板文件进临时目录验证 C2 模板派生）。
@@ -5155,6 +5155,73 @@ const SCENARIOS = [
       if (!out.includes('输入序号或平台名（逗号分隔多选）或回车')) throw new Error('未出现 readline 序号提示:\n' + out);
       if (out.includes('方向键移动、空格勾选')) throw new Error('强制回退仍走了 clack 主路径:\n' + out);
       if (!fs.existsSync(path.join(proj, '.dsh', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('readline 选择 dsh 后未安装 dsh 平台');
+    },
+  },
+
+  // 198: purge 时目标无 flow-kit → 不得获取也不得创建（清理域语义：purge 只清理、不产生
+  // 新产物）。注入不可达 http.proxy（与「网络失败 WARN 继续」场景同技法）——若 purge 路径仍调 ensureFlowKit，
+  // 会触发 clone 失败 WARN「flow-kit 自动获取失败」→ 断言“该 WARN 不出现 + 已获取不出现 +
+  // 无 flow-kit 目录”即对当前实现 RED。
+  {
+    name: '198 prepare-env purge 不触碰 flow-kit：purge 且无 flow-kit 不获取不创建',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj');
+      fs.mkdirSync(proj, { recursive: true });
+      const res = runPrepareEnv(['--target', proj, '--platform', 'dsh', '--purge', '--yes'], dir, {
+        DSH_HOME: path.join(dir, 'dshhome'),
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'http.proxy',
+        GIT_CONFIG_VALUE_0: 'http://127.0.0.1:9',
+      });
+      assertExit(res, 0);
+      assertNotOut(res, '已获取 flow-kit');
+      assertNotOut(res, 'flow-kit 自动获取失败');
+      if (fs.existsSync(path.join(proj, 'flow-kit'))) throw new Error('purge 后创建了 flow-kit 目录');
+    },
+  },
+
+  // 199: 版本戳形态校验——已装 loader 标记行非语义化版本（如 beta，无数字主形）→ 提取失败
+  // 警告 + 跳过版本比对 + 照常覆盖；不得作为合法版本进入 compare（畸形值 parseInt 得 NaN，
+  // 会产生升/降级方向的错误结论）。
+  {
+    name: '199 prepare-env 版本戳形态：畸形标记（beta）走提取失败警告而非版本比对',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj');
+      fs.mkdirSync(proj, { recursive: true });
+      const dshHome = path.join(dir, 'dshhome');
+      writeFile(dshHome, 'plugins/dsh-flow-comet-bridge.mjs',
+        '// dsh bridge loader fixture (malformed stamp)\n// BRIDGE_VERSION: beta\n' +
+        "export const name = 'dsh-flow-comet-bridge';\nexport const version = '1.6.0-alpha.1';\n");
+      const res = runPrepareEnv(['--target', proj, '--platform', 'dsh'], dir, { DSH_HOME: dshHome });
+      assertExit(res, 0);
+      assertOut(res, '版本戳提取失败');
+      assertNotOut(res, '桥接 loader 升级');
+      assertNotOut(res, '桥接 loader 降级');
+      const installed = fs.readFileSync(path.join(dshHome, 'plugins', 'dsh-flow-comet-bridge.mjs'), 'utf8');
+      if (!installed.includes('BRIDGE_VERSION: 1.6.0-alpha.1')) throw new Error('覆盖后 loader 版本戳非权威源值');
+    },
+  },
+
+  // 200: bridge-check 目标一致性——托管块 file:// 指向存在但非期望的 loader 文件
+  // （可达性成立、目标错误）：不可报健康（必须 FAIL——解码目标与期望 loaderPath 不符，exit 1）。
+  {
+    name: '200 bridge-check 可达但目标错误：file:// 指向非期望 loader FAIL exit 1',
+    run: (dir) => {
+      const wrong = path.join(dir, 'dshhome', 'plugins', 'some-other-loader.mjs');
+      fs.mkdirSync(path.dirname(wrong), { recursive: true });
+      fs.writeFileSync(wrong, '// some other loader\n', 'utf8');
+      const fileUrl = pathToFileURL(wrong).href;
+      const { dshHome } = writeBridgeFixture(dir, {
+        patchContent:
+          '# --- flow-comet managed ---\n- insert:\n    - id: dsh-flow-comet-bridge\n      name: \'' +
+          fileUrl.replace(/'/g, "''") + '\'\n# --- end flow-comet managed ---\n',
+      });
+      const res = runBridgeCheck(dir, dshHome);
+      assertExit(res, 1);
+      assertOut(res, '[FAIL]');
+      assertNotOut(res, '健康（全部检查通过）');
     },
   },
 ];

@@ -656,7 +656,7 @@ function printNext(protocol, nodeId, executionMode = 'subagent') {
 
 // 版本戳锚点正则（契约定稿见 T02-SUMMARY「版本戳标记行格式契约」/ DESIGN §9.3）：
 // 独立整行、行首无缩进、冒号后恰一个空格、行尾无其它字符。格式禁动（§9.5）。
-const BRIDGE_VERSION_RE = /^\/\/ BRIDGE_VERSION: (\S+)$/m;
+const BRIDGE_VERSION_RE = /^\/\/ BRIDGE_VERSION: ([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)$/m;
 
 // $DSH_HOME 解析——与 prepare-env.mjs resolveDshHome 同语义（显式 DSH_HOME > ~/.dsh）。
 // 安装器函数位于仓库根 scripts/，技能包脚本不能跨模块 import，语义复刻保持单点契约
@@ -742,7 +742,11 @@ async function runBridgeCheck() {
         if (targetPath === null) {
           report.warn.push('近似性声明: 托管块 file:// 引用无法解析为本地路径（' + fileUrlMatch[0] + '）——无法核验目标可达性，不定论');
         } else if (await fileExists(targetPath)) {
-          report.pass.push('块内 file:// 目标可达: ' + targetPath);
+          if (targetPath === loaderPath) {
+            report.pass.push('块内 file:// 目标可达且与期望 loader 路径一致: ' + targetPath);
+          } else {
+            report.fail.push('托管块 file:// 目标与期望 loader 路径不符: ' + targetPath + ' ≠ ' + loaderPath);
+          }
         } else {
           report.fail.push('托管块指向的 loader 文件缺失: ' + targetPath + '（file:// 目标不可达）');
         }
@@ -789,7 +793,7 @@ async function runBridgeCheck() {
       if (stampMatch) {
         loaderStamp = stampMatch[1];
       } else {
-        report.warn.push('近似性声明: loader 未提取到 BRIDGE_VERSION 戳（锚点正则 /^\\/\\/ BRIDGE_VERSION: (\\S+)$/m 无命中）——无法比对版本，不定论');
+        report.warn.push('近似性声明: loader 未提取到 BRIDGE_VERSION 戳（锚点正则 /^\\/\\/ BRIDGE_VERSION: ([0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?)$/m 无命中——非语义化版本标记或缺失）——无法比对版本，不定论');
       }
     } catch {
       report.warn.push('近似性声明: loader 文件读取失败——无法比对版本，不定论');

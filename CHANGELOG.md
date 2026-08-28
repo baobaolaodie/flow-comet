@@ -25,7 +25,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 - **Write-guard project-root resolution hardened against directory drift**: the hook now resolves its project root via `COMET_RUN_ROOT`, then `CLAUDE_PROJECT_DIR` (injected by Claude Code), then walks upward from the session working directory to the nearest project marker — a drifted session no longer degrades to an error-style pass-through for out-of-project writes.
 - **Advisory pseudo-parallel detection at planning exit**: when a parallel task's declared writes consist exclusively of test files, the planning exit emits a non-blocking warning listing the task id and suggesting an explicit `depends_on` declaration or merging into a vertical slice — closing the implicit-dependency blind spot opened by interleaved multi-pass routing.
 - **Multi-pass exit hardening**: the execute-exit serial-task check now respects declared task dependencies — serial tasks waiting on later passes no longer block progress, while genuinely runnable serial tasks still block with their ids and recovery guidance; single-line semicolon-separated write-file lists are accepted by both handoff auto-parsing and pseudo-parallel detection; the routing advisory warning stays silent once every task is done; dependency-deadlock blocks now include a boundary hint for the workflow-state `advance` escape hatch (with its re-entry obligation); and the planning and delegation skill texts now describe interleaved parallel/serial sequences as valid under dependency-graph semantics.
-- **Regression suite expanded to 197 scenarios**; the system test suite now runs 67 items.
+- **Regression suite expanded to 200 scenarios**; the system test suite now runs 67 items.
 
 ## [1.5.0-rc.1] - 2026-08-23
 

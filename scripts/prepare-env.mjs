@@ -841,7 +841,7 @@ function resolveDshHome() {
 
 // 版本戳锚点正则（标记行格式契约：独立整行、行首无缩进、冒号后恰一个空格、行尾无其它字符；
 // 格式禁动——安装器与 bridge-check 双侧提取以此为准；技能包自包含，语义同值复刻不跨模块 import）。
-const BRIDGE_VERSION_RE = /^\/\/ BRIDGE_VERSION: (\S+)$/m;
+const BRIDGE_VERSION_RE = /^\/\/ BRIDGE_VERSION: ([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)$/m;
 
 /**
  * 从 loader 文件提取版本戳（同一锚点正则）。返回 { ok:true, version }；
@@ -855,7 +855,12 @@ function extractBridgeVersion(loaderPath) {
     return { ok: false, reason: '文件读取失败' };
   }
   const match = BRIDGE_VERSION_RE.exec(text);
-  return match ? { ok: true, version: match[1] } : { ok: false, reason: '未提取到版本戳标记行' };
+  if (match) return { ok: true, version: match[1] };
+  // 标记行存在但形态非法（区别于「无标记行」）——仍走既有警告路径，原因精确可诊断
+  const loose = /^\/\/ BRIDGE_VERSION: (.*)$/m.exec(text);
+  return loose
+    ? { ok: false, reason: '版本戳形态非法（非语义化版本: ' + loose[1] + '）' }
+    : { ok: false, reason: '未提取到版本戳标记行' };
 }
 
 /**
@@ -1187,7 +1192,7 @@ async function main() {
 
   // flow-kit 获取链路（ADR-008 / D1~D6——平台无关,平台循环之前调用一次;
   // 内部四条路径均不抛错、不阻断后续平台安装职责）
-  ensureFlowKit(target);
+  if (!purge) ensureFlowKit(target);
 
   for (const platform of platforms) {
     const skillRoot = platform.skillRoot(target);
