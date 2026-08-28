@@ -1,11 +1,11 @@
-// route-node.mjs — 共享「任务状态 → 节点」路由判定核心（D3 单一权威）
+// route-node.mjs — 共享「任务状态 → 节点」路由判定核心（单一权威实现）
 // 本模块承载从 workflow-state.mjs determineNode 抽取的节点判定核心（含「串行 pending → execute」回流）。
-// 两侧复用唯一实现（guard 与 workflow-state 各调用 resolveNextNode），根治双实现漂移（D8）。
+// 两侧复用同一实现（guard 与 workflow-state 各调用 resolveNextNode），根治双实现漂移。
 // 纯判定：resolveNextNode 无副作用、无 console 输出、无 process.exit——只读 .specs 产物与任务文件，
 // 仅返回节点 id（或 null = 完成态）；展示层（guard NEXT+SKILL 行 / workflow-state NODE+SKILL 行）
 // 由各自调用方渲染，不并入本模块（文案逐字保留）。
 // 接口：resolveNextNode({ runRoot, changeName, protocol, completedNodes = [] })——runRoot 显式传入，
-// specsRoot 内部派生为 path.join(runRoot, '.specs')（与两侧调用方各自 .specs 根语义一致）。
+// specsRoot 由 runRoot 派生为 path.join(runRoot, '.specs')（与两侧调用方各自 .specs 根语义一致）。
 import { promises as fs } from 'fs';
 import path from 'path';
 import { taskBlocks, taskOpeningAttrs } from './task-parsing.mjs';

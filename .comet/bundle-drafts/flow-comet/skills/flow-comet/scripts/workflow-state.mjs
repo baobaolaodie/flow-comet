@@ -296,11 +296,11 @@ async function verifySkillLoadMarkers(completedChecks, changeName, recordTime, p
 }
 
 // ---------- 节点完成判定 · determineNode 数据化：完成标志从协议 outputSchemas 推导 ----------
-// （D3 抽取 · dependency-aware-routing）: 节点完成判定核心已迁至共享模块 route-node.mjs——
+// （节点完成判定核心抽取 · 依赖感知路由）: 节点完成判定核心已迁至共享模块 route-node.mjs——
 // determineNode 保持既有签名与返回语义，仅改为委托 resolveNextNode（行为逐字等价，重构保持锚：
 // 输出与抽取前 200 版一致）。route / buildNodeCompletionFlags / pathPatternExists / nodeFlagsComplete /
 // protocolTaskFilePath / hasSubagentNode 已随抽取移至 route-node.mjs（单一实现，根治 guard 与
-// 状态机双实现漂移——D3 决策）。
+// 状态机双实现漂移的根治（单一实现决策）。
 async function determineNode(changeName, protocol, completedNodes = []) {
   return resolveNextNode({ runRoot, changeName, protocol, completedNodes });
 }
