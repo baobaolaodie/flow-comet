@@ -1833,12 +1833,16 @@ function missingRequiredSchemaEvidence(protocol, node, evidence) {
   return missing;
 }
 
-// 并行冲突检测——解析 TASK.md 中 parallel=pending 任务的 write_files，找交集（防同 wave 并行写冲突）。
-// 开标签属性解析与 workflow-state 路由共享 taskOpeningAttrs（属性序无关；不读块内文本）。
+// 并行文件依赖检测——解析 TASK.md 中本趟可运行的 parallel=pending 任务的 read/write_files 声明，
+// 分两级返回：write∩write（写写绝对冲突，强判）与 read∩write（共享读写嫌疑，弱判——仅对彼此
+// 无显式 depends_on 关联的并行对探测，有显式关联=依赖已声明，跳过→合法拓扑零新增告警）。
+// 路径解析按声明实际内容（换行切分 → 分号二次切分 → trim → 滤空与 HTML 注释），不做扩展名
+// 白名单过滤——txt/log/无扩展名路径同等检出（链式重命名的 .txt 事故面闭合；与既有自动解析
+// 同源实现）。开标签属性解析与 workflow-state 路由共享 taskOpeningAttrs（属性序无关；不读块内文本）。
 async function findParallelWriteConflicts(changeDir) {
   const taskFile = path.join(changeDir, 'TASK.md');
   let text;
-  try { text = await fs.readFile(taskFile, 'utf8'); } catch { return []; }
+  try { text = await fs.readFile(taskFile, 'utf8'); } catch { return { writeConflicts: [], readWarnings: [] }; }
   const allBlocks = extractTaskBlocks(text);
   // 依赖资格收窄：仅统计「本趟可运行」的并行任务——deps ⊆ doneIds；
   // 等待后续趟次的并行任务（依赖未满足）与已交付任务不参与同趟冲突判定，
@@ -1856,22 +1860,41 @@ async function findParallelWriteConflicts(changeDir) {
     if (!a || !a.parallel || a.status !== 'pending') return false;
     return dependsOnOf(b).every((d) => doneIds.has(d));
   });
+  // 路径解析与既有自动解析同源：剥 HTML 注释 → 换行切分 → 分号二次切分 → trim → 滤空
+  const parsePaths = (matchText) => String(matchText ?? '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .trim().split(/\s*\n\s*/).map((l) => l.trim()).filter(Boolean)
+    .flatMap((l) => l.split(';')).map((l) => l.trim()).filter(Boolean);
   const perTask = [];
   for (const b of blocks) {
     const a = taskOpeningAttrs(b);
+    if (!a || !a.id) continue;
     const wf = b.match(/<write_files>([\s\S]*?)<\/write_files>/);
-    if (!a || !a.id || !wf) continue;
-    const files = [...wf[1].matchAll(/([A-Za-z0-9_./@*-]+\.(?:ts|tsx|py|js|mjs|json|css|md))/g)].map((m) => m[1]);
-    perTask.push({ id: a.id, files: new Set(files) });
+    const rf = b.match(/<read_files>([\s\S]*?)<\/read_files>/);
+    if (!wf && !rf) continue;
+    perTask.push({
+      id: a.id,
+      deps: new Set(dependsOnOf(b)),
+      writes: new Set(parsePaths(wf && wf[1])),
+      reads: new Set(parsePaths(rf && rf[1])),
+    });
   }
-  const conflicts = [];
+  const writeConflicts = [];
+  const readWarnings = [];
   for (let i = 0; i < perTask.length; i++) {
     for (let j = i + 1; j < perTask.length; j++) {
-      const overlap = [...perTask[i].files].filter((f) => perTask[j].files.has(f));
-      if (overlap.length) conflicts.push({ a: perTask[i].id, b: perTask[j].id, files: overlap });
+      const overlap = [...perTask[i].writes].filter((f) => perTask[j].writes.has(f));
+      if (overlap.length) writeConflicts.push({ a: perTask[i].id, b: perTask[j].id, files: overlap });
+      // 读写弱判触发面：仅无显式 depends_on 关联的并行对（有显式关联=依赖已声明，跳过）
+      const associated = perTask[i].deps.has(perTask[j].id) || perTask[j].deps.has(perTask[i].id);
+      if (associated) continue;
+      const readOverlap = [...perTask[i].reads].filter((f) => perTask[j].writes.has(f));
+      if (readOverlap.length) readWarnings.push({ a: perTask[i].id, b: perTask[j].id, files: readOverlap });
+      const readOverlap2 = [...perTask[j].reads].filter((f) => perTask[i].writes.has(f));
+      if (readOverlap2.length) readWarnings.push({ a: perTask[j].id, b: perTask[i].id, files: readOverlap2 });
     }
   }
-  return conflicts;
+  return { writeConflicts, readWarnings };
 }
 
 function escapeRegExp(value) {
@@ -2255,10 +2278,11 @@ async function main() {
       }
     }
     // 并行冲突检测——subagent-execute 委托前校验 wave 内 parallel 任务 write_files 无交集
+    // （第二道写写锚：只取强判组，行为与消息保持既有语义不变）
     if (node.id === 'subagent-execute' && state.activeChange) {
-      const conflicts = await findParallelWriteConflicts(path.join(runRoot, '.specs', state.activeChange));
-      if (conflicts.length > 0) {
-        console.error('BLOCKED: parallel tasks write_files 冲突: ' + conflicts.map((c) => `${c.a}×${c.b}(${c.files.join(',')})`).join('; '));
+      const { writeConflicts } = await findParallelWriteConflicts(path.join(runRoot, '.specs', state.activeChange));
+      if (writeConflicts.length > 0) {
+        console.error('BLOCKED: parallel tasks write_files 冲突: ' + writeConflicts.map((c) => `${c.a}×${c.b}(${c.files.join(',')})`).join('; '));
         process.exit(1);
       }
     }
@@ -2639,6 +2663,24 @@ async function main() {
         console.error('WARN: 伪并行检测——以下并行任务仅写测试文件而无生产代码文件: '
           + testOnlyParallelIds.join(', ')
           + '。测试通常依赖实现产出的符号，可能存在隐式依赖；建议添加 depends_on 声明或合并为垂直切片');
+      }
+      // 并行文件依赖检测前移（触发面）：write∩write 写写强判（新 change BLOCKED / 旧 change
+      // WARN 渐进，与依赖环分级同先例）+ read∩write 读写弱判（仅无显式 depends_on 关联的并行对；
+      // WARN 提示级，新/旧均不 BLOCK——渐进提示）。与委托前既有拦截并存（委托前为第二道写写锚，
+      // 行为与消息保持既有语义不变）。
+      const { writeConflicts, readWarnings } = await findParallelWriteConflicts(path.join(runRoot, '.specs', state.activeChange));
+      if (writeConflicts.length > 0) {
+        const detail = writeConflicts.map((c) => `${c.a}×${c.b}(${c.files.join(',')})`).join('; ');
+        const guide = ';恢复: 补显式 depends_on 或拆为串行任务后重试';
+        if (isNewChange(state)) {
+          console.error('BLOCKED: TASK.md 并行任务 write_files 重叠（写写冲突，同波次并行会竞态覆盖）: ' + detail + guide);
+          process.exit(1);
+        }
+        console.error('WARN: TASK.md 并行任务 write_files 重叠（写写冲突，建议补显式 depends_on 或拆为串行任务）: ' + detail + guide);
+      }
+      if (readWarnings.length > 0) {
+        console.error('WARN: TASK.md 并行任务 read∩write 隐式依赖嫌疑（一方读取对方写路径，建议补显式 depends_on 声明）: '
+          + readWarnings.map((c) => `${c.a}×${c.b}(${c.files.join(',')})`).join('; '));
       }
     } catch {}
   }

@@ -1012,6 +1012,55 @@ const TEST_ITEMS = [
     },
   },
 
+  {
+    // 并行文件依赖检出（真实命令链路）：write∩write 重叠强判前移 plan 出口——同波次并行任务
+    // 写同一路径（链式重命名的 .txt 事故面）→ 新 change BLOCKED（含重叠路径与 depends_on
+    // 恢复指引）；按指引补显式 depends_on 后同出口恢复通过。read∩write 弱判：无显式关联并行对
+    // 一方读取对方写路径 → WARN 提示不 BLOCK（渐进）。修复前 plan 出口无此检测 = 预期 RED。
+    name: 'A16 plan 出口文件依赖检出：写写重叠 BLOCK 与恢复 + 读写弱判 WARN（真实命令）',
+    run: (dir) => {
+      driveThroughDesign(dir);
+      const planEnv = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      // 非 --apply 出口（弱判/强判阶段不推进状态，避免 apply 后 currentNode 偏离 plan）
+      const exitPlanNoApply = () => runGuard(['exit', 'plan'], dir, planEnv);
+      const exitPlanApply = () => runGuard(['exit', 'plan', '--apply'], dir, planEnv);
+      assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md'], dir), 0);
+      assertExit(runState(['record', 'plan', '{"summary":"plan drafted"}'], dir), 0);
+      assertExit(runGuard(['entry', 'plan'], dir), 0);
+      const planTask = (taskBody) => writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + taskBody);
+      const C1 = '<task id="C1" status="pending"><action>实现 C1</action><write_files>src/c1.mjs</write_files><verify>node --check src/c1.mjs</verify></task>\n';
+      // 弱判（渐进）：无显式关联并行对 read∩write → WARN 提示不 BLOCK
+      planTask(
+        C1 +
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><read_files>shared-context.md</read_files><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n' +
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>shared-context.md</write_files><verify>node --check shared-context.md</verify></task>\n');
+      const weakRes = exitPlanNoApply();
+      assertExit(weakRes, 0);
+      assertOut(weakRes, 'read∩write');
+      assertOut(weakRes, 'shared-context.md');
+      assertNotOut(weakRes, 'BLOCKED');
+      // 强判（负例）：P01/P02 同波次并行写同一 .txt 路径（无 depends_on）→ BLOCKED 含恢复指引
+      planTask(
+        C1 +
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n' +
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n');
+      const blocked = exitPlanNoApply();
+      assertExit(blocked, 1);
+      assertOut(blocked, 'BLOCKED');
+      assertOut(blocked, 'bak_a.txt');
+      assertOut(blocked, 'depends_on');
+      // 恢复：按指引补显式 depends_on（P02 依赖 P01 → 跨趟，非同波次并行对）→ 同出口通过并推进
+      planTask(
+        C1 +
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n' +
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>bak_b.txt</write_files><verify>node --check bak_b.txt</verify><depends_on>P01</depends_on></task>\n');
+      const ok = exitPlanApply();
+      assertExit(ok, 0);
+      assertOut(ok, 'ALL CHECKS PASSED');
+      assertNotOut(ok, 'BLOCKED');
+    },
+  },
+
   // ---------- B. 声明机制（skill-load / record / exit 校验） ----------
 
   {

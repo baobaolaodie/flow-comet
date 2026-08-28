@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · flow-comet 引擎自测套件（201 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退））
+// C1 · flow-comet 引擎自测套件（206 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退）、并行文件依赖检测（写写重叠强判前移 plan 出口 + read 读写弱判渐进 + 触发面排除 + 委托前保持锚 + 扩展名闭合））
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -7,7 +7,7 @@
 // （COMET_RUN_ROOT=<临时目录>）→ 断言退出码与输出关键词。场景跑完 rmSync 清理。
 //
 // 运行: node scripts/guard-self-test.mjs
-// 全过 → exit 0，输出 ALL 201 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
+// 全过 → exit 0，输出 ALL 206 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
 //
 // 仅 node 内置模块（child_process/fs/os/path）；不依赖 flow-kit 模板目录存在
 // （fallback 场景用内置段名；部分场景复制模板文件进临时目录验证 C2 模板派生）。
@@ -5353,6 +5353,138 @@ const SCENARIOS = [
       assertExit(res, 1);
       assertOut(res, '[FAIL]');
       assertNotOut(res, '健康（全部检查通过）');
+    },
+  },
+
+  // 202: 并行文件依赖检测前移（write∩write 强判）——两个同波次 parallel pending 任务
+  // write_files 重叠（链式重命名的 .txt 事故面：任务 A 写 bak_a.txt、任务 B 也写 bak_a.txt，
+  // 无 depends_on）：新 change 的 plan 出口应 BLOCKED（含任务 id 对、重叠路径、恢复指引
+  // 「补显式 depends_on 或拆串行」）。修复前 plan 出口无此检测 = 预期 RED（重叠静默放行）。
+  {
+    name: '202 plan exit BLOCKED：新 change 写写重叠（链式重命名 .txt 事故面）',
+    run: (dir) => {
+      const st = baseState('plan');
+      st.evidence.plan = { summary: 'plan done' };
+      st.newChange = true;
+      writeState(dir, st);
+      const tasks =
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n' +
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n';
+      const res = runPlanExit(dir, tasks);
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, 'P01×P02');
+      assertOut(res, 'bak_a.txt');
+      assertOut(res, 'depends_on');
+    },
+  },
+
+  // 203: 写写强判分级（渐进）——同拓扑旧 change（无 newChange 标记）：plan 出口应 WARN 渐进
+  // 不 BLOCK（与依赖环分级同先例）。修复前 plan 出口无检测 = 预期 RED（无 WARN 亦无 BLOCK）。
+  {
+    name: '203 plan exit 兼容：旧 change 写写重叠不 BLOCK（渐进 WARN）',
+    run: (dir) => {
+      const st = baseState('plan');
+      st.evidence.plan = { summary: 'plan done' };
+      writeState(dir, st);
+      const tasks =
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n' +
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n';
+      const res = runPlanExit(dir, tasks);
+      assertExit(res, 0);
+      assertNotOut(res, 'BLOCKED');
+      assertOut(res, 'WARN');
+      assertOut(res, 'P01×P02');
+      assertOut(res, 'bak_a.txt');
+    },
+  },
+
+  // 204: 扩展名白名单闭合——txt/无扩展名写路径重叠同等检出（不再被标准扩展名白名单漏检）。
+  // 拓扑：P01 与 P02 重叠于 notes.txt，P03 与 P04 重叠于无扩展名路径 RELEASE。
+  {
+    name: '204 plan exit BLOCKED：txt/无扩展名写路径重叠检出（扩展名闭合）',
+    run: (dir) => {
+      const st = baseState('plan');
+      st.evidence.plan = { summary: 'plan done' };
+      st.newChange = true;
+      writeState(dir, st);
+      const tasks =
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>notes.txt</write_files><verify>node --check notes.txt</verify></task>\n' +
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>notes.txt</write_files><verify>node --check notes.txt</verify></task>\n' +
+        '<task id="P03" parallel="true" status="pending"><action>实现 P03</action><write_files>RELEASE</write_files><verify>node --check RELEASE</verify></task>\n' +
+        '<task id="P04" parallel="true" status="pending"><action>实现 P04</action><write_files>RELEASE</write_files><verify>node --check RELEASE</verify></task>\n';
+      const res = runPlanExit(dir, tasks);
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, 'notes.txt');
+      assertOut(res, 'RELEASE');
+    },
+  },
+
+  // 205: read∩write 弱判（渐进提示，触发面=仅无显式 depends_on 关联的并行对）——
+  // ① 无关联对：一方 read_files 命中对方 write_files → WARN 提示（新 change 亦不 BLOCK）；
+  // ② 有显式关联（依赖已声明）→ 探测跳过 → 零新增告警（既有合法拓扑断言不变）。
+  // 修复前无此弱判 = 预期 RED（无 read∩write WARN）。
+  {
+    name: '205 plan exit 弱判：read∩write 无显式关联对 WARN 不 BLOCK；有显式关联零告警',
+    run: (dir) => {
+      const st = baseState('plan');
+      st.evidence.plan = { summary: 'plan done' };
+      st.newChange = true;
+      writeState(dir, st);
+      // ① 无显式关联对：P01 读 shared-context.md，P02 写同路径 → WARN 提示级（不 BLOCK）
+      const weak =
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><read_files>shared-context.md</read_files><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n' +
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>shared-context.md</write_files><verify>node --check shared-context.md</verify></task>\n';
+      const res = runPlanExit(dir, weak);
+      assertExit(res, 0);
+      assertNotOut(res, 'BLOCKED');
+      assertOut(res, 'read∩write');
+      assertOut(res, 'P01×P02');
+      assertOut(res, 'shared-context.md');
+      // ② 有显式关联（P02 depends_on P01 → 跨趟非同波次并行对）→ read∩write 探测跳过 → 零告警
+      const associated =
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><read_files>shared-context.md</read_files><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n' +
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>shared-context.md</write_files><verify>node --check shared-context.md</verify><depends_on>P01</depends_on></task>\n';
+      const res2 = runPlanExit(dir, associated);
+      assertExit(res2, 0);
+      assertNotOut(res2, 'read∩write');
+      assertNotOut(res2, 'BLOCKED');
+    },
+  },
+
+  // 206: 委托前行为保持锚 + 伪并行并存不干扰——① subagent-execute 委托前写写重叠仍 BLOCKED
+  // （第二道拦截不变）；② 修复写写重叠后 plan 出口放行，且仅写测试产物的并行任务仍触发伪并行
+  // WARN（渐进提示不阻断）——新检测与既有检测并存不干扰。
+  {
+    name: '206 委托前写写拦截保持锚 + 伪并行并存不干扰',
+    run: (dir) => {
+      // ① 委托前锚：同波次并行 pending 写写重叠 → entry subagent-execute 仍 BLOCKED
+      const st = baseState('subagent-execute');
+      st.newChange = true;
+      writeState(dir, st);
+      const conflictTasksForDelegation =
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n' +
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n';
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n## 任务清单\n\n' + conflictTasksForDelegation);
+      const resDeleg = runGuard(['entry', 'subagent-execute'], dir);
+      assertExit(resDeleg, 1);
+      assertOut(resDeleg, 'BLOCKED');
+      assertOut(resDeleg, 'write_files 冲突');
+      // ② 伪并行并存：修复重叠（各写各的）后 plan 出口放行，且仅写测试产物的并行任务
+      // 仍触发伪并行 WARN——新检测与既有检测并存不干扰
+      const st2 = baseState('plan');
+      st2.evidence.plan = { summary: 'plan done' };
+      st2.newChange = true;
+      writeState(dir, st2);
+      const coexisting =
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n' +
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>tests/test_p2.mjs</write_files><verify>node --check tests/test_p2.mjs</verify></task>\n';
+      const resPlan = runPlanExit(dir, coexisting);
+      assertExit(resPlan, 0);
+      assertOut(resPlan, 'ALL CHECKS PASSED');
+      assertOut(resPlan, '伪并行检测');
+      assertNotOut(resPlan, 'BLOCKED');
     },
   },
 ];
