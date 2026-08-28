@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · flow-comet 引擎自测套件（184 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁））
+// C1 · flow-comet 引擎自测套件（200 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退））
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -7,10 +7,13 @@
 // （COMET_RUN_ROOT=<临时目录>）→ 断言退出码与输出关键词。场景跑完 rmSync 清理。
 //
 // 运行: node scripts/guard-self-test.mjs
-// 全过 → exit 0，输出 ALL 184 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
+// 全过 → exit 0，输出 ALL 200 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
 //
-// 仅 node 内置模块（child_process/fs/os/path）；无网络；不依赖 flow-kit 模板目录
-// 存在（fallback 场景用内置段名；部分场景复制模板文件进临时目录验证 C2 模板派生）。
+// 仅 node 内置模块（child_process/fs/os/path）；不依赖 flow-kit 模板目录存在
+// （fallback 场景用内置段名；部分场景复制模板文件进临时目录验证 C2 模板派生）。
+// flow-kit 新装场景除外：优先复用仓库内 vendored 上游副本经 git 标准 insteadOf 机制本地克隆
+// （离线可复现，HEAD 即锁定点）；副本缺席（如 CI 全新检出）时真实 clone 上游——
+// 前提与 CI installer 链路一致（github 可达）。
 //
 // 自定义协议路径适配：T03 起 workflow-guard 用 readProtocolFile（protected-path：
 // 协议路径必须在 runRoot 内）。场景 runRoot=临时目录、内置协议默认路径在 packageRoot
@@ -25,7 +28,7 @@ import { execFileSync, spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GUARD = path.join(__dirname, 'workflow-guard.mjs');
@@ -148,6 +151,44 @@ function runPrepareEnv(args, root, envOverrides = {}) {
     timeout: 120000,
   });
   return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+}
+
+// 跑 workflow-state.mjs 的 bridge-check 只读子命令（T05 实现——六判定态健康/文件缺失/
+// 未挂载/版本偏斜/重复注册/不适用）。runRoot = cwd = 项目根；协议副本须在 runRoot 内
+// （protected-path）——指向运行器已复制到 <root>/reference/ 的内置协议副本
+// （FLOW_COMET_PROTOCOL env 优先级高于默认，见 protocol-utils resolveProtocol）。
+function runBridgeCheck(root, dshHome) {
+  return runState(['bridge-check'], root, {
+    DSH_HOME: dshHome,
+    FLOW_COMET_PROTOCOL: path.join(root, 'reference', 'workflow-protocol.json'),
+  });
+}
+
+// 组装 dsh 桥接健康夹具（bridge-check 六态场景共用）：项目根挂 .dsh/skills/flow-comet
+// 适用性门；$DSH_HOME/plugins/ 放 loader（含契约锚点 BRIDGE_VERSION 戳，值取自权威源
+// INSTALLED_VERSION，与 bridge-check 比对源同值——健康态恒等、偏斜态可控）；cordis.patch.yml
+// 托管块按安装器实际写入形态（insert 条目 + file:// 引用——形态断言，L-048 精神）逐字构造。
+// overrides: { loaderStamp, skipLoader, patchContent, outsideBlock }
+function writeBridgeFixture(dir, overrides = {}) {
+  const dshHome = overrides.dshHome || path.join(dir, 'dshhome');
+  const installedVersion = fs.readFileSync(path.join(__dirname, '..', 'INSTALLED_VERSION'), 'utf8').trim();
+  const loaderStamp = overrides.loaderStamp || installedVersion;
+  writeFile(dir, '.dsh/skills/flow-comet/.fixture-anchor', 'fixture\n');
+  const loaderPath = path.join(dshHome, 'plugins', 'dsh-flow-comet-bridge.mjs');
+  if (!overrides.skipLoader) {
+    writeFile(dshHome, 'plugins/dsh-flow-comet-bridge.mjs',
+      '// dsh bridge loader fixture\n// BRIDGE_VERSION: ' + loaderStamp + '\n' +
+      "export const name = 'dsh-flow-comet-bridge';\nexport const version = '" + loaderStamp + "';\n");
+  }
+  const fileUrl = pathToFileURL(loaderPath).href;
+  const managedBlock =
+    '# --- flow-comet managed ---\n- insert:\n    - id: dsh-flow-comet-bridge\n      name: \'' +
+    fileUrl.replace(/'/g, "''") + '\'\n# --- end flow-comet managed ---\n';
+  writeFile(dshHome, 'cordis.patch.yml',
+    overrides.patchContent !== undefined
+      ? overrides.patchContent
+      : managedBlock + (overrides.outsideBlock || ''));
+  return { dshHome, loaderPath, installedVersion, managedBlock };
 }
 
 function assertExit(res, expected) {
@@ -4765,7 +4806,8 @@ const SCENARIOS = [
       st.evidence.execute = { summary: 'executed' };
       writeState(dir, st);
       // 未分类并行任务（缺 status）自初始 TASK 在场——全部可解析任务 done 后，
-      // 该任务按「缺 status 不视为 pending」文档语义保持静默（与 S78 案例锚同源），不误报路由警告。
+      // 该任务按「缺 status 不视为 pending」文档语义保持静默（与既有「无可解析 pending 静默」
+      // 案例锚同源），不误报路由警告。
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1 + TASK_P2 +
         '<task id="P03" parallel="true"><action>实现 P03</action><write_files>src/p3.mjs</write_files><verify>node --check src/p3.mjs</verify></task>\n');
       assertExit(runGuard(['entry', 'execute'], dir), 0);
@@ -4819,6 +4861,367 @@ const SCENARIOS = [
         if (!text.includes('用 Skill 工具')) problems.push(skillDir + ' 缺「用 Skill 工具」两层加载句式');
       }
       if (problems.length > 0) throw new Error('技能文本混排合法化语义不符: ' + problems.join('; '));
+    },
+  },
+
+  // ---------- 场景（installer 新链路——flow-kit 获取五态 / bridge-check 六态 / 他方保持 / 强制回退） ----------
+
+  // 185: flow-kit 新装——目标缺失 → clone + detached checkout 到锁定 commit。
+  // 克隆源：仓库内 vendored 上游副本在场时经 git 标准 insteadOf 机制本地克隆（HEAD 即锁定点，
+  // 离线可复现）；副本缺席（如 CI 全新检出）时真实 clone 上游——与 CI installer 链路同前提。
+  {
+    name: '185 flow-kit 新装：clone 后 detached checkout 锁定点',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj');
+      fs.mkdirSync(proj, { recursive: true });
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      const localUpstream = path.join(repoRoot, 'flow-kit');
+      const env = {};
+      if (fs.existsSync(path.join(localUpstream, '.git'))) {
+        env.GIT_CONFIG_COUNT = '1';
+        env.GIT_CONFIG_KEY_0 = 'url.' + localUpstream.replace(/\\/g, '/') + '.insteadOf';
+        env.GIT_CONFIG_VALUE_0 = 'https://github.com/rihebty/flow-kit.git';
+      }
+      const res = runPrepareEnv(['--target', proj, '--platform', 'dsh'], dir, { DSH_HOME: path.join(dir, 'dshhome'), ...env });
+      assertExit(res, 0);
+      assertOut(res, '[prepare-env] 已获取 flow-kit（锁定 9b5dda7）');
+      const fk = path.join(proj, 'flow-kit');
+      const head = execFileSync('git', ['-C', fk, 'rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 60000 }).trim();
+      if (head !== '9b5dda7206ae841230f118348d660ad8d0ae2830') throw new Error('flow-kit HEAD 非锁定点: ' + head);
+      let symref = '';
+      try {
+        symref = execFileSync('git', ['-C', fk, 'symbolic-ref', '-q', 'HEAD'], { encoding: 'utf8', timeout: 60000 }).trim();
+      } catch { /* detached 状态：symbolic-ref 非零，保持空 */ }
+      if (symref !== '') throw new Error('flow-kit HEAD 未处于 detached: ' + symref);
+    },
+  },
+
+  // 186: flow-kit 已存在且 origin 匹配上游 → 只读报告 HEAD 与锁定点差异影响，绝不改动。
+  // 夹具 = 本地真实 git 仓库 + origin 指向真实上游 URL（归属判定走本地 config，零网络），
+  // HEAD 落在非锁定点提交上 → 断言差异影响输出且安装器不改动用户克隆（非破坏语义）。
+  {
+    name: '186 flow-kit 已存在：只读报告差异且不动用户克隆',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj');
+      fs.mkdirSync(proj, { recursive: true });
+      const fk = path.join(proj, 'flow-kit');
+      fs.mkdirSync(fk, { recursive: true });
+      execFileSync('git', ['-C', fk, 'init', '-q'], { encoding: 'utf8', timeout: 60000 });
+      fs.writeFileSync(path.join(fk, 'fixture.txt'), 'mine\n', 'utf8');
+      execFileSync('git', ['-C', fk, 'add', 'fixture.txt'], { encoding: 'utf8', timeout: 60000 });
+      execFileSync('git', ['-C', fk, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.com', 'commit', '-q', '-m', 'fixture'], { encoding: 'utf8', timeout: 60000 });
+      execFileSync('git', ['-C', fk, 'remote', 'add', 'origin', 'https://github.com/rihebty/flow-kit.git'], { encoding: 'utf8', timeout: 60000 });
+      const headBefore = execFileSync('git', ['-C', fk, 'rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 60000 }).trim();
+      const res = runPrepareEnv(['--target', proj, '--platform', 'dsh'], dir, { DSH_HOME: path.join(dir, 'dshhome') });
+      assertExit(res, 0);
+      assertOut(res, '已有 flow-kit（HEAD=' + headBefore.slice(0, 7) + '，推荐锁定点=9b5dda7）');
+      assertOut(res, '差异影响');
+      const headAfter = execFileSync('git', ['-C', fk, 'rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 60000 }).trim();
+      if (headAfter !== headBefore) throw new Error('安装器改动了用户克隆 HEAD: ' + headAfter);
+      if (!fs.existsSync(path.join(fk, 'fixture.txt'))) throw new Error('安装器删除了用户文件');
+    },
+  },
+
+  // 187: flow-kit 同名非上游目录 → 跳过 + 手动指引，绝不改动、绝不注入 .git（归属判定读本地
+  // config 零网络；无 .git → 保守落入非上游分支）。
+  {
+    name: '187 flow-kit 同名非上游目录：跳过并指引且不触碰用户目录',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj');
+      fs.mkdirSync(proj, { recursive: true });
+      const fk = path.join(proj, 'flow-kit');
+      fs.mkdirSync(fk, { recursive: true });
+      fs.writeFileSync(path.join(fk, 'user-asset.txt'), 'do not touch\n', 'utf8');
+      const res = runPrepareEnv(['--target', proj, '--platform', 'dsh'], dir, { DSH_HOME: path.join(dir, 'dshhome') });
+      assertExit(res, 0);
+      assertOut(res, '目录存在但非上游克隆，已跳过');
+      assertOut(res, '手动获取指引');
+      assertOut(res, 'git clone https://github.com/rihebty/flow-kit.git');
+      if (fs.readFileSync(path.join(fk, 'user-asset.txt'), 'utf8') !== 'do not touch\n') throw new Error('用户资产被改动');
+      if (fs.existsSync(path.join(fk, '.git'))) throw new Error('安装器向用户目录注入了 .git');
+    },
+  },
+
+  // 188: flow-kit clone/checkout 失败（git 官方配置注入机制让 clone 走不可达代理）→
+  // WARN + 手动指引，不抛错不阻断，其余安装职责照常、exit 0（网络失败兜底）。
+  {
+    name: '188 flow-kit 网络失败：WARN 继续且其余安装职责照常 exit 0',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj');
+      fs.mkdirSync(proj, { recursive: true });
+      const res = runPrepareEnv(['--target', proj, '--platform', 'dsh'], dir, {
+        DSH_HOME: path.join(dir, 'dshhome'),
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'http.proxy',
+        GIT_CONFIG_VALUE_0: 'http://127.0.0.1:9',
+      });
+      assertExit(res, 0);
+      assertOut(res, '[prepare-env] 警告: flow-kit 自动获取失败');
+      assertOut(res, '手动获取指引');
+      assertOut(res, '已准备环境');
+      if (!fs.existsSync(path.join(proj, '.dsh', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('安装器其余职责未继续');
+      if (fs.existsSync(path.join(proj, 'flow-kit'))) throw new Error('失败后不应残留半成品 flow-kit 目录');
+    },
+  },
+
+  // 189: --purge --yes 后 flow-kit 原样存在（清理域语义：purge 清单永不包含 flow-kit—
+  // 删除清单段逐字断言无 flow-kit 字样，目录与内容保持）。
+  {
+    name: '189 flow-kit 不属清理域：purge 后原样存在且删除清单无 flow-kit',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj');
+      fs.mkdirSync(proj, { recursive: true });
+      const fk = path.join(proj, 'flow-kit');
+      fs.mkdirSync(fk, { recursive: true });
+      fs.writeFileSync(path.join(fk, 'sentinel.txt'), 'keep me\n', 'utf8');
+      const res = runPrepareEnv(['--target', proj, '--platform', 'dsh', '--purge', '--yes'], dir, { DSH_HOME: path.join(dir, 'dshhome') });
+      assertExit(res, 0);
+      assertOut(res, '警告: --purge 将删除');
+      const segStart = res.output.indexOf('警告: --purge 将删除');
+      const segEnd = res.output.indexOf('已删除，开始重新生成。');
+      if (segStart < 0 || segEnd < 0 || segEnd < segStart) throw new Error('purge 删除清单段未找到');
+      const purgeList = res.output.slice(segStart, segEnd);
+      if (purgeList.includes('flow-kit')) throw new Error('purge 删除清单包含 flow-kit: ' + purgeList);
+      if (!fs.existsSync(path.join(fk, 'sentinel.txt'))) throw new Error('purge 后 flow-kit 目录丢失');
+      if (fs.readFileSync(path.join(fk, 'sentinel.txt'), 'utf8') !== 'keep me\n') throw new Error('purge 后 flow-kit 内容被改动');
+      if (!fs.existsSync(path.join(proj, '.dsh', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('purge 重建未完成');
+    },
+  },
+
+  // 190: bridge-check 健康——全检查通过 exit 0。夹具按安装器实际写入形态构造
+  // （insert 条目 + file:// 引用 + BRIDGE_VERSION 戳 = 权威源 INSTALLED_VERSION 同值）。
+  {
+    name: '190 bridge-check 健康：全检查通过 exit 0',
+    run: (dir) => {
+      const { dshHome } = writeBridgeFixture(dir);
+      const res = runBridgeCheck(dir, dshHome);
+      assertExit(res, 0);
+      assertOut(res, '[OK] loader 文件存在');
+      assertOut(res, '[OK] cordis.patch.yml 托管块');
+      assertOut(res, '[OK] 块内 file:// 目标可达');
+      assertOut(res, '[OK] 重复注册检查');
+      assertOut(res, '[OK] 版本一致性');
+      assertOut(res, 'bridge-check: 健康（全部检查通过）——exit 0');
+    },
+  },
+
+  // 191: bridge-check 文件缺失——loader 缺失时存在性检查与 file:// 目标可达性双 FAIL exit 1。
+  {
+    name: '191 bridge-check 文件缺失：loader 与 file:// 目标双 FAIL exit 1',
+    run: (dir) => {
+      const { dshHome } = writeBridgeFixture(dir, { skipLoader: true });
+      const res = runBridgeCheck(dir, dshHome);
+      assertExit(res, 1);
+      assertOut(res, '[FAIL] loader 文件缺失');
+      assertOut(res, '[FAIL] 托管块指向的 loader 文件缺失');
+      assertOut(res, 'bridge-check: 失配 2 项——exit 1');
+    },
+  },
+
+  // 192: bridge-check 未挂载——loader 存在但托管块缺失 FAIL exit 1（不会监听任何项目）。
+  {
+    name: '192 bridge-check 未挂载：托管块缺失 FAIL exit 1',
+    run: (dir) => {
+      const { dshHome } = writeBridgeFixture(dir, {
+        patchContent: "- id: other-plugin\n  name: 'file:///C:/plugins/other-plugin.mjs'\n",
+      });
+      const res = runBridgeCheck(dir, dshHome);
+      assertExit(res, 1);
+      assertOut(res, '[FAIL] 未挂载');
+      assertOut(res, 'bridge-check: 失配 1 项——exit 1');
+    },
+  },
+
+  // 193: bridge-check 版本偏斜——loader 戳 != 项目 INSTALLED_VERSION，两值都打印 FAIL exit 1。
+  {
+    name: '193 bridge-check 版本偏斜：双值打印 FAIL exit 1',
+    run: (dir) => {
+      const { dshHome, installedVersion } = writeBridgeFixture(dir, { loaderStamp: '9.9.9-fixture-skew' });
+      const res = runBridgeCheck(dir, dshHome);
+      assertExit(res, 1);
+      assertOut(res, '[FAIL] 版本偏斜: loader BRIDGE_VERSION=9.9.9-fixture-skew != 项目 INSTALLED_VERSION=' + installedVersion);
+      assertOut(res, '（两值如上）');
+      assertOut(res, 'bridge-check: 失配 1 项——exit 1');
+    },
+  },
+
+  // 194: bridge-check 重复注册——托管块之外另有同 id 注册行 FAIL exit 1（块内安装器固有
+  // 条目不计）。outsideBlock 追加在块后——块外扫描精确捕获。
+  {
+    name: '194 bridge-check 重复注册：托管块外同 id 注册行 FAIL exit 1',
+    run: (dir) => {
+      const { dshHome } = writeBridgeFixture(dir, {
+        outsideBlock: "\n- id: dsh-flow-comet-bridge\n  name: 'file:///C:/plugins/dup.mjs'\n",
+      });
+      const res = runBridgeCheck(dir, dshHome);
+      assertExit(res, 1);
+      assertOut(res, '[FAIL] 重复注册: cordis.patch.yml 托管块外另有 1 处同 id 注册行');
+      assertOut(res, 'bridge-check: 失配 1 项——exit 1');
+    },
+  },
+
+  // 195: bridge-check 不适用——项目根无 .dsh/skills/flow-comet → 不适用 exit 0（AC-11）。
+  {
+    name: '195 bridge-check 不适用：非 dsh 项目 exit 0',
+    run: (dir) => {
+      const res = runBridgeCheck(dir, path.join(dir, 'dshhome'));
+      assertExit(res, 0);
+      assertOut(res, '[NA] bridge-check: 不适用（本项目未安装 dsh 平台副本）');
+      assertOut(res, 'bridge-check: 不适用（exit 0）');
+    },
+  },
+
+  // 196: 他方插件与他方注册行在安装与清理两个相中原样保持——$DSH_HOME/plugins/ 下非
+  // flow-comet 插件文件与 cordis.patch.yml 托管块外他方注册行均不得被安装/清理触碰
+  // （读-合并-写 + 只清托管块的非破坏语义；清理 = 删生成物后重建，托管块重新注入属预期，
+  // 他方注册行逐字保持）。
+  {
+    name: '196 dsh 他方插件与他方注册行在安装与清理双相中原样保持',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj');
+      fs.mkdirSync(proj, { recursive: true });
+      const dshHome = path.join(dir, 'dshhome');
+      const otherLoader = '// other plugin fixture\nexport const name = \'other-plugin\';\n';
+      const otherPatch = "- id: other-plugin\n  name: 'file:///C:/plugins/other-plugin.mjs'\n";
+      writeFile(dshHome, 'plugins/other-plugin.mjs', otherLoader);
+      writeFile(dshHome, 'cordis.patch.yml', otherPatch);
+      const otherBefore = fs.readFileSync(path.join(dshHome, 'plugins', 'other-plugin.mjs'), 'utf8');
+      const patchBefore = fs.readFileSync(path.join(dshHome, 'cordis.patch.yml'), 'utf8');
+      // 相 1 安装：loader 复制 + 托管块注入，他方内容保持
+      const r1 = runPrepareEnv(['--target', proj, '--platform', 'dsh'], dir, { DSH_HOME: dshHome });
+      assertExit(r1, 0);
+      assertOut(r1, '桥接 loader 首次安装');
+      assertOut(r1, '托管块注入完成');
+      if (fs.readFileSync(path.join(dshHome, 'plugins', 'other-plugin.mjs'), 'utf8') !== otherBefore) throw new Error('安装相后他方插件被改动');
+      const patchAfterInstall = fs.readFileSync(path.join(dshHome, 'cordis.patch.yml'), 'utf8');
+      if (!patchAfterInstall.includes('- id: other-plugin') || !patchAfterInstall.includes("name: 'file:///C:/plugins/other-plugin.mjs'")) {
+        throw new Error('安装相后他方注册行丢失: ' + patchAfterInstall);
+      }
+      if (!patchAfterInstall.includes('# --- flow-comet managed ---')) throw new Error('安装相后托管块未注入');
+      // 相 2 清理重装：purge 只清托管块与 loader 后重建（生成物域），他方内容保持
+      const r2 = runPrepareEnv(['--target', proj, '--platform', 'dsh', '--purge', '--yes'], dir, { DSH_HOME: dshHome });
+      assertExit(r2, 0);
+      if (fs.readFileSync(path.join(dshHome, 'plugins', 'other-plugin.mjs'), 'utf8') !== otherBefore) throw new Error('清理相后他方插件被改动');
+      const patchAfterPurge = fs.readFileSync(path.join(dshHome, 'cordis.patch.yml'), 'utf8');
+      // purge = 删生成物后重建：托管块重新注入属预期；他方注册行必须逐字保持（含换行边界）
+      if (!patchAfterPurge.startsWith(patchBefore.trim() + '\n\n')) throw new Error('清理相后他方注册行被改动: ' + JSON.stringify(patchAfterPurge));
+      if (!patchAfterPurge.includes('# --- flow-comet managed ---')) throw new Error('清理相后托管块未重建注入');
+      if (!fs.existsSync(path.join(proj, '.dsh', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('清理相后重建未完成');
+    },
+  },
+
+  // 197: FORCE_READLINE 强制回退——env 开关置 1 时即便 clack 可加载也直接走 readline
+  // 序号/逗号多选（仅测试面的回退测试钩子）。wrapper 注入 TTY 标志 + stdin 输入选择 dsh，
+  // 断言 readline 序号提示出现、clack 主路径提示不出现、选择后安装真实生效。
+  {
+    name: '197 prepare-env 强制回退：FORCE_READLINE 走 readline 序号提示且不走 clack',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj');
+      fs.mkdirSync(proj, { recursive: true });
+      // 非上游 flow-kit 预置——隔离网络，断言聚焦交互分支
+      const fk = path.join(proj, 'flow-kit');
+      fs.mkdirSync(fk, { recursive: true });
+      fs.writeFileSync(path.join(fk, 'sentinel.txt'), 'keep\n', 'utf8');
+      const dshHome = path.join(dir, 'dshhome');
+      const wrapper = path.join(dir, 'readline-wrapper.mjs');
+      fs.writeFileSync(wrapper,
+        "import { pathToFileURL } from 'url';\n" +
+        "Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });\n" +
+        "process.argv = [process.argv[0], process.env.FC_PREPARE_ENV, '--target', process.env.FC_TARGET];\n" +
+        "await import(pathToFileURL(process.env.FC_PREPARE_ENV).href);\n", 'utf8');
+      const res = spawnSync(process.execPath, [wrapper], {
+        cwd: dir,
+        input: '3\n', // readline 多选：输入序号 3 = dsh
+        env: {
+          ...process.env,
+          FLOW_COMET_FORCE_READLINE: '1',
+          DSH_HOME: dshHome,
+          FC_PREPARE_ENV: PREPARE_ENV,
+          FC_TARGET: proj,
+        },
+        encoding: 'utf8',
+        timeout: 120000,
+      });
+      const status = res.status ?? 1;
+      const out = String(res.stdout || '') + String(res.stderr || '');
+      if (status !== 0) throw new Error('强制回退路径 exit ' + status + '\n' + out);
+      if (!out.includes('输入序号或平台名（逗号分隔多选）或回车')) throw new Error('未出现 readline 序号提示:\n' + out);
+      if (out.includes('方向键移动、空格勾选')) throw new Error('强制回退仍走了 clack 主路径:\n' + out);
+      if (!fs.existsSync(path.join(proj, '.dsh', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('readline 选择 dsh 后未安装 dsh 平台');
+    },
+  },
+
+  // 198: purge 时目标无 flow-kit → 不得获取也不得创建（清理域语义：purge 只清理、不产生
+  // 新产物）。注入不可达 http.proxy（与「网络失败 WARN 继续」场景同技法）——若 purge 路径仍调 ensureFlowKit，
+  // 会触发 clone 失败 WARN「flow-kit 自动获取失败」→ 断言“该 WARN 不出现 + 已获取不出现 +
+  // 无 flow-kit 目录”即对当前实现 RED。
+  {
+    name: '198 prepare-env purge 不触碰 flow-kit：purge 且无 flow-kit 不获取不创建',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj');
+      fs.mkdirSync(proj, { recursive: true });
+      const res = runPrepareEnv(['--target', proj, '--platform', 'dsh', '--purge', '--yes'], dir, {
+        DSH_HOME: path.join(dir, 'dshhome'),
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'http.proxy',
+        GIT_CONFIG_VALUE_0: 'http://127.0.0.1:9',
+      });
+      assertExit(res, 0);
+      assertNotOut(res, '已获取 flow-kit');
+      assertNotOut(res, 'flow-kit 自动获取失败');
+      if (fs.existsSync(path.join(proj, 'flow-kit'))) throw new Error('purge 后创建了 flow-kit 目录');
+    },
+  },
+
+  // 199: 版本戳形态校验——已装 loader 标记行非语义化版本（如 beta，无数字主形）→ 提取失败
+  // 警告 + 跳过版本比对 + 照常覆盖；不得作为合法版本进入 compare（畸形值 parseInt 得 NaN，
+  // 会产生升/降级方向的错误结论）。
+  {
+    name: '199 prepare-env 版本戳形态：畸形标记（beta）走提取失败警告而非版本比对',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj');
+      fs.mkdirSync(proj, { recursive: true });
+      const dshHome = path.join(dir, 'dshhome');
+      writeFile(dshHome, 'plugins/dsh-flow-comet-bridge.mjs',
+        '// dsh bridge loader fixture (malformed stamp)\n// BRIDGE_VERSION: beta\n' +
+        "export const name = 'dsh-flow-comet-bridge';\nexport const version = '1.6.0-alpha.1';\n");
+      const res = runPrepareEnv(['--target', proj, '--platform', 'dsh'], dir, { DSH_HOME: dshHome });
+      assertExit(res, 0);
+      assertOut(res, '版本戳提取失败');
+      assertNotOut(res, '桥接 loader 升级');
+      assertNotOut(res, '桥接 loader 降级');
+      const installed = fs.readFileSync(path.join(dshHome, 'plugins', 'dsh-flow-comet-bridge.mjs'), 'utf8');
+      if (!installed.includes('BRIDGE_VERSION: 1.6.0-alpha.1')) throw new Error('覆盖后 loader 版本戳非权威源值');
+    },
+  },
+
+  // 200: bridge-check 目标一致性——托管块 file:// 指向存在但非期望的 loader 文件
+  // （可达性成立、目标错误）：不可报健康（必须 FAIL——解码目标与期望 loaderPath 不符，exit 1）。
+  {
+    name: '200 bridge-check 可达但目标错误：file:// 指向非期望 loader FAIL exit 1',
+    run: (dir) => {
+      const wrong = path.join(dir, 'dshhome', 'plugins', 'some-other-loader.mjs');
+      fs.mkdirSync(path.dirname(wrong), { recursive: true });
+      fs.writeFileSync(wrong, '// some other loader\n', 'utf8');
+      const fileUrl = pathToFileURL(wrong).href;
+      const { dshHome } = writeBridgeFixture(dir, {
+        patchContent:
+          '# --- flow-comet managed ---\n- insert:\n    - id: dsh-flow-comet-bridge\n      name: \'' +
+          fileUrl.replace(/'/g, "''") + '\'\n# --- end flow-comet managed ---\n',
+      });
+      const res = runBridgeCheck(dir, dshHome);
+      assertExit(res, 1);
+      assertOut(res, '[FAIL]');
+      assertNotOut(res, '健康（全部检查通过）');
     },
   },
 ];

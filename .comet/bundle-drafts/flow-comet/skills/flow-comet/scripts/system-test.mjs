@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // system-test.mjs — flow-comet 系统测试集（与 guard-self-test 同构的载体，测试内容为系统级全链路）
 //
-// 定位：guard-self-test 是引擎脚本的单元/场景级回归（184 场景，fixture 构造为主）；
+// 定位：guard-self-test 是引擎脚本的单元/场景级回归（200，fixture 构造为主）；
 // 本套件是**系统级**测试——每个测试项走真实命令序列（init → record → guard exit → handoff →
 // hook …），覆盖 flow-comet 全部机制面（A~L 十二类）：
 //   A. 状态机与路由（init/status/next/select/advance/record/execution-mode/config/
@@ -16,7 +16,7 @@
 //   I. 异常路径（损坏状态/缺工件出口/非法参数/状态字段类型非法）
 //   J. 文档一致性（双语健康检查/公开产物零代号检查——调用仓库本地工具）
 //   K. 安装器与平台（版本标识/多平台安装与平台化路径/codex hook JSON 契约/平台选择链/
-//      purge 语义/描述符驱动/dsh 平台断言/hook 注入形态无关断言与旧条目幂等升级）
+//      purge 语义/描述符驱动/dsh 平台断言/loader 版本戳重装断言/hook 注入形态无关断言与旧条目幂等升级）
 //   L. 执行遗漏防护（entry 进入证据/空退出豁免/空仓库提示）
 //
 // 载体（与 guard-self-test 同构）：每项 = 独立临时目录（fs.mkdtemp）+ 内置协议副本复制到
@@ -331,6 +331,35 @@ function collectTreeFiles(root) {
     }
   })(root);
   return files.sort();
+}
+
+// ---------- 桥接 loader 版本戳重装断言助手（临时 DSH_HOME 重装链路） ----------
+
+// 从权威源 loader 提取版本戳（与安装器/检查器同一锚点标记行；动态取值，版本演进零维护）
+function readBridgeSourceVersion(loader) {
+  const text = fs.readFileSync(loader, 'utf8');
+  const m = /^\/\/ BRIDGE_VERSION: (\S+)$/m.exec(text);
+  if (!m) throw new Error('权威源 loader 缺版本戳标记行（契约锚点）: ' + loader);
+  return m[1];
+}
+
+// 构造指定版本戳的 loader 副本内容（仅替换标记行，其余逐字保持——MISS 检测：替换未命中即报错）
+function stampBridgeLoader(sourceLoader, version) {
+  const text = fs.readFileSync(sourceLoader, 'utf8');
+  const replaced = text.replace(/^\/\/ BRIDGE_VERSION: \S+$/m, '// BRIDGE_VERSION: ' + version);
+  if (!replaced.includes('// BRIDGE_VERSION: ' + version)) {
+    throw new Error('版本戳替换未命中（MISS）: 目标版本 ' + version);
+  }
+  return replaced;
+}
+
+// 预置目标项目 flow-kit/ 为同名非上游目录（安装器走「非上游克隆，已跳过」路径——
+// 网络零接触；与安装器冒烟同手法）
+function seedForeignFlowKit(root) {
+  const flowKitDir = path.join(root, 'flow-kit');
+  fs.mkdirSync(flowKitDir, { recursive: true });
+  execFileSync('git', ['init', '-q'], { cwd: flowKitDir, stdio: 'ignore' });
+  execFileSync('git', ['remote', 'add', 'origin', 'https://example.com/not-flow-kit.git'], { cwd: flowKitDir, stdio: 'ignore' });
 }
 
 // ---------- hook 注入命令形态判定（托管条目断言放宽决策：断言意图 = 托管条目在场且指向本项目脚本） ----------
@@ -2901,6 +2930,136 @@ const TEST_ITEMS = [
       if (cxAfter.length !== 1) throw new Error('codex 升级后应恰余 1 条托管条目(旧条目被替换): ' + JSON.stringify(cxAfter));
       assertManagedHookEntry(cxAfter[0], 'codex 升级后托管命令');
       console.log('  hook 注入形态无关断言(basename+项目根引用特征)+ 新旧幂等升级 ✓');
+    },
+  },
+
+  // K14~K16: 桥接 loader 版本戳重装断言（安装器覆盖前版本比对明示的系统级锚定）——
+  // 临时 DSH_HOME 预置不同版本戳 loader，真实安装器重装断言方向措辞（升级/降级/版本一致）、
+  // 覆盖后磁盘为源新戳、同源重装收敛、purge 清除重建后路径回归。
+  {
+    name: 'K14 桥接 loader:版本戳重装断言(升级/降级方向与覆盖后新戳)',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
+      const loader = path.join(repoRoot, 'scripts', 'dsh-bridge.mjs');
+      if (!fs.existsSync(loader)) throw new Error('缺少 scripts/dsh-bridge.mjs');
+      const srcVersion = readBridgeSourceVersion(loader);
+      // 旧戳 = 低于源版本（升级方向）；新戳 = 数值序高于源版本（降级方向——字典序会误判为升级，
+      // 断言「降级」即数值序比较语义的系统级护栏；与实现侧冒烟同口径）
+      const OLD_STAMP = '1.5.0';
+      const NEWER_STAMP = '1.10.0';
+      const dshHome = path.join(dir, 'k14-dsh-home');
+      const target = path.join(dir, 'k14-target');
+      fs.mkdirSync(target, { recursive: true });
+      seedForeignFlowKit(target);
+      const pluginPath = path.join(dshHome, 'plugins', 'dsh-flow-comet-bridge.mjs');
+      const runInstall = () => {
+        const res = spawnSync(process.execPath, [installer, '--target', target, '--platform', 'dsh'], {
+          cwd: repoRoot, encoding: 'utf8', timeout: 120000, env: { ...process.env, DSH_HOME: dshHome },
+        });
+        // 统一包装为 { status, output }（与 runState 等助手同形态——assertOut 期望字符串 output）
+        return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+      };
+      // ① 已装旧戳 loader → 重装输出「升级 A → B」逐字措辞 + 覆盖后磁盘为源新戳
+      fs.mkdirSync(path.dirname(pluginPath), { recursive: true });
+      fs.writeFileSync(pluginPath, stampBridgeLoader(loader, OLD_STAMP), 'utf8');
+      const upgrade = runInstall();
+      assertExit(upgrade, 0);
+      assertOut(upgrade, '桥接 loader 升级 ' + OLD_STAMP + ' → ' + srcVersion);
+      if (!fs.readFileSync(pluginPath, 'utf8').includes('// BRIDGE_VERSION: ' + srcVersion)) {
+        throw new Error('升级重装后已装 loader 应被覆盖为源新戳');
+      }
+      // ② 已装新戳 loader（数值序高于源）→ 重装输出「降级 A → B」+ 覆盖后仍为源戳
+      fs.writeFileSync(pluginPath, stampBridgeLoader(loader, NEWER_STAMP), 'utf8');
+      const downgrade = runInstall();
+      assertExit(downgrade, 0);
+      assertOut(downgrade, '桥接 loader 降级 ' + NEWER_STAMP + ' → ' + srcVersion);
+      if (!fs.readFileSync(pluginPath, 'utf8').includes('// BRIDGE_VERSION: ' + srcVersion)) {
+        throw new Error('降级重装后已装 loader 应为源戳');
+      }
+      console.log('  版本戳重装断言:升级/降级方向措辞与覆盖后新戳 ✓');
+    },
+  },
+
+  {
+    name: 'K15 桥接 loader:同源重装断言(首次安装后版本一致)',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
+      const loader = path.join(repoRoot, 'scripts', 'dsh-bridge.mjs');
+      if (!fs.existsSync(loader)) throw new Error('缺少 scripts/dsh-bridge.mjs');
+      const srcVersion = readBridgeSourceVersion(loader);
+      const dshHome = path.join(dir, 'k15-dsh-home');
+      const target = path.join(dir, 'k15-target');
+      fs.mkdirSync(target, { recursive: true });
+      seedForeignFlowKit(target);
+      const pluginPath = path.join(dshHome, 'plugins', 'dsh-flow-comet-bridge.mjs');
+      const runInstall = () => {
+        const res = spawnSync(process.execPath, [installer, '--target', target, '--platform', 'dsh'], {
+          cwd: repoRoot, encoding: 'utf8', timeout: 120000, env: { ...process.env, DSH_HOME: dshHome },
+        });
+        return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+      };
+      // ① 无已装 loader → 首次安装措辞（比对的空态前提）
+      const first = runInstall();
+      assertExit(first, 0);
+      assertOut(first, '桥接 loader 首次安装');
+      if (!fs.existsSync(pluginPath)) throw new Error('首次安装后 loader 应就位');
+      // ② 同源重装（已装 = 源版本）→ 「版本一致（A）」逐字措辞 + 磁盘保持源戳
+      const re = runInstall();
+      assertExit(re, 0);
+      assertOut(re, '桥接 loader 版本一致（' + srcVersion + '）');
+      if (!fs.readFileSync(pluginPath, 'utf8').includes('// BRIDGE_VERSION: ' + srcVersion)) {
+        throw new Error('同源重装后 loader 应保持源戳');
+      }
+      console.log('  同源重装断言:首次安装 → 版本一致收敛 ✓');
+    },
+  },
+
+  {
+    name: 'K16 桥接 loader:purge 后重建路径回归(loader 恢复与再装收敛)',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
+      const loader = path.join(repoRoot, 'scripts', 'dsh-bridge.mjs');
+      if (!fs.existsSync(loader)) throw new Error('缺少 scripts/dsh-bridge.mjs');
+      const srcVersion = readBridgeSourceVersion(loader);
+      const dshHome = path.join(dir, 'k16-dsh-home');
+      const target = path.join(dir, 'k16-target');
+      fs.mkdirSync(target, { recursive: true });
+      seedForeignFlowKit(target);
+      const pluginPath = path.join(dshHome, 'plugins', 'dsh-flow-comet-bridge.mjs');
+      const patchPath = path.join(dshHome, 'cordis.patch.yml');
+      const runInstall = (extra) => {
+        const res = spawnSync(process.execPath, [installer, '--target', target, '--platform', 'dsh', ...(extra || [])], {
+          cwd: repoRoot, encoding: 'utf8', timeout: 120000, env: { ...process.env, DSH_HOME: dshHome },
+        });
+        return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+      };
+      // ① 首次安装：loader 与 cordis.patch.yml 托管块就位
+      const first = runInstall();
+      assertExit(first, 0);
+      if (!fs.existsSync(pluginPath)) throw new Error('首次安装后 loader 应就位');
+      if (!fs.existsSync(patchPath)) throw new Error('首次安装后 cordis.patch.yml 应就位');
+      // ② purge --yes：dsh 平台生成物清除后删除并重建——loader/托管块恢复为源形态
+      const purgeRes = runInstall(['--purge', '--yes']);
+      assertExit(purgeRes, 0);
+      if (!fs.existsSync(pluginPath)) throw new Error('purge 后 loader 应重建恢复');
+      if (!fs.readFileSync(pluginPath, 'utf8').includes('// BRIDGE_VERSION: ' + srcVersion)) {
+        throw new Error('purge 后 loader 应为源戳');
+      }
+      if (!fs.existsSync(patchPath)) throw new Error('purge 后 cordis.patch.yml 托管块应重建');
+      // ③ 清除后再重装：成功且「版本一致」收敛（重建成果可复装、版本比对路径回归）
+      const re = runInstall();
+      assertExit(re, 0);
+      assertOut(re, '桥接 loader 版本一致（' + srcVersion + '）');
+      if (!fs.readFileSync(pluginPath, 'utf8').includes('// BRIDGE_VERSION: ' + srcVersion)) {
+        throw new Error('purge 后再装后 loader 应为源戳');
+      }
+      console.log('  purge 后重建路径回归:loader/托管块恢复 + 再装版本一致收敛 ✓');
     },
   },
 
