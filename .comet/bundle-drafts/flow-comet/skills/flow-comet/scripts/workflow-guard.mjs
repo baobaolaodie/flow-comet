@@ -2358,10 +2358,33 @@ async function main() {
     process.exit(1);
   }
   // W1-A: 转移前置约束——currentNode 必须等于被 exit 的节点（防跳阶段）
+  // M2（2026-08-29 容错落地 · L-061 修复候选）：currentNode 已漂移到文件推导位置
+  // （resolveNextNode(completedNodes) === currentNode，如 execute 证据/产物齐后路由已指向
+  // review）且本节点 evidence 齐 + 产物齐（执行者确认本节点实际已完成）→ 容错放行 exit
+  // （漂移/提前校正态可补欠账；BLOCK 消息/提示标注「漂移态可用容错 exit」——不再只有不可行的
+  // advance/select 指引）。漂移但 evidence/产物不齐 → 仍严格 BLOCK（容错不放开未完成）。
+  const driftedNodeEvidence = evidenceFor(state, node.id);
   if (state.currentNode !== node.id) {
-    console.error('BLOCKED: currentNode is ' + String(state.currentNode) + ', cannot exit ' + node.id + '.');
-    console.error('恢复: 若节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进，确认节点实际已完成后再用）或 select（切换 change）；禁止手改 state 机器字段');
-    process.exit(1);
+    let tolerable = false;
+    if (driftedNodeEvidence) {
+      const derivedNext = await nextNode(protocol, state);
+      const missingDriftArtifacts = await missingRequiredArtifacts(protocol, node, state.activeChange);
+      const missingDriftSchemaEvidence = missingRequiredSchemaEvidence(protocol, node, driftedNodeEvidence);
+      tolerable = !!(
+        derivedNext && derivedNext.id === state.currentNode
+        && missingDriftArtifacts.length === 0
+        && missingDriftSchemaEvidence.length === 0
+      );
+    }
+    if (tolerable) {
+      console.log('NOTE: 容错放行——currentNode 已为文件推导下一节点且本节点证据/产物齐（执行者确认本节点实际已完成），exit ' + node.id + ' --apply 补齐欠账（漂移容忍路径）');
+    }
+    if (!tolerable) {
+      console.error('BLOCKED: currentNode is ' + String(state.currentNode) + ', cannot exit ' + node.id + '.');
+      console.error('恢复: 若节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进，确认节点实际已完成后再用）或 select（切换 change）；禁止手改 state 机器字段');
+      console.error('提示: 若 currentNode 已漂移到文件推导位置且本节点证据/产物齐（执行者确认本节点实际已完成）→ 可用容错 exit ' + node.id + ' --apply 补齐欠账（漂移容忍路径，不再只有不可行的 advance/select 指引）；漂移但证据/产物不齐则不适用');
+      process.exit(1);
+    }
   }
   // M1/R2: enter 证据检测——未 entry 直接 exit:新 change(init 标记)强制 BLOCKED,旧 change 渐进 WARN
   // 跳过 entry 会漏掉进入检查(协调者禁令/C4 WORKTREE/PROGRESS/签名记录)

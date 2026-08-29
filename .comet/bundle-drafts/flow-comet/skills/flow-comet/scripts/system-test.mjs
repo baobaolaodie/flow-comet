@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // system-test.mjs — flow-comet 系统测试集（与 guard-self-test 同构的载体，测试内容为系统级全链路）
 //
-// 定位：guard-self-test 是引擎脚本的单元/场景级回归（208，fixture 构造为主）；
+// 定位：guard-self-test 是引擎脚本的单元/场景级回归（210，fixture 构造为主）；
 // 本套件是**系统级**测试——每个测试项走真实命令序列（init → record → guard exit → handoff →
 // hook …），覆盖 flow-comet 全部机制面（A~L 十二类）：
 //   A. 状态机与路由（init/status/next/select/advance/record/execution-mode/config/
@@ -1165,6 +1165,49 @@ const TEST_ITEMS = [
       const nxt = runNext();
       assertExit(nxt, 0);
       assertOut(nxt, 'NEXT: done');
+    },
+  },
+
+  {
+    // M2（2026-08-29）漂移容忍 exit 系统锚（真实命令链路）：execute 产物/证据齐（单任务完成 +
+    // SUMMARY + record execute + entry execute）→ 构造欠账漂移态（currentNode 漂移到文件推导
+    // 下一节点 review，execute 未进 completedNodes）→ 容错 exit execute --apply 补齐欠账。
+    // 修复前 currentNode 校验直接 BLOCK → 预期失败（RED 锚）；场景级同语义锚见自测套件。
+    name: 'A18 漂移容忍 exit：execute 欠账经容错路径补齐（真实命令）',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const writeTask = (statusMap) => {
+        const blk = (id, status) =>
+          '<task id="' + id + '" status="' + status + '">' +
+          '<action>实现 ' + id + '</action><write_files>src/' + id.toLowerCase() + '.mjs</write_files>' +
+          '<verify>node --check src/' + id.toLowerCase() + '.mjs</verify></task>\n';
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + blk('S01', statusMap.S01 ?? 'pending'));
+      };
+      // 驱动至 plan 出口（真实命令：init→open→design 见 driveThroughDesign，随后 plan 三连）
+      driveThroughDesign(dir);
+      writeTask({ S01: 'pending' });
+      assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md'], dir, env), 0);
+      assertExit(runState(['record', 'plan', '{"summary":"plan complete"}'], dir, env), 0);
+      assertExit(runGuard(['entry', 'plan'], dir), 0);
+      assertExit(runGuard(['exit', 'plan', '--apply'], dir), 0);
+      // execute 完整完成（产物 + record + entry，真实命令）——仅差 completedNodes（欠账）
+      writeTask({ S01: 'done' });
+      writeFile(dir, '.specs/' + CHANGE_ID + '/S01-SUMMARY.md', execSummaryFixture('S01'));
+      assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+      assertExit(runState(['record', 'execute', '{"summary":"executed","parallelTakeoverApproved":true}'], dir, env), 0);
+      assertExit(runGuard(['entry', 'execute'], dir), 0);
+      // R-1 欠账漂移态：currentNode 漂移到文件推导下一节点 review（execute 未 completed）
+      const st = readStateFile(dir);
+      st.currentNode = 'review';
+      writeState(dir, st);
+      // 容错 exit execute --apply → 补齐欠账（completedNodes 补 execute）
+      const res = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(res, 0);
+      assertOut(res, 'ALL CHECKS PASSED');
+      const stAfter = readStateFile(dir);
+      if (!stAfter.completedNodes.includes('execute')) {
+        throw new Error('容错 exit execute --apply 后 completedNodes 应含 execute（欠账补齐）;实际: ' + stAfter.completedNodes.join(','));
+      }
     },
   },
 
