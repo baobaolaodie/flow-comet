@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · flow-comet 引擎自测套件（212 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退）、并行文件依赖检测（写写重叠强判前移 plan 出口 + read 读写弱判渐进 + 触发面排除 + 委托前保持锚 + 扩展名闭合））
+// C1 · flow-comet 引擎自测套件（216 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退）、并行文件依赖检测（写写重叠强判前移 plan 出口 + read 读写弱判渐进 + 触发面排除 + 委托前保持锚 + 扩展名闭合）、directOverride 授权约束（协调者授权留痕正例 / 执行者自切无授权 BLOCK / 越界改 state hook 拦截 / 恢复双路径））
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -7,7 +7,7 @@
 // （COMET_RUN_ROOT=<临时目录>）→ 断言退出码与输出关键词。场景跑完 rmSync 清理。
 //
 // 运行: node scripts/guard-self-test.mjs
-// 全过 → exit 0，输出 ALL 212 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
+// 全过 → exit 0，输出 ALL 216 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
 //
 // 仅 node 内置模块（child_process/fs/os/path）；不依赖 flow-kit 模板目录存在
 // （fallback 场景用内置段名；部分场景复制模板文件进临时目录验证 C2 模板派生）。
@@ -392,6 +392,56 @@ function summaryContent(options = {}) {
     '- src/t1.mjs',
     '',
     method,
+    '',
+  ].join('\n');
+}
+
+// 新 change 模板保真 SUMMARY（M1 严格形态：# SUMMARY: 标题 + 首部 4 字段 + 段序保真——
+// directOverride 授权约束场景（213~216）用：新 change 出口强制模板保真，旧 summaryContent
+// 无 # SUMMARY: 标题会被 M1 BLOCKED，不能用于正例/恢复场景）
+function strictSummary(taskId) {
+  return [
+    '# SUMMARY: ' + taskId + ' - 实现 ' + taskId,
+    '',
+    '- **Change ID**: ' + CHANGE_ID,
+    '- **Task ID**: ' + taskId,
+    '- **完成时间**: 2026-08-29 10:00',
+    '- **AI 角色**: Dev',
+    '',
+    '---',
+    '',
+    '## 做了什么',
+    '',
+    '实现 ' + taskId + '（TDD：先写失败场景再实现）。',
+    '',
+    '## 改动文件',
+    '',
+    '| 文件 | 性质 | 说明 |',
+    '|---|---|---|',
+    '| src/' + taskId.toLowerCase() + '.mjs | 修改 | 实现任务 |',
+    '',
+    '## verify 输出',
+    '',
+    '```',
+    'node --check src/' + taskId.toLowerCase() + '.mjs',
+    '```',
+    '',
+    '## 6 维自查',
+    '',
+    '- 功能: 通过（brooks-review 已跑）',
+    '- 性能: 无影响',
+    '- 安全: 无影响',
+    '- 兼容: 通过',
+    '- 可观测: 通过',
+    '- 可维护: 通过',
+    '',
+    '## 越界检查',
+    '',
+    '仅修改 src/' + taskId.toLowerCase() + '.mjs，无越界。',
+    '',
+    '## 自检方法',
+    '',
+    'brooks-review',
     '',
   ].join('\n');
 }
@@ -5770,6 +5820,146 @@ const SCENARIOS = [
       const res = runGuard(['exit', 'plan', '--apply'], dir, env);
       assertExit(res, 0);
       assertOut(res, 'ROUTE WARN');
+    },
+  },
+
+  // 213: directOverride 授权约束正例——协调者显式授权留痕在场（executionMode=direct +
+  // directOverride=true + 授权审计字段 directOverrideAt/来源）→ execute 出口通过（direct 是
+  // 用户决策点,授权留痕即合法路径;修复前出口无授权校验——GREEN 后本场景仍恒过,防过度修复）。
+  {
+    name: '213 directOverride 授权约束正例：协调者授权 + direct → exit 通过',
+    run: (dir) => {
+      const st = baseState('execute');
+      st.completedNodes = ['open', 'design', 'plan'];
+      st.enteredNodes = ['open', 'design', 'plan', 'execute'];
+      st.evidence = {
+        open: { summary: 'open done' },
+        design: { summary: 'design done' },
+        plan: { summary: 'plan done' },
+        execute: { summary: 'executed' },
+      };
+      st.executionMode = 'direct';
+      st.directOverride = true;
+      st.directOverrideAt = '2026-08-29T10:00:00.000Z';
+      st.directOverrideSource = 'execution-mode';
+      st.newChange = true;
+      writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+        '<task id="S01" status="done"><action>实现 S01</action><write_files>src/s1.mjs</write_files><verify>node --check src/s1.mjs</verify></task>\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/S01-SUMMARY.md', strictSummary('S01'));
+      const res = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(res, 0);
+      assertNotOut(res, 'BLOCKED');
+      assertOut(res, 'ALL CHECKS PASSED');
+    },
+  },
+
+  // 214: directOverride 授权约束负例——执行者自切 direct 无授权审计记录（executionMode=direct +
+  // directOverride=true 但无 directOverrideAt）→ execute 出口 BLOCKED（direct 是用户决策点,
+  // 不可自决——机制约束）+ 恢复指引（协调者显式授权 / 回 subagent）。修复前出口无校验 → RED。
+  {
+    name: '214 directOverride 授权约束负例：执行者自切 direct 无授权 → exit BLOCKED',
+    run: (dir) => {
+      const st = baseState('execute');
+      st.completedNodes = ['open', 'design', 'plan'];
+      st.enteredNodes = ['open', 'design', 'plan', 'execute'];
+      st.evidence = {
+        open: { summary: 'open done' },
+        design: { summary: 'design done' },
+        plan: { summary: 'plan done' },
+        execute: { summary: 'executed' },
+      };
+      st.executionMode = 'direct';
+      st.directOverride = true;
+      // 无 directOverrideAt 授权审计记录（执行者自切/修复前遗留形态）
+      st.newChange = true;
+      writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+        '<task id="S01" status="done"><action>实现 S01</action><write_files>src/s1.mjs</write_files><verify>node --check src/s1.mjs</verify></task>\n');
+      const res = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, 'directOverride');
+      assertOut(res, '授权');
+    },
+  },
+
+  // 215: directOverride 越界检测——绕过脚本直接改 state 文件（工具写 .comet/flow-comet-state.json,
+  // 无授权）→ hook BLOCK（state 文件禁手动工具写——机器字段由脚本通道管理;修复前 direct 模式
+  // 白名单 [''] 允许写 state → 越权写入口 fail-open → RED）。
+  {
+    name: '215 directOverride 越界：直接改 state 文件无授权 → hook BLOCK',
+    run: (dir) => {
+      const st = baseState('execute');
+      st.status = 'running';
+      st.executionMode = 'direct';
+      st.directOverride = true;
+      st.directOverrideAt = '2026-08-29T10:00:00.000Z';
+      writeState(dir, st);
+      const stateFile = path.join(dir, '.comet', 'flow-comet-state.json');
+      const res = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: stateFile } });
+      assertExit(res, 2);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, 'flow-comet-state.json');
+    },
+  },
+
+  // 216: directOverride 授权约束恢复——BLOCK 后按指引① 协调者 execution-mode direct（脚本写入
+  // 授权留痕）→ exit 通过；② 回 subagent（清除 directOverride 与授权留痕,handoff 在场）→ exit
+  // 也通过——两条恢复路径都闭合（修复前无 BLOCK 无从恢复 → RED）。
+  {
+    name: '216 directOverride 恢复：BLOCK 后补授权 / 回 subagent → exit 通过',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const buildState = () => {
+        const st = baseState('execute');
+        st.completedNodes = ['open', 'design', 'plan'];
+        st.enteredNodes = ['open', 'design', 'plan', 'execute'];
+        st.evidence = {
+          open: { summary: 'open done' },
+          design: { summary: 'design done' },
+          plan: { summary: 'plan done' },
+          execute: { summary: 'executed' },
+          'subagent-execute': { summary: 'delegated', handoffResult: handoffFor(['S01']) },
+        };
+        st.newChange = true;
+        return st;
+      };
+      const writeTask = () => writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+        '<task id="S01" status="done"><action>实现 S01</action><write_files>src/s1.mjs</write_files><verify>node --check src/s1.mjs</verify></task>\n');
+      const readState = () => JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      // ① 复现 BLOCK（direct 无授权）
+      const st1 = buildState();
+      st1.executionMode = 'direct';
+      st1.directOverride = true;
+      writeState(dir, st1);
+      writeTask();
+      const rBlock = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(rBlock, 1);
+      assertOut(rBlock, 'BLOCKED');
+      // ② 恢复路径一：协调者 execution-mode direct（脚本写入授权留痕）→ exit 通过
+      writeFile(dir, '.specs/' + CHANGE_ID + '/S01-SUMMARY.md', strictSummary('S01'));
+      const auth = runState(['execution-mode', 'direct'], dir, env);
+      assertExit(auth, 0);
+      assertOut(auth, 'DIRECT-AUTH');
+      const st2 = readState();
+      if (typeof st2.directOverrideAt !== 'string' || st2.directOverrideAt.trim() === '') {
+        throw new Error('授权后 state 应含 directOverrideAt 审计字段: ' + JSON.stringify(st2.directOverrideAt));
+      }
+      const rAuth = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(rAuth, 0);
+      assertOut(rAuth, 'ALL CHECKS PASSED');
+      // ③ 恢复路径二：回 subagent（清除 directOverride 与授权留痕）→ exit 通过
+      const back = runState(['execution-mode', 'subagent'], dir, env);
+      assertExit(back, 0);
+      const st3 = readState();
+      if (st3.directOverride !== false || st3.directOverrideAt !== undefined) {
+        throw new Error('回 subagent 应清除 directOverride 与授权审计字段: ' + JSON.stringify({ directOverride: st3.directOverride, directOverrideAt: st3.directOverrideAt }));
+      }
+      const rBack = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(rBack, 0);
+      assertOut(rBack, 'ALL CHECKS PASSED');
     },
   },
 ];

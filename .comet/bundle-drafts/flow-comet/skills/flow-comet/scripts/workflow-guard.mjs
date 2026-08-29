@@ -2732,6 +2732,23 @@ async function main() {
       }
     } catch {}
   }
+  // W3: directOverride 授权约束（direct 是用户决策点，不可自决——机制约束）——
+  // execute / subagent-execute 出口校验：executionMode=direct 且 directOverride=true（显式
+  // 直显授权态）须存在授权审计记录（directOverrideAt/来源，由 workflow-state execution-mode
+  // 命令在协调者显式授权时写入）——否则 BLOCKED + 恢复指引（协调者显式授权 / 回 subagent）。
+  // 旧 state 缺省（directOverride=false / 缺字段）放行（前向兼容——未处于显式 direct 不受影响）。
+  if ((node.id === 'execute' || node.id === 'subagent-execute') && state.activeChange) {
+    const directMode = state.executionMode ?? 'subagent';
+    if (directMode === 'direct' && state.directOverride === true) {
+      const hasAuditRecord = typeof state.directOverrideAt === 'string'
+        && state.directOverrideAt.trim() !== '';
+      if (!hasAuditRecord) {
+        console.error('BLOCKED: executionMode=direct 且 directOverride=true 但无授权审计记录（direct 是用户决策点，不可自决——须存在授权留痕 directOverrideAt/来源，由协调者显式 execution-mode direct 写入）');
+        console.error('恢复: 由协调者执行 workflow-state.mjs execution-mode direct 显式授权（写入授权审计记录）后重试 exit；或 execution-mode subagent 切回（清除 directOverride）后重试 exit；禁止手改 state 机器字段');
+        process.exit(1);
+      }
+    }
+  }
   // W1-B: execute / subagent-execute 出口校验每份 SUMMARY 含三个必填段 + 6 维自查非空 + 自检方法
   if (node.id === 'execute' || node.id === 'subagent-execute') {
     const changeDir = path.join(runRoot, '.specs', state.activeChange ?? '');

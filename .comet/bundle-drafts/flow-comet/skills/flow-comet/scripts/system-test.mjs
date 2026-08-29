@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // system-test.mjs — flow-comet 系统测试集（与 guard-self-test 同构的载体，测试内容为系统级全链路）
 //
-// 定位：guard-self-test 是引擎脚本的单元/场景级回归（212，fixture 构造为主）；
+// 定位：guard-self-test 是引擎脚本的单元/场景级回归（216，fixture 构造为主）；
 // 本套件是**系统级**测试——每个测试项走真实命令序列（init → record → guard exit → handoff →
 // hook …），覆盖 flow-comet 全部机制面（A~L 十二类）：
 //   A. 状态机与路由（init/status/next/select/advance/record/execution-mode/config/
@@ -1266,6 +1266,57 @@ const TEST_ITEMS = [
       const resMal = runGuard(['exit', 'plan', '--apply'], dir);
       assertExit(resMal, 0);
       assertOut(resMal, 'ROUTE WARN'); // 畸形块仍报（结构校验严格保持）
+    },
+  },
+
+  {
+    // directOverride 授权约束系统锚（真实命令链路）：执行者自切 direct 无授权（绕过脚本手改
+    // state——修复后 hook 会拦截此类工具写；此处直接构造越权形态验证 guard 出口拦截）→
+    // execute 出口 BLOCKED + 恢复指引；协调者授权路径（execution-mode direct 真实命令写入
+    // 授权留痕）→ 出口通过。场景级同语义见自测套件对应锚。
+    name: 'A20 directOverride 授权约束：自切 direct 无授权 BLOCK / 协调者授权通过（真实命令）',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const writeTask = (statusMap) => {
+        const blk = (id, status) =>
+          '<task id="' + id + '" status="' + status + '">' +
+          '<action>实现 ' + id + '</action><write_files>src/' + id.toLowerCase() + '.mjs</write_files>' +
+          '<verify>node --check src/' + id.toLowerCase() + '.mjs</verify></task>\n';
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + blk('S01', statusMap.S01 ?? 'pending'));
+      };
+      // 驱动至 execute（真实命令：init→open→design→plan 出口）
+      driveThroughDesign(dir);
+      writeTask({ S01: 'pending' });
+      assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md'], dir, env), 0);
+      assertExit(runState(['record', 'plan', '{"summary":"plan complete"}'], dir, env), 0);
+      assertExit(runGuard(['entry', 'plan'], dir), 0);
+      assertExit(runGuard(['exit', 'plan', '--apply'], dir), 0);
+      // execute 完整完成（产物 + record + entry，真实命令）
+      writeTask({ S01: 'done' });
+      writeFile(dir, '.specs/' + CHANGE_ID + '/S01-SUMMARY.md', execSummaryFixture('S01'));
+      assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+      assertExit(runState(['record', 'execute', '{"summary":"executed"}'], dir, env), 0);
+      assertExit(runGuard(['entry', 'execute'], dir), 0);
+      // 执行者自切 direct（directOverride=true 但无授权审计记录——B 方案前的自切/遗留形态）
+      const st = readStateFile(dir);
+      st.executionMode = 'direct';
+      st.directOverride = true;
+      writeState(dir, st);
+      const rBlock = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(rBlock, 1);
+      assertOut(rBlock, 'BLOCKED');
+      assertOut(rBlock, 'directOverride');
+      // 协调者授权路径：execution-mode direct（脚本写入授权留痕）→ exit 通过
+      const auth = runState(['execution-mode', 'direct'], dir, env);
+      assertExit(auth, 0);
+      assertOut(auth, 'DIRECT-AUTH');
+      const stAuth = readStateFile(dir);
+      if (typeof stAuth.directOverrideAt !== 'string' || stAuth.directOverrideAt.trim() === '') {
+        throw new Error('协调者授权后 state 应含 directOverrideAt 审计字段: ' + JSON.stringify(stAuth.directOverrideAt));
+      }
+      const rPass = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(rPass, 0);
+      assertOut(rPass, 'ALL CHECKS PASSED');
     },
   },
 

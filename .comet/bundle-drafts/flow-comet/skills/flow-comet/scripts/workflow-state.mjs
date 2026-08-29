@@ -1204,6 +1204,17 @@ async function main() {
     // direct 是逃生口：必须用户显式调用，并记录 directOverride；切回 subagent 时清除
     // （directOverride 恒等于"当前是否处于用户确认的 direct"——再次切 direct 必须重新确认，无历史歧义）
     state.directOverride = mode === 'direct';
+    if (mode === 'direct') {
+      // 授权审计留痕：direct 是用户决策点不可自决——协调者显式调用本命令即授权事件，写入授权
+      // 审计字段（guard 出口校验须存在授权记录；执行者绕过脚本手改 state 字段无授权记录 → BLOCK）。
+      console.error('DIRECT-AUTH: direct=逃生口须用户显式授权——本命令即授权留痕（directOverrideAt 写入）');
+      state.directOverrideAt = new Date().toISOString();
+      state.directOverrideSource = 'execution-mode';
+    } else {
+      // 切回 subagent 清除授权留痕（directOverride 一并清除——既有语义保持）
+      delete state.directOverrideAt;
+      delete state.directOverrideSource;
+    }
     await writeState(state);
     console.log('EXECUTION-MODE: ' + state.executionMode + (state.directOverride ? ' (directOverride)' : ''));
     return;
