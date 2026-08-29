@@ -24,6 +24,6 @@ jobs:
             Before review, please make sure:
             - PR title follows Conventional Commits (e.g. `fix: ...`, `docs: ...`, `ci: ...`)
             - The checklist in the PR template stays complete (keep unchecked items as `[ ]`)
-            - Local pre-check: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → ALL 208 SCENARIOS PASSED
+            - Local pre-check: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → ALL 210 SCENARIOS PASSED
 
             CI enforces the rest automatically (regression, PR conventions, version consistency, dead links). Local hooks: run `node scripts/install-commit-hook.mjs` after cloning.
