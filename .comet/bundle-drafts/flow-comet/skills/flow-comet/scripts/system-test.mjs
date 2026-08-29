@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // system-test.mjs — flow-comet 系统测试集（与 guard-self-test 同构的载体，测试内容为系统级全链路）
 //
-// 定位：guard-self-test 是引擎脚本的单元/场景级回归（206，fixture 构造为主）；
+// 定位：guard-self-test 是引擎脚本的单元/场景级回归（208，fixture 构造为主）；
 // 本套件是**系统级**测试——每个测试项走真实命令序列（init → record → guard exit → handoff →
 // hook …），覆盖 flow-comet 全部机制面（A~L 十二类）：
 //   A. 状态机与路由（init/status/next/select/advance/record/execution-mode/config/
@@ -1058,6 +1058,113 @@ const TEST_ITEMS = [
       assertExit(ok, 0);
       assertOut(ok, 'ALL CHECKS PASSED');
       assertNotOut(ok, 'BLOCKED');
+    },
+  },
+
+  {
+    // 多趟平行转换后 next 可达且与 guard 出口一致（真实命令链路）：在 A15 的收敛链路之上，
+    // 把此前排除在收敛断言面外的两个平行转换点（plan→subagent-execute、subagent-execute→execute
+    // 趟间回流）也纳入 next 收敛断言——修复前 next 在这些转换点被误拦为“疑似未 exit”，预期失败。
+    name: 'A17 多趟平行转换后 next 可达：各转换点 next 与 guard 出口 NODE 一致（真实命令）',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const writeTask = (statusMap) => {
+        const blk = (id, parallel, deps) =>
+          '<task id="' + id + '"' + (parallel ? ' parallel="true"' : '') +
+          ' status="' + (statusMap[id] === 'done' ? 'done' : 'pending') + '">' +
+          '<action>实现 ' + id + '</action><write_files>src/' + id.toLowerCase() + '.mjs</write_files>' +
+          '<verify>node --check src/' + id.toLowerCase() + '.mjs</verify>' +
+          (deps ? '<depends_on>' + deps + '</depends_on>' : '') + '</task>\n';
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+          blk('P01', true, '') + blk('P02', true, '') +
+          blk('S01', false, 'P01,P02') +
+          blk('P03', true, 'S01') + blk('P04', true, 'S01') +
+          blk('S02', false, 'P03,P04'));
+      };
+      const runNext = () => runState(['next'], dir, env);
+      const nodeOf = (out) => (out.match(/^NODE: ([a-z-]+)$/m) || [])[1] ?? null;
+      const completeTasks = (ids) => {
+        for (const id of ids) {
+          writeFile(dir, '.specs/' + CHANGE_ID + '/' + id + '-SUMMARY.md', execSummaryFixture(id));
+          assertExit(runHandoff(['request', id, id + ' 委托', '--write-files', 'src/' + id.toLowerCase() + '.mjs'], dir), 0);
+          assertExit(runHandoff(['result', id, fullContract('abcd1234abcd1234abcd1234abcd1234abcd1234', id)], dir), 0);
+        }
+      };
+      // drive 收敛面全量：每个转换点（含平行跳转与趟间回流）都断言 next 可达且与 guard 出口 NODE 一致
+      const drive = (nodeId, skill, prompt, prepare, { expectedNode } = {}) => {
+        assertExit(runState(['skill-load', nodeId, skill, '--prompt', prompt], dir, env), 0);
+        prepare();
+        assertExit(runGuard(['entry', nodeId], dir), 0);
+        const res = runGuard(['exit', nodeId, '--apply'], dir);
+        assertExit(res, 0);
+        const n1 = nodeOf(res.output);
+        if (expectedNode && n1 !== expectedNode) {
+          throw new Error('节点 ' + nodeId + ' 出口后 guard NODE(' + n1 + ') != 期望(' + expectedNode +
+            ')\nguard:\n' + res.output);
+        }
+        const nxt = runNext();
+        assertExit(nxt, 0);
+        const n2 = nodeOf(nxt.output);
+        if (n1 !== n2) {
+          throw new Error('节点 ' + nodeId + ' 出口后 guard NODE(' + n1 + ') != next NODE(' + n2 +
+            ')\nguard:\n' + res.output + '\nnext:\n' + nxt.output);
+        }
+      };
+      const writeSummary = (ids) => { for (const id of ids) writeFile(dir, '.specs/' + CHANGE_ID + '/' + id + '-SUMMARY.md', execSummaryFixture(id)); };
+      driveThroughDesign(dir);
+      writeTask({ P01: 'pending', P02: 'pending', S01: 'pending', P03: 'pending', P04: 'pending', S02: 'pending' });
+      // ① plan 出口 → subagent-execute（平行跳转——修复前 next 误拦）
+      drive('plan', 'flow-comet-plan', 'flow-kit/prompts/3-task.md', () => assertExit(runState(['record', 'plan', '{"summary":"plan complete"}'], dir, env), 0),
+        { expectedNode: 'subagent-execute' });
+      // ② 首波并行委托完成 → 趟间回串行 execute（平行回流——修复前 next 误拦）
+      drive('subagent-execute', 'flow-comet-subagent-execute', 'flow-kit/prompts/4-dev.md', () => {
+        writeTask({ P01: 'done', P02: 'done', S01: 'pending', P03: 'pending', P04: 'pending', S02: 'pending' });
+        writeSummary(['P01', 'P02']);
+        completeTasks(['P01', 'P02']);
+        assertExit(runState(['record', 'subagent-execute', '{"summary":"wave 1 delegated and collected"}'], dir, env), 0);
+      }, { expectedNode: 'execute' });
+      // ③ 串行衔接完成 → 第二波并行可委托
+      drive('execute', 'flow-comet-execute', 'flow-kit/prompts/4-dev.md', () => {
+        writeTask({ P01: 'done', P02: 'done', S01: 'done', P03: 'pending', P04: 'pending', S02: 'pending' });
+        writeSummary(['S01']);
+        completeTasks(['S01']);
+        assertExit(runState(['record', 'execute', '{"summary":"serial wave complete"}'], dir, env), 0);
+      }, { expectedNode: 'subagent-execute' });
+      // ④ 第二波并行委托完成 → 收尾串行回流 execute
+      drive('subagent-execute', 'flow-comet-subagent-execute', 'flow-kit/prompts/4-dev.md', () => {
+        writeTask({ P01: 'done', P02: 'done', S01: 'done', P03: 'done', P04: 'done', S02: 'pending' });
+        writeSummary(['P03', 'P04']);
+        completeTasks(['P03', 'P04']);
+        assertExit(runState(['record', 'subagent-execute', '{"summary":"wave 2 delegated and collected"}'], dir, env), 0);
+      }, { expectedNode: 'execute' });
+      // ⑤ 收尾串行完成 → review（后随 review→verify→archive 同 A15 形态）
+      drive('execute', 'flow-comet-execute', 'flow-kit/prompts/4-dev.md', () => {
+        writeTask({ P01: 'done', P02: 'done', S01: 'done', P03: 'done', P04: 'done', S02: 'done' });
+        writeSummary(['S02']);
+        completeTasks(['S02']);
+        assertExit(runState(['record', 'execute', '{"summary":"final serial wave complete"}'], dir, env), 0);
+      }, { expectedNode: 'review' });
+      drive('review', 'flow-comet-review', 'flow-kit/prompts/6-review.md', () => {
+        writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
+          '# REVIEW\n\n## 发现\n\n### Critical\n\n- 无\n\n### Major\n\n- 无\n\n### Minor\n\n- 无\n\n## 结论\n\nreview passed，无遗留问题。\n');
+        assertExit(runState(['record', 'review', '{"summary":"review complete"}'], dir, env), 0);
+      }, { expectedNode: 'verify' });
+      drive('verify', 'flow-comet-verify', 'flow-kit/prompts/7-integration.md', () => {
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```\necho ok\n```\n');
+        writeFile(dir, '.specs/' + CHANGE_ID + '/UAT.md', '# UAT\n\n## 验收\n\n- 通过\n');
+        assertExit(runState(['record', 'verify', '{"summary":"verify complete"}'], dir, env), 0);
+      }, { expectedNode: 'archive' });
+      // 归档出口：两侧均 NEXT: done
+      assertExit(runState(['skill-load', 'archive', 'flow-comet-archive', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
+      writeFile(dir, '.specs/archive/2026-08-28-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# 遗留问题\n\n无。\n');
+      assertExit(runState(['record', 'archive', '{"summary":"archive complete"}'], dir, env), 0);
+      assertExit(runGuard(['entry', 'archive'], dir), 0);
+      const resArch = runGuard(['exit', 'archive', '--apply'], dir);
+      assertExit(resArch, 0);
+      assertOut(resArch, 'NEXT: done');
+      const nxt = runNext();
+      assertExit(nxt, 0);
+      assertOut(nxt, 'NEXT: done');
     },
   },
 

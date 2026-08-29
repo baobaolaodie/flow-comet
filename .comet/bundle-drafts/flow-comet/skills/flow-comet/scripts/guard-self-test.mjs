@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · flow-comet 引擎自测套件（206 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退）、并行文件依赖检测（写写重叠强判前移 plan 出口 + read 读写弱判渐进 + 触发面排除 + 委托前保持锚 + 扩展名闭合））
+// C1 · flow-comet 引擎自测套件（208 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退）、并行文件依赖检测（写写重叠强判前移 plan 出口 + read 读写弱判渐进 + 触发面排除 + 委托前保持锚 + 扩展名闭合））
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -7,7 +7,7 @@
 // （COMET_RUN_ROOT=<临时目录>）→ 断言退出码与输出关键词。场景跑完 rmSync 清理。
 //
 // 运行: node scripts/guard-self-test.mjs
-// 全过 → exit 0，输出 ALL 206 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
+// 全过 → exit 0，输出 ALL 208 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
 //
 // 仅 node 内置模块（child_process/fs/os/path）；不依赖 flow-kit 模板目录存在
 // （fallback 场景用内置段名；部分场景复制模板文件进临时目录验证 C2 模板派生）。
@@ -5485,6 +5485,167 @@ const SCENARIOS = [
       assertOut(resPlan, 'ALL CHECKS PASSED');
       assertOut(resPlan, '伪并行检测');
       assertNotOut(resPlan, 'BLOCKED');
+    },
+  },
+
+  // 207: 多趟平行转换门禁共用路由后继——各转换点 exit --apply 后 next 可达且与 guard NEXT
+  // 一致（时序锚完整化：既有收敛场景曾把「plan→subagent-execute」「subagent-execute→execute」
+  // 两个平行转换点排除在收敛断言面外——next 侧正常推进豁免只认静态直接后继,平行转换被误拦
+  // 为「疑似未 exit」;本场景把全转换链纳入收敛断言,覆盖平行跳转与趟间回流）。
+  {
+    name: '207 多趟平行转换 next 可达且与 guard NEXT 一致（完整时序锚）',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const writeTask = (statusMap) => {
+        const blk = (id, parallel, deps) =>
+          '<task id="' + id + '"' + (parallel ? ' parallel="true"' : '') +
+          ' status="' + (statusMap[id] === 'done' ? 'done' : 'pending') + '">' +
+          '<action>实现 ' + id + '</action><write_files>src/' + id.toLowerCase() + '.mjs</write_files>' +
+          '<verify>node --check src/' + id.toLowerCase() + '.mjs</verify>' +
+          (deps ? '<depends_on>' + deps + '</depends_on>' : '') + '</task>\n';
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+          blk('P01', true, '') + blk('P02', true, '') +
+          blk('S01', false, 'P01,P02') +
+          blk('P03', true, 'S01') + blk('P04', true, 'S01') +
+          blk('S02', false, 'P03,P04'));
+      };
+      const readStateObj = () => JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const appendEvidence = (node, evidence) => {
+        const o = readStateObj();
+        const prev = o.evidence[node] || {};
+        const merged = { ...prev, ...evidence };
+        if (evidence.handoffResult && typeof evidence.handoffResult === 'object') {
+          merged.handoffResult = { ...(prev.handoffResult || {}), ...evidence.handoffResult };
+        }
+        o.evidence[node] = merged;
+        writeState(dir, o);
+      };
+      const writeSummary = (ids) => { for (const id of ids) writeFile(dir, '.specs/' + CHANGE_ID + '/' + id + '-SUMMARY.md', summaryContent()); };
+      const nodeOf = (out) => (out.match(/^NODE: ([a-z-]+)$/m) || [])[1] ?? null;
+      const assertConverge = (guardRes) => {
+        assertExit(guardRes, 0);
+        const gNode = nodeOf(guardRes.output);
+        const nextRes = runState(['next'], dir, env);
+        assertExit(nextRes, 0);
+        const sNode = nodeOf(nextRes.output);
+        if (gNode !== sNode) {
+          throw new Error('guard 出口 NODE(' + gNode + ') != next 输出 NODE(' + sNode +
+            ')——完整时序锚断言失败\nguard 输出:\n' + guardRes.output + '\nnext 输出:\n' + nextRes.output);
+        }
+      };
+      // 前序产物（open/design/plan 产物门控按文件推导——与既有收敛场景同形态；DESIGN/TASK 在
+      // 各自节点出口前写入，路由转换按真实时序推进）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## Why（为什么做）\n\nx\n\n## 范围（Scope）\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 用户故事（User Story）\n\nx\n\n## 验收准则（AC）\n\n- Given x When y Then z');
+      writeState(dir, baseState('open'));
+      // ① open 出口 → design（收敛）
+      appendEvidence('open', { summary: 'intake complete' });
+      assertExit(runGuard(['entry', 'open'], dir), 0);
+      assertConverge(runGuard(['exit', 'open', '--apply'], dir));
+      // ② design 出口 → plan（收敛；DESIGN 产物在本节点出口前写入——真实时序）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 0. 技术栈选型\n\nNode（纯脚本）\n\n## 决策清单\n\n- [ ] 决策 1');
+      appendEvidence('design', { summary: 'design complete' });
+      assertExit(runGuard(['entry', 'design'], dir), 0);
+      assertConverge(runGuard(['exit', 'design', '--apply'], dir));
+      // ③ plan 出口 → subagent-execute（平行转换点——修复前 next 误拦「疑似未 exit」）
+      writeTask({ P01: 'pending', P02: 'pending', S01: 'pending', P03: 'pending', P04: 'pending', S02: 'pending' });
+      appendEvidence('plan', { summary: 'plan complete' });
+      assertExit(runGuard(['entry', 'plan'], dir), 0);
+      assertConverge(runGuard(['exit', 'plan', '--apply'], dir));
+      // ④ 首波并行委托完成 → 趟间回串行 execute（平行回流点——修复前同样误拦）
+      writeTask({ P01: 'done', P02: 'done', S01: 'pending', P03: 'pending', P04: 'pending', S02: 'pending' });
+      writeSummary(['P01', 'P02']);
+      appendEvidence('subagent-execute', { summary: 'wave 1 delegated and collected', handoffResult: handoffFor(['P01', 'P02']) });
+      assertExit(runGuard(['entry', 'subagent-execute'], dir), 0);
+      assertConverge(runGuard(['exit', 'subagent-execute', '--apply'], dir));
+      // ⑤ 串行衔接完成 → 第二波并行可委托（execute → subagent-execute）
+      writeTask({ P01: 'done', P02: 'done', S01: 'done', P03: 'pending', P04: 'pending', S02: 'pending' });
+      writeSummary(['S01']);
+      appendEvidence('subagent-execute', { handoffResult: handoffFor(['S01']) });
+      appendEvidence('execute', { summary: 'serial wave complete' });
+      assertExit(runGuard(['entry', 'execute'], dir), 0);
+      assertConverge(runGuard(['exit', 'execute', '--apply'], dir));
+      // ⑥ 第二波并行委托完成 → 收尾串行回流 execute（平行回流点）
+      writeTask({ P01: 'done', P02: 'done', S01: 'done', P03: 'done', P04: 'done', S02: 'pending' });
+      writeSummary(['P03', 'P04']);
+      appendEvidence('subagent-execute', { summary: 'wave 2 delegated and collected', handoffResult: handoffFor(['P03', 'P04']) });
+      assertExit(runGuard(['entry', 'subagent-execute'], dir), 0);
+      assertConverge(runGuard(['exit', 'subagent-execute', '--apply'], dir));
+      // ⑦ 收尾串行完成 → review
+      writeTask({ P01: 'done', P02: 'done', S01: 'done', P03: 'done', P04: 'done', S02: 'done' });
+      writeSummary(['S02']);
+      appendEvidence('subagent-execute', { handoffResult: handoffFor(['S02']) });
+      appendEvidence('execute', { summary: 'final serial wave complete' });
+      assertExit(runGuard(['entry', 'execute'], dir), 0);
+      assertConverge(runGuard(['exit', 'execute', '--apply'], dir));
+      // ⑧ review → verify
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
+        '# REVIEW\n\n## 发现\n\n### Critical\n\n- 无\n\n### Major\n\n- 无\n\n### Minor\n\n- 无\n\n## 结论\n\nreview passed。\n');
+      appendEvidence('review', { summary: 'review complete' });
+      assertExit(runGuard(['entry', 'review'], dir), 0);
+      assertConverge(runGuard(['exit', 'review', '--apply'], dir));
+      // ⑨ verify → archive
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```\necho ok\n```\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/UAT.md', '# UAT\n\n## 验收\n\n- 通过\n');
+      appendEvidence('verify', { summary: 'verify complete' });
+      assertExit(runGuard(['entry', 'verify'], dir), 0);
+      assertConverge(runGuard(['exit', 'verify', '--apply'], dir));
+      // ⑩ archive 出口 → 完成（两侧均 NEXT: done）
+      writeFile(dir, '.specs/archive/2026-08-28-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# 遗留问题\n\n无。\n');
+      appendEvidence('archive', { summary: 'archive complete' });
+      assertExit(runGuard(['entry', 'archive'], dir), 0);
+      const resArch = runGuard(['exit', 'archive', '--apply'], dir);
+      assertExit(resArch, 0);
+      assertOut(resArch, 'NEXT: done');
+      const nextRes = runState(['next'], dir, env);
+      assertExit(nextRes, 0);
+      assertOut(nextRes, 'NEXT: done');
+    },
+  },
+
+  // 208: record 后未 exit 先 next 不提前校正到路由后继（反死结锚——平行转换点：进行中
+  // 节点保护此前只认静态直接后继,推导落子在 subagent-execute 时保护失效,currentNode 被
+  // 提前校正 → 随后 exit plan 的 currentNode 匹配必 BLOCK → 死结）。
+  {
+    name: '208 record 后未 exit 先 next 不漂移死结：后续 exit 仍可',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      // 前序产物（open/design 已完成,plan 已进入并 record——未 exit）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## Why（为什么做）\n\nx\n\n## 范围（Scope）\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 用户故事（User Story）\n\nx\n\n## 验收准则（AC）\n\n- Given x When y Then z');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 0. 技术栈选型\n\nNode（纯脚本）\n\n## 决策清单\n\n- [ ] 决策 1');
+      // 平行转换前夜：并行任务存在且可委托（无依赖待满足）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n' +
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>src/p2.mjs</write_files><verify>node --check src/p2.mjs</verify></task>\n' +
+        '<task id="S01" parallel="false" status="pending"><action>实现 S01</action><write_files>src/s1.mjs</write_files><verify>node --check src/s1.mjs</verify><depends_on>P01,P02</depends_on></task>\n');
+      const st = baseState('plan');
+      st.completedNodes = ['open', 'design'];
+      st.enteredNodes = ['open', 'design', 'plan'];
+      st.evidence = {
+        open: { summary: 'open complete' },
+        design: { summary: 'design complete' },
+        plan: { summary: 'plan complete' },
+      };
+      st.newChange = true;
+      writeState(dir, st);
+      // ① record 后未 exit 先 next：不把 currentNode 提前校正到 subagent-execute（路由后继）
+      const r1 = runState(['next'], dir, env);
+      assertExit(r1, 0);
+      assertOut(r1, 'NODE: plan');
+      const stAfterNext = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      if (stAfterNext.currentNode !== 'plan') {
+        throw new Error('record 后未 exit 先 next 不应提前校正 currentNode（应保持 plan），实际: ' + stAfterNext.currentNode);
+      }
+      // ② 后续 exit plan --apply 仍可（进行中节点保护 → 未漂移 → currentNode 匹配）
+      assertExit(runGuard(['entry', 'plan'], dir), 0);
+      const rExit = runGuard(['exit', 'plan', '--apply'], dir);
+      assertExit(rExit, 0);
+      assertOut(rExit, 'ALL CHECKS PASSED');
+      // ③ exit 推进后 next 路由到 subagent-execute（平行转换点——与 guard 出口一致）
+      const r2 = runState(['next'], dir, env);
+      assertExit(r2, 0);
+      assertOut(r2, 'NODE: subagent-execute');
     },
   },
 ];

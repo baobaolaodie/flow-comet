@@ -328,30 +328,42 @@ async function tFixRollbackExempt(changeName, protocol, currentNode, completedNo
 // 正常推进豁免判定——exit --apply 会把 currentNode 推进到下一节点（如 open exit 后
 // currentNode=design，该节点尚未开始故 evidence 无记录），随后按 SKILL 协议调 next（正常路径）
 // 不应被  误拦为"疑似未 exit"。判定三条件：① completedNodes 非空；② 最后一个已完成节点
-// 在路由列表（route(protocol)，disabled 过滤）中的直接后继 = currentNode（exit 推进的正常下一节点）；
-// ③ 最后一个已完成节点存在 evidence（exit --apply 必须带证据通过——证据存在证明该 exit 真实发生，
-// 排除伪造/漂移状态（如 review 无 evidence）。与  回退豁免独立判断（回退 = TASK.md
-// 有 pending 回退修复任务；本豁免 = 正常推进后继）。真乱序（currentNode 不是 completedNodes 的后继）仍
-// 维持  严格 BLOCK。
-function normalAdvanceExempt(state, protocol, completedNodes, currentNode) {
+// 存在 evidence（exit --apply 必须带证据通过——证据存在证明该 exit 真实发生，排除伪造/漂移状态，
+// 如 review 无 evidence）；③ currentNode 是下一个合法路由目标——**路由后继优先**（exit --apply
+// 把 currentNode 推进到共享路由判定 resolveNextNode 的结果，平行转换 plan→subagent-execute、
+// 趟间回流 subagent-execute→execute 等即由此产生；next 正常推进豁免识别路由后继，与 guard
+// NEXT 同源），静态直接后继兜底（串行推进原语义，旧态/序列流不回归）。与  回退豁免独立判断
+// （回退 = TASK.md 有 pending 回退修复任务；本豁免 = 正常推进后继）。真乱序（currentNode
+// 既非路由后继也非静态后继）仍维持  严格 BLOCK。
+async function normalAdvanceExempt(state, protocol, completedNodes, currentNode, changeName) {
   if (completedNodes.length === 0) return false;
   const lastNodeId = completedNodes[completedNodes.length - 1];
   const routeIds = route(protocol).map((node) => node.id);
   const lastIdx = routeIds.indexOf(lastNodeId);
-  if (lastIdx < 0 || lastIdx + 1 >= routeIds.length) return false;
-  if (routeIds[lastIdx + 1] !== currentNode) return false;
+  if (lastIdx < 0) return false;
   const lastEvidence = state.evidence && typeof state.evidence === 'object'
     ? state.evidence[lastNodeId]
     : null;
   // 审查补充（2026-08-08）：evidence 必须是对象且含非空 summary（空对象 {} 可绕过豁免，
   // 真实流程 exit 强制 summary——此处严格化防止手动修改 state 绕过）
-  return !!(
+  const hasExitEvidence = !!(
     lastEvidence &&
     typeof lastEvidence === 'object' &&
     !Array.isArray(lastEvidence) &&
     typeof lastEvidence.summary === 'string' &&
     lastEvidence.summary.trim() !== ''
   );
+  if (!hasExitEvidence) return false;
+  // 路由后继判定（与 guard 出口同源）：currentNode === resolveNextNode(completedNodes) 即
+  // 正常推进后的下一路由目标（含平行转换与趟间回流）；文件推导失败（异常态）不豁免。
+  try {
+    const routingNext = await determineNode(changeName, protocol, completedNodes);
+    if (routingNext === currentNode) return true;
+  } catch {
+    return false;
+  }
+  // 静态直接后继兜底（串行推进原语义，向后兼容旧态不回归）
+  return lastIdx + 1 < routeIds.length && routeIds[lastIdx + 1] === currentNode;
 }
 
 async function readState() {
@@ -855,7 +867,7 @@ async function main() {
         const rollbackExempt = await tFixRollbackExempt(changeName, protocol, state.currentNode, completedArr);
         // 正常推进豁免——exit --apply 推进 currentNode 到下一节点后按 SKILL 协议调 next
         // （正常路径）不拦截；与  回退豁免独立判断（详见 normalAdvanceExempt 注释）
-        const advanceExempt = normalAdvanceExempt(state, protocol, completedArr, state.currentNode);
+        const advanceExempt = await normalAdvanceExempt(state, protocol, completedArr, state.currentNode, changeName);
         if (!rollbackExempt && !advanceExempt) {
           console.error('BLOCKED: 疑似未 exit 节点 ' + state.currentNode + '，先 workflow-guard.mjs exit ' + state.currentNode + ' --apply');
           console.error('恢复: 确认当前节点实际已完成 → 用 exit <节点> --apply 正常推进；节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进）或 select（切换 change）；禁止手改 state 机器字段');
@@ -911,17 +923,29 @@ async function main() {
     );
     const routeIds = route(protocol).map((n) => n.id);
     const currentNodeIdx = state.currentNode ? routeIds.indexOf(state.currentNode) : -1;
-    // 推导为 currentNode 的直接后继 → 该节点产物已齐待 exit(内容级拦截重跑场景)→ 保护;
-    // 推导跳跃(跨节点,如"部分完成但产物全齐")或回退 → 产物权威校正(漂移,防过度修复)
+    // 推导为 currentNode 的**路由后继**（与 guard 出口同源：把 currentNode 视为已完成再加入
+    // completedNodes 求 resolveNextNode）→ 该节点产物已齐待 exit、路由自然推进到 detectedNode
+    // （平行转换 plan→subagent-execute、趟间回流 subagent-execute→execute 均属此形态）→ 保护。
+    // 反过度修复锚（同族：产物全齐但无推进史形态）：completedNodes 为空（无任何 exit 推进史，currentNode 仅是初始
+    // 陈旧节点）时不做路由后继保护——产物推导继续生效推进到最终节点（自定义协议产物全齐的
+    // 「部分完成但产物齐」形态仍路由到最后节点）。静态直接后继兜底（串行推进原语义）。
+    // 推导跳跃/跨节点或回退 → 产物权威校正(漂移,防过度修复)。
+    const routingSuccessorOfCurrent = state.currentNode
+      ? await determineNode(changeName, protocol, [...completedArr, state.currentNode])
+      : null;
+    const routingSuccessorProtects = !!(completedArr.length > 0
+      && routingSuccessorOfCurrent !== null
+      && routingSuccessorOfCurrent === detectedNode);
     const derivedIsDirectSuccessor = currentNodeIdx >= 0
       && currentNodeIdx + 1 < routeIds.length
       && routeIds[currentNodeIdx + 1] === detectedNode;
+    const derivedIsSuccessor = routingSuccessorProtects || derivedIsDirectSuccessor;
     const inProgress = !!(
       state.currentNode
       && !completedArr.includes(state.currentNode)
       && (currentNodeEntered
         || (currentNodeEvidence && typeof currentNodeEvidence === 'object' && !Array.isArray(currentNodeEvidence)))
-      && derivedIsDirectSuccessor
+      && derivedIsSuccessor
     );
     if (!inProgress && state.currentNode !== detectedNode) {
       state.currentNode = detectedNode;
