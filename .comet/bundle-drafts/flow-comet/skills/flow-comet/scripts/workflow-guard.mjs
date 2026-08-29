@@ -3350,25 +3350,38 @@ async function main() {
     if (isArchive) state.activeChange = null;
     let next = isArchive ? null : await nextNode(protocol, state);
     // 多趟路由诊断保留（展示层，不并入共享判定）：出口推进后下一候选非委托节点时，若任务集存在
-    // parallel 标记任务与任一 pending 任务但无 pending parallel 可委托块，输出路由诊断提示
-    // （收尾态静默：全部任务 done 时无 pending 不输出）。路由决策本身由 resolveNextNode
-    // 单一实现（不再维护第二份并行镜像）。
+    // parallel 标记任务与任一 pending 任务但无 pending parallel 可委托块，输出路由诊断提示。
+    // 静默边界（M4 批次扩展）：(a) 全部任务 done 时无 pending 不输出（收尾静默锚）；
+    // (b) 剩余 pending 全为串行且各 parallel 块均带 status（结构正常、P→S 收尾转换）→ 静默
+    // （「全 done 静默」扩展为「全串行剩余」也静默）；(c) 存在「parallel 缺 status」的
+    // 畸形/旧模板块且仍有 pending → 仍报（结构校验严格，缺 status 不视为 pending，
+    // 不因扩展误静音——反过静音锚）。路由决策本身由 resolveNextNode 单一实现（不维护第二份并行镜像）。
     if (next && next.id !== 'subagent-execute' && state.activeChange) {
       const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
       try {
         const taskContent = await fs.readFile(taskFile, 'utf8');
         const taskList = extractTaskBlocks(taskContent);
-        if (taskList.some((block) => {
+        const hasParallelTag = taskList.some((block) => {
           const a = taskOpeningAttrs(block);
           return a && a.parallel;
-        }) && taskList.some((block) => {
+        });
+        const hasPending = taskList.some((block) => {
           const a = taskOpeningAttrs(block);
           return a && a.status === 'pending';
-        }) && !taskList.some((block) => {
+        });
+        const hasParallelPending = taskList.some((block) => {
           const a = taskOpeningAttrs(block);
           return a && a.parallel && a.status === 'pending';
-        })) {
-          console.error('ROUTE WARN: 未找到 parallel="true" status="pending" 的任务块——检查 task 开标签的 parallel/status 属性（属性序无关；缺 status 不视为 pending）');
+        });
+        // 畸形/旧模板信号：parallel 标记但缺 status 属性（无法分类为 done/pending——缺 status
+        // 不视为 pending；这正是诊断要提示的检查点）。taskOpeningAttrs 缺属性时 status 返回 null，
+        // 故判 `status == null`（null 或 undefined 双容）。
+        const hasParallelMissingStatus = taskList.some((block) => {
+          const a = taskOpeningAttrs(block);
+          return a && a.parallel && (a.status === null || a.status === undefined);
+        });
+        if (hasPending && hasParallelTag && !hasParallelPending && hasParallelMissingStatus) {
+          console.error('ROUTE WARN: 未找到 parallel="true" status="pending" 的任务块——存在 parallel="true" 但缺 status 属性的任务块（缺 status 不视为 pending、无法参与委托判定），检查 task 开标签的 parallel/status 属性（属性序无关）');
         }
       } catch {}
     }

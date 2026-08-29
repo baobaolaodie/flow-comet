@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // system-test.mjs — flow-comet 系统测试集（与 guard-self-test 同构的载体，测试内容为系统级全链路）
 //
-// 定位：guard-self-test 是引擎脚本的单元/场景级回归（210，fixture 构造为主）；
+// 定位：guard-self-test 是引擎脚本的单元/场景级回归（212，fixture 构造为主）；
 // 本套件是**系统级**测试——每个测试项走真实命令序列（init → record → guard exit → handoff →
 // hook …），覆盖 flow-comet 全部机制面（A~L 十二类）：
 //   A. 状态机与路由（init/status/next/select/advance/record/execution-mode/config/
@@ -1208,6 +1208,64 @@ const TEST_ITEMS = [
       if (!stAfter.completedNodes.includes('execute')) {
         throw new Error('容错 exit execute --apply 后 completedNodes 应含 execute（欠账补齐）;实际: ' + stAfter.completedNodes.join(','));
       }
+    },
+  },
+
+  {
+    // M4（2026-08-29）路由诊断静默扩展系统锚（真实命令链路）：波 1 并行完成后剩余串行 pending
+    // （P→S 收尾转换）→ subagent-execute 出口无 ROUTE WARN 噪音；畸形 parallel（parallel=true
+    // 缺 status）+ 串行 pending → ROUTE WARN 仍报（结构校验严格保持）。场景级同语义见自测套件对应锚。
+    name: 'A19 路由诊断静默扩展：P→S 收尾无噪音 / 畸形块仍报（真实命令）',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const writeTask = (statusMap, extra) => {
+        const blk = (id, parallel, status, deps) =>
+          '<task id="' + id + '"' + (parallel ? ' parallel="true"' : ' parallel="false"') +
+          ' status="' + status + '">' +
+          '<name>任务-' + id + '</name><read_files>src/*</read_files>' +
+          '<action>实现 ' + id + '</action><write_files>src/' + id.toLowerCase() + '.mjs</write_files>' +
+          '<verify>node --check src/' + id.toLowerCase() + '.mjs</verify>' +
+          '<done>AC-' + id + '</done><depends_on>' + (deps || '') + '</depends_on></task>\n';
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+          (extra ? extra
+            : blk('P01', true, statusMap.P01 ?? 'pending', '') + blk('S01', false, statusMap.S01 ?? 'pending', 'P01')));
+      };
+      driveThroughDesign(dir);
+      writeTask({ P01: 'pending', S01: 'pending' });
+      assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md'], dir, env), 0);
+      assertExit(runState(['record', 'plan', '{"summary":"plan complete"}'], dir, env), 0);
+      assertExit(runGuard(['entry', 'plan'], dir), 0);
+      assertExit(runGuard(['exit', 'plan', '--apply'], dir), 0);
+      // 波 1：并行任务完成（SUMMARY+handoff）→ P→S 收尾（串行尾任务 pending）；
+      // 发起委托前先 skill-load 声明（handoff request 前置门——先声明再发起委托，与既有委托链同序）
+      writeTask({ P01: 'done', S01: 'pending' });
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', execSummaryFixture('P01'));
+      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-subagent-execute', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+      assertExit(runHandoff(['request', 'P01', 'P01 委托', '--write-files', 'src/p01.mjs'], dir), 0);
+      assertExit(runHandoff(['result', 'P01', fullContract('abcd1234abcd1234abcd1234abcd1234abcd1234', 'P01')], dir), 0);
+      assertExit(runState(['record', 'subagent-execute', '{"summary":"wave 1 delegated and collected"}'], dir, env), 0);
+      assertExit(runGuard(['entry', 'subagent-execute'], dir), 0);
+      const resWave = runGuard(['exit', 'subagent-execute', '--apply'], dir);
+      assertExit(resWave, 0);
+      assertNotOut(resWave, 'ROUTE WARN'); // 剩余 pending 全串行（P→S 收尾）→ M4 静默
+      // 畸形块仍报：parallel 缺 status（但 7 字段齐）+ 串行 pending → ROUTE WARN 保持
+      // （构造 plan 出口态，既有出口同款夹具形态；新 change 下畸形块亦须过结构门再达诊断）
+      const st = readStateFile(dir);
+      st.currentNode = 'plan';
+      st.completedNodes = ['open', 'design'];
+      writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+        '<task id="P03" parallel="true"><name>任务-P03（畸形并行，缺 status）</name><read_files>src/*</read_files>' +
+        '<action>实现 P03</action><write_files>src/p03.mjs</write_files><verify>node --check src/p03.mjs</verify>' +
+        '<done>AC-P03</done><depends_on></depends_on></task>\n' +
+        '<task id="S02" parallel="false" status="pending"><name>任务-S02（串行）</name><read_files>src/*</read_files>' +
+        '<action>实现 S02</action><write_files>src/s02.mjs</write_files><verify>node --check src/s02.mjs</verify>' +
+        '<done>AC-S02</done><depends_on></depends_on></task>\n');
+      assertExit(runState(['record', 'plan', '{"summary":"plan complete"}'], dir, env), 0);
+      assertExit(runGuard(['entry', 'plan'], dir), 0);
+      const resMal = runGuard(['exit', 'plan', '--apply'], dir);
+      assertExit(resMal, 0);
+      assertOut(resMal, 'ROUTE WARN'); // 畸形块仍报（结构校验严格保持）
     },
   },
 
