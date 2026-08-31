@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // system-test.mjs — flow-comet 系统测试集（与 guard-self-test 同构的载体，测试内容为系统级全链路）
 //
-// 定位：guard-self-test 是引擎脚本的单元/场景级回归（216，fixture 构造为主）；
+// 定位：guard-self-test 是引擎脚本的单元/场景级回归（219，fixture 构造为主）；
 // 本套件是**系统级**测试——每个测试项走真实命令序列（init → record → guard exit → handoff →
 // hook …），覆盖 flow-comet 全部机制面（A~L 十二类）：
 //   A. 状态机与路由（init/status/next/select/advance/record/execution-mode/config/
@@ -1049,11 +1049,13 @@ const TEST_ITEMS = [
       assertOut(blocked, 'BLOCKED');
       assertOut(blocked, 'bak_a.txt');
       assertOut(blocked, 'depends_on');
-      // 恢复：按指引补显式 depends_on（P02 依赖 P01 → 跨趟，非同波次并行对）→ 同出口通过并推进
+      // 恢复（CodeRabbit 采纳）：按指引补显式 depends_on，且 **P02 保持写原重叠路径 bak_a.txt**
+      // （不改路径避开重叠）——证明「补 depends_on 解决原重叠」而非「改路径避开重叠」；补依赖后
+      // P02 跨趟（dep 未满足，不在本趟可运行集合）→ 同波次并行对只剩 P01 → 重叠消失 → 同出口通过。
       planTask(
         C1 +
         '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n' +
-        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>bak_b.txt</write_files><verify>node --check bak_b.txt</verify><depends_on>P01</depends_on></task>\n');
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify><depends_on>P01</depends_on></task>\n');
       const ok = exitPlanApply();
       assertExit(ok, 0);
       assertOut(ok, 'ALL CHECKS PASSED');

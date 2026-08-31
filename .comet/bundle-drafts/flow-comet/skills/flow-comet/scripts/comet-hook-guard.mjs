@@ -114,8 +114,16 @@ function targetAllowed(targetRel, whitelist, activeChange) {
 // （fail-closed）。hook 拦工具不拦脚本——脚本通道天然不触发 PreToolUse，不受影响。
 // 与 M1 归档白名单收窄同型：保护机器文件不被越权手改（含 direct 模式下白名单 [''] 曾
 // 放行 state 写入的 fail-open 缺口——执行者自切 direct 越权写的物理入口）。
+// 大小写变体闭合（CodeRabbit 采纳）：win32/darwin 文件系统大小写不敏感，`.Comet/Flow-Comet-
+// State.json` 与机器状态文件指向同一实体——目标路径先 toLowerCase() 再与机器状态相对路径
+// 比较，变体同等 BLOCK（修复前精确等值比较被变体绕过 → fail-open）。其他平台
+// （大小写敏感文件系统）变体是不同文件，保持精确等值比较（不误拦合法路径）。
+const STATE_FILE_REL = '.comet/flow-comet-state.json';
+const CASE_INSENSITIVE_FS = process.platform === 'win32' || process.platform === 'darwin';
 function blockedStateFileTarget(targetRel) {
-  return targetRel === '.comet/flow-comet-state.json';
+  return CASE_INSENSITIVE_FS
+    ? targetRel.toLowerCase() === STATE_FILE_REL
+    : targetRel === STATE_FILE_REL;
 }
 
 function blockStateFileWrite(target) {

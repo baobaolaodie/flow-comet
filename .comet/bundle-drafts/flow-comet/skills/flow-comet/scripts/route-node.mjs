@@ -207,6 +207,11 @@ export async function resolveNextNode({ runRoot, changeName, protocol, completed
       }
       return 'execute';
     }
+    // 完成判定 fail-closed（CodeRabbit 采纳）：pending===0 不足为凭——缺/未知 status 的任务既非
+    // pending 也非 done，畸形块若被跳过，会在另一任务已产 SUMMARY 时把完成态误判为「任务全部
+    // done」→ 提前路由 review。attrsList.length===0（无任务块可解析）或 done !== attrsList.length
+    // （存在缺/未知 status 任务）→ 一律回 execute（不提前放行到后置节点）。
+    if (attrsList.length === 0 || done !== attrsList.length) return 'execute';
     // 任务全部 done——execute 完成还需至少一份 SUMMARY（execute 产物门控，内置 = <change-id>/*-SUMMARY.md glob）
     if (!(await nodeFlagsComplete(nodeFlags, 'execute', specsRoot, runRoot))) return 'execute';
     // 后置产物门控：按协议顺序检查 execute 之后的节点（内置 = review → verify → archive）。

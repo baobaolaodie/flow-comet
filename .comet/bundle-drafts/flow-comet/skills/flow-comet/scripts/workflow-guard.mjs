@@ -1861,10 +1861,30 @@ async function findParallelWriteConflicts(changeDir) {
     return dependsOnOf(b).every((d) => doneIds.has(d));
   });
   // 路径解析与既有自动解析同源：剥 HTML 注释 → 换行切分 → 分号二次切分 → trim → 滤空
+  // 路径归一化（CodeRabbit 采纳）：分隔符统一 '/'、解 '.' 段（`./` / `a/./b`）、`..` 逃出项目根
+  // 按越界处理（返回 null 不参与重叠比较）——`src/a.mjs` vs `src/./a.mjs` / `src\a.mjs` 变体不再
+  // 绕过写写强判与读写弱判；与委托入口共用同一函数（两侧同语义）。
+  const normalizeTaskPath = (raw) => {
+    const p = String(raw).trim();
+    if (p === '') return null;
+    const segments = p.replace(/\\/g, '/').split('/').filter((s) => s !== '' && s !== '.');
+    const out = [];
+    for (const seg of segments) {
+      if (seg === '..') {
+        if (out.length === 0) return null; // 逃出项目根 → 越界（不参与比较）
+        out.pop();
+      } else {
+        out.push(seg);
+      }
+    }
+    return out.join('/');
+  };
   const parsePaths = (matchText) => String(matchText ?? '')
     .replace(/<!--[\s\S]*?-->/g, '')
     .trim().split(/\s*\n\s*/).map((l) => l.trim()).filter(Boolean)
-    .flatMap((l) => l.split(';')).map((l) => l.trim()).filter(Boolean);
+    .flatMap((l) => l.split(';')).map((l) => l.trim()).filter(Boolean)
+    .map(normalizeTaskPath)
+    .filter((p) => p !== null && p !== '');
   const perTask = [];
   for (const b of blocks) {
     const a = taskOpeningAttrs(b);
