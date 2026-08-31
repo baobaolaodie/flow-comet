@@ -6,7 +6,7 @@
 ## 一、测试载体说明
 
 - **载体**：每个测试项 = 一个独立临时目录（`fs.mkdtemp`）+ 内置协议副本复制到 `<tmp>/reference/`（受保护路径要求协议文件位于 runRoot 内）+ **真实命令序列**（`init → record → guard entry/exit → handoff → hook` 的 `spawnSync` 调用）+ 断言退出码与输出关键词；测试项跑完 `rmSync` 清理。
-- **与引擎回归的关系**：`guard-self-test.mjs` 是引擎脚本的单元/场景级回归（fixture 构造为主，206 场景）；本系统测试集是**系统级**（69 项：A1~A16 / B1~B9 / C1~C3 / D1~D3 / E1~E2 / F1~F4 / G1~G3 / H1~H4 / I1~I4 / J1~J2 / K1~K16 / L1~L3）——每个测试项走真实命令链路，验证机制在真实调用序列下生效（行为锚定归场景回归，集成正确性归系统测试）。
+- **与引擎回归的关系**：`guard-self-test.mjs` 是引擎脚本的单元/场景级回归（fixture 构造为主，219 场景）；本系统测试集是**系统级**（73 项：A1~A20 / B1~B9 / C1~C3 / D1~D3 / E1~E2 / F1~F4 / G1~G3 / H1~H4 / I1~I4 / J1~J2 / K1~K16 / L1~L3）——每个测试项走真实命令链路，验证机制在真实调用序列下生效（行为锚定归场景回归，集成正确性归系统测试）。
 - **运行环境**：仅 node 内置模块（child_process/fs/os/path），无网络、无第三方依赖。
 - **输出纪律**：逐项 PASS/FAIL + 汇总（`SYSTEM TEST: N/M passed`）；全过 exit 0，有 FAIL exit 1。测试项命名为公开面——零过程代号。
 
@@ -22,7 +22,7 @@
 
 覆盖：init 全分支（状态写入/工件目录/同 id 重跑防护/分支模式）、status 节点推导与无活跃兜底、next 推进与状态漂移校正、next 未出口节点严格拦截、select 切换、advance 推进、record 基础证据、execution-mode 切换与记录、config 设置与非法值拒绝、多趟路由真实链路（并→串→交替与多波依赖）、plan 出口依赖环负例与恢复、多趟路由时序收敛、plan 出口文件依赖检出。
 
-测试项（16）：A1 init 状态写入与工件目录创建 / A2 init 分支模式与非法前缀拒绝 / A3 init 同 id 重跑防护 / A4 status 节点推导与无活跃兜底 / A5 next 推进与状态漂移校正（进行中节点保护由引擎回归覆盖）/ A6 next 未出口节点严格拦截 / A7 select 切换与缺失拒绝 / A8 advance 节点推进 / A9 record 基础证据记录 / A10 execution-mode 切换与记录 / A11 config 配置与非法值拒绝 / A12 验证失败计数按 change 隔离（切换 change 后计数独立）/ A13 多趟路由真实链路（并→串→交替与多波依赖，NODE 行多次交替直至全部 done）/ A14 plan 出口依赖环负例（BLOCK 含 depends_on 恢复指引，按指引调环后恢复通过）/ A15 多趟路由时序收敛（逐节点 exit 后 next NODE 与 guard 出口 NODE 一致）/ A16 plan 出口文件依赖检出（写写重叠 BLOCK 与恢复 + 读写弱判 WARN）。
+测试项（20）：A1 init 状态写入与工件目录创建 / A2 init 分支模式与非法前缀拒绝 / A3 init 同 id 重跑防护 / A4 status 节点推导与无活跃兜底 / A5 next 推进与状态漂移校正（进行中节点保护由引擎回归覆盖）/ A6 next 未出口节点严格拦截 / A7 select 切换与缺失拒绝 / A8 advance 节点推进 / A9 record 基础证据记录 / A10 execution-mode 切换与记录 / A11 config 配置与非法值拒绝 / A12 验证失败计数按 change 隔离（切换 change 后计数独立）/ A13 多趟路由真实链路（并→串→交替与多波依赖，NODE 行多次交替直至全部 done）/ A14 plan 出口依赖环负例（BLOCK 含 depends_on 恢复指引，按指引调环后恢复通过）/ A15 多趟路由时序收敛（逐节点 exit 后 next NODE 与 guard 出口 NODE 一致）/ A16 plan 出口文件依赖检出（写写重叠 BLOCK 与恢复 + 读写弱判 WARN）/ A17 多趟平行转换后 next 可达（各转换点 next NODE 与 guard 出口 NODE 一致）/ A18 漂移容忍 exit（execute 欠账经容错路径补齐）/ A19 路由诊断静默扩展（P→S 收尾无噪音 / 畸形块仍报）/ A20 directOverride 授权约束（自切 direct 无授权 BLOCK / 协调者授权通过）。
 
 ### B. 声明机制
 
