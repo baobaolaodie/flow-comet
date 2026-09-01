@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · flow-comet 引擎自测套件（200 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退））
+// C1 · flow-comet 引擎自测套件（219 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退）、并行文件依赖检测（写写重叠强判前移 plan 出口 + read 读写弱判渐进 + 触发面排除 + 委托前保持锚 + 扩展名闭合）、directOverride 授权约束（协调者授权留痕正例 / 执行者自切无授权 BLOCK / 越界改 state hook 拦截 / 恢复双路径）、hook state 大小写变体拦截（win32/darwin 闭合 / 其他平台放行）、路由完成判定 fail-closed（缺/未知 status 畸形块不提前放行）、并行文件依赖路径归一化（`.` 段变体重叠检出））
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -7,7 +7,7 @@
 // （COMET_RUN_ROOT=<临时目录>）→ 断言退出码与输出关键词。场景跑完 rmSync 清理。
 //
 // 运行: node scripts/guard-self-test.mjs
-// 全过 → exit 0，输出 ALL 200 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
+// 全过 → exit 0，输出 ALL 219 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
 //
 // 仅 node 内置模块（child_process/fs/os/path）；不依赖 flow-kit 模板目录存在
 // （fallback 场景用内置段名；部分场景复制模板文件进临时目录验证 C2 模板派生）。
@@ -392,6 +392,56 @@ function summaryContent(options = {}) {
     '- src/t1.mjs',
     '',
     method,
+    '',
+  ].join('\n');
+}
+
+// 新 change 模板保真 SUMMARY（M1 严格形态：# SUMMARY: 标题 + 首部 4 字段 + 段序保真——
+// directOverride 授权约束场景（213~216）用：新 change 出口强制模板保真，旧 summaryContent
+// 无 # SUMMARY: 标题会被 M1 BLOCKED，不能用于正例/恢复场景）
+function strictSummary(taskId) {
+  return [
+    '# SUMMARY: ' + taskId + ' - 实现 ' + taskId,
+    '',
+    '- **Change ID**: ' + CHANGE_ID,
+    '- **Task ID**: ' + taskId,
+    '- **完成时间**: 2026-08-29 10:00',
+    '- **AI 角色**: Dev',
+    '',
+    '---',
+    '',
+    '## 做了什么',
+    '',
+    '实现 ' + taskId + '（TDD：先写失败场景再实现）。',
+    '',
+    '## 改动文件',
+    '',
+    '| 文件 | 性质 | 说明 |',
+    '|---|---|---|',
+    '| src/' + taskId.toLowerCase() + '.mjs | 修改 | 实现任务 |',
+    '',
+    '## verify 输出',
+    '',
+    '```',
+    'node --check src/' + taskId.toLowerCase() + '.mjs',
+    '```',
+    '',
+    '## 6 维自查',
+    '',
+    '- 功能: 通过（brooks-review 已跑）',
+    '- 性能: 无影响',
+    '- 安全: 无影响',
+    '- 兼容: 通过',
+    '- 可观测: 通过',
+    '- 可维护: 通过',
+    '',
+    '## 越界检查',
+    '',
+    '仅修改 src/' + taskId.toLowerCase() + '.mjs，无越界。',
+    '',
+    '## 自检方法',
+    '',
+    'brooks-review',
     '',
   ].join('\n');
 }
@@ -2028,14 +2078,15 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n## Why\nx\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n## 用户故事\nx\n## 验收准则（AC）\nx\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN-lite.md', '# DESIGN-lite\n## 决策清单\n- d1: x\n');
-      // ① 可解析 pending 在场：并行任务已 done、串行任务 pending → 无可委托并行块 → WARN
+      // ① 可解析 pending 在场且剩余全串行（并行已 done、串行 pending、无缺 status 畸形块）
+      // → M4 静默（P→S 收尾转换无噪音——① 语义随扩展翻转）
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
         '<task id="P01" parallel="true" status="done">\n  <action>do</action>\n  <verify>echo ok</verify>\n</task>\n' +
         '<task id="T01" parallel="false" status="pending">\n  <action>do serial</action>\n  <verify>echo ok</verify>\n</task>\n');
       const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       const res = runGuard(['exit', 'plan', '--apply'], dir, env);
       assertExit(res, 0);
-      assertOut(res, 'ROUTE WARN');
+      assertNotOut(res, 'ROUTE WARN');
       // ② 旧模板无 status 属性（无可解析 pending）→ 前置条件跳过诊断 → 静默
       //（① 的 --apply 已把 currentNode 推进到 execute——先复位 state 再独立跑第二半）
       writeState(dir, st);
@@ -5158,12 +5209,143 @@ const SCENARIOS = [
     },
   },
 
-  // 198: purge 时目标无 flow-kit → 不得获取也不得创建（清理域语义：purge 只清理、不产生
+  // 时序收敛回归锚（AC-5 事故回放）：多趟拓扑（并行开路 → 串行衔接 → 并行收尾 → 串行收尾），
+  // 逐节点真实走 guard exit --apply 后运行 workflow-state next——断言两者路由结果逐节点一致。
+  // 修复前 guard 出口镜像缺「串行 pending → execute」回流（并行收尾完成后直接落到 review，
+  // 与权威 next 的 execute 回流偏差）——本场景对未修复引擎为 RED（预期中间态）。
+  {
+    name: '198 多趟出口路由时序收敛：逐节点 exit --apply 后 next 输出 NODE 与 guard 出口 NODE 一致',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const writeTask = (statusMap) => {
+        const blk = (id, parallel, deps) =>
+          '<task id="' + id + '"' + (parallel ? ' parallel="true"' : '') +
+          ' status="' + (statusMap[id] === 'done' ? 'done' : 'pending') + '">' +
+          '<action>实现 ' + id + '</action><write_files>src/' + id.toLowerCase() + '.mjs</write_files>' +
+          '<verify>node --check src/' + id.toLowerCase() + '.mjs</verify>' +
+          (deps ? '<depends_on>' + deps + '</depends_on>' : '') + '</task>\n';
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+          blk('P01', true, '') + blk('P02', true, '') +
+          blk('S01', false, 'P01,P02') +
+          blk('P03', true, 'S01') + blk('P04', true, 'S01') +
+          blk('S02', false, 'P03,P04'));
+      };
+      const readStateObj = () => JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      // appendEvidence 顶层浅合并 + handoffResult 深层合并：多趟委托下 subagent-execute 的
+      // handoffResult 是跨趟累积的委托结果库（越俎代庖检测按全部 done 任务查记录）——整体
+      // 覆盖会丢失已委托任务记录（与真实链路 handoff 逐趟追加不一致）。其它节点 evidence
+      // 为 summary 对象，浅合并语义与整体赋值等价。
+      const appendEvidence = (node, evidence) => {
+        const o = readStateObj();
+        const prev = o.evidence[node] || {};
+        const merged = { ...prev, ...evidence };
+        if (evidence.handoffResult && typeof evidence.handoffResult === 'object') {
+          merged.handoffResult = { ...(prev.handoffResult || {}), ...evidence.handoffResult };
+        }
+        o.evidence[node] = merged;
+        writeState(dir, o);
+      };
+      const writeSummary = (ids) => { for (const id of ids) writeFile(dir, '.specs/' + CHANGE_ID + '/' + id + '-SUMMARY.md', summaryContent()); };
+      const nodeOf = (out) => (out.match(/^NODE: ([a-z-]+)$/m) || [])[1] ?? null;
+      const assertConverge = (guardRes) => {
+        assertExit(guardRes, 0);
+        const gNode = nodeOf(guardRes.output);
+        const nextRes = runState(['next'], dir, env);
+        assertExit(nextRes, 0);
+        const sNode = nodeOf(nextRes.output);
+        if (gNode !== sNode) {
+          throw new Error('guard 出口 NODE(' + gNode + ') != next 输出 NODE(' + sNode +
+            ')——时序收敛断言失败\nguard 输出:\n' + guardRes.output + '\nnext 输出:\n' + nextRes.output);
+        }
+      };
+      // 预置 open 产物（CHANGE + REQUIREMENT）；design/plan 产物在各自出口前写入（真实链路时序）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## Why（为什么做）\n\nx\n\n## 范围（Scope）\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 用户故事（User Story）\n\nx\n\n## 验收准则（AC）\n\n- Given x When y Then z');
+      writeState(dir, baseState('open'));
+      assertExit(runGuard(['entry', 'open'], dir), 0);
+      // ① open 出口 → design
+      appendEvidence('open', { summary: 'intake complete' });
+      assertConverge(runGuard(['exit', 'open', '--apply'], dir));
+      // ② design 出口 → plan
+      assertExit(runGuard(['entry', 'design'], dir), 0);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 0. 技术栈选型\n\nNode（纯脚本）\n\n## 决策清单\n\n- [ ] 决策 1');
+      appendEvidence('design', { summary: 'design complete' });
+      assertConverge(runGuard(['exit', 'design', '--apply'], dir));
+      const assertExitRouted = (res, nodeId) => { assertExit(res, 0); if (nodeId) assertOut(res, 'NODE: ' + nodeId); };
+      // ③ plan 出口（首波并行可委托）→ subagent-execute（guard 路由跳转；next 侧仅对「直接后继
+      // 推进」态可确认输出，委托跳转态不在收敛断言面——收敛锚设在 next 可确认的直接后继/回流态）
+      assertExit(runGuard(['entry', 'plan'], dir), 0);
+      writeTask({ P01: 'pending', P02: 'pending', S01: 'pending', P03: 'pending', P04: 'pending', S02: 'pending' });
+      appendEvidence('plan', { summary: 'plan complete' });
+      assertExitRouted(runGuard(['exit', 'plan', '--apply'], dir), 'subagent-execute');
+      // ④ 第一波并行委托完成 → 趟间回串行（guard 路由 execute）
+      assertExit(runGuard(['entry', 'subagent-execute'], dir), 0);
+      writeTask({ P01: 'done', P02: 'done', S01: 'pending', P03: 'pending', P04: 'pending', S02: 'pending' });
+      writeSummary(['P01', 'P02']);
+      // handoff evidence 构造与既有委托出口场景一致合法形态：非空 summary 满足
+      // flowkit.handoff.v1 的 schema evidence 前置校验（missingRequiredSchemaEvidence 中
+      // summary 视同满足），handoffResult 满足越俎代庖检测的委托结果记录——guard exit 才
+      // 能通过证据前置校验并真正断言路由收敛（缺 summary 时前置 BLOCK，属场景构造缺陷）。
+      appendEvidence('subagent-execute', { summary: 'wave1 delegated and collected', handoffResult: handoffFor(['P01', 'P02']) });
+      assertExitRouted(runGuard(['exit', 'subagent-execute', '--apply'], dir), 'execute');
+      // ⑤ 串行衔接完成 → 第二波并行可委托（guard 路由 subagent-execute）
+      assertExit(runGuard(['entry', 'execute'], dir), 0);
+      writeTask({ P01: 'done', P02: 'done', S01: 'done', P03: 'pending', P04: 'pending', S02: 'pending' });
+      writeSummary(['S01']);
+      // 串行衔接任务由 execute 完成，但 subagent 统一委托语义下 execute 出口的越俎代庖检测
+      // 要求**所有** done 任务在 subagent-execute 的 handoffResult 有委托记录（真实链路
+      // completeTasks 同形态）——追加该任务记录（handoffResult 深层合并保留既有记录）。
+      appendEvidence('subagent-execute', { handoffResult: handoffFor(['S01']) });
+      appendEvidence('execute', { summary: 'serial wave complete' });
+      assertExitRouted(runGuard(['exit', 'execute', '--apply'], dir), 'subagent-execute');
+      // ⑥ 第二波并行委托完成 → 收尾串行 pending 应回流 execute（修复核心断言）
+      assertExit(runGuard(['entry', 'subagent-execute'], dir), 0);
+      writeTask({ P01: 'done', P02: 'done', S01: 'done', P03: 'done', P04: 'done', S02: 'pending' });
+      writeSummary(['P03', 'P04']);
+      // 与 ④ 同形态（既有合法委托出口形态）：非空 summary + handoffResult，guard exit 通过
+      // 证据前置校验后才能真正收敛断言（AC-5 时序收敛）。
+      appendEvidence('subagent-execute', { summary: 'wave2 delegated and collected', handoffResult: handoffFor(['P03', 'P04']) });
+      assertConverge(runGuard(['exit', 'subagent-execute', '--apply'], dir));
+      // ⑦ 收尾串行完成 → review
+      assertExit(runGuard(['entry', 'execute'], dir), 0);
+      writeTask({ P01: 'done', P02: 'done', S01: 'done', P03: 'done', P04: 'done', S02: 'done' });
+      writeSummary(['S02']);
+      // 同 ⑤：收尾串行任务委托记录追加（深层合并后全部 done 任务均在 handoffResult，
+      // execute 出口越俎代庖检测通过）。
+      appendEvidence('subagent-execute', { handoffResult: handoffFor(['S02']) });
+      appendEvidence('execute', { summary: 'final serial complete' });
+      assertConverge(runGuard(['exit', 'execute', '--apply'], dir));
+      // ⑧ review → verify
+      assertExit(runGuard(['entry', 'review'], dir), 0);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
+        '# REVIEW\n\n## 发现\n\n### Critical\n\n- 无\n\n### Major\n\n- 无\n\n### Minor\n\n- 无\n\n## 结论\n\nreview passed，无遗留问题。\n');
+      appendEvidence('review', { summary: 'review complete' });
+      assertConverge(runGuard(['exit', 'review', '--apply'], dir));
+      // ⑨ verify → archive
+      assertExit(runGuard(['entry', 'verify'], dir), 0);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```\necho ok\n```\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/UAT.md', '# UAT\n\n## 验收\n\n- 通过\n');
+      appendEvidence('verify', { summary: 'verify complete' });
+      assertConverge(runGuard(['exit', 'verify', '--apply'], dir));
+      // ⑩ archive 出口 → 全部完成（两侧均 NEXT: done）
+      assertExit(runGuard(['entry', 'archive'], dir), 0);
+      writeFile(dir, '.specs/archive/2026-08-28-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# 遗留问题\n\n无。\n');
+      appendEvidence('archive', { summary: 'archive complete' });
+      const res = runGuard(['exit', 'archive', '--apply'], dir);
+      assertExit(res, 0);
+      assertOut(res, 'NEXT: done');
+      const nextRes = runState(['next'], dir, env);
+      assertExit(nextRes, 0);
+      assertOut(nextRes, 'NEXT: done');
+    },
+  },
+
+  // 199: purge 时目标无 flow-kit → 不得获取也不得创建（清理域语义：purge 只清理、不产生
   // 新产物）。注入不可达 http.proxy（与「网络失败 WARN 继续」场景同技法）——若 purge 路径仍调 ensureFlowKit，
   // 会触发 clone 失败 WARN「flow-kit 自动获取失败」→ 断言“该 WARN 不出现 + 已获取不出现 +
   // 无 flow-kit 目录”即对当前实现 RED。
   {
-    name: '198 prepare-env purge 不触碰 flow-kit：purge 且无 flow-kit 不获取不创建',
+    name: '199 prepare-env purge 不触碰 flow-kit：purge 且无 flow-kit 不获取不创建',
     run: (dir) => {
       if (!fs.existsSync(PREPARE_ENV)) return;
       const proj = path.join(dir, 'proj');
@@ -5181,11 +5363,11 @@ const SCENARIOS = [
     },
   },
 
-  // 199: 版本戳形态校验——已装 loader 标记行非语义化版本（如 beta，无数字主形）→ 提取失败
+  // 200: 版本戳形态校验——已装 loader 标记行非语义化版本（如 beta，无数字主形）→ 提取失败
   // 警告 + 跳过版本比对 + 照常覆盖；不得作为合法版本进入 compare（畸形值 parseInt 得 NaN，
   // 会产生升/降级方向的错误结论）。
   {
-    name: '199 prepare-env 版本戳形态：畸形标记（beta）走提取失败警告而非版本比对',
+    name: '200 prepare-env 版本戳形态：畸形标记（beta）走提取失败警告而非版本比对',
     run: (dir) => {
       if (!fs.existsSync(PREPARE_ENV)) return;
       const proj = path.join(dir, 'proj');
@@ -5204,10 +5386,10 @@ const SCENARIOS = [
     },
   },
 
-  // 200: bridge-check 目标一致性——托管块 file:// 指向存在但非期望的 loader 文件
+  // 201: bridge-check 目标一致性——托管块 file:// 指向存在但非期望的 loader 文件
   // （可达性成立、目标错误）：不可报健康（必须 FAIL——解码目标与期望 loaderPath 不符，exit 1）。
   {
-    name: '200 bridge-check 可达但目标错误：file:// 指向非期望 loader FAIL exit 1',
+    name: '201 bridge-check 可达但目标错误：file:// 指向非期望 loader FAIL exit 1',
     run: (dir) => {
       const wrong = path.join(dir, 'dshhome', 'plugins', 'some-other-loader.mjs');
       fs.mkdirSync(path.dirname(wrong), { recursive: true });
@@ -5222,6 +5404,643 @@ const SCENARIOS = [
       assertExit(res, 1);
       assertOut(res, '[FAIL]');
       assertNotOut(res, '健康（全部检查通过）');
+    },
+  },
+
+  // 202: 并行文件依赖检测前移（write∩write 强判）——两个同波次 parallel pending 任务
+  // write_files 重叠（链式重命名的 .txt 事故面：任务 A 写 bak_a.txt、任务 B 也写 bak_a.txt，
+  // 无 depends_on）：新 change 的 plan 出口应 BLOCKED（含任务 id 对、重叠路径、恢复指引
+  // 「补显式 depends_on 或拆串行」）。修复前 plan 出口无此检测 = 预期 RED（重叠静默放行）。
+  {
+    name: '202 plan exit BLOCKED：新 change 写写重叠（链式重命名 .txt 事故面）',
+    run: (dir) => {
+      const st = baseState('plan');
+      st.evidence.plan = { summary: 'plan done' };
+      st.newChange = true;
+      writeState(dir, st);
+      const tasks =
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n' +
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n';
+      const res = runPlanExit(dir, tasks);
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, 'P01×P02');
+      assertOut(res, 'bak_a.txt');
+      assertOut(res, 'depends_on');
+    },
+  },
+
+  // 203: 写写强判分级（渐进）——同拓扑旧 change（无 newChange 标记）：plan 出口应 WARN 渐进
+  // 不 BLOCK（与依赖环分级同先例）。修复前 plan 出口无检测 = 预期 RED（无 WARN 亦无 BLOCK）。
+  {
+    name: '203 plan exit 兼容：旧 change 写写重叠不 BLOCK（渐进 WARN）',
+    run: (dir) => {
+      const st = baseState('plan');
+      st.evidence.plan = { summary: 'plan done' };
+      writeState(dir, st);
+      const tasks =
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n' +
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n';
+      const res = runPlanExit(dir, tasks);
+      assertExit(res, 0);
+      assertNotOut(res, 'BLOCKED');
+      assertOut(res, 'WARN');
+      assertOut(res, 'P01×P02');
+      assertOut(res, 'bak_a.txt');
+    },
+  },
+
+  // 204: 扩展名白名单闭合——txt/无扩展名写路径重叠同等检出（不再被标准扩展名白名单漏检）。
+  // 拓扑：P01 与 P02 重叠于 notes.txt，P03 与 P04 重叠于无扩展名路径 RELEASE。
+  {
+    name: '204 plan exit BLOCKED：txt/无扩展名写路径重叠检出（扩展名闭合）',
+    run: (dir) => {
+      const st = baseState('plan');
+      st.evidence.plan = { summary: 'plan done' };
+      st.newChange = true;
+      writeState(dir, st);
+      const tasks =
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>notes.txt</write_files><verify>node --check notes.txt</verify></task>\n' +
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>notes.txt</write_files><verify>node --check notes.txt</verify></task>\n' +
+        '<task id="P03" parallel="true" status="pending"><action>实现 P03</action><write_files>RELEASE</write_files><verify>node --check RELEASE</verify></task>\n' +
+        '<task id="P04" parallel="true" status="pending"><action>实现 P04</action><write_files>RELEASE</write_files><verify>node --check RELEASE</verify></task>\n';
+      const res = runPlanExit(dir, tasks);
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, 'notes.txt');
+      assertOut(res, 'RELEASE');
+    },
+  },
+
+  // 205: read∩write 弱判（渐进提示，触发面=仅无显式 depends_on 关联的并行对）——
+  // ① 无关联对：一方 read_files 命中对方 write_files → WARN 提示（新 change 亦不 BLOCK）；
+  // ② 有显式关联（依赖已声明）→ 探测跳过 → 零新增告警（既有合法拓扑断言不变）。
+  // 修复前无此弱判 = 预期 RED（无 read∩write WARN）。
+  {
+    name: '205 plan exit 弱判：read∩write 无显式关联对 WARN 不 BLOCK；有显式关联零告警',
+    run: (dir) => {
+      const st = baseState('plan');
+      st.evidence.plan = { summary: 'plan done' };
+      st.newChange = true;
+      writeState(dir, st);
+      // ① 无显式关联对：P01 读 shared-context.md，P02 写同路径 → WARN 提示级（不 BLOCK）
+      const weak =
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><read_files>shared-context.md</read_files><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n' +
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>shared-context.md</write_files><verify>node --check shared-context.md</verify></task>\n';
+      const res = runPlanExit(dir, weak);
+      assertExit(res, 0);
+      assertNotOut(res, 'BLOCKED');
+      assertOut(res, 'read∩write');
+      assertOut(res, 'P01×P02');
+      assertOut(res, 'shared-context.md');
+      // ② 有显式关联（P02 depends_on P01 → 跨趟非同波次并行对）→ read∩write 探测跳过 → 零告警
+      const associated =
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><read_files>shared-context.md</read_files><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n' +
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>shared-context.md</write_files><verify>node --check shared-context.md</verify><depends_on>P01</depends_on></task>\n';
+      const res2 = runPlanExit(dir, associated);
+      assertExit(res2, 0);
+      assertNotOut(res2, 'read∩write');
+      assertNotOut(res2, 'BLOCKED');
+    },
+  },
+
+  // 206: 委托前行为保持锚 + 伪并行并存不干扰——① subagent-execute 委托前写写重叠仍 BLOCKED
+  // （第二道拦截不变）；② 修复写写重叠后 plan 出口放行，且仅写测试产物的并行任务仍触发伪并行
+  // WARN（渐进提示不阻断）——新检测与既有检测并存不干扰。
+  {
+    name: '206 委托前写写拦截保持锚 + 伪并行并存不干扰',
+    run: (dir) => {
+      // ① 委托前锚：同波次并行 pending 写写重叠 → entry subagent-execute 仍 BLOCKED
+      const st = baseState('subagent-execute');
+      st.newChange = true;
+      writeState(dir, st);
+      const conflictTasksForDelegation =
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n' +
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n';
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n## 任务清单\n\n' + conflictTasksForDelegation);
+      const resDeleg = runGuard(['entry', 'subagent-execute'], dir);
+      assertExit(resDeleg, 1);
+      assertOut(resDeleg, 'BLOCKED');
+      assertOut(resDeleg, 'write_files 冲突');
+      // ② 伪并行并存：修复重叠（各写各的）后 plan 出口放行，且仅写测试产物的并行任务
+      // 仍触发伪并行 WARN——新检测与既有检测并存不干扰
+      const st2 = baseState('plan');
+      st2.evidence.plan = { summary: 'plan done' };
+      st2.newChange = true;
+      writeState(dir, st2);
+      const coexisting =
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n' +
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>tests/test_p2.mjs</write_files><verify>node --check tests/test_p2.mjs</verify></task>\n';
+      const resPlan = runPlanExit(dir, coexisting);
+      assertExit(resPlan, 0);
+      assertOut(resPlan, 'ALL CHECKS PASSED');
+      assertOut(resPlan, '伪并行检测');
+      assertNotOut(resPlan, 'BLOCKED');
+    },
+  },
+
+  // 207: 多趟平行转换门禁共用路由后继——各转换点 exit --apply 后 next 可达且与 guard NEXT
+  // 一致（时序锚完整化：既有收敛场景曾把「plan→subagent-execute」「subagent-execute→execute」
+  // 两个平行转换点排除在收敛断言面外——next 侧正常推进豁免只认静态直接后继,平行转换被误拦
+  // 为「疑似未 exit」;本场景把全转换链纳入收敛断言,覆盖平行跳转与趟间回流）。
+  {
+    name: '207 多趟平行转换 next 可达且与 guard NEXT 一致（完整时序锚）',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const writeTask = (statusMap) => {
+        const blk = (id, parallel, deps) =>
+          '<task id="' + id + '"' + (parallel ? ' parallel="true"' : '') +
+          ' status="' + (statusMap[id] === 'done' ? 'done' : 'pending') + '">' +
+          '<action>实现 ' + id + '</action><write_files>src/' + id.toLowerCase() + '.mjs</write_files>' +
+          '<verify>node --check src/' + id.toLowerCase() + '.mjs</verify>' +
+          (deps ? '<depends_on>' + deps + '</depends_on>' : '') + '</task>\n';
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+          blk('P01', true, '') + blk('P02', true, '') +
+          blk('S01', false, 'P01,P02') +
+          blk('P03', true, 'S01') + blk('P04', true, 'S01') +
+          blk('S02', false, 'P03,P04'));
+      };
+      const readStateObj = () => JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const appendEvidence = (node, evidence) => {
+        const o = readStateObj();
+        const prev = o.evidence[node] || {};
+        const merged = { ...prev, ...evidence };
+        if (evidence.handoffResult && typeof evidence.handoffResult === 'object') {
+          merged.handoffResult = { ...(prev.handoffResult || {}), ...evidence.handoffResult };
+        }
+        o.evidence[node] = merged;
+        writeState(dir, o);
+      };
+      const writeSummary = (ids) => { for (const id of ids) writeFile(dir, '.specs/' + CHANGE_ID + '/' + id + '-SUMMARY.md', summaryContent()); };
+      const nodeOf = (out) => (out.match(/^NODE: ([a-z-]+)$/m) || [])[1] ?? null;
+      const assertConverge = (guardRes) => {
+        assertExit(guardRes, 0);
+        const gNode = nodeOf(guardRes.output);
+        const nextRes = runState(['next'], dir, env);
+        assertExit(nextRes, 0);
+        const sNode = nodeOf(nextRes.output);
+        if (gNode !== sNode) {
+          throw new Error('guard 出口 NODE(' + gNode + ') != next 输出 NODE(' + sNode +
+            ')——完整时序锚断言失败\nguard 输出:\n' + guardRes.output + '\nnext 输出:\n' + nextRes.output);
+        }
+      };
+      // 前序产物（open/design/plan 产物门控按文件推导——与既有收敛场景同形态；DESIGN/TASK 在
+      // 各自节点出口前写入，路由转换按真实时序推进）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## Why（为什么做）\n\nx\n\n## 范围（Scope）\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 用户故事（User Story）\n\nx\n\n## 验收准则（AC）\n\n- Given x When y Then z');
+      writeState(dir, baseState('open'));
+      // ① open 出口 → design（收敛）
+      appendEvidence('open', { summary: 'intake complete' });
+      assertExit(runGuard(['entry', 'open'], dir), 0);
+      assertConverge(runGuard(['exit', 'open', '--apply'], dir));
+      // ② design 出口 → plan（收敛；DESIGN 产物在本节点出口前写入——真实时序）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 0. 技术栈选型\n\nNode（纯脚本）\n\n## 决策清单\n\n- [ ] 决策 1');
+      appendEvidence('design', { summary: 'design complete' });
+      assertExit(runGuard(['entry', 'design'], dir), 0);
+      assertConverge(runGuard(['exit', 'design', '--apply'], dir));
+      // ③ plan 出口 → subagent-execute（平行转换点——修复前 next 误拦「疑似未 exit」）
+      writeTask({ P01: 'pending', P02: 'pending', S01: 'pending', P03: 'pending', P04: 'pending', S02: 'pending' });
+      appendEvidence('plan', { summary: 'plan complete' });
+      assertExit(runGuard(['entry', 'plan'], dir), 0);
+      assertConverge(runGuard(['exit', 'plan', '--apply'], dir));
+      // ④ 首波并行委托完成 → 趟间回串行 execute（平行回流点——修复前同样误拦）
+      writeTask({ P01: 'done', P02: 'done', S01: 'pending', P03: 'pending', P04: 'pending', S02: 'pending' });
+      writeSummary(['P01', 'P02']);
+      appendEvidence('subagent-execute', { summary: 'wave 1 delegated and collected', handoffResult: handoffFor(['P01', 'P02']) });
+      assertExit(runGuard(['entry', 'subagent-execute'], dir), 0);
+      assertConverge(runGuard(['exit', 'subagent-execute', '--apply'], dir));
+      // ⑤ 串行衔接完成 → 第二波并行可委托（execute → subagent-execute）
+      writeTask({ P01: 'done', P02: 'done', S01: 'done', P03: 'pending', P04: 'pending', S02: 'pending' });
+      writeSummary(['S01']);
+      appendEvidence('subagent-execute', { handoffResult: handoffFor(['S01']) });
+      appendEvidence('execute', { summary: 'serial wave complete' });
+      assertExit(runGuard(['entry', 'execute'], dir), 0);
+      assertConverge(runGuard(['exit', 'execute', '--apply'], dir));
+      // ⑥ 第二波并行委托完成 → 收尾串行回流 execute（平行回流点）
+      writeTask({ P01: 'done', P02: 'done', S01: 'done', P03: 'done', P04: 'done', S02: 'pending' });
+      writeSummary(['P03', 'P04']);
+      appendEvidence('subagent-execute', { summary: 'wave 2 delegated and collected', handoffResult: handoffFor(['P03', 'P04']) });
+      assertExit(runGuard(['entry', 'subagent-execute'], dir), 0);
+      assertConverge(runGuard(['exit', 'subagent-execute', '--apply'], dir));
+      // ⑦ 收尾串行完成 → review
+      writeTask({ P01: 'done', P02: 'done', S01: 'done', P03: 'done', P04: 'done', S02: 'done' });
+      writeSummary(['S02']);
+      appendEvidence('subagent-execute', { handoffResult: handoffFor(['S02']) });
+      appendEvidence('execute', { summary: 'final serial wave complete' });
+      assertExit(runGuard(['entry', 'execute'], dir), 0);
+      assertConverge(runGuard(['exit', 'execute', '--apply'], dir));
+      // ⑧ review → verify
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
+        '# REVIEW\n\n## 发现\n\n### Critical\n\n- 无\n\n### Major\n\n- 无\n\n### Minor\n\n- 无\n\n## 结论\n\nreview passed。\n');
+      appendEvidence('review', { summary: 'review complete' });
+      assertExit(runGuard(['entry', 'review'], dir), 0);
+      assertConverge(runGuard(['exit', 'review', '--apply'], dir));
+      // ⑨ verify → archive
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```\necho ok\n```\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/UAT.md', '# UAT\n\n## 验收\n\n- 通过\n');
+      appendEvidence('verify', { summary: 'verify complete' });
+      assertExit(runGuard(['entry', 'verify'], dir), 0);
+      assertConverge(runGuard(['exit', 'verify', '--apply'], dir));
+      // ⑩ archive 出口 → 完成（两侧均 NEXT: done）
+      writeFile(dir, '.specs/archive/2026-08-28-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# 遗留问题\n\n无。\n');
+      appendEvidence('archive', { summary: 'archive complete' });
+      assertExit(runGuard(['entry', 'archive'], dir), 0);
+      const resArch = runGuard(['exit', 'archive', '--apply'], dir);
+      assertExit(resArch, 0);
+      assertOut(resArch, 'NEXT: done');
+      const nextRes = runState(['next'], dir, env);
+      assertExit(nextRes, 0);
+      assertOut(nextRes, 'NEXT: done');
+    },
+  },
+
+  // 208: record 后未 exit 先 next 不提前校正到路由后继（反死结锚——平行转换点：进行中
+  // 节点保护此前只认静态直接后继,推导落子在 subagent-execute 时保护失效,currentNode 被
+  // 提前校正 → 随后 exit plan 的 currentNode 匹配必 BLOCK → 死结）。
+  {
+    name: '208 record 后未 exit 先 next 不漂移死结：后续 exit 仍可',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      // 前序产物（open/design 已完成,plan 已进入并 record——未 exit）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## Why（为什么做）\n\nx\n\n## 范围（Scope）\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 用户故事（User Story）\n\nx\n\n## 验收准则（AC）\n\n- Given x When y Then z');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 0. 技术栈选型\n\nNode（纯脚本）\n\n## 决策清单\n\n- [ ] 决策 1');
+      // 平行转换前夜：并行任务存在且可委托（无依赖待满足）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n' +
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>src/p2.mjs</write_files><verify>node --check src/p2.mjs</verify></task>\n' +
+        '<task id="S01" parallel="false" status="pending"><action>实现 S01</action><write_files>src/s1.mjs</write_files><verify>node --check src/s1.mjs</verify><depends_on>P01,P02</depends_on></task>\n');
+      const st = baseState('plan');
+      st.completedNodes = ['open', 'design'];
+      st.enteredNodes = ['open', 'design', 'plan'];
+      st.evidence = {
+        open: { summary: 'open complete' },
+        design: { summary: 'design complete' },
+        plan: { summary: 'plan complete' },
+      };
+      st.newChange = true;
+      writeState(dir, st);
+      // ① record 后未 exit 先 next：不把 currentNode 提前校正到 subagent-execute（路由后继）
+      const r1 = runState(['next'], dir, env);
+      assertExit(r1, 0);
+      assertOut(r1, 'NODE: plan');
+      const stAfterNext = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      if (stAfterNext.currentNode !== 'plan') {
+        throw new Error('record 后未 exit 先 next 不应提前校正 currentNode（应保持 plan），实际: ' + stAfterNext.currentNode);
+      }
+      // ② 后续 exit plan --apply 仍可（进行中节点保护 → 未漂移 → currentNode 匹配）
+      assertExit(runGuard(['entry', 'plan'], dir), 0);
+      const rExit = runGuard(['exit', 'plan', '--apply'], dir);
+      assertExit(rExit, 0);
+      assertOut(rExit, 'ALL CHECKS PASSED');
+      // ③ exit 推进后 next 路由到 subagent-execute（平行转换点——与 guard 出口一致）
+      const r2 = runState(['next'], dir, env);
+      assertExit(r2, 0);
+      assertOut(r2, 'NODE: subagent-execute');
+    },
+  },
+
+  // 209: exit 漂移容忍正例——currentNode 已漂移到文件推导下一节点（execute 证据/产物齐→路由已指向
+  // review）且本节点证据+产物齐 → 容错 exit execute --apply 可过（补欠账）——BLOCK 不再只有
+  // 不可行的 advance/select 指引（M2/L-061 修复锚）。修复前 currentNode 校验必 BLOCK → RED。
+  {
+    name: '209 exit 漂移容忍：currentNode 已为文件推导下一节点且证据/产物齐 → exit 可过',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      writeIntakeArtifacts(dir);
+      // TASK 全 done（T01 串行）+ SUMMARY（execute 产物门控）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+        '<task id="T01" status="done"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n');
+      // 新 change 严格模板保真：SUMMARY 须 `# SUMMARY:` 标题 + 首部 4 字段 + 段序（模板保真场景同款合法形态）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md',
+        ['# SUMMARY: T01 - 实现 T01', '',
+          '- **Change ID**: ' + CHANGE_ID, '- **Task ID**: T01', '- **完成时间**: 2026-08-29 10:00', '- **AI 角色**: Dev',
+          '', '---', '',
+          '## 做了什么\n\n实现 T01（TDD：先写失败场景再实现）。',
+          '## 改动文件\n\n| 文件 | 性质 | 说明 |\n|---|---|---|\n| src/t1.mjs | 修改 | 实现 T01 |',
+          '## verify 输出\n\n```\nnode --check src/t1.mjs\n```',
+          '## 6 维自查\n\n- 功能: 通过（brooks-review 已跑）\n- 性能: 无影响\n- 安全: 无影响\n- 兼容: 通过\n- 可观测: 通过\n- 可维护: 通过',
+          '## 越界检查\n\n仅修改 src/t1.mjs，无越界。',
+          '## 自检方法\n\nbrooks-review', '',
+        ].join('\n'));
+      // 漂移态：completedNodes=[open,design,plan]（execute 未 completed——欠账），currentNode=review
+      // （路由已越过 execute——execute 证据/产物齐）；evidence.execute + enteredNodes 含 execute（防 R2 拦）
+      const st = baseState('review');
+      st.completedNodes = ['open', 'design', 'plan'];
+      st.enteredNodes = ['open', 'design', 'plan', 'execute', 'review'];
+      st.evidence = {
+        open: { summary: 'open done' },
+        design: { summary: 'design done' },
+        plan: { summary: 'plan done' },
+        execute: { summary: 'executed', parallelTakeoverApproved: true },
+      };
+      st.newChange = true;
+      writeState(dir, st);
+      const res = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(res, 0);
+      assertNotOut(res, 'BLOCKED: currentNode');
+      assertOut(res, '容错');
+      const stAfter = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      if (!stAfter.completedNodes.includes('execute')) {
+        throw new Error('容错 exit execute --apply 后 completedNodes 应含 execute（欠账补齐）;实际: ' + stAfter.completedNodes.join(','));
+      }
+    },
+  },
+
+  // 210: exit 漂移容忍反例——currentNode 已漂移但本节点证据/产物不齐 → 仍 BLOCK（容错不放开未完成）
+  {
+    name: '210 exit 漂移仍 BLOCK：漂移但证据/产物不齐（容错不放开未完成）',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      writeIntakeArtifacts(dir);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+        '<task id="T01" status="done"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n');
+      // 漂移态同 209，但 execute 产物缺失（T01 宣称 done 却无 SUMMARY 文件）——证据虽在，
+      // 产物不齐 → 容错判定 tolerable=false → 仍 BLOCK（容错不放开未完成；反过度修复锚）。
+      // 注意：证据缺失面由前置证据校验先命中（BLOCKED: missing evidence），本场景故意给证据、
+      // 只缺产物——让漂移容错判定真正走到边界，验证「漂移但产物不齐不收容」。
+      const st = baseState('review');
+      st.completedNodes = ['open', 'design', 'plan'];
+      st.enteredNodes = ['open', 'design', 'plan', 'execute', 'review'];
+      st.evidence = {
+        open: { summary: 'open done' },
+        design: { summary: 'design done' },
+        plan: { summary: 'plan done' },
+        execute: { summary: 'executed' },
+      };
+      st.newChange = true;
+      writeState(dir, st);
+      const res = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED: currentNode is review');
+      assertNotOut(res, 'ALL CHECKS PASSED');
+    },
+  },
+
+  // 211: 路由诊断静默扩展（M4/R-4·L-061 批次）——剩余 pending 全串行（P→S 收尾转换：并行已全 done、
+  // 仅剩串行 pending、无缺 status 畸形块）→ ROUTE WARN 静默（「全 done 静默」锚扩展为
+  // 「剩余全串行」也静默——P→S 收尾不再输出噪音；修复前按「无 parallel pending」判定仍报 → RED）
+  {
+    name: '211 路由诊断静默：剩余 pending 全串行（P→S 收尾转换）无 ROUTE WARN',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      writeIntakeArtifacts(dir);
+      const st = baseState('plan');
+      st.completedNodes = ['open', 'design'];
+      st.evidence.plan = { summary: 'executed' };
+      writeState(dir, st);
+      // 并行任务已 done、串行尾任务 pending（全串行剩余、无缺 status 畸形块）→ M4 静默
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+        '<task id="P01" parallel="true" status="done">\n  <action>do</action>\n  <verify>echo ok</verify>\n</task>\n' +
+        '<task id="S01" parallel="false" status="pending">\n  <action>do serial</action>\n  <verify>echo ok</verify>\n</task>\n');
+      const res = runGuard(['exit', 'plan', '--apply'], dir, env);
+      assertExit(res, 0);
+      assertNotOut(res, 'ROUTE WARN');
+      assertOut(res, 'ALL CHECKS PASSED');
+    },
+  },
+
+  // 212: 路由诊断保持（M4 反例）——存在缺 status 的 parallel 块（畸形/旧模板形态）且存在串行
+  // pending 时 ROUTE WARN 仍报（结构校验严格保持——缺 status 不视为 pending，不因 M4 误静音；
+  // 判定载体：parallel 标记在场对照 + 真畸形块驱动 WARN）
+  {
+    name: '212 路由诊断保持：parallel 缺 status（畸形块）仍报 ROUTE WARN',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      writeIntakeArtifacts(dir);
+      const st = baseState('plan');
+      st.completedNodes = ['open', 'design'];
+      st.evidence.plan = { summary: 'executed' };
+      writeState(dir, st);
+      // 正常并行任务 done + 畸形并行任务（parallel="true" 无 status）+ 串行尾任务 pending → WARN 保持
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+        '<task id="P01" parallel="true" status="done">\n  <action>do</action>\n  <verify>echo ok</verify>\n</task>\n' +
+        '<task id="P03" parallel="true">\n  <action>do malformed parallel</action>\n  <verify>echo ok</verify>\n</task>\n' +
+        '<task id="S02" parallel="false" status="pending">\n  <action>do serial</action>\n  <verify>echo ok</verify>\n</task>\n');
+      const res = runGuard(['exit', 'plan', '--apply'], dir, env);
+      assertExit(res, 0);
+      assertOut(res, 'ROUTE WARN');
+    },
+  },
+
+  // 213: directOverride 授权约束正例——协调者显式授权留痕在场（executionMode=direct +
+  // directOverride=true + 授权审计字段 directOverrideAt/来源）→ execute 出口通过（direct 是
+  // 用户决策点,授权留痕即合法路径;修复前出口无授权校验——GREEN 后本场景仍恒过,防过度修复）。
+  {
+    name: '213 directOverride 授权约束正例：协调者授权 + direct → exit 通过',
+    run: (dir) => {
+      const st = baseState('execute');
+      st.completedNodes = ['open', 'design', 'plan'];
+      st.enteredNodes = ['open', 'design', 'plan', 'execute'];
+      st.evidence = {
+        open: { summary: 'open done' },
+        design: { summary: 'design done' },
+        plan: { summary: 'plan done' },
+        execute: { summary: 'executed' },
+      };
+      st.executionMode = 'direct';
+      st.directOverride = true;
+      st.directOverrideAt = '2026-08-29T10:00:00.000Z';
+      st.directOverrideSource = 'execution-mode';
+      st.newChange = true;
+      writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+        '<task id="S01" status="done"><action>实现 S01</action><write_files>src/s1.mjs</write_files><verify>node --check src/s1.mjs</verify></task>\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/S01-SUMMARY.md', strictSummary('S01'));
+      const res = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(res, 0);
+      assertNotOut(res, 'BLOCKED');
+      assertOut(res, 'ALL CHECKS PASSED');
+    },
+  },
+
+  // 214: directOverride 授权约束负例——执行者自切 direct 无授权审计记录（executionMode=direct +
+  // directOverride=true 但无 directOverrideAt）→ execute 出口 BLOCKED（direct 是用户决策点,
+  // 不可自决——机制约束）+ 恢复指引（协调者显式授权 / 回 subagent）。修复前出口无校验 → RED。
+  {
+    name: '214 directOverride 授权约束负例：执行者自切 direct 无授权 → exit BLOCKED',
+    run: (dir) => {
+      const st = baseState('execute');
+      st.completedNodes = ['open', 'design', 'plan'];
+      st.enteredNodes = ['open', 'design', 'plan', 'execute'];
+      st.evidence = {
+        open: { summary: 'open done' },
+        design: { summary: 'design done' },
+        plan: { summary: 'plan done' },
+        execute: { summary: 'executed' },
+      };
+      st.executionMode = 'direct';
+      st.directOverride = true;
+      // 无 directOverrideAt 授权审计记录（执行者自切/修复前遗留形态）
+      st.newChange = true;
+      writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+        '<task id="S01" status="done"><action>实现 S01</action><write_files>src/s1.mjs</write_files><verify>node --check src/s1.mjs</verify></task>\n');
+      const res = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, 'directOverride');
+      assertOut(res, '授权');
+    },
+  },
+
+  // 215: directOverride 越界检测——绕过脚本直接改 state 文件（工具写 .comet/flow-comet-state.json,
+  // 无授权）→ hook BLOCK（state 文件禁手动工具写——机器字段由脚本通道管理;修复前 direct 模式
+  // 白名单 [''] 允许写 state → 越权写入口 fail-open → RED）。
+  {
+    name: '215 directOverride 越界：直接改 state 文件无授权 → hook BLOCK',
+    run: (dir) => {
+      const st = baseState('execute');
+      st.status = 'running';
+      st.executionMode = 'direct';
+      st.directOverride = true;
+      st.directOverrideAt = '2026-08-29T10:00:00.000Z';
+      writeState(dir, st);
+      const stateFile = path.join(dir, '.comet', 'flow-comet-state.json');
+      const res = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: stateFile } });
+      assertExit(res, 2);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, 'flow-comet-state.json');
+    },
+  },
+
+  // 216: directOverride 授权约束恢复——BLOCK 后按指引① 协调者 execution-mode direct（脚本写入
+  // 授权留痕）→ exit 通过；② 回 subagent（清除 directOverride 与授权留痕,handoff 在场）→ exit
+  // 也通过——两条恢复路径都闭合（修复前无 BLOCK 无从恢复 → RED）。
+  {
+    name: '216 directOverride 恢复：BLOCK 后补授权 / 回 subagent → exit 通过',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const buildState = () => {
+        const st = baseState('execute');
+        st.completedNodes = ['open', 'design', 'plan'];
+        st.enteredNodes = ['open', 'design', 'plan', 'execute'];
+        st.evidence = {
+          open: { summary: 'open done' },
+          design: { summary: 'design done' },
+          plan: { summary: 'plan done' },
+          execute: { summary: 'executed' },
+          'subagent-execute': { summary: 'delegated', handoffResult: handoffFor(['S01']) },
+        };
+        st.newChange = true;
+        return st;
+      };
+      const writeTask = () => writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+        '<task id="S01" status="done"><action>实现 S01</action><write_files>src/s1.mjs</write_files><verify>node --check src/s1.mjs</verify></task>\n');
+      const readState = () => JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      // ① 复现 BLOCK（direct 无授权）
+      const st1 = buildState();
+      st1.executionMode = 'direct';
+      st1.directOverride = true;
+      writeState(dir, st1);
+      writeTask();
+      const rBlock = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(rBlock, 1);
+      assertOut(rBlock, 'BLOCKED');
+      // ② 恢复路径一：协调者 execution-mode direct（脚本写入授权留痕）→ exit 通过
+      writeFile(dir, '.specs/' + CHANGE_ID + '/S01-SUMMARY.md', strictSummary('S01'));
+      const auth = runState(['execution-mode', 'direct'], dir, env);
+      assertExit(auth, 0);
+      assertOut(auth, 'DIRECT-AUTH');
+      const st2 = readState();
+      if (typeof st2.directOverrideAt !== 'string' || st2.directOverrideAt.trim() === '') {
+        throw new Error('授权后 state 应含 directOverrideAt 审计字段: ' + JSON.stringify(st2.directOverrideAt));
+      }
+      const rAuth = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(rAuth, 0);
+      assertOut(rAuth, 'ALL CHECKS PASSED');
+      // ③ 恢复路径二：回 subagent（清除 directOverride 与授权留痕）→ exit 通过
+      const back = runState(['execution-mode', 'subagent'], dir, env);
+      assertExit(back, 0);
+      const st3 = readState();
+      if (st3.directOverride !== false || st3.directOverrideAt !== undefined) {
+        throw new Error('回 subagent 应清除 directOverride 与授权审计字段: ' + JSON.stringify({ directOverride: st3.directOverride, directOverrideAt: st3.directOverrideAt }));
+      }
+      const rBack = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(rBack, 0);
+      assertOut(rBack, 'ALL CHECKS PASSED');
+    },
+  },
+
+  // 217: hook state 文件拦截的大小写变体闭合（CodeRabbit 采纳）——win32/darwin 文件系统大小写
+  // 不敏感，`.Comet/Flow-Comet-State.json` 与机器状态文件指向同一实体；修复前 blockedStateFileTarget
+  // 精确等值比较 → 变体绕过 W4 防线（direct 白名单 [''] 放行）→ 预期 RED（期望 exit 2 实际 exit 0）。
+  // 其他平台（大小写敏感文件系统）变体是不同文件，不属机器状态文件 → 放行（与「其他平台保持等值
+  // 比较」语义一致，平台分支断言防 CI 误报）。
+  {
+    name: '217 hook state 拦截：大小写变体路径 BLOCK（win32/darwin；其他平台放行）',
+    run: (dir) => {
+      const st = baseState('execute');
+      st.status = 'running';
+      st.executionMode = 'direct';
+      st.directOverride = true;
+      st.directOverrideAt = '2026-08-29T10:00:00.000Z';
+      writeState(dir, st);
+      const caseVariant = path.join(dir, '.Comet', 'Flow-Comet-State.json');
+      const res = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: caseVariant } });
+      if (process.platform === 'win32' || process.platform === 'darwin') {
+        assertExit(res, 2);
+        assertOut(res, 'BLOCKED');
+        assertOut(res, '.Comet/Flow-Comet-State.json');
+      } else {
+        assertNotOut(res, 'BLOCKED');
+      }
+    },
+  },
+
+  // 218: execute 完成判定 fail-closed（CodeRabbit 采纳）——pending===0 不足为凭：缺/未知 status
+  // 的任务既非 pending 也非 done，畸形块若被跳过，会在另一任务已产 SUMMARY 时把完成态误判为
+  // 「任务全部 done」→ 提前路由 review。修复前 resolveNextNode 在 done=1 / attrs=2 时跳过畸形块
+  // 按「全 done」推进 → NODE: review（误路由 → 预期 RED）；修复后 done !== attrsList.length
+  // → 回 execute（不提前放行到后置节点）。
+  {
+    name: '218 route-node 完成判定：done 任务 + 畸形块(缺 status) → next 仍回 execute',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      writeIntakeArtifacts(dir);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
+        '<task id="T01" status="done"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n' +
+        '<task id="T02" parallel="true"><action>实现 T02</action><write_files>src/t2.mjs</write_files><verify>node --check src/t2.mjs</verify></task>\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeState(dir, {
+        activeChange: CHANGE_ID,
+        currentNode: 'execute',
+        completedNodes: ['open', 'design', 'plan'],
+        evidence: { open: { summary: 'o' }, design: { summary: 'd' }, plan: { summary: 'p' } },
+        verifyFailures: 0,
+        executionMode: 'subagent',
+        directOverride: false,
+      });
+      const res = runState(['next'], dir, env);
+      assertExit(res, 0);
+      assertOut(res, 'NODE: execute');
+      assertNotOut(res, 'NODE: review');
+    },
+  },
+
+  // 219: 并行文件依赖检测路径归一化闭合（CodeRabbit 采纳）——重叠比较只用原始字符串时，
+  // `src/a.mjs` vs `src/./a.mjs`（`.` 段变体——同一路径的两种写法）不判重叠 → 变体绕过
+  // 写写强判（修复前 plan 出口漏检 → 预期 RED：期望 BLOCKED 实际放行）。修复后路径解析先
+  // 归一化（分隔符统一 `/`、解 `.` 段、`..` 逃出项目根按越界处理不参与比较），归一化集合
+  // 用于写写强判与读写弱判——与委托入口共用同一函数，两侧同语义。
+  {
+    name: '219 plan exit BLOCKED：路径变体重叠检出（src/a.mjs × src/./a.mjs）',
+    run: (dir) => {
+      const st = baseState('plan');
+      st.evidence.plan = { summary: 'plan done' };
+      st.newChange = true;
+      writeState(dir, st);
+      const tasks =
+        '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/a.mjs</write_files><verify>node --check src/a.mjs</verify></task>\n' +
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>src/./a.mjs</write_files><verify>node --check src/./a.mjs</verify></task>\n';
+      const res = runPlanExit(dir, tasks);
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, 'P01×P02');
+      assertOut(res, 'src/a.mjs');
+      assertOut(res, 'depends_on');
     },
   },
 ];

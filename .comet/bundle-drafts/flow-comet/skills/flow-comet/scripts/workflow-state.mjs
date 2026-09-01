@@ -8,6 +8,7 @@ import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCO
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, looksLikeObjectLiteral } from './state-schema.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide, skipInit } from './context-init.mjs';
 import { taskOpeningAttrs, taskBlocks } from './task-parsing.mjs';
+import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath } from './route-node.mjs';
 
 const command = process.argv[2] ?? 'status';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -295,200 +296,13 @@ async function verifySkillLoadMarkers(completedChecks, changeName, recordTime, p
 }
 
 // ---------- 节点完成判定 · determineNode 数据化：完成标志从协议 outputSchemas 推导 ----------
-
-// 为每个节点构建"完成标志文件集"：遍历节点 outputSchemas 引用的 schema 的 artifacts
-// （schema 在 protocol.outputSchemas 数组中按 id 查找），paths 中 <change-id> 替换为实际
-// changeName，得到相对 .specs 根的路径数组。同一 artifact 的 paths 为互斥备选（命中任一即
-// 该 artifact 存在，如 DESIGN.md / DESIGN-lite.md）；节点完成 = 标志文件集全部存在
-// （required !== false 的 artifact 全部存在，与 workflow-guard missingRequiredArtifacts 同语义）。
-// 返回 Map<nodeId, Array<{ id, paths }>>。
-function buildNodeCompletionFlags(protocol, changeName) {
-  const schemaById = new Map((protocol.outputSchemas ?? []).map((schema) => [schema.id, schema]));
-  const flags = new Map();
-  for (const node of protocol.nodes ?? []) {
-    const artifacts = [];
-    for (const schemaId of node.outputSchemas ?? []) {
-      const schema = schemaById.get(schemaId);
-      for (const artifact of schema?.artifacts ?? []) {
-        if (artifact.required === false) continue; // 可选产物不是完成门控
-        // B 方案（fail-fast）：classic/native pathBase 由 guard 侧 workflowPathBaseRoot 全量
-        // 感知，但状态机推导暂不支持（按 specs-root 兜底会与 guard 不一致导致卡死/误判）——
-        // 显式报错提示改用 specs-root/project + 完整路径（如 project + openspec/changes/xxx.md）。
-        if (artifact.pathBase === 'classic-openspec-root'
-          || artifact.pathBase === 'classic-superpowers-root'
-          || artifact.pathBase === 'native-root') {
-          throw new Error('产物根 pathBase "' + artifact.pathBase
-            + '" 由 guard 校验支持但状态机推导暂不支持——请改用 specs-root/project + 完整路径（如 project + openspec/changes/xxx.md）');
-        }
-        artifacts.push({
-          id: schemaId + '.' + (artifact.id ?? 'artifact'),
-          paths: (artifact.paths ?? []).map((p) => String(p).replaceAll('<change-id>', changeName)),
-          pathBase: artifact.pathBase,
-        });
-      }
-    }
-    flags.set(node.id, artifacts);
-  }
-  return flags;
-}
-
-function escapeRegExp(value) {
-  return String(value).replace(/[|\\{}()[\]^$+?.]/gu, '\\$&');
-}
-
-// 与 workflow-guard.mjs pathPatternExists 同语义的轻量 glob 存在检查：
-// 按路径段逐段 walk，含 `*` 的段按正则匹配（`*` → `.*`，如 *-SUMMARY.md），命中任一真实路径即存在。
-async function pathPatternExists(root, relativePattern) {
-  const parts = String(relativePattern).split(/[\\/]+/).filter(Boolean);
-  async function walk(current, index) {
-    if (index >= parts.length) return fileExists(current);
-    const part = parts[index];
-    if (!part.includes('*')) return walk(path.join(current, part), index + 1);
-    let entries;
-    try {
-      entries = await fs.readdir(current, { withFileTypes: true });
-    } catch {
-      return false;
-    }
-    const matcher = new RegExp('^' + part.split('*').map(escapeRegExp).join('.*') + '$', 'u');
-    for (const entry of entries) {
-      if (matcher.test(entry.name) && (await walk(path.join(current, entry.name), index + 1))) {
-        return true;
-      }
-    }
-    return false;
-  }
-  return walk(root, 0);
-}
-
-// 节点完成判定 = 标志文件集全部存在（artifact 存在 = 其 paths 任一命中 glob）
-// 产物推导 pathBase 感知: 产物根按 artifact.pathBase 解析——'specs-root' → .specs/；'project'/缺省 → 项目根
-// （与 workflow-guard.mjs 的 workflowPathBaseRoot 对齐：内置协议 10 个 artifacts 全部显式
-// 声明 specs-root；compose 自定义协议可声明 project 根工件如 README.md）。
-// classic/native 等其余 pathBase 暂按 specs-root 兜底（与修复前一致，不回归——guard 侧全量感知）。
-async function nodeFlagsComplete(nodeFlags, nodeId) {
-  for (const artifact of nodeFlags.get(nodeId) ?? []) {
-    let present = false;
-    const artifactRoot = artifact.pathBase === 'specs-root' ? specsRoot : runRoot;
-    for (const pattern of artifact.paths) {
-      if (await pathPatternExists(artifactRoot, pattern)) {
-        present = true;
-        break;
-      }
-    }
-    if (!present) return false;
-  }
-  return true;
-}
-
-// 协议任务文件路径：协议可选 taskFile 字段（相对 .specs/<change-id>/），无声明时缺省 TASK.md。
-// determineNode 与 next 的零进展防呆共用（同一解析，防两处漂移）。
-function protocolTaskFilePath(protocol, changeName) {
-  const taskFile = typeof protocol.taskFile === 'string' && protocol.taskFile !== ''
-    ? protocol.taskFile
-    : 'TASK.md';
-  return path.join(specsRoot, changeName, taskFile);
-}
-
-// 协议是否含 subagent-execute 委托节点（自定义协议可不含——此时 parallel 任务由 execute 直接消化）
-function hasSubagentNode(protocol) {
-  return route(protocol).some((n) => n.id === 'subagent-execute');
-}
-
+// （节点完成判定核心抽取 · 依赖感知路由）: 节点完成判定核心已迁至共享模块 route-node.mjs——
+// determineNode 保持既有签名与返回语义，仅改为委托 resolveNextNode（行为逐字等价，重构保持锚：
+// 输出与抽取前 200 版一致）。route / buildNodeCompletionFlags / pathPatternExists / nodeFlagsComplete /
+// protocolTaskFilePath / hasSubagentNode 已随抽取移至 route-node.mjs（单一实现，根治 guard 与
+// 状态机双实现漂移的根治（单一实现决策）。
 async function determineNode(changeName, protocol, completedNodes = []) {
-  // （实测）: 全部节点已完成 → 完成态，不产出最后节点。
-  // 自定义协议无 archive 节点时，completedNodes 全齐后 next 仍会输出 NODE: <最后节点>
-  // （产物推导只返回最后节点 id）——此处（产物推导之前）判定：route(protocol) 的所有节点
-  // id 均已包含在 completedNodes 中 → 返回 null。printNext(null) 输出 "NEXT: done"；
-  // status 的 currentNode = null 表示完成态。内置协议不受影响：archive exit 时 workflow-guard
-  // 清 activeChange，findActiveChange 返回 null 先于 determineNode 触发；completedNodes 含
-  // 全部 8 节点时同样返回 null，与"归档后无活跃 change"语义一致。
-  const protocolNodeIds = route(protocol).map((n) => n.id);
-  if (protocolNodeIds.length > 0 && protocolNodeIds.every((id) => completedNodes.includes(id))) {
-    return null;
-  }
-  const changeDir = path.join(specsRoot, changeName);
-  // 节点完成判定: 节点完成标志从协议 outputSchemas 推导（内置协议缺省行为与现硬编码逐字节一致）
-  const nodeFlags = buildNodeCompletionFlags(protocol, changeName);
-  // 任务文件路径：协议可选 taskFile 字段（相对 changeDir），无声明时缺省 TASK.md。
-  // 自定义协议无 taskFile 时 parallel 检测自然降级为串行（任务文件缺失 → 不路由 subagent-execute）。
-  const taskPath = protocolTaskFilePath(protocol, changeName);
-
-  // 节点顺序 = 协议 nodes 顺序（disabled 过滤，见 route()）；execute/subagent-execute 由任务状态特判。
-  // 按协议顺序拆分：execute/subagent-execute 之前的节点走产物门控（内置 = open → design → plan），
-  // 之后的节点在任务全部 done 后按序门控（内置 = review → verify → archive）。
-  const orderedNodes = route(protocol);
-  const hasExecuteFamily = orderedNodes.some((n) => n.id === 'execute' || n.id === 'subagent-execute');
-  const preExecNodes = [];
-  const postExecNodes = [];
-  let sawExecuteFamily = false;
-  for (const node of orderedNodes) {
-    if (node.id === 'execute' || node.id === 'subagent-execute') {
-      sawExecuteFamily = true;
-      continue;
-    }
-    if (sawExecuteFamily) postExecNodes.push(node);
-    else preExecNodes.push(node);
-  }
-
-  // 前置产物门控：execute 之前的节点按序检查（内置协议 = open → design → plan）
-  for (const node of preExecNodes) {
-    if (!(await nodeFlagsComplete(nodeFlags, node.id))) return node.id;
-  }
-
-  // 协议无 execute/subagent-execute 节点：无任务状态特判，全部节点已按产物门控完成 → 当前处于最后节点
-  if (!hasExecuteFamily) {
-    return orderedNodes.length > 0 ? orderedNodes[orderedNodes.length - 1].id : 'archive';
-  }
-
-  // execute/subagent-execute 特判：解析任务文件 <task> 块 pending/done/parallel/depends_on。
-  // 属性解析统一走 task-parsing.mjs 的 taskOpeningAttrs——只读 <task ...> 开标签（属性序无关、
-  // 不受 <action>/<verify> 内容文本干扰），与 workflow-guard 的校验共享同一语义。
-  try {
-    const taskContent = await fs.readFile(taskPath, 'utf8');
-    const taskList = taskBlocks(taskContent);
-    const attrsList = taskList.map(taskOpeningAttrs).filter(Boolean);
-    const pending = attrsList.filter((a) => a.status === 'pending').length;
-    const done = attrsList.filter((a) => a.status === 'done').length;
-    if (pending > 0) {
-      // 多趟循环路由（循环路由形态决策 · 多趟路由架构决策记录）：委托进入谓词每趟重新求值——∃ p ∈ tasks：p.parallel ∧
-      // p.status=pending ∧ deps(p) ⊆ doneIds → 路由 subagent-execute（第 N 趟，节点可多次进入）。
-      // 旧「首趟委托完成后即固定单趟」的防死循环限制移除；死循环防护改由三重保险承担：
-      // plan 出口依赖图前置拦截（guard）/ next 单趟零进展防呆（本脚本）/ 每趟重入完整 entry 检查
-      // （guard entry R2，不绕过）。与 workflow-guard 出口 --apply 平行路由镜像同谓词。
-      // 只检测依赖已满足的 parallel 任务，避免 Wave N+1 的 parallel 任务
-      // 在 Wave N 串行任务未完成时就被路由到 subagent-execute。
-      if (hasSubagentNode(protocol)) {
-        // 收集所有 done 任务的 id（开标签属性序无关）
-        const doneIds = new Set(attrsList.filter((a) => a.status === 'done' && a.id).map((a) => a.id));
-        // 检查 pending parallel 任务中是否有依赖已满足的（开标签 parallel="true" 且 status="pending"）
-        const parallelBlocks = taskList.filter((block) => {
-          const a = taskOpeningAttrs(block);
-          return a && a.parallel && a.status === 'pending';
-        });
-        const eligibleParallel = parallelBlocks.filter((block) => {
-          const depsMatch = block.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
-          if (!depsMatch || !depsMatch[1].trim()) return true; // 无依赖
-          const deps = depsMatch[1].trim().split(/[,\s]+/).filter(Boolean);
-          return deps.every((d) => doneIds.has(d));
-        });
-        if (eligibleParallel.length > 0) return 'subagent-execute';
-      }
-      return 'execute';
-    }
-    // 任务全部 done——execute 完成还需至少一份 SUMMARY（execute 产物门控，内置 = <change-id>/*-SUMMARY.md glob）
-    if (!(await nodeFlagsComplete(nodeFlags, 'execute'))) return 'execute';
-    // 后置产物门控：按协议顺序检查 execute 之后的节点（内置 = review → verify → archive）。
-    // verify 的完成标志 = flowkit.verify.v1 全部 required artifacts（TEST.md + UAT.md）；自然流程中
-    // TEST.md 由 review 产出、UAT.md 由 verify 产出，故"verify 看 UAT.md"的判定语义保持不变。
-    for (const node of postExecNodes) {
-      if (!(await nodeFlagsComplete(nodeFlags, node.id))) return node.id;
-    }
-    // 全部产物门控通过 → 当前处于协议最后一个节点（内置协议 = archive，与现硬编码 checks.uat → 'archive' 一致）
-    return orderedNodes.length > 0 ? orderedNodes[orderedNodes.length - 1].id : 'archive';
-  } catch {}
-
-  return 'execute';
+  return resolveNextNode({ runRoot, changeName, protocol, completedNodes });
 }
 
 // 回退修复豁免判定——回退修复标准路径：review/verify 阶段发现缺陷 → TASK.md 追加
@@ -514,30 +328,42 @@ async function tFixRollbackExempt(changeName, protocol, currentNode, completedNo
 // 正常推进豁免判定——exit --apply 会把 currentNode 推进到下一节点（如 open exit 后
 // currentNode=design，该节点尚未开始故 evidence 无记录），随后按 SKILL 协议调 next（正常路径）
 // 不应被  误拦为"疑似未 exit"。判定三条件：① completedNodes 非空；② 最后一个已完成节点
-// 在路由列表（route(protocol)，disabled 过滤）中的直接后继 = currentNode（exit 推进的正常下一节点）；
-// ③ 最后一个已完成节点存在 evidence（exit --apply 必须带证据通过——证据存在证明该 exit 真实发生，
-// 排除伪造/漂移状态（如 review 无 evidence）。与  回退豁免独立判断（回退 = TASK.md
-// 有 pending 回退修复任务；本豁免 = 正常推进后继）。真乱序（currentNode 不是 completedNodes 的后继）仍
-// 维持  严格 BLOCK。
-function normalAdvanceExempt(state, protocol, completedNodes, currentNode) {
+// 存在 evidence（exit --apply 必须带证据通过——证据存在证明该 exit 真实发生，排除伪造/漂移状态，
+// 如 review 无 evidence）；③ currentNode 是下一个合法路由目标——**路由后继优先**（exit --apply
+// 把 currentNode 推进到共享路由判定 resolveNextNode 的结果，平行转换 plan→subagent-execute、
+// 趟间回流 subagent-execute→execute 等即由此产生；next 正常推进豁免识别路由后继，与 guard
+// NEXT 同源），静态直接后继兜底（串行推进原语义，旧态/序列流不回归）。与  回退豁免独立判断
+// （回退 = TASK.md 有 pending 回退修复任务；本豁免 = 正常推进后继）。真乱序（currentNode
+// 既非路由后继也非静态后继）仍维持  严格 BLOCK。
+async function normalAdvanceExempt(state, protocol, completedNodes, currentNode, changeName) {
   if (completedNodes.length === 0) return false;
   const lastNodeId = completedNodes[completedNodes.length - 1];
   const routeIds = route(protocol).map((node) => node.id);
   const lastIdx = routeIds.indexOf(lastNodeId);
-  if (lastIdx < 0 || lastIdx + 1 >= routeIds.length) return false;
-  if (routeIds[lastIdx + 1] !== currentNode) return false;
+  if (lastIdx < 0) return false;
   const lastEvidence = state.evidence && typeof state.evidence === 'object'
     ? state.evidence[lastNodeId]
     : null;
   // 审查补充（2026-08-08）：evidence 必须是对象且含非空 summary（空对象 {} 可绕过豁免，
   // 真实流程 exit 强制 summary——此处严格化防止手动修改 state 绕过）
-  return !!(
+  const hasExitEvidence = !!(
     lastEvidence &&
     typeof lastEvidence === 'object' &&
     !Array.isArray(lastEvidence) &&
     typeof lastEvidence.summary === 'string' &&
     lastEvidence.summary.trim() !== ''
   );
+  if (!hasExitEvidence) return false;
+  // 路由后继判定（与 guard 出口同源）：currentNode === resolveNextNode(completedNodes) 即
+  // 正常推进后的下一路由目标（含平行转换与趟间回流）；文件推导失败（异常态）不豁免。
+  try {
+    const routingNext = await determineNode(changeName, protocol, completedNodes);
+    if (routingNext === currentNode) return true;
+  } catch {
+    return false;
+  }
+  // 静态直接后继兜底（串行推进原语义，向后兼容旧态不回归）
+  return lastIdx + 1 < routeIds.length && routeIds[lastIdx + 1] === currentNode;
 }
 
 async function readState() {
@@ -615,10 +441,6 @@ async function writeState(state) {
     process.exit(1);
   }
   await writeJson(statePath, state);
-}
-
-function route(protocol) {
-  return (protocol.nodes ?? []).filter(n => !n.disabled);
 }
 
 function generatedNodeSkillName(protocol, nodeId) {
@@ -1045,7 +867,7 @@ async function main() {
         const rollbackExempt = await tFixRollbackExempt(changeName, protocol, state.currentNode, completedArr);
         // 正常推进豁免——exit --apply 推进 currentNode 到下一节点后按 SKILL 协议调 next
         // （正常路径）不拦截；与  回退豁免独立判断（详见 normalAdvanceExempt 注释）
-        const advanceExempt = normalAdvanceExempt(state, protocol, completedArr, state.currentNode);
+        const advanceExempt = await normalAdvanceExempt(state, protocol, completedArr, state.currentNode, changeName);
         if (!rollbackExempt && !advanceExempt) {
           console.error('BLOCKED: 疑似未 exit 节点 ' + state.currentNode + '，先 workflow-guard.mjs exit ' + state.currentNode + ' --apply');
           console.error('恢复: 确认当前节点实际已完成 → 用 exit <节点> --apply 正常推进；节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进）或 select（切换 change）；禁止手改 state 机器字段');
@@ -1063,7 +885,7 @@ async function main() {
     if (detectedNode === 'execute' || detectedNode === 'subagent-execute') {
       if (hasSubagentNode(protocol)) {
         try {
-          const zpBlocks = taskBlocks(await fs.readFile(protocolTaskFilePath(protocol, changeName), 'utf8'));
+          const zpBlocks = taskBlocks(await fs.readFile(protocolTaskFilePath(protocol, changeName, specsRoot), 'utf8'));
           const zpAttrs = zpBlocks.map(taskOpeningAttrs).filter(Boolean);
           const zpPending = zpAttrs.filter((a) => a.status === 'pending');
           if (zpPending.length > 0) {
@@ -1101,17 +923,29 @@ async function main() {
     );
     const routeIds = route(protocol).map((n) => n.id);
     const currentNodeIdx = state.currentNode ? routeIds.indexOf(state.currentNode) : -1;
-    // 推导为 currentNode 的直接后继 → 该节点产物已齐待 exit(内容级拦截重跑场景)→ 保护;
-    // 推导跳跃(跨节点,如"部分完成但产物全齐")或回退 → 产物权威校正(漂移,防过度修复)
+    // 推导为 currentNode 的**路由后继**（与 guard 出口同源：把 currentNode 视为已完成再加入
+    // completedNodes 求 resolveNextNode）→ 该节点产物已齐待 exit、路由自然推进到 detectedNode
+    // （平行转换 plan→subagent-execute、趟间回流 subagent-execute→execute 均属此形态）→ 保护。
+    // 反过度修复锚（同族：产物全齐但无推进史形态）：completedNodes 为空（无任何 exit 推进史，currentNode 仅是初始
+    // 陈旧节点）时不做路由后继保护——产物推导继续生效推进到最终节点（自定义协议产物全齐的
+    // 「部分完成但产物齐」形态仍路由到最后节点）。静态直接后继兜底（串行推进原语义）。
+    // 推导跳跃/跨节点或回退 → 产物权威校正(漂移,防过度修复)。
+    const routingSuccessorOfCurrent = state.currentNode
+      ? await determineNode(changeName, protocol, [...completedArr, state.currentNode])
+      : null;
+    const routingSuccessorProtects = !!(completedArr.length > 0
+      && routingSuccessorOfCurrent !== null
+      && routingSuccessorOfCurrent === detectedNode);
     const derivedIsDirectSuccessor = currentNodeIdx >= 0
       && currentNodeIdx + 1 < routeIds.length
       && routeIds[currentNodeIdx + 1] === detectedNode;
+    const derivedIsSuccessor = routingSuccessorProtects || derivedIsDirectSuccessor;
     const inProgress = !!(
       state.currentNode
       && !completedArr.includes(state.currentNode)
       && (currentNodeEntered
         || (currentNodeEvidence && typeof currentNodeEvidence === 'object' && !Array.isArray(currentNodeEvidence)))
-      && derivedIsDirectSuccessor
+      && derivedIsSuccessor
     );
     if (!inProgress && state.currentNode !== detectedNode) {
       state.currentNode = detectedNode;
@@ -1370,6 +1204,17 @@ async function main() {
     // direct 是逃生口：必须用户显式调用，并记录 directOverride；切回 subagent 时清除
     // （directOverride 恒等于"当前是否处于用户确认的 direct"——再次切 direct 必须重新确认，无历史歧义）
     state.directOverride = mode === 'direct';
+    if (mode === 'direct') {
+      // 授权审计留痕：direct 是用户决策点不可自决——协调者显式调用本命令即授权事件，写入授权
+      // 审计字段（guard 出口校验须存在授权记录；执行者绕过脚本手改 state 字段无授权记录 → BLOCK）。
+      console.error('DIRECT-AUTH: direct=逃生口须用户显式授权——本命令即授权留痕（directOverrideAt 写入）');
+      state.directOverrideAt = new Date().toISOString();
+      state.directOverrideSource = 'execution-mode';
+    } else {
+      // 切回 subagent 清除授权留痕（directOverride 一并清除——既有语义保持）
+      delete state.directOverrideAt;
+      delete state.directOverrideSource;
+    }
     await writeState(state);
     console.log('EXECUTION-MODE: ' + state.executionMode + (state.directOverride ? ' (directOverride)' : ''));
     return;

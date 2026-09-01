@@ -108,6 +108,31 @@ function targetAllowed(targetRel, whitelist, activeChange) {
   });
 }
 
+// W4: state 文件禁手动工具写（directOverride 授权约束的写入路径物理控制）——
+// .comet/flow-comet-state.json 是机器字段文件，只能由脚本通道（workflow-state 的
+// execution-mode/record/init 等命令）管理；任何工具写（Write/Edit/Bash 命令级）→ BLOCK
+// （fail-closed）。hook 拦工具不拦脚本——脚本通道天然不触发 PreToolUse，不受影响。
+// 与 M1 归档白名单收窄同型：保护机器文件不被越权手改（含 direct 模式下白名单 [''] 曾
+// 放行 state 写入的 fail-open 缺口——执行者自切 direct 越权写的物理入口）。
+// 大小写变体闭合（CodeRabbit 采纳）：win32/darwin 文件系统大小写不敏感，`.Comet/Flow-Comet-
+// State.json` 与机器状态文件指向同一实体——目标路径先 toLowerCase() 再与机器状态相对路径
+// 比较，变体同等 BLOCK（修复前精确等值比较被变体绕过 → fail-open）。其他平台
+// （大小写敏感文件系统）变体是不同文件，保持精确等值比较（不误拦合法路径）。
+const STATE_FILE_REL = '.comet/flow-comet-state.json';
+const CASE_INSENSITIVE_FS = process.platform === 'win32' || process.platform === 'darwin';
+function blockedStateFileTarget(targetRel) {
+  return CASE_INSENSITIVE_FS
+    ? targetRel.toLowerCase() === STATE_FILE_REL
+    : targetRel === STATE_FILE_REL;
+}
+
+function blockStateFileWrite(target) {
+  hookBlock(
+    `BLOCKED: state 文件 "${target}" 禁手动工具写（机器字段由脚本通道管理——execution-mode/record/init 等命令正常）`,
+    '恢复: 用 workflow-state.mjs 的 execution-mode 等命令管理状态；禁止手改 state 机器字段'
+  );
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..');
 // 项目根判定兜底链（级3 cwd 漂移实测暴露的 H5 残留缺口收口）：
@@ -1854,6 +1879,9 @@ async function main() {
         const absolute = path.resolve(runRoot, t);
         const rel = path.relative(runRoot, absolute);
         const targetRel = (path.isAbsolute(rel) || rel === '..' || rel.startsWith('..' + path.sep)) ? null : rel.replaceAll('\\', '/');
+        if (targetRel !== null && blockedStateFileTarget(targetRel)) {
+          blockStateFileWrite(t);
+        }
         const allowed = targetRel !== null && effectiveWhitelist !== null && targetAllowed(targetRel, effectiveWhitelist, activeChange);
         if (!allowed) {
           hookBlock(
@@ -1868,6 +1896,9 @@ async function main() {
   }
 
   if (currentNode && target) {
+    if (blockedStateFileTarget(target)) {
+      blockStateFileWrite(target);
+    }
     const whitelist = PHASE_WRITE_WHITELIST[currentNode];
     if (whitelist) {
       const allowed = targetAllowed(target, whitelist, activeChange);

@@ -6,7 +6,7 @@
 ## 一、测试载体说明
 
 - **载体**：每个测试项 = 一个独立临时目录（`fs.mkdtemp`）+ 内置协议副本复制到 `<tmp>/reference/`（受保护路径要求协议文件位于 runRoot 内）+ **真实命令序列**（`init → record → guard entry/exit → handoff → hook` 的 `spawnSync` 调用）+ 断言退出码与输出关键词；测试项跑完 `rmSync` 清理。
-- **与引擎回归的关系**：`guard-self-test.mjs` 是引擎脚本的单元/场景级回归（fixture 构造为主，200 场景）；本系统测试集是**系统级**——每个测试项走真实命令链路，验证机制在真实调用序列下生效（行为锚定归场景回归，集成正确性归系统测试）。
+- **与引擎回归的关系**：`guard-self-test.mjs` 是引擎脚本的单元/场景级回归（fixture 构造为主，219 场景）；本系统测试集是**系统级**（73 项：A1~A20 / B1~B9 / C1~C3 / D1~D3 / E1~E2 / F1~F4 / G1~G3 / H1~H4 / I1~I4 / J1~J2 / K1~K16 / L1~L3）——每个测试项走真实命令链路，验证机制在真实调用序列下生效（行为锚定归场景回归，集成正确性归系统测试）。
 - **运行环境**：仅 node 内置模块（child_process/fs/os/path），无网络、无第三方依赖。
 - **输出纪律**：逐项 PASS/FAIL + 汇总（`SYSTEM TEST: N/M passed`）；全过 exit 0，有 FAIL exit 1。测试项命名为公开面——零过程代号。
 
@@ -20,9 +20,9 @@
 
 ### A. 状态机与路由
 
-覆盖：init 全分支（状态写入/工件目录/同 id 重跑防护/分支模式）、status 节点推导与无活跃兜底、next 推进与状态漂移校正、next 未出口节点严格拦截、select 切换、advance 推进、record 基础证据、execution-mode 切换与记录、config 设置与非法值拒绝。
+覆盖：init 全分支（状态写入/工件目录/同 id 重跑防护/分支模式）、status 节点推导与无活跃兜底、next 推进与状态漂移校正、next 未出口节点严格拦截、select 切换、advance 推进、record 基础证据、execution-mode 切换与记录、config 设置与非法值拒绝、多趟路由真实链路（并→串→交替与多波依赖）、plan 出口依赖环负例与恢复、多趟路由时序收敛、plan 出口文件依赖检出。
 
-测试项（12）：A1 init 状态写入与工件目录创建 / A2 init 分支模式与非法前缀拒绝 / A3 init 同 id 重跑防护 / A4 status 节点推导与无活跃兜底 / A5 next 推进与状态漂移校正（进行中节点保护由引擎回归覆盖）/ A6 next 未出口节点严格拦截 / A7 select 切换与缺失拒绝 / A8 advance 节点推进 / A9 record 基础证据记录 / A10 execution-mode 切换与记录 / A11 config 配置与非法值拒绝 / A12 验证失败计数按 change 隔离（切换 change 后计数独立）。
+测试项（20）：A1 init 状态写入与工件目录创建 / A2 init 分支模式与非法前缀拒绝 / A3 init 同 id 重跑防护 / A4 status 节点推导与无活跃兜底 / A5 next 推进与状态漂移校正（进行中节点保护由引擎回归覆盖）/ A6 next 未出口节点严格拦截 / A7 select 切换与缺失拒绝 / A8 advance 节点推进 / A9 record 基础证据记录 / A10 execution-mode 切换与记录 / A11 config 配置与非法值拒绝 / A12 验证失败计数按 change 隔离（切换 change 后计数独立）/ A13 多趟路由真实链路（并→串→交替与多波依赖，NODE 行多次交替直至全部 done）/ A14 plan 出口依赖环负例（BLOCK 含 depends_on 恢复指引，按指引调环后恢复通过）/ A15 多趟路由时序收敛（逐节点 exit 后 next NODE 与 guard 出口 NODE 一致）/ A16 plan 出口文件依赖检出（写写重叠 BLOCK 与恢复 + 读写弱判 WARN）/ A17 多趟平行转换后 next 可达（各转换点 next NODE 与 guard 出口 NODE 一致）/ A18 漂移容忍 exit（execute 欠账经容错路径补齐）/ A19 路由诊断静默扩展（P→S 收尾无噪音 / 畸形块仍报）/ A20 directOverride 授权约束（自切 direct 无授权 BLOCK / 协调者授权通过）。
 
 ### B. 声明机制
 
@@ -80,9 +80,9 @@
 
 ### K. 安装器（版本标识 + 多平台）
 
-覆盖：prepare-env 生成的版本标识（优先源仓库 git describe：发布版 = 精确 tag、开发态 = `<tag>-N-g<hash>`；无 git 时回退权威源随技能包分发的 INSTALLED_VERSION）精确反映源仓库状态；权威源文件与 CHANGELOG 首个版本段一致（CI release-consistency 同规则）；多平台安装（平台描述符驱动：claude-code 默认零变化 / codex——技能落 `.agents/skills/`、SKILL 命令路径平台化替换、`.codex/hooks.json`（顶层 hooks 包裹层 + matcher `*`）注入、`config.toml [features] hooks` 启用、AGENTS.md 托管区、纯 codex 不生成 `.claude/`）；hook 平台分支输出契约（codex = `{"decision":"block"}` deny 通道 + Bash 命令写入检测（PowerShell cmdlet / .NET File API / 重定向）、放行 `{}`；claude-code 文本输出不变）；平台选择链（`--platform` 显式 / TTY 交互 / 无 TTY 探测 `.codex/`·`.claude/` / 默认 claude-code）；purge 语义（缺 `--yes` 拒绝 / 重建 / 用户内容保留）；平台描述符驱动防回归（main 统一调度——源码无平台分支标识，安装/清理逻辑全部封装在描述符条目；从源码提取平台逐一安装冒烟，未来新增平台自动纳入测试）。
+覆盖：prepare-env 生成的版本标识（优先源仓库 git describe：发布版 = 精确 tag、开发态 = `<tag>-N-g<hash>`；无 git 时回退权威源随技能包分发的 INSTALLED_VERSION）精确反映源仓库状态；权威源文件与 CHANGELOG 首个版本段一致（CI release-consistency 同规则）；多平台安装（平台描述符驱动：claude-code 默认零变化 / codex——技能落 `.agents/skills/`、SKILL 命令路径平台化替换、`.codex/hooks.json`（顶层 hooks 包裹层 + matcher `*`）注入、`config.toml [features] hooks` 启用、AGENTS.md 托管区、纯 codex 不生成 `.claude/`）；hook 平台分支输出契约（codex = `{"decision":"block"}` deny 通道 + Bash 命令写入检测（PowerShell cmdlet / .NET File API / 重定向）、放行 `{}`；claude-code 文本输出不变）；平台选择链（`--platform` 显式 / TTY 交互 / 无 TTY 探测 `.codex/`·`.claude/` / 默认 claude-code）；purge 语义（缺 `--yes` 拒绝 / 重建 / 用户内容保留）；平台描述符驱动防回归（main 统一调度——源码无平台分支标识，安装/清理逻辑全部封装在描述符条目；从源码提取平台逐一安装冒烟，未来新增平台自动纳入测试）；dsh 平台面（三平台桥接——技能落 `.dsh/skills/`、路径替换/版本标识/AGENTS.md 托管区/purge 清理/桥接 loader 纯函数与流程态门/版本戳重装断言）。
 
-测试项（6）：K1 安装器版本标识 / K2 codex 平台安装冒烟（技能/路径替换/hooks.json/AGENTS 托管区 + 非法 hooks.json fail-safe）/ K3 hook 平台分支 JSON 契约 + CC 分支不变 / K4 平台选择链（显式/无 TTY 探测/默认/未知平台拒绝）/ K5 purge 语义（缺 --yes 拒绝/重建/用户内容保留）/ K6 平台描述符驱动（全平台安装冒烟 + main 统一调度断言）。
+测试项（16）：K1 安装器版本标识 / K2 codex 平台安装冒烟（技能/路径替换/hooks.json/AGENTS 托管区 + 非法 hooks.json fail-safe）/ K3 hook 平台分支 JSON 契约 + CC 分支不变 / K4 平台选择链（显式/无 TTY 探测/默认/未知平台拒绝）/ K5 purge 语义（缺 --yes 拒绝/重建/用户内容保留）/ K6 平台描述符驱动（全平台安装冒烟 + main 统一调度断言）/ K7 dsh 平台安装（技能/pathReplacements/版本标识/树一致）/ K8 dsh AGENTS.md 托管区（用户内容保留 + 幂等重装）/ K9 桥接 loader 源文件/语法/复制与托管块注入（读-合并-写）/ K10 dsh purge 清理恢复（缺 --yes 拒绝/删除后重建/用户内容保留/空目录清理）/ K11 桥接 loader 纯函数与 apply 分派断言（映射/包含性/退出映射/身份分派）/ K12 桥接 loader 流程态门断言（无 state/无 activeChange/completed 放行 · 非法 JSON/未知 status deny）/ K13 hook 注入形态无关断言（basename+项目根引用）+ 旧条目幂等升级 / K14 桥接 loader 版本戳重装断言（升级/降级方向与覆盖后新戳）/ K15 桥接 loader 同源重装断言（首次安装后版本一致）/ K16 桥接 loader purge 后重建路径回归（loader 恢复与再装收敛）。
 
 ### L. 执行遗漏防护（真实链路）
 
