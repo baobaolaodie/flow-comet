@@ -10,7 +10,9 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号记录于 git tag、本文档、README 徽章、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 与权威源 `skills/flow-comet/INSTALLED_VERSION`；`bundle.yaml` 的 version 保持 1.0.0（与发布流程解耦）。
 
-## [Unreleased]
+## [1.5.0-rc.2] - 2026-09-01
+
+预发布版本，承载 rc.1 之后积累的路由与安装器批次：依赖驱动的多趟并行路由（依赖门控、混排趟次）、写入守卫加固（项目根锚定、state 文件大小写变体闭合）、测试专用并行任务预警、多趟出口硬化、平行转换后 `next` 可用、规划出口文件级依赖检查、路由收敛于单一共享判定、direct 逃生口的执行者授权约束，以及 flow-kit 快照获取 / dsh 桥接 loader 治理。([#75](https://github.com/baobaolaodie/flow-comet/pull/75)) ([#76](https://github.com/baobaolaodie/flow-comet/pull/76)) ([#77](https://github.com/baobaolaodie/flow-comet/pull/77)) ([#78](https://github.com/baobaolaodie/flow-comet/pull/78)) ([#79](https://github.com/baobaolaodie/flow-comet/pull/79)) ([#80](https://github.com/baobaolaodie/flow-comet/pull/80)) ([#81](https://github.com/baobaolaodie/flow-comet/pull/81)) ([#83](https://github.com/baobaolaodie/flow-comet/pull/83)) ([#84](https://github.com/baobaolaodie/flow-comet/pull/84))
 
 ### 新增
 
