@@ -6,6 +6,7 @@ import { createHash } from 'crypto';
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor } from './state-schema.mjs';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES } from './protocol-utils.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from './task-parsing.mjs';
+import { resolveNextNode } from './route-node.mjs';
 
 const command = process.argv[2] ?? 'verify';
 const nodeId = process.argv[3] ?? null;
@@ -1679,9 +1680,82 @@ function completedSet(state) {
   return new Set(Array.isArray(state.completedNodes) ? state.completedNodes : []);
 }
 
-function nextNode(protocol, state) {
-  const completed = completedSet(state);
-  return route(protocol).find((node) => !completed.has(node.id)) ?? null;
+// 路由判定统一委托共享模块 route-node.mjs 的 resolveNextNode（单一实现——guard 与
+// workflow-state 两侧同语义，含多趟 parallel 回流与串行 pending → execute）。展示层
+// （NEXT/NODE/SKILL 行）保留在本文件（AC-6 展示文案逐字）。无活跃 change → null（完成态）。
+async function nextNode(protocol, state) {
+  if (!state.activeChange) return null;
+  const id = await resolveNextNode({
+    runRoot,
+    changeName: state.activeChange,
+    protocol,
+    completedNodes: Array.isArray(state.completedNodes) ? state.completedNodes : [],
+  });
+  return id ? findNode(protocol, id) : null;
+}
+
+// ---------- 多趟路由共享判定（依赖图校验决策与完成判定谓词决策 · 多趟路由架构决策记录） ----------
+
+// <depends_on> 提取（逗号/空白分隔）。DESIGN 0.5.2：与 workflow-state.mjs 各自保留既有正则实现、
+// 不提取到共享解析层（task-parsing/state-schema 冻结为只消费）——两处语义由场景族锚定一致。
+function taskDependsOn(block) {
+  const m = String(block ?? '').match(/<depends_on>([\s\S]*?)<\/depends_on>/);
+  if (!m || !m[1].trim()) return [];
+  return m[1].trim().split(/[,\s]+/).filter(Boolean);
+}
+
+// 委托进入谓词（每趟求值）：∃ p ∈ tasks：p.parallel ∧ p.status=pending ∧ deps(p) ⊆ doneIds。
+// 返回满足谓词的任务块数组——subagent-execute 出口的「尚有可委托」判定用，
+// 与 workflow-state.mjs determineNode 的路由谓词同语义（镜像同步点）。
+function eligibleParallelBlocks(blocks, doneIds) {
+  return blocks.filter((block) => {
+    const a = taskOpeningAttrs(block);
+    if (!a || !a.parallel || a.status !== 'pending') return false;
+    const deps = taskDependsOn(block);
+    return deps.every((d) => doneIds.has(d));
+  });
+}
+
+// 依赖图分析：对全部 <task> 块建依赖图（deps 边），Kahn 拓扑排序判环 + 缺失依赖收集。
+// 返回 { ids, depsById, missing: [{id, dep}], cyclic, cycleIds }（cycleIds = 拓扑排序无解的
+// 任务集合，含被环传递拖累的下游任务）。plan 出口波次校验与 subagent-execute 出口孤儿检测
+// 共用同一实现（单一语义：依赖图无环 + 依赖链可满足）。
+function analyzeDependencyGraph(blocks) {
+  const parsed = blocks
+    .map((block) => ({ block, attrs: taskOpeningAttrs(block) }))
+    .filter((x) => x.attrs && x.attrs.id);
+  const ids = new Set(parsed.map((x) => x.attrs.id));
+  const depsById = new Map();
+  const missing = [];
+  for (const x of parsed) {
+    const deps = [...new Set(taskDependsOn(x.block))];
+    depsById.set(x.attrs.id, deps);
+    for (const d of deps) {
+      if (!ids.has(d)) missing.push({ id: x.attrs.id, dep: d });
+    }
+  }
+  const indegree = new Map([...ids].map((id) => [id, 0]));
+  const dependents = new Map([...ids].map((id) => [id, []]));
+  for (const [id, deps] of depsById) {
+    for (const d of deps) {
+      if (!ids.has(d)) continue;
+      indegree.set(id, indegree.get(id) + 1);
+      dependents.get(d).push(id);
+    }
+  }
+  let queue = [...ids].filter((id) => indegree.get(id) === 0);
+  const sorted = [];
+  while (queue.length > 0) {
+    const n = queue.shift();
+    sorted.push(n);
+    for (const m of dependents.get(n)) {
+      indegree.set(m, indegree.get(m) - 1);
+      if (indegree.get(m) === 0) queue.push(m);
+    }
+  }
+  const cyclic = sorted.length < ids.size;
+  const cycleIds = cyclic ? [...ids].filter((id) => !sorted.includes(id)) : [];
+  return { ids, depsById, missing, cyclic, cycleIds };
 }
 
 function printNext(protocol, node) {
@@ -1759,32 +1833,88 @@ function missingRequiredSchemaEvidence(protocol, node, evidence) {
   return missing;
 }
 
-// 并行冲突检测——解析 TASK.md 中 parallel=pending 任务的 write_files，找交集（防同 wave 并行写冲突）。
-// 开标签属性解析与 workflow-state 路由共享 taskOpeningAttrs（属性序无关；不读块内文本）。
+// 并行文件依赖检测——解析 TASK.md 中本趟可运行的 parallel=pending 任务的 read/write_files 声明，
+// 分两级返回：write∩write（写写绝对冲突，强判）与 read∩write（共享读写嫌疑，弱判——仅对彼此
+// 无显式 depends_on 关联的并行对探测，有显式关联=依赖已声明，跳过→合法拓扑零新增告警）。
+// 路径解析按声明实际内容（换行切分 → 分号二次切分 → trim → 滤空与 HTML 注释），不做扩展名
+// 白名单过滤——txt/log/无扩展名路径同等检出（链式重命名的 .txt 事故面闭合；与既有自动解析
+// 同源实现）。开标签属性解析与 workflow-state 路由共享 taskOpeningAttrs（属性序无关；不读块内文本）。
 async function findParallelWriteConflicts(changeDir) {
   const taskFile = path.join(changeDir, 'TASK.md');
   let text;
-  try { text = await fs.readFile(taskFile, 'utf8'); } catch { return []; }
-  const blocks = extractTaskBlocks(text).filter((b) => {
+  try { text = await fs.readFile(taskFile, 'utf8'); } catch { return { writeConflicts: [], readWarnings: [] }; }
+  const allBlocks = extractTaskBlocks(text);
+  // 依赖资格收窄：仅统计「本趟可运行」的并行任务——deps ⊆ doneIds；
+  // 等待后续趟次的并行任务（依赖未满足）与已交付任务不参与同趟冲突判定，
+  // 使 A→B 同写路径的跨趟合法计划不再被首趟误拦（与路由谓词同一口径）。
+  const doneIds = new Set(allBlocks
+    .map((b) => taskOpeningAttrs(b))
+    .filter((a) => a && a.id && a.status === 'done')
+    .map((a) => a.id));
+  const dependsOnOf = (b) => {
+    const m = b.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
+    return m ? m[1].trim().split(/[,\s]+/).filter(Boolean) : [];
+  };
+  const blocks = allBlocks.filter((b) => {
     const a = taskOpeningAttrs(b);
-    return a && a.parallel && a.status === 'pending';
+    if (!a || !a.parallel || a.status !== 'pending') return false;
+    return dependsOnOf(b).every((d) => doneIds.has(d));
   });
+  // 路径解析与既有自动解析同源：剥 HTML 注释 → 换行切分 → 分号二次切分 → trim → 滤空
+  // 路径归一化（CodeRabbit 采纳）：分隔符统一 '/'、解 '.' 段（`./` / `a/./b`）、`..` 逃出项目根
+  // 按越界处理（返回 null 不参与重叠比较）——`src/a.mjs` vs `src/./a.mjs` / `src\a.mjs` 变体不再
+  // 绕过写写强判与读写弱判；与委托入口共用同一函数（两侧同语义）。
+  const normalizeTaskPath = (raw) => {
+    const p = String(raw).trim();
+    if (p === '') return null;
+    const segments = p.replace(/\\/g, '/').split('/').filter((s) => s !== '' && s !== '.');
+    const out = [];
+    for (const seg of segments) {
+      if (seg === '..') {
+        if (out.length === 0) return null; // 逃出项目根 → 越界（不参与比较）
+        out.pop();
+      } else {
+        out.push(seg);
+      }
+    }
+    return out.join('/');
+  };
+  const parsePaths = (matchText) => String(matchText ?? '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .trim().split(/\s*\n\s*/).map((l) => l.trim()).filter(Boolean)
+    .flatMap((l) => l.split(';')).map((l) => l.trim()).filter(Boolean)
+    .map(normalizeTaskPath)
+    .filter((p) => p !== null && p !== '');
   const perTask = [];
   for (const b of blocks) {
     const a = taskOpeningAttrs(b);
+    if (!a || !a.id) continue;
     const wf = b.match(/<write_files>([\s\S]*?)<\/write_files>/);
-    if (!a || !a.id || !wf) continue;
-    const files = [...wf[1].matchAll(/([A-Za-z0-9_./@*-]+\.(?:ts|tsx|py|js|mjs|json|css|md))/g)].map((m) => m[1]);
-    perTask.push({ id: a.id, files: new Set(files) });
+    const rf = b.match(/<read_files>([\s\S]*?)<\/read_files>/);
+    if (!wf && !rf) continue;
+    perTask.push({
+      id: a.id,
+      deps: new Set(dependsOnOf(b)),
+      writes: new Set(parsePaths(wf && wf[1])),
+      reads: new Set(parsePaths(rf && rf[1])),
+    });
   }
-  const conflicts = [];
+  const writeConflicts = [];
+  const readWarnings = [];
   for (let i = 0; i < perTask.length; i++) {
     for (let j = i + 1; j < perTask.length; j++) {
-      const overlap = [...perTask[i].files].filter((f) => perTask[j].files.has(f));
-      if (overlap.length) conflicts.push({ a: perTask[i].id, b: perTask[j].id, files: overlap });
+      const overlap = [...perTask[i].writes].filter((f) => perTask[j].writes.has(f));
+      if (overlap.length) writeConflicts.push({ a: perTask[i].id, b: perTask[j].id, files: overlap });
+      // 读写弱判触发面：仅无显式 depends_on 关联的并行对（有显式关联=依赖已声明，跳过）
+      const associated = perTask[i].deps.has(perTask[j].id) || perTask[j].deps.has(perTask[i].id);
+      if (associated) continue;
+      const readOverlap = [...perTask[i].reads].filter((f) => perTask[j].writes.has(f));
+      if (readOverlap.length) readWarnings.push({ a: perTask[i].id, b: perTask[j].id, files: readOverlap });
+      const readOverlap2 = [...perTask[j].reads].filter((f) => perTask[i].writes.has(f));
+      if (readOverlap2.length) readWarnings.push({ a: perTask[j].id, b: perTask[i].id, files: readOverlap2 });
     }
   }
-  return conflicts;
+  return { writeConflicts, readWarnings };
 }
 
 function escapeRegExp(value) {
@@ -2146,7 +2276,7 @@ async function main() {
   state.completedNodes = Array.isArray(state.completedNodes) ? state.completedNodes : [];
   state.evidence = state.evidence && typeof state.evidence === 'object' ? state.evidence : {};
   if (command === 'entry') {
-    const current = state.currentNode ?? nextNode(protocol, state)?.id ?? null;
+    const current = state.currentNode ?? (await nextNode(protocol, state))?.id ?? null;
     if (current !== node.id && !state.completedNodes.includes(node.id)) {
       console.error('BLOCKED: current Node is ' + String(current) + ', cannot enter ' + node.id + '.');
       process.exit(1);
@@ -2168,10 +2298,11 @@ async function main() {
       }
     }
     // 并行冲突检测——subagent-execute 委托前校验 wave 内 parallel 任务 write_files 无交集
+    // （第二道写写锚：只取强判组，行为与消息保持既有语义不变）
     if (node.id === 'subagent-execute' && state.activeChange) {
-      const conflicts = await findParallelWriteConflicts(path.join(runRoot, '.specs', state.activeChange));
-      if (conflicts.length > 0) {
-        console.error('BLOCKED: parallel tasks write_files 冲突: ' + conflicts.map((c) => `${c.a}×${c.b}(${c.files.join(',')})`).join('; '));
+      const { writeConflicts } = await findParallelWriteConflicts(path.join(runRoot, '.specs', state.activeChange));
+      if (writeConflicts.length > 0) {
+        console.error('BLOCKED: parallel tasks write_files 冲突: ' + writeConflicts.map((c) => `${c.a}×${c.b}(${c.files.join(',')})`).join('; '));
         process.exit(1);
       }
     }
@@ -2247,10 +2378,33 @@ async function main() {
     process.exit(1);
   }
   // W1-A: 转移前置约束——currentNode 必须等于被 exit 的节点（防跳阶段）
+  // M2（2026-08-29 容错落地 · L-061 修复候选）：currentNode 已漂移到文件推导位置
+  // （resolveNextNode(completedNodes) === currentNode，如 execute 证据/产物齐后路由已指向
+  // review）且本节点 evidence 齐 + 产物齐（执行者确认本节点实际已完成）→ 容错放行 exit
+  // （漂移/提前校正态可补欠账；BLOCK 消息/提示标注「漂移态可用容错 exit」——不再只有不可行的
+  // advance/select 指引）。漂移但 evidence/产物不齐 → 仍严格 BLOCK（容错不放开未完成）。
+  const driftedNodeEvidence = evidenceFor(state, node.id);
   if (state.currentNode !== node.id) {
-    console.error('BLOCKED: currentNode is ' + String(state.currentNode) + ', cannot exit ' + node.id + '.');
-    console.error('恢复: 若节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进，确认节点实际已完成后再用）或 select（切换 change）；禁止手改 state 机器字段');
-    process.exit(1);
+    let tolerable = false;
+    if (driftedNodeEvidence) {
+      const derivedNext = await nextNode(protocol, state);
+      const missingDriftArtifacts = await missingRequiredArtifacts(protocol, node, state.activeChange);
+      const missingDriftSchemaEvidence = missingRequiredSchemaEvidence(protocol, node, driftedNodeEvidence);
+      tolerable = !!(
+        derivedNext && derivedNext.id === state.currentNode
+        && missingDriftArtifacts.length === 0
+        && missingDriftSchemaEvidence.length === 0
+      );
+    }
+    if (tolerable) {
+      console.log('NOTE: 容错放行——currentNode 已为文件推导下一节点且本节点证据/产物齐（执行者确认本节点实际已完成），exit ' + node.id + ' --apply 补齐欠账（漂移容忍路径）');
+    }
+    if (!tolerable) {
+      console.error('BLOCKED: currentNode is ' + String(state.currentNode) + ', cannot exit ' + node.id + '.');
+      console.error('恢复: 若节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进，确认节点实际已完成后再用）或 select（切换 change）；禁止手改 state 机器字段');
+      console.error('提示: 若 currentNode 已漂移到文件推导位置且本节点证据/产物齐（执行者确认本节点实际已完成）→ 可用容错 exit ' + node.id + ' --apply 补齐欠账（漂移容忍路径，不再只有不可行的 advance/select 指引）；漂移但证据/产物不齐则不适用');
+      process.exit(1);
+    }
   }
   // M1/R2: enter 证据检测——未 entry 直接 exit:新 change(init 标记)强制 BLOCKED,旧 change 渐进 WARN
   // 跳过 entry 会漏掉进入检查(协调者禁令/C4 WORKTREE/PROGRESS/签名记录)
@@ -2508,29 +2662,68 @@ async function main() {
           }
         }
       }
-      // 波次分组一致性检测（DESIGN 波次分组小节）——任务的 parallel 序列必须构成单个连续并行块且位于
-      // 串行任务序列首或尾（含全串行/全并行）。违规即混排：新 change 强制 BLOCK（含恢复指引），
-      // 旧 change 渐进 WARN。复用 task-parsing.mjs 共享开标签解析（与 workflow-state 路由同语义：
-      // 开标签中 parallel="true" 且 status="pending" 判为并行，属性序无关、不读块内文本）。
-      // 合法序列：P+S+（并在前+串在后）/ S+P+（串在前+并在后）/ 全并行 / 全串行;
-      // 非法即 S→P→S、P→S→P 或离散多并行块（混排）。
-      const groupFlag = taskList.map(b => {
-        const a = taskOpeningAttrs(b);
-        return a && a.parallel && a.status === 'pending' ? 'P' : 'S';
-      }).join('');
-      const groupingValid = !groupFlag.includes('P') || !groupFlag.includes('S') ||
-        /^P+S+$/.test(groupFlag) || /^S+P+$/.test(groupFlag);
-      if (!groupingValid) {
-        const groupedIds = taskList
-          .map(b => (taskOpeningAttrs(b) || {}).id)
-          .filter(Boolean)
-          .join(',');
+      // 波次分组校验重定义（依赖图校验决策 · 混排合法化）：原「并行块必须单个连续且居首/尾」形态约束废除——
+      // 串行任务位置不再受限，串→并→串 / 并→串→并 / 多波混合均合法（多趟循环路由按依赖拓扑分趟）。
+      // 改为依赖图校验：① 全部任务建依赖图（deps 边）做 Kahn 拓扑排序判环——有环即规划结构性死锁；
+      // ② 全部引用的任务 id 必须存在（无环图下「每个 parallel 任务的全部传递依赖存在且非环」
+      // ⟺ 直接引用都存在）。违规分级：新 change BLOCKED（含「依赖环」/缺失依赖明细 + depends_on
+      // 调整恢复指引）；旧 change 渐进 WARN 不阻断。波次散文一致性检测保留不动（与形态约束正交的既有独立检测，维持不变）。
+      const depGraph = analyzeDependencyGraph(taskList);
+      if (depGraph.cyclic || depGraph.missing.length > 0) {
+        const detail = depGraph.cyclic
+          ? '依赖环（拓扑排序无解，涉及任务: ' + depGraph.cycleIds.join(', ') + '）'
+          : '依赖不存在的任务: ' + depGraph.missing.map((m) => m.id + '→' + m.dep).join(', ');
+        const guide = ';恢复: 调整任务 depends_on——移除成环引用或改为真实存在的任务 id 后重试';
         if (isNewChange(state)) {
-          console.error('BLOCKED: TASK.md 波次分组混排（并行块必须为单个连续块且位于串行序列首或尾,当前序列 ' + groupFlag + '，任务: ' + groupedIds + '）——并行任务不成组' +
-            ';恢复: 调整波次分组——把并行块移到串行任务前/后（保持并行任务单个连续块），或显式豁免');
+          console.error('BLOCKED: TASK.md ' + detail + '——依赖图不可满足（任务的依赖链必须存在且无环）' + guide);
           process.exit(1);
         }
-        console.error('WARN: TASK.md 波次分组混排（并行块必须为单个连续块且位于串行序列首或尾,当前序列 ' + groupFlag + '，任务: ' + groupedIds + '）——建议把并行块移到串行任务前/后（旧 change 渐进不阻断）');
+        console.error('WARN: TASK.md ' + detail + '——依赖图不可满足（旧 change 渐进不阻断）' + guide);
+      }
+      // 伪并行检测（真实载体验证暴露的设计盲区兜底）：如果一个标记为并行的任务只写测试文件
+      // 而无任何生产代码文件，它很可能隐式依赖某个实现类并行任务的产出（如测试 import
+      // 尚未存在的函数）。这种"伪并行"在多趟路由下会导致委托后测试失败。
+      // 启发式：并行任务的 write_files 全部匹配 tests/ 或 test_ 前缀 → 视为疑似伪并行。
+      // WARN 渐进不阻断——由执行者判断是否真独立（纯测试基础设施改动可合法全测试面）。
+      const testOnlyParallelIds = [];
+      for (const block of taskList) {
+        const attrs = taskOpeningAttrs(block);
+        if (!attrs || !attrs.parallel || attrs.status !== 'pending') continue;
+        const wfMatch = block.match(/<write_files>([\s\S]*?)<\/write_files>/);
+        if (!wfMatch) continue;
+        // 分号容错：与 workflow-handoff.mjs 自动解析同源实现（分号容错双点内联，与 workflow-handoff.mjs 同源互锚）——
+        // 换行切分后逐段按 ';' 二次切分、trim、滤空与 HTML 注释行（路径含分号的极端形态不支持，须换行书写）
+        const blockContent = wfMatch[1].replace(/<!--[\s\S]*?-->/g, '');
+        const filePaths = blockContent.trim().split(/\s*\n\s*/).map(l => l.trim()).filter(Boolean)
+          .flatMap(l => l.split(';')).map(l => l.trim()).filter(Boolean);
+        if (filePaths.length === 0) continue;
+        const prodFiles = filePaths.filter(f => !/(?:^|[\/\\])(?:__tests__\/|test_|tests?\/)|\.(?:test|spec)\.(?:mjs|js|jsx|ts|tsx|cjs)$/.test(f));
+        if (prodFiles.length === 0) {
+          testOnlyParallelIds.push(attrs.id || 'unknown');
+        }
+      }
+      if (testOnlyParallelIds.length > 0) {
+        console.error('WARN: 伪并行检测——以下并行任务仅写测试文件而无生产代码文件: '
+          + testOnlyParallelIds.join(', ')
+          + '。测试通常依赖实现产出的符号，可能存在隐式依赖；建议添加 depends_on 声明或合并为垂直切片');
+      }
+      // 并行文件依赖检测前移（触发面）：write∩write 写写强判（新 change BLOCKED / 旧 change
+      // WARN 渐进，与依赖环分级同先例）+ read∩write 读写弱判（仅无显式 depends_on 关联的并行对；
+      // WARN 提示级，新/旧均不 BLOCK——渐进提示）。与委托前既有拦截并存（委托前为第二道写写锚，
+      // 行为与消息保持既有语义不变）。
+      const { writeConflicts, readWarnings } = await findParallelWriteConflicts(path.join(runRoot, '.specs', state.activeChange));
+      if (writeConflicts.length > 0) {
+        const detail = writeConflicts.map((c) => `${c.a}×${c.b}(${c.files.join(',')})`).join('; ');
+        const guide = ';恢复: 补显式 depends_on 或拆为串行任务后重试';
+        if (isNewChange(state)) {
+          console.error('BLOCKED: TASK.md 并行任务 write_files 重叠（写写冲突，同波次并行会竞态覆盖）: ' + detail + guide);
+          process.exit(1);
+        }
+        console.error('WARN: TASK.md 并行任务 write_files 重叠（写写冲突，建议补显式 depends_on 或拆为串行任务）: ' + detail + guide);
+      }
+      if (readWarnings.length > 0) {
+        console.error('WARN: TASK.md 并行任务 read∩write 隐式依赖嫌疑（一方读取对方写路径，建议补显式 depends_on 声明）: '
+          + readWarnings.map((c) => `${c.a}×${c.b}(${c.files.join(',')})`).join('; '));
       }
     } catch {}
   }
@@ -2558,6 +2751,23 @@ async function main() {
           '——未处置的发现（含 Minor）不应无声消失，补标记后本警告消除（渐进不阻断）');
       }
     } catch {}
+  }
+  // W3: directOverride 授权约束（direct 是用户决策点，不可自决——机制约束）——
+  // execute / subagent-execute 出口校验：executionMode=direct 且 directOverride=true（显式
+  // 直显授权态）须存在授权审计记录（directOverrideAt/来源，由 workflow-state execution-mode
+  // 命令在协调者显式授权时写入）——否则 BLOCKED + 恢复指引（协调者显式授权 / 回 subagent）。
+  // 旧 state 缺省（directOverride=false / 缺字段）放行（前向兼容——未处于显式 direct 不受影响）。
+  if ((node.id === 'execute' || node.id === 'subagent-execute') && state.activeChange) {
+    const directMode = state.executionMode ?? 'subagent';
+    if (directMode === 'direct' && state.directOverride === true) {
+      const hasAuditRecord = typeof state.directOverrideAt === 'string'
+        && state.directOverrideAt.trim() !== '';
+      if (!hasAuditRecord) {
+        console.error('BLOCKED: executionMode=direct 且 directOverride=true 但无授权审计记录（direct 是用户决策点，不可自决——须存在授权留痕 directOverrideAt/来源，由协调者显式 execution-mode direct 写入）');
+        console.error('恢复: 由协调者执行 workflow-state.mjs execution-mode direct 显式授权（写入授权审计记录）后重试 exit；或 execution-mode subagent 切回（清除 directOverride）后重试 exit；禁止手改 state 机器字段');
+        process.exit(1);
+      }
+    }
   }
   // W1-B: execute / subagent-execute 出口校验每份 SUMMARY 含三个必填段 + 6 维自查非空 + 自检方法
   if (node.id === 'execute' || node.id === 'subagent-execute') {
@@ -2650,9 +2860,23 @@ async function main() {
       if (emptyExitApproved) {
         console.error('EMPTY-EXIT: execute 空退出豁免已生效(evidence.execute.emptyExitApproved)——审计记录:该 change 在无串行任务时显式豁免空退出');
       }
-      const serialPending = tasks.filter(t => !t.parallel && t.status !== 'done');
-      if (serialPending.length > 0) {
-        console.error('BLOCKED: execute 出口仍有串行 pending 任务: ' + serialPending.map(t => t.id).join(', ') + '——空退出豁免不适用于存在未完成串行任务的情况(先完成串行任务,或修正任务标记)');
+      // serialPending 收窄为「可运行串行」（出口拦截集合收窄）：仅 deps ⊆ doneIds 的
+      // 未完成串行计入拦截——deps 未满足的串行 pending 是等后续波次的合法中间态，放行由多趟
+      // 路由按依赖拓扑分趟驱动。doneIds 就地派生；deps 提取复用 taskDependsOn（<depends_on>
+      // 内容按 [,\s]+ 切分，与路由谓词同一解析口径），不新增状态。
+      const doneIds = new Set(tasks.filter(t => t.status === 'done').map(t => t.id));
+      const blockById = new Map();
+      for (const block of taskList) {
+        const a = taskOpeningAttrs(block);
+        if (a && a.id) blockById.set(a.id, block);
+      }
+      const serialRunnable = tasks.filter(t =>
+        !t.parallel && t.status === 'pending'
+        && taskDependsOn(blockById.get(t.id) || '').every(d => doneIds.has(d)));
+      if (serialRunnable.length > 0) {
+        console.error('BLOCKED: execute 出口仍有串行 pending 任务: ' + serialRunnable.map(t => t.id).join(', ')
+          + '——空退出豁免不适用于存在未完成可运行串行任务的情况(先完成该串行任务,或修正任务标记)'
+          + ';无可执行的常规恢复动作时，可用 workflow-state.mjs advance 渡过结构性死结（逃生口：使用后本节点须重新 entry 并重做交付记录）；常规缺产物/缺证据情形不适用');
         process.exit(1);
       }
 
@@ -2885,6 +3109,63 @@ async function main() {
       }
     } catch {}
   }
+  // 多趟完成判定（完成判定谓词决策·合取语义）——subagent-execute 每趟出口校验：
+  // ① 可委托集合必须为空：仍存在 p（parallel ∧ pending ∧ deps⊆done）→ 本趟未委派完即退 →
+  //    BLOCK「尚有可委托并行任务（继续委托）」（AC-1：每趟委托全部依赖已满足的并行任务）；
+  // ② 孤儿并行单独区分文案：parallel ∧ pending 且依赖链无法满足（直接依赖缺失，或陷入依赖环/
+  //    被环传递拖累）→ BLOCK「孤儿并行任务依赖无法满足（检查 depends_on）」——数据异常 fail-closed，
+  //    防静默跳过（三重防呆决策之二）。
+  // serial pending 不阻断：合法趟间态（回 execute 消化串行）——最终完成的另一支「无 serial pending」
+  // 由 execute 出口的串行 pending 校验把关，两支在流程推进中自然合取。
+  if (node.id === 'subagent-execute' && state.activeChange) {
+    try {
+      const mpContent = await fs.readFile(path.join(runRoot, '.specs', state.activeChange, 'TASK.md'), 'utf8');
+      const mpBlocks = extractTaskBlocks(mpContent);
+      const mpDoneIds = new Set(mpBlocks
+        .map(taskOpeningAttrs)
+        .filter((a) => a && a.status === 'done' && a.id)
+        .map((a) => a.id));
+      const delegable = eligibleParallelBlocks(mpBlocks, mpDoneIds);
+      if (delegable.length > 0) {
+        console.error('BLOCKED: 尚有可委托并行任务（继续委托）: ' + delegable
+          .map((b) => (taskOpeningAttrs(b) || {}).id).join(', ') +
+          '——多趟语义下每趟须委派全部依赖已满足的并行任务后才能退出');
+        console.error('恢复: 继续委托上述任务（子代理回传 Return Contract 后再 exit）；若确需提前收尾，先调整其 depends_on 使其脱离可委派状态');
+        process.exit(1);
+      }
+      const mpGraph = analyzeDependencyGraph(mpBlocks);
+      const parallelPending = mpBlocks.filter((b) => {
+        const a = taskOpeningAttrs(b);
+        return a && a.parallel && a.status === 'pending';
+      });
+      let orphans = [];
+      if (mpGraph.cyclic || mpGraph.missing.length > 0) {
+        // doomed 闭包：直接依赖缺失的任务 ∪ 环上/被环拖累的任务，再传递扩散到一切（传递）依赖它们
+        // 的任务——这些任务永远进不了可委派状态，一并视为孤儿。
+        const doomed = new Set(mpGraph.cycleIds);
+        for (const m of mpGraph.missing) doomed.add(m.id);
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const [id, deps] of mpGraph.depsById) {
+            if (doomed.has(id)) continue;
+            if (deps.some((d) => doomed.has(d))) { doomed.add(id); changed = true; }
+          }
+        }
+        orphans = parallelPending.filter((b) => {
+          const a = taskOpeningAttrs(b);
+          return a && a.id && doomed.has(a.id);
+        });
+      }
+      if (orphans.length > 0) {
+        console.error('BLOCKED: 孤儿并行任务依赖无法满足（检查 depends_on）: ' + orphans
+          .map((b) => (taskOpeningAttrs(b) || {}).id).join(', ') +
+          '——依赖引用了不存在的任务或陷入依赖环，永远无法进入可委派状态');
+        console.error('恢复: 调整这些任务的 depends_on——指向真实存在且无环的任务 id 后重试；依赖环应在 plan 出口被前置拦截，执行期出现请核对 TASK.md 是否被手改');
+        process.exit(1);
+      }
+    } catch {}
+  }
   // exit 协议声明标记校验——节点 exit 时扫描 .specs/<change-id>/.skill-loads/ 下该节点标记
   // （<node>-*.json，执行者加载节点 skill 后经 skill-load 写入，含 protocol 字段——指向
   // flow-kit/prompts/ 协议文件，只读引用），校验至少一个标记的 protocol ∈ 该节点协议集（节点协议映射表）。
@@ -3104,44 +3385,40 @@ async function main() {
     // archive 节点完成后 change 已归档 → 清空活跃 change（flow-comet 回到无活跃状态）
     const isArchive = node.id === 'archive';
     if (isArchive) state.activeChange = null;
-    let next = isArchive ? null : nextNode(protocol, state);
-    // parallel-aware 路由——如果下一候选是 execute，检查 TASK.md 是否有依赖已满足的 pending parallel 任务
-    // 有则路由到 subagent-execute（与 workflow-state.mjs 的 determineNode 逻辑一致）
-    if (next && next.id === 'execute' && state.activeChange) {
+    let next = isArchive ? null : await nextNode(protocol, state);
+    // 多趟路由诊断保留（展示层，不并入共享判定）：出口推进后下一候选非委托节点时，若任务集存在
+    // parallel 标记任务与任一 pending 任务但无 pending parallel 可委托块，输出路由诊断提示。
+    // 静默边界（M4 批次扩展）：(a) 全部任务 done 时无 pending 不输出（收尾静默锚）；
+    // (b) 剩余 pending 全为串行且各 parallel 块均带 status（结构正常、P→S 收尾转换）→ 静默
+    // （「全 done 静默」扩展为「全串行剩余」也静默）；(c) 存在「parallel 缺 status」的
+    // 畸形/旧模板块且仍有 pending → 仍报（结构校验严格，缺 status 不视为 pending，
+    // 不因扩展误静音——反过静音锚）。路由决策本身由 resolveNextNode 单一实现（不维护第二份并行镜像）。
+    if (next && next.id !== 'subagent-execute' && state.activeChange) {
       const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
       try {
         const taskContent = await fs.readFile(taskFile, 'utf8');
-        // 开标签属性解析共享 task-parsing.mjs——与 workflow-state determineNode 同语义（属性序无关）
         const taskList = extractTaskBlocks(taskContent);
-        // 收集所有 done 任务的 id
-        const doneIds = new Set(taskList
-          .map(taskOpeningAttrs)
-          .filter(a => a && a.status === 'done' && a.id)
-          .map(a => a.id));
-        // 检查 pending parallel 任务中是否有依赖已满足的（开标签 parallel="true" 且 status="pending"）
-        const parallelBlocks = taskList.filter((block) => {
+        const hasParallelTag = taskList.some((block) => {
+          const a = taskOpeningAttrs(block);
+          return a && a.parallel;
+        });
+        const hasPending = taskList.some((block) => {
+          const a = taskOpeningAttrs(block);
+          return a && a.status === 'pending';
+        });
+        const hasParallelPending = taskList.some((block) => {
           const a = taskOpeningAttrs(block);
           return a && a.parallel && a.status === 'pending';
         });
-        // 路由无匹配时输出诊断——结构校验保持严格，检测失败纠偏可见
-        // 旧模板（task 标签无 status 属性）产出的 TASK.md 无法匹配——明确提示而非静默卡在 execute
-        if (parallelBlocks.length === 0 && taskList.some((block) => {
+        // 畸形/旧模板信号：parallel 标记但缺 status 属性（无法分类为 done/pending——缺 status
+        // 不视为 pending；这正是诊断要提示的检查点）。taskOpeningAttrs 缺属性时 status 返回 null，
+        // 故判 `status == null`（null 或 undefined 双容）。
+        const hasParallelMissingStatus = taskList.some((block) => {
           const a = taskOpeningAttrs(block);
-          return a && a.parallel;
-        })) {
-          console.error('ROUTE WARN: 未找到 parallel="true" status="pending" 的任务块——检查 task 开标签的 parallel/status 属性（属性序无关；缺 status 不视为 pending）');
-        }
-        const eligibleParallel = parallelBlocks.filter(block => {
-          const depsMatch = block.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
-          if (!depsMatch || !depsMatch[1].trim()) return true;
-          const deps = depsMatch[1].trim().split(/[,\s]+/).filter(Boolean);
-          return deps.every(d => doneIds.has(d));
+          return a && a.parallel && (a.status === null || a.status === undefined);
         });
-        if (eligibleParallel.length > 0) {
-          const subagentNode = findNode(protocol, 'subagent-execute');
-          if (subagentNode && !completed.has('subagent-execute')) {
-            next = subagentNode;
-          }
+        if (hasPending && hasParallelTag && !hasParallelPending && hasParallelMissingStatus) {
+          console.error('ROUTE WARN: 未找到 parallel="true" status="pending" 的任务块——存在 parallel="true" 但缺 status 属性的任务块（缺 status 不视为 pending、无法参与委托判定），检查 task 开标签的 parallel/status 属性（属性序无关）');
         }
       } catch {}
     }

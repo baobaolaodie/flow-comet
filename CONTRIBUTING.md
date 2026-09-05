@@ -85,15 +85,15 @@ git branch -d hotfix/<description>
 
 1. **Read the README** — the quick start walks through a minimal workflow.
 2. **Pick a first issue** — issues labeled `good first issue` are scoped for newcomers.
-3. **Set up your environment** — Node.js ≥ 18; clone the repo; run `node scripts/install-commit-hook.mjs` once (local commit/push message checks).
+3. **Set up your environment** — Node.js ≥ 18; clone the repo; run `npm install` once (installs the locked `@clack/prompts` dependency — the repository's only third-party dependency, used solely by the installer's interactive platform selection); run `node scripts/install-commit-hook.mjs` once (local commit/push message checks).
 4. **Verify the baseline** — run the regression suite (see Development setup below).
 5. **Not sure whether a change is wanted?** Open an issue first — the issue templates ask for the context we need.
 
 ## Development setup
 
-- **Runtime**: Node.js ≥ 18 (ESM)
-- **Repo**: clone, then verify the regression baseline runs:
-  `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 171 SCENARIOS PASSED` (two-tier baseline; also run `system-test.mjs` → `ALL SYSTEM TESTS PASSED`, 61 items)
+- **Runtime**: Node.js ≥ 18 (ESM); the only third-party dependency is `@clack/prompts` (pinned exact version via `package-lock.json`), used only by the installer's interactive TTY multi-select with an automatic readline fallback — run `npm install` once after cloning
+- **Repo**: clone, run `npm install`, then verify the regression baseline runs:
+  `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 219 SCENARIOS PASSED` (two-tier baseline; also run `system-test.mjs` → `ALL SYSTEM TESTS PASSED`, 73 items)
 - **Authoring environment**: Claude Code (skills/hooks run in Claude Code sessions); the hook is installed via `prepare-env` into your project's `.claude/` (the same installer serves Codex via `--platform codex` and DeepSeek Harness (dsh) via `--platform dsh` — project-level skill tree, AGENTS.md managed rules, and a global bridge loader)
 - **For mechanism work**: read [docs/MECHANISM.md](docs/MECHANISM.md) for the mechanism semantics (behavior layer) before touching scripts
 
@@ -112,7 +112,7 @@ The hooks reject commits and pushes whose messages carry process codes — proje
 Before pushing, run the regression baseline:
 
 ```bash
-node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 171 SCENARIOS PASSED
+node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 219 SCENARIOS PASSED
 ```
 
 CI handles the rest.
@@ -130,7 +130,7 @@ After the issue is confirmed: bug fixes use a `fix/` branch, features use a `fea
 
 - **Authoritative source**: edit skills/scripts under `.comet/bundle-drafts/flow-comet/skills/` (the single source; `.claude/` copies are install artifacts — update them via `prepare-env`, never by hand)
 - **TDD**: every mechanism fix starts with a RED scenario in `guard-self-test.mjs` (watch it fail for the right reason), then GREEN, then full regression
-- **Regression baseline**: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 171 SCENARIOS PASSED` (two-tier baseline; also run `system-test.mjs` → `ALL SYSTEM TESTS PASSED`, 61 items) (mandatory after every change)
+- **Regression baseline**: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 219 SCENARIOS PASSED` (two-tier baseline; also run `system-test.mjs` → `ALL SYSTEM TESTS PASSED`, 73 items) (mandatory after every change)
 - **Documentation sync**: behavior-layer docs live in `docs/` (bilingual EN/zh — keep both in sync when a doc changes); implementation details stay out of public docs
 - **Bilingual discipline**: English docs contain no Chinese (except the language switcher, flow-kit artifact section names, and runtime message quotes); Chinese docs contain no long English sentences (except commands, URLs, and proper terms)
 - **Backward compatibility**: old changes/states keep working — progressive WARN over BLOCK
@@ -156,6 +156,10 @@ ci:        CI pipeline changes
 chore:     tooling, release wrap-up
 revert:    reverts a previous commit
 ```
+
+**General optional scope**: this repository uses `<type>(<scope>): <subject>` — the scope is a short subsystem or area-of-interest noun from the ecosystem-wide Conventional Commits vocabulary (e.g. `docs`, `usage`, `installer`, `guard`, `handoff`, `selftest`). The scope is **recommended and optional**: give one for single-subsystem changes (e.g. `feat(guard): ...`, `docs(usage): ...`, `fix(installer): ...`); omit it (`<type>: <subject>`) for cross-subsystem or global changes. Management codes — change-id, dates, task numbers — must **never** be used as the scope (administrative metadata does not belong in the subject or the scope). Task/work-item IDs go in the commit body footer as `Task: <id>` — for example, subject `feat(guard): add import pipeline` with body `Task: T01`. The `Task:` footer is the sanctioned exception to the no-numbers rule.
+
+**Workflow artifacts are never committed**: `.specs/` artifacts (SUMMARY, handoff, TASK, etc.) are gitignored workflow products and never enter the repository. If `git add` is rejected for them, that rejection is correct behavior — never bypass it with `git add -f`.
 
 Examples:
 
@@ -223,7 +227,7 @@ Force push is allowed on your own feature branch (no protection); a new push inv
 ## Release approval sheet
 
 - Changes: PR list + one-line summary each
-- Verification: regression (171 scenarios) / installed-copy checks
+- Verification: regression (219 scenarios) / installed-copy checks
 - Version: X.Y.Z (doc-only batches may skip the bump)
 ```
 
