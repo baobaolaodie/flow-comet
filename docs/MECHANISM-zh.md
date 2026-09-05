@@ -24,8 +24,6 @@
 
 hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会话 TUI 阻止工具调用；`claude -p`（SDK CLI 模式）下非零退出被降级为 non-blocking。
 
-越界拦截的项目根兜底链：会话 cwd 漂移时按 `COMET_RUN_ROOT` → `CLAUDE_PROJECT_DIR` → 含 `.comet/flow-comet-state.json` **或** `.claude/skills/flow-comet` 的最近祖先 → cwd 锚定项目根，项目根外写入仍被拦截。
-
 ## 3. guard 校验体系（证据驱动推进）
 
 | 机制 | 校验点 | 触发 |
@@ -43,8 +41,7 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 | builtin 自检证据 | `builtin-quickcheck` 须声明不可用原因与插件缓存尝试证据(新 change 缺失 BLOCKED;旧 change WARN) | exit execute |
 | 工件模板保真 | SUMMARY / TASK / CHANGE / REQUIREMENT / DESIGN 须保持模板标题、首部字段与段序；新 change 任一缺失 → 阻断 + 恢复指引，旧 change 仅告警 | exit execute / plan / open / design |
 | 波次散文一致性 | 散文 `[P]` 标记须与任务 `parallel="true"` 一致(新 change 不一致 BLOCKED;旧 change WARN) | exit plan |
-| 波次分组一致性 | 分组合法性由依赖图判定而非块位置：`depends_on` 无环且引用任务全部存在即合法；串/并混排（穿插）序列合法，由多趟路由按依赖拓扑分趟消化；仅依赖环或缺失依赖引用 BLOCK——新 change BLOCK 含 `depends_on` 调整指引，旧 change WARN | exit plan |
-| 伪并行提示 | 并行任务声明的写入仅含测试文件时，plan 出口输出不阻断的警告（任务 id + 建议：声明显式 `depends_on` 或合并为垂直切片） | exit plan |
+| 波次分组一致性 | `[P]` 并行块须构成单个连续块、置于串行序列首/尾；`[P]` 与串行混排（穿插）违规——新 change BLOCK（含恢复指引：调整分组或显式豁免），旧 change WARN | exit plan |
 | 越权委托 | 并行 done 任务须经委托节点(新 change 未委托 BLOCKED;旧 change WARN) | exit execute/verify |
 | verify 真实执行 | TEST.md `## 验证命令` 真实运行（支持多行 `&&`）；verifyFailures 机器计数**按变更隔离**（切换变更不继承另一变更的失败次数），第 4 次 → BLOCKED（超时可用 `FLOW_COMET_VERIFY_TIMEOUT_MS` 配置，默认 300s） | exit verify |
 | 追加位置检测 | CONTEXT 孤立追加段 / LESSONS 编号乱序 / STATE+CHANGELOG 非倒序 → WARN（渐进） | exit open/verify/archive |
@@ -58,22 +55,20 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 - **handoff hash 溯源**：`git show <commitHash>` 校验提交文件 ⊆ write_files（从 TASK.md 自动解析，剥 XML 注释）
 - **零提交任务**：request 侧 `write_files` 为空（或 request 记录了 `noCommit` 标记）即判定为零提交——result 跳过提交文件子集校验并输出可审计提示；零提交结果若携带 tracked 提交，新 change 阻断、旧 change 告警
 - **write_files 冲突检测**：parallel 任务 write_files 不重叠才可同 wave 并行
-- **多趟路由**：串/并交互的序列在依赖语义下合法——委托节点可多次进入，每趟按依赖拓扑委派全部依赖已满足的并行任务；等待后续波次的串行任务是合法趟间态
 
 ## 5. 恢复协议
 
 - 任意入口恢复：determineNode 从文件推导 + state 自动纠偏（不依赖对话历史）
 - PROGRESS.md 恢复警告（R1.6 反重复）
 - 分支-状态一致性校验
-- `advance` 逃生口：结构性死结且无常规恢复动作时，`workflow-state.mjs advance` 强制推进（使用后须重新 entry 本节点并重做交付记录）；常规缺产物/缺证据情形不适用
 
 ## 6. guard 自测套件（作者回归基线）
 
-`scripts/guard-self-test.mjs`：**219 个场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（73 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
+`scripts/guard-self-test.mjs`：**171 个场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（61 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
 
 ```bash
 node .claude/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 219 SCENARIOS PASSED
+# → ALL 171 SCENARIOS PASSED
 ```
 
 ## 6.5 DeepSeek Harness（dsh）平台
@@ -87,14 +82,6 @@ node .claude/skills/flow-comet/scripts/guard-self-test.mjs
 - **执行者放行**：协调者把任务委托给子代理时，被委托的子代理（以会话的子代理委托深度识别）作为执行者写入源码、跳过阶段白名单——与其他平台 worktree 隔离语义一致；协调者仍受白名单约束。流程运行中越界写入与参数形状不符对两者一律拒绝。
 - **包含性仅流程运行中生效**：空闲态（无 state / 无 `activeChange` / `completed`）项目根外写放行；解析失败 / 未知状态保持 fail-closed（拒绝）。
 - **托管规则注入**：安装时把编排规则注入 `AGENTS.md` 的 `<!-- Managed by flow-comet prepare-env -->` 托管区（非破坏合并，标记与 Codex 共用）。
-
-## 6.6 安装器行为（flow-kit 获取、loader 生命周期、bridge-check）
-
-`prepare-env` 在安装中扩展了 flow-kit 获取、dsh loader 生命周期汇报与只读桥接健康检查：
-
-- **flow-kit 获取（五态）**：平台循环前安装器确保 `<目标项目>/flow-kit/` 就位——缺失 → 克隆上游并检出锁定快照 commit `9b5dda7`；已存在的上游克隆（`.git` 存在且 `origin` remote 匹配）→ 只读 HEAD-vs-锁定点比对与差异影响报告（绝不改动）；已存在的同名非克隆目录（或 origin 无法确认）→ 跳过并给出手动指引；clone/checkout 网络失败 → WARN + 手动指引，安装继续（exit 0）；purge 永不包含 `flow-kit`（含 `--purge --yes`）。
-- **dsh loader 版本迁移**：桥接 loader 携带内嵌版本戳（`// BRIDGE_VERSION: <version>`）；每次 dsh 安装先比对权威源戳与已装 loader 戳再覆盖，输出首次安装 / 升级 `A → B` / 降级 `A → B` / 版本一致。
-- **bridge-check（只读）**：`workflow-state.mjs bridge-check` 对 dsh 桥接执行零写入、零网络的健康检查，共六态——健康（exit 0）、文件缺失 / 未挂载 / 版本偏斜 / 重复注册（exit 1）、不适用（exit 0，项目未安装 dsh 平台副本）。无法识别的 YAML 形态输出近似性声明告警（只告警不定论——绝不误杀）；仅明确失配强制非零退出。
 
 ## 7. 自动初始化检测（init 前置步骤）
 
