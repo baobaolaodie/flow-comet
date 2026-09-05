@@ -16,12 +16,6 @@
  *   .codex/rules 为命令批准规则目录,不混用) / 清理 purge / 覆盖清单 overwriteDescription——
  *   main 统一调度,新增平台 = 描述符条目 + 安装/清理函数,main 零改动。
  *
- * hook 命令项目根锚定:CC 命令引用 CC 注入的 CLAUDE_PROJECT_DIR 运行期展开(Windows cmd.exe
- *   %VAR% / POSIX $VAR,单一来源常量派生,见 PROJECT_ROOT_ENV_VAR);Codex 官方 hooks 无等价
- *   项目根变量(查证 openai/codex 上游执行层,结论与出处见 injectCodexHook 注释)→ 安装期
- *   字面注入 target 绝对路径(迁移目录需重跑安装器)。两平台命令均不加外层引号,以保住
- *   isManagedHookCommand 的 basename 幂等识别(含空格路径不支持,见常量区取舍说明)。
- *
  * 非破坏设计（T-FIX-13，2026-08-08 用户裁决）：
  *   - 默认（无 --purge）：**不删除整个 .claude/（或 .agents/ / .dsh/）**——只精确覆盖生成物
  *     （rules/ + skills/ 等），保留其他一切内容（commands/、自定义 hook、自定义 skill）。
@@ -40,10 +34,8 @@
  *   --platform 显式指定平台：单平台 / 逗号分隔多平台（claude-code,codex,dsh）/
  *   all（全部平台,安装顺序 = PLATFORMS 表顺序）；未知平台报错（旧 both 语义已移除——
  *   多平台用逗号列表或 all）；缺省走选择链：
- *     TTY 交互多选（@clack/prompts 方向键多选——依赖安装后为主路径,try-import 失败
- *     （未装/离线）或 stdin 非真实 TTY（无 setRawMode,如管道喂入模拟）自动回退 readline
- *     数字/逗号多选;基于目标项目痕迹 .claude/ .codex/ .dsh/ 预勾选,回车默认 = 探测推荐;
- *     FLOW_COMET_FORCE_READLINE=1 仅测试面强制走回退）
+ *     TTY 交互多选（@clack/prompts 方向键多选——可选依赖,未安装自动回退 readline
+ *     数字/逗号多选;基于目标项目痕迹 .claude/ .codex/ .dsh/ 预勾选,回车默认 = 探测推荐）
  *     > 探测目标项目（仅 .codex/ → codex；仅 .dsh/ → dsh；含 .claude/ → claude-code；
  *     多痕迹默认 claude-code 并输出提示）> 默认 claude-code。
  *   --purge 破坏性：删除目标平台生成物后重新生成（打印清单 + 警告 + --yes 确认）。
@@ -64,27 +56,6 @@ const BUNDLE_DRAFTS = path.join(REPO_ROOT, '.comet', 'bundle-drafts', 'flow-come
 // comet-hook-guard 的 command 特征（用于识别"已管理的 hook 命令"，注入时替换避免重复）
 const MANAGED_HOOK_COMMAND_MARKER = 'comet-hook-guard.mjs';
 
-// ---------- hook 命令项目根锚定（单一事实来源） ----------
-// Claude Code 运行 hook 时注入 CLAUDE_PROJECT_DIR 环境变量（值 = 项目根绝对路径，官方 hooks
-// 文档契约）。变量名是唯一事实来源，展开语法按宿主 OS 的 hook shell 派生：
-//   Windows：hook 经 cmd.exe 执行 → %VAR%（cmd.exe 原生展开）
-//   POSIX  ：sh 系执行 → $VAR
-// 本安装器装在本机（安装机 = 目标机），process.platform 即 hook 的执行平台。
-const PROJECT_ROOT_ENV_VAR = 'CLAUDE_PROJECT_DIR';
-
-// 两平台 hook 命令一律不加外层引号（已知取舍）：isManagedHookCommand 按空白分词提取 .mjs
-// token 后取 basename 判等（本任务契约：该函数保持不动），外层引号会并入 token 使 basename
-// 变成 comet-hook-guard.mjs" 而识别失效，破坏幂等升级（旧相对条目将无法被过滤替换）。
-// 代价：项目根路径含空格时，未加引号的命令在空格处断裂——设计允许实施期按三平台实测
-// 微调引号策略，此处以幂等识别优先；含空格路径暂不支持（需先演进识别函数再放开引号）。
-function projectRootGuardScriptRef(rootDirName) {
-  const isWindows = process.platform === 'win32';
-  const sep = isWindows ? '\\' : '/';
-  const varRef = isWindows ? `%${PROJECT_ROOT_ENV_VAR}%` : `$${PROJECT_ROOT_ENV_VAR}`;
-  const segments = [rootDirName, 'skills', 'flow-comet', 'scripts', MANAGED_HOOK_COMMAND_MARKER];
-  return `${varRef}${sep}${segments.join(sep)}`;
-}
-
 // AGENTS.md 托管区标记（Codex/dsh 平台 rules 注入共用——幂等替换边界,任一平台卸载可清）
 const MANAGED_AGENTS_START = '<!-- Managed by flow-comet prepare-env -->';
 const MANAGED_AGENTS_END = '<!-- /Managed by flow-comet prepare-env -->';
@@ -95,8 +66,6 @@ const MANAGED_CORDIS_START = '# --- flow-comet managed ---';
 const MANAGED_CORDIS_END = '# --- end flow-comet managed ---';
 
 // ---------- 平台描述符表（单一来源——新增平台 = 描述符条目 + 安装/清理函数，main 零改动） ----------
-// D6：flow-kit 永不纳入清理域——下述各平台 purge 清单均不含 <target>/flow-kit/（含 --purge --yes）；
-//     它不是本安装器的生成物域（ADR-008），由安装器首次创建的 flow-kit 残留属预期。
 
 const PLATFORMS = {
   'claude-code': {
@@ -153,7 +122,7 @@ const PLATFORMS = {
     // hook 注入：.codex/hooks.json（顶层 hooks 包裹层 + matcher *）+ config.toml features 启用
     installHooks(target, stats) {
       const codexDir = path.join(target, '.codex');
-      injectCodexHook(codexDir, target);
+      injectCodexHook(codexDir);
       injectCodexConfig(codexDir);
       stats.files += 2;
       console.log('[prepare-env] .codex/hooks.json + config.toml 注入完成（hooks 启用，保留既有字段）');
@@ -221,9 +190,6 @@ const PLATFORMS = {
       const loaderDst = path.join(pluginsDir, 'dsh-flow-comet-bridge.mjs');
       if (fs.existsSync(loaderSrc)) {
         fs.mkdirSync(pluginsDir, { recursive: true });
-        // 覆盖前版本比对明示（版本戳标记契约）：输出首次安装/升级/降级/版本一致之一；
-        // 任一侧提取失败只告警不中断——覆盖照常执行（幂等语义不变）
-        reportLoaderVersionTransition(loaderSrc, loaderDst);
         fs.copyFileSync(loaderSrc, loaderDst);
         stats.files++;
         console.log('[prepare-env] 桥接 loader 已复制到 $DSH_HOME/plugins/dsh-flow-comet-bridge.mjs');
@@ -375,27 +341,17 @@ function detectTraces(target) {
 
 // TTY 交互多选（缺省路径——用户裁决：交互式选择为主；无 TTY 自动走探测/默认）。
 // 首选 @clack/prompts 方向键多选（Claude Code / Codex / dsh,基于 detectTraces 痕迹预勾选：
-// .claude/ / .codex/ / .dsh/）；try-import 失败（依赖未安装/离线）或 stdin 无法 raw mode
-// （isTTY 缺失/伪真且 setRawMode 不存在——如管道喂入的自动化形态）自动回退 readline
-// 数字/逗号多选（回车默认 = 探测推荐）。仅测试面环境开关 FLOW_COMET_FORCE_READLINE=1
-// 强制走 readline 回退分支（即便 @clack/prompts 可加载）——供自动化套件断言回退可测，
-// 不得用于生产规避。
+// .claude/ / .codex/ / .dsh/）；**可选依赖**——动态 import 失败（未安装）自动回退
+// readline 数字/逗号多选（回车默认 = 探测推荐）。保持零依赖哲学：CI 无 npm install
+// 环境可运行（本任务不引入 package.json 或依赖安装——@clack/prompts 仅为尝试加载）。
 async function promptPlatformSelection(probe, traces, multiTrace) {
-  if (process.env.FLOW_COMET_FORCE_READLINE === '1') {
-    return promptPlatformSelectionReadline(probe, traces, multiTrace);
-  }
   const options = Object.entries(PLATFORMS).map(([id, p]) => ({ value: id, label: `${p.label} (${id})` }));
   const initialValues = options.filter((o) => traces[o.value]).map((o) => o.value);
   let clack = null;
   try {
     clack = await import('@clack/prompts');
-  } catch { /* 依赖未安装/离线——自动回退 readline 多选 */ }
+  } catch { /* 可选依赖未安装——回退 readline 多选 */ }
   if (clack && typeof clack.multiselect === 'function') {
-    // @clack 依赖 stdin raw mode：isTTY 为真但 stdin 实为管道（无 setRawMode）时调用
-    // multiselect 会崩溃（o.setRawMode is not a function）——与强制回退同路径直接走 readline。
-    if (!process.stdin.isTTY || typeof process.stdin.setRawMode !== 'function') {
-      return promptPlatformSelectionReadline(probe, traces, multiTrace);
-    }
     const selected = await clack.multiselect({
       message: '[prepare-env] 选择要安装的平台（方向键移动、空格勾选、回车确认）',
       options,
@@ -410,8 +366,8 @@ async function promptPlatformSelection(probe, traces, multiTrace) {
   return promptPlatformSelectionReadline(probe, traces, multiTrace);
 }
 
-// readline 多选回退（无第三方依赖路径——@clack/prompts 未安装/离线/强制开关下）：
-// 数字/平台名逗号分隔多选；回车 = 探测推荐（无探测 → claude-code）。
+// readline 多选回退（零依赖路径——@clack/prompts 未安装时）：数字/平台名逗号分隔多选；
+// 回车 = 探测推荐（无探测 → claude-code）。保持零依赖哲学：CI 无 npm install 环境可运行。
 async function promptPlatformSelectionReadline(probe, traces, multiTrace) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
@@ -658,10 +614,7 @@ function injectSettingsHook(claudeDir) {
     hooks: [
       {
         type: 'command',
-        // 项目根锚定：node %CLAUDE_PROJECT_DIR%\.claude\skills\...\comet-hook-guard.mjs（Windows）
-        // / node $CLAUDE_PROJECT_DIR/.claude/skills/.../comet-hook-guard.mjs（POSIX）。
-        // 运行期由 CC 注入的变量展开；单一事实来源 = PROJECT_ROOT_ENV_VAR + projectRootGuardScriptRef。
-        command: `node ${projectRootGuardScriptRef('.claude')}`,
+        command: 'node .claude/skills/flow-comet/scripts/comet-hook-guard.mjs',
       },
     ],
   };
@@ -691,7 +644,7 @@ function injectSettingsHook(claudeDir) {
  * 实测缺包裹层 hook 不加载）。
  * fail-safe：文件存在但 JSON 非法 → 抛错退出（保护用户配置）。
  */
-function injectCodexHook(codexDir, target) {
+function injectCodexHook(codexDir) {
   const hooksPath = path.join(codexDir, 'hooks.json');
   let hooks = {};
   let fileExists = false;
@@ -716,26 +669,12 @@ function injectCodexHook(codexDir, target) {
     ? hooks.hooks
     : {};
   const existingGroups = Array.isArray(existingHooks.PreToolUse) ? existingHooks.PreToolUse : [];
-  // D6 查证结论（2026-08，openai/codex 官方仓库 main 分支）：
-  // - hooks.json 的 command 经 shell 执行：Windows = %COMSPEC% 回退 cmd.exe /C；POSIX = $SHELL
-  //   回退 /bin/sh -lc（codex-rs/hooks/src/engine/command_runner.rs 的 build_command /
-  //   default_shell_command）；子进程环境 = 会话环境快照 + 条目级 env 映射，current_dir = 会话工作目录。
-  // - 无等价项目根变量：全仓 Rust 检索 CODEX_PROJECT_DIR / CLAUDE_PROJECT_DIR / project_dir
-  //   均 0 命中（GitHub code search，openai/codex）；$PWD/%CD% 展开的是"会话启动目录"而非
-  //   项目根契约，子目录启动即漂移——不构成 CLAUDE_PROJECT_DIR 的等价锚点。
-  // → 按 D6 预授权退化分支：安装期把 target 绝对路径字面注入（path.join）。
-  // ⚠️ 迁移目录需重跑安装器：绝对路径随安装位置固化，项目移动/换 checkout 后必须重新运行
-  //    本安装器刷新 hooks.json（旧条目按脚本 basename 仍被 isManagedHookCommand 识别并在
-  //    重跑时被过滤替换为新位置——幂等自愈，不会产生重复条目）。
-  // 注：上游 HookHandlerConfig::Command 另有 command_windows 平台分字段（declarations.rs）；
-  //    本安装器逐机注入，写入路径与宿主 OS 天然一致，无需分字段双写。
-  const guardAbsolutePath = path.join(target, '.agents', 'skills', 'flow-comet', 'scripts', MANAGED_HOOK_COMMAND_MARKER);
   const newGroup = {
     matcher: '*',
     hooks: [
       {
         type: 'command',
-        command: `node ${guardAbsolutePath} before_tool --platform codex`,
+        command: 'node .agents/skills/flow-comet/scripts/comet-hook-guard.mjs before_tool --platform codex',
       },
     ],
   };
@@ -835,108 +774,6 @@ function removeManagedCodexHooks(codexDir) {
 function resolveDshHome() {
   if (process.env.DSH_HOME) return path.resolve(process.env.DSH_HOME);
   return path.join(os.homedir(), '.dsh');
-}
-
-// ---------- loader 覆盖前版本比对（全局挂载的桥接 loader 生命周期治理） ----------
-
-// 版本戳锚点正则（标记行格式契约：独立整行、行首无缩进、冒号后恰一个空格、行尾无其它字符；
-// 格式禁动——安装器与 bridge-check 双侧提取以此为准；技能包自包含，语义同值复刻不跨模块 import）。
-const BRIDGE_VERSION_RE = /^\/\/ BRIDGE_VERSION: ([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)$/m;
-
-/**
- * 从 loader 文件提取版本戳（同一锚点正则）。返回 { ok:true, version }；
- * 文件缺失/读取失败/无标记行 → { ok:false, reason }（调用方告警兜底，不抛错）。
- */
-function extractBridgeVersion(loaderPath) {
-  let text;
-  try {
-    text = fs.readFileSync(loaderPath, 'utf8');
-  } catch {
-    return { ok: false, reason: '文件读取失败' };
-  }
-  const match = BRIDGE_VERSION_RE.exec(text);
-  if (match) return { ok: true, version: match[1] };
-  // 标记行存在但形态非法（区别于「无标记行」）——仍走既有警告路径，原因精确可诊断
-  const loose = /^\/\/ BRIDGE_VERSION: (.*)$/m.exec(text);
-  return loose
-    ? { ok: false, reason: '版本戳形态非法（非语义化版本: ' + loose[1] + '）' }
-    : { ok: false, reason: '未提取到版本戳标记行' };
-}
-
-/**
- * 语义化版本数值序比较（覆盖前判定方向）：major.minor.patch 逐段按数值比较
- * （如 1.10.0 > 1.6.0——非字典序）；核心版本相等时按语义化版本规则处理预发布后缀
- * （如 1.6.0-alpha.1 < 1.6.0）。返回 -1 / 0 / 1。
- */
-function compareBridgeVersions(a, b) {
-  const parse = (v) => {
-    const text = String(v);
-    const dash = text.indexOf('-');
-    const core = (dash === -1 ? text : text.slice(0, dash)).split('.').map((seg) => parseInt(seg, 10));
-    return { core, pre: dash === -1 ? null : text.slice(dash + 1) };
-  };
-  const av = parse(a);
-  const bv = parse(b);
-  const coreLen = Math.max(av.core.length, bv.core.length);
-  for (let i = 0; i < coreLen; i++) {
-    const x = av.core[i] ?? 0;
-    const y = bv.core[i] ?? 0;
-    if (x !== y) return x < y ? -1 : 1;
-  }
-  const ap = av.pre !== null;
-  const bp = bv.pre !== null;
-  if (ap !== bp) return ap ? -1 : 1; // 预发布 < 正式版
-  if (!ap) return 0;
-  const ai = av.pre.split('.');
-  const bi = bv.pre.split('.');
-  const preLen = Math.max(ai.length, bi.length);
-  for (let i = 0; i < preLen; i++) {
-    if (i >= ai.length) return -1; // 更短标识符列表是更长列表的前缀 → 更小
-    if (i >= bi.length) return 1;
-    const x = ai[i];
-    const y = bi[i];
-    if (x === y) continue;
-    const xn = /^\d+$/.test(x) ? parseInt(x, 10) : null;
-    const yn = /^\d+$/.test(y) ? parseInt(y, 10) : null;
-    if (xn !== null && yn !== null) return xn < yn ? -1 : 1;
-    if (xn !== null) return -1; // 数字标识符 < 字母标识符（语义化版本规则）
-    if (yn !== null) return 1;
-    return x < y ? -1 : 1;
-  }
-  return 0;
-}
-
-/**
- * 覆盖前版本比对明示：从权威源 loader 与已装 loader 各提取版本戳，按数值序输出
- * 首次安装 / 升级 A→B / 降级 A→B / 版本一致 四类结论之一（人读、带 [prepare-env] 前缀）。
- * 任一侧提取失败（文件缺失/无标记行）→ 告警并跳过比对——不抛错、不中断安装；
- * 覆盖动作（copyFileSync）由调用方照常执行，幂等语义不变。
- */
-function reportLoaderVersionTransition(loaderSrc, loaderDst) {
-  if (!fs.existsSync(loaderDst)) {
-    console.log('[prepare-env] 桥接 loader 首次安装（$DSH_HOME/plugins 无已装 loader）');
-    return;
-  }
-  const src = extractBridgeVersion(loaderSrc);
-  const installed = extractBridgeVersion(loaderDst);
-  if (!src.ok || !installed.ok) {
-    const failedSide = !src.ok ? '权威源 loader' : '已装 loader';
-    const reason = !src.ok ? src.reason : installed.reason;
-    console.warn(
-      `[prepare-env] 警告: ${failedSide} 版本戳提取失败（${reason}）——跳过版本比对，继续覆盖安装`
-    );
-    return;
-  }
-  const a = installed.version;
-  const b = src.version;
-  const cmp = compareBridgeVersions(a, b);
-  if (cmp < 0) {
-    console.log(`[prepare-env] 桥接 loader 升级 ${a} → ${b}`);
-  } else if (cmp > 0) {
-    console.log(`[prepare-env] 桥接 loader 降级 ${a} → ${b}`);
-  } else {
-    console.log(`[prepare-env] 桥接 loader 版本一致（${a}）`);
-  }
 }
 
 /**
@@ -1059,112 +896,6 @@ function resolveInstalledVersion() {
   return installedVersion;
 }
 
-// ---------- flow-kit 获取链路（ADR-008 / DESIGN D1~D6——平台无关,main 平台循环前调用一次） ----------
-
-// 锁定点常量（D2）：上游 github.com/rihebty/flow-kit 实测无 tag,commit 是唯一精确锚;
-// 升级锁定点 = 显式修改此常量并记 CHANGELOG,不做自动跟随（2026-08-23 ls-remote 实测 == 上游 HEAD）。
-const FLOW_KIT_UPSTREAM_URL = 'https://github.com/rihebty/flow-kit.git';
-const FLOW_KIT_LOCKED_COMMIT = '9b5dda7206ae841230f118348d660ad8d0ae2830';
-// git 网络调用统一超时（D5——沿用 resolveInstalledVersion 的 execFileSync timeout 先例风格）
-const FLOW_KIT_GIT_TIMEOUT_MS = 60000;
-// 摘要展示用短 sha 长度（git 短哈希惯例——单一来源,clone 成功/已有/指引三处引用）
-const FLOW_KIT_SHORT_SHA_LEN = 7;
-
-/** 提取 git 调用失败信息首行（execFileSync 错误消息含多行 stderr——警告只留首行） */
-function gitErrorFirstLine(err) {
-  return String(err && err.message ? err.message : err).split('\n')[0].trim();
-}
-
-/** 手动获取指引（clone/checkout 失败或目录非上游克隆时打印——含上游 URL 与目标路径;不抛错） */
-function printFlowKitManualGuide(target) {
-  const flowKitDir = path.join(target, 'flow-kit');
-  console.warn(`[prepare-env] 手动获取指引: git clone ${FLOW_KIT_UPSTREAM_URL} "${flowKitDir}"`);
-  console.warn(`[prepare-env] 然后锁定快照: git -C "${flowKitDir}" checkout --detach ${FLOW_KIT_LOCKED_COMMIT.slice(0, FLOW_KIT_SHORT_SHA_LEN)}`);
-  console.warn('[prepare-env] 未获取 flow-kit 时技能协议引用悬空、guard 段名基准退化为内置 fallback——其余安装职责不受影响。');
-}
-
-/**
- * 归属判定（D3）：origin remote URL 匹配上游——本地 config 读取,无网络。
- * 兼容 https / ssh 形态与可选 .git 后缀;读取失败视为不匹配（保守落入"非上游克隆"分支,
- * 绝不改动用户目录）。返回 'match' | 'mismatch' | 'unreadable'。
- */
-function flowKitOriginStatus(flowKitDir) {
-  try {
-    const url = execFileSync(
-      'git',
-      ['-C', flowKitDir, 'config', '--get', 'remote.origin.url'],
-      { encoding: 'utf8', timeout: FLOW_KIT_GIT_TIMEOUT_MS }
-    ).trim().replace(/\.git$/i, '').replace(/\/+$/, '');
-    return /github\.com[:/]rihebty\/flow-kit$/i.test(url) ? 'match' : 'mismatch';
-  } catch {
-    return 'unreadable';
-  }
-}
-
-/**
- * 确保 <target>/flow-kit/ 就位（ADR-008 / DESIGN D1~D6——L-008 非破坏哲学:已存在路径一律只读不动）：
- *   路径 1 目标不存在 → execFileSync('git',…) 数组参数形态 clone 上游后 detached checkout 到锁定 commit;
- *   路径 2 已存在且 .git 存在且 origin 匹配上游 → 只读 rev-parse HEAD 并输出与锁定点差异影响,绝不改动;
- *   路径 3 已存在但不满足归属判定 → 摘要"非上游克隆,已跳过"+ 手动指引,不改动;
- *   路径 4 clone/checkout 任一失败 → 警告 + 手动获取指引,**不抛错**（D5——外网故障不得绑架安装器
- *          其余职责,进程照常 exit 0）;各平台 purge 清单永不包含 flow-kit（D6,见 PLATFORMS 表头注释）。
- */
-function ensureFlowKit(target) {
-  const flowKitDir = path.join(target, 'flow-kit');
-  const shortLock = FLOW_KIT_LOCKED_COMMIT.slice(0, FLOW_KIT_SHORT_SHA_LEN);
-  if (!fs.existsSync(flowKitDir)) {
-    // 路径 1：目标缺失 → clone + detached checkout 到锁定 commit（D1/D2）
-    try {
-      execFileSync('git', ['clone', FLOW_KIT_UPSTREAM_URL, flowKitDir], {
-        encoding: 'utf8',
-        timeout: FLOW_KIT_GIT_TIMEOUT_MS,
-      });
-      execFileSync('git', ['-C', flowKitDir, 'checkout', '--detach', FLOW_KIT_LOCKED_COMMIT], {
-        encoding: 'utf8',
-        timeout: FLOW_KIT_GIT_TIMEOUT_MS,
-      });
-      console.log(`[prepare-env] 已获取 flow-kit（锁定 ${shortLock}）`);
-    } catch (err) {
-      // 路径 4：clone/checkout 任一失败 → WARN + 手动指引,不抛错
-      console.warn(`[prepare-env] 警告: flow-kit 自动获取失败（${gitErrorFirstLine(err)}）`);
-      printFlowKitManualGuide(target);
-    }
-    return;
-  }
-  // 目录已存在 → 归属判定（D3:.git 存在 且 origin remote 匹配上游）
-  const hasDotGit = fs.existsSync(path.join(flowKitDir, '.git'));
-  const originStatus = hasDotGit ? flowKitOriginStatus(flowKitDir) : 'mismatch';
-  if (originStatus !== 'match') {
-    // 路径 3：同名非克隆目录（或 remote 无法确认归属）→ 跳过 + 指引,绝不改动
-    if (originStatus === 'unreadable') {
-      console.warn('[prepare-env] 警告: flow-kit 目录存在且含 .git,但 origin remote 读取失败——无法确认归属');
-    }
-    console.log('[prepare-env] 目录存在但非上游克隆，已跳过');
-    printFlowKitManualGuide(target);
-    return;
-  }
-  // 路径 2：上游克隆 → 只读检测并输出差异影响（D4——绝不 fetch/checkout 改动用户克隆）
-  try {
-    const head = execFileSync('git', ['-C', flowKitDir, 'rev-parse', 'HEAD'], {
-      encoding: 'utf8',
-      timeout: FLOW_KIT_GIT_TIMEOUT_MS,
-    }).trim();
-    const shortHead = head.slice(0, FLOW_KIT_SHORT_SHA_LEN);
-    console.log(`[prepare-env] 已有 flow-kit（HEAD=${shortHead}，推荐锁定点=${shortLock}）`);
-    if (head === FLOW_KIT_LOCKED_COMMIT) {
-      console.log('[prepare-env] 当前 HEAD 与推荐锁定点一致。');
-    } else {
-      console.warn(
-        `[prepare-env] 差异影响: 当前 HEAD 与推荐锁定点不一致——guard 段名基准与协议引用可能偏离安装器锁定内容` +
-          `（安装器绝不改动已有克隆;如需对齐请手动执行 git -C "${flowKitDir}" fetch 后 checkout --detach ${shortLock}）`
-      );
-    }
-  } catch (err) {
-    // HEAD 只读失败同样不改动、不中断安装（保守降级为警告）
-    console.warn(`[prepare-env] 警告: flow-kit HEAD 读取失败（${gitErrorFirstLine(err)}），已跳过比对`);
-  }
-}
-
 // ---------- 主流程 ----------
 
 async function main() {
@@ -1189,10 +920,6 @@ async function main() {
     }
     console.error('[prepare-env] 已删除，开始重新生成。');
   }
-
-  // flow-kit 获取链路（ADR-008 / D1~D6——平台无关,平台循环之前调用一次;
-  // 内部四条路径均不抛错、不阻断后续平台安装职责）
-  if (!purge) ensureFlowKit(target);
 
   for (const platform of platforms) {
     const skillRoot = platform.skillRoot(target);

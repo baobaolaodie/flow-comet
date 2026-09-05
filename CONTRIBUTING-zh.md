@@ -85,15 +85,15 @@ git branch -d hotfix/<描述>
 
 1. **读 README** —— 快速开始展示了一个最小工作流。
 2. **选一个入门 issue** —— 标记为 `good first issue` 的 issue 适合新贡献者。
-3. **准备环境** —— Node.js ≥ 18；clone 仓库；运行一次 `npm install`（安装锁定版本 `@clack/prompts` 依赖——仓库唯一第三方依赖，仅供安装器交互式平台选择使用）；再运行一次 `node scripts/install-commit-hook.mjs`（本地提交/推送消息检查）。
+3. **准备环境** —— Node.js ≥ 18；clone 仓库；运行一次 `node scripts/install-commit-hook.mjs`（本地提交/推送消息检查）。
 4. **验证基线** —— 运行回归套件（见下方开发环境）。
 5. **不确定改动是否被需要？** 先开 issue —— issue 模板会引导你提供所需上下文。
 
 ## 开发环境
 
-- **运行时**：Node.js ≥ 18（ESM）；唯一第三方依赖是 `@clack/prompts`（经 `package-lock.json` 锁定精确版本），仅供安装器交互式 TTY 多选使用（不可用时自动回退 readline）——clone 后运行一次 `npm install`
-- **仓库**：clone、运行 `npm install`，然后验证回归基线可跑：
-  `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 219 SCENARIOS PASSED`（统一测试集两级基线，另需 `system-test.mjs` → `ALL SYSTEM TESTS PASSED`，73 项）
+- **运行时**：Node.js ≥ 18（ESM）
+- **仓库**：clone 后先验证回归基线可跑：
+  `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 171 SCENARIOS PASSED`（统一测试集两级基线，另需 `system-test.mjs` → `ALL SYSTEM TESTS PASSED`，61 项）
 - **创作环境**：Claude Code（skill/hook 在 Claude Code 会话中运行）；hook 通过 `prepare-env` 安装到你的项目 `.claude/`（同一安装器服务 Codex（`--platform codex`）与 DeepSeek Harness（dsh，`--platform dsh`）——项目级技能树、AGENTS.md 托管规则与全局桥接 loader）
 - **机制相关工作**：动手改脚本前先读 [docs/MECHANISM.md](docs/MECHANISM.md) 了解机制语义（行为层）
 
@@ -112,7 +112,7 @@ hook 在提交与推送时拒绝含过程代号（修复编号、批次代号、
 推送前运行回归基线：
 
 ```bash
-node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 219 SCENARIOS PASSED
+node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 171 SCENARIOS PASSED
 ```
 
 其余由 CI 处理。
@@ -130,7 +130,7 @@ Issue 确认后：bug 用 `fix/` 分支、feature 用 `feat/` 分支——都按
 
 - **权威源**：skill/脚本改动在 `.comet/bundle-drafts/flow-comet/skills/`（单一权威源；`.claude/` 副本是安装产物——用 `prepare-env` 更新，勿手改）
 - **TDD**：每个机制修复先写 RED 场景（`guard-self-test.mjs`——确认以正确原因失败）→ GREEN → 全量回归
-- **回归基线**：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 219 SCENARIOS PASSED`（统一测试集两级基线，另需 `system-test.mjs` → `ALL SYSTEM TESTS PASSED`，73 项）（每次改动后必须）
+- **回归基线**：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 171 SCENARIOS PASSED`（统一测试集两级基线，另需 `system-test.mjs` → `ALL SYSTEM TESTS PASSED`，61 项）（每次改动后必须）
 - **文档同步**：行为层文档在 `docs/`（中英双语——改文档时两语同步）；实现细节不进公开文档
 - **双语纪律**：英文文档不含中文（语言切换器、flow-kit 工件段名、运行时消息原文除外）；中文文档不含英文长句（命令、URL、专有术语除外）
 - **向后兼容**：旧 change/旧 state 照常工作——渐进 WARN 优先于 BLOCK
@@ -156,10 +156,6 @@ ci:        CI 管道改动
 chore:     工具、发布收尾
 revert:    回滚之前的提交
 ```
-
-**通用 scope 语义（推荐可选）**：本仓库使用 `<type>(<scope>): <subject>`——scope 是生态通用 Conventional Commits 的子系统/关注域短词（如 `docs`、`usage`、`installer`、`guard`、`handoff`、`selftest`）。scope 推荐但可选：单子系统改动给 scope（如 `feat(guard): ...`、`docs(usage): ...`、`fix(installer): ...`）；跨子系统或全局性改动可省略（`<type>: <subject>`）。**禁用管理代号（change-id、日期、任务号）作 scope**——管理元数据不入标题/scope。任务号放提交正文尾注 `Task: <id>`——例如主题 `feat(guard): add import pipeline` + 正文 `Task: T01`。该 `Task:` 尾注是提交信息禁数字规则的唯一豁免。
-
-**流程工件不入库**：`.specs/` 下的一切工件（SUMMARY、handoff、TASK 等）是 gitignored 流程产物，永不入库。`git add` 被拒即正确行为，严禁 `-f` 强加。
 
 示例：
 
@@ -227,7 +223,7 @@ git push --force-with-lease origin feat/<描述>            # feature 分支允�
 ## 发布审批单
 
 - 包含改动：PR 列表 + 每项一句话摘要
-- 验证结果：回归（219 场景）/ 安装副本验证
+- 验证结果：回归（171 场景）/ 安装副本验证
 - 版本：X.Y.Z（文档批次可不 bump）
 ```
 

@@ -11,7 +11,7 @@
 - [Claude Code](https://claude.ai/code), installed and authenticated (default platform)
 - [Codex](https://github.com/openai/codex) CLI, installed (skills/rules/hook support as described under [Platforms](#platforms))
 - [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) CLI `0.1.0-rc.6` or newer for the dsh platform (optional; see [Option C](#option-c--deepseek-harness-dsh-platform))
-- [flow-kit](https://github.com/rihebty/flow-kit) installed in the target project — the installer obtains it automatically (locked snapshot; existing copies are only inspected read-only, see [flow-kit acquisition](#flow-kit-acquisition)):
+- [flow-kit](https://github.com/rihebty/flow-kit) installed in the target project:
 
 ```bash
 cd <target project>
@@ -33,13 +33,12 @@ node scripts/prepare-env.mjs --target <absolute path to target project> --platfo
 node scripts/prepare-env.mjs --target <absolute path to target project> --platform all     # all platforms
 ```
 
-On an interactive terminal, the first run prompts for the platform with a direction-key multi-select (arrow keys + space to toggle, Enter to confirm; pre-checked from existing traces — see the selection chain under [Platforms](#platforms)): `@clack/prompts` is the primary path, with an automatic readline number/comma multi-select fallback when the dependency is not installed, offline, or stdin has no raw mode; `FLOW_COMET_FORCE_READLINE=1` forces the fallback for testing.
+On an interactive terminal, the first run prompts for the platform with a multi-select (arrow keys + space to toggle, Enter to confirm; pre-checked from existing traces — see the selection chain under [Platforms](#platforms)).
 
 `prepare-env` does:
 
 1. **Generates/overwrites `rules/` and `skills/`** — all flow-comet* skills, from the authoritative source `.comet/bundle-drafts/flow-comet/`
 2. **Injects the hook into `settings.local.json`** — read-merge-write: preserves everything already in the target project (`permissions`, custom hooks, other matcher groups), only injects/updates the comet-hook-guard entry under `hooks.PreToolUse` (existing comet hooks are replaced, not duplicated — idempotent). First-time creation writes only the hook entry; existing files are merged.
-3. **Ensures `flow-kit` in the target project** — clones the upstream and checks out the locked snapshot when missing; an existing upstream clone is only inspected read-only (current HEAD vs the locked snapshot is reported); a same-name non-clone directory is skipped with guidance; a network failure warns and continues (see [flow-kit acquisition](#flow-kit-acquisition))
 
 **Non-destructive by default**: nothing under the target project's install root (`.claude/` for Claude Code, `.agents/` for Codex) is deleted (`commands/`, custom skills, custom config all preserved). Explicit `--purge --yes` resets the install — deletes the generated files and regenerates them to a full install state (purge is delete-and-rebuild, **not uninstall**): on Claude Code the entire `.claude/` is removed; on Codex only the flow-comet skills + managed hook entries + AGENTS.md managed block are removed (`.agents/` is shared with other tools; user entries are preserved). Prints the deletion list + warning; `--yes` is a second confirmation.
 
@@ -54,28 +53,12 @@ node scripts/prepare-env.mjs --target <absolute path to target project> --purge 
 
 **Updating an installed flow-comet**: re-run the same Option A command — idempotent (overwrites generated files + merges the hook, preserves existing config).
 
-### flow-kit acquisition
-
-Before the platform install loop (platform-independent, once per run), `prepare-env` ensures `<target>/flow-kit/` is in place:
-
-- **Missing** → the installer clones the upstream and checks out the locked snapshot commit `9b5dda7` (the upstream has no tags, so a commit is the only precise pin; verified against the upstream head on 2026-08-23), then prints a summary with the locked short SHA.
-- **Existing upstream clone** (`.git` present and the `origin` remote URL matches `github.com/rihebty/flow-kit`) → read-only inspection only: the current HEAD is compared with the locked snapshot and the difference impact is reported (the installer never fetches or checks out over an existing clone). An identical HEAD is confirmed; a differing HEAD warns that guard section names and protocol references may deviate from the locked content, with manual alignment instructions.
-- **Existing same-name non-clone directory** (or an origin that cannot be confirmed) → skipped with manual guidance (clone + checkout commands); never modified.
-- **Network failure** (clone/checkout error) → WARN + manual acquisition guidance (upstream URL + target path); the install continues and exits 0 — without flow-kit, guard section names fall back to the built-in baseline and protocol references may point at missing files.
-- **Purge never includes `flow-kit`** (including `--purge --yes`): it is outside the installer's generated-artifact domain, so a copy created by the installer is expected to remain after purge.
-
-### Hook upgrade
-
-The injected hook command shape evolves across releases: newer releases reference the guard script through the host's project-root variable instead of a relative path, so interception keeps working when the session's working directory drifts away from the project root. **Re-running the same Option A installer command upgrades the managed hook entry in place** — the entry is recognized by the script it points to regardless of its command shape and replaced with the current form: no duplicates, no residue, no manual cleanup of old settings. If you installed via Option B (manual copy), update the entry by hand to match the recommended command in step 3 above. If out-of-scope writes stopped being blocked after working-directory drift (hook log shows `Cannot find module ...comet-hook-guard`), that is the legacy relative-path entry failing to resolve — the fix is the same re-run; see the matching symptom row in [Troubleshooting](TROUBLESHOOTING.md).
-
-> **Fail-open boundary**: a host that degrades a crashing hook to non-blocking lets the tool call through, and flow-comet cannot change that host behavior — the only fix is to remove the crash itself. The project-root reference resolves from the injected project root instead of the session's working directory, so the guard script is always found and the `Cannot find module ...comet-hook-guard` failure mode no longer occurs (crash probability for this cause drops to zero).
-
 ### Platforms
 
 The installer targets **Claude Code** by default (unchanged behavior). The target platform is chosen in this order:
 
 1. **Explicit flag**: `--platform <claude-code|codex|dsh|claude-code,dsh|all>` always wins (headless/CI compatible). It accepts a single platform, a comma-separated list (installed in argument order), or `all` (all platforms in table order). Unknown platforms error out (including any unknown item inside a comma list — no partial install). The old `both` option is removed — `--platform both` errors with a hint to use a comma list or `all`.
-2. **Interactive prompt**: when run on an interactive terminal (TTY) without `--platform`, the installer shows a direction-key multi-select (arrow keys + space to toggle, Enter to confirm; `@clack/prompts` is the primary path) — when the dependency is not installed, offline, or stdin has no raw mode, it automatically falls back to a readline number/comma multi-select (`FLOW_COMET_FORCE_READLINE=1` forces the fallback for testing). Claude Code / Codex / dsh are pre-checked from existing `.claude/` / `.codex/` / `.dsh/` traces; press Enter to accept the pre-checked selection (fallback default Claude Code).
+2. **Interactive prompt**: when run on an interactive terminal (TTY) without `--platform`, the installer shows a multi-select (arrow keys + space to toggle, Enter to confirm; optional `@clack/prompts` dependency with a readline number/comma fallback) — Claude Code / Codex / dsh, pre-checked from existing `.claude/` / `.codex/` / `.dsh/` traces; press Enter to accept the pre-checked selection (fallback default Claude Code).
 3. **Auto-detection**: without a TTY (CI, scripts, pipelines), traces in the target project are detected — `.codex/` only → Codex; `.dsh/` only → dsh; `.claude/` present → Claude Code; **multiple traces → Claude Code (primary) with a hint** (for another set, run in an interactive terminal for the multi-select, or pass `--platform` explicitly).
 4. **Fallback**: if no trace exists, Claude Code is used.
 
@@ -90,13 +73,13 @@ On non-default platforms, command paths inside SKILL/GUIDANCE files are rewritte
 ### Verifying installation (no side effects, no change created)
 
 1. **Structure**: `flow-comet*` skill directories under `<target>/.claude/skills/` (count matches prepare-env output, currently 19) + `rules/flow-comet-orchestration.md` + `settings.local.json` + `skills/flow-comet/INSTALLED_VERSION` (version marker shipped with the skill bundle — `cat .claude/skills/flow-comet/INSTALLED_VERSION`; it equals the latest release version, or for prepare-env installs with git available, a precise `<release>-<n>-g<hash>` describing how far the source has accumulated since that release)
-2. **Config loadability**: `settings.local.json` is valid JSON; `hooks.PreToolUse[].hooks[].command` points to the project-root reference `node %CLAUDE_PROJECT_DIR%\.claude\skills\flow-comet\scripts\comet-hook-guard.mjs` (POSIX hosts: `node $CLAUDE_PROJECT_DIR/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`) and `<target>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs` exists. Claude Code injects `CLAUDE_PROJECT_DIR` with the project root when a hook runs, so the path resolves from the project root rather than the session's working directory — it still resolves after the working directory drifts out of the project root (the recommended shape under [Hook upgrade](#hook-upgrade))
+2. **Config loadability**: `settings.local.json` is valid JSON; `hooks.PreToolUse[].command` points to `node .claude/skills/flow-comet/scripts/comet-hook-guard.mjs` and that file exists
 3. **Consistency**: diff against the authoritative source (run inside the flow-comet repo; no output = identical):
    `diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/rules <target>/.claude/rules` and the same for `skills`
 4. **Smoke test** (run inside the target project): `cd <target> && node .claude/skills/flow-comet/scripts/workflow-state.mjs status` — expected output is a JSON state object (`{"status":"no-change",...}` for a fresh project, `{"status":"running","change":...}` when a workflow is active)
 
 > Commands are POSIX-style (Git Bash / WSL / macOS terminal); Windows users should run them in Git Bash.
-> **Note**: `guard-self-test.mjs` (219 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
+> **Note**: `guard-self-test.mjs` (171 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
 
 ### Using flow-comet on Codex
 
@@ -136,7 +119,7 @@ cp -r $SKILLS/flow-comet* "$TARGET/.claude/skills/"
 cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.claude/rules/"
 ```
 
-**3. Register the hook (manual)**: merge the following into the target project's `.claude/settings.local.json` (preserve existing content, e.g. `permissions`). The command references the guard script through Claude Code's project-root variable (`CLAUDE_PROJECT_DIR`, injected with the project root when a hook runs; `%CLAUDE_PROJECT_DIR%` on Windows, `$CLAUDE_PROJECT_DIR` on POSIX), so it resolves from the project root instead of the session's working directory (i.e. `<target>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`):
+**3. Register the hook (manual)**: merge the following into the target project's `.claude/settings.local.json` (preserve existing content, e.g. `permissions`). The hook command's relative path resolves against the Claude Code project root (i.e. `<target>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`):
 
 ```json
 {
@@ -147,7 +130,7 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
         "hooks": [
           {
             "type": "command",
-            "command": "node %CLAUDE_PROJECT_DIR%\\.claude\\skills\\flow-comet\\scripts\\comet-hook-guard.mjs"
+            "command": "node .claude/skills/flow-comet/scripts/comet-hook-guard.mjs"
           }
         ]
       }
@@ -155,10 +138,6 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
   }
 }
 ```
-
-POSIX hosts use the forward-slash command form instead: `node $CLAUDE_PROJECT_DIR/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`.
-
-> **Upgrade note**: projects that installed earlier with the legacy relative-path entry (`node .claude/skills/...`) can upgrade in place — re-running the Option A installer replaces that entry with the project-root form above (managed entries are recognized by the script name and overwritten, no manual cleanup needed).
 
 **4. Runtime state**: `.comet/flow-comet-state.json` is created by `init` (or the first `/flow-comet` call).
 
@@ -183,30 +162,6 @@ On an interactive terminal, dsh is one of the multi-select options (see [Platfor
 
 > **Note — the installer writes to your home directory**: mounting the bridge loader writes to `$DSH_HOME` (default `~/.dsh`; resolution: `$DSH_HOME` env var > `~/.dsh`). This is the intended, **non-destructive** design: `cordis.patch.yml` is read-merged (existing blocks such as dsh-skin preserved; an unparseable file fails safely instead of being overwritten) and the loader file is added/removed by name. Restore via purge (below), which removes the managed block and the loader file while keeping everything else.
 
-### Loader version handling
-
-The bridge loader carries an embedded version stamp (`// BRIDGE_VERSION: <version>` in `scripts/dsh-bridge.mjs`). On every dsh install, the installer extracts the stamp from the authoritative loader and from the currently installed loader (if any) and reports the transition before overwriting the mounted file: first install / **upgrade `A → B`** / **downgrade `A → B`** / **version consistent**. The stamp is also the contract anchor for `bridge-check` below.
-
-### bridge-check (read-only self-check)
-
-`workflow-state.mjs bridge-check` (available in every installed copy under the platform's skill path) performs a strictly read-only dsh bridge health check — zero writes, zero network. It reports six states:
-
-| State | Meaning | Exit |
-|-------|---------|------|
-| healthy | loader installed and mounted with the expected insert shape, the referenced `file://` target is reachable, no duplicate registration, and the loader stamp matches the project `INSTALLED_VERSION` | 0 |
-| file missing | `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` is absent | 1 |
-| not mounted | the managed block is missing from `$DSH_HOME/cordis.patch.yml` (or the patch file is absent), or the block has the wrong shape (e.g. id-targeted instead of insert) | 1 |
-| version skew | loader `BRIDGE_VERSION` differs from the project `INSTALLED_VERSION` | 1 |
-| duplicate registration | the patch file registers `dsh-flow-comet-bridge` outside the managed block | 1 |
-| not applicable | the project root contains no `.dsh/skills/flow-comet` (dsh platform copy not installed) — all other checks are skipped | 0 |
-
-Unrecognized YAML shapes are reported as approximate warnings (warn without deciding — never a false fail); only explicit mismatches force a non-zero exit.
-
-```bash
-# Run inside the target project (dsh install shape)
-node .dsh/skills/flow-comet/scripts/workflow-state.mjs bridge-check
-```
-
 ### Using flow-comet on dsh
 
 - **First use**: no hook-trust step — the bridge loader is a global plugin mounted by the installer; start a dsh session in the target project and invoke the skill by name (rank 100, auto-discovered). The bridge only intercepts when the session's project root contains `.dsh/skills/flow-comet` — projects without it are untouched. Interception only applies while a flow is running — in the idle state (no state / no `activeChange` / `completed`) writes outside the project root are allowed; parse failures or unknown workflow status stay fail-closed.
@@ -219,7 +174,6 @@ node .dsh/skills/flow-comet/scripts/workflow-state.mjs bridge-check
 1. **Structure**: `flow-comet` skill directory under `<target>/.dsh/skills/` + `AGENTS.md` managed block (`grep "Managed by flow-comet" <target>/AGENTS.md`) + `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` + the managed block in `$DSH_HOME/cordis.patch.yml` + `<target>/.dsh/skills/flow-comet/INSTALLED_VERSION`
 2. **Command paths rewritten**: `grep -c "\.claude/skills/flow-comet/scripts/" <target>/.dsh/skills/flow-comet/SKILL.md` → 0; `grep -c "\.dsh/skills/flow-comet/scripts/" <target>/.dsh/skills/flow-comet/SKILL.md` → non-zero
 3. **Smoke test** (run inside the target project): `cd <target> && node .dsh/skills/flow-comet/scripts/workflow-state.mjs status` → JSON state object
-4. **Bridge health (optional)**: `cd <target> && node .dsh/skills/flow-comet/scripts/workflow-state.mjs bridge-check` → `healthy` (exit 0) on a correctly installed dsh project, or `not applicable` (exit 0) on a project without the dsh platform copy
 
 ### Reset and regenerate (purge — not uninstall)
 
@@ -251,19 +205,6 @@ rm -rf <target>/.dsh/skills/flow-comet*
 ```
 
 **Multi-project semantics**: each project installs its own skill tree (a project that has not installed the skill cannot see it); the bridge loader is a single global copy serving all flow-comet projects (per-session project detection — equivalent to the Claude Code project-level hook).
-
-## Branch naming alignment
-
-By default the engine creates the workflow branch as `change/<id>`. If your project follows a different local branch convention, pass a custom prefix when initializing the change:
-
-```bash
-cd <target project>
-node .claude/skills/flow-comet/scripts/workflow-state.mjs init <id> --branch-prefix feat/
-```
-
-On Codex the same init runs against `.agents/skills/flow-comet/scripts/workflow-state.mjs`; on dsh against `.dsh/skills/flow-comet/scripts/workflow-state.mjs` (paths are rewritten at install time — see [Platforms](#platforms)). A missing trailing `/` is added automatically, so `--branch-prefix feat` and `--branch-prefix feat/` are equivalent.
-
-Branch/state consistency checks (`status`/`next`) compare the current branch with the active change and emit a `WARN:` line on mismatch. The warning is a non-blocking hint, not an error — the workflow keeps running. To clear it, check out the expected branch (`git checkout <prefix><activeChange>`); the full symptom table lives in [Troubleshooting](TROUBLESHOOTING.md). Day-to-day branch behavior once the workflow is running (automatic creation, archive wrap-up, merge-back) is described in [Usage](USAGE.md).
 
 ## Uninstalling
 

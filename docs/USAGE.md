@@ -16,8 +16,6 @@ open → design → plan → execute ⇄ subagent-execute → review → verify 
 
 Routing is **derived from `.specs/` artifacts** (determineNode): missing files → the node stops there; unfinished tasks → stays at execute; everything done → advances through review/verify/archive.
 
-**Multi-pass routing between `execute` and `subagent-execute`** is dependency-topology driven: each pass enters `subagent-execute` to delegate the parallel tasks whose dependencies (`<depends_on>`) are satisfied, returns to `execute` for the runnable serial tasks between waves, and re-enters `subagent-execute` when the next parallel wave becomes eligible — alternating until no runnable task remains, then advancing to `review`. There is **no single-pass limit**: mixed topologies (serial → parallel → serial → parallel) are legal and are digested pass by pass by dependency topology; dependency cycles or missing dependencies are rejected at the plan exit (see [TROUBLESHOOTING](TROUBLESHOOTING.md)).
-
 ### Node responsibilities
 
 | Node | Responsibility | Key artifacts | Exit validation (guard) |
@@ -25,8 +23,8 @@ Routing is **derived from `.specs/` artifacts** (determineNode): missing files �
 | **open** | CHANGE clarification + requirements (AC derivation) | `CHANGE.md` / `REQUIREMENT.md` / CONTEXT terms | Required sections (template-derived): `## Why` / `## 用户故事` / acceptance; CONTEXT orphan-section detection |
 | **design** | Tech-stack selection + architecture alignment + decisions | `DESIGN.md` (§0 stack / §0.5 architecture / decision list / risks) | §0 sections + `## 决策清单` (template-derived, numbered) |
 | **plan** | Atomic task breakdown (XML) + wave planning | `TASK.md` (`<task>` blocks with 7 fields + parallel markers) | task blocks + verify field |
-| **execute** | Serial task execution (coordinator delegates subagents; re-entered on each pass) | `<task-id>-SUMMARY.md` | SUMMARY six sections + 6-dimension self-check + mandatory `## 自检方法`; TASK signature hash (recorded at enter, compared at exit); takeover detection |
-| **subagent-execute** | Parallel task delegation (waves; re-entered per dependency topology) | same (one SUMMARY per task) | same + handoff evidence (Return Contract) |
+| **execute** | Serial task execution (coordinator delegates subagents) | `<task-id>-SUMMARY.md` | SUMMARY six sections + 6-dimension self-check + mandatory `## 自检方法`; TASK signature hash (recorded at enter, compared at exit); takeover detection |
+| **subagent-execute** | Parallel task delegation (waves) | same (one SUMMARY per task) | same + handoff evidence (Return Contract) |
 | **review** | 4-round review (spec compliance / code quality / UI visual / optional) | `REVIEW.md` (Critical/findings/conclusion) | ≥100B + required sections |
 | **verify** | Integration verification + UAT + failure diagnosis (≤3 rounds) | `TEST.md` / `UAT.md` / LESSONS nominations | verification commands actually executed; UAT.md exists; LESSONS numbering/placement |
 | **archive** | LESSONS nominations + archive + branch wrap-up | `.specs/archive/<date>-<id>/` / CHANGELOG | branch check (new mode); CHANGELOG ordering + registration hint |
@@ -52,13 +50,6 @@ All workflow artifacts live in `.specs/` (project-level) and `.specs/<change-id>
 | `.comet/flow-comet-state.json` | `.comet/` | state machine (activeChange/currentNode/completedNodes/evidence/…) | throughout (script-managed) |
 
 > **Append placement discipline**: CONTEXT terms → glossary table, decisions → locked-decision list; LESSONS → entries section by L-NNN; STATE/CHANGELOG → top (reverse order); rollback fixes → `## Fix 任务` section — guard detects violations (progressive WARN).
-
-## Workflow discipline
-
-- **`.specs/` artifacts are never committed**: SUMMARY / handoff / TASK and all other workflow artifacts stay in the working tree. If `git add` rejects them, that is correct behavior — **force-add (`-f`) is forbidden**.
-- **JSON payloads travel by file**: `record` and `workflow-handoff` payloads should be written to a UTF-8 file and passed with `--json-file <file>` instead of inline arguments — avoids Windows PowerShell quote stripping and silent JSON corruption.
-- **SUMMARY template discipline**: every SUMMARY must contain a `## 自检方法` section, placed **after the bounds check** (`## 越界检查`); the 6-dimension self-check must declare one of the three self-review values **in that `## 自检方法` section** — `brooks-review` (full Skill review), `cache-brooks` (manual execution from the plugin-cache protocol files), or `builtin-quickcheck` (built-in fallback — must declare the unavailability reason and the cache-attempt evidence).
-- **Pseudo-parallel hint**: if a parallel task's `write_files` contain only test files (`tests/` / `test_` prefixes) and no production code file, the plan exit emits a progressive **WARN** (not a BLOCK) listing the task ids and suggesting to add a `depends_on` declaration or merge the task into a vertical slice (production code + its tests in one task).
 
 ## Branch mode
 

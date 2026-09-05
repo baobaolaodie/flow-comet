@@ -25,10 +25,7 @@ description: "flow-kit DEV 阶段协议：TDD + 6 维自查 + diff 边界 verify
    - **`## 6 维自查` 段内也须出现自检方法名**（`brooks-review` / `cache-brooks` 字样，如「- 功能: 通过（brooks-review 已跑）」）——guard 校验 6 维自查段是否声明了自检方法（新 change 缺失 BLOCKED，旧 change WARN 渐进）。
    - **纯测试/纯文档任务**（无生产代码改动，6 维自查非必跑）仍须满足自检方法声明与 builtin 缓存证据——可**引用同 change 其他 SUMMARY 已声明的缓存尝试**（如「自检证据见 T01-SUMMARY（cache-brooks 已读插件缓存）」）满足 guard 校验。
 5. **diff 边界 verify（R6.5）**：`git diff --name-only` 与 TASK write_files 比对，越界必须回滚
-6. **原子提交**：`<type>(<scope>): <subject>`（scope 推荐可选：子系统短词；禁止把 change-id/日期/任务号作 scope）
-   任务号放提交正文尾注（如 Task: T03），change-id 不入标题
-
-**覆盖声明（上游 vendored 只读）**：vendored 上游提示文件（`flow-kit/prompts/**`、`flow-kit/templates/**`）保持只读基准，不作修改——上游（如 `flow-kit/prompts/4-dev.md` 等）旧示例以 change-id 作 scope 的写法**不采用**；本仓采用通用子系统 scope 语义（推荐可选），提交格式与本仓约束以本节为准；已登记向上游提改进待办（REQUIREMENT v2），收口前由本声明压制差异。
+6. **原子提交**：`<type>(<change-id>): <task-id> <subject>`
 
 ### 条件检查
 
