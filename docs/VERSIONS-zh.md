@@ -18,7 +18,8 @@
 
 | 类型 | 项 |
 |------|-----|
-| **必需** | [flow-kit](https://github.com/rihebty/flow-kit)（方法论与工件模板）；Claude Code |
+| **必需** | [flow-kit](https://github.com/rihebty/flow-kit)（方法论与工件模板；安装器自动获取——锁定快照）；Claude Code |
+| **运行时依赖（仅安装器 TTY）** | `@clack/prompts`（`package-lock.json` 精确锁版；仅 `prepare-env` 交互方向键多选使用——不可用时自动回退 readline） |
 | **平台** | Claude Code（skill 体系，默认）；Codex（技能/规则/hook 经 `prepare-env --platform codex`，见[安装](INSTALLATION-zh.md#平台)）；DeepSeek Harness（项目级技能 + 全局桥接 loader，经 `prepare-env --platform dsh`，见[安装](INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-平台)）；不保证 Gemini/Cursor |
 | **运行时** | Node.js ESM（Node ≥ 18）；工件语言与项目主语言一致 |
 
@@ -26,7 +27,7 @@
 
 - 旧 change/旧 state 自动补默认字段（executionMode/branchMode/enablePrReview）；无分支 change 照常运行——向后兼容
 - 旧 change 重入渐进 WARN 不 BLOCK（redEvidence/greenEvidence 缺失、纯字符串 handoff）
-- 回归基线（两级）：`guard-self-test.mjs` 171 场景 + `system-test.mjs` 61 项全绿（每次改动后必须）
+- 回归基线（两级）：`guard-self-test.mjs` 219 场景 + `system-test.mjs` 73 项全绿（每次改动后必须）
 - dsh 平台：项目级技能副本携带与 flow-comet 发布版本同步的 `INSTALLED_VERSION` 标识；卸载经 `prepare-env --purge --platform dsh --yes`（见[安装](INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-平台)）
 
 ## 发布 checklist（每次发布收尾）

@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 import { execFileSync } from 'child_process';
 import { promises as fs } from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, SKILL_PROTOCOL_FILES } from './protocol-utils.mjs';
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, looksLikeObjectLiteral } from './state-schema.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide, skipInit } from './context-init.mjs';
 import { taskOpeningAttrs, taskBlocks } from './task-parsing.mjs';
+import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath } from './route-node.mjs';
 
 const command = process.argv[2] ?? 'status';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -294,187 +296,13 @@ async function verifySkillLoadMarkers(completedChecks, changeName, recordTime, p
 }
 
 // ---------- 节点完成判定 · determineNode 数据化：完成标志从协议 outputSchemas 推导 ----------
-
-// 为每个节点构建"完成标志文件集"：遍历节点 outputSchemas 引用的 schema 的 artifacts
-// （schema 在 protocol.outputSchemas 数组中按 id 查找），paths 中 <change-id> 替换为实际
-// changeName，得到相对 .specs 根的路径数组。同一 artifact 的 paths 为互斥备选（命中任一即
-// 该 artifact 存在，如 DESIGN.md / DESIGN-lite.md）；节点完成 = 标志文件集全部存在
-// （required !== false 的 artifact 全部存在，与 workflow-guard missingRequiredArtifacts 同语义）。
-// 返回 Map<nodeId, Array<{ id, paths }>>。
-function buildNodeCompletionFlags(protocol, changeName) {
-  const schemaById = new Map((protocol.outputSchemas ?? []).map((schema) => [schema.id, schema]));
-  const flags = new Map();
-  for (const node of protocol.nodes ?? []) {
-    const artifacts = [];
-    for (const schemaId of node.outputSchemas ?? []) {
-      const schema = schemaById.get(schemaId);
-      for (const artifact of schema?.artifacts ?? []) {
-        if (artifact.required === false) continue; // 可选产物不是完成门控
-        // B 方案（fail-fast）：classic/native pathBase 由 guard 侧 workflowPathBaseRoot 全量
-        // 感知，但状态机推导暂不支持（按 specs-root 兜底会与 guard 不一致导致卡死/误判）——
-        // 显式报错提示改用 specs-root/project + 完整路径（如 project + openspec/changes/xxx.md）。
-        if (artifact.pathBase === 'classic-openspec-root'
-          || artifact.pathBase === 'classic-superpowers-root'
-          || artifact.pathBase === 'native-root') {
-          throw new Error('产物根 pathBase "' + artifact.pathBase
-            + '" 由 guard 校验支持但状态机推导暂不支持——请改用 specs-root/project + 完整路径（如 project + openspec/changes/xxx.md）');
-        }
-        artifacts.push({
-          id: schemaId + '.' + (artifact.id ?? 'artifact'),
-          paths: (artifact.paths ?? []).map((p) => String(p).replaceAll('<change-id>', changeName)),
-          pathBase: artifact.pathBase,
-        });
-      }
-    }
-    flags.set(node.id, artifacts);
-  }
-  return flags;
-}
-
-function escapeRegExp(value) {
-  return String(value).replace(/[|\\{}()[\]^$+?.]/gu, '\\$&');
-}
-
-// 与 workflow-guard.mjs pathPatternExists 同语义的轻量 glob 存在检查：
-// 按路径段逐段 walk，含 `*` 的段按正则匹配（`*` → `.*`，如 *-SUMMARY.md），命中任一真实路径即存在。
-async function pathPatternExists(root, relativePattern) {
-  const parts = String(relativePattern).split(/[\\/]+/).filter(Boolean);
-  async function walk(current, index) {
-    if (index >= parts.length) return fileExists(current);
-    const part = parts[index];
-    if (!part.includes('*')) return walk(path.join(current, part), index + 1);
-    let entries;
-    try {
-      entries = await fs.readdir(current, { withFileTypes: true });
-    } catch {
-      return false;
-    }
-    const matcher = new RegExp('^' + part.split('*').map(escapeRegExp).join('.*') + '$', 'u');
-    for (const entry of entries) {
-      if (matcher.test(entry.name) && (await walk(path.join(current, entry.name), index + 1))) {
-        return true;
-      }
-    }
-    return false;
-  }
-  return walk(root, 0);
-}
-
-// 节点完成判定 = 标志文件集全部存在（artifact 存在 = 其 paths 任一命中 glob）
-// 产物推导 pathBase 感知: 产物根按 artifact.pathBase 解析——'specs-root' → .specs/；'project'/缺省 → 项目根
-// （与 workflow-guard.mjs 的 workflowPathBaseRoot 对齐：内置协议 10 个 artifacts 全部显式
-// 声明 specs-root；compose 自定义协议可声明 project 根工件如 README.md）。
-// classic/native 等其余 pathBase 暂按 specs-root 兜底（与修复前一致，不回归——guard 侧全量感知）。
-async function nodeFlagsComplete(nodeFlags, nodeId) {
-  for (const artifact of nodeFlags.get(nodeId) ?? []) {
-    let present = false;
-    const artifactRoot = artifact.pathBase === 'specs-root' ? specsRoot : runRoot;
-    for (const pattern of artifact.paths) {
-      if (await pathPatternExists(artifactRoot, pattern)) {
-        present = true;
-        break;
-      }
-    }
-    if (!present) return false;
-  }
-  return true;
-}
-
+// （节点完成判定核心抽取 · 依赖感知路由）: 节点完成判定核心已迁至共享模块 route-node.mjs——
+// determineNode 保持既有签名与返回语义，仅改为委托 resolveNextNode（行为逐字等价，重构保持锚：
+// 输出与抽取前 200 版一致）。route / buildNodeCompletionFlags / pathPatternExists / nodeFlagsComplete /
+// protocolTaskFilePath / hasSubagentNode 已随抽取移至 route-node.mjs（单一实现，根治 guard 与
+// 状态机双实现漂移的根治（单一实现决策）。
 async function determineNode(changeName, protocol, completedNodes = []) {
-  // （实测）: 全部节点已完成 → 完成态，不产出最后节点。
-  // 自定义协议无 archive 节点时，completedNodes 全齐后 next 仍会输出 NODE: <最后节点>
-  // （产物推导只返回最后节点 id）——此处（产物推导之前）判定：route(protocol) 的所有节点
-  // id 均已包含在 completedNodes 中 → 返回 null。printNext(null) 输出 "NEXT: done"；
-  // status 的 currentNode = null 表示完成态。内置协议不受影响：archive exit 时 workflow-guard
-  // 清 activeChange，findActiveChange 返回 null 先于 determineNode 触发；completedNodes 含
-  // 全部 8 节点时同样返回 null，与"归档后无活跃 change"语义一致。
-  const protocolNodeIds = route(protocol).map((n) => n.id);
-  if (protocolNodeIds.length > 0 && protocolNodeIds.every((id) => completedNodes.includes(id))) {
-    return null;
-  }
-  const changeDir = path.join(specsRoot, changeName);
-  // 节点完成判定: 节点完成标志从协议 outputSchemas 推导（内置协议缺省行为与现硬编码逐字节一致）
-  const nodeFlags = buildNodeCompletionFlags(protocol, changeName);
-  // 任务文件路径：协议可选 taskFile 字段（相对 changeDir），无声明时缺省 TASK.md。
-  // 自定义协议无 taskFile 时 parallel 检测自然降级为串行（任务文件缺失 → 不路由 subagent-execute）。
-  const taskFile = typeof protocol.taskFile === 'string' && protocol.taskFile !== ''
-    ? protocol.taskFile
-    : 'TASK.md';
-  const taskPath = path.join(changeDir, taskFile);
-
-  // 节点顺序 = 协议 nodes 顺序（disabled 过滤，见 route()）；execute/subagent-execute 由任务状态特判。
-  // 按协议顺序拆分：execute/subagent-execute 之前的节点走产物门控（内置 = open → design → plan），
-  // 之后的节点在任务全部 done 后按序门控（内置 = review → verify → archive）。
-  const orderedNodes = route(protocol);
-  const hasExecuteFamily = orderedNodes.some((n) => n.id === 'execute' || n.id === 'subagent-execute');
-  const preExecNodes = [];
-  const postExecNodes = [];
-  let sawExecuteFamily = false;
-  for (const node of orderedNodes) {
-    if (node.id === 'execute' || node.id === 'subagent-execute') {
-      sawExecuteFamily = true;
-      continue;
-    }
-    if (sawExecuteFamily) postExecNodes.push(node);
-    else preExecNodes.push(node);
-  }
-
-  // 前置产物门控：execute 之前的节点按序检查（内置协议 = open → design → plan）
-  for (const node of preExecNodes) {
-    if (!(await nodeFlagsComplete(nodeFlags, node.id))) return node.id;
-  }
-
-  // 协议无 execute/subagent-execute 节点：无任务状态特判，全部节点已按产物门控完成 → 当前处于最后节点
-  if (!hasExecuteFamily) {
-    return orderedNodes.length > 0 ? orderedNodes[orderedNodes.length - 1].id : 'archive';
-  }
-
-  // execute/subagent-execute 特判：解析任务文件 <task> 块 pending/done/parallel/depends_on。
-  // 属性解析统一走 task-parsing.mjs 的 taskOpeningAttrs——只读 <task ...> 开标签（属性序无关、
-  // 不受 <action>/<verify> 内容文本干扰），与 workflow-guard 的校验共享同一语义。
-  try {
-    const taskContent = await fs.readFile(taskPath, 'utf8');
-    const taskList = taskBlocks(taskContent);
-    const attrsList = taskList.map(taskOpeningAttrs).filter(Boolean);
-    const pending = attrsList.filter((a) => a.status === 'pending').length;
-    const done = attrsList.filter((a) => a.status === 'done').length;
-    if (pending > 0) {
-      // 只检测依赖已满足的 parallel 任务，避免 Wave N+1 的 parallel 任务
-      // 在 Wave N 串行任务未完成时就被路由到 subagent-execute。
-      // subagent-execute 已完成（第一波委托 exit）后第二波 parallel 不再路由回
-      // 该节点（防死循环）——与 workflow-guard 平行路由的 !completed 判定一致。
-      const hasSubagentNode = route(protocol).some((n) => n.id === 'subagent-execute');
-      if (hasSubagentNode && !completedNodes.includes('subagent-execute')) {
-        // 收集所有 done 任务的 id（开标签属性序无关）
-        const doneIds = new Set(attrsList.filter((a) => a.status === 'done' && a.id).map((a) => a.id));
-        // 检查 pending parallel 任务中是否有依赖已满足的（开标签 parallel="true" 且 status="pending"）
-        const parallelBlocks = taskList.filter((block) => {
-          const a = taskOpeningAttrs(block);
-          return a && a.parallel && a.status === 'pending';
-        });
-        const eligibleParallel = parallelBlocks.filter((block) => {
-          const depsMatch = block.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
-          if (!depsMatch || !depsMatch[1].trim()) return true; // 无依赖
-          const deps = depsMatch[1].trim().split(/[,\s]+/).filter(Boolean);
-          return deps.every((d) => doneIds.has(d));
-        });
-        if (eligibleParallel.length > 0) return 'subagent-execute';
-      }
-      return 'execute';
-    }
-    // 任务全部 done——execute 完成还需至少一份 SUMMARY（execute 产物门控，内置 = <change-id>/*-SUMMARY.md glob）
-    if (!(await nodeFlagsComplete(nodeFlags, 'execute'))) return 'execute';
-    // 后置产物门控：按协议顺序检查 execute 之后的节点（内置 = review → verify → archive）。
-    // verify 的完成标志 = flowkit.verify.v1 全部 required artifacts（TEST.md + UAT.md）；自然流程中
-    // TEST.md 由 review 产出、UAT.md 由 verify 产出，故"verify 看 UAT.md"的判定语义保持不变。
-    for (const node of postExecNodes) {
-      if (!(await nodeFlagsComplete(nodeFlags, node.id))) return node.id;
-    }
-    // 全部产物门控通过 → 当前处于协议最后一个节点（内置协议 = archive，与现硬编码 checks.uat → 'archive' 一致）
-    return orderedNodes.length > 0 ? orderedNodes[orderedNodes.length - 1].id : 'archive';
-  } catch {}
-
-  return 'execute';
+  return resolveNextNode({ runRoot, changeName, protocol, completedNodes });
 }
 
 // 回退修复豁免判定——回退修复标准路径：review/verify 阶段发现缺陷 → TASK.md 追加
@@ -500,30 +328,42 @@ async function tFixRollbackExempt(changeName, protocol, currentNode, completedNo
 // 正常推进豁免判定——exit --apply 会把 currentNode 推进到下一节点（如 open exit 后
 // currentNode=design，该节点尚未开始故 evidence 无记录），随后按 SKILL 协议调 next（正常路径）
 // 不应被  误拦为"疑似未 exit"。判定三条件：① completedNodes 非空；② 最后一个已完成节点
-// 在路由列表（route(protocol)，disabled 过滤）中的直接后继 = currentNode（exit 推进的正常下一节点）；
-// ③ 最后一个已完成节点存在 evidence（exit --apply 必须带证据通过——证据存在证明该 exit 真实发生，
-// 排除伪造/漂移状态（如 review 无 evidence）。与  回退豁免独立判断（回退 = TASK.md
-// 有 pending 回退修复任务；本豁免 = 正常推进后继）。真乱序（currentNode 不是 completedNodes 的后继）仍
-// 维持  严格 BLOCK。
-function normalAdvanceExempt(state, protocol, completedNodes, currentNode) {
+// 存在 evidence（exit --apply 必须带证据通过——证据存在证明该 exit 真实发生，排除伪造/漂移状态，
+// 如 review 无 evidence）；③ currentNode 是下一个合法路由目标——**路由后继优先**（exit --apply
+// 把 currentNode 推进到共享路由判定 resolveNextNode 的结果，平行转换 plan→subagent-execute、
+// 趟间回流 subagent-execute→execute 等即由此产生；next 正常推进豁免识别路由后继，与 guard
+// NEXT 同源），静态直接后继兜底（串行推进原语义，旧态/序列流不回归）。与  回退豁免独立判断
+// （回退 = TASK.md 有 pending 回退修复任务；本豁免 = 正常推进后继）。真乱序（currentNode
+// 既非路由后继也非静态后继）仍维持  严格 BLOCK。
+async function normalAdvanceExempt(state, protocol, completedNodes, currentNode, changeName) {
   if (completedNodes.length === 0) return false;
   const lastNodeId = completedNodes[completedNodes.length - 1];
   const routeIds = route(protocol).map((node) => node.id);
   const lastIdx = routeIds.indexOf(lastNodeId);
-  if (lastIdx < 0 || lastIdx + 1 >= routeIds.length) return false;
-  if (routeIds[lastIdx + 1] !== currentNode) return false;
+  if (lastIdx < 0) return false;
   const lastEvidence = state.evidence && typeof state.evidence === 'object'
     ? state.evidence[lastNodeId]
     : null;
   // 审查补充（2026-08-08）：evidence 必须是对象且含非空 summary（空对象 {} 可绕过豁免，
   // 真实流程 exit 强制 summary——此处严格化防止手动修改 state 绕过）
-  return !!(
+  const hasExitEvidence = !!(
     lastEvidence &&
     typeof lastEvidence === 'object' &&
     !Array.isArray(lastEvidence) &&
     typeof lastEvidence.summary === 'string' &&
     lastEvidence.summary.trim() !== ''
   );
+  if (!hasExitEvidence) return false;
+  // 路由后继判定（与 guard 出口同源）：currentNode === resolveNextNode(completedNodes) 即
+  // 正常推进后的下一路由目标（含平行转换与趟间回流）；文件推导失败（异常态）不豁免。
+  try {
+    const routingNext = await determineNode(changeName, protocol, completedNodes);
+    if (routingNext === currentNode) return true;
+  } catch {
+    return false;
+  }
+  // 静态直接后继兜底（串行推进原语义，向后兼容旧态不回归）
+  return lastIdx + 1 < routeIds.length && routeIds[lastIdx + 1] === currentNode;
 }
 
 async function readState() {
@@ -603,10 +443,6 @@ async function writeState(state) {
   await writeJson(statePath, state);
 }
 
-function route(protocol) {
-  return (protocol.nodes ?? []).filter(n => !n.disabled);
-}
-
 function generatedNodeSkillName(protocol, nodeId) {
   return protocol.name + '-' + nodeId;
 }
@@ -638,11 +474,193 @@ function printNext(protocol, nodeId, executionMode = 'subagent') {
   }
 }
 
+// ---------- bridge-check（只读 dsh 桥接健康检查 · 六判定态） ----------
+
+// 版本戳锚点正则（契约定稿见 T02-SUMMARY「版本戳标记行格式契约」/ DESIGN §9.3）：
+// 独立整行、行首无缩进、冒号后恰一个空格、行尾无其它字符。格式禁动（§9.5）。
+const BRIDGE_VERSION_RE = /^\/\/ BRIDGE_VERSION: ([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)$/m;
+
+// $DSH_HOME 解析——与 prepare-env.mjs resolveDshHome 同语义（显式 DSH_HOME > ~/.dsh）。
+// 安装器函数位于仓库根 scripts/，技能包脚本不能跨模块 import，语义复刻保持单点契约
+// （套件断言保证双侧不漂移）。
+function resolveDshHomeForBridgeCheck() {
+  if (process.env.DSH_HOME) return path.resolve(process.env.DSH_HOME);
+  return path.join(os.homedir(), '.dsh');
+}
+
+// cordis.patch.yml 托管块标记——与 prepare-env.mjs MANAGED_CORDIS_START/END 同值复刻
+// （技能包自包含；标记为安装器读-合并-写幂等替换边界，格式禁动）。
+const MANAGED_CORDIS_START = '# --- flow-comet managed ---';
+const MANAGED_CORDIS_END = '# --- end flow-comet managed ---';
+
+// 判定态：健康 / 不适用 / 文件缺失 / 未挂载 / 版本偏斜 / 重复注册。
+// 严格只读零写入零网络；失配（FAIL）exit 非 0；无法识别形态 → 近似性声明告警（WARN）
+// 不定论不误杀（行扫描对无法识别形态的手写极端 YAML 只告警不定论，不误判为失配；
+// 仅明确失配才强制非零退出）。
+async function runBridgeCheck() {
+  const report = { pass: [], warn: [], fail: [] };
+  // ⑥ 非 dsh 项目 →「不适用」exit 0（AC-11）：会话项目根无 .dsh/skills/flow-comet
+  // （未安装 dsh 平台副本）即不适用，其余检查全部跳过。
+  if (!(await fileExists(path.join(runRoot, '.dsh', 'skills', 'flow-comet')))) {
+    console.log('[NA] bridge-check: 不适用（本项目未安装 dsh 平台副本）——项目根无 .dsh/skills/flow-comet');
+    console.log('bridge-check: 不适用（exit 0）');
+    return;
+  }
+
+  const dshHome = resolveDshHomeForBridgeCheck();
+  const loaderPath = path.join(dshHome, 'plugins', 'dsh-flow-comet-bridge.mjs');
+  const patchPath = path.join(dshHome, 'cordis.patch.yml');
+  const installedVersionPath = path.join(__dirname, '..', 'INSTALLED_VERSION');
+
+  // ① loader 文件存在性（$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs）
+  const loaderExists = await fileExists(loaderPath);
+  if (loaderExists) {
+    report.pass.push('loader 文件存在: ' + loaderPath);
+  } else {
+    report.fail.push('loader 文件缺失: ' + loaderPath);
+  }
+
+  // ② cordis.patch.yml 托管块存在性与 insert 形态（含 - insert: 与 name: 'file://…'；
+  //    L-048：id-targeted patch 形态无 insert → 确认为错误形态失配）
+  //    ＋ ③ 块内 file:// 目标可达
+  let patchContent = null;
+  try {
+    patchContent = await fs.readFile(patchPath, 'utf8');
+  } catch {
+    patchContent = null;
+  }
+  if (patchContent === null) {
+    report.fail.push(
+      '未挂载: ' + patchPath + ' 不存在——' +
+      (loaderExists ? 'loader 存在但未挂载（不会监听任何项目）' : '托管块无从指向 loader')
+    );
+  } else {
+    const startIdx = patchContent.indexOf(MANAGED_CORDIS_START);
+    const endIdx = patchContent.indexOf(MANAGED_CORDIS_END);
+    if (startIdx === -1 || endIdx === -1 || endIdx < startIdx) {
+      report.fail.push(
+        '未挂载: ' + patchPath + ' 中不存在托管块（' + MANAGED_CORDIS_START + ' … ' + MANAGED_CORDIS_END +
+        '）——' + (loaderExists ? 'loader 存在但未挂载（不会监听任何项目）' : '')
+      );
+    } else {
+      // 块内容 = 起始标记行尾之后、结束标记之前
+      let blockStart = patchContent.indexOf('\n', startIdx);
+      blockStart = blockStart === -1 ? endIdx : blockStart + 1;
+      const block = patchContent.slice(blockStart, endIdx);
+      const hasInsert = /^\s*- insert:\s*$/m.test(block);
+      const fileUrlMatch = /name:\s*'file:\/\/([^']+)'/.exec(block);
+      const hasIdLine = /^\s*- id:\s*dsh-flow-comet-bridge\s*$/m.test(block);
+
+      if (hasInsert && fileUrlMatch) {
+        report.pass.push('cordis.patch.yml 托管块: 存在且 insert 形态（含 - insert: 与 name: \'file://…\'）');
+        // ③ file:// 目标可达性（捕获组含 file:// 后的整段——'file://' + 捕获即完整 URL；
+        // fileURLToPath 按平台归一 Windows 盘符与 POSIX 根路径）
+        let targetPath = null;
+        try {
+          targetPath = fileURLToPath('file://' + fileUrlMatch[1]);
+        } catch (error) {
+          targetPath = null;
+        }
+        if (targetPath === null) {
+          report.warn.push('近似性声明: 托管块 file:// 引用无法解析为本地路径（' + fileUrlMatch[0] + '）——无法核验目标可达性，不定论');
+        } else if (await fileExists(targetPath)) {
+          if (targetPath === loaderPath) {
+            report.pass.push('块内 file:// 目标可达且与期望 loader 路径一致: ' + targetPath);
+          } else {
+            report.fail.push('托管块 file:// 目标与期望 loader 路径不符: ' + targetPath + ' ≠ ' + loaderPath);
+          }
+        } else {
+          report.fail.push('托管块指向的 loader 文件缺失: ' + targetPath + '（file:// 目标不可达）');
+        }
+      } else if (hasInsert && !fileUrlMatch) {
+        // insert 形态在但无 name: 'file://…' 行——部分可识别、目标不可核验：
+        // 近似性声明告警，不定论不误杀（不 forced 非零）
+        report.warn.push('近似性声明: 托管块为 insert 形态但未识别到 name: \'file://…\' 行——无法核验 file:// 目标是否可达，不定论');
+      } else if (hasIdLine && !hasInsert) {
+        // L-048 确认形态：id-targeted patch（- id: ... 无 - insert:）——
+        // dsh applyEntryPatches 对不存在的 id 报 entry not found 并跳过，loader 不会加载
+        report.fail.push('托管块为 id-targeted patch 形态（含 - id: dsh-flow-comet-bridge 但无 - insert:）——确认为错误形态失配（dsh 不会加载该 loader）');
+      } else {
+        report.warn.push('近似性声明: 托管块内容无法识别为已知形态（未见 - insert: / - id: dsh-flow-comet-bridge / name: \'file://…\'）——不判失配，不定论');
+      }
+    }
+  }
+
+  // ④ 托管块外同 id 重复注册（AC-10b；块内安装器写入的固有条目不计）
+  let outside = '';
+  if (patchContent !== null) {
+    if (patchContent.includes(MANAGED_CORDIS_START) && patchContent.includes(MANAGED_CORDIS_END)) {
+      const sIdx = patchContent.indexOf(MANAGED_CORDIS_START);
+      const eIdx = patchContent.indexOf(MANAGED_CORDIS_END);
+      outside = patchContent.slice(0, sIdx) + patchContent.slice(eIdx + MANAGED_CORDIS_END.length);
+    } else {
+      outside = patchContent; // 无托管块：全文件视为块外
+    }
+  }
+  const dupMatches = outside.match(/^\s*-\s+id:\s*['"]?dsh-flow-comet-bridge['"]?\s*$/gm) ?? [];
+  if (dupMatches.length > 0) {
+    report.fail.push('重复注册: cordis.patch.yml 托管块外另有 ' + dupMatches.length + ' 处同 id 注册行（dsh-flow-comet-bridge）——可能重复加载');
+  } else {
+    report.pass.push('重复注册检查: 托管块外无同 id（dsh-flow-comet-bridge）注册行');
+  }
+
+  // ⑤ loader BRIDGE_VERSION 戳 vs 项目 INSTALLED_VERSION 偏斜（两值都打印；
+  //    契约锚点正则见 T02-SUMMARY「版本戳标记行格式契约」）
+  let loaderStamp = null;
+  let installedVersion = null;
+  if (loaderExists) {
+    try {
+      const loaderText = await fs.readFile(loaderPath, 'utf8');
+      const stampMatch = BRIDGE_VERSION_RE.exec(loaderText);
+      if (stampMatch) {
+        loaderStamp = stampMatch[1];
+      } else {
+        report.warn.push('近似性声明: loader 未提取到 BRIDGE_VERSION 戳（锚点正则 /^\\/\\/ BRIDGE_VERSION: ([0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?)$/m 无命中——非语义化版本标记或缺失）——无法比对版本，不定论');
+      }
+    } catch {
+      report.warn.push('近似性声明: loader 文件读取失败——无法比对版本，不定论');
+    }
+  }
+  try {
+    installedVersion = (await fs.readFile(installedVersionPath, 'utf8')).trim();
+  } catch {
+    report.warn.push('近似性声明: 无法读取项目 INSTALLED_VERSION（' + installedVersionPath + '）——无法比对版本，不定论');
+  }
+  if (loaderStamp !== null && installedVersion !== null) {
+    if (loaderStamp === installedVersion) {
+      report.pass.push('版本一致性: loader BRIDGE_VERSION=' + loaderStamp + ' == 项目 INSTALLED_VERSION=' + installedVersion);
+    } else {
+      report.fail.push('版本偏斜: loader BRIDGE_VERSION=' + loaderStamp + ' != 项目 INSTALLED_VERSION=' + installedVersion + '（两值如上）');
+    }
+  }
+
+  // 逐项人读报告（AC-7~10：全过 exit 0 / 任一失配 exit 非 0）
+  console.log('bridge-check: 只读检查（DSH_HOME=' + dshHome + ' · 项目根=' + runRoot + '）');
+  for (const line of report.pass) console.log('[OK] ' + line);
+  for (const line of report.warn) console.log('[WARN] ' + line);
+  for (const line of report.fail) console.log('[FAIL] ' + line);
+  if (report.fail.length > 0) {
+    console.log('bridge-check: 失配 ' + report.fail.length + ' 项——exit 1');
+    process.exitCode = 1;
+  } else if (report.warn.length > 0) {
+    console.log('bridge-check: 未发现明确失配，含 ' + report.warn.length + ' 项近似性声明告警（不定论，不误杀）——exit 0');
+  } else {
+    console.log('bridge-check: 健康（全部检查通过）——exit 0');
+  }
+}
+
 async function main() {
   // 协议解析: 协议加载 = resolveProtocol 解析路径 + 受保护读取 + fail-closed schema 校验
   // （读失败/校验失败直接 throw，沿用现有错误处理风格）
   const protocol = await readProtocolFile(runRoot, protocolPath);
   validateProtocolSchema(protocol);
+
+  if (command === 'bridge-check') {
+    // 只读 dsh 桥接健康检查：零写入零网络；
+    // 不依赖协议/状态，直接执行后返回。
+    await runBridgeCheck();
+    return;
+  }
 
   if (command === 'init') {
     const changeName = process.argv[3];
@@ -849,7 +867,7 @@ async function main() {
         const rollbackExempt = await tFixRollbackExempt(changeName, protocol, state.currentNode, completedArr);
         // 正常推进豁免——exit --apply 推进 currentNode 到下一节点后按 SKILL 协议调 next
         // （正常路径）不拦截；与  回退豁免独立判断（详见 normalAdvanceExempt 注释）
-        const advanceExempt = normalAdvanceExempt(state, protocol, completedArr, state.currentNode);
+        const advanceExempt = await normalAdvanceExempt(state, protocol, completedArr, state.currentNode, changeName);
         if (!rollbackExempt && !advanceExempt) {
           console.error('BLOCKED: 疑似未 exit 节点 ' + state.currentNode + '，先 workflow-guard.mjs exit ' + state.currentNode + ' --apply');
           console.error('恢复: 确认当前节点实际已完成 → 用 exit <节点> --apply 正常推进；节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进）或 select（切换 change）；禁止手改 state 机器字段');
@@ -858,6 +876,37 @@ async function main() {
       }
     }
     const detectedNode = await determineNode(changeName, protocol, state.completedNodes);
+    // 单趟零进展防呆（三重防呆决策之二·状态机侧）：路由落在 execute/subagent-execute，但既无可委托的并行任务
+    // （依赖已满足集合为空）又无串行 pending，且 TASK 未全 done——剩余 pending 全部是依赖无法满足的
+    // 孤儿并行任务（数据异常：depends_on 引用不存在的任务 id 或执行期出现依赖环）→ BLOCKED，
+    // 防止静默路由到无法推进的节点造成死循环/死等。协议无 subagent-execute 节点时不适用
+    // （parallel 任务由 execute 直接消化，无孤儿语义）。依赖环的常规拦截点在 plan 出口（guard 前置），
+    // 此处兜底执行期数据异常（如手改 TASK 绕过签名校验的极端态）。
+    if (detectedNode === 'execute' || detectedNode === 'subagent-execute') {
+      if (hasSubagentNode(protocol)) {
+        try {
+          const zpBlocks = taskBlocks(await fs.readFile(protocolTaskFilePath(protocol, changeName, specsRoot), 'utf8'));
+          const zpAttrs = zpBlocks.map(taskOpeningAttrs).filter(Boolean);
+          const zpPending = zpAttrs.filter((a) => a.status === 'pending');
+          if (zpPending.length > 0) {
+            const zpDoneIds = new Set(zpAttrs.filter((a) => a.status === 'done' && a.id).map((a) => a.id));
+            const zpEligible = zpBlocks.filter((block) => {
+              const a = taskOpeningAttrs(block);
+              if (!a || !a.parallel || a.status !== 'pending') return false;
+              const depsMatch = block.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
+              if (!depsMatch || !depsMatch[1].trim()) return true;
+              return depsMatch[1].trim().split(/[,\s]+/).filter(Boolean).every((d) => zpDoneIds.has(d));
+            });
+            const zpSerial = zpPending.filter((a) => !a.parallel);
+            if (zpEligible.length === 0 && zpSerial.length === 0) {
+              console.error('BLOCKED: 路由零进展——既无可委托的并行任务（依赖已满足集合为空）也无串行 pending，但 TASK 尚有 ' + zpPending.length + ' 个未完成任务');
+              console.error('疑似孤儿并行任务依赖无法满足（检查 depends_on）：' + zpPending.map((a) => a.id).join(', ') + '——修正 depends_on 为真实存在且无环的任务 id 后重试；执行期出现此异常请核对 TASK.md 是否被手改');
+              process.exit(1);
+            }
+          }
+        } catch {}
+      }
+    }
     // 状态漂移自动校正——以文件产物为准（determineNode）校正 state.currentNode。
     // 进行中节点保护:currentNode 未 exit(不在 completedNodes)且已记录 evidence(record 过)
     // → 视为节点进行中(可能 exit 被内容级拦截后重跑),不校正推走——否则被拦截节点
@@ -874,17 +923,29 @@ async function main() {
     );
     const routeIds = route(protocol).map((n) => n.id);
     const currentNodeIdx = state.currentNode ? routeIds.indexOf(state.currentNode) : -1;
-    // 推导为 currentNode 的直接后继 → 该节点产物已齐待 exit(内容级拦截重跑场景)→ 保护;
-    // 推导跳跃(跨节点,如"部分完成但产物全齐")或回退 → 产物权威校正(漂移,防过度修复)
+    // 推导为 currentNode 的**路由后继**（与 guard 出口同源：把 currentNode 视为已完成再加入
+    // completedNodes 求 resolveNextNode）→ 该节点产物已齐待 exit、路由自然推进到 detectedNode
+    // （平行转换 plan→subagent-execute、趟间回流 subagent-execute→execute 均属此形态）→ 保护。
+    // 反过度修复锚（同族：产物全齐但无推进史形态）：completedNodes 为空（无任何 exit 推进史，currentNode 仅是初始
+    // 陈旧节点）时不做路由后继保护——产物推导继续生效推进到最终节点（自定义协议产物全齐的
+    // 「部分完成但产物齐」形态仍路由到最后节点）。静态直接后继兜底（串行推进原语义）。
+    // 推导跳跃/跨节点或回退 → 产物权威校正(漂移,防过度修复)。
+    const routingSuccessorOfCurrent = state.currentNode
+      ? await determineNode(changeName, protocol, [...completedArr, state.currentNode])
+      : null;
+    const routingSuccessorProtects = !!(completedArr.length > 0
+      && routingSuccessorOfCurrent !== null
+      && routingSuccessorOfCurrent === detectedNode);
     const derivedIsDirectSuccessor = currentNodeIdx >= 0
       && currentNodeIdx + 1 < routeIds.length
       && routeIds[currentNodeIdx + 1] === detectedNode;
+    const derivedIsSuccessor = routingSuccessorProtects || derivedIsDirectSuccessor;
     const inProgress = !!(
       state.currentNode
       && !completedArr.includes(state.currentNode)
       && (currentNodeEntered
         || (currentNodeEvidence && typeof currentNodeEvidence === 'object' && !Array.isArray(currentNodeEvidence)))
-      && derivedIsDirectSuccessor
+      && derivedIsSuccessor
     );
     if (!inProgress && state.currentNode !== detectedNode) {
       state.currentNode = detectedNode;
@@ -1143,6 +1204,17 @@ async function main() {
     // direct 是逃生口：必须用户显式调用，并记录 directOverride；切回 subagent 时清除
     // （directOverride 恒等于"当前是否处于用户确认的 direct"——再次切 direct 必须重新确认，无历史歧义）
     state.directOverride = mode === 'direct';
+    if (mode === 'direct') {
+      // 授权审计留痕：direct 是用户决策点不可自决——协调者显式调用本命令即授权事件，写入授权
+      // 审计字段（guard 出口校验须存在授权记录；执行者绕过脚本手改 state 字段无授权记录 → BLOCK）。
+      console.error('DIRECT-AUTH: direct=逃生口须用户显式授权——本命令即授权留痕（directOverrideAt 写入）');
+      state.directOverrideAt = new Date().toISOString();
+      state.directOverrideSource = 'execution-mode';
+    } else {
+      // 切回 subagent 清除授权留痕（directOverride 一并清除——既有语义保持）
+      delete state.directOverrideAt;
+      delete state.directOverrideSource;
+    }
     await writeState(state);
     console.log('EXECUTION-MODE: ' + state.executionMode + (state.directOverride ? ' (directOverride)' : ''));
     return;
@@ -1181,7 +1253,7 @@ async function main() {
     return;
   }
 
-  throw new Error('Unknown command: ' + command + '. Use: init, status, next, select, record, verify-fail, advance, execution-mode, config, skill-load');
+  throw new Error('Unknown command: ' + command + '. Use: init, status, next, select, record, verify-fail, advance, execution-mode, config, skill-load, bridge-check');
 }
 
 main().catch(error => {
