@@ -10,6 +10,30 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号记录于 git tag、本文档、README 徽章、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 与权威源 `skills/flow-comet/INSTALLED_VERSION`；`bundle.yaml` 的 version 保持 1.0.0（与发布流程解耦）。
 
+## [1.5.0-rc.2] - 2026-09-01
+
+预发布版本，承载 rc.1 之后积累的路由与安装器批次：依赖驱动的多趟并行路由（依赖门控、混排趟次）、写入守卫加固（项目根锚定、state 文件大小写变体闭合）、测试专用并行任务预警、多趟出口硬化、平行转换后 `next` 可用、规划出口文件级依赖检查、路由收敛于单一共享判定、direct 逃生口的执行者授权约束，以及 flow-kit 快照获取 / dsh 桥接 loader 治理。([#75](https://github.com/baobaolaodie/flow-comet/pull/75)) ([#76](https://github.com/baobaolaodie/flow-comet/pull/76)) ([#77](https://github.com/baobaolaodie/flow-comet/pull/77)) ([#78](https://github.com/baobaolaodie/flow-comet/pull/78)) ([#79](https://github.com/baobaolaodie/flow-comet/pull/79)) ([#80](https://github.com/baobaolaodie/flow-comet/pull/80)) ([#81](https://github.com/baobaolaodie/flow-comet/pull/81)) ([#83](https://github.com/baobaolaodie/flow-comet/pull/83)) ([#84](https://github.com/baobaolaodie/flow-comet/pull/84))
+
+### 新增
+
+- **安装器自动获取 flow-kit**：目标项目缺少 `flow-kit/` 时，`prepare-env` 克隆上游并检出锁定快照提交（`9b5dda7`）；已存在的上游克隆仅只读检查（报告当前 HEAD 与锁定快照的差异及影响）；同名非克隆目录跳过并给出指引；网络失败告警并继续；purge 永不包含 `flow-kit`。
+- **dsh loader 版本治理与只读桥接健康检查**：每次 dsh 安装都在覆盖前把 loader 内嵌版本戳与已安装副本比对，并报告首次安装 / 升级 / 降级 / 版本一致；`workflow-state.mjs bridge-check` 报告六种状态（健康 / 文件缺失 / 未挂载 / 版本偏斜 / 重复注册 / 不适用），零写入、零网络。
+- **交互式平台选择升级为方向键多选**：`@clack/prompts` 现为 TTY 主路径（锁定精确版本——仓库唯一第三方依赖，仅供安装器交互式选择使用）；依赖未安装、离线或 stdin 无 raw mode 时自动回退 readline 数字/逗号多选；`FLOW_COMET_FORCE_READLINE=1` 强制回退用于测试。
+
+### 变更
+
+- **规范文档与仓库约定对齐**：任务摘要遵循各仓库自身的忽略规则、绝不强制加入版本库，提交规范采用通用 scope 语义（子系统短词、推荐可选；禁止管理代号作 scope（含 change-id），任务号入正文尾注），通过 `init --branch-prefix` 对齐分支命名的用法已写入安装指南，规划者在规划出口前即获知波次分组约束。
+- **依赖驱动的多趟并行路由**：委托节点现可多次进入——每趟委托全部依赖已满足的并行任务，并行/串行交错的混排序列改为交替分趟执行而不再被拒，规划出口校验依赖环而非波次形态（命中环时附恢复指引），且仅当既无依赖已满足的并行任务也无串行任务残留时委托节点才算完成。**写入守卫 hook 注入收口**：安装器把 hook 命令升级为项目根引用形态，重跑安装器即可原地升级旧的相对路径条目（幂等、零残留），安装与故障排查指南补齐升级步骤与 fail-open 症状识别说明。
+- **写入守卫项目根判定收口**：hook 的项目根现按 `COMET_RUN_ROOT → CLAUDE_PROJECT_DIR（Claude Code 注入）→ 自会话目录逐级向上锚定最近项目标记` 的顺序解析——会话目录漂移后，项目外写入不再退化为报错式放行。
+- **规划出口伪并行预警**：当并行任务声明的产物全部为测试文件时，规划出口给出不阻断的预警——列出任务 id 并建议显式补充 `depends_on` 声明或合并为垂直切片——补上多趟混排合法化之后隐式依赖的盲区。
+- **多趟路由出口硬化**：执行出口的串行任务拦截改为依赖感知——等待后续趟次的串行任务不再阻断推进，真正可运行的串行任务仍被拦截并列出任务 id 与恢复指引；单行分号分隔的 write_files 清单同时被委托自动解析与伪并行检测接受；全部任务完成后路由诊断警告不再输出；依赖死结类拦截消息补充状态机 advance 命令的边界提示（含重入义务）；规划与委托节点技能文本同步为依赖图语义下混排序列合法的描述。
+- **平行转换后 `next` 可用**：规划或委托节点出口推进后，`next` 现在识别**路由后继**（与 guard 报告的下一个节点同源推导）而非仅静态直接后继——plan→委托、趟间委托→执行等平行转换不再被误拦为「疑似未退出」；记录证据后未退出先查下一节点也不再提前漂移当前节点，后续正常退出仍可工作。
+- **回归套件扩展至 219 场景**；系统测试集现运行 73 项。
+- **写入守卫 state 文件大小写变体闭合、任务完成判定 fail-closed、并行写路径归一化（含测试矩阵同步）**：大小写不敏感文件系统上，hook 现拦截 state 文件的大小写变体（`.Comet/Flow-Comet-State.json`）；任务路由不再把缺 status 的任务当作 done（畸形块保持流程在 execute，不再提前路由到 review）；并行写重叠检测对声明的路径先归一化（分隔符统一、解 `.` 段、`..` 越界按越界处理），路径变体无法绕过重叠判断；系统测试恢复夹具保持原重叠路径并补 depends_on——证明恢复靠补依赖而非改路径。
+- **规划出口文件级依赖检查**：并行任务声明的写路径在无显式依赖时重叠 → 新 change 拦截（恢复指引：补显式 depends_on 或拆为串行），旧 change 保持渐进告警；一个并行任务读取另一并行任务的写路径 → 不阻断的隐式依赖告警；扩展名按实际声明路径解析，补上此前 `.txt`/无扩展名的漏检盲区。
+- **路由收敛于单一共享判定**：出口报告的 NEXT 与 `next` 同源自共享路由模块（含串行 pending 回流到执行）——多趟出口与查询的 next 不再漂移（回归锚锁定）。
+- **执行者不可自决 direct 模式**：切换 direct 逃生口现需显式授权记录（仅协调者显式切换时写入）；执行者未授权自切被拦截，state 文件本身也受手动工具写入保护——逃生口保持为用户确认路径。
+
 ## [1.5.0-rc.1] - 2026-08-23
 
 预发布版本，收口机制与技能健壮性批次：工件模板保真、技能加载前置门、两层技能加载模型、零提交正式语义、验证出口沙箱兼容，外加 dsh 桥接空闲态包含性与 plan 波次分组校验。([#64](https://github.com/baobaolaodie/flow-comet/pull/64)) ([#65](https://github.com/baobaolaodie/flow-comet/pull/65)) ([#66](https://github.com/baobaolaodie/flow-comet/pull/66)) ([#67](https://github.com/baobaolaodie/flow-comet/pull/67))
