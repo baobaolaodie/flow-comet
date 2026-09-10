@@ -1,7 +1,7 @@
 # flow-comet 系统测试矩阵（TEST-MATRIX）
 
 > 定位：系统测试集（`system-test.mjs`）的设计文档——说明测试覆盖的机制面、测试载体与判定规则。
-> 运行：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/system-test.mjs`（权威源直接跑；安装副本路径同理）。
+> 运行：`node .flow-comet/skills/flow-comet/scripts/system-test.mjs`（权威源直接跑；安装副本路径同理）。
 
 ## 一、测试载体说明
 

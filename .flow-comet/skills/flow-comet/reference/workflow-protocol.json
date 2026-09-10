@@ -648,7 +648,7 @@
   ],
   "state": {
     "kind": "workflow-run",
-    "statePath": ".comet/flow-comet-state.json",
+    "statePath": ".flow-comet/flow-comet-state.json",
     "currentNodeField": "currentNode",
     "completedNodesField": "completedNodes",
     "evidenceField": "evidence"

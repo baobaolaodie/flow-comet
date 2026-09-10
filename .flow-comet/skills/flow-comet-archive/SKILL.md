@@ -55,7 +55,7 @@ This node finalizes a completed change by extracting reusable lessons from the d
 7. **Update CHANGELOG.md**: 在 `.specs/CHANGELOG.md` **顶部**按日期倒序插入新条目（倒序约定：新条目永远在最新日期行之上；文件不存在则从模板创建）。若项目既有 CHANGELOG 采用其他格式（如 `## 日期 + 列表`），**跟随项目既有格式**在顶部插入（不强制转表格——保持仓库一致性；guard 的倒序检测只针对表格格式行）:
    - 表格格式: `| YYYY-MM-DD | <change-id> | one-line summary | PR link | new L-NNN entries |`
 
-8. **Update STATE.md（可选决策日志）**: 若项目维护 `STATE.md`，新决策日志条目**顶部**插入（倒序约定，**禁止文件尾追加**）。flow-comet 的活动 change 状态由 `.comet/flow-comet-state.json` 管理——STATE.md 无 active change 字段，不需要也不应手动清除。
+8. **Update STATE.md（可选决策日志）**: 若项目维护 `STATE.md`，新决策日志条目**顶部**插入（倒序约定，**禁止文件尾追加**）。flow-comet 的活动 change 状态由 `.flow-comet/flow-comet-state.json` 管理——STATE.md 无 active change 字段，不需要也不应手动清除。
 
 9. **Notify user of architecture sedimentation + leftover issues**: Check DESIGN.md section 9 for sedimentation suggestions. If N > 0 suggestions exist, tell user — and always explicitly enumerate the leftover issues from KNOWN-ISSUES.md in the archive notification (they must not silently disappear after archive):
    ```

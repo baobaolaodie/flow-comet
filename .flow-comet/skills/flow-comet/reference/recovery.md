@@ -5,7 +5,7 @@
 ## 状态模型：workflow-run（主）
 
 - State model: `workflow-run`（protocol `state.kind` 定义，flow-comet 实际使用）
-- State path: `.comet/flow-comet-state.json`（单文件 JSON，机器字段由脚本管理，绝不手改）
+- State path: `.flow-comet/flow-comet-state.json`（单文件 JSON，机器字段由脚本管理，绝不手改）
 - Resume by reading the first incomplete Workflow Node（`completedNodes` 之后的第一个节点）
 - 状态推导：从 `.specs/<change-id>/` 工件文件推导（file-as-truth），脚本状态只是加速器；状态文件缺失或与产物冲突时以产物为准
 

@@ -79,7 +79,7 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
    - Instruction to produce `<task-id>-SUMMARY.md` in `.specs/<change-id>/` following the `flow-kit/templates/SUMMARY.md` template（标题/首部/段序保真，另补 flow-comet 增量 `## 自检方法` 段）。
    - **提交边界警告**:提交**只含该任务 write_files 范围内的文件**(含测试文件)——不得包含 TASK.md 与其他协调者维护的 .specs 工件(新 change 提交越界 BLOCKED;实测子代理提交含 TASK.md 被 W2-D 拦截)。**提交从属规则**:任务专属的 `<task-id>-SUMMARY.md`(位于 `.specs/<change-id>/`,是 flow-comet 强制产物)允许随任务提交属流程默认豁免——目标仓库的既有规定优先,若目标仓库忽略清单等既有规定拒绝其入库,被拒即为正确行为,严禁 force-add 强加越库提交;委托校验对任务摘要的豁免属于校验宽容度,不是入库指令。
 
-3. **Delegate to subagents**（强制 worktree isolation）: 所有并行子代理**必须**使用 `Agent` 工具的 `isolation: "worktree"`，**禁止共享 cwd 直接委托**——hook 白名单依赖 worktree 隔离：子代理 cwd 无 `.comet/flow-comet-state.json`（.gitignore 排除）时 hook 放行源码写入，共享 cwd 的子代理会被 subagent-execute 白名单误拦。Each subagent:
+3. **Delegate to subagents**（强制 worktree isolation）: 所有并行子代理**必须**使用 `Agent` 工具的 `isolation: "worktree"`，**禁止共享 cwd 直接委托**——hook 白名单依赖 worktree 隔离：子代理 cwd 无 `.flow-comet/flow-comet-state.json`（.gitignore 排除）时 hook 放行源码写入，共享 cwd 的子代理会被 subagent-execute 白名单误拦。Each subagent:
    - Reads TASK.md for its specific task block.
    - Executes the full TDD protocol (RED/GREEN/REFACTOR). **纯文档/纯配置任务无生产代码可测时，`redEvidence` 与 `greenEvidence` 均允许 `{"command":"N/A (non-code task)","output":"..."}` 形态**（guard W1-D 接受此形状；不得伪造测试输出）。
    - Greps existing abstractions (R6.4).

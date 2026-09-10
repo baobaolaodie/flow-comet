@@ -31,7 +31,7 @@ description: "Use only when explicitly invoked as /flow-comet-compose. Not part 
 
 ### Step 2：skill 库扫描
 
-1. 列出已安装 skill：`ls .claude/skills/` 与 `ls .comet/bundle-drafts/flow-comet/skills/`；用户也可直接提供候选 skill 名。
+1. 列出已安装 skill：`ls .claude/skills/` 与 `ls .flow-comet/skills/`；用户也可直接提供候选 skill 名。
 2. 把候选列表贴给用户，确认组合：哪些 skill 作为节点 implementation，哪些作为 requiredSkillCalls。
 3. 确认每个 skill 实际存在；不存在时标记为占位并提醒用户安装。
 
@@ -76,7 +76,7 @@ console.log('protocol valid');
 "
 ```
 
-- `protocol-utils.mjs` 位于 flow-comet skill 的 `scripts/` 目录；若 bundle 未安装为 `.claude/skills/flow-comet`，按实际路径（如 `.comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/protocol-utils.mjs`）调整
+- `protocol-utils.mjs` 位于 flow-comet skill 的 `scripts/` 目录；若 bundle 未安装为 `.claude/skills/flow-comet`，按实际路径（如 `.flow-comet/skills/flow-comet/scripts/protocol-utils.mjs`）调整
 - 校验不通过 → 修复字段 → 重跑，直到输出 `protocol valid`
 - 校验通过后，把校验命令与输出写入该协议所在目录的验证记录（或直接回显给用户），作为协议生效证据
 
@@ -226,7 +226,7 @@ console.log('protocol valid');
   ],
   "state": {
     "kind": "workflow-run",
-    "statePath": ".comet/flow-comet-state.json",
+    "statePath": ".flow-comet/flow-comet-state.json",
     "currentNodeField": "currentNode",
     "completedNodesField": "completedNodes",
     "evidenceField": "evidence"
