@@ -10,6 +10,12 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded in git tags, this document, the README badge, [docs/VERSIONS.md](docs/VERSIONS.md) and the authoritative `skills/flow-comet/INSTALLED_VERSION`; `bundle.yaml` version stays 1.0.0 (decoupled from release versioning).
 
+## [Unreleased]
+
+### Fixed
+
+- **dsh bridge loader version stamp aligned with the release version**: the loader's `BRIDGE_VERSION` now matches the release version (and the authoritative `INSTALLED_VERSION`), so the read-only bridge health check reports a version-consistent loader on a freshly installed project instead of version skew; the installer's overwrite reporting and the regression suites read the stamp from the authoritative source instead of a fixed value.
+
 ## [1.5.0-rc.2] - 2026-09-01
 
 Release candidate shipping the routing and installer batches accumulated after rc.1: dependency-driven multi-pass parallel routing (dependency gates, interleaved waves), write-guard hardening (project-root anchoring, state-file case variants), test-only parallel-task advisories, multi-pass exit hardening, `next` usable across parallel transitions, file-level dependency checks at planning exit, routing convergence under one shared decision, the executor authorization constraint for the direct escape hatch, and the flow-kit snapshot / dsh bridge loader governance. ([#75](https://github.com/baobaolaodie/flow-comet/pull/75)) ([#76](https://github.com/baobaolaodie/flow-comet/pull/76)) ([#77](https://github.com/baobaolaodie/flow-comet/pull/77)) ([#78](https://github.com/baobaolaodie/flow-comet/pull/78)) ([#79](https://github.com/baobaolaodie/flow-comet/pull/79)) ([#80](https://github.com/baobaolaodie/flow-comet/pull/80)) ([#81](https://github.com/baobaolaodie/flow-comet/pull/81)) ([#83](https://github.com/baobaolaodie/flow-comet/pull/83)) ([#84](https://github.com/baobaolaodie/flow-comet/pull/84))

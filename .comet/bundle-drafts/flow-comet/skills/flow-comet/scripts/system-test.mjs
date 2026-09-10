@@ -3365,10 +3365,14 @@ const TEST_ITEMS = [
       const loader = path.join(repoRoot, 'scripts', 'dsh-bridge.mjs');
       if (!fs.existsSync(loader)) throw new Error('缺少 scripts/dsh-bridge.mjs');
       const srcVersion = readBridgeSourceVersion(loader);
-      // 旧戳 = 低于源版本（升级方向）；新戳 = 数值序高于源版本（降级方向——字典序会误判为升级，
-      // 断言「降级」即数值序比较语义的系统级护栏；与实现侧冒烟同口径）
-      const OLD_STAMP = '1.5.0';
-      const NEWER_STAMP = '1.10.0';
+      // 旧戳/新戳从源版本动态派生（固定值会随发布线演进失效——预发布语义下同主版本比较
+      // 可能反转，如 1.5.0-rc.2 < 1.5.0）：
+      //   旧戳 = 主版本低一位 → 恒定「升级」方向；
+      //   新戳 = 同主版本、次版本 +5 → 数值序高于源而字典序低于源（保持「数值序比较」护栏：
+      //         字典序会误判为升级，断言「降级」即语义正确；与实现侧冒烟同口径）
+      const [srcMajor, srcMinor] = srcVersion.split('.').map((p) => parseInt(p, 10));
+      const OLD_STAMP = (srcMajor - 1) + '.0.0';
+      const NEWER_STAMP = srcMajor + '.' + (srcMinor + 5) + '.0';
       const dshHome = path.join(dir, 'k14-dsh-home');
       const target = path.join(dir, 'k14-target');
       fs.mkdirSync(target, { recursive: true });

@@ -2,13 +2,13 @@
 
 > 维护者参考文档：dsh 平台适配的版本锚定、安装形态、API 签名、桥接 loader 契约与验证记录模板。
 > 权威依据：`@.specs/deepseek-harness-platform/DESIGN.md`（D1~D10 / 7.1 / 7.2 / 7.3）、`@.specs/deepseek-harness-platform/REQUIREMENT.md`（AC-1~AC-7）、`@.specs/adr/ADR-005-dsh-install-via-installer.md`。
-> dsh 为 dev-preview：本文件锚定实测版本（0.1.0-rc.6）；破坏性变更风险显式声明。
+> dsh 为 dev-preview：本文件锚定认证版本（0.1.5-rc.1，2026-09-10 全接缝运行时认证；历史锚 0.1.0-rc.6 → 0.1.1-rc.2 实测线）；破坏性变更风险显式声明。
 
 ## 1. 版本锚定
 
 | 项 | 值 |
 |---|---|
-| 最低 dsh 版本 | `0.1.0-rc.6` |
+| 认证 dsh 版本 | `0.1.5-rc.1`（2026-09-10 全接缝运行时认证；历史锚 `0.1.0-rc.6` → `0.1.1-rc.2` 实测线） |
 | 安装入口 | `node scripts/prepare-env.mjs --target <项目> --platform dsh`（或交互终端多选勾选 dsh）——唯一入口（D1） |
 | 重置/重新生成（purge——删除后重建到完整安装态，**不是卸载**） | `node scripts/prepare-env.mjs --target <项目> --purge --platform dsh --yes` |
 | npm 包 | 暂不发布（D8——1.5.0 一并处理）；旧 npm 插件包安装形态已废弃（verify 阶段推翻，见 ADR-005） |
@@ -152,3 +152,18 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 - 环境：dsh CLI 0.1.0-rc.8 / Harness 核心 rc.8 / dsh-tui 0.8.5
 - 结果：运行中协调者项目外 Write → deny；运行中子代理项目内 Write → next()；空闲态（无 state）项目外 Write → next()；解析失败/未知 status → fail-closed deny（system-test 61/61 ALL PASSED，K11/K12 断言覆盖）
 - 载体：prepare-env --platform dsh 经临时项目重推真实 ~/.dsh 桥接 loader，loader 与权威源 SHA-256 一致；真实交互式 TUI/Web 冒烟留待开放项
+
+### 0.1.5-rc.1 全接缝认证（2026-09-10）
+
+- 环境：dsh CLI 0.1.5-rc.1 / Node v24.14.1 / dsh-tui 0.10.0；headless profile；真实 `~/.dsh`（loader 与权威源逐字节一致）
+- 方式：真实 headless 会话逐接缝运行时检测——每场景独立运行，证据取会话日志（`session.v3.jsonl` 解压）与文件系统双重判定；配套无 skill 目录负向载体
+- 结果（全部通过）：
+  - 运行中协调者写项目内白名单外 Write → deny（桥接消息 + guard 的 `BLOCKED: phase ... 允许范围: .specs/` 详情透传）；写白名单内 → 放行
+  - 空闲态（无 state）项目内 Write → 放行；state 解析失败 → fail-closed deny（不视为空闲）
+  - 真实子代理（child session header `delegationDepth: 1`、`origin: subagent`）写源码 → 放行；子代理越界写 → 桥接包含性 deny（bridge 消息而非 sandbox 消息——证明子代理判定全程经过桥接，非未触发）
+  - `pwsh` 命令级写入 → deny（命令写入检测：`命令写入 ... 不在当前节点允许范围`）
+  - 窄监听负向（运行态 state 但无 `.dsh/skills/flow-comet` 的项目）→ 零拦截；项目级 skill 发现正常（flow-comet 全系可见）
+  - AGENTS.md 注入实证：dsh 将项目根 AGENTS.md 作为上下文注入（`Instructions from: AGENTS.md`），托管区内容被会话逐字引用
+- 安装链：bridge-check 四项全绿（loader 存在 / 托管块 insert 形态 / `file://` 目标可达 / 无重复注册）
+- 边界：认证面向 headless profile（自动化通道）；dsh-tui / web 为静态证据（组合树含桥接行），交互式运行时留待日常使用或手动步骤清单；`str_replace_editor` 自 0.1.5-alpha.2 起为 opt-in（默认不挂载）
+- 结论：桥接与 workflow-kernel 均无需修改（完整认证记录见维护者归档）
