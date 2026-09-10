@@ -5387,14 +5387,16 @@ const SCENARIOS = [
       if (!srcStamp) throw new Error('权威源 loader 未提取到版本戳（场景前置失效）');
       const installed = fs.readFileSync(path.join(dshHome, 'plugins', 'dsh-flow-comet-bridge.mjs'), 'utf8');
       if (!installed.includes('BRIDGE_VERSION: ' + srcStamp[1])) throw new Error('覆盖后 loader 版本戳非权威源值');
-      // 子断言（发布同步守卫）：权威源 loader 版本戳 == 权威源 INSTALLED_VERSION——两者分叉时
-      // 安装副本的 bridge-check 会在已装项目报版本偏斜（本断言独立读取两侧值，防止发布时只改一处；
-      // 上方断言只证明「覆盖 == 权威源文件」，无法捕获跨文件分叉）。
+      // 子断言（发布同步守卫，以 INSTALLED_VERSION 为权威基准）：权威源 loader 的标记行、
+      // 导出常量与 INSTALLED_VERSION 三处同值——任一处漂移时安装副本的 bridge-check 会在已装
+      // 项目报版本偏斜（上方断言只证明「覆盖 == 权威源文件」，无法捕获跨文件/跨值分叉）。
       const installedVersion = fs.readFileSync(path.join(__dirname, '..', 'INSTALLED_VERSION'), 'utf8').trim();
-      if (srcStamp[1] !== installedVersion) {
+      const exportMatch = /^export const version = '([^']+)';$/m.exec(srcText);
+      if (!exportMatch) throw new Error('权威源 loader 未提取到 export version（场景前置失效）');
+      if (srcStamp[1] !== installedVersion || exportMatch[1] !== installedVersion) {
         throw new Error(
-          '权威源 loader 版本戳(' + srcStamp[1] + ')与 INSTALLED_VERSION(' + installedVersion +
-          ')不一致——发布同步遗漏（bridge-check 会在安装副本报版本偏斜）'
+          '权威源版本三处不一致（标记行=' + srcStamp[1] + ' / export=' + exportMatch[1] +
+          ' / INSTALLED_VERSION=' + installedVersion + '）——发布同步遗漏（bridge-check 会在安装副本报版本偏斜）'
         );
       }
     },
