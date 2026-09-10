@@ -3358,6 +3358,30 @@ const TEST_ITEMS = [
             '无法验证生成命令可执行;请在具备 bash 的环境运行套件(Windows 请确认 Git Bash 在 PATH 中)'
         );
       }
+      // ③b 含空格项目根路径:同一端到端验证——未加引号的命令在变量展开后的空格处被词法分词
+      //     切断(静默失效,与反斜杠转义同类);含引号形态须可执行,且仍被幂等识别(识别层去引号)。
+      const ccSpaceTarget = path.join(dir, 'k13 cc space');
+      fs.mkdirSync(ccSpaceTarget, { recursive: true });
+      const rccSpace = spawnSync(process.execPath, [installer, '--target', ccSpaceTarget, '--platform', 'claude-code'], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
+      if (rccSpace.status !== 0) throw new Error('claude-code 含空格路径安装失败: ' + (rccSpace.stderr || ''));
+      const ccSpaceManaged = collectManagedHookCommands(JSON.parse(fs.readFileSync(path.join(ccSpaceTarget, '.claude', 'settings.local.json'), 'utf8')));
+      if (ccSpaceManaged.length === 0) throw new Error('含空格路径下未注入托管 hook 条目');
+      for (const c of ccSpaceManaged) {
+        assertManagedHookEntry(c, '含空格路径托管命令');
+        const execRes = spawnSync('bash', ['-c', c], {
+          cwd: ccSpaceTarget,
+          encoding: 'utf8',
+          timeout: 60000,
+          env: { ...process.env, CLAUDE_PROJECT_DIR: ccSpaceTarget },
+          input: JSON.stringify({ tool_name: 'Write', tool_input: { file_path: path.join(ccSpaceTarget, 'k13-space-probe.txt') } }),
+        });
+        if (execRes.status !== 0 || /Cannot find module/.test(String(execRes.stderr || ''))) {
+          throw new Error(
+            '含空格路径托管命令在 CC 执行语义下不可执行: ' + c +
+              ' —— ' + String(execRes.stderr || '').split('\n').slice(0, 3).join(' | ')
+          );
+        }
+      }
       // ④ 幂等升级(claude-code):托管命令改回旧相对路径形态 → 重跑安装器 → 识别替换:
       // 恰余 1 条托管条目(无重复无残留)且形态达标(项目根引用特征在位)
       for (const g of ccSettings.hooks.PreToolUse) {
