@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // C1 · flow-comet 引擎自测套件（219 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退）、并行文件依赖检测（写写重叠强判前移 plan 出口 + read 读写弱判渐进 + 触发面排除 + 委托前保持锚 + 扩展名闭合）、directOverride 授权约束（协调者授权留痕正例 / 执行者自切无授权 BLOCK / 越界改 state hook 拦截 / 恢复双路径）、hook state 大小写变体拦截（win32/darwin 闭合 / 其他平台放行）、路由完成判定 fail-closed（缺/未知 status 畸形块不提前放行）、并行文件依赖路径归一化（`.` 段变体重叠检出））
 //
-// 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .comet/flow-comet-state.json
+// 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .flow-comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
 // .specs/<change>/ 工件 → spawnSync 跑 workflow-guard.mjs <entry|exit> <node>
-// （COMET_RUN_ROOT=<临时目录>）→ 断言退出码与输出关键词。场景跑完 rmSync 清理。
+// （FLOW_COMET_RUN_ROOT=<临时目录>）→ 断言退出码与输出关键词。场景跑完 rmSync 清理。
 //
 // 运行: node scripts/guard-self-test.mjs
 // 全过 → exit 0，输出 ALL 219 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
@@ -36,14 +36,32 @@ const STATE = path.join(__dirname, 'workflow-state.mjs');
 const HOOK = path.join(__dirname, 'comet-hook-guard.mjs');
 const HANDOFF = path.join(__dirname, 'workflow-handoff.mjs');
 // prepare-env 安装器（平台选择链场景——真实脚本,场景用临时目录 + spawn 断言）：
-// 权威源仓库脚本位于仓库根 scripts/prepare-env.mjs（6 级 .. = 仓库根）；安装副本无此脚本,场景跳过
-const PREPARE_ENV = path.join(__dirname, '..', '..', '..', '..', '..', '..', 'scripts', 'prepare-env.mjs');
+// 仓库根（权威源检出）：脚本位于 <root>/.flow-comet/skills/flow-comet/scripts —— 4 级 .. 到 <root>。
+// 单一来源：安装器路径、仓库文档级场景与底部自检共用（历史教训：同一路径表达式分散在多处，
+// 布局迁移时逐处改写必然遗漏——本次迁移即因此把 4 处深度链收敛为一处）。
+const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
+// 权威源锚点：仅权威源检出含 <root>/.flow-comet/（安装副本把技能树放在 .claude|.agents|.dsh/skills/，
+// 其 .flow-comet/ 只是运行时目录，无 skills/flow-comet/SKILL.md）——与安装器自身判定同判据
+// （prepare-env.mjs 的 gitignore 纳管跳过分支）。
+const AUTHORITATIVE_SOURCE_ANCHOR = path.join(REPO_ROOT, '.flow-comet', 'skills', 'flow-comet', 'SKILL.md');
+function isAuthoritativeSourceRepo() {
+  return fs.existsSync(AUTHORITATIVE_SOURCE_ANCHOR);
+}
+// 权威源仓库脚本位于仓库根 scripts/prepare-env.mjs；安装副本无此脚本,场景跳过
+const PREPARE_ENV = path.join(REPO_ROOT, 'scripts', 'prepare-env.mjs');
 // 内置协议源文件（packageRoot/reference/）：场景复制到 <tmpdir>/reference/ 内（protected-path 要求 runRoot 内）
 const BUILTIN_PROTOCOL_SOURCE = path.join(__dirname, '..', 'reference', 'workflow-protocol.json');
 const CHANGE_ID = 'ch';
 
 // 场景数一致性自检清单（21 文件，全变体：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n）——
-// 场景数自检与底部自检共用同一清单（自检常量同步：SCENARIOS.length 变更 → 21 文件须同步）。
+// 场景数自检与底部自检共用同一清单/同一实现（自检常量同步：SCENARIOS.length 变更 → 21 文件须同步）。
+// 分两组按"分发形态"划界（AC-14：条目缺失必须显式报告，不得静默跳过——幽灵条目无处藏身）：
+//   ① 分发组：随仓库分发（受版本控制），**任何**权威源检出都必须存在——维护者工作副本、
+//      CI 全新检出、worktree 检出皆然 → 条目缺失即报错（幽灵条目在此被强制暴露）。
+//   ② 维护者组：被 .gitignore 排除（docs/internal/），只存在于维护者工作副本；CI 全新检出与
+//      worktree 检出**整组必然缺席** → 判据取"整组是否在场"而非"单条目是否在场"：整组缺席 =
+//      该检出无此文档面，跳过该组；整组在场时同样逐条强制存在与同步，缺失即报错。
+//      （单条目静默跳过正是本 change 修正的缺陷——故跳过粒度只能是"整组"，不能是"单条"。）
 // CLAUDE.md 为主仓私有指导文件（gitignore 不随 clone 分发）——不在自检清单内（2026-08-16 决策：
 // 清单只针对随仓库分发的文件；CLAUDE.md 场景数由人工维护）
 const SCENARIO_COUNT_FILES = [
@@ -51,18 +69,61 @@ const SCENARIO_COUNT_FILES = [
   'docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
   'docs/VERSIONS.md', 'docs/VERSIONS-zh.md', '.github/PULL_REQUEST_TEMPLATE.md',
   'CHANGELOG.md', 'CHANGELOG-zh.md',
-  'docs/internal/ARCHITECTURE.md', 'docs/internal/DOC-CHECKLIST.md', 'docs/internal/MECHANISM.md',
-  'docs/internal/next-change-prompt.md', 'docs/internal/ROADMAP.md', 'docs/internal/WORKING-METHOD.md',
-  // T9: CI workflow 文件纳入场景数自检（此前盲区——ci.yml 注释/greeting 欢迎消息的
+  // CI workflow 文件纳入场景数自检（此前盲区——ci.yml 注释/greeting 欢迎消息的
   // 场景数字样游离,发布时靠人工核对;纳入后自检强制同步,防漏）
   '.github/workflows/ci.yml', '.github/workflows/greeting.yml',
 ];
+// 维护者组（见上方分组说明）；整组在场判据取**组外**的目录 `docs/internal/`——不能取组内成员：
+// 若用某个成员当探针，该成员缺失时会被判成"整组缺席"而跳过，正好把这个成员的缺失藏起来
+//（即 AC-14 要消灭的"永不生效的条目"）。用目录作探针则目录在场即逐条严检，成员缺失照样报告。
+const SCENARIO_COUNT_FILES_MAINTAINER = [
+  'docs/internal/ARCHITECTURE.md', 'docs/internal/DOC-CHECKLIST.md', 'docs/internal/MECHANISM.md',
+  'docs/internal/next-session-prompt-2026-09-10.md', 'docs/internal/ROADMAP.md',
+  'docs/internal/WORKING-METHOD.md',
+];
+const MAINTAINER_DOC_DIR = 'docs/internal';
 
 let passed = 0;
 const failures = [];
 const createdDirs = [];
 
 // ---------- 工具函数 ----------
+
+// 场景数一致性检查（单一来源）：场景 105 与底部自检共用同一实现与同一判据。
+// 返回问题描述数组（空数组 = 通过）。AC-14：条目缺失**显式报告**，不静默跳过。
+function scanScenarioCountFiles(files, n) {
+  const missing = [];
+  const unsynced = [];
+  for (const rel of files) {
+    let text;
+    try {
+      text = fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
+    } catch (e) {
+      if (e.code === 'ENOENT') { missing.push(rel); continue; } // AC-14：显式记录缺失（不再 continue 静默）
+      throw e;
+    }
+    const ok = text.includes('ALL ' + n + ' SCENARIOS PASSED')
+      || text.includes(n + ' scenarios')
+      || text.includes(n + ' 场景')
+      || text.includes(n + '/' + n);
+    if (!ok) unsynced.push(rel);
+  }
+  return { missing, unsynced };
+}
+
+function scenarioCountSyncProblems(n) {
+  const problems = [];
+  const dist = scanScenarioCountFiles(SCENARIO_COUNT_FILES, n);
+  if (dist.missing.length > 0) problems.push('受检条目文件缺失（幽灵条目）: ' + dist.missing.join(', '));
+  if (dist.unsynced.length > 0) problems.push('场景数未同步（应为 ' + n + '）: ' + dist.unsynced.join(', '));
+  // 维护者组：整组在场才检查（CI 全新检出 / worktree 检出整组必然缺席——见清单分组说明）
+  if (fs.existsSync(path.join(REPO_ROOT, MAINTAINER_DOC_DIR))) {
+    const mnt = scanScenarioCountFiles(SCENARIO_COUNT_FILES_MAINTAINER, n);
+    if (mnt.missing.length > 0) problems.push('维护者文档条目文件缺失（幽灵条目）: ' + mnt.missing.join(', '));
+    if (mnt.unsynced.length > 0) problems.push('维护者文档场景数未同步（应为 ' + n + '）: ' + mnt.unsynced.join(', '));
+  }
+  return problems;
+}
 
 function makeTmp() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flow-comet-guard-test-'));
@@ -77,10 +138,10 @@ function writeFile(root, rel, content) {
 }
 
 function writeState(root, state) {
-  writeFile(root, path.posix.join('.comet', 'flow-comet-state.json'), JSON.stringify(state, null, 2) + '\n');
+  writeFile(root, path.posix.join('.flow-comet', 'flow-comet-state.json'), JSON.stringify(state, null, 2) + '\n');
 }
 
-// 跑 guard：COMET_RUN_ROOT=临时目录；FLOW_COMET_PROTOCOL 指向场景内协议副本（T06：T03 起
+// 跑 guard：FLOW_COMET_RUN_ROOT=临时目录；FLOW_COMET_PROTOCOL 指向场景内协议副本（T06：T03 起
 // 协议文件须在 runRoot 内，protected-path 检查）；spawnSync 同时捕获 stdout+stderr
 // （WARN/BLOCKED 走 stderr，execFileSync 在成功退出时丢弃 stderr，会导致 WARN 断言误报）并带 exit code。
 // envOverrides 可覆盖 FLOW_COMET_PROTOCOL（自定义协议场景；--protocol CLI 优先级高于 env）
@@ -89,7 +150,7 @@ function runGuard(args, root, envOverrides = {}) {
     cwd: root,
     env: {
       ...process.env,
-      COMET_RUN_ROOT: root,
+      FLOW_COMET_RUN_ROOT: root,
       FLOW_COMET_PROTOCOL: path.join(root, 'reference', 'workflow-protocol.json'),
       ...envOverrides,
     },
@@ -99,11 +160,11 @@ function runGuard(args, root, envOverrides = {}) {
   return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
 }
 
-// 跑 workflow-state.mjs：runRoot = process.cwd()（T02 不用 COMET_RUN_ROOT），spawn 时 cwd=临时目录即可
+// 跑 workflow-state.mjs：runRoot = process.cwd()（不读 FLOW_COMET_RUN_ROOT），spawn 时 cwd=临时目录即可
 function runState(args, root, envOverrides = {}) {
   const res = spawnSync(process.execPath, [STATE, ...args], {
     cwd: root,
-    env: { ...process.env, COMET_RUN_ROOT: root, ...envOverrides },
+    env: { ...process.env, FLOW_COMET_RUN_ROOT: root, ...envOverrides },
     encoding: 'utf8',
     timeout: 60000,
   });
@@ -115,7 +176,7 @@ function runState(args, root, envOverrides = {}) {
 function runHandoff(args, root, envOverrides = {}) {
   const res = spawnSync(process.execPath, [HANDOFF, ...args], {
     cwd: root,
-    env: { ...process.env, COMET_RUN_ROOT: root, ...envOverrides },
+    env: { ...process.env, FLOW_COMET_RUN_ROOT: root, ...envOverrides },
     encoding: 'utf8',
     timeout: 60000,
   });
@@ -130,7 +191,7 @@ function runHook(args, root, input, envOverrides = {}) {
     input: input === undefined ? '' : JSON.stringify(input),
     env: {
       ...process.env,
-      COMET_RUN_ROOT: root,
+      FLOW_COMET_RUN_ROOT: root,
       FLOW_COMET_PROTOCOL: path.join(root, 'reference', 'workflow-protocol.json'),
       ...envOverrides,
     },
@@ -238,7 +299,7 @@ function baseState(node) {
 
 // 自定义协议（compose-demo）：3 节点 brainstorm/tdd/codereview（避开内置 8 节点 id，验证
 // 协议数据化路由与通用层防线对自定义节点生效）；无 writeWhitelist（hook 回退内置缺省表）；
-// state 与内置协议同构（statePath 指向 .comet/flow-comet-state.json）
+// state 与内置协议同构（statePath 指向 .flow-comet/flow-comet-state.json）
 function customProtocol() {
   return {
     schemaVersion: 1,
@@ -323,7 +384,7 @@ function customProtocol() {
     ],
     state: {
       kind: 'workflow-run',
-      statePath: '.comet/flow-comet-state.json',
+      statePath: '.flow-comet/flow-comet-state.json',
       currentNodeField: 'currentNode',
       completedNodesField: 'completedNodes',
       evidenceField: 'evidence',
@@ -697,7 +758,7 @@ const SCENARIOS = [
       assertExit(runGuard(['entry', 'execute'], dir), 0);
       // exit 前补 SUMMARY + handoff（不碰 TASK.md）
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
-      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
       writeState(dir, st2);
       const res = runGuard(['exit', 'execute'], dir);
@@ -963,7 +1024,7 @@ const SCENARIOS = [
       assertOut(resEnv, 'BLOCKED: verify 命令失败');
       assertOut(resEnv, 'timeout 500ms');
       // 子断言:失败计数按 change 写入(guard 侧递增语义)
-      const stFail = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const stFail = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (!stFail.verifyFailuresByChange || stFail.verifyFailuresByChange[CHANGE_ID] !== 1) {
         throw new Error('exit verify 失败计数未按 change 写入: ' + JSON.stringify(stFail.verifyFailuresByChange));
       }
@@ -971,14 +1032,14 @@ const SCENARIOS = [
       const resEnv2 = runGuard(['exit', 'verify'], dir, { FLOW_COMET_VERIFY_TIMEOUT_MS: '500' });
       execFileSync(process.execPath, ['-e', 'setTimeout(()=>{}, 2000)']);
       assertExit(resEnv2, 1);
-      const stFail2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const stFail2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (!stFail2.verifyFailuresByChange || stFail2.verifyFailuresByChange[CHANGE_ID] !== 2) {
         throw new Error('exit verify 失败计数未递增: ' + JSON.stringify(stFail2.verifyFailuresByChange));
       }
       writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```bash\nnode -e "1"\n```\n');
       const resPass = runGuard(['exit', 'verify', '--apply'], dir);
       assertExit(resPass, 0);
-      const stPass = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const stPass = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (!stPass.verifyFailuresByChange || stPass.verifyFailuresByChange[CHANGE_ID] !== 0) {
         throw new Error('exit verify 成功未清零当前 change 计数: ' + JSON.stringify(stPass.verifyFailuresByChange));
       }
@@ -1311,7 +1372,7 @@ const SCENARIOS = [
       const res2 = runHandoff(['result', 'P01', both], dir);
       assertExit(res2, 0);
       assertOut(res2, 'HANDOFF RESULT: P01');
-      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       const rec = st.evidence['subagent-execute'].handoffResult['P01'].result;
       if (!rec.redEvidence.recordedAt || typeof rec.redEvidence.recordedAt !== 'string') {
         throw new Error('redEvidence 未附带 recordedAt: ' + JSON.stringify(rec.redEvidence));
@@ -1357,7 +1418,7 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskLF.replace(/\n/g, '\r\n'));
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
       writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent()); // M2: 新 change 强制 done 任务须有 SUMMARY
-      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01', 'P01']) };
       writeState(dir, st2);
       const res = runGuard(['exit', 'execute'], dir);
@@ -1380,7 +1441,7 @@ const SCENARIOS = [
       const changed = taskLF.replace('实现 T01', '实现 T01 并补充单元测试');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', changed);
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
-      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01', 'P01']) };
       writeState(dir, st2);
       const res = runGuard(['exit', 'execute'], dir);
@@ -1449,7 +1510,7 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', marked);
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
       writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent()); // M2: 新 change 强制 done 任务须有 SUMMARY
-      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01', 'P01']) };
       writeState(dir, st2);
       const res = runGuard(['exit', 'execute'], dir);
@@ -1475,7 +1536,7 @@ const SCENARIOS = [
         .replace('实现 T01', '实现 T01（改）');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', changed);
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
-      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01', 'P01']) };
       writeState(dir, st2);
       const res = runGuard(['exit', 'execute'], dir);
@@ -1555,7 +1616,7 @@ const SCENARIOS = [
       //（浅合并替换 handoffResult 键）→ 已记录的 T01 handoff 丢失（对照组 A 踩坑路径）
       assertExit(runState(['record', 'subagent-execute', '{"handoffResult":{}}'], dir,
         { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') }), 0);
-      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       const hr = st2.evidence['subagent-execute'] && st2.evidence['subagent-execute'].handoffResult;
       if (!hr || hr['T01']) {
         throw new Error('record 未整体覆盖 handoffResult（T01 应被覆盖丢失）: ' + JSON.stringify(st2.evidence['subagent-execute']));
@@ -1687,7 +1748,7 @@ const SCENARIOS = [
       const res = runState(['init', 'tf15-st'], dir,
         { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
       assertExit(res, 0);
-      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (st.status !== 'running') {
         throw new Error('init state 缺 status: running，实际: ' + JSON.stringify(st.status));
       }
@@ -1761,7 +1822,7 @@ const SCENARIOS = [
       const custom = writeCustomProtocol(dir);
       const initRes = runState(['init', 'tf18-cp'], dir, { FLOW_COMET_PROTOCOL: custom });
       assertExit(initRes, 0);
-      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (st.currentNode !== 'brainstorm') {
         throw new Error('init currentNode 应为协议首节点 brainstorm，实际: ' + JSON.stringify(st.currentNode));
       }
@@ -1826,7 +1887,7 @@ const SCENARIOS = [
       assertExit(initRes, 0);
       const res = runState(['record', 'open', '{"summary":"x","completedChecks":["a"]}', '--protocol', custom], dir);
       assertExit(res, 0);
-      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       const ev = st.evidence.open || {};
       if (ev.summary !== 'x') {
         throw new Error('summary 被污染，应为 "x"，实际: ' + JSON.stringify(ev.summary));
@@ -1933,7 +1994,7 @@ const SCENARIOS = [
   },
 
   // 71: 自定义协议未声明 state.statePath（最小 schema）→ hook 不崩溃，写 .specs/ 放行
-  // （：statePath 缺省回退 .comet/flow-comet-state.json——与 workflow-state 硬编码一致；
+  // （：statePath 缺省回退 .flow-comet/flow-comet-state.json——与 workflow-state 硬编码一致；
   //  当前空值解析崩溃 exit 1 全量拦截）
   {
     name: '71 无 statePath 协议 hook 不崩溃',
@@ -1956,8 +2017,8 @@ const SCENARIOS = [
     run: (dir) => {
       const st = composeState({ status: 'running' });
       const raw = '﻿' + JSON.stringify(st, null, 2) + '\n';
-      fs.mkdirSync(path.join(dir, '.comet'), { recursive: true });
-      fs.writeFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), raw, 'utf8');
+      fs.mkdirSync(path.join(dir, '.flow-comet'), { recursive: true });
+      fs.writeFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), raw, 'utf8');
       writeFile(dir, '.specs/compose-demo/CHANGE.md', '# CHANGE\n## Why\nx\n');
       const res = runState(['status'], dir,
         { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
@@ -1973,8 +2034,8 @@ const SCENARIOS = [
       const st = baseState('open');
       st.status = 'running';
       const raw = '﻿' + JSON.stringify(st, null, 2) + '\n';
-      fs.mkdirSync(path.join(dir, '.comet'), { recursive: true });
-      fs.writeFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), raw, 'utf8');
+      fs.mkdirSync(path.join(dir, '.flow-comet'), { recursive: true });
+      fs.writeFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), raw, 'utf8');
       const res = runHook(['before_tool'], dir,
         { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', 'compose-demo', 'CHANGE.md') } });
       assertExit(res, 0);
@@ -2050,8 +2111,8 @@ const SCENARIOS = [
       const st = baseState('open');
       st.status = 'running';
       const raw = '﻿' + JSON.stringify(st, null, 2) + '\n';
-      fs.mkdirSync(path.join(dir, '.comet'), { recursive: true });
-      fs.writeFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), raw, 'utf8');
+      fs.mkdirSync(path.join(dir, '.flow-comet'), { recursive: true });
+      fs.writeFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), raw, 'utf8');
       writeFile(dir, '.specs/compose-demo/CHANGE.md', '# CHANGE\n## Why\nx\n');
       const res = runGuard(['entry', 'open'], dir,
         { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
@@ -2190,7 +2251,7 @@ const SCENARIOS = [
     run: (dir) => {
       writeFile(dir, 'package.json', '{"name":"x"}');
       runState(['init', CHANGE_ID, '--init-skip'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
-      const st1 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st1 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (st1.ai_context_doc !== 'none') throw new Error('ai_context_doc 应为 none');
       const res2 = runState(['init', CHANGE_ID + '-2'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
       if (res2.output.includes('INIT-NEEDED') || res2.output.includes('INIT-HINT')) throw new Error('下次 init 不应再提示');
@@ -2230,7 +2291,7 @@ const SCENARIOS = [
       assertExit(res, 0);
       assertOut(res, 'INIT-GENERATE');
       if (fs.existsSync(path.join(dir, '.specs', 'CONTEXT.md'))) throw new Error('CONTEXT 不应由脚本生成（生成职责在 agent）');
-      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (st.last_intel_scan) throw new Error('校验通过前不应写 last_intel_scan');
     },
   },
@@ -2269,7 +2330,7 @@ const SCENARIOS = [
       const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
       assertExit(res, 0);
       assertOut(res, 'INIT-DONE');
-      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (!st.last_intel_scan) throw new Error('校验通过后应写 last_intel_scan');
     },
   },
@@ -2284,7 +2345,7 @@ const SCENARIOS = [
       assertExit(res, 0);
       assertOut(res, 'INIT-VALIDATE-FAILED');
       assertOut(res, '重写');
-      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (st.last_intel_scan) throw new Error('校验失败不应写 last_intel_scan');
     },
   },
@@ -2300,7 +2361,7 @@ const SCENARIOS = [
       assertExit(res, 0);
       assertOut(res, 'INIT-VALIDATE-FAILED');
       assertOut(res, '日期');
-      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (st.last_intel_scan) throw new Error('格式校验失败不应写 last_intel_scan');
     },
   },
@@ -2314,7 +2375,7 @@ const SCENARIOS = [
       const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
       assertExit(res, 0);
       assertOut(res, 'INIT-DONE');
-      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (!st.last_intel_scan) throw new Error('占位 CONTEXT 校验通过应写 last_intel_scan');
     },
   },
@@ -2488,7 +2549,7 @@ const SCENARIOS = [
       assertOut(res, '缺少对应声明标记');
       assertOut(res, 'workflow-state.mjs skill-load open flow-comet-change');
       // BLOCK 先于记录——校验失败后 evidence 不得写入
-      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (st.evidence && st.evidence.open) throw new Error('BLOCKED 后不应写入 evidence: ' + JSON.stringify(st.evidence.open));
     },
   },
@@ -2506,7 +2567,7 @@ const SCENARIOS = [
       const res = runState(['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })], dir, env);
       assertExit(res, 0);
       assertOut(res, 'EVIDENCE: open');
-      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (!st.evidence.open || st.evidence.open.summary !== 'done') {
         throw new Error('record 未写入 evidence: ' + JSON.stringify(st.evidence));
       }
@@ -2634,32 +2695,18 @@ const SCENARIOS = [
     },
   },
 
-  // 105: 场景数一致性自检同步（AC-8）——SCENARIOS.length 变更时 SCENARIO_COUNT_FILES 21 文件须同步
-  // （ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n 变体）。本场景直接读取权威源仓库的
-  // 21 文件断言含当前场景数变体——文档漏同步即 RED（与底部自检同判据；安装副本无文档跳过）
+  // 105: 场景数一致性自检同步（AC-8 / AC-14）——SCENARIOS.length 变更时受检文件须同步
+  // （ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n 变体）。本场景读取权威源仓库的
+  // 受检文件断言含当前场景数变体——文档漏同步或条目缺失（幽灵条目）即 RED；与底部自检
+  // 共用同一实现（scenarioCountSyncProblems），两处判据不会漂移。安装副本无文档面，跳过。
   {
-    name: '105 场景数自检同步：21 文件含当前场景数变体（AC-8）',
-    run: (dir) => {
-      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无 flow-comet 文档
+    name: '105 场景数自检同步：受检文件含当前场景数变体（AC-8 / AC-14）',
+    run: () => {
+      if (!isAuthoritativeSourceRepo()) return; // 安装副本无 flow-comet 文档
       const n = SCENARIOS.length;
-      const missing = [];
-      for (const rel of SCENARIO_COUNT_FILES) {
-        let text;
-        try {
-          text = fs.readFileSync(path.join(repoRoot, rel), 'utf8');
-        } catch (e) {
-          if (e.code === 'ENOENT') continue; // 文件不存在跳过（与底部自检一致）
-          throw e;
-        }
-        const ok = text.includes('ALL ' + n + ' SCENARIOS PASSED')
-          || text.includes(n + ' scenarios')
-          || text.includes(n + ' 场景')
-          || text.includes(n + '/' + n);
-        if (!ok) missing.push(rel);
-      }
-      if (missing.length > 0) {
-        throw new Error('场景数未同步（应为 ' + n + '）: ' + missing.join(', '));
+      const problems = scenarioCountSyncProblems(n);
+      if (problems.length > 0) {
+        throw new Error(problems.join('; '));
       }
     },
   },
@@ -2924,7 +2971,7 @@ const SCENARIOS = [
       assertNotOut(res, 'BRANCH:');
       const branchAfter = execFileSync('git', ['branch', '--show-current'], { cwd: dir, encoding: 'utf8' }).trim();
       if (branchAfter !== branchBefore) throw new Error('init --help 不应切换或创建分支');
-      if (fs.existsSync(path.join(dir, '.comet', 'flow-comet-state.json'))) {
+      if (fs.existsSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'))) {
         throw new Error('init --help 不应写状态文件(此前被当作 change 名执行的副作用)');
       }
       if (fs.existsSync(path.join(dir, '.specs', '--help'))) {
@@ -2950,7 +2997,7 @@ const SCENARIOS = [
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
-      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
       writeState(dir, st2);
       const res = runGuard(['exit', 'execute'], dir);
@@ -2970,7 +3017,7 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
       assertExit(runGuard(['entry', 'execute'], dir), 0); // entry 记录 enter 标记
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
-      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
       writeState(dir, st2);
       const res = runGuard(['exit', 'execute'], dir);
@@ -3236,7 +3283,7 @@ const SCENARIOS = [
       assertExit(runGuard(['entry', 'execute'], dir), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1);
       writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent()); // 满足 M2
-      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['P01']) }; // 满足越俎代庖,触发 KI-10 越权委托
       writeState(dir, st2);
       const res = runGuard(['exit', 'execute'], dir);
@@ -3270,7 +3317,7 @@ const SCENARIOS = [
       execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
       const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
       assertExit(res, 0);
-      const st = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (st.newChange !== true) throw new Error('init 未写入 newChange: true');
     },
   },
@@ -3391,7 +3438,7 @@ const SCENARIOS = [
       const r1 = runState(['verify-fail'], dir, env);
       assertExit(r1, 0);
       assertOut(r1, 'VERIFY-FAIL: 3/3');
-      const stAfter = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const stAfter = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (!stAfter.verifyFailuresByChange || stAfter.verifyFailuresByChange['ch'] !== 3) {
         throw new Error('旧字段未迁移并入 change 计数: ' + JSON.stringify(stAfter.verifyFailuresByChange));
       }
@@ -3750,7 +3797,7 @@ const SCENARIOS = [
       assertExit(res, 1);
       assertOut(res, '--json-file');
       // fail-closed：state 文件须保持原样（evidence.open 未被脏字符串污染）
-      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (!st2.evidence.open || st2.evidence.open.summary !== 'intake complete') {
         throw new Error('record 解析失败后仍写入了 evidence（应 fail-closed 不落库）: ' + JSON.stringify(st2.evidence.open));
       }
@@ -3771,7 +3818,7 @@ const SCENARIOS = [
       assertExit(res, 1);
       assertOut(res, '--json-file');
       // fail-closed：handoffResult 不得写入
-      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       const hr = st2.evidence && st2.evidence['subagent-execute'] && st2.evidence['subagent-execute'].handoffResult;
       if (hr && hr.T01) {
         throw new Error('handoff result 解析失败后仍写入了 handoffResult（应 fail-closed 不落库）: ' + JSON.stringify(hr.T01));
@@ -3851,7 +3898,7 @@ const SCENARIOS = [
         throw new Error('fail-closed 应有提示（--json-file / not valid JSON / 不是合法 JSON），实际输出: ' + res.output);
       }
       // fail-closed：evidence 不被污染
-      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (!st2.evidence.open || st2.evidence.open.summary !== 'intake complete') {
         throw new Error('纯文本以 [ 开头应 fail-closed 不落库，state 被污染: ' + JSON.stringify(st2.evidence.open));
       }
@@ -4199,7 +4246,7 @@ const SCENARIOS = [
       const res = runState(['next'], dir, env);
       assertExit(res, 0);
       assertOut(res, 'NODE: plan');
-      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (st2.currentNode !== 'plan') {
         throw new Error('entered 未 record 的节点不应被推进，currentNode 应为 plan，实际: ' + st2.currentNode);
       }
@@ -4649,7 +4696,7 @@ const SCENARIOS = [
 
   // 177: hook 项目根判定兜底链（级3 实测暴露的 H5 残留缺口收口）——会话 cwd 漂移后：
   // ① 有 CLAUDE_PROJECT_DIR（CC hook env 注入）→ 越界写 BLOCKED / .specs 写放行；
-  // ② 无任何 env → 自 cwd 向上锚定最近含 .comet/flow-comet-state.json 的祖先，同样正确判定。
+  // ② 无任何 env → 自 cwd 向上锚定最近含 .flow-comet/flow-comet-state.json 的祖先，同样正确判定。
   // 修复前两种漂移形态下协议读取失败 → exit 1 报错式放行（越界写有痕放过）。
   {
     name: '177 hook 根判定兜底：cwd 漂移经变量/祖先锚定后正确拦截（H5 收口）',
@@ -4666,7 +4713,7 @@ const SCENARIOS = [
       const spawnDrift = (input, extraEnv) => {
         // 封闭性：剥离宿主可能注入的锚定变量，确保用例只测显式给定的锚定形态
         const inherited = { ...process.env };
-        delete inherited.COMET_RUN_ROOT;
+        delete inherited.FLOW_COMET_RUN_ROOT;
         delete inherited.CLAUDE_PROJECT_DIR;
         const res = spawnSync(process.execPath, [HOOK, 'before_tool'], {
           cwd: path.join(dir, 'deep'),
@@ -4689,7 +4736,7 @@ const SCENARIOS = [
       r = spawnDrift({ tool_name: 'Write', tool_input: { file_path: inspec } }, { CLAUDE_PROJECT_DIR: dir });
       assertExit(r, 0);
       assertOut(r, 'workflow-hook-guard-ok');
-      // ② 无 env → 祖先锚定（dir 含 .comet/state.json）
+      // ② 无 env → 祖先锚定（dir 含 .flow-comet/flow-comet-state.json）
       r = spawnDrift({ tool_name: 'Write', tool_input: { file_path: evil } }, {});
       assertExit(r, 2);
       assertOut(r, 'BLOCKED');
@@ -4736,7 +4783,7 @@ const SCENARIOS = [
         '<task id="T05" parallel="false"><action>遗留无状态串行</action><write_files>src/t5.mjs</write_files><verify>node --check src/t5.mjs</verify></task>\n');
       assertExit(runGuard(['entry', 'execute'], dir), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
-      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
       writeState(dir, st2);
       const res = runGuard(['exit', 'execute', '--apply'], dir);
@@ -4762,7 +4809,7 @@ const SCENARIOS = [
         '<task id="T04" parallel="false" status="pending"><action>实现 T04</action><write_files>src/t4.mjs</write_files><verify>node --check src/t4.mjs</verify></task>\n');
       assertExit(runGuard(['entry', 'execute'], dir), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
-      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
       writeState(dir, st2);
       const res = runGuard(['exit', 'execute'], dir);
@@ -4801,7 +4848,7 @@ const SCENARIOS = [
       assertExit(resReq, 0);
       assertOut(resReq, 'HANDOFF REQUEST: T01');
       // 自动解析结果与换行形态等价：单行分号切分为两条独立路径入库
-      const stAfter = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const stAfter = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       const parsedFiles = stAfter.evidence['subagent-execute'].handoffRequests.T01.writeFiles;
       if (!Array.isArray(parsedFiles) || parsedFiles.length !== 2
         || !parsedFiles.includes('src/todo_x.py') || !parsedFiles.includes('tests/test_todo_x.py')) {
@@ -4864,7 +4911,7 @@ const SCENARIOS = [
       assertExit(runGuard(['entry', 'execute'], dir), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent());
       writeFile(dir, '.specs/' + CHANGE_ID + '/P02-SUMMARY.md', summaryContent());
-      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['P01', 'P02']) };
       writeState(dir, st2);
       const res = runGuard(['exit', 'execute', '--apply'], dir);
@@ -4887,7 +4934,7 @@ const SCENARIOS = [
         '<task id="T02" parallel="false" status="pending"><action>实现 T02</action><write_files>src/t2.mjs</write_files><verify>node --check src/t2.mjs</verify><depends_on>P01</depends_on></task>\n');
       assertExit(runGuard(['entry', 'execute'], dir), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent());
-      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['P01']) };
       writeState(dir, st2);
       const res = runGuard(['exit', 'execute'], dir);
@@ -4926,8 +4973,7 @@ const SCENARIOS = [
       if (!fs.existsSync(PREPARE_ENV)) return;
       const proj = path.join(dir, 'proj');
       fs.mkdirSync(proj, { recursive: true });
-      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-      const localUpstream = path.join(repoRoot, 'flow-kit');
+      const localUpstream = path.join(REPO_ROOT, 'flow-kit');
       const env = {};
       if (fs.existsSync(path.join(localUpstream, '.git'))) {
         env.GIT_CONFIG_COUNT = '1';
@@ -5230,7 +5276,7 @@ const SCENARIOS = [
           blk('P03', true, 'S01') + blk('P04', true, 'S01') +
           blk('S02', false, 'P03,P04'));
       };
-      const readStateObj = () => JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const readStateObj = () => JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       // appendEvidence 顶层浅合并 + handoffResult 深层合并：多趟委托下 subagent-execute 的
       // handoffResult 是跨趟累积的委托结果库（越俎代庖检测按全部 done 任务查记录）——整体
       // 覆盖会丢失已委托任务记录（与真实链路 handoff 逐趟追加不一致）。其它节点 evidence
@@ -5576,7 +5622,7 @@ const SCENARIOS = [
           blk('P03', true, 'S01') + blk('P04', true, 'S01') +
           blk('S02', false, 'P03,P04'));
       };
-      const readStateObj = () => JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const readStateObj = () => JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       const appendEvidence = (node, evidence) => {
         const o = readStateObj();
         const prev = o.evidence[node] || {};
@@ -5700,7 +5746,7 @@ const SCENARIOS = [
       const r1 = runState(['next'], dir, env);
       assertExit(r1, 0);
       assertOut(r1, 'NODE: plan');
-      const stAfterNext = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const stAfterNext = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (stAfterNext.currentNode !== 'plan') {
         throw new Error('record 后未 exit 先 next 不应提前校正 currentNode（应保持 plan），实际: ' + stAfterNext.currentNode);
       }
@@ -5756,7 +5802,7 @@ const SCENARIOS = [
       assertExit(res, 0);
       assertNotOut(res, 'BLOCKED: currentNode');
       assertOut(res, '容错');
-      const stAfter = JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const stAfter = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (!stAfter.completedNodes.includes('execute')) {
         throw new Error('容错 exit execute --apply 后 completedNodes 应含 execute（欠账补齐）;实际: ' + stAfter.completedNodes.join(','));
       }
@@ -5900,7 +5946,7 @@ const SCENARIOS = [
     },
   },
 
-  // 215: directOverride 越界检测——绕过脚本直接改 state 文件（工具写 .comet/flow-comet-state.json,
+  // 215: directOverride 越界检测——绕过脚本直接改 state 文件（工具写 .flow-comet/flow-comet-state.json,
   // 无授权）→ hook BLOCK（state 文件禁手动工具写——机器字段由脚本通道管理;修复前 direct 模式
   // 白名单 [''] 允许写 state → 越权写入口 fail-open → RED）。
   {
@@ -5912,7 +5958,7 @@ const SCENARIOS = [
       st.directOverride = true;
       st.directOverrideAt = '2026-08-29T10:00:00.000Z';
       writeState(dir, st);
-      const stateFile = path.join(dir, '.comet', 'flow-comet-state.json');
+      const stateFile = path.join(dir, '.flow-comet', 'flow-comet-state.json');
       const res = runHook(['before_tool'], dir,
         { tool_name: 'Write', tool_input: { file_path: stateFile } });
       assertExit(res, 2);
@@ -5944,7 +5990,7 @@ const SCENARIOS = [
       };
       const writeTask = () => writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
         '<task id="S01" status="done"><action>实现 S01</action><write_files>src/s1.mjs</write_files><verify>node --check src/s1.mjs</verify></task>\n');
-      const readState = () => JSON.parse(fs.readFileSync(path.join(dir, '.comet', 'flow-comet-state.json'), 'utf8'));
+      const readState = () => JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       // ① 复现 BLOCK（direct 无授权）
       const st1 = buildState();
       st1.executionMode = 'direct';
@@ -5980,7 +6026,8 @@ const SCENARIOS = [
   },
 
   // 217: hook state 文件拦截的大小写变体闭合（CodeRabbit 采纳）——win32/darwin 文件系统大小写
-  // 不敏感，`.Comet/Flow-Comet-State.json` 与机器状态文件指向同一实体；修复前 blockedStateFileTarget
+  // 不敏感，`.Flow-Comet/Flow-Comet-State.json` 与机器状态文件（.flow-comet/flow-comet-state.json）
+  // 指向同一实体；修复前 blockedStateFileTarget
   // 精确等值比较 → 变体绕过 W4 防线（direct 白名单 [''] 放行）→ 预期 RED（期望 exit 2 实际 exit 0）。
   // 其他平台（大小写敏感文件系统）变体是不同文件，不属机器状态文件 → 放行（与「其他平台保持等值
   // 比较」语义一致，平台分支断言防 CI 误报）。
@@ -5993,13 +6040,14 @@ const SCENARIOS = [
       st.directOverride = true;
       st.directOverrideAt = '2026-08-29T10:00:00.000Z';
       writeState(dir, st);
-      const caseVariant = path.join(dir, '.Comet', 'Flow-Comet-State.json');
+      // 变体形态必须跟随机器状态文件的实际相对路径（命名空间 .flow-comet/flow-comet-state.json）
+      const caseVariant = path.join(dir, '.Flow-Comet', 'Flow-Comet-State.json');
       const res = runHook(['before_tool'], dir,
         { tool_name: 'Write', tool_input: { file_path: caseVariant } });
       if (process.platform === 'win32' || process.platform === 'darwin') {
         assertExit(res, 2);
         assertOut(res, 'BLOCKED');
-        assertOut(res, '.Comet/Flow-Comet-State.json');
+        assertOut(res, '.Flow-Comet/Flow-Comet-State.json');
       } else {
         assertNotOut(res, 'BLOCKED');
       }
@@ -6088,30 +6136,16 @@ for (const sc of SCENARIOS) {
 console.log('RESULT: ' + passed + '/' + SCENARIOS.length + ' scenarios passed');
 
 // 文档一致性自检（场景数纪律 + 公开产物零代号纪律工具化，2026-08-10）：
-// ① 场景数：全清单文档（公开 10 + 非公开 6 + CLAUDE）须与 SCENARIOS.length 一致（全变体检查）；
+// ① 场景数：受检清单文档须与 SCENARIOS.length 一致（全变体检查），且清单条目必须真实存在
+//    （AC-14：缺失显式报告，不静默跳过）；
 // ② 公开产物零代号：公开文档不得含过程代号（场景编号/修复编号/批次/缺陷编号/问题级/验证代号/验证轮次/未公开概念——历史 CHANGELOG 回归实证）。
-// 仅权威源仓库（含 .comet/bundle-drafts 锚点）执行；安装副本（目标项目）无 flow-comet 文档，跳过。
-const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-const isAuthoritativeSource = fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'));
-if (isAuthoritativeSource) {
-  // ① 场景数全清单（公开双语 + 非公开文档 + CLAUDE + PR 模板；全变体：ALL n SCENARIOS / n scenarios / n 场景 / n/n）
-  // SCENARIO_COUNT_FILES 为模块级常量（场景数自检与底部自检共用同一清单，见文件头定义）
-  for (const rel of SCENARIO_COUNT_FILES) {
-    const docPath = path.join(repoRoot, rel);
-    try {
-      const text = fs.readFileSync(docPath, 'utf8');
-      const n = SCENARIOS.length;
-      const ok = text.includes('ALL ' + n + ' SCENARIOS PASSED')
-        || text.includes(n + ' scenarios')
-        || text.includes(n + ' 场景')
-        || text.includes(n + '/' + n);
-      if (!ok) throw new Error(rel + ' 场景数未同步（应为 ' + n + '）');
-    } catch (e) {
-      if (e.code !== 'ENOENT') {
-        failures.push({ name: '场景数一致性(' + rel + ')', error: e.message });
-        console.error('FAIL: 场景数一致性(' + rel + ')\n' + e.message);
-      }
-    }
+// 仅权威源检出执行；安装副本（目标项目）无 flow-comet 文档面，跳过。
+if (isAuthoritativeSourceRepo()) {
+  // ① 场景数受检清单（分发组恒检 + 维护者组整组在场时检；判据与场景 105 共用同一实现）
+  // SCENARIO_COUNT_FILES / SCENARIO_COUNT_FILES_MAINTAINER 为模块级常量（见文件头定义）
+  for (const problem of scenarioCountSyncProblems(SCENARIOS.length)) {
+    failures.push({ name: '场景数一致性', error: problem });
+    console.error('FAIL: 场景数一致性\n' + problem);
   }
 
   // ② 公开文档零代号（公开产物纪律——CHANGELOG 历史 S 编号回归的教训，2026-08-10）
@@ -6131,16 +6165,20 @@ if (isAuthoritativeSource) {
   // 分发，不能 import 主仓私有 .githooks——改动词表时两份同改，行为必须一致）
   const INTERNAL_CODE_RE = /\bS\d{1,3}\b|T-FIX|batch-(?![a-z])|D-\d+|P[0-7]\b|round\s*\d|dogfood|内部/;
   for (const rel of PUBLIC_DOCS) {
-    const docPath = path.join(repoRoot, rel);
+    let text;
     try {
-      const text = fs.readFileSync(docPath, 'utf8');
-      const m = text.match(INTERNAL_CODE_RE);
-      if (m) throw new Error(rel + ' 含过程代号: "' + m[0] + '"');
+      text = fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
     } catch (e) {
-      if (e.code !== 'ENOENT') {
-        failures.push({ name: '公开产物零代号(' + rel + ')', error: e.message });
-        console.error('FAIL: 公开产物零代号(' + rel + ')\n' + e.message);
-      }
+      // ENOENT 同样显式报告：本清单全部为随仓库分发的文件，任何权威源检出都应存在——
+      // 静默跳过会让"永不生效的条目"藏身（同类 AC-14 缺陷）。
+      failures.push({ name: '公开产物零代号(' + rel + ')', error: '文件缺失: ' + e.message });
+      console.error('FAIL: 公开产物零代号(' + rel + ')\n文件缺失: ' + e.message);
+      continue;
+    }
+    const m = text.match(INTERNAL_CODE_RE);
+    if (m) {
+      failures.push({ name: '公开产物零代号(' + rel + ')', error: rel + ' 含过程代号: "' + m[0] + '"' });
+      console.error('FAIL: 公开产物零代号(' + rel + ')\n' + rel + ' 含过程代号: "' + m[0] + '"');
     }
   }
 }
