@@ -26,7 +26,7 @@
 // 输出纪律：逐项 PASS/FAIL + 汇总（SYSTEM TEST: N/M passed）；全过 exit 0，有 FAIL exit 1。
 // 测试项命名与输出为公开面——零过程代号（场景编号/修复编号/批次/缺陷编号/未公开概念）。
 //
-// 运行: node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/system-test.mjs
+// 运行: node .flow-comet/skills/flow-comet/scripts/system-test.mjs
 // 仅 node 内置模块（child_process/fs/os/path）；无网络。
 
 import { execFileSync, spawnSync } from 'child_process';
@@ -68,7 +68,7 @@ function writeFile(root, rel, content) {
 }
 
 function writeState(root, state) {
-  writeFile(root, path.posix.join('.comet', 'flow-comet-state.json'), JSON.stringify(state, null, 2) + '\n');
+  writeFile(root, path.posix.join('.flow-comet', 'flow-comet-state.json'), JSON.stringify(state, null, 2) + '\n');
 }
 
 // 跑 workflow-state.mjs：runRoot = process.cwd()（spawn cwd=临时目录）；
@@ -78,7 +78,7 @@ function runState(args, root, envOverrides = {}) {
     cwd: root,
     env: {
       ...process.env,
-      COMET_RUN_ROOT: root,
+      FLOW_COMET_RUN_ROOT: root,
       FLOW_COMET_PROTOCOL: path.join(root, 'reference', 'workflow-protocol.json'),
       ...envOverrides,
     },
@@ -88,13 +88,13 @@ function runState(args, root, envOverrides = {}) {
   return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
 }
 
-// 跑 workflow-guard.mjs：COMET_RUN_ROOT=临时目录；同时捕获 stdout+stderr（WARN/BLOCKED 走 stderr）
+// 跑 workflow-guard.mjs：FLOW_COMET_RUN_ROOT=临时目录；同时捕获 stdout+stderr（WARN/BLOCKED 走 stderr）
 function runGuard(args, root, envOverrides = {}) {
   const res = spawnSync(process.execPath, [GUARD, ...args], {
     cwd: root,
     env: {
       ...process.env,
-      COMET_RUN_ROOT: root,
+      FLOW_COMET_RUN_ROOT: root,
       FLOW_COMET_PROTOCOL: path.join(root, 'reference', 'workflow-protocol.json'),
       ...envOverrides,
     },
@@ -108,7 +108,7 @@ function runGuard(args, root, envOverrides = {}) {
 function runHandoff(args, root, envOverrides = {}) {
   const res = spawnSync(process.execPath, [HANDOFF, ...args], {
     cwd: root,
-    env: { ...process.env, COMET_RUN_ROOT: root, ...envOverrides },
+    env: { ...process.env, FLOW_COMET_RUN_ROOT: root, ...envOverrides },
     encoding: 'utf8',
     timeout: 60000,
   });
@@ -122,7 +122,7 @@ function runHook(args, root, input, envOverrides = {}) {
     input: input === undefined ? '' : JSON.stringify(input),
     env: {
       ...process.env,
-      COMET_RUN_ROOT: root,
+      FLOW_COMET_RUN_ROOT: root,
       FLOW_COMET_PROTOCOL: path.join(root, 'reference', 'workflow-protocol.json'),
       ...envOverrides,
     },
@@ -152,7 +152,7 @@ function assertNotOut(res, keyword) {
 
 // 读取 state 文件（测试断言用）
 function readStateFile(root) {
-  return JSON.parse(fs.readFileSync(path.join(root, '.comet', 'flow-comet-state.json'), 'utf8'));
+  return JSON.parse(fs.readFileSync(path.join(root, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
 }
 
 // git 工具：临时目录内初始化仓库（含初始 commit——unborn HEAD 下 init 不会建分支）
@@ -271,7 +271,7 @@ function customProtocol() {
     ],
     state: {
       kind: 'workflow-run',
-      statePath: '.comet/flow-comet-state.json',
+      statePath: '.flow-comet/flow-comet-state.json',
       currentNodeField: 'currentNode',
       completedNodesField: 'completedNodes',
       evidenceField: 'evidence',
@@ -553,7 +553,7 @@ const TEST_ITEMS = [
       assertExit(s2, 0);
       assertOut(s2, '"currentNode": "design"');
       // 无 state 无工件 → no-change 兜底
-      fs.rmSync(path.join(dir, '.comet'), { recursive: true });
+      fs.rmSync(path.join(dir, '.flow-comet'), { recursive: true });
       const s3 = runState(['status'], dir);
       assertExit(s3, 0);
       assertOut(s3, '"status": "no-change"');
@@ -2230,7 +2230,7 @@ const TEST_ITEMS = [
   {
     name: 'I1 异常路径：损坏状态文件 fail-closed',
     run: (dir) => {
-      writeFile(dir, '.comet/flow-comet-state.json', '{broken json');
+      writeFile(dir, '.flow-comet/flow-comet-state.json', '{broken json');
       const res = runState(['status'], dir);
       assertExit(res, 1);
     },
@@ -2295,8 +2295,8 @@ const TEST_ITEMS = [
   {
     name: 'J1 文档一致性：双语健康检查（本地工具）',
     run: (dir) => {
-      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无仓库文档
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无仓库文档
       const checker = path.join(repoRoot, 'scripts', 'check-docs-local.mjs');
       if (!fs.existsSync(checker)) {
         console.log('  （本地工具缺失，跳过——gitignore 不随克隆分发）');
@@ -2323,8 +2323,8 @@ const TEST_ITEMS = [
   {
     name: 'J2 文档一致性：公开产物零代号检查（本地工具）',
     run: (dir) => {
-      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return;
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return;
       const checker = path.join(repoRoot, 'scripts', 'check-codes-local.mjs');
       if (!fs.existsSync(checker)) {
         console.log('  （本地工具缺失，跳过——gitignore 不随克隆分发）');
@@ -2341,8 +2341,8 @@ const TEST_ITEMS = [
   {
     name: 'K1 安装器：版本标识由安装器生成且精确反映源仓库状态',
     run: (dir) => {
-      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       if (!fs.existsSync(installer)) throw new Error('缺少 prepare-env.mjs');
       const target = path.join(dir, 'j3-target');
@@ -2350,7 +2350,7 @@ const TEST_ITEMS = [
       const res = spawnSync(process.execPath, [installer, '--target', target], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
       if (res.status !== 0) throw new Error('prepare-env 失败: ' + (res.stderr || JSON.stringify(res.output)));
       // 分发主干:权威源随技能包分发的静态文件(手动复制也有效,不依赖安装脚本)
-      const srcVersionFile = path.join(repoRoot, '.comet', 'bundle-drafts', 'flow-comet', 'skills', 'flow-comet', 'INSTALLED_VERSION');
+      const srcVersionFile = path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet', 'INSTALLED_VERSION');
       if (!fs.existsSync(srcVersionFile)) throw new Error('缺少权威源 INSTALLED_VERSION(随技能包分发)');
       const srcVersion = fs.readFileSync(srcVersionFile, 'utf8').trim();
       if (!srcVersion) throw new Error('权威源版本标识为空');
@@ -2378,8 +2378,8 @@ const TEST_ITEMS = [
   {
     name: 'K2 安装器:codex 平台安装(技能/路径替换/hooks.json/AGENTS 托管区)',
     run: (dir) => {
-      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       const target = path.join(dir, 'k2-target');
       fs.mkdirSync(target, { recursive: true });
@@ -2456,7 +2456,7 @@ const TEST_ITEMS = [
       const okParsed = JSON.parse(ok.output.trim()); // 放行输出须为合法 JSON(空串解析失败 → RED)
       if (okParsed.decision === 'block') throw new Error('codex 放行输出不应含 decision block');
       // ③ codex 分支:无活跃 workflow → 放行(JSON 可解析)
-      fs.rmSync(path.join(dir, '.comet'), { recursive: true, force: true });
+      fs.rmSync(path.join(dir, '.flow-comet'), { recursive: true, force: true });
       const noActive = runHook(['before_tool', '--platform', 'codex'], dir,
         { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'src', 'x.py') } });
       assertExit(noActive, 0);
@@ -2509,8 +2509,8 @@ const TEST_ITEMS = [
   {
     name: 'K4 安装器:平台选择链(显式/无 TTY 探测/默认)',
     run: (dir) => {
-      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return;
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return;
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       const run = (target, envOverrides = {}) => spawnSync(process.execPath, [installer, '--target', target], { cwd: repoRoot, encoding: 'utf8', timeout: 120000, env: { ...process.env, ...envOverrides } });
       // ① --platform claude-code 显式 → .claude/skills 生成,.agents 不生成
@@ -2611,8 +2611,8 @@ const TEST_ITEMS = [
   {
     name: 'K5 安装器:purge 语义(缺 --yes 拒绝/重建/用户内容保留)',
     run: (dir) => {
-      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return;
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return;
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       const run = (target, extra) => spawnSync(process.execPath, [installer, '--target', target, ...extra], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
       // ① codex 平台:首次安装 + 用户内容(项目根,非生成物)
@@ -2702,8 +2702,8 @@ const TEST_ITEMS = [
   {
     name: 'K6 安装器:平台描述符驱动(全平台安装冒烟 + main 统一调度)',
     run: (dir) => {
-      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return;
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return;
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       const src = fs.readFileSync(installer, 'utf8');
       // ① main 统一调度:平台分支标识已消除(新增平台 = 描述符条目,main 零改动)
@@ -2750,8 +2750,8 @@ const TEST_ITEMS = [
   {
     name: 'K7 安装器:dsh 平台安装(技能/pathReplacements/版本标识/树一致)',
     run: (dir) => {
-      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       const dshHome = path.join(dir, 'k7-dsh-home');
       const target = path.join(dir, 'k7-target');
@@ -2776,7 +2776,7 @@ const TEST_ITEMS = [
       if (!text.includes('.dsh/skills/flow-comet/scripts/')) throw new Error('SKILL 命令路径未替换为 .dsh/skills/flow-comet/scripts/');
       if (text.includes('.claude/skills/flow-comet/scripts/')) throw new Error('SKILL 仍含 .claude/skills/flow-comet/scripts/ 命令路径');
       // ⑤ 安装树文件清单与权威源一致(pathReplacements 只改内容不改清单)
-      const authoritative = path.join(repoRoot, '.comet', 'bundle-drafts', 'flow-comet', 'skills', 'flow-comet');
+      const authoritative = path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet');
       const installedTree = collectTreeFiles(path.join(target, '.dsh', 'skills', 'flow-comet'));
       const srcTree = collectTreeFiles(authoritative);
       if (installedTree.length === 0) throw new Error('安装技能树为空');
@@ -2792,8 +2792,8 @@ const TEST_ITEMS = [
   {
     name: 'K8 安装器:dsh AGENTS.md 托管区(用户内容保留 + 幂等重装)',
     run: (dir) => {
-      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       const dshHome = path.join(dir, 'k8-dsh-home');
       const target = path.join(dir, 'k8-target');
@@ -2829,8 +2829,8 @@ const TEST_ITEMS = [
   {
     name: 'K9 桥接 loader:源文件/语法/复制与托管块注入(读-合并-写)',
     run: (dir) => {
-      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       // ① 权威源 loader 存在 + 语法检查
       const loader = path.join(repoRoot, 'scripts', 'dsh-bridge.mjs');
       if (!fs.existsSync(loader)) throw new Error('缺少 scripts/dsh-bridge.mjs');
@@ -2881,8 +2881,8 @@ const TEST_ITEMS = [
   {
     name: 'K10 安装器:dsh purge 清理恢复(缺 --yes 拒绝/删除后重建/用户内容保留/空目录清理)',
     run: (dir) => {
-      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       const dshHome = path.join(dir, 'k10-dsh-home');
       const run = (target, extra) => spawnSync(process.execPath, [installer, '--target', target, '--platform', 'dsh', ...extra], {
@@ -2932,11 +2932,11 @@ const TEST_ITEMS = [
   {
     name: 'K11 桥接 loader:纯函数与 apply 分派断言(映射/包含性/退出映射/身份分派)',
     run: async (dir) => {
-      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       // 动态 import(套件运行器逐项 await)——dsh-bridge.mjs 仅在权威源仓库根 scripts/,
       // 安装副本缺失时整体跳过(与 K 组其余项同语义);静态 import 会让安装副本套件整体崩
-      const loader = path.join(__dirname, '..', '..', '..', '..', '..', '..', 'scripts', 'dsh-bridge.mjs');
+      const loader = path.join(repoRoot, 'scripts', 'dsh-bridge.mjs');
       if (!fs.existsSync(loader)) throw new Error('缺少 scripts/dsh-bridge.mjs');
       const bridge = await import(pathToFileURL(loader).href);
       // ① 工具名归一化别名矩阵:write/edit/bash 全部别名 → Write/Edit/Bash
@@ -3180,8 +3180,8 @@ const TEST_ITEMS = [
   {
     name: 'K12 桥接 loader:流程态门断言(无state/无activeChange/completed放行·非法JSON/未知status deny)',
     run: async (dir) => {
-      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       const loader = path.join(repoRoot, 'scripts', 'dsh-bridge.mjs');
       if (!fs.existsSync(loader)) throw new Error('缺少 scripts/dsh-bridge.mjs');
       const bridge = await import(pathToFileURL(loader).href + '?k12=' + Date.now()); // 全新模块实例(applied=false)
@@ -3212,8 +3212,8 @@ const TEST_ITEMS = [
       bridge.apply({ on: (event, fn) => { ctxEvents[event] = fn; } });
       const preExec = ctxEvents['tools/pre-execute'];
       if (typeof preExec !== 'function') throw new Error('bridge.apply 应注册 tools/pre-execute 监听器');
-      const statePath = path.join(target, '.comet', 'flow-comet-state.json');
-      // AC-1 无 state：无 .comet/flow-comet-state.json + 项目外 Write → next() 放行（空闲放行已生效）
+      const statePath = path.join(target, '.flow-comet', 'flow-comet-state.json');
+      // AC-1 无 state：无 .flow-comet/flow-comet-state.json + 项目外 Write → next() 放行（空闲放行已生效）
       {
         if (fs.existsSync(statePath)) throw new Error('AC-1 前置:目标项目不应有 state 文件');
         let usedNext = false;
@@ -3240,7 +3240,7 @@ const TEST_ITEMS = [
       // AC-7 解析失败：state 写成非法 JSON + 项目外 Write → deny（reason 含 fail-closed 拒绝语义；
       //   当前无条件 deny 已通过、T02 流程态门落地后必须保持 deny，不得当空闲放行）
       {
-        writeFile(target, '.comet/flow-comet-state.json', '{ not-valid-json ');
+        writeFile(target, '.flow-comet/flow-comet-state.json', '{ not-valid-json ');
         let usedNext = false;
         const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
         if (usedNext) throw new Error('AC-7 非法 JSON 不应 next——解析失败必须 fail-closed deny');
@@ -3259,7 +3259,7 @@ const TEST_ITEMS = [
       }
       // AC-7b 非对象 JSON（null/标量/数组/字符串）：合法 JSON 但非对象 = 损坏 state → deny（fail-closed）
       for (const bad of [null, 123, ['x'], 'str']) {
-        writeFile(target, '.comet/flow-comet-state.json', JSON.stringify(bad));
+        writeFile(target, '.flow-comet/flow-comet-state.json',JSON.stringify(bad));
         let usedNext = false;
         const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
         if (usedNext) throw new Error('AC-7b 非对象 state(' + JSON.stringify(bad) + ') 不应 next——必须 fail-closed deny');
@@ -3268,7 +3268,7 @@ const TEST_ITEMS = [
       }
       // AC-3b BOM 前缀 + completed：BOM 容错断言——应被解析并视为空闲放行
       {
-        writeFile(target, '.comet/flow-comet-state.json', '\uFEFF' + JSON.stringify({ activeChange: 'x', status: 'completed' }));
+        writeFile(target, '.flow-comet/flow-comet-state.json', '\uFEFF' + JSON.stringify({ activeChange: 'x', status: 'completed' }));
         let usedNext = false;
         const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
         if (!usedNext) throw new Error('AC-3b BOM+completed 应放行(next 被调)——BOM 容错: ' + JSON.stringify(r));
@@ -3286,8 +3286,8 @@ const TEST_ITEMS = [
   {
     name: 'K13 安装器:hook 注入形态无关断言(basename+项目根引用)+旧条目幂等升级',
     run: (dir) => {
-      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       // ① 形态分类器:新旧托管形态均被 basename 识别;项目根引用特征仅根引用形态命中
       for (const legacy of [
@@ -3426,8 +3426,8 @@ const TEST_ITEMS = [
   {
     name: 'K14 桥接 loader:版本戳重装断言(升级/降级方向与覆盖后新戳)',
     run: (dir) => {
-      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       const loader = path.join(repoRoot, 'scripts', 'dsh-bridge.mjs');
       if (!fs.existsSync(loader)) throw new Error('缺少 scripts/dsh-bridge.mjs');
@@ -3485,8 +3485,8 @@ const TEST_ITEMS = [
   {
     name: 'K15 桥接 loader:同源重装断言(首次安装后版本一致)',
     run: (dir) => {
-      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       const loader = path.join(repoRoot, 'scripts', 'dsh-bridge.mjs');
       if (!fs.existsSync(loader)) throw new Error('缺少 scripts/dsh-bridge.mjs');
@@ -3521,8 +3521,8 @@ const TEST_ITEMS = [
   {
     name: 'K16 桥接 loader:purge 后重建路径回归(loader 恢复与再装收敛)',
     run: (dir) => {
-      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.comet', 'bundle-drafts'))) return; // 安装副本无权威源
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       const loader = path.join(repoRoot, 'scripts', 'dsh-bridge.mjs');
       if (!fs.existsSync(loader)) throw new Error('缺少 scripts/dsh-bridge.mjs');
