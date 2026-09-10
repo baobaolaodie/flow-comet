@@ -90,7 +90,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 ### 验证安装（无副作用，不创建 change）
 
 1. **结构检查**：`<目标项目>/.claude/skills/` 下 `flow-comet*` skill 目录数量与 prepare-env 输出一致（当前 19 个）+ `rules/flow-comet-orchestration.md` + `settings.local.json` 均存在 + `skills/flow-comet/INSTALLED_VERSION`（随技能包分发的版本标识——`cat .claude/skills/flow-comet/INSTALLED_VERSION`；内容为基于的最近发布版本；prepare-env 安装且源仓库有 git 时更精确：`<发布版本>-<领先提交数>-g<hash>`）
-2. **配置可加载性**：`settings.local.json` 是合法 JSON；`hooks.PreToolUse[].hooks[].command` 指向项目根变量绝对引用 `node %CLAUDE_PROJECT_DIR%\.claude\skills\flow-comet\scripts\comet-hook-guard.mjs`（POSIX 宿主：`node $CLAUDE_PROJECT_DIR/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`）且 `<目标项目>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs` 存在。Claude Code 运行 hook 时注入 `CLAUDE_PROJECT_DIR` = 项目根，路径自项目根解析而非会话工作目录——工作目录漂移出项目根后仍命中（与[hook 升级说明](#hook-升级说明)推荐的形态一致）
+2. **配置可加载性**：`settings.local.json` 是合法 JSON；`hooks.PreToolUse[].hooks[].command` 指向项目根变量绝对引用 `node ${CLAUDE_PROJECT_DIR}/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs` 且 `<目标项目>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs` 存在。Claude Code 运行 hook 时注入 `CLAUDE_PROJECT_DIR` = 项目根，路径自项目根解析而非会话工作目录——工作目录漂移出项目根后仍命中（与[hook 升级说明](#hook-升级说明)推荐的形态一致）
 3. **一致性检查**（在 flow-comet 仓库内执行，strip 行尾后应无差异）：`diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/rules <目标项目>/.claude/rules` 与 `.../skills`——**diff 无输出即通过**
 4. **真实环境冒烟**（在目标项目目录内执行）：`cd <目标项目> && node .claude/skills/flow-comet/scripts/workflow-state.mjs status`——期望输出 JSON 状态对象（全新项目为 `{"status":"no-change",...}`，运行中为 `{"status":"running","change":...}`）
 
@@ -135,7 +135,7 @@ cp -r $SKILLS/flow-comet* "$TARGET/.claude/skills/"
 cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.claude/rules/"
 ```
 
-**3. 注册 hook（手动）**：在目标项目 `.claude/settings.local.json` 的 `hooks` 中**合并**以下片段（保留既有内容，如 `permissions`）。命令经 Claude Code 的项目根变量引用守卫脚本（`CLAUDE_PROJECT_DIR`——hook 运行时宿主注入项目根；Windows 为 `%CLAUDE_PROJECT_DIR%`，POSIX 为 `$CLAUDE_PROJECT_DIR`），自项目根解析而非会话工作目录（即 `<目标项目>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`）：
+**3. 注册 hook（手动）**：在目标项目 `.claude/settings.local.json` 的 `hooks` 中**合并**以下片段（保留既有内容，如 `permissions`）。命令经 Claude Code 的项目根变量引用守卫脚本（`CLAUDE_PROJECT_DIR`——hook 运行时宿主注入项目根），自项目根解析而非会话工作目录（即 `<目标项目>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`）：
 
 ```json
 {
@@ -146,7 +146,7 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
         "hooks": [
           {
             "type": "command",
-            "command": "node %CLAUDE_PROJECT_DIR%\\.claude\\skills\\flow-comet\\scripts\\comet-hook-guard.mjs"
+            "command": "node ${CLAUDE_PROJECT_DIR}/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs"
           }
         ]
       }
@@ -155,7 +155,7 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
 }
 ```
 
-POSIX 宿主使用正斜杠命令形态：`node $CLAUDE_PROJECT_DIR/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`。
+Claude Code 在**所有平台**（含 Windows）以 bash 语义执行 hook 命令，故上述命令统一使用 POSIX 形态（`${CLAUDE_PROJECT_DIR}` 花括号词形 + 正斜杠路径）——Windows 上 cmd 风格的 `%VAR%` 语法不会被展开，且反斜杠会被当作转义字符吞掉（hook 将无法加载守卫脚本）。
 
 > **升级说明**：以旧相对路径条目（`node .claude/skills/...`）安装的存量项目可原地升级——重跑方案 A 安装器即把旧条目替换为上面的项目根引用形态（托管条目按脚本名识别并覆盖，无需手工清理旧配置）。
 

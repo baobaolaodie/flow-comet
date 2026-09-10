@@ -16,11 +16,12 @@
  *   .codex/rules 为命令批准规则目录,不混用) / 清理 purge / 覆盖清单 overwriteDescription——
  *   main 统一调度,新增平台 = 描述符条目 + 安装/清理函数,main 零改动。
  *
- * hook 命令项目根锚定:CC 命令引用 CC 注入的 CLAUDE_PROJECT_DIR 运行期展开(Windows cmd.exe
- *   %VAR% / POSIX $VAR,单一来源常量派生,见 PROJECT_ROOT_ENV_VAR);Codex 官方 hooks 无等价
+ * hook 命令项目根锚定:CC 命令引用 CC 注入的 CLAUDE_PROJECT_DIR 运行期展开(全平台 bash
+ *   ${VAR} 词形——CC 以 /bin/bash -c 执行 hook 命令,含 Windows;单一来源常量派生,
+ *   见 PROJECT_ROOT_ENV_VAR);Codex 官方 hooks 无等价
  *   项目根变量(查证 openai/codex 上游执行层,结论与出处见 injectCodexHook 注释)→ 安装期
  *   字面注入 target 绝对路径(迁移目录需重跑安装器)。两平台命令均不加外层引号,以保住
- *   isManagedHookCommand 的 basename 幂等识别(含空格路径不支持,见常量区取舍说明)。
+ *   isManagedHookCommand 的 basename 幂等识别(容忍外层引号——含空格路径支持,见常量区说明)。
  *
  * 非破坏设计（T-FIX-13，2026-08-08 用户裁决）：
  *   - 默认（无 --purge）：**不删除整个 .claude/（或 .agents/ / .dsh/）**——只精确覆盖生成物
@@ -72,17 +73,17 @@ const MANAGED_HOOK_COMMAND_MARKER = 'comet-hook-guard.mjs';
 // 本安装器装在本机（安装机 = 目标机），process.platform 即 hook 的执行平台。
 const PROJECT_ROOT_ENV_VAR = 'CLAUDE_PROJECT_DIR';
 
-// 两平台 hook 命令一律不加外层引号（已知取舍）：isManagedHookCommand 按空白分词提取 .mjs
-// token 后取 basename 判等（本任务契约：该函数保持不动），外层引号会并入 token 使 basename
-// 变成 comet-hook-guard.mjs" 而识别失效，破坏幂等升级（旧相对条目将无法被过滤替换）。
-// 代价：项目根路径含空格时，未加引号的命令在空格处断裂——设计允许实施期按三平台实测
-// 微调引号策略，此处以幂等识别优先；含空格路径暂不支持（需先演进识别函数再放开引号）。
+// hook 命令加整体外层引号（2026-09-10 演进——原「不加引号」取舍的前提是识别函数按空白分词
+// 判等、外层引号会并入 token 使 basename 失配；识别函数已演进为容忍引号，故放开）：未加
+// 引号时，含空格的项目根路径在变量展开后会被词法分词切断（静默失效，与反斜杠转义同类）。
 function projectRootGuardScriptRef(rootDirName) {
-  const isWindows = process.platform === 'win32';
-  const sep = isWindows ? '\\' : '/';
-  const varRef = isWindows ? `%${PROJECT_ROOT_ENV_VAR}%` : `$${PROJECT_ROOT_ENV_VAR}`;
+  // CC 全平台以 /bin/bash -c 执行 hook 命令（含 Windows——Git Bash 语义），并注入
+  // CLAUDE_PROJECT_DIR 环境变量；故统一 POSIX 形态：${VAR} 花括号词形（CC 自身亦做该词形
+  // 插值——字符串替换，双保险）+ 正斜杠路径（反斜杠在 bash 词法里会被当转义吞掉，如 \. \f）。
+  // 整体加引号：含空格的项目根路径不因词法分词断裂；识别层容忍引号（isManagedHookCommand
+  // 去引号后取 basename 判等），幂等升级不受影响。
   const segments = [rootDirName, 'skills', 'flow-comet', 'scripts', MANAGED_HOOK_COMMAND_MARKER];
-  return `${varRef}${sep}${segments.join(sep)}`;
+  return `"\${${PROJECT_ROOT_ENV_VAR}}/${segments.join('/')}"`;
 }
 
 // AGENTS.md 托管区标记（Codex/dsh 平台 rules 注入共用——幂等替换边界,任一平台卸载可清）
@@ -569,8 +570,10 @@ function isManagedHookCommand(command) {
     return false;
   }
   const normalized = command.replace(/\\/g, '/').trim();
-  // 提取命令中的脚本路径（node <path> 或直接 <path>）
-  const pathMatch = normalized.match(/(?:^|\s)([^\s]+\.mjs)(?:\s|$)/);
+  // 提取命令中的脚本路径（node <path> 或直接 <path>）——容忍外层引号（含空格路径防护形态）：
+  // 引号由可选的 ["']? 吸收、不并入捕获组，basename 判等保持形态无关（旧相对形态 / 变量引用
+  // 形态 / 绝对路径形态 / 带引号形态均识别）。
+  const pathMatch = normalized.match(/(?:^|\s)["']?([^\s"']+\.mjs)["']?(?:\s|$)/);
   if (!pathMatch) {
     return false;
   }
@@ -658,8 +661,8 @@ function injectSettingsHook(claudeDir) {
     hooks: [
       {
         type: 'command',
-        // 项目根锚定：node %CLAUDE_PROJECT_DIR%\.claude\skills\...\comet-hook-guard.mjs（Windows）
-        // / node $CLAUDE_PROJECT_DIR/.claude/skills/.../comet-hook-guard.mjs（POSIX）。
+        // 项目根锚定（全平台统一形态）：node ${CLAUDE_PROJECT_DIR}/.claude/skills/.../comet-hook-guard.mjs
+        // —— CC 以 /bin/bash -c 执行 hook 命令（含 Windows），POSIX 词形 + 正斜杠为唯一可用形态。
         // 运行期由 CC 注入的变量展开；单一事实来源 = PROJECT_ROOT_ENV_VAR + projectRootGuardScriptRef。
         command: `node ${projectRootGuardScriptRef('.claude')}`,
       },

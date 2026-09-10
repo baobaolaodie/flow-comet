@@ -15,6 +15,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 ### Fixed
 
 - **dsh bridge loader version stamp aligned with the release version**: the loader's `BRIDGE_VERSION` now matches the release version (and the authoritative `INSTALLED_VERSION`), so the read-only bridge health check reports a version-consistent loader on a freshly installed project instead of version skew; the installer's overwrite reporting and the regression suites read the stamp from the authoritative source instead of a fixed value.
+- **The Claude Code hook command now uses the POSIX form on every platform**: the installer previously emitted a cmd-style `%CLAUDE_PROJECT_DIR%` reference with backslash paths on Windows, but the host executes hook commands with bash semantics — the variable was never expanded and the backslashes were swallowed as escape characters, so the guard script failed to load on every tool call (the host downgraded the crashing hook to a non-blocking error, leaving writes unintercepted); the installer now emits the braced POSIX form on all platforms, and the regression suite verifies the generated command actually executes under the host's semantics.
 
 ## [1.5.0-rc.2] - 2026-09-01
 
