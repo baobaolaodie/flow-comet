@@ -8,8 +8,8 @@
 
 ## 改动范围（勾选）/ Scope of Changes (check)
 
-- [ ] 工作流脚本 / Workflow scripts（`.comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/`）
-- [ ] Skill 指令 / Skill instructions（`.comet/bundle-drafts/flow-comet/skills/flow-comet*/`）
+- [ ] 工作流脚本 / Workflow scripts（`.flow-comet/skills/flow-comet/scripts/`）
+- [ ] Skill 指令 / Skill instructions（`.flow-comet/skills/flow-comet*/`）
 - [ ] 安装器 / Installer（`scripts/prepare-env.mjs`）
 - [ ] 回归场景 / Regression scenarios（guard-self-test；场景数变化需全库同步 / scenario-count changes require repo-wide sync）
 - [ ] 文档 / Docs（README / docs/ / CHANGELOG / CONTRIBUTING）
@@ -19,7 +19,7 @@
 ## 验证（勾选已执行）/ Verification (check executed)
 
 <!-- 关键验证输出请粘贴到验证段下方(如回归结果/失败日志),reviewer 可直接核验 / Paste key verification output below (e.g. regression result, failure logs) so reviewers can check directly -->
-- [ ] 回归测试 / Regression：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → ALL 219 SCENARIOS PASSED + `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/system-test.mjs` → ALL SYSTEM TESTS PASSED
+- [ ] 回归测试 / Regression：`node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → ALL 219 SCENARIOS PASSED + `node .flow-comet/skills/flow-comet/scripts/system-test.mjs` → ALL SYSTEM TESTS PASSED
 - [ ] 脚本改动：先写失败测试（确认测试因缺陷失败）再实现 / Script changes: write a failing test first (confirm it fails for the right reason) before implementing
 - [ ] 文档改动：中英双语同步 / Doc changes: EN and ZH mirrored
 - [ ] 发布验证：各安装副本回归通过 / Release check: regression passes in all installed copies
