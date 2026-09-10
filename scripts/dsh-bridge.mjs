@@ -156,7 +156,7 @@ export function isPathInsideProjectRoot(projectRoot, filePath) {
  * (fail-closed — never treated as idle), else { ok:true, state }.
  */
 export function readFlowState(projectRoot) {
-  const stateFile = path.join(projectRoot, '.comet', 'flow-comet-state.json');
+  const stateFile = path.join(projectRoot, '.flow-comet', 'flow-comet-state.json');
   let raw;
   try {
     raw = readFileSync(stateFile);
@@ -263,7 +263,7 @@ export function mapGuardExit(code, stderr, stdout) {
       reason:
         'dsh-flow-comet-bridge: 写入被 flow-comet 白名单拦截\n' +
         (detail ? detail + '\n' : '') +
-        '恢复指引：请将写入目标调整到当前节点允许的路径前缀，或先完成当前节点流程后再写；如认为判定有误，请检查 .comet/flow-comet-state.json 与协议白名单。',
+        '恢复指引：请将写入目标调整到当前节点允许的路径前缀，或先完成当前节点流程后再写；如认为判定有误，请检查 .flow-comet/flow-comet-state.json 与协议白名单。',
     };
   }
   return {
@@ -391,7 +391,7 @@ export function apply(ctx) {
       if (flowState === 'error') {
         // 解析失败 / 状态异常：fail-closed deny，不得当空闲放行（D2/R2 缓解——防异常被静默放行）。
         const reason =
-          'dsh-flow-comet-bridge: .comet/flow-comet-state.json 解析失败或状态异常——fail-closed 拒绝';
+          'dsh-flow-comet-bridge: .flow-comet/flow-comet-state.json 解析失败或状态异常——fail-closed 拒绝';
         console.warn(reason);
         return { kind: 'deny', reason };
       }
