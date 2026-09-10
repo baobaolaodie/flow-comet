@@ -2,7 +2,7 @@
 /**
  * prepare-env.mjs — flow-comet 环境安装脚本（T-FIX-08 创建 / T-FIX-13 非破坏化 / 1.4.0 多平台化）
  *
- * 用途：从权威源 `.comet/bundle-drafts/flow-comet/` 安装/更新目标仓库的环境，
+ * 用途：从权威源 `.flow-comet/`（含 skills/ 与 rules/）安装/更新目标仓库的环境，
  *   使目标环境获得完整约束——rules 行为层 + hook 物理层 + skills 协议层。
  *   这是 flow-comet 的**安装器**：适用于新项目安装 flow-comet、e2e 验证载体准备、
  *   源仓库自我改进 worktree 环境准备。
@@ -33,11 +33,21 @@
  *
  * 幂等：默认模式重复运行——rules/skills 覆盖一致；settings/hooks 注入幂等
  *   （已管理的 comet-hook-guard 命令被过滤后重新合并，不产生重复条目）；
- *   AGENTS.md 托管区幂等替换（移除旧托管区后重新生成）。
+ *   AGENTS.md 托管区幂等替换（移除旧托管区后重新生成）；
+ *   运行时位置迁移幂等（旧件已搬走 → 跳过）；.gitignore 纳管幂等（已有条目 → 保持原样）。
+ *
+ * 运行时位置迁移（旧命名空间 → 新命名空间）：目标项目 `.comet/` 下的 flow-comet 运行时
+ *   文件按白名单枚举（RUNTIME_FILE_MIGRATIONS）搬移到 `.flow-comet/`——搬移语义 =
+ *   迁移前强制备份 → 写新位置 → 回读校验（逐字节）→ 删旧件；备份在迁移成功后保留
+ *   （无 git 载体项目的唯一回退依据）。边界情形（新旧并存 / 符号链接 / JSON 损坏）
+ *   一律报错中止并保留全部原件，绝不静默覆盖或丢弃。`.comet/` 是三方共占目录——
+ *   白名单之外的内容（Comet 资产、用户自有文件）一律原位不动。
+ *   执行顺序：迁移 → 部署 → .gitignore 纳管；任一步失败即中止（保持可重跑的一致态）。
+ *   .gitignore 纳管取保守策略：既有条目一律保留，仅缺失时追加 `.flow-comet/` 条目。
  *
  * 用法：node scripts/prepare-env.mjs [--target <dir>] [--platform <claude-code|codex|dsh|claude-code,dsh|all>] [--purge --yes]
  *   --target 缺省 = 当前工作目录（cwd）。脚本自身定位：__dirname 上一级 = 仓库根
- *   （scripts/ 与 .comet/ 同级），据此解析权威源。
+ *   （scripts/ 与 .flow-comet/ 同级），据此解析权威源。
  *   --platform 显式指定平台：单平台 / 逗号分隔多平台（claude-code,codex,dsh）/
  *   all（全部平台,安装顺序 = PLATFORMS 表顺序）；未知平台报错（旧 both 语义已移除——
  *   多平台用逗号列表或 all）；缺省走选择链：
@@ -60,17 +70,28 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
-const BUNDLE_DRAFTS = path.join(REPO_ROOT, '.comet', 'bundle-drafts', 'flow-comet');
+// 权威源根（含 skills/ 与 rules/——目录结构与安装副本 .claude/ 对称：<根>/skills/flow-comet/）
+const BUNDLE_DRAFTS = path.join(REPO_ROOT, '.flow-comet');
+
+// ---------- 运行时文件位置迁移（旧命名空间 → 新命名空间） ----------
+// 位置迁移白名单（单一来源）：目标项目的 `.comet/` 是三方共占目录——flow-comet 运行时文件
+// + Comet 资产（`runs/`、`config.yaml` 等）+ 用户自有文件（`*.bak-*` 等）。只有下表列出的
+// 文件属 flow-comet 运行时域，其余一律原位不动（不搬迁、不删除、不改写）——整目录搬迁或
+// 前缀正则匹配都会越界处置非 flow-comet 资产。新增运行时文件时必须同步本表。
+const LEGACY_RUNTIME_DIR = '.comet';
+const RUNTIME_DIR = '.flow-comet';
+const RUNTIME_FILE_MIGRATIONS = [
+  { name: 'flow-comet-state.json', validateJson: true },
+];
 
 // comet-hook-guard 的 command 特征（用于识别"已管理的 hook 命令"，注入时替换避免重复）
 const MANAGED_HOOK_COMMAND_MARKER = 'comet-hook-guard.mjs';
 
 // ---------- hook 命令项目根锚定（单一事实来源） ----------
 // Claude Code 运行 hook 时注入 CLAUDE_PROJECT_DIR 环境变量（值 = 项目根绝对路径，官方 hooks
-// 文档契约）。变量名是唯一事实来源，展开语法按宿主 OS 的 hook shell 派生：
-//   Windows：hook 经 cmd.exe 执行 → %VAR%（cmd.exe 原生展开）
-//   POSIX  ：sh 系执行 → $VAR
-// 本安装器装在本机（安装机 = 目标机），process.platform 即 hook 的执行平台。
+// 文档契约）。变量名是唯一事实来源；命令形态**全平台统一**为 POSIX/bash 词形
+// （`${VAR}` + 正斜杠——CC 在所有平台含 Windows 都以 /bin/bash -c 执行 hook 命令），
+// 由 projectRootGuardScriptRef 派生，不按宿主 OS 分叉。
 const PROJECT_ROOT_ENV_VAR = 'CLAUDE_PROJECT_DIR';
 
 // hook 命令加整体外层引号（2026-09-10 演进——原「不加引号」取舍的前提是识别函数按空白分词
@@ -351,7 +372,7 @@ function parseArgs(argv) {
 
 function printUsage() {
   console.log('用法: node scripts/prepare-env.mjs [--target <dir>] [--platform <claude-code|codex|dsh|claude-code,dsh|all>] [--purge --yes]');
-  console.log('  从权威源 .comet/bundle-drafts/flow-comet/ 安装/更新 <dir> 环境');
+  console.log('  从权威源 .flow-comet/ 安装/更新 <dir> 环境（含运行时位置迁移与 .gitignore 纳管）');
   console.log('  --target 缺省 = 当前工作目录（cwd）');
   console.log('  --platform 指定平台（claude-code / codex / dsh；逗号分隔多选或 all 全部平台）');
   console.log('            缺省 = TTY 交互多选（@clack/prompts,未安装回退 readline）> 探测目标项目 > 默认 claude-code');
@@ -557,6 +578,204 @@ function applyPathReplacements(root, replacements) {
     }
   }
   return replaced;
+}
+
+// ---------- 运行时文件位置迁移（旧命名空间 .comet/ → 新命名空间 .flow-comet/） ----------
+
+/** lstat 探测：返回 stat 或 null（**不跟随符号链接**——isSymbolicLink() 判定依赖 lstat）。 */
+function lstatIfExists(target) {
+  try {
+    return fs.lstatSync(target);
+  } catch {
+    return null;
+  }
+}
+
+/** 迁移备份文件名时间戳（ISO 串里的 `:` 与 `.` 在 Windows 文件名中非法——统一替换为 `-`）。 */
+function migrationTimestamp() {
+  return new Date().toISOString().replace(/[:.]/g, '-');
+}
+
+/** 逐字节读回并比较；读取失败一律视为不一致（调用方按校验失败处置）。 */
+function fileEqualsBytes(filePath, bytes) {
+  try {
+    return fs.readFileSync(filePath).equals(bytes);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 迁移前置校验：旧件不存在 → 返回 null（无需迁移）；命中边界情形 → 抛错中止（不返回字节）。
+ * 三种边界一律不静默覆盖或丢弃：
+ *   - 旧件是符号链接 → 不跟随（防穿越到项目外），报错并给人工处置指引
+ *   - 新旧位置并存 → 不覆盖任何一方，报错并列出两处路径供人工判断
+ *   - 内容损坏（validateJson 条目）→ 保留原件未改动，报错并给修复指引
+ */
+function readMigratableRuntimeFile(oldPath, newPath, entry) {
+  const oldStat = lstatIfExists(oldPath);
+  if (!oldStat) return null;
+  if (oldStat.isSymbolicLink()) {
+    let linkTarget = '(读取失败)';
+    try {
+      linkTarget = fs.readlinkSync(oldPath);
+    } catch {
+      /* 链接目标读取失败不改变处置（同样中止） */
+    }
+    throw new Error(
+      `${oldPath} 是符号链接（指向 ${linkTarget}）——不跟随链接搬移（避免穿越到项目外）。` +
+        `请人工确认后处理：把真实文件复制到 ${newPath}（保留本链接），或删除该链接后重跑安装器。`
+    );
+  }
+  if (lstatIfExists(newPath)) {
+    throw new Error(
+      `新旧位置同时存在该运行时文件，不覆盖任何一方：\n  - 旧位置: ${oldPath}\n  - 新位置: ${newPath}\n` +
+        `请人工比对两处内容，保留正确的一份（删除或改名另一份）后重跑安装器。`
+    );
+  }
+  let bytes;
+  try {
+    bytes = fs.readFileSync(oldPath);
+  } catch (err) {
+    throw new Error(`${oldPath} 读取失败（${err.message}）——未做任何改动，中止迁移。请检查文件权限后重跑安装器。`);
+  }
+  if (entry.validateJson) {
+    let parsed = null;
+    try {
+      parsed = JSON.parse(bytes.toString('utf8'));
+    } catch (err) {
+      throw new Error(
+        `${oldPath} 内容不是合法 JSON（${err.message}）——保留原件未改动，中止迁移。` +
+          `请修复该文件（或从备份恢复）后重跑安装器。`
+      );
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error(`${oldPath} 顶层不是 JSON 对象——保留原件未改动，中止迁移。请修复该文件后重跑安装器。`);
+    }
+  }
+  return bytes;
+}
+
+/**
+ * 搬移落盘（写成功才删旧件）：建目标目录 → 复制备份 → 逐字节校验备份 → 写新位置 →
+ * 回读校验新位置 → 删旧件。任一环节失败都抛错，且**旧件与备份至少保留一份**（不丢数据）。
+ */
+function writeRuntimeFileWithBackup(oldPath, newPath, backupPath, bytes) {
+  const targetDir = path.dirname(newPath);
+  const keepNote = `旧文件完整保留于 ${oldPath}`;
+  try {
+    fs.mkdirSync(targetDir, { recursive: true });
+  } catch (err) {
+    throw new Error(
+      `无法建立迁移目标目录 ${targetDir}（${err.message}）——${keepNote}，未做任何改动。` +
+        `请确认该路径未被普通文件占用且可写后重跑安装器。`
+    );
+  }
+  try {
+    fs.copyFileSync(oldPath, backupPath);
+  } catch (err) {
+    throw new Error(
+      `生成迁移前备份失败（${backupPath}：${err.message}）——${keepNote}，未做任何改动。` +
+        `请解除目标目录的写入限制后重跑安装器。`
+    );
+  }
+  if (!fileEqualsBytes(backupPath, bytes)) {
+    throw new Error(`备份逐字节校验失败（${backupPath} 与源文件不一致）——${keepNote}，中止迁移。请重跑安装器。`);
+  }
+  try {
+    fs.writeFileSync(newPath, bytes);
+  } catch (err) {
+    throw new Error(
+      `写入新位置失败（${newPath}：${err.message}）——${keepNote}，备份保留于 ${backupPath}。` +
+        `请解除该路径的写入限制后重跑安装器。`
+    );
+  }
+  if (!fileEqualsBytes(newPath, bytes)) {
+    throw new Error(
+      `新位置回读校验失败（${newPath} 与源文件不一致）——${keepNote}，备份保留于 ${backupPath}，中止迁移。请人工检查后重跑安装器。`
+    );
+  }
+  fs.rmSync(oldPath, { force: true });
+}
+
+/**
+ * 编排单个白名单文件的位置迁移（前置校验 → 备份 → 写 → 回读校验 → 删旧件）；
+ * 无需迁移时把跳过说明记入 report（调用方统一打印）。
+ */
+function migrateRuntimeFile(target, entry, report) {
+  const oldRel = path.join(LEGACY_RUNTIME_DIR, entry.name);
+  const newRel = path.join(RUNTIME_DIR, entry.name);
+  const oldPath = path.join(target, oldRel);
+  const newPath = path.join(target, newRel);
+  const bytes = readMigratableRuntimeFile(oldPath, newPath, entry);
+  if (!bytes) {
+    report.skipped.push(`${oldRel} 不存在——无需迁移`);
+    return;
+  }
+  const backupRel = path.join(RUNTIME_DIR, `${entry.name}.bak-${migrationTimestamp()}`);
+  writeRuntimeFileWithBackup(oldPath, newPath, path.join(target, backupRel), bytes);
+  report.migrated.push(`${oldRel} → ${newRel}（迁移前备份: ${backupRel}）`);
+}
+
+/**
+ * 运行时文件位置迁移总入口：按 RUNTIME_FILE_MIGRATIONS 白名单逐个执行（白名单之外的内容
+ * 一律原位不动——目标项目 `.comet/` 三方共占），打印迁移/跳过报告；任一文件失败即抛错中止
+ * （旧件与备份保留，可重跑自愈）。
+ */
+function migrateRuntimeFiles(target) {
+  const report = { migrated: [], skipped: [] };
+  for (const entry of RUNTIME_FILE_MIGRATIONS) {
+    migrateRuntimeFile(target, entry, report);
+  }
+  console.log(`[prepare-env] 运行时文件迁移（${LEGACY_RUNTIME_DIR}/ → ${RUNTIME_DIR}/;白名单 ${RUNTIME_FILE_MIGRATIONS.length} 项）：`);
+  for (const line of report.migrated) {
+    console.log(`  - 已迁移: ${line}`);
+  }
+  for (const line of report.skipped) {
+    console.log(`  - 已跳过: ${line}`);
+  }
+  if (report.migrated.length > 0) {
+    console.log('  （迁移前备份保留在新位置，确认无误后可自行清理）');
+  }
+}
+
+// ---------- .gitignore 保守纳管（目标项目；读-合并-写幂等，参照 injectSettingsHook 模式） ----------
+
+/** 判断一行是否为 `.flow-comet/` 忽略条目（容忍首尾空白与可选的首尾斜杠变体）。 */
+function isRuntimeDirIgnoreLine(line) {
+  return String(line).trim().replace(/^\/+/, '').replace(/\/+$/, '') === RUNTIME_DIR;
+}
+
+/**
+ * gitignore 保守纳管（读-合并-写幂等）：既有条目一律保留原样——安装器无法可靠推断用户
+ * 写下 `.comet/` 条目的原始意图（实测载体用整目录形态，该目录中仍有 Comet 资产），
+ * 故只做「缺失时追加」，不改写用户其他内容（无关行/注释/既有行尾风格）。
+ * 源仓库自身跳过：`.flow-comet/` 在源仓库是权威源（需被版本控制跟踪），
+ * 整目录忽略会把权威源新增文件静默排除出版本控制。
+ */
+function manageGitignore(target) {
+  if (fs.existsSync(path.join(target, RUNTIME_DIR, 'skills', 'flow-comet', 'SKILL.md'))) {
+    console.log(`[prepare-env] .gitignore 纳管跳过: 当前目录是 flow-comet 源仓库（${RUNTIME_DIR}/ 为权威源，需保持被版本控制跟踪）`);
+    return;
+  }
+  const gitignorePath = path.join(target, '.gitignore');
+  let existing = '';
+  let fileExists = false;
+  try {
+    existing = fs.readFileSync(gitignorePath, 'utf8');
+    fileExists = true;
+  } catch {
+    /* 文件缺失 = 首次纳管 */
+  }
+  if (existing.split(/\r?\n/).some(isRuntimeDirIgnoreLine)) {
+    console.log(`[prepare-env] .gitignore 已含 ${RUNTIME_DIR}/ 条目——保持原样（幂等）`);
+    return;
+  }
+  const eol = existing.includes('\r\n') ? '\r\n' : '\n';
+  const appended = ['# flow-comet 运行时文件（不随仓库分发）', `${RUNTIME_DIR}/`].join(eol);
+  const separator = !fileExists || existing === '' || existing.endsWith('\n') ? '' : eol;
+  fs.writeFileSync(gitignorePath, existing + separator + appended + eol, 'utf8');
+  console.log(`[prepare-env] .gitignore 追加 ${RUNTIME_DIR}/ 条目（既有内容原样保留）: ${gitignorePath}`);
 }
 
 // ---------- settings.local.json 注入（Claude Code 平台；参考 comet installClaudeCodeHooks） ----------
@@ -1179,6 +1398,9 @@ async function main() {
   }
   const platformsLabel = platforms.map((p) => p.label).join(' + ');
 
+  // 执行顺序第一段：运行时文件位置迁移（先于任何部署写入——失败即中止，保持可重跑的一致态）
+  migrateRuntimeFiles(target);
+
   // --purge：必须配合 --yes 二次确认（防误传导致整删）；逐平台删除生成物后重新生成
   if (purge) {
     if (!yes) {
@@ -1244,6 +1466,9 @@ async function main() {
     );
     console.log(`[prepare-env] skills: ${stats.skills.join(', ')}`);
   }
+
+  // 执行顺序第三段：.gitignore 保守纳管（部署成功后执行——失败即中止，可重跑自愈）
+  manageGitignore(target);
 }
 
 try {
