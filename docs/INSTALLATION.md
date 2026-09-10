@@ -90,7 +90,7 @@ On non-default platforms, command paths inside SKILL/GUIDANCE files are rewritte
 ### Verifying installation (no side effects, no change created)
 
 1. **Structure**: `flow-comet*` skill directories under `<target>/.claude/skills/` (count matches prepare-env output, currently 19) + `rules/flow-comet-orchestration.md` + `settings.local.json` + `skills/flow-comet/INSTALLED_VERSION` (version marker shipped with the skill bundle — `cat .claude/skills/flow-comet/INSTALLED_VERSION`; it equals the latest release version, or for prepare-env installs with git available, a precise `<release>-<n>-g<hash>` describing how far the source has accumulated since that release)
-2. **Config loadability**: `settings.local.json` is valid JSON; `hooks.PreToolUse[].hooks[].command` points to the project-root reference `node %CLAUDE_PROJECT_DIR%\.claude\skills\flow-comet\scripts\comet-hook-guard.mjs` (POSIX hosts: `node $CLAUDE_PROJECT_DIR/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`) and `<target>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs` exists. Claude Code injects `CLAUDE_PROJECT_DIR` with the project root when a hook runs, so the path resolves from the project root rather than the session's working directory — it still resolves after the working directory drifts out of the project root (the recommended shape under [Hook upgrade](#hook-upgrade))
+2. **Config loadability**: `settings.local.json` is valid JSON; `hooks.PreToolUse[].hooks[].command` points to the project-root reference `node ${CLAUDE_PROJECT_DIR}/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs` and `<target>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs` exists. Claude Code injects `CLAUDE_PROJECT_DIR` with the project root when a hook runs, so the path resolves from the project root rather than the session's working directory — it still resolves after the working directory drifts out of the project root (the recommended shape under [Hook upgrade](#hook-upgrade))
 3. **Consistency**: diff against the authoritative source (run inside the flow-comet repo; no output = identical):
    `diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/rules <target>/.claude/rules` and the same for `skills`
 4. **Smoke test** (run inside the target project): `cd <target> && node .claude/skills/flow-comet/scripts/workflow-state.mjs status` — expected output is a JSON state object (`{"status":"no-change",...}` for a fresh project, `{"status":"running","change":...}` when a workflow is active)
@@ -136,7 +136,7 @@ cp -r $SKILLS/flow-comet* "$TARGET/.claude/skills/"
 cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.claude/rules/"
 ```
 
-**3. Register the hook (manual)**: merge the following into the target project's `.claude/settings.local.json` (preserve existing content, e.g. `permissions`). The command references the guard script through Claude Code's project-root variable (`CLAUDE_PROJECT_DIR`, injected with the project root when a hook runs; `%CLAUDE_PROJECT_DIR%` on Windows, `$CLAUDE_PROJECT_DIR` on POSIX), so it resolves from the project root instead of the session's working directory (i.e. `<target>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`):
+**3. Register the hook (manual)**: merge the following into the target project's `.claude/settings.local.json` (preserve existing content, e.g. `permissions`). The command references the guard script through Claude Code's project-root variable (`CLAUDE_PROJECT_DIR`, injected with the project root when a hook runs), so it resolves from the project root instead of the session's working directory (i.e. `<target>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`):
 
 ```json
 {
@@ -147,7 +147,7 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
         "hooks": [
           {
             "type": "command",
-            "command": "node %CLAUDE_PROJECT_DIR%\\.claude\\skills\\flow-comet\\scripts\\comet-hook-guard.mjs"
+            "command": "node ${CLAUDE_PROJECT_DIR}/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs"
           }
         ]
       }
@@ -156,7 +156,7 @@ cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.c
 }
 ```
 
-POSIX hosts use the forward-slash command form instead: `node $CLAUDE_PROJECT_DIR/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`.
+Claude Code executes hook commands with bash semantics on **every platform** (including Windows), so the command above uses the POSIX form (`${CLAUDE_PROJECT_DIR}` braced form + forward slashes) — on Windows the cmd-style `%VAR%` syntax is never expanded and backslashes are swallowed as escape characters, so the hook would fail to load the guard script.
 
 > **Upgrade note**: projects that installed earlier with the legacy relative-path entry (`node .claude/skills/...`) can upgrade in place — re-running the Option A installer replaces that entry with the project-root form above (managed entries are recognized by the script name and overwritten, no manual cleanup needed).
 

@@ -3315,7 +3315,45 @@ const TEST_ITEMS = [
       const ccManaged = collectManagedHookCommands(ccSettings);
       if (ccManaged.length === 0) throw new Error('.claude/settings.local.json 未注入托管 hook 条目');
       for (const c of ccManaged) assertManagedHookEntry(c, 'claude-code 托管命令');
-      // ③ 幂等升级(claude-code):托管命令改回旧相对路径形态 → 重跑安装器 → 识别替换:
+      // ③ 可执行性(补「形态可识别但不可执行」盲区,2026-09-10):识别层与执行层是两个维度——
+      //    前者只要求 basename 可辨,后者要求命令在 CC 的真实执行语义下可达。CC 全平台以
+      //    /bin/bash -c 执行 hook 命令(含 Windows),并注入 CLAUDE_PROJECT_DIR 环境变量;
+      //    cmd 变量语法 %VAR% 在 bash 下既不展开、路径反斜杠还会被转义吞掉 → node 静默
+      //    找不到脚本(fail-open,仅报 non-blocking hook error)。
+      //    (a) 形态约束(全平台可判):托管命令不得含 %VAR% cmd 语法;
+      //    (b) 端到端(需 bash):以 bash -c + 注入 CLAUDE_PROJECT_DIR 跑完整命令,验证可达。
+      for (const c of ccManaged) {
+        if (/%[A-Za-z_][A-Za-z0-9_]*%/.test(c)) {
+          throw new Error('claude-code 托管命令含 cmd 变量语法(%VAR%)——bash 执行语义下不可用: ' + c);
+        }
+      }
+      const hasBash = (() => {
+        try {
+          return spawnSync('bash', ['--version'], { encoding: 'utf8', timeout: 30000 }).status === 0;
+        } catch {
+          return false;
+        }
+      })();
+      if (hasBash) {
+        for (const c of ccManaged) {
+          const execRes = spawnSync('bash', ['-c', c], {
+            cwd: ccTarget,
+            encoding: 'utf8',
+            timeout: 60000,
+            env: { ...process.env, CLAUDE_PROJECT_DIR: ccTarget },
+            input: JSON.stringify({ tool_name: 'Write', tool_input: { file_path: path.join(ccTarget, 'k13-probe.txt') } }),
+          });
+          if (execRes.status !== 0 || /Cannot find module/.test(String(execRes.stderr || ''))) {
+            throw new Error(
+              'claude-code 托管命令在 CC 执行语义(bash -c + CLAUDE_PROJECT_DIR)下不可执行: ' +
+                c + ' —— ' + String(execRes.stderr || '').split('\n').slice(0, 3).join(' | ')
+            );
+          }
+        }
+      } else {
+        console.log('  K13: 环境无 bash——跳过托管命令可执行性端到端探针');
+      }
+      // ④ 幂等升级(claude-code):托管命令改回旧相对路径形态 → 重跑安装器 → 识别替换:
       // 恰余 1 条托管条目(无重复无残留)且形态达标(项目根引用特征在位)
       for (const g of ccSettings.hooks.PreToolUse) {
         for (const h of (Array.isArray(g.hooks) ? g.hooks : [])) {
@@ -3328,7 +3366,7 @@ const TEST_ITEMS = [
       const ccAfter = collectManagedHookCommands(JSON.parse(fs.readFileSync(ccSettingsPath, 'utf8')));
       if (ccAfter.length !== 1) throw new Error('claude-code 升级后应恰余 1 条托管条目(旧条目被替换): ' + JSON.stringify(ccAfter));
       assertManagedHookEntry(ccAfter[0], 'claude-code 升级后托管命令');
-      // ④ codex 平台同断言:安装产物形态达标 + 旧条目幂等升级
+      // ⑤ codex 平台同断言:安装产物形态达标 + 旧条目幂等升级
       const cxTarget = path.join(dir, 'k13-codex');
       fs.mkdirSync(cxTarget, { recursive: true });
       const rcx = spawnSync(process.execPath, [installer, '--target', cxTarget, '--platform', 'codex'], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
