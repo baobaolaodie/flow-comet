@@ -3321,7 +3321,9 @@ const TEST_ITEMS = [
       //    cmd 变量语法 %VAR% 在 bash 下既不展开、路径反斜杠还会被转义吞掉 → node 静默
       //    找不到脚本(fail-open,仅报 non-blocking hook error)。
       //    (a) 形态约束(全平台可判):托管命令不得含 %VAR% cmd 语法;
-      //    (b) 端到端(需 bash):以 bash -c + 注入 CLAUDE_PROJECT_DIR 跑完整命令,验证可达。
+      //    (b) 端到端(需 bash):以 bash -c + 注入 CLAUDE_PROJECT_DIR 跑完整命令,验证可达;
+      //    无 bash 环境 → 显式失败(未验证不等于通过——宿主本身以 bash 语义执行 hook,
+      //    不具备 bash 的环境无法完成本验证)。
       for (const c of ccManaged) {
         if (/%[A-Za-z_][A-Za-z0-9_]*%/.test(c)) {
           throw new Error('claude-code 托管命令含 cmd 变量语法(%VAR%)——bash 执行语义下不可用: ' + c);
@@ -3351,7 +3353,10 @@ const TEST_ITEMS = [
           }
         }
       } else {
-        console.log('  K13: 环境无 bash——跳过托管命令可执行性端到端探针');
+        throw new Error(
+          'K13 端到端执行探针需要 bash(宿主以 bash 语义执行 hook 命令),当前环境 PATH 中不可用——' +
+            '无法验证生成命令可执行;请在具备 bash 的环境运行套件(Windows 请确认 Git Bash 在 PATH 中)'
+        );
       }
       // ④ 幂等升级(claude-code):托管命令改回旧相对路径形态 → 重跑安装器 → 识别替换:
       // 恰余 1 条托管条目(无重复无残留)且形态达标(项目根引用特征在位)
