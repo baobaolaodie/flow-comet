@@ -5387,6 +5387,16 @@ const SCENARIOS = [
       if (!srcStamp) throw new Error('权威源 loader 未提取到版本戳（场景前置失效）');
       const installed = fs.readFileSync(path.join(dshHome, 'plugins', 'dsh-flow-comet-bridge.mjs'), 'utf8');
       if (!installed.includes('BRIDGE_VERSION: ' + srcStamp[1])) throw new Error('覆盖后 loader 版本戳非权威源值');
+      // 子断言（发布同步守卫）：权威源 loader 版本戳 == 权威源 INSTALLED_VERSION——两者分叉时
+      // 安装副本的 bridge-check 会在已装项目报版本偏斜（本断言独立读取两侧值，防止发布时只改一处；
+      // 上方断言只证明「覆盖 == 权威源文件」，无法捕获跨文件分叉）。
+      const installedVersion = fs.readFileSync(path.join(__dirname, '..', 'INSTALLED_VERSION'), 'utf8').trim();
+      if (srcStamp[1] !== installedVersion) {
+        throw new Error(
+          '权威源 loader 版本戳(' + srcStamp[1] + ')与 INSTALLED_VERSION(' + installedVersion +
+          ')不一致——发布同步遗漏（bridge-check 会在安装副本报版本偏斜）'
+        );
+      }
     },
   },
 
