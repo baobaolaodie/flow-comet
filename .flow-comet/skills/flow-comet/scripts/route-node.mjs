@@ -32,9 +32,9 @@ function buildNodeCompletionFlags(protocol, changeName) {
       const schema = schemaById.get(schemaId);
       for (const artifact of schema?.artifacts ?? []) {
         if (artifact.required === false) continue; // 可选产物不是完成门控
-        // B 方案（fail-fast）：classic/native pathBase 由 guard 侧 workflowPathBaseRoot 全量
-        // 感知，但状态机推导暂不支持（按 specs-root 兜底会与 guard 不一致导致卡死/误判）——
-        // 显式报错提示改用 specs-root/project + 完整路径（如 project + openspec/changes/xxx.md）。
+        // fail-fast（与 guard 侧 workflowArtifactRoot 同语义）：产物根只支持 'project'/缺省 → runRoot
+        // 与 'specs-root' → <root>/.specs；下列三类 classic/native pathBase 依赖项目配置文件，该配置源
+        // 已随感知层剥离——不再有读取方，遇即显式报错（不静默兜底），提示改用 specs-root/project + 完整路径。
         if (artifact.pathBase === 'classic-openspec-root'
           || artifact.pathBase === 'classic-superpowers-root'
           || artifact.pathBase === 'native-root') {
