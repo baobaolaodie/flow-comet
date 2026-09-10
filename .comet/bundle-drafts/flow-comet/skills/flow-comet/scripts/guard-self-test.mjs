@@ -5365,7 +5365,8 @@ const SCENARIOS = [
 
   // 200: 版本戳形态校验——已装 loader 标记行非语义化版本（如 beta，无数字主形）→ 提取失败
   // 警告 + 跳过版本比对 + 照常覆盖；不得作为合法版本进入 compare（畸形值 parseInt 得 NaN，
-  // 会产生升/降级方向的错误结论）。
+  // 会产生升/降级方向的错误结论）。覆盖断言从权威源动态提取版本值（单一来源——值随发布
+  // 更新时本场景无需同步；断言意图 = 「覆盖后 loader 版本戳 == 权威源文件版本戳」）。
   {
     name: '200 prepare-env 版本戳形态：畸形标记（beta）走提取失败警告而非版本比对',
     run: (dir) => {
@@ -5375,14 +5376,29 @@ const SCENARIOS = [
       const dshHome = path.join(dir, 'dshhome');
       writeFile(dshHome, 'plugins/dsh-flow-comet-bridge.mjs',
         '// dsh bridge loader fixture (malformed stamp)\n// BRIDGE_VERSION: beta\n' +
-        "export const name = 'dsh-flow-comet-bridge';\nexport const version = '1.6.0-alpha.1';\n");
+        "export const name = 'dsh-flow-comet-bridge';\nexport const version = '0.0.0-fixture';\n");
       const res = runPrepareEnv(['--target', proj, '--platform', 'dsh'], dir, { DSH_HOME: dshHome });
       assertExit(res, 0);
       assertOut(res, '版本戳提取失败');
       assertNotOut(res, '桥接 loader 升级');
       assertNotOut(res, '桥接 loader 降级');
+      const srcText = fs.readFileSync(path.join(path.dirname(PREPARE_ENV), 'dsh-bridge.mjs'), 'utf8');
+      const srcStamp = /^\/\/ BRIDGE_VERSION: (\S+)$/m.exec(srcText);
+      if (!srcStamp) throw new Error('权威源 loader 未提取到版本戳（场景前置失效）');
       const installed = fs.readFileSync(path.join(dshHome, 'plugins', 'dsh-flow-comet-bridge.mjs'), 'utf8');
-      if (!installed.includes('BRIDGE_VERSION: 1.6.0-alpha.1')) throw new Error('覆盖后 loader 版本戳非权威源值');
+      if (!installed.includes('BRIDGE_VERSION: ' + srcStamp[1])) throw new Error('覆盖后 loader 版本戳非权威源值');
+      // 子断言（发布同步守卫，以 INSTALLED_VERSION 为权威基准）：权威源 loader 的标记行、
+      // 导出常量与 INSTALLED_VERSION 三处同值——任一处漂移时安装副本的 bridge-check 会在已装
+      // 项目报版本偏斜（上方断言只证明「覆盖 == 权威源文件」，无法捕获跨文件/跨值分叉）。
+      const installedVersion = fs.readFileSync(path.join(__dirname, '..', 'INSTALLED_VERSION'), 'utf8').trim();
+      const exportMatch = /^export const version = '([^']+)';$/m.exec(srcText);
+      if (!exportMatch) throw new Error('权威源 loader 未提取到 export version（场景前置失效）');
+      if (srcStamp[1] !== installedVersion || exportMatch[1] !== installedVersion) {
+        throw new Error(
+          '权威源版本三处不一致（标记行=' + srcStamp[1] + ' / export=' + exportMatch[1] +
+          ' / INSTALLED_VERSION=' + installedVersion + '）——发布同步遗漏（bridge-check 会在安装副本报版本偏斜）'
+        );
+      }
     },
   },
 
