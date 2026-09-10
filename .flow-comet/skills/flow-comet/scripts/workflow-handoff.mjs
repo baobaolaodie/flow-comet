@@ -12,7 +12,7 @@ import { validateStateFields, looksLikeObjectLiteral } from './state-schema.mjs'
 //   node workflow-handoff.mjs status                           -- show all handoff evidence
 
 const runRoot = process.cwd();
-const statePath = path.join(runRoot, '.comet', 'flow-comet-state.json');
+const statePath = path.join(runRoot, '.flow-comet', 'flow-comet-state.json');
 
 async function fileExists(f) { try { await fs.access(f); return true; } catch { return false; } }
 

@@ -18,7 +18,7 @@ const runRoot = process.cwd();
 // 环境变量 → 内置默认 reference/workflow-protocol.json。--protocol 为全局参数（可放在 command
 // 之后的任意位置）；cliArgs = 去掉 command 后的剩余参数数组。
 const protocolPath = resolveProtocol(packageRoot, runRoot, process.argv.slice(3));
-const statePath = path.join(runRoot, '.comet', 'flow-comet-state.json');
+const statePath = path.join(runRoot, '.flow-comet', 'flow-comet-state.json');
 const specsRoot = path.join(runRoot, '.specs');
 
 // 内置节点常量: 内置 8 节点常量（供其他用途参照——如 guard 的节点→协议映射对照；skill-load 的 node

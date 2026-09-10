@@ -13,7 +13,7 @@ const nodeId = process.argv[3] ?? null;
 const apply = process.argv.includes('--apply');
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..');
-const runRoot = process.env.COMET_RUN_ROOT ? path.resolve(process.env.COMET_RUN_ROOT) : process.cwd();
+const runRoot = process.env.FLOW_COMET_RUN_ROOT ? path.resolve(process.env.FLOW_COMET_RUN_ROOT) : process.cwd();
 // 协议路径解析（resolveProtocol）：--protocol 全局参数从命令后的剩余参数提取（command=argv[2]），
 // 其次 FLOW_COMET_PROTOCOL 环境变量，最后内置默认 <packageRoot>/reference/workflow-protocol.json
 const protocolPath = resolveProtocol(packageRoot, runRoot, process.argv.slice(3));
@@ -1335,7 +1335,7 @@ function evidencePathFor(protocol, change) {
   const changeName = typeof change === 'string' ? change : change.name;
   return resolveWorkflowRelativePath(
     runRoot,
-    ['.comet', 'workflow-evidence', changeName, protocol.name + '.json'].join('/'),
+    ['.flow-comet', 'workflow-evidence', changeName, protocol.name + '.json'].join('/'),
     'workflow evidence path',
   ).target;
 }
