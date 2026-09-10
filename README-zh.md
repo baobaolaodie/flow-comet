@@ -178,13 +178,13 @@ processor-pipeline/            （归档 change，完整产物集）
 |------|------|---------------------|
 | [flow-kit](https://github.com/rihebty/flow-kit) | 方法论与工件体系（9 阶段流程、`.specs/` 模板、R1-R8 规则） | **依赖**——flow-comet 是它的执行自动化层；产物与规则来自 flow-kit |
 | [Comet](https://github.com/rpamis/comet) | Skill Creator 生态（bundle 创作、hook guard 模式、状态机） | **机制来源**——flow-comet 大量借鉴 Comet 的机制范式（协议即事实源、脚本拥有状态、guard 门禁、hook 拦截）；**运行时可选**（复制安装无需 Comet CLI）。详见[生态](docs/ECOSYSTEM-zh.md) |
-| **Comet Classic** | Comet 的经典工作流（OpenSpec + Superpowers） | **不依赖**——flow-comet 是独立 workflow-kernel；状态与 classic 不互通（自有 `.comet/flow-comet-state.json` + 文件推导路由） |
+| **Comet Classic** | Comet 的经典工作流（OpenSpec + Superpowers） | **不依赖**——flow-comet 是独立 workflow-kernel；状态与 classic 不互通（自有 `.flow-comet/flow-comet-state.json` + 文件推导路由） |
 
 ## 目录结构
 
 ```
 flow-comet/
-├── .comet/bundle-drafts/   ★ 权威源（19 skills + scripts）
+├── .flow-comet/            ★ 权威源（skills/ + rules/）
 ├── scripts/                prepare-env 安装器
 ├── docs/
 │   ├── examples/           工作流产物示例
@@ -227,8 +227,8 @@ flow-comet/
 完整指南见 [CONTRIBUTING-zh.md](CONTRIBUTING-zh.md)——分支模型（`feature → dev → main`）、PR 流程、合并规则与提交规范。速览：
 
 1. 从 `dev` 开分支：`git checkout dev && git checkout -b feat/<描述>`
-2. 修改 skill/脚本请改 `.comet/bundle-drafts/flow-comet/skills/`（权威源）；TDD——先写 RED 场景
-3. 运行回归：`node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 219 SCENARIOS PASSED`
+2. 修改 skill/脚本请改 `.flow-comet/skills/`（权威源）；TDD——先写 RED 场景
+3. 运行回归：`node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 231 SCENARIOS PASSED`
 4. 开 PR 合入 `dev`（squash——change 级提交）；发布 PR `dev → main`（merge——change 级提交进入 main，每次发布后 dev 不再领先）
 
 CI 在每个 PR 与 push 时自动强制仓库约定（回归、PR 纪律、版本一致性、死链）。本地 hook（提交/推送消息检测）通过 `node scripts/install-commit-hook.mjs` 安装——完整指南见 [CONTRIBUTING-zh.md](CONTRIBUTING-zh.md)。

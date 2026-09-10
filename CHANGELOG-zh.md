@@ -12,6 +12,16 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **运行时命名空间与 Comet 解耦**：工作流状态文件改置于 `.flow-comet/flow-comet-state.json`，权威源迁至 `.flow-comet/skills/`（编排规则在 `.flow-comet/rules/`），根锚定环境变量更名为 `FLOW_COMET_RUN_ROOT`（硬切换——不再读取旧变量）。安装器迁移既有状态文件时强制先备份（`.flow-comet/flow-comet-state.json.bak-<时间戳>`，迁移成功后保留），并在新旧位置并存、旧文件为符号链接、旧文件不是合法 JSON 三种情形下报错中止且不覆盖任一方；目标项目的忽略规则保守纳管（既有条目逐字保留，仅在缺失时追加 `.flow-comet/` 条目，重跑幂等）。
+- **写入守卫与工作流守卫剥离 Comet 感知层**：两者都不再读取 Comet 的 `.comet/config.yaml`，也不再扫描 classic change 目录——判定只依据状态文件；已废弃的 overlay 协议种类不再进入叠加分支。
+- **回归套件扩展至 231 场景**；系统测试集现运行 74 项。
+
+### 移除
+
+- **无运行时路径与门禁读取的残留清单文件**：`bundle.yaml`、`hooks/` 下的 hook 描述符，以及 `skills/flow-comet/comet/` 下的四个清单 YAML。
+
 ### 修复
 
 - **dsh 桥接 loader 版本戳与发布版本对齐**：loader 的 `BRIDGE_VERSION` 现与发布版本（及权威源 `INSTALLED_VERSION`）同值——新安装项目的只读桥接健康检查报告版本一致而非版本偏斜；安装器的覆盖报告与回归套件改为从权威源读取版本戳，不再使用固定值。

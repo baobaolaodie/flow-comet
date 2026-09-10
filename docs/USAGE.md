@@ -49,7 +49,7 @@ All workflow artifacts live in `.specs/` (project-level) and `.specs/<change-id>
 | `CONTEXT.md` | `.specs/` | project-level shared context (glossary/locked decisions/defaults) | open (append each time) |
 | `LESSONS.md` | `.specs/` | cross-task failure knowledge base (L-NNN numbered entries) | verify / archive |
 | `CHANGELOG.md` | `.specs/` | change log (table, newest date first) | archive |
-| `.comet/flow-comet-state.json` | `.comet/` | state machine (activeChange/currentNode/completedNodes/evidence/…) | throughout (script-managed) |
+| `.flow-comet/flow-comet-state.json` | `.flow-comet/` | state machine (activeChange/currentNode/completedNodes/evidence/…) | throughout (script-managed) |
 
 > **Append placement discipline**: CONTEXT terms → glossary table, decisions → locked-decision list; LESSONS → entries section by L-NNN; STATE/CHANGELOG → top (reverse order); rollback fixes → `## Fix 任务` section — guard detects violations (progressive WARN).
 

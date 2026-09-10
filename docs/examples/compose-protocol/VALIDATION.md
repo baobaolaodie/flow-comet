@@ -14,7 +14,7 @@ console.log('protocol valid');
 "
 ```
 
-> 路径按实际安装位置调整（如 `.comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/protocol-utils.mjs`）。
+> 路径按实际安装位置调整（如 `.flow-comet/skills/flow-comet/scripts/protocol-utils.mjs`）。
 
 ## 验证结果
 

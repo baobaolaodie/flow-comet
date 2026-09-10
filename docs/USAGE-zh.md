@@ -49,7 +49,7 @@ open → design → plan → execute ⇄ subagent-execute → review → verify 
 | `CONTEXT.md` | `.specs/` | 项目级共享上下文（术语表/已锁决策/默认偏好） | open（每次追加） |
 | `LESSONS.md` | `.specs/` | 跨任务失败知识库（L-NNN 按编号插入） | verify / archive |
 | `CHANGELOG.md` | `.specs/` | 变更日志（表格顶部按日期倒序插入） | archive |
-| `.comet/flow-comet-state.json` | `.comet/` | 状态机（activeChange/currentNode/completedNodes/evidence/…） | 全程（脚本管理） |
+| `.flow-comet/flow-comet-state.json` | `.flow-comet/` | 状态机（activeChange/currentNode/completedNodes/evidence/…） | 全程（脚本管理） |
 
 > **追加位置纪律**：CONTEXT 术语→术语表表格、决策→已锁决策清单；LESSONS→条目区按 L-NNN 编号；STATE/CHANGELOG→顶部倒序；回退修复→`## Fix 任务` 段——guard 检测（WARN 渐进）兜底。
 

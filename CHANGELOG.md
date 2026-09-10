@@ -12,6 +12,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Changed
+
+- **Runtime namespace decoupled from Comet**: the workflow state file now lives at `.flow-comet/flow-comet-state.json`, the authoritative source moved to `.flow-comet/skills/` with the orchestration rule at `.flow-comet/rules/`, and the root-anchoring environment variable is renamed `FLOW_COMET_RUN_ROOT` (hard switch — the old variable is no longer read). The installer migrates an existing state file with a mandatory pre-migration backup (`.flow-comet/flow-comet-state.json.bak-<timestamp>`, kept after migration) and aborts without overwriting when the new and old locations both exist, when the old file is a symbolic link, or when it is not valid JSON; target-project ignore rules are handled conservatively (existing entries preserved verbatim, a `.flow-comet/` entry appended only when missing, idempotent on re-run).
+- **Comet awareness layer removed from the write guard and the workflow guard**: neither reads Comet's `.comet/config.yaml` nor scans classic change directories — decisions follow the state file alone, and a retired overlay protocol kind no longer takes the overlay branch.
+- **Regression suite expanded to 231 scenarios**; the system test suite now runs 74 items.
+
+### Removed
+
+- **Residue manifests that no runtime path or guard gate read**: `bundle.yaml`, the hook descriptor files under `hooks/`, and the four manifest YAML files under `skills/flow-comet/comet/`.
+
 ### Fixed
 
 - **dsh bridge loader version stamp aligned with the release version**: the loader's `BRIDGE_VERSION` now matches the release version (and the authoritative `INSTALLED_VERSION`), so the read-only bridge health check reports a version-consistent loader on a freshly installed project instead of version skew; the installer's overwrite reporting and the regression suites read the stamp from the authoritative source instead of a fixed value.

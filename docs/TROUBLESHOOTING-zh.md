@@ -12,7 +12,7 @@
 | `WARN: 分支与 activeChange 不一致` | 分支与状态漂移 | `git checkout <prefix><activeChange>`（按 WARN 提示；前缀为 init 时配置的 `--branch-prefix`，默认 `change/`）后继续 |
 | `WORKTREE WARN: .specs/<change>/ 有未提交工件` | 委托前工件未 commit | 在委托 prompt 内联所需上下文（流程工件留在工作区、永不入库） |
 | `BLOCKED: TASK.md 任务集被修改` | execute 期间增删任务/改 action/改边界 | 回退 TASK.md 到 enter 时内容（仅标记 done 合法） |
-| `BLOCKED: state 字段类型非法` | state 文件被直改坏 | 修复字段类型或从备份/git 历史恢复 `.comet/flow-comet-state.json` |
+| `BLOCKED: state 字段类型非法` | state 文件被直改坏 | 修复字段类型或从备份/git 历史恢复 `.flow-comet/flow-comet-state.json` |
 | `WARN: CONTEXT.md 检测到孤立追加段` | 术语/决策被尾部追加成新段 | 把内容移入术语表表格/已锁决策清单 |
 | `WARN: LESSONS.md 条目编号乱序/区外` | 新条目未按 L-NNN 插入条目区 | 按编号插入 `## 条目区`（或 `## 活跃条目`） |
 | `WARN: CHANGELOG.md 非倒序` | 新变更日志条目追加在表格尾部而非顶部 | 表格顶部按日期倒序插入（新条目永远在最新日期行之上） |
@@ -45,13 +45,13 @@
 | hook 静默不拦截（Codex） | hook 尚未信任，或 `[features] hooks` 未启用 | 信任 hook（交互会话 `/hooks`；脚本化自动化传 `--dangerously-bypass-hook-trust`）；`config.toml` 含 `[features] hooks = true` |
 | 换写法绕过 hook（Codex） | Codex 拦截为命令级——其他 File API 写法可能绕过 | 平台限制；主流模式（PowerShell cmdlet、.NET File API、重定向）已覆盖 |
 | hook 日志出现 `Cannot find module ...comet-hook-guard`，越权写入被静默放行 | hook 命令无法解析守卫脚本——相对路径旧条目在会话工作目录漂移出项目根后解析失败，或 cmd 风格条目（`%CLAUDE_PROJECT_DIR%` + 反斜杠路径）在宿主以 bash 语义执行 hook 时变量不展开、反斜杠被当转义吞掉；崩溃的 hook 被宿主降级放行（fail-open） | 重跑方案 A 安装器把条目原地升级为项目根引用形态（见[安装](INSTALLATION-zh.md)的 hook 升级说明小节） |
-| hook 在会话工作目录漂移出项目根后误判项目根 | runRoot 由兜底链解析：`COMET_RUN_ROOT` → `CLAUDE_PROJECT_DIR` → 自 cwd 逐级向上的最近祖先（含 `.comet/flow-comet-state.json` 或 `.claude/skills/flow-comet` 即视为项目根）→ `cwd`（最后兜底）；无环境变量且无祖先锚点时回退 cwd；相对路径旧条目或 cmd 风格条目则报 `Cannot find module ...comet-hook-guard`（宿主降级放行——fail-open） | 显式设置 `COMET_RUN_ROOT`（受限/测试环境），或让项目根含锚点（根下存在 `.comet/flow-comet-state.json` 或 `.claude/skills/flow-comet`），或在项目根内运行会话；相对路径旧条目须用方案 A 安装器升级（见上一行） |
+| hook 在会话工作目录漂移出项目根后误判项目根 | runRoot 由兜底链解析：`FLOW_COMET_RUN_ROOT` → `CLAUDE_PROJECT_DIR` → 自 cwd 逐级向上的最近祖先（含 `.flow-comet/flow-comet-state.json` 或 `.claude/skills/flow-comet` 即视为项目根）→ `cwd`（最后兜底）；无环境变量且无祖先锚点时回退 cwd；相对路径旧条目或 cmd 风格条目则报 `Cannot find module ...comet-hook-guard`（宿主降级放行——fail-open） | 显式设置 `FLOW_COMET_RUN_ROOT`（受限/测试环境），或让项目根含锚点（根下存在 `.flow-comet/flow-comet-state.json` 或 `.claude/skills/flow-comet`），或在项目根内运行会话；相对路径旧条目须用方案 A 安装器升级（见上一行） |
 | dsh 会话中技能不可见 | `.dsh/skills/flow-comet` 未对该项目安装（dsh 在 `<项目>/.dsh/skills/` 下以 rank 100 发现——未安装该目录的项目不可见该技能），或 dsh 低于 `0.1.0-rc.6` | 运行 `node scripts/prepare-env.mjs --target <项目> --platform dsh`；升级 dsh 到 `0.1.0-rc.6`+ |
 | dsh 拦截不生效 | 桥接 loader 未挂载（`$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 或 `cordis.patch.yml` 托管块缺失）、项目未安装，或 `tools/pre-execute` 签名不匹配 | 重跑 `prepare-env --platform dsh`（挂载 loader + 托管块）；确认会话项目根含 `.dsh/skills/flow-comet`（窄监听）；确认 dsh 为 `0.1.0-rc.6`+ |
 | dsh 卸载残留（技能 / AGENTS.md 托管区 / loader 仍在） | 未执行 `prepare-env --purge --platform dsh --yes`（例如只手工删了 `.dsh/skills` 目录） | 运行 `node scripts/prepare-env.mjs --target <项目> --purge --platform dsh --yes`——移除 `.dsh/skills/flow-comet*`、AGENTS.md 托管区、`$DSH_HOME/cordis.patch.yml` 托管块与 loader 文件（非 flow-comet 条目与 dsh-skin 等既有块保留） |
 | dsh 无审计轨迹 | v1 桥接刻意不写审计日志（v1 不采用审计观察——旧插件的 `$DSH_HOME` 审计文件已不存在） | 属预期——拦截决策呈现在会话 WARN 输出中；项目级技能安装使旧全局审计轨迹失去意义 |
 | dsh 在 Windows 短路径项目根下写被放行 | （已修复）会话项目根为 8.3 短路径时，guard 的词法路径解析可能跳过白名单 | 当前版本在判定前把项目根规范化为长形态——若为旧副本请重跑 `prepare-env --platform dsh` 刷新 |
-| dsh 项目根外写被放行 | 流程处于空闲态（无 state / 无 `activeChange` / `completed`） | 属预期——包含性仅在流程运行中生效（存在 `activeChange` 且 `status` 为 `running` 或缺省时视为运行中；解析失败或未知状态会被拒绝，不当作空闲）。如需核实请检查 `.comet/flow-comet-state.json` 的 `activeChange` 与 `status` |
+| dsh 项目根外写被放行 | 流程处于空闲态（无 state / 无 `activeChange` / `completed`） | 属预期——包含性仅在流程运行中生效（存在 `activeChange` 且 `status` 为 `running` 或缺省时视为运行中；解析失败或未知状态会被拒绝，不当作空闲）。如需核实请检查 `.flow-comet/flow-comet-state.json` 的 `activeChange` 与 `status` |
 | `INIT-NEEDED: 项目上下文（CONTEXT.md）尚未初始化` | 项目首次使用——尚无项目上下文 | 执行 `init <id> --init-context` 生成（读取既有 AI 上下文文档并带出处整合；约 15-30k tokens，仅首次），或 `--init-skip` 记录跳过并在后续 init 保持静默 |
 | `INIT-HINT: 项目上下文（CONTEXT.md）已就绪（7 段 + 模板格式校验通过）但尚未记录扫描时间` / `INIT-HINT: 上次扫描已 X 天` | 上下文已存在但未记录扫描：CONTEXT 满足模板但无扫描记录（生成后未重跑），或上次扫描超过 90 天 | 就绪态：运行 `init <id> --init-context` 记录扫描时间（此后 90 天内不再提示）；过期态：可选重跑刷新，非强制 |
 | `INIT-GENERATE: 项目上下文未初始化——请生成 .specs/CONTEXT.md`（后附模板指引：已检测到 flow-kit/templates/CONTEXT.md 时严格对照模板段名与条目格式；未检测到时按 7 段基准） | `--init-context` 时 CONTEXT.md 缺失——生成协作第一步 | 按指引全量阅读源文档并整合（出处标注 `来自 <doc>:<line>`，原文档零写入）+ 代码探测（技术栈/既有抽象索引），对照模板生成 7 段；生成后重跑 `init <id> --init-context` 由脚本校验并记录扫描时间 |
