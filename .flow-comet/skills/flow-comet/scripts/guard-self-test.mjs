@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · flow-comet 引擎自测套件（219 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退）、并行文件依赖检测（写写重叠强判前移 plan 出口 + read 读写弱判渐进 + 触发面排除 + 委托前保持锚 + 扩展名闭合）、directOverride 授权约束（协调者授权留痕正例 / 执行者自切无授权 BLOCK / 越界改 state hook 拦截 / 恢复双路径）、hook state 大小写变体拦截（win32/darwin 闭合 / 其他平台放行）、路由完成判定 fail-closed（缺/未知 status 畸形块不提前放行）、并行文件依赖路径归一化（`.` 段变体重叠检出））
+// C1 · flow-comet 引擎自测套件（231 场景：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退）、并行文件依赖检测（写写重叠强判前移 plan 出口 + read 读写弱判渐进 + 触发面排除 + 委托前保持锚 + 扩展名闭合）、directOverride 授权约束（协调者授权留痕正例 / 执行者自切无授权 BLOCK / 越界改 state hook 拦截 / 恢复双路径）、hook state 大小写变体拦截（win32/darwin 闭合 / 其他平台放行）、路由完成判定 fail-closed（缺/未知 status 畸形块不提前放行）、并行文件依赖路径归一化（`.` 段变体重叠检出）、运行时文件位置迁移（白名单搬移 / 迁移前备份与回退 / 新旧并存·符号链接·内容损坏三边界 / 失败保护 / gitignore 三形态保守纳管与幂等）、Comet 感知层剥离（classic 资产有无判定一致 / overlay 协议不再进入叠加分支 + 源码符号检索）、自检清单条目缺失显式报告）
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .flow-comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -7,7 +7,7 @@
 // （FLOW_COMET_RUN_ROOT=<临时目录>）→ 断言退出码与输出关键词。场景跑完 rmSync 清理。
 //
 // 运行: node scripts/guard-self-test.mjs
-// 全过 → exit 0，输出 ALL 219 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
+// 全过 → exit 0，输出 ALL 231 SCENARIOS PASSED；失败 → exit 1，列出场景名+实际输出+exit code
 //
 // 仅 node 内置模块（child_process/fs/os/path）；不依赖 flow-kit 模板目录存在
 // （fallback 场景用内置段名；部分场景复制模板文件进临时目录验证 C2 模板派生）。
@@ -91,13 +91,16 @@ const createdDirs = [];
 
 // 场景数一致性检查（单一来源）：场景 105 与底部自检共用同一实现与同一判据。
 // 返回问题描述数组（空数组 = 通过）。AC-14：条目缺失**显式报告**，不静默跳过。
-function scanScenarioCountFiles(files, n) {
+// root 可覆盖扫描根（默认仓库根）——仅为可测性接缝：使「清单条目缺失 → 显式报告」
+// 这一分支能在真实文件系统上被场景驱动（否则该分支只能靠人工实验验证，回归时可能被改回
+// 静默跳过而套件仍全绿）。生产调用不传该参数，行为与改前逐字一致。
+function scanScenarioCountFiles(files, n, root = REPO_ROOT) {
   const missing = [];
   const unsynced = [];
   for (const rel of files) {
     let text;
     try {
-      text = fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
+      text = fs.readFileSync(path.join(root, rel), 'utf8');
     } catch (e) {
       if (e.code === 'ENOENT') { missing.push(rel); continue; } // AC-14：显式记录缺失（不再 continue 静默）
       throw e;
@@ -111,14 +114,15 @@ function scanScenarioCountFiles(files, n) {
   return { missing, unsynced };
 }
 
-function scenarioCountSyncProblems(n) {
+// root 可覆盖扫描根（默认仓库根）——同上：仅为可测性接缝（生产调用不传，判据与改前一致）。
+function scenarioCountSyncProblems(n, root = REPO_ROOT) {
   const problems = [];
-  const dist = scanScenarioCountFiles(SCENARIO_COUNT_FILES, n);
+  const dist = scanScenarioCountFiles(SCENARIO_COUNT_FILES, n, root);
   if (dist.missing.length > 0) problems.push('受检条目文件缺失（幽灵条目）: ' + dist.missing.join(', '));
   if (dist.unsynced.length > 0) problems.push('场景数未同步（应为 ' + n + '）: ' + dist.unsynced.join(', '));
   // 维护者组：整组在场才检查（CI 全新检出 / worktree 检出整组必然缺席——见清单分组说明）
-  if (fs.existsSync(path.join(REPO_ROOT, MAINTAINER_DOC_DIR))) {
-    const mnt = scanScenarioCountFiles(SCENARIO_COUNT_FILES_MAINTAINER, n);
+  if (fs.existsSync(path.join(root, MAINTAINER_DOC_DIR))) {
+    const mnt = scanScenarioCountFiles(SCENARIO_COUNT_FILES_MAINTAINER, n, root);
     if (mnt.missing.length > 0) problems.push('维护者文档条目文件缺失（幽灵条目）: ' + mnt.missing.join(', '));
     if (mnt.unsynced.length > 0) problems.push('维护者文档场景数未同步（应为 ' + n + '）: ' + mnt.unsynced.join(', '));
   }
@@ -634,6 +638,111 @@ function writeIntakeArtifacts(dir) {
   writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n\nx');
   writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\nx\n\n## 验收准则（AC）\n\n- Given x When y Then z');
   writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n## 0. 技术栈\n\nNode\n\n## 决策清单\n\n| # | D | R |\n|---|---|---|\n| D1 | x | y |');
+}
+
+// ---------- 位置迁移 / 备份 / 感知层剥离场景材料 ----------
+// 全部经真实安装器（scripts/prepare-env.mjs）在临时项目上执行——断言落在真实文件系统状态与
+// 进程输出上（端到端执行断言），不用形态断言替代。夹具路径一律 os.tmpdir()/path.join 生成
+// （Windows 平台：bash 的 /tmp 会被 node 解析为当前盘根——夹具必须由 node 侧构造）。
+
+const LEGACY_RUNTIME_DIR = '.comet';
+const RUNTIME_DIR = '.flow-comet';
+const RUNTIME_STATE_NAME = 'flow-comet-state.json';
+const MIGRATION_CHANGE = 'mig-ch';
+
+// 迁移前状态字节（健康 JSON——白名单唯一在册的运行时文件）
+function migratableStateBytes(activeChange = MIGRATION_CHANGE) {
+  return Buffer.from(JSON.stringify({
+    activeChange,
+    currentNode: 'design',
+    completedNodes: ['open'],
+    evidence: { open: { summary: 'intake complete' } },
+    verifyFailures: 0,
+    executionMode: 'subagent',
+    directOverride: false,
+  }, null, 2) + '\n', 'utf8');
+}
+
+// 旧命名空间三方共占夹具（实测形态）：flow-comet 运行时文件 + Comet 资产（config.yaml / runs/）
+// + 用户自有文件（*.bak-*）。返回各非白名单项的迁移前字节，供「原位未动」断言（位置 + 内容）。
+function writeSharedCometDir(proj, stateBytes) {
+  const legacyDir = path.join(proj, LEGACY_RUNTIME_DIR);
+  fs.mkdirSync(path.join(legacyDir, 'runs'), { recursive: true });
+  fs.writeFileSync(path.join(legacyDir, RUNTIME_STATE_NAME), stateBytes);
+  fs.writeFileSync(path.join(legacyDir, 'config.yaml'), 'workflow:\n  projectPath: docs/openspec\n');
+  fs.writeFileSync(path.join(legacyDir, 'runs', 'run-001.json'), '{"comet":true}\n');
+  fs.writeFileSync(path.join(legacyDir, RUNTIME_STATE_NAME + '.bak-20260901-user'), 'user backup\n');
+  const kept = ['config.yaml', 'runs/run-001.json', RUNTIME_STATE_NAME + '.bak-20260901-user'];
+  return kept.map((rel) => ({ rel, bytes: fs.readFileSync(path.join(legacyDir, rel)) }));
+}
+
+// 迁移生成的备份清单（新命名空间内 flow-comet-state.json.bak-<时间戳>）
+function migrationBackups(proj) {
+  const dir = path.join(proj, RUNTIME_DIR);
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir).filter((name) => /^flow-comet-state\.json\.bak-/.test(name)).sort();
+}
+
+// 目标项目的 .specs 工件（迁移后「流程可继续」断言需要活动 change 目录在场）
+function writeMigratedProjectArtifacts(proj, changeId = MIGRATION_CHANGE) {
+  writeFile(proj, '.specs/' + changeId + '/CHANGE.md', '# CHANGE\n\n- **Change ID**: ' + changeId + '\n\n## Why（为什么做）\n\nx\n');
+  writeFile(proj, '.specs/' + changeId + '/REQUIREMENT.md', '# REQUIREMENT\n\n- **Change ID**: ' + changeId + '\n\n## 用户故事（User Story）\n\nx\n\n## 验收准则（AC）\n\n- y\n');
+}
+
+// 跑安装副本内的脚本（cwd = 目标项目根——runRoot = process.cwd()）：迁移后链路在
+// 真实安装形态（而非权威源脚本）上验证
+function runInstalled(proj, platformRoot, scriptName, args) {
+  const script = path.join(proj, platformRoot, 'skills', 'flow-comet', 'scripts', scriptName);
+  const res = spawnSync(process.execPath, [script, ...args], {
+    cwd: proj,
+    env: { ...process.env, FLOW_COMET_RUN_ROOT: proj },
+    encoding: 'utf8',
+    timeout: 60000,
+  });
+  return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+}
+
+// 安装器输出/判定文本归一化（两个夹具的项目根不同——比较判定一致性前抹掉根路径差异）
+function normalizeRoot(text, ...roots) {
+  let out = String(text);
+  for (const root of roots) {
+    out = out.split(root).join('<root>');
+    out = out.split(root.replace(/\\/g, '/')).join('<root>');
+  }
+  return out;
+}
+
+// Comet classic 资产夹具（感知层对照用）：classic 配置 + 一个 phase=build 的活动 change
+// + overlay 证据目录——旧感知层正是据此推导节点，故它们是"判定是否还读这些文件"的探针。
+function writeClassicCometAssets(proj) {
+  writeFile(proj, '.comet/config.yaml', 'workflow:\n  projectPath: docs/openspec\n');
+  writeFile(proj, 'docs/openspec/changes/classic-marker/.comet.yaml', 'phase: build\nbuild_pause: plan-ready\n');
+  writeFile(proj, '.comet/workflow-evidence/classic-marker/overlay.json', '{}\n');
+}
+
+// gitignore 纳管公共链路（三形态共用）：写入既有内容 → 连续两次安装 → 返回两次结果与两次
+// 安装后的 .gitignore 全文（字符串，逐字节比较用）
+function runGitignoreForm(dir, proj, initialContent) {
+  fs.writeFileSync(path.join(proj, '.gitignore'), initialContent, 'utf8');
+  const first = runPrepareEnv(['--target', proj, '--platform', 'claude-code'], dir);
+  const afterFirst = fs.readFileSync(path.join(proj, '.gitignore'), 'utf8');
+  const second = runPrepareEnv(['--target', proj, '--platform', 'claude-code'], dir);
+  const afterSecond = fs.readFileSync(path.join(proj, '.gitignore'), 'utf8');
+  return { first, second, afterFirst, afterSecond };
+}
+
+// 纳管公共断言：两次安装均成功；新命名空间条目恰一行；第二次安装逐字节无变化（幂等）
+function assertGitignoreManaged(result) {
+  assertExit(result.first, 0);
+  assertExit(result.second, 0);
+  const entries = result.afterFirst.split(/\r?\n/)
+    .filter((line) => line.trim().replace(/^\/+/, '').replace(/\/+$/, '') === RUNTIME_DIR);
+  if (entries.length !== 1) throw new Error(RUNTIME_DIR + '/ 条目应恰一行，实际 ' + entries.length + ' 行');
+  if (result.afterSecond !== result.afterFirst) {
+    throw new Error('第二次安装改写了 gitignore（应幂等）:\n' +
+      JSON.stringify({ afterFirst: result.afterFirst, afterSecond: result.afterSecond }, null, 2));
+  }
+  assertOut(result.second, '保持原样');
 }
 
 // ---------- 17 个场景 ----------
@@ -6105,6 +6214,385 @@ const SCENARIOS = [
       assertOut(res, 'P01×P02');
       assertOut(res, 'src/a.mjs');
       assertOut(res, 'depends_on');
+    },
+  },
+
+  // ---------- 位置迁移 / 备份 / 感知层剥离（真实安装器 + 真实文件系统，端到端执行断言） ----------
+
+  // AC-1 迁移正例：旧命名空间三方共占（flow-comet 运行时文件 + Comet 资产 + 用户自有文件），
+  // 安装器只搬白名单在册的运行时文件——新位置逐字节一致、旧位置移除，其余内容原位不动
+  // （不搬迁 / 不删除 / 不改写），且不会被按前缀/模式误搬进新命名空间。
+  {
+    name: '220 状态迁移白名单：仅运行时文件搬移，Comet 资产与用户文件原位不动（AC-1）',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return; // 安装副本无安装器脚本（与场景 105 同判据）
+      const proj = path.join(dir, 'proj');
+      const stateBytes = migratableStateBytes();
+      const kept = writeSharedCometDir(proj, stateBytes);
+      const res = runPrepareEnv(['--target', proj, '--platform', 'claude-code'], dir);
+      assertExit(res, 0);
+      assertOut(res, '已迁移');
+      // ① 新位置落位且逐字节一致
+      const newState = path.join(proj, RUNTIME_DIR, RUNTIME_STATE_NAME);
+      if (!fs.existsSync(newState)) throw new Error('迁移后新位置状态文件缺失: ' + newState);
+      if (!fs.readFileSync(newState).equals(stateBytes)) throw new Error('新位置状态与迁移前不逐字节一致');
+      // ② 旧位置运行时文件已移除（搬移语义，非复制）
+      if (fs.existsSync(path.join(proj, LEGACY_RUNTIME_DIR, RUNTIME_STATE_NAME))) {
+        throw new Error('迁移后旧位置运行时文件应已移除');
+      }
+      // ③ Comet 资产与用户自有文件原位未动（位置 + 内容都未变）
+      for (const item of kept) {
+        const target = path.join(proj, LEGACY_RUNTIME_DIR, item.rel);
+        if (!fs.existsSync(target)) throw new Error('非白名单内容被搬迁/删除: ' + item.rel);
+        if (!fs.readFileSync(target).equals(item.bytes)) throw new Error('非白名单内容被改写: ' + item.rel);
+      }
+      // ④ 用户自有备份文件未被搬入新命名空间（白名单按精确文件名，不做前缀/模式匹配）
+      const leaked = path.join(proj, RUNTIME_DIR, RUNTIME_STATE_NAME + '.bak-20260901-user');
+      if (fs.existsSync(leaked)) throw new Error('用户自有文件被搬入新命名空间（白名单过宽）: ' + leaked);
+    },
+  },
+
+  // AC-15 迁移前备份：备份在迁移动作之前生成于新命名空间，内容与迁移前逐字节一致、命名含
+  // 时间戳、迁移成功后仍保留；且仅凭这份备份即可恢复出可用的旧状态（状态文件不进版本控制的
+  // 项目没有 git 回滚载体——备份是唯一回退依据）。
+  {
+    name: '221 迁移前备份：逐字节一致且迁移后保留，可据以恢复旧状态（AC-15）',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj');
+      const stateBytes = migratableStateBytes();
+      writeSharedCometDir(proj, stateBytes);
+      writeMigratedProjectArtifacts(proj);
+      const res = runPrepareEnv(['--target', proj, '--platform', 'claude-code'], dir);
+      assertExit(res, 0);
+      assertOut(res, '迁移前备份');
+      // ① 备份恰一份，命名含时间戳（.bak-<ISO 时间戳>）
+      const backups = migrationBackups(proj);
+      if (backups.length !== 1) throw new Error('迁移应恰生成 1 份备份，实际: ' + JSON.stringify(backups));
+      if (!/^flow-comet-state\.json\.bak-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/.test(backups[0])) {
+        throw new Error('备份命名非 .bak-<时间戳> 形态: ' + backups[0]);
+      }
+      // ② 备份与迁移前逐字节一致
+      const backupPath = path.join(proj, RUNTIME_DIR, backups[0]);
+      if (!fs.readFileSync(backupPath).equals(stateBytes)) throw new Error('备份与迁移前不逐字节一致');
+      // ③ 迁移成功后备份仍保留（安装器不读取、不清理）——再跑一次安装后仍应恰一份
+      assertExit(runPrepareEnv(['--target', proj, '--platform', 'claude-code'], dir), 0);
+      if (migrationBackups(proj).length !== 1) throw new Error('重跑安装后备份应保留且不新增');
+      // ④ 仅凭备份即可恢复出可用的旧状态：把备份覆盖回状态文件 → 安装副本读到同一 change/节点
+      fs.copyFileSync(backupPath, path.join(proj, RUNTIME_DIR, RUNTIME_STATE_NAME));
+      const st = runInstalled(proj, '.claude', 'workflow-state.mjs', ['status']);
+      assertExit(st, 0);
+      assertOut(st, '"change": "' + MIGRATION_CHANGE + '"');
+      assertOut(st, '"currentNode": "design"');
+    },
+  },
+
+  // AC-13 边界①：新位置与旧位置同时存在 → 不覆盖任何一方、报错中止（列出两处路径与人工
+  // 处置指引），且中止发生在部署与纳管之前（不产生安装产物、不改 gitignore、不生成备份）。
+  {
+    name: '222 迁移边界 新旧并存：不覆盖任一方，报错中止（AC-13）',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj');
+      const oldBytes = migratableStateBytes();
+      const newBytes = Buffer.from('{\n  "activeChange": "already-migrated"\n}\n', 'utf8');
+      writeSharedCometDir(proj, oldBytes);
+      const newPath = path.join(proj, RUNTIME_DIR, RUNTIME_STATE_NAME);
+      fs.mkdirSync(path.dirname(newPath), { recursive: true });
+      fs.writeFileSync(newPath, newBytes);
+      const res = runPrepareEnv(['--target', proj, '--platform', 'claude-code'], dir);
+      if (res.status === 0) throw new Error('新旧并存应报错中止（exit 非 0），实际 exit 0');
+      // 报错须列出两处路径（供人工比对判断），并给出处置指引
+      assertOut(res, path.join(proj, LEGACY_RUNTIME_DIR, RUNTIME_STATE_NAME));
+      assertOut(res, newPath);
+      assertOut(res, '不覆盖任何一方');
+      assertOut(res, '重跑安装器');
+      // 双方内容都未被改动
+      if (!fs.readFileSync(path.join(proj, LEGACY_RUNTIME_DIR, RUNTIME_STATE_NAME)).equals(oldBytes)) {
+        throw new Error('旧件被改写');
+      }
+      if (!fs.readFileSync(newPath).equals(newBytes)) throw new Error('新件被覆盖');
+      // 中止于部署/纳管之前
+      if (migrationBackups(proj).length !== 0) throw new Error('中止时不应产生备份');
+      if (fs.existsSync(path.join(proj, '.claude'))) throw new Error('中止时不应产生安装产物');
+      if (fs.existsSync(path.join(proj, '.gitignore'))) throw new Error('中止时不应改写 gitignore');
+    },
+  },
+
+  // AC-13 边界②：旧件是符号链接 → 不跟随链接搬移（避免穿越到项目外）、报错中止；
+  // 链接本身与链接指向的真实内容都未被改动，新位置不生成文件。
+  {
+    name: '223 迁移边界 符号链接：不跟随链接搬移，报错中止（AC-13）',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj');
+      const outside = path.join(dir, 'outside-real-dir');
+      fs.mkdirSync(outside, { recursive: true });
+      fs.writeFileSync(path.join(outside, 'real.txt'), 'real\n');
+      fs.mkdirSync(path.join(proj, LEGACY_RUNTIME_DIR), { recursive: true });
+      const linkPath = path.join(proj, LEGACY_RUNTIME_DIR, RUNTIME_STATE_NAME);
+      // 受限形态如实声明：Windows 无文件符号链接权限（EPERM）时用目录 junction——判定走同一
+      // isSymbolicLink() 分支；两种链接都建不出来时显式跳过（不静默冒充已覆盖）
+      let linkForm = 'junction';
+      try {
+        fs.symlinkSync(outside, linkPath, process.platform === 'win32' ? 'junction' : 'dir');
+      } catch (e1) {
+        linkForm = 'file-symlink';
+        try {
+          fs.symlinkSync(outside, linkPath, 'file');
+        } catch (e2) {
+          console.log('  （本机无创建链接的权限，跳过符号链接夹具——' + (e2.code || e2.message) + '）');
+          return;
+        }
+      }
+      const res = runPrepareEnv(['--target', proj, '--platform', 'claude-code'], dir);
+      if (res.status === 0) throw new Error('符号链接旧件应报错中止（exit 非 0），实际 exit 0（形态=' + linkForm + '）');
+      assertOut(res, '符号链接');
+      assertOut(res, '不跟随');
+      if (!fs.lstatSync(linkPath).isSymbolicLink()) throw new Error('链接本身被改动（不再是链接）');
+      if (!fs.readFileSync(path.join(outside, 'real.txt')).equals(Buffer.from('real\n', 'utf8'))) {
+        throw new Error('链接指向的真实内容被改动');
+      }
+      if (fs.existsSync(path.join(proj, RUNTIME_DIR, RUNTIME_STATE_NAME))) throw new Error('新位置不应生成文件');
+      if (fs.existsSync(path.join(proj, '.claude'))) throw new Error('中止时不应产生安装产物');
+    },
+  },
+
+  // AC-13 边界③：旧件内容损坏（JSON 解析失败）→ 保留原件未改动、报错中止并给修复指引；
+  // 中止发生在写入之前（新位置不生成文件、不产生备份）。
+  {
+    name: '224 迁移边界 JSON 损坏：保留原件报错中止（AC-13）',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj');
+      const broken = Buffer.from('{ "activeChange": \n', 'utf8');
+      fs.mkdirSync(path.join(proj, LEGACY_RUNTIME_DIR), { recursive: true });
+      fs.writeFileSync(path.join(proj, LEGACY_RUNTIME_DIR, RUNTIME_STATE_NAME), broken);
+      const res = runPrepareEnv(['--target', proj, '--platform', 'claude-code'], dir);
+      if (res.status === 0) throw new Error('损坏状态应报错中止（exit 非 0），实际 exit 0');
+      assertOut(res, '不是合法 JSON');
+      assertOut(res, '保留原件');
+      if (!fs.readFileSync(path.join(proj, LEGACY_RUNTIME_DIR, RUNTIME_STATE_NAME)).equals(broken)) {
+        throw new Error('损坏原件被改写');
+      }
+      if (fs.existsSync(path.join(proj, RUNTIME_DIR, RUNTIME_STATE_NAME))) throw new Error('新位置不应生成文件');
+      if (migrationBackups(proj).length !== 0) throw new Error('中止于写入之前，不应产生备份');
+      if (fs.existsSync(path.join(proj, '.claude'))) throw new Error('中止时不应产生安装产物');
+    },
+  },
+
+  // AC-7 迁移失败不丢数据：迁移目标不可建立（路径异常——目标目录位置被普通文件占用）时，
+  // 旧文件完整保留、报错并给出恢复指引，不删除任何既有内容。
+  {
+    name: '225 迁移失败保护：目标不可建立时旧文件完整保留（AC-7）',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj');
+      const stateBytes = migratableStateBytes();
+      writeSharedCometDir(proj, stateBytes);
+      const occupied = path.join(proj, RUNTIME_DIR);
+      fs.writeFileSync(occupied, 'occupied\n'); // 目标目录位置被普通文件占用（确定性的路径异常形态）
+      const res = runPrepareEnv(['--target', proj, '--platform', 'claude-code'], dir);
+      if (res.status === 0) throw new Error('迁移目标不可建立应报错中止（exit 非 0），实际 exit 0');
+      assertOut(res, '旧文件完整保留');
+      assertOut(res, '重跑安装器');
+      if (!fs.readFileSync(path.join(proj, LEGACY_RUNTIME_DIR, RUNTIME_STATE_NAME)).equals(stateBytes)) {
+        throw new Error('失败路径下旧文件被改写');
+      }
+      if (!fs.lstatSync(occupied).isFile()) throw new Error('占位文件被改动（既有内容不得被处置）');
+      if (fs.existsSync(path.join(proj, '.claude'))) throw new Error('中止时不应产生安装产物');
+    },
+  },
+
+  // AC-8 gitignore 形态①（逐条路径）：既有条目一律保留原样（不"更新"为新路径），仅缺失时
+  // 追加新命名空间条目；连续两次安装不产生重复行；追加内容沿用既有行尾风格。
+  {
+    name: '226 gitignore 纳管 逐条路径形态：既有条目保留 + 追加幂等（AC-8）',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj');
+      fs.mkdirSync(path.join(proj, LEGACY_RUNTIME_DIR, 'runs'), { recursive: true }); // Comet 资产在场
+      fs.writeFileSync(path.join(proj, LEGACY_RUNTIME_DIR, 'runs', 'run-001.json'), '{"comet":true}\n');
+      const legacyLine = LEGACY_RUNTIME_DIR + '/' + RUNTIME_STATE_NAME;
+      const initial = legacyLine + '\r\nnode_modules/\r\n# user note\r\n*.bak-*\r\n';
+      const result = runGitignoreForm(dir, proj, initial);
+      assertGitignoreManaged(result);
+      if (!result.afterFirst.startsWith(initial)) {
+        throw new Error('既有内容未逐字保留:\n' + JSON.stringify(result.afterFirst));
+      }
+      if (!result.afterFirst.split(/\r?\n/).includes(legacyLine)) {
+        throw new Error('既有逐条路径条目被改写/删除: ' + legacyLine);
+      }
+      const appended = result.afterFirst.slice(initial.length);
+      if (!appended.includes('\r\n') || /(^|[^\r])\n/.test(appended)) {
+        throw new Error('追加内容未沿用既有行尾风格（CRLF）: ' + JSON.stringify(appended));
+      }
+    },
+  },
+
+  // AC-8 gitignore 形态②（整目录 .comet/）：整目录条目原样保留——该目录中仍有 Comet 资产，
+  // 改写会误伤用户对它们的忽略意图；同样只追加缺失的新命名空间条目且幂等。
+  {
+    name: '227 gitignore 纳管 整目录形态：既有条目保留 + 追加幂等（AC-8）',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj');
+      fs.mkdirSync(path.join(proj, LEGACY_RUNTIME_DIR, 'runs'), { recursive: true });
+      fs.writeFileSync(path.join(proj, LEGACY_RUNTIME_DIR, 'runs', 'run-001.json'), '{"comet":true}\n');
+      const initial = LEGACY_RUNTIME_DIR + '/\nnode_modules/\n# user note\n';
+      const result = runGitignoreForm(dir, proj, initial);
+      assertGitignoreManaged(result);
+      if (!result.afterFirst.startsWith(initial)) {
+        throw new Error('既有内容未逐字保留:\n' + JSON.stringify(result.afterFirst));
+      }
+      if (!result.afterFirst.split(/\r?\n/).includes(LEGACY_RUNTIME_DIR + '/')) {
+        throw new Error('整目录既有条目被改写/删除: ' + LEGACY_RUNTIME_DIR + '/');
+      }
+      const appended = result.afterFirst.slice(initial.length);
+      if (appended.includes('\r\n')) throw new Error('追加内容引入了 CRLF（既有为 LF）: ' + JSON.stringify(appended));
+    },
+  },
+
+  // AC-8 gitignore 形态③（完全无条目）：用户其他内容（无关行 / 注释 / 无末行换行）不被改写，
+  // 仅追加缺失条目且连续两次安装逐字节不变。
+  {
+    name: '228 gitignore 纳管 无条目形态：用户内容原样保留 + 追加幂等（AC-8）',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj');
+      fs.mkdirSync(proj, { recursive: true });
+      const initial = 'node_modules/\n# keep\n*.log'; // 末行无换行——追加不得粘接到用户行上
+      const result = runGitignoreForm(dir, proj, initial);
+      assertGitignoreManaged(result);
+      if (!result.afterFirst.startsWith(initial)) {
+        throw new Error('既有内容未逐字保留:\n' + JSON.stringify(result.afterFirst));
+      }
+      if (!/^\*\.log$/m.test(result.afterFirst)) throw new Error('用户末行被改写/粘接: ' + JSON.stringify(result.afterFirst));
+    },
+  },
+
+  // AC-5 剥离①：同一运行中 workflow 下，Comet classic 资产（.comet/config.yaml + classic
+  // change 目录 + overlay 证据）在场与缺席时，hook 与 guard 的判定（退出码 + 归一化输出）
+  // 完全一致——判定与这些文件是否存在无关；判定本身非空洞（hook 拦越权写源码 / guard 放行合规出口）。
+  {
+    name: '229 感知层剥离：classic 资产有无不改变 hook 与 guard 判定（AC-5）',
+    run: (dir) => {
+      const builtin = path.join(dir, 'reference', 'workflow-protocol.json');
+      const build = (name, withClassic) => {
+        const proj = path.join(dir, name);
+        fs.mkdirSync(path.join(proj, 'reference'), { recursive: true });
+        fs.copyFileSync(builtin, path.join(proj, 'reference', 'workflow-protocol.json'));
+        writeIntakeArtifacts(proj);
+        const st = baseState('open');
+        st.status = 'running';
+        st.evidence.open = { summary: 'intake complete' };
+        writeState(proj, st);
+        if (withClassic) writeClassicCometAssets(proj);
+        return proj;
+      };
+      const judge = (proj) => ({
+        hook: runHook(['before_tool'], proj,
+          { tool_name: 'Write', tool_input: { file_path: path.join(proj, 'src', 'evil.mjs') } }),
+        guard: runGuard(['exit', 'open'], proj),
+      });
+      const withClassic = build('with-classic', true);
+      const withoutClassic = build('without-classic', false);
+      const a = judge(withClassic);
+      const b = judge(withoutClassic);
+      // 判定非空洞：运行中 workflow 越权写源码被拦；合规出口放行
+      assertExit(a.hook, 2);
+      assertOut(a.hook, 'BLOCKED');
+      assertExit(a.guard, 0);
+      assertOut(a.guard, 'ALL CHECKS PASSED');
+      // 一致性：退出码 + 归一化输出逐字相同（路径差异抹除后）
+      const norm = (res, proj) => normalizeRoot(outputText(res), proj, dir);
+      if (a.hook.status !== b.hook.status || norm(a.hook, withClassic) !== norm(b.hook, withoutClassic)) {
+        throw new Error('hook 判定随 classic 资产变化（感知层未剥离干净）:\n' +
+          JSON.stringify({ withClassic: norm(a.hook, withClassic), withoutClassic: norm(b.hook, withoutClassic) }, null, 2));
+      }
+      if (a.guard.status !== b.guard.status || norm(a.guard, withClassic) !== norm(b.guard, withoutClassic)) {
+        throw new Error('guard 判定随 classic 资产变化（感知层未剥离干净）:\n' +
+          JSON.stringify({ withClassic: norm(a.guard, withClassic), withoutClassic: norm(b.guard, withoutClassic) }, null, 2));
+      }
+    },
+  },
+
+  // AC-5 剥离②：kind 为 comet-five-phase-overlay 的协议不再进入叠加分支——与同节点、
+  // kind=workflow-kernel 的协议在完全相同的夹具（含 classic 活动 change）上判定一致；
+  // 叠加分支的专属信号（无活动 Comet change / 多 Comet change）不再出现；
+  // 另做源码符号检索，确认感知层符号在判定脚本中零残留。
+  {
+    name: '230 感知层剥离：overlay 协议不再进入叠加分支（AC-5）',
+    run: (dir) => {
+      const builtinProtocol = JSON.parse(fs.readFileSync(BUILTIN_PROTOCOL_SOURCE, 'utf8'));
+      const build = (name, kind) => {
+        const proj = path.join(dir, name);
+        const protocol = JSON.parse(JSON.stringify(builtinProtocol));
+        protocol.kind = kind;
+        fs.mkdirSync(path.join(proj, 'reference'), { recursive: true });
+        fs.copyFileSync(path.join(dir, 'reference', 'workflow-protocol.json'), path.join(proj, 'reference', 'workflow-protocol.json'));
+        writeFile(proj, 'overlay-protocol.json', JSON.stringify(protocol, null, 2) + '\n');
+        writeIntakeArtifacts(proj);
+        const st = baseState('open');
+        st.status = 'running';
+        st.evidence.open = { summary: 'intake complete' };
+        writeState(proj, st);
+        writeClassicCometAssets(proj); // 叠加分支的前置（classic 活动 change）在场
+        return proj;
+      };
+      const overlayProj = build('overlay-kind', 'comet-five-phase-overlay');
+      const kernelProj = build('kernel-kind', 'workflow-kernel');
+      const runExit = (proj) => runGuard(['exit', 'open', '--protocol', path.join(proj, 'overlay-protocol.json')], proj);
+      const a = runExit(overlayProj);
+      const b = runExit(kernelProj);
+      assertExit(a, 0);
+      assertOut(a, 'ALL CHECKS PASSED');
+      assertNotOut(a, 'active Comet change');
+      if (a.status !== b.status
+        || normalizeRoot(outputText(a), overlayProj, dir) !== normalizeRoot(outputText(b), kernelProj, dir)) {
+        throw new Error('overlay 协议与同节点 kernel 协议判定不一致（叠加分支未剥离）:\n' +
+          JSON.stringify({ overlay: normalizeRoot(outputText(a), overlayProj, dir), kernel: normalizeRoot(outputText(b), kernelProj, dir) }, null, 2));
+      }
+      // 源码符号检索：感知层符号在判定脚本中零残留
+      const SYMBOLS = [
+        'isCometOverlay', 'comet-five-phase-overlay', 'resolveCometOverlayChange',
+        'activeCometChanges', 'overlayNodeFromState', 'hasOverlayEvidence',
+        'readWorkflowProjectPathConfig', 'workflowPathBaseRoot',
+      ];
+      for (const [label, file] of [['workflow-guard.mjs', GUARD], ['comet-hook-guard.mjs', HOOK]]) {
+        const src = fs.readFileSync(file, 'utf8');
+        for (const symbol of SYMBOLS) {
+          if (src.includes(symbol)) throw new Error(label + ' 仍含 Comet 感知层符号: ' + symbol);
+        }
+      }
+    },
+  },
+
+  // AC-14 自检清单有效性：条目齐备且同步 → 零问题；条目缺失 → 显式报告（含文件名），
+  // 不得静默跳过（"永不生效的条目"无处藏身）；条目在场但场景数未同步 → 同样上报。
+  // 用真实清单常量与真实文件系统驱动自检实现（受检根替换为场景临时目录）。
+  {
+    name: '231 自检清单：条目缺失被显式报告而非静默跳过（AC-14）',
+    run: (dir) => {
+      const n = 7; // 夹具自定场景数（受检文件内容与之一致）
+      const synced = 'ALL ' + n + ' SCENARIOS PASSED\n';
+      for (const rel of SCENARIO_COUNT_FILES) writeFile(dir, rel, synced);
+      const clean = scenarioCountSyncProblems(n, dir);
+      if (clean.length !== 0) throw new Error('条目齐备且同步时不应报告问题: ' + JSON.stringify(clean));
+      // ① 移走一个条目（幽灵条目形态）→ 显式报告缺失项（列出文件名）
+      const missingRel = 'docs/VERSIONS-zh.md';
+      if (!SCENARIO_COUNT_FILES.includes(missingRel)) throw new Error('夹具前提失效：' + missingRel + ' 不在受检清单内');
+      fs.rmSync(path.join(dir, missingRel));
+      const problems = scenarioCountSyncProblems(n, dir);
+      if (!problems.some((p) => p.includes('缺失') && p.includes(missingRel))) {
+        throw new Error('缺失条目未被显式报告: ' + JSON.stringify(problems));
+      }
+      // ② 条目在场但场景数未同步 → 同样上报（缺省放过即为静默失检）
+      writeFile(dir, missingRel, '未同步的内容\n');
+      const stale = scenarioCountSyncProblems(n, dir).join(' | ');
+      if (!stale.includes('未同步') || !stale.includes(missingRel)) {
+        throw new Error('未同步条目未被上报: ' + stale);
+      }
     },
   },
 ];

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // system-test.mjs — flow-comet 系统测试集（与 guard-self-test 同构的载体，测试内容为系统级全链路）
 //
-// 定位：guard-self-test 是引擎脚本的单元/场景级回归（219，fixture 构造为主）；
+// 定位：guard-self-test 是引擎脚本的单元/场景级回归（231，fixture 构造为主）；
 // 本套件是**系统级**测试——每个测试项走真实命令序列（init → record → guard exit → handoff →
 // hook …），覆盖 flow-comet 全部机制面（A~L 十二类）：
 //   A. 状态机与路由（init/status/next/select/advance/record/execution-mode/config/
@@ -16,7 +16,8 @@
 //   I. 异常路径（损坏状态/缺工件出口/非法参数/状态字段类型非法）
 //   J. 文档一致性（双语健康检查/公开产物零代号检查——调用仓库本地工具）
 //   K. 安装器与平台（版本标识/多平台安装与平台化路径/codex hook JSON 契约/平台选择链/
-//      purge 语义/描述符驱动/dsh 平台断言/loader 版本戳重装断言/hook 注入形态无关断言与旧条目幂等升级）
+//      purge 语义/描述符驱动/dsh 平台断言/loader 版本戳重装断言/hook 注入形态无关断言与旧条目幂等升级/
+//      旧布局状态迁移后状态可读与流程可继续）
 //   L. 执行遗漏防护（entry 进入证据/空退出豁免/空仓库提示）
 //
 // 载体（与 guard-self-test 同构）：每项 = 独立临时目录（fs.mkdtemp）+ 内置协议副本复制到
@@ -3560,6 +3561,89 @@ const TEST_ITEMS = [
         throw new Error('purge 后再装后 loader 应为源戳');
       }
       console.log('  purge 后重建路径回归:loader/托管块恢复 + 再装版本一致收敛 ✓');
+    },
+  },
+
+  // K17: 旧布局项目（状态文件在旧命名空间 + 同目录 Comet 资产/用户文件）经安装器自动迁移后，
+  // 真实安装副本上的流程可继续——状态逐字节搬移且可读、合规节点链路 entry → record → exit
+  // 正常推进、Comet 资产与用户文件原位未动。端到端执行断言（真实命令序列，非形态断言）。
+  {
+    name: 'K17 状态迁移:旧布局项目安装后状态可读且流程可继续',
+    run: (dir) => {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
+      const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
+      const target = path.join(dir, 'k17-target');
+      const legacyDir = path.join(target, '.comet');
+      fs.mkdirSync(legacyDir, { recursive: true });
+      // 迁移前状态（进行中的 change：design 节点待完成）
+      const stateBytes = Buffer.from(JSON.stringify({
+        activeChange: 'mig-ch',
+        currentNode: 'design',
+        completedNodes: ['open'],
+        evidence: { open: { summary: 'intake complete' } },
+        verifyFailures: 0,
+        executionMode: 'subagent',
+        directOverride: false,
+      }, null, 2) + '\n', 'utf8');
+      fs.writeFileSync(path.join(legacyDir, 'flow-comet-state.json'), stateBytes);
+      // 同目录的非 flow-comet 内容（旧目录三方共占实测形态）：迁移不得处置它们
+      fs.writeFileSync(path.join(legacyDir, 'config.yaml'), 'workflow:\n  projectPath: docs/openspec\n');
+      const userBytes = Buffer.from('user backup\n', 'utf8');
+      fs.writeFileSync(path.join(legacyDir, 'flow-comet-state.json.bak-20260901-user'), userBytes);
+      // 活动 change 工件（迁移后流程可继续的前提）
+      writeFile(target, '.specs/mig-ch/CHANGE.md', '# CHANGE\n\n- **Change ID**: mig-ch\n\n## Why（为什么做）\n\nx\n');
+      writeFile(target, '.specs/mig-ch/REQUIREMENT.md', '# REQUIREMENT\n\n- **Change ID**: mig-ch\n\n## 用户故事（User Story）\n\nx\n\n## 验收准则（AC）\n\n- y\n');
+      writeFile(target, '.specs/mig-ch/DESIGN.md', '# DESIGN\n\n- **Change ID**: mig-ch\n\n## 0. 技术栈\n\nNode\n\n## 决策清单\n\n| # | D | R |\n|---|---|---|\n| D1 | x | y |\n');
+      seedForeignFlowKit(target); // 安装器不再走网络克隆（与 K14~K16 同手法）
+      const install = spawnSync(process.execPath, [installer, '--target', target, '--platform', 'claude-code'], {
+        cwd: repoRoot, encoding: 'utf8', timeout: 120000,
+      });
+      const installRes = { status: install.status ?? 1, output: String(install.stdout || '') + String(install.stderr || '') };
+      assertExit(installRes, 0);
+      assertOut(installRes, '已迁移');
+      // ① 状态逐字节搬到新命名空间；旧位置移除；迁移前备份在场且逐字节一致
+      const migrated = path.join(target, '.flow-comet', 'flow-comet-state.json');
+      if (!fs.existsSync(migrated)) throw new Error('迁移后新位置状态文件缺失: ' + migrated);
+      if (!fs.readFileSync(migrated).equals(stateBytes)) throw new Error('迁移后状态与迁移前不逐字节一致');
+      if (fs.existsSync(path.join(legacyDir, 'flow-comet-state.json'))) throw new Error('迁移后旧位置状态文件应已移除');
+      const backups = fs.readdirSync(path.join(target, '.flow-comet')).filter((n) => /^flow-comet-state\.json\.bak-/.test(n));
+      if (backups.length !== 1) throw new Error('迁移前备份应恰一份: ' + JSON.stringify(backups));
+      if (!fs.readFileSync(path.join(target, '.flow-comet', backups[0])).equals(stateBytes)) {
+        throw new Error('迁移前备份与迁移前状态不逐字节一致');
+      }
+      // ② 非 flow-comet 内容原位未动
+      if (!fs.readFileSync(path.join(legacyDir, 'config.yaml')).equals(Buffer.from('workflow:\n  projectPath: docs/openspec\n', 'utf8'))) {
+        throw new Error('同目录 Comet 资产被改写');
+      }
+      if (!fs.readFileSync(path.join(legacyDir, 'flow-comet-state.json.bak-20260901-user')).equals(userBytes)) {
+        throw new Error('同目录用户文件被改写');
+      }
+      // ③ 迁移后状态可读（真实安装副本，cwd = 项目根）
+      const installed = (script, args) => {
+        const res = spawnSync(process.execPath, [path.join(target, '.claude', 'skills', 'flow-comet', 'scripts', script), ...args], {
+          cwd: target, encoding: 'utf8', timeout: 60000, env: { ...process.env, FLOW_COMET_RUN_ROOT: target },
+        });
+        return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+      };
+      const before = installed('workflow-state.mjs', ['status']);
+      assertExit(before, 0);
+      assertOut(before, '"change": "mig-ch"');
+      assertOut(before, '"stateCurrentNode": "design"'); // 迁移搬移的状态字段原值可读
+      // ④ 流程可继续：entry → record → exit 推进到下一节点
+      assertExit(installed('workflow-guard.mjs', ['entry', 'design']), 0);
+      assertExit(installed('workflow-state.mjs', ['record', 'design', '{"summary":"design done"}']), 0);
+      const exitDesign = installed('workflow-guard.mjs', ['exit', 'design', '--apply']);
+      assertExit(exitDesign, 0);
+      assertOut(exitDesign, 'ALL CHECKS PASSED');
+      const after = installed('workflow-state.mjs', ['status']);
+      assertExit(after, 0);
+      assertOut(after, '"currentNode": "plan"');
+      const finalState = JSON.parse(fs.readFileSync(migrated, 'utf8'));
+      if (!Array.isArray(finalState.completedNodes) || !finalState.completedNodes.includes('design')) {
+        throw new Error('exit design 后 completedNodes 应含 design: ' + JSON.stringify(finalState.completedNodes));
+      }
+      console.log('  迁移后链路:状态逐字节搬移 + 备份在场 + status 可读 + 节点推进 design → plan ✓');
     },
   },
 
