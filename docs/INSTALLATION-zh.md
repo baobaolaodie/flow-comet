@@ -37,7 +37,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --platform all 
 
 `prepare-env` 会：
 
-1. **生成/覆盖 `rules/` 与 `skills/`**——全部 flow-comet* skill，来源为权威源 `.flow-comet/skills/flow-comet/`
+1. **生成/覆盖 `rules/` 与 `skills/`**——全部 flow-comet* skill，来源为权威源 `.flow-comet/skills/`（入口 skill `flow-comet/` 是其中一个技能目录）
 2. **注入 hook 到 `settings.local.json`**——读-合并-写：保留目标项目既有的一切（`permissions`、自定义 hook、其他 matcher 组），仅在 `hooks.PreToolUse` 中注入/更新 comet-hook-guard 条目（已存在的 comet hook 被替换而非重复追加——幂等）。**首次创建**（项目原本无此文件）只写入 hook 条目；**已有文件**按合并保留既有字段
 3. **确保目标项目中的 `flow-kit`**——缺失时克隆上游并检出锁定快照；已存在的上游克隆只读检测（输出当前 HEAD 与锁定快照差异）；同名非克隆目录跳过并给出手动指引；网络失败仅告警并继续（见 [flow-kit 获取](#flow-kit-获取)）
 
@@ -50,7 +50,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径>
 node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 ```
 
-**使用前提**：脚本必须在 flow-comet 仓库内运行（从 `.flow-comet/skills/flow-comet/` 读取安装内容）；`--target` 指向目标项目。
+**使用前提**：脚本必须在 flow-comet 仓库内运行（从 `.flow-comet/skills/` 读取全部 flow-comet* 技能目录）；`--target` 指向目标项目。
 
 **更新已安装的 flow-comet**：重跑同一条方案 A 命令即可（幂等——覆盖生成物 + 合并注入 hook，既有配置保留）。
 
@@ -95,7 +95,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 4. **真实环境冒烟**（在目标项目目录内执行）：`cd <目标项目> && node .claude/skills/flow-comet/scripts/workflow-state.mjs status`——期望输出 JSON 状态对象（全新项目为 `{"status":"no-change",...}`，运行中为 `{"status":"running","change":...}`）
 
 > 命令为 POSIX 风格（Git Bash / WSL / macOS 终端）；Windows 用户请在 Git Bash 中执行。
-> **注意**：`guard-self-test.mjs`（231 场景）是**作者回归基线**（沙箱环境自测脚本逻辑——不依赖安装完整性，不是安装验证判据）。
+> **注意**：`guard-self-test.mjs`（235 场景）是**作者回归基线**（沙箱环境自测脚本逻辑——不依赖安装完整性，不是安装验证判据）。
 
 ### 在 Codex 上使用 flow-comet
 

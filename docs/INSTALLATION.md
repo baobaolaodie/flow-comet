@@ -37,7 +37,7 @@ On an interactive terminal, the first run prompts for the platform with a direct
 
 `prepare-env` does:
 
-1. **Generates/overwrites `rules/` and `skills/`** — all flow-comet* skills, from the authoritative source `.flow-comet/skills/flow-comet/`
+1. **Generates/overwrites `rules/` and `skills/`** — all flow-comet* skills, copied from the authoritative source `.flow-comet/skills/` (the entry skill `flow-comet/` is one of the skill directories there)
 2. **Injects the hook into `settings.local.json`** — read-merge-write: preserves everything already in the target project (`permissions`, custom hooks, other matcher groups), only injects/updates the comet-hook-guard entry under `hooks.PreToolUse` (existing comet hooks are replaced, not duplicated — idempotent). First-time creation writes only the hook entry; existing files are merged.
 3. **Ensures `flow-kit` in the target project** — clones the upstream and checks out the locked snapshot when missing; an existing upstream clone is only inspected read-only (current HEAD vs the locked snapshot is reported); a same-name non-clone directory is skipped with guidance; a network failure warns and continues (see [flow-kit acquisition](#flow-kit-acquisition))
 
@@ -50,7 +50,7 @@ node scripts/prepare-env.mjs --target <absolute path to target project>
 node scripts/prepare-env.mjs --target <absolute path to target project> --purge --yes
 ```
 
-**Prerequisites for use**: run the script inside the flow-comet repository (it reads from `.flow-comet/skills/flow-comet/`); `--target` points at the target project.
+**Prerequisites for use**: run the script inside the flow-comet repository (it reads every flow-comet* skill directory from `.flow-comet/skills/`); `--target` points at the target project.
 
 **Updating an installed flow-comet**: re-run the same Option A command — idempotent (overwrites generated files + merges the hook, preserves existing config).
 
@@ -96,7 +96,7 @@ On non-default platforms, command paths inside SKILL/GUIDANCE files are rewritte
 4. **Smoke test** (run inside the target project): `cd <target> && node .claude/skills/flow-comet/scripts/workflow-state.mjs status` — expected output is a JSON state object (`{"status":"no-change",...}` for a fresh project, `{"status":"running","change":...}` when a workflow is active)
 
 > Commands are POSIX-style (Git Bash / WSL / macOS terminal); Windows users should run them in Git Bash.
-> **Note**: `guard-self-test.mjs` (231 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
+> **Note**: `guard-self-test.mjs` (235 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
 
 ### Using flow-comet on Codex
 
