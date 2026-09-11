@@ -207,7 +207,43 @@ function normalizeSectionName(name) {
   return String(name ?? '').replace(/^#{1,6}\s*/, '').replace(/[（(].*$/, '').trim();
 }
 
+// 围栏代码块剥离：标题/格式判定的输入必须是「文档结构」，而代码示例里的 `## 段名` 只是示例文本。
+// 不剥离会让缺段的 CONTEXT 假通过——只要围栏示例里出现该段名，标题解析就把它当成段存在
+// （校验放行并写入扫描时间）。围栏识别按 CommonMark 收口：
+//   · 开栏 = 至多 3 空格缩进 + 连续 3 个及以上 ` 或 ~（后续为语言标注等信息串）
+//   · 反引号围栏的信息串不得含反引号（否则是行内代码而非围栏）
+//   · 闭栏须与开栏同字符、长度不短于开栏、其后仅余空白；不同字符的围栏互不闭合
+//   · 围栏内的行（含 `## 标题`）一律不计入结构判定
+function stripFencedCodeBlocks(text) {
+  const kept = [];
+  let fenceChar = null;
+  let fenceLength = 0;
+  for (const line of String(text ?? '').split('\n')) {
+    const fence = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (fenceChar === null) {
+      if (fence && !(fence[1][0] === '`' && fence[2].includes('`'))) {
+        fenceChar = fence[1][0];
+        fenceLength = fence[1].length;
+        continue;
+      }
+      kept.push(line);
+      continue;
+    }
+    if (
+      fence &&
+      fence[1][0] === fenceChar &&
+      fence[1].length >= fenceLength &&
+      fence[2].trim() === ''
+    ) {
+      fenceChar = null;
+      fenceLength = 0;
+    }
+  }
+  return kept.join('\n');
+}
+
 // 文档标题集合（ATX 标题行：行首 #~###### + 空白 + 标题文本；正文文本不参与）。
+// 输入为「文档结构」文本（围栏代码块已由 stripFencedCodeBlocks 剥离——见 validateContext）。
 function headingSet(text) {
   const set = new Set();
   for (const m of String(text ?? '').matchAll(/^#{1,6}[ \t]+(.+?)[ \t]*$/gm)) {
@@ -230,10 +266,13 @@ export async function validateContext(runRoot) {
   } catch {
     return { missingSections: [...sections], formatIssues: [], template: await probeTemplate(runRoot) };
   }
-  const headings = headingSet(text);
+  // 结构判定一律只看「文档结构」文本：围栏代码块（代码示例）内的行不参与段存在与格式判定——
+  // 两条判据共用同一输入，避免同一份文本上出现两条相反口径
+  const body = stripFencedCodeBlocks(text);
+  const headings = headingSet(body);
   const missingSections = sections.filter((s) => !headings.has(normalizeSectionName(s)));
   const formatIssues = CONTEXT_FORMAT_CHECKS
-    .filter((c) => c.applies(text) && !c.passes(text))
+    .filter((c) => c.applies(body) && !c.passes(body))
     .map((c) => c.name + '（' + c.hint + '）');
   return { missingSections, formatIssues, template: await probeTemplate(runRoot) };
 }

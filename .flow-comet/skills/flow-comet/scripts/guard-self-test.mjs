@@ -2450,8 +2450,9 @@ const SCENARIOS = [
   // 91: CONTEXT 存在但缺段 + --init-context → INIT-VALIDATE-FAILED 重写指引 + 不写 last_intel_scan。
   // ② 段名判定须为**精确标题**匹配（非全文 includes）：段名变体（`## 技术栈补充`）与正文文本提及
   // 都不得算作段存在——旧 includes 判据下二者会假通过（校验放行 + 写 last_intel_scan）。
+  // ③ 标题解析须先排除围栏代码块：代码示例里的 `## 段名` 不是段（否则缺段仍能假通过并写扫描时间）。
   {
-    name: '91 CONTEXT 缺段 --init-context → 重写指引不写 state',
+    name: '91 CONTEXT 缺段 --init-context → 重写指引不写 state（含围栏代码块段名不假通过）',
     run: (dir) => {
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n');
       writeFile(dir, 'package.json', '{"name":"x"}');
@@ -2468,6 +2469,28 @@ const SCENARIOS = [
       assertOut(res, 'INIT-VALIDATE-FAILED');
       st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (st.last_intel_scan) throw new Error('段名变体不应通过校验（不应写 last_intel_scan）');
+      // ③ 围栏代码块内的 `## 段名` 不计入标题集合：缺 `## 默认偏好`，但三种围栏形态——
+      //    带语言标注的反引号围栏、缩进 2 空格的波浪线围栏、波浪线围栏——内都出现该段名。
+      //    标题正则若不跟踪围栏边界，就会把这些示例行当成段存在 → 假通过并写扫描时间（RED）。
+      writeFile(dir, '.specs/CONTEXT.md', [
+        '# CONTEXT',
+        '## 项目概要', 'x',
+        '## 技术栈', 'x',
+        '## 域语言', '| 术语 | 定义 |', '|---|---|', '| 例 | 定义 |',
+        '## 已锁决策', '- [2026-08-01] 决策一',
+        '## 既有抽象索引', 'x',
+        '## intel-scan 元数据', '- **last_intel_scan**: x', '- **scanner**: x', '- **下次重扫建议**: x',
+        '示例（以下均为代码示例，不是段）：',
+        '```markdown', '## 默认偏好', '- 反引号围栏内的示例', '```',
+        '  ~~~', '## 默认偏好', '  ~~~',
+        '~~~text', '## 默认偏好', '~~~',
+        '',
+      ].join('\n'));
+      res = runState(['init', CHANGE_ID + '-3', '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'INIT-VALIDATE-FAILED');
+      st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      if (st.last_intel_scan) throw new Error('围栏内的段名不应通过校验（不应写 last_intel_scan）');
     },
   },
 
@@ -6616,8 +6639,10 @@ const SCENARIOS = [
   // （Bash 分支先执行并直接按协调者白名单判定），同一路径用 Write/Edit 放行、用 Bash
   // 重定向写却被拦（判定随工具而变）。修复后两条判定共用同一隔离区判据——同路径同结论。
   // 穿越形态（`..` 逃出隔离区）在两条路径上都必须仍被拦截：放行不是无条件的。
+  // ④ 追加（物理包含性）：隔离区**内**指向区外的符号链接/junction 是同一前缀下的第二种逃逸——
+  // 词法归一化对它无能为力（路径字符串确实以隔离区前缀开头），必须按真实落点判定。
   {
-    name: '232 hook worktree 放行：Bash 与 file_path 判定一致，穿越形态仍拦',
+    name: '232 hook worktree 放行：Bash 与 file_path 判定一致，穿越形态与区外链接落点仍拦',
     run: (dir) => {
       writeState(dir, { ...baseState('subagent-execute'), status: 'running' });
       const insideWorktree = path.join(dir, '.claude', 'worktrees', 'agent-abc123', 'src', 'x.mjs');
@@ -6643,6 +6668,45 @@ const SCENARIOS = [
         { tool_name: 'Bash', tool_input: { command: 'echo x > "' + escape + '"' } });
       assertExit(viaBashEscape, 2);
       assertOut(viaBashEscape, 'BLOCKED');
+      // ④ 物理包含性：隔离区**内**指向区外的符号链接/junction——词法上仍以 `.claude/worktrees/`
+      //    开头，真实落点却在隔离区外。放行先于各自的白名单判定返回，故放行这类路径等于
+      //    没有任何后续校验兜底 → 两条判定都必须拦截（修复前按词法放行 = RED）。
+      //    Windows 用 junction（建 junction 不需要符号链接特权，与真实环境权限无关）；
+      //    POSIX 用目录符号链接；平台确实无法构造链接时按下方 ⑤ 的兜底断言如实降级。
+      const outsideDir = path.join(dir, 'outside-zone');
+      fs.mkdirSync(outsideDir, { recursive: true });
+      const agentDir = path.join(dir, '.claude', 'worktrees', 'agent-abc123');
+      fs.mkdirSync(agentDir, { recursive: true });
+      let linkCreated = false;
+      try {
+        fs.symlinkSync(outsideDir, path.join(agentDir, 'link'),
+          process.platform === 'win32' ? 'junction' : 'dir');
+        linkCreated = true;
+      } catch { linkCreated = false; }
+      if (!linkCreated) {
+        console.error('WARN: 当前平台无法构造符号链接/junction，隔离区链接逃逸断言降级为兜底断言');
+      }
+      if (linkCreated) {
+        const escaping = posix(path.join(agentDir, 'link', 'evil.mjs'));
+        const viaWriteLink = runHook(['before_tool'], dir,
+          { tool_name: 'Write', tool_input: { file_path: escaping } });
+        assertExit(viaWriteLink, 2);
+        assertOut(viaWriteLink, 'BLOCKED');
+        const viaBashLink = runHook(['before_tool'], dir,
+          { tool_name: 'Bash', tool_input: { command: 'echo x > "' + escaping + '"' } });
+        assertExit(viaBashLink, 2);
+        assertOut(viaBashLink, 'BLOCKED');
+      }
+      // ⑤ 放行不得过宽：链接**旁**的真实隔离区路径仍须放行（把整个隔离区一并拦掉同样是回归），
+      //    非隔离区路径仍按原逻辑判定（协调者白名单拦截）。
+      const viaWriteNormal = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(agentDir, 'src', 'y.mjs') } });
+      assertExit(viaWriteNormal, 0);
+      assertOut(viaWriteNormal, 'workflow-hook-guard-ok');
+      const viaWriteOutside = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'src', 'evil.mjs') } });
+      assertExit(viaWriteOutside, 2);
+      assertOut(viaWriteOutside, 'BLOCKED');
     },
   },
 

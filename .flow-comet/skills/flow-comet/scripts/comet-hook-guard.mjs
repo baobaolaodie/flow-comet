@@ -125,10 +125,74 @@ function targetAllowed(targetRel, whitelist, activeChange) {
 // 与提交子集校验约束。判据用归一化后的相对路径(防 ../../ 穿越绕过)。
 // 单一实现:file_path 判定与 Bash 命令写入判定共用同一函数——两条判定路径必须同语义,
 // 否则同一路径会因所选工具而异(Write/Edit 放行、Bash 重定向被拦)。
+// 隔离区根（项目根相对，POSIX 形态）——词法判定与物理判定共用同一常量：隔离区位置是安全边界
+// 的一部分，变更只应改这一处（两处各写一份字面量必然漂移）。
+const AGENT_WORKTREE_ROOT_REL = '.claude/worktrees';
 function isInsideAgentWorktree(targetRel) {
   if (typeof targetRel !== 'string' || targetRel === '') return false;
   const normalized = path.posix.normalize(targetRel.replaceAll('\\', '/'));
-  return normalized.startsWith('.claude/worktrees/');
+  return normalized.startsWith(AGENT_WORKTREE_ROOT_REL + '/');
+}
+
+// worktree 隔离区的**物理**包含性判定（与上方词法判定的配对条件，放行的前置）：
+// 词法前缀匹配只证明"路径字符串以隔离区前缀开头"，证明不了"写入真的落在隔离区内"——
+// `.claude/worktrees/<id>/link/src/x.mjs` 中的 `link` 若是指向区外的符号链接/junction，
+// 词法判定照样命中（该放行又在各自的白名单判定**之前**返回，没有任何后续校验能兜住）。
+// 判据（fail-closed：不能证明落在区内即不放行）：
+//   ① 自项目根逐分量 lstat——任一分量为符号链接/junction（Windows 两者在 lstat 下同为
+//      symbolic link）即拒：其真实落点不受词法位置约束；
+//   ② 每个已存在分量的真实路径须仍在项目根内（防项目根自身被链接分量替换的异常形态）；
+//   ③ 首个不存在的分量之后按「最近已存在祖先的真实路径 + 余下分量」推导落点——目标文件/
+//      目录尚不存在是常态（新建文件时目标必然不存在），不能因此拒判；
+//      落点须位于 <真实项目根>/.claude/worktrees/ 之下（隔离区语义的物理版本）；
+//   ④ 解析类故障（EACCES/ELOOP/悬挂链接/其它异常）一律拒。
+// 性能：仅当词法前缀命中时才执行——普通协调者会话零开销；命中时每次至多 O(路径深度) 次
+// lstat/realpath，且判定的路径形态固定（隔离区路径深度有限）。
+async function agentWorktreeWriteStaysIsolated(targetRel) {
+  let realRoot;
+  try {
+    realRoot = await fs.realpath(runRoot);
+  } catch {
+    return false;
+  }
+  const segments = targetRel
+    .replaceAll('\\', '/')
+    .split('/')
+    .filter((segment) => segment !== '' && segment !== '.');
+  let cursor = runRoot;
+  let physicalCursor = realRoot;
+  let existingSegments = 0;
+  for (const segment of segments) {
+    cursor = path.join(cursor, segment);
+    let stat;
+    try {
+      stat = await fs.lstat(cursor);
+    } catch (error) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+      ) {
+        break; // 余下分量为待新建——落点由最近已存在祖先的真实路径推导（见 ③）
+      }
+      return false; // 其它故障 fail-closed
+    }
+    if (stat.isSymbolicLink()) return false;
+    let real;
+    try {
+      real = await fs.realpath(cursor);
+    } catch {
+      return false;
+    }
+    if (!workflowPathInside(realRoot, real)) return false;
+    physicalCursor = real;
+    existingSegments += 1;
+  }
+  const destination = path.resolve(physicalCursor, ...segments.slice(existingSegments));
+  return workflowPathInside(
+    path.join(realRoot, ...AGENT_WORKTREE_ROOT_REL.split('/')),
+    destination,
+  );
 }
 
 // W4: state 文件禁手动工具写（directOverride 授权约束的写入路径物理控制）——
@@ -616,8 +680,15 @@ async function main() {
         if (targetRel !== null && blockedStateFileTarget(targetRel)) {
           blockStateFileWrite(t);
         }
-        // worktree 隔离区放行(与 file_path 判定共用 isInsideAgentWorktree——同路径同结论)
-        if (targetRel !== null && isInsideAgentWorktree(targetRel)) continue;
+        // worktree 隔离区放行(与 file_path 判定共用同一判定——同路径同结论);
+        // 放行前置 = 物理包含性(词法命中但真实落点在区外 → 拒,不放行)
+        if (targetRel !== null && isInsideAgentWorktree(targetRel)) {
+          if (await agentWorktreeWriteStaysIsolated(targetRel)) continue;
+          hookBlock(
+            `BLOCKED: 命令写入 "${t}" 位于 worktree 隔离区但物理落点在区外（符号链接/junction 穿越）`,
+            '恢复: 改用隔离区内的真实路径（隔离区放行仅限物理位于 <项目根>/.claude/worktrees/ 之下的写入）'
+          );
+        }
         const allowed = targetRel !== null && effectiveWhitelist !== null && targetAllowed(targetRel, effectiveWhitelist, activeChange);
         if (!allowed) {
           hookBlock(
@@ -632,8 +703,15 @@ async function main() {
   }
 
   // ── worktree 隔离区放行（CC Agent isolation:"worktree"）────────────────────
-  // 判定实现见 isInsideAgentWorktree（与上方 Bash 命令写入判定共用——同一路径不因工具而异）。
+  // 判定实现见 isInsideAgentWorktree + agentWorktreeWriteStaysIsolated（与上方 Bash 命令写入
+  // 判定共用——同一路径不因工具而异）；词法命中但物理落点在区外 → 拒（fail-closed）。
   if (isInsideAgentWorktree(target)) {
+    if (!(await agentWorktreeWriteStaysIsolated(target))) {
+      hookBlock(
+        `BLOCKED: 写入 "${target}" 位于 worktree 隔离区但物理落点在区外（符号链接/junction 穿越）`,
+        '恢复: 改用隔离区内的真实路径（隔离区放行仅限物理位于 <项目根>/.claude/worktrees/ 之下的写入）'
+      );
+    }
     hookOk();
     return;
   }

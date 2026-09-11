@@ -11,7 +11,7 @@ description: "Use only when explicitly invoked as /flow-comet-design or routed b
 
 Complete the `design` Node for `flow-comet`.
 
-Responsibility: 技术栈选型 + ADR + 数据流。生成 DESIGN.md。
+Responsibility: 技术栈选型 + ADR + 数据流。生成 DESIGN.md(轻量流程为 DESIGN-lite.md)。
 
 ## Guidance
 
@@ -75,7 +75,7 @@ The full design protocol, templates, and anti-patterns are in:
 ### Completion reasoning
 
 This node is truly done when:
-- `.specs/<change-id>/DESIGN.md` exists with section 0 (tech stack selected) populated.
+- `.specs/<change-id>/DESIGN.md` — 或轻量流程的 `.specs/<change-id>/DESIGN-lite.md` — exists with section 0 (tech stack selected) populated.
 - Section 0.5 (existing architecture alignment) is populated for brownfield projects.
 - Each technical decision has alternatives + reason + trade-off.
 - At least 1 data flow / architecture diagram exists.
