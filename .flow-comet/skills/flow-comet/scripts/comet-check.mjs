@@ -29,7 +29,11 @@ const required = [
   "scripts/comet-hook-guard.mjs",
   "scripts/workflow-state.mjs",
   "scripts/workflow-guard.mjs",
-  "scripts/workflow-handoff.mjs"
+  "scripts/workflow-handoff.mjs",
+  "scripts/protocol-utils.mjs",
+  "scripts/state-schema.mjs",
+  "scripts/task-parsing.mjs",
+  "scripts/route-node.mjs"
 ];
 
 async function main() {
