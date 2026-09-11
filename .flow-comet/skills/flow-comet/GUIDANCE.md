@@ -169,7 +169,7 @@ All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT
 
 | 脚本 | 用途 |
 |------|------|
-| `workflow-state.mjs` | 状态管理：init/status/next/select/record/advance/skill-load/execution-mode/config/verify-fail |
+| `workflow-state.mjs` | 状态管理：init/status/next/select/record/advance/skill-load/execution-mode/config/verify-fail（verify 失败计数，第 4 次 BLOCKED） |
 | `workflow-guard.mjs` | 节点门禁：entry/exit/verify 检查 |
 | `workflow-handoff.mjs` | 子代理交接：request/result/status |
 | `comet-plan.mjs` | 兼容别名入口（内容为 workflow-state 的别名壳） |
@@ -186,6 +186,7 @@ All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT
 | `completedNodes` | 已完成节点列表 | workflow-guard.mjs exit --apply |
 | `evidence` | 节点证据记录 | workflow-state.mjs record |
 | `verifyFailures` | verify 失败计数 | workflow-guard.mjs (auto-increment) |
+| `verifyFailuresByChange` | 按 change 隔离的失败计数（keyed by change-id） | workflow-state.mjs / state-schema.mjs helper |
 | `status` | 运行状态 | workflow-guard.mjs exit --apply |
 | `executionMode` | subagent/direct，execute 执行模式 | workflow-state.mjs execution-mode |
 | `directOverride` | direct 是否用户显式确认 | workflow-state.mjs execution-mode direct |
