@@ -3,6 +3,21 @@
 // 语义（与批次 C C6 完全一致）：存在字段逐一校验；未知字段放行（前向兼容）；缺字段放行（readState 默认补）；
 // 只校验存在字段的类型。调用方负责 BLOCKED / exit(1) 处理。
 
+// ---------- 运行时路径常量（单一来源）----------
+// 「状态文件在哪」曾是一个被独立表达在 6 处的决策（协议 state.statePath、workflow-state 默认值、
+// workflow-handoff 默认值、comet-hook-guard 的 STATE_FILE_REL / 回退值 / runRoot 锚点 / 相位读取、
+// workflow-guard 的跨命名空间探测常量、安装器迁移白名单）——改一处不会让另一处报警，主仓安装副本
+// 滞后一轮即导致写入拦截全程静默失效且外观正常。此处收敛为唯一来源，各脚本 import 之，不再各自硬编码。
+// 取值一律为「项目根相对路径、POSIX 分隔符」（与 workflowRelativeSegments /
+// resolveWorkflowRelativePath 的归一化语义一致）；比较前调用方自行归一化。
+export const RUNTIME_DIR = '.flow-comet';
+export const RUNTIME_STATE_FILE_NAME = 'flow-comet-state.json';
+export const RUNTIME_STATE_PATH = RUNTIME_DIR + '/' + RUNTIME_STATE_FILE_NAME;
+// 旧命名空间（三方共占目录）。仅用于诊断探测与安装器迁移，绝不作为运行时回退路径（fail-closed 语义不变）。
+// 只导出完整相对路径——消费方（guard 的跨命名空间探测）按整文件路径使用，导出裸目录名属于无消费方的
+// 死 API 面（且会诱使调用方自行拼路径，重新引入第二处决策）。
+export const LEGACY_RUNTIME_STATE_PATH = '.comet/' + RUNTIME_STATE_FILE_NAME;
+
 // 疑似对象字面量判定（单一来源——设计语义 / AC-1：workflow-state record 与
 // workflow-handoff result 共用，两脚本不再各自定义）：trim 后以 {/[ 开头 → 视作
 // "形似对象字面量"（常见于 Windows 传参剥离内嵌引号后的损坏 JSON 形态）。

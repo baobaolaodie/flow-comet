@@ -3,7 +3,7 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
-import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor } from './state-schema.mjs';
+import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, RUNTIME_STATE_PATH, LEGACY_RUNTIME_STATE_PATH } from './state-schema.mjs';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES } from './protocol-utils.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from './task-parsing.mjs';
 import { resolveNextNode } from './route-node.mjs';
@@ -575,13 +575,9 @@ function generatedNodeSkillName(protocol, id) {
   return (slug(protocol.name) || 'workflow') + '-' + (slug(id) || 'node');
 }
 
-// 运行时状态文件的两个命名空间(项目根相对):旧命名空间与当前命名空间。
-// 仅在协议声明的 statePath 失效时用于交叉探测提示——探测只读、只改善错误措辞,
-// 不参与路径解析,也不改变控制流(绝不回退到另一命名空间,fail-closed 语义不变)。
-const LEGACY_RUNTIME_STATE_FILE = '.comet/flow-comet-state.json';
-const CURRENT_RUNTIME_STATE_FILE = '.flow-comet/flow-comet-state.json';
-
 // 组装 statePath 失效错误:声明的字段值 + 实际解析出的绝对路径 + 跨命名空间探测 + 调整指引。
+// 交叉探测的两个命名空间取值来自 state-schema.mjs 的运行时路径常量(单一来源,本文件不再硬编码);
+// 探测只读、只改善错误措辞,不参与路径解析,也不改变控制流(绝不回退到另一命名空间,fail-closed 语义不变)。
 // 探测基准 = statePath 所在目录的父目录(项目根布局下即项目根);该基准落在项目外时回落
 // 到项目根,保证探测点不越出项目。探测失败一律按"未探测到"处理,不掩盖主错误。
 async function statePathMissingError(declared, target) {
@@ -592,7 +588,7 @@ async function statePathMissingError(declared, target) {
   const probeBase = workflowPathInside(runRoot, parent) ? parent : runRoot;
   const declaredNormalized = declared.replaceAll('\\', '/');
   const elsewhere = [];
-  for (const candidate of [LEGACY_RUNTIME_STATE_FILE, CURRENT_RUNTIME_STATE_FILE]) {
+  for (const candidate of [LEGACY_RUNTIME_STATE_PATH, RUNTIME_STATE_PATH]) {
     if (candidate === declaredNormalized) continue;
     if (await fileExists(path.resolve(probeBase, ...candidate.split('/')))) elsewhere.push(candidate);
   }
@@ -605,7 +601,7 @@ async function statePathMissingError(declared, target) {
   lines.push(
     'fix: edit "state.statePath" in the workflow protocol JSON (' + protocolPath +
       ') — the value must be the state file path relative to the project root (current runtime namespace: ' +
-      CURRENT_RUNTIME_STATE_FILE + ')',
+      RUNTIME_STATE_PATH + ')',
   );
   const error = new Error(lines.join('\n'));
   error.code = 'ENOENT';

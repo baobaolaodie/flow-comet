@@ -5,7 +5,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, SKILL_PROTOCOL_FILES } from './protocol-utils.mjs';
-import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, looksLikeObjectLiteral } from './state-schema.mjs';
+import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, looksLikeObjectLiteral, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME } from './state-schema.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide, skipInit } from './context-init.mjs';
 import { taskOpeningAttrs, taskBlocks } from './task-parsing.mjs';
 import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath } from './route-node.mjs';
@@ -18,7 +18,8 @@ const runRoot = process.cwd();
 // 环境变量 → 内置默认 reference/workflow-protocol.json。--protocol 为全局参数（可放在 command
 // 之后的任意位置）；cliArgs = 去掉 command 后的剩余参数数组。
 const protocolPath = resolveProtocol(packageRoot, runRoot, process.argv.slice(3));
-const statePath = path.join(runRoot, '.flow-comet', 'flow-comet-state.json');
+// 状态文件路径（单一来源：state-schema.mjs 的运行时路径常量）
+const statePath = path.join(runRoot, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME);
 const specsRoot = path.join(runRoot, '.specs');
 
 // 内置节点常量: 内置 8 节点常量（供其他用途参照——如 guard 的节点→协议映射对照；skill-load 的 node

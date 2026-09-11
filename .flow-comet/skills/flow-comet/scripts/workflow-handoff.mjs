@@ -2,7 +2,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { validateStateFields, looksLikeObjectLiteral } from './state-schema.mjs';
+import { validateStateFields, looksLikeObjectLiteral, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME } from './state-schema.mjs';
 
 // workflow-handoff.mjs: Record subagent handoff evidence
 // evidence 统一记录在 subagent-execute 名下作为委托证据库——execute（串行委托）与 subagent-execute（并行委托）共用。不改成节点参数，保持最小改动。
@@ -12,7 +12,8 @@ import { validateStateFields, looksLikeObjectLiteral } from './state-schema.mjs'
 //   node workflow-handoff.mjs status                           -- show all handoff evidence
 
 const runRoot = process.cwd();
-const statePath = path.join(runRoot, '.flow-comet', 'flow-comet-state.json');
+// 状态文件路径（单一来源：state-schema.mjs 的运行时路径常量）
+const statePath = path.join(runRoot, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME);
 
 async function fileExists(f) { try { await fs.access(f); return true; } catch { return false; } }
 

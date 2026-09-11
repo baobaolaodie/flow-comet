@@ -8,6 +8,14 @@ import {
   resolveProtocol,
   validateProtocolSchema,
 } from './protocol-utils.mjs';
+// 运行时路径常量（单一来源：state-schema.mjs）——本脚本每次工具调用都会执行，故此处只 import
+// 同包内的本地 ESM 模块（与已存在的 protocol-utils.mjs import 同型，实测无可感知开销）；
+// 禁止在本文件重新硬编码命名空间/文件名。
+import {
+  RUNTIME_DIR,
+  RUNTIME_STATE_FILE_NAME,
+  RUNTIME_STATE_PATH,
+} from './state-schema.mjs';
 
 const event = process.argv[2] ?? 'before_tool';
 // 平台识别（1.4.0 多平台）：--platform codex argv 参数（prepare-env 注入 hook 命令时带平台标记）。
@@ -109,7 +117,7 @@ function targetAllowed(targetRel, whitelist, activeChange) {
 }
 
 // W4: state 文件禁手动工具写（directOverride 授权约束的写入路径物理控制）——
-// .flow-comet/flow-comet-state.json 是机器字段文件，只能由脚本通道（workflow-state 的
+// 运行时状态文件（.flow-comet/flow-comet-state.json）是机器字段文件，只能由脚本通道（workflow-state 的
 // execution-mode/record/init 等命令）管理；任何工具写（Write/Edit/Bash 命令级）→ BLOCK
 // （fail-closed）。hook 拦工具不拦脚本——脚本通道天然不触发 PreToolUse，不受影响。
 // 与 M1 归档白名单收窄同型：保护机器文件不被越权手改（含 direct 模式下白名单 [''] 曾
@@ -118,7 +126,9 @@ function targetAllowed(targetRel, whitelist, activeChange) {
 // State.json` 与机器状态文件指向同一实体——目标路径先 toLowerCase() 再与机器状态相对路径
 // 比较，变体同等 BLOCK（修复前精确等值比较被变体绕过 → fail-open）。其他平台
 // （大小写敏感文件系统）变体是不同文件，保持精确等值比较（不误拦合法路径）。
-const STATE_FILE_REL = '.flow-comet/flow-comet-state.json';
+// 取值唯一来源 = state-schema.mjs 的 RUNTIME_STATE_PATH（项目根相对的 POSIX 路径）。
+// 本文件不再硬编码该路径——命名空间/文件名变更只改 state-schema.mjs 一处。
+const STATE_FILE_REL = RUNTIME_STATE_PATH;
 const CASE_INSENSITIVE_FS = process.platform === 'win32' || process.platform === 'darwin';
 function blockedStateFileTarget(targetRel) {
   return CASE_INSENSITIVE_FS
@@ -147,7 +157,7 @@ const runRoot = (() => {
     const resolved = path.resolve(candidate);
     if (
       fsExistsSync(resolved) &&
-      (fsExistsSync(path.join(resolved, '.flow-comet', 'flow-comet-state.json')) ||
+      (fsExistsSync(path.join(resolved, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME)) ||
         fsExistsSync(path.join(resolved, '.claude', 'skills', 'flow-comet')))
     ) {
       return resolved;
@@ -156,7 +166,7 @@ const runRoot = (() => {
   let current = path.resolve(process.cwd());
   for (;;) {
     if (
-      fsExistsSync(path.join(current, '.flow-comet', 'flow-comet-state.json')) ||
+      fsExistsSync(path.join(current, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME)) ||
       fsExistsSync(path.join(current, '.claude', 'skills', 'flow-comet'))
     ) {
       return current;
@@ -426,10 +436,10 @@ function resolveWorkflowRelativePath(base, value, label, allowWildcards = false)
 
 
 async function statePath(protocol) {
-  // 协议未声明 state.statePath（最小 schema 协议）→ 回退默认 .flow-comet/flow-comet-state.json
-  // （与 workflow-state.mjs 写 state 的硬编码路径一致——防最小协议在 hook 下全量崩溃，
-  //  顺带消除"相位白名单读硬编码路径 vs 主流程读协议路径"的两段不一致）
-  const preferred = String(protocol.state?.statePath ?? '') || '.flow-comet/flow-comet-state.json';
+  // 协议未声明 state.statePath（最小 schema 协议）→ 回退默认运行时状态路径
+  // （与 workflow-state.mjs 写 state 的路径同源——同为 state-schema.mjs 常量，防最小协议在
+  //  hook 下全量崩溃，顺带消除"相位白名单读硬编码路径 vs 主流程读协议路径"的两段不一致）
+  const preferred = String(protocol.state?.statePath ?? '') || RUNTIME_STATE_PATH;
   const target = resolveWorkflowRelativePath(
     runRoot,
     preferred,
@@ -553,9 +563,9 @@ async function main() {
   if (nodes.length === 0) {
     throw new Error('workflow protocol has no enabled nodes');
   }
-  // Phase 写入控制：按 .flow-comet/flow-comet-state.json 的 currentNode 检查写入目标是否在白名单内
+  // Phase 写入控制：按运行时状态文件的 currentNode 检查写入目标是否在白名单内
   // state 文件读取失败时不阻断（state 可能不存在），继续执行后续安全检查
-  const stateFile = path.join(runRoot, '.flow-comet', 'flow-comet-state.json');
+  const stateFile = path.join(runRoot, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME);
   let currentNode = null;
   let executionMode = 'subagent';
   let activeChange = null;
