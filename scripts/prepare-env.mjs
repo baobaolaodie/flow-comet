@@ -597,12 +597,24 @@ function applyPathReplacements(root, replacements) {
 
 // ---------- 运行时文件位置迁移（旧命名空间 .comet/ → 新命名空间 .flow-comet/） ----------
 
-/** lstat 探测：返回 stat 或 null（**不跟随符号链接**——isSymbolicLink() 判定依赖 lstat）。 */
+/**
+ * lstat 探测：返回 stat 或 null（**不跟随符号链接**——isSymbolicLink() 判定依赖 lstat）。
+ * 只有「该路径确实不存在」一类错误返回 null：
+ *   - ENOENT：路径缺失；
+ *   - ENOTDIR：路径中某一段不是目录——该路径不可能存在为文件（跨平台等价于「不存在」：
+ *     同一形态在 Windows 报 ENOENT、在 POSIX 报 ENOTDIR）。
+ * 其余错误（EACCES / EPERM / EIO 等访问类故障）**原样抛出**——把访问故障当成「文件不存在」
+ * 会让迁移静默跳过：安装照常继续并报告「已跳过：旧位置不存在」，用户的旧状态却永远留在
+ * 旧位置（用户以为已迁移）——静默的数据丢失风险，必须中止并暴露。
+ */
 function lstatIfExists(target) {
   try {
     return fs.lstatSync(target);
-  } catch {
-    return null;
+  } catch (err) {
+    if (err && typeof err === 'object' && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) {
+      return null;
+    }
+    throw err;
   }
 }
 
@@ -657,7 +669,12 @@ function readMigratableRuntimeFile(oldPath, newPath, entry) {
   if (entry.validateJson) {
     let parsed = null;
     try {
-      parsed = JSON.parse(bytes.toString('utf8'));
+      // 校验容忍 UTF-8 BOM（与运行时判定一致：workflow-state.mjs 的 readJson 明确容忍 BOM，
+      // 外部写入如会话 Write 可能带 BOM）——否则运行时读得动的状态文件会被迁移判为损坏而
+      // 中止安装（同一份数据两处判定不一致）。strip 只作用于校验：备份与落盘始终写原始字节
+      // bytes，绝不改写用户数据（BOM strip 用字面形态——与 workflow-state.mjs 的 readJson 同形，
+      // 行为由场景 234 端到端锚定：若该字符被剥离会立即变红）。
+      parsed = JSON.parse(bytes.toString('utf8').replace(/^﻿/, ''));
     } catch (err) {
       throw new Error(
         `${oldPath} 内容不是合法 JSON（${err.message}）——保留原件未改动，中止迁移。` +
@@ -1408,6 +1425,13 @@ function ensureFlowKit(target) {
 
 async function main() {
   const { target, purge, yes, platform: platformArg } = parseArgs(process.argv);
+
+  // --purge 的 --yes 二次确认（防误传导致整删）**先于一切写操作**：被拒绝的命令不得产生
+  // 任何副作用——确认校验若排在迁移之后，命令最终被拒绝但迁移已经执行、目标已被修改。
+  if (purge && !yes) {
+    throw new Error('--purge 是破坏性操作，需显式 --yes 确认：node scripts/prepare-env.mjs --target <dir> --purge --yes');
+  }
+
   const platforms = await resolvePlatform(target, platformArg);
   const skillsSrc = path.join(BUNDLE_DRAFTS, 'skills');
   if (!fs.existsSync(skillsSrc)) {
@@ -1418,11 +1442,8 @@ async function main() {
   // 执行顺序第一段：运行时文件位置迁移（先于任何部署写入——失败即中止，保持可重跑的一致态）
   migrateRuntimeFiles(target);
 
-  // --purge：必须配合 --yes 二次确认（防误传导致整删）；逐平台删除生成物后重新生成
+  // --purge（已在上方确认 --yes）：逐平台删除生成物后重新生成
   if (purge) {
-    if (!yes) {
-      throw new Error('--purge 是破坏性操作，需显式 --yes 确认：node scripts/prepare-env.mjs --target <dir> --purge --yes');
-    }
     console.error(`[prepare-env] 警告: --purge 将删除 ${platformsLabel} 平台的以下生成物（不可恢复）：`);
     for (const platform of platforms) {
       for (const entry of platform.purge(target)) {

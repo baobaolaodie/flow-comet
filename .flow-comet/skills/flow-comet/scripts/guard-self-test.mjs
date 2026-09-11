@@ -6595,6 +6595,158 @@ const SCENARIOS = [
       }
     },
   },
+
+  // ---------- 外部审查修复：hook 双判定路径 / 迁移错误分类 / BOM / purge 时序 ----------
+
+  // 232: worktree 隔离区放行的判定路径一致性——放行分支此前只挂在 file_path 判定处
+  // （Bash 分支先执行并直接按协调者白名单判定），同一路径用 Write/Edit 放行、用 Bash
+  // 重定向写却被拦（判定随工具而变）。修复后两条判定共用同一隔离区判据——同路径同结论。
+  // 穿越形态（`..` 逃出隔离区）在两条路径上都必须仍被拦截：放行不是无条件的。
+  {
+    name: '232 hook worktree 放行：Bash 与 file_path 判定一致，穿越形态仍拦',
+    run: (dir) => {
+      writeState(dir, { ...baseState('subagent-execute'), status: 'running' });
+      const insideWorktree = path.join(dir, '.claude', 'worktrees', 'agent-abc123', 'src', 'x.mjs');
+      const posix = (p) => p.split(path.sep).join('/');
+      // ① file_path 判定：隔离区内写入放行（既有行为，防回归）
+      const viaWrite = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: insideWorktree } });
+      assertExit(viaWrite, 0);
+      assertOut(viaWrite, 'workflow-hook-guard-ok');
+      // ② Bash 判定：同一路径的命令级写入同样放行（修复前按协调者白名单拦截 → RED）
+      const viaBash = runHook(['before_tool'], dir,
+        { tool_name: 'Bash', tool_input: { command: 'echo x > "' + posix(insideWorktree) + '"' } });
+      assertExit(viaBash, 0);
+      assertOut(viaBash, 'workflow-hook-guard-ok');
+      // ③ 穿越形态：`..` 归一化后逃出隔离区 → 两条判定都仍拦截
+      const escape = posix(path.join(dir, '.claude', 'worktrees', 'agent-abc123'))
+        + '/../../src/evil.mjs';
+      const viaWriteEscape = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: escape } });
+      assertExit(viaWriteEscape, 2);
+      assertOut(viaWriteEscape, 'BLOCKED');
+      const viaBashEscape = runHook(['before_tool'], dir,
+        { tool_name: 'Bash', tool_input: { command: 'echo x > "' + escape + '"' } });
+      assertExit(viaBashEscape, 2);
+      assertOut(viaBashEscape, 'BLOCKED');
+    },
+  },
+
+  // 233: 迁移前置探测的错误分类——lstat 的**访问类**故障（EACCES/EPERM/EIO）不得被当作
+  // 「文件不存在」：吞掉会让迁移报告「已跳过：旧位置不存在」而安装照常继续，用户的旧状态
+  // 永远留在旧位置（静默的数据丢失风险）。修复后只有「确实不存在」类（ENOENT/ENOTDIR）
+  // 返回 null，其余原样抛出、安装中止并暴露问题。
+  // 构造方式：本机/CI 无法用真实文件系统稳定造出访问类故障（受权限与平台差异支配，
+  // 见场景 223 的链接权限先例），故用 `--require` 预加载在**子进程内**把 lstatSync 对
+  // 「旧位置状态文件」的探测替换为抛 EACCES（故障注入只命中该路径，其余调用走真实实现）——
+  // 驱动的仍是真实安装器主流程与真实文件系统状态。
+  {
+    name: '233 迁移探测错误分类：lstat 访问类故障中止安装，ENOENT 仍按不存在跳过',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      // ① ENOENT（确实不存在）→ 仍按「无需迁移」跳过、安装继续（行为未变）
+      const noLegacy = path.join(dir, 'proj-no-legacy');
+      fs.mkdirSync(noLegacy, { recursive: true });
+      const skipped = runPrepareEnv(['--target', noLegacy, '--platform', 'claude-code'], dir);
+      assertExit(skipped, 0);
+      assertOut(skipped, '已跳过');
+      assertOut(skipped, '无需迁移');
+      // ② 访问类故障 → 中止（修复前被吞成「不存在」→ 已跳过 + 安装继续 → RED）
+      const proj = path.join(dir, 'proj-lstat-fault');
+      const stateBytes = migratableStateBytes();
+      writeSharedCometDir(proj, stateBytes);
+      const preloadName = 'lstat-fault-preload.cjs';
+      writeFile(dir, preloadName, [
+        "const fs = require('node:fs');",
+        "const path = require('node:path');",
+        'const realLstatSync = fs.lstatSync;',
+        'fs.lstatSync = function (target, ...rest) {',
+        '  const segments = path.resolve(String(target)).split(path.sep);',
+        "  const isLegacyStateFile = segments[segments.length - 1] === 'flow-comet-state.json'",
+        "    && segments[segments.length - 2] === '.comet';",
+        '  if (isLegacyStateFile) {',
+        "    const error = new Error('EACCES: permission denied, lstat ' + JSON.stringify(String(target)));",
+        "    error.code = 'EACCES';",
+        '    throw error;',
+        '  }',
+        '  return realLstatSync.call(fs, target, ...rest);',
+        '};',
+        '',
+      ].join('\n'));
+      const spawned = spawnSync(
+        process.execPath,
+        ['--require', path.join(dir, preloadName), PREPARE_ENV, '--target', proj, '--platform', 'claude-code'],
+        { cwd: dir, env: { ...process.env }, encoding: 'utf8', timeout: 120000 },
+      );
+      const res = { status: spawned.status ?? 1, output: String(spawned.stdout || '') + String(spawned.stderr || '') };
+      if (res.status === 0) throw new Error('访问类故障应中止安装（exit 非 0），实际 exit 0');
+      assertOut(res, 'EACCES');
+      assertNotOut(res, '已跳过');
+      assertNotOut(res, '已迁移');
+      // 旧件未被处置、新位置不生成文件（中止于任何写操作之前）
+      if (!fs.readFileSync(path.join(proj, LEGACY_RUNTIME_DIR, RUNTIME_STATE_NAME)).equals(stateBytes)) {
+        throw new Error('中止路径下旧件被改写');
+      }
+      if (fs.existsSync(path.join(proj, RUNTIME_DIR, RUNTIME_STATE_NAME))) throw new Error('中止时新位置不应生成文件');
+      if (migrationBackups(proj).length !== 0) throw new Error('中止时不应产生备份');
+    },
+  },
+
+  // 234: 迁移校验与运行时判定的 BOM 一致性——运行时（workflow-state.mjs readJson）明确容忍
+  // UTF-8 BOM（外部写入如会话 Write 可能带 BOM）。迁移侧此前不 strip BOM：同一份数据运行时
+  // 读得动、迁移判「不是合法 JSON」而中止安装。修复后校验侧同样容忍 BOM，且**只影响校验**——
+  // 备份与新落盘必须保留原始字节（不得改写用户数据）。
+  {
+    name: '234 状态迁移接受带 BOM 的旧状态：迁移成功且备份与新位置保留原始字节',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj');
+      const bomStateBytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), migratableStateBytes()]);
+      writeSharedCometDir(proj, bomStateBytes);
+      writeMigratedProjectArtifacts(proj); // ③ 运行时读取断言需要活动 change 目录在场
+      const res = runPrepareEnv(['--target', proj, '--platform', 'claude-code'], dir);
+      assertExit(res, 0);
+      assertOut(res, '已迁移');
+      // ① 新位置落位且逐字节一致（BOM 保留——校验容忍不改写数据）
+      const newState = path.join(proj, RUNTIME_DIR, RUNTIME_STATE_NAME);
+      if (!fs.readFileSync(newState).equals(bomStateBytes)) {
+        throw new Error('新位置状态未保留原始字节（BOM 被剥离或内容被改写）');
+      }
+      // ② 备份同样逐字节一致
+      const backups = migrationBackups(proj);
+      if (backups.length !== 1) throw new Error('迁移应恰生成 1 份备份，实际: ' + JSON.stringify(backups));
+      if (!fs.readFileSync(path.join(proj, RUNTIME_DIR, backups[0])).equals(bomStateBytes)) {
+        throw new Error('备份未保留原始字节（BOM 被剥离或内容被改写）');
+      }
+      // ③ 迁移后运行时能读（BOM 容忍是运行时的既有设计决策——两处判定一致）
+      const st = runInstalled(proj, '.claude', 'workflow-state.mjs', ['status']);
+      assertExit(st, 0);
+      assertOut(st, MIGRATION_CHANGE);
+    },
+  },
+
+  // 235: 被拒绝的命令不得产生副作用——`--purge` 缺 `--yes` 的确认校验此前排在运行时文件
+  // 迁移之后：命令最终被拒绝，但迁移已经执行、目标已被修改。修复后确认校验先于一切写操作。
+  {
+    name: '235 purge 缺 --yes：命令被拒且迁移未发生（零副作用）',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj');
+      const stateBytes = migratableStateBytes();
+      writeSharedCometDir(proj, stateBytes);
+      const res = runPrepareEnv(['--target', proj, '--platform', 'claude-code', '--purge'], dir);
+      if (res.status === 0) throw new Error('--purge 缺 --yes 应拒绝执行（exit 非 0），实际 exit 0');
+      assertOut(res, '--yes');
+      assertNotOut(res, '已迁移');
+      // 零副作用：旧件原位未动、新位置不生成文件、不产生备份、无安装产物
+      const oldPath = path.join(proj, LEGACY_RUNTIME_DIR, RUNTIME_STATE_NAME);
+      if (!fs.existsSync(oldPath)) throw new Error('被拒绝的命令仍执行了迁移（旧位置文件已消失）');
+      if (!fs.readFileSync(oldPath).equals(stateBytes)) throw new Error('被拒绝的命令改写了旧件');
+      if (fs.existsSync(path.join(proj, RUNTIME_DIR, RUNTIME_STATE_NAME))) throw new Error('被拒绝的命令仍写入了新位置');
+      if (migrationBackups(proj).length !== 0) throw new Error('被拒绝的命令仍产生了备份');
+      if (fs.existsSync(path.join(proj, '.claude'))) throw new Error('被拒绝的命令仍产生了安装产物');
+    },
+  },
 ];
 
 // ---------- 运行 ----------

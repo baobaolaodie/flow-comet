@@ -17,7 +17,9 @@ Responsibility: 委托 [P] 并行任务给子代理，要求加载 flow-comet-de
 
 > **Codex 平台委托方式（2026-08-13 调研修正 + 实测）**：Codex CLI 无 `--worktree` 一键 flag（openai/codex#12862 跟踪中），但 git worktree 是标准支持方式（Codex App 内置 worktree；子代理运行时自动创建 worktree 隔离）——本节点委托与 Claude Code 的 worktree 隔离语义对齐：协调者对每个 parallel 任务 `git worktree add <worktree路径> -b <分支>` → 在 worktree 内 `codex exec` 委托（fresh-context，prompt 内联任务块 + AC + 强制加载 flow-comet-dev 与回传 Return Contract，`</dev/null>` 防 stdin 卡住）→ 子代理回报 commitHash 后校验存在性 + 任务完成回收（`git worktree remove`）。
 > **沙箱要求（实测 2026-08-13）**：worktree 的 `.git` 是主仓共享——`workspace-write`/`git-write-access` 沙箱均被 Codex 硬拦截（index.lock / objects / COMMIT_EDITMSG Permission denied）；子代理必须用 `sandbox_mode="danger-full-access"` 才能完成 git 提交（worktree 隔离已限定写范围，full-access 仅用于让 git 提交可行）。**信任边界**：`danger-full-access` 是宿主级信任边界（不隔离凭据/网络访问）——仅委托可信子代理，并移除委托环境中的不必要凭据。
-> **hook 会话 root 继承（实测 2026-08-15）**：Codex worktree 子代理的会话 root 仍是主仓库，hook 以主仓库状态判定——`execute`/`subagent-execute` 阶段协调者白名单 `.specs/` 会拦截子代理在 worktree 内写源码（CC 平台的守卫改以路径前缀判定：写入落在 `.claude/worktrees/**` 隔离区内即放行，两者判据不同）。规避：子代理用 Python `open()` 等 File API 直写（命令级检测限制）或协调者代操作；详见 worktree-notes 4.5。handoff 记录（workflow-handoff request/result）与 Return Contract 校验机制不变。
+> **hook 会话 root 继承（实测 2026-08-15；2026-09-12 修订）**：Codex worktree 子代理的会话 root 仍是主仓库，hook 以主仓库状态判定——`execute`/`subagent-execute` 阶段协调者白名单 `.specs/` 会拦截子代理在 worktree 内写源码。**两平台的判据不同，覆盖范围也不同**：CC 的守卫按路径前缀识别隔离区（写入落在 `.claude/worktrees/**` 内即放行，`file_path` 与 Bash 命令两条判定路径同语义）；Codex 靠手工 `git worktree add <任意路径>` 建隔离区，那些路径不在该前缀下，**不被放行覆盖，写入会被协调者白名单拦截**。
+> **出路（受支持路径，二选一）**：① **CC 平台**——用 `Agent` 工具的 `isolation: "worktree"` 委托（守卫已覆盖该区，见步骤 3）；② **Codex 平台**——**串行执行**：不使用并行委托，任务逐个走 `execute` 节点交付，直到守卫也能识别手工 worktree（属机制变更，超出本节点范围）。
+> **不提供/不使用规避通道**：绕开守卫命令级检测的写法（如用 Python `open()` 等 File API 直写）**不是受支持路径**——它绕过的是写入防线本身（防线失效时无拦截、无记录），与三层防御的设计相反。遇到拦截一律走上面的出路，或如实上报 BLOCKED，**不得以更换工具形态绕过**。handoff 记录（workflow-handoff request/result）与 Return Contract 校验机制不变。
 
 ## Guidance
 
@@ -79,7 +81,7 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
    - Instruction to produce `<task-id>-SUMMARY.md` in `.specs/<change-id>/` following the `flow-kit/templates/SUMMARY.md` template（标题/首部/段序保真，另补 flow-comet 增量 `## 自检方法` 段）。
    - **提交边界警告**:提交**只含该任务 write_files 范围内的文件**(含测试文件)——不得包含 TASK.md 与其他协调者维护的 .specs 工件(新 change 提交越界 BLOCKED;实测子代理提交含 TASK.md 被 W2-D 拦截)。**提交从属规则**:任务专属的 `<task-id>-SUMMARY.md`(位于 `.specs/<change-id>/`,是 flow-comet 强制产物)允许随任务提交属流程默认豁免——目标仓库的既有规定优先,若目标仓库忽略清单等既有规定拒绝其入库,被拒即为正确行为,严禁 force-add 强加越库提交;委托校验对任务摘要的豁免属于校验宽容度,不是入库指令。
 
-3. **Delegate to subagents**（强制 worktree isolation）: 所有并行子代理**必须**使用 `Agent` 工具的 `isolation: "worktree"`，**禁止共享 cwd 直接委托**——hook 白名单依赖 worktree 隔离：守卫对归一化后位于 `.claude/worktrees/**`（worktree 隔离区）的写入直接放行，共享 cwd 的子代理写入落在该区之外，会被 subagent-execute 协调者白名单误拦。Each subagent:
+3. **Delegate to subagents**（平台相关——强制隔离的要求只对 CC 成立，见下）: **Claude Code 平台**：所有并行子代理**必须**使用 `Agent` 工具的 `isolation: "worktree"`，**禁止共享 cwd 直接委托**——hook 白名单依赖 worktree 隔离：守卫对归一化后位于 `.claude/worktrees/**`（worktree 隔离区）的写入直接放行（`file_path` 与 Bash 命令两条判定路径同语义），共享 cwd 的子代理写入落在该区之外，会被 subagent-execute 协调者白名单误拦。**Codex 平台**：`isolation: "worktree"` 是 CC 的 `Agent` 工具能力，Codex 无等价参数，手工 `git worktree add <任意路径>` 的路径**不被守卫识别**（见上方「Codex 平台委托方式」的出路）——故本节点在 Codex 上**不委托并行子代理**：任务改为串行交付（`execute` 节点逐个处理）；**不得用 File API 直写等规避通道代替**（绕过写入防线不是受支持路径）。Each subagent (CC):
    - Reads TASK.md for its specific task block.
    - Executes the full TDD protocol (RED/GREEN/REFACTOR). **纯文档/纯配置任务无生产代码可测时，`redEvidence` 与 `greenEvidence` 均允许 `{"command":"N/A (non-code task)","output":"..."}` 形态**（guard W1-D 接受此形状；不得伪造测试输出）。
    - Greps existing abstractions (R6.4).

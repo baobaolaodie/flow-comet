@@ -116,6 +116,21 @@ function targetAllowed(targetRel, whitelist, activeChange) {
   });
 }
 
+// worktree 隔离区判定(共享):CC 的隔离委托把子代理工作区放在 <项目根>/.claude/worktrees/<agent-id>/
+// 下。子代理在该区内写源码是设计意图(见上方 phase 白名单注释「源码由 worktree 子代理写」);
+// 但 runRoot 锚定到主仓后(v1.5.0-rc.2 引入的锚定链),区内路径被相对化为
+// .claude/worktrees/<id>/...,不在协调者白名单内 —— 子代理被误判为协调者而遭拦截
+// (回归:rc.2 之前 runRoot 取 cwd=worktree,区内无 state 故按设计放行)。
+// 该区与主仓状态隔离(区内无 state 文件),故按隔离区语义放行;内容边界仍由 TASK write_files
+// 与提交子集校验约束。判据用归一化后的相对路径(防 ../../ 穿越绕过)。
+// 单一实现:file_path 判定与 Bash 命令写入判定共用同一函数——两条判定路径必须同语义,
+// 否则同一路径会因所选工具而异(Write/Edit 放行、Bash 重定向被拦)。
+function isInsideAgentWorktree(targetRel) {
+  if (typeof targetRel !== 'string' || targetRel === '') return false;
+  const normalized = path.posix.normalize(targetRel.replaceAll('\\', '/'));
+  return normalized.startsWith('.claude/worktrees/');
+}
+
 // W4: state 文件禁手动工具写（directOverride 授权约束的写入路径物理控制）——
 // 运行时状态文件（.flow-comet/flow-comet-state.json）是机器字段文件，只能由脚本通道（workflow-state 的
 // execution-mode/record/init 等命令）管理；任何工具写（Write/Edit/Bash 命令级）→ BLOCK
@@ -601,6 +616,8 @@ async function main() {
         if (targetRel !== null && blockedStateFileTarget(targetRel)) {
           blockStateFileWrite(t);
         }
+        // worktree 隔离区放行(与 file_path 判定共用 isInsideAgentWorktree——同路径同结论)
+        if (targetRel !== null && isInsideAgentWorktree(targetRel)) continue;
         const allowed = targetRel !== null && effectiveWhitelist !== null && targetAllowed(targetRel, effectiveWhitelist, activeChange);
         if (!allowed) {
           hookBlock(
@@ -615,16 +632,8 @@ async function main() {
   }
 
   // ── worktree 隔离区放行（CC Agent isolation:"worktree"）────────────────────
-  // CC 的隔离委托把子代理工作区放在 <项目根>/.claude/worktrees/<agent-id>/ 下。子代理
-  // 在该区内写源码是设计意图（见上方 phase 白名单注释「源码由 worktree 子代理写」）；
-  // 但 runRoot 锚定到主仓后（v1.5.0-rc.2 引入的锚定链），区内路径被相对化为
-  // .claude/worktrees/<id>/...，不在协调者白名单内 —— 子代理被误判为协调者而遭拦截
-  // （回归：rc.2 之前 runRoot 取 cwd=worktree，区内无 state 故按设计放行）。
-  // 该区与主仓状态隔离（区内无 .flow-comet/flow-comet-state.json），故按隔离区语义放行；
-  // 内容边界仍由 TASK write_files 与提交子集校验约束。判据用归一化后的相对
-  // 路径（防 ../../ 穿越绕过）。
-  const normalizedTarget = target ? path.posix.normalize(String(target).replaceAll('\\', '/')) : '';
-  if (normalizedTarget.startsWith('.claude/worktrees/')) {
+  // 判定实现见 isInsideAgentWorktree（与上方 Bash 命令写入判定共用——同一路径不因工具而异）。
+  if (isInsideAgentWorktree(target)) {
     hookOk();
     return;
   }
