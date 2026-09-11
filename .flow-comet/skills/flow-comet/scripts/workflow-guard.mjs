@@ -575,6 +575,43 @@ function generatedNodeSkillName(protocol, id) {
   return (slug(protocol.name) || 'workflow') + '-' + (slug(id) || 'node');
 }
 
+// 运行时状态文件的两个命名空间(项目根相对):旧命名空间与当前命名空间。
+// 仅在协议声明的 statePath 失效时用于交叉探测提示——探测只读、只改善错误措辞,
+// 不参与路径解析,也不改变控制流(绝不回退到另一命名空间,fail-closed 语义不变)。
+const LEGACY_RUNTIME_STATE_FILE = '.comet/flow-comet-state.json';
+const CURRENT_RUNTIME_STATE_FILE = '.flow-comet/flow-comet-state.json';
+
+// 组装 statePath 失效错误:声明的字段值 + 实际解析出的绝对路径 + 跨命名空间探测 + 调整指引。
+// 探测基准 = statePath 所在目录的父目录(项目根布局下即项目根);该基准落在项目外时回落
+// 到项目根,保证探测点不越出项目。探测失败一律按"未探测到"处理,不掩盖主错误。
+async function statePathMissingError(declared, target) {
+  const lines = [
+    'workflow-run statePath does not exist: ' + declared + ' (resolved to ' + target + ')',
+  ];
+  const parent = path.resolve(path.dirname(target), '..');
+  const probeBase = workflowPathInside(runRoot, parent) ? parent : runRoot;
+  const declaredNormalized = declared.replaceAll('\\', '/');
+  const elsewhere = [];
+  for (const candidate of [LEGACY_RUNTIME_STATE_FILE, CURRENT_RUNTIME_STATE_FILE]) {
+    if (candidate === declaredNormalized) continue;
+    if (await fileExists(path.resolve(probeBase, ...candidate.split('/')))) elsewhere.push(candidate);
+  }
+  if (elsewhere.length > 0) {
+    lines.push(
+      'hint: a state file exists in the other runtime namespace (' + elsewhere.join(', ') +
+        ') — the project may not be migrated yet; run the installer (prepare-env) to finish the migration, or correct the statePath field',
+    );
+  }
+  lines.push(
+    'fix: edit "state.statePath" in the workflow protocol JSON (' + protocolPath +
+      ') — the value must be the state file path relative to the project root (current runtime namespace: ' +
+      CURRENT_RUNTIME_STATE_FILE + ')',
+  );
+  const error = new Error(lines.join('\n'));
+  error.code = 'ENOENT';
+  return error;
+}
+
 async function statePath(protocol) {
   const preferred = String(protocol.state?.statePath ?? '');
   const target = resolveWorkflowRelativePath(
@@ -582,12 +619,15 @@ async function statePath(protocol) {
     preferred,
     'workflow-run statePath',
   ).target;
-  await inspectWorkflowProtectedPath(
+  const inspection = await inspectWorkflowProtectedPath(
     runRoot,
     target,
     'workflow-run statePath',
     'file',
   );
+  if (!inspection.exists) {
+    throw await statePathMissingError(preferred, target);
+  }
   return target;
 }
 
