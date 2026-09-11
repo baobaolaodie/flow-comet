@@ -8,6 +8,7 @@
  * 用法：
  *   node contract-check.mjs <field> [--project <root>]
  *   例：node contract-check.mjs status
+ *   --project <root> 优先于当前目录（未指定时用 cwd）
  *
  * 输出：后端定义清单 + 前端定义清单，人工比对（脚本不自动判定正确性——需要业务语义）。
  */
@@ -22,13 +23,24 @@ if (!field) {
   process.exit(1);
 }
 
+// 正则元字符转义（field 直接拼进 RegExp 会改变匹配语义：`item[0]` 被当字符类；`[` 直接抛错）
+const escapedField = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// --project <root>：显式项目根优先于 cwd 兜底；其后缺值（或缺值处又跟了选项）→ 明确报错
+const projectFlagIndex = process.argv.indexOf('--project');
+const projectRoot = projectFlagIndex === -1 ? null : process.argv[projectFlagIndex + 1];
+if (projectFlagIndex !== -1
+  && (typeof projectRoot !== 'string' || projectRoot.trim() === '' || projectRoot.startsWith('--'))) {
+  console.error('用法: node contract-check.mjs <field> [--project <root>]');
+  console.error('--project 后缺少项目根目录值');
+  process.exit(1);
+}
+
 // 定位后端/前端目录（从 project root 或约定路径）
 async function findRoots() {
   const candidates = [
+    ...(projectRoot ? [projectRoot] : []),
     runRoot,
-    ...(process.argv.includes('--project')
-      ? [process.argv[process.argv.indexOf('--project') + 1]]
-      : []),
   ];
   for (const root of candidates) {
     const backend = path.join(root, 'pingpong-tournament', 'app');
@@ -37,7 +49,8 @@ async function findRoots() {
       return { root, backend, frontend };
     }
   }
-  return { root: runRoot, backend: path.join(runRoot, 'app'), frontend: path.join(runRoot, 'src') };
+  const fallback = projectRoot ?? runRoot;
+  return { root: fallback, backend: path.join(fallback, 'app'), frontend: path.join(fallback, 'src') };
 }
 
 async function exists(p) {
@@ -77,11 +90,11 @@ async function main() {
   // 后端：Pydantic 校验 + service 赋值
   console.log('## 后端（Pydantic 校验 / service 赋值）');
   const backendHits = await grepFiles(backend, [
-    `(?:Field\\([^)]*ge=|le=)[^)]*\\b${field}\\b`,
-    `\\b${field}\\s*=\\s*Field\\(`,
-    `\\b${field}\\s*=\\s*\\d+`,       // status = 3 类赋值
+    `(?:Field\\([^)]*ge=|le=)[^)]*\\b${escapedField}\\b`,
+    `\\b${escapedField}\\s*=\\s*Field\\(`,
+    `\\b${escapedField}\\s*=\\s*\\d+`,       // status = 3 类赋值
     `status=\\d+`,                     // update_status(..., status=N)
-    `${field}\\s*:\\s*Literal`,
+    `${escapedField}\\s*:\\s*Literal`,
   ]);
   if (backendHits.length === 0) {
     console.log('（未命中——该字段可能无后端校验/赋值，或路径不对）');
@@ -98,9 +111,9 @@ async function main() {
   // 前端：map / derive / Form rules
   console.log('\n## 前端（map / derive / form rules）');
   const frontendHits = await grepFiles(frontend, [
-    `\\b${field}===\\s*\\d+`,          // status===3
-    `\\b${field}\\s*===?\\s*\\d+`,
-    `['"]${field}['"]\\s*:.*ge|le|min|max`,  // 校验
+    `\\b${escapedField}===\\s*\\d+`,          // status===3
+    `\\b${escapedField}\\s*===?\\s*\\d+`,
+    `['"]${escapedField}['"]\\s*:.*ge|le|min|max`,  // 校验
     `Record<number.*>`,
     `Field\\([^)]*ge=|le=`,
   ]);

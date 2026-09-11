@@ -5,12 +5,15 @@
 // （无则 null）。判定「并行 pending 任务」统一为 parallel===true 且 status==='pending'。
 
 // 解析 <task ...> 开标签属性。输入为包含开标签的块字符串；非 <task 开头 / 无开标签 → null。
+// 属性值接受双引号与单引号两种形态（XML 两种引号均合法；生产者契约未限定引号种类）——
+// 只认双引号会把合法的单引号属性任务解析成 { id: null, status: null, parallel: false }，
+// 导致路由误判（route-node 不认并行）与并行写写检测漏判。
 export function taskOpeningAttrs(block) {
   const m = String(block ?? '').match(/<task\b([^>]*)>/);
   if (!m) return null;
   const attrs = {};
-  for (const attr of m[1].matchAll(/([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*"([^"]*)"/g)) {
-    attrs[attr[1]] = attr[2];
+  for (const attr of m[1].matchAll(/([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
+    attrs[attr[1]] = attr[2] ?? attr[3];
   }
   return {
     id: attrs.id ?? null,

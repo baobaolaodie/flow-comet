@@ -27,5 +27,5 @@ description: "Use only when explicitly invoked as /flow-comet-health; periodic c
 
 ## 边界
 
-- 只读 + 报告，不自动改业务代码
+- 业务代码只读；写入仅限巡检报告（`.specs/health/<date>.md`）与 CONTEXT 技术债段——不自动改业务代码
 - 发现的冗余/债项排入 backlog，不在本命令内修

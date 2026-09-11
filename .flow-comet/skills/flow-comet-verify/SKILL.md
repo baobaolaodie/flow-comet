@@ -126,7 +126,7 @@ Schema: `flowkit.verify.v1`
 |-----------|--------------|----------|------|
 | `uat-doc` | file | yes | `.specs/<change-id>/UAT.md` |
 | `test-doc` | file | yes | `.specs/<change-id>/TEST.md` (must already exist) |
-| `lessons-updated` | file | yes | `.specs/LESSONS.md` (nominated lessons added) |
+| `lessons-updated` | file | conditional | `.specs/LESSONS.md` (if new lessons nominated；无合格条目时扫描本身即完成，不新增条目) |
 
 Evidence: `verification-result` (required)
 

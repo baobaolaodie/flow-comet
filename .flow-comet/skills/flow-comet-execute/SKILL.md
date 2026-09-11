@@ -56,7 +56,7 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 - `.specs/<change-id>/DESIGN.md` or `DESIGN-lite.md` must exist — agent must read section 0 (tech stack) and section 0.5 (architecture alignment).
 - `.specs/LESSONS.md` must exist (or be created from template if missing).
 - For frontend/UI tasks: `.specs/<change-id>/UI-DESIGN.md` must exist.
-- 若 `.specs/<change>/PROGRESS.md` 存在，必须先读取"已排除方案"段（R1.6 反重复），确认当前计划不在排除列表中。完成后删除 PROGRESS.md，有用信息迁移至 SUMMARY。
+- 若当前任务的 `<task-id>-PROGRESS.md`（位于 `.specs/<change>/`；与 Recovery 段及归档期 `*-PROGRESS.md` 扫描同口径）存在，必须先读取"已排除方案"段（R1.6 反重复），确认当前计划不在排除列表中。完成后删除该文件，有用信息迁移至 SUMMARY。
 - 委托前按 `reference/dirty-worktree.md` 检查脏工作树（`.specs/<change-id>/` 未提交工件会触发 entry execute 的 WORKTREE WARN；verify 前为自查建议，无 guard 检查）。
 
 ### Steps（subagent 模式 · 协调者流程，统一委托子代理）

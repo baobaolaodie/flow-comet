@@ -140,7 +140,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record design '{"summa
 
 | Guardrail ID | Label | Validation Type |
 |--------------|-------|-----------------|
-| `design-artifacts` | DESIGN.md exists with section 0 | artifact-exists |
+| `design-artifacts` | DESIGN.md (or DESIGN-lite.md) exists with section 0 | artifact-exists |
 | `architecture-aligned` | Section 0.5 populated for brownfield | 执行纪律（review 把关），guard 不校验 |
 | `ui-design-artifacts` | UI-DESIGN.md exists for frontend projects | 执行纪律（review 把关），guard 不校验 |
 
@@ -155,7 +155,7 @@ If the script prints `SKILL: flow-comet-plan`, load that Skill next.
 ## Recovery
 
 1. Re-run entry check to confirm workflow state.
-2. Read `.specs/<change-id>/DESIGN.md` — if exists with section 0 populated and user confirmed, design phase is done.
-3. If DESIGN.md exists but incomplete, resume from the first missing section (check 0, 0.5, 1-5, 9).
+2. Read `.specs/<change-id>/DESIGN.md` — 轻量流程允许 `.specs/<change-id>/DESIGN-lite.md`(guard 同口径:DESIGN.md 优先、DESIGN-lite 兜底)——if exists with section 0 populated and user confirmed, design phase is done.
+3. If the design doc exists but incomplete, resume from the first missing section (check 0, 0.5, 1-5, 9).
 4. If frontend project: check `.specs/<change-id>/UI-DESIGN.md` existence.
 5. Do not repeat confirmed decisions. Resume from the first incomplete artifact.

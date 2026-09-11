@@ -571,10 +571,13 @@ const TASK_MIXED_PSP =
   '<task id="T01" parallel="false" status="pending"><action>实现 T01（串行任务，动作描述含 literal parallel="true" 字样，不影响并行标记）</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify><depends_on>P01,P02</depends_on></task>\n' +
   '<task id="P03" parallel="true" status="pending"><action>实现 P03</action><write_files>src/p3.mjs</write_files><verify>node --check src/p3.mjs</verify><depends_on>T01</depends_on></task>\n' +
   '<task id="P04" parallel="true" status="pending"><action>实现 P04</action><write_files>src/p4.mjs</write_files><verify>node --check src/p4.mjs</verify><depends_on>T01</depends_on></task>\n';
-// 并存前+串在后（P→S）：并行 P01/P02 → 串行 T01（合法成组）
+// 并存前+串在后（P→S）：并行 P01/P02 → 串行 T01（合法成组）。
+// 引号形态回归（解析一致性）：P01/P02 用**单引号属性**（XML 合法形态）——单引号属性若不解析，
+// 并行任务退化为非并行（route-node 误路由到 execute、并行写写检测漏判），本常量被场景 175 用于
+// 断言 `NODE: subagent-execute`，漏解析即 RED。
 const TASK_VALID_PS =
-  '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n' +
-  '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>src/p2.mjs</write_files><verify>node --check src/p2.mjs</verify></task>\n' +
+  "<task id='P01' parallel='true' status='pending'><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n" +
+  "<task id='P02' parallel='true' status='pending'><action>实现 P02</action><write_files>src/p2.mjs</write_files><verify>node --check src/p2.mjs</verify></task>\n" +
   '<task id="T01" parallel="false" status="pending"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify><depends_on>P01,P02</depends_on></task>\n';
 // 串在前+并在后（S→P）：串行 T01 → 并行 P01/P02（合法成组）
 const TASK_VALID_SP =
@@ -2444,18 +2447,27 @@ const SCENARIOS = [
     },
   },
 
-  // 91: CONTEXT 存在但缺段 + --init-context → INIT-VALIDATE-FAILED 重写指引 + 不写 last_intel_scan
+  // 91: CONTEXT 存在但缺段 + --init-context → INIT-VALIDATE-FAILED 重写指引 + 不写 last_intel_scan。
+  // ② 段名判定须为**精确标题**匹配（非全文 includes）：段名变体（`## 技术栈补充`）与正文文本提及
+  // 都不得算作段存在——旧 includes 判据下二者会假通过（校验放行 + 写 last_intel_scan）。
   {
     name: '91 CONTEXT 缺段 --init-context → 重写指引不写 state',
     run: (dir) => {
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n');
       writeFile(dir, 'package.json', '{"name":"x"}');
-      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      let res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
       assertExit(res, 0);
       assertOut(res, 'INIT-VALIDATE-FAILED');
       assertOut(res, '重写');
-      const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      let st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (st.last_intel_scan) throw new Error('校验失败不应写 last_intel_scan');
+      // ② 段名变体（含正文提及）不满足必填段
+      writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n## 技术栈补充\nx\n## 域语言说明\n| 术语 | 定义 |\n|---|---|\n| 例 | 定义 |\n## 已锁决策说明\n- [2026-08-01] 决策一\n## 默认偏好补充\nx\n## 既有抽象索引附录\nx\n## intel-scan 元数据附录\n- **last_intel_scan**: x\n- **scanner**: x\n- **下次重扫建议**: x\n正文提及 域语言 与 默认偏好 与 既有抽象索引（文本非标题）。\n');
+      res = runState(['init', CHANGE_ID + '-2', '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'INIT-VALIDATE-FAILED');
+      st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      if (st.last_intel_scan) throw new Error('段名变体不应通过校验（不应写 last_intel_scan）');
     },
   },
 
@@ -5582,6 +5594,8 @@ const SCENARIOS = [
   // write_files 重叠（链式重命名的 .txt 事故面：任务 A 写 bak_a.txt、任务 B 也写 bak_a.txt，
   // 无 depends_on）：新 change 的 plan 出口应 BLOCKED（含任务 id 对、重叠路径、恢复指引
   // 「补显式 depends_on 或拆串行」）。修复前 plan 出口无此检测 = 预期 RED（重叠静默放行）。
+  // 引号形态：P02 用单引号属性（XML 合法形态）——属性不解析会让 P02 退化为非并行 → 重叠漏判
+  // （本场景退出码/消息断言即 RED），与 TASK_VALID_PS 的路由断言构成两条下游消费路径的覆盖。
   {
     name: '202 plan exit BLOCKED：新 change 写写重叠（链式重命名 .txt 事故面）',
     run: (dir) => {
@@ -5591,7 +5605,7 @@ const SCENARIOS = [
       writeState(dir, st);
       const tasks =
         '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n' +
-        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n';
+        "<task id='P02' parallel='true' status='pending'><action>实现 P02</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n";
       const res = runPlanExit(dir, tasks);
       assertExit(res, 1);
       assertOut(res, 'BLOCKED');

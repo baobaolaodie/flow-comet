@@ -201,8 +201,25 @@ const CONTEXT_FORMAT_CHECKS = [
   },
 ];
 
+// 段名规范化：兼容「带 `## ` 前缀」（内置 fallback）与「不带前缀」（模板派生）两种来源，
+// 并剥离模板标题的括注后缀（`已锁决策（ADR 摘要）` → `已锁决策`，与 deriveSections 同口径）。
+function normalizeSectionName(name) {
+  return String(name ?? '').replace(/^#{1,6}\s*/, '').replace(/[（(].*$/, '').trim();
+}
+
+// 文档标题集合（ATX 标题行：行首 #~###### + 空白 + 标题文本；正文文本不参与）。
+function headingSet(text) {
+  const set = new Set();
+  for (const m of String(text ?? '').matchAll(/^#{1,6}[ \t]+(.+?)[ \t]*$/gm)) {
+    set.add(normalizeSectionName(m[1]));
+  }
+  return set;
+}
+
 // 校验 .specs/CONTEXT.md 7 段结构 + 模板关键格式；文件缺失 = 全缺。返回
 // { missingSections, formatIssues, template }（missingSections 与 formatIssues 皆空 = 通过）。
+// 段存在判定 = **精确标题匹配**（标题名归一后相等）：全文 includes 会把段名变体
+// （`## 项目概要补充`）与正文提及误判为段存在，使不满足模板的 CONTEXT 记录为完成。
 // 生成由 agent 执行（intel-scan 全量阅读语义）——脚本只做确定性结构/格式校验，不做智能整合。
 export async function validateContext(runRoot) {
   const target = path.join(runRoot, '.specs', 'CONTEXT.md');
@@ -213,7 +230,8 @@ export async function validateContext(runRoot) {
   } catch {
     return { missingSections: [...sections], formatIssues: [], template: await probeTemplate(runRoot) };
   }
-  const missingSections = sections.filter((s) => !text.includes(s));
+  const headings = headingSet(text);
+  const missingSections = sections.filter((s) => !headings.has(normalizeSectionName(s)));
   const formatIssues = CONTEXT_FORMAT_CHECKS
     .filter((c) => c.applies(text) && !c.passes(text))
     .map((c) => c.name + '（' + c.hint + '）');
