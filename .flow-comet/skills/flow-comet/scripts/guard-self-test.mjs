@@ -78,7 +78,7 @@ const SCENARIO_COUNT_FILES = [
 //（即 AC-14 要消灭的"永不生效的条目"）。用目录作探针则目录在场即逐条严检，成员缺失照样报告。
 const SCENARIO_COUNT_FILES_MAINTAINER = [
   'docs/internal/ARCHITECTURE.md', 'docs/internal/DOC-CHECKLIST.md', 'docs/internal/MECHANISM.md',
-  'docs/internal/next-session-prompt-2026-09-10.md', 'docs/internal/ROADMAP.md',
+  'docs/internal/next-session-prompt-2026-09-12.md', 'docs/internal/ROADMAP.md',
   'docs/internal/WORKING-METHOD.md',
 ];
 const MAINTAINER_DOC_DIR = 'docs/internal';
