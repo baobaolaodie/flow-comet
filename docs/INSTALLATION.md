@@ -37,7 +37,7 @@ On an interactive terminal, the first run prompts for the platform with a direct
 
 `prepare-env` does:
 
-1. **Generates/overwrites `rules/` and `skills/`** — all flow-comet* skills, from the authoritative source `.comet/bundle-drafts/flow-comet/`
+1. **Generates/overwrites `rules/` and `skills/`** — all flow-comet* skills, copied from the authoritative source `.flow-comet/skills/` (the entry skill `flow-comet/` is one of the skill directories there)
 2. **Injects the hook into `settings.local.json`** — read-merge-write: preserves everything already in the target project (`permissions`, custom hooks, other matcher groups), only injects/updates the comet-hook-guard entry under `hooks.PreToolUse` (existing comet hooks are replaced, not duplicated — idempotent). First-time creation writes only the hook entry; existing files are merged.
 3. **Ensures `flow-kit` in the target project** — clones the upstream and checks out the locked snapshot when missing; an existing upstream clone is only inspected read-only (current HEAD vs the locked snapshot is reported); a same-name non-clone directory is skipped with guidance; a network failure warns and continues (see [flow-kit acquisition](#flow-kit-acquisition))
 
@@ -50,7 +50,7 @@ node scripts/prepare-env.mjs --target <absolute path to target project>
 node scripts/prepare-env.mjs --target <absolute path to target project> --purge --yes
 ```
 
-**Prerequisites for use**: run the script inside the flow-comet repository (it reads from `.comet/bundle-drafts/flow-comet/`); `--target` points at the target project.
+**Prerequisites for use**: run the script inside the flow-comet repository (it reads every flow-comet* skill directory from `.flow-comet/skills/`); `--target` points at the target project.
 
 **Updating an installed flow-comet**: re-run the same Option A command — idempotent (overwrites generated files + merges the hook, preserves existing config).
 
@@ -92,11 +92,11 @@ On non-default platforms, command paths inside SKILL/GUIDANCE files are rewritte
 1. **Structure**: `flow-comet*` skill directories under `<target>/.claude/skills/` (count matches prepare-env output, currently 19) + `rules/flow-comet-orchestration.md` + `settings.local.json` + `skills/flow-comet/INSTALLED_VERSION` (version marker shipped with the skill bundle — `cat .claude/skills/flow-comet/INSTALLED_VERSION`; it equals the latest release version, or for prepare-env installs with git available, a precise `<release>-<n>-g<hash>` describing how far the source has accumulated since that release)
 2. **Config loadability**: `settings.local.json` is valid JSON; `hooks.PreToolUse[].hooks[].command` points to the project-root reference `node ${CLAUDE_PROJECT_DIR}/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs` and `<target>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs` exists. Claude Code injects `CLAUDE_PROJECT_DIR` with the project root when a hook runs, so the path resolves from the project root rather than the session's working directory — it still resolves after the working directory drifts out of the project root (the recommended shape under [Hook upgrade](#hook-upgrade))
 3. **Consistency**: diff against the authoritative source (run inside the flow-comet repo; no output = identical):
-   `diff -r --strip-trailing-cr .comet/bundle-drafts/flow-comet/rules <target>/.claude/rules` and the same for `skills`
+   `diff -r --strip-trailing-cr .flow-comet/rules <target>/.claude/rules` and the same for `skills`
 4. **Smoke test** (run inside the target project): `cd <target> && node .claude/skills/flow-comet/scripts/workflow-state.mjs status` — expected output is a JSON state object (`{"status":"no-change",...}` for a fresh project, `{"status":"running","change":...}` when a workflow is active)
 
 > Commands are POSIX-style (Git Bash / WSL / macOS terminal); Windows users should run them in Git Bash.
-> **Note**: `guard-self-test.mjs` (219 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
+> **Note**: `guard-self-test.mjs` (235 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
 
 ### Using flow-comet on Codex
 
@@ -126,14 +126,14 @@ When prepare-env cannot be run (Claude Code target; Codex users should prefer Op
 
 ```bash
 cd <flow-comet repo>
-SKILLS=.comet/bundle-drafts/flow-comet/skills
+SKILLS=.flow-comet/skills
 TARGET=<absolute path to target project>
 
 # 1. Copy all flow-comet* skills (with GUIDANCE and scripts)
 cp -r $SKILLS/flow-comet* "$TARGET/.claude/skills/"
 
 # 2. Copy the orchestration rule
-cp .comet/bundle-drafts/flow-comet/rules/flow-comet-orchestration.md "$TARGET/.claude/rules/"
+cp .flow-comet/rules/flow-comet-orchestration.md "$TARGET/.claude/rules/"
 ```
 
 **3. Register the hook (manual)**: merge the following into the target project's `.claude/settings.local.json` (preserve existing content, e.g. `permissions`). The command references the guard script through Claude Code's project-root variable (`CLAUDE_PROJECT_DIR`, injected with the project root when a hook runs), so it resolves from the project root instead of the session's working directory (i.e. `<target>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs`):
@@ -160,7 +160,7 @@ Claude Code executes hook commands with bash semantics on **every platform** (in
 
 > **Upgrade note**: projects that installed earlier with the legacy relative-path entry (`node .claude/skills/...`) can upgrade in place — re-running the Option A installer replaces that entry with the project-root form above (managed entries are recognized by the script name and overwritten, no manual cleanup needed).
 
-**4. Runtime state**: `.comet/flow-comet-state.json` is created by `init` (or the first `/flow-comet` call).
+**4. Runtime state**: `.flow-comet/flow-comet-state.json` is created by `init` (or the first `/flow-comet` call).
 
 ## Option C · DeepSeek Harness (dsh) platform
 
@@ -279,7 +279,7 @@ rm <target>/.claude/rules/flow-comet-orchestration.md
 #     keeping everything else — permissions, custom hooks, other matcher groups)
 
 # 3. Optional: remove workflow state and artifacts
-rm <target>/.comet/flow-comet-state.json
+rm <target>/.flow-comet/flow-comet-state.json
 rm -rf <target>/.specs/          # only if you no longer need the workflow artifacts
 ```
 

@@ -178,13 +178,13 @@ processor-pipeline/            (archived change, full artifact set)
 |---------|------|---------------------------|
 | [flow-kit](https://github.com/rihebty/flow-kit) | Methodology & artifact system (9-stage flow, `.specs/` templates, R1-R8 rules) | **Dependency** — flow-comet is its automation layer; artifacts and rules come from flow-kit |
 | [Comet](https://github.com/rpamis/comet) | Skill Creator ecosystem (bundle authoring, hook-guard pattern, state machine) | **Mechanism source** — flow-comet borrows Comet's mechanism patterns extensively (workflow-protocol as source of truth, script-owned state, guard gates, hook interception); **runtime optional** (copy install needs no Comet CLI). Details in [Ecosystem](docs/ECOSYSTEM.md) |
-| **Comet Classic** | Comet's classic workflow (OpenSpec + Superpowers) | **Not a dependency** — flow-comet is an independent workflow-kernel; state does not interoperate with classic (own `.comet/flow-comet-state.json` + file-derived routing) |
+| **Comet Classic** | Comet's classic workflow (OpenSpec + Superpowers) | **Not a dependency** — flow-comet is an independent workflow-kernel; state does not interoperate with classic (own `.flow-comet/flow-comet-state.json` + file-derived routing) |
 
 ## Directory Structure
 
 ```
 flow-comet/
-├── .comet/bundle-drafts/   ★ authoritative source (19 skills + scripts)
+├── .flow-comet/            ★ authoritative source (skills/ + rules/)
 ├── scripts/                prepare-env installer
 ├── docs/
 │   ├── examples/           workflow artifact examples
@@ -227,8 +227,8 @@ flow-comet/
 Full guide in [CONTRIBUTING.md](CONTRIBUTING.md) — branch model (`feature → dev → main`), PR workflow, merge rules, and commit convention. In short:
 
 1. Branch from `dev`: `git checkout dev && git checkout -b feat/<description>`
-2. Edit skills/scripts under `.comet/bundle-drafts/flow-comet/skills/` (authoritative source); TDD with RED scenario first
-3. Run regression: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 219 SCENARIOS PASSED`
+2. Edit skills/scripts under `.flow-comet/skills/` (authoritative source); TDD with RED scenario first
+3. Run regression: `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 235 SCENARIOS PASSED`
 4. Open a PR into `dev` (squash — one change-level commit); release PR `dev → main` (merge — dev's change-level commits enter main, and dev stops leading after each release)
 
 CI enforces the repository conventions automatically on every PR and push (regression, PR discipline, version consistency, dead links). Local hooks (commit/push message checks) install with `node scripts/install-commit-hook.mjs` — see [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.

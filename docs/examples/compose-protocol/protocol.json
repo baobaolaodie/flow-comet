@@ -131,13 +131,13 @@
     }
   ],
   "writeWhitelist": {
-    "brainstorm": [".specs/<change-id>/", ".comet/"],
-    "tdd": [".specs/<change-id>/", ".comet/", "calc/", "tests/", "README.md"],
-    "codereview": [".specs/<change-id>/", ".comet/", "STATE.md", ".specs/CONTEXT.md", ".specs/LESSONS.md"]
+    "brainstorm": [".specs/<change-id>/", ".flow-comet/"],
+    "tdd": [".specs/<change-id>/", ".flow-comet/", "calc/", "tests/", "README.md"],
+    "codereview": [".specs/<change-id>/", ".flow-comet/", "STATE.md", ".specs/CONTEXT.md", ".specs/LESSONS.md"]
   },
   "state": {
     "kind": "workflow-run",
-    "statePath": ".comet/flow-comet-state.json",
+    "statePath": ".flow-comet/flow-comet-state.json",
     "currentNodeField": "currentNode",
     "completedNodesField": "completedNodes",
     "evidenceField": "evidence"

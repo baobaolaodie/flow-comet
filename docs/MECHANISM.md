@@ -10,7 +10,7 @@ This document describes what flow-comet **does** — the behaviors and rules you
 
 ## 1. State machine and routing (file-as-truth)
 
-- Single-file state machine `.comet/flow-comet-state.json`; node advancement is gated by `workflow-guard.mjs exit <node> --apply`
+- Single-file state machine `.flow-comet/flow-comet-state.json`; node advancement is gated by `workflow-guard.mjs exit <node> --apply`
 - **determineNode**: the current node is derived in real time from `.specs/` artifacts (missing files → stop at that node); state is not fully trusted
 - **auto-correction**: when state's currentNode disagrees with derivation, it is written back automatically (triggered by `next`)
 
@@ -18,13 +18,13 @@ This document describes what flow-comet **does** — the behaviors and rules you
 
 | Layer | Mechanism | Check point |
 |-------|-----------|-------------|
-| ① Hook physical interception | Phase whitelist: execute/subagent-execute coordinators may only write `.specs/`; source code is written by worktree subagents (no state in their cwd → allowed) | write target path + currentNode |
+| ① Hook physical interception | Phase whitelist: execute/subagent-execute coordinators may only write `.specs/`; source code is written by worktree subagents (their workspace sits under the isolation prefix `.claude/worktrees/**`, which the hook allows) | write target path + currentNode |
 | ② Coordinator prohibition | `next`/`entry` inject "you are the coordinator, not the executor" each time (direct-mode execute exempt) | output injection |
 | ③ Exit takeover detection | parallel tasks done must have handoffResult, otherwise BLOCKED (`parallelTakeoverApproved` explicit exemption) | TASK.md + handoff evidence |
 
 Hook blocking semantics (see Limitations): PreToolUse hook exit 2 blocks in the main TUI session; in `claude -p` non-zero exits are downgraded to non-blocking.
 
-Project-root fallback chain for interception: when the session cwd drifts, the project root is anchored via `COMET_RUN_ROOT` → `CLAUDE_PROJECT_DIR` → the nearest ancestor containing either `.comet/flow-comet-state.json` or `.claude/skills/flow-comet` → cwd, so out-of-project writes keep being intercepted.
+Project-root fallback chain for interception: when the session cwd drifts, the project root is anchored via `FLOW_COMET_RUN_ROOT` → `CLAUDE_PROJECT_DIR` → the nearest ancestor containing either `.flow-comet/flow-comet-state.json` or `.claude/skills/flow-comet` → cwd, so out-of-project writes keep being intercepted.
 
 ## 3. Guard validation (evidence-driven advancement)
 
@@ -69,11 +69,11 @@ Project-root fallback chain for interception: when the session cwd drifts, the p
 
 ## 6. Guard self-test suite (author regression baseline)
 
-`scripts/guard-self-test.mjs`: **219 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (73 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
+`scripts/guard-self-test.mjs`: **235 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (74 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
 
 ```bash
-node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 219 SCENARIOS PASSED
+node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
+# → ALL 235 SCENARIOS PASSED
 ```
 
 ## 6.5 DeepSeek Harness (dsh) platform
@@ -121,7 +121,7 @@ Explicit parameter authorization (no blocking prompts, headless-safe): `--init-c
 - **File-as-truth, no event sourcing**: single-file state machine + node derivation from `.specs/` — simple, recovery never depends on history
 - **Structural validation, no semantic judgment**: guard checks "filled or not" (sections/non-empty/structure); "good or not" is left to review — light validation, few false positives
 - **Detect + correct, not intercept**: agents cannot truly be prevented from editing files directly; machine fields rely on detection and auto-correction
-- **State stays out of version control**: `.comet/` is gitignored — branch switches share one working-tree state, avoiding state divergence
+- **State stays out of version control**: `.flow-comet/` is gitignored — branch switches share one working-tree state, avoiding state divergence
 - **One change at a time, no forced PR**: a single active change keeps the state machine simple; PR review is opt-in
 
 ## Limitations
@@ -129,7 +129,7 @@ Explicit parameter authorization (no blocking prompts, headless-safe): `--init-c
 - **Platforms**: Claude Code (default), Codex (skills/rules/hook via the multi-platform installer), and DeepSeek Harness (dsh — project-level skill + global bridge loader via `prepare-env --platform dsh`, see [Installation](INSTALLATION.md#option-c--deepseek-harness-dsh-platform)) are supported; other platforms (Gemini/Cursor) not guaranteed
 - **Return Contract transition rule**: legacy pure-string handoffs are exempt as WARN; missing redEvidence/greenEvidence is progressive WARN (not BLOCK) to avoid blocking legacy change re-entry
 - **Not interoperable with Comet Classic**: workflow-kernel state is independent of classic (design decision, not a defect)
-- **Hook allows writes when no active change**: when `.comet/flow-comet-state.json` is absent, the hook guard allows all writes (design decision: no workflow, no write restrictions)
+- **Hook allows writes when no active change**: when `.flow-comet/flow-comet-state.json` is absent, the hook guard allows all writes (design decision: no workflow, no write restrictions)
 - **Hook blocking semantics**: exit 2 (blocking) is verified working in the main TUI session; in `claude -p` (SDK CLI mode) non-zero exits are downgraded to non-blocking — writes logged but not prevented
 - **Worktree mount dependency**: Agent `isolation: "worktree"` worktrees mount at the **session project root** (not the subagent's target project) — cross-repo artifacts need manual `git show <branch>:<path>` transport, and the commit-file provenance check (`git show` subset validation) is degraded in that case
 - **GUIDANCE not tracked by the authoring record**: `<skill>-GUIDANCE.md` and SKILL.md reference lines are not recorded in the authoring manifest; re-running the Skill generator tool clears them

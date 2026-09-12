@@ -20,7 +20,7 @@
 
 范围内:
 
-- 权威源下的技能脚本(`.comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/`):状态机/门禁/交接、hook 防线、上下文初始化
+- 权威源下的技能脚本(`.flow-comet/skills/flow-comet/scripts/`):状态机/门禁/交接、hook 防线、上下文初始化
 - 安装器(`scripts/prepare-env.mjs`)与本地 hook(`.githooks/`)
 - GitHub Actions 工作流(`.github/workflows/`)
 
