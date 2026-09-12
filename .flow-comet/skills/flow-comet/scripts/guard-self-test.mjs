@@ -76,9 +76,13 @@ const SCENARIO_COUNT_FILES = [
 // 维护者组（见上方分组说明）；整组在场判据取**组外**的目录 `docs/internal/`——不能取组内成员：
 // 若用某个成员当探针，该成员缺失时会被判成"整组缺席"而跳过，正好把这个成员的缺失藏起来
 //（即 AC-14 要消灭的"永不生效的条目"）。用目录作探针则目录在场即逐条严检，成员缺失照样报告。
+// 会话接续文档（`next-session-prompt-<日期>.md`）**刻意不在本清单内**：它每次会话更名，
+// 而本清单是**受版本控制**的——把它写进来，等于让一个被跟踪的检查器去要求一个
+// 「被忽略且随会话改名」的文件名：在未执行同一次本地迁移的维护者检出里，它会被报成缺失
+// 而让套件失败（CI 因整组跳过不会暴露这一点）。详见本清单下方的分组说明。
 const SCENARIO_COUNT_FILES_MAINTAINER = [
   'docs/internal/ARCHITECTURE.md', 'docs/internal/DOC-CHECKLIST.md', 'docs/internal/MECHANISM.md',
-  'docs/internal/next-session-prompt-2026-09-10.md', 'docs/internal/ROADMAP.md',
+  'docs/internal/ROADMAP.md',
   'docs/internal/WORKING-METHOD.md',
 ];
 const MAINTAINER_DOC_DIR = 'docs/internal';
