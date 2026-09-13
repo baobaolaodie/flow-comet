@@ -17,7 +17,7 @@
 //   J. 文档一致性（双语健康检查/公开产物零代号检查——调用仓库本地工具）
 //   K. 安装器与平台（版本标识/多平台安装与平台化路径/codex hook JSON 契约/平台选择链/
 //      purge 语义/描述符驱动/dsh 平台断言/loader 版本戳重装断言/hook 注入形态无关断言与旧条目幂等升级/
-//      旧布局状态迁移后状态可读与流程可继续）
+//      旧布局状态迁移后状态可读与流程可继续/分发面包体边界与 bin 双入口（权威源真跑·副本显式不适用）与 init 词元红线）
 //   L. 执行遗漏防护（entry 进入证据/空退出豁免/空仓库提示）
 //
 // 载体（与 guard-self-test 同构）：每项 = 独立临时目录（fs.mkdtemp）+ 内置协议副本复制到
@@ -332,6 +332,150 @@ function collectTreeFiles(root) {
     }
   })(root);
   return files.sort();
+}
+
+// ---------- 分发面包体断言助手（npm 包形态：包体边界 / bin 双入口 / 环境判据） ----------
+
+// 环境判据（结构化事实，不做路径字符串猜测）：本套件在权威源与安装副本内都会运行，
+// 而包体质检只有权威源侧可判——判据落空时输出显式「不适用」行并计通过，禁止静默跳过。
+//   权威源侧 = 脚本上溯 4 层（包根）存在 `name === 'flow-comet'` 的 package.json；
+//   安装副本侧 = <target>/.claude|.agents|.dsh/skills/flow-comet/scripts 上溯 4 层 = 目标项目根，
+//   其 package.json（若存在）name 不是本包 → 不适用（判定写反会让每个已安装项目假红）。
+// 权威源标记（.flow-comet/skills/flow-comet 权威树在位）用于区分判据落空的两种情形：
+//   ① 目标项目根（权威树不在）→ 不适用；② 权威树在位但 package.json 缺失/不可解析/name 不符
+//   → 必须失败（判定过宽会让权威源侧的包体断言静默漏检——与副本侧假红相反的另一失败模式）。
+function resolvePackageContext() {
+  const root = path.resolve(__dirname, '..', '..', '..', '..');
+  const authoritative = fs.existsSync(path.join(root, '.flow-comet', 'skills', 'flow-comet'));
+  const notApplicable = () => ({ kind: 'copy', reason: '根目录无本包 package.json（name=flow-comet）' });
+  const manifest = path.join(root, 'package.json');
+  if (!fs.existsSync(manifest)) {
+    if (authoritative) throw new Error('权威源包根缺少 package.json: ' + manifest);
+    return notApplicable();
+  }
+  let pkg = null;
+  try {
+    pkg = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+  } catch (e) {
+    if (authoritative) throw new Error('权威源 package.json 不可解析: ' + e.message);
+    return notApplicable();
+  }
+  if (!pkg || pkg.name !== 'flow-comet') {
+    if (authoritative) throw new Error('权威源 package.json 的 name 应为 flow-comet，实际 ' + JSON.stringify(pkg && pkg.name));
+    return notApplicable();
+  }
+  return { kind: 'source', root, pkg };
+}
+
+// 跑 `npm pack --dry-run --json`（只读，不产出 tarball）并解析出产物相对路径清单。
+// 命令以字符串形态经 shell 执行（与 workflow-guard verify 命令执行同形态）：Windows 上 npm 是
+// npm.cmd（CreateProcess 不解析 .cmd 后缀，且 Node 对 .cmd/.bat 直接 spawn 属 EINVAL）——
+// 字符串 + shell 是全平台唯一稳妥形态。解析失败即报错（不做文本兜底：静默回退会掩盖 npm 形态漂移）。
+function runNpmPackDryRun(root) {
+  const res = spawnSync('npm pack --dry-run --json', {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: 120000,
+    shell: true,
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  const status = res.status ?? 1;
+  const stdout = String(res.stdout || '');
+  const stderr = String(res.stderr || '');
+  if (status !== 0) {
+    throw new Error('npm pack --dry-run 退出码 ' + status + '（npm 缺失或环境异常）\nstdout:\n' + stdout + '\nstderr:\n' + stderr);
+  }
+  let parsed = null;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch (e) {
+    throw new Error('npm pack --dry-run --json 输出不可解析: ' + e.message + '\nstdout(前 500 字):\n' + stdout.slice(0, 500) + '\nstderr:\n' + stderr);
+  }
+  const entry = Array.isArray(parsed) ? parsed[0] : parsed;
+  const files = entry && Array.isArray(entry.files) ? entry.files.map((f) => String(f.path).replaceAll('\\', '/')) : null;
+  if (!files || files.length === 0) throw new Error('npm pack --dry-run 产物清单为空（--json 未列出任何文件）');
+  return files;
+}
+
+// ① 包体边界：必含面在场 / 私有面零命中 / scripts 面精确等于两项 / 顶层白名单 fail-closed /
+// 权威源技能树逐文件在场（漏收 = 安装期炸或平台静默退化——协议 JSON 也在内）。
+function assertPackageBoundary(root) {
+  const files = runNpmPackDryRun(root);
+  const packedUnder = (prefix) => files.some((p) => p.startsWith(prefix + '/'));
+  const required = [
+    ['.flow-comet/skills', () => packedUnder('.flow-comet/skills')],
+    ['.flow-comet/rules/flow-comet-orchestration.md', () => files.includes('.flow-comet/rules/flow-comet-orchestration.md')],
+    ['scripts/prepare-env.mjs', () => files.includes('scripts/prepare-env.mjs')],
+    ['scripts/dsh-bridge.mjs', () => files.includes('scripts/dsh-bridge.mjs')],
+  ];
+  for (const [label, ok] of required) {
+    if (!ok()) throw new Error('包体缺少必需路径: ' + label);
+  }
+  // 私有面零命中（提交钩子与本地词表 / 仓库工作笔记 / 流程工件 / 仓库级 AI 上下文与 CI 资产 / 演示图）
+  const forbidden = ['.githooks/', 'docs/internal/', '.specs/', 'CLAUDE.md', 'AGENTS.md', '.github/', 'images/'];
+  for (const prefix of forbidden) {
+    const hit = files.filter((p) => p === prefix.replace(/\/$/, '') || p.startsWith(prefix));
+    if (hit.length > 0) throw new Error('包体含私有面路径 ' + prefix + ': ' + hit.slice(0, 5).join(', '));
+  }
+  // 随包 scripts/ 面精确等于两项（本地工具脚本——提交钩子安装器/本地检查器一类——不得进包）
+  const allowedScripts = ['scripts/dsh-bridge.mjs', 'scripts/prepare-env.mjs'];
+  const extraScripts = files.filter((p) => p.startsWith('scripts/') && !allowedScripts.includes(p));
+  if (extraScripts.length > 0) {
+    throw new Error('包体含未纳管的 scripts/ 条目（本地工具脚本不得进包）: ' + extraScripts.join(', '));
+  }
+  // 顶层条目仅允许已声明的两棵子树 + npm 恒定携带项（白名单 fail-closed：新增顶层目录默认不得进包）
+  const allowedTopLevel = ['.flow-comet', 'scripts', 'package.json', 'README.md', 'LICENSE'];
+  const unexpectedTop = [...new Set(files.map((p) => p.split('/')[0]))].filter((t) => !allowedTopLevel.includes(t));
+  if (unexpectedTop.length > 0) {
+    throw new Error('包体顶层出现白名单外条目（新增顶层目录默认不得进包）: ' + unexpectedTop.join(', '));
+  }
+  // 仅忽略 npm 恒定排除的操作系统垃圾文件（跨平台检出物，非包体声明面）
+  const osJunk = ['.DS_Store', 'Thumbs.db', 'desktop.ini'];
+  const skillsOnDisk = collectTreeFiles(path.join(root, '.flow-comet', 'skills'))
+    .filter((p) => !osJunk.includes(path.basename(p)))
+    .map((p) => '.flow-comet/skills/' + p.replaceAll('\\', '/'));
+  const missingSkills = skillsOnDisk.filter((p) => !files.includes(p));
+  if (missingSkills.length > 0) throw new Error('包体漏收技能树文件: ' + missingSkills.slice(0, 5).join(', '));
+  console.log('  包体边界: ' + files.length + ' 文件，技能树 ' + skillsOnDisk.length + ' 文件逐文件在场，私有面零命中 ✓');
+}
+
+// ② bin 双入口契约：两个命令名同指同一安装器（同一实现 = 行为一致的结构事实）。返回安装器绝对路径。
+function assertBinContract(pkg, root) {
+  const binTarget = 'scripts/prepare-env.mjs';
+  const bin = pkg.bin && typeof pkg.bin === 'object' ? pkg.bin : null;
+  if (!bin) throw new Error('package.json 缺 bin 声明（双入口契约）');
+  for (const name of ['fcomet', 'flow-comet']) {
+    if (bin[name] !== binTarget) {
+      throw new Error('bin["' + name + '"] 应指向 ' + binTarget + '，实际 ' + JSON.stringify(bin[name]));
+    }
+  }
+  const installer = path.join(root, ...binTarget.split('/'));
+  if (!fs.existsSync(installer)) throw new Error('bin 目标文件不存在: ' + binTarget);
+  console.log('  bin 双入口: fcomet / flow-comet → ' + binTarget + '（同一实现）✓');
+  return installer;
+}
+
+// ③ init 词元形态与红线（负例常驻：变形/重复词元绝不被静默吞成默认安装）。cwd 用场景临时目录。
+function assertInitTokenContract(installer, cwd) {
+  const runInstaller = (args) => {
+    const res = spawnSync(process.execPath, [installer, ...args], { cwd, encoding: 'utf8', timeout: 60000 });
+    return { status: res.status ?? 1, stdout: String(res.stdout || ''), stderr: String(res.stderr || '') };
+  };
+  const withInit = runInstaller(['init', '--help']);
+  if (withInit.status !== 0) {
+    throw new Error('`init` 词元形态应退 0（`fcomet init --help`），实际 ' + withInit.status + '\n' + withInit.stderr);
+  }
+  if (!withInit.stdout.includes('fcomet init')) throw new Error('用法输出未含 `fcomet init` 形态:\n' + withInit.stdout);
+  const bare = runInstaller(['--help']);
+  if (bare.status !== 0) throw new Error('裸形态（无 init 词元）`--help` 行为应不变（退 0），实际 ' + bare.status + '\n' + bare.stderr);
+  for (const bad of ['inti', 'int', 'install', 'init init']) {
+    const res = runInstaller(bad.split(' '));
+    if (res.status !== 1) throw new Error('变形/重复词元 `' + bad + '` 必须退 1，实际 ' + res.status + '\n' + res.stdout);
+    if (!res.stderr.includes('未知参数')) {
+      throw new Error('变形/重复词元 `' + bad + '` 的 stderr 应含「未知参数」，实际:\n' + res.stderr);
+    }
+  }
+  console.log('  init 词元: `init --help` 退 0 且含 fcomet init / 裸形态行为不变 / 变形·重复词元 4 例退 1 且报未知参数 ✓');
 }
 
 // ---------- 桥接 loader 版本戳重装断言助手（临时 DSH_HOME 重装链路） ----------
@@ -3644,6 +3788,22 @@ const TEST_ITEMS = [
         throw new Error('exit design 后 completedNodes 应含 design: ' + JSON.stringify(finalState.completedNodes));
       }
       console.log('  迁移后链路:状态逐字节搬移 + 备份在场 + status 可读 + 节点推进 design → plan ✓');
+    },
+  },
+
+  // K18: 分发面（npm 包形态）——包体边界 + bin 双入口 + init 词元形态与红线。
+  // 权威源侧真跑断言（npm pack --dry-run 的真实产物清单在场才算通过）；安装副本侧输出显式
+  // 「不适用」行并计通过（禁止静默跳过——「未验证 ≠ 通过」）。三组断言见上方同名助手。
+  {
+    name: 'K18 分发面:包体边界与 bin 双入口(权威源真跑/副本显式不适用)与 init 词元红线',
+    run: (dir) => {
+      const pkgCtx = resolvePackageContext();
+      if (pkgCtx.kind === 'copy') {
+        console.log('  不适用（安装副本侧：' + pkgCtx.reason + '）——包体边界/bin 断言仅权威源侧可判，本项计通过');
+        return;
+      }
+      assertPackageBoundary(pkgCtx.root);
+      assertInitTokenContract(assertBinContract(pkgCtx.pkg, pkgCtx.root), dir);
     },
   },
 
