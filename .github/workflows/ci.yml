@@ -6,8 +6,9 @@
 # 检查映射 / Check mapping:
 #   regression           guard self-test (235 scenarios incl. scenario-count & public-artifact
 #                        code self-checks) / script syntax / BOM guard
-#   installer            prepare-env reproducibility + distribution surface (pack
-#                        boundary & bin contract) + installed-copy smoke test
+#   installer            prepare-env reproducibility + distribution surface (publishable
+#                        manifest / pack boundary incl. top-level allowlist and per-file
+#                        skill tree / bin contract) + installed-copy smoke test
 #   quality              workflow yaml validity (actionlint) + bilingual mirror symmetry
 #   pr-policy            PR template completeness (5 bilingual sections + 17 checkboxes,
 #                        deletion = fail) / feature-branch prefix / dev-main sync /
@@ -89,14 +90,30 @@ jobs:
       - name: '分发面断言 / Distribution surface (pack boundary & bin)'
         run: |
           # 分发面契约(DESIGN D7/D13、AC-1/D1):files 白名单裁剪出的真实发布内容 + bin 双入口。
-          # `npm pack --dry-run` 是只读操作——其文件清单即发布产物;判据与 system-test 的分发面项同源。
+          # `npm pack --dry-run` 是只读操作——其文件清单即发布产物。
+          #
+          # 判据权威定义 = 本地系统测试集的分发面项(K18):assertPublishableManifest /
+          # assertPackageBoundary / assertBinContract。本 step 是这三组判据的**等价搬运**——
+          # 逐条对齐、同一判据,但不是共享实现:改动任一侧都必须同步另一侧。
+          #   ① 清单可发布性(private 缺席)                  ← assertPublishableManifest
+          #   ② 包体边界:必含面 / 私有面零命中 / scripts 面两项 /
+          #      顶层白名单 fail-closed / 技能树逐文件在场   ← assertPackageBoundary
+          #   ③ bin 双入口契约                               ← assertBinContract
+          # 本 step 另有一条比 K18 更严的锚:flow-comet* 技能目录数恒为 19(白名单裁剪的显式契约)。
+          # 尚未搬运:K18 的 init 词元红线(变形/重复词元退 1)——须起真实安装器进程,仍由本地套件覆盖;
+          # 完整的系统测试集同样不在 CI 运行(它是本地两级基线中的第二级)。
           npm pack --dry-run --json | node -e '
             const fs = require("fs");
-            const entries = JSON.parse(fs.readFileSync(0, "utf8"))[0].files.map((f) => f.path);
+            const path = require("path");
+            const entries = JSON.parse(fs.readFileSync(0, "utf8"))[0].files.map((f) => String(f.path).replaceAll("\\", "/"));
             const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
             const problems = [];
 
-            // ① 必需面:19 个 flow-comet* 技能目录 + rules + 两个随包脚本
+            // ① 清单可发布性:private 在场即 npm 拒绝发布(允许缺席或显式非真值)
+            if (pkg.private)
+              problems.push(`package.json must not be private (npm refuses to publish): ${JSON.stringify(pkg.private)}`);
+
+            // ② 必需面:19 个 flow-comet* 技能目录 + rules + 两个随包脚本
             const skills = [...new Set(entries
               .filter((p) => p.startsWith(".flow-comet/skills/"))
               .map((p) => p.split("/")[2]))];
@@ -106,24 +123,45 @@ jobs:
                                 "scripts/prepare-env.mjs", "scripts/dsh-bridge.mjs"])
               if (!entries.includes(must)) problems.push(`required entry missing from pack: ${must}`);
 
-            // ② 私有面:零命中(.githooks/ 文件头明文"主仓私有,不分发"——零配置时实测进包)
-            // ③ 本地工具脚本:scripts/ 下只允许两个随包脚本
-            const forbiddenPrefixes = [".githooks/", "docs/internal/", ".specs/", ".github/", "images/"];
+            // ③ 私有面:零命中(.githooks/ 文件头明文"主仓私有,不分发"——零配置时实测进包)
+            // ④ 本地工具脚本:scripts/ 下只允许两个随包脚本
+            const forbidden = [".githooks/", "docs/internal/", ".specs/", "CLAUDE.md", "AGENTS.md", ".github/", "images/"];
             const packedScripts = ["scripts/prepare-env.mjs", "scripts/dsh-bridge.mjs"];
             for (const p of entries) {
-              if (forbiddenPrefixes.some((x) => p.startsWith(x)) || p === "CLAUDE.md" || p === "AGENTS.md")
+              if (forbidden.some((x) => p === x.replace(/\/$/, "") || p.startsWith(x)))
                 problems.push(`private entry leaked into pack: ${p}`);
               if (p.startsWith("scripts/") && !packedScripts.includes(p))
                 problems.push(`local tool script leaked into pack: ${p}`);
             }
 
-            // ④ bin 双入口契约:两个命令名同指一个文件(AC-3/D1)
+            // ⑤ 顶层白名单 fail-closed:新增顶层条目默认不得进包(未声明即失败,而非静默随包)
+            const allowedTop = [".flow-comet", "scripts", "package.json", "README.md", "LICENSE"];
+            const unexpectedTop = [...new Set(entries.map((p) => p.split("/")[0]))].filter((t) => !allowedTop.includes(t));
+            if (unexpectedTop.length)
+              problems.push(`top-level entry outside the allowlist (new top-level dirs must not be packed by default): ${unexpectedTop.join(", ")}`);
+
+            // ⑥ 技能树逐文件在场:权威源磁盘清单 vs 真实产物(漏收 = 安装期炸或平台静默退化)
+            const skillRoot = path.join(process.cwd(), ".flow-comet", "skills");
+            const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+              const abs = path.join(dir, e.name);
+              return e.isDirectory() ? walk(abs) : e.isFile() ? [abs] : [];
+            });
+            const osJunk = [".DS_Store", "Thumbs.db", "desktop.ini"];
+            const onDisk = walk(skillRoot)
+              .filter((abs) => !osJunk.includes(path.basename(abs)))
+              .map((abs) => ".flow-comet/skills/" + path.relative(skillRoot, abs).replaceAll("\\", "/"))
+              .sort();
+            const missingSkills = onDisk.filter((p) => !entries.includes(p));
+            if (missingSkills.length)
+              problems.push(`skill tree files missing from pack: ${missingSkills.slice(0, 5).join(", ")}`);
+
+            // ⑦ bin 双入口契约:两个命令名同指一个文件(AC-3/D1)
             if (!pkg.bin || pkg.bin.fcomet !== "scripts/prepare-env.mjs"
                 || pkg.bin["flow-comet"] !== "scripts/prepare-env.mjs")
               problems.push(`bin contract broken: ${JSON.stringify(pkg.bin)}`);
 
             if (problems.length) { console.error(problems.join("\n")); process.exit(1); }
-            console.log(`distribution surface OK: ${entries.length} packed files, ${skills.length} skill dirs`);
+            console.log(`distribution surface OK: ${entries.length} packed files, ${skills.length} skill dirs, ${onDisk.length} skill tree files verified`);
           '
 
   # ── 质量: workflow 配置有效性 + 双语镜像对称 / Quality ──
