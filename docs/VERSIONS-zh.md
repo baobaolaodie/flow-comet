@@ -10,9 +10,9 @@
 
 | 项 | 说明 |
 |----|------|
-| **当前版本** | v1.5.0-rc.2。发布真相：[CHANGELOG-zh.md](../CHANGELOG-zh.md) + git tag（发布步骤创建）；README 徽章镜像；`skills/flow-comet/INSTALLED_VERSION` 为安装副本元数据（源仓库 git describe）。dsh 平台（经 `prepare-env --platform dsh`）在项目级技能副本中携带同一版本标识；无独立 npm 包（留后续）。v1.0.0 = 首个稳定版：8 节点工作流 + 三层防御 + guard 校验体系 |
+| **当前版本** | v1.5.0-rc.2。发布真相：[CHANGELOG-zh.md](../CHANGELOG-zh.md) + git tag（发布步骤创建）；README 徽章镜像；`skills/flow-comet/INSTALLED_VERSION` 为安装副本元数据（源仓库 git describe）。dsh 平台（经 `prepare-env --platform dsh`）在项目级技能副本中携带同一版本标识，npm 包则在 `package.json` 中携带同一版本。v1.0.0 = 首个稳定版：8 节点工作流 + 三层防御 + guard 校验体系 |
 | **版本策略** | 语义化版本：新功能发布 → minor（1.2.0）、bug 修复 → patch（1.1.1）、破坏性变更 → major（2.0.0）；每次功能发布完成时 bump |
-| **bundle 版本解耦** | `bundle.yaml`/`skill.yaml` 的 version 保持 1.0.0（与发布版本解耦）；git tag + CHANGELOG 是版本唯一事实来源 |
+| **版本记录面** | 九处保持一致，由 CI 在发布面对账强制：发布 git tag；安装副本标识 `skills/flow-comet/INSTALLED_VERSION`；npm 包的 `package.json` 的 `version`；以及按语言各计一处的文档面——README 徽章 ×2、本文档 ×2、CHANGELOG ×2。git tag + CHANGELOG 仍是版本唯一事实来源 |
 
 ## 依赖
 
@@ -27,7 +27,7 @@
 
 - 旧 change/旧 state 自动补默认字段（executionMode/branchMode/enablePrReview）；无分支 change 照常运行——向后兼容
 - 旧 change 重入渐进 WARN 不 BLOCK（redEvidence/greenEvidence 缺失、纯字符串 handoff）
-- 回归基线（两级）：`guard-self-test.mjs` 235 场景 + `system-test.mjs` 74 项全绿（每次改动后必须）
+- 回归基线（两级）：`guard-self-test.mjs` 235 场景 + `system-test.mjs` 75 项全绿（每次改动后必须）
 - dsh 平台：项目级技能副本携带与 flow-comet 发布版本同步的 `INSTALLED_VERSION` 标识；卸载经 `prepare-env --purge --platform dsh --yes`（见[安装](INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-平台)）
 
 ## 发布 checklist（每次发布收尾）

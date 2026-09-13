@@ -8,17 +8,23 @@
 
 本项目的所有显著变更都记录在此文件中。
 
-格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号记录于 git tag、本文档、README 徽章、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 与权威源 `skills/flow-comet/INSTALLED_VERSION`；`bundle.yaml` 的 version 保持 1.0.0（与发布流程解耦）。
+格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号记录于九处，由 CI 在发布面对账保持一致：发布 git tag；README 徽章、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 与本文档（各含两种语言）；权威源 `skills/flow-comet/INSTALLED_VERSION`；以及 npm 包的 `package.json` 的 `version`。
 
 ## [Unreleased]
+
+### 新增
+
+- **npm 分发通道**：flow-comet 现可作为 npm 包安装，并把安装器以两个命令名（`fcomet` 与 `flow-comet`）暴露出来——全局安装后执行 `fcomet init` 即在当前目录完成项目安装；`--target` 成为可选项，安装器同时接受可选的前导 `init` 词元，因此 `fcomet init` 与裸 `fcomet` 等价。发布内容以 `files` 白名单声明（技能树、编排规则、安装器与 dsh 桥接脚本），私有产物与「不分发」产物由结构排除，而非依赖黑名单过滤。尚未向 registry 发布任何版本：本批次做到「可发布」，真正发布仍是发布动作。
 
 ### 变更
 
 - **运行时命名空间与 Comet 解耦**：工作流状态文件改置于 `.flow-comet/flow-comet-state.json`，权威源迁至 `.flow-comet/skills/`（编排规则在 `.flow-comet/rules/`），根锚定环境变量更名为 `FLOW_COMET_RUN_ROOT`（硬切换——不再读取旧变量）。安装器迁移既有状态文件时强制先备份（`.flow-comet/flow-comet-state.json.bak-<时间戳>`，迁移成功后保留），并在新旧位置并存、旧文件为符号链接、旧文件不是合法 JSON 三种情形下报错中止且不覆盖任一方；目标项目的忽略规则保守纳管（既有条目逐字保留，仅在缺失时追加 `.flow-comet/` 条目，重跑幂等）。
 - **写入守卫与工作流守卫剥离 Comet 感知层**：两者都不再读取 Comet 的 `.comet/config.yaml`，也不再扫描 classic change 目录——判定只依据状态文件；已废弃的 overlay 协议种类不再进入叠加分支。
 - **迁移步骤被明确定义为过渡性的，并载明退役条件**：安装器的迁移模块是仅存的一处引用旧命名空间的地方，它存在的唯一目的是把既有状态文件一次性搬走——从不进入任何运行路径。该模块现载明其退役方式：可在下一个破坏性版本发布时（迁移窗口关闭）整体删除，或在安装运行持续报告「无内容可迁移」后删除——使这处过渡性引用不会无声地变成永久。迁移报告也会在全部跳过时明确说明，让项目一眼看出安装器已无需触碰旧目录。
-- **回归套件扩展至 235 场景**；系统测试集现运行 74 项。
+- **回归套件扩展至 235 场景**；系统测试集现运行 75 项。
 - **凡无门禁覆盖之处，计数改为描述而非写死**：若干文档写死了场景数或项数，却不属于一致性自检的覆盖范围，数字会静默过期——本批次内就发生了三次。这些位置现改为说明数字的来源，并把一份技能与其指引文件之间已漂移的两行表格对齐，使同类静默过期不再无察觉地复发。
+- **包清单版本纳入发布版本面**：发布一致性检查现对账九处而非八处——npm 包的 `version` 与 README 徽章、本 CHANGELOG、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 及权威源 `skills/flow-comet/INSTALLED_VERSION` 同值比对，带着过期版本号的包会在发布检查处失败，而不会流到 registry。
+- **分发面由断言把关而非假定**：系统测试集新增一项，检查真实 `npm pack` 产物中的包体边界与两个命令入口；从安装副本运行时（副本没有包清单）输出显式「不适用」而非静默跳过；CI 的 installer job 断言同一边界——混入私有文件或丢掉命令入口都会让检查失败，而不是随包发出。
 
 ### 移除
 
