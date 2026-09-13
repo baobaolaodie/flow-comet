@@ -78,7 +78,7 @@ node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
 
 ## 6.5 DeepSeek Harness (dsh) platform
 
-On DeepSeek Harness, flow-comet is installed through the **prepare-env installer** (`--platform dsh`) — no plugin bundle, no npm package (a later / 1.5.0 item); the engine itself is untouched, the guard decision core is reused unchanged via subprocess calls:
+On DeepSeek Harness, flow-comet is installed through the **prepare-env installer** (`--platform dsh`) — no plugin bundle; the npm distribution channel (the `flow-comet` package with its `fcomet` command) now has a publishable form, with the first real publish belonging to the release batch, and dsh installs keep going through prepare-env. The engine itself is untouched, the guard decision core is reused unchanged via subprocess calls:
 
 - **Installation**: `node scripts/prepare-env.mjs --target <project> --platform dsh` (minimum dsh `0.1.0-rc.6`; dev preview).
 - **Project-level skill discovery**: the skill tree is installed at `<project>/.dsh/skills/flow-comet`; dsh auto-discovers skills under `<project>/.dsh/skills/` at rank 100 (file watching, no restart) — projects **without that directory cannot see the skill**, so activation is naturally project-level (no runtime trace detection, no chicken-and-egg).
@@ -126,7 +126,7 @@ Explicit parameter authorization (no blocking prompts, headless-safe): `--init-c
 
 ## Limitations
 
-- **Platforms**: Claude Code (default), Codex (skills/rules/hook via the multi-platform installer), and DeepSeek Harness (dsh — project-level skill + global bridge loader via `prepare-env --platform dsh`, see [Installation](INSTALLATION.md#option-c--deepseek-harness-dsh-platform)) are supported; other platforms (Gemini/Cursor) not guaranteed
+- **Platforms**: Claude Code (default), Codex (skills/rules/hook via the multi-platform installer), and DeepSeek Harness (dsh — project-level skill + global bridge loader via `prepare-env --platform dsh`, see [Installation](INSTALLATION.md#option-d--deepseek-harness-dsh-platform)) are supported; other platforms (Gemini/Cursor) not guaranteed
 - **Return Contract transition rule**: legacy pure-string handoffs are exempt as WARN; missing redEvidence/greenEvidence is progressive WARN (not BLOCK) to avoid blocking legacy change re-entry
 - **Not interoperable with Comet Classic**: workflow-kernel state is independent of classic (design decision, not a defect)
 - **Hook allows writes when no active change**: when `.flow-comet/flow-comet-state.json` is absent, the hook guard allows all writes (design decision: no workflow, no write restrictions)

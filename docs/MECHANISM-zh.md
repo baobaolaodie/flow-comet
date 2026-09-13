@@ -78,7 +78,7 @@ node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
 
 ## 6.5 DeepSeek Harness（dsh）平台
 
-在 DeepSeek Harness 上，flow-comet 经 **prepare-env 安装器**（`--platform dsh`）安装——无插件包、无 npm 包（留后续 / 1.5.0）；引擎零改动，guard 判定核心经子进程调用原样复用：
+在 DeepSeek Harness 上，flow-comet 经 **prepare-env 安装器**（`--platform dsh`）安装——无插件包；npm 分发通道（`flow-comet` 包与 `fcomet` 命令）现已具备可发布形态（首次真实发布归发布批次），dsh 安装仍走 prepare-env。引擎零改动，guard 判定核心经子进程调用原样复用：
 
 - **安装**：`node scripts/prepare-env.mjs --target <项目> --platform dsh`（最低 dsh `0.1.0-rc.6`；dev preview）。
 - **项目级技能发现**：技能树安装到 `<项目>/.dsh/skills/flow-comet`；dsh 在 `<项目>/.dsh/skills/` 下以 rank 100 自动发现（文件监听、免重启）——**未安装该目录的项目不可见该技能**，因此激活天然是项目级的（无运行时痕迹判定、无 chicken-and-egg）。
@@ -125,7 +125,7 @@ node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
 
 ## 已知限制
 
-- **平台**：Claude Code（默认）、Codex（技能/规则/hook 经多平台安装器）与 DeepSeek Harness（dsh——项目级技能 + 全局桥接 loader，经 `prepare-env --platform dsh`，见[安装](INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-平台)）受支持；其他平台（Gemini/Cursor）不保证
+- **平台**：Claude Code（默认）、Codex（技能/规则/hook 经多平台安装器）与 DeepSeek Harness（dsh——项目级技能 + 全局桥接 loader，经 `prepare-env --platform dsh`，见[安装](INSTALLATION-zh.md#方案-d--deepseek-harnessdsh平台)）受支持；其他平台（Gemini/Cursor）不保证
 - **Return Contract 过渡规则**：旧格式纯字符串 handoff 豁免为 WARN；redEvidence/greenEvidence 缺失渐进 WARN（不 BLOCK），避免旧 change 重入被卡死
 - **与 Comet Classic 不互通**：workflow-kernel 状态独立于 classic（设计决策，非缺陷）
 - **无活跃 change 时 hook 放行**：`.flow-comet/flow-comet-state.json` 不存在时 hook guard 放行所有写入（设计决策：无 workflow 时不限制文件操作）
