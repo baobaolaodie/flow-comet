@@ -1,8 +1,17 @@
 {
   "name": "flow-comet",
-  "version": "0.0.0",
-  "private": true,
+  "version": "1.5.0-rc.2",
   "type": "module",
+  "files": [
+    ".flow-comet/skills",
+    ".flow-comet/rules",
+    "scripts/prepare-env.mjs",
+    "scripts/dsh-bridge.mjs"
+  ],
+  "bin": {
+    "fcomet": "scripts/prepare-env.mjs",
+    "flow-comet": "scripts/prepare-env.mjs"
+  },
   "dependencies": {
     "@clack/prompts": "1.7.0"
   }
