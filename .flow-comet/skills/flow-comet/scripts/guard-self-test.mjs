@@ -6962,6 +6962,147 @@ const SCENARIOS = [
       if (fs.existsSync(path.join(proj, '.claude'))) throw new Error('被拒绝的命令仍产生了安装产物');
     },
   },
+
+  // ---------- 命令写判定的写入目标取向（Copy/Move 与位置形态） ----------
+
+  // 236: 命令写判定的写入目标取向——Copy-Item/Move-Item 的 `-Path`/`-LiteralPath` 是**源**路径，
+  // 写入目标是 `-Destination`。修复前 cmdlet 模式只捕获 `-(Path|LiteralPath)`（源），且全无
+  // `-Destination` 模式 → 目标从不被检查（越界写整条放行）；而同文件 .NET File API 分支按
+  // 「Copy/Move 目标 = 第二参数」取第二个捕获组——同一函数两个分支取向相反。
+  // 修复后按目的地取值（与 .NET 分支同向）：① 目标越界 → BLOCK（修复前放行 → RED）；
+  // ② 源在白名单外而目标在白名单内 → 放行（源是读取方向，不属写入判定；修复前拿源当目标 → 误拦 → RED）；
+  // ③ 源与目标都在白名单内 → 放行（放行不得因本次修复收窄）。
+  {
+    name: '236 hook 命令写：Copy-Item/Move-Item 取 -Destination 为写入目标（目标越界拦、源路径不再误拦）',
+    run: (dir) => {
+      writeState(dir, { ...baseState('review'), status: 'running' });
+      const src = '.specs/' + CHANGE_ID + '/x.md';
+      const inside = '.specs/' + CHANGE_ID + '/copy.md';
+      // ① 逃逸：目标在协调者白名单（.specs/）之外
+      const escapeCopy = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'Copy-Item -Path ' + src + ' -Destination CLAUDE.md' },
+      });
+      assertExit(escapeCopy, 2);
+      assertOut(escapeCopy, 'BLOCKED');
+      assertOut(escapeCopy, 'CLAUDE.md');
+      const escapeMove = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'Move-Item -Path ' + src + ' -Destination docs/MECHANISM.md' },
+      });
+      assertExit(escapeMove, 2);
+      assertOut(escapeMove, 'BLOCKED');
+      assertOut(escapeMove, 'docs/MECHANISM.md');
+      // ② 源在白名单外、目标在白名单内 → 放行（读取方向不判定为写入）
+      const sourceOutside = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'Copy-Item -LiteralPath CLAUDE.md -Destination ' + inside },
+      });
+      assertExit(sourceOutside, 0);
+      assertOut(sourceOutside, 'workflow-hook-guard-ok');
+      // ③ 源与目标都在白名单内 → 放行
+      const bothInside = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'Copy-Item -Path ' + src + ' -Destination ' + inside },
+      });
+      assertExit(bothInside, 0);
+      assertOut(bothInside, 'workflow-hook-guard-ok');
+    },
+  },
+
+  // 237: 位置形态 `cp <src> <dst>` / `mv <src> <dst>`——修复前命令写判定只认 PowerShell cmdlet、
+  // shell 重定向与 .NET File API，位置形态无任何模式覆盖 → 越界写整条放行。
+  // 修复后取最后一个位置参数为目标（开关及其取值不参与）：① 目标越界 → BLOCK（修复前放行 → RED）；
+  // ② 目标在白名单内 → 放行；③ `cp` 只作为普通参数出现（不是命令词）时不产生写入目标
+  // （命令位置锚定——否则 `grep -n cp <file>` 会把文件名当成写入目标 → 反过来造成误拦）。
+  {
+    name: '237 hook 命令写：cp/mv 位置形态取最后位置参数为目标（逃逸拦截，命令位置锚定不误判）',
+    run: (dir) => {
+      writeState(dir, { ...baseState('review'), status: 'running' });
+      const src = '.specs/' + CHANGE_ID + '/x.md';
+      const inside = '.specs/' + CHANGE_ID + '/copy.md';
+      const cpEscape = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'cp ' + src + ' CLAUDE.md' },
+      });
+      assertExit(cpEscape, 2);
+      assertOut(cpEscape, 'BLOCKED');
+      assertOut(cpEscape, 'CLAUDE.md');
+      const mvEscape = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'mv -f ' + src + ' README-zh.md' },
+      });
+      assertExit(mvEscape, 2);
+      assertOut(mvEscape, 'BLOCKED');
+      assertOut(mvEscape, 'README-zh.md');
+      // 目标在白名单内 → 放行（含开关：开关与其取值不参与位置参数扫描）
+      const cpInside = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'cp -f CLAUDE.md ' + inside },
+      });
+      assertExit(cpInside, 0);
+      assertOut(cpInside, 'workflow-hook-guard-ok');
+      // 命令位置锚定：`cp` 作为普通参数出现（grep 模式）不是写命令
+      const notCommand = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'grep -n cp README.md' },
+      });
+      assertExit(notCommand, 0);
+      assertOut(notCommand, 'workflow-hook-guard-ok');
+    },
+  },
+
+  // 238: 纯位置形态（`Copy-Item <src> <dst>`）与 `-FilePath`（Out-File 的惯用主参数）修复前均无
+  // 模式覆盖 → 放行；修复后两者都按写入目标判定。同场景锚定既有 `-Path` 语义未被本次修复放宽
+  // （Set-Content / Remove-Item 的 `-Path` 就是写入目标：越界拦、白名单内放行）。
+  {
+    name: '238 hook 命令写：纯位置形态与 -FilePath 目标覆盖，既有 -Path 语义保持',
+    run: (dir) => {
+      writeState(dir, { ...baseState('review'), status: 'running' });
+      const src = '.specs/' + CHANGE_ID + '/x.md';
+      const positional = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'Copy-Item ' + src + ' CLAUDE.md' },
+      });
+      assertExit(positional, 2);
+      assertOut(positional, 'BLOCKED');
+      assertOut(positional, 'CLAUDE.md');
+      const filePath = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'Out-File -FilePath docs/MECHANISM.md' },
+      });
+      assertExit(filePath, 2);
+      assertOut(filePath, 'BLOCKED');
+      assertOut(filePath, 'docs/MECHANISM.md');
+      // 开关取值不参与位置参数扫描：`-Filter *.md` 的 `*.md` 不是写入目标（当成目标即新的误拦）
+      const filterValue = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'Remove-Item -Force -Filter *.md' },
+      });
+      assertExit(filterValue, 0);
+      assertOut(filterValue, 'workflow-hook-guard-ok');
+      // 既有 -Path 语义保持（回归锚）：越界拦
+      const removePath = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'Remove-Item -Path docs/MECHANISM.md' },
+      });
+      assertExit(removePath, 2);
+      assertOut(removePath, 'BLOCKED');
+      const setContentOut = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'Set-Content -Path docs/MECHANISM.md -Value x' },
+      });
+      assertExit(setContentOut, 2);
+      assertOut(setContentOut, 'BLOCKED');
+      // 既有 -Path 语义保持（回归锚）：白名单内放行
+      const setContentIn = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'Set-Content -Path ' + src + ' -Value x' },
+      });
+      assertExit(setContentIn, 0);
+      assertOut(setContentIn, 'workflow-hook-guard-ok');
+    },
+  },
 ];
 
 // ---------- 运行 ----------

@@ -93,7 +93,7 @@ git branch -d hotfix/<description>
 
 - **Runtime**: Node.js ≥ 18 (ESM); the only third-party dependency is `@clack/prompts` (pinned exact version via `package-lock.json`), used only by the installer's interactive TTY multi-select with an automatic readline fallback — run `npm install` once after cloning; without it the installer falls back to readline, so the interactive selection shipped to users goes unexercised in your local runs
 - **Repo**: clone, run `npm install`, then verify the regression baseline runs:
-  `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 235 SCENARIOS PASSED` (two-tier baseline; also run `node .flow-comet/skills/flow-comet/scripts/system-test.mjs` → `ALL SYSTEM TESTS PASSED`, 75 items)
+  `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 238 SCENARIOS PASSED` (two-tier baseline; also run `node .flow-comet/skills/flow-comet/scripts/system-test.mjs` → `ALL SYSTEM TESTS PASSED`, 75 items)
 - **Distribution surface**: the npm package boundary (`files` whitelist in `package.json`) and the `fcomet` / `flow-comet` bin entries are asserted in two places — CI's `installer` job (the merge gate) and `system-test` (reproducible locally, and from an installed copy the assertion reports "not applicable" instead of skipping silently). The engine self-test suite is not a distribution criterion.
 - **Authoring environment**: Claude Code (skills/hooks run in Claude Code sessions); the hook is installed via `prepare-env` into your project's `.claude/` (the same installer serves Codex via `--platform codex` and DeepSeek Harness (dsh) via `--platform dsh` — project-level skill tree, AGENTS.md managed rules, and a global bridge loader)
 - **For mechanism work**: read [docs/MECHANISM.md](docs/MECHANISM.md) for the mechanism semantics (behavior layer) before touching scripts
@@ -113,7 +113,7 @@ The hooks reject commits and pushes whose messages carry process codes — proje
 Before pushing, run the regression baseline:
 
 ```bash
-node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 235 SCENARIOS PASSED
+node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 238 SCENARIOS PASSED
 ```
 
 CI handles the rest.
@@ -131,7 +131,7 @@ After the issue is confirmed: bug fixes use a `fix/` branch, features use a `fea
 
 - **Authoritative source**: edit skills/scripts under `.flow-comet/skills/` (the single source; `.claude/` copies are install artifacts — update them via `prepare-env`, never by hand)
 - **TDD**: every mechanism fix starts with a RED scenario in `guard-self-test.mjs` (watch it fail for the right reason), then GREEN, then full regression
-- **Regression baseline**: `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 235 SCENARIOS PASSED` (two-tier baseline; also run `node .flow-comet/skills/flow-comet/scripts/system-test.mjs` → `ALL SYSTEM TESTS PASSED`, 75 items) (mandatory after every change)
+- **Regression baseline**: `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 238 SCENARIOS PASSED` (two-tier baseline; also run `node .flow-comet/skills/flow-comet/scripts/system-test.mjs` → `ALL SYSTEM TESTS PASSED`, 75 items) (mandatory after every change)
 - **Distribution contract**: the npm package name and the `fcomet` / `flow-comet` bin names become contract once released, and the package boundary is the `files` whitelist in `package.json` — fail-closed, never relaxed to a blacklist or a whole-directory include. Decision record: ADR-010.
 - **Documentation sync**: behavior-layer docs live in `docs/` (bilingual EN/zh — keep both in sync when a doc changes); implementation details stay out of public docs
 - **Bilingual discipline**: English docs contain no Chinese (except the language switcher, flow-kit artifact section names, and runtime message quotes); Chinese docs contain no long English sentences (except commands, URLs, and proper terms)
@@ -229,7 +229,7 @@ Force push is allowed on your own feature branch (no protection); a new push inv
 ## Release approval sheet
 
 - Changes: PR list + one-line summary each
-- Verification: regression (235 scenarios) / installed-copy checks
+- Verification: regression (238 scenarios) / installed-copy checks
 - Version: X.Y.Z (doc-only batches may skip the bump)
 ```
 
