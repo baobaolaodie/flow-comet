@@ -17,7 +17,8 @@
 //   J. 文档一致性（双语健康检查/公开产物零代号检查——调用仓库本地工具）
 //   K. 安装器与平台（版本标识/多平台安装与平台化路径/codex hook JSON 契约/平台选择链/
 //      purge 语义/描述符驱动/dsh 平台断言/loader 版本戳重装断言/hook 注入形态无关断言与旧条目幂等升级/
-//      旧布局状态迁移后状态可读与流程可继续/分发面包体边界与 bin 双入口（权威源真跑·副本显式不适用）与 init 词元红线）
+//      旧布局状态迁移后状态可读与流程可继续/分发面包体边界·可发布性清单与 bin 双入口（权威源真跑·
+//      副本回传显式「不适用」结果标记）与 init 词元红线）
 //   L. 执行遗漏防护（entry 进入证据/空退出豁免/空仓库提示）
 //
 // 载体（与 guard-self-test 同构）：每项 = 独立临时目录（fs.mkdtemp）+ 内置协议副本复制到
@@ -25,6 +26,9 @@
 // 断言退出码与输出关键词。测试项跑完 rmSync 清理。
 //
 // 输出纪律：逐项 PASS/FAIL + 汇总（SYSTEM TEST: N/M passed）；全过 exit 0，有 FAIL exit 1。
+// 结果标记：分发面项（distributionSurface）必须回传机器可读标记，运行器按结构化环境判据断言——
+// 权威源侧 `distribution:executed@source` / 安装副本侧 `distribution:not-applicable@copy`；
+// 缺标记（静默跳过）或与环境不符（判定写反）都判失败（「未验证 ≠ 通过」）。
 // 测试项命名与输出为公开面——零过程代号（场景编号/修复编号/批次/缺陷编号/未公开概念）。
 //
 // 运行: node .flow-comet/skills/flow-comet/scripts/system-test.mjs
@@ -334,7 +338,7 @@ function collectTreeFiles(root) {
   return files.sort();
 }
 
-// ---------- 分发面包体断言助手（npm 包形态：包体边界 / bin 双入口 / 环境判据） ----------
+// ---------- 分发面包体断言助手（npm 包形态：环境判据 / 结果标记 / 可发布性清单 / 包体边界 / bin 双入口） ----------
 
 // 环境判据（结构化事实，不做路径字符串猜测）：本套件在权威源与安装副本内都会运行，
 // 而包体质检只有权威源侧可判——判据落空时输出显式「不适用」行并计通过，禁止静默跳过。
@@ -367,6 +371,31 @@ function resolvePackageContext() {
   return { kind: 'source', root, pkg };
 }
 
+// 分发面结果标记（机器可读）：本套件在权威源与安装副本两侧都会运行，而断言只在权威源侧真跑——
+// 两侧的区别（「已执行」/「不适用」）必须留在运行器可捕获的结果里，不能只打 console 行靠人工核验。
+// 映射两行即两侧的正反锚点：权威源侧回传 executed、安装副本侧回传 not-applicable，写反则该侧判失败。
+const DISTRIBUTION_MARKERS = {
+  source: 'distribution:executed@source',
+  copy: 'distribution:not-applicable@copy',
+};
+
+// 运行器侧标记契约校验（分发面项）：标记必须显式在场且与结构化环境判据推出的期望值一致。
+//   缺标记 = 该项走了静默跳过（「未验证 ≠ 通过」，与显式「不适用」是两回事）→ 失败；
+//   标记与环境不符 = 环境判据写反（副本侧假红 / 权威源侧静默漏检）→ 失败。
+function assertDistributionOutcome(itemName, marker) {
+  const legal = Object.values(DISTRIBUTION_MARKERS);
+  if (!legal.includes(marker)) {
+    throw new Error('分发面结果标记缺席或非法（应回传 ' + legal.join(' 或 ') + '，实际 ' + JSON.stringify(marker)
+      + '）——禁止静默跳过');
+  }
+  const expected = DISTRIBUTION_MARKERS[resolvePackageContext().kind];
+  if (marker !== expected) {
+    throw new Error('分发面结果标记与环境判据不符：本环境应 ' + expected + '，实际 ' + marker
+      + '（判定写反会让该侧静默漏检或假红）');
+  }
+  console.log('OUTCOME: ' + itemName + ' → ' + marker);
+}
+
 // 跑 `npm pack --dry-run --json`（只读，不产出 tarball）并解析出产物相对路径清单。
 // 命令以字符串形态经 shell 执行（与 workflow-guard verify 命令执行同形态）：Windows 上 npm 是
 // npm.cmd（CreateProcess 不解析 .cmd 后缀，且 Node 对 .cmd/.bat 直接 spawn 属 EINVAL）——
@@ -397,7 +426,17 @@ function runNpmPackDryRun(root) {
   return files;
 }
 
-// ① 包体边界：必含面在场 / 私有面零命中 / scripts 面精确等于两项 / 顶层白名单 fail-closed /
+// ① 清单可发布性：`private` 在场即 npm 拒绝发布——被误加回会让包不可发布，而包体边界断言
+// （按效果覆盖 files/version）与 CI 版本对账都察觉不到，故独立成锚。允许缺席或显式非真值。
+function assertPublishableManifest(pkg) {
+  if (pkg.private) {
+    throw new Error('package.json 的 private 应缺席（或显式非真值），实际 ' + JSON.stringify(pkg.private)
+      + '——置真值会让 npm 拒绝发布');
+  }
+  console.log('  清单可发布性: private 缺席 ✓');
+}
+
+// ② 包体边界：必含面在场 / 私有面零命中 / scripts 面精确等于两项 / 顶层白名单 fail-closed /
 // 权威源技能树逐文件在场（漏收 = 安装期炸或平台静默退化——协议 JSON 也在内）。
 function assertPackageBoundary(root) {
   const files = runNpmPackDryRun(root);
@@ -439,7 +478,7 @@ function assertPackageBoundary(root) {
   console.log('  包体边界: ' + files.length + ' 文件，技能树 ' + skillsOnDisk.length + ' 文件逐文件在场，私有面零命中 ✓');
 }
 
-// ② bin 双入口契约：两个命令名同指同一安装器（同一实现 = 行为一致的结构事实）。返回安装器绝对路径。
+// ③ bin 双入口契约：两个命令名同指同一安装器（同一实现 = 行为一致的结构事实）。返回安装器绝对路径。
 function assertBinContract(pkg, root) {
   const binTarget = 'scripts/prepare-env.mjs';
   const bin = pkg.bin && typeof pkg.bin === 'object' ? pkg.bin : null;
@@ -455,7 +494,7 @@ function assertBinContract(pkg, root) {
   return installer;
 }
 
-// ③ init 词元形态与红线（负例常驻：变形/重复词元绝不被静默吞成默认安装）。cwd 用场景临时目录。
+// ④ init 词元形态与红线（负例常驻：变形/重复词元绝不被静默吞成默认安装）。cwd 用场景临时目录。
 function assertInitTokenContract(installer, cwd) {
   const runInstaller = (args) => {
     const res = spawnSync(process.execPath, [installer, ...args], { cwd, encoding: 'utf8', timeout: 60000 });
@@ -3791,19 +3830,24 @@ const TEST_ITEMS = [
     },
   },
 
-  // K18: 分发面（npm 包形态）——包体边界 + bin 双入口 + init 词元形态与红线。
+  // K18: 分发面（npm 包形态）——可发布性清单 + 包体边界 + bin 双入口 + init 词元形态与红线。
   // 权威源侧真跑断言（npm pack --dry-run 的真实产物清单在场才算通过）；安装副本侧输出显式
-  // 「不适用」行并计通过（禁止静默跳过——「未验证 ≠ 通过」）。三组断言见上方同名助手。
+  // 「不适用」行并回传同语义的结果标记计通过（禁止静默跳过——「未验证 ≠ 通过」）。
+  // 四组断言见上方同名助手；结果标记由运行器按环境判据断言（distributionSurface 契约）。
   {
     name: 'K18 分发面:包体边界与 bin 双入口(权威源真跑/副本显式不适用)与 init 词元红线',
+    distributionSurface: true,
     run: (dir) => {
       const pkgCtx = resolvePackageContext();
+      const marker = DISTRIBUTION_MARKERS[pkgCtx.kind];
       if (pkgCtx.kind === 'copy') {
         console.log('  不适用（安装副本侧：' + pkgCtx.reason + '）——包体边界/bin 断言仅权威源侧可判，本项计通过');
-        return;
+        return marker;
       }
+      assertPublishableManifest(pkgCtx.pkg);
       assertPackageBoundary(pkgCtx.root);
       assertInitTokenContract(assertBinContract(pkgCtx.pkg, pkgCtx.root), dir);
+      return marker;
     },
   },
 
@@ -3882,7 +3926,9 @@ const TEST_ITEMS = [
 for (const item of TEST_ITEMS) {
   const dir = makeTmp();
   try {
-    await item.run(dir);
+    const marker = await item.run(dir);
+    // 分发面项的机器可读结果标记：缺标记（静默跳过）或与环境不符（判定写反）都判该项失败
+    if (item.distributionSurface) assertDistributionOutcome(item.name, marker);
     passed += 1;
     console.log('PASS: ' + item.name);
   } catch (e) {
