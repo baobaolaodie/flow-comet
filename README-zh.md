@@ -48,27 +48,42 @@
 需要目标项目安装 [Claude Code](https://claude.ai/code)、[Codex](https://github.com/openai/codex) 或 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）与 [flow-kit](https://github.com/rihebty/flow-kit)（见[安装](docs/INSTALLATION-zh.md)）。
 
 ```bash
-# 1. 从本仓库安装（方案 A：prepare-env 安装器）
+# 1. 全局安装命令行工具（Node.js 18+）
+npm install -g flow-comet
+
+# 2. 在项目目录内执行安装，把 flow-comet 装入该项目
+cd <你的项目>
+fcomet init
+```
+
+包内提供两个命令名，指向同一个安装器——`fcomet`（主）与 `flow-comet`（别名）。`init` 词元可省略（裸 `fcomet` 等价），`--target <目录>` 同样可选（缺省 = 当前工作目录）。重跑同一条命令即为幂等更新。
+
+首次在交互终端运行会以方向键多选方式提示选择平台（方向键 + 空格勾选，回车确认；默认 Claude Code）——`@clack/prompts` 为主路径，依赖未安装/离线/stdin 无 raw mode 时自动回退 readline 数字/逗号多选（`FLOW_COMET_FORCE_READLINE=1` 测试钩子强制走回退）；非交互场景直接加 `--platform codex` / `--platform dsh` / `--platform claude-code,dsh`（逗号分隔多选）/ `--platform all`。
+
+**更新**：升级全局包不会改动已安装的项目——需在各项目里重跑 `fcomet init` 才能拿到新文件。另外，npm 安装没有 git 历史可据以推导开发态标识，因此它写入的版本标识（`<项目>/.claude/skills/flow-comet/INSTALLED_VERSION`）是随包分发的发布版本号；`<发布版本>-<n>-g<hash>` 形态只出现在从**有 git 与 tag 的仓库克隆**里执行的安装中。
+
+安装器默认面向 Claude Code（行为不变）。面向 Codex：`fcomet init --platform codex`——技能安装到自动发现的 `.agents/skills/`，编排规则注入 `AGENTS.md` 托管区，写入守卫 hook 经 Codex PreToolUse 拦截 Bash 写命令（首次使用需信任 hook：`/hooks`）。面向 DeepSeek Harness：`fcomet init --platform dsh`——技能安装到 `.dsh/skills/flow-comet`（rank 100 自动发现、免重启），编排规则注入 `AGENTS.md` 托管区，并在 `$DSH_HOME` 全局挂载薄桥接 loader（见[安装 → 方案 D](docs/INSTALLATION-zh.md#方案-d--deepseek-harnessdsh平台)）。在交互式终端（有 TTY）运行且未指定 `--platform` 时，会以方向键多选提示选择目标平台（`@clack/prompts` 为主路径，按目标项目既有痕迹预勾选，默认 Claude Code，回车即选；依赖未安装/离线/stdin 无 raw mode 自动回退 readline 数字/逗号多选；`FLOW_COMET_FORCE_READLINE=1` 测试钩子强制回退）；无 TTY（CI/脚本）自动探测 `.claude/` / `.codex/` / `.dsh/`，均无则默认 Claude Code。
+
+安装器还会确保目标项目中的 `flow-kit`：缺失时自动克隆上游并检出锁定快照 `9b5dda7`；已存在的上游克隆只读检测（输出当前 HEAD 与锁定快照的差异，绝不改动）；同名非克隆目录跳过并给出手动指引；网络失败仅告警并继续；purge 永不触碰它。
+
+同一个安装器也可直接从仓库克隆运行，无需全局包——本仓自身工作流与对外分发走的就是这条路径（安装指南中的方案 B）：
+
+```bash
 cd <flow-comet 仓库>
 node scripts/prepare-env.mjs --target <目标项目绝对路径>
 ```
 
-首次在交互终端运行会以方向键多选方式提示选择平台（方向键 + 空格勾选，回车确认；默认 Claude Code）——`@clack/prompts` 为主路径，依赖未安装/离线/stdin 无 raw mode 时自动回退 readline 数字/逗号多选（`FLOW_COMET_FORCE_READLINE=1` 测试钩子强制走回退）；非交互场景直接加 `--platform codex` / `--platform dsh` / `--platform claude-code,dsh`（逗号分隔多选）/ `--platform all`。
-
-安装器默认面向 Claude Code（行为不变）。面向 Codex：`node scripts/prepare-env.mjs --target <路径> --platform codex`——技能安装到自动发现的 `.agents/skills/`，编排规则注入 `AGENTS.md` 托管区，写入守卫 hook 经 Codex PreToolUse 拦截 Bash 写命令（首次使用需信任 hook：`/hooks`）。面向 DeepSeek Harness：`node scripts/prepare-env.mjs --target <路径> --platform dsh`——技能安装到 `.dsh/skills/flow-comet`（rank 100 自动发现、免重启），编排规则注入 `AGENTS.md` 托管区，并在 `$DSH_HOME` 全局挂载薄桥接 loader（见[安装 → 方案 C](docs/INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-平台)）。在交互式终端（有 TTY）运行且未指定 `--platform` 时，会以方向键多选提示选择目标平台（`@clack/prompts` 为主路径，按目标项目既有痕迹预勾选，默认 Claude Code，回车即选；依赖未安装/离线/stdin 无 raw mode 自动回退 readline 数字/逗号多选；`FLOW_COMET_FORCE_READLINE=1` 测试钩子强制回退）；无 TTY（CI/脚本）自动探测 `.claude/` / `.codex/` / `.dsh/`，均无则默认 Claude Code。
-
-安装器还会确保目标项目中的 `flow-kit`：缺失时自动克隆上游并检出锁定快照 `9b5dda7`；已存在的上游克隆只读检测（输出当前 HEAD 与锁定快照的差异，绝不改动）；同名非克隆目录跳过并给出手动指引；网络失败仅告警并继续；purge 永不触碰它。
-
-面向 DeepSeek Harness（dsh）时走同一个安装器——**无插件包、无 npm 包**：
+面向 DeepSeek Harness（dsh）时走同一个安装器——独立的 dsh 平台描述符，无需单独插件包：
 
 ```bash
-node scripts/prepare-env.mjs --target <目标项目绝对路径> --platform dsh
+cd <你的项目>
+fcomet init --platform dsh
 ```
 
-这会项目级安装技能树到 `<项目>/.dsh/skills/flow-comet`（dsh 以 rank 100 自动发现、免重启——未安装该目录的项目不可见该技能，因此激活天然是项目级的），把编排规则注入 `AGENTS.md` 托管区（非破坏合并），并在 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 全局挂载薄桥接 loader（托管块写入 `$DSH_HOME/cordis.patch.yml`——读-合并-写，保留 dsh-skin 等既有块，对所有 profile 生效）。桥接经 dsh 的 `tools/pre-execute` 事件拦截写工具。拦截仅在流程运行中生效；空闲会话项目根外写不会被打断。每次安装会对比 loader 内嵌版本戳输出版本迁移结论（升级 / 降级 / 版本一致），`workflow-state.mjs bridge-check` 是只读健康自检（六态：健康 / 文件缺失 / 未挂载 / 版本偏斜 / 重复注册 / 不适用）。最低 dsh `0.1.0-rc.6`；npm 包暂不发布（1.5.0 一并处理）。完整 dsh 平台安装章节见[安装 → 方案 C](docs/INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-平台)。
+这会项目级安装技能树到 `<项目>/.dsh/skills/flow-comet`（dsh 以 rank 100 自动发现、免重启——未安装该目录的项目不可见该技能，因此激活天然是项目级的），把编排规则注入 `AGENTS.md` 托管区（非破坏合并），并在 `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 全局挂载薄桥接 loader（托管块写入 `$DSH_HOME/cordis.patch.yml`——读-合并-写，保留 dsh-skin 等既有块，对所有 profile 生效）。桥接经 dsh 的 `tools/pre-execute` 事件拦截写工具。拦截仅在流程运行中生效；空闲会话项目根外写不会被打断。每次安装会对比 loader 内嵌版本戳输出版本迁移结论（升级 / 降级 / 版本一致），`workflow-state.mjs bridge-check` 是只读健康自检（六态：健康 / 文件缺失 / 未挂载 / 版本偏斜 / 重复注册 / 不适用）。最低 dsh `0.1.0-rc.6`。完整 dsh 平台安装章节见[安装 → 方案 D](docs/INSTALLATION-zh.md#方案-d--deepseek-harnessdsh平台)。
 
 ```bash
-# 2. 在目标项目新开 Claude Code 会话，输入：
+# 3. 在目标项目新开 Claude Code 会话，输入：
 /flow-comet
 #    （Codex：在 Codex 会话中调用技能——`/use flow-comet` 或自然语言；
 #     同一工作流，见安装指南「在 Codex 上使用 flow-comet」）
@@ -146,7 +161,7 @@ graph LR
 2. **断了线、换了会话也不丢进度**——进行到哪一步永远从 `.specs/` 工件推导，不靠对话记忆；随时重开从正确节点继续。
 3. **实现与协调物理隔离，防止越权**——实现交给全新上下文的子代理在独立工作树完成，必须交回"提交哈希 + 验证证据 + 完成检查"才放行；协调者被禁止写源码，写文件白名单物理拦截越权。
 4. **flow-kit 方法论的原生自动化层**——不是另起炉灶：工件格式、规则、阶段与 flow-kit 完全一致；装了 flow-kit 的项目装上 flow-comet 即升级为机器化流程，无需迁移。
-5. **协议驱动、最小依赖、拷贝即用**——内置 8 节点流程开箱即用；任意已装技能可组合成自定义协议跑在同一引擎；Node.js 18+；第三方依赖仅 `@clack/prompts`，且仅安装器 TTY 多选使用（其余场景自动回退 readline）；一条命令装入目标项目。
+5. **协议驱动、最小依赖、安装即用**——内置 8 节点流程开箱即用；任意已装技能可组合成自定义协议跑在同一引擎；Node.js 18+；第三方依赖仅 `@clack/prompts`，且仅安装器 TTY 多选使用（其余场景自动回退 readline）；一条命令装入目标项目。
 
 **适用场景**：flow-comet 面向 Claude Code 上耗时数小时、跨多会话的开发 change——纪律自动化的价值在长任务中体现。它不是通用 CI/CD 或项目管理工具；Codex 与 DeepSeek Harness 受支持（见[安装](docs/INSTALLATION-zh.md#平台)），其他平台（Gemini / Cursor）不保证支持。
 
@@ -185,7 +200,7 @@ processor-pipeline/            （归档 change，完整产物集）
 ```
 flow-comet/
 ├── .flow-comet/            ★ 权威源（skills/ + rules/）
-├── scripts/                prepare-env 安装器
+├── scripts/                prepare-env 安装器（npm bin：fcomet / flow-comet）
 ├── docs/
 │   ├── examples/           工作流产物示例
 │   ├── ECOSYSTEM.md        flow-kit 与 Comet 的作用、借鉴边界
@@ -211,7 +226,7 @@ flow-comet/
 | 文档 | 说明 |
 |------|------|
 | [生态](docs/ECOSYSTEM-zh.md) | flow-kit 与 Comet 的作用、flow-comet 借鉴什么与明确不吸收什么 |
-| [安装](docs/INSTALLATION-zh.md) | 前置依赖、prepare-env 方案 A/B/C、安装验证 |
+| [安装](docs/INSTALLATION-zh.md) | 前置依赖、安装方案 A–D（npm / prepare-env / 手动复制 / dsh）、安装验证 |
 | [使用](docs/USAGE-zh.md) | 8 节点工作流、分支模式、执行模式、决策点 |
 | [自定义协议](docs/PROTOCOL-zh.md) | 组合 skill 成自定义工作流 |
 | [核心机制](docs/MECHANISM-zh.md) | 状态机、防线、guard 校验 |

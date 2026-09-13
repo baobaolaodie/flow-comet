@@ -10,7 +10,8 @@
 
 - [Claude Code](https://claude.ai/code), installed and authenticated (default platform)
 - [Codex](https://github.com/openai/codex) CLI, installed (skills/rules/hook support as described under [Platforms](#platforms))
-- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) CLI `0.1.0-rc.6` or newer for the dsh platform (optional; see [Option C](#option-c--deepseek-harness-dsh-platform))
+- [Node.js](https://nodejs.org) 18 or newer — required by the npm package and by the installer scripts
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) CLI `0.1.0-rc.6` or newer for the dsh platform (optional; see [Option D](#option-d--deepseek-harness-dsh-platform))
 - [flow-kit](https://github.com/rihebty/flow-kit) installed in the target project — the installer obtains it automatically (locked snapshot; existing copies are only inspected read-only, see [flow-kit acquisition](#flow-kit-acquisition)):
 
 ```bash
@@ -20,7 +21,25 @@ git clone https://github.com/rihebty/flow-kit.git flow-kit
 
 Verify flow-kit: `ls <target project>/flow-kit/templates/` should list workflow artifact templates (CHANGE.md, REQUIREMENT.md, etc.).
 
-## Option A · prepare-env installer (recommended)
+## Option A · npm package (recommended)
+
+Install the CLI globally, then run it inside the target project:
+
+```bash
+npm install -g flow-comet
+cd <target project>
+fcomet init
+```
+
+Two command names ship in the package and both point at the same installer: `fcomet` (primary) and `flow-comet` (alias). The leading `init` token is optional — a bare `fcomet` is equivalent — and `--target <dir>` is optional as well (default: the current working directory), so running the command from inside the project is enough. `--platform <claude-code|codex|dsh|claude-code,dsh|all>` selects the platform without a prompt, and `--purge --yes` resets an installation (delete-and-rebuild, **not uninstall**).
+
+`fcomet init` runs the same installer as the repository form, with identical semantics: it generates/overwrites `rules/` and `skills/`, injects the hook into the platform's settings, and ensures `flow-kit` in the target project. The per-item description, the platform selection chain, the non-destructive guarantees, the hook upgrade path and the installation verification steps are documented under [Option B](#option-b--prepare-env-installer-repository-clone) and apply unchanged to the npm form.
+
+**Updating an installed flow-comet**: re-run `fcomet init` inside the target project — idempotent (generated files are overwritten, the hook entry is merged in place, existing configuration is preserved). Note that `npm install -g flow-comet` on its own only upgrades the CLI: a project keeps the copy it received until the command is re-run there.
+
+**Version marker**: the marker written by an npm install (`<target>/.claude/skills/flow-comet/INSTALLED_VERSION`) is the release version shipped inside the package. The `<release>-<n>-g<hash>` development marker is derived from `git describe` in the source repository, so it only appears for installs run from a repository clone that has git and tags ([Option B](#option-b--prepare-env-installer-repository-clone)) — an npm install has no repository history to derive it from.
+
+## Option B · prepare-env installer (repository clone)
 
 Automated installation from this repository (no Comet CLI required):
 
@@ -52,7 +71,7 @@ node scripts/prepare-env.mjs --target <absolute path to target project> --purge 
 
 **Prerequisites for use**: run the script inside the flow-comet repository (it reads every flow-comet* skill directory from `.flow-comet/skills/`); `--target` points at the target project.
 
-**Updating an installed flow-comet**: re-run the same Option A command — idempotent (overwrites generated files + merges the hook, preserves existing config).
+**Updating an installed flow-comet**: re-run the same Option B command — idempotent (overwrites generated files + merges the hook, preserves existing config).
 
 ### flow-kit acquisition
 
@@ -66,7 +85,7 @@ Before the platform install loop (platform-independent, once per run), `prepare-
 
 ### Hook upgrade
 
-The injected hook command shape evolves across releases: newer releases reference the guard script through the host's project-root variable instead of a relative path, so interception keeps working when the session's working directory drifts away from the project root. **Re-running the same Option A installer command upgrades the managed hook entry in place** — the entry is recognized by the script it points to regardless of its command shape and replaced with the current form: no duplicates, no residue, no manual cleanup of old settings. If you installed via Option B (manual copy), update the entry by hand to match the recommended command in step 3 above. If out-of-scope writes stopped being blocked after working-directory drift (hook log shows `Cannot find module ...comet-hook-guard`), that is the legacy relative-path entry failing to resolve — the fix is the same re-run; see the matching symptom row in [Troubleshooting](TROUBLESHOOTING.md).
+The injected hook command shape evolves across releases: newer releases reference the guard script through the host's project-root variable instead of a relative path, so interception keeps working when the session's working directory drifts away from the project root. **Re-running the same Option B installer command — or `fcomet init` (Option A) in the target project — upgrades the managed hook entry in place** — the entry is recognized by the script it points to regardless of its command shape and replaced with the current form: no duplicates, no residue, no manual cleanup of old settings. If you installed via Option C (manual copy), update the entry by hand to match the recommended command in step 3 above. If out-of-scope writes stopped being blocked after working-directory drift (hook log shows `Cannot find module ...comet-hook-guard`), that is the legacy relative-path entry failing to resolve — the fix is the same re-run; see the matching symptom row in [Troubleshooting](TROUBLESHOOTING.md).
 
 > **Fail-open boundary**: a host that degrades a crashing hook to non-blocking lets the tool call through, and flow-comet cannot change that host behavior — the only fix is to remove the crash itself. The project-root reference resolves from the injected project root instead of the session's working directory, so the guard script is always found and the `Cannot find module ...comet-hook-guard` failure mode no longer occurs (crash probability for this cause drops to zero).
 
@@ -85,11 +104,11 @@ The installer targets **Claude Code** by default (unchanged behavior). The targe
 | Codex | `.agents/skills/` (auto-discovered by Codex) | `AGENTS.md` managed block (inlined at install; Codex's `rules/` directory serves command-approval policies, not instruction files) | `.codex/hooks.json` (matcher `*` — Codex PreToolUse intercepts Bash tool calls; deny via `{"decision":"block"}`) |
 | dsh | `.dsh/skills/flow-comet` (auto-discovered by dsh at rank 100, no restart) | `AGENTS.md` managed block (non-destructive merge) | global bridge loader — `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` + `$DSH_HOME/cordis.patch.yml` managed block (`tools/pre-execute` interception, all profiles) |
 
-On non-default platforms, command paths inside SKILL/GUIDANCE files are rewritten at install time to the platform's actual skill location (the authoritative source stays in `.claude` form). Codex support has been exercised end-to-end (8-node flow on Codex CLI 0.146.0); the write-guard hook intercepts Bash write commands (PowerShell cmdlets, .NET File API, redirection) — command-level interception covers the mainstream patterns, alternate spellings may bypass it (Codex platform limit). The dsh platform installs a thin bridge loader globally in `$DSH_HOME` (see [Option C](#option-c--deepseek-harness-dsh-platform)) — the engine is untouched; the guard decision core is reused unchanged via subprocess calls.
+On non-default platforms, command paths inside SKILL/GUIDANCE files are rewritten at install time to the platform's actual skill location (the authoritative source stays in `.claude` form). Codex support has been exercised end-to-end (8-node flow on Codex CLI 0.146.0); the write-guard hook intercepts Bash write commands (PowerShell cmdlets, .NET File API, redirection) — command-level interception covers the mainstream patterns, alternate spellings may bypass it (Codex platform limit). The dsh platform installs a thin bridge loader globally in `$DSH_HOME` (see [Option D](#option-d--deepseek-harness-dsh-platform)) — the engine is untouched; the guard decision core is reused unchanged via subprocess calls.
 
 ### Verifying installation (no side effects, no change created)
 
-1. **Structure**: `flow-comet*` skill directories under `<target>/.claude/skills/` (count matches prepare-env output, currently 19) + `rules/flow-comet-orchestration.md` + `settings.local.json` + `skills/flow-comet/INSTALLED_VERSION` (version marker shipped with the skill bundle — `cat .claude/skills/flow-comet/INSTALLED_VERSION`; it equals the latest release version, or for prepare-env installs with git available, a precise `<release>-<n>-g<hash>` describing how far the source has accumulated since that release)
+1. **Structure**: `flow-comet*` skill directories under `<target>/.claude/skills/` (count matches prepare-env output, currently 19) + `rules/flow-comet-orchestration.md` + `settings.local.json` + `skills/flow-comet/INSTALLED_VERSION` (version marker shipped with the skill bundle — `cat .claude/skills/flow-comet/INSTALLED_VERSION`; for npm installs it equals the release version shipped in the package, while an install run from a repository clone with git and tags writes the precise `<release>-<n>-g<hash>` describing how far the source has accumulated since that release)
 2. **Config loadability**: `settings.local.json` is valid JSON; `hooks.PreToolUse[].hooks[].command` points to the project-root reference `node ${CLAUDE_PROJECT_DIR}/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs` and `<target>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs` exists. Claude Code injects `CLAUDE_PROJECT_DIR` with the project root when a hook runs, so the path resolves from the project root rather than the session's working directory — it still resolves after the working directory drifts out of the project root (the recommended shape under [Hook upgrade](#hook-upgrade))
 3. **Consistency**: diff against the authoritative source (run inside the flow-comet repo; no output = identical):
    `diff -r --strip-trailing-cr .flow-comet/rules <target>/.claude/rules` and the same for `skills`
@@ -120,9 +139,9 @@ Measured on Codex CLI 0.146.0 — the 8-node flow runs end-to-end.
 3. **Hook contract smoke** (run inside the target project): feed the guard an out-of-scope write target and expect a JSON block decision — `echo '{"tool_name":"Write","tool_input":{"file_path":"src/evil.py"}}' | node .agents/skills/flow-comet/scripts/comet-hook-guard.mjs before_tool --platform codex` → `{"decision":"block",...}`
 4. **Smoke test** (run inside the target project): `cd <target> && node .agents/skills/flow-comet/scripts/workflow-state.mjs status` → JSON state object
 
-## Option B · Manual copy (fallback)
+## Option C · Manual copy (fallback)
 
-When prepare-env cannot be run (Claude Code target; Codex users should prefer Option A — manual copy does not run the platform path replacement):
+When neither installer can be run (Claude Code target; Codex users should prefer Option B — manual copy does not run the platform path replacement):
 
 ```bash
 cd <flow-comet repo>
@@ -158,13 +177,20 @@ cp .flow-comet/rules/flow-comet-orchestration.md "$TARGET/.claude/rules/"
 
 Claude Code executes hook commands with bash semantics on **every platform** (including Windows), so the command above uses the POSIX form (`${CLAUDE_PROJECT_DIR}` braced form + forward slashes) — on Windows the cmd-style `%VAR%` syntax is never expanded and backslashes are swallowed as escape characters, so the hook would fail to load the guard script.
 
-> **Upgrade note**: projects that installed earlier with the legacy relative-path entry (`node .claude/skills/...`) can upgrade in place — re-running the Option A installer replaces that entry with the project-root form above (managed entries are recognized by the script name and overwritten, no manual cleanup needed).
+> **Upgrade note**: projects that installed earlier with the legacy relative-path entry (`node .claude/skills/...`) can upgrade in place — re-running the Option B installer (or `fcomet init`) replaces that entry with the project-root form above (managed entries are recognized by the script name and overwritten, no manual cleanup needed).
 
 **4. Runtime state**: `.flow-comet/flow-comet-state.json` is created by `init` (or the first `/flow-comet` call).
 
-## Option C · DeepSeek Harness (dsh) platform
+## Option D · DeepSeek Harness (dsh) platform
 
-DeepSeek Harness (dsh) is supported through the **prepare-env installer** — the same entry point as Claude Code / Codex, with a dedicated dsh platform descriptor. There is no plugin bundle and no npm package (the npm distribution is a later / 1.5.0 item):
+DeepSeek Harness (dsh) is supported through the **same installer** as Claude Code / Codex, with a dedicated dsh platform descriptor. There is no separate plugin bundle to install — the dsh platform ships inside the same package / repository copy:
+
+```bash
+cd <target project>
+fcomet init --platform dsh
+```
+
+From a repository clone, the equivalent form is:
 
 ```bash
 cd <flow-comet repo>
@@ -267,7 +293,7 @@ Branch/state consistency checks (`status`/`next`) compare the current branch wit
 
 ## Uninstalling
 
-Remove flow-comet from a target project (Claude Code / Codex below; for DeepSeek Harness (dsh), see the manual uninstall steps in [Option C](#option-c--deepseek-harness-dsh-platform)):
+Remove flow-comet from a target project (Claude Code / Codex below; for DeepSeek Harness (dsh), see the manual uninstall steps in [Option D](#option-d--deepseek-harness-dsh-platform)):
 
 ```bash
 # 1. Remove the skill directories and the orchestration rule
