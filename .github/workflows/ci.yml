@@ -283,13 +283,13 @@ jobs:
           V2=$(vver docs/VERSIONS-zh.md)
           C1=$(cver CHANGELOG.md)
           C2=$(cver CHANGELOG-zh.md)
-          P1=$(pver package.json)
+          PKGVER=$(pver package.json)
           # 安装版本标识:权威源文件须等于 CHANGELOG 首个版本段(无版本段 = unreleased)
           IV=$(tr -d '\r\n' < .flow-comet/skills/flow-comet/INSTALLED_VERSION)
           IV_EXPECTED=$(cver CHANGELOG.md)
           IV_EXPECTED=${IV_EXPECTED:-unreleased}
-          echo "README=$R1/$R2 VERSIONS=$V1/$V2 CHANGELOG=$C1/$C2 PACKAGE=$P1 INSTALLED_VERSION=$IV"
-          if [ "$R1" = "$R2" ] && [ "$R1" = "$V1" ] && [ "$R1" = "$V2" ] && [ "$R1" = "$C1" ] && [ "$R1" = "$C2" ] && [ "$R1" = "$P1" ]; then
+          echo "README=$R1/$R2 VERSIONS=$V1/$V2 CHANGELOG=$C1/$C2 PACKAGE=$PKGVER INSTALLED_VERSION=$IV"
+          if [ "$R1" = "$R2" ] && [ "$R1" = "$V1" ] && [ "$R1" = "$V2" ] && [ "$R1" = "$C1" ] && [ "$R1" = "$C2" ] && [ "$R1" = "$PKGVER" ]; then
             :
           else
             echo "版本不一致 / version mismatch across docs"; exit 1
