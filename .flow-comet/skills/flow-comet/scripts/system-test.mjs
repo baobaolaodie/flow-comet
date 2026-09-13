@@ -428,12 +428,23 @@ function runNpmPackDryRun(root) {
 
 // ① 清单可发布性：`private` 在场即 npm 拒绝发布——被误加回会让包不可发布，而包体边界断言
 // （按效果覆盖 files/version）与 CI 版本对账都察觉不到，故独立成锚。允许缺席或显式非真值。
+// 同时守住公开身份与运行时前提（license / engines.node）：这些元数据随版本固化在发布物上，
+// 发布后才察觉漏声明只能等下一个版本补救，故与 private 同点做在场锚定。
 function assertPublishableManifest(pkg) {
   if (pkg.private) {
     throw new Error('package.json 的 private 应缺席（或显式非真值），实际 ' + JSON.stringify(pkg.private)
       + '——置真值会让 npm 拒绝发布');
   }
-  console.log('  清单可发布性: private 缺席 ✓');
+  if (pkg.license !== 'MIT') {
+    throw new Error('package.json 的 license 应为 MIT（与仓库 LICENSE 文件一致），实际 '
+      + JSON.stringify(pkg.license) + '——包被 npm 打进发布物时该字段随版本固化');
+  }
+  const nodeFloor = pkg.engines ? pkg.engines.node : undefined;
+  if (nodeFloor !== '>=18') {
+    throw new Error('package.json 的 engines.node 应为 >=18（文档与 CI 声明的运行时前提），实际 '
+      + JSON.stringify(nodeFloor) + '（engines 整段缺失时为 undefined）');
+  }
+  console.log('  清单可发布性: private 缺席 / license=' + pkg.license + ' / engines.node=' + nodeFloor + ' ✓');
 }
 
 // ② 包体边界：必含面在场 / 私有面零命中 / scripts 面精确等于两项 / 顶层白名单 fail-closed /
