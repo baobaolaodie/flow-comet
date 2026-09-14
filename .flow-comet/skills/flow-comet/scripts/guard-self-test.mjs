@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · flow-comet 引擎自测套件（场景数以 SCENARIOS.length 为准：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、场景数一致性自检、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退）、并行文件依赖检测（写写重叠强判前移 plan 出口 + read 读写弱判渐进 + 触发面排除 + 委托前保持锚 + 扩展名闭合）、directOverride 授权约束（协调者授权留痕正例 / 执行者自切无授权 BLOCK / 越界改 state hook 拦截 / 恢复双路径）、hook state 大小写变体拦截（win32/darwin 闭合 / 其他平台放行）、路由完成判定 fail-closed（缺/未知 status 畸形块不提前放行）、并行文件依赖路径归一化（`.` 段变体重叠检出）、运行时文件位置迁移（白名单搬移 / 迁移前备份与回退 / 新旧并存·符号链接·内容损坏三边界 / 失败保护 / gitignore 三形态保守纳管与幂等）、Comet 感知层剥离（classic 资产有无判定一致 / overlay 协议不再进入叠加分支 + 源码符号检索）、自检清单条目缺失显式报告）
+// C1 · flow-comet 引擎自测套件（场景数以 SCENARIOS.length 为准：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、计数一致性自检（场景数 + 系统测试集项数）、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退）、并行文件依赖检测（写写重叠强判前移 plan 出口 + read 读写弱判渐进 + 触发面排除 + 委托前保持锚 + 扩展名闭合）、directOverride 授权约束（协调者授权留痕正例 / 执行者自切无授权 BLOCK / 越界改 state hook 拦截 / 恢复双路径）、hook state 大小写变体拦截（win32/darwin 闭合 / 其他平台放行）、路由完成判定 fail-closed（缺/未知 status 畸形块不提前放行）、并行文件依赖路径归一化（`.` 段变体重叠检出）、运行时文件位置迁移（白名单搬移 / 迁移前备份与回退 / 新旧并存·符号链接·内容损坏三边界 / 失败保护 / gitignore 三形态保守纳管与幂等）、Comet 感知层剥离（classic 资产有无判定一致 / overlay 协议不再进入叠加分支 + 源码符号检索）、自检清单条目缺失显式报告）
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .flow-comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -9,7 +9,7 @@
 // 运行: node scripts/guard-self-test.mjs
 // 全过 → exit 0，输出 ALL <n> SCENARIOS PASSED（n = SCENARIOS.length）；失败 → exit 1，列出场景名+实际输出+exit code
 //
-// 仅 node 内置模块（child_process/fs/os/path）；不依赖 flow-kit 模板目录存在
+// 仅 node 内置模块（child_process/fs/os/path/vm）；不依赖 flow-kit 模板目录存在
 // （fallback 场景用内置段名；部分场景复制模板文件进临时目录验证 C2 模板派生）。
 // flow-kit 新装场景除外：优先复用仓库内 vendored 上游副本经 git 标准 insteadOf 机制本地克隆
 // （离线可复现，HEAD 即锁定点）；副本缺席（如 CI 全新检出）时真实 clone 上游——
@@ -29,6 +29,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import vm from 'vm'; // 系统测试集项数的运行时派生：求值其 TEST_ITEMS 数组字面量（见 readSystemTestItemCount）
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GUARD = path.join(__dirname, 'workflow-guard.mjs');
@@ -87,18 +88,51 @@ const SCENARIO_COUNT_FILES_MAINTAINER = [
 ];
 const MAINTAINER_DOC_DIR = 'docs/internal';
 
+// 系统测试集项数受检清单——与场景数清单**并列不合并**：两者数字不同、受检文件面也不同
+// （项数只出现在下面这些文档里；场景数散布更广，含 README / 模板 / CI）。清单本身是
+// 单一来源：改动项数必须同步列出的全部文件，漏同步即套件报错（此前无任何机检锚定，
+// 漂移只能靠人工发现）。分组语义与场景数清单一致（见上方分组说明）：分发组恒检，
+// 维护者组整组在场时逐条严检。
+const SYSTEM_TEST_COUNT_FILES = [
+  'CONTRIBUTING.md', 'CONTRIBUTING-zh.md',
+  'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
+  'docs/VERSIONS.md', 'docs/VERSIONS-zh.md',
+  'CHANGELOG.md', 'CHANGELOG-zh.md',
+];
+const SYSTEM_TEST_COUNT_FILES_MAINTAINER = [
+  'docs/internal/ARCHITECTURE.md', 'docs/internal/DOC-CHECKLIST.md',
+  'docs/internal/ROADMAP.md', 'docs/internal/WORKING-METHOD.md',
+];
+// 刻意不收进清单的项数副本（逐条留痕，避免"清单外漏网"变成无声的例外）：
+//   - CLAUDE.md：主仓私有指导文件，计数人工维护（场景数清单同一决策）；
+//   - docs/internal/MECHANISM.md：其项数写法与当前值不一致，由维护批次单独同步——收进清单
+//     就等于要求与本批同时修正；
+//   - .specs/CONTEXT.md：流程工件目录随 change 清理/归档——收进清单会让套件在维护者检出
+//     依赖流程工件状态。
+const SYSTEM_TEST_SCRIPT_REL = '.flow-comet/skills/flow-comet/scripts/system-test.mjs';
+
 let passed = 0;
 const failures = [];
 const createdDirs = [];
 
 // ---------- 工具函数 ----------
 
-// 场景数一致性检查（单一来源）：场景 105 与底部自检共用同一实现与同一判据。
-// 返回问题描述数组（空数组 = 通过）。AC-14：条目缺失**显式报告**，不静默跳过。
+// 计数变体：受检文档可接受的写法（含运行时输出形态）。场景数沿用既有全变体；
+// 系统测试集项数用它真实出现的三形态（运行输出 `SYSTEM TEST: n/n passed` 与文档手抄
+// `n items` / `n 项`）。
+function scenarioCountVariants(n) {
+  return ['ALL ' + n + ' SCENARIOS PASSED', n + ' scenarios', n + ' 场景', n + '/' + n];
+}
+function systemTestCountVariants(itemCount) {
+  return [itemCount + '/' + itemCount, itemCount + ' items', itemCount + ' 项'];
+}
+
+// 受检文件扫描（单一实现，两套计数共用）：返回 { missing, unsynced }（空数组 = 通过）。
+// AC-14：条目缺失**显式报告**，不静默跳过。
 // root 可覆盖扫描根（默认仓库根）——仅为可测性接缝：使「清单条目缺失 → 显式报告」
 // 这一分支能在真实文件系统上被场景驱动（否则该分支只能靠人工实验验证，回归时可能被改回
-// 静默跳过而套件仍全绿）。生产调用不传该参数，行为与改前逐字一致。
-function scanScenarioCountFiles(files, n, root = REPO_ROOT) {
+// 静默跳过而套件仍全绿）。生产调用不传该参数。
+function scanCountFiles(files, variants, root = REPO_ROOT) {
   const missing = [];
   const unsynced = [];
   for (const rel of files) {
@@ -109,28 +143,75 @@ function scanScenarioCountFiles(files, n, root = REPO_ROOT) {
       if (e.code === 'ENOENT') { missing.push(rel); continue; } // AC-14：显式记录缺失（不再 continue 静默）
       throw e;
     }
-    const ok = text.includes('ALL ' + n + ' SCENARIOS PASSED')
-      || text.includes(n + ' scenarios')
-      || text.includes(n + ' 场景')
-      || text.includes(n + '/' + n);
-    if (!ok) unsynced.push(rel);
+    if (!variants.some((v) => text.includes(v))) unsynced.push(rel);
   }
   return { missing, unsynced };
 }
 
+// 场景数一致性检查（单一来源）：场景 105 与底部自检共用同一实现与同一判据。
+// 返回问题描述数组（空数组 = 通过）。
 // root 可覆盖扫描根（默认仓库根）——同上：仅为可测性接缝（生产调用不传，判据与改前一致）。
 function scenarioCountSyncProblems(n, root = REPO_ROOT) {
   const problems = [];
-  const dist = scanScenarioCountFiles(SCENARIO_COUNT_FILES, n, root);
+  const dist = scanCountFiles(SCENARIO_COUNT_FILES, scenarioCountVariants(n), root);
   if (dist.missing.length > 0) problems.push('受检条目文件缺失（幽灵条目）: ' + dist.missing.join(', '));
   if (dist.unsynced.length > 0) problems.push('场景数未同步（应为 ' + n + '）: ' + dist.unsynced.join(', '));
   // 维护者组：整组在场才检查（CI 全新检出 / worktree 检出整组必然缺席——见清单分组说明）
   if (fs.existsSync(path.join(root, MAINTAINER_DOC_DIR))) {
-    const mnt = scanScenarioCountFiles(SCENARIO_COUNT_FILES_MAINTAINER, n, root);
+    const mnt = scanCountFiles(SCENARIO_COUNT_FILES_MAINTAINER, scenarioCountVariants(n), root);
     if (mnt.missing.length > 0) problems.push('维护者文档条目文件缺失（幽灵条目）: ' + mnt.missing.join(', '));
     if (mnt.unsynced.length > 0) problems.push('维护者文档场景数未同步（应为 ' + n + '）: ' + mnt.unsynced.join(', '));
   }
   return problems;
+}
+
+// 系统测试集真实项数（运行时派生）：读其脚本的 TEST_ITEMS 数组字面量并求值取 length——
+// 与运行器打印的 `SYSTEM TEST: <n>/<n> passed` 同源（同一表达式）。既不 import（import 会
+// 执行整套系统测试）也不二次硬编码。求值只构造数组元素（条目内的运行体是函数值，不被调用）。
+// 派生源缺失 → 返回 missing 交调用方显式报告；派生失败 → 抛出（fail-closed，绝不返回哨兵值
+// 静默降级）。
+function readSystemTestItemCount(root = REPO_ROOT) {
+  let src;
+  try {
+    src = fs.readFileSync(path.join(root, SYSTEM_TEST_SCRIPT_REL), 'utf8');
+  } catch (e) {
+    if (e.code === 'ENOENT') return { count: null, missing: SYSTEM_TEST_SCRIPT_REL };
+    throw e;
+  }
+  const decl = src.indexOf('const TEST_ITEMS = [');
+  if (decl < 0) throw new Error(SYSTEM_TEST_SCRIPT_REL + ' 中找不到 TEST_ITEMS 声明（计数派生源失效）');
+  const open = src.indexOf('[', decl);
+  const close = src.indexOf('\n];', open); // 数组按脚本自身格式以顶格 ]; 收尾
+  if (close < 0) throw new Error(SYSTEM_TEST_SCRIPT_REL + ' 的 TEST_ITEMS 未以顶格 ]; 收尾（计数派生源失效）');
+  const items = vm.runInNewContext('[' + src.slice(open + 1, close) + ']', {}, { filename: SYSTEM_TEST_SCRIPT_REL });
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error(SYSTEM_TEST_SCRIPT_REL + ' 的 TEST_ITEMS 求值结果异常（应有非空数组）');
+  }
+  for (const item of items) {
+    if (!item || typeof item.name !== 'string') throw new Error(SYSTEM_TEST_SCRIPT_REL + ' 的 TEST_ITEMS 条目缺 name 字段');
+  }
+  return { count: items.length, missing: null };
+}
+
+// 系统测试集项数一致性检查：受检面与场景数面同构（分发组恒检 + 维护者组整组在场时严检）。
+function systemTestCountSyncProblems(root = REPO_ROOT) {
+  const { count: itemCount, missing } = readSystemTestItemCount(root);
+  if (missing) return ['系统测试集项数派生源缺失（无法核对项数）: ' + missing];
+  const problems = [];
+  const dist = scanCountFiles(SYSTEM_TEST_COUNT_FILES, systemTestCountVariants(itemCount), root);
+  if (dist.missing.length > 0) problems.push('系统测试集项数条目文件缺失（幽灵条目）: ' + dist.missing.join(', '));
+  if (dist.unsynced.length > 0) problems.push('系统测试集项数未同步（应为 ' + itemCount + '）: ' + dist.unsynced.join(', '));
+  if (fs.existsSync(path.join(root, MAINTAINER_DOC_DIR))) {
+    const mnt = scanCountFiles(SYSTEM_TEST_COUNT_FILES_MAINTAINER, systemTestCountVariants(itemCount), root);
+    if (mnt.missing.length > 0) problems.push('维护者文档系统测试集项数条目文件缺失（幽灵条目）: ' + mnt.missing.join(', '));
+    if (mnt.unsynced.length > 0) problems.push('维护者文档系统测试集项数未同步（应为 ' + itemCount + '）: ' + mnt.unsynced.join(', '));
+  }
+  return problems;
+}
+
+// 计数一致性检查（两套计数合并）：场景 105 与底部自检共用，两处判据不会漂移。
+function countSyncProblems(root = REPO_ROOT) {
+  return [...scenarioCountSyncProblems(SCENARIOS.length, root), ...systemTestCountSyncProblems(root)];
 }
 
 function makeTmp() {
@@ -750,6 +831,55 @@ function assertGitignoreManaged(result) {
       JSON.stringify({ afterFirst: result.afterFirst, afterSecond: result.afterSecond }, null, 2));
   }
   assertOut(result.second, '保持原样');
+}
+
+// 系统测试集项数受检面的分支夹具（场景 231 用）：逐条驱动运行时派生、条目缺失、项数未同步、
+// 维护者组整组在场判定、派生源缺失——判据统一是「显式报告、不静默跳过」（AC-14 同型）。
+function exerciseSystemTestCountCheck(dir) {
+  // ① 运行时派生：夹具脚本 3 项 → 派生值必须是 3（证明计数是读出来的，不是硬编码）
+  writeFile(dir, SYSTEM_TEST_SCRIPT_REL, 'const TEST_ITEMS = [\n'
+    + '  { name: \'x1\', run: () => {} },\n'
+    + '  { name: \'x2\', run: () => {} },\n'
+    + '  { name: \'x3\', run: () => {} },\n'
+    + '];\n');
+  const derived = readSystemTestItemCount(dir);
+  if (derived.count !== 3) throw new Error('项数未从脚本派生（应为 3）: ' + JSON.stringify(derived));
+  const itemCount = derived.count;
+  for (const rel of SYSTEM_TEST_COUNT_FILES) writeFile(dir, rel, itemCount + ' items\n');
+  if (systemTestCountSyncProblems(dir).length !== 0) {
+    throw new Error('受检面齐备且同步时不应报告问题: ' + JSON.stringify(systemTestCountSyncProblems(dir)));
+  }
+  // ② 移走一个条目（幽灵条目形态）→ 显式报告缺失项（列出文件名）
+  const missingRel = 'CHANGELOG-zh.md';
+  if (!SYSTEM_TEST_COUNT_FILES.includes(missingRel)) throw new Error('夹具前提失效：' + missingRel + ' 不在受检清单内');
+  fs.rmSync(path.join(dir, missingRel));
+  const missingProblems = systemTestCountSyncProblems(dir);
+  if (!missingProblems.some((p) => p.includes('缺失') && p.includes(missingRel))) {
+    throw new Error('系统测试集项数缺失条目未被显式报告: ' + JSON.stringify(missingProblems));
+  }
+  // ③ 条目在场但项数未同步 → 同样上报（缺省放过即为静默失检）
+  writeFile(dir, missingRel, '未同步的内容\n');
+  const stale = systemTestCountSyncProblems(dir).join(' | ');
+  if (!stale.includes('未同步') || !stale.includes(missingRel)) {
+    throw new Error('系统测试集项数未同步条目未被上报: ' + stale);
+  }
+  // ④ 维护者组整组在场判定：组目录缺席 → 整组跳过（CI 全新检出形态，不可判成假红）
+  writeFile(dir, missingRel, itemCount + ' items\n');
+  if (systemTestCountSyncProblems(dir).length !== 0) {
+    throw new Error('组目录缺席时应整组跳过: ' + JSON.stringify(systemTestCountSyncProblems(dir)));
+  }
+  // ⑤ 组目录在场 → 逐条严检：成员缺席照样显式报告（"整组跳过"不等于"组内在场者免检"）
+  writeFile(dir, path.posix.join(MAINTAINER_DOC_DIR, 'stand-in.md'), 'stand-in\n');
+  const mntMissing = systemTestCountSyncProblems(dir);
+  if (!mntMissing.some((p) => p.includes('缺失') && p.includes(SYSTEM_TEST_COUNT_FILES_MAINTAINER[0]))) {
+    throw new Error('维护者组成员缺席未被显式报告: ' + JSON.stringify(mntMissing));
+  }
+  // ⑥ 派生源缺失（脚本被移走）→ 显式报告，不静默跳过
+  fs.rmSync(path.join(dir, SYSTEM_TEST_SCRIPT_REL));
+  const noSource = systemTestCountSyncProblems(dir).join(' | ');
+  if (!noSource.includes('缺失') || !noSource.includes(SYSTEM_TEST_SCRIPT_REL)) {
+    throw new Error('项数派生源缺失未被显式报告: ' + noSource);
+  }
 }
 
 // ---------- 17 个场景 ----------
@@ -2843,16 +2973,16 @@ const SCENARIOS = [
     },
   },
 
-  // 105: 场景数一致性自检同步（AC-8 / AC-14）——SCENARIOS.length 变更时受检文件须同步
-  // （ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n 变体）。本场景读取权威源仓库的
-  // 受检文件断言含当前场景数变体——文档漏同步或条目缺失（幽灵条目）即 RED；与底部自检
-  // 共用同一实现（scenarioCountSyncProblems），两处判据不会漂移。安装副本无文档面，跳过。
+  // 105: 计数一致性自检同步（AC-8 / AC-14）——SCENARIOS.length 或系统测试集项数变更时，
+  // 受检文件须同步（场景数：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n 变体；
+  // 项数：n/n / n items / n 项 变体）。本场景读取权威源仓库的受检文件断言含当前计数变体——
+  // 文档漏同步或条目缺失（幽灵条目）即 RED；与底部自检共用同一实现（countSyncProblems），
+  // 两处判据不会漂移。安装副本无文档面，跳过。
   {
-    name: '105 场景数自检同步：受检文件含当前场景数变体（AC-8 / AC-14）',
+    name: '105 计数一致性自检同步：受检文件含当前场景数与系统测试集项数变体（AC-8 / AC-14）',
     run: () => {
       if (!isAuthoritativeSourceRepo()) return; // 安装副本无 flow-comet 文档
-      const n = SCENARIOS.length;
-      const problems = scenarioCountSyncProblems(n);
+      const problems = countSyncProblems();
       if (problems.length > 0) {
         throw new Error(problems.join('; '));
       }
@@ -6610,8 +6740,9 @@ const SCENARIOS = [
   },
 
   // AC-14 自检清单有效性：条目齐备且同步 → 零问题；条目缺失 → 显式报告（含文件名），
-  // 不得静默跳过（"永不生效的条目"无处藏身）；条目在场但场景数未同步 → 同样上报。
+  // 不得静默跳过（"永不生效的条目"无处藏身）；条目在场但计数未同步 → 同样上报。
   // 用真实清单常量与真实文件系统驱动自检实现（受检根替换为场景临时目录）。
+  // ③ 起为系统测试集项数受检面（与场景数面同构，判据同一）。
   {
     name: '231 自检清单：条目缺失被显式报告而非静默跳过（AC-14）',
     run: (dir) => {
@@ -6634,6 +6765,8 @@ const SCENARIOS = [
       if (!stale.includes('未同步') || !stale.includes(missingRel)) {
         throw new Error('未同步条目未被上报: ' + stale);
       }
+      // ③ 系统测试集项数受检面：运行时派生 + 缺失 / 未同步 / 组判定 / 派生源缺失全分支
+      exerciseSystemTestCountCheck(dir);
     },
   },
 
@@ -6829,6 +6962,280 @@ const SCENARIOS = [
       if (fs.existsSync(path.join(proj, '.claude'))) throw new Error('被拒绝的命令仍产生了安装产物');
     },
   },
+
+  // ---------- 命令写判定的写入目标取向（Copy/Move 与位置形态） ----------
+
+  // 236: 命令写判定的写入目标取向——Copy-Item/Move-Item 的 `-Path`/`-LiteralPath` 是**源**路径，
+  // 写入目标是 `-Destination`。修复前 cmdlet 模式只捕获 `-(Path|LiteralPath)`（源），且全无
+  // `-Destination` 模式 → 目标从不被检查（越界写整条放行）；而同文件 .NET File API 分支按
+  // 「Copy/Move 目标 = 第二参数」取第二个捕获组——同一函数两个分支取向相反。
+  // 修复后按目的地取值（与 .NET 分支同向）：① 目标越界 → BLOCK（修复前放行 → RED）；
+  // ② 源在白名单外而目标在白名单内 → 放行（源是读取方向，不属写入判定；修复前拿源当目标 → 误拦 → RED）；
+  // ③ 源与目标都在白名单内 → 放行（放行不得因本次修复收窄）。
+  {
+    name: '236 hook 命令写：Copy-Item/Move-Item 取 -Destination 为写入目标（目标越界拦、源路径不再误拦）',
+    run: (dir) => {
+      writeState(dir, { ...baseState('review'), status: 'running' });
+      const src = '.specs/' + CHANGE_ID + '/x.md';
+      const inside = '.specs/' + CHANGE_ID + '/copy.md';
+      // ① 逃逸：目标在协调者白名单（.specs/）之外
+      const escapeCopy = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'Copy-Item -Path ' + src + ' -Destination CLAUDE.md' },
+      });
+      assertExit(escapeCopy, 2);
+      assertOut(escapeCopy, 'BLOCKED');
+      assertOut(escapeCopy, 'CLAUDE.md');
+      const escapeMove = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'Move-Item -Path ' + src + ' -Destination docs/MECHANISM.md' },
+      });
+      assertExit(escapeMove, 2);
+      assertOut(escapeMove, 'BLOCKED');
+      assertOut(escapeMove, 'docs/MECHANISM.md');
+      // ② 源在白名单外、目标在白名单内 → 放行（读取方向不判定为写入）
+      const sourceOutside = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'Copy-Item -LiteralPath CLAUDE.md -Destination ' + inside },
+      });
+      assertExit(sourceOutside, 0);
+      assertOut(sourceOutside, 'workflow-hook-guard-ok');
+      // ③ 源与目标都在白名单内 → 放行
+      const bothInside = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'Copy-Item -Path ' + src + ' -Destination ' + inside },
+      });
+      assertExit(bothInside, 0);
+      assertOut(bothInside, 'workflow-hook-guard-ok');
+    },
+  },
+
+  // 237: 位置形态 `cp <src> <dst>` / `mv <src> <dst>`——修复前命令写判定只认 PowerShell cmdlet、
+  // shell 重定向与 .NET File API，位置形态无任何模式覆盖 → 越界写整条放行。
+  // 修复后取最后一个位置参数为目标（开关及其取值不参与）：① 目标越界 → BLOCK（修复前放行 → RED）；
+  // ② 目标在白名单内 → 放行；③ `cp` 只作为普通参数出现（不是命令词）时不产生写入目标
+  // （命令位置锚定——否则 `grep -n cp <file>` 会把文件名当成写入目标 → 反过来造成误拦）。
+  {
+    name: '237 hook 命令写：cp/mv 位置形态取最后位置参数为目标（逃逸拦截，命令位置锚定不误判）',
+    run: (dir) => {
+      writeState(dir, { ...baseState('review'), status: 'running' });
+      const src = '.specs/' + CHANGE_ID + '/x.md';
+      const inside = '.specs/' + CHANGE_ID + '/copy.md';
+      const cpEscape = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'cp ' + src + ' CLAUDE.md' },
+      });
+      assertExit(cpEscape, 2);
+      assertOut(cpEscape, 'BLOCKED');
+      assertOut(cpEscape, 'CLAUDE.md');
+      const mvEscape = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'mv -f ' + src + ' README-zh.md' },
+      });
+      assertExit(mvEscape, 2);
+      assertOut(mvEscape, 'BLOCKED');
+      assertOut(mvEscape, 'README-zh.md');
+      // 目标在白名单内 → 放行（含开关：开关与其取值不参与位置参数扫描）
+      const cpInside = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'cp -f CLAUDE.md ' + inside },
+      });
+      assertExit(cpInside, 0);
+      assertOut(cpInside, 'workflow-hook-guard-ok');
+      // 命令位置锚定：`cp` 作为普通参数出现（grep 模式）不是写命令
+      const notCommand = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'grep -n cp README.md' },
+      });
+      assertExit(notCommand, 0);
+      assertOut(notCommand, 'workflow-hook-guard-ok');
+    },
+  },
+
+  // 238: 纯位置形态（`Copy-Item <src> <dst>`）与 `-FilePath`（Out-File 的惯用主参数）修复前均无
+  // 模式覆盖 → 放行；修复后两者都按写入目标判定。同场景锚定既有 `-Path` 语义未被本次修复放宽
+  // （Set-Content / Remove-Item 的 `-Path` 就是写入目标：越界拦、白名单内放行）。
+  {
+    name: '238 hook 命令写：纯位置形态与 -FilePath 目标覆盖，既有 -Path 语义保持',
+    run: (dir) => {
+      writeState(dir, { ...baseState('review'), status: 'running' });
+      const src = '.specs/' + CHANGE_ID + '/x.md';
+      const positional = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'Copy-Item ' + src + ' CLAUDE.md' },
+      });
+      assertExit(positional, 2);
+      assertOut(positional, 'BLOCKED');
+      assertOut(positional, 'CLAUDE.md');
+      const filePath = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'Out-File -FilePath docs/MECHANISM.md' },
+      });
+      assertExit(filePath, 2);
+      assertOut(filePath, 'BLOCKED');
+      assertOut(filePath, 'docs/MECHANISM.md');
+      // 开关取值不参与位置参数扫描：`-Filter *.md` 的 `*.md` 不是写入目标（当成目标即新的误拦）
+      const filterValue = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'Remove-Item -Force -Filter *.md' },
+      });
+      assertExit(filterValue, 0);
+      assertOut(filterValue, 'workflow-hook-guard-ok');
+      // 既有 -Path 语义保持（回归锚）：越界拦
+      const removePath = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'Remove-Item -Path docs/MECHANISM.md' },
+      });
+      assertExit(removePath, 2);
+      assertOut(removePath, 'BLOCKED');
+      const setContentOut = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'Set-Content -Path docs/MECHANISM.md -Value x' },
+      });
+      assertExit(setContentOut, 2);
+      assertOut(setContentOut, 'BLOCKED');
+      // 既有 -Path 语义保持（回归锚）：白名单内放行
+      const setContentIn = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'Set-Content -Path ' + src + ' -Value x' },
+      });
+      assertExit(setContentIn, 0);
+      assertOut(setContentIn, 'workflow-hook-guard-ok');
+    },
+  },
+
+  // 239: 目的地型命令的参数段必须止于换行——段捕获 `[^;|&]*` 不排除 `\r`/`\n`，`cp <src> <dst>`
+  // 之后紧跟另一行命令时段会跨行吞并：「最后一个位置参数」取到下一行的参数（通常在白名单内）
+  // → 整条命令放行，**真正被写的 <dst> 从不被检查**（逃逸方向）。修复后换行/回车都是段边界，
+  // 每行命令按各自参数段判定。
+  {
+    name: '239 hook 命令写：目的地型命令的段不跨行（跨行吞并使真实目标漏检 → 拦）',
+    run: (dir) => {
+      writeState(dir, { ...baseState('review'), status: 'running' });
+      const src = '.specs/' + CHANGE_ID + '/x.md';
+      const inside = '.specs/' + CHANGE_ID + '/ok.md';
+      // ① 目标越界、下一行参数在白名单内：修复前取到下一行参数 → 放行（逃逸）
+      const crossLine = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'cp ' + src + ' CLAUDE.md\necho ' + inside },
+      });
+      assertExit(crossLine, 2);
+      assertOut(crossLine, 'BLOCKED');
+      assertOut(crossLine, 'CLAUDE.md');
+      // ② CRLF 行尾（Windows 形态）同判：`\r` 也是段边界
+      const crlf = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'cp ' + src + ' CLAUDE.md\r\necho ' + inside },
+      });
+      assertExit(crlf, 2);
+      assertOut(crlf, 'BLOCKED');
+      assertOut(crlf, 'CLAUDE.md');
+      // ③ 行首是普通命令、写命令在第二行 → 第二行仍被独立判定（多行命令串的覆盖保持）
+      const secondLine = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'echo ' + inside + '\nmv ' + src + ' README-zh.md' },
+      });
+      assertExit(secondLine, 2);
+      assertOut(secondLine, 'BLOCKED');
+      assertOut(secondLine, 'README-zh.md');
+      // ④ 单行且目标在白名单内 → 放行（收紧段边界不得误伤合法形态）
+      const singleLine = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'cp ' + src + ' ' + inside },
+      });
+      assertExit(singleLine, 0);
+      assertOut(singleLine, 'workflow-hook-guard-ok');
+    },
+  },
+
+  // 240: GNU cp/mv 的**前置目的地**选项 `-t <dir>` / `--target-directory[= ]<dir>`——目的地不是
+  // 最后一个位置参数而是开关的取值。修复前只把开关跳过取值、仍取「最后一个位置参数」= 源
+  // （源通常在白名单内）→ 整条命令放行，真正被写的目录不被检查（逃逸方向）。
+  {
+    name: '240 hook 命令写：cp/mv 前置目的地 -t / --target-directory 取为写入目标',
+    run: (dir) => {
+      writeState(dir, { ...baseState('review'), status: 'running' });
+      const src = '.specs/' + CHANGE_ID + '/x.md';
+      const inside = '.specs/' + CHANGE_ID + '/ok.md';
+      // ① `-t <dir>`：目的地越界 → 拦（修复前取源 → 放行）
+      const shortForm = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'cp -t docs ' + src },
+      });
+      assertExit(shortForm, 2);
+      assertOut(shortForm, 'BLOCKED');
+      assertOut(shortForm, 'docs');
+      // ② `--target-directory=<dir>`（等号形态）
+      const longFormEquals = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'cp --target-directory=docs ' + src },
+      });
+      assertExit(longFormEquals, 2);
+      assertOut(longFormEquals, 'BLOCKED');
+      assertOut(longFormEquals, 'docs');
+      // ③ `--target-directory <dir>`（空格形态）
+      const longFormSpace = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'mv --target-directory docs ' + src },
+      });
+      assertExit(longFormSpace, 2);
+      assertOut(longFormSpace, 'BLOCKED');
+      assertOut(longFormSpace, 'docs');
+      // ④ 前置目的地在白名单内 → 放行（不得因本次修复误拦）
+      const insideTarget = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'mv -t .specs/' + CHANGE_ID + ' ' + src },
+      });
+      assertExit(insideTarget, 0);
+      assertOut(insideTarget, 'workflow-hook-guard-ok');
+      // ⑤ 反向锚：无前置目的地的普通形态仍按最后位置参数判定（既有语义保持）
+      const plain = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'cp -f ' + src + ' ' + inside },
+      });
+      assertExit(plain, 0);
+      assertOut(plain, 'workflow-hook-guard-ok');
+    },
+  },
+
+  // 241: 命令位置锚定必须引号感知——命令边界集 `[;&|(){}]` 不区分引号内外，`printf '(cp CLAUDE.md)'`
+  // 引号内的括号被当成命令边界，括号里的文本被读成写命令 → **合法命令被拦**（误拦方向）。
+  // 修复后边界只在引号外生效；引号外的真命令仍按原判据拦截（收紧不得放过真逃逸）。
+  {
+    name: '241 hook 命令写：引号内的命令分隔符不构成命令位置（合法命令不被读成写命令）',
+    run: (dir) => {
+      writeState(dir, { ...baseState('review'), status: 'running' });
+      // ① 单引号内的括号：不是命令边界
+      const singleQuoted = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: "printf '(cp CLAUDE.md)'" },
+      });
+      assertExit(singleQuoted, 0);
+      assertOut(singleQuoted, 'workflow-hook-guard-ok');
+      // ② 双引号内的分号：不是命令分隔符
+      const doubleQuoted = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'echo "cp CLAUDE.md; mv x README.md"' },
+      });
+      assertExit(doubleQuoted, 0);
+      assertOut(doubleQuoted, 'workflow-hook-guard-ok');
+      // ③ 引号外的真写命令仍拦（同一命令串内引号内文本与真命令并存）
+      const realCommand = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'printf "(cp x)" ; cp .specs/' + CHANGE_ID + '/x.md CLAUDE.md' },
+      });
+      assertExit(realCommand, 2);
+      assertOut(realCommand, 'BLOCKED');
+      assertOut(realCommand, 'CLAUDE.md');
+      // ④ 既有意图保持：`cp` 只作为被检索文本出现时不构成命令位置（不误判为写命令）
+      const notCommand = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'grep -n "cp" README.md' },
+      });
+      assertExit(notCommand, 0);
+      assertOut(notCommand, 'workflow-hook-guard-ok');
+    },
+  },
 ];
 
 // ---------- 运行 ----------
@@ -6863,11 +7270,12 @@ console.log('RESULT: ' + passed + '/' + SCENARIOS.length + ' scenarios passed');
 // ② 公开产物零代号：公开文档不得含过程代号（场景编号/修复编号/批次/缺陷编号/问题级/验证代号/验证轮次/未公开概念——历史 CHANGELOG 回归实证）。
 // 仅权威源检出执行；安装副本（目标项目）无 flow-comet 文档面，跳过。
 if (isAuthoritativeSourceRepo()) {
-  // ① 场景数受检清单（分发组恒检 + 维护者组整组在场时检；判据与场景 105 共用同一实现）
-  // SCENARIO_COUNT_FILES / SCENARIO_COUNT_FILES_MAINTAINER 为模块级常量（见文件头定义）
-  for (const problem of scenarioCountSyncProblems(SCENARIOS.length)) {
-    failures.push({ name: '场景数一致性', error: problem });
-    console.error('FAIL: 场景数一致性\n' + problem);
+  // ① 计数一致性受检清单（分发组恒检 + 维护者组整组在场时检；判据与场景 105 共用同一实现）
+  // SCENARIO_COUNT_FILES(_MAINTAINER) / SYSTEM_TEST_COUNT_FILES(_MAINTAINER) 为模块级常量
+  // （见文件头定义）——场景数与系统测试集项数两套计数合并检查
+  for (const problem of countSyncProblems()) {
+    failures.push({ name: '计数一致性', error: problem });
+    console.error('FAIL: 计数一致性\n' + problem);
   }
 
   // ② 公开文档零代号（公开产物纪律——CHANGELOG 历史 S 编号回归的教训，2026-08-10）

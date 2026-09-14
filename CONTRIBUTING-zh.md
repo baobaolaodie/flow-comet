@@ -85,21 +85,22 @@ git branch -d hotfix/<描述>
 
 1. **读 README** —— 快速开始展示了一个最小工作流。
 2. **选一个入门 issue** —— 标记为 `good first issue` 的 issue 适合新贡献者。
-3. **准备环境** —— Node.js ≥ 18；clone 仓库；运行一次 `npm install`（安装锁定版本 `@clack/prompts` 依赖——仓库唯一第三方依赖，仅供安装器交互式平台选择使用）；再运行一次 `node scripts/install-commit-hook.mjs`（本地提交/推送消息检查）。
+3. **准备环境** —— Node.js ≥ 18；clone 仓库；运行一次 `npm install` —— `@clack/prompts` 是安装器的**真依赖**（交互式平台多选），不是仅供开发使用的工具，lockfile 锁定其精确版本；未安装时安装器回退为纯 readline 提示。再运行一次 `node scripts/install-commit-hook.mjs` —— 它把 `core.hooksPath` 指向 `.githooks/`；未执行前，提交/推送消息无本地检查。
 4. **验证基线** —— 运行回归套件（见下方开发环境）。
 5. **不确定改动是否被需要？** 先开 issue —— issue 模板会引导你提供所需上下文。
 
 ## 开发环境
 
-- **运行时**：Node.js ≥ 18（ESM）；唯一第三方依赖是 `@clack/prompts`（经 `package-lock.json` 锁定精确版本），仅供安装器交互式 TTY 多选使用（不可用时自动回退 readline）——clone 后运行一次 `npm install`
+- **运行时**：Node.js ≥ 18（ESM）；唯一第三方依赖是 `@clack/prompts`（经 `package-lock.json` 锁定精确版本），仅供安装器交互式 TTY 多选使用（不可用时自动回退 readline）——clone 后运行一次 `npm install`；未安装时安装器回退 readline，随包交付给用户的交互选择就不会在你的本地运行中被走到
 - **仓库**：clone、运行 `npm install`，然后验证回归基线可跑：
-  `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 235 SCENARIOS PASSED`（统一测试集两级基线，另需 `node .flow-comet/skills/flow-comet/scripts/system-test.mjs` → `ALL SYSTEM TESTS PASSED`，74 项）
+  `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 241 SCENARIOS PASSED`（统一测试集两级基线，另需 `node .flow-comet/skills/flow-comet/scripts/system-test.mjs` → `ALL SYSTEM TESTS PASSED`，75 项）
+- **分发面**：npm 包体边界（`package.json` 的 `files` 白名单）与 `fcomet` / `flow-comet` 两个 bin 入口由两处断言把关——CI 的 `installer` job（合并门禁）与 `system-test`（本地可复跑；在安装副本内该项输出显式「不适用」而非静默跳过）。引擎自测套件不是分发判据。
 - **创作环境**：Claude Code（skill/hook 在 Claude Code 会话中运行）；hook 通过 `prepare-env` 安装到你的项目 `.claude/`（同一安装器服务 Codex（`--platform codex`）与 DeepSeek Harness（dsh，`--platform dsh`）——项目级技能树、AGENTS.md 托管规则与全局桥接 loader）
 - **机制相关工作**：动手改脚本前先读 [docs/MECHANISM.md](docs/MECHANISM.md) 了解机制语义（行为层）
 
 ### CI 强制检查与本地 hook
 
-CI 在每个 PR 与 push 时自动运行——服务端强制仓库约定（回归套件含场景数与公开产物代号自检、脚本语法、BOM 防线、安装器可复现性（覆盖 Claude Code / Codex / DeepSeek Harness（dsh）三个平台）、workflow yaml 有效性、PR 模板完整性、提交规范（Conventional Commits）、版本一致性、CHANGELOG PR 链接、死链）。
+CI 在每个 PR 与 push 时自动运行——服务端强制仓库约定（回归套件含场景数与公开产物代号自检、脚本语法、BOM 防线、安装器可复现性（覆盖 Claude Code / Codex / DeepSeek Harness（dsh）三个平台）、分发面（npm 包体边界与 bin 契约）、workflow yaml 有效性、PR 模板完整性、提交规范（Conventional Commits）、版本一致性、CHANGELOG PR 链接、死链）。
 
 **本地 hook**（clone 后安装一次）：
 
@@ -112,7 +113,7 @@ hook 在提交与推送时拒绝含过程代号（修复编号、批次代号、
 推送前运行回归基线：
 
 ```bash
-node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 235 SCENARIOS PASSED
+node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 241 SCENARIOS PASSED
 ```
 
 其余由 CI 处理。
@@ -130,7 +131,8 @@ Issue 确认后：bug 用 `fix/` 分支、feature 用 `feat/` 分支——都按
 
 - **权威源**：skill/脚本改动在 `.flow-comet/skills/`（单一权威源；`.claude/` 副本是安装产物——用 `prepare-env` 更新，勿手改）
 - **TDD**：每个机制修复先写 RED 场景（`guard-self-test.mjs`——确认以正确原因失败）→ GREEN → 全量回归
-- **回归基线**：`node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 235 SCENARIOS PASSED`（统一测试集两级基线，另需 `node .flow-comet/skills/flow-comet/scripts/system-test.mjs` → `ALL SYSTEM TESTS PASSED`，74 项）（每次改动后必须）
+- **回归基线**：`node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 241 SCENARIOS PASSED`（统一测试集两级基线，另需 `node .flow-comet/skills/flow-comet/scripts/system-test.mjs` → `ALL SYSTEM TESTS PASSED`，75 项）（每次改动后必须）
+- **分发契约**：npm 包名与 `fcomet` / `flow-comet` 两个 bin 名一经发布即为契约；包体边界是 `package.json` 的 `files` 白名单——**fail-closed**，不得放宽为黑名单或整目录包含。决策记录：ADR-010。
 - **文档同步**：行为层文档在 `docs/`（中英双语——改文档时两语同步）；实现细节不进公开文档
 - **双语纪律**：英文文档不含中文（语言切换器、flow-kit 工件段名、运行时消息原文除外）；中文文档不含英文长句（命令、URL、专有术语除外）
 - **向后兼容**：旧 change/旧 state 照常工作——渐进 WARN 优先于 BLOCK
@@ -227,7 +229,7 @@ git push --force-with-lease origin feat/<描述>            # feature 分支允�
 ## 发布审批单
 
 - 包含改动：PR 列表 + 每项一句话摘要
-- 验证结果：回归（235 场景）/ 安装副本验证
+- 验证结果：回归（241 场景）/ 安装副本验证
 - 版本：X.Y.Z（文档批次可不 bump）
 ```
 

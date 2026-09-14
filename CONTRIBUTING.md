@@ -85,21 +85,22 @@ git branch -d hotfix/<description>
 
 1. **Read the README** — the quick start walks through a minimal workflow.
 2. **Pick a first issue** — issues labeled `good first issue` are scoped for newcomers.
-3. **Set up your environment** — Node.js ≥ 18; clone the repo; run `npm install` once (installs the locked `@clack/prompts` dependency — the repository's only third-party dependency, used solely by the installer's interactive platform selection); run `node scripts/install-commit-hook.mjs` once (local commit/push message checks).
+3. **Set up your environment** — Node.js ≥ 18; clone the repo; run `npm install` once — `@clack/prompts` is the installer's real runtime dependency (the interactive platform multi-select), not a dev-only tool, and the lockfile pins its exact version; without it the installer falls back to plain readline prompts. Then run `node scripts/install-commit-hook.mjs` once — it points `core.hooksPath` at `.githooks/`; until it has been run, nothing checks commit/push messages locally.
 4. **Verify the baseline** — run the regression suite (see Development setup below).
 5. **Not sure whether a change is wanted?** Open an issue first — the issue templates ask for the context we need.
 
 ## Development setup
 
-- **Runtime**: Node.js ≥ 18 (ESM); the only third-party dependency is `@clack/prompts` (pinned exact version via `package-lock.json`), used only by the installer's interactive TTY multi-select with an automatic readline fallback — run `npm install` once after cloning
+- **Runtime**: Node.js ≥ 18 (ESM); the only third-party dependency is `@clack/prompts` (pinned exact version via `package-lock.json`), used only by the installer's interactive TTY multi-select with an automatic readline fallback — run `npm install` once after cloning; without it the installer falls back to readline, so the interactive selection shipped to users goes unexercised in your local runs
 - **Repo**: clone, run `npm install`, then verify the regression baseline runs:
-  `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 235 SCENARIOS PASSED` (two-tier baseline; also run `node .flow-comet/skills/flow-comet/scripts/system-test.mjs` → `ALL SYSTEM TESTS PASSED`, 74 items)
+  `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 241 SCENARIOS PASSED` (two-tier baseline; also run `node .flow-comet/skills/flow-comet/scripts/system-test.mjs` → `ALL SYSTEM TESTS PASSED`, 75 items)
+- **Distribution surface**: the npm package boundary (`files` whitelist in `package.json`) and the `fcomet` / `flow-comet` bin entries are asserted in two places — CI's `installer` job (the merge gate) and `system-test` (reproducible locally, and from an installed copy the assertion reports "not applicable" instead of skipping silently). The engine self-test suite is not a distribution criterion.
 - **Authoring environment**: Claude Code (skills/hooks run in Claude Code sessions); the hook is installed via `prepare-env` into your project's `.claude/` (the same installer serves Codex via `--platform codex` and DeepSeek Harness (dsh) via `--platform dsh` — project-level skill tree, AGENTS.md managed rules, and a global bridge loader)
 - **For mechanism work**: read [docs/MECHANISM.md](docs/MECHANISM.md) for the mechanism semantics (behavior layer) before touching scripts
 
 ### CI enforcement and local hooks
 
-CI runs automatically on every PR and push — it enforces the repository conventions server-side (regression suite with scenario-count and public-artifact code self-checks, script syntax, BOM guard, installer reproducibility across all three platforms — Claude Code / Codex / DeepSeek Harness (dsh) — workflow yaml validity, PR template completeness, commit-message conventions, version consistency, CHANGELOG PR links, dead links).
+CI runs automatically on every PR and push — it enforces the repository conventions server-side (regression suite with scenario-count and public-artifact code self-checks, script syntax, BOM guard, installer reproducibility across all three platforms — Claude Code / Codex / DeepSeek Harness (dsh) — the distribution surface (npm pack boundary and bin contract), workflow yaml validity, PR template completeness, commit-message conventions, version consistency, CHANGELOG PR links, dead links).
 
 **Local hooks** (install once after cloning):
 
@@ -112,7 +113,7 @@ The hooks reject commits and pushes whose messages carry process codes — proje
 Before pushing, run the regression baseline:
 
 ```bash
-node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 235 SCENARIOS PASSED
+node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 241 SCENARIOS PASSED
 ```
 
 CI handles the rest.
@@ -130,7 +131,8 @@ After the issue is confirmed: bug fixes use a `fix/` branch, features use a `fea
 
 - **Authoritative source**: edit skills/scripts under `.flow-comet/skills/` (the single source; `.claude/` copies are install artifacts — update them via `prepare-env`, never by hand)
 - **TDD**: every mechanism fix starts with a RED scenario in `guard-self-test.mjs` (watch it fail for the right reason), then GREEN, then full regression
-- **Regression baseline**: `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 235 SCENARIOS PASSED` (two-tier baseline; also run `node .flow-comet/skills/flow-comet/scripts/system-test.mjs` → `ALL SYSTEM TESTS PASSED`, 74 items) (mandatory after every change)
+- **Regression baseline**: `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 241 SCENARIOS PASSED` (two-tier baseline; also run `node .flow-comet/skills/flow-comet/scripts/system-test.mjs` → `ALL SYSTEM TESTS PASSED`, 75 items) (mandatory after every change)
+- **Distribution contract**: the npm package name and the `fcomet` / `flow-comet` bin names become contract once released, and the package boundary is the `files` whitelist in `package.json` — fail-closed, never relaxed to a blacklist or a whole-directory include. Decision record: ADR-010.
 - **Documentation sync**: behavior-layer docs live in `docs/` (bilingual EN/zh — keep both in sync when a doc changes); implementation details stay out of public docs
 - **Bilingual discipline**: English docs contain no Chinese (except the language switcher, flow-kit artifact section names, and runtime message quotes); Chinese docs contain no long English sentences (except commands, URLs, and proper terms)
 - **Backward compatibility**: old changes/states keep working — progressive WARN over BLOCK
@@ -227,7 +229,7 @@ Force push is allowed on your own feature branch (no protection); a new push inv
 ## Release approval sheet
 
 - Changes: PR list + one-line summary each
-- Verification: regression (235 scenarios) / installed-copy checks
+- Verification: regression (241 scenarios) / installed-copy checks
 - Version: X.Y.Z (doc-only batches may skip the bump)
 ```
 

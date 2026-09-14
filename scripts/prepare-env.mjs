@@ -355,9 +355,16 @@ function parseArgs(argv) {
   let purge = false;
   let yes = false;
   let platform = null;
+  // 命令形态容忍（npm bin 形态 `fcomet init`）：包管理器垫片把 `init` 当位置词元传给脚本。
+  // 只吃掉**一个**精确等于 `init` 且位于位置参数首位的词元（其前只允许选项词元）；
+  // 其它非 `--` 开头词元仍按既有语义报「未知参数」——变形词元（如 `int`/`inti`）
+  // 绝不被静默吞成默认安装。
+  let initTokenConsumed = false;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (a === '--target') {
+    if (a === 'init' && !initTokenConsumed) {
+      initTokenConsumed = true;
+    } else if (a === '--target') {
       if (i + 1 >= args.length) {
         throw new Error('--target 缺少目录参数');
       }
@@ -386,7 +393,9 @@ function parseArgs(argv) {
 }
 
 function printUsage() {
-  console.log('用法: node scripts/prepare-env.mjs [--target <dir>] [--platform <claude-code|codex|dsh|claude-code,dsh|all>] [--purge --yes]');
+  console.log('用法: fcomet init [--target <dir>] [--platform <claude-code|codex|dsh|claude-code,dsh|all>] [--purge --yes]');
+  console.log('  （`fcomet` 与 `flow-comet` 是同一安装器的两个命令名；`init` 词元可省略——裸 `fcomet` 等价）');
+  console.log('  仓库内直调: node scripts/prepare-env.mjs [--target <dir>] [--platform <...>] [--purge --yes]');
   console.log('  从权威源 .flow-comet/ 安装/更新 <dir> 环境（含运行时位置迁移与 .gitignore 纳管）');
   console.log('  --target 缺省 = 当前工作目录（cwd）');
   console.log('  --platform 指定平台（claude-code / codex / dsh；逗号分隔多选或 all 全部平台）');

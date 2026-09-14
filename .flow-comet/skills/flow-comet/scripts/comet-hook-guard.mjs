@@ -68,23 +68,150 @@ function hookBlock(mainLine, detailLine) {
 // 命中任一模式即提取路径(供白名单判定);未命中 = 无写入语义,放行。
 // 边界:检测为命令级——换写法(如其他 File API)可绕过,属平台限制;覆盖主流模式后越权写入
 // 对执行者的阻力与可见性已足够(每次绕过都留下试错痕迹)。
+// 目的地型命令的位置形态扫描：下面这些开关各吃一个取值，其取值 token 不是位置参数
+// （不排除就会把 `-Filter *.md` 的 `*.md` 取成写入目标——修完取错方向又添新的误拦）
+const DEST_VALUE_FLAGS = new Set([
+  'destination', 'dest', 'path', 'literalpath', 'filepath', 'filter', 'include', 'exclude',
+]);
+
+// 引号感知的命令结构扫描（目的地型命令的「命令位置」与「参数段边界」共用）：
+//   masked[i] = 该位置在引号内（含引号字符本身，以及反斜杠转义的下一字符——转义字符是字面量，
+//               不参与结构判定；被转义的换行是续行，不算命令分隔）；
+//   starts    = 候选命令位置（行首，以及未加引号的 `; & | ( ) { }` 或换行之后的首个非空白位置）。
+// 逐字符扫描而非字符类正则：字符类不区分引号内外（引号内的括号/分号不是命令边界），
+// 也不覆盖「引号内文本含命令名」的形态——详见下方目的地型模式的注释。
+function scanCommandStructure(command) {
+  const masked = new Array(command.length).fill(false);
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (inSingle) {
+      masked[i] = true;
+      if (ch === "'") inSingle = false;
+      continue;
+    }
+    if (ch === '\\' && i + 1 < command.length) {
+      masked[i] = true;
+      masked[i + 1] = true;
+      i += 1;
+      continue;
+    }
+    if (inDouble) {
+      masked[i] = true;
+      if (ch === '"') inDouble = false;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      masked[i] = true;
+      if (ch === "'") inSingle = true;
+      else inDouble = true;
+    }
+  }
+  const starts = new Set();
+  let pending = true;
+  for (let i = 0; i < command.length; i++) {
+    if (masked[i]) continue;
+    const ch = command[i];
+    if (ch === ' ' || ch === '\t') continue;
+    if (ch === ';' || ch === '&' || ch === '|' || ch === '(' || ch === ')' || ch === '{' || ch === '}' || ch === '\n' || ch === '\r') {
+      pending = true;
+      continue;
+    }
+    if (pending) {
+      starts.add(i);
+      pending = false;
+    }
+  }
+  return { masked, starts };
+}
+
+// 参数段结束位置（引号感知）：自 from 起第一个未在引号内的段边界（`;` / `|` / `&` 或换行/回车）。
+// 换行与回车都算段边界——`\r`/`\n` 任一在场都把两行命令切开（CRLF 与 LF 同判）。
+// 反斜杠续行由 masked 排除（被转义的换行不截断段），跨行的单条命令不会被误截成两段。
+function unquotedSegmentEnd(command, masked, from) {
+  for (let i = from; i < command.length; i++) {
+    if (masked[i]) continue;
+    const ch = command[i];
+    if (ch === ';' || ch === '|' || ch === '&' || ch === '\n' || ch === '\r') return i;
+  }
+  return command.length;
+}
+
 function codexWriteTargetsFromCommand(command) {
   if (typeof command !== 'string' || command.trim() === '') return [];
   const targets = [];
+  // 目标归一化(剥引号 / 过滤空值与空设备 / 去重)——下方各模式共用,防多处口径漂移
+  const addTarget = (raw) => {
+    let t = raw && raw.trim();
+    if (t) t = t.replace(/^["']|["']$/g, ''); // 剥引号
+    if (t && t !== 'NUL' && t !== '/dev/null' && !targets.includes(t)) targets.push(t); // 去重
+  };
   const patterns = [
-    // PowerShell 写类 cmdlet 的 -Path/-LiteralPath(引号内空格整体捕获并剥引号;
-    // 只匹配写类 cmdlet——读类(Get-Content 等)的 -Path 不提取;同一命令内 [^;|&]*? 防跨命令)
-    /(?:Set-Content|Add-Content|New-Item|Out-File|Copy-Item|Move-Item|Remove-Item|Set-Item|Export-Csv)[^;|&]*?-(?:Path|LiteralPath)\s+("[^"]*"|'[^']*'|[^\s;|&]+)/gi,
+    // PowerShell **路径型**写类 cmdlet 的 -Path/-LiteralPath/-FilePath(引号内空格整体捕获并剥引号;
+    // 只匹配写类 cmdlet——读类(Get-Content 等)的 -Path 不提取;同一命令内 [^;|&]*? 防跨命令)。
+    // 路径型的 -Path 就是写入目标;**Copy-Item/Move-Item 不在此列**——它们的 -Path 是**源**路径
+    // (见下方目的地型模式):把源取成目标正是本函数曾经的取向错误——写入目标从不被检查,
+    // 源路径反而被误拦(只读命令也拦)。
+    /(?:Set-Content|Add-Content|New-Item|Out-File|Remove-Item|Set-Item|Export-Csv)[^;|&]*?-(?:Path|LiteralPath|FilePath)\s+("[^"]*"|'[^']*'|[^\s;|&]+)/gi,
     // shell 重定向(含描述符变体:> / >> / 2> / 1>>)
     /(?:^|[;\s|&])(?:[0-9]*>>?)\s*("[^"]*"|'[^']*'|[^\s;|&]+)/gi,
   ];
   for (const re of patterns) {
     let m;
-    while ((m = re.exec(command)) !== null) {
-      let t = m[1] && m[1].trim();
-      if (t) t = t.replace(/^["']|["']$/g, ''); // 剥引号
-      if (t && t !== 'NUL' && t !== '/dev/null' && !targets.includes(t)) targets.push(t); // 去重
+    while ((m = re.exec(command)) !== null) addTarget(m[1]);
+  }
+  // **目的地型**命令(与上方 .NET File API 的 Copy/Move 分支同向:写目标是第二参数):
+  //   Copy-Item / Move-Item / Remove-Item  与位置型形态 cp / mv
+  // 目标按命令语义分层取值:① `-Destination`/`-Dest`;② GNU 前置目的地
+  // `-t <dir>` / `--target-directory[= ]<dir>`(目的地是开关取值,不是位置参数);
+  // ③ 兜底取**最后一个位置参数**(`Copy-Item <src> <dst>` / `cp <src> <dst>`)。
+  // 命令位置锚定(行首/未加引号的命令分隔符或换行之后才认命令名):命令名与短名同样出现在普通
+  // 参数、路径片段与被检索文本里——不锚定会把 `grep -n cp <file>` 的 <file> 取成写入目标。
+  // 锚定与分段都走引号感知扫描(不用字符类正则),因为字符类不区分引号内外、也不认得跨行:
+  //   ① `[;&|(){}]` 会把 `printf '(cp CLAUDE.md)'` 引号内的括号当成命令边界,括号里的文本被读成
+  //      写命令 → 合法命令被拦(误拦);② 段捕获 `[^;|&]*` 会跨行吞并——`cp <src> <dst>` 后跟另一
+  //      行命令时,「最后一个位置参数」取到下一行的参数,真正被写的 <dst> 反而从不被检查(逃逸)。
+  // 非命令位置的内嵌形态(如 powershell -Command "…")不提取,属命令级检测的既有边界。
+  const { masked, starts } = scanCommandStructure(command);
+  const destinationRe = /(?:Copy-Item|Move-Item|Remove-Item|cp|mv)/gi;
+  let destMatch;
+  while ((destMatch = destinationRe.exec(command)) !== null) {
+    const nameEnd = destMatch.index + destMatch[0].length;
+    if (!starts.has(destMatch.index)) continue; // 非命令位置(如 `grep -n cp <file>` 的参数)
+    const afterName = command[nameEnd];
+    if (afterName !== undefined && !/\s/.test(afterName)) continue; // 命令名后须接空白(`cpio` 不是 `cp`)
+    const segment = command.slice(nameEnd, unquotedSegmentEnd(command, masked, nameEnd));
+    const named = /-(?:Destination|Dest)(?::|\s)+("[^"]*"|'[^']*'|[^\s;|&]+)/i.exec(segment);
+    if (named) {
+      addTarget(named[1]);
+      continue;
     }
+    // GNU 前置目的地:只把 `-t` 当普通开关跳过取值并不够——那样仍会取到最后一个位置参数
+    // (即源,通常在白名单内)而真正被写的目录不被检查(fail-open)。
+    const targetDir = /(?:^|[\s;&|])(?:--target-directory|-t)(?:\s*=\s*|\s+)("[^"]*"|'[^']*'|[^\s;|&]+)/i.exec(segment);
+    if (targetDir) {
+      addTarget(targetDir[1]);
+      continue;
+    }
+    // 位置形态:取最后一个位置参数——开关与开关取值不参与(Remove-Item 无 -Destination 语义,
+    // 其 -Path 由上方路径型模式按既有语义提取,此处只兜底纯位置形态)。
+    const tokens = segment.match(/"[^"]*"|'[^']*'|[^\s]+/g) || [];
+    let positional = '';
+    let skipValue = false;
+    for (const token of tokens) {
+      if (skipValue) {
+        skipValue = false; // 上一个开关的取值不是位置参数
+        continue;
+      }
+      if (token.startsWith('-')) {
+        const flag = token.replace(/^[-/]+/, '').replace(/:.*$/, '').toLowerCase();
+        skipValue = DEST_VALUE_FLAGS.has(flag);
+        continue;
+      }
+      positional = token;
+    }
+    addTarget(positional);
   }
   // .NET File API:写 API 的目标参数按语义区分——WriteAll*/AppendAll*/Delete 目标 = 第一参数;
   // Copy(source, destination) / Move(source, destination) 目标 = 第二参数(第一参数是源路径,守卫应检查写入目标)
