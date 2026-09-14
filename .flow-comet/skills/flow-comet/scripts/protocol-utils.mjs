@@ -20,9 +20,12 @@ import path from 'path';
 
 export const WORKFLOW_PROTOCOL_MAX_BYTES = 2 * 1024 * 1024;
 
-// ---------- 受保护文件读取（复制自 comet-hook-guard.mjs，与各脚本各自内联的风格一致） ----------
+// ---------- 受保护文件读取（单一来源：写入守卫 import 本模块，全包共用同一份实现） ----------
+// 这三个判据曾以逐字节相同的副本存在于 comet-hook-guard.mjs，两侧注释互指「同源」——
+// 注释不是同步机制，副本必然分叉。现由本模块导出、守卫 import：
+// 改一处即全改，消除「修了这份、漏了那份」的缺陷面。
 
-function workflowPathInside(root, target) {
+export function workflowPathInside(root, target) {
   const relative = path.relative(root, target);
   return (
     relative === '' ||
@@ -32,7 +35,7 @@ function workflowPathInside(root, target) {
   );
 }
 
-async function inspectWorkflowProtectedPath(
+export async function inspectWorkflowProtectedPath(
   projectRoot,
   target,
   label,
@@ -122,7 +125,7 @@ function workflowSameFileStat(left, right) {
   );
 }
 
-async function readWorkflowProtectedFile(
+export async function readWorkflowProtectedFile(
   projectRoot,
   file,
   label,
