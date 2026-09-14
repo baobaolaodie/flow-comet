@@ -8,7 +8,22 @@
 
 All notable changes to this project are documented in this file.
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded in nine places, kept in agreement by CI on the release surface: the release git tag; the README badge, [docs/VERSIONS.md](docs/VERSIONS.md) and this changelog, each in both languages; the authoritative `skills/flow-comet/INSTALLED_VERSION`; and the npm package's `package.json` `version`.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded in nine places, kept in agreement by CI on the release surface: the release git tag; the README badge, [docs/VERSIONS.md](docs/VERSIONS.md) and this changelog, each in both languages; the authoritative `.flow-comet/skills/flow-comet/INSTALLED_VERSION`; and the npm package's `package.json` `version`.
+
+## [Unreleased]
+
+### Fixed
+
+- **A context document whose headings carry a legal closing marker no longer blocks the workflow**: an ATX heading that repeats its hashes at the end (for example `## Section name ##`) was stored with the trailing `##` as part of the section name, so the name comparison missed it and the structure check reported sections that are present as missing — the closing marker is now stripped (it must still be preceded by a space, so a section name that legitimately ends with `#` is left alone).
+- **The installer no longer truncates a `.gitignore` it cannot read**: every read error was treated as "the file does not exist", so under an access failure (read denied, write allowed) the user's existing `.gitignore` was rewritten down to the managed entry alone. Only a genuinely absent file counts as first-time management now, and an access failure aborts the install instead — the same rule the installer already applied to its migration probe, now shared by both call sites.
+
+### Changed
+
+- **The protected-path helpers have a single implementation**: the write guard carried its own byte-identical copy of the path-containment, protected-path inspection and protected-file read helpers, so a fix to one copy never reached the other — the guard imports them from the shared module.
+- **Stale statements corrected**: the path-base error message no longer claims that only the state machine withholds support (the guard rejects the same values, and the neighbouring comment now agrees), the dsh platform reference records the npm package as published and the AGENTS.md injection as certified, and the security policy names the installer's third-party dependency together with the boundary for reporting that package's own vulnerabilities upstream.
+- **The changelog's own path reference is complete**: the authoritative version marker is now referred to as `.flow-comet/skills/flow-comet/INSTALLED_VERSION`, a path that resolves from the repository root.
+- **Three skill descriptions match the behaviour they document**: the review reference states both outcomes for a missing disposition marker (blocking on a new change, a progressive warning on a legacy one), the evolve command explains that a stale timestamp only prompts an explicit invocation instead of triggering on its own, and the decision-points reference no longer files a terminal stop condition as a user decision.
+- **The regression suite now runs 243 scenarios**; the system test suite is unchanged at 75 items.
 
 ## [1.5.0-rc.3] - 2026-09-14
 
@@ -16,7 +31,7 @@ Release candidate shipping the distribution and runtime-namespace batches accumu
 
 ### Added
 
-- **npm distribution channel**: flow-comet is now installable as an npm package that exposes the installer under two command names (`fcomet` and `flow-comet`), so a global install followed by `fcomet init` sets up a project in the current directory — `--target` is optional, and the installer also accepts an optional leading `init` word, so `fcomet init` and a bare `fcomet` are equivalent. The published contents are declared as a `files` allow-list (the skill tree, the orchestration rule, the installer and the dsh bridge script), so private and non-distributed artifacts stay out of the package structurally rather than through a deny-list. Nothing has been published to the registry yet: this batch makes the package publishable, and publishing stays a release action.
+- **npm distribution channel**: flow-comet is now installable as an npm package that exposes the installer under two command names (`fcomet` and `flow-comet`), so a global install followed by `fcomet init` sets up a project in the current directory — `--target` is optional, and the installer also accepts an optional leading `init` word, so `fcomet init` and a bare `fcomet` are equivalent. The published contents are declared as a `files` allow-list (the skill tree, the orchestration rule, the installer and the dsh bridge script), so private and non-distributed artifacts stay out of the package structurally rather than through a deny-list. This batch made the package publishable, and the `1.5.0-rc.3` release published it — the first version available from the registry.
 
 ### Changed
 
@@ -25,7 +40,7 @@ Release candidate shipping the distribution and runtime-namespace batches accumu
 - **The migration step is explicitly temporary, with stated retirement conditions**: the installer's migration module is the only remaining place that references the old namespace, and it exists solely to move an existing state file once — it never enters a runtime path. It now documents how it is retired: it can be deleted in whole either at the next breaking release (when the migration window closes) or once install runs consistently report nothing left to migrate, so the transient reference cannot silently become permanent. The migration report also states plainly when everything was skipped, so a project can tell at a glance that the installer no longer needs to touch the old directory.
 - **Regression suite expanded to 241 scenarios**; the system test suite now runs 75 items.
 - **Counts are described rather than frozen where no check covers them**: several documents carried a hard-coded scenario or item count while not being part of the consistency self-check, so the number could go stale silently — this happened three times in this batch alone. Those places now say where the number comes from, and two table rows that had drifted apart between a skill and its guidance file are aligned, so the same class of staleness cannot recur unnoticed.
-- **The package manifest version joins the release version surface**: the release-consistency check now reconciles nine places instead of eight — the npm package's `version` is compared with the README badge, this changelog, [docs/VERSIONS.md](docs/VERSIONS.md) and the authoritative `skills/flow-comet/INSTALLED_VERSION`, so a package that would ship with a stale version fails the release check instead of reaching the registry.
+- **The package manifest version joins the release version surface**: the release-consistency check now reconciles nine places instead of eight — the npm package's `version` is compared with the README badge, this changelog, [docs/VERSIONS.md](docs/VERSIONS.md) and the authoritative `.flow-comet/skills/flow-comet/INSTALLED_VERSION`, so a package that would ship with a stale version fails the release check instead of reaching the registry.
 - **The distribution surface is asserted rather than assumed**: the system test suite gained an item that inspects the real `npm pack` output for the package boundary and the two command entries, and reports an explicit "not applicable" when it runs from an installed copy (which carries no package manifest) instead of skipping silently; the CI installer job asserts the same boundary, so a stray private file or a dropped command entry fails a check rather than shipping.
 
 ### Removed

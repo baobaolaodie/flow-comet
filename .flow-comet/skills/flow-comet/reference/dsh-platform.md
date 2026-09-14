@@ -11,7 +11,7 @@
 | 认证 dsh 版本 | `0.1.5-rc.1`（2026-09-10 全接缝运行时认证；历史锚 `0.1.0-rc.6` → `0.1.1-rc.2` 实测线） |
 | 安装入口 | `node scripts/prepare-env.mjs --target <项目> --platform dsh`（或交互终端多选勾选 dsh）——唯一入口（D1） |
 | 重置/重新生成（purge——删除后重建到完整安装态，**不是卸载**） | `node scripts/prepare-env.mjs --target <项目> --purge --platform dsh --yes` |
-| npm 包 | 暂不发布（D8——1.5.0 一并处理）；旧 npm 插件包安装形态已废弃（verify 阶段推翻，见 ADR-005） |
+| npm 包 | **自 `1.5.0-rc.3` 起已发布**（`npm i -g flow-comet` → `fcomet init`，dist-tag `latest`）——分发的为**安装器**，非 dsh 插件包；旧 npm 插件包安装形态已废弃（verify 阶段推翻，见 ADR-005） |
 | 破坏性变更 | dev-preview 中 `tools/pre-execute` 签名 / skill 发现 rank / `DSH_HOME` 语义可能变化；低于锚定版本时拦截/发现可能失效 |
 
 > 版本不匹配时拦截可能失效——必须文档警示 + 级 3 实测兜底（D9）。
@@ -81,7 +81,7 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 ### 激活（天然项目级）
 
 - 目录物理存在即激活——dsh 启动自动发现 `/flow-comet`（rank 100，chokidar 热发现免重启）；未安装该目录的项目不可见（无痕迹判定、无 chicken-and-egg）。
-- dsh 对项目 AGENTS.md 的注入行为未实测（R2 遗留）——级 3 必测项；若 dsh 不注入则备选同时写 CLAUDE.md（symlink 同内容）并如实文档化。
+- dsh 对项目 AGENTS.md 的注入行为**已认证**（0.1.5-rc.1 headless 会话：项目根 AGENTS.md 作为上下文注入，托管区内容被会话逐字引用——见下方认证记录）；**边界**：认证面向 headless profile，dsh-tui / web 运行时未验。
 
 ### 重置/重新生成（prepare-env --purge --yes——删除后重建，**不是卸载**）
 

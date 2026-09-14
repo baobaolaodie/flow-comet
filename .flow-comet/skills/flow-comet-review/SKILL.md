@@ -96,7 +96,7 @@ guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好�
    - `[已修]` — fixed via a fix task (linked in the entry)
    - `[升级]` — escalated to the user for a decision (accept + reason recorded)
    - `[转待办]` — deferred to `.specs/<change-id>/KNOWN-ISSUES.md` at archive time
-   The exit guard structurally checks these markers on the findings area (missing marker → non-blocking warning, to avoid deadlocking legacy reviews; add markers to clear it).
+   The exit guard structurally checks these markers on the findings area: a missing marker **blocks** the exit for a new change, and is a non-blocking warning for a legacy change (to avoid deadlocking legacy reviews). Add markers to clear it.
 
 The full review protocol, templates, and checklists are in:
 - `flow-kit/prompts/6-review.md` (REVIEW phase)
