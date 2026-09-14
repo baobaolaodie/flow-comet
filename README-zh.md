@@ -56,7 +56,7 @@ cd <你的项目>
 fcomet init
 ```
 
-包内提供两个命令名，指向同一个安装器——`fcomet`（主）与 `flow-comet`（别名）。`init` 词元可省略（裸 `fcomet` 等价），`--target <目录>` 同样可选（缺省 = 当前工作目录）。重跑同一条命令即为幂等更新。
+包内提供两个命令名，指向同一个安装器——`fcomet`（主）与 `flow-comet`（别名）。只要其它参数表达了意图，`init` 词元即可省略（`fcomet --target <目录>` 等价于 `fcomet init --target <目录>`）；`--target <目录>` 同样可选（缺省 = 当前工作目录）。不带任何参数时只打印用法并非零退出，不安装；`fcomet --version` 打印已安装命令行的版本。重跑同一条命令即为幂等更新。
 
 首次在交互终端运行会以方向键多选方式提示选择平台（方向键 + 空格勾选，回车确认；默认 Claude Code）——`@clack/prompts` 为主路径，依赖未安装/离线/stdin 无 raw mode 时自动回退 readline 数字/逗号多选（`FLOW_COMET_FORCE_READLINE=1` 测试钩子强制走回退）；非交互场景直接加 `--platform codex` / `--platform dsh` / `--platform claude-code,dsh`（逗号分隔多选）/ `--platform all`。
 

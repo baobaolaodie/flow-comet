@@ -10,6 +10,16 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded in nine places, kept in agreement by CI on the release surface: the release git tag; the README badge, [docs/VERSIONS.md](docs/VERSIONS.md) and this changelog, each in both languages; the authoritative `.flow-comet/skills/flow-comet/INSTALLED_VERSION`; and the npm package's `package.json` `version`.
 
+## [Unreleased]
+
+### Added
+
+- **The installer answers `--version`** (and `-v`): it prints the version identifier from the same source that ships inside the package and is written into installed projects, so the version of a global install can be checked without going through the package manager. Previously only `--help` was handled, and asking for the version exited non-zero with an "unknown argument" error.
+
+### Fixed
+
+- **A bare `fcomet` no longer installs into the current directory**: with no arguments at all the command now prints its usage and exits non-zero instead of running a full install — creating `.claude/`, fetching `flow-kit/` and appending to `.gitignore` — in whatever directory happened to be current. The `init` word remains optional whenever another argument expresses the intent, so `fcomet --target <dir>` is still equivalent to `fcomet init --target <dir>`.
+
 ## [1.5.0] - 2026-09-14
 
 A release closing out the review follow-up after `1.5.0-rc.3`: the two defects found by external review are fixed — a context document whose headings carry a legal ATX closing marker no longer has sections that are present reported as missing, and the installer aborts rather than truncating a `.gitignore` it cannot read — the protected-path helpers now have a single implementation, and several statements that had gone stale are corrected. ([#100](https://github.com/baobaolaodie/flow-comet/pull/100))
