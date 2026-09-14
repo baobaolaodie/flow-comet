@@ -569,19 +569,34 @@ function assertInitTokenContract(installer, cwd) {
       throw new Error('变形/重复词元 `' + bad + '` 的 stderr 应含「未知参数」，实际:\n' + res.stderr);
     }
   }
-  // ⑤ 版本查询：`--version` / `-v` 退 0 并输出本工具的版本标识（与随包分发的权威源标识同源）。
-  // 断言取「前缀」而非等值：开发态下 git describe 输出 `<发布版>-N-g<hash>`，其前缀仍是发布版。
+  // ⑤ 版本查询：`--version` / `-v` 退 0 且输出本工具的版本标识（同一个解析来源，不另设常量）。
+  // 断言做成**状态无关**，因为「版本面已 bump、tag 尚未打」是发布准备的常态：此时随包标记
+  // 领先于 git describe（标记 = 待发版本，describe = 旧 tag + 提交数）。两条合法来源：
+  //   ① 随包分发的权威源标记（包形态 / 发布后命中）；② 当前 tag 的开发态后缀 `<tag>-N-g<hash>`。
+  // 等值断言会在发布准备期误红——那不是缺陷，是顺序（先改版本面、后打 tag）。
+  const versionShape = /^\d+\.\d+\.\d+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$/;
   const installedVersion = fs.readFileSync(path.join(__dirname, '..', 'INSTALLED_VERSION'), 'utf8').trim();
+  let headTag = '';
+  try {
+    const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+    headTag = execFileSync('git', ['describe', '--tags', '--abbrev=0'], { cwd: repoRoot, encoding: 'utf8', timeout: 30000 }).trim().replace(/^v/, '');
+  } catch { /* 无 git 或无 tag：只按随包标记比对 */ }
   for (const flag of ['--version', '-v']) {
     const res = runInstaller([flag]);
     if (res.status !== 0) {
       throw new Error('`' + flag + '` 应退 0（版本查询不是错误），实际 ' + res.status + '\n' + res.stderr);
     }
-    if (!res.stdout.trim().startsWith(installedVersion)) {
-      throw new Error('`' + flag + '` 输出应以 ' + installedVersion + ' 起始，实际: ' + JSON.stringify(res.stdout.trim()));
+    const printed = res.stdout.trim();
+    if (!versionShape.test(printed)) {
+      throw new Error('`' + flag + '` 的输出不是版本标识形态: ' + JSON.stringify(printed));
+    }
+    const matchesMarker = printed === installedVersion || printed.startsWith(installedVersion);
+    const matchesHeadTag = headTag !== '' && printed.startsWith(headTag);
+    if (!matchesMarker && !matchesHeadTag) {
+      throw new Error('`' + flag + '` 的输出与「随包标记 / 当前 tag」都不一致（标记=' + installedVersion + ' tag=' + headTag + '）: ' + JSON.stringify(printed));
     }
   }
-  console.log('  版本查询: `--version` / `-v` 退 0 且输出以 ' + installedVersion + ' 起始 ✓');
+  console.log('  版本查询: `--version` / `-v` 退 0 且输出为版本标识形态（标记=' + installedVersion + ' / 当前 tag=' + headTag + '）✓');
   // ⑥ 零参数裸调用不得安装到当前目录（本轮修正）：无参数 = 没说要做什么，
   //    应当在当前目录留下零产物并给出用法与非零退出码。修复前它会做一次完整安装
   //    （.claude/ + flow-kit/ + 改写 .gitignore）→ 误敲即在当前目录铺开一套环境。
