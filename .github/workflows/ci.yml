@@ -89,8 +89,10 @@ jobs:
           node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry open | grep -q "ENTRY OK"             || { echo "冒烟失败 / smoke failed: entry"; exit 1; }
       - name: '分发面断言 / Distribution surface (pack boundary & bin)'
         run: |
-          # shellcheck disable=SC2016 —— 本段内嵌的 node 脚本用 JS 模板字面量 `${...}`（单引号内），
-          # 它们是 JS 插值、不是 shell 展开，SC2016 在此为误报。
+          # shellcheck disable=SC2016
+          # 依据:本段内嵌的 node 脚本位于单引号内,其中的 `${...}` 是 JS 模板字面量(JS 插值),
+          # 不是 shell 展开——SC2016 在此为误报。指令行须独占一行且不得附加说明文字
+          # (shellcheck 会把同一行的其余词当 key=value 解析 → SC1125)。
           # 分发面契约(DESIGN D7/D13、AC-1/D1):files 白名单裁剪出的真实发布内容 + bin 双入口。
           # `npm pack --dry-run` 是只读操作——其文件清单即发布产物。
           #
