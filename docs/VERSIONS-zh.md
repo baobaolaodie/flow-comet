@@ -10,7 +10,7 @@
 
 | 项 | 说明 |
 |----|------|
-| **当前版本** | v1.5.0。发布真相：[CHANGELOG-zh.md](../CHANGELOG-zh.md) + git tag（发布步骤创建）；README 徽章镜像；`skills/flow-comet/INSTALLED_VERSION` 为安装副本元数据（源仓库 git describe）。dsh 平台（经 `prepare-env --platform dsh`）在项目级技能副本中携带同一版本标识，npm 包则在 `package.json` 中携带同一版本。v1.0.0 = 首个稳定版：8 节点工作流 + 三层防御 + guard 校验体系 |
+| **当前版本** | v1.5.1。发布真相：[CHANGELOG-zh.md](../CHANGELOG-zh.md) + git tag（发布步骤创建）；README 徽章镜像；`skills/flow-comet/INSTALLED_VERSION` 为安装副本元数据（源仓库 git describe）。dsh 平台（经 `prepare-env --platform dsh`）在项目级技能副本中携带同一版本标识，npm 包则在 `package.json` 中携带同一版本。v1.0.0 = 首个稳定版：8 节点工作流 + 三层防御 + guard 校验体系 |
 | **版本策略** | 语义化版本：新功能发布 → minor（1.2.0）、bug 修复 → patch（1.1.1）、破坏性变更 → major（2.0.0）；每次功能发布完成时 bump |
 | **版本记录面** | 九处保持一致，由 CI 在发布面对账强制：发布 git tag；安装副本标识 `skills/flow-comet/INSTALLED_VERSION`；npm 包的 `package.json` 的 `version`；以及按语言各计一处的文档面——README 徽章 ×2、本文档 ×2、CHANGELOG ×2。git tag + CHANGELOG 仍是版本唯一事实来源 |
 
