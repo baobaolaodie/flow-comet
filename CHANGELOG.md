@@ -10,7 +10,9 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded in nine places, kept in agreement by CI on the release surface: the release git tag; the README badge, [docs/VERSIONS.md](docs/VERSIONS.md) and this changelog, each in both languages; the authoritative `.flow-comet/skills/flow-comet/INSTALLED_VERSION`; and the npm package's `package.json` `version`.
 
-## [Unreleased]
+## [1.5.0] - 2026-09-14
+
+A release closing out the review follow-up after `1.5.0-rc.3`: the two defects found by external review are fixed — a context document whose headings carry a legal ATX closing marker no longer has sections that are present reported as missing, and the installer aborts rather than truncating a `.gitignore` it cannot read — the protected-path helpers now have a single implementation, and several statements that had gone stale are corrected. ([#100](https://github.com/baobaolaodie/flow-comet/pull/100))
 
 ### Fixed
 

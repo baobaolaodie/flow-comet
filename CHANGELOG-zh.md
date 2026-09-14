@@ -10,7 +10,9 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号记录于九处，由 CI 在发布面对账保持一致：发布 git tag；README 徽章、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 与本文档（各含两种语言）；权威源 `.flow-comet/skills/flow-comet/INSTALLED_VERSION`；以及 npm 包的 `package.json` 的 `version`。
 
-## [Unreleased]
+## [1.5.0] - 2026-09-14
+
+收口 `1.5.0-rc.3` 之后外部审查的正式版本：修复审查发现的两处缺陷——标题带合法 ATX 闭合标记的上下文文档不再把实际存在的段报成缺段，安装器不再截断读不到的 `.gitignore` 而是中止；受保护路径判据收为单一实现；并订正若干过时表述。 ([#100](https://github.com/baobaolaodie/flow-comet/pull/100))
 
 ### 修复
 
