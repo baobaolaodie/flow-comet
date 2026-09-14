@@ -10,7 +10,9 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded in nine places, kept in agreement by CI on the release surface: the release git tag; the README badge, [docs/VERSIONS.md](docs/VERSIONS.md) and this changelog, each in both languages; the authoritative `.flow-comet/skills/flow-comet/INSTALLED_VERSION`; and the npm package's `package.json` `version`.
 
-## [Unreleased]
+## [1.5.1] - 2026-09-14
+
+Installer command-surface fix: a bare `fcomet` with no arguments no longer installs into the current directory (it prints its usage and exits non-zero), and `--version` / `-v` report the installed version instead of failing as an unknown argument. ([#103](https://github.com/baobaolaodie/flow-comet/pull/103))
 
 ### Added
 
