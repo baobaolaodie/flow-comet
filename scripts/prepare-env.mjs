@@ -607,20 +607,30 @@ function applyPathReplacements(root, replacements) {
 // ---------- 运行时文件位置迁移（旧命名空间 .comet/ → 新命名空间 .flow-comet/） ----------
 
 /**
- * lstat 探测：返回 stat 或 null（**不跟随符号链接**——isSymbolicLink() 判定依赖 lstat）。
- * 只有「该路径确实不存在」一类错误返回 null：
+ * 「该路径确实不存在」一类错误的单一判定（迁移探测与 gitignore 纳管共用同一判据——
+ * 同一语义只有一处实现，改一处即全改，不会分叉）：
  *   - ENOENT：路径缺失；
  *   - ENOTDIR：路径中某一段不是目录——该路径不可能存在为文件（跨平台等价于「不存在」：
  *     同一形态在 Windows 报 ENOENT、在 POSIX 报 ENOTDIR）。
- * 其余错误（EACCES / EPERM / EIO 等访问类故障）**原样抛出**——把访问故障当成「文件不存在」
- * 会让迁移静默跳过：安装照常继续并报告「已跳过：旧位置不存在」，用户的旧状态却永远留在
- * 旧位置（用户以为已迁移）——静默的数据丢失风险，必须中止并暴露。
+ * 其余错误（EACCES / EPERM / EIO 等访问类故障）**不算**「不存在」——把访问故障当成
+ * 「文件不存在」会让调用方按空内容继续（迁移静默跳过 / gitignore 被截断覆盖），
+ * 都是静默的数据丢失风险，必须原样抛出并中止。
+ */
+function isMissingPathError(err) {
+  return Boolean(err) && typeof err === 'object' && (err.code === 'ENOENT' || err.code === 'ENOTDIR');
+}
+
+/**
+ * lstat 探测：返回 stat 或 null（**不跟随符号链接**——isSymbolicLink() 判定依赖 lstat）。
+ * 只有「该路径确实不存在」一类错误返回 null（判定见 isMissingPathError）；其余错误原样抛出——
+ * 迁移静默跳过会让安装照常继续并报告「已跳过：旧位置不存在」，用户的旧状态却永远留在旧位置
+ * （用户以为已迁移）。
  */
 function lstatIfExists(target) {
   try {
     return fs.lstatSync(target);
   } catch (err) {
-    if (err && typeof err === 'object' && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) {
+    if (isMissingPathError(err)) {
       return null;
     }
     throw err;
@@ -807,8 +817,13 @@ function manageGitignore(target) {
   try {
     existing = fs.readFileSync(gitignorePath, 'utf8');
     fileExists = true;
-  } catch {
-    /* 文件缺失 = 首次纳管 */
+  } catch (err) {
+    // 只有「确实不存在」才是首次纳管；访问类故障（EACCES/EPERM/EIO…）必须原样抛出中止——
+    // 按空内容继续会让下面的写回把用户既有 .gitignore **截断**为仅含受管条目
+    // （判定语义见 isMissingPathError；调用点契约即「失败即中止，可重跑自愈」）。
+    if (!isMissingPathError(err)) {
+      throw err;
+    }
   }
   if (existing.split(/\r?\n/).some(isRuntimeDirIgnoreLine)) {
     console.log(`[prepare-env] .gitignore 已含 ${RUNTIME_DIR}/ 条目——保持原样（幂等）`);

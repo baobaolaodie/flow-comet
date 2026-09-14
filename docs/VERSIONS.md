@@ -10,7 +10,7 @@
 
 | Item | Description |
 |------|-------------|
-| **Current version** | v1.5.0-rc.3. Release truth: [CHANGELOG.md](../CHANGELOG.md) + git tag (created at the release step); README badge mirrors it; `skills/flow-comet/INSTALLED_VERSION` is checked installed-copy metadata (git describe of the source repo). The dsh platform (via `prepare-env --platform dsh`) carries the same version marker in its project-level skill copy, and the npm package carries it in `package.json`. v1.0.0 = first stable: 8-node workflow + three defense layers + guard validation |
+| **Current version** | v1.5.0. Release truth: [CHANGELOG.md](../CHANGELOG.md) + git tag (created at the release step); README badge mirrors it; `skills/flow-comet/INSTALLED_VERSION` is checked installed-copy metadata (git describe of the source repo). The dsh platform (via `prepare-env --platform dsh`) carries the same version marker in its project-level skill copy, and the npm package carries it in `package.json`. v1.0.0 = first stable: 8-node workflow + three defense layers + guard validation |
 | **Versioning** | Semantic Versioning: feature release → minor (1.2.0), bug fix → patch (1.1.1), breaking change → major (2.0.0); bump at the end of each feature release |
 | **Version record surfaces** | Nine places, kept in agreement by CI on the release surface: the release git tag; the installed-copy marker `skills/flow-comet/INSTALLED_VERSION`; the npm package's `package.json` `version`; and the documentation surfaces counted per language — README badge ×2, this document ×2, CHANGELOG ×2. git tag + CHANGELOG remain the single source of truth |
 
@@ -27,7 +27,7 @@
 
 - Old changes / old states auto-fill default fields (executionMode/branchMode/enablePrReview); changes without a branch run unchanged — backward compatible
 - Progressive WARN (not BLOCK) for legacy change re-entry (missing redEvidence/greenEvidence, pure-string handoff)
-- Regression baseline (two-tier): `guard-self-test.mjs` 241 scenarios + `system-test.mjs` 75 items green (required after every change)
+- Regression baseline (two-tier): `guard-self-test.mjs` 243 scenarios + `system-test.mjs` 75 items green (required after every change)
 - dsh platform: the project-level skill copy carries an `INSTALLED_VERSION` marker synced with flow-comet releases; uninstall via `prepare-env --purge --platform dsh --yes` (see [Installation](INSTALLATION.md#option-d--deepseek-harness-dsh-platform))
 
 ## Release checklist (per release)

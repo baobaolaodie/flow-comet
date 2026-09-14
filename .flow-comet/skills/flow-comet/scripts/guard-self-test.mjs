@@ -3072,10 +3072,12 @@ const SCENARIOS = [
         ],
       }, null, 2));
       assertExit(runState(['init', CHANGE_ID, '--protocol', custom, '--init-skip'], dir), 0);
-      // status:classic/native pathBase → fail-fast 显式报错（不静默兜底）
+      // status:classic/native pathBase → fail-fast 显式报错（不静默兜底）。
+      // 措辞订正：guard 侧同样拒绝这三类 pathBase，故消息不再说「由 guard 校验支持」
+      // （旧措辞会让人以为只有状态机推导缺支持）——断言随之锁新措辞。
       const st = runState(['status', '--protocol', custom], dir);
       assertExit(st, 1);
-      assertOut(st, '状态机推导暂不支持');
+      assertOut(st, '已不受 guard 与状态机支持');
       assertOut(st, 'specs-root');
     },
   },
@@ -7234,6 +7236,100 @@ const SCENARIOS = [
       });
       assertExit(notCommand, 0);
       assertOut(notCommand, 'workflow-hook-guard-ok');
+    },
+  },
+
+  // 242: ATX 标题的**闭合标记**（`## 名称 ##`——合法 Markdown）须在段名归一中被剥离。
+  // 不剥离时段名归一为 `名称 ##`，与模板段名不等 → 七段全判缺失 → INIT-VALIDATE-FAILED，
+  // 依赖 CONTEXT 结构校验的流程被误阻断（记录扫描时间的正常路径走不通）。
+  // 与场景 90（同夹具、无闭合标记）成对：唯一变量就是闭合标记本身。
+  {
+    name: '242 CONTEXT 段标题带 ATX 闭合标记 → 段存在判定通过（INIT-DONE）',
+    run: (dir) => {
+      writeFile(dir, '.specs/CONTEXT.md', [
+        '# CONTEXT',
+        '## 项目概要 ##', 'x',
+        '## 技术栈 ##', 'x',
+        '## 域语言 ##', '| 术语 | 定义 |', '|---|---|', '| 例 | 定义 |',
+        '## 已锁决策 ##', '- [2026-08-01] 决策一',
+        '## 默认偏好 ##', 'x',
+        '## 既有抽象索引 ##', 'x',
+        '## intel-scan 元数据 ##', '- **last_intel_scan**: x', '- **scanner**: x', '- **下次重扫建议**: x',
+        '',
+      ].join('\n'));
+      writeFile(dir, 'package.json', '{"name":"x"}');
+      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(res, 0);
+      assertOut(res, 'INIT-DONE');
+      const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      if (!st.last_intel_scan) throw new Error('闭合标记形态应通过段存在判定并写 last_intel_scan');
+      // ② 闭合标记须**前置空白**（CommonMark 语义）：`## 项目概要#` 不是闭合形态，段名即
+      //    `项目概要#`——它不得被剥成 `项目概要`（否则缺段被假判为存在）。这条边界锁住剥离
+      //    范围：将来把前置空白放宽成「任意位置」，此处即变红。
+      writeFile(dir, '.specs/CONTEXT.md', [
+        '# CONTEXT',
+        '## 项目概要#', 'x',
+        '## 技术栈 ##', 'x',
+        '## 域语言 ##', '| 术语 | 定义 |', '|---|---|', '| 例 | 定义 |',
+        '## 已锁决策 ##', '- [2026-08-01] 决策一',
+        '## 默认偏好 ##', 'x',
+        '## 既有抽象索引 ##', 'x',
+        '## intel-scan 元数据 ##', '- **last_intel_scan**: x', '- **scanner**: x', '- **下次重扫建议**: x',
+        '',
+      ].join('\n'));
+      const boundary = runState(['init', CHANGE_ID + '-2', '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(boundary, 0);
+      assertOut(boundary, 'INIT-VALIDATE-FAILED');
+      assertOut(boundary, '项目概要');
+    },
+  },
+
+  // 243: `.gitignore` 读取的**访问类故障**（非「确实不存在」）不得当作「文件缺失」。
+  // 当作缺失时 existing='' 且 fileExists=false → 后续 writeFileSync 用默认 flag 'w' 把用户既有
+  // .gitignore **截断**为仅含受管条目（数据破坏）；而该调用的自述契约是「失败即中止，可重跑自愈」。
+  // 修复后访问类故障原样抛出 → 安装中止且用户文件逐字节不变（与 lstatIfExists 同语义）。
+  // 故障注入用 `--require` 预加载（同场景 233 手法），只命中该项目的 .gitignore，其余读取走真实实现。
+  {
+    name: '243 .gitignore 读取访问类故障 → 中止安装且用户文件不被改写',
+    run: (dir) => {
+      if (!fs.existsSync(PREPARE_ENV)) return;
+      const proj = path.join(dir, 'proj-gitignore-fault');
+      fs.mkdirSync(proj, { recursive: true });
+      const initial = '# 用户既有内容\nnode_modules/\ndist/\n';
+      fs.writeFileSync(path.join(proj, '.gitignore'), initial, 'utf8');
+      const preloadName = 'gitignore-read-fault-preload.cjs';
+      writeFile(dir, preloadName, [
+        "const fs = require('node:fs');",
+        "const path = require('node:path');",
+        "const target = path.resolve(String(process.env.GITIGNORE_FAULT_TARGET || ''));",
+        'const realReadFileSync = fs.readFileSync;',
+        'fs.readFileSync = function (file, ...rest) {',
+        "  if (target !== '' && path.resolve(String(file)) === target) {",
+        "    const error = new Error('EACCES: permission denied, open ' + JSON.stringify(String(file)));",
+        "    error.code = 'EACCES';",
+        '    throw error;',
+        '  }',
+        '  return realReadFileSync.call(fs, file, ...rest);',
+        '};',
+        '',
+      ].join('\n'));
+      const spawned = spawnSync(
+        process.execPath,
+        ['--require', path.join(dir, preloadName), PREPARE_ENV, '--target', proj, '--platform', 'claude-code'],
+        {
+          cwd: dir,
+          env: { ...process.env, GITIGNORE_FAULT_TARGET: path.join(proj, '.gitignore') },
+          encoding: 'utf8',
+          timeout: 120000,
+        },
+      );
+      const res = { status: spawned.status ?? 1, output: String(spawned.stdout || '') + String(spawned.stderr || '') };
+      const after = fs.readFileSync(path.join(proj, '.gitignore'), 'utf8');
+      if (after !== initial) {
+        throw new Error('访问类故障下用户 .gitignore 被改写（应原样保留）:\n' + JSON.stringify({ initial, after }, null, 2));
+      }
+      if (res.status === 0) throw new Error('读取访问类故障应中止安装（exit 非 0），实际 exit 0\n' + res.output);
+      assertOut(res, 'EACCES');
     },
   },
 ];

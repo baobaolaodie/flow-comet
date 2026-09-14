@@ -39,7 +39,7 @@ function buildNodeCompletionFlags(protocol, changeName) {
           || artifact.pathBase === 'classic-superpowers-root'
           || artifact.pathBase === 'native-root') {
           throw new Error('产物根 pathBase "' + artifact.pathBase
-            + '" 由 guard 校验支持但状态机推导暂不支持——请改用 specs-root/project + 完整路径（如 project + openspec/changes/xxx.md）');
+            + '" 已不受 guard 与状态机支持——请改用 specs-root/project + 完整路径（如 project + openspec/changes/xxx.md）');
         }
         artifacts.push({
           id: schemaId + '.' + (artifact.id ?? 'artifact'),
@@ -86,7 +86,8 @@ async function pathPatternExists(root, relativePattern) {
 // 产物推导 pathBase 感知: 产物根按 artifact.pathBase 解析——'specs-root' → specsRoot；'project'/缺省 → runRoot
 // （与 workflow-guard.mjs 的 workflowPathBaseRoot 对齐：内置协议 10 个 artifacts 全部显式
 // 声明 specs-root；compose 自定义协议可声明 project 根工件如 README.md）。
-// classic/native 等其余 pathBase 暂按 specs-root 兜底（与抽取前一致，不回归——guard 侧全量感知）。
+// classic/native 三类不属于二分——标志构建阶段即 fail-fast 拒绝（见上方 artifact 循环），
+// 走不到这里，故此处无需为它们兜底。
 async function nodeFlagsComplete(nodeFlags, nodeId, specsRoot, runRoot) {
   for (const artifact of nodeFlags.get(nodeId) ?? []) {
     let present = false;

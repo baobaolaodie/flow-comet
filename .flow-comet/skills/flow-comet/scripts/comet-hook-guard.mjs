@@ -1,12 +1,15 @@
 #!/usr/bin/env node
-  import { constants as fsConstants, promises as fs, existsSync as fsExistsSync } from 'fs';
+  import { promises as fs, existsSync as fsExistsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
+  inspectWorkflowProtectedPath,
   parseProtocolWriteWhitelist,
   readProtocolFile,
+  readWorkflowProtectedFile,
   resolveProtocol,
   validateProtocolSchema,
+  workflowPathInside,
 } from './protocol-utils.mjs';
 // 运行时路径常量（单一来源：state-schema.mjs）——本脚本每次工具调用都会执行，故此处只 import
 // 同包内的本地 ESM 模块（与已存在的 protocol-utils.mjs import 同型，实测无可感知开销）；
@@ -397,206 +400,10 @@ const WORKFLOW_PROJECT_FILE_MAX_BYTES = 2 * 1024 * 1024;
 // execute 的名单由 state.executionMode 动态收窄（subagent=协调者 .specs/；direct=逃生口允许主代理直写源码），
 // 收窄规则对缺省/声明表同样生效，见 resolvePhaseWriteWhitelist()
 
-function workflowPathInside(root, target) {
-  const relative = path.relative(root, target);
-  return (
-    relative === '' ||
-    (!path.isAbsolute(relative) &&
-      relative !== '..' &&
-      !relative.startsWith('..' + path.sep))
-  );
-}
-
-async function inspectWorkflowProtectedPath(
-  projectRoot,
-  target,
-  label,
-  expected = 'any',
-) {
-  const lexicalRoot = path.resolve(projectRoot);
-  const lexicalTarget = path.resolve(target);
-  if (!workflowPathInside(lexicalRoot, lexicalTarget)) {
-    throw new Error(label + ' must stay inside the project root');
-  }
-  const rootStat = await fs.lstat(lexicalRoot);
-  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
-    throw new Error(label + ' project root must be a real directory');
-  }
-  const realRoot = await fs.realpath(lexicalRoot);
-  const relative = path.relative(lexicalRoot, lexicalTarget);
-  const segments = relative === '' ? [] : relative.split(path.sep);
-  let cursor = lexicalRoot;
-  for (let index = 0; index < segments.length; index++) {
-    cursor = path.join(cursor, segments[index]);
-    let stat;
-    try {
-      stat = await fs.lstat(cursor);
-    } catch (error) {
-      if (
-        error &&
-        typeof error === 'object' &&
-        (error.code === 'ENOENT' || error.code === 'ENOTDIR')
-      ) {
-        return { target: lexicalTarget, exists: false };
-      }
-      throw error;
-    }
-    const display = path.relative(lexicalRoot, cursor).replaceAll('\\', '/');
-    if (stat.isSymbolicLink()) {
-      throw new Error(label + ' crosses a symbolic link or junction at ' + display);
-    }
-    const final = index === segments.length - 1;
-    if (!final && !stat.isDirectory()) {
-      throw new Error(label + ' ancestor ' + display + ' must be a real directory');
-    }
-    if (
-      final &&
-      ((expected === 'file' && !stat.isFile()) ||
-        (expected === 'directory' && !stat.isDirectory()) ||
-        (expected === 'any' && !stat.isFile() && !stat.isDirectory()))
-    ) {
-      throw new Error(label + ' must be a real ' + expected);
-    }
-    const physical = await fs.realpath(cursor);
-    if (!workflowPathInside(realRoot, physical)) {
-      throw new Error(label + ' resolves outside the project root');
-    }
-  }
-  return { target: lexicalTarget, exists: true };
-}
-
-function workflowFileObjectIdentity(stat) {
-  return {
-    dev: stat.dev,
-    ino: stat.ino,
-    birthtime: typeof stat.birthtimeNs === 'bigint' ? stat.birthtimeNs : stat.birthtimeMs,
-  };
-}
-
-function workflowHasIdentity(value) {
-  return value !== 0 && value !== 0n && value !== '0';
-}
-
-function workflowSameFileObject(left, right) {
-  const comparableDevice = workflowHasIdentity(left.dev) && workflowHasIdentity(right.dev);
-  const comparableInode = workflowHasIdentity(left.ino) && workflowHasIdentity(right.ino);
-  if (comparableDevice && left.dev !== right.dev) return false;
-  if (comparableInode && left.ino !== right.ino) return false;
-  if (comparableDevice && comparableInode) return true;
-  return left.birthtime === right.birthtime;
-}
-
-function workflowSameFileStat(left, right) {
-  return (
-    workflowSameFileObject(
-      workflowFileObjectIdentity(left),
-      workflowFileObjectIdentity(right),
-    ) &&
-    left.size === right.size &&
-    left.ctimeNs === right.ctimeNs
-  );
-}
-
-async function readWorkflowProtectedFile(
-  projectRoot,
-  file,
-  label,
-  maxBytes,
-  hooks = {},
-) {
-  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
-    throw new Error(label + ' byte limit must be a positive integer');
-  }
-  const inspection = await inspectWorkflowProtectedPath(
-    projectRoot,
-    file,
-    label,
-    'file',
-  );
-  if (!inspection.exists) {
-    const error = new Error(label + ' does not exist');
-    error.code = 'ENOENT';
-    throw error;
-  }
-  const before = await fs.lstat(file, { bigint: true });
-  if (!before.isFile() || before.isSymbolicLink()) {
-    throw new Error(label + ' must be a real file');
-  }
-  if (before.size > BigInt(maxBytes)) {
-    throw new Error(label + ' exceeds ' + String(maxBytes) + ' bytes');
-  }
-  const beforeRealPath = await fs.realpath(file);
-  await hooks.afterLstat?.();
-  const flags =
-    process.platform === 'win32'
-      ? fsConstants.O_RDONLY
-      : fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK;
-  let handle;
-  try {
-    handle = await fs.open(file, flags);
-  } catch (error) {
-    if (error && typeof error === 'object' && error.code === 'ELOOP') {
-      throw new Error(label + ' must be a real file');
-    }
-    throw error;
-  }
-  try {
-    const [opened, afterOpen, afterOpenRealPath] = await Promise.all([
-      handle.stat({ bigint: true }),
-      fs.lstat(file, { bigint: true }),
-      fs.realpath(file),
-    ]);
-    if (
-      !opened.isFile() ||
-      !afterOpen.isFile() ||
-      afterOpen.isSymbolicLink() ||
-      afterOpenRealPath !== beforeRealPath ||
-      !workflowSameFileStat(before, opened) ||
-      !workflowSameFileStat(before, afterOpen)
-    ) {
-      throw new Error(label + ' changed while opening');
-    }
-    await inspectWorkflowProtectedPath(projectRoot, file, label, 'file');
-    await hooks.afterOpen?.();
-    const chunks = [];
-    let total = 0;
-    const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, maxBytes + 1));
-    for (;;) {
-      const remaining = maxBytes + 1 - total;
-      const { bytesRead } = await handle.read(
-        buffer,
-        0,
-        Math.min(buffer.length, remaining),
-        null,
-      );
-      if (bytesRead === 0) break;
-      total += bytesRead;
-      if (total > maxBytes) {
-        throw new Error(label + ' exceeds ' + String(maxBytes) + ' bytes');
-      }
-      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
-    }
-    await hooks.beforeFinalCheck?.();
-    const [afterHandle, afterPath, afterRealPath] = await Promise.all([
-      handle.stat({ bigint: true }),
-      fs.lstat(file, { bigint: true }),
-      fs.realpath(file),
-    ]);
-    if (
-      !afterPath.isFile() ||
-      afterPath.isSymbolicLink() ||
-      afterRealPath !== beforeRealPath ||
-      !workflowSameFileStat(before, afterHandle) ||
-      !workflowSameFileStat(before, afterPath)
-    ) {
-      throw new Error(label + ' changed while reading');
-    }
-    await inspectWorkflowProtectedPath(projectRoot, file, label, 'file');
-    return Buffer.concat(chunks, total);
-  } finally {
-    await handle.close();
-  }
-}
+// 受保护路径三判据（workflowPathInside / inspectWorkflowProtectedPath /
+// readWorkflowProtectedFile）与私有身份比较函数是 protocol-utils.mjs 的**单一来源**——
+// 本文件此前各持一份逐字节相同的副本，两侧注释互指「同源」；副本已删除，改为 import
+// （见文件头 import 列表）。改判据只需改 protocol-utils.mjs 一处。
 
 function workflowRelativeSegments(value, label, allowWildcards = false) {
   if (typeof value !== 'string') throw new Error(label + ' must be a string');
