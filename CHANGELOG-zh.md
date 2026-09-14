@@ -10,7 +10,9 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号记录于九处，由 CI 在发布面对账保持一致：发布 git tag；README 徽章、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 与本文档（各含两种语言）；权威源 `skills/flow-comet/INSTALLED_VERSION`；以及 npm 包的 `package.json` 的 `version`。
 
-## [Unreleased]
+## [1.5.0-rc.3] - 2026-09-14
+
+预发布版本，承载 rc.2 之后积累的分发与运行时命名空间批次：npm 分发通道（以 `files` 白名单声明发布内容、暴露两个命令入口的可安装包）、运行时命名空间与 Comet 解耦（`.flow-comet/` 状态文件、权威源与 `FLOW_COMET_RUN_ROOT`）、写入守卫与工作流守卫不再读取 Comet 配置，以及同批次内的修复——dsh 桥接版本戳与发布版本对齐、全平台 POSIX 形态的 hook 命令、worktree 隔离区放行、据外部审查的安装器与迁移加固。([#93](https://github.com/baobaolaodie/flow-comet/pull/93)) ([#94](https://github.com/baobaolaodie/flow-comet/pull/94)) ([#95](https://github.com/baobaolaodie/flow-comet/pull/95)) ([#96](https://github.com/baobaolaodie/flow-comet/pull/96)) ([#97](https://github.com/baobaolaodie/flow-comet/pull/97)) ([#98](https://github.com/baobaolaodie/flow-comet/pull/98))
 
 ### 新增
 

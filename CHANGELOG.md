@@ -10,7 +10,9 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded in nine places, kept in agreement by CI on the release surface: the release git tag; the README badge, [docs/VERSIONS.md](docs/VERSIONS.md) and this changelog, each in both languages; the authoritative `skills/flow-comet/INSTALLED_VERSION`; and the npm package's `package.json` `version`.
 
-## [Unreleased]
+## [1.5.0-rc.3] - 2026-09-14
+
+Release candidate shipping the distribution and runtime-namespace batches accumulated after rc.2: the npm distribution channel (an installable package declaring its published contents as a `files` allow-list and exposing two command entries), the runtime namespace decoupled from Comet (`.flow-comet/` state file, authoritative source and `FLOW_COMET_RUN_ROOT`), the write guard and the workflow guard no longer reading Comet configuration, and the fixes carried in the same batch — the dsh bridge version stamp aligned with the release version, the POSIX hook command on every platform, the worktree-isolation release, and installer/migration hardening from external review. ([#93](https://github.com/baobaolaodie/flow-comet/pull/93)) ([#94](https://github.com/baobaolaodie/flow-comet/pull/94)) ([#95](https://github.com/baobaolaodie/flow-comet/pull/95)) ([#96](https://github.com/baobaolaodie/flow-comet/pull/96)) ([#97](https://github.com/baobaolaodie/flow-comet/pull/97)) ([#98](https://github.com/baobaolaodie/flow-comet/pull/98))
 
 ### Added
 
