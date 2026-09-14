@@ -54,23 +54,23 @@ Comet 是**可恢复的长期任务工作流与 Skill 平台**（Node-only 运�
 | 7 | **Hook 白名单 / fail-closed / 受保护路径**（before_tool + before_write 描述符、failure: block、symlink/junction 检测、TOCTOU 快照） | `comet-hook-guard.mjs`——同款 guard 风格；白名单经协议 `writeWhitelist` 声明化（缺省表回退）；execute 按 executionMode 动态收窄（subagent/direct） |
 | 8 | **Entry Skill 双区结构**（确定性 Auto 区：路由表/Skill Bindings/Guardrails/Recovery + Authored 区：Decision Core 四必填节） | SKILL.md 同构；Decision Core 含相同四节（自动节点检测/Resume 规则/决策分类/Red Flags） |
 | 9 | **Handoff 证据协议**（handoff kind 节点 + 子代理证据回传） | `workflow-handoff.mjs request/result/status`（writeFiles 白名单、JSON Return Contract、completedChecks 校验、commitHash 子集检查） |
-| 10 | **eval.yaml manifest**（comet.eval/v1alpha1 + qualityGates + routeConformance） | `comet/eval.yaml` 同构；`checks.yaml`（state_equals）、`skill.yaml`、`guardrails.yaml` 齐备（`engine.enabled: false` 在 `bundle.yaml` 中） |
-| 11 | **bundle.yaml / resolved-skills.json / composition-report** | 同构包结构（apiVersion comet/v1alpha1、SkillBundle、resources、platforms.requires） |
+| 10 | **eval.yaml manifest**（comet.eval/v1alpha1 + qualityGates + routeConformance） | 仅借鉴机制形态——清单文件不参与运行时路由与门禁，已从包中移除 |
+| 11 | **bundle.yaml / resolved-skills.json / composition-report** | `resolved-skills.json` + `composition-report.md` 保留为创作记录（哪些 skill 组成了内核）；`bundle.yaml` 清单已移除（无脚本读取） |
 | 12 | **多 change 选择语义**（零/一/多候选 → 暂停） | `findActiveChange`（state 优先 → `.specs/` 扫描；completed 优先防归档残留） |
 
 ### flow-comet 明确不吸收
 
-- **双投影状态**（`.comet.yaml` 用户字段 + `run-state.json` 引擎字段 + `state-events.jsonl` 审计）：flow-comet 只用**单一** `.comet/flow-comet-state.json`——无审计日志、无 run/trajectory/checkpoint 文件族
+- **双投影状态**（`.comet.yaml` 用户字段 + `run-state.json` 引擎字段 + `state-events.jsonl` 审计）：flow-comet 只用**单一** `.flow-comet/flow-comet-state.json`——无审计日志、无 run/trajectory/checkpoint 文件族
 - **Native 可靠性栈**（mutation lock、transition journal、CAS、事务化归档、证据新鲜度、repair/stagnation 预算）：未采用——协议 state 仅 currentNode/completedNodes/evidence
-- **Eval 平台本体**（pytest harness、Rubric/Pass@k/Pass^k、LangSmith、Docker 隔离）：flow-comet 只携带 eval.yaml **清单**（`engine.enabled: false`）——无 eval 运行时
-- **Publish/分发**（creator/publish/bundle 后端、33 平台安装器、skill-preferences）：未采用——flow-comet 是本地 bundle draft
+- **Eval 平台本体**（pytest harness、Rubric/Pass@k/Pass^k、LangSmith、Docker 隔离）：未采用——无 eval 运行时，也无 eval 清单
+- **Publish/分发平台**（creator/publish/bundle 后端、33 平台安装器、skill-preferences）：平台本体未采用——但分发不再处于范围外：flow-comet 以 **npm 包**分发（包名 `flow-comet`、命令 `fcomet`），把技能树安装进目标项目；仓库内仍以复制方式安装（见[安装](INSTALLATION-zh.md)）
 - **Context compression**（SHA256 压缩交接包）、**auto_transition 三层配置**、**Engine Run**（确定性 step 表 + completionEvals）、**ambient resume probe / dashboard / doctor**：未采用
 
 ## 3. 借鉴边界
 
-Comet 的 **eval（科学评估）+ publish/distribute（跨平台分发）** 构成完整闭环——`/comet-any 创作 → comet eval 证据 → 审核 → 发布 → 分发`，发布就绪以 planHash/preferenceHash/当前 draft-hash eval 证据/人工批准四者绑定。flow-comet 只借鉴了**创作产物形态**（协议、脚本、包结构、Decision Core）——评估与分发不在范围（flow-comet 是复制安装；见[安装](INSTALLATION-zh.md)）。
+Comet 的 **eval（科学评估）+ publish/distribute（跨平台分发）** 构成完整闭环——`/comet-any 创作 → comet eval 证据 → 审核 → 发布 → 分发`，发布就绪以 planHash/preferenceHash/当前 draft-hash eval 证据/人工批准四者绑定。flow-comet 只借鉴了**创作产物形态**（协议、脚本、Decision Core）——评估仍不在范围；分发则以单一 npm 安装入口（包 `flow-comet`、命令 `fcomet`）取代 Comet 的平台发布器；仓库内仍以复制方式安装（见[安装](INSTALLATION-zh.md)）。
 
-借鉴遵循刻意的扬弃原则：**吸收机制的形式与语义，丢弃需要分发/评估基础设施的平台机制**（对 flow-kit 同理：吸收方法论与模板，丢弃被状态机替代的文件）。这正是 flow-comet 保持零依赖、复制即用的同时，携带与 Comet Skill Creator 相同的机制 DNA 的原因。
+借鉴遵循刻意的扬弃原则：**吸收机制的形式与语义，丢弃需要分发/评估基础设施的平台机制**（对 flow-kit 同理：吸收方法论与模板，丢弃被状态机替代的文件）。这正是 flow-comet 的工作流脚本不依赖任何第三方运行时包、却携带与 Comet Skill Creator 相同机制 DNA 的原因——唯一例外是 `@clack/prompts`：它在 `package.json` 中精确锁定，仅安装器（`prepare-env.mjs`）用于交互式平台多选。
 
 ## 4. 一句话总结
 

@@ -28,7 +28,7 @@
 <p align="center">
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js_%E2%89%A518-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js 18+" /></a>
   <a href="https://github.com/baobaolaodie/flow-comet/actions"><img src="https://img.shields.io/github/actions/workflow/status/baobaolaodie/flow-comet/ci.yml?style=flat" alt="CI" /></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.5.0--rc.2-blue.svg" alt="Version" /></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.5.0--rc.3-blue.svg" alt="Version" /></a>
 </p>
 
 ---
@@ -48,27 +48,42 @@ If you use skill-based disciplines like [superpowers](https://github.com/obra/su
 Requires [Claude Code](https://claude.ai/code), [Codex](https://github.com/openai/codex), or [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) and [flow-kit](https://github.com/rihebty/flow-kit) in the target project (see [Installation](docs/INSTALLATION.md)).
 
 ```bash
-# 1. Install from this repository (option A: prepare-env installer)
+# 1. Install the CLI globally (Node.js 18+)
+npm install -g flow-comet
+
+# 2. Install flow-comet into your project, from the project directory
+cd <your project>
+fcomet init
+```
+
+The package ships two command names pointing at the same installer — `fcomet` (primary) and `flow-comet` (alias). The `init` token is optional (a bare `fcomet` is equivalent) and `--target <dir>` is optional too (default: the current working directory). Re-running the same command updates an existing install and is idempotent.
+
+On an interactive terminal, the first run prompts for the platform with a direction-key multi-select (arrow keys + space to toggle, Enter to confirm; the default is Claude Code) — `@clack/prompts` is the primary path, with an automatic readline number/comma multi-select fallback when the dependency is not installed, offline, or stdin has no raw mode (`FLOW_COMET_FORCE_READLINE=1` forces the fallback for testing); for a non-interactive pick, add `--platform codex` / `--platform dsh` / `--platform claude-code,dsh` (comma-separated) / `--platform all`.
+
+**Updating**: a global package upgrade does not touch projects that are already installed — re-run `fcomet init` in each project to pick up the new files. And because an npm install has no git history to derive a development marker from, the version marker it writes (`<project>/.claude/skills/flow-comet/INSTALLED_VERSION` for Claude Code, `.agents/skills/…` for Codex, `.dsh/skills/…` for dsh) is the release version shipped inside the package; the `<release>-<n>-g<hash>` form appears only for installs run from a repository clone that has git and tags.
+
+By default the installer targets Claude Code (unchanged behavior). For Codex: `fcomet init --platform codex` — skills install to `.agents/skills/` (auto-discovered), orchestration rules are injected into an `AGENTS.md` managed block, and the write-guard hook intercepts Bash write commands via Codex's PreToolUse (trust the hook on first use: `/hooks`). For DeepSeek Harness: `fcomet init --platform dsh` — skills install to `.dsh/skills/flow-comet` (auto-discovered at rank 100, no restart), orchestration rules are injected into an `AGENTS.md` managed block, and a thin bridge loader is mounted globally in `$DSH_HOME` (see [Installation → Option D](docs/INSTALLATION.md#option-d--deepseek-harness-dsh-platform)). When run on an interactive terminal (TTY) without `--platform`, the installer prompts for the target platform with a multi-select (pre-checked from existing traces — default Claude Code — press Enter to accept); without a TTY (CI/scripts) existing `.claude/` / `.codex/` / `.dsh/` in the target project is detected, falling back to Claude Code.
+
+The installer also ensures `flow-kit` in the target project: when missing it clones the upstream and checks out the locked snapshot `9b5dda7`; an existing upstream clone is only inspected (current HEAD vs the locked snapshot is reported, read-only); a same-name non-clone directory is skipped with guidance; a network failure warns and continues; purge never touches it.
+
+The same installer also runs straight from a repository clone, with no global package — that is the path this repository's own workflow and its distribution to other projects use (Option B in the installation guide):
+
+```bash
 cd <flow-comet repo>
 node scripts/prepare-env.mjs --target <absolute path to your project>
 ```
 
-On an interactive terminal, the first run prompts for the platform with a direction-key multi-select (arrow keys + space to toggle, Enter to confirm; the default is Claude Code) — `@clack/prompts` is the primary path, with an automatic readline number/comma multi-select fallback when the dependency is not installed, offline, or stdin has no raw mode (`FLOW_COMET_FORCE_READLINE=1` forces the fallback for testing); for a non-interactive pick, add `--platform codex` / `--platform dsh` / `--platform claude-code,dsh` (comma-separated) / `--platform all`.
-
-By default the installer targets Claude Code (unchanged behavior). For Codex: `node scripts/prepare-env.mjs --target <path> --platform codex` — skills install to `.agents/skills/` (auto-discovered), orchestration rules are injected into an `AGENTS.md` managed block, and the write-guard hook intercepts Bash write commands via Codex's PreToolUse (trust the hook on first use: `/hooks`). For DeepSeek Harness: `node scripts/prepare-env.mjs --target <path> --platform dsh` — skills install to `.dsh/skills/flow-comet` (auto-discovered at rank 100, no restart), orchestration rules are injected into an `AGENTS.md` managed block, and a thin bridge loader is mounted globally in `$DSH_HOME` (see [Installation → Option C](docs/INSTALLATION.md#option-c--deepseek-harness-dsh-platform)). When run on an interactive terminal (TTY) without `--platform`, the installer prompts for the target platform with a multi-select (pre-checked from existing traces — default Claude Code — press Enter to accept); without a TTY (CI/scripts) existing `.claude/` / `.codex/` / `.dsh/` in the target project is detected, falling back to Claude Code.
-
-The installer also ensures `flow-kit` in the target project: when missing it clones the upstream and checks out the locked snapshot `9b5dda7`; an existing upstream clone is only inspected (current HEAD vs the locked snapshot is reported, read-only); a same-name non-clone directory is skipped with guidance; a network failure warns and continues; purge never touches it.
-
-For DeepSeek Harness (dsh), install through the same installer — no plugin bundle or npm package is involved:
+For DeepSeek Harness (dsh), install through the same installer — a dedicated dsh platform descriptor, with no separate plugin bundle:
 
 ```bash
-node scripts/prepare-env.mjs --target <absolute path to your project> --platform dsh
+cd <your project>
+fcomet init --platform dsh
 ```
 
-This installs the skill tree project-locally at `<project>/.dsh/skills/flow-comet` (dsh auto-discovers skills there at rank 100 without a restart — projects without that directory cannot see the skill, which makes activation naturally project-level), injects the orchestration rules into an `AGENTS.md` managed block (non-destructive merge), and mounts a thin bridge loader globally at `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` with a managed block in `$DSH_HOME/cordis.patch.yml` (read-merge-write, preserves existing blocks such as dsh-skin, effective for all profiles). The bridge intercepts write tools via dsh's `tools/pre-execute` event. Interception only applies while a flow is running — in an idle session, writes outside the project root are not interrupted. Each install reports the dsh loader version transition (upgrade / downgrade / consistent) by comparing the embedded version stamp with the previously installed loader, and `workflow-state.mjs bridge-check` is a read-only health check with six states (healthy / file missing / not mounted / version skew / duplicate registration / not applicable). Minimum dsh `0.1.0-rc.6`; the npm package is not published yet (planned for 1.5.0). See [Installation → Option C](docs/INSTALLATION.md#option-c--deepseek-harness-dsh-platform) for the full dsh platform section.
+This installs the skill tree project-locally at `<project>/.dsh/skills/flow-comet` (dsh auto-discovers skills there at rank 100 without a restart — projects without that directory cannot see the skill, which makes activation naturally project-level), injects the orchestration rules into an `AGENTS.md` managed block (non-destructive merge), and mounts a thin bridge loader globally at `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` with a managed block in `$DSH_HOME/cordis.patch.yml` (read-merge-write, preserves existing blocks such as dsh-skin, effective for all profiles). The bridge intercepts write tools via dsh's `tools/pre-execute` event. Interception only applies while a flow is running — in an idle session, writes outside the project root are not interrupted. Each install reports the dsh loader version transition (upgrade / downgrade / consistent) by comparing the embedded version stamp with the previously installed loader, and `workflow-state.mjs bridge-check` is a read-only health check with six states (healthy / file missing / not mounted / version skew / duplicate registration / not applicable). Minimum dsh `0.1.0-rc.6`. See [Installation → Option D](docs/INSTALLATION.md#option-d--deepseek-harness-dsh-platform) for the full dsh platform section.
 
 ```bash
-# 2. Open your project in a new Claude Code session and run:
+# 3. Open your project in a new Claude Code session and run:
 /flow-comet
 #    (Codex: invoke the skill in a Codex session — `/use flow-comet` or natural language;
 #     same workflow, see Installation → "Using flow-comet on Codex")
@@ -146,7 +161,7 @@ The engine routes between nodes by deriving state from `.specs/` artifacts (dete
 2. **No lost progress across sessions** — where you are is always derived from `.specs/` artifacts, never from conversation memory; reopen and continue from the right node.
 3. **Implementation and coordination are physically separated** — implementation runs in fresh-context subagents inside isolated worktrees and must return a verified contract; the coordinator is banned from writing source, and the write whitelist blocks violations at the physical layer.
 4. **The native automation layer for flow-kit** — not a re-invention: artifact formats, rules, and stages are identical to flow-kit; a flow-kit project upgrades to a machine-driven flow by installing flow-comet, no migration needed.
-5. **Protocol-driven, minimal dependency, copy-and-run** — the built-in 8-node flow works out of the box; any installed skill can be composed into a custom protocol on the same engine; Node.js 18+; the only third-party dependency is `@clack/prompts`, used exclusively by the installer's TTY multi-select (with an automatic readline fallback otherwise); one command installs it.
+5. **Protocol-driven, minimal dependency, install-and-run** — the built-in 8-node flow works out of the box; any installed skill can be composed into a custom protocol on the same engine; Node.js 18+; the only third-party dependency is `@clack/prompts`, used exclusively by the installer's TTY multi-select (with an automatic readline fallback otherwise); one command installs it.
 
 **Fit**: flow-comet is built for long-running, multi-session development changes on Claude Code — the discipline it automates pays off when a change spans hours and multiple sessions. It is not a general CI/CD or project-management tool; Codex and DeepSeek Harness are supported (see [Installation](docs/INSTALLATION.md#platforms)), other platforms (Gemini / Cursor) are not guaranteed.
 
@@ -178,14 +193,14 @@ processor-pipeline/            (archived change, full artifact set)
 |---------|------|---------------------------|
 | [flow-kit](https://github.com/rihebty/flow-kit) | Methodology & artifact system (9-stage flow, `.specs/` templates, R1-R8 rules) | **Dependency** — flow-comet is its automation layer; artifacts and rules come from flow-kit |
 | [Comet](https://github.com/rpamis/comet) | Skill Creator ecosystem (bundle authoring, hook-guard pattern, state machine) | **Mechanism source** — flow-comet borrows Comet's mechanism patterns extensively (workflow-protocol as source of truth, script-owned state, guard gates, hook interception); **runtime optional** (copy install needs no Comet CLI). Details in [Ecosystem](docs/ECOSYSTEM.md) |
-| **Comet Classic** | Comet's classic workflow (OpenSpec + Superpowers) | **Not a dependency** — flow-comet is an independent workflow-kernel; state does not interoperate with classic (own `.comet/flow-comet-state.json` + file-derived routing) |
+| **Comet Classic** | Comet's classic workflow (OpenSpec + Superpowers) | **Not a dependency** — flow-comet is an independent workflow-kernel; state does not interoperate with classic (own `.flow-comet/flow-comet-state.json` + file-derived routing) |
 
 ## Directory Structure
 
 ```
 flow-comet/
-├── .comet/bundle-drafts/   ★ authoritative source (19 skills + scripts)
-├── scripts/                prepare-env installer
+├── .flow-comet/            ★ authoritative source (skills/ + rules/)
+├── scripts/                prepare-env installer (npm bin: fcomet / flow-comet)
 ├── docs/
 │   ├── examples/           workflow artifact examples
 │   ├── ECOSYSTEM.md        roles of flow-kit & Comet, borrowing boundaries
@@ -211,7 +226,7 @@ flow-comet/
 | Document | Description |
 |----------|-------------|
 | [Ecosystem](docs/ECOSYSTEM.md) | Roles of flow-kit & Comet, what flow-comet borrows and deliberately does not |
-| [Installation](docs/INSTALLATION.md) | Prerequisites, prepare-env options A/B/C, installation verification |
+| [Installation](docs/INSTALLATION.md) | Prerequisites, install options A–D (npm / prepare-env / manual copy / dsh), installation verification |
 | [Usage](docs/USAGE.md) | 8-node workflow, branch mode, execution modes, decision points |
 | [Custom Protocols](docs/PROTOCOL.md) | Compose skills into custom workflows |
 | [Core Mechanisms](docs/MECHANISM.md) | State machine, defense layers, guard validation |
@@ -227,8 +242,8 @@ flow-comet/
 Full guide in [CONTRIBUTING.md](CONTRIBUTING.md) — branch model (`feature → dev → main`), PR workflow, merge rules, and commit convention. In short:
 
 1. Branch from `dev`: `git checkout dev && git checkout -b feat/<description>`
-2. Edit skills/scripts under `.comet/bundle-drafts/flow-comet/skills/` (authoritative source); TDD with RED scenario first
-3. Run regression: `node .comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 219 SCENARIOS PASSED`
+2. Edit skills/scripts under `.flow-comet/skills/` (authoritative source); TDD with RED scenario first
+3. Run regression: `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 241 SCENARIOS PASSED`
 4. Open a PR into `dev` (squash — one change-level commit); release PR `dev → main` (merge — dev's change-level commits enter main, and dev stops leading after each release)
 
 CI enforces the repository conventions automatically on every PR and push (regression, PR discipline, version consistency, dead links). Local hooks (commit/push message checks) install with `node scripts/install-commit-hook.mjs` — see [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.

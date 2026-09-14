@@ -1,6 +1,7 @@
 # 运行状态（每项目不同，不入库）
+.flow-comet/flow-comet-state.json
+# 以下 .comet/ 条目静态检索无 flow-comet 读取方（疑属 Comet 资产）——不随本包命名空间迁移
 .comet/current-change.json
-.comet/flow-comet-state.json
 .comet/flow-comet-plan.json
 .comet/real-eval-result.json
 .comet/manual-eval-result.json

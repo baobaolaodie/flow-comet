@@ -10,7 +10,7 @@
 
 ## 1. 状态机与路由（文件即真相）
 
-- 单文件状态机 `.comet/flow-comet-state.json`；节点推进由 `workflow-guard.mjs exit <node> --apply` 门控
+- 单文件状态机 `.flow-comet/flow-comet-state.json`；节点推进由 `workflow-guard.mjs exit <node> --apply` 门控
 - **determineNode**：从 `.specs/` 工件实时推导当前节点（文件不齐 → 停在对应节点），不完全信任 state
 - **自动纠偏**：state 的 currentNode 与推导不一致时自动写回（`next` 触发）
 
@@ -18,13 +18,13 @@
 
 | 层 | 机制 | 校验点 |
 |----|------|--------|
-| ① hook 物理拦截 | phase 白名单：execute/subagent-execute 协调者只写 `.specs/`；源码由 worktree 子代理写（cwd 无 state → 放行） | 写入目标路径 + currentNode |
+| ① hook 物理拦截 | phase 白名单：execute/subagent-execute 协调者只写 `.specs/`；源码由 worktree 子代理写（其工作区位于隔离区前缀 `.claude/worktrees/**` 下，hook 放行） | 写入目标路径 + currentNode |
 | ② 协调者禁令 | `next`/`entry` 每次注入"你是协调者不是执行者"（direct 模式 execute 豁免） | 输出注入 |
 | ③ exit 越俎代庖检测 | parallel 任务 done 必须有 handoffResult，否则 BLOCKED（`parallelTakeoverApproved` 显式豁免） | TASK.md + handoff evidence |
 
 hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会话 TUI 阻止工具调用；`claude -p`（SDK CLI 模式）下非零退出被降级为 non-blocking。
 
-越界拦截的项目根兜底链：会话 cwd 漂移时按 `COMET_RUN_ROOT` → `CLAUDE_PROJECT_DIR` → 含 `.comet/flow-comet-state.json` **或** `.claude/skills/flow-comet` 的最近祖先 → cwd 锚定项目根，项目根外写入仍被拦截。
+越界拦截的项目根兜底链：会话 cwd 漂移时按 `FLOW_COMET_RUN_ROOT` → `CLAUDE_PROJECT_DIR` → 含 `.flow-comet/flow-comet-state.json` **或** `.claude/skills/flow-comet` 的最近祖先 → cwd 锚定项目根，项目根外写入仍被拦截。
 
 ## 3. guard 校验体系（证据驱动推进）
 
@@ -69,16 +69,16 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 
 ## 6. guard 自测套件（作者回归基线）
 
-`scripts/guard-self-test.mjs`：**219 个场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（73 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
+`scripts/guard-self-test.mjs`：**241 个场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（75 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
 
 ```bash
-node .claude/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 219 SCENARIOS PASSED
+node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
+# → ALL 241 SCENARIOS PASSED
 ```
 
 ## 6.5 DeepSeek Harness（dsh）平台
 
-在 DeepSeek Harness 上，flow-comet 经 **prepare-env 安装器**（`--platform dsh`）安装——无插件包、无 npm 包（留后续 / 1.5.0）；引擎零改动，guard 判定核心经子进程调用原样复用：
+在 DeepSeek Harness 上，flow-comet 经 **prepare-env 安装器**（`--platform dsh`）安装——无插件包；npm 分发通道（`flow-comet` 包与 `fcomet` 命令）现已具备可发布形态（首次真实发布归发布批次），dsh 安装仍走 prepare-env。引擎零改动，guard 判定核心经子进程调用原样复用：
 
 - **安装**：`node scripts/prepare-env.mjs --target <项目> --platform dsh`（最低 dsh `0.1.0-rc.6`；dev preview）。
 - **项目级技能发现**：技能树安装到 `<项目>/.dsh/skills/flow-comet`；dsh 在 `<项目>/.dsh/skills/` 下以 rank 100 自动发现（文件监听、免重启）——**未安装该目录的项目不可见该技能**，因此激活天然是项目级的（无运行时痕迹判定、无 chicken-and-egg）。
@@ -120,15 +120,15 @@ node .claude/skills/flow-comet/scripts/guard-self-test.mjs
 - **文件即真相，不做事件溯源**：单文件状态机 + 从 `.specs/` 推导节点——简单且恢复不依赖历史
 - **结构级校验，不做语义判断**：guard 判"填没填"（段名/非空/结构），"填得好不好"交给 review——校验轻、误报少
 - **检测+纠偏，不做拦截**：agent 环境无法真正阻止 LLM 直改文件，机器字段靠检测与自动写回
-- **状态不入库**：`.comet/` 保持 gitignore——分支切换共享同一份工作树状态，避免状态分裂
+- **状态不入库**：`.flow-comet/` 保持 gitignore——分支切换共享同一份工作树状态，避免状态分裂
 - **不并行 change、不强制 PR**：一次一个 active change（状态机模型简单）；PR 审查按需开启
 
 ## 已知限制
 
-- **平台**：Claude Code（默认）、Codex（技能/规则/hook 经多平台安装器）与 DeepSeek Harness（dsh——项目级技能 + 全局桥接 loader，经 `prepare-env --platform dsh`，见[安装](INSTALLATION-zh.md#方案-c--deepseek-harnessdsh-平台)）受支持；其他平台（Gemini/Cursor）不保证
+- **平台**：Claude Code（默认）、Codex（技能/规则/hook 经多平台安装器）与 DeepSeek Harness（dsh——项目级技能 + 全局桥接 loader，经 `prepare-env --platform dsh`，见[安装](INSTALLATION-zh.md#方案-d--deepseek-harnessdsh平台)）受支持；其他平台（Gemini/Cursor）不保证
 - **Return Contract 过渡规则**：旧格式纯字符串 handoff 豁免为 WARN；redEvidence/greenEvidence 缺失渐进 WARN（不 BLOCK），避免旧 change 重入被卡死
 - **与 Comet Classic 不互通**：workflow-kernel 状态独立于 classic（设计决策，非缺陷）
-- **无活跃 change 时 hook 放行**：`.comet/flow-comet-state.json` 不存在时 hook guard 放行所有写入（设计决策：无 workflow 时不限制文件操作）
+- **无活跃 change 时 hook 放行**：`.flow-comet/flow-comet-state.json` 不存在时 hook guard 放行所有写入（设计决策：无 workflow 时不限制文件操作）
 - **hook blocking 语义**：exit 2（blocking）在主会话 TUI 实测生效；`claude -p`（SDK CLI 模式）下非零退出降级为 non-blocking——写入被记录但不阻止
 - **worktree 挂载依赖**：Agent `isolation: "worktree"` 的 worktree 挂在**会话项目根**（非子代理目标项目）——跨仓库产物需 `git show <branch>:<path>` 手动搬运，该场景下提交文件溯源校验（`git show` 子集检查）降级
 - **GUIDANCE 不经创作清单记录**：`<skill>-GUIDANCE.md` 与 SKILL.md 引用行不登记创作清单，重跑 Skill 生成工具会清掉

@@ -28,7 +28,7 @@
 // 纯 ESM、零第三方依赖，仅使用 Node.js 内置模块。dsh 官方插件形态：
 // ESM 模块导出 { name, apply }，ctx 由 dsh 注入。
 //
-// BRIDGE_VERSION: 1.6.0-alpha.1
+// BRIDGE_VERSION: 1.5.0-rc.3
 
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
@@ -37,8 +37,10 @@ import path from 'node:path';
 // 插件元信息：dsh 官方插件形态（name / apply；ctx 由 dsh 注入）。
 // 版本戳（DESIGN D7 / §9.3 契约）：与文件头 BRIDGE_VERSION 标记行同值——
 // 安装器与 bridge-check 双侧正则提取的锚点，标记行格式不得改动（§9.5 禁动）。
+// 值语义 = 当前发布版本（随发布同步更新，与技能包 INSTALLED_VERSION 同值——
+// bridge-check 的版本一致性检查据此判定 loader 与项目副本同版）。
 export const name = 'dsh-flow-comet-bridge';
-export const version = '1.6.0-alpha.1';
+export const version = '1.5.0-rc.3';
 
 // guard 在项目内的相对路径常量（随 skill 包分发）。
 const HOOK_GUARD_REL = '.dsh/skills/flow-comet/scripts/comet-hook-guard.mjs';
@@ -154,7 +156,7 @@ export function isPathInsideProjectRoot(projectRoot, filePath) {
  * (fail-closed — never treated as idle), else { ok:true, state }.
  */
 export function readFlowState(projectRoot) {
-  const stateFile = path.join(projectRoot, '.comet', 'flow-comet-state.json');
+  const stateFile = path.join(projectRoot, '.flow-comet', 'flow-comet-state.json');
   let raw;
   try {
     raw = readFileSync(stateFile);
@@ -261,7 +263,7 @@ export function mapGuardExit(code, stderr, stdout) {
       reason:
         'dsh-flow-comet-bridge: 写入被 flow-comet 白名单拦截\n' +
         (detail ? detail + '\n' : '') +
-        '恢复指引：请将写入目标调整到当前节点允许的路径前缀，或先完成当前节点流程后再写；如认为判定有误，请检查 .comet/flow-comet-state.json 与协议白名单。',
+        '恢复指引：请将写入目标调整到当前节点允许的路径前缀，或先完成当前节点流程后再写；如认为判定有误，请检查 .flow-comet/flow-comet-state.json 与协议白名单。',
     };
   }
   return {
@@ -389,7 +391,7 @@ export function apply(ctx) {
       if (flowState === 'error') {
         // 解析失败 / 状态异常：fail-closed deny，不得当空闲放行（D2/R2 缓解——防异常被静默放行）。
         const reason =
-          'dsh-flow-comet-bridge: .comet/flow-comet-state.json 解析失败或状态异常——fail-closed 拒绝';
+          'dsh-flow-comet-bridge: .flow-comet/flow-comet-state.json 解析失败或状态异常——fail-closed 拒绝';
         console.warn(reason);
         return { kind: 'deny', reason };
       }

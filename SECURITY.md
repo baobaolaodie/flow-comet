@@ -20,7 +20,7 @@ We aim to acknowledge reports within 72 hours and to respond with a fix plan or 
 
 In scope:
 
-- Skill scripts under the authoritative source (`.comet/bundle-drafts/flow-comet/skills/flow-comet/scripts/`): workflow state/guard/handoff, hook guard, context init
+- Skill scripts under the authoritative source (`.flow-comet/skills/flow-comet/scripts/`): workflow state/guard/handoff, hook guard, context init
 - The installer (`scripts/prepare-env.mjs`) and local hooks (`.githooks/`)
 - GitHub Actions workflows (`.github/workflows/`)
 
