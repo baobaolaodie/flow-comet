@@ -28,7 +28,7 @@
 // 纯 ESM、零第三方依赖，仅使用 Node.js 内置模块。dsh 官方插件形态：
 // ESM 模块导出 { name, apply }，ctx 由 dsh 注入。
 //
-// BRIDGE_VERSION: 1.5.0-rc.3
+// BRIDGE_VERSION: 1.5.0
 
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
@@ -40,7 +40,7 @@ import path from 'node:path';
 // 值语义 = 当前发布版本（随发布同步更新，与技能包 INSTALLED_VERSION 同值——
 // bridge-check 的版本一致性检查据此判定 loader 与项目副本同版）。
 export const name = 'dsh-flow-comet-bridge';
-export const version = '1.5.0-rc.3';
+export const version = '1.5.0';
 
 // guard 在项目内的相对路径常量（随 skill 包分发）。
 const HOOK_GUARD_REL = '.dsh/skills/flow-comet/scripts/comet-hook-guard.mjs';

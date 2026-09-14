@@ -1,6 +1,6 @@
 {
   "name": "flow-comet",
-  "version": "1.5.0-rc.3",
+  "version": "1.5.0",
   "description": "An automated execution engine that turns AI coding discipline into a verifiable state machine for the flow-kit 9-stage workflow, built for Claude Code, Codex, and DeepSeek Harness.",
   "type": "module",
   "files": [
