@@ -23,10 +23,11 @@ In scope:
 - Skill scripts under the authoritative source (`.flow-comet/skills/flow-comet/scripts/`): workflow state/guard/handoff, hook guard, context init
 - The installer (`scripts/prepare-env.mjs`) and local hooks (`.githooks/`)
 - GitHub Actions workflows (`.github/workflows/`)
+- How flow-comet uses its third-party dependency — the invocation path and the assumptions flow-comet makes about that package's behavior
 
 Out of scope:
 
-- Third-party runtime dependencies (there are none — Node.js built-ins only)
+- Vulnerabilities in third-party packages themselves: the installer depends on `@clack/prompts` (exact-pinned) for its interactive platform multi-select, falling back to readline when it is unavailable — report that package's own vulnerabilities upstream. The rest of flow-comet runs on Node.js built-ins only
 - Upstream templates and content from [flow-kit](https://github.com/rihebty/flow-kit)
 - Content of user projects using flow-comet (their own code and artifacts)
 
