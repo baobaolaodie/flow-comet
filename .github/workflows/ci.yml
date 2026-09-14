@@ -4,7 +4,7 @@
 # (All checks are enforced server-side and independently.)
 #
 # 检查映射 / Check mapping:
-#   regression           guard self-test (238 scenarios incl. scenario-count & public-artifact
+#   regression           guard self-test (241 scenarios incl. scenario-count & public-artifact
 #                        code self-checks) / script syntax / BOM guard
 #   installer            prepare-env reproducibility + distribution surface (publishable
 #                        manifest / pack boundary incl. top-level allowlist and per-file
@@ -99,10 +99,17 @@ jobs:
           # 判据权威定义 = 本地系统测试集的分发面项(K18):assertPublishableManifest /
           # assertPackageBoundary / assertBinContract。本 step 是这三组判据的**等价搬运**——
           # 逐条对齐、同一判据,但不是共享实现:改动任一侧都必须同步另一侧。
-          #   ① 清单可发布性(private 缺席)                  ← assertPublishableManifest
+          #   ① 清单可发布性:private 缺席 / license 为 MIT / engines.node 为 >=18
+          #                                                  ← assertPublishableManifest
           #   ② 包体边界:必含面 / 私有面零命中 / scripts 面两项 /
           #      顶层白名单 fail-closed / 技能树逐文件在场   ← assertPackageBoundary
           #   ③ bin 双入口契约                               ← assertBinContract
+          # 同步清单(两份实现没有任何机制能发现彼此已不同步,故把「本侧覆盖了什么」写死在此;
+          # 改动任一侧都必须同时改另一侧,并逐条比对——不采信「同源」措辞):
+          #   ① 的三条断言(private / license / engines.node);② 的五项子判据(必含面 / 私有面 /
+          #   scripts 面 / 顶层白名单 / 技能树逐文件);③ bin 两键指向。
+          # license 与 engines.node 正是此前加进 K18 却漏在本 step 同步的两条(服务端门因此比
+          # 本地套件弱:删掉 license 或改掉 engines.node 时 required check 仍全绿),现已按同判据补齐。
           # 本 step 另有一条比 K18 更严的锚:flow-comet* 技能目录数恒为 19(白名单裁剪的显式契约)。
           # 尚未搬运:K18 的 init 词元红线(变形/重复词元退 1)——须起真实安装器进程,仍由本地套件覆盖;
           # 完整的系统测试集同样不在 CI 运行(它是本地两级基线中的第二级)。
@@ -113,9 +120,15 @@ jobs:
             const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
             const problems = [];
 
-            // ① 清单可发布性:private 在场即 npm 拒绝发布(允许缺席或显式非真值)
+            // ① 清单可发布性:private 在场即 npm 拒绝发布(允许缺席或显式非真值);
+            // license 与 engines.node 是随发布物固化的公开身份与运行时前提(取值唯一,与 K18 同判据)
             if (pkg.private)
               problems.push(`package.json must not be private (npm refuses to publish): ${JSON.stringify(pkg.private)}`);
+            if (pkg.license !== "MIT")
+              problems.push(`package.json license must be "MIT" (matches the repository LICENSE): ${JSON.stringify(pkg.license)}`);
+            const nodeFloor = pkg.engines ? pkg.engines.node : undefined;
+            if (nodeFloor !== ">=18")
+              problems.push(`package.json engines.node must be ">=18" (documented runtime requirement): ${JSON.stringify(nodeFloor)}`);
 
             // ② 必需面:19 个 flow-comet* 技能目录 + rules + 两个随包脚本
             const skills = [...new Set(entries

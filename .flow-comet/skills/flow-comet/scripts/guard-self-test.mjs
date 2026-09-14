@@ -7103,6 +7103,139 @@ const SCENARIOS = [
       assertOut(setContentIn, 'workflow-hook-guard-ok');
     },
   },
+
+  // 239: 目的地型命令的参数段必须止于换行——段捕获 `[^;|&]*` 不排除 `\r`/`\n`，`cp <src> <dst>`
+  // 之后紧跟另一行命令时段会跨行吞并：「最后一个位置参数」取到下一行的参数（通常在白名单内）
+  // → 整条命令放行，**真正被写的 <dst> 从不被检查**（逃逸方向）。修复后换行/回车都是段边界，
+  // 每行命令按各自参数段判定。
+  {
+    name: '239 hook 命令写：目的地型命令的段不跨行（跨行吞并使真实目标漏检 → 拦）',
+    run: (dir) => {
+      writeState(dir, { ...baseState('review'), status: 'running' });
+      const src = '.specs/' + CHANGE_ID + '/x.md';
+      const inside = '.specs/' + CHANGE_ID + '/ok.md';
+      // ① 目标越界、下一行参数在白名单内：修复前取到下一行参数 → 放行（逃逸）
+      const crossLine = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'cp ' + src + ' CLAUDE.md\necho ' + inside },
+      });
+      assertExit(crossLine, 2);
+      assertOut(crossLine, 'BLOCKED');
+      assertOut(crossLine, 'CLAUDE.md');
+      // ② CRLF 行尾（Windows 形态）同判：`\r` 也是段边界
+      const crlf = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'cp ' + src + ' CLAUDE.md\r\necho ' + inside },
+      });
+      assertExit(crlf, 2);
+      assertOut(crlf, 'BLOCKED');
+      assertOut(crlf, 'CLAUDE.md');
+      // ③ 行首是普通命令、写命令在第二行 → 第二行仍被独立判定（多行命令串的覆盖保持）
+      const secondLine = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'echo ' + inside + '\nmv ' + src + ' README-zh.md' },
+      });
+      assertExit(secondLine, 2);
+      assertOut(secondLine, 'BLOCKED');
+      assertOut(secondLine, 'README-zh.md');
+      // ④ 单行且目标在白名单内 → 放行（收紧段边界不得误伤合法形态）
+      const singleLine = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'cp ' + src + ' ' + inside },
+      });
+      assertExit(singleLine, 0);
+      assertOut(singleLine, 'workflow-hook-guard-ok');
+    },
+  },
+
+  // 240: GNU cp/mv 的**前置目的地**选项 `-t <dir>` / `--target-directory[= ]<dir>`——目的地不是
+  // 最后一个位置参数而是开关的取值。修复前只把开关跳过取值、仍取「最后一个位置参数」= 源
+  // （源通常在白名单内）→ 整条命令放行，真正被写的目录不被检查（逃逸方向）。
+  {
+    name: '240 hook 命令写：cp/mv 前置目的地 -t / --target-directory 取为写入目标',
+    run: (dir) => {
+      writeState(dir, { ...baseState('review'), status: 'running' });
+      const src = '.specs/' + CHANGE_ID + '/x.md';
+      const inside = '.specs/' + CHANGE_ID + '/ok.md';
+      // ① `-t <dir>`：目的地越界 → 拦（修复前取源 → 放行）
+      const shortForm = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'cp -t docs ' + src },
+      });
+      assertExit(shortForm, 2);
+      assertOut(shortForm, 'BLOCKED');
+      assertOut(shortForm, 'docs');
+      // ② `--target-directory=<dir>`（等号形态）
+      const longFormEquals = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'cp --target-directory=docs ' + src },
+      });
+      assertExit(longFormEquals, 2);
+      assertOut(longFormEquals, 'BLOCKED');
+      assertOut(longFormEquals, 'docs');
+      // ③ `--target-directory <dir>`（空格形态）
+      const longFormSpace = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'mv --target-directory docs ' + src },
+      });
+      assertExit(longFormSpace, 2);
+      assertOut(longFormSpace, 'BLOCKED');
+      assertOut(longFormSpace, 'docs');
+      // ④ 前置目的地在白名单内 → 放行（不得因本次修复误拦）
+      const insideTarget = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'mv -t .specs/' + CHANGE_ID + ' ' + src },
+      });
+      assertExit(insideTarget, 0);
+      assertOut(insideTarget, 'workflow-hook-guard-ok');
+      // ⑤ 反向锚：无前置目的地的普通形态仍按最后位置参数判定（既有语义保持）
+      const plain = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'cp -f ' + src + ' ' + inside },
+      });
+      assertExit(plain, 0);
+      assertOut(plain, 'workflow-hook-guard-ok');
+    },
+  },
+
+  // 241: 命令位置锚定必须引号感知——命令边界集 `[;&|(){}]` 不区分引号内外，`printf '(cp CLAUDE.md)'`
+  // 引号内的括号被当成命令边界，括号里的文本被读成写命令 → **合法命令被拦**（误拦方向）。
+  // 修复后边界只在引号外生效；引号外的真命令仍按原判据拦截（收紧不得放过真逃逸）。
+  {
+    name: '241 hook 命令写：引号内的命令分隔符不构成命令位置（合法命令不被读成写命令）',
+    run: (dir) => {
+      writeState(dir, { ...baseState('review'), status: 'running' });
+      // ① 单引号内的括号：不是命令边界
+      const singleQuoted = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: "printf '(cp CLAUDE.md)'" },
+      });
+      assertExit(singleQuoted, 0);
+      assertOut(singleQuoted, 'workflow-hook-guard-ok');
+      // ② 双引号内的分号：不是命令分隔符
+      const doubleQuoted = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'echo "cp CLAUDE.md; mv x README.md"' },
+      });
+      assertExit(doubleQuoted, 0);
+      assertOut(doubleQuoted, 'workflow-hook-guard-ok');
+      // ③ 引号外的真写命令仍拦（同一命令串内引号内文本与真命令并存）
+      const realCommand = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'printf "(cp x)" ; cp .specs/' + CHANGE_ID + '/x.md CLAUDE.md' },
+      });
+      assertExit(realCommand, 2);
+      assertOut(realCommand, 'BLOCKED');
+      assertOut(realCommand, 'CLAUDE.md');
+      // ④ 既有意图保持：`cp` 只作为被检索文本出现时不构成命令位置（不误判为写命令）
+      const notCommand = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'grep -n "cp" README.md' },
+      });
+      assertExit(notCommand, 0);
+      assertOut(notCommand, 'workflow-hook-guard-ok');
+    },
+  },
 ];
 
 // ---------- 运行 ----------

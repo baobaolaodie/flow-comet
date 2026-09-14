@@ -342,16 +342,19 @@ function collectTreeFiles(root) {
 
 // 环境判据（结构化事实，不做路径字符串猜测）：本套件在权威源与安装副本内都会运行，
 // 而包体质检只有权威源侧可判——判据落空时输出显式「不适用」行并计通过，禁止静默跳过。
-//   权威源侧 = 脚本上溯 4 层（包根）存在 `name === 'flow-comet'` 的 package.json；
-//   安装副本侧 = <target>/.claude|.agents|.dsh/skills/flow-comet/scripts 上溯 4 层 = 目标项目根，
-//   其 package.json（若存在）name 不是本包 → 不适用（判定写反会让每个已安装项目假红）。
-// 权威源标记（.flow-comet/skills/flow-comet 权威树在位）用于区分判据落空的两种情形：
-//   ① 目标项目根（权威树不在）→ 不适用；② 权威树在位但 package.json 缺失/不可解析/name 不符
-//   → 必须失败（判定过宽会让权威源侧的包体断言静默漏检——与副本侧假红相反的另一失败模式）。
-function resolvePackageContext() {
-  const root = path.resolve(__dirname, '..', '..', '..', '..');
+//   权威源侧 = 脚本上溯 4 层（包根）**同时**满足：存在 `name === 'flow-comet'` 的 package.json
+//     **且** `.flow-comet/skills/flow-comet` 权威树在位；
+//   安装副本侧 = <target>/.claude|.agents|.dsh/skills/flow-comet/scripts 上溯 4 层 = 目标项目根
+//     → 判「不适用」（判定写反会让每个已安装项目假红）。
+// 两个条件是**并列必要**的：只看 manifest 名字会把「恰好同名的消费项目」（依赖里带同名包、
+// 或项目自身就叫 flow-comet 但无权威树）判成权威源——于是包体质检在该项目里跑 npm pack 而不是
+// 输出「不适用」（判据过宽的另一失败模式）。权威树在场时 manifest 缺失/不可解析/name 不符
+// → 必须失败（判定过宽会让权威源侧的包体断言静默漏检）。
+// root 可覆盖（默认真实包根）——仅为可测性接缝：使上述四种形态能在夹具目录上被逐条驱动
+// （否则判据的判别力只能靠人工实验验证，回归时可能被改宽而套件仍全绿）。生产调用不传该参数。
+function resolvePackageContext(root = path.resolve(__dirname, '..', '..', '..', '..')) {
   const authoritative = fs.existsSync(path.join(root, '.flow-comet', 'skills', 'flow-comet'));
-  const notApplicable = () => ({ kind: 'copy', reason: '根目录无本包 package.json（name=flow-comet）' });
+  const notApplicable = (reason) => ({ kind: 'copy', reason: reason || '根目录无本包权威源（name=flow-comet 的 package.json + .flow-comet/skills/flow-comet 权威树）' });
   const manifest = path.join(root, 'package.json');
   if (!fs.existsSync(manifest)) {
     if (authoritative) throw new Error('权威源包根缺少 package.json: ' + manifest);
@@ -368,7 +371,48 @@ function resolvePackageContext() {
     if (authoritative) throw new Error('权威源 package.json 的 name 应为 flow-comet，实际 ' + JSON.stringify(pkg && pkg.name));
     return notApplicable();
   }
+  if (!authoritative) {
+    return notApplicable('根目录有 name=flow-comet 的 package.json 但权威树（.flow-comet/skills/flow-comet）不在位——同名不构成权威源，按安装副本判定');
+  }
   return { kind: 'source', root, pkg };
+}
+
+// 环境判据的判别力锚（正反两向逐形态驱动）：判据写宽（manifest 名字相符即认权威源）会让同名
+// 消费项目被当成权威源；写反/写严则两侧互串（副本侧假红 / 权威源侧静默漏检）。夹具形态：
+//   ① 权威树不在 + 同名 manifest → copy（同名 ≠ 权威源）
+//   ② 权威树不在 + 无 manifest   → copy
+//   ③ 权威树在场 + 同名 manifest → source
+//   ④ 权威树在场 + 无 manifest / manifest 不可解析 / name 不符 → 抛错（既有行为保持，不得放宽）
+// 夹具建在调用方给定的临时目录内（随该项临时目录一并清理，不留残留）。
+function assertPackageContextJudgment(scratch) {
+  const fixture = (name, options) => {
+    const root = path.join(scratch, name);
+    const tree = path.join(root, '.flow-comet', 'skills', 'flow-comet');
+    if (options.tree) fs.mkdirSync(tree, { recursive: true });
+    else fs.mkdirSync(root, { recursive: true });
+    if (options.manifest !== undefined) fs.writeFileSync(path.join(root, 'package.json'), options.manifest, 'utf8');
+    return root;
+  };
+  const expectKind = (root, expected, label) => {
+    const ctx = resolvePackageContext(root);
+    if (ctx.kind !== expected) {
+      throw new Error('环境判据失配（' + label + '）：期望 ' + expected + '，实际 ' + ctx.kind);
+    }
+  };
+  const expectThrow = (root, label) => {
+    let threw = null;
+    try { resolvePackageContext(root); } catch (e) { threw = e; }
+    if (!threw) {
+      throw new Error('环境判据失配（' + label + '）：权威树在场而 manifest 畸形时应显式失败，实际未抛错');
+    }
+  };
+  expectKind(fixture('same-name-consumer', { tree: false, manifest: '{"name":"flow-comet"}' }), 'copy', '权威树不在 + 同名 manifest');
+  expectKind(fixture('plain-consumer', { tree: false, manifest: undefined }), 'copy', '权威树不在 + 无 manifest');
+  expectKind(fixture('authoritative', { tree: true, manifest: '{"name":"flow-comet"}' }), 'source', '权威树在场 + 同名 manifest');
+  expectThrow(fixture('authoritative-no-manifest', { tree: true, manifest: undefined }), '权威树在场 + 无 manifest');
+  expectThrow(fixture('authoritative-broken', { tree: true, manifest: '{ not json' }), '权威树在场 + manifest 不可解析');
+  expectThrow(fixture('authoritative-other-name', { tree: true, manifest: '{"name":"other"}' }), '权威树在场 + name 不符');
+  console.log('  环境判据: 副本侧同名/无名两形态判「不适用」，权威源侧判「权威源」，畸形 manifest 三形态显式失败 ✓');
 }
 
 // 分发面结果标记（机器可读）：本套件在权威源与安装副本两侧都会运行，而断言只在权威源侧真跑——
@@ -3846,9 +3890,12 @@ const TEST_ITEMS = [
   // 「不适用」行并回传同语义的结果标记计通过（禁止静默跳过——「未验证 ≠ 通过」）。
   // 四组断言见上方同名助手；结果标记由运行器按环境判据断言（distributionSurface 契约）。
   {
-    name: 'K18 分发面:包体边界与 bin 双入口(权威源真跑/副本显式不适用)与 init 词元红线',
+    name: 'K18 分发面:环境判据与包体边界·bin 双入口(权威源真跑/副本显式不适用)与 init 词元红线',
     distributionSurface: true,
     run: (dir) => {
+      // 环境判据的判别力锚先跑(与所在环境无关的夹具驱动):判据判错会让下面整段走错分支——
+      // 副本侧假红,或权威源侧静默漏检,故判据本身必须先被证明有条判别力。
+      assertPackageContextJudgment(dir);
       const pkgCtx = resolvePackageContext();
       const marker = DISTRIBUTION_MARKERS[pkgCtx.kind];
       if (pkgCtx.kind === 'copy') {
