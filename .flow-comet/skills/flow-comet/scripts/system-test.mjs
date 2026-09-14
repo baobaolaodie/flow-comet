@@ -569,6 +569,50 @@ function assertInitTokenContract(installer, cwd) {
       throw new Error('变形/重复词元 `' + bad + '` 的 stderr 应含「未知参数」，实际:\n' + res.stderr);
     }
   }
+  // ⑤ 版本查询：`--version` / `-v` 退 0 并输出本工具的版本标识（与随包分发的权威源标识同源）。
+  // 断言取「前缀」而非等值：开发态下 git describe 输出 `<发布版>-N-g<hash>`，其前缀仍是发布版。
+  const installedVersion = fs.readFileSync(path.join(__dirname, '..', 'INSTALLED_VERSION'), 'utf8').trim();
+  for (const flag of ['--version', '-v']) {
+    const res = runInstaller([flag]);
+    if (res.status !== 0) {
+      throw new Error('`' + flag + '` 应退 0（版本查询不是错误），实际 ' + res.status + '\n' + res.stderr);
+    }
+    if (!res.stdout.trim().startsWith(installedVersion)) {
+      throw new Error('`' + flag + '` 输出应以 ' + installedVersion + ' 起始，实际: ' + JSON.stringify(res.stdout.trim()));
+    }
+  }
+  console.log('  版本查询: `--version` / `-v` 退 0 且输出以 ' + installedVersion + ' 起始 ✓');
+  // ⑥ 零参数裸调用不得安装到当前目录（本轮修正）：无参数 = 没说要做什么，
+  //    应当在当前目录留下零产物并给出用法与非零退出码。修复前它会做一次完整安装
+  //    （.claude/ + flow-kit/ + 改写 .gitignore）→ 误敲即在当前目录铺开一套环境。
+  const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'no-action-'));
+  try {
+    seedForeignFlowKit(emptyDir); // 预置同名非上游目录：走「已跳过」路径，零网络接触
+    const bareRun = spawnSync(process.execPath, [installer], { cwd: emptyDir, encoding: 'utf8', timeout: 60000 });
+    const status = bareRun.status ?? 1;
+    const stderr = String(bareRun.stderr || '');
+    if (status === 0) {
+      throw new Error('零参数裸调用不得退 0（它做了/声称做了一次安装）；实际退 0\n' + String(bareRun.stdout || '').slice(-300));
+    }
+    if (!stderr.includes('用法')) {
+      throw new Error('零参数裸调用的 stderr 应给出用法，实际:\n' + stderr);
+    }
+    // 用法必须**整段**在 stderr：只断言「stderr 含用法」会漏掉「部分行仍写 stdout」的实现
+    // （首行在 stderr 即满足该断言，其余行可能被劈到 stdout——实测出现过）。故此处两侧同判：
+    // stderr 末尾行在场，且 stdout 为空。
+    if (!/--version 打印版本标识/.test(stderr)) {
+      throw new Error('用法末行不在 stderr（用法输出被劈到 stdout）：stderr 实际:\n' + stderr);
+    }
+    if (String(bareRun.stdout || '').trim() !== '') {
+      throw new Error('零参数裸调用的 stdout 应为空（用法整段走 stderr），实际:\n' + String(bareRun.stdout));
+    }
+    if (fs.existsSync(path.join(emptyDir, '.claude'))) {
+      throw new Error('零参数裸调用不得在当前目录留下安装产物（.claude/ 被创建）');
+    }
+    console.log('  零参数裸调用: 非零退出 + 用法整段在 stderr + stdout 空 + 当前目录零产物 ✓');
+  } finally {
+    fs.rmSync(emptyDir, { recursive: true, force: true });
+  }
   console.log('  init 词元: `init --help` 退 0 且含 fcomet init / 裸形态行为不变 / 变形·重复词元 4 例退 1 且报未知参数 ✓');
 }
 

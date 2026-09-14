@@ -56,7 +56,7 @@ cd <your project>
 fcomet init
 ```
 
-The package ships two command names pointing at the same installer — `fcomet` (primary) and `flow-comet` (alias). The `init` token is optional (a bare `fcomet` is equivalent) and `--target <dir>` is optional too (default: the current working directory). Re-running the same command updates an existing install and is idempotent.
+The package ships two command names pointing at the same installer — `fcomet` (primary) and `flow-comet` (alias). The `init` token is optional whenever another argument expresses the intent (`fcomet --target <dir>` is equivalent to `fcomet init --target <dir>`), and `--target <dir>` is optional too (default: the current working directory); run with no arguments at all, the command prints its usage and exits non-zero instead of installing. `fcomet --version` prints the version of the installed CLI. Re-running the same command updates an existing install and is idempotent.
 
 On an interactive terminal, the first run prompts for the platform with a direction-key multi-select (arrow keys + space to toggle, Enter to confirm; the default is Claude Code) — `@clack/prompts` is the primary path, with an automatic readline number/comma multi-select fallback when the dependency is not installed, offline, or stdin has no raw mode (`FLOW_COMET_FORCE_READLINE=1` forces the fallback for testing); for a non-interactive pick, add `--platform codex` / `--platform dsh` / `--platform claude-code,dsh` (comma-separated) / `--platform all`.
 

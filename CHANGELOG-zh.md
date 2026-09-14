@@ -10,6 +10,16 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号记录于九处，由 CI 在发布面对账保持一致：发布 git tag；README 徽章、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 与本文档（各含两种语言）；权威源 `.flow-comet/skills/flow-comet/INSTALLED_VERSION`；以及 npm 包的 `package.json` 的 `version`。
 
+## [Unreleased]
+
+### 新增
+
+- **安装器支持 `--version`（`-v` 等价）**：输出与随包分发、并写入目标项目同一来源的版本标识——全局安装的版本可直接查询，不必绕到包管理器。此前只处理 `--help`，查询版本会以非零退出码报「未知参数」。
+
+### 修复
+
+- **裸执行 `fcomet` 不再安装到当前目录**：完全不带参数时改为打印用法并以非零退出码结束，不再在碰巧所在的目录里做一次完整安装（建 `.claude/`、拉取 `flow-kit/`、追加 `.gitignore`）。只要其它参数表达了意图，`init` 词元仍可省略——`fcomet --target <目录>` 依然等价于 `fcomet init --target <目录>`。
+
 ## [1.5.0] - 2026-09-14
 
 收口 `1.5.0-rc.3` 之后外部审查的正式版本：修复审查发现的两处缺陷——标题带合法 ATX 闭合标记的上下文文档不再把实际存在的段报成缺段，安装器不再截断读不到的 `.gitignore` 而是中止；受保护路径判据收为单一实现；并订正若干过时表述。 ([#100](https://github.com/baobaolaodie/flow-comet/pull/100))
