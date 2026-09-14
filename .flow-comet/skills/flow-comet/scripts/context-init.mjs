@@ -203,8 +203,17 @@ const CONTEXT_FORMAT_CHECKS = [
 
 // 段名规范化：兼容「带 `## ` 前缀」（内置 fallback）与「不带前缀」（模板派生）两种来源，
 // 并剥离模板标题的括注后缀（`已锁决策（ADR 摘要）` → `已锁决策`，与 deriveSections 同口径）。
+// 第三项剥离 **ATX 闭合标记**（`## 名称 ##` 的尾部 `##`）：它是合法 Markdown 语法，
+// 不剥离时段名归一成 `名称 ##`，与模板段名不等 → 七段被整片判成缺失
+// （INIT-VALIDATE-FAILED），依赖 CONTEXT 结构校验的正常路径被误阻断。
+// 闭合标记按 CommonMark 收口：必须**前置空白**（故 `C#` 这类以井号结尾的段名不被误剥），
+// 其后可跟空白。
 function normalizeSectionName(name) {
-  return String(name ?? '').replace(/^#{1,6}\s*/, '').replace(/[（(].*$/, '').trim();
+  return String(name ?? '')
+    .replace(/^#{1,6}\s*/, '')
+    .replace(/[（(].*$/, '')
+    .replace(/[ \t]+#+[ \t]*$/, '')
+    .trim();
 }
 
 // 围栏代码块剥离：标题/格式判定的输入必须是「文档结构」，而代码示例里的 `## 段名` 只是示例文本。
