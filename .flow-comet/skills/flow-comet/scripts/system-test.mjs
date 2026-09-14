@@ -597,10 +597,19 @@ function assertInitTokenContract(installer, cwd) {
     if (!stderr.includes('用法')) {
       throw new Error('零参数裸调用的 stderr 应给出用法，实际:\n' + stderr);
     }
+    // 用法必须**整段**在 stderr：只断言「stderr 含用法」会漏掉「部分行仍写 stdout」的实现
+    // （首行在 stderr 即满足该断言，其余行可能被劈到 stdout——实测出现过）。故此处两侧同判：
+    // stderr 末尾行在场，且 stdout 为空。
+    if (!/--version 打印版本标识/.test(stderr)) {
+      throw new Error('用法末行不在 stderr（用法输出被劈到 stdout）：stderr 实际:\n' + stderr);
+    }
+    if (String(bareRun.stdout || '').trim() !== '') {
+      throw new Error('零参数裸调用的 stdout 应为空（用法整段走 stderr），实际:\n' + String(bareRun.stdout));
+    }
     if (fs.existsSync(path.join(emptyDir, '.claude'))) {
       throw new Error('零参数裸调用不得在当前目录留下安装产物（.claude/ 被创建）');
     }
-    console.log('  零参数裸调用: 非零退出 + 给出用法 + 当前目录零产物 ✓');
+    console.log('  零参数裸调用: 非零退出 + 用法整段在 stderr + stdout 空 + 当前目录零产物 ✓');
   } finally {
     fs.rmSync(emptyDir, { recursive: true, force: true });
   }
