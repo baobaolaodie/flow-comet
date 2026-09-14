@@ -60,7 +60,7 @@ fcomet init
 
 首次在交互终端运行会以方向键多选方式提示选择平台（方向键 + 空格勾选，回车确认；默认 Claude Code）——`@clack/prompts` 为主路径，依赖未安装/离线/stdin 无 raw mode 时自动回退 readline 数字/逗号多选（`FLOW_COMET_FORCE_READLINE=1` 测试钩子强制走回退）；非交互场景直接加 `--platform codex` / `--platform dsh` / `--platform claude-code,dsh`（逗号分隔多选）/ `--platform all`。
 
-**更新**：升级全局包不会改动已安装的项目——需在各项目里重跑 `fcomet init` 才能拿到新文件。另外，npm 安装没有 git 历史可据以推导开发态标识，因此它写入的版本标识（`<项目>/.claude/skills/flow-comet/INSTALLED_VERSION`）是随包分发的发布版本号；`<发布版本>-<n>-g<hash>` 形态只出现在从**有 git 与 tag 的仓库克隆**里执行的安装中。
+**更新**：升级全局包不会改动已安装的项目——需在各项目里重跑 `fcomet init` 才能拿到新文件。另外，npm 安装没有 git 历史可据以推导开发态标识，因此它写入的版本标识（Claude Code 为 `<项目>/.claude/skills/flow-comet/INSTALLED_VERSION`、Codex 为 `.agents/skills/…`、dsh 为 `.dsh/skills/…`）是随包分发的发布版本号；`<发布版本>-<n>-g<hash>` 形态只出现在从**有 git 与 tag 的仓库克隆**里执行的安装中。
 
 安装器默认面向 Claude Code（行为不变）。面向 Codex：`fcomet init --platform codex`——技能安装到自动发现的 `.agents/skills/`，编排规则注入 `AGENTS.md` 托管区，写入守卫 hook 经 Codex PreToolUse 拦截 Bash 写命令（首次使用需信任 hook：`/hooks`）。面向 DeepSeek Harness：`fcomet init --platform dsh`——技能安装到 `.dsh/skills/flow-comet`（rank 100 自动发现、免重启），编排规则注入 `AGENTS.md` 托管区，并在 `$DSH_HOME` 全局挂载薄桥接 loader（见[安装 → 方案 D](docs/INSTALLATION-zh.md#方案-d--deepseek-harnessdsh平台)）。在交互式终端（有 TTY）运行且未指定 `--platform` 时，会以方向键多选提示选择目标平台（`@clack/prompts` 为主路径，按目标项目既有痕迹预勾选，默认 Claude Code，回车即选；依赖未安装/离线/stdin 无 raw mode 自动回退 readline 数字/逗号多选；`FLOW_COMET_FORCE_READLINE=1` 测试钩子强制回退）；无 TTY（CI/脚本）自动探测 `.claude/` / `.codex/` / `.dsh/`，均无则默认 Claude Code。
 

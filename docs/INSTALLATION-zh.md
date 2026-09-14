@@ -37,7 +37,7 @@ fcomet init
 
 **更新已安装的 flow-comet**：在目标项目内重跑 `fcomet init`——幂等（覆盖生成物、原地合并 hook 条目、既有配置保留）。注意 `npm install -g flow-comet` 本身只升级命令行工具：已安装的项目仍保留它此前拿到的副本，直到在该项目里重跑一次。
 
-**版本标识**：npm 安装写入的标识（`<目标项目>/.claude/skills/flow-comet/INSTALLED_VERSION`）是随包分发的发布版本号。`<发布版本>-<n>-g<hash>` 开发态标识由源仓库的 `git describe` 推导，因此只出现在从**有 git 与 tag 的仓库克隆**执行的安装中（[方案 B](#方案-b--prepare-env-安装器仓库克隆)）——npm 安装没有仓库历史可据以推导。
+**版本标识**：npm 安装写入的标识（Claude Code 为 `<目标项目>/.claude/skills/flow-comet/INSTALLED_VERSION`、Codex 为 `.agents/skills/…`、dsh 为 `.dsh/skills/…`）是随包分发的发布版本号。`<发布版本>-<n>-g<hash>` 开发态标识由源仓库的 `git describe` 推导，因此只出现在从**有 git 与 tag 的仓库克隆**执行的安装中（[方案 B](#方案-b--prepare-env-安装器仓库克隆)）——npm 安装没有仓库历史可据以推导。
 
 ## 方案 B · prepare-env 安装器（仓库克隆）
 
@@ -106,7 +106,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 
 非默认平台上，SKILL/GUIDANCE 内的命令路径在安装时按平台实际技能位置重写（权威源保持 `.claude` 形态）。Codex 支持已完成端到端演练（Codex CLI 0.146.0 上 8 节点流程）；写入守卫 hook 拦截 Bash 写命令（PowerShell cmdlet、.NET File API、重定向）——命令级拦截覆盖主流模式，换写法可能绕过（Codex 平台限制）。dsh 平台在 `$DSH_HOME` 全局挂载薄桥接 loader（见[方案 D](#方案-d--deepseek-harnessdsh平台)）——引擎零改动，guard 判定核心经子进程调用原样复用。
 
-### 验证安装（无副作用，不创建 change）
+### 验证安装（Claude Code；无副作用，不创建 change）
 
 1. **结构检查**：`<目标项目>/.claude/skills/` 下 `flow-comet*` skill 目录数量与 prepare-env 输出一致（当前 19 个）+ `rules/flow-comet-orchestration.md` + `settings.local.json` 均存在 + `skills/flow-comet/INSTALLED_VERSION`（随技能包分发的版本标识——`cat .claude/skills/flow-comet/INSTALLED_VERSION`；npm 安装写入的是包内携带的发布版本号，从有 git 与 tag 的仓库克隆执行安装时则写入更精确的 `<发布版本>-<领先提交数>-g<hash>`）
 2. **配置可加载性**：`settings.local.json` 是合法 JSON；`hooks.PreToolUse[].hooks[].command` 指向项目根变量绝对引用 `node ${CLAUDE_PROJECT_DIR}/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs` 且 `<目标项目>/.claude/skills/flow-comet/scripts/comet-hook-guard.mjs` 存在。Claude Code 运行 hook 时注入 `CLAUDE_PROJECT_DIR` = 项目根，路径自项目根解析而非会话工作目录——工作目录漂移出项目根后仍命中（与[hook 升级说明](#hook-升级说明)推荐的形态一致）
