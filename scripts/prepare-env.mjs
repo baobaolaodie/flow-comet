@@ -1339,16 +1339,47 @@ function stripManagedBlock(content, startMarker, endMarker) {
 // ---------- 版本标识（全部平台共用） ----------
 
 /**
+ * 目录**本身**是否为 git 仓库根。判据 = `git rev-parse --show-toplevel` 指回自身。
+ * git 从 cwd 起**向上**找仓库，故嵌套在别人仓库里的目录同样能拿到结果——必须比对。
+ * 同时静音 stderr：git 在非仓库目录会打印 `fatal: not a git repository`，不该漏给用户。
+ */
+function isRepositoryRoot(dir) {
+  try {
+    const top = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: dir, encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (!top) return false;
+    const normalize = (value) => {
+      let resolved = value;
+      try { resolved = fs.realpathSync(value); } catch { /* 取不到真实路径时用词法路径 */ }
+      return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+    };
+    return normalize(top) === normalize(dir);
+  } catch {
+    return false; // 无 git / 非仓库：一律不采信
+  }
+}
+
+/**
  * 版本标识:优先从源仓库 git describe 生成(多人协作精确检测——发布版 = 精确 tag,
  * 开发态 = "<tag>-<领先提交数>-g<hash>",提 issue 时维护者可据此判断包含哪些积累);
  * 无 git(纯手动复制兜底)时用权威源随技能包分发的 INSTALLED_VERSION(最近发布版本)。
+ *
+ * **采信 git 的前提 = 本目录就是仓库根**（仓库检出形态）。包被装在别人的仓库里时
+ * （本地安装进项目 → `<项目>/node_modules/flow-comet`），git 会向上找到**宿主仓库**，
+ * 把宿主 tag 当成流工具版本——该值是错的，且它正是写进目标项目版本标识的那个值
+ * （issue 报版本 / bridge-check 比对 / 套件跨值守卫会跟着全错）。故非仓库根一律回退包内文件。
  */
 function resolveInstalledVersion() {
   let installedVersion = '';
-  try {
-    const desc = execFileSync('git', ['describe', '--tags'], { cwd: REPO_ROOT, encoding: 'utf8', timeout: 30000 }).trim();
-    if (desc) installedVersion = desc.replace(/^v/, ''); // 剥 v 前缀,与 CHANGELOG 版本号一致
-  } catch { /* 无 tag 或非 git 仓库:回退权威源文件 */ }
+  if (isRepositoryRoot(REPO_ROOT)) {
+    try {
+      const desc = execFileSync('git', ['describe', '--tags'], {
+        cwd: REPO_ROOT, encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+      if (desc) installedVersion = desc.replace(/^v/, ''); // 剥 v 前缀,与 CHANGELOG 版本号一致
+    } catch { /* 无 tag:回退权威源文件 */ }
+  }
   if (!installedVersion) {
     const bundled = path.join(BUNDLE_DRAFTS, 'skills', 'flow-comet', 'INSTALLED_VERSION');
     if (fs.existsSync(bundled)) installedVersion = fs.readFileSync(bundled, 'utf8').trim();

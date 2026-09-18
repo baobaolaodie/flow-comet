@@ -10,6 +10,12 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded in nine places, kept in agreement by CI on the release surface: the release git tag; the README badge, [docs/VERSIONS.md](docs/VERSIONS.md) and this changelog, each in both languages; the authoritative `.flow-comet/skills/flow-comet/INSTALLED_VERSION`; and the npm package's `package.json` `version`.
 
+## [Unreleased]
+
+### Fixed
+
+- **The version marker no longer borrows the host repository's tags**: when the installer's own directory is not a repository root — the shape you get from a local package install, where the package sits under `node_modules/` — the version lookup walked up to the enclosing repository and reported *its* tag. That wrong value was both the answer to `--version` and the marker written into the project being installed, so an installed project could carry a version that belongs to something else. The lookup now trusts the repository only when the installer's directory is the repository root itself, and falls back to the version shipped inside the package otherwise. It also no longer lets the underlying git probe print its own error when there is no repository at all.
+
 ## [1.5.1] - 2026-09-14
 
 Installer command-surface fix: a bare `fcomet` with no arguments no longer installs into the current directory (it prints its usage and exits non-zero), and `--version` / `-v` report the installed version instead of failing as an unknown argument. ([#103](https://github.com/baobaolaodie/flow-comet/pull/103))
