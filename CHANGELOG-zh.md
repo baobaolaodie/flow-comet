@@ -10,7 +10,9 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号记录于九处，由 CI 在发布面对账保持一致：发布 git tag；README 徽章、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 与本文档（各含两种语言）；权威源 `.flow-comet/skills/flow-comet/INSTALLED_VERSION`；以及 npm 包的 `package.json` 的 `version`。
 
-## [Unreleased]
+## [1.5.1] - 2026-09-14
+
+安装器命令面修正：零参数的裸 `fcomet` 不再安装到当前目录（改为打印用法并非零退出），`--version` / `-v` 输出已安装版本而不再以「未知参数」失败。([#103](https://github.com/baobaolaodie/flow-comet/pull/103))
 
 ### 新增
 

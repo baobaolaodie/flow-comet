@@ -10,7 +10,7 @@
 
 | Item | Description |
 |------|-------------|
-| **Current version** | v1.5.0. Release truth: [CHANGELOG.md](../CHANGELOG.md) + git tag (created at the release step); README badge mirrors it; `skills/flow-comet/INSTALLED_VERSION` is checked installed-copy metadata (git describe of the source repo). The dsh platform (via `prepare-env --platform dsh`) carries the same version marker in its project-level skill copy, and the npm package carries it in `package.json`. v1.0.0 = first stable: 8-node workflow + three defense layers + guard validation |
+| **Current version** | v1.5.1. Release truth: [CHANGELOG.md](../CHANGELOG.md) + git tag (created at the release step); README badge mirrors it; `skills/flow-comet/INSTALLED_VERSION` is checked installed-copy metadata (git describe of the source repo). The dsh platform (via `prepare-env --platform dsh`) carries the same version marker in its project-level skill copy, and the npm package carries it in `package.json`. v1.0.0 = first stable: 8-node workflow + three defense layers + guard validation |
 | **Versioning** | Semantic Versioning: feature release → minor (1.2.0), bug fix → patch (1.1.1), breaking change → major (2.0.0); bump at the end of each feature release |
 | **Version record surfaces** | Nine places, kept in agreement by CI on the release surface: the release git tag; the installed-copy marker `skills/flow-comet/INSTALLED_VERSION`; the npm package's `package.json` `version`; and the documentation surfaces counted per language — README badge ×2, this document ×2, CHANGELOG ×2. git tag + CHANGELOG remain the single source of truth |
 
