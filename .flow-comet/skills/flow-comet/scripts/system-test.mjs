@@ -2668,7 +2668,33 @@ const TEST_ITEMS = [
       // 格式:发布版本号(1.3.1) / prerelease(1.5.0-rc.1 或 1.5.0-beta-1) / git describe 开发态(1.3.1-N-g<hash>) / unreleased(无 tag 兜底)
       const ok = /^\d+\.\d+\.\d+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(-\d+-g[0-9a-f]+)?$/.test(installed) || installed === 'unreleased';
       if (!ok) throw new Error('版本标识格式异常: ' + installed);
+      // 信任边界：安装器目录**不是仓库根**时（包被装在别人的仓库里——本地安装进项目即是此形态），
+      // 不得采信 git describe：它会向上找到宿主仓库，把**宿主 tag** 当成流工具版本。
+      // 该解析值是单一来源——`--version` 输出它，`init` 写进目标项目的版本标识也是它，
+      // 故此处断言它即覆盖两条路径。修复前实测：输出宿主 tag（9.9.9），且 init 把它写进项目。
+      const host = path.join(dir, 'trust-host');
+      const pkg = path.join(host, 'node_modules', 'flow-comet');
+      fs.mkdirSync(path.join(pkg, 'scripts'), { recursive: true });
+      fs.mkdirSync(path.join(pkg, '.flow-comet', 'skills', 'flow-comet'), { recursive: true });
+      fs.copyFileSync(installer, path.join(pkg, 'scripts', 'prepare-env.mjs'));
+      fs.copyFileSync(srcVersionFile, path.join(pkg, '.flow-comet', 'skills', 'flow-comet', 'INSTALLED_VERSION'));
+      execFileSync('git', ['init', '-q'], { cwd: host, stdio: 'ignore' });
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: host, stdio: 'ignore' });
+      execFileSync('git', ['tag', 'v9.9.9'], { cwd: host, stdio: 'ignore' });
+      const nested = spawnSync(process.execPath, [path.join(pkg, 'scripts', 'prepare-env.mjs'), '--version'], { cwd: host, encoding: 'utf8', timeout: 60000 });
+      const printed = String(nested.stdout || '').trim();
+      if (nested.status !== 0) throw new Error('包内直跑 --version 应退 0，实际 ' + nested.status + '\n' + nested.stderr);
+      if (printed === '9.9.9' || printed.startsWith('9.9.9')) {
+        throw new Error('版本解析越过了信任边界：安装器目录不是仓库根，却采信了宿主仓库的 tag（输出 ' + printed + '）');
+      }
+      if (printed !== srcVersion) {
+        throw new Error('越界情形应回退随包分发的权威源标识 ' + srcVersion + '，实际 ' + printed);
+      }
+      if (/fatal:/.test(String(nested.stderr || ''))) {
+        throw new Error('版本解析不应把 git 的 fatal 输出漏给用户：\n' + nested.stderr);
+      }
       console.log('  版本标识 = ' + installed + '(git describe 或权威源兜底——多人协作精确检测)✓');
+      console.log('  信任边界: 包装在他人仓库内 → 取随包标识 ' + srcVersion + '（不采信宿主 tag）✓');
     },
   },
 

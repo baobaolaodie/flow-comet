@@ -10,6 +10,12 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号记录于九处，由 CI 在发布面对账保持一致：发布 git tag；README 徽章、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 与本文档（各含两种语言）；权威源 `.flow-comet/skills/flow-comet/INSTALLED_VERSION`；以及 npm 包的 `package.json` 的 `version`。
 
+## [Unreleased]
+
+### 修复
+
+- **版本标识不再借用宿主仓库的 tag**：当安装器自身目录不是仓库根时（本地安装形态——包位于 `node_modules/` 下），版本查询会向上走到外层的仓库并报告**它的** tag。这个错值既是 `--version` 的答案，也是写进被安装项目的版本标识——于是装好的项目可能带着属于别人的版本号。现改为：只有当安装器目录**本身就是仓库根**时才采信该仓库，否则回退到随包分发的版本。此外，完全没有仓库时，底层的 git 探测不再把自己的错误输出漏给用户。
+
 ## [1.5.1] - 2026-09-14
 
 安装器命令面修正：零参数的裸 `fcomet` 不再安装到当前目录（改为打印用法并非零退出），`--version` / `-v` 输出已安装版本而不再以「未知参数」失败。([#103](https://github.com/baobaolaodie/flow-comet/pull/103))
