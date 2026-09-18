@@ -590,8 +590,11 @@ function assertInitTokenContract(installer, cwd) {
     if (!versionShape.test(printed)) {
       throw new Error('`' + flag + '` 的输出不是版本标识形态: ' + JSON.stringify(printed));
     }
-    const matchesMarker = printed === installedVersion || printed.startsWith(installedVersion);
-    const matchesHeadTag = headTag !== '' && printed.startsWith(headTag);
+    // 等值、或**以「版本 + `-`」为界**的开发态后缀——不能裸用前缀匹配：`1.5.10` 会被
+    // `startsWith('1.5.1')` 收下，把「族外的更长版本号」误判为一致（实测：注入 1.5.10 时
+    // 裸前缀谓词全绿通过）。边界字符取 `-`，正合 git describe 的后缀形态 `<tag>-N-g<hash>`。
+    const matchesMarker = printed === installedVersion || printed.startsWith(installedVersion + '-');
+    const matchesHeadTag = headTag !== '' && (printed === headTag || printed.startsWith(headTag + '-'));
     if (!matchesMarker && !matchesHeadTag) {
       throw new Error('`' + flag + '` 的输出与「随包标记 / 当前 tag」都不一致（标记=' + installedVersion + ' tag=' + headTag + '）: ' + JSON.stringify(printed));
     }
