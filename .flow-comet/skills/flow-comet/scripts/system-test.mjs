@@ -569,6 +569,68 @@ function assertInitTokenContract(installer, cwd) {
       throw new Error('变形/重复词元 `' + bad + '` 的 stderr 应含「未知参数」，实际:\n' + res.stderr);
     }
   }
+  // ⑤ 版本查询：`--version` / `-v` 退 0 且输出本工具的版本标识（同一个解析来源，不另设常量）。
+  // 断言做成**状态无关**，因为「版本面已 bump、tag 尚未打」是发布准备的常态：此时随包标记
+  // 领先于 git describe（标记 = 待发版本，describe = 旧 tag + 提交数）。两条合法来源：
+  //   ① 随包分发的权威源标记（包形态 / 发布后命中）；② 当前 tag 的开发态后缀 `<tag>-N-g<hash>`。
+  // 等值断言会在发布准备期误红——那不是缺陷，是顺序（先改版本面、后打 tag）。
+  const versionShape = /^\d+\.\d+\.\d+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$/;
+  const installedVersion = fs.readFileSync(path.join(__dirname, '..', 'INSTALLED_VERSION'), 'utf8').trim();
+  let headTag = '';
+  try {
+    const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+    headTag = execFileSync('git', ['describe', '--tags', '--abbrev=0'], { cwd: repoRoot, encoding: 'utf8', timeout: 30000 }).trim().replace(/^v/, '');
+  } catch { /* 无 git 或无 tag：只按随包标记比对 */ }
+  for (const flag of ['--version', '-v']) {
+    const res = runInstaller([flag]);
+    if (res.status !== 0) {
+      throw new Error('`' + flag + '` 应退 0（版本查询不是错误），实际 ' + res.status + '\n' + res.stderr);
+    }
+    const printed = res.stdout.trim();
+    if (!versionShape.test(printed)) {
+      throw new Error('`' + flag + '` 的输出不是版本标识形态: ' + JSON.stringify(printed));
+    }
+    // 等值、或**以「版本 + `-`」为界**的开发态后缀——不能裸用前缀匹配：`1.5.10` 会被
+    // `startsWith('1.5.1')` 收下，把「族外的更长版本号」误判为一致（实测：注入 1.5.10 时
+    // 裸前缀谓词全绿通过）。边界字符取 `-`，正合 git describe 的后缀形态 `<tag>-N-g<hash>`。
+    const matchesMarker = printed === installedVersion || printed.startsWith(installedVersion + '-');
+    const matchesHeadTag = headTag !== '' && (printed === headTag || printed.startsWith(headTag + '-'));
+    if (!matchesMarker && !matchesHeadTag) {
+      throw new Error('`' + flag + '` 的输出与「随包标记 / 当前 tag」都不一致（标记=' + installedVersion + ' tag=' + headTag + '）: ' + JSON.stringify(printed));
+    }
+  }
+  console.log('  版本查询: `--version` / `-v` 退 0 且输出为版本标识形态（标记=' + installedVersion + ' / 当前 tag=' + headTag + '）✓');
+  // ⑥ 零参数裸调用不得安装到当前目录（本轮修正）：无参数 = 没说要做什么，
+  //    应当在当前目录留下零产物并给出用法与非零退出码。修复前它会做一次完整安装
+  //    （.claude/ + flow-kit/ + 改写 .gitignore）→ 误敲即在当前目录铺开一套环境。
+  const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'no-action-'));
+  try {
+    seedForeignFlowKit(emptyDir); // 预置同名非上游目录：走「已跳过」路径，零网络接触
+    const bareRun = spawnSync(process.execPath, [installer], { cwd: emptyDir, encoding: 'utf8', timeout: 60000 });
+    const status = bareRun.status ?? 1;
+    const stderr = String(bareRun.stderr || '');
+    if (status === 0) {
+      throw new Error('零参数裸调用不得退 0（它做了/声称做了一次安装）；实际退 0\n' + String(bareRun.stdout || '').slice(-300));
+    }
+    if (!stderr.includes('用法')) {
+      throw new Error('零参数裸调用的 stderr 应给出用法，实际:\n' + stderr);
+    }
+    // 用法必须**整段**在 stderr：只断言「stderr 含用法」会漏掉「部分行仍写 stdout」的实现
+    // （首行在 stderr 即满足该断言，其余行可能被劈到 stdout——实测出现过）。故此处两侧同判：
+    // stderr 末尾行在场，且 stdout 为空。
+    if (!/--version 打印版本标识/.test(stderr)) {
+      throw new Error('用法末行不在 stderr（用法输出被劈到 stdout）：stderr 实际:\n' + stderr);
+    }
+    if (String(bareRun.stdout || '').trim() !== '') {
+      throw new Error('零参数裸调用的 stdout 应为空（用法整段走 stderr），实际:\n' + String(bareRun.stdout));
+    }
+    if (fs.existsSync(path.join(emptyDir, '.claude'))) {
+      throw new Error('零参数裸调用不得在当前目录留下安装产物（.claude/ 被创建）');
+    }
+    console.log('  零参数裸调用: 非零退出 + 用法整段在 stderr + stdout 空 + 当前目录零产物 ✓');
+  } finally {
+    fs.rmSync(emptyDir, { recursive: true, force: true });
+  }
   console.log('  init 词元: `init --help` 退 0 且含 fcomet init / 裸形态行为不变 / 变形·重复词元 4 例退 1 且报未知参数 ✓');
 }
 

@@ -31,7 +31,7 @@ cd <目标项目>
 fcomet init
 ```
 
-包内提供两个命令名，指向同一个安装器：`fcomet`（主）与 `flow-comet`（别名）。前导 `init` 词元可省略——裸 `fcomet` 等价；`--target <目录>` 同样可选（缺省 = 当前工作目录），因此在项目内运行即可。`--platform <claude-code|codex|dsh|claude-code,dsh|all>` 免交互指定平台，`--purge --yes` 重置安装（删除+重建，**不是卸载**）。
+包内提供两个命令名，指向同一个安装器：`fcomet`（主）与 `flow-comet`（别名）。只要其它参数表达了意图，前导 `init` 词元即可省略（`fcomet --target <目录>` 等价于 `fcomet init --target <目录>`）；`--target <目录>` 同样可选（缺省 = 当前工作目录），因此在项目内运行即可。不带任何参数时只打印用法并非零退出，不安装。`--platform <claude-code|codex|dsh|claude-code,dsh|all>` 免交互指定平台，`--purge --yes` 重置安装（删除+重建，**不是卸载**），`--version`（或 `-v`）打印已安装命令行的版本。
 
 `fcomet init` 与仓库形态跑的是同一个安装器，语义完全一致：生成/覆盖 `rules/` 与 `skills/`、向平台配置注入 hook、确保目标项目中的 `flow-kit` 就位。逐项说明、平台选择链、非破坏保证、hook 升级路径与安装验证步骤见[方案 B](#方案-b--prepare-env-安装器仓库克隆)——对 npm 形态同样适用。
 

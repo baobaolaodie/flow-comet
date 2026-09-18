@@ -355,6 +355,15 @@ function parseArgs(argv) {
   let purge = false;
   let yes = false;
   let platform = null;
+  // 零参数 = 没说要做什么：**不安装**，打印用法并非零退出。
+  // 修复前它等价于 `fcomet init`（在 cwd 做一次完整安装：建 .claude/、拉 flow-kit/、改写 .gitignore）
+  // ——误敲或试探性执行会在当前目录铺开一套环境。`init` 词元仍可选：`fcomet --target X`
+  // 与 `fcomet init --target X` 等价（有参数即表达了意图）。
+  if (args.length === 0) {
+    console.error('[prepare-env] 未指定任何参数——裸执行不安装。');
+    printUsage((line) => console.error(line));
+    process.exit(1);
+  }
   // 命令形态容忍（npm bin 形态 `fcomet init`）：包管理器垫片把 `init` 当位置词元传给脚本。
   // 只吃掉**一个**精确等于 `init` 且位于位置参数首位的词元（其前只允许选项词元）；
   // 其它非 `--` 开头词元仍按既有语义报「未知参数」——变形词元（如 `int`/`inti`）
@@ -385,6 +394,11 @@ function parseArgs(argv) {
     } else if (a === '--help' || a === '-h') {
       printUsage();
       process.exit(0);
+    } else if (a === '--version' || a === '-v') {
+      // 版本查询：输出本工具的版本标识（与随包分发、写入目标项目的是同一来源——
+      // 见 resolveInstalledVersion；单一来源，不另设版本常量）。
+      console.log(resolveInstalledVersion() || 'unknown');
+      process.exit(0);
     } else {
       throw new Error(`未知参数: ${a}`);
     }
@@ -392,15 +406,18 @@ function parseArgs(argv) {
   return { target: target ? path.resolve(target) : process.cwd(), purge, yes, platform };
 }
 
-function printUsage() {
-  console.log('用法: fcomet init [--target <dir>] [--platform <claude-code|codex|dsh|claude-code,dsh|all>] [--purge --yes]');
-  console.log('  （`fcomet` 与 `flow-comet` 是同一安装器的两个命令名；`init` 词元可省略——裸 `fcomet` 等价）');
-  console.log('  仓库内直调: node scripts/prepare-env.mjs [--target <dir>] [--platform <...>] [--purge --yes]');
-  console.log('  从权威源 .flow-comet/ 安装/更新 <dir> 环境（含运行时位置迁移与 .gitignore 纳管）');
-  console.log('  --target 缺省 = 当前工作目录（cwd）');
-  console.log('  --platform 指定平台（claude-code / codex / dsh；逗号分隔多选或 all 全部平台）');
-  console.log('            缺省 = TTY 交互多选（@clack/prompts,未安装回退 readline）> 探测目标项目 > 默认 claude-code');
-  console.log('  --purge   破坏性：先删除目标平台生成物再重新生成（默认不删除；需 --yes 确认）');
+// 用法输出：默认写 stdout（--help）；出错时由调用方传入 stderr 写入函数（用法错误走 stderr）。
+function printUsage(write = console.log) {
+  write('用法: fcomet init [--target <dir>] [--platform <claude-code|codex|dsh|claude-code,dsh|all>] [--purge --yes]');
+  write('  （`fcomet` 与 `flow-comet` 是同一安装器的两个命令名；`init` 词元可省略——`fcomet --target X`');
+  write('    等价于 `fcomet init --target X`；不带任何参数时不安装，只打印本用法）');
+  write('  仓库内直调: node scripts/prepare-env.mjs [--target <dir>] [--platform <...>] [--purge --yes]');
+  write('  从权威源 .flow-comet/ 安装/更新 <dir> 环境（含运行时位置迁移与 .gitignore 纳管）');
+  write('  --target 缺省 = 当前工作目录（cwd）');
+  write('  --platform 指定平台（claude-code / codex / dsh；逗号分隔多选或 all 全部平台）');
+  write('            缺省 = TTY 交互多选（@clack/prompts,未安装回退 readline）> 探测目标项目 > 默认 claude-code');
+  write('  --purge   破坏性：先删除目标平台生成物再重新生成（默认不删除；需 --yes 确认）');
+  write('  --version 打印版本标识（等价 -v）；--help 打印本用法');
 }
 
 // 探测目标项目既有平台痕迹（三痕迹,一次计算复用于探测 / TTY 预勾选 / 多痕迹判定）:
