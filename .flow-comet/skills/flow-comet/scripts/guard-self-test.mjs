@@ -5262,7 +5262,7 @@ const SCENARIOS = [
       }
       const res = runPrepareEnv(['--target', proj, '--platform', 'dsh'], dir, { DSH_HOME: path.join(dir, 'dshhome'), ...env });
       assertExit(res, 0);
-      assertOut(res, '[prepare-env] 已获取 flow-kit（锁定 9b5dda7）');
+      assertOut(res, '[flow-comet] 已获取 flow-kit（锁定 9b5dda7）');
       const fk = path.join(proj, 'flow-kit');
       const head = execFileSync('git', ['-C', fk, 'rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 60000 }).trim();
       if (head !== '9b5dda7206ae841230f118348d660ad8d0ae2830') throw new Error('flow-kit HEAD 非锁定点: ' + head);
@@ -5337,7 +5337,7 @@ const SCENARIOS = [
         GIT_CONFIG_VALUE_0: 'http://127.0.0.1:9',
       });
       assertExit(res, 0);
-      assertOut(res, '[prepare-env] 警告: flow-kit 自动获取失败');
+      assertOut(res, '[flow-comet] 警告: flow-kit 自动获取失败');
       assertOut(res, '手动获取指引');
       assertOut(res, '已准备环境');
       if (!fs.existsSync(path.join(proj, '.dsh', 'skills', 'flow-comet', 'SKILL.md'))) throw new Error('安装器其余职责未继续');

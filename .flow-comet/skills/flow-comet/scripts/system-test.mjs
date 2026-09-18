@@ -2743,6 +2743,14 @@ const TEST_ITEMS = [
       const agents = fs.readFileSync(agentsFile, 'utf8');
       if (!agents.includes('Managed by flow-comet')) throw new Error('AGENTS.md 无托管标记');
       if (!agents.includes('flow-comet Orchestration')) throw new Error('AGENTS.md 未内联 orchestration 内容');
+      // ④b 分发词面锁：orchestration 是**每个项目自动加载**的文本（CC 走 .claude/rules/、Codex/dsh 走
+      //     AGENTS.md 托管区，三者同源），其用词必须与工具当下的自称一致——不得残留 Comet 时代词汇
+      //     （本仓早已移除 bundles/ 双目录、权威源路径也从 bundle-drafts/ 迁走），也不得把**只有两行的
+      //     兼容别名壳**列进脚本清单（它不是任何流程的入口，列出来只会让读者去找错文件）。
+      for (const banned of ['Bundle', 'control plane']) {
+        if (agents.includes(banned)) throw new Error('内联的 orchestration 含 Comet 时代词汇（' + banned + '）——分发文本须与工具当下的自称一致');
+      }
+      if (agents.includes('comet-plan.mjs')) throw new Error('内联的 orchestration 仍列兼容别名壳 comet-plan.mjs（它不是流程入口）');
       // ⑤ 纯 codex 平台不生成 .claude/
       if (fs.existsSync(path.join(target, '.claude'))) throw new Error('codex 平台不应生成 .claude/');
       // ⑥ 版本标识随技能包分发(平台化路径)

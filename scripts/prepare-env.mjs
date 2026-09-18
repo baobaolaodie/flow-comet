@@ -150,7 +150,7 @@ const PLATFORMS = {
       const settings = injectSettingsHook(claudeDir);
       const injected = !!(settings.hooks && settings.hooks.PreToolUse);
       stats.files++;
-      console.log(`[prepare-env] settings.local.json ${injected ? '注入完成（保留既有字段）' : '已生成'}`);
+      console.log(`[flow-comet] settings.local.json ${injected ? '注入完成（保留既有字段）' : '已生成'}`);
     },
     // rules 注入：.claude/rules/ 整树复制（自动加载 markdown 指令）
     installRules(target, stats) {
@@ -193,13 +193,13 @@ const PLATFORMS = {
       injectCodexHook(codexDir, target);
       injectCodexConfig(codexDir);
       stats.files += 2;
-      console.log('[prepare-env] .codex/hooks.json + config.toml 注入完成（hooks 启用，保留既有字段）');
+      console.log('[flow-comet] .codex/hooks.json + config.toml 注入完成（hooks 启用，保留既有字段）');
     },
     // rules 注入：AGENTS.md 托管区内联（Codex 指令唯一自动加载路径；.codex/rules/ 是命令批准规则目录，不混用；
     // 注入函数与托管区标记 codex/dsh 共用——任一平台卸载可清,另一平台重装恢复）
     installRules(target, stats) {
       if (injectManagedRules(target, stats)) {
-        console.log('[prepare-env] AGENTS.md 托管区注入完成（保留托管区外用户内容）');
+        console.log('[flow-comet] AGENTS.md 托管区注入完成（保留托管区外用户内容）');
       }
     },
     // purge 清理：只清 flow-comet 技能（.agents/ 为多工具共享位置——非 flow-comet 条目保留）
@@ -263,17 +263,17 @@ const PLATFORMS = {
         reportLoaderVersionTransition(loaderSrc, loaderDst);
         fs.copyFileSync(loaderSrc, loaderDst);
         stats.files++;
-        console.log('[prepare-env] 桥接 loader 已复制到 $DSH_HOME/plugins/dsh-flow-comet-bridge.mjs');
+        console.log('[flow-comet] 桥接 loader 已复制到 $DSH_HOME/plugins/dsh-flow-comet-bridge.mjs');
         injectDshCordisPatch(dshHome, loaderDst);
         stats.files++;
-        console.log('[prepare-env] $DSH_HOME/cordis.patch.yml 托管块注入完成（读-合并-写,保留既有块）');
+        console.log('[flow-comet] $DSH_HOME/cordis.patch.yml 托管块注入完成（读-合并-写,保留既有块）');
       } else {
         // 容错：scripts/dsh-bridge.mjs 由并行任务新建——源缺失时 WARN 跳过 loader 复制
         // **并跳过 cordis.patch.yml 托管块注入**（避免注入指向不存在文件的 file:// 引用,
         // 导致 dsh 每次启动尝试加载不存在的插件）;仍完成其余安装
         // （AGENTS.md 托管区 / skills 复制照常）
         console.warn(
-          '[prepare-env] 警告: scripts/dsh-bridge.mjs 不存在——跳过 loader 复制与 cordis.patch.yml 托管块注入' +
+          '[flow-comet] 警告: scripts/dsh-bridge.mjs 不存在——跳过 loader 复制与 cordis.patch.yml 托管块注入' +
             '（dsh 桥接拦截暂不生效,待源文件就位后重跑 prepare-env）'
         );
       }
@@ -281,7 +281,7 @@ const PLATFORMS = {
     // rules 注入：AGENTS.md 托管区（与 codex 共用注入函数与托管区标记——任一平台卸载可清）
     installRules(target, stats) {
       if (injectManagedRules(target, stats)) {
-        console.log('[prepare-env] AGENTS.md 托管区注入完成（保留托管区外用户内容）');
+        console.log('[flow-comet] AGENTS.md 托管区注入完成（保留托管区外用户内容）');
       }
     },
     // purge 清理：项目级 .dsh/skills 下全部 flow-comet* 技能（.dsh/skills 为 dsh 技能位置——
@@ -330,7 +330,7 @@ const PLATFORMS = {
         // 全局挂载语义警示：loader 位于 $DSH_HOME（所有 profile / 所有项目共享）——
         // 任一项目 purge 都会连带移除，其它已安装 flow-comet 的项目将静默失去拦截
         console.warn(
-          '[prepare-env] 全局桥接 loader 被移除，其它已安装 flow-comet 的项目将停止拦截' +
+          '[flow-comet] 全局桥接 loader 被移除，其它已安装 flow-comet 的项目将停止拦截' +
             '（$DSH_HOME 全局挂载——如需恢复请重跑 prepare-env --platform dsh）'
         );
       }
@@ -360,7 +360,7 @@ function parseArgs(argv) {
   // ——误敲或试探性执行会在当前目录铺开一套环境。`init` 词元仍可选：`fcomet --target X`
   // 与 `fcomet init --target X` 等价（有参数即表达了意图）。
   if (args.length === 0) {
-    console.error('[prepare-env] 未指定任何参数——裸执行不安装。');
+    console.error('[flow-comet] 未指定任何参数——裸执行不安装。');
     printUsage((line) => console.error(line));
     process.exit(1);
   }
@@ -460,7 +460,7 @@ async function promptPlatformSelection(probe, traces, multiTrace) {
       return promptPlatformSelectionReadline(probe, traces, multiTrace);
     }
     const selected = await clack.multiselect({
-      message: '[prepare-env] 选择要安装的平台（方向键移动、空格勾选、回车确认）',
+      message: '[flow-comet] 选择要安装的平台（方向键移动、空格勾选、回车确认）',
       options,
       required: true,
       initialValues: initialValues.length > 0 ? initialValues : undefined,
@@ -487,7 +487,7 @@ async function promptPlatformSelectionReadline(probe, traces, multiTrace) {
         ? `（检测到目标项目已有 ${probe === 'claude-code' ? '.claude/' : probe === 'codex' ? '.codex/' : '.dsh/'} 痕迹）`
         : '';
     const answer = await rl.question(
-      `[prepare-env] 选择要安装的平台（可多选）${probeNote}:\n` +
+      `[flow-comet] 选择要安装的平台（可多选）${probeNote}:\n` +
       `  1) Claude Code (claude-code)${traceNote('claude-code', '.claude/')}\n` +
       `  2) Codex (codex)${traceNote('codex', '.codex/')}\n` +
       `  3) DeepSeek Harness (dsh)${traceNote('dsh', '.dsh/')}\n` +
@@ -556,7 +556,7 @@ async function resolvePlatform(target, platformArg) {
   }
   if (multiTrace) {
     const fallbackId = probe ?? 'claude-code';
-    console.log(`[prepare-env] 检测到目标项目同时有 .claude/、.codex/ 或 .dsh/ 中的多个痕迹——默认安装 ${PLATFORMS[fallbackId].label}。`);
+    console.log(`[flow-comet] 检测到目标项目同时有 .claude/、.codex/ 或 .dsh/ 中的多个痕迹——默认安装 ${PLATFORMS[fallbackId].label}。`);
     console.log('          如需其它平台或组合:交互终端运行,或显式 --platform dsh / claude-code,dsh / all。');
   }
   return [PLATFORMS[probe ?? 'claude-code']];
@@ -795,7 +795,7 @@ function migrateRuntimeFiles(target) {
   for (const entry of RUNTIME_FILE_MIGRATIONS) {
     migrateRuntimeFile(target, entry, report);
   }
-  console.log(`[prepare-env] 运行时文件迁移（${LEGACY_RUNTIME_DIR}/ → ${RUNTIME_DIR}/;白名单 ${RUNTIME_FILE_MIGRATIONS.length} 项）：`);
+  console.log(`[flow-comet] 运行时文件迁移（${LEGACY_RUNTIME_DIR}/ → ${RUNTIME_DIR}/;白名单 ${RUNTIME_FILE_MIGRATIONS.length} 项）：`);
   for (const line of report.migrated) {
     console.log(`  - 已迁移: ${line}`);
   }
@@ -825,7 +825,7 @@ function isRuntimeDirIgnoreLine(line) {
  */
 function manageGitignore(target) {
   if (fs.existsSync(path.join(target, RUNTIME_DIR, 'skills', 'flow-comet', 'SKILL.md'))) {
-    console.log(`[prepare-env] .gitignore 纳管跳过: 当前目录是 flow-comet 源仓库（${RUNTIME_DIR}/ 为权威源，需保持被版本控制跟踪）`);
+    console.log(`[flow-comet] .gitignore 纳管跳过: 当前目录是 flow-comet 源仓库（${RUNTIME_DIR}/ 为权威源，需保持被版本控制跟踪）`);
     return;
   }
   const gitignorePath = path.join(target, '.gitignore');
@@ -843,14 +843,14 @@ function manageGitignore(target) {
     }
   }
   if (existing.split(/\r?\n/).some(isRuntimeDirIgnoreLine)) {
-    console.log(`[prepare-env] .gitignore 已含 ${RUNTIME_DIR}/ 条目——保持原样（幂等）`);
+    console.log(`[flow-comet] .gitignore 已含 ${RUNTIME_DIR}/ 条目——保持原样（幂等）`);
     return;
   }
   const eol = existing.includes('\r\n') ? '\r\n' : '\n';
   const appended = ['# flow-comet 运行时文件（不随仓库分发）', `${RUNTIME_DIR}/`].join(eol);
   const separator = !fileExists || existing === '' || existing.endsWith('\n') ? '' : eol;
   fs.writeFileSync(gitignorePath, existing + separator + appended + eol, 'utf8');
-  console.log(`[prepare-env] .gitignore 追加 ${RUNTIME_DIR}/ 条目（既有内容原样保留）: ${gitignorePath}`);
+  console.log(`[flow-comet] .gitignore 追加 ${RUNTIME_DIR}/ 条目（既有内容原样保留）: ${gitignorePath}`);
 }
 
 // ---------- settings.local.json 注入（Claude Code 平台；参考 comet installClaudeCodeHooks） ----------
@@ -965,7 +965,7 @@ function injectSettingsHook(claudeDir) {
   if (existingHooks.PreToolUse !== undefined && !Array.isArray(existingHooks.PreToolUse)) {
     // PreToolUse 非数组（手写变体）：保留原值 + 警告，不注入（避免破坏用户结构）
     console.error(
-      '[prepare-env] 警告: settings.local.json 的 hooks.PreToolUse 不是数组（可能是手写变体）——' +
+      '[flow-comet] 警告: settings.local.json 的 hooks.PreToolUse 不是数组（可能是手写变体）——' +
         '为保护用户配置，未注入 comet hook。请手动添加（见 README 方案 B）。'
     );
     return settings;
@@ -1205,13 +1205,13 @@ function compareBridgeVersions(a, b) {
 
 /**
  * 覆盖前版本比对明示：从权威源 loader 与已装 loader 各提取版本戳，按数值序输出
- * 首次安装 / 升级 A→B / 降级 A→B / 版本一致 四类结论之一（人读、带 [prepare-env] 前缀）。
+ * 首次安装 / 升级 A→B / 降级 A→B / 版本一致 四类结论之一（人读、带 [flow-comet] 前缀）。
  * 任一侧提取失败（文件缺失/无标记行）→ 告警并跳过比对——不抛错、不中断安装；
  * 覆盖动作（copyFileSync）由调用方照常执行，幂等语义不变。
  */
 function reportLoaderVersionTransition(loaderSrc, loaderDst) {
   if (!fs.existsSync(loaderDst)) {
-    console.log('[prepare-env] 桥接 loader 首次安装（$DSH_HOME/plugins 无已装 loader）');
+    console.log('[flow-comet] 桥接 loader 首次安装（$DSH_HOME/plugins 无已装 loader）');
     return;
   }
   const src = extractBridgeVersion(loaderSrc);
@@ -1220,7 +1220,7 @@ function reportLoaderVersionTransition(loaderSrc, loaderDst) {
     const failedSide = !src.ok ? '权威源 loader' : '已装 loader';
     const reason = !src.ok ? src.reason : installed.reason;
     console.warn(
-      `[prepare-env] 警告: ${failedSide} 版本戳提取失败（${reason}）——跳过版本比对，继续覆盖安装`
+      `[flow-comet] 警告: ${failedSide} 版本戳提取失败（${reason}）——跳过版本比对，继续覆盖安装`
     );
     return;
   }
@@ -1228,11 +1228,11 @@ function reportLoaderVersionTransition(loaderSrc, loaderDst) {
   const b = src.version;
   const cmp = compareBridgeVersions(a, b);
   if (cmp < 0) {
-    console.log(`[prepare-env] 桥接 loader 升级 ${a} → ${b}`);
+    console.log(`[flow-comet] 桥接 loader 升级 ${a} → ${b}`);
   } else if (cmp > 0) {
-    console.log(`[prepare-env] 桥接 loader 降级 ${a} → ${b}`);
+    console.log(`[flow-comet] 桥接 loader 降级 ${a} → ${b}`);
   } else {
-    console.log(`[prepare-env] 桥接 loader 版本一致（${a}）`);
+    console.log(`[flow-comet] 桥接 loader 版本一致（${a}）`);
   }
 }
 
@@ -1406,9 +1406,9 @@ function gitErrorFirstLine(err) {
 /** 手动获取指引（clone/checkout 失败或目录非上游克隆时打印——含上游 URL 与目标路径;不抛错） */
 function printFlowKitManualGuide(target) {
   const flowKitDir = path.join(target, 'flow-kit');
-  console.warn(`[prepare-env] 手动获取指引: git clone ${FLOW_KIT_UPSTREAM_URL} "${flowKitDir}"`);
-  console.warn(`[prepare-env] 然后锁定快照: git -C "${flowKitDir}" checkout --detach ${FLOW_KIT_LOCKED_COMMIT.slice(0, FLOW_KIT_SHORT_SHA_LEN)}`);
-  console.warn('[prepare-env] 未获取 flow-kit 时技能协议引用悬空、guard 段名基准退化为内置 fallback——其余安装职责不受影响。');
+  console.warn(`[flow-comet] 手动获取指引: git clone ${FLOW_KIT_UPSTREAM_URL} "${flowKitDir}"`);
+  console.warn(`[flow-comet] 然后锁定快照: git -C "${flowKitDir}" checkout --detach ${FLOW_KIT_LOCKED_COMMIT.slice(0, FLOW_KIT_SHORT_SHA_LEN)}`);
+  console.warn('[flow-comet] 未获取 flow-kit 时技能协议引用悬空、guard 段名基准退化为内置 fallback——其余安装职责不受影响。');
 }
 
 /**
@@ -1451,10 +1451,10 @@ function ensureFlowKit(target) {
         encoding: 'utf8',
         timeout: FLOW_KIT_GIT_TIMEOUT_MS,
       });
-      console.log(`[prepare-env] 已获取 flow-kit（锁定 ${shortLock}）`);
+      console.log(`[flow-comet] 已获取 flow-kit（锁定 ${shortLock}）`);
     } catch (err) {
       // 路径 4：clone/checkout 任一失败 → WARN + 手动指引,不抛错
-      console.warn(`[prepare-env] 警告: flow-kit 自动获取失败（${gitErrorFirstLine(err)}）`);
+      console.warn(`[flow-comet] 警告: flow-kit 自动获取失败（${gitErrorFirstLine(err)}）`);
       printFlowKitManualGuide(target);
     }
     return;
@@ -1465,9 +1465,9 @@ function ensureFlowKit(target) {
   if (originStatus !== 'match') {
     // 路径 3：同名非克隆目录（或 remote 无法确认归属）→ 跳过 + 指引,绝不改动
     if (originStatus === 'unreadable') {
-      console.warn('[prepare-env] 警告: flow-kit 目录存在且含 .git,但 origin remote 读取失败——无法确认归属');
+      console.warn('[flow-comet] 警告: flow-kit 目录存在且含 .git,但 origin remote 读取失败——无法确认归属');
     }
-    console.log('[prepare-env] 目录存在但非上游克隆，已跳过');
+    console.log('[flow-comet] 目录存在但非上游克隆，已跳过');
     printFlowKitManualGuide(target);
     return;
   }
@@ -1478,18 +1478,18 @@ function ensureFlowKit(target) {
       timeout: FLOW_KIT_GIT_TIMEOUT_MS,
     }).trim();
     const shortHead = head.slice(0, FLOW_KIT_SHORT_SHA_LEN);
-    console.log(`[prepare-env] 已有 flow-kit（HEAD=${shortHead}，推荐锁定点=${shortLock}）`);
+    console.log(`[flow-comet] 已有 flow-kit（HEAD=${shortHead}，推荐锁定点=${shortLock}）`);
     if (head === FLOW_KIT_LOCKED_COMMIT) {
-      console.log('[prepare-env] 当前 HEAD 与推荐锁定点一致。');
+      console.log('[flow-comet] 当前 HEAD 与推荐锁定点一致。');
     } else {
       console.warn(
-        `[prepare-env] 差异影响: 当前 HEAD 与推荐锁定点不一致——guard 段名基准与协议引用可能偏离安装器锁定内容` +
+        `[flow-comet] 差异影响: 当前 HEAD 与推荐锁定点不一致——guard 段名基准与协议引用可能偏离安装器锁定内容` +
           `（安装器绝不改动已有克隆;如需对齐请手动执行 git -C "${flowKitDir}" fetch 后 checkout --detach ${shortLock}）`
       );
     }
   } catch (err) {
     // HEAD 只读失败同样不改动、不中断安装（保守降级为警告）
-    console.warn(`[prepare-env] 警告: flow-kit HEAD 读取失败（${gitErrorFirstLine(err)}），已跳过比对`);
+    console.warn(`[flow-comet] 警告: flow-kit HEAD 读取失败（${gitErrorFirstLine(err)}），已跳过比对`);
   }
 }
 
@@ -1516,13 +1516,13 @@ async function main() {
 
   // --purge（已在上方确认 --yes）：逐平台删除生成物后重新生成
   if (purge) {
-    console.error(`[prepare-env] 警告: --purge 将删除 ${platformsLabel} 平台的以下生成物（不可恢复）：`);
+    console.error(`[flow-comet] 警告: --purge 将删除 ${platformsLabel} 平台的以下生成物（不可恢复）：`);
     for (const platform of platforms) {
       for (const entry of platform.purge(target)) {
         console.error(`  - ${entry}`);
       }
     }
-    console.error('[prepare-env] 已删除，开始重新生成。');
+    console.error('[flow-comet] 已删除，开始重新生成。');
   }
 
   // flow-kit 获取链路（ADR-008 / D1~D6——平台无关,平台循环之前调用一次;
@@ -1534,7 +1534,7 @@ async function main() {
     const stats = { dirs: 0, files: 0, skills: [] };
 
     // 覆盖前打印将覆盖的生成物清单（默认非破坏：只覆盖生成物）
-    console.log(`[prepare-env] 平台: ${platform.label} — 将覆盖以下生成物（其他内容保留）：`);
+    console.log(`[flow-comet] 平台: ${platform.label} — 将覆盖以下生成物（其他内容保留）：`);
     console.log(`  - ${skillRoot}`);
     for (const line of platform.overwriteDescription(target)) {
       console.log(`  - ${line}`);
@@ -1561,7 +1561,7 @@ async function main() {
     }
     const replacedFiles = applyPathReplacements(skillRoot, platform.pathReplacements);
     if (replacedFiles > 0) {
-      console.log(`[prepare-env] 平台路径替换: ${replacedFiles} 个 .md 文件（${platform.label} 命令路径）`);
+      console.log(`[flow-comet] 平台路径替换: ${replacedFiles} 个 .md 文件（${platform.label} 命令路径）`);
     }
 
     // 4. 版本标识（写入平台技能根,随技能包分发）
@@ -1570,11 +1570,11 @@ async function main() {
     stats.files++;
 
     // 摘要（逐平台）
-    console.log(`[prepare-env] 已准备环境: ${target}（${platform.label}）`);
+    console.log(`[flow-comet] 已准备环境: ${target}（${platform.label}）`);
     console.log(
-      `[prepare-env] 目录 ${stats.dirs} 个、文件 ${stats.files} 个、skills ${stats.skills.length} 个`
+      `[flow-comet] 目录 ${stats.dirs} 个、文件 ${stats.files} 个、skills ${stats.skills.length} 个`
     );
-    console.log(`[prepare-env] skills: ${stats.skills.join(', ')}`);
+    console.log(`[flow-comet] skills: ${stats.skills.join(', ')}`);
   }
 
   // 执行顺序第三段：.gitignore 保守纳管（部署成功后执行——失败即中止，可重跑自愈）
@@ -1584,6 +1584,6 @@ async function main() {
 try {
   await main();
 } catch (err) {
-  console.error(`[prepare-env] 错误: ${err.message}`);
+  console.error(`[flow-comet] 错误: ${err.message}`);
   process.exit(1);
 }
