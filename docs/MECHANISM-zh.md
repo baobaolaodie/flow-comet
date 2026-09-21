@@ -78,7 +78,7 @@ node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
 
 ## 6.5 DeepSeek Harness（dsh）平台
 
-在 DeepSeek Harness 上，flow-comet 经 **prepare-env 安装器**（`--platform dsh`）安装——无插件包；npm 分发通道（`flow-comet` 包与 `fcomet` 命令）现已具备可发布形态（首次真实发布归发布批次），dsh 安装仍走 prepare-env。引擎零改动，guard 判定核心经子进程调用原样复用：
+在 DeepSeek Harness 上，flow-comet 经 **prepare-env 安装器**（`--platform dsh`）安装——无插件包；npm 分发通道（`flow-comet` 包与 `fcomet` 命令）**已发布到 npm**（当前版本见 [版本状态页](VERSIONS-zh.md)，与其余发布面同步），dsh 安装仍走 prepare-env。引擎零改动，guard 判定核心经子进程调用原样复用：
 
 - **安装**：`node scripts/prepare-env.mjs --target <项目> --platform dsh`（最低 dsh `0.1.0-rc.6`；dev preview）。
 - **项目级技能发现**：技能树安装到 `<项目>/.dsh/skills/flow-comet`；dsh 在 `<项目>/.dsh/skills/` 下以 rank 100 自动发现（文件监听、免重启）——**未安装该目录的项目不可见该技能**，因此激活天然是项目级的（无运行时痕迹判定、无 chicken-and-egg）。

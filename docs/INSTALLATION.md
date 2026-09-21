@@ -129,7 +129,7 @@ Measured on Codex CLI 0.146.0 — the 8-node flow runs end-to-end.
 - **Archive order**: run `skill-load archive flow-comet-integration --prompt flow-kit/prompts/7-integration.md` **before** copying the archive directory (declaration markers travel with the directory copy).
 - **Chinese artifact writing (measured)**: session Bash writing Chinese via the PowerShell pipeline may corrupt it into literal `?` (`$OutputEncoding` encoding) — write via Python with `encoding='utf-8'`, set `$OutputEncoding` to `[System.Text.Encoding]::UTF8`, or use full `\uXXXX` escapes; `python` with the `-c` argument and embedded Chinese is lossless.
 - **JSON argument quoting (measured)**: PowerShell 5.1 strips embedded double quotes when passing arguments to native commands (`handoff result` / `record` may store dirty strings) — use `--json-file` to read the JSON payload from a file, or run from Git Bash.
-- **Git proxy operations (measured)**: git is restricted inside the codex sandbox (init branch creation fails, worktree subagents cannot self-commit) — init branch failure degrading to file-only mode is expected; commits from delegated subagents are made by the coordinator outside the sandbox, and the Return Contract's commitHash remains verifiable.
+- **Git proxy operations (measured)**: git is restricted inside the codex sandbox (init branch creation fails) — init branch failure degrading to file-only mode is expected; commits from delegated subagents are made by the coordinator outside the sandbox, and the Return Contract's commitHash remains verifiable.
 - **Leading `>` misdetection (measured)**: the hook treats a command-line leading `>` as a shell redirection (markdown quote lines get blocked) — escape and restore with `>`.
 
 ### Verifying a Codex installation

@@ -54,8 +54,8 @@ const PREPARE_ENV = path.join(REPO_ROOT, 'scripts', 'prepare-env.mjs');
 const BUILTIN_PROTOCOL_SOURCE = path.join(__dirname, '..', 'reference', 'workflow-protocol.json');
 const CHANGE_ID = 'ch';
 
-// 场景数一致性自检清单（21 文件，全变体：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n）——
-// 场景数自检与底部自检共用同一清单/同一实现（自检常量同步：SCENARIOS.length 变更 → 21 文件须同步）。
+// 场景数一致性自检清单（20 文件 = 15 分发组 + 5 维护者组，全变体：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n）——
+// 场景数自检与底部自检共用同一清单/同一实现（自检常量同步：SCENARIOS.length 变更 → 20 受检文件须同步）。
 // 分两组按"分发形态"划界（AC-14：条目缺失必须显式报告，不得静默跳过——幽灵条目无处藏身）：
 //   ① 分发组：随仓库分发（受版本控制），**任何**权威源检出都必须存在——维护者工作副本、
 //      CI 全新检出、worktree 检出皆然 → 条目缺失即报错（幽灵条目在此被强制暴露）。
@@ -221,16 +221,23 @@ function countSyncProblems(root = REPO_ROOT) {
 // 占位符 / 通配 / 未来路径不参与判定（见 ALLOWLIST）。
 const INTERNAL_DOC_REF_BASES = ['.flow-comet/skills/flow-comet', '.claude/skills/flow-comet', '', 'flow-kit'];
 const INTERNAL_DOC_REF_ALLOWLIST = new Set(['.specs/archive/CONTEXT-history.md']);
-const INTERNAL_DOC_REF_RE = /(?<![A-Za-z0-9_.\-\/])\.?((?:[A-Za-z0-9_][A-Za-z0-9_.\-]*\/)+[A-Za-z0-9_.\-]+\.(?:md|mjs|json|ya?ml))/gm;
+const INTERNAL_DOC_REF_RE = /(?<![A-Za-z0-9_.\-\/])\.?((?:[A-Za-z0-9_][A-Za-z0-9_.\-]*\/)+[A-Za-z0-9_.\-]+\.(?:md|mjs|cjs|js|ts|json|ya?ml|sh|patch|toml))/gm;
 
 function internalDocRefCandidates(text) {
-  const out = new Set();
-  for (const m of String(text).matchAll(INTERNAL_DOC_REF_RE)) {
-    const token = m[1];
-    if (token.includes('*') || token.includes('<')) continue; // 通配 / 占位符
-    out.add(token);
+  const out = [];
+  const seen = new Set();
+  const lines = String(text).split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    for (const m of lines[i].matchAll(INTERNAL_DOC_REF_RE)) {
+      const token = m[1];
+      if (token.includes('*') || token.includes('<')) continue; // 通配 / 占位符
+      const key = i + 1 + ' ' + token;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ ref: token, line: i + 1 });
+    }
   }
-  return [...out];
+  return out;
 }
 
 function internalDocsProblems(root = REPO_ROOT) {
@@ -254,12 +261,12 @@ function internalDocsProblems(root = REPO_ROOT) {
     } catch {
       continue;
     }
-    for (const ref of internalDocRefCandidates(text)) {
+    for (const { ref, line } of internalDocRefCandidates(text)) {
       if (INTERNAL_DOC_REF_ALLOWLIST.has(ref)) continue;
       if (INTERNAL_DOC_REF_BASES.some((base) => fs.existsSync(path.join(root, base, ref)))) continue;
       const firstSegment = ref.split('/')[0];
       if (!fs.existsSync(path.join(root, firstSegment))) continue; // 顶层整体缺席 → 跳过（组缺席语义）
-      problems.push('死引用: ' + rel + ' → ' + ref);
+      problems.push('死引用: ' + rel + ':' + line + ' → ' + ref);
     }
   }
   const roadmapRel = path.posix.join(MAINTAINER_DOC_DIR, 'ROADMAP.md');
@@ -7405,12 +7412,22 @@ const SCENARIOS = [
       writeFile(dir, 'docs/internal/ROADMAP.md', '# 路线图\n\n## Now\n\n## Next\n\n## Later\n\n## Open decisions\n');
       writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/ROADMAP.md` 与 `docs/internal/missing-file.md`。\n');
       const problems = internalDocsProblems(dir);
-      if (!problems.some((p) => p.includes('FIXTURE.md') && p.includes('missing-file.md'))) {
-        throw new Error('死引用未被报告: ' + JSON.stringify(problems));
+      if (!problems.some((p) => p.includes('FIXTURE.md:1') && p.includes('missing-file.md'))) {
+        throw new Error('死引用未被报告（或未带行号）: ' + JSON.stringify(problems));
       }
       if (!problems.some((p) => p.includes('死引用')) || problems.length !== 1) {
         throw new Error('死引用判定应恰好 1 条（合法引用不得误报）: ' + JSON.stringify(problems));
       }
+      // 覆盖：.specs/adr 目标面 + allowlist 分支（未来路径不得被报）
+      writeFile(dir, '.specs/adr/ADR-FIXTURE.md', '见 `docs/internal/missing-adr-target.md` 与 `.specs/archive/CONTEXT-history.md`。\n');
+      const adrProblems = internalDocsProblems(dir);
+      if (!adrProblems.some((p) => p.includes('ADR-FIXTURE.md') && p.includes('missing-adr-target.md'))) {
+        throw new Error('adr 面死引用未被报告: ' + JSON.stringify(adrProblems));
+      }
+      if (adrProblems.some((p) => p.includes('CONTEXT-history.md'))) {
+        throw new Error('allowlist 未来路径被误报: ' + JSON.stringify(adrProblems));
+      }
+      fs.rmSync(path.join(dir, '.specs', 'adr', 'ADR-FIXTURE.md'));
       // 恢复：修好引用 → 通过
       writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/ROADMAP.md`。\n');
       if (internalDocsProblems(dir).length !== 0) {
