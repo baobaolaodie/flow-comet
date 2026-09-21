@@ -16,6 +16,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 - **The installer's messages use the tool's name**: the output prefix came from the script's own file name, so a command typed as `fcomet` reported every step under a name the user never used — and the usage line in the same output already said `fcomet init`, leaving one command with two names on one screen. The prefix is now `flow-comet`, which matches the tool however it is invoked (the packaged command, its alias, or the script in a repository clone).
 - **The orchestration instructions installed into projects no longer carry stale wording or a non-entry**: the opening line described a "bundle" and a "portable control plane" — vocabulary this project dropped when it moved away from its predecessor's layout — and the script list included a two-line compatibility shim that is not an entry point to anything. The opening line now says plainly what the file is, and the shim is no longer advertised. A check keeps that text, which every project loads automatically, free of both.
+- **The regression suite now checks the maintenance documents**: the self-test suite validates that references in the maintenance documents resolve and that the roadmap keeps its four sections (it skips where those documents are absent, as in a CI checkout), so drift that CI structurally cannot see is caught locally. The scenario count moved to 244.
+- **The documentation now matches the shipped behaviour**: the install guide no longer points at a retired state file or command; the npm channel is described as published; the release checklist includes the npm publish and GitHub Release steps; the Codex section describes serial delivery instead of manual worktree delegation; the force-push rule states its scope; and the Comet badge now carries a boundary note (the two projects no longer share files).
 
 ### Fixed
 
@@ -48,7 +50,7 @@ A release closing out the review follow-up after `1.5.0-rc.3`: the two defects f
 - **Stale statements corrected**: the path-base error message no longer claims that only the state machine withholds support (the guard rejects the same values, and the neighbouring comment now agrees), the dsh platform reference records the npm package as published and the AGENTS.md injection as certified, and the security policy names the installer's third-party dependency together with the boundary for reporting that package's own vulnerabilities upstream.
 - **The changelog's own path reference is complete**: the authoritative version marker is now referred to as `.flow-comet/skills/flow-comet/INSTALLED_VERSION`, a path that resolves from the repository root.
 - **Three skill descriptions match the behaviour they document**: the review reference states both outcomes for a missing disposition marker (blocking on a new change, a progressive warning on a legacy one), the evolve command explains that a stale timestamp only prompts an explicit invocation instead of triggering on its own, and the decision-points reference no longer files a terminal stop condition as a user decision.
-- **The regression suite now runs 243 scenarios**; the system test suite is unchanged at 75 items.
+- **The regression suite now runs 244 scenarios**; the system test suite is unchanged at 75 items.
 
 ## [1.5.0-rc.3] - 2026-09-14
 
