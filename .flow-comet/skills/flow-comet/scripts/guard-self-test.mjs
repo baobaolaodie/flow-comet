@@ -221,7 +221,7 @@ function countSyncProblems(root = REPO_ROOT) {
 // 占位符 / 通配 / 未来路径不参与判定（见 ALLOWLIST）。
 const INTERNAL_DOC_REF_BASES = ['.flow-comet/skills/flow-comet', '.claude/skills/flow-comet', '', 'flow-kit'];
 const INTERNAL_DOC_REF_ALLOWLIST = new Set(['.specs/archive/CONTEXT-history.md']);
-const INTERNAL_DOC_REF_RE = /(?<![A-Za-z0-9_.\-\/])\.?((?:[A-Za-z0-9_][A-Za-z0-9_.\-]*\/)+[A-Za-z0-9_.\-]+\.(?:md|mjs|cjs|js|ts|json|ya?ml|sh|patch|toml))/gm;
+const INTERNAL_DOC_REF_RE = /(?<![A-Za-z0-9_.\-\/])(\.?(?:[A-Za-z0-9_][A-Za-z0-9_.\-]*\/)+[A-Za-z0-9_.\-]+\.(?:md|mjs|cjs|js|ts|json|ya?ml|sh|patch|toml))(?![A-Za-z0-9])/gm;
 
 function internalDocRefCandidates(text) {
   const out = [];
@@ -243,10 +243,12 @@ function internalDocRefCandidates(text) {
 function internalDocsProblems(root = REPO_ROOT) {
   const problems = [];
   const internalDir = path.join(root, MAINTAINER_DOC_DIR);
-  if (!fs.existsSync(internalDir)) return problems; // 整组缺席 → 跳过（CI / worktree 形态）
+  const hasInternal = fs.existsSync(internalDir);
   const targets = [];
-  for (const name of fs.readdirSync(internalDir)) {
-    if (name.endsWith('.md')) targets.push(path.posix.join(MAINTAINER_DOC_DIR, name));
+  if (hasInternal) {
+    for (const name of fs.readdirSync(internalDir)) {
+      if (name.endsWith('.md')) targets.push(path.posix.join(MAINTAINER_DOC_DIR, name));
+    }
   }
   const adrDir = path.join(root, '.specs', 'adr');
   if (fs.existsSync(adrDir)) {
@@ -254,6 +256,7 @@ function internalDocsProblems(root = REPO_ROOT) {
       if (name.endsWith('.md')) targets.push(path.posix.join('.specs', 'adr', name));
     }
   }
+  if (targets.length === 0) return problems; // 两处目标面皆缺席 → 整组跳过（CI / worktree 形态）
   for (const rel of targets) {
     let text;
     try {
@@ -275,7 +278,8 @@ function internalDocsProblems(root = REPO_ROOT) {
   } else {
     const text = fs.readFileSync(path.join(root, roadmapRel), 'utf8');
     for (const section of ['Now', 'Next', 'Later', 'Open decisions']) {
-      if (!new RegExp('^##\\s*' + section, 'm').test(text)) {
+      const sectionRe = new RegExp('^##\\s*' + section + '\\s*(?:[（(][^）)\\n]*[）)])?\\s*$', 'm');
+      if (!sectionRe.test(text)) {
         problems.push('ROADMAP 结构缺段: ' + section + '（' + roadmapRel + '）');
       }
     }
