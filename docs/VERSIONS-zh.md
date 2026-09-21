@@ -27,7 +27,7 @@
 
 - 旧 change/旧 state 自动补默认字段（executionMode/branchMode/enablePrReview）；无分支 change 照常运行——向后兼容
 - 旧 change 重入渐进 WARN 不 BLOCK（redEvidence/greenEvidence 缺失、纯字符串 handoff）
-- 回归基线（两级）：`guard-self-test.mjs` 243 场景 + `system-test.mjs` 75 项全绿（每次改动后必须）
+- 回归基线（两级）：`guard-self-test.mjs` 244 场景 + `system-test.mjs` 75 项全绿（每次改动后必须）
 - dsh 平台：项目级技能副本携带与 flow-comet 发布版本同步的 `INSTALLED_VERSION` 标识；卸载经 `prepare-env --purge --platform dsh --yes`（见[安装](INSTALLATION-zh.md#方案-d--deepseek-harnessdsh平台)）
 
 ## 发布 checklist（每次发布收尾）
@@ -38,4 +38,6 @@
 2. 更新 README 版本徽章 + 版本状态
 3. `git tag vX.Y.Z` + push --tags
 4. prepare-env 发布到全部已安装副本（主仓 `.claude/` + 各目标项目）——功能改动时
-5. 将 `dev` fast-forward 同步到 `main`（发布 merge 后立即执行）——发布 PR merge 使 dev tip 成为 main 祖先，dev 上 `git merge main` 为零提交 fast-forward，dev 与 main 完全一致（无 sync merge 提交）
+5. 从 tag 提交执行 `npm publish`（预发布版本必须显式 `--tag`）
+6. 为该 tag 创建 GitHub Release（notes 取 CHANGELOG 对应版本段；预发布版必须标 pre-release）
+7. 将 `dev` fast-forward 同步到 `main`（发布 merge 后立即执行）——发布 PR merge 使 dev tip 成为 main 祖先，dev 上 `git merge main` 为零提交 fast-forward，dev 与 main 完全一致（无 sync merge 提交）

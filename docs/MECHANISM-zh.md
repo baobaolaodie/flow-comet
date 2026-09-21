@@ -69,16 +69,16 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 
 ## 6. guard 自测套件（作者回归基线）
 
-`scripts/guard-self-test.mjs`：**243 个场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（75 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
+`scripts/guard-self-test.mjs`：**244 个场景**覆盖全部 entry/exit 校验正反例（分支校验、追加位置检测、自定义协议、组合场景、自动初始化检测）——与 `system-test.mjs`（75 项，真实命令序列覆盖全部机制面）构成两级回归基线，每次改动后必须（沙箱环境自测脚本逻辑；**不是**安装验证判据）：
 
 ```bash
 node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 243 SCENARIOS PASSED
+# → ALL 244 SCENARIOS PASSED
 ```
 
 ## 6.5 DeepSeek Harness（dsh）平台
 
-在 DeepSeek Harness 上，flow-comet 经 **prepare-env 安装器**（`--platform dsh`）安装——无插件包；npm 分发通道（`flow-comet` 包与 `fcomet` 命令）现已具备可发布形态（首次真实发布归发布批次），dsh 安装仍走 prepare-env。引擎零改动，guard 判定核心经子进程调用原样复用：
+在 DeepSeek Harness 上，flow-comet 经 **prepare-env 安装器**（`--platform dsh`）安装——无插件包；npm 分发通道（`flow-comet` 包与 `fcomet` 命令）**已发布到 npm**（当前版本见 [版本状态页](VERSIONS-zh.md)，与其余发布面同步），dsh 安装仍走 prepare-env。引擎零改动，guard 判定核心经子进程调用原样复用：
 
 - **安装**：`node scripts/prepare-env.mjs --target <项目> --platform dsh`（最低 dsh `0.1.0-rc.6`；dev preview）。
 - **项目级技能发现**：技能树安装到 `<项目>/.dsh/skills/flow-comet`；dsh 在 `<项目>/.dsh/skills/` 下以 rank 100 自动发现（文件监听、免重启）——**未安装该目录的项目不可见该技能**，因此激活天然是项目级的（无运行时痕迹判定、无 chicken-and-egg）。

@@ -54,8 +54,8 @@ const PREPARE_ENV = path.join(REPO_ROOT, 'scripts', 'prepare-env.mjs');
 const BUILTIN_PROTOCOL_SOURCE = path.join(__dirname, '..', 'reference', 'workflow-protocol.json');
 const CHANGE_ID = 'ch';
 
-// 场景数一致性自检清单（21 文件，全变体：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n）——
-// 场景数自检与底部自检共用同一清单/同一实现（自检常量同步：SCENARIOS.length 变更 → 21 文件须同步）。
+// 场景数一致性自检清单（20 文件 = 15 分发组 + 5 维护者组，全变体：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n）——
+// 场景数自检与底部自检共用同一清单/同一实现（自检常量同步：SCENARIOS.length 变更 → 20 受检文件须同步）。
 // 分两组按"分发形态"划界（AC-14：条目缺失必须显式报告，不得静默跳过——幽灵条目无处藏身）：
 //   ① 分发组：随仓库分发（受版本控制），**任何**权威源检出都必须存在——维护者工作副本、
 //      CI 全新检出、worktree 检出皆然 → 条目缺失即报错（幽灵条目在此被强制暴露）。
@@ -213,6 +213,80 @@ function systemTestCountSyncProblems(root = REPO_ROOT) {
 function countSyncProblems(root = REPO_ROOT) {
   return [...scenarioCountSyncProblems(SCENARIOS.length, root), ...systemTestCountSyncProblems(root)];
 }
+
+// 维护文档机检（docs-governance）：覆盖 CI 结构上不可见的面——docs/internal/ 与 .specs/adr/ 的
+// ① 死引用（文档中的仓库相对路径引用必须存在）；② ROADMAP 最低结构（Now / Next / Later / Open decisions）。
+// 与计数检查同构：docs/internal 整组缺席（CI 全新检出 / worktree 检出）→ 跳过（空数组，不误红）。
+// 判别力边界（实测教训）：提取必须取「完整路径 token」而非后缀子串；scripts/… 一类简写按技能树基准解析；
+// 占位符 / 通配 / 未来路径不参与判定（见 ALLOWLIST）。
+const INTERNAL_DOC_REF_BASES = ['.flow-comet/skills/flow-comet', '.claude/skills/flow-comet', '', 'flow-kit'];
+const INTERNAL_DOC_REF_ALLOWLIST = new Set(['.specs/archive/CONTEXT-history.md']);
+const INTERNAL_DOC_REF_RE = /(?<![A-Za-z0-9_.\-\/])(\.?(?:[A-Za-z0-9_][A-Za-z0-9_.\-]*\/)+[A-Za-z0-9_.\-]+\.(?:md|mjs|cjs|js|ts|json|ya?ml|sh|patch|toml))(?![A-Za-z0-9])/gm;
+
+function internalDocRefCandidates(text) {
+  const out = [];
+  const seen = new Set();
+  const lines = String(text).split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    for (const m of lines[i].matchAll(INTERNAL_DOC_REF_RE)) {
+      const token = m[1];
+      if (token.includes('*') || token.includes('<')) continue; // 通配 / 占位符
+      const key = i + 1 + ' ' + token;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ ref: token, line: i + 1 });
+    }
+  }
+  return out;
+}
+
+function internalDocsProblems(root = REPO_ROOT) {
+  const problems = [];
+  const internalDir = path.join(root, MAINTAINER_DOC_DIR);
+  const hasInternal = fs.existsSync(internalDir);
+  const targets = [];
+  if (hasInternal) {
+    for (const name of fs.readdirSync(internalDir)) {
+      if (name.endsWith('.md')) targets.push(path.posix.join(MAINTAINER_DOC_DIR, name));
+    }
+  }
+  const adrDir = path.join(root, '.specs', 'adr');
+  if (fs.existsSync(adrDir)) {
+    for (const name of fs.readdirSync(adrDir)) {
+      if (name.endsWith('.md')) targets.push(path.posix.join('.specs', 'adr', name));
+    }
+  }
+  if (targets.length === 0) return problems; // 两处目标面皆缺席 → 整组跳过（CI / worktree 形态）
+  for (const rel of targets) {
+    let text;
+    try {
+      text = fs.readFileSync(path.join(root, rel), 'utf8');
+    } catch {
+      continue;
+    }
+    for (const { ref, line } of internalDocRefCandidates(text)) {
+      if (INTERNAL_DOC_REF_ALLOWLIST.has(ref)) continue;
+      if (INTERNAL_DOC_REF_BASES.some((base) => fs.existsSync(path.join(root, base, ref)))) continue;
+      const firstSegment = ref.split('/')[0];
+      if (!fs.existsSync(path.join(root, firstSegment))) continue; // 顶层整体缺席 → 跳过（组缺席语义）
+      problems.push('死引用: ' + rel + ':' + line + ' → ' + ref);
+    }
+  }
+  const roadmapRel = path.posix.join(MAINTAINER_DOC_DIR, 'ROADMAP.md');
+  if (!fs.existsSync(path.join(root, roadmapRel))) {
+    problems.push('ROADMAP 缺失: ' + roadmapRel);
+  } else {
+    const text = fs.readFileSync(path.join(root, roadmapRel), 'utf8');
+    for (const section of ['Now', 'Next', 'Later', 'Open decisions']) {
+      const sectionRe = new RegExp('^##\\s*' + section + '\\s*(?:[（(][^）)\\n]*[）)])?\\s*$', 'm');
+      if (!sectionRe.test(text)) {
+        problems.push('ROADMAP 结构缺段: ' + section + '（' + roadmapRel + '）');
+      }
+    }
+  }
+  return problems;
+}
+
 
 function makeTmp() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flow-comet-guard-test-'));
@@ -7332,6 +7406,50 @@ const SCENARIOS = [
       assertOut(res, 'EACCES');
     },
   },
+
+  // 244: 维护文档机检（docs-governance）——docs/internal 死引用 + ROADMAP 最低结构。
+  // 判别力四类：正例（干净夹具通过）/ 反例（死引用必须报告且含来源与目标）/
+  // 越界（ROADMAP 缺段必须报告）/ 恢复（修复后通过）；另锁「整组缺席即跳过」语义。
+  {
+    name: '244 维护文档机检：docs/internal 死引用与 ROADMAP 结构（docs-governance）',
+    run: (dir) => {
+      writeFile(dir, 'docs/internal/ROADMAP.md', '# 路线图\n\n## Now\n\n## Next\n\n## Later\n\n## Open decisions\n');
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/ROADMAP.md` 与 `docs/internal/missing-file.md`。\n');
+      const problems = internalDocsProblems(dir);
+      if (!problems.some((p) => p.includes('FIXTURE.md:1') && p.includes('missing-file.md'))) {
+        throw new Error('死引用未被报告（或未带行号）: ' + JSON.stringify(problems));
+      }
+      if (!problems.some((p) => p.includes('死引用')) || problems.length !== 1) {
+        throw new Error('死引用判定应恰好 1 条（合法引用不得误报）: ' + JSON.stringify(problems));
+      }
+      // 覆盖：.specs/adr 目标面 + allowlist 分支（未来路径不得被报）
+      writeFile(dir, '.specs/adr/ADR-FIXTURE.md', '见 `docs/internal/missing-adr-target.md` 与 `.specs/archive/CONTEXT-history.md`。\n');
+      const adrProblems = internalDocsProblems(dir);
+      if (!adrProblems.some((p) => p.includes('ADR-FIXTURE.md') && p.includes('missing-adr-target.md'))) {
+        throw new Error('adr 面死引用未被报告: ' + JSON.stringify(adrProblems));
+      }
+      if (adrProblems.some((p) => p.includes('CONTEXT-history.md'))) {
+        throw new Error('allowlist 未来路径被误报: ' + JSON.stringify(adrProblems));
+      }
+      fs.rmSync(path.join(dir, '.specs', 'adr', 'ADR-FIXTURE.md'));
+      // 恢复：修好引用 → 通过
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/ROADMAP.md`。\n');
+      if (internalDocsProblems(dir).length !== 0) {
+        throw new Error('修复后应通过: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      // 越界：删段 → 结构问题必须报告
+      writeFile(dir, 'docs/internal/ROADMAP.md', '# 路线图\n\n## Now\n## Next\n## Later\n');
+      const structProblems = internalDocsProblems(dir);
+      if (!structProblems.some((p) => p.includes('Open decisions'))) {
+        throw new Error('ROADMAP 缺段未被报告: ' + JSON.stringify(structProblems));
+      }
+      // 整组缺席（CI / worktree 形态）→ 跳过，不误红
+      fs.rmSync(path.join(dir, 'docs/internal'), { recursive: true, force: true });
+      if (internalDocsProblems(dir).length !== 0) {
+        throw new Error('组目录缺席时应跳过: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+    },
+  },
 ];
 
 // ---------- 运行 ----------
@@ -7372,6 +7490,12 @@ if (isAuthoritativeSourceRepo()) {
   for (const problem of countSyncProblems()) {
     failures.push({ name: '计数一致性', error: problem });
     console.error('FAIL: 计数一致性\n' + problem);
+  }
+
+  // ①b 维护文档机检（docs/internal 死引用 + ROADMAP 最低结构；整组缺席即跳过）
+  for (const problem of internalDocsProblems()) {
+    failures.push({ name: '维护文档机检', error: problem });
+    console.error('FAIL: 维护文档机检\n' + problem);
   }
 
   // ② 公开文档零代号（公开产物纪律——CHANGELOG 历史 S 编号回归的教训，2026-08-10）

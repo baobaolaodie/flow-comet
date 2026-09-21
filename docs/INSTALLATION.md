@@ -115,7 +115,7 @@ On non-default platforms, command paths inside SKILL/GUIDANCE files are rewritte
 4. **Smoke test** (run inside the target project): `cd <target> && node .claude/skills/flow-comet/scripts/workflow-state.mjs status` — expected output is a JSON state object (`{"status":"no-change",...}` for a fresh project, `{"status":"running","change":...}` when a workflow is active)
 
 > Commands are POSIX-style (Git Bash / WSL / macOS terminal); Windows users should run them in Git Bash.
-> **Note**: `guard-self-test.mjs` (243 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
+> **Note**: `guard-self-test.mjs` (244 scenarios) is the **author regression baseline** (self-test of script logic in a sandboxed environment — it does not depend on installation completeness and is not an installation verification criterion).
 
 ### Using flow-comet on Codex
 
@@ -123,13 +123,13 @@ Measured on Codex CLI 0.146.0 — the 8-node flow runs end-to-end.
 
 - **First use**: trust the write-guard hook — run `/hooks` in an interactive session and trust the flow-comet hook entry; for scripted automation pass `--dangerously-bypass-hook-trust` to `codex exec`.
 - **Scripted automation**: `codex exec … </dev/null` — when stdin is piped, Codex waits for stdin to close before starting (add the redirect when driving it from scripts/CI).
-- **Execution mode**: the execute node runs in **direct** mode (the Codex main agent implements; switch with `execution-mode direct`). The `subagent-execute` node delegates `parallel="true"` tasks through **git worktrees** (one worktree per task: `git worktree add <path> -b <branch>` → `codex exec` inside the worktree, loading `flow-comet-dev` and returning a Return Contract → verify the commitHash and `git worktree remove` after the task) — worktree isolation matches Claude Code's delegation semantics; Codex CLI has no `--worktree` one-command flag (tracked in [openai/codex#12862](https://github.com/openai/codex/issues/12862)), so the coordinator manages worktrees explicitly.
+- **Execution mode**: the execute node runs in **direct** mode (the Codex main agent implements; switch with `execution-mode direct`). On Codex, the `subagent-execute` node delivers `parallel="true"` tasks **serially** — tasks go through the `execute` node one at a time; parallel delegation awaits mechanism support (Codex CLI has no `--worktree` one-command flag — tracked in [openai/codex#12862](https://github.com/openai/codex/issues/12862) — and the write guard does not yet recognize manually created worktrees).
 - **Windows PowerShell argument quoting**: `node … '{"summary":"…"}'` loses embedded double quotes through PowerShell 5.1 — run such commands via .NET `ProcessStartInfo`/`ArgumentList`, or from Git Bash.
 - **Commit discipline**: the workflow scripts validate artifacts, not git commits — mark tasks `status="done"` in TASK.md and commit as part of the execute node protocol.
 - **Archive order**: run `skill-load archive flow-comet-integration --prompt flow-kit/prompts/7-integration.md` **before** copying the archive directory (declaration markers travel with the directory copy).
 - **Chinese artifact writing (measured)**: session Bash writing Chinese via the PowerShell pipeline may corrupt it into literal `?` (`$OutputEncoding` encoding) — write via Python with `encoding='utf-8'`, set `$OutputEncoding` to `[System.Text.Encoding]::UTF8`, or use full `\uXXXX` escapes; `python` with the `-c` argument and embedded Chinese is lossless.
 - **JSON argument quoting (measured)**: PowerShell 5.1 strips embedded double quotes when passing arguments to native commands (`handoff result` / `record` may store dirty strings) — use `--json-file` to read the JSON payload from a file, or run from Git Bash.
-- **Git proxy operations (measured)**: git is restricted inside the codex sandbox (init branch creation fails, worktree subagents cannot self-commit) — init branch failure degrading to file-only mode is expected; commits from delegated subagents are made by the coordinator outside the sandbox, and the Return Contract's commitHash remains verifiable.
+- **Git proxy operations (measured)**: git is restricted inside the codex sandbox (init branch creation fails) — init branch failure degrading to file-only mode is expected.
 - **Leading `>` misdetection (measured)**: the hook treats a command-line leading `>` as a shell redirection (markdown quote lines get blocked) — escape and restore with `>`.
 
 ### Verifying a Codex installation
@@ -330,7 +330,7 @@ Before starting a task that changes or investigates the repo, if an active Comet
 
 If `.claude/skills/flow-comet/SKILL.md` exists (flow-comet installed):
 
-1. Check `.comet/current-change.json` or run `comet state get <change> phase` to confirm an active change
+1. Run `node .claude/skills/flow-comet/scripts/workflow-state.mjs status` (state lives in `.flow-comet/flow-comet-state.json`) to confirm an active change
 2. If an active change exists and `phase=build`, go straight to `/flow-comet` (do not run the resume probe)
 3. If an active change exists but phase is not build, pick the entry per the flow-comet node routing table
 4. If no active change, enter `/flow-comet` when the user explicitly wants to develop (it routes to the open stage)

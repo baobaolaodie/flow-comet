@@ -114,7 +114,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 4. **真实环境冒烟**（在目标项目目录内执行）：`cd <目标项目> && node .claude/skills/flow-comet/scripts/workflow-state.mjs status`——期望输出 JSON 状态对象（全新项目为 `{"status":"no-change",...}`，运行中为 `{"status":"running","change":...}`）
 
 > 命令为 POSIX 风格（Git Bash / WSL / macOS 终端）；Windows 用户请在 Git Bash 中执行。
-> **注意**：`guard-self-test.mjs`（243 场景）是**作者回归基线**（沙箱环境自测脚本逻辑——不依赖安装完整性，不是安装验证判据）。
+> **注意**：`guard-self-test.mjs`（244 场景）是**作者回归基线**（沙箱环境自测脚本逻辑——不依赖安装完整性，不是安装验证判据）。
 
 ### 在 Codex 上使用 flow-comet
 
@@ -122,13 +122,13 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 
 - **首次使用**：信任写入守卫 hook——交互会话运行 `/hooks` 信任 flow-comet hook 条目；脚本化自动化在 `codex exec` 传 `--dangerously-bypass-hook-trust`。
 - **脚本化自动化**：`codex exec … </dev/null`——stdin 为管道时 Codex 会等待 stdin 关闭才开始（脚本/CI 驱动时加该重定向）。
-- **执行模式**：execute 节点用 **direct** 模式（Codex 主代理直接实现；`execution-mode direct` 切换）。`subagent-execute` 节点把 `parallel="true"` 任务经 **git worktree** 委托（每任务一个 worktree：`git worktree add <路径> -b <分支>` → 在 worktree 内 `codex exec`，加载 flow-comet-dev 并回传 Return Contract → 校验 commitHash 后 `git worktree remove`）——worktree 隔离与 Claude Code 的委托语义一致；Codex CLI 无 `--worktree` 一键 flag（[openai/codex#12862](https://github.com/openai/codex/issues/12862) 跟踪中），由协调者显式管理 worktree。
+- **执行模式**：execute 节点用 **direct** 模式（Codex 主代理直接实现；`execution-mode direct` 切换）。在 Codex 上，`subagent-execute` 节点对 `parallel="true"` 任务**串行交付**——任务逐个走 `execute` 节点；并行委托待机制支持（Codex CLI 无 `--worktree` 一键 flag——[openai/codex#12862](https://github.com/openai/codex/issues/12862) 跟踪中——且写入守卫尚不识别手工创建的 worktree）。
 - **Windows PowerShell 引号**：`node … '{"summary":"…"}'` 经 PowerShell 5.1 会丢失内嵌双引号——用 .NET `ProcessStartInfo`/`ArgumentList` 执行，或改用 Git Bash。
 - **提交纪律**：工作流脚本校验产物而非 git 提交——execute 节点协议要求把任务标记 `status="done"` 并提交。
 - **归档顺序**：`skill-load archive flow-comet-integration --prompt flow-kit/prompts/7-integration.md` 须在**复制归档目录之前**运行（声明标记随目录复制）。
 - **中文工件写入（实测）**：会话 Bash 写中文经 PowerShell 管道可能损坏为字面 `?`（$OutputEncoding 编码）——用 Python 以 `encoding='utf-8'` 写文件、设置 `$OutputEncoding` 为 `[System.Text.Encoding]::UTF8`、或全 `\uXXXX` 转义规避；使用 `python` 的 `-c` 参数内嵌中文无损。
 - **JSON 参数引号（实测）**：PowerShell 5.1 对原生命令传参剥离 JSON 内嵌双引号（handoff result / record 可能存成脏字符串）——用 `--json-file` 从文件读 JSON payload，或用 Git Bash 执行。
-- **git 代操作（实测）**：codex 沙箱内 git 受限（init 分支创建失败、worktree 内无法自提交）——init 分支失败降级纯文件模式属预期；委托子代理的提交由协调者在沙箱外代操作，Return Contract 的 commitHash 仍可校验。
+- **git 代操作（实测）**：codex 沙箱内 git 受限（init 分支创建失败）——init 分支失败降级纯文件模式属预期。
 - **行首 `>` 误判（实测）**：hook 把命令行首 `>` 判为 shell 重定向（markdown 引用行被拦）——用 `>` 转义还原。
 
 ### 验证 Codex 安装
@@ -327,7 +327,7 @@ rm -rf <目标项目>/.specs/          # 仅当不再需要流程工件时
 
 如果 `.claude/skills/flow-comet/SKILL.md` 存在（flow-comet 已安装）：
 
-1. 检查 `.comet/current-change.json` 或运行 `comet state get <change> phase` 确认是否有活跃 change
+1. 运行 `node .claude/skills/flow-comet/scripts/workflow-state.mjs status`（状态存于 `.flow-comet/flow-comet-state.json`）确认是否有活跃 change
 2. 如有活跃 change 且 `phase=build`，直接进入 `/flow-comet`（不要运行 resume probe）
 3. 如有活跃 change 但 phase 不是 build，按 flow-comet 的节点路由表决定入口
 4. 如无活跃 change，用户明确要开发时进入 `/flow-comet`（它会路由到 open 阶段）

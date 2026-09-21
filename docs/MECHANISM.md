@@ -69,16 +69,16 @@ Project-root fallback chain for interception: when the session cwd drifts, the p
 
 ## 6. Guard self-test suite (author regression baseline)
 
-`scripts/guard-self-test.mjs`: **243 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (75 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
+`scripts/guard-self-test.mjs`: **244 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (75 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
 
 ```bash
 node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 243 SCENARIOS PASSED
+# → ALL 244 SCENARIOS PASSED
 ```
 
 ## 6.5 DeepSeek Harness (dsh) platform
 
-On DeepSeek Harness, flow-comet is installed through the **prepare-env installer** (`--platform dsh`) — no plugin bundle; the npm distribution channel (the `flow-comet` package with its `fcomet` command) now has a publishable form, with the first real publish belonging to the release batch, and dsh installs keep going through prepare-env. The engine itself is untouched, the guard decision core is reused unchanged via subprocess calls:
+On DeepSeek Harness, flow-comet is installed through the **prepare-env installer** (`--platform dsh`) — no plugin bundle; the npm distribution channel (the `flow-comet` package with its `fcomet` command) is published on npm — see [the version status page](VERSIONS.md) for the current version, kept in step with the other release surfaces — and dsh installs keep going through prepare-env. The engine itself is untouched, the guard decision core is reused unchanged via subprocess calls:
 
 - **Installation**: `node scripts/prepare-env.mjs --target <project> --platform dsh` (minimum dsh `0.1.0-rc.6`; dev preview).
 - **Project-level skill discovery**: the skill tree is installed at `<project>/.dsh/skills/flow-comet`; dsh auto-discovers skills under `<project>/.dsh/skills/` at rank 100 (file watching, no restart) — projects **without that directory cannot see the skill**, so activation is naturally project-level (no runtime trace detection, no chicken-and-egg).

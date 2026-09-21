@@ -27,7 +27,7 @@
 
 - Old changes / old states auto-fill default fields (executionMode/branchMode/enablePrReview); changes without a branch run unchanged — backward compatible
 - Progressive WARN (not BLOCK) for legacy change re-entry (missing redEvidence/greenEvidence, pure-string handoff)
-- Regression baseline (two-tier): `guard-self-test.mjs` 243 scenarios + `system-test.mjs` 75 items green (required after every change)
+- Regression baseline (two-tier): `guard-self-test.mjs` 244 scenarios + `system-test.mjs` 75 items green (required after every change)
 - dsh platform: the project-level skill copy carries an `INSTALLED_VERSION` marker synced with flow-comet releases; uninstall via `prepare-env --purge --platform dsh --yes` (see [Installation](INSTALLATION.md#option-d--deepseek-harness-dsh-platform))
 
 ## Release checklist (per release)
@@ -38,4 +38,6 @@ Releases are **batched**: `dev` accumulates feature changes; one release PR ship
 2. Update README version badge + version status
 3. `git tag vX.Y.Z` + push --tags
 4. prepare-env release to all installed copies (main `.claude/` + target projects) when functionality changed
-5. Fast-forward `dev` to `main` (right after the release merge): the release PR merge makes dev's tip an ancestor of main, so `git merge main` on dev is a zero-commit fast-forward — dev becomes identical to main (no sync merge commit)
+5. `npm publish` from the tagged commit (pre-release versions require an explicit `--tag`)
+6. Create the GitHub Release for the tag (notes from the corresponding CHANGELOG section; mark pre-releases as pre-release)
+7. Fast-forward `dev` to `main` (right after the release merge): the release PR merge makes dev's tip an ancestor of main, so `git merge main` on dev is a zero-commit fast-forward — dev becomes identical to main (no sync merge commit)
