@@ -122,7 +122,7 @@ node scripts/prepare-env.mjs --target <目标项目绝对路径> --purge --yes
 
 - **首次使用**：信任写入守卫 hook——交互会话运行 `/hooks` 信任 flow-comet hook 条目；脚本化自动化在 `codex exec` 传 `--dangerously-bypass-hook-trust`。
 - **脚本化自动化**：`codex exec … </dev/null`——stdin 为管道时 Codex 会等待 stdin 关闭才开始（脚本/CI 驱动时加该重定向）。
-- **执行模式**：execute 节点用 **direct** 模式（Codex 主代理直接实现；`execution-mode direct` 切换）。`subagent-execute` 节点把 `parallel="true"` 任务经 **git worktree** 委托（每任务一个 worktree：`git worktree add <路径> -b <分支>` → 在 worktree 内 `codex exec`，加载 flow-comet-dev 并回传 Return Contract → 校验 commitHash 后 `git worktree remove`）——worktree 隔离与 Claude Code 的委托语义一致；Codex CLI 无 `--worktree` 一键 flag（[openai/codex#12862](https://github.com/openai/codex/issues/12862) 跟踪中），由协调者显式管理 worktree。
+- **执行模式**：execute 节点用 **direct** 模式（Codex 主代理直接实现；`execution-mode direct` 切换）。在 Codex 上，`subagent-execute` 节点对 `parallel="true"` 任务**串行交付**——任务逐个走 `execute` 节点；并行委托待机制支持（Codex CLI 无 `--worktree` 一键 flag——[openai/codex#12862](https://github.com/openai/codex/issues/12862) 跟踪中——且写入守卫尚不识别手工创建的 worktree）。
 - **Windows PowerShell 引号**：`node … '{"summary":"…"}'` 经 PowerShell 5.1 会丢失内嵌双引号——用 .NET `ProcessStartInfo`/`ArgumentList` 执行，或改用 Git Bash。
 - **提交纪律**：工作流脚本校验产物而非 git 提交——execute 节点协议要求把任务标记 `status="done"` 并提交。
 - **归档顺序**：`skill-load archive flow-comet-integration --prompt flow-kit/prompts/7-integration.md` 须在**复制归档目录之前**运行（声明标记随目录复制）。
@@ -327,7 +327,7 @@ rm -rf <目标项目>/.specs/          # 仅当不再需要流程工件时
 
 如果 `.claude/skills/flow-comet/SKILL.md` 存在（flow-comet 已安装）：
 
-1. 检查 `.comet/current-change.json` 或运行 `comet state get <change> phase` 确认是否有活跃 change
+1. 运行 `node .claude/skills/flow-comet/scripts/workflow-state.mjs status`（状态存于 `.flow-comet/flow-comet-state.json`）确认是否有活跃 change
 2. 如有活跃 change 且 `phase=build`，直接进入 `/flow-comet`（不要运行 resume probe）
 3. 如有活跃 change 但 phase 不是 build，按 flow-comet 的节点路由表决定入口
 4. 如无活跃 change，用户明确要开发时进入 `/flow-comet`（它会路由到 open 阶段）

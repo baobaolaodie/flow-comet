@@ -31,6 +31,10 @@
   <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.5.1-blue.svg" alt="Version" /></a>
 </p>
 
+<p align="center">
+  <em>The <code>comet</code> badge links to the Comet project — flow-comet itself no longer reads any Comet files (see ADR-009).</em>
+</p>
+
 ---
 
 ## Why

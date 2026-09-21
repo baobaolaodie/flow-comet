@@ -47,7 +47,7 @@ dev ──PR(merge)──▶ main   (release branch — one merge commit per rel
 | Rule | `main` | `dev` |
 |------|--------|-------|
 | Require status checks (CI jobs) | ✅ (regression / pr-policy / quality / installer / docs-links — required for merge; release-consistency runs on the release face only and is not required) | ✅ (same) |
-| Block force pushes | ✅ | ✅ |
+| Block force pushes (scope: `main` / `dev`; feature branches are unprotected) | ✅ | ✅ |
 | Block deletions | ✅ | ✅ |
 | Dismiss stale reviews | ✅ | ✅ |
 
@@ -219,7 +219,7 @@ node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # re-run regres
 git push --force-with-lease origin feat/<description>     # force push is allowed on feature branches
 ```
 
-Force push is allowed on your own feature branch (no protection); a new push invalidates previous approvals (dismiss stale reviews), so request re-review after updating.
+Force push is allowed on your own feature branch — feature branches carry no protection, unlike `main` and `dev`; a new push invalidates previous approvals (dismiss stale reviews), so request re-review after updating.
 
 ## Release process (maintainers)
 

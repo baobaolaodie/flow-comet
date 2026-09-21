@@ -123,7 +123,7 @@ Measured on Codex CLI 0.146.0 — the 8-node flow runs end-to-end.
 
 - **First use**: trust the write-guard hook — run `/hooks` in an interactive session and trust the flow-comet hook entry; for scripted automation pass `--dangerously-bypass-hook-trust` to `codex exec`.
 - **Scripted automation**: `codex exec … </dev/null` — when stdin is piped, Codex waits for stdin to close before starting (add the redirect when driving it from scripts/CI).
-- **Execution mode**: the execute node runs in **direct** mode (the Codex main agent implements; switch with `execution-mode direct`). The `subagent-execute` node delegates `parallel="true"` tasks through **git worktrees** (one worktree per task: `git worktree add <path> -b <branch>` → `codex exec` inside the worktree, loading `flow-comet-dev` and returning a Return Contract → verify the commitHash and `git worktree remove` after the task) — worktree isolation matches Claude Code's delegation semantics; Codex CLI has no `--worktree` one-command flag (tracked in [openai/codex#12862](https://github.com/openai/codex/issues/12862)), so the coordinator manages worktrees explicitly.
+- **Execution mode**: the execute node runs in **direct** mode (the Codex main agent implements; switch with `execution-mode direct`). On Codex, the `subagent-execute` node delivers `parallel="true"` tasks **serially** — tasks go through the `execute` node one at a time; parallel delegation awaits mechanism support (Codex CLI has no `--worktree` one-command flag — tracked in [openai/codex#12862](https://github.com/openai/codex/issues/12862) — and the write guard does not yet recognize manually created worktrees).
 - **Windows PowerShell argument quoting**: `node … '{"summary":"…"}'` loses embedded double quotes through PowerShell 5.1 — run such commands via .NET `ProcessStartInfo`/`ArgumentList`, or from Git Bash.
 - **Commit discipline**: the workflow scripts validate artifacts, not git commits — mark tasks `status="done"` in TASK.md and commit as part of the execute node protocol.
 - **Archive order**: run `skill-load archive flow-comet-integration --prompt flow-kit/prompts/7-integration.md` **before** copying the archive directory (declaration markers travel with the directory copy).
@@ -330,7 +330,7 @@ Before starting a task that changes or investigates the repo, if an active Comet
 
 If `.claude/skills/flow-comet/SKILL.md` exists (flow-comet installed):
 
-1. Check `.comet/current-change.json` or run `comet state get <change> phase` to confirm an active change
+1. Run `node .claude/skills/flow-comet/scripts/workflow-state.mjs status` (state lives in `.flow-comet/flow-comet-state.json`) to confirm an active change
 2. If an active change exists and `phase=build`, go straight to `/flow-comet` (do not run the resume probe)
 3. If an active change exists but phase is not build, pick the entry per the flow-comet node routing table
 4. If no active change, enter `/flow-comet` when the user explicitly wants to develop (it routes to the open stage)

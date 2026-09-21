@@ -78,7 +78,7 @@ node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
 
 ## 6.5 DeepSeek Harness (dsh) platform
 
-On DeepSeek Harness, flow-comet is installed through the **prepare-env installer** (`--platform dsh`) — no plugin bundle; the npm distribution channel (the `flow-comet` package with its `fcomet` command) now has a publishable form, with the first real publish belonging to the release batch, and dsh installs keep going through prepare-env. The engine itself is untouched, the guard decision core is reused unchanged via subprocess calls:
+On DeepSeek Harness, flow-comet is installed through the **prepare-env installer** (`--platform dsh`) — no plugin bundle; the npm distribution channel (the `flow-comet` package with its `fcomet` command) is published on npm — currently 1.5.1, in step with the other release surfaces — and dsh installs keep going through prepare-env. The engine itself is untouched, the guard decision core is reused unchanged via subprocess calls:
 
 - **Installation**: `node scripts/prepare-env.mjs --target <project> --platform dsh` (minimum dsh `0.1.0-rc.6`; dev preview).
 - **Project-level skill discovery**: the skill tree is installed at `<project>/.dsh/skills/flow-comet`; dsh auto-discovers skills under `<project>/.dsh/skills/` at rank 100 (file watching, no restart) — projects **without that directory cannot see the skill**, so activation is naturally project-level (no runtime trace detection, no chicken-and-egg).
