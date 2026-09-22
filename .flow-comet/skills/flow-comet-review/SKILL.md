@@ -90,7 +90,7 @@ guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好�
    - Major (should fix: design issues, significant regression)
    - Minor (optional: naming, style, small refactor)
 
-8. **Generate fix tasks**: For all Critical and decided-to-fix Major findings, append to `.specs/<change-id>/TASK.md` as numbered fix tasks with full 7 fields — 追加到 TASK.md 的 `## Fix 任务` 段内（**禁止文件尾追加**）, then trigger return to execute node.
+8. **Generate fix tasks**: For all Critical and decided-to-fix Major findings, append to `.specs/<change-id>/TASK.md` as numbered fix tasks with full 7 fields — 追加到 TASK.md 的 `## Fix 任务` 段内（**禁止文件尾追加**）, then follow the「Fix 批次状态机路径」section below: home back to execute and run its four exit gates before review can be closed.
 
 9. **Disposition markers (problem-handling principle)**: Every finding entry in the `## 发现` section of REVIEW.md — including Minor — must carry a **disposition marker** so findings never silently disappear after being recorded:
    - `[已修]` — fixed via a fix task (linked in the entry)
@@ -120,6 +120,17 @@ This node is truly done when:
 - **Agent thought**: "Round 3 (UI) is optional." **Actual risk**: For frontend projects with UI changes, Round 3 is mandatory. Only non-frontend projects skip it.
 - **Agent thought**: "6-dimension review is just a checklist." **Actual risk**: Without file:line references and book citations (when using built-in path), the review lacks rigor and fixability.
 - **Agent thought**: "I'll record this Minor and move on." **Actual risk**: Findings (especially Minor) that are recorded without a disposition marker silently disappear — the exit guard warns on missing markers; every finding must be `[已修]`, `[升级]` (user decision), or `[转待办]` (tracked for archive).
+
+## Fix 批次状态机路径
+
+review / verify 发现缺陷后的修复必须回到 `execute` 节点生命周期内完成，禁止驻留源节点「顺手修完」；引擎按以下路径强制闭环（`<源节点>` 为 review 或 verify）：
+
+1. **追加 Fix 任务**：在 `.specs/<change-id>/TASK.md` 的 `## Fix 任务` 段内追加编号修复任务（完整任务字段），**禁止文件尾追加**；任务集修订必须在 `entry` 之前完成。
+2. **受控归位 execute**：运行 `workflow-state next`（完整命令：`node .claude/skills/flow-comet/scripts/workflow-state.mjs next`），或运行 `workflow-guard entry execute`（完整命令：`node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry execute`）。处于 Fix 回退态（源节点驻留 + 存在 pending Fix 任务 + 当前路由判定为 execute）时，引擎把当前节点受控归位为 `execute`（`currentNode=execute`），并输出 `FIX-BATCH` 审计行（`next` 同时输出 `NODE: execute`）；用 `workflow-state.mjs status` 确认 `stateCurrentNode` 已是 `execute` 再开工；若未归位，先按 `next` / `status` 的输出核对任务状态与路由，不要未经归位硬开工。
+3. **执行修复**：按 execute 节点生命周期完成全部 Fix 任务（委托/直写规则不变）；`entry execute` 刷新任务集签名，锁定追加后的任务集——归位后不得再增删任务或修改任务内容。
+4. **跑 execute 四类出口**：`record execute` → `exit execute --apply`。四类出口门禁真实执行——**全任务 done / 逐任务 SUMMARY 完备 / 6 维自查 + 自检方法声明 / 任务集签名一致**；任一缺失即 BLOCKED 并给出恢复指引。通过后，引擎在 Fix 二次完成时把当前节点推回源节点（review 或 verify）。
+5. **回源节点跑出口**：回到源节点后运行 `next`，Fix 回程豁免生效时应输出 `NODE: review` 或 `NODE: verify`（不会因源节点产物已存在而跳过）；若仍输出后续节点，说明回程条件未满足，先核对状态机归属与任务状态，不要继续推进。随后执行 `entry <源节点>` → `exit <源节点> --apply` 跑源节点出口门禁（即 entry/exit 源节点）；通过后继续正常路由（review → verify；verify → archive），必要时进入下一轮 Fix 闭环。
+6. **禁止绕过**：驻留源节点不归位、顺手改完后直接跑源节点 exit 收场会被 BLOCKED（存在未归位/未跑出口的 Fix 批次），必须按上述路径恢复；不得用跳过归位或出口门禁的手段（含手动改写 `.flow-comet/flow-comet-state.json`）替代本路径。
 
 ## Entry Check
 
@@ -200,5 +211,5 @@ If the script prints `SKILL: flow-comet-verify`, load that Skill next.
 2. Read `.specs/<change-id>/REVIEW.md` — if exists with all rounds completed and Critical resolved, review is done.
 3. If REVIEW.md exists but incomplete, check which rounds are missing and resume from there.
 4. If Critical items were found but fix tasks not yet generated, generate them now.
-5. If fix tasks were generated but not executed, return to execute node.
+5. If fix tasks were generated but not executed, follow the「Fix 批次状态机路径」section below to home back to execute and run its four exit gates; return here only after execute exit passes, then run review's own exit.
 6. Do not repeat completed review rounds.
