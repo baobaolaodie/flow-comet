@@ -8,7 +8,7 @@ import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCO
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, looksLikeObjectLiteral, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME } from './state-schema.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide, skipInit } from './context-init.mjs';
 import { taskOpeningAttrs, taskBlocks } from './task-parsing.mjs';
-import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath } from './route-node.mjs';
+import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackState, resolveFixReturnNode } from './route-node.mjs';
 
 const command = process.argv[2] ?? 'status';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -304,26 +304,6 @@ async function verifySkillLoadMarkers(completedChecks, changeName, recordTime, p
 // 状态机双实现漂移的根治（单一实现决策）。
 async function determineNode(changeName, protocol, completedNodes = []) {
   return resolveNextNode({ runRoot, changeName, protocol, completedNodes });
-}
-
-// 回退修复豁免判定——回退修复标准路径：review/verify 阶段发现缺陷 → TASK.md 追加
-// pending 回退任务 → next 回 execute。三条件全满足才豁免（否则维持严格 BLOCK）：
-// ① currentNode 为 review/verify（回退修复源节点）；② TASK.md 存在 status="pending" 任务块；
-// ③ determineNode 推导为 execute（回退目标）。任一不满足 → 不豁免，保持严格拦截。
-async function tFixRollbackExempt(changeName, protocol, currentNode, completedNodes) {
-  if (currentNode !== 'review' && currentNode !== 'verify') return false;
-  const taskPath = path.join(specsRoot, changeName, 'TASK.md');
-  try {
-    const taskContent = await fs.readFile(taskPath, 'utf8');
-    // 开标签解析（与 determineNode 同一语义）：存在任一 status="pending" 任务块
-    if (!taskBlocks(taskContent).some((b) => {
-      const a = taskOpeningAttrs(b);
-      return a && a.status === 'pending';
-    })) return false;
-    return (await determineNode(changeName, protocol, completedNodes)) === 'execute';
-  } catch {
-    return false;
-  }
 }
 
 // 正常推进豁免判定——exit --apply 会把 currentNode 推进到下一节点（如 open exit 后
@@ -848,6 +828,47 @@ async function main() {
       return;
     }
     const state = await readState();
+    const completedArr = Array.isArray(state.completedNodes) ? state.completedNodes : [];
+    // Fix 回退显式分支——必须早于「疑似未 exit」门禁与进行中漂移保护：
+    // review/verify 驻留 + TASK 有 pending 修复任务 + 共享路由推导回 execute 时，把工作归属
+    // 受控归位 execute（写盘）并显式输出 NODE: execute，不再依赖 inProgress 保护副作用
+    // （修复前 next 输出仍停在源节点）。判定复用 route-node 共享纯函数。
+    if (await resolveFixRollbackState({
+      runRoot, changeName, protocol, completedNodes: completedArr, currentNode: state.currentNode,
+    })) {
+      const sourceNode = state.currentNode;
+      state.currentNode = 'execute';
+      await writeState(state);
+      console.log('FIX-BATCH: 归位 execute（源节点 ' + sourceNode + '）');
+      printNext(protocol, 'execute', state.executionMode ?? 'subagent');
+      printBranchLine(changeName, state.branchPrefix ?? 'change/');
+      return;
+    }
+    // Fix 回程豁免——exit execute --apply 二次完成把 currentNode 回推源节点后，
+    // 源节点产物（REVIEW.md / TEST.md+UAT.md）已在场会让 resolveNextNode 跳过尚未 exit 的
+    // 源节点；仅当源节点未完成、任务全 done、firstIncompletePostExecNode === currentNode
+    // 且 resolveNextNode 确实会跳过该节点时显式放行（只读不改写 state）。artifactNext ===
+    // currentNode 的形态落回既有正常逻辑（normalAdvanceExempt 覆盖），不放宽豁免面。
+    const fixReturnNode = state.activeChange
+      ? await resolveFixReturnNode({ runRoot, changeName, protocol, completedNodes: completedArr })
+      : null;
+    if (fixReturnNode !== null && fixReturnNode === state.currentNode) {
+      const artifactNext = await resolveNextNode({ runRoot, changeName, protocol, completedNodes: completedArr });
+      const routeIds = route(protocol).map((node) => node.id);
+      const artifactNextIdx = routeIds.indexOf(artifactNext);
+      const currentIdx = routeIds.indexOf(state.currentNode);
+      // 「跳过」必须是产物存在性把路由推到源节点之后；artifactNext 落在源节点之前（如 execute
+      // 产物缺失时回退到 execute）不是合法回程态，落回既有门禁，防止越界放宽（既有门禁反例锚）。
+      const skipsForward = artifactNext !== state.currentNode
+        && currentIdx >= 0
+        && artifactNextIdx > currentIdx;
+      if (skipsForward) {
+        console.log('FIX-BATCH: 回程源节点 ' + fixReturnNode);
+        printNext(protocol, state.currentNode, state.executionMode ?? 'subagent');
+        printBranchLine(changeName, state.branchPrefix ?? 'change/');
+        return;
+      }
+    }
     // 节点顺序校验（严格模式）——state.currentNode 非 null、不在 completedNodes、
     // 且 evidence 无该节点记录 → 上一节点从未 exit 就推进 → BLOCKED（exit 1）。
     // 状态漂移校正保留：已完成节点（currentNode ∈ completedNodes，或 evidence 已记录——
@@ -855,17 +876,18 @@ async function main() {
     // 豁免（两种独立判断，任一成立即放行）： 回退豁免（TASK.md 有 pending 回退修复任务 回 execute）；
     //  正常推进豁免（currentNode 是 completedNodes 最后节点 exit 推进的正常下一节点，
     // 见 normalAdvanceExempt）——真乱序（跳节点）仍严格 BLOCK
-    const completedArr = Array.isArray(state.completedNodes) ? state.completedNodes : [];
     if (state.currentNode && !completedArr.includes(state.currentNode)) {
       const nodeEvidence = state.evidence && typeof state.evidence === 'object'
         ? state.evidence[state.currentNode]
         : null;
       const hasEvidence = !!(nodeEvidence && typeof nodeEvidence === 'object' && !Array.isArray(nodeEvidence));
       if (!hasEvidence) {
-        // 回退豁免——review/verify 发现缺陷追加 pending 修复任务后回 execute 的
-        // 修复任务标准回退路径放行（否则被  严格模式误拦为"未 exit 跳阶段"）；
-        // 豁免条件不满足时维持严格 BLOCK
-        const rollbackExempt = await tFixRollbackExempt(changeName, protocol, state.currentNode, completedArr);
+        // 回退豁免（显式分支已先行；此处按共享谓词保留门禁层语义，不再内联第二份判定）——
+        // review/verify 发现缺陷追加 pending 修复任务后回 execute 的修复任务标准回退路径放行
+        // （否则被严格模式误拦为"未 exit 跳阶段"）；豁免条件不满足时维持严格 BLOCK
+        const rollbackExempt = await resolveFixRollbackState({
+          runRoot, changeName, protocol, completedNodes: completedArr, currentNode: state.currentNode,
+        });
         // 正常推进豁免——exit --apply 推进 currentNode 到下一节点后按 SKILL 协议调 next
         // （正常路径）不拦截；与  回退豁免独立判断（详见 normalAdvanceExempt 注释）
         const advanceExempt = await normalAdvanceExempt(state, protocol, completedArr, state.currentNode, changeName);

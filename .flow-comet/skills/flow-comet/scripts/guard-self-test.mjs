@@ -7899,8 +7899,343 @@ const SCENARIOS = [
       assertOut(resOld, 'ALL CHECKS PASSED');
     },
   },
-];
 
+  // 253: next Fix 回退态显式归位——源节点（review/verify）驻留 + TASK 有 pending
+  // Fix 任务 + 共享路由回 execute 时，next 必须显式归位 execute、写盘并输出审计行，不再依赖
+  // inProgress 保护副作用（修复前 next 仍输出源节点）。反例：全 done 无 pending → 不归位。
+  {
+    name: '253 next Fix 回退态显式归位：review/verify 源 + 审计行（无 pending 反例不归位）',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      writeIntakeArtifacts(dir);
+      const taskPath = '.specs/' + CHANGE_ID + '/TASK.md';
+      const base = {
+        activeChange: CHANGE_ID,
+        currentNode: 'review',
+        completedNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
+        enteredNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review'],
+        evidence: {
+          execute: { summary: 'first pass executed' },
+          review: { summary: 'review in progress' },
+        },
+        verifyFailures: 0,
+        executionMode: 'subagent',
+        directOverride: false,
+        newChange: true,
+      };
+      // ① review 源：pending Fix 任务在场 → NODE: execute + 审计行 + 机器字段归位写盘
+      writeFile(dir, taskPath, fixBatchTaskText('pending'));
+      writeState(dir, base);
+      const resReview = runState(['next'], dir, env);
+      assertExit(resReview, 0);
+      assertOut(resReview, 'FIX-BATCH: 归位 execute（源节点 review）');
+      assertOut(resReview, 'NODE: execute');
+      assertNotOut(resReview, 'NODE: review');
+      assertNotOut(resReview, 'NODE: verify');
+      assertNotOut(resReview, 'BLOCKED');
+      let after = readScenarioState(dir);
+      if (after.currentNode !== 'execute') {
+        throw new Error('review 源回退态 next 后 currentNode 应为 execute，实际 ' + JSON.stringify(after.currentNode));
+      }
+      // ② verify 源（review 已完成）→ 同样显式归位 + 审计行 + 写盘
+      writeFile(dir, taskPath, fixBatchTaskText('pending'));
+      writeState(dir, {
+        ...base,
+        currentNode: 'verify',
+        completedNodes: [...base.completedNodes, 'review'],
+        enteredNodes: [...base.enteredNodes, 'verify'],
+        evidence: { ...base.evidence, review: { summary: 'review complete' }, verify: { summary: 'verify in progress' } },
+      });
+      const resVerify = runState(['next'], dir, env);
+      assertExit(resVerify, 0);
+      assertOut(resVerify, 'FIX-BATCH: 归位 execute（源节点 verify）');
+      assertOut(resVerify, 'NODE: execute');
+      assertNotOut(resVerify, 'NODE: verify');
+      assertNotOut(resVerify, 'BLOCKED');
+      after = readScenarioState(dir);
+      if (after.currentNode !== 'execute') {
+        throw new Error('verify 源回退态 next 后 currentNode 应为 execute，实际 ' + JSON.stringify(after.currentNode));
+      }
+      // ③ 反例：全 done（无 pending Fix 任务）→ 非回退态，不得归位 execute（回程逻辑另行覆盖）
+      writeFile(dir, taskPath, fixBatchTaskText('done'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-01-SUMMARY.md', strictSummary('T-FIX-01'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
+        '# REVIEW\n\n## 发现\n\n### Critical\n\n- 无\n\n### Major\n\n- 无\n\n### Minor\n\n- 无\n\n## 结论\n\nFix 批次由 execute 完成，待回源重新出口。\n');
+      writeState(dir, base);
+      const resNoFix = runState(['next'], dir, env);
+      assertExit(resNoFix, 0);
+      assertNotOut(resNoFix, 'FIX-BATCH: 归位 execute');
+      assertNotOut(resNoFix, 'NODE: execute');
+      assertOut(resNoFix, 'NODE: review');
+      after = readScenarioState(dir);
+      if (after.currentNode !== 'review') {
+        throw new Error('无 pending 时不应归位 execute，实际 ' + JSON.stringify(after.currentNode));
+      }
+    },
+  },
+
+  // 254: next Fix 回程豁免（review 源）——exit execute --apply 把 currentNode 推回 review 后，
+  // REVIEW.md 已在场会让 resolveNextNode 按产物跳过未出口的 review；next 必须在源节点未完成时
+  // 显式放行 review（审计行 + 只读不改写 state），不依赖 inProgress 保护副作用；无 review 证据的
+  // 引擎回程态同样放行（修复前缺审计行 / 漂移 verify / 无证据时 BLOCK）。
+  {
+    name: '254 next Fix 回程豁免：review 源（REVIEW.md 在场不跳过；无 inProgress 证据也不 BLOCK）',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      writeIntakeArtifacts(dir);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', fixBatchTaskText('done'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-01-SUMMARY.md', strictSummary('T-FIX-01'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
+        '# REVIEW\n\n## 发现\n\n### Critical\n\n- 无\n\n### Major\n\n- 无\n\n### Minor\n\n- 无\n\n## 结论\n\nFix 批次由 execute 完成，待回源重新出口。\n');
+      const completedNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute'];
+      const base = {
+        activeChange: CHANGE_ID,
+        currentNode: 'review',
+        completedNodes,
+        enteredNodes: [...completedNodes, 'review'],
+        evidence: { execute: { summary: 'fix batch executed' }, review: { summary: 'review in progress' } },
+        verifyFailures: 0,
+        executionMode: 'subagent',
+        directOverride: false,
+        newChange: true,
+      };
+      // ① 真实回程态（review 已 entry）→ 审计行 + NODE: review + state 只读不改写
+      writeState(dir, base);
+      const res = runState(['next'], dir, env);
+      assertExit(res, 0);
+      assertOut(res, 'FIX-BATCH: 回程源节点 review');
+      assertOut(res, 'NODE: review');
+      assertNotOut(res, 'NODE: verify');
+      assertNotOut(res, 'BLOCKED');
+      let after = readScenarioState(dir);
+      if (after.currentNode !== 'review' || after.completedNodes.join(',') !== completedNodes.join(',')) {
+        throw new Error('回程豁免不得改写 state，实际 '
+          + JSON.stringify({ currentNode: after.currentNode, completedNodes: after.completedNodes }));
+      }
+      // ② 引擎回程态（review 无 evidence/entered；末位已完成节点证据在场）→ 仍放行 review，不漂移 verify
+      writeState(dir, {
+        ...base,
+        enteredNodes: completedNodes.slice(),
+        evidence: { execute: { summary: 'fix batch executed' }, 'subagent-execute': { summary: 'delegated' } },
+      });
+      const resNoEvidence = runState(['next'], dir, env);
+      assertExit(resNoEvidence, 0);
+      assertOut(resNoEvidence, 'FIX-BATCH: 回程源节点 review');
+      assertOut(resNoEvidence, 'NODE: review');
+      assertNotOut(resNoEvidence, 'NODE: verify');
+      assertNotOut(resNoEvidence, 'BLOCKED');
+      after = readScenarioState(dir);
+      if (after.currentNode !== 'review') {
+        throw new Error('无 inProgress 证据的回程态 next 后 currentNode 应保持 review，实际 ' + JSON.stringify(after.currentNode));
+      }
+      // ③ 无任何 evidence 的引擎回程态 → 回程豁免先于「疑似未 exit」门禁，不 BLOCK
+      writeState(dir, { ...base, enteredNodes: [], evidence: {} });
+      const resNoAnyEvidence = runState(['next'], dir, env);
+      assertExit(resNoAnyEvidence, 0);
+      assertOut(resNoAnyEvidence, 'FIX-BATCH: 回程源节点 review');
+      assertOut(resNoAnyEvidence, 'NODE: review');
+      assertNotOut(resNoAnyEvidence, 'BLOCKED');
+      after = readScenarioState(dir);
+      if (after.currentNode !== 'review') {
+        throw new Error('回程豁免不得因证据缺失被门禁改写 currentNode，实际 ' + JSON.stringify(after.currentNode));
+      }
+    },
+  },
+
+  // 255: next Fix 回程豁免（verify 源）——TEST.md + UAT.md 已在场会让 resolveNextNode 按
+  // 产物跳过未出口的 verify 去 archive；next 必须显式放行 verify（审计行 + 只读不改写 state）；
+  // 无 verify 证据时不得漂移 archive；完全无证据时不得被「疑似未 exit」门禁 BLOCK。
+  {
+    name: '255 next Fix 回程豁免：verify 源（TEST/UAT 在场不跳过；不漂移 archive/不 BLOCK）',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      writeIntakeArtifacts(dir);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', fixBatchTaskText('done'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-01-SUMMARY.md', strictSummary('T-FIX-01'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
+        '# REVIEW\n\n## 发现\n\n### Critical\n\n- 无\n\n### Major\n\n- 无\n\n### Minor\n\n- 无\n\n## 结论\n\nreview passed，待回源 verify 重新出口。\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```\necho ok\n```\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/UAT.md', '# UAT\n\n## 验收\n\n- 通过\n');
+      const completedNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review'];
+      const base = {
+        activeChange: CHANGE_ID,
+        currentNode: 'verify',
+        completedNodes,
+        enteredNodes: [...completedNodes, 'verify'],
+        evidence: {
+          execute: { summary: 'fix batch executed' },
+          review: { summary: 'review complete' },
+          verify: { summary: 'verify in progress' },
+        },
+        verifyFailures: 0,
+        executionMode: 'subagent',
+        directOverride: false,
+        newChange: true,
+      };
+      // ① 真实回程态（verify 已 entry）→ 审计行 + NODE: verify + state 只读不改写
+      writeState(dir, base);
+      const res = runState(['next'], dir, env);
+      assertExit(res, 0);
+      assertOut(res, 'FIX-BATCH: 回程源节点 verify');
+      assertOut(res, 'NODE: verify');
+      assertNotOut(res, 'NODE: archive');
+      assertNotOut(res, 'BLOCKED');
+      let after = readScenarioState(dir);
+      if (after.currentNode !== 'verify' || after.completedNodes.join(',') !== completedNodes.join(',')) {
+        throw new Error('回程豁免不得改写 state，实际 '
+          + JSON.stringify({ currentNode: after.currentNode, completedNodes: after.completedNodes }));
+      }
+      // ② 引擎回程态（verify 无 evidence/entered；末位已完成节点证据在场）→ 不漂移 archive
+      writeState(dir, {
+        ...base,
+        enteredNodes: completedNodes.slice(),
+        evidence: { execute: { summary: 'fix batch executed' }, review: { summary: 'review complete' } },
+      });
+      const resNoEvidence = runState(['next'], dir, env);
+      assertExit(resNoEvidence, 0);
+      assertOut(resNoEvidence, 'FIX-BATCH: 回程源节点 verify');
+      assertOut(resNoEvidence, 'NODE: verify');
+      assertNotOut(resNoEvidence, 'NODE: archive');
+      assertNotOut(resNoEvidence, 'BLOCKED');
+      after = readScenarioState(dir);
+      if (after.currentNode !== 'verify') {
+        throw new Error('无 inProgress 证据的回程态 next 后 currentNode 应保持 verify，实际 ' + JSON.stringify(after.currentNode));
+      }
+      // ③ 无任何 evidence → 回程豁免先于「疑似未 exit」门禁，不 BLOCK
+      writeState(dir, { ...base, enteredNodes: [], evidence: {} });
+      const resNoAnyEvidence = runState(['next'], dir, env);
+      assertExit(resNoAnyEvidence, 0);
+      assertOut(resNoAnyEvidence, 'FIX-BATCH: 回程源节点 verify');
+      assertOut(resNoAnyEvidence, 'NODE: verify');
+      assertNotOut(resNoAnyEvidence, 'BLOCKED');
+    },
+  },
+
+  // 256: 负例回归——正常多趟中间态（execute 已完成 + 依赖已满足的 parallel pending 任务）
+  // 必须照常路由 subagent-execute：回退谓词（源节点限制）与回程谓词（任务全 done 限制）都不成立，
+  // 不得被 Fix 两态分支误分流到 review/verify，也不得输出 FIX-BATCH 审计行。
+  {
+    name: '256 负例：正常多趟中间态（execute 已完成 + 可委托 parallel pending）不误分流',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      writeIntakeArtifacts(dir);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', renderMultiWaveTasks(['T01', 'P01', 'P02', 'T02']));
+      for (const id of ['T01', 'P01', 'P02', 'T02']) {
+        writeFile(dir, '.specs/' + CHANGE_ID + '/' + id + '-SUMMARY.md', strictSummary(id));
+      }
+      const completedNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute'];
+      writeState(dir, {
+        activeChange: CHANGE_ID,
+        currentNode: 'execute',
+        completedNodes,
+        enteredNodes: completedNodes.slice(),
+        evidence: {
+          execute: { summary: 'serial wave complete' },
+          'subagent-execute': { summary: 'wave 1 delegated and collected' },
+        },
+        verifyFailures: 0,
+        executionMode: 'subagent',
+        directOverride: false,
+        newChange: true,
+      });
+      const res = runState(['next'], dir, env);
+      assertExit(res, 0);
+      assertOut(res, 'NODE: subagent-execute');
+      assertNotOut(res, 'NODE: review');
+      assertNotOut(res, 'NODE: verify');
+      assertNotOut(res, 'FIX-BATCH');
+      assertNotOut(res, 'BLOCKED');
+      const after = readScenarioState(dir);
+      if (after.currentNode !== 'subagent-execute') {
+        throw new Error('正常多趟中间态应路由 subagent-execute，实际 currentNode=' + JSON.stringify(after.currentNode));
+      }
+    },
+  },
+
+  // 257: 旧 change 兼容——无 newChange: true 的回退态与回程态都不新增 BLOCK，
+  // 且 NODE 输出与判定正确（回退 → execute；回程 → 源节点）。
+  {
+    name: '257 旧 change 兼容：无 newChange 的回退/回程态不新增 BLOCK 且 NODE 正确',
+    run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      writeIntakeArtifacts(dir);
+      const taskPath = '.specs/' + CHANGE_ID + '/TASK.md';
+      const completedNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute'];
+      const oldState = {
+        activeChange: CHANGE_ID,
+        currentNode: 'review',
+        completedNodes,
+        enteredNodes: [...completedNodes, 'review'],
+        evidence: { execute: { summary: 'first pass executed' }, review: { summary: 'review in progress' } },
+        verifyFailures: 0,
+        executionMode: 'subagent',
+        directOverride: false,
+        // newChange 缺省/null = 旧 change 渐进形态（newChange 校验只接受 true/缺失/null）
+      };
+      // ① 旧 change 回退态（pending Fix 任务）→ NODE: execute + 审计行，不得 BLOCK
+      writeFile(dir, taskPath, fixBatchTaskText('pending'));
+      writeState(dir, oldState);
+      const resRollback = runState(['next'], dir, env);
+      assertExit(resRollback, 0);
+      assertNotOut(resRollback, 'BLOCKED');
+      assertOut(resRollback, 'FIX-BATCH: 归位 execute（源节点 review）');
+      assertOut(resRollback, 'NODE: execute');
+      if (readScenarioState(dir).currentNode !== 'execute') {
+        throw new Error('旧 change 回退态 next 后 currentNode 应为 execute，实际 ' + JSON.stringify(readScenarioState(dir).currentNode));
+      }
+      // ② 旧 change 回程态（无 newChange 字段：全 done + REVIEW.md + 源节点未完成）→ NODE: review，不得 BLOCK
+      writeFile(dir, taskPath, fixBatchTaskText('done'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-01-SUMMARY.md', strictSummary('T-FIX-01'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
+        '# REVIEW\n\n## 发现\n\n### Critical\n\n- 无\n\n### Major\n\n- 无\n\n### Minor\n\n- 无\n\n## 结论\n\n待回源出口。\n');
+      writeState(dir, oldState);
+      const resReturn = runState(['next'], dir, env);
+      assertExit(resReturn, 0);
+      assertNotOut(resReturn, 'BLOCKED');
+      assertOut(resReturn, 'FIX-BATCH: 回程源节点 review');
+      assertOut(resReturn, 'NODE: review');
+      assertNotOut(resReturn, 'NODE: verify');
+      if (readScenarioState(dir).currentNode !== 'review') {
+        throw new Error('旧 change 回程态 next 后 currentNode 应保持 review，实际 ' + JSON.stringify(readScenarioState(dir).currentNode));
+      }
+    },
+  },
+
+  // 258: 三节点 SKILL 文本锁（AC-9 / T05 已落地）——execute/review/verify 均含
+  // 「## Fix 批次状态机路径」段，段内含受控归位 + 回源节点跑出口 + 禁止绕过；不得把
+  // 直接 exit 源节点收场或 advance 当正常路径（反捷径文本锚）。
+  {
+    name: '258 技能文本锁：三节点 SKILL 含 Fix 批次状态机路径（禁止直接 exit/advance 为正常路径）',
+    run: () => {
+      for (const nodeSkill of ['flow-comet-execute', 'flow-comet-review', 'flow-comet-verify']) {
+        const file = path.join(REPO_ROOT, '.flow-comet', 'skills', nodeSkill, 'SKILL.md');
+        const text = fs.readFileSync(file, 'utf8');
+        const match = text.match(/(?:^|\r?\n)## Fix 批次状态机路径\r?\n([\s\S]*?)(?=\r?\n## |$)/);
+        if (!match) {
+          throw new Error(nodeSkill + ' SKILL.md 缺「## Fix 批次状态机路径」段');
+        }
+        const section = match[1];
+        for (const keyword of ['受控归位', 'NODE: execute', '回源节点跑出口', 'entry <源节点>', 'exit <源节点> --apply', '禁止绕过']) {
+          if (!section.includes(keyword)) {
+            throw new Error(nodeSkill + ' Fix 批次状态机路径段缺关键词: ' + keyword);
+          }
+        }
+        if (section.includes('advance')) {
+          throw new Error(nodeSkill + ' Fix 批次状态机路径段不得把 advance 作为正常路径');
+        }
+        for (const line of section.split(/\r?\n/)) {
+          if (line.includes('直接') && line.includes('exit') && !/禁止|不得|会被 BLOCKED/.test(line)) {
+            throw new Error(nodeSkill + ' Fix 批次状态机路径段不得把直接 exit 源节点收场作为正常路径: ' + line.trim());
+          }
+        }
+      }
+    },
+  },
+];
 // ---------- 运行 ----------
 
 for (const sc of SCENARIOS) {
