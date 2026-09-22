@@ -2,11 +2,10 @@
   import { constants as fsConstants, promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createHash } from 'crypto';
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, RUNTIME_STATE_PATH, LEGACY_RUNTIME_STATE_PATH } from './state-schema.mjs';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES } from './protocol-utils.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from './task-parsing.mjs';
-import { resolveNextNode, resolveFixRollbackState, resolveFixReturnNode } from './route-node.mjs';
+import { resolveNextNode, resolveFixRollbackState, resolveFixReturnNode, taskSetSignature } from './route-node.mjs';
 
 const command = process.argv[2] ?? 'verify';
 const nodeId = process.argv[3] ?? null;
@@ -1179,27 +1178,6 @@ async function templateSectionPatterns() {
     return { titleMissing, headerMissing, orderIssue, missingSections };
   }
 
-// C3: TASK.md 任务集签名——提取全部 <task> 块，剥离开标签上的标记类属性（仅保留 id/parallel），排序防顺序漂移，拼接后 sha256
-// 行尾规范化——Windows 下 bash heredoc 写 LF、python 写 CRLF（os.linesep），跨工具编辑
-// 导致"任务集逻辑未变但字节变"的误报 BLOCK；签名前统一 CRLF → LF（仅归一化行尾，不改变内容语义）
-// 标记类属性白名单——子代理标记 task done 会在开标签追加 completed_at/started_at/finished_at/
-// assigned_to/updated_at 等属性（纯状态标记），仅剥离 status 仍误报 BLOCK；改为开标签只保留
-// 影响路由语义的 id/parallel，其余属性一律剥离（含未来新增标记属性，无需再改）；
-// 任务内容（name/action/write_files/verify/depends_on）保持签名敏感
-function taskSetSignature(taskContent) {
-  const normalized = String(taskContent).replace(/\r\n/g, '\n');
-  const blocks = (normalized.match(/<task[\s\S]*?<\/task>/g) || [])
-    .map((block) =>
-      block.replace(/<task[^>]*>/, (open) =>
-        open.replace(/\s+[a-zA-Z_][\w-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'))?/g, (attr) =>
-          /^\s*(?:id|parallel)(?=[\s=>])/.test(attr) ? attr : ''
-        )
-      )
-    )
-    .sort();
-  return createHash('sha256').update(blocks.join('\n'), 'utf8').digest('hex');
-}
-
 // WARN 计数——entry/exit 成功路径末尾输出汇总行（可观测性；追加不改变既有输出）
 let __warnCount = 0;
 const __origError = console.error;
@@ -1239,6 +1217,7 @@ async function main() {
         protocol,
         completedNodes: state.completedNodes,
         currentNode: state.currentNode,
+        history: state.history,
       });
     if (current !== node.id && !state.completedNodes.includes(node.id) && !fixBatchRollback) {
       console.error('BLOCKED: current Node is ' + String(current) + ', cannot enter ' + node.id + '.');
@@ -1377,25 +1356,27 @@ async function main() {
       process.exit(1);
     }
   }
-  // FIX-BATCH: 越界拦截——源节点（review/verify）驻留 + TASK 仍有 pending 修复任务时，
-  // 直接 exit 源节点收场会静默跳过 execute 生命周期与四类出口（缺陷实录形态）。排在 M1/R2
+  // FIX-BATCH: 越界拦截——源节点（review/verify）驻留，且 TASK 仍有 pending 修复任务，或修复
+  // 任务已 done 但本批 execute 生命周期未闭合（history 最新 exit execute 签名 ≠ 当前任务集签名）
+  // 时，直接 exit 源节点收场会静默跳过 execute 生命周期与四类出口（缺陷实录形态）。排在 M1/R2
   // entry 证据门之前：该越界路径给 Fix 恢复指引，避免通用 entry 提示覆盖更具体的归位路径。
   // 复用共享回退谓词判定：新 change 强制 BLOCKED 含恢复指引；旧 change 渐进 WARN 不阻断。
   if ((node.id === 'review' || node.id === 'verify') && state.activeChange) {
-    const fixBatchPending = await resolveFixRollbackState({
+    const fixBatchUnclosed = await resolveFixRollbackState({
       runRoot,
       changeName: state.activeChange,
       protocol,
       completedNodes: state.completedNodes,
       currentNode: node.id,
+      history: state.history,
     });
-    if (fixBatchPending && isNewChange(state)) {
-      console.error('BLOCKED: 存在未归位/未跑出口的 Fix 批次——' + node.id + ' 驻留且 TASK.md 仍有 pending 修复任务，不能直接 exit ' + node.id + ' 收场（会静默跳过 execute 生命周期与四类出口）');
+    if (fixBatchUnclosed && isNewChange(state)) {
+      console.error('BLOCKED: 存在未归位/未跑出口的 Fix 批次——' + node.id + ' 驻留且 TASK.md 存在 pending 修复任务，或修复任务已 done 但本批 execute 生命周期未闭合（最近一次 exit execute 后任务集仍有变更），不能直接 exit ' + node.id + ' 收场（会静默跳过 execute 生命周期与四类出口）');
       console.error('恢复: 运行 workflow-state.mjs next 或 workflow-guard.mjs entry execute 受控归位 execute → 在 execute 生命周期内完成修复任务 → record/exit execute --apply 跑完四类出口并回源节点 ' + node.id + ' → 再 exit ' + node.id + ' --apply');
       process.exit(1);
     }
-    if (fixBatchPending) {
-      console.error('FIX-BATCH WARN: 存在未归位/未跑出口的 Fix 批次——' + node.id + ' 驻留且 TASK.md 仍有 pending 修复任务，直接 exit ' + node.id + ' 会跳过 execute 出口门禁（旧 change 渐进不阻断；建议 next/entry execute 归位跑完出口后回源节点 exit）');
+    if (fixBatchUnclosed) {
+      console.error('FIX-BATCH WARN: 存在未归位/未跑出口的 Fix 批次——' + node.id + ' 驻留且 TASK.md 存在 pending 修复任务，或修复任务已 done 但本批 execute 生命周期未闭合，直接 exit ' + node.id + ' 会跳过 execute 出口门禁（旧 change 渐进不阻断；建议 next/entry execute 归位跑完出口后回源节点 exit）');
     }
   }
   // M1/R2: enter 证据检测——未 entry 直接 exit:新 change(init 标记)强制 BLOCKED,旧 change 渐进 WARN
@@ -2435,7 +2416,20 @@ async function main() {
     state.currentNode = isArchive ? null : (next?.id ?? null);
     state.status = next ? 'running' : 'completed';
     state.history = Array.isArray(state.history) ? state.history : [];
-    state.history.push({ event: 'exit-applied', node: node.id, at: new Date().toISOString() });
+    // 「未闭合 execute 生命周期」信号：exit execute --apply 把当次 TASK.md 任务集签名写入 history
+    // 事件——源节点直接 exit 时以「最新 exit execute 签名 ≠ 当前签名」识别 done-but-unclosed
+    // 修复批次（lazy entry 只刷新 taskHash、不写本事件，因此仍保持未闭合）。其余节点事件形状不变；
+    // TASK.md 缺失/不可读时省略字段（旧 state 形态 → 渐进放行）。
+    const exitEvent = { event: 'exit-applied', node: node.id, at: new Date().toISOString() };
+    if (node.id === 'execute' && state.activeChange) {
+      const exitTaskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
+      try {
+        if (await fileExists(exitTaskFile)) {
+          exitEvent.taskSetSignature = taskSetSignature(await fs.readFile(exitTaskFile, 'utf8'));
+        }
+      } catch {}
+    }
+    state.history.push(exitEvent);
     const bad = validateStateFields(state);
     if (bad.length) { console.error('BLOCKED: state 字段类型非法: ' + bad[0]); process.exit(1); }
     await writeJson(file, state);

@@ -8,6 +8,7 @@
 // specsRoot 由 runRoot 派生为 path.join(runRoot, '.specs')（与两侧调用方各自 .specs 根语义一致）。
 import { promises as fs } from 'fs';
 import path from 'path';
+import { createHash } from 'crypto';
 import { taskBlocks, taskOpeningAttrs } from './task-parsing.mjs';
 
 // 节点顺序 = 协议 nodes 顺序（disabled 过滤）。两侧路由排序共用同一实现（单一来源）。
@@ -261,23 +262,69 @@ async function readProtocolTaskContent(protocol, changeName, specsRoot) {
   }
 }
 
-// Fix 回退态判定：currentNode ∈ {review, verify} ∧ TASK.md 至少一个 status="pending"
-// 任务块 ∧ resolveNextNode(completedNodes) === 'execute'。TASK.md 缺失 / 不可读 / 无 pending /
-// 路由非 execute → false（fail-closed）。路由复用唯一权威 resolveNextNode，不复制判定。
-async function resolveFixRollbackState({ runRoot, changeName, protocol, completedNodes = [], currentNode }) {
+// TASK.md 任务集签名（唯一实现：guard 的入口记录 / 出口比对与 Fix 回退判定共用）——提取全部
+// <task> 块，剥离开标签上的标记类属性（仅保留 id/parallel），排序防顺序漂移，拼接后 sha256。
+// 行尾规范化——Windows 下 bash heredoc 写 LF、python 写 CRLF（os.linesep），跨工具编辑
+// 导致"任务集逻辑未变但字节变"的误报 BLOCK；签名前统一 CRLF → LF（仅归一化行尾，不改变内容语义）。
+// 标记类属性白名单——子代理标记 task done 会在开标签追加 completed_at/started_at/finished_at/
+// assigned_to/updated_at 等属性（纯状态标记），仅剥离 status 仍误报 BLOCK；改为开标签只保留
+// 影响路由语义的 id/parallel，其余属性一律剥离（含未来新增标记属性，无需再改）；
+// 任务内容（name/action/write_files/verify/depends_on）保持签名敏感。
+function taskSetSignature(taskContent) {
+  const normalized = String(taskContent).replace(/\r\n/g, '\n');
+  const blocks = (normalized.match(/<task[\s\S]*?<\/task>/g) || [])
+    .map((block) =>
+      block.replace(/<task[^>]*>/, (open) =>
+        open.replace(/\s+[a-zA-Z_][\w-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'))?/g, (attr) =>
+          /^\s*(?:id|parallel)(?=[\s=>])/.test(attr) ? attr : ''
+        )
+      )
+    )
+    .sort();
+  return createHash('sha256').update(blocks.join('\n'), 'utf8').digest('hex');
+}
+
+// 「未闭合 execute 生命周期」信号派生：取 history 中最后一次 exit-applied execute 事件记录的
+// 任务集签名；无 execute 出口事件 / 该事件无签名字段（旧 state）→ null（调用方按旧 change 渐进
+// 放行）。只认最新一次 execute 出口——更早的签名被后续闭合覆盖。
+function latestExecuteExitSignature(history) {
+  if (!Array.isArray(history)) return null;
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const event = history[i];
+    if (!event || event.event !== 'exit-applied' || event.node !== 'execute') continue;
+    return typeof event.taskSetSignature === 'string' && event.taskSetSignature !== ''
+      ? event.taskSetSignature
+      : null;
+  }
+  return null;
+}
+
+// Fix 回退态判定（单一权威——guard 入口/出口与 state 的 next 分支一律复用本函数）：currentNode
+// ∈ {review, verify} ∧ TASK.md 可解析出任务块 ∧ 以下任一：
+//   ① 存在 status="pending" 任务 ∧ resolveNextNode(completedNodes) === 'execute'（待执行回退路径）；
+//   ② 全任务 done ∧ execute 已在 completedNodes ∧ history 最新 exit execute 记录的任务集签名与
+//      当前 TASK.md 签名不一致（done-but-unclosed：追加/修改修复任务后从未重跑 exit execute；
+//      lazy entry 只刷新 taskHash、不写 exit 事件，签名仍保持不一致）。
+// 旧 state 无签名记录 → ② 不成立（旧 change 渐进放行）。TASK.md 缺失 / 不可读 / 零任务块 /
+// 当前节点非 review|verify → false（fail-closed）。路由复用唯一权威 resolveNextNode，不复制判定。
+async function resolveFixRollbackState({ runRoot, changeName, protocol, completedNodes = [], currentNode, history = [] }) {
   if (currentNode !== 'review' && currentNode !== 'verify') return false;
   const taskContent = await readProtocolTaskContent(protocol, changeName, path.join(runRoot, '.specs'));
   if (taskContent === null) return false;
-  const hasPendingTask = taskBlocks(taskContent).some((block) => {
-    const attrs = taskOpeningAttrs(block);
-    return attrs && attrs.status === 'pending';
-  });
-  if (!hasPendingTask) return false;
-  try {
-    return (await resolveNextNode({ runRoot, changeName, protocol, completedNodes })) === 'execute';
-  } catch {
-    return false;
+  const attrsList = taskBlocks(taskContent).map(taskOpeningAttrs).filter(Boolean);
+  if (attrsList.length === 0) return false;
+  if (attrsList.some((attrs) => attrs.status === 'pending')) {
+    try {
+      return (await resolveNextNode({ runRoot, changeName, protocol, completedNodes })) === 'execute';
+    } catch {
+      return false;
+    }
   }
+  if (!attrsList.every((attrs) => attrs.status === 'done')) return false;
+  if (!completedNodes.includes('execute')) return false;
+  const recorded = latestExecuteExitSignature(history);
+  if (recorded === null) return false;
+  return taskSetSignature(taskContent) !== recorded;
 }
 
 // Fix 回程节点推导（共享基础）：TASK.md 存在、至少一个任务块且全部 status="done" 时，
@@ -299,6 +346,7 @@ export {
   protocolTaskFilePath,
   hasSubagentNode,
   firstIncompletePostExecNode,
+  taskSetSignature,
   resolveFixRollbackState,
   resolveFixReturnNode,
 };

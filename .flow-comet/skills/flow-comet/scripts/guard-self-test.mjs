@@ -477,6 +477,15 @@ function fixBatchTaskText(fixStatus) {
   return '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n' + fixTaskBlock('T-FIX-01', fixStatus) + '\n';
 }
 
+// done-but-unclosed 回放夹具（L-070 事故形态）：history 中最新 exit-applied execute 事件记录的
+// 签名仍是追加修复任务之前的占位值（与「既有任务 + 追加修复任务」当前任务集签名必然不等）——
+// 机器信号 =「修复任务已标 done，但本批 execute 出口从未重新通过」。追加前的真实哈希值不影响
+// 判据（只比较是否相等），占位常量让夹具与哈希算法实现解耦；旧 state 无该字段 → 渐进放行。
+const STALE_FIX_BATCH_SIGNATURE = '0'.repeat(64);
+function fixBatchHistoryWithStaleExecuteExit() {
+  return [{ event: 'exit-applied', node: 'execute', at: '2026-09-20T00:00:00.000Z', taskSetSignature: STALE_FIX_BATCH_SIGNATURE }];
+}
+
 // 读取场景 state 的机器字段（Fix 批次场景的写盘断言：归位/回程真实落盘，不是只看输出）
 function readScenarioState(dir) {
   return JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -7802,12 +7811,16 @@ const SCENARIOS = [
   // 252: 越界拦截 + 恢复 + 旧 change 渐进——源节点（review/verify）驻留且 TASK 有 pending Fix
   // 任务时直接 exit 源节点收场：新 change BLOCKED 且含恢复指引（不许静默跳过 execute 出口门禁）；
   // 按指引 entry execute 归位 → 完成修复 → exit execute 回源节点可恢复；
+  // done-but-unclosed 变体（全任务 done 但本批 execute 出口未重跑：history 最新 exit execute
+  // 签名与当前任务集不等）同样 BLOCKED 且 state 零改写，闭合后源节点出口恢复通过；
   // 旧 change（无 newChange 标记）保持渐进 WARN 不阻断（向后兼容）。
   {
-    name: '252 越界：源节点 + pending Fix 直接 exit 源节点 BLOCK（新）/WARN（旧）+ 恢复闭环',
+    name: '252 越界：源节点 + pending/done-but-unclosed Fix 直接 exit 源节点 BLOCK（新）/WARN（旧）+ 恢复闭环',
     run: (dir) => {
       writeIntakeArtifacts(dir);
       const taskPath = '.specs/' + CHANGE_ID + '/TASK.md';
+      const statePath = path.join(dir, '.flow-comet', 'flow-comet-state.json');
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
         '# REVIEW\n\n## 发现\n\n### Critical\n\n- 无\n\n### Major\n\n- 无\n\n### Minor\n\n- 无\n\n## 结论\n\n审查发现需修复项，Fix 任务已追加；待 execute 出口完成后重新出口。\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
@@ -7891,20 +7904,125 @@ const SCENARIOS = [
       assertExit(resNoEntryBlock, 1);
       assertOut(resNoEntryBlock, 'BLOCKED: 存在未归位/未跑出口的 Fix 批次');
       assertNotOut(resNoEntryBlock, '未执行 entry 直接 exit');
-      // ④ 旧 change（无 newChange 标记）同路径：渐进 WARN 不阻断（向后兼容）
+      // ③c 新 change done-but-unclosed（review 源）：Fix 任务已 done，但 history 最新 exit
+      // execute 签名仍是追加前值（本批 execute 出口从未重跑）→ 必须 BLOCKED 且 state 字节零
+      // 改写（修复前此路径静默放行为 NODE: verify / archive）。
+      writeFile(dir, taskPath, fixBatchTaskText('done'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-01-SUMMARY.md', strictSummary('T-FIX-01'));
+      writeState(dir, { ...reviewState, history: fixBatchHistoryWithStaleExecuteExit() });
+      const staleReviewBytes = fs.readFileSync(statePath, 'utf8');
+      const resDoneBlock = runGuard(['exit', 'review', '--apply'], dir);
+      assertExit(resDoneBlock, 1);
+      assertOut(resDoneBlock, 'BLOCKED: 存在未归位/未跑出口的 Fix 批次');
+      assertOut(resDoneBlock, 'entry execute');
+      assertOut(resDoneBlock, 'workflow-state.mjs next');
+      assertOut(resDoneBlock, '恢复');
+      assertNotOut(resDoneBlock, 'ALL CHECKS PASSED');
+      if (fs.readFileSync(statePath, 'utf8') !== staleReviewBytes) {
+        throw new Error('done-but-unclosed BLOCK 不得改写 state 字节');
+      }
+      // ③c-2 恢复闭环：entry execute 归位 → 补 handoff → exit execute --apply 写当前签名 →
+      // 回源 review → exit review 通过（闭合后 done 变体不再拦截）。
+      const recDoneEntry = runGuard(['entry', 'execute'], dir);
+      assertExit(recDoneEntry, 0);
+      assertOut(recDoneEntry, 'FIX-BATCH: 受控归位 execute（源节点 review）');
+      after = readScenarioState(dir);
+      if (after.currentNode !== 'execute') {
+        throw new Error('done-but-unclosed 恢复步 entry execute 应归位 execute，实际 ' + JSON.stringify(after.currentNode));
+      }
+      after.evidence['subagent-execute'] = after.evidence['subagent-execute'] || {};
+      after.evidence['subagent-execute'].handoffResult = {
+        ...(after.evidence['subagent-execute'].handoffResult || {}),
+        ...handoffFor(['T-FIX-01']),
+      };
+      writeState(dir, after);
+      assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+      const recDoneExit = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(recDoneExit, 0);
+      assertOut(recDoneExit, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
+      assertOut(recDoneExit, 'NODE: review');
+      assertExit(runState(['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md'], dir, env), 0);
+      assertExit(runGuard(['entry', 'review'], dir), 0);
+      const recDoneReview = runGuard(['exit', 'review', '--apply'], dir);
+      assertExit(recDoneReview, 0);
+      assertOut(recDoneReview, 'ALL CHECKS PASSED');
+      assertNotOut(recDoneReview, 'BLOCKED');
+      // ③d 新 change done-but-unclosed（verify 源）：TEST/UAT 在场（原路径会跳过 verify 去
+      // archive）+ 全 Fix 任务 done + 最新 exit execute 签名过时 → BLOCKED，验证命令未执行，
+      // state 字节零改写；闭合后 exit verify 真实执行验证命令并推进 archive。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md',
+        '# TEST\n\n## 验证命令\n\n```\nnode -e "require(\'fs\').writeFileSync(\'verify-gate-ran.txt\', \'GATE-RAN\')"\n```\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/UAT.md', '# UAT\n\n## 验收\n\n- 通过\n');
+      const gateMarker = path.join(dir, 'verify-gate-ran.txt');
+      fs.rmSync(gateMarker, { force: true });
+      writeFile(dir, taskPath, fixBatchTaskText('done'));
+      writeState(dir, {
+        ...reviewState,
+        currentNode: 'verify',
+        completedNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review'],
+        enteredNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review', 'verify'],
+        evidence: { ...reviewState.evidence, review: { summary: 'review complete' }, verify: { summary: 'verify in progress' } },
+        history: fixBatchHistoryWithStaleExecuteExit(),
+      });
+      const staleVerifyBytes = fs.readFileSync(statePath, 'utf8');
+      const resDoneVerifyBlock = runGuard(['exit', 'verify', '--apply'], dir);
+      assertExit(resDoneVerifyBlock, 1);
+      assertOut(resDoneVerifyBlock, 'BLOCKED: 存在未归位/未跑出口的 Fix 批次');
+      assertOut(resDoneVerifyBlock, 'entry execute');
+      assertNotOut(resDoneVerifyBlock, 'ALL CHECKS PASSED');
+      if (fs.existsSync(gateMarker)) throw new Error('done-but-unclosed verify BLOCK 不得执行验证命令');
+      if (fs.readFileSync(statePath, 'utf8') !== staleVerifyBytes) {
+        throw new Error('done-but-unclosed verify BLOCK 不得改写 state 字节');
+      }
+      const recDoneVerifyEntry = runGuard(['entry', 'execute'], dir);
+      assertExit(recDoneVerifyEntry, 0);
+      assertOut(recDoneVerifyEntry, 'FIX-BATCH: 受控归位 execute（源节点 verify）');
+      after = readScenarioState(dir);
+      after.evidence['subagent-execute'] = after.evidence['subagent-execute'] || {};
+      after.evidence['subagent-execute'].handoffResult = {
+        ...(after.evidence['subagent-execute'].handoffResult || {}),
+        ...handoffFor(['T-FIX-01']),
+      };
+      writeState(dir, after);
+      assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+      const recDoneVerifyExit = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(recDoneVerifyExit, 0);
+      assertOut(recDoneVerifyExit, 'FIX-BATCH: 回源节点 verify（execute 出口已完成）');
+      assertOut(recDoneVerifyExit, 'NODE: verify');
+      assertExit(runState(['skill-load', 'verify', 'flow-comet-verify', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
+      assertExit(runGuard(['entry', 'verify'], dir), 0);
+      const recDoneVerify = runGuard(['exit', 'verify', '--apply'], dir);
+      assertExit(recDoneVerify, 0);
+      assertOut(recDoneVerify, 'ALL CHECKS PASSED');
+      assertOut(recDoneVerify, 'NODE: archive');
+      if (!fs.existsSync(gateMarker) || fs.readFileSync(gateMarker, 'utf8') !== 'GATE-RAN') {
+        throw new Error('闭合后 verify 出口未真实执行 TEST.md 验证命令（副作用文件缺失/内容不符）');
+      }
+      // ④ 旧 change（无 newChange 标记）pending 同路径：渐进 WARN 不阻断（向后兼容）
+      writeFile(dir, taskPath, fixBatchTaskText('pending'));
       writeState(dir, { ...reviewState, newChange: false });
       const resOld = runGuard(['exit', 'review'], dir);
       assertExit(resOld, 0);
       assertOut(resOld, 'FIX-BATCH WARN');
       assertOut(resOld, 'ALL CHECKS PASSED');
+      // ④b 过渡态渐进（feature 之前创建的 state 无 exit execute 签名字段）：全 done 也不得
+      // 仅凭「签名缺席」误判未闭合——无签名记录 → done 变体不成立，源节点出口保持可走
+      writeFile(dir, taskPath, fixBatchTaskText('done'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-01-SUMMARY.md', strictSummary('T-FIX-01'));
+      writeState(dir, { ...reviewState, history: [{ event: 'exit-applied', node: 'execute', at: '2026-09-19T00:00:00.000Z' }] });
+      const resLegacyState = runGuard(['exit', 'review', '--apply'], dir);
+      assertExit(resLegacyState, 0);
+      assertNotOut(resLegacyState, 'BLOCKED');
+      assertOut(resLegacyState, 'ALL CHECKS PASSED');
     },
   },
 
   // 253: next Fix 回退态显式归位——源节点（review/verify）驻留 + TASK 有 pending
   // Fix 任务 + 共享路由回 execute 时，next 必须显式归位 execute、写盘并输出审计行，不再依赖
-  // inProgress 保护副作用（修复前 next 仍输出源节点）。反例：全 done 无 pending → 不归位。
+  // inProgress 保护副作用（修复前 next 仍输出源节点）。反例：全 done 无 pending → 不归位；
+  // done-but-unclosed（全 done + history 最新 exit execute 签名仍是追加前值）同样必须归位。
   {
-    name: '253 next Fix 回退态显式归位：review/verify 源 + 审计行（无 pending 反例不归位）',
+    name: '253 next Fix 回退态显式归位：review/verify 源 + 审计行（无 pending 反例不归位；done-but-unclosed 归位）',
     run: (dir) => {
       const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
@@ -7971,6 +8089,19 @@ const SCENARIOS = [
       after = readScenarioState(dir);
       if (after.currentNode !== 'review') {
         throw new Error('无 pending 时不应归位 execute，实际 ' + JSON.stringify(after.currentNode));
+      }
+      // ④ done-but-unclosed 回退态（全 done + history 最新 exit execute 签名仍是追加前值）：
+      // next 同样显式归位 execute（修复前 done 变体无恢复通道，next 停在源节点）。
+      writeState(dir, { ...base, history: fixBatchHistoryWithStaleExecuteExit() });
+      const resDoneRollback = runState(['next'], dir, env);
+      assertExit(resDoneRollback, 0);
+      assertOut(resDoneRollback, 'FIX-BATCH: 归位 execute（源节点 review）');
+      assertOut(resDoneRollback, 'NODE: execute');
+      assertNotOut(resDoneRollback, 'NODE: review');
+      assertNotOut(resDoneRollback, 'BLOCKED');
+      after = readScenarioState(dir);
+      if (after.currentNode !== 'execute') {
+        throw new Error('done-but-unclosed 回退态 next 后 currentNode 应为 execute，实际 ' + JSON.stringify(after.currentNode));
       }
     },
   },

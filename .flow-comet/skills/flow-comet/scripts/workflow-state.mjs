@@ -835,6 +835,7 @@ async function main() {
     // （修复前 next 输出仍停在源节点）。判定复用 route-node 共享纯函数。
     if (await resolveFixRollbackState({
       runRoot, changeName, protocol, completedNodes: completedArr, currentNode: state.currentNode,
+      history: state.history,
     })) {
       const sourceNode = state.currentNode;
       state.currentNode = 'execute';
@@ -887,6 +888,7 @@ async function main() {
         // （否则被严格模式误拦为"未 exit 跳阶段"）；豁免条件不满足时维持严格 BLOCK
         const rollbackExempt = await resolveFixRollbackState({
           runRoot, changeName, protocol, completedNodes: completedArr, currentNode: state.currentNode,
+          history: state.history,
         });
         // 正常推进豁免——exit --apply 推进 currentNode 到下一节点后按 SKILL 协议调 next
         // （正常路径）不拦截；与  回退豁免独立判断（详见 normalAdvanceExempt 注释）

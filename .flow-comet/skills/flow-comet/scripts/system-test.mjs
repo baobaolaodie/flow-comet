@@ -773,6 +773,15 @@ function fixBatchReviewDoc(disposed) {
     '\n\n### Minor\n\n- 无\n\n## 结论\n\nFix 批次在 execute 生命周期内完成后回源节点重新跑出口。\n';
 }
 
+// done-but-unclosed 回放夹具（L-070 事故形态）：history 最新 exit-applied execute 记录的任务集
+// 签名仍是追加修复任务之前的占位值（与当前「既有任务 + 追加修复任务」任务集签名必然不等）——
+// 机器信号 =「修复任务已 done，但本批 execute 出口从未重新通过」。判据只比较是否相等，占位常量
+// 与哈希实现解耦；旧 state 无该字段 → 渐进放行。
+const STALE_TASK_SET_SIGNATURE = '0'.repeat(64);
+function fixBatchHistoryWithStaleExecuteExit() {
+  return [{ event: 'exit-applied', node: 'execute', at: '2026-09-20T00:00:00.000Z', taskSetSignature: STALE_TASK_SET_SIGNATURE }];
+}
+
 // Fix 批次夹具写入：state + TASK + 既有任务 SUMMARY + REVIEW.md（verify 源另备 TEST/UAT）。
 // kind='review'（审查驻留，execute 已首次完成）/ 'verify'（验证驻留，review 已完成）；
 // newChange=false 时 state 不带新 change 标记（旧 change 渐进形态）。
@@ -1859,16 +1868,20 @@ const TEST_ITEMS = [
     },
   },
   {
-    // 越界拦截 + 旧 change 兼容（真实命令链路）：新 change 下源节点驻留 + pending 修复任务时直接
-    // exit 源节点 → BLOCKED 含恢复指引且 state 不变；同夹具去掉 pending 即通过（判别力对照——
-    // 证明拦截来自 Fix 批次门禁而非夹具缺件）；旧 change（无新 change 标记）同形态 → 渐进 WARN
-    // 放行 + next 归位可达，流程不卡死。
+    // 越界拦截 + done-but-unclosed 回放 + 旧 change 兼容（真实命令链路）：
+    // ① 新 change review/pending → BLOCKED + state 不变；
+    // ② L-070 事故回放——Fix 任务全 done 但 history 最新 exit execute 签名仍是追加前值
+    //    （从未重跑 execute 出口）→ 同出口 BLOCKED + state 字节零改写（修复前被错误断言为通过）；
+    // ③ 正对照——按指引 entry execute + exit execute --apply 真闭合后，review 出口通过；
+    // ④⑤ verify 源 pending / done-but-unclosed 同样 BLOCKED 且验证命令不执行，⑥ 闭合后通过；
+    // ⑦⑧⑨ 旧 change（无 new change 标记）同形态渐进 WARN 放行、next 归位可达、验证出口真实执行。
     name: 'A23 Fix 越界拦截与旧 change 渐进：源节点直接 exit BLOCK（新）/WARN（旧）不卡死（真实命令）',
     run: (dir) => {
       const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       const gateMarker = path.join(dir, 'verify-gate-ran.txt');
+      const statePath = path.join(dir, '.flow-comet', 'flow-comet-state.json');
 
-      // ① 新 change review 源：直接 exit review --apply → BLOCKED + 恢复指引 + state 不变
+      // ① 新 change review 源 + pending：直接 exit review --apply → BLOCKED + 恢复指引 + state 不变
       writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending' });
       const rBlock = runGuard(['exit', 'review', '--apply'], dir, env);
       assertExit(rBlock, 1);
@@ -1883,16 +1896,42 @@ const TEST_ITEMS = [
         throw new Error('review 源越界 BLOCK 不得改写 state: ' + JSON.stringify({ currentNode: st.currentNode, completedNodes: st.completedNodes }));
       }
 
-      // ② 判别力对照：同夹具任务全 done（无 pending）→ 同出口通过（拦截确由 Fix 批次门禁触发）
+      // ② L-070 事故回放形态：Fix 任务已全 done，但 history 最新 exit execute 记录的是追加前签名
+      //（done 后从未再跑 execute 出口）→ 修复前静默放行，修复后必须 BLOCKED + state 字节零改写
       writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'done' });
       writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-01-SUMMARY.md', execSummaryFixture('T-FIX-01'));
-      const rPass = runGuard(['exit', 'review', '--apply'], dir, env);
-      assertExit(rPass, 0);
-      assertOut(rPass, 'ALL CHECKS PASSED');
-      assertNotOut(rPass, 'BLOCKED');
-      assertNodeLine(rPass, 'verify');
+      const doneUnclosed = readStateFile(dir);
+      doneUnclosed.history = fixBatchHistoryWithStaleExecuteExit();
+      writeState(dir, doneUnclosed);
+      const doneBytes = fs.readFileSync(statePath, 'utf8');
+      const rDoneBlock = runGuard(['exit', 'review', '--apply'], dir, env);
+      assertExit(rDoneBlock, 1);
+      assertOut(rDoneBlock, 'BLOCKED: 存在未归位/未跑出口的 Fix 批次');
+      assertOut(rDoneBlock, 'entry execute');
+      assertOut(rDoneBlock, 'workflow-state.mjs next');
+      assertNotOut(rDoneBlock, 'ALL CHECKS PASSED');
+      if (fs.readFileSync(statePath, 'utf8') !== doneBytes) {
+        throw new Error('done-but-unclosed 越界 BLOCK 不得改写 state 字节');
+      }
 
-      // ③ 新 change verify 源：直接 exit verify --apply → BLOCKED，且验证命令未被执行
+      // ③ 正对照：同夹具按指引真闭合（entry execute → 完成声明/record → exit execute --apply 写当前
+      //    签名并回源 review）→ 再 exit review --apply 通过（拦截只针对未闭合态，不误伤正常路径）
+      assertExit(runGuard(['entry', 'execute'], dir, env), 0);
+      completeFixTaskAndRecord(dir, env);
+      const rClosedExit = runGuard(['exit', 'execute', '--apply'], dir, env);
+      assertExit(rClosedExit, 0);
+      assertOut(rClosedExit, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
+      assertNodeLine(rClosedExit, 'review');
+      assertExit(runState(['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md'], dir, env), 0);
+      assertExit(runGuard(['entry', 'review'], dir, env), 0);
+      const rReviewPass = runGuard(['exit', 'review', '--apply'], dir, env);
+      assertExit(rReviewPass, 0);
+      assertOut(rReviewPass, 'ALL CHECKS PASSED');
+      assertNotOut(rReviewPass, 'BLOCKED');
+      assertNodeLine(rReviewPass, 'verify');
+
+      // ④ 新 change verify 源 + pending：直接 exit verify --apply → BLOCKED，验证命令未执行
+      fs.rmSync(gateMarker, { force: true });
       writeFixBatchFixture(dir, { kind: 'verify', fixStatus: 'pending' });
       const vBlock = runGuard(['exit', 'verify', '--apply'], dir, env);
       assertExit(vBlock, 1);
@@ -1905,7 +1944,41 @@ const TEST_ITEMS = [
         throw new Error('verify 源越界 BLOCK 不得改写 state: ' + JSON.stringify({ currentNode: st.currentNode, completedNodes: st.completedNodes }));
       }
 
-      // ④ 旧 change review 源：直接 exit review --apply → FIX-BATCH WARN 渐进放行（不 BLOCK、不死结）
+      // ⑤ verify 源 done-but-unclosed 回放（独立复核实跑形态）：review 已完成 + TEST/UAT 在场
+      //（原路径会跳过 verify 去 archive）+ 全 done + 最新 execute exit 签名过时 → BLOCKED，验证命令
+      // 不执行、state 字节零改写；⑥ 按指引闭合后 exit verify 真实执行验证命令并推进 archive
+      writeFixBatchFixture(dir, { kind: 'verify', fixStatus: 'done' });
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-01-SUMMARY.md', execSummaryFixture('T-FIX-01'));
+      const verifyDoneUnclosed = readStateFile(dir);
+      verifyDoneUnclosed.history = fixBatchHistoryWithStaleExecuteExit();
+      writeState(dir, verifyDoneUnclosed);
+      const verifyDoneBytes = fs.readFileSync(statePath, 'utf8');
+      const vDoneBlock = runGuard(['exit', 'verify', '--apply'], dir, env);
+      assertExit(vDoneBlock, 1);
+      assertOut(vDoneBlock, 'BLOCKED: 存在未归位/未跑出口的 Fix 批次');
+      assertOut(vDoneBlock, 'entry execute');
+      assertNotOut(vDoneBlock, 'ALL CHECKS PASSED');
+      if (fs.existsSync(gateMarker)) throw new Error('done-but-unclosed 越界 BLOCK 不得执行 verify 验证命令');
+      if (fs.readFileSync(statePath, 'utf8') !== verifyDoneBytes) {
+        throw new Error('verify done-but-unclosed 越界 BLOCK 不得改写 state 字节');
+      }
+      assertExit(runGuard(['entry', 'execute'], dir, env), 0);
+      completeFixTaskAndRecord(dir, env);
+      const vClosedExit = runGuard(['exit', 'execute', '--apply'], dir, env);
+      assertExit(vClosedExit, 0);
+      assertOut(vClosedExit, 'FIX-BATCH: 回源节点 verify（execute 出口已完成）');
+      assertNodeLine(vClosedExit, 'verify');
+      assertExit(runState(['skill-load', 'verify', 'flow-comet-verify', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
+      assertExit(runGuard(['entry', 'verify'], dir, env), 0);
+      const vPass = runGuard(['exit', 'verify', '--apply'], dir, env);
+      assertExit(vPass, 0);
+      assertOut(vPass, 'ALL CHECKS PASSED');
+      assertNodeLine(vPass, 'archive');
+      if (!fs.existsSync(gateMarker) || fs.readFileSync(gateMarker, 'utf8') !== 'GATE-RAN') {
+        throw new Error('闭合后 verify 出口未真实执行 TEST.md 验证命令（副作用文件缺失/内容不符）');
+      }
+
+      // ⑦ 旧 change review 源 + pending：直接 exit review --apply → FIX-BATCH WARN 渐进放行（不 BLOCK、不死结）
       writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending', newChange: false });
       const oldExit = runGuard(['exit', 'review', '--apply'], dir, env);
       assertExit(oldExit, 0);
@@ -1918,7 +1991,7 @@ const TEST_ITEMS = [
         throw new Error('旧 change 渐进放行后 currentNode 应为 execute，实际 ' + JSON.stringify(st.currentNode));
       }
 
-      // ⑤ 旧 change next 入口：pending 修复 + 源节点驻留 → 不新增 BLOCK，归位 execute 可继续
+      // ⑧ 旧 change next 入口：pending 修复 + 源节点驻留 → 不新增 BLOCK，归位 execute 可继续
       writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending', newChange: false });
       const oldNext = runState(['next'], dir, env);
       assertExit(oldNext, 0);
@@ -1930,7 +2003,8 @@ const TEST_ITEMS = [
         throw new Error('旧 change next 归位后 currentNode 应为 execute，实际 ' + JSON.stringify(st.currentNode));
       }
 
-      // ⑥ 旧 change verify 源：直接 exit verify --apply → WARN 渐进且验证出口真实执行、不卡死
+      // ⑨ 旧 change verify 源 + pending：直接 exit verify --apply → WARN 渐进且验证出口真实执行、不卡死
+      fs.rmSync(gateMarker, { force: true });
       writeFixBatchFixture(dir, { kind: 'verify', fixStatus: 'pending', newChange: false });
       const oldVerify = runGuard(['exit', 'verify', '--apply'], dir, env);
       assertExit(oldVerify, 0);
