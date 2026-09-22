@@ -228,4 +228,77 @@ export async function resolveNextNode({ runRoot, changeName, protocol, completed
   return 'execute';
 }
 
-export { route, protocolTaskFilePath, hasSubagentNode };
+// ---------- Fix 批次共享判定（单一权威 · 纯函数） ----------
+// workflow-guard 与 workflow-state 的 Fix 两态一律复用本段实现，禁止任一侧内联第二份
+// （L-058 路由单一权威 / L-067 同判据两份实现必然分叉）。纯判定：只读 TASK.md 与协议/产物
+// 推导，无副作用、无 console 输出、无 process.exit，不新增 state 字段。
+// execute 家族节点：协议 route 顺序中由任务状态特判的节点（与 resolveNextNode 同一划分）。
+const EXECUTE_FAMILY_NODE_IDS = new Set(['execute', 'subagent-execute']);
+
+// execute 家族之后第一个未完成节点：按协议 route 顺序跳过全部 execute 家族节点，返回其后
+// 首个不在 completedNodes 中的节点 id；协议无 execute 家族或后置节点全部完成 → null。
+// 这里只做通用推导（内置协议 = review → verify → archive）；是否可作为 Fix 回程源由调用方
+// （resolveFixReturnNode / exit apply）再用 review / verify 收窄（只覆盖内置源节点）。
+function firstIncompletePostExecNode({ protocol, completedNodes = [] }) {
+  let sawExecuteFamily = false;
+  for (const node of route(protocol)) {
+    if (EXECUTE_FAMILY_NODE_IDS.has(node.id)) {
+      sawExecuteFamily = true;
+      continue;
+    }
+    if (sawExecuteFamily && !completedNodes.includes(node.id)) return node.id;
+  }
+  return null;
+}
+
+// 协议任务文件内容读取（taskFile 语义唯一来源）：不存在 / 不可读 → null；调用方各自按
+// fail-closed 语义处理（回退判定 → false，回程推导 → null），不把访问类故障当成空任务集。
+async function readProtocolTaskContent(protocol, changeName, specsRoot) {
+  try {
+    return await fs.readFile(protocolTaskFilePath(protocol, changeName, specsRoot), 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+// Fix 回退态判定：currentNode ∈ {review, verify} ∧ TASK.md 至少一个 status="pending"
+// 任务块 ∧ resolveNextNode(completedNodes) === 'execute'。TASK.md 缺失 / 不可读 / 无 pending /
+// 路由非 execute → false（fail-closed）。路由复用唯一权威 resolveNextNode，不复制判定。
+async function resolveFixRollbackState({ runRoot, changeName, protocol, completedNodes = [], currentNode }) {
+  if (currentNode !== 'review' && currentNode !== 'verify') return false;
+  const taskContent = await readProtocolTaskContent(protocol, changeName, path.join(runRoot, '.specs'));
+  if (taskContent === null) return false;
+  const hasPendingTask = taskBlocks(taskContent).some((block) => {
+    const attrs = taskOpeningAttrs(block);
+    return attrs && attrs.status === 'pending';
+  });
+  if (!hasPendingTask) return false;
+  try {
+    return (await resolveNextNode({ runRoot, changeName, protocol, completedNodes })) === 'execute';
+  } catch {
+    return false;
+  }
+}
+
+// Fix 回程节点推导（共享基础）：TASK.md 存在、至少一个任务块且全部 status="done" 时，
+// 取 firstIncompletePostExecNode；仅当其 ∈ {review, verify}（内置回程源）才返回，否则 null。
+// 仍有 pending / 零任务块 / TASK.md 缺失 → null（fail-closed）。「execute 本次 exit 前已在
+// completedNodes」的二次完成条件由 exit apply 推进点判定，本函数只做 TASK + 路由推导。
+async function resolveFixReturnNode({ runRoot, changeName, protocol, completedNodes = [] }) {
+  const taskContent = await readProtocolTaskContent(protocol, changeName, path.join(runRoot, '.specs'));
+  if (taskContent === null) return null;
+  const attrsList = taskBlocks(taskContent).map(taskOpeningAttrs).filter(Boolean);
+  if (attrsList.length === 0) return null;
+  if (!attrsList.every((attrs) => attrs.status === 'done')) return null;
+  const node = firstIncompletePostExecNode({ protocol, completedNodes });
+  return node === 'review' || node === 'verify' ? node : null;
+}
+
+export {
+  route,
+  protocolTaskFilePath,
+  hasSubagentNode,
+  firstIncompletePostExecNode,
+  resolveFixRollbackState,
+  resolveFixReturnNode,
+};

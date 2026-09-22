@@ -32,6 +32,10 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import vm from 'vm'; // 系统测试集项数的运行时派生：求值其 TEST_ITEMS 数组字面量（见 readSystemTestItemCount）
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// route-node 共享 Fix 判定纯函数（直接调用锚）：动态导入 + 顶层 await——缺失命名导出由
+// requireRouteNodeExport 在场景内显式报告（RED 可定位到具体场景），避免静态命名 import 在
+// 模块加载期失败导致其余场景一并 abort（整套件 0 场景、失败原因失焦）。
+const routeNodeModule = await import(pathToFileURL(path.join(__dirname, 'route-node.mjs')).href);
 const GUARD = path.join(__dirname, 'workflow-guard.mjs');
 const STATE = path.join(__dirname, 'workflow-state.mjs');
 const HOOK = path.join(__dirname, 'comet-hook-guard.mjs');
@@ -442,6 +446,30 @@ function assertNotOut(res, keyword) {
   if (text.includes(keyword)) {
     throw new Error('输出不应包含关键词 ' + JSON.stringify(keyword) + '（exit ' + res.status + '）\n实际输出:\n' + text);
   }
+}
+
+// ---------- route-node 共享 Fix 判定纯函数锚（直接调用） ----------
+
+// 协议副本由运行器在场景执行前复制到 <dir>/reference/（见底部运行段）。
+function readScenarioProtocol(dir) {
+  return JSON.parse(fs.readFileSync(path.join(dir, 'reference', 'workflow-protocol.json'), 'utf8'));
+}
+
+// 245~247 场景直接调用 route-node 纯函数：缺失导出在此显式报告（RED 定位到具体场景，
+// 而不是整套件在模块加载期因命名绑定失败 abort）。
+function requireRouteNodeExport(name) {
+  const fn = routeNodeModule?.[name];
+  if (typeof fn !== 'function') {
+    throw new Error('route-node.mjs 未导出共享 Fix 判定纯函数 ' + name + '（待实现）');
+  }
+  return fn;
+}
+
+// Fix 夹具任务块（串行；字段齐全以通过 task-parsing 解析）
+function fixTaskBlock(id, status) {
+  return '<task id="' + id + '" parallel="false" status="' + status + '">'
+    + '<action>实现 ' + id + '</action><write_files>src/' + id.toLowerCase() + '.mjs</write_files>'
+    + '<verify>node --check src/' + id.toLowerCase() + '.mjs</verify></task>';
 }
 
 // ---------- 伪造材料 ----------
@@ -7450,6 +7478,135 @@ const SCENARIOS = [
       }
     },
   },
+
+  // 245: Fix 回退态共享判定（共享判定 / AC-1 基础谓词）——正例：review / verify 驻留 + TASK 存在
+  // pending 任务 + resolveNextNode(completedNodes) === execute；反例三类：非源节点驻留 /
+  // 无 pending 任务（路由仍回 execute，证明 pending 是独立条件）/ 路由不回 execute（前置产物缺失）。
+  {
+    name: '245 resolveFixRollbackState：源节点 + pending + 路由回 execute → true（三类反例）',
+    run: async (dir) => {
+      const isRollback = requireRouteNodeExport('resolveFixRollbackState');
+      const protocol = readScenarioProtocol(dir);
+      const completedNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute'];
+      const pendingTasks = '# TASK\n\n' + fixTaskBlock('T01', 'pending') + '\n';
+      writeIntakeArtifacts(dir);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', pendingTasks);
+      const baseArgs = { runRoot: dir, changeName: CHANGE_ID, protocol, completedNodes };
+      // 夹具前提：该 completedNodes 下共享路由确实推导回 execute（谓词第三条件成立）
+      if ((await routeNodeModule.resolveNextNode(baseArgs)) !== 'execute') {
+        throw new Error('夹具前提失效：pending 任务在场时 resolveNextNode 应推导 execute');
+      }
+      const fromReview = await isRollback({ ...baseArgs, currentNode: 'review' });
+      if (fromReview !== true) {
+        throw new Error('review 驻留 + pending + 路由 execute 应为 true，实际 ' + JSON.stringify(fromReview));
+      }
+      const fromVerify = await isRollback({ ...baseArgs, currentNode: 'verify' });
+      if (fromVerify !== true) {
+        throw new Error('verify 驻留 + pending + 路由 execute 应为 true，实际 ' + JSON.stringify(fromVerify));
+      }
+      // 反例①：非 review/verify 驻留（pending 与路由条件仍成立）→ false
+      const fromExecute = await isRollback({ ...baseArgs, currentNode: 'execute' });
+      if (fromExecute !== false) {
+        throw new Error('非源节点驻留应为 false，实际 ' + JSON.stringify(fromExecute));
+      }
+      // 反例②：无 pending（全 done 但缺 SUMMARY，resolveNextNode 仍推导 execute）→ false
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n');
+      if ((await routeNodeModule.resolveNextNode(baseArgs)) !== 'execute') {
+        throw new Error('夹具前提失效：全 done 且缺 SUMMARY 时 resolveNextNode 应仍推导 execute');
+      }
+      const noPending = await isRollback({ ...baseArgs, currentNode: 'review' });
+      if (noPending !== false) {
+        throw new Error('无 pending 任务应为 false，实际 ' + JSON.stringify(noPending));
+      }
+      // 反例③：pending 在场但前置产物缺失 → 路由退回 design（非 execute）→ false
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', pendingTasks);
+      fs.rmSync(path.join(dir, '.specs', CHANGE_ID, 'DESIGN.md'));
+      if ((await routeNodeModule.resolveNextNode(baseArgs)) !== 'design') {
+        throw new Error('夹具前提失效：DESIGN.md 缺失时 resolveNextNode 应推导 design');
+      }
+      const notExecute = await isRollback({ ...baseArgs, currentNode: 'review' });
+      if (notExecute !== false) {
+        throw new Error('路由不回 execute 时应为 false，实际 ' + JSON.stringify(notExecute));
+      }
+    },
+  },
+
+  // 246: execute 后第一个未完成节点推导（共享推导基础）——按协议 route 顺序跳过全部
+  // execute 家族节点（execute / subagent-execute 均不参与后置推导），返回其后首个未完成
+  // 节点：review → verify → archive；协议无 execute 家族 → null（调用方再用 review/verify 收窄）。
+  {
+    name: '246 firstIncompletePostExecNode：execute 家族后首个未完成节点（review→verify→archive；无 execute 家族→null）',
+    run: (dir) => {
+      const firstIncomplete = requireRouteNodeExport('firstIncompletePostExecNode');
+      const protocol = readScenarioProtocol(dir);
+      const pre = ['open', 'design', 'plan'];
+      // subagent-execute（execute 家族）未完成不作为后置节点，首个后置节点应为 review
+      const review = firstIncomplete({ protocol, completedNodes: [...pre, 'execute'] });
+      if (review !== 'review') {
+        throw new Error('execute 已完成、subagent-execute 未完成时应为 review，实际 ' + JSON.stringify(review));
+      }
+      const verify = firstIncomplete({ protocol, completedNodes: [...pre, 'execute', 'subagent-execute', 'review'] });
+      if (verify !== 'verify') {
+        throw new Error('review 已完成时应为 verify，实际 ' + JSON.stringify(verify));
+      }
+      const archive = firstIncomplete({ protocol, completedNodes: [...pre, 'execute', 'subagent-execute', 'review', 'verify'] });
+      if (archive !== 'archive') {
+        throw new Error('review/verify 均已完成时应为 archive，实际 ' + JSON.stringify(archive));
+      }
+      const noExecuteFamily = firstIncomplete({ protocol: { nodes: [{ id: 'alpha' }, { id: 'beta' }] }, completedNodes: [] });
+      if (noExecuteFamily !== null) {
+        throw new Error('协议无 execute 家族时应为 null，实际 ' + JSON.stringify(noExecuteFamily));
+      }
+    },
+  },
+
+  // 247: Fix 回程节点推导（共享推导基础）——TASK 全 done → 取 execute 后首个未完成节点，
+  // 仅 review/verify 可作回程源（archive / 完成态 → null）；仍有 pending / TASK 缺失 /
+  // 零任务块一律 null（fail-closed，不许用半解析结果回程）。
+  {
+    name: '247 resolveFixReturnNode：全 done 且源节点未完成 → 源节点；否则 null（pending/缺失/零任务块）',
+    run: async (dir) => {
+      const fixReturn = requireRouteNodeExport('resolveFixReturnNode');
+      const protocol = readScenarioProtocol(dir);
+      const completedNodes = ['open', 'design', 'plan', 'execute'];
+      writeIntakeArtifacts(dir);
+      const taskPath = path.join(dir, '.specs', CHANGE_ID, 'TASK.md');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
+        '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n' + fixTaskBlock('T02', 'done') + '\n');
+      const baseArgs = { runRoot: dir, changeName: CHANGE_ID, protocol, completedNodes };
+      const sourceReview = await fixReturn(baseArgs);
+      if (sourceReview !== 'review') {
+        throw new Error('review 未完成、任务全 done 时应为 review，实际 ' + JSON.stringify(sourceReview));
+      }
+      const sourceVerify = await fixReturn({ ...baseArgs, completedNodes: [...completedNodes, 'subagent-execute', 'review'] });
+      if (sourceVerify !== 'verify') {
+        throw new Error('review 已完成、verify 未完成时应为 verify，实际 ' + JSON.stringify(sourceVerify));
+      }
+      const pastSources = await fixReturn({ ...baseArgs, completedNodes: [...completedNodes, 'subagent-execute', 'review', 'verify'] });
+      if (pastSources !== null) {
+        throw new Error('review/verify 均已完成（首个未完成为 archive）时应为 null，实际 ' + JSON.stringify(pastSources));
+      }
+      // 反例：仍有 pending 任务 → null（即使 resolveNextNode 会推导回 execute）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
+        '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n' + fixTaskBlock('T02', 'pending') + '\n');
+      const stillPending = await fixReturn(baseArgs);
+      if (stillPending !== null) {
+        throw new Error('仍有 pending 任务时应为 null，实际 ' + JSON.stringify(stillPending));
+      }
+      // 反例：TASK.md 缺失 → null
+      fs.rmSync(taskPath);
+      const missingTask = await fixReturn(baseArgs);
+      if (missingTask !== null) {
+        throw new Error('TASK.md 缺失时应为 null，实际 ' + JSON.stringify(missingTask));
+      }
+      // 反例：零任务块（仅占位）→ null
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<!-- 占位 -->\n');
+      const noBlocks = await fixReturn(baseArgs);
+      if (noBlocks !== null) {
+        throw new Error('零任务块时应为 null，实际 ' + JSON.stringify(noBlocks));
+      }
+    },
+  },
 ];
 
 // ---------- 运行 ----------
@@ -7465,7 +7622,7 @@ for (const sc of SCENARIOS) {
     const builtinCopy = path.join(dir, 'reference', 'workflow-protocol.json');
     fs.mkdirSync(path.dirname(builtinCopy), { recursive: true });
     fs.copyFileSync(BUILTIN_PROTOCOL_SOURCE, builtinCopy);
-    sc.run(dir);
+    await sc.run(dir);
     passed += 1;
     console.log('PASS: ' + sc.name);
   } catch (e) {
