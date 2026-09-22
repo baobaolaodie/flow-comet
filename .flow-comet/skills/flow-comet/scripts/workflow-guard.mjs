@@ -6,7 +6,7 @@ import { createHash } from 'crypto';
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, RUNTIME_STATE_PATH, LEGACY_RUNTIME_STATE_PATH } from './state-schema.mjs';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES } from './protocol-utils.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from './task-parsing.mjs';
-import { resolveNextNode } from './route-node.mjs';
+import { resolveNextNode, resolveFixRollbackState, resolveFixReturnNode } from './route-node.mjs';
 
 const command = process.argv[2] ?? 'verify';
 const nodeId = process.argv[3] ?? null;
@@ -1227,9 +1227,30 @@ async function main() {
   state.evidence = state.evidence && typeof state.evidence === 'object' ? state.evidence : {};
   if (command === 'entry') {
     const current = state.currentNode ?? (await nextNode(protocol, state))?.id ?? null;
-    if (current !== node.id && !state.completedNodes.includes(node.id)) {
+    // Fix 批次受控归位（共享谓词，唯一受控例外 · ADR-011）：review/verify 驻留 + TASK 有
+    // pending 修复任务 + 共享路由推导回 execute 时，entry execute 归位工作归属并写盘。
+    // 前置 currentNode 校验对该受控例外放行（L-070 实录路径即直接 entry）；其余节点/状态行为不变。
+    const fixBatchRollback = node.id === 'execute'
+      && state.activeChange
+      && state.currentNode !== 'execute'
+      && await resolveFixRollbackState({
+        runRoot,
+        changeName: state.activeChange,
+        protocol,
+        completedNodes: state.completedNodes,
+        currentNode: state.currentNode,
+      });
+    if (current !== node.id && !state.completedNodes.includes(node.id) && !fixBatchRollback) {
       console.error('BLOCKED: current Node is ' + String(current) + ', cannot enter ' + node.id + '.');
       process.exit(1);
+    }
+    if (fixBatchRollback) {
+      const sourceNode = state.currentNode;
+      state.currentNode = 'execute';
+      console.log('FIX-BATCH: 受控归位 execute（源节点 ' + sourceNode + '）');
+      const bad = validateStateFields(state);
+      if (bad.length) { console.error('BLOCKED: state 字段类型非法: ' + bad[0]); process.exit(1); }
+      await writeJson(file, state);
     }
     // E2: entry archive 分支校验（新模式 branchMode=true）——归档必须在 change/<activeChange> 分支上进行
     // 旧模式（无 branchMode 字段 / 非 git 仓库 / git 不可用）跳过，向后兼容
@@ -1354,6 +1375,27 @@ async function main() {
       console.error('恢复: 若节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进，确认节点实际已完成后再用）或 select（切换 change）；禁止手改 state 机器字段');
       console.error('提示: 若 currentNode 已漂移到文件推导位置且本节点证据/产物齐（执行者确认本节点实际已完成）→ 可用容错 exit ' + node.id + ' --apply 补齐欠账（漂移容忍路径，不再只有不可行的 advance/select 指引）；漂移但证据/产物不齐则不适用');
       process.exit(1);
+    }
+  }
+  // FIX-BATCH: 越界拦截——源节点（review/verify）驻留 + TASK 仍有 pending 修复任务时，
+  // 直接 exit 源节点收场会静默跳过 execute 生命周期与四类出口（缺陷实录形态）。排在 M1/R2
+  // entry 证据门之前：该越界路径给 Fix 恢复指引，避免通用 entry 提示覆盖更具体的归位路径。
+  // 复用共享回退谓词判定：新 change 强制 BLOCKED 含恢复指引；旧 change 渐进 WARN 不阻断。
+  if ((node.id === 'review' || node.id === 'verify') && state.activeChange) {
+    const fixBatchPending = await resolveFixRollbackState({
+      runRoot,
+      changeName: state.activeChange,
+      protocol,
+      completedNodes: state.completedNodes,
+      currentNode: node.id,
+    });
+    if (fixBatchPending && isNewChange(state)) {
+      console.error('BLOCKED: 存在未归位/未跑出口的 Fix 批次——' + node.id + ' 驻留且 TASK.md 仍有 pending 修复任务，不能直接 exit ' + node.id + ' 收场（会静默跳过 execute 生命周期与四类出口）');
+      console.error('恢复: 运行 workflow-state.mjs next 或 workflow-guard.mjs entry execute 受控归位 execute → 在 execute 生命周期内完成修复任务 → record/exit execute --apply 跑完四类出口并回源节点 ' + node.id + ' → 再 exit ' + node.id + ' --apply');
+      process.exit(1);
+    }
+    if (fixBatchPending) {
+      console.error('FIX-BATCH WARN: 存在未归位/未跑出口的 Fix 批次——' + node.id + ' 驻留且 TASK.md 仍有 pending 修复任务，直接 exit ' + node.id + ' 会跳过 execute 出口门禁（旧 change 渐进不阻断；建议 next/entry execute 归位跑完出口后回源节点 exit）');
     }
   }
   // M1/R2: enter 证据检测——未 entry 直接 exit:新 change(init 标记)强制 BLOCKED,旧 change 渐进 WARN
@@ -2328,6 +2370,9 @@ async function main() {
   }
   if (apply) {
     const completed = completedSet(state);
+    // Fix 二次完成信号：execute 在本次 exit 之前已在 completedNodes（首轮 exit 后再次进入
+    // execute 生命周期完成回修）——须在 add 之前捕获，作为回源分支的唯一触发条件。
+    const executeAlreadyCompleted = completed.has('execute');
     completed.add(node.id);
     // W2-A: verify exit --apply 成功 → 当前 change 的 verifyFailures 清零
     if (node.id === 'verify') setVerifyFailuresFor(state, 0);
@@ -2336,6 +2381,21 @@ async function main() {
     const isArchive = node.id === 'archive';
     if (isArchive) state.activeChange = null;
     let next = isArchive ? null : await nextNode(protocol, state);
+    // FIX-BATCH: exit execute --apply 受控回程——Fix 二次完成（execute 已在 completedNodes）
+    // 且 TASK 全 done 时，回源节点（execute 后第一个未完成节点且 ∈ review/verify）跑其出口；
+    // 其余情况维持 resolveNextNode 原判定（正常首轮 exit 与多趟中间 exit 零回归）。
+    if (node.id === 'execute' && executeAlreadyCompleted && state.activeChange) {
+      const fixReturnSource = await resolveFixReturnNode({
+        runRoot,
+        changeName: state.activeChange,
+        protocol,
+        completedNodes: state.completedNodes,
+      });
+      if (fixReturnSource) {
+        next = findNode(protocol, fixReturnSource);
+        console.log('FIX-BATCH: 回源节点 ' + fixReturnSource + '（execute 出口已完成）');
+      }
+    }
     // 多趟路由诊断保留（展示层，不并入共享判定）：出口推进后下一候选非委托节点时，若任务集存在
     // parallel 标记任务与任一 pending 任务但无 pending parallel 可委托块，输出路由诊断提示。
     // 静默边界（M4 批次扩展）：(a) 全部任务 done 时无 pending 不输出（收尾静默锚）；
