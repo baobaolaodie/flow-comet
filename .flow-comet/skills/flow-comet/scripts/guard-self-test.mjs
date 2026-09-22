@@ -58,6 +58,29 @@ const PREPARE_ENV = path.join(REPO_ROOT, 'scripts', 'prepare-env.mjs');
 const BUILTIN_PROTOCOL_SOURCE = path.join(__dirname, '..', 'reference', 'workflow-protocol.json');
 const CHANGE_ID = 'ch';
 
+// 组件技能树布局感知（单一来源）：本 suite 恒位于 <skillsRoot>/flow-comet/scripts/，
+// 组件技能（flow-comet-execute / flow-comet-review / flow-comet-verify 等）是 <skillsRoot>
+// 下的同级目录。权威源 checkout → <root>/.flow-comet/skills/；安装副本 → <目标>/.claude|
+// .agents|.dsh/skills/ —— 同一相对推导覆盖全部形态。禁止再假定权威源布局
+// （REPO_ROOT/.flow-comet/skills 在安装副本形态不存在 → 技能文本锁场景 ENOENT，级 3 e2e 缺陷）。
+function skillsRootForScriptsDir(scriptsDir) {
+  return path.resolve(scriptsDir, '..', '..');
+}
+// 解析组件技能 SKILL.md：缺失即显式失败并给指引（MECHANISM 三·6「未验证 ≠ 通过」——
+// 不得静默跳过）；scriptsDir 为可测接缝（技能文本锁场景的合成布局回归锚）。
+function resolveComponentSkillFile(nodeSkill, scriptsDir = __dirname) {
+  const skillsRoot = skillsRootForScriptsDir(scriptsDir);
+  const file = path.join(skillsRoot, nodeSkill, 'SKILL.md');
+  if (!fs.existsSync(file)) {
+    throw new Error(
+      '技能树布局定位失败：' + nodeSkill + '/SKILL.md 不存在。suite 脚本须位于 <skillsRoot>/flow-comet/scripts/' +
+      '，组件技能为其同级目录；已解析 skillsRoot=' + skillsRoot + '，期望路径=' + file +
+      '。权威源 .flow-comet/skills 与安装副本 .claude|.agents|.dsh/skills 均按此相对布局解析。'
+    );
+  }
+  return file;
+}
+
 // 场景数一致性自检清单（20 文件 = 15 分发组 + 5 维护者组，全变体：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n）——
 // 场景数自检与底部自检共用同一清单/同一实现（自检常量同步：SCENARIOS.length 变更 → 20 受检文件须同步）。
 // 分两组按"分发形态"划界（AC-14：条目缺失必须显式报告，不得静默跳过——幽灵条目无处藏身）：
@@ -8339,11 +8362,43 @@ const SCENARIOS = [
   // 258: 三节点 SKILL 文本锁（AC-9 / T05 已落地）——execute/review/verify 均含
   // 「## Fix 批次状态机路径」段，段内含受控归位 + 回源节点跑出口 + 禁止绕过；不得把
   // 直接 exit 源节点收场或 advance 当正常路径（反捷径文本锚）。
+  // 布局感知（级 3 e2e 副本缺陷）：技能树从 suite 脚本自身位置推导
+  // （<skillsRoot>/flow-comet/scripts/ → 组件技能为 <skillsRoot> 下同级目录），权威源
+  // .flow-comet/skills/ 与安装副本 .claude|.agents|.dsh/skills/ 同一相对布局通吃。
   {
     name: '258 技能文本锁：三节点 SKILL 含 Fix 批次状态机路径（禁止直接 exit/advance 为正常路径）',
-    run: () => {
-      for (const nodeSkill of ['flow-comet-execute', 'flow-comet-review', 'flow-comet-verify']) {
-        const file = path.join(REPO_ROOT, '.flow-comet', 'skills', nodeSkill, 'SKILL.md');
+    run: (dir) => {
+      const componentSkills = ['flow-comet-execute', 'flow-comet-review', 'flow-comet-verify'];
+      // 布局感知回归锚（合成安装副本）：suite 位于 <skillsRoot>/flow-comet/scripts/ 时组件技能
+      // 必须解析到同级 <skillsRoot>/<skill>/SKILL.md——与权威源 .flow-comet 布局无关
+      //（旧实现硬编码 REPO_ROOT/.flow-comet/skills → 此锚变红）。
+      const syntheticSkillsRoot = path.join(dir, 'synthetic-carrier', '.claude', 'skills');
+      const syntheticScriptsDir = path.join(syntheticSkillsRoot, 'flow-comet', 'scripts');
+      for (const nodeSkill of componentSkills) {
+        writeFile(dir, path.join('synthetic-carrier', '.claude', 'skills', nodeSkill, 'SKILL.md'),
+          '## Fix 批次状态机路径\n\n受控归位（合成布局锚）\n');
+        const expected = path.join(syntheticSkillsRoot, nodeSkill, 'SKILL.md');
+        const resolved = resolveComponentSkillFile(nodeSkill, syntheticScriptsDir);
+        if (resolved !== expected) {
+          throw new Error('技能树布局感知解析错误：期望 ' + expected + '，实际 ' + resolved);
+        }
+      }
+      // 显式失败锚（MECHANISM 三·6）：组件技能缺失时必须报错并给指引，不得静默跳过/空过。
+      const emptyScriptsDir = path.join(dir, 'empty-carrier', '.dsh', 'skills', 'flow-comet', 'scripts');
+      let missingError = null;
+      try {
+        resolveComponentSkillFile('flow-comet-execute', emptyScriptsDir);
+      } catch (e) {
+        missingError = e.message;
+      }
+      if (!missingError
+        || !missingError.includes('技能树布局定位失败')
+        || !missingError.includes(path.join('flow-comet-execute', 'SKILL.md'))) {
+        throw new Error('组件技能缺失时未显式失败并给指引: ' + JSON.stringify(missingError));
+      }
+      // 真实三节点文本锁：从本 suite 自身位置推导技能树（不假定权威源布局）。
+      for (const nodeSkill of componentSkills) {
+        const file = resolveComponentSkillFile(nodeSkill);
         const text = fs.readFileSync(file, 'utf8');
         const match = text.match(/(?:^|\r?\n)## Fix 批次状态机路径\r?\n([\s\S]*?)(?=\r?\n## |$)/);
         if (!match) {
