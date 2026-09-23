@@ -432,6 +432,18 @@ function managedCordisBlockFor(loaderPath) {
     fileUrl.replace(/'/g, "''") + '\'\n# --- end flow-comet managed ---\n';
 }
 
+// bridge-check 版本断言的期望值归一（测试侧镜像生产 bridge-check 契约：仅剥离 git-describe
+// dev 态后缀 `-<N>-g<hash>`，大小写不敏感；预发布标识不匹配、不剥离）。套件自身
+// INSTALLED_VERSION 在权威源检出差为发布标记、在安装副本内为 dev 态戳——期望必须从载体
+// 原始戳归一出的基础版本派生，两种载体形态（权威源 / 安装副本）才都可移植。
+const FIXTURE_BRIDGE_DEV_SUFFIX_RE = /-\d+-g[0-9a-f]+$/i;
+function fixtureBridgeBaseVersion(version) {
+  return String(version).replace(FIXTURE_BRIDGE_DEV_SUFFIX_RE, '');
+}
+function fixtureIsBridgeDevVersion(version) {
+  return FIXTURE_BRIDGE_DEV_SUFFIX_RE.test(String(version));
+}
+
 // 组装 dsh 桥接健康夹具（bridge-check 六态场景共用）：项目根挂 .dsh/skills/flow-comet
 // 适用性门；$DSH_HOME/plugins/ 放 loader（含契约锚点 BRIDGE_VERSION 戳，值取自权威源
 // INSTALLED_VERSION，与 bridge-check 比对源同值——健康态恒等、偏斜态可控）；cordis.patch.yml
@@ -514,6 +526,60 @@ function assertNotOut(res, keyword) {
   if (text.includes(keyword)) {
     throw new Error('输出不应包含关键词 ' + JSON.stringify(keyword) + '（exit ' + res.status + '）\n实际输出:\n' + text);
   }
+}
+
+// 安装副本版本比较断言单点（场景 193 多子锚共用）：构造安装副本夹具 → 以副本脚本跑真实
+// bridge-check CLI → 断言 exit 与全部关键词（失败附子锚标签便于定位）。helper 只声明期望，
+// bridge-check 语义仍由 CLI 真实输出承载。
+function assertInstalledCopyBridgeVersionCase(dir, { label, installedVersion, loaderStamp, expectedExit, expectedKeywords }) {
+  const fixture = writeInstalledCopyBridgeFixture(dir, { installedVersion, loaderStamp });
+  const res = runBridgeCheckFromCopy(dir, fixture.dshHome, fixture.skillCopy);
+  try {
+    assertExit(res, expectedExit);
+    for (const keyword of expectedKeywords) assertOut(res, keyword);
+  } catch (e) {
+    throw new Error('[' + label + '] ' + e.message);
+  }
+}
+
+// 子锚表构造：单字段对象工厂 + 表函数（run 回调保持线性短小；子锚增长不再推动回调膨胀）。
+function bridgeCopyVersionCase(label, installedVersion, loaderStamp, expectedExit, ...expectedKeywords) {
+  return { label, installedVersion, loaderStamp, expectedExit, expectedKeywords };
+}
+
+// 场景 193 的安装副本版本比较子锚表——期望值全部从载体基础版本 baseVersion 派生：
+// ② release 态严格相等；③ dev 态安装副本形态同基础健康；④ 两侧 dev 后缀同基础健康；
+// ⑤ 基础版本失配仍 FAIL；⑥ 预发布标识不剥离仍 FAIL；⑦ release 对 release 失配仍 FAIL。
+function bridgeCopyVersionSubAnchorCases(baseVersion, devVersion) {
+  const major = parseInt(baseVersion.split('.')[0], 10);
+  const otherBase = (major + 9) + '.0.0';
+  return [
+    // ② release 态严格相等：两原始戳逐字相同 → 沿用 `==` 报告。
+    bridgeCopyVersionCase('release 严格相等', baseVersion, baseVersion, 0,
+      '[OK] 版本一致性: loader BRIDGE_VERSION=' + baseVersion + ' == 项目 INSTALLED_VERSION=' + baseVersion,
+      'bridge-check: 健康（全部检查通过）——exit 0'),
+    // ③ dev 态安装副本形态：载体戳为本副本自身形态（安装副本为 git describe 戳；权威源以发布
+    // 标记 + 同构 dev 后缀构造）→ 归一后与同基础 loader 判健康。
+    bridgeCopyVersionCase('dev 态安装副本同基础健康', devVersion, baseVersion, 0,
+      '[OK] 版本一致性: loader BRIDGE_VERSION=' + baseVersion + ' ~= 项目 INSTALLED_VERSION=' + devVersion + '（dev 态后缀归一后基础版本 ' + baseVersion + ' 一致）',
+      'bridge-check: 健康（全部检查通过）——exit 0'),
+    // ④ 两侧 dev 后缀同基础：归一后健康（后缀位置无关性）。
+    bridgeCopyVersionCase('两侧 dev 后缀同基础健康', baseVersion + '-3-gabcdef0', baseVersion + '-2-g1234567', 0,
+      '[OK] 版本一致性: loader BRIDGE_VERSION=' + baseVersion + '-2-g1234567 ~= 项目 INSTALLED_VERSION=' + baseVersion + '-3-gabcdef0（dev 态后缀归一后基础版本 ' + baseVersion + ' 一致）',
+      'bridge-check: 健康（全部检查通过）——exit 0'),
+    // ⑤ 基础版本失配：两侧 dev 后缀归一后仍不同 → 原始戳配对 + 双方归一值 FAIL exit 1。
+    bridgeCopyVersionCase('基础版本失配', otherBase + '-3-gabcdef0', baseVersion + '-2-g1234567', 1,
+      '[FAIL] 版本偏斜: loader BRIDGE_VERSION=' + baseVersion + '-2-g1234567 != 项目 INSTALLED_VERSION=' + otherBase + '-3-gabcdef0（归一基础版本: loader=' + baseVersion + ' / installed=' + otherBase + '）——两值如上',
+      'bridge-check: 失配 1 项——exit 1'),
+    // ⑥ 预发布标识不剥离：-rc.N 不属 dev 态后缀 → 仍报偏斜 FAIL exit 1。
+    bridgeCopyVersionCase('预发布标识不剥离', baseVersion, baseVersion + '-rc.3', 1,
+      '[FAIL] 版本偏斜: loader BRIDGE_VERSION=' + baseVersion + '-rc.3 != 项目 INSTALLED_VERSION=' + baseVersion + '（归一基础版本: loader=' + baseVersion + '-rc.3 / installed=' + baseVersion + '）——两值如上',
+      'bridge-check: 失配 1 项——exit 1'),
+    // ⑦ release 对 release 失配：两侧均无 dev 后缀且不同 → 仍 FAIL exit 1。
+    bridgeCopyVersionCase('release 对 release 失配', baseVersion, '9.9.9-fixture-skew', 1,
+      '[FAIL] 版本偏斜: loader BRIDGE_VERSION=9.9.9-fixture-skew != 项目 INSTALLED_VERSION=' + baseVersion + '（归一基础版本: loader=9.9.9-fixture-skew / installed=' + baseVersion + '）——两值如上',
+      'bridge-check: 失配 1 项——exit 1'),
+  ];
 }
 
 // ---------- route-node 共享 Fix 判定纯函数锚（直接调用） ----------
@@ -5603,44 +5669,34 @@ const SCENARIOS = [
     },
   },
 
-  // 193: bridge-check 版本比较语义——dev 态后缀归一后按基础版本比较。四个子锚：
-  //   ① 无法识别为 dev 态的失配戳 → 原始值/归一值双打印 FAIL exit 1（既有锚扩展）；
-  //   ② dev 态载体 INSTALLED_VERSION（<发布>-<N>-g<hash>）vs 同基础 loader → 归一后健康 exit 0；
-  //   ③ 基础版本不同（两侧均可带 dev 后缀）→ 归一后仍 FAIL exit 1（双值双打印）；
-  //   ④ 语义化预发布标识（-rc.N）不属 dev 态后缀、不得剥离 → 仍 FAIL exit 1。
+  // 193: bridge-check 版本比较语义——dev 态后缀归一后按基础版本比较。子锚：
+  //   ① 载体原始戳（权威源=发布标记 / 安装副本=dev 戳）vs 不可识别戳 → 原始戳配对 +
+  //      归一基础版本双打印，FAIL exit 1（保留 raw-stamp pairing）；
+  //   ② release 态严格相等（两原始值逐字相同）→ 既有 `==` 报告健康 exit 0（release 语义不变）；
+  //   ③ dev 态安装副本形态（INSTALLED_VERSION=<发布>-<N>-g<hash>）vs 同基础 loader → 归一后健康 exit 0；
+  //   ④ 两侧均带 dev 后缀且基础版本一致 → 归一后健康 exit 0；
+  //   ⑤ 基础版本不同（两侧均可带 dev 后缀）→ 归一后仍 FAIL exit 1（双值双打印）；
+  //   ⑥ 语义化预发布标识（-rc.N）不属 dev 态后缀、不得剥离 → 仍 FAIL exit 1；
+  //   ⑦ release 对 release 失配 → 归一不误判健康，仍 FAIL exit 1。
+  // 期望值从载体自身 INSTALLED_VERSION 归一出的基础版本派生——权威源（发布标记）与安装副本
+  // （git describe dev 戳）两载体形态均可移植；不得再以原始戳冒充归一后的期望值。
   {
     name: '193 bridge-check 版本比较：dev 态同基础健康 / 基础失配与预发布仍 FAIL exit 1',
     run: (dir) => {
       const { dshHome, installedVersion } = writeBridgeFixture(dir, { loaderStamp: '9.9.9-fixture-skew' });
+      const baseVersion = fixtureBridgeBaseVersion(installedVersion);
       const skew = runBridgeCheck(dir, dshHome);
       assertExit(skew, 1);
-      assertOut(skew, '[FAIL] 版本偏斜: loader BRIDGE_VERSION=9.9.9-fixture-skew != 项目 INSTALLED_VERSION=' + installedVersion + '（归一基础版本: loader=9.9.9-fixture-skew / installed=' + installedVersion + '）——两值如上');
+      assertOut(skew, '[FAIL] 版本偏斜: loader BRIDGE_VERSION=9.9.9-fixture-skew != 项目 INSTALLED_VERSION=' + installedVersion + '（归一基础版本: loader=9.9.9-fixture-skew / installed=' + baseVersion + '）——两值如上');
       assertOut(skew, 'bridge-check: 失配 1 项——exit 1');
 
-      const devVersion = installedVersion + '-11-g93d96c0';
-      const devFixture = writeInstalledCopyBridgeFixture(dir, { installedVersion: devVersion, loaderStamp: installedVersion });
-      const dev = runBridgeCheckFromCopy(dir, devFixture.dshHome, devFixture.skillCopy);
-      assertExit(dev, 0);
-      assertOut(dev, '[OK] 版本一致性: loader BRIDGE_VERSION=' + installedVersion + ' ~= 项目 INSTALLED_VERSION=' + devVersion);
-      assertOut(dev, '（dev 态后缀归一后基础版本 ' + installedVersion + ' 一致）');
-      assertOut(dev, 'bridge-check: 健康（全部检查通过）——exit 0');
-
-      const major = parseInt(installedVersion.split('.')[0], 10);
-      const otherBase = (major + 9) + '.0.0';
-      const mismatchFixture = writeInstalledCopyBridgeFixture(dir, {
-        installedVersion: otherBase + '-3-gabcdef0',
-        loaderStamp: installedVersion + '-2-g1234567',
-      });
-      const mismatch = runBridgeCheckFromCopy(dir, mismatchFixture.dshHome, mismatchFixture.skillCopy);
-      assertExit(mismatch, 1);
-      assertOut(mismatch, '[FAIL] 版本偏斜: loader BRIDGE_VERSION=' + installedVersion + '-2-g1234567 != 项目 INSTALLED_VERSION=' + otherBase + '-3-gabcdef0（归一基础版本: loader=' + installedVersion + ' / installed=' + otherBase + '）——两值如上');
-      assertOut(mismatch, 'bridge-check: 失配 1 项——exit 1');
-
-      const preFixture = writeInstalledCopyBridgeFixture(dir, { installedVersion, loaderStamp: installedVersion + '-rc.3' });
-      const pre = runBridgeCheckFromCopy(dir, preFixture.dshHome, preFixture.skillCopy);
-      assertExit(pre, 1);
-      assertOut(pre, '[FAIL] 版本偏斜: loader BRIDGE_VERSION=' + installedVersion + '-rc.3 != 项目 INSTALLED_VERSION=' + installedVersion + '（归一基础版本: loader=' + installedVersion + '-rc.3 / installed=' + installedVersion + '）——两值如上');
-      assertOut(pre, 'bridge-check: 失配 1 项——exit 1');
+      // ②~⑦ 安装副本子锚表：执行器逐个跑真实 CLI；期望值均由 baseVersion / devVersion 派生。
+      const devVersion = fixtureIsBridgeDevVersion(installedVersion)
+        ? installedVersion
+        : baseVersion + '-11-g93d96c0';
+      for (const subAnchor of bridgeCopyVersionSubAnchorCases(baseVersion, devVersion)) {
+        assertInstalledCopyBridgeVersionCase(dir, subAnchor);
+      }
     },
   },
 
