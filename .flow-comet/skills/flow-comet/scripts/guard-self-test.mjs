@@ -415,6 +415,23 @@ function runBridgeCheck(root, dshHome) {
   });
 }
 
+// 桥接夹具 loader 写入（单一来源——bridge-check 夹具与安装副本形态夹具共用；两处各自
+// 拼装锚点行会随契约格式演进分叉）。返回 loader 绝对路径。
+function writeBridgeLoaderFixture(dshHome, loaderStamp) {
+  const loaderPath = path.join(dshHome, 'plugins', 'dsh-flow-comet-bridge.mjs');
+  writeFile(dshHome, 'plugins/dsh-flow-comet-bridge.mjs',
+    '// dsh bridge loader fixture\n// BRIDGE_VERSION: ' + loaderStamp + '\n' +
+    "export const name = 'dsh-flow-comet-bridge';\nexport const version = '" + loaderStamp + "';\n");
+  return loaderPath;
+}
+
+// cordis.patch.yml 托管块（insert 形态 + file:// 引用）逐字构造（单一来源，同上）。
+function managedCordisBlockFor(loaderPath) {
+  const fileUrl = pathToFileURL(loaderPath).href;
+  return '# --- flow-comet managed ---\n- insert:\n    - id: dsh-flow-comet-bridge\n      name: \'' +
+    fileUrl.replace(/'/g, "''") + '\'\n# --- end flow-comet managed ---\n';
+}
+
 // 组装 dsh 桥接健康夹具（bridge-check 六态场景共用）：项目根挂 .dsh/skills/flow-comet
 // 适用性门；$DSH_HOME/plugins/ 放 loader（含契约锚点 BRIDGE_VERSION 戳，值取自权威源
 // INSTALLED_VERSION，与 bridge-check 比对源同值——健康态恒等、偏斜态可控）；cordis.patch.yml
@@ -427,19 +444,47 @@ function writeBridgeFixture(dir, overrides = {}) {
   writeFile(dir, '.dsh/skills/flow-comet/.fixture-anchor', 'fixture\n');
   const loaderPath = path.join(dshHome, 'plugins', 'dsh-flow-comet-bridge.mjs');
   if (!overrides.skipLoader) {
-    writeFile(dshHome, 'plugins/dsh-flow-comet-bridge.mjs',
-      '// dsh bridge loader fixture\n// BRIDGE_VERSION: ' + loaderStamp + '\n' +
-      "export const name = 'dsh-flow-comet-bridge';\nexport const version = '" + loaderStamp + "';\n");
+    writeBridgeLoaderFixture(dshHome, loaderStamp);
   }
-  const fileUrl = pathToFileURL(loaderPath).href;
-  const managedBlock =
-    '# --- flow-comet managed ---\n- insert:\n    - id: dsh-flow-comet-bridge\n      name: \'' +
-    fileUrl.replace(/'/g, "''") + '\'\n# --- end flow-comet managed ---\n';
+  const managedBlock = managedCordisBlockFor(loaderPath);
   writeFile(dshHome, 'cordis.patch.yml',
     overrides.patchContent !== undefined
       ? overrides.patchContent
       : managedBlock + (overrides.outsideBlock || ''));
   return { dshHome, loaderPath, installedVersion, managedBlock };
+}
+
+// 安装副本形态夹具（版本比较场景）：把本 suite 自身技能树整体复制为
+// <dir>/.dsh/skills/flow-comet —— 被检脚本与同包 INSTALLED_VERSION 因而都可控。
+// bridge-check 读取脚本同包（`<脚本目录>/..`）的 INSTALLED_VERSION：权威源检出路径固定为
+// 发布标记，无法表达「载体 INSTALLED_VERSION 为 dev 态（git describe 后缀）」的形态；
+// 只有以副本自身脚本运行才能构造真实 dev 态载体（与 prepare-env 安装出的形态同构）。
+// 返回 { dshHome, skillCopy }；loader 戳由调用方指定，与 INSTALLED_VERSION 可不同。
+function writeInstalledCopyBridgeFixture(dir, { installedVersion, loaderStamp }) {
+  const skillCopy = path.join(dir, '.dsh', 'skills', 'flow-comet');
+  fs.cpSync(path.join(__dirname, '..'), skillCopy, { recursive: true });
+  writeFile(skillCopy, 'INSTALLED_VERSION', installedVersion + '\n');
+  const dshHome = path.join(dir, 'dshhome');
+  const loaderPath = writeBridgeLoaderFixture(dshHome, loaderStamp);
+  writeFile(dshHome, 'cordis.patch.yml', managedCordisBlockFor(loaderPath));
+  return { dshHome, skillCopy };
+}
+
+// 以安装副本自身脚本运行 bridge-check（runRoot = 载体项目根；协议副本在 skill 包内，
+// 与真实安装形态一致——默认协议解析即为 <skillCopy>/reference/workflow-protocol.json）。
+function runBridgeCheckFromCopy(dir, dshHome, skillCopy) {
+  const res = spawnSync(process.execPath, [path.join(skillCopy, 'scripts', 'workflow-state.mjs'), 'bridge-check'], {
+    cwd: dir,
+    env: {
+      ...process.env,
+      FLOW_COMET_RUN_ROOT: dir,
+      FLOW_COMET_PROTOCOL: path.join(skillCopy, 'reference', 'workflow-protocol.json'),
+      DSH_HOME: dshHome,
+    },
+    encoding: 'utf8',
+    timeout: 60000,
+  });
+  return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
 }
 
 function assertExit(res, expected) {
@@ -5558,16 +5603,44 @@ const SCENARIOS = [
     },
   },
 
-  // 193: bridge-check 版本偏斜——loader 戳 != 项目 INSTALLED_VERSION，两值都打印 FAIL exit 1。
+  // 193: bridge-check 版本比较语义——dev 态后缀归一后按基础版本比较。四个子锚：
+  //   ① 无法识别为 dev 态的失配戳 → 原始值/归一值双打印 FAIL exit 1（既有锚扩展）；
+  //   ② dev 态载体 INSTALLED_VERSION（<发布>-<N>-g<hash>）vs 同基础 loader → 归一后健康 exit 0；
+  //   ③ 基础版本不同（两侧均可带 dev 后缀）→ 归一后仍 FAIL exit 1（双值双打印）；
+  //   ④ 语义化预发布标识（-rc.N）不属 dev 态后缀、不得剥离 → 仍 FAIL exit 1。
   {
-    name: '193 bridge-check 版本偏斜：双值打印 FAIL exit 1',
+    name: '193 bridge-check 版本比较：dev 态同基础健康 / 基础失配与预发布仍 FAIL exit 1',
     run: (dir) => {
       const { dshHome, installedVersion } = writeBridgeFixture(dir, { loaderStamp: '9.9.9-fixture-skew' });
-      const res = runBridgeCheck(dir, dshHome);
-      assertExit(res, 1);
-      assertOut(res, '[FAIL] 版本偏斜: loader BRIDGE_VERSION=9.9.9-fixture-skew != 项目 INSTALLED_VERSION=' + installedVersion);
-      assertOut(res, '（两值如上）');
-      assertOut(res, 'bridge-check: 失配 1 项——exit 1');
+      const skew = runBridgeCheck(dir, dshHome);
+      assertExit(skew, 1);
+      assertOut(skew, '[FAIL] 版本偏斜: loader BRIDGE_VERSION=9.9.9-fixture-skew != 项目 INSTALLED_VERSION=' + installedVersion + '（归一基础版本: loader=9.9.9-fixture-skew / installed=' + installedVersion + '）——两值如上');
+      assertOut(skew, 'bridge-check: 失配 1 项——exit 1');
+
+      const devVersion = installedVersion + '-11-g93d96c0';
+      const devFixture = writeInstalledCopyBridgeFixture(dir, { installedVersion: devVersion, loaderStamp: installedVersion });
+      const dev = runBridgeCheckFromCopy(dir, devFixture.dshHome, devFixture.skillCopy);
+      assertExit(dev, 0);
+      assertOut(dev, '[OK] 版本一致性: loader BRIDGE_VERSION=' + installedVersion + ' ~= 项目 INSTALLED_VERSION=' + devVersion);
+      assertOut(dev, '（dev 态后缀归一后基础版本 ' + installedVersion + ' 一致）');
+      assertOut(dev, 'bridge-check: 健康（全部检查通过）——exit 0');
+
+      const major = parseInt(installedVersion.split('.')[0], 10);
+      const otherBase = (major + 9) + '.0.0';
+      const mismatchFixture = writeInstalledCopyBridgeFixture(dir, {
+        installedVersion: otherBase + '-3-gabcdef0',
+        loaderStamp: installedVersion + '-2-g1234567',
+      });
+      const mismatch = runBridgeCheckFromCopy(dir, mismatchFixture.dshHome, mismatchFixture.skillCopy);
+      assertExit(mismatch, 1);
+      assertOut(mismatch, '[FAIL] 版本偏斜: loader BRIDGE_VERSION=' + installedVersion + '-2-g1234567 != 项目 INSTALLED_VERSION=' + otherBase + '-3-gabcdef0（归一基础版本: loader=' + installedVersion + ' / installed=' + otherBase + '）——两值如上');
+      assertOut(mismatch, 'bridge-check: 失配 1 项——exit 1');
+
+      const preFixture = writeInstalledCopyBridgeFixture(dir, { installedVersion, loaderStamp: installedVersion + '-rc.3' });
+      const pre = runBridgeCheckFromCopy(dir, preFixture.dshHome, preFixture.skillCopy);
+      assertExit(pre, 1);
+      assertOut(pre, '[FAIL] 版本偏斜: loader BRIDGE_VERSION=' + installedVersion + '-rc.3 != 项目 INSTALLED_VERSION=' + installedVersion + '（归一基础版本: loader=' + installedVersion + '-rc.3 / installed=' + installedVersion + '）——两值如上');
+      assertOut(pre, 'bridge-check: 失配 1 项——exit 1');
     },
   },
 

@@ -654,6 +654,35 @@ function stampBridgeLoader(sourceLoader, version) {
   return replaced;
 }
 
+// 安装副本载体的 bridge-check 版本比较断言：dev 态载体（INSTALLED_VERSION = <发布>-<N>-g<hash>）
+// 与同基础版本 loader 判健康，基础版本失配仍 FAIL。以副本自身脚本运行——bridge-check 读取脚本
+// 同包 INSTALLED_VERSION，与真实安装载体同构（权威源检出路径固定为发布标记，无法构造 dev 态）。
+function assertInstalledCopyBridgeVersionSemantics(target, dshHome, srcVersion) {
+  const installedSkillRoot = path.join(target, '.dsh', 'skills', 'flow-comet');
+  const installedVersionPath = path.join(installedSkillRoot, 'INSTALLED_VERSION');
+  const runBridgeCheck = () => {
+    const res = spawnSync(process.execPath, [path.join(installedSkillRoot, 'scripts', 'workflow-state.mjs'), 'bridge-check'], {
+      cwd: target, encoding: 'utf8', timeout: 60000, env: { ...process.env, DSH_HOME: dshHome },
+    });
+    return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+  };
+  const devVersion = srcVersion + '-11-g93d96c0';
+  fs.writeFileSync(installedVersionPath, devVersion + '\n', 'utf8');
+  const devHealthy = runBridgeCheck();
+  assertExit(devHealthy, 0);
+  assertOut(devHealthy, '[OK] 版本一致性: loader BRIDGE_VERSION=' + srcVersion + ' ~= 项目 INSTALLED_VERSION=' + devVersion);
+  assertOut(devHealthy, '（dev 态后缀归一后基础版本 ' + srcVersion + ' 一致）');
+  assertOut(devHealthy, 'bridge-check: 健康（全部检查通过）——exit 0');
+  const [major] = srcVersion.split('.').map((p) => parseInt(p, 10));
+  const otherBase = (major + 9) + '.0.0';
+  const otherVersion = otherBase + '-3-gabcdef0';
+  fs.writeFileSync(installedVersionPath, otherVersion + '\n', 'utf8');
+  const baseMismatch = runBridgeCheck();
+  assertExit(baseMismatch, 1);
+  assertOut(baseMismatch, '[FAIL] 版本偏斜: loader BRIDGE_VERSION=' + srcVersion + ' != 项目 INSTALLED_VERSION=' + otherVersion + '（归一基础版本: loader=' + srcVersion + ' / installed=' + otherBase + '）——两值如上');
+  assertOut(baseMismatch, 'bridge-check: 失配 1 项——exit 1');
+}
+
 // 预置目标项目 flow-kit/ 为同名非上游目录（安装器走「非上游克隆，已跳过」路径——
 // 网络零接触；与安装器冒烟同手法）
 function seedForeignFlowKit(root) {
@@ -4207,7 +4236,10 @@ const TEST_ITEMS = [
       if (!fs.readFileSync(pluginPath, 'utf8').includes('// BRIDGE_VERSION: ' + srcVersion)) {
         throw new Error('降级重装后已装 loader 应为源戳');
       }
+      // ③④ 安装副本载体版本比较语义（dev 态同基础健康 / 基础失配仍 FAIL）——助手单点实现
+      assertInstalledCopyBridgeVersionSemantics(target, dshHome, srcVersion);
       console.log('  版本戳重装断言:升级/降级方向措辞与覆盖后新戳 ✓');
+      console.log('  dev 态载体版本比较:同基础健康 + 基础失配仍 FAIL ✓');
     },
   },
 
