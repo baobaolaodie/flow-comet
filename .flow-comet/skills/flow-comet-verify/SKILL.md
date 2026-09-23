@@ -49,9 +49,9 @@ guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好�
 
 3. **Failure diagnosis**: For any failure (automated test or UAT):
    - Switch to "Diagnose sub-role" — identify root cause, not symptom.
-   - Produce fix-plan: append to TASK.md as numbered fix tasks with full 7 fields and verify command.
-   - Return to execute node for fix execution.
-   - Re-run verification after fix.
+   - Produce fix-plan: append to TASK.md 的 `## Fix 任务` 段 as numbered fix tasks with full 7 fields and verify command — 禁止文件尾追加.
+   - Follow the「Fix 批次状态机路径」section below: home back to execute, run its four exit gates, then return to verify.
+   - Re-run verification after fix, then run verify's own exit gates.
 
 4. **Auto-retry limit (R2.6)**: verify 失败自动重试 ≤ 3 次（机器计数 verifyFailures）；第 4 次失败必须暂停问用户「继续修 / 停止」。Do not auto-retry beyond 3 times.
 
@@ -82,6 +82,17 @@ This node is truly done when:
 - **Agent thought**: "This UAT item is similar to the last one, marking pass." **Actual risk**: UAT must be executed by the human, not assumed. Each item needs explicit human confirmation.
 - **Agent thought**: "Auto-retry 4th time, maybe it'll work now." **Actual risk**: On the 4th failure (R2.6 violation), the problem is likely systematic, not transient. Must pause and ask the user「继续修 / 停止」.
 - **Agent thought**: "Fix the failure directly, no need for a fix task." **Actual risk**: Bypassing the fix-task -> execute -> re-verify cycle means the fix is not properly tracked or tested. Must go through the proper loop.
+
+## Fix 批次状态机路径
+
+review / verify 发现缺陷后的修复必须回到 `execute` 节点生命周期内完成，禁止驻留源节点「顺手修完」；引擎按以下路径强制闭环（`<源节点>` 为 review 或 verify）：
+
+1. **追加 Fix 任务**：在 `.specs/<change-id>/TASK.md` 的 `## Fix 任务` 段内追加编号修复任务（完整任务字段），**禁止文件尾追加**；任务集修订必须在 `entry` 之前完成。
+2. **受控归位 execute**：运行 `workflow-state next`（完整命令：`node .claude/skills/flow-comet/scripts/workflow-state.mjs next`），或运行 `workflow-guard entry execute`（完整命令：`node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry execute`）。处于 Fix 回退态（源节点驻留 + 存在 pending Fix 任务 + 当前路由判定为 execute）时，引擎把当前节点受控归位为 `execute`（`currentNode=execute`），并输出 `FIX-BATCH` 审计行（`next` 同时输出 `NODE: execute`）；用 `workflow-state.mjs status` 确认 `stateCurrentNode` 已是 `execute` 再开工；若未归位，先按 `next` / `status` 的输出核对任务状态与路由，不要未经归位硬开工。
+3. **执行修复**：按 execute 节点生命周期完成全部 Fix 任务（委托/直写规则不变）；`entry execute` 刷新任务集签名，锁定追加后的任务集——归位后不得再增删任务或修改任务内容。
+4. **跑 execute 四类出口**：`record execute` → `exit execute --apply`。四类出口门禁真实执行——**全任务 done / 逐任务 SUMMARY 完备 / 6 维自查 + 自检方法声明 / 任务集签名一致**；任一缺失即 BLOCKED 并给出恢复指引。通过后，引擎在 Fix 二次完成时把当前节点推回源节点（review 或 verify）。
+5. **回源节点跑出口**：回到源节点后运行 `next`，Fix 回程豁免生效时应输出 `NODE: review` 或 `NODE: verify`（不会因源节点产物已存在而跳过）；若仍输出后续节点，说明回程条件未满足，先核对状态机归属与任务状态，不要继续推进。随后执行 `entry <源节点>` → `exit <源节点> --apply` 跑源节点出口门禁（即 entry/exit 源节点）；通过后继续正常路由（review → verify；verify → archive），必要时进入下一轮 Fix 闭环。
+6. **禁止绕过**：驻留源节点不归位、顺手改完后直接跑源节点 exit 收场会被 BLOCKED（存在未归位/未跑出口的 Fix 批次），必须按上述路径恢复；不得用跳过归位或出口门禁的手段（含手动改写 `.flow-comet/flow-comet-state.json`）替代本路径。
 
 ## Entry Check
 
@@ -159,6 +170,6 @@ If the script prints `SKILL: flow-comet-archive`, load that Skill next.
 2. Read `.specs/<change-id>/UAT.md` — check which items have results.
 3. If UAT.md exists with all items passing, verification is done.
 4. If UAT.md has failures, check if fix tasks were generated in TASK.md.
-5. If fix tasks exist but not executed, return to execute node.
+5. If fix tasks exist but have not gone through the execute lifecycle, follow the「Fix 批次状态机路径」section below: home back to execute, run its four exit gates, then return to verify and run verify's exit gates.
 6. Count previous auto-retries (from UAT.md / machine-counted verifyFailures) to enforce R2.6 limit.
 7. Resume from the first incomplete verification step.

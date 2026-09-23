@@ -16,6 +16,13 @@
 
 > 版本不匹配时拦截可能失效——必须文档警示 + 级 3 实测兜底（D9）。
 
+**bridge-check 版本比较语义（基础版本比较）**：桥接健康检查比较 loader 的 `// BRIDGE_VERSION:` 发布戳与技能包 `INSTALLED_VERSION` 时，两侧先剥离 git-describe 开发态后缀 `-<领先提交数>-g<hash>`、再按基础版本比较：
+
+- 开发态载体的 `INSTALLED_VERSION = <发布版本>-<N>-g<hash>` 是预期形态、不构成版本偏斜——与同基础版本的 loader 判健康（exit 0）。
+- 语义化预发布标识（如 `1.5.0-rc.3`）不是开发态后缀、不剥离——预发布与基础版本不可互相放行。
+- 归一后基础版本不同（含发布版对发布版）仍报「版本偏斜」并 exit 1；失配报告同时打印原始值与归一值，便于识别 dev 态后缀。
+- loader 戳生成与发布同步纪律不变（发布戳仍取当前发布版本，随发布同步更新）。
+
 ## 2. tools/pre-execute 签名
 
 ```js
@@ -150,7 +157,7 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 ### rc.8 三态冒烟（2026-08-20）
 
 - 环境：dsh CLI 0.1.0-rc.8 / Harness 核心 rc.8 / dsh-tui 0.8.5
-- 结果：运行中协调者项目外 Write → deny；运行中子代理项目内 Write → next()；空闲态（无 state）项目外 Write → next()；解析失败/未知 status → fail-closed deny（system-test 75/75 ALL PASSED，K11/K12 断言覆盖）
+- 结果：运行中协调者项目外 Write → deny；运行中子代理项目内 Write → next()；空闲态（无 state）项目外 Write → next()；解析失败/未知 status → fail-closed deny（当轮 system-test ALL PASSED，K11/K12 断言覆盖；当前基线 78/78）
 - 载体：prepare-env --platform dsh 经临时项目重推真实 ~/.dsh 桥接 loader，loader 与权威源 SHA-256 一致；真实交互式 TUI/Web 冒烟留待开放项
 
 ### 0.1.5-rc.1 全接缝认证（2026-09-10）
