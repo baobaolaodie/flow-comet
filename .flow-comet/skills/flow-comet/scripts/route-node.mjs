@@ -151,12 +151,12 @@ export async function resolveNextNode({ runRoot, changeName, protocol, completed
   // 按协议顺序拆分：execute/subagent-execute 之前的节点走产物门控（内置 = open → design → plan），
   // 之后的节点在任务全部 done 后按序门控（内置 = review → verify → archive）。
   const orderedNodes = route(protocol);
-  const hasExecuteFamily = orderedNodes.some((n) => n.id === 'execute' || n.id === 'subagent-execute');
+  const hasExecuteFamily = orderedNodes.some((n) => EXECUTE_FAMILY_NODE_IDS.has(n.id));
   const preExecNodes = [];
   const postExecNodes = [];
   let sawExecuteFamily = false;
   for (const node of orderedNodes) {
-    if (node.id === 'execute' || node.id === 'subagent-execute') {
+    if (EXECUTE_FAMILY_NODE_IDS.has(node.id)) {
       sawExecuteFamily = true;
       continue;
     }
@@ -284,47 +284,51 @@ function taskSetSignature(taskContent) {
   return createHash('sha256').update(blocks.join('\n'), 'utf8').digest('hex');
 }
 
-// 「未闭合 execute 生命周期」信号派生：取 history 中最后一次 exit-applied execute 事件记录的
-// 任务集签名；无 execute 出口事件 / 该事件无签名字段（旧 state）→ null（调用方按旧 change 渐进
-// 放行）。只认最新一次 execute 出口——更早的签名被后续闭合覆盖。
-function latestExecuteExitSignature(history) {
+// 「未闭合 execute 生命周期」信号派生：取 history 中最后一次 exit-applied execute 家族事件
+// 记录的 { signature, node }；无家族出口事件 / 该事件无签名字段（旧 state）→ null（调用方按
+// 旧 change 渐进放行）。只认最新一次家族出口——更早的签名被后续闭合覆盖。
+// change 归属：state.history 跨 change 保留（select 只切 activeChange），因此带 change 的事件
+// 只在 change 名一致时参与判定；无 change 字段的旧 state 事件保持兼容（legacy 可参与）。
+function latestExecuteExitEvent(history, changeName) {
   if (!Array.isArray(history)) return null;
   for (let i = history.length - 1; i >= 0; i -= 1) {
     const event = history[i];
-    if (!event || event.event !== 'exit-applied' || event.node !== 'execute') continue;
-    return typeof event.taskSetSignature === 'string' && event.taskSetSignature !== ''
-      ? event.taskSetSignature
-      : null;
+    if (!event || event.event !== 'exit-applied' || !EXECUTE_FAMILY_NODE_IDS.has(event.node)) continue;
+    if (typeof event.change === 'string' && event.change !== changeName) continue;
+    if (typeof event.taskSetSignature !== 'string' || event.taskSetSignature === '') return null;
+    return { signature: event.taskSetSignature, node: event.node };
   }
   return null;
 }
 
 // Fix 回退态判定（单一权威——guard 入口/出口与 state 的 next 分支一律复用本函数）：currentNode
 // ∈ {review, verify} ∧ TASK.md 可解析出任务块 ∧ 以下任一：
-//   ① 存在 status="pending" 任务 ∧ resolveNextNode(completedNodes) === 'execute'（待执行回退路径）；
-//   ② 全任务 done ∧ execute 已在 completedNodes ∧ history 最新 exit execute 记录的任务集签名与
-//      当前 TASK.md 签名不一致（done-but-unclosed：追加/修改修复任务后从未重跑 exit execute；
-//      lazy entry 只刷新 taskHash、不写 exit 事件，签名仍保持不一致）。
+//   ① 存在 status="pending" 任务 ∧ resolveNextNode(completedNodes) ∈ execute 家族
+//      （串行 pending → execute；可委托 parallel pending → subagent-execute）→ 返回该目标节点；
+//   ② 全任务 done ∧ execute 家族至少一个节点已在 completedNodes ∧ history 最新家族出口事件记录的
+//      任务集签名与当前 TASK.md 签名不一致 → 返回该事件记录的家族节点（done-but-unclosed：追加/
+//      修改修复任务后从未重跑家族出口；lazy entry 只刷新 taskHash、不写 exit 事件，签名保持不一致）。
 // 旧 state 无签名记录 → ② 不成立（旧 change 渐进放行）。TASK.md 缺失 / 不可读 / 零任务块 /
-// 当前节点非 review|verify → false（fail-closed）。路由复用唯一权威 resolveNextNode，不复制判定。
+// 当前节点非 review|verify → null（fail-closed）。路由复用唯一权威 resolveNextNode，不复制判定。
 async function resolveFixRollbackState({ runRoot, changeName, protocol, completedNodes = [], currentNode, history = [] }) {
-  if (currentNode !== 'review' && currentNode !== 'verify') return false;
+  if (currentNode !== 'review' && currentNode !== 'verify') return null;
   const taskContent = await readProtocolTaskContent(protocol, changeName, path.join(runRoot, '.specs'));
-  if (taskContent === null) return false;
+  if (taskContent === null) return null;
   const attrsList = taskBlocks(taskContent).map(taskOpeningAttrs).filter(Boolean);
-  if (attrsList.length === 0) return false;
+  if (attrsList.length === 0) return null;
   if (attrsList.some((attrs) => attrs.status === 'pending')) {
     try {
-      return (await resolveNextNode({ runRoot, changeName, protocol, completedNodes })) === 'execute';
+      const next = await resolveNextNode({ runRoot, changeName, protocol, completedNodes });
+      return EXECUTE_FAMILY_NODE_IDS.has(next) ? next : null;
     } catch {
-      return false;
+      return null;
     }
   }
-  if (!attrsList.every((attrs) => attrs.status === 'done')) return false;
-  if (!completedNodes.includes('execute')) return false;
-  const recorded = latestExecuteExitSignature(history);
-  if (recorded === null) return false;
-  return taskSetSignature(taskContent) !== recorded;
+  if (!attrsList.every((attrs) => attrs.status === 'done')) return null;
+  if (![...EXECUTE_FAMILY_NODE_IDS].some((id) => completedNodes.includes(id))) return null;
+  const recorded = latestExecuteExitEvent(history, changeName);
+  if (recorded === null) return null;
+  return taskSetSignature(taskContent) !== recorded.signature ? recorded.node : null;
 }
 
 // Fix 回程节点推导（共享基础）：TASK.md 存在、至少一个任务块且全部 status="done" 时，
@@ -346,6 +350,7 @@ export {
   protocolTaskFilePath,
   hasSubagentNode,
   firstIncompletePostExecNode,
+  EXECUTE_FAMILY_NODE_IDS,
   taskSetSignature,
   resolveFixRollbackState,
   resolveFixReturnNode,

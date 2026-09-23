@@ -852,18 +852,19 @@ async function main() {
     const state = await readState();
     const completedArr = Array.isArray(state.completedNodes) ? state.completedNodes : [];
     // Fix 回退显式分支——必须早于「疑似未 exit」门禁与进行中漂移保护：
-    // review/verify 驻留 + TASK 有 pending 修复任务 + 共享路由推导回 execute 时，把工作归属
-    // 受控归位 execute（写盘）并显式输出 NODE: execute，不再依赖 inProgress 保护副作用
-    // （修复前 next 输出仍停在源节点）。判定复用 route-node 共享纯函数。
-    if (await resolveFixRollbackState({
+    // review/verify 驻留 + TASK 有 pending 修复任务（串行/并行）或未闭合家族出口签名时，把工作
+    // 归属受控归位共享谓词返回的 execute 家族目标（写盘）并显式输出 NODE: <目标>，不再依赖
+    // inProgress 保护副作用（修复前并行任务 next 输出仍停在源节点）。判定复用 route-node 共享纯函数。
+    const fixRollbackTarget = await resolveFixRollbackState({
       runRoot, changeName, protocol, completedNodes: completedArr, currentNode: state.currentNode,
       history: state.history,
-    })) {
+    });
+    if (fixRollbackTarget) {
       const sourceNode = state.currentNode;
-      state.currentNode = 'execute';
+      state.currentNode = fixRollbackTarget;
       await writeState(state);
-      console.log('FIX-BATCH: 归位 execute（源节点 ' + sourceNode + '）');
-      printNext(protocol, 'execute', state.executionMode ?? 'subagent');
+      console.log('FIX-BATCH: 归位 ' + fixRollbackTarget + '（源节点 ' + sourceNode + '）');
+      printNext(protocol, fixRollbackTarget, state.executionMode ?? 'subagent');
       printBranchLine(changeName, state.branchPrefix ?? 'change/');
       return;
     }

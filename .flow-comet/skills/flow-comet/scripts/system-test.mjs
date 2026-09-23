@@ -793,6 +793,15 @@ function fixBatchTaskText(fixStatus) {
     '\n\n## Fix 任务（来自 REVIEW / INTEGRATION）\n\n' + serialTaskBlock('T-FIX-01', fixStatus) + '\n';
 }
 
+// 并行 Fix 任务集（无依赖 → 可委托）：既有任务 T01 done + parallel 修复任务（状态由参数指定）。
+function fixBatchParallelTaskText(fixStatus) {
+  return '# TASK\n\n## 任务清单\n\n' + serialTaskBlock('T01', 'done') +
+    '\n\n## Fix 任务（来自 REVIEW / INTEGRATION）\n\n'
+    + '<task id="P-FIX-01" parallel="true" status="' + fixStatus + '">'
+    + '<action>实现 P-FIX-01</action><write_files>src/p-fix-01.mjs</write_files>'
+    + '<verify>node --check src/p-fix-01.mjs</verify></task>\n';
+}
+
 // 审查文档：disposed=false 时发现条目缺处置标记（钉住 review 出口的真实校验与恢复）
 function fixBatchReviewDoc(disposed) {
   const finding = disposed
@@ -814,7 +823,7 @@ function fixBatchHistoryWithStaleExecuteExit() {
 // Fix 批次夹具写入：state + TASK + 既有任务 SUMMARY + REVIEW.md（verify 源另备 TEST/UAT）。
 // kind='review'（审查驻留，execute 已首次完成）/ 'verify'（验证驻留，review 已完成）；
 // newChange=false 时 state 不带新 change 标记（旧 change 渐进形态）。
-function writeFixBatchFixture(dir, { kind, fixStatus, newChange = true }) {
+function writeFixBatchFixture(dir, { kind, fixStatus, newChange = true, parallelFix = false }) {
   const completed = kind === 'verify'
     ? ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review']
     : ['open', 'design', 'plan', 'execute', 'subagent-execute'];
@@ -838,7 +847,8 @@ function writeFixBatchFixture(dir, { kind, fixStatus, newChange = true }) {
   writeIntakeArtifacts(dir);
   writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md',
     '# DESIGN\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 0. 技术栈选定\n\nNode.js(ESM)\n\n## 决策清单\n\n- [ ] 循环路由\n');
-  writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', fixBatchTaskText(fixStatus));
+  writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
+    parallelFix ? fixBatchParallelTaskText(fixStatus) : fixBatchTaskText(fixStatus));
   writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', execSummaryFixture('T01'));
   writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', fixBatchReviewDoc(true));
   if (kind === 'verify') {
@@ -1959,6 +1969,52 @@ const TEST_ITEMS = [
       assertNotOut(rReviewPass, 'BLOCKED');
       assertNodeLine(rReviewPass, 'verify');
 
+      // ③b 并行 Fix 任务（可委托 parallel pending）+ review 源（真实命令链路）：
+      // 直接 exit review BLOCKED；next 归位 subagent-execute；完成委托后第二趟
+      // exit subagent-execute --apply 回源 review；源节点出口真实执行并推进 verify。
+      writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending', parallelFix: true });
+      const pBypass = runGuard(['exit', 'review', '--apply'], dir, env);
+      assertExit(pBypass, 1);
+      assertOut(pBypass, 'BLOCKED: 存在未归位/未跑出口的 Fix 批次');
+      assertNotOut(pBypass, 'ALL CHECKS PASSED');
+      let pSt = readStateFile(dir);
+      if (pSt.currentNode !== 'review' || pSt.completedNodes.includes('review')) {
+        throw new Error('并行越界 BLOCK 不得改写 state: ' + JSON.stringify({ currentNode: pSt.currentNode, completedNodes: pSt.completedNodes }));
+      }
+      const pNext = runState(['next'], dir, env);
+      assertExit(pNext, 0);
+      assertOut(pNext, 'FIX-BATCH: 归位 subagent-execute（源节点 review）');
+      assertNodeLine(pNext, 'subagent-execute');
+      assertNotNodeLine(pNext, 'execute');
+      pSt = readStateFile(dir);
+      if (pSt.currentNode !== 'subagent-execute') {
+        throw new Error('并行回退归位后 currentNode 应为 subagent-execute，实际 ' + JSON.stringify(pSt.currentNode));
+      }
+      // 完成并行修复任务：标记 done + 摘要 + 真实 handoff request/result + skill-load/record。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', fixBatchParallelTaskText('done'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P-FIX-01-SUMMARY.md', execSummaryFixture('P-FIX-01'));
+      // 委托前先加载节点技能声明（新 change 两层加载模型：request 命令要求标记在位）。
+      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+      for (const taskId of ['T01', 'P-FIX-01']) {
+        assertExit(runHandoff(['request', taskId, taskId + ' 委托', '--write-files', 'src/' + taskId.toLowerCase() + '.mjs'], dir), 0);
+        assertExit(runHandoff(['result', taskId, fullContract('abcd1234abcd1234abcd1234abcd1234abcd1234', taskId)], dir), 0);
+      }
+      assertExit(runState(['record', 'subagent-execute', '{"summary":"parallel fix delegated and collected"}'], dir, env), 0);
+      const pExit = runGuard(['exit', 'subagent-execute', '--apply'], dir, env);
+      assertExit(pExit, 0);
+      assertOut(pExit, 'ALL CHECKS PASSED');
+      assertOut(pExit, 'FIX-BATCH: 回源节点 review（subagent-execute 出口已完成）');
+      assertNodeLine(pExit, 'review');
+      pSt = readStateFile(dir);
+      if (pSt.currentNode !== 'review') {
+        throw new Error('并行修复第二趟出口应回源 review，实际 ' + JSON.stringify(pSt.currentNode));
+      }
+      assertExit(runState(['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md'], dir, env), 0);
+      assertExit(runGuard(['entry', 'review'], dir, env), 0);
+      const pReviewPass = runGuard(['exit', 'review', '--apply'], dir, env);
+      assertExit(pReviewPass, 0);
+      assertOut(pReviewPass, 'ALL CHECKS PASSED');
+      assertNodeLine(pReviewPass, 'verify');
       // ④ 新 change verify 源 + pending：直接 exit verify --apply → BLOCKED，验证命令未执行
       fs.rmSync(gateMarker, { force: true });
       writeFixBatchFixture(dir, { kind: 'verify', fixStatus: 'pending' });

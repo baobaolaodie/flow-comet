@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, RUNTIME_STATE_PATH, LEGACY_RUNTIME_STATE_PATH } from './state-schema.mjs';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES } from './protocol-utils.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from './task-parsing.mjs';
-import { resolveNextNode, resolveFixRollbackState, resolveFixReturnNode, taskSetSignature } from './route-node.mjs';
+import { resolveNextNode, resolveFixRollbackState, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS, taskSetSignature } from './route-node.mjs';
 
 const command = process.argv[2] ?? 'verify';
 const nodeId = process.argv[3] ?? null;
@@ -1206,27 +1206,28 @@ async function main() {
   if (command === 'entry') {
     const current = state.currentNode ?? (await nextNode(protocol, state))?.id ?? null;
     // Fix 批次受控归位（共享谓词，唯一受控例外 · ADR-011）：review/verify 驻留 + TASK 有
-    // pending 修复任务 + 共享路由推导回 execute 时，entry execute 归位工作归属并写盘。
+    // pending 修复任务（串行/并行）或有未闭合家族出口签名时，entry 家族节点（execute /
+    // subagent-execute）归位工作归属并写盘；仅当入口节点与共享谓词目标一致才归位。
     // 前置 currentNode 校验对该受控例外放行（L-070 实录路径即直接 entry）；其余节点/状态行为不变。
-    const fixBatchRollback = node.id === 'execute'
-      && state.activeChange
-      && state.currentNode !== 'execute'
-      && await resolveFixRollbackState({
+    const fixBatchRollbackTarget = EXECUTE_FAMILY_NODE_IDS.has(node.id) && state.activeChange
+      ? await resolveFixRollbackState({
         runRoot,
         changeName: state.activeChange,
         protocol,
         completedNodes: state.completedNodes,
         currentNode: state.currentNode,
         history: state.history,
-      });
+      })
+      : null;
+    const fixBatchRollback = fixBatchRollbackTarget === node.id;
     if (current !== node.id && !state.completedNodes.includes(node.id) && !fixBatchRollback) {
       console.error('BLOCKED: current Node is ' + String(current) + ', cannot enter ' + node.id + '.');
       process.exit(1);
     }
     if (fixBatchRollback) {
       const sourceNode = state.currentNode;
-      state.currentNode = 'execute';
-      console.log('FIX-BATCH: 受控归位 execute（源节点 ' + sourceNode + '）');
+      state.currentNode = node.id;
+      console.log('FIX-BATCH: 受控归位 ' + node.id + '（源节点 ' + sourceNode + '）');
       const bad = validateStateFields(state);
       if (bad.length) { console.error('BLOCKED: state 字段类型非法: ' + bad[0]); process.exit(1); }
       await writeJson(file, state);
@@ -1357,8 +1358,8 @@ async function main() {
     }
   }
   // FIX-BATCH: 越界拦截——源节点（review/verify）驻留，且 TASK 仍有 pending 修复任务，或修复
-  // 任务已 done 但本批 execute 生命周期未闭合（history 最新 exit execute 签名 ≠ 当前任务集签名）
-  // 时，直接 exit 源节点收场会静默跳过 execute 生命周期与四类出口（缺陷实录形态）。排在 M1/R2
+  // 任务已 done 但本批 execute 家族生命周期未闭合（本 change 最新家族出口签名 ≠ 当前任务集签名）
+  // 时，直接 exit 源节点收场会静默跳过 execute 家族生命周期与四类出口（缺陷实录形态）。排在 M1/R2
   // entry 证据门之前：该越界路径给 Fix 恢复指引，避免通用 entry 提示覆盖更具体的归位路径。
   // 复用共享回退谓词判定：新 change 强制 BLOCKED 含恢复指引；旧 change 渐进 WARN 不阻断。
   if ((node.id === 'review' || node.id === 'verify') && state.activeChange) {
@@ -1371,12 +1372,12 @@ async function main() {
       history: state.history,
     });
     if (fixBatchUnclosed && isNewChange(state)) {
-      console.error('BLOCKED: 存在未归位/未跑出口的 Fix 批次——' + node.id + ' 驻留且 TASK.md 存在 pending 修复任务，或修复任务已 done 但本批 execute 生命周期未闭合（最近一次 exit execute 后任务集仍有变更），不能直接 exit ' + node.id + ' 收场（会静默跳过 execute 生命周期与四类出口）');
-      console.error('恢复: 运行 workflow-state.mjs next 或 workflow-guard.mjs entry execute 受控归位 execute → 在 execute 生命周期内完成修复任务 → record/exit execute --apply 跑完四类出口并回源节点 ' + node.id + ' → 再 exit ' + node.id + ' --apply');
+      console.error('BLOCKED: 存在未归位/未跑出口的 Fix 批次——' + node.id + ' 驻留且 TASK.md 存在 pending 修复任务，或修复任务已 done 但本批 execute / subagent-execute 生命周期未闭合（最近一次 execute 家族 exit 后任务集仍有变更），不能直接 exit ' + node.id + ' 收场（会静默跳过 execute 家族生命周期与四类出口）');
+      console.error('恢复: 运行 workflow-state.mjs next 或 workflow-guard.mjs entry execute / entry subagent-execute 受控归位 execute 家族节点 → 在 execute 家族生命周期内完成修复任务 → record/exit 该节点 --apply 跑完四类出口并回源节点 ' + node.id + ' → 再 exit ' + node.id + ' --apply');
       process.exit(1);
     }
     if (fixBatchUnclosed) {
-      console.error('FIX-BATCH WARN: 存在未归位/未跑出口的 Fix 批次——' + node.id + ' 驻留且 TASK.md 存在 pending 修复任务，或修复任务已 done 但本批 execute 生命周期未闭合，直接 exit ' + node.id + ' 会跳过 execute 出口门禁（旧 change 渐进不阻断；建议 next/entry execute 归位跑完出口后回源节点 exit）');
+      console.error('FIX-BATCH WARN: 存在未归位/未跑出口的 Fix 批次——' + node.id + ' 驻留且 TASK.md 存在 pending 修复任务，或修复任务已 done 但本批 execute / subagent-execute 生命周期未闭合，直接 exit ' + node.id + ' 会跳过 execute 家族出口门禁（旧 change 渐进不阻断；建议 next/entry execute 家族节点归位跑完出口后回源节点 exit）');
     }
   }
   // M1/R2: enter 证据检测——未 entry 直接 exit:新 change(init 标记)强制 BLOCKED,旧 change 渐进 WARN
@@ -2351,9 +2352,9 @@ async function main() {
   }
   if (apply) {
     const completed = completedSet(state);
-    // Fix 二次完成信号：execute 在本次 exit 之前已在 completedNodes（首轮 exit 后再次进入
-    // execute 生命周期完成回修）——须在 add 之前捕获，作为回源分支的唯一触发条件。
-    const executeAlreadyCompleted = completed.has('execute');
+    // Fix 二次完成信号：exit 的 execute 家族节点在本次 exit 之前已在 completedNodes（首轮 exit
+    // 后再次进入该节点生命周期完成回修）——须在 add 之前捕获，作为回源分支的唯一触发条件。
+    const familyAlreadyCompleted = completed.has(node.id);
     completed.add(node.id);
     // W2-A: verify exit --apply 成功 → 当前 change 的 verifyFailures 清零
     if (node.id === 'verify') setVerifyFailuresFor(state, 0);
@@ -2362,10 +2363,10 @@ async function main() {
     const isArchive = node.id === 'archive';
     if (isArchive) state.activeChange = null;
     let next = isArchive ? null : await nextNode(protocol, state);
-    // FIX-BATCH: exit execute --apply 受控回程——Fix 二次完成（execute 已在 completedNodes）
+    // FIX-BATCH: exit execute 家族 --apply 受控回程——Fix 二次完成（本节点已在 completedNodes）
     // 且 TASK 全 done 时，回源节点（execute 后第一个未完成节点且 ∈ review/verify）跑其出口；
     // 其余情况维持 resolveNextNode 原判定（正常首轮 exit 与多趟中间 exit 零回归）。
-    if (node.id === 'execute' && executeAlreadyCompleted && state.activeChange) {
+    if (EXECUTE_FAMILY_NODE_IDS.has(node.id) && familyAlreadyCompleted && state.activeChange) {
       const fixReturnSource = await resolveFixReturnNode({
         runRoot,
         changeName: state.activeChange,
@@ -2374,7 +2375,7 @@ async function main() {
       });
       if (fixReturnSource) {
         next = findNode(protocol, fixReturnSource);
-        console.log('FIX-BATCH: 回源节点 ' + fixReturnSource + '（execute 出口已完成）');
+        console.log('FIX-BATCH: 回源节点 ' + fixReturnSource + '（' + node.id + ' 出口已完成）');
       }
     }
     // 多趟路由诊断保留（展示层，不并入共享判定）：出口推进后下一候选非委托节点时，若任务集存在
@@ -2416,12 +2417,14 @@ async function main() {
     state.currentNode = isArchive ? null : (next?.id ?? null);
     state.status = next ? 'running' : 'completed';
     state.history = Array.isArray(state.history) ? state.history : [];
-    // 「未闭合 execute 生命周期」信号：exit execute --apply 把当次 TASK.md 任务集签名写入 history
-    // 事件——源节点直接 exit 时以「最新 exit execute 签名 ≠ 当前签名」识别 done-but-unclosed
-    // 修复批次（lazy entry 只刷新 taskHash、不写本事件，因此仍保持未闭合）。其余节点事件形状不变；
-    // TASK.md 缺失/不可读时省略字段（旧 state 形态 → 渐进放行）。
+    // 「未闭合 execute 生命周期」信号：exit execute / subagent-execute --apply 把当次 TASK.md
+    // 任务集签名与 change 归属写入 history 事件——源节点直接 exit 时以「本 change 最新家族出口
+    // 签名 ≠ 当前签名」识别 done-but-unclosed 修复批次（lazy entry 只刷新 taskHash、不写本事件，
+    // 因此仍保持未闭合）。change 字段只在家族节点事件上写（其它节点事件形状不变），state.history
+    // 跨 change 保留时用于隔离判定；TASK.md 缺失/不可读时省略签名字段（旧 state 形态 → 渐进放行）。
     const exitEvent = { event: 'exit-applied', node: node.id, at: new Date().toISOString() };
-    if (node.id === 'execute' && state.activeChange) {
+    if (EXECUTE_FAMILY_NODE_IDS.has(node.id) && state.activeChange) {
+      exitEvent.change = state.activeChange;
       const exitTaskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
       try {
         if (await fileExists(exitTaskFile)) {
