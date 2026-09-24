@@ -1064,11 +1064,12 @@ async function templateSectionPatterns() {
     return templateSectionPatternsCache;
   }
   const templateDir = path.join(runRoot, 'flow-kit', 'templates');
-  const result = { change: [], requirement: [], design: [] };
+  const result = { change: [], requirement: [], design: [], summary: [] };
   for (const [key, fileName] of Object.entries({
     change: 'CHANGE.md',
     requirement: 'REQUIREMENT.md',
     design: 'DESIGN.md',
+    summary: 'SUMMARY.md',
   })) {
     const templateFile = path.join(templateDir, fileName);
     if (await fileExists(templateFile)) {
@@ -1151,13 +1152,23 @@ async function derivedFixSectionTitle() {
     change: ['why', 'what', '视觉调性', '影响面', '范围排除', '验收线', '风险与未知'],
     requirement: ['用户故事', '验收准则', '范围切分', '非功能性需求', '依赖与假设'],
     design: ['技术栈选定', '既有架构对齐', '决策清单', '数据流', '关键状态机', 'adr 索引', '风险', '不在范围', '架构沉淀建议'],
+    // SUMMARY 模板缺失时的内置全骨架：十段（含条件段——条件段允许正文 N/A，但 H2 标题须在场）
+    summary: ['做了什么', '改动文件', 'verify 输出', '6 维自查', '数据库迁移', '越界检查', '破坏性变更', '决策与偏离', '是否触发新工作', '完成判定'],
   };
 
   async function templateSkeleton(key) {
     const tpl = await templateSectionPatterns(); // 复用 C2 模板缓存（runRoot 内模板）
     const src = tpl[key] ?? [];
     if (src.length > 0) return src.map((s) => normalizeTemplateHeading(s.name));
-    return TEMPLATE_FIDELITY_FALLBACK_SKELETON[key] ?? [];
+    return (TEMPLATE_FIDELITY_FALLBACK_SKELETON[key] ?? []).map((s) => normalizeTemplateHeading(s));
+  }
+
+  // SUMMARY 全骨架来源：模板全部 H2 派生（derived=true）；模板缺失/无 H2 → 内置十段兜底
+  // （derived=false——调用方据此保持渐进兼容，不新增硬阻断）
+  async function summaryTemplateSkeleton() {
+    const tpl = await templateSectionPatterns();
+    const derived = (tpl.summary ?? []).length > 0;
+    return { derived, sections: await templateSkeleton('summary') };
   }
 
   // 段序校核（宽容）：模板骨架段里「实际出现」的段须按模板先后出现；返回乱序描述（无则 null）
@@ -1208,6 +1219,40 @@ async function derivedFixSectionTitle() {
       if (!seen.has(i)) missingSections.push(SUMMARY_ORDERED_SECTIONS[i]);
     }
     return { titleMissing, headerMissing, orderIssue, missingSections };
+  }
+
+  // 全骨架保真：骨架来自 SUMMARY 模板全部 H2；每段须存在（条件段内容可写 N/A，但须有 H2 标题），
+  // 实际出现的骨架段须按模板先后排列。## 自检方法 不进入骨架，单独校验：须位于 ## 越界检查 之后，
+  // 且只允许两种位置——紧随 ## 越界检查 之后（下一段即自检方法）或位于全文末尾（最后一个 H2）。
+  function summarySkeletonFidelity(content, skeleton) {
+    const text = String(content).replace(/\uFEFF/g, '');
+    const headings = documentSectionHeadings(text);
+    const seen = new Set();
+    for (const h of headings) {
+      const idx = skeleton.sections.indexOf(h.norm);
+      if (idx !== -1) seen.add(idx);
+    }
+    // 段序复用既有骨架校核（单一实现），段存在性单列——两者共用同一骨架
+    const orderIssue = templateOrderViolation(skeleton.sections, headings);
+    const missingSections = [];
+    for (let i = 0; i < skeleton.sections.length; i++) {
+      if (!seen.has(i)) missingSections.push(skeleton.sections[i]);
+    }
+    const selfHeading = normalizeTemplateHeading('自检方法');
+    const boundsHeading = normalizeTemplateHeading('越界检查');
+    const selfIdx = headings.findIndex((h) => h.norm === selfHeading);
+    const boundsIdx = headings.findIndex((h) => h.norm === boundsHeading);
+    let selfCheckIssue = null;
+    if (selfIdx === -1) {
+      selfCheckIssue = '缺 ## 自检方法 段（须位于 ## 越界检查 之后：文末或紧随越界检查两种合法位置）';
+    } else if (
+      boundsIdx === -1 ||
+      selfIdx < boundsIdx ||
+      (selfIdx !== headings.length - 1 && selfIdx !== boundsIdx + 1)
+    ) {
+      selfCheckIssue = '## 自检方法 位置非法（须位于 ## 越界检查 之后：只允许文末或紧随越界检查两种位置）';
+    }
+    return { missingSections, orderIssue, selfCheckIssue };
   }
 
 // WARN 计数——entry/exit 成功路径末尾输出汇总行（可观测性；追加不改变既有输出）
@@ -2241,14 +2286,20 @@ async function main() {
     // ===== M1: SUMMARY 模板保真（execute / subagent-execute 出口·设计语义 / AC-7）=====
     // 每份 *-SUMMARY.md 校 ① 标题首行 # SUMMARY: ② 首部 4 字段（Change ID/Task ID/完成时间/AI 角色）
     // ③ 段序（做了什么→改动文件→verify 输出→6 维自查→…→自检方法）；宽容匹配（大小写/编号前缀/括号后缀）。
-    // 新 change 任一缺失 → BLOCK（含缺失点 + 恢复指引）；旧 change/归档批 → WARN 渐进。
+    // ④ 全骨架存在 + 模板序（骨架从 flow-kit/templates/SUMMARY.md 全部 H2 派生，条件段允许正文 N/A）；
+    //    ## 自检方法 不在骨架内，单独要求且只允许「文末」「紧随越界检查」两种位置。
+    // 新 change 任一缺失 → BLOCK（含缺失点 + 恢复指引）；旧 change/归档批 → WARN 渐进；
+    // 模板缺失（无权威骨架来源）→ 新规则只告警不阻断，保持旧格式渐进。
     if (EXECUTE_FAMILY_NODE_IDS.has(node.id)) {
       const summaryChangeDir = path.join(runRoot, '.specs', state.activeChange ?? '');
       const summaryFiles = (await fs.readdir(summaryChangeDir).catch(() => [])).filter((f) => f.endsWith('-SUMMARY.md'));
+      const skeleton = await summaryTemplateSkeleton();
       const hardIssues = [];
+      let skeletonGuidanceNeeded = false;
       for (const f of summaryFiles) {
         try {
-          const fidelity = summaryTemplateFidelity(await fs.readFile(path.join(summaryChangeDir, f), 'utf8'));
+          const content = await fs.readFile(path.join(summaryChangeDir, f), 'utf8');
+          const fidelity = summaryTemplateFidelity(content);
           const problems = [];
           if (fidelity.titleMissing) {
             problems.push('首行缺 `# SUMMARY: <Task>-<名>` 标题（大小写不敏感，标题可带括号说明后缀）');
@@ -2271,11 +2322,39 @@ async function main() {
                 '（旧 change/归档批渐进，不阻断；新 change 将强制）');
             }
           }
+          // ④ 全骨架保真：模板在场时新 change 缺段/乱序/自检位置非法 → BLOCK；
+          // 模板缺失时骨架来自内置兜底，不据此新增阻断（旧格式兼容）。
+          const skeletonFidelity = summarySkeletonFidelity(content, skeleton);
+          const skeletonProblems = [];
+          if (skeletonFidelity.missingSections.length > 0) {
+            skeletonProblems.push('缺段: ' + skeletonFidelity.missingSections.join('、'));
+          }
+          if (skeletonFidelity.orderIssue) {
+            skeletonProblems.push('段序乱（「' + skeletonFidelity.orderIssue.replace(/^##\s*/, '') +
+              '」偏离 flow-kit/templates/SUMMARY.md 的段序）');
+          }
+          if (skeletonFidelity.selfCheckIssue) {
+            skeletonProblems.push(skeletonFidelity.selfCheckIssue);
+          }
+          if (skeletonProblems.length > 0) {
+            if (isNewChange(state) && skeleton.derived) {
+              skeletonGuidanceNeeded = true;
+              hardIssues.push(f + ' SUMMARY 全骨架校验失败: ' + skeletonProblems.join('; '));
+            } else {
+              console.error('SUMMARY TEMPLATE WARN: ' + f + ' ' + skeletonProblems.join('; ') +
+                (skeleton.derived
+                  ? '（旧 change/归档批渐进，不阻断；新 change 将强制）'
+                  : '（模板缺失，按内置骨架提示；不新增阻断）'));
+            }
+          }
         } catch {}
       }
       if (hardIssues.length > 0) {
         console.error('BLOCKED: SUMMARY 模板保真校验失败: ' + hardIssues.join('; '));
         console.error('恢复: 对照 flow-kit/templates/SUMMARY.md 修正标题/首部/段序（含 flow-comet 增量 ## 自检方法 段）后重试 exit；新 change 强制模板保真');
+        if (skeletonGuidanceNeeded) {
+          console.error('恢复: 对照 flow-kit/templates/SUMMARY.md 补齐缺失段的 H2 标题（条件段内容可写 N/A）并按模板顺序排列；## 自检方法 只允许文末或紧随 ## 越界检查 之后两种位置');
+        }
         process.exit(1);
       }
     }
