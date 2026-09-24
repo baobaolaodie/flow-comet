@@ -4380,11 +4380,16 @@ const SCENARIOS = [
   // 启发式安全侧边界锚定 / 零提交正式语义 / SUMMARY·TASK7·三文档模板保真 / 技能加载前置门 /
   // next·entry 输出点名 / 技能加载措辞 / next 进行中节点保护扩展） ----------
 
-  // 154: 疑似对象判定单一来源（设计语义 / AC-1）——workflow-state.mjs 与 workflow-handoff.mjs
-  // 不得各自定义 looksLikeObjectLiteral，必须从 state-schema.mjs import（单一来源 fail-closed）。
-  // 当前两脚本各有一份逐字重复定义、state-schema 无导出 → 预期 RED。
+  // 154: 单一来源静态锁（设计语义 / AC-1 + F-3 / AC-5）——① workflow-state.mjs 与
+  // workflow-handoff.mjs 不得各自定义 looksLikeObjectLiteral，必须从 state-schema.mjs import
+  //（单一来源 fail-closed）；② F-3：workflow-guard/state/handoff 三消费脚本均须从
+  // route-node.mjs import EXECUTE_FAMILY_NODE_IDS，且源码中不得再出现 execute 家族成员内联 pair
+  //（<ident> === 'execute' || <ident> === 'subagent-execute'，正反顺序）→ 0 命中。
+  // 允许清单：单节点分支 / hasSubagentNode 协议判定 / 证据键与文案不参与 pair 断言。
+  // ② 为 T-FIX-02 在既有场景内扩展（不新增顶层编号，场景数保持 258）。
+
   {
-    name: '154 疑似对象判定单一来源：state/handoff 从 state-schema import（禁止各自定义）',
+    name: '154 单一来源静态锁：state/handoff 不内置 looksLikeObjectLiteral + 三消费脚本 import EXECUTE_FAMILY_NODE_IDS 且无内联 pair',
     run: (dir) => {
       const schemaPath = path.join(__dirname, 'state-schema.mjs');
       const script = `
@@ -4404,6 +4409,62 @@ const SCENARIOS = [
       const res = spawnSync(process.execPath, ['-e', script, STATE, HANDOFF, schemaPath], { encoding: 'utf8', timeout: 60000 });
       assertExit(res, 0);
       assertOut(res, 'SINGLE SOURCE OK');
+
+      // ===== F-3（T-FIX-02 / AC-5）：三消费脚本 execute 家族成员单一来源静态锁 =====
+      // ① import 断言：枚举 import 语句后匹配 source + 具名符号（容忍重排/多行/其它符号共存）。
+      const importRe = /import\s*\{([\s\S]*?)\}\s*from\s*['"]([^'"]+)['"]/g;
+      const hasNamedImport = (text, source, name) => {
+        importRe.lastIndex = 0;
+        let m;
+        while ((m = importRe.exec(text)) !== null) {
+          if (m[2] === source && m[1].split(',').some((s) => s.trim() === name)) return true;
+        }
+        return false;
+      };
+      // ② 内联 pair 检测器：`=== 'execute'` 与 `=== 'subagent-execute'` 经 `||` 直连（正反顺序）。
+      // 只命中双侧 === || === 组合；单节点分支（&& / 单 compare）、协议判定、证据键不命中
+      //（下方合成正/负例自锚，防检测器退化为永不生效或误伤允许形态）。
+      const pairRe = /(?:[A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*\s*===\s*'execute'\s*\)?\s*\|\|\s*\(?\s*[A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*\s*===\s*'subagent-execute')|(?:[A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*\s*===\s*'subagent-execute'\s*\)?\s*\|\|\s*\(?\s*[A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*\s*===\s*'execute')/g;
+      const detectorPositive = [
+        "(node.id === 'execute' || node.id === 'subagent-execute')",
+        "(detectedNode === 'subagent-execute' || detectedNode === 'execute')",
+        "(nodeId === 'execute' || requestNode === 'subagent-execute')",
+      ];
+      const detectorNegative = [
+        "if (node.id === 'execute' && state.activeChange) {",
+        "if (node.id === 'subagent-execute' && state.activeChange) {",
+        "(protocol.nodes ?? []).some(n => n.id === 'subagent-execute')",
+        "state.evidence['subagent-execute'] = state.evidence['subagent-execute'] || {};",
+        "hasSubagentNode(protocol)",
+      ];
+      const issues = [];
+      for (const candidate of detectorPositive) {
+        pairRe.lastIndex = 0;
+        if (!pairRe.test(candidate)) issues.push('内联 pair 检测器自身失效：未命中已知历史形态 ' + JSON.stringify(candidate));
+      }
+      for (const candidate of detectorNegative) {
+        pairRe.lastIndex = 0;
+        if (pairRe.test(candidate)) issues.push('内联 pair 检测器误报允许形态：' + JSON.stringify(candidate));
+      }
+      const familySources = [
+        ['workflow-guard.mjs', GUARD],
+        ['workflow-state.mjs', STATE],
+        ['workflow-handoff.mjs', HANDOFF],
+      ];
+      for (const [sourceName, sourceFile] of familySources) {
+        const text = fs.readFileSync(sourceFile, 'utf8');
+        if (!hasNamedImport(text, './route-node.mjs', 'EXECUTE_FAMILY_NODE_IDS')) {
+          issues.push(sourceName + ' 未从 ./route-node.mjs import EXECUTE_FAMILY_NODE_IDS（execute 家族成员须单一来源）');
+        }
+        const sourceLines = text.split('\n');
+        pairRe.lastIndex = 0;
+        let m;
+        while ((m = pairRe.exec(text)) !== null) {
+          const lineNo = text.slice(0, m.index).split('\n').length;
+          issues.push(sourceName + ':' + lineNo + ' 出现 execute 家族成员内联 pair（应改用 EXECUTE_FAMILY_NODE_IDS.has(...)）: ' + sourceLines[lineNo - 1].trim());
+        }
+      }
+      if (issues.length > 0) throw new Error(issues.join(String.fromCharCode(10)));
     },
   },
 
