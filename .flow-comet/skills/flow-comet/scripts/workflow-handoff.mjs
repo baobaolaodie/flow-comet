@@ -5,7 +5,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { validateStateFields, looksLikeObjectLiteral, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME } from './state-schema.mjs';
 import { EXECUTE_FAMILY_NODE_IDS } from './route-node.mjs';
-import { resolveProtocol, readProtocolFile, validateProtocolSchema } from './protocol-utils.mjs';
+import {
+  resolveProtocol,
+  readProtocolFile,
+  validateProtocolSchema,
+  inspectWorkflowPathSegments,
+} from './protocol-utils.mjs';
 import { taskAttrsById } from './task-parsing.mjs';
 
 // workflow-handoff.mjs: Record subagent handoff evidence
@@ -131,6 +136,9 @@ function literalRelativePosixPath(entry) {
 // `git check-ignore -q -- <repo-relative-path>` 退出 0（cwd=runRoot，数组参数、index-aware
 // 默认：tracked 文件退出 1）→ true；任一不满足 / 非 0 / 命令错误 / 非 git 仓 → false
 //（调用方不记 noCommit、不阻断原流程）。不用 --no-index、不 import prepare-env（不分发）。
+// 路径扫描增强（m-13）：runRoot 先 realpath 归一；对每个字面路径的最近已存在祖先逐段 lstat，
+// 任一段为 symlink/junction（或物理逃出 runRoot）→ fail-closed false（目标不存在不算失败）。
+// 逐段扫描复用 protocol-utils 的单一权威，本处不得另写第二份 symlink/包含判据（L-067）。
 async function writeFilesProvablyIgnored(entries) {
   if (!Array.isArray(entries) || entries.length === 0) return false;
   const relPaths = [];
@@ -159,12 +167,44 @@ async function writeFilesProvablyIgnored(entries) {
   if (!sameRoot) return false; // runRoot 必须是 git top-level（worktree/子目录形态保守不享受）
   for (const rel of relPaths) {
     try {
+      await inspectWorkflowPathSegments(realRoot, path.resolve(realRoot, rel), 'write_files 字面路径');
+    } catch {
+      return false; // symlink/junction 穿越 / 非目录祖先 / 物理越界 → 资格 false（fail-closed）
+    }
+    try {
       execFileSync('git', ['check-ignore', '-q', '--', rel], { cwd: runRoot, stdio: 'ignore' });
     } catch {
       return false; // 未命中（退出 1）/ tracked（退出 1，index-aware 默认）/ 命令错误
     }
   }
   return true;
+}
+
+// ---------- m-13 result 零提交资格重验 ----------
+// 仅当 request 记录 noCommit=true 且 writeFiles 非空时，在 result 时刻按同一增强资格重跑。
+// 失败 → 撤销 request evidence 的 noCommit（置 false，审计留痕）：
+//   新 change → HANDOFF ERROR、不落 result（只落资格撤销），出口 W1-D 不再豁免缺 commitHash；
+//   旧 change → HANDOFF WARN 后继续记录 result（出口 W1-D 同样不再豁免）。
+// 返回 'skip'（形态不适用）/ 'pass'（资格仍成立）/ 'warn'（旧 change 已撤销）/ 'block'（新 change 已撤销）。
+// 空 writeFiles、非 noCommit、无 request 记录均不扩大行为；未引用提交 / HEAD 移动 / TOCTOU /
+// worktree 提交不可见等结构性 residual 由 T11/T12 文档登记，本函数不宣称已闭合。
+async function revalidateResultZeroCommit(state, taskId, handoffReq) {
+  if (!handoffReq || handoffReq.noCommit !== true) return 'skip';
+  const entries = Array.isArray(handoffReq.writeFiles) ? handoffReq.writeFiles : [];
+  if (entries.length === 0) return 'skip';
+  if (await writeFilesProvablyIgnored(entries)) return 'pass';
+  handoffReq.noCommit = false;
+  // 资格撤销先落盘（新旧 change 一致）：旧 change 后续若被其它门禁阻断，审计也不丢失，
+  // 避免 WARN 声称已撤销而 state 仍是旧值。
+  await writeState(state);
+  const detail = '任务 ' + taskId + ' 零提交资格 result 重验失败（.gitignore 变化 / 路径变为 tracked / symlink-junction 逃逸 / 非 git 仓等）——request evidence noCommit=false';
+  if (state.newChange === true) {
+    // 新 change 只落 request 资格撤销；此刻尚未默认 handoffResult，确保「不落 result」不是文案承诺
+    console.error('HANDOFF ERROR: ' + detail + '；新 change 不落 result，出口校验不再豁免缺 commitHash。恢复: 修正 write_files / .gitignore 与路径形态后重新 request，或回传含合法 commitHash 的 Return Contract');
+    return 'block';
+  }
+  console.error('HANDOFF WARN: ' + detail + '（旧 change 渐进，继续记录 result；出口校验不再豁免缺 commitHash）');
+  return 'warn';
 }
 
 async function readState() {
@@ -380,14 +420,18 @@ async function main() {
     }
     state.evidence = state.evidence || {};
     state.evidence['subagent-execute'] = state.evidence['subagent-execute'] || {};
+    const handoffReq = state.evidence['subagent-execute'].handoffRequests?.[taskId];
+    const hasRequest = !!handoffReq && typeof handoffReq === 'object';
+    // m-13：result 重验在默认 handoffResult 之前——新 change 失败路径只落 request.noCommit=false，
+    // 不落下空 handoffResult 充当 result 载体；重验通过/旧 change 之后才初始化结果容器。
+    if (await revalidateResultZeroCommit(state, taskId, handoffReq) === 'block') process.exit(1);
     state.evidence['subagent-execute'].handoffResult = state.evidence['subagent-execute'].handoffResult || {};
     // 零提交任务语义：已有 request 记录且其写文件列表为空（无 tracked 写意图）或带 noCommit
     // 标记（空 write_files 或全部可证明 gitignored——request 侧 F-6 资格判定的结论）时，判定为
     // 零提交——跳过提交文件子集校验并输出可审计提示。契约侧 noCommit 声明仅作
     // 审计线索：写文件列表非空的任务即使契约声称零提交，仍执行完整提交文件子集校验（不可借
     // 零提交声明绕过真实提交检查）。无 request 记录的任务不适用零提交（保持既有完整校验）。
-    const handoffReq = state.evidence['subagent-execute'].handoffRequests?.[taskId];
-    const hasRequest = !!handoffReq && typeof handoffReq === 'object';
+    // m-13：request.noCommit 在上述重验失败时已被撤销，故此处按撤销后的真实值重算。
     const reqWriteFiles = hasRequest ? (handoffReq.writeFiles || []) : [];
     const reqNoCommit = hasRequest && handoffReq.noCommit === true;
     const contractNoCommit = typeof parsed === 'object' && parsed !== null && parsed.noCommit === true;

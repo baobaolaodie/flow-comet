@@ -35,7 +35,12 @@ export function workflowPathInside(root, target) {
   );
 }
 
-export async function inspectWorkflowProtectedPath(
+// 路径段扫描（单一权威）：target 词法必须在 projectRoot 内；root 必须是真实目录；自 root 起
+// 对 target 的每个已存在段逐段 lstat——任一段为 symlink/junction、非末段非目录、末段类型不符
+// expected、或某段 realpath 逃出物理 root → 抛错（fail-closed）；最近已存在祖先之后不存在
+// → 返回 { exists: false }（不是错误：写资格判定允许目标尚未创建）。调用方负责 runRoot 的
+// realpath 归一（写入侧传 realpath 后的 root）。受保护读取与写路径资格共用本段扫描，禁止副本。
+export async function inspectWorkflowPathSegments(
   projectRoot,
   target,
   label,
@@ -91,6 +96,17 @@ export async function inspectWorkflowProtectedPath(
     }
   }
   return { target: lexicalTarget, exists: true };
+}
+
+// 兼容既有消费方（readWorkflowProtectedFile / comet-hook-guard）：受保护读取使用同一段
+// 扫描权威；这里是委托而非第二份实现（L-067 单一权威）。
+export async function inspectWorkflowProtectedPath(
+  projectRoot,
+  target,
+  label,
+  expected = 'any',
+) {
+  return inspectWorkflowPathSegments(projectRoot, target, label, expected);
 }
 
 function workflowFileObjectIdentity(stat) {
