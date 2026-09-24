@@ -423,21 +423,77 @@ const DISTRIBUTION_MARKERS = {
   copy: 'distribution:not-applicable@copy',
 };
 
+// K14 安装副本侧「不适用」说明：K14 分支与契约夹具共用同一字面量来源（防两处文案漂移）。
+const K14_COPY_DETAIL = '桥接 loader 版本戳重装断言仅权威源侧可判';
+
 // 运行器侧标记契约校验（分发面项）：标记必须显式在场且与结构化环境判据推出的期望值一致。
 //   缺标记 = 该项走了静默跳过（「未验证 ≠ 通过」，与显式「不适用」是两回事）→ 失败；
 //   标记与环境不符 = 环境判据写反（副本侧假红 / 权威源侧静默漏检）→ 失败。
-function assertDistributionOutcome(itemName, marker) {
+// ctx 是可注入接缝（默认按真实环境判据解析）：使两侧错配与非法 marker 的失败路径能由夹具
+// 合成 ctx 真实驱动（否则这些分支没有调用者，判定被改宽也没有断言能拦住）。
+function assertDistributionOutcome(itemName, marker, ctx = resolvePackageContext()) {
   const legal = Object.values(DISTRIBUTION_MARKERS);
   if (!legal.includes(marker)) {
     throw new Error('分发面结果标记缺席或非法（应回传 ' + legal.join(' 或 ') + '，实际 ' + JSON.stringify(marker)
       + '）——禁止静默跳过');
   }
-  const expected = DISTRIBUTION_MARKERS[resolvePackageContext().kind];
+  const expected = DISTRIBUTION_MARKERS[ctx.kind];
   if (marker !== expected) {
     throw new Error('分发面结果标记与环境判据不符：本环境应 ' + expected + '，实际 ' + marker
       + '（判定写反会让该侧静默漏检或假红）');
   }
   console.log('OUTCOME: ' + itemName + ' → ' + marker);
+}
+
+// copy 形态「不适用」回传：文案与机器可读结果标记同源产出（文案是「非静默跳过」的证据）。
+// 返回 { message, marker } 供 early-return 分支直接消费，也使夹具无需捕获 stdout 即可逐字驱动断言。
+// 非 copy ctx 必须 fail-closed——不允许把 source 形态的 marker 与「不适用」文案拼在一起。
+function copyDistributionOutcome(ctx, detail) {
+  if (!ctx || ctx.kind !== 'copy' || typeof ctx.reason !== 'string' || ctx.reason.trim() === '') {
+    throw new Error('copy 回传契约要求 kind=copy 且含非空 reason，实际 ' + JSON.stringify(ctx));
+  }
+  return {
+    message: '  不适用（安装副本侧：' + ctx.reason + '）——' + detail + '，本项计通过',
+    marker: DISTRIBUTION_MARKERS[ctx.kind],
+  };
+}
+
+// 分发面回传契约夹具（环境无关；K14 在副本 early-return 之前调用，故两侧都会真跑）：
+//   ① 三类失败路径负例必须 throw——copy ctx + source marker / source ctx + copy marker /
+//      undefined 或非法 marker（缺可注入 ctx 接缝时这些路径没有任何调用者）；
+//   ② 接缝正例：两侧 marker 与 ctx 匹配时必须通过；
+//   ③ copy 形态真实判据 + helper 文案/marker 同源产出。
+function assertDistributionOutcomeContract(scratch) {
+  const expectThrow = (fn, label) => {
+    let threw = null;
+    try { fn(); } catch (e) { threw = e; }
+    if (!threw) throw new Error('分发面回传契约失配（' + label + '）：失败路径应抛错而未抛错');
+  };
+  // ① 失败路径负例先驱动：接缝缺失时先在此以「应抛错而未抛错」暴露，不被后续环境相关失败掩盖
+  expectThrow(() => assertDistributionOutcome('分发面契约夹具:copy ctx + source marker', DISTRIBUTION_MARKERS.source, { kind: 'copy', reason: '夹具' }), 'copy ctx + source marker');
+  expectThrow(() => assertDistributionOutcome('分发面契约夹具:source ctx + copy marker', DISTRIBUTION_MARKERS.copy, { kind: 'source' }), 'source ctx + copy marker');
+  expectThrow(() => assertDistributionOutcome('分发面契约夹具:undefined marker', undefined, { kind: 'copy', reason: '夹具' }), 'undefined marker');
+  expectThrow(() => assertDistributionOutcome('分发面契约夹具:非法 marker', 'distribution:unknown', { kind: 'copy', reason: '夹具' }), '非法 marker');
+  // ② 接缝正例
+  assertDistributionOutcome('分发面契约夹具:copy 正例', DISTRIBUTION_MARKERS.copy, { kind: 'copy', reason: '夹具' });
+  assertDistributionOutcome('分发面契约夹具:source 正例', DISTRIBUTION_MARKERS.source, { kind: 'source' });
+  // ③ copy 形态真实判据 + helper 文案/marker 同源
+  const copyCtx = resolvePackageContext(path.join(scratch, 'k14-copy-probe'));
+  if (copyCtx.kind !== 'copy' || typeof copyCtx.reason !== 'string' || copyCtx.reason.trim() === '') {
+    throw new Error('分发面回传契约夹具 copy 判据失配: ' + JSON.stringify(copyCtx));
+  }
+  const copyOutcome = copyDistributionOutcome(copyCtx, K14_COPY_DETAIL);
+  if (copyOutcome.marker !== DISTRIBUTION_MARKERS.copy) {
+    throw new Error('分发面回传契约 copy marker 失配: ' + JSON.stringify(copyOutcome.marker));
+  }
+  if (!copyOutcome.message.includes('不适用（安装副本侧：' + copyCtx.reason + '）')
+      || !copyOutcome.message.includes(K14_COPY_DETAIL)
+      || !copyOutcome.message.includes('本项计通过')) {
+    throw new Error('分发面回传契约 copy 文案失配: ' + JSON.stringify(copyOutcome.message));
+  }
+  // ④ helper 非 copy ctx 必须 fail-closed（不得把 source marker 伪装成「不适用」）
+  expectThrow(() => copyDistributionOutcome({ kind: 'source' }, 'x'), 'copy helper 非 copy ctx');
+  console.log('  分发面回传契约: copy 文案/marker + 两侧正例 + 三类失败路径负例 ✓');
 }
 
 // 跑 `npm pack --dry-run --json`（只读，不产出 tarball）并解析出产物相对路径清单。
@@ -4480,12 +4536,15 @@ const TEST_ITEMS = [
     run: (dir) => {
       const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
       const pkgCtx = resolvePackageContext();
+      // 分发面回传契约夹具先跑（环境无关）：在副本 early-return 之前由夹具驱动断言——
+      // copy 文案/marker 与三类失败路径负例在权威源与安装副本两侧都真跑，不依赖「装到副本才验证」。
+      assertDistributionOutcomeContract(dir);
       const marker = DISTRIBUTION_MARKERS[pkgCtx.kind];
       if (pkgCtx.kind === 'copy') {
-        console.log('  不适用（安装副本侧：' + pkgCtx.reason + '）——桥接 loader 版本戳重装断言仅权威源侧可判，本项计通过');
-        return marker;
+        const outcome = copyDistributionOutcome(pkgCtx, K14_COPY_DETAIL);
+        console.log(outcome.message);
+        return outcome.marker;
       }
-      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       const loader = path.join(repoRoot, 'scripts', 'dsh-bridge.mjs');
       if (!fs.existsSync(loader)) throw new Error('缺少 scripts/dsh-bridge.mjs');
@@ -4540,17 +4599,7 @@ const TEST_ITEMS = [
       assertInstalledCopyBridgeVersionSemantics(target, dshHome, srcVersion);
       console.log('  版本戳重装断言:升级/降级方向措辞与覆盖后新戳 ✓');
       console.log('  dev 态载体版本比较:同基础健康 + 基础失配仍 FAIL ✓');
-      // 副本形态标记分支单测（本环境为权威源侧）：构造无权威树/无同名 manifest 的目录，判据应返回 copy；
-      // copy 形态的显式「不适用」文案与机器可读标记同源（runner 按环境判据断言 marker，防静默跳过）。
-      const copyProbe = resolvePackageContext(path.join(dir, 'k14-copy-probe'));
-      if (copyProbe.kind !== 'copy' || typeof copyProbe.reason !== 'string' || copyProbe.reason.trim() === '') {
-        throw new Error('K14 副本形态判据夹具失配: ' + JSON.stringify(copyProbe));
-      }
-      const copyMarker = DISTRIBUTION_MARKERS[copyProbe.kind];
-      if (copyMarker !== DISTRIBUTION_MARKERS.copy || marker !== DISTRIBUTION_MARKERS.source) {
-        throw new Error('K14 分发面标记映射失配: source=' + marker + ' copy=' + copyMarker);
-      }
-      console.log('  source 形态:既有断言全跑 → ' + marker + '；copy 形态标记映射 → ' + copyMarker + ' ✓');
+      console.log('  source 形态:既有断言全跑 → ' + marker + '（copy 文案/marker 与失败路径负例已由分发面回传契约夹具断言）✓');
       return marker;
     },
   },
