@@ -8135,6 +8135,204 @@ const SCENARIOS = [
         throw new Error('exit execute --apply 应记录带 change 与 taskSetSignature 的出口事件，实际 '
           + JSON.stringify(lastExit));
       }
+
+      // ---------- T02 回程行分类子锚（分类只决定审计行；路由/state 写入零变化） ----------
+      const taskPath = '.specs/' + CHANGE_ID + '/TASK.md';
+      const familyEvidence = (taskIds) => ({
+        execute: { summary: 'fix batch executed' },
+        'subagent-execute': { summary: 'delegated', handoffResult: handoffFor(taskIds) },
+        review: { summary: 'review in progress' },
+      });
+      const baseReturnState = (overrides = {}) => ({
+        activeChange: CHANGE_ID,
+        currentNode: 'execute',
+        completedNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
+        enteredNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review'],
+        evidence: familyEvidence(['T01']),
+        verifyFailures: 0,
+        executionMode: 'subagent',
+        directOverride: false,
+        newChange: true,
+        ...overrides,
+      });
+      const FAMILY_COMPLETED = 'open,design,plan,execute,subagent-execute';
+      // 分类不得引入新 state 顶层字段；比对除 currentNode（既有路由覆盖 next）、history
+      // （既有出口事件追加）与 status（既有 apply 写 running/completed）之外的字段——其中
+      // execute 证据的 completedChecks 由既有 required-skill 自动补齐逻辑写入，同样属
+      // 收口前既有行为，故从比对形状中排除。
+      const stateKeyShape = (s) => JSON.stringify(Object.keys(s).filter((k) => k !== 'status').sort());
+      const routingShape = (s) => JSON.stringify({
+        activeChange: s.activeChange,
+        completedNodes: s.completedNodes,
+        enteredNodes: s.enteredNodes,
+        verifyFailures: s.verifyFailures,
+        executionMode: s.executionMode,
+        directOverride: s.directOverride,
+        newChange: s.newChange,
+        subagentEvidence: s.evidence['subagent-execute'],
+        reviewEvidence: s.evidence.review,
+      });
+
+      // 250b 正常多趟最终 exit：无 Fix 任务、历史家族出口签名 == 当前 TASK 签名 → 中性
+      // RETURN（正常多趟收尾，非 Fix 回修）；不得出现 FIX-BATCH；NODE/state 与收口前一致。
+      const normalTaskText = '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n';
+      const normalSignature = routeNodeModule.taskSetSignature(normalTaskText);
+      writeFile(dir, taskPath, normalTaskText);
+      writeState(dir, baseReturnState({
+        history: [{
+          event: 'exit-applied', node: 'subagent-execute', change: CHANGE_ID,
+          at: '2026-09-23T00:00:00.000Z', taskSetSignature: normalSignature,
+        }],
+      }));
+      const beforeNormal = readScenarioState(dir);
+      const resNormal = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resNormal, 0);
+      assertOut(resNormal, 'RETURN: 回源节点 review（execute 出口已完成；正常多趟收尾，非 Fix 回修）');
+      assertOut(resNormal, 'NODE: review');
+      assertNotOut(resNormal, 'FIX-BATCH');
+      assertNotOut(resNormal, 'NODE: verify');
+      const afterNormal = readScenarioState(dir);
+      if (afterNormal.currentNode !== 'review'
+        || afterNormal.completedNodes.join(',') !== FAMILY_COMPLETED
+        || stateKeyShape(afterNormal) !== stateKeyShape(beforeNormal)
+        || routingShape(afterNormal) !== routingShape(beforeNormal)) {
+        throw new Error('正常多趟回程只应改审计行（路由按既有 resolveFixReturnNode 覆盖 next），实际 '
+          + JSON.stringify({
+            currentNode: afterNormal.currentNode,
+            completedNodes: afterNormal.completedNodes,
+            keys: stateKeyShape(afterNormal),
+            routing: routingShape(afterNormal),
+          }));
+      }
+      const normalExit = (afterNormal.history || []).pop();
+      if (!normalExit || normalExit.node !== 'execute' || normalExit.change !== CHANGE_ID
+        || normalExit.taskSetSignature !== normalSignature) {
+        throw new Error('正常多趟出口事件形状应与既有一致（node/change/taskSetSignature），实际 '
+          + JSON.stringify(normalExit));
+      }
+
+      // 250c 多波次真实 Fix：历史旧签名 ≠ 当前、最新签名 == 当前（只看最新会漏判）→ 保留
+      // FIX-BATCH（全量扫描）；TASK 含 T-FIX 任务与结构标记。
+      const multiWaveTaskText = fixBatchTaskText('done');
+      const multiWaveSignature = routeNodeModule.taskSetSignature(multiWaveTaskText);
+      writeFile(dir, taskPath, multiWaveTaskText);
+      writeState(dir, baseReturnState({
+        evidence: familyEvidence(['T01', 'T-FIX-01']),
+        history: [
+          {
+            event: 'exit-applied', node: 'execute', change: CHANGE_ID,
+            at: '2026-09-20T00:00:00.000Z', taskSetSignature: STALE_FIX_BATCH_SIGNATURE,
+          },
+          {
+            event: 'exit-applied', node: 'subagent-execute', change: CHANGE_ID,
+            at: '2026-09-24T00:00:00.000Z', taskSetSignature: multiWaveSignature,
+          },
+        ],
+      }));
+      const resMultiWave = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resMultiWave, 0);
+      assertOut(resMultiWave, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
+      assertOut(resMultiWave, 'NODE: review');
+      assertNotOut(resMultiWave, 'RETURN: 回源节点');
+
+      // 250d 反向构造（L-064）——与 250c 一一对应证明分类依据是历史全量扫描（不是只看
+      // 最新）：① 无 Fix 编号任务 + 旧签名 ≠ 当前 + 最新签名 == 当前 → 仍判 fix（发散证据
+      // 不依赖结构标记）；② 同任务集仅保留最新（签名 == 当前）→ 必须中性 RETURN。
+      const plainTaskText = '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n';
+      const plainSignature = routeNodeModule.taskSetSignature(plainTaskText);
+      writeFile(dir, taskPath, plainTaskText);
+      writeState(dir, baseReturnState({
+        history: [
+          {
+            event: 'exit-applied', node: 'execute', change: CHANGE_ID,
+            at: '2026-09-20T00:00:00.000Z', taskSetSignature: STALE_FIX_BATCH_SIGNATURE,
+          },
+          {
+            event: 'exit-applied', node: 'subagent-execute', change: CHANGE_ID,
+            at: '2026-09-24T00:00:00.000Z', taskSetSignature: plainSignature,
+          },
+        ],
+      }));
+      const resDivergentPlain = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resDivergentPlain, 0);
+      assertOut(resDivergentPlain, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
+      assertNotOut(resDivergentPlain, 'RETURN: 回源节点');
+      writeState(dir, baseReturnState({
+        history: [{
+          event: 'exit-applied', node: 'subagent-execute', change: CHANGE_ID,
+          at: '2026-09-24T00:00:00.000Z', taskSetSignature: plainSignature,
+        }],
+      }));
+      const resLatestOnlyEqual = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resLatestOnlyEqual, 0);
+      assertOut(resLatestOnlyEqual, 'RETURN: 回源节点 review（execute 出口已完成；正常多趟收尾，非 Fix 回修）');
+      assertNotOut(resLatestOnlyEqual, 'FIX-BATCH');
+
+      // 250e 源未 entry 的真实 Fix：T-FIX 任务 + enteredNodes 不含源节点 review + 历史无
+      // 签名（旧态）→ 结构标记仍恢复 fix 标签，保留 FIX-BATCH；不误判 unknown、不卡死。
+      writeFile(dir, taskPath, multiWaveTaskText);
+      writeState(dir, baseReturnState({
+        evidence: familyEvidence(['T01', 'T-FIX-01']),
+        enteredNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
+        history: [],
+      }));
+      const resSourceNotEntered = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resSourceNotEntered, 0);
+      assertOut(resSourceNotEntered, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
+      assertOut(resSourceNotEntered, 'NODE: review');
+      assertNotOut(resSourceNotEntered, 'RETURN: 回源节点');
+      assertNotOut(resSourceNotEntered, 'BLOCKED');
+
+      // 250f 旧态无签名无标记：历史家族出口无签名 + 任务集无 Fix 标记 → RETURN 未分类；
+      // 不 BLOCK、不出现 FIX-BATCH；NODE/state 与收口前一致（只有审计行变化）。
+      writeFile(dir, taskPath, plainTaskText);
+      writeState(dir, baseReturnState({
+        history: [{
+          event: 'exit-applied', node: 'execute', change: CHANGE_ID,
+          at: '2026-09-19T00:00:00.000Z',
+        }],
+      }));
+      const beforeUnknown = readScenarioState(dir);
+      const resUnknown = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resUnknown, 0);
+      assertOut(resUnknown, 'RETURN: 回源节点 review（execute 出口已完成；旧 state 缺闭合/修复证据，未分类）');
+      assertOut(resUnknown, 'NODE: review');
+      assertNotOut(resUnknown, 'FIX-BATCH');
+      assertNotOut(resUnknown, 'BLOCKED');
+      const afterUnknown = readScenarioState(dir);
+      if (afterUnknown.currentNode !== 'review'
+        || afterUnknown.completedNodes.join(',') !== FAMILY_COMPLETED
+        || stateKeyShape(afterUnknown) !== stateKeyShape(beforeUnknown)
+        || routingShape(afterUnknown) !== routingShape(beforeUnknown)) {
+        throw new Error('未分类回程只应改审计行（路由按既有 resolveFixReturnNode 覆盖 next），实际 '
+          + JSON.stringify({
+            currentNode: afterUnknown.currentNode,
+            completedNodes: afterUnknown.completedNodes,
+            keys: stateKeyShape(afterUnknown),
+            routing: routingShape(afterUnknown),
+          }));
+      }
+
+      // 250g Fix 段标题从 flow-kit/templates/TASK.md 派生（D4）：模板段名含括号说明 +
+      // 段内非 FIX 编号任务 → 结构标记命中 fix（模板读取路径真实被执行；标题由模板派生）。
+      writeFile(dir, 'flow-kit/templates/TASK.md',
+        '# TASK 模板\n\n## Fix 任务（来自 REVIEW / INTEGRATION）\n');
+      const sectionTaskText = '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n'
+        + '## Fix 任务（来自 REVIEW / INTEGRATION）\n\n' + fixTaskBlock('T02', 'done') + '\n';
+      writeFile(dir, taskPath, sectionTaskText);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T02-SUMMARY.md', strictSummary('T02'));
+      const sectionSignature = routeNodeModule.taskSetSignature(sectionTaskText);
+      writeState(dir, baseReturnState({
+        evidence: familyEvidence(['T01', 'T02']),
+        history: [{
+          event: 'exit-applied', node: 'execute', change: CHANGE_ID,
+          at: '2026-09-24T00:00:00.000Z', taskSetSignature: sectionSignature,
+        }],
+      }));
+      const resSection = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resSection, 0);
+      assertOut(resSection, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
+      assertNotOut(resSection, 'RETURN: 回源节点');
     },
   },
 
