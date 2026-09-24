@@ -1,8 +1,10 @@
 #!/usr/bin/env node
+import { execFileSync } from 'child_process';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { validateStateFields, looksLikeObjectLiteral, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME } from './state-schema.mjs';
+import { EXECUTE_FAMILY_NODE_IDS } from './route-node.mjs';
 
 // workflow-handoff.mjs: Record subagent handoff evidence
 // evidence 统一记录在 subagent-execute 名下作为委托证据库——execute（串行委托）与 subagent-execute（并行委托）共用。不改成节点参数，保持最小改动。
@@ -74,9 +76,15 @@ async function resolveJsonFileWithinRunRoot(jsonFile) {
 // writeFiles 段感知 glob 匹配:按 / 分段,`*` 只匹配段内任意字符(不跨段);
 // 精确条目要求完全相等(不用前缀匹配——src/foo 不得匹配 src/foobar);
 // 段内含 * 的部分通配(如 src/*.test.js、src/*.mjs)转锚定正则匹配
+// 路径分隔符归一（单一来源）：Windows 反斜杠 → POSIX `/`；matchWriteFilePattern 与
+// F-6 字面路径资格判定共用（同口径两处实现必分叉——L-067）。
+function toPosixPath(value) {
+  return String(value).replace(/\\/g, '/');
+}
+
 function matchWriteFilePattern(file, pattern) {
-  const f = String(file).replace(/\\/g, '/');
-  const p = String(pattern).replace(/\\/g, '/');
+  const f = toPosixPath(file);
+  const p = toPosixPath(pattern);
   const fp = f.split('/');
   const pp = p.split('/');
   if (fp.length !== pp.length) return false;
@@ -91,6 +99,65 @@ function matchWriteFilePattern(file, pattern) {
       .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
       .join('[^/]*') + '$');
     if (!seg.test(fp[i])) return false;
+  }
+  return true;
+}
+
+// ---------- F-6 零提交资格（DESIGN D7 · fail-closed） ----------
+// 字面路径 → repo 相对 POSIX 路径归一：仅接受不含 glob 魔法（* ? [）的字面路径；拒绝绝对
+// 路径（POSIX 前导 /、盘符前缀、UNC）与 .. 逃逸、空段。返回归一后相对路径，或 null（无资格）。
+function literalRelativePosixPath(entry) {
+  if (typeof entry !== 'string') return null;
+  const raw = entry.trim();
+  if (raw === '' || /[*?[]/.test(raw)) return null;
+  const posix = toPosixPath(raw);
+  if (posix.startsWith('/') || /^[A-Za-z]:/.test(posix)) return null;
+  const normalized = path.posix.normalize(posix);
+  if (normalized === '' || normalized === '.' || normalized === '..' || normalized.startsWith('../')) return null;
+  // 必须位于 runRoot 内：解析后相对路径逐字复核（词法拒绝后的二次保险，含平台路径语义差异）
+  const relToRoot = path.relative(runRoot, path.resolve(runRoot, normalized));
+  if (relToRoot === '' || path.isAbsolute(relToRoot) || relToRoot === '..' || relToRoot.startsWith('..' + path.sep)) {
+    return null;
+  }
+  return normalized;
+}
+
+// 资格判定：全部字面路径 + runRoot 等于 git top-level 的 realpath + 逐路径
+// `git check-ignore -q -- <repo-relative-path>` 退出 0（cwd=runRoot，数组参数、index-aware
+// 默认：tracked 文件退出 1）→ true；任一不满足 / 非 0 / 命令错误 / 非 git 仓 → false
+//（调用方不记 noCommit、不阻断原流程）。不用 --no-index、不 import prepare-env（不分发）。
+async function writeFilesProvablyIgnored(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) return false;
+  const relPaths = [];
+  for (const entry of entries) {
+    const rel = literalRelativePosixPath(entry);
+    if (rel === null) return false;
+    relPaths.push(rel);
+  }
+  let realRoot;
+  let realTop;
+  try {
+    realRoot = await fs.realpath(runRoot);
+    const out = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: runRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const top = String(out).split('\n').map((s) => s.trim()).filter(Boolean)[0];
+    if (!top) return false;
+    realTop = await fs.realpath(top);
+  } catch {
+    return false; // 非 git 仓 / git 不可用 / 命令错误
+  }
+  // windows 路径大小写不敏感（realpath 双方同源，仍按平台归一比较）
+  const sameRoot = process.platform === 'win32'
+    ? realRoot.toLowerCase() === realTop.toLowerCase()
+    : realRoot === realTop;
+  if (!sameRoot) return false; // runRoot 必须是 git top-level（worktree/子目录形态保守不享受）
+  for (const rel of relPaths) {
+    try {
+      execFileSync('git', ['check-ignore', '-q', '--', rel], { cwd: runRoot, stdio: 'ignore' });
+    } catch {
+      return false; // 未命中（退出 1）/ tracked（退出 1，index-aware 默认）/ 命令错误
+    }
   }
   return true;
 }
@@ -124,7 +191,7 @@ async function main() {
     // 并 skill-load 声明，再发起委托。缺失 → 新 change BLOCK / 旧 change 渐进 WARN。
     // 与零提交语义独立共存：本门只校验节点技能声明，不依赖任务 write_files 内容。
     const requestNode = state.currentNode;
-    if (requestNode && (requestNode === 'execute' || requestNode === 'subagent-execute')) {
+    if (requestNode && EXECUTE_FAMILY_NODE_IDS.has(requestNode)) {
       const declared = await nodeSkillDeclared(requestNode, state.activeChange);
       if (!declared) {
         const loadGuide = '先加载技能（用 Skill 工具，禁止跳过）并运行 workflow-state.mjs skill-load ' + requestNode + ' <skill> 再发起委托';
@@ -185,12 +252,19 @@ async function main() {
       state.evidence['subagent-execute'].handoffRequests = {};
     }
     const zeroEligible = taskResolved && emptyWriteFilesElement && writeFiles.length === 0;
+    // F-6（DESIGN D7）：非空 write_files 的「全部可证明 gitignored」资格——与空元素同语义，
+    // 记 noCommit:true；不具资格 → 不记 noCommit、不阻断原流程（保持既有完整提交子集校验）。
+    const literalIgnoredEligible = taskResolved && writeFiles.length > 0
+      && await writeFilesProvablyIgnored(writeFiles);
     state.evidence['subagent-execute'].handoffRequests[taskId] = {
       description, requestedAt: new Date().toISOString(),
       ...(writeFiles.length ? { writeFiles } : {}),
-      ...(zeroEligible ? { noCommit: true } : {})
+      ...(zeroEligible || literalIgnoredEligible ? { noCommit: true } : {})
     };
     await writeState(state);
+    if (literalIgnoredEligible) {
+      console.error('HANDOFF 零提交资格: ' + taskId + ' — write_files 全部可证明 gitignored');
+    }
     console.log('HANDOFF REQUEST: ' + taskId);
     return;
   }
@@ -237,7 +311,8 @@ async function main() {
     state.evidence['subagent-execute'] = state.evidence['subagent-execute'] || {};
     state.evidence['subagent-execute'].handoffResult = state.evidence['subagent-execute'].handoffResult || {};
     // 零提交任务语义：已有 request 记录且其写文件列表为空（无 tracked 写意图）或带 noCommit
-    // 标记时，判定为零提交——跳过提交文件子集校验并输出可审计提示。契约侧 noCommit 声明仅作
+    // 标记（空 write_files 或全部可证明 gitignored——request 侧 F-6 资格判定的结论）时，判定为
+    // 零提交——跳过提交文件子集校验并输出可审计提示。契约侧 noCommit 声明仅作
     // 审计线索：写文件列表非空的任务即使契约声称零提交，仍执行完整提交文件子集校验（不可借
     // 零提交声明绕过真实提交检查）。无 request 记录的任务不适用零提交（保持既有完整校验）。
     const handoffReq = state.evidence['subagent-execute'].handoffRequests?.[taskId];
@@ -247,7 +322,7 @@ async function main() {
     const contractNoCommit = typeof parsed === 'object' && parsed !== null && parsed.noCommit === true;
     const isZeroCommit = hasRequest && (reqWriteFiles.length === 0 || reqNoCommit);
     if (isZeroCommit) {
-      console.error('HANDOFF 零提交: ' + taskId + ' — 无 tracked 写文件（write_files 为空），已跳过提交文件子集校验');
+      console.error('HANDOFF 零提交: ' + taskId + ' — 无 tracked 写文件（write_files 为空或全部可证明 gitignored），已跳过提交文件子集校验');
       // 零提交边界收紧（bot 评审实证逃逸口）：声明零提交的结果若携带含 tracked 文件的提交，
       // 等于从「空 write_files」旁路逃逸——新 change BLOCK / 旧 change WARN。探测异常降级
       // WARN 不阻断（对齐 M4 提交对象确认提示先例）。

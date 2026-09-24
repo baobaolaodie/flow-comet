@@ -25,6 +25,7 @@
 // 校验绑定、hook 白名单缺省）。
 
 import { execFileSync, spawnSync } from 'child_process';
+import { createHash } from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -4454,12 +4455,16 @@ const SCENARIOS = [
     },
   },
 
-  // 157: 零提交任务正例（设计语义 / AC-5）——request write_files 为空 + 契约显式 noCommit + result
-  // 无任何提交 → 跳过提交文件子集校验并输出可审计"零提交"提示（不误 BLOCK）。当前无 noCommit 概念：
-  // 新 change 空 write_files 结果反而被"允许列表为空"拦 BLOCK → 预期 RED。
+  // 157: 零提交任务正例（设计语义 / AC-5 / AC-7）——① request write_files 为空 + 契约显式 noCommit +
+  // result 无任何提交 → 跳过提交文件子集校验并输出可审计"零提交"提示（不误 BLOCK）；
+  // ② 真实 request（F-6）：临时 git 仓 + .gitignore 忽略 .specs/，TASK write_files 全为字面
+  // .specs/... 路径 → 引擎记 handoffRequests.<id>.noCommit=true（可证明全部 gitignored）；
+  // result 回传无 commitHash 的零提交契约 → 记录成功、输出"零提交"、无 HANDOFF ERROR。
+  // 修复前 request 只认「<write_files> 元素存在且为空」→ ② 无 noCommit → 预期 RED。
   {
-    name: '157 零提交正例：write_files 空 + 契约 noCommit → 跳过提交校验 + 可审计提示',
+    name: '157 零提交正例：空 write_files 跳过校验；全字面 gitignored 真实 request 记 noCommit',
     run: (dir) => {
+      // ① 空 write_files 既有正例（request 落库夹具；零回归锚）
       const st = baseState('subagent-execute');
       st.newChange = true;
       st.evidence['subagent-execute'] = { handoffRequests: { T01: { description: 'zero-commit task', writeFiles: [] } } };
@@ -4473,15 +4478,54 @@ const SCENARIOS = [
       })], dir);
       assertExit(res, 0);
       assertOut(res, '零提交');
+      // ② 全字面 gitignored 正例：临时 git 仓 + .gitignore 忽略 .specs/；真实 request 自动解析 TASK.md
+      execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore' });
+      const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
+      writeFile(dir, '.gitignore', '.specs/\n');
+      writeFile(dir, 'baseline.js', 'export const baseline = 1;\n');
+      git('add', '.gitignore', 'baseline.js');
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'init baseline');
+      // write_files 全为字面 .specs/...（被 .gitignore 忽略；不要求预先存在——check-ignore 按规则判）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n'
+        + '<task id="T02" status="done"><action>写变更内部面工件</action>'
+        + '<write_files>\n.specs/' + CHANGE_ID + '/notes/T02.md\n.specs/' + CHANGE_ID + '/T02-SUMMARY.md\n</write_files>'
+        + '<verify>node --check baseline.js</verify></task>\n');
+      fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
+      writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/subagent-execute-flow-comet-dev.json',
+        JSON.stringify({ node: 'subagent-execute', skill: 'flow-comet-dev', protocol: '4-dev.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+      const st2 = baseState('subagent-execute');
+      st2.newChange = true;
+      writeState(dir, st2);
+      const resReq = runHandoff(['request', 'T02', 'delegate docs-only slice'], dir);
+      assertExit(resReq, 0);
+      assertOut(resReq, 'HANDOFF REQUEST: T02');
+      // 先断资格落库（RED 取证点：修复前 request 只认空 write_files → 此断言先红），后断审计文案
+      const stAfter = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      const req = stAfter.evidence['subagent-execute'].handoffRequests.T02;
+      if (!req || req.noCommit !== true) {
+        throw new Error('全字面 gitignored write_files 应记 noCommit:true，实际 ' + JSON.stringify(req));
+      }
+      assertOut(resReq, '零提交资格');
+      const resZero = runHandoff(['result', 'T02', JSON.stringify({
+        status: 'DONE', taskId: 'T02', noCommit: true,
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        redEvidence: { command: 'node --check baseline.js', output: 'no output（RED 锚点）' },
+        greenEvidence: { command: 'node --check baseline.js', output: 'ok' },
+      })], dir);
+      assertExit(resZero, 0);
+      assertOut(resZero, '零提交');
+      assertNotOut(resZero, 'HANDOFF ERROR');
     },
   },
 
-  // 158: 零提交滥用负例（设计语义 / AC-6）——write_files 非空任务的结果契约声称 noCommit →
-  // 不得借零提交声明绕过真实提交检查：仍走完整提交文件子集校验（越界 → 新 change BLOCK），且输出
-  // 可审计的"零提交声明与 write_files 非空矛盾"提示。当前无 noCommit 概念（完整校验本身已生效，
-  // RED 来自缺失的机制审计提示）→ 预期 RED。
+  // 158: 零提交滥用负例（设计语义 / AC-6 / AC-8）——① write_files 非空任务的结果契约声称 noCommit
+  // → 不得借零提交声明绕过真实提交检查：仍走完整提交文件子集校验（越界 → 新 change BLOCK），且输出
+  // 可审计的"零提交声明与 write_files 非空矛盾"提示；
+  // ② F-6 请求侧 fail-closed：glob 魔法 / 路径越界（../）/ 非 git 仓 / 非 git top-level 的 runRoot
+  // → request 不记 noCommit（不阻断原流程、仍记 writeFiles）；
+  // ③ 请求无资格 + 契约声称 noCommit → 仍完整校验（WARN + 越界 BLOCK，零提交声明无效）。
   {
-    name: '158 零提交滥用负例：write_files 非空 + 声称 noCommit → 仍完整校验 + 矛盾审计提示',
+    name: '158 零提交滥用负例：非空声称 noCommit 仍完整校验；glob/越界/非 git/非 top-level 请求不记 noCommit',
     run: (dir) => {
       const g = (args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
       g(['init', '-q']);
@@ -4506,6 +4550,91 @@ const SCENARIOS = [
       assertExit(res, 1);
       assertOut(res, '超出 writeFiles 范围');
       assertOut(res, '零提交');
+      // ② F-6 请求侧 fail-closed：不具资格形态 → request 不记 noCommit、不阻断原流程。
+      // 夹具加强：.gitignore 同时忽略 src/gen/ 与 .specs/——globs/子目录锚的路径在缺判定时会
+      // 被 git check-ignore 命中，故必须由字面/包含判定本身拒绝，锚才具备判别力（可反向构造红）。
+      writeFile(dir, '.gitignore', 'src/gen/\n.specs/\n');
+      // 请求夹具（旧 change 语义：技能加载门 WARN 渐进，不干扰本锚）
+      writeState(dir, baseState('subagent-execute'));
+      const readReq = (id) => {
+        const s = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+        return (s.evidence['subagent-execute'].handoffRequests || {})[id];
+      };
+      const requestWithWriteFiles = (id, writeFilesElement) => {
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n'
+          + '<task id="' + id + '" status="done"><action>边界任务</action>'
+          + '<write_files>' + writeFilesElement + '</write_files>'
+          + '<verify>node --check allowed.js</verify></task>\n');
+        const r = runHandoff(['request', id, 'boundary slice'], dir);
+        assertExit(r, 0);
+        return r;
+      };
+      // ②a glob 魔法 `*` → 无可证明资格（不展开 glob、不享受零提交）
+      const resGlob = requestWithWriteFiles('T02', 'src/gen/*.mjs');
+      assertNotOut(resGlob, 'HANDOFF ERROR');
+      const reqGlob = readReq('T02');
+      if (!reqGlob || reqGlob.noCommit === true) {
+        throw new Error('glob write_files 不应具备零提交资格，实际 ' + JSON.stringify(reqGlob));
+      }
+      if (!Array.isArray(reqGlob.writeFiles) || reqGlob.writeFiles[0] !== 'src/gen/*.mjs') {
+        throw new Error('不具资格也不得丢失 writeFiles 记录: ' + JSON.stringify(reqGlob.writeFiles));
+      }
+      // ②b 路径越界（../ 逃逸 runRoot）→ 无资格
+      requestWithWriteFiles('T03', '../../outside.md');
+      const reqEscape = readReq('T03');
+      if (!reqEscape || reqEscape.noCommit === true) {
+        throw new Error('../ 逃逸 write_files 不应具备零提交资格，实际 ' + JSON.stringify(reqEscape));
+      }
+      // ②c 非 git 仓（独立临时目录，无 .git）→ 无资格；场景自建临时目录须自清理
+      //（运行器只回收场景主目录；残留校验会抓走漏——故 try/finally 内自删）
+      const nonGit = makeTmp();
+      try {
+        writeFile(nonGit, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n'
+          + '<task id="T04" status="done"><action>边界任务</action>'
+          + '<write_files>.specs/' + CHANGE_ID + '/x.md</write_files>'
+          + '<verify>node --check allowed.js</verify></task>\n');
+        writeState(nonGit, baseState('subagent-execute'));
+        const resNonGit = runHandoff(['request', 'T04', 'non-git slice'], nonGit);
+        assertExit(resNonGit, 0);
+        const stNonGit = JSON.parse(fs.readFileSync(path.join(nonGit, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+        const reqNonGit = stNonGit.evidence['subagent-execute'].handoffRequests.T04;
+        if (!reqNonGit || reqNonGit.noCommit === true) {
+          throw new Error('非 git 仓不应具备零提交资格，实际 ' + JSON.stringify(reqNonGit));
+        }
+      } finally {
+        fs.rmSync(nonGit, { recursive: true, force: true });
+      }
+      // ②d runRoot 非 git top-level（仓内子目录）→ 无资格
+      writeFile(dir, 'sub/.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n'
+        + '<task id="T05" status="done"><action>边界任务</action>'
+        + '<write_files>.specs/' + CHANGE_ID + '/x.md</write_files>'
+        + '<verify>node --check allowed.js</verify></task>\n');
+      const sub = path.join(dir, 'sub');
+      writeState(sub, baseState('subagent-execute'));
+      const resSub = runHandoff(['request', 'T05', 'subdir slice'], sub);
+      assertExit(resSub, 0);
+      const stSub = JSON.parse(fs.readFileSync(path.join(sub, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      const reqSub = stSub.evidence['subagent-execute'].handoffRequests.T05;
+      if (!reqSub || reqSub.noCommit === true) {
+        throw new Error('runRoot 非 git top-level 不应具备零提交资格，实际 ' + JSON.stringify(reqSub));
+      }
+      // ③ 请求无资格（glob）+ 契约声称 noCommit → 仍完整提交文件子集校验（越界新 change BLOCK）
+      const stIneligible = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      stIneligible.newChange = true;
+      writeState(dir, stIneligible);
+      writeFile(dir, 'src/deep/rogue.js', 'export const deepRogue = 1;\n');
+      g(['add', 'src/deep/rogue.js']);
+      g(['commit', '-qm', 'deep rogue']);
+      const deepHash = g(['rev-parse', 'HEAD']).stdout.trim();
+      const resIneligible = runHandoff(['result', 'T02', JSON.stringify({
+        status: 'DONE', taskId: 'T02', noCommit: true, commitHash: deepHash,
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        redEvidence: { command: 'node --check allowed.js', output: 'ok' },
+        greenEvidence: { command: 'node --check allowed.js', output: 'ok' },
+      })], dir);
+      assertExit(resIneligible, 1);
+      assertOut(resIneligible, '契约声明零提交但 write_files 非空');
+      assertOut(resIneligible, '超出 writeFiles 范围');
     },
   },
 
@@ -4914,6 +5043,8 @@ const SCENARIOS = [
   // 170: 零提交旁路收紧——noCommit 结果若携带 tracked 提交：新 change BLOCKED / 旧 change
   // HANDOFF WARN；空提交（--allow-empty）正例通过。锚定 AC-1（防「空 write_files 声明」
   // 成为携带任意提交的逃逸口——bot 评审 Major）。
+  // ④ F-6 请求侧补 tracked 负例：write_files 路径虽被 .gitignore 命中、但该路径已 tracked
+  //（index-aware check-ignore 退出 1）→ 不记 noCommit（tracked 提交仍走完整子集校验）。
   {
     name: '170 零提交旁路：携带 tracked 提交新 BLOCK / 旧 WARN / 空提交通过',
     run: (dir) => {
@@ -4955,6 +5086,23 @@ const SCENARIOS = [
       const res3 = runHandoff(['result', 'T11', payload('T11', hashEmpty)], dir);
       assertExit(res3, 0);
       assertOut(res3, '提交为空，校验通过');
+      // ④ F-6 请求侧 tracked 负例：路径被 .gitignore 命中但已被 index 跟踪 → check-ignore 退出 1
+      writeFile(dir, '.gitignore', '.specs/\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/tracked.md', 'tracked\n');
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '-f', '.specs/' + CHANGE_ID + '/tracked.md');
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'track ignored file');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n'
+        + '<task id="T12" status="done"><action>边界任务</action>'
+        + '<write_files>.specs/' + CHANGE_ID + '/tracked.md</write_files>'
+        + '<verify>node --check src/x.js</verify></task>\n');
+      writeState(dir, baseState('subagent-execute'));
+      const resReqTracked = runHandoff(['request', 'T12', 'tracked path slice'], dir);
+      assertExit(resReqTracked, 0);
+      const stTracked = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      const reqTracked = stTracked.evidence['subagent-execute'].handoffRequests.T12;
+      if (!reqTracked || reqTracked.noCommit === true) {
+        throw new Error('tracked 文件路径不应具备零提交资格，实际 ' + JSON.stringify(reqTracked));
+      }
     },
   },
 
@@ -9114,7 +9262,10 @@ const SCENARIOS = [
         || !missingError.includes(path.join('flow-comet-execute', 'SKILL.md'))) {
         throw new Error('组件技能缺失时未显式失败并给指引: ' + JSON.stringify(missingError));
       }
-      // 真实三节点文本锁：从本 suite 自身位置推导技能树（不假定权威源布局）。
+      // 真实三节点文本锁：从本 suite 自身位置推导技能树（不假定权威源布局）。逐份断言：
+      // 段在场 + 6 关键词 + 反 advance 捷径 + 不得把直接 exit 源节点收场当正常路径；同时收集
+      // 段正文（同一区间：首个 ## Fix 批次状态机路径 → 下一 ## 或 EOF，标题不计入）供 F-4 互比。
+      const sectionEntries = [];
       for (const nodeSkill of componentSkills) {
         const file = resolveComponentSkillFile(nodeSkill);
         const text = fs.readFileSync(file, 'utf8');
@@ -9136,6 +9287,27 @@ const SCENARIOS = [
             throw new Error(nodeSkill + ' Fix 批次状态机路径段不得把直接 exit 源节点收场作为正常路径: ' + line.trim());
           }
         }
+        // F-4 段一致性锁：CRLF→LF 归一、不 trim（行尾/空白差异同样算漂移），正文参与三份互比。
+        const normalized = section.replace(/\r\n/g, '\n');
+        sectionEntries.push({ nodeSkill, body: normalized, hash: createHash('sha256').update(normalized, 'utf8').digest('hex') });
+      }
+      // F-4：三份段正文必须非空且逐字完全一致（当前无合法 per-node 差异）——任一单文件漂移即
+      // 套件失败；失败信息给出三份 hash 与首处差异位置/上下文（L-064 反向构造证明判别力）。
+      const emptyEntry = sectionEntries.find((entry) => entry.body.trim() === '');
+      if (emptyEntry) {
+        throw new Error('Fix 批次状态机路径段不得为空: ' + emptyEntry.nodeSkill);
+      }
+      const baselineEntry = sectionEntries[0];
+      for (const entry of sectionEntries.slice(1)) {
+        if (entry.body === baselineEntry.body) continue;
+        const limit = Math.min(baselineEntry.body.length, entry.body.length);
+        let diffIndex = 0;
+        while (diffIndex < limit && baselineEntry.body[diffIndex] === entry.body[diffIndex]) diffIndex += 1;
+        const context = baselineEntry.body.slice(Math.max(0, diffIndex - 40), diffIndex + 40);
+        throw new Error('Fix 批次状态机路径段三份 SKILL 正文不一致（F-4 段一致性锁）：'
+          + baselineEntry.nodeSkill + ' sha256=' + baselineEntry.hash
+          + ' vs ' + entry.nodeSkill + ' sha256=' + entry.hash
+          + '；首处差异 @' + diffIndex + '（基准上下文: ' + JSON.stringify(context) + '）');
       }
     },
   },
