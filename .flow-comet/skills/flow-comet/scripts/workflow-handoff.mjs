@@ -5,6 +5,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { validateStateFields, looksLikeObjectLiteral, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME } from './state-schema.mjs';
 import { EXECUTE_FAMILY_NODE_IDS } from './route-node.mjs';
+import { resolveProtocol, readProtocolFile, validateProtocolSchema } from './protocol-utils.mjs';
+import { taskAttrsById } from './task-parsing.mjs';
 
 // workflow-handoff.mjs: Record subagent handoff evidence
 // evidence 统一记录在 subagent-execute 名下作为委托证据库——execute（串行委托）与 subagent-execute（并行委托）共用。不改成节点参数，保持最小改动。
@@ -13,6 +15,9 @@ import { EXECUTE_FAMILY_NODE_IDS } from './route-node.mjs';
 //   node workflow-handoff.mjs result <task-id> <result-or-JSON>  -- record handoff result (W1-D: JSON Return Contract; W2-D: commitHash subset check; : completedChecks 规范化; redEvidence 时间顺序校验)
 //   node workflow-handoff.mjs status                           -- show all handoff evidence
 
+// 归属门禁读取协议用：与其它脚本同源（packageRoot 默认协议；env 可覆盖），不消费 request 参数。
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const packageRoot = path.resolve(__dirname, '..');
 const runRoot = process.cwd();
 // 状态文件路径（单一来源：state-schema.mjs 的运行时路径常量）
 const statePath = path.join(runRoot, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME);
@@ -178,6 +183,58 @@ async function writeState(state) {
   await fs.writeFile(statePath, JSON.stringify(state, null, 2) + '\n', 'utf8');
 }
 
+// ---------- request 归属门禁（只读判定） ----------
+// 目标节点：parallel=true → subagent-execute；串行 → execute。协议无对应 enabled 节点 → 跳过门禁。
+// 判定只读 state 与协议：BLOCK 路径在首个 state.evidence 写入之前返回，state 字节零改写、不落请求记录。
+
+// 协议 enabled 节点判定：协议路径走 protocol-utils 的统一解析（不消费 request 的 CLI 参数，
+// 仅 env 覆盖 + packageRoot 默认协议）；协议缺失/不可读/schema 非法 → false（调用方跳过，不误伤请求）。
+async function protocolNodeEnabled(nodeId) {
+  let protocol;
+  try {
+    const protocolPath = resolveProtocol(packageRoot, runRoot);
+    protocol = await readProtocolFile(runRoot, protocolPath);
+    validateProtocolSchema(protocol);
+  } catch {
+    return false;
+  }
+  return (protocol.nodes ?? []).some((node) => node && node.id === nodeId && !node.disabled);
+}
+
+// 归属判定：仅 status=pending 的任务参与；比较原始 state.currentNode（不取任何派生 currentNode）。
+// 返回 { verdict: 'skip' | 'mismatch' | 'not-entered' | 'pass' }。
+async function assessRequestOwnership(state, taskAttrs) {
+  if (!taskAttrs || taskAttrs.status !== 'pending') return { verdict: 'skip' };
+  const targetNode = taskAttrs.parallel === true ? 'subagent-execute' : 'execute';
+  if (!(await protocolNodeEnabled(targetNode))) return { verdict: 'skip' };
+  if (state.currentNode !== targetNode) {
+    return { verdict: 'mismatch', targetNode };
+  }
+  const enteredNodes = Array.isArray(state.enteredNodes) ? state.enteredNodes : [];
+  if (!enteredNodes.includes(targetNode)) return { verdict: 'not-entered', targetNode };
+  return { verdict: 'pass' };
+}
+
+// 渲染归属判定结果（只输出与退出，不写 state）：
+// 不匹配 → 新 change BLOCK / 旧 change 可见 WARN 后继续；正确节点未 entry → 可见 WARN 不阻断。
+function reportRequestOwnership(state, taskId, taskAttrs, ownership) {
+  if (ownership.verdict === 'mismatch') {
+    const detail = '任务 ' + taskId + '（' + (taskAttrs.parallel === true ? '并行' : '串行') + ' pending）应归属节点 '
+      + ownership.targetNode + '，原始 currentNode=' + String(state.currentNode);
+    const guide = '恢复指引: 运行 workflow-state next 查看当前路由，再运行 workflow-state entry '
+      + ownership.targetNode + '（或 workflow-guard entry ' + ownership.targetNode + '）进入目标节点后再发起委托';
+    if (state.newChange === true) {
+      console.error('BLOCKED: ' + detail + '——' + guide + '；本次请求未写入 state，也未记录 handoffRequests');
+      process.exit(1);
+    }
+    console.error('WARN: ' + detail + '（旧 change 渐进不阻断，请求照常记录）——' + guide);
+  } else if (ownership.verdict === 'not-entered') {
+    console.error('WARN: 任务 ' + taskId + ' 的归属节点 ' + ownership.targetNode
+      + ' 与原始 currentNode 一致，但该节点尚未 entry（enteredNodes 缺 ' + ownership.targetNode
+      + '）——建议先运行 workflow-state entry ' + ownership.targetNode + ' 或 workflow-guard entry '
+      + ownership.targetNode + ' 记录进入');
+  }
+}
 async function main() {
   const action = process.argv[2] ?? 'status';
   const state = await readState();
@@ -216,12 +273,19 @@ async function main() {
     // 解析三态（bot 评审收紧）：① 匹配到任务块且 <write_files> 存在 → 按内容分类；
     // ② 任务块缺失或块内无 <write_files> 元素 → 任务不可解析，新 change BLOCK，旧 change
     // WARN 且不设 noCommit（防未解析任务静默变零提交逃逸口）；③ TASK.md 读不到同 ②。
+    // TASK.md 只读一次：任务开标签属性解析（归属门禁）复用 task-parsing.mjs；
+    // 下方 write_files 元素提取沿用既有实现（该路径的解析策略不在本任务改动面内）。
+    const taskFile = state.activeChange
+      ? path.join(runRoot, '.specs', state.activeChange, 'TASK.md')
+      : null;
+    let taskContent = null;
+    if (taskFile) {
+      taskContent = await fs.readFile(taskFile, 'utf8').catch(() => null);
+    }
     let taskResolved = false;
     let emptyWriteFilesElement = false;
     if (!writeFiles || writeFiles.length === 0) {
-      try {
-        const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
-        const taskContent = await fs.readFile(taskFile, 'utf8');
+      if (taskContent !== null) {
         const taskRegex = new RegExp(`<task[^>]*id="${taskId.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}"[\\s\\S]*?<write_files>([\\s\\S]*?)</write_files>`, 'i');
         const match = taskContent.match(taskRegex);
         if (match) {
@@ -233,7 +297,7 @@ async function main() {
           if (files.length > 0) { writeFiles = files; }
           else { emptyWriteFilesElement = true; }
         }
-      } catch {}
+      }
       if (wfIdx >= 0) { taskResolved = true; emptyWriteFilesElement = false; }
     } else {
       taskResolved = true;
@@ -246,6 +310,13 @@ async function main() {
       }
       console.error('WARN: ' + msg + '（旧 change 渐进，不阻断，不记录 noCommit）');
     }
+    // request 归属门禁：技能声明门之后、任务解析之后、首个 state.evidence 写入之前。
+    // 只读判定；新 change 不匹配 → BLOCK（state 字节零改写、不落 handoffRequests）；旧 change → 可见 WARN 后照常记录。
+    const parsedTask = taskAttrsById(taskContent, taskId);
+    if (!parsedTask && wfIdx >= 0) {
+      console.error('WARN: 显式 --write-files 且 TASK.md 无匹配任务 ' + taskId + '——无法判定 pending 与归属，跳过归属门禁（不阻断，照常记录）');
+    }
+    reportRequestOwnership(state, taskId, parsedTask, await assessRequestOwnership(state, parsedTask));
     state.evidence = state.evidence || {};
     state.evidence['subagent-execute'] = state.evidence['subagent-execute'] || {};
     if (!state.evidence['subagent-execute'].handoffRequests) {
