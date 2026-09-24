@@ -8760,6 +8760,9 @@ const SCENARIOS = [
       const resNoFix = runState(['next'], dir, env);
       assertExit(resNoFix, 0);
       assertNotOut(resNoFix, 'FIX-BATCH: 归位 execute');
+      // ③ 全局缺席：无 pending Fix 任务的回程态，state 侧无 Fix 因果——不得出现任何 FIX-BATCH
+      // （含旧「回程源节点」误标形态；回程中性行由 RETURN 覆盖）
+      assertNotOut(resNoFix, 'FIX-BATCH');
       assertNotOut(resNoFix, 'NODE: execute');
       assertOut(resNoFix, 'NODE: review');
       after = readScenarioState(dir);
@@ -8861,7 +8864,7 @@ const SCENARIOS = [
       writeState(dir, base);
       const res = runState(['next'], dir, env);
       assertExit(res, 0);
-      assertOut(res, 'FIX-BATCH: 回程源节点 review');
+      assertOut(res, 'RETURN: 回程源节点 review');
       assertOut(res, 'NODE: review');
       assertNotOut(res, 'NODE: verify');
       assertNotOut(res, 'BLOCKED');
@@ -8878,7 +8881,7 @@ const SCENARIOS = [
       });
       const resNoEvidence = runState(['next'], dir, env);
       assertExit(resNoEvidence, 0);
-      assertOut(resNoEvidence, 'FIX-BATCH: 回程源节点 review');
+      assertOut(resNoEvidence, 'RETURN: 回程源节点 review');
       assertOut(resNoEvidence, 'NODE: review');
       assertNotOut(resNoEvidence, 'NODE: verify');
       assertNotOut(resNoEvidence, 'BLOCKED');
@@ -8890,7 +8893,7 @@ const SCENARIOS = [
       writeState(dir, { ...base, enteredNodes: [], evidence: {} });
       const resNoAnyEvidence = runState(['next'], dir, env);
       assertExit(resNoAnyEvidence, 0);
-      assertOut(resNoAnyEvidence, 'FIX-BATCH: 回程源节点 review');
+      assertOut(resNoAnyEvidence, 'RETURN: 回程源节点 review');
       assertOut(resNoAnyEvidence, 'NODE: review');
       assertNotOut(resNoAnyEvidence, 'BLOCKED');
       after = readScenarioState(dir);
@@ -8935,7 +8938,7 @@ const SCENARIOS = [
       writeState(dir, base);
       const res = runState(['next'], dir, env);
       assertExit(res, 0);
-      assertOut(res, 'FIX-BATCH: 回程源节点 verify');
+      assertOut(res, 'RETURN: 回程源节点 verify');
       assertOut(res, 'NODE: verify');
       assertNotOut(res, 'NODE: archive');
       assertNotOut(res, 'BLOCKED');
@@ -8952,7 +8955,7 @@ const SCENARIOS = [
       });
       const resNoEvidence = runState(['next'], dir, env);
       assertExit(resNoEvidence, 0);
-      assertOut(resNoEvidence, 'FIX-BATCH: 回程源节点 verify');
+      assertOut(resNoEvidence, 'RETURN: 回程源节点 verify');
       assertOut(resNoEvidence, 'NODE: verify');
       assertNotOut(resNoEvidence, 'NODE: archive');
       assertNotOut(resNoEvidence, 'BLOCKED');
@@ -8964,7 +8967,7 @@ const SCENARIOS = [
       writeState(dir, { ...base, enteredNodes: [], evidence: {} });
       const resNoAnyEvidence = runState(['next'], dir, env);
       assertExit(resNoAnyEvidence, 0);
-      assertOut(resNoAnyEvidence, 'FIX-BATCH: 回程源节点 verify');
+      assertOut(resNoAnyEvidence, 'RETURN: 回程源节点 verify');
       assertOut(resNoAnyEvidence, 'NODE: verify');
       assertNotOut(resNoAnyEvidence, 'BLOCKED');
     },
@@ -9052,11 +9055,24 @@ const SCENARIOS = [
       const resReturn = runState(['next'], dir, env);
       assertExit(resReturn, 0);
       assertNotOut(resReturn, 'BLOCKED');
-      assertOut(resReturn, 'FIX-BATCH: 回程源节点 review');
+      assertOut(resReturn, 'RETURN: 回程源节点 review');
       assertOut(resReturn, 'NODE: review');
       assertNotOut(resReturn, 'NODE: verify');
       if (readScenarioState(dir).currentNode !== 'review') {
         throw new Error('旧 change 回程态 next 后 currentNode 应保持 review，实际 ' + JSON.stringify(readScenarioState(dir).currentNode));
+      }
+      // ③ 旧 change 无签名、无 Fix 标记的回程态（D2/D3 旧态边界）：state 侧同样只输出中性
+      // RETURN 回程行——缺 taskSetSignature、TASK 无 Fix 段/编号 → 不得冒充 FIX-BATCH。
+      writeFile(dir, taskPath, '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n');
+      writeState(dir, oldState);
+      const resReturnNoMarker = runState(['next'], dir, env);
+      assertExit(resReturnNoMarker, 0);
+      assertNotOut(resReturnNoMarker, 'BLOCKED');
+      assertNotOut(resReturnNoMarker, 'FIX-BATCH');
+      assertOut(resReturnNoMarker, 'RETURN: 回程源节点 review（源节点产物在场且未出口；保留源节点跑出口）');
+      assertOut(resReturnNoMarker, 'NODE: review');
+      if (readScenarioState(dir).currentNode !== 'review') {
+        throw new Error('旧 change 无标记回程态 next 后 currentNode 应保持 review，实际 ' + JSON.stringify(readScenarioState(dir).currentNode));
       }
     },
   },
