@@ -4386,7 +4386,7 @@ const SCENARIOS = [
   // route-node.mjs import EXECUTE_FAMILY_NODE_IDS，且源码中不得再出现 execute 家族成员内联 pair
   //（<ident> === 'execute' || <ident> === 'subagent-execute'，正反顺序）→ 0 命中。
   // 允许清单：单节点分支 / hasSubagentNode 协议判定 / 证据键与文案不参与 pair 断言。
-  // ② 为 T-FIX-02 在既有场景内扩展（不新增顶层编号，场景数保持 258）。
+  // ② 本轮修复在既有场景内扩展（不新增顶层编号，场景数保持 258）。
 
   {
     name: '154 单一来源静态锁：state/handoff 不内置 looksLikeObjectLiteral + 三消费脚本 import EXECUTE_FAMILY_NODE_IDS 且无内联 pair',
@@ -4410,7 +4410,7 @@ const SCENARIOS = [
       assertExit(res, 0);
       assertOut(res, 'SINGLE SOURCE OK');
 
-      // ===== F-3（T-FIX-02 / AC-5）：三消费脚本 execute 家族成员单一来源静态锁 =====
+      // ===== F-3（AC-5）：三消费脚本 execute 家族成员单一来源静态锁 ====
       // ① import 断言：枚举 import 语句后匹配 source + 具名符号（容忍重排/多行/其它符号共存）。
       const importRe = /import\s*\{([\s\S]*?)\}\s*from\s*['"]([^'"]+)['"]/g;
       const hasNamedImport = (text, source, name) => {
