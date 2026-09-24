@@ -301,6 +301,89 @@ function latestExecuteExitEvent(history, changeName) {
   return null;
 }
 
+// ---------- Fix 回因分类（共享纯函数 · 单一权威 · 展示层派生） ----------
+// guard exit 回程分支在写本次 exit-applied 事件之前调用本分类器：只用既有字段派生证据（history
+// 的 execute 家族出口签名 + TASK 内容结构标记），零新增 state 字段 / 事件类型。判据（DESIGN D1）：
+//   divergence = 历史任一 execute 家族 exit-applied 事件记录的 taskSetSignature ≠ 当前任务集签名；
+//   marker     = 模板派生的 Fix 段内含 <task> 块，或全文任一任务 id 匹配 /^[TP]-FIX-/i；
+//   divergence ∨ marker → 'fix'；有签名且不发散 → 'normal'；无签名且无标记 → 'unknown'
+//   （旧 state 证据不足：中性输出、不 BLOCK，由调用方渲染）。
+// Fix 段标题由调用方传入（guard 从 flow-kit/templates/TASK.md 派生，D4 单一模板源）；缺失 / 空串
+// 回退内置常量。history 过滤与 latestExecuteExitEvent 同语义（change 归属：有 change 字段且不匹配
+// 则跳过，无 change 的 legacy 事件参与）；签名事件全量参与、不做「只看最新」短路——多波次场景最新
+// 签名已被闭合写成当前签名，只看最新会漏判 fix。
+const FIX_SECTION_TITLE_FALLBACK = 'Fix 任务';
+
+// 段标题归一：去 ATX 标记 / 闭合标记 / 尾部括号内容 / 编号前缀后比较（与 guard C2 段名归一同型），
+// 让 Fix 任务、Fix 任务（来自 REVIEW / INTEGRATION）、## Fix 任务 ## 等合法写法命中同一段。
+function normalizeFixSectionTitle(raw) {
+  return String(raw ?? '')
+    .replace(/\r/g, '')
+    .replace(/^#{1,6}\s*/, '')
+    .replace(/\s+#+\s*$/, '')
+    .replace(/[（(][^）)\n]*[）)]\s*$/u, '')
+    .replace(/^\d+(?:\.\d+)?\.?\s*/u, '')
+    .trim()
+    .toLowerCase();
+}
+
+// Fix 段正文切片：首个同级（##）标题命中 → 返回标题行之后、下一个同级标题（或 EOF）之前的正文；
+// 无命中标题 → null。只认二级标题（### 不闭合本段）；CRLF / LF 归一后按行定位。
+function fixSectionBody(taskContent, fixSectionTitle) {
+  const lines = String(taskContent ?? '').replace(/\r\n?/g, '\n').split('\n');
+  const wanted = normalizeFixSectionTitle(fixSectionTitle);
+  if (wanted === '') return null;
+  let start = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = lines[i].match(/^##\s+(.+?)\s*$/);
+    if (!m) continue;
+    const heading = normalizeFixSectionTitle(m[1]);
+    if (heading === wanted || heading.startsWith(wanted)) { start = i; break; }
+  }
+  if (start < 0) return null;
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^##\s/.test(lines[i])) { end = i; break; }
+  }
+  return lines.slice(start + 1, end).join('\n');
+}
+
+// Fix 任务结构标记：全文任一任务 id 匹配 /^[TP]-FIX-/i（覆盖文件尾追加等非规范落点）→ true；
+// 否则 Fix 段内出现 <task> 块（标题与任务需同段，段内无任务不误报）→ true；两者皆无 → false。
+// 解析复用 taskBlocks / taskOpeningAttrs（与路由、guard 校验共享同一 <task> 解析语义）。
+function fixTaskMarker(taskContent, fixSectionTitle) {
+  const content = String(taskContent ?? '');
+  const title = (typeof fixSectionTitle === 'string' && fixSectionTitle.trim() !== '')
+    ? fixSectionTitle
+    : FIX_SECTION_TITLE_FALLBACK;
+  const hasFixTaskId = taskBlocks(content).some((block) => {
+    const attrs = taskOpeningAttrs(block);
+    return Boolean(attrs && typeof attrs.id === 'string' && /^[TP]-FIX-/i.test(attrs.id));
+  });
+  if (hasFixTaskId) return true;
+  const section = fixSectionBody(content, title);
+  return section !== null && taskBlocks(section).length > 0;
+}
+
+// 回因分类唯一入口。签名：classifyFixReturnCause({ history, changeName, taskContent, fixSectionTitle })
+// → 'fix' | 'normal' | 'unknown'。纯函数：无 fs/console/process.exit，不改既有路由判定语义。
+function classifyFixReturnCause({ history, changeName, taskContent, fixSectionTitle } = {}) {
+  const currentSignature = taskSetSignature(taskContent);
+  let signatureKnown = false;
+  let divergence = false;
+  if (Array.isArray(history)) {
+    for (const event of history) {
+      if (!event || event.event !== 'exit-applied' || !EXECUTE_FAMILY_NODE_IDS.has(event.node)) continue;
+      if (typeof event.change === 'string' && event.change !== changeName) continue;
+      if (typeof event.taskSetSignature !== 'string' || event.taskSetSignature === '') continue;
+      signatureKnown = true;
+      if (event.taskSetSignature !== currentSignature) divergence = true;
+    }
+  }
+  if (divergence || fixTaskMarker(taskContent, fixSectionTitle)) return 'fix';
+  return signatureKnown ? 'normal' : 'unknown';
+}
+
 // Fix 回退态判定（单一权威——guard 入口/出口与 state 的 next 分支一律复用本函数）：currentNode
 // ∈ {review, verify} ∧ TASK.md 可解析出任务块 ∧ 以下任一：
 //   ① 存在 status="pending" 任务 ∧ resolveNextNode(completedNodes) ∈ execute 家族
@@ -352,6 +435,7 @@ export {
   firstIncompletePostExecNode,
   EXECUTE_FAMILY_NODE_IDS,
   taskSetSignature,
+  classifyFixReturnCause,
   resolveFixRollbackState,
   resolveFixReturnNode,
 };

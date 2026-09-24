@@ -7825,7 +7825,7 @@ const SCENARIOS = [
   // 仅 review/verify 可作回程源（archive / 完成态 → null）；仍有 pending / TASK 缺失 /
   // 零任务块一律 null（fail-closed，不许用半解析结果回程）。
   {
-    name: '247 resolveFixReturnNode：全 done 且源节点未完成 → 源节点；否则 null（pending/缺失/零任务块）',
+    name: '247 resolveFixReturnNode：全 done 且源节点未完成 → 源节点；否则 null（pending/缺失/零任务块）+ classifyFixReturnCause 基础锚',
     run: async (dir) => {
       const fixReturn = requireRouteNodeExport('resolveFixReturnNode');
       const protocol = readScenarioProtocol(dir);
@@ -7865,6 +7865,128 @@ const SCENARIOS = [
       const noBlocks = await fixReturn(baseArgs);
       if (noBlocks !== null) {
         throw new Error('零任务块时应为 null，实际 ' + JSON.stringify(noBlocks));
+      }
+
+      // ——classifyFixReturnCause 基础锚（T01：历史签名全量发散 + Fix 结构标记 + unknown 回退）——
+      // 分类器缺失时在此显式 RED（requireRouteNodeExport），不做半成品静默通过。
+      const classifyCause = requireRouteNodeExport('classifyFixReturnCause');
+      const signatureOf = (text) => routeNodeModule.taskSetSignature(text);
+      const familyExit = (node, signature, extra = {}) => ({
+        event: 'exit-applied', node, at: '2026-09-24T00:00:00.000Z',
+        taskSetSignature: signature, ...extra,
+      });
+      const plainTaskText = '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n';
+      const plainSignature = signatureOf(plainTaskText);
+      const divergentSignature = '0'.repeat(64);
+      // ① 签名发散：历史任一出口签名 ≠ 当前任务集签名 → fix（无 Fix 标记也成立）
+      const divergence = classifyCause({
+        history: [familyExit('execute', divergentSignature)],
+        changeName: CHANGE_ID, taskContent: plainTaskText, fixSectionTitle: 'Fix 任务',
+      });
+      if (divergence !== 'fix') {
+        throw new Error('历史签名全量发散应判 fix，实际 ' + JSON.stringify(divergence));
+      }
+      // ② 签名相等：唯一出口签名 == 当前 TASK 签名且无 Fix 标记 → normal
+      const equalCause = classifyCause({
+        history: [familyExit('subagent-execute', plainSignature)],
+        changeName: CHANGE_ID, taskContent: plainTaskText, fixSectionTitle: 'Fix 任务',
+      });
+      if (equalCause !== 'normal') {
+        throw new Error('签名一致且无 Fix 标记应判 normal，实际 ' + JSON.stringify(equalCause));
+      }
+      // ③ 无签名事件：空串签名 / history 缺席 / 非家族节点 / 其它 change → unknown（都不误判 normal）
+      const emptySignature = classifyCause({
+        history: [familyExit('execute', '')],
+        changeName: CHANGE_ID, taskContent: plainTaskText, fixSectionTitle: 'Fix 任务',
+      });
+      if (emptySignature !== 'unknown') {
+        throw new Error('空签名事件应判 unknown，实际 ' + JSON.stringify(emptySignature));
+      }
+      const missingHistory = classifyCause({ taskContent: plainTaskText, fixSectionTitle: 'Fix 任务' });
+      if (missingHistory !== 'unknown') {
+        throw new Error('history 缺席应判 unknown，实际 ' + JSON.stringify(missingHistory));
+      }
+      const otherChangeOnly = classifyCause({
+        history: [familyExit('execute', divergentSignature, { change: 'other-change' })],
+        changeName: CHANGE_ID, taskContent: plainTaskText, fixSectionTitle: 'Fix 任务',
+      });
+      if (otherChangeOnly !== 'unknown') {
+        throw new Error('其它 change 的出口事件不得参与分类（应为 unknown），实际 ' + JSON.stringify(otherChangeOnly));
+      }
+      const nonFamilyOnly = classifyCause({
+        history: [familyExit('review', divergentSignature)],
+        changeName: CHANGE_ID, taskContent: plainTaskText, fixSectionTitle: 'Fix 任务',
+      });
+      if (nonFamilyOnly !== 'unknown') {
+        throw new Error('非 execute 家族出口事件不得参与分类（应为 unknown），实际 ' + JSON.stringify(nonFamilyOnly));
+      }
+      // ④ Fix 段内任务块（故意用非 FIX 编号 T02，排除全文编号规则干扰）→ fix（结构标记）
+      const fixSectionWithTask = plainTaskText
+        + '\n## Fix 任务（来自 REVIEW / INTEGRATION）\n\n' + fixTaskBlock('T02', 'done') + '\n';
+      const sectionMarker = classifyCause({
+        history: [familyExit('execute', signatureOf(fixSectionWithTask))],
+        changeName: CHANGE_ID, taskContent: fixSectionWithTask, fixSectionTitle: 'Fix 任务',
+      });
+      if (sectionMarker !== 'fix') {
+        throw new Error('Fix 段内含 task 块应判 fix，实际 ' + JSON.stringify(sectionMarker));
+      }
+      // ⑤ Fix 段无任务（仅标题与占位）→ normal（切片边界正确、不把其它段标题误当 Fix 段）
+      const fixSectionEmpty = plainTaskText + '\n## Fix 任务（来自 REVIEW / INTEGRATION）\n\n<!-- 占位 -->\n';
+      const emptySection = classifyCause({
+        history: [familyExit('execute', signatureOf(fixSectionEmpty))],
+        changeName: CHANGE_ID, taskContent: fixSectionEmpty, fixSectionTitle: 'Fix 任务',
+      });
+      if (emptySection !== 'normal') {
+        throw new Error('Fix 段无任务块应判 normal，实际 ' + JSON.stringify(emptySection));
+      }
+      // ⑥ 全文任务 id T-FIX-/P-FIX-（Fix 段之外、文件尾追加形态）→ fix
+      const tailTFix = plainTaskText + '\n## 其它\n\n' + fixTaskBlock('T-FIX-01', 'done') + '\n';
+      const tailPFix = plainTaskText + '\n## 其它\n\n' + fixTaskBlock('P-FIX-01', 'done') + '\n';
+      for (const [label, text] of [['T-FIX-01', tailTFix], ['P-FIX-01', tailPFix]]) {
+        const idMarker = classifyCause({
+          history: [familyExit('execute', signatureOf(text))],
+          changeName: CHANGE_ID, taskContent: text, fixSectionTitle: 'Fix 任务',
+        });
+        if (idMarker !== 'fix') {
+          throw new Error(label + ' 编号（Fix 段外）应判 fix，实际 ' + JSON.stringify(idMarker));
+        }
+      }
+      // ⑦ 标题缺失回退：fixSectionTitle 缺席 / 空串 → 回退内置「Fix 任务」仍命中结构标记；
+      //    传入标题优先于内置（Fix 段在场但传入无关标题，结构规则不命中 → normal）。
+      for (const [label, title] of [['缺席', undefined], ['空串', '']]) {
+        const fallback = classifyCause({
+          history: [familyExit('execute', signatureOf(fixSectionWithTask))],
+          changeName: CHANGE_ID, taskContent: fixSectionWithTask, fixSectionTitle: title,
+        });
+        if (fallback !== 'fix') {
+          throw new Error('fixSectionTitle ' + label + ' 应回退内置「Fix 任务」判 fix，实际 ' + JSON.stringify(fallback));
+        }
+      }
+      const customTitlePriority = classifyCause({
+        history: [familyExit('execute', signatureOf(fixSectionWithTask))],
+        changeName: CHANGE_ID, taskContent: fixSectionWithTask, fixSectionTitle: '修复任务',
+      });
+      if (customTitlePriority !== 'normal') {
+        throw new Error('传入标题应优先于内置（无关标题不得命中 Fix 段）应判 normal，实际 ' + JSON.stringify(customTitlePriority));
+      }
+      // ⑧ 多波次历史：旧签名 ≠ 当前、最新签名 == 当前 → 全量扫描仍判 fix（只看最新会误判 normal）
+      const multiWave = classifyCause({
+        history: [
+          familyExit('execute', divergentSignature, { at: '2026-09-20T00:00:00.000Z' }),
+          familyExit('subagent-execute', plainSignature, { at: '2026-09-24T00:00:00.000Z' }),
+        ],
+        changeName: CHANGE_ID, taskContent: plainTaskText, fixSectionTitle: 'Fix 任务',
+      });
+      if (multiWave !== 'fix') {
+        throw new Error('多波次历史旧签名发散（最新签名 == 当前）应判 fix（全量扫描），实际 ' + JSON.stringify(multiWave));
+      }
+      // ⑨ legacy 事件（无 change 字段）与既有 latestExecuteExitEvent 兼容语义一致：参与分类
+      const legacyDivergence = classifyCause({
+        history: [{ event: 'exit-applied', node: 'execute', at: '2026-09-20T00:00:00.000Z', taskSetSignature: divergentSignature }],
+        changeName: CHANGE_ID, taskContent: plainTaskText, fixSectionTitle: 'Fix 任务',
+      });
+      if (legacyDivergence !== 'fix') {
+        throw new Error('无 change 字段的 legacy 出口事件应参与分类（发散 → fix），实际 ' + JSON.stringify(legacyDivergence));
       }
     },
   },
