@@ -358,15 +358,16 @@ function latestExecuteExitEvent(history, changeName) {
 //   marker     = 模板派生的 Fix 段内含 <task> 块，或全文任一任务 id 匹配 /^[TP]-FIX-/i；
 //   divergence ∨ marker → 'fix'；有签名且不发散 → 'normal'；无签名且无标记 → 'unknown'
 //   （旧 state 证据不足：中性输出、不 BLOCK，由调用方渲染）。
-// Fix 段标题由调用方传入（guard 从 flow-kit/templates/TASK.md 派生，决策 4 单一模板源）；缺失 / 空串
-// 回退内置常量。history 过滤与 latestExecuteExitEvent 同语义（change 归属：有 change 字段且不匹配
-// 则跳过，无 change 的 legacy 事件参与）；签名事件全量参与、不做「只看最新」短路——多波次场景最新
-// 签名已被闭合写成当前签名，只看最新会漏判 fix。
+// Fix 段标题由调用方传入（guard 从 flow-kit/templates/TASK.md 的 H2 派生）；缺失 / 空串
+// 回退内置常量（FIX_SECTION_TITLE_FALLBACK）。history 过滤与 latestExecuteExitEvent 同语义
+// （change 归属：有 change 字段且不匹配则跳过，无 change 的 legacy 事件参与）；签名事件全量参与、
+// 不做「只看最新」短路——多波次场景最新签名已被闭合写成当前签名，只看最新会漏判 fix。
 const FIX_SECTION_TITLE_FALLBACK = 'Fix 任务';
 
-// 段标题归一：去 ATX 标记 / 闭合标记 / 尾部括号内容 / 编号前缀后比较（与 guard C2 段名归一同型），
-// 让 Fix 任务、Fix 任务（来自 REVIEW / INTEGRATION）、## Fix 任务 ## 等合法写法命中同一段。
-function normalizeFixSectionTitle(raw) {
+// 共享 heading 归一（单一权威）：去 ATX 标记 / 闭合 ATX 标记 / 尾部括号内容 / 编号前缀后比较，
+// 让 Fix 任务、Fix 任务（来自 REVIEW / INTEGRATION）、## Fix 任务 ## 等合法写法命中同一段；
+// Fix 段标题匹配与 guard 的模板段名归一均委托本实现，禁止另起第二份。
+function normalizeHeading(raw) {
   return String(raw ?? '')
     .replace(/\r/g, '')
     .replace(/^#{1,6}\s*/, '')
@@ -381,13 +382,13 @@ function normalizeFixSectionTitle(raw) {
 // 无命中标题 → null。只认二级标题（### 不闭合本段）；CRLF / LF 归一后按行定位。
 function fixSectionBody(taskContent, fixSectionTitle) {
   const lines = String(taskContent ?? '').replace(/\r\n?/g, '\n').split('\n');
-  const wanted = normalizeFixSectionTitle(fixSectionTitle);
+  const wanted = normalizeHeading(fixSectionTitle);
   if (wanted === '') return null;
   let start = -1;
   for (let i = 0; i < lines.length; i += 1) {
     const m = lines[i].match(/^##\s+(.+?)\s*$/);
     if (!m) continue;
-    const heading = normalizeFixSectionTitle(m[1]);
+    const heading = normalizeHeading(m[1]);
     if (heading === wanted || heading.startsWith(wanted)) { start = i; break; }
   }
   if (start < 0) return null;
@@ -574,6 +575,8 @@ export {
   hasSubagentNode,
   firstIncompletePostExecNode,
   EXECUTE_FAMILY_NODE_IDS,
+  FIX_SECTION_TITLE_FALLBACK,
+  normalizeHeading,
   classifyFixReturnCause,
   resolveFixRollbackDecision,
   resolveFixRollbackState,

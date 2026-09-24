@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, RUNTIME_STATE_PATH, LEGACY_RUNTIME_STATE_PATH } from './state-schema.mjs';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES } from './protocol-utils.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from './task-parsing.mjs';
-import { resolveNextNode, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS, TASK_SET_SIGNATURE_ALGO, taskSetSignature, parseTaskSetSignature, sameTaskSetSignature, taskSetSignatureVersionSkew, classifyFixReturnCause } from './route-node.mjs';
+import { resolveNextNode, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS, TASK_SET_SIGNATURE_ALGO, taskSetSignature, parseTaskSetSignature, sameTaskSetSignature, taskSetSignatureVersionSkew, classifyFixReturnCause, normalizeHeading, FIX_SECTION_TITLE_FALLBACK } from './route-node.mjs';
 
 const command = process.argv[2] ?? 'verify';
 const nodeId = process.argv[3] ?? null;
@@ -1092,43 +1092,49 @@ async function templateSectionPatterns() {
   return result;
 }
 
-// 决策 2/4 · Fix 段标题从 <runRoot>/flow-kit/templates/TASK.md 派生（与上方 C2 段名读取同一
-// 模式：runRoot 内模板 + 模块级缓存 + 缺失/读取失败回退内置常量）——regex 提取
-// `^##\s*Fix 任务.*$` 标题文本并去 `##`；模板缺失/读取失败回退 `Fix 任务`。标题只喂给
-// 回程分类器决定审计行（不参与路由/state 写入）；分类器自身对标题做归一宽容匹配。
-const FIX_SECTION_TITLE_FALLBACK = 'Fix 任务';
+// Fix 段标题从 <runRoot>/flow-kit/templates/TASK.md 派生（单一模板源 + 模块级缓存 + runRoot 键控）：
+// 扫描模板全部 H2，用 route-node 共享 heading 归一（单一权威，含闭合 ATX）识别 Fix 段标题；
+// 无匹配（模板缺失 / 读取失败 / 无 Fix 段）返回 undefined，由回程分类器的内置 fallback 常量兜底。
+// 标题只喂给回程分类器决定审计行（不参与路由/state 写入）。
+// 识别标记词从单一权威 fallback 派生（归一后首词，如 Fix 任务 → Fix），因此模板基名改为其它
+// 语言后缀（如 Fix Tasks）仍可识别；闭合 ATX 与尾部括号变体由共享归一消化。
+const FIX_SECTION_HEADING_MARKER = normalizeHeading(FIX_SECTION_TITLE_FALLBACK).split(/\s+/u)[0];
+
+// 模板文本全部 H2 中的 Fix 段标题（无匹配 → undefined）：共享归一后与识别标记词比较，
+// 因此语言后缀可变（Fix 任务 / Fix Tasks）；闭合 ATX 与尾部括号由共享归一消化。
+function fixSectionTitleFromTemplateText(text) {
+  for (const match of String(text).matchAll(/^##\s+(.+)$/gmu)) {
+    const raw = match[1].trim();
+    const normalized = normalizeHeading(raw);
+    if (normalized === FIX_SECTION_HEADING_MARKER
+      || normalized.startsWith(FIX_SECTION_HEADING_MARKER + ' ')) return raw;
+  }
+  return undefined;
+}
+
 let fixSectionTitleCacheRoot = null;
-let fixSectionTitleCache = null;
+let fixSectionTitleCached = false;
+let fixSectionTitleCache;
 async function derivedFixSectionTitle() {
-  if (fixSectionTitleCacheRoot === runRoot && fixSectionTitleCache !== null) return fixSectionTitleCache;
-  let title = FIX_SECTION_TITLE_FALLBACK;
+  if (fixSectionTitleCacheRoot === runRoot && fixSectionTitleCached) return fixSectionTitleCache;
+  let title;
   const templateFile = path.join(runRoot, 'flow-kit', 'templates', 'TASK.md');
   if (await fileExists(templateFile)) {
     try {
-      const text = await fs.readFile(templateFile, 'utf8');
-      const match = text.match(/^##\s*Fix 任务.*$/mu);
-      if (match) {
-        const derived = match[0].replace(/^##\s*/, '').trim();
-        if (derived !== '') title = derived;
-      }
+      title = fixSectionTitleFromTemplateText(await fs.readFile(templateFile, 'utf8'));
     } catch {}
   }
   fixSectionTitleCache = title;
   fixSectionTitleCacheRoot = runRoot;
+  fixSectionTitleCached = true;
   return title;
 }
 
   // ===== 模板保真（M1/M2/M3·设计语义 / AC-7~AC-9）=====
-  // 段名归一化：去标题标记 + 去尾部括号（如 Why（为什么做）→ Why）+ 去编号前缀（如 1. 决策清单 → 决策清单）
-  // + 去首尾空白 + ASCII 小写（中文无大小写；英文侧大小写不敏感）——沿用 C2 宽容匹配风格
+  // 段名归一化：委托 route-node 共享 heading 归一（单一权威）——去标题标记 / 尾部括号
+  // （如 Why（为什么做）→ Why）/ 编号前缀（1. 决策清单 → 决策清单）/ 闭合 ATX，去首尾空白 + 小写。
   function normalizeTemplateHeading(raw) {
-    return String(raw)
-      .replace(/\r/g, '')
-      .replace(/^#{1,6}\s*/, '')
-      .replace(/[（(][^）)\n]*[）)]\s*$/u, '')
-      .replace(/^\d+(?:\.\d+)?\.?\s*/u, '')
-      .trim()
-      .toLowerCase();
+    return normalizeHeading(raw);
   }
 
   // 提取文档全部 ^## 段（归一化后），供段序/缺段校验
@@ -2070,8 +2076,9 @@ async function main() {
     for (const [taskId, rec] of Object.entries(results)) {
       const r = typeof rec.result === 'object' && rec.result !== null ? rec.result : null;
       if (!r) { violations.push(taskId + ' 非 Return Contract（旧格式，缺 completedChecks）'); continue; }
-      // 零提交语义对齐：request 记录 noCommit（write_files 空）的任务无提交可回传，
-      // 豁免 commitHash 缺失断言（其余契约校验不变）——与 workflow-handoff 零提交跳过同构
+      // 零提交语义对齐：request 记录 noCommit（write_files 为空，或全部字面路径可证明被 gitignore）
+      // 的任务无提交可回传，豁免 commitHash 缺失断言（其余契约校验不变）——与 workflow-handoff
+      // 零提交跳过同构
       const taskReq = he.handoffRequests ? he.handoffRequests[taskId] : null;
       const noCommitTask = !!(taskReq && taskReq.noCommit === true);
       if (!r.commitHash && !noCommitTask) violations.push(taskId + ' 缺 commitHash');
