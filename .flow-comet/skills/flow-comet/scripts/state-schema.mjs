@@ -36,6 +36,9 @@ export const STATE_FIELD_VALIDATORS = [
   { field: 'verifyFailures', check: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 },
   // verifyFailures 按 change 存储:change-id → 非负整数计数(旧顶层字段为迁移通道,新 state 用本字段)
   { field: 'verifyFailuresByChange', check: (v) => (typeof v === 'object' && v !== null && !Array.isArray(v) && Object.values(v).every((x) => typeof x === 'number' && Number.isFinite(x) && x >= 0)) || v === undefined || v === null },
+  // Fix 受控归位轮次按 change 存储:change-id → 非负整数计数(与 verifyFailuresByChange 同型;
+  // 旧 state 缺字段默认 0,旧 change 不因计数卡死)
+  { field: 'fixRoundsByChange', check: (v) => (typeof v === 'object' && v !== null && !Array.isArray(v) && Object.values(v).every((x) => typeof x === 'number' && Number.isFinite(x) && x >= 0)) || v === undefined || v === null },
   { field: 'executionMode', check: (v) => v === 'subagent' || v === 'direct' },
   { field: 'directOverride', check: (v) => typeof v === 'boolean' },
   { field: 'taskHash', check: (v) => typeof v === 'string' || v === undefined },
@@ -96,4 +99,25 @@ export function setVerifyFailuresFor(state, value) {
   }
   state.verifyFailuresByChange[state.activeChange] = value;
   delete state.verifyFailures;
+}
+
+// ---------- fixRounds 按 change 读写(单一来源——受控归位计数 helper 与两个归位入口共用) ----------
+
+// 读取当前 change 的 Fix 受控归位轮次;旧 state 缺字段 / 缺当前 change 条目 → 0(不因计数卡死)。
+// 该计数与 verifyFailuresByChange 各自独立:verify 成功只清 verify 失败计数,不清归位轮次。
+export function fixRoundsFor(state) {
+  if (!state || !state.activeChange) return 0;
+  const rounds = state.fixRoundsByChange;
+  if (!rounds || typeof rounds !== 'object' || Array.isArray(rounds)) return 0;
+  const value = rounds[state.activeChange];
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+// 写入当前 change 的 Fix 受控归位轮次(容器缺失时按需创建;无 activeChange 时为无操作)
+export function setFixRoundsFor(state, value) {
+  if (!state || !state.activeChange) return;
+  if (!state.fixRoundsByChange || typeof state.fixRoundsByChange !== 'object' || Array.isArray(state.fixRoundsByChange)) {
+    state.fixRoundsByChange = {};
+  }
+  state.fixRoundsByChange[state.activeChange] = value;
 }

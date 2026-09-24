@@ -8,7 +8,7 @@ import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCO
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, looksLikeObjectLiteral, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME } from './state-schema.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide, skipInit } from './context-init.mjs';
 import { taskOpeningAttrs, taskBlocks } from './task-parsing.mjs';
-import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackState, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS } from './route-node.mjs';
+import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS } from './route-node.mjs';
 
 const command = process.argv[2] ?? 'status';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -758,6 +758,8 @@ async function main() {
       verifyFailures: 0,
       // verifyFailures 按 change 存储——init 新 change 从零计数(切换 change 不串扰)
       verifyFailuresByChange: {},
+      // Fix 受控归位轮次按 change 存储——init 写空对象；旧 state 缺字段按 0 读取
+      fixRoundsByChange: {},
       executionMode: 'subagent',
       directOverride: false,
       branchMode,
@@ -855,16 +857,24 @@ async function main() {
     // review/verify 驻留 + TASK 有 pending 修复任务（串行/并行）或未闭合家族出口签名时，把工作
     // 归属受控归位共享谓词返回的 execute 家族目标（写盘）并显式输出 NODE: <目标>，不再依赖
     // inProgress 保护副作用（修复前并行任务 next 输出仍停在源节点）。判定复用 route-node 共享纯函数。
-    const fixRollbackTarget = await resolveFixRollbackState({
+    const fixRollbackDecision = await resolveFixRollbackDecision({
       runRoot, changeName, protocol, completedNodes: completedArr, currentNode: state.currentNode,
       history: state.history,
     });
-    if (fixRollbackTarget) {
+    if (fixRollbackDecision) {
       const sourceNode = state.currentNode;
-      state.currentNode = fixRollbackTarget;
+      // 轮次计数与阈值/授权判定全部走共享 helper：分支②不计数；第 4 轮新 change 先 BLOCK
+      // （此处尚未写盘，满足不写 currentNode），旧 change WARN 后照常归位。
+      const rollbackRound = applyFixRollbackRound({ state, sourceNode, decision: fixRollbackDecision });
+      if (rollbackRound.blocked) {
+        console.error(rollbackRound.blockedMessage);
+        process.exit(1);
+      }
+      if (rollbackRound.warn) console.error(rollbackRound.warnMessage);
+      state.currentNode = fixRollbackDecision.target;
       await writeState(state);
-      console.log('FIX-BATCH: 归位 ' + fixRollbackTarget + '（源节点 ' + sourceNode + '）');
-      printNext(protocol, fixRollbackTarget, state.executionMode ?? 'subagent');
+      console.log('FIX-BATCH: 归位 ' + fixRollbackDecision.target + '（源节点 ' + sourceNode + '）' + rollbackRound.auditSuffix);
+      printNext(protocol, fixRollbackDecision.target, state.executionMode ?? 'subagent');
       printBranchLine(changeName, state.branchPrefix ?? 'change/');
       return;
     }

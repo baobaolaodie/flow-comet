@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, RUNTIME_STATE_PATH, LEGACY_RUNTIME_STATE_PATH } from './state-schema.mjs';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES } from './protocol-utils.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from './task-parsing.mjs';
-import { resolveNextNode, resolveFixRollbackState, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS, taskSetSignature, classifyFixReturnCause } from './route-node.mjs';
+import { resolveNextNode, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS, TASK_SET_SIGNATURE_ALGO, taskSetSignature, parseTaskSetSignature, sameTaskSetSignature, taskSetSignatureVersionSkew, classifyFixReturnCause } from './route-node.mjs';
 
 const command = process.argv[2] ?? 'verify';
 const nodeId = process.argv[3] ?? null;
@@ -1235,8 +1235,8 @@ async function main() {
     // pending 修复任务（串行/并行）或有未闭合家族出口签名时，entry 家族节点（execute /
     // subagent-execute）归位工作归属并写盘；仅当入口节点与共享谓词目标一致才归位。
     // 前置 currentNode 校验对该受控例外放行（L-070 实录路径即直接 entry）；其余节点/状态行为不变。
-    const fixBatchRollbackTarget = EXECUTE_FAMILY_NODE_IDS.has(node.id) && state.activeChange
-      ? await resolveFixRollbackState({
+    const fixBatchDecision = EXECUTE_FAMILY_NODE_IDS.has(node.id) && state.activeChange
+      ? await resolveFixRollbackDecision({
         runRoot,
         changeName: state.activeChange,
         protocol,
@@ -1245,15 +1245,23 @@ async function main() {
         history: state.history,
       })
       : null;
-    const fixBatchRollback = fixBatchRollbackTarget === node.id;
+    const fixBatchRollback = !!fixBatchDecision && fixBatchDecision.target === node.id;
     if (current !== node.id && !state.completedNodes.includes(node.id) && !fixBatchRollback) {
       console.error('BLOCKED: current Node is ' + String(current) + ', cannot enter ' + node.id + '.');
       process.exit(1);
     }
     if (fixBatchRollback) {
       const sourceNode = state.currentNode;
+      // 轮次计数与阈值/授权判定全部走共享 helper：分支②不计数；第 4 轮新 change 先 BLOCK
+      // （此处尚未写盘，满足不写 currentNode），旧 change WARN 后照常归位。
+      const rollbackRound = applyFixRollbackRound({ state, sourceNode, decision: fixBatchDecision });
+      if (rollbackRound.blocked) {
+        console.error(rollbackRound.blockedMessage);
+        process.exit(1);
+      }
+      if (rollbackRound.warn) console.error(rollbackRound.warnMessage);
       state.currentNode = node.id;
-      console.log('FIX-BATCH: 受控归位 ' + node.id + '（源节点 ' + sourceNode + '）');
+      console.log('FIX-BATCH: 受控归位 ' + node.id + '（源节点 ' + sourceNode + '）' + rollbackRound.auditSuffix);
       const bad = validateStateFields(state);
       if (bad.length) { console.error('BLOCKED: state 字段类型非法: ' + bad[0]); process.exit(1); }
       await writeJson(file, state);
@@ -1548,7 +1556,11 @@ async function main() {
       if (await fileExists(taskFile)) {
         try {
           const currentHash = taskSetSignature(await fs.readFile(taskFile, 'utf8'));
-          if (currentHash !== state.taskHash) {
+          if (taskSetSignatureVersionSkew(state.taskHash, currentHash)) {
+            // 跨算法版本不做一致性比对（值不可比），不误拦任务集；要强制一致需重新 entry 重建签名
+            const storedAlgo = parseTaskSetSignature(state.taskHash)?.algo ?? 'unknown';
+            console.error('SIGNATURE-ALGO WARN: state.taskHash 算法版本 ' + storedAlgo + ' 与当前任务集签名版本 ' + TASK_SET_SIGNATURE_ALGO + ' 不同——跨版本不做一致性比对，本轮不阻断；如需强制一致请重新 entry execute 家族节点重建签名');
+          } else if (!sameTaskSetSignature(state.taskHash, currentHash)) {
             console.error('BLOCKED: TASK.md 任务集被修改（签名不匹配），execute 期间不允许增删任务/改 action/改边界');
             process.exit(1);
           }
@@ -2478,6 +2490,7 @@ async function main() {
       try {
         if (await fileExists(exitTaskFile)) {
           exitEvent.taskSetSignature = taskSetSignature(await fs.readFile(exitTaskFile, 'utf8'));
+          exitEvent.signatureAlgo = TASK_SET_SIGNATURE_ALGO;
         }
       } catch {}
     }
