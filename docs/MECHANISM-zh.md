@@ -39,6 +39,11 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 | 契约解析失败检测 | record / workflow-handoff result：形似对象字面量的 payload 却 JSON 解析失败 → 报错并提示 `--json-file`，**不写** state（fail-closed，不落脏数据） | record / workflow-handoff result |
 | 疑似对象启发式边界 | 以 `{`/`[` 开头或含 `:`/`;` 的 payload 会被判为疑似对象字面量；若随后解析失败则 fail-closed 拒绝并提示 `--json-file`——处于该边界的合法纯文本会被保守拒绝（安全侧设计，不落脏数据） | record / workflow-handoff result |
 | SUMMARY 六段 | verify 输出 / 6 维自查（非空）/ 越界检查 + 强制 `## 自检方法`——6 维自查段须声明 `brooks-review` 或 `cache-brooks`（两级降级：Skill 工具 → 仅返回 "Launching skill" 占位时 Read 插件缓存协议文件手动执行完整审查）；`builtin-quickcheck` 只出现在 `## 自检方法` 段（须声明不可用原因**和**缓存尝试证据；新 change 缺失 BLOCKED；旧 change WARN） | exit execute |
+| 请求时刻任务归属门禁 | pending 任务的请求只在工作流已位于其声明执行方式对应的节点时才被接受——并行任务对应 `subagent-execute`、串行任务对应 `execute`——按状态文件记录的原始 currentNode 判定，不取派生值；不匹配时在写入任何交接证据之前阻断新 change（状态文件逐字节不变、不落请求记录），并打印 `workflow-state next` + `entry <目标节点>` 恢复指引；同一节点尚未 entry 只告警；已完成任务补录、显式 `--write-files` 请求与协议无对应启用节点的情况不受影响；旧 change 告警后照常放行 | handoff request |
+| 修复轮次计数 | 只有「review/verify 源 + 存在待修复工作 + 后继属于执行家族」的受控归位才让该 change 的修复计数加一；前三次在审计行打印当前轮次，第 4 次阻断新 change 且不移动节点，并给出继续修 / 停止指引；继续需要显式用户授权并记入交接证据；verify 成功不清零该计数，verify 失败计数保持独立；任务集已完成未闭合、仅回程分类、verify 命令失败路径均不计入；旧 change 告警后照常放行 | next / entry execute |
+| 签名算法版本 | 记录的任务集签名带版本前缀，应用出口事件记录产生它的算法版本；回程分类、受控归位与任务集比对只比较同一版本产生的签名，旧 state 的裸摘要按最初版本语义读取——引擎升级不会把正常多趟收尾误判为未闭合修复、也不会误拦未变化的任务集；更换算法本身必须在冻结的回归锚上显式决策 | enter/exit execute；回程分类 |
+| 结果时刻零提交重验 | 结果声明无提交且声明输出非空时，记录结果前重新核验零提交资格：忽略规则变化、路径变为 tracked、任一已存在祖先段出现符号链接/junction、或项目根不是 git 仓，都会撤销已记录的零提交标记，新 change 上结果被拒绝（旧 change 告警），出口门禁因此不再豁免缺失的提交哈希；判定前先对项目根做 realpath 归一，无法证明的路径仍走完整提交子集校验 | handoff result |
+| SUMMARY 全骨架 | 段骨架从 SUMMARY 模板的全部 H2 派生；每段必须存在（条件段可写 N/A），已出现段必须符合模板顺序，强制的自检方法段须位于越界检查之后（文末或紧随其后）；新 change 缺段即阻断并给恢复指引，旧 change 告警；模板缺失时回退内置十段骨架 | exit execute |
 | 处置标记 | REVIEW.md 发现区条目须带 `[已修]`/`[升级]`/`[转待办]`(新 change 缺失 BLOCKED;旧 change WARN) | exit review |
 | builtin 自检证据 | `builtin-quickcheck` 须声明不可用原因与插件缓存尝试证据(新 change 缺失 BLOCKED;旧 change WARN) | exit execute |
 | 工件模板保真 | SUMMARY / TASK / CHANGE / REQUIREMENT / DESIGN 须保持模板标题、首部字段与段序；新 change 任一缺失 → 阻断 + 恢复指引，旧 change 仅告警 | exit execute / plan / open / design |
@@ -56,7 +61,7 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 
 - **Return Contract**：子代理回传 `{status, commitHash, redEvidence, greenEvidence, completedChecks, riskSignals}`——缺 commitHash/greenEvidence/completedChecks → BLOCK；缺 redEvidence → 渐进 WARN；redEvidence 事后补录 → BLOCK
 - **handoff hash 溯源**：`git show <commitHash>` 校验提交文件 ⊆ write_files（从 TASK.md 自动解析，剥 XML 注释）
-- **零提交任务**：request 侧 `write_files` 为空（或 request 记录了 `noCommit` 标记）即判定为零提交——result 跳过提交文件子集校验并输出可审计提示；零提交结果若携带 tracked 提交，新 change 阻断、旧 change 告警
+- **零提交任务**：request 侧 `write_files` 为空（或 request 记录了 `noCommit` 标记）即判定为零提交——result 跳过提交文件子集校验并输出可审计提示；零提交结果若携带 tracked 提交，新 change 阻断、旧 change 告警；声明零提交的结果会在记录时重验，忽略规则变化、路径变为 tracked 或任一已存在祖先段为符号链接/junction 都会撤销已记录的标记并拒绝结果（新 change 阻断、旧 change 告警）
 - **write_files 冲突检测**：parallel 任务 write_files 不重叠才可同 wave 并行
 - **多趟路由**：串/并交互的序列在依赖语义下合法——委托节点可多次进入，每趟按依赖拓扑委派全部依赖已满足的并行任务；等待后续波次的串行任务是合法趟间态
 
@@ -131,4 +136,5 @@ node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
 - **无活跃 change 时 hook 放行**：`.flow-comet/flow-comet-state.json` 不存在时 hook guard 放行所有写入（设计决策：无 workflow 时不限制文件操作）
 - **hook blocking 语义**：exit 2（blocking）在主会话 TUI 实测生效；`claude -p`（SDK CLI 模式）下非零退出降级为 non-blocking——写入被记录但不阻止
 - **worktree 挂载依赖**：Agent `isolation: "worktree"` 的 worktree 挂在**会话项目根**（非子代理目标项目）——跨仓库产物需 `git show <branch>:<path>` 手动搬运，该场景下提交文件溯源校验（`git show` 子集检查）降级
+- **零提交信任边界**：资格检查只证明判定时刻声明的字面路径为空或确被忽略，且祖先段无符号链接/junction；未被提交引用的提交、判定后 HEAD 移动、校验与记录之间的竞态，以及 worktree 隔离下不可见的提交，均为已登记残留风险——机制不声称这些已闭合，无法证明的情形仍走完整提交子集校验
 - **GUIDANCE 不经创作清单记录**：`<skill>-GUIDANCE.md` 与 SKILL.md 引用行不登记创作清单，重跑 Skill 生成工具会清掉
