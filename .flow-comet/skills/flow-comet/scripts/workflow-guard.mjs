@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, RUNTIME_STATE_PATH, LEGACY_RUNTIME_STATE_PATH } from './state-schema.mjs';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES } from './protocol-utils.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from './task-parsing.mjs';
-import { resolveNextNode, resolveFixRollbackState, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS, taskSetSignature } from './route-node.mjs';
+import { resolveNextNode, resolveFixRollbackState, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS, taskSetSignature, classifyFixReturnCause } from './route-node.mjs';
 
 const command = process.argv[2] ?? 'verify';
 const nodeId = process.argv[3] ?? null;
@@ -1092,6 +1092,32 @@ async function templateSectionPatterns() {
   return result;
 }
 
+// 决策 2/4 · Fix 段标题从 <runRoot>/flow-kit/templates/TASK.md 派生（与上方 C2 段名读取同一
+// 模式：runRoot 内模板 + 模块级缓存 + 缺失/读取失败回退内置常量）——regex 提取
+// `^##\s*Fix 任务.*$` 标题文本并去 `##`；模板缺失/读取失败回退 `Fix 任务`。标题只喂给
+// 回程分类器决定审计行（不参与路由/state 写入）；分类器自身对标题做归一宽容匹配。
+const FIX_SECTION_TITLE_FALLBACK = 'Fix 任务';
+let fixSectionTitleCacheRoot = null;
+let fixSectionTitleCache = null;
+async function derivedFixSectionTitle() {
+  if (fixSectionTitleCacheRoot === runRoot && fixSectionTitleCache !== null) return fixSectionTitleCache;
+  let title = FIX_SECTION_TITLE_FALLBACK;
+  const templateFile = path.join(runRoot, 'flow-kit', 'templates', 'TASK.md');
+  if (await fileExists(templateFile)) {
+    try {
+      const text = await fs.readFile(templateFile, 'utf8');
+      const match = text.match(/^##\s*Fix 任务.*$/mu);
+      if (match) {
+        const derived = match[0].replace(/^##\s*/, '').trim();
+        if (derived !== '') title = derived;
+      }
+    } catch {}
+  }
+  fixSectionTitleCache = title;
+  fixSectionTitleCacheRoot = runRoot;
+  return title;
+}
+
   // ===== 模板保真（M1/M2/M3·设计语义 / AC-7~AC-9）=====
   // 段名归一化：去标题标记 + 去尾部括号（如 Why（为什么做）→ Why）+ 去编号前缀（如 1. 决策清单 → 决策清单）
   // + 去首尾空白 + ASCII 小写（中文无大小写；英文侧大小写不敏感）——沿用 C2 宽容匹配风格
@@ -1258,7 +1284,7 @@ async function main() {
       }
     }
     // C4: 委托前工件 commit 检查——worktree isolation 子代理看不到未提交工件（WARN 不 BLOCKED）
-    if ((node.id === 'execute' || node.id === 'subagent-execute') && state.activeChange) {
+    if (EXECUTE_FAMILY_NODE_IDS.has(node.id) && state.activeChange) {
       const { execFileSync } = await import('child_process');
       try {
         execFileSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: runRoot, stdio: 'pipe' });
@@ -1282,7 +1308,7 @@ async function main() {
       }
     }
     // C3: enter execute / subagent-execute 记录 TASK.md 任务集签名（exit 时比对，防 execute 期间增删任务/改 action/改边界）
-    if ((node.id === 'execute' || node.id === 'subagent-execute') && state.activeChange) {
+    if (EXECUTE_FAMILY_NODE_IDS.has(node.id) && state.activeChange) {
       const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
       if (await fileExists(taskFile)) {
         try {
@@ -1296,7 +1322,7 @@ async function main() {
     // 协调者禁令：execute / subagent-execute 阶段主会话只能委托，禁止直接写源码
     // 例外：direct 模式 execute 是主代理直写（逃生口），不输出协调者禁令
     const entryExecutionMode = state.executionMode ?? 'subagent';
-    if (node.id === 'execute' || node.id === 'subagent-execute') {
+    if (EXECUTE_FAMILY_NODE_IDS.has(node.id)) {
       if (!(entryExecutionMode === 'direct' && node.id === 'execute')) {
         console.log('COORDINATOR: 你是协调者，不是执行者。禁止在主会话直接修改源码；只能通过 Agent 工具 worktree isolation 委托子代理；子代理回传后仅更新 TASK.md / SUMMARY / handoff evidence。');
       }
@@ -1516,7 +1542,7 @@ async function main() {
     }
   }
   // C3: exit execute / subagent-execute 校验 TASK.md 任务集签名未变（status 标记 done 合法已剥离；增删任务/改 action/改边界 BLOCKED）
-  if ((node.id === 'execute' || node.id === 'subagent-execute') && state.activeChange) {
+  if (EXECUTE_FAMILY_NODE_IDS.has(node.id) && state.activeChange) {
     if (typeof state.taskHash === 'string' && state.taskHash.length > 0) {
       const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
       if (await fileExists(taskFile)) {
@@ -1731,7 +1757,7 @@ async function main() {
   // 直显授权态）须存在授权审计记录（directOverrideAt/来源，由 workflow-state execution-mode
   // 命令在协调者显式授权时写入）——否则 BLOCKED + 恢复指引（协调者显式授权 / 回 subagent）。
   // 旧 state 缺省（directOverride=false / 缺字段）放行（前向兼容——未处于显式 direct 不受影响）。
-  if ((node.id === 'execute' || node.id === 'subagent-execute') && state.activeChange) {
+  if (EXECUTE_FAMILY_NODE_IDS.has(node.id) && state.activeChange) {
     const directMode = state.executionMode ?? 'subagent';
     if (directMode === 'direct' && state.directOverride === true) {
       const hasAuditRecord = typeof state.directOverrideAt === 'string'
@@ -1744,7 +1770,7 @@ async function main() {
     }
   }
   // W1-B: execute / subagent-execute 出口校验每份 SUMMARY 含三个必填段 + 6 维自查非空 + 自检方法
-  if (node.id === 'execute' || node.id === 'subagent-execute') {
+  if (EXECUTE_FAMILY_NODE_IDS.has(node.id)) {
     const changeDir = path.join(runRoot, '.specs', state.activeChange ?? '');
     const violations = await verifySummaries(changeDir);
     // brooks-lint 自检方法审计：检查 6 维自查段是否声明了自检方法
@@ -2197,7 +2223,7 @@ async function main() {
     // 每份 *-SUMMARY.md 校 ① 标题首行 # SUMMARY: ② 首部 4 字段（Change ID/Task ID/完成时间/AI 角色）
     // ③ 段序（做了什么→改动文件→verify 输出→6 维自查→…→自检方法）；宽容匹配（大小写/编号前缀/括号后缀）。
     // 新 change 任一缺失 → BLOCK（含缺失点 + 恢复指引）；旧 change/归档批 → WARN 渐进。
-    if (node.id === 'execute' || node.id === 'subagent-execute') {
+    if (EXECUTE_FAMILY_NODE_IDS.has(node.id)) {
       const summaryChangeDir = path.join(runRoot, '.specs', state.activeChange ?? '');
       const summaryFiles = (await fs.readdir(summaryChangeDir).catch(() => [])).filter((f) => f.endsWith('-SUMMARY.md'));
       const hardIssues = [];
@@ -2375,7 +2401,30 @@ async function main() {
       });
       if (fixReturnSource) {
         next = findNode(protocol, fixReturnSource);
-        console.log('FIX-BATCH: 回源节点 ' + fixReturnSource + '（' + node.id + ' 出口已完成）');
+        // 决策 1/2/4: 回程行分类——只在写本次 exit-applied 事件之前（下方 state.history.push）
+        // 用既有字段派生因果：历史 execute 家族出口签名发散 ∨ TASK 的 Fix 结构标记 → fix；
+        // 有签名且全等 → normal；无签名且无标记 / TASK 不可读 → unknown。分类只决定审计行
+        // 文案；next / currentNode / completedNodes / history 写入仍按既有 resolveFixReturnNode
+        // 无条件覆盖（路由与 state 形状零变化）。协议 TASK 路径与 C3/exitEvent 一致。
+        let fixTaskContent = null;
+        try {
+          fixTaskContent = await fs.readFile(path.join(runRoot, '.specs', state.activeChange, 'TASK.md'), 'utf8');
+        } catch {}
+        const fixReturnCause = fixTaskContent === null
+          ? 'unknown'
+          : classifyFixReturnCause({
+              history: state.history,
+              changeName: state.activeChange,
+              taskContent: fixTaskContent,
+              fixSectionTitle: await derivedFixSectionTitle(),
+            });
+        if (fixReturnCause === 'fix') {
+          console.log('FIX-BATCH: 回源节点 ' + fixReturnSource + '（' + node.id + ' 出口已完成）');
+        } else if (fixReturnCause === 'normal') {
+          console.log('RETURN: 回源节点 ' + fixReturnSource + '（' + node.id + ' 出口已完成；正常多趟收尾，非 Fix 回修）');
+        } else {
+          console.log('RETURN: 回源节点 ' + fixReturnSource + '（' + node.id + ' 出口已完成；旧 state 缺闭合/修复证据，未分类）');
+        }
       }
     }
     // 多趟路由诊断保留（展示层，不并入共享判定）：出口推进后下一候选非委托节点时，若任务集存在

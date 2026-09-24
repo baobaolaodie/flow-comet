@@ -8,7 +8,7 @@ import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCO
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, looksLikeObjectLiteral, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME } from './state-schema.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide, skipInit } from './context-init.mjs';
 import { taskOpeningAttrs, taskBlocks } from './task-parsing.mjs';
-import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackState, resolveFixReturnNode } from './route-node.mjs';
+import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackState, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS } from './route-node.mjs';
 
 const command = process.argv[2] ?? 'status';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -445,7 +445,7 @@ function printNext(protocol, nodeId, executionMode = 'subagent') {
   if (implSkill) {
     console.log('LOAD SKILL: ' + implSkill + '（用 Skill 工具，禁止跳过）');
   }
-  if (nodeId === 'execute' || nodeId === 'subagent-execute') {
+  if (EXECUTE_FAMILY_NODE_IDS.has(nodeId)) {
     if (executionMode === 'direct' && nodeId === 'execute') {
       console.log('EXECUTION-MODE: direct（主代理直接执行串行任务，必须加载 flow-comet-dev 完整协议；parallel 任务仍由 subagent-execute 委托）');
     } else {
@@ -834,7 +834,7 @@ async function main() {
       branchMode: isInsideWorkTree(),
       enablePrReview: state.enablePrReview ?? false,
       artifactRoot: '.specs/' + changeName,
-      coordinatorMode: ['execute', 'subagent-execute'].includes(detectedNode),
+      coordinatorMode: EXECUTE_FAMILY_NODE_IDS.has(detectedNode),
       // G14: 新旧 change 标记——newChange true = 新 change(严格模式);false/缺失 = 旧 change(渐进)
       newChange: state.newChange === true
     }, null, 2));
@@ -887,7 +887,7 @@ async function main() {
         && currentIdx >= 0
         && artifactNextIdx > currentIdx;
       if (skipsForward) {
-        console.log('FIX-BATCH: 回程源节点 ' + fixReturnNode);
+        console.log('RETURN: 回程源节点 ' + fixReturnNode + '（源节点产物在场且未出口；保留源节点跑出口）');
         printNext(protocol, state.currentNode, state.executionMode ?? 'subagent');
         printBranchLine(changeName, state.branchPrefix ?? 'change/');
         return;
@@ -930,7 +930,7 @@ async function main() {
     // 防止静默路由到无法推进的节点造成死循环/死等。协议无 subagent-execute 节点时不适用
     // （parallel 任务由 execute 直接消化，无孤儿语义）。依赖环的常规拦截点在 plan 出口（guard 前置），
     // 此处兜底执行期数据异常（如手改 TASK 绕过签名校验的极端态）。
-    if (detectedNode === 'execute' || detectedNode === 'subagent-execute') {
+    if (EXECUTE_FAMILY_NODE_IDS.has(detectedNode)) {
       if (hasSubagentNode(protocol)) {
         try {
           const zpBlocks = taskBlocks(await fs.readFile(protocolTaskFilePath(protocol, changeName, specsRoot), 'utf8'));
