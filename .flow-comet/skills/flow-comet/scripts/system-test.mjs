@@ -1351,6 +1351,29 @@ const TEST_ITEMS = [
       completeTasks(['P01', 'P02']);
       drivePass('subagent-execute', 'execute', 'parallel-wave-1');
 
+      // 归属门禁事故回放（真实命令链路）：波 1 收口后工作归属在 execute（尚有串行衔接待办），
+      // 此刻对未消化的并行 pending 任务发起委托 → 新 change BLOCK（state 字节零改写、不落请求），
+      // 恢复指引指向 next/entry；随后原链路照跑（串行衔接完成后并行收尾正常委托）。
+      const ownershipEnv = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const ownershipStatePath = path.join(dir, '.flow-comet', 'flow-comet-state.json');
+      const ownershipBytesBefore = fs.readFileSync(ownershipStatePath, 'utf8');
+      const wrongNodeRequest = runHandoff(['request', 'P03', 'P03 委托', '--write-files', 'src/p03.mjs'], dir, ownershipEnv);
+      assertExit(wrongNodeRequest, 1);
+      assertOut(wrongNodeRequest, 'BLOCKED');
+      assertOut(wrongNodeRequest, '应归属节点 subagent-execute');
+      assertOut(wrongNodeRequest, '原始 currentNode=execute');
+      assertOut(wrongNodeRequest, 'workflow-state next');
+      assertOut(wrongNodeRequest, 'entry subagent-execute');
+      assertNotOut(wrongNodeRequest, 'HANDOFF REQUEST');
+      if (fs.readFileSync(ownershipStatePath, 'utf8') !== ownershipBytesBefore) {
+        throw new Error('归属门禁 BLOCK 不得改写 state 字节（含 handoffRequests）');
+      }
+      const ownershipState = readStateFile(dir);
+      if (ownershipState.evidence?.['subagent-execute']?.handoffRequests?.P03) {
+        throw new Error('归属门禁 BLOCK 不得落 handoffRequests: '
+          + JSON.stringify(ownershipState.evidence?.['subagent-execute']?.handoffRequests));
+      }
+
       // 趟 2 · execute:先消化本趟全部串行 pending(串行衔接,标 done 并委托留证)——
       // 确认无串行残留后才 exit → 收尾并行依赖满足 → 再次进入委托节点
       // (旧引擎单趟限制下此处不再路由回——本断言即多趟语义回归锚)
@@ -1385,7 +1408,7 @@ const TEST_ITEMS = [
       if (st.currentNode !== 'review') {
         throw new Error('全部任务 done 后应停在 review 门控前: ' + JSON.stringify(st.currentNode));
       }
-      console.log('  多趟路由:subagent-execute→execute→subagent-execute→review 三趟两交替 ✓');
+      console.log('  多趟路由:subagent-execute→execute→subagent-execute→review 三趟两交替 + 归属门禁 BLOCK 后原链路续跑 ✓');
     },
   },
 
@@ -1869,10 +1892,12 @@ const TEST_ITEMS = [
         throw new Error('越界 BLOCK 不得改写 state: ' + JSON.stringify({ currentNode: st.currentNode, completedNodes: st.completedNodes }));
       }
 
+      // 首轮计数与 verify 失败计数互相独立：先记一次 verify 失败，归位不得改动其计数。
+      assertExit(runState(['verify-fail'], dir, env), 0);
       // ② next 受控归位 execute：显式审计行 + 真实写盘（不得停在源节点）
       const nxt = runState(['next'], dir, env);
       assertExit(nxt, 0);
-      assertOut(nxt, 'FIX-BATCH: 归位 execute（源节点 review）');
+      assertOut(nxt, 'FIX-BATCH: 归位 execute（源节点 review）（第 1/3 轮）');
       assertNodeLine(nxt, 'execute');
       assertNotNodeLine(nxt, 'review');
       st = readStateFile(dir);
@@ -1884,6 +1909,12 @@ const TEST_ITEMS = [
       }
       if (!st.evidence?.review) {
         throw new Error('归位不得清掉源节点证据: ' + JSON.stringify(st.evidence));
+      }
+      if (st.fixRoundsByChange?.ch !== 1) {
+        throw new Error('首轮受控归位应计数 1: ' + JSON.stringify(st.fixRoundsByChange));
+      }
+      if (st.verifyFailuresByChange?.ch !== 1) {
+        throw new Error('Fix 轮次计数不得改写 verify 失败计数: ' + JSON.stringify(st.verifyFailuresByChange));
       }
 
       // ③ 完成修复任务（标 done + 逐任务 SUMMARY + 重载声明 + record execute）
@@ -1933,6 +1964,12 @@ const TEST_ITEMS = [
       st = readStateFile(dir);
       if (st.currentNode !== 'verify' || !st.completedNodes.includes('review')) {
         throw new Error('审查出口通过后应推进 verify: ' + JSON.stringify({ currentNode: st.currentNode, completedNodes: st.completedNodes }));
+      }
+      if (st.fixRoundsByChange?.ch !== 1) {
+        throw new Error('审查出口通过不得清零 Fix 轮次计数: ' + JSON.stringify(st.fixRoundsByChange));
+      }
+      if (st.verifyFailuresByChange?.ch !== 1) {
+        throw new Error('审查出口不得改写 verify 失败计数: ' + JSON.stringify(st.verifyFailuresByChange));
       }
     },
   },
@@ -2299,6 +2336,144 @@ const TEST_ITEMS = [
       if (legacyState.currentNode !== 'review') {
         throw new Error('旧态未分类回程应停在 review: ' + JSON.stringify(legacyState.currentNode));
       }
+
+      // ⑬ 受控归位轮次真实链路（review 源）：第 1~3 轮输出「第 n/3 轮」并递增计数；第 4 轮新
+      //    change BLOCK（state 字节零改写、currentNode 保持 review）；用户显式授权（嵌套证据）
+      //    后放行；verify 失败计数与轮次计数各自独立；旧 change 第 4 轮渐进 WARN 放行。
+      const fixRoundsText = (statuses) => '# TASK\n\n## 任务清单\n\n' + serialTaskBlock('T01', 'done')
+        + '\n\n## Fix 任务（来自 REVIEW / INTEGRATION）\n\n'
+        + statuses.map((s, i) => serialTaskBlock('T-FIX-0' + (i + 1), s)).join('\n') + '\n';
+      const doneStatuses = (n) => Array.from({ length: n }, () => 'done');
+      const assertRoundCounters = (round, label) => {
+        const s = readStateFile(dir);
+        if (s.fixRoundsByChange?.ch !== round) {
+          throw new Error(label + ' 受控归位轮次应为 ' + round + ': ' + JSON.stringify(s.fixRoundsByChange));
+        }
+        if (s.verifyFailuresByChange?.ch !== 2) {
+          throw new Error(label + ' 不得改写 verify 失败计数（应保持 2）: ' + JSON.stringify(s.verifyFailuresByChange));
+        }
+      };
+      const completeFixRound = (n) => {
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', fixRoundsText(doneStatuses(n)));
+        for (let i = 1; i <= n; i++) {
+          writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-0' + i + '-SUMMARY.md', execSummaryFixture('T-FIX-0' + i));
+        }
+        assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+        // entry 记录 taskHash：签名值必须带算法版本前缀（新链路 vN 前缀形态）
+        assertExit(runGuard(['entry', 'execute'], dir, env), 0);
+        const stHash = readStateFile(dir);
+        if (!/^v1:[0-9a-f]{64}$/.test(String(stHash.taskHash))) {
+          throw new Error('execute entry 应写入带算法版本前缀的任务集签名: ' + JSON.stringify(stHash.taskHash));
+        }
+        assertExit(runState(['record', 'execute', '{"summary":"fix round ' + n + ' executed","parallelTakeoverApproved":true}'], dir, env), 0);
+        const closed = runGuard(['exit', 'execute', '--apply'], dir, env);
+        assertExit(closed, 0);
+        assertOut(closed, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
+        const stEvent = readStateFile(dir);
+        const lastExit = [...(stEvent.history || [])].reverse()
+          .find((e) => e.event === 'exit-applied' && e.node === 'execute');
+        if (!lastExit || lastExit.signatureAlgo !== 'v1' || !/^v1:[0-9a-f]{64}$/.test(String(lastExit.taskSetSignature))) {
+          throw new Error('execute 出口事件应携带算法版本元数据（signatureAlgo + vN 前缀签名）: ' + JSON.stringify(lastExit));
+        }
+        if (stEvent.currentNode !== 'review') {
+          throw new Error('第 ' + n + ' 轮收口应回到未完成的 review: ' + JSON.stringify(stEvent.currentNode));
+        }
+      };
+
+      writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending' });
+      // verify 失败计数先落到 2——后续 4 轮归位都不得触碰该值
+      assertExit(runState(['verify-fail'], dir, env), 0);
+      const vfTwo = runState(['verify-fail'], dir, env);
+      assertExit(vfTwo, 0);
+      assertOut(vfTwo, 'VERIFY-FAIL: 2/3');
+      for (let round = 1; round <= 3; round++) {
+        const rollback = runState(['next'], dir, env);
+        assertExit(rollback, 0);
+        assertOut(rollback, 'FIX-BATCH: 归位 execute（源节点 review）');
+        assertOut(rollback, '（第 ' + round + '/3 轮）');
+        assertRoundCounters(round, '第 ' + round + ' 轮');
+        completeFixRound(round);
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', fixRoundsText([...doneStatuses(round), 'pending']));
+      }
+      // 第 4 轮：新 change BLOCK；state 字节零改写、currentNode 保持 review、轮次仍为 3
+      const round4Bytes = fs.readFileSync(statePath, 'utf8');
+      const round4Block = runState(['next'], dir, env);
+      assertExit(round4Block, 1);
+      assertOut(round4Block, 'BLOCKED');
+      assertOut(round4Block, '第 4 轮需用户决策');
+      assertOut(round4Block, '继续修');
+      assertOut(round4Block, '停止');
+      assertOut(round4Block, 'fixRoundOverride');
+      if (fs.readFileSync(statePath, 'utf8') !== round4Bytes) {
+        throw new Error('第 4 轮 BLOCK 不得改写 state 字节（currentNode/计数均不得变化）');
+      }
+      let round4State = readStateFile(dir);
+      if (round4State.currentNode !== 'review') {
+        throw new Error('第 4 轮 BLOCK 不得改写 currentNode: ' + JSON.stringify(round4State.currentNode));
+      }
+      assertRoundCounters(3, '第 4 轮 BLOCK 后');
+      // 用户显式授权：嵌套 evidence 记录授权来源/轮次 → 同一入口放行第 4 轮
+      round4State.evidence.review = {
+        ...(round4State.evidence.review || {}),
+        fixRoundOverride: { round: 4, at: new Date().toISOString(), source: 'user' },
+      };
+      writeState(dir, round4State);
+      const round4Authorized = runState(['next'], dir, env);
+      assertExit(round4Authorized, 0);
+      assertOut(round4Authorized, 'FIX-BATCH: 归位 execute（源节点 review）（第 4/3 轮）');
+      round4State = readStateFile(dir);
+      if (round4State.currentNode !== 'execute' || round4State.fixRoundsByChange?.ch !== 4) {
+        throw new Error('授权后应放行第 4 轮并计数到 4: '
+          + JSON.stringify({ currentNode: round4State.currentNode, rounds: round4State.fixRoundsByChange }));
+      }
+      completeFixRound(4);
+      // 轮次计数不影响 verify 预算：同一 change 继续失败到 3/3 仍可用，第 4 次才超限
+      const vfThree = runState(['verify-fail'], dir, env);
+      assertExit(vfThree, 0);
+      assertOut(vfThree, 'VERIFY-FAIL: 3/3');
+      const vfFour = runState(['verify-fail'], dir, env);
+      assertExit(vfFour, 1);
+      assertOut(vfFour, '超限');
+      if (readStateFile(dir).fixRoundsByChange?.ch !== 4) {
+        throw new Error('verify 失败累计不得改写 Fix 轮次计数: ' + JSON.stringify(readStateFile(dir).fixRoundsByChange));
+      }
+      // 旧 change 第 4 轮渐进：WARN 后照常归位（不 BLOCK、不卡死）
+      writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending', newChange: false });
+      const oldRoundState = readStateFile(dir);
+      oldRoundState.fixRoundsByChange = { ch: 3 };
+      writeState(dir, oldRoundState);
+      const oldRound4 = runState(['next'], dir, env);
+      assertExit(oldRound4, 0);
+      assertOut(oldRound4, 'FIX-BATCH WARN');
+      assertOut(oldRound4, '（第 4/3 轮）');
+      assertNotOut(oldRound4, 'BLOCKED');
+      const oldRoundAfter = readStateFile(dir);
+      if (oldRoundAfter.currentNode !== 'execute' || oldRoundAfter.fixRoundsByChange?.ch !== 4) {
+        throw new Error('旧 change 第 4 轮应渐进归位并计数: '
+          + JSON.stringify({ currentNode: oldRoundAfter.currentNode, rounds: oldRoundAfter.fixRoundsByChange }));
+      }
+
+      // ⑭ 签名算法版本可判别（真实命令链路）：跨版本（v2 事件 vs 当前 v1）不做同版本比对——
+      //    不得把正常回程误判为未闭合 Fix；同版本 legacy 裸 hex 按既有语义参与（②⑤ 已锚）。
+      writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'done' });
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-01-SUMMARY.md', execSummaryFixture('T-FIX-01'));
+      const versionSkewState = readStateFile(dir);
+      versionSkewState.history = [{
+        event: 'exit-applied', node: 'execute', change: CHANGE_ID, at: '2026-09-20T00:00:00.000Z',
+        taskSetSignature: 'v2:' + '0'.repeat(64), signatureAlgo: 'v2',
+      }];
+      writeState(dir, versionSkewState);
+      // 清掉本项先前 verify 子场景遗留的 TEST/UAT，使回程路由确定为 verify（夹具前提）
+      fs.rmSync(path.join(dir, '.specs', CHANGE_ID, 'TEST.md'), { force: true });
+      fs.rmSync(path.join(dir, '.specs', CHANGE_ID, 'UAT.md'), { force: true });
+      assertExit(runState(['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md'], dir, env), 0);
+      assertExit(runGuard(['entry', 'review'], dir, env), 0);
+      const skewExit = runGuard(['exit', 'review', '--apply'], dir, env);
+      assertExit(skewExit, 0);
+      assertOut(skewExit, 'ALL CHECKS PASSED');
+      assertNotOut(skewExit, 'BLOCKED: 存在未归位/未跑出口的 Fix 批次');
+      assertNodeLine(skewExit, 'verify');
+
     },
   },
   // ---------- B. 声明机制（skill-load / record / exit 校验） ----------
@@ -2756,6 +2931,176 @@ const TEST_ITEMS = [
       } finally {
         fs.rmSync(nonGitRoot, { recursive: true, force: true });
       }
+
+      // ⑭ 归属门禁事故回放与恢复（真实命令链路）：stale currentNode=execute（并行任务未消化、
+      //    execute 已在完成集合内）→ request BLOCK（state 字节零改写、不落 handoffRequests，
+      //    指引 next/entry）→ next 校正 state.currentNode → entry 正确节点 → request/result 成功。
+      const ownershipEnv = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      writeState(dir, {
+        activeChange: CHANGE_ID,
+        currentNode: 'execute',
+        completedNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
+        enteredNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
+        evidence: { execute: { summary: 'previous pass executed' }, 'subagent-execute': { summary: 'previous wave collected' } },
+        verifyFailures: 0,
+        executionMode: 'subagent',
+        directOverride: false,
+        newChange: true,
+      });
+      writeIntakeArtifacts(dir);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md',
+        '# DESIGN\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 0. 技术栈选定\n\nNode.js(ESM)\n\n## 决策清单\n\n- [ ] 循环路由\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
+        '# TASK\n\n<task id="P02" parallel="true" status="pending">\n  <action>实现 P02</action>\n  <write_files>src/p02.mjs</write_files>\n  <verify>node --check src/p02.mjs</verify>\n</task>\n');
+      writeFile(dir, 'src/p02.mjs', 'export const p02 = 2;\n');
+      execFileSync('git', ['add', 'src/p02.mjs'], { cwd: dir });
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'feat: p02'], { cwd: dir });
+      const p02Hash = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+      assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
+      const ownershipStatePath = path.join(dir, '.flow-comet', 'flow-comet-state.json');
+      const ownershipBytes = fs.readFileSync(ownershipStatePath, 'utf8');
+      const wrongNode = runHandoff(['request', 'P02', 'P02 委托', '--write-files', 'src/p02.mjs'], dir, ownershipEnv);
+      assertExit(wrongNode, 1);
+      assertOut(wrongNode, 'BLOCKED');
+      assertOut(wrongNode, '应归属节点 subagent-execute');
+      assertOut(wrongNode, '原始 currentNode=execute');
+      assertOut(wrongNode, 'workflow-state next');
+      assertOut(wrongNode, 'entry subagent-execute');
+      assertNotOut(wrongNode, 'HANDOFF REQUEST');
+      if (fs.readFileSync(ownershipStatePath, 'utf8') !== ownershipBytes) {
+        throw new Error('归属门禁 BLOCK 不得改写 state 字节（含 handoffRequests）');
+      }
+      if (readStateFile(dir).evidence?.['subagent-execute']?.handoffRequests?.P02) {
+        throw new Error('归属门禁 BLOCK 不得落 handoffRequests');
+      }
+      const correction = runState(['next'], dir);
+      assertExit(correction, 0);
+      assertNodeLine(correction, 'subagent-execute');
+      if (readStateFile(dir).currentNode !== 'subagent-execute') {
+        throw new Error('next 未按路由校正 state.currentNode: ' + JSON.stringify(readStateFile(dir).currentNode));
+      }
+      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
+      assertExit(runGuard(['entry', 'subagent-execute'], dir), 0);
+      const correctedRequest = runHandoff(['request', 'P02', 'P02 委托', '--write-files', 'src/p02.mjs'], dir, ownershipEnv);
+      assertExit(correctedRequest, 0);
+      assertOut(correctedRequest, 'HANDOFF REQUEST: P02');
+      const correctedResult = runHandoff(['result', 'P02', JSON.stringify({
+        status: 'DONE', taskId: 'P02', commitHash: p02Hash,
+        changedFiles: ['src/p02.mjs'],
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        redEvidence: { command: 'node --check src/p02.mjs' },
+        greenEvidence: { command: 'node --check src/p02.mjs', output: 'ok' },
+      })], dir);
+      assertExit(correctedResult, 0);
+      assertOut(correctedResult, 'HANDOFF RESULT: P02');
+      assertNotOut(correctedResult, 'HANDOFF ERROR');
+
+      // ⑮ result 重验零提交资格（真实命令链路）：合法零提交 result 无 HANDOFF ERROR；
+      //    request 后修改 .gitignore（路径不再被忽略）→ 新 change BLOCK（request 证据 noCommit
+      //    置 false、不落 result）；修正 .gitignore 后重新 request/result 恢复通过。
+      writeFile(dir, '.gitignore', '.specs/\n');
+      const writeM13Task = (taskId, files) => writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
+        '# TASK\n\n<task id="' + taskId + '" status="done">\n  <action>交付 ' + taskId + '</action>\n'
+        + '  <write_files>' + files + '</write_files>\n  <verify>echo ok</verify>\n</task>\n');
+      const zeroCommitContract = (taskId) => JSON.stringify({
+        status: 'DONE', taskId: taskId, noCommit: true,
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        redEvidence: { command: 'echo ok' },
+        greenEvidence: { command: 'echo ok', output: 'ok' },
+      });
+      writeM13Task('Z01', '.specs/' + CHANGE_ID + '/Z01-SUMMARY.md');
+      const z01Request = runHandoff(['request', 'Z01'], dir, ownershipEnv);
+      assertExit(z01Request, 0);
+      assertOut(z01Request, 'HANDOFF 零提交资格: Z01');
+      if (readStateFile(dir).evidence['subagent-execute'].handoffRequests.Z01.noCommit !== true) {
+        throw new Error('request 应记录字面 gitignored 路径的零提交资格');
+      }
+      const z01Result = runHandoff(['result', 'Z01', zeroCommitContract('Z01')], dir);
+      assertExit(z01Result, 0);
+      assertOut(z01Result, 'HANDOFF RESULT: Z01');
+      assertOut(z01Result, 'HANDOFF 零提交: Z01');
+      assertNotOut(z01Result, 'HANDOFF ERROR');
+      assertNotOut(z01Result, 'BLOCKED');
+
+      writeM13Task('Z02', '.specs/' + CHANGE_ID + '/Z02.md');
+      const z02Request = runHandoff(['request', 'Z02'], dir, ownershipEnv);
+      assertExit(z02Request, 0);
+      assertOut(z02Request, 'HANDOFF 零提交资格: Z02');
+      writeFile(dir, '.gitignore', 'node_modules/\n');
+      const z02Blocked = runHandoff(['result', 'Z02', zeroCommitContract('Z02')], dir);
+      assertExit(z02Blocked, 1);
+      assertOut(z02Blocked, 'HANDOFF ERROR');
+      assertOut(z02Blocked, '零提交资格 result 重验失败');
+      assertNotOut(z02Blocked, 'HANDOFF RESULT');
+      let m13State = readStateFile(dir);
+      if (m13State.evidence['subagent-execute'].handoffRequests.Z02.noCommit !== false) {
+        throw new Error('重验失败应把 request evidence 的 noCommit 置 false: '
+          + JSON.stringify(m13State.evidence['subagent-execute'].handoffRequests.Z02));
+      }
+      if (m13State.evidence['subagent-execute'].handoffResult?.Z02) {
+        throw new Error('新 change 重验失败不得落 result');
+      }
+      writeFile(dir, '.gitignore', '.specs/\n');
+      const z02Recover = runHandoff(['request', 'Z02'], dir, ownershipEnv);
+      assertExit(z02Recover, 0);
+      assertOut(z02Recover, 'HANDOFF 零提交资格: Z02');
+      const z02RecoverResult = runHandoff(['result', 'Z02', zeroCommitContract('Z02')], dir);
+      assertExit(z02RecoverResult, 0);
+      assertNotOut(z02RecoverResult, 'HANDOFF ERROR');
+
+      // ⑯ request 后路径变为 tracked → result 重验失败 → 新 change BLOCK（资格撤销留痕）
+      writeM13Task('Z03', '.specs/' + CHANGE_ID + '/Z03.md');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/Z03.md', 'tracked-after-request\n');
+      const z03Request = runHandoff(['request', 'Z03'], dir, ownershipEnv);
+      assertExit(z03Request, 0);
+      assertOut(z03Request, 'HANDOFF 零提交资格: Z03');
+      execFileSync('git', ['add', '-f', '.specs/' + CHANGE_ID + '/Z03.md'], { cwd: dir });
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'chore: z03 tracked'], { cwd: dir });
+      const z03Blocked = runHandoff(['result', 'Z03', zeroCommitContract('Z03')], dir);
+      assertExit(z03Blocked, 1);
+      assertOut(z03Blocked, 'HANDOFF ERROR');
+      assertOut(z03Blocked, '重验失败');
+      if (readStateFile(dir).evidence['subagent-execute'].handoffRequests.Z03.noCommit !== false) {
+        throw new Error('tracked 形态应撤销零提交资格');
+      }
+
+      // ⑰ symlink/junction 逃逸：request 时路径尚未存在 → 记资格；result 前落 junction 指向 runRoot
+      //    外 → 重验拒绝（fail-closed）；request 时即存在 junction → 资格直接不成立（越权负例）。
+      const escapeTarget = fs.mkdtempSync(path.join(os.tmpdir(), 'flow-comet-system-escape-'));
+      const removeEscapeLink = (link) => {
+        try { fs.unlinkSync(link); } catch { try { fs.rmdirSync(link); } catch { /* 已清理 */ } }
+      };
+      const z04Link = path.join(dir, '.specs', CHANGE_ID, 'z04-link');
+      const z05Link = path.join(dir, '.specs', CHANGE_ID, 'z05-link');
+      try {
+        writeM13Task('Z04', '.specs/' + CHANGE_ID + '/z04-link');
+        const z04Request = runHandoff(['request', 'Z04'], dir, ownershipEnv);
+        assertExit(z04Request, 0);
+        assertOut(z04Request, 'HANDOFF 零提交资格: Z04');
+        fs.symlinkSync(escapeTarget, z04Link, process.platform === 'win32' ? 'junction' : 'dir');
+        const z04Blocked = runHandoff(['result', 'Z04', zeroCommitContract('Z04')], dir);
+        assertExit(z04Blocked, 1);
+        assertOut(z04Blocked, 'HANDOFF ERROR');
+        assertOut(z04Blocked, '重验失败');
+        if (readStateFile(dir).evidence['subagent-execute'].handoffRequests.Z04.noCommit !== false) {
+          throw new Error('symlink/junction 逃逸应撤销零提交资格');
+        }
+        writeM13Task('Z05', '.specs/' + CHANGE_ID + '/z05-link');
+        fs.symlinkSync(escapeTarget, z05Link, process.platform === 'win32' ? 'junction' : 'dir');
+        const z05Request = runHandoff(['request', 'Z05'], dir, ownershipEnv);
+        assertExit(z05Request, 0);
+        assertOut(z05Request, 'HANDOFF REQUEST: Z05');
+        assertNotOut(z05Request, 'HANDOFF 零提交资格');
+        if (readStateFile(dir).evidence['subagent-execute'].handoffRequests.Z05.noCommit === true) {
+          throw new Error('request 时已存在的 symlink/junction 不得被判定零提交资格');
+        }
+        removeEscapeLink(z05Link);
+      } finally {
+        removeEscapeLink(z04Link);
+        removeEscapeLink(z05Link);
+        fs.rmSync(escapeTarget, { recursive: true, force: true });
+      }
+
     },
   },
 
