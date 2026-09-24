@@ -1092,10 +1092,10 @@ async function templateSectionPatterns() {
   return result;
 }
 
-// D2/D4 · Fix 段标题从 <runRoot>/flow-kit/templates/TASK.md 派生（与上方 C2 段名读取同一
+// 决策 2/4 · Fix 段标题从 <runRoot>/flow-kit/templates/TASK.md 派生（与上方 C2 段名读取同一
 // 模式：runRoot 内模板 + 模块级缓存 + 缺失/读取失败回退内置常量）——regex 提取
 // `^##\s*Fix 任务.*$` 标题文本并去 `##`；模板缺失/读取失败回退 `Fix 任务`。标题只喂给
-// 回程分类器决定审计行（不参与路由/state 写入）；分类器内部对标题做归一宽容匹配。
+// 回程分类器决定审计行（不参与路由/state 写入）；分类器自身对标题做归一宽容匹配。
 const FIX_SECTION_TITLE_FALLBACK = 'Fix 任务';
 let fixSectionTitleCacheRoot = null;
 let fixSectionTitleCache = null;
@@ -2401,7 +2401,7 @@ async function main() {
       });
       if (fixReturnSource) {
         next = findNode(protocol, fixReturnSource);
-        // D1/D2/D4: 回程行分类——只在写本次 exit-applied 事件之前（下方 state.history.push）
+        // 决策 1/2/4: 回程行分类——只在写本次 exit-applied 事件之前（下方 state.history.push）
         // 用既有字段派生因果：历史 execute 家族出口签名发散 ∨ TASK 的 Fix 结构标记 → fix；
         // 有签名且全等 → normal；无签名且无标记 / TASK 不可读 → unknown。分类只决定审计行
         // 文案；next / currentNode / completedNodes / history 写入仍按既有 resolveFixReturnNode

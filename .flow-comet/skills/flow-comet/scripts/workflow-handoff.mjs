@@ -103,7 +103,7 @@ function matchWriteFilePattern(file, pattern) {
   return true;
 }
 
-// ---------- F-6 零提交资格（DESIGN D7 · fail-closed） ----------
+// ---------- F-6 零提交资格（DESIGN 决策 7 · fail-closed） ----------
 // 字面路径 → repo 相对 POSIX 路径归一：仅接受不含 glob 魔法（* ? [）的字面路径；拒绝绝对
 // 路径（POSIX 前导 /、盘符前缀、UNC）与 .. 逃逸、空段。返回归一后相对路径，或 null（无资格）。
 function literalRelativePosixPath(entry) {
@@ -252,7 +252,7 @@ async function main() {
       state.evidence['subagent-execute'].handoffRequests = {};
     }
     const zeroEligible = taskResolved && emptyWriteFilesElement && writeFiles.length === 0;
-    // F-6（DESIGN D7）：非空 write_files 的「全部可证明 gitignored」资格——与空元素同语义，
+    // F-6（DESIGN 决策 7）：非空 write_files 的「全部可证明 gitignored」资格——与空元素同语义，
     // 记 noCommit:true；不具资格 → 不记 noCommit、不阻断原流程（保持既有完整提交子集校验）。
     const literalIgnoredEligible = taskResolved && writeFiles.length > 0
       && await writeFilesProvablyIgnored(writeFiles);

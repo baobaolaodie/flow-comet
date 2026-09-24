@@ -8087,7 +8087,7 @@ const SCENARIOS = [
       if (emptySection !== 'normal') {
         throw new Error('Fix 段无任务块应判 normal，实际 ' + JSON.stringify(emptySection));
       }
-      // ⑥ 全文任务 id T-FIX-/P-FIX-（Fix 段之外、文件尾追加形态）→ fix
+      // ⑥ 全文任务 id 修复任务编号前缀（Fix 段之外、文件尾追加形态）→ fix
       const tailTFix = plainTaskText + '\n## 其它\n\n' + fixTaskBlock('T-FIX-01', 'done') + '\n';
       const tailPFix = plainTaskText + '\n## 其它\n\n' + fixTaskBlock('P-FIX-01', 'done') + '\n';
       for (const [label, text] of [['T-FIX-01', tailTFix], ['P-FIX-01', tailPFix]]) {
@@ -8360,7 +8360,7 @@ const SCENARIOS = [
       }
 
       // 250c 多波次真实 Fix：历史旧签名 ≠ 当前、最新签名 == 当前（只看最新会漏判）→ 保留
-      // FIX-BATCH（全量扫描）；TASK 含 T-FIX 任务与结构标记。
+      // FIX-BATCH（全量扫描）；TASK 含修复任务与结构标记。
       const multiWaveTaskText = fixBatchTaskText('done');
       const multiWaveSignature = routeNodeModule.taskSetSignature(multiWaveTaskText);
       writeFile(dir, taskPath, multiWaveTaskText);
@@ -8416,7 +8416,7 @@ const SCENARIOS = [
       assertOut(resLatestOnlyEqual, 'RETURN: 回源节点 review（execute 出口已完成；正常多趟收尾，非 Fix 回修）');
       assertNotOut(resLatestOnlyEqual, 'FIX-BATCH');
 
-      // 250e 源未 entry 的真实 Fix：T-FIX 任务 + enteredNodes 不含源节点 review + 历史无
+      // 250e 源未 entry 的真实 Fix：修复任务 + enteredNodes 不含源节点 review + 历史无
       // 签名（旧态）→ 结构标记仍恢复 fix 标签，保留 FIX-BATCH；不误判 unknown、不卡死。
       writeFile(dir, taskPath, multiWaveTaskText);
       writeState(dir, baseReturnState({
@@ -8461,7 +8461,7 @@ const SCENARIOS = [
           }));
       }
 
-      // 250g Fix 段标题从 flow-kit/templates/TASK.md 派生（D4）：模板段名含括号说明 +
+      // 250g Fix 段标题从 flow-kit/templates/TASK.md 派生（决策 4）：模板段名含括号说明 +
       // 段内非 FIX 编号任务 → 结构标记命中 fix（模板读取路径真实被执行；标题由模板派生）。
       writeFile(dir, 'flow-kit/templates/TASK.md',
         '# TASK 模板\n\n## Fix 任务（来自 REVIEW / INTEGRATION）\n');
@@ -9209,7 +9209,7 @@ const SCENARIOS = [
       if (readScenarioState(dir).currentNode !== 'review') {
         throw new Error('旧 change 回程态 next 后 currentNode 应保持 review，实际 ' + JSON.stringify(readScenarioState(dir).currentNode));
       }
-      // ③ 旧 change 无签名、无 Fix 标记的回程态（D2/D3 旧态边界）：state 侧同样只输出中性
+      // ③ 旧 change 无签名、无 Fix 标记的回程态（决策 2/3 旧态边界）：state 侧同样只输出中性
       // RETURN 回程行——缺 taskSetSignature、TASK 无 Fix 段/编号 → 不得冒充 FIX-BATCH。
       writeFile(dir, taskPath, '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n');
       writeState(dir, oldState);

@@ -303,12 +303,12 @@ function latestExecuteExitEvent(history, changeName) {
 
 // ---------- Fix 回因分类（共享纯函数 · 单一权威 · 展示层派生） ----------
 // guard exit 回程分支在写本次 exit-applied 事件之前调用本分类器：只用既有字段派生证据（history
-// 的 execute 家族出口签名 + TASK 内容结构标记），零新增 state 字段 / 事件类型。判据（DESIGN D1）：
+// 的 execute 家族出口签名 + TASK 内容结构标记），零新增 state 字段 / 事件类型。判据（DESIGN 决策 1）：
 //   divergence = 历史任一 execute 家族 exit-applied 事件记录的 taskSetSignature ≠ 当前任务集签名；
 //   marker     = 模板派生的 Fix 段内含 <task> 块，或全文任一任务 id 匹配 /^[TP]-FIX-/i；
 //   divergence ∨ marker → 'fix'；有签名且不发散 → 'normal'；无签名且无标记 → 'unknown'
 //   （旧 state 证据不足：中性输出、不 BLOCK，由调用方渲染）。
-// Fix 段标题由调用方传入（guard 从 flow-kit/templates/TASK.md 派生，D4 单一模板源）；缺失 / 空串
+// Fix 段标题由调用方传入（guard 从 flow-kit/templates/TASK.md 派生，决策 4 单一模板源）；缺失 / 空串
 // 回退内置常量。history 过滤与 latestExecuteExitEvent 同语义（change 归属：有 change 字段且不匹配
 // 则跳过，无 change 的 legacy 事件参与）；签名事件全量参与、不做「只看最新」短路——多波次场景最新
 // 签名已被闭合写成当前签名，只看最新会漏判 fix。
