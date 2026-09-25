@@ -658,6 +658,44 @@ function fixBatchTaskText(fixStatus) {
   return '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n' + fixTaskBlock('T-FIX-01', fixStatus) + '\n';
 }
 
+// exit execute 二次完成回源场景公共夹具（场景族拆分后由三个顶层场景共享；每个场景仍在独立
+// 临时目录运行，状态不跨场景共享）：家族证据与基础 state 的字段基线在此单一表达。
+function fixReturnFamilyEvidence(taskIds) {
+  return {
+    execute: { summary: 'fix batch executed', completedChecks: ['required-skill:execute.flow-comet-dev'] },
+    'subagent-execute': { summary: 'delegated', handoffResult: handoffFor(taskIds) },
+    review: { summary: 'review in progress' },
+  };
+}
+
+function fixReturnBaseState(overrides = {}) {
+  return {
+    activeChange: CHANGE_ID,
+    currentNode: 'execute',
+    completedNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
+    enteredNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review'],
+    evidence: fixReturnFamilyEvidence(['T01']),
+    verifyFailures: 0,
+    executionMode: 'subagent',
+    directOverride: false,
+    newChange: true,
+    ...overrides,
+  };
+}
+
+const FIX_RETURN_FAMILY_COMPLETED = 'open,design,plan,execute,subagent-execute';
+
+// 回源夹具的 REVIEW.md 正文：内容表达「审查未完成、Fix 批次待回源出口」，文件在场即触发
+// 路由按产物跳过 review 的行为。
+const FIX_RETURN_REVIEW_TEXT = '# REVIEW\n\n## 发现\n\n### Critical\n\n- 无\n\n### Major\n\n- 无\n\n### Minor\n\n- 无\n\n## 结论\n\n审查结论已记录；Fix 批次由 execute 完成，待回源重新出口。\n';
+
+// 逐任务写入摘要夹具（id 列表由调用场景给出，未列出的任务不会凭空出现摘要）。
+function writeFixReturnSummaries(dir, taskIds) {
+  for (const id of taskIds) {
+    writeFile(dir, '.specs/' + CHANGE_ID + '/' + id + '-SUMMARY.md', strictSummary(id));
+  }
+}
+
 // 并行 Fix 任务集（无依赖 → 可委托）：既有任务 T01 done + parallel 修复任务（状态由参数指定）。
 function fixBatchParallelTaskText(fixStatus) {
   return '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n'
@@ -4578,7 +4616,7 @@ const SCENARIOS = [
   // route-node.mjs import EXECUTE_FAMILY_NODE_IDS，且源码中不得再出现 execute 家族成员内联 pair
   //（<ident> === 'execute' || <ident> === 'subagent-execute'，正反顺序）→ 0 命中。
   // 允许清单：单节点分支 / hasSubagentNode 协议判定 / 证据键与文案不参与 pair 断言。
-  // ② 本轮修复在既有场景内扩展（不新增顶层编号，场景数保持 258）。
+  // ② 该轮修复在既有场景内扩展（不新增顶层编号）。
 
   {
     name: '154 单一来源静态锁：state/handoff 不内置 looksLikeObjectLiteral + 三消费脚本 import EXECUTE_FAMILY_NODE_IDS 且无内联 pair',
@@ -9109,15 +9147,15 @@ const SCENARIOS = [
   // 250: exit execute --apply Fix 二次完成回源（review 源）——execute 在 exit 前已在
   // completedNodes + TASK 全 done：REVIEW.md 已在场（resolveNextNode 会按产物跳过 review 到
   // verify）但 review 未完成 → 受控回程 review（源节点出口必须真实执行，不被产物存在性跳过）。
+  // 本场景族拆自原 250 单场景，断言与失败信息保持不变；本段覆盖回源归属与出口事件形状。
   {
     name: '250 exit execute --apply Fix 二次完成：回源 review（REVIEW.md 在场但不按产物跳过）',
     run: (dir) => {
       writeIntakeArtifacts(dir);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', fixBatchTaskText('done'));
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-01-SUMMARY.md', strictSummary('T-FIX-01'));
-      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
-        '# REVIEW\n\n## 发现\n\n### Critical\n\n- 无\n\n### Major\n\n- 无\n\n### Minor\n\n- 无\n\n## 结论\n\n审查结论已记录；Fix 批次由 execute 完成，待回源重新出口。\n');
+      const taskPath = '.specs/' + CHANGE_ID + '/TASK.md';
+      writeFile(dir, taskPath, fixBatchTaskText('done'));
+      writeFixReturnSummaries(dir, ['T01', 'T-FIX-01']);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', FIX_RETURN_REVIEW_TEXT);
       writeState(dir, {
         activeChange: CHANGE_ID,
         currentNode: 'execute',
@@ -9150,26 +9188,150 @@ const SCENARIOS = [
           + JSON.stringify(lastExit));
       }
 
-      // ---------- T02 回程行分类子锚（分类只决定审计行；路由/state 写入零变化） ----------
+      // 250e 源未 entry 的真实 Fix：修复任务 + enteredNodes 不含源节点 review + 历史无
+      // 签名（旧态）→ 结构标记仍恢复 fix 标签，保留 FIX-BATCH；不误判 unknown、不卡死。
+      writeFile(dir, taskPath, fixBatchTaskText('done'));
+      writeState(dir, fixReturnBaseState({
+        evidence: fixReturnFamilyEvidence(['T01', 'T-FIX-01']),
+        enteredNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
+        history: [],
+      }));
+      const resSourceNotEntered = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resSourceNotEntered, 0);
+      assertOut(resSourceNotEntered, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
+      assertOut(resSourceNotEntered, 'NODE: review');
+      assertNotOut(resSourceNotEntered, 'RETURN: 回源节点');
+      assertNotOut(resSourceNotEntered, 'BLOCKED');
+    },
+  },
+
+  // 250b: 回程行分类与 Fix 段标题路径——历史全量扫描 / 旧态未分类 / 模板派生与缺失回退。
+  // 本场景族拆自原 250 单场景，断言与失败信息保持不变。
+  {
+    name: '250b 回程行分类与 Fix 段标题路径：历史扫描、旧态未分类、模板派生与回退',
+    run: (dir) => {
+      writeIntakeArtifacts(dir);
       const taskPath = '.specs/' + CHANGE_ID + '/TASK.md';
-      const familyEvidence = (taskIds) => ({
-        execute: { summary: 'fix batch executed', completedChecks: ['required-skill:execute.flow-comet-dev'] },
-        'subagent-execute': { summary: 'delegated', handoffResult: handoffFor(taskIds) },
-        review: { summary: 'review in progress' },
+      writeFixReturnSummaries(dir, ['T01', 'T-FIX-01']);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', FIX_RETURN_REVIEW_TEXT);
+
+      // 250d 反向构造（L-064）——与 250c 一一对应证明分类依据是历史全量扫描（不是只看
+      // 最新）：① 无 Fix 编号任务 + 旧签名 ≠ 当前 + 最新签名 == 当前 → 仍判 fix（发散证据
+      // 不依赖结构标记）；② 同任务集仅保留最新（签名 == 当前）→ 必须中性 RETURN。
+      const plainTaskText = '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n';
+      const plainSignature = routeNodeModule.taskSetSignature(plainTaskText);
+      writeFile(dir, taskPath, plainTaskText);
+      writeState(dir, fixReturnBaseState({
+        history: [
+          {
+            event: 'exit-applied', node: 'execute', change: CHANGE_ID,
+            at: '2026-09-20T00:00:00.000Z', taskSetSignature: STALE_FIX_BATCH_SIGNATURE,
+          },
+          {
+            event: 'exit-applied', node: 'subagent-execute', change: CHANGE_ID,
+            at: '2026-09-24T00:00:00.000Z', taskSetSignature: plainSignature,
+          },
+        ],
+      }));
+      const resDivergentPlain = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resDivergentPlain, 0);
+      assertOut(resDivergentPlain, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
+      assertNotOut(resDivergentPlain, 'RETURN: 回源节点');
+      writeState(dir, fixReturnBaseState({
+        history: [{
+          event: 'exit-applied', node: 'subagent-execute', change: CHANGE_ID,
+          at: '2026-09-24T00:00:00.000Z', taskSetSignature: plainSignature,
+        }],
+      }));
+      const resLatestOnlyEqual = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resLatestOnlyEqual, 0);
+      assertOut(resLatestOnlyEqual, 'RETURN: 回源节点 review（execute 出口已完成；正常多趟收尾，非 Fix 回修）');
+      assertNotOut(resLatestOnlyEqual, 'FIX-BATCH');
+
+      // 250f 旧态无签名无标记：历史家族出口无签名 + 任务集无 Fix 标记 → RETURN 未分类；
+      // 不 BLOCK、不出现 FIX-BATCH；NODE/state 与收口前一致（只有审计行变化）。
+      writeState(dir, fixReturnBaseState({
+        history: [{
+          event: 'exit-applied', node: 'execute', change: CHANGE_ID,
+          at: '2026-09-19T00:00:00.000Z',
+        }],
+      }));
+      const beforeUnknown = readScenarioState(dir);
+      const resUnknown = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resUnknown, 0);
+      assertOut(resUnknown, 'RETURN: 回源节点 review（execute 出口已完成；旧 state 缺闭合/修复证据，未分类）');
+      assertOut(resUnknown, 'NODE: review');
+      assertNotOut(resUnknown, 'FIX-BATCH');
+      assertNotOut(resUnknown, 'BLOCKED');
+      const afterUnknown = readScenarioState(dir);
+      if (afterUnknown.currentNode !== 'review' || afterUnknown.completedNodes.join(',') !== FIX_RETURN_FAMILY_COMPLETED) {
+        throw new Error('未分类回程应只覆盖路由到 review 且 completedNodes 不变，实际 '
+          + JSON.stringify({ currentNode: afterUnknown.currentNode, completedNodes: afterUnknown.completedNodes }));
+      }
+      assertStateOnlyChanged(beforeUnknown, afterUnknown, {
+        label: '250f 旧态未分类回程',
+        allowed: ['currentNode', 'status', 'history'],
       });
-      const baseReturnState = (overrides = {}) => ({
-        activeChange: CHANGE_ID,
-        currentNode: 'execute',
-        completedNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
-        enteredNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review'],
-        evidence: familyEvidence(['T01']),
-        verifyFailures: 0,
-        executionMode: 'subagent',
-        directOverride: false,
-        newChange: true,
-        ...overrides,
-      });
-      const FAMILY_COMPLETED = 'open,design,plan,execute,subagent-execute';
+
+      // 250g Fix 段标题从 flow-kit/templates/TASK.md 派生（决策 4）：模板段名含括号说明 +
+      // 段内非 FIX 编号任务 → 结构标记命中 fix（模板读取路径真实被执行；标题由模板派生）。
+      writeFile(dir, 'flow-kit/templates/TASK.md',
+        '# TASK 模板\n\n## Fix 任务（来自 REVIEW / INTEGRATION）\n');
+      const sectionTaskText = '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n'
+        + '## Fix 任务（来自 REVIEW / INTEGRATION）\n\n' + fixTaskBlock('T02', 'done') + '\n';
+      writeFile(dir, taskPath, sectionTaskText);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T02-SUMMARY.md', strictSummary('T02'));
+      const sectionSignature = routeNodeModule.taskSetSignature(sectionTaskText);
+      writeState(dir, fixReturnBaseState({
+        evidence: fixReturnFamilyEvidence(['T01', 'T02']),
+        history: [{
+          event: 'exit-applied', node: 'execute', change: CHANGE_ID,
+          at: '2026-09-24T00:00:00.000Z', taskSetSignature: sectionSignature,
+        }],
+      }));
+      const resSection = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resSection, 0);
+      assertOut(resSection, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
+      assertNotOut(resSection, 'RETURN: 回源节点');
+
+      // 250h m-06 模板缺失 + 闭合 ATX + 非 FIX 编号：guard 无模板派生标题 → 回退内置
+      // 「Fix 任务」，段内 T02 由结构标记判 fix（模板缺席不得让 Fix 批次漏判）。
+      fs.rmSync(path.join(dir, 'flow-kit', 'templates', 'TASK.md'), { force: true });
+      const missingTplTaskText = '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n'
+        + '## Fix 任务 ##\n\n' + fixTaskBlock('T02', 'done') + '\n';
+      writeFile(dir, taskPath, missingTplTaskText);
+      writeState(dir, fixReturnBaseState({ evidence: fixReturnFamilyEvidence(['T01', 'T02']), history: [] }));
+      const resMissingTpl = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resMissingTpl, 0);
+      assertOut(resMissingTpl, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
+      assertNotOut(resMissingTpl, 'RETURN: 回源节点');
+      assertNotOut(resMissingTpl, 'BLOCKED');
+
+      // 250i m-06 模板基名不同（Fix Tasks）+ 闭合 ATX + 非 FIX 编号：标题归一来自共享权威，
+      // 语言后缀可变仍命中 Fix 段（旧硬编码中文基名会漏判 → RETURN-normal）。
+      writeFile(dir, 'flow-kit/templates/TASK.md',
+        '# TASK 模板\n\n## Fix Tasks（来自 REVIEW / INTEGRATION）\n');
+      const renamedTplTaskText = '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n'
+        + '## Fix Tasks ##\n\n' + fixTaskBlock('T02', 'done') + '\n';
+      writeFile(dir, taskPath, renamedTplTaskText);
+      writeState(dir, fixReturnBaseState({ evidence: fixReturnFamilyEvidence(['T01', 'T02']), history: [] }));
+      const resRenamedTpl = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resRenamedTpl, 0);
+      assertOut(resRenamedTpl, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
+      assertNotOut(resRenamedTpl, 'RETURN: 回源节点');
+      assertNotOut(resRenamedTpl, 'BLOCKED');
+    },
+  },
+
+  // 250c: 多趟收尾与签名元数据——中性回程 / 多波次真实修复 / 任务集签名同版本三态。
+  // 本场景族拆自原 250 单场景，断言与失败信息保持不变。
+  {
+    name: '250c 多趟收尾与签名元数据：中性回程、多波次修复、任务集签名三态',
+    run: (dir) => {
+      writeIntakeArtifacts(dir);
+      const taskPath = '.specs/' + CHANGE_ID + '/TASK.md';
+      writeFixReturnSummaries(dir, ['T01', 'T-FIX-01']);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', FIX_RETURN_REVIEW_TEXT);
       // state 不变量统一走 assertStateOnlyChanged（白名单外深比 + history 旧前缀稳定 + 恰新增
       // 一条 exit-applied）——白名单仅 currentNode（既有路由覆盖 next）、status（既有 apply 写
       // running/completed）、history（既有出口事件追加）；execute 证据的 completedChecks 已预置，
@@ -9180,7 +9342,7 @@ const SCENARIOS = [
       const normalTaskText = '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n';
       const normalSignature = routeNodeModule.taskSetSignature(normalTaskText);
       writeFile(dir, taskPath, normalTaskText);
-      writeState(dir, baseReturnState({
+      writeState(dir, fixReturnBaseState({
         history: [{
           event: 'exit-applied', node: 'subagent-execute', change: CHANGE_ID,
           at: '2026-09-23T00:00:00.000Z', taskSetSignature: normalSignature,
@@ -9194,7 +9356,7 @@ const SCENARIOS = [
       assertNotOut(resNormal, 'FIX-BATCH');
       assertNotOut(resNormal, 'NODE: verify');
       const afterNormal = readScenarioState(dir);
-      if (afterNormal.currentNode !== 'review' || afterNormal.completedNodes.join(',') !== FAMILY_COMPLETED) {
+      if (afterNormal.currentNode !== 'review' || afterNormal.completedNodes.join(',') !== FIX_RETURN_FAMILY_COMPLETED) {
         throw new Error('正常多趟回程应只覆盖路由到 review 且 completedNodes 不变，实际 '
           + JSON.stringify({ currentNode: afterNormal.currentNode, completedNodes: afterNormal.completedNodes }));
       }
@@ -9222,8 +9384,8 @@ const SCENARIOS = [
       const multiWaveTaskText = fixBatchTaskText('done');
       const multiWaveSignature = routeNodeModule.taskSetSignature(multiWaveTaskText);
       writeFile(dir, taskPath, multiWaveTaskText);
-      writeState(dir, baseReturnState({
-        evidence: familyEvidence(['T01', 'T-FIX-01']),
+      writeState(dir, fixReturnBaseState({
+        evidence: fixReturnFamilyEvidence(['T01', 'T-FIX-01']),
         history: [
           {
             event: 'exit-applied', node: 'execute', change: CHANGE_ID,
@@ -9241,144 +9403,28 @@ const SCENARIOS = [
       assertOut(resMultiWave, 'NODE: review');
       assertNotOut(resMultiWave, 'RETURN: 回源节点');
 
-      // 250d 反向构造（L-064）——与 250c 一一对应证明分类依据是历史全量扫描（不是只看
-      // 最新）：① 无 Fix 编号任务 + 旧签名 ≠ 当前 + 最新签名 == 当前 → 仍判 fix（发散证据
-      // 不依赖结构标记）；② 同任务集仅保留最新（签名 == 当前）→ 必须中性 RETURN。
-      const plainTaskText = '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n';
-      const plainSignature = routeNodeModule.taskSetSignature(plainTaskText);
-      writeFile(dir, taskPath, plainTaskText);
-      writeState(dir, baseReturnState({
-        history: [
-          {
-            event: 'exit-applied', node: 'execute', change: CHANGE_ID,
-            at: '2026-09-20T00:00:00.000Z', taskSetSignature: STALE_FIX_BATCH_SIGNATURE,
-          },
-          {
-            event: 'exit-applied', node: 'subagent-execute', change: CHANGE_ID,
-            at: '2026-09-24T00:00:00.000Z', taskSetSignature: plainSignature,
-          },
-        ],
-      }));
-      const resDivergentPlain = runGuard(['exit', 'execute', '--apply'], dir);
-      assertExit(resDivergentPlain, 0);
-      assertOut(resDivergentPlain, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
-      assertNotOut(resDivergentPlain, 'RETURN: 回源节点');
-      writeState(dir, baseReturnState({
-        history: [{
-          event: 'exit-applied', node: 'subagent-execute', change: CHANGE_ID,
-          at: '2026-09-24T00:00:00.000Z', taskSetSignature: plainSignature,
-        }],
-      }));
-      const resLatestOnlyEqual = runGuard(['exit', 'execute', '--apply'], dir);
-      assertExit(resLatestOnlyEqual, 0);
-      assertOut(resLatestOnlyEqual, 'RETURN: 回源节点 review（execute 出口已完成；正常多趟收尾，非 Fix 回修）');
-      assertNotOut(resLatestOnlyEqual, 'FIX-BATCH');
-
-      // 250e 源未 entry 的真实 Fix：修复任务 + enteredNodes 不含源节点 review + 历史无
-      // 签名（旧态）→ 结构标记仍恢复 fix 标签，保留 FIX-BATCH；不误判 unknown、不卡死。
-      writeFile(dir, taskPath, multiWaveTaskText);
-      writeState(dir, baseReturnState({
-        evidence: familyEvidence(['T01', 'T-FIX-01']),
-        enteredNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
-        history: [],
-      }));
-      const resSourceNotEntered = runGuard(['exit', 'execute', '--apply'], dir);
-      assertExit(resSourceNotEntered, 0);
-      assertOut(resSourceNotEntered, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
-      assertOut(resSourceNotEntered, 'NODE: review');
-      assertNotOut(resSourceNotEntered, 'RETURN: 回源节点');
-      assertNotOut(resSourceNotEntered, 'BLOCKED');
-
-      // 250f 旧态无签名无标记：历史家族出口无签名 + 任务集无 Fix 标记 → RETURN 未分类；
-      // 不 BLOCK、不出现 FIX-BATCH；NODE/state 与收口前一致（只有审计行变化）。
-      writeFile(dir, taskPath, plainTaskText);
-      writeState(dir, baseReturnState({
-        history: [{
-          event: 'exit-applied', node: 'execute', change: CHANGE_ID,
-          at: '2026-09-19T00:00:00.000Z',
-        }],
-      }));
-      const beforeUnknown = readScenarioState(dir);
-      const resUnknown = runGuard(['exit', 'execute', '--apply'], dir);
-      assertExit(resUnknown, 0);
-      assertOut(resUnknown, 'RETURN: 回源节点 review（execute 出口已完成；旧 state 缺闭合/修复证据，未分类）');
-      assertOut(resUnknown, 'NODE: review');
-      assertNotOut(resUnknown, 'FIX-BATCH');
-      assertNotOut(resUnknown, 'BLOCKED');
-      const afterUnknown = readScenarioState(dir);
-      if (afterUnknown.currentNode !== 'review' || afterUnknown.completedNodes.join(',') !== FAMILY_COMPLETED) {
-        throw new Error('未分类回程应只覆盖路由到 review 且 completedNodes 不变，实际 '
-          + JSON.stringify({ currentNode: afterUnknown.currentNode, completedNodes: afterUnknown.completedNodes }));
-      }
-      assertStateOnlyChanged(beforeUnknown, afterUnknown, {
-        label: '250f 旧态未分类回程',
-        allowed: ['currentNode', 'status', 'history'],
-      });
-
-      // 250g Fix 段标题从 flow-kit/templates/TASK.md 派生（决策 4）：模板段名含括号说明 +
-      // 段内非 FIX 编号任务 → 结构标记命中 fix（模板读取路径真实被执行；标题由模板派生）。
-      writeFile(dir, 'flow-kit/templates/TASK.md',
-        '# TASK 模板\n\n## Fix 任务（来自 REVIEW / INTEGRATION）\n');
-      const sectionTaskText = '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n'
-        + '## Fix 任务（来自 REVIEW / INTEGRATION）\n\n' + fixTaskBlock('T02', 'done') + '\n';
-      writeFile(dir, taskPath, sectionTaskText);
       writeFile(dir, '.specs/' + CHANGE_ID + '/T02-SUMMARY.md', strictSummary('T02'));
-      const sectionSignature = routeNodeModule.taskSetSignature(sectionTaskText);
-      writeState(dir, baseReturnState({
-        evidence: familyEvidence(['T01', 'T02']),
-        history: [{
-          event: 'exit-applied', node: 'execute', change: CHANGE_ID,
-          at: '2026-09-24T00:00:00.000Z', taskSetSignature: sectionSignature,
-        }],
-      }));
-      const resSection = runGuard(['exit', 'execute', '--apply'], dir);
-      assertExit(resSection, 0);
-      assertOut(resSection, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
-      assertNotOut(resSection, 'RETURN: 回源节点');
-
-      // 250h m-06 模板缺失 + 闭合 ATX + 非 FIX 编号：guard 无模板派生标题 → 回退内置
-      // 「Fix 任务」，段内 T02 由结构标记判 fix（模板缺席不得让 Fix 批次漏判）。
-      fs.rmSync(path.join(dir, 'flow-kit', 'templates', 'TASK.md'), { force: true });
-      const missingTplTaskText = '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n'
-        + '## Fix 任务 ##\n\n' + fixTaskBlock('T02', 'done') + '\n';
-      writeFile(dir, taskPath, missingTplTaskText);
-      writeState(dir, baseReturnState({ evidence: familyEvidence(['T01', 'T02']), history: [] }));
-      const resMissingTpl = runGuard(['exit', 'execute', '--apply'], dir);
-      assertExit(resMissingTpl, 0);
-      assertOut(resMissingTpl, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
-      assertNotOut(resMissingTpl, 'RETURN: 回源节点');
-      assertNotOut(resMissingTpl, 'BLOCKED');
-
-      // 250i m-06 模板基名不同（Fix Tasks）+ 闭合 ATX + 非 FIX 编号：标题归一来自共享权威，
-      // 语言后缀可变仍命中 Fix 段（旧硬编码中文基名会漏判 → RETURN-normal）。
+      // 250j~l m-14 C3 三态（guard exit 入口签名比对消费点）：同版本一致 → 放行；
+      // 同版本不一致 → BLOCK；跨算法版本 → SIGNATURE-ALGO WARN 跳过比对不阻断。
       writeFile(dir, 'flow-kit/templates/TASK.md',
         '# TASK 模板\n\n## Fix Tasks（来自 REVIEW / INTEGRATION）\n');
       const renamedTplTaskText = '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n'
         + '## Fix Tasks ##\n\n' + fixTaskBlock('T02', 'done') + '\n';
       writeFile(dir, taskPath, renamedTplTaskText);
-      writeState(dir, baseReturnState({ evidence: familyEvidence(['T01', 'T02']), history: [] }));
-      const resRenamedTpl = runGuard(['exit', 'execute', '--apply'], dir);
-      assertExit(resRenamedTpl, 0);
-      assertOut(resRenamedTpl, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
-      assertNotOut(resRenamedTpl, 'RETURN: 回源节点');
-      assertNotOut(resRenamedTpl, 'BLOCKED');
-
-      // 250j~l m-14 C3 三态（guard exit 入口签名比对消费点）：同版本一致 → 放行；
-      // 同版本不一致 → BLOCK；跨算法版本 → SIGNATURE-ALGO WARN 跳过比对不阻断。
-      const c3Evidence = familyEvidence(['T01', 'T02']);
+      const c3Evidence = fixReturnFamilyEvidence(['T01', 'T02']);
       const c3Digest = routeNodeModule.parseTaskSetSignature(
         routeNodeModule.taskSetSignature(renamedTplTaskText))?.digest;
-      writeState(dir, baseReturnState({ evidence: c3Evidence, history: [], taskHash: routeNodeModule.taskSetSignature(renamedTplTaskText) }));
+      writeState(dir, fixReturnBaseState({ evidence: c3Evidence, history: [], taskHash: routeNodeModule.taskSetSignature(renamedTplTaskText) }));
       const resC3Same = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(resC3Same, 0);
       assertNotOut(resC3Same, 'BLOCKED');
       // 同版本不一致（占位 digest）→ 新 change BLOCK 任务集被修改
-      writeState(dir, baseReturnState({ evidence: c3Evidence, history: [], taskHash: 'v1:' + '0'.repeat(64) }));
+      writeState(dir, fixReturnBaseState({ evidence: c3Evidence, history: [], taskHash: 'v1:' + '0'.repeat(64) }));
       const resC3Diff = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(resC3Diff, 1);
       assertOut(resC3Diff, 'BLOCKED: TASK.md 任务集被修改');
       // 跨算法版本（v2 值 + v2 声明）→ 不可比，WARN 跳过比对，不误拦任务集
-      writeState(dir, baseReturnState({ evidence: c3Evidence, history: [], taskHash: 'v2:' + c3Digest }));
+      writeState(dir, fixReturnBaseState({ evidence: c3Evidence, history: [], taskHash: 'v2:' + c3Digest }));
       const resC3Skew = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(resC3Skew, 0);
       assertOut(resC3Skew, 'SIGNATURE-ALGO WARN');
