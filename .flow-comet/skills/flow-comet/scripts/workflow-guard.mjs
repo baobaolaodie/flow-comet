@@ -3,7 +3,7 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, RUNTIME_STATE_PATH, LEGACY_RUNTIME_STATE_PATH } from './state-schema.mjs';
-import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, workflowPathInside, inspectWorkflowProtectedPath } from './protocol-utils.mjs';
+import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, workflowPathInside, inspectWorkflowProtectedPath, readWorkflowProtectedFile, workflowFileObjectIdentity, workflowSameFileObject, workflowSameFileStat } from './protocol-utils.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from './task-parsing.mjs';
 import { resolveNextNode, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS, TASK_SET_SIGNATURE_ALGO, taskSetSignature, parseTaskSetSignature, sameTaskSetSignature, taskSetSignatureVersionSkew, classifyFixReturnCause, normalizeHeading, FIX_SECTION_TITLE_FALLBACK } from './route-node.mjs';
 
@@ -165,143 +165,12 @@ const SUMMARY_REQUIRED_SECTIONS = [
   { regex: /##\s*(越界检查|边界检查)/i, label: '## 越界检查' },
 ];
 
-// 路径包含与逐段扫描判据的单一权威在 protocol-utils.mjs（workflowPathInside /
-// inspectWorkflowProtectedPath），本文件不再保留本地副本：同一判据两份实现会静默分叉，
-// 注释互指同源不是同步机制。错误语义（越界 / 非真实根 / symlink 或 junction / 类型不符 /
-// 物理逃逸的抛错文案与 fail-closed 行为）由该单一实现统一保证。
-
-function workflowFileObjectIdentity(stat) {
-  return {
-    dev: stat.dev,
-    ino: stat.ino,
-    birthtime: typeof stat.birthtimeNs === 'bigint' ? stat.birthtimeNs : stat.birthtimeMs,
-  };
-}
-
-function workflowHasIdentity(value) {
-  return value !== 0 && value !== 0n && value !== '0';
-}
-
-function workflowSameFileObject(left, right) {
-  const comparableDevice = workflowHasIdentity(left.dev) && workflowHasIdentity(right.dev);
-  const comparableInode = workflowHasIdentity(left.ino) && workflowHasIdentity(right.ino);
-  if (comparableDevice && left.dev !== right.dev) return false;
-  if (comparableInode && left.ino !== right.ino) return false;
-  if (comparableDevice && comparableInode) return true;
-  return left.birthtime === right.birthtime;
-}
-
-function workflowSameFileStat(left, right) {
-  return (
-    workflowSameFileObject(
-      workflowFileObjectIdentity(left),
-      workflowFileObjectIdentity(right),
-    ) &&
-    left.size === right.size &&
-    left.ctimeNs === right.ctimeNs
-  );
-}
-
-async function readWorkflowProtectedFile(
-  projectRoot,
-  file,
-  label,
-  maxBytes,
-  hooks = {},
-) {
-  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
-    throw new Error(label + ' byte limit must be a positive integer');
-  }
-  const inspection = await inspectWorkflowProtectedPath(
-    projectRoot,
-    file,
-    label,
-    'file',
-  );
-  if (!inspection.exists) {
-    const error = new Error(label + ' does not exist');
-    error.code = 'ENOENT';
-    throw error;
-  }
-  const before = await fs.lstat(file, { bigint: true });
-  if (!before.isFile() || before.isSymbolicLink()) {
-    throw new Error(label + ' must be a real file');
-  }
-  if (before.size > BigInt(maxBytes)) {
-    throw new Error(label + ' exceeds ' + String(maxBytes) + ' bytes');
-  }
-  const beforeRealPath = await fs.realpath(file);
-  await hooks.afterLstat?.();
-  const flags =
-    process.platform === 'win32'
-      ? fsConstants.O_RDONLY
-      : fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK;
-  let handle;
-  try {
-    handle = await fs.open(file, flags);
-  } catch (error) {
-    if (error && typeof error === 'object' && error.code === 'ELOOP') {
-      throw new Error(label + ' must be a real file');
-    }
-    throw error;
-  }
-  try {
-    const [opened, afterOpen, afterOpenRealPath] = await Promise.all([
-      handle.stat({ bigint: true }),
-      fs.lstat(file, { bigint: true }),
-      fs.realpath(file),
-    ]);
-    if (
-      !opened.isFile() ||
-      !afterOpen.isFile() ||
-      afterOpen.isSymbolicLink() ||
-      afterOpenRealPath !== beforeRealPath ||
-      !workflowSameFileStat(before, opened) ||
-      !workflowSameFileStat(before, afterOpen)
-    ) {
-      throw new Error(label + ' changed while opening');
-    }
-    await inspectWorkflowProtectedPath(projectRoot, file, label, 'file');
-    await hooks.afterOpen?.();
-    const chunks = [];
-    let total = 0;
-    const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, maxBytes + 1));
-    for (;;) {
-      const remaining = maxBytes + 1 - total;
-      const { bytesRead } = await handle.read(
-        buffer,
-        0,
-        Math.min(buffer.length, remaining),
-        null,
-      );
-      if (bytesRead === 0) break;
-      total += bytesRead;
-      if (total > maxBytes) {
-        throw new Error(label + ' exceeds ' + String(maxBytes) + ' bytes');
-      }
-      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
-    }
-    await hooks.beforeFinalCheck?.();
-    const [afterHandle, afterPath, afterRealPath] = await Promise.all([
-      handle.stat({ bigint: true }),
-      fs.lstat(file, { bigint: true }),
-      fs.realpath(file),
-    ]);
-    if (
-      !afterPath.isFile() ||
-      afterPath.isSymbolicLink() ||
-      afterRealPath !== beforeRealPath ||
-      !workflowSameFileStat(before, afterHandle) ||
-      !workflowSameFileStat(before, afterPath)
-    ) {
-      throw new Error(label + ' changed while reading');
-    }
-    await inspectWorkflowProtectedPath(projectRoot, file, label, 'file');
-    return Buffer.concat(chunks, total);
-  } finally {
-    await handle.close();
-  }
-}
+// 受保护读取 / 文件身份比较 / 路径包含与逐段扫描判据的单一权威在 protocol-utils.mjs
+// （readWorkflowProtectedFile / workflowFileObjectIdentity / workflowSameFileObject /
+// workflowSameFileStat / workflowPathInside / inspectWorkflowProtectedPath），本文件不再保留
+// 本地副本：同一判据两份实现会静默分叉，注释互指同源不是同步机制。错误语义（越界 / 非真实根 /
+// symlink 或 junction / 类型不符 / 物理逃逸 / 读取期间身份漂移的抛错文案与 fail-closed 行为）
+// 由该单一实现统一保证。
 
 function workflowRelativeSegments(value, label, allowWildcards = false) {
   if (typeof value !== 'string') throw new Error(label + ' must be a string');
