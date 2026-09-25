@@ -541,6 +541,8 @@ async function resolveFixRollbackState(args) {
 // 阈值语义：从第 4 轮起，新 change 返回 blocked（调用方必须先于任何 state 写盘退出，不得写入
 // currentNode）；旧 change 返回 warn 后照常归位。用户显式授权记录为
 // state.evidence[源节点].fixRoundOverride = { round, at, source }，覆盖到该轮即放行（不新增第二个顶层字段）。
+// 完整授权形态：round 为正整数、at/source 均为非空字符串；任一缺失/类型非法/空串（含纯空白）
+// 一律视为未授权 fail-closed——第 4 轮继续 BLOCK，调用方不写 currentNode、state 字节零改写。
 // 审计行后缀由本 helper 统一给出，两个入口禁止各自拼装。
 
 function readFixRoundOverride(state, sourceNode) {
@@ -552,7 +554,9 @@ function readFixRoundOverride(state, sourceNode) {
     ? sourceEvidence.fixRoundOverride
     : null;
   if (!override || typeof override !== 'object' || Array.isArray(override)) return null;
-  if (typeof override.round !== 'number' || !Number.isInteger(override.round)) return null;
+  if (typeof override.round !== 'number' || !Number.isInteger(override.round) || override.round <= 0) return null;
+  if (typeof override.at !== 'string' || override.at.trim() === '') return null;
+  if (typeof override.source !== 'string' || override.source.trim() === '') return null;
   return { round: override.round };
 }
 

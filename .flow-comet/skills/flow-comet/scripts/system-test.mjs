@@ -2422,7 +2422,27 @@ const TEST_ITEMS = [
         throw new Error('第 4 轮 BLOCK 不得改写 currentNode: ' + JSON.stringify(round4State.currentNode));
       }
       assertRoundCounters(3, '第 4 轮 BLOCK 后');
-      // 用户显式授权：嵌套 evidence 记录授权来源/轮次 → 同一入口放行第 4 轮
+      // F5 真实链路：不完整授权（仅 round，缺 at/source）按未授权 fail-closed——仍 BLOCK 且
+      // state 字节零改写；随后补全完整三元组才放行（BLOCK → 非法形态仍 BLOCK → 完整授权 → 放行）。
+      round4State.evidence.review = {
+        ...(round4State.evidence.review || {}),
+        fixRoundOverride: { round: 4 },
+      };
+      writeState(dir, round4State);
+      const incompleteBytes = fs.readFileSync(statePath, 'utf8');
+      const round4Incomplete = runState(['next'], dir, env);
+      assertExit(round4Incomplete, 1);
+      assertOut(round4Incomplete, 'BLOCKED');
+      assertNotOut(round4Incomplete, '（第 4/3 轮）');
+      if (fs.readFileSync(statePath, 'utf8') !== incompleteBytes) {
+        throw new Error('F5 缺 at/source 的不完整授权必须 fail-closed：state 字节零改写');
+      }
+      assertRoundCounters(3, 'F5 不完整授权 BLOCK 后');
+      if (readStateFile(dir).currentNode !== 'review') {
+        throw new Error('F5 不完整授权不得改写 currentNode（应保持 review）');
+      }
+      // 用户显式授权：嵌套 evidence 补全 round/at/source 三元组 → 同一入口放行第 4 轮
+      round4State = readStateFile(dir);
       round4State.evidence.review = {
         ...(round4State.evidence.review || {}),
         fixRoundOverride: { round: 4, at: new Date().toISOString(), source: 'user' },

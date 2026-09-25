@@ -8724,7 +8724,34 @@ const SCENARIOS = [
       if (!String(blocked.blockedMessage).includes('继续修') || !String(blocked.blockedMessage).includes('停止')) {
         throw new Error('第 4 轮 BLOCK 消息应含「继续修/停止」决策指引，实际 ' + JSON.stringify(blocked.blockedMessage));
       }
-      // 用户显式授权（嵌套 evidence）→ 放行被 BLOCK 的那一轮并留审计
+      // F5 fail-closed：完整授权形态 = round 正整数 + at/source 非空字符串；任一缺失、类型非法、
+      // 空串/纯空白一律按未授权处理——第 4 轮继续 BLOCK、不计数、不写 state（state 字节零改写）。
+      const invalidOverrides = [
+        ['仅 round（缺 at/source）', { round: 4 }],
+        ['缺 at', { round: 4, source: 'fixture-user' }],
+        ['缺 source', { round: 4, at: '2026-09-25T00:00:00.000Z' }],
+        ['round 为字符串', { round: '4', at: '2026-09-25T00:00:00.000Z', source: 'fixture-user' }],
+        ['round 为零', { round: 0, at: '2026-09-25T00:00:00.000Z', source: 'fixture-user' }],
+        ['round 为负数', { round: -1, at: '2026-09-25T00:00:00.000Z', source: 'fixture-user' }],
+        ['round 为小数', { round: 4.5, at: '2026-09-25T00:00:00.000Z', source: 'fixture-user' }],
+        ['at 类型非法（数字）', { round: 4, at: 123, source: 'fixture-user' }],
+        ['source 类型非法（数组）', { round: 4, at: '2026-09-25T00:00:00.000Z', source: ['fixture-user'] }],
+        ['at 空串', { round: 4, at: '', source: 'fixture-user' }],
+        ['source 空串', { round: 4, at: '2026-09-25T00:00:00.000Z', source: '' }],
+        ['at 纯空白', { round: 4, at: '   ', source: 'fixture-user' }],
+        ['source 纯空白', { round: 4, at: '2026-09-25T00:00:00.000Z', source: '\t' }],
+        ['override 为 null', null],
+      ];
+      for (const [label, badOverride] of invalidOverrides) {
+        roundState.evidence.review.fixRoundOverride = badOverride;
+        const badResult = applyRound({ state: roundState, sourceNode: 'review', decision: pendingDecision });
+        if (!badResult.blocked || badResult.counted || badResult.overrideUsed || badResult.round !== 4
+          || roundState.fixRoundsByChange?.[CHANGE_ID] !== 3) {
+          throw new Error('F5 非法授权形态必须按未授权 fail-closed BLOCK 且零改写（' + label + '），实际 '
+            + JSON.stringify({ badResult, rounds: roundState.fixRoundsByChange }));
+        }
+      }
+      // 合法三元组（嵌套 evidence）→ 放行被 BLOCK 的那一轮并留审计
       roundState.evidence.review.fixRoundOverride = { round: 4, at: '2026-09-25T00:00:00.000Z', source: 'fixture-user' };
       const override = applyRound({ state: roundState, sourceNode: 'review', decision: pendingDecision });
       if (!override.counted || !override.overrideUsed || override.blocked || override.round !== 4) {
@@ -9107,7 +9134,25 @@ const SCENARIOS = [
         throw new Error('第 4 轮 BLOCK 后 currentNode 应保持 review、计数器保持 3，实际 '
           + JSON.stringify({ currentNode: stBlocked.currentNode, rounds: stBlocked.fixRoundsByChange }));
       }
-      // ⑥ 用户显式授权（嵌套 evidence）→ 放行第 4 轮并写 currentNode + 计数器
+      // ⑤b F5：非法授权形态（仅 round，缺 at/source）在真实 entry 链路上仍按未授权 fail-closed——
+      // 继续 BLOCK、state 字节零改写、currentNode 保持 review、计数器保持 3。
+      const stBadOverride = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      stBadOverride.evidence.review.fixRoundOverride = { round: 4 };
+      writeState(dir, stBadOverride);
+      const badOverrideBytes = fs.readFileSync(statePath, 'utf8');
+      const resBadOverride = runGuard(['entry', 'execute'], dir);
+      assertExit(resBadOverride, 1);
+      assertOut(resBadOverride, 'BLOCKED: Fix 批次受控归位已达 3 轮上限');
+      assertNotOut(resBadOverride, '（第 4/3 轮）');
+      if (fs.readFileSync(statePath, 'utf8') !== badOverrideBytes) {
+        throw new Error('F5 缺 at/source 的授权形态必须在 entry 链路上 state 字节零改写');
+      }
+      const stBadAfter = readScenarioState(dir);
+      if (stBadAfter.currentNode !== 'review' || stBadAfter.fixRoundsByChange?.[CHANGE_ID] !== 3) {
+        throw new Error('F5 缺 at/source 不得放行第 4 轮（currentNode 保持 review、计数保持 3），实际 '
+          + JSON.stringify({ currentNode: stBadAfter.currentNode, rounds: stBadAfter.fixRoundsByChange }));
+      }
+      // ⑥ 用户显式授权（嵌套 evidence，完整三元组）→ 放行第 4 轮并写 currentNode + 计数器
       const stOverride = JSON.parse(fs.readFileSync(statePath, 'utf8'));
       stOverride.evidence.review.fixRoundOverride = { round: 4, at: '2026-09-25T00:00:00.000Z', source: 'fixture-user' };
       writeState(dir, stOverride);
@@ -10020,7 +10065,25 @@ const SCENARIOS = [
         throw new Error('next 第 4 轮 BLOCK 后 currentNode/计数器不得改写，实际 '
           + JSON.stringify({ currentNode: stBlocked.currentNode, rounds: stBlocked.fixRoundsByChange }));
       }
-      // ⑩ 用户显式授权（嵌套 evidence）→ next 第 4 轮放行并写盘
+      // ⑨b F5：非法授权形态（仅 round，缺 at/source）在 next 链路上仍按未授权 fail-closed——
+      // 继续 BLOCK、state 字节零改写、currentNode 保持 review、计数器保持 3。
+      const stBadOverride = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      stBadOverride.evidence.review.fixRoundOverride = { round: 4 };
+      writeState(dir, stBadOverride);
+      const badOverrideBytes = fs.readFileSync(statePath, 'utf8');
+      const resBadOverride = runState(['next'], dir, env);
+      assertExit(resBadOverride, 1);
+      assertOut(resBadOverride, 'BLOCKED: Fix 批次受控归位已达 3 轮上限');
+      assertNotOut(resBadOverride, '（第 4/3 轮）');
+      if (fs.readFileSync(statePath, 'utf8') !== badOverrideBytes) {
+        throw new Error('F5 缺 at/source 的授权形态必须在 next 链路上 state 字节零改写');
+      }
+      const stBadAfter = readScenarioState(dir);
+      if (stBadAfter.currentNode !== 'review' || stBadAfter.fixRoundsByChange?.[CHANGE_ID] !== 3) {
+        throw new Error('F5 缺 at/source 不得放行第 4 轮（currentNode 保持 review、计数保持 3），实际 '
+          + JSON.stringify({ currentNode: stBadAfter.currentNode, rounds: stBadAfter.fixRoundsByChange }));
+      }
+      // ⑩ 用户显式授权（嵌套 evidence，完整三元组）→ next 第 4 轮放行并写盘
       const stOverride = JSON.parse(fs.readFileSync(statePath, 'utf8'));
       stOverride.evidence.review.fixRoundOverride = { round: 4, at: '2026-09-25T00:00:00.000Z', source: 'fixture-user' };
       writeState(dir, stOverride);
