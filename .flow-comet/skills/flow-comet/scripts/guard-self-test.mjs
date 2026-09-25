@@ -530,6 +530,20 @@ function assertNotOut(res, keyword) {
   }
 }
 
+// result 重验撤销审计断言（共享单一来源）：撤销后 request evidence 必须 noCommit=false，
+// 且含非空、可被 Date 解析的 revokedAt 与失败类别对应的 revokeReason（缺任一即审计缺口）。
+function assertRevocationAudit(req, expectedReason, label) {
+  if (!req || req.noCommit !== false) {
+    throw new Error(label + '：撤销后 request evidence 应为 noCommit=false，实际 ' + JSON.stringify(req));
+  }
+  if (typeof req.revokedAt !== 'string' || req.revokedAt.trim() === '' || Number.isNaN(Date.parse(req.revokedAt))) {
+    throw new Error(label + '：撤销应记录非空且可被 Date 解析的 revokedAt，实际 ' + JSON.stringify(req.revokedAt));
+  }
+  if (req.revokeReason !== expectedReason) {
+    throw new Error(label + '：撤销应记录 revokeReason=' + expectedReason + '，实际 ' + JSON.stringify(req.revokeReason));
+  }
+}
+
 // state 不变量断言（m-09 / AC-4 / AC-12）：白名单外深比 + history 旧前缀稳定 + 恰新增一条
 // exit-applied 事件。白名单为点分路径（如 'currentNode' / 'evidence.execute.completedChecks'）。
 // 判别力：实现若顺手写白名单外字段、重写 history 旧条目、多推/漏推出口事件即抛错。
@@ -4830,6 +4844,10 @@ const SCENARIOS = [
       if (stRevalBlock.evidence['subagent-execute'].handoffResult.T02.completedAt !== priorCompletedAt) {
         throw new Error('新 change result 重验失败不得覆盖既有 handoffResult（completedAt 变化）');
       }
+      // F6 审计：忽略规则变化（过期资格）撤销必须留 at/reason，且失败类别与既有归类一致
+      assertRevocationAudit(reqBlocked, 'stale-eligibility', '157③ 新 change .gitignore 变化');
+      assertOut(resRevalBlock, 'revokedAt=');
+      assertOut(resRevalBlock, 'revokeReason=stale-eligibility');
       // ④ 旧 change 同构造：HANDOFF WARN + 照常落 result + noCommit 同样置 false（渐进兼容）
       writeFile(dir, '.gitignore', '.specs/\n'); // 恢复忽略规则 → 重新 request 取得资格
       const stReReq = JSON.parse(fs.readFileSync(statePath, 'utf8'));
@@ -4857,6 +4875,10 @@ const SCENARIOS = [
         throw new Error('旧 change 重验失败同样应撤销 request.noCommit，实际 '
           + JSON.stringify(stRevalWarn.evidence['subagent-execute'].handoffRequests.T02));
       }
+      // F6 审计：旧 change 渐进撤销同样必须留 at/reason（与失败类别对应）
+      assertRevocationAudit(stRevalWarn.evidence['subagent-execute'].handoffRequests.T02,
+        'stale-eligibility', '157④ 旧 change .gitignore 变化');
+      assertOut(resRevalWarn, 'revokeReason=stale-eligibility');
       const legacyResult = stRevalWarn.evidence['subagent-execute'].handoffResult.T02;
       if (!legacyResult || legacyResult.completedAt === legacyCompletedAt || legacyResult.result.noCommit !== true) {
         throw new Error('旧 change 重验失败应照常落 result（渐进），实际 ' + JSON.stringify(legacyResult));
@@ -5025,6 +5047,10 @@ const SCENARIOS = [
           throw new Error('junction 逃逸重验失败应撤销 request.noCommit，实际 '
             + JSON.stringify(stRevalLink.evidence['subagent-execute'].handoffRequests.T07));
         }
+        // F6 审计：symlink/junction 逃逸撤销留 at/reason，类别与既有失败归类一致
+        assertRevocationAudit(stRevalLink.evidence['subagent-execute'].handoffRequests.T07,
+          'symlink-junction-escape', '158②f junction/symlink 重验');
+        assertOut(resRevalLink, 'revokeReason=symlink-junction-escape');
         if (stRevalLink.evidence['subagent-execute'].handoffResult?.T07) {
           throw new Error('junction 逃逸重验失败不得落 handoffResult');
         }
@@ -5823,6 +5849,35 @@ const SCENARIOS = [
       const reqTracked = stTracked.evidence['subagent-execute'].handoffRequests.T12;
       if (!reqTracked || reqTracked.noCommit === true) {
         throw new Error('tracked 文件路径不应具备零提交资格，实际 ' + JSON.stringify(reqTracked));
+      }
+      // ④b m-13 result 重验：request 时路径不存在（记资格），随后路径被强制跟踪 →
+      // result 重验失败撤销 noCommit，失败类别 = became-tracked，且留 at/reason 审计。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n'
+        + '<task id="T15" status="done"><action>tracked-after-request 边界任务</action>'
+        + '<write_files>.specs/' + CHANGE_ID + '/T15.md</write_files>'
+        + '<verify>node --check src/x.js</verify></task>\n');
+      writeState(dir, baseState('subagent-execute'));
+      const resReqT15 = runHandoff(['request', 'T15', 'tracked-after-request slice'], dir);
+      assertExit(resReqT15, 0);
+      const stReqT15 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      if (stReqT15.evidence['subagent-execute'].handoffRequests.T15.noCommit !== true) {
+        throw new Error('request 时未跟踪且被忽略的路径应取得 noCommit 资格，实际 '
+          + JSON.stringify(stReqT15.evidence['subagent-execute'].handoffRequests.T15));
+      }
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T15.md', 'tracked after request\n');
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '-f', '.specs/' + CHANGE_ID + '/T15.md');
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'track after request');
+      stReqT15.newChange = true;
+      writeState(dir, stReqT15);
+      const resRevokeTracked = runHandoff(['result', 'T15', payload('T15', '')], dir);
+      assertExit(resRevokeTracked, 1);
+      assertOut(resRevokeTracked, 'HANDOFF ERROR');
+      assertOut(resRevokeTracked, 'revokeReason=became-tracked');
+      const stRevokeTracked = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      assertRevocationAudit(stRevokeTracked.evidence['subagent-execute'].handoffRequests.T15,
+        'became-tracked', '170④b 路径变 tracked 重验');
+      if (stRevokeTracked.evidence['subagent-execute'].handoffResult?.T15) {
+        throw new Error('tracked 重验失败不得落 result');
       }
       // ⑤ merge commit 负例（evil merge）：merge 提交独有的越界文件不得绕过完整提交子集校验
       // → 新 change BLOCK 且列出越界文件（merge 与普通提交走同一 fail-closed 路径）

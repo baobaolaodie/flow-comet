@@ -132,19 +132,35 @@ function literalRelativePosixPath(entry) {
   return normalized;
 }
 
+// `check-ignore` 退出 1 时判别路径是否已被 index 跟踪（index-aware 默认下 tracked 不算 ignored）：
+// 命中 → became-tracked，未命中 → 忽略规则变化。仅作失败归类，任一探测异常按未跟踪处理（仍 fail-closed）。
+function gitIndexTracksPath(rel) {
+  try {
+    execFileSync('git', ['ls-files', '--error-unmatch', '--', rel], { cwd: runRoot, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // 资格判定：全部字面路径 + runRoot 等于 git top-level 的 realpath + 逐路径
 // `git check-ignore -q -- <repo-relative-path>` 退出 0（cwd=runRoot，数组参数、index-aware
-// 默认：tracked 文件退出 1）→ true；任一不满足 / 非 0 / 命令错误 / 非 git 仓 → false
-//（调用方不记 noCommit、不阻断原流程）。不用 --no-index、不 import prepare-env（不分发）。
+// 默认：tracked 文件退出 1）→ eligible；任一不满足 → 带 reason 的 fail-closed 结论
+//（request 侧只看 eligible、不记 noCommit、不阻断原流程；result 侧把 reason 写入撤销审计）。
+// 不用 --no-index、不 import prepare-env（不分发）。
 // 路径扫描增强（m-13）：runRoot 先 realpath 归一；对每个字面路径的最近已存在祖先逐段 lstat，
-// 任一段为 symlink/junction（或物理逃出 runRoot）→ fail-closed false（目标不存在不算失败）。
+// 任一段为 symlink/junction（或物理逃出 runRoot）→ fail-closed（目标不存在不算失败）。
 // 逐段扫描复用 protocol-utils 的单一权威，本处不得另写第二份 symlink/包含判据（L-067）。
-async function writeFilesProvablyIgnored(entries) {
-  if (!Array.isArray(entries) || entries.length === 0) return false;
+// 失败类别（稳定机器码，作为 result 撤销审计的 revokeReason）：invalid-path（glob / 绝对路径 /
+// `..` 逃逸等字面形态不成立）、stale-eligibility（忽略规则变化，路径不再被证明 gitignored）、
+// became-tracked（路径已在 index 中）、symlink-junction-escape（祖先段 symlink/junction 或
+// 物理越界）、non-git（非 git 仓 / runRoot 非 top-level / git 探测错误）。
+async function classifyWriteFilesProvablyIgnored(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) return { eligible: false, reason: 'invalid-path' };
   const relPaths = [];
   for (const entry of entries) {
     const rel = literalRelativePosixPath(entry);
-    if (rel === null) return false;
+    if (rel === null) return { eligible: false, reason: 'invalid-path' };
     relPaths.push(rel);
   }
   let realRoot;
@@ -155,34 +171,50 @@ async function writeFilesProvablyIgnored(entries) {
       cwd: runRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
     });
     const top = String(out).split('\n').map((s) => s.trim()).filter(Boolean)[0];
-    if (!top) return false;
+    if (!top) return { eligible: false, reason: 'non-git' };
     realTop = await fs.realpath(top);
   } catch {
-    return false; // 非 git 仓 / git 不可用 / 命令错误
+    return { eligible: false, reason: 'non-git' }; // 非 git 仓 / git 不可用 / 命令错误
   }
   // windows 路径大小写不敏感（realpath 双方同源，仍按平台归一比较）
   const sameRoot = process.platform === 'win32'
     ? realRoot.toLowerCase() === realTop.toLowerCase()
     : realRoot === realTop;
-  if (!sameRoot) return false; // runRoot 必须是 git top-level（worktree/子目录形态保守不享受）
+  if (!sameRoot) return { eligible: false, reason: 'non-git' }; // runRoot 必须是 git top-level
   for (const rel of relPaths) {
     try {
       await inspectWorkflowPathSegments(realRoot, path.resolve(realRoot, rel), 'write_files 字面路径');
     } catch {
-      return false; // symlink/junction 穿越 / 非目录祖先 / 物理越界 → 资格 false（fail-closed）
+      return { eligible: false, reason: 'symlink-junction-escape' }; // 穿越 / 非目录祖先 / 物理越界
     }
     try {
       execFileSync('git', ['check-ignore', '-q', '--', rel], { cwd: runRoot, stdio: 'ignore' });
-    } catch {
-      return false; // 未命中（退出 1）/ tracked（退出 1，index-aware 默认）/ 命令错误
+    } catch (error) {
+      if (error && typeof error === 'object' && error.status === 1) {
+        // check-ignore 退出 1 = 未命中忽略规则，或路径已被 index 跟踪（index-aware 默认）——
+        // 用 ls-files 判别后落入既有失败归类。
+        return { eligible: false, reason: gitIndexTracksPath(rel) ? 'became-tracked' : 'stale-eligibility' };
+      }
+      return { eligible: false, reason: 'non-git' }; // 命令错误等
     }
   }
-  return true;
+  return { eligible: true, reason: null };
 }
+
+// 失败类别 → 审计文案（撤销 detail 与 revokeReason 机器码一一对应；新失败形态只在此扩展）。
+const ZERO_COMMIT_REVOKE_REASON_TEXT = {
+  'invalid-path': 'write_files 字面形态不成立（glob / 绝对路径 / .. 逃逸等）',
+  'stale-eligibility': '.gitignore 变化（路径不再被证明 ignored）',
+  'became-tracked': '路径变为 tracked',
+  'symlink-junction-escape': 'symlink-junction 逃逸',
+  'non-git': '非 git 仓 / runRoot 非 top-level / git 探测错误',
+};
 
 // ---------- m-13 result 零提交资格重验 ----------
 // 仅当 request 记录 noCommit=true 且 writeFiles 非空时，在 result 时刻按同一增强资格重跑。
-// 失败 → 撤销 request evidence 的 noCommit（置 false，审计留痕）：
+// 失败 → 撤销 request evidence 的 noCommit（置 false）并加法式记录 revokedAt（ISO 时间）与
+// revokeReason（失败类别机器码——invalid-path / stale-eligibility / became-tracked /
+// symlink-junction-escape / non-git）：
 //   新 change → HANDOFF ERROR、不落 result（只落资格撤销），出口 W1-D 不再豁免缺 commitHash；
 //   旧 change → HANDOFF WARN 后继续记录 result（出口 W1-D 同样不再豁免）。
 // 返回 'skip'（形态不适用）/ 'pass'（资格仍成立）/ 'warn'（旧 change 已撤销）/ 'block'（新 change 已撤销）。
@@ -192,12 +224,18 @@ async function revalidateResultZeroCommit(state, taskId, handoffReq) {
   if (!handoffReq || handoffReq.noCommit !== true) return 'skip';
   const entries = Array.isArray(handoffReq.writeFiles) ? handoffReq.writeFiles : [];
   if (entries.length === 0) return 'skip';
-  if (await writeFilesProvablyIgnored(entries)) return 'pass';
+  const verdict = await classifyWriteFilesProvablyIgnored(entries);
+  if (verdict.eligible) return 'pass';
+  // 加法式撤销审计：noCommit=false（既有语义不变）+ revokedAt（ISO 时间）+ revokeReason
+  //（失败类别，复用资格判定的失败归类）；每次撤销刷新为本次的 at/reason。
   handoffReq.noCommit = false;
+  handoffReq.revokedAt = new Date().toISOString();
+  handoffReq.revokeReason = verdict.reason;
   // 资格撤销先落盘（新旧 change 一致）：旧 change 后续若被其它门禁阻断，审计也不丢失，
   // 避免 WARN 声称已撤销而 state 仍是旧值。
   await writeState(state);
-  const detail = '任务 ' + taskId + ' 零提交资格 result 重验失败（.gitignore 变化 / 路径变为 tracked / symlink-junction 逃逸 / 非 git 仓等）——request evidence noCommit=false';
+  const reasonText = ZERO_COMMIT_REVOKE_REASON_TEXT[verdict.reason] || verdict.reason;
+  const detail = '任务 ' + taskId + ' 零提交资格 result 重验失败（' + reasonText + '）——request evidence noCommit=false, revokedAt=' + handoffReq.revokedAt + ', revokeReason=' + verdict.reason;
   if (state.newChange === true) {
     // 新 change 只落 request 资格撤销；此刻尚未默认 handoffResult，确保「不落 result」不是文案承诺
     console.error('HANDOFF ERROR: ' + detail + '；新 change 不落 result，出口校验不再豁免缺 commitHash。恢复: 修正 write_files / .gitignore 与路径形态后重新 request，或回传含合法 commitHash 的 Return Contract');
@@ -449,7 +487,7 @@ async function main() {
     // F-6（DESIGN 决策 7）：非空 write_files 的「全部可证明 gitignored」资格——与空元素同语义，
     // 记 noCommit:true；不具资格 → 不记 noCommit、不阻断原流程（保持既有完整提交子集校验）。
     const literalIgnoredEligible = taskResolved && writeFiles.length > 0
-      && await writeFilesProvablyIgnored(writeFiles);
+      && (await classifyWriteFilesProvablyIgnored(writeFiles)).eligible;
     state.evidence['subagent-execute'].handoffRequests[taskId] = {
       description, requestedAt: new Date().toISOString(),
       ...(writeFiles.length ? { writeFiles } : {}),

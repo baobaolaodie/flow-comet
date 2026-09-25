@@ -3097,6 +3097,19 @@ const TEST_ITEMS = [
         redEvidence: { command: 'echo ok' },
         greenEvidence: { command: 'echo ok', output: 'ok' },
       });
+      // F6 撤销审计断言（真实链路）：noCommit=false + 非空、可被 Date 解析的 revokedAt +
+      // 与失败类别对应的 revokeReason；三种真实失败形态分别断言类别（过期资格 / tracked / 逃逸）。
+      const assertRevokeAudit = (record, expectedReason, label) => {
+        if (!record || record.noCommit !== false) {
+          throw new Error(label + ' 应撤销 noCommit=false: ' + JSON.stringify(record));
+        }
+        if (typeof record.revokedAt !== 'string' || record.revokedAt.trim() === '' || Number.isNaN(Date.parse(record.revokedAt))) {
+          throw new Error(label + ' 应记录非空且可被 Date 解析的 revokedAt: ' + JSON.stringify(record));
+        }
+        if (record.revokeReason !== expectedReason) {
+          throw new Error(label + ' 应记录 revokeReason=' + expectedReason + ': ' + JSON.stringify(record.revokeReason));
+        }
+      };
       writeM13Task('Z01', '.specs/' + CHANGE_ID + '/Z01-SUMMARY.md');
       const z01Request = runHandoff(['request', 'Z01'], dir, ownershipEnv);
       assertExit(z01Request, 0);
@@ -3126,6 +3139,9 @@ const TEST_ITEMS = [
         throw new Error('重验失败应把 request evidence 的 noCommit 置 false: '
           + JSON.stringify(m13State.evidence['subagent-execute'].handoffRequests.Z02));
       }
+      assertRevokeAudit(m13State.evidence['subagent-execute'].handoffRequests.Z02,
+        'stale-eligibility', 'Z02 忽略规则变化重验');
+      assertOut(z02Blocked, 'revokeReason=stale-eligibility');
       if (m13State.evidence['subagent-execute'].handoffResult?.Z02) {
         throw new Error('新 change 重验失败不得落 result');
       }
@@ -3152,6 +3168,9 @@ const TEST_ITEMS = [
       if (readStateFile(dir).evidence['subagent-execute'].handoffRequests.Z03.noCommit !== false) {
         throw new Error('tracked 形态应撤销零提交资格');
       }
+      const z03Revoked = readStateFile(dir).evidence['subagent-execute'].handoffRequests.Z03;
+      assertRevokeAudit(z03Revoked, 'became-tracked', 'Z03 路径变 tracked 重验');
+      assertOut(z03Blocked, 'revokeReason=became-tracked');
 
       // ⑰ symlink/junction 逃逸：request 时路径尚未存在 → 记资格；result 前落 junction 指向 runRoot
       //    外 → 重验拒绝（fail-closed）；request 时即存在 junction → 资格直接不成立（越权负例）。
@@ -3174,6 +3193,9 @@ const TEST_ITEMS = [
         if (readStateFile(dir).evidence['subagent-execute'].handoffRequests.Z04.noCommit !== false) {
           throw new Error('symlink/junction 逃逸应撤销零提交资格');
         }
+        assertRevokeAudit(readStateFile(dir).evidence['subagent-execute'].handoffRequests.Z04,
+          'symlink-junction-escape', 'Z04 symlink/junction 逃逸重验');
+        assertOut(z04Blocked, 'revokeReason=symlink-junction-escape');
         writeM13Task('Z05', '.specs/' + CHANGE_ID + '/z05-link');
         fs.symlinkSync(escapeTarget, z05Link, process.platform === 'win32' ? 'junction' : 'dir');
         const z05Request = runHandoff(['request', 'Z05'], dir, ownershipEnv);

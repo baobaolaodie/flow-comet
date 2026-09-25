@@ -42,7 +42,7 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 | 请求时刻任务归属门禁 | pending 任务的请求只在工作流已位于其声明执行方式对应的节点时才被接受——并行任务对应 `subagent-execute`、串行任务对应 `execute`——按状态文件记录的原始 currentNode 判定，不取派生值；不匹配时在写入任何交接证据之前阻断新 change（状态文件逐字节不变、不落请求记录），并打印 `workflow-state next` + `entry <目标节点>` 恢复指引；同一节点尚未 entry 只告警；已完成任务补录、显式 `--write-files` 请求、以及可读协议中无对应启用节点的情况不受影响；协议文件不可读或解析失败时输出可见 WARN（说明原因并声明本次未执行归属校验）后照常放行——新/旧 change 均不因此新增阻断；旧 change 告警后照常放行 | handoff request |
 | 修复轮次计数 | 只有「review/verify 源 + 存在待修复工作 + 后继属于执行家族」的受控归位才让该 change 的修复计数加一；前三次在审计行打印当前轮次，第 4 次阻断新 change 且不移动节点，并给出继续修 / 停止指引；继续需要显式用户授权并记入交接证据；verify 成功不清零该计数，verify 失败计数保持独立；任务集已完成未闭合、仅回程分类、verify 命令失败路径均不计入；旧 change 告警后照常放行 | next / entry execute |
 | 签名算法版本 | 记录的任务集签名带版本前缀，应用出口事件记录产生它的算法版本；回程分类、受控归位与任务集比对只比较同一版本产生的签名，旧 state 的裸摘要按最初版本语义读取——引擎升级不会把正常多趟收尾误判为未闭合修复、也不会误拦未变化的任务集；更换算法本身必须在冻结的回归锚上显式决策 | enter/exit execute；回程分类 |
-| 结果时刻零提交重验 | 结果声明无提交且声明输出非空时，记录结果前重新核验零提交资格：忽略规则变化、路径变为 tracked、任一已存在祖先段出现符号链接/junction、或项目根不是 git 仓，都会撤销已记录的零提交标记，新 change 上结果被拒绝（旧 change 告警），出口门禁因此不再豁免缺失的提交哈希；判定前先对项目根做 realpath 归一，无法证明的路径仍走完整提交子集校验 | handoff result |
+| 结果时刻零提交重验 | 结果声明无提交且声明输出非空时，记录结果前重新核验零提交资格：忽略规则变化、路径变为 tracked、任一已存在祖先段出现符号链接/junction、或项目根不是 git 仓，都会撤销已记录的零提交标记，新 change 上结果被拒绝（旧 change 告警），出口门禁因此不再豁免缺失的提交哈希；判定前先对项目根做 realpath 归一，无法证明的路径仍走完整提交子集校验；撤销时在 request evidence 中加法式记录 revokedAt（ISO 时间）与 revokeReason（失败类别机器码：stale-eligibility / became-tracked / symlink-junction-escape / non-git / invalid-path），使 noCommit 被定义为可撤销的当前资格凭据而非 request 时刻的不可变历史 | handoff result |
 | SUMMARY 全骨架 | 段骨架从 SUMMARY 模板的全部 H2 派生；每段必须存在（条件段可写 N/A），已出现段必须符合模板顺序，强制的自检方法段须位于越界检查之后（文末或紧随其后）；新 change 缺段即阻断并给恢复指引，旧 change 告警；模板缺失时回退内置十段骨架 | exit execute |
 | 处置标记 | REVIEW.md 发现区条目须带 `[已修]`/`[升级]`/`[转待办]`(新 change 缺失 BLOCKED;旧 change WARN) | exit review |
 | builtin 自检证据 | `builtin-quickcheck` 须声明不可用原因与插件缓存尝试证据(新 change 缺失 BLOCKED;旧 change WARN) | exit execute |
@@ -61,7 +61,7 @@ hook blocking 语义（见已知限制）：PreToolUse hook 的 exit 2 在主会
 
 - **Return Contract**：子代理回传 `{status, commitHash, redEvidence, greenEvidence, completedChecks, riskSignals}`——缺 commitHash/greenEvidence/completedChecks → BLOCK；缺 redEvidence → 渐进 WARN；redEvidence 事后补录 → BLOCK
 - **handoff hash 溯源**：`git show <commitHash>` 校验提交文件 ⊆ write_files（从 TASK.md 自动解析，剥 XML 注释）
-- **零提交任务**：request 侧 `write_files` 为空（或 request 记录了 `noCommit` 标记）即判定为零提交——result 跳过提交文件子集校验并输出可审计提示；零提交结果若携带 tracked 提交，新 change 阻断、旧 change 告警；声明零提交的结果会在记录时重验，忽略规则变化、路径变为 tracked 或任一已存在祖先段为符号链接/junction 都会撤销已记录的标记并拒绝结果（新 change 阻断、旧 change 告警）
+- **零提交任务**：request 侧 `write_files` 为空（或 request 记录了 `noCommit` 标记）即判定为零提交——result 跳过提交文件子集校验并输出可审计提示；零提交结果若携带 tracked 提交，新 change 阻断、旧 change 告警；声明零提交的结果会在记录时重验，忽略规则变化、路径变为 tracked 或任一已存在祖先段为符号链接/junction 都会撤销已记录的标记并拒绝结果（新 change 阻断、旧 change 告警）；noCommit 因此是可撤销的当前资格凭据，每次撤销都会在 request 证据中加法式留下 revokedAt（ISO 时间）与 revokeReason（失败类别），供审计定位资格为何失效
 - **write_files 冲突检测**：parallel 任务 write_files 不重叠才可同 wave 并行
 - **多趟路由**：串/并交互的序列在依赖语义下合法——委托节点可多次进入，每趟按依赖拓扑委派全部依赖已满足的并行任务；等待后续波次的串行任务是合法趟间态
 
