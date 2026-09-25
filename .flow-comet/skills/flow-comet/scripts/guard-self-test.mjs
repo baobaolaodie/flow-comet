@@ -3409,6 +3409,21 @@ const SCENARIOS = [
       assertExit(res2, 0);
       assertNotOut(res2, 'REVIEW WARN');
       assertOut(res2, 'ALL CHECKS PASSED');
+      // ③ 有序条目（1. **...**）与无序同口径——缺处置标记 → 旧 change 仍渐进 REVIEW WARN
+      // （修复前 .filter((item) => !item.ordered) 使有序条目静默通过 = RED）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
+        '# REVIEW\n\n## 发现\n\n1. **m-2 · 有序未处置**：某处问题，未给出任何处置结论，描述足够长以避免内容不足\n\n## 结论\n\n通过\n');
+      const resOrdered = runGuard(['exit', 'review'], dir);
+      assertExit(resOrdered, 0);
+      assertOut(resOrdered, 'REVIEW WARN');
+      assertNotOut(resOrdered, 'BLOCKED');
+      // ④ 有序 Minor 带 [转待办] → 无该渐进告警（有序条目接入校验不误报已处置项）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
+        '# REVIEW\n\n## 发现\n\n1. **m-3 · 有序小项**：某处小问题，已登记下一 change 跟踪处置 [转待办]\n\n## 结论\n\n通过\n');
+      const resOrderedOk = runGuard(['exit', 'review'], dir);
+      assertExit(resOrderedOk, 0);
+      assertNotOut(resOrderedOk, 'REVIEW WARN');
+      assertOut(resOrderedOk, 'ALL CHECKS PASSED');
     },
   },
 
@@ -3942,6 +3957,37 @@ const SCENARIOS = [
       assertOut(resNoEscalation, 'BLOCKED');
       assertOut(resNoEscalation, 'Major');
       assertOut(resNoEscalation, '用户裁决');
+      // 子断言:Minor 条目正文引用 [Major] 标签字样（自身 [转待办]）→ 放行——严重度/处置
+      // 以条目自身标题/行首为准，不做整块标签扫描（修复前误判 Major 并触发延期门禁 = RED）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n- **m-2 · 引用 Major 的小项**：本条与 [Major] F1 项不同，是独立问题 [转待办]\n\n## 结论\n\n通过\n');
+      const resCited = runGuard(['exit', 'review'], dir);
+      assertExit(resCited, 0);
+      assertOut(resCited, 'ALL CHECKS PASSED');
+      assertNotOut(resCited, 'BLOCKED');
+      // 子断言:Major 条目自身处置为 [已修]，续行正文引用他条 [转待办] → 放行——
+      // 延期门禁只看该条目自身标题/行首的处置标记，不做整块扫描
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **[Major] F9 · 已修项引用他条**：某处问题 [已修]\n  （续行仅引用他条的处置去向 [转待办]，非本条处置）\n\n## 结论\n\n通过\n');
+      const resQuotedDisposition = runGuard(['exit', 'review'], dir);
+      assertExit(resQuotedDisposition, 0);
+      assertOut(resQuotedDisposition, 'ALL CHECKS PASSED');
+      assertNotOut(resQuotedDisposition, 'BLOCKED');
+      // 子断言:有序 Major 标签条目缺任何处置标记 → BLOCKED（修复前有序条目被跳过 = RED）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n1. **[Major] F6 · 有序无处置**：某处问题，未给出任何处置结论，描述足够长以避免内容不足\n\n## 结论\n\n通过\n');
+      const resOrderedMissing = runGuard(['exit', 'review'], dir);
+      assertExit(resOrderedMissing, 1);
+      assertOut(resOrderedMissing, '处置状态标记');
+      // 子断言:有序 Major [转待办] 无用户裁决 → BLOCKED（Major 延期门禁对有序条目同口径）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n1. **F7 · 有序未裁决的延期**：某处问题 [转待办]\n\n## 结论\n\n通过\n');
+      const resOrderedDeferred = runGuard(['exit', 'review'], dir);
+      assertExit(resOrderedDeferred, 1);
+      assertOut(resOrderedDeferred, 'Major');
+      assertOut(resOrderedDeferred, '用户裁决');
+      // 子断言:有序 Major [升级] [转待办] + 同段用户裁决（[升级] 承接）→ 放行
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n1. **F8 · 有序已裁决的延期**：某处问题 [升级] [转待办]（用户裁决：接受延期，下一 change 首修）\n\n## 结论\n\n通过\n');
+      const resOrderedAdjudicated = runGuard(['exit', 'review'], dir);
+      assertExit(resOrderedAdjudicated, 0);
+      assertOut(resOrderedAdjudicated, 'ALL CHECKS PASSED');
+      assertNotOut(resOrderedAdjudicated, '用户裁决');
     },
   },
 
@@ -4156,6 +4202,13 @@ const SCENARIOS = [
       assertExit(resOk, 0);
       assertNotOut(resOk, '用户裁决');
       assertOut(resOk, 'ALL CHECKS PASSED');
+      // 子断言:有序 Major [转待办] 无用户裁决 → 旧 change 渐进 WARN 不 BLOCK（有序同口径）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n1. **F3 · 有序未裁决的延期**：某处问题 [转待办]\n\n## 结论\n\n通过\n');
+      const resOrderedMajor = runGuard(['exit', 'review'], dir);
+      assertExit(resOrderedMajor, 0);
+      assertOut(resOrderedMajor, 'REVIEW WARN');
+      assertOut(resOrderedMajor, '用户裁决');
+      assertNotOut(resOrderedMajor, 'BLOCKED');
     },
   },
 

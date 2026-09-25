@@ -51,10 +51,11 @@ function markerProtocolBasename(value) {
 }
 
 // REVIEW.md 发现区条目解析——"## 发现" 段下的发现项 = 列表项（"- **" 无序 / "1. **" 有序，
-// 加粗开头的标题行）；"无" 条目（"- 无" / "无（...）"）表示该级别无发现，豁免。条目块包含
-// 其后的非空续行（同一段落），直到空行 / 下一条目 / 下一个标题。同时记录条目所属的
-// "### Major" 分区，以及条目自身是否带 [Major] 标签（真实 REVIEW 常用扁平有序列表 +
-// 条目内级别标签的写法）。返回 { title, lines, isMajor, ordered, ordinal }。
+// 两种列表形态同口径解析）；"无" 条目（"- 无" / "无（...）"）表示该级别无发现，豁免。条目块
+// 包含其后的非空续行（同一段落），直到空行 / 下一条目 / 下一个标题。严重度只取该条目自身的
+// 标题/行首——所属 "### Major" 分区，或标题（加粗部分）内带 [Major] 标签（真实 REVIEW 常用
+// 扁平有序列表 + 条目内级别标签的写法）；条目正文引用他条的 [Major] 字样不改变本条严重度。
+// 返回 { title, lines, isMajor, ordinal }。
 const REVIEW_FINDING_ITEM_RE = /^\s*(?:[-*+]|\d+[.)])\s*\*\*(.+?)\*\*/;
 const REVIEW_DISPOSITION_RE = /\[已修\]|\[升级\]|\[转待办\]/;
 const REVIEW_MAJOR_LABEL_RE = /\[\s*Major\s*\]/i;
@@ -84,11 +85,11 @@ function reviewFindingsItems(text) {
     const m = line.match(REVIEW_FINDING_ITEM_RE);
     if (m) {
       pushCurrent();
+      const title = m[1].trim();
       current = {
-        title: m[1].trim(),
+        title,
         lines: [line],
-        isMajor: /^major\b/i.test(severity),
-        ordered: /^\s*\d/.test(line), // 条目行首为数字 = 有序列表（-*+ 之外唯一入口）
+        isMajor: /^major\b/i.test(severity) || REVIEW_MAJOR_LABEL_RE.test(title),
       };
       continue;
     }
@@ -98,19 +99,15 @@ function reviewFindingsItems(text) {
     }
   }
   pushCurrent();
-  for (const item of items) {
-    if (REVIEW_MAJOR_LABEL_RE.test(item.lines.join('\n'))) item.isMajor = true;
-  }
   items.forEach((item, i) => { item.ordinal = i + 1; });
   return items;
 }
 
 // 发现区条目处置标记存在性：返回缺处置状态标记（[已修]/[升级]/[转待办]）的条目标题列表——
-// 结构级校验（不做语义判断：标记存在即视为已处置）。发现项（含 Minor）不得"记录后无声消失"。
-// 保持既有语义范围：仅无序列表条目参与本校验（有序列表条目的处置由 Major 延期裁决门禁覆盖）。
+// 结构级校验（不做语义判断：标记存在即视为已处置）。发现项（含 Minor；无序与有序条目同口径，
+// 均不得"记录后无声消失"）的处置标记以该条目自身标题/行首为准——正文引用他条标记不参与判定。
 function reviewFindingsMissingDisposition(text) {
   return reviewFindingsItems(text)
-    .filter((item) => !item.ordered)
     .filter((item) => !/^无/.test(item.title)) // "无" 条目豁免
     // 四要素字段行豁免:REVIEW 发现条目的 Symptom/Source/Consequence/Remedy
     // 是 brooks 审查输出格式的字段行(带 ** 加粗),不是发现条目本身——不豁免会误判
@@ -137,13 +134,16 @@ function reviewAdjudicationPointsTo(record, item) {
 // 同段（条目自身段落）或文末其余段落含「用户裁决：接受延期」且指向该条目，并由 [升级] 承接
 // （条目自身块或裁决记录含 [升级]）。任一缺失 → 返回条目标题（调用方按新 change BLOCK /
 // 旧 change WARN 渐进处置）。Minor 不参与；Major [升级]/[已修] 直接放行。
+// 条目自身的处置标记（[转待办]）只认该条目标题/行首（无序与有序同口径），正文续行引用他条
+// 标记不触发本门禁；[升级] 承接可出现在条目自身块或用户裁决记录中（承接非本条处置）。
 function reviewDeferredMajorProblems(text) {
   const textValue = String(text);
   const items = reviewFindingsItems(textValue);
   const paragraphs = textValue.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
   const problems = [];
   for (const item of items) {
-    if (!item.isMajor || !/\[转待办\]/.test(item.lines.join('\n'))) continue;
+    const ownLine = item.lines[0];
+    if (!item.isMajor || !/\[转待办\]/.test(ownLine)) continue;
     const block = item.lines.join('\n');
     const escalatedInBlock = /\[升级\]/.test(block);
     const blockTrimmed = block.trim();
