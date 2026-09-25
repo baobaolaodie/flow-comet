@@ -3,7 +3,7 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, RUNTIME_STATE_PATH, LEGACY_RUNTIME_STATE_PATH } from './state-schema.mjs';
-import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES } from './protocol-utils.mjs';
+import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, workflowPathInside, inspectWorkflowProtectedPath } from './protocol-utils.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from './task-parsing.mjs';
 import { resolveNextNode, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS, TASK_SET_SIGNATURE_ALGO, taskSetSignature, parseTaskSetSignature, sameTaskSetSignature, taskSetSignatureVersionSkew, classifyFixReturnCause, normalizeHeading, FIX_SECTION_TITLE_FALLBACK } from './route-node.mjs';
 
@@ -81,73 +81,10 @@ const SUMMARY_REQUIRED_SECTIONS = [
   { regex: /##\s*(越界检查|边界检查)/i, label: '## 越界检查' },
 ];
 
-function workflowPathInside(root, target) {
-  const relative = path.relative(root, target);
-  return (
-    relative === '' ||
-    (!path.isAbsolute(relative) &&
-      relative !== '..' &&
-      !relative.startsWith('..' + path.sep))
-  );
-}
-
-async function inspectWorkflowProtectedPath(
-  projectRoot,
-  target,
-  label,
-  expected = 'any',
-) {
-  const lexicalRoot = path.resolve(projectRoot);
-  const lexicalTarget = path.resolve(target);
-  if (!workflowPathInside(lexicalRoot, lexicalTarget)) {
-    throw new Error(label + ' must stay inside the project root');
-  }
-  const rootStat = await fs.lstat(lexicalRoot);
-  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
-    throw new Error(label + ' project root must be a real directory');
-  }
-  const realRoot = await fs.realpath(lexicalRoot);
-  const relative = path.relative(lexicalRoot, lexicalTarget);
-  const segments = relative === '' ? [] : relative.split(path.sep);
-  let cursor = lexicalRoot;
-  for (let index = 0; index < segments.length; index++) {
-    cursor = path.join(cursor, segments[index]);
-    let stat;
-    try {
-      stat = await fs.lstat(cursor);
-    } catch (error) {
-      if (
-        error &&
-        typeof error === 'object' &&
-        (error.code === 'ENOENT' || error.code === 'ENOTDIR')
-      ) {
-        return { target: lexicalTarget, exists: false };
-      }
-      throw error;
-    }
-    const display = path.relative(lexicalRoot, cursor).replaceAll('\\', '/');
-    if (stat.isSymbolicLink()) {
-      throw new Error(label + ' crosses a symbolic link or junction at ' + display);
-    }
-    const final = index === segments.length - 1;
-    if (!final && !stat.isDirectory()) {
-      throw new Error(label + ' ancestor ' + display + ' must be a real directory');
-    }
-    if (
-      final &&
-      ((expected === 'file' && !stat.isFile()) ||
-        (expected === 'directory' && !stat.isDirectory()) ||
-        (expected === 'any' && !stat.isFile() && !stat.isDirectory()))
-    ) {
-      throw new Error(label + ' must be a real ' + expected);
-    }
-    const physical = await fs.realpath(cursor);
-    if (!workflowPathInside(realRoot, physical)) {
-      throw new Error(label + ' resolves outside the project root');
-    }
-  }
-  return { target: lexicalTarget, exists: true };
-}
+// 路径包含与逐段扫描判据的单一权威在 protocol-utils.mjs（workflowPathInside /
+// inspectWorkflowProtectedPath），本文件不再保留本地副本：同一判据两份实现会静默分叉，
+// 注释互指同源不是同步机制。错误语义（越界 / 非真实根 / symlink 或 junction / 类型不符 /
+// 物理逃逸的抛错文案与 fail-closed 行为）由该单一实现统一保证。
 
 function workflowFileObjectIdentity(stat) {
   return {
