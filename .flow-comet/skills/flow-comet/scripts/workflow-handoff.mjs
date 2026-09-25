@@ -4,14 +4,14 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { validateStateFields, looksLikeObjectLiteral, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME } from './state-schema.mjs';
-import { EXECUTE_FAMILY_NODE_IDS } from './route-node.mjs';
+import { EXECUTE_FAMILY_NODE_IDS, protocolNodeEnabled, resolveDelegationTarget, taskDependencyEligibility } from './route-node.mjs';
 import {
   resolveProtocol,
   readProtocolFile,
   validateProtocolSchema,
   inspectWorkflowPathSegments,
 } from './protocol-utils.mjs';
-import { taskAttrsById } from './task-parsing.mjs';
+import { taskAttrsById, taskBlocks, taskOpeningAttrs } from './task-parsing.mjs';
 
 // workflow-handoff.mjs: Record subagent handoff evidence
 // evidence 统一记录在 subagent-execute 名下作为委托证据库——execute（串行委托）与 subagent-execute（并行委托）共用。不改成节点参数，保持最小改动。
@@ -224,51 +224,106 @@ async function writeState(state) {
 }
 
 // ---------- request 归属门禁（只读判定） ----------
-// 目标节点：parallel=true → subagent-execute；串行 → execute。协议无对应 enabled 节点 → 跳过门禁。
+// 归属目标与依赖资格一律复用 route-node 的共享纯函数（单一权威）：门禁不在本文件内联
+// 「parallel → 目标节点」映射。协议无对应 enabled 节点 → 跳过门禁。
 // 判定只读 state 与协议：BLOCK 路径在首个 state.evidence 写入之前返回，state 字节零改写、不落请求记录。
 
-// 协议 enabled 节点判定：协议路径走 protocol-utils 的统一解析（不消费 request 的 CLI 参数，
-// 仅 env 覆盖 + packageRoot 默认协议）；协议缺失/不可读/schema 非法 → false（调用方跳过，不误伤请求）。
-async function protocolNodeEnabled(nodeId) {
-  let protocol;
+// 协议读取（归属判定用）：协议路径走 protocol-utils 的统一解析（不消费 request 的 CLI 参数，
+// 仅 env 覆盖 + packageRoot 默认协议）；协议缺失/不可读/schema 非法 → null（调用方跳过，
+// 不误伤请求）。enabled 语义由 route-node 的共享判定给出，不在本文件另做过滤。
+async function readOwnershipProtocol() {
   try {
     const protocolPath = resolveProtocol(packageRoot, runRoot);
-    protocol = await readProtocolFile(runRoot, protocolPath);
+    const protocol = await readProtocolFile(runRoot, protocolPath);
     validateProtocolSchema(protocol);
+    return protocol;
   } catch {
-    return false;
+    return null;
   }
-  return (protocol.nodes ?? []).some((node) => node && node.id === nodeId && !node.disabled);
+}
+
+// 路由事实：从 TASK.md 全文派生 done id 集合与目标任务块。解析走 task-parsing 的开标签
+// 解析（与路由、guard 同一语义），不新增第二份正则。
+function taskRouteFacts(taskContent, taskId) {
+  const doneIds = new Set();
+  let targetBlock = null;
+  for (const block of taskBlocks(taskContent)) {
+    const attrs = taskOpeningAttrs(block);
+    if (!attrs) continue;
+    if (attrs.status === 'done' && attrs.id) doneIds.add(attrs.id);
+    if (taskId !== null && taskId !== undefined && attrs.id === String(taskId)) targetBlock = block;
+  }
+  return { doneIds, targetBlock };
 }
 
 // 归属判定：仅 status=pending 的任务参与；比较原始 state.currentNode（不取任何派生 currentNode）。
-// 返回 { verdict: 'skip' | 'mismatch' | 'not-entered' | 'pass' }。
-async function assessRequestOwnership(state, taskAttrs) {
-  if (!taskAttrs || taskAttrs.status !== 'pending') return { verdict: 'skip' };
-  const targetNode = taskAttrs.parallel === true ? 'subagent-execute' : 'execute';
-  if (!(await protocolNodeEnabled(targetNode))) return { verdict: 'skip' };
-  if (state.currentNode !== targetNode) {
-    return { verdict: 'mismatch', targetNode };
+// 目标与依赖资格经 route-node 共享纯函数求得，与 next/路由使用同一判定。
+// 返回 { verdict: 'skip' | 'pass' | 'not-entered' | 'mismatch' | 'not-delegable', ... }。
+async function assessRequestOwnership(state, taskAttrs, taskContent) {
+  if (!taskAttrs || taskAttrs.status !== 'pending') return { verdict: 'skip', reason: 'not-pending' };
+  const protocol = await readOwnershipProtocol();
+  if (protocol === null) return { verdict: 'skip', reason: 'protocol-unavailable' };
+  const { doneIds, targetBlock } = taskRouteFacts(taskContent, taskAttrs.id);
+  const dependency = targetBlock
+    ? taskDependencyEligibility(targetBlock, doneIds)
+    : { eligible: false, deps: [], unmet: [] };
+  const ownership = resolveDelegationTarget({
+    taskAttrs,
+    dependencyEligible: dependency.eligible,
+    subagentNodeEnabled: protocolNodeEnabled(protocol, 'subagent-execute'),
+    executeNodeEnabled: protocolNodeEnabled(protocol, 'execute'),
+  });
+  if (ownership.reason === 'not-pending' || ownership.reason === 'no-delegation-node') {
+    return { verdict: 'skip', reason: ownership.reason };
+  }
+  if (ownership.reason === 'dependencies-unmet') {
+    return { verdict: 'not-delegable', reason: ownership.reason, unmet: dependency.unmet };
+  }
+  if (state.currentNode !== ownership.targetNode) {
+    return { verdict: 'mismatch', targetNode: ownership.targetNode, reason: ownership.reason };
   }
   const enteredNodes = Array.isArray(state.enteredNodes) ? state.enteredNodes : [];
-  if (!enteredNodes.includes(targetNode)) return { verdict: 'not-entered', targetNode };
-  return { verdict: 'pass' };
+  if (!enteredNodes.includes(ownership.targetNode)) {
+    return { verdict: 'not-entered', targetNode: ownership.targetNode, reason: ownership.reason };
+  }
+  return { verdict: 'pass', reason: ownership.reason };
 }
 
 // 渲染归属判定结果（只输出与退出，不写 state）：
-// 不匹配 → 新 change BLOCK / 旧 change 可见 WARN 后继续；正确节点未 entry → 可见 WARN 不阻断。
+// 不可委托 → 新 change BLOCK / 旧 change 可见 WARN 后继续；恢复指引以 workflow-state next 的
+// 实际 NODE 输出为准，不固定指向 next 不会输出的节点（依赖未满足时路由按串行消化走 execute）。
+// 归属目标不匹配 → 同样先按 next 的路由指引进入；正确节点未 entry → 可见 WARN 不阻断。
 function reportRequestOwnership(state, taskId, taskAttrs, ownership) {
-  if (ownership.verdict === 'mismatch') {
-    const detail = '任务 ' + taskId + '（' + (taskAttrs.parallel === true ? '并行' : '串行') + ' pending）应归属节点 '
-      + ownership.targetNode + '，原始 currentNode=' + String(state.currentNode);
-    const guide = '恢复指引: 运行 workflow-state next 查看当前路由，再运行 workflow-state entry '
-      + ownership.targetNode + '（或 workflow-guard entry ' + ownership.targetNode + '）进入目标节点后再发起委托';
+  const kind = taskAttrs && taskAttrs.parallel === true ? '并行' : '串行';
+  const current = String(state.currentNode);
+  if (ownership.verdict === 'not-delegable') {
+    const unmet = Array.isArray(ownership.unmet) ? ownership.unmet : [];
+    const detail = '任务 ' + taskId + '（' + kind + ' pending）当前不可委托：依赖未满足'
+      + (unmet.length > 0 ? '（未完成: ' + unmet.join(', ') + '）' : '')
+      + '；原始 currentNode=' + current;
+    const guide = '恢复指引: 运行 workflow-state next，按输出的 NODE 进入；若输出 execute 表示依赖未满足'
+      + '（该任务当前按串行消化），待任务变为可委托（next 输出对应委托节点）后再 request';
     if (state.newChange === true) {
       console.error('BLOCKED: ' + detail + '——' + guide + '；本次请求未写入 state，也未记录 handoffRequests');
       process.exit(1);
     }
     console.error('WARN: ' + detail + '（旧 change 渐进不阻断，请求照常记录）——' + guide);
-  } else if (ownership.verdict === 'not-entered') {
+    return;
+  }
+  if (ownership.verdict === 'mismatch') {
+    const detail = '任务 ' + taskId + '（' + kind + ' pending）应归属节点 '
+      + ownership.targetNode + '，原始 currentNode=' + current;
+    const guide = '恢复指引: 运行 workflow-state next 查看当前路由，按 NODE 输出进入'
+      + '（本任务归属节点 ' + ownership.targetNode + '：workflow-state entry ' + ownership.targetNode
+      + ' 或 workflow-guard entry ' + ownership.targetNode + '）后再发起委托';
+    if (state.newChange === true) {
+      console.error('BLOCKED: ' + detail + '——' + guide + '；本次请求未写入 state，也未记录 handoffRequests');
+      process.exit(1);
+    }
+    console.error('WARN: ' + detail + '（旧 change 渐进不阻断，请求照常记录）——' + guide);
+    return;
+  }
+  if (ownership.verdict === 'not-entered') {
     console.error('WARN: 任务 ' + taskId + ' 的归属节点 ' + ownership.targetNode
       + ' 与原始 currentNode 一致，但该节点尚未 entry（enteredNodes 缺 ' + ownership.targetNode
       + '）——建议先运行 workflow-state entry ' + ownership.targetNode + ' 或 workflow-guard entry '
@@ -356,7 +411,7 @@ async function main() {
     if (!parsedTask && wfIdx >= 0) {
       console.error('WARN: 显式 --write-files 且 TASK.md 无匹配任务 ' + taskId + '——无法判定 pending 与归属，跳过归属门禁（不阻断，照常记录）');
     }
-    reportRequestOwnership(state, taskId, parsedTask, await assessRequestOwnership(state, parsedTask));
+    reportRequestOwnership(state, taskId, parsedTask, await assessRequestOwnership(state, parsedTask, taskContent));
     state.evidence = state.evidence || {};
     state.evidence['subagent-execute'] = state.evidence['subagent-execute'] || {};
     if (!state.evidence['subagent-execute'].handoffRequests) {

@@ -3956,6 +3956,58 @@ const SCENARIOS = [
       if (!stOldChange.evidence?.['subagent-execute']?.handoffRequests?.['P-M02']) {
         throw new Error('旧 change 错误节点请求应照常落库（AC-3），实际 ' + JSON.stringify(stOldChange.evidence));
       }
+      // ③ pending 并行任务依赖未满足 → 当前不可委托。恢复指引必须以 next 实际输出为准：
+      // next 对依赖未满足的并行任务按串行消化输出 execute——指引不得再固定指向
+      // entry subagent-execute（否则按指引进入会被 currentNode 门禁拦成死路）。
+      writeIntakeArtifacts(dir);
+      const unmetDepsTask =
+        '<task id="S-M01" parallel="false" status="pending"><action>实现 S-M01</action><write_files>src/s-m01.mjs</write_files><verify>node --check src/s-m01.mjs</verify></task>\n' +
+        '<task id="P-M03" parallel="true" status="pending"><action>实现 P-M03</action><write_files>src/p-m03.mjs</write_files><verify>node --check src/p-m03.mjs</verify><depends_on>S-M01</depends_on></task>\n';
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + unmetDepsTask);
+      const unmetState = baseState('execute');
+      unmetState.newChange = true;
+      unmetState.enteredNodes = ['execute'];
+      unmetState.completedNodes = ['open', 'design', 'plan'];
+      unmetState.evidence = { plan: { summary: 'plan done' } };
+      writeState(dir, unmetState);
+      const unmetBytesBefore = fs.readFileSync(reqStatePath, 'utf8');
+      const resUnmet = runHandoff(['request', 'P-M03', 'parallel slice with unmet deps'], dir, reqEnv);
+      assertExit(resUnmet, 1);
+      assertOut(resUnmet, 'BLOCKED: 任务 P-M03（并行 pending）当前不可委托：依赖未满足');
+      assertOut(resUnmet, '未完成: S-M01');
+      assertOut(resUnmet, '原始 currentNode=execute');
+      assertOut(resUnmet, 'workflow-state next');
+      assertOut(resUnmet, '按输出的 NODE 进入');
+      assertOut(resUnmet, '若输出 execute 表示依赖未满足');
+      assertOut(resUnmet, '待任务变为可委托');
+      // 不得固定指引 next 不会输出的节点（进入即死路的反锚）
+      assertNotOut(resUnmet, 'entry subagent-execute');
+      assertNotOut(resUnmet, 'HANDOFF REQUEST');
+      if (fs.readFileSync(reqStatePath, 'utf8') !== unmetBytesBefore) {
+        throw new Error('依赖未满足 BLOCK 必须 state 字节零改写');
+      }
+      const stUnmet = readScenarioState(dir);
+      if (stUnmet.evidence?.['subagent-execute']?.handoffRequests?.['P-M03']) {
+        throw new Error('依赖未满足 BLOCK 不得落 handoffRequests: ' + JSON.stringify(stUnmet.evidence));
+      }
+      // 同构真实链路：next 对当前 TASK 实际输出 execute（依赖未满足/串行消化），与指引条件分支一致
+      const resUnmetNext = runState(['next'], dir, reqEnv);
+      assertExit(resUnmetNext, 0);
+      if (!/^NODE: execute$/m.test(resUnmetNext.output)) {
+        throw new Error('依赖未满足时 next 应输出 execute（指引一致性锚）：\n' + resUnmetNext.output);
+      }
+      if (readScenarioState(dir).currentNode !== 'execute') {
+        throw new Error('依赖未满足时 next 应把工作归属留在 execute: ' + JSON.stringify(readScenarioState(dir).currentNode));
+      }
+      // 旧 change 同形态 → 可见 WARN + 照常落库（渐进兼容，不因依赖未满足而卡死）
+      const oldUnmetState = { ...unmetState };
+      delete oldUnmetState.newChange;
+      writeState(dir, oldUnmetState);
+      const resUnmetOld = runHandoff(['request', 'P-M03', 'old change unmet deps'], dir, reqEnv);
+      assertExit(resUnmetOld, 0);
+      assertOut(resUnmetOld, 'WARN: 任务 P-M03（并行 pending）当前不可委托：依赖未满足');
+      assertOut(resUnmetOld, '旧 change 渐进不阻断');
+      assertOut(resUnmetOld, 'HANDOFF REQUEST: P-M03');
     },
   },
 
@@ -5353,6 +5405,60 @@ const SCENARIOS = [
       assertExit(resDisabled, 0);
       assertNotOut(resDisabled, 'BLOCKED');
       assertOut(resDisabled, 'HANDOFF REQUEST: P03');
+      // ⑪ pending 并行任务依赖未满足 → BLOCK 指引与 next 实际输出一致（next 按串行消化输出
+      // execute）；依赖满足后按 next 输出进入委托节点，request 恢复成功——无 entry 死路。
+      writeIntakeArtifacts(dir);
+      const unmetDepsTask =
+        '<task id="S03" parallel="false" status="pending"><action>实现 S03</action><write_files>src/s03.mjs</write_files><verify>node --check src/s03.mjs</verify></task>\n' +
+        '<task id="P04" parallel="true" status="pending"><action>实现 P04</action><write_files>src/p04.mjs</write_files><verify>node --check src/p04.mjs</verify><depends_on>S03</depends_on></task>\n';
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + unmetDepsTask);
+      const stUnmet = baseState('execute');
+      stUnmet.newChange = true;
+      stUnmet.enteredNodes = ['execute'];
+      stUnmet.completedNodes = ['open', 'design', 'plan'];
+      stUnmet.evidence = { plan: { summary: 'plan done' } };
+      writeState(dir, stUnmet);
+      const unmetBytesBefore = fs.readFileSync(statePath, 'utf8');
+      const resUnmet = runHandoff(['request', 'P04', 'parallel slice with unmet deps'], dir, env);
+      assertExit(resUnmet, 1);
+      assertOut(resUnmet, 'BLOCKED: 任务 P04（并行 pending）当前不可委托：依赖未满足');
+      assertOut(resUnmet, '未完成: S03');
+      assertOut(resUnmet, 'workflow-state next');
+      assertOut(resUnmet, '若输出 execute 表示依赖未满足');
+      assertOut(resUnmet, '待任务变为可委托');
+      assertNotOut(resUnmet, 'entry subagent-execute');
+      if (fs.readFileSync(statePath, 'utf8') !== unmetBytesBefore) {
+        throw new Error('依赖未满足 BLOCK 必须 state 字节零改写');
+      }
+      if (readScenarioState(dir).evidence?.['subagent-execute']?.handoffRequests?.P04) {
+        throw new Error('依赖未满足 BLOCK 不得落 handoffRequests');
+      }
+      const resUnmetNext = runState(['next'], dir, env);
+      assertExit(resUnmetNext, 0);
+      if (!/^NODE: execute$/m.test(resUnmetNext.output)) {
+        throw new Error('依赖未满足时 next 应输出 execute：\n' + resUnmetNext.output);
+      }
+      // 依赖满足：串行任务消化完成后 next 输出 subagent-execute；按输出 entry 后 request 成功
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
+        '# TASK\n\n<task id="S03" parallel="false" status="done"><action>实现 S03</action><write_files>src/s03.mjs</write_files><verify>node --check src/s03.mjs</verify></task>\n'
+        + '<task id="P04" parallel="true" status="pending"><action>实现 P04</action><write_files>src/p04.mjs</write_files><verify>node --check src/p04.mjs</verify><depends_on>S03</depends_on></task>\n');
+      const afterSerial = readScenarioState(dir);
+      afterSerial.completedNodes = [...new Set([...(afterSerial.completedNodes || []), 'execute'])];
+      afterSerial.evidence = { ...(afterSerial.evidence || {}), execute: { summary: 'serial digest done' } };
+      writeState(dir, afterSerial);
+      const resDelegableNext = runState(['next'], dir, env);
+      assertExit(resDelegableNext, 0);
+      if (!/^NODE: subagent-execute$/m.test(resDelegableNext.output)) {
+        throw new Error('依赖满足后 next 应输出 subagent-execute：\n' + resDelegableNext.output);
+      }
+      if (readScenarioState(dir).currentNode !== 'subagent-execute') {
+        throw new Error('依赖满足后 next 应把工作归属推到 subagent-execute');
+      }
+      writeMarker('subagent-execute');
+      assertExit(runGuard(['entry', 'subagent-execute'], dir, env), 0);
+      const resRecovered = runHandoff(['request', 'P04', 'now delegable'], dir, env);
+      assertExit(resRecovered, 0);
+      assertOut(resRecovered, 'HANDOFF REQUEST: P04');
     },
   },
 

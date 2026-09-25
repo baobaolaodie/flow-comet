@@ -114,13 +114,65 @@ function protocolTaskFilePath(protocol, changeName, specsRoot) {
   return path.join(specsRoot, changeName, taskFile);
 }
 
+// 协议节点是否 enabled：route 顺序中存在且未 disabled。协议 enabled 语义以本函数为唯一来源，
+// hasSubagentNode 与各消费方（含请求归属门禁）一律复用，不各自过滤。
+export function protocolNodeEnabled(protocol, nodeId) {
+  return route(protocol).some((node) => node.id === nodeId);
+}
+
 // 协议是否含 subagent-execute 委托节点（自定义协议可不含——此时 parallel 任务由 execute 直接消化）
 function hasSubagentNode(protocol) {
-  return route(protocol).some((n) => n.id === 'subagent-execute');
+  return protocolNodeEnabled(protocol, 'subagent-execute');
 }
 
 async function fileExists(file) {
   try { await fs.access(file); return true; } catch { return false; }
+}
+
+// ---------- 委托归属共享判定（纯函数 · 单一权威） ----------
+// 任务属性、依赖资格、协议 enabled → 归属目标 / 不可委托原因。resolveNextNode 的下一节点
+// 判定与请求归属门禁共用本段实现，禁止任一侧再内联「parallel → 目标节点」映射。
+// 本段无 fs / console / process.exit / state 写入，只做确定性推导。
+
+// 依赖资格：解析任务块的 <depends_on> 并与已完成任务 id 集合比较。依赖文本解析只此一处，
+// resolveNextNode 的可委托并行过滤与消费方一律调用本函数。返回 { eligible, deps, unmet }；
+// 无 <depends_on> 元素或内容为空视为无依赖（eligible=true）。
+export function taskDependencyEligibility(block, doneIds = new Set()) {
+  const depsMatch = String(block ?? '').match(/<depends_on>([\s\S]*?)<\/depends_on>/);
+  if (!depsMatch || !depsMatch[1].trim()) return { eligible: true, deps: [], unmet: [] };
+  const deps = depsMatch[1].trim().split(/[,\s]+/).filter(Boolean);
+  const unmet = deps.filter((dep) => !doneIds.has(dep));
+  return { eligible: unmet.length === 0, deps, unmet };
+}
+
+// 归属判定：输入 taskAttrs（task-parsing 开标签属性）、依赖资格、协议 enabled。
+// 返回 { targetNode, delegable, reason }，reason 取值：
+//   not-pending         任务非 pending，归属门禁不适用；
+//   serial              pending 串行 → 归属 execute；
+//   no-delegation-node  pending 并行但协议无 enabled 委托节点 → 门禁不适用；
+//   dependencies-unmet  pending 并行但依赖未满足 → 当前不可委托（路由按串行消化走 execute）；
+//   parallel-eligible   pending 并行且依赖满足 → 归属 subagent-execute。
+export function resolveDelegationTarget({
+  taskAttrs = null,
+  dependencyEligible = false,
+  subagentNodeEnabled = false,
+  executeNodeEnabled = true,
+} = {}) {
+  if (!taskAttrs || taskAttrs.status !== 'pending') {
+    return { targetNode: null, delegable: false, reason: 'not-pending' };
+  }
+  if (taskAttrs.parallel !== true) {
+    return executeNodeEnabled
+      ? { targetNode: 'execute', delegable: true, reason: 'serial' }
+      : { targetNode: null, delegable: false, reason: 'no-delegation-node' };
+  }
+  if (!subagentNodeEnabled) {
+    return { targetNode: null, delegable: false, reason: 'no-delegation-node' };
+  }
+  if (!dependencyEligible) {
+    return { targetNode: null, delegable: false, reason: 'dependencies-unmet' };
+  }
+  return { targetNode: 'subagent-execute', delegable: true, reason: 'parallel-eligible' };
 }
 
 // 判定核心（抽取自 workflow-state.mjs determineNode，行为逐字等价——重构保持锚）：
@@ -195,18 +247,19 @@ export async function resolveNextNode({ runRoot, changeName, protocol, completed
       if (hasSubagentNode(protocol)) {
         // 收集所有 done 任务的 id（开标签属性序无关）
         const doneIds = new Set(attrsList.filter((a) => a.status === 'done' && a.id).map((a) => a.id));
-        // 检查 pending parallel 任务中是否有依赖已满足的（开标签 parallel="true" 且 status="pending"）
-        const parallelBlocks = taskList.filter((block) => {
-          const a = taskOpeningAttrs(block);
-          return a && a.parallel && a.status === 'pending';
+        // 检查 pending parallel 任务中是否有依赖已满足的（开标签 parallel="true" 且 status="pending"）——
+        // 依赖资格与归属目标一律走共享纯函数，不在本函数内联第二份判定。
+        const hasDelegableParallel = taskList.some((block) => {
+          const attrs = taskOpeningAttrs(block);
+          if (!attrs || attrs.parallel !== true || attrs.status !== 'pending') return false;
+          const dependencyEligible = taskDependencyEligibility(block, doneIds).eligible;
+          return resolveDelegationTarget({
+            taskAttrs: attrs,
+            dependencyEligible,
+            subagentNodeEnabled: true,
+          }).delegable;
         });
-        const eligibleParallel = parallelBlocks.filter((block) => {
-          const depsMatch = block.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
-          if (!depsMatch || !depsMatch[1].trim()) return true; // 无依赖
-          const deps = depsMatch[1].trim().split(/[,\s]+/).filter(Boolean);
-          return deps.every((d) => doneIds.has(d));
-        });
-        if (eligibleParallel.length > 0) return 'subagent-execute';
+        if (hasDelegableParallel) return 'subagent-execute';
       }
       return 'execute';
     }

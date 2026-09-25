@@ -1352,18 +1352,24 @@ const TEST_ITEMS = [
       drivePass('subagent-execute', 'execute', 'parallel-wave-1');
 
       // 归属门禁事故回放（真实命令链路）：波 1 收口后工作归属在 execute（尚有串行衔接待办），
-      // 此刻对未消化的并行 pending 任务发起委托 → 新 change BLOCK（state 字节零改写、不落请求），
-      // 恢复指引指向 next/entry；随后原链路照跑（串行衔接完成后并行收尾正常委托）。
+      // 此刻对未消化的并行 pending 任务发起委托 → 新 change BLOCK（state 字节零改写、不落请求）。
+      // P03 依赖未满足：恢复指引以 workflow-state next 实际输出为准（next 按串行消化输出
+      // execute），不得固定指向 entry subagent-execute；随后原链路照跑（串行衔接完成后并行收尾正常委托）。
       const ownershipEnv = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       const ownershipStatePath = path.join(dir, '.flow-comet', 'flow-comet-state.json');
       const ownershipBytesBefore = fs.readFileSync(ownershipStatePath, 'utf8');
       const wrongNodeRequest = runHandoff(['request', 'P03', 'P03 委托', '--write-files', 'src/p03.mjs'], dir, ownershipEnv);
       assertExit(wrongNodeRequest, 1);
       assertOut(wrongNodeRequest, 'BLOCKED');
-      assertOut(wrongNodeRequest, '应归属节点 subagent-execute');
+      assertOut(wrongNodeRequest, '当前不可委托');
+      assertOut(wrongNodeRequest, '依赖未满足');
+      assertOut(wrongNodeRequest, '未完成: S01');
       assertOut(wrongNodeRequest, '原始 currentNode=execute');
       assertOut(wrongNodeRequest, 'workflow-state next');
-      assertOut(wrongNodeRequest, 'entry subagent-execute');
+      assertOut(wrongNodeRequest, '若输出 execute 表示依赖未满足');
+      assertOut(wrongNodeRequest, '待任务变为可委托');
+      // 反锚：不得固定指引 next 不会输出的节点（按该指引进入会被 currentNode 门禁拦成死路）
+      assertNotOut(wrongNodeRequest, 'entry subagent-execute');
       assertNotOut(wrongNodeRequest, 'HANDOFF REQUEST');
       if (fs.readFileSync(ownershipStatePath, 'utf8') !== ownershipBytesBefore) {
         throw new Error('归属门禁 BLOCK 不得改写 state 字节（含 handoffRequests）');
@@ -1373,6 +1379,10 @@ const TEST_ITEMS = [
         throw new Error('归属门禁 BLOCK 不得落 handoffRequests: '
           + JSON.stringify(ownershipState.evidence?.['subagent-execute']?.handoffRequests));
       }
+      // 指引与 next 实际输出一致：依赖未满足 → next 输出 execute（串行消化），无 entry 死路
+      const routeAfterBlock = runState(['next'], dir, ownershipEnv);
+      assertExit(routeAfterBlock, 0);
+      assertNodeLine(routeAfterBlock, 'execute');
 
       // 趟 2 · execute:先消化本趟全部串行 pending(串行衔接,标 done 并委托留证)——
       // 确认无串行残留后才 exit → 收尾并行依赖满足 → 再次进入委托节点
@@ -2994,6 +3004,58 @@ const TEST_ITEMS = [
       assertExit(correctedResult, 0);
       assertOut(correctedResult, 'HANDOFF RESULT: P02');
       assertNotOut(correctedResult, 'HANDOFF ERROR');
+
+      // ⑭b 依赖未满足的并行 pending 委派（真实命令链路）：request BLOCK 且指引与 next 实际
+      //     输出一致（next 输出 execute）→ 按输出进入 execute 消化串行依赖 → 依赖满足后
+      //     next 输出 subagent-execute → entry 后 request 成功（无 entry 死路）。
+      const unmetTaskContent = (s04Status) =>
+        '# TASK\n\n<task id="S04" parallel="false" status="' + s04Status + '"><action>实现 S04</action>'
+        + '<write_files>src/s04.mjs</write_files><verify>node --check src/s04.mjs</verify></task>\n'
+        + '<task id="P05" parallel="true" status="pending"><action>实现 P05</action>'
+        + '<write_files>src/p05.mjs</write_files><verify>node --check src/p05.mjs</verify>'
+        + '<depends_on>S04</depends_on></task>\n';
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', unmetTaskContent('pending'));
+      const unmetBytesBefore = fs.readFileSync(ownershipStatePath, 'utf8');
+      const unmetRequest = runHandoff(['request', 'P05', 'P05 委托（依赖未满足）', '--write-files', 'src/p05.mjs'], dir, ownershipEnv);
+      assertExit(unmetRequest, 1);
+      assertOut(unmetRequest, 'BLOCKED');
+      assertOut(unmetRequest, '当前不可委托');
+      assertOut(unmetRequest, '依赖未满足');
+      assertOut(unmetRequest, '未完成: S04');
+      assertOut(unmetRequest, 'workflow-state next');
+      assertOut(unmetRequest, '若输出 execute 表示依赖未满足');
+      assertOut(unmetRequest, '待任务变为可委托');
+      assertNotOut(unmetRequest, 'entry subagent-execute');
+      assertNotOut(unmetRequest, 'HANDOFF REQUEST');
+      if (fs.readFileSync(ownershipStatePath, 'utf8') !== unmetBytesBefore) {
+        throw new Error('依赖未满足 BLOCK 不得改写 state 字节（含 handoffRequests）');
+      }
+      if (readStateFile(dir).evidence?.['subagent-execute']?.handoffRequests?.P05) {
+        throw new Error('依赖未满足 BLOCK 不得落 handoffRequests');
+      }
+      // 按 next 实际输出进入 execute 消化串行依赖（指引条件分支与真实路由一致）
+      const unmetNext = runState(['next'], dir);
+      assertExit(unmetNext, 0);
+      assertNodeLine(unmetNext, 'execute');
+      if (readStateFile(dir).currentNode !== 'execute') {
+        throw new Error('依赖未满足时 next 应把工作归属校正到 execute: ' + JSON.stringify(readStateFile(dir).currentNode));
+      }
+      // 串行依赖消化完成（execute 生命周期闭合：completedNodes/evidence 推进）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', unmetTaskContent('done'));
+      const afterSerialState = readStateFile(dir);
+      afterSerialState.completedNodes = [...new Set([...(afterSerialState.completedNodes || []), 'execute'])];
+      afterSerialState.evidence = { ...(afterSerialState.evidence || {}), execute: { summary: 'serial dependency digested' } };
+      writeState(dir, afterSerialState);
+      const delegableNext = runState(['next'], dir);
+      assertExit(delegableNext, 0);
+      assertNodeLine(delegableNext, 'subagent-execute');
+      if (readStateFile(dir).currentNode !== 'subagent-execute') {
+        throw new Error('依赖满足后 next 应把工作归属推到 subagent-execute');
+      }
+      assertExit(runGuard(['entry', 'subagent-execute'], dir), 0);
+      const recoveredRequest = runHandoff(['request', 'P05', 'P05 委托（依赖已满足）', '--write-files', 'src/p05.mjs'], dir, ownershipEnv);
+      assertExit(recoveredRequest, 0);
+      assertOut(recoveredRequest, 'HANDOFF REQUEST: P05');
 
       // ⑮ result 重验零提交资格（真实命令链路）：合法零提交 result 无 HANDOFF ERROR；
       //    request 后修改 .gitignore（路径不再被忽略）→ 新 change BLOCK（request 证据 noCommit
