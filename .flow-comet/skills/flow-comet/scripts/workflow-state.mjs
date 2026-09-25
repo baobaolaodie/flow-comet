@@ -5,7 +5,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, SKILL_PROTOCOL_FILES } from './protocol-utils.mjs';
-import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, looksLikeObjectLiteral, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME } from './state-schema.mjs';
+import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, looksLikeObjectLiteral, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, toPersistedProtocolPath } from './state-schema.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide, skipInit } from './context-init.mjs';
 import { taskOpeningAttrs, taskBlocks } from './task-parsing.mjs';
 import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS } from './route-node.mjs';
@@ -751,6 +751,9 @@ async function main() {
     const branchMode = isInsideWorkTree();
     const state = {
       activeChange: changeName,
+      // 协议来源绑定：init 解析出的协议路径持久化（项目根相对 POSIX；旧 state 缺字段 = 未绑定，
+      // 归属/节点门禁按渐进语义回退环境变量/默认协议）
+      protocolPath: toPersistedProtocolPath(runRoot, protocolPath),
       // currentNode 取协议首节点（内置协议 = open，行为不变；自定义协议 = 首节点，如 brainstorm）
       currentNode: route(protocol)[0]?.id ?? 'open',
       completedNodes: [],

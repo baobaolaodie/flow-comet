@@ -1824,6 +1824,27 @@ const SCENARIOS = [
       assertExit(res, 0);
       assertOut(res, 'ALL CHECKS PASSED');
       assertNotOut(res, 'Unknown workflow Node');
+      // ③ state.protocolPath 持久化绑定优先于 FLOW_COMET_PROTOCOL env：env 指向内置协议
+      // （无 brainstorm 节点），state 绑定自定义协议 → 仍按自定义协议通过。修复前 guard 只看
+      // CLI/env → 走内置协议报 Unknown Node（RED）。
+      const bound = composeState({
+        currentNode: 'brainstorm',
+        evidence: { brainstorm: { summary: 'brainstorm done' } },
+        protocolPath: 'custom-protocol.json',
+      });
+      writeState(dir, bound);
+      const resBound = runGuard(['exit', 'brainstorm'], dir); // runGuard 默认 env=内置协议副本
+      assertExit(resBound, 0);
+      assertOut(resBound, 'ALL CHECKS PASSED');
+      assertNotOut(resBound, 'Unknown workflow Node');
+      // ④ state.protocolPath 绑定不可读 → fail-closed 不回退 env/默认协议，错误说明来源与
+      // 不回退语义（归属门禁可跳过校验，节点门禁没有等价降级路径）。
+      writeState(dir, composeState({ protocolPath: 'missing-protocol.json' }));
+      const resBoundMissing = runGuard(['exit', 'brainstorm'], dir);
+      assertExit(resBoundMissing, 1);
+      assertOut(resBoundMissing, 'state.protocolPath');
+      assertOut(resBoundMissing, '不回退');
+      assertNotOut(resBoundMissing, 'Unknown workflow Node');
     },
   },
 
@@ -3988,6 +4009,23 @@ const SCENARIOS = [
       assertExit(resOrderedAdjudicated, 0);
       assertOut(resOrderedAdjudicated, 'ALL CHECKS PASSED');
       assertNotOut(resOrderedAdjudicated, '用户裁决');
+      // 子断言:中间位置的独立裁决段落（不与条目同段、也不在文末）——指向该条目且含
+      // [升级] 承接 → 放行。实现按独立段落匹配，位置不限；文档须写明这一合法形态。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
+        '# REVIEW\n\n## 发现\n\n### Major\n\n'
+        + '- **F10 · 中段裁决的延期**：某处问题 [升级] [转待办]\n\n'
+        + '- 用户裁决：接受延期 —— 发现 F10（中段裁决的延期）：下一 change 首修。\n\n'
+        + '### Minor\n\n- **m-4 · 小项**：另一个独立问题 [已修]\n\n## 结论\n\n通过\n');
+      const resMidParagraph = runGuard(['exit', 'review'], dir);
+      assertExit(resMidParagraph, 0);
+      assertOut(resMidParagraph, 'ALL CHECKS PASSED');
+      // 子断言:文档口径与实现对齐——review SKILL 须写明「单独段落（指向条目 + [升级] 承接）」
+      // 也是合法裁决位置，避免文档只写「同段或文末」而收窄实现语义（文档未同步 = RED）。
+      const reviewSkillText = fs.readFileSync(
+        path.join(__dirname, '..', '..', 'flow-comet-review', 'SKILL.md'), 'utf8');
+      if (!reviewSkillText.includes('单独段落') || !reviewSkillText.includes('指向') || !reviewSkillText.includes('[升级]')) {
+        throw new Error('flow-comet-review/SKILL.md 未写明「单独段落（指向条目 + [升级] 承接）」合法');
+      }
     },
   },
 
@@ -5688,6 +5726,60 @@ const SCENARIOS = [
       assertOut(resProtocolBroken, '不是合法 JSON');
       assertOut(resProtocolBroken, 'HANDOFF REQUEST: P07');
       assertNotOut(resProtocolBroken, 'BLOCKED');
+      // ⑮ state 协议绑定：init --protocol 指向自定义协议（无 execute / subagent-execute
+      // 节点）→ state.protocolPath 持久化；后续 request 按该协议判定，串行 pending 无对应
+      // enabled 委托节点 → 跳过归属校验。若协议来源未持久化，env 指向内置协议会把串行
+      // pending 误判为归属 execute → BLOCK（修复前 RED）。
+      const boundChange = 'bound-proto';
+      const boundProtocol = {
+        ...proto,
+        nodes: proto.nodes.filter((n) => n.id !== 'execute' && n.id !== 'subagent-execute'),
+      };
+      writeFile(dir, 'reference/protocol-bound.json', JSON.stringify(boundProtocol, null, 2) + '\n');
+      assertExit(runState(['init', boundChange, '--init-skip', '--protocol', 'reference/protocol-bound.json'], dir), 0);
+      writeFile(dir, '.specs/' + boundChange + '/TASK.md', taskXml('B01', 'parallel="false" status="pending"', 'src/b01.mjs'));
+      const resBound = runHandoff(['request', 'B01', 'bound protocol serial'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(resBound, 0);
+      assertOut(resBound, 'HANDOFF REQUEST: B01');
+      assertNotOut(resBound, 'BLOCKED');
+      assertNotOut(resBound, '本次未执行归属校验'); // 协议可读且无对应 enabled 节点 → 跳过校验，不产生不可读 WARN
+      const boundState = readScenarioState(dir);
+      if (boundState.protocolPath !== 'reference/protocol-bound.json') {
+        throw new Error('init 应把解析后的协议路径持久化为项目根相对形态，实际: ' + JSON.stringify(boundState.protocolPath));
+      }
+      if (!boundState.evidence?.['subagent-execute']?.handoffRequests?.B01) {
+        throw new Error('state 绑定协议下的 request 应照常落库');
+      }
+      // ⑯ state.protocolPath 存在但不可读 → 不回退 env/默认（回退会按内置协议把串行 pending
+      // 误判为归属 execute → BLOCK）；可见 WARN 说明来源 +「本次未执行归属校验」后放行。
+      const boundMissingState = readScenarioState(dir);
+      boundMissingState.protocolPath = 'reference/protocol-bound-missing.json';
+      writeState(dir, boundMissingState);
+      writeFile(dir, '.specs/' + boundChange + '/TASK.md', taskXml('B02', 'parallel="false" status="pending"', 'src/b02.mjs'));
+      const resBoundMissing = runHandoff(['request', 'B02', 'bound protocol unreadable'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(resBoundMissing, 0);
+      assertOut(resBoundMissing, 'WARN:');
+      assertOut(resBoundMissing, '本次未执行归属校验');
+      assertOut(resBoundMissing, 'state.protocolPath');
+      assertOut(resBoundMissing, '协议文件不存在');
+      assertOut(resBoundMissing, 'HANDOFF REQUEST: B02');
+      assertNotOut(resBoundMissing, 'BLOCKED');
+      if (!readScenarioState(dir).evidence?.['subagent-execute']?.handoffRequests?.B02) {
+        throw new Error('state.protocolPath 不可读应可见 WARN 后照常落库');
+      }
+      // ⑰ 旧 state（无 protocolPath 字段）→ env/默认回退不回归：env 指向内置协议时，串行
+      // pending 在 open 节点发起仍按内置协议归属 execute → BLOCK（缺字段 = 渐进兼容路径）。
+      const legacyBoundState = readScenarioState(dir);
+      delete legacyBoundState.protocolPath;
+      legacyBoundState.currentNode = 'open';
+      writeState(dir, legacyBoundState);
+      writeFile(dir, '.specs/' + boundChange + '/TASK.md', taskXml('B03', 'parallel="false" status="pending"', 'src/b03.mjs'));
+      const resLegacyBound = runHandoff(['request', 'B03', 'legacy state no binding'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(resLegacyBound, 1);
+      assertOut(resLegacyBound, 'BLOCKED: 任务 B03（串行 pending）应归属节点 execute');
     },
   },
 

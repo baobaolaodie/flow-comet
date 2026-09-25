@@ -2,8 +2,8 @@
   import { constants as fsConstants, promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, RUNTIME_STATE_PATH, LEGACY_RUNTIME_STATE_PATH } from './state-schema.mjs';
-import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, workflowPathInside, inspectWorkflowProtectedPath, readWorkflowProtectedFile, workflowFileObjectIdentity, workflowSameFileObject, workflowSameFileStat } from './protocol-utils.mjs';
+import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, RUNTIME_STATE_PATH, LEGACY_RUNTIME_STATE_PATH, resolveProtocolPathWithState, hasProtocolCliArg } from './state-schema.mjs';
+import { readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, workflowPathInside, inspectWorkflowProtectedPath, readWorkflowProtectedFile, workflowFileObjectIdentity, workflowSameFileObject, workflowSameFileStat } from './protocol-utils.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from './task-parsing.mjs';
 import { resolveNextNode, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS, TASK_SET_SIGNATURE_ALGO, taskSetSignature, parseTaskSetSignature, sameTaskSetSignature, taskSetSignatureVersionSkew, classifyFixReturnCause, normalizeHeading, FIX_SECTION_TITLE_FALLBACK } from './route-node.mjs';
 
@@ -13,9 +13,11 @@ const apply = process.argv.includes('--apply');
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..');
 const runRoot = process.env.FLOW_COMET_RUN_ROOT ? path.resolve(process.env.FLOW_COMET_RUN_ROOT) : process.cwd();
-// 协议路径解析（resolveProtocol）：--protocol 全局参数从命令后的剩余参数提取（command=argv[2]），
-// 其次 FLOW_COMET_PROTOCOL 环境变量，最后内置默认 <packageRoot>/reference/workflow-protocol.json
-const protocolPath = resolveProtocol(packageRoot, runRoot, process.argv.slice(3));
+// 协议路径解析：显式 --protocol 全局参数（command=argv[2] 之后的剩余参数）> state.protocolPath
+// （init 持久化绑定）> FLOW_COMET_PROTOCOL 环境变量 > 内置默认
+// <packageRoot>/reference/workflow-protocol.json。选择在 main() 内执行（state.protocolPath 需先读
+// 标准运行时状态文件引导，协议决定 statePath 时存在先后次序），此处仅声明供 main 与错误文案使用。
+let protocolPath = null;
 
 
 const WORKFLOW_PROJECT_FILE_MAX_BYTES = 2 * 1024 * 1024;
@@ -1149,15 +1151,55 @@ async function derivedFixSectionTitle() {
 let __warnCount = 0;
 const __origError = console.error;
 
+// 协议绑定引导读取：协议决定 statePath，故协议未解析前只能读标准运行时状态文件，仅取
+// state.protocolPath 用于协议选择；文件缺失/旧 state 缺字段/读取失败 → null（未绑定），由统一
+// 解析回退 CLI/环境变量/默认协议。不改变后续 statePath 解析与读写语义。
+async function readPersistedProtocolBinding() {
+  const standardStateFile = path.join(runRoot, ...RUNTIME_STATE_PATH.split('/'));
+  try {
+    if (!(await fileExists(standardStateFile))) return null;
+    const state = await readStateJson(standardStateFile);
+    return state && typeof state === 'object' ? state : null;
+  } catch {
+    return null;
+  }
+}
+
+// 协议路径选择（单一权威）：显式 --protocol CLI 参数优先；无 CLI 时按 state.protocolPath >
+// FLOW_COMET_PROTOCOL 环境变量 > 默认解析。state.protocolPath 存在但不可读时 fail-closed
+// （受保护读取/schema 校验抛错由 main().catch 统一处理）——不静默回退到另一份协议造成门禁按错误
+// 协议判定。
+async function resolveGuardProtocolPath() {
+  const cliArgs = process.argv.slice(3);
+  if (hasProtocolCliArg(cliArgs)) {
+    return resolveProtocolPathWithState({ packageRoot, runRoot, cliArgs });
+  }
+  const state = await readPersistedProtocolBinding();
+  return resolveProtocolPathWithState({ packageRoot, runRoot, state });
+}
+
 async function main() {
   // 包装 console.error 统计 WARN 输出（转发原实现，行为不变）
   console.error = (...args) => {
     if (/WARN/.test(args.join(' '))) __warnCount += 1;
     __origError(...args);
   };
-  // 受保护读取 + fail-closed schema 校验（读失败/校验失败沿用 throw → main().catch 统一处理）
-  const protocol = await readProtocolFile(runRoot, protocolPath);
-  validateProtocolSchema(protocol);
+  // 协议路径选择 + 受保护读取 + fail-closed schema 校验（读失败/校验失败沿用 throw →
+  // main().catch 统一处理；来源为 state.protocolPath 时补充来源与不回退说明）
+  const selectedProtocol = await resolveGuardProtocolPath();
+  protocolPath = selectedProtocol.protocolPath;
+  let protocol;
+  try {
+    protocol = await readProtocolFile(runRoot, protocolPath);
+    validateProtocolSchema(protocol);
+  } catch (error) {
+    if (selectedProtocol.source === 'state') {
+      throw new Error('state.protocolPath 指向的协议不可读（' + protocolPath + '）：'
+        + (error && typeof error.message === 'string' ? error.message : String(error))
+        + '——不回退环境变量/默认协议（回退会按错误协议判定门禁）；修正 state.protocolPath 或移除绑定后重试');
+    }
+    throw error;
+  }
   if (command === 'verify') {
     console.log('workflow-guard-ok');
     return;

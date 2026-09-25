@@ -19,7 +19,7 @@ This node performs a structured multi-round review of the implemented change, ch
 
 | 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
 |------|-------------------------------|-----------------------------------|
-| REVIEW.md | 文件 ≥ 100 字节；发现区条目处置标记（`[已修]` / `[升级]` / `[转待办]`——新 change 缺失 BLOCKED,旧 change WARN 渐进）；**Major `[转待办]` 须有用户裁决记录**（同段或文末「用户裁决：接受延期」+ 指向该条目 + `[升级]` 承接）——缺失新 change BLOCKED / 旧 change WARN 渐进 | `## Critical` / `## 发现` / `## 结论` 等段（结构要求，guard 不拦段名） |
+| REVIEW.md | 文件 ≥ 100 字节；发现区条目处置标记（`[已修]` / `[升级]` / `[转待办]`——新 change 缺失 BLOCKED,旧 change WARN 渐进）；**Major `[转待办]` 须有用户裁决记录**（同段、文末或单独段落「用户裁决：接受延期」+ 指向该条目 + `[升级]` 承接——单独段落与条目以空行分隔、位置不限）——缺失新 change BLOCKED / 旧 change WARN 渐进 | `## Critical` / `## 发现` / `## 结论` 等段（结构要求，guard 不拦段名） |
 
 guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
 
@@ -97,7 +97,7 @@ guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好�
    - `[已修]` — fixed via a fix task (linked in the entry)
    - `[升级]` — escalated to the user for a decision (accept + reason recorded)
    - `[转待办]` — deferred to `.specs/<change-id>/KNOWN-ISSUES.md` at archive time
-   - **Major 不得由 reviewer 自行 `[转待办]`**：Major 的延期属用户决策点，reviewer 须先标 `[升级]` 等用户裁决；用户接受延期后，在同段或文末记录「用户裁决：接受延期」并指向该条目（由 `[升级]` 承接），方可标 `[转待办]`。review exit 结构校验：Major 条目标 `[转待办]` 而缺上述记录 → 新 change BLOCKED / 旧 change WARN 渐进；Minor `[转待办]` 不受影响，`[升级]` / `[已修]` 的 Major 直接放行。
+   - **Major 不得由 reviewer 自行 `[转待办]`**：Major 的延期属用户决策点，reviewer 须先标 `[升级]` 等用户裁决；用户接受延期后，在同段、文末或单独段落记录「用户裁决：接受延期」并指向该条目（由 `[升级]` 承接），方可标 `[转待办]`——单独段落与发现条目以空行分隔、可位于发现区中间，位置不限（guard 按独立段落匹配，不要求位于文末）。review exit 结构校验：Major 条目标 `[转待办]` 而缺上述记录 → 新 change BLOCKED / 旧 change WARN 渐进；Minor `[转待办]` 不受影响，`[升级]` / `[已修]` 的 Major 直接放行。
    The exit guard structurally checks these markers on the findings area: a missing marker **blocks** the exit for a new change, and is a non-blocking warning for a legacy change (to avoid deadlocking legacy reviews). Add markers to clear it.
 
 The full review protocol, templates, and checklists are in:

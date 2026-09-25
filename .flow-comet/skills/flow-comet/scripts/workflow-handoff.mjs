@@ -3,10 +3,9 @@ import { execFileSync } from 'child_process';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { validateStateFields, looksLikeObjectLiteral, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME } from './state-schema.mjs';
+import { validateStateFields, looksLikeObjectLiteral, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, resolveProtocolPathWithState } from './state-schema.mjs';
 import { EXECUTE_FAMILY_NODE_IDS, protocolNodeEnabled, resolveDelegationTarget, taskDependencyEligibility } from './route-node.mjs';
 import {
-  resolveProtocol,
   readProtocolFile,
   validateProtocolSchema,
   inspectWorkflowPathSegments,
@@ -267,35 +266,42 @@ async function writeState(state) {
 // 协议不可读 → 可见 WARN（含原因 +「本次未执行归属校验」）后放行，不静默、不新增硬 BLOCK。
 // 判定只读 state 与协议：BLOCK 路径在首个 state.evidence 写入之前返回，state 字节零改写、不落请求记录。
 
-// 协议读取（归属判定用）：协议路径走 protocol-utils 的统一解析（不消费 request 的 CLI 参数，
-// 仅 env 覆盖 + packageRoot 默认协议）。读取/解析/schema 校验失败时不静默 skip：返回失败原因，
-// 由调用方输出低噪声可见 WARN；新/旧 change 均不因此新增硬 BLOCK。
-async function readOwnershipProtocol() {
+// 协议读取（归属判定用）：协议路径统一由 state-schema.mjs 的 resolveProtocolPathWithState 选择
+// （不消费 request 的 CLI 参数）：state.protocolPath（init 持久化绑定）> FLOW_COMET_PROTOCOL 环境变量 >
+// 内置默认协议。state.protocolPath 存在但不可读时不回退环境变量/默认——回退会在自定义协议缺节点时
+// 按默认协议误判归属；读取/解析/schema 校验失败统一返回失败原因，由调用方输出低噪声可见 WARN，
+// 新/旧 change 均不因此新增硬 BLOCK。
+async function readOwnershipProtocol(state) {
   let protocolPath = null;
+  let source = null;
   try {
-    protocolPath = resolveProtocol(packageRoot, runRoot);
+    const selected = resolveProtocolPathWithState({ packageRoot, runRoot, state });
+    protocolPath = selected.protocolPath;
+    source = selected.source;
     const protocol = await readProtocolFile(runRoot, protocolPath);
     validateProtocolSchema(protocol);
     return { protocol, failure: null };
   } catch (error) {
-    return { protocol: null, failure: describeProtocolReadFailure(error, protocolPath) };
+    return { protocol: null, failure: describeProtocolReadFailure(error, protocolPath, source) };
   }
 }
 
 // 协议读取失败原因归类（低噪声单行消息用；不打印堆栈、不回显文件内容）：
 // 缺失 / 受保护路径拒绝 / JSON 解析失败 / schema 非法 / 其余原样归类。
-function describeProtocolReadFailure(error, protocolPath) {
+// 来源为 state.protocolPath 时附注来源，便于区分「绑定协议不可读」与「回退解析不可读」。
+function describeProtocolReadFailure(error, protocolPath, source = null) {
   const location = protocolPath === null ? '（路径未解析）' : '：' + protocolPath;
+  const origin = source === 'state' ? '（来源 state.protocolPath）' : '';
   const message = error && typeof error.message === 'string' ? error.message : String(error);
-  if (error && error.code === 'ENOENT') return '协议文件不存在' + location;
+  if (error && error.code === 'ENOENT') return '协议文件不存在' + location + origin;
   if (message.includes('must stay inside the project root')) {
-    return '协议路径不在当前项目根内（受保护读取拒绝）' + location;
+    return '协议路径不在当前项目根内（受保护读取拒绝）' + location + origin;
   }
-  if (message.includes('is not valid JSON')) return '协议文件不是合法 JSON' + location;
+  if (message.includes('is not valid JSON')) return '协议文件不是合法 JSON' + location + origin;
   if (message.includes('protocol') || message.includes('schema')) {
-    return '协议内容不合法：' + message;
+    return '协议内容不合法：' + message + origin;
   }
-  return '协议读取失败：' + message;
+  return '协议读取失败：' + message + origin;
 }
 
 // 路由事实：从 TASK.md 全文派生 done id 集合与目标任务块。解析走 task-parsing 的开标签
@@ -318,7 +324,7 @@ function taskRouteFacts(taskContent, taskId) {
 // skip 的 reason='protocol-unavailable' 携带 protocolFailure（调用方输出可见 WARN 后放行）。
 async function assessRequestOwnership(state, taskAttrs, taskContent) {
   if (!taskAttrs || taskAttrs.status !== 'pending') return { verdict: 'skip', reason: 'not-pending' };
-  const protocolRead = await readOwnershipProtocol();
+  const protocolRead = await readOwnershipProtocol(state);
   if (protocolRead.protocol === null) {
     return { verdict: 'skip', reason: 'protocol-unavailable', protocolFailure: protocolRead.failure };
   }

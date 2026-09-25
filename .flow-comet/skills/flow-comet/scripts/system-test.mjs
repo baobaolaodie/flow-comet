@@ -3212,6 +3212,31 @@ const TEST_ITEMS = [
         fs.rmSync(escapeTarget, { recursive: true, force: true });
       }
 
+      // ⑱ state 协议绑定（真实命令链路）：init --protocol 自定义协议（无 execute /
+      //    subagent-execute 节点）→ state.protocolPath 持久化 → handoff request 按该协议
+      //    判定（无对应 enabled 委托节点 → 跳过归属校验、不 BLOCK）。env 指向内置协议，
+      //    协议来源未持久化时会误判串行 pending 归属 execute → BLOCK（修复前 RED）。
+      const boundChange = 'bound-proto-real';
+      const boundProtocol = JSON.parse(fs.readFileSync(path.join(dir, 'reference', 'workflow-protocol.json'), 'utf8'));
+      boundProtocol.nodes = boundProtocol.nodes.filter((n) => n.id !== 'execute' && n.id !== 'subagent-execute');
+      writeFile(dir, 'reference/protocol-bound.json', JSON.stringify(boundProtocol, null, 2) + '\n');
+      assertExit(runState(['init', boundChange, '--init-skip', '--protocol', 'reference/protocol-bound.json'], dir), 0);
+      writeFile(dir, '.specs/' + boundChange + '/TASK.md',
+        '# TASK\n\n<task id="R01" parallel="false" status="pending"><action>实现 R01</action>'
+        + '<write_files>src/r01.mjs</write_files><verify>node --check src/r01.mjs</verify></task>\n');
+      const boundRequest = runHandoff(['request', 'R01', 'bound protocol serial'], dir, ownershipEnv);
+      assertExit(boundRequest, 0);
+      assertOut(boundRequest, 'HANDOFF REQUEST: R01');
+      assertNotOut(boundRequest, 'BLOCKED');
+      assertNotOut(boundRequest, '本次未执行归属校验');
+      const boundState = readStateFile(dir);
+      if (boundState.protocolPath !== 'reference/protocol-bound.json') {
+        throw new Error('init --protocol 应把解析后的协议路径持久化为项目根相对形态，实际: '
+          + JSON.stringify(boundState.protocolPath));
+      }
+      if (!boundState.evidence?.['subagent-execute']?.handoffRequests?.R01) {
+        throw new Error('state 绑定协议下的 request 应照常落库');
+      }
     },
   },
 
