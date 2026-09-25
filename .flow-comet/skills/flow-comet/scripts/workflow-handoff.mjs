@@ -225,21 +225,39 @@ async function writeState(state) {
 
 // ---------- request 归属门禁（只读判定） ----------
 // 归属目标与依赖资格一律复用 route-node 的共享纯函数（单一权威）：门禁不在本文件内联
-// 「parallel → 目标节点」映射。协议无对应 enabled 节点 → 跳过门禁。
+// 「parallel → 目标节点」映射。协议无对应 enabled 节点 → 跳过门禁（不产生归属 WARN）；
+// 协议不可读 → 可见 WARN（含原因 +「本次未执行归属校验」）后放行，不静默、不新增硬 BLOCK。
 // 判定只读 state 与协议：BLOCK 路径在首个 state.evidence 写入之前返回，state 字节零改写、不落请求记录。
 
 // 协议读取（归属判定用）：协议路径走 protocol-utils 的统一解析（不消费 request 的 CLI 参数，
-// 仅 env 覆盖 + packageRoot 默认协议）；协议缺失/不可读/schema 非法 → null（调用方跳过，
-// 不误伤请求）。enabled 语义由 route-node 的共享判定给出，不在本文件另做过滤。
+// 仅 env 覆盖 + packageRoot 默认协议）。读取/解析/schema 校验失败时不静默 skip：返回失败原因，
+// 由调用方输出低噪声可见 WARN；新/旧 change 均不因此新增硬 BLOCK。
 async function readOwnershipProtocol() {
+  let protocolPath = null;
   try {
-    const protocolPath = resolveProtocol(packageRoot, runRoot);
+    protocolPath = resolveProtocol(packageRoot, runRoot);
     const protocol = await readProtocolFile(runRoot, protocolPath);
     validateProtocolSchema(protocol);
-    return protocol;
-  } catch {
-    return null;
+    return { protocol, failure: null };
+  } catch (error) {
+    return { protocol: null, failure: describeProtocolReadFailure(error, protocolPath) };
   }
+}
+
+// 协议读取失败原因归类（低噪声单行消息用；不打印堆栈、不回显文件内容）：
+// 缺失 / 受保护路径拒绝 / JSON 解析失败 / schema 非法 / 其余原样归类。
+function describeProtocolReadFailure(error, protocolPath) {
+  const location = protocolPath === null ? '（路径未解析）' : '：' + protocolPath;
+  const message = error && typeof error.message === 'string' ? error.message : String(error);
+  if (error && error.code === 'ENOENT') return '协议文件不存在' + location;
+  if (message.includes('must stay inside the project root')) {
+    return '协议路径不在当前项目根内（受保护读取拒绝）' + location;
+  }
+  if (message.includes('is not valid JSON')) return '协议文件不是合法 JSON' + location;
+  if (message.includes('protocol') || message.includes('schema')) {
+    return '协议内容不合法：' + message;
+  }
+  return '协议读取失败：' + message;
 }
 
 // 路由事实：从 TASK.md 全文派生 done id 集合与目标任务块。解析走 task-parsing 的开标签
@@ -258,11 +276,15 @@ function taskRouteFacts(taskContent, taskId) {
 
 // 归属判定：仅 status=pending 的任务参与；比较原始 state.currentNode（不取任何派生 currentNode）。
 // 目标与依赖资格经 route-node 共享纯函数求得，与 next/路由使用同一判定。
-// 返回 { verdict: 'skip' | 'pass' | 'not-entered' | 'mismatch' | 'not-delegable', ... }。
+// 返回 { verdict: 'skip' | 'pass' | 'not-entered' | 'mismatch' | 'not-delegable', ... }；
+// skip 的 reason='protocol-unavailable' 携带 protocolFailure（调用方输出可见 WARN 后放行）。
 async function assessRequestOwnership(state, taskAttrs, taskContent) {
   if (!taskAttrs || taskAttrs.status !== 'pending') return { verdict: 'skip', reason: 'not-pending' };
-  const protocol = await readOwnershipProtocol();
-  if (protocol === null) return { verdict: 'skip', reason: 'protocol-unavailable' };
+  const protocolRead = await readOwnershipProtocol();
+  if (protocolRead.protocol === null) {
+    return { verdict: 'skip', reason: 'protocol-unavailable', protocolFailure: protocolRead.failure };
+  }
+  const protocol = protocolRead.protocol;
   const { doneIds, targetBlock } = taskRouteFacts(taskContent, taskAttrs.id);
   const dependency = targetBlock
     ? taskDependencyEligibility(targetBlock, doneIds)
@@ -290,12 +312,18 @@ async function assessRequestOwnership(state, taskAttrs, taskContent) {
 }
 
 // 渲染归属判定结果（只输出与退出，不写 state）：
+// 协议不可读 → 可见 WARN（含原因与「本次未执行归属校验」）后放行，不静默、不阻断。
 // 不可委托 → 新 change BLOCK / 旧 change 可见 WARN 后继续；恢复指引以 workflow-state next 的
 // 实际 NODE 输出为准，不固定指向 next 不会输出的节点（依赖未满足时路由按串行消化走 execute）。
 // 归属目标不匹配 → 同样先按 next 的路由指引进入；正确节点未 entry → 可见 WARN 不阻断。
 function reportRequestOwnership(state, taskId, taskAttrs, ownership) {
   const kind = taskAttrs && taskAttrs.parallel === true ? '并行' : '串行';
   const current = String(state.currentNode);
+  if (ownership.verdict === 'skip' && ownership.reason === 'protocol-unavailable') {
+    console.error('WARN: 任务 ' + taskId + ' 的委托归属校验未执行——协议不可读（'
+      + ownership.protocolFailure + '）；本次未执行归属校验，请求照常记录（新/旧 change 均不因此阻断）');
+    return;
+  }
   if (ownership.verdict === 'not-delegable') {
     const unmet = Array.isArray(ownership.unmet) ? ownership.unmet : [];
     const detail = '任务 ' + taskId + '（' + kind + ' pending）当前不可委托：依赖未满足'

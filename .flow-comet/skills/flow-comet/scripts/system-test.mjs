@@ -2868,9 +2868,16 @@ const TEST_ITEMS = [
       const stIgnored = readStateFile(dir);
       stIgnored.newChange = true;
       writeState(dir, stIgnored);
-      const reqIgnored = runHandoff(['request', 'T12'], dir);
+      const reqIgnored = runHandoff(['request', 'T12'], dir, { FLOW_COMET_PROTOCOL: '' });
       assertExit(reqIgnored, 0);
       assertOut(reqIgnored, 'HANDOFF REQUEST: T12');
+      // 协议不可读边界（真实链路）：runHandoff 不默认注入协议（独立于 runGuard/runState），
+      // 此处显式清空协议环境变量以固定「临时 runRoot 无可用协议」形态——归属门禁必须输出
+      // 可见 WARN（原因 + 本次未执行归属校验）后放行，不得静默 skip，且零提交资格等既有
+      // 请求行为不变。
+      assertOut(reqIgnored, 'WARN:');
+      assertOut(reqIgnored, '协议不可读');
+      assertOut(reqIgnored, '本次未执行归属校验');
       assertOut(reqIgnored, 'HANDOFF 零提交资格: T12');
       const stIgnoredReq = readStateFile(dir);
       if (stIgnoredReq.evidence['subagent-execute'].handoffRequests['T12'].noCommit !== true) {

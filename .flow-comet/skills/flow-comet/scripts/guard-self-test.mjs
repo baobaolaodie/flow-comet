@@ -5345,8 +5345,9 @@ const SCENARIOS = [
 
       // ===== M-02 request 时刻归属门禁（AC-2 不误伤面）=====
       // 正确节点成功 / 串行错配 BLOCK / 未 entry WARN / done 与显式 write-files 旁路 /
-      // 协议无对应 enabled 节点跳过。归属门禁位于技能声明门之后——新 change 夹具必须放入
-      // 本节点声明标记，否则先被技能门 BLOCK，测不到归属门禁本身。
+      // 协议无对应 enabled 节点跳过 / 协议不可读可见 WARN 后放行（不静默）。归属门禁位于
+      // 技能声明门之后——新 change 夹具必须放入本节点声明标记，否则先被技能门 BLOCK，
+      // 测不到归属门禁本身。
       const writeMarker = (node) => {
         fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
         writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/' + node + '-flow-comet-dev.json',
@@ -5429,6 +5430,7 @@ const SCENARIOS = [
         { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'protocol-nosub.json') });
       assertExit(resNoSub, 0);
       assertNotOut(resNoSub, 'BLOCKED');
+      assertNotOut(resNoSub, '本次未执行归属校验'); // 协议可读且无对应 enabled 节点 → 跳过校验，不产生归属 WARN
       assertOut(resNoSub, 'HANDOFF REQUEST: P02');
       // ⑩ 节点被 disabled → 同样跳过归属门禁
       const disabledProto = { ...proto, nodes: proto.nodes.map((n) => (n.id === 'subagent-execute' ? { ...n, disabled: true } : n)) };
@@ -5442,6 +5444,7 @@ const SCENARIOS = [
         { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'protocol-disabled.json') });
       assertExit(resDisabled, 0);
       assertNotOut(resDisabled, 'BLOCKED');
+      assertNotOut(resDisabled, '本次未执行归属校验'); // disabled 节点语义与缺节点一致 → 跳过校验且无归属 WARN
       assertOut(resDisabled, 'HANDOFF REQUEST: P03');
       // ⑪ pending 并行任务依赖未满足 → BLOCK 指引与 next 实际输出一致（next 按串行消化输出
       // execute）；依赖满足后按 next 输出进入委托节点，request 恢复成功——无 entry 死路。
@@ -5497,6 +5500,63 @@ const SCENARIOS = [
       const resRecovered = runHandoff(['request', 'P04', 'now delegable'], dir, env);
       assertExit(resRecovered, 0);
       assertOut(resRecovered, 'HANDOFF REQUEST: P04');
+      // ⑫ 协议不可读（默认解析指向 runRoot 外的内置协议，受保护读取拒绝）→ 可见 WARN（原因 +
+      // 「本次未执行归属校验」）+ 放行语义不变。修复前此形态静默 skip（无 WARN、照常落库）＝假绿。
+      writeMarker('execute');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskXml('P05', 'parallel="true" status="pending"', 'src/p05.mjs'));
+      const stNoProtocol = baseState('execute');
+      stNoProtocol.newChange = true;
+      stNoProtocol.enteredNodes = ['execute'];
+      writeState(dir, stNoProtocol);
+      const resNoProtocol = runHandoff(['request', 'P05', 'no protocol'], dir, { FLOW_COMET_PROTOCOL: '' });
+      assertExit(resNoProtocol, 0);
+      assertOut(resNoProtocol, 'WARN:');
+      assertOut(resNoProtocol, '本次未执行归属校验');
+      assertOut(resNoProtocol, '协议路径不在当前项目根内');
+      assertOut(resNoProtocol, 'HANDOFF REQUEST: P05');
+      assertNotOut(resNoProtocol, 'BLOCKED');
+      if (!readScenarioState(dir).evidence?.['subagent-execute']?.handoffRequests?.P05) {
+        throw new Error('协议不可读应可见 WARN 后照常落库（放行语义不变），实际未落请求记录');
+      }
+      // ⑬ 协议文件缺失（显式指向 runRoot 内不存在的路径）→ 同类可见 WARN（原因=文件不存在）+ 放行
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskXml('P06', 'parallel="true" status="pending"', 'src/p06.mjs'));
+      const stProtocolMissing = baseState('execute');
+      stProtocolMissing.newChange = true;
+      stProtocolMissing.enteredNodes = ['execute'];
+      writeState(dir, stProtocolMissing);
+      const resProtocolMissing = runHandoff(['request', 'P06', 'missing protocol'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'protocol-missing.json') });
+      assertExit(resProtocolMissing, 0);
+      assertOut(resProtocolMissing, 'WARN:');
+      assertOut(resProtocolMissing, '本次未执行归属校验');
+      assertOut(resProtocolMissing, '协议文件不存在');
+      assertOut(resProtocolMissing, 'HANDOFF REQUEST: P06');
+      assertNotOut(resProtocolMissing, 'BLOCKED');
+      // 旧 change 同形态 → 同样仅可见 WARN + 照常落库（协议不可读不区分新旧 change 新增硬 BLOCK）
+      const stProtocolMissingOld = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      delete stProtocolMissingOld.newChange;
+      writeState(dir, stProtocolMissingOld);
+      const resProtocolMissingOld = runHandoff(['request', 'P06', 'missing protocol legacy'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'protocol-missing.json') });
+      assertExit(resProtocolMissingOld, 0);
+      assertOut(resProtocolMissingOld, '本次未执行归属校验');
+      assertOut(resProtocolMissingOld, 'HANDOFF REQUEST: P06');
+      assertNotOut(resProtocolMissingOld, 'BLOCKED');
+      // ⑭ 协议解析失败（非法 JSON 文件）→ 同类可见 WARN（原因=不是合法 JSON）+ 放行
+      writeFile(dir, 'reference/protocol-broken.json', '{ not-json\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskXml('P07', 'parallel="true" status="pending"', 'src/p07.mjs'));
+      const stProtocolBroken = baseState('execute');
+      stProtocolBroken.newChange = true;
+      stProtocolBroken.enteredNodes = ['execute'];
+      writeState(dir, stProtocolBroken);
+      const resProtocolBroken = runHandoff(['request', 'P07', 'broken protocol'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'protocol-broken.json') });
+      assertExit(resProtocolBroken, 0);
+      assertOut(resProtocolBroken, 'WARN:');
+      assertOut(resProtocolBroken, '本次未执行归属校验');
+      assertOut(resProtocolBroken, '不是合法 JSON');
+      assertOut(resProtocolBroken, 'HANDOFF REQUEST: P07');
+      assertNotOut(resProtocolBroken, 'BLOCKED');
     },
   },
 
