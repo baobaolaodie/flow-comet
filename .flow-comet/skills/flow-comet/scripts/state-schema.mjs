@@ -2,6 +2,8 @@
 // 批次 D 内置节点常量：自 workflow-state.mjs C6 内联表原样迁移，供 workflow-state / workflow-guard / workflow-handoff 三脚本共用。
 // 语义（与批次 C C6 完全一致）：存在字段逐一校验；未知字段放行（前向兼容）；缺字段放行（readState 默认补）；
 // 只校验存在字段的类型。调用方负责 BLOCKED / exit(1) 处理。
+import path from 'path';
+import { resolveProtocol } from './protocol-utils.mjs';
 
 // ---------- 运行时路径常量（单一来源）----------
 // 「状态文件在哪」曾是一个被独立表达在 6 处的决策（协议 state.statePath、workflow-state 默认值、
@@ -17,6 +19,44 @@ export const RUNTIME_STATE_PATH = RUNTIME_DIR + '/' + RUNTIME_STATE_FILE_NAME;
 // 只导出完整相对路径——消费方（guard 的跨命名空间探测）按整文件路径使用，导出裸目录名属于无消费方的
 // 死 API 面（且会诱使调用方自行拼路径，重新引入第二处决策）。
 export const LEGACY_RUNTIME_STATE_PATH = '.comet/' + RUNTIME_STATE_FILE_NAME;
+
+// ---------- 协议来源解析（state 持久化绑定 · 单一权威） ----------
+// init 解析出的协议路径持久化在 state.protocolPath：项目根内 → 根相对 POSIX 形态（随项目迁移），
+// 项目根外 → 绝对路径原样保留。消费方按统一优先级选择协议路径：
+//   显式 --protocol CLI 参数（仅消费自身 CLI 的入口传入）> state.protocolPath >
+//   FLOW_COMET_PROTOCOL 环境变量 > 内置默认协议。
+// state.protocolPath 一旦存在即独占：读取/解析失败由调用方按可见告警处理，不回退环境变量或默认——
+// 回退会在自定义协议缺节点时按默认协议误判归属。旧 state 缺字段 = 未绑定（渐进兼容，走既有解析）。
+export function hasProtocolCliArg(cliArgs = []) {
+  return (Array.isArray(cliArgs) ? cliArgs : []).some(
+    (arg) => arg === '--protocol' || (typeof arg === 'string' && arg.startsWith('--protocol=')),
+  );
+}
+
+// init 持久化形态归一：项目根内路径 → 根相对 POSIX；根外/退化形态 → 绝对路径原样。
+export function toPersistedProtocolPath(runRoot, protocolPath) {
+  const absolute = path.resolve(protocolPath);
+  const relative = path.relative(path.resolve(runRoot), absolute);
+  if (relative === '' || path.isAbsolute(relative) || relative === '..' || relative.startsWith('..' + path.sep)) {
+    return absolute;
+  }
+  return relative.split(path.sep).join('/');
+}
+
+// 统一协议路径选择。返回 { protocolPath, source }，source ∈ 'cli' | 'state' | 'env-or-default'。
+// 只做路径选择，不读文件；调用方负责读取失败时的可见告警与放行/失败语义。
+export function resolveProtocolPathWithState({ packageRoot, runRoot, state = null, cliArgs = [] } = {}) {
+  if (hasProtocolCliArg(cliArgs)) {
+    return { protocolPath: resolveProtocol(packageRoot, runRoot, cliArgs), source: 'cli' };
+  }
+  const persisted = state && typeof state === 'object' && typeof state.protocolPath === 'string'
+    ? state.protocolPath.trim()
+    : '';
+  if (persisted !== '') {
+    return { protocolPath: path.resolve(runRoot, persisted), source: 'state' };
+  }
+  return { protocolPath: resolveProtocol(packageRoot, runRoot, []), source: 'env-or-default' };
+}
 
 // 疑似对象字面量判定（单一来源——设计语义 / AC-1：workflow-state record 与
 // workflow-handoff result 共用，两脚本不再各自定义）：trim 后以 {/[ 开头 → 视作
@@ -36,6 +76,9 @@ export const STATE_FIELD_VALIDATORS = [
   { field: 'verifyFailures', check: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 },
   // verifyFailures 按 change 存储:change-id → 非负整数计数(旧顶层字段为迁移通道,新 state 用本字段)
   { field: 'verifyFailuresByChange', check: (v) => (typeof v === 'object' && v !== null && !Array.isArray(v) && Object.values(v).every((x) => typeof x === 'number' && Number.isFinite(x) && x >= 0)) || v === undefined || v === null },
+  // Fix 受控归位轮次按 change 存储:change-id → 非负整数计数(与 verifyFailuresByChange 同型;
+  // 旧 state 缺字段默认 0,旧 change 不因计数卡死)
+  { field: 'fixRoundsByChange', check: (v) => (typeof v === 'object' && v !== null && !Array.isArray(v) && Object.values(v).every((x) => typeof x === 'number' && Number.isFinite(x) && x >= 0)) || v === undefined || v === null },
   { field: 'executionMode', check: (v) => v === 'subagent' || v === 'direct' },
   { field: 'directOverride', check: (v) => typeof v === 'boolean' },
   { field: 'taskHash', check: (v) => typeof v === 'string' || v === undefined },
@@ -52,6 +95,8 @@ export const STATE_FIELD_VALIDATORS = [
   { field: 'ai_context_doc', check: (v) => typeof v === 'string' || v === null },
   // auto-init-detection: 上次全量初始化扫描时间（ISO 日期字符串或 null）
   { field: 'last_intel_scan', check: (v) => typeof v === 'string' || v === null },
+  // 协议来源绑定（init 持久化解析后的协议路径；旧 state 缺字段 = 未绑定，归属门禁渐进回退环境变量/默认）
+  { field: 'protocolPath', check: (v) => typeof v === 'string' || v === null || v === undefined },
 ];
 
 // 返回非法字段名数组（空 = 合法）。仅校验存在字段；unknown / 缺失字段一律放行。
@@ -96,4 +141,25 @@ export function setVerifyFailuresFor(state, value) {
   }
   state.verifyFailuresByChange[state.activeChange] = value;
   delete state.verifyFailures;
+}
+
+// ---------- fixRounds 按 change 读写(单一来源——受控归位计数 helper 与两个归位入口共用) ----------
+
+// 读取当前 change 的 Fix 受控归位轮次;旧 state 缺字段 / 缺当前 change 条目 → 0(不因计数卡死)。
+// 该计数与 verifyFailuresByChange 各自独立:verify 成功只清 verify 失败计数,不清归位轮次。
+export function fixRoundsFor(state) {
+  if (!state || !state.activeChange) return 0;
+  const rounds = state.fixRoundsByChange;
+  if (!rounds || typeof rounds !== 'object' || Array.isArray(rounds)) return 0;
+  const value = rounds[state.activeChange];
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+// 写入当前 change 的 Fix 受控归位轮次(容器缺失时按需创建;无 activeChange 时为无操作)
+export function setFixRoundsFor(state, value) {
+  if (!state || !state.activeChange) return;
+  if (!state.fixRoundsByChange || typeof state.fixRoundsByChange !== 'object' || Array.isArray(state.fixRoundsByChange)) {
+    state.fixRoundsByChange = {};
+  }
+  state.fixRoundsByChange[state.activeChange] = value;
 }

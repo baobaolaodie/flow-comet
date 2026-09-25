@@ -3,8 +3,14 @@ import { execFileSync } from 'child_process';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { validateStateFields, looksLikeObjectLiteral, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME } from './state-schema.mjs';
-import { EXECUTE_FAMILY_NODE_IDS } from './route-node.mjs';
+import { validateStateFields, looksLikeObjectLiteral, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, resolveProtocolPathWithState } from './state-schema.mjs';
+import { EXECUTE_FAMILY_NODE_IDS, protocolNodeEnabled, resolveDelegationTarget, taskDependencyEligibility } from './route-node.mjs';
+import {
+  readProtocolFile,
+  validateProtocolSchema,
+  inspectWorkflowPathSegments,
+} from './protocol-utils.mjs';
+import { taskAttrsById, taskBlocks, taskOpeningAttrs } from './task-parsing.mjs';
 
 // workflow-handoff.mjs: Record subagent handoff evidence
 // evidence 统一记录在 subagent-execute 名下作为委托证据库——execute（串行委托）与 subagent-execute（并行委托）共用。不改成节点参数，保持最小改动。
@@ -13,6 +19,9 @@ import { EXECUTE_FAMILY_NODE_IDS } from './route-node.mjs';
 //   node workflow-handoff.mjs result <task-id> <result-or-JSON>  -- record handoff result (W1-D: JSON Return Contract; W2-D: commitHash subset check; : completedChecks 规范化; redEvidence 时间顺序校验)
 //   node workflow-handoff.mjs status                           -- show all handoff evidence
 
+// 归属门禁读取协议用：与其它脚本同源（packageRoot 默认协议；env 可覆盖），不消费 request 参数。
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const packageRoot = path.resolve(__dirname, '..');
 const runRoot = process.cwd();
 // 状态文件路径（单一来源：state-schema.mjs 的运行时路径常量）
 const statePath = path.join(runRoot, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME);
@@ -122,16 +131,35 @@ function literalRelativePosixPath(entry) {
   return normalized;
 }
 
+// `check-ignore` 退出 1 时判别路径是否已被 index 跟踪（index-aware 默认下 tracked 不算 ignored）：
+// 命中 → became-tracked，未命中 → 忽略规则变化。仅作失败归类，任一探测异常按未跟踪处理（仍 fail-closed）。
+function gitIndexTracksPath(rel) {
+  try {
+    execFileSync('git', ['ls-files', '--error-unmatch', '--', rel], { cwd: runRoot, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // 资格判定：全部字面路径 + runRoot 等于 git top-level 的 realpath + 逐路径
 // `git check-ignore -q -- <repo-relative-path>` 退出 0（cwd=runRoot，数组参数、index-aware
-// 默认：tracked 文件退出 1）→ true；任一不满足 / 非 0 / 命令错误 / 非 git 仓 → false
-//（调用方不记 noCommit、不阻断原流程）。不用 --no-index、不 import prepare-env（不分发）。
-async function writeFilesProvablyIgnored(entries) {
-  if (!Array.isArray(entries) || entries.length === 0) return false;
+// 默认：tracked 文件退出 1）→ eligible；任一不满足 → 带 reason 的 fail-closed 结论
+//（request 侧只看 eligible、不记 noCommit、不阻断原流程；result 侧把 reason 写入撤销审计）。
+// 不用 --no-index、不 import prepare-env（不分发）。
+// 路径扫描增强（m-13）：runRoot 先 realpath 归一；对每个字面路径的最近已存在祖先逐段 lstat，
+// 任一段为 symlink/junction（或物理逃出 runRoot）→ fail-closed（目标不存在不算失败）。
+// 逐段扫描复用 protocol-utils 的单一权威，本处不得另写第二份 symlink/包含判据（L-067）。
+// 失败类别（稳定机器码，作为 result 撤销审计的 revokeReason）：invalid-path（glob / 绝对路径 /
+// `..` 逃逸等字面形态不成立）、stale-eligibility（忽略规则变化，路径不再被证明 gitignored）、
+// became-tracked（路径已在 index 中）、symlink-junction-escape（祖先段 symlink/junction 或
+// 物理越界）、non-git（非 git 仓 / runRoot 非 top-level / git 探测错误）。
+async function classifyWriteFilesProvablyIgnored(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) return { eligible: false, reason: 'invalid-path' };
   const relPaths = [];
   for (const entry of entries) {
     const rel = literalRelativePosixPath(entry);
-    if (rel === null) return false;
+    if (rel === null) return { eligible: false, reason: 'invalid-path' };
     relPaths.push(rel);
   }
   let realRoot;
@@ -142,24 +170,78 @@ async function writeFilesProvablyIgnored(entries) {
       cwd: runRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
     });
     const top = String(out).split('\n').map((s) => s.trim()).filter(Boolean)[0];
-    if (!top) return false;
+    if (!top) return { eligible: false, reason: 'non-git' };
     realTop = await fs.realpath(top);
   } catch {
-    return false; // 非 git 仓 / git 不可用 / 命令错误
+    return { eligible: false, reason: 'non-git' }; // 非 git 仓 / git 不可用 / 命令错误
   }
   // windows 路径大小写不敏感（realpath 双方同源，仍按平台归一比较）
   const sameRoot = process.platform === 'win32'
     ? realRoot.toLowerCase() === realTop.toLowerCase()
     : realRoot === realTop;
-  if (!sameRoot) return false; // runRoot 必须是 git top-level（worktree/子目录形态保守不享受）
+  if (!sameRoot) return { eligible: false, reason: 'non-git' }; // runRoot 必须是 git top-level
   for (const rel of relPaths) {
     try {
-      execFileSync('git', ['check-ignore', '-q', '--', rel], { cwd: runRoot, stdio: 'ignore' });
+      await inspectWorkflowPathSegments(realRoot, path.resolve(realRoot, rel), 'write_files 字面路径');
     } catch {
-      return false; // 未命中（退出 1）/ tracked（退出 1，index-aware 默认）/ 命令错误
+      return { eligible: false, reason: 'symlink-junction-escape' }; // 穿越 / 非目录祖先 / 物理越界
+    }
+    try {
+      execFileSync('git', ['check-ignore', '-q', '--', rel], { cwd: runRoot, stdio: 'ignore' });
+    } catch (error) {
+      if (error && typeof error === 'object' && error.status === 1) {
+        // check-ignore 退出 1 = 未命中忽略规则，或路径已被 index 跟踪（index-aware 默认）——
+        // 用 ls-files 判别后落入既有失败归类。
+        return { eligible: false, reason: gitIndexTracksPath(rel) ? 'became-tracked' : 'stale-eligibility' };
+      }
+      return { eligible: false, reason: 'non-git' }; // 命令错误等
     }
   }
-  return true;
+  return { eligible: true, reason: null };
+}
+
+// 失败类别 → 审计文案（撤销 detail 与 revokeReason 机器码一一对应；新失败形态只在此扩展）。
+const ZERO_COMMIT_REVOKE_REASON_TEXT = {
+  'invalid-path': 'write_files 字面形态不成立（glob / 绝对路径 / .. 逃逸等）',
+  'stale-eligibility': '.gitignore 变化（路径不再被证明 ignored）',
+  'became-tracked': '路径变为 tracked',
+  'symlink-junction-escape': 'symlink-junction 逃逸',
+  'non-git': '非 git 仓 / runRoot 非 top-level / git 探测错误',
+};
+
+// ---------- m-13 result 零提交资格重验 ----------
+// 仅当 request 记录 noCommit=true 且 writeFiles 非空时，在 result 时刻按同一增强资格重跑。
+// 失败 → 撤销 request evidence 的 noCommit（置 false）并加法式记录 revokedAt（ISO 时间）与
+// revokeReason（失败类别机器码——invalid-path / stale-eligibility / became-tracked /
+// symlink-junction-escape / non-git）：
+//   新 change → HANDOFF ERROR、不落 result（只落资格撤销），出口 W1-D 不再豁免缺 commitHash；
+//   旧 change → HANDOFF WARN 后继续记录 result（出口 W1-D 同样不再豁免）。
+// 返回 'skip'（形态不适用）/ 'pass'（资格仍成立）/ 'warn'（旧 change 已撤销）/ 'block'（新 change 已撤销）。
+// 空 writeFiles、非 noCommit、无 request 记录均不扩大行为；未引用提交 / HEAD 移动 / TOCTOU /
+// worktree 提交不可见等结构性 residual 由 T11/T12 文档登记，本函数不宣称已闭合。
+async function revalidateResultZeroCommit(state, taskId, handoffReq) {
+  if (!handoffReq || handoffReq.noCommit !== true) return 'skip';
+  const entries = Array.isArray(handoffReq.writeFiles) ? handoffReq.writeFiles : [];
+  if (entries.length === 0) return 'skip';
+  const verdict = await classifyWriteFilesProvablyIgnored(entries);
+  if (verdict.eligible) return 'pass';
+  // 加法式撤销审计：noCommit=false（既有语义不变）+ revokedAt（ISO 时间）+ revokeReason
+  //（失败类别，复用资格判定的失败归类）；每次撤销刷新为本次的 at/reason。
+  handoffReq.noCommit = false;
+  handoffReq.revokedAt = new Date().toISOString();
+  handoffReq.revokeReason = verdict.reason;
+  // 资格撤销先落盘（新旧 change 一致）：旧 change 后续若被其它门禁阻断，审计也不丢失，
+  // 避免 WARN 声称已撤销而 state 仍是旧值。
+  await writeState(state);
+  const reasonText = ZERO_COMMIT_REVOKE_REASON_TEXT[verdict.reason] || verdict.reason;
+  const detail = '任务 ' + taskId + ' 零提交资格 result 重验失败（' + reasonText + '）——request evidence noCommit=false, revokedAt=' + handoffReq.revokedAt + ', revokeReason=' + verdict.reason;
+  if (state.newChange === true) {
+    // 新 change 只落 request 资格撤销；此刻尚未默认 handoffResult，确保「不落 result」不是文案承诺
+    console.error('HANDOFF ERROR: ' + detail + '；新 change 不落 result，出口校验不再豁免缺 commitHash。恢复: 修正 write_files / .gitignore 与路径形态后重新 request，或回传含合法 commitHash 的 Return Contract');
+    return 'block';
+  }
+  console.error('HANDOFF WARN: ' + detail + '（旧 change 渐进，继续记录 result；出口校验不再豁免缺 commitHash）');
+  return 'warn';
 }
 
 async function readState() {
@@ -178,6 +260,148 @@ async function writeState(state) {
   await fs.writeFile(statePath, JSON.stringify(state, null, 2) + '\n', 'utf8');
 }
 
+// ---------- request 归属门禁（只读判定） ----------
+// 归属目标与依赖资格一律复用 route-node 的共享纯函数（单一权威）：门禁不在本文件内联
+// 「parallel → 目标节点」映射。协议无对应 enabled 节点 → 跳过门禁（不产生归属 WARN）；
+// 协议不可读 → 可见 WARN（含原因 +「本次未执行归属校验」）后放行，不静默、不新增硬 BLOCK。
+// 判定只读 state 与协议：BLOCK 路径在首个 state.evidence 写入之前返回，state 字节零改写、不落请求记录。
+
+// 协议读取（归属判定用）：协议路径统一由 state-schema.mjs 的 resolveProtocolPathWithState 选择
+// （不消费 request 的 CLI 参数）：state.protocolPath（init 持久化绑定）> FLOW_COMET_PROTOCOL 环境变量 >
+// 内置默认协议。state.protocolPath 存在但不可读时不回退环境变量/默认——回退会在自定义协议缺节点时
+// 按默认协议误判归属；读取/解析/schema 校验失败统一返回失败原因，由调用方输出低噪声可见 WARN，
+// 新/旧 change 均不因此新增硬 BLOCK。
+async function readOwnershipProtocol(state) {
+  let protocolPath = null;
+  let source = null;
+  try {
+    const selected = resolveProtocolPathWithState({ packageRoot, runRoot, state });
+    protocolPath = selected.protocolPath;
+    source = selected.source;
+    const protocol = await readProtocolFile(runRoot, protocolPath);
+    validateProtocolSchema(protocol);
+    return { protocol, failure: null };
+  } catch (error) {
+    return { protocol: null, failure: describeProtocolReadFailure(error, protocolPath, source) };
+  }
+}
+
+// 协议读取失败原因归类（低噪声单行消息用；不打印堆栈、不回显文件内容）：
+// 缺失 / 受保护路径拒绝 / JSON 解析失败 / schema 非法 / 其余原样归类。
+// 来源为 state.protocolPath 时附注来源，便于区分「绑定协议不可读」与「回退解析不可读」。
+function describeProtocolReadFailure(error, protocolPath, source = null) {
+  const location = protocolPath === null ? '（路径未解析）' : '：' + protocolPath;
+  const origin = source === 'state' ? '（来源 state.protocolPath）' : '';
+  const message = error && typeof error.message === 'string' ? error.message : String(error);
+  if (error && error.code === 'ENOENT') return '协议文件不存在' + location + origin;
+  if (message.includes('must stay inside the project root')) {
+    return '协议路径不在当前项目根内（受保护读取拒绝）' + location + origin;
+  }
+  if (message.includes('is not valid JSON')) return '协议文件不是合法 JSON' + location + origin;
+  if (message.includes('protocol') || message.includes('schema')) {
+    return '协议内容不合法：' + message + origin;
+  }
+  return '协议读取失败：' + message + origin;
+}
+
+// 路由事实：从 TASK.md 全文派生 done id 集合与目标任务块。解析走 task-parsing 的开标签
+// 解析（与路由、guard 同一语义），不新增第二份正则。
+function taskRouteFacts(taskContent, taskId) {
+  const doneIds = new Set();
+  let targetBlock = null;
+  for (const block of taskBlocks(taskContent)) {
+    const attrs = taskOpeningAttrs(block);
+    if (!attrs) continue;
+    if (attrs.status === 'done' && attrs.id) doneIds.add(attrs.id);
+    if (taskId !== null && taskId !== undefined && attrs.id === String(taskId)) targetBlock = block;
+  }
+  return { doneIds, targetBlock };
+}
+
+// 归属判定：仅 status=pending 的任务参与；比较原始 state.currentNode（不取任何派生 currentNode）。
+// 目标与依赖资格经 route-node 共享纯函数求得，与 next/路由使用同一判定。
+// 返回 { verdict: 'skip' | 'pass' | 'not-entered' | 'mismatch' | 'not-delegable', ... }；
+// skip 的 reason='protocol-unavailable' 携带 protocolFailure（调用方输出可见 WARN 后放行）。
+async function assessRequestOwnership(state, taskAttrs, taskContent) {
+  if (!taskAttrs || taskAttrs.status !== 'pending') return { verdict: 'skip', reason: 'not-pending' };
+  const protocolRead = await readOwnershipProtocol(state);
+  if (protocolRead.protocol === null) {
+    return { verdict: 'skip', reason: 'protocol-unavailable', protocolFailure: protocolRead.failure };
+  }
+  const protocol = protocolRead.protocol;
+  const { doneIds, targetBlock } = taskRouteFacts(taskContent, taskAttrs.id);
+  const dependency = targetBlock
+    ? taskDependencyEligibility(targetBlock, doneIds)
+    : { eligible: false, deps: [], unmet: [] };
+  const ownership = resolveDelegationTarget({
+    taskAttrs,
+    dependencyEligible: dependency.eligible,
+    subagentNodeEnabled: protocolNodeEnabled(protocol, 'subagent-execute'),
+    executeNodeEnabled: protocolNodeEnabled(protocol, 'execute'),
+  });
+  if (ownership.reason === 'not-pending' || ownership.reason === 'no-delegation-node') {
+    return { verdict: 'skip', reason: ownership.reason };
+  }
+  if (ownership.reason === 'dependencies-unmet') {
+    return { verdict: 'not-delegable', reason: ownership.reason, unmet: dependency.unmet };
+  }
+  if (state.currentNode !== ownership.targetNode) {
+    return { verdict: 'mismatch', targetNode: ownership.targetNode, reason: ownership.reason };
+  }
+  const enteredNodes = Array.isArray(state.enteredNodes) ? state.enteredNodes : [];
+  if (!enteredNodes.includes(ownership.targetNode)) {
+    return { verdict: 'not-entered', targetNode: ownership.targetNode, reason: ownership.reason };
+  }
+  return { verdict: 'pass', reason: ownership.reason };
+}
+
+// 渲染归属判定结果（只输出与退出，不写 state）：
+// 协议不可读 → 可见 WARN（含原因与「本次未执行归属校验」）后放行，不静默、不阻断。
+// 不可委托 → 新 change BLOCK / 旧 change 可见 WARN 后继续；恢复指引以 workflow-state next 的
+// 实际 NODE 输出为准，不固定指向 next 不会输出的节点（依赖未满足时路由按串行消化走 execute）。
+// 归属目标不匹配 → 同样先按 next 的路由指引进入；正确节点未 entry → 可见 WARN 不阻断。
+function reportRequestOwnership(state, taskId, taskAttrs, ownership) {
+  const kind = taskAttrs && taskAttrs.parallel === true ? '并行' : '串行';
+  const current = String(state.currentNode);
+  if (ownership.verdict === 'skip' && ownership.reason === 'protocol-unavailable') {
+    console.error('WARN: 任务 ' + taskId + ' 的委托归属校验未执行——协议不可读（'
+      + ownership.protocolFailure + '）；本次未执行归属校验，请求照常记录（新/旧 change 均不因此阻断）');
+    return;
+  }
+  if (ownership.verdict === 'not-delegable') {
+    const unmet = Array.isArray(ownership.unmet) ? ownership.unmet : [];
+    const detail = '任务 ' + taskId + '（' + kind + ' pending）当前不可委托：依赖未满足'
+      + (unmet.length > 0 ? '（未完成: ' + unmet.join(', ') + '）' : '')
+      + '；原始 currentNode=' + current;
+    const guide = '恢复指引: 运行 workflow-state next，按输出的 NODE 进入；若输出 execute 表示依赖未满足'
+      + '（该任务当前按串行消化），待任务变为可委托（next 输出对应委托节点）后再 request';
+    if (state.newChange === true) {
+      console.error('BLOCKED: ' + detail + '——' + guide + '；本次请求未写入 state，也未记录 handoffRequests');
+      process.exit(1);
+    }
+    console.error('WARN: ' + detail + '（旧 change 渐进不阻断，请求照常记录）——' + guide);
+    return;
+  }
+  if (ownership.verdict === 'mismatch') {
+    const detail = '任务 ' + taskId + '（' + kind + ' pending）应归属节点 '
+      + ownership.targetNode + '，原始 currentNode=' + current;
+    const guide = '恢复指引: 运行 workflow-state next 查看当前路由，按 NODE 输出进入'
+      + '（本任务归属节点 ' + ownership.targetNode + '：workflow-state entry ' + ownership.targetNode
+      + ' 或 workflow-guard entry ' + ownership.targetNode + '）后再发起委托';
+    if (state.newChange === true) {
+      console.error('BLOCKED: ' + detail + '——' + guide + '；本次请求未写入 state，也未记录 handoffRequests');
+      process.exit(1);
+    }
+    console.error('WARN: ' + detail + '（旧 change 渐进不阻断，请求照常记录）——' + guide);
+    return;
+  }
+  if (ownership.verdict === 'not-entered') {
+    console.error('WARN: 任务 ' + taskId + ' 的归属节点 ' + ownership.targetNode
+      + ' 与原始 currentNode 一致，但该节点尚未 entry（enteredNodes 缺 ' + ownership.targetNode
+      + '）——建议先运行 workflow-state entry ' + ownership.targetNode + ' 或 workflow-guard entry '
+      + ownership.targetNode + ' 记录进入');
+  }
+}
 async function main() {
   const action = process.argv[2] ?? 'status';
   const state = await readState();
@@ -216,12 +440,19 @@ async function main() {
     // 解析三态（bot 评审收紧）：① 匹配到任务块且 <write_files> 存在 → 按内容分类；
     // ② 任务块缺失或块内无 <write_files> 元素 → 任务不可解析，新 change BLOCK，旧 change
     // WARN 且不设 noCommit（防未解析任务静默变零提交逃逸口）；③ TASK.md 读不到同 ②。
+    // TASK.md 只读一次：任务开标签属性解析（归属门禁）复用 task-parsing.mjs；
+    // 下方 write_files 元素提取沿用既有实现（该路径的解析策略不在本任务改动面内）。
+    const taskFile = state.activeChange
+      ? path.join(runRoot, '.specs', state.activeChange, 'TASK.md')
+      : null;
+    let taskContent = null;
+    if (taskFile) {
+      taskContent = await fs.readFile(taskFile, 'utf8').catch(() => null);
+    }
     let taskResolved = false;
     let emptyWriteFilesElement = false;
     if (!writeFiles || writeFiles.length === 0) {
-      try {
-        const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
-        const taskContent = await fs.readFile(taskFile, 'utf8');
+      if (taskContent !== null) {
         const taskRegex = new RegExp(`<task[^>]*id="${taskId.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}"[\\s\\S]*?<write_files>([\\s\\S]*?)</write_files>`, 'i');
         const match = taskContent.match(taskRegex);
         if (match) {
@@ -233,7 +464,7 @@ async function main() {
           if (files.length > 0) { writeFiles = files; }
           else { emptyWriteFilesElement = true; }
         }
-      } catch {}
+      }
       if (wfIdx >= 0) { taskResolved = true; emptyWriteFilesElement = false; }
     } else {
       taskResolved = true;
@@ -246,6 +477,13 @@ async function main() {
       }
       console.error('WARN: ' + msg + '（旧 change 渐进，不阻断，不记录 noCommit）');
     }
+    // request 归属门禁：技能声明门之后、任务解析之后、首个 state.evidence 写入之前。
+    // 只读判定；新 change 不匹配 → BLOCK（state 字节零改写、不落 handoffRequests）；旧 change → 可见 WARN 后照常记录。
+    const parsedTask = taskAttrsById(taskContent, taskId);
+    if (!parsedTask && wfIdx >= 0) {
+      console.error('WARN: 显式 --write-files 且 TASK.md 无匹配任务 ' + taskId + '——无法判定 pending 与归属，跳过归属门禁（不阻断，照常记录）');
+    }
+    reportRequestOwnership(state, taskId, parsedTask, await assessRequestOwnership(state, parsedTask, taskContent));
     state.evidence = state.evidence || {};
     state.evidence['subagent-execute'] = state.evidence['subagent-execute'] || {};
     if (!state.evidence['subagent-execute'].handoffRequests) {
@@ -255,7 +493,7 @@ async function main() {
     // F-6（DESIGN 决策 7）：非空 write_files 的「全部可证明 gitignored」资格——与空元素同语义，
     // 记 noCommit:true；不具资格 → 不记 noCommit、不阻断原流程（保持既有完整提交子集校验）。
     const literalIgnoredEligible = taskResolved && writeFiles.length > 0
-      && await writeFilesProvablyIgnored(writeFiles);
+      && (await classifyWriteFilesProvablyIgnored(writeFiles)).eligible;
     state.evidence['subagent-execute'].handoffRequests[taskId] = {
       description, requestedAt: new Date().toISOString(),
       ...(writeFiles.length ? { writeFiles } : {}),
@@ -309,14 +547,18 @@ async function main() {
     }
     state.evidence = state.evidence || {};
     state.evidence['subagent-execute'] = state.evidence['subagent-execute'] || {};
+    const handoffReq = state.evidence['subagent-execute'].handoffRequests?.[taskId];
+    const hasRequest = !!handoffReq && typeof handoffReq === 'object';
+    // m-13：result 重验在默认 handoffResult 之前——新 change 失败路径只落 request.noCommit=false，
+    // 不落下空 handoffResult 充当 result 载体；重验通过/旧 change 之后才初始化结果容器。
+    if (await revalidateResultZeroCommit(state, taskId, handoffReq) === 'block') process.exit(1);
     state.evidence['subagent-execute'].handoffResult = state.evidence['subagent-execute'].handoffResult || {};
     // 零提交任务语义：已有 request 记录且其写文件列表为空（无 tracked 写意图）或带 noCommit
     // 标记（空 write_files 或全部可证明 gitignored——request 侧 F-6 资格判定的结论）时，判定为
     // 零提交——跳过提交文件子集校验并输出可审计提示。契约侧 noCommit 声明仅作
     // 审计线索：写文件列表非空的任务即使契约声称零提交，仍执行完整提交文件子集校验（不可借
     // 零提交声明绕过真实提交检查）。无 request 记录的任务不适用零提交（保持既有完整校验）。
-    const handoffReq = state.evidence['subagent-execute'].handoffRequests?.[taskId];
-    const hasRequest = !!handoffReq && typeof handoffReq === 'object';
+    // m-13：request.noCommit 在上述重验失败时已被撤销，故此处按撤销后的真实值重算。
     const reqWriteFiles = hasRequest ? (handoffReq.writeFiles || []) : [];
     const reqNoCommit = hasRequest && handoffReq.noCommit === true;
     const contractNoCommit = typeof parsed === 'object' && parsed !== null && parsed.noCommit === true;

@@ -2,10 +2,10 @@
   import { constants as fsConstants, promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, RUNTIME_STATE_PATH, LEGACY_RUNTIME_STATE_PATH } from './state-schema.mjs';
-import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES } from './protocol-utils.mjs';
+import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, RUNTIME_STATE_PATH, LEGACY_RUNTIME_STATE_PATH, resolveProtocolPathWithState, hasProtocolCliArg } from './state-schema.mjs';
+import { readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, workflowPathInside, inspectWorkflowProtectedPath, readWorkflowProtectedFile, workflowFileObjectIdentity, workflowSameFileObject, workflowSameFileStat } from './protocol-utils.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from './task-parsing.mjs';
-import { resolveNextNode, resolveFixRollbackState, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS, taskSetSignature, classifyFixReturnCause } from './route-node.mjs';
+import { resolveNextNode, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS, TASK_SET_SIGNATURE_ALGO, taskSetSignature, parseTaskSetSignature, sameTaskSetSignature, taskSetSignatureVersionSkew, classifyFixReturnCause, normalizeHeading, FIX_SECTION_TITLE_FALLBACK } from './route-node.mjs';
 
 const command = process.argv[2] ?? 'verify';
 const nodeId = process.argv[3] ?? null;
@@ -13,9 +13,11 @@ const apply = process.argv.includes('--apply');
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..');
 const runRoot = process.env.FLOW_COMET_RUN_ROOT ? path.resolve(process.env.FLOW_COMET_RUN_ROOT) : process.cwd();
-// 协议路径解析（resolveProtocol）：--protocol 全局参数从命令后的剩余参数提取（command=argv[2]），
-// 其次 FLOW_COMET_PROTOCOL 环境变量，最后内置默认 <packageRoot>/reference/workflow-protocol.json
-const protocolPath = resolveProtocol(packageRoot, runRoot, process.argv.slice(3));
+// 协议路径解析：显式 --protocol 全局参数（command=argv[2] 之后的剩余参数）> state.protocolPath
+// （init 持久化绑定）> FLOW_COMET_PROTOCOL 环境变量 > 内置默认
+// <packageRoot>/reference/workflow-protocol.json。选择在 main() 内执行（state.protocolPath 需先读
+// 标准运行时状态文件引导，协议决定 statePath 时存在先后次序），此处仅声明供 main 与错误文案使用。
+let protocolPath = null;
 
 
 const WORKFLOW_PROJECT_FILE_MAX_BYTES = 2 * 1024 * 1024;
@@ -50,28 +52,112 @@ function markerProtocolBasename(value) {
   return String(value).replaceAll('\\', '/').split('/').pop() || null;
 }
 
-// REVIEW.md 发现区条目处置状态提取——"## 发现" 段下 Critical/Major/Minor
-// 子区的发现项 = 以 "- **" 开头的列表项（加粗标题）；"无" 条目（"- 无" / "无（...）"）表示
-// 该级别无发现，豁免。返回缺处置状态标记（[已修]/[升级]/[转待办]）的条目标题列表——
-// 结构级校验（不做语义判断：标记存在即视为已处置）。发现项（含 Minor）不得"记录后无声消失"。
-function reviewFindingsMissingDisposition(text) {
-  const missing = [];
-  for (const section of text.split(/\n##\s+/)) {
-    if (!/^发现/.test(section)) continue;
-    for (const line of section.split('\n')) {
-      const m = line.match(/^\s*-\s*\*\*(.+?)\*\*/);
-      if (!m) continue;
-      if (/^无/.test(m[1].trim())) continue; // "无" 条目豁免
-      // 四要素字段行豁免:REVIEW 发现条目的 Symptom/Source/Consequence/Remedy
-      // 是 brooks 审查输出格式的字段行(带 ** 加粗),不是发现条目本身——不豁免会误判
-      // 为"发现项缺处置标记"(执行者按 4 要素格式书写时被误 BLOCKED)。
-      // 精确匹配完整标签(允许尾冒号)——"Source maps expose paths" 这类以 Source 开头的
-      // 真实发现标题不得被前缀匹配误豁免(其处置校验必须照常进行)
-      if (/^(?:Symptom|Source|Consequence|Remedy)\s*:?\s*$/i.test(m[1].trim())) continue;
-      if (!/\[已修\]|\[升级\]|\[转待办\]/.test(line)) missing.push(m[1]);
+// REVIEW.md 发现区条目解析——"## 发现" 段下的发现项 = 列表项（"- **" 无序 / "1. **" 有序，
+// 两种列表形态同口径解析）；"无" 条目（"- 无" / "无（...）"）表示该级别无发现，豁免。条目块
+// 包含其后的非空续行（同一段落），直到空行 / 下一条目 / 下一个标题。严重度只取该条目自身的
+// 标题/行首——所属 "### Major" 分区，或标题（加粗部分）内带 [Major] 标签（真实 REVIEW 常用
+// 扁平有序列表 + 条目内级别标签的写法）；条目正文引用他条的 [Major] 字样不改变本条严重度。
+// 返回 { title, lines, isMajor, ordinal }。
+const REVIEW_FINDING_ITEM_RE = /^\s*(?:[-*+]|\d+[.)])\s*\*\*(.+?)\*\*/;
+const REVIEW_DISPOSITION_RE = /\[已修\]|\[升级\]|\[转待办\]/;
+const REVIEW_MAJOR_LABEL_RE = /\[\s*Major\s*\]/i;
+const REVIEW_ADJUDICATION_RE = /用户裁决\s*[:：]\s*接受延期/;
+
+function reviewFindingsItems(text) {
+  const items = [];
+  let inFindings = false;
+  let severity = '';
+  let current = null;
+  const pushCurrent = () => { if (current) { items.push(current); current = null; } };
+  for (const line of String(text).split(/\r?\n/)) {
+    const h2 = line.match(/^##\s+(.+?)\s*$/);
+    if (h2) {
+      pushCurrent();
+      inFindings = /^发现/.test(h2[1]);
+      severity = '';
+      continue;
+    }
+    if (!inFindings) continue;
+    const h3 = line.match(/^###\s+(.+?)\s*$/);
+    if (h3) {
+      pushCurrent();
+      severity = h3[1].trim();
+      continue;
+    }
+    const m = line.match(REVIEW_FINDING_ITEM_RE);
+    if (m) {
+      pushCurrent();
+      const title = m[1].trim();
+      current = {
+        title,
+        lines: [line],
+        isMajor: /^major\b/i.test(severity) || REVIEW_MAJOR_LABEL_RE.test(title),
+      };
+      continue;
+    }
+    if (current) {
+      if (line.trim() === '') pushCurrent();
+      else current.lines.push(line);
     }
   }
-  return missing;
+  pushCurrent();
+  items.forEach((item, i) => { item.ordinal = i + 1; });
+  return items;
+}
+
+// 发现区条目处置标记存在性：返回缺处置状态标记（[已修]/[升级]/[转待办]）的条目标题列表——
+// 结构级校验（不做语义判断：标记存在即视为已处置）。发现项（含 Minor；无序与有序条目同口径，
+// 均不得"记录后无声消失"）的处置标记以该条目自身标题/行首为准——正文引用他条标记不参与判定。
+function reviewFindingsMissingDisposition(text) {
+  return reviewFindingsItems(text)
+    .filter((item) => !/^无/.test(item.title)) // "无" 条目豁免
+    // 四要素字段行豁免:REVIEW 发现条目的 Symptom/Source/Consequence/Remedy
+    // 是 brooks 审查输出格式的字段行(带 ** 加粗),不是发现条目本身——不豁免会误判
+    // 为"发现项缺处置标记"(执行者按 4 要素格式书写时被误 BLOCKED)。
+    // 精确匹配完整标签(允许尾冒号)——"Source maps expose paths" 这类以 Source 开头的
+    // 真实发现标题不得被前缀匹配误豁免(其处置校验必须照常进行)
+    .filter((item) => !/^(?:Symptom|Source|Consequence|Remedy)\s*:?\s*$/i.test(item.title))
+    .filter((item) => !REVIEW_DISPOSITION_RE.test(item.lines[0]))
+    .map((item) => item.title);
+}
+
+// 裁决记录是否指向某条发现：条目标题全文 / 标题内标识 token（如 F1、m-2）/ 条目序号
+// （发现 N、第 N 项、#N）/ 标题核心前缀任一命中即视为指认。结构级判定，不做语义判断。
+function reviewAdjudicationPointsTo(record, item) {
+  if (record.includes(item.title)) return true;
+  const idTokens = item.title.match(/[A-Za-z]{1,8}[-–]?\d{1,4}/g) || [];
+  if (idTokens.some((token) => record.includes(token))) return true;
+  if (new RegExp('(?:发现|条目|第|#)\\s*' + item.ordinal + '(?!\\d)').test(record)) return true;
+  const core = item.title.replace(/[\[\]【】]/g, '').replace(/^[A-Za-z]+\s*/, '').trim().slice(0, 12);
+  return core.length >= 6 && record.includes(core);
+}
+
+// Major 延期裁决门禁：发现区任何 Major 条目处置为 [转待办] 时，必须同时存在用户裁决记录——
+// 同段（条目自身段落）或文末其余段落含「用户裁决：接受延期」且指向该条目，并由 [升级] 承接
+// （条目自身块或裁决记录含 [升级]）。任一缺失 → 返回条目标题（调用方按新 change BLOCK /
+// 旧 change WARN 渐进处置）。Minor 不参与；Major [升级]/[已修] 直接放行。
+// 条目自身的处置标记（[转待办]）只认该条目标题/行首（无序与有序同口径），正文续行引用他条
+// 标记不触发本门禁；[升级] 承接可出现在条目自身块或用户裁决记录中（承接非本条处置）。
+function reviewDeferredMajorProblems(text) {
+  const textValue = String(text);
+  const items = reviewFindingsItems(textValue);
+  const paragraphs = textValue.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  const problems = [];
+  for (const item of items) {
+    const ownLine = item.lines[0];
+    if (!item.isMajor || !/\[转待办\]/.test(ownLine)) continue;
+    const block = item.lines.join('\n');
+    const escalatedInBlock = /\[升级\]/.test(block);
+    const blockTrimmed = block.trim();
+    if (REVIEW_ADJUDICATION_RE.test(block) && escalatedInBlock) continue; // 同段裁决 + [升级] 承接
+    const matched = paragraphs.some((paragraph) => {
+      if (!REVIEW_ADJUDICATION_RE.test(paragraph)) return false;
+      if (paragraph === blockTrimmed) return false; // 跳过条目自身段落
+      return (escalatedInBlock || /\[升级\]/.test(paragraph)) && reviewAdjudicationPointsTo(paragraph, item);
+    });
+    if (!matched) problems.push(item.title);
+  }
+  return problems;
 }
 
 // W1-B: flow-kit SUMMARY 模板必填段（正则匹配，大小写不敏感 + 变体兼容）
@@ -81,206 +167,12 @@ const SUMMARY_REQUIRED_SECTIONS = [
   { regex: /##\s*(越界检查|边界检查)/i, label: '## 越界检查' },
 ];
 
-function workflowPathInside(root, target) {
-  const relative = path.relative(root, target);
-  return (
-    relative === '' ||
-    (!path.isAbsolute(relative) &&
-      relative !== '..' &&
-      !relative.startsWith('..' + path.sep))
-  );
-}
-
-async function inspectWorkflowProtectedPath(
-  projectRoot,
-  target,
-  label,
-  expected = 'any',
-) {
-  const lexicalRoot = path.resolve(projectRoot);
-  const lexicalTarget = path.resolve(target);
-  if (!workflowPathInside(lexicalRoot, lexicalTarget)) {
-    throw new Error(label + ' must stay inside the project root');
-  }
-  const rootStat = await fs.lstat(lexicalRoot);
-  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
-    throw new Error(label + ' project root must be a real directory');
-  }
-  const realRoot = await fs.realpath(lexicalRoot);
-  const relative = path.relative(lexicalRoot, lexicalTarget);
-  const segments = relative === '' ? [] : relative.split(path.sep);
-  let cursor = lexicalRoot;
-  for (let index = 0; index < segments.length; index++) {
-    cursor = path.join(cursor, segments[index]);
-    let stat;
-    try {
-      stat = await fs.lstat(cursor);
-    } catch (error) {
-      if (
-        error &&
-        typeof error === 'object' &&
-        (error.code === 'ENOENT' || error.code === 'ENOTDIR')
-      ) {
-        return { target: lexicalTarget, exists: false };
-      }
-      throw error;
-    }
-    const display = path.relative(lexicalRoot, cursor).replaceAll('\\', '/');
-    if (stat.isSymbolicLink()) {
-      throw new Error(label + ' crosses a symbolic link or junction at ' + display);
-    }
-    const final = index === segments.length - 1;
-    if (!final && !stat.isDirectory()) {
-      throw new Error(label + ' ancestor ' + display + ' must be a real directory');
-    }
-    if (
-      final &&
-      ((expected === 'file' && !stat.isFile()) ||
-        (expected === 'directory' && !stat.isDirectory()) ||
-        (expected === 'any' && !stat.isFile() && !stat.isDirectory()))
-    ) {
-      throw new Error(label + ' must be a real ' + expected);
-    }
-    const physical = await fs.realpath(cursor);
-    if (!workflowPathInside(realRoot, physical)) {
-      throw new Error(label + ' resolves outside the project root');
-    }
-  }
-  return { target: lexicalTarget, exists: true };
-}
-
-function workflowFileObjectIdentity(stat) {
-  return {
-    dev: stat.dev,
-    ino: stat.ino,
-    birthtime: typeof stat.birthtimeNs === 'bigint' ? stat.birthtimeNs : stat.birthtimeMs,
-  };
-}
-
-function workflowHasIdentity(value) {
-  return value !== 0 && value !== 0n && value !== '0';
-}
-
-function workflowSameFileObject(left, right) {
-  const comparableDevice = workflowHasIdentity(left.dev) && workflowHasIdentity(right.dev);
-  const comparableInode = workflowHasIdentity(left.ino) && workflowHasIdentity(right.ino);
-  if (comparableDevice && left.dev !== right.dev) return false;
-  if (comparableInode && left.ino !== right.ino) return false;
-  if (comparableDevice && comparableInode) return true;
-  return left.birthtime === right.birthtime;
-}
-
-function workflowSameFileStat(left, right) {
-  return (
-    workflowSameFileObject(
-      workflowFileObjectIdentity(left),
-      workflowFileObjectIdentity(right),
-    ) &&
-    left.size === right.size &&
-    left.ctimeNs === right.ctimeNs
-  );
-}
-
-async function readWorkflowProtectedFile(
-  projectRoot,
-  file,
-  label,
-  maxBytes,
-  hooks = {},
-) {
-  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
-    throw new Error(label + ' byte limit must be a positive integer');
-  }
-  const inspection = await inspectWorkflowProtectedPath(
-    projectRoot,
-    file,
-    label,
-    'file',
-  );
-  if (!inspection.exists) {
-    const error = new Error(label + ' does not exist');
-    error.code = 'ENOENT';
-    throw error;
-  }
-  const before = await fs.lstat(file, { bigint: true });
-  if (!before.isFile() || before.isSymbolicLink()) {
-    throw new Error(label + ' must be a real file');
-  }
-  if (before.size > BigInt(maxBytes)) {
-    throw new Error(label + ' exceeds ' + String(maxBytes) + ' bytes');
-  }
-  const beforeRealPath = await fs.realpath(file);
-  await hooks.afterLstat?.();
-  const flags =
-    process.platform === 'win32'
-      ? fsConstants.O_RDONLY
-      : fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK;
-  let handle;
-  try {
-    handle = await fs.open(file, flags);
-  } catch (error) {
-    if (error && typeof error === 'object' && error.code === 'ELOOP') {
-      throw new Error(label + ' must be a real file');
-    }
-    throw error;
-  }
-  try {
-    const [opened, afterOpen, afterOpenRealPath] = await Promise.all([
-      handle.stat({ bigint: true }),
-      fs.lstat(file, { bigint: true }),
-      fs.realpath(file),
-    ]);
-    if (
-      !opened.isFile() ||
-      !afterOpen.isFile() ||
-      afterOpen.isSymbolicLink() ||
-      afterOpenRealPath !== beforeRealPath ||
-      !workflowSameFileStat(before, opened) ||
-      !workflowSameFileStat(before, afterOpen)
-    ) {
-      throw new Error(label + ' changed while opening');
-    }
-    await inspectWorkflowProtectedPath(projectRoot, file, label, 'file');
-    await hooks.afterOpen?.();
-    const chunks = [];
-    let total = 0;
-    const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, maxBytes + 1));
-    for (;;) {
-      const remaining = maxBytes + 1 - total;
-      const { bytesRead } = await handle.read(
-        buffer,
-        0,
-        Math.min(buffer.length, remaining),
-        null,
-      );
-      if (bytesRead === 0) break;
-      total += bytesRead;
-      if (total > maxBytes) {
-        throw new Error(label + ' exceeds ' + String(maxBytes) + ' bytes');
-      }
-      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
-    }
-    await hooks.beforeFinalCheck?.();
-    const [afterHandle, afterPath, afterRealPath] = await Promise.all([
-      handle.stat({ bigint: true }),
-      fs.lstat(file, { bigint: true }),
-      fs.realpath(file),
-    ]);
-    if (
-      !afterPath.isFile() ||
-      afterPath.isSymbolicLink() ||
-      afterRealPath !== beforeRealPath ||
-      !workflowSameFileStat(before, afterHandle) ||
-      !workflowSameFileStat(before, afterPath)
-    ) {
-      throw new Error(label + ' changed while reading');
-    }
-    await inspectWorkflowProtectedPath(projectRoot, file, label, 'file');
-    return Buffer.concat(chunks, total);
-  } finally {
-    await handle.close();
-  }
-}
+// 受保护读取 / 文件身份比较 / 路径包含与逐段扫描判据的单一权威在 protocol-utils.mjs
+// （readWorkflowProtectedFile / workflowFileObjectIdentity / workflowSameFileObject /
+// workflowSameFileStat / workflowPathInside / inspectWorkflowProtectedPath），本文件不再保留
+// 本地副本：同一判据两份实现会静默分叉，注释互指同源不是同步机制。错误语义（越界 / 非真实根 /
+// symlink 或 junction / 类型不符 / 物理逃逸 / 读取期间身份漂移的抛错文案与 fail-closed 行为）
+// 由该单一实现统一保证。
 
 function workflowRelativeSegments(value, label, allowWildcards = false) {
   if (typeof value !== 'string') throw new Error(label + ' must be a string');
@@ -1064,11 +956,12 @@ async function templateSectionPatterns() {
     return templateSectionPatternsCache;
   }
   const templateDir = path.join(runRoot, 'flow-kit', 'templates');
-  const result = { change: [], requirement: [], design: [] };
+  const result = { change: [], requirement: [], design: [], summary: [] };
   for (const [key, fileName] of Object.entries({
     change: 'CHANGE.md',
     requirement: 'REQUIREMENT.md',
     design: 'DESIGN.md',
+    summary: 'SUMMARY.md',
   })) {
     const templateFile = path.join(templateDir, fileName);
     if (await fileExists(templateFile)) {
@@ -1092,43 +985,49 @@ async function templateSectionPatterns() {
   return result;
 }
 
-// 决策 2/4 · Fix 段标题从 <runRoot>/flow-kit/templates/TASK.md 派生（与上方 C2 段名读取同一
-// 模式：runRoot 内模板 + 模块级缓存 + 缺失/读取失败回退内置常量）——regex 提取
-// `^##\s*Fix 任务.*$` 标题文本并去 `##`；模板缺失/读取失败回退 `Fix 任务`。标题只喂给
-// 回程分类器决定审计行（不参与路由/state 写入）；分类器自身对标题做归一宽容匹配。
-const FIX_SECTION_TITLE_FALLBACK = 'Fix 任务';
+// Fix 段标题从 <runRoot>/flow-kit/templates/TASK.md 派生（单一模板源 + 模块级缓存 + runRoot 键控）：
+// 扫描模板全部 H2，用 route-node 共享 heading 归一（单一权威，含闭合 ATX）识别 Fix 段标题；
+// 无匹配（模板缺失 / 读取失败 / 无 Fix 段）返回 undefined，由回程分类器的内置 fallback 常量兜底。
+// 标题只喂给回程分类器决定审计行（不参与路由/state 写入）。
+// 识别标记词从单一权威 fallback 派生（归一后首词，如 Fix 任务 → Fix），因此模板基名改为其它
+// 语言后缀（如 Fix Tasks）仍可识别；闭合 ATX 与尾部括号变体由共享归一消化。
+const FIX_SECTION_HEADING_MARKER = normalizeHeading(FIX_SECTION_TITLE_FALLBACK).split(/\s+/u)[0];
+
+// 模板文本全部 H2 中的 Fix 段标题（无匹配 → undefined）：共享归一后与识别标记词比较，
+// 因此语言后缀可变（Fix 任务 / Fix Tasks）；闭合 ATX 与尾部括号由共享归一消化。
+function fixSectionTitleFromTemplateText(text) {
+  for (const match of String(text).matchAll(/^##\s+(.+)$/gmu)) {
+    const raw = match[1].trim();
+    const normalized = normalizeHeading(raw);
+    if (normalized === FIX_SECTION_HEADING_MARKER
+      || normalized.startsWith(FIX_SECTION_HEADING_MARKER + ' ')) return raw;
+  }
+  return undefined;
+}
+
 let fixSectionTitleCacheRoot = null;
-let fixSectionTitleCache = null;
+let fixSectionTitleCached = false;
+let fixSectionTitleCache;
 async function derivedFixSectionTitle() {
-  if (fixSectionTitleCacheRoot === runRoot && fixSectionTitleCache !== null) return fixSectionTitleCache;
-  let title = FIX_SECTION_TITLE_FALLBACK;
+  if (fixSectionTitleCacheRoot === runRoot && fixSectionTitleCached) return fixSectionTitleCache;
+  let title;
   const templateFile = path.join(runRoot, 'flow-kit', 'templates', 'TASK.md');
   if (await fileExists(templateFile)) {
     try {
-      const text = await fs.readFile(templateFile, 'utf8');
-      const match = text.match(/^##\s*Fix 任务.*$/mu);
-      if (match) {
-        const derived = match[0].replace(/^##\s*/, '').trim();
-        if (derived !== '') title = derived;
-      }
+      title = fixSectionTitleFromTemplateText(await fs.readFile(templateFile, 'utf8'));
     } catch {}
   }
   fixSectionTitleCache = title;
   fixSectionTitleCacheRoot = runRoot;
+  fixSectionTitleCached = true;
   return title;
 }
 
   // ===== 模板保真（M1/M2/M3·设计语义 / AC-7~AC-9）=====
-  // 段名归一化：去标题标记 + 去尾部括号（如 Why（为什么做）→ Why）+ 去编号前缀（如 1. 决策清单 → 决策清单）
-  // + 去首尾空白 + ASCII 小写（中文无大小写；英文侧大小写不敏感）——沿用 C2 宽容匹配风格
+  // 段名归一化：委托 route-node 共享 heading 归一（单一权威）——去标题标记 / 尾部括号
+  // （如 Why（为什么做）→ Why）/ 编号前缀（1. 决策清单 → 决策清单）/ 闭合 ATX，去首尾空白 + 小写。
   function normalizeTemplateHeading(raw) {
-    return String(raw)
-      .replace(/\r/g, '')
-      .replace(/^#{1,6}\s*/, '')
-      .replace(/[（(][^）)\n]*[）)]\s*$/u, '')
-      .replace(/^\d+(?:\.\d+)?\.?\s*/u, '')
-      .trim()
-      .toLowerCase();
+    return normalizeHeading(raw);
   }
 
   // 提取文档全部 ^## 段（归一化后），供段序/缺段校验
@@ -1145,13 +1044,23 @@ async function derivedFixSectionTitle() {
     change: ['why', 'what', '视觉调性', '影响面', '范围排除', '验收线', '风险与未知'],
     requirement: ['用户故事', '验收准则', '范围切分', '非功能性需求', '依赖与假设'],
     design: ['技术栈选定', '既有架构对齐', '决策清单', '数据流', '关键状态机', 'adr 索引', '风险', '不在范围', '架构沉淀建议'],
+    // SUMMARY 模板缺失时的内置全骨架：十段（含条件段——条件段允许正文 N/A，但 H2 标题须在场）
+    summary: ['做了什么', '改动文件', 'verify 输出', '6 维自查', '数据库迁移', '越界检查', '破坏性变更', '决策与偏离', '是否触发新工作', '完成判定'],
   };
 
   async function templateSkeleton(key) {
     const tpl = await templateSectionPatterns(); // 复用 C2 模板缓存（runRoot 内模板）
     const src = tpl[key] ?? [];
     if (src.length > 0) return src.map((s) => normalizeTemplateHeading(s.name));
-    return TEMPLATE_FIDELITY_FALLBACK_SKELETON[key] ?? [];
+    return (TEMPLATE_FIDELITY_FALLBACK_SKELETON[key] ?? []).map((s) => normalizeTemplateHeading(s));
+  }
+
+  // SUMMARY 全骨架来源：模板全部 H2 派生（derived=true）；模板缺失/无 H2 → 内置十段兜底
+  // （derived=false——调用方据此保持渐进兼容，不新增硬阻断）
+  async function summaryTemplateSkeleton() {
+    const tpl = await templateSectionPatterns();
+    const derived = (tpl.summary ?? []).length > 0;
+    return { derived, sections: await templateSkeleton('summary') };
   }
 
   // 段序校核（宽容）：模板骨架段里「实际出现」的段须按模板先后出现；返回乱序描述（无则 null）
@@ -1204,9 +1113,70 @@ async function derivedFixSectionTitle() {
     return { titleMissing, headerMissing, orderIssue, missingSections };
   }
 
+  // 全骨架保真：骨架来自 SUMMARY 模板全部 H2；每段须存在（条件段内容可写 N/A，但须有 H2 标题），
+  // 实际出现的骨架段须按模板先后排列。## 自检方法 不进入骨架，单独校验：须位于 ## 越界检查 之后，
+  // 且只允许两种位置——紧随 ## 越界检查 之后（下一段即自检方法）或位于全文末尾（最后一个 H2）。
+  function summarySkeletonFidelity(content, skeleton) {
+    const text = String(content).replace(/\uFEFF/g, '');
+    const headings = documentSectionHeadings(text);
+    const seen = new Set();
+    for (const h of headings) {
+      const idx = skeleton.sections.indexOf(h.norm);
+      if (idx !== -1) seen.add(idx);
+    }
+    // 段序复用既有骨架校核（单一实现），段存在性单列——两者共用同一骨架
+    const orderIssue = templateOrderViolation(skeleton.sections, headings);
+    const missingSections = [];
+    for (let i = 0; i < skeleton.sections.length; i++) {
+      if (!seen.has(i)) missingSections.push(skeleton.sections[i]);
+    }
+    const selfHeading = normalizeTemplateHeading('自检方法');
+    const boundsHeading = normalizeTemplateHeading('越界检查');
+    const selfIdx = headings.findIndex((h) => h.norm === selfHeading);
+    const boundsIdx = headings.findIndex((h) => h.norm === boundsHeading);
+    let selfCheckIssue = null;
+    if (selfIdx === -1) {
+      selfCheckIssue = '缺 ## 自检方法 段（须位于 ## 越界检查 之后：文末或紧随越界检查两种合法位置）';
+    } else if (
+      boundsIdx === -1 ||
+      selfIdx < boundsIdx ||
+      (selfIdx !== headings.length - 1 && selfIdx !== boundsIdx + 1)
+    ) {
+      selfCheckIssue = '## 自检方法 位置非法（须位于 ## 越界检查 之后：只允许文末或紧随越界检查两种位置）';
+    }
+    return { missingSections, orderIssue, selfCheckIssue };
+  }
+
 // WARN 计数——entry/exit 成功路径末尾输出汇总行（可观测性；追加不改变既有输出）
 let __warnCount = 0;
 const __origError = console.error;
+
+// 协议绑定引导读取：协议决定 statePath，故协议未解析前只能读标准运行时状态文件，仅取
+// state.protocolPath 用于协议选择；文件缺失/旧 state 缺字段/读取失败 → null（未绑定），由统一
+// 解析回退 CLI/环境变量/默认协议。不改变后续 statePath 解析与读写语义。
+async function readPersistedProtocolBinding() {
+  const standardStateFile = path.join(runRoot, ...RUNTIME_STATE_PATH.split('/'));
+  try {
+    if (!(await fileExists(standardStateFile))) return null;
+    const state = await readStateJson(standardStateFile);
+    return state && typeof state === 'object' ? state : null;
+  } catch {
+    return null;
+  }
+}
+
+// 协议路径选择（单一权威）：显式 --protocol CLI 参数优先；无 CLI 时按 state.protocolPath >
+// FLOW_COMET_PROTOCOL 环境变量 > 默认解析。state.protocolPath 存在但不可读时 fail-closed
+// （受保护读取/schema 校验抛错由 main().catch 统一处理）——不静默回退到另一份协议造成门禁按错误
+// 协议判定。
+async function resolveGuardProtocolPath() {
+  const cliArgs = process.argv.slice(3);
+  if (hasProtocolCliArg(cliArgs)) {
+    return resolveProtocolPathWithState({ packageRoot, runRoot, cliArgs });
+  }
+  const state = await readPersistedProtocolBinding();
+  return resolveProtocolPathWithState({ packageRoot, runRoot, state });
+}
 
 async function main() {
   // 包装 console.error 统计 WARN 输出（转发原实现，行为不变）
@@ -1214,9 +1184,22 @@ async function main() {
     if (/WARN/.test(args.join(' '))) __warnCount += 1;
     __origError(...args);
   };
-  // 受保护读取 + fail-closed schema 校验（读失败/校验失败沿用 throw → main().catch 统一处理）
-  const protocol = await readProtocolFile(runRoot, protocolPath);
-  validateProtocolSchema(protocol);
+  // 协议路径选择 + 受保护读取 + fail-closed schema 校验（读失败/校验失败沿用 throw →
+  // main().catch 统一处理；来源为 state.protocolPath 时补充来源与不回退说明）
+  const selectedProtocol = await resolveGuardProtocolPath();
+  protocolPath = selectedProtocol.protocolPath;
+  let protocol;
+  try {
+    protocol = await readProtocolFile(runRoot, protocolPath);
+    validateProtocolSchema(protocol);
+  } catch (error) {
+    if (selectedProtocol.source === 'state') {
+      throw new Error('state.protocolPath 指向的协议不可读（' + protocolPath + '）：'
+        + (error && typeof error.message === 'string' ? error.message : String(error))
+        + '——不回退环境变量/默认协议（回退会按错误协议判定门禁）；修正 state.protocolPath 或移除绑定后重试');
+    }
+    throw error;
+  }
   if (command === 'verify') {
     console.log('workflow-guard-ok');
     return;
@@ -1235,8 +1218,8 @@ async function main() {
     // pending 修复任务（串行/并行）或有未闭合家族出口签名时，entry 家族节点（execute /
     // subagent-execute）归位工作归属并写盘；仅当入口节点与共享谓词目标一致才归位。
     // 前置 currentNode 校验对该受控例外放行（L-070 实录路径即直接 entry）；其余节点/状态行为不变。
-    const fixBatchRollbackTarget = EXECUTE_FAMILY_NODE_IDS.has(node.id) && state.activeChange
-      ? await resolveFixRollbackState({
+    const fixBatchDecision = EXECUTE_FAMILY_NODE_IDS.has(node.id) && state.activeChange
+      ? await resolveFixRollbackDecision({
         runRoot,
         changeName: state.activeChange,
         protocol,
@@ -1245,15 +1228,23 @@ async function main() {
         history: state.history,
       })
       : null;
-    const fixBatchRollback = fixBatchRollbackTarget === node.id;
+    const fixBatchRollback = !!fixBatchDecision && fixBatchDecision.target === node.id;
     if (current !== node.id && !state.completedNodes.includes(node.id) && !fixBatchRollback) {
       console.error('BLOCKED: current Node is ' + String(current) + ', cannot enter ' + node.id + '.');
       process.exit(1);
     }
     if (fixBatchRollback) {
       const sourceNode = state.currentNode;
+      // 轮次计数与阈值/授权判定全部走共享 helper：分支②不计数；第 4 轮新 change 先 BLOCK
+      // （此处尚未写盘，满足不写 currentNode），旧 change WARN 后照常归位。
+      const rollbackRound = applyFixRollbackRound({ state, sourceNode, decision: fixBatchDecision });
+      if (rollbackRound.blocked) {
+        console.error(rollbackRound.blockedMessage);
+        process.exit(1);
+      }
+      if (rollbackRound.warn) console.error(rollbackRound.warnMessage);
       state.currentNode = node.id;
-      console.log('FIX-BATCH: 受控归位 ' + node.id + '（源节点 ' + sourceNode + '）');
+      console.log('FIX-BATCH: 受控归位 ' + node.id + '（源节点 ' + sourceNode + '）' + rollbackRound.auditSuffix);
       const bad = validateStateFields(state);
       if (bad.length) { console.error('BLOCKED: state 字段类型非法: ' + bad[0]); process.exit(1); }
       await writeJson(file, state);
@@ -1548,7 +1539,11 @@ async function main() {
       if (await fileExists(taskFile)) {
         try {
           const currentHash = taskSetSignature(await fs.readFile(taskFile, 'utf8'));
-          if (currentHash !== state.taskHash) {
+          if (taskSetSignatureVersionSkew(state.taskHash, currentHash)) {
+            // 跨算法版本不做一致性比对（值不可比），不误拦任务集；要强制一致需重新 entry 重建签名
+            const storedAlgo = parseTaskSetSignature(state.taskHash)?.algo ?? 'unknown';
+            console.error('SIGNATURE-ALGO WARN: state.taskHash 算法版本 ' + storedAlgo + ' 与当前任务集签名版本 ' + TASK_SET_SIGNATURE_ALGO + ' 不同——跨版本不做一致性比对，本轮不阻断；如需强制一致请重新 entry execute 家族节点重建签名');
+          } else if (!sameTaskSetSignature(state.taskHash, currentHash)) {
             console.error('BLOCKED: TASK.md 任务集被修改（签名不匹配），execute 期间不允许增删任务/改 action/改边界');
             process.exit(1);
           }
@@ -1736,10 +1731,11 @@ async function main() {
         console.error('BLOCKED: REVIEW.md 内容不足（' + stat.size + ' 字节，需 ≥ 100）');
         process.exit(1);
       }
-      // L3-1: 发现项（含 Minor）须有处置状态标记——[已修]（对应 fix 任务）/ [升级]（用户决策：
+      // 发现项（含 Minor）须有处置状态标记——[已修]（对应 fix 任务）/ [升级]（用户决策：
       // 接受+理由）/ [转待办]（归档时进 KNOWN-ISSUES）。结构级校验，WARN 渐进不 BLOCK：
       // 旧 REVIEW 未按新格式写标记只警告不阻断（防旧 REVIEW 卡死），执行者补标记后可消除。
-      const missingDisposition = reviewFindingsMissingDisposition(await fs.readFile(reviewFile, 'utf8'));
+      const reviewText = await fs.readFile(reviewFile, 'utf8');
+      const missingDisposition = reviewFindingsMissingDisposition(reviewText);
       if (missingDisposition.length > 0) {
         if (isNewChange(state)) {
           console.error('BLOCKED: REVIEW.md 发现区 ' + missingDisposition.length + ' 项条目缺处置状态标记（[已修]/[升级]/[转待办]）——新 change 强制每项发现须有处置');
@@ -1749,6 +1745,21 @@ async function main() {
         console.error('REVIEW WARN: REVIEW.md 发现区 ' + missingDisposition.length +
           ' 项条目缺处置状态标记（[已修]/[升级]/[转待办]）: ' + missingDisposition.join('、') +
           '——未处置的发现（含 Minor）不应无声消失，补标记后本警告消除（渐进不阻断）');
+      }
+      // Major 延期裁决门禁：Major 的处置是用户决策点——reviewer 不得自行 [转待办]。结构校验：
+      // Major 条目标 [转待办] 时须同时存在用户裁决记录（同段或文末含「用户裁决：接受延期」
+      // 且指向该条目，并由 [升级] 承接）；缺失 → 新 change BLOCKED / 旧 change WARN 渐进。
+      // Minor 不受影响；Major [升级]/[已修] 直接放行。
+      const deferredMajor = reviewDeferredMajorProblems(reviewText);
+      if (deferredMajor.length > 0) {
+        const guide = '；恢复: 先把 Major 改为 [升级] 交用户裁决；用户接受延期后在同段或文末记录「用户裁决：接受延期」并指向该条目（由 [升级] 承接）';
+        if (isNewChange(state)) {
+          console.error('BLOCKED: REVIEW.md 发现区 ' + deferredMajor.length + ' 项 Major 条目为 [转待办] 但缺少用户裁决记录（Major 不得由 reviewer 自行转待办）: ' + deferredMajor.join('、') + guide);
+          process.exit(1);
+        }
+        console.error('REVIEW WARN: REVIEW.md 发现区 ' + deferredMajor.length +
+          ' 项 Major 条目为 [转待办] 但缺少用户裁决记录: ' + deferredMajor.join('、') +
+          '——Major 不得由 reviewer 自行转待办' + guide + '（渐进不阻断）');
       }
     } catch {}
   }
@@ -2058,8 +2069,9 @@ async function main() {
     for (const [taskId, rec] of Object.entries(results)) {
       const r = typeof rec.result === 'object' && rec.result !== null ? rec.result : null;
       if (!r) { violations.push(taskId + ' 非 Return Contract（旧格式，缺 completedChecks）'); continue; }
-      // 零提交语义对齐：request 记录 noCommit（write_files 空）的任务无提交可回传，
-      // 豁免 commitHash 缺失断言（其余契约校验不变）——与 workflow-handoff 零提交跳过同构
+      // 零提交语义对齐：request 记录 noCommit（write_files 为空，或全部字面路径可证明被 gitignore）
+      // 的任务无提交可回传，豁免 commitHash 缺失断言（其余契约校验不变）——与 workflow-handoff
+      // 零提交跳过同构
       const taskReq = he.handoffRequests ? he.handoffRequests[taskId] : null;
       const noCommitTask = !!(taskReq && taskReq.noCommit === true);
       if (!r.commitHash && !noCommitTask) violations.push(taskId + ' 缺 commitHash');
@@ -2222,14 +2234,20 @@ async function main() {
     // ===== M1: SUMMARY 模板保真（execute / subagent-execute 出口·设计语义 / AC-7）=====
     // 每份 *-SUMMARY.md 校 ① 标题首行 # SUMMARY: ② 首部 4 字段（Change ID/Task ID/完成时间/AI 角色）
     // ③ 段序（做了什么→改动文件→verify 输出→6 维自查→…→自检方法）；宽容匹配（大小写/编号前缀/括号后缀）。
-    // 新 change 任一缺失 → BLOCK（含缺失点 + 恢复指引）；旧 change/归档批 → WARN 渐进。
+    // ④ 全骨架存在 + 模板序（骨架从 flow-kit/templates/SUMMARY.md 全部 H2 派生，条件段允许正文 N/A）；
+    //    ## 自检方法 不在骨架内，单独要求且只允许「文末」「紧随越界检查」两种位置。
+    // 新 change 任一缺失 → BLOCK（含缺失点 + 恢复指引）；旧 change/归档批 → WARN 渐进；
+    // 模板缺失（无权威骨架来源）→ 新规则只告警不阻断，保持旧格式渐进。
     if (EXECUTE_FAMILY_NODE_IDS.has(node.id)) {
       const summaryChangeDir = path.join(runRoot, '.specs', state.activeChange ?? '');
       const summaryFiles = (await fs.readdir(summaryChangeDir).catch(() => [])).filter((f) => f.endsWith('-SUMMARY.md'));
+      const skeleton = await summaryTemplateSkeleton();
       const hardIssues = [];
+      let skeletonGuidanceNeeded = false;
       for (const f of summaryFiles) {
         try {
-          const fidelity = summaryTemplateFidelity(await fs.readFile(path.join(summaryChangeDir, f), 'utf8'));
+          const content = await fs.readFile(path.join(summaryChangeDir, f), 'utf8');
+          const fidelity = summaryTemplateFidelity(content);
           const problems = [];
           if (fidelity.titleMissing) {
             problems.push('首行缺 `# SUMMARY: <Task>-<名>` 标题（大小写不敏感，标题可带括号说明后缀）');
@@ -2252,11 +2270,39 @@ async function main() {
                 '（旧 change/归档批渐进，不阻断；新 change 将强制）');
             }
           }
+          // ④ 全骨架保真：模板在场时新 change 缺段/乱序/自检位置非法 → BLOCK；
+          // 模板缺失时骨架来自内置兜底，不据此新增阻断（旧格式兼容）。
+          const skeletonFidelity = summarySkeletonFidelity(content, skeleton);
+          const skeletonProblems = [];
+          if (skeletonFidelity.missingSections.length > 0) {
+            skeletonProblems.push('缺段: ' + skeletonFidelity.missingSections.join('、'));
+          }
+          if (skeletonFidelity.orderIssue) {
+            skeletonProblems.push('段序乱（「' + skeletonFidelity.orderIssue.replace(/^##\s*/, '') +
+              '」偏离 flow-kit/templates/SUMMARY.md 的段序）');
+          }
+          if (skeletonFidelity.selfCheckIssue) {
+            skeletonProblems.push(skeletonFidelity.selfCheckIssue);
+          }
+          if (skeletonProblems.length > 0) {
+            if (isNewChange(state) && skeleton.derived) {
+              skeletonGuidanceNeeded = true;
+              hardIssues.push(f + ' SUMMARY 全骨架校验失败: ' + skeletonProblems.join('; '));
+            } else {
+              console.error('SUMMARY TEMPLATE WARN: ' + f + ' ' + skeletonProblems.join('; ') +
+                (skeleton.derived
+                  ? '（旧 change/归档批渐进，不阻断；新 change 将强制）'
+                  : '（模板缺失，按内置骨架提示；不新增阻断）'));
+            }
+          }
         } catch {}
       }
       if (hardIssues.length > 0) {
         console.error('BLOCKED: SUMMARY 模板保真校验失败: ' + hardIssues.join('; '));
         console.error('恢复: 对照 flow-kit/templates/SUMMARY.md 修正标题/首部/段序（含 flow-comet 增量 ## 自检方法 段）后重试 exit；新 change 强制模板保真');
+        if (skeletonGuidanceNeeded) {
+          console.error('恢复: 对照 flow-kit/templates/SUMMARY.md 补齐缺失段的 H2 标题（条件段内容可写 N/A）并按模板顺序排列；## 自检方法 只允许文末或紧随 ## 越界检查 之后两种位置');
+        }
         process.exit(1);
       }
     }
@@ -2478,6 +2524,7 @@ async function main() {
       try {
         if (await fileExists(exitTaskFile)) {
           exitEvent.taskSetSignature = taskSetSignature(await fs.readFile(exitTaskFile, 'utf8'));
+          exitEvent.signatureAlgo = TASK_SET_SIGNATURE_ALGO;
         }
       } catch {}
     }

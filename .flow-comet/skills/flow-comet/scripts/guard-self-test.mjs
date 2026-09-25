@@ -30,6 +30,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { isDeepStrictEqual } from 'util'; // 白名单外深比（state 字节级不变量断言，标准库零依赖）
 import vm from 'vm'; // 系统测试集项数的运行时派生：求值其 TEST_ITEMS 数组字面量（见 readSystemTestItemCount）
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -529,6 +530,65 @@ function assertNotOut(res, keyword) {
   }
 }
 
+// result 重验撤销审计断言（共享单一来源）：撤销后 request evidence 必须 noCommit=false，
+// 且含非空、可被 Date 解析的 revokedAt 与失败类别对应的 revokeReason（缺任一即审计缺口）。
+function assertRevocationAudit(req, expectedReason, label) {
+  if (!req || req.noCommit !== false) {
+    throw new Error(label + '：撤销后 request evidence 应为 noCommit=false，实际 ' + JSON.stringify(req));
+  }
+  if (typeof req.revokedAt !== 'string' || req.revokedAt.trim() === '' || Number.isNaN(Date.parse(req.revokedAt))) {
+    throw new Error(label + '：撤销应记录非空且可被 Date 解析的 revokedAt，实际 ' + JSON.stringify(req.revokedAt));
+  }
+  if (req.revokeReason !== expectedReason) {
+    throw new Error(label + '：撤销应记录 revokeReason=' + expectedReason + '，实际 ' + JSON.stringify(req.revokeReason));
+  }
+}
+
+// state 不变量断言（m-09 / AC-4 / AC-12）：白名单外深比 + history 旧前缀稳定 + 恰新增一条
+// exit-applied 事件。白名单为点分路径（如 'currentNode' / 'evidence.execute.completedChecks'）。
+// 判别力：实现若顺手写白名单外字段、重写 history 旧条目、多推/漏推出口事件即抛错。
+function omitStatePath(root, dottedPath) {
+  const parts = String(dottedPath).split('.');
+  let cursor = root;
+  for (let i = 0; i < parts.length - 1; i += 1) {
+    if (!cursor || typeof cursor !== 'object') return;
+    cursor = cursor[parts[i]];
+  }
+  if (cursor && typeof cursor === 'object') delete cursor[parts[parts.length - 1]];
+}
+
+function assertStateOnlyChanged(before, after, options = {}) {
+  const label = options.label ? '[' + options.label + '] ' : '';
+  const allowed = Array.isArray(options.allowed) ? options.allowed : [];
+  const expectNewExitApplied = options.expectNewExitApplied === undefined ? 1 : options.expectNewExitApplied;
+  const beforeCmp = JSON.parse(JSON.stringify(before));
+  const afterCmp = JSON.parse(JSON.stringify(after));
+  for (const p of allowed) {
+    omitStatePath(beforeCmp, p);
+    omitStatePath(afterCmp, p);
+  }
+  if (!isDeepStrictEqual(beforeCmp, afterCmp)) {
+    throw new Error(label + '白名单外 state 深度不变量被破坏（allowed=' + JSON.stringify(allowed) + '）\n'
+      + 'before=' + JSON.stringify(beforeCmp) + '\nafter=' + JSON.stringify(afterCmp));
+  }
+  const beforeHistory = Array.isArray(before?.history) ? before.history : [];
+  const afterHistory = Array.isArray(after?.history) ? after.history : [];
+  if (!isDeepStrictEqual(afterHistory.slice(0, beforeHistory.length), beforeHistory)) {
+    throw new Error(label + 'history 旧前缀被改写（旧条目必须逐字稳定）');
+  }
+  const appended = afterHistory.slice(beforeHistory.length);
+  if (appended.length !== expectNewExitApplied) {
+    throw new Error(label + 'history 应恰新增 ' + expectNewExitApplied + ' 条，实际 ' + appended.length
+      + '：' + JSON.stringify(appended));
+  }
+  for (const event of appended) {
+    if (!event || event.event !== 'exit-applied') {
+      throw new Error(label + '新增 history 条目应为 exit-applied：' + JSON.stringify(event));
+    }
+  }
+  return appended;
+}
+
 // 安装副本版本比较断言单点（场景 193 多子锚共用）：构造安装副本夹具 → 以副本脚本跑真实
 // bridge-check CLI → 断言 exit 与全部关键词（失败附子锚标签便于定位）。helper 只声明期望，
 // bridge-check 语义仍由 CLI 真实输出承载。
@@ -610,6 +670,44 @@ function fixTaskBlock(id, status) {
 // Fix 批次（248~252）场景公共任务集：既有任务 T01 done + 修复任务（状态由参数指定）
 function fixBatchTaskText(fixStatus) {
   return '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n' + fixTaskBlock('T-FIX-01', fixStatus) + '\n';
+}
+
+// exit execute 二次完成回源场景公共夹具（场景族拆分后由三个顶层场景共享；每个场景仍在独立
+// 临时目录运行，状态不跨场景共享）：家族证据与基础 state 的字段基线在此单一表达。
+function fixReturnFamilyEvidence(taskIds) {
+  return {
+    execute: { summary: 'fix batch executed', completedChecks: ['required-skill:execute.flow-comet-dev'] },
+    'subagent-execute': { summary: 'delegated', handoffResult: handoffFor(taskIds) },
+    review: { summary: 'review in progress' },
+  };
+}
+
+function fixReturnBaseState(overrides = {}) {
+  return {
+    activeChange: CHANGE_ID,
+    currentNode: 'execute',
+    completedNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
+    enteredNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review'],
+    evidence: fixReturnFamilyEvidence(['T01']),
+    verifyFailures: 0,
+    executionMode: 'subagent',
+    directOverride: false,
+    newChange: true,
+    ...overrides,
+  };
+}
+
+const FIX_RETURN_FAMILY_COMPLETED = 'open,design,plan,execute,subagent-execute';
+
+// 回源夹具的 REVIEW.md 正文：内容表达「审查未完成、Fix 批次待回源出口」，文件在场即触发
+// 路由按产物跳过 review 的行为。
+const FIX_RETURN_REVIEW_TEXT = '# REVIEW\n\n## 发现\n\n### Critical\n\n- 无\n\n### Major\n\n- 无\n\n### Minor\n\n- 无\n\n## 结论\n\n审查结论已记录；Fix 批次由 execute 完成，待回源重新出口。\n';
+
+// 逐任务写入摘要夹具（id 列表由调用场景给出，未列出的任务不会凭空出现摘要）。
+function writeFixReturnSummaries(dir, taskIds) {
+  for (const id of taskIds) {
+    writeFile(dir, '.specs/' + CHANGE_ID + '/' + id + '-SUMMARY.md', strictSummary(id));
+  }
 }
 
 // 并行 Fix 任务集（无依赖 → 可委托）：既有任务 T01 done + parallel 修复任务（状态由参数指定）。
@@ -855,9 +953,29 @@ function strictSummary(taskId) {
     '- 可观测: 通过',
     '- 可维护: 通过',
     '',
+    '## 数据库迁移',
+    '',
+    'N/A：本任务无 schema 变更（条件段按模板占位）。',
+    '',
     '## 越界检查',
     '',
     '仅修改 src/' + taskId.toLowerCase() + '.mjs，无越界。',
+    '',
+    '## 破坏性变更',
+    '',
+    'N/A：本任务不涉及破坏性变更。',
+    '',
+    '## 决策与偏离',
+    '',
+    '无偏离。',
+    '',
+    '## 是否触发新工作',
+    '',
+    '无。',
+    '',
+    '## 完成判定',
+    '',
+    '- TASK.md 中对应任务已勾选：是',
     '',
     '## 自检方法',
     '',
@@ -1553,11 +1671,19 @@ const SCENARIOS = [
         throw new Error('exit verify 失败计数未递增: ' + JSON.stringify(stFail2.verifyFailuresByChange));
       }
       writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```bash\nnode -e "1"\n```\n');
+      // AC-5 隔离：verify 成功只清 verify 计数，不得清 Fix 归位轮次（预置计数，成功出口后核对）
+      const stBeforePass = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      stBeforePass.fixRoundsByChange = { ...(stBeforePass.fixRoundsByChange || {}), [CHANGE_ID]: 2 };
+      fs.writeFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), JSON.stringify(stBeforePass, null, 2) + '\n');
       const resPass = runGuard(['exit', 'verify', '--apply'], dir);
       assertExit(resPass, 0);
       const stPass = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (!stPass.verifyFailuresByChange || stPass.verifyFailuresByChange[CHANGE_ID] !== 0) {
         throw new Error('exit verify 成功未清零当前 change 计数: ' + JSON.stringify(stPass.verifyFailuresByChange));
+      }
+      if (stPass.fixRoundsByChange?.[CHANGE_ID] !== 2) {
+        throw new Error('exit verify 成功不得清 Fix 归位轮次（计数隔离）: '
+          + JSON.stringify(stPass.fixRoundsByChange));
       }
     },
   },
@@ -1698,6 +1824,27 @@ const SCENARIOS = [
       assertExit(res, 0);
       assertOut(res, 'ALL CHECKS PASSED');
       assertNotOut(res, 'Unknown workflow Node');
+      // ③ state.protocolPath 持久化绑定优先于 FLOW_COMET_PROTOCOL env：env 指向内置协议
+      // （无 brainstorm 节点），state 绑定自定义协议 → 仍按自定义协议通过。修复前 guard 只看
+      // CLI/env → 走内置协议报 Unknown Node（RED）。
+      const bound = composeState({
+        currentNode: 'brainstorm',
+        evidence: { brainstorm: { summary: 'brainstorm done' } },
+        protocolPath: 'custom-protocol.json',
+      });
+      writeState(dir, bound);
+      const resBound = runGuard(['exit', 'brainstorm'], dir); // runGuard 默认 env=内置协议副本
+      assertExit(resBound, 0);
+      assertOut(resBound, 'ALL CHECKS PASSED');
+      assertNotOut(resBound, 'Unknown workflow Node');
+      // ④ state.protocolPath 绑定不可读 → fail-closed 不回退 env/默认协议，错误说明来源与
+      // 不回退语义（归属门禁可跳过校验，节点门禁没有等价降级路径）。
+      writeState(dir, composeState({ protocolPath: 'missing-protocol.json' }));
+      const resBoundMissing = runGuard(['exit', 'brainstorm'], dir);
+      assertExit(resBoundMissing, 1);
+      assertOut(resBoundMissing, 'state.protocolPath');
+      assertOut(resBoundMissing, '不回退');
+      assertNotOut(resBoundMissing, 'Unknown workflow Node');
     },
   },
 
@@ -3283,6 +3430,21 @@ const SCENARIOS = [
       assertExit(res2, 0);
       assertNotOut(res2, 'REVIEW WARN');
       assertOut(res2, 'ALL CHECKS PASSED');
+      // ③ 有序条目（1. **...**）与无序同口径——缺处置标记 → 旧 change 仍渐进 REVIEW WARN
+      // （修复前 .filter((item) => !item.ordered) 使有序条目静默通过 = RED）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
+        '# REVIEW\n\n## 发现\n\n1. **m-2 · 有序未处置**：某处问题，未给出任何处置结论，描述足够长以避免内容不足\n\n## 结论\n\n通过\n');
+      const resOrdered = runGuard(['exit', 'review'], dir);
+      assertExit(resOrdered, 0);
+      assertOut(resOrdered, 'REVIEW WARN');
+      assertNotOut(resOrdered, 'BLOCKED');
+      // ④ 有序 Minor 带 [转待办] → 无该渐进告警（有序条目接入校验不误报已处置项）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
+        '# REVIEW\n\n## 发现\n\n1. **m-3 · 有序小项**：某处小问题，已登记下一 change 跟踪处置 [转待办]\n\n## 结论\n\n通过\n');
+      const resOrderedOk = runGuard(['exit', 'review'], dir);
+      assertExit(resOrderedOk, 0);
+      assertNotOut(resOrderedOk, 'REVIEW WARN');
+      assertOut(resOrderedOk, 'ALL CHECKS PASSED');
     },
   },
 
@@ -3749,9 +3911,11 @@ const SCENARIOS = [
     },
   },
 
-  // 125: R1——新 change(newChange:true)review 处置标记缺失 → BLOCKED(旧 change WARN 保留)
+  // 125: R1——新 change(newChange:true)review 处置标记缺失 → BLOCKED(旧 change WARN 保留)；
+  // 并内扩 Major 延期待裁决门禁三态+一反例：无用户裁决 BLOCK / 同段或文末裁决（由 [升级]
+  // 承接）放行 / Minor [转待办] 不受影响 / 有裁决但缺 [升级] 承接仍 BLOCK。
   {
-    name: '125 review exit BLOCKED：新 change 处置标记缺失（R1）',
+    name: '125 review exit BLOCKED：新 change 处置标记缺失 + Major 延期待裁决（R1）',
     run: (dir) => {
       const st = baseState('review');
       st.evidence.review = { summary: 'reviewed' };
@@ -3779,6 +3943,89 @@ const SCENARIOS = [
       const resOk2 = runGuard(['exit', 'review'], dir);
       assertExit(resOk2, 0);
       assertOut(resOk2, 'ALL CHECKS PASSED');
+      // 子断言:Major [转待办] 属用户决策点——无用户裁决记录 → BLOCKED(修复前放行 = RED)
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **F1 · 未裁决的延期**：某处问题 [转待办]\n\n## 结论\n\n通过\n');
+      const resMajor = runGuard(['exit', 'review'], dir);
+      assertExit(resMajor, 1);
+      assertOut(resMajor, 'BLOCKED');
+      assertOut(resMajor, 'Major');
+      assertOut(resMajor, '用户裁决');
+      // 子断言:同段用户裁决 + [升级] 承接 → 放行
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **F2 · 已裁决的延期**：某处问题 [升级] [转待办]（用户裁决：接受延期，下一 change 首修）\n\n## 结论\n\n通过\n');
+      const resAdjudicated = runGuard(['exit', 'review'], dir);
+      assertExit(resAdjudicated, 0);
+      assertOut(resAdjudicated, 'ALL CHECKS PASSED');
+      assertNotOut(resAdjudicated, '用户裁决');
+      // 子断言:Minor [转待办] 不受影响 → 放行
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-1 · 小项**：某处小问题 [转待办]\n\n## 结论\n\n通过\n');
+      const resMinor = runGuard(['exit', 'review'], dir);
+      assertExit(resMinor, 0);
+      assertOut(resMinor, 'ALL CHECKS PASSED');
+      // 子断言:文末用户裁决 + 指向该条目 + [升级] 承接 → 放行
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **F3 · 文末裁决的延期**：某处问题 [升级] [转待办]\n\n## 用户裁决\n\n- 用户裁决：接受延期 —— 发现 F3（文末裁决的延期）：下一 change 首修。\n\n## 结论\n\n通过\n');
+      const resTail = runGuard(['exit', 'review'], dir);
+      assertExit(resTail, 0);
+      assertOut(resTail, 'ALL CHECKS PASSED');
+      // 子断言:尾部裁决段落引用条目整行（引用块）时不得被误判为条目自身段落 → 放行
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **F5 · 引用条目行的尾部裁决**：某处问题 [升级] [转待办]\n\n## 用户裁决\n\n> - **F5 · 引用条目行的尾部裁决**：某处问题 [升级] [转待办]\n> 用户裁决：接受延期 —— 发现 F5：下一 change 首修。\n\n## 结论\n\n通过\n');
+      const resQuotedTail = runGuard(['exit', 'review'], dir);
+      assertExit(resQuotedTail, 0);
+      assertOut(resQuotedTail, 'ALL CHECKS PASSED');
+      // 子断言:有用户裁决但缺 [升级] 承接 → 仍 BLOCKED（不因裁决在文末就跳过承接校验）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **F4 · 无升级承接**：某处问题 [转待办]\n\n## 用户裁决\n\n- 用户裁决：接受延期 —— 发现 F4（无升级承接）：下一 change 首修。\n\n## 结论\n\n通过\n');
+      const resNoEscalation = runGuard(['exit', 'review'], dir);
+      assertExit(resNoEscalation, 1);
+      assertOut(resNoEscalation, 'BLOCKED');
+      assertOut(resNoEscalation, 'Major');
+      assertOut(resNoEscalation, '用户裁决');
+      // 子断言:Minor 条目正文引用 [Major] 标签字样（自身 [转待办]）→ 放行——严重度/处置
+      // 以条目自身标题/行首为准，不做整块标签扫描（修复前误判 Major 并触发延期门禁 = RED）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n- **m-2 · 引用 Major 的小项**：本条与 [Major] F1 项不同，是独立问题 [转待办]\n\n## 结论\n\n通过\n');
+      const resCited = runGuard(['exit', 'review'], dir);
+      assertExit(resCited, 0);
+      assertOut(resCited, 'ALL CHECKS PASSED');
+      assertNotOut(resCited, 'BLOCKED');
+      // 子断言:Major 条目自身处置为 [已修]，续行正文引用他条 [转待办] → 放行——
+      // 延期门禁只看该条目自身标题/行首的处置标记，不做整块扫描
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **[Major] F9 · 已修项引用他条**：某处问题 [已修]\n  （续行仅引用他条的处置去向 [转待办]，非本条处置）\n\n## 结论\n\n通过\n');
+      const resQuotedDisposition = runGuard(['exit', 'review'], dir);
+      assertExit(resQuotedDisposition, 0);
+      assertOut(resQuotedDisposition, 'ALL CHECKS PASSED');
+      assertNotOut(resQuotedDisposition, 'BLOCKED');
+      // 子断言:有序 Major 标签条目缺任何处置标记 → BLOCKED（修复前有序条目被跳过 = RED）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n1. **[Major] F6 · 有序无处置**：某处问题，未给出任何处置结论，描述足够长以避免内容不足\n\n## 结论\n\n通过\n');
+      const resOrderedMissing = runGuard(['exit', 'review'], dir);
+      assertExit(resOrderedMissing, 1);
+      assertOut(resOrderedMissing, '处置状态标记');
+      // 子断言:有序 Major [转待办] 无用户裁决 → BLOCKED（Major 延期门禁对有序条目同口径）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n1. **F7 · 有序未裁决的延期**：某处问题 [转待办]\n\n## 结论\n\n通过\n');
+      const resOrderedDeferred = runGuard(['exit', 'review'], dir);
+      assertExit(resOrderedDeferred, 1);
+      assertOut(resOrderedDeferred, 'Major');
+      assertOut(resOrderedDeferred, '用户裁决');
+      // 子断言:有序 Major [升级] [转待办] + 同段用户裁决（[升级] 承接）→ 放行
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n1. **F8 · 有序已裁决的延期**：某处问题 [升级] [转待办]（用户裁决：接受延期，下一 change 首修）\n\n## 结论\n\n通过\n');
+      const resOrderedAdjudicated = runGuard(['exit', 'review'], dir);
+      assertExit(resOrderedAdjudicated, 0);
+      assertOut(resOrderedAdjudicated, 'ALL CHECKS PASSED');
+      assertNotOut(resOrderedAdjudicated, '用户裁决');
+      // 子断言:中间位置的独立裁决段落（不与条目同段、也不在文末）——指向该条目且含
+      // [升级] 承接 → 放行。实现按独立段落匹配，位置不限；文档须写明这一合法形态。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
+        '# REVIEW\n\n## 发现\n\n### Major\n\n'
+        + '- **F10 · 中段裁决的延期**：某处问题 [升级] [转待办]\n\n'
+        + '- 用户裁决：接受延期 —— 发现 F10（中段裁决的延期）：下一 change 首修。\n\n'
+        + '### Minor\n\n- **m-4 · 小项**：另一个独立问题 [已修]\n\n## 结论\n\n通过\n');
+      const resMidParagraph = runGuard(['exit', 'review'], dir);
+      assertExit(resMidParagraph, 0);
+      assertOut(resMidParagraph, 'ALL CHECKS PASSED');
+      // 子断言:文档口径与实现对齐——review SKILL 须写明「单独段落（指向条目 + [升级] 承接）」
+      // 也是合法裁决位置，避免文档只写「同段或文末」而收窄实现语义（文档未同步 = RED）。
+      const reviewSkillText = fs.readFileSync(
+        path.join(__dirname, '..', '..', 'flow-comet-review', 'SKILL.md'), 'utf8');
+      if (!reviewSkillText.includes('单独段落') || !reviewSkillText.includes('指向') || !reviewSkillText.includes('[升级]')) {
+        throw new Error('flow-comet-review/SKILL.md 未写明「单独段落（指向条目 + [升级] 承接）」合法');
+      }
     },
   },
 
@@ -3839,6 +4086,101 @@ const SCENARIOS = [
       const res = runGuard(['exit', 'execute'], dir);
       assertExit(res, 1);
       assertOut(res, '越权');
+
+      // ===== M-02 request 时刻归属门禁（AC-1/AC-2/AC-3 的 L1 面）=====
+      // 夹具前提：新 change 驻留 execute + 本节点技能声明标记在场（否则先被技能声明门 BLOCK，
+      // 测不到归属门禁本身）；协议副本由运行器放入 <dir>/reference/ 并显式指向（env 优先级）。
+      const reqEnv = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const reqStatePath = path.join(dir, '.flow-comet', 'flow-comet-state.json');
+      fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
+      writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/execute-flow-comet-dev.json',
+        JSON.stringify({ node: 'execute', skill: 'flow-comet-dev', protocol: '4-dev.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+      const pendingParallelTask =
+        '<task id="P-M02" parallel="true" status="pending"><action>实现 P-M02</action><write_files>src/p-m02.mjs</write_files><verify>node --check src/p-m02.mjs</verify></task>\n';
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + pendingParallelTask);
+      // ① 新 change 错误节点 pending 并行 request → BLOCK + state 字节零改写 + 不落请求记录 + 恢复指引
+      const reqState = baseState('execute');
+      reqState.newChange = true;
+      reqState.enteredNodes = ['execute'];
+      writeState(dir, reqState);
+      const beforeReqBytes = fs.readFileSync(reqStatePath, 'utf8');
+      const resWrongNode = runHandoff(['request', 'P-M02', 'parallel fix slice'], dir, reqEnv);
+      assertExit(resWrongNode, 1);
+      assertOut(resWrongNode, 'BLOCKED: 任务 P-M02（并行 pending）应归属节点 subagent-execute');
+      assertOut(resWrongNode, 'workflow-state next');
+      assertOut(resWrongNode, 'entry subagent-execute');
+      assertOut(resWrongNode, '本次请求未写入 state');
+      if (fs.readFileSync(reqStatePath, 'utf8') !== beforeReqBytes) {
+        throw new Error('M-02 BLOCK 必须 state 字节零改写');
+      }
+      const stAfterBlock = readScenarioState(dir);
+      const reqsAfterBlock = stAfterBlock.evidence?.['subagent-execute']?.handoffRequests ?? {};
+      if (reqsAfterBlock['P-M02']) {
+        throw new Error('M-02 BLOCK 不得落 handoffRequests: ' + JSON.stringify(reqsAfterBlock));
+      }
+      // ② 旧 change 同构造 → 可见 WARN + 照常落库（AC-3 渐进兼容）
+      writeState(dir, { ...baseState('execute'), enteredNodes: ['execute'] });
+      const resOldChange = runHandoff(['request', 'P-M02', 'parallel fix slice'], dir, reqEnv);
+      assertExit(resOldChange, 0);
+      assertOut(resOldChange, 'WARN: 任务 P-M02（并行 pending）应归属节点 subagent-execute');
+      assertOut(resOldChange, '旧 change 渐进不阻断');
+      assertOut(resOldChange, 'HANDOFF REQUEST: P-M02');
+      const stOldChange = readScenarioState(dir);
+      if (!stOldChange.evidence?.['subagent-execute']?.handoffRequests?.['P-M02']) {
+        throw new Error('旧 change 错误节点请求应照常落库（AC-3），实际 ' + JSON.stringify(stOldChange.evidence));
+      }
+      // ③ pending 并行任务依赖未满足 → 当前不可委托。恢复指引必须以 next 实际输出为准：
+      // next 对依赖未满足的并行任务按串行消化输出 execute——指引不得再固定指向
+      // entry subagent-execute（否则按指引进入会被 currentNode 门禁拦成死路）。
+      writeIntakeArtifacts(dir);
+      const unmetDepsTask =
+        '<task id="S-M01" parallel="false" status="pending"><action>实现 S-M01</action><write_files>src/s-m01.mjs</write_files><verify>node --check src/s-m01.mjs</verify></task>\n' +
+        '<task id="P-M03" parallel="true" status="pending"><action>实现 P-M03</action><write_files>src/p-m03.mjs</write_files><verify>node --check src/p-m03.mjs</verify><depends_on>S-M01</depends_on></task>\n';
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + unmetDepsTask);
+      const unmetState = baseState('execute');
+      unmetState.newChange = true;
+      unmetState.enteredNodes = ['execute'];
+      unmetState.completedNodes = ['open', 'design', 'plan'];
+      unmetState.evidence = { plan: { summary: 'plan done' } };
+      writeState(dir, unmetState);
+      const unmetBytesBefore = fs.readFileSync(reqStatePath, 'utf8');
+      const resUnmet = runHandoff(['request', 'P-M03', 'parallel slice with unmet deps'], dir, reqEnv);
+      assertExit(resUnmet, 1);
+      assertOut(resUnmet, 'BLOCKED: 任务 P-M03（并行 pending）当前不可委托：依赖未满足');
+      assertOut(resUnmet, '未完成: S-M01');
+      assertOut(resUnmet, '原始 currentNode=execute');
+      assertOut(resUnmet, 'workflow-state next');
+      assertOut(resUnmet, '按输出的 NODE 进入');
+      assertOut(resUnmet, '若输出 execute 表示依赖未满足');
+      assertOut(resUnmet, '待任务变为可委托');
+      // 不得固定指引 next 不会输出的节点（进入即死路的反锚）
+      assertNotOut(resUnmet, 'entry subagent-execute');
+      assertNotOut(resUnmet, 'HANDOFF REQUEST');
+      if (fs.readFileSync(reqStatePath, 'utf8') !== unmetBytesBefore) {
+        throw new Error('依赖未满足 BLOCK 必须 state 字节零改写');
+      }
+      const stUnmet = readScenarioState(dir);
+      if (stUnmet.evidence?.['subagent-execute']?.handoffRequests?.['P-M03']) {
+        throw new Error('依赖未满足 BLOCK 不得落 handoffRequests: ' + JSON.stringify(stUnmet.evidence));
+      }
+      // 同构真实链路：next 对当前 TASK 实际输出 execute（依赖未满足/串行消化），与指引条件分支一致
+      const resUnmetNext = runState(['next'], dir, reqEnv);
+      assertExit(resUnmetNext, 0);
+      if (!/^NODE: execute$/m.test(resUnmetNext.output)) {
+        throw new Error('依赖未满足时 next 应输出 execute（指引一致性锚）：\n' + resUnmetNext.output);
+      }
+      if (readScenarioState(dir).currentNode !== 'execute') {
+        throw new Error('依赖未满足时 next 应把工作归属留在 execute: ' + JSON.stringify(readScenarioState(dir).currentNode));
+      }
+      // 旧 change 同形态 → 可见 WARN + 照常落库（渐进兼容，不因依赖未满足而卡死）
+      const oldUnmetState = { ...unmetState };
+      delete oldUnmetState.newChange;
+      writeState(dir, oldUnmetState);
+      const resUnmetOld = runHandoff(['request', 'P-M03', 'old change unmet deps'], dir, reqEnv);
+      assertExit(resUnmetOld, 0);
+      assertOut(resUnmetOld, 'WARN: 任务 P-M03（并行 pending）当前不可委托：依赖未满足');
+      assertOut(resUnmetOld, '旧 change 渐进不阻断');
+      assertOut(resUnmetOld, 'HANDOFF REQUEST: P-M03');
     },
   },
 
@@ -3872,9 +4214,10 @@ const SCENARIOS = [
     },
   },
 
-  // 131: R1 旧兼容——旧 change(无 newChange)处置标记缺失仍 WARN
+  // 131: R1 旧兼容——旧 change(无 newChange)处置标记缺失仍 WARN；并内扩 Major 延期待裁决
+  // 门禁旧 change 渐进面：无用户裁决 → WARN 不 BLOCK（不卡死旧 REVIEW）；有裁决+[升级] → 放行。
   {
-    name: '131 review exit 兼容：旧 change 处置标记缺失仍 WARN（R1 旧兼容）',
+    name: '131 review exit 兼容：旧 change 处置标记缺失仍 WARN + Major 延期渐进（R1 旧兼容）',
     run: (dir) => {
       const st = baseState('review');
       st.evidence.review = { summary: 'reviewed' };
@@ -3883,6 +4226,27 @@ const SCENARIOS = [
       const res = runGuard(['exit', 'review'], dir);
       assertExit(res, 0);
       assertOut(res, 'WARN');
+      // 子断言:Major [转待办] 无用户裁决 → 旧 change 渐进 WARN 且不 BLOCK（不卡死旧 REVIEW）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **F1 · 未裁决的延期**：某处问题 [转待办]\n\n## 结论\n\n通过\n');
+      const resMajor = runGuard(['exit', 'review'], dir);
+      assertExit(resMajor, 0);
+      assertOut(resMajor, 'REVIEW WARN');
+      assertOut(resMajor, 'Major');
+      assertOut(resMajor, '用户裁决');
+      assertNotOut(resMajor, 'BLOCKED');
+      // 子断言:有同段用户裁决 + [升级] 承接 → 无该渐进告警
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **F2 · 已裁决的延期**：某处问题 [升级] [转待办]（用户裁决：接受延期）\n\n## 结论\n\n通过\n');
+      const resOk = runGuard(['exit', 'review'], dir);
+      assertExit(resOk, 0);
+      assertNotOut(resOk, '用户裁决');
+      assertOut(resOk, 'ALL CHECKS PASSED');
+      // 子断言:有序 Major [转待办] 无用户裁决 → 旧 change 渐进 WARN 不 BLOCK（有序同口径）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n1. **F3 · 有序未裁决的延期**：某处问题 [转待办]\n\n## 结论\n\n通过\n');
+      const resOrderedMajor = runGuard(['exit', 'review'], dir);
+      assertExit(resOrderedMajor, 0);
+      assertOut(resOrderedMajor, 'REVIEW WARN');
+      assertOut(resOrderedMajor, '用户裁决');
+      assertNotOut(resOrderedMajor, 'BLOCKED');
     },
   },
 
@@ -4018,6 +4382,29 @@ const SCENARIOS = [
       const r9 = runState(['verify-fail'], dir, env);
       assertExit(r9, 1);
       assertOut(r9, '超限');
+      // ⑥ 计数隔离扩展（AC-5）：verify 失败计数与 Fix 归位轮次各自独立——verify-fail 只动
+      // verifyFailuresByChange，绝不触碰 fixRoundsByChange（旧实现只读 verify 计数已通过；
+      // 若未来把二者混用 / 共用容器，本条按 change 逐项断言变红）。
+      const stIsolated = readScenarioState(dir);
+      stIsolated.fixRoundsByChange = { ch: 2, ch2: 1 };
+      writeState(dir, stIsolated);
+      writeFile(dir, '.specs/ch3/CHANGE.md', '# CHANGE\n## Why\nx\n');
+      assertExit(runState(['select', 'ch3'], dir, env), 0);
+      const stCh3Before = readScenarioState(dir);
+      stCh3Before.fixRoundsByChange = { ch: 2, ch2: 1, ch3: 5 };
+      writeState(dir, stCh3Before);
+      const r10 = runState(['verify-fail'], dir, env);
+      assertExit(r10, 0);
+      assertOut(r10, 'VERIFY-FAIL: 1/3');
+      const stCh3After = readScenarioState(dir);
+      if (stCh3After.verifyFailuresByChange?.ch3 !== 1) {
+        throw new Error('verify-fail 应按 change 递增 verify 计数，实际 '
+          + JSON.stringify(stCh3After.verifyFailuresByChange));
+      }
+      if (JSON.stringify(stCh3After.fixRoundsByChange) !== JSON.stringify({ ch: 2, ch2: 1, ch3: 5 })) {
+        throw new Error('verify 失败计数与 Fix 轮次计数不得串扰（fixRoundsByChange 被改写）: '
+          + JSON.stringify(stCh3After.fixRoundsByChange));
+      }
     },
   },
 
@@ -4386,7 +4773,7 @@ const SCENARIOS = [
   // route-node.mjs import EXECUTE_FAMILY_NODE_IDS，且源码中不得再出现 execute 家族成员内联 pair
   //（<ident> === 'execute' || <ident> === 'subagent-execute'，正反顺序）→ 0 命中。
   // 允许清单：单节点分支 / hasSubagentNode 协议判定 / 证据键与文案不参与 pair 断言。
-  // ② 本轮修复在既有场景内扩展（不新增顶层编号，场景数保持 258）。
+  // ② 该轮修复在既有场景内扩展（不新增顶层编号）。
 
   {
     name: '154 单一来源静态锁：state/handoff 不内置 looksLikeObjectLiteral + 三消费脚本 import EXECUTE_FAMILY_NODE_IDS 且无内联 pair',
@@ -4576,6 +4963,69 @@ const SCENARIOS = [
       assertExit(resZero, 0);
       assertOut(resZero, '零提交');
       assertNotOut(resZero, 'HANDOFF ERROR');
+      // ③ m-13 result 重验失败（.gitignore 变化）新 change：HANDOFF ERROR + request.noCommit 置 false
+      // + 不落/不覆盖 result（资格建立后把 .specs/ 从忽略规则移除 → 重验失败）
+      const statePath = path.join(dir, '.flow-comet', 'flow-comet-state.json');
+      const priorCompletedAt = JSON.parse(fs.readFileSync(statePath, 'utf8'))
+        .evidence['subagent-execute'].handoffResult.T02.completedAt;
+      writeFile(dir, '.gitignore', 'baseline-only\n');
+      const resRevalBlock = runHandoff(['result', 'T02', JSON.stringify({
+        status: 'DONE', taskId: 'T02', noCommit: true,
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        redEvidence: { command: 'node --check baseline.js', output: 'ok' },
+        greenEvidence: { command: 'node --check baseline.js', output: 'ok' },
+      })], dir);
+      assertExit(resRevalBlock, 1);
+      assertOut(resRevalBlock, 'HANDOFF ERROR');
+      assertOut(resRevalBlock, 'noCommit=false');
+      assertOut(resRevalBlock, '不落 result');
+      const stRevalBlock = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      const reqBlocked = stRevalBlock.evidence['subagent-execute'].handoffRequests.T02;
+      if (!reqBlocked || reqBlocked.noCommit !== false) {
+        throw new Error('result 重验失败应把 request.noCommit 置 false，实际 ' + JSON.stringify(reqBlocked));
+      }
+      if (stRevalBlock.evidence['subagent-execute'].handoffResult.T02.completedAt !== priorCompletedAt) {
+        throw new Error('新 change result 重验失败不得覆盖既有 handoffResult（completedAt 变化）');
+      }
+      // F6 审计：忽略规则变化（过期资格）撤销必须留 at/reason，且失败类别与既有归类一致
+      assertRevocationAudit(reqBlocked, 'stale-eligibility', '157③ 新 change .gitignore 变化');
+      assertOut(resRevalBlock, 'revokedAt=');
+      assertOut(resRevalBlock, 'revokeReason=stale-eligibility');
+      // ④ 旧 change 同构造：HANDOFF WARN + 照常落 result + noCommit 同样置 false（渐进兼容）
+      writeFile(dir, '.gitignore', '.specs/\n'); // 恢复忽略规则 → 重新 request 取得资格
+      const stReReq = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      delete stReReq.newChange; // 旧 change = 缺省/null（validator 不接受 false）
+      writeState(dir, stReReq);
+      assertExit(runHandoff(['request', 'T02', 'delegate docs-only slice again'], dir), 0);
+      const stReReqAfter = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      if (stReReqAfter.evidence['subagent-execute'].handoffRequests.T02.noCommit !== true) {
+        throw new Error('恢复忽略规则后重新 request 应重新取得 noCommit 资格，实际 '
+          + JSON.stringify(stReReqAfter.evidence['subagent-execute'].handoffRequests.T02));
+      }
+      const legacyCompletedAt = stReReqAfter.evidence['subagent-execute'].handoffResult.T02.completedAt;
+      writeFile(dir, '.gitignore', 'baseline-only\n');
+      const resRevalWarn = runHandoff(['result', 'T02', JSON.stringify({
+        status: 'DONE', taskId: 'T02', noCommit: true,
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        redEvidence: { command: 'node --check baseline.js', output: 'ok' },
+        greenEvidence: { command: 'node --check baseline.js', output: 'ok' },
+      })], dir);
+      assertExit(resRevalWarn, 0);
+      assertOut(resRevalWarn, 'HANDOFF WARN');
+      assertOut(resRevalWarn, 'noCommit=false');
+      const stRevalWarn = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      if (stRevalWarn.evidence['subagent-execute'].handoffRequests.T02.noCommit !== false) {
+        throw new Error('旧 change 重验失败同样应撤销 request.noCommit，实际 '
+          + JSON.stringify(stRevalWarn.evidence['subagent-execute'].handoffRequests.T02));
+      }
+      // F6 审计：旧 change 渐进撤销同样必须留 at/reason（与失败类别对应）
+      assertRevocationAudit(stRevalWarn.evidence['subagent-execute'].handoffRequests.T02,
+        'stale-eligibility', '157④ 旧 change .gitignore 变化');
+      assertOut(resRevalWarn, 'revokeReason=stale-eligibility');
+      const legacyResult = stRevalWarn.evidence['subagent-execute'].handoffResult.T02;
+      if (!legacyResult || legacyResult.completedAt === legacyCompletedAt || legacyResult.result.noCommit !== true) {
+        throw new Error('旧 change 重验失败应照常落 result（渐进），实际 ' + JSON.stringify(legacyResult));
+      }
     },
   },
 
@@ -4679,6 +5129,80 @@ const SCENARIOS = [
       if (!reqSub || reqSub.noCommit === true) {
         throw new Error('runRoot 非 git top-level 不应具备零提交资格，实际 ' + JSON.stringify(reqSub));
       }
+      // ②e/②f m-13 symlink/junction 逃逸（Windows junction 先例）：request 时刻逐段 lstat
+      // 拒绝 symlink/junction 祖先；result 时刻对资格重验——资格建立后把真实目录替换为
+      // junction 指向 runRoot 外 → 新 change HANDOFF ERROR、noCommit 撤销、不落 result。
+      const outsideDir = makeTmp();
+      const linkPathA = path.join(dir, 'linked-out');
+      const linkPathB = path.join(dir, 'linked-out2');
+      const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+      try {
+        writeFile(outsideDir, 'escape.md', 'outside\n');
+        // ②e request 资格拒绝：write_files 祖先段为 junction（目标在 runRoot 外），即使
+        // .gitignore 命中该路径也不得授予零提交（旧实现只看 check-ignore → noCommit:true = RED）
+        fs.symlinkSync(outsideDir, linkPathA, linkType);
+        writeFile(dir, '.gitignore', 'linked-out/\n');
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n'
+          + '<task id="T06" status="done"><action>symlink 边界任务</action>'
+          + '<write_files>linked-out/escape.md</write_files>'
+          + '<verify>node --check allowed.js</verify></task>\n');
+        writeState(dir, baseState('subagent-execute'));
+        const resLink = runHandoff(['request', 'T06', 'symlink slice'], dir);
+        assertExit(resLink, 0);
+        const stLink = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+        const reqLink = stLink.evidence['subagent-execute'].handoffRequests.T06;
+        if (!reqLink || reqLink.noCommit === true) {
+          throw new Error('symlink/junction 祖先不得具备零提交资格（fail-closed），实际 ' + JSON.stringify(reqLink));
+        }
+        // ②f result 重验拒绝：先以真实目录建立资格，再把目录替换为 junction → 重验失败
+        writeFile(dir, 'linked-out2/escape.md', 'inside\n');
+        writeFile(dir, '.gitignore', 'linked-out2/\n');
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n'
+          + '<task id="T07" status="done"><action>junction 重验边界任务</action>'
+          + '<write_files>linked-out2/escape.md</write_files>'
+          + '<verify>node --check allowed.js</verify></task>\n');
+        fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
+        writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/subagent-execute-flow-comet-dev.json',
+          JSON.stringify({ node: 'subagent-execute', skill: 'flow-comet-dev', protocol: '4-dev.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+        const stReqLink = baseState('subagent-execute');
+        stReqLink.newChange = true;
+        writeState(dir, stReqLink);
+        const resReqLink = runHandoff(['request', 'T07', 'junction revalidate slice'], dir);
+        assertExit(resReqLink, 0);
+        const stReqLinkAfter = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+        if (stReqLinkAfter.evidence['subagent-execute'].handoffRequests.T07.noCommit !== true) {
+          throw new Error('真实目录 + 命中忽略规则时 request 应取得 noCommit 资格，实际 '
+            + JSON.stringify(stReqLinkAfter.evidence['subagent-execute'].handoffRequests.T07));
+        }
+        fs.rmSync(linkPathB, { recursive: true, force: true });
+        fs.symlinkSync(outsideDir, linkPathB, linkType);
+        const resRevalLink = runHandoff(['result', 'T07', JSON.stringify({
+          status: 'DONE', taskId: 'T07', noCommit: true,
+          completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+          redEvidence: { command: 'node --check allowed.js', output: 'ok' },
+          greenEvidence: { command: 'node --check allowed.js', output: 'ok' },
+        })], dir);
+        assertExit(resRevalLink, 1);
+        assertOut(resRevalLink, 'HANDOFF ERROR');
+        assertOut(resRevalLink, 'noCommit=false');
+        const stRevalLink = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+        if (stRevalLink.evidence['subagent-execute'].handoffRequests.T07.noCommit !== false) {
+          throw new Error('junction 逃逸重验失败应撤销 request.noCommit，实际 '
+            + JSON.stringify(stRevalLink.evidence['subagent-execute'].handoffRequests.T07));
+        }
+        // F6 审计：symlink/junction 逃逸撤销留 at/reason，类别与既有失败归类一致
+        assertRevocationAudit(stRevalLink.evidence['subagent-execute'].handoffRequests.T07,
+          'symlink-junction-escape', '158②f junction/symlink 重验');
+        assertOut(resRevalLink, 'revokeReason=symlink-junction-escape');
+        if (stRevalLink.evidence['subagent-execute'].handoffResult?.T07) {
+          throw new Error('junction 逃逸重验失败不得落 handoffResult');
+        }
+      } finally {
+        for (const linkPath of [linkPathA, linkPathB]) {
+          try { fs.unlinkSync(linkPath); } catch { try { fs.rmdirSync(linkPath); } catch { /* 已移除 */ } }
+        }
+        fs.rmSync(outsideDir, { recursive: true, force: true });
+      }
       // ③ 请求无资格（glob）+ 契约声称 noCommit → 仍完整提交文件子集校验（越界新 change BLOCK）
       const stIneligible = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       stIneligible.newChange = true;
@@ -4717,14 +5241,30 @@ const SCENARIOS = [
         '- **完成时间**: 2026-08-20 10:00',
         '- **AI 角色**: Dev',
       ].join('\n');
-      const sections = [
-        '## 做了什么\n\n实现 T01（TDD：先写失败场景再实现）。',
-        '## 改动文件\n\n| 文件 | 性质 | 说明 |\n|---|---|---|\n| src/t1.mjs | 修改 | 实现 T01 |',
-        '## verify 输出\n\n```\nnode --check src/t1.mjs\n```',
-        '## 6 维自查\n\n- 功能: 通过（brooks-review 已跑）\n- 性能: 无影响\n- 安全: 无影响\n- 兼容: 通过\n- 可观测: 通过\n- 可维护: 通过',
-        '## 越界检查\n\n仅修改 src/t1.mjs，无越界。',
-        '## 自检方法\n\nbrooks-review',
-      ];
+      const sectionText = {
+        what: '## 做了什么\n\n实现 T01（TDD：先写失败场景再实现）。',
+        files: '## 改动文件\n\n| 文件 | 性质 | 说明 |\n|---|---|---|\n| src/t1.mjs | 修改 | 实现 T01 |',
+        verify: '## verify 输出\n\n```\nnode --check src/t1.mjs\n```',
+        sixDim: '## 6 维自查\n\n- 功能: 通过（brooks-review 已跑）\n- 性能: 无影响\n- 安全: 无影响\n- 兼容: 通过\n- 可观测: 通过\n- 可维护: 通过',
+        db: '## 数据库迁移\n\nN/A：本任务无 schema 变更。',
+        bounds: '## 越界检查\n\n仅修改 src/t1.mjs，无越界。',
+        breaking: '## 破坏性变更\n\nN/A：本任务不涉及破坏性变更。',
+        deviation: '## 决策与偏离\n\n无偏离。',
+        newWork: '## 是否触发新工作\n\n无。',
+        done: '## 完成判定\n\n- TASK.md 中对应任务已勾选：是',
+        method: '## 自检方法\n\nbrooks-review',
+      };
+      // 模板序 = flow-kit/templates/SUMMARY.md 全部 H2（含 5 个条件段）；## 自检方法 不属骨架，
+      // 单独按位置校核（文末或紧随 ## 越界检查两种合法位置）。
+      const skeletonOrder = [sectionText.what, sectionText.files, sectionText.verify, sectionText.sixDim,
+        sectionText.db, sectionText.bounds, sectionText.breaking, sectionText.deviation, sectionText.newWork, sectionText.done];
+      const fullSections = [...skeletonOrder, sectionText.method]; // 自检方法在文末（合法位置一）
+      const afterBoundsSections = [...skeletonOrder.slice(0, 6), sectionText.method, ...skeletonOrder.slice(6)]; // 紧随越界（合法位置二）
+      const illegalSelfSections = [...skeletonOrder.slice(0, 4), sectionText.method, ...skeletonOrder.slice(4)]; // 自检方法夹在中间（非法）
+      const missingTailSections = [...skeletonOrder.slice(0, 9), sectionText.method]; // 缺尾段 完成判定
+      const outOfOrderSections = [
+        ...skeletonOrder.slice(0, 5), sectionText.bounds, sectionText.db, ...skeletonOrder.slice(6), sectionText.method,
+      ]; // 数据库迁移排到越界检查之后（段序偏离）
       const compose = (title, order) =>
         [title, '', header, '', '---', '', order.join('\n\n')].join('\n');
       const setupExecute = (newChange) => {
@@ -4738,7 +5278,7 @@ const SCENARIOS = [
       };
       // ① 新 change：缺 `# SUMMARY:` 标题（段齐全）→ BLOCK
       setupExecute(true);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# T01-SUMMARY', sections));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# T01-SUMMARY', fullSections));
       const res1 = runGuard(['exit', 'execute'], dir);
       assertExit(res1, 1);
       assertOut(res1, 'BLOCKED');
@@ -4749,34 +5289,108 @@ const SCENARIOS = [
         '- **Task ID**: T01',
       ].join('\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md',
-        ['# SUMMARY: T01 - 实现 T01', '', headerMissing, '', '---', '', sections.join('\n\n')].join('\n'));
+        ['# SUMMARY: T01 - 实现 T01', '', headerMissing, '', '---', '', fullSections.join('\n\n')].join('\n'));
       const res2 = runGuard(['exit', 'execute'], dir);
       assertExit(res2, 1);
       assertOut(res2, 'BLOCKED');
       // ③ 新 change：段序乱（自检方法提前、做了什么滞后）→ BLOCK
-      const scrambled = [sections[2], sections[4], sections[3], sections[5], sections[0], sections[1]];
+      const scrambled = [
+        sectionText.verify, sectionText.bounds, sectionText.sixDim, sectionText.method,
+        sectionText.what, sectionText.files, sectionText.db, sectionText.breaking,
+        sectionText.deviation, sectionText.newWork, sectionText.done,
+      ];
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# SUMMARY: T01 - 实现 T01', scrambled));
       const res3 = runGuard(['exit', 'execute'], dir);
       assertExit(res3, 1);
       assertOut(res3, 'BLOCKED');
       // ④ 合法变体：大小写（# Summary: …）→ 通过
       setupExecute(true);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# Summary: T01 - 实现 T01', sections));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# Summary: T01 - 实现 T01', fullSections));
       const res4 = runGuard(['exit', 'execute'], dir);
       assertExit(res4, 0);
       assertOut(res4, 'ALL CHECKS PASSED');
       // ⑤ 合法变体：括号后缀 → 通过
       setupExecute(true);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# SUMMARY: T01 - 实现 T01（含说明括号）', sections));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# SUMMARY: T01 - 实现 T01（含说明括号）', fullSections));
       const res5 = runGuard(['exit', 'execute'], dir);
       assertExit(res5, 0);
       assertOut(res5, 'ALL CHECKS PASSED');
       // ⑥ 旧 change：缺标题 → WARN 渐进不阻断
       setupExecute(false);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# T01-SUMMARY', sections));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# T01-SUMMARY', fullSections));
       const res6 = runGuard(['exit', 'execute'], dir);
       assertExit(res6, 0);
       assertOut(res6, 'WARN');
+      // ⑦ 起：写入 SUMMARY 模板副本——M1 全骨架硬阻断只在 runRoot 内存在
+      // flow-kit/templates/SUMMARY.md 时生效（模板缺失仅内置骨架提示，不新增 BLOCK）。
+      // 维护者工作副本含 vendored flow-kit → 复制真实模板；CI 全新检出 flow-kit 被
+      // .gitignore 排除（不可分发）→ 用与真实模板 H2 逐字对齐的内置镜像（skeleton 派生结果
+      // 等价），保证硬阻断锚在两级载体都可执行、不静默跳过。
+      const realSummaryTemplate = path.join(REPO_ROOT, 'flow-kit', 'templates', 'SUMMARY.md');
+      const summaryTemplateFixture = fs.existsSync(realSummaryTemplate)
+        ? fs.readFileSync(realSummaryTemplate, 'utf8')
+        : [
+            '# SUMMARY: <T01 - 任务名>',
+            '',
+            '## 做了什么（一段话）',
+            '',
+            '## 改动文件',
+            '',
+            '## verify 输出（必填）',
+            '',
+            '## 6 维自查（生产代码改动必填 · 来自 4-dev 步骤 4）',
+            '',
+            '## 数据库迁移（涉及 schema 变更必填 · 来自 4-dev 步骤 1.7 / R4.5）',
+            '',
+            '## 越界检查（必填 · 来自 4-dev 步骤 5 / R6.5 / B3 老项目护栏）',
+            '',
+            '## 破坏性变更（涉及破坏性改动必填 · 来自 4-dev 步骤 1.8 / R4.6 / B4 老项目护栏）',
+            '',
+            '## 决策与偏离（如有）',
+            '',
+            '## 是否触发新工作',
+            '',
+            '## 完成判定',
+            '',
+          ].join('\n');
+      writeFile(dir, 'flow-kit/templates/SUMMARY.md', summaryTemplateFixture);
+      // ⑦ 新 change 缺尾段（完成判定）→ BLOCK + 缺段 + 「补 N/A 段」恢复指引
+      setupExecute(true);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# SUMMARY: T01 - 实现 T01', missingTailSections));
+      const res7 = runGuard(['exit', 'execute'], dir);
+      assertExit(res7, 1);
+      assertOut(res7, 'BLOCKED');
+      assertOut(res7, '完成判定');
+      assertOut(res7, 'N/A');
+      // ⑧ 段序偏离（数据库迁移排到越界检查之后）→ BLOCK + 段序 + 缺段点可定位
+      setupExecute(true);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# SUMMARY: T01 - 实现 T01', outOfOrderSections));
+      const res8 = runGuard(['exit', 'execute'], dir);
+      assertExit(res8, 1);
+      assertOut(res8, 'BLOCKED');
+      assertOut(res8, '段序');
+      assertOut(res8, '数据库迁移');
+      // ⑨ 合法位置一：## 自检方法 位于文末 → 通过（真实模板在场）
+      setupExecute(true);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# SUMMARY: T01 - 实现 T01', fullSections));
+      const res9 = runGuard(['exit', 'execute'], dir);
+      assertExit(res9, 0);
+      assertOut(res9, 'ALL CHECKS PASSED');
+      assertNotOut(res9, 'BLOCKED');
+      // ⑩ 合法位置二：## 自检方法 紧随 ## 越界检查 之后 → 通过（真实模板在场）
+      setupExecute(true);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# SUMMARY: T01 - 实现 T01', afterBoundsSections));
+      const res10 = runGuard(['exit', 'execute'], dir);
+      assertExit(res10, 0);
+      assertOut(res10, 'ALL CHECKS PASSED');
+      assertNotOut(res10, 'BLOCKED');
+      // ⑪ 自检方法位置非法（夹在 6 维自查与数据库迁移之间）→ BLOCK
+      setupExecute(true);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# SUMMARY: T01 - 实现 T01', illegalSelfSections));
+      const res11 = runGuard(['exit', 'execute'], dir);
+      assertExit(res11, 1);
+      assertOut(res11, 'BLOCKED');
+      assertOut(res11, '自检方法');
     },
   },
 
@@ -4897,6 +5511,275 @@ const SCENARIOS = [
       const resOld = runState(['record', 'plan', '{"summary":"plan done"}'], dir, env);
       assertExit(resOld, 0);
       assertOut(resOld, 'WARN');
+
+      // ===== M-02 request 时刻归属门禁（AC-2 不误伤面）=====
+      // 正确节点成功 / 串行错配 BLOCK / 未 entry WARN / done 与显式 write-files 旁路 /
+      // 协议无对应 enabled 节点跳过 / 协议不可读可见 WARN 后放行（不静默）。归属门禁位于
+      // 技能声明门之后——新 change 夹具必须放入本节点声明标记，否则先被技能门 BLOCK，
+      // 测不到归属门禁本身。
+      const writeMarker = (node) => {
+        fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
+        writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/' + node + '-flow-comet-dev.json',
+          JSON.stringify({ node, skill: 'flow-comet-dev', protocol: '4-dev.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+      };
+      const taskXml = (id, attrs, writeFiles) =>
+        '# TASK\n\n<task id="' + id + '" ' + attrs + '><action>实现 ' + id + '</action>'
+        + '<write_files>' + writeFiles + '</write_files><verify>node --check src/x.mjs</verify></task>\n';
+      const statePath = path.join(dir, '.flow-comet', 'flow-comet-state.json');
+      // ④ 正确节点（subagent-execute）+ pending 并行 → 成功落库（不误伤）
+      writeMarker('subagent-execute');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskXml('P01', 'parallel="true" status="pending"', 'src/p01.mjs'));
+      const stOk = baseState('subagent-execute');
+      stOk.newChange = true;
+      stOk.enteredNodes = ['subagent-execute'];
+      writeState(dir, stOk);
+      const resOk = runHandoff(['request', 'P01', 'delegate'], dir, env);
+      assertExit(resOk, 0);
+      assertOut(resOk, 'HANDOFF REQUEST: P01');
+      const recOk = readScenarioState(dir).evidence?.['subagent-execute']?.handoffRequests?.P01;
+      if (!recOk) throw new Error('正确节点并行 pending 请求应成功落库，实际 ' + JSON.stringify(recOk));
+      // ⑤ 串行 pending 在 subagent-execute 请求（目标 execute 不匹配）→ BLOCK + 字节零改写
+      writeMarker('execute');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskXml('S01', 'parallel="false" status="pending"', 'src/s01.mjs'));
+      const stSerial = baseState('subagent-execute');
+      stSerial.newChange = true;
+      stSerial.enteredNodes = ['subagent-execute'];
+      writeState(dir, stSerial);
+      const beforeSerial = fs.readFileSync(statePath, 'utf8');
+      const resSerial = runHandoff(['request', 'S01', 'serial slice'], dir, env);
+      assertExit(resSerial, 1);
+      assertOut(resSerial, 'BLOCKED: 任务 S01（串行 pending）应归属节点 execute');
+      assertOut(resSerial, 'entry execute');
+      if (fs.readFileSync(statePath, 'utf8') !== beforeSerial) {
+        throw new Error('串行错配 BLOCK 必须 state 字节零改写');
+      }
+      // ⑥ 正确节点但尚未 entry → 仅 WARN + 照常落库
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskXml('S02', 'parallel="false" status="pending"', 'src/s02.mjs'));
+      const stNotEntered = baseState('execute');
+      stNotEntered.newChange = true; // enteredNodes 缺 execute
+      writeState(dir, stNotEntered);
+      const resNotEntered = runHandoff(['request', 'S02', 'serial slice'], dir, env);
+      assertExit(resNotEntered, 0);
+      assertOut(resNotEntered, 'WARN: 任务 S02 的归属节点 execute 与原始 currentNode 一致');
+      assertOut(resNotEntered, '尚未 entry');
+      assertOut(resNotEntered, 'HANDOFF REQUEST: S02');
+      // ⑦ done 任务补录（非 pending）→ 归属门禁跳过，不误伤
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskXml('D01', 'parallel="true" status="done"', 'src/d01.mjs'));
+      const stDone = baseState('execute');
+      stDone.newChange = true;
+      stDone.enteredNodes = ['execute'];
+      writeState(dir, stDone);
+      const resDone = runHandoff(['request', 'D01', 'backfill'], dir, env);
+      assertExit(resDone, 0);
+      assertNotOut(resDone, 'BLOCKED');
+      assertOut(resDone, 'HANDOFF REQUEST: D01');
+      // ⑧ 显式 --write-files 且 TASK 无匹配任务 → 可见 WARN + 跳过归属门禁（不误伤）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<!-- 无匹配任务块 -->\n');
+      const stExplicit = baseState('execute');
+      stExplicit.newChange = true;
+      stExplicit.enteredNodes = ['execute'];
+      writeState(dir, stExplicit);
+      const resExplicit = runHandoff(['request', 'X01', 'explicit slice', '--write-files', 'src/x01.mjs'], dir, env);
+      assertExit(resExplicit, 0);
+      assertOut(resExplicit, '显式 --write-files 且 TASK.md 无匹配任务 X01');
+      assertOut(resExplicit, 'HANDOFF REQUEST: X01');
+      assertNotOut(resExplicit, 'BLOCKED');
+      // ⑨ 协议无对应 enabled 节点 → 跳过归属门禁（删除 subagent-execute 节点）：驻留 execute
+      // 但任务为并行 pending——若实现不做协议感知会误判目标 subagent-execute ≠ execute 而 BLOCK
+      writeMarker('execute');
+      const proto = JSON.parse(fs.readFileSync(path.join(dir, 'reference', 'workflow-protocol.json'), 'utf8'));
+      const noSubProto = { ...proto, nodes: proto.nodes.filter((n) => n.id !== 'subagent-execute') };
+      writeFile(dir, 'reference/protocol-nosub.json', JSON.stringify(noSubProto, null, 2) + '\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskXml('P02', 'parallel="true" status="pending"', 'src/p02.mjs'));
+      const stNoSub = baseState('execute');
+      stNoSub.newChange = true;
+      stNoSub.enteredNodes = ['execute'];
+      writeState(dir, stNoSub);
+      const resNoSub = runHandoff(['request', 'P02', 'no-sub protocol'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'protocol-nosub.json') });
+      assertExit(resNoSub, 0);
+      assertNotOut(resNoSub, 'BLOCKED');
+      assertNotOut(resNoSub, '本次未执行归属校验'); // 协议可读且无对应 enabled 节点 → 跳过校验，不产生归属 WARN
+      assertOut(resNoSub, 'HANDOFF REQUEST: P02');
+      // ⑩ 节点被 disabled → 同样跳过归属门禁
+      const disabledProto = { ...proto, nodes: proto.nodes.map((n) => (n.id === 'subagent-execute' ? { ...n, disabled: true } : n)) };
+      writeFile(dir, 'reference/protocol-disabled.json', JSON.stringify(disabledProto, null, 2) + '\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskXml('P03', 'parallel="true" status="pending"', 'src/p03.mjs'));
+      const stDisabled = baseState('execute');
+      stDisabled.newChange = true;
+      stDisabled.enteredNodes = ['execute'];
+      writeState(dir, stDisabled);
+      const resDisabled = runHandoff(['request', 'P03', 'disabled protocol'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'protocol-disabled.json') });
+      assertExit(resDisabled, 0);
+      assertNotOut(resDisabled, 'BLOCKED');
+      assertNotOut(resDisabled, '本次未执行归属校验'); // disabled 节点语义与缺节点一致 → 跳过校验且无归属 WARN
+      assertOut(resDisabled, 'HANDOFF REQUEST: P03');
+      // ⑪ pending 并行任务依赖未满足 → BLOCK 指引与 next 实际输出一致（next 按串行消化输出
+      // execute）；依赖满足后按 next 输出进入委托节点，request 恢复成功——无 entry 死路。
+      writeIntakeArtifacts(dir);
+      const unmetDepsTask =
+        '<task id="S03" parallel="false" status="pending"><action>实现 S03</action><write_files>src/s03.mjs</write_files><verify>node --check src/s03.mjs</verify></task>\n' +
+        '<task id="P04" parallel="true" status="pending"><action>实现 P04</action><write_files>src/p04.mjs</write_files><verify>node --check src/p04.mjs</verify><depends_on>S03</depends_on></task>\n';
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + unmetDepsTask);
+      const stUnmet = baseState('execute');
+      stUnmet.newChange = true;
+      stUnmet.enteredNodes = ['execute'];
+      stUnmet.completedNodes = ['open', 'design', 'plan'];
+      stUnmet.evidence = { plan: { summary: 'plan done' } };
+      writeState(dir, stUnmet);
+      const unmetBytesBefore = fs.readFileSync(statePath, 'utf8');
+      const resUnmet = runHandoff(['request', 'P04', 'parallel slice with unmet deps'], dir, env);
+      assertExit(resUnmet, 1);
+      assertOut(resUnmet, 'BLOCKED: 任务 P04（并行 pending）当前不可委托：依赖未满足');
+      assertOut(resUnmet, '未完成: S03');
+      assertOut(resUnmet, 'workflow-state next');
+      assertOut(resUnmet, '若输出 execute 表示依赖未满足');
+      assertOut(resUnmet, '待任务变为可委托');
+      assertNotOut(resUnmet, 'entry subagent-execute');
+      if (fs.readFileSync(statePath, 'utf8') !== unmetBytesBefore) {
+        throw new Error('依赖未满足 BLOCK 必须 state 字节零改写');
+      }
+      if (readScenarioState(dir).evidence?.['subagent-execute']?.handoffRequests?.P04) {
+        throw new Error('依赖未满足 BLOCK 不得落 handoffRequests');
+      }
+      const resUnmetNext = runState(['next'], dir, env);
+      assertExit(resUnmetNext, 0);
+      if (!/^NODE: execute$/m.test(resUnmetNext.output)) {
+        throw new Error('依赖未满足时 next 应输出 execute：\n' + resUnmetNext.output);
+      }
+      // 依赖满足：串行任务消化完成后 next 输出 subagent-execute；按输出 entry 后 request 成功
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
+        '# TASK\n\n<task id="S03" parallel="false" status="done"><action>实现 S03</action><write_files>src/s03.mjs</write_files><verify>node --check src/s03.mjs</verify></task>\n'
+        + '<task id="P04" parallel="true" status="pending"><action>实现 P04</action><write_files>src/p04.mjs</write_files><verify>node --check src/p04.mjs</verify><depends_on>S03</depends_on></task>\n');
+      const afterSerial = readScenarioState(dir);
+      afterSerial.completedNodes = [...new Set([...(afterSerial.completedNodes || []), 'execute'])];
+      afterSerial.evidence = { ...(afterSerial.evidence || {}), execute: { summary: 'serial digest done' } };
+      writeState(dir, afterSerial);
+      const resDelegableNext = runState(['next'], dir, env);
+      assertExit(resDelegableNext, 0);
+      if (!/^NODE: subagent-execute$/m.test(resDelegableNext.output)) {
+        throw new Error('依赖满足后 next 应输出 subagent-execute：\n' + resDelegableNext.output);
+      }
+      if (readScenarioState(dir).currentNode !== 'subagent-execute') {
+        throw new Error('依赖满足后 next 应把工作归属推到 subagent-execute');
+      }
+      writeMarker('subagent-execute');
+      assertExit(runGuard(['entry', 'subagent-execute'], dir, env), 0);
+      const resRecovered = runHandoff(['request', 'P04', 'now delegable'], dir, env);
+      assertExit(resRecovered, 0);
+      assertOut(resRecovered, 'HANDOFF REQUEST: P04');
+      // ⑫ 协议不可读（默认解析指向 runRoot 外的内置协议，受保护读取拒绝）→ 可见 WARN（原因 +
+      // 「本次未执行归属校验」）+ 放行语义不变。修复前此形态静默 skip（无 WARN、照常落库）＝假绿。
+      writeMarker('execute');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskXml('P05', 'parallel="true" status="pending"', 'src/p05.mjs'));
+      const stNoProtocol = baseState('execute');
+      stNoProtocol.newChange = true;
+      stNoProtocol.enteredNodes = ['execute'];
+      writeState(dir, stNoProtocol);
+      const resNoProtocol = runHandoff(['request', 'P05', 'no protocol'], dir, { FLOW_COMET_PROTOCOL: '' });
+      assertExit(resNoProtocol, 0);
+      assertOut(resNoProtocol, 'WARN:');
+      assertOut(resNoProtocol, '本次未执行归属校验');
+      assertOut(resNoProtocol, '协议路径不在当前项目根内');
+      assertOut(resNoProtocol, 'HANDOFF REQUEST: P05');
+      assertNotOut(resNoProtocol, 'BLOCKED');
+      if (!readScenarioState(dir).evidence?.['subagent-execute']?.handoffRequests?.P05) {
+        throw new Error('协议不可读应可见 WARN 后照常落库（放行语义不变），实际未落请求记录');
+      }
+      // ⑬ 协议文件缺失（显式指向 runRoot 内不存在的路径）→ 同类可见 WARN（原因=文件不存在）+ 放行
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskXml('P06', 'parallel="true" status="pending"', 'src/p06.mjs'));
+      const stProtocolMissing = baseState('execute');
+      stProtocolMissing.newChange = true;
+      stProtocolMissing.enteredNodes = ['execute'];
+      writeState(dir, stProtocolMissing);
+      const resProtocolMissing = runHandoff(['request', 'P06', 'missing protocol'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'protocol-missing.json') });
+      assertExit(resProtocolMissing, 0);
+      assertOut(resProtocolMissing, 'WARN:');
+      assertOut(resProtocolMissing, '本次未执行归属校验');
+      assertOut(resProtocolMissing, '协议文件不存在');
+      assertOut(resProtocolMissing, 'HANDOFF REQUEST: P06');
+      assertNotOut(resProtocolMissing, 'BLOCKED');
+      // 旧 change 同形态 → 同样仅可见 WARN + 照常落库（协议不可读不区分新旧 change 新增硬 BLOCK）
+      const stProtocolMissingOld = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      delete stProtocolMissingOld.newChange;
+      writeState(dir, stProtocolMissingOld);
+      const resProtocolMissingOld = runHandoff(['request', 'P06', 'missing protocol legacy'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'protocol-missing.json') });
+      assertExit(resProtocolMissingOld, 0);
+      assertOut(resProtocolMissingOld, '本次未执行归属校验');
+      assertOut(resProtocolMissingOld, 'HANDOFF REQUEST: P06');
+      assertNotOut(resProtocolMissingOld, 'BLOCKED');
+      // ⑭ 协议解析失败（非法 JSON 文件）→ 同类可见 WARN（原因=不是合法 JSON）+ 放行
+      writeFile(dir, 'reference/protocol-broken.json', '{ not-json\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskXml('P07', 'parallel="true" status="pending"', 'src/p07.mjs'));
+      const stProtocolBroken = baseState('execute');
+      stProtocolBroken.newChange = true;
+      stProtocolBroken.enteredNodes = ['execute'];
+      writeState(dir, stProtocolBroken);
+      const resProtocolBroken = runHandoff(['request', 'P07', 'broken protocol'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'protocol-broken.json') });
+      assertExit(resProtocolBroken, 0);
+      assertOut(resProtocolBroken, 'WARN:');
+      assertOut(resProtocolBroken, '本次未执行归属校验');
+      assertOut(resProtocolBroken, '不是合法 JSON');
+      assertOut(resProtocolBroken, 'HANDOFF REQUEST: P07');
+      assertNotOut(resProtocolBroken, 'BLOCKED');
+      // ⑮ state 协议绑定：init --protocol 指向自定义协议（无 execute / subagent-execute
+      // 节点）→ state.protocolPath 持久化；后续 request 按该协议判定，串行 pending 无对应
+      // enabled 委托节点 → 跳过归属校验。若协议来源未持久化，env 指向内置协议会把串行
+      // pending 误判为归属 execute → BLOCK（修复前 RED）。
+      const boundChange = 'bound-proto';
+      const boundProtocol = {
+        ...proto,
+        nodes: proto.nodes.filter((n) => n.id !== 'execute' && n.id !== 'subagent-execute'),
+      };
+      writeFile(dir, 'reference/protocol-bound.json', JSON.stringify(boundProtocol, null, 2) + '\n');
+      assertExit(runState(['init', boundChange, '--init-skip', '--protocol', 'reference/protocol-bound.json'], dir), 0);
+      writeFile(dir, '.specs/' + boundChange + '/TASK.md', taskXml('B01', 'parallel="false" status="pending"', 'src/b01.mjs'));
+      const resBound = runHandoff(['request', 'B01', 'bound protocol serial'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(resBound, 0);
+      assertOut(resBound, 'HANDOFF REQUEST: B01');
+      assertNotOut(resBound, 'BLOCKED');
+      assertNotOut(resBound, '本次未执行归属校验'); // 协议可读且无对应 enabled 节点 → 跳过校验，不产生不可读 WARN
+      const boundState = readScenarioState(dir);
+      if (boundState.protocolPath !== 'reference/protocol-bound.json') {
+        throw new Error('init 应把解析后的协议路径持久化为项目根相对形态，实际: ' + JSON.stringify(boundState.protocolPath));
+      }
+      if (!boundState.evidence?.['subagent-execute']?.handoffRequests?.B01) {
+        throw new Error('state 绑定协议下的 request 应照常落库');
+      }
+      // ⑯ state.protocolPath 存在但不可读 → 不回退 env/默认（回退会按内置协议把串行 pending
+      // 误判为归属 execute → BLOCK）；可见 WARN 说明来源 +「本次未执行归属校验」后放行。
+      const boundMissingState = readScenarioState(dir);
+      boundMissingState.protocolPath = 'reference/protocol-bound-missing.json';
+      writeState(dir, boundMissingState);
+      writeFile(dir, '.specs/' + boundChange + '/TASK.md', taskXml('B02', 'parallel="false" status="pending"', 'src/b02.mjs'));
+      const resBoundMissing = runHandoff(['request', 'B02', 'bound protocol unreadable'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(resBoundMissing, 0);
+      assertOut(resBoundMissing, 'WARN:');
+      assertOut(resBoundMissing, '本次未执行归属校验');
+      assertOut(resBoundMissing, 'state.protocolPath');
+      assertOut(resBoundMissing, '协议文件不存在');
+      assertOut(resBoundMissing, 'HANDOFF REQUEST: B02');
+      assertNotOut(resBoundMissing, 'BLOCKED');
+      if (!readScenarioState(dir).evidence?.['subagent-execute']?.handoffRequests?.B02) {
+        throw new Error('state.protocolPath 不可读应可见 WARN 后照常落库');
+      }
+      // ⑰ 旧 state（无 protocolPath 字段）→ env/默认回退不回归：env 指向内置协议时，串行
+      // pending 在 open 节点发起仍按内置协议归属 execute → BLOCK（缺字段 = 渐进兼容路径）。
+      const legacyBoundState = readScenarioState(dir);
+      delete legacyBoundState.protocolPath;
+      legacyBoundState.currentNode = 'open';
+      writeState(dir, legacyBoundState);
+      writeFile(dir, '.specs/' + boundChange + '/TASK.md', taskXml('B03', 'parallel="false" status="pending"', 'src/b03.mjs'));
+      const resLegacyBound = runHandoff(['request', 'B03', 'legacy state no binding'], dir,
+        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      assertExit(resLegacyBound, 1);
+      assertOut(resLegacyBound, 'BLOCKED: 任务 B03（串行 pending）应归属节点 execute');
     },
   },
 
@@ -5164,6 +6047,67 @@ const SCENARIOS = [
       if (!reqTracked || reqTracked.noCommit === true) {
         throw new Error('tracked 文件路径不应具备零提交资格，实际 ' + JSON.stringify(reqTracked));
       }
+      // ④b m-13 result 重验：request 时路径不存在（记资格），随后路径被强制跟踪 →
+      // result 重验失败撤销 noCommit，失败类别 = became-tracked，且留 at/reason 审计。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n'
+        + '<task id="T15" status="done"><action>tracked-after-request 边界任务</action>'
+        + '<write_files>.specs/' + CHANGE_ID + '/T15.md</write_files>'
+        + '<verify>node --check src/x.js</verify></task>\n');
+      writeState(dir, baseState('subagent-execute'));
+      const resReqT15 = runHandoff(['request', 'T15', 'tracked-after-request slice'], dir);
+      assertExit(resReqT15, 0);
+      const stReqT15 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      if (stReqT15.evidence['subagent-execute'].handoffRequests.T15.noCommit !== true) {
+        throw new Error('request 时未跟踪且被忽略的路径应取得 noCommit 资格，实际 '
+          + JSON.stringify(stReqT15.evidence['subagent-execute'].handoffRequests.T15));
+      }
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T15.md', 'tracked after request\n');
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '-f', '.specs/' + CHANGE_ID + '/T15.md');
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'track after request');
+      stReqT15.newChange = true;
+      writeState(dir, stReqT15);
+      const resRevokeTracked = runHandoff(['result', 'T15', payload('T15', '')], dir);
+      assertExit(resRevokeTracked, 1);
+      assertOut(resRevokeTracked, 'HANDOFF ERROR');
+      assertOut(resRevokeTracked, 'revokeReason=became-tracked');
+      const stRevokeTracked = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      assertRevocationAudit(stRevokeTracked.evidence['subagent-execute'].handoffRequests.T15,
+        'became-tracked', '170④b 路径变 tracked 重验');
+      if (stRevokeTracked.evidence['subagent-execute'].handoffResult?.T15) {
+        throw new Error('tracked 重验失败不得落 result');
+      }
+      // ⑤ merge commit 负例（evil merge）：merge 提交独有的越界文件不得绕过完整提交子集校验
+      // → 新 change BLOCK 且列出越界文件（merge 与普通提交走同一 fail-closed 路径）
+      const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+      git('checkout', '-q', '-b', 'feature-merge');
+      writeFile(dir, 'src/feature-merge.js', 'feature\n');
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'add', 'src/feature-merge.js');
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'feature branch');
+      git('checkout', '-q', branch);
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'merge', '--no-ff', '--no-commit', 'feature-merge');
+      writeFile(dir, 'src/evil-merge.js', 'evil\n');
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'add', 'src/evil-merge.js');
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'evil merge');
+      const mergeHash = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+      const stMerge = baseState('subagent-execute');
+      stMerge.newChange = true;
+      stMerge.evidence['subagent-execute'] = { handoffRequests: { T13: { description: 'merge boundary', writeFiles: ['src/x.js'] } } };
+      writeState(dir, stMerge);
+      const resMerge = runHandoff(['result', 'T13', payload('T13', mergeHash)], dir);
+      assertExit(resMerge, 1);
+      assertOut(resMerge, '超出 writeFiles 范围');
+      assertOut(resMerge, 'src/evil-merge.js');
+      // ⑥ invalid hash 负例：非法 commitHash 不得被静默当作合法提交——必须输出可见 HANDOFF ERROR
+      //（记录不被拒绝是既有渐进语义；此处锚定「可见报错 + 不作为合法提交校验」的契约边界）
+      const stInvalidHash = baseState('subagent-execute');
+      stInvalidHash.newChange = true;
+      stInvalidHash.evidence['subagent-execute'] = { handoffRequests: { T14: { description: 'invalid hash', writeFiles: ['src/x.js'] } } };
+      writeState(dir, stInvalidHash);
+      const resInvalidHash = runHandoff(['result', 'T14', payload('T14', 'not-a-commit-hash')], dir);
+      assertExit(resInvalidHash, 0);
+      assertOut(resInvalidHash, 'HANDOFF ERROR');
+      assertOut(resInvalidHash, 'commitHash 格式非法');
+      assertNotOut(resInvalidHash, '提交为空，校验通过');
     },
   },
 
@@ -7998,6 +8942,92 @@ const SCENARIOS = [
       if (closed !== null) {
         throw new Error('出口签名与当前任务集一致时应为 null（已闭合），实际 ' + JSON.stringify(closed));
       }
+
+      // ---------- m-12 轮次计数纯函数锚（唯一写点 applyFixRollbackRound）----------
+      // 第 1~3 轮递增并带审计后缀；第 4 轮新 change BLOCK 且不写计数器；用户显式授权后
+      // 放行该轮；旧 change 缺字段缺省 0 不 BLOCK；done-but-unclosed 分支不计数。
+      const applyRound = requireRouteNodeExport('applyFixRollbackRound');
+      const roundState = {
+        activeChange: CHANGE_ID,
+        currentNode: 'review',
+        evidence: { review: { summary: 'pending fix' } },
+        newChange: true,
+      };
+      const pendingDecision = { kind: 'pending', target: 'execute' };
+      for (let round = 1; round <= 3; round += 1) {
+        const applied = applyRound({ state: roundState, sourceNode: 'review', decision: pendingDecision });
+        if (!applied.counted || applied.blocked || applied.round !== round
+          || applied.auditSuffix !== '（第 ' + round + '/3 轮）') {
+          throw new Error('第 ' + round + ' 轮应计数并输出轮次审计后缀，实际 ' + JSON.stringify(applied));
+        }
+        if (roundState.fixRoundsByChange?.[CHANGE_ID] !== round) {
+          throw new Error('第 ' + round + ' 轮后计数器应为 ' + round + '，实际 '
+            + JSON.stringify(roundState.fixRoundsByChange));
+        }
+      }
+      const blocked = applyRound({ state: roundState, sourceNode: 'review', decision: pendingDecision });
+      if (!blocked.blocked || blocked.counted || blocked.round !== 4) {
+        throw new Error('新 change 第 4 轮应 BLOCK 且不计数，实际 ' + JSON.stringify(blocked));
+      }
+      if (roundState.fixRoundsByChange?.[CHANGE_ID] !== 3) {
+        throw new Error('第 4 轮 BLOCK 不得写计数器（应保持 3），实际 '
+          + JSON.stringify(roundState.fixRoundsByChange));
+      }
+      if (!String(blocked.blockedMessage).includes('继续修') || !String(blocked.blockedMessage).includes('停止')) {
+        throw new Error('第 4 轮 BLOCK 消息应含「继续修/停止」决策指引，实际 ' + JSON.stringify(blocked.blockedMessage));
+      }
+      // F5 fail-closed：完整授权形态 = round 正整数 + at/source 非空字符串；任一缺失、类型非法、
+      // 空串/纯空白一律按未授权处理——第 4 轮继续 BLOCK、不计数、不写 state（state 字节零改写）。
+      const invalidOverrides = [
+        ['仅 round（缺 at/source）', { round: 4 }],
+        ['缺 at', { round: 4, source: 'fixture-user' }],
+        ['缺 source', { round: 4, at: '2026-09-25T00:00:00.000Z' }],
+        ['round 为字符串', { round: '4', at: '2026-09-25T00:00:00.000Z', source: 'fixture-user' }],
+        ['round 为零', { round: 0, at: '2026-09-25T00:00:00.000Z', source: 'fixture-user' }],
+        ['round 为负数', { round: -1, at: '2026-09-25T00:00:00.000Z', source: 'fixture-user' }],
+        ['round 为小数', { round: 4.5, at: '2026-09-25T00:00:00.000Z', source: 'fixture-user' }],
+        ['at 类型非法（数字）', { round: 4, at: 123, source: 'fixture-user' }],
+        ['source 类型非法（数组）', { round: 4, at: '2026-09-25T00:00:00.000Z', source: ['fixture-user'] }],
+        ['at 空串', { round: 4, at: '', source: 'fixture-user' }],
+        ['source 空串', { round: 4, at: '2026-09-25T00:00:00.000Z', source: '' }],
+        ['at 纯空白', { round: 4, at: '   ', source: 'fixture-user' }],
+        ['source 纯空白', { round: 4, at: '2026-09-25T00:00:00.000Z', source: '\t' }],
+        ['override 为 null', null],
+      ];
+      for (const [label, badOverride] of invalidOverrides) {
+        roundState.evidence.review.fixRoundOverride = badOverride;
+        const badResult = applyRound({ state: roundState, sourceNode: 'review', decision: pendingDecision });
+        if (!badResult.blocked || badResult.counted || badResult.overrideUsed || badResult.round !== 4
+          || roundState.fixRoundsByChange?.[CHANGE_ID] !== 3) {
+          throw new Error('F5 非法授权形态必须按未授权 fail-closed BLOCK 且零改写（' + label + '），实际 '
+            + JSON.stringify({ badResult, rounds: roundState.fixRoundsByChange }));
+        }
+      }
+      // 合法三元组（嵌套 evidence）→ 放行被 BLOCK 的那一轮并留审计
+      roundState.evidence.review.fixRoundOverride = { round: 4, at: '2026-09-25T00:00:00.000Z', source: 'fixture-user' };
+      const override = applyRound({ state: roundState, sourceNode: 'review', decision: pendingDecision });
+      if (!override.counted || !override.overrideUsed || override.blocked || override.round !== 4) {
+        throw new Error('用户显式授权后第 4 轮应放行并标记 overrideUsed，实际 ' + JSON.stringify(override));
+      }
+      if (roundState.fixRoundsByChange?.[CHANGE_ID] !== 4) {
+        throw new Error('授权放行后计数器应为 4，实际 ' + JSON.stringify(roundState.fixRoundsByChange));
+      }
+      // 旧 change 缺轮次字段 → 缺省 0、不因计数 BLOCK
+      const legacyRoundState = { activeChange: CHANGE_ID, currentNode: 'review', evidence: {}, newChange: false };
+      const legacyRound = applyRound({ state: legacyRoundState, sourceNode: 'review', decision: pendingDecision });
+      if (!legacyRound.counted || legacyRound.blocked || legacyRound.round !== 1) {
+        throw new Error('旧 change 缺省 0 应可从第 1 轮计数，实际 ' + JSON.stringify(legacyRound));
+      }
+      if (legacyRoundState.fixRoundsByChange?.[CHANGE_ID] !== 1) {
+        throw new Error('旧 change 第 1 轮应写入缺省容器，实际 ' + JSON.stringify(legacyRoundState.fixRoundsByChange));
+      }
+      // 分支② done-but-unclosed 不计数（计数语义 = 一次受控归位）
+      const unclosedState = { activeChange: CHANGE_ID, currentNode: 'review', evidence: {}, newChange: true };
+      const unclosedRound = applyRound({ state: unclosedState, sourceNode: 'review', decision: { kind: 'unclosed', target: 'execute' } });
+      if (unclosedRound.counted || unclosedRound.round !== null || unclosedState.fixRoundsByChange) {
+        throw new Error('done-but-unclosed 分支不得计数/建容器，实际 '
+          + JSON.stringify({ unclosedRound, rounds: unclosedState.fixRoundsByChange }));
+      }
     },
   },
 
@@ -8197,6 +9227,75 @@ const SCENARIOS = [
       if (legacyDivergence !== 'fix') {
         throw new Error('无 change 字段的 legacy 出口事件应参与分类（发散 → fix），实际 ' + JSON.stringify(legacyDivergence));
       }
+
+      // ⑩ m-14 签名算法版本三态 + 冻结锚（分类器与 C3 消费点共用 route-node 谓词）
+      // 冻结锚：算法版本升级必须先更新版本决策与测试锚——本断言变红强制该决策。
+      if (routeNodeModule.TASK_SET_SIGNATURE_ALGO !== 'v1') {
+        throw new Error('签名算法版本冻结锚失效：期望 v1，实际 '
+          + JSON.stringify(routeNodeModule.TASK_SET_SIGNATURE_ALGO)
+          + '——升级算法前必须先更新版本决策与测试锚');
+      }
+      const parseSig = requireRouteNodeExport('parseTaskSetSignature');
+      const sameSig = requireRouteNodeExport('sameTaskSetSignature');
+      const sigSkew = requireRouteNodeExport('taskSetSignatureVersionSkew');
+      const versioned = routeNodeModule.taskSetSignature(plainTaskText);
+      if (!/^v1:[0-9a-f]{64}$/.test(versioned)) {
+        throw new Error('新版本签名值应为 v1:<sha256 hex>，实际 ' + JSON.stringify(versioned));
+      }
+      const versionedParsed = parseSig(versioned);
+      if (!versionedParsed || versionedParsed.algo !== 'v1'
+        || versionedParsed.digest !== parseSig(signatureOf(plainTaskText)).digest) {
+        throw new Error('parseTaskSetSignature 应解析 vN:<digest> 元数据，实际 ' + JSON.stringify(versionedParsed));
+      }
+      // legacy 裸 hex 按 v1 语义（旧 taskHash / 旧事件）
+      const legacyParsed = parseSig(versionedParsed.digest);
+      if (!legacyParsed || legacyParsed.algo !== 'v1' || legacyParsed.digest !== versionedParsed.digest) {
+        throw new Error('legacy 裸 hex 应按 v1 解析，实际 ' + JSON.stringify(legacyParsed));
+      }
+      // C3 三态谓词：同版本同 digest 一致 / 同版本不同 digest 不一致 / 跨版本 skew 跳过比对
+      if (!sameSig(versioned, 'v1:' + versionedParsed.digest)
+        || sameSig(versioned, 'v1:' + divergentSignature)
+        || sameSig(versioned, 'v2:' + versionedParsed.digest)) {
+        throw new Error('同版本一致性谓词三态错误（sameTaskSetSignature）');
+      }
+      if (!sigSkew(versioned, 'v2:' + versionedParsed.digest)
+        || sigSkew(versioned, versioned)
+        || sigSkew(versioned, versionedParsed.digest)) {
+        throw new Error('跨版本 skew 谓词三态错误（taskSetSignatureVersionSkew）');
+      }
+      if (parseSig('v1:not-a-digest') !== null || parseSig('') !== null || parseSig(null) !== null) {
+        throw new Error('非法签名形态应解析为 null（fail-closed）');
+      }
+      // 分类器三态：新版本相等 → normal；legacy 裸 hex 相等 → normal（legacy=v1）；
+      // 跨版本 / 声明版本与值不一致 → 跳过比对（unknown，不误判 fix）。
+      const versionedEqual = classifyCause({
+        history: [familyExit('execute', versioned)],
+        changeName: CHANGE_ID, taskContent: plainTaskText, fixSectionTitle: 'Fix 任务',
+      });
+      if (versionedEqual !== 'normal') {
+        throw new Error('新版本签名相等应判 normal，实际 ' + JSON.stringify(versionedEqual));
+      }
+      const legacyEqual = classifyCause({
+        history: [familyExit('execute', versionedParsed.digest)],
+        changeName: CHANGE_ID, taskContent: plainTaskText, fixSectionTitle: 'Fix 任务',
+      });
+      if (legacyEqual !== 'normal') {
+        throw new Error('legacy 裸 hex 与当前摘要相等应判 normal（legacy=v1），实际 ' + JSON.stringify(legacyEqual));
+      }
+      const crossVersion = classifyCause({
+        history: [familyExit('execute', 'v2:' + divergentSignature, { signatureAlgo: 'v2' })],
+        changeName: CHANGE_ID, taskContent: plainTaskText, fixSectionTitle: 'Fix 任务',
+      });
+      if (crossVersion !== 'unknown') {
+        throw new Error('跨算法版本历史事件应跳过比对（unknown，不误判 fix），实际 ' + JSON.stringify(crossVersion));
+      }
+      const mismatchedDeclared = classifyCause({
+        history: [familyExit('execute', versioned, { signatureAlgo: 'v2' })],
+        changeName: CHANGE_ID, taskContent: plainTaskText, fixSectionTitle: 'Fix 任务',
+      });
+      if (mismatchedDeclared !== 'unknown') {
+        throw new Error('signatureAlgo 与值版本不一致的畸形事件应跳过（unknown），实际 ' + JSON.stringify(mismatchedDeclared));
+      }
     },
   },
 
@@ -8254,6 +9353,69 @@ const SCENARIOS = [
       if (after.currentNode !== 'execute') {
         throw new Error('欠账态受控归位后 currentNode 应为 execute，实际 ' + JSON.stringify(after.currentNode));
       }
+      // ④ m-12 第 1~3 轮递增（AC-4）：逐轮重置驻留态，审计后缀第 n/3 轮且计数器同步 +1
+      writeFile(dir, taskPath, fixBatchTaskText('pending'));
+      for (let round = 1; round <= 3; round += 1) {
+        writeState(dir, st);
+        const stRound = readScenarioState(dir);
+        stRound.fixRoundsByChange = { [CHANGE_ID]: round - 1 };
+        writeState(dir, stRound);
+        const resRound = runGuard(['entry', 'execute'], dir);
+        assertExit(resRound, 0);
+        assertOut(resRound, 'FIX-BATCH: 受控归位 execute（源节点 review）（第 ' + round + '/3 轮）');
+        const stAfterRound = readScenarioState(dir);
+        if (stAfterRound.fixRoundsByChange?.[CHANGE_ID] !== round) {
+          throw new Error('第 ' + round + ' 轮 entry 归位后计数器应为 ' + round + '，实际 '
+            + JSON.stringify(stAfterRound.fixRoundsByChange));
+        }
+      }
+      // ⑤ 第 4 轮新 change BLOCK：state 字节零改写（不写 currentNode、不写计数器）
+      writeState(dir, { ...st, fixRoundsByChange: { [CHANGE_ID]: 3 } });
+      const statePath = path.join(dir, '.flow-comet', 'flow-comet-state.json');
+      const beforeRound4 = fs.readFileSync(statePath, 'utf8');
+      const resRound4 = runGuard(['entry', 'execute'], dir);
+      assertExit(resRound4, 1);
+      assertOut(resRound4, 'BLOCKED: Fix 批次受控归位已达 3 轮上限');
+      assertOut(resRound4, '继续修');
+      assertOut(resRound4, '停止');
+      if (fs.readFileSync(statePath, 'utf8') !== beforeRound4) {
+        throw new Error('第 4 轮 BLOCK 必须 state 字节零改写（不写 currentNode/计数器）');
+      }
+      const stBlocked = readScenarioState(dir);
+      if (stBlocked.currentNode !== 'review' || stBlocked.fixRoundsByChange?.[CHANGE_ID] !== 3) {
+        throw new Error('第 4 轮 BLOCK 后 currentNode 应保持 review、计数器保持 3，实际 '
+          + JSON.stringify({ currentNode: stBlocked.currentNode, rounds: stBlocked.fixRoundsByChange }));
+      }
+      // ⑤b F5：非法授权形态（仅 round，缺 at/source）在真实 entry 链路上仍按未授权 fail-closed——
+      // 继续 BLOCK、state 字节零改写、currentNode 保持 review、计数器保持 3。
+      const stBadOverride = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      stBadOverride.evidence.review.fixRoundOverride = { round: 4 };
+      writeState(dir, stBadOverride);
+      const badOverrideBytes = fs.readFileSync(statePath, 'utf8');
+      const resBadOverride = runGuard(['entry', 'execute'], dir);
+      assertExit(resBadOverride, 1);
+      assertOut(resBadOverride, 'BLOCKED: Fix 批次受控归位已达 3 轮上限');
+      assertNotOut(resBadOverride, '（第 4/3 轮）');
+      if (fs.readFileSync(statePath, 'utf8') !== badOverrideBytes) {
+        throw new Error('F5 缺 at/source 的授权形态必须在 entry 链路上 state 字节零改写');
+      }
+      const stBadAfter = readScenarioState(dir);
+      if (stBadAfter.currentNode !== 'review' || stBadAfter.fixRoundsByChange?.[CHANGE_ID] !== 3) {
+        throw new Error('F5 缺 at/source 不得放行第 4 轮（currentNode 保持 review、计数保持 3），实际 '
+          + JSON.stringify({ currentNode: stBadAfter.currentNode, rounds: stBadAfter.fixRoundsByChange }));
+      }
+      // ⑥ 用户显式授权（嵌套 evidence，完整三元组）→ 放行第 4 轮并写 currentNode + 计数器
+      const stOverride = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      stOverride.evidence.review.fixRoundOverride = { round: 4, at: '2026-09-25T00:00:00.000Z', source: 'fixture-user' };
+      writeState(dir, stOverride);
+      const resOverride = runGuard(['entry', 'execute'], dir);
+      assertExit(resOverride, 0);
+      assertOut(resOverride, '（第 4/3 轮）');
+      const stAuthorized = readScenarioState(dir);
+      if (stAuthorized.currentNode !== 'execute' || stAuthorized.fixRoundsByChange?.[CHANGE_ID] !== 4) {
+        throw new Error('授权后第 4 轮应放行归位（currentNode=execute、计数器=4），实际 '
+          + JSON.stringify({ currentNode: stAuthorized.currentNode, rounds: stAuthorized.fixRoundsByChange }));
+      }
     },
   },
 
@@ -8298,21 +9460,59 @@ const SCENARIOS = [
       if (after.currentNode !== 'verify') {
         throw new Error('无 pending 时 entry execute 不应归位（currentNode 应保持 verify），实际 ' + JSON.stringify(after.currentNode));
       }
+      // ③ m-12/AC-5 计数隔离：verify 源归位只增 Fix 轮次，verify 失败计数保持不动
+      writeFile(dir, taskPath, fixBatchTaskText('pending'));
+      writeState(dir, { ...st, fixRoundsByChange: { [CHANGE_ID]: 1 }, verifyFailuresByChange: { [CHANGE_ID]: 2 } });
+      const resRound2 = runGuard(['entry', 'execute'], dir);
+      assertExit(resRound2, 0);
+      assertOut(resRound2, '受控归位 execute（源节点 verify）（第 2/3 轮）');
+      let stIsolated = readScenarioState(dir);
+      if (stIsolated.fixRoundsByChange?.[CHANGE_ID] !== 2 || stIsolated.verifyFailuresByChange?.[CHANGE_ID] !== 2) {
+        throw new Error('verify 源归位应只增 Fix 轮次（2）、verify 失败计数保持 2，实际 '
+          + JSON.stringify({ rounds: stIsolated.fixRoundsByChange, verifyFailures: stIsolated.verifyFailuresByChange }));
+      }
+      // ④ 第 4 轮 BLOCK + state 字节零改写 + 授权放行（verify 源）
+      writeState(dir, { ...st, fixRoundsByChange: { [CHANGE_ID]: 3 }, verifyFailuresByChange: { [CHANGE_ID]: 2 } });
+      const statePath = path.join(dir, '.flow-comet', 'flow-comet-state.json');
+      const beforeBlocked = fs.readFileSync(statePath, 'utf8');
+      const resBlocked = runGuard(['entry', 'execute'], dir);
+      assertExit(resBlocked, 1);
+      assertOut(resBlocked, 'BLOCKED: Fix 批次受控归位已达 3 轮上限');
+      if (fs.readFileSync(statePath, 'utf8') !== beforeBlocked) {
+        throw new Error('verify 源第 4 轮 BLOCK 必须 state 字节零改写');
+      }
+      const stVBlocked = readScenarioState(dir);
+      if (stVBlocked.currentNode !== 'verify' || stVBlocked.verifyFailuresByChange?.[CHANGE_ID] !== 2) {
+        throw new Error('verify 源第 4 轮 BLOCK 后 currentNode/verify 计数不得改写，实际 '
+          + JSON.stringify({ currentNode: stVBlocked.currentNode, verifyFailures: stVBlocked.verifyFailuresByChange }));
+      }
+      const stVOverride = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      stVOverride.evidence.verify.fixRoundOverride = { round: 4, at: '2026-09-25T00:00:00.000Z', source: 'fixture-user' };
+      writeState(dir, stVOverride);
+      const resVOverride = runGuard(['entry', 'execute'], dir);
+      assertExit(resVOverride, 0);
+      assertOut(resVOverride, '（第 4/3 轮）');
+      const stVAfter = readScenarioState(dir);
+      if (stVAfter.currentNode !== 'execute' || stVAfter.fixRoundsByChange?.[CHANGE_ID] !== 4
+        || stVAfter.verifyFailuresByChange?.[CHANGE_ID] !== 2) {
+        throw new Error('verify 源授权放行后应 currentNode=execute、轮次=4、verify 计数保持 2，实际 '
+          + JSON.stringify({ currentNode: stVAfter.currentNode, rounds: stVAfter.fixRoundsByChange, verifyFailures: stVAfter.verifyFailuresByChange }));
+      }
     },
   },
 
   // 250: exit execute --apply Fix 二次完成回源（review 源）——execute 在 exit 前已在
   // completedNodes + TASK 全 done：REVIEW.md 已在场（resolveNextNode 会按产物跳过 review 到
   // verify）但 review 未完成 → 受控回程 review（源节点出口必须真实执行，不被产物存在性跳过）。
+  // 本场景族拆自原 250 单场景，断言与失败信息保持不变；本段覆盖回源归属与出口事件形状。
   {
     name: '250 exit execute --apply Fix 二次完成：回源 review（REVIEW.md 在场但不按产物跳过）',
     run: (dir) => {
       writeIntakeArtifacts(dir);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', fixBatchTaskText('done'));
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-01-SUMMARY.md', strictSummary('T-FIX-01'));
-      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
-        '# REVIEW\n\n## 发现\n\n### Critical\n\n- 无\n\n### Major\n\n- 无\n\n### Minor\n\n- 无\n\n## 结论\n\n审查结论已记录；Fix 批次由 execute 完成，待回源重新出口。\n');
+      const taskPath = '.specs/' + CHANGE_ID + '/TASK.md';
+      writeFile(dir, taskPath, fixBatchTaskText('done'));
+      writeFixReturnSummaries(dir, ['T01', 'T-FIX-01']);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', FIX_RETURN_REVIEW_TEXT);
       writeState(dir, {
         activeChange: CHANGE_ID,
         currentNode: 'execute',
@@ -8345,49 +9545,161 @@ const SCENARIOS = [
           + JSON.stringify(lastExit));
       }
 
-      // ---------- T02 回程行分类子锚（分类只决定审计行；路由/state 写入零变化） ----------
+      // 250e 源未 entry 的真实 Fix：修复任务 + enteredNodes 不含源节点 review + 历史无
+      // 签名（旧态）→ 结构标记仍恢复 fix 标签，保留 FIX-BATCH；不误判 unknown、不卡死。
+      writeFile(dir, taskPath, fixBatchTaskText('done'));
+      writeState(dir, fixReturnBaseState({
+        evidence: fixReturnFamilyEvidence(['T01', 'T-FIX-01']),
+        enteredNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
+        history: [],
+      }));
+      const resSourceNotEntered = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resSourceNotEntered, 0);
+      assertOut(resSourceNotEntered, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
+      assertOut(resSourceNotEntered, 'NODE: review');
+      assertNotOut(resSourceNotEntered, 'RETURN: 回源节点');
+      assertNotOut(resSourceNotEntered, 'BLOCKED');
+    },
+  },
+
+  // 250b: 回程行分类与 Fix 段标题路径——历史全量扫描 / 旧态未分类 / 模板派生与缺失回退。
+  // 本场景族拆自原 250 单场景，断言与失败信息保持不变。
+  {
+    name: '250b 回程行分类与 Fix 段标题路径：历史扫描、旧态未分类、模板派生与回退',
+    run: (dir) => {
+      writeIntakeArtifacts(dir);
       const taskPath = '.specs/' + CHANGE_ID + '/TASK.md';
-      const familyEvidence = (taskIds) => ({
-        execute: { summary: 'fix batch executed' },
-        'subagent-execute': { summary: 'delegated', handoffResult: handoffFor(taskIds) },
-        review: { summary: 'review in progress' },
+      writeFixReturnSummaries(dir, ['T01', 'T-FIX-01']);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', FIX_RETURN_REVIEW_TEXT);
+
+      // 250d 反向构造（L-064）——与 250c 一一对应证明分类依据是历史全量扫描（不是只看
+      // 最新）：① 无 Fix 编号任务 + 旧签名 ≠ 当前 + 最新签名 == 当前 → 仍判 fix（发散证据
+      // 不依赖结构标记）；② 同任务集仅保留最新（签名 == 当前）→ 必须中性 RETURN。
+      const plainTaskText = '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n';
+      const plainSignature = routeNodeModule.taskSetSignature(plainTaskText);
+      writeFile(dir, taskPath, plainTaskText);
+      writeState(dir, fixReturnBaseState({
+        history: [
+          {
+            event: 'exit-applied', node: 'execute', change: CHANGE_ID,
+            at: '2026-09-20T00:00:00.000Z', taskSetSignature: STALE_FIX_BATCH_SIGNATURE,
+          },
+          {
+            event: 'exit-applied', node: 'subagent-execute', change: CHANGE_ID,
+            at: '2026-09-24T00:00:00.000Z', taskSetSignature: plainSignature,
+          },
+        ],
+      }));
+      const resDivergentPlain = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resDivergentPlain, 0);
+      assertOut(resDivergentPlain, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
+      assertNotOut(resDivergentPlain, 'RETURN: 回源节点');
+      writeState(dir, fixReturnBaseState({
+        history: [{
+          event: 'exit-applied', node: 'subagent-execute', change: CHANGE_ID,
+          at: '2026-09-24T00:00:00.000Z', taskSetSignature: plainSignature,
+        }],
+      }));
+      const resLatestOnlyEqual = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resLatestOnlyEqual, 0);
+      assertOut(resLatestOnlyEqual, 'RETURN: 回源节点 review（execute 出口已完成；正常多趟收尾，非 Fix 回修）');
+      assertNotOut(resLatestOnlyEqual, 'FIX-BATCH');
+
+      // 250f 旧态无签名无标记：历史家族出口无签名 + 任务集无 Fix 标记 → RETURN 未分类；
+      // 不 BLOCK、不出现 FIX-BATCH；NODE/state 与收口前一致（只有审计行变化）。
+      writeState(dir, fixReturnBaseState({
+        history: [{
+          event: 'exit-applied', node: 'execute', change: CHANGE_ID,
+          at: '2026-09-19T00:00:00.000Z',
+        }],
+      }));
+      const beforeUnknown = readScenarioState(dir);
+      const resUnknown = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resUnknown, 0);
+      assertOut(resUnknown, 'RETURN: 回源节点 review（execute 出口已完成；旧 state 缺闭合/修复证据，未分类）');
+      assertOut(resUnknown, 'NODE: review');
+      assertNotOut(resUnknown, 'FIX-BATCH');
+      assertNotOut(resUnknown, 'BLOCKED');
+      const afterUnknown = readScenarioState(dir);
+      if (afterUnknown.currentNode !== 'review' || afterUnknown.completedNodes.join(',') !== FIX_RETURN_FAMILY_COMPLETED) {
+        throw new Error('未分类回程应只覆盖路由到 review 且 completedNodes 不变，实际 '
+          + JSON.stringify({ currentNode: afterUnknown.currentNode, completedNodes: afterUnknown.completedNodes }));
+      }
+      assertStateOnlyChanged(beforeUnknown, afterUnknown, {
+        label: '250f 旧态未分类回程',
+        allowed: ['currentNode', 'status', 'history'],
       });
-      const baseReturnState = (overrides = {}) => ({
-        activeChange: CHANGE_ID,
-        currentNode: 'execute',
-        completedNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
-        enteredNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review'],
-        evidence: familyEvidence(['T01']),
-        verifyFailures: 0,
-        executionMode: 'subagent',
-        directOverride: false,
-        newChange: true,
-        ...overrides,
-      });
-      const FAMILY_COMPLETED = 'open,design,plan,execute,subagent-execute';
-      // 分类不得引入新 state 顶层字段；比对除 currentNode（既有路由覆盖 next）、history
-      // （既有出口事件追加）与 status（既有 apply 写 running/completed）之外的字段——其中
-      // execute 证据的 completedChecks 由既有 required-skill 自动补齐逻辑写入，同样属
-      // 收口前既有行为，故从比对形状中排除。
-      const stateKeyShape = (s) => JSON.stringify(Object.keys(s).filter((k) => k !== 'status').sort());
-      const routingShape = (s) => JSON.stringify({
-        activeChange: s.activeChange,
-        completedNodes: s.completedNodes,
-        enteredNodes: s.enteredNodes,
-        verifyFailures: s.verifyFailures,
-        executionMode: s.executionMode,
-        directOverride: s.directOverride,
-        newChange: s.newChange,
-        subagentEvidence: s.evidence['subagent-execute'],
-        reviewEvidence: s.evidence.review,
-      });
+
+      // 250g Fix 段标题从 flow-kit/templates/TASK.md 派生（决策 4）：模板段名含括号说明 +
+      // 段内非 FIX 编号任务 → 结构标记命中 fix（模板读取路径真实被执行；标题由模板派生）。
+      writeFile(dir, 'flow-kit/templates/TASK.md',
+        '# TASK 模板\n\n## Fix 任务（来自 REVIEW / INTEGRATION）\n');
+      const sectionTaskText = '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n'
+        + '## Fix 任务（来自 REVIEW / INTEGRATION）\n\n' + fixTaskBlock('T02', 'done') + '\n';
+      writeFile(dir, taskPath, sectionTaskText);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T02-SUMMARY.md', strictSummary('T02'));
+      const sectionSignature = routeNodeModule.taskSetSignature(sectionTaskText);
+      writeState(dir, fixReturnBaseState({
+        evidence: fixReturnFamilyEvidence(['T01', 'T02']),
+        history: [{
+          event: 'exit-applied', node: 'execute', change: CHANGE_ID,
+          at: '2026-09-24T00:00:00.000Z', taskSetSignature: sectionSignature,
+        }],
+      }));
+      const resSection = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resSection, 0);
+      assertOut(resSection, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
+      assertNotOut(resSection, 'RETURN: 回源节点');
+
+      // 250h m-06 模板缺失 + 闭合 ATX + 非 FIX 编号：guard 无模板派生标题 → 回退内置
+      // 「Fix 任务」，段内 T02 由结构标记判 fix（模板缺席不得让 Fix 批次漏判）。
+      fs.rmSync(path.join(dir, 'flow-kit', 'templates', 'TASK.md'), { force: true });
+      const missingTplTaskText = '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n'
+        + '## Fix 任务 ##\n\n' + fixTaskBlock('T02', 'done') + '\n';
+      writeFile(dir, taskPath, missingTplTaskText);
+      writeState(dir, fixReturnBaseState({ evidence: fixReturnFamilyEvidence(['T01', 'T02']), history: [] }));
+      const resMissingTpl = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resMissingTpl, 0);
+      assertOut(resMissingTpl, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
+      assertNotOut(resMissingTpl, 'RETURN: 回源节点');
+      assertNotOut(resMissingTpl, 'BLOCKED');
+
+      // 250i m-06 模板基名不同（Fix Tasks）+ 闭合 ATX + 非 FIX 编号：标题归一来自共享权威，
+      // 语言后缀可变仍命中 Fix 段（旧硬编码中文基名会漏判 → RETURN-normal）。
+      writeFile(dir, 'flow-kit/templates/TASK.md',
+        '# TASK 模板\n\n## Fix Tasks（来自 REVIEW / INTEGRATION）\n');
+      const renamedTplTaskText = '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n'
+        + '## Fix Tasks ##\n\n' + fixTaskBlock('T02', 'done') + '\n';
+      writeFile(dir, taskPath, renamedTplTaskText);
+      writeState(dir, fixReturnBaseState({ evidence: fixReturnFamilyEvidence(['T01', 'T02']), history: [] }));
+      const resRenamedTpl = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resRenamedTpl, 0);
+      assertOut(resRenamedTpl, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
+      assertNotOut(resRenamedTpl, 'RETURN: 回源节点');
+      assertNotOut(resRenamedTpl, 'BLOCKED');
+    },
+  },
+
+  // 250c: 多趟收尾与签名元数据——中性回程 / 多波次真实修复 / 任务集签名同版本三态。
+  // 本场景族拆自原 250 单场景，断言与失败信息保持不变。
+  {
+    name: '250c 多趟收尾与签名元数据：中性回程、多波次修复、任务集签名三态',
+    run: (dir) => {
+      writeIntakeArtifacts(dir);
+      const taskPath = '.specs/' + CHANGE_ID + '/TASK.md';
+      writeFixReturnSummaries(dir, ['T01', 'T-FIX-01']);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', FIX_RETURN_REVIEW_TEXT);
+      // state 不变量统一走 assertStateOnlyChanged（白名单外深比 + history 旧前缀稳定 + 恰新增
+      // 一条 exit-applied）——白名单仅 currentNode（既有路由覆盖 next）、status（既有 apply 写
+      // running/completed）、history（既有出口事件追加）；execute 证据的 completedChecks 已预置，
+      // 不在白名单内假豁免。
 
       // 250b 正常多趟最终 exit：无 Fix 任务、历史家族出口签名 == 当前 TASK 签名 → 中性
       // RETURN（正常多趟收尾，非 Fix 回修）；不得出现 FIX-BATCH；NODE/state 与收口前一致。
       const normalTaskText = '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n';
       const normalSignature = routeNodeModule.taskSetSignature(normalTaskText);
       writeFile(dir, taskPath, normalTaskText);
-      writeState(dir, baseReturnState({
+      writeState(dir, fixReturnBaseState({
         history: [{
           event: 'exit-applied', node: 'subagent-execute', change: CHANGE_ID,
           at: '2026-09-23T00:00:00.000Z', taskSetSignature: normalSignature,
@@ -8401,17 +9713,21 @@ const SCENARIOS = [
       assertNotOut(resNormal, 'FIX-BATCH');
       assertNotOut(resNormal, 'NODE: verify');
       const afterNormal = readScenarioState(dir);
-      if (afterNormal.currentNode !== 'review'
-        || afterNormal.completedNodes.join(',') !== FAMILY_COMPLETED
-        || stateKeyShape(afterNormal) !== stateKeyShape(beforeNormal)
-        || routingShape(afterNormal) !== routingShape(beforeNormal)) {
-        throw new Error('正常多趟回程只应改审计行（路由按既有 resolveFixReturnNode 覆盖 next），实际 '
-          + JSON.stringify({
-            currentNode: afterNormal.currentNode,
-            completedNodes: afterNormal.completedNodes,
-            keys: stateKeyShape(afterNormal),
-            routing: routingShape(afterNormal),
-          }));
+      if (afterNormal.currentNode !== 'review' || afterNormal.completedNodes.join(',') !== FIX_RETURN_FAMILY_COMPLETED) {
+        throw new Error('正常多趟回程应只覆盖路由到 review 且 completedNodes 不变，实际 '
+          + JSON.stringify({ currentNode: afterNormal.currentNode, completedNodes: afterNormal.completedNodes }));
+      }
+      const [normalAppended] = assertStateOnlyChanged(beforeNormal, afterNormal, {
+        label: '250b 正常多趟回程',
+        allowed: ['currentNode', 'status', 'history'],
+      });
+      // m-14 新版本元数据锚：exit-applied 事件带 signatureAlgo 且签名值为 vN:<digest> 形态
+      if (!normalAppended || normalAppended.node !== 'execute' || normalAppended.change !== CHANGE_ID
+        || normalAppended.taskSetSignature !== normalSignature
+        || !/^v\d+:[0-9a-f]{64}$/.test(String(normalAppended.taskSetSignature))
+        || normalAppended.signatureAlgo !== routeNodeModule.TASK_SET_SIGNATURE_ALGO) {
+        throw new Error('正常多趟出口事件应记录本 change + vN:<digest> 签名 + signatureAlgo 元数据，实际 '
+          + JSON.stringify(normalAppended));
       }
       const normalExit = (afterNormal.history || []).pop();
       if (!normalExit || normalExit.node !== 'execute' || normalExit.change !== CHANGE_ID
@@ -8425,8 +9741,8 @@ const SCENARIOS = [
       const multiWaveTaskText = fixBatchTaskText('done');
       const multiWaveSignature = routeNodeModule.taskSetSignature(multiWaveTaskText);
       writeFile(dir, taskPath, multiWaveTaskText);
-      writeState(dir, baseReturnState({
-        evidence: familyEvidence(['T01', 'T-FIX-01']),
+      writeState(dir, fixReturnBaseState({
+        evidence: fixReturnFamilyEvidence(['T01', 'T-FIX-01']),
         history: [
           {
             event: 'exit-applied', node: 'execute', change: CHANGE_ID,
@@ -8444,104 +9760,32 @@ const SCENARIOS = [
       assertOut(resMultiWave, 'NODE: review');
       assertNotOut(resMultiWave, 'RETURN: 回源节点');
 
-      // 250d 反向构造（L-064）——与 250c 一一对应证明分类依据是历史全量扫描（不是只看
-      // 最新）：① 无 Fix 编号任务 + 旧签名 ≠ 当前 + 最新签名 == 当前 → 仍判 fix（发散证据
-      // 不依赖结构标记）；② 同任务集仅保留最新（签名 == 当前）→ 必须中性 RETURN。
-      const plainTaskText = '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n';
-      const plainSignature = routeNodeModule.taskSetSignature(plainTaskText);
-      writeFile(dir, taskPath, plainTaskText);
-      writeState(dir, baseReturnState({
-        history: [
-          {
-            event: 'exit-applied', node: 'execute', change: CHANGE_ID,
-            at: '2026-09-20T00:00:00.000Z', taskSetSignature: STALE_FIX_BATCH_SIGNATURE,
-          },
-          {
-            event: 'exit-applied', node: 'subagent-execute', change: CHANGE_ID,
-            at: '2026-09-24T00:00:00.000Z', taskSetSignature: plainSignature,
-          },
-        ],
-      }));
-      const resDivergentPlain = runGuard(['exit', 'execute', '--apply'], dir);
-      assertExit(resDivergentPlain, 0);
-      assertOut(resDivergentPlain, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
-      assertNotOut(resDivergentPlain, 'RETURN: 回源节点');
-      writeState(dir, baseReturnState({
-        history: [{
-          event: 'exit-applied', node: 'subagent-execute', change: CHANGE_ID,
-          at: '2026-09-24T00:00:00.000Z', taskSetSignature: plainSignature,
-        }],
-      }));
-      const resLatestOnlyEqual = runGuard(['exit', 'execute', '--apply'], dir);
-      assertExit(resLatestOnlyEqual, 0);
-      assertOut(resLatestOnlyEqual, 'RETURN: 回源节点 review（execute 出口已完成；正常多趟收尾，非 Fix 回修）');
-      assertNotOut(resLatestOnlyEqual, 'FIX-BATCH');
-
-      // 250e 源未 entry 的真实 Fix：修复任务 + enteredNodes 不含源节点 review + 历史无
-      // 签名（旧态）→ 结构标记仍恢复 fix 标签，保留 FIX-BATCH；不误判 unknown、不卡死。
-      writeFile(dir, taskPath, multiWaveTaskText);
-      writeState(dir, baseReturnState({
-        evidence: familyEvidence(['T01', 'T-FIX-01']),
-        enteredNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
-        history: [],
-      }));
-      const resSourceNotEntered = runGuard(['exit', 'execute', '--apply'], dir);
-      assertExit(resSourceNotEntered, 0);
-      assertOut(resSourceNotEntered, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
-      assertOut(resSourceNotEntered, 'NODE: review');
-      assertNotOut(resSourceNotEntered, 'RETURN: 回源节点');
-      assertNotOut(resSourceNotEntered, 'BLOCKED');
-
-      // 250f 旧态无签名无标记：历史家族出口无签名 + 任务集无 Fix 标记 → RETURN 未分类；
-      // 不 BLOCK、不出现 FIX-BATCH；NODE/state 与收口前一致（只有审计行变化）。
-      writeFile(dir, taskPath, plainTaskText);
-      writeState(dir, baseReturnState({
-        history: [{
-          event: 'exit-applied', node: 'execute', change: CHANGE_ID,
-          at: '2026-09-19T00:00:00.000Z',
-        }],
-      }));
-      const beforeUnknown = readScenarioState(dir);
-      const resUnknown = runGuard(['exit', 'execute', '--apply'], dir);
-      assertExit(resUnknown, 0);
-      assertOut(resUnknown, 'RETURN: 回源节点 review（execute 出口已完成；旧 state 缺闭合/修复证据，未分类）');
-      assertOut(resUnknown, 'NODE: review');
-      assertNotOut(resUnknown, 'FIX-BATCH');
-      assertNotOut(resUnknown, 'BLOCKED');
-      const afterUnknown = readScenarioState(dir);
-      if (afterUnknown.currentNode !== 'review'
-        || afterUnknown.completedNodes.join(',') !== FAMILY_COMPLETED
-        || stateKeyShape(afterUnknown) !== stateKeyShape(beforeUnknown)
-        || routingShape(afterUnknown) !== routingShape(beforeUnknown)) {
-        throw new Error('未分类回程只应改审计行（路由按既有 resolveFixReturnNode 覆盖 next），实际 '
-          + JSON.stringify({
-            currentNode: afterUnknown.currentNode,
-            completedNodes: afterUnknown.completedNodes,
-            keys: stateKeyShape(afterUnknown),
-            routing: routingShape(afterUnknown),
-          }));
-      }
-
-      // 250g Fix 段标题从 flow-kit/templates/TASK.md 派生（决策 4）：模板段名含括号说明 +
-      // 段内非 FIX 编号任务 → 结构标记命中 fix（模板读取路径真实被执行；标题由模板派生）。
-      writeFile(dir, 'flow-kit/templates/TASK.md',
-        '# TASK 模板\n\n## Fix 任务（来自 REVIEW / INTEGRATION）\n');
-      const sectionTaskText = '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n'
-        + '## Fix 任务（来自 REVIEW / INTEGRATION）\n\n' + fixTaskBlock('T02', 'done') + '\n';
-      writeFile(dir, taskPath, sectionTaskText);
       writeFile(dir, '.specs/' + CHANGE_ID + '/T02-SUMMARY.md', strictSummary('T02'));
-      const sectionSignature = routeNodeModule.taskSetSignature(sectionTaskText);
-      writeState(dir, baseReturnState({
-        evidence: familyEvidence(['T01', 'T02']),
-        history: [{
-          event: 'exit-applied', node: 'execute', change: CHANGE_ID,
-          at: '2026-09-24T00:00:00.000Z', taskSetSignature: sectionSignature,
-        }],
-      }));
-      const resSection = runGuard(['exit', 'execute', '--apply'], dir);
-      assertExit(resSection, 0);
-      assertOut(resSection, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
-      assertNotOut(resSection, 'RETURN: 回源节点');
+      // 250j~l m-14 C3 三态（guard exit 入口签名比对消费点）：同版本一致 → 放行；
+      // 同版本不一致 → BLOCK；跨算法版本 → SIGNATURE-ALGO WARN 跳过比对不阻断。
+      writeFile(dir, 'flow-kit/templates/TASK.md',
+        '# TASK 模板\n\n## Fix Tasks（来自 REVIEW / INTEGRATION）\n');
+      const renamedTplTaskText = '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n'
+        + '## Fix Tasks ##\n\n' + fixTaskBlock('T02', 'done') + '\n';
+      writeFile(dir, taskPath, renamedTplTaskText);
+      const c3Evidence = fixReturnFamilyEvidence(['T01', 'T02']);
+      const c3Digest = routeNodeModule.parseTaskSetSignature(
+        routeNodeModule.taskSetSignature(renamedTplTaskText))?.digest;
+      writeState(dir, fixReturnBaseState({ evidence: c3Evidence, history: [], taskHash: routeNodeModule.taskSetSignature(renamedTplTaskText) }));
+      const resC3Same = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resC3Same, 0);
+      assertNotOut(resC3Same, 'BLOCKED');
+      // 同版本不一致（占位 digest）→ 新 change BLOCK 任务集被修改
+      writeState(dir, fixReturnBaseState({ evidence: c3Evidence, history: [], taskHash: 'v1:' + '0'.repeat(64) }));
+      const resC3Diff = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resC3Diff, 1);
+      assertOut(resC3Diff, 'BLOCKED: TASK.md 任务集被修改');
+      // 跨算法版本（v2 值 + v2 声明）→ 不可比，WARN 跳过比对，不误拦任务集
+      writeState(dir, fixReturnBaseState({ evidence: c3Evidence, history: [], taskHash: 'v2:' + c3Digest }));
+      const resC3Skew = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resC3Skew, 0);
+      assertOut(resC3Skew, 'SIGNATURE-ALGO WARN');
+      assertNotOut(resC3Skew, 'BLOCKED: TASK.md 任务集被修改');
     },
   },
 
@@ -9040,6 +10284,69 @@ const SCENARIOS = [
       if (after.currentNode !== 'subagent-execute') {
         throw new Error('done-but-unclosed 并行变体 next 后 currentNode 应为 subagent-execute，实际 ' + JSON.stringify(after.currentNode));
       }
+      // ⑧ m-12 next 入口第 1~3 轮递增：逐轮重置驻留 review，审计后缀第 n/3 轮且计数器同步 +1
+      writeFile(dir, taskPath, fixBatchTaskText('pending'));
+      for (let round = 1; round <= 3; round += 1) {
+        writeState(dir, base);
+        const stRound = readScenarioState(dir);
+        stRound.fixRoundsByChange = { [CHANGE_ID]: round - 1 };
+        writeState(dir, stRound);
+        const resRound = runState(['next'], dir, env);
+        assertExit(resRound, 0);
+        assertOut(resRound, 'FIX-BATCH: 归位 execute（源节点 review）（第 ' + round + '/3 轮）');
+        const stAfterRound = readScenarioState(dir);
+        if (stAfterRound.fixRoundsByChange?.[CHANGE_ID] !== round) {
+          throw new Error('next 第 ' + round + ' 轮归位后计数器应为 ' + round + '，实际 '
+            + JSON.stringify(stAfterRound.fixRoundsByChange));
+        }
+      }
+      // ⑨ 第 4 轮新 change BLOCK：state 字节零改写（不写 currentNode、不写计数器）
+      writeState(dir, { ...base, fixRoundsByChange: { [CHANGE_ID]: 3 } });
+      const statePath = path.join(dir, '.flow-comet', 'flow-comet-state.json');
+      const beforeRound4 = fs.readFileSync(statePath, 'utf8');
+      const resRound4 = runState(['next'], dir, env);
+      assertExit(resRound4, 1);
+      assertOut(resRound4, 'BLOCKED: Fix 批次受控归位已达 3 轮上限');
+      assertOut(resRound4, '继续修');
+      assertOut(resRound4, '停止');
+      if (fs.readFileSync(statePath, 'utf8') !== beforeRound4) {
+        throw new Error('next 第 4 轮 BLOCK 必须 state 字节零改写');
+      }
+      const stBlocked = readScenarioState(dir);
+      if (stBlocked.currentNode !== 'review' || stBlocked.fixRoundsByChange?.[CHANGE_ID] !== 3) {
+        throw new Error('next 第 4 轮 BLOCK 后 currentNode/计数器不得改写，实际 '
+          + JSON.stringify({ currentNode: stBlocked.currentNode, rounds: stBlocked.fixRoundsByChange }));
+      }
+      // ⑨b F5：非法授权形态（仅 round，缺 at/source）在 next 链路上仍按未授权 fail-closed——
+      // 继续 BLOCK、state 字节零改写、currentNode 保持 review、计数器保持 3。
+      const stBadOverride = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      stBadOverride.evidence.review.fixRoundOverride = { round: 4 };
+      writeState(dir, stBadOverride);
+      const badOverrideBytes = fs.readFileSync(statePath, 'utf8');
+      const resBadOverride = runState(['next'], dir, env);
+      assertExit(resBadOverride, 1);
+      assertOut(resBadOverride, 'BLOCKED: Fix 批次受控归位已达 3 轮上限');
+      assertNotOut(resBadOverride, '（第 4/3 轮）');
+      if (fs.readFileSync(statePath, 'utf8') !== badOverrideBytes) {
+        throw new Error('F5 缺 at/source 的授权形态必须在 next 链路上 state 字节零改写');
+      }
+      const stBadAfter = readScenarioState(dir);
+      if (stBadAfter.currentNode !== 'review' || stBadAfter.fixRoundsByChange?.[CHANGE_ID] !== 3) {
+        throw new Error('F5 缺 at/source 不得放行第 4 轮（currentNode 保持 review、计数保持 3），实际 '
+          + JSON.stringify({ currentNode: stBadAfter.currentNode, rounds: stBadAfter.fixRoundsByChange }));
+      }
+      // ⑩ 用户显式授权（嵌套 evidence，完整三元组）→ next 第 4 轮放行并写盘
+      const stOverride = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      stOverride.evidence.review.fixRoundOverride = { round: 4, at: '2026-09-25T00:00:00.000Z', source: 'fixture-user' };
+      writeState(dir, stOverride);
+      const resOverride = runState(['next'], dir, env);
+      assertExit(resOverride, 0);
+      assertOut(resOverride, '（第 4/3 轮）');
+      const stAuthorized = readScenarioState(dir);
+      if (stAuthorized.currentNode !== 'execute' || stAuthorized.fixRoundsByChange?.[CHANGE_ID] !== 4) {
+        throw new Error('next 授权后第 4 轮应放行归位（currentNode=execute、计数器=4），实际 '
+          + JSON.stringify({ currentNode: stAuthorized.currentNode, rounds: stAuthorized.fixRoundsByChange }));
+      }
     },
   },
 
@@ -9251,8 +10558,12 @@ const SCENARIOS = [
       assertNotOut(resRollback, 'BLOCKED');
       assertOut(resRollback, 'FIX-BATCH: 归位 execute（源节点 review）');
       assertOut(resRollback, 'NODE: execute');
-      if (readScenarioState(dir).currentNode !== 'execute') {
-        throw new Error('旧 change 回退态 next 后 currentNode 应为 execute，实际 ' + JSON.stringify(readScenarioState(dir).currentNode));
+      // 旧 change 缺 fixRoundsByChange 字段 → 缺省 0，从第 1 轮计数且不 BLOCK（AC-5 旧兼容）
+      assertOut(resRollback, '（第 1/3 轮）');
+      const stLegacyRollback = readScenarioState(dir);
+      if (stLegacyRollback.currentNode !== 'execute' || stLegacyRollback.fixRoundsByChange?.[CHANGE_ID] !== 1) {
+        throw new Error('旧 change 回退态 next 后应归位 execute 且计数器缺省 0→1，实际 '
+          + JSON.stringify({ currentNode: stLegacyRollback.currentNode, rounds: stLegacyRollback.fixRoundsByChange }));
       }
       // ② 旧 change 回程态（无 newChange 字段：全 done + REVIEW.md + 源节点未完成）→ NODE: review，不得 BLOCK
       writeFile(dir, taskPath, fixBatchTaskText('done'));

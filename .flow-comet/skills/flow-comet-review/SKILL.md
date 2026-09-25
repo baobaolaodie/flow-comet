@@ -19,7 +19,7 @@ This node performs a structured multi-round review of the implemented change, ch
 
 | 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
 |------|-------------------------------|-----------------------------------|
-| REVIEW.md | 文件 ≥ 100 字节；发现区条目处置标记（`[已修]` / `[升级]` / `[转待办]`——新 change 缺失 BLOCKED,旧 change WARN 渐进） | `## Critical` / `## 发现` / `## 结论` 等段（结构要求，guard 不拦段名） |
+| REVIEW.md | 文件 ≥ 100 字节；发现区条目处置标记（`[已修]` / `[升级]` / `[转待办]`——新 change 缺失 BLOCKED,旧 change WARN 渐进）；**Major `[转待办]` 须有用户裁决记录**（同段、文末或单独段落「用户裁决：接受延期」+ 指向该条目 + `[升级]` 承接——单独段落与条目以空行分隔、位置不限）——缺失新 change BLOCKED / 旧 change WARN 渐进 | `## Critical` / `## 发现` / `## 结论` 等段（结构要求，guard 不拦段名） |
 
 guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
 
@@ -27,6 +27,7 @@ guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好�
 
 - [ ] **工件模板保真**：每份交付工件（`*-SUMMARY.md` / TASK / CHANGE / REQUIREMENT / DESIGN）的**标题 / 首部字段 / 段序**与对应模板一致——SUMMARY 按 `flow-kit/templates/SUMMARY.md` 填写并含 `## 自检方法` 段；执行者按 `flow-kit/prompts/4-dev.md` 协议交付。
 - [ ] **Skill 工具触发可见**：检查执行者交付的 transcript，**逐节点可见本节点 skill 用 Skill 工具加载**的触发记录——声明标记在 ≠ 已加载；只看到 `skill-load` 声明命令、看不到 Skill 工具触发 → 反馈并要求补证/重做。
+- [ ] **Skill 工具不可用降级核验**：执行者会话具备 Skill 工具时，须见 Skill 工具加载节点 SKILL 的触发记录；不具备时（委托会话工具集无 Skill 工具），须按 Read 加载节点 SKILL + 协议，并在 Return Contract（`skillToolFallback: "降级，未执行 Skill 工具注入"`）与 SUMMARY「自检方法」段显式声明——**Read 不得被声称为已注入**。只回传 required-skill 标记而无降级声明 → 证据不完整，要求补声明；声明齐全的环境限制不判为代码缺陷。
 
 ### Prerequisites
 
@@ -96,6 +97,7 @@ guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好�
    - `[已修]` — fixed via a fix task (linked in the entry)
    - `[升级]` — escalated to the user for a decision (accept + reason recorded)
    - `[转待办]` — deferred to `.specs/<change-id>/KNOWN-ISSUES.md` at archive time
+   - **Major 不得由 reviewer 自行 `[转待办]`**：Major 的延期属用户决策点，reviewer 须先标 `[升级]` 等用户裁决；用户接受延期后，在同段、文末或单独段落记录「用户裁决：接受延期」并指向该条目（由 `[升级]` 承接），方可标 `[转待办]`——单独段落与发现条目以空行分隔、可位于发现区中间，位置不限（guard 按独立段落匹配，不要求位于文末）。review exit 结构校验：Major 条目标 `[转待办]` 而缺上述记录 → 新 change BLOCKED / 旧 change WARN 渐进；Minor `[转待办]` 不受影响，`[升级]` / `[已修]` 的 Major 直接放行。
    The exit guard structurally checks these markers on the findings area: a missing marker **blocks** the exit for a new change, and is a non-blocking warning for a legacy change (to avoid deadlocking legacy reviews). Add markers to clear it.
 
 The full review protocol, templates, and checklists are in:
@@ -120,6 +122,7 @@ This node is truly done when:
 - **Agent thought**: "Round 3 (UI) is optional." **Actual risk**: For frontend projects with UI changes, Round 3 is mandatory. Only non-frontend projects skip it.
 - **Agent thought**: "6-dimension review is just a checklist." **Actual risk**: Without file:line references and book citations (when using built-in path), the review lacks rigor and fixability.
 - **Agent thought**: "I'll record this Minor and move on." **Actual risk**: Findings (especially Minor) that are recorded without a disposition marker silently disappear — the exit guard warns on missing markers; every finding must be `[已修]`, `[升级]` (user decision), or `[转待办]` (tracked for archive).
+- **Agent thought**: "This Major is not for this batch, I'll defer it to backlog myself." **Actual risk**: Major 延期属用户决策点——reviewer 自行 `[转待办]` 会被退出守卫拦截（新 change BLOCKED / 旧 change WARN）；须先 `[升级]` 等用户裁决，用户接受延期后才可记录裁决并转待办。
 
 ## Fix 批次状态机路径
 
