@@ -50,28 +50,112 @@ function markerProtocolBasename(value) {
   return String(value).replaceAll('\\', '/').split('/').pop() || null;
 }
 
-// REVIEW.md 发现区条目处置状态提取——"## 发现" 段下 Critical/Major/Minor
-// 子区的发现项 = 以 "- **" 开头的列表项（加粗标题）；"无" 条目（"- 无" / "无（...）"）表示
-// 该级别无发现，豁免。返回缺处置状态标记（[已修]/[升级]/[转待办]）的条目标题列表——
-// 结构级校验（不做语义判断：标记存在即视为已处置）。发现项（含 Minor）不得"记录后无声消失"。
-function reviewFindingsMissingDisposition(text) {
-  const missing = [];
-  for (const section of text.split(/\n##\s+/)) {
-    if (!/^发现/.test(section)) continue;
-    for (const line of section.split('\n')) {
-      const m = line.match(/^\s*-\s*\*\*(.+?)\*\*/);
-      if (!m) continue;
-      if (/^无/.test(m[1].trim())) continue; // "无" 条目豁免
-      // 四要素字段行豁免:REVIEW 发现条目的 Symptom/Source/Consequence/Remedy
-      // 是 brooks 审查输出格式的字段行(带 ** 加粗),不是发现条目本身——不豁免会误判
-      // 为"发现项缺处置标记"(执行者按 4 要素格式书写时被误 BLOCKED)。
-      // 精确匹配完整标签(允许尾冒号)——"Source maps expose paths" 这类以 Source 开头的
-      // 真实发现标题不得被前缀匹配误豁免(其处置校验必须照常进行)
-      if (/^(?:Symptom|Source|Consequence|Remedy)\s*:?\s*$/i.test(m[1].trim())) continue;
-      if (!/\[已修\]|\[升级\]|\[转待办\]/.test(line)) missing.push(m[1]);
+// REVIEW.md 发现区条目解析——"## 发现" 段下的发现项 = 列表项（"- **" 无序 / "1. **" 有序，
+// 加粗开头的标题行）；"无" 条目（"- 无" / "无（...）"）表示该级别无发现，豁免。条目块包含
+// 其后的非空续行（同一段落），直到空行 / 下一条目 / 下一个标题。同时记录条目所属的
+// "### Major" 分区，以及条目自身是否带 [Major] 标签（真实 REVIEW 常用扁平有序列表 +
+// 条目内级别标签的写法）。返回 { title, lines, isMajor, ordered, ordinal }。
+const REVIEW_FINDING_ITEM_RE = /^\s*(?:[-*+]|\d+[.)])\s*\*\*(.+?)\*\*/;
+const REVIEW_DISPOSITION_RE = /\[已修\]|\[升级\]|\[转待办\]/;
+const REVIEW_MAJOR_LABEL_RE = /\[\s*Major\s*\]/i;
+const REVIEW_ADJUDICATION_RE = /用户裁决\s*[:：]\s*接受延期/;
+
+function reviewFindingsItems(text) {
+  const items = [];
+  let inFindings = false;
+  let severity = '';
+  let current = null;
+  const pushCurrent = () => { if (current) { items.push(current); current = null; } };
+  for (const line of String(text).split(/\r?\n/)) {
+    const h2 = line.match(/^##\s+(.+?)\s*$/);
+    if (h2) {
+      pushCurrent();
+      inFindings = /^发现/.test(h2[1]);
+      severity = '';
+      continue;
+    }
+    if (!inFindings) continue;
+    const h3 = line.match(/^###\s+(.+?)\s*$/);
+    if (h3) {
+      pushCurrent();
+      severity = h3[1].trim();
+      continue;
+    }
+    const m = line.match(REVIEW_FINDING_ITEM_RE);
+    if (m) {
+      pushCurrent();
+      current = {
+        title: m[1].trim(),
+        lines: [line],
+        isMajor: /^major\b/i.test(severity),
+        ordered: /^\s*\d/.test(line), // 条目行首为数字 = 有序列表（-*+ 之外唯一入口）
+      };
+      continue;
+    }
+    if (current) {
+      if (line.trim() === '') pushCurrent();
+      else current.lines.push(line);
     }
   }
-  return missing;
+  pushCurrent();
+  for (const item of items) {
+    if (REVIEW_MAJOR_LABEL_RE.test(item.lines.join('\n'))) item.isMajor = true;
+  }
+  items.forEach((item, i) => { item.ordinal = i + 1; });
+  return items;
+}
+
+// 发现区条目处置标记存在性：返回缺处置状态标记（[已修]/[升级]/[转待办]）的条目标题列表——
+// 结构级校验（不做语义判断：标记存在即视为已处置）。发现项（含 Minor）不得"记录后无声消失"。
+// 保持既有语义范围：仅无序列表条目参与本校验（有序列表条目的处置由 Major 延期裁决门禁覆盖）。
+function reviewFindingsMissingDisposition(text) {
+  return reviewFindingsItems(text)
+    .filter((item) => !item.ordered)
+    .filter((item) => !/^无/.test(item.title)) // "无" 条目豁免
+    // 四要素字段行豁免:REVIEW 发现条目的 Symptom/Source/Consequence/Remedy
+    // 是 brooks 审查输出格式的字段行(带 ** 加粗),不是发现条目本身——不豁免会误判
+    // 为"发现项缺处置标记"(执行者按 4 要素格式书写时被误 BLOCKED)。
+    // 精确匹配完整标签(允许尾冒号)——"Source maps expose paths" 这类以 Source 开头的
+    // 真实发现标题不得被前缀匹配误豁免(其处置校验必须照常进行)
+    .filter((item) => !/^(?:Symptom|Source|Consequence|Remedy)\s*:?\s*$/i.test(item.title))
+    .filter((item) => !REVIEW_DISPOSITION_RE.test(item.lines[0]))
+    .map((item) => item.title);
+}
+
+// 裁决记录是否指向某条发现：条目标题全文 / 标题内标识 token（如 F1、m-2）/ 条目序号
+// （发现 N、第 N 项、#N）/ 标题核心前缀任一命中即视为指认。结构级判定，不做语义判断。
+function reviewAdjudicationPointsTo(record, item) {
+  if (record.includes(item.title)) return true;
+  const idTokens = item.title.match(/[A-Za-z]{1,8}[-–]?\d{1,4}/g) || [];
+  if (idTokens.some((token) => record.includes(token))) return true;
+  if (new RegExp('(?:发现|条目|第|#)\\s*' + item.ordinal + '(?!\\d)').test(record)) return true;
+  const core = item.title.replace(/[\[\]【】]/g, '').replace(/^[A-Za-z]+\s*/, '').trim().slice(0, 12);
+  return core.length >= 6 && record.includes(core);
+}
+
+// Major 延期裁决门禁：发现区任何 Major 条目处置为 [转待办] 时，必须同时存在用户裁决记录——
+// 同段（条目自身段落）或文末其余段落含「用户裁决：接受延期」且指向该条目，并由 [升级] 承接
+// （条目自身块或裁决记录含 [升级]）。任一缺失 → 返回条目标题（调用方按新 change BLOCK /
+// 旧 change WARN 渐进处置）。Minor 不参与；Major [升级]/[已修] 直接放行。
+function reviewDeferredMajorProblems(text) {
+  const textValue = String(text);
+  const items = reviewFindingsItems(textValue);
+  const paragraphs = textValue.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  const problems = [];
+  for (const item of items) {
+    if (!item.isMajor || !/\[转待办\]/.test(item.lines.join('\n'))) continue;
+    const block = item.lines.join('\n');
+    const escalatedInBlock = /\[升级\]/.test(block);
+    const blockTrimmed = block.trim();
+    if (REVIEW_ADJUDICATION_RE.test(block) && escalatedInBlock) continue; // 同段裁决 + [升级] 承接
+    const matched = paragraphs.some((paragraph) => {
+      if (!REVIEW_ADJUDICATION_RE.test(paragraph)) return false;
+      if (paragraph === blockTrimmed) return false; // 跳过条目自身段落
+      return (escalatedInBlock || /\[升级\]/.test(paragraph)) && reviewAdjudicationPointsTo(paragraph, item);
+    });
+    if (!matched) problems.push(item.title);
+  }
+  return problems;
 }
 
 // W1-B: flow-kit SUMMARY 模板必填段（正则匹配，大小写不敏感 + 变体兼容）
@@ -1736,10 +1820,11 @@ async function main() {
         console.error('BLOCKED: REVIEW.md 内容不足（' + stat.size + ' 字节，需 ≥ 100）');
         process.exit(1);
       }
-      // L3-1: 发现项（含 Minor）须有处置状态标记——[已修]（对应 fix 任务）/ [升级]（用户决策：
+      // 发现项（含 Minor）须有处置状态标记——[已修]（对应 fix 任务）/ [升级]（用户决策：
       // 接受+理由）/ [转待办]（归档时进 KNOWN-ISSUES）。结构级校验，WARN 渐进不 BLOCK：
       // 旧 REVIEW 未按新格式写标记只警告不阻断（防旧 REVIEW 卡死），执行者补标记后可消除。
-      const missingDisposition = reviewFindingsMissingDisposition(await fs.readFile(reviewFile, 'utf8'));
+      const reviewText = await fs.readFile(reviewFile, 'utf8');
+      const missingDisposition = reviewFindingsMissingDisposition(reviewText);
       if (missingDisposition.length > 0) {
         if (isNewChange(state)) {
           console.error('BLOCKED: REVIEW.md 发现区 ' + missingDisposition.length + ' 项条目缺处置状态标记（[已修]/[升级]/[转待办]）——新 change 强制每项发现须有处置');
@@ -1749,6 +1834,21 @@ async function main() {
         console.error('REVIEW WARN: REVIEW.md 发现区 ' + missingDisposition.length +
           ' 项条目缺处置状态标记（[已修]/[升级]/[转待办]）: ' + missingDisposition.join('、') +
           '——未处置的发现（含 Minor）不应无声消失，补标记后本警告消除（渐进不阻断）');
+      }
+      // Major 延期裁决门禁：Major 的处置是用户决策点——reviewer 不得自行 [转待办]。结构校验：
+      // Major 条目标 [转待办] 时须同时存在用户裁决记录（同段或文末含「用户裁决：接受延期」
+      // 且指向该条目，并由 [升级] 承接）；缺失 → 新 change BLOCKED / 旧 change WARN 渐进。
+      // Minor 不受影响；Major [升级]/[已修] 直接放行。
+      const deferredMajor = reviewDeferredMajorProblems(reviewText);
+      if (deferredMajor.length > 0) {
+        const guide = '；恢复: 先把 Major 改为 [升级] 交用户裁决；用户接受延期后在同段或文末记录「用户裁决：接受延期」并指向该条目（由 [升级] 承接）';
+        if (isNewChange(state)) {
+          console.error('BLOCKED: REVIEW.md 发现区 ' + deferredMajor.length + ' 项 Major 条目为 [转待办] 但缺少用户裁决记录（Major 不得由 reviewer 自行转待办）: ' + deferredMajor.join('、') + guide);
+          process.exit(1);
+        }
+        console.error('REVIEW WARN: REVIEW.md 发现区 ' + deferredMajor.length +
+          ' 项 Major 条目为 [转待办] 但缺少用户裁决记录: ' + deferredMajor.join('、') +
+          '——Major 不得由 reviewer 自行转待办' + guide + '（渐进不阻断）');
       }
     } catch {}
   }

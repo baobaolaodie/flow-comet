@@ -64,6 +64,7 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
    - ① `git status --short`：change 工件（`.specs/<change-id>/`）**必须已 commit**——未 commit 时 worktree 子代理看不到工件（harness 从已提交 HEAD 创建 worktree）
    - ② `git log --oneline -1`：确认 HEAD 位置（change 分支）
    - ③ 委托 prompt **必须内联任务块全文 + 相关 AC**（worktree 基线可能不是 change 分支——harness 行为不可控，内联是唯一可靠路径）
+   - ④ **子代理会话 Skill 工具可用性（委托前探测）**：委托 prompt 必须要求子代理开工前确认本会话是否具备 Skill 工具——具备时用 Skill 工具加载 `flow-comet-dev`；不可用时按 Read 加载节点 SKILL + `flow-kit/prompts/4-dev.md` 协议执行，并在 Return Contract 回传 `"skillToolFallback": "降级，未执行 Skill 工具注入"`（SUMMARY「自检方法」段同步声明）。**禁止把 Read 声称为已注入**；委托 prompt 未写明该口径 = 委托前检查未完成，不得发出委托
    - **Red Flag**：worktree 工件不可见/基线不确定时**禁止继续委托**——先 commit 或内联上下文
    - 委托后：子代理回报 commitHash 后校验存在性（`git cat-file -e <commitHash>`，workflow-handoff result 已有 W2-D git show 校验兜底）
 
@@ -77,7 +78,8 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
    - DESIGN.md sections 0 and 0.5 for context.
    - REQUIREMENT.md ACs relevant to this task.
    - Explicit instruction to **use the Skill 工具** to load `flow-comet-dev` and follow its full protocol `flow-kit/prompts/4-dev.md`（不得跳过——读取 SKILL.md 文件不叫加载，跑声明命令也不叫加载；加载 = Skill 工具把 skill 注入会话）。
-   - Explicit requirement to return `completedChecks` in the Return Contract containing `required-skill:subagent-execute.flow-comet-dev`（证明已加载 implementation skill；guard W1-D 严格校验，缺失 → exit BLOCKED，无旧 change 豁免）。
+   - **Skill 工具不可用时的降级口径（与上一条并排内联）**：子代理会话不具备 Skill 工具时，按 Read 加载节点 SKILL + `flow-kit/prompts/4-dev.md` 协议执行，Return Contract 回传 `"skillToolFallback": "降级，未执行 Skill 工具注入"`，SUMMARY「自检方法」段同步同措辞；**禁止把 Read 声称为已完成 Skill 工具注入**。
+   - Explicit requirement to return `completedChecks` in the Return Contract containing `required-skill:subagent-execute.flow-comet-dev`（证明已加载 implementation skill；guard W1-D 严格校验，缺失 → exit BLOCKED，无旧 change 豁免）。Skill 工具不可用而走降级时该条目标记仍按契约回传，但必须与 `skillToolFallback` 降级声明并排出现——只回传标记而无声明视为不实声明，orchestrator 不得记录 result。
    - The task's `read_files` and `write_files` boundaries.
    - Instruction to produce `<task-id>-SUMMARY.md` in `.specs/<change-id>/` following the `flow-kit/templates/SUMMARY.md` template（标题/首部/段序保真，另补 flow-comet 增量 `## 自检方法` 段）。
    - **提交边界警告**:提交**只含该任务 write_files 范围内的文件**(含测试文件)——不得包含 TASK.md 与其他协调者维护的 .specs 工件(新 change 提交越界 BLOCKED;实测子代理提交含 TASK.md 被 W2-D 拦截)。**提交从属规则**:任务专属的 `<task-id>-SUMMARY.md`(位于 `.specs/<change-id>/`,是 flow-comet 强制产物)允许随任务提交属流程默认豁免——目标仓库的既有规定优先,若目标仓库忽略清单等既有规定拒绝其入库,被拒即为正确行为,严禁 force-add 强加越库提交;委托校验对任务摘要的豁免属于校验宽容度,不是入库指令。
@@ -119,13 +121,15 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
   "redEvidence": { "command": "<RED 失败测试命令>", "output": "<真实失败输出片段>" },
   "greenEvidence": { "command": "<GREEN 通过测试命令>", "output": "<真实通过输出片段>" },
   "riskSignals": ["cross-module | security | concurrency | migration | public-api | 200+lines | none"],
-  "concerns": "<可选：未解决的疑虑>"
+  "concerns": "<可选：未解决的疑虑>",
+  "skillToolFallback": "<仅 Skill 工具不可用时回传：降级，未执行 Skill 工具注入>"
 }
 ```
 
 - `status=DONE` 才视为完成；`BLOCKED` / `NEEDS_CONTEXT` 需 orchestrator 处理。
 - `redEvidence` / `greenEvidence` 缺任一 → 视为未执行 TDD，orchestrator 拒绝记录；**新 change 下 guard 强制 BLOCKED**（旧 change WARN 渐进）。
 - `completedChecks` 必须含 `required-skill:subagent-execute.flow-comet-dev`（子代理加载 implementation skill 的证明）；缺任一项 → guard exit 严格 BLOCKED（W1-D，无旧 change 豁免），orchestrator 不得以旧格式/补录方式绕过。
+- **Skill 工具不可用降级（如实声明）**：子代理会话不具备 Skill 工具时，按 Read 加载节点 SKILL + 协议执行，并在 Return Contract 回传 `"skillToolFallback": "降级，未执行 Skill 工具注入"`（SUMMARY「自检方法」段同步同措辞）；此时 `completedChecks` 的 `required-skill:...` 标记仍按契约保留，但必须与降级声明并排出现——只回传标记而无降级声明视为不实声明，orchestrator 不得记录 result；具备 Skill 工具时不得回传该字段。
 - `riskSignals` 非 `none` 时，orchestrator 应将该任务标记为 review 节点的高优先级审查对象。
 - 子代理回传后，orchestrator 用 `workflow-handoff.mjs result <task-id> '<JSON>'` 记录；guard exit subagent-execute 会校验 commitHash + greenEvidence + completedChecks（W1-D，严格）。
 

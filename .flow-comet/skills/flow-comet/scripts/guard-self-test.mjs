@@ -3875,9 +3875,11 @@ const SCENARIOS = [
     },
   },
 
-  // 125: R1——新 change(newChange:true)review 处置标记缺失 → BLOCKED(旧 change WARN 保留)
+  // 125: R1——新 change(newChange:true)review 处置标记缺失 → BLOCKED(旧 change WARN 保留)；
+  // 并内扩 Major 延期待裁决门禁三态+一反例：无用户裁决 BLOCK / 同段或文末裁决（由 [升级]
+  // 承接）放行 / Minor [转待办] 不受影响 / 有裁决但缺 [升级] 承接仍 BLOCK。
   {
-    name: '125 review exit BLOCKED：新 change 处置标记缺失（R1）',
+    name: '125 review exit BLOCKED：新 change 处置标记缺失 + Major 延期待裁决（R1）',
     run: (dir) => {
       const st = baseState('review');
       st.evidence.review = { summary: 'reviewed' };
@@ -3905,6 +3907,41 @@ const SCENARIOS = [
       const resOk2 = runGuard(['exit', 'review'], dir);
       assertExit(resOk2, 0);
       assertOut(resOk2, 'ALL CHECKS PASSED');
+      // 子断言:Major [转待办] 属用户决策点——无用户裁决记录 → BLOCKED(修复前放行 = RED)
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **F1 · 未裁决的延期**：某处问题 [转待办]\n\n## 结论\n\n通过\n');
+      const resMajor = runGuard(['exit', 'review'], dir);
+      assertExit(resMajor, 1);
+      assertOut(resMajor, 'BLOCKED');
+      assertOut(resMajor, 'Major');
+      assertOut(resMajor, '用户裁决');
+      // 子断言:同段用户裁决 + [升级] 承接 → 放行
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **F2 · 已裁决的延期**：某处问题 [升级] [转待办]（用户裁决：接受延期，下一 change 首修）\n\n## 结论\n\n通过\n');
+      const resAdjudicated = runGuard(['exit', 'review'], dir);
+      assertExit(resAdjudicated, 0);
+      assertOut(resAdjudicated, 'ALL CHECKS PASSED');
+      assertNotOut(resAdjudicated, '用户裁决');
+      // 子断言:Minor [转待办] 不受影响 → 放行
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-1 · 小项**：某处小问题 [转待办]\n\n## 结论\n\n通过\n');
+      const resMinor = runGuard(['exit', 'review'], dir);
+      assertExit(resMinor, 0);
+      assertOut(resMinor, 'ALL CHECKS PASSED');
+      // 子断言:文末用户裁决 + 指向该条目 + [升级] 承接 → 放行
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **F3 · 文末裁决的延期**：某处问题 [升级] [转待办]\n\n## 用户裁决\n\n- 用户裁决：接受延期 —— 发现 F3（文末裁决的延期）：下一 change 首修。\n\n## 结论\n\n通过\n');
+      const resTail = runGuard(['exit', 'review'], dir);
+      assertExit(resTail, 0);
+      assertOut(resTail, 'ALL CHECKS PASSED');
+      // 子断言:尾部裁决段落引用条目整行（引用块）时不得被误判为条目自身段落 → 放行
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **F5 · 引用条目行的尾部裁决**：某处问题 [升级] [转待办]\n\n## 用户裁决\n\n> - **F5 · 引用条目行的尾部裁决**：某处问题 [升级] [转待办]\n> 用户裁决：接受延期 —— 发现 F5：下一 change 首修。\n\n## 结论\n\n通过\n');
+      const resQuotedTail = runGuard(['exit', 'review'], dir);
+      assertExit(resQuotedTail, 0);
+      assertOut(resQuotedTail, 'ALL CHECKS PASSED');
+      // 子断言:有用户裁决但缺 [升级] 承接 → 仍 BLOCKED（不因裁决在文末就跳过承接校验）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **F4 · 无升级承接**：某处问题 [转待办]\n\n## 用户裁决\n\n- 用户裁决：接受延期 —— 发现 F4（无升级承接）：下一 change 首修。\n\n## 结论\n\n通过\n');
+      const resNoEscalation = runGuard(['exit', 'review'], dir);
+      assertExit(resNoEscalation, 1);
+      assertOut(resNoEscalation, 'BLOCKED');
+      assertOut(resNoEscalation, 'Major');
+      assertOut(resNoEscalation, '用户裁决');
     },
   },
 
@@ -4093,9 +4130,10 @@ const SCENARIOS = [
     },
   },
 
-  // 131: R1 旧兼容——旧 change(无 newChange)处置标记缺失仍 WARN
+  // 131: R1 旧兼容——旧 change(无 newChange)处置标记缺失仍 WARN；并内扩 Major 延期待裁决
+  // 门禁旧 change 渐进面：无用户裁决 → WARN 不 BLOCK（不卡死旧 REVIEW）；有裁决+[升级] → 放行。
   {
-    name: '131 review exit 兼容：旧 change 处置标记缺失仍 WARN（R1 旧兼容）',
+    name: '131 review exit 兼容：旧 change 处置标记缺失仍 WARN + Major 延期渐进（R1 旧兼容）',
     run: (dir) => {
       const st = baseState('review');
       st.evidence.review = { summary: 'reviewed' };
@@ -4104,6 +4142,20 @@ const SCENARIOS = [
       const res = runGuard(['exit', 'review'], dir);
       assertExit(res, 0);
       assertOut(res, 'WARN');
+      // 子断言:Major [转待办] 无用户裁决 → 旧 change 渐进 WARN 且不 BLOCK（不卡死旧 REVIEW）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **F1 · 未裁决的延期**：某处问题 [转待办]\n\n## 结论\n\n通过\n');
+      const resMajor = runGuard(['exit', 'review'], dir);
+      assertExit(resMajor, 0);
+      assertOut(resMajor, 'REVIEW WARN');
+      assertOut(resMajor, 'Major');
+      assertOut(resMajor, '用户裁决');
+      assertNotOut(resMajor, 'BLOCKED');
+      // 子断言:有同段用户裁决 + [升级] 承接 → 无该渐进告警
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **F2 · 已裁决的延期**：某处问题 [升级] [转待办]（用户裁决：接受延期）\n\n## 结论\n\n通过\n');
+      const resOk = runGuard(['exit', 'review'], dir);
+      assertExit(resOk, 0);
+      assertNotOut(resOk, '用户裁决');
+      assertOut(resOk, 'ALL CHECKS PASSED');
     },
   },
 
