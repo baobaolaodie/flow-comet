@@ -76,10 +76,10 @@ This node finalizes a completed change by extracting reusable lessons from the d
 - **未移动** → 受控重入：由用户显式授权后运行
 
   ```bash
-  node .claude/skills/flow-comet/scripts/workflow-state.mjs reenter <target> --authorized-by <source> --reason <text>
+  node .claude/skills/flow-comet/scripts/workflow-state.mjs reenter <target> --authorized-by <source> --reason <text> [--continue-round <n>]
   ```
 
-  目标限 `execute` / `subagent-execute` / `review` / `verify` 之一；每次调用都需要用户显式授权，每 change 上限 3 轮；命令先自动落 state 备份快照（`.specs/<change-id>/.reentry-backups/`），再转移工作归属，并打印 `REENTRY: archive → <target>（授权源 <source>；第 n/3 轮；备份 <file>）` 审计行。缺授权、目标越界、超上限或归档移动已发生一律 BLOCKED（state 字节零改写），不会静默跳过。
+  目标限 `execute` / `subagent-execute` / `review` / `verify` 之一；每次调用都需要用户显式授权，每 change 上限 3 轮（达上限后凭显式续轮授权 `--continue-round <n>`（n ≥ 已用轮次 + 1）可继续并计入下一轮）；命令先自动落 state 备份快照（`.specs/<change-id>/.reentry-backups/`），再转移工作归属，并打印 `REENTRY: archive → <target>（授权源 <source>；第 n/3 轮；备份 <file>）` 与 `REASON: <text>` 行（续轮审计行为 `第 n 轮（显式授权续轮，上限 3）`）。缺授权、目标越界、超上限或归档移动已发生一律 BLOCKED（state 字节零改写），不会静默跳过。
 - **已移动 / 已合并** → 人工处置或新 change：归档移动已发生（`.specs/archive/<日期>-<change-id>/`）或 change 已 `completed` / 已合并时，受控重入不适用（不承诺把文件搬回原位）；走人工处置，或把修复放进新 change / hotfix，并在遗留清单里登记指针。
 
 **写权限顺序（先转移后写 TASK）**：archive 阶段 hook 对 change 目录只放行 `KNOWN-ISSUES.md` 这一个精确文件（另有 `.specs/archive/`、`.specs/CHANGELOG.md`、`.specs/LESSONS.md`、`STATE.md`），TASK.md 的修复任务写入不在放行面内。顺序固定为：先跑 `reenter` 完成转移（写入权限随即跟随目标节点），再在目标节点权限内追加 Fix 任务 / 修改工件——不要试图在 archive 阶段先写 TASK.md。若重入成功后追加任务失败，用 `next` / `status` 核对归属；重复调用同一目标为空操作（不备份、不计数、不改写 state）。

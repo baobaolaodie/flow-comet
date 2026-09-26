@@ -12,6 +12,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added
+
+- **An archived change can be re-opened through a controlled, explicitly authorized path**: when a defect surfaces only after the change has been archived and before its workspace directory is moved away, the coordinator can return the work to the execution family, review or verify with one command. Each call requires an explicit authorization and a reason, takes a verifiable state snapshot before anything is moved, and records a dedicated audit entry and line that are distinguishable from an ordinary repair reposition or multi-pass finish. A change may use the path up to three times; a further attempt is blocked with continue/stop guidance, and continuing past the cap requires its own explicit authorization for the coming round. Unauthorized calls, out-of-range targets, a moved or already-completed archive are rejected with the state file byte-for-byte unchanged — including on a legacy change, whose shape must not become an authorization bypass, while legacy changes keep their warn-and-proceed behaviour everywhere else.
+
 ### Changed
 
 - **Delegation requests are checked against the task's declared execution mode at request time**: a pending task is now rejected unless the workflow is already on the node its declaration expects — the delegation node for a parallel task, the execution node for a serial one. The check runs before any handoff evidence is written, so a rejection leaves the state file byte-for-byte unchanged and records nothing; the message points to `workflow-state next` and then `entry <target node>` for recovery. A correct node that has not been entered only warns, completed tasks and explicit `--write-files` requests are not gated, a protocol without the expected enabled node skips the check, and a legacy change keeps the previous warn-and-proceed behaviour.
