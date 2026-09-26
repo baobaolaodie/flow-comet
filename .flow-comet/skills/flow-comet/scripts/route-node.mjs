@@ -634,20 +634,20 @@ async function resolveFixReturnNode({ runRoot, changeName, protocol, completedNo
   return node === 'review' || node === 'verify' ? node : null;
 }
 
-// ---------- archive 源受控重入判定（单一权威 · 纯函数 · D2/D3/D4/D5/D6/D9/D11） ----------
+// ---------- archive 源受控重入判定（单一权威 · 纯函数：目标白名单 / 前驱转移语义 / 授权形态 / 轮次上限 / 审计事件 / 空操作） ----------
 // archive 已 entry 且归档移动尚未发生时，用户显式授权把工作归属退到 execute 家族 / review /
 // verify 的受控回边。本段只做确定性推导（无 fs / console / process.exit / state 写入）：全部
 // 判定集中在这里，reenter 子命令只做编排与落盘，禁止内联第二份（L-058 路由单一权威 /
 // L-067 同判据两份实现必然分叉）。信号统一用 structured result：非法 / 未授权返回
 // { ok: false, reason: '<machine-code>' }，不抛异常。
 
-// 受控重入目标白名单（D2）：显式目标必须 ∈ 本集合 ∩ 协议 enabled 节点。
+// 受控重入目标白名单：显式目标必须 ∈ 本集合 ∩ 协议 enabled 节点。
 const REENTRY_TARGET_NODE_IDS = new Set(['execute', 'subagent-execute', 'review', 'verify']);
 
-// 每 change 轮次上限（D5）：3 轮；调用方禁止内联阈值，必须引用本常量。
+// 每 change 轮次上限：3 轮；调用方禁止内联阈值，必须引用本常量。
 const REENTRY_ROUND_LIMIT = 3;
 
-// 源判定（① · D11 / AC-5）：currentNode === 'archive' 且 activeChange 存在（非空字符串）。
+// 源判定（① · AC-5）：currentNode === 'archive' 且 activeChange 存在（非空字符串）。
 // 源不是 archive 或没有活跃 change → 未授权来源，返回 machine-code，不抛异常。
 function reentrySourceDecision({ currentNode, activeChange } = {}) {
   if (typeof activeChange !== 'string' || activeChange.trim() === '') {
@@ -659,7 +659,7 @@ function reentrySourceDecision({ currentNode, activeChange } = {}) {
   return { ok: true, reason: 'archive-source' };
 }
 
-// 目标判定（② · D2 / AC-5）：target ∈ 白名单 ∩ 协议 enabled 节点。enabled 判定复用
+// 目标判定（② · AC-5）：target ∈ 白名单 ∩ 协议 enabled 节点。enabled 判定复用
 // protocolNodeEnabled（协议 enabled 语义唯一来源），本函数不写第二份解析；协议缺失 /
 // 非对象按 fail-closed 返回未启用（L-079：解析失败不得静默放行）。
 function resolveReentryTarget({ protocol, target } = {}) {
@@ -672,7 +672,7 @@ function resolveReentryTarget({ protocol, target } = {}) {
   return { ok: true, reason: 'target-allowed', target };
 }
 
-// 授权形态 fail-closed 解析（③ · D4 / AC-2）：round 为正整数、at / source 均为非空（去空白）
+// 授权形态 fail-closed 解析（③ · AC-2）：round 为正整数、at / source 均为非空（去空白）
 // 字符串、authorization.target 与本次调用 target 一致；任一项非法 → 未授权，不抛异常。
 // 形态与既有 Fix 轮次授权（workflow-guard readFixRoundOverride）同源，禁止第二份校验。
 function parseReentryAuthorization({ authorization, target } = {}) {
@@ -703,7 +703,7 @@ function parseReentryAuthorization({ authorization, target } = {}) {
   };
 }
 
-// 轮次派生（④ · D5 / D6 / AC-7）：统计 state.history 中本 change 的 reentry-applied 事件数，
+// 轮次派生（④ · AC-7）：统计 state.history 中本 change 的 reentry-applied 事件数，
 // change 归属过滤调用 historyEventBelongsToChange（单一权威——不在此内联第二份，L-067）。
 // 跨 change 隔离依赖事件的 change 字段：写入方（reenter 子命令）必须带 change；无 change 的
 // 旧事件按 legacy 形态参与（reentry-applied 为新事件类型，实际不会出现）。history 缺失 /
@@ -719,7 +719,7 @@ function reentryRoundCount({ history, changeName } = {}) {
   return count;
 }
 
-// 上限判定（⑤ · D5 / AC-7）：已用轮次 < REENTRY_ROUND_LIMIT → 放行并给出本轮序号
+// 上限判定（⑤ · AC-7）：已用轮次 < REENTRY_ROUND_LIMIT → 放行并给出本轮序号
 // （nextRound = 已用 + 1，供审计事件与 REENTRY 行使用）；达上限 → blocked（调用方必须先于
 // 任何 state 写盘返回，保证字节零改写）。阈值只从 REENTRY_ROUND_LIMIT 取。
 function reentryRoundDecision({ history, changeName } = {}) {
@@ -730,8 +730,8 @@ function reentryRoundDecision({ history, changeName } = {}) {
   return { ok: false, reason: 'round-limit-reached', used, limit: REENTRY_ROUND_LIMIT };
 }
 
-// 协议前驱推导（⑦ 的输入 · D3）：沿协议 success 边反向可达的全部祖先节点（传递闭包——对应
-// D3「清掉目标及其后继」语义），按协议 route 顺序（disabled 过滤）排序；failure / pause 自环、
+// 协议前驱推导（⑦ 的输入）：沿协议 success 边反向可达的全部祖先节点（传递闭包——对应
+// 前驱语义「清掉目标及其后继」），按协议 route 顺序（disabled 过滤）排序；failure / pause 自环、
 // target 自身与协议外节点不参与。顺序唯一来源是 route(protocol)，不另写节点排序。
 function reentryPredecessors(protocol, target) {
   if (!protocol || typeof protocol !== 'object') return [];
@@ -750,16 +750,16 @@ function reentryPredecessors(protocol, target) {
   return order.filter((id) => ancestors.has(id));
 }
 
-// 前驱交集（⑦ · D3 / AC-8）：completedNodes ∩ predecessors(target)，按协议节点顺序保留原顺序。
+// 前驱交集（⑦ · AC-8）：completedNodes ∩ predecessors(target)，按协议节点顺序保留原顺序。
 // completedNodes 中的协议外 / 重复项自然被过滤与去重；target 未知 / 未启用 → 空交集（fail-closed）。
 function reentryPredecessorIntersection({ protocol, target, completedNodes = [] } = {}) {
   const completed = Array.isArray(completedNodes) ? completedNodes : [];
   return reentryPredecessors(protocol, target).filter((id) => completed.includes(id));
 }
 
-// 空操作判定（⑥ · D9 / 幂等锚）：currentNode === target 且 completedNodes 已等于前驱交集结果
+// 空操作判定（⑥ · 幂等锚）：currentNode === target 且 completedNodes 已等于前驱交集结果
 // （同序逐项相等）→ noop（调用方不备份 / 不计数 / 不写事件）；否则返回待落地的交集，调用方按
-// D3 覆盖 completedNodes。判定本身不改写输入。
+// 前驱语义覆盖 completedNodes。判定本身不改写输入。
 function reentryNoOpDecision({ currentNode, target, protocol, completedNodes = [] } = {}) {
   const completed = Array.isArray(completedNodes) ? completedNodes : [];
   const intersection = reentryPredecessorIntersection({ protocol, target, completedNodes: completed });
@@ -771,14 +771,14 @@ function reentryNoOpDecision({ currentNode, target, protocol, completedNodes = [
     : { noop: false, reason: 'target-state-not-satisfied', completedNodes: intersection };
 }
 
-// 受控重入综合判定（D11 单一权威 · 供 reenter 子命令单点调用），返回三态 action：
+// 受控重入综合判定（单一权威聚合判定 · 供 reenter 子命令单点调用），返回三态 action：
 //   'block'（ok:false，调用方零写盘返回）、
 //   'noop' （目标形态已成立，调用方零写盘提示）、
 //   'apply'（ok:true，携带 changeName / target / 待落地 completedNodes / 本轮 round / 归一授权）。
-// 判定顺序：目标合法性（越界即使处于重复态也 BLOCK · AC-5）→ 幂等短路（D9）→ 源 → 授权 →
+// 判定顺序：目标合法性（越界即使处于重复态也 BLOCK · AC-5）→ 幂等短路 → 源 → 授权 →
 // 上限。幂等短路必须先于源判定：目标形态已成立时 currentNode === target ≠ 'archive'，先判源
-// 会让 D9 的空操作永远不可达（DESIGN D8 顺序表与 D9 谓词的固有张力，见 T01-SUMMARY 决策与
-// 偏离）；短路分支零写盘，其余分支严格按 D8：源 → 授权 → 上限。调用方不得内联重排或复制
+// 会让空操作判定永远不可达（既定判定顺序与幂等谓词的固有张力，见本任务执行记录的决策与
+// 偏离）；短路分支零写盘，其余分支严格按既定判定顺序：源 → 授权 → 上限。调用方不得内联重排或复制
 // 其中任何一条判据。
 function resolveReentryDecision({ protocol, state, target, authorization } = {}) {
   const targetDecision = resolveReentryTarget({ protocol, target });
