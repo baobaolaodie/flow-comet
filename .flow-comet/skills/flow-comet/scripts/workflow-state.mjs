@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from 'child_process';
+import { createHash } from 'crypto';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -8,7 +9,7 @@ import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCO
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, looksLikeObjectLiteral, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, toPersistedProtocolPath } from './state-schema.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide, skipInit } from './context-init.mjs';
 import { taskOpeningAttrs, taskBlocks } from './task-parsing.mjs';
-import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS } from './route-node.mjs';
+import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, resolveReentryDecision, REENTRY_ROUND_LIMIT, REENTRY_TARGET_NODE_IDS, EXECUTE_FAMILY_NODE_IDS } from './route-node.mjs';
 
 const command = process.argv[2] ?? 'status';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1314,7 +1315,187 @@ async function main() {
     return;
   }
 
-  throw new Error('Unknown command: ' + command + '. Use: init, status, next, select, record, verify-fail, advance, execution-mode, config, skill-load, bridge-check');
+  if (command === 'reenter') {
+    // 受控重入（archive 源回边）：archive 已 entry 且归档移动尚未发生时，用户显式授权把工作归属
+    // 退回执行家族 / review / verify 之一。命令形态：reenter <target> --authorized-by <source>
+    // --reason <text>。编排顺序：参数防护 → 移动边界 → 单一权威判定（目标 / 幂等 / 源 / 授权 /
+    // 上限）→ 备份 → 转移 → 授权留痕 → 审计事件 → REENTRY 行。全部判定集中在 route-node.mjs
+    // 纯函数（本命令只做编排与落盘，禁止内联第二份）；BLOCK 与空操作路径一律在写盘前返回
+    // （state 字节零改写）。
+    const target = process.argv[3];
+    const reentryTargetList = [...REENTRY_TARGET_NODE_IDS].join(', ');
+    const reenterUsage = '用法: workflow-state.mjs reenter <target> --authorized-by <source> --reason <text>'
+      + '（target 白名单: ' + reentryTargetList + '）';
+    if (typeof target !== 'string' || target === '' || target.startsWith('--')) {
+      console.error('BLOCKED: reenter 缺少目标节点。' + reenterUsage);
+      process.exit(1);
+    }
+    let authorizedBy = null;
+    let reason = null;
+    const reenterArgs = process.argv.slice(4);
+    for (let index = 0; index < reenterArgs.length; index += 1) {
+      const arg = reenterArgs[index];
+      // 支持 --name value 与 --name=value 两种形态；--protocol 为全局参数（协议路径已由
+      // resolveProtocol 统一解析），命令面只做占位透传。
+      let key = arg;
+      let value = null;
+      if (typeof arg === 'string' && arg.startsWith('--')) {
+        const eq = arg.indexOf('=');
+        if (eq > 0) {
+          key = arg.slice(0, eq);
+          value = arg.slice(eq + 1);
+        }
+      }
+      if (key === '--protocol') {
+        if (value === null) index += 1;
+        continue;
+      }
+      if (key === '--authorized-by' || key === '--reason') {
+        let consumedNext = false;
+        if (value === null) {
+          value = reenterArgs[index + 1];
+          consumedNext = true;
+        }
+        // 缺值 / 空值 / 纯空白 / 取下个选项名当值 → 一律用法错误（fail-closed，先于任何读盘）
+        if (typeof value !== 'string' || value.trim() === '' || value.startsWith('--')) {
+          console.error('BLOCKED: reenter ' + key + ' 需要非空取值。' + reenterUsage);
+          process.exit(1);
+        }
+        if (key === '--authorized-by') authorizedBy = value.trim();
+        else reason = value.trim();
+        if (consumedNext) index += 1;
+        continue;
+      }
+      console.error('BLOCKED: reenter 未知参数 ' + JSON.stringify(arg) + '。' + reenterUsage);
+      process.exit(1);
+    }
+    if (authorizedBy === null) {
+      console.error('BLOCKED: reenter 需要显式授权 --authorized-by <source>（授权不可自决）。' + reenterUsage);
+      process.exit(1);
+    }
+    if (reason === null) {
+      console.error('BLOCKED: reenter 需要 --reason <text> 说明重入原因。' + reenterUsage);
+      process.exit(1);
+    }
+    const state = await readState();
+    const badFields = validateStateFields(state);
+    if (badFields.length > 0) {
+      console.error('BLOCKED: state 字段类型非法: ' + badFields[0]);
+      process.exit(1);
+    }
+    // 移动边界：归档移动已发生（.specs/<change-id>/ 不在原位）或 change 已 completed 时不接受
+    // 重入（只覆盖归档移动前的运行形态），指引人工处置 / 新 change / hotfix 路径。该边界先于
+    // 综合判定执行——completed 与已移动形态必须无条件 BLOCK（不被空操作分支短路）。目录名同时
+    // 做包含性校验（备份是写路径，拒绝 activeChange 越出 .specs/ 的畸形值）。
+    const changeName = typeof state.activeChange === 'string' ? state.activeChange : '';
+    const changeDir = path.join(specsRoot, changeName);
+    const changeRel = path.relative(specsRoot, changeDir);
+    const changeDirInsideSpecs = changeRel !== '' && !path.isAbsolute(changeRel)
+      && changeRel !== '..' && !changeRel.startsWith('..' + path.sep);
+    const changeDirPresent = changeName.trim() === '' ? null : changeDirInsideSpecs && await fileExists(changeDir);
+    if (state.status === 'completed' || changeDirPresent === false) {
+      console.error('BLOCKED: 归档移动已发生或 change 已 completed（.specs/' + (changeName || '<未知>') + '/ 在场='
+        + changeDirPresent + '，status=' + JSON.stringify(state.status)
+        + '）——受控重入只覆盖归档移动前的运行形态；请走人工处置、新 change 或 hotfix 路径。');
+      process.exit(1);
+    }
+    // 授权形态的 round / at 由引擎派生（命令面只承载授权来源与原因）：round 以合法占位值过
+    // 形态门，落盘轮次一律取综合判定返回的 round（由本 change 历史事件派生），不在此内联
+    // 第二份轮次推导。
+    const authorizedAt = new Date().toISOString();
+    const decision = resolveReentryDecision({
+      protocol,
+      state,
+      target,
+      authorization: { round: 1, at: authorizedAt, source: authorizedBy, target },
+    });
+    if (!decision.ok) {
+      if (decision.reason === 'round-limit-reached') {
+        console.error('BLOCKED: 本 change 受控重入已达上限（' + decision.used + '/' + decision.limit
+          + ' 轮）。需要人工裁决：继续（评估后开新 change 或按人工处置流程推进）/ 停止（保持归档态，不再重入）。');
+        process.exit(1);
+      }
+      const guidance = {
+        'target-not-allowed': '目标节点 ' + JSON.stringify(target) + ' 不在受控重入白名单（'
+          + reentryTargetList + '）——请显式指定白名单内目标',
+        'target-not-enabled': '目标节点 ' + JSON.stringify(target)
+          + ' 在当前协议中未启用（disabled）——请检查协议或改选已启用目标',
+        'no-active-change': '当前没有活跃 change（activeChange 缺失或为空）——先 select <change-id>',
+        'source-not-archive': '受控重入只覆盖 archive 源（当前节点 ' + JSON.stringify(state.currentNode)
+          + '）——正常推进请走 next / record / exit 既有通道',
+      }[decision.reason] || ('授权形态不合法（' + decision.reason + '）——需要用户显式传入 --authorized-by <source>');
+      console.error('BLOCKED: ' + guidance);
+      process.exit(1);
+    }
+    if (decision.action === 'noop') {
+      console.log('REENTRY: 空操作——workflow 已处于目标形态（' + target
+        + '，完成标记已是目标前驱交集）；未备份、未计数、未改写 state。');
+      return;
+    }
+    if (decision.action !== 'apply') {
+      console.error('BLOCKED: 受控重入判定返回未知动作 ' + JSON.stringify(decision.action) + '——按 fail-closed 拒绝。');
+      process.exit(1);
+    }
+    const round = decision.round;
+    const source = decision.authorization.source;
+    const at = decision.authorization.at;
+    // 备份：重入前 state 全量快照（文件原始字节，UTF-8 BOM 按可解析形态落盘）；文件名
+    // <UTC ISO 净化>-pre-<target>.json；审计指纹 = 备份文件字节的 sha256（可核验）。
+    const backupDir = path.join(changeDir, '.reentry-backups');
+    const backupFile = at.replace(/:/g, '-') + '-pre-' + target + '.json';
+    const backupPath = path.join(backupDir, backupFile);
+    const snapshotBytes = Buffer.from((await fs.readFile(statePath, 'utf8')).replace(/^\uFEFF/, ''), 'utf8');
+    await fs.mkdir(backupDir, { recursive: true });
+    await fs.writeFile(backupPath, snapshotBytes);
+    const fingerprint = createHash('sha256').update(snapshotBytes).digest('hex');
+    const backupRecord = path.relative(runRoot, backupPath).split(path.sep).join('/');
+    // 转移：currentNode := target；completedNodes := 前驱交集；status := running。目标节点的
+    // 入口与出口门禁、源节点出口随既有协议真实重跑（不写任何闭合标记、不跳过出口）。
+    state.currentNode = decision.target;
+    state.completedNodes = decision.completedNodes.slice();
+    state.status = 'running';
+    // 授权留痕：嵌套写入被重入目标节点的 evidence（授权记录 + 备份指针 + 指纹）。
+    const authorizationRecord = {
+      round,
+      at,
+      source,
+      target: decision.target,
+      backup: backupRecord,
+      fingerprint,
+    };
+    const existingEvidence = state.evidence && typeof state.evidence === 'object' && !Array.isArray(state.evidence)
+      ? state.evidence
+      : {};
+    const targetEvidence = existingEvidence[decision.target]
+      && typeof existingEvidence[decision.target] === 'object'
+      && !Array.isArray(existingEvidence[decision.target])
+      ? existingEvidence[decision.target]
+      : {};
+    state.evidence = {
+      ...existingEvidence,
+      [decision.target]: { ...targetEvidence, reentryAuthorization: authorizationRecord },
+    };
+    // 审计事件：append-only 追加 reentry-applied；change 字段是跨 change 轮次隔离的唯一依据。
+    if (!Array.isArray(state.history)) state.history = [];
+    state.history.push({
+      event: 'reentry-applied',
+      from: 'archive',
+      to: decision.target,
+      round,
+      authorization: { round, at, source, target: decision.target },
+      backup: backupRecord,
+      fingerprint,
+      at,
+      change: changeName,
+    });
+    await writeState(state);
+    console.log('REENTRY: archive → ' + decision.target + '（授权源 ' + source + '；第 ' + round + '/'
+      + REENTRY_ROUND_LIMIT + ' 轮；备份 ' + backupRecord + '）');
+    console.log('REASON: ' + reason);
+    return;
+  }
+
+  throw new Error('Unknown command: ' + command + '. Use: init, status, next, select, record, verify-fail, advance, execution-mode, config, skill-load, bridge-check, reenter');
 }
 
 main().catch(error => {
