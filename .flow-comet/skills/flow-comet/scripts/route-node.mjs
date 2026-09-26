@@ -647,11 +647,27 @@ const REENTRY_TARGET_NODE_IDS = new Set(['execute', 'subagent-execute', 'review'
 // 每 change 轮次上限：3 轮；调用方禁止内联阈值，必须引用本常量。
 const REENTRY_ROUND_LIMIT = 3;
 
-// 源判定（① · AC-5）：currentNode === 'archive' 且 activeChange 存在（非空字符串）。
-// 源不是 archive 或没有活跃 change → 未授权来源，返回 machine-code，不抛异常。
+// change 名形态（单一权威 · 受控重入判定与 select 入口共用）：change-id 必须是 .specs/ 下的
+// 单段目录名——拒绝空串、路径分隔符与「.」「..」，并保留目录名 archive（归档区）不得作为
+// change 名。本判据只做字符串形态判定（纯函数）；「realpath 归一后仍是 .specs 真实直接子目录」
+// 的物理包含性由调用方的路径段扫描（protocol-utils 单一权威）负责。
+function isSingleSegmentChangeName(value) {
+  if (typeof value !== 'string') return false;
+  const name = value.trim();
+  if (name === '' || name === '.' || name === '..') return false;
+  if (name.includes('/') || name.includes('\\')) return false;
+  if (name === 'archive') return false;
+  return true;
+}
+
+// 源判定（① · AC-5）：currentNode === 'archive' 且 activeChange 是合法的单段 change 名。
+// 源不是 archive / 没有活跃 change / change 名形态非法 → 未授权来源，返回 machine-code，不抛异常。
 function reentrySourceDecision({ currentNode, activeChange } = {}) {
   if (typeof activeChange !== 'string' || activeChange.trim() === '') {
     return { ok: false, reason: 'no-active-change' };
+  }
+  if (!isSingleSegmentChangeName(activeChange)) {
+    return { ok: false, reason: 'change-name-invalid' };
   }
   if (currentNode !== 'archive') {
     return { ok: false, reason: 'source-not-archive' };
@@ -703,6 +719,21 @@ function parseReentryAuthorization({ authorization, target } = {}) {
   };
 }
 
+// 上限后的续轮授权形态（AC-7 后半句）：达到上限后，用户可显式授权把轮次推进到下一轮。
+// 授权三元组形态复用 parseReentryAuthorization（单一权威——不复制第二份字段校验）；本函数只
+// 追加续轮特有约束：round 必须覆盖即将执行的轮次（已用轮次 + 1，与既有 Fix 轮次授权的
+// 「覆盖即将执行轮次」语义同型），否则视为未授权 fail-closed。未达上限时调用方不得传续轮授权
+// （续轮只在人工裁决点需要）。本函数只做形态判定，不读 history。
+function parseReentryContinuationAuthorization({ authorization, target, used } = {}) {
+  const parsed = parseReentryAuthorization({ authorization, target });
+  if (!parsed.ok) return parsed;
+  if (typeof used !== 'number' || !Number.isInteger(used) || used < 0
+    || parsed.authorization.round < used + 1) {
+    return { ok: false, reason: 'round-below-required' };
+  }
+  return { ok: true, reason: 'continuation-authorized', authorization: parsed.authorization };
+}
+
 // 轮次派生（④ · AC-7）：统计 state.history 中本 change 的 reentry-applied 事件数，
 // change 归属过滤调用 historyEventBelongsToChange（单一权威——不在此内联第二份，L-067）。
 // 跨 change 隔离依赖事件的 change 字段：写入方（reenter 子命令）必须带 change；无 change 的
@@ -719,13 +750,16 @@ function reentryRoundCount({ history, changeName } = {}) {
   return count;
 }
 
-// 上限判定（⑤ · AC-7）：已用轮次 < REENTRY_ROUND_LIMIT → 放行并给出本轮序号
-// （nextRound = 已用 + 1，供审计事件与 REENTRY 行使用）；达上限 → blocked（调用方必须先于
+// 上限判定（⑤ · AC-7）：已用轮次 < REENTRY_ROUND_LIMIT 或持有合法续轮授权 → 放行并给出本轮
+// 序号（nextRound = 已用 + 1，供审计事件与 REENTRY 行使用）；否则 blocked（调用方必须先于
 // 任何 state 写盘返回，保证字节零改写）。阈值只从 REENTRY_ROUND_LIMIT 取。
-function reentryRoundDecision({ history, changeName } = {}) {
+function reentryRoundDecision({ history, changeName, continuationAuthorized = false } = {}) {
   const used = reentryRoundCount({ history, changeName });
   if (used < REENTRY_ROUND_LIMIT) {
     return { ok: true, reason: 'round-available', used, nextRound: used + 1, limit: REENTRY_ROUND_LIMIT };
+  }
+  if (continuationAuthorized === true) {
+    return { ok: true, reason: 'round-available-continuation', used, nextRound: used + 1, limit: REENTRY_ROUND_LIMIT };
   }
   return { ok: false, reason: 'round-limit-reached', used, limit: REENTRY_ROUND_LIMIT };
 }
@@ -775,31 +809,60 @@ function reentryNoOpDecision({ currentNode, target, protocol, completedNodes = [
 //   'block'（ok:false，调用方零写盘返回）、
 //   'noop' （目标形态已成立，调用方零写盘提示）、
 //   'apply'（ok:true，携带 changeName / target / 待落地 completedNodes / 本轮 round / 归一授权）。
-// 判定顺序：目标合法性（越界即使处于重复态也 BLOCK · AC-5）→ 幂等短路 → 源 → 授权 →
-// 上限。幂等短路必须先于源判定：目标形态已成立时 currentNode === target ≠ 'archive'，先判源
-// 会让空操作判定永远不可达（既定判定顺序与幂等谓词的固有张力，见本任务执行记录的决策与
-// 偏离）；短路分支零写盘，其余分支严格按既定判定顺序：源 → 授权 → 上限。调用方不得内联重排或复制
-// 其中任何一条判据。
-function resolveReentryDecision({ protocol, state, target, authorization } = {}) {
+// 判定顺序：目标合法性（越界即使处于重复态也 BLOCK · AC-5）→ change 名形态 → 上限 →
+// 幂等短路 → 源 → 授权。
+// 幂等短路必须先于源判定：目标形态已成立时 currentNode === target ≠ 'archive'，先判源会让
+// 空操作判定永远不可达；但幂等短路不得越过上限判定——达到上限的 change 即使处于同目标形态也
+// 必须走人工裁决路径（不得以空操作退出 0），也不得越过 change 名形态判定（畸形 change 名
+// 一律 BLOCK，不因形态巧合而短路）。短路分支零写盘。调用方不得内联重排或复制其中任何一条判据。
+function resolveReentryDecision({ protocol, state, target, authorization, continuationRound } = {}) {
   const targetDecision = resolveReentryTarget({ protocol, target });
   if (!targetDecision.ok) return { ok: false, action: 'block', reason: targetDecision.reason };
+  const activeChange = state?.activeChange;
+  if (typeof activeChange !== 'string' || activeChange.trim() === '') {
+    return { ok: false, action: 'block', reason: 'no-active-change' };
+  }
+  if (!isSingleSegmentChangeName(activeChange)) {
+    return { ok: false, action: 'block', reason: 'change-name-invalid' };
+  }
+  const used = reentryRoundCount({ history: state?.history, changeName: activeChange });
+  const atLimit = used >= REENTRY_ROUND_LIMIT;
+  let continuationAuthorized = false;
+  if (atLimit) {
+    const continuation = parseReentryContinuationAuthorization({
+      authorization: continuationRound === undefined || continuationRound === null
+        ? null
+        : {
+          ...(authorization && typeof authorization === 'object' && !Array.isArray(authorization) ? authorization : {}),
+          round: continuationRound,
+        },
+      target,
+      used,
+    });
+    if (!continuation.ok) {
+      return { ok: false, action: 'block', reason: 'round-limit-reached', used, limit: REENTRY_ROUND_LIMIT };
+    }
+    continuationAuthorized = true;
+  } else if (continuationRound !== undefined && continuationRound !== null) {
+    return { ok: false, action: 'block', reason: 'continuation-not-required', used, limit: REENTRY_ROUND_LIMIT };
+  }
   const noop = reentryNoOpDecision({
     currentNode: state?.currentNode,
     target,
     protocol,
     completedNodes: state?.completedNodes,
   });
-  if (noop.noop) {
+  if (noop.noop && !atLimit) {
     return { ok: true, action: 'noop', reason: noop.reason, target, completedNodes: noop.completedNodes };
   }
   const source = reentrySourceDecision({
     currentNode: state?.currentNode,
-    activeChange: state?.activeChange,
+    activeChange,
   });
   if (!source.ok) return { ok: false, action: 'block', reason: source.reason };
   const parsed = parseReentryAuthorization({ authorization, target });
   if (!parsed.ok) return { ok: false, action: 'block', reason: parsed.reason };
-  const round = reentryRoundDecision({ history: state?.history, changeName: state?.activeChange });
+  const round = reentryRoundDecision({ history: state?.history, changeName: activeChange, continuationAuthorized });
   if (!round.ok) {
     return { ok: false, action: 'block', reason: round.reason, used: round.used, limit: round.limit };
   }
@@ -807,10 +870,11 @@ function resolveReentryDecision({ protocol, state, target, authorization } = {})
     ok: true,
     action: 'apply',
     reason: 'reentry-authorized',
-    changeName: state.activeChange,
+    changeName: activeChange,
     target,
     completedNodes: noop.completedNodes,
     round: round.nextRound,
+    continuationAuthorized,
     authorization: parsed.authorization,
   };
 }
@@ -830,9 +894,11 @@ export {
   resolveFixReturnNode,
   REENTRY_TARGET_NODE_IDS,
   REENTRY_ROUND_LIMIT,
+  isSingleSegmentChangeName,
   reentrySourceDecision,
   resolveReentryTarget,
   parseReentryAuthorization,
+  parseReentryContinuationAuthorization,
   reentryRoundCount,
   reentryRoundDecision,
   reentryPredecessorIntersection,

@@ -10819,6 +10819,7 @@ const SCENARIOS = [
       assertOut(res, 'verify');
       assertOut(res, '1/3');
       assertOut(res, 'user-approval');
+      assertOut(res, 'REASON: 归档后发现缺陷，需回到验证节点');
       const st = readScenarioState(dir);
       if (st.currentNode !== 'verify') {
         throw new Error('转移应把 currentNode 置为 target(verify)，实际 ' + JSON.stringify(st.currentNode));
@@ -10893,6 +10894,13 @@ const SCENARIOS = [
       }
       if (record.backup !== event.backup || record.fingerprint !== event.fingerprint) {
         throw new Error('授权留痕的 backup / fingerprint 应与审计事件一致：' + JSON.stringify({ record, event }));
+      }
+      // --reason 必须落盘（事件 + 嵌套授权记录）：只打印不落盘的必填参数无法支撑事后审计追溯
+      if (event.reason !== '归档后发现缺陷，需回到验证节点') {
+        throw new Error('审计事件应记录本次 --reason（可追溯），实际 ' + JSON.stringify(event.reason));
+      }
+      if (record.reason !== event.reason) {
+        throw new Error('授权留痕的 reason 应与审计事件逐字一致：' + JSON.stringify({ record: record.reason, event: event.reason }));
       }
       // 备份：路径形态 + 全量快照语义 + 指纹可核验
       const backupPath = path.isAbsolute(event.backup) ? event.backup : path.join(dir, event.backup);
@@ -11072,6 +11080,121 @@ const SCENARIOS = [
         throw new Error('他 change 的轮次事件不应占用本 change 配额（本 change 应为第 1 轮），实际 '
           + JSON.stringify(appliedEvent));
       }
+      // ⑧ select 入口收紧：多段路径（归档相对路径形态）与保留目录名不得被选为 activeChange
+      const selectEnv = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      fs.mkdirSync(path.join(dir, '.specs', 'archive', '2026-09-26-' + CHANGE_ID), { recursive: true });
+      const beforeSelect = readStateBytes(dir);
+      assertExit(runState(['select', 'archive/2026-09-26-' + CHANGE_ID], dir, selectEnv), 1);
+      assertStateBytesUnchanged(dir, beforeSelect, 'select 归档相对路径');
+      assertExit(runState(['select', 'archive'], dir, selectEnv), 1);
+      assertStateBytesUnchanged(dir, beforeSelect, 'select 保留目录名');
+      if (readScenarioState(dir).activeChange !== CHANGE_ID) {
+        throw new Error('被拒绝的 select 不得改写 activeChange：' + JSON.stringify(readScenarioState(dir).activeChange));
+      }
+      // ⑨ change 键被换成归档相对路径（换键重置轮次配额的绕过形态）→ 写盘前 BLOCK：本 change 的
+      // 3 条事件既不得被换键忽略，也不得产生新事件 / 备份 / 机器字段改写
+      writeState(dir, reentryArchiveState({
+        activeChange: 'archive/2026-09-26-' + CHANGE_ID,
+        history: [reentryHistoryEvent(1), reentryHistoryEvent(2), reentryHistoryEvent(3)],
+      }));
+      const nestedBytes = readStateBytes(dir);
+      const nestedBackupsBefore = reentryBackupFiles(dir).length;
+      const nestedRes = runReenter(dir, 'verify', { source: 'user-approval', reason: '换键重入' });
+      assertExit(nestedRes, 1);
+      assertOut(nestedRes, 'BLOCKED');
+      assertStateBytesUnchanged(dir, nestedBytes, '归档相对路径 change 名');
+      if (reentryBackupFiles(dir).length !== nestedBackupsBefore) {
+        throw new Error('归档相对路径 change 名不得产生备份');
+      }
+      // ⑩ history 存在但非数组 → fail-closed BLOCK，不得静默清空覆盖审计历史
+      writeReentryChangeDir(dir);
+      writeState(dir, reentryArchiveState({ history: 'corrupted-history' }));
+      const corruptBytes = readStateBytes(dir);
+      const corruptRes = runReenter(dir, 'verify', { source: 'user-approval', reason: 'history 损坏' });
+      assertExit(corruptRes, 1);
+      assertOut(corruptRes, 'BLOCKED');
+      assertOut(corruptRes, 'history');
+      assertStateBytesUnchanged(dir, corruptBytes, '非数组 history');
+      if (readScenarioState(dir).history !== 'corrupted-history') {
+        throw new Error('损坏的 history 不得被静默清空覆盖：' + JSON.stringify(readScenarioState(dir).history));
+      }
+      // ⑪ 备份写入包含性：.specs/<change> 为 junction（指向 runRoot 外）→ BLOCK 零改写，
+      // runRoot 外不得出现任何备份字节
+      const linkedOutsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'flow-comet-reentry-outside-'));
+      writeFile(linkedOutsideDir, 'CHANGE.md', '# CHANGE\n\n## Why\n\njunction 目标。\n');
+      const linkedName = 'linked-change';
+      fs.symlinkSync(linkedOutsideDir, path.join(dir, '.specs', linkedName), 'junction');
+      writeState(dir, reentryArchiveState({ activeChange: linkedName }));
+      const linkedBytes = readStateBytes(dir);
+      const linkedRes = runReenter(dir, 'verify', { source: 'user-approval', reason: 'junction 逃逸' });
+      assertExit(linkedRes, 1);
+      assertOut(linkedRes, 'BLOCKED');
+      assertStateBytesUnchanged(dir, linkedBytes, 'junction 逃逸');
+      if (fs.existsSync(path.join(linkedOutsideDir, '.reentry-backups'))) {
+        throw new Error('junction 逃逸不得在 runRoot 外产生备份：'
+          + JSON.stringify(fs.readdirSync(path.join(linkedOutsideDir, '.reentry-backups'))));
+      }
+      fs.rmSync(linkedOutsideDir, { recursive: true, force: true });
+      try { fs.rmSync(path.join(dir, '.specs', linkedName), { recursive: true, force: true }); } catch { /* 场景目录整体清理兜底 */ }
+      // ⑫ 上限后的显式授权续轮（AC-7 后半句）：合法授权 → 放行并计下一轮（事件 / 授权留痕带
+      // 续轮标记与原因）；授权轮次不足或未达上限即传续轮 → BLOCK 且 state 字节零改写
+      const threeRounds = [reentryHistoryEvent(1), reentryHistoryEvent(2), reentryHistoryEvent(3)];
+      writeReentryChangeDir(dir);
+      writeState(dir, reentryArchiveState({ history: threeRounds }));
+      const continued = runReenter(dir, 'verify', {
+        source: 'admin-approval', reason: '上限后显式授权续轮', extra: ['--continue-round', '4'],
+      });
+      assertExit(continued, 0);
+      assertOut(continued, 'REENTRY');
+      assertOut(continued, '续轮');
+      const continuedState = readScenarioState(dir);
+      if (continuedState.currentNode !== 'verify') {
+        throw new Error('续轮放行后 currentNode 应为 verify，实际 ' + JSON.stringify(continuedState.currentNode));
+      }
+      const continuedEvent = (continuedState.history || [])
+        .filter((e) => e.event === 'reentry-applied')
+        .pop();
+      if (!continuedEvent || continuedEvent.round !== 4 || continuedEvent.change !== CHANGE_ID
+        || continuedEvent.continuationAuthorized !== true
+        || continuedEvent.reason !== '上限后显式授权续轮') {
+        throw new Error('续轮审计事件字段不符（round=4 / change / 续轮标记 / reason）：' + JSON.stringify(continuedEvent));
+      }
+      const continuedRecord = continuedState.evidence?.verify?.reentryAuthorization;
+      if (!continuedRecord || continuedRecord.continuationAuthorized !== true
+        || continuedRecord.reason !== '上限后显式授权续轮') {
+        throw new Error('续轮授权留痕不符：' + JSON.stringify(continuedRecord));
+      }
+      writeState(dir, reentryArchiveState({ history: threeRounds }));
+      const insufficientBytes = readStateBytes(dir);
+      const insufficient = runReenter(dir, 'verify', {
+        source: 'admin-approval', reason: '轮次不足', extra: ['--continue-round', '3'],
+      });
+      assertExit(insufficient, 1);
+      assertOut(insufficient, 'BLOCKED');
+      assertStateBytesUnchanged(dir, insufficientBytes, '续轮授权轮次不足');
+      writeState(dir, reentryArchiveState());
+      const earlyBytes = readStateBytes(dir);
+      const early = runReenter(dir, 'verify', {
+        source: 'admin-approval', reason: '未达上限', extra: ['--continue-round', '4'],
+      });
+      assertExit(early, 1);
+      assertOut(early, 'BLOCKED');
+      assertStateBytesUnchanged(dir, earlyBytes, '未达上限即传续轮');
+      // ⑬ 写盘失败路径：原子写因临时路径被占而失败 → 非零退出、state 不截断、本次孤儿备份回滚
+      writeReentryChangeDir(dir);
+      writeState(dir, reentryArchiveState());
+      const atomicBytes = readStateBytes(dir);
+      const atomicBackupsBefore = reentryBackupFiles(dir);
+      const blockedTempDir = path.join(dir, '.flow-comet', 'flow-comet-state.json.tmp');
+      fs.mkdirSync(blockedTempDir, { recursive: true });
+      const atomicRes = runReenter(dir, 'verify', { source: 'user-approval', reason: '模拟写盘失败' });
+      assertExit(atomicRes, 1);
+      assertStateBytesUnchanged(dir, atomicBytes, '写盘失败路径');
+      if (!isDeepStrictEqual(reentryBackupFiles(dir), atomicBackupsBefore)) {
+        throw new Error('写盘失败必须回滚本次孤儿备份：before=' + JSON.stringify(atomicBackupsBefore)
+          + ' after=' + JSON.stringify(reentryBackupFiles(dir)));
+      }
+      fs.rmSync(blockedTempDir, { recursive: true, force: true });
     },
   },
 
@@ -11157,6 +11280,33 @@ const SCENARIOS = [
       if (!appliedEvent || appliedEvent.change !== CHANGE_ID || appliedEvent.round !== 1) {
         throw new Error('旧 change 的审计事件应带 change 且为第 1 轮，实际 ' + JSON.stringify(appliedEvent));
       }
+      // 最小旧 state（仅 7 个键、无 readState 兼容默认字段）：apply 只写本次实际改动的字段，
+      // 兼容默认值不得随重入回写（键集逐项不变——「其余字段零改写」口径覆盖真实最小旧 state）
+      const minimalLegacy = {
+        activeChange: CHANGE_ID,
+        currentNode: 'archive',
+        completedNodes: [...REENTRY_FULL_COMPLETED],
+        evidence: {},
+        verifyFailures: 0,
+        status: 'running',
+        history: [{ event: 'exit-applied', node: 'verify', at: '2026-09-20T00:00:00.000Z', change: CHANGE_ID }],
+      };
+      writeState(dir, minimalLegacy);
+      const minimalKeysBefore = Object.keys(readScenarioState(dir)).sort();
+      const minimalRes = runReenter(dir, 'verify', { source: 'user-approval', reason: '最小旧 state 重入' });
+      assertExit(minimalRes, 0);
+      assertOut(minimalRes, 'REENTRY');
+      const minimalAfter = readScenarioState(dir);
+      const minimalKeysAfter = Object.keys(minimalAfter).sort();
+      if (!isDeepStrictEqual(minimalKeysAfter, minimalKeysBefore)) {
+        throw new Error('最小旧 state 重入后键集必须逐项不变（兼容默认值不得回写）：before='
+          + JSON.stringify(minimalKeysBefore) + ' after=' + JSON.stringify(minimalKeysAfter));
+      }
+      for (const defaultKey of ['executionMode', 'directOverride', 'branchMode', 'enablePrReview', 'branchPrefix']) {
+        if (defaultKey in minimalAfter) {
+          throw new Error('readState 兼容默认字段不得随重入回写: ' + defaultKey);
+        }
+      }
     },
   },
 
@@ -11206,9 +11356,10 @@ const SCENARIOS = [
   // 265: 幂等锚（空操作判定）——目标形态已成立（currentNode=target 且 completedNodes 已等于
   // 前驱交集）时重复调用 = 空操作：放行 + 可见提示 + 不备份 / 不计数 / 不写事件 / state 字节
   // 零改写。夹具直接构造目标形态（不经 apply 路径），同时锁定判定顺序：空操作短路必须先于
-  // 源判定——否则 currentNode=verify ≠ archive 会先被源门禁误 BLOCK。
+  // 源判定——否则 currentNode=verify ≠ archive 会先被源门禁误 BLOCK；但空操作短路不得先于
+  // 上限判定——达上限的同目标形态必须走人工裁决 BLOCK（不得以空操作退出 0）。
   {
-    name: '265 幂等锚：目标形态已成立的重复调用 = 空操作（零备份·零计数·零事件·零改写）',
+    name: '265 幂等锚：目标形态已成立的重复调用 = 空操作（零备份·零计数·零事件·零改写），超限同目标仍 BLOCK',
     run: (dir) => {
       writeReentryChangeDir(dir);
       writeState(dir, reentryArchiveState({
@@ -11233,6 +11384,27 @@ const SCENARIOS = [
       }
       if ((st.history || []).some((e) => e.event === 'reentry-applied')) {
         throw new Error('空操作不得写入 reentry-applied 事件');
+      }
+      // 上限判定必须先于空操作短路：达到上限的 change 即使处于同目标形态也走人工裁决 BLOCK，
+      // 不得以空操作退出 0（幂等豁免不越过上限；state 仍字节零改写）
+      writeState(dir, reentryArchiveState({
+        currentNode: 'verify',
+        completedNodes: [...REENTRY_EXPECTED_INTERSECTION.verify],
+        history: [reentryHistoryEvent(1), reentryHistoryEvent(2), reentryHistoryEvent(3)],
+      }));
+      const cappedBytes = readStateBytes(dir);
+      const cappedRes = runReenter(dir, 'verify', { source: 'user-approval', reason: '超限同目标' });
+      assertExit(cappedRes, 1);
+      assertOut(cappedRes, 'BLOCKED');
+      assertOut(cappedRes, '继续');
+      assertOut(cappedRes, '停止');
+      assertNotOut(cappedRes, '空操作');
+      assertStateBytesUnchanged(dir, cappedBytes, '超限同目标形态');
+      if (reentryBackupFiles(dir).length !== 0) {
+        throw new Error('超限同目标形态不得产生备份：' + JSON.stringify(reentryBackupFiles(dir)));
+      }
+      if ((readScenarioState(dir).history || []).length !== 3) {
+        throw new Error('超限同目标形态不得追加审计事件');
       }
     },
   },

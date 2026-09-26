@@ -3961,8 +3961,10 @@ const TEST_ITEMS = [
   },
 
   {
-    name: 'H8 受控重入:第 4 轮 BLOCK 与人工裁决指引',
+    name: 'H8 受控重入:上限 BLOCK、显式授权续轮与重入后闭环组合链路（真实命令）',
     run: (dir) => {
+      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const gateMarker = path.join(dir, 'verify-gate-ran.txt');
       seedArchiveEntryState(dir);
       // 真实链路跑满 3 轮：每轮成功后把归属重置回 archive 已 entry 形态（模拟流程再次归档进入），
       // history 事件保留——轮次按 change 从事件派生
@@ -3992,6 +3994,136 @@ const TEST_ITEMS = [
       if (reentryEventsOf(readStateFile(dir)).length !== 3) throw new Error('超上限调用写入了 reentry-applied 事件');
       if (reentryBackupFiles(dir).length !== 3) {
         throw new Error('超上限调用新增了备份: ' + JSON.stringify(reentryBackupFiles(dir)));
+      }
+      // ⑦ 上限判定先于空操作短路：同目标形态 + 3 条本 change 事件 → 仍 BLOCK 零改写
+      {
+        const capped = readStateFile(dir);
+        capped.currentNode = 'verify';
+        capped.completedNodes = REENTRY_VERIFY_PREDECESSORS.slice();
+        writeState(dir, capped);
+        const cappedBytes = readStateBytes(dir);
+        const sameTarget = runState(['reenter', 'verify', '--authorized-by', '用户裁决', '--reason', '超限同目标重放'], dir);
+        assertExit(sameTarget, 1);
+        assertOut(sameTarget, 'BLOCK');
+        assertOut(sameTarget, '继续');
+        assertNotOut(sameTarget, '空操作');
+        if (!readStateBytes(dir).equals(cappedBytes)) throw new Error('超限同目标形态改写了 state 字节');
+        if (reentryEventsOf(readStateFile(dir)).length !== 3) throw new Error('超限同目标形态写入了 reentry-applied 事件');
+        const reset = readStateFile(dir);
+        reset.currentNode = 'archive';
+        reset.completedNodes = ARCHIVE_ENTRY_COMPLETED_NODES.slice();
+        reset.status = 'running';
+        writeState(dir, reset);
+      }
+      // ⑧ 续轮授权不足（授权轮次 < 已用 + 1）→ BLOCK 零改写：上限裁决点不可被残缺授权绕过
+      {
+        const insufficientBytes = readStateBytes(dir);
+        const insufficient = runState(['reenter', 'verify', '--authorized-by', '用户授权', '--reason', '轮次不足', '--continue-round', '3'], dir);
+        assertExit(insufficient, 1);
+        assertOut(insufficient, 'BLOCK');
+        if (!readStateBytes(dir).equals(insufficientBytes)) throw new Error('续轮授权轮次不足改写了 state 字节');
+      }
+      // ⑨ 上限后的显式授权续轮（AC-7 后半句）→ 放行并计第 4 轮：审计事件 / 嵌套授权留痕带续轮
+      // 标记与原因，备份链新增一份
+      const continued = runState(['reenter', 'verify', '--authorized-by', '用户授权续轮', '--reason', '第 4 轮显式授权续轮', '--continue-round', '4'], dir);
+      assertExit(continued, 0);
+      assertOut(continued, 'REENTRY');
+      assertOut(continued, '续轮');
+      assertOut(continued, '4');
+      const continuedState = readStateFile(dir);
+      if (continuedState.currentNode !== 'verify') {
+        throw new Error('续轮放行后 currentNode 应为 verify: ' + JSON.stringify(continuedState.currentNode));
+      }
+      const continuedEvents = reentryEventsOf(continuedState);
+      const continuedEvent = continuedEvents[continuedEvents.length - 1];
+      if (!continuedEvent || continuedEvent.round !== 4 || continuedEvent.change !== CHANGE_ID
+        || continuedEvent.continuationAuthorized !== true
+        || continuedEvent.reason !== '第 4 轮显式授权续轮') {
+        throw new Error('续轮审计事件字段不符（round=4 / change / 续轮标记 / reason）: ' + JSON.stringify(continuedEvent));
+      }
+      if (continuedState.evidence?.verify?.reentryAuthorization?.continuationAuthorized !== true) {
+        throw new Error('续轮授权留痕缺失: ' + JSON.stringify(continuedState.evidence?.verify));
+      }
+      if (reentryBackupFiles(dir).length !== 4) {
+        throw new Error('续轮放行应新增一份备份（共 4 份）: ' + JSON.stringify(reentryBackupFiles(dir)));
+      }
+      // ⑩ 组合真实链路（AC-8）：续轮后的 verify 驻留态 → 追加 pending 修复任务 → 受控归位
+      // execute → 执行家族四类出口真实执行 → 回源 verify 出口真实执行（验证命令副作用）→ archive
+      writeIntakeArtifacts(dir);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md',
+        '# DESIGN\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 0. 技术栈选定\n\nNode.js(ESM)\n\n## 决策清单\n\n- [ ] 循环路由\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', fixBatchTaskText('pending'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', execSummaryFixture('T01'));
+      // 源节点前序产物齐备：REVIEW.md 在场（已处置）——否则回源 verify 出口后的产物推导会把
+      // 下一跳判回 review（产物即真相），组合链路的终点断言无法到达 archive。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', fixBatchReviewDoc(true));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md',
+        '# TEST\n\n## 验证命令\n\n```\nnode -e "require(\'fs\').writeFileSync(\'verify-gate-ran.txt\', \'GATE-RAN\')"\n```\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/UAT.md', '# UAT\n\n## 验收\n\n- 通过\n');
+      // 受控归位：next 检出 pending 修复任务 → FIX-BATCH 归位 execute（真实写盘）
+      const reposition = runState(['next'], dir, env);
+      assertExit(reposition, 0);
+      assertOut(reposition, 'FIX-BATCH: 归位 execute（源节点 verify）');
+      assertNodeLine(reposition, 'execute');
+      let chainState = readStateFile(dir);
+      if (chainState.currentNode !== 'execute') {
+        throw new Error('受控归位后 currentNode 应为 execute: ' + JSON.stringify(chainState.currentNode));
+      }
+      if (chainState.completedNodes.includes('verify')) {
+        throw new Error('受控归位不得把源节点标完成: ' + JSON.stringify(chainState.completedNodes));
+      }
+      // 完成修复任务（标 done + 逐任务 SUMMARY + 重载声明 + record execute）
+      completeFixTaskAndRecord(dir, env);
+      // execute 家族四类出口真实跑通：全任务 done / 逐任务 SUMMARY / 六段自查与自检方法 / 任务集签名
+      const execExit = runGuard(['exit', 'execute', '--apply'], dir, env);
+      assertExit(execExit, 0);
+      assertOut(execExit, 'ALL CHECKS PASSED');
+      assertOut(execExit, 'FIX-BATCH: 回源节点 verify（execute 出口已完成）');
+      assertNodeLine(execExit, 'verify');
+      assertNotNodeLine(execExit, 'archive');
+      chainState = readStateFile(dir);
+      if (chainState.currentNode !== 'verify' || chainState.completedNodes.includes('verify')) {
+        throw new Error('回源后应停在未完成的 verify: ' + JSON.stringify({ node: chainState.currentNode, completed: chainState.completedNodes }));
+      }
+      if (!fs.existsSync(path.join(dir, '.specs', CHANGE_ID, 'T01-SUMMARY.md'))
+        || !fs.existsSync(path.join(dir, '.specs', CHANGE_ID, 'T-FIX-01-SUMMARY.md'))) {
+        throw new Error('逐任务 SUMMARY 必须在场（execute 家族出口之一）');
+      }
+      for (const summaryName of ['T01-SUMMARY.md', 'T-FIX-01-SUMMARY.md']) {
+        const summaryText = fs.readFileSync(path.join(dir, '.specs', CHANGE_ID, summaryName), 'utf8');
+        if (!/##\s*6 维自查/.test(summaryText) || !/##\s*自检方法/.test(summaryText)) {
+          throw new Error(summaryName + ' 缺六维自查 / 自检方法段（execute 家族出口之一）');
+        }
+      }
+      const execEvent = (chainState.history || [])
+        .filter((e) => e.event === 'exit-applied' && e.node === 'execute')
+        .pop();
+      if (!execEvent || !/^v1:[0-9a-f]{64}$/.test(String(execEvent.taskSetSignature || ''))) {
+        throw new Error('execute 家族出口必须记录任务集签名（出口之一）: ' + JSON.stringify(execEvent));
+      }
+      if (!chainState.evidence?.execute?.summary) {
+        throw new Error('execute 出口证据缺失: ' + JSON.stringify(chainState.evidence?.execute));
+      }
+      // 源节点（verify）出口真实重跑：验证命令落盘副作用 + 推进 archive
+      assertExit(runState(['skill-load', 'verify', 'flow-comet-verify', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
+      assertExit(runState(['record', 'verify', '{"summary":"回源复验完成"}'], dir, env), 0);
+      assertExit(runGuard(['entry', 'verify'], dir, env), 0);
+      const verifyExit = runGuard(['exit', 'verify', '--apply'], dir, env);
+      assertExit(verifyExit, 0);
+      assertOut(verifyExit, 'ALL CHECKS PASSED');
+      assertNodeLine(verifyExit, 'archive');
+      if (!fs.existsSync(gateMarker) || fs.readFileSync(gateMarker, 'utf8') !== 'GATE-RAN') {
+        throw new Error('回源 verify 出口未真实执行 TEST.md 验证命令（副作用文件缺失/内容不符）');
+      }
+      const finalState = readStateFile(dir);
+      if (finalState.currentNode !== 'archive' || !finalState.completedNodes.includes('verify')) {
+        throw new Error('组合链路终点应为 archive 且 verify 已完成: ' + JSON.stringify({ node: finalState.currentNode, completed: finalState.completedNodes }));
+      }
+      if (reentryEventsOf(finalState).length !== 4) {
+        throw new Error('组合链路不得丢失重入审计事件（应为 4 条）: ' + reentryEventsOf(finalState).length);
+      }
+      if (reentryBackupFiles(dir).length !== 4) {
+        throw new Error('组合链路不得新增 / 丢失备份（应为 4 份）: ' + JSON.stringify(reentryBackupFiles(dir)));
       }
     },
   },
