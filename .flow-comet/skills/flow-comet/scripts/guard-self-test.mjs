@@ -11088,6 +11088,20 @@ const SCENARIOS = [
       assertStateBytesUnchanged(dir, beforeSelect, 'select 归档相对路径');
       assertExit(runState(['select', 'archive'], dir, selectEnv), 1);
       assertStateBytesUnchanged(dir, beforeSelect, 'select 保留目录名');
+      // ⑧b 名字变体族：保留目录名大小写变体（ARCHIVE/Archive）、真实目录名的大小写变体（CH）与
+      // 首尾空白变体在大小写不敏感文件系统上同样可达，但会让 activeChange 与实际目录名不一致
+      // （轮次事件按 activeChange 精确匹配 → 配额被换键重置）→ 一律拒绝且 state 字节零改写
+      assertExit(runState(['select', 'ARCHIVE'], dir, selectEnv), 1);
+      assertStateBytesUnchanged(dir, beforeSelect, 'select 保留目录名大小写变体');
+      assertExit(runState(['select', 'Archive'], dir, selectEnv), 1);
+      assertStateBytesUnchanged(dir, beforeSelect, 'select 保留目录名混合大小写变体');
+      const caseVariant = String(CHANGE_ID).toUpperCase();
+      if (caseVariant !== CHANGE_ID) {
+        assertExit(runState(['select', caseVariant], dir, selectEnv), 1);
+        assertStateBytesUnchanged(dir, beforeSelect, 'select 真实目录名大小写变体');
+      }
+      assertExit(runState(['select', ' ' + CHANGE_ID + ' '], dir, selectEnv), 1);
+      assertStateBytesUnchanged(dir, beforeSelect, 'select 首尾空白变体');
       if (readScenarioState(dir).activeChange !== CHANGE_ID) {
         throw new Error('被拒绝的 select 不得改写 activeChange：' + JSON.stringify(readScenarioState(dir).activeChange));
       }

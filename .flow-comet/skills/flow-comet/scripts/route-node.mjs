@@ -655,8 +655,14 @@ function isSingleSegmentChangeName(value) {
   if (typeof value !== 'string') return false;
   const name = value.trim();
   if (name === '' || name === '.' || name === '..') return false;
+  // 原始值必须与 trim 后逐字相等：Windows 与部分文件系统忽略首尾空白/尾点，放行「空白变体」
+  // 会让 path.join 指到真实目录、而 activeChange 存的是变体字符串——轮次事件按 activeChange
+  // 精确匹配（配额被换键重置），事件归属随即失真。
+  if (value !== name) return false;
   if (name.includes('/') || name.includes('\\')) return false;
-  if (name === 'archive') return false;
+  // 保留目录名按大小写归一判定：Windows 与默认 macOS 的路径解析不区分大小写，「ARCHIVE」
+  // 「Archive」同样指向归档区，逐字比较会漏判。
+  if (name.toLowerCase() === 'archive') return false;
   return true;
 }
 

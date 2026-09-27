@@ -68,7 +68,7 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
    - ① `git status --short`：change 工件（`.specs/<change-id>/`）**必须已 commit**——未 commit 时 worktree 子代理看不到工件（harness 从已提交 HEAD 创建 worktree）
    - ② `git log --oneline -1`：确认 HEAD 位置（change 分支）
    - ③ 委托 prompt **必须内联任务块全文 + 相关 AC**（worktree 基线可能不是 change 分支——harness 行为不可控，内联是唯一可靠路径）
-   - ④ **子代理会话 Skill 工具可用性（委托前探测）**：委托 prompt 必须要求子代理开工前确认本会话是否具备 Skill 工具——具备时用 Skill 工具加载 `flow-comet-dev`；不可用时按 Read 加载节点 SKILL + `flow-kit/prompts/4-dev.md` 协议执行，并在 Return Contract 回传 `"skillToolFallback": "降级，未执行 Skill 工具注入"`（SUMMARY「自检方法」段同步声明）。**禁止把 Read 声称为已注入**；委托 prompt 未写明该口径 = 委托前检查未完成，不得发出委托
+   - ④ **子代理会话 Skill 工具可用性（委托前探测）**：委托 prompt 必须要求子代理开工前确认本会话是否具备 Skill 工具——具备时用 Skill 工具加载 `flow-comet-dev`；不可用时按 Read 加载节点 SKILL + `flow-kit/prompts/4-dev.md` 协议执行，并在 Return Contract 回传 `"skillToolFallback": "<降级替代形态，如 file-read>"`（SUMMARY「自检方法」段同步声明该替代形态并注明未执行 Skill 工具注入）。**禁止把 Read 声称为已注入**；委托 prompt 未写明该口径 = 委托前检查未完成，不得发出委托
    - **Red Flag**：worktree 工件不可见/基线不确定时**禁止继续委托**——先 commit 或内联上下文
    - 委托后：子代理回报 commitHash 后校验存在性（`git cat-file -e <commitHash>`，workflow-handoff result 已有 W2-D git show 校验兜底）
 
@@ -82,7 +82,7 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
    - DESIGN.md sections 0 and 0.5 for context.
    - REQUIREMENT.md ACs relevant to this task.
    - Explicit instruction to **use the Skill 工具** to load `flow-comet-dev` and follow its full protocol `flow-kit/prompts/4-dev.md`（不得跳过——读取 SKILL.md 文件不叫加载，跑声明命令也不叫加载；加载 = Skill 工具把 skill 注入会话）。
-   - **Skill 工具不可用时的降级口径（与上一条并排内联）**：子代理会话不具备 Skill 工具时，按 Read 加载节点 SKILL + `flow-kit/prompts/4-dev.md` 协议执行，Return Contract 回传 `"skillToolFallback": "降级，未执行 Skill 工具注入"`，SUMMARY「自检方法」段同步同措辞；**禁止把 Read 声称为已完成 Skill 工具注入**。
+   - **Skill 工具不可用时的降级口径（与上一条并排内联）**：子代理会话不具备 Skill 工具时，按 Read 加载节点 SKILL + `flow-kit/prompts/4-dev.md` 协议执行，Return Contract 回传 `"skillToolFallback": "<降级替代形态，如 file-read>"`，SUMMARY「自检方法」段同步声明该替代形态并注明未执行 Skill 工具注入；**禁止把 Read 声称为已完成 Skill 工具注入**。
    - Explicit requirement to return `completedChecks` in the Return Contract containing `required-skill:subagent-execute.flow-comet-dev`（证明已加载 implementation skill；guard W1-D 严格校验，缺失 → exit BLOCKED，无旧 change 豁免）。Skill 工具不可用而走降级时该条目标记仍按契约回传，但必须与 `skillToolFallback` 降级声明并排出现——只回传标记而无声明视为不实声明，orchestrator 不得记录 result。
    - The task's `read_files` and `write_files` boundaries.
    - Instruction to produce `<task-id>-SUMMARY.md` in `.specs/<change-id>/` following the `flow-kit/templates/SUMMARY.md` template（标题/首部/段序保真，另补 flow-comet 增量 `## 自检方法` 段）。
@@ -133,7 +133,7 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
 - `status=DONE` 才视为完成；`BLOCKED` / `NEEDS_CONTEXT` 需 orchestrator 处理。
 - `redEvidence` / `greenEvidence` 缺任一 → 视为未执行 TDD，orchestrator 拒绝记录；**新 change 下 guard 强制 BLOCKED**（旧 change WARN 渐进）。
 - `completedChecks` 必须含 `required-skill:subagent-execute.flow-comet-dev`（子代理加载 implementation skill 的证明）；缺任一项 → guard exit 严格 BLOCKED（W1-D，无旧 change 豁免），orchestrator 不得以旧格式/补录方式绕过。
-- **Skill 工具不可用降级（如实声明）**：子代理会话不具备 Skill 工具时，按 Read 加载节点 SKILL + 协议执行（替代形态在字段中声明，如 `file-read`），并在 Return Contract 回传 `"skillToolFallback": "降级，未执行 Skill 工具注入"`（SUMMARY「自检方法」段同步同措辞）；此时 `completedChecks` 的 `required-skill:...` 标记仍按契约保留，但必须与降级声明并排出现——只回传标记而无降级声明视为不实声明，orchestrator 不得记录 result；具备 Skill 工具时不得回传该字段。**该字段是声明、不是物理证明**：回执只能记录会话的声明，读 SKILL.md 与真实 Skill 注入在机器可读证据上不可区分（与 `directOverride` / `completedChecks` 同族的诚实边界）——声明与事实不符属流程违规，验收以 transcript 可见的 Skill 工具触发为准。
+- **Skill 工具不可用降级（如实声明）**：子代理会话不具备 Skill 工具时，按 Read 加载节点 SKILL + 协议执行并在 Return Contract 回传 `"skillToolFallback": "<降级替代形态，如 file-read>"`（SUMMARY「自检方法」段同步声明该替代形态并注明未执行 Skill 工具注入）；此时 `completedChecks` 的 `required-skill:...` 标记仍按契约保留，但必须与降级声明并排出现——只回传标记而无降级声明视为不实声明，orchestrator 不得记录 result；具备 Skill 工具时不得回传该字段。**该字段是声明、不是物理证明**：回执只能记录会话的声明，读 SKILL.md 与真实 Skill 注入在机器可读证据上不可区分（与 `directOverride` / `completedChecks` 同族的诚实边界）——声明与事实不符属流程违规，验收以 transcript 可见的 Skill 工具触发为准。
 - `riskSignals` 非 `none` 时，orchestrator 应将该任务标记为 review 节点的高优先级审查对象。
 - 子代理回传后，orchestrator 用 `workflow-handoff.mjs result <task-id> '<JSON>'` 记录；guard exit subagent-execute 会校验 commitHash + greenEvidence + completedChecks（W1-D，严格）。
 

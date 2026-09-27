@@ -436,10 +436,25 @@ async function writeState(state) {
   await writeJson(statePath, state);
 }
 
+// .specs/ 下必须存在名字「逐字相等」的目录条目（change 名唯一性判据）。大小写不敏感文件系统
+// （Windows / 默认 macOS）会把「CH」解析到 .specs/ch、「Archive」解析到归档区，但 activeChange
+// 存的是变体字符串——轮次事件按 activeChange 精确匹配（配额被换键重置）、保留名检查按小写归一，
+// 故 change 名必须等于真实目录名，大小写/空白变体一律拒绝（fail-closed）。
+async function hasExactSpecsEntry(changeName) {
+  let entries = [];
+  try {
+    entries = await fs.readdir(specsRoot);
+  } catch {
+    return false;
+  }
+  return entries.includes(changeName);
+}
+
 // 受控重入路径边界（单一 helper：change 名形态 + realpath 直接子目录 + symlink/junction 逃逸）。
 // change 名必须是单段目录名（形态单一权威在 route-node.mjs，与综合判定同源）；目录必须真实存在、
-// 非 symlink/junction、realpath 归一后仍在 .specs/ 内。物理包含性判定复用 protocol-utils 的
-// 路径段扫描（单一权威，不写第二份路径判据）；任何越界 / 链接形态一律 BLOCK（fail-closed）。
+// 非 symlink/junction、realpath 归一后仍在 .specs/ 内、且名字与真实目录条目逐字相等。物理包含性
+// 判定复用 protocol-utils 的路径段扫描（单一权威，不写第二份路径判据）；任何越界 / 链接形态 /
+// 名字变体一律 BLOCK（fail-closed）。
 async function inspectReentryChangeDir(changeName) {
   if (typeof changeName !== 'string' || changeName.trim() === '') {
     return { ok: false, reason: 'no-active-change' };
@@ -455,6 +470,7 @@ async function inspectReentryChangeDir(changeName) {
     return { ok: false, reason: 'change-dir-escape', detail: error && error.message ? error.message : String(error) };
   }
   if (!inspection.exists) return { ok: false, reason: 'change-dir-missing' };
+  if (!(await hasExactSpecsEntry(changeName))) return { ok: false, reason: 'change-name-invalid' };
   return { ok: true, changeDir };
 }
 
@@ -1074,6 +1090,13 @@ async function main() {
       throw new Error('Change not found or path unsafe: ' + changeDir + '（' + (error && error.message ? error.message : error) + '）');
     }
     if (!inspection.exists) throw new Error('Change not found: ' + changeDir);
+    // 名字必须与 .specs/ 下真实目录条目逐字相等：大小写/空白变体（如 .specs/ch 用 'CH' 选中）
+    // 在大小写不敏感文件系统上同样可达，但会把 activeChange 存成变体字符串——轮次事件按
+    // activeChange 精确匹配（配额被换键重置）。名字变体一律拒绝，不得改写 activeChange。
+    if (!(await hasExactSpecsEntry(changeName))) {
+      throw new Error('select change 名必须与 .specs/ 下真实目录名逐字相等（大小写/空白变体会使 activeChange 与实际目录不一致）: '
+        + JSON.stringify(changeName));
+    }
     const state = await readState();
     state.activeChange = changeName;
     if (!state.currentNode) state.currentNode = await determineNode(changeName, protocol, state.completedNodes);

@@ -27,7 +27,7 @@ guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好�
 
 - [ ] **工件模板保真**：每份交付工件（`*-SUMMARY.md` / TASK / CHANGE / REQUIREMENT / DESIGN）的**标题 / 首部字段 / 段序**与对应模板一致——SUMMARY 按 `flow-kit/templates/SUMMARY.md` 填写并含 `## 自检方法` 段；执行者按 `flow-kit/prompts/4-dev.md` 协议交付。
 - [ ] **Skill 工具触发可见**：检查执行者交付的 transcript，**逐节点可见本节点 skill 用 Skill 工具加载**的触发记录——声明标记在 ≠ 已加载；只看到 `skill-load` 声明命令、看不到 Skill 工具触发 → 反馈并要求补证/重做。
-- [ ] **Skill 工具不可用降级核验**：执行者会话具备 Skill 工具时，须见 Skill 工具加载节点 SKILL 的触发记录；不具备时（委托会话工具集无 Skill 工具），须按 Read 加载节点 SKILL + 协议，并在 Return Contract（`skillToolFallback: "降级，未执行 Skill 工具注入"`）与 SUMMARY「自检方法」段显式声明——**Read 不得被声称为已注入**。只回传 required-skill 标记而无降级声明 → 证据不完整，要求补声明；声明齐全的环境限制不判为代码缺陷。
+- [ ] **Skill 工具不可用降级核验**：执行者会话具备 Skill 工具时，须见 Skill 工具加载节点 SKILL 的触发记录；不具备时（委托会话工具集无 Skill 工具），须按 Read 加载节点 SKILL + 协议，并在 Return Contract（`skillToolFallback: "<降级替代形态，如 file-read>"`）与 SUMMARY「自检方法」段显式声明——**Read 不得被声称为已注入（即未执行 Skill 工具注入，字段值必须写替代形态而非本说明）**。只回传 required-skill 标记而无降级声明 → 证据不完整，要求补声明；声明齐全的环境限制不判为代码缺陷。
 
 ### Prerequisites
 
