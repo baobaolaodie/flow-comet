@@ -53,6 +53,7 @@ body:
       options:
         - claude-code
         - codex
+        - dsh
     validations:
       required: true
   - type: dropdown
