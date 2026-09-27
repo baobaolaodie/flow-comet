@@ -738,6 +738,124 @@ function readScenarioState(dir) {
   return JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
 }
 
+// ---------- 受控重入（archive 源回边）场景材料（先写期望后执行） ----------
+// archive 已 entry 且归档目录仍在原位时的受控重入契约（设计决策清单全部条目 /
+// REQUIREMENT AC-1~AC-10）：CLI 入口为
+// `workflow-state.mjs reenter <target> --authorized-by <source> --reason <text>`。
+// 本段只装配夹具与断言助手；判定语义的唯一权威在 route-node.mjs（测试侧不复制生产判定——
+// L-067）；前驱交集期望值由内置协议 success 边独立推导，是测试判据的独立复算。
+
+// 内置协议（route 顺序 open→design→plan→execute→subagent-execute→review→verify→archive）
+// 下 predecessors(target) 的期望交集：success 边反向传递闭包，按协议顺序输出。
+const REENTRY_EXPECTED_INTERSECTION = {
+  'execute': ['open', 'design', 'plan'],
+  'subagent-execute': ['open', 'design', 'plan', 'execute'],
+  'review': ['open', 'design', 'plan', 'execute', 'subagent-execute'],
+  'verify': ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review'],
+};
+const REENTRY_FULL_COMPLETED = ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review', 'verify'];
+
+// archive 已 entry 夹具（AC-1 初始状态）：归档目录仍在原位、status=running、前驱全已完成；
+// overrides 覆盖旧 change（无 newChange 字段）/ status=completed / 轮次事件等形态。
+// branchMode / enablePrReview / branchPrefix 显式在场——避免 readState 的旧 state 默认补齐
+// 让「白名单外字段零改写」断言混入实现细节噪音。
+function reentryArchiveState(overrides = {}) {
+  return {
+    activeChange: CHANGE_ID,
+    currentNode: 'archive',
+    completedNodes: [...REENTRY_FULL_COMPLETED],
+    enteredNodes: [...REENTRY_FULL_COMPLETED, 'archive'],
+    evidence: {},
+    verifyFailures: 0,
+    executionMode: 'subagent',
+    directOverride: false,
+    newChange: true,
+    status: 'running',
+    branchMode: true,
+    enablePrReview: false,
+    branchPrefix: 'change/',
+    history: [{ event: 'exit-applied', node: 'verify', at: '2026-09-20T00:00:00.000Z', change: CHANGE_ID }],
+    ...overrides,
+  };
+}
+
+// 归档目录仍在原位（移动边界判定的前提之一）：CHANGE.md + TASK.md 在场
+function writeReentryChangeDir(dir, changeName = CHANGE_ID) {
+  writeFile(dir, '.specs/' + changeName + '/CHANGE.md', '# CHANGE\n\n## Why\n\n受控重入夹具。\n');
+  writeFile(dir, '.specs/' + changeName + '/TASK.md', '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n');
+}
+
+// 受控重入 CLI（真实命令路径）：env 显式注入协议路径（门禁不得静默跳过）；
+// extra 供 --protocol 等追加参数；reenter 未落地前本路径因 unknown subcommand 必然 RED。
+function runReenter(dir, target, options = {}) {
+  const args = ['reenter', target];
+  if (options.source !== undefined) args.push('--authorized-by', options.source);
+  if (options.reason !== undefined) args.push('--reason', options.reason);
+  if (Array.isArray(options.extra)) args.push(...options.extra);
+  return runState(args, dir, {
+    FLOW_COMET_PROTOCOL: options.protocol || path.join(dir, 'reference', 'workflow-protocol.json'),
+  });
+}
+
+// state 原始字节：BLOCK / 空操作路径的「字节零改写」判据（JSON 深比会漏掉格式化、键序与
+// 序列化表示漂移——字节比较才是契约）。
+function readStateBytes(dir) {
+  const file = path.join(dir, '.flow-comet', 'flow-comet-state.json');
+  if (!fs.existsSync(file)) {
+    throw new Error('state 文件缺失（夹具错误或命令删除了 state）: ' + file);
+  }
+  return fs.readFileSync(file, 'utf8');
+}
+
+function assertStateBytesUnchanged(dir, before, label) {
+  const after = readStateBytes(dir);
+  if (after !== before) {
+    throw new Error(label + '：要求 state 字节零改写，实际发生变化\nbefore:\n' + before + '\nafter:\n' + after);
+  }
+}
+
+// 备份文件清单（备份路径规则 .specs/<change-id>/.reentry-backups/）：BLOCK / 空操作路径必须零新增。
+function reentryBackupFiles(dir, changeName = CHANGE_ID) {
+  const backupDir = path.join(dir, '.specs', changeName, '.reentry-backups');
+  if (!fs.existsSync(backupDir)) return [];
+  return fs.readdirSync(backupDir).sort();
+}
+
+// 轮次事件夹具：change 归属字段是跨 change 隔离的唯一依据（写侧必须带 change）——
+// 不带 change 的旧事件按 legacy 形态参与（reentry-applied 为新事件类型，实际不会出现）。
+function reentryHistoryEvent(roundNumber, changeName = CHANGE_ID) {
+  return {
+    event: 'reentry-applied',
+    from: 'archive',
+    to: 'verify',
+    round: roundNumber,
+    change: changeName,
+    authorization: { round: roundNumber, at: '2026-09-20T00:00:00.000Z', source: 'user-approval', target: 'verify' },
+    backup: '.specs/' + changeName + '/.reentry-backups/2026-09-20T00-00-00.000Z-pre-verify.json',
+    fingerprint: '0'.repeat(64),
+    at: '2026-09-20T00:00:00.000Z',
+  };
+}
+
+// 授权形态纯函数锚（AC-2 的 guard-self-test 验证方式）：形态合法性由 route-node 的
+// parseReentryAuthorization 单一权威判定，本助手只声明期望（malformed → ok:false）。
+function assertReentryAuthorizationShape(authorization, target, expectedOk, label) {
+  const parse = requireRouteNodeExport('parseReentryAuthorization');
+  const result = parse({ authorization, target });
+  if (!result || result.ok !== expectedOk) {
+    throw new Error('[' + label + '] 授权形态判定应为 ok=' + expectedOk + '，实际 ' + JSON.stringify(result));
+  }
+  return result;
+}
+
+// 输出正则断言（BLOCK 指引类断言的共享助手；精确关键词断言用 assertOut）。
+function assertOutMatches(res, pattern, label) {
+  const text = outputText(res);
+  if (!pattern.test(text)) {
+    throw new Error((label || '输出') + ' 应匹配 ' + pattern + '，实际输出:\n' + text);
+  }
+}
+
 // ---------- 伪造材料 ----------
 
 function baseState(node) {
@@ -10680,6 +10798,627 @@ const SCENARIOS = [
           + baselineEntry.nodeSkill + ' sha256=' + baselineEntry.hash
           + ' vs ' + entry.nodeSkill + ' sha256=' + entry.hash
           + '；首处差异 @' + diffIndex + '（基准上下文: ' + JSON.stringify(context) + '）');
+      }
+    },
+  },
+
+  // 259: 受控重入正例（AC-1 / AC-10）——archive 已 entry + 归档目录仍在原位 + 完整授权
+  // 三元组 → 一次调用完成：备份落盘（全量快照 + 可核验 sha256 指纹）→ 转移落地
+  // （currentNode=target / completedNodes=前驱交集 / status=running）→ 审计事件（含 change
+  // 归属与授权留痕）→ 可审计的 REENTRY 行。
+  {
+    name: '259 受控重入正例：archive → verify 备份·转移·审计事件·授权留痕全链路',
+    run: (dir) => {
+      writeReentryChangeDir(dir);
+      writeState(dir, reentryArchiveState());
+      const beforeState = readScenarioState(dir);
+      const res = runReenter(dir, 'verify', { source: 'user-approval', reason: '归档后发现缺陷，需回到验证节点' });
+      assertExit(res, 0);
+      assertOut(res, 'REENTRY');
+      assertOut(res, 'archive');
+      assertOut(res, 'verify');
+      assertOut(res, '1/3');
+      assertOut(res, 'user-approval');
+      assertOut(res, 'REASON: 归档后发现缺陷，需回到验证节点');
+      const st = readScenarioState(dir);
+      if (st.currentNode !== 'verify') {
+        throw new Error('转移应把 currentNode 置为 target(verify)，实际 ' + JSON.stringify(st.currentNode));
+      }
+      if (!isDeepStrictEqual(st.completedNodes, REENTRY_EXPECTED_INTERSECTION.verify)) {
+        throw new Error('completedNodes 应为前驱交集 ' + JSON.stringify(REENTRY_EXPECTED_INTERSECTION.verify)
+          + '，实际 ' + JSON.stringify(st.completedNodes));
+      }
+      if (st.status !== 'running') {
+        throw new Error('重入应把 status 置为 running，实际 ' + JSON.stringify(st.status));
+      }
+      // 除四类机器字段与 evidence（授权留痕）外，state 其余字段逐项不变、不得新增/删除
+      const mutable = new Set(['currentNode', 'completedNodes', 'status', 'history', 'evidence']);
+      for (const key of Object.keys(st)) {
+        if (mutable.has(key)) continue;
+        if (!isDeepStrictEqual(beforeState[key], st[key])) {
+          throw new Error('受控重入不得改写 ' + key + '：before=' + JSON.stringify(beforeState[key])
+            + ' after=' + JSON.stringify(st[key]));
+        }
+      }
+      for (const key of Object.keys(beforeState)) {
+        if (!(key in st)) throw new Error('受控重入不得删除 state 字段: ' + key);
+      }
+      // history：旧前缀逐字稳定 + 恰新增一条 reentry-applied
+      const history = Array.isArray(st.history) ? st.history : [];
+      if (history.length !== beforeState.history.length + 1) {
+        throw new Error('history 应恰新增 1 条，实际新增 ' + (history.length - beforeState.history.length)
+          + '：' + JSON.stringify(history.slice(beforeState.history.length)));
+      }
+      if (!isDeepStrictEqual(history.slice(0, beforeState.history.length), beforeState.history)) {
+        throw new Error('history 旧前缀被改写（既有事件必须逐字稳定）');
+      }
+      const event = history[history.length - 1];
+      if (!event || event.event !== 'reentry-applied') {
+        throw new Error('新增 history 事件应为 reentry-applied：' + JSON.stringify(event));
+      }
+      if (event.from !== 'archive' || event.to !== 'verify') {
+        throw new Error('审计事件应记录 from=archive / to=verify，实际 '
+          + JSON.stringify({ from: event.from, to: event.to }));
+      }
+      if (event.round !== 1) {
+        throw new Error('首次重入轮次应为 1，实际 ' + JSON.stringify(event.round));
+      }
+      if (event.change !== CHANGE_ID) {
+        throw new Error('reentry-applied 事件必须带 change 字段（跨 change 轮次隔离的唯一依据），实际 '
+          + JSON.stringify(event.change));
+      }
+      if (typeof event.at !== 'string' || Number.isNaN(Date.parse(event.at))) {
+        throw new Error('审计事件应带可解析的 at 时间戳，实际 ' + JSON.stringify(event.at));
+      }
+      const authorization = event.authorization;
+      if (!authorization || authorization.round !== 1 || authorization.source !== 'user-approval'
+        || authorization.target !== 'verify'
+        || typeof authorization.at !== 'string' || authorization.at.trim() === '') {
+        throw new Error('审计事件 authorization 记录不完整（round / at / source / target 与本次调用绑定）：'
+          + JSON.stringify(authorization));
+      }
+      if (typeof event.backup !== 'string' || event.backup.trim() === '') {
+        throw new Error('审计事件应记录备份路径，实际 ' + JSON.stringify(event.backup));
+      }
+      if (typeof event.fingerprint !== 'string' || !/^[0-9a-f]{64}$/.test(event.fingerprint)) {
+        throw new Error('审计事件应记录 sha256 指纹（64 位小写十六进制），实际 ' + JSON.stringify(event.fingerprint));
+      }
+      // 授权嵌套留痕（evidence.<target>.reentryAuthorization）
+      const record = st.evidence?.verify?.reentryAuthorization;
+      if (!record) {
+        throw new Error('evidence.verify.reentryAuthorization 授权留痕缺失：' + JSON.stringify(st.evidence));
+      }
+      if (record.round !== 1 || record.source !== 'user-approval' || record.target !== 'verify'
+        || typeof record.at !== 'string' || record.at.trim() === '') {
+        throw new Error('授权留痕字段不完整：' + JSON.stringify(record));
+      }
+      if (record.backup !== event.backup || record.fingerprint !== event.fingerprint) {
+        throw new Error('授权留痕的 backup / fingerprint 应与审计事件一致：' + JSON.stringify({ record, event }));
+      }
+      // --reason 必须落盘（事件 + 嵌套授权记录）：只打印不落盘的必填参数无法支撑事后审计追溯
+      if (event.reason !== '归档后发现缺陷，需回到验证节点') {
+        throw new Error('审计事件应记录本次 --reason（可追溯），实际 ' + JSON.stringify(event.reason));
+      }
+      if (record.reason !== event.reason) {
+        throw new Error('授权留痕的 reason 应与审计事件逐字一致：' + JSON.stringify({ record: record.reason, event: event.reason }));
+      }
+      // 备份：路径形态 + 全量快照语义 + 指纹可核验
+      const backupPath = path.isAbsolute(event.backup) ? event.backup : path.join(dir, event.backup);
+      if (!fs.existsSync(backupPath)) {
+        throw new Error('备份文件不在场：' + backupPath);
+      }
+      const backupRel = path.relative(dir, backupPath).split(path.sep).join('/');
+      if (!backupRel.startsWith('.specs/' + CHANGE_ID + '/.reentry-backups/')
+        || !/-pre-verify\.json$/.test(path.basename(backupPath))) {
+        throw new Error('备份路径应符合 .specs/<id>/.reentry-backups/<ISO>-pre-<target>.json，实际 ' + backupRel);
+      }
+      const backupBytes = fs.readFileSync(backupPath);
+      const fingerprint = createHash('sha256').update(backupBytes).digest('hex');
+      if (fingerprint !== event.fingerprint) {
+        throw new Error('备份指纹与文件内容不一致（AC-9 可核验）：事件=' + event.fingerprint + ' 实算=' + fingerprint);
+      }
+      if (!isDeepStrictEqual(JSON.parse(backupBytes.toString('utf8')), beforeState)) {
+        throw new Error('备份应为重入前 state 的全量快照');
+      }
+    },
+  },
+
+  // 260: 授权门禁 fail-closed（AC-2）——缺授权 / source 空串 / source 纯空白 → BLOCK、
+  // state 字节零改写、零备份、零事件；授权形态（round 正整数、at / source 非空字符串、
+  // target 与授权一致）由 route-node 纯函数单一权威判定（形态锚 + 合法形态放行对照）。
+  {
+    name: '260 授权 fail-closed：缺授权·空/纯空白 source BLOCK 零改写 + 形态纯函数锚',
+    run: (dir) => {
+      writeReentryChangeDir(dir);
+      writeState(dir, reentryArchiveState());
+      const bytes = readStateBytes(dir);
+      const blockedCases = [
+        ['缺授权（无 --authorized-by / --reason）', () => runReenter(dir, 'verify')],
+        ['source 空串', () => runReenter(dir, 'verify', { source: '', reason: 'x' })],
+        ['source 纯空白', () => runReenter(dir, 'verify', { source: '   ', reason: 'x' })],
+      ];
+      for (const [label, call] of blockedCases) {
+        const res = call();
+        assertExit(res, 1);
+        assertOut(res, 'BLOCKED');
+        assertStateBytesUnchanged(dir, bytes, label);
+      }
+      if (reentryBackupFiles(dir).length !== 0) {
+        throw new Error('授权非法路径不得产生备份：' + JSON.stringify(reentryBackupFiles(dir)));
+      }
+      const st = readScenarioState(dir);
+      const reentryEvents = (st.history || []).filter((e) => e.event === 'reentry-applied');
+      if (reentryEvents.length !== 0) {
+        throw new Error('授权非法路径不得写审计事件：' + JSON.stringify(reentryEvents));
+      }
+      // 授权形态纯函数锚：malformed 一律 ok:false，合法 ok:true（放行侧对照）
+      const valid = { round: 1, at: '2026-09-20T00:00:00.000Z', source: 'user-approval', target: 'verify' };
+      assertReentryAuthorizationShape(valid, 'verify', true, '合法三元组');
+      const malformed = [
+        ['缺 authorization', undefined],
+        ['round=0', { ...valid, round: 0 }],
+        ['round=-1', { ...valid, round: -1 }],
+        ['round=1.5 非整数', { ...valid, round: 1.5 }],
+        ['round="1" 类型错误', { ...valid, round: '1' }],
+        ['round 缺失', { ...valid, round: undefined }],
+        ['at=42 类型错误', { ...valid, at: 42 }],
+        ['at 空串', { ...valid, at: '' }],
+        ['at 纯空白', { ...valid, at: '  ' }],
+        ['at 缺失', { ...valid, at: undefined }],
+        ['source=[] 类型错误', { ...valid, source: [] }],
+        ['source 空串', { ...valid, source: '' }],
+        ['source 纯空白', { ...valid, source: '  ' }],
+        ['source 缺失', { ...valid, source: undefined }],
+        ['target 与授权不一致', { ...valid, target: 'execute' }],
+      ];
+      for (const [label, authorization] of malformed) {
+        assertReentryAuthorizationShape(authorization, 'verify', false, label);
+      }
+      // 综合判定：archive 源 + 合法 target + 形态非法授权 → block（不抛异常），合法 → apply
+      const decide = requireRouteNodeExport('resolveReentryDecision');
+      const protocol = readScenarioProtocol(dir);
+      const decideState = {
+        activeChange: CHANGE_ID,
+        currentNode: 'archive',
+        completedNodes: [...REENTRY_FULL_COMPLETED],
+        history: [],
+      };
+      for (const [label, authorization] of malformed) {
+        const decision = decide({ protocol, state: decideState, target: 'verify', authorization });
+        if (!decision || decision.ok !== false || decision.action !== 'block') {
+          throw new Error('[' + label + '] resolveReentryDecision 应返回 block，实际 ' + JSON.stringify(decision));
+        }
+      }
+      const applied = decide({ protocol, state: decideState, target: 'verify', authorization: valid });
+      if (!applied || applied.ok !== true || applied.action !== 'apply' || applied.round !== 1) {
+        throw new Error('合法授权 + archive 源应返回 apply / 第 1 轮，实际 ' + JSON.stringify(applied));
+      }
+    },
+  },
+
+  // 261: 越界拦截（AC-5 / AC-6 / AC-7）——目标不在白名单 / 协议 disabled 节点 / 源不是
+  // archive / status=completed / 归档移动已发生 / 超轮次上限：一律 BLOCK 且 state 字节零改写；
+  // 轮次按 change 隔离（他 change 的历史事件不占本 change 配额）——同场景断言 BLOCK 与放行两态。
+  {
+    name: '261 越界拦截：目标/协议/源/归档移动/上限全 BLOCK 零改写 + 轮次跨 change 隔离',
+    run: (dir) => {
+      // ① 目标不在白名单（design / open / archive 自身）
+      for (const target of ['design', 'open', 'archive']) {
+        writeReentryChangeDir(dir);
+        writeState(dir, reentryArchiveState());
+        const bytes = readStateBytes(dir);
+        const res = runReenter(dir, target, { source: 'user-approval', reason: 'x' });
+        assertExit(res, 1);
+        assertOut(res, 'BLOCKED');
+        assertStateBytesUnchanged(dir, bytes, '目标越界: ' + target);
+      }
+      // ② 协议 disabled 节点不可作目标（自定义协议禁用 verify）
+      const customProtocolPath = path.join(dir, 'reentry-protocol-disabled.json');
+      const customProtocol = readScenarioProtocol(dir);
+      customProtocol.nodes.find((n) => n.id === 'verify').disabled = true;
+      writeFile(dir, 'reentry-protocol-disabled.json', JSON.stringify(customProtocol, null, 2) + '\n');
+      writeState(dir, reentryArchiveState());
+      const bytesDisabled = readStateBytes(dir);
+      const resDisabled = runReenter(dir, 'verify', {
+        source: 'user-approval', reason: 'x', extra: ['--protocol', customProtocolPath],
+      });
+      assertExit(resDisabled, 1);
+      assertOut(resDisabled, 'BLOCKED');
+      assertStateBytesUnchanged(dir, bytesDisabled, '协议 disabled 节点');
+      // ③ 源不是 archive（execute 驻留；目标 verify 形态未成立 → 不被空操作短路）
+      writeState(dir, reentryArchiveState({ currentNode: 'execute' }));
+      const bytesSource = readStateBytes(dir);
+      const resSource = runReenter(dir, 'verify', { source: 'user-approval', reason: 'x' });
+      assertExit(resSource, 1);
+      assertOut(resSource, 'BLOCKED');
+      assertStateBytesUnchanged(dir, bytesSource, '源不是 archive');
+      // ④ status=completed（归档已出口 / 已发布形态）→ BLOCK + 人工处置或新 change 指引
+      writeState(dir, reentryArchiveState({ status: 'completed' }));
+      const bytesCompleted = readStateBytes(dir);
+      const resCompleted = runReenter(dir, 'verify', { source: 'user-approval', reason: 'x' });
+      assertExit(resCompleted, 1);
+      assertOut(resCompleted, 'BLOCKED');
+      assertOutMatches(resCompleted, /人工|新 ?change|hotfix/, 'status=completed 指引');
+      assertStateBytesUnchanged(dir, bytesCompleted, 'status=completed');
+      // ⑤ 归档移动已发生（.specs/<id>/ 不在原位，已搬入 .specs/archive/<日期>-<id>/）
+      fs.rmSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true, force: true });
+      writeFile(dir, '.specs/archive/2026-09-26-' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n\n已归档。\n');
+      writeState(dir, reentryArchiveState());
+      const bytesMoved = readStateBytes(dir);
+      const resMoved = runReenter(dir, 'verify', { source: 'user-approval', reason: 'x' });
+      assertExit(resMoved, 1);
+      assertOut(resMoved, 'BLOCKED');
+      assertOutMatches(resMoved, /人工|新 ?change|hotfix/, '归档移动已发生指引');
+      assertStateBytesUnchanged(dir, bytesMoved, '归档移动已发生');
+      // ⑥ 超轮次上限：本 change 已有 3 条 reentry-applied → 第 4 次 BLOCK + 「继续 / 停止」指引
+      writeReentryChangeDir(dir);
+      writeState(dir, reentryArchiveState({
+        history: [reentryHistoryEvent(1), reentryHistoryEvent(2), reentryHistoryEvent(3)],
+      }));
+      const bytesCapped = readStateBytes(dir);
+      const resCapped = runReenter(dir, 'verify', { source: 'user-approval', reason: 'x' });
+      assertExit(resCapped, 1);
+      assertOut(resCapped, 'BLOCKED');
+      assertOut(resCapped, '继续');
+      assertOut(resCapped, '停止');
+      assertStateBytesUnchanged(dir, bytesCapped, '超轮次上限');
+      // ⑦ 轮次跨 change 隔离：他 change 的 3 条事件不占本 change 配额 → 放行且为第 1 轮
+      writeState(dir, reentryArchiveState({
+        history: [
+          reentryHistoryEvent(1, 'other-change'),
+          reentryHistoryEvent(2, 'other-change'),
+          reentryHistoryEvent(3, 'other-change'),
+        ],
+      }));
+      const resIsolated = runReenter(dir, 'verify', { source: 'user-approval', reason: 'x' });
+      assertExit(resIsolated, 0);
+      assertOut(resIsolated, '1/3');
+      const isolatedState = readScenarioState(dir);
+      const appliedEvent = (isolatedState.history || [])
+        .find((e) => e.event === 'reentry-applied' && e.change === CHANGE_ID);
+      if (!appliedEvent || appliedEvent.round !== 1) {
+        throw new Error('他 change 的轮次事件不应占用本 change 配额（本 change 应为第 1 轮），实际 '
+          + JSON.stringify(appliedEvent));
+      }
+      // ⑧ select 入口收紧：多段路径（归档相对路径形态）与保留目录名不得被选为 activeChange
+      const selectEnv = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      fs.mkdirSync(path.join(dir, '.specs', 'archive', '2026-09-26-' + CHANGE_ID), { recursive: true });
+      const beforeSelect = readStateBytes(dir);
+      assertExit(runState(['select', 'archive/2026-09-26-' + CHANGE_ID], dir, selectEnv), 1);
+      assertStateBytesUnchanged(dir, beforeSelect, 'select 归档相对路径');
+      assertExit(runState(['select', 'archive'], dir, selectEnv), 1);
+      assertStateBytesUnchanged(dir, beforeSelect, 'select 保留目录名');
+      // ⑧b 名字变体族：保留目录名大小写变体（ARCHIVE/Archive）、真实目录名的大小写变体（CH）与
+      // 首尾空白变体在大小写不敏感文件系统上同样可达，但会让 activeChange 与实际目录名不一致
+      // （轮次事件按 activeChange 精确匹配 → 配额被换键重置）→ 一律拒绝且 state 字节零改写
+      assertExit(runState(['select', 'ARCHIVE'], dir, selectEnv), 1);
+      assertStateBytesUnchanged(dir, beforeSelect, 'select 保留目录名大小写变体');
+      assertExit(runState(['select', 'Archive'], dir, selectEnv), 1);
+      assertStateBytesUnchanged(dir, beforeSelect, 'select 保留目录名混合大小写变体');
+      const caseVariant = String(CHANGE_ID).toUpperCase();
+      if (caseVariant !== CHANGE_ID) {
+        assertExit(runState(['select', caseVariant], dir, selectEnv), 1);
+        assertStateBytesUnchanged(dir, beforeSelect, 'select 真实目录名大小写变体');
+      }
+      assertExit(runState(['select', ' ' + CHANGE_ID + ' '], dir, selectEnv), 1);
+      assertStateBytesUnchanged(dir, beforeSelect, 'select 首尾空白变体');
+      if (readScenarioState(dir).activeChange !== CHANGE_ID) {
+        throw new Error('被拒绝的 select 不得改写 activeChange：' + JSON.stringify(readScenarioState(dir).activeChange));
+      }
+      // ⑨ change 键被换成归档相对路径（换键重置轮次配额的绕过形态）→ 写盘前 BLOCK：本 change 的
+      // 3 条事件既不得被换键忽略，也不得产生新事件 / 备份 / 机器字段改写
+      writeState(dir, reentryArchiveState({
+        activeChange: 'archive/2026-09-26-' + CHANGE_ID,
+        history: [reentryHistoryEvent(1), reentryHistoryEvent(2), reentryHistoryEvent(3)],
+      }));
+      const nestedBytes = readStateBytes(dir);
+      const nestedBackupsBefore = reentryBackupFiles(dir).length;
+      const nestedRes = runReenter(dir, 'verify', { source: 'user-approval', reason: '换键重入' });
+      assertExit(nestedRes, 1);
+      assertOut(nestedRes, 'BLOCKED');
+      assertStateBytesUnchanged(dir, nestedBytes, '归档相对路径 change 名');
+      if (reentryBackupFiles(dir).length !== nestedBackupsBefore) {
+        throw new Error('归档相对路径 change 名不得产生备份');
+      }
+      // ⑩ history 存在但非数组 → fail-closed BLOCK，不得静默清空覆盖审计历史
+      writeReentryChangeDir(dir);
+      writeState(dir, reentryArchiveState({ history: 'corrupted-history' }));
+      const corruptBytes = readStateBytes(dir);
+      const corruptRes = runReenter(dir, 'verify', { source: 'user-approval', reason: 'history 损坏' });
+      assertExit(corruptRes, 1);
+      assertOut(corruptRes, 'BLOCKED');
+      assertOut(corruptRes, 'history');
+      assertStateBytesUnchanged(dir, corruptBytes, '非数组 history');
+      if (readScenarioState(dir).history !== 'corrupted-history') {
+        throw new Error('损坏的 history 不得被静默清空覆盖：' + JSON.stringify(readScenarioState(dir).history));
+      }
+      // ⑪ 备份写入包含性：.specs/<change> 为 junction（指向 runRoot 外）→ BLOCK 零改写，
+      // runRoot 外不得出现任何备份字节
+      const linkedOutsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'flow-comet-reentry-outside-'));
+      writeFile(linkedOutsideDir, 'CHANGE.md', '# CHANGE\n\n## Why\n\njunction 目标。\n');
+      const linkedName = 'linked-change';
+      fs.symlinkSync(linkedOutsideDir, path.join(dir, '.specs', linkedName), 'junction');
+      writeState(dir, reentryArchiveState({ activeChange: linkedName }));
+      const linkedBytes = readStateBytes(dir);
+      const linkedRes = runReenter(dir, 'verify', { source: 'user-approval', reason: 'junction 逃逸' });
+      assertExit(linkedRes, 1);
+      assertOut(linkedRes, 'BLOCKED');
+      assertStateBytesUnchanged(dir, linkedBytes, 'junction 逃逸');
+      if (fs.existsSync(path.join(linkedOutsideDir, '.reentry-backups'))) {
+        throw new Error('junction 逃逸不得在 runRoot 外产生备份：'
+          + JSON.stringify(fs.readdirSync(path.join(linkedOutsideDir, '.reentry-backups'))));
+      }
+      fs.rmSync(linkedOutsideDir, { recursive: true, force: true });
+      try { fs.rmSync(path.join(dir, '.specs', linkedName), { recursive: true, force: true }); } catch { /* 场景目录整体清理兜底 */ }
+      // ⑫ 上限后的显式授权续轮（AC-7 后半句）：合法授权 → 放行并计下一轮（事件 / 授权留痕带
+      // 续轮标记与原因）；授权轮次不足或未达上限即传续轮 → BLOCK 且 state 字节零改写
+      const threeRounds = [reentryHistoryEvent(1), reentryHistoryEvent(2), reentryHistoryEvent(3)];
+      writeReentryChangeDir(dir);
+      writeState(dir, reentryArchiveState({ history: threeRounds }));
+      const continued = runReenter(dir, 'verify', {
+        source: 'admin-approval', reason: '上限后显式授权续轮', extra: ['--continue-round', '4'],
+      });
+      assertExit(continued, 0);
+      assertOut(continued, 'REENTRY');
+      assertOut(continued, '续轮');
+      const continuedState = readScenarioState(dir);
+      if (continuedState.currentNode !== 'verify') {
+        throw new Error('续轮放行后 currentNode 应为 verify，实际 ' + JSON.stringify(continuedState.currentNode));
+      }
+      const continuedEvent = (continuedState.history || [])
+        .filter((e) => e.event === 'reentry-applied')
+        .pop();
+      if (!continuedEvent || continuedEvent.round !== 4 || continuedEvent.change !== CHANGE_ID
+        || continuedEvent.continuationAuthorized !== true
+        || continuedEvent.reason !== '上限后显式授权续轮') {
+        throw new Error('续轮审计事件字段不符（round=4 / change / 续轮标记 / reason）：' + JSON.stringify(continuedEvent));
+      }
+      const continuedRecord = continuedState.evidence?.verify?.reentryAuthorization;
+      if (!continuedRecord || continuedRecord.continuationAuthorized !== true
+        || continuedRecord.reason !== '上限后显式授权续轮') {
+        throw new Error('续轮授权留痕不符：' + JSON.stringify(continuedRecord));
+      }
+      writeState(dir, reentryArchiveState({ history: threeRounds }));
+      const insufficientBytes = readStateBytes(dir);
+      const insufficient = runReenter(dir, 'verify', {
+        source: 'admin-approval', reason: '轮次不足', extra: ['--continue-round', '3'],
+      });
+      assertExit(insufficient, 1);
+      assertOut(insufficient, 'BLOCKED');
+      assertStateBytesUnchanged(dir, insufficientBytes, '续轮授权轮次不足');
+      writeState(dir, reentryArchiveState());
+      const earlyBytes = readStateBytes(dir);
+      const early = runReenter(dir, 'verify', {
+        source: 'admin-approval', reason: '未达上限', extra: ['--continue-round', '4'],
+      });
+      assertExit(early, 1);
+      assertOut(early, 'BLOCKED');
+      assertStateBytesUnchanged(dir, earlyBytes, '未达上限即传续轮');
+      // ⑬ 写盘失败路径：原子写因临时路径被占而失败 → 非零退出、state 不截断、本次孤儿备份回滚
+      writeReentryChangeDir(dir);
+      writeState(dir, reentryArchiveState());
+      const atomicBytes = readStateBytes(dir);
+      const atomicBackupsBefore = reentryBackupFiles(dir);
+      const blockedTempDir = path.join(dir, '.flow-comet', 'flow-comet-state.json.tmp');
+      fs.mkdirSync(blockedTempDir, { recursive: true });
+      const atomicRes = runReenter(dir, 'verify', { source: 'user-approval', reason: '模拟写盘失败' });
+      assertExit(atomicRes, 1);
+      assertStateBytesUnchanged(dir, atomicBytes, '写盘失败路径');
+      if (!isDeepStrictEqual(reentryBackupFiles(dir), atomicBackupsBefore)) {
+        throw new Error('写盘失败必须回滚本次孤儿备份：before=' + JSON.stringify(atomicBackupsBefore)
+          + ' after=' + JSON.stringify(reentryBackupFiles(dir)));
+      }
+      fs.rmSync(blockedTempDir, { recursive: true, force: true });
+    },
+  },
+
+  // 262: 恢复链（AC-2 的「BLOCK → 补全授权 → 放行」/ 编排顺序 / 幂等重放）——未授权 BLOCK 且
+  // 字节零改写、零备份；补齐授权三元组后放行（备份 + 转移 + 审计）；重复同目标调用 = 空操作
+  // （放行 + 可见提示 + 零备份新增 + 零计数 + 零事件 + 字节零改写）。
+  {
+    name: '262 恢复链：未授权 BLOCK → 补全授权放行 → 重复同目标空操作（零副作用）',
+    run: (dir) => {
+      writeReentryChangeDir(dir);
+      writeState(dir, reentryArchiveState());
+      const blockedBytes = readStateBytes(dir);
+      const resBlocked = runReenter(dir, 'verify');
+      assertExit(resBlocked, 1);
+      assertOut(resBlocked, 'BLOCKED');
+      assertStateBytesUnchanged(dir, blockedBytes, '未授权 BLOCK');
+      if (reentryBackupFiles(dir).length !== 0) {
+        throw new Error('未授权 BLOCK 不得产生备份');
+      }
+      const resAllowed = runReenter(dir, 'verify', { source: 'user-approval', reason: '用户显式授权重入' });
+      assertExit(resAllowed, 0);
+      assertOut(resAllowed, 'REENTRY');
+      const appliedState = readScenarioState(dir);
+      if (appliedState.currentNode !== 'verify') {
+        throw new Error('补全授权后应放行并把 currentNode 置为 verify，实际 ' + JSON.stringify(appliedState.currentNode));
+      }
+      const backupsAfterApply = reentryBackupFiles(dir);
+      if (backupsAfterApply.length !== 1) {
+        throw new Error('放行应恰产生 1 份备份，实际 ' + JSON.stringify(backupsAfterApply));
+      }
+      const appliedEvents = (appliedState.history || []).filter((e) => e.event === 'reentry-applied');
+      if (appliedEvents.length !== 1) {
+        throw new Error('放行应恰写 1 条 reentry-applied 事件，实际 ' + JSON.stringify(appliedEvents));
+      }
+      const noopBytes = readStateBytes(dir);
+      const resNoop = runReenter(dir, 'verify', { source: 'user-approval', reason: '重复调用同目标' });
+      assertExit(resNoop, 0);
+      assertNotOut(resNoop, 'BLOCKED');
+      if (outputText(resNoop).trim() === '') {
+        throw new Error('空操作应打印一条可见提示');
+      }
+      assertStateBytesUnchanged(dir, noopBytes, '重复同目标空操作');
+      if (!isDeepStrictEqual(reentryBackupFiles(dir), backupsAfterApply)) {
+        throw new Error('空操作不得新增备份：' + JSON.stringify(reentryBackupFiles(dir)));
+      }
+      const noopState = readScenarioState(dir);
+      if ((noopState.history || []).length !== (appliedState.history || []).length) {
+        throw new Error('空操作不得写事件：history 长度由 ' + (appliedState.history || []).length
+          + ' 变为 ' + (noopState.history || []).length);
+      }
+    },
+  },
+
+  // 263: 旧 change（无 newChange 字段 · AC-3 与本 change 的显式例外）——授权门禁对一切
+  // change 无条件 fail-closed：旧 change 未授权同样 BLOCK（安全面不因 change 新旧降级）；
+  // 合法授权放行并与新 change 走同一转移 / 审计路径。
+  {
+    name: '263 旧 change：未授权仍 BLOCK（显式例外）+ 合法授权放行',
+    run: (dir) => {
+      writeReentryChangeDir(dir);
+      const legacyState = reentryArchiveState();
+      delete legacyState.newChange;
+      writeState(dir, legacyState);
+      const blockedBytes = readStateBytes(dir);
+      const resBlocked = runReenter(dir, 'verify');
+      assertExit(resBlocked, 1);
+      assertOut(resBlocked, 'BLOCKED');
+      assertStateBytesUnchanged(dir, blockedBytes, '旧 change 未授权');
+      if (reentryBackupFiles(dir).length !== 0) {
+        throw new Error('旧 change 未授权 BLOCK 不得产生备份');
+      }
+      const resAllowed = runReenter(dir, 'verify', { source: 'user-approval', reason: '旧 change 显式授权' });
+      assertExit(resAllowed, 0);
+      assertOut(resAllowed, 'REENTRY');
+      const st = readScenarioState(dir);
+      if (st.currentNode !== 'verify') {
+        throw new Error('旧 change 合法授权应放行并转移，实际 ' + JSON.stringify(st.currentNode));
+      }
+      if (!isDeepStrictEqual(st.completedNodes, REENTRY_EXPECTED_INTERSECTION.verify)) {
+        throw new Error('旧 change 转移后 completedNodes 应为前驱交集，实际 ' + JSON.stringify(st.completedNodes));
+      }
+      const appliedEvent = (st.history || []).find((e) => e.event === 'reentry-applied');
+      if (!appliedEvent || appliedEvent.change !== CHANGE_ID || appliedEvent.round !== 1) {
+        throw new Error('旧 change 的审计事件应带 change 且为第 1 轮，实际 ' + JSON.stringify(appliedEvent));
+      }
+      // 最小旧 state（仅 7 个键、无 readState 兼容默认字段）：apply 只写本次实际改动的字段，
+      // 兼容默认值不得随重入回写（键集逐项不变——「其余字段零改写」口径覆盖真实最小旧 state）
+      const minimalLegacy = {
+        activeChange: CHANGE_ID,
+        currentNode: 'archive',
+        completedNodes: [...REENTRY_FULL_COMPLETED],
+        evidence: {},
+        verifyFailures: 0,
+        status: 'running',
+        history: [{ event: 'exit-applied', node: 'verify', at: '2026-09-20T00:00:00.000Z', change: CHANGE_ID }],
+      };
+      writeState(dir, minimalLegacy);
+      const minimalKeysBefore = Object.keys(readScenarioState(dir)).sort();
+      const minimalRes = runReenter(dir, 'verify', { source: 'user-approval', reason: '最小旧 state 重入' });
+      assertExit(minimalRes, 0);
+      assertOut(minimalRes, 'REENTRY');
+      const minimalAfter = readScenarioState(dir);
+      const minimalKeysAfter = Object.keys(minimalAfter).sort();
+      if (!isDeepStrictEqual(minimalKeysAfter, minimalKeysBefore)) {
+        throw new Error('最小旧 state 重入后键集必须逐项不变（兼容默认值不得回写）：before='
+          + JSON.stringify(minimalKeysBefore) + ' after=' + JSON.stringify(minimalKeysAfter));
+      }
+      for (const defaultKey of ['executionMode', 'directOverride', 'branchMode', 'enablePrReview', 'branchPrefix']) {
+        if (defaultKey in minimalAfter) {
+          throw new Error('readState 兼容默认字段不得随重入回写: ' + defaultKey);
+        }
+      }
+    },
+  },
+
+  // 264: history 事件类型集合静态锚（唯一事件类型例外 / 禁止扩散）——扫描引擎生产脚本的
+  // 事件类型字面量：写侧集合必须恰为 {exit-applied, reentry-applied}（reenter 写侧未落地即
+  // RED），读侧集合必须 ⊆ 允许集（出现第三种事件类型即红）；另锚 reentry-applied 写点必须
+  // 带 change 字段（事件对象的动态断言在 259 / 263）。
+  {
+    name: '264 history 事件类型集合静态锚：既有类型 + reentry-applied（新增即红）',
+    run: () => {
+      const allowed = ['exit-applied', 'reentry-applied'];
+      const scripts = fs.readdirSync(__dirname)
+        .filter((f) => f.endsWith('.mjs') && f !== 'guard-self-test.mjs' && f !== 'system-test.mjs');
+      const writers = new Set();
+      const readers = new Set();
+      let writeSite = null;
+      for (const file of scripts) {
+        const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
+        for (const match of text.matchAll(/event:\s*'([a-z][a-z-]*)'/g)) {
+          writers.add(match[1]);
+          if (match[1] === 'reentry-applied') writeSite = { file, text, index: match.index };
+        }
+        for (const match of text.matchAll(/\.event\s*(?:===|!==)\s*'([a-z][a-z-]*)'/g)) {
+          readers.add(match[1]);
+        }
+      }
+      const extra = [...new Set([...writers, ...readers])].filter((type) => !allowed.includes(type));
+      if (extra.length > 0) {
+        throw new Error('history 事件类型出现允许集外的新类型（唯一事件类型例外不得扩散）: ' + extra.join(', ')
+          + '；写侧=' + [...writers].join(',') + '；读侧=' + [...readers].join(','));
+      }
+      const missingWriters = allowed.filter((type) => !writers.has(type));
+      if (missingWriters.length > 0) {
+        throw new Error('history 事件类型写侧缺类型（reenter 未落地即 RED）: ' + missingWriters.join(', ')
+          + '；实际写侧=' + [...writers].join(','));
+      }
+      if (!writeSite) {
+        throw new Error('reentry-applied 写点缺失（审计事件必须由引擎脚本写入）');
+      }
+      const windowText = writeSite.text.slice(writeSite.index, writeSite.index + 800);
+      if (!/\bchange\s*:/.test(windowText)) {
+        throw new Error('reentry-applied 写点必须带 change 字段（跨 change 轮次隔离依据）: ' + writeSite.file);
+      }
+    },
+  },
+
+  // 265: 幂等锚（空操作判定）——目标形态已成立（currentNode=target 且 completedNodes 已等于
+  // 前驱交集）时重复调用 = 空操作：放行 + 可见提示 + 不备份 / 不计数 / 不写事件 / state 字节
+  // 零改写。夹具直接构造目标形态（不经 apply 路径），同时锁定判定顺序：空操作短路必须先于
+  // 源判定——否则 currentNode=verify ≠ archive 会先被源门禁误 BLOCK；但空操作短路不得先于
+  // 上限判定——达上限的同目标形态必须走人工裁决 BLOCK（不得以空操作退出 0）。
+  {
+    name: '265 幂等锚：目标形态已成立的重复调用 = 空操作（零备份·零计数·零事件·零改写），超限同目标仍 BLOCK',
+    run: (dir) => {
+      writeReentryChangeDir(dir);
+      writeState(dir, reentryArchiveState({
+        currentNode: 'verify',
+        completedNodes: [...REENTRY_EXPECTED_INTERSECTION.verify],
+      }));
+      const bytes = readStateBytes(dir);
+      const beforeHistoryLength = (readScenarioState(dir).history || []).length;
+      const res = runReenter(dir, 'verify', { source: 'user-approval', reason: '重复调用同目标' });
+      assertExit(res, 0);
+      assertNotOut(res, 'BLOCKED');
+      if (outputText(res).trim() === '') {
+        throw new Error('空操作应打印一条可见提示');
+      }
+      assertStateBytesUnchanged(dir, bytes, '目标形态已成立的空操作');
+      if (reentryBackupFiles(dir).length !== 0) {
+        throw new Error('空操作不得备份：' + JSON.stringify(reentryBackupFiles(dir)));
+      }
+      const st = readScenarioState(dir);
+      if ((st.history || []).length !== beforeHistoryLength) {
+        throw new Error('空操作不得写事件：history 长度由 ' + beforeHistoryLength + ' 变为 ' + (st.history || []).length);
+      }
+      if ((st.history || []).some((e) => e.event === 'reentry-applied')) {
+        throw new Error('空操作不得写入 reentry-applied 事件');
+      }
+      // 上限判定必须先于空操作短路：达到上限的 change 即使处于同目标形态也走人工裁决 BLOCK，
+      // 不得以空操作退出 0（幂等豁免不越过上限；state 仍字节零改写）
+      writeState(dir, reentryArchiveState({
+        currentNode: 'verify',
+        completedNodes: [...REENTRY_EXPECTED_INTERSECTION.verify],
+        history: [reentryHistoryEvent(1), reentryHistoryEvent(2), reentryHistoryEvent(3)],
+      }));
+      const cappedBytes = readStateBytes(dir);
+      const cappedRes = runReenter(dir, 'verify', { source: 'user-approval', reason: '超限同目标' });
+      assertExit(cappedRes, 1);
+      assertOut(cappedRes, 'BLOCKED');
+      assertOut(cappedRes, '继续');
+      assertOut(cappedRes, '停止');
+      assertNotOut(cappedRes, '空操作');
+      assertStateBytesUnchanged(dir, cappedBytes, '超限同目标形态');
+      if (reentryBackupFiles(dir).length !== 0) {
+        throw new Error('超限同目标形态不得产生备份：' + JSON.stringify(reentryBackupFiles(dir)));
+      }
+      if ((readScenarioState(dir).history || []).length !== 3) {
+        throw new Error('超限同目标形态不得追加审计事件');
       }
     },
   },

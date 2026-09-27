@@ -97,6 +97,9 @@ export const STATE_FIELD_VALIDATORS = [
   { field: 'last_intel_scan', check: (v) => typeof v === 'string' || v === null },
   // 协议来源绑定（init 持久化解析后的协议路径；旧 state 缺字段 = 未绑定，归属门禁渐进回退环境变量/默认）
   { field: 'protocolPath', check: (v) => typeof v === 'string' || v === null || v === undefined },
+  // 审计历史（事件追加数组）：存在即必须是数组——非数组是审计历史损坏，一律 fail-closed 拒绝写入，
+  // 不得由任何写点静默清空覆盖（否则既有事件与轮次派生同时丢失）。旧 state 缺字段 = 空历史（放行）。
+  { field: 'history', check: (v) => Array.isArray(v) },
 ];
 
 // 返回非法字段名数组（空 = 合法）。仅校验存在字段；unknown / 缺失字段一律放行。

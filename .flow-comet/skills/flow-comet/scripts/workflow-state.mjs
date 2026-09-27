@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 import { execFileSync } from 'child_process';
+import { createHash } from 'crypto';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, SKILL_PROTOCOL_FILES } from './protocol-utils.mjs';
+import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, SKILL_PROTOCOL_FILES, inspectWorkflowPathSegments } from './protocol-utils.mjs';
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, looksLikeObjectLiteral, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, toPersistedProtocolPath } from './state-schema.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide, skipInit } from './context-init.mjs';
 import { taskOpeningAttrs, taskBlocks } from './task-parsing.mjs';
-import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS } from './route-node.mjs';
+import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, resolveReentryDecision, isSingleSegmentChangeName, REENTRY_ROUND_LIMIT, REENTRY_TARGET_NODE_IDS, EXECUTE_FAMILY_NODE_IDS } from './route-node.mjs';
 
 const command = process.argv[2] ?? 'status';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -33,9 +34,20 @@ async function readJson(file) {
   return JSON.parse((await fs.readFile(file, 'utf8')).replace(/^﻿/, ''));
 }
 
+// JSON 写盘统一走原子写：先写同目录临时文件，再 rename 覆盖目标——目标文件要么是旧内容、
+// 要么是新内容，不会出现被截断的半写状态。写失败（磁盘满 / 权限 / 目标被占用）时清理临时文件
+// 后抛出，调用方按 fail-closed 处理。状态下发是单写者形态（机器字段只由脚本通道写），
+// 固定临时名与目标同目录，保证 rename 不跨卷。
 async function writeJson(file, value) {
   await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, JSON.stringify(value, null, 2) + '\n', 'utf8');
+  const temporary = file + '.tmp';
+  try {
+    await fs.writeFile(temporary, JSON.stringify(value, null, 2) + '\n', 'utf8');
+    await fs.rename(temporary, file);
+  } catch (error) {
+    try { await fs.rm(temporary, { force: true }); } catch { /* 清理失败不掩盖原始写错误 */ }
+    throw error;
+  }
 }
 
 async function fileExists(file) {
@@ -422,6 +434,44 @@ async function writeState(state) {
     process.exit(1);
   }
   await writeJson(statePath, state);
+}
+
+// .specs/ 下必须存在名字「逐字相等」的目录条目（change 名唯一性判据）。大小写不敏感文件系统
+// （Windows / 默认 macOS）会把「CH」解析到 .specs/ch、「Archive」解析到归档区，但 activeChange
+// 存的是变体字符串——轮次事件按 activeChange 精确匹配（配额被换键重置）、保留名检查按小写归一，
+// 故 change 名必须等于真实目录名，大小写/空白变体一律拒绝（fail-closed）。
+async function hasExactSpecsEntry(changeName) {
+  let entries = [];
+  try {
+    entries = await fs.readdir(specsRoot);
+  } catch {
+    return false;
+  }
+  return entries.includes(changeName);
+}
+
+// 受控重入路径边界（单一 helper：change 名形态 + realpath 直接子目录 + symlink/junction 逃逸）。
+// change 名必须是单段目录名（形态单一权威在 route-node.mjs，与综合判定同源）；目录必须真实存在、
+// 非 symlink/junction、realpath 归一后仍在 .specs/ 内、且名字与真实目录条目逐字相等。物理包含性
+// 判定复用 protocol-utils 的路径段扫描（单一权威，不写第二份路径判据）；任何越界 / 链接形态 /
+// 名字变体一律 BLOCK（fail-closed）。
+async function inspectReentryChangeDir(changeName) {
+  if (typeof changeName !== 'string' || changeName.trim() === '') {
+    return { ok: false, reason: 'no-active-change' };
+  }
+  if (!isSingleSegmentChangeName(changeName)) {
+    return { ok: false, reason: 'change-name-invalid' };
+  }
+  const changeDir = path.join(specsRoot, changeName);
+  let inspection;
+  try {
+    inspection = await inspectWorkflowPathSegments(specsRoot, changeDir, 'reenter change dir', 'directory');
+  } catch (error) {
+    return { ok: false, reason: 'change-dir-escape', detail: error && error.message ? error.message : String(error) };
+  }
+  if (!inspection.exists) return { ok: false, reason: 'change-dir-missing' };
+  if (!(await hasExactSpecsEntry(changeName))) return { ok: false, reason: 'change-name-invalid' };
+  return { ok: true, changeDir };
 }
 
 function generatedNodeSkillName(protocol, nodeId) {
@@ -1023,8 +1073,30 @@ async function main() {
   if (command === 'select') {
     const changeName = process.argv[3];
     if (!changeName) throw new Error('select requires a change name.');
+    // change 名必须是 .specs/ 下的单段目录名（形态单一权威在 route-node.mjs）：拒绝路径分隔符、
+    // . / .. 与保留目录 archive（归档区不是活跃 change）——多段路径会把归档目录等非 change
+    // 目录选成 activeChange，进而污染后续命令的 change 归属与轮次派生。
+    if (!isSingleSegmentChangeName(changeName)) {
+      throw new Error('select change 名必须是 .specs/ 下的单段目录名（拒绝路径分隔符、. / .. 与保留目录 archive）: '
+        + JSON.stringify(changeName));
+    }
     const changeDir = path.join(specsRoot, changeName);
-    if (!(await fileExists(changeDir))) throw new Error('Change not found: ' + changeDir);
+    // 目录必须真实存在且不是 symlink/junction、realpath 归一后仍在 .specs/ 内（复用路径段扫描
+    // 单一权威）；越界 / 链接形态一律拒绝，不把非真实目录选为 activeChange。
+    let inspection;
+    try {
+      inspection = await inspectWorkflowPathSegments(specsRoot, changeDir, 'select change dir', 'directory');
+    } catch (error) {
+      throw new Error('Change not found or path unsafe: ' + changeDir + '（' + (error && error.message ? error.message : error) + '）');
+    }
+    if (!inspection.exists) throw new Error('Change not found: ' + changeDir);
+    // 名字必须与 .specs/ 下真实目录条目逐字相等：大小写/空白变体（如 .specs/ch 用 'CH' 选中）
+    // 在大小写不敏感文件系统上同样可达，但会把 activeChange 存成变体字符串——轮次事件按
+    // activeChange 精确匹配（配额被换键重置）。名字变体一律拒绝，不得改写 activeChange。
+    if (!(await hasExactSpecsEntry(changeName))) {
+      throw new Error('select change 名必须与 .specs/ 下真实目录名逐字相等（大小写/空白变体会使 activeChange 与实际目录不一致）: '
+        + JSON.stringify(changeName));
+    }
     const state = await readState();
     state.activeChange = changeName;
     if (!state.currentNode) state.currentNode = await determineNode(changeName, protocol, state.completedNodes);
@@ -1314,7 +1386,260 @@ async function main() {
     return;
   }
 
-  throw new Error('Unknown command: ' + command + '. Use: init, status, next, select, record, verify-fail, advance, execution-mode, config, skill-load, bridge-check');
+  if (command === 'reenter') {
+    // 受控重入（archive 源回边）：archive 已 entry 且归档移动尚未发生时，用户显式授权把工作归属
+    // 退回执行家族 / review / verify 之一。命令形态：reenter <target> --authorized-by <source>
+    // --reason <text> [--continue-round <n>]。编排顺序：参数防护 → 路径边界（change 名单段 +
+    // realpath 直接子目录）→ 单一权威判定（目标 / change 名 / 上限 / 幂等 / 源 / 授权）→ 备份
+    // （包含性复核）→ 转移 → 授权留痕 → 审计事件 → REENTRY 行。全部判定集中在 route-node.mjs
+    // 纯函数（本命令只做编排与落盘，禁止内联第二份）；BLOCK 与空操作路径一律在写盘前返回
+    // （state 字节零改写）。
+    const target = process.argv[3];
+    const reentryTargetList = [...REENTRY_TARGET_NODE_IDS].join(', ');
+    const reenterUsage = '用法: workflow-state.mjs reenter <target> --authorized-by <source> --reason <text>'
+      + ' [--continue-round <n>]（target 白名单: ' + reentryTargetList + '）';
+    if (typeof target !== 'string' || target === '' || target.startsWith('--')) {
+      console.error('BLOCKED: reenter 缺少目标节点。' + reenterUsage);
+      process.exit(1);
+    }
+    let authorizedBy = null;
+    let reason = null;
+    let continuationRound = null;
+    const reenterArgs = process.argv.slice(4);
+    for (let index = 0; index < reenterArgs.length; index += 1) {
+      const arg = reenterArgs[index];
+      // 支持 --name value 与 --name=value 两种形态；--protocol 为全局参数（协议路径已由
+      // resolveProtocol 统一解析），命令面只做占位透传。
+      let key = arg;
+      let value = null;
+      if (typeof arg === 'string' && arg.startsWith('--')) {
+        const eq = arg.indexOf('=');
+        if (eq > 0) {
+          key = arg.slice(0, eq);
+          value = arg.slice(eq + 1);
+        }
+      }
+      if (key === '--protocol') {
+        if (value === null) index += 1;
+        continue;
+      }
+      if (key === '--continue-round') {
+        // 续轮授权只在达到轮次上限后生效：命令面收正整数，形态合法性与「是否已到上限」由
+        // 单一权威综合判定裁决（本处只做数值形态防护，fail-closed，先于任何读盘）。
+        let consumedNext = false;
+        if (value === null) {
+          value = reenterArgs[index + 1];
+          consumedNext = true;
+        }
+        const parsedRound = typeof value === 'string' && value.trim() !== '' && !value.startsWith('--')
+          ? Number(value.trim())
+          : Number.NaN;
+        if (!Number.isInteger(parsedRound) || parsedRound <= 0) {
+          console.error('BLOCKED: reenter --continue-round 需要正整数取值，实际 ' + JSON.stringify(value) + '。' + reenterUsage);
+          process.exit(1);
+        }
+        continuationRound = parsedRound;
+        if (consumedNext) index += 1;
+        continue;
+      }
+      if (key === '--authorized-by' || key === '--reason') {
+        let consumedNext = false;
+        if (value === null) {
+          value = reenterArgs[index + 1];
+          consumedNext = true;
+        }
+        // 缺值 / 空值 / 纯空白 / 取下个选项名当值 → 一律用法错误（fail-closed，先于任何读盘）
+        if (typeof value !== 'string' || value.trim() === '' || value.startsWith('--')) {
+          console.error('BLOCKED: reenter ' + key + ' 需要非空取值。' + reenterUsage);
+          process.exit(1);
+        }
+        if (key === '--authorized-by') authorizedBy = value.trim();
+        else reason = value.trim();
+        if (consumedNext) index += 1;
+        continue;
+      }
+      console.error('BLOCKED: reenter 未知参数 ' + JSON.stringify(arg) + '。' + reenterUsage);
+      process.exit(1);
+    }
+    if (authorizedBy === null) {
+      console.error('BLOCKED: reenter 需要显式授权 --authorized-by <source>（授权不可自决）。' + reenterUsage);
+      process.exit(1);
+    }
+    if (reason === null) {
+      console.error('BLOCKED: reenter 需要 --reason <text> 说明重入原因。' + reenterUsage);
+      process.exit(1);
+    }
+    const state = await readState();
+    const badFields = validateStateFields(state);
+    if (badFields.length > 0) {
+      // history 存在但非数组等类型损坏在此 fail-closed：不得由本命令静默清空覆盖审计历史。
+      console.error('BLOCKED: state 字段类型非法: ' + badFields[0]);
+      process.exit(1);
+    }
+    // 原始 state（未经 readState 兼容默认值叠加）：落盘时只写「原始键集 + 本次实际改动的字段」，
+    // 兼容默认值不得随重入回写（最小旧 state 的键集保持逐项不变）。
+    const rawState = (await fileExists(statePath)) ? await readJson(statePath) : null;
+    // 路径边界：change 名必须是 .specs/ 下的单段真实目录（realpath 归一后是 .specs 直接子目录，
+    // 且路径上无 symlink/junction）。归档移动已发生（目录不在原位）、change 已 completed、
+    // change 名畸形（多段 / . / .. / 保留目录 archive）与链接逃逸一律 BLOCK。该边界先于综合
+    // 判定执行——completed 与已移动形态必须无条件 BLOCK（不被空操作分支短路）。
+    const changeName = typeof state.activeChange === 'string' ? state.activeChange : '';
+    const changeBoundary = await inspectReentryChangeDir(changeName);
+    const changeDirPresent = changeBoundary.ok
+      ? true
+      : (changeBoundary.reason === 'change-dir-missing' ? false : null);
+    const movedOrCompletedMessage = 'BLOCKED: 归档移动已发生或 change 已 completed（.specs/'
+      + (changeName || '<未知>') + '/ 在场=' + changeDirPresent + '，status=' + JSON.stringify(state.status)
+      + '）——受控重入只覆盖归档移动前的运行形态；请走人工处置、新 change 或 hotfix 路径。';
+    if (state.status === 'completed' || changeDirPresent === false) {
+      console.error(movedOrCompletedMessage);
+      process.exit(1);
+    }
+    if (!changeBoundary.ok) {
+      const boundaryMessages = {
+        'no-active-change': '当前没有活跃 change（activeChange 缺失或为空）——先 select <change-id>',
+        'change-name-invalid': 'change 名非法 ' + JSON.stringify(changeName)
+          + '——必须是 .specs/ 下的单段目录名（拒绝路径分隔符、. / .. 与保留目录 archive）',
+        'change-dir-escape': 'change 目录路径越界或跨越符号链接 / junction（' + changeBoundary.detail
+          + '）——受控重入与备份只允许落在 .specs/<change-id>/ 真实目录内',
+      };
+      console.error('BLOCKED: ' + boundaryMessages[changeBoundary.reason]);
+      process.exit(1);
+    }
+    const changeDir = changeBoundary.changeDir;
+    // 授权形态的 round / at 由引擎派生（命令面只承载授权来源、原因与上限后的续轮轮次）：普通轮次
+    // 以合法占位值过形态门；落盘轮次一律取综合判定返回的 round（由本 change 历史事件派生），
+    // 不在此内联第二份轮次推导。
+    const authorizedAt = new Date().toISOString();
+    const decision = resolveReentryDecision({
+      protocol,
+      state,
+      target,
+      authorization: { round: 1, at: authorizedAt, source: authorizedBy, target },
+      continuationRound,
+    });
+    if (!decision.ok) {
+      if (decision.reason === 'round-limit-reached') {
+        console.error('BLOCKED: 本 change 受控重入已达上限（' + decision.used + '/' + decision.limit
+          + ' 轮）。需要人工裁决：继续（显式授权后在同一命令加 --continue-round <n>，n 为不小于第 '
+          + (decision.used + 1) + ' 轮的正整数，须与 --authorized-by / --reason 同次传入）/ 停止（保持归档态，不再重入）。');
+        process.exit(1);
+      }
+      const guidance = {
+        'target-not-allowed': '目标节点 ' + JSON.stringify(target) + ' 不在受控重入白名单（'
+          + reentryTargetList + '）——请显式指定白名单内目标',
+        'target-not-enabled': '目标节点 ' + JSON.stringify(target)
+          + ' 在当前协议中未启用（disabled）——请检查协议或改选已启用目标',
+        'no-active-change': '当前没有活跃 change（activeChange 缺失或为空）——先 select <change-id>',
+        'change-name-invalid': 'change 名非法 ' + JSON.stringify(changeName)
+          + '——必须是 .specs/ 下的单段目录名（拒绝路径分隔符、. / .. 与保留目录 archive）',
+        'source-not-archive': '受控重入只覆盖 archive 源（当前节点 ' + JSON.stringify(state.currentNode)
+          + '）——正常推进请走 next / record / exit 既有通道',
+        'continuation-not-required': '--continue-round 只在达到轮次上限后需要（当前 ' + decision.used + '/'
+          + decision.limit + ' 轮）——上限前请直接以 --authorized-by / --reason 发起',
+      }[decision.reason] || ('授权形态不合法（' + decision.reason + '）——需要用户显式传入 --authorized-by <source>');
+      console.error('BLOCKED: ' + guidance);
+      process.exit(1);
+    }
+    if (decision.action === 'noop') {
+      console.log('REENTRY: 空操作——workflow 已处于目标形态（' + target
+        + '，完成标记已是目标前驱交集）；未备份、未计数、未改写 state。');
+      return;
+    }
+    if (decision.action !== 'apply') {
+      console.error('BLOCKED: 受控重入判定返回未知动作 ' + JSON.stringify(decision.action) + '——按 fail-closed 拒绝。');
+      process.exit(1);
+    }
+    const round = decision.round;
+    const source = decision.authorization.source;
+    const at = decision.authorization.at;
+    const continuationAuthorized = decision.continuationAuthorized === true;
+    // 备份：重入前 state 全量快照（文件原始字节，UTF-8 BOM 按可解析形态落盘）；文件名
+    // <UTC ISO 净化>-pre-<target>.json；审计指纹 = 备份文件字节的 sha256（可核验）。
+    const backupDir = path.join(changeDir, '.reentry-backups');
+    const backupFile = at.replace(/:/g, '-') + '-pre-' + target + '.json';
+    const backupPath = path.join(backupDir, backupFile);
+    const backupRecord = path.relative(runRoot, backupPath).split(path.sep).join('/');
+    const snapshotBytes = Buffer.from((await fs.readFile(statePath, 'utf8')).replace(/^\uFEFF/, ''), 'utf8');
+    const fingerprint = createHash('sha256').update(snapshotBytes).digest('hex');
+    const existingHistory = Array.isArray(rawState?.history) ? rawState.history : [];
+    let backupWritten = false;
+    try {
+      if (!rawState || typeof rawState !== 'object' || Array.isArray(rawState)) {
+        throw new Error('state 文件缺失或形态非法，无法重入');
+      }
+      // 备份写入路径的物理包含性复核（单一权威路径段扫描）：备份目录与备份文件逐段
+      // lstat + realpath——任何 symlink/junction 逃出 .specs/ 一律拒绝，不写任何字节。
+      await fs.mkdir(backupDir, { recursive: true });
+      await inspectWorkflowPathSegments(specsRoot, backupDir, 'reenter backup dir', 'directory');
+      await fs.writeFile(backupPath, snapshotBytes);
+      backupWritten = true;
+      await inspectWorkflowPathSegments(specsRoot, backupPath, 'reenter backup file', 'file');
+      // 授权留痕：嵌套写入被重入目标节点的 evidence（授权记录 + 备份指针 + 指纹 + 原因 +
+      // 续轮标记）。只改 evidence 的目标节点键，其余键按原始键集逐项保留。
+      const existingEvidence = rawState.evidence && typeof rawState.evidence === 'object' && !Array.isArray(rawState.evidence)
+        ? rawState.evidence
+        : {};
+      const targetEvidence = existingEvidence[decision.target]
+        && typeof existingEvidence[decision.target] === 'object'
+        && !Array.isArray(existingEvidence[decision.target])
+        ? existingEvidence[decision.target]
+        : {};
+      const authorizationRecord = {
+        round,
+        at,
+        source,
+        target: decision.target,
+        backup: backupRecord,
+        fingerprint,
+        reason,
+        ...(continuationAuthorized ? { continuationAuthorized: true } : {}),
+      };
+      // 落盘形态 = 原始 state 键集 + 本次实际改动的四类机器字段与审计字段——转移语义
+      // （currentNode := target / completedNodes := 前驱交集 / status := running）与审计
+      // （evidence 留痕 + history 追加事件）之外的字段逐项不变；readState 的兼容默认值不回写。
+      const persisted = { ...rawState };
+      persisted.currentNode = decision.target;
+      persisted.completedNodes = decision.completedNodes.slice();
+      persisted.status = 'running';
+      persisted.evidence = {
+        ...existingEvidence,
+        [decision.target]: { ...targetEvidence, reentryAuthorization: authorizationRecord },
+      };
+      // 审计事件：append-only 追加 reentry-applied；change 字段是跨 change 轮次隔离的唯一依据。
+      persisted.history = existingHistory.concat([{
+        event: 'reentry-applied',
+        from: 'archive',
+        to: decision.target,
+        round,
+        authorization: { round, at, source, target: decision.target },
+        backup: backupRecord,
+        fingerprint,
+        at,
+        change: changeName,
+        reason,
+        ...(continuationAuthorized ? { continuationAuthorized: true } : {}),
+      }]);
+      const persistedBad = validateStateFields(persisted);
+      if (persistedBad.length > 0) throw new Error('state 字段类型非法: ' + persistedBad[0]);
+      await writeState(persisted);
+    } catch (error) {
+      // 写盘失败：回滚本次调用创建的孤儿备份（state 由原子写保证不被截断），原始错误照常上抛。
+      if (backupWritten) {
+        try { await fs.rm(backupPath, { force: true }); } catch { /* 清理失败不掩盖原始错误 */ }
+      }
+      throw error;
+    }
+    const roundLabel = continuationAuthorized
+      ? '第 ' + round + ' 轮（显式授权续轮，上限 ' + REENTRY_ROUND_LIMIT + '）'
+      : '第 ' + round + '/' + REENTRY_ROUND_LIMIT + ' 轮';
+    console.log('REENTRY: archive → ' + decision.target + '（授权源 ' + source + '；' + roundLabel
+      + '；备份 ' + backupRecord + '）');
+    console.log('REASON: ' + reason);
+    return;
+  }
+
+  throw new Error('Unknown command: ' + command + '. Use: init, status, next, select, record, verify-fail, advance, execution-mode, config, skill-load, bridge-check, reenter');
 }
 
 main().catch(error => {

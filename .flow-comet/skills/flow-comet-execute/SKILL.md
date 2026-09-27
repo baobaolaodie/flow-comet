@@ -79,6 +79,7 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 > - 正确：`"completedChecks": ["required-skill:subagent-execute.flow-comet-dev"]`
 > - 错误：`"completedChecks": ["required-skill:execute.flow-comet-dev"]` —— 按 execute 域命名会被 W1-D 拦截（exit BLOCKED），子代理必须回传统一契约值
 > - 错误：`"completedChecks": [{"id": "required-skill:subagent-execute.flow-comet-dev", "status": "done"}]` —— 对象数组会被严格比较判"缺"（必须为字符串数组）
+> **Return Contract 的 skillToolFallback 声明**：子代理会话不具备 Skill 工具时，必须并排回传 `skillToolFallback` 声明降级替代形态（如 `file-read`）——该字段是**声明、不是物理证明**（回执只能记录声明，读 SKILL.md 与真实 Skill 注入在机器可读证据上不可区分）；只有 `required-skill` 标记而无降级声明视为不实声明，orchestrator 不得记录 result；具备 Skill 工具时不得回传该字段。
 
 The full dev protocol, templates, and constraints are in:
 - `flow-kit/prompts/4-dev.md` (DEV phase) — handoff prompt 的子代理强制协议（不再以“参照前一产物”转述——子代理必须显式按此协议执行并加载 flow-comet-dev）
@@ -114,6 +115,8 @@ review / verify 发现缺陷后的修复必须回到 `execute` 节点生命周�
 5. **回源节点跑出口**：回到源节点后运行 `next`，Fix 回程豁免生效时应输出 `NODE: review` 或 `NODE: verify`（不会因源节点产物已存在而跳过）；若仍输出后续节点，说明回程条件未满足，先核对状态机归属与任务状态，不要继续推进。随后执行 `entry <源节点>` → `exit <源节点> --apply` 跑源节点出口门禁（即 entry/exit 源节点）；通过后继续正常路由（review → verify；verify → archive），必要时进入下一轮 Fix 闭环。
    - **`next` 回程审计行语义**：回程豁免行始终输出中性 `RETURN: 回程源节点 <源节点>`（源节点产物在场且未出口；保留源节点跑出口），不再输出 FIX-BATCH；受控归位行的 `FIX-BATCH: 归位 <execute 家族>` 保留（真实 Fix 回退行），两者不得混同。
 6. **禁止绕过**：驻留源节点不归位、顺手改完后直接跑源节点 exit 收场会被 BLOCKED（存在未归位/未跑出口的 Fix 批次），必须按上述路径恢复；不得用跳过归位或出口门禁的手段（含手动改写 `.flow-comet/flow-comet-state.json`）替代本路径。
+
+**由受控重入打开的场景（archive 源）**：缺陷在归档后才暴露、且归档移动尚未发生时，可先由用户显式授权把工作归属退回 `execute` / `subagent-execute` / `review` / `verify` 之一，再按本节路径回到 execute 生命周期完成修复。重入命令：`node .claude/skills/flow-comet/scripts/workflow-state.mjs reenter <target> --authorized-by <source> --reason <text> [--continue-round <n>]`——每次调用都需要用户显式授权，每 change 上限 3 轮（达上限后凭显式续轮授权 `--continue-round <n>`（n ≥ 已用轮次 + 1）可继续并计入下一轮）；重入前自动落 state 备份快照（`.specs/<change-id>/.reentry-backups/`）；成功打印 `REENTRY: archive → <target>（授权源 <source>；第 n/3 轮；备份 <file>）` 与 `REASON: <text>` 行（续轮审计行为 `第 n 轮（显式授权续轮，上限 3）`），与 Fix 回炉的 `FIX-BATCH` 行、正常多趟收尾的 `RETURN` 行三态可区分。归档移动已发生或 change 已 `completed` 时重入 BLOCKED，须走人工处置或新 change，不得静默跳过。重入只改工作归属，不写任何闭合标记，也不跳过目标节点入口 / 出口与源节点出口门禁；重复调用同一目标为空操作（输出 `REENTRY: 空操作——…`，不备份、不计数、不改写 state）。
 
 ## Entry Check
 
