@@ -10,6 +10,12 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded in nine places, kept in agreement by CI on the release surface: the release git tag; the README badge, [docs/VERSIONS.md](docs/VERSIONS.md) and this changelog, each in both languages; the authoritative `.flow-comet/skills/flow-comet/INSTALLED_VERSION`; and the npm package's `package.json` `version`.
 
+## [Unreleased]
+
+### Changed
+
+- **The two-tier regression baseline moved up with the new coverage**: the self-test suite now records 273 scenarios and the system test suite 85 items, and both counts stay machine-checked across the release surfaces.
+
 ## [1.6.0] - 2026-09-27
 
 A release gathering the batches accumulated after 1.5.1: the installer no longer borrows the host repository's tags for the version it reports and its messages use the tool's own name; the repository's maintenance documents were rebuilt and cleaned up; repairs reported after review now run through the execution lifecycle, return audit lines state their source explicitly, controlled repair cycles are counted per change with a fourth one pausing for a decision, and task-set signatures record the algorithm that produced them; and an archived change can be re-opened through a controlled, explicitly authorized path. ([#106](https://github.com/baobaolaodie/flow-comet/pull/106)) ([#107](https://github.com/baobaolaodie/flow-comet/pull/107)) ([#109](https://github.com/baobaolaodie/flow-comet/pull/109)) ([#110](https://github.com/baobaolaodie/flow-comet/pull/110)) ([#111](https://github.com/baobaolaodie/flow-comet/pull/111)) ([#112](https://github.com/baobaolaodie/flow-comet/pull/112)) ([#113](https://github.com/baobaolaodie/flow-comet/pull/113))

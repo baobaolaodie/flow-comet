@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · flow-comet 引擎自测套件（场景数以 SCENARIOS.length 为准：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、计数一致性自检（场景数 + 系统测试集项数）、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退）、并行文件依赖检测（写写重叠强判前移 plan 出口 + read 读写弱判渐进 + 触发面排除 + 委托前保持锚 + 扩展名闭合）、directOverride 授权约束（协调者授权留痕正例 / 执行者自切无授权 BLOCK / 越界改 state hook 拦截 / 恢复双路径）、hook state 大小写变体拦截（win32/darwin 闭合 / 其他平台放行）、路由完成判定 fail-closed（缺/未知 status 畸形块不提前放行）、并行文件依赖路径归一化（`.` 段变体重叠检出）、运行时文件位置迁移（白名单搬移 / 迁移前备份与回退 / 新旧并存·符号链接·内容损坏三边界 / 失败保护 / gitignore 三形态保守纳管与幂等）、Comet 感知层剥离（classic 资产有无判定一致 / overlay 协议不再进入叠加分支 + 源码符号检索）、自检清单条目缺失显式报告）
+// C1 · flow-comet 引擎自测套件（场景数以 SCENARIOS.length 为准：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、计数一致性自检（场景数 + 系统测试集项数）、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退）、并行文件依赖检测（写写重叠强判前移 plan 出口 + read 读写弱判渐进 + 触发面排除 + 委托前保持锚 + 扩展名闭合）、directOverride 授权约束（协调者授权留痕正例 / 执行者自切无授权 BLOCK / 越界改 state hook 拦截 / 恢复双路径）、hook state 大小写变体拦截（win32/darwin 闭合 / 其他平台放行）、路由完成判定 fail-closed（缺/未知 status 畸形块不提前放行）、并行文件依赖路径归一化（`.` 段变体重叠检出）、运行时文件位置迁移（白名单搬移 / 迁移前备份与回退 / 新旧并存·符号链接·内容损坏三边界 / 失败保护 / gitignore 三形态保守纳管与幂等）、Comet 感知层剥离（classic 资产有无判定一致 / overlay 协议不再进入叠加分支 + 源码符号检索）、自检清单条目缺失显式报告、受控计划重校重签（replan 授权 fail-closed / 轮次上限与显式续轮 / 幂等空操作 / 重签后 execute 出口放行 / 校验不豁免与任务图分析单源锚）与强制推进留痕（advance-forced 事件 / status.forcedNodes 派生视图））
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .flow-comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -868,6 +868,128 @@ function assertOutMatches(res, pattern, label) {
   if (!pattern.test(text)) {
     throw new Error((label || '输出') + ' 应匹配 ' + pattern + '，实际输出:\n' + text);
   }
+}
+
+// ---------- 受控计划重校重签（replan）与强制推进留痕（advance-forced）场景材料 ----------
+// replan 是"计划在执行中被证明有缺陷"时的受控通道（ADR-013）：仅 execute / subagent-execute
+// 相位可用、停原位、不跳节点——重新校验任务图与任务字段 → 重录 state.taskHash → 双写留痕
+// （evidence.<node>.replanAuthorization + history 事件 replan-applied）。判定语义的唯一权威在
+// route-node.mjs（测试侧不复制生产判定——L-067）；本段只装配夹具与断言助手。纯函数契约按
+// reentry 族同构声明：
+//   parseReplanAuthorization({ authorization, node })  // authorization = { round, at, source, reason, node }
+//   replanRoundCount({ history, changeName })
+//   replanRoundDecision({ history, changeName, continuationAuthorized })
+//   replanNoOpDecision({ state, taskContent })
+//   resolveReplanDecision({ protocol, state, authorization, continuationRound })
+// 缺失导出由 requireRouteNodeExport 在场景内显式报告（RED 可定位到具体场景，不整套件 abort）。
+
+// 修订前的任务集（entry 形态）：一个串行待办任务
+const REPLAN_TASK_INITIAL =
+  '<task id="S01" status="pending" parallel="false"><action>实现 S01</action>'
+  + '<write_files>src/s01.mjs</write_files><verify>node --check src/s01.mjs</verify></task>\n';
+// 修订后的任务集（死锁现场）：原任务完成 + 计划外新增的并行就绪任务
+const REPLAN_TASK_REVISED =
+  '<task id="S01" status="done" parallel="false"><action>实现 S01</action>'
+  + '<write_files>src/s01.mjs</write_files><verify>node --check src/s01.mjs</verify></task>\n'
+  + '<task id="P02" status="pending" parallel="true"><action>实现计划外新增的 P02</action>'
+  + '<write_files>src/p02.mjs</write_files><verify>node --check src/p02.mjs</verify></task>\n';
+// 缺 <verify> 字段的负例任务集（plan 出口与 replan 共用的任务字段校验）
+const REPLAN_TASK_NO_VERIFY =
+  '<task id="S01" status="pending" parallel="false"><action>实现 S01</action>'
+  + '<write_files>src/s01.mjs</write_files></task>\n';
+// 过期签名占位（与哈希算法实现解耦：只比较是否相等/同版本，不依赖真实摘要值）
+const REPLAN_STALE_SIGNATURE = 'v1:' + '0'.repeat(64);
+
+// replan 相位夹具：execute 已 entry、前序完成、证据齐备（execute 出口可通过）、TASK.md 在场。
+// branchMode / enablePrReview / branchPrefix 显式在场——避免 readState 兼容默认值让「零改写」
+// 口径混入实现细节噪音（与受控重入夹具同做法）。
+function replanExecuteState(overrides = {}) {
+  return {
+    activeChange: CHANGE_ID,
+    currentNode: 'execute',
+    completedNodes: ['open', 'design', 'plan'],
+    enteredNodes: ['open', 'design', 'plan', 'execute'],
+    evidence: {
+      open: { summary: 'open done' },
+      design: { summary: 'design done' },
+      plan: { summary: 'plan done' },
+      execute: { summary: 'implementation recorded' },
+      'subagent-execute': { handoffResult: handoffFor(['S01']) },
+    },
+    verifyFailures: 0,
+    executionMode: 'subagent',
+    directOverride: false,
+    newChange: true,
+    status: 'running',
+    branchMode: false,
+    enablePrReview: false,
+    branchPrefix: 'change/',
+    history: [{ event: 'exit-applied', node: 'plan', at: '2026-09-27T00:00:00.000Z', change: CHANGE_ID }],
+    ...overrides,
+  };
+}
+
+// 备份目录/清单（replan 备份规则 .specs/<change-id>/replan-backups/）：BLOCK / 空操作路径零新增。
+function replanBackupFiles(dir, changeName = CHANGE_ID) {
+  const backupDir = path.join(dir, '.specs', changeName, 'replan-backups');
+  return fs.existsSync(backupDir) ? fs.readdirSync(backupDir).sort() : [];
+}
+
+// replan-applied 事件过滤（轮次按 change 从 history 派生——与受控重入同计数法）
+function replanEventsOf(state) {
+  return (state.history || []).filter((e) => e && e.event === 'replan-applied');
+}
+
+// 轮次事件夹具：change 归属字段是跨 change 隔离的唯一依据（写侧必须带 change）
+function replanHistoryEvent(roundNumber, changeName = CHANGE_ID) {
+  return {
+    event: 'replan-applied',
+    node: 'execute',
+    round: roundNumber,
+    change: changeName,
+    reason: '计划重校',
+    authorizedBy: 'user-approval',
+    taskSetSignature: REPLAN_STALE_SIGNATURE,
+    at: '2026-09-27T00:00:00.000Z',
+  };
+}
+
+// 授权形态纯函数锚（AC-2 的 guard-self-test 验证方式）：形态合法性由 route-node 的
+// parseReplanAuthorization 单一权威判定，本助手只声明期望（malformed → ok:false）。
+function assertReplanAuthorizationShape(authorization, node, expectedOk, label) {
+  const parse = requireRouteNodeExport('parseReplanAuthorization');
+  const result = parse({ authorization, node });
+  if (!result || result.ok !== expectedOk) {
+    throw new Error('[' + label + '] replan 授权形态判定应为 ok=' + expectedOk + '，实际 ' + JSON.stringify(result));
+  }
+  return result;
+}
+
+// 重签复核：state.taskHash 必须等于当前 TASK.md 的签名（同版本比较复用 route-node 既有实现，
+// 不在此内联第二份判据）。
+function assertReplanSignatureRecorded(state, taskContent, label) {
+  const same = requireRouteNodeExport('sameTaskSetSignature');
+  const signature = requireRouteNodeExport('taskSetSignature')(taskContent);
+  if (!same(state.taskHash, signature)) {
+    throw new Error(label + '：state.taskHash 应重签为当前 TASK.md 的签名，实际 '
+      + JSON.stringify(state.taskHash) + '，期望 ' + JSON.stringify(signature));
+  }
+  return signature;
+}
+
+// status 输出（JSON 块 + 尾巴行）解析：只取首个 { 到末个 } 之间的 JSON 对象。
+function parseStatusJson(res) {
+  const text = outputText(res);
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start < 0 || end <= start) throw new Error('status 输出缺少 JSON 块:\n' + text);
+  return JSON.parse(text.slice(start, end + 1));
+}
+
+// 场景内受控命令（replan / advance / status / next）：显式注入场景协议副本路径
+// （L-079：依赖协议解析的门禁不得静默跳过；副本由运行器预置在 <dir>/reference/）。
+function runStateWithProtocol(dir, args) {
+  return runState(args, dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
 }
 
 // ---------- 伪造材料 ----------
@@ -11369,23 +11491,25 @@ const SCENARIOS = [
   },
 
   // 264: history 事件类型集合静态锚（唯一事件类型例外 / 禁止扩散）——扫描引擎生产脚本的
-  // 事件类型字面量：写侧集合必须恰为 {exit-applied, reentry-applied}（reenter 写侧未落地即
-  // RED），读侧集合必须 ⊆ 允许集（出现第三种事件类型即红）；另锚 reentry-applied 写点必须
-  // 带 change 字段（事件对象的动态断言在 259 / 263）。
+  // 事件类型字面量：写侧集合必须恰为 {exit-applied, reentry-applied, replan-applied,
+  // advance-forced}（新增类型必须由引擎写侧真实落地 + 显式更新本锚，未落地即 RED），读侧集合
+  // 必须 ⊆ 允许集（出现允许集外的事件类型即红）；另锚新的两类写点必须带跨 change 归属字段
+  // （replan-applied → change）与「被跳过的出口门禁」标识（advance-forced → skipped：
+  // exit:<node>），事件对象的动态断言在 259 / 263 / 受控计划重校场景族。
   {
-    name: '264 history 事件类型集合静态锚：既有类型 + reentry-applied（新增即红）',
+    name: '264 history 事件类型集合静态锚：既有类型 + replan-applied / advance-forced（新增即红、判据不放宽）',
     run: () => {
-      const allowed = ['exit-applied', 'reentry-applied'];
+      const allowed = ['exit-applied', 'reentry-applied', 'replan-applied', 'advance-forced'];
       const scripts = fs.readdirSync(__dirname)
         .filter((f) => f.endsWith('.mjs') && f !== 'guard-self-test.mjs' && f !== 'system-test.mjs');
       const writers = new Set();
       const readers = new Set();
-      let writeSite = null;
+      const writeSites = new Map();
       for (const file of scripts) {
         const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
         for (const match of text.matchAll(/event:\s*'([a-z][a-z-]*)'/g)) {
           writers.add(match[1]);
-          if (match[1] === 'reentry-applied') writeSite = { file, text, index: match.index };
+          writeSites.set(match[1], { file, text, index: match.index });
         }
         for (const match of text.matchAll(/\.event\s*(?:===|!==)\s*'([a-z][a-z-]*)'/g)) {
           readers.add(match[1]);
@@ -11398,15 +11522,28 @@ const SCENARIOS = [
       }
       const missingWriters = allowed.filter((type) => !writers.has(type));
       if (missingWriters.length > 0) {
-        throw new Error('history 事件类型写侧缺类型（reenter 未落地即 RED）: ' + missingWriters.join(', ')
+        throw new Error('history 事件类型写侧缺类型（受控通道未落地即 RED）: ' + missingWriters.join(', ')
           + '；实际写侧=' + [...writers].join(','));
       }
-      if (!writeSite) {
-        throw new Error('reentry-applied 写点缺失（审计事件必须由引擎脚本写入）');
+      // 跨 change 归属字段锚：轮次/配额按 change 隔离依赖事件的 change 字段（reentry / replan 同判据）
+      const changeFieldTypes = ['reentry-applied', 'replan-applied'];
+      for (const type of changeFieldTypes) {
+        const site = writeSites.get(type);
+        if (!site) throw new Error(type + ' 写点缺失（审计事件必须由引擎脚本写入）');
+        const windowText = site.text.slice(site.index, site.index + 800);
+        if (!/\bchange\s*:/.test(windowText)) {
+          throw new Error(type + ' 写点必须带 change 字段（跨 change 轮次隔离依据）: ' + site.file);
+        }
       }
-      const windowText = writeSite.text.slice(writeSite.index, writeSite.index + 800);
-      if (!/\bchange\s*:/.test(windowText)) {
-        throw new Error('reentry-applied 写点必须带 change 字段（跨 change 轮次隔离依据）: ' + writeSite.file);
+      // 强制推进留痕锚：事件必须记录被跳过的出口门禁标识（skipped: ['exit:<node>']）
+      const forcedSite = writeSites.get('advance-forced');
+      if (!forcedSite) throw new Error('advance-forced 写点缺失（逃生口留痕必须由引擎脚本写入）');
+      const forcedWindow = forcedSite.text.slice(forcedSite.index, forcedSite.index + 800);
+      if (!/\bskipped\s*:/.test(forcedWindow)) {
+        throw new Error('advance-forced 写点必须带 skipped 字段（记录被跳过的出口门禁）: ' + forcedSite.file);
+      }
+      if (!/exit:/.test(forcedWindow)) {
+        throw new Error('advance-forced 写点的 skipped 值必须标识 exit:<node> 形态的门禁: ' + forcedSite.file);
       }
     },
   },
@@ -11463,6 +11600,438 @@ const SCENARIOS = [
       }
       if ((readScenarioState(dir).history || []).length !== 3) {
         throw new Error('超限同目标形态不得追加审计事件');
+      }
+    },
+  },
+
+  // 266: replan 授权 fail-closed（AC-2 / ADR-013 决策 5）——缺 --authorized-by / 空串 /
+  // 纯空白 / 缺 <reason> / 纯空白 reason → BLOCKED、state 字节（sha256）零改写、零备份、零事件；
+  // 授权形态由 route-node 纯函数单一权威判定（malformed → block + 合法形态放行对照）。
+  {
+    name: '266 replan 授权 fail-closed：缺/空/纯空白授权与缺原因 → BLOCKED 零改写 + 形态纯函数锚',
+    run: (dir) => {
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', REPLAN_TASK_INITIAL);
+      writeState(dir, replanExecuteState());
+      // entry 形态：真实记录修订前的任务集签名（后续修订使其成为「到期签名」）
+      assertExit(runGuard(['entry', 'execute'], dir), 0);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', REPLAN_TASK_REVISED);
+      const bytes = readStateBytes(dir);
+      const shaBefore = createHash('sha256').update(bytes, 'utf8').digest('hex');
+      const blockedCases = [
+        ['缺 --authorized-by（仅位置 reason）', ['replan', '计划有缺陷：新增并行任务']],
+        ['--authorized-by 空串', ['replan', '计划有缺陷：新增并行任务', '--authorized-by', '']],
+        ['--authorized-by 纯空白', ['replan', '计划有缺陷：新增并行任务', '--authorized-by', '   ']],
+        ['缺 <reason>（仅授权）', ['replan', '--authorized-by', 'user-approval']],
+        ['<reason> 纯空白', ['replan', '   ', '--authorized-by', 'user-approval']],
+      ];
+      for (const [label, args] of blockedCases) {
+        const res = runStateWithProtocol(dir, args);
+        assertExit(res, 1);
+        assertOut(res, 'BLOCKED');
+        assertStateBytesUnchanged(dir, bytes, label);
+        const shaNow = createHash('sha256').update(readStateBytes(dir), 'utf8').digest('hex');
+        if (shaNow !== shaBefore) {
+          throw new Error(label + '：state sha256 应零改写，实际 ' + shaNow + ' ≠ ' + shaBefore);
+        }
+      }
+      if (replanBackupFiles(dir).length !== 0) {
+        throw new Error('授权非法路径不得产生备份：' + JSON.stringify(replanBackupFiles(dir)));
+      }
+      if (replanEventsOf(readScenarioState(dir)).length !== 0) {
+        throw new Error('授权非法路径不得写审计事件：' + JSON.stringify(replanEventsOf(readScenarioState(dir))));
+      }
+      // 授权形态纯函数锚：malformed 一律 ok:false；合法形态 ok:true 且归一化字段完整
+      const valid = {
+        round: 1,
+        at: '2026-09-27T00:00:00.000Z',
+        source: 'user-approval',
+        reason: '计划有缺陷',
+        node: 'execute',
+      };
+      const parsedValid = assertReplanAuthorizationShape(valid, 'execute', true, '合法授权三元组');
+      if (!parsedValid.authorization || parsedValid.authorization.source !== 'user-approval'
+        || parsedValid.authorization.reason !== '计划有缺陷' || parsedValid.authorization.node !== 'execute') {
+        throw new Error('合法授权的归一化结果不完整：' + JSON.stringify(parsedValid.authorization));
+      }
+      const malformed = [
+        ['缺 authorization', undefined],
+        ['authorization 为数组', []],
+        ['round=0', { ...valid, round: 0 }],
+        ['round 非整数', { ...valid, round: 1.5 }],
+        ['round 类型错误', { ...valid, round: '1' }],
+        ['at 空串', { ...valid, at: '' }],
+        ['at 纯空白', { ...valid, at: '  ' }],
+        ['at 类型错误', { ...valid, at: 42 }],
+        ['source 空串', { ...valid, source: '' }],
+        ['source 纯空白', { ...valid, source: '  ' }],
+        ['source 类型错误', { ...valid, source: [] }],
+        ['node 与调用不一致', { ...valid, node: 'subagent-execute' }],
+      ];
+      for (const [label, authorization] of malformed) {
+        assertReplanAuthorizationShape(authorization, 'execute', false, label);
+      }
+      // 综合判定的未授权路径：非法授权 → block（不抛异常、不写盘；零改写由上方 CLI 用例锚定）
+      const decide = requireRouteNodeExport('resolveReplanDecision');
+      const decideState = replanExecuteState();
+      for (const [label, authorization] of malformed) {
+        const decision = decide({ protocol: readScenarioProtocol(dir), state: decideState, authorization });
+        if (!decision || decision.ok !== false || decision.action !== 'block') {
+          throw new Error('[' + label + '] resolveReplanDecision 应返回 block，实际 ' + JSON.stringify(decision));
+        }
+      }
+      // 纯函数族存在性锚（T03 交付面）：五项导出缺任一即本场景 RED
+      requireRouteNodeExport('replanRoundCount');
+      requireRouteNodeExport('replanRoundDecision');
+      requireRouteNodeExport('replanNoOpDecision');
+    },
+  },
+
+  // 267: replan 校验不豁免（ADR-013 决策 3 / 明确 out：replan 绝不做校验豁免）——依赖环 /
+  // 缺失依赖 / 缺 <verify> 三类任务集在 replan 上一律 BLOCKED 且状态零改写；并且 plan 出口与
+  // replan 对同一输入给出同一机器分类。同源是结构事实而非注释声明（L-067）：任务图分析只有
+  // 一份实现（route-node.mjs 定义并导出），workflow-guard 静态 import 使用它。
+  {
+    name: '267 replan 校验不豁免：依赖环/缺失依赖/缺 verify → BLOCKED 零改写 + 任务图分析单源锚',
+    run: (dir) => {
+      const cases = [
+        ['依赖环', TASK_DEP_CYCLE, '依赖环', '依赖环'],
+        ['依赖不存在的任务', TASK_MISSING_DEP, '依赖不存在的任务', '依赖'],
+        ['缺 <verify> 字段', REPLAN_TASK_NO_VERIFY, '缺 <verify> 字段', 'verify'],
+      ];
+      for (const [label, taskContent, planExpected, replanExpected] of cases) {
+        // ① plan 出口（既有判定路径）对同一输入的机器分类
+        const planState = baseState('plan');
+        planState.evidence.plan = { summary: 'plan done' };
+        planState.newChange = true;
+        writeState(dir, planState);
+        const planRes = runPlanExit(dir, taskContent);
+        assertExit(planRes, 1);
+        assertOut(planRes, 'BLOCKED');
+        assertOut(planRes, planExpected);
+        // ② replan 对同一输入：同一分类 + BLOCKED + state 零改写
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskContent);
+        writeState(dir, replanExecuteState({ taskHash: REPLAN_STALE_SIGNATURE }));
+        const bytes = readStateBytes(dir);
+        const replanRes = runStateWithProtocol(dir, ['replan', '计划缺陷重校', '--authorized-by', 'user-approval']);
+        assertExit(replanRes, 1);
+        assertOut(replanRes, 'BLOCKED');
+        assertOut(replanRes, replanExpected);
+        assertStateBytesUnchanged(dir, bytes, 'replan ' + label);
+        if (replanBackupFiles(dir).length !== 0) {
+          throw new Error(label + '：校验失败路径不得产生备份');
+        }
+        if (replanEventsOf(readScenarioState(dir)).length !== 0) {
+          throw new Error(label + '：校验失败路径不得写审计事件');
+        }
+      }
+      // 同源结构锚：任务图分析全引擎只有一处定义，且位于 route-node.mjs（可由 replan 复用）
+      const analyze = requireRouteNodeExport('analyzeDependencyGraph');
+      const cyclicBlocks = TASK_DEP_CYCLE.match(/<task[\s\S]*?<\/task>/g) || [];
+      const verdict = analyze(cyclicBlocks);
+      if (!verdict || verdict.cyclic !== true || !Array.isArray(verdict.cycleIds) || verdict.cycleIds.length === 0) {
+        throw new Error('route-node 导出的任务图分析对依赖环应返回 cyclic=true + cycleIds，实际 ' + JSON.stringify(verdict));
+      }
+      const missingVerdict = analyze(TASK_MISSING_DEP.match(/<task[\s\S]*?<\/task>/g) || []);
+      if (!missingVerdict || missingVerdict.missing.length === 0 || missingVerdict.cyclic !== false) {
+        throw new Error('route-node 导出的任务图分析对缺失依赖应返回 missing 明细，实际 ' + JSON.stringify(missingVerdict));
+      }
+      const engineScripts = fs.readdirSync(__dirname)
+        .filter((f) => f.endsWith('.mjs') && f !== 'guard-self-test.mjs' && f !== 'system-test.mjs');
+      const definitionFiles = engineScripts.filter((file) =>
+        /function\s+analyzeDependencyGraph\s*\(/.test(fs.readFileSync(path.join(__dirname, file), 'utf8')));
+      if (definitionFiles.length !== 1 || definitionFiles[0] !== 'route-node.mjs') {
+        throw new Error('任务图分析必须只有一份实现且位于 route-node.mjs（plan 出口与 replan 共用），实际定义处: '
+          + JSON.stringify(definitionFiles));
+      }
+      const guardText = fs.readFileSync(GUARD, 'utf8');
+      if (!/import[^;]*\banalyzeDependencyGraph\b[^;]*from\s*'\.\/route-node\.mjs'/.test(guardText)) {
+        throw new Error('workflow-guard.mjs 必须静态 import route-node 的任务图分析（不得内联第二份判定）');
+      }
+    },
+  },
+
+  // 268: replan 轮次上限与显式续轮（AC-3 / ADR-013 决策 6）——按 history 中本 change 的
+  // replan-applied 事件计数，上限 3：第 4 次 BLOCKED 且给出「继续 / 停止」人工裁决指引；
+  // --continue-round <n> 满足 n ≥ 已用 + 1 才放行并计入下一轮（审计事件 / 授权留痕带续轮标记）；
+  // n 不足则 BLOCK 零改写；轮次按 change 隔离（他 change 的事件不占本 change 配额）。
+  {
+    name: '268 replan 轮次上限 3 与显式续轮：超限 BLOCK 人工裁决·续轮放行计下一轮·授权不足 BLOCK·跨 change 隔离',
+    run: (dir) => {
+      const baseHistory = [replanHistoryEvent(1), replanHistoryEvent(2), replanHistoryEvent(3)];
+      const blockedCases = [
+        ['超限未续轮', []],
+        ['续轮授权轮次不足（n=3 < 已用+1）', ['--continue-round', '3']],
+      ];
+      for (const [label, extra] of blockedCases) {
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', REPLAN_TASK_REVISED);
+        writeState(dir, replanExecuteState({ history: [...baseHistory], taskHash: REPLAN_STALE_SIGNATURE }));
+        const bytes = readStateBytes(dir);
+        const res = runStateWithProtocol(dir, ['replan', '计划缺陷重校', '--authorized-by', 'user-approval', ...extra]);
+        assertExit(res, 1);
+        assertOut(res, 'BLOCKED');
+        assertOut(res, '继续');
+        assertOut(res, '停止');
+        assertStateBytesUnchanged(dir, bytes, label);
+        if (replanBackupFiles(dir).length !== 0) {
+          throw new Error(label + '：上限拦截不得产生备份');
+        }
+        if (replanEventsOf(readScenarioState(dir)).length !== 3) {
+          throw new Error(label + '：上限拦截不得追加审计事件');
+        }
+      }
+      // 显式续轮放行：n = 已用 + 1 → 计入第 4 轮（审计行标注续轮）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', REPLAN_TASK_REVISED);
+      writeState(dir, replanExecuteState({ history: [...baseHistory], taskHash: REPLAN_STALE_SIGNATURE }));
+      const continued = runStateWithProtocol(
+        dir, ['replan', '计划缺陷重校（上限后显式续轮）', '--authorized-by', 'admin-approval', '--continue-round', '4']);
+      assertExit(continued, 0);
+      assertOut(continued, 'REPLAN');
+      assertOut(continued, '续轮');
+      const continuedState = readScenarioState(dir);
+      const continuedEvents = replanEventsOf(continuedState);
+      if (continuedEvents.length !== 4) {
+        throw new Error('续轮放行应写入第 4 条 replan-applied 事件，实际 ' + JSON.stringify(continuedEvents.length));
+      }
+      const continuedEvent = continuedEvents[continuedEvents.length - 1];
+      if (continuedEvent.round !== 4 || continuedEvent.change !== CHANGE_ID
+        || continuedEvent.reason !== '计划缺陷重校（上限后显式续轮）'
+        || continuedEvent.continuationAuthorized !== true) {
+        throw new Error('续轮审计事件字段不符（round=4 / change / 续轮标记 / reason）：' + JSON.stringify(continuedEvent));
+      }
+      const continuedRecord = continuedState.evidence?.execute?.replanAuthorization;
+      if (!continuedRecord || continuedRecord.continuationAuthorized !== true
+        || continuedRecord.round !== 4 || continuedRecord.source !== 'admin-approval') {
+        throw new Error('续轮授权留痕不符：' + JSON.stringify(continuedRecord));
+      }
+      assertReplanSignatureRecorded(continuedState, REPLAN_TASK_REVISED, '续轮放行');
+      if (replanBackupFiles(dir).length !== 1) {
+        throw new Error('续轮放行应产生一份备份，实际 ' + JSON.stringify(replanBackupFiles(dir)));
+      }
+      // 跨 change 隔离：他 change 的 3 条事件不占本 change 配额 → 本 change 为第 1 轮
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', REPLAN_TASK_REVISED);
+      writeState(dir, replanExecuteState({
+        history: [replanHistoryEvent(1, 'other-change'), replanHistoryEvent(2, 'other-change'), replanHistoryEvent(3, 'other-change')],
+        taskHash: REPLAN_STALE_SIGNATURE,
+      }));
+      const isolated = runStateWithProtocol(dir, ['replan', '计划缺陷重校', '--authorized-by', 'user-approval']);
+      assertExit(isolated, 0);
+      assertOut(isolated, 'REPLAN');
+      assertOut(isolated, '1/3');
+      const isolatedEvent = replanEventsOf(readScenarioState(dir)).find((e) => e.change === CHANGE_ID);
+      if (!isolatedEvent || isolatedEvent.round !== 1) {
+        throw new Error('他 change 的轮次事件不应占用本 change 配额（本 change 应为第 1 轮），实际 '
+          + JSON.stringify(isolatedEvent));
+      }
+      // 轮次判定纯函数锚（阈值只从实现常量取——本锚同时锁上限 = 3）
+      const roundCount = requireRouteNodeExport('replanRoundCount');
+      if (roundCount({ history: baseHistory, changeName: CHANGE_ID }) !== 3) {
+        throw new Error('replanRoundCount 应统计本 change 的 replan-applied 事件数（3）');
+      }
+      if (roundCount({ history: baseHistory, changeName: 'other-change' }) !== 0) {
+        throw new Error('replanRoundCount 应按 change 过滤（他 change 应为 0）');
+      }
+      if (roundCount({ history: 'corrupted', changeName: CHANGE_ID }) !== 0) {
+        throw new Error('replanRoundCount 对非数组 history 应返回 0（旧 state 形态）');
+      }
+      const roundDecision = requireRouteNodeExport('replanRoundDecision');
+      const available = roundDecision({ history: [replanHistoryEvent(1)], changeName: CHANGE_ID });
+      if (!available || available.ok !== true || available.nextRound !== 2 || available.limit !== 3) {
+        throw new Error('replanRoundDecision 未达上限应放行并给出下一轮：' + JSON.stringify(available));
+      }
+      const capped = roundDecision({ history: baseHistory, changeName: CHANGE_ID });
+      if (!capped || capped.ok !== false || capped.limit !== 3) {
+        throw new Error('replanRoundDecision 达上限且无续轮应 blocked：' + JSON.stringify(capped));
+      }
+      const continuation = roundDecision({ history: baseHistory, changeName: CHANGE_ID, continuationAuthorized: true });
+      if (!continuation || continuation.ok !== true || continuation.nextRound !== 4) {
+        throw new Error('replanRoundDecision 持显式续轮授权应放行第 4 轮：' + JSON.stringify(continuation));
+      }
+    },
+  },
+
+  // 269: replan 幂等空操作（AC-5 / ADR-013 决策 9）——目标形态已成立（state.taskHash 已等于
+  // 当前 TASK.md 签名）时重复调用 = 空操作：可见提示 + 零备份 / 零轮次计数 / 零事件 /
+  // state 字节零改写（与 archive 重入的幂等锚同构）。
+  {
+    name: '269 replan 幂等空操作：重签后重复同形态 → 零备份·零轮次·零事件·零改写',
+    run: (dir) => {
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', REPLAN_TASK_REVISED);
+      writeState(dir, replanExecuteState({ taskHash: REPLAN_STALE_SIGNATURE }));
+      const first = runStateWithProtocol(dir, ['replan', '计划缺陷重校', '--authorized-by', 'user-approval']);
+      assertExit(first, 0);
+      assertOut(first, 'REPLAN');
+      const afterApply = readStateBytes(dir);
+      const appliedState = readScenarioState(dir);
+      if (replanEventsOf(appliedState).length !== 1) {
+        throw new Error('首次重签应恰写 1 条 replan-applied 事件，实际 '
+          + JSON.stringify(replanEventsOf(appliedState).length));
+      }
+      const backupsAfterApply = replanBackupFiles(dir);
+      if (backupsAfterApply.length !== 1) {
+        throw new Error('首次重签应恰产生一份备份，实际 ' + JSON.stringify(backupsAfterApply));
+      }
+      assertReplanSignatureRecorded(appliedState, REPLAN_TASK_REVISED, '首次重签');
+      // 同形态重复调用 → 空操作（零副作用）
+      const noop = runStateWithProtocol(dir, ['replan', '重复调用同形态', '--authorized-by', 'user-approval']);
+      assertExit(noop, 0);
+      assertOut(noop, '空操作');
+      assertNotOut(noop, 'BLOCKED');
+      assertStateBytesUnchanged(dir, afterApply, '重复同形态空操作');
+      if (!isDeepStrictEqual(replanBackupFiles(dir), backupsAfterApply)) {
+        throw new Error('空操作不得新增备份：' + JSON.stringify(replanBackupFiles(dir)));
+      }
+      if (replanEventsOf(readScenarioState(dir)).length !== 1) {
+        throw new Error('空操作不得写审计事件（history 长度漂移）');
+      }
+      // 空操作判定纯函数存在性锚（T04 编排消费的判定点）
+      requireRouteNodeExport('replanNoOpDecision');
+    },
+  },
+
+  // 270: 重签后 execute 出口放行（AC-1）——entry 后修订任务集（计划外新增并行就绪任务）使
+  // exit execute 撞签名门禁 → replan 重校重签 → 同一出口再跑通过（不再报签名不匹配）→
+  // next 正常路由到委托节点；审计事件 / 授权留痕 / 备份快照齐备，重签值与会话当前 TASK.md 同签。
+  {
+    name: '270 replan 重签后 exit execute --apply 通过：修订任务集（含并行就绪任务）→ 签名 BLOCKED → 重签 → 出口放行',
+    run: (dir) => {
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', REPLAN_TASK_INITIAL);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/S01-SUMMARY.md', strictSummary('S01'));
+      writeState(dir, replanExecuteState());
+      assertExit(runGuard(['entry', 'execute'], dir), 0);
+      // 任务集修订（#119 死锁现场）：新增计划外的并行就绪任务
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', REPLAN_TASK_REVISED);
+      const blockedBytes = readStateBytes(dir);
+      const blocked = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(blocked, 1);
+      assertOut(blocked, 'BLOCKED');
+      assertOut(blocked, '签名不匹配');
+      assertStateBytesUnchanged(dir, blockedBytes, '修订任务集后的签名门禁 BLOCK');
+      // 受控重校重签
+      const reason = '计划有缺陷：新增并行任务 P02';
+      const beforeReplan = readScenarioState(dir);
+      const res = runStateWithProtocol(dir, ['replan', reason, '--authorized-by', 'user-approval']);
+      assertExit(res, 0);
+      assertOut(res, 'REPLAN');
+      assertOut(res, 'execute');
+      assertOut(res, '1/3');
+      assertOut(res, 'user-approval');
+      assertOut(res, reason);
+      const st = readScenarioState(dir);
+      // 留痕（双写）：history 事件 + evidence.<node>.replanAuthorization
+      const events = replanEventsOf(st);
+      if (events.length !== 1) {
+        throw new Error('重签应恰写 1 条 replan-applied 事件，实际 ' + JSON.stringify(events));
+      }
+      const event = events[0];
+      if (event.change !== CHANGE_ID || event.node !== 'execute' || event.round !== 1
+        || event.authorizedBy !== 'user-approval' || event.reason !== reason
+        || typeof event.at !== 'string' || Number.isNaN(Date.parse(event.at))) {
+        throw new Error('replan-applied 事件字段不完整（change / node / round / reason / authorizedBy / at）：'
+          + JSON.stringify(event));
+      }
+      const record = st.evidence?.execute?.replanAuthorization;
+      if (!record || record.source !== 'user-approval' || record.reason !== reason || record.round !== 1
+        || typeof record.at !== 'string' || record.at.trim() === '') {
+        throw new Error('evidence.execute.replanAuthorization 授权留痕不完整：' + JSON.stringify(record));
+      }
+      // 重签值 = 当前 TASK.md 签名（事件同步记录同一签名）
+      const signed = assertReplanSignatureRecorded(st, REPLAN_TASK_REVISED, '重签');
+      if (!requireRouteNodeExport('sameTaskSetSignature')(event.taskSetSignature, signed)) {
+        throw new Error('replan-applied 事件记录的签名应与 state.taskHash 同签：'
+          + JSON.stringify({ event: event.taskSetSignature, state: st.taskHash }));
+      }
+      // 转移前备份：全量快照 + sha256 指纹在任何留痕面可核验（ADR-013 决策 7）
+      const backups = replanBackupFiles(dir);
+      if (backups.length !== 1) {
+        throw new Error('重签应恰产生一份备份，实际 ' + JSON.stringify(backups));
+      }
+      if (!/-pre-replan\.json$/.test(backups[0])) {
+        throw new Error('备份命名应为 <UTC ISO>-pre-replan.json，实际 ' + backups[0]);
+      }
+      const backupBytes = fs.readFileSync(path.join(dir, '.specs', CHANGE_ID, 'replan-backups', backups[0]));
+      const backupState = JSON.parse(backupBytes.toString('utf8'));
+      if (!isDeepStrictEqual(backupState, beforeReplan)) {
+        throw new Error('备份应为重签前的 state 全量快照');
+      }
+      const fingerprint = createHash('sha256').update(backupBytes).digest('hex');
+      const haystack = (JSON.stringify(st) + '\n' + outputText(res)).toLowerCase();
+      if (!haystack.includes(fingerprint)) {
+        throw new Error('备份 sha256 指纹未在任何留痕面出现（备份不可核验）: ' + fingerprint);
+      }
+      // 同一出口再跑：签名已重签 → 放行；并行就绪任务使 next 路由到委托节点
+      const exitRes = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(exitRes, 0);
+      assertOut(exitRes, 'ALL CHECKS PASSED');
+      if (!/^NODE: subagent-execute$/m.test(outputText(exitRes))) {
+        throw new Error('重签后出口应路由到委托节点（并行就绪任务），实际输出:\n' + outputText(exitRes));
+      }
+      const next = runStateWithProtocol(dir, ['next']);
+      assertExit(next, 0);
+      if (!/^NODE: subagent-execute$/m.test(outputText(next))) {
+        throw new Error('next 应正常路由到 subagent-execute，实际输出:\n' + outputText(next));
+      }
+    },
+  },
+
+  // 271: advance 留痕 + 状态可见（AC-4）——advance 仍推进（语义不变），但必须写
+  // history 事件 advance-forced（node + skipped: ['exit:<node>'] + reason: 'advance'）并打印
+  // ADVANCE-AUDIT；status 输出派生字段 forcedNodes = completedNodes 含而 evidence 不含的节点。
+  // 反向断言（L-069）：有出口证据的 completed 节点不得进入 forcedNodes。
+  {
+    name: '271 advance 留痕：advance-forced 事件 + status.forcedNodes 派生视图（含反向断言）',
+    run: (dir) => {
+      assertExit(runStateWithProtocol(dir, ['init', CHANGE_ID]), 0);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n\n推进留痕夹具。\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md',
+        '# REQUIREMENT\n\n## 用户故事\n\nx\n\n## 验收准则（AC）\n\n- 通过\n');
+      const res = runStateWithProtocol(dir, ['advance']);
+      assertExit(res, 0);
+      assertOut(res, 'Advanced to: design');
+      assertOut(res, 'ADVANCE-AUDIT');
+      assertOut(res, 'open');
+      const st = readScenarioState(dir);
+      const events = (st.history || []).filter((e) => e && e.event === 'advance-forced');
+      if (events.length !== 1) {
+        throw new Error('advance 应恰写 1 条 advance-forced 事件，实际 ' + JSON.stringify(events));
+      }
+      const event = events[0];
+      if (event.change !== CHANGE_ID || event.node !== 'open') {
+        throw new Error('advance-forced 事件应记录 change / 被推进节点，实际 ' + JSON.stringify(event));
+      }
+      if (!isDeepStrictEqual(event.skipped, ['exit:open'])) {
+        throw new Error("advance-forced 事件应记录被跳过的出口门禁 skipped: ['exit:open']，实际 "
+          + JSON.stringify(event.skipped));
+      }
+      if (event.reason !== 'advance') {
+        throw new Error('advance-forced 事件应记录 reason: \'advance\'，实际 ' + JSON.stringify(event.reason));
+      }
+      if (typeof event.at !== 'string' || Number.isNaN(Date.parse(event.at))) {
+        throw new Error('advance-forced 事件应带可解析时间戳，实际 ' + JSON.stringify(event.at));
+      }
+      const status = runStateWithProtocol(dir, ['status']);
+      assertExit(status, 0);
+      const parsed = parseStatusJson(status);
+      if (!Array.isArray(parsed.forcedNodes) || !parsed.forcedNodes.includes('open')) {
+        throw new Error('status.forcedNodes 应包含被强制推进且无出口证据的 open，实际 '
+          + JSON.stringify(parsed.forcedNodes));
+      }
+      if (parsed.forcedNodes.includes('design')) {
+        throw new Error('status.forcedNodes 只能包含已完成节点，实际 ' + JSON.stringify(parsed.forcedNodes));
+      }
+      // 反向：有出口证据的 completed 节点不得进入 forcedNodes；无出口证据的仍收录
+      const st2 = readScenarioState(dir);
+      st2.completedNodes = ['open', 'design'];
+      st2.currentNode = 'plan';
+      st2.evidence = { ...(st2.evidence || {}), open: { summary: 'open exited' } };
+      writeState(dir, st2);
+      const status2 = runStateWithProtocol(dir, ['status']);
+      assertExit(status2, 0);
+      const parsed2 = parseStatusJson(status2);
+      if (!Array.isArray(parsed2.forcedNodes) || !parsed2.forcedNodes.includes('design')) {
+        throw new Error('无出口证据的 completed 节点应进入 forcedNodes，实际 ' + JSON.stringify(parsed2.forcedNodes));
+      }
+      if (parsed2.forcedNodes.includes('open')) {
+        throw new Error('有出口证据的 completed 节点不得进入 forcedNodes，实际 ' + JSON.stringify(parsed2.forcedNodes));
       }
     },
   },

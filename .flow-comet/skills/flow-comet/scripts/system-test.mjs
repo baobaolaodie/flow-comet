@@ -13,7 +13,9 @@
 //   F. 自动初始化（缺失提示/跳过记忆/新鲜静默/生成协作全链路）
 //   G. 分支模式（init 建分支/归档入口分支校验/一致性失配警告）
 //   H. verify 与归档（验证命令真实执行 + 超时配置/完整归档流程/归档路径声明标记查找/
-//      受控重入真实命令链路：授权门禁·转移·审计·备份指纹·幂等·轮次上限·手工回滚）
+//      受控重入真实命令链路：授权门禁·转移·审计·备份指纹·幂等·轮次上限·手工回滚/
+//      受控计划重校重签真实命令链路：修订任务集死锁→重签→出口放行·授权 fail-closed·
+//      轮次上限与显式续轮/强制推进留痕：advance-forced 事件 + status.forcedNodes 派生可见）
 //   I. 异常路径（损坏状态/缺工件出口/非法参数/状态字段类型非法）
 //   J. 文档一致性（双语健康检查/公开产物零代号检查——调用仓库本地工具）
 //   K. 安装器与平台（版本标识/多平台安装与平台化路径/codex hook JSON 契约/平台选择链/
@@ -1042,6 +1044,66 @@ function resolveReentryBackupPath(root, changeId, event) {
     ? [raw]
     : [path.resolve(root, raw), path.join(reentryBackupDir(root, changeId), path.basename(raw))];
   return candidates.find((p) => fs.existsSync(p)) || null;
+}
+
+// ---------- 受控计划重校重签（replan）与强制推进留痕真实命令链路夹具（H9~H11 共用） ----------
+
+// 任务集构造：基础串行任务 S01（status 可切）+ 可追加的并行就绪任务（计划外修订用）
+function replanTaskText(options = {}) {
+  const lines = ['# TASK', '',
+    '<task id="S01" parallel="false" status="' + (options.s01Status || 'pending') + '">'
+    + '<action>实现 S01</action><write_files>src/s01.mjs</write_files>'
+    + '<verify>node --check src/s01.mjs</verify></task>'];
+  for (const id of options.parallelPending || []) {
+    lines.push('<task id="' + id + '" parallel="true" status="pending">'
+      + '<action>实现计划外新增的 ' + id + '</action>'
+      + '<write_files>src/' + id.toLowerCase() + '.mjs</write_files>'
+      + '<verify>node --check src/' + id.toLowerCase() + '.mjs</verify></task>');
+  }
+  return lines.join('\n') + '\n';
+}
+
+// execute 已 entry 的真实链路前奏：#init → open/design 出口 → plan 出口 → 任务集 → record +
+// entry execute（entry 真实记录任务集签名）。返回后调用方可修订任务集触发签名不匹配现场。
+function seedExecuteEntryState(dir, taskText) {
+  driveThroughDesign(dir);
+  writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskText);
+  assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md'], dir), 0);
+  assertExit(runState(['record', 'plan', '{"summary":"plan done"}'], dir), 0);
+  assertExit(runGuard(['entry', 'plan'], dir), 0);
+  const planExit = runGuard(['exit', 'plan', '--apply'], dir);
+  assertExit(planExit, 0);
+  assertNodeLine(planExit, 'execute');
+  assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
+  assertExit(runState(['record', 'execute', '{"summary":"implementation recorded"}'], dir), 0);
+  assertExit(runGuard(['entry', 'execute'], dir), 0);
+}
+
+// 串行 pending 任务的真实委托留证（execute 归属：request + result 契约回传）
+function completeSerialTaskWithHandoff(dir, taskId, writeFilesRel) {
+  assertExit(runHandoff(['request', taskId, taskId + ' 委托', '--write-files', writeFilesRel], dir), 0);
+  assertExit(runHandoff(['result', taskId, fullContract('abcd1234abcd1234abcd1234abcd1234abcd1234', taskId)], dir), 0);
+}
+
+// replan 备份清单（.specs/<id>/replan-backups/）
+function replanBackupFiles(dir, changeId = CHANGE_ID) {
+  const backupDir = path.join(dir, '.specs', changeId, 'replan-backups');
+  return fs.existsSync(backupDir) ? fs.readdirSync(backupDir).sort() : [];
+}
+
+// replan-applied 事件过滤（轮次按 change 从 history 派生）
+function replanEventsOf(state) {
+  return (state.history || []).filter((e) => e && e.event === 'replan-applied');
+}
+
+// status 输出的 JSON 块解析（命令行尾巴行不进 JSON）
+function parseStatusOutput(root) {
+  const res = runState(['status'], root);
+  assertExit(res, 0);
+  const start = res.output.indexOf('{');
+  const end = res.output.lastIndexOf('}');
+  if (start < 0 || end <= start) throw new Error('status 输出缺少 JSON 块:\n' + res.output);
+  return JSON.parse(res.output.slice(start, end + 1));
 }
 
 // ---------- 系统测试项（A~L 十二类） ----------
@@ -4124,6 +4186,161 @@ const TEST_ITEMS = [
       }
       if (reentryBackupFiles(dir).length !== 4) {
         throw new Error('组合链路不得新增 / 丢失备份（应为 4 份）: ' + JSON.stringify(reentryBackupFiles(dir)));
+      }
+    },
+  },
+
+  // ---------- H9~H11: 受控计划重校重签（replan）与强制推进留痕真实命令链路 ----------
+
+  {
+    name: 'H9 replan 解死锁：execute 相位修订任务集（含并行就绪任务）→ 重签 → 出口放行 → next 正常路由',
+    run: (dir) => {
+      seedExecuteEntryState(dir, replanTaskText());
+      // 真实委托留证（S01 串行 pending → execute 归属）→ SUMMARY 齐备，出口四类校验可通过
+      completeSerialTaskWithHandoff(dir, 'S01', 'src/s01.mjs');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/S01-SUMMARY.md', execSummaryFixture('S01'));
+      // 任务集修订（死锁现场）：原任务完成 + 计划外新增的并行就绪任务
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', replanTaskText({ s01Status: 'done', parallelPending: ['P02'] }));
+      const beforeBytes = readStateBytes(dir);
+      // ① 前进被签名门禁挡住：exit execute → BLOCKED（任务集被修改）+ 零改写
+      const blocked = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(blocked, 1);
+      assertOut(blocked, 'BLOCKED');
+      assertOut(blocked, '签名不匹配');
+      if (!readStateBytes(dir).equals(beforeBytes)) throw new Error('签名门禁 BLOCK 改写了 state 字节');
+      // ② 受控重校重签（唯一合规出口）：授权 + 原因 + 重签 + 双写留痕 + 备份
+      const replan = runState(['replan', '计划有缺陷：新增并行任务 P02', '--authorized-by', '用户裁决'], dir);
+      assertExit(replan, 0);
+      assertOut(replan, 'REPLAN');
+      const st = readStateFile(dir);
+      const events = replanEventsOf(st);
+      if (events.length !== 1 || events[0].change !== CHANGE_ID || events[0].node !== 'execute') {
+        throw new Error('replan-applied 审计事件不符: ' + JSON.stringify(events));
+      }
+      if (!st.evidence || !st.evidence.execute || !st.evidence.execute.replanAuthorization) {
+        throw new Error('缺 evidence.execute.replanAuthorization 授权留痕: ' + JSON.stringify(st.evidence));
+      }
+      if (replanBackupFiles(dir).length !== 1) {
+        throw new Error('重签应恰产生一份备份: ' + JSON.stringify(replanBackupFiles(dir)));
+      }
+      // ③ 同一出口再跑 → 放行（不再报签名不匹配），路由到委托节点（并行就绪任务）
+      const exitRes = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(exitRes, 0);
+      assertOut(exitRes, 'ALL CHECKS PASSED');
+      assertNodeLine(exitRes, 'subagent-execute');
+      // ④ next 正常路由（死锁解除后可继续推进）
+      const next = runState(['next'], dir);
+      assertExit(next, 0);
+      assertNodeLine(next, 'subagent-execute');
+    },
+  },
+
+  {
+    name: 'H10 replan 授权 fail-closed 与轮次上限：未授权零改写 · 第 4 次 BLOCK · 显式续轮放行（真实命令）',
+    run: (dir) => {
+      seedExecuteEntryState(dir, replanTaskText());
+      // 修订任务集 → 进入「签名不匹配」的适用现场
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', replanTaskText({ parallelPending: ['P01'] }));
+      const beforeBytes = readStateBytes(dir);
+      // ① 缺授权 / 空授权 / 纯空白授权 / 缺原因 → BLOCKED 且 state 字节零改写、零备份、零事件
+      const blockedCalls = [
+        ['缺 --authorized-by', ['replan', '计划有缺陷：新增并行任务 P01']],
+        ['--authorized-by 空串', ['replan', '计划有缺陷：新增并行任务 P01', '--authorized-by', '']],
+        ['--authorized-by 纯空白', ['replan', '计划有缺陷：新增并行任务 P01', '--authorized-by', '   ']],
+        ['缺位置 reason', ['replan', '--authorized-by', '用户裁决']],
+      ];
+      for (const [label, args] of blockedCalls) {
+        const res = runState(args, dir);
+        assertExit(res, 1);
+        assertOut(res, 'BLOCKED');
+        if (!readStateBytes(dir).equals(beforeBytes)) throw new Error(label + '：改写了 state 字节');
+      }
+      if (replanBackupFiles(dir).length !== 0) {
+        throw new Error('未授权调用产生了备份: ' + JSON.stringify(replanBackupFiles(dir)));
+      }
+      if (replanEventsOf(readStateFile(dir)).length !== 0) {
+        throw new Error('未授权调用写入了 replan-applied 事件');
+      }
+      // ② 真实链路跑满 3 轮（每轮重新修订任务集 → 重签；轮次按 change 从事件派生）
+      const parallelIds = ['P01', 'P02', 'P03', 'P04'];
+      for (let round = 1; round <= 3; round += 1) {
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', replanTaskText({ parallelPending: parallelIds.slice(0, round) }));
+        const res = runState(['replan', '计划缺陷重校 ' + round, '--authorized-by', '用户裁决'], dir);
+        assertExit(res, 0);
+        assertOut(res, 'REPLAN');
+        if (replanEventsOf(readStateFile(dir)).length !== round) {
+          throw new Error('第 ' + round + ' 轮后 replan-applied 事件数应为 ' + round);
+        }
+      }
+      if (replanBackupFiles(dir).length !== 3) {
+        throw new Error('三轮应产生三份备份: ' + JSON.stringify(replanBackupFiles(dir)));
+      }
+      // ③ 第 4 次 → BLOCK + 人工裁决指引（继续 / 停止）+ state 字节零改写
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', replanTaskText({ parallelPending: parallelIds }));
+      const beforeFourth = readStateBytes(dir);
+      const fourth = runState(['replan', '计划缺陷重校（上限后未授权）', '--authorized-by', '用户裁决'], dir);
+      assertExit(fourth, 1);
+      assertOut(fourth, 'BLOCK');
+      assertOut(fourth, '继续');
+      assertOut(fourth, '停止');
+      if (!readStateBytes(dir).equals(beforeFourth)) throw new Error('超上限调用改写了 state 字节');
+      if (replanEventsOf(readStateFile(dir)).length !== 3) throw new Error('超上限调用写入了 replan-applied 事件');
+      if (replanBackupFiles(dir).length !== 3) {
+        throw new Error('超上限调用新增了备份: ' + JSON.stringify(replanBackupFiles(dir)));
+      }
+      // ④ 续轮授权不足（n < 已用 + 1）→ BLOCK 零改写：上限裁决点不可被残缺授权绕过
+      const insufficientBytes = readStateBytes(dir);
+      const insufficient = runState(['replan', '计划缺陷重校（续轮不足）', '--authorized-by', '用户授权', '--continue-round', '3'], dir);
+      assertExit(insufficient, 1);
+      assertOut(insufficient, 'BLOCK');
+      if (!readStateBytes(dir).equals(insufficientBytes)) throw new Error('续轮授权不足改写了 state 字节');
+      // ⑤ 显式授权续轮（n = 已用 + 1）→ 放行并计第 4 轮：审计行标注续轮，事件 / 留痕带续轮标记
+      const continued = runState(['replan', '计划缺陷重校（上限后显式续轮）', '--authorized-by', '用户授权续轮', '--continue-round', '4'], dir);
+      assertExit(continued, 0);
+      assertOut(continued, 'REPLAN');
+      assertOut(continued, '续轮');
+      const continuedState = readStateFile(dir);
+      const continuedEvents = replanEventsOf(continuedState);
+      const continuedEvent = continuedEvents[continuedEvents.length - 1];
+      if (!continuedEvent || continuedEvent.round !== 4 || continuedEvent.change !== CHANGE_ID
+        || continuedEvent.continuationAuthorized !== true) {
+        throw new Error('续轮审计事件字段不符（round=4 / change / 续轮标记）: ' + JSON.stringify(continuedEvent));
+      }
+      if (!continuedState.evidence || !continuedState.evidence.execute
+        || continuedState.evidence.execute.replanAuthorization.continuationAuthorized !== true) {
+        throw new Error('续轮授权留痕缺失: ' + JSON.stringify(continuedState.evidence && continuedState.evidence.execute));
+      }
+      if (replanBackupFiles(dir).length !== 4) {
+        throw new Error('续轮放行应新增一份备份（共 4 份）: ' + JSON.stringify(replanBackupFiles(dir)));
+      }
+    },
+  },
+
+  {
+    name: 'H11 advance 留痕：advance-forced 事件 + status.forcedNodes 派生可见（真实命令）',
+    run: (dir) => {
+      assertExit(runState(['init', CHANGE_ID, '--init-skip'], dir), 0);
+      writeIntakeArtifacts(dir);
+      const res = runState(['advance'], dir);
+      assertExit(res, 0);
+      assertOut(res, 'Advanced to: design');
+      assertOut(res, 'ADVANCE-AUDIT');
+      const st = readStateFile(dir);
+      const events = (st.history || []).filter((e) => e && e.event === 'advance-forced');
+      if (events.length !== 1) {
+        throw new Error('advance 应恰写一条 advance-forced 事件: ' + JSON.stringify(events));
+      }
+      const event = events[0];
+      if (event.node !== 'open' || event.change !== CHANGE_ID || event.reason !== 'advance') {
+        throw new Error('advance-forced 事件字段不符: ' + JSON.stringify(event));
+      }
+      if (JSON.stringify(event.skipped) !== JSON.stringify(['exit:open'])) {
+        throw new Error("advance-forced 事件应记录 skipped: ['exit:open']: " + JSON.stringify(event.skipped));
+      }
+      if (typeof event.at !== 'string' || event.at.trim() === '') throw new Error('advance-forced 缺 at: ' + JSON.stringify(event.at));
+      const status = parseStatusOutput(dir);
+      if (!Array.isArray(status.forcedNodes) || !status.forcedNodes.includes('open')) {
+        throw new Error('status.forcedNodes 应含强制推进且无出口证据的 open: ' + JSON.stringify(status.forcedNodes));
       }
     },
   },
