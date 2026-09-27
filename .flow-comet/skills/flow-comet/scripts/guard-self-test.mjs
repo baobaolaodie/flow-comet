@@ -474,9 +474,23 @@ function writeBridgeFixture(dir, overrides = {}) {
 // 发布标记，无法表达「载体 INSTALLED_VERSION 为 dev 态（git describe 后缀）」的形态；
 // 只有以副本自身脚本运行才能构造真实 dev 态载体（与 prepare-env 安装出的形态同构）。
 // 返回 { dshHome, skillCopy }；loader 戳由调用方指定，与 INSTALLED_VERSION 可不同。
+// 便携递归复制：不使用 fs.cpSync——实测在 Windows 且**源路径含非 ASCII 字符**时 cpSync 会让
+// 进程静默崩溃（同一进程内 ASCII 源正常、中文源直接退出，逐文件复制两种源都正常），使本套件在
+// 路径含中文的项目内无法跑完。逐目录逐文件复制无此问题，且复制完整性与内容可断言。
+function copyTreePortable(src, dst) {
+  fs.mkdirSync(dst, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const from = path.join(src, entry.name);
+    const to = path.join(dst, entry.name);
+    if (entry.isDirectory()) copyTreePortable(from, to);
+    else if (entry.isFile()) fs.copyFileSync(from, to);
+    else if (entry.isSymbolicLink()) fs.symlinkSync(fs.readlinkSync(from), to);
+  }
+}
+
 function writeInstalledCopyBridgeFixture(dir, { installedVersion, loaderStamp }) {
   const skillCopy = path.join(dir, '.dsh', 'skills', 'flow-comet');
-  fs.cpSync(path.join(__dirname, '..'), skillCopy, { recursive: true });
+  copyTreePortable(path.join(__dirname, '..'), skillCopy);
   writeFile(skillCopy, 'INSTALLED_VERSION', installedVersion + '\n');
   const dshHome = path.join(dir, 'dshhome');
   const loaderPath = writeBridgeLoaderFixture(dshHome, loaderStamp);
@@ -6968,6 +6982,21 @@ const SCENARIOS = [
   {
     name: '193 bridge-check 版本比较：dev 态同基础健康 / 基础失配与预发布仍 FAIL exit 1',
     run: (dir) => {
+      // ⑧ 便携复制锚：源路径含非 ASCII 字符时仍能完整复制技能树——旧实现用 fs.cpSync，在 Windows 上
+      // 会让进程静默崩溃（中文路径项目内本套件曾中断于本场景）；此处同时断言复制结果的文件数一致。
+      {
+        const cjkSource = path.join(dir, '源-中文-技能树');
+        const cjkTarget = path.join(dir, '复制-目标');
+        copyTreePortable(path.join(__dirname, '..'), cjkSource);
+        copyTreePortable(cjkSource, cjkTarget);
+        const countFiles = (root) => fs.readdirSync(root, { withFileTypes: true })
+          .reduce((n, e) => n + (e.isDirectory() ? countFiles(path.join(root, e.name)) : 1), 0);
+        const expected = countFiles(path.join(__dirname, '..'));
+        const actual = countFiles(cjkTarget);
+        if (actual !== expected) {
+          throw new Error('非 ASCII 源路径的递归复制不完整：期望 ' + expected + ' 个文件，实际 ' + actual);
+        }
+      }
       const { dshHome, installedVersion } = writeBridgeFixture(dir, { loaderStamp: '9.9.9-fixture-skew' });
       const baseVersion = fixtureBridgeBaseVersion(installedVersion);
       const skew = runBridgeCheck(dir, dshHome);
