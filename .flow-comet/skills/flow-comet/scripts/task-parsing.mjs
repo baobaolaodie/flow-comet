@@ -26,3 +26,16 @@ export function taskOpeningAttrs(block) {
 export function taskBlocks(content) {
   return [...String(content ?? '').matchAll(/<task\b[^>]*>[\s\S]*?<\/task>/g)].map((m) => m[0]);
 }
+
+// 按 id 提取单个任务的开标签属性（id/status/parallel）：复用上方开标签解析与块提取，
+// 不新增第二份正则、不扫描块内文本。未匹配（含 taskId 为空 / TASK 内容为空）→ null。
+// 消费方：workflow-handoff request 归属门禁按 id 取 pending/parallel，禁止在消费方内联属性解析。
+export function taskAttrsById(content, taskId) {
+  if (taskId === null || taskId === undefined || String(taskId) === '') return null;
+  const wanted = String(taskId);
+  for (const block of taskBlocks(content)) {
+    const attrs = taskOpeningAttrs(block);
+    if (attrs && attrs.id === wanted) return attrs;
+  }
+  return null;
+}

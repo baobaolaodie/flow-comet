@@ -35,7 +35,12 @@ export function workflowPathInside(root, target) {
   );
 }
 
-export async function inspectWorkflowProtectedPath(
+// 路径段扫描（单一权威）：target 词法必须在 projectRoot 内；root 必须是真实目录；自 root 起
+// 对 target 的每个已存在段逐段 lstat——任一段为 symlink/junction、非末段非目录、末段类型不符
+// expected、或某段 realpath 逃出物理 root → 抛错（fail-closed）；最近已存在祖先之后不存在
+// → 返回 { exists: false }（不是错误：写资格判定允许目标尚未创建）。调用方负责 runRoot 的
+// realpath 归一（写入侧传 realpath 后的 root）。受保护读取与写路径资格共用本段扫描，禁止副本。
+export async function inspectWorkflowPathSegments(
   projectRoot,
   target,
   label,
@@ -93,7 +98,22 @@ export async function inspectWorkflowProtectedPath(
   return { target: lexicalTarget, exists: true };
 }
 
-function workflowFileObjectIdentity(stat) {
+// 兼容既有消费方（readWorkflowProtectedFile / comet-hook-guard）：受保护读取使用同一段
+// 扫描权威；这里是委托而非第二份实现（L-067 单一权威）。
+export async function inspectWorkflowProtectedPath(
+  projectRoot,
+  target,
+  label,
+  expected = 'any',
+) {
+  return inspectWorkflowPathSegments(projectRoot, target, label, expected);
+}
+
+// 文件身份比较判据（workflowFileObjectIdentity / workflowSameFileObject / workflowSameFileStat）
+// 与受保护读取 readWorkflowProtectedFile 的单一权威在本模块：workflow-guard 与 comet-hook-guard
+// 均 import 复用，不再各自保留逐字节副本（同一判据两份实现会静默分叉——注释互指同源不是同步机制）。
+// workflowHasIdentity 仅被本模块 workflowSameFileObject 消费，保持私有（无外部消费方不导出）。
+export function workflowFileObjectIdentity(stat) {
   return {
     dev: stat.dev,
     ino: stat.ino,
@@ -105,7 +125,7 @@ function workflowHasIdentity(value) {
   return value !== 0 && value !== 0n && value !== '0';
 }
 
-function workflowSameFileObject(left, right) {
+export function workflowSameFileObject(left, right) {
   const comparableDevice = workflowHasIdentity(left.dev) && workflowHasIdentity(right.dev);
   const comparableInode = workflowHasIdentity(left.ino) && workflowHasIdentity(right.ino);
   if (comparableDevice && left.dev !== right.dev) return false;
@@ -114,7 +134,7 @@ function workflowSameFileObject(left, right) {
   return left.birthtime === right.birthtime;
 }
 
-function workflowSameFileStat(left, right) {
+export function workflowSameFileStat(left, right) {
   return (
     workflowSameFileObject(
       workflowFileObjectIdentity(left),

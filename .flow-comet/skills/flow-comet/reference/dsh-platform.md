@@ -16,6 +16,13 @@
 
 > 版本不匹配时拦截可能失效——必须文档警示 + 级 3 实测兜底（D9）。
 
+**bridge-check 版本比较语义（基础版本比较）**：桥接健康检查比较 loader 的 `// BRIDGE_VERSION:` 发布戳与技能包 `INSTALLED_VERSION` 时，两侧先剥离 git-describe 开发态后缀 `-<领先提交数>-g<hash>`、再按基础版本比较：
+
+- 开发态载体的 `INSTALLED_VERSION = <发布版本>-<N>-g<hash>` 是预期形态、不构成版本偏斜——与同基础版本的 loader 判健康（exit 0）。
+- 语义化预发布标识（如 `1.5.0-rc.3`）不是开发态后缀、不剥离——预发布与基础版本不可互相放行。
+- 归一后基础版本不同（含发布版对发布版）仍报「版本偏斜」并 exit 1；失配报告同时打印原始值与归一值，便于识别 dev 态后缀。
+- loader 戳生成与发布同步纪律不变（发布戳仍取当前发布版本，随发布同步更新）。
+
 ## 2. tools/pre-execute 签名
 
 ```js
@@ -99,7 +106,7 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 - 职责链：`tools/pre-execute` 监听 → 会话项目判定 → 参数映射 → 流程态门 → 包含性校验 → 子进程调项目本地 guard → 决策映射。
   1. **窄监听（硬性契约）**：工具名归一化（非 Write/Edit/Bash 直接 `next()`）；会话 cwd（`exec.agent.session.header.cwd` 锚定，缺失回退）的最近 `.git` 项目根下**存在 `.dsh/skills/flow-comet` 才处理**，否则直接 `next()`——非 flow-comet 项目零拦截零开销（D6/R7）。
   2. **参数映射（fail-closed）**：dsh 工具名归一化到 guard CLI 契约名（Write/Edit/Bash；别名：write/writefile/file-write、edit/editfile/file-edit、bash/shell/powershell/pwsh/run_command/run-command）；Write/Edit → `file_path`、Bash → `command`；形状不符/缺关键字段 → WARN + fail-closed deny（不静默放行）。
-  3. **流程态门（B 方案——包含性仅运行中生效）**：读项目根 `.flow-comet/flow-comet-state.json`（UTF-8 BOM 容错；判定规则锚定 guard `comet-hook-guard.mjs` L1882-1895）：空闲（无 state / 无 `activeChange` / `status==='completed'`）→ 直接 `next()` 放行——跳过包含性校验与 guard 白名单（与 Claude Code / Codex 的 active-change 门语义对齐）；解析失败 / 未知 status → WARN + fail-closed deny（不视为空闲放行）；`activeChange` 存在且 `status==='running'` 或缺失（undefined）→ 继续下方包含性校验与 guard（现状不变）。
+  3. **流程态门（B 方案——包含性仅运行中生效）**：读项目根 `.flow-comet/flow-comet-state.json`（UTF-8 BOM 容错；判定规则锚定 guard `comet-hook-guard.mjs` 的空闲态门——grep 锚点：`grep -n "if (!state.activeChange)"`）：空闲（无 state / 无 `activeChange` / `status==='completed'`）→ 直接 `next()` 放行——跳过包含性校验与 guard 白名单（与 Claude Code / Codex 的 active-change 门语义对齐）；解析失败 / 未知 status → WARN + fail-closed deny（不视为空闲放行）；`activeChange` 存在且 `status==='running'` 或缺失（undefined）→ 继续下方包含性校验与 guard（现状不变）。
    - **空闲边界（refined）**：空闲 = 无 state / 无 activeChange / status==='completed' → 项目外写 next() 放行；解析失败 / 未知 status 保持 fail-closed deny（不视为空闲），与 Claude Code / Codex 的 guard 语义一致。
   4. **包含性校验**：Write/Edit 的 `file_path` 必须解析后位于项目根内——`realpathSync.native` 展开 Windows 8.3 短路径（词法 path.relative 会把项目内短路径误判为越界）；**运行中**越界直接 deny（不进 guard——guard 侧 target=null 会跳过白名单判定 = fail-open）；通过后传规范化长路径。
   5. **代理身份分派（B1——dsh 子代理=执行者）**：读 `exec.agent.session.header.delegationDepth`（`agentDepth(exec)` 纯函数）——**>0 = 子代理（执行者）→ 跳过 guard 白名单判定直接 `next()` 放行**（子代理写源码是执行者职责，对应 Claude Code worktree 子代理物理自由写；形状 fail-closed 与项目根包含性校验已在上方对子代理同样执行，不因身份放宽）；**0/缺失 = 协调者 → 走 guard 白名单判定**（协调者禁令物理拦截保留）。dsh 子代理系统在 dsh-base 自带（`tool-subagent`/`subagent-spawn-in-process` 等，headless/web/tui 全 profile 激活），`childSessionMeta` 写入 delegationDepth=parentDepth+1（dsh-subagent 源码锚定 rc.6）；不识别此字段会导致 subagent 执行模式下子代理写源码被 guard 白名单（execute → `.specs/`）误拦（B1，DOGFOOD-REPORT 实证）。级 3 实测（2026-08-18 UAT-7）：真实模型调 subagent → 子代理（delegationDepth:1）写 `scripts/` 放行、协调者（delegationDepth:0）写同路径被 deny 保留。
@@ -150,7 +157,7 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 ### rc.8 三态冒烟（2026-08-20）
 
 - 环境：dsh CLI 0.1.0-rc.8 / Harness 核心 rc.8 / dsh-tui 0.8.5
-- 结果：运行中协调者项目外 Write → deny；运行中子代理项目内 Write → next()；空闲态（无 state）项目外 Write → next()；解析失败/未知 status → fail-closed deny（system-test 61/61 ALL PASSED，K11/K12 断言覆盖）
+- 结果：运行中协调者项目外 Write → deny；运行中子代理项目内 Write → next()；空闲态（无 state）项目外 Write → next()；解析失败/未知 status → fail-closed deny（当轮 system-test ALL PASSED，K11/K12 断言覆盖；当前基线 82/82）
 - 载体：prepare-env --platform dsh 经临时项目重推真实 ~/.dsh 桥接 loader，loader 与权威源 SHA-256 一致；真实交互式 TUI/Web 冒烟留待开放项
 
 ### 0.1.5-rc.1 全接缝认证（2026-09-10）

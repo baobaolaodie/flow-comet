@@ -15,7 +15,7 @@ Responsibility: 委托 [P] 并行任务给子代理，要求加载 flow-comet-de
 
 职责分工（趟次协作）：本节点负责**并行委托**（`parallel="true"` 且依赖已满足的任务，同一趟内同时发出）——委托节点可多次往返：每趟委托当时全部依赖已满足的并行任务，趟间由 execute 节点串行消化，直至不存在依赖已满足的可并行 pending 且无串行残留。execute 节点负责**串行委托**（非 parallel 任务，一次一个）。两者共用同一委托证据库（handoff 记录在 subagent-execute evidence）。序列形态不是本节点的关注点：全并行、全串行、串→并、并→串及任意混排均合法（合法性只取决于 `depends_on` 无环且引用存在；依赖环与缺失依赖已在 plan 出口拦截并附恢复指引），到达本节点的任务序列由多趟路由按依赖拓扑自动分趟消化。
 
-> **Codex 平台委托方式（2026-08-13 调研修正 + 实测）**：Codex CLI 无 `--worktree` 一键 flag（openai/codex#12862 跟踪中），但 git worktree 是标准支持方式（Codex App 内置 worktree；子代理运行时自动创建 worktree 隔离）——本节点委托与 Claude Code 的 worktree 隔离语义对齐：协调者对每个 parallel 任务 `git worktree add <worktree路径> -b <分支>` → 在 worktree 内 `codex exec` 委托（fresh-context，prompt 内联任务块 + AC + 强制加载 flow-comet-dev 与回传 Return Contract，`</dev/null>` 防 stdin 卡住）→ 子代理回报 commitHash 后校验存在性 + 任务完成回收（`git worktree remove`）。
+> **Codex 平台委托方式（2026-08-13 调研修正 + 实测）**：Codex 当前 = **串行交付**；并行委托待机制支持——不使用并行委托，任务逐个走 `execute` 节点交付，直到守卫也能识别手工 `git worktree`（属机制变更，超出本节点范围，见下方「出路」段）。
 > **沙箱要求（实测 2026-08-13）**：worktree 的 `.git` 是主仓共享——`workspace-write`/`git-write-access` 沙箱均被 Codex 硬拦截（index.lock / objects / COMMIT_EDITMSG Permission denied）；子代理必须用 `sandbox_mode="danger-full-access"` 才能完成 git 提交（worktree 隔离已限定写范围，full-access 仅用于让 git 提交可行）。**信任边界**：`danger-full-access` 是宿主级信任边界（不隔离凭据/网络访问）——仅委托可信子代理，并移除委托环境中的不必要凭据。
 > **hook 会话 root 继承（实测 2026-08-15；2026-09-12 修订）**：Codex worktree 子代理的会话 root 仍是主仓库，hook 以主仓库状态判定——`execute`/`subagent-execute` 阶段协调者白名单 `.specs/` 会拦截子代理在 worktree 内写源码。**两平台的判据不同，覆盖范围也不同**：CC 的守卫按路径前缀识别隔离区（写入落在 `.claude/worktrees/**` 内即放行，`file_path` 与 Bash 命令两条判定路径同语义）；Codex 靠手工 `git worktree add <任意路径>` 建隔离区，那些路径不在该前缀下，**不被放行覆盖，写入会被协调者白名单拦截**。
 > **出路（受支持路径，二选一）**：① **CC 平台**——用 `Agent` 工具的 `isolation: "worktree"` 委托（守卫已覆盖该区，见步骤 3）；② **Codex 平台**——**串行执行**：不使用并行委托，任务逐个走 `execute` 节点交付，直到守卫也能识别手工 worktree（属机制变更，超出本节点范围）。
@@ -51,6 +51,10 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
 
 主会话是协调者，不是执行者。禁止在主会话直接修改源码或执行实现。源码只能通过 `Agent` 工具以 `isolation: "worktree"` 委托子代理完成。子代理派发失败时，主会话**不得接管实现**——记录当前任务为 BLOCKED 并走 Recovery。协调者只允许更新：TASK.md（标记 done）、`<task>-SUMMARY.md`、handoff evidence（workflow-handoff.mjs result）。
 
+### 受控重入打开的修复场景（archive 源）
+
+缺陷在归档后才暴露、且归档移动尚未发生时，可先由用户显式授权把工作归属退回本节点或 `execute` / `review` / `verify`，再按常规委托与出口流程完成修复。重入命令：`node .claude/skills/flow-comet/scripts/workflow-state.mjs reenter <target> --authorized-by <source> --reason <text> [--continue-round <n>]`——每次调用都需要用户显式授权，每 change 上限 3 轮（达上限后凭显式续轮授权 `--continue-round <n>`（n ≥ 已用轮次 + 1）可继续并计入下一轮）；重入前自动落 state 备份快照（`.specs/<change-id>/.reentry-backups/`）；成功打印 `REENTRY: archive → <target>（授权源 <source>；第 n/3 轮；备份 <file>）` 与 `REASON: <text>` 行（续轮审计行为 `第 n 轮（显式授权续轮，上限 3）`），与 Fix 回炉的 `FIX-BATCH` 行、正常多趟收尾的 `RETURN` 行三态可区分。归档移动已发生或 change 已 `completed` 时重入 BLOCKED，须走人工处置或新 change，不得静默跳过。重入只改工作归属，不写任何闭合标记，也不跳过本节点入口 / 出口门禁；重入后并行任务的委托证据、write_files 边界与 Return Contract 校验与常规流程完全一致；重复调用同一目标为空操作（输出 `REENTRY: 空操作——…`，不备份、不计数、不改写 state）。
+
 ### Prerequisites
 
 - `.specs/<change-id>/TASK.md` must exist with at least one task marked `parallel="true"` and `status="pending"`.
@@ -64,6 +68,7 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
    - ① `git status --short`：change 工件（`.specs/<change-id>/`）**必须已 commit**——未 commit 时 worktree 子代理看不到工件（harness 从已提交 HEAD 创建 worktree）
    - ② `git log --oneline -1`：确认 HEAD 位置（change 分支）
    - ③ 委托 prompt **必须内联任务块全文 + 相关 AC**（worktree 基线可能不是 change 分支——harness 行为不可控，内联是唯一可靠路径）
+   - ④ **子代理会话 Skill 工具可用性（委托前探测）**：委托 prompt 必须要求子代理开工前确认本会话是否具备 Skill 工具——具备时用 Skill 工具加载 `flow-comet-dev`；不可用时按 Read 加载节点 SKILL + `flow-kit/prompts/4-dev.md` 协议执行，并在 Return Contract 回传 `"skillToolFallback": "<降级替代形态，如 file-read>"`（SUMMARY「自检方法」段同步声明该替代形态并注明未执行 Skill 工具注入）。**禁止把 Read 声称为已注入**；委托 prompt 未写明该口径 = 委托前检查未完成，不得发出委托
    - **Red Flag**：worktree 工件不可见/基线不确定时**禁止继续委托**——先 commit 或内联上下文
    - 委托后：子代理回报 commitHash 后校验存在性（`git cat-file -e <commitHash>`，workflow-handoff result 已有 W2-D git show 校验兜底）
 
@@ -71,12 +76,14 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
 
 2. **For each parallel task, create handoff request**: Use `workflow-handoff.mjs request <task-id>` to register the handoff. **委托即记 request**——直接记录 result 而无对应 request 时,write_files 允许列表为空会被 BLOCKED(新 change 强制委托边界),补 request 后再重录 result 即可。
    > 若不传 `--write-files`，脚本会自动从 TASK.md 对应 task 的 `<write_files>` 块解析（orchestrator 无需手动从 TASK.md 提取文件列表）。
+   **归属纪律**：request 会校验任务的并行属性与原始 `currentNode`——并行 pending 任务只归属本节点，串行 pending 任务归属 `execute`；错误节点的新 change 请求会被 BLOCK，并按输出运行 `workflow-state next` 与 `entry <目标节点>` 恢复后再重试。
    The handoff prompt must include:
    - The task's full XML block from TASK.md.
    - DESIGN.md sections 0 and 0.5 for context.
    - REQUIREMENT.md ACs relevant to this task.
    - Explicit instruction to **use the Skill 工具** to load `flow-comet-dev` and follow its full protocol `flow-kit/prompts/4-dev.md`（不得跳过——读取 SKILL.md 文件不叫加载，跑声明命令也不叫加载；加载 = Skill 工具把 skill 注入会话）。
-   - Explicit requirement to return `completedChecks` in the Return Contract containing `required-skill:subagent-execute.flow-comet-dev`（证明已加载 implementation skill；guard W1-D 严格校验，缺失 → exit BLOCKED，无旧 change 豁免）。
+   - **Skill 工具不可用时的降级口径（与上一条并排内联）**：子代理会话不具备 Skill 工具时，按 Read 加载节点 SKILL + `flow-kit/prompts/4-dev.md` 协议执行，Return Contract 回传 `"skillToolFallback": "<降级替代形态，如 file-read>"`，SUMMARY「自检方法」段同步声明该替代形态并注明未执行 Skill 工具注入；**禁止把 Read 声称为已完成 Skill 工具注入**。
+   - Explicit requirement to return `completedChecks` in the Return Contract containing `required-skill:subagent-execute.flow-comet-dev`（证明已加载 implementation skill；guard W1-D 严格校验，缺失 → exit BLOCKED，无旧 change 豁免）。Skill 工具不可用而走降级时该条目标记仍按契约回传，但必须与 `skillToolFallback` 降级声明并排出现——只回传标记而无声明视为不实声明，orchestrator 不得记录 result。
    - The task's `read_files` and `write_files` boundaries.
    - Instruction to produce `<task-id>-SUMMARY.md` in `.specs/<change-id>/` following the `flow-kit/templates/SUMMARY.md` template（标题/首部/段序保真，另补 flow-comet 增量 `## 自检方法` 段）。
    - **提交边界警告**:提交**只含该任务 write_files 范围内的文件**(含测试文件)——不得包含 TASK.md 与其他协调者维护的 .specs 工件(新 change 提交越界 BLOCKED;实测子代理提交含 TASK.md 被 W2-D 拦截)。**提交从属规则**:任务专属的 `<task-id>-SUMMARY.md`(位于 `.specs/<change-id>/`,是 flow-comet 强制产物)允许随任务提交属流程默认豁免——目标仓库的既有规定优先,若目标仓库忽略清单等既有规定拒绝其入库,被拒即为正确行为,严禁 force-add 强加越库提交;委托校验对任务摘要的豁免属于校验宽容度,不是入库指令。
@@ -118,13 +125,15 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
   "redEvidence": { "command": "<RED 失败测试命令>", "output": "<真实失败输出片段>" },
   "greenEvidence": { "command": "<GREEN 通过测试命令>", "output": "<真实通过输出片段>" },
   "riskSignals": ["cross-module | security | concurrency | migration | public-api | 200+lines | none"],
-  "concerns": "<可选：未解决的疑虑>"
+  "concerns": "<可选：未解决的疑虑>",
+  "skillToolFallback": "<仅 Skill 工具不可用时回传：降级替代形态（如 file-read），未执行 Skill 工具注入>"
 }
 ```
 
 - `status=DONE` 才视为完成；`BLOCKED` / `NEEDS_CONTEXT` 需 orchestrator 处理。
 - `redEvidence` / `greenEvidence` 缺任一 → 视为未执行 TDD，orchestrator 拒绝记录；**新 change 下 guard 强制 BLOCKED**（旧 change WARN 渐进）。
 - `completedChecks` 必须含 `required-skill:subagent-execute.flow-comet-dev`（子代理加载 implementation skill 的证明）；缺任一项 → guard exit 严格 BLOCKED（W1-D，无旧 change 豁免），orchestrator 不得以旧格式/补录方式绕过。
+- **Skill 工具不可用降级（如实声明）**：子代理会话不具备 Skill 工具时，按 Read 加载节点 SKILL + 协议执行并在 Return Contract 回传 `"skillToolFallback": "<降级替代形态，如 file-read>"`（SUMMARY「自检方法」段同步声明该替代形态并注明未执行 Skill 工具注入）；此时 `completedChecks` 的 `required-skill:...` 标记仍按契约保留，但必须与降级声明并排出现——只回传标记而无降级声明视为不实声明，orchestrator 不得记录 result；具备 Skill 工具时不得回传该字段。**该字段是声明、不是物理证明**：回执只能记录会话的声明，读 SKILL.md 与真实 Skill 注入在机器可读证据上不可区分（与 `directOverride` / `completedChecks` 同族的诚实边界）——声明与事实不符属流程违规，验收以 transcript 可见的 Skill 工具触发为准。
 - `riskSignals` 非 `none` 时，orchestrator 应将该任务标记为 review 节点的高优先级审查对象。
 - 子代理回传后，orchestrator 用 `workflow-handoff.mjs result <task-id> '<JSON>'` 记录；guard exit subagent-execute 会校验 commitHash + greenEvidence + completedChecks（W1-D，严格）。
 
