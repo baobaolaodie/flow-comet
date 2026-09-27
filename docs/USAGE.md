@@ -19,6 +19,12 @@ Everything here is done inside the project you installed into, with the installe
 
 `next` tells you where you are; `status` prints the machine state. Both are read-only.
 
+## How you use it
+
+You invoke the workflow once per session and it drives itself from there. In Claude Code that is the entry skill `/flow-comet`; in Codex, invoke the skill (`/use flow-comet`) or ask for the workflow in natural language; in DeepSeek Harness, invoke the `flow-comet` skill. The first call confirms scope, creates the change's branch, initializes the state and enters the first node; afterwards the workflow routes each stage and stops only at decision points.
+
+The per-node lifecycle described below is what the workflow runs for you — and what you run yourself when you are driving a node by hand (recovering a stuck change, or working inside the engine).
+
 ## Driving a node
 
 Every node has the same lifecycle. The guard records the entry, you load the node's skill, declare it, work, record the node's evidence, and the guard validates the exit:

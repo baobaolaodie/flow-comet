@@ -63,15 +63,19 @@ cat .claude/skills/flow-comet/INSTALLED_VERSION    # the version written into th
 
 The installer writes the marker to `.claude/skills/flow-comet/INSTALLED_VERSION` for Claude Code, `.agents/skills/...` for Codex and `.dsh/skills/...` for dsh. It records the version the copy came from: the package's release version for an npm install, or the repository's `git describe` value for an install run from a clone (that form carries a `-<n>-g<hash>` suffix when the clone is ahead of its tag).
 
-## Your first change
+## Use it
 
-```bash
-cd <your project>
-node .claude/skills/flow-comet/scripts/workflow-state.mjs init my-first-change
-node .claude/skills/flow-comet/scripts/workflow-state.mjs next
-```
+Open a session in your project and invoke the workflow:
 
-`next` reports the node you are on and the skill to load. Every node then follows the same lifecycle: the guard records the entry (`workflow-guard.mjs entry <node> --apply`), you load the node's skill, declare it (`workflow-state.mjs skill-load <node> <skill>`), do the work, record the node's evidence (`workflow-state.mjs record <node> '{"summary":"..."}'`), and let the guard validate the exit (`workflow-guard.mjs exit <node> --apply`). Artifacts live in `.specs/my-first-change/`; on archive they move to `.specs/archive/<date>-my-first-change/` and a row is added to `.specs/CHANGELOG.md`. The full walkthrough is in [Usage](docs/USAGE.md).
+- **Claude Code** — `/flow-comet`
+- **Codex** — invoke the skill (`/use flow-comet`, or simply ask for the flow-comet workflow in natural language)
+- **DeepSeek Harness** — invoke the `flow-comet` skill
+
+The first call confirms scope, then creates the branch for the change, initializes the state and enters the first node, producing that change's `CHANGE.md` / `REQUIREMENT.md` under `.specs/`. Every later stage is routed automatically — you only answer the decision points (scope, tech stack, destructive changes, review findings, archive confirmation). On first use in a project it detects a missing project context and offers to build one from your existing documents before starting.
+
+To see where it is, just ask it — or inspect it from the command line with `status` and `next` in the project (the per-platform paths are in [Installation](docs/INSTALLATION.md)).
+
+Artifacts live in `.specs/<change-id>/`; on archive they move to `.specs/archive/<date>-<change-id>/` and a row is added to `.specs/CHANGELOG.md`. The node-by-node walkthrough — including what the workflow runs underneath, and how to drive a node by hand when you need to — is in [Usage](docs/USAGE.md).
 
 ## Pick a platform
 

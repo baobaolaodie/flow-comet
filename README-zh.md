@@ -60,15 +60,19 @@ cat .claude/skills/flow-comet/INSTALLED_VERSION    # 写进本项目的版本标
 
 安装器把标识写到：Claude Code 为 `.claude/skills/flow-comet/INSTALLED_VERSION`，Codex 为 `.agents/skills/...`，dsh 为 `.dsh/skills/...`。它记录这份副本的来源版本：npm 安装写**随包发布的版本**；从仓库 clone 安装写该仓库的 `git describe` 值（clone 领先 tag 时才带 `-<n>-g<hash>` 后缀）。
 
-## 你的第一个 change
+## 怎么用
 
-```bash
-cd <你的项目>
-node .claude/skills/flow-comet/scripts/workflow-state.mjs init my-first-change
-node .claude/skills/flow-comet/scripts/workflow-state.mjs next
-```
+在项目里开一个会话，调用工作流：
 
-`next` 会告诉你当前节点与该加载的技能。此后每个节点都是同一条生命周期：守卫记录进入（`workflow-guard.mjs entry <node> --apply`）→ 你加载该节点技能 → 声明（`workflow-state.mjs skill-load <node> <skill>`）→ 干活 → 记录节点证据（`workflow-state.mjs record <node> '{"summary":"..."}'`）→ 守卫校验出口（`workflow-guard.mjs exit <node> --apply`）。工件放在 `.specs/my-first-change/`；归档时整体迁到 `.specs/archive/<日期>-my-first-change/`，并在 `.specs/CHANGELOG.md` 顶部登记一行。完整走查见[使用](docs/USAGE-zh.md)。
+- **Claude Code** —— `/flow-comet`
+- **Codex** —— 调用该技能（`/use flow-comet`，或直接用自然语言说要走 flow-comet 工作流）
+- **DeepSeek Harness** —— 调用 `flow-comet` 技能
+
+首次调用会先确认范围，然后自动创建该 change 的分支、初始化状态并进入第一个节点，在 `.specs/` 下产出这个 change 的 `CHANGE.md` / `REQUIREMENT.md`。此后每个阶段自动路由——你只需要回答决策点（范围、技术栈、破坏性变更、审查发现、归档确认）。项目首次使用时会检测到缺少项目上下文，并在开始前提议用你既有的文档生成一份。
+
+想知道它走到哪儿了，直接问它就行——也可以在项目里用命令行 `status` / `next` 查看（各平台路径见[安装](docs/INSTALLATION-zh.md)）。
+
+工件放在 `.specs/<change-id>/`；归档时整体迁到 `.specs/archive/<日期>-<change-id>/`，并在 `.specs/CHANGELOG.md` 顶部登记一行。逐节点的走查——包括工作流在底层实际执行什么、以及需要手动驱动节点时怎么做——见[使用](docs/USAGE-zh.md)。
 
 ## 选择平台
 
