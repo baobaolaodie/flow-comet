@@ -1,59 +1,53 @@
-<div align="right">
-
-[English](TROUBLESHOOTING.md) · [中文](TROUBLESHOOTING-zh.md)
-
-</div>
-
 # Troubleshooting
 
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| `BLOCKED: 归档必须在 <prefix><id> 分支上进行`（前缀默认 `change/`） | archive executed on the wrong branch (branch mode) | `git checkout <prefix><id>`（默认 `change/<id>`）then retry |
-| `WARN: 分支与 activeChange 不一致` | branch/state drift | `git checkout <prefix><activeChange>` (per WARN hint; prefix is the init `--branch-prefix`, default `change/`) then continue |
-| `WORKTREE WARN: .specs/<change>/ 有未提交工件` | artifacts uncommitted before delegation | inline the needed context in the delegation prompt (workflow artifacts stay in the working tree and are never committed) |
-| `BLOCKED: TASK.md 任务集被修改` | tasks added/removed, action/boundary changed during execute | revert TASK.md to its enter-time content (marking done is legal) |
-| `BLOCKED: state 字段类型非法` | state file edited directly | fix field types or restore `.flow-comet/flow-comet-state.json` from backup/git |
-| `WARN: CONTEXT.md 检测到孤立追加段` | terms/decisions appended as a new tail section | move content into the glossary table / locked-decision list |
-| `WARN: LESSONS.md 条目编号乱序/区外` | new entry not inserted by L-NNN in the entries section | insert by number into `## 条目区` (or `## 活跃条目`) |
-| `WARN: CHANGELOG.md 非倒序` | new change-log entry appended at the bottom instead of the top | insert at the top of the table, newest date first |
-| `WARN: CHANGELOG.md 未登记本 change(<id>)` | archive wrap-up did not register this change in the project CHANGELOG (progressive, new and legacy changes alike) | insert a CHANGELOG entry for this change at the top (follow the project's existing format) |
-| `WARN: STATE.md 决策日志非倒序` | new decision-log entry appended at the bottom | insert at the top (reverse-chronological), never append at the tail |
-| `WARN: PROGRESS.md 存在（恢复警告）` | a mid-task context-window snapshot remains on resume | read its "excluded solutions" section to avoid repeating failures (R1.6), then delete it after completion |
-| `BROOKS-LINT WARN: 使用 builtin-quickcheck 未声明原因` | SUMMARY missing "plugin unavailable" note | add the reason in SUMMARY's `## 自检方法` |
-| `BROOKS-LINT WARN/BLOCKED: 使用 builtin-quickcheck 但未声明缓存尝试证据` | builtin fallback declared without evidence of reading the plugin-cache protocol files (new changes: BLOCKED; legacy: WARN) | in SUMMARY's `## 自检方法`, state that you Read the plugin-cache protocol files (e.g. `~/.claude/plugins/cache/brooks-lint-marketplace/.../brooks-review/`; Codex: `~/.codex/skills/brooks-review/`) and executed manually before falling back |
-| `VERIFY-FAIL: N/3`（前 3 次）/ `BLOCKED: verify 已失败 N 次，需用户决策` | auto-retry up to 3 times; the 4th failure (machine-counted verifyFailures, per change) requires human decision | pause, human decision: "continue / stop" |
-| `verify 失败超限，需用户决策（verifyFailures=N）` | output of the `verify-fail` command — machine-counted (verifyFailures) limit reached, decision prompt | pause, human decision: "继续修 / 停止" |
-| `VERIFY-DEGRADED` appears in verify output | the sandbox denied the piped spawn with EPERM (restricted session); the script retried the same command with `inherit` stdio — real execution and exit-code judgment are kept, and the `VERIFY-DEGRADED` marker line records the degraded capture | expected — the marker does not change exit-code semantics (non-EPERM failures are not degraded; real failures still fail the exit) |
-| `BLOCKED: 疑似未 exit 节点 <node>` | `next` detects illegal node order (skipped/not exited) | run `workflow-guard.mjs exit <node> --apply` per the hint (rollback scenarios see hint); for stuck/drifted state use `workflow-state.mjs select` |
-| `BLOCKED: currentNode is <node>, cannot exit <target>` | trying to exit a node that is not the current one (state drift) | `workflow-state.mjs select` to switch (record missing evidence first if needed); never hand-edit the machine fields |
-| `BLOCKED: missing evidence for Node <node>` | the node finished but its evidence record is missing | run `workflow-state.mjs record <node> '{"summary":"<完成摘要>"}'` to record evidence, then retry; for state drift use `select` |
-| `BLOCKED: ...无可执行的常规恢复动作时，可用 workflow-state.mjs advance 渡过结构性死结` | the exit is blocked by an unfinished runnable serial task and the regular recovery action is not executable — a structural deadlock under multi-pass routing (e.g. the serial task's dependency can never be satisfied) | only for this deadlock-class BLOCKED, follow the advance boundary hint in the message and use `workflow-state.mjs advance` — the escape hatch: after using it, re-enter the node (`workflow-guard.mjs entry <node>`) and redo the delivery records; regular missing-artifact / missing-evidence cases do NOT apply |
-| `BLOCKED: workflow protocol node must have a non-empty string id` | custom protocol `nodes[]` contains empty/invalid element | fix protocol JSON: each node `id` non-empty string, avoid built-in 8-node ids |
-| `BLOCKED: 未在协议 writeWhitelist 中声明` | write target outside the custom protocol whitelist (fail-closed) | declare the node's allowed path prefixes in protocol `writeWhitelist`, or use the built-in protocol |
-| `--protocol <path> 加载失败` | protocol path missing / schemaVersion or kind mismatch | check the path; confirm `schemaVersion: 1`, `kind: "workflow-kernel"` |
-| `ROUTE WARN: 未找到 parallel="true" status="pending" 的任务块` | TASK.md task tags lack the `status="pending"` attribute (or wrong attribute order) | add `status="pending"` after `parallel="true"` in each task tag (attribute order matters: parallel before status) |
-| `WARN: 伪并行检测——以下并行任务仅写测试文件而无生产代码文件: <ids>` | a parallel task's `write_files` contain only test files (`tests/` / `test_` prefixes) and no production code file — its tests may silently depend on symbols produced elsewhere | add a `depends_on` declaration pointing at the producing task, or merge the task into a vertical slice (production code + its tests in one task); progressive WARN — non-blocking |
-| `C4-CHECK SKIP: <reason>` | worktree dirty-check skipped (not a git repo, or git command failed) | expected in non-git projects; if it appears in a git repo, the git command failed — check the reason |
-| `WARN COUNT: N` | summary line on entry/exit — N warns were emitted this call | review each WARN above this line |
-| `--json-file requires a path argument` | `--json-file` is missing its path argument (e.g. used as the last argument) or empty (record and handoff share this usage error) | provide a path: `--json-file <file>` (on Windows PowerShell, prefer `--json-file` to read the JSON payload from a file and avoid quote stripping) |
-| `Unexpected token ... is not valid JSON` (state) | state file carries a UTF-8 BOM or corrupted content | rewrite the state file without BOM (scripts tolerate BOM since 1.2.1) |
-| `BLOCKED: 节点 <node> 未执行 entry 直接 exit`（新 change）/ `ENTER WARN: 节点 <node> 未执行 entry 直接 exit`（旧 change） | the node was exited without entering it first — entry checks (coordinator prohibition / pre-delegation commit check / signature recording) were skipped (new changes: BLOCKED; legacy: WARN) | run `workflow-guard.mjs entry <node>` first, then exit |
-| `BLOCKED: done 任务 <id> 缺少 <id>-SUMMARY.md` | a completed task lacks its summary (new changes enforced; legacy changes warn progressively) | produce the matching `<id>-SUMMARY.md` before exiting |
-| `INIT EMPTY-REPO WARN: 仓库无提交` | the git repository has no commits — branch creation is impossible | commit an initial commit, or continue in file-only mode |
-| `PreToolUse:Write hook error: ... non-blocking` (claude -p) | SDK CLI mode downgrades hook exit codes to non-blocking | expected in `claude -p`; main TUI session blocks writes (exit 2) |
-| `{"decision":"block",...}` from the hook (Codex) | out-of-scope write intercepted via Codex PreToolUse (Bash tool) | expected — the write is denied by design; use worktree delegation for source changes or switch the execution mode |
-| hook silently not blocking (Codex) | hook not trusted yet, or `[features] hooks` not enabled | trust the hook (`/hooks` in an interactive session; `--dangerously-bypass-hook-trust` for scripted automation); `config.toml` has `[features] hooks = true` |
-| write bypassing the hook via alternate spellings (Codex) | Codex interception is command-level — other File APIs may bypass it | platform limit; the mainstream patterns (PowerShell cmdlets, .NET File API, redirection) are covered |
-| hook log shows `Cannot find module ...comet-hook-guard`, and out-of-scope writes are silently allowed | the hook command cannot resolve the guard script — either a legacy relative-path entry fails after the session working directory drifts away from the project root, or a cmd-style entry (`%CLAUDE_PROJECT_DIR%` + backslashes) fails because the host executes hooks with bash semantics on every platform (variable never expanded, backslashes swallowed); the crashing hook is downgraded by the host to non-blocking (fail-open) | re-run the Option B installer to upgrade the entry in place to the project-root-referencing form (see the Hook upgrade section in [Installation](INSTALLATION.md#option-b--prepare-env-installer-repository-clone)) |
-| hook mis-resolves the project root when the session working directory drifts out of it | runRoot is resolved by the fallback chain `FLOW_COMET_RUN_ROOT` → `CLAUDE_PROJECT_DIR` → the nearest ancestor containing `.flow-comet/flow-comet-state.json` or `.claude/skills/flow-comet` → `cwd` (last resort); **each environment-variable candidate is validated before it is adopted** — it is used only when the resolved directory exists and carries the project marker (`.flow-comet/flow-comet-state.json` or `.claude/skills/flow-comet`), and a stale or invalid value is skipped so resolution falls through to the next source; with no usable environment variable and no ancestor anchor it falls back to `cwd`; a legacy relative-path entry (or a cmd-style entry) instead fails with `Cannot find module ...comet-hook-guard` (host downgrades it to non-blocking — fail-open) | set `FLOW_COMET_RUN_ROOT` explicitly (restricted/test environments) — point it at the project root that carries the marker, otherwise the value is skipped; alternatively keep the project root anchored (`.flow-comet/flow-comet-state.json` or `.claude/skills/flow-comet` present at the root), or run the session from inside the project root; a legacy relative-path entry must be upgraded with the Option B installer (see the previous row) |
-| dsh skill not visible in a session | `.dsh/skills/flow-comet` not installed for this project (dsh discovers skills under `<project>/.dsh/skills/` at rank 100 — projects without that directory cannot see the skill), or dsh below `0.1.0-rc.6` | run `node scripts/prepare-env.mjs --target <project> --platform dsh`; upgrade dsh to `0.1.0-rc.6`+ |
-| dsh interception not blocking writes | bridge loader not mounted (`$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` or the `cordis.patch.yml` managed block missing), project not installed, or `tools/pre-execute` signature mismatch | re-run `prepare-env --platform dsh` (mounts the loader + managed block); confirm the session project root contains `.dsh/skills/flow-comet` (narrow listening); verify dsh is `0.1.0-rc.6`+ |
-| dsh uninstall residue (skill / AGENTS.md block / loader remains) | `prepare-env --purge --platform dsh --yes` was not run (e.g. only the `.dsh/skills` directory was deleted by hand) | run `node scripts/prepare-env.mjs --target <project> --purge --platform dsh --yes` — removes `.dsh/skills/flow-comet*`, the AGENTS.md managed block, the `$DSH_HOME/cordis.patch.yml` managed block and the loader file (non-flow-comet entries and other blocks such as dsh-skin preserved) |
-| dsh audit trail not produced | the v1 bridge deliberately writes no audit log (audit observation is not adopted in v1 — the old plugin's `$DSH_HOME` audit file no longer exists) | expected — interception decisions surface in the session's WARN output; project-level skill installs make the old global audit trail obsolete |
-| dsh write unexpectedly allowed on a Windows short-path root | (resolved) the session project root was an 8.3 short path, which could make the guard's lexical path resolution skip the whitelist | current versions canonicalize the project root to its long form before the guard decision — refresh the installed skill (`prepare-env --platform dsh`) if a stale copy is in use |
-| dsh write outside the project root allowed | the flow is in the idle state (no state / no `activeChange` / `completed`) | expected — containment applies only while the flow is running (an existing `activeChange` with `status: "running"` or an omitted status means running; parse failures and unknown statuses are denied, not treated as idle). To verify, check that `.flow-comet/flow-comet-state.json` contains an active change with a running/omitted status |
-| `INIT-NEEDED: 项目上下文（CONTEXT.md）尚未初始化` | first use in a project — no project context yet | run `init <id> --init-context` to generate it (reads existing AI-context docs with attribution; ~15-30k tokens, first use only), or `--init-skip` to record the skip and stay silent on future inits |
-| `INIT-HINT: 项目上下文（CONTEXT.md）已就绪（7 段 + 模板格式校验通过）但尚未记录扫描时间` / `INIT-HINT: 上次扫描已 X 天` | context exists but not recorded: template-valid CONTEXT with no scan record yet (generated but never re-run), or last scan older than 90 days | ready state: run `init <id> --init-context` to record the scan time (then silent for 90 days); stale state: optional refresh — not required |
-| `INIT-GENERATE: 项目上下文未初始化——请生成 .specs/CONTEXT.md` (a template note follows: strictly follow `flow-kit/templates/CONTEXT.md` section names and entry formats when detected; otherwise use the 7-section baseline) | `--init-context` with no CONTEXT.md — first step of the generation collaboration | read the listed source docs in full and integrate them with attribution (`来自 <doc>:<line>`; originals are never written), probe the code (tech stack / existing abstractions), and produce the 7 sections against the template; re-run `init <id> --init-context` afterwards to validate and record the scan time |
-| `INIT-VALIDATE-FAILED: CONTEXT.md 已存在但不满足模板（<原因>）` (`<原因>` = format issues / missing sections) | `--init-context` always validates and found CONTEXT.md missing sections or failing the template format checks | rewrite it — keep the accumulated terms/decisions (they accumulate across changes), attribute sources with `来自 <doc>:<line>`, never modify the originals; follow the template's section names and entry formats |
-| `INIT-DONE: 项目上下文（CONTEXT.md）已就绪（7 段 + 模板格式校验通过）` / `INIT-DONE: 项目上下文已存在且新鲜，跳过生成。` | second step of the generation collaboration — re-running `init <id> --init-context` validated the 7-section structure and template format (or the context is still fresh within 90 days) | nothing to do — the scan time is recorded; no hints for the next 90 days |
+Find your symptom, run the command. Everything here assumes you are inside the project you installed into.
+
+## Symptoms
+
+### Installation
+
+**`fcomet: command not found`** — the CLI is not on your PATH. Re-run `npm install -g flow-comet` and check `npm bin -g` (or `npm prefix -g`) is on PATH; `node --version` must report 18 or newer.
+
+**The command printed usage and exited non-zero** — that is the no-argument behaviour: with no arguments at all the installer only prints its usage. Add the intent: `fcomet init`, or `fcomet --target <dir>`, or `--platform <name>`.
+
+**It installed the wrong platform** — re-run with the platform named explicitly: `fcomet init --platform claude-code`, `--platform codex`, `--platform dsh`, or a comma-separated list / `all`. Re-running is idempotent; it does not delete what is already there.
+
+**`.gitignore` was not updated** — check you ran the installer in a project (not inside the flow-comet repository itself, where `.flow-comet/` must stay tracked). The managed entry is appended, never replacing existing lines.
+
+### First run
+
+**Claude Code never blocks an out-of-scope write** — the hook runs through a shell the host must be able to find. On Windows, tell the platform where Git Bash is (the host looks for it) and retry; a headless session additionally needs the workspace trust to be accepted beforehand.
+
+**Codex never blocks anything** — project hooks only run once their trust has been accepted (interactive `/hooks`), or when a scripted run passes `--dangerously-bypass-hook-trust`. Without either, the hook is not executed at all.
+
+**dsh: writes are not intercepted** — run the read-only self-check in the project: `node .dsh/skills/flow-comet/scripts/workflow-state.mjs bridge-check`. It reports whether the loader is present, whether the managed block in `$DSH_HOME` is mounted, whether it is registered once, and whether the loader's version stamp matches the project marker. Re-running `fcomet init --platform dsh` rewrites both the loader and the managed block.
+
+### A stuck node
+
+**`BLOCKED: … 未执行 entry 直接 exit`** — the guard requires an entry for every node on a new change: run `workflow-guard.mjs entry <node> --apply` first.
+
+**`BLOCKED: … 缺少技能加载声明标记`** — load the node's skill and declare it: `workflow-state.mjs skill-load <node> <skill>`, then repeat the `record` and the exit.
+
+**`BLOCKED: … 模板保真校验失败`** — the node's document is missing a header field or a section the flow-kit template defines. Compare it with `flow-kit/templates/<DOC>.md` and add the named field or section; the message names what it wanted.
+
+**`BLOCKED: … TASK.md 任务集被修改（签名不匹配）`** — the task set changed after the execution node was entered. Restore the task list and re-enter the node (or add the work as a new task before entering), rather than editing tasks mid-flight.
+
+**`BLOCKED: done 任务 … 缺少 <id>-SUMMARY.md`** — every completed task needs its summary document with the template's sections. Write it, or revert the task to pending if it is not actually done.
+
+**`BLOCKED: … 任务被主代理直接标记 done（越俎代庖）`** — in the default execution mode the coordinating session may not complete tasks itself. Delegate the task, or declare the takeover explicitly with `workflow-state.mjs record execute '{"parallelTakeoverApproved":true}'`.
+
+**`verify` fails with a timeout or a non-zero command** — the exit runs the command block from `TEST.md`. Run that command yourself to see the output; a suite that legitimately needs longer can be given a larger budget through the documented `FLOW_COMET_VERIFY_TIMEOUT_MS` environment variable.
+
+**`BLOCKED: missing Output Schema artifacts`** — the archive exit wants the archived directory and its leftover list. Move the change directory into `.specs/archive/<date>-<change-id>/` and make sure `KNOWN-ISSUES.md` exists inside it (write "no leftovers" explicitly if there are none).
+
+### Platform
+
+**Codex hook stopped working after moving the project** — the Codex hook stores the absolute path it was installed with. Re-run `fcomet init --platform codex` in the project's new location.
+
+**dsh reports a version skew** — the loader's version stamp and the project marker disagree. Re-run `fcomet init --platform dsh` (it rewrites both), then re-check with `bridge-check`. A development suffix on one side is normal for an install from a clone.
+
+### Upgrade and reset
+
+**The project still runs the old version after `npm install -g flow-comet`** — upgrading the global package only replaces the CLI. Run `fcomet init` in the project again; it overwrites generated files and is idempotent.
+
+**I want to start over** — `fcomet init --purge --yes --platform <platform>` deletes that platform's generated files and rebuilds them. It is a delete-and-rebuild, **not an uninstall**: on Claude Code the whole `.claude/` directory is removed (keep your own additions elsewhere), on Codex only the flow-comet skills and managed entries are removed, and `flow-kit/` is never deleted. The deletion list is printed before anything happens; `--yes` is the second confirmation.

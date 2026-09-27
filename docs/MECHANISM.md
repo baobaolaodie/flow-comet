@@ -1,142 +1,65 @@
-<div align="right">
+# Core Mechanisms
 
-[English](MECHANISM.md) · [中文](MECHANISM-zh.md)
+The behaviour layer: what the engine guarantees, how a node's exit is validated, how execution is isolated, and how to run a workflow of your own on the same engine. Step-by-step usage lives in [Usage](USAGE.md); installation in [Installation](INSTALLATION.md).
 
-</div>
+## Behaviour contract
 
-# Core Mechanisms (behavior layer)
+- **File as truth.** The state machine lives in a single file (`.flow-comet/flow-comet-state.json`) and is only ever advanced by the guard's exit command. Everything the engine needs to know about the work is derivable from the artifacts under `.specs/`; no progress is stored in a conversation, so any session can resume by re-reading them.
+- **Gates, not advice.** Advancing from a node is a validated transition, not a suggestion: the guard checks the node's artifacts, their structure, the evidence recorded for the node, and the declarations the workflow requires.
+- **Fail-closed by default.** When a decision cannot be proven safe — the protocol file cannot be read, the state or a payload cannot be parsed, the workflow status is unknown, a path cannot be shown to stay inside the project — the engine refuses instead of proceeding. Only clearly idle states (no change, or a completed change) are treated as unconstrained.
+- **Declared boundaries.** Anything that looks like user authority — accepting a repair round past its cap, re-entering an archived change, taking over a task from the coordinator — must be an explicit, recorded declaration. The engine treats silence as refusal.
 
-This document describes what flow-comet **does** — the behaviors and rules you will observe while using it. Implementation details (script logic, decision tables, historical fixes) are out of scope here.
+## Three defense layers
 
-## 1. State machine and routing (file-as-truth)
+| Layer | What it does | Where it is enforced |
+|---|---|---|
+| ① Physical write interception | Before a tool writes, the platform hook checks the target against the current node's write whitelist; out-of-scope writes are refused in the platform itself | the platform's `PreToolUse` hook, installed by the installer |
+| ② Guard validation | Node entry and exit are validated against evidence: required artifacts and sections, recorded node evidence, the skill-load declaration, the task-set signature, summaries for completed tasks, review dispositions, and the test commands that `verify` actually runs | the guard's `entry` / `exit` |
+| ③ State and schema validation | Every state write is validated against the schema (field types, nested records), and unwritable shapes are rejected rather than silently normalized | the state machine's write path |
 
-- Single-file state machine `.flow-comet/flow-comet-state.json`; node advancement is gated by `workflow-guard.mjs exit <node> --apply`
-- **determineNode**: the current node is derived in real time from `.specs/` artifacts (missing files → stop at that node); state is not fully trusted
-- **auto-correction**: when state's currentNode disagrees with derivation, it is written back automatically (triggered by `next`)
+The same discipline gives the coordinator an enforced boundary: in the default execution mode the coordinating session may not carry out implementation tasks itself (the engine reports the takeover). Implementation is delegated to isolated subagents that must return a verifiable contract — a commit, the real output of their verification, and the checks they declared.
 
-## 2. Three defense layers (takeover protection)
+**Hook blocking semantics and their limits.** The hook blocks a write by exiting with status 2 and printing the reason; in an interactive platform session that is a refusal. Two platform-level preconditions are worth knowing, because when they are missing the hook *cannot* refuse even though the mechanism is intact:
 
-| Layer | Mechanism | Check point |
-|-------|-----------|-------------|
-| ① Hook physical interception | Phase whitelist: execute/subagent-execute coordinators may only write `.specs/`; source code is written by worktree subagents (their workspace sits under the isolation prefix `.claude/worktrees/**`, which the hook allows) | write target path + currentNode |
-| ② Coordinator prohibition | `next`/`entry` inject "you are the coordinator, not the executor" each time (direct-mode execute exempt) | output injection |
-| ③ Exit takeover detection | parallel tasks done must have handoffResult, otherwise BLOCKED (`parallelTakeoverApproved` explicit exemption) | TASK.md + handoff evidence |
+- Claude Code runs the hook through the shell it can find; if the host cannot discover a Bash (for example Git Bash on Windows), the hook falls back to a shell where the installed command form does not run, and a non-zero status is not treated as a block. Giving the platform the path to a POSIX shell restores blocking.
+- Codex only executes project hooks when its hook-trust has been accepted (interactive `/hooks`), or when a scripted run passes the platform's bypass flag. Without either, the hook is simply not executed.
 
-Hook blocking semantics (see Limitations): PreToolUse hook exit 2 blocks in the main TUI session; in `claude -p` non-zero exits are downgraded to non-blocking.
+Both are host preconditions rather than engine behaviour; with them satisfied, a real session refuses an out-of-scope write and allows the same write once the node permits it.
 
-Project-root fallback chain for interception: when the session cwd drifts, the project root is anchored via `FLOW_COMET_RUN_ROOT` → `CLAUDE_PROJECT_DIR` → the nearest ancestor containing either `.flow-comet/flow-comet-state.json` or `.claude/skills/flow-comet` → cwd, so out-of-project writes keep being intercepted.
+## Guard validation
 
-## 3. Guard validation (evidence-driven advancement)
+At each node the guard answers a fixed set of questions; a "no" is a refusal with the reason and the command that fixes it:
 
-| Mechanism | Check point | Trigger |
-|-----------|-------------|---------|
-| Template-derived section names | open/design exit required section names derived from `flow-kit/templates/` (built-in fallback when templates missing) | exit open/design |
-| TASK signature hash | enter records task-set signature (line-ending normalized + marker attributes stripped) → exit compares: add/remove tasks, change action/boundaries → BLOCKED; marking done/adding marker attributes → legal | enter/exit execute |
-| Node order BLOCK | next when currentNode not exited (non-normal successor) → BLOCKED; normal next after exit advancement exempt; rollback exempt (pending rollback task in TASK) | next |
-| handoff completedChecks | subagent Return Contract must carry required-skill completedChecks (skill-load evidence), missing → BLOCKED | exit subagent-execute |
-| Skill-load front gate | new changes require the node's skill-load declaration marker to exist before handoff request / record; the declaration must follow loading the skill with the Skill tool (reading the SKILL.md file is not enough) | handoff request / record |
-| redEvidence ordering | redEvidence must exist before greenEvidence; recording redEvidence after greenEvidence → BLOCKED | workflow-handoff result |
-| Contract payload parse failure | record / workflow-handoff result: a payload that looks like an object literal but fails JSON parsing → error with a `--json-file` hint, and nothing is written to state (fail-closed, no dirty data) | record / workflow-handoff result |
-| Suspicious-object heuristic boundary | a payload starting with `{`/`[` or containing `:`/`;` is treated as a likely object literal; if parsing then fails, the operation fails closed with a `--json-file` hint — a legitimate plain-text value at this boundary is conservatively rejected (safe-side design, no dirty state) | record / workflow-handoff result |
-| SUMMARY six sections | verify output / 6-dimension self-check (non-empty) / boundary check + mandatory `## 自检方法` — the 6-dimension section must declare `brooks-review` or `cache-brooks` (two-tier fallback: Skill tool → if only a "Launching skill" placeholder is returned, Read the plugin-cache protocol files and execute the full review manually); `builtin-quickcheck` appears only under `## 自检方法` with the unavailable reason AND the cache-attempt evidence (new changes blocked; legacy warned) | exit execute |
-| Request-time task ownership | a pending task's request is accepted only from the node its declared execution mode expects — `subagent-execute` for a parallel task, `execute` for a serial one — judged from the raw recorded current node, not a derived value; a mismatch blocks a new change before any handoff evidence is written (state byte-for-byte unchanged, no request recorded) and prints `workflow-state next` + `entry <target node>` recovery guidance; the same node not yet entered only warns; completed tasks, explicit `--write-files` requests and readable protocols without the expected enabled node are unaffected; when the protocol file cannot be read or parsed, the gate emits a visible warning naming the reason and stating that ownership checking was skipped for this request — neither new nor legacy changes are blocked for that reason; legacy changes warn and proceed | handoff request |
-| Fix round accounting | only a controlled reposition from review/verify with pending repair work and an execute-family successor increments the per-change repair counter; the first three rounds print the round in the audit line, the fourth blocks a new change without moving the node and asks to continue or stop; continuing requires an explicit user authorization recorded in handoff evidence; a passing verify does not clear the counter, verify-failure counting stays independent, and already-complete task sets, classification-only passes and verify command failures are not counted; legacy changes warn and proceed | next / entry execute |
-| Controlled re-entry from the archive node | when a defect surfaces only after the change is archived and before its directory is moved away, an explicit user authorization (`--authorized-by` plus a required reason) can return the work to the execution family, review or verify; the command takes a verifiable state snapshot and prints a dedicated audit line before moving the workflow, and a per-change cap of three rounds blocks a fourth attempt with continue/stop guidance — continuing past the cap requires an explicit continuation authorization for the coming round | re-enter command; unauthorized, out-of-range, moved or already-completed states are rejected with the state file byte-for-byte unchanged, on legacy changes as well — a legacy shape must not become an authorization bypass |
-| Signature algorithm version | the recorded task-set signature carries a version prefix and the applied-exit event records the algorithm version that produced it; return classification, controlled reposition and the task-set comparison only compare signatures from the same version, and a bare legacy digest is read as the original version's value — so an engine upgrade does not misclassify an ordinary multi-pass finish or block an unchanged task set, while changing the algorithm requires an explicit decision at the frozen regression anchor | enter/exit execute; return classification |
-| Result-time zero-commit revalidation | when a result declares no commit with non-empty declared outputs, zero-commit eligibility is re-checked before the result is recorded: changed ignore rules, a path that became tracked, a symbolic link or junction on any existing ancestor segment, or a non-git root revokes the recorded no-commit flag and rejects the result on a new change (warned on a legacy one), so the exit gate no longer exempts the missing commit hash; the project root is realpath-normalized first, and anything unproven still runs the full commit-subset check; the no-commit flag is a revocable current eligibility credential rather than an immutable request-time fact — each revocation additively records revokedAt (ISO timestamp) and revokeReason (failure category: stale-eligibility / became-tracked / symlink-junction-escape / non-git / invalid-path) in the request evidence for audit | handoff result |
-| SUMMARY full skeleton | headings are derived from every H2 in the SUMMARY template; each section must exist (conditional sections may state N/A), sections that appear must follow template order, and the mandatory self-check method section must sit after the boundary check (at the end or immediately after it); a new change missing a section blocks with recovery guidance, a legacy change warns, and a missing template falls back to the built-in ten-section skeleton | exit execute |
-| Disposition markers | REVIEW.md findings must carry a disposition marker (fixed/upgraded/deferred; new changes blocked; legacy warned) | exit review |
-| builtin self-check evidence | `builtin-quickcheck` must state the unavailable reason AND the plugin-cache attempt (new changes blocked; legacy warned) | exit execute |
-| Artifact template fidelity | SUMMARY / TASK / CHANGE / REQUIREMENT / DESIGN must keep the template title, header fields, and section order; new changes missing any part are blocked with recovery guidance, legacy changes warned | exit execute / plan / open / design |
-| Wave-wording consistency | prose `[P]` markers must match task `parallel="true"` (new changes blocked; legacy warned) | exit plan |
-| Wave grouping consistency | grouping validity is decided by the dependency graph, not by block position: acyclic `depends_on` with every referenced task present is legal; interleaved parallel/serial sequences are allowed and are consumed pass-by-pass by multi-pass routing in dependency-topology order; only a dependency cycle or a missing dependency reference blocks — new changes BLOCK with `depends_on` adjustment guidance, legacy changes WARN | exit plan |
-| Pseudo-parallel advisory | when a parallel task declares only test files in its writes, the plan exit emits a non-blocking warning (task id + suggestion: declare an explicit `depends_on` or merge into a vertical slice) | exit plan |
-| Overreach delegation | parallel done tasks require the delegation node exited (new changes blocked; legacy warned) | exit execute/verify |
-| verify real execution | TEST.md `## 验证命令` actually runs (multi-line `&&` supported); verifyFailures machine-counted **per change** (switching changes does not carry over another change's count), 4th → BLOCKED (timeout configurable via `FLOW_COMET_VERIFY_TIMEOUT_MS`, default 300s) | exit verify |
-| Append placement | CONTEXT orphan sections / LESSONS numbering-out-of-order / STATE+CHANGELOG non-reverse-order → WARN (progressive) | exit open/verify/archive |
-| Task completion artifacts | every `done` task must have a matching `<id>-SUMMARY.md`; missing → progressive WARN (artifacts incomplete — the task claims done without its summary) | exit execute |
-| Pre-delegation check | uncommitted artifacts in `.specs/<change>/` → WORKTREE WARN; PROGRESS.md present → recovery warning | entry execute |
-| state schema validation | writeState field types fail-closed (state-schema.mjs single source, shared by three scripts) | all state writes |
+| Question | Applies to |
+|---|---|
+| Was the entry recorded, and is the node's skill-load declaration present? | every node |
+| Do the node's documents exist, with the template's header fields and section names? | `open`, `design`, `plan`, `review`, `archive` |
+| Are all tasks complete, with a summary per completed task and an unchanged task set? | `execute`, `subagent-execute` |
+| Did the verification actually run, and did it pass? | `verify` (runs the command block in `TEST.md`) |
+| Does every review finding carry a disposition, and does a deferred major finding have a user ruling? | `review` |
+| Are the archive directory and its leftover list in place? | `archive` |
 
-## 4. Execution model (subagent-based)
+Because the checks are structural, a payload that looks like a contract but cannot be parsed is rejected the same way a missing file is — the engine never guesses.
 
-- **Return Contract**: subagents return `{status, commitHash, redEvidence, greenEvidence, completedChecks, riskSignals}` — missing commitHash/greenEvidence/completedChecks → BLOCK; missing redEvidence → progressive WARN; redEvidence recorded after the fact → BLOCK
-- **handoff hash provenance**: `git show <commitHash>` verifies committed files ⊆ write_files (auto-parsed from TASK.md, XML comments stripped)
-- **Zero-commit tasks**: a request-side empty `write_files` list (or request-side `noCommit` marker) classifies the task as zero-commit — results skip the commit-subset check with an auditable prompt; zero-commit results carrying tracked files are blocked on new changes and warned on legacy changes; a claimed no-commit result is re-checked at result time, and changed ignore rules, a path that became tracked, or a symlink/junction on any existing ancestor segment withdraws the recorded flag and rejects the result (blocking on new changes, warning on legacy ones); the noCommit marker is therefore a revocable current eligibility credential, so every revocation additively records revokedAt (ISO timestamp) and revokeReason (failure category) in the request evidence for audit
-- **write_files conflict detection**: parallel tasks may share a wave only if their write_files do not overlap
-- **Multi-pass routing**: interleaved parallel/serial task sequences are valid under dependency semantics — the delegation node can be entered multiple times, each pass delegating every dependency-satisfied parallel task in dependency-topology order; serial tasks waiting on later passes are a legal intermediate state
+## Execution model
 
-## 5. Recovery protocol
+Work runs as a change: artifacts in `.specs/<change-id>/`, a git branch per change when the project is a git repository (`change/<change-id>`), and one node at a time. Implementation is delegated to subagents that work in isolation and return a contract; the coordinator may not write source in the default mode. A change that needs repair after review returns through the execution node's lifecycle rather than being patched in place, so the same exit gates apply to the repair as to the original work.
 
-- Any-entry recovery: determineNode derives from files + state auto-correction (no conversation history needed)
-- PROGRESS.md recovery warning (R1.6 anti-repetition)
-- Branch-state consistency check
-- `advance` escape hatch: for structural deadlocks with no routine recovery action, `workflow-state.mjs advance` forces advancement (you must re-enter the node and redo the delivery records afterwards); not for ordinary missing-artifact/missing-evidence cases
+## Recovery
 
-## 6. Guard self-test suite (author regression baseline)
+State is always re-derivable: `status` prints the machine view, `next` prints the node and the command to continue, `advance` forces the state forward when it is genuinely out of step, and `select <change-id>` switches to another change. A node that refuses an exit prints what is missing; the fix is always to add what the message names, never to edit the state file by hand.
 
-`scripts/guard-self-test.mjs`: **267 scenarios** covering entry/exit validation positive/negative cases (branch checks, append-placement detection, custom protocols, composition scenarios, automatic initialization detection) — together with `system-test.mjs` (82 items, real command sequences across all mechanism surfaces) they form the two-tier regression baseline after every change (script-logic self-test in a sandboxed environment; **not** an installation verification criterion):
+## Custom protocols
 
-```bash
-node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs
-# → ALL 267 SCENARIOS PASSED
-```
+`/flow-comet-compose` is a side command (not part of the 8-node flow) that guides you through composing any installed skill into a custom workflow protocol in JSON. The custom protocol is then driven by the same engine — state routing, guard validation and hook interception — with no new runtime capability required. The built-in 8-node protocol remains the default and is not replaced.
 
-## 6.5 DeepSeek Harness (dsh) platform
+**Loading a protocol.** Priority is `--protocol <path>` (or `--protocol=<path>`) on the command line, then the `FLOW_COMET_PROTOCOL` environment variable (persistent when set in the platform's project environment), then the built-in default. Without an explicit choice, everything behaves exactly like the built-in protocol.
 
-On DeepSeek Harness, flow-comet is installed through the **prepare-env installer** (`--platform dsh`) — no plugin bundle; the npm distribution channel (the `flow-comet` package with its `fcomet` command) is published on npm — see [the version status page](VERSIONS.md) for the current version, kept in step with the other release surfaces — and dsh installs keep going through prepare-env. The engine itself is untouched, the guard decision core is reused unchanged via subprocess calls:
+**Minimal structure.** A protocol declares `schemaVersion` (`1`), `kind`, `name`, a `nodes[]` array, an `outputSchemas[]` array, and optionally `writeWhitelist` and `taskFile`. Each node names the skill that implements it (`implementation.skill`) and the output schemas it must satisfy.
 
-- **Installation**: `node scripts/prepare-env.mjs --target <project> --platform dsh` (minimum dsh `0.1.0-rc.6`; dev preview).
-- **Project-level skill discovery**: the skill tree is installed at `<project>/.dsh/skills/flow-comet`; dsh auto-discovers skills under `<project>/.dsh/skills/` at rank 100 (file watching, no restart) — projects **without that directory cannot see the skill**, so activation is naturally project-level (no runtime trace detection, no chicken-and-egg).
-- **Interception**: a thin bridge loader mounted globally at `$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` (managed block in `$DSH_HOME/cordis.patch.yml`, effective for all profiles) listens on dsh's `tools/pre-execute` waterfall event, maps tool arguments to the same guard contract (`Write`/`Edit` → `file_path`, `Bash` → `command`), calls the project-local `comet-hook-guard.mjs` in a child process, and returns `{kind:'deny', reason}` (BLOCK message + recovery guidance) for out-of-scope writes while the flow is running; shape mismatches and abnormal exits fail closed. On Windows 8.3 paths the project root is canonicalized to its long form before the guard decision, preventing the guard's lexical path resolution from skipping the whitelist (fail-open).
-- **Activation scope**: the bridge only engages when the session project root contains `.dsh/skills/flow-comet` (narrow listening) — non-flow-comet projects are untouched.
-- **Executor passthrough**: when the coordinator delegates tasks to subagents, the delegated agent (identified by the session's subagent delegation depth) writes source code as the executor and bypasses the phase whitelist — matching the worktree-isolation semantics of the other platforms — while the coordinating agent remains subject to the whitelist. Out-of-project writes and malformed tool arguments stay denied for both while the flow is running.
-- **Containment is active only while the flow is running**: in the idle state (no state / no `activeChange` / `completed`) writes outside the project root are allowed; parse failures or unknown workflow status stay fail-closed (deny).
-- **Managed rule injection**: installation injects the orchestration rule into `AGENTS.md` inside the `<!-- Managed by flow-comet prepare-env -->` block (non-destructive merge, marker shared with Codex).
+**Rules that make it work.**
 
-## 6.6 Installer behaviors (flow-kit acquisition, loader lifecycle, bridge-check)
-
-`prepare-env` extends the install with flow-kit acquisition, dsh loader lifecycle reporting, and a read-only bridge health check:
-
-- **flow-kit acquisition (five states)**: before the platform loop the installer ensures `<target>/flow-kit/` — missing → clone the upstream and check out the locked snapshot commit `9b5dda7`; existing upstream clone (`.git` present with a matching `origin` remote) → read-only HEAD-vs-lock comparison and impact report (never modified); existing same-name non-clone directory (or an unreadable origin) → skip with manual guidance; clone/checkout network failure → WARN + manual guidance, install continues (exit 0); purge never includes `flow-kit` (including `--purge --yes`).
-- **dsh loader version transitions**: the bridge loader carries an embedded version stamp (`// BRIDGE_VERSION: <version>`); each dsh install compares the authoritative stamp with the installed loader's stamp before overwriting and reports first install / upgrade `A → B` / downgrade `A → B` / version consistent.
-- **bridge-check (read-only)**: `workflow-state.mjs bridge-check` runs a zero-write, zero-network health check over the dsh bridge with six states — healthy (exit 0), file missing / not mounted / version skew / duplicate registration (exit 1), and not applicable (exit 0, project without the dsh platform copy). Unrecognized YAML shapes produce approximation warnings (warn without deciding — never a false fail); only explicit mismatches force a non-zero exit.
-
-## 7. Automatic initialization detection (init pre-step)
-
-On `init`, the workflow automatically detects whether a project context (`.specs/CONTEXT.md`) exists and classifies the project (A~F):
-
-- **A/B**: a context decision was recorded or the context is fresh (≤ 90 days) → fully silent
-- **C**: context exists but the last scan is older than 90 days → hint only (non-blocking)
-- **D**: no context + existing AI-context documents (CLAUDE.md / AGENTS.md / .cursor / .windsurf / Copilot / Cline) → prompt listing them; on approval, reads and integrates them with source attribution (`from <doc>:<line>` + a source-documents section) — **existing files are never modified**
-- **E**: no context + code present → prompt; full generation on approval (dependency/directory probing fills the tech-stack and abstraction sections)
-- **F**: greenfield (no code context) → prompt; skeleton generation on approval
-
-Explicit parameter authorization (no blocking prompts, headless-safe): `--init-context` runs the full generation (≈15-30k tokens, first use only, stated in the prompt); `--init-skip` records `ai_context_doc: none` and silences future prompts. Project-level fields (`ai_context_doc`, `last_intel_scan`) persist across changes; state-schema validates them (fail-closed, legacy states default to null).
-
-
-## 8. Execution-omission protection
-
-- **Node entry evidence**: entering a node records it; exiting a node that was never entered — blocked on new changes (entry checks must not be skipped: coordinator prohibition, pre-delegation commit check, signature recording), progressive warning for legacy changes.
-- **New-change enforcement**: changes created via `init` are marked new (`newChange`) and enforce all content-level checks as blocking — completed tasks require their matching summary, handoff results require TDD RED evidence, disposition markers, builtin self-check evidence, wave-wording consistency, overreach delegation, and append placement; legacy changes keep the progressive warnings.
-- **Declaration automation**: for legacy changes `record` auto-fills missing skill-load declaration markers as a fallback; new changes require the node's declaration markers to exist first (the skill-load front gate blocks handoff requests and records without them).
-- **Explicit empty-exit exemption**: execute may exit with no serial tasks when explicitly declared (`emptyExitApproved`); otherwise blocked by default.
-
-## Design principles
-
-- **File-as-truth, no event sourcing**: single-file state machine + node derivation from `.specs/` — simple, recovery never depends on history
-- **Structural validation, no semantic judgment**: guard checks "filled or not" (sections/non-empty/structure); "good or not" is left to review — light validation, few false positives
-- **Detect + correct, not intercept**: agents cannot truly be prevented from editing files directly; machine fields rely on detection and auto-correction
-- **State stays out of version control**: `.flow-comet/` is gitignored — branch switches share one working-tree state, avoiding state divergence
-- **One change at a time, no forced PR**: a single active change keeps the state machine simple; PR review is opt-in
-
-## Limitations
-
-- **Platforms**: Claude Code (default), Codex (skills/rules/hook via the multi-platform installer), and DeepSeek Harness (dsh — project-level skill + global bridge loader via `prepare-env --platform dsh`, see [Installation](INSTALLATION.md#option-d--deepseek-harness-dsh-platform)) are supported; other platforms (Gemini/Cursor) not guaranteed
-- **Return Contract transition rule**: legacy pure-string handoffs are exempt as WARN; missing redEvidence/greenEvidence is progressive WARN (not BLOCK) to avoid blocking legacy change re-entry
-- **Not interoperable with Comet Classic**: workflow-kernel state is independent of classic (design decision, not a defect)
-- **Hook allows writes when no active change**: when `.flow-comet/flow-comet-state.json` is absent, the hook guard allows all writes (design decision: no workflow, no write restrictions)
-- **Hook blocking semantics**: exit 2 (blocking) is verified working in the main TUI session; in `claude -p` (SDK CLI mode) non-zero exits are downgraded to non-blocking — writes logged but not prevented
-- **Worktree mount dependency**: Agent `isolation: "worktree"` worktrees mount at the **session project root** (not the subagent's target project) — cross-repo artifacts need manual `git show <branch>:<path>` transport, and the commit-file provenance check (`git show` subset validation) is degraded in that case
-- **Zero-commit trust boundary**: the eligibility check proves only that the declared literal paths were empty or ignored and free of symlink/junction ancestor segments at decision time; an unreferenced commit, a HEAD moved after validation, a race between validation and recording, and commits invisible to a worktree-isolated flow are known residual risks — the mechanism does not claim them closed, and unprovable cases still run the full commit-subset validation
-- **GUIDANCE not tracked by the authoring record**: `<skill>-GUIDANCE.md` and SKILL.md reference lines are not recorded in the authoring manifest; re-running the Skill generator tool clears them
+1. **Every node must have artifacts** — each referenced schema must exist in `outputSchemas[]` with non-empty artifact paths; without artifacts there is nothing to validate or recover from.
+2. **Every node must have evidence** — each schema carries its evidence ids, which is what `record` writes and the exit checks.
+3. **Node ids must avoid the built-in eight** — `open`, `design`, `plan`, `execute`, `subagent-execute`, `review`, `verify` and `archive` are reserved.
+4. **Write boundaries are declared** — a protocol may supply a whitelist (node id → allowed path prefixes, with a `<change-id>` placeholder so one protocol serves every change). When omitted, the built-in ids keep the built-in table and custom ids default to the coordinator whitelist, which allows writing under `.specs/` and requires an explicit declaration for anything else.

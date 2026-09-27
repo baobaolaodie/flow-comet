@@ -18,7 +18,7 @@
 
 | 类型 | 项 |
 |------|-----|
-| **必需** | [flow-kit](https://github.com/rihebty/flow-kit)（方法论与工件模板；安装器自动获取——锁定快照）；Claude Code |
+| **最低要求** | [flow-kit](https://github.com/rihebty/flow-kit)（方法论与工件模板；安装器自动获取——锁定快照）；Claude Code |
 | **运行时依赖（仅安装器 TTY）** | `@clack/prompts`（`package-lock.json` 精确锁版；仅 `prepare-env` 交互方向键多选使用——不可用时自动回退 readline） |
 | **平台** | Claude Code（skill 体系，默认）；Codex（技能/规则/hook 经 `prepare-env --platform codex`，见[安装](INSTALLATION-zh.md#平台)）；DeepSeek Harness（项目级技能 + 全局桥接 loader，经 `prepare-env --platform dsh`，见[安装](INSTALLATION-zh.md#方案-d--deepseek-harnessdsh平台)）；不保证 Gemini/Cursor |
 | **运行时** | Node.js ESM（Node ≥ 18）；工件语言与项目主语言一致 |
