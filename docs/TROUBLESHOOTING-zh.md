@@ -1,59 +1,53 @@
-<div align="right">
-
-[English](TROUBLESHOOTING.md) · [中文](TROUBLESHOOTING-zh.md)
-
-</div>
-
 # 故障排查
 
-| 现象 | 原因 | 处理 |
-|------|------|------|
-| `BLOCKED: 归档必须在 <prefix><id> 分支上进行`（前缀默认 `change/`） | 在错误分支执行 archive（分支模式） | `git checkout <prefix><id>`（默认 `change/<id>`）后重试 |
-| `WARN: 分支与 activeChange 不一致` | 分支与状态漂移 | `git checkout <prefix><activeChange>`（按 WARN 提示；前缀为 init 时配置的 `--branch-prefix`，默认 `change/`）后继续 |
-| `WORKTREE WARN: .specs/<change>/ 有未提交工件` | 委托前工件未 commit | 在委托 prompt 内联所需上下文（流程工件留在工作区、永不入库） |
-| `BLOCKED: TASK.md 任务集被修改` | execute 期间增删任务/改 action/改边界 | 回退 TASK.md 到 enter 时内容（仅标记 done 合法） |
-| `BLOCKED: state 字段类型非法` | state 文件被直改坏 | 修复字段类型或从备份/git 历史恢复 `.flow-comet/flow-comet-state.json` |
-| `WARN: CONTEXT.md 检测到孤立追加段` | 术语/决策被尾部追加成新段 | 把内容移入术语表表格/已锁决策清单 |
-| `WARN: LESSONS.md 条目编号乱序/区外` | 新条目未按 L-NNN 插入条目区 | 按编号插入 `## 条目区`（或 `## 活跃条目`） |
-| `WARN: CHANGELOG.md 非倒序` | 新变更日志条目追加在表格尾部而非顶部 | 表格顶部按日期倒序插入（新条目永远在最新日期行之上） |
-| `WARN: CHANGELOG.md 未登记本 change(<id>)` | 归档收尾未在 CHANGELOG 顶部登记本 change 条目（渐进提示，新旧 change 一致） | 在 CHANGELOG 顶部插入本 change 条目（跟随项目既有格式） |
-| `WARN: STATE.md 决策日志非倒序` | 新决策日志条目追加在尾部 | 顶部插入（倒序约定），禁止文件尾追加 |
-| `WARN: PROGRESS.md 存在（恢复警告）` | 恢复时残留任务中途清窗快照 | 读取「已排除方案」段避免重复失败（R1.6），完成后删除 |
-| `BROOKS-LINT WARN: 使用 builtin-quickcheck 未声明原因` | SUMMARY 缺"插件不可用"说明 | 在 SUMMARY 的 `## 自检方法` 段补原因 |
-| `BROOKS-LINT WARN/BLOCKED: 使用 builtin-quickcheck 但未声明缓存尝试证据` | builtin 降级声明但无「已读插件缓存协议文件」证据(新 change BLOCKED;旧 change WARN) | 在 SUMMARY 的 `## 自检方法` 段声明：已 Read 插件缓存协议文件（如 `~/.claude/plugins/cache/brooks-lint-marketplace/.../brooks-review/`；Codex 为 `~/.codex/skills/brooks-review/`）手动执行完整 brooks 流程后才降级 |
-| `VERIFY-FAIL: N/3`（前 3 次）/ `BLOCKED: verify 已失败 N 次，需用户决策` | 自动重试 ≤3 次；第 4 次失败（机器计数 verifyFailures，按 change 隔离）需人工决策 | 暂停，人工决策「继续修 / 停止」 |
-| `verify 失败超限，需用户决策（verifyFailures=N）` | `verify-fail` 命令输出——机器计数（verifyFailures）达上限后的决策提示 | 暂停，人工决策「继续修 / 停止」 |
-| verify 输出出现 `VERIFY-DEGRADED` | 受限会话中管道 spawn 被沙箱以 EPERM 拒绝；脚本改用 `inherit` 方式重试同一命令——真实执行与退出码判定保持，`VERIFY-DEGRADED` 标记行记录降级捕获 | 属预期——该标记不改变退出码语义（非 EPERM 失败不降级；真实失败仍按失败退出） |
-| `BLOCKED: 疑似未 exit 节点 <node>` | `next` 检测到节点顺序非法（跳节点/未 exit） | 按提示执行 `workflow-guard.mjs exit <node> --apply`（回退场景见提示）；状态卡住/漂移用 `workflow-state.mjs select` |
-| `BLOCKED: currentNode is <node>, cannot exit <target>` | 尝试 exit 的不是当前节点（状态漂移） | 用 `workflow-state.mjs select` 切换（必要时先补 record 证据）；禁止手改机器字段 |
-| `BLOCKED: missing evidence for Node <node>` | 节点已完成但缺证据记录 | 运行 `workflow-state.mjs record <node> '{"summary":"<完成摘要>"}'` 补证据后重试；状态漂移用 `select` |
-| `BLOCKED: ...无可执行的常规恢复动作时，可用 workflow-state.mjs advance 渡过结构性死结` | 出口因存在未完成的可运行串行任务被 BLOCK，且常规恢复动作不可执行——多趟路由下的结构性死结（如该串行任务的依赖永远无法满足） | 仅对死结类 BLOCKED，按消息中的 advance 边界提示使用 `workflow-state.mjs advance`——逃生口：使用后本节点须重新 entry（`workflow-guard.mjs entry <node>`）并重做交付记录；常规缺产物/缺证据情形**不适用** |
-| `BLOCKED: workflow protocol node must have a non-empty string id` | 自定义协议 `nodes[]` 含空/非法元素 | 修复协议 JSON：每个节点 `id` 非空字符串且避开内置 8 节点 id |
-| `BLOCKED: 未在协议 writeWhitelist 中声明` | 写入路径超出自定义协议白名单（fail-closed） | 在协议 `writeWhitelist` 声明该节点允许的路径前缀，或改用内置协议 |
-| `--protocol <path> 加载失败` | 协议路径不存在 / schemaVersion 或 kind 不符 | 检查路径；确认 `schemaVersion: 1`、`kind: "workflow-kernel"` |
-| `ROUTE WARN: 未找到 parallel="true" status="pending" 的任务块` | TASK.md task 标签缺 `status="pending"` 属性（或属性顺序错） | 在每个 task 标签中 `parallel="true"` 之后补 `status="pending"`（属性顺序：parallel 在 status 前） |
-| `WARN: 伪并行检测——以下并行任务仅写测试文件而无生产代码文件: <ids>` | 并行任务的 `write_files` 只有测试文件（`tests/` / `test_` 前缀）而无生产代码文件——其测试可能隐式依赖他处产出的符号 | 补 `depends_on` 声明指向产出任务，或合并成垂直切片（一任务含实现+其测试）；渐进 WARN——不阻断 |
-| `C4-CHECK SKIP: <原因>` | worktree 脏检查被跳过（非 git 仓库，或 git 命令失败） | 非 git 项目下属预期；git 仓库中出现则 git 命令失败——按原因排查 |
-| `WARN COUNT: N` | entry/exit 汇总行——本次调用共 N 条 WARN | 逐条检查该行上方的 WARN |
-| `--json-file requires a path argument` | `--json-file` 缺路径参数（如作为最后一个参数）或为空值（record 与 handoff 统一用法错误） | 补路径参数：`--json-file <文件>`（Windows PowerShell 下推荐用 `--json-file` 从文件读 JSON，规避引号剥离） |
-| `Unexpected token ... is not valid JSON`（state） | state 文件带 UTF-8 BOM 或内容损坏 | 重写 state 文件（无 BOM；脚本自 1.2.1 起容忍 BOM） |
-| `BLOCKED: 节点 <node> 未执行 entry 直接 exit`（新 change）/ `ENTER WARN: 节点 <node> 未执行 entry 直接 exit`（旧 change） | 节点未 entry 直接 exit——entry 的进入检查(协调者禁令/委托前 commit 检查/签名记录)被跳过(新 change BLOCKED;旧 change WARN) | 先运行 `workflow-guard.mjs entry <node>` 再 exit |
-| `BLOCKED: done 任务 <id> 缺少 <id>-SUMMARY.md` | 已完成任务缺对应 SUMMARY(新 change 强制;旧 change 渐进 WARN) | 补写 `<id>-SUMMARY.md` 后再 exit |
-| `INIT EMPTY-REPO WARN: 仓库无提交` | git 仓库无提交——分支创建不可行 | 先初始提交,或继续纯文件模式 |
-| `PreToolUse:Write hook error: ... non-blocking`（claude -p） | SDK CLI 模式把 hook 退出码降级为 non-blocking | `claude -p` 下属预期；主会话 TUI 会阻止写入（exit 2） |
-| `{"decision":"block",...}`（Codex） | 越权写入被 Codex PreToolUse（Bash 工具）拦截 | 属预期——该写入被设计性拒绝；源码改动走 worktree 委托或切换执行模式 |
-| hook 静默不拦截（Codex） | hook 尚未信任，或 `[features] hooks` 未启用 | 信任 hook（交互会话 `/hooks`；脚本化自动化传 `--dangerously-bypass-hook-trust`）；`config.toml` 含 `[features] hooks = true` |
-| 换写法绕过 hook（Codex） | Codex 拦截为命令级——其他 File API 写法可能绕过 | 平台限制；主流模式（PowerShell cmdlet、.NET File API、重定向）已覆盖 |
-| hook 日志出现 `Cannot find module ...comet-hook-guard`，越权写入被静默放行 | hook 命令无法解析守卫脚本——相对路径旧条目在会话工作目录漂移出项目根后解析失败，或 cmd 风格条目（`%CLAUDE_PROJECT_DIR%` + 反斜杠路径）在宿主以 bash 语义执行 hook 时变量不展开、反斜杠被当转义吞掉；崩溃的 hook 被宿主降级放行（fail-open） | 重跑方案 B 安装器把条目原地升级为项目根引用形态（见[安装](INSTALLATION-zh.md#方案-b--prepare-env-安装器仓库克隆)的 hook 升级说明小节） |
-| hook 在会话工作目录漂移出项目根后误判项目根 | runRoot 由兜底链解析：`FLOW_COMET_RUN_ROOT` → `CLAUDE_PROJECT_DIR` → 自 cwd 逐级向上的最近祖先（含 `.flow-comet/flow-comet-state.json` 或 `.claude/skills/flow-comet` 即视为项目根）→ `cwd`（最后兜底）；**两个环境变量候选值在被采纳前都会校验**——仅当解析后的目录存在且带项目标记（`.flow-comet/flow-comet-state.json` 或 `.claude/skills/flow-comet`）时才使用，陈旧或无效的值会被跳过、解析落入下一来源；无可用环境变量且无祖先锚点时回退 cwd；相对路径旧条目或 cmd 风格条目则报 `Cannot find module ...comet-hook-guard`（宿主降级放行——fail-open） | 显式设置 `FLOW_COMET_RUN_ROOT`（受限/测试环境）——须指向带项目标记的项目根，否则该值会被跳过；或让项目根含锚点（根下存在 `.flow-comet/flow-comet-state.json` 或 `.claude/skills/flow-comet`），或在项目根内运行会话；相对路径旧条目须用方案 B 安装器升级（见上一行） |
-| dsh 会话中技能不可见 | `.dsh/skills/flow-comet` 未对该项目安装（dsh 在 `<项目>/.dsh/skills/` 下以 rank 100 发现——未安装该目录的项目不可见该技能），或 dsh 低于 `0.1.0-rc.6` | 运行 `node scripts/prepare-env.mjs --target <项目> --platform dsh`；升级 dsh 到 `0.1.0-rc.6`+ |
-| dsh 拦截不生效 | 桥接 loader 未挂载（`$DSH_HOME/plugins/dsh-flow-comet-bridge.mjs` 或 `cordis.patch.yml` 托管块缺失）、项目未安装，或 `tools/pre-execute` 签名不匹配 | 重跑 `prepare-env --platform dsh`（挂载 loader + 托管块）；确认会话项目根含 `.dsh/skills/flow-comet`（窄监听）；确认 dsh 为 `0.1.0-rc.6`+ |
-| dsh 卸载残留（技能 / AGENTS.md 托管区 / loader 仍在） | 未执行 `prepare-env --purge --platform dsh --yes`（例如只手工删了 `.dsh/skills` 目录） | 运行 `node scripts/prepare-env.mjs --target <项目> --purge --platform dsh --yes`——移除 `.dsh/skills/flow-comet*`、AGENTS.md 托管区、`$DSH_HOME/cordis.patch.yml` 托管块与 loader 文件（非 flow-comet 条目与 dsh-skin 等既有块保留） |
-| dsh 无审计轨迹 | v1 桥接刻意不写审计日志（v1 不采用审计观察——旧插件的 `$DSH_HOME` 审计文件已不存在） | 属预期——拦截决策呈现在会话 WARN 输出中；项目级技能安装使旧全局审计轨迹失去意义 |
-| dsh 在 Windows 短路径项目根下写被放行 | （已修复）会话项目根为 8.3 短路径时，guard 的词法路径解析可能跳过白名单 | 当前版本在判定前把项目根规范化为长形态——若为旧副本请重跑 `prepare-env --platform dsh` 刷新 |
-| dsh 项目根外写被放行 | 流程处于空闲态（无 state / 无 `activeChange` / `completed`） | 属预期——包含性仅在流程运行中生效（存在 `activeChange` 且 `status` 为 `running` 或缺省时视为运行中；解析失败或未知状态会被拒绝，不当作空闲）。如需核实请检查 `.flow-comet/flow-comet-state.json` 的 `activeChange` 与 `status` |
-| `INIT-NEEDED: 项目上下文（CONTEXT.md）尚未初始化` | 项目首次使用——尚无项目上下文 | 执行 `init <id> --init-context` 生成（读取既有 AI 上下文文档并带出处整合；约 15-30k tokens，仅首次），或 `--init-skip` 记录跳过并在后续 init 保持静默 |
-| `INIT-HINT: 项目上下文（CONTEXT.md）已就绪（7 段 + 模板格式校验通过）但尚未记录扫描时间` / `INIT-HINT: 上次扫描已 X 天` | 上下文已存在但未记录扫描：CONTEXT 满足模板但无扫描记录（生成后未重跑），或上次扫描超过 90 天 | 就绪态：运行 `init <id> --init-context` 记录扫描时间（此后 90 天内不再提示）；过期态：可选重跑刷新，非强制 |
-| `INIT-GENERATE: 项目上下文未初始化——请生成 .specs/CONTEXT.md`（后附模板指引：已检测到 flow-kit/templates/CONTEXT.md 时严格对照模板段名与条目格式；未检测到时按 7 段基准） | `--init-context` 时 CONTEXT.md 缺失——生成协作第一步 | 按指引全量阅读源文档并整合（出处标注 `来自 <doc>:<line>`，原文档零写入）+ 代码探测（技术栈/既有抽象索引），对照模板生成 7 段；生成后重跑 `init <id> --init-context` 由脚本校验并记录扫描时间 |
-| `INIT-VALIDATE-FAILED: CONTEXT.md 已存在但不满足模板（<原因>）`（<原因> = 格式问题/缺段清单） | `--init-context` 显式校验发现 CONTEXT.md 缺段或格式不符 | 重写——保留既有 CONTEXT 的累积术语/决策（跨 change 长期累积语义），出处标注 `来自 <doc>:<line>`，原文档零写入；对照模板段名与条目格式 |
-| `INIT-DONE: 项目上下文（CONTEXT.md）已就绪（7 段 + 模板格式校验通过）` / `INIT-DONE: 项目上下文已存在且新鲜，跳过生成。` | 生成协作第二步——重跑 `init <id> --init-context` 时脚本校验 7 段结构 + 模板格式通过（或 CONTEXT 90 天内仍新鲜） | 无需处置——扫描时间已记录，此后 90 天内不再提示 |
+对号入座找症状，然后执行给出的命令。以下都假定你在安装过的项目内。
+
+## 症状
+
+### 安装
+
+**`fcomet: command not found`** —— CLI 不在 PATH 上。重跑 `npm install -g flow-comet`，确认 `npm prefix -g` 在 PATH 中；`node --version` 必须 ≥ 18。
+
+**命令打印用法并非零退出** —— 那正是无参数行为：不带任何参数时安装器只打印用法。补上意图即可：`fcomet init`，或 `fcomet --target <dir>`，或 `--platform <名字>`。
+
+**装错了平台** —— 显式指定重跑：`fcomet init --platform claude-code`、`--platform codex`、`--platform dsh`，或逗号组合 / `all`。重跑是幂等的，不会删除既有内容。
+
+**`.gitignore` 没被更新** —— 确认是在项目里跑的（不是在 flow-comet 仓库自身内——那里 `.flow-comet/` 必须保持被跟踪）。托管条目是追加的，不会替换既有行。
+
+### 首次运行
+
+**Claude Code 从不拦截越界写入** —— hook 要通过宿主能找到的 shell 执行。Windows 上需把 Git Bash 的位置告知平台后重试；无头会话还需预先接受工作区信任。
+
+**Codex 什么都不拦** —— 项目 hook 仅在信任被接受后（交互式 `/hooks`）执行，或由脚本化运行传入 `--dangerously-bypass-hook-trust`。两者都没有时，hook 根本不会执行。
+
+**dsh：写入未被拦截** —— 在项目里跑只读自检：`node .dsh/skills/flow-comet/scripts/workflow-state.mjs bridge-check`，它会报告 loader 是否存在、`$DSH_HOME` 托管块是否挂载、是否只注册一次、loader 版本戳与项目标识是否一致。重跑 `fcomet init --platform dsh` 会同时重写 loader 与托管块。
+
+### 节点卡住
+
+**`BLOCKED: … 未执行 entry 直接 exit`** —— 新 change 的每个节点都要先进入：先跑 `workflow-guard.mjs entry <node> --apply`。
+
+**`BLOCKED: … 缺少技能加载声明标记`** —— 加载该节点技能并声明：`workflow-state.mjs skill-load <node> <skill>`，然后重做 `record` 与出口。
+
+**`BLOCKED: … 模板保真校验失败`** —— 节点文档缺少 flow-kit 模板规定的首部字段或段。对照 `flow-kit/templates/<DOC>.md` 补上被点名的字段或段。
+
+**`BLOCKED: … TASK.md 任务集被修改（签名不匹配）`** —— 进入执行节点后任务集被改动。恢复任务清单后重新进入节点（或把新工作作为任务在进入前加好），不要在流程中途改任务。
+
+**`BLOCKED: done 任务 … 缺少 <id>-SUMMARY.md`** —— 每个完成任务都要有摘要文档且含模板各段。补写它，或把该任务回退为未完成。
+
+**`BLOCKED: … 任务被主代理直接标记 done（越俎代庖）`** —— 默认执行模式下协调会话不得亲自完成任务。请委托，或用 `workflow-state.mjs record execute '{"parallelTakeoverApproved":true}'` 显式声明接管。
+
+**`verify` 超时或命令非零退出** —— 出口会执行 `TEST.md` 的命令块。先自己跑那条命令看输出；确实需要更长时间的套件，可用文档化的 `FLOW_COMET_VERIFY_TIMEOUT_MS` 环境变量放宽预算。
+
+**`BLOCKED: missing Output Schema artifacts`** —— 归档出口要求归档目录与其遗留清单。把 change 目录移入 `.specs/archive/<日期>-<change-id>/`，并确保其内存在 `KNOWN-ISSUES.md`（无遗留也要显式写明）。
+
+### 平台
+
+**移动项目后 Codex hook 失效** —— Codex hook 记录的是安装时的绝对路径。在新位置重跑 `fcomet init --platform codex`。
+
+**dsh 报版本偏斜** —— loader 版本戳与项目标识不一致。重跑 `fcomet init --platform dsh`（两者都会被重写），再用 `bridge-check` 复查。从 clone 安装时一侧带开发态后缀属正常。
+
+### 升级与重置
+
+**`npm install -g flow-comet` 之后项目还是旧版本** —— 升级全局包只换 CLI。在该项目重跑 `fcomet init`；它会覆盖生成文件且是幂等的。
+
+**我想重来** —— `fcomet init --purge --yes --platform <平台>` 会删除该平台的生成物并重建。它是删除并重建，**不是卸载**：Claude Code 会移除整个 `.claude/`（自定义内容请另置），Codex 只移除 flow-comet 技能与托管条目，`flow-kit/` 永不被删。删除清单会在动手前打印；`--yes` 是第二次确认。

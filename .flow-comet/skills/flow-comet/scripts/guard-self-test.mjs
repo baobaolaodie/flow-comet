@@ -94,9 +94,11 @@ function resolveComponentSkillFile(nodeSkill, scriptsDir = __dirname) {
 //      （单条目静默跳过正是本 change 修正的缺陷——故跳过粒度只能是"整组"，不能是"单条"。）
 // CLAUDE.md 为主仓私有指导文件（gitignore 不随 clone 分发）——不在自检清单内（2026-08-16 决策：
 // 清单只针对随仓库分发的文件；CLAUDE.md 场景数由人工维护）
+// 2026-09-27 文档重构：计数只允许出现在入口页徽章行、发布权威与机器锁面（PR 模板 / CI / 欢迎消息 / 变更日志）；
+// 其余公开文档一律改述为「见 VERSIONS」，因此本清单随之收缩（此前把 CONTRIBUTING/INSTALLATION/MECHANISM 也列进来，
+// 与单一权威策略冲突：同一数字散落越多越容易漂移）。
 const SCENARIO_COUNT_FILES = [
-  'README.md', 'README-zh.md', 'CONTRIBUTING.md', 'CONTRIBUTING-zh.md',
-  'docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
+  'README.md', 'README-zh.md',
   'docs/VERSIONS.md', 'docs/VERSIONS-zh.md', '.github/PULL_REQUEST_TEMPLATE.md',
   'CHANGELOG.md', 'CHANGELOG-zh.md',
   // CI workflow 文件纳入场景数自检（此前盲区——ci.yml 注释/greeting 欢迎消息的
@@ -123,8 +125,6 @@ const MAINTAINER_DOC_DIR = 'docs/internal';
 // 漂移只能靠人工发现）。分组语义与场景数清单一致（见上方分组说明）：分发组恒检，
 // 维护者组整组在场时逐条严检。
 const SYSTEM_TEST_COUNT_FILES = [
-  'CONTRIBUTING.md', 'CONTRIBUTING-zh.md',
-  'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
   'docs/VERSIONS.md', 'docs/VERSIONS-zh.md',
   'CHANGELOG.md', 'CHANGELOG-zh.md',
 ];
@@ -11519,9 +11519,8 @@ if (isAuthoritativeSourceRepo()) {
     'SECURITY.md', 'SECURITY-zh.md', 'CODE_OF_CONDUCT.md', 'CODE_OF_CONDUCT-zh.md',
     'CHANGELOG.md', 'CHANGELOG-zh.md',
     'docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
-    'docs/USAGE.md', 'docs/USAGE-zh.md', 'docs/PROTOCOL.md', 'docs/PROTOCOL-zh.md',
+    'docs/USAGE.md', 'docs/USAGE-zh.md',
     'docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md', 'docs/VERSIONS.md', 'docs/VERSIONS-zh.md',
-    'docs/ECOSYSTEM.md', 'docs/ECOSYSTEM-zh.md',
     '.github/PULL_REQUEST_TEMPLATE.md',
     '.github/ISSUE_TEMPLATE/1-bug_report.yml', '.github/ISSUE_TEMPLATE/2-feature_request.yml',
     '.github/ISSUE_TEMPLATE/3-question.md', '.github/ISSUE_TEMPLATE/4-task.md',

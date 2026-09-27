@@ -1,0 +1,91 @@
+{
+  "_about": [
+    "Public documentation authority map - the declaration side of the single-authority check.",
+    "The enforcing contract (required topics, sentinel phrases, forbidden files) is hard-coded in the CI quality job and in scripts/check-docs-local.mjs; this file declares the same mapping in a readable, reviewable form, so deleting a topic or weakening a sentinel here cannot switch the check off.",
+    "sentinel = structural phrases that must appear in the authority file and must not appear in forbidden_in files; must_link = files that must carry a markdown link to the authority."
+  ],
+  "version": 1,
+  "topics": {
+    "install": {
+      "authority": "docs/INSTALLATION.md",
+      "twin": "docs/INSTALLATION-zh.md",
+      "sentinel": ["Verify the installation"],
+      "forbidden_in": ["README.md", "docs/USAGE.md", "docs/MECHANISM.md", "docs/TROUBLESHOOTING.md"],
+      "must_link": ["README.md"],
+      "why": "Install steps, platform choice and reset behaviour live in one place; the entrance page shows the three-step path and links here for everything else."
+    },
+    "workflow": {
+      "authority": "docs/USAGE.md",
+      "twin": "docs/USAGE-zh.md",
+      "sentinel": ["## The 8-node workflow", "## User entry points"],
+      "forbidden_in": ["README.md", "docs/INSTALLATION.md", "docs/MECHANISM.md"],
+      "must_link": ["README.md", "docs/MECHANISM.md"],
+      "why": "The node list, the per-node lifecycle and the real entry points are the product contract; other files summarise and link."
+    },
+    "troubleshooting": {
+      "authority": "docs/TROUBLESHOOTING.md",
+      "twin": "docs/TROUBLESHOOTING-zh.md",
+      "sentinel": ["## Symptoms"],
+      "forbidden_in": ["README.md", "docs/INSTALLATION.md", "docs/MECHANISM.md"],
+      "must_link": ["README.md", "docs/INSTALLATION.md"],
+      "why": "Recovery advice is only usable when it is grouped by symptom in one place."
+    },
+    "release": {
+      "authority": "docs/VERSIONS.md",
+      "twin": "docs/VERSIONS-zh.md",
+      "sentinel": ["Update CHANGELOG", "Nine places"],
+      "forbidden_in": ["README.md", "CONTRIBUTING.md", "docs/MECHANISM.md"],
+      "must_link": ["README.md", "CONTRIBUTING.md"],
+      "why": "Version semantics, the nine surfaces and the release checklist drifted once already (five steps vs seven); contributors are sent here instead of a second copy."
+    },
+    "behaviour": {
+      "authority": "docs/MECHANISM.md",
+      "twin": "docs/MECHANISM-zh.md",
+      "sentinel": ["## Behaviour contract", "## Custom protocols"],
+      "forbidden_in": ["README.md", "docs/INSTALLATION.md", "docs/USAGE.md"],
+      "must_link": ["README.md", "docs/USAGE.md"],
+      "why": "The guarantees and the custom-protocol material form one contract; a second statement elsewhere would be a second contract."
+    },
+    "contributing": {
+      "authority": "CONTRIBUTING.md",
+      "twin": "CONTRIBUTING-zh.md",
+      "sentinel": ["## Borrowing boundary"],
+      "forbidden_in": ["README.md", "docs/MECHANISM.md"],
+      "must_link": ["README.md"],
+      "why": "Contribution rules, including what may be borrowed from the upstream project, belong with the contributor flow."
+    },
+    "history": {
+      "authority": "CHANGELOG.md",
+      "twin": "CHANGELOG-zh.md",
+      "sentinel": ["All notable changes to this project"],
+      "forbidden_in": ["README.md", "docs/MECHANISM.md", "docs/VERSIONS.md"],
+      "must_link": ["README.md"],
+      "why": "Per-version history stays in the changelog; other surfaces link to it."
+    },
+    "upstream": {
+      "authority": "README.md",
+      "twin": "README-zh.md",
+      "sentinel": ["## Relationship to the upstream project"],
+      "forbidden_in": ["docs/MECHANISM.md", "docs/INSTALLATION.md"],
+      "must_link": [],
+      "why": "The short statement of the upstream relationship belongs on the entrance page only."
+    },
+    "security": {
+      "authority": "SECURITY.md",
+      "twin": null,
+      "sentinel": [],
+      "forbidden_in": ["README.md"],
+      "must_link": ["README.md"],
+      "why": "Vulnerability reporting has a single home by convention, and the entrance page must point at it."
+    }
+  },
+  "counts": {
+    "policy": "Scenario and item counts may appear only on the README badge line and in the release authority; every other public surface says see VERSIONS instead of repeating a number.",
+    "sentinel": ["badge/version-", "Nine places"],
+    "release_authority": ["docs/VERSIONS.md", "docs/VERSIONS-zh.md"]
+  },
+  "internals": {
+    "policy": "Implementation-internal identifiers (hook script names, bridge loader file names, hook payload fields, machine-owned state field names) belong to the internal surfaces only. The two command entry scripts users actually run - workflow-state.mjs and workflow-guard.mjs - are command surface, not internals, and may appear in public documents.",
+    "sentinel": ["comet-hook-guard.mjs", "comet-hook-guard", "dsh-bridge.mjs", "delegationDepth", "reentryAuthorization"]
+  }
+}
