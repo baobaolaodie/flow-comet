@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, RUNTIME_STATE_PATH, LEGACY_RUNTIME_STATE_PATH, resolveProtocolPathWithState, hasProtocolCliArg } from './state-schema.mjs';
 import { readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, workflowPathInside, inspectWorkflowProtectedPath, readWorkflowProtectedFile, workflowFileObjectIdentity, workflowSameFileObject, workflowSameFileStat } from './protocol-utils.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from './task-parsing.mjs';
-import { resolveNextNode, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS, TASK_SET_SIGNATURE_ALGO, taskSetSignature, parseTaskSetSignature, sameTaskSetSignature, taskSetSignatureVersionSkew, classifyFixReturnCause, normalizeHeading, FIX_SECTION_TITLE_FALLBACK } from './route-node.mjs';
+import { resolveNextNode, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS, TASK_SET_SIGNATURE_ALGO, taskSetSignature, parseTaskSetSignature, sameTaskSetSignature, taskSetSignatureVersionSkew, classifyFixReturnCause, normalizeHeading, FIX_SECTION_TITLE_FALLBACK, analyzeDependencyGraph } from './route-node.mjs';
 
 const command = process.argv[2] ?? 'verify';
 const nodeId = process.argv[3] ?? null;
@@ -588,48 +588,6 @@ function eligibleParallelBlocks(blocks, doneIds) {
     const deps = taskDependsOn(block);
     return deps.every((d) => doneIds.has(d));
   });
-}
-
-// 依赖图分析：对全部 <task> 块建依赖图（deps 边），Kahn 拓扑排序判环 + 缺失依赖收集。
-// 返回 { ids, depsById, missing: [{id, dep}], cyclic, cycleIds }（cycleIds = 拓扑排序无解的
-// 任务集合，含被环传递拖累的下游任务）。plan 出口波次校验与 subagent-execute 出口孤儿检测
-// 共用同一实现（单一语义：依赖图无环 + 依赖链可满足）。
-function analyzeDependencyGraph(blocks) {
-  const parsed = blocks
-    .map((block) => ({ block, attrs: taskOpeningAttrs(block) }))
-    .filter((x) => x.attrs && x.attrs.id);
-  const ids = new Set(parsed.map((x) => x.attrs.id));
-  const depsById = new Map();
-  const missing = [];
-  for (const x of parsed) {
-    const deps = [...new Set(taskDependsOn(x.block))];
-    depsById.set(x.attrs.id, deps);
-    for (const d of deps) {
-      if (!ids.has(d)) missing.push({ id: x.attrs.id, dep: d });
-    }
-  }
-  const indegree = new Map([...ids].map((id) => [id, 0]));
-  const dependents = new Map([...ids].map((id) => [id, []]));
-  for (const [id, deps] of depsById) {
-    for (const d of deps) {
-      if (!ids.has(d)) continue;
-      indegree.set(id, indegree.get(id) + 1);
-      dependents.get(d).push(id);
-    }
-  }
-  let queue = [...ids].filter((id) => indegree.get(id) === 0);
-  const sorted = [];
-  while (queue.length > 0) {
-    const n = queue.shift();
-    sorted.push(n);
-    for (const m of dependents.get(n)) {
-      indegree.set(m, indegree.get(m) - 1);
-      if (indegree.get(m) === 0) queue.push(m);
-    }
-  }
-  const cyclic = sorted.length < ids.size;
-  const cycleIds = cyclic ? [...ids].filter((id) => !sorted.includes(id)) : [];
-  return { ids, depsById, missing, cyclic, cycleIds };
 }
 
 function printNext(protocol, node) {
