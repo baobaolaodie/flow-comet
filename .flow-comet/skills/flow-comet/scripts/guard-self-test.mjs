@@ -6983,18 +6983,33 @@ const SCENARIOS = [
     name: '193 bridge-check 版本比较：dev 态同基础健康 / 基础失配与预发布仍 FAIL exit 1',
     run: (dir) => {
       // ⑧ 便携复制锚：源路径含非 ASCII 字符时仍能完整复制技能树——旧实现用 fs.cpSync，在 Windows 上
-      // 会让进程静默崩溃（中文路径项目内本套件曾中断于本场景）；此处同时断言复制结果的文件数一致。
+      // 会让进程静默崩溃（中文路径项目内本套件曾中断于本场景）。比对用「相对路径 + 条目类型 +
+      // 内容哈希（文件）/ 链接目标（符号链接）」全量清单：只比条目数会放过「少一个、多一个改名」
+      // 这类等数错误，也无法发现内容被改写。
       {
         const cjkSource = path.join(dir, '源-中文-技能树');
         const cjkTarget = path.join(dir, '复制-目标');
         copyTreePortable(path.join(__dirname, '..'), cjkSource);
         copyTreePortable(cjkSource, cjkTarget);
-        const countFiles = (root) => fs.readdirSync(root, { withFileTypes: true })
-          .reduce((n, e) => n + (e.isDirectory() ? countFiles(path.join(root, e.name)) : 1), 0);
-        const expected = countFiles(path.join(__dirname, '..'));
-        const actual = countFiles(cjkTarget);
-        if (actual !== expected) {
-          throw new Error('非 ASCII 源路径的递归复制不完整：期望 ' + expected + ' 个文件，实际 ' + actual);
+        const listTree = (root, base = '', out = []) => {
+          for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+            const rel = base ? base + '/' + entry.name : entry.name;
+            const full = path.join(root, entry.name);
+            if (entry.isDirectory()) listTree(full, rel, out);
+            else if (entry.isSymbolicLink()) out.push('link ' + rel + ' -> ' + fs.readlinkSync(full));
+            else out.push('file ' + rel + ' ' + createHash('sha256').update(fs.readFileSync(full)).digest('hex'));
+          }
+          return out.sort();
+        };
+        const expected = listTree(path.join(__dirname, '..'));
+        const actual = listTree(cjkTarget);
+        if (expected.length !== actual.length) {
+          throw new Error('非 ASCII 源路径的递归复制条目数不一致：期望 ' + expected.length + '，实际 ' + actual.length);
+        }
+        for (let i = 0; i < expected.length; i += 1) {
+          if (expected[i] !== actual[i]) {
+            throw new Error('非 ASCII 源路径的递归复制内容不一致（第 ' + (i + 1) + ' 项）：期望 ' + expected[i] + '，实际 ' + actual[i]);
+          }
         }
       }
       const { dshHome, installedVersion } = writeBridgeFixture(dir, { loaderStamp: '9.9.9-fixture-skew' });
