@@ -1048,7 +1048,7 @@ function resolveReentryBackupPath(root, changeId, event) {
 
 // ---------- 受控计划重校重签（replan）与强制推进留痕真实命令链路夹具（H9~H11 共用） ----------
 
-// 任务集构造：基础串行任务 S01（status 可切）+ 可追加的并行就绪任务（计划外修订用）
+// 任务集构造：基础串行任务（status 可切）+ 可追加的并行就绪任务（计划外修订用）
 function replanTaskText(options = {}) {
   const lines = ['# TASK', '',
     '<task id="S01" parallel="false" status="' + (options.s01Status || 'pending') + '">'
@@ -4196,7 +4196,7 @@ const TEST_ITEMS = [
     name: 'H9 replan 解死锁：execute 相位修订任务集（含并行就绪任务）→ 重签 → 出口放行 → next 正常路由',
     run: (dir) => {
       seedExecuteEntryState(dir, replanTaskText());
-      // 真实委托留证（S01 串行 pending → execute 归属）→ SUMMARY 齐备，出口四类校验可通过
+      // 真实委托留证（串行 pending → execute 归属）→ SUMMARY 齐备，出口四类校验可通过
       completeSerialTaskWithHandoff(dir, 'S01', 'src/s01.mjs');
       writeFile(dir, '.specs/' + CHANGE_ID + '/S01-SUMMARY.md', execSummaryFixture('S01'));
       // 任务集修订（死锁现场）：原任务完成 + 计划外新增的并行就绪任务
