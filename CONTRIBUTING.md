@@ -242,7 +242,7 @@ Force push is allowed on your own feature branch — feature branches carry no p
 - Version: X.Y.Z (doc-only batches may skip the bump)
 ```
 
-**Release steps**: the five-step checklist (CHANGELOG → README badge → tag → prepare-env distribution → dev sync) lives in [VERSIONS.md](docs/VERSIONS.md).
+**Release steps**: the release checklist lives in [VERSIONS.md](docs/VERSIONS.md), the single authority for release steps and the version surface.
 
 **Release PR specifics**:
 - The release PR (dev → main) lists dev's change-level commits (by design — each PR = one change); merging it brings those commits into main via one merge commit per release
