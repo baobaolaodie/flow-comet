@@ -14,7 +14,7 @@
 | npm 包 | **自 `1.5.0-rc.3` 起已发布**（`npm i -g flow-comet` → `fcomet init`，dist-tag `latest`）——分发的为**安装器**，非 dsh 插件包；旧 npm 插件包安装形态已废弃（verify 阶段推翻，见 ADR-005） |
 | 破坏性变更 | dev-preview 中 `tools/pre-execute` 签名 / skill 发现 rank / `DSH_HOME` 语义可能变化；低于锚定版本时拦截/发现可能失效 |
 
-> 版本不匹配时拦截可能失效——必须文档警示 + 级 3 实测兜底（D9）。
+> 版本不匹配时拦截可能失效——必须文档警示 + 真实平台会话实测兜底（D9）。
 
 **bridge-check 版本比较语义（基础版本比较）**：桥接健康检查比较 loader 的 `// BRIDGE_VERSION:` 发布戳与技能包 `INSTALLED_VERSION` 时，两侧先剥离 git-describe 开发态后缀 `-<领先提交数>-g<hash>`、再按基础版本比较：
 
@@ -109,7 +109,7 @@ ctx.on('tools/pre-execute', async (exec, next) => {
   3. **流程态门（B 方案——包含性仅运行中生效）**：读项目根 `.flow-comet/flow-comet-state.json`（UTF-8 BOM 容错；判定规则锚定 guard `comet-hook-guard.mjs` 的空闲态门——grep 锚点：`grep -n "if (!state.activeChange)"`）：空闲（无 state / 无 `activeChange` / `status==='completed'`）→ 直接 `next()` 放行——跳过包含性校验与 guard 白名单（与 Claude Code / Codex 的 active-change 门语义对齐）；解析失败 / 未知 status → WARN + fail-closed deny（不视为空闲放行）；`activeChange` 存在且 `status==='running'` 或缺失（undefined）→ 继续下方包含性校验与 guard（现状不变）。
    - **空闲边界（refined）**：空闲 = 无 state / 无 activeChange / status==='completed' → 项目外写 next() 放行；解析失败 / 未知 status 保持 fail-closed deny（不视为空闲），与 Claude Code / Codex 的 guard 语义一致。
   4. **包含性校验**：Write/Edit 的 `file_path` 必须解析后位于项目根内——`realpathSync.native` 展开 Windows 8.3 短路径（词法 path.relative 会把项目内短路径误判为越界）；**运行中**越界直接 deny（不进 guard——guard 侧 target=null 会跳过白名单判定 = fail-open）；通过后传规范化长路径。
-  5. **代理身份分派（B1——dsh 子代理=执行者）**：读 `exec.agent.session.header.delegationDepth`（`agentDepth(exec)` 纯函数）——**>0 = 子代理（执行者）→ 跳过 guard 白名单判定直接 `next()` 放行**（子代理写源码是执行者职责，对应 Claude Code worktree 子代理物理自由写；形状 fail-closed 与项目根包含性校验已在上方对子代理同样执行，不因身份放宽）；**0/缺失 = 协调者 → 走 guard 白名单判定**（协调者禁令物理拦截保留）。dsh 子代理系统在 dsh-base 自带（`tool-subagent`/`subagent-spawn-in-process` 等，headless/web/tui 全 profile 激活），`childSessionMeta` 写入 delegationDepth=parentDepth+1（dsh-subagent 源码锚定 rc.6）；不识别此字段会导致 subagent 执行模式下子代理写源码被 guard 白名单（execute → `.specs/`）误拦（B1，DOGFOOD-REPORT 实证）。级 3 实测（2026-08-18 UAT-7）：真实模型调 subagent → 子代理（delegationDepth:1）写 `scripts/` 放行、协调者（delegationDepth:0）写同路径被 deny 保留。
+  5. **代理身份分派（B1——dsh 子代理=执行者）**：读 `exec.agent.session.header.delegationDepth`（`agentDepth(exec)` 纯函数）——**>0 = 子代理（执行者）→ 跳过 guard 白名单判定直接 `next()` 放行**（子代理写源码是执行者职责，对应 Claude Code worktree 子代理物理自由写；形状 fail-closed 与项目根包含性校验已在上方对子代理同样执行，不因身份放宽）；**0/缺失 = 协调者 → 走 guard 白名单判定**（协调者禁令物理拦截保留）。dsh 子代理系统在 dsh-base 自带（`tool-subagent`/`subagent-spawn-in-process` 等，headless/web/tui 全 profile 激活），`childSessionMeta` 写入 delegationDepth=parentDepth+1（dsh-subagent 源码锚定 rc.6）；不识别此字段会导致 subagent 执行模式下子代理写源码被 guard 白名单（execute → `.specs/`）误拦（B1，项目内验证记录实证）。真实平台会话实测（2026-08-18）：真实模型调 subagent → 子代理（delegationDepth:1）写 `scripts/` 放行、协调者（delegationDepth:0）写同路径被 deny 保留。
   6. **判定调用**：`spawn node <项目根>/.dsh/skills/flow-comet/scripts/comet-hook-guard.mjs before_tool`，stdin JSON `{tool_name, tool_input}`；**spawn cwd 必须 = 会话项目根的长形态规范化（硬性）**（相对 file_path 按 cwd 解析，cwd≠项目根 = fail-open；8.3 短形态项目根若原样传入、而 file_path 已归一化为长形态时，guard 词法 path.relative 得 target=null → 白名单跳过 = fail-open——桥接修复已关闭，系统测试 K11 断言锁定；不得以设 env 替代 cwd）；guard 文件缺失（安装未完成/被删除）→ WARN + `next()` 放行（不阻断非 flow-comet 语义）；spawn 异常 → fail-closed deny + WARN。
   7. **决策映射**：exit 0 → `next()` 放行；exit 2 → `{kind:'deny', reason}`（BLOCK 消息 + 恢复指引透传）；其它/异常 → fail-closed deny + WARN。
 - 协议文件：天然在项目内（skill 包 `reference/` 随树复制）——受保护读取满足，**无 FLOW_COMET_PROTOCOL 机制**。
@@ -117,7 +117,7 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 
 ## 8. 验证记录模板
 
-> 级 3 / 级 4 执行后按此模板回填；发布前逐项闭环（DESIGN 7.3）。
+> 实测执行后按此模板回填；发布前逐项闭环（DESIGN 7.3）。
 
 ### 环境
 
@@ -127,7 +127,7 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 - profile：
 - 临时项目路径：
 
-### 检查项（级 3 新形态命令——非旧插件冒烟形态）
+### 检查项（新形态命令——非旧插件冒烟形态）
 
 | # | 检查 | 结果 | 证据（命令/输出摘要） |
 |---|---|---|---|
