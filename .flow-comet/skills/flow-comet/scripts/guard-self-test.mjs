@@ -11896,6 +11896,12 @@ const SCENARIOS = [
     run: (dir) => {
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', REPLAN_TASK_INITIAL);
       writeFile(dir, '.specs/' + CHANGE_ID + '/S01-SUMMARY.md', strictSummary('S01'));
+      // 夹具忠实性修复（协调者授权 A · 夹具缺陷而非放宽带锚）：resolveNextNode 的 execute 前
+      // 产物门控按文件存在性判定（不读 completedNodes）——路由到委托节点要求 open / design 的
+      // 前置产物在场。此处补齐 CHANGE.md / REQUIREMENT.md / DESIGN.md（writeIntakeArtifacts
+      // 三件全写，其定义内已含 DESIGN.md），使夹具与真实链路的产物现场一致；不改任何断言 / 锚 /
+      // 判据 / 计数。
+      writeIntakeArtifacts(dir);
       writeState(dir, replanExecuteState());
       assertExit(runGuard(['entry', 'execute'], dir), 0);
       // 任务集修订（#119 死锁现场）：新增计划外的并行就绪任务
