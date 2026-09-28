@@ -328,6 +328,93 @@ function analyzeDependencyGraph(blocks) {
   return { ids, depsById, missing, cyclic, cycleIds };
 }
 
+// ---------- 并行文件依赖检测（单源：workflow-guard 门禁与 replan 重校共用） ----------
+// 并行文件依赖检测——解析 TASK.md 中本趟可运行的 parallel=pending 任务的 read/write_files 声明，
+// 分两级返回：write∩write（写写绝对冲突，强判）与 read∩write（共享读写嫌疑，弱判——仅对彼此
+// 无显式 depends_on 关联的并行对探测，有显式关联=依赖已声明，跳过→合法拓扑零新增告警）。
+// 路径解析按声明实际内容（换行切分 → 分号二次切分 → trim → 滤空与 HTML 注释），不做扩展名
+// 白名单过滤——txt/log/无扩展名路径同等检出（链式重命名的 .txt 事故面闭合；与既有自动解析
+// 同源实现）。开标签属性解析与 workflow-state 路由共享 taskOpeningAttrs（属性序无关；不读块内文本）。
+// 2026-09-28 PR 审查采纳：由 workflow-guard.mjs 抽到本模块——plan 出口与 replan 重校消费同一实现，
+// 两侧各自决定强判（BLOCK）/弱判（WARN），判定本身只此一处（L-067 单一判据）。
+async function findParallelWriteConflicts(changeDir) {
+  const taskFile = path.join(changeDir, 'TASK.md');
+  let text;
+  try { text = await fs.readFile(taskFile, 'utf8'); } catch { return { writeConflicts: [], readWarnings: [] }; }
+  const allBlocks = taskBlocks(text);
+  // 依赖资格收窄：仅统计「本趟可运行」的并行任务——deps ⊆ doneIds；
+  // 等待后续趟次的并行任务（依赖未满足）与已交付任务不参与同趟冲突判定，
+  // 使 A→B 同写路径的跨趟合法计划不再被首趟误拦（与路由谓词同一口径）。
+  const doneIds = new Set(allBlocks
+    .map((b) => taskOpeningAttrs(b))
+    .filter((a) => a && a.id && a.status === 'done')
+    .map((a) => a.id));
+  const dependsOnOf = (b) => {
+    const m = b.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
+    return m ? m[1].trim().split(/[,\s]+/).filter(Boolean) : [];
+  };
+  const blocks = allBlocks.filter((b) => {
+    const a = taskOpeningAttrs(b);
+    if (!a || !a.parallel || a.status !== 'pending') return false;
+    return dependsOnOf(b).every((d) => doneIds.has(d));
+  });
+  // 路径解析与既有自动解析同源：剥 HTML 注释 → 换行切分 → 分号二次切分 → trim → 滤空
+  // 路径归一化（CodeRabbit 采纳）：分隔符统一 '/'、解 '.' 段（`./` / `a/./b`）、`..` 逃出项目根
+  // 按越界处理（返回 null 不参与重叠比较）——`src/a.mjs` vs `src/./a.mjs` / `src\a.mjs` 变体不再
+  // 绕过写写强判与读写弱判；与委托入口共用同一函数（两侧同语义）。
+  const normalizeTaskPath = (raw) => {
+    const p = String(raw).trim();
+    if (p === '') return null;
+    const segments = p.replace(/\\/g, '/').split('/').filter((s) => s !== '' && s !== '.');
+    const out = [];
+    for (const seg of segments) {
+      if (seg === '..') {
+        if (out.length === 0) return null; // 逃出项目根 → 越界（不参与比较）
+        out.pop();
+      } else {
+        out.push(seg);
+      }
+    }
+    return out.join('/');
+  };
+  const parsePaths = (matchText) => String(matchText ?? '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .trim().split(/\s*\n\s*/).map((l) => l.trim()).filter(Boolean)
+    .flatMap((l) => l.split(';')).map((l) => l.trim()).filter(Boolean)
+    .map(normalizeTaskPath)
+    .filter((p) => p !== null && p !== '');
+  const perTask = [];
+  for (const b of blocks) {
+    const a = taskOpeningAttrs(b);
+    if (!a || !a.id) continue;
+    const wf = b.match(/<write_files>([\s\S]*?)<\/write_files>/);
+    const rf = b.match(/<read_files>([\s\S]*?)<\/read_files>/);
+    if (!wf && !rf) continue;
+    perTask.push({
+      id: a.id,
+      deps: new Set(dependsOnOf(b)),
+      writes: new Set(parsePaths(wf && wf[1])),
+      reads: new Set(parsePaths(rf && rf[1])),
+    });
+  }
+  const writeConflicts = [];
+  const readWarnings = [];
+  for (let i = 0; i < perTask.length; i++) {
+    for (let j = i + 1; j < perTask.length; j++) {
+      const overlap = [...perTask[i].writes].filter((f) => perTask[j].writes.has(f));
+      if (overlap.length) writeConflicts.push({ a: perTask[i].id, b: perTask[j].id, files: overlap });
+      // 读写弱判触发面：仅无显式 depends_on 关联的并行对（有显式关联=依赖已声明，跳过）
+      const associated = perTask[i].deps.has(perTask[j].id) || perTask[j].deps.has(perTask[i].id);
+      if (associated) continue;
+      const readOverlap = [...perTask[i].reads].filter((f) => perTask[j].writes.has(f));
+      if (readOverlap.length) readWarnings.push({ a: perTask[i].id, b: perTask[j].id, files: readOverlap });
+      const readOverlap2 = [...perTask[j].reads].filter((f) => perTask[i].writes.has(f));
+      if (readOverlap2.length) readWarnings.push({ a: perTask[j].id, b: perTask[i].id, files: readOverlap2 });
+    }
+  }
+  return { writeConflicts, readWarnings };
+}
+
 // ---------- Fix 批次共享判定（单一权威 · 纯函数） ----------
 // workflow-guard 与 workflow-state 的 Fix 两态一律复用本段实现，禁止任一侧内联第二份
 // （L-058 路由单一权威 / L-067 同判据两份实现必然分叉）。判定本身只读 TASK.md 与协议/产物
@@ -1143,6 +1230,7 @@ export {
   EXECUTE_FAMILY_NODE_IDS,
   FIX_SECTION_TITLE_FALLBACK,
   analyzeDependencyGraph,
+  findParallelWriteConflicts,
   normalizeHeading,
   classifyFixReturnCause,
   resolveFixRollbackDecision,

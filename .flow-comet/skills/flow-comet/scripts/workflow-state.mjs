@@ -9,7 +9,7 @@ import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCO
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, looksLikeObjectLiteral, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, toPersistedProtocolPath } from './state-schema.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide, skipInit } from './context-init.mjs';
 import { taskOpeningAttrs, taskBlocks } from './task-parsing.mjs';
-import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, resolveReentryDecision, resolveReplanDecision, analyzeDependencyGraph, isSingleSegmentChangeName, REENTRY_ROUND_LIMIT, REENTRY_TARGET_NODE_IDS, REPLAN_ROUND_LIMIT, EXECUTE_FAMILY_NODE_IDS } from './route-node.mjs';
+import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, resolveReentryDecision, resolveReplanDecision, analyzeDependencyGraph, findParallelWriteConflicts, isSingleSegmentChangeName, REENTRY_ROUND_LIMIT, REENTRY_TARGET_NODE_IDS, REPLAN_ROUND_LIMIT, EXECUTE_FAMILY_NODE_IDS } from './route-node.mjs';
 
 const command = process.argv[2] ?? 'status';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -878,17 +878,32 @@ async function main() {
     }
     const state = await readState();
     const detectedNode = await determineNode(changeName, protocol, state.completedNodes);
-    // 派生视图（ADR-013 决策 11）：「被强制推进、无出口证据」= completedNodes 含而 evidence
-    // 不含的节点——只新增输出字段，不新增状态字段（零 schema 迁移）。有出口证据的判据与引擎
-    // 其余消费点一致：evidence[node] 必须是非 null 对象形态（数组 / null 不算证据）。
+    // 派生视图（ADR-013 决策 11；2026-09-28 PR 审查采纳改为事件为准）：被强制推进的节点以
+    // state.history 中本 change 的 advance-forced 事件为唯一判据——按 change 过滤（兼容旧事件
+    // 无 change 字段），取 e.node 集合后与 completedNodes 求交。旧「completedNodes 含而 evidence
+    // 不含」推断会漏报两类真实反例：① record 后被 advance；② replan/reenter 写授权留痕
+    // （evidence.<node>.replanAuthorization）后被 advance。state.history === undefined 的旧 state
+    // 无事件可依（advance 当时无痕）→ 回退本「缺 evidence」判据。
     const completedArr = Array.isArray(state.completedNodes) ? state.completedNodes : [];
-    const evidenceMap = state.evidence && typeof state.evidence === 'object' && !Array.isArray(state.evidence)
-      ? state.evidence
-      : {};
-    const forcedNodes = completedArr.filter((id) => {
-      const record = evidenceMap[id];
-      return !(record && typeof record === 'object' && !Array.isArray(record));
-    });
+    let forcedNodes;
+    if (state.history === undefined) {
+      const evidenceMap = state.evidence && typeof state.evidence === 'object' && !Array.isArray(state.evidence)
+        ? state.evidence
+        : {};
+      forcedNodes = completedArr.filter((id) => {
+        const record = evidenceMap[id];
+        return !(record && typeof record === 'object' && !Array.isArray(record));
+      });
+    } else {
+      const forcedSet = new Set(
+        (Array.isArray(state.history) ? state.history : [])
+          .filter((e) => e
+            && e.event === 'advance-forced'
+            && (typeof e.change !== 'string' || e.change === changeName))
+          .map((e) => e.node)
+      );
+      forcedNodes = completedArr.filter((id) => forcedSet.has(id));
+    }
     console.log(JSON.stringify({
       status: 'running',
       change: changeName,
@@ -1866,6 +1881,21 @@ async function main() {
       process.exit(1);
     }
     const changeDir = changeBoundary.changeDir;
+    // 并行写冲突校验（2026-09-28 PR 审查采纳）：replan 不做校验豁免——重校后的任务集若含
+    // 本趟可运行（依赖已满足）的并行任务且 write_files 重叠，与 plan 出口使用同一实现
+    // （route-node.findParallelWriteConflicts 单一来源）在此 BLOCK；必须早于备份与任何写盘，
+    // BLOCK 路径 state 字节零改写。read∩write 弱判与 plan 出口同风格——仅 WARN 不阻断。
+    const { writeConflicts, readWarnings } = await findParallelWriteConflicts(path.join(runRoot, '.specs', changeName));
+    if (writeConflicts.length > 0) {
+      console.error('BLOCKED: replan 检测到并行写冲突（'
+        + writeConflicts.map((c) => c.a + '↔' + c.b + ': ' + c.files.join(',')).join('; ')
+        + '）——replan 不做校验豁免，状态零改写；恢复: 调整 write_files 消除重叠后重试');
+      process.exit(1);
+    }
+    if (readWarnings.length > 0) {
+      console.error('WARN: TASK.md 并行任务 read∩write 隐式依赖嫌疑（一方读取对方写路径，建议补显式 depends_on 声明）: '
+        + readWarnings.map((c) => c.a + '×' + c.b + '(' + c.files.join(',') + ')').join('; '));
+    }
     const round = decision.round;
     const source = decision.authorization.source;
     const at = decision.authorization.at;

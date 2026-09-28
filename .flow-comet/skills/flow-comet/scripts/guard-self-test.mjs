@@ -954,6 +954,19 @@ function replanHistoryEvent(roundNumber, changeName = CHANGE_ID) {
   };
 }
 
+// advance-forced 事件夹具（status.forcedNodes 事件判据）：change 归属过滤与 advance 写侧同形——
+// 派生只取 event / change / node，skipped 等字段保留以贴近真实事件。
+function advanceForcedEvent(node, changeName = CHANGE_ID) {
+  return {
+    event: 'advance-forced',
+    change: changeName,
+    node,
+    skipped: ['exit:' + node],
+    reason: 'advance',
+    at: '2026-09-28T00:00:00.000Z',
+  };
+}
+
 // 授权形态纯函数锚（AC-2 的 guard-self-test 验证方式）：形态合法性由 route-node 的
 // parseReplanAuthorization 单一权威判定，本助手只声明期望（malformed → ok:false）。
 function assertReplanAuthorizationShape(authorization, node, expectedOk, label) {
@@ -1331,6 +1344,12 @@ const TASK_DEP_CYCLE =
 const TASK_MISSING_DEP =
   '<task id="T01" parallel="false" status="pending"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n' +
   '<task id="P01" status="pending" parallel="true"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify><depends_on>T99</depends_on></task>\n';
+// 并行写冲突（replan 越界场景扩展）：前置串行任务已 done，两个并行任务依赖已满足且 write_files
+// 重叠——plan 出口写写强判为 BLOCKED，replan 不做校验豁免、必须同样 BLOCK 且状态零改写（禁止备份先于拦截）。
+const TASK_PARALLEL_WRITE_CONFLICT =
+  '<task id="S01" parallel="false" status="done"><action>完成 S01</action><write_files>src/s01.mjs</write_files><verify>node --check src/s01.mjs</verify></task>\n' +
+  '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/shared.mjs</write_files><verify>node --check src/shared.mjs</verify><depends_on>S01</depends_on></task>\n' +
+  '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>src/shared.mjs</write_files><verify>node --check src/shared.mjs</verify><depends_on>S01</depends_on></task>\n';
 
 // 波次分组场景公共路径：注入 TASK.md → entry plan（记录 enteredNodes，新 change 强制先 entry；
 // 旧 change 亦先 entry 避免 ENTER WARN 干扰断言）→ exit plan。返回 exit plan 结果。
@@ -11687,16 +11706,18 @@ const SCENARIOS = [
   },
 
   // 267: replan 校验不豁免（ADR-013 决策 3 / 明确 out：replan 绝不做校验豁免）——依赖环 /
-  // 缺失依赖 / 缺 <verify> 三类任务集在 replan 上一律 BLOCKED 且状态零改写；并且 plan 出口与
-  // replan 对同一输入给出同一机器分类。同源是结构事实而非注释声明（L-067）：任务图分析只有
-  // 一份实现（route-node.mjs 定义并导出），workflow-guard 静态 import 使用它。
+  // 缺失依赖 / 缺 <verify> / 并行写冲突四类任务集在 replan 上一律 BLOCKED 且状态零改写；
+  // 并且 plan 出口与 replan 对同一输入给出同一机器分类。同源是结构事实而非注释声明（L-067）：
+  // 任务图分析与并行写冲突检测各只有一份实现（route-node.mjs 定义并导出），
+  // workflow-guard 静态 import 使用它。
   {
-    name: '267 replan 校验不豁免：依赖环/缺失依赖/缺 verify → BLOCKED 零改写 + 任务图分析单源锚',
+    name: '267 replan 校验不豁免：依赖环/缺失依赖/缺 verify/并行写冲突 → BLOCKED 零改写 + 单源锚',
     run: (dir) => {
       const cases = [
         ['依赖环', TASK_DEP_CYCLE, '依赖环', '依赖环'],
         ['依赖不存在的任务', TASK_MISSING_DEP, '依赖不存在的任务', '依赖'],
         ['缺 <verify> 字段', REPLAN_TASK_NO_VERIFY, '缺 <verify> 字段', 'verify'],
+        ['并行写冲突', TASK_PARALLEL_WRITE_CONFLICT, 'write_files', '并行写冲突'],
       ];
       for (const [label, taskContent, planExpected, replanExpected] of cases) {
         // ① plan 出口（既有判定路径）对同一输入的机器分类
@@ -11717,6 +11738,13 @@ const SCENARIOS = [
         assertOut(replanRes, 'BLOCKED');
         assertOut(replanRes, replanExpected);
         assertStateBytesUnchanged(dir, bytes, 'replan ' + label);
+        // 显式 sha256 前后相同（字节零改写的独立哈希表达，L-069：断言覆盖完整契约而非关键词）
+        const shaBefore = createHash('sha256').update(bytes).digest('hex');
+        const shaAfter = createHash('sha256').update(readStateBytes(dir)).digest('hex');
+        if (shaBefore !== shaAfter) {
+          throw new Error(label + '：replan BLOCK 路径 state sha256 应前后相同，实际 '
+            + shaBefore + ' → ' + shaAfter);
+        }
         if (replanBackupFiles(dir).length !== 0) {
           throw new Error(label + '：校验失败路径不得产生备份');
         }
@@ -11746,6 +11774,17 @@ const SCENARIOS = [
       const guardText = fs.readFileSync(GUARD, 'utf8');
       if (!/import[^;]*\banalyzeDependencyGraph\b[^;]*from\s*'\.\/route-node\.mjs'/.test(guardText)) {
         throw new Error('workflow-guard.mjs 必须静态 import route-node 的任务图分析（不得内联第二份判定）');
+      }
+      // 并行写冲突检测单源锚（CR-2 抽取）：全引擎只有一份定义且位于 route-node.mjs，
+      // workflow-guard 静态 import 使用它（replan 与 plan 出口同一判据，禁止内联第二份）。
+      const conflictDefinitionFiles = engineScripts.filter((file) =>
+        /function\s+findParallelWriteConflicts\s*\(/.test(fs.readFileSync(path.join(__dirname, file), 'utf8')));
+      if (conflictDefinitionFiles.length !== 1 || conflictDefinitionFiles[0] !== 'route-node.mjs') {
+        throw new Error('并行写冲突检测必须只有一份实现且位于 route-node.mjs（plan 出口与 replan 共用），实际定义处: '
+          + JSON.stringify(conflictDefinitionFiles));
+      }
+      if (!/import[^;]*\bfindParallelWriteConflicts\b[^;]*from\s*'\.\/route-node\.mjs'/.test(guardText)) {
+        throw new Error('workflow-guard.mjs 必须静态 import route-node 的并行写冲突检测（不得内联第二份判定）');
       }
     },
   },
@@ -11981,8 +12020,11 @@ const SCENARIOS = [
 
   // 271: advance 留痕 + 状态可见（AC-4）——advance 仍推进（语义不变），但必须写
   // history 事件 advance-forced（node + skipped: ['exit:<node>'] + reason: 'advance'）并打印
-  // ADVANCE-AUDIT；status 输出派生字段 forcedNodes = completedNodes 含而 evidence 不含的节点。
-  // 反向断言（L-069）：有出口证据的 completed 节点不得进入 forcedNodes。
+  // ADVANCE-AUDIT；status 输出派生字段 forcedNodes 以 history 中本 change 的 advance-forced
+  // 事件为准（2026-09-28 PR 审查采纳）——record 后 advance / replanAuthorization 留痕后
+  // advance 两类真实反例都不得漏报；旧 state（无 history 字段）回退「completedNodes 含而
+  // evidence 不含」判据（当时 advance 无痕，无事件可依）。
+  // 正反断言（L-069）：被强制推进的节点必现；有出口证据但未被强制的不现。
   {
     name: '271 advance 留痕：advance-forced 事件 + status.forcedNodes 派生视图（含反向断言）',
     run: (dir) => {
@@ -12024,11 +12066,14 @@ const SCENARIOS = [
       if (parsed.forcedNodes.includes('design')) {
         throw new Error('status.forcedNodes 只能包含已完成节点，实际 ' + JSON.stringify(parsed.forcedNodes));
       }
-      // 反向：有出口证据的 completed 节点不得进入 forcedNodes；无出口证据的仍收录
+      // 反向：有出口证据且未被 advance 强制的 completed 节点不得进入 forcedNodes；
+      // 无出口证据但被 advance 强制的节点仍收录（事件判据）。事件派生下「强制」由 history 决定：
+      // 夹具把 advance-forced 事件挂到 design（open 只留 exit 证据），反向断言语义保持不变。
       const st2 = readScenarioState(dir);
       st2.completedNodes = ['open', 'design'];
       st2.currentNode = 'plan';
       st2.evidence = { ...(st2.evidence || {}), open: { summary: 'open exited' } };
+      st2.history = [advanceForcedEvent('design')];
       writeState(dir, st2);
       const status2 = runStateWithProtocol(dir, ['status']);
       assertExit(status2, 0);
@@ -12038,6 +12083,71 @@ const SCENARIOS = [
       }
       if (parsed2.forcedNodes.includes('open')) {
         throw new Error('有出口证据的 completed 节点不得进入 forcedNodes，实际 ' + JSON.stringify(parsed2.forcedNodes));
+      }
+      // (i) 有 record 出口证据且被 advance 强制 → 必须出现（旧「缺 evidence」推断会漏报）
+      const stRecord = replanExecuteState({
+        completedNodes: ['open', 'design'],
+        currentNode: 'plan',
+        evidence: { open: { summary: 'record 出口证据（advance 事件之外的真实证据）' } },
+        history: [advanceForcedEvent('open')],
+      });
+      writeState(dir, stRecord);
+      const statusRecord = runStateWithProtocol(dir, ['status']);
+      assertExit(statusRecord, 0);
+      const parsedRecord = parseStatusJson(statusRecord);
+      const failures271 = [];
+      if (!Array.isArray(parsedRecord.forcedNodes) || !parsedRecord.forcedNodes.includes('open')) {
+        failures271.push('(i) 有 record 证据且被 advance 强制的 open 应进入 forcedNodes，实际 '
+          + JSON.stringify(parsedRecord.forcedNodes));
+      }
+      // (ii) 只有 replanAuthorization 授权留痕且被 advance 强制 → 必须出现（旧对象判据会漏报）
+      const stAuth = replanExecuteState({
+        completedNodes: ['open', 'design'],
+        currentNode: 'plan',
+        evidence: {
+          open: { summary: 'open exited' },
+          design: {
+            replanAuthorization: {
+              round: 1,
+              at: '2026-09-28T00:00:00.000Z',
+              source: 'user',
+              reason: '计划重校',
+              backup: '.specs/' + CHANGE_ID + '/replan-backups/x.json',
+              fingerprint: '0'.repeat(64),
+            },
+          },
+        },
+        history: [advanceForcedEvent('design')],
+      });
+      writeState(dir, stAuth);
+      const statusAuth = runStateWithProtocol(dir, ['status']);
+      assertExit(statusAuth, 0);
+      const parsedAuth = parseStatusJson(statusAuth);
+      if (!Array.isArray(parsedAuth.forcedNodes) || !parsedAuth.forcedNodes.includes('design')) {
+        failures271.push('(ii) 仅有 replanAuthorization 留痕且被 advance 强制的 design 应进入 forcedNodes，实际 '
+          + JSON.stringify(parsedAuth.forcedNodes));
+      }
+      // (iv) 旧 state（无 history 字段）→ 回退「缺 evidence」判据仍生效
+      const stLegacy = replanExecuteState({
+        completedNodes: ['open', 'design'],
+        currentNode: 'plan',
+        evidence: { open: { summary: 'open exited' } },
+      });
+      delete stLegacy.history;
+      writeState(dir, stLegacy);
+      const statusLegacy = runStateWithProtocol(dir, ['status']);
+      assertExit(statusLegacy, 0);
+      const parsedLegacy = parseStatusJson(statusLegacy);
+      if (!Array.isArray(parsedLegacy.forcedNodes) || !parsedLegacy.forcedNodes.includes('design')) {
+        failures271.push('(iv) 旧 state（无 history）应回退缺 evidence 判据：design 应在 forcedNodes，实际 '
+          + JSON.stringify(parsedLegacy.forcedNodes));
+      }
+      if (parsedLegacy.forcedNodes.includes('open')) {
+        failures271.push('(iv) 旧 state（无 history）有出口证据的 open 不得进入 forcedNodes，实际 '
+          + JSON.stringify(parsedLegacy.forcedNodes));
+      }
+      if (failures271.length > 0) {
+        throw new Error('advance-forced 事件派生判据失败: ' + failures271.join(' | '));
       }
     },
   },
