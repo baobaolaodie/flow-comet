@@ -2868,7 +2868,7 @@ const TEST_ITEMS = [
       const status = runHandoff(['status'], dir);
       assertExit(status, 0);
       assertOut(status, '"handoffRequests"');
-      assertOut(status, '"handoffResults"');
+      assertOut(status, '"handoffResult"');
       assertOut(status, 'T01');
       // ④ 无效提交哈希 → 错误提示但记录不阻断（结果仍入库）
       const badHash = runHandoff(['result', 'T02', JSON.stringify({

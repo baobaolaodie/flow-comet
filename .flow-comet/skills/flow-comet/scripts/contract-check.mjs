@@ -6,19 +6,23 @@
  * 供 reviewer 快速比对一致性（防 status/type 枚举错位、字段名、min/required 不匹配）。
  *
  * 用法：
- *   node contract-check.mjs <field> [--project <root>]
+ *   node contract-check.mjs <field> [--project <root>] [--backend <dir>] [--frontend <dir>]
  *   例：node contract-check.mjs status
  *   --project <root> 优先于当前目录（未指定时用 cwd）
+ *   --backend/--frontend 相对 --project 或 cwd 解析；缺省回退 <root>/app 与 <root>/src
  *
- * 输出：后端定义清单 + 前端定义清单，人工比对（脚本不自动判定正确性——需要业务语义）。
+ * 输出：后端定义清单 + 前端定义清单（头部打印实际解析路径），人工比对（脚本不自动判定正确性——需要业务语义）。
  */
 import { promises as fs } from 'fs';
 import path from 'path';
 
+// 用法串单一来源（缺参 / 缺值两条错误路径同源——新增选项只改一行）
+const USAGE = '用法: node contract-check.mjs <field> [--project <root>] [--backend <dir>] [--frontend <dir>]';
+
 const runRoot = process.cwd();
 const field = process.argv[2];
 if (!field) {
-  console.error('用法: node contract-check.mjs <field> [--project <root>]');
+  console.error(USAGE);
   console.error('例: node contract-check.mjs status');
   process.exit(1);
 }
@@ -26,35 +30,33 @@ if (!field) {
 // 正则元字符转义（field 直接拼进 RegExp 会改变匹配语义：`item[0]` 被当字符类；`[` 直接抛错）
 const escapedField = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-// --project <root>：显式项目根优先于 cwd 兜底；其后缺值（或缺值处又跟了选项）→ 明确报错
-const projectFlagIndex = process.argv.indexOf('--project');
-const projectRoot = projectFlagIndex === -1 ? null : process.argv[projectFlagIndex + 1];
-if (projectFlagIndex !== -1
-  && (typeof projectRoot !== 'string' || projectRoot.trim() === '' || projectRoot.startsWith('--'))) {
-  console.error('用法: node contract-check.mjs <field> [--project <root>]');
-  console.error('--project 后缺少项目根目录值');
-  process.exit(1);
-}
-
-// 定位后端/前端目录（从 project root 或约定路径）
-async function findRoots() {
-  const candidates = [
-    ...(projectRoot ? [projectRoot] : []),
-    runRoot,
-  ];
-  for (const root of candidates) {
-    const backend = path.join(root, 'pingpong-tournament', 'app');
-    const frontend = path.join(root, 'frontend', 'src');
-    if ((await exists(backend)) && (await exists(frontend))) {
-      return { root, backend, frontend };
-    }
+// 目录类选项读取（单一来源 · 与既有 --project 同规则）：显式参数优先于缺省回退；
+// 其后缺值（末尾 / 空串 / 纯空白 / 缺值处又跟了选项）→ 用法错误 + 非零退出
+function readDirOption(name, missingMessage) {
+  const index = process.argv.indexOf(name);
+  if (index === -1) return null;
+  const value = process.argv[index + 1];
+  if (typeof value !== 'string' || value.trim() === '' || value.startsWith('--')) {
+    console.error(USAGE);
+    console.error(missingMessage);
+    process.exit(1);
   }
-  const fallback = projectRoot ?? runRoot;
-  return { root: fallback, backend: path.join(fallback, 'app'), frontend: path.join(fallback, 'src') };
+  return value;
 }
 
-async function exists(p) {
-  try { await fs.access(p); return true; } catch { return false; }
+const projectRoot = readDirOption('--project', '--project 后缺少项目根目录值');
+const backendArg = readDirOption('--backend', '--backend 后缺少后端目录值');
+const frontendArg = readDirOption('--frontend', '--frontend 后缺少前端目录值');
+
+// 定位后端/前端目录：显式 --backend/--frontend 优先于缺省回退（<root>/app 与 <root>/src）；
+// 相对路径按 --project 或 cwd 解析——显式参数优于目录形态探测，不做项目耦合硬编码
+function findRoots() {
+  const root = projectRoot ?? runRoot;
+  return {
+    root,
+    backend: backendArg ? path.resolve(root, backendArg) : path.join(root, 'app'),
+    frontend: frontendArg ? path.resolve(root, frontendArg) : path.join(root, 'src'),
+  };
 }
 
 async function grepFiles(dir, patterns, exclude = ['node_modules', '__pycache__', 'dist']) {
@@ -84,8 +86,11 @@ async function grepFiles(dir, patterns, exclude = ['node_modules', '__pycache__'
 }
 
 async function main() {
-  const { root, backend, frontend } = await findRoots();
-  console.log(`# 契约核对: ${field}（project: ${root}）\n`);
+  const { root, backend, frontend } = findRoots();
+  console.log(`# 契约核对: ${field}（project: ${root}）`);
+  console.log(`# backend: ${backend}`);
+  console.log(`# frontend: ${frontend}`);
+  console.log('');
 
   // 后端：Pydantic 校验 + service 赋值
   console.log('## 后端（Pydantic 校验 / service 赋值）');

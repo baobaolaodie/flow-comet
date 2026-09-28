@@ -683,7 +683,7 @@ async function main() {
     console.log(JSON.stringify({
       activeChange: state.activeChange,
       handoffRequests: handoff.handoffRequests || {},
-      handoffResults: handoff.handoffResult || {}
+      handoffResult: handoff.handoffResult || {}
     }, null, 2));
     return;
   }
