@@ -83,8 +83,11 @@ function resolveComponentSkillFile(nodeSkill, scriptsDir = __dirname) {
   return file;
 }
 
-// 场景数一致性自检清单（20 文件 = 15 分发组 + 5 维护者组，全变体：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n）——
-// 场景数自检与底部自检共用同一清单/同一实现（自检常量同步：SCENARIOS.length 变更 → 20 受检文件须同步）。
+// 场景数一致性自检清单（14 文件 = 9 分发组 + 5 维护者组，全变体：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n）——
+// 数字由下方常量清单**推导**、不硬编码：9 = SCENARIO_COUNT_FILES 9 条与 SYSTEM_TEST_COUNT_FILES 4 条的
+// 并集（后者是前者子集）；5 = SCENARIO_COUNT_FILES_MAINTAINER 5 条与 SYSTEM_TEST_COUNT_FILES_MAINTAINER
+// 4 条的并集（后者是前者子集）——底部自检输出「受检面: n 文件」实际值，清单/数字漂移即可见（防再漂移）。
+// 场景数自检与底部自检共用同一清单/同一实现（自检常量同步：SCENARIOS.length 变更 → 全部受检文件须同步）。
 // 分两组按"分发形态"划界（AC-14：条目缺失必须显式报告，不得静默跳过——幽灵条目无处藏身）：
 //   ① 分发组：随仓库分发（受版本控制），**任何**权威源检出都必须存在——维护者工作副本、
 //      CI 全新检出、worktree 检出皆然 → 条目缺失即报错（幽灵条目在此被强制暴露）。
@@ -331,7 +334,12 @@ function internalDocsProblems(root = REPO_ROOT) {
     let text;
     try {
       text = fs.readFileSync(path.join(root, rel), 'utf8');
-    } catch {
+    } catch (e) {
+      // F4：读取失败（EACCES / EBUSY / EISDIR 等）不得静默 continue——该目标既没被判死引用、
+      // 也没被判缺失，静默跳过会让受检面出现「未执行 ≠ 通过」的黑洞（L-079 同类通道；本批
+      // 正落在新扩扫描面上）。按可见问题报告，并继续扫描其余目标（一个目标损坏不吞整册扫描面）。
+      const reason = e && e.code ? e.code : (e && e.message ? e.message : String(e));
+      problems.push('无法读取: ' + rel + ': ' + reason);
       continue;
     }
     for (const { ref, line } of internalDocRefCandidates(text)) {
@@ -514,6 +522,41 @@ function fixtureBridgeBaseVersion(version) {
 }
 function fixtureIsBridgeDevVersion(version) {
   return FIXTURE_BRIDGE_DEV_SUFFIX_RE.test(String(version));
+}
+
+// 发布同步守卫（场景 200 子断言）纯函数：权威源 loader 的标记行 / 导出常量与载体
+// INSTALLED_VERSION 三处一致性判定——比较语义 = bridge-check 既有语义（MECHANISM 二·二十七
+// 「bridge-check 基础版本归一」：比较前剥离 git-describe dev 态后缀 `-<N>-g<hash>`、按基础版本
+// 比较；预发布标识（如 -rc.N）不是 dev 态后缀、不剥离；基础版本不同（含发布版对发布版）仍报
+// 漂移）。归一复用 fixtureBridgeBaseVersion（单点正则，不再复制第二份实现）——发布态权威源与
+// dev 态安装副本（INSTALLED_VERSION = `<发布>-<N>-g<hash>`）归一后同基础判同步；真实跨文件/
+// 跨值分叉仍必报。返回问题描述数组（空 = 三处基础版本一致）。
+function bridgeStampSyncProblems(markerStamp, exportStamp, installedVersion) {
+  const base = fixtureBridgeBaseVersion;
+  const problems = [];
+  if (base(markerStamp) !== base(installedVersion)) {
+    problems.push('标记行=' + markerStamp + '（基础 ' + base(markerStamp) + '）vs INSTALLED_VERSION=' + installedVersion + '（基础 ' + base(installedVersion) + '）');
+  }
+  if (base(exportStamp) !== base(installedVersion)) {
+    problems.push('export=' + exportStamp + '（基础 ' + base(exportStamp) + '）vs INSTALLED_VERSION=' + installedVersion + '（基础 ' + base(installedVersion) + '）');
+  }
+  return problems;
+}
+
+// 发布同步守卫（场景 200）子锚表（判别力双向，全部由载体基础版本派生）：正例 = 三处基础版本一致
+// （含 dev 态副本戳 vs 权威源发布戳的真实形态、两侧 dev 后缀同基础）；负例 = 标记行 / export
+// 任一基础版本漂移、发布版对发布版失配、预发布标识不剥离——归一不得放行真实漂移。
+function bridgeStampSyncSubAnchorCases(baseVersion, devVersion) {
+  const major = parseInt(baseVersion.split('.')[0], 10);
+  const otherBase = (major + 9) + '.0.0';
+  return [
+    { label: 'dev 态副本戳 vs 权威源发布戳同基础', expectSync: true, problems: bridgeStampSyncProblems(baseVersion, baseVersion, devVersion) },
+    { label: '两侧 dev 后缀同基础', expectSync: true, problems: bridgeStampSyncProblems(baseVersion + '-2-g1234567', baseVersion + '-1-gabcdef0', devVersion) },
+    { label: '标记行基础版本不同', expectSync: false, problems: bridgeStampSyncProblems(otherBase, baseVersion, devVersion) },
+    { label: 'export 基础版本不同', expectSync: false, problems: bridgeStampSyncProblems(baseVersion, otherBase, devVersion) },
+    { label: '发布版对发布版失配', expectSync: false, problems: bridgeStampSyncProblems('9.9.9-fixture-skew', baseVersion, baseVersion) },
+    { label: '预发布标识不剥离', expectSync: false, problems: bridgeStampSyncProblems(baseVersion + '-rc.3', baseVersion, devVersion) },
+  ];
 }
 
 // 组装 dsh 桥接健康夹具（bridge-check 六态场景共用）：项目根挂 .dsh/skills/flow-comet
@@ -7532,17 +7575,34 @@ const SCENARIOS = [
       if (!srcStamp) throw new Error('权威源 loader 未提取到版本戳（场景前置失效）');
       const installed = fs.readFileSync(path.join(dshHome, 'plugins', 'dsh-flow-comet-bridge.mjs'), 'utf8');
       if (!installed.includes('BRIDGE_VERSION: ' + srcStamp[1])) throw new Error('覆盖后 loader 版本戳非权威源值');
-      // 子断言（发布同步守卫，以 INSTALLED_VERSION 为权威基准）：权威源 loader 的标记行、
-      // 导出常量与 INSTALLED_VERSION 三处同值——任一处漂移时安装副本的 bridge-check 会在已装
-      // 项目报版本偏斜（上方断言只证明「覆盖 == 权威源文件」，无法捕获跨文件/跨值分叉）。
+      // 子断言（发布同步守卫）：权威源 loader 的标记行、导出常量与载体 INSTALLED_VERSION
+      // 三处按 **bridge-check 既有语义**比较（MECHANISM 二·二十七「bridge-check 基础版本归一」：
+      // 剥离 dev 态后缀 `-<N>-g<hash>`、按基础版本比较；预发布标识不剥离）——任一处基础版本漂移
+      // 时安装副本的 bridge-check 会在已装项目报版本偏斜（上方断言只证明「覆盖 == 权威源文件」，
+      // 无法捕获跨文件/跨值分叉）。旧严格全等使主仓「dev 态副本 + 权威源」形态结构性必红（F6）；
+      // 归一后 dev 态同基础判同步，真实漂移仍必报（判别力见下方子锚表）。
       const installedVersion = fs.readFileSync(path.join(__dirname, '..', 'INSTALLED_VERSION'), 'utf8').trim();
       const exportMatch = /^export const version = '([^']+)';$/m.exec(srcText);
       if (!exportMatch) throw new Error('权威源 loader 未提取到 export version（场景前置失效）');
-      if (srcStamp[1] !== installedVersion || exportMatch[1] !== installedVersion) {
+      const syncProblems = bridgeStampSyncProblems(srcStamp[1], exportMatch[1], installedVersion);
+      if (syncProblems.length > 0) {
         throw new Error(
-          '权威源版本三处不一致（标记行=' + srcStamp[1] + ' / export=' + exportMatch[1] +
-          ' / INSTALLED_VERSION=' + installedVersion + '）——发布同步遗漏（bridge-check 会在安装副本报版本偏斜）'
+          '权威源版本三处基础版本不一致（标记行=' + srcStamp[1] + ' / export=' + exportMatch[1] +
+          ' / INSTALLED_VERSION=' + installedVersion + '）——发布同步遗漏（bridge-check 会在安装副本报版本偏斜）：' +
+          syncProblems.join('；')
         );
+      }
+      // in-place 锚（F6：发布同步守卫判别力双向证明，不新增顶层编号）——权威源 loader 的发布戳
+      // 与 dev 态副本 INSTALLED_VERSION 必须按 bridge-check 既有语义比较：剥离 dev 态后缀按基础
+      // 版本判同步（锚表正例即该真实形态），真实漂移（基础版本不同 / 发布版对发布版 / 预发布标识
+      // 不剥离）仍必报。
+      const baseVersion = fixtureBridgeBaseVersion(installedVersion);
+      for (const subAnchor of bridgeStampSyncSubAnchorCases(baseVersion, installedVersion)) {
+        const synced = subAnchor.problems.length === 0;
+        if (synced !== subAnchor.expectSync) {
+          throw new Error('发布同步守卫子锚失败（' + subAnchor.label + '）：期望'
+            + (subAnchor.expectSync ? '同步' : '报漂移') + '，实际 problems=' + JSON.stringify(subAnchor.problems));
+        }
       }
     },
   },
@@ -9250,6 +9310,24 @@ const SCENARIOS = [
       const structProblems = internalDocsProblems(dir);
       if (!structProblems.some((p) => p.includes('Open decisions'))) {
         throw new Error('ROADMAP 缺段未被报告: ' + JSON.stringify(structProblems));
+      }
+      // —— 本批 in-place 增锚（F4：读取失败可见化）——以同名目录替换 .md 文件 → readFileSync
+      // 抛 EISDIR（目录读取错误，跨平台同码）；旧实现 catch → continue 静默跳过，该目标既无
+      // FAIL 也无 SKIP（「未执行 ≠ 通过」的静默通道，L-079 同类）→ 必须报告
+      // 「无法读取: <rel>: <err 摘要>」。前置：ROADMAP 复原为完整结构，确保本锚的失败只可能
+      // 来自不可读目标（无结构噪声）。
+      writeFile(dir, 'docs/internal/ROADMAP.md', '# 路线图\n\n## Now\n\n## Next\n\n## Later\n\n## Open decisions\n');
+      if (internalDocsProblems(dir).length !== 0) {
+        throw new Error('不可读目标锚前置：干净夹具应通过: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      fs.mkdirSync(path.join(dir, 'docs/internal', 'UNREADABLE.md'), { recursive: true });
+      const unreadableProblems = internalDocsProblems(dir);
+      if (!unreadableProblems.some((p) => p.includes('无法读取: docs/internal/UNREADABLE.md'))) {
+        throw new Error('不可读目标被静默跳过（应报告「无法读取: <rel>: <err 摘要>」）: ' + JSON.stringify(unreadableProblems));
+      }
+      fs.rmSync(path.join(dir, 'docs/internal', 'UNREADABLE.md'), { recursive: true, force: true });
+      if (internalDocsProblems(dir).length !== 0) {
+        throw new Error('移除不可读目标后应复绿: ' + JSON.stringify(internalDocsProblems(dir)));
       }
       // 整组缺席（CI / worktree 形态）→ 跳过，不误红：目标面 = docs/internal 与 .specs/adr 与
       // 三册——组缺席判据是「全部目标面缺席」（targets.length === 0），故夹具同步移除三册。
@@ -12444,6 +12522,17 @@ console.log('RESULT: ' + passed + '/' + SCENARIOS.length + ' scenarios passed');
 // ② 公开产物零代号：公开文档不得含过程代号（场景编号/修复编号/批次/缺陷编号/问题级/验证代号/验证轮次/未公开概念——历史 CHANGELOG 回归实证）。
 // 仅权威源检出执行；安装副本（目标项目）无 flow-comet 文档面，跳过。
 if (isAuthoritativeSourceRepo()) {
+  // ①a 受检面可见化（F2 防漂移）：实际受检文件数由模块级常量**推导**、不硬编码——分发组 =
+  // SCENARIO_COUNT_FILES ∪ SYSTEM_TEST_COUNT_FILES（后者为前者子集），维护者组 =
+  // SCENARIO_COUNT_FILES_MAINTAINER ∪ SYSTEM_TEST_COUNT_FILES_MAINTAINER（后者为前者子集）；
+  // 维护者面缺席（CI 全新检出 / worktree）时按组跳过语义只计分发面。本行是对外可复核的
+  // 「覆盖面事实」——清单增删/口径漂移在此直接可见，不再依赖人工核对注释（F2 根因）。
+  const distFaceCount = new Set([...SCENARIO_COUNT_FILES, ...SYSTEM_TEST_COUNT_FILES]).size;
+  const maintainerFaceCount = maintainerFacePresent()
+    ? new Set([...SCENARIO_COUNT_FILES_MAINTAINER, ...SYSTEM_TEST_COUNT_FILES_MAINTAINER]).size
+    : 0;
+  console.log('受检面: ' + (distFaceCount + maintainerFaceCount) + ' 文件（分发 ' + distFaceCount
+    + ' + 维护者 ' + maintainerFaceCount + '）');
   // ① 计数一致性受检清单（分发组恒检 + 维护者组整组在场时检；判据与场景 105 共用同一实现）
   // SCENARIO_COUNT_FILES(_MAINTAINER) / SYSTEM_TEST_COUNT_FILES(_MAINTAINER) 为模块级常量
   // （见文件头定义）——场景数与系统测试集项数两套计数合并检查
