@@ -1809,6 +1809,12 @@ async function main() {
       process.exit(1);
     }
   }
+  // execute 出口空退出豁免（M6 收窄）——豁免仅适用于「无任何串行任务」的全并行 change；
+  // 含串行任务（parallel!=="true"，缺省串行——与 task-parsing.mjs 同语义）时豁免不生效，
+  // 后续产物校验照常执行（陈旧 emptyExitApproved 不得静默放行）。
+  // 判据单一来源：evidence 谓词只在此处求值一次，execute 出口块与 M6 共用（L-067）。
+  const executeEmptyExitApproved = node.id === 'execute' && !!(state.evidence?.execute?.emptyExitApproved);
+  let executeEmptyExitExempt = false;
   // execute 出口校验——统一委托后所有 done 任务需 handoff（越俎代庖检测覆盖串行/并行）
   if (node.id === 'execute' && state.activeChange) {
     const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
@@ -1825,9 +1831,15 @@ async function main() {
       // 串行 pending → BLOCKED（execute 任务没做完）——emptyExitApproved 不豁免串行 pending:
       // 豁免语义是"全 parallel 无串行可做时空退出";存在未完成串行任务时豁免不应生效
       // (防规划错误被豁免掩盖;豁免仅作用于后续产物校验跳过,审计提示保留)
-      const emptyExitApproved = !!(state.evidence?.execute && state.evidence.execute.emptyExitApproved);
-      if (emptyExitApproved) {
-        console.error('EMPTY-EXIT: execute 空退出豁免已生效(evidence.execute.emptyExitApproved)——审计记录:该 change 在无串行任务时显式豁免空退出');
+      if (executeEmptyExitApproved) {
+        // M6 前置条件（收窄）：TASK 存在任一串行任务块（parallel!=="true"，含缺省）时豁免不生效，
+        // 无论该串行任务 pending 还是 done——陈旧标记不得跳过产物/摘要校验。
+        if (tasks.some(t => !t.parallel)) {
+          console.error('EMPTY-EXIT 未生效：本 change 含串行任务，豁免仅适用于全并行 change');
+        } else {
+          executeEmptyExitExempt = true;
+          console.error('EMPTY-EXIT: execute 空退出豁免已生效(evidence.execute.emptyExitApproved)——审计记录:该 change 在无串行任务时显式豁免空退出');
+        }
       }
       // serialPending 收窄为「可运行串行」（出口拦截集合收窄）：仅 deps ⊆ doneIds 的
       // 未完成串行计入拦截——deps 未满足的串行 pending 是等后续波次的合法中间态，放行由多趟
@@ -2363,9 +2375,15 @@ async function main() {
     console.error('BLOCKED: missing Output Schema evidence: ' + missingSchemaEvidence.join(', '));
     process.exit(1);
   }
-  // M6: execute 显式空退出豁免——evidence.execute.emptyExitApproved 时跳过产物校验(全 parallel 无 SUMMARY 属预期)
-  const missingArtifacts = (node.id === 'execute' && state.evidence?.execute?.emptyExitApproved)
-    ? [] : await missingRequiredArtifacts(protocol, node, state.activeChange);
+  // M6: execute 显式空退出豁免——仅当豁免活性成立（executeEmptyExitApproved 且 TASK 无任何
+  // 串行任务）时跳过产物校验(全 parallel 无 SUMMARY 属预期);含串行任务的 change 豁免不生效,
+  // 照常校验,不得静默放行。生效时追加被跳过项清单（EMPTY-EXIT-SKIPPED）。
+  const checkedArtifacts = await missingRequiredArtifacts(protocol, node, state.activeChange);
+  let missingArtifacts = checkedArtifacts;
+  if (executeEmptyExitApproved && executeEmptyExitExempt) {
+    console.error('EMPTY-EXIT-SKIPPED: ' + (checkedArtifacts.length > 0 ? checkedArtifacts.join(', ') : '（无缺失产物项）'));
+    missingArtifacts = [];
+  }
   if (missingArtifacts.length > 0) {
     console.error('BLOCKED: missing Output Schema artifacts: ' + missingArtifacts.join(', '));
     process.exit(1);

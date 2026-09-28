@@ -12041,6 +12041,36 @@ const SCENARIOS = [
       }
     },
   },
+
+  // 274: M6 收窄——空退出豁免仅适用于「无任何串行任务」的全并行 change；含串行任务
+  // （parallel="false"/缺省，无论 pending/done）时豁免不生效，产物校验照常执行。
+  // 夹具用旧 change 语义（无 newChange）：done 缺 SUMMARY 在 M2 只 WARN → 放行与否
+  // 唯一取决于 M6 是否跳过 task-summaries 产物校验（隔离判据；新 change 由 M2 硬门先行，
+  // 无法观察 M6 行为）。修复前 emptyExitApproved 无条件跳过 → exit 0（本场景 RED）。
+  {
+    name: '274 execute exit BLOCKED：含串行任务的 change 空退出豁免不生效（M6 收窄）',
+    run: (dir) => {
+      const st = baseState('execute');
+      st.evidence.execute = { summary: '陈旧空退出标记', emptyExitApproved: true };
+      st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
+      writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
+        '# TASK\n\n<task id="T01" parallel="false" status="done"><action>串行任务已完成但缺 SUMMARY</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n');
+      const res = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, 'task-summaries');
+      assertOut(res, 'EMPTY-EXIT 未生效');
+      assertNotOut(res, '豁免已生效');
+      // 反向子锚：全并行 change 时豁免仍生效，且输出被跳过项清单（补既有全 parallel 通过锚）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
+        '# TASK\n\n<task id="P01" parallel="true" status="pending"><action>并行任务</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n');
+      const resParallel = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resParallel, 0);
+      assertOut(resParallel, '豁免已生效');
+      assertOut(resParallel, 'EMPTY-EXIT-SKIPPED');
+    },
+  },
 ];
 // ---------- 运行 ----------
 

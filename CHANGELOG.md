@@ -14,7 +14,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ### Changed
 
-- **The two-tier regression baseline moved up with the new coverage**: the self-test suite now records 273 scenarios and the system test suite 85 items, and both counts stay machine-checked across the release surfaces.
+- **The two-tier regression baseline moved up with the new coverage**: the self-test suite now records 274 scenarios and the system test suite 85 items, and both counts stay machine-checked across the release surfaces.
 
 ## [1.6.0] - 2026-09-27
 
