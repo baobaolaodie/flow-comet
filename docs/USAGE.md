@@ -41,7 +41,7 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 | Command | What it owns |
 |---|---|
 | `workflow-guard.mjs` | `entry` / `exit` — the gates. Exits validate the node's artifacts, sections, declarations and (for `verify`) run the test commands |
-| `workflow-state.mjs` | `init`, `status`, `next`, `select`, `record`, `verify-fail`, `advance`, `execution-mode`, `config`, `skill-load`, `bridge-check`, `reenter` — the state machine and its bookkeeping |
+| `workflow-state.mjs` | `init`, `status`, `next`, `select`, `record`, `verify-fail`, `advance`, `execution-mode`, `config`, `skill-load`, `bridge-check`, `reenter`, `replan` — the state machine and its bookkeeping |
 
 A node's exit refuses to pass when its artifacts are incomplete or malformed, when the skill-load declaration is missing, or when the entry was never recorded; each refusal prints the reason and the command that fixes it. Nothing about the state is stored in the conversation: re-derive it with `status` / `next`.
 
@@ -70,6 +70,7 @@ On archive the whole directory moves to `.specs/archive/<YYYY-MM-DD>-<change-id>
 - **Evidence before exit** — `record <node>` writes the node's evidence, and the exit requires it (plus the skill-load declaration).
 - **Summary skeleton** — every completed task needs its `<task-id>-SUMMARY.md` with the template's sections, including the self-check and the boundary check.
 - **Tests actually run** — the `verify` exit executes the command block in `TEST.md` and counts failures; a failing command blocks the exit.
+- **Plan re-validation is controlled** — when the plan is proven wrong mid-node, `replan "<reason>" --authorized-by <source>` is the only compliant way to re-validate and re-sign the task set. It re-runs the same task-graph and field checks the plan exit runs, so it never waives any gate. Every call needs an explicit authorization, is capped at 3 rounds per change (a further round only via the explicit continuation parameter), writes a state backup before it changes anything, and a repeated call of the same shape is a no-op.
 - **Review findings stay visible** — each finding in `REVIEW.md` needs a disposition marker (fixed / escalated / deferred), and deferring a major finding asks for a user ruling.
 - **Coordinator boundary** — in the default `subagent` execution mode the coordinating session may not carry out tasks itself; the engine reports a takeover instead. The documented escape hatch is an explicit `record execute '{"parallelTakeoverApproved":true}'` declaration.
 - **Archive completeness** — the archive exit requires the archived directory and a `KNOWN-ISSUES.md` inside it (write "no leftovers" explicitly when there are none).

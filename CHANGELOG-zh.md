@@ -10,6 +10,21 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号记录于九处，由 CI 在发布面对账保持一致：发布 git tag；README 徽章、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 与本文档（各含两种语言）；权威源 `.flow-comet/skills/flow-comet/INSTALLED_VERSION`；以及 npm 包的 `package.json` 的 `version`。
 
+## [Unreleased]
+
+### 新增
+
+- **受控的计划重校通道**：执行相位中一旦计划被证明有缺陷，其任务集现可经**显式授权**的通道就地修订——重跑与计划出口完全相同的依赖、字段与验证检查（**不做豁免**），改写前留全量状态备份与指纹，每次使用都留痕（谁授权、为什么、第几轮），每 change 有轮次上限且超限需显式续轮，签名已一致时是可见的空操作。
+
+### 变更
+
+- **两级回归基线随新增覆盖上移**：自测套件现记录 274 场景、系统测试集 85 项，两个计数继续受发布面机检约束。
+- **强制推进现在留痕**：节点未经出口门禁被推进时追加审计事件（写明跳过了哪个门禁），状态视图暴露哪些节点曾被强制推进。
+
+### 修复
+
+- **执行相位出口的空退出豁免已收窄**：仅当该 change 的任务集没有串行任务时才生效；否则照常执行产物校验，并显式提示豁免未生效；豁免生效时列出被跳过的检查项。
+
 ## [1.6.0] - 2026-09-27
 
 本版汇集 1.5.1 之后累积的批次：安装器不再借用宿主仓库的 tag 作为它报告的版本，其输出前缀也改用工具自身名称；维护文档整体重建与清理；审查后报告的修复改为经执行节点生命周期闭环，回程审计行显式标明来源，受控修复轮次按 change 计数且第四次暂停等待决策，任务集签名同时记录产出它的算法版本；归档的 change 可通过受控且需显式授权的路径重新打开。([#106](https://github.com/baobaolaodie/flow-comet/pull/106)) ([#107](https://github.com/baobaolaodie/flow-comet/pull/107)) ([#109](https://github.com/baobaolaodie/flow-comet/pull/109)) ([#110](https://github.com/baobaolaodie/flow-comet/pull/110)) ([#111](https://github.com/baobaolaodie/flow-comet/pull/111)) ([#112](https://github.com/baobaolaodie/flow-comet/pull/112)) ([#113](https://github.com/baobaolaodie/flow-comet/pull/113))

@@ -41,7 +41,7 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 | 命令 | 负责什么 |
 |---|---|
 | `workflow-guard.mjs` | `entry` / `exit` —— 门禁。出口校验该节点的工件、段、声明，并在 `verify` 时**真跑**测试命令 |
-| `workflow-state.mjs` | `init`、`status`、`next`、`select`、`record`、`verify-fail`、`advance`、`execution-mode`、`config`、`skill-load`、`bridge-check`、`reenter` —— 状态机与记账 |
+| `workflow-state.mjs` | `init`、`status`、`next`、`select`、`record`、`verify-fail`、`advance`、`execution-mode`、`config`、`skill-load`、`bridge-check`、`reenter`、`replan` —— 状态机与记账 |
 
 节点的出口会在以下情况拒绝通过：工件不完整或形态不合规、缺少技能加载声明、或从未记录进入；每次拒绝都会打印原因与修复命令。状态不存放在对话里：随时用 `status` / `next` 重新推导。
 
@@ -70,6 +70,7 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 - **先证据后出口** —— `record <node>` 写入节点证据，出口要求它存在（外加技能加载声明）。
 - **摘要骨架** —— 每个完成任务都要有 `<任务号>-SUMMARY.md`，含模板规定的各段（包括自检与越界检查）。
 - **测试真跑** —— `verify` 出口执行 `TEST.md` 里的命令块并统计失败；命令失败即阻断出口。
+- **计划重校是受控通道** —— 计划在节点中途被证明有缺陷时，`replan "<原因>" --authorized-by <来源>` 是重新校验并重签任务集的唯一合规路径。它重跑 plan 出口同一套任务图与字段校验，因此绝不豁免任何门禁。每次调用都需要显式授权，每个 change 最多 3 轮（追加轮次只能走显式续轮参数），改写状态前先落状态备份，重复的同形态调用是空操作。
 - **审查发现不消失** —— `REVIEW.md` 每条发现都要有处置标记（已修 / 升级 / 转待办）；把 Major 转待办需要用户裁决记录。
 - **协调者边界** —— 默认的 `subagent` 执行模式下，协调会话不得亲自执行任务，引擎会报告越俎代庖；文档化豁免通道是显式声明 `record execute '{"parallelTakeoverApproved":true}'`。
 - **归档完整** —— 归档出口要求归档目录与其内的 `KNOWN-ISSUES.md`（无遗留也要显式写明）。

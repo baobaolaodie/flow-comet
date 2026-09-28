@@ -10,6 +10,21 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). Versions are recorded in nine places, kept in agreement by CI on the release surface: the release git tag; the README badge, [docs/VERSIONS.md](docs/VERSIONS.md) and this changelog, each in both languages; the authoritative `.flow-comet/skills/flow-comet/INSTALLED_VERSION`; and the npm package's `package.json` `version`.
 
+## [Unreleased]
+
+### Added
+
+- **A controlled plan re-validation channel**: when an executable phase's plan is proven defective, its task set can now be revised in place through an explicitly authorized path that re-runs the same dependency, field and verification checks the planning exit runs (no exemption), takes a full state backup with a fingerprint before rewriting, keeps every use on record (who authorized it, why, and which round), caps revisions per change with an explicit continuation round beyond the cap, and is a visible no-op when the signature already matches.
+
+### Changed
+
+- **The two-tier regression baseline moved up with the new coverage**: the self-test suite now records 274 scenarios and the system test suite 85 items, and both counts stay machine-checked across the release surfaces.
+- **Forced advancement is now recorded**: advancing a node without its exit gate appends an audit event naming the gate that was skipped, and the status view exposes which nodes were advanced this way.
+
+### Fixed
+
+- **The empty-exit exemption at the execution-phase exit was narrowed**: it now applies only to a change whose task set has no serial tasks; otherwise the normal output-schema checks run, an explicit notice says the exemption did not apply, and the checks that are skipped when it does apply are listed.
+
 ## [1.6.0] - 2026-09-27
 
 A release gathering the batches accumulated after 1.5.1: the installer no longer borrows the host repository's tags for the version it reports and its messages use the tool's own name; the repository's maintenance documents were rebuilt and cleaned up; repairs reported after review now run through the execution lifecycle, return audit lines state their source explicitly, controlled repair cycles are counted per change with a fourth one pausing for a decision, and task-set signatures record the algorithm that produced them; and an archived change can be re-opened through a controlled, explicitly authorized path. ([#106](https://github.com/baobaolaodie/flow-comet/pull/106)) ([#107](https://github.com/baobaolaodie/flow-comet/pull/107)) ([#109](https://github.com/baobaolaodie/flow-comet/pull/109)) ([#110](https://github.com/baobaolaodie/flow-comet/pull/110)) ([#111](https://github.com/baobaolaodie/flow-comet/pull/111)) ([#112](https://github.com/baobaolaodie/flow-comet/pull/112)) ([#113](https://github.com/baobaolaodie/flow-comet/pull/113))
