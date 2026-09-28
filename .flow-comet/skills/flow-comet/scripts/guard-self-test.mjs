@@ -1351,6 +1351,12 @@ const TASK_PARALLEL_WRITE_CONFLICT =
   '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/shared.mjs</write_files><verify>node --check src/shared.mjs</verify><depends_on>S01</depends_on></task>\n' +
   '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>src/shared.mjs</write_files><verify>node --check src/shared.mjs</verify><depends_on>S01</depends_on></task>\n';
 
+// 并行读写弱判（replan 侧，2026-09-28 PR 审查补锚）：同一对并行任务无显式 depends_on，一方读取对方
+// 写路径 → 与 plan 出口同一判据：read∩write 仅 WARN 不阻断，replan 照常重签并写重签前备份。
+const TASK_PARALLEL_READ_OVERLAP =
+  '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/shared.mjs</write_files><verify>node --check src/shared.mjs</verify></task>\n' +
+  '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><read_files>src/shared.mjs</read_files><write_files>src/other.mjs</write_files><verify>node --check src/other.mjs</verify></task>\n';
+
 // 波次分组场景公共路径：注入 TASK.md → entry plan（记录 enteredNodes，新 change 强制先 entry；
 // 旧 change 亦先 entry 避免 ENTER WARN 干扰断言）→ exit plan。返回 exit plan 结果。
 function runPlanExit(dir, taskContent) {
@@ -11751,6 +11757,23 @@ const SCENARIOS = [
         if (replanEventsOf(readScenarioState(dir)).length !== 0) {
           throw new Error(label + '：校验失败路径不得写审计事件');
         }
+      }
+      // 读写弱判（read∩write，plan 出口同判据）：仅 WARN 不阻断——replan 照常重签、写重签前备份、
+      // 写审计事件（覆盖写写强判之外的非阻断分支，2026-09-28 PR 审查补锚）。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', TASK_PARALLEL_READ_OVERLAP);
+      writeState(dir, replanExecuteState({ taskHash: REPLAN_STALE_SIGNATURE }));
+      const readWarnRes = runStateWithProtocol(dir, ['replan', '计划缺陷重校', '--authorized-by', 'user-approval']);
+      assertExit(readWarnRes, 0);
+      assertOut(readWarnRes, 'REPLAN:');
+      assertOut(readWarnRes, 'WARN: TASK.md 并行任务 read∩write 隐式依赖嫌疑');
+      assertOut(readWarnRes, 'P02×P01(src/shared.mjs)');  // 输出为「读取方×写入方」（P02 读 P01 写路径）
+      if (replanBackupFiles(dir).length !== 1) {
+        throw new Error('read∩write 弱判不得阻断 replan：应恰有 1 份重签前备份，实际 '
+          + replanBackupFiles(dir).length);
+      }
+      if (replanEventsOf(readScenarioState(dir)).length !== 1) {
+        throw new Error('read∩write 弱判不得阻断 replan：应写入 1 条 replan-applied 审计事件，实际 '
+          + replanEventsOf(readScenarioState(dir)).length);
       }
       // 同源结构锚：任务图分析全引擎只有一处定义，且位于 route-node.mjs（可由 replan 复用）
       const analyze = requireRouteNodeExport('analyzeDependencyGraph');
