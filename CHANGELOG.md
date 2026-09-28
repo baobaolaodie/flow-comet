@@ -12,9 +12,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added
+
+- **A controlled plan re-validation channel**: when an executable phase's plan is proven defective, its task set can now be revised in place through an explicitly authorized path that re-runs the same dependency, field and verification checks the planning exit runs (no exemption), takes a full state backup with a fingerprint before rewriting, keeps every use on record (who authorized it, why, and which round), caps revisions per change with an explicit continuation round beyond the cap, and is a visible no-op when the signature already matches.
+
 ### Changed
 
 - **The two-tier regression baseline moved up with the new coverage**: the self-test suite now records 274 scenarios and the system test suite 85 items, and both counts stay machine-checked across the release surfaces.
+- **Forced advancement is now recorded**: advancing a node without its exit gate appends an audit event naming the gate that was skipped, and the status view exposes which nodes were advanced this way.
+
+### Fixed
+
+- **The empty-exit exemption at the execution-phase exit was narrowed**: it now applies only to a change whose task set has no serial tasks; otherwise the normal output-schema checks run, an explicit notice says the exemption did not apply, and the checks that are skipped when it does apply are listed.
 
 ## [1.6.0] - 2026-09-27
 
