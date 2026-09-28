@@ -1,14 +1,14 @@
 # dsh 平台锚定参考（dsh-platform）
 
 > 维护者参考文档：dsh 平台适配的版本锚定、安装形态、API 签名、桥接 loader 契约与验证记录模板。
-> 权威依据：`@.specs/deepseek-harness-platform/DESIGN.md`（D1~D10 / 7.1 / 7.2 / 7.3）、`@.specs/deepseek-harness-platform/REQUIREMENT.md`（AC-1~AC-7）、`@.specs/adr/ADR-005-dsh-install-via-installer.md`。
-> dsh 为 dev-preview：本文件锚定认证版本（0.1.5-rc.1，2026-09-10 全接缝运行时认证；历史锚 0.1.0-rc.6 → 0.1.1-rc.2 实测线）；破坏性变更风险显式声明。
+> 权威依据：`@.specs/archive/2026-08-18-deepseek-harness-platform/DESIGN.md`（D1~D10 / 7.1 / 7.2 / 7.3）、`@.specs/archive/2026-08-18-deepseek-harness-platform/REQUIREMENT.md`（AC-1~AC-7）、`@.specs/adr/ADR-005-dsh-install-via-installer.md`。
+> dsh 为 dev-preview：本文件锚定认证版本（0.1.7-rc.2，2026-09-27 全接缝重认证；历史锚 0.1.0-rc.6 → 0.1.1-rc.2 → 0.1.5-rc.1）；破坏性变更风险显式声明。
 
 ## 1. 版本锚定
 
 | 项 | 值 |
 |---|---|
-| 认证 dsh 版本 | `0.1.5-rc.1`（2026-09-10 全接缝运行时认证；历史锚 `0.1.0-rc.6` → `0.1.1-rc.2` 实测线） |
+| 认证 dsh 版本 | `0.1.7-rc.2`（2026-09-27 全接缝重认证；历史锚 `0.1.0-rc.6` → `0.1.1-rc.2` → `0.1.5-rc.1`） |
 | 安装入口 | `node scripts/prepare-env.mjs --target <项目> --platform dsh`（或交互终端多选勾选 dsh）——唯一入口（D1） |
 | 重置/重新生成（purge——删除后重建到完整安装态，**不是卸载**） | `node scripts/prepare-env.mjs --target <项目> --purge --platform dsh --yes` |
 | npm 包 | **自 `1.5.0-rc.3` 起已发布**（`npm i -g flow-comet` → `fcomet init`，dist-tag `latest`）——分发的为**安装器**，非 dsh 插件包；旧 npm 插件包安装形态已废弃（verify 阶段推翻，见 ADR-005） |
@@ -88,7 +88,7 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 ### 激活（天然项目级）
 
 - 目录物理存在即激活——dsh 启动自动发现 `/flow-comet`（rank 100，chokidar 热发现免重启）；未安装该目录的项目不可见（无痕迹判定、无 chicken-and-egg）。
-- dsh 对项目 AGENTS.md 的注入行为**已认证**（0.1.5-rc.1 headless 会话：项目根 AGENTS.md 作为上下文注入，托管区内容被会话逐字引用——见下方认证记录）；**边界**：认证面向 headless profile，dsh-tui / web 运行时未验。
+- dsh 对项目 AGENTS.md 的注入行为**已认证**（0.1.7-rc.2 headless 会话：项目根 AGENTS.md 作为上下文注入，托管区内容被会话逐字引用——见下方认证记录）；**边界**：认证面向 headless profile，dsh-tui / web 运行时未验。
 
 ### 重置/重新生成（prepare-env --purge --yes——删除后重建，**不是卸载**）
 
@@ -154,13 +154,13 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 - 遗留风险：
 
 
-### rc.8 三态冒烟（2026-08-20）
+### rc.8 三态冒烟（2026-08-20）（历史）
 
 - 环境：dsh CLI 0.1.0-rc.8 / Harness 核心 rc.8 / dsh-tui 0.8.5
 - 结果：运行中协调者项目外 Write → deny；运行中子代理项目内 Write → next()；空闲态（无 state）项目外 Write → next()；解析失败/未知 status → fail-closed deny（当轮 system-test ALL PASSED，K11/K12 断言覆盖；当前基线 82/82）
 - 载体：prepare-env --platform dsh 经临时项目重推真实 ~/.dsh 桥接 loader，loader 与权威源 SHA-256 一致；真实交互式 TUI/Web 冒烟留待开放项
 
-### 0.1.5-rc.1 全接缝认证（2026-09-10）
+### 0.1.5-rc.1 全接缝认证（2026-09-10）（历史）
 
 - 环境：dsh CLI 0.1.5-rc.1 / Node v24.14.1 / dsh-tui 0.10.0；headless profile；真实 `~/.dsh`（loader 与权威源逐字节一致）
 - 方式：真实 headless 会话逐接缝运行时检测——每场景独立运行，证据取会话日志（`session.v3.jsonl` 解压）与文件系统双重判定；配套无 skill 目录负向载体
@@ -174,3 +174,11 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 - 安装链：bridge-check 四项全绿（loader 存在 / 托管块 insert 形态 / `file://` 目标可达 / 无重复注册）
 - 边界：认证面向 headless profile（自动化通道）；dsh-tui / web 为静态证据（组合树含桥接行），交互式运行时留待日常使用或手动步骤清单；`str_replace_editor` 自 0.1.5-alpha.2 起为 opt-in（默认不挂载）
 - 结论：桥接与 workflow-kernel 均无需修改（完整认证记录见维护者归档）
+
+### 0.1.7-rc.2 全接缝重认证（2026-09-27）
+
+- 版本线（历史锚）：`0.1.0-rc.6` → `0.1.1-rc.2` → `0.1.5-rc.1` → `0.1.7-rc.2`（当前认证锚）
+- 环境：dsh CLI `0.1.7-rc.2`；headless profile；真实 `~/.dsh`
+- 结果：各接缝重认证通过
+- 结论：桥接与 workflow-kernel 均无需修改
+- 持续锚：`system-test` K9~K13 覆盖核心行为（loader 源文件与托管块注入 / 纯函数与身份分派 / 流程态门 / hook 注入形态与幂等升级）——后续版本升级以该套件持续回归为准
