@@ -15,10 +15,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 ### Added
 
 - **A controlled plan re-validation channel**: when an executable phase's plan is proven defective, its task set can now be revised in place through an explicitly authorized path that re-runs the same dependency, field and verification checks the planning exit runs (no exemption), takes a full state backup with a fingerprint before rewriting, keeps every use on record (who authorized it, why, and which round), caps revisions per change with an explicit continuation round beyond the cap, and is a visible no-op when the signature already matches.
+- **The maintenance-document checks now say what they skipped**: the self-test suite also validates the references written in the three knowledge documents that are updated most often, resolves references written relative to the skill tree or the rule tree (reporting a missing target under those roots), and prints a visible skip line — naming the check, the reason, and the reminder to run the suite in the maintainer checkout — when a maintainer checkout does not carry those documents, instead of passing silently. A regression anchor now covers the plan-revision path's refusal to continue when the task list is missing or empty, down to unchanged state bytes.
 
 ### Changed
 
-- **The two-tier regression baseline moved up with the new coverage**: the self-test suite now records 274 scenarios and the system test suite 85 items, and both counts stay machine-checked across the release surfaces.
+- **The two-tier regression baseline moved up with the new coverage**: the self-test suite now records 275 scenarios and the system test suite 85 items, and both counts stay machine-checked across the release surfaces.
 - **Forced advancement is now recorded**: advancing a node without its exit gate appends an audit event naming the gate that was skipped, and the status view exposes which nodes were advanced this way.
 
 ### Fixed
