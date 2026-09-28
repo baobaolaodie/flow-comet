@@ -360,11 +360,22 @@ function internalDocsProblems(root = REPO_ROOT) {
   if (!fs.existsSync(path.join(root, roadmapRel))) {
     problems.push('ROADMAP 缺失: ' + roadmapRel);
   } else {
-    const text = fs.readFileSync(path.join(root, roadmapRel), 'utf8');
-    for (const section of ['Now', 'Next', 'Later', 'Open decisions']) {
-      const sectionRe = new RegExp('^##\\s*' + section + '\\s*(?:[（(][^）)\\n]*[）)])?\\s*$', 'm');
-      if (!sectionRe.test(text)) {
-        problems.push('ROADMAP 结构缺段: ' + section + '（' + roadmapRel + '）');
+    let text = null;
+    try {
+      text = fs.readFileSync(path.join(root, roadmapRel), 'utf8');
+    } catch (e) {
+      // F4 语义的结构检查侧补齐：ROADMAP 自身读取失败（EACCES / EBUSY / EISDIR 等）与目标扫描
+      // 同型报告（同一错误摘要口径），并跳过四段结构检查——不得让同一受检面在结构检查处抛
+      // 未捕获异常、以堆栈崩溃整个套件（读取失败可见化在两个消费点语义一致）。
+      const reason = e && e.code ? e.code : (e && e.message ? e.message : String(e));
+      problems.push('无法读取: ' + roadmapRel + ': ' + reason);
+    }
+    if (text !== null) {
+      for (const section of ['Now', 'Next', 'Later', 'Open decisions']) {
+        const sectionRe = new RegExp('^##\\s*' + section + '\\s*(?:[（(][^）)\\n]*[）)])?\\s*$', 'm');
+        if (!sectionRe.test(text)) {
+          problems.push('ROADMAP 结构缺段: ' + section + '（' + roadmapRel + '）');
+        }
       }
     }
   }
@@ -9328,6 +9339,29 @@ const SCENARIOS = [
       fs.rmSync(path.join(dir, 'docs/internal', 'UNREADABLE.md'), { recursive: true, force: true });
       if (internalDocsProblems(dir).length !== 0) {
         throw new Error('移除不可读目标后应复绿: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      // —— 本批 in-place 增锚（F4 语义的结构检查侧补齐）——：目标扫描的读取失败已可见化，但
+      // ROADMAP 结构检查此前仍对同一路径直接 readFileSync——ROADMAP 自身不可读（同名目录 →
+      // EISDIR / 访问类错误）时未捕获异常会把整个套件打成堆栈崩溃，而不是给出可见问题条目。
+      // 夹具把 ROADMAP.md 换成同名目录（其余受检面保持合法，失败只可能来自该目标）→ 断言
+      // 返回问题数组且含「无法读取: docs/internal/ROADMAP.md」（不是抛出），且不得以「结构缺段」
+      // 噪声替代读取失败可见化（读取失败即跳过四段结构检查）；移除目录、写回合法 ROADMAP → 复绿。
+      fs.rmSync(path.join(dir, 'docs/internal', 'ROADMAP.md'), { force: true });
+      fs.mkdirSync(path.join(dir, 'docs/internal', 'ROADMAP.md'), { recursive: true });
+      const unreadableRoadmap = internalDocsProblems(dir);
+      if (!Array.isArray(unreadableRoadmap)) {
+        throw new Error('ROADMAP 不可读时应返回问题数组（不得抛出）: ' + String(unreadableRoadmap));
+      }
+      if (!unreadableRoadmap.some((p) => p.includes('无法读取: docs/internal/ROADMAP.md'))) {
+        throw new Error('ROADMAP 自身不可读未被报告（应含「无法读取: docs/internal/ROADMAP.md」）: ' + JSON.stringify(unreadableRoadmap));
+      }
+      if (unreadableRoadmap.some((p) => p.includes('ROADMAP 结构缺段'))) {
+        throw new Error('ROADMAP 读取失败时不得继续四段结构检查: ' + JSON.stringify(unreadableRoadmap));
+      }
+      fs.rmSync(path.join(dir, 'docs/internal', 'ROADMAP.md'), { recursive: true, force: true });
+      writeFile(dir, 'docs/internal/ROADMAP.md', '# 路线图\n\n## Now\n\n## Next\n\n## Later\n\n## Open decisions\n');
+      if (internalDocsProblems(dir).length !== 0) {
+        throw new Error('ROADMAP 写回合法结构后应复绿: ' + JSON.stringify(internalDocsProblems(dir)));
       }
       // 整组缺席（CI / worktree 形态）→ 跳过，不误红：目标面 = docs/internal 与 .specs/adr 与
       // 三册——组缺席判据是「全部目标面缺席」（targets.length === 0），故夹具同步移除三册。
