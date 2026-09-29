@@ -7037,7 +7037,7 @@ const SCENARIOS = [
     name: '184 技能文本锁：旧连续块/居首表述清零且依赖图语义描述在场',
     run: () => {
       const problems = [];
-      // —— 既有锚（S184 原文，语义与失败消息保持）——
+      // —— 既有锚（原文语义与失败消息保持）——
       for (const skillDir of ['flow-comet-plan', 'flow-comet-subagent-execute']) {
         const text = fs.readFileSync(path.join(__dirname, '..', '..', skillDir, 'SKILL.md'), 'utf8');
         if (text.includes('连续块')) problems.push(skillDir + ' 含「连续块」旧形态约束表述');
