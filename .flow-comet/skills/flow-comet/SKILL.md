@@ -179,7 +179,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs replan "<reason>" --au
 - **上限与显式续轮**：每 change 最多 3 轮；第 4 次 BLOCKED 并给出「继续 / 停止」人工裁决指引。人工裁决「继续」须追加 `--continue-round <n>`（正整数，且 n ≥ 已用轮次 + 1）作显式续轮授权：满足则放行并计入下一轮，审计行打印续轮标记；未到上限即传该参数、或轮次不足一律 BLOCKED 且零改写。轮次与审计事件记入 `state.history`（事件类型 `replan-applied`），成功输出 `REPLAN: <node> 重新校验通过（授权源 <source>；第 n/3 轮；备份 <file>）` 与 `REASON: <text>` 两行。
 - **备份**：改写前自动落 state 快照 `.specs/<change-id>/replan-backups/<UTC ISO>-pre-replan.json`（时间戳中的 `:` 替换为 `-`），并记录 sha256 指纹，供审查核验与手工回滚。
 - **幂等与零改写**：目标形态已成立时的重复同形态调用 = 空操作（输出 `REPLAN: 空操作——…`，不备份、不计数、不写事件、不改写 state），不会静默跳过。
-- **绝不豁免校验**：`replan` 只做「重新校验 + 重新签名」——任务图（依赖环 / 缺失依赖 / 并行写冲突（写写 BLOCK））与任务字段完整性（7 字段 / 每任务 verify 字段）走 plan 出口同一套校验，任一失败即 BLOCKED；它不是绕过签名门禁，而是把「签名不匹配」重新收敛为「匹配」。
+- **绝不豁免校验**：`replan` 只做「重新校验 + 重新签名」——任务图（依赖环 / 缺失依赖 / 并行写冲突（写写 BLOCK / 读写 WARN））与任务字段完整性（7 字段 / 每任务 `<verify>` 字段）走 plan 出口同一套校验，任一失败即 BLOCKED；它不是绕过签名门禁，而是把「签名不匹配」重新收敛为「匹配」。
 
 ### Evidence Recording
 
