@@ -11135,13 +11135,13 @@ const SCENARIOS = [
   },
 
   // 258: 三节点 SKILL 文本锁（AC-9 / T05 已落地）——execute/review/verify 均含
-  // 「## Fix 批次状态机路径」段，段内含受控归位 + 回源节点跑出口 + 禁止绕过；不得把
+  // 「## 修复回路状态机路径」段，段内含受控归位 + 回源节点跑出口 + 禁止绕过；不得把
   // 直接 exit 源节点收场或 advance 当正常路径（反捷径文本锚）。
   // 布局感知（级 3 e2e 副本缺陷）：技能树从 suite 脚本自身位置推导
   // （<skillsRoot>/flow-comet/scripts/ → 组件技能为 <skillsRoot> 下同级目录），权威源
   // .flow-comet/skills/ 与安装副本 .claude|.agents|.dsh/skills/ 同一相对布局通吃。
   {
-    name: '258 技能文本锁：三节点 SKILL 含 Fix 批次状态机路径（禁止直接 exit/advance 为正常路径）',
+    name: '258 技能文本锁：三节点 SKILL 含修复回路状态机路径（禁止直接 exit/advance 为正常路径）',
     run: (dir) => {
       const componentSkills = ['flow-comet-execute', 'flow-comet-review', 'flow-comet-verify'];
       // 布局感知回归锚（合成安装副本）：suite 位于 <skillsRoot>/flow-comet/scripts/ 时组件技能
@@ -11151,7 +11151,7 @@ const SCENARIOS = [
       const syntheticScriptsDir = path.join(syntheticSkillsRoot, 'flow-comet', 'scripts');
       for (const nodeSkill of componentSkills) {
         writeFile(dir, path.join('synthetic-carrier', '.claude', 'skills', nodeSkill, 'SKILL.md'),
-          '## Fix 批次状态机路径\n\n受控归位（合成布局锚）\n');
+          '## 修复回路状态机路径\n\n受控归位（合成布局锚）\n');
         const expected = path.join(syntheticSkillsRoot, nodeSkill, 'SKILL.md');
         const resolved = resolveComponentSkillFile(nodeSkill, syntheticScriptsDir);
         if (resolved !== expected) {
@@ -11173,27 +11173,27 @@ const SCENARIOS = [
       }
       // 真实三节点文本锁：从本 suite 自身位置推导技能树（不假定权威源布局）。逐份断言：
       // 段在场 + 6 关键词 + 反 advance 捷径 + 不得把直接 exit 源节点收场当正常路径；同时收集
-      // 段正文（同一区间：首个 ## Fix 批次状态机路径 → 下一 ## 或 EOF，标题不计入）供 F-4 互比。
+      // 段正文（同一区间：首个 ## 修复回路状态机路径 → 下一 ## 或 EOF，标题不计入）供 F-4 互比。
       const sectionEntries = [];
       for (const nodeSkill of componentSkills) {
         const file = resolveComponentSkillFile(nodeSkill);
         const text = fs.readFileSync(file, 'utf8');
-        const match = text.match(/(?:^|\r?\n)## Fix 批次状态机路径\r?\n([\s\S]*?)(?=\r?\n## |$)/);
+        const match = text.match(/(?:^|\r?\n)## 修复回路状态机路径\r?\n([\s\S]*?)(?=\r?\n## |$)/);
         if (!match) {
-          throw new Error(nodeSkill + ' SKILL.md 缺「## Fix 批次状态机路径」段');
+          throw new Error(nodeSkill + ' SKILL.md 缺「## 修复回路状态机路径」段');
         }
         const section = match[1];
         for (const keyword of ['受控归位', 'NODE: execute', '回源节点跑出口', 'entry <源节点>', 'exit <源节点> --apply', '禁止绕过']) {
           if (!section.includes(keyword)) {
-            throw new Error(nodeSkill + ' Fix 批次状态机路径段缺关键词: ' + keyword);
+            throw new Error(nodeSkill + ' 修复回路状态机路径段缺关键词: ' + keyword);
           }
         }
         if (section.includes('advance')) {
-          throw new Error(nodeSkill + ' Fix 批次状态机路径段不得把 advance 作为正常路径');
+          throw new Error(nodeSkill + ' 修复回路状态机路径段不得把 advance 作为正常路径');
         }
         for (const line of section.split(/\r?\n/)) {
           if (line.includes('直接') && line.includes('exit') && !/禁止|不得|会被 BLOCKED/.test(line)) {
-            throw new Error(nodeSkill + ' Fix 批次状态机路径段不得把直接 exit 源节点收场作为正常路径: ' + line.trim());
+            throw new Error(nodeSkill + ' 修复回路状态机路径段不得把直接 exit 源节点收场作为正常路径: ' + line.trim());
           }
         }
         // F-4 段一致性锁：CRLF→LF 归一、不 trim（行尾/空白差异同样算漂移），正文参与三份互比。
@@ -11204,7 +11204,7 @@ const SCENARIOS = [
       // 套件失败；失败信息给出三份 hash 与首处差异位置/上下文（L-064 反向构造证明判别力）。
       const emptyEntry = sectionEntries.find((entry) => entry.body.trim() === '');
       if (emptyEntry) {
-        throw new Error('Fix 批次状态机路径段不得为空: ' + emptyEntry.nodeSkill);
+        throw new Error('修复回路状态机路径段不得为空: ' + emptyEntry.nodeSkill);
       }
       const baselineEntry = sectionEntries[0];
       for (const entry of sectionEntries.slice(1)) {
@@ -11213,7 +11213,7 @@ const SCENARIOS = [
         let diffIndex = 0;
         while (diffIndex < limit && baselineEntry.body[diffIndex] === entry.body[diffIndex]) diffIndex += 1;
         const context = baselineEntry.body.slice(Math.max(0, diffIndex - 40), diffIndex + 40);
-        throw new Error('Fix 批次状态机路径段三份 SKILL 正文不一致（F-4 段一致性锁）：'
+        throw new Error('修复回路状态机路径段三份 SKILL 正文不一致（F-4 段一致性锁）：'
           + baselineEntry.nodeSkill + ' sha256=' + baselineEntry.hash
           + ' vs ' + entry.nodeSkill + ' sha256=' + entry.hash
           + '；首处差异 @' + diffIndex + '（基准上下文: ' + JSON.stringify(context) + '）');
