@@ -20,11 +20,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ### Changed
 
-- **The two-tier regression baseline moved up with the new coverage**: the self-test suite now records 275 scenarios and the system test suite 85 items, and both counts stay machine-checked across the release surfaces.
+- **The two-tier regression baseline moved up with the new coverage**: the self-test suite now records 275 scenarios and the system test suite 86 items, and both counts stay machine-checked across the release surfaces.
 - **Forced advancement is now recorded**: advancing a node without its exit gate appends an audit event naming the gate that was skipped, and the status view exposes which nodes were advanced this way.
 - **`workflow-handoff status` now names a recorded result the way the state stores it**: the status output used the plural key `handoffResults` while the state stores `handoffResult`, so a consumer that followed the printed name found nothing. The output key and the storage key are now the same single name; the other status fields (`activeChange`, `handoffRequests`) and the state shape are unchanged.
 - **The contract check no longer assumes one project's directory layout**: the directories it scanned were hard-coded to a single application's layout, so in any other project it either missed the sources or pointed at paths that did not exist. It now scans the default directories (`<root>/app` and `<root>/src`) or the ones given explicitly with `--backend <dir>` and `--frontend <dir>` (resolved against `--project` or the current directory), and it prints the paths it actually resolved.
-- **The shipped skill tree no longer carries unreleased-process vocabulary**: the step names, window labels and verification-record terms that had leaked into the shipped skill and reference pages were replaced with plain descriptions; machine-readable markers, command names, and state or protocol field names are untouched.
+- **The shipped skill and reference pages no longer carry unreleased-process vocabulary**: the step names, window labels and verification-record terms that had leaked into them were replaced with plain descriptions; machine-readable markers, command names, and state or protocol field names are untouched.
 
 ### Fixed
 
