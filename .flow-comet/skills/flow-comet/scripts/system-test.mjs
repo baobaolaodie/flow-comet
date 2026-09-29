@@ -5841,14 +5841,16 @@ const TEST_ITEMS = [
     },
   },
 
-  // K19: 契约核对脚本 CLI 契约——四组真实命令断言（临时夹具 app/x.py 含 status 赋值、src/y.ts 含 status 比较）：
+  // K19: 契约核对脚本 CLI 契约——五组真实命令断言（临时夹具 app/x.py 含 status 赋值、src/y.ts 含 status 比较）：
   // ① 显式 --backend/--frontend → exit 0 且输出含两个实际解析路径与两侧真实命中；
   // ② 缺省回退（cwd=夹具、无目录参数）→ exit 0 且两侧命中；
   // ③ 悬空 --backend（缺值）→ exit 1 + 用法错误；
-  // ④ --project <夹具>（从夹具外运行）→ exit 0 且两侧命中（证明显式根优先于 cwd）。
+  // ④ --project <夹具>（从夹具外运行）→ exit 0 且两侧命中（证明显式根优先于 cwd）；
+  // ⑤ 单横线操作数（--backend -bad-dir / --project -x / --frontend -y）→ exit 1 + 用法与非法操作数提示
+  //    （此前被当作目录接受、零命中仍 exit 0——fail-closed 缺口回归锚）。
   // 夹具随所在项临时目录由运行器统一清理，不留残留。
   {
-    name: 'K19 契约核对:显式目录解析与缺省回退·悬空参数用法错误·--project 形态(真实命令序列)',
+    name: 'K19 契约核对:显式目录解析与缺省回退·悬空参数用法错误·单横线操作数拒绝·--project 形态(真实命令序列)',
     run: (dir) => {
       if (!fs.existsSync(CONTRACT)) throw new Error('缺少 contract-check.mjs: ' + CONTRACT);
       writeFile(dir, 'app/x.py', 'status = 3\n');
@@ -5896,7 +5898,18 @@ const TEST_ITEMS = [
       assertExit(viaProject, 0);
       assertOut(viaProject, 'status = 3');
       assertOut(viaProject, 'status === 3');
-      console.log('  契约核对 CLI: 显式解析 + 缺省回退 + 悬空参数用法错误 + --project 优先于 cwd ✓');
+      // ⑤ 单横线操作数：取值以 '-' 开头（含单横线形态）→ 用法错误 + 非零退出，不被当作目录
+      //    （判据含选项名与非法操作数提示——只查 exit 1 无判别力，须证明拒绝理由在场）
+      const assertDashOperandRejected = (opt, bad) => {
+        const r = runContract(['status', opt, bad]);
+        assertExit(r, 1);
+        assertOut(r, '用法: node contract-check.mjs');
+        assertOut(r, opt + ' 的目录操作数不得以 - 开头');
+      };
+      assertDashOperandRejected('--backend', '-bad-dir');
+      assertDashOperandRejected('--project', '-x');
+      assertDashOperandRejected('--frontend', '-y');
+      console.log('  契约核对 CLI: 显式解析 + 缺省回退 + 悬空参数用法错误 + 单横线操作数拒绝 + --project 优先于 cwd ✓');
     },
   },
 

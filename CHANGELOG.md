@@ -30,6 +30,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 - **The empty-exit exemption at the execution-phase exit was narrowed**: it now applies only to a change whose task set has no serial tasks; otherwise the normal output-schema checks run, an explicit notice says the exemption did not apply, and the checks that are skipped when it does apply are listed.
 - **The shipped reference pages no longer carry stale facts**: the test-matrix page now lists the plan-revision and forced-advance checks it was missing and no longer embeds per-group counts; the issue template page points at the release authority instead of a frozen version and counts; the recovery page no longer describes a retired overlay model; and the dsh page anchors the certified version at 0.1.7-rc.2 (the 2026-09-27 full-seam re-certification), with the earlier certifications kept and explicitly marked as history.
+- **The contract check now rejects directory operands that begin with a single dash**: a value such as `-bad-dir` was previously accepted as a directory, so the scan found nothing and the command still exited zero; the three directory options (`--project`, `--backend`, `--frontend`) now report a usage error and exit non-zero instead.
 
 ## [1.6.0] - 2026-09-27
 

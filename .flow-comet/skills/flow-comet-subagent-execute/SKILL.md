@@ -61,7 +61,7 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
 - `.specs/<change-id>/TASK.md` must exist with at least one task marked `parallel="true"` and `status="pending"`.
 - `.specs/<change-id>/DESIGN.md` or `DESIGN-lite.md` must exist.
 - `.specs/LESSONS.md` must exist (or be created).
-- The orchestrating agent must have the `Agent` tool available for spawning subagents.
+- Delegation capability, split by platform: **Claude Code** requires the `Agent` tool (the platform creates the worktree automatically, and subagents are delegated with `isolation: "worktree"`); **dsh** requires the platform's in-process delegation capability (subagents carry `delegationDepth > 0`, share the workspace, and need no isolation directory); **Codex** does **not** support parallel delegation — a manually created `git worktree` is not covered by the write guard, so this node delivers serially through the `execute` node instead (the same conclusion reached on 2026-08-13; see the "出路" section above).
 
 ### Steps
 

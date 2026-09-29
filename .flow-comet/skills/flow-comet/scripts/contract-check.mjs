@@ -16,7 +16,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 
-// 用法串单一来源（缺参 / 缺值两条错误路径同源——新增选项只改一行）
+// 用法串单一来源（缺参 / 缺值 / 非法操作数三条错误路径同源——新增选项只改一行）
 const USAGE = '用法: node contract-check.mjs <field> [--project <root>] [--backend <dir>] [--frontend <dir>]';
 
 const runRoot = process.cwd();
@@ -31,14 +31,19 @@ if (!field) {
 const escapedField = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // 目录类选项读取（单一来源 · 与既有 --project 同规则）：显式参数优先于缺省回退；
-// 其后缺值（末尾 / 空串 / 纯空白 / 缺值处又跟了选项）→ 用法错误 + 非零退出
+// 其后缺值（末尾 / 空串 / 纯空白 / 缺值处又跟了选项）→ 用法错误 + 非零退出；
+// 取值以 '-' 开头（含单横线形态，如 -bad-dir）不是合法目录操作数——同样按用法错误
+// fail-closed 拒绝，否则会被当成目录、扫描零命中仍以 exit 0 通过。
 function readDirOption(name, missingMessage) {
   const index = process.argv.indexOf(name);
   if (index === -1) return null;
   const value = process.argv[index + 1];
-  if (typeof value !== 'string' || value.trim() === '' || value.startsWith('--')) {
+  const dashOperand = typeof value === 'string' && value.trim() !== '' && value.startsWith('-');
+  if (typeof value !== 'string' || value.trim() === '' || dashOperand) {
     console.error(USAGE);
-    console.error(missingMessage);
+    console.error(dashOperand
+      ? name + ' 的目录操作数不得以 - 开头（疑似把选项当作取值）: ' + value
+      : missingMessage);
     process.exit(1);
   }
   return value;
