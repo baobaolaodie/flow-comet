@@ -7027,19 +7027,79 @@ const SCENARIOS = [
     },
   },
 
-  // 184: 技能文本混排合法化语义文本锁——plan 与 subagent-execute 两 SKILL 权威源不得再含
+  // 184: 技能文本混排合法化语义文本锁（in-place 扩展：R-14 模板权威 / 入口 archive 读法 /
+  // R-15 规划约束 / Codex-worktree 订正）——plan 与 subagent-execute 两 SKILL 权威源不得再含
   // 「连续块」「居首」旧波次形态约束表述，且依赖图语义描述（depends_on）在场、「用 Skill 工具」
-  // 两层加载句式保持（措辞锁族既有锚不破坏）。文本存在级断言（结构级由其余场景族覆盖）。
+  // 两层加载句式保持（措辞锁族既有锚不破坏）；9 个产出节点/任务 SKILL 含 R-14 正反向声明，
+  // 入口 SKILL 含 archive 三要素读法，plan / task 含 R-15 关键词，worktree-notes / subagent-execute
+  // 含 fail-open 未闭合限定且旧过宽句零残留。文本存在级断言（结构级由其余场景族覆盖）。
   {
     name: '184 技能文本锁：旧连续块/居首表述清零且依赖图语义描述在场',
     run: () => {
       const problems = [];
+      // —— 既有锚（S184 原文，语义与失败消息保持）——
       for (const skillDir of ['flow-comet-plan', 'flow-comet-subagent-execute']) {
         const text = fs.readFileSync(path.join(__dirname, '..', '..', skillDir, 'SKILL.md'), 'utf8');
         if (text.includes('连续块')) problems.push(skillDir + ' 含「连续块」旧形态约束表述');
         if (text.includes('居首')) problems.push(skillDir + ' 含「居首」旧位置约束表述');
         if (!text.includes('depends_on')) problems.push(skillDir + ' 缺依赖图语义描述（depends_on）');
         if (!text.includes('用 Skill 工具')) problems.push(skillDir + ' 缺「用 Skill 工具」两层加载句式');
+      }
+      // —— R-14 模板权威声明：8 个产出节点 SKILL + task SKILL 正反向声明在场 ——
+      const templateAuthoritySkills = [
+        'flow-comet-open', 'flow-comet-design', 'flow-comet-plan', 'flow-comet-execute',
+        'flow-comet-subagent-execute', 'flow-comet-review', 'flow-comet-verify', 'flow-comet-archive',
+        'flow-comet-task',
+      ];
+      for (const skillDir of templateAuthoritySkills) {
+        const rel = skillDir + '/SKILL.md';
+        const text = fs.readFileSync(path.join(__dirname, '..', '..', skillDir, 'SKILL.md'), 'utf8');
+        if (!text.includes('flow-kit/templates')) {
+          problems.push(rel + ' 缺「flow-kit/templates」（R-14 正向模板权威声明）');
+        }
+        if (!text.includes('不是模板来源')) {
+          problems.push(rel + ' 缺「不是模板来源」（R-14 反向 archive 禁令）');
+        }
+      }
+      // —— R-14 入口 archive 读法：三要素关键词在场 ——
+      {
+        const entry = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+        for (const keyword of ['flow-kit/templates', '何时可读', '不读什么']) {
+          if (!entry.includes(keyword)) {
+            problems.push('flow-comet/SKILL.md 缺「' + keyword + '」（入口 archive 读法三要素）');
+          }
+        }
+      }
+      // —— R-15 规划约束：plan 三关键词 / task 两关键词 ——
+      {
+        const r15Keywords = {
+          'flow-comet-plan': ['同一文件', '并发同伴', 'direct'],
+          'flow-comet-task': ['同一文件', '并发同伴'],
+        };
+        for (const [skillDir, keywords] of Object.entries(r15Keywords)) {
+          const text = fs.readFileSync(path.join(__dirname, '..', '..', skillDir, 'SKILL.md'), 'utf8');
+          for (const keyword of keywords) {
+            if (!text.includes(keyword)) {
+              problems.push(skillDir + '/SKILL.md 缺「' + keyword + '」（R-15 规划期约束）');
+            }
+          }
+        }
+      }
+      // —— Codex / worktree 订正：fail-open 与未闭合限定在场、旧过宽句零残留 ——
+      {
+        const worktreeNotes = fs.readFileSync(path.join(__dirname, '..', 'reference', 'worktree-notes.md'), 'utf8');
+        for (const keyword of ['fail-open', '未闭合']) {
+          if (!worktreeNotes.includes(keyword)) {
+            problems.push('reference/worktree-notes.md 缺「' + keyword + '」（Codex/worktree 订正限定）');
+          }
+        }
+        if (worktreeNotes.includes('写入仍会被协调者白名单拦截')) {
+          problems.push('reference/worktree-notes.md 残留「写入仍会被协调者白名单拦截」旧过宽句');
+        }
+        const subagentText = fs.readFileSync(path.join(__dirname, '..', '..', 'flow-comet-subagent-execute', 'SKILL.md'), 'utf8');
+        if (subagentText.includes('写入会被协调者白名单拦截')) {
+          problems.push('flow-comet-subagent-execute/SKILL.md 残留「写入会被协调者白名单拦截」旧过宽句');
+        }
       }
       if (problems.length > 0) throw new Error('技能文本混排合法化语义不符: ' + problems.join('; '));
     },
