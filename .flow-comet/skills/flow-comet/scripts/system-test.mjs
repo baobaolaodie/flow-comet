@@ -20,8 +20,9 @@
 //   J. 文档一致性（双语健康检查/公开产物零代号检查——调用仓库本地工具）
 //   K. 安装器与平台（版本标识/多平台安装与平台化路径/codex hook JSON 契约/平台选择链/
 //      purge 语义/描述符驱动/dsh 平台断言/loader 版本戳重装断言/hook 注入形态无关断言与旧条目幂等升级/
-//      旧布局状态迁移后状态可读与流程可继续/分发面包体边界·可发布性清单与 bin 双入口（权威源真跑·
-//      副本回传显式「不适用」结果标记）与 init 词元红线）
+//      旧布局状态迁移后状态可读与流程可继续/契约核对 CLI 参数化目录解析与缺省回退回归锚/
+//      分发面包体边界·可发布性清单与 bin 双入口（权威源真跑·副本回传显式「不适用」结果标记）
+//      与 init 词元红线）
 //   L. 执行遗漏防护（entry 进入证据/空退出豁免/空仓库提示）
 //
 // 载体（与 guard-self-test 同构）：每项 = 独立临时目录（fs.mkdtemp）+ 内置协议副本复制到
@@ -49,6 +50,7 @@ const GUARD = path.join(__dirname, 'workflow-guard.mjs');
 const STATE = path.join(__dirname, 'workflow-state.mjs');
 const HOOK = path.join(__dirname, 'comet-hook-guard.mjs');
 const HANDOFF = path.join(__dirname, 'workflow-handoff.mjs');
+const CONTRACT = path.join(__dirname, 'contract-check.mjs');
 // 内置协议源文件（脚本所在技能包 reference/）：复制到 <tmp>/reference/ 内（受保护路径要求 runRoot 内）
 const BUILTIN_PROTOCOL_SOURCE = path.join(__dirname, '..', 'reference', 'workflow-protocol.json');
 const CHANGE_ID = 'ch';
@@ -2868,7 +2870,7 @@ const TEST_ITEMS = [
       const status = runHandoff(['status'], dir);
       assertExit(status, 0);
       assertOut(status, '"handoffRequests"');
-      assertOut(status, '"handoffResults"');
+      assertOut(status, '"handoffResult"');
       assertOut(status, 'T01');
       // ④ 无效提交哈希 → 错误提示但记录不阻断（结果仍入库）
       const badHash = runHandoff(['result', 'T02', JSON.stringify({
@@ -4893,7 +4895,7 @@ const TEST_ITEMS = [
       console.log('  描述符驱动: ' + ids.length + ' 个平台逐一安装 + purge 冒烟通过✓');
     },
   },
-// ---------- K 扩展:dsh 平台断言（1.4.2 deepseek-harness-platform——安装器多平台） ----------
+// ---------- K 扩展:dsh 平台断言（1.4.2 deepseek-harness-platform——安装器多平台）（历史） ----------
 // 旧 dsh-plugin npm 包已废弃(对象 dsh-plugin/ 目录另行废弃清理)——以下断言覆盖
 // prepare-env --platform dsh 的项目级安装/AGENTS.md 托管区/桥接 loader/purge 清理恢复;
 // 断言全程 DSH_HOME=临时目录环境变量,禁止污染真实 ~/.dsh(AC-1/AC-4)
@@ -5836,6 +5838,78 @@ const TEST_ITEMS = [
       assertPackageBoundary(pkgCtx.root);
       assertInitTokenContract(assertBinContract(pkgCtx.pkg, pkgCtx.root), dir);
       return marker;
+    },
+  },
+
+  // K19: 契约核对脚本 CLI 契约——五组真实命令断言（临时夹具 app/x.py 含 status 赋值、src/y.ts 含 status 比较）：
+  // ① 显式 --backend/--frontend → exit 0 且输出含两个实际解析路径与两侧真实命中；
+  // ② 缺省回退（cwd=夹具、无目录参数）→ exit 0 且两侧命中；
+  // ③ 悬空 --backend（缺值）→ exit 1 + 用法错误；
+  // ④ --project <夹具>（从夹具外运行）→ exit 0 且两侧命中（证明显式根优先于 cwd）；
+  // ⑤ 单横线操作数（--backend -bad-dir / --project -x / --frontend -y）→ exit 1 + 用法与非法操作数提示
+  //    （此前被当作目录接受、零命中仍 exit 0——fail-closed 缺口回归锚）。
+  // 夹具随所在项临时目录由运行器统一清理，不留残留。
+  {
+    name: 'K19 契约核对:显式目录解析与缺省回退·悬空参数用法错误·单横线操作数拒绝·--project 形态(真实命令序列)',
+    run: (dir) => {
+      if (!fs.existsSync(CONTRACT)) throw new Error('缺少 contract-check.mjs: ' + CONTRACT);
+      writeFile(dir, 'app/x.py', 'status = 3\n');
+      writeFile(dir, 'src/y.ts', 'status === 3\n');
+      const runContract = (args, cwd = dir) => {
+        const res = spawnSync(process.execPath, [CONTRACT, ...args], { cwd, encoding: 'utf8', timeout: 60000 });
+        return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+      };
+      // 输出头 `# <label>: <路径>` 取实际解析路径（断言脚本打印的是真实落点，而非回显参数）
+      const resolvedPath = (res, label) => {
+        const line = res.output.split(/\r?\n/).find((l) => l.startsWith('# ' + label + ': '));
+        if (!line) throw new Error('输出缺少 ' + label + ' 解析路径头:\n' + res.output);
+        return line.slice(('# ' + label + ': ').length).trim();
+      };
+      // ① 显式目录参数：exit 0 + 两个实际解析路径 + 两侧真实命中
+      const explicit = runContract(['status', '--backend', 'app', '--frontend', 'src']);
+      assertExit(explicit, 0);
+      assertOut(explicit, 'status = 3');
+      assertOut(explicit, 'status === 3');
+      const backendPath = resolvedPath(explicit, 'backend');
+      const frontendPath = resolvedPath(explicit, 'frontend');
+      if (path.basename(backendPath) !== 'app' || path.basename(frontendPath) !== 'src') {
+        throw new Error('解析路径落点错误: backend=' + backendPath + ' / frontend=' + frontendPath);
+      }
+      if (!fs.readFileSync(path.join(backendPath, 'x.py'), 'utf8').includes('status = 3')) {
+        throw new Error('backend 实际解析路径未指向夹具: ' + backendPath);
+      }
+      if (!fs.readFileSync(path.join(frontendPath, 'y.ts'), 'utf8').includes('status === 3')) {
+        throw new Error('frontend 实际解析路径未指向夹具: ' + frontendPath);
+      }
+      // ② 缺省回退：无目录参数时默认 <root>/app 与 <root>/src（root = cwd）
+      const fallback = runContract(['status']);
+      assertExit(fallback, 0);
+      assertOut(fallback, 'status = 3');
+      assertOut(fallback, 'status === 3');
+      // ③ 悬空 --backend：缺值即用法错误 + 非零退出
+      const dangling = runContract(['status', '--backend']);
+      assertExit(dangling, 1);
+      assertOut(dangling, '用法: node contract-check.mjs');
+      assertOut(dangling, '--backend 后缺少后端目录值');
+      // ④ --project 形态：从夹具外运行，显式项目根优先于 cwd（若被忽略则两侧都不命中）
+      const elsewhere = path.join(dir, 'elsewhere');
+      fs.mkdirSync(elsewhere, { recursive: true });
+      const viaProject = runContract(['status', '--project', dir], elsewhere);
+      assertExit(viaProject, 0);
+      assertOut(viaProject, 'status = 3');
+      assertOut(viaProject, 'status === 3');
+      // ⑤ 单横线操作数：取值以 '-' 开头（含单横线形态）→ 用法错误 + 非零退出，不被当作目录
+      //    （判据含选项名与非法操作数提示——只查 exit 1 无判别力，须证明拒绝理由在场）
+      const assertDashOperandRejected = (opt, bad) => {
+        const r = runContract(['status', opt, bad]);
+        assertExit(r, 1);
+        assertOut(r, '用法: node contract-check.mjs');
+        assertOut(r, opt + ' 的目录操作数不得以 - 开头');
+      };
+      assertDashOperandRejected('--backend', '-bad-dir');
+      assertDashOperandRejected('--project', '-x');
+      assertDashOperandRejected('--frontend', '-y');
+      console.log('  契约核对 CLI: 显式解析 + 缺省回退 + 悬空参数用法错误 + 单横线操作数拒绝 + --project 优先于 cwd ✓');
     },
   },
 

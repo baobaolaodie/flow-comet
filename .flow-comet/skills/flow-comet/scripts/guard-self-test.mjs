@@ -785,7 +785,7 @@ function bridgeCopyVersionSubAnchorCases(baseVersion, devVersion) {
 
 // 协议副本由运行器在场景执行前复制到 <dir>/reference/（见底部运行段）。
 function readScenarioProtocol(dir) {
-  return JSON.parse(fs.readFileSync(path.join(dir, 'reference', 'workflow-protocol.json'), 'utf8'));
+  return JSON.parse(fs.readFileSync(scenarioProtocolPath(dir), 'utf8'));
 }
 
 // 245~247 场景直接调用 route-node 纯函数：缺失导出在此显式报告（RED 定位到具体场景，
@@ -931,7 +931,7 @@ function runReenter(dir, target, options = {}) {
   if (options.reason !== undefined) args.push('--reason', options.reason);
   if (Array.isArray(options.extra)) args.push(...options.extra);
   return runState(args, dir, {
-    FLOW_COMET_PROTOCOL: options.protocol || path.join(dir, 'reference', 'workflow-protocol.json'),
+    FLOW_COMET_PROTOCOL: options.protocol || scenarioProtocolPath(dir),
   });
 }
 
@@ -1123,10 +1123,22 @@ function parseStatusJson(res) {
   return JSON.parse(text.slice(start, end + 1));
 }
 
+// 场景协议副本路径（单一来源，L-067）：以 dir 为基准的协议路径表达式只在此处出现一次；
+// 调用面统一走下方助手。跨树（root）/ 安装副本（skillCopy）/ 自定义协议（options.protocol 或
+// --protocol CLI）场景仍各自显式传路径，不经本助手（数据点保留）。
+function scenarioProtocolPath(dir) {
+  return path.join(dir, 'reference', 'workflow-protocol.json');
+}
+
 // 场景内受控命令（replan / advance / status / next）：显式注入场景协议副本路径
 // （L-079：依赖协议解析的门禁不得静默跳过；副本由运行器预置在 <dir>/reference/）。
 function runStateWithProtocol(dir, args) {
-  return runState(args, dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+  return runState(args, dir, { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) });
+}
+
+// 同形 runGuard 助手（入口/出口门禁场景）：注入与 runStateWithProtocol 同一 FLOW_COMET_PROTOCOL 表达。
+function runGuardWithProtocol(dir, args) {
+  return runGuard(args, dir, { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) });
 }
 
 // ---------- 伪造材料 ----------
@@ -2395,7 +2407,7 @@ const SCENARIOS = [
     run: (dir) => {
       writeState(dir, baseState('open'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
-      const res = runState(['next'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 1);
       assertOut(res, '疑似未 exit 节点 open');
       assertOut(res, 'workflow-guard.mjs exit open --apply');
@@ -2413,7 +2425,7 @@ const SCENARIOS = [
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n');
-      const res = runState(['next'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: design');
       assertNotOut(res, 'BLOCKED');
@@ -2531,7 +2543,7 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n## 0. 技术栈\n');
       // 既有 done 任务 + verify 阶段追加的 pending 修复任务
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE + TASK_P1 + TASK_TFIX);
-      const res = runState(['next'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: execute');
       assertNotOut(res, 'BLOCKED');
@@ -2551,7 +2563,7 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n## 0. 技术栈\n');
       // 全部 done（无 pending）——正常推进场景不豁免
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE + TASK_P1);
-      const res = runState(['next'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 1);
       assertOut(res, '疑似未 exit 节点 verify');
       assertOut(res, 'workflow-guard.mjs exit verify --apply');
@@ -2627,7 +2639,7 @@ const SCENARIOS = [
       // open exit 已通过的产物（design 尚未开始，无 DESIGN.md）
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n');
-      const res = runState(['next'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: design');
       assertNotOut(res, 'BLOCKED');
@@ -2647,7 +2659,7 @@ const SCENARIOS = [
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n');
-      const res = runState(['next'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 1);
       assertOut(res, '疑似未 exit 节点 review');
       assertOut(res, 'workflow-guard.mjs exit review --apply');
@@ -2680,8 +2692,7 @@ const SCENARIOS = [
       assertOut(res, 'HANDOFF RESULT: T01');
       // ② record subagent-execute '{"handoffResult":{}}' 整体覆盖 evidence['subagent-execute']
       //（浅合并替换 handoffResult 键）→ 已记录的 T01 handoff 丢失（对照组 A 踩坑路径）
-      assertExit(runState(['record', 'subagent-execute', '{"handoffResult":{}}'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') }), 0);
+      assertExit(runStateWithProtocol(dir, ['record', 'subagent-execute', '{"handoffResult":{}}']), 0);
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       const hr = st2.evidence['subagent-execute'] && st2.evidence['subagent-execute'].handoffResult;
       if (!hr || hr['T01']) {
@@ -2710,7 +2721,7 @@ const SCENARIOS = [
       st.evidence['subagent-execute'] = { summary: 'wave1 delegated and collected' };
       writeState(dir, st);
       // ① next：第二波 eligible 并行存在 → 多趟路由回该节点（旧单趟「不回流」行为已移除）
-      const res = runState(['next'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: subagent-execute');
       // ② entry subagent-execute：completedNodes 含该节点仍可重入（每趟完整 entry 检查）
@@ -2776,7 +2787,7 @@ const SCENARIOS = [
     run: (dir) => {
       execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
       execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--allow-empty', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
-      const res = runState(['init', 'prefix-test', '--branch-prefix', 'feat/'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', 'prefix-test', '--branch-prefix', 'feat/']);
       assertExit(res, 0);
       assertOut(res, 'BRANCH: feat/prefix-test');
       const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
@@ -2799,7 +2810,7 @@ const SCENARIOS = [
       writeState(dir, st);
       writeFile(dir, '.specs/pref-state/CHANGE.md', '# CHANGE\n## Why\nx\n');
       writeFile(dir, '.specs/pref-state/REQUIREMENT.md', '# REQUIREMENT\n## 用户故事\nx\n## 验收准则（AC）\nx\n');
-      const res = runState(['status'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['status']);
       assertExit(res, 0);
       assertOut(res, '一致性: ok');
     },
@@ -2811,8 +2822,7 @@ const SCENARIOS = [
   {
     name: '55 init state 含 status: running',
     run: (dir) => {
-      const res = runState(['init', 'tf15-st'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', 'tf15-st']);
       assertExit(res, 0);
       const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (st.status !== 'running') {
@@ -2825,8 +2835,7 @@ const SCENARIOS = [
   {
     name: '56 hook BLOCKED：init 后越权写源码',
     run: (dir) => {
-      const initRes = runState(['init', 'tf15-hk'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const initRes = runStateWithProtocol(dir, ['init', 'tf15-hk']);
       assertExit(initRes, 0);
       const res = runHook(['before_tool'], dir,
         { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'src', 'evil.py') } });
@@ -2851,11 +2860,9 @@ const SCENARIOS = [
   {
     name: '58 init 后 next 识别 active change',
     run: (dir) => {
-      const initRes = runState(['init', 'tf16-dir'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const initRes = runStateWithProtocol(dir, ['init', 'tf16-dir']);
       assertExit(initRes, 0);
-      const res = runState(['next'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 1);
       assertOut(res, '疑似未 exit 节点 open');
       assertNotOut(res, 'No active change');
@@ -2871,8 +2878,7 @@ const SCENARIOS = [
       writeState(dir, composeState({ status: 'completed', activeChange: null, currentNode: null }));
       writeFile(dir, '.specs/stale/CHANGE.md', '# CHANGE\n## Why\nx\n');
       writeFile(dir, '.specs/stale/TASK.md', '# TASK\n');
-      const res = runState(['status'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['status']);
       assertExit(res, 0);
       assertOut(res, 'no-change');
       assertNotOut(res, 'stale');
@@ -2916,8 +2922,7 @@ const SCENARIOS = [
   {
     name: '62 hook 放行：init 后写 .specs/ 工件',
     run: (dir) => {
-      const initRes = runState(['init', 'tf15-ok'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const initRes = runStateWithProtocol(dir, ['init', 'tf15-ok']);
       assertExit(initRes, 0);
       const res = runHook(['before_tool'], dir,
         { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', 'tf15-ok', 'CHANGE.md') } });
@@ -2934,8 +2939,7 @@ const SCENARIOS = [
       writeFile(dir, '.specs/sci-notation/CHANGE.md', '# CHANGE\n## Why\nx\n');
       writeFile(dir, '.specs/sci-notation/TASK.md', '# TASK\n');
       writeFile(dir, '.specs/archive/2026-08-08-sci-notation/CHANGE.md', '# CHANGE\n## Why\nx\n');
-      const res = runState(['status'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['status']);
       assertExit(res, 0);
       assertOut(res, '"change": "sci-notation"');
     },
@@ -2948,8 +2952,7 @@ const SCENARIOS = [
     name: '64 record --protocol 不污染 payload',
     run: (dir) => {
       const custom = writeCustomProtocol(dir);
-      const initRes = runState(['init', 'tf14-rec'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const initRes = runStateWithProtocol(dir, ['init', 'tf14-rec']);
       assertExit(initRes, 0);
       const res = runState(['record', 'open', '{"summary":"x","completedChecks":["a"]}', '--protocol', custom], dir);
       assertExit(res, 0);
@@ -3052,8 +3055,7 @@ const SCENARIOS = [
       writeState(dir, st);
       writeFile(dir, '.specs/stale-id/CHANGE.md', '# CHANGE\n## Why\nx\n');
       writeFile(dir, '.specs/stale-id/TASK.md', '# TASK\n');
-      const res = runState(['status'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['status']);
       assertExit(res, 0);
       assertOut(res, 'no-change');
     },
@@ -3086,8 +3088,7 @@ const SCENARIOS = [
       fs.mkdirSync(path.join(dir, '.flow-comet'), { recursive: true });
       fs.writeFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), raw, 'utf8');
       writeFile(dir, '.specs/compose-demo/CHANGE.md', '# CHANGE\n## Why\nx\n');
-      const res = runState(['status'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['status']);
       assertExit(res, 0);
       assertOut(res, '"status": "running"');
     },
@@ -3180,8 +3181,7 @@ const SCENARIOS = [
       fs.mkdirSync(path.join(dir, '.flow-comet'), { recursive: true });
       fs.writeFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), raw, 'utf8');
       writeFile(dir, '.specs/compose-demo/CHANGE.md', '# CHANGE\n## Why\nx\n');
-      const res = runGuard(['entry', 'open'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runGuardWithProtocol(dir, ['entry', 'open']);
       assertExit(res, 0);
     },
   },
@@ -3210,15 +3210,14 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
         '<task id="P01" parallel="true" status="done">\n  <action>do</action>\n  <verify>echo ok</verify>\n</task>\n' +
         '<task id="T01" parallel="false" status="pending">\n  <action>do serial</action>\n  <verify>echo ok</verify>\n</task>\n');
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
-      const res = runGuard(['exit', 'plan', '--apply'], dir, env);
+      const res = runGuardWithProtocol(dir, ['exit', 'plan', '--apply']);
       assertExit(res, 0);
       assertNotOut(res, 'ROUTE WARN');
       // ② 旧模板无 status 属性（无可解析 pending）→ 前置条件跳过诊断 → 静默
       //（① 的 --apply 已把 currentNode 推进到 execute——先复位 state 再独立跑第二半）
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="T02" parallel="true">\n  <action>do legacy</action>\n  <verify>echo ok</verify>\n</task>\n');
-      const resLegacy = runGuard(['exit', 'plan', '--apply'], dir, env);
+      const resLegacy = runGuardWithProtocol(dir, ['exit', 'plan', '--apply']);
       assertExit(resLegacy, 0);
       assertNotOut(resLegacy, 'ROUTE WARN');
     },
@@ -3231,8 +3230,7 @@ const SCENARIOS = [
     run: (dir) => {
       const st = baseState('execute');
       writeState(dir, st);
-      const res = runGuard(['entry', 'execute'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runGuardWithProtocol(dir, ['entry', 'execute']);
       assertExit(res, 0);
       assertOut(res, 'C4-CHECK SKIP');
     },
@@ -3273,8 +3271,7 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent({
         method: '## 自检方法\n\nbuiltin-quickcheck — brooks-lint 不可用（Skill 仅返回占位，插件执行体未加载），按协议降级内置 R1~R6 快查',
       }));
-      const res = runGuard(['exit', 'execute'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runGuardWithProtocol(dir, ['exit', 'execute']);
       assertExit(res, 0);
       assertOut(res, 'BROOKS-LINT WARN');
       assertOut(res, 'WARN COUNT:');
@@ -3289,8 +3286,7 @@ const SCENARIOS = [
       st.evidence.execute = { summary: 'executed' };
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="T01" parallel="true" status="pending">\n  <action>do</action>\n</task>\n<task id="T02" parallel="true" status="pending">\n  <action>do2</action>\n</task>\n');
-      const res = runGuard(['exit', 'execute'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runGuardWithProtocol(dir, ['exit', 'execute']);
       assertExit(res, 1);
       assertOut(res, 'missing Output Schema artifacts');
     },
@@ -3304,7 +3300,7 @@ const SCENARIOS = [
     name: '83 CONTEXT 缺失 + 有代码 → init 输出 INIT-NEEDED 不生成',
     run: (dir) => {
       writeFile(dir, 'package.json', '{"name":"x"}');
-      const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID]);
       assertExit(res, 0);
       assertOut(res, 'INIT-NEEDED');
       if (fs.existsSync(path.join(dir, '.specs', 'CONTEXT.md'))) throw new Error('CONTEXT 不应被自动生成');
@@ -3316,10 +3312,10 @@ const SCENARIOS = [
     name: '84 --init-skip 记 none 且下次 init 静默',
     run: (dir) => {
       writeFile(dir, 'package.json', '{"name":"x"}');
-      runState(['init', CHANGE_ID, '--init-skip'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-skip']);
       const st1 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (st1.ai_context_doc !== 'none') throw new Error('ai_context_doc 应为 none');
-      const res2 = runState(['init', CHANGE_ID + '-2'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res2 = runStateWithProtocol(dir, ['init', CHANGE_ID + '-2']);
       if (res2.output.includes('INIT-NEEDED') || res2.output.includes('INIT-HINT')) throw new Error('下次 init 不应再提示');
     },
   },
@@ -3330,7 +3326,7 @@ const SCENARIOS = [
     run: (dir) => {
       writeState(dir, { ...baseState('open'), last_intel_scan: new Date(Date.now() - 10 * 864e5).toISOString() });
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n');
-      const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID]);
       assertExit(res, 0);
       if (res.output.includes('INIT-NEEDED') || res.output.includes('INIT-HINT')) throw new Error('不应有初始化提示');
     },
@@ -3341,7 +3337,7 @@ const SCENARIOS = [
     name: '86 有 CONTEXT 无扫描记录 → INIT-HINT 文案无 null',
     run: (dir) => {
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n');
-      const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID]);
       assertExit(res, 0);
       assertOut(res, 'INIT-HINT');
       if (res.output.includes('null')) throw new Error('INIT-HINT 不应含 "null"（无扫描记录时用友好文案）');
@@ -3353,7 +3349,7 @@ const SCENARIOS = [
     name: '87 --init-context 无 CONTEXT → INIT-GENERATE 指引不生成',
     run: (dir) => {
       writeFile(dir, 'package.json', '{"name":"x"}');
-      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-context']);
       assertExit(res, 0);
       assertOut(res, 'INIT-GENERATE');
       if (fs.existsSync(path.join(dir, '.specs', 'CONTEXT.md'))) throw new Error('CONTEXT 不应由脚本生成（生成职责在 agent）');
@@ -3368,7 +3364,7 @@ const SCENARIOS = [
     run: (dir) => {
       writeFile(dir, 'CLAUDE.md', '# CLAUDE\n项目约定：使用 kebab-case 命名。\n');
       writeFile(dir, 'package.json', '{"name":"x"}');
-      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-context']);
       assertExit(res, 0);
       assertOut(res, 'INIT-GENERATE');
       assertOut(res, 'CLAUDE.md');
@@ -3380,7 +3376,7 @@ const SCENARIOS = [
     name: '89 --init-context 指引含代码信号',
     run: (dir) => {
       writeFile(dir, 'requirements.txt', 'pytest\n');
-      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-context']);
       assertExit(res, 0);
       assertOut(res, 'INIT-GENERATE');
       assertOut(res, '代码信号');
@@ -3393,7 +3389,7 @@ const SCENARIOS = [
     run: (dir) => {
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n## 技术栈\nx\n## 域语言\n| 术语 | 定义 |\n|---|---|\n| 例 | 定义 |\n## 已锁决策\n- [2026-08-01] 决策一\n## 默认偏好\nx\n## 既有抽象索引\nx\n## intel-scan 元数据\n- **last_intel_scan**: x\n- **scanner**: x\n- **下次重扫建议**: x\n');
       writeFile(dir, 'package.json', '{"name":"x"}');
-      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-context']);
       assertExit(res, 0);
       assertOut(res, 'INIT-DONE');
       const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -3410,7 +3406,7 @@ const SCENARIOS = [
     run: (dir) => {
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n');
       writeFile(dir, 'package.json', '{"name":"x"}');
-      let res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      let res = runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-context']);
       assertExit(res, 0);
       assertOut(res, 'INIT-VALIDATE-FAILED');
       assertOut(res, '重写');
@@ -3418,7 +3414,7 @@ const SCENARIOS = [
       if (st.last_intel_scan) throw new Error('校验失败不应写 last_intel_scan');
       // ② 段名变体（含正文提及）不满足必填段
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n## 技术栈补充\nx\n## 域语言说明\n| 术语 | 定义 |\n|---|---|\n| 例 | 定义 |\n## 已锁决策说明\n- [2026-08-01] 决策一\n## 默认偏好补充\nx\n## 既有抽象索引附录\nx\n## intel-scan 元数据附录\n- **last_intel_scan**: x\n- **scanner**: x\n- **下次重扫建议**: x\n正文提及 域语言 与 默认偏好 与 既有抽象索引（文本非标题）。\n');
-      res = runState(['init', CHANGE_ID + '-2', '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      res = runStateWithProtocol(dir, ['init', CHANGE_ID + '-2', '--init-context']);
       assertExit(res, 0);
       assertOut(res, 'INIT-VALIDATE-FAILED');
       st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -3440,7 +3436,7 @@ const SCENARIOS = [
         '~~~text', '## 默认偏好', '~~~',
         '',
       ].join('\n'));
-      res = runState(['init', CHANGE_ID + '-3', '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      res = runStateWithProtocol(dir, ['init', CHANGE_ID + '-3', '--init-context']);
       assertExit(res, 0);
       assertOut(res, 'INIT-VALIDATE-FAILED');
       st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -3455,7 +3451,7 @@ const SCENARIOS = [
       // 7 段齐全但已锁决策条目缺 [YYYY-MM-DD] 日期前缀（模板格式）
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n## 技术栈\nx\n## 域语言\n| 术语 | 定义 |\n|---|---|\n| 例 | 定义 |\n## 已锁决策\n- 决策缺日期前缀\n## 默认偏好\nx\n## 既有抽象索引\nx\n## intel-scan 元数据\n- **last_intel_scan**: x\n- **scanner**: x\n- **下次重扫建议**: x\n');
       writeFile(dir, 'package.json', '{"name":"x"}');
-      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-context']);
       assertExit(res, 0);
       assertOut(res, 'INIT-VALIDATE-FAILED');
       assertOut(res, '日期');
@@ -3470,7 +3466,7 @@ const SCENARIOS = [
     run: (dir) => {
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\n新项目骨架\n## 技术栈\nx\n## 域语言\n| 术语 | 定义 |\n|---|---|\n| （待沉淀） | 随 change 逐步补充 |\n## 已锁决策\n- （待沉淀——后续 change 按时间倒序追加）\n## 默认偏好\n- 待补充\n## 既有抽象索引\nx\n## intel-scan 元数据\n- **last_intel_scan**: x\n- **scanner**: x\n- **下次重扫建议**: x\n');
       writeFile(dir, 'package.json', '{"name":"x"}');
-      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-context']);
       assertExit(res, 0);
       assertOut(res, 'INIT-DONE');
       const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -3485,7 +3481,7 @@ const SCENARIOS = [
     run: (dir) => {
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n## 技术栈\nx\n## 域语言\n| 术语 | 定义 |\n|---|---|\n| 例 | 定义 |\n## 已锁决策\n- [2026-08-01] 决策一\n## 默认偏好\nx\n## 既有抽象索引\nx\n## intel-scan 元数据\n- **last_intel_scan**: x\n- **scanner**: x\n- **下次重扫建议**: x\n');
       writeFile(dir, 'package.json', '{"name":"x"}');
-      const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID]);
       assertExit(res, 0);
       assertOut(res, '记录扫描时间');
       if (res.output.includes('刷新')) throw new Error('CONTEXT 已就绪不应提示"刷新"（应提示记录扫描时间）');
@@ -3497,8 +3493,8 @@ const SCENARIOS = [
     name: '95 init 同 id 重跑 → WARN 防护不阻断',
     run: (dir) => {
       writeFile(dir, 'package.json', '{"name":"x"}');
-      runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
-      const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      runStateWithProtocol(dir, ['init', CHANGE_ID]);
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID]);
       assertExit(res, 0);
       assertOut(res, 'WARN: change ' + CHANGE_ID + ' 已存在');
       assertOut(res, '重置节点状态');
@@ -3572,8 +3568,7 @@ const SCENARIOS = [
       writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
       writeState(dir, baseState('open'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
-      const res = runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md']);
       assertExit(res, 0);
       assertOut(res, 'SKILL-LOAD: open flow-comet-change → .skill-loads/open-flow-comet-change.json');
       const markerPath = path.join(dir, '.specs', CHANGE_ID, '.skill-loads', 'open-flow-comet-change.json');
@@ -3601,22 +3596,21 @@ const SCENARIOS = [
     run: (dir) => {
       writeState(dir, baseState('open'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       // a) 缺参数（无 node/skill）
-      const rA = runState(['skill-load'], dir, env);
+      const rA = runStateWithProtocol(dir, ['skill-load']);
       assertExit(rA, 1);
       assertOut(rA, 'skill-load requires <node> <skill>');
       // b) node 非法（非内置节点）
-      const rB = runState(['skill-load', 'bogus', 'flow-comet-change'], dir, env);
+      const rB = runStateWithProtocol(dir, ['skill-load', 'bogus', 'flow-comet-change']);
       assertExit(rB, 1);
       assertOut(rB, 'skill-load node 非法');
       // c) skill 名含非法字符
-      const rC = runState(['skill-load', 'open', 'bad/name'], dir, env);
+      const rC = runStateWithProtocol(dir, ['skill-load', 'open', 'bad/name']);
       assertExit(rC, 1);
       assertOut(rC, 'skill-load skill 名非法');
       // d) --prompt 不在 flow-kit/prompts/ 下（指向场景内 reference 副本——文件存在可加载，
       //    归属校验拒绝；若归属校验被跳过则此处会成功写标记，断言即失效）
-      const rD = runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'reference/workflow-protocol.json'], dir, env);
+      const rD = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change', '--prompt', 'reference/workflow-protocol.json']);
       assertExit(rD, 1);
       assertOut(rD, 'skill-load --prompt 路径必须位于 flow-kit/prompts/ 下');
       // e) 自定义协议下未知节点同样拒绝（node 校验从内置清单改为当前协议节点集合
@@ -3640,8 +3634,7 @@ const SCENARIOS = [
     run: (dir) => {
       writeState(dir, baseState('open'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
-      const res = runState(['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })]);
       assertExit(res, 1);
       assertOut(res, 'BLOCKED');
       assertOut(res, '缺少对应声明标记');
@@ -3658,11 +3651,10 @@ const SCENARIOS = [
     run: (dir) => {
       writeState(dir, baseState('open'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
-      const sl = runState(['skill-load', 'open', 'flow-comet-change'], dir, env);
+      const sl = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change']);
       assertExit(sl, 0);
       assertOut(sl, 'SKILL-LOAD: open flow-comet-change');
-      const res = runState(['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })], dir, env);
+      const res = runStateWithProtocol(dir, ['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })]);
       assertExit(res, 0);
       assertOut(res, 'EVIDENCE: open');
       const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -3698,7 +3690,6 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\n## 验收准则（AC）\n');
       // 场景内 flow-kit/prompts/ 提示文件（真实 skill-load --prompt 指向——归属校验仅查前缀不读内容）
       writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       const loadsDir = path.join(dir, '.specs', CHANGE_ID, '.skill-loads');
       fs.mkdirSync(loadsDir, { recursive: true });
       // ① 机制已激活（.skill-loads/ 存在）但无 open-* 标记（仅他节点标记）→ BLOCKED
@@ -3710,7 +3701,7 @@ const SCENARIOS = [
       assertOut(resBlock, 'exit 缺协议声明标记');
       // ② 真实链路：skill-load --prompt 写入标记（protocol = basename）→ exit 通过
       const markerPath = path.join(loadsDir, 'open-flow-comet-change.json');
-      const sl = runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir, env);
+      const sl = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md']);
       assertExit(sl, 0);
       assertOut(sl, 'SKILL-LOAD: open flow-comet-change');
       const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
@@ -3723,7 +3714,7 @@ const SCENARIOS = [
       assertNotOut(resPass, 'BLOCKED');
       // ③ skill-load 未传 --prompt → 标记 protocol = null → exit BLOCKED（fail-closed：
       // 无协议声明不可通过——指引补 skill-load --prompt）
-      const slNull = runState(['skill-load', 'open', 'flow-comet-change'], dir, env);
+      const slNull = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change']);
       assertExit(slNull, 0);
       const markerNull = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
       if (markerNull.protocol !== null) {
@@ -3752,8 +3743,7 @@ const SCENARIOS = [
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
       writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-change.json',
         JSON.stringify({ node: 'open', skill: 'flow-comet-change', protocol: '0-change.md', at: '2999-12-31T00:00:00.000Z' }, null, 2) + '\n');
-      const res = runState(['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })]);
       assertExit(res, 1);
       assertOut(res, 'BLOCKED');
       assertOut(res, '标记必须先于记录声明');
@@ -3768,13 +3758,12 @@ const SCENARIOS = [
     run: (dir) => {
       writeState(dir, baseState('open'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       // ① 旧格式 record：completedChecks 无 required-skill 条目 → 无标记也通过
-      const resA = runState(['record', 'open', JSON.stringify({ summary: 'legacy', completedChecks: ['unit-tests'] })], dir, env);
+      const resA = runStateWithProtocol(dir, ['record', 'open', JSON.stringify({ summary: 'legacy', completedChecks: ['unit-tests'] })]);
       assertExit(resA, 0);
       assertOut(resA, 'EVIDENCE: open');
       // ② 无 completedChecks 的纯 summary 记录 → 通过
-      const resB = runState(['record', 'open', JSON.stringify({ summary: 'plain' })], dir, env);
+      const resB = runStateWithProtocol(dir, ['record', 'open', JSON.stringify({ summary: 'plain' })]);
       assertExit(resB, 0);
       // ③ exit open：M5 后 record 已自动补声明标记 → 无 SKILL-LOAD WARN,正常通过
       const st = baseState('open');
@@ -4016,7 +4005,7 @@ const SCENARIOS = [
       const st1 = baseState('execute'); // evidence 空——无豁免,触发"疑似未 exit"BLOCK
       writeState(dir, st1);
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true }); // findActiveChange 要求目录存在
-      const nx = runState(['next'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const nx = runStateWithProtocol(dir, ['next']);
       assertExit(nx, 1);
       assertOut(nx, 'BLOCKED');
       assertOut(nx, 'advance');
@@ -4079,7 +4068,7 @@ const SCENARIOS = [
       execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
       execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--allow-empty', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
       const branchBefore = execFileSync('git', ['branch', '--show-current'], { cwd: dir, encoding: 'utf8' }).trim();
-      const res = runState(['init', '--help'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', '--help']);
       assertExit(res, 1);
       assertOut(res, 'not a change name');
       assertOut(res, 'Usage: workflow-state.mjs init');
@@ -4093,7 +4082,7 @@ const SCENARIOS = [
         throw new Error('init --help 不应创建 .specs/--help 工件目录');
       }
       // ② 带前导空白的 flag-like 参数(如 " --help")经 trim 后同样应被拒绝
-      const res2 = runState(['init', ' --help'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res2 = runStateWithProtocol(dir, ['init', ' --help']);
       assertExit(res2, 1);
       assertOut(res2, 'not a change name');
       if (fs.existsSync(path.join(dir, '.specs', ' --help'))) {
@@ -4213,7 +4202,7 @@ const SCENARIOS = [
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why（为什么做）\nx');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\nx\n\n## 验收准则（AC）\n- Given x When y Then z');
-      const res = runState(['record', 'open', '{"summary":"done"}'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['record', 'open', '{"summary":"done"}']);
       assertExit(res, 0);
       const loads = path.join(dir, '.specs', CHANGE_ID, '.skill-loads');
       const changeMarker = path.join(loads, 'open-flow-comet-change.json');
@@ -4281,7 +4270,7 @@ const SCENARIOS = [
     name: '123 init 空仓库提示：无提交仓库的分支创建边界（M8）',
     run: (dir) => {
       execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
-      const res = runState(['init', 'empty-repo'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', 'empty-repo']);
       assertExit(res, 0);
       assertOut(res, 'EMPTY-REPO');
       // 子断言 ①:警告后不得实际创建分支(unborn HEAD 下 rev-parse 失败 → currentBranch=null
@@ -4493,7 +4482,7 @@ const SCENARIOS = [
       // ===== M-02 request 时刻归属门禁（AC-1/AC-2/AC-3 的 L1 面）=====
       // 夹具前提：新 change 驻留 execute + 本节点技能声明标记在场（否则先被技能声明门 BLOCK，
       // 测不到归属门禁本身）；协议副本由运行器放入 <dir>/reference/ 并显式指向（env 优先级）。
-      const reqEnv = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const reqEnv = { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) };
       const reqStatePath = path.join(dir, '.flow-comet', 'flow-comet-state.json');
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
       writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/execute-flow-comet-dev.json',
@@ -4567,7 +4556,7 @@ const SCENARIOS = [
         throw new Error('依赖未满足 BLOCK 不得落 handoffRequests: ' + JSON.stringify(stUnmet.evidence));
       }
       // 同构真实链路：next 对当前 TASK 实际输出 execute（依赖未满足/串行消化），与指引条件分支一致
-      const resUnmetNext = runState(['next'], dir, reqEnv);
+      const resUnmetNext = runStateWithProtocol(dir, ['next']);
       assertExit(resUnmetNext, 0);
       if (!/^NODE: execute$/m.test(resUnmetNext.output)) {
         throw new Error('依赖未满足时 next 应输出 execute（指引一致性锚）：\n' + resUnmetNext.output);
@@ -4610,7 +4599,7 @@ const SCENARIOS = [
     run: (dir) => {
       execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
       execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
-      const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID]);
       assertExit(res, 0);
       const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (st.newChange !== true) throw new Error('init 未写入 newChange: true');
@@ -4663,7 +4652,7 @@ const SCENARIOS = [
       const st = baseState('open');
       writeState(dir, st);
       assertExit(runGuard(['entry', 'open'], dir), 0);
-      assertExit(runState(['record', 'open', '{"summary":"intake"}'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') }), 0);
+      assertExit(runStateWithProtocol(dir, ['record', 'open', '{"summary":"intake"}']), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why（为什么做）\nx');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\nx\n\n## 验收准则（AC）\n- Given x When y Then z');
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
@@ -4745,14 +4734,13 @@ const SCENARIOS = [
   {
     name: '136 verifyFailures 按 change 隔离:切换计数独立 + 旧字段迁移',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       // ① 旧字段迁移:旧 state(顶层 verifyFailures=2)→ verify-fail 并入当前 change(2+1=3)不超限
       const st = baseState('verify');
       st.verifyFailures = 2;
       writeState(dir, st);
       // 场景内 ch/ch2 目录(select 要求 change 目录存在)
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
-      const r1 = runState(['verify-fail'], dir, env);
+      const r1 = runStateWithProtocol(dir, ['verify-fail']);
       assertExit(r1, 0);
       assertOut(r1, 'VERIFY-FAIL: 3/3');
       const stAfter = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -4763,26 +4751,26 @@ const SCENARIOS = [
         throw new Error('旧顶层字段应已清除: ' + JSON.stringify(stAfter.verifyFailures));
       }
       // ② 同 change 第 4 次 → BLOCK(3 >= 3)
-      const r2 = runState(['verify-fail'], dir, env);
+      const r2 = runStateWithProtocol(dir, ['verify-fail']);
       assertExit(r2, 1);
       assertOut(r2, '超限');
       // ③ 切换 change:select ch2 → 计数独立(若实现仍用全局计数 3,此处会误 BLOCK = RED)
       writeFile(dir, '.specs/ch2/CHANGE.md', '# CHANGE\n## Why\nx\n');
-      const r3 = runState(['select', 'ch2'], dir, env);
+      const r3 = runStateWithProtocol(dir, ['select', 'ch2']);
       assertExit(r3, 0);
-      const r4 = runState(['verify-fail'], dir, env);
+      const r4 = runStateWithProtocol(dir, ['verify-fail']);
       assertExit(r4, 0);
       assertOut(r4, 'VERIFY-FAIL: 1/3');
       // ④ ch2 独立计数:连续 3 次后第 4 次 BLOCK
-      assertExit(runState(['verify-fail'], dir, env), 0);
-      assertExit(runState(['verify-fail'], dir, env), 0);
-      const r7 = runState(['verify-fail'], dir, env);
+      assertExit(runStateWithProtocol(dir, ['verify-fail']), 0);
+      assertExit(runStateWithProtocol(dir, ['verify-fail']), 0);
+      const r7 = runStateWithProtocol(dir, ['verify-fail']);
       assertExit(r7, 1);
       assertOut(r7, '超限');
       // ⑤ 切回 ch:原计数保留(3 → 仍超限,不串扰不回零)
-      const r8 = runState(['select', 'ch'], dir, env);
+      const r8 = runStateWithProtocol(dir, ['select', 'ch']);
       assertExit(r8, 0);
-      const r9 = runState(['verify-fail'], dir, env);
+      const r9 = runStateWithProtocol(dir, ['verify-fail']);
       assertExit(r9, 1);
       assertOut(r9, '超限');
       // ⑥ 计数隔离扩展（AC-5）：verify 失败计数与 Fix 归位轮次各自独立——verify-fail 只动
@@ -4792,11 +4780,11 @@ const SCENARIOS = [
       stIsolated.fixRoundsByChange = { ch: 2, ch2: 1 };
       writeState(dir, stIsolated);
       writeFile(dir, '.specs/ch3/CHANGE.md', '# CHANGE\n## Why\nx\n');
-      assertExit(runState(['select', 'ch3'], dir, env), 0);
+      assertExit(runStateWithProtocol(dir, ['select', 'ch3']), 0);
       const stCh3Before = readScenarioState(dir);
       stCh3Before.fixRoundsByChange = { ch: 2, ch2: 1, ch3: 5 };
       writeState(dir, stCh3Before);
-      const r10 = runState(['verify-fail'], dir, env);
+      const r10 = runStateWithProtocol(dir, ['verify-fail']);
       assertExit(r10, 0);
       assertOut(r10, 'VERIFY-FAIL: 1/3');
       const stCh3After = readScenarioState(dir);
@@ -4818,7 +4806,6 @@ const SCENARIOS = [
   {
     name: '137 next 不推走进行中节点:exit 被拦截后重跑路径保留',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       const st = baseState('review');
       st.completedNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute'];
       st.evidence.review = { summary: 'reviewed' }; // record 过但 exit 被拦截
@@ -4832,18 +4819,18 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', '# T01-SUMMARY\n## verify 输出\nx\n## 6 维自查\nx\n## 越界检查\nx\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## Critical\n\n无。\n\n## 发现\n\n- **问题A**: 某处问题 **[已修]**\n\n## 结论\n\n通过\n');
       // ① next:进行中节点(evidence 存在且未 exit)不被漂移校正推走(修复前校正到 verify = RED)
-      const r1 = runState(['next'], dir, env);
+      const r1 = runStateWithProtocol(dir, ['next']);
       assertExit(r1, 0);
       assertOut(r1, 'NODE: review');
       assertNotOut(r1, 'NODE: verify');
       // ② exit review 重跑路径保留:缺处置标记 → BLOCKED(新 change),补标记后通过
-      assertExit(runGuard(['entry', 'review'], dir, env), 0); // 新 change 强制先 entry
+      assertExit(runGuardWithProtocol(dir, ['entry', 'review']), 0); // 新 change 强制先 entry
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## Critical\n\n无。\n\n## 发现\n\n- **问题B**: 某处问题无处置标记\n\n## 结论\n\n通过\n');
-      const rBlock = runGuard(['exit', 'review'], dir, env);
+      const rBlock = runGuardWithProtocol(dir, ['exit', 'review']);
       assertExit(rBlock, 1);
       assertOut(rBlock, '处置状态标记');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## Critical\n\n无。\n\n## 发现\n\n- **问题B**: 某处问题 **[已修]**\n\n## 结论\n\n通过\n');
-      const rPass = runGuard(['exit', 'review', '--apply'], dir, env);
+      const rPass = runGuardWithProtocol(dir, ['exit', 'review', '--apply']);
       assertExit(rPass, 0);
       assertOut(rPass, 'ALL CHECKS PASSED');
     },
@@ -5133,7 +5120,7 @@ const SCENARIOS = [
       writeState(dir, st);
       // 形似对象字面量但未闭合（PowerShell 剥离内嵌引号后常见的损坏 JSON 形态）
       const bad = '{summary: "intake", completedChecks: ["unit-tests"]';
-      const res = runState(['record', 'open', bad], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['record', 'open', bad]);
       assertExit(res, 1);
       assertOut(res, '--json-file');
       // fail-closed：state 文件须保持原样（evidence.open 未被脏字符串污染）
@@ -5267,17 +5254,16 @@ const SCENARIOS = [
       const st = baseState('open');
       st.evidence.open = { summary: 'intake complete' };
       writeState(dir, st);
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       // ① --json-file 指向损坏 JSON（以 { 开头）→ "不是合法 JSON" + 长度元数据，不再建议 --json-file
       writeFile(dir, 'payload.json', '{summary: "broken", completedChecks: ["x"]');
-      const resFile = runState(['record', 'open', '--json-file', 'payload.json'], dir, env);
+      const resFile = runStateWithProtocol(dir, ['record', 'open', '--json-file', 'payload.json']);
       assertExit(resFile, 1);
       assertNotOut(resFile, '--json-file');
       assertOut(resFile, '不是合法 JSON');
       assertOut(resFile, 'length=');
       // ② 内联传参损坏（以 { 开头）→ 仍建议 --json-file（既有语义保留）
       const bad = '{summary: "broken"';
-      const resInline = runState(['record', 'open', bad], dir, env);
+      const resInline = runStateWithProtocol(dir, ['record', 'open', bad]);
       assertExit(resInline, 1);
       assertOut(resInline, '--json-file');
     },
@@ -5292,8 +5278,7 @@ const SCENARIOS = [
       const st = baseState('open');
       st.evidence.open = { summary: 'intake complete' };
       writeState(dir, st);
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
-      const res = runState(['record', 'open', '[plain-text-not-json'], dir, env);
+      const res = runStateWithProtocol(dir, ['record', 'open', '[plain-text-not-json']);
       assertExit(res, 1);
       if (!/--json-file|not valid JSON|不是合法 JSON/.test(res.output)) {
         throw new Error('fail-closed 应有提示（--json-file / not valid JSON / 不是合法 JSON），实际输出: ' + res.output);
@@ -5893,7 +5878,7 @@ const SCENARIOS = [
   {
     name: '162 技能加载前置门：request/record 无声明新 BLOCK / 旧 WARN',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const env = { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) };
       // ① handoff request 前置门：新 change、subagent-execute 节点无声明标记 → BLOCK
       const stReq = baseState('subagent-execute');
       stReq.newChange = true;
@@ -5905,13 +5890,13 @@ const SCENARIOS = [
       const stRec = baseState('plan');
       stRec.newChange = true;
       writeState(dir, stRec);
-      const resRec = runState(['record', 'plan', '{"summary":"plan done"}'], dir, env);
+      const resRec = runStateWithProtocol(dir, ['record', 'plan', '{"summary":"plan done"}']);
       assertExit(resRec, 1);
       assertOut(resRec, '先加载技能');
       // ③ 旧 change：record 无声明 → WARN 渐进不阻断
       const stOld = baseState('plan');
       writeState(dir, stOld);
-      const resOld = runState(['record', 'plan', '{"summary":"plan done"}'], dir, env);
+      const resOld = runStateWithProtocol(dir, ['record', 'plan', '{"summary":"plan done"}']);
       assertExit(resOld, 0);
       assertOut(resOld, 'WARN');
 
@@ -5990,7 +5975,7 @@ const SCENARIOS = [
       // ⑨ 协议无对应 enabled 节点 → 跳过归属门禁（删除 subagent-execute 节点）：驻留 execute
       // 但任务为并行 pending——若实现不做协议感知会误判目标 subagent-execute ≠ execute 而 BLOCK
       writeMarker('execute');
-      const proto = JSON.parse(fs.readFileSync(path.join(dir, 'reference', 'workflow-protocol.json'), 'utf8'));
+      const proto = JSON.parse(fs.readFileSync(scenarioProtocolPath(dir), 'utf8'));
       const noSubProto = { ...proto, nodes: proto.nodes.filter((n) => n.id !== 'subagent-execute') };
       writeFile(dir, 'reference/protocol-nosub.json', JSON.stringify(noSubProto, null, 2) + '\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskXml('P02', 'parallel="true" status="pending"', 'src/p02.mjs'));
@@ -6046,7 +6031,7 @@ const SCENARIOS = [
       if (readScenarioState(dir).evidence?.['subagent-execute']?.handoffRequests?.P04) {
         throw new Error('依赖未满足 BLOCK 不得落 handoffRequests');
       }
-      const resUnmetNext = runState(['next'], dir, env);
+      const resUnmetNext = runStateWithProtocol(dir, ['next']);
       assertExit(resUnmetNext, 0);
       if (!/^NODE: execute$/m.test(resUnmetNext.output)) {
         throw new Error('依赖未满足时 next 应输出 execute：\n' + resUnmetNext.output);
@@ -6059,7 +6044,7 @@ const SCENARIOS = [
       afterSerial.completedNodes = [...new Set([...(afterSerial.completedNodes || []), 'execute'])];
       afterSerial.evidence = { ...(afterSerial.evidence || {}), execute: { summary: 'serial digest done' } };
       writeState(dir, afterSerial);
-      const resDelegableNext = runState(['next'], dir, env);
+      const resDelegableNext = runStateWithProtocol(dir, ['next']);
       assertExit(resDelegableNext, 0);
       if (!/^NODE: subagent-execute$/m.test(resDelegableNext.output)) {
         throw new Error('依赖满足后 next 应输出 subagent-execute：\n' + resDelegableNext.output);
@@ -6068,7 +6053,7 @@ const SCENARIOS = [
         throw new Error('依赖满足后 next 应把工作归属推到 subagent-execute');
       }
       writeMarker('subagent-execute');
-      assertExit(runGuard(['entry', 'subagent-execute'], dir, env), 0);
+      assertExit(runGuardWithProtocol(dir, ['entry', 'subagent-execute']), 0);
       const resRecovered = runHandoff(['request', 'P04', 'now delegable'], dir, env);
       assertExit(resRecovered, 0);
       assertOut(resRecovered, 'HANDOFF REQUEST: P04');
@@ -6142,7 +6127,7 @@ const SCENARIOS = [
       assertExit(runState(['init', boundChange, '--init-skip', '--protocol', 'reference/protocol-bound.json'], dir), 0);
       writeFile(dir, '.specs/' + boundChange + '/TASK.md', taskXml('B01', 'parallel="false" status="pending"', 'src/b01.mjs'));
       const resBound = runHandoff(['request', 'B01', 'bound protocol serial'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+        { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) });
       assertExit(resBound, 0);
       assertOut(resBound, 'HANDOFF REQUEST: B01');
       assertNotOut(resBound, 'BLOCKED');
@@ -6161,7 +6146,7 @@ const SCENARIOS = [
       writeState(dir, boundMissingState);
       writeFile(dir, '.specs/' + boundChange + '/TASK.md', taskXml('B02', 'parallel="false" status="pending"', 'src/b02.mjs'));
       const resBoundMissing = runHandoff(['request', 'B02', 'bound protocol unreadable'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+        { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) });
       assertExit(resBoundMissing, 0);
       assertOut(resBoundMissing, 'WARN:');
       assertOut(resBoundMissing, '本次未执行归属校验');
@@ -6180,7 +6165,7 @@ const SCENARIOS = [
       writeState(dir, legacyBoundState);
       writeFile(dir, '.specs/' + boundChange + '/TASK.md', taskXml('B03', 'parallel="false" status="pending"', 'src/b03.mjs'));
       const resLegacyBound = runHandoff(['request', 'B03', 'legacy state no binding'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+        { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) });
       assertExit(resLegacyBound, 1);
       assertOut(resLegacyBound, 'BLOCKED: 任务 B03（串行 pending）应归属节点 execute');
     },
@@ -6192,20 +6177,19 @@ const SCENARIOS = [
   {
     name: '163 next / entry 输出点名 LOAD SKILL：用 Skill 工具，禁止跳过',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       // ① next：open 节点 → 输出点名 flow-comet-open
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
       const st = baseState('open');
       st.evidence.open = { summary: 'intake complete' };
       writeState(dir, st);
-      const resNext = runState(['next'], dir, env);
+      const resNext = runStateWithProtocol(dir, ['next']);
       assertExit(resNext, 0);
       assertOut(resNext, 'LOAD SKILL: flow-comet-open');
       assertOut(resNext, '禁止跳过');
       // ② guard entry：plan 节点 → 输出点名 flow-comet-plan
       const st2 = baseState('plan');
       writeState(dir, st2);
-      const resEntry = runGuard(['entry', 'plan'], dir, env);
+      const resEntry = runGuardWithProtocol(dir, ['entry', 'plan']);
       assertExit(resEntry, 0);
       assertOut(resEntry, 'LOAD SKILL: flow-comet-plan');
       assertOut(resEntry, '禁止跳过');
@@ -6248,7 +6232,6 @@ const SCENARIOS = [
   {
     name: '165 next 保护扩展：entered 未 record 节点不推走（保持 plan）',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why（为什么做）\n\nx');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\nx\n\n## 验收准则（AC）\n\n- Given x When y Then z');
@@ -6268,7 +6251,7 @@ const SCENARIOS = [
         directOverride: false,
       };
       writeState(dir, st);
-      const res = runState(['next'], dir, env);
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: plan');
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -6568,7 +6551,6 @@ const SCENARIOS = [
   {
     name: '172 多波混合推进完成：分趟自动路由直至清空进 review',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       const goNext = (currentNode, doneIds, completedExtra = []) => {
         writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + renderMultiWaveTasks(doneIds));
@@ -6587,7 +6569,7 @@ const SCENARIOS = [
           executionMode: 'subagent',
           directOverride: false,
         });
-        return runState(['next'], dir, env);
+        return runStateWithProtocol(dir, ['next']);
       };
       // 趟 0：无可委托并行（P 波依赖 T01 未完成）、串行 T01 pending → execute
       let res = goNext('execute', []);
@@ -6622,7 +6604,6 @@ const SCENARIOS = [
   {
     name: '173 单趟零进展 BLOCK：孤儿并行依赖无法满足（检查 depends_on）',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
         '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify><depends_on>T99</depends_on></task>\n');
@@ -6635,7 +6616,7 @@ const SCENARIOS = [
         executionMode: 'subagent',
         directOverride: false,
       });
-      const res = runState(['next'], dir, env);
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 1);
       assertOut(res, 'BLOCKED');
       assertOut(res, '孤儿并行');
@@ -6651,7 +6632,6 @@ const SCENARIOS = [
   {
     name: '174 委托节点二次进入完成判定：eligible 再入 → 趟间串行 → 清空进 review',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       const pDone = (id, deps) =>
         '<task id="' + id + '" status="done" parallel="true"><action>实现 ' + id + '</action><write_files>src/' + id.toLowerCase() + '.mjs</write_files><verify>node --check src/' + id.toLowerCase() + '.mjs</verify>' +
@@ -6672,19 +6652,19 @@ const SCENARIOS = [
         executionMode: 'subagent',
         directOverride: false,
       });
-      let res = runState(['next'], dir, env);
+      let res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: subagent-execute');
       // ② P02 也 done → 可委托集合为空、串行 T03 pending → 趟间回 execute
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1 + pDone('P02', 'P01') + t03(''));
-      res = runState(['next'], dir, env);
+      res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: execute');
       // ③ 全部 done + SUMMARY 在场 → 合取完成（无 eligible ∧ 无 serial pending）→ review
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1 + pDone('P02', 'P01') + t03('done'));
       writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent());
       writeFile(dir, '.specs/' + CHANGE_ID + '/T03-SUMMARY.md', summaryContent());
-      res = runState(['next'], dir, env);
+      res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: review');
     },
@@ -6696,7 +6676,6 @@ const SCENARIOS = [
   {
     name: '175 向后兼容等价：旧合法形态路由结果与旧期望一致',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       const goNext = (taskContent, currentNode, completedExtra = [], withExecuteEvidence = false) => {
         writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + taskContent);
@@ -6717,7 +6696,7 @@ const SCENARIOS = [
           executionMode: 'subagent',
           directOverride: false,
         });
-        return runState(['next'], dir, env);
+        return runStateWithProtocol(dir, ['next']);
       };
       // ① 全串行（含依赖链）→ execute
       let res = goNext(TASK_VALID_ALL_SERIAL, 'execute');
@@ -6749,7 +6728,6 @@ const SCENARIOS = [
   {
     name: '176 伪并行 WARN：仅写测试产物的并行任务提示依赖嫌疑且不阻断',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       writeState(dir, {
         activeChange: CHANGE_ID,
@@ -6825,7 +6803,7 @@ const SCENARIOS = [
           input: JSON.stringify(input),
           env: {
             ...inherited,
-            FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json'),
+            FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir),
             ...extraEnv,
           },
           encoding: 'utf8', timeout: 60000,
@@ -7415,7 +7393,6 @@ const SCENARIOS = [
   {
     name: '198 多趟出口路由时序收敛：逐节点 exit --apply 后 next 输出 NODE 与 guard 出口 NODE 一致',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       const writeTask = (statusMap) => {
         const blk = (id, parallel, deps) =>
           '<task id="' + id + '"' + (parallel ? ' parallel="true"' : '') +
@@ -7449,7 +7426,7 @@ const SCENARIOS = [
       const assertConverge = (guardRes) => {
         assertExit(guardRes, 0);
         const gNode = nodeOf(guardRes.output);
-        const nextRes = runState(['next'], dir, env);
+        const nextRes = runStateWithProtocol(dir, ['next']);
         assertExit(nextRes, 0);
         const sNode = nodeOf(nextRes.output);
         if (gNode !== sNode) {
@@ -7533,7 +7510,7 @@ const SCENARIOS = [
       const res = runGuard(['exit', 'archive', '--apply'], dir);
       assertExit(res, 0);
       assertOut(res, 'NEXT: done');
-      const nextRes = runState(['next'], dir, env);
+      const nextRes = runStateWithProtocol(dir, ['next']);
       assertExit(nextRes, 0);
       assertOut(nextRes, 'NEXT: done');
     },
@@ -7780,7 +7757,6 @@ const SCENARIOS = [
   {
     name: '207 多趟平行转换 next 可达且与 guard NEXT 一致（完整时序锚）',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       const writeTask = (statusMap) => {
         const blk = (id, parallel, deps) =>
           '<task id="' + id + '"' + (parallel ? ' parallel="true"' : '') +
@@ -7810,7 +7786,7 @@ const SCENARIOS = [
       const assertConverge = (guardRes) => {
         assertExit(guardRes, 0);
         const gNode = nodeOf(guardRes.output);
-        const nextRes = runState(['next'], dir, env);
+        const nextRes = runStateWithProtocol(dir, ['next']);
         assertExit(nextRes, 0);
         const sNode = nodeOf(nextRes.output);
         if (gNode !== sNode) {
@@ -7882,7 +7858,7 @@ const SCENARIOS = [
       const resArch = runGuard(['exit', 'archive', '--apply'], dir);
       assertExit(resArch, 0);
       assertOut(resArch, 'NEXT: done');
-      const nextRes = runState(['next'], dir, env);
+      const nextRes = runStateWithProtocol(dir, ['next']);
       assertExit(nextRes, 0);
       assertOut(nextRes, 'NEXT: done');
     },
@@ -7894,7 +7870,6 @@ const SCENARIOS = [
   {
     name: '208 record 后未 exit 先 next 不漂移死结：后续 exit 仍可',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       // 前序产物（open/design 已完成,plan 已进入并 record——未 exit）
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## Why（为什么做）\n\nx\n\n## 范围（Scope）\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 用户故事（User Story）\n\nx\n\n## 验收准则（AC）\n\n- Given x When y Then z');
@@ -7915,7 +7890,7 @@ const SCENARIOS = [
       st.newChange = true;
       writeState(dir, st);
       // ① record 后未 exit 先 next：不把 currentNode 提前校正到 subagent-execute（路由后继）
-      const r1 = runState(['next'], dir, env);
+      const r1 = runStateWithProtocol(dir, ['next']);
       assertExit(r1, 0);
       assertOut(r1, 'NODE: plan');
       const stAfterNext = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -7928,7 +7903,7 @@ const SCENARIOS = [
       assertExit(rExit, 0);
       assertOut(rExit, 'ALL CHECKS PASSED');
       // ③ exit 推进后 next 路由到 subagent-execute（平行转换点——与 guard 出口一致）
-      const r2 = runState(['next'], dir, env);
+      const r2 = runStateWithProtocol(dir, ['next']);
       assertExit(r2, 0);
       assertOut(r2, 'NODE: subagent-execute');
     },
@@ -7940,7 +7915,6 @@ const SCENARIOS = [
   {
     name: '209 exit 漂移容忍：currentNode 已为文件推导下一节点且证据/产物齐 → exit 可过',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       // TASK 全 done（T01 串行）+ SUMMARY（execute 产物门控）
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
@@ -7985,7 +7959,6 @@ const SCENARIOS = [
   {
     name: '210 exit 漂移仍 BLOCK：漂移但证据/产物不齐（容错不放开未完成）',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
         '<task id="T01" status="done"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n');
@@ -8017,7 +7990,6 @@ const SCENARIOS = [
   {
     name: '211 路由诊断静默：剩余 pending 全串行（P→S 收尾转换）无 ROUTE WARN',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       const st = baseState('plan');
       st.completedNodes = ['open', 'design'];
@@ -8027,7 +7999,7 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
         '<task id="P01" parallel="true" status="done">\n  <action>do</action>\n  <verify>echo ok</verify>\n</task>\n' +
         '<task id="S01" parallel="false" status="pending">\n  <action>do serial</action>\n  <verify>echo ok</verify>\n</task>\n');
-      const res = runGuard(['exit', 'plan', '--apply'], dir, env);
+      const res = runGuardWithProtocol(dir, ['exit', 'plan', '--apply']);
       assertExit(res, 0);
       assertNotOut(res, 'ROUTE WARN');
       assertOut(res, 'ALL CHECKS PASSED');
@@ -8040,7 +8012,6 @@ const SCENARIOS = [
   {
     name: '212 路由诊断保持：parallel 缺 status（畸形块）仍报 ROUTE WARN',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       const st = baseState('plan');
       st.completedNodes = ['open', 'design'];
@@ -8051,7 +8022,7 @@ const SCENARIOS = [
         '<task id="P01" parallel="true" status="done">\n  <action>do</action>\n  <verify>echo ok</verify>\n</task>\n' +
         '<task id="P03" parallel="true">\n  <action>do malformed parallel</action>\n  <verify>echo ok</verify>\n</task>\n' +
         '<task id="S02" parallel="false" status="pending">\n  <action>do serial</action>\n  <verify>echo ok</verify>\n</task>\n');
-      const res = runGuard(['exit', 'plan', '--apply'], dir, env);
+      const res = runGuardWithProtocol(dir, ['exit', 'plan', '--apply']);
       assertExit(res, 0);
       assertOut(res, 'ROUTE WARN');
     },
@@ -8145,7 +8116,6 @@ const SCENARIOS = [
   {
     name: '216 directOverride 恢复：BLOCK 后补授权 / 回 subagent → exit 通过',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       const buildState = () => {
         const st = baseState('execute');
         st.completedNodes = ['open', 'design', 'plan'];
@@ -8174,7 +8144,7 @@ const SCENARIOS = [
       assertOut(rBlock, 'BLOCKED');
       // ② 恢复路径一：协调者 execution-mode direct（脚本写入授权留痕）→ exit 通过
       writeFile(dir, '.specs/' + CHANGE_ID + '/S01-SUMMARY.md', strictSummary('S01'));
-      const auth = runState(['execution-mode', 'direct'], dir, env);
+      const auth = runStateWithProtocol(dir, ['execution-mode', 'direct']);
       assertExit(auth, 0);
       assertOut(auth, 'DIRECT-AUTH');
       const st2 = readState();
@@ -8185,7 +8155,7 @@ const SCENARIOS = [
       assertExit(rAuth, 0);
       assertOut(rAuth, 'ALL CHECKS PASSED');
       // ③ 恢复路径二：回 subagent（清除 directOverride 与授权留痕）→ exit 通过
-      const back = runState(['execution-mode', 'subagent'], dir, env);
+      const back = runStateWithProtocol(dir, ['execution-mode', 'subagent']);
       assertExit(back, 0);
       const st3 = readState();
       if (st3.directOverride !== false || st3.directOverrideAt !== undefined) {
@@ -8234,7 +8204,6 @@ const SCENARIOS = [
   {
     name: '218 route-node 完成判定：done 任务 + 畸形块(缺 status) → next 仍回 execute',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
         '<task id="T01" status="done"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n' +
@@ -8249,7 +8218,7 @@ const SCENARIOS = [
         executionMode: 'subagent',
         directOverride: false,
       });
-      const res = runState(['next'], dir, env);
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: execute');
       assertNotOut(res, 'NODE: review');
@@ -8540,7 +8509,7 @@ const SCENARIOS = [
   {
     name: '229 感知层剥离：classic 资产有无不改变 hook 与 guard 判定（AC-5）',
     run: (dir) => {
-      const builtin = path.join(dir, 'reference', 'workflow-protocol.json');
+      const builtin = scenarioProtocolPath(dir);
       const build = (name, withClassic) => {
         const proj = path.join(dir, name);
         fs.mkdirSync(path.join(proj, 'reference'), { recursive: true });
@@ -8593,7 +8562,7 @@ const SCENARIOS = [
         const protocol = JSON.parse(JSON.stringify(builtinProtocol));
         protocol.kind = kind;
         fs.mkdirSync(path.join(proj, 'reference'), { recursive: true });
-        fs.copyFileSync(path.join(dir, 'reference', 'workflow-protocol.json'), path.join(proj, 'reference', 'workflow-protocol.json'));
+        fs.copyFileSync(scenarioProtocolPath(dir), path.join(proj, 'reference', 'workflow-protocol.json'));
         writeFile(proj, 'overlay-protocol.json', JSON.stringify(protocol, null, 2) + '\n');
         writeIntakeArtifacts(proj);
         const st = baseState('open');
@@ -9148,7 +9117,7 @@ const SCENARIOS = [
         '',
       ].join('\n'));
       writeFile(dir, 'package.json', '{"name":"x"}');
-      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-context']);
       assertExit(res, 0);
       assertOut(res, 'INIT-DONE');
       const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -9167,7 +9136,7 @@ const SCENARIOS = [
         '## intel-scan 元数据 ##', '- **last_intel_scan**: x', '- **scanner**: x', '- **下次重扫建议**: x',
         '',
       ].join('\n'));
-      const boundary = runState(['init', CHANGE_ID + '-2', '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const boundary = runStateWithProtocol(dir, ['init', CHANGE_ID + '-2', '--init-context']);
       assertExit(boundary, 0);
       assertOut(boundary, 'INIT-VALIDATE-FAILED');
       assertOut(boundary, '项目概要');
@@ -10416,7 +10385,6 @@ const SCENARIOS = [
       writeIntakeArtifacts(dir);
       const taskPath = '.specs/' + CHANGE_ID + '/TASK.md';
       const statePath = path.join(dir, '.flow-comet', 'flow-comet-state.json');
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
         '# REVIEW\n\n## 发现\n\n### Critical\n\n- 无\n\n### Major\n\n- 无\n\n### Minor\n\n- 无\n\n## 结论\n\n审查发现需修复项，Fix 任务已追加；待 execute 出口完成后重新出口。\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
@@ -10532,12 +10500,12 @@ const SCENARIOS = [
         ...handoffFor(['T-FIX-01']),
       };
       writeState(dir, after);
-      assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md']), 0);
       const recDoneExit = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(recDoneExit, 0);
       assertOut(recDoneExit, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
       assertOut(recDoneExit, 'NODE: review');
-      assertExit(runState(['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md'], dir, env), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md']), 0);
       assertExit(runGuard(['entry', 'review'], dir), 0);
       const recDoneReview = runGuard(['exit', 'review', '--apply'], dir);
       assertExit(recDoneReview, 0);
@@ -10580,12 +10548,12 @@ const SCENARIOS = [
         ...handoffFor(['T-FIX-01']),
       };
       writeState(dir, after);
-      assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md']), 0);
       const recDoneVerifyExit = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(recDoneVerifyExit, 0);
       assertOut(recDoneVerifyExit, 'FIX-BATCH: 回源节点 verify（execute 出口已完成）');
       assertOut(recDoneVerifyExit, 'NODE: verify');
-      assertExit(runState(['skill-load', 'verify', 'flow-comet-verify', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'verify', 'flow-comet-verify', '--prompt', 'flow-kit/prompts/7-integration.md']), 0);
       assertExit(runGuard(['entry', 'verify'], dir), 0);
       const recDoneVerify = runGuard(['exit', 'verify', '--apply'], dir);
       assertExit(recDoneVerify, 0);
@@ -10620,7 +10588,7 @@ const SCENARIOS = [
       assertOut(rParBlock, 'BLOCKED: 存在未归位/未跑出口的 Fix 批次');
       assertNotOut(rParBlock, 'ALL CHECKS PASSED');
       writeState(dir, reviewState);
-      const rParNext = runState(['next'], dir, env);
+      const rParNext = runStateWithProtocol(dir, ['next']);
       assertExit(rParNext, 0);
       assertOut(rParNext, 'FIX-BATCH: 归位 subagent-execute（源节点 review）');
       assertOut(rParNext, 'NODE: subagent-execute');
@@ -10642,7 +10610,7 @@ const SCENARIOS = [
         ...handoffFor(['P-FIX-01']),
       };
       writeState(dir, after);
-      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md']), 0);
       const rParExit = runGuard(['exit', 'subagent-execute', '--apply'], dir);
       assertExit(rParExit, 0);
       assertOut(rParExit, 'FIX-BATCH: 回源节点 review（subagent-execute 出口已完成）');
@@ -10657,7 +10625,7 @@ const SCENARIOS = [
         || typeof parFamilyExit.taskSetSignature !== 'string' || parFamilyExit.taskSetSignature === '') {
         throw new Error('并行修复出口应记录本 change + taskSetSignature 的家族出口事件，实际 ' + JSON.stringify(parFamilyExit));
       }
-      assertExit(runState(['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md'], dir, env), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md']), 0);
       assertExit(runGuard(['entry', 'review'], dir), 0);
       const rParSource = runGuard(['exit', 'review', '--apply'], dir);
       assertExit(rParSource, 0);
@@ -10695,7 +10663,7 @@ const SCENARIOS = [
         ...handoffFor(['P-FIX-01']),
       };
       writeState(dir, after);
-      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md']), 0);
       const rDoneParExit = runGuard(['exit', 'subagent-execute', '--apply'], dir);
       assertExit(rDoneParExit, 0);
       assertOut(rDoneParExit, 'FIX-BATCH: 回源节点 review（subagent-execute 出口已完成）');
@@ -10727,7 +10695,6 @@ const SCENARIOS = [
   {
     name: '253 next Fix 回退态显式归位：review/verify 源 + 审计行（无 pending 反例不归位；done-but-unclosed 归位）',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       const taskPath = '.specs/' + CHANGE_ID + '/TASK.md';
       const base = {
@@ -10747,7 +10714,7 @@ const SCENARIOS = [
       // ① review 源：pending Fix 任务在场 → NODE: execute + 审计行 + 机器字段归位写盘
       writeFile(dir, taskPath, fixBatchTaskText('pending'));
       writeState(dir, base);
-      const resReview = runState(['next'], dir, env);
+      const resReview = runStateWithProtocol(dir, ['next']);
       assertExit(resReview, 0);
       assertOut(resReview, 'FIX-BATCH: 归位 execute（源节点 review）');
       assertOut(resReview, 'NODE: execute');
@@ -10767,7 +10734,7 @@ const SCENARIOS = [
         enteredNodes: [...base.enteredNodes, 'verify'],
         evidence: { ...base.evidence, review: { summary: 'review complete' }, verify: { summary: 'verify in progress' } },
       });
-      const resVerify = runState(['next'], dir, env);
+      const resVerify = runStateWithProtocol(dir, ['next']);
       assertExit(resVerify, 0);
       assertOut(resVerify, 'FIX-BATCH: 归位 execute（源节点 verify）');
       assertOut(resVerify, 'NODE: execute');
@@ -10784,7 +10751,7 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
         '# REVIEW\n\n## 发现\n\n### Critical\n\n- 无\n\n### Major\n\n- 无\n\n### Minor\n\n- 无\n\n## 结论\n\nFix 批次由 execute 完成，待回源重新出口。\n');
       writeState(dir, base);
-      const resNoFix = runState(['next'], dir, env);
+      const resNoFix = runStateWithProtocol(dir, ['next']);
       assertExit(resNoFix, 0);
       assertNotOut(resNoFix, 'FIX-BATCH: 归位 execute');
       // ③ 全局缺席：无 pending Fix 任务的回程态，state 侧无 Fix 因果——不得出现任何 FIX-BATCH
@@ -10799,7 +10766,7 @@ const SCENARIOS = [
       // ④ done-but-unclosed 回退态（全 done + history 最新 exit execute 签名仍是追加前值）：
       // next 同样显式归位 execute（修复前 done 变体无恢复通道，next 停在源节点）。
       writeState(dir, { ...base, history: fixBatchHistoryWithStaleExecuteExit() });
-      const resDoneRollback = runState(['next'], dir, env);
+      const resDoneRollback = runStateWithProtocol(dir, ['next']);
       assertExit(resDoneRollback, 0);
       assertOut(resDoneRollback, 'FIX-BATCH: 归位 execute（源节点 review）');
       assertOut(resDoneRollback, 'NODE: execute');
@@ -10813,7 +10780,7 @@ const SCENARIOS = [
       // 不得停在源节点，也不得错配回 execute。
       writeFile(dir, taskPath, fixBatchParallelTaskText('pending'));
       writeState(dir, base);
-      const resParallelReview = runState(['next'], dir, env);
+      const resParallelReview = runStateWithProtocol(dir, ['next']);
       assertExit(resParallelReview, 0);
       assertOut(resParallelReview, 'FIX-BATCH: 归位 subagent-execute（源节点 review）');
       assertOut(resParallelReview, 'NODE: subagent-execute');
@@ -10833,7 +10800,7 @@ const SCENARIOS = [
         enteredNodes: [...base.enteredNodes, 'verify'],
         evidence: { ...base.evidence, review: { summary: 'review complete' }, verify: { summary: 'verify in progress' } },
       });
-      const resParallelVerify = runState(['next'], dir, env);
+      const resParallelVerify = runStateWithProtocol(dir, ['next']);
       assertExit(resParallelVerify, 0);
       assertOut(resParallelVerify, 'FIX-BATCH: 归位 subagent-execute（源节点 verify）');
       assertOut(resParallelVerify, 'NODE: subagent-execute');
@@ -10848,7 +10815,7 @@ const SCENARIOS = [
       writeFile(dir, taskPath, fixBatchParallelTaskText('done'));
       writeFile(dir, '.specs/' + CHANGE_ID + '/P-FIX-01-SUMMARY.md', strictSummary('P-FIX-01'));
       writeState(dir, { ...base, history: fixBatchHistoryWithStaleFamilyExit('subagent-execute') });
-      const resDoneParallel = runState(['next'], dir, env);
+      const resDoneParallel = runStateWithProtocol(dir, ['next']);
       assertExit(resDoneParallel, 0);
       assertOut(resDoneParallel, 'FIX-BATCH: 归位 subagent-execute（源节点 review）');
       assertOut(resDoneParallel, 'NODE: subagent-execute');
@@ -10865,7 +10832,7 @@ const SCENARIOS = [
         const stRound = readScenarioState(dir);
         stRound.fixRoundsByChange = { [CHANGE_ID]: round - 1 };
         writeState(dir, stRound);
-        const resRound = runState(['next'], dir, env);
+        const resRound = runStateWithProtocol(dir, ['next']);
         assertExit(resRound, 0);
         assertOut(resRound, 'FIX-BATCH: 归位 execute（源节点 review）（第 ' + round + '/3 轮）');
         const stAfterRound = readScenarioState(dir);
@@ -10878,7 +10845,7 @@ const SCENARIOS = [
       writeState(dir, { ...base, fixRoundsByChange: { [CHANGE_ID]: 3 } });
       const statePath = path.join(dir, '.flow-comet', 'flow-comet-state.json');
       const beforeRound4 = fs.readFileSync(statePath, 'utf8');
-      const resRound4 = runState(['next'], dir, env);
+      const resRound4 = runStateWithProtocol(dir, ['next']);
       assertExit(resRound4, 1);
       assertOut(resRound4, 'BLOCKED: Fix 批次受控归位已达 3 轮上限');
       assertOut(resRound4, '继续修');
@@ -10897,7 +10864,7 @@ const SCENARIOS = [
       stBadOverride.evidence.review.fixRoundOverride = { round: 4 };
       writeState(dir, stBadOverride);
       const badOverrideBytes = fs.readFileSync(statePath, 'utf8');
-      const resBadOverride = runState(['next'], dir, env);
+      const resBadOverride = runStateWithProtocol(dir, ['next']);
       assertExit(resBadOverride, 1);
       assertOut(resBadOverride, 'BLOCKED: Fix 批次受控归位已达 3 轮上限');
       assertNotOut(resBadOverride, '（第 4/3 轮）');
@@ -10913,7 +10880,7 @@ const SCENARIOS = [
       const stOverride = JSON.parse(fs.readFileSync(statePath, 'utf8'));
       stOverride.evidence.review.fixRoundOverride = { round: 4, at: '2026-09-25T00:00:00.000Z', source: 'fixture-user' };
       writeState(dir, stOverride);
-      const resOverride = runState(['next'], dir, env);
+      const resOverride = runStateWithProtocol(dir, ['next']);
       assertExit(resOverride, 0);
       assertOut(resOverride, '（第 4/3 轮）');
       const stAuthorized = readScenarioState(dir);
@@ -10931,7 +10898,6 @@ const SCENARIOS = [
   {
     name: '254 next Fix 回程豁免：review 源（REVIEW.md 在场不跳过；无 inProgress 证据也不 BLOCK）',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', fixBatchTaskText('done'));
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
@@ -10952,7 +10918,7 @@ const SCENARIOS = [
       };
       // ① 真实回程态（review 已 entry）→ 审计行 + NODE: review + state 只读不改写
       writeState(dir, base);
-      const res = runState(['next'], dir, env);
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'RETURN: 回程源节点 review');
       assertOut(res, 'NODE: review');
@@ -10969,7 +10935,7 @@ const SCENARIOS = [
         enteredNodes: completedNodes.slice(),
         evidence: { execute: { summary: 'fix batch executed' }, 'subagent-execute': { summary: 'delegated' } },
       });
-      const resNoEvidence = runState(['next'], dir, env);
+      const resNoEvidence = runStateWithProtocol(dir, ['next']);
       assertExit(resNoEvidence, 0);
       assertOut(resNoEvidence, 'RETURN: 回程源节点 review');
       assertOut(resNoEvidence, 'NODE: review');
@@ -10981,7 +10947,7 @@ const SCENARIOS = [
       }
       // ③ 无任何 evidence 的引擎回程态 → 回程豁免先于「疑似未 exit」门禁，不 BLOCK
       writeState(dir, { ...base, enteredNodes: [], evidence: {} });
-      const resNoAnyEvidence = runState(['next'], dir, env);
+      const resNoAnyEvidence = runStateWithProtocol(dir, ['next']);
       assertExit(resNoAnyEvidence, 0);
       assertOut(resNoAnyEvidence, 'RETURN: 回程源节点 review');
       assertOut(resNoAnyEvidence, 'NODE: review');
@@ -10999,7 +10965,6 @@ const SCENARIOS = [
   {
     name: '255 next Fix 回程豁免：verify 源（TEST/UAT 在场不跳过；不漂移 archive/不 BLOCK）',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', fixBatchTaskText('done'));
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
@@ -11026,7 +10991,7 @@ const SCENARIOS = [
       };
       // ① 真实回程态（verify 已 entry）→ 审计行 + NODE: verify + state 只读不改写
       writeState(dir, base);
-      const res = runState(['next'], dir, env);
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'RETURN: 回程源节点 verify');
       assertOut(res, 'NODE: verify');
@@ -11043,7 +11008,7 @@ const SCENARIOS = [
         enteredNodes: completedNodes.slice(),
         evidence: { execute: { summary: 'fix batch executed' }, review: { summary: 'review complete' } },
       });
-      const resNoEvidence = runState(['next'], dir, env);
+      const resNoEvidence = runStateWithProtocol(dir, ['next']);
       assertExit(resNoEvidence, 0);
       assertOut(resNoEvidence, 'RETURN: 回程源节点 verify');
       assertOut(resNoEvidence, 'NODE: verify');
@@ -11055,7 +11020,7 @@ const SCENARIOS = [
       }
       // ③ 无任何 evidence → 回程豁免先于「疑似未 exit」门禁，不 BLOCK
       writeState(dir, { ...base, enteredNodes: [], evidence: {} });
-      const resNoAnyEvidence = runState(['next'], dir, env);
+      const resNoAnyEvidence = runStateWithProtocol(dir, ['next']);
       assertExit(resNoAnyEvidence, 0);
       assertOut(resNoAnyEvidence, 'RETURN: 回程源节点 verify');
       assertOut(resNoAnyEvidence, 'NODE: verify');
@@ -11069,7 +11034,6 @@ const SCENARIOS = [
   {
     name: '256 负例：正常多趟中间态（execute 已完成 + 可委托 parallel pending）不误分流',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', renderMultiWaveTasks(['T01', 'P01', 'P02', 'T02']));
       for (const id of ['T01', 'P01', 'P02', 'T02']) {
@@ -11090,7 +11054,7 @@ const SCENARIOS = [
         directOverride: false,
         newChange: true,
       });
-      const res = runState(['next'], dir, env);
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: subagent-execute');
       assertNotOut(res, 'NODE: review');
@@ -11109,7 +11073,6 @@ const SCENARIOS = [
   {
     name: '257 旧 change 兼容：无 newChange 的回退/回程态不新增 BLOCK 且 NODE 正确',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       const taskPath = '.specs/' + CHANGE_ID + '/TASK.md';
       const completedNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute'];
@@ -11127,7 +11090,7 @@ const SCENARIOS = [
       // ① 旧 change 回退态（pending Fix 任务）→ NODE: execute + 审计行，不得 BLOCK
       writeFile(dir, taskPath, fixBatchTaskText('pending'));
       writeState(dir, oldState);
-      const resRollback = runState(['next'], dir, env);
+      const resRollback = runStateWithProtocol(dir, ['next']);
       assertExit(resRollback, 0);
       assertNotOut(resRollback, 'BLOCKED');
       assertOut(resRollback, 'FIX-BATCH: 归位 execute（源节点 review）');
@@ -11146,7 +11109,7 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
         '# REVIEW\n\n## 发现\n\n### Critical\n\n- 无\n\n### Major\n\n- 无\n\n### Minor\n\n- 无\n\n## 结论\n\n待回源出口。\n');
       writeState(dir, oldState);
-      const resReturn = runState(['next'], dir, env);
+      const resReturn = runStateWithProtocol(dir, ['next']);
       assertExit(resReturn, 0);
       assertNotOut(resReturn, 'BLOCKED');
       assertOut(resReturn, 'RETURN: 回程源节点 review');
@@ -11159,7 +11122,7 @@ const SCENARIOS = [
       // RETURN 回程行——缺 taskSetSignature、TASK 无 Fix 段/编号 → 不得冒充 FIX-BATCH。
       writeFile(dir, taskPath, '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n');
       writeState(dir, oldState);
-      const resReturnNoMarker = runState(['next'], dir, env);
+      const resReturnNoMarker = runStateWithProtocol(dir, ['next']);
       assertExit(resReturnNoMarker, 0);
       assertNotOut(resReturnNoMarker, 'BLOCKED');
       assertNotOut(resReturnNoMarker, 'FIX-BATCH');
@@ -11172,13 +11135,13 @@ const SCENARIOS = [
   },
 
   // 258: 三节点 SKILL 文本锁（AC-9 / T05 已落地）——execute/review/verify 均含
-  // 「## Fix 批次状态机路径」段，段内含受控归位 + 回源节点跑出口 + 禁止绕过；不得把
+  // 「## 修复回路状态机路径」段，段内含受控归位 + 回源节点跑出口 + 禁止绕过；不得把
   // 直接 exit 源节点收场或 advance 当正常路径（反捷径文本锚）。
   // 布局感知（级 3 e2e 副本缺陷）：技能树从 suite 脚本自身位置推导
   // （<skillsRoot>/flow-comet/scripts/ → 组件技能为 <skillsRoot> 下同级目录），权威源
   // .flow-comet/skills/ 与安装副本 .claude|.agents|.dsh/skills/ 同一相对布局通吃。
   {
-    name: '258 技能文本锁：三节点 SKILL 含 Fix 批次状态机路径（禁止直接 exit/advance 为正常路径）',
+    name: '258 技能文本锁：三节点 SKILL 含修复回路状态机路径（禁止直接 exit/advance 为正常路径）',
     run: (dir) => {
       const componentSkills = ['flow-comet-execute', 'flow-comet-review', 'flow-comet-verify'];
       // 布局感知回归锚（合成安装副本）：suite 位于 <skillsRoot>/flow-comet/scripts/ 时组件技能
@@ -11188,7 +11151,7 @@ const SCENARIOS = [
       const syntheticScriptsDir = path.join(syntheticSkillsRoot, 'flow-comet', 'scripts');
       for (const nodeSkill of componentSkills) {
         writeFile(dir, path.join('synthetic-carrier', '.claude', 'skills', nodeSkill, 'SKILL.md'),
-          '## Fix 批次状态机路径\n\n受控归位（合成布局锚）\n');
+          '## 修复回路状态机路径\n\n受控归位（合成布局锚）\n');
         const expected = path.join(syntheticSkillsRoot, nodeSkill, 'SKILL.md');
         const resolved = resolveComponentSkillFile(nodeSkill, syntheticScriptsDir);
         if (resolved !== expected) {
@@ -11210,27 +11173,27 @@ const SCENARIOS = [
       }
       // 真实三节点文本锁：从本 suite 自身位置推导技能树（不假定权威源布局）。逐份断言：
       // 段在场 + 6 关键词 + 反 advance 捷径 + 不得把直接 exit 源节点收场当正常路径；同时收集
-      // 段正文（同一区间：首个 ## Fix 批次状态机路径 → 下一 ## 或 EOF，标题不计入）供 F-4 互比。
+      // 段正文（同一区间：首个 ## 修复回路状态机路径 → 下一 ## 或 EOF，标题不计入）供 F-4 互比。
       const sectionEntries = [];
       for (const nodeSkill of componentSkills) {
         const file = resolveComponentSkillFile(nodeSkill);
         const text = fs.readFileSync(file, 'utf8');
-        const match = text.match(/(?:^|\r?\n)## Fix 批次状态机路径\r?\n([\s\S]*?)(?=\r?\n## |$)/);
+        const match = text.match(/(?:^|\r?\n)## 修复回路状态机路径\r?\n([\s\S]*?)(?=\r?\n## |$)/);
         if (!match) {
-          throw new Error(nodeSkill + ' SKILL.md 缺「## Fix 批次状态机路径」段');
+          throw new Error(nodeSkill + ' SKILL.md 缺「## 修复回路状态机路径」段');
         }
         const section = match[1];
         for (const keyword of ['受控归位', 'NODE: execute', '回源节点跑出口', 'entry <源节点>', 'exit <源节点> --apply', '禁止绕过']) {
           if (!section.includes(keyword)) {
-            throw new Error(nodeSkill + ' Fix 批次状态机路径段缺关键词: ' + keyword);
+            throw new Error(nodeSkill + ' 修复回路状态机路径段缺关键词: ' + keyword);
           }
         }
         if (section.includes('advance')) {
-          throw new Error(nodeSkill + ' Fix 批次状态机路径段不得把 advance 作为正常路径');
+          throw new Error(nodeSkill + ' 修复回路状态机路径段不得把 advance 作为正常路径');
         }
         for (const line of section.split(/\r?\n/)) {
           if (line.includes('直接') && line.includes('exit') && !/禁止|不得|会被 BLOCKED/.test(line)) {
-            throw new Error(nodeSkill + ' Fix 批次状态机路径段不得把直接 exit 源节点收场作为正常路径: ' + line.trim());
+            throw new Error(nodeSkill + ' 修复回路状态机路径段不得把直接 exit 源节点收场作为正常路径: ' + line.trim());
           }
         }
         // F-4 段一致性锁：CRLF→LF 归一、不 trim（行尾/空白差异同样算漂移），正文参与三份互比。
@@ -11241,7 +11204,7 @@ const SCENARIOS = [
       // 套件失败；失败信息给出三份 hash 与首处差异位置/上下文（L-064 反向构造证明判别力）。
       const emptyEntry = sectionEntries.find((entry) => entry.body.trim() === '');
       if (emptyEntry) {
-        throw new Error('Fix 批次状态机路径段不得为空: ' + emptyEntry.nodeSkill);
+        throw new Error('修复回路状态机路径段不得为空: ' + emptyEntry.nodeSkill);
       }
       const baselineEntry = sectionEntries[0];
       for (const entry of sectionEntries.slice(1)) {
@@ -11250,7 +11213,7 @@ const SCENARIOS = [
         let diffIndex = 0;
         while (diffIndex < limit && baselineEntry.body[diffIndex] === entry.body[diffIndex]) diffIndex += 1;
         const context = baselineEntry.body.slice(Math.max(0, diffIndex - 40), diffIndex + 40);
-        throw new Error('Fix 批次状态机路径段三份 SKILL 正文不一致（F-4 段一致性锁）：'
+        throw new Error('修复回路状态机路径段三份 SKILL 正文不一致（F-4 段一致性锁）：'
           + baselineEntry.nodeSkill + ' sha256=' + baselineEntry.hash
           + ' vs ' + entry.nodeSkill + ' sha256=' + entry.hash
           + '；首处差异 @' + diffIndex + '（基准上下文: ' + JSON.stringify(context) + '）');
@@ -11537,26 +11500,25 @@ const SCENARIOS = [
           + JSON.stringify(appliedEvent));
       }
       // ⑧ select 入口收紧：多段路径（归档相对路径形态）与保留目录名不得被选为 activeChange
-      const selectEnv = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       fs.mkdirSync(path.join(dir, '.specs', 'archive', '2026-09-26-' + CHANGE_ID), { recursive: true });
       const beforeSelect = readStateBytes(dir);
-      assertExit(runState(['select', 'archive/2026-09-26-' + CHANGE_ID], dir, selectEnv), 1);
+      assertExit(runStateWithProtocol(dir, ['select', 'archive/2026-09-26-' + CHANGE_ID]), 1);
       assertStateBytesUnchanged(dir, beforeSelect, 'select 归档相对路径');
-      assertExit(runState(['select', 'archive'], dir, selectEnv), 1);
+      assertExit(runStateWithProtocol(dir, ['select', 'archive']), 1);
       assertStateBytesUnchanged(dir, beforeSelect, 'select 保留目录名');
       // ⑧b 名字变体族：保留目录名大小写变体（ARCHIVE/Archive）、真实目录名的大小写变体（CH）与
       // 首尾空白变体在大小写不敏感文件系统上同样可达，但会让 activeChange 与实际目录名不一致
       // （轮次事件按 activeChange 精确匹配 → 配额被换键重置）→ 一律拒绝且 state 字节零改写
-      assertExit(runState(['select', 'ARCHIVE'], dir, selectEnv), 1);
+      assertExit(runStateWithProtocol(dir, ['select', 'ARCHIVE']), 1);
       assertStateBytesUnchanged(dir, beforeSelect, 'select 保留目录名大小写变体');
-      assertExit(runState(['select', 'Archive'], dir, selectEnv), 1);
+      assertExit(runStateWithProtocol(dir, ['select', 'Archive']), 1);
       assertStateBytesUnchanged(dir, beforeSelect, 'select 保留目录名混合大小写变体');
       const caseVariant = String(CHANGE_ID).toUpperCase();
       if (caseVariant !== CHANGE_ID) {
-        assertExit(runState(['select', caseVariant], dir, selectEnv), 1);
+        assertExit(runStateWithProtocol(dir, ['select', caseVariant]), 1);
         assertStateBytesUnchanged(dir, beforeSelect, 'select 真实目录名大小写变体');
       }
-      assertExit(runState(['select', ' ' + CHANGE_ID + ' '], dir, selectEnv), 1);
+      assertExit(runStateWithProtocol(dir, ['select', ' ' + CHANGE_ID + ' ']), 1);
       assertStateBytesUnchanged(dir, beforeSelect, 'select 首尾空白变体');
       if (readScenarioState(dir).activeChange !== CHANGE_ID) {
         throw new Error('被拒绝的 select 不得改写 activeChange：' + JSON.stringify(readScenarioState(dir).activeChange));
@@ -12534,7 +12496,7 @@ for (const sc of SCENARIOS) {
     // 场景 runRoot=tmpdir、内置协议默认路径在 packageRoot（tmpdir 外）→ 复制到 <dir>/reference/ 内，
     // 由 runGuard 的 FLOW_COMET_PROTOCOL env 指向场景内副本。场景内 writeFile('reference/...') 或
     // --protocol CLI 覆盖保持后写优先语义（CLI --protocol 优先级高于 env）。
-    const builtinCopy = path.join(dir, 'reference', 'workflow-protocol.json');
+    const builtinCopy = scenarioProtocolPath(dir);
     fs.mkdirSync(path.dirname(builtinCopy), { recursive: true });
     fs.copyFileSync(BUILTIN_PROTOCOL_SOURCE, builtinCopy);
     await sc.run(dir);
