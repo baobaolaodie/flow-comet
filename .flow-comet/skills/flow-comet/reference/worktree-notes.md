@@ -37,11 +37,12 @@ git ls-tree <branch> <path>      # 确认产物在目标仓库哪个分支、路
 
 测试载体(如演练项目)若 git 跟踪 `.flow-comet/flow-comet-state.json`(主仓 gitignore 它,载体可能不同),**恢复/回退操作不得用 `git reset --hard`**——会连带把运行时状态回退到历史版本,状态机倒退(端到端验证实证事故:回退后重跑 init + 重录证据恢复,耗时约 10 分钟)。恢复工件用精确 `git checkout -- <path>`(只回退指定文件),不用整树 reset。
 
-## 4.5. Codex 平台的 worktree 委托差异(实测 2026-08-14)
+## 4.5. Codex 平台的 worktree 委托差异（依据 2026-09-30 真机重测订正）
 
-Codex 环境的子代理(spawn_agent)无 `isolation:"worktree"` 参数——自动 worktree 假定仅 Claude Code 适用。**受支持的工作流是串行执行:Codex 不使用并行委托**——任务逐个走 `execute` 节点交付(写边界天然互斥),直到守卫也能识别手工 worktree 路径为止(属机制变更,尚未落地)。**手工 `git worktree add <路径> -b <分支>` + 在 worktree 内 `codex exec` 委托不是受支持路径(不应使用)**:守卫按 `.claude/worktrees/**` 前缀识别隔离区,手工建出的路径不在该前缀下、不被放行覆盖,写入仍会被协调者白名单拦截——详见下方「hook 会话 root 继承」段。worktree-notes 第 3 节的"委托 prompt 内联全部上游上下文"在 Codex 同样适用且是唯一可靠路径(串行委托时同样建议内联)。**注意**:worktree 同样不含 `flow-kit/` 与 `.agents/`(它们是目标仓库内容,不在 worktree 快照内)——委托 prompt 内联必须覆盖这些依赖。
+Codex 环境的子代理(spawn_agent)无 `isolation:"worktree"` 参数——自动 worktree 假定仅 Claude Code 适用。**受支持的工作流仍是串行执行:Codex 不使用并行委托**——任务逐个走 `execute` 节点交付(写边界天然互斥)。**理由已订正**:不是「写入会被拦」,而是 2026-09-30 真机重测(codex-cli 0.146.0 / Windows;`codex exec --json --ephemeral` headless 形态)显示——手工 worktree 形态下隔离与白名单执行缺失(worktree 通常缺 gitignored 运行态 state → 守卫走「无活跃 workflow」放行)或可被降级放行(hook 命令指向主仓安装副本时守卫报错退出,宿主把 hook 失败降级为非阻塞 → 写入照常落地);`apply_patch` 的写入目标不可解析;hook 触发依赖信任且稳定性未证(隔离 `CODEX_HOME`、无持久信任时默认 headless 不执行项目 hook)。**手工 `git worktree add <路径> -b <分支>` + 在 worktree 内 `codex exec` 委托不是受支持路径(不应使用),也不得作为绕过手段**。worktree-notes 第 3 节的"委托 prompt 内联全部上游上下文"在 Codex 同样适用且是唯一可靠路径(串行委托时同样建议内联)。**注意**:worktree 同样不含 `flow-kit/` 与 `.agents/`(它们是目标仓库内容,不在 worktree 快照内)——委托 prompt 内联必须覆盖这些依赖。
 
-**hook 会话 root 继承(实测 2026-08-15,与 CC 语义不同;2026-09-12 修订)**:Codex worktree 子代理的**会话 root 仍是主仓库**——写入守卫 hook 以主仓库 `.flow-comet/flow-comet-state.json` 的 `currentNode`/`executionMode` 判定白名单,`execute`/`subagent-execute` 阶段协调者白名单 `.specs/` 会**拦截子代理在 worktree 内写源码**(此前文档声称"worktree 内无 .codex/ → hook 不生效"与实测不符,已修正)。**处理方式(2026-09-12 修订——受支持路径)**:CC 与 Codex 的判据不同,覆盖面也不同。CC 侧守卫按路径前缀识别隔离区(`.claude/worktrees/**` 内写入放行);Codex 无 `Agent` 工具的 `isolation: "worktree"` 能力,手工 `git worktree add <任意路径>` 建出的路径不在该前缀下、**不被放行覆盖**,写入仍会被协调者白名单拦截。故 **Codex 平台要求串行执行:不使用并行委托**——任务逐个走 `execute` 节点交付,直到守卫也能识别手工 worktree(属机制变更)。**已废弃的绕过手段(不应使用)**:用 Python `open()` 等 File API 直写曾被记为命令级检测缺口的规避通道——它**绕过写入守卫防线**,不是受支持做法,现明确废止,不得再作为委托方案使用。协调者层面的辅助做法(不改变上述结论):委托 prompt 内联全部上游上下文,验收产物时按 write_files 边界核对。CC 平台的 worktree 子代理在 v1.5.0-rc.2 之前无此问题:runRoot 取进程 cwd(即 worktree 内),区内无 state → 按设计放行;该版起的锚定链把 runRoot 锚到主仓库(`CLAUDE_PROJECT_DIR`),隔离子代理会被误判为协调者而遭白名单拦截——守卫已对 worktree 隔离区放行(区内写源码不受协调者白名单约束,见机制文档 1.4)。
+**hook 会话 root 实测订正(依据 2026-09-30 真机重测;codex-cli 0.146.0 / Windows;`codex exec --json --ephemeral` headless 形态)**:旧结论「手工 worktree 内的写入会被协调者白名单拦住、会话 root 仍是主仓库」被**推翻并收窄**——实测 hook 进程 cwd == 载荷 `cwd` == 会话工作根(cwd=项目 / `-C` / 手工 worktree 三形态一致);**Codex 原生子代理(`spawn_agent`)形态未覆盖,不得外推**。手工 worktree 形态下相对路径写入**不会**被拦:worktree 通常缺 gitignored 运行态 state → 守卫走「无活跃 workflow」放行;若 hook 命令仍指向主仓安装副本(runRoot 外),守卫因「workflow protocol file must stay inside the project root」报错退出,Codex 将 hook 失败降级为非阻塞 → 写入照常落地。**静态喂测(独立复现)**:守卫白名单只覆盖**解析后仍在 runRoot 内**的目标;`Write/Edit` 的 `file_path` 解析为 runRoot 外时跳过判定(**fail-open**,已知缺口、未闭合),而 Bash 写命令同目标仍 `decision:block`(两分支不对称)。**`apply_patch`**:会触发 PreToolUse,但 `tool_name="Bash"`、补丁正文在 `tool_input.command`(heredoc)、**无 `file_path`**;守卫不解析补丁体 → 目标不被提取、放行。独立复验复现了载荷与守卫盲区;**「文件确实落盘」子项在复验环境因 apply_patch shim 失败未复现(首次真机重测环境曾落盘)**——两环境存在差异,按此如实理解。**hook 触发条件**:隔离 `CODEX_HOME` 无持久信任时默认 headless **不执行**项目 hook;`hooks` 特性默认 enabled、可被项目配置/开关覆盖;`codex_hooks` 是 deprecated 别名;per-invocation 信任是必要因素之一,但独立复验显示 trust-only 触发**不稳定**(3/21;补 `--dangerously-bypass-approvals-and-sandbox` 后 5/5)——**不得写成稳定/确定性保证**。持久信任与 TUI 形态未覆盖。
+**已废弃的绕过手段(不应使用)**:用 Python `open()` 等 File API 直写曾被记为命令级检测缺口的规避通道——它**绕过写入守卫防线**,不是受支持做法,现明确废止,不得再作为委托方案使用。CC 平台的 worktree 子代理在 v1.5.0-rc.2 之前无此问题:runRoot 取进程 cwd(即 worktree 内),区内无 state → 按设计放行;该版起的锚定链把 runRoot 锚到主仓库(`CLAUDE_PROJECT_DIR`),隔离子代理会被误判为协调者而遭白名单拦截——守卫已对 worktree 隔离区放行(区内写源码不受协调者白名单约束,见机制文档 1.4)。
 
 ## 4.6. dsh 平台的委托形态:进程内子代理,无需 worktree / 隔离区(实测核对)
 
@@ -53,7 +54,7 @@ dsh 的子代理是**平台进程内子代理**——不创建独立工作区,�
 |---|---|---|---|
 | Claude Code | `Agent` 工具 `isolation: "worktree"` | 有(`.claude/worktrees/**`,守卫放行) | 并行委托需隔离;委托前 commit 上游工件(见第 3 节) |
 | dsh | 平台进程内子代理 | **无**——无需创建 | 写入守卫按会话身份分派放行;同工作区并行靠 `write_files` 边界与提交时点作相互隔离纪律 |
-| Codex | 串行交付(不使用并行委托) | 不适用 | 无 `isolation: "worktree"` 能力;手工 `git worktree add` 的路径不被守卫覆盖(见 4.5) |
+| Codex | 串行交付(不使用并行委托) | 不适用 | 无 `isolation: "worktree"` 能力;手工 `git worktree add` 非受支持路径——实测形态下隔离/白名单执行缺失或可被降级放行、`apply_patch` 目标不可解析、hook 触发依赖信任且稳定性未证(见 4.5,**不是「写入会被拦」**) |
 
 **同一工作区的通用边界**:进程内并行子代理会看到彼此未提交的中间态——任务的 `write_files` 边界互斥与提交时点(见第 3 节第 2/4 条)就是相互隔离纪律;dsh 上发起并行委托前同样必须先确认 `write_files` 互不重叠。
 

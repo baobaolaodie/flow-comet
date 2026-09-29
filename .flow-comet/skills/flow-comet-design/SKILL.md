@@ -25,6 +25,8 @@ Responsibility: 技术栈选型 + ADR + 数据流。生成 DESIGN.md(轻量流�
 
 guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / templateSectionPatterns；「填得好不好」由 review 把关。
 
+> **模板权威**：本节点产出工件的段形唯一权威 = `flow-kit/templates/**`；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+
 # Design
 
 ## Node Goal
