@@ -43,6 +43,8 @@ guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好�
 - **② [P] 只给本波确有并发同伴的任务**：`parallel="true"` 仅适用于同波确有其他可并行同伴、且 write_files 互不重叠的任务；孤立任务一律串行——「互不冲突」只是必要条件，不等于应标 `[P]`。
 - **③ [P] × direct 模式**：`[P]` 任务只在 `subagent-execute` 节点委托消化；direct 模式只放行**串行任务**的主代理直写，`parallel="true"` 任务在 direct 下仍必须委托——direct 不是并行任务的逃生口。共享工作区下以 `write_files` 互斥 + 提交时点（提交前 diff 边界）作为并行子代理的相互隔离纪律。
 
+**上游语义显式覆盖**：flow-kit 上游（`flow-kit/prompts/3-task.md` 等 vendored 只读文件）的宽松语义——「无冲突即可标 [P]」「同层即同波并行」——以本节为准（显式覆盖；上游只读，不做修改）。
+
 # Plan
 
 ## Node Goal
@@ -81,9 +83,10 @@ This node decomposes the technical design into atomic, executable tasks with cle
    - `done`: One sentence completion criteria, corresponding to an AC sub-item.
 
 7. **Wave division**: Group tasks by dependency graph:
-   - Same layer = same wave (parallel execution).
    - Cross layer = sequential execution.
-   - Output wave diagram: `Wave 1 (parallel): T01[P], T02[P]` etc.
+   - Same-layer tasks may carry `parallel="true"` only when the wave genuinely contains a concurrent companion and their `write_files` do not overlap; an isolated task stays serial.
+   - Flow-comet override: the permissive flow-kit upstream semantics — "no conflict ⇒ [P]" and "same layer = same wave, parallel" — are superseded by this node's rule; the vendored upstream files stay read-only and are not modified.
+   - Output wave diagram: `Wave 1: T01[P], T02[P]` etc.; isolated tasks appear as serial steps.
 
 8. **LESSONS scan**: Grep `.specs/LESSONS.md` for keywords related to planned file paths or actions. If active lessons hit, declare difference or confirm still applies.
 
@@ -97,7 +100,7 @@ This node is truly done when:
 - At least one `<task>` block exists; every task carries a `<verify>` field (the full seven-field shape — id/name/read_files/write_files/action/verify/done — is the execution discipline, review-checked; guard enforces the subset).
 - Every `verify` field is an executable command (not a description).
 - Every `write_files` is strictly within DESIGN.md touched + new modules range (not in forbidden list).
-- At least 1 task is marked `[P]` (parallel), unless all tasks are genuinely serial.
+- Every `[P]` mark has a genuine concurrent companion in its wave with non-overlapping `write_files`; isolated tasks are serial (a fully serial plan is valid when no genuine companion exists).
 - Wave division diagram is clear and has no circular dependencies.
 - Task numbering is continuous.
 
@@ -106,7 +109,7 @@ This node is truly done when:
 - **Agent thought**: "Split by layer first — models, then services, then endpoints." **Actual risk**: Horizontal layering creates artificial dependencies and blocks parallel execution. Always slice vertically by file conflict.
 - **Agent thought**: "verify: tests should pass" is good enough. **Actual risk**: Vague verify commands cannot be executed. Must be specific: `pytest tests/test_x.py -v` not "tests should pass".
 - **Agent thought**: "write_files can include any file the task might touch." **Actual risk**: Including DESIGN forbidden list modules in write_files bypasses R7.3 + R6.5 boundary enforcement. Strict control is mandatory.
-- **Agent thought**: "All tasks are serial, no need for [P] marking." **Actual risk**: Failing to identify parallel opportunities wastes execution time. Most changes have at least some independent tasks.
+- **Agent thought**: "Same layer means these tasks can all be marked [P]." **Actual risk**: A same-layer task with no concurrent companion, or with overlapping `write_files`, would be delegated as parallel in violation of this node's rule. Mark `[P]` by companion and write boundaries, never by layer alone.
 - **Agent thought**: "read_files and write_files are the same thing." **Actual risk**: read_files includes reuse targets and reference modules; write_files is strictly the modification boundary. They serve different purposes (B3 old-project guardrail).
 
 ## Entry Check

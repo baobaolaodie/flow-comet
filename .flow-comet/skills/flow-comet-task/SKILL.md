@@ -24,7 +24,7 @@ description: "flow-kit TASK 阶段协议：拆原子任务（XML 格式）、rea
    - 依赖：`depends_on: <task-id>`
 3. **每任务 7 字段**：id / name / read_files / write_files / action / verify / done
    - **write_files 必须包含关联测试文件**：若任务修改组件/函数，且有关联测试直接 import 其本地导出（如 `src/**/__tests__/*.test.ts` 从组件文件 import），该测试文件**必须纳入该任务 write_files**。否则组件删除本地导出/改 import 后，关联测试会编译失败或断言失效（实测：改组件时破坏了关联测试文件）。
-4. **波次划分**：同层并行，跨层串行
+4. **波次划分**：跨层顺序；同层任务只有确有并发同伴、且 write_files 互不重叠时才标 [P]，孤立任务一律串行；flow-kit 上游宽松语义（「无冲突即可标 [P]」「同层即同波并行」）以本节点为准（显式覆盖，vendored 只读不改）
 5. **XML 格式**：便于 AI 解析与执行
 
 ## 产物
