@@ -7070,19 +7070,24 @@ const SCENARIOS = [
           }
         }
       }
-      // —— R-15 规划约束：plan 三关键词 / task 两关键词 ——
+      // —— R-15 规划约束：plan / task 判别句式 + GUIDANCE 委托消化 ——
       {
+        const directLockPhrase = 'direct 不是并行任务的逃生口';
         const r15Keywords = {
-          'flow-comet-plan': ['同一文件', '并发同伴', 'direct'],
-          'flow-comet-task': ['同一文件', '并发同伴'],
+          'flow-comet-plan': ['同一文件', '并发同伴', directLockPhrase],
+          'flow-comet-task': ['同一文件', '并发同伴', directLockPhrase],
         };
         for (const [skillDir, keywords] of Object.entries(r15Keywords)) {
           const text = fs.readFileSync(path.join(__dirname, '..', '..', skillDir, 'SKILL.md'), 'utf8');
           for (const keyword of keywords) {
             if (!text.includes(keyword)) {
-              problems.push(skillDir + '/SKILL.md 缺「' + keyword + '」（R-15 规划期约束）');
+              problems.push(skillDir + '/SKILL.md 缺「' + keyword + '」（R-15 规划期约束判别句式）');
             }
           }
+        }
+        const guidance = fs.readFileSync(path.join(__dirname, '..', 'GUIDANCE.md'), 'utf8');
+        if (!guidance.includes('仍必须由 subagent-execute 委托消化')) {
+          problems.push('flow-comet/GUIDANCE.md 缺「仍必须由 subagent-execute 委托消化」（R-15③ direct 委托消化判别句）');
         }
       }
       // —— Codex / worktree 订正：fail-open 与未闭合限定在场、旧过宽句零残留 ——
