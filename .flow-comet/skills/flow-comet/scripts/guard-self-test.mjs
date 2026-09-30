@@ -64,7 +64,7 @@ const CHANGE_ID = 'ch';
 // 组件技能（flow-comet-execute / flow-comet-review / flow-comet-verify 等）是 <skillsRoot>
 // 下的同级目录。权威源 checkout → <root>/.flow-comet/skills/；安装副本 → <目标>/.claude|
 // .agents|.dsh/skills/ —— 同一相对推导覆盖全部形态。禁止再假定权威源布局
-// （REPO_ROOT/.flow-comet/skills 在安装副本形态不存在 → 技能文本锁场景 ENOENT，级 3 e2e 缺陷）。
+// （REPO_ROOT/.flow-comet/skills 在安装副本形态不存在 → 技能文本锁场景 ENOENT，端到端冒烟缺陷）。
 function skillsRootForScriptsDir(scriptsDir) {
   return path.resolve(scriptsDir, '..', '..');
 }
@@ -83,10 +83,18 @@ function resolveComponentSkillFile(nodeSkill, scriptsDir = __dirname) {
   return file;
 }
 
-// 场景数一致性自检清单（14 文件 = 9 分发组 + 5 维护者组，全变体：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n）——
+// 公开产物零代号判据（与 .githooks/internal-codes.mjs 的 BANNED 保持同步——单一来源约定：
+// 本文件随技能包分发，不能 import 主仓私有的 .githooks；改动词表时两份同改，行为必须一致）。
+// 除既有过程代号外，本批并入"未公开概念"类**收窄模式**：批次编号 / 批+数字 / 级别编号 /
+// 验收代号 / 工作项编号。模式刻意收窄（词界 + 字母边界）：合法中文用法（发布批次 / 维护批次 /
+// 级联 / 变更请求与采纳编号前缀）不命中；判别力与边界锚见维护文档机检场景族（四形态命中 +
+// 相似子串不误报 + 本文件注释层零残留三向自检）。禁止放宽为裸词——那会误伤公开面大量合法用法。
+const PUBLIC_CODE_RE = /\bS\d{1,3}\b|T-FIX|batch-(?![a-z])|D-\d+|P[0-7]\b|round\s*\d|dogfood|内部|批次 [A-Z0-9]|批 ?\d|级 [0-9]|UAT-\d|(?<![A-Za-z])R-\d{2}/;
+
+// 场景数一致性自检清单（15 文件 = 9 分发组 + 6 维护者组，全变体：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n）——
 // 数字由下方常量清单**推导**、不硬编码：9 = SCENARIO_COUNT_FILES 9 条与 SYSTEM_TEST_COUNT_FILES 4 条的
-// 并集（后者是前者子集）；5 = SCENARIO_COUNT_FILES_MAINTAINER 5 条与 SYSTEM_TEST_COUNT_FILES_MAINTAINER
-// 4 条的并集（后者是前者子集）——底部自检输出「受检面: n 文件」实际值，清单/数字漂移即可见（防再漂移）。
+// 并集（后者是前者子集）；6 = SCENARIO_COUNT_FILES_MAINTAINER 6 条与 SYSTEM_TEST_COUNT_FILES_MAINTAINER
+// 6 条的并集（后者是前者子集，故并集即 6 条）——底部自检输出「受检面: n 文件」实际值，清单/数字漂移即可见（防再漂移）。
 // 场景数自检与底部自检共用同一清单/同一实现（自检常量同步：SCENARIOS.length 变更 → 全部受检文件须同步）。
 // 分两组按"分发形态"划界（AC-14：条目缺失必须显式报告，不得静默跳过——幽灵条目无处藏身）：
 //   ① 分发组：随仓库分发（受版本控制），**任何**权威源检出都必须存在——维护者工作副本、
@@ -95,8 +103,9 @@ function resolveComponentSkillFile(nodeSkill, scriptsDir = __dirname) {
 //      worktree 检出**整组必然缺席** → 判据取"整组是否在场"而非"单条目是否在场"：整组缺席 =
 //      该检出无此文档面，跳过该组；整组在场时同样逐条强制存在与同步，缺失即报错。
 //      （单条目静默跳过正是本 change 修正的缺陷——故跳过粒度只能是"整组"，不能是"单条"。）
-// CLAUDE.md 为主仓私有指导文件（gitignore 不随 clone 分发）——不在自检清单内（2026-08-16 决策：
-// 清单只针对随仓库分发的文件；CLAUDE.md 场景数由人工维护）
+// CLAUDE.md 为主仓私有指导文件（gitignore 不随 clone 分发）——现列入**维护者组**受检清单：
+// 与 docs/internal/ 同进同退（该目录缺席即整组跳过，非维护者检出不会误红），主仓形态下其
+// 计数不再由人工维护。分发组仍只含随仓库分发的文件。
 // 2026-09-27 文档重构：计数只允许出现在入口页徽章行、发布权威与机器锁面（PR 模板 / CI / 欢迎消息 / 变更日志）；
 // 其余公开文档一律改述为「见 VERSIONS」，因此本清单随之收缩（此前把 CONTRIBUTING/INSTALLATION/MECHANISM 也列进来，
 // 与单一权威策略冲突：同一数字散落越多越容易漂移）。
@@ -119,6 +128,9 @@ const SCENARIO_COUNT_FILES_MAINTAINER = [
   'docs/internal/ARCHITECTURE.md', 'docs/internal/DOC-CHECKLIST.md', 'docs/internal/MECHANISM.md',
   'docs/internal/ROADMAP.md',
   'docs/internal/WORKING-METHOD.md',
+  // 主仓私有指导面（见上方分组说明）：纳入维护者组后其场景数由机检维护；docs/internal/ 缺席
+  // 的检出形态整组跳过（该文件同样被 gitignore，两种缺席同源）。
+  'CLAUDE.md',
 ];
 const MAINTAINER_DOC_DIR = 'docs/internal';
 // 三册显式清单（维护文档机检扫描面；与 docs/internal/*.md、.specs/adr/*.md 并列）：
@@ -136,15 +148,18 @@ const SYSTEM_TEST_COUNT_FILES = [
   'CHANGELOG.md', 'CHANGELOG-zh.md',
 ];
 const SYSTEM_TEST_COUNT_FILES_MAINTAINER = [
-  'docs/internal/ARCHITECTURE.md', 'docs/internal/DOC-CHECKLIST.md',
+  'docs/internal/ARCHITECTURE.md', 'docs/internal/DOC-CHECKLIST.md', 'docs/internal/MECHANISM.md',
   'docs/internal/ROADMAP.md', 'docs/internal/WORKING-METHOD.md',
+  // 与场景数维护者组同面同序（该组为子集关系，便于并集口径一眼可核）：机制知识册纳入后
+  // 其项数由机检维护；CLAUDE.md 同属主仓私有面。
+  'CLAUDE.md',
 ];
 // 刻意不收进清单的项数副本（逐条留痕，避免"清单外漏网"变成无声的例外）：
-//   - CLAUDE.md：主仓私有指导文件，计数人工维护（场景数清单同一决策）；
-//   - docs/internal/MECHANISM.md：其项数写法与当前值不一致，由维护批次单独同步——收进清单
-//     就等于要求与本批同时修正；
 //   - .specs/CONTEXT.md：流程工件目录随 change 清理/归档——收进清单会让套件在维护者检出
 //     依赖流程工件状态。
+// 两条原排除说明已结清：CLAUDE.md 与 docs/internal/MECHANISM.md 现均列入维护者组受检清单
+// （前者随 docs/internal/ 缺席整组跳过；后者的项数已与当前值同步）。presence 之外另有 stale
+// 检测兜住"在场但值过期"的形态（见下方 staleCountProblems）。
 const SYSTEM_TEST_SCRIPT_REL = '.flow-comet/skills/flow-comet/scripts/system-test.mjs';
 
 let passed = 0;
@@ -189,6 +204,92 @@ function scanCountFiles(files, variants, root = REPO_ROOT) {
 // 维护者组与 maintainerFaceSkips 的计数面描述符共用本判据（单一决策，避免多处各写一份而漂移）。
 function maintainerFacePresent(root = REPO_ROOT) {
   return fs.existsSync(path.join(root, MAINTAINER_DOC_DIR));
+}
+
+// ---------- 计数 stale 检测（presence 之外的判别力补足） ----------
+// presence 只能证明"当前值在场"，证不了"旧值不在场"：维护面曾长期带着无标记旧值仍全绿。
+// 判据：受检面里出现**计数形态 token**、数值落在合理量程、且不等于当前值、且行内没有历史
+// 标记 → 报"旧值未标记"（在场 + 旧值不在场两条一起才叫同步）。
+//   ① token 白名单（只认这几种计数写法，避免把通用比值/编号误当计数）：`N 场景` / `N scenarios` /
+//      `N 项` / `N items` / `ALL N SCENARIOS` / `N/N`——最后一种还须**同行点名套件**
+//      （guard-self-test|system-test|SYSTEM TEST|SCENARIOS|场景|项|items|scenarios），
+//      否则 `69/69 = 100%` 一类通用比值会被误伤（设计期实测口径）。
+//   ② 量程门：30~400 之外不参与（把版本号、年份、行号一类数字挡在外面）。
+//   ③ 历史标记豁免：行内出现"历史 / history / VERSIONS"即视为已标注的历史值。另有两枚等价标记
+//      `本轮`（维护笔记记述既往事件的固定措辞）与 `过时`（行内自述该值已过期）——实测受检面里
+//      仅有的两处旧值都出现在这类回顾叙述行里，它们是**已标注**的历史值，不是"未标记旧值"。
+// 受检面（staleCountTargets）：维护者面（docs/internal/ 全册 + CLAUDE.md）+ 参考册
+// （reference/*.md，路径从本脚本自身位置推导）。**分发组计数清单不入本面**：变更日志按语义
+// 就是历史记录（双语实测 42 处既往计数），纳入即灾难性误报；分发组的"当前值在场"要求照旧
+// 由 presence 判据覆盖（见上方清单）。
+const STALE_COUNT_TOKEN_RE = /\b(\d{2,4})\s*(?:场景|scenarios|项|items)|\b(\d{2,4})\/(\d{2,4})\b|\bALL (\d{2,4}) SCENARIOS\b/g;
+const STALE_COUNT_SUITE_KEYWORD_RE = /guard-self-test|system-test|SYSTEM TEST|SCENARIOS|场景|项|items|scenarios/;
+const STALE_COUNT_HISTORY_MARKER_RE = /历史|history|VERSIONS|本轮|过时|outdated|superseded/i;
+const STALE_COUNT_MIN = 30;
+const STALE_COUNT_MAX = 400;
+// 参考册面（分发参考册）：技能树从本脚本自身位置推导——权威源与各安装副本（.claude / .agents /
+// .dsh/skills）同一推导覆盖，不假定权威源布局（与技能树布局感知注释同一纪律）。
+const REFERENCE_FACE_DIR_REL = path
+  .relative(REPO_ROOT, path.join(__dirname, '..', 'reference'))
+  .split(path.sep).join('/');
+
+function staleCountTargets(root = REPO_ROOT) {
+  const targets = [];
+  const internalDir = path.join(root, MAINTAINER_DOC_DIR);
+  if (fs.existsSync(internalDir)) {
+    for (const name of fs.readdirSync(internalDir)) {
+      if (name.endsWith('.md')) targets.push(path.posix.join(MAINTAINER_DOC_DIR, name));
+    }
+  }
+  const referenceDir = path.join(root, REFERENCE_FACE_DIR_REL);
+  if (fs.existsSync(referenceDir)) {
+    for (const name of fs.readdirSync(referenceDir)) {
+      if (name.endsWith('.md')) targets.push(path.posix.join(REFERENCE_FACE_DIR_REL, name));
+    }
+  }
+  if (fs.existsSync(path.join(root, 'CLAUDE.md'))) targets.push('CLAUDE.md');
+  return targets;
+}
+
+// counts = 当前值集合（场景数 / 系统测试集项数；派生失败时按 null 过滤——派生失败本身已由
+// 计数一致性判据显式报告，不在此重复）。返回问题描述数组（空数组 = 无未标记旧值）。
+function staleCountProblems(counts, root = REPO_ROOT) {
+  const problems = [];
+  const current = new Set(counts.filter((v) => typeof v === 'number' && Number.isFinite(v)));
+  for (const rel of staleCountTargets(root)) {
+    let text;
+    try {
+      text = fs.readFileSync(path.join(root, rel), 'utf8');
+    } catch (e) {
+      // 与维护文档机检同型：读取失败不得静默跳过（"未执行 ≠ 通过"）。
+      const reason = e && e.code ? e.code : (e && e.message ? e.message : String(e));
+      problems.push('无法读取: ' + rel + ': ' + reason);
+      continue;
+    }
+    const lines = text.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (STALE_COUNT_HISTORY_MARKER_RE.test(line)) continue;
+      for (const m of line.matchAll(STALE_COUNT_TOKEN_RE)) {
+        let value = null;
+        if (m[1] !== undefined) {
+          value = Number(m[1]);
+        } else if (m[2] !== undefined) {
+          if (m[2] !== m[3]) continue; // 非等值比值（如 69/70）不是计数形态
+          if (!STALE_COUNT_SUITE_KEYWORD_RE.test(line)) continue; // 通用比值须同行点名套件
+          value = Number(m[2]);
+        } else {
+          value = Number(m[4]);
+        }
+        if (!Number.isFinite(value) || value < STALE_COUNT_MIN || value > STALE_COUNT_MAX) continue;
+        if (current.has(value)) continue;
+        problems.push('旧值未标记: ' + rel + ':' + (i + 1) + ' 计数 ' + m[0].trim()
+          + '（当前值 ' + [...current].join(' / ') + '）——请改写为当前值，或补历史标记'
+          + '（历史 / VERSIONS 指针 / 过时 说明）');
+      }
+    }
+  }
+  return problems;
 }
 
 // 场景数一致性检查（单一来源）：场景 105 与底部自检共用同一实现与同一判据。
@@ -252,9 +353,17 @@ function systemTestCountSyncProblems(root = REPO_ROOT) {
   return problems;
 }
 
-// 计数一致性检查（两套计数合并）：场景 105 与底部自检共用，两处判据不会漂移。
+// 计数一致性检查（两套计数合并 + stale 检测）：场景 105 与底部自检共用，两处判据不会漂移。
+// 顺序有意为之：先跑 presence（含派生源缺失/失败，必要时 fail-closed 抛出），再跑 stale——
+// 当前值取自同一派生（场景数 = SCENARIOS.length，项数 = 系统测试集脚本派生），不二次硬编码。
 function countSyncProblems(root = REPO_ROOT) {
-  return [...scenarioCountSyncProblems(SCENARIOS.length, root), ...systemTestCountSyncProblems(root)];
+  const problems = [
+    ...scenarioCountSyncProblems(SCENARIOS.length, root),
+    ...systemTestCountSyncProblems(root),
+  ];
+  const { count: itemCount } = readSystemTestItemCount(root);
+  problems.push(...staleCountProblems([SCENARIOS.length, itemCount], root));
+  return problems;
 }
 
 // 维护文档机检（docs-governance）：覆盖 CI 结构上不可见的维护者面——docs/internal/、
@@ -275,15 +384,65 @@ const INTERNAL_DOC_REF_BASES = [
 // 窄域报告规则（判别力补丁）：基准全部未解析时，首段属于下列「仓库内树根相对形态」族的引用
 // 必须按死引用报告——即使顶层目录在仓库根不存在也报（这正是旧逻辑「顶层整体缺席 → 跳过」
 // 会静默放过的形态）。族为声明式清单，只覆盖已确证的形态：flow-comet* 技能目录 / rules。
-// 边界（保持既有组缺席语义，不在族内）：外部命名空间（如 DSH_HOME/…、dsh-tui/…）、示例形态
-// （如 src/x.ts）、已移除临时区（如 .verify-tools/…）——这些首段在仓库根缺席时按既有语义跳过。
 const INTERNAL_DOC_REF_TREE_ROOT_FAMILIES = [/^flow-comet[A-Za-z0-9-]*$/, /^rules$/];
 function isTreeRootRelativeRef(ref) {
   const firstSegment = ref.split('/')[0];
   return INTERNAL_DOC_REF_TREE_ROOT_FAMILIES.some((re) => re.test(firstSegment));
 }
+// 声明式族（取代"顶层段不存在即静默跳过"）：解析失败后仍允许跳过的形态必须**逐条显式登记**，
+// 未登记者一律按死引用报告（fail-closed）。旧语义实测吞掉过指向已移除临时区的真实残留——
+// 隐含边界把"允许"藏进了代码，声明式族把允许面变成可见清单，新增跳过必须显式登记。
+//   ① 外部命名空间族（前缀声明）：平台侧命名空间，本仓库根天然不存在。
+const EXTERNAL_NAMESPACE_PREFIXES = ['DSH_HOME/', 'dsh-tui/', 'dsh-base/'];
+//   ② 退役命名空间允许面（逐条 {file, ref, reason}）：仅限**记录该迁移**的 ADR 与决策册——
+//      退役命名空间在那里是历史事实，改掉反而丢失迁移记录。
+const RETIRED_NAMESPACE_ALLOWLIST = [
+  {
+    file: '.specs/adr/ADR-009-runtime-namespace.md', ref: '.comet/config.yaml',
+    reason: '记录运行时命名空间迁移的决策件：退役命名空间作为迁移前事实保留',
+  },
+  {
+    file: '.specs/adr/ADR-009-runtime-namespace.md', ref: '.comet/flow-comet-state.json',
+    reason: '同上（迁移前的状态文件位置）',
+  },
+  {
+    file: '.specs/CONTEXT.md', ref: '.comet/config.yaml',
+    reason: '已锁决策记录迁移事实（退役命名空间的历史形态）',
+  },
+];
+//   ③ 示例形态允许面（逐条 {file, ref, reason}）：文档里的示意路径。当前为空——设计期实测的
+//      示例形态已由文档侧改写；出现新示例时在此登记（未登记即报，不再静默跳过）。
+const EXAMPLE_REF_ALLOWLIST = [];
+function isDeclaredReferenceSkip(rel, ref) {
+  if (EXTERNAL_NAMESPACE_PREFIXES.some((prefix) => ref.startsWith(prefix))) return true;
+  if (RETIRED_NAMESPACE_ALLOWLIST.some((e) => e.file === rel && e.ref === ref)) return true;
+  if (EXAMPLE_REF_ALLOWLIST.some((e) => e.file === rel && e.ref === ref)) return true;
+  return false;
+}
 const INTERNAL_DOC_REF_ALLOWLIST = new Set(['.specs/archive/CONTEXT-history.md']);
-const INTERNAL_DOC_REF_RE = /(?<![A-Za-z0-9_.\-\/])(\.?(?:[A-Za-z0-9_][A-Za-z0-9_.\-]*\/)+[A-Za-z0-9_.\-]+\.(?:md|mjs|cjs|js|ts|json|ya?ml|sh|patch|toml))(?![A-Za-z0-9])/gm;
+// 引用提取：既有形态（≥1 段路径 + 扩展名）+ **可选行号后缀**（`:N` / `:N-M` / 逗号列表
+// `:N,M`）——行号存在性与不越界判据需要把行号一起取出来（见 internalDocsProblems）。
+const INTERNAL_DOC_REF_RE = /(?<![A-Za-z0-9_.\-\/])(\.?(?:[A-Za-z0-9_][A-Za-z0-9_.\-]*\/)+[A-Za-z0-9_.\-]+\.(?:md|mjs|cjs|js|ts|json|ya?ml|sh|patch|toml))(?::(\d+(?:-\d+)?(?:\s*,\s*\d+(?:-\d+)?)*))?(?![A-Za-z0-9])/gm;
+// 并列写法护栏：首段**本身带文件扩展名**的 token 不是路径引用（如 `TEST.md/REVIEW.md` 是两个
+// 文件名并列写法）——不参与解析（存在性判据与行号判据同此）。判据必须收窄到"首段带扩展名"：
+// 用"首段含 `.`"会把 `.specs/…` / `.flow-comet/…` 这类隐藏目录一并误排（设计期实测该写法把
+// 5 处带行号引用压成 3 处）。
+const INTERNAL_DOC_REF_PARALLEL_RE = /\.(?:md|mjs|cjs|js|ts|json|ya?ml|sh|patch|toml)$/i;
+
+// 行号后缀 → 数值数组（区间取两端；逗号列表逐项展开）。
+function parseRefLineNumbers(suffix) {
+  if (!suffix) return [];
+  const out = [];
+  for (const part of suffix.split(/\s*,\s*/)) {
+    if (part.includes('-')) {
+      const [start, end] = part.split('-');
+      out.push(Number(start), Number(end));
+    } else {
+      out.push(Number(part));
+    }
+  }
+  return out;
+}
 
 function internalDocRefCandidates(text) {
   const out = [];
@@ -293,13 +452,23 @@ function internalDocRefCandidates(text) {
     for (const m of lines[i].matchAll(INTERNAL_DOC_REF_RE)) {
       const token = m[1];
       if (token.includes('*') || token.includes('<')) continue; // 通配 / 占位符
-      const key = i + 1 + ' ' + token;
+      if (INTERNAL_DOC_REF_PARALLEL_RE.test(token.split('/')[0])) continue; // 并列写法（见上方护栏）
+      const key = i + 1 + ' ' + token + ':' + (m[2] || '');
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ ref: token, line: i + 1 });
+      out.push({ ref: token, line: i + 1, lineRefs: parseRefLineNumbers(m[2]) });
     }
   }
   return out;
+}
+
+// 引用解析（单一实现）：按声明式基准清单逐个试解析，命中即返回绝对路径；全部失败返回 null。
+function resolveInternalDocRef(ref, root = REPO_ROOT) {
+  for (const base of INTERNAL_DOC_REF_BASES) {
+    const p = base === '' ? path.join(root, ref) : path.join(root, base, ref);
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
 }
 
 // 维护文档机检的受检目标清单（单一来源）：docs/internal/*.md（目录在场时）+ .specs/adr/*.md
@@ -326,10 +495,91 @@ function internalDocTargets(root = REPO_ROOT) {
   return targets;
 }
 
+// ROADMAP 表头新鲜度（内容锚）：声明式表头行 `> 最后更新：<YYYY-MM-DD>` 的日期必须 ≥ 该文件
+// 正文中出现过的最大日期。维护面无 git 跟踪文件（实测 0 跟踪），提交日锚不可得——内容锚纯结构、
+// 可夹具驱动。未声明表头的目标跳过（登记边界：表头即"最后更新"声明，没声明就没得比）。
+const ROADMAP_HEADER_RE = /^\s*>\s*最后更新[:：]\s*(20\d{2}-\d{2}-\d{2})/m;
+const INTERNAL_DOC_DATE_RE = /20\d{2}-\d{2}-\d{2}/g;
+// 归档目录条目：`<日期>-<change-id>`。
+const ARCHIVE_DIR_ENTRY_RE = /^\d{4}-\d{2}-\d{2}-(.+)$/;
+
+// 行号存在与不越界判定（结构级；单一实现）：只在引用本身解析成功后才调用——引用不存在时由
+// 死引用判据负责报告（同一处只报一次，不叠两条）。区间取两端、逗号列表逐项，逐个校验 1..N。
+function lineNumberProblems(rel, entry, resolvedPath, lineCountOf) {
+  const problems = [];
+  if (entry.lineRefs.length === 0) return problems;
+  const total = lineCountOf(resolvedPath);
+  if (total === null) return problems; // 目标瞬时不可读：存在性已通过，行号按不可判跳过
+  for (const num of entry.lineRefs) {
+    if (num < 1 || num > total) {
+      problems.push('行号越界: ' + rel + ':' + entry.line + ' → ' + entry.ref + ':' + num
+        + '（目标共 ' + total + ' 行）——请改指目标里真实存在的行，或删除行号后缀');
+    }
+  }
+  return problems;
+}
+
+// 表头新鲜度判定（内容锚；单一实现）：无表头声明 → 跳过（登记边界）；表头日期 < 正文最大日期 → 报。
+function headerFreshnessProblems(rel, text) {
+  const header = text.match(ROADMAP_HEADER_RE);
+  if (!header) return [];
+  const dates = [...text.matchAll(INTERNAL_DOC_DATE_RE)].map((m) => m[0]);
+  const maxBody = dates.reduce((a, b) => (a > b ? a : b), '');
+  if (maxBody === '' || header[1] >= maxBody) return [];
+  return ['表头不新鲜: ' + rel + ' 表头 ' + header[1] + ' < 正文最大 ' + maxBody
+    + '——请把表头日期刷新到不早于正文最大日期'];
+}
+
+// 已归档 change 清单（读目录名；归档面缺席 → 空数组，非维护者检出/夹具形态不误红）。
+function archivedChangeIds(root = REPO_ROOT) {
+  const archiveDir = path.join(root, '.specs', 'archive');
+  if (!fs.existsSync(archiveDir)) return [];
+  const ids = [];
+  for (const name of fs.readdirSync(archiveDir)) {
+    const m = ARCHIVE_DIR_ENTRY_RE.exec(name);
+    if (m) ids.push({ id: m[1], dir: name });
+  }
+  return ids;
+}
+
+// `## Now`（在办段）不得出现已归档 change-id：段定位**必须用标题扫描**（允许段名尾部括号注记），
+// 切到下一个二级标题 Next 为止。禁止用 indexOf('## Now')——该册文件头的目录说明行里含被反引号
+// 包住的同名标题字样，indexOf 会命中说明行、切出极短窗口使判据恒过（实测教训：判据的定位口径
+// 必须自实测推导，不能被同一文件里"看起来对"的文本骗过）。
+function roadmapNowArchivedProblems(rel, text, root = REPO_ROOT) {
+  const problems = [];
+  const nowRe = /^##\s*Now\s*(?:[（(][^）)\n]*[）)])?\s*$/m;
+  const nowMatch = nowRe.exec(text);
+  if (!nowMatch) return problems; // 段缺席由结构判据报告，此处不重复
+  const rest = text.slice(nowMatch.index + nowMatch[0].length);
+  const nextRe = /^##\s*Next\s*(?:[（(][^）)\n]*[）)])?\s*$/m;
+  const nextMatch = nextRe.exec(rest);
+  const section = nextMatch ? rest.slice(0, nextMatch.index) : rest;
+  for (const { id, dir } of archivedChangeIds(root)) {
+    // 命中面 = id 及其路径形态（两形态都要判：只判路径会漏掉裸 id 写法）
+    if (section.includes(id) || section.includes(dir)) {
+      problems.push('Now 段含已归档 change-id: ' + id + '（' + rel + ' 的在办段引用了已归档记录 '
+        + dir + '）——请从在办段移出（历史指针面记录）');
+    }
+  }
+  return problems;
+}
+
 function internalDocsProblems(root = REPO_ROOT) {
   const problems = [];
   const targets = internalDocTargets(root);
   if (targets.length === 0) return problems; // 全部目标面缺席 → 整组跳过（CI / worktree 形态）
+  const lineCountCache = new Map();
+  const lineCountOf = (p) => {
+    if (!lineCountCache.has(p)) {
+      try {
+        lineCountCache.set(p, fs.readFileSync(p, 'utf8').split(/\r?\n/).length);
+      } catch {
+        lineCountCache.set(p, null); // 目标瞬时不可读：存在性已通过，行号判据按不可判跳过
+      }
+    }
+    return lineCountCache.get(p);
+  };
   for (const rel of targets) {
     let text;
     try {
@@ -342,19 +592,28 @@ function internalDocsProblems(root = REPO_ROOT) {
       problems.push('无法读取: ' + rel + ': ' + reason);
       continue;
     }
-    for (const { ref, line } of internalDocRefCandidates(text)) {
-      if (INTERNAL_DOC_REF_ALLOWLIST.has(ref)) continue;
-      if (INTERNAL_DOC_REF_BASES.some((base) => fs.existsSync(path.join(root, base, ref)))) continue;
-      // 窄域报告规则：树根相对形态（flow-comet* 技能目录 / rules）基准全失败 → 按死引用报告，
-      // 不再落入「顶层整体缺席 → 跳过」（旧逻辑在此静默放过——族与边界见上方声明）。
-      if (isTreeRootRelativeRef(ref)) {
-        problems.push('死引用: ' + rel + ':' + line + ' → ' + ref);
+    for (const entry of internalDocRefCandidates(text)) {
+      if (INTERNAL_DOC_REF_ALLOWLIST.has(entry.ref)) continue;
+      const resolved = resolveInternalDocRef(entry.ref, root);
+      if (resolved !== null) {
+        problems.push(...lineNumberProblems(rel, entry, resolved, lineCountOf));
         continue;
       }
-      const firstSegment = ref.split('/')[0];
-      if (!fs.existsSync(path.join(root, firstSegment))) continue; // 顶层整体缺席 → 跳过（外部命名空间/示例/已移除临时区）
-      problems.push('死引用: ' + rel + ':' + line + ' → ' + ref);
+      // 窄域报告规则：树根相对形态（flow-comet* 技能目录 / rules）基准全失败 → 按死引用报告，
+      // 不再落入「顶层整体缺席 → 跳过」（旧逻辑在此静默放过——族见上方声明）。
+      if (isTreeRootRelativeRef(entry.ref)) {
+        problems.push('死引用: ' + rel + ':' + entry.line + ' → ' + entry.ref
+          + '（树根相对形态未解析：技能树 / 规则树内不存在该目标）');
+        continue;
+      }
+      // 声明式族：登记在案的外部命名空间 / 退役命名空间 / 示例形态 → 跳过；其余一律按死引用报
+      // （顶层段不存在不再是免检理由——那正是旧逻辑吞掉真实残留的通道）。
+      if (isDeclaredReferenceSkip(rel, entry.ref)) continue;
+      problems.push('死引用: ' + rel + ':' + entry.line + ' → ' + entry.ref
+        + '（顶层段不存在且未登记为允许跳过；请修正路径，或按声明式族逐条登记理由）');
     }
+    // 表头新鲜度（内容锚；未声明表头 → 跳过）
+    problems.push(...headerFreshnessProblems(rel, text));
   }
   const roadmapRel = path.posix.join(MAINTAINER_DOC_DIR, 'ROADMAP.md');
   if (!fs.existsSync(path.join(root, roadmapRel))) {
@@ -377,6 +636,7 @@ function internalDocsProblems(root = REPO_ROOT) {
           problems.push('ROADMAP 结构缺段: ' + section + '（' + roadmapRel + '）');
         }
       }
+      problems.push(...roadmapNowArchivedProblems(roadmapRel, text, root));
     }
   }
   return problems;
@@ -1492,6 +1752,21 @@ const TASK_PARALLEL_WRITE_CONFLICT =
 const TASK_PARALLEL_READ_OVERLAP =
   '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/shared.mjs</write_files><verify>node --check src/shared.mjs</verify></task>\n' +
   '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><read_files>src/shared.mjs</read_files><write_files>src/other.mjs</write_files><verify>node --check src/other.mjs</verify></task>\n';
+
+// 同文件跨任务（第三族）夹具族：串行拆分出的同文件任务、彼此无 depends_on（#125 要抓的形态）。
+// ① 非修复任务对 → 必须命中；② 修复任务族对（同文件回修）→ 不参与（顺序由修复生命周期保证）；
+// ③ 混合夹具：两类并存 → 只报非修复对（反向构造：第三族缺位时 ①③ 必然放过）。
+const CROSS_TASK_PLAIN_PAIR =
+  '<task id="T01" parallel="false" status="pending"><action>实现 T01</action><write_files>src/shared.mjs</write_files><verify>node --check src/shared.mjs</verify></task>\n'
+  + '<task id="T02" parallel="false" status="pending"><action>实现 T02</action><write_files>src/shared.mjs</write_files><verify>node --check src/shared.mjs</verify></task>\n';
+const CROSS_TASK_FIX_PAIR =
+  '<task id="T-FIX-01" parallel="false" status="pending"><action>修复 T-FIX-01</action><write_files>src/fix-shared.mjs</write_files><verify>node --check src/fix-shared.mjs</verify></task>\n'
+  + '<task id="T-FIX-02" parallel="false" status="pending"><action>修复 T-FIX-02</action><write_files>src/fix-shared.mjs</write_files><verify>node --check src/fix-shared.mjs</verify></task>\n';
+const CROSS_TASK_MIXED_PAIR =
+  '<task id="T01" parallel="false" status="pending"><action>实现 T01</action><write_files>src/shared.mjs</write_files><verify>node --check src/shared.mjs</verify></task>\n'
+  + '<task id="T02" parallel="false" status="pending"><action>实现 T02</action><write_files>src/shared.mjs</write_files><verify>node --check src/shared.mjs</verify></task>\n'
+  + '<task id="T-FIX-01" parallel="false" status="pending"><action>修复 T-FIX-01</action><write_files>src/other-shared.mjs</write_files><verify>node --check src/other-shared.mjs</verify></task>\n'
+  + '<task id="T-FIX-02" parallel="false" status="pending"><action>修复 T-FIX-02</action><write_files>src/other-shared.mjs</write_files><verify>node --check src/other-shared.mjs</verify></task>\n';
 
 // 波次分组场景公共路径：注入 TASK.md → entry plan（记录 enteredNodes，新 change 强制先 entry；
 // 旧 change 亦先 entry 避免 ENTER WARN 干扰断言）→ exit plan。返回 exit plan 结果。
@@ -2995,7 +3270,7 @@ const SCENARIOS = [
     },
   },
 
-  // 67: 旧格式 state（无 status 字段 + 无 activeChange + 无 currentNode——批次 C 归档后升级场景）
+  // 67: 旧格式 state（无 status 字段 + 无 activeChange + 无 currentNode——归档批次的升级场景）
   // → hook 放行（：无 activeChange 与无 state 文件同语义——当前被「not running」拦截）
   {
     name: '67 旧 state 无 status 无 activeChange hook 放行',
@@ -4439,7 +4714,7 @@ const SCENARIOS = [
       const res = runGuard(['exit', 'execute'], dir);
       assertExit(res, 1);
       assertOut(res, '缓存');
-      // 子断言:拦截消息须含关键词引导(声明级校验的执行者体验——级 4 实证:语义完整但
+      // 子断言:拦截消息须含关键词引导(声明级校验的执行者体验——真机回归实证:语义完整但
       // 缺关键词被拦,消息应指明所需关键词,防执行者无从下手)
       assertOut(res, '须含关键词');
     },
@@ -7051,7 +7326,7 @@ const SCENARIOS = [
         if (!text.includes('depends_on')) problems.push(skillDir + ' 缺依赖图语义描述（depends_on）');
         if (!text.includes('用 Skill 工具')) problems.push(skillDir + ' 缺「用 Skill 工具」两层加载句式');
       }
-      // —— R-14 模板权威整句声明：9 个既有成员 + 5 个 flow-kit 阶段协议技能（真实成员 14）——
+      // —— 模板权威整句声明：9 个既有成员 + 5 个 flow-kit 阶段协议技能（真实成员 14）——
       const templateAuthoritySkills = [
         'flow-comet-open', 'flow-comet-design', 'flow-comet-plan', 'flow-comet-execute',
         'flow-comet-subagent-execute', 'flow-comet-review', 'flow-comet-verify', 'flow-comet-archive',
@@ -7084,7 +7359,7 @@ const SCENARIOS = [
           problems.push(rel + ' 含「archive 是模板来源」旧反向声明');
         }
       }
-      // —— R-14 入口 archive 读法：三要素关键词在场 ——
+      // —— 入口 archive 读法：三要素关键词在场 ——
       {
         const entry = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
         for (const keyword of ['flow-kit/templates', '何时可读', '不读什么']) {
@@ -7093,7 +7368,7 @@ const SCENARIOS = [
           }
         }
       }
-      // —— R-15 规划约束：plan / task 判别句式 + GUIDANCE 委托消化 ——
+      // —— 规划约束：plan / task 判别句式 + GUIDANCE 委托消化 ——
       {
         const directLockPhrase = 'direct 不是并行任务的逃生口';
         const r15Keywords = {
@@ -7106,7 +7381,7 @@ const SCENARIOS = [
           const text = skillDir === 'flow-comet-plan' ? planText : taskText;
           for (const keyword of keywords) {
             if (!text.includes(keyword)) {
-              problems.push(skillDir + '/SKILL.md 缺「' + keyword + '」（R-15 规划期约束判别句式）');
+              problems.push(skillDir + '/SKILL.md 缺「' + keyword + '」（规划期约束判别句式）');
             }
           }
         }
@@ -7124,7 +7399,7 @@ const SCENARIOS = [
         }
         const guidance = fs.readFileSync(path.join(__dirname, '..', 'GUIDANCE.md'), 'utf8');
         if (!guidance.includes('仍必须由 subagent-execute 委托消化')) {
-          problems.push('flow-comet/GUIDANCE.md 缺「仍必须由 subagent-execute 委托消化」（R-15③ direct 委托消化判别句）');
+          problems.push('flow-comet/GUIDANCE.md 缺「仍必须由 subagent-execute 委托消化」（direct 委托消化判别句）');
         }
       }
       // —— Codex / worktree 订正：平台事实 + 支持面判别锚与适用范围限定在场、旧独断句
@@ -8752,6 +9027,69 @@ const SCENARIOS = [
       }
       // ③ 系统测试集项数受检面：运行时派生 + 缺失 / 未同步 / 组判定 / 派生源缺失全分支
       exerciseSystemTestCountCheck(dir);
+      // ④ stale 检测（presence 之外的判别力）：在场 ≠ 同步——旧值不在场才是同步的另一半。
+      // 受检面 = 维护者面（docs/internal/ 全册 + CLAUDE.md）+ 参考册（reference/*.md，路径从本
+      // 脚本自身位置推导）；夹具用独立临时根驱动（夹具根下参考册缺席 → 该面为空，不误红）。
+      const staleRoot = makeTmp();
+      writeFile(staleRoot, 'docs/internal/DOC.md',
+        '当前 ' + SCENARIOS.length + ' 场景 全部通过。\n');
+      writeFile(staleRoot, 'CLAUDE.md', '回归基线：ALL ' + SCENARIOS.length + ' SCENARIOS PASSED\n');
+      if (staleCountProblems([SCENARIOS.length, 86], staleRoot).length !== 0) {
+        throw new Error('当前值不得被判成旧值: ' + JSON.stringify(staleCountProblems([SCENARIOS.length, 86], staleRoot)));
+      }
+      // 反例（旧 presence 判据必然放过：当前值在场即全绿，旁边的旧值不可见）
+      writeFile(staleRoot, 'docs/internal/DOC.md', '当前 ' + SCENARIOS.length + ' 场景；另有 120 场景 的记录。\n');
+      const staleOld = staleCountProblems([SCENARIOS.length, 86], staleRoot);
+      if (!(staleOld.some((p) => p.includes('旧值未标记') && p.includes('docs/internal/DOC.md:1')
+        && p.includes('120')))) {
+        throw new Error('无标记旧值未被报告（应含文件:行 + 旧值）: ' + JSON.stringify(staleOld));
+      }
+      // 历史标记豁免：已标注的历史值不是"未标记旧值"（四枚标记各取一例——标记清单本身也受锚）
+      for (const marked of ['（历史）120 场景。\n', '该值 120 场景 已过时。\n', '回顾：120 场景（history）。\n',
+        '本轮踩坑：模板里写过 120 场景。\n']) {
+        writeFile(staleRoot, 'docs/internal/DOC.md', marked);
+        if (staleCountProblems([SCENARIOS.length, 86], staleRoot).length !== 0) {
+          throw new Error('带历史标记的行不得报告: ' + JSON.stringify([marked, staleCountProblems([SCENARIOS.length, 86], staleRoot)]));
+        }
+      }
+      // 量程门：30 以下 / 400 以上不参与（年份、编号一类数字挡在外面）
+      writeFile(staleRoot, 'docs/internal/DOC.md', '夹具 7 场景 与 9999 场景。\n');
+      if (staleCountProblems([SCENARIOS.length, 86], staleRoot).length !== 0) {
+        throw new Error('量程外的数字不得参与: ' + JSON.stringify(staleCountProblems([SCENARIOS.length, 86], staleRoot)));
+      }
+      // 通用比值门控：同行未点名套件的 N/N 不参与（覆盖率一类通用比值不误伤）；点名套件才判
+      writeFile(staleRoot, 'docs/internal/DOC.md', '覆盖率 120/120。\n');
+      if (staleCountProblems([SCENARIOS.length, 86], staleRoot).length !== 0) {
+        throw new Error('同行未点名套件的通用比值不得参与: ' + JSON.stringify(staleCountProblems([SCENARIOS.length, 86], staleRoot)));
+      }
+      writeFile(staleRoot, 'docs/internal/DOC.md', 'guard-self-test 覆盖率 120/120。\n');
+      if (!staleCountProblems([SCENARIOS.length, 86], staleRoot).some((p) => p.includes('旧值未标记') && p.includes('120/120'))) {
+        throw new Error('点名套件的旧比值未被报告: ' + JSON.stringify(staleCountProblems([SCENARIOS.length, 86], staleRoot)));
+      }
+      writeFile(staleRoot, 'docs/internal/DOC.md', 'guard-self-test 覆盖率 120/121。\n');
+      if (staleCountProblems([SCENARIOS.length, 86], staleRoot).length !== 0) {
+        throw new Error('非等值比值不是计数形态（不得参与）: ' + JSON.stringify(staleCountProblems([SCENARIOS.length, 86], staleRoot)));
+      }
+      // 声明的 CLAUDE.md 形态：维护者面逐册纳入（夹具根下 CLAUDE.md 在场即入面）
+      writeFile(staleRoot, 'CLAUDE.md', '自检套件 120 场景。\n');
+      if (!staleCountProblems([SCENARIOS.length, 86], staleRoot).some((p) => p.includes('CLAUDE.md:1') && p.includes('旧值未标记'))) {
+        throw new Error('CLAUDE.md 未纳入 stale 受检面: ' + JSON.stringify(staleCountProblems([SCENARIOS.length, 86], staleRoot)));
+      }
+      // 读取失败可见化：与维护文档机检同型（同名目录 → 读取错误，不得静默跳过）
+      fs.mkdirSync(path.join(staleRoot, 'docs', 'internal', 'DIR.md'), { recursive: true });
+      if (!staleCountProblems([SCENARIOS.length, 86], staleRoot).some((p) => p.includes('无法读取: docs/internal/DIR.md'))) {
+        throw new Error('stale 受检面里的不可读目标被静默跳过: ' + JSON.stringify(staleCountProblems([SCENARIOS.length, 86], staleRoot)));
+      }
+      fs.rmSync(staleRoot, { recursive: true, force: true }); // 夹具根清理（残留目录由底部统一校验）
+      // ⑤ 面路径的推导纪律锚（同类断言回扫）：参考册受检面必须**从本脚本自身位置**推导——
+      //    权威源（.flow-comet/skills）与各安装副本（.claude / .agents / .dsh/skills）同一推导
+      //    覆盖；硬编码树根相对路径会在安装副本形态指向不存在的面（静默空面 = 未执行当通过）。
+      if (path.resolve(REPO_ROOT, REFERENCE_FACE_DIR_REL) !== path.resolve(__dirname, '..', 'reference')) {
+        throw new Error('参考册受检面必须由脚本自身位置推导（不得硬编码树根相对路径），实际: ' + REFERENCE_FACE_DIR_REL);
+      }
+      if (path.basename(REFERENCE_FACE_DIR_REL) !== 'reference') {
+        throw new Error('参考册受检面路径异常: ' + REFERENCE_FACE_DIR_REL);
+      }
     },
   },
 
@@ -9397,14 +9735,124 @@ const SCENARIOS = [
           throw new Error('同族缺目标（' + deadRef + '）必须按死引用报告（窄域规则）: ' + JSON.stringify(treeNegative));
         }
       }
-      // 边界负例：非族形态（外部命名空间 / 已移除临时区）顶层缺席 → 仍按既有组缺席语义跳过
+      // —— 本批 in-place 增锚（声明式族：外部命名空间 / 退役命名空间 / 示例）——旧语义
+      // "顶层段不存在即静默跳过"在此被替换：允许面必须显式登记，未登记者一律按死引用报告
+      // （fail-closed；旧逻辑对下列②③两种形态都静默放过——判别力差异即反向构造证据）。
+      // ① 外部命名空间族（前缀声明）→ 仍跳过（平台侧命名空间在本仓库根天然不存在）
       writeFile(dir, 'docs/internal/FIXTURE.md',
-        '见 `DSH_HOME/skills/x/SKILL.md` 与 `.verify-tools/level3-smoke.mjs` 与 `docs/internal/ROADMAP.md`。\n');
-      const boundaryProblems = internalDocsProblems(dir);
-      if (boundaryProblems.length !== 0) {
-        throw new Error('非族形态（外部命名空间 / 已移除临时区）不得误报: ' + JSON.stringify(boundaryProblems));
+        '见 `DSH_HOME/skills/x/SKILL.md` 与 `dsh-tui/lib/a.js` 与 `dsh-base/cordis.patch.yml` 与 `docs/internal/ROADMAP.md`。\n');
+      const externalProblems = internalDocsProblems(dir);
+      if (externalProblems.length !== 0) {
+        throw new Error('声明式外部命名空间族不得误报: ' + JSON.stringify(externalProblems));
+      }
+      // ② 退役命名空间：登记在案（记录迁移的决策件）→ 跳过；未登记文件里的同形态引用 → 必须按死引用报
+      writeFile(dir, '.specs/adr/ADR-009-runtime-namespace.md', '见 `.comet/config.yaml` 与 `.comet/flow-comet-state.json`。\n');
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `.comet/config.yaml` 与 `docs/internal/ROADMAP.md`。\n');
+      const retiredProblems = internalDocsProblems(dir);
+      if (!retiredProblems.some((p) => p.includes('FIXTURE.md:1') && p.includes('.comet/config.yaml'))) {
+        throw new Error('未登记的退役命名空间引用必须按死引用报告: ' + JSON.stringify(retiredProblems));
+      }
+      if (retiredProblems.some((p) => p.includes('ADR-009-runtime-namespace.md'))) {
+        throw new Error('登记在案的迁移记录件不得误报: ' + JSON.stringify(retiredProblems));
+      }
+      fs.rmSync(path.join(dir, '.specs', 'adr', 'ADR-009-runtime-namespace.md'));
+      // ③ 已移除临时区（未登记形态）→ 必须报（真实残留曾因旧跳过语义长期不可见）
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `.verify-tools/level3-smoke.mjs` 与 `docs/internal/ROADMAP.md`。\n');
+      const residueProblems = internalDocsProblems(dir);
+      if (!residueProblems.some((p) => p.includes('FIXTURE.md:1') && p.includes('.verify-tools/level3-smoke.mjs'))) {
+        throw new Error('未登记的临时区引用必须按死引用报告: ' + JSON.stringify(residueProblems));
       }
       writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/ROADMAP.md`。\n');
+      // —— 行号存在与不越界（结构级）：引用解析成功后才校验行号 ——
+      writeFile(dir, 'docs/internal/TARGET.md', '第一行\n第二行\n第三行\n');
+      writeFile(dir, 'docs/internal/FIXTURE.md',
+        '见 `docs/internal/TARGET.md:1` 与 `docs/internal/TARGET.md:1-3` 与 `docs/internal/TARGET.md:2,3`。\n');
+      if (internalDocsProblems(dir).length !== 0) {
+        throw new Error('合法行号引用（单值 / 区间 / 逗号列表）不得误报: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      // 反例：越界（旧实现只判路径存在性，行号部分根本不参与解析 → 必然放过）
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/TARGET.md:99`。\n');
+      const lineProblems = internalDocsProblems(dir);
+      if (!(lineProblems.some((p) => p.includes('行号越界') && p.includes('FIXTURE.md:1')
+        && p.includes('TARGET.md:99') && p.includes('目标共')))) {
+        throw new Error('越界行号未被报告（应含「行号越界」+ 受检文件:行 + 目标:行号 + 目标行数）: '
+          + JSON.stringify(lineProblems));
+      }
+      // 反例：下界（第 0 行不存在）
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/TARGET.md:0`。\n');
+      if (!internalDocsProblems(dir).some((p) => p.includes('行号越界') && p.includes('TARGET.md:0'))) {
+        throw new Error('下界越界（引用第 0 行）未被报告: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      // 反例：区间上端越界（区间取两端逐一校验）
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/TARGET.md:2-99`。\n');
+      if (!internalDocsProblems(dir).some((p) => p.includes('行号越界') && p.includes('TARGET.md:99'))) {
+        throw new Error('区间上端越界未被报告: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      // 反例：逗号列表中的越界项
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/TARGET.md:1,99`。\n');
+      if (!internalDocsProblems(dir).some((p) => p.includes('行号越界') && p.includes('TARGET.md:99'))) {
+        throw new Error('逗号列表中的越界项未被报告: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      // 并列写法护栏：首段带文件扩展名的 token 不是路径引用（两个文件名并列）→ 不参与解析；
+      // 同一行里真实的越界引用照报（证明护栏没有把整行一起吞掉——判据必须收窄到"首段带扩展名"）
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `TEST.md/REVIEW.md` 与 `docs/internal/TARGET.md:99`。\n');
+      const parallelProblems = internalDocsProblems(dir);
+      if (parallelProblems.some((p) => p.includes('TEST.md/REVIEW.md'))) {
+        throw new Error('并列写法（首段带扩展名）不得按路径引用解析: ' + JSON.stringify(parallelProblems));
+      }
+      if (!parallelProblems.some((p) => p.includes('TARGET.md:99'))) {
+        throw new Error('并列写法护栏不得吞掉同一行的真实越界引用: ' + JSON.stringify(parallelProblems));
+      }
+      // 目标本身不存在时只报死引用，不叠报行号越界（同一处只报一次）
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/MISSING-TARGET.md:99`。\n');
+      const missingTargetProblems = internalDocsProblems(dir);
+      if (!missingTargetProblems.some((p) => p.includes('死引用') && p.includes('MISSING-TARGET.md'))) {
+        throw new Error('不存在的目标应报死引用: ' + JSON.stringify(missingTargetProblems));
+      }
+      if (missingTargetProblems.some((p) => p.includes('行号越界'))) {
+        throw new Error('目标不存在时不得叠报行号越界: ' + JSON.stringify(missingTargetProblems));
+      }
+      fs.rmSync(path.join(dir, 'docs/internal', 'TARGET.md'));
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/ROADMAP.md`。\n');
+      // —— 表头新鲜度（内容锚：表头日期 ≥ 正文最大日期；未声明表头 → 跳过）——
+      writeFile(dir, 'docs/internal/HEADER.md', '> 最后更新：2026-01-01\n\n正文提到 2026-02-02 的事。\n');
+      const staleHeaderProblems = internalDocsProblems(dir);
+      if (!(staleHeaderProblems.some((p) => p.includes('表头不新鲜') && p.includes('HEADER.md')
+        && p.includes('2026-01-01') && p.includes('2026-02-02')))) {
+        throw new Error('表头落后于正文最大日期未被报告（应含文件与两侧日期）: ' + JSON.stringify(staleHeaderProblems));
+      }
+      writeFile(dir, 'docs/internal/HEADER.md', '> 最后更新：2026-02-02\n\n正文提到 2026-02-02 的事。\n');
+      if (internalDocsProblems(dir).some((p) => p.includes('表头不新鲜'))) {
+        throw new Error('表头与正文最大日期相等（新鲜）不得误报: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      writeFile(dir, 'docs/internal/HEADER.md', '正文提到 2026-12-31 的事，但本册没声明表头。\n');
+      if (internalDocsProblems(dir).some((p) => p.includes('表头不新鲜'))) {
+        throw new Error('未声明表头的目标必须跳过（登记边界）: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      fs.rmSync(path.join(dir, 'docs/internal', 'HEADER.md'));
+      // —— `## Now` 段不得出现已归档 change-id（旧逻辑无此判据 → 必然放过）——
+      writeFile(dir, '.specs/archive/2026-01-01-archived-fixture/CHANGE.md', '# 归档夹具\n');
+      writeFile(dir, 'docs/internal/ROADMAP.md',
+        '# 路线图\n\n> 最后更新：2026-01-01\n\n## Now\n\n- 在办：archived-fixture 的后续\n\n## Next\n\n## Later\n\n## Open decisions\n');
+      const nowProblems = internalDocsProblems(dir);
+      if (!nowProblems.some((p) => p.includes('Now 段含已归档 change-id: archived-fixture'))) {
+        throw new Error('在办段引用已归档 change-id 未被报告: ' + JSON.stringify(nowProblems));
+      }
+      // 正例：同一 id 只出现在 Now 段之外 → 不报（判据只约束在办段，历史段本就该记已归档项）
+      writeFile(dir, 'docs/internal/ROADMAP.md',
+        '# 路线图\n\n> 最后更新：2026-01-01\n\n## Now\n\n- 在办：别的主题\n\n## Next\n\n## Later\n\n- 历史：archived-fixture\n\n## Open decisions\n');
+      if (internalDocsProblems(dir).some((p) => p.includes('Now 段含已归档'))) {
+        throw new Error('Now 段之外的归档 id 不得误报: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      // 定位口径锚：文件头目录说明行里出现被反引号包住的同名标题字样时，段定位必须仍命中真实
+      // 在办段（按行首标题扫描，而不是按子串首次出现位置切段——后者会切出极短窗口使判据恒过）
+      writeFile(dir, 'docs/internal/ROADMAP.md',
+        '# 路线图\n\n> 最后更新：2026-01-01\n\n目录说明：`## Now` 与 `## Next` 两段。\n\n## Now\n\n- 在办：archived-fixture\n\n## Next\n\n## Later\n\n## Open decisions\n');
+      if (!internalDocsProblems(dir).some((p) => p.includes('Now 段含已归档 change-id: archived-fixture'))) {
+        throw new Error('目录说明行含标题字样时仍须命中真实在办段（标题扫描口径）: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      fs.rmSync(path.join(dir, '.specs', 'archive'), { recursive: true, force: true });
+      writeFile(dir, 'docs/internal/ROADMAP.md', '# 路线图\n\n## Now\n\n## Next\n\n## Later\n\n## Open decisions\n');
       // 缺席可见化描述符（正例）：维护者面全在场 → 无跳过描述符
       if (maintainerFaceSkips(dir).length !== 0) {
         throw new Error('维护者面在场时应无跳过描述符: ' + JSON.stringify(maintainerFaceSkips(dir)));
@@ -9480,6 +9928,31 @@ const SCENARIOS = [
       }
       if (!skips.some((s) => s.face.includes('机检') && s.reason.includes('目标面'))) {
         throw new Error('维护文档机检面跳过描述符应说明目标面缺席: ' + JSON.stringify(skips));
+      }
+      // —— 本批 in-place 增锚（公开产物零代号判据的三向自检）——
+      // 与 .githooks 词表单一来源同判据（该文件主仓私有、不随技能包分发；本文件内保留同义镜像，
+      // 两处同改）。① 四形态命中（收窄模式真的在场——模式缺失/被放宽成裸词时此锚先红）；
+      // ② 相似子串不误报（前缀与字母边界有效）；③ 本文件注释层零残留（清理后不许回潮）。
+      // 注意：形态字面量只能写在非注释行——本锚的③正是扫注释层。
+      for (const form of ['批次 D', '级 3', 'UAT-7', 'R-14']) {
+        if (!PUBLIC_CODE_RE.test(form)) {
+          throw new Error('未公开概念形态未被零代号判据命中（收窄模式缺失或被放宽）: ' + form);
+        }
+      }
+      for (const legit of ['ADR-013', 'PR-130', '批次发布', '维护批次', '级联', '批处理', 'Fix 批次']) {
+        if (PUBLIC_CODE_RE.test(legit)) {
+          throw new Error('合法相似子串被零代号判据误报: ' + legit);
+        }
+      }
+      const selfLines = fs.readFileSync(path.join(__dirname, 'guard-self-test.mjs'), 'utf8').split(/\r?\n/);
+      const commentHits = [];
+      for (let i = 0; i < selfLines.length; i += 1) {
+        if (!/^\s*(\/\/|\*|\/\*)/.test(selfLines[i])) continue;
+        const hit = selfLines[i].match(PUBLIC_CODE_RE);
+        if (hit) commentHits.push((i + 1) + ': ' + hit[0]);
+      }
+      if (commentHits.length !== 0) {
+        throw new Error('本文件注释层仍有未公开概念字样（判据锚：注释层零残留）: ' + commentHits.join(', '));
       }
     },
   },
@@ -11261,7 +11734,7 @@ const SCENARIOS = [
   // 258: 三节点 SKILL 文本锁（AC-9 / T05 已落地）——execute/review/verify 均含
   // 「## 修复回路状态机路径」段，段内含受控归位 + 回源节点跑出口 + 禁止绕过；不得把
   // 直接 exit 源节点收场或 advance 当正常路径（反捷径文本锚）。
-  // 布局感知（级 3 e2e 副本缺陷）：技能树从 suite 脚本自身位置推导
+  // 布局感知（端到端冒烟副本缺陷）：技能树从 suite 脚本自身位置推导
   // （<skillsRoot>/flow-comet/scripts/ → 组件技能为 <skillsRoot> 下同级目录），权威源
   // .flow-comet/skills/ 与安装副本 .claude|.agents|.dsh/skills/ 同一相对布局通吃。
   {
@@ -12069,7 +12542,7 @@ const SCENARIOS = [
   // workflow-guard 静态 import 使用它。
   {
     name: '267 replan 校验不豁免：依赖环/缺失依赖/缺 verify/并行写冲突 → BLOCKED 零改写 + 单源锚',
-    run: (dir) => {
+    run: async (dir) => {
       const cases = [
         ['依赖环', TASK_DEP_CYCLE, '依赖环', '依赖环'],
         ['依赖不存在的任务', TASK_MISSING_DEP, '依赖不存在的任务', '依赖'],
@@ -12160,6 +12633,64 @@ const SCENARIOS = [
       if (!/import[^;]*\bfindParallelWriteConflicts\b[^;]*from\s*'\.\/route-node\.mjs'/.test(guardText)) {
         throw new Error('workflow-guard.mjs 必须静态 import route-node 的并行写冲突检测（不得内联第二份判定）');
       }
+      // —— 本批 in-place 增锚（第三族：同文件跨任务且无依赖路径）——
+      // ① 单一实现锚（结构事实而非注释声明）：第三族的构件（修复任务族前缀常量 / 任务对键 /
+      //    依赖可达闭包）与结果产出在全引擎脚本里只能出现一次且位于 route-node.mjs——消费脚本
+      //    内自建第二份（依赖闭包或写入面交集实现）会在此变红。
+      for (const piece of ['FIX_TASK_ID_PREFIX', 'taskPairKey', 'reachableTaskIds']) {
+        const pieceFiles = engineScripts.filter((file) =>
+          new RegExp('\\b' + piece + '\\b').test(fs.readFileSync(path.join(__dirname, file), 'utf8')));
+        if (pieceFiles.length !== 1 || pieceFiles[0] !== 'route-node.mjs') {
+          throw new Error('第三族判定构件 ' + piece + ' 必须只出现在 route-node.mjs，实际: ' + JSON.stringify(pieceFiles));
+        }
+      }
+      const crossTaskProducerFiles = engineScripts.filter((file) =>
+        /const\s+crossTaskConflicts\s*=/.test(fs.readFileSync(path.join(__dirname, file), 'utf8')));
+      if (crossTaskProducerFiles.length !== 1 || crossTaskProducerFiles[0] !== 'route-node.mjs') {
+        throw new Error('第三族结果只能由 route-node.mjs 产出（不得在消费脚本内内联），实际: ' + JSON.stringify(crossTaskProducerFiles));
+      }
+      if (!/\bcrossTaskConflicts\b/.test(guardText)) {
+        throw new Error('workflow-guard.mjs 必须消费 route-node 的第三族结果（plan 出口判定）');
+      }
+      // ② 行为锚（直接驱动判定函数，plan 出口与 replan 共用同一实现）：非修复同文件对命中、
+      //    修复任务族对不参与（其顺序由修复生命周期保证，回修同文件是必然形态）。
+      const findConflicts = requireRouteNodeExport('findParallelWriteConflicts');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n## 任务清单\n\n' + CROSS_TASK_PLAIN_PAIR);
+      const plainConflicts = await findConflicts(path.join(dir, '.specs', CHANGE_ID));
+      if (plainConflicts.crossTaskConflicts.length !== 1
+        || plainConflicts.crossTaskConflicts[0].files.join(',') !== 'src/shared.mjs') {
+        throw new Error('非修复同文件无依赖对必须命中第三族: ' + JSON.stringify(plainConflicts.crossTaskConflicts));
+      }
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n## 任务清单\n\n' + CROSS_TASK_FIX_PAIR);
+      const fixConflicts = await findConflicts(path.join(dir, '.specs', CHANGE_ID));
+      if (fixConflicts.crossTaskConflicts.length !== 0 || fixConflicts.writeConflicts.length !== 0) {
+        throw new Error('修复任务族对不得进入第三族（也不得进入写写强判）: ' + JSON.stringify(fixConflicts));
+      }
+      // ③ 出口链路锚（新 change）：非修复对照对 → BLOCKED 且消息带任务对与重叠文件；
+      //    修复族对 → exit 0 且不出现该族消息（BLOCKED / WARN 两形态都不许有）。
+      const crossState = baseState('plan');
+      crossState.evidence.plan = { summary: 'plan done' };
+      crossState.newChange = true;
+      writeState(dir, crossState);
+      const plainRes = runPlanExit(dir, CROSS_TASK_PLAIN_PAIR);
+      assertExit(plainRes, 1);
+      assertOut(plainRes, 'BLOCKED');
+      assertOut(plainRes, '同文件跨任务且无依赖路径');
+      assertOut(plainRes, 'T01×T02');
+      assertOut(plainRes, 'src/shared.mjs');
+      assertOut(plainRes, 'depends_on');
+      writeState(dir, crossState);
+      const fixRes = runPlanExit(dir, CROSS_TASK_FIX_PAIR);
+      assertExit(fixRes, 0);
+      assertNotOut(fixRes, '同文件跨任务');
+      assertNotOut(fixRes, 'BLOCKED');
+      // ④ 混合夹具：两类并存 → 只报非修复对（修复族对不出现在消息里）
+      writeState(dir, crossState);
+      const mixedRes = runPlanExit(dir, CROSS_TASK_MIXED_PAIR);
+      assertExit(mixedRes, 1);
+      assertOut(mixedRes, 'BLOCKED');
+      assertOut(mixedRes, 'T01×T02');
+      assertNotOut(mixedRes, 'T-FIX-01×T-FIX-02');
     },
   },
 
@@ -12686,9 +13217,8 @@ if (isAuthoritativeSourceRepo()) {
     '.github/ISSUE_TEMPLATE/1-bug_report.yml', '.github/ISSUE_TEMPLATE/2-feature_request.yml',
     '.github/ISSUE_TEMPLATE/3-question.md', '.github/ISSUE_TEMPLATE/4-task.md',
   ];
-  // 与 .githooks/internal-codes.mjs 的 BANNED 保持同步（单一来源约定；本文件随 bundle
-  // 分发，不能 import 主仓私有 .githooks——改动词表时两份同改，行为必须一致）
-  const INTERNAL_CODE_RE = /\bS\d{1,3}\b|T-FIX|batch-(?![a-z])|D-\d+|P[0-7]\b|round\s*\d|dogfood|内部/;
+  // 词表判据 = 模块级 PUBLIC_CODE_RE（与 .githooks/internal-codes.mjs 的 BANNED 同判据，
+  // 见其定义处的同步约定；维护文档机检场景族另有该判据的判别力/边界锚）。
   for (const rel of PUBLIC_DOCS) {
     let text;
     try {
@@ -12700,7 +13230,7 @@ if (isAuthoritativeSourceRepo()) {
       console.error('FAIL: 公开产物零代号(' + rel + ')\n文件缺失: ' + e.message);
       continue;
     }
-    const m = text.match(INTERNAL_CODE_RE);
+    const m = text.match(PUBLIC_CODE_RE);
     if (m) {
       failures.push({ name: '公开产物零代号(' + rel + ')', error: rel + ' 含过程代号: "' + m[0] + '"' });
       console.error('FAIL: 公开产物零代号(' + rel + ')\n' + rel + ' 含过程代号: "' + m[0] + '"');
