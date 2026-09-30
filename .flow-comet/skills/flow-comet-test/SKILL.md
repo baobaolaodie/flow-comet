@@ -7,6 +7,8 @@ description: "flow-kit TEST 阶段协议：5 轮测试金字塔（功能/性能/
 
 本 Skill 为 flow-comet 的 review 节点提供 flow-kit 的 5 轮测试金字塔。
 
+> **模板权威**：本技能产出工件的段形唯一权威 = `flow-kit/templates/**`；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+
 ## 加载
 
 读取 `flow-kit/prompts/5-test.md` 并按其执行。

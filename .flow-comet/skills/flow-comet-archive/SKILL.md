@@ -15,6 +15,8 @@ This node finalizes a completed change by extracting reusable lessons from the d
 
 ## Guidance
 
+> **模板权威**：本节点产出工件的段形唯一权威 = `flow-kit/templates/**`；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+
 ### Prerequisites
 
 - `.specs/<change-id>/UAT.md` must exist with all items passed (from verify node).

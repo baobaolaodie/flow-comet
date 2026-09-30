@@ -192,6 +192,9 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record <node-id> '{"su
 
 All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT.md, LESSONS.md, CHANGELOG.md).
 
+> **模板权威**：工件段形以 `flow-kit/templates/**` 为唯一权威。
+> **archive 定位与读法**：`.specs/archive/**` 是历史证据。**何时可读**：工作区文档明确要求（如断点续传 / 决策追溯），或某 guard 硬校验的约定在模板与 LESSONS 中查不到时；**读什么**：只取结构与证据；**不读什么**：不作为格式规范或决策依据，不得以归档工件对齐段形。
+
 ### Scripts
 
 > **命令路径的平台化**：本文件命令统一为**权威源设计形态** `node .claude/skills/flow-comet/scripts/...`。安装时由 prepare-env 按平台处理——Claude Code 平台零替换（即此形态）；Codex 平台自动替换为 `node .agents/skills/flow-comet/scripts/...`（技能安装于 `.agents/skills/`，Codex 自动发现）。相对引用（`reference/`、`flow-kit/`）不替换——随技能目录整体复制，相对位置不变。手动复制（方案 C）仅面向 Claude Code；Codex 请用安装器。

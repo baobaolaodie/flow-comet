@@ -7027,19 +7027,143 @@ const SCENARIOS = [
     },
   },
 
-  // 184: 技能文本混排合法化语义文本锁——plan 与 subagent-execute 两 SKILL 权威源不得再含
+  // 184: 技能文本混排合法化语义文本锁（in-place 扩展：模板权威整句 / 入口 archive 读法 /
+  // 规划约束 / Codex-worktree 订正）——plan 与 subagent-execute 两 SKILL 权威源不得再含
   // 「连续块」「居首」旧波次形态约束表述，且依赖图语义描述（depends_on）在场、「用 Skill 工具」
-  // 两层加载句式保持（措辞锁族既有锚不破坏）。文本存在级断言（结构级由其余场景族覆盖）。
+  // 两层加载句式保持（措辞锁族既有锚不破坏）；模板权威声明覆盖 9 个既有成员（8 产出节点 + task）
+  // 与 5 个 flow-kit 阶段协议技能 = 14 个真实成员（题面 13 按 8+5 计数漏计 task；保留既有断言
+  // 优先，实际按 14 文件落地，成员边界见收口证据）——每份须在同一声明行内按序组合出现
+  // 「唯一权威 = 」/「`flow-kit/templates/**`」/「是历史证据」/「不是模板来源」/「上一轮就是这么写的」
+  // 且全数零命中旧反向声明「archive 是模板来源」；入口 SKILL 含 archive 三要素读法；plan / task
+  // 含规划约束判别句式与各自边界锚（以本节为准 / 以本节点为准），旧同层并行句零残留；
+  // worktree-notes / subagent-execute 含平台事实（multi_agent）与支持面（机制缺口）判别锚、
+  // 适用范围限定（不得外推 / 不可外推），旧独断句只允许以被反驳引用形态出现。
+  // 文本存在级断言（结构级由其余场景族覆盖）。
   {
     name: '184 技能文本锁：旧连续块/居首表述清零且依赖图语义描述在场',
     run: () => {
       const problems = [];
+      // —— 既有锚（原文语义与失败消息保持）——
       for (const skillDir of ['flow-comet-plan', 'flow-comet-subagent-execute']) {
         const text = fs.readFileSync(path.join(__dirname, '..', '..', skillDir, 'SKILL.md'), 'utf8');
         if (text.includes('连续块')) problems.push(skillDir + ' 含「连续块」旧形态约束表述');
         if (text.includes('居首')) problems.push(skillDir + ' 含「居首」旧位置约束表述');
         if (!text.includes('depends_on')) problems.push(skillDir + ' 缺依赖图语义描述（depends_on）');
         if (!text.includes('用 Skill 工具')) problems.push(skillDir + ' 缺「用 Skill 工具」两层加载句式');
+      }
+      // —— R-14 模板权威整句声明：9 个既有成员 + 5 个 flow-kit 阶段协议技能（真实成员 14）——
+      const templateAuthoritySkills = [
+        'flow-comet-open', 'flow-comet-design', 'flow-comet-plan', 'flow-comet-execute',
+        'flow-comet-subagent-execute', 'flow-comet-review', 'flow-comet-verify', 'flow-comet-archive',
+        'flow-comet-task',
+        'flow-comet-change', 'flow-comet-requirement', 'flow-comet-dev', 'flow-comet-test',
+        'flow-comet-integration',
+      ];
+      // 整句级语义组合：同一段声明行内按序出现下列锚点，防止只留半句或把锚点拆到不同段落。
+      const authoritySentenceAnchors = [
+        '唯一权威 = ', '`flow-kit/templates/**`', '是历史证据', '不是模板来源', '上一轮就是这么写的',
+      ];
+      for (const skillDir of templateAuthoritySkills) {
+        const rel = skillDir + '/SKILL.md';
+        const text = fs.readFileSync(path.join(__dirname, '..', '..', skillDir, 'SKILL.md'), 'utf8');
+        const authorityLine = text.split(/\r?\n/).find((line) => line.includes('模板权威'));
+        if (!authorityLine) {
+          problems.push(rel + ' 缺模板权威整句声明（正向权威 + 反向历史证据组合缺失）');
+          continue;
+        }
+        let cursor = -1;
+        for (const anchor of authoritySentenceAnchors) {
+          const at = authorityLine.indexOf(anchor, cursor + 1);
+          if (at < 0) {
+            problems.push(rel + ' 模板权威整句缺「' + anchor + '」（整句语义组合）');
+          } else {
+            cursor = at;
+          }
+        }
+        if (text.includes('archive 是模板来源')) {
+          problems.push(rel + ' 含「archive 是模板来源」旧反向声明');
+        }
+      }
+      // —— R-14 入口 archive 读法：三要素关键词在场 ——
+      {
+        const entry = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+        for (const keyword of ['flow-kit/templates', '何时可读', '不读什么']) {
+          if (!entry.includes(keyword)) {
+            problems.push('flow-comet/SKILL.md 缺「' + keyword + '」（入口 archive 读法三要素）');
+          }
+        }
+      }
+      // —— R-15 规划约束：plan / task 判别句式 + GUIDANCE 委托消化 ——
+      {
+        const directLockPhrase = 'direct 不是并行任务的逃生口';
+        const r15Keywords = {
+          'flow-comet-plan': ['同一文件', '并发同伴', directLockPhrase],
+          'flow-comet-task': ['同一文件', '并发同伴', directLockPhrase],
+        };
+        const planText = fs.readFileSync(path.join(__dirname, '..', '..', 'flow-comet-plan', 'SKILL.md'), 'utf8');
+        const taskText = fs.readFileSync(path.join(__dirname, '..', '..', 'flow-comet-task', 'SKILL.md'), 'utf8');
+        for (const [skillDir, keywords] of Object.entries(r15Keywords)) {
+          const text = skillDir === 'flow-comet-plan' ? planText : taskText;
+          for (const keyword of keywords) {
+            if (!text.includes(keyword)) {
+              problems.push(skillDir + '/SKILL.md 缺「' + keyword + '」（R-15 规划期约束判别句式）');
+            }
+          }
+        }
+        if (planText.includes('Same layer = same wave (parallel execution)')) {
+          problems.push('flow-comet-plan/SKILL.md 残留「Same layer = same wave (parallel execution)」旧同层并行句');
+        }
+        if (!planText.includes('以本节为准')) {
+          problems.push('flow-comet-plan/SKILL.md 缺「以本节为准」（上游宽松语义显式覆盖锚）');
+        }
+        if (taskText.includes('同层并行，跨层串行')) {
+          problems.push('flow-comet-task/SKILL.md 残留「同层并行，跨层串行」旧波次句');
+        }
+        if (!taskText.includes('以本节点为准')) {
+          problems.push('flow-comet-task/SKILL.md 缺「以本节点为准」（上游宽松语义显式覆盖锚）');
+        }
+        const guidance = fs.readFileSync(path.join(__dirname, '..', 'GUIDANCE.md'), 'utf8');
+        if (!guidance.includes('仍必须由 subagent-execute 委托消化')) {
+          problems.push('flow-comet/GUIDANCE.md 缺「仍必须由 subagent-execute 委托消化」（R-15③ direct 委托消化判别句）');
+        }
+      }
+      // —— Codex / worktree 订正：平台事实 + 支持面判别锚与适用范围限定在场、旧独断句
+      // 只允许以被反驳引用形态出现、fail-open 与未闭合限定在场、旧过宽句零残留 ——
+      {
+        const codexTexts = new Map([
+          ['reference/worktree-notes.md', fs.readFileSync(path.join(__dirname, '..', 'reference', 'worktree-notes.md'), 'utf8')],
+          ['flow-comet-subagent-execute/SKILL.md', fs.readFileSync(path.join(__dirname, '..', '..', 'flow-comet-subagent-execute', 'SKILL.md'), 'utf8')],
+        ]);
+        const refutedClaim = '「Codex 不能委派 / 不使用并行委托」';
+        for (const [rel, text] of codexTexts) {
+          for (const keyword of ['multi_agent', '机制缺口']) {
+            if (!text.includes(keyword)) {
+              problems.push(rel + ' 缺「' + keyword + '」（Codex 平台事实与支持面判别锚）');
+            }
+          }
+          // 旧独断句只允许以被反驳引用的完整形态出现：剥离该引用后不得再有残句。
+          if (text.split(refutedClaim).join('').includes('不使用并行委托')) {
+            problems.push(rel + ' 残留旧独断句「不使用并行委托」（非被反驳引用形态）');
+          }
+          if (!text.includes('不得外推') && !text.includes('不可外推')) {
+            problems.push(rel + ' 缺「不得外推 / 不可外推」适用范围限定');
+          }
+        }
+        const worktreeNotes = codexTexts.get('reference/worktree-notes.md');
+        for (const keyword of ['fail-open', '未闭合']) {
+          if (!worktreeNotes.includes(keyword)) {
+            problems.push('reference/worktree-notes.md 缺「' + keyword + '」（Codex/worktree 订正限定）');
+          }
+        }
+        if (worktreeNotes.includes('受支持的工作流仍是串行执行')) {
+          problems.push('reference/worktree-notes.md 残留「受支持的工作流仍是串行执行」旧独断句');
+        }
+        if (worktreeNotes.includes('写入仍会被协调者白名单拦截')) {
+          problems.push('reference/worktree-notes.md 残留「写入仍会被协调者白名单拦截」旧过宽句');
+        }
+        if (codexTexts.get('flow-comet-subagent-execute/SKILL.md').includes('写入会被协调者白名单拦截')) {
+          problems.push('flow-comet-subagent-execute/SKILL.md 残留「写入会被协调者白名单拦截」旧过宽句');
+        }
       }
       if (problems.length > 0) throw new Error('技能文本混排合法化语义不符: ' + problems.join('; '));
     },
