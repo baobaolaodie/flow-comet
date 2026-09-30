@@ -426,7 +426,7 @@ function printBranchLine(activeChange, branchPrefix = 'change/') {
 
 // C6: writeState 写入前校验已知字段类型（fail-closed：非法 → BLOCKED 拒绝写入，不修复不猜测）
 // 未知字段允许（前向兼容）；缺字段允许（readState 默认补）；只校验存在字段的类型。
-// 内置节点常量: 校验表已迁移到 state-schema.mjs（唯一来源），行为与批次 C C6 完全一致（对第一个非法字段输出后退出）
+// 内置节点常量: 校验表已迁移到 state-schema.mjs（唯一来源），行为与迁移前的内联表完全一致（对第一个非法字段输出后退出）
 async function writeState(state) {
   const bad = validateStateFields(state);
   if (bad.length) {
@@ -1166,7 +1166,7 @@ async function main() {
     const changeName = await findActiveChange();
     if (!changeName) {
       // 归档后场景:change 目录已移入 .specs/archive/(无活跃 change)——skill-load 不可用,
-      // 但 record 的声明自动化(M5)仍可写归档路径标记——消息如实引导(级 4 实证反馈)
+      // 但 record 的声明自动化(M5)仍可写归档路径标记——消息如实引导（真实运行实证反馈）
       throw new Error('skill-load requires an active change（先运行 init <change-id>;若该 change 已归档,声明标记由 record 自动补写——M5 会写入归档路径的 .skill-loads/）');
     }
     // 标记 protocol 字段 = --prompt 参数的 basename（如 0-change.md）——与 guard exit
