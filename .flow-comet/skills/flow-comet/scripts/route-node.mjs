@@ -329,18 +329,49 @@ function analyzeDependencyGraph(blocks) {
 }
 
 // ---------- 并行文件依赖检测（单源：workflow-guard 门禁与 replan 重校共用） ----------
-// 并行文件依赖检测——解析 TASK.md 中本趟可运行的 parallel=pending 任务的 read/write_files 声明，
-// 分两级返回：write∩write（写写绝对冲突，强判）与 read∩write（共享读写嫌疑，弱判——仅对彼此
-// 无显式 depends_on 关联的并行对探测，有显式关联=依赖已声明，跳过→合法拓扑零新增告警）。
+// 文件依赖检测——解析 TASK.md 的任务 read/write_files 声明，分三族返回：
+//   ① writeConflicts（写写强判）：本趟可运行的 parallel=pending 任务间 write∩write 非空——同波次
+//      并行写同一路径必竞态覆盖；
+//   ② readWarnings（读写弱判）：并行对一方读取对方写路径——仅对彼此无显式 depends_on 关联的并行对
+//      探测，有显式关联=依赖已声明，跳过→合法拓扑零新增告警；
+//   ③ crossTaskConflicts（同文件跨任务且无依赖路径）：两个未完成任务（status 非 done）写入面重叠
+//      且两任务间不存在依赖路径（depends_on 传递闭包，双向任一可达即视为已显式排序 → 放行）——
+//      串行拆分出的同文件任务同样命中（未显式排序的同文件多任务）；修复任务族（id 以修复前缀
+//      开头的任务）不参与本族：其顺序由修复生命周期保证，回修同一文件是必然形态；与①按任务对
+//      去重（同一对已计入写写强判则不再计入本族）。
 // 路径解析按声明实际内容（换行切分 → 分号二次切分 → trim → 滤空与 HTML 注释），不做扩展名
 // 白名单过滤——txt/log/无扩展名路径同等检出（链式重命名的 .txt 事故面闭合；与既有自动解析
 // 同源实现）。开标签属性解析与 workflow-state 路由共享 taskOpeningAttrs（属性序无关；不读块内文本）。
 // 2026-09-28 PR 审查采纳：由 workflow-guard.mjs 抽到本模块——plan 出口与 replan 重校消费同一实现，
 // 两侧各自决定强判（BLOCK）/弱判（WARN），判定本身只此一处（L-067 单一判据）。
+// 修复任务族 id 前缀（同文件跨任务族的参与者排除面）：修复任务回修同一文件是其生命周期的必然
+// 形态，顺序由修复生命周期保证而非 depends_on——故该族不参与第三族判定（族语义见上方块注释）。
+const FIX_TASK_ID_PREFIX = /^(T-FIX|P-FIX)/i;
+
+// 任务对键（无序——不依赖任务书写顺序；NUL 分隔，任务 id 不含 NUL）：同文件跨任务族与写写强判族
+// 按任务对去重时使用（同一对已计入写写强判则不再计入第三族）。
+function taskPairKey(a, b) {
+  return a < b ? a + '\u0000' + b : b + '\u0000' + a;
+}
+
+// 依赖可达集（depends_on 传递闭包）：从 start 沿依赖边可达的全部任务 id（含经由其它任务中转的
+// 路径）。判定语义 = 双向任一可达即视为两任务已显式排序 → 第三族放行（见上方族说明）。
+function reachableTaskIds(depsById, start) {
+  const seen = new Set();
+  const stack = [...(depsById.get(start) ?? [])];
+  while (stack.length > 0) {
+    const cur = stack.pop();
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    for (const next of depsById.get(cur) ?? []) stack.push(next);
+  }
+  return seen;
+}
+
 async function findParallelWriteConflicts(changeDir) {
   const taskFile = path.join(changeDir, 'TASK.md');
   let text;
-  try { text = await fs.readFile(taskFile, 'utf8'); } catch { return { writeConflicts: [], readWarnings: [] }; }
+  try { text = await fs.readFile(taskFile, 'utf8'); } catch { return { writeConflicts: [], readWarnings: [], crossTaskConflicts: [] }; }
   const allBlocks = taskBlocks(text);
   // 依赖资格收窄：仅统计「本趟可运行」的并行任务——deps ⊆ doneIds；
   // 等待后续趟次的并行任务（依赖未满足）与已交付任务不参与同趟冲突判定，
@@ -412,7 +443,39 @@ async function findParallelWriteConflicts(changeDir) {
       if (readOverlap2.length) readWarnings.push({ a: perTask[j].id, b: perTask[i].id, files: readOverlap2 });
     }
   }
-  return { writeConflicts, readWarnings };
+  // 第三族：同文件跨任务且无依赖路径（族语义见上方块注释）。参与者 = status 非 done 且非修复
+  // 任务族；依赖路径 = depends_on 传递闭包（双向任一可达即已显式排序 → 放行）；与写写强判族
+  // 按任务对去重。写入面解析与归一复用同函数既有 parsePaths / normalizeTaskPath（不另起第二份）；
+  // 依赖图与依赖文本解析复用既有单一权威 analyzeDependencyGraph（其依赖解析走 taskDependencyEligibility）。
+  const writePairKeys = new Set(writeConflicts.map((c) => taskPairKey(c.a, c.b)));
+  const { depsById } = analyzeDependencyGraph(allBlocks);
+  const reachCache = new Map();
+  const reachableFrom = (id) => {
+    if (!reachCache.has(id)) reachCache.set(id, reachableTaskIds(depsById, id));
+    return reachCache.get(id);
+  };
+  const participants = [];
+  for (const b of allBlocks) {
+    const a = taskOpeningAttrs(b);
+    if (!a || !a.id || a.status === 'done' || FIX_TASK_ID_PREFIX.test(a.id)) continue;
+    const wf = b.match(/<write_files>([\s\S]*?)<\/write_files>/);
+    if (!wf) continue;
+    const writes = new Set(parsePaths(wf[1]));
+    if (writes.size === 0) continue;
+    participants.push({ id: a.id, writes });
+  }
+  const crossTaskConflicts = [];
+  for (let i = 0; i < participants.length; i++) {
+    for (let j = i + 1; j < participants.length; j++) {
+      if (writePairKeys.has(taskPairKey(participants[i].id, participants[j].id))) continue;
+      const overlap = [...participants[i].writes].filter((f) => participants[j].writes.has(f));
+      if (overlap.length === 0) continue;
+      if (reachableFrom(participants[i].id).has(participants[j].id)
+        || reachableFrom(participants[j].id).has(participants[i].id)) continue;
+      crossTaskConflicts.push({ a: participants[i].id, b: participants[j].id, files: overlap });
+    }
+  }
+  return { writeConflicts, readWarnings, crossTaskConflicts };
 }
 
 // ---------- Fix 批次共享判定（单一权威 · 纯函数） ----------

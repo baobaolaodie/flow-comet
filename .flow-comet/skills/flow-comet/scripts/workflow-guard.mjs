@@ -1578,9 +1578,11 @@ async function main() {
       }
       // 并行文件依赖检测前移（触发面）：write∩write 写写强判（新 change BLOCKED / 旧 change
       // WARN 渐进，与依赖环分级同先例）+ read∩write 读写弱判（仅无显式 depends_on 关联的并行对；
-      // WARN 提示级，新/旧均不 BLOCK——渐进提示）。与委托前既有拦截并存（委托前为第二道写写锚，
-      // 行为与消息保持既有语义不变）。
-      const { writeConflicts, readWarnings } = await findParallelWriteConflicts(path.join(runRoot, '.specs', state.activeChange));
+      // WARN 提示级，新/旧均不 BLOCK——渐进提示）+ 同文件跨任务且无依赖路径（未完成任务写入面
+      // 重叠而两任务间无依赖路径——新 change BLOCKED / 旧 change WARN 渐进；串行拆分同样命中，
+      // 修复任务族不参与，族语义见 route-node 判定块注释）。与委托前既有拦截并存（委托前为第二道
+      // 写写锚，行为与消息保持既有语义不变）。
+      const { writeConflicts, readWarnings, crossTaskConflicts } = await findParallelWriteConflicts(path.join(runRoot, '.specs', state.activeChange));
       if (writeConflicts.length > 0) {
         const detail = writeConflicts.map((c) => `${c.a}×${c.b}(${c.files.join(',')})`).join('; ');
         const guide = ';恢复: 补显式 depends_on 或拆为串行任务后重试';
@@ -1589,6 +1591,15 @@ async function main() {
           process.exit(1);
         }
         console.error('WARN: TASK.md 并行任务 write_files 重叠（写写冲突，建议补显式 depends_on 或拆为串行任务）: ' + detail + guide);
+      }
+      if (crossTaskConflicts.length > 0) {
+        const detail = crossTaskConflicts.map((c) => `${c.a}×${c.b}(${c.files.join(',')})`).join('; ');
+        const guide = ';恢复: 补显式 depends_on 或合并为一个任务后重试';
+        if (isNewChange(state)) {
+          console.error('BLOCKED: TASK.md 同文件跨任务且无依赖路径: ' + detail + guide);
+          process.exit(1);
+        }
+        console.error('WARN: TASK.md 同文件跨任务且无依赖路径（建议补显式 depends_on 或合并为一个任务）: ' + detail + guide);
       }
       if (readWarnings.length > 0) {
         console.error('WARN: TASK.md 并行任务 read∩write 隐式依赖嫌疑（一方读取对方写路径，建议补显式 depends_on 声明）: '

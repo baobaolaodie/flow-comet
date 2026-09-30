@@ -1693,8 +1693,12 @@ const TEST_ITEMS = [
     // 并行文件依赖检出（真实命令链路）：write∩write 重叠强判前移 plan 出口——同波次并行任务
     // 写同一路径（链式重命名的 .txt 事故面）→ 新 change BLOCKED（含重叠路径与 depends_on
     // 恢复指引）；按指引补显式 depends_on 后同出口恢复通过。read∩write 弱判：无显式关联并行对
-    // 一方读取对方写路径 → WARN 提示不 BLOCK（渐进）。修复前 plan 出口无此检测 = 预期 RED。
-    name: 'A16 plan 出口文件依赖检出：写写重叠 BLOCK 与恢复 + 读写弱判 WARN（真实命令）',
+    // 一方读取对方写路径 → WARN 提示不 BLOCK（渐进）。同一文件跨任务族：两个未完成任务写入面
+    // 重叠且彼此无依赖路径（串行拆分同样拦截）→ 新 change BLOCKED（消息含任务对与重叠文件）；
+    // 补显式 depends_on 后放行；旧 change 形态仅 WARN 不阻断；修复任务族（id 带修复前缀）
+    // 不参与该族——其顺序由修复生命周期保证，回修同一文件是必然形态。修复前 plan 出口无这些
+    // 检测 = 预期 RED。
+    name: 'A16 plan 出口文件依赖检出：写写重叠 BLOCK 与恢复 + 读写弱判 WARN + 同文件跨任务无依赖路径（真实命令）',
     run: (dir) => {
       driveThroughDesign(dir);
       const planEnv = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
@@ -1726,17 +1730,54 @@ const TEST_ITEMS = [
       assertOut(blocked, 'BLOCKED');
       assertOut(blocked, 'bak_a.txt');
       assertOut(blocked, 'depends_on');
+      // 同一文件跨任务族（负例）：两个非修复任务写入同一文件、彼此无依赖路径（串行拆分同样构成
+      // 「未显式排序的同文件多任务」）→ 新 change BLOCKED，消息含任务对与重叠文件 + 恢复指引。
+      // 同夹具并列一对修复任务（id 带修复前缀）写同一文件且无依赖路径——该族不参与判定，
+      // 消息中不得出现它们（其顺序由修复生命周期保证）。
+      const fixPair =
+        '<task id="T-FIX-01" status="pending"><action>修复 F1</action><write_files>src/fix.mjs</write_files><verify>node --check src/fix.mjs</verify></task>\n' +
+        '<task id="T-FIX-02" status="pending"><action>修复 F2</action><write_files>src/fix.mjs</write_files><verify>node --check src/fix.mjs</verify></task>\n';
+      const sameFileTask = (id, depsElement) =>
+        '<task id="' + id + '" status="pending"><action>实现 ' + id + '</action><write_files>src/x.mjs</write_files>' +
+        '<verify>node --check src/x.mjs</verify>' + depsElement + '</task>\n';
+      const sameFilePairNoDeps = sameFileTask('X1', '') + sameFileTask('X2', '');
+      const sameFilePairWithDeps = sameFileTask('X1', '') + sameFileTask('X2', '<depends_on>X1</depends_on>');
+      planTask(C1 + sameFilePairNoDeps + fixPair);
+      const sameFileBlocked = exitPlanNoApply();
+      assertExit(sameFileBlocked, 1);
+      assertOut(sameFileBlocked, 'BLOCKED');
+      assertOut(sameFileBlocked, '同文件跨任务且无依赖路径');
+      assertOut(sameFileBlocked, 'X1×X2');
+      assertOut(sameFileBlocked, 'src/x.mjs');
+      assertOut(sameFileBlocked, 'depends_on');
+      assertNotOut(sameFileBlocked, 'T-FIX-01');
+      assertNotOut(sameFileBlocked, 'src/fix.mjs');
+      // 旧 change 形态（无新 change 标记）：同形态仅 WARN 渐进不阻断，恢复指引仍在
+      const sameFileState = readStateFile(dir);
+      delete sameFileState.newChange;
+      writeState(dir, sameFileState);
+      const sameFileWarn = exitPlanNoApply();
+      assertExit(sameFileWarn, 0);
+      assertOut(sameFileWarn, 'WARN');
+      assertOut(sameFileWarn, '同文件跨任务且无依赖路径');
+      assertOut(sameFileWarn, 'X1×X2');
+      assertNotOut(sameFileWarn, 'BLOCKED');
+      writeState(dir, { ...sameFileState, newChange: true });
       // 恢复（CodeRabbit 采纳）：按指引补显式 depends_on，且 **P02 保持写原重叠路径 bak_a.txt**
       // （不改路径避开重叠）——证明「补 depends_on 解决原重叠」而非「改路径避开重叠」；补依赖后
       // P02 跨趟（dep 未满足，不在本趟可运行集合）→ 同波次并行对只剩 P01 → 重叠消失 → 同出口通过。
+      // 同一文件跨任务族同批恢复：X2 补 depends_on X1（重叠路径不改）；并列的修复任务对保持无依赖
+      // ——该族不参与判定，故不影响本出口通过。
       planTask(
         C1 +
         '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n' +
-        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify><depends_on>P01</depends_on></task>\n');
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify><depends_on>P01</depends_on></task>\n' +
+        sameFilePairWithDeps + fixPair);
       const ok = exitPlanApply();
       assertExit(ok, 0);
       assertOut(ok, 'ALL CHECKS PASSED');
       assertNotOut(ok, 'BLOCKED');
+      assertNotOut(ok, '同文件跨任务且无依赖路径');
     },
   },
 
@@ -3892,7 +3933,7 @@ const TEST_ITEMS = [
       if (fs.existsSync(path.join(dir, '.specs', 'arch-m5b'))) {
         throw new Error('M5 在双路径皆无时重建了活动目录(残留): .specs/arch-m5b/');
       }
-      // 变体:归档后 skill-load 报错须引导 record 自动补路径(级 4 实证:归档后手动声明
+      // 变体:归档后 skill-load 报错须引导 record 自动补路径(真实会话实证:归档后手动声明
       // 不可行,消息须指明 M5 自动补仍可写归档路径标记)
       const slArchive = runState(['skill-load', 'archive', 'flow-comet-integration'], dir);
       assertExit(slArchive, 1);
@@ -5225,7 +5266,7 @@ const TEST_ITEMS = [
         }
       }
       console.log('  delegationDepth 代理身份分派(子代理=执行者/协调者原链)✓');
-      // ⑦ apply 集成喂测（5.5 分派分支自动化回归——此前仅级 3 真实会话人工覆盖）：
+      // ⑦ apply 集成喂测（5.5 分派分支自动化回归——此前仅有真实会话人工覆盖）：
       //   mock ctx 捕获 tools/pre-execute 监听器，构造 exec 断言插件级行为、
       //   子代理(agentDepth>0)写源码放行 / 协调者走 guard 白名单 / 越界·形状 deny 不受身份、
       //   非 flow-comet 项目窄监听放行。复用 ⑤ 安装产物(target 为真实 dsh flow-comet 项目)：
