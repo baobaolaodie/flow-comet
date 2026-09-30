@@ -157,7 +157,7 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 ### rc.8 三态冒烟（2026-08-20）（历史）
 
 - 环境：dsh CLI 0.1.0-rc.8 / Harness 核心 rc.8 / dsh-tui 0.8.5
-- 结果：运行中协调者项目外 Write → deny；运行中子代理项目内 Write → next()；空闲态（无 state）项目外 Write → next()；解析失败/未知 status → fail-closed deny（当轮 system-test ALL PASSED，K11/K12 断言覆盖；当轮基线 82 项（历史））
+- 结果：运行中协调者项目外 Write → deny；运行中子代理项目内 Write → next()；空闲态（无 state）项目外 Write → next()；解析失败/未知 status → fail-closed deny（当轮 system-test ALL PASSED，K11/K12 断言覆盖；项数以套件自身输出为准）
 - 载体：prepare-env --platform dsh 经临时项目重推真实 ~/.dsh 桥接 loader，loader 与权威源 SHA-256 一致；真实交互式 TUI/Web 冒烟留待开放项
 
 ### 0.1.5-rc.1 全接缝认证（2026-09-10）（历史）
