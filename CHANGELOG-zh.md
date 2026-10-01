@@ -10,7 +10,9 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号记录于九处，由 CI 在发布面对账保持一致：发布 git tag；README 徽章、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 与本文档（各含两种语言）；权威源 `.flow-comet/skills/flow-comet/INSTALLED_VERSION`；以及 npm 包的 `package.json` 的 `version`。
 
-## [Unreleased]
+## [1.6.1] - 2026-10-02
+
+本版本汇总 1.6.0 之后积累的工作：公开文档按「每个主题一个权威」重构，双语检查改为比较结构而非行数；维护文档纳入回归套件校验，并在跳过时显式说明跳过了什么；执行中被证明有缺陷的计划可经显式授权通道就地修订——重跑同一套检查且不做豁免、改写前留状态备份、每次使用留痕并设轮次上限；强制推进现在留痕并在状态视图中可见；把一个文件拆进多个任务却无声明顺序的计划在计划出口被拦；回归套件在夹具目录仍被占用时不再中止整轮。 ([#118](https://github.com/baobaolaodie/flow-comet/pull/118)) ([#120](https://github.com/baobaolaodie/flow-comet/pull/120)) ([#121](https://github.com/baobaolaodie/flow-comet/pull/121)) ([#126](https://github.com/baobaolaodie/flow-comet/pull/126)) ([#127](https://github.com/baobaolaodie/flow-comet/pull/127)) ([#128](https://github.com/baobaolaodie/flow-comet/pull/128)) ([#130](https://github.com/baobaolaodie/flow-comet/pull/130)) ([#131](https://github.com/baobaolaodie/flow-comet/pull/131)) ([#132](https://github.com/baobaolaodie/flow-comet/pull/132))
 
 ### 新增
 
@@ -30,6 +32,8 @@
 - **随包分发的 Codex 与 worktree 说明现把平台事实与当前支持面分开陈述**：Codex 的常规用法是交互式 CLI，其原生多代理（`multi_agent`）默认启用——真实交互式会话中确有 `spawn_agent`、`wait_agent`、`close_agent` 调用记录——因此「Codex 不能委派」不是平台事实。flow-comet 的守卫与白名单模型尚未覆盖该原生子代理形态；在探针（须覆盖交互式会话与原生子代理）结论确定后续契约前，执行节点在 Codex 上不派遣并行子代理、任务逐个走 `execute` 节点串行交付——属现阶段支持面限制，不是平台边界。本次记录中实测的部分仅限 `codex exec` headless 子面并已如此标注，不外推到交互式与原生子代理形态；手工 worktree 仍非受支持路径、不得作为绕过手段。([#130](https://github.com/baobaolaodie/flow-comet/pull/130))
 - **把同一文件拆进多个任务、且任务之间没有排序路径的计划现在会被计划出口拦住**：当两个不属于修复回路的任务声明写入同一文件，且彼此都无法通过已声明的依赖抵达对方时，新 change 会被拦住，报告写明任务对、重叠文件与恢复路径——在两个任务之间补一条显式依赖，或把它们合并为一个任务。较早的 change 只告警放行，既有计划不会被卡死。计划出口与就地修订通道（`replan`）**同判据**——新 change 一律拦住，较早的 change 仅告警放行，恢复路径也相同：在两个任务之间补一条显式依赖，或把它们合并为一个任务。
 - **机检覆盖面扩大**：用于把未公开的过程措辞挡在公开文档之外的词汇检查，现在同时覆盖随包分发的技能文本与随其分发的脚本注释；更新最频繁的知识文档进入计数受检清单，且记录的计数与当前值不符时会被报为过期——即便同一文件里也带着当前值；维护文档检查另加三项判据——引用行号超出目标文件末尾的文件行引用、页头日期早于正文最新日期的知识页、以及在办工作段中仍列出已归档 change 的路线图。
+- **双语镜像检查改为比较结构而非行数**：同一文档的两份语言版本按块逐一比对（块类型序列与标题层级序列），仅在一种语言中存在的块不再能藏进行数容差里；有意偏差必须带内容模式显式声明，且检查会核验该偏差确属声明的那一类。([#120](https://github.com/baobaolaodie/flow-comet/pull/120))
+- **缺陷与提问表单现可接收 DeepSeek Harness 的报告**：平台下拉新增 `dsh`，提问模板的版本提示也补上 dsh 的标识路径（与 Claude Code、Codex 并列），该平台的报告不必再挤进自由文本的环境段。([#121](https://github.com/baobaolaodie/flow-comet/pull/121))
 
 ### 修复
 
