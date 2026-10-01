@@ -85,11 +85,19 @@ function resolveComponentSkillFile(nodeSkill, scriptsDir = __dirname) {
 
 // 公开产物零代号判据（与 .githooks/internal-codes.mjs 的 BANNED 保持同步——单一来源约定：
 // 本文件随技能包分发，不能 import 主仓私有的 .githooks；改动词表时两份同改，行为必须一致）。
+// 等价性不只靠注释约定：底部自检在权威源检出下读该私有件**逐字符比对**（主仓形态），安装副本
+// 形态输出显式「不适用」描述符（未验证 ≠ 通过）——见词表镜像漂移判据。
 // 除既有过程代号外，本批并入"未公开概念"类**收窄模式**：批次编号 / 批+数字 / 级别编号 /
 // 验收代号 / 工作项编号。模式刻意收窄（词界 + 字母边界）：合法中文用法（发布批次 / 维护批次 /
-// 级联 / 变更请求与采纳编号前缀）不命中；判别力与边界锚见维护文档机检场景族（四形态命中 +
-// 相似子串不误报 + 本文件注释层零残留三向自检）。禁止放宽为裸词——那会误伤公开面大量合法用法。
-const PUBLIC_CODE_RE = /\bS\d{1,3}\b|T-FIX|batch-(?![a-z])|D-\d+|P[0-7]\b|round\s*\d|dogfood|内部|批次 [A-Z0-9]|批 ?\d|级 [0-9]|UAT-\d|(?<![A-Za-z])R-\d{2}/;
+// 级联 / 变更请求与采纳编号前缀）不命中；判别力与边界锚见维护文档机检场景族（表驱动等价性：
+// 词表每个分支各一条正例 + 一条对应反例，另加本文件注释层零残留——三向自检）。禁止放宽为裸词
+// ——那会误伤公开面大量合法中文用法。
+// 2026-10-01 收窄一处：「批 + 数字」补中文序数否定环视——「第 N 批 + 数字」是普通计数短语
+// （合法中文用法），旧模式把它当未公开概念命中。序号与「批」之间隔着数字（阿拉伯或中文），
+// 故环视必须吸收这段数字（`(?<!第[0-9一二三四五六七八九十百千万]*)`，变长环视）；
+// 只排除中文序数前缀这一种形态，其余形态判定不变（只收窄不放宽）。无空格连写形态
+// （如「批次2」）刻意不命中：实测受检三层 0 处，放宽会增误报。
+const PUBLIC_CODE_RE = /\bS\d{1,3}\b|T-FIX|batch-(?![a-z])|D-\d+|P[0-7]\b|round\s*\d|dogfood|内部|批次 [A-Z0-9]|(?<!第[0-9一二三四五六七八九十百千万]*)批 ?\d|级 [0-9]|UAT-\d|(?<![A-Za-z])R-\d{2}/;
 
 // 场景数一致性自检清单（15 文件 = 9 分发组 + 6 维护者组，全变体：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n）——
 // 数字由下方常量清单**推导**、不硬编码：9 = SCENARIO_COUNT_FILES 9 条与 SYSTEM_TEST_COUNT_FILES 4 条的
@@ -394,29 +402,61 @@ function isTreeRootRelativeRef(ref) {
 // 隐含边界把"允许"藏进了代码，声明式族把允许面变成可见清单，新增跳过必须显式登记。
 //   ① 外部命名空间族（前缀声明）：平台侧命名空间，本仓库根天然不存在。
 const EXTERNAL_NAMESPACE_PREFIXES = ['DSH_HOME/', 'dsh-tui/', 'dsh-base/'];
-//   ② 退役命名空间允许面（逐条 {file, ref, reason}）：仅限**记录该迁移**的 ADR 与决策册——
-//      退役命名空间在那里是历史事实，改掉反而丢失迁移记录。
+//   ② 退役命名空间允许面（**按角色 / 前缀匹配**，不再逐条硬编码精确 ref）：仅限**记录该迁移**
+//      的决策件与决策册——退役命名空间在那里是历史事实，改掉反而丢失迁移记录。
+//      匹配 = 文件面（前缀形态 `filePrefix` 或角色形态 `role`）+ 引用面（退役命名空间前缀）。
+//      精确 ref 硬编码的脆性在于：文件改名即静默失配 → 合法历史迁移记录被误报死引用（误红），
+//      而误红会诱导维护者删掉历史事实。改名不改角色，故按角色/前缀匹配；反过来**不**放宽
+//      引用面与文件面之外的部分：未登记文件 / 未登记命名空间的引用照旧一律报（fail-closed）。
+const RETIRED_NAMESPACE_PREFIX = '.comet/';
+// 决策册角色判定：`.specs` 下的决策账本族文件（含改名后的 `CONTEXT-<后缀>.md` 形态）——
+// 角色判定按语义而非精确文件名，改名不该让合法迁移记录变成死引用误报。
+// 边界（登记）：角色判定只作用于**扫描目标**（该族文件本身须在受检目标清单内才会被扫描）。
+function isDecisionLedgerFile(rel) {
+  return /^\.specs\/CONTEXT(?:[-.][A-Za-z0-9_.-]+)?\.md$/i.test(rel);
+}
+// 文件面匹配器（声明式）：kind = filePrefix（路径前缀，改名后缀不影响）| role（角色判定函数）。
+const RETIRED_NAMESPACE_FILE_MATCHERS = {
+  'decision-ledger': isDecisionLedgerFile,
+};
 const RETIRED_NAMESPACE_ALLOWLIST = [
   {
-    file: '.specs/adr/ADR-009-runtime-namespace.md', ref: '.comet/config.yaml',
-    reason: '记录运行时命名空间迁移的决策件：退役命名空间作为迁移前事实保留',
+    filePrefix: '.specs/adr/ADR-009',
+    refPrefix: RETIRED_NAMESPACE_PREFIX,
+    reason: '记录运行时命名空间迁移的决策件：退役命名空间作为迁移前事实保留（改名不改角色）',
   },
   {
-    file: '.specs/adr/ADR-009-runtime-namespace.md', ref: '.comet/flow-comet-state.json',
-    reason: '同上（迁移前的状态文件位置）',
+    filePrefix: '.specs/adr/ADR-010',
+    refPrefix: RETIRED_NAMESPACE_PREFIX,
+    reason: '同族决策件（迁移决策的后续修订）：迁移前事实同样保留，按前缀匹配避免改名失配',
   },
   {
-    file: '.specs/CONTEXT.md', ref: '.comet/config.yaml',
-    reason: '已锁决策记录迁移事实（退役命名空间的历史形态）',
+    role: 'decision-ledger',
+    refPrefix: RETIRED_NAMESPACE_PREFIX,
+    reason: '决策册角色（.specs 下决策账本族）：已锁决策记录迁移事实（退役命名空间的历史形态）',
   },
 ];
-//   ③ 示例形态允许面（逐条 {file, ref, reason}）：文档里的示意路径。当前为空——设计期实测的
-//      示例形态已由文档侧改写；出现新示例时在此登记（未登记即报，不再静默跳过）。
+// 允许面条目匹配（单一实现）：文件面（前缀 / 角色）与引用面（前缀）同时命中才算登记在案。
+function matchesRetiredNamespaceEntry(entry, rel, ref) {
+  const refOk = typeof entry.refPrefix === 'string' && ref.startsWith(entry.refPrefix);
+  if (!refOk) return false;
+  if (typeof entry.filePrefix === 'string' && rel.startsWith(entry.filePrefix)) return true;
+  if (typeof entry.role === 'string') {
+    const roleMatcher = RETIRED_NAMESPACE_FILE_MATCHERS[entry.role];
+    if (typeof roleMatcher === 'function' && roleMatcher(rel)) return true;
+  }
+  return false;
+}
+//   ③ 示例形态允许面（逐条 {file, ref, reason}）：文档里的示意路径。**当前为空清单**——
+//      空清单的语义是「无任何示例允许项」（未登记即报，fail-closed），不是「该判据不生效」；
+//      查询带长度短路（零条目时不进入匹配），避免把零条目扩展点当成隐式权限。
+//      出现新示例时在此登记（未登记即报，不再静默跳过）。
 const EXAMPLE_REF_ALLOWLIST = [];
 function isDeclaredReferenceSkip(rel, ref) {
   if (EXTERNAL_NAMESPACE_PREFIXES.some((prefix) => ref.startsWith(prefix))) return true;
-  if (RETIRED_NAMESPACE_ALLOWLIST.some((e) => e.file === rel && e.ref === ref)) return true;
-  if (EXAMPLE_REF_ALLOWLIST.some((e) => e.file === rel && e.ref === ref)) return true;
+  if (RETIRED_NAMESPACE_ALLOWLIST.some((e) => matchesRetiredNamespaceEntry(e, rel, ref))) return true;
+  if (EXAMPLE_REF_ALLOWLIST.length > 0
+    && EXAMPLE_REF_ALLOWLIST.some((e) => e.file === rel && e.ref === ref)) return true;
   return false;
 }
 const INTERNAL_DOC_REF_ALLOWLIST = new Set(['.specs/archive/CONTEXT-history.md']);
@@ -1958,6 +1998,204 @@ function exerciseSystemTestCountCheck(dir) {
   if (!noSource.includes('缺失') || !noSource.includes(SYSTEM_TEST_SCRIPT_REL)) {
     throw new Error('项数派生源缺失未被显式报告: ' + noSource);
   }
+}
+
+// ---------- 结构锚的共享判定（判别力升级：按表达式形态计数，而不只是数标识符名） ----------
+
+// 引擎脚本集（不含套件自身与系统测试集）：结构锚共用同一清单——多处各写一份过滤表达式会在
+// 清单口径变化时漂移（同一事实的第二实现）。
+function engineScriptFiles(scriptsDir = __dirname) {
+  return fs.readdirSync(scriptsDir)
+    .filter((f) => f.endsWith('.mjs') && f !== 'guard-self-test.mjs' && f !== 'system-test.mjs');
+}
+
+// 注释行判定：与检查工具的注释层口径一致（行首 // / /* / * 才算注释行，行尾注释不在此列）。
+function isScriptCommentLine(line) {
+  return /^\s*(\/\/|\*|\/\*)/.test(line);
+}
+
+// 具名函数体文本：先配平参数表圆括号（解构入参内含 `new Map()` 一类调用），再配平函数体花括号。
+// 目标函数体内不含字符串花括号，故不做字面量扫描。找不到定义返回 null——调用方据此显式报告
+// "结构锚前提失效"，不静默按通过处理。
+function functionBodyText(text, name) {
+  const start = text.indexOf('function ' + name + '(');
+  if (start < 0) return null;
+  let i = text.indexOf('(', start);
+  if (i < 0) return null;
+  let parens = 0;
+  for (; i < text.length; i += 1) {
+    if (text[i] === '(') parens += 1;
+    else if (text[i] === ')') {
+      parens -= 1;
+      if (parens === 0) break;
+    }
+  }
+  i = text.indexOf('{', i);
+  if (i < 0) return null;
+  let depth = 0;
+  for (; i < text.length; i += 1) {
+    if (text[i] === '{') depth += 1;
+    else if (text[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+// 修复族 id 前缀边界的权威表达式文本（单一来源：判据与夹具锚共用同一份字面量）。
+const FIX_PREFIX_LITERAL_TEXT = '/^[TP]-FIX-/i';
+
+// 修复族边界"出现处"扫描（纯读取，单一实现）：引擎脚本里的五类出现面——
+//   前缀正则字面量 / 含 FIX 词干的其它正则字面量 / 修复族 id 字符串字面量 / 段内成员判定 /
+//   边界常量的按文件使用次数。注释行不参与（与检查工具的注释层口径一致）：注释里提到标识符
+//   是说明，不是第二份实现。判定与扫描分离（本函数只收集事实，下函数只下结论）。
+function fixFamilyBoundarySites(scriptsDir = __dirname) {
+  const sites = {
+    prefixLiterals: [],
+    otherFixRegexes: [],
+    idLiterals: [],
+    sectionMemberships: [],
+    prefixUsesByFile: new Map(),
+    texts: new Map(),
+  };
+  for (const file of engineScriptFiles(scriptsDir)) {
+    const text = fs.readFileSync(path.join(scriptsDir, file), 'utf8');
+    sites.texts.set(file, text);
+    const lines = text.split(/\r?\n/);
+    let prefixUses = 0;
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (isScriptCommentLine(line)) continue;
+      let at = line.indexOf(FIX_PREFIX_LITERAL_TEXT);
+      while (at >= 0) {
+        sites.prefixLiterals.push(file + ':' + (i + 1));
+        at = line.indexOf(FIX_PREFIX_LITERAL_TEXT, at + 1);
+      }
+      // 含 FIX 词干的其它正则字面量（单行内闭合、\ 转义感知）：第二份前缀表达式在此现形
+      for (const m of line.matchAll(/\/(?:\\.|[^/\\\n])*FIX(?:\\.|[^/\\\n])*\/[a-z]*/g)) {
+        if (m[0] !== FIX_PREFIX_LITERAL_TEXT) sites.otherFixRegexes.push(file + ':' + (i + 1) + ' ' + m[0]);
+      }
+      for (const token of ['T-FIX', 'P-FIX']) {
+        if (line.includes(token)) sites.idLiterals.push(file + ':' + (i + 1) + ' ' + token);
+      }
+      if (line.includes('sectionBlocks.has(')) sites.sectionMemberships.push(file + ':' + (i + 1));
+      prefixUses += line.split('FIX_TASK_ID_PREFIX').length - 1;
+    }
+    if (prefixUses > 0) sites.prefixUsesByFile.set(file, prefixUses);
+  }
+  return sites;
+}
+
+// 修复族约定「只表达一次」判定（AC-15 判别力锚）：返回问题描述数组（空数组 = 唯一表达）。
+// 判别力设计——旧锚按**标识符名**统计（哪个文件里出现该常量名），对"同一约定被表达两次"
+// 零判别力：第二份等价前缀表达式（交替式写法）不含该常量名 → 旧锚必放过（虚假单一来源信心）。
+// 本判据按**表达式形态**计数（扫描见 fixFamilyBoundarySites），四条一起构成"约定被表达两次即红"：
+//   ① id 前缀边界：唯一前缀正则字面量只允许出现一次，且必须位于 route-node.mjs；
+//   ② 第二份表达式：引擎代码行不得出现其它含 FIX 词干的正则字面量，也不得出现修复族 id 的
+//      字符串字面量（`.startsWith(...)` 一类内联前缀判定形态）；
+//   ③ 段内边界：段内成员判定（`sectionBlocks.has(`）只允许出现一次——「位于修复段内」这条
+//      边界只在唯一分类器里表达；
+//   ④ 谓词共用：修复族标记与并行文件依赖第三族的参与者排除必须各自调用唯一分类器，且不得
+//      自持边界常量 / 段切片（任一消费方自建第二份边界即红）。
+// 判据自身的判别力由场景内的反向夹具锚（同源 → 无问题；逐条注入 → 逐条专项报告）常驻保证。
+function fixFamilyBoundaryProblems(scriptsDir = __dirname) {
+  const problems = [];
+  const sites = fixFamilyBoundarySites(scriptsDir);
+  if (sites.prefixLiterals.length !== 1 || !sites.prefixLiterals[0].startsWith('route-node.mjs:')) {
+    problems.push('修复族 id 前缀边界必须只表达一次且位于 route-node.mjs，实际出现处: '
+      + JSON.stringify(sites.prefixLiterals));
+  }
+  if (sites.otherFixRegexes.length !== 0) {
+    problems.push('引擎内出现第二份修复族 id 前缀表达式（同一约定被表达两次）: '
+      + sites.otherFixRegexes.join('; '));
+  }
+  if (sites.idLiterals.length !== 0) {
+    problems.push('引擎代码行出现修复族 id 字面量（内联前缀判定形态，应经唯一分类器）: '
+      + sites.idLiterals.join('; '));
+  }
+  if (sites.sectionMemberships.length !== 1) {
+    problems.push('「位于修复段内」边界（段内成员判定）必须只表达一次，实际出现处: '
+      + JSON.stringify(sites.sectionMemberships));
+  }
+  // 边界常量的使用面：定义 1 处 + 唯一分类器内 1 次 test = 2（其他消费方一律经分类器）
+  const prefixUseTotal = [...sites.prefixUsesByFile.values()].reduce((a, b) => a + b, 0);
+  if (prefixUseTotal !== 2 || sites.prefixUsesByFile.size !== 1 || !sites.prefixUsesByFile.has('route-node.mjs')) {
+    problems.push('修复族 id 边界常量的使用面必须恰为「定义 + 唯一分类器内一次判定」，实际: '
+      + JSON.stringify([...sites.prefixUsesByFile.entries()]));
+  }
+  const routeText = sites.texts.get('route-node.mjs') ?? '';
+  for (const fnName of ['fixTaskMarker', 'collectCrossTaskConflicts']) {
+    const body = functionBodyText(routeText, fnName);
+    if (body === null) {
+      problems.push('结构锚前提失效：route-node.mjs 未找到 ' + fnName + ' 的定义');
+      continue;
+    }
+    if (!/fixTaskClassifier\s*\(/.test(body)) {
+      problems.push(fnName + ' 必须经唯一分类器判定修复族（不得自持第二份边界）');
+    }
+    if (/FIX_TASK_ID_PREFIX|fixSectionBody/.test(body)) {
+      problems.push(fnName + ' 自持修复族边界常量 / 段切片（应只调用唯一分类器）');
+    }
+  }
+  return problems;
+}
+
+// ---------- 词表镜像漂移判据（主仓私有单一来源 ↔ 分发套件的同义镜像；L-067 收口） ----------
+// 背景：套件随技能包分发、不能 import 主仓私有的 .githooks（该面不随 clone 分发），故套件内
+// 保留同义镜像 PUBLIC_CODE_RE。两份此前只有注释互指"同步"，零一致性判据：主仓增补模式时
+// 分发侧扫描静默落后（新词可在公开面长期存活而套件全绿），反向则分发面误红——正是
+// 「同一判据两份实现必然分叉」点名的形态。本判据把等价性变成机检事实：
+//   · 主仓形态（权威源检出）：读 .githooks 的 BANNED.source，与套件镜像**逐字符比对**，
+//     不等即报（消息含两侧 source 片段、长度与首个差异位置，可直接定位）；
+//   · 安装副本形态：该私有面结构性缺席 → 判据**不适用**，由调用方输出显式「不适用」描述符
+//     （未验证 ≠ 通过，与维护者面缺席的可见 SKIP 同族语义）。
+const GITHOOKS_CODES_REL = path.posix.join('.githooks', 'internal-codes.mjs');
+
+// 导出正则字面量抽取（\ 转义感知）：从 `export const <name> = /<body>/<flags>;` 取 body 与 flags。
+// 解析失败返回 null（调用方按"判据未执行"显式报告，不静默放过）。
+function extractExportedRegexLiteral(text, name) {
+  const re = new RegExp('export\\s+const\\s+' + name + '\\s*=\\s*/((?:\\\\.|[^/\\\\\\n])*)/([a-z]*)\\s*;');
+  const m = re.exec(text);
+  return m === null ? null : { source: m[1], flags: m[2] };
+}
+
+function vocabularyMirrorProblems(root = REPO_ROOT) {
+  const problems = [];
+  const rel = GITHOOKS_CODES_REL;
+  let text;
+  try {
+    text = fs.readFileSync(path.join(root, rel), 'utf8');
+  } catch (e) {
+    const reason = e && e.code ? e.code : (e && e.message ? e.message : String(e));
+    problems.push('词表镜像漂移判据无法执行: ' + rel + ' 读取失败（' + reason
+      + '）——未执行 ≠ 通过；请在主仓私有面在场处重跑（主树 L1）');
+    return problems;
+  }
+  const banned = extractExportedRegexLiteral(text, 'BANNED');
+  if (banned === null) {
+    problems.push('词表镜像漂移判据无法执行: ' + rel + ' 未解析出导出的 BANNED 正则字面量'
+      + '（词表单一来源形态变化）——未执行 ≠ 通过');
+    return problems;
+  }
+  const mine = PUBLIC_CODE_RE.source;
+  if (banned.source !== mine) {
+    const shared = Math.min(banned.source.length, mine.length);
+    let firstDiff = shared;
+    for (let i = 0; i < shared; i += 1) {
+      if (banned.source[i] !== mine[i]) { firstDiff = i; break; }
+    }
+    const fragment = (s) => (s.length > 80 ? s.slice(0, 80) + '…' : s);
+    problems.push('词表镜像漂移: ' + rel + ' 的 BANNED.source（' + banned.source.length
+      + ' 字符）≠ 套件 PUBLIC_CODE_RE.source（' + mine.length + ' 字符）；首个差异位置 ' + firstDiff
+      + '；主仓侧片段「' + fragment(banned.source) + '」；套件侧片段「' + fragment(mine)
+      + '」——两侧必须逐字符等价，请同改（词表只许收窄、不许放宽）');
+  }
+  if (banned.flags !== PUBLIC_CODE_RE.flags) {
+    problems.push('词表镜像标志位漂移: ' + rel + ' 的 BANNED flags=' + JSON.stringify(banned.flags)
+      + ' ≠ 套件 PUBLIC_CODE_RE flags=' + JSON.stringify(PUBLIC_CODE_RE.flags));
+  }
+  return problems;
 }
 
 // ---------- 17 个场景 ----------
@@ -9755,7 +9993,46 @@ const SCENARIOS = [
       if (retiredProblems.some((p) => p.includes('ADR-009-runtime-namespace.md'))) {
         throw new Error('登记在案的迁移记录件不得误报: ' + JSON.stringify(retiredProblems));
       }
-      fs.rmSync(path.join(dir, '.specs', 'adr', 'ADR-009-runtime-namespace.md'));
+      // ②b 允许面按角色 / 前缀匹配（改名不误报）：同一决策件 / 同族后续决策件换名后仍须跳过——
+      // 精确 ref 硬编码下改名即静默失配 → 合法历史迁移记录被误报死引用（误红会诱导维护者
+      // 删掉历史事实）。本锚即"改名后仍正确跳过"的反向构造。
+      fs.renameSync(path.join(dir, '.specs', 'adr', 'ADR-009-runtime-namespace.md'),
+        path.join(dir, '.specs', 'adr', 'ADR-009-runtime-namespace-renamed.md'));
+      writeFile(dir, '.specs/adr/ADR-010-namespace-followup.md', '见 `.comet/config.yaml`。\n');
+      const renamedProblems = internalDocsProblems(dir);
+      for (const renamed of ['ADR-009-runtime-namespace-renamed.md', 'ADR-010-namespace-followup.md']) {
+        if (renamedProblems.some((p) => p.includes(renamed))) {
+          throw new Error('决策件改名后不得误报死引用（按前缀匹配退役命名空间允许面）: ' + renamed
+            + ' → ' + JSON.stringify(renamedProblems));
+        }
+      }
+      // ②c 决策册角色匹配（角色面正 / 反例；角色判定直接锚 + 引用面不得被角色面放宽）
+      if (!isDeclaredReferenceSkip('.specs/CONTEXT.md', '.comet/config.yaml')
+        || !isDeclaredReferenceSkip('.specs/CONTEXT-decisions.md', '.comet/flow-comet-state.json')) {
+        throw new Error('决策册角色（含改名形态）必须按角色命中退役命名空间允许面');
+      }
+      if (isDeclaredReferenceSkip('.specs/CONTEXT-decisions.md', 'docs/internal/missing-target.md')
+        || isDeclaredReferenceSkip('.specs/OTHER.md', '.comet/config.yaml')) {
+        throw new Error('允许面不得面化：引用面（退役命名空间前缀）与文件面（角色 / 前缀）须同时命中');
+      }
+      // 反例（fail-closed 仍成立）：非登记角色的同形态引用 → 必须照报（允许面不得变成宽面）
+      writeFile(dir, '.specs/adr/ADR-008-unrelated.md', '见 `.comet/config.yaml`。\n');
+      const unrelatedProblems = internalDocsProblems(dir);
+      if (!unrelatedProblems.some((p) => p.includes('ADR-008-unrelated.md') && p.includes('.comet/config.yaml'))) {
+        throw new Error('非登记角色的退役命名空间引用必须照报: ' + JSON.stringify(unrelatedProblems));
+      }
+      fs.rmSync(path.join(dir, '.specs', 'adr', 'ADR-009-runtime-namespace-renamed.md'));
+      fs.rmSync(path.join(dir, '.specs', 'adr', 'ADR-010-namespace-followup.md'));
+      fs.rmSync(path.join(dir, '.specs', 'adr', 'ADR-008-unrelated.md'));
+      // 夹具移除后本组不再产生任何报告（判别力反向确认：上面三类断言确由这些夹具驱动，
+      // 不是被其它夹具的既有报告蒙对）。此处只对本组文件断言——docs/internal/FIXTURE.md
+      // 仍带着上一段夹具的未登记引用（其报告由上一段断言负责）。
+      const afterAllowlistCleanup = internalDocsProblems(dir);
+      for (const removed of ['ADR-009-runtime-namespace-renamed.md', 'ADR-010-namespace-followup.md', 'ADR-008-unrelated.md']) {
+        if (afterAllowlistCleanup.some((p) => p.includes(removed))) {
+          throw new Error('允许面夹具移除后不得再报该文件: ' + removed + ' → ' + JSON.stringify(afterAllowlistCleanup));
+        }
+      }
       // ③ 已移除临时区（未登记形态）→ 必须报（真实残留曾因旧跳过语义长期不可见）
       writeFile(dir, 'docs/internal/FIXTURE.md', '见 `.verify-tools/level3-smoke.mjs` 与 `docs/internal/ROADMAP.md`。\n');
       const residueProblems = internalDocsProblems(dir);
@@ -9929,20 +10206,71 @@ const SCENARIOS = [
       if (!skips.some((s) => s.face.includes('机检') && s.reason.includes('目标面'))) {
         throw new Error('维护文档机检面跳过描述符应说明目标面缺席: ' + JSON.stringify(skips));
       }
-      // —— 本批 in-place 增锚（公开产物零代号判据的三向自检）——
+      // —— 本批 in-place 增锚（公开产物零代号判据 + 词表镜像漂移判据）——
       // 与 .githooks 词表单一来源同判据（该文件主仓私有、不随技能包分发；本文件内保留同义镜像，
-      // 两处同改）。① 四形态命中（收窄模式真的在场——模式缺失/被放宽成裸词时此锚先红）；
-      // ② 相似子串不误报（前缀与字母边界有效）；③ 本文件注释层零残留（清理后不许回潮）。
-      // 注意：形态字面量只能写在非注释行——本锚的③正是扫注释层。
-      for (const form of ['批次 D', '级 3', 'UAT-7', 'R-14']) {
-        if (!PUBLIC_CODE_RE.test(form)) {
-          throw new Error('未公开概念形态未被零代号判据命中（收窄模式缺失或被放宽）: ' + form);
+      // 两处同改）。① 表驱动等价性：词表**每个分支**各一条正例（分支被删 / 被收窄过头 → 该行
+      // 先红）与一条对应反例（分支被放宽成裸词 / 宽前缀 → 该行先红）——反例按"放宽后会被误
+      // 命中的合法或无关形态"选取，故"某分支被动过"必然落在某个（正例，反例）对上；
+      // ② 本文件注释层零残留（清理后不许回潮）；③ 词表镜像漂移判据夹具锚（同源 → 绿 /
+      // 改一字符 → 红且消息含两侧片段与长度 / 私有面缺席 → 显式"无法执行"而非静默放过）。
+      // 注意：形态字面量只能写在非注释行——本锚的②正是扫注释层。
+      const CODE_BRANCH_SAMPLES = [
+        ['场景编号', 'S12', 'S1234'],
+        ['修复族 id', 'T-FIX-01', 'FIX-01'],
+        ['批次连字符前缀', 'batch-2', 'batch-name'],
+        ['缺陷编号', 'D-12', 'D-abc'],
+        ['优先级编号', 'P3', 'P9'],
+        ['验证轮次', 'round 3', 'round-table'],
+        ['英文本地实践词', 'dogfood', 'dog food'],
+        ['内部标识词', '内部', '内卷'],
+        ['批次加编号', '批次 D', '批次发布'],
+        ['批加编号', '批 2', '第一批 2 次'],
+        ['级加编号', '级 3', '级联'],
+        ['验收代号', 'UAT-7', 'UAT-x'],
+        ['工作项编号', 'R-14', 'ADR-013'],
+      ];
+      for (const [label, hit, miss] of CODE_BRANCH_SAMPLES) {
+        if (!PUBLIC_CODE_RE.test(hit)) {
+          throw new Error('词表分支缺失或被收窄过头（正例不再命中）: ' + label + ' → ' + JSON.stringify(hit));
+        }
+        if (PUBLIC_CODE_RE.test(miss)) {
+          throw new Error('词表分支被放宽（反例被误命中）: ' + label + ' → ' + JSON.stringify(miss));
         }
       }
-      for (const legit of ['ADR-013', 'PR-130', '批次发布', '维护批次', '级联', '批处理', 'Fix 批次']) {
+      for (const legit of ['PR-130', '维护批次', '批处理', 'Fix 批次']) {
         if (PUBLIC_CODE_RE.test(legit)) {
           throw new Error('合法相似子串被零代号判据误报: ' + legit);
         }
+      }
+      // ③ 词表镜像漂移判据（夹具驱动；不依赖真实私有面在场——权威源与安装副本两形态都可跑）
+      const mirrorFixtureRel = path.posix.join('.githooks', 'internal-codes.mjs');
+      const mirrorText = 'export const BANNED = /' + PUBLIC_CODE_RE.source + '/;\n';
+      writeFile(dir, mirrorFixtureRel, mirrorText);
+      const mirrorOk = vocabularyMirrorProblems(dir);
+      if (mirrorOk.length !== 0) {
+        throw new Error('同源词表镜像不得报漂移: ' + JSON.stringify(mirrorOk));
+      }
+      // 逐字符比对必有判别力：镜像侧改动一个字符（这里放宽一条分支）→ 必报，且消息可定位
+      const driftedSource = PUBLIC_CODE_RE.source.replace('dogfood', 'dogfoods');
+      if (driftedSource === PUBLIC_CODE_RE.source) {
+        throw new Error('夹具前提失效：漂移注入未改变镜像 source（词表分支名已变）');
+      }
+      writeFile(dir, mirrorFixtureRel, 'export const BANNED = /' + driftedSource + '/;\n');
+      const driftProblems = vocabularyMirrorProblems(dir);
+      if (!driftProblems.some((p) => p.includes('词表镜像漂移') && p.includes('主仓侧片段')
+        && p.includes('套件侧片段') && p.includes('首个差异位置')
+        && p.includes(String(driftedSource.length)) && p.includes(String(PUBLIC_CODE_RE.source.length)))) {
+        throw new Error('镜像侧改动一个字符必须报漂移且消息含两侧片段与长度: ' + JSON.stringify(driftProblems));
+      }
+      writeFile(dir, mirrorFixtureRel, mirrorText);
+      if (vocabularyMirrorProblems(dir).length !== 0) {
+        throw new Error('镜像还原后应复绿: ' + JSON.stringify(vocabularyMirrorProblems(dir)));
+      }
+      // 私有面结构性缺席（安装副本形态）→ 显式"判据无法执行"，不得静默返回空
+      fs.rmSync(path.join(dir, '.githooks'), { recursive: true, force: true });
+      const mirrorMissing = vocabularyMirrorProblems(dir);
+      if (!mirrorMissing.some((p) => p.includes('无法执行') && p.includes(mirrorFixtureRel))) {
+        throw new Error('私有面缺席必须显式报告判据未执行（未验证 ≠ 通过）: ' + JSON.stringify(mirrorMissing));
       }
       const selfLines = fs.readFileSync(path.join(__dirname, 'guard-self-test.mjs'), 'utf8').split(/\r?\n/);
       const commentHits = [];
@@ -12610,8 +12938,7 @@ const SCENARIOS = [
       if (!missingVerdict || missingVerdict.missing.length === 0 || missingVerdict.cyclic !== false) {
         throw new Error('route-node 导出的任务图分析对缺失依赖应返回 missing 明细，实际 ' + JSON.stringify(missingVerdict));
       }
-      const engineScripts = fs.readdirSync(__dirname)
-        .filter((f) => f.endsWith('.mjs') && f !== 'guard-self-test.mjs' && f !== 'system-test.mjs');
+      const engineScripts = engineScriptFiles();
       const definitionFiles = engineScripts.filter((file) =>
         /function\s+analyzeDependencyGraph\s*\(/.test(fs.readFileSync(path.join(__dirname, file), 'utf8')));
       if (definitionFiles.length !== 1 || definitionFiles[0] !== 'route-node.mjs') {
@@ -12651,6 +12978,94 @@ const SCENARIOS = [
       }
       if (!/\bcrossTaskConflicts\b/.test(guardText)) {
         throw new Error('workflow-guard.mjs 必须消费 route-node 的第三族结果（plan 出口判定）');
+      }
+      // ①b 修复族约定「只表达一次」锚（判别力升级：按表达式形态计数，不再只数标识符名）——
+      //     两条边界（id 前缀 / 「位于修复段内」）各只允许一处实现，第三族参与者排除与修复族
+      //     标记必须共用同一分类器；第二份等价前缀表达式（含内联前缀判定）在此变红。
+      //     旧锚只统计"哪个文件含该常量名"：第二份写法（不含该名字的等价正则）必然被放过——
+      //     本锚即对该盲区的判别力补齐。
+      for (const problem of fixFamilyBoundaryProblems()) {
+        throw new Error('修复族约定未被唯一表达: ' + problem);
+      }
+      // ①b-1 该判据自身的夹具锚（常驻判别力，不依赖外部临时注入）：同源形态 → 无问题；
+      //      逐条注入"同一约定被表达两次"的变体 → 逐条专项报告。夹具目录即判据的 scriptsDir
+      //      接缝（合成引擎脚本，不被执行、只被扫描）。
+      const engineFixtureDir = path.join(dir, 'engine-fixture');
+      // 夹具文本的权威前缀表达式自模块常量拼接（不在夹具里再写一份字面量——同源才测得准）
+      const canonicalPrefixDecl = 'const FIX_TASK_ID_PREFIX = ' + FIX_PREFIX_LITERAL_TEXT + ';';
+      const canonicalEngine = [
+        canonicalPrefixDecl,
+        'function fixTaskClassifier(taskContent, fixSectionTitle) {',
+        '  const section = fixSectionBody(taskContent, fixSectionTitle);',
+        '  const sectionBlocks = new Set(section === null ? [] : taskBlocks(section));',
+        '  return (block) => FIX_TASK_ID_PREFIX.test(taskOpeningAttrs(block).id) || sectionBlocks.has(block);',
+        '}',
+        'function fixTaskMarker(taskContent, fixSectionTitle) {',
+        '  const isFixTask = fixTaskClassifier(taskContent, fixSectionTitle);',
+        '  return taskBlocks(String(taskContent ?? "")).some((block) => isFixTask(block));',
+        '}',
+        'function collectCrossTaskConflicts({ taskContent = "", allBlocks = [] } = {}) {',
+        '  const isFixTask = fixTaskClassifier(taskContent);',
+        '  return allBlocks.filter((block) => !isFixTask(block));',
+        '}',
+        '',
+      ].join('\n');
+      const fixtureFileRel = path.join('engine-fixture', 'route-node.mjs');
+      writeFile(dir, fixtureFileRel, canonicalEngine);
+      const canonicalProblems = fixFamilyBoundaryProblems(engineFixtureDir);
+      if (canonicalProblems.length !== 0) {
+        throw new Error('唯一表达形态不得报问题（判据夹具模板）: ' + JSON.stringify(canonicalProblems));
+      }
+      const boundaryCases = [
+        ['第二份前缀表达式', canonicalEngine + 'const legacyFixPrefix = /^(T-FIX|P-FIX)/i;\n',
+          '第二份修复族 id 前缀表达式'],
+        ['内联前缀判定（id 字面量）', canonicalEngine + 'const legacyIds = ["T-FIX-01"];\n',
+          '修复族 id 字面量'],
+        ['前缀边界被删', canonicalEngine.replace(canonicalPrefixDecl, 'const FIX_TASK_ID_PREFIX = /nope/;'),
+          '修复族 id 前缀边界必须只表达一次'],
+        ['段内成员判定第二份',
+          canonicalEngine.replace('  return allBlocks.filter((block) => !isFixTask(block));',
+            '  sectionBlocks.has({});\n  return allBlocks.filter((block) => !isFixTask(block));'),
+          '段内成员判定）必须只表达一次'],
+        ['消费方自持边界（不共用分类器）',
+          canonicalEngine.replace('  const isFixTask = fixTaskClassifier(taskContent);',
+            '  const isFixTask = () => false;'),
+          '必须经唯一分类器判定修复族'],
+      ];
+      for (const [label, mutated, expected] of boundaryCases) {
+        writeFile(dir, fixtureFileRel, mutated);
+        const mutatedProblems = fixFamilyBoundaryProblems(engineFixtureDir);
+        if (!mutatedProblems.some((p) => p.includes(expected))) {
+          throw new Error('修复族边界反向夹具（' + label + '）未按预期报告「' + expected + '」: '
+            + JSON.stringify(mutatedProblems));
+        }
+      }
+      // ①c replan 消费锚（结构锚；replan 的真实命令链路由系统测试集承担，此处不重复造链路）：
+      //     第三族必须①被解构（只解构两族 = 静默丢失该判据，即修订通道可静默引入该形态）、
+      //     ②在 BLOCK 早于备份与写盘的位置判定、③消息与恢复指引与 plan 出口同族（新 change
+      //     阻断 / 旧 change 渐进）。断言写成对 workflow-state.mjs 文本的结构判定。
+      const stateText = fs.readFileSync(STATE, 'utf8');
+      const destructured = stateText.match(/const\s*\{([^}]*)\}\s*=\s*await\s+findParallelWriteConflicts\s*\(/);
+      if (destructured === null || !/\bcrossTaskConflicts\b/.test(destructured[1])) {
+        throw new Error('workflow-state.mjs 的 replan 必须解构 route-node 第三族结果'
+          + '（只解构两族即静默丢失该判据）: ' + JSON.stringify(destructured === null ? null : destructured[1].trim()));
+      }
+      const crossJudgeAt = stateText.indexOf('crossTaskConflicts.length > 0');
+      const backupAt = stateText.indexOf('-pre-replan.json');
+      if (crossJudgeAt < 0) {
+        throw new Error('workflow-state.mjs 的 replan 未消费第三族（缺判定分支）');
+      }
+      if (backupAt < 0 || crossJudgeAt > backupAt) {
+        throw new Error('replan 的第三族判定必须早于重签前备份（BLOCK 早于落盘的零改写语义）: '
+          + '判定位置 ' + crossJudgeAt + ' / 备份位置 ' + backupAt);
+      }
+      for (const message of ['同文件跨任务且无依赖路径', '补显式 depends_on 或合并为一个任务']) {
+        if (!stateText.includes(message)) {
+          throw new Error('replan 的第三族消息必须与 plan 出口同族（缺「' + message + '」）');
+        }
+      }
+      if (!/WARN: TASK\.md 同文件跨任务且无依赖路径（旧 change 渐进不阻断）/.test(stateText)) {
+        throw new Error('replan 的第三族必须保留旧 change 渐进分支（WARN 不阻断）');
       }
       // ② 行为锚（直接驱动判定函数，plan 出口与 replan 共用同一实现）：非修复同文件对命中、
       //    修复任务族对不参与（其顺序由修复生命周期保证，回修同文件是必然形态）。
@@ -13236,6 +13651,20 @@ if (isAuthoritativeSourceRepo()) {
       console.error('FAIL: 公开产物零代号(' + rel + ')\n' + rel + ' 含过程代号: "' + m[0] + '"');
     }
   }
+
+  // ③ 词表镜像漂移（L-067 收口）：主仓私有的词表单一来源与套件内的同义镜像必须**逐字符
+  // 等价**——两侧此前只有注释互指"同步"、零一致性判据：主仓增补模式时分发侧扫描静默落后
+  // （新词可在公开面长期存活而套件全绿），反向则分发面误红。判据只读文件、不改任何判定语义。
+  for (const problem of vocabularyMirrorProblems()) {
+    failures.push({ name: '词表镜像漂移', error: problem });
+    console.error('FAIL: 词表镜像漂移\n' + problem);
+  }
+} else {
+  // 安装副本形态：.githooks 是主仓私有面（随 clone 不分发）→ 该判据**不适用**。结构性缺席
+  // 不判失败（退出码不变、不误红），但必须显式可见——未验证 ≠ 通过，不得静默跳过。
+  console.log('SKIP/NOT-APPLICABLE: 词表镜像漂移判据（.githooks 为主仓私有面）'
+    + '；本次检出无该私有面，未执行「词表单一来源 ↔ 套件同义镜像」的逐字符等价性比对'
+    + '——请在主仓私有面在场处重跑本套件（主树 L1），勿把不适用当成已校验。');
 }
 
 // 清理验证：自测套件自身创建的临时目录不留残留
