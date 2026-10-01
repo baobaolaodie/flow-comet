@@ -618,9 +618,11 @@ function internalDocsProblems(root = REPO_ROOT) {
   const lineCountOf = (p) => {
     if (!lineCountCache.has(p)) {
       try {
-        // 逻辑行数：**尾随换行不产生额外一行**（`a\nb\nc\n` = 3 行），空文件 = 0 行。
-        // 直接取 `split(/\r?\n/).length` 会把尾随空段算成一行 → `:N+1` 越界被漏报。
-        const parts = fs.readFileSync(p, 'utf8').split(/\r?\n/);
+        // 逻辑行数：**尾随换行不产生额外一行**（`a\nb\nc\n` = 3 行），**空文件 = 0 行**（不是 1 行）。
+        // 直接取 `split(/\r?\n/).length` 会把尾随空段算成一行 → `:N+1` 越界被漏报；空文件若按段数
+        // 计会得 1 行 → `:1` 被放过（空文件没有任何行，任何行号都越界）。
+        const body = fs.readFileSync(p, 'utf8');
+        const parts = body === '' ? [] : body.split(/\r?\n/);
         if (parts.length > 1 && parts[parts.length - 1] === '') parts.pop();
         lineCountCache.set(p, parts.length);
       } catch {
@@ -10093,6 +10095,13 @@ const SCENARIOS = [
         throw new Error('尾随换行被算成额外一行（3 行目标文件引 :4 未报越界）: '
           + JSON.stringify(internalDocsProblems(dir)));
       }
+      // 反例：**空文件 = 0 行**——空目标文件的任何行号都越界（按 split 段数计会得 1 行 → `:1` 被放过）
+      writeFile(dir, 'docs/internal/EMPTY.md', '');
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/EMPTY.md:1`。\n');
+      if (!internalDocsProblems(dir).some((p) => p.includes('行号越界') && p.includes('EMPTY.md:1'))) {
+        throw new Error('空目标文件引 :1 未报越界（空文件应为 0 行）: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      fs.rmSync(path.join(dir, 'docs/internal', 'EMPTY.md'));
       // 反例：区间上端越界（区间取两端逐一校验）
       writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/TARGET.md:2-99`。\n');
       if (!internalDocsProblems(dir).some((p) => p.includes('行号越界') && p.includes('TARGET.md:99'))) {
