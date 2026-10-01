@@ -723,6 +723,28 @@ function makeTmp() {
   return dir;
 }
 
+// 场景夹具清理（Windows 韧性，2026-10-01 实证）：子进程退出后，其 cwd / 文件句柄可能仍被短暂占用
+// → `rmSync` 抛 EPERM/EBUSY。Node 的 `maxRetries`/`retryDelay` 正是为该窗口设计（对 EBUSY /
+// EMFILE / ENFILE / ENOTEMPTY / EPERM 线性退避重试）。**仍失败不得让整轮崩溃**——旧写法把
+// `rmSync` 裸放在 finally 里，一个目录删不掉就抛未捕获异常：后续场景不执行、末尾的「临时目录
+// 清理」判据与失败报告也全都不执行（本机实测：整轮 exit 1 且无 RESULT 行，并每次留下一个残留目录）。
+// 现改为「重试 + 容忍」：清理不了的目录留待末尾判据统一报告（可见失败，不静默、也不自杀）。
+const CLEANUP_RETRIES = 10;
+const CLEANUP_RETRY_DELAY_MS = 150;
+function cleanupTmpDir(dir) {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: CLEANUP_RETRIES, retryDelay: CLEANUP_RETRY_DELAY_MS });
+  } catch {
+    // 交由末尾「临时目录清理」判据报告
+  }
+  return !fs.existsSync(dir);
+}
+
+// 同步小睡（末尾延迟重试用；主线程可用 Atomics.wait 阻塞等待）
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 function writeFile(root, rel, content) {
   const p = path.join(root, rel);
   fs.mkdirSync(path.dirname(p), { recursive: true });
@@ -13644,7 +13666,8 @@ for (const sc of SCENARIOS) {
     failures.push({ name: sc.name, error: e.message });
     console.error('FAIL: ' + sc.name + '\n' + e.message);
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    // 清理失败不抛（见 cleanupTmpDir 注释）：残留由末尾判据报告，避免整轮崩
+    cleanupTmpDir(dir);
   }
 }
 
@@ -13736,6 +13759,13 @@ if (isAuthoritativeSourceRepo()) {
 }
 
 // 清理验证：自测套件自身创建的临时目录不留残留
+// 先做一次延迟重试：跨场景仍被占用的句柄（子进程退出、扫描器）可能晚于最后一个场景的清理才释放。
+for (const d of createdDirs) {
+  if (fs.existsSync(d)) {
+    sleepSync(300);
+    cleanupTmpDir(d);
+  }
+}
 const residue = createdDirs.filter((d) => fs.existsSync(d));
 if (residue.length > 0) {
   failures.push({ name: '临时目录清理', error: '残留目录: ' + residue.join(', ') });
