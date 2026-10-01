@@ -4,7 +4,7 @@
 # (All checks are enforced server-side and independently.)
 #
 # 检查映射 / Check mapping:
-#   regression           guard self-test (267 scenarios incl. scenario-count & public-artifact
+#   regression           guard self-test (275 scenarios incl. scenario-count & public-artifact
 #                        code self-checks) / script syntax / BOM guard
 #   installer            prepare-env reproducibility + distribution surface (publishable
 #                        manifest / pack boundary incl. top-level allowlist and per-file
@@ -194,19 +194,141 @@ jobs:
           import io, os
           pairs = [('README.md','README-zh.md'),('CONTRIBUTING.md','CONTRIBUTING-zh.md'),
                    ('CHANGELOG.md','CHANGELOG-zh.md'),('docs/INSTALLATION.md','docs/INSTALLATION-zh.md'),
-                   ('docs/USAGE.md','docs/USAGE-zh.md'),('docs/PROTOCOL.md','docs/PROTOCOL-zh.md'),
+                   ('docs/USAGE.md','docs/USAGE-zh.md'),
                    ('docs/MECHANISM.md','docs/MECHANISM-zh.md'),('docs/TROUBLESHOOTING.md','docs/TROUBLESHOOTING-zh.md'),
-                   ('docs/VERSIONS.md','docs/VERSIONS-zh.md'),('docs/ECOSYSTEM.md','docs/ECOSYSTEM-zh.md'),
+                   ('docs/VERSIONS.md','docs/VERSIONS-zh.md'),
                    ('SECURITY.md','SECURITY-zh.md')]
           # CODE_OF_CONDUCT 除外:标准模板(Contributor Covenant)与官方翻译的段落行数天然不对齐(与本地 check-docs-local 一致)
+          import re as _re
+          def tokens_of(path):
+              plines = io.open(path, encoding='utf-8', errors='replace').read().splitlines()
+              toks, in_fence = [], False
+              for pl in plines:
+                  t = pl.strip()
+                  if t == '':
+                      continue
+                  if t.startswith('```'):
+                      toks.append(('FENCE', t)); in_fence = not in_fence; continue
+                  if in_fence:
+                      continue
+                  m = _re.match(r'^(#{1,6})\s', t)
+                  if m:
+                      toks.append(('H' + str(len(m.group(1))), t)); continue
+                  if t.startswith('|'):
+                      toks.append(('TABLE', t)); continue
+                  if t.startswith('<'):
+                      toks.append(('HTML', t)); continue
+                  if t.startswith('>'):
+                      toks.append(('Q', t)); continue
+                  if _re.match(r'^([-*+]|\d+\.)\s', t):
+                      toks.append(('LIST', t)); continue
+                  toks.append(('P', t))
+              return len(plines), toks
+          # 结构 token 流（2026-09-27 二版）：标题 1~6 级；围栏内整体跳过；表格/列表/引用逐行；
+          # 空行不产生 token。已知有意偏差必须声明，且声明带内容模式（被放行的 token 必须匹配），
+          # 不是“允许某个偏移量”。
+          # 已声明的有意偏差：先在中文侧无条件剔除（必须恰好命中声明条数且匹配内容谓词），
+          # 再无条件比较 token 类型序列——不在“已相等”时短路。
+          EXEMPT = {'CHANGELOG.md': (1, 'Q', _re.compile(r'^>\s*注：(?=[\s\S]*1\.2\.4)(?=[\s\S]*英文小节标题)'))}
           for en, zh in pairs:
               if not os.path.isfile(en) or not os.path.isfile(zh):
                   raise SystemExit('missing bilingual pair: %s / %s' % (en, zh))
-              ne = sum(1 for _ in io.open(en, encoding='utf-8'))
-              nz = sum(1 for _ in io.open(zh, encoding='utf-8'))
-              if abs(ne - nz) > 10:
-                  raise SystemExit('bilingual asymmetry: %s %d vs %s %d' % (en, ne, zh, nz))
-          print('11 bilingual pairs OK')
+              ne, te = tokens_of(en)
+              nz, tz = tokens_of(zh)
+              if abs(ne - nz) > 5:
+                  raise SystemExit('bilingual line delta > 5: %s %d vs %s %d' % (en, ne, zh, nz))
+              ex = EXEMPT.get(en)
+              if ex:
+                  extra, kind_want, text_re = ex
+                  kept, removed = [], 0
+                  for tok in tz:
+                      if removed < extra and tok[0] == kind_want and text_re.match(tok[1]):
+                          removed += 1
+                          continue
+                      kept.append(tok)
+                  if removed != extra:
+                      raise SystemExit('declared allowance not found in %s: declared %d, matched %d' % (zh, extra, removed))
+                  tz = kept
+              if [k for k, _ in te] != [k for k, _ in tz]:
+                  raise SystemExit('bilingual structure mismatch: %s %d tokens vs %s %d tokens%s'
+                                   % (en, len(te), zh, len(tz), ' (after removing the declared deviation)' if ex else ''))
+          print('9 bilingual pairs OK (structural token stream)')
+          EOF
+      - name: '文档权威单一性 / Documentation single-authority check'
+        run: |
+          node - <<'EOF'
+          const fs = require('fs');
+          const CONTRACT = {
+            install: { authority: 'docs/INSTALLATION.md', twin: 'docs/INSTALLATION-zh.md', sentinel: ['Verify the installation'], forbidden: ['README.md','docs/USAGE.md','docs/MECHANISM.md','docs/TROUBLESHOOTING.md'], mustLink: ['README.md'] },
+            workflow: { authority: 'docs/USAGE.md', twin: 'docs/USAGE-zh.md', sentinel: ['## The 8-node workflow','## User entry points'], forbidden: ['README.md','docs/INSTALLATION.md','docs/MECHANISM.md'], mustLink: ['README.md','docs/MECHANISM.md'] },
+            troubleshooting: { authority: 'docs/TROUBLESHOOTING.md', twin: 'docs/TROUBLESHOOTING-zh.md', sentinel: ['## Symptoms'], forbidden: ['README.md','docs/INSTALLATION.md','docs/MECHANISM.md'], mustLink: ['README.md','docs/INSTALLATION.md'] },
+            release: { authority: 'docs/VERSIONS.md', twin: 'docs/VERSIONS-zh.md', sentinel: ['Update CHANGELOG','Nine places'], forbidden: ['README.md','CONTRIBUTING.md','docs/MECHANISM.md'], mustLink: ['README.md','CONTRIBUTING.md'] },
+            behaviour: { authority: 'docs/MECHANISM.md', twin: 'docs/MECHANISM-zh.md', sentinel: ['## Behaviour contract','## Custom protocols'], forbidden: ['README.md','docs/INSTALLATION.md','docs/USAGE.md'], mustLink: ['README.md','docs/USAGE.md'] },
+            contributing: { authority: 'CONTRIBUTING.md', twin: 'CONTRIBUTING-zh.md', sentinel: ['## Borrowing boundary'], forbidden: ['README.md','docs/MECHANISM.md'], mustLink: ['README.md'] },
+            history: { authority: 'CHANGELOG.md', twin: 'CHANGELOG-zh.md', sentinel: ['All notable changes to this project'], forbidden: ['README.md','docs/MECHANISM.md','docs/VERSIONS.md'], mustLink: ['README.md'] },
+            upstream: { authority: 'README.md', twin: 'README-zh.md', sentinel: ['## Relationship to the upstream project'], forbidden: ['docs/MECHANISM.md','docs/INSTALLATION.md'], mustLink: [] },
+            security: { authority: 'SECURITY.md', twin: null, sentinel: [], forbidden: ['README.md'], mustLink: ['README.md'] },
+          };
+          const COUNTS_SENTINEL = ['badge/version-', 'Nine places'];
+          const RELEASE_AUTHORITY = ['docs/VERSIONS.md','docs/VERSIONS-zh.md'];
+          const INTERNALS = ['comet-hook-guard.mjs','comet-hook-guard','dsh-bridge.mjs','delegationDepth','reentryAuthorization'];
+          const PUBLIC = ['README.md','README-zh.md','CONTRIBUTING.md','CONTRIBUTING-zh.md','CHANGELOG.md','CHANGELOG-zh.md','docs/INSTALLATION.md','docs/INSTALLATION-zh.md','docs/USAGE.md','docs/USAGE-zh.md','docs/MECHANISM.md','docs/MECHANISM-zh.md','docs/TROUBLESHOOTING.md','docs/TROUBLESHOOTING-zh.md','docs/VERSIONS.md','docs/VERSIONS-zh.md'];
+          const read = (f) => fs.readFileSync(f, 'utf8');
+          const exists = (f) => fs.existsSync(f);
+          const path = require('path');
+          const targets = (rel) => [...read(rel).matchAll(/\[[^\]]*\]\(\s*(<[^>]*>|[^)\s]+)/g)].map((m) => m[1].replace(/^</, '').replace(/>$/, ''));
+          const resolves = (fromRel, href) => {
+            if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//') || href.startsWith('#')) return null;
+            const clean = href.split('#')[0].split('?')[0];
+            if (!clean) return null;
+            return path.posix.normalize(path.posix.join(path.posix.dirname(fromRel), clean));
+          };          let failed = 0;
+          const check = (name, fn) => { try { fn(); console.log('PASS: ' + name); } catch (e) { console.log('FAIL: ' + name + ' :: ' + e.message); failed++; } };
+          for (const topic of Object.keys(CONTRACT)) {
+            const c = CONTRACT[topic];
+            check('topic ' + topic + ' files present', () => {
+              const missing = [c.authority].concat(c.twin ? [c.twin] : []).filter((f) => !exists(f));
+              if (missing.length) throw new Error('missing: ' + missing.join(', '));
+            });
+            check('topic ' + topic + ' sentinel in authority', () => {
+              const absent = c.sentinel.filter((x) => !read(c.authority).includes(x));
+              if (absent.length) throw new Error('absent: ' + absent.join(' | '));
+            });
+            check('topic ' + topic + ' sentinel not in forbidden', () => {
+              const hits = [];
+              for (const f of c.forbidden) { if (!exists(f)) { hits.push(f + ' (missing)'); continue; } for (const x of c.sentinel) if (read(f).includes(x)) hits.push(f + ': ' + x); }
+              if (hits.length) throw new Error(hits.join(' | '));
+            });
+            check('topic ' + topic + ' must_link', () => {
+              const bad = [];
+              for (const f of c.mustLink) {
+                const ok = exists(f) && targets(f).some((h) => resolves(f, h) === c.authority);
+                if (!ok) bad.push(f);
+              }
+              if (bad.length) throw new Error('no link to ' + c.authority + ' from ' + bad.join(', '));
+            });
+          }
+          check('counts sentinel confined to README badge and release authority', () => {
+            const bad = [];
+            for (const rel of PUBLIC) {
+              if (!exists(rel)) continue;
+              read(rel).split(/\r?\n/).forEach((line, i) => {
+                for (const x of COUNTS_SENTINEL) {
+                  if (!line.includes(x)) continue;
+                  const badgeLine = /img\.shields\.io/.test(line) && (rel === 'README.md' || rel === 'README-zh.md');
+                  if (!RELEASE_AUTHORITY.includes(rel) && !badgeLine) bad.push(rel + ':' + (i + 1));
+                }
+              });
+            }
+            if (bad.length) throw new Error(bad.join(', '));
+          });
+          check('internals not on public surfaces', () => {
+            const bad = [];
+            for (const rel of PUBLIC) { if (!exists(rel)) continue; for (const x of INTERNALS) if (read(rel).includes(x)) bad.push(rel + ': ' + x); }
+            if (bad.length) throw new Error(bad.join(' | '));
+          });
+          if (failed) { console.log(failed + ' single-authority checks failed'); process.exit(1); }
+          console.log('single-authority check passed');
           EOF
 
 

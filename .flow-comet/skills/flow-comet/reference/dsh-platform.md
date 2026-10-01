@@ -1,20 +1,20 @@
 # dsh 平台锚定参考（dsh-platform）
 
 > 维护者参考文档：dsh 平台适配的版本锚定、安装形态、API 签名、桥接 loader 契约与验证记录模板。
-> 权威依据：`@.specs/deepseek-harness-platform/DESIGN.md`（D1~D10 / 7.1 / 7.2 / 7.3）、`@.specs/deepseek-harness-platform/REQUIREMENT.md`（AC-1~AC-7）、`@.specs/adr/ADR-005-dsh-install-via-installer.md`。
-> dsh 为 dev-preview：本文件锚定认证版本（0.1.5-rc.1，2026-09-10 全接缝运行时认证；历史锚 0.1.0-rc.6 → 0.1.1-rc.2 实测线）；破坏性变更风险显式声明。
+> 权威依据：`@.specs/archive/2026-08-18-deepseek-harness-platform/DESIGN.md`（D1~D10 / 7.1 / 7.2 / 7.3）、`@.specs/archive/2026-08-18-deepseek-harness-platform/REQUIREMENT.md`（AC-1~AC-7）、`@.specs/adr/ADR-005-dsh-install-via-installer.md`。
+> dsh 为 dev-preview：本文件锚定认证版本（0.1.7-rc.2，2026-09-27 全接缝重认证；历史锚 0.1.0-rc.6 → 0.1.1-rc.2 → 0.1.5-rc.1）；破坏性变更风险显式声明。
 
 ## 1. 版本锚定
 
 | 项 | 值 |
 |---|---|
-| 认证 dsh 版本 | `0.1.5-rc.1`（2026-09-10 全接缝运行时认证；历史锚 `0.1.0-rc.6` → `0.1.1-rc.2` 实测线） |
+| 认证 dsh 版本 | `0.1.7-rc.2`（2026-09-27 全接缝重认证；历史锚 `0.1.0-rc.6` → `0.1.1-rc.2` → `0.1.5-rc.1`） |
 | 安装入口 | `node scripts/prepare-env.mjs --target <项目> --platform dsh`（或交互终端多选勾选 dsh）——唯一入口（D1） |
 | 重置/重新生成（purge——删除后重建到完整安装态，**不是卸载**） | `node scripts/prepare-env.mjs --target <项目> --purge --platform dsh --yes` |
 | npm 包 | **自 `1.5.0-rc.3` 起已发布**（`npm i -g flow-comet` → `fcomet init`，dist-tag `latest`）——分发的为**安装器**，非 dsh 插件包；旧 npm 插件包安装形态已废弃（verify 阶段推翻，见 ADR-005） |
 | 破坏性变更 | dev-preview 中 `tools/pre-execute` 签名 / skill 发现 rank / `DSH_HOME` 语义可能变化；低于锚定版本时拦截/发现可能失效 |
 
-> 版本不匹配时拦截可能失效——必须文档警示 + 级 3 实测兜底（D9）。
+> 版本不匹配时拦截可能失效——必须文档警示 + 真实平台会话实测兜底（D9）。
 
 **bridge-check 版本比较语义（基础版本比较）**：桥接健康检查比较 loader 的 `// BRIDGE_VERSION:` 发布戳与技能包 `INSTALLED_VERSION` 时，两侧先剥离 git-describe 开发态后缀 `-<领先提交数>-g<hash>`、再按基础版本比较：
 
@@ -88,7 +88,7 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 ### 激活（天然项目级）
 
 - 目录物理存在即激活——dsh 启动自动发现 `/flow-comet`（rank 100，chokidar 热发现免重启）；未安装该目录的项目不可见（无痕迹判定、无 chicken-and-egg）。
-- dsh 对项目 AGENTS.md 的注入行为**已认证**（0.1.5-rc.1 headless 会话：项目根 AGENTS.md 作为上下文注入，托管区内容被会话逐字引用——见下方认证记录）；**边界**：认证面向 headless profile，dsh-tui / web 运行时未验。
+- dsh 对项目 AGENTS.md 的注入行为**已认证**（0.1.7-rc.2 headless 会话：项目根 AGENTS.md 作为上下文注入，托管区内容被会话逐字引用——见下方认证记录）；**边界**：认证面向 headless profile，dsh-tui / web 运行时未验。
 
 ### 重置/重新生成（prepare-env --purge --yes——删除后重建，**不是卸载**）
 
@@ -109,7 +109,7 @@ ctx.on('tools/pre-execute', async (exec, next) => {
   3. **流程态门（B 方案——包含性仅运行中生效）**：读项目根 `.flow-comet/flow-comet-state.json`（UTF-8 BOM 容错；判定规则锚定 guard `comet-hook-guard.mjs` 的空闲态门——grep 锚点：`grep -n "if (!state.activeChange)"`）：空闲（无 state / 无 `activeChange` / `status==='completed'`）→ 直接 `next()` 放行——跳过包含性校验与 guard 白名单（与 Claude Code / Codex 的 active-change 门语义对齐）；解析失败 / 未知 status → WARN + fail-closed deny（不视为空闲放行）；`activeChange` 存在且 `status==='running'` 或缺失（undefined）→ 继续下方包含性校验与 guard（现状不变）。
    - **空闲边界（refined）**：空闲 = 无 state / 无 activeChange / status==='completed' → 项目外写 next() 放行；解析失败 / 未知 status 保持 fail-closed deny（不视为空闲），与 Claude Code / Codex 的 guard 语义一致。
   4. **包含性校验**：Write/Edit 的 `file_path` 必须解析后位于项目根内——`realpathSync.native` 展开 Windows 8.3 短路径（词法 path.relative 会把项目内短路径误判为越界）；**运行中**越界直接 deny（不进 guard——guard 侧 target=null 会跳过白名单判定 = fail-open）；通过后传规范化长路径。
-  5. **代理身份分派（B1——dsh 子代理=执行者）**：读 `exec.agent.session.header.delegationDepth`（`agentDepth(exec)` 纯函数）——**>0 = 子代理（执行者）→ 跳过 guard 白名单判定直接 `next()` 放行**（子代理写源码是执行者职责，对应 Claude Code worktree 子代理物理自由写；形状 fail-closed 与项目根包含性校验已在上方对子代理同样执行，不因身份放宽）；**0/缺失 = 协调者 → 走 guard 白名单判定**（协调者禁令物理拦截保留）。dsh 子代理系统在 dsh-base 自带（`tool-subagent`/`subagent-spawn-in-process` 等，headless/web/tui 全 profile 激活），`childSessionMeta` 写入 delegationDepth=parentDepth+1（dsh-subagent 源码锚定 rc.6）；不识别此字段会导致 subagent 执行模式下子代理写源码被 guard 白名单（execute → `.specs/`）误拦（B1，DOGFOOD-REPORT 实证）。级 3 实测（2026-08-18 UAT-7）：真实模型调 subagent → 子代理（delegationDepth:1）写 `scripts/` 放行、协调者（delegationDepth:0）写同路径被 deny 保留。
+  5. **代理身份分派（B1——dsh 子代理=执行者）**：读 `exec.agent.session.header.delegationDepth`（`agentDepth(exec)` 纯函数）——**>0 = 子代理（执行者）→ 跳过 guard 白名单判定直接 `next()` 放行**（子代理写源码是执行者职责，对应 Claude Code worktree 子代理物理自由写；形状 fail-closed 与项目根包含性校验已在上方对子代理同样执行，不因身份放宽）；**0/缺失 = 协调者 → 走 guard 白名单判定**（协调者禁令物理拦截保留）。dsh 子代理系统在 dsh-base 自带（`tool-subagent`/`subagent-spawn-in-process` 等，headless/web/tui 全 profile 激活），`childSessionMeta` 写入 delegationDepth=parentDepth+1（dsh-subagent 源码锚定 rc.6）；不识别此字段会导致 subagent 执行模式下子代理写源码被 guard 白名单（execute → `.specs/`）误拦（B1，项目内验证记录实证）。真实平台会话实测（2026-08-18）：真实模型调 subagent → 子代理（delegationDepth:1）写 `scripts/` 放行、协调者（delegationDepth:0）写同路径被 deny 保留。
   6. **判定调用**：`spawn node <项目根>/.dsh/skills/flow-comet/scripts/comet-hook-guard.mjs before_tool`，stdin JSON `{tool_name, tool_input}`；**spawn cwd 必须 = 会话项目根的长形态规范化（硬性）**（相对 file_path 按 cwd 解析，cwd≠项目根 = fail-open；8.3 短形态项目根若原样传入、而 file_path 已归一化为长形态时，guard 词法 path.relative 得 target=null → 白名单跳过 = fail-open——桥接修复已关闭，系统测试 K11 断言锁定；不得以设 env 替代 cwd）；guard 文件缺失（安装未完成/被删除）→ WARN + `next()` 放行（不阻断非 flow-comet 语义）；spawn 异常 → fail-closed deny + WARN。
   7. **决策映射**：exit 0 → `next()` 放行；exit 2 → `{kind:'deny', reason}`（BLOCK 消息 + 恢复指引透传）；其它/异常 → fail-closed deny + WARN。
 - 协议文件：天然在项目内（skill 包 `reference/` 随树复制）——受保护读取满足，**无 FLOW_COMET_PROTOCOL 机制**。
@@ -117,7 +117,7 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 
 ## 8. 验证记录模板
 
-> 级 3 / 级 4 执行后按此模板回填；发布前逐项闭环（DESIGN 7.3）。
+> 实测执行后按此模板回填；发布前逐项闭环（DESIGN 7.3）。
 
 ### 环境
 
@@ -127,7 +127,7 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 - profile：
 - 临时项目路径：
 
-### 检查项（级 3 新形态命令——非旧插件冒烟形态）
+### 检查项（新形态命令——非旧插件冒烟形态）
 
 | # | 检查 | 结果 | 证据（命令/输出摘要） |
 |---|---|---|---|
@@ -154,13 +154,13 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 - 遗留风险：
 
 
-### rc.8 三态冒烟（2026-08-20）
+### rc.8 三态冒烟（2026-08-20）（历史）
 
 - 环境：dsh CLI 0.1.0-rc.8 / Harness 核心 rc.8 / dsh-tui 0.8.5
-- 结果：运行中协调者项目外 Write → deny；运行中子代理项目内 Write → next()；空闲态（无 state）项目外 Write → next()；解析失败/未知 status → fail-closed deny（当轮 system-test ALL PASSED，K11/K12 断言覆盖；当前基线 82/82）
+- 结果：运行中协调者项目外 Write → deny；运行中子代理项目内 Write → next()；空闲态（无 state）项目外 Write → next()；解析失败/未知 status → fail-closed deny（当轮 system-test ALL PASSED，K11/K12 断言覆盖；当轮基线 82 项（历史））。**记录口径**：历史实测基线保留原始数字并在行内标注（历史）——历史数字是证据，删除不是修法（带标记即被计数过期判据豁免）；指针语（「以套件自身输出为准」）只用于当前值。
 - 载体：prepare-env --platform dsh 经临时项目重推真实 ~/.dsh 桥接 loader，loader 与权威源 SHA-256 一致；真实交互式 TUI/Web 冒烟留待开放项
 
-### 0.1.5-rc.1 全接缝认证（2026-09-10）
+### 0.1.5-rc.1 全接缝认证（2026-09-10）（历史）
 
 - 环境：dsh CLI 0.1.5-rc.1 / Node v24.14.1 / dsh-tui 0.10.0；headless profile；真实 `~/.dsh`（loader 与权威源逐字节一致）
 - 方式：真实 headless 会话逐接缝运行时检测——每场景独立运行，证据取会话日志（`session.v3.jsonl` 解压）与文件系统双重判定；配套无 skill 目录负向载体
@@ -174,3 +174,11 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 - 安装链：bridge-check 四项全绿（loader 存在 / 托管块 insert 形态 / `file://` 目标可达 / 无重复注册）
 - 边界：认证面向 headless profile（自动化通道）；dsh-tui / web 为静态证据（组合树含桥接行），交互式运行时留待日常使用或手动步骤清单；`str_replace_editor` 自 0.1.5-alpha.2 起为 opt-in（默认不挂载）
 - 结论：桥接与 workflow-kernel 均无需修改（完整认证记录见维护者归档）
+
+### 0.1.7-rc.2 全接缝重认证（2026-09-27）
+
+- 版本线（历史锚）：`0.1.0-rc.6` → `0.1.1-rc.2` → `0.1.5-rc.1` → `0.1.7-rc.2`（当前认证锚）
+- 环境：dsh CLI `0.1.7-rc.2`；headless profile；真实 `~/.dsh`
+- 结果：各接缝重认证通过
+- 结论：桥接与 workflow-kernel 均无需修改
+- 持续锚：`system-test` K9~K13 覆盖核心行为（loader 源文件与托管块注入 / 纯函数与身份分派 / 流程态门 / hook 注入形态与幂等升级）——后续版本升级以该套件持续回归为准

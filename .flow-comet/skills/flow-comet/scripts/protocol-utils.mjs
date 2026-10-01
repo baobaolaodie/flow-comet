@@ -1,5 +1,5 @@
 // protocol-utils.mjs: 工作流协议文件（workflow-protocol.json）的统一解析 / 受保护读取 / schema 校验模块
-// 批次 D T01：供 workflow-state.mjs / workflow-guard.mjs / comet-hook-guard.mjs 三脚本共用，
+// 供 workflow-state.mjs / workflow-guard.mjs / comet-hook-guard.mjs 三脚本共用，
 // 替代各脚本内联的 protocolPath 硬编码，统一协议解析优先级、受保护读取与 fail-closed 校验。
 // 纯 ESM（.mjs），仅依赖 node 内置模块（fs/path），零 npm 依赖。
 //

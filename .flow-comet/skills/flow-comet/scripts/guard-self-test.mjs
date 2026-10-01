@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · flow-comet 引擎自测套件（场景数以 SCENARIOS.length 为准：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、计数一致性自检（场景数 + 系统测试集项数）、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退）、并行文件依赖检测（写写重叠强判前移 plan 出口 + read 读写弱判渐进 + 触发面排除 + 委托前保持锚 + 扩展名闭合）、directOverride 授权约束（协调者授权留痕正例 / 执行者自切无授权 BLOCK / 越界改 state hook 拦截 / 恢复双路径）、hook state 大小写变体拦截（win32/darwin 闭合 / 其他平台放行）、路由完成判定 fail-closed（缺/未知 status 畸形块不提前放行）、并行文件依赖路径归一化（`.` 段变体重叠检出）、运行时文件位置迁移（白名单搬移 / 迁移前备份与回退 / 新旧并存·符号链接·内容损坏三边界 / 失败保护 / gitignore 三形态保守纳管与幂等）、Comet 感知层剥离（classic 资产有无判定一致 / overlay 协议不再进入叠加分支 + 源码符号检索）、自检清单条目缺失显式报告）
+// C1 · flow-comet 引擎自测套件（场景数以 SCENARIOS.length 为准：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、计数一致性自检（场景数 + 系统测试集项数）、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退）、并行文件依赖检测（写写重叠强判前移 plan 出口 + read 读写弱判渐进 + 触发面排除 + 委托前保持锚 + 扩展名闭合）、directOverride 授权约束（协调者授权留痕正例 / 执行者自切无授权 BLOCK / 越界改 state hook 拦截 / 恢复双路径）、hook state 大小写变体拦截（win32/darwin 闭合 / 其他平台放行）、路由完成判定 fail-closed（缺/未知 status 畸形块不提前放行）、并行文件依赖路径归一化（`.` 段变体重叠检出）、运行时文件位置迁移（白名单搬移 / 迁移前备份与回退 / 新旧并存·符号链接·内容损坏三边界 / 失败保护 / gitignore 三形态保守纳管与幂等）、Comet 感知层剥离（classic 资产有无判定一致 / overlay 协议不再进入叠加分支 + 源码符号检索）、自检清单条目缺失显式报告、受控计划重校重签（replan 授权 fail-closed / 轮次上限与显式续轮 / 幂等空操作 / 重签后 execute 出口放行 / 校验不豁免与任务图分析单源锚）与强制推进留痕（advance-forced 事件 / status.forcedNodes 派生视图））
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .flow-comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -64,7 +64,7 @@ const CHANGE_ID = 'ch';
 // 组件技能（flow-comet-execute / flow-comet-review / flow-comet-verify 等）是 <skillsRoot>
 // 下的同级目录。权威源 checkout → <root>/.flow-comet/skills/；安装副本 → <目标>/.claude|
 // .agents|.dsh/skills/ —— 同一相对推导覆盖全部形态。禁止再假定权威源布局
-// （REPO_ROOT/.flow-comet/skills 在安装副本形态不存在 → 技能文本锁场景 ENOENT，级 3 e2e 缺陷）。
+// （REPO_ROOT/.flow-comet/skills 在安装副本形态不存在 → 技能文本锁场景 ENOENT，端到端冒烟缺陷）。
 function skillsRootForScriptsDir(scriptsDir) {
   return path.resolve(scriptsDir, '..', '..');
 }
@@ -83,8 +83,29 @@ function resolveComponentSkillFile(nodeSkill, scriptsDir = __dirname) {
   return file;
 }
 
-// 场景数一致性自检清单（20 文件 = 15 分发组 + 5 维护者组，全变体：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n）——
-// 场景数自检与底部自检共用同一清单/同一实现（自检常量同步：SCENARIOS.length 变更 → 20 受检文件须同步）。
+// 公开产物零代号判据（与 .githooks/internal-codes.mjs 的 BANNED 保持同步——单一来源约定：
+// 本文件随技能包分发，不能 import 主仓私有的 .githooks；改动词表时两份同改，行为必须一致）。
+// 等价性不只靠注释约定：底部自检在权威源检出下读该私有件**逐字符比对**（主仓形态），安装副本
+// 形态输出显式「不适用」描述符（未验证 ≠ 通过）——见词表镜像漂移判据。
+// 除既有过程代号外，本批并入"未公开概念"类**收窄模式**：批次编号 / 批+数字 / 级别编号 /
+// 验收代号 / 工作项编号。模式刻意收窄（词界 + 字母边界）：合法中文用法（发布批次 / 维护批次 /
+// 级联 / 变更请求与采纳编号前缀）不命中；判别力与边界锚见维护文档机检场景族（表驱动等价性：
+// 词表每个分支各一条正例 + 一条对应反例，另加本文件注释层零残留——三向自检）。禁止放宽为裸词
+// ——那会误伤公开面大量合法中文用法。
+// 2026-10-01 收窄一处：「批 + 数字」补中文序数否定环视——「第 N 批 + 数字」是普通计数短语
+// （合法中文用法），旧模式把它当未公开概念命中。序号与「批」之间隔着数字（阿拉伯或中文），
+// 故环视必须吸收这段数字（变长环视），且**允许两侧空格**（`第 1 批 2 次` 同属普通计数短语）；
+// 工作项编号补**尾界**（要求恰好两位，`R-123` 形态不命中）。以上均属"只收窄不放宽"；
+// 只排除这两类形态，其余判定不变。无空格连写形态（如「批次2」）刻意不命中：实测受检三层 0 处，
+// 放宽会增误报。本正则与 `.githooks/internal-codes.mjs` 的 `BANNED` 保持 **source 逐字符相等**
+// （主仓形态由镜像漂移判据强制，改一侧必须同步另一侧）。
+const PUBLIC_CODE_RE = /\bS\d{1,3}\b|T-FIX|batch-(?![a-z])|D-\d+|P[0-7]\b|round\s*\d|dogfood|内部|批次 [A-Z0-9]|(?<!第 ?[0-9一二三四五六七八九十百千万]* ?)批 ?\d|级 [0-9]|UAT-\d|(?<![A-Za-z])R-\d{2}(?![A-Za-z0-9_-])/;
+
+// 场景数一致性自检清单（15 文件 = 9 分发组 + 6 维护者组，全变体：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n）——
+// 数字由下方常量清单**推导**、不硬编码：9 = SCENARIO_COUNT_FILES 9 条与 SYSTEM_TEST_COUNT_FILES 4 条的
+// 并集（后者是前者子集）；6 = SCENARIO_COUNT_FILES_MAINTAINER 6 条与 SYSTEM_TEST_COUNT_FILES_MAINTAINER
+// 6 条的并集（后者是前者子集，故并集即 6 条）——底部自检输出「受检面: n 文件」实际值，清单/数字漂移即可见（防再漂移）。
+// 场景数自检与底部自检共用同一清单/同一实现（自检常量同步：SCENARIOS.length 变更 → 全部受检文件须同步）。
 // 分两组按"分发形态"划界（AC-14：条目缺失必须显式报告，不得静默跳过——幽灵条目无处藏身）：
 //   ① 分发组：随仓库分发（受版本控制），**任何**权威源检出都必须存在——维护者工作副本、
 //      CI 全新检出、worktree 检出皆然 → 条目缺失即报错（幽灵条目在此被强制暴露）。
@@ -92,11 +113,14 @@ function resolveComponentSkillFile(nodeSkill, scriptsDir = __dirname) {
 //      worktree 检出**整组必然缺席** → 判据取"整组是否在场"而非"单条目是否在场"：整组缺席 =
 //      该检出无此文档面，跳过该组；整组在场时同样逐条强制存在与同步，缺失即报错。
 //      （单条目静默跳过正是本 change 修正的缺陷——故跳过粒度只能是"整组"，不能是"单条"。）
-// CLAUDE.md 为主仓私有指导文件（gitignore 不随 clone 分发）——不在自检清单内（2026-08-16 决策：
-// 清单只针对随仓库分发的文件；CLAUDE.md 场景数由人工维护）
+// CLAUDE.md 为主仓私有指导文件（gitignore 不随 clone 分发）——现列入**维护者组**受检清单：
+// 与 docs/internal/ 同进同退（该目录缺席即整组跳过，非维护者检出不会误红），主仓形态下其
+// 计数不再由人工维护。分发组仍只含随仓库分发的文件。
+// 2026-09-27 文档重构：计数只允许出现在入口页徽章行、发布权威与机器锁面（PR 模板 / CI / 欢迎消息 / 变更日志）；
+// 其余公开文档一律改述为「见 VERSIONS」，因此本清单随之收缩（此前把 CONTRIBUTING/INSTALLATION/MECHANISM 也列进来，
+// 与单一权威策略冲突：同一数字散落越多越容易漂移）。
 const SCENARIO_COUNT_FILES = [
-  'README.md', 'README-zh.md', 'CONTRIBUTING.md', 'CONTRIBUTING-zh.md',
-  'docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
+  'README.md', 'README-zh.md',
   'docs/VERSIONS.md', 'docs/VERSIONS-zh.md', '.github/PULL_REQUEST_TEMPLATE.md',
   'CHANGELOG.md', 'CHANGELOG-zh.md',
   // CI workflow 文件纳入场景数自检（此前盲区——ci.yml 注释/greeting 欢迎消息的
@@ -114,8 +138,15 @@ const SCENARIO_COUNT_FILES_MAINTAINER = [
   'docs/internal/ARCHITECTURE.md', 'docs/internal/DOC-CHECKLIST.md', 'docs/internal/MECHANISM.md',
   'docs/internal/ROADMAP.md',
   'docs/internal/WORKING-METHOD.md',
+  // 主仓私有指导面（见上方分组说明）：纳入维护者组后其场景数由机检维护；docs/internal/ 缺席
+  // 的检出形态整组跳过（该文件同样被 gitignore，两种缺席同源）。
+  'CLAUDE.md',
 ];
 const MAINTAINER_DOC_DIR = 'docs/internal';
+// 三册显式清单（维护文档机检扫描面；与 docs/internal/*.md、.specs/adr/*.md 并列）：
+// 知识权威累积面，更新频率高——写入即需校验。显式清单（不用 .specs/*.md 通配）可预测、
+// 可按册 allowlist，未来新增册需手工登记（与计数受检清单同纪律）。
+const MAINTAINER_BOOKS = ['.specs/CONTEXT.md', '.specs/LESSONS.md', '.specs/CHANGELOG.md'];
 
 // 系统测试集项数受检清单——与场景数清单**并列不合并**：两者数字不同、受检文件面也不同
 // （项数只出现在下面这些文档里；场景数散布更广，含 README / 模板 / CI）。清单本身是
@@ -123,21 +154,22 @@ const MAINTAINER_DOC_DIR = 'docs/internal';
 // 漂移只能靠人工发现）。分组语义与场景数清单一致（见上方分组说明）：分发组恒检，
 // 维护者组整组在场时逐条严检。
 const SYSTEM_TEST_COUNT_FILES = [
-  'CONTRIBUTING.md', 'CONTRIBUTING-zh.md',
-  'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
   'docs/VERSIONS.md', 'docs/VERSIONS-zh.md',
   'CHANGELOG.md', 'CHANGELOG-zh.md',
 ];
 const SYSTEM_TEST_COUNT_FILES_MAINTAINER = [
-  'docs/internal/ARCHITECTURE.md', 'docs/internal/DOC-CHECKLIST.md',
+  'docs/internal/ARCHITECTURE.md', 'docs/internal/DOC-CHECKLIST.md', 'docs/internal/MECHANISM.md',
   'docs/internal/ROADMAP.md', 'docs/internal/WORKING-METHOD.md',
+  // 与场景数维护者组同面同序（该组为子集关系，便于并集口径一眼可核）：机制知识册纳入后
+  // 其项数由机检维护；CLAUDE.md 同属主仓私有面。
+  'CLAUDE.md',
 ];
 // 刻意不收进清单的项数副本（逐条留痕，避免"清单外漏网"变成无声的例外）：
-//   - CLAUDE.md：主仓私有指导文件，计数人工维护（场景数清单同一决策）；
-//   - docs/internal/MECHANISM.md：其项数写法与当前值不一致，由维护批次单独同步——收进清单
-//     就等于要求与本批同时修正；
 //   - .specs/CONTEXT.md：流程工件目录随 change 清理/归档——收进清单会让套件在维护者检出
 //     依赖流程工件状态。
+// 两条原排除说明已结清：CLAUDE.md 与 docs/internal/MECHANISM.md 现均列入维护者组受检清单
+// （前者随 docs/internal/ 缺席整组跳过；后者的项数已与当前值同步）。presence 之外另有 stale
+// 检测兜住"在场但值过期"的形态（见下方 staleCountProblems）。
 const SYSTEM_TEST_SCRIPT_REL = '.flow-comet/skills/flow-comet/scripts/system-test.mjs';
 
 let passed = 0;
@@ -177,6 +209,99 @@ function scanCountFiles(files, variants, root = REPO_ROOT) {
   return { missing, unsynced };
 }
 
+// 维护者面的在场探针（单一来源）：以**组外**目录 docs/internal/ 是否存在为判据——不能用组内
+// 成员当探针（成员缺失会被误判成「整组缺席」而跳过，正好藏起该成员的缺失）。计数受检清单的
+// 维护者组与 maintainerFaceSkips 的计数面描述符共用本判据（单一决策，避免多处各写一份而漂移）。
+function maintainerFacePresent(root = REPO_ROOT) {
+  return fs.existsSync(path.join(root, MAINTAINER_DOC_DIR));
+}
+
+// ---------- 计数 stale 检测（presence 之外的判别力补足） ----------
+// presence 只能证明"当前值在场"，证不了"旧值不在场"：维护面曾长期带着无标记旧值仍全绿。
+// 判据：受检面里出现**计数形态 token**、数值落在合理量程、且不等于当前值、且行内没有历史
+// 标记 → 报"旧值未标记"（在场 + 旧值不在场两条一起才叫同步）。
+//   ① token 白名单（只认这几种计数写法，避免把通用比值/编号误当计数）：`N 场景` / `N scenarios` /
+//      `N 项` / `N items` / `ALL N SCENARIOS` / `N/N`——最后一种还须**同行点名套件**
+//      （guard-self-test|system-test|SYSTEM TEST|SCENARIOS|场景|项|items|scenarios），
+//      否则 `69/69 = 100%` 一类通用比值会被误伤（设计期实测口径）。
+//   ② 量程门：30~400 之外不参与（把版本号、年份、行号一类数字挡在外面）。
+//   ③ 历史标记豁免：行内出现"历史 / history / VERSIONS"即视为已标注的历史值。另有两枚等价标记
+//      `本轮`（维护笔记记述既往事件的固定措辞）与 `过时`（行内自述该值已过期）——实测受检面里
+//      仅有的两处旧值都出现在这类回顾叙述行里，它们是**已标注**的历史值，不是"未标记旧值"。
+// 受检面（staleCountTargets）：维护者面（docs/internal/ 全册 + CLAUDE.md）+ 参考册
+// （reference/*.md，路径从本脚本自身位置推导）。**分发组计数清单不入本面**：变更日志按语义
+// 就是历史记录（双语实测 42 处既往计数），纳入即灾难性误报；分发组的"当前值在场"要求照旧
+// 由 presence 判据覆盖（见上方清单）。
+const STALE_COUNT_TOKEN_RE = /\b(\d{2,4})\s*(?:场景|scenarios|项|items)|\b(\d{2,4})\/(\d{2,4})\b|\bALL (\d{2,4}) SCENARIOS\b/g;
+const STALE_COUNT_SUITE_KEYWORD_RE = /guard-self-test|system-test|SYSTEM TEST|SCENARIOS|场景|项|items|scenarios/;
+const STALE_COUNT_HISTORY_MARKER_RE = /历史|history|VERSIONS|本轮|过时|outdated|superseded/i;
+const STALE_COUNT_MIN = 30;
+const STALE_COUNT_MAX = 400;
+// 参考册面（分发参考册）：技能树从本脚本自身位置推导——权威源与各安装副本（.claude / .agents /
+// .dsh/skills）同一推导覆盖，不假定权威源布局（与技能树布局感知注释同一纪律）。
+const REFERENCE_FACE_DIR_REL = path
+  .relative(REPO_ROOT, path.join(__dirname, '..', 'reference'))
+  .split(path.sep).join('/');
+
+function staleCountTargets(root = REPO_ROOT) {
+  const targets = [];
+  const internalDir = path.join(root, MAINTAINER_DOC_DIR);
+  if (fs.existsSync(internalDir)) {
+    for (const name of fs.readdirSync(internalDir)) {
+      if (name.endsWith('.md')) targets.push(path.posix.join(MAINTAINER_DOC_DIR, name));
+    }
+  }
+  const referenceDir = path.join(root, REFERENCE_FACE_DIR_REL);
+  if (fs.existsSync(referenceDir)) {
+    for (const name of fs.readdirSync(referenceDir)) {
+      if (name.endsWith('.md')) targets.push(path.posix.join(REFERENCE_FACE_DIR_REL, name));
+    }
+  }
+  if (fs.existsSync(path.join(root, 'CLAUDE.md'))) targets.push('CLAUDE.md');
+  return targets;
+}
+
+// counts = 当前值集合（场景数 / 系统测试集项数；派生失败时按 null 过滤——派生失败本身已由
+// 计数一致性判据显式报告，不在此重复）。返回问题描述数组（空数组 = 无未标记旧值）。
+function staleCountProblems(counts, root = REPO_ROOT) {
+  const problems = [];
+  const current = new Set(counts.filter((v) => typeof v === 'number' && Number.isFinite(v)));
+  for (const rel of staleCountTargets(root)) {
+    let text;
+    try {
+      text = fs.readFileSync(path.join(root, rel), 'utf8');
+    } catch (e) {
+      // 与维护文档机检同型：读取失败不得静默跳过（"未执行 ≠ 通过"）。
+      const reason = e && e.code ? e.code : (e && e.message ? e.message : String(e));
+      problems.push('无法读取: ' + rel + ': ' + reason);
+      continue;
+    }
+    const lines = text.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (STALE_COUNT_HISTORY_MARKER_RE.test(line)) continue;
+      for (const m of line.matchAll(STALE_COUNT_TOKEN_RE)) {
+        let value = null;
+        if (m[1] !== undefined) {
+          value = Number(m[1]);
+        } else if (m[2] !== undefined) {
+          if (m[2] !== m[3]) continue; // 非等值比值（如 69/70）不是计数形态
+          if (!STALE_COUNT_SUITE_KEYWORD_RE.test(line)) continue; // 通用比值须同行点名套件
+          value = Number(m[2]);
+        } else {
+          value = Number(m[4]);
+        }
+        if (!Number.isFinite(value) || value < STALE_COUNT_MIN || value > STALE_COUNT_MAX) continue;
+        if (current.has(value)) continue;
+        problems.push('旧值未标记: ' + rel + ':' + (i + 1) + ' 计数 ' + m[0].trim()
+          + '（当前值 ' + [...current].join(' / ') + '）——请改写为当前值，或补历史标记'
+          + '（历史 / VERSIONS 指针 / 过时 说明）');
+      }
+    }
+  }
+  return problems;
+}
+
 // 场景数一致性检查（单一来源）：场景 105 与底部自检共用同一实现与同一判据。
 // 返回问题描述数组（空数组 = 通过）。
 // root 可覆盖扫描根（默认仓库根）——同上：仅为可测性接缝（生产调用不传，判据与改前一致）。
@@ -186,7 +311,7 @@ function scenarioCountSyncProblems(n, root = REPO_ROOT) {
   if (dist.missing.length > 0) problems.push('受检条目文件缺失（幽灵条目）: ' + dist.missing.join(', '));
   if (dist.unsynced.length > 0) problems.push('场景数未同步（应为 ' + n + '）: ' + dist.unsynced.join(', '));
   // 维护者组：整组在场才检查（CI 全新检出 / worktree 检出整组必然缺席——见清单分组说明）
-  if (fs.existsSync(path.join(root, MAINTAINER_DOC_DIR))) {
+  if (maintainerFacePresent(root)) {
     const mnt = scanCountFiles(SCENARIO_COUNT_FILES_MAINTAINER, scenarioCountVariants(n), root);
     if (mnt.missing.length > 0) problems.push('维护者文档条目文件缺失（幽灵条目）: ' + mnt.missing.join(', '));
     if (mnt.unsynced.length > 0) problems.push('维护者文档场景数未同步（应为 ' + n + '）: ' + mnt.unsynced.join(', '));
@@ -230,7 +355,7 @@ function systemTestCountSyncProblems(root = REPO_ROOT) {
   const dist = scanCountFiles(SYSTEM_TEST_COUNT_FILES, systemTestCountVariants(itemCount), root);
   if (dist.missing.length > 0) problems.push('系统测试集项数条目文件缺失（幽灵条目）: ' + dist.missing.join(', '));
   if (dist.unsynced.length > 0) problems.push('系统测试集项数未同步（应为 ' + itemCount + '）: ' + dist.unsynced.join(', '));
-  if (fs.existsSync(path.join(root, MAINTAINER_DOC_DIR))) {
+  if (maintainerFacePresent(root)) {
     const mnt = scanCountFiles(SYSTEM_TEST_COUNT_FILES_MAINTAINER, systemTestCountVariants(itemCount), root);
     if (mnt.missing.length > 0) problems.push('维护者文档系统测试集项数条目文件缺失（幽灵条目）: ' + mnt.missing.join(', '));
     if (mnt.unsynced.length > 0) problems.push('维护者文档系统测试集项数未同步（应为 ' + itemCount + '）: ' + mnt.unsynced.join(', '));
@@ -238,19 +363,128 @@ function systemTestCountSyncProblems(root = REPO_ROOT) {
   return problems;
 }
 
-// 计数一致性检查（两套计数合并）：场景 105 与底部自检共用，两处判据不会漂移。
+// 计数一致性检查（两套计数合并 + stale 检测）：场景 105 与底部自检共用，两处判据不会漂移。
+// 顺序有意为之：先跑 presence（含派生源缺失/失败，必要时 fail-closed 抛出），再跑 stale——
+// 当前值取自同一派生（场景数 = SCENARIOS.length，项数 = 系统测试集脚本派生），不二次硬编码。
 function countSyncProblems(root = REPO_ROOT) {
-  return [...scenarioCountSyncProblems(SCENARIOS.length, root), ...systemTestCountSyncProblems(root)];
+  const problems = [
+    ...scenarioCountSyncProblems(SCENARIOS.length, root),
+    ...systemTestCountSyncProblems(root),
+  ];
+  const { count: itemCount } = readSystemTestItemCount(root);
+  problems.push(...staleCountProblems([SCENARIOS.length, itemCount], root));
+  return problems;
 }
 
-// 维护文档机检（docs-governance）：覆盖 CI 结构上不可见的面——docs/internal/ 与 .specs/adr/ 的
+// 维护文档机检（docs-governance）：覆盖 CI 结构上不可见的维护者面——docs/internal/、
+// .specs/adr/ 与三册显式清单（见 MAINTAINER_BOOKS）的
 // ① 死引用（文档中的仓库相对路径引用必须存在）；② ROADMAP 最低结构（Now / Next / Later / Open decisions）。
-// 与计数检查同构：docs/internal 整组缺席（CI 全新检出 / worktree 检出）→ 跳过（空数组，不误红）。
+// 与计数检查同构：全部目标面缺席（CI 全新检出 / worktree 检出）→ 跳过（空数组，不误红）。
 // 判别力边界（实测教训）：提取必须取「完整路径 token」而非后缀子串；scripts/… 一类简写按技能树基准解析；
 // 占位符 / 通配 / 未来路径不参与判定（见 ALLOWLIST）。
-const INTERNAL_DOC_REF_BASES = ['.flow-comet/skills/flow-comet', '.claude/skills/flow-comet', '', 'flow-kit'];
+// 解析基准（数据驱动，扩展条目不写逻辑分支）：前四条为既有基准（技能树 / 包根 / 上游），
+// 新增基准覆盖权威树根（.flow-comet）、技能树根（.flow-comet/skills、.claude/skills、
+// .agents/skills、.dsh/skills）、规则树根（.flow-comet/rules、.claude/rules）与平台副本根
+// （.claude）——用于解析 `rules/…`、`flow-comet-*/SKILL.md` 这类树根相对形态。
+const INTERNAL_DOC_REF_BASES = [
+  '.flow-comet/skills/flow-comet', '.claude/skills/flow-comet', '', 'flow-kit',
+  '.flow-comet', '.flow-comet/skills', '.flow-comet/rules',
+  '.claude', '.claude/skills', '.claude/rules', '.agents/skills', '.dsh/skills',
+];
+// 窄域报告规则（判别力补丁）：基准全部未解析时，首段属于下列「仓库内树根相对形态」族的引用
+// 必须按死引用报告——即使顶层目录在仓库根不存在也报（这正是旧逻辑「顶层整体缺席 → 跳过」
+// 会静默放过的形态）。族为声明式清单，只覆盖已确证的形态：flow-comet* 技能目录 / rules。
+const INTERNAL_DOC_REF_TREE_ROOT_FAMILIES = [/^flow-comet[A-Za-z0-9-]*$/, /^rules$/];
+function isTreeRootRelativeRef(ref) {
+  const firstSegment = ref.split('/')[0];
+  return INTERNAL_DOC_REF_TREE_ROOT_FAMILIES.some((re) => re.test(firstSegment));
+}
+// 声明式族（取代"顶层段不存在即静默跳过"）：解析失败后仍允许跳过的形态必须**逐条显式登记**，
+// 未登记者一律按死引用报告（fail-closed）。旧语义实测吞掉过指向已移除临时区的真实残留——
+// 隐含边界把"允许"藏进了代码，声明式族把允许面变成可见清单，新增跳过必须显式登记。
+//   ① 外部命名空间族（前缀声明）：平台侧命名空间，本仓库根天然不存在。
+const EXTERNAL_NAMESPACE_PREFIXES = ['DSH_HOME/', 'dsh-tui/', 'dsh-base/'];
+//   ② 退役命名空间允许面（**按角色 / 前缀匹配**，不再逐条硬编码精确 ref）：仅限**记录该迁移**
+//      的决策件与决策册——退役命名空间在那里是历史事实，改掉反而丢失迁移记录。
+//      匹配 = 文件面（前缀形态 `filePrefix` 或角色形态 `role`）+ 引用面（退役命名空间前缀）。
+//      精确 ref 硬编码的脆性在于：文件改名即静默失配 → 合法历史迁移记录被误报死引用（误红），
+//      而误红会诱导维护者删掉历史事实。改名不改角色，故按角色/前缀匹配；反过来**不**放宽
+//      引用面与文件面之外的部分：未登记文件 / 未登记命名空间的引用照旧一律报（fail-closed）。
+const RETIRED_NAMESPACE_PREFIX = '.comet/';
+// 决策册角色判定：`.specs` 下的决策账本族文件（含改名后的 `CONTEXT-<后缀>.md` 形态）——
+// 角色判定按语义而非精确文件名，改名不该让合法迁移记录变成死引用误报。
+// 边界（登记）：角色判定只作用于**扫描目标**（该族文件本身须在受检目标清单内才会被扫描）。
+function isDecisionLedgerFile(rel) {
+  return /^\.specs\/CONTEXT(?:[-.][A-Za-z0-9_.-]+)?\.md$/i.test(rel);
+}
+// 文件面匹配器（声明式）：kind = filePrefix（路径前缀，改名后缀不影响）| role（角色判定函数）。
+const RETIRED_NAMESPACE_FILE_MATCHERS = {
+  'decision-ledger': isDecisionLedgerFile,
+};
+const RETIRED_NAMESPACE_ALLOWLIST = [
+  {
+    filePrefix: '.specs/adr/ADR-009',
+    refPrefix: RETIRED_NAMESPACE_PREFIX,
+    reason: '记录运行时命名空间迁移的决策件：退役命名空间作为迁移前事实保留（改名不改角色）',
+  },
+  {
+    filePrefix: '.specs/adr/ADR-010',
+    refPrefix: RETIRED_NAMESPACE_PREFIX,
+    reason: '同族决策件（迁移决策的后续修订）：迁移前事实同样保留，按前缀匹配避免改名失配',
+  },
+  {
+    role: 'decision-ledger',
+    refPrefix: RETIRED_NAMESPACE_PREFIX,
+    reason: '决策册角色（.specs 下决策账本族）：已锁决策记录迁移事实（退役命名空间的历史形态）',
+  },
+];
+// 允许面条目匹配（单一实现）：文件面（前缀 / 角色）与引用面（前缀）同时命中才算登记在案。
+function matchesRetiredNamespaceEntry(entry, rel, ref) {
+  const refOk = typeof entry.refPrefix === 'string' && ref.startsWith(entry.refPrefix);
+  if (!refOk) return false;
+  if (typeof entry.filePrefix === 'string' && rel.startsWith(entry.filePrefix)) return true;
+  if (typeof entry.role === 'string') {
+    const roleMatcher = RETIRED_NAMESPACE_FILE_MATCHERS[entry.role];
+    if (typeof roleMatcher === 'function' && roleMatcher(rel)) return true;
+  }
+  return false;
+}
+//   ③ 示例形态允许面（逐条 {file, ref, reason}）：文档里的示意路径。**当前为空清单**——
+//      空清单的语义是「无任何示例允许项」（未登记即报，fail-closed），不是「该判据不生效」；
+//      查询带长度短路（零条目时不进入匹配），避免把零条目扩展点当成隐式权限。
+//      出现新示例时在此登记（未登记即报，不再静默跳过）。
+const EXAMPLE_REF_ALLOWLIST = [];
+function isDeclaredReferenceSkip(rel, ref) {
+  if (EXTERNAL_NAMESPACE_PREFIXES.some((prefix) => ref.startsWith(prefix))) return true;
+  if (RETIRED_NAMESPACE_ALLOWLIST.some((e) => matchesRetiredNamespaceEntry(e, rel, ref))) return true;
+  if (EXAMPLE_REF_ALLOWLIST.length > 0
+    && EXAMPLE_REF_ALLOWLIST.some((e) => e.file === rel && e.ref === ref)) return true;
+  return false;
+}
 const INTERNAL_DOC_REF_ALLOWLIST = new Set(['.specs/archive/CONTEXT-history.md']);
-const INTERNAL_DOC_REF_RE = /(?<![A-Za-z0-9_.\-\/])(\.?(?:[A-Za-z0-9_][A-Za-z0-9_.\-]*\/)+[A-Za-z0-9_.\-]+\.(?:md|mjs|cjs|js|ts|json|ya?ml|sh|patch|toml))(?![A-Za-z0-9])/gm;
+// 引用提取：既有形态（≥1 段路径 + 扩展名）+ **可选行号后缀**（`:N` / `:N-M` / 逗号列表
+// `:N,M`）——行号存在性与不越界判据需要把行号一起取出来（见 internalDocsProblems）。
+const INTERNAL_DOC_REF_RE = /(?<![A-Za-z0-9_.\-\/])(\.?(?:[A-Za-z0-9_][A-Za-z0-9_.\-]*\/)+[A-Za-z0-9_.\-]+\.(?:md|mjs|cjs|js|ts|json|ya?ml|sh|patch|toml))(?::(\d+(?:-\d+)?(?:\s*,\s*\d+(?:-\d+)?)*))?(?![A-Za-z0-9])/gm;
+// 并列写法护栏：首段**本身带文件扩展名**的 token 不是路径引用（如 `TEST.md/REVIEW.md` 是两个
+// 文件名并列写法）——不参与解析（存在性判据与行号判据同此）。判据必须收窄到"首段带扩展名"：
+// 用"首段含 `.`"会把 `.specs/…` / `.flow-comet/…` 这类隐藏目录一并误排（设计期实测该写法把
+// 5 处带行号引用压成 3 处）。
+const INTERNAL_DOC_REF_PARALLEL_RE = /\.(?:md|mjs|cjs|js|ts|json|ya?ml|sh|patch|toml)$/i;
+
+// 行号后缀 → 数值数组（区间取两端；逗号列表逐项展开）。
+function parseRefLineNumbers(suffix) {
+  if (!suffix) return [];
+  const out = [];
+  for (const part of suffix.split(/\s*,\s*/)) {
+    if (part.includes('-')) {
+      const [start, end] = part.split('-');
+      out.push(Number(start), Number(end));
+    } else {
+      out.push(Number(part));
+    }
+  }
+  return out;
+}
 
 function internalDocRefCandidates(text) {
   const out = [];
@@ -260,21 +494,33 @@ function internalDocRefCandidates(text) {
     for (const m of lines[i].matchAll(INTERNAL_DOC_REF_RE)) {
       const token = m[1];
       if (token.includes('*') || token.includes('<')) continue; // 通配 / 占位符
-      const key = i + 1 + ' ' + token;
+      if (INTERNAL_DOC_REF_PARALLEL_RE.test(token.split('/')[0])) continue; // 并列写法（见上方护栏）
+      const key = i + 1 + ' ' + token + ':' + (m[2] || '');
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ ref: token, line: i + 1 });
+      out.push({ ref: token, line: i + 1, lineRefs: parseRefLineNumbers(m[2]) });
     }
   }
   return out;
 }
 
-function internalDocsProblems(root = REPO_ROOT) {
-  const problems = [];
-  const internalDir = path.join(root, MAINTAINER_DOC_DIR);
-  const hasInternal = fs.existsSync(internalDir);
+// 引用解析（单一实现）：按声明式基准清单逐个试解析，命中即返回绝对路径；全部失败返回 null。
+function resolveInternalDocRef(ref, root = REPO_ROOT) {
+  for (const base of INTERNAL_DOC_REF_BASES) {
+    const p = base === '' ? path.join(root, ref) : path.join(root, base, ref);
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+// 维护文档机检的受检目标清单（单一来源）：docs/internal/*.md（目录在场时）+ .specs/adr/*.md
+// + 三册显式清单（MAINTAINER_BOOKS）。三册是知识权威累积面、更新频率高（写入即需校验）；
+// 显式清单可预测，未来新增第四册需手工登记（与计数受检清单同纪律）。
+// 全部目标面缺席 → 空数组（组缺席语义；internalDocsProblems 与 maintainerFaceSkips 共用同一判据）。
+function internalDocTargets(root = REPO_ROOT) {
   const targets = [];
-  if (hasInternal) {
+  const internalDir = path.join(root, MAINTAINER_DOC_DIR);
+  if (fs.existsSync(internalDir)) {
     for (const name of fs.readdirSync(internalDir)) {
       if (name.endsWith('.md')) targets.push(path.posix.join(MAINTAINER_DOC_DIR, name));
     }
@@ -285,42 +531,219 @@ function internalDocsProblems(root = REPO_ROOT) {
       if (name.endsWith('.md')) targets.push(path.posix.join('.specs', 'adr', name));
     }
   }
-  if (targets.length === 0) return problems; // 两处目标面皆缺席 → 整组跳过（CI / worktree 形态）
-  for (const rel of targets) {
-    let text;
-    try {
-      text = fs.readFileSync(path.join(root, rel), 'utf8');
-    } catch {
-      continue;
-    }
-    for (const { ref, line } of internalDocRefCandidates(text)) {
-      if (INTERNAL_DOC_REF_ALLOWLIST.has(ref)) continue;
-      if (INTERNAL_DOC_REF_BASES.some((base) => fs.existsSync(path.join(root, base, ref)))) continue;
-      const firstSegment = ref.split('/')[0];
-      if (!fs.existsSync(path.join(root, firstSegment))) continue; // 顶层整体缺席 → 跳过（组缺席语义）
-      problems.push('死引用: ' + rel + ':' + line + ' → ' + ref);
-    }
+  for (const rel of MAINTAINER_BOOKS) {
+    if (fs.existsSync(path.join(root, rel))) targets.push(rel);
   }
-  const roadmapRel = path.posix.join(MAINTAINER_DOC_DIR, 'ROADMAP.md');
-  if (!fs.existsSync(path.join(root, roadmapRel))) {
-    problems.push('ROADMAP 缺失: ' + roadmapRel);
-  } else {
-    const text = fs.readFileSync(path.join(root, roadmapRel), 'utf8');
-    for (const section of ['Now', 'Next', 'Later', 'Open decisions']) {
-      const sectionRe = new RegExp('^##\\s*' + section + '\\s*(?:[（(][^）)\\n]*[）)])?\\s*$', 'm');
-      if (!sectionRe.test(text)) {
-        problems.push('ROADMAP 结构缺段: ' + section + '（' + roadmapRel + '）');
-      }
+  return targets;
+}
+
+// ROADMAP 表头新鲜度（内容锚）：声明式表头行 `> 最后更新：<YYYY-MM-DD>` 的日期必须 ≥ 该文件
+// 正文中出现过的最大日期。维护面无 git 跟踪文件（实测 0 跟踪），提交日锚不可得——内容锚纯结构、
+// 可夹具驱动。未声明表头的目标跳过（登记边界：表头即"最后更新"声明，没声明就没得比）。
+const ROADMAP_HEADER_RE = /^\s*>\s*最后更新[:：]\s*(20\d{2}-\d{2}-\d{2})/m;
+const INTERNAL_DOC_DATE_RE = /20\d{2}-\d{2}-\d{2}/g;
+// 归档目录条目：`<日期>-<change-id>`。
+const ARCHIVE_DIR_ENTRY_RE = /^\d{4}-\d{2}-\d{2}-(.+)$/;
+
+// 行号存在与不越界判定（结构级；单一实现）：只在引用本身解析成功后才调用——引用不存在时由
+// 死引用判据负责报告（同一处只报一次，不叠两条）。区间取两端、逗号列表逐项，逐个校验 1..N。
+function lineNumberProblems(rel, entry, resolvedPath, lineCountOf) {
+  const problems = [];
+  if (entry.lineRefs.length === 0) return problems;
+  const total = lineCountOf(resolvedPath);
+  if (total === null) return problems; // 目标瞬时不可读：存在性已通过，行号按不可判跳过
+  for (const num of entry.lineRefs) {
+    if (num < 1 || num > total) {
+      problems.push('行号越界: ' + rel + ':' + entry.line + ' → ' + entry.ref + ':' + num
+        + '（目标共 ' + total + ' 行）——请改指目标里真实存在的行，或删除行号后缀');
     }
   }
   return problems;
 }
 
+// 表头新鲜度判定（内容锚；单一实现）：无表头声明 → 跳过（登记边界）；表头日期 < 正文最大日期 → 报。
+function headerFreshnessProblems(rel, text) {
+  const header = text.match(ROADMAP_HEADER_RE);
+  if (!header) return [];
+  const dates = [...text.matchAll(INTERNAL_DOC_DATE_RE)].map((m) => m[0]);
+  const maxBody = dates.reduce((a, b) => (a > b ? a : b), '');
+  if (maxBody === '' || header[1] >= maxBody) return [];
+  return ['表头不新鲜: ' + rel + ' 表头 ' + header[1] + ' < 正文最大 ' + maxBody
+    + '——请把表头日期刷新到不早于正文最大日期'];
+}
+
+// 已归档 change 清单（读目录名；归档面缺席 → 空数组，非维护者检出/夹具形态不误红）。
+function archivedChangeIds(root = REPO_ROOT) {
+  const archiveDir = path.join(root, '.specs', 'archive');
+  if (!fs.existsSync(archiveDir)) return [];
+  const ids = [];
+  for (const name of fs.readdirSync(archiveDir)) {
+    const m = ARCHIVE_DIR_ENTRY_RE.exec(name);
+    if (m) ids.push({ id: m[1], dir: name });
+  }
+  return ids;
+}
+
+// `## Now`（在办段）不得出现已归档 change-id：段定位**必须用标题扫描**（允许段名尾部括号注记），
+// 切到下一个二级标题 Next 为止。禁止用 indexOf('## Now')——该册文件头的目录说明行里含被反引号
+// 包住的同名标题字样，indexOf 会命中说明行、切出极短窗口使判据恒过（实测教训：判据的定位口径
+// 必须自实测推导，不能被同一文件里"看起来对"的文本骗过）。
+function roadmapNowArchivedProblems(rel, text, root = REPO_ROOT) {
+  const problems = [];
+  const nowRe = /^##\s*Now\s*(?:[（(][^）)\n]*[）)])?\s*$/m;
+  const nowMatch = nowRe.exec(text);
+  if (!nowMatch) return problems; // 段缺席由结构判据报告，此处不重复
+  const rest = text.slice(nowMatch.index + nowMatch[0].length);
+  const nextRe = /^##\s*Next\s*(?:[（(][^）)\n]*[）)])?\s*$/m;
+  const nextMatch = nextRe.exec(rest);
+  const section = nextMatch ? rest.slice(0, nextMatch.index) : rest;
+  for (const { id, dir } of archivedChangeIds(root)) {
+    // 命中面 = id 及其路径形态（两形态都要判：只判路径会漏掉裸 id 写法）。
+    // id 用**整词**匹配（字母/数字/连字符为词字符）——直接 `includes(id)` 会让短 id 命中更长 id
+    // 或同族更长 id 的中间（如归档 id `archived-fixture` 命中 `archived-fixture-v2`），属假红。
+    const idRe = new RegExp('(?<![A-Za-z0-9_-])' + id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![A-Za-z0-9_-])');
+    if (idRe.test(section) || section.includes(dir)) {
+      problems.push('Now 段含已归档 change-id: ' + id + '（' + rel + ' 的在办段引用了已归档记录 '
+        + dir + '）——请从在办段移出（历史指针面记录）');
+    }
+  }
+  return problems;
+}
+
+function internalDocsProblems(root = REPO_ROOT) {
+  const problems = [];
+  const targets = internalDocTargets(root);
+  if (targets.length === 0) return problems; // 全部目标面缺席 → 整组跳过（CI / worktree 形态）
+  const lineCountCache = new Map();
+  const lineCountOf = (p) => {
+    if (!lineCountCache.has(p)) {
+      try {
+        // 逻辑行数：**尾随换行不产生额外一行**（`a\nb\nc\n` = 3 行），**空文件 = 0 行**（不是 1 行）。
+        // 直接取 `split(/\r?\n/).length` 会把尾随空段算成一行 → `:N+1` 越界被漏报；空文件若按段数
+        // 计会得 1 行 → `:1` 被放过（空文件没有任何行，任何行号都越界）。
+        const body = fs.readFileSync(p, 'utf8');
+        const parts = body === '' ? [] : body.split(/\r?\n/);
+        if (parts.length > 1 && parts[parts.length - 1] === '') parts.pop();
+        lineCountCache.set(p, parts.length);
+      } catch {
+        lineCountCache.set(p, null); // 目标瞬时不可读：存在性已通过，行号判据按不可判跳过
+      }
+    }
+    return lineCountCache.get(p);
+  };
+  for (const rel of targets) {
+    let text;
+    try {
+      text = fs.readFileSync(path.join(root, rel), 'utf8');
+    } catch (e) {
+      // F4：读取失败（EACCES / EBUSY / EISDIR 等）不得静默 continue——该目标既没被判死引用、
+      // 也没被判缺失，静默跳过会让受检面出现「未执行 ≠ 通过」的黑洞（L-079 同类通道；本批
+      // 正落在新扩扫描面上）。按可见问题报告，并继续扫描其余目标（一个目标损坏不吞整册扫描面）。
+      const reason = e && e.code ? e.code : (e && e.message ? e.message : String(e));
+      problems.push('无法读取: ' + rel + ': ' + reason);
+      continue;
+    }
+    for (const entry of internalDocRefCandidates(text)) {
+      if (INTERNAL_DOC_REF_ALLOWLIST.has(entry.ref)) continue;
+      const resolved = resolveInternalDocRef(entry.ref, root);
+      if (resolved !== null) {
+        problems.push(...lineNumberProblems(rel, entry, resolved, lineCountOf));
+        continue;
+      }
+      // 窄域报告规则：树根相对形态（flow-comet* 技能目录 / rules）基准全失败 → 按死引用报告，
+      // 不再落入「顶层整体缺席 → 跳过」（旧逻辑在此静默放过——族见上方声明）。
+      if (isTreeRootRelativeRef(entry.ref)) {
+        problems.push('死引用: ' + rel + ':' + entry.line + ' → ' + entry.ref
+          + '（树根相对形态未解析：技能树 / 规则树内不存在该目标）');
+        continue;
+      }
+      // 声明式族：登记在案的外部命名空间 / 退役命名空间 / 示例形态 → 跳过；其余一律按死引用报
+      // （顶层段不存在不再是免检理由——那正是旧逻辑吞掉真实残留的通道）。
+      if (isDeclaredReferenceSkip(rel, entry.ref)) continue;
+      problems.push('死引用: ' + rel + ':' + entry.line + ' → ' + entry.ref
+        + '（顶层段不存在且未登记为允许跳过；请修正路径，或按声明式族逐条登记理由）');
+    }
+    // 表头新鲜度（内容锚；未声明表头 → 跳过）
+    problems.push(...headerFreshnessProblems(rel, text));
+  }
+  const roadmapRel = path.posix.join(MAINTAINER_DOC_DIR, 'ROADMAP.md');
+  if (!fs.existsSync(path.join(root, roadmapRel))) {
+    problems.push('ROADMAP 缺失: ' + roadmapRel);
+  } else {
+    let text = null;
+    try {
+      text = fs.readFileSync(path.join(root, roadmapRel), 'utf8');
+    } catch (e) {
+      // F4 语义的结构检查侧补齐：ROADMAP 自身读取失败（EACCES / EBUSY / EISDIR 等）与目标扫描
+      // 同型报告（同一错误摘要口径），并跳过四段结构检查——不得让同一受检面在结构检查处抛
+      // 未捕获异常、以堆栈崩溃整个套件（读取失败可见化在两个消费点语义一致）。
+      const reason = e && e.code ? e.code : (e && e.message ? e.message : String(e));
+      problems.push('无法读取: ' + roadmapRel + ': ' + reason);
+    }
+    if (text !== null) {
+      for (const section of ['Now', 'Next', 'Later', 'Open decisions']) {
+        const sectionRe = new RegExp('^##\\s*' + section + '\\s*(?:[（(][^）)\\n]*[）)])?\\s*$', 'm');
+        if (!sectionRe.test(text)) {
+          problems.push('ROADMAP 结构缺段: ' + section + '（' + roadmapRel + '）');
+        }
+      }
+      problems.push(...roadmapNowArchivedProblems(roadmapRel, text, root));
+    }
+  }
+  return problems;
+}
+
+// 维护者面缺席可见化（可测接缝；root 可覆盖=测试专用入口，生产调用不传）：
+// 返回被跳过的面与原因描述符数组（空数组 = 全部维护者面在场，无跳过）。与消费点共用同一在场
+// 判据——① 计数受检清单的维护者组复用 maintainerFacePresent（组外目录探针，与
+// scenarioCountSyncProblems 同源）；② 维护文档机检以 internalDocTargets 是否为空为判据
+// （同 internalDocsProblems）。
+// 只产出描述符，不改任何判定 / 返回值语义 / 退出码；套件底部据此输出可见的 SKIP 行
+// （worktree / CI 全新检出等结构性缺席不误红，但不得被当成「已校验」——以维护者主树 L1 为准）。
+function maintainerFaceSkips(root = REPO_ROOT) {
+  const skips = [];
+  if (!maintainerFacePresent(root)) {
+    skips.push({
+      face: '维护者文档计数面（场景数 + 系统测试集项数）',
+      reason: MAINTAINER_DOC_DIR + '/ 目录缺席（CI 全新检出 / worktree 检出等非维护者形态）',
+    });
+  }
+  if (internalDocTargets(root).length === 0) {
+    skips.push({
+      face: '维护文档机检（引用解析 + 路线图结构）',
+      reason: '受检目标面全部缺席（' + MAINTAINER_DOC_DIR + ' 与 .specs/adr 与三册均不可见）',
+    });
+  }
+  return skips;
+}
 
 function makeTmp() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flow-comet-guard-test-'));
   createdDirs.push(dir);
   return dir;
+}
+
+// 场景夹具清理（Windows 韧性，2026-10-01 实证）：子进程退出后，其 cwd / 文件句柄可能仍被短暂占用
+// → `rmSync` 抛 EPERM/EBUSY。Node 的 `maxRetries`/`retryDelay` 正是为该窗口设计（对 EBUSY /
+// EMFILE / ENFILE / ENOTEMPTY / EPERM 线性退避重试）。**仍失败不得让整轮崩溃**——旧写法把
+// `rmSync` 裸放在 finally 里，一个目录删不掉就抛未捕获异常：后续场景不执行、末尾的「临时目录
+// 清理」判据与失败报告也全都不执行（本机实测：整轮 exit 1 且无 RESULT 行，并每次留下一个残留目录）。
+// 现改为「重试 + 容忍」：清理不了的目录留待末尾判据统一报告（可见失败，不静默、也不自杀）。
+const CLEANUP_RETRIES = 10;
+const CLEANUP_RETRY_DELAY_MS = 150;
+// 不返回清理状态：调用方不据它分支，且「清理成功」的**单一判定点**是末尾「临时目录清理」判据
+// （避免 helper 与调用方各自 existsSync 形成两套判定——Sourcery 评审指出，2026-10-01 收敛）。
+function cleanupTmpDir(dir) {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: CLEANUP_RETRIES, retryDelay: CLEANUP_RETRY_DELAY_MS });
+  } catch {
+    // 交由末尾「临时目录清理」判据报告
+  }
+}
+
+// 同步小睡（末尾延迟重试用；主线程可用 Atomics.wait 阻塞等待）
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 function writeFile(root, rel, content) {
@@ -444,6 +867,41 @@ function fixtureBridgeBaseVersion(version) {
 }
 function fixtureIsBridgeDevVersion(version) {
   return FIXTURE_BRIDGE_DEV_SUFFIX_RE.test(String(version));
+}
+
+// 发布同步守卫（场景 200 子断言）纯函数：权威源 loader 的标记行 / 导出常量与载体
+// INSTALLED_VERSION 三处一致性判定——比较语义 = bridge-check 既有语义（MECHANISM 二·二十七
+// 「bridge-check 基础版本归一」：比较前剥离 git-describe dev 态后缀 `-<N>-g<hash>`、按基础版本
+// 比较；预发布标识（如 -rc.N）不是 dev 态后缀、不剥离；基础版本不同（含发布版对发布版）仍报
+// 漂移）。归一复用 fixtureBridgeBaseVersion（单点正则，不再复制第二份实现）——发布态权威源与
+// dev 态安装副本（INSTALLED_VERSION = `<发布>-<N>-g<hash>`）归一后同基础判同步；真实跨文件/
+// 跨值分叉仍必报。返回问题描述数组（空 = 三处基础版本一致）。
+function bridgeStampSyncProblems(markerStamp, exportStamp, installedVersion) {
+  const base = fixtureBridgeBaseVersion;
+  const problems = [];
+  if (base(markerStamp) !== base(installedVersion)) {
+    problems.push('标记行=' + markerStamp + '（基础 ' + base(markerStamp) + '）vs INSTALLED_VERSION=' + installedVersion + '（基础 ' + base(installedVersion) + '）');
+  }
+  if (base(exportStamp) !== base(installedVersion)) {
+    problems.push('export=' + exportStamp + '（基础 ' + base(exportStamp) + '）vs INSTALLED_VERSION=' + installedVersion + '（基础 ' + base(installedVersion) + '）');
+  }
+  return problems;
+}
+
+// 发布同步守卫（场景 200）子锚表（判别力双向，全部由载体基础版本派生）：正例 = 三处基础版本一致
+// （含 dev 态副本戳 vs 权威源发布戳的真实形态、两侧 dev 后缀同基础）；负例 = 标记行 / export
+// 任一基础版本漂移、发布版对发布版失配、预发布标识不剥离——归一不得放行真实漂移。
+function bridgeStampSyncSubAnchorCases(baseVersion, devVersion) {
+  const major = parseInt(baseVersion.split('.')[0], 10);
+  const otherBase = (major + 9) + '.0.0';
+  return [
+    { label: 'dev 态副本戳 vs 权威源发布戳同基础', expectSync: true, problems: bridgeStampSyncProblems(baseVersion, baseVersion, devVersion) },
+    { label: '两侧 dev 后缀同基础', expectSync: true, problems: bridgeStampSyncProblems(baseVersion + '-2-g1234567', baseVersion + '-1-gabcdef0', devVersion) },
+    { label: '标记行基础版本不同', expectSync: false, problems: bridgeStampSyncProblems(otherBase, baseVersion, devVersion) },
+    { label: 'export 基础版本不同', expectSync: false, problems: bridgeStampSyncProblems(baseVersion, otherBase, devVersion) },
+    { label: '发布版对发布版失配', expectSync: false, problems: bridgeStampSyncProblems('9.9.9-fixture-skew', baseVersion, baseVersion) },
+    { label: '预发布标识不剥离', expectSync: false, problems: bridgeStampSyncProblems(baseVersion + '-rc.3', baseVersion, devVersion) },
+  ];
 }
 
 // 组装 dsh 桥接健康夹具（bridge-check 六态场景共用）：项目根挂 .dsh/skills/flow-comet
@@ -661,7 +1119,7 @@ function bridgeCopyVersionSubAnchorCases(baseVersion, devVersion) {
 
 // 协议副本由运行器在场景执行前复制到 <dir>/reference/（见底部运行段）。
 function readScenarioProtocol(dir) {
-  return JSON.parse(fs.readFileSync(path.join(dir, 'reference', 'workflow-protocol.json'), 'utf8'));
+  return JSON.parse(fs.readFileSync(scenarioProtocolPath(dir), 'utf8'));
 }
 
 // 245~247 场景直接调用 route-node 纯函数：缺失导出在此显式报告（RED 定位到具体场景，
@@ -807,7 +1265,7 @@ function runReenter(dir, target, options = {}) {
   if (options.reason !== undefined) args.push('--reason', options.reason);
   if (Array.isArray(options.extra)) args.push(...options.extra);
   return runState(args, dir, {
-    FLOW_COMET_PROTOCOL: options.protocol || path.join(dir, 'reference', 'workflow-protocol.json'),
+    FLOW_COMET_PROTOCOL: options.protocol || scenarioProtocolPath(dir),
   });
 }
 
@@ -868,6 +1326,153 @@ function assertOutMatches(res, pattern, label) {
   if (!pattern.test(text)) {
     throw new Error((label || '输出') + ' 应匹配 ' + pattern + '，实际输出:\n' + text);
   }
+}
+
+// ---------- 受控计划重校重签（replan）与强制推进留痕（advance-forced）场景材料 ----------
+// replan 是"计划在执行中被证明有缺陷"时的受控通道（ADR-013）：仅 execute / subagent-execute
+// 相位可用、停原位、不跳节点——重新校验任务图与任务字段 → 重录 state.taskHash → 双写留痕
+// （evidence.<node>.replanAuthorization + history 事件 replan-applied）。判定语义的唯一权威在
+// route-node.mjs（测试侧不复制生产判定——L-067）；本段只装配夹具与断言助手。纯函数契约按
+// reentry 族同构声明：
+//   parseReplanAuthorization({ authorization, node })  // authorization = { round, at, source, reason, node }
+//   replanRoundCount({ history, changeName })
+//   replanRoundDecision({ history, changeName, continuationAuthorized })
+//   replanNoOpDecision({ state, taskContent })
+//   resolveReplanDecision({ protocol, state, authorization, continuationRound })
+// 缺失导出由 requireRouteNodeExport 在场景内显式报告（RED 可定位到具体场景，不整套件 abort）。
+
+// 修订前的任务集（entry 形态）：一个串行待办任务
+const REPLAN_TASK_INITIAL =
+  '<task id="S01" status="pending" parallel="false"><action>实现 S01</action>'
+  + '<write_files>src/s01.mjs</write_files><verify>node --check src/s01.mjs</verify></task>\n';
+// 修订后的任务集（死锁现场）：原任务完成 + 计划外新增的并行就绪任务
+const REPLAN_TASK_REVISED =
+  '<task id="S01" status="done" parallel="false"><action>实现 S01</action>'
+  + '<write_files>src/s01.mjs</write_files><verify>node --check src/s01.mjs</verify></task>\n'
+  + '<task id="P02" status="pending" parallel="true"><action>实现计划外新增的 P02</action>'
+  + '<write_files>src/p02.mjs</write_files><verify>node --check src/p02.mjs</verify></task>\n';
+// 缺 <verify> 字段的负例任务集（plan 出口与 replan 共用的任务字段校验）
+const REPLAN_TASK_NO_VERIFY =
+  '<task id="S01" status="pending" parallel="false"><action>实现 S01</action>'
+  + '<write_files>src/s01.mjs</write_files></task>\n';
+// 过期签名占位（与哈希算法实现解耦：只比较是否相等/同版本，不依赖真实摘要值）
+const REPLAN_STALE_SIGNATURE = 'v1:' + '0'.repeat(64);
+
+// replan 相位夹具：execute 已 entry、前序完成、证据齐备（execute 出口可通过）、TASK.md 在场。
+// branchMode / enablePrReview / branchPrefix 显式在场——避免 readState 兼容默认值让「零改写」
+// 口径混入实现细节噪音（与受控重入夹具同做法）。
+function replanExecuteState(overrides = {}) {
+  return {
+    activeChange: CHANGE_ID,
+    currentNode: 'execute',
+    completedNodes: ['open', 'design', 'plan'],
+    enteredNodes: ['open', 'design', 'plan', 'execute'],
+    evidence: {
+      open: { summary: 'open done' },
+      design: { summary: 'design done' },
+      plan: { summary: 'plan done' },
+      execute: { summary: 'implementation recorded' },
+      'subagent-execute': { handoffResult: handoffFor(['S01']) },
+    },
+    verifyFailures: 0,
+    executionMode: 'subagent',
+    directOverride: false,
+    newChange: true,
+    status: 'running',
+    branchMode: false,
+    enablePrReview: false,
+    branchPrefix: 'change/',
+    history: [{ event: 'exit-applied', node: 'plan', at: '2026-09-27T00:00:00.000Z', change: CHANGE_ID }],
+    ...overrides,
+  };
+}
+
+// 备份目录/清单（replan 备份规则 .specs/<change-id>/replan-backups/）：BLOCK / 空操作路径零新增。
+function replanBackupFiles(dir, changeName = CHANGE_ID) {
+  const backupDir = path.join(dir, '.specs', changeName, 'replan-backups');
+  return fs.existsSync(backupDir) ? fs.readdirSync(backupDir).sort() : [];
+}
+
+// replan-applied 事件过滤（轮次按 change 从 history 派生——与受控重入同计数法）
+function replanEventsOf(state) {
+  return (state.history || []).filter((e) => e && e.event === 'replan-applied');
+}
+
+// 轮次事件夹具：change 归属字段是跨 change 隔离的唯一依据（写侧必须带 change）
+function replanHistoryEvent(roundNumber, changeName = CHANGE_ID) {
+  return {
+    event: 'replan-applied',
+    node: 'execute',
+    round: roundNumber,
+    change: changeName,
+    reason: '计划重校',
+    authorizedBy: 'user-approval',
+    taskSetSignature: REPLAN_STALE_SIGNATURE,
+    at: '2026-09-27T00:00:00.000Z',
+  };
+}
+
+// advance-forced 事件夹具（status.forcedNodes 事件判据）：change 归属过滤与 advance 写侧同形——
+// 派生只取 event / change / node，skipped 等字段保留以贴近真实事件。
+function advanceForcedEvent(node, changeName = CHANGE_ID) {
+  return {
+    event: 'advance-forced',
+    change: changeName,
+    node,
+    skipped: ['exit:' + node],
+    reason: 'advance',
+    at: '2026-09-28T00:00:00.000Z',
+  };
+}
+
+// 授权形态纯函数锚（AC-2 的 guard-self-test 验证方式）：形态合法性由 route-node 的
+// parseReplanAuthorization 单一权威判定，本助手只声明期望（malformed → ok:false）。
+function assertReplanAuthorizationShape(authorization, node, expectedOk, label) {
+  const parse = requireRouteNodeExport('parseReplanAuthorization');
+  const result = parse({ authorization, node });
+  if (!result || result.ok !== expectedOk) {
+    throw new Error('[' + label + '] replan 授权形态判定应为 ok=' + expectedOk + '，实际 ' + JSON.stringify(result));
+  }
+  return result;
+}
+
+// 重签复核：state.taskHash 必须等于当前 TASK.md 的签名（同版本比较复用 route-node 既有实现，
+// 不在此内联第二份判据）。
+function assertReplanSignatureRecorded(state, taskContent, label) {
+  const same = requireRouteNodeExport('sameTaskSetSignature');
+  const signature = requireRouteNodeExport('taskSetSignature')(taskContent);
+  if (!same(state.taskHash, signature)) {
+    throw new Error(label + '：state.taskHash 应重签为当前 TASK.md 的签名，实际 '
+      + JSON.stringify(state.taskHash) + '，期望 ' + JSON.stringify(signature));
+  }
+  return signature;
+}
+
+// status 输出（JSON 块 + 尾巴行）解析：只取首个 { 到末个 } 之间的 JSON 对象。
+function parseStatusJson(res) {
+  const text = outputText(res);
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start < 0 || end <= start) throw new Error('status 输出缺少 JSON 块:\n' + text);
+  return JSON.parse(text.slice(start, end + 1));
+}
+
+// 场景协议副本路径（单一来源，L-067）：以 dir 为基准的协议路径表达式只在此处出现一次；
+// 调用面统一走下方助手。跨树（root）/ 安装副本（skillCopy）/ 自定义协议（options.protocol 或
+// --protocol CLI）场景仍各自显式传路径，不经本助手（数据点保留）。
+function scenarioProtocolPath(dir) {
+  return path.join(dir, 'reference', 'workflow-protocol.json');
+}
+
+// 场景内受控命令（replan / advance / status / next）：显式注入场景协议副本路径
+// （L-079：依赖协议解析的门禁不得静默跳过；副本由运行器预置在 <dir>/reference/）。
+function runStateWithProtocol(dir, args) {
+  return runState(args, dir, { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) });
+}
+
+// 同形 runGuard 助手（入口/出口门禁场景）：注入与 runStateWithProtocol 同一 FLOW_COMET_PROTOCOL 表达。
+function runGuardWithProtocol(dir, args) {
+  return runGuard(args, dir, { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) });
 }
 
 // ---------- 伪造材料 ----------
@@ -1209,6 +1814,50 @@ const TASK_DEP_CYCLE =
 const TASK_MISSING_DEP =
   '<task id="T01" parallel="false" status="pending"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n' +
   '<task id="P01" status="pending" parallel="true"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify><depends_on>T99</depends_on></task>\n';
+// 并行写冲突（replan 越界场景扩展）：前置串行任务已 done，两个并行任务依赖已满足且 write_files
+// 重叠——plan 出口写写强判为 BLOCKED，replan 不做校验豁免、必须同样 BLOCK 且状态零改写（禁止备份先于拦截）。
+const TASK_PARALLEL_WRITE_CONFLICT =
+  '<task id="S01" parallel="false" status="done"><action>完成 S01</action><write_files>src/s01.mjs</write_files><verify>node --check src/s01.mjs</verify></task>\n' +
+  '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/shared.mjs</write_files><verify>node --check src/shared.mjs</verify><depends_on>S01</depends_on></task>\n' +
+  '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>src/shared.mjs</write_files><verify>node --check src/shared.mjs</verify><depends_on>S01</depends_on></task>\n';
+
+// 并行读写弱判（replan 侧，2026-09-28 PR 审查补锚）：同一对并行任务无显式 depends_on，一方读取对方
+// 写路径 → 与 plan 出口同一判据：read∩write 仅 WARN 不阻断，replan 照常重签并写重签前备份。
+const TASK_PARALLEL_READ_OVERLAP =
+  '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/shared.mjs</write_files><verify>node --check src/shared.mjs</verify></task>\n' +
+  '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><read_files>src/shared.mjs</read_files><write_files>src/other.mjs</write_files><verify>node --check src/other.mjs</verify></task>\n';
+
+// 同文件跨任务（第三族）夹具族：串行拆分出的同文件任务、彼此无 depends_on（#125 要抓的形态）。
+// ① 非修复任务对 → 必须命中；② 修复任务族对（同文件回修）→ 不参与（顺序由修复生命周期保证）；
+// ③ 混合夹具：两类并存 → 只报非修复对（反向构造：第三族缺位时 ①③ 必然放过）。
+const CROSS_TASK_PLAIN_PAIR =
+  '<task id="T01" parallel="false" status="pending"><action>实现 T01</action><write_files>src/shared.mjs</write_files><verify>node --check src/shared.mjs</verify></task>\n'
+  + '<task id="T02" parallel="false" status="pending"><action>实现 T02</action><write_files>src/shared.mjs</write_files><verify>node --check src/shared.mjs</verify></task>\n';
+const CROSS_TASK_FIX_PAIR =
+  '<task id="T-FIX-01" parallel="false" status="pending"><action>修复 T-FIX-01</action><write_files>src/fix-shared.mjs</write_files><verify>node --check src/fix-shared.mjs</verify></task>\n'
+  + '<task id="T-FIX-02" parallel="false" status="pending"><action>修复 T-FIX-02</action><write_files>src/fix-shared.mjs</write_files><verify>node --check src/fix-shared.mjs</verify></task>\n';
+const CROSS_TASK_MIXED_PAIR =
+  '<task id="T01" parallel="false" status="pending"><action>实现 T01</action><write_files>src/shared.mjs</write_files><verify>node --check src/shared.mjs</verify></task>\n'
+  + '<task id="T02" parallel="false" status="pending"><action>实现 T02</action><write_files>src/shared.mjs</write_files><verify>node --check src/shared.mjs</verify></task>\n'
+  + '<task id="T-FIX-01" parallel="false" status="pending"><action>修复 T-FIX-01</action><write_files>src/other-shared.mjs</write_files><verify>node --check src/other-shared.mjs</verify></task>\n'
+  + '<task id="T-FIX-02" parallel="false" status="pending"><action>修复 T-FIX-02</action><write_files>src/other-shared.mjs</write_files><verify>node --check src/other-shared.mjs</verify></task>\n';
+// ④ **段归属分支**夹具：修复段内的任务 id **不带**修复族前缀（F01/F02）——判定必须靠「位于修复
+// 任务段内」这条边界，而不是 id 命名。既有 ② 用的是带前缀 id，走的是 id 分支，段归属分支此前
+// 没有行为夹具（该分支的行尾归一口径缺陷因此漏过，2026-10-01 PR 审查发现后补）。
+// **块内必须跨行**：单行块在 LF 与 CRLF 下文本完全相同，行尾口径缺陷无从显现——真实 TASK.md
+// 的任务块本就跨行，夹具按真实形态构造（否则夹具自身无判别力）。
+const CROSS_TASK_FIX_SECTION_PAIR =
+  '## Fix 任务（来自 REVIEW）\n\n'
+  + '<task id="F01" parallel="false" status="pending">\n'
+  + '  <action>回修 F01</action>\n'
+  + '  <write_files>src/section-shared.mjs</write_files>\n'
+  + '  <verify>node --check src/section-shared.mjs</verify>\n'
+  + '</task>\n'
+  + '<task id="F02" parallel="false" status="pending">\n'
+  + '  <action>回修 F02</action>\n'
+  + '  <write_files>src/section-shared.mjs</write_files>\n'
+  + '  <verify>node --check src/section-shared.mjs</verify>\n'
+  + '</task>\n';
 
 // 波次分组场景公共路径：注入 TASK.md → entry plan（记录 enteredNodes，新 change 强制先 entry；
 // 旧 change 亦先 entry 避免 ENTER WARN 干扰断言）→ exit plan。返回 exit plan 结果。
@@ -1400,6 +2049,204 @@ function exerciseSystemTestCountCheck(dir) {
   if (!noSource.includes('缺失') || !noSource.includes(SYSTEM_TEST_SCRIPT_REL)) {
     throw new Error('项数派生源缺失未被显式报告: ' + noSource);
   }
+}
+
+// ---------- 结构锚的共享判定（判别力升级：按表达式形态计数，而不只是数标识符名） ----------
+
+// 引擎脚本集（不含套件自身与系统测试集）：结构锚共用同一清单——多处各写一份过滤表达式会在
+// 清单口径变化时漂移（同一事实的第二实现）。
+function engineScriptFiles(scriptsDir = __dirname) {
+  return fs.readdirSync(scriptsDir)
+    .filter((f) => f.endsWith('.mjs') && f !== 'guard-self-test.mjs' && f !== 'system-test.mjs');
+}
+
+// 注释行判定：与检查工具的注释层口径一致（行首 // / /* / * 才算注释行，行尾注释不在此列）。
+function isScriptCommentLine(line) {
+  return /^\s*(\/\/|\*|\/\*)/.test(line);
+}
+
+// 具名函数体文本：先配平参数表圆括号（解构入参内含 `new Map()` 一类调用），再配平函数体花括号。
+// 目标函数体内不含字符串花括号，故不做字面量扫描。找不到定义返回 null——调用方据此显式报告
+// "结构锚前提失效"，不静默按通过处理。
+function functionBodyText(text, name) {
+  const start = text.indexOf('function ' + name + '(');
+  if (start < 0) return null;
+  let i = text.indexOf('(', start);
+  if (i < 0) return null;
+  let parens = 0;
+  for (; i < text.length; i += 1) {
+    if (text[i] === '(') parens += 1;
+    else if (text[i] === ')') {
+      parens -= 1;
+      if (parens === 0) break;
+    }
+  }
+  i = text.indexOf('{', i);
+  if (i < 0) return null;
+  let depth = 0;
+  for (; i < text.length; i += 1) {
+    if (text[i] === '{') depth += 1;
+    else if (text[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+// 修复族 id 前缀边界的权威表达式文本（单一来源：判据与夹具锚共用同一份字面量）。
+const FIX_PREFIX_LITERAL_TEXT = '/^[TP]-FIX-/i';
+
+// 修复族边界"出现处"扫描（纯读取，单一实现）：引擎脚本里的五类出现面——
+//   前缀正则字面量 / 含 FIX 词干的其它正则字面量 / 修复族 id 字符串字面量 / 段内成员判定 /
+//   边界常量的按文件使用次数。注释行不参与（与检查工具的注释层口径一致）：注释里提到标识符
+//   是说明，不是第二份实现。判定与扫描分离（本函数只收集事实，下函数只下结论）。
+function fixFamilyBoundarySites(scriptsDir = __dirname) {
+  const sites = {
+    prefixLiterals: [],
+    otherFixRegexes: [],
+    idLiterals: [],
+    sectionMemberships: [],
+    prefixUsesByFile: new Map(),
+    texts: new Map(),
+  };
+  for (const file of engineScriptFiles(scriptsDir)) {
+    const text = fs.readFileSync(path.join(scriptsDir, file), 'utf8');
+    sites.texts.set(file, text);
+    const lines = text.split(/\r?\n/);
+    let prefixUses = 0;
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (isScriptCommentLine(line)) continue;
+      let at = line.indexOf(FIX_PREFIX_LITERAL_TEXT);
+      while (at >= 0) {
+        sites.prefixLiterals.push(file + ':' + (i + 1));
+        at = line.indexOf(FIX_PREFIX_LITERAL_TEXT, at + 1);
+      }
+      // 含 FIX 词干的其它正则字面量（单行内闭合、\ 转义感知）：第二份前缀表达式在此现形
+      for (const m of line.matchAll(/\/(?:\\.|[^/\\\n])*FIX(?:\\.|[^/\\\n])*\/[a-z]*/g)) {
+        if (m[0] !== FIX_PREFIX_LITERAL_TEXT) sites.otherFixRegexes.push(file + ':' + (i + 1) + ' ' + m[0]);
+      }
+      for (const token of ['T-FIX', 'P-FIX']) {
+        if (line.includes(token)) sites.idLiterals.push(file + ':' + (i + 1) + ' ' + token);
+      }
+      if (line.includes('sectionBlocks.has(')) sites.sectionMemberships.push(file + ':' + (i + 1));
+      prefixUses += line.split('FIX_TASK_ID_PREFIX').length - 1;
+    }
+    if (prefixUses > 0) sites.prefixUsesByFile.set(file, prefixUses);
+  }
+  return sites;
+}
+
+// 修复族约定「只表达一次」判定（AC-15 判别力锚）：返回问题描述数组（空数组 = 唯一表达）。
+// 判别力设计——旧锚按**标识符名**统计（哪个文件里出现该常量名），对"同一约定被表达两次"
+// 零判别力：第二份等价前缀表达式（交替式写法）不含该常量名 → 旧锚必放过（虚假单一来源信心）。
+// 本判据按**表达式形态**计数（扫描见 fixFamilyBoundarySites），四条一起构成"约定被表达两次即红"：
+//   ① id 前缀边界：唯一前缀正则字面量只允许出现一次，且必须位于 route-node.mjs；
+//   ② 第二份表达式：引擎代码行不得出现其它含 FIX 词干的正则字面量，也不得出现修复族 id 的
+//      字符串字面量（`.startsWith(...)` 一类内联前缀判定形态）；
+//   ③ 段内边界：段内成员判定（`sectionBlocks.has(`）只允许出现一次——「位于修复段内」这条
+//      边界只在唯一分类器里表达；
+//   ④ 谓词共用：修复族标记与并行文件依赖第三族的参与者排除必须各自调用唯一分类器，且不得
+//      自持边界常量 / 段切片（任一消费方自建第二份边界即红）。
+// 判据自身的判别力由场景内的反向夹具锚（同源 → 无问题；逐条注入 → 逐条专项报告）常驻保证。
+function fixFamilyBoundaryProblems(scriptsDir = __dirname) {
+  const problems = [];
+  const sites = fixFamilyBoundarySites(scriptsDir);
+  if (sites.prefixLiterals.length !== 1 || !sites.prefixLiterals[0].startsWith('route-node.mjs:')) {
+    problems.push('修复族 id 前缀边界必须只表达一次且位于 route-node.mjs，实际出现处: '
+      + JSON.stringify(sites.prefixLiterals));
+  }
+  if (sites.otherFixRegexes.length !== 0) {
+    problems.push('引擎内出现第二份修复族 id 前缀表达式（同一约定被表达两次）: '
+      + sites.otherFixRegexes.join('; '));
+  }
+  if (sites.idLiterals.length !== 0) {
+    problems.push('引擎代码行出现修复族 id 字面量（内联前缀判定形态，应经唯一分类器）: '
+      + sites.idLiterals.join('; '));
+  }
+  if (sites.sectionMemberships.length !== 1) {
+    problems.push('「位于修复段内」边界（段内成员判定）必须只表达一次，实际出现处: '
+      + JSON.stringify(sites.sectionMemberships));
+  }
+  // 边界常量的使用面：定义 1 处 + 唯一分类器内 1 次 test = 2（其他消费方一律经分类器）
+  const prefixUseTotal = [...sites.prefixUsesByFile.values()].reduce((a, b) => a + b, 0);
+  if (prefixUseTotal !== 2 || sites.prefixUsesByFile.size !== 1 || !sites.prefixUsesByFile.has('route-node.mjs')) {
+    problems.push('修复族 id 边界常量的使用面必须恰为「定义 + 唯一分类器内一次判定」，实际: '
+      + JSON.stringify([...sites.prefixUsesByFile.entries()]));
+  }
+  const routeText = sites.texts.get('route-node.mjs') ?? '';
+  for (const fnName of ['fixTaskMarker', 'collectCrossTaskConflicts']) {
+    const body = functionBodyText(routeText, fnName);
+    if (body === null) {
+      problems.push('结构锚前提失效：route-node.mjs 未找到 ' + fnName + ' 的定义');
+      continue;
+    }
+    if (!/fixTaskClassifier\s*\(/.test(body)) {
+      problems.push(fnName + ' 必须经唯一分类器判定修复族（不得自持第二份边界）');
+    }
+    if (/FIX_TASK_ID_PREFIX|fixSectionBody/.test(body)) {
+      problems.push(fnName + ' 自持修复族边界常量 / 段切片（应只调用唯一分类器）');
+    }
+  }
+  return problems;
+}
+
+// ---------- 词表镜像漂移判据（主仓私有单一来源 ↔ 分发套件的同义镜像；L-067 收口） ----------
+// 背景：套件随技能包分发、不能 import 主仓私有的 .githooks（该面不随 clone 分发），故套件内
+// 保留同义镜像 PUBLIC_CODE_RE。两份此前只有注释互指"同步"，零一致性判据：主仓增补模式时
+// 分发侧扫描静默落后（新词可在公开面长期存活而套件全绿），反向则分发面误红——正是
+// 「同一判据两份实现必然分叉」点名的形态。本判据把等价性变成机检事实：
+//   · 主仓形态（权威源检出）：读 .githooks 的 BANNED.source，与套件镜像**逐字符比对**，
+//     不等即报（消息含两侧 source 片段、长度与首个差异位置，可直接定位）；
+//   · 安装副本形态：该私有面结构性缺席 → 判据**不适用**，由调用方输出显式「不适用」描述符
+//     （未验证 ≠ 通过，与维护者面缺席的可见 SKIP 同族语义）。
+const GITHOOKS_CODES_REL = path.posix.join('.githooks', 'internal-codes.mjs');
+
+// 导出正则字面量抽取（\ 转义感知）：从 `export const <name> = /<body>/<flags>;` 取 body 与 flags。
+// 解析失败返回 null（调用方按"判据未执行"显式报告，不静默放过）。
+function extractExportedRegexLiteral(text, name) {
+  const re = new RegExp('export\\s+const\\s+' + name + '\\s*=\\s*/((?:\\\\.|[^/\\\\\\n])*)/([a-z]*)\\s*;');
+  const m = re.exec(text);
+  return m === null ? null : { source: m[1], flags: m[2] };
+}
+
+function vocabularyMirrorProblems(root = REPO_ROOT) {
+  const problems = [];
+  const rel = GITHOOKS_CODES_REL;
+  let text;
+  try {
+    text = fs.readFileSync(path.join(root, rel), 'utf8');
+  } catch (e) {
+    const reason = e && e.code ? e.code : (e && e.message ? e.message : String(e));
+    problems.push('词表镜像漂移判据无法执行: ' + rel + ' 读取失败（' + reason
+      + '）——未执行 ≠ 通过；请在主仓私有面在场处重跑（主树 L1）');
+    return problems;
+  }
+  const banned = extractExportedRegexLiteral(text, 'BANNED');
+  if (banned === null) {
+    problems.push('词表镜像漂移判据无法执行: ' + rel + ' 未解析出导出的 BANNED 正则字面量'
+      + '（词表单一来源形态变化）——未执行 ≠ 通过');
+    return problems;
+  }
+  const mine = PUBLIC_CODE_RE.source;
+  if (banned.source !== mine) {
+    const shared = Math.min(banned.source.length, mine.length);
+    let firstDiff = shared;
+    for (let i = 0; i < shared; i += 1) {
+      if (banned.source[i] !== mine[i]) { firstDiff = i; break; }
+    }
+    const fragment = (s) => (s.length > 80 ? s.slice(0, 80) + '…' : s);
+    problems.push('词表镜像漂移: ' + rel + ' 的 BANNED.source（' + banned.source.length
+      + ' 字符）≠ 套件 PUBLIC_CODE_RE.source（' + mine.length + ' 字符）；首个差异位置 ' + firstDiff
+      + '；主仓侧片段「' + fragment(banned.source) + '」；套件侧片段「' + fragment(mine)
+      + '」——两侧必须逐字符等价，请同改（词表只许收窄、不许放宽）');
+  }
+  if (banned.flags !== PUBLIC_CODE_RE.flags) {
+    problems.push('词表镜像标志位漂移: ' + rel + ' 的 BANNED flags=' + JSON.stringify(banned.flags)
+      + ' ≠ 套件 PUBLIC_CODE_RE flags=' + JSON.stringify(PUBLIC_CODE_RE.flags));
+  }
+  return problems;
 }
 
 // ---------- 17 个场景 ----------
@@ -2124,7 +2971,7 @@ const SCENARIOS = [
     run: (dir) => {
       writeState(dir, baseState('open'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
-      const res = runState(['next'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 1);
       assertOut(res, '疑似未 exit 节点 open');
       assertOut(res, 'workflow-guard.mjs exit open --apply');
@@ -2142,7 +2989,7 @@ const SCENARIOS = [
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n');
-      const res = runState(['next'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: design');
       assertNotOut(res, 'BLOCKED');
@@ -2260,7 +3107,7 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n## 0. 技术栈\n');
       // 既有 done 任务 + verify 阶段追加的 pending 修复任务
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE + TASK_P1 + TASK_TFIX);
-      const res = runState(['next'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: execute');
       assertNotOut(res, 'BLOCKED');
@@ -2280,7 +3127,7 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n## 0. 技术栈\n');
       // 全部 done（无 pending）——正常推进场景不豁免
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE + TASK_P1);
-      const res = runState(['next'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 1);
       assertOut(res, '疑似未 exit 节点 verify');
       assertOut(res, 'workflow-guard.mjs exit verify --apply');
@@ -2356,7 +3203,7 @@ const SCENARIOS = [
       // open exit 已通过的产物（design 尚未开始，无 DESIGN.md）
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n');
-      const res = runState(['next'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: design');
       assertNotOut(res, 'BLOCKED');
@@ -2376,7 +3223,7 @@ const SCENARIOS = [
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n');
-      const res = runState(['next'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 1);
       assertOut(res, '疑似未 exit 节点 review');
       assertOut(res, 'workflow-guard.mjs exit review --apply');
@@ -2409,8 +3256,7 @@ const SCENARIOS = [
       assertOut(res, 'HANDOFF RESULT: T01');
       // ② record subagent-execute '{"handoffResult":{}}' 整体覆盖 evidence['subagent-execute']
       //（浅合并替换 handoffResult 键）→ 已记录的 T01 handoff 丢失（对照组 A 踩坑路径）
-      assertExit(runState(['record', 'subagent-execute', '{"handoffResult":{}}'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') }), 0);
+      assertExit(runStateWithProtocol(dir, ['record', 'subagent-execute', '{"handoffResult":{}}']), 0);
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       const hr = st2.evidence['subagent-execute'] && st2.evidence['subagent-execute'].handoffResult;
       if (!hr || hr['T01']) {
@@ -2439,7 +3285,7 @@ const SCENARIOS = [
       st.evidence['subagent-execute'] = { summary: 'wave1 delegated and collected' };
       writeState(dir, st);
       // ① next：第二波 eligible 并行存在 → 多趟路由回该节点（旧单趟「不回流」行为已移除）
-      const res = runState(['next'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: subagent-execute');
       // ② entry subagent-execute：completedNodes 含该节点仍可重入（每趟完整 entry 检查）
@@ -2505,7 +3351,7 @@ const SCENARIOS = [
     run: (dir) => {
       execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
       execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--allow-empty', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
-      const res = runState(['init', 'prefix-test', '--branch-prefix', 'feat/'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', 'prefix-test', '--branch-prefix', 'feat/']);
       assertExit(res, 0);
       assertOut(res, 'BRANCH: feat/prefix-test');
       const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
@@ -2528,7 +3374,7 @@ const SCENARIOS = [
       writeState(dir, st);
       writeFile(dir, '.specs/pref-state/CHANGE.md', '# CHANGE\n## Why\nx\n');
       writeFile(dir, '.specs/pref-state/REQUIREMENT.md', '# REQUIREMENT\n## 用户故事\nx\n## 验收准则（AC）\nx\n');
-      const res = runState(['status'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['status']);
       assertExit(res, 0);
       assertOut(res, '一致性: ok');
     },
@@ -2540,8 +3386,7 @@ const SCENARIOS = [
   {
     name: '55 init state 含 status: running',
     run: (dir) => {
-      const res = runState(['init', 'tf15-st'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', 'tf15-st']);
       assertExit(res, 0);
       const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (st.status !== 'running') {
@@ -2554,8 +3399,7 @@ const SCENARIOS = [
   {
     name: '56 hook BLOCKED：init 后越权写源码',
     run: (dir) => {
-      const initRes = runState(['init', 'tf15-hk'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const initRes = runStateWithProtocol(dir, ['init', 'tf15-hk']);
       assertExit(initRes, 0);
       const res = runHook(['before_tool'], dir,
         { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'src', 'evil.py') } });
@@ -2580,11 +3424,9 @@ const SCENARIOS = [
   {
     name: '58 init 后 next 识别 active change',
     run: (dir) => {
-      const initRes = runState(['init', 'tf16-dir'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const initRes = runStateWithProtocol(dir, ['init', 'tf16-dir']);
       assertExit(initRes, 0);
-      const res = runState(['next'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 1);
       assertOut(res, '疑似未 exit 节点 open');
       assertNotOut(res, 'No active change');
@@ -2600,8 +3442,7 @@ const SCENARIOS = [
       writeState(dir, composeState({ status: 'completed', activeChange: null, currentNode: null }));
       writeFile(dir, '.specs/stale/CHANGE.md', '# CHANGE\n## Why\nx\n');
       writeFile(dir, '.specs/stale/TASK.md', '# TASK\n');
-      const res = runState(['status'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['status']);
       assertExit(res, 0);
       assertOut(res, 'no-change');
       assertNotOut(res, 'stale');
@@ -2645,8 +3486,7 @@ const SCENARIOS = [
   {
     name: '62 hook 放行：init 后写 .specs/ 工件',
     run: (dir) => {
-      const initRes = runState(['init', 'tf15-ok'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const initRes = runStateWithProtocol(dir, ['init', 'tf15-ok']);
       assertExit(initRes, 0);
       const res = runHook(['before_tool'], dir,
         { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.specs', 'tf15-ok', 'CHANGE.md') } });
@@ -2663,8 +3503,7 @@ const SCENARIOS = [
       writeFile(dir, '.specs/sci-notation/CHANGE.md', '# CHANGE\n## Why\nx\n');
       writeFile(dir, '.specs/sci-notation/TASK.md', '# TASK\n');
       writeFile(dir, '.specs/archive/2026-08-08-sci-notation/CHANGE.md', '# CHANGE\n## Why\nx\n');
-      const res = runState(['status'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['status']);
       assertExit(res, 0);
       assertOut(res, '"change": "sci-notation"');
     },
@@ -2677,8 +3516,7 @@ const SCENARIOS = [
     name: '64 record --protocol 不污染 payload',
     run: (dir) => {
       const custom = writeCustomProtocol(dir);
-      const initRes = runState(['init', 'tf14-rec'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const initRes = runStateWithProtocol(dir, ['init', 'tf14-rec']);
       assertExit(initRes, 0);
       const res = runState(['record', 'open', '{"summary":"x","completedChecks":["a"]}', '--protocol', custom], dir);
       assertExit(res, 0);
@@ -2721,7 +3559,7 @@ const SCENARIOS = [
     },
   },
 
-  // 67: 旧格式 state（无 status 字段 + 无 activeChange + 无 currentNode——批次 C 归档后升级场景）
+  // 67: 旧格式 state（无 status 字段 + 无 activeChange + 无 currentNode——归档批次的升级场景）
   // → hook 放行（：无 activeChange 与无 state 文件同语义——当前被「not running」拦截）
   {
     name: '67 旧 state 无 status 无 activeChange hook 放行',
@@ -2781,8 +3619,7 @@ const SCENARIOS = [
       writeState(dir, st);
       writeFile(dir, '.specs/stale-id/CHANGE.md', '# CHANGE\n## Why\nx\n');
       writeFile(dir, '.specs/stale-id/TASK.md', '# TASK\n');
-      const res = runState(['status'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['status']);
       assertExit(res, 0);
       assertOut(res, 'no-change');
     },
@@ -2815,8 +3652,7 @@ const SCENARIOS = [
       fs.mkdirSync(path.join(dir, '.flow-comet'), { recursive: true });
       fs.writeFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), raw, 'utf8');
       writeFile(dir, '.specs/compose-demo/CHANGE.md', '# CHANGE\n## Why\nx\n');
-      const res = runState(['status'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['status']);
       assertExit(res, 0);
       assertOut(res, '"status": "running"');
     },
@@ -2909,8 +3745,7 @@ const SCENARIOS = [
       fs.mkdirSync(path.join(dir, '.flow-comet'), { recursive: true });
       fs.writeFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), raw, 'utf8');
       writeFile(dir, '.specs/compose-demo/CHANGE.md', '# CHANGE\n## Why\nx\n');
-      const res = runGuard(['entry', 'open'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runGuardWithProtocol(dir, ['entry', 'open']);
       assertExit(res, 0);
     },
   },
@@ -2939,15 +3774,14 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
         '<task id="P01" parallel="true" status="done">\n  <action>do</action>\n  <verify>echo ok</verify>\n</task>\n' +
         '<task id="T01" parallel="false" status="pending">\n  <action>do serial</action>\n  <verify>echo ok</verify>\n</task>\n');
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
-      const res = runGuard(['exit', 'plan', '--apply'], dir, env);
+      const res = runGuardWithProtocol(dir, ['exit', 'plan', '--apply']);
       assertExit(res, 0);
       assertNotOut(res, 'ROUTE WARN');
       // ② 旧模板无 status 属性（无可解析 pending）→ 前置条件跳过诊断 → 静默
       //（① 的 --apply 已把 currentNode 推进到 execute——先复位 state 再独立跑第二半）
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="T02" parallel="true">\n  <action>do legacy</action>\n  <verify>echo ok</verify>\n</task>\n');
-      const resLegacy = runGuard(['exit', 'plan', '--apply'], dir, env);
+      const resLegacy = runGuardWithProtocol(dir, ['exit', 'plan', '--apply']);
       assertExit(resLegacy, 0);
       assertNotOut(resLegacy, 'ROUTE WARN');
     },
@@ -2960,8 +3794,7 @@ const SCENARIOS = [
     run: (dir) => {
       const st = baseState('execute');
       writeState(dir, st);
-      const res = runGuard(['entry', 'execute'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runGuardWithProtocol(dir, ['entry', 'execute']);
       assertExit(res, 0);
       assertOut(res, 'C4-CHECK SKIP');
     },
@@ -3002,8 +3835,7 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent({
         method: '## 自检方法\n\nbuiltin-quickcheck — brooks-lint 不可用（Skill 仅返回占位，插件执行体未加载），按协议降级内置 R1~R6 快查',
       }));
-      const res = runGuard(['exit', 'execute'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runGuardWithProtocol(dir, ['exit', 'execute']);
       assertExit(res, 0);
       assertOut(res, 'BROOKS-LINT WARN');
       assertOut(res, 'WARN COUNT:');
@@ -3018,8 +3850,7 @@ const SCENARIOS = [
       st.evidence.execute = { summary: 'executed' };
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="T01" parallel="true" status="pending">\n  <action>do</action>\n</task>\n<task id="T02" parallel="true" status="pending">\n  <action>do2</action>\n</task>\n');
-      const res = runGuard(['exit', 'execute'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runGuardWithProtocol(dir, ['exit', 'execute']);
       assertExit(res, 1);
       assertOut(res, 'missing Output Schema artifacts');
     },
@@ -3033,7 +3864,7 @@ const SCENARIOS = [
     name: '83 CONTEXT 缺失 + 有代码 → init 输出 INIT-NEEDED 不生成',
     run: (dir) => {
       writeFile(dir, 'package.json', '{"name":"x"}');
-      const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID]);
       assertExit(res, 0);
       assertOut(res, 'INIT-NEEDED');
       if (fs.existsSync(path.join(dir, '.specs', 'CONTEXT.md'))) throw new Error('CONTEXT 不应被自动生成');
@@ -3045,10 +3876,10 @@ const SCENARIOS = [
     name: '84 --init-skip 记 none 且下次 init 静默',
     run: (dir) => {
       writeFile(dir, 'package.json', '{"name":"x"}');
-      runState(['init', CHANGE_ID, '--init-skip'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-skip']);
       const st1 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (st1.ai_context_doc !== 'none') throw new Error('ai_context_doc 应为 none');
-      const res2 = runState(['init', CHANGE_ID + '-2'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res2 = runStateWithProtocol(dir, ['init', CHANGE_ID + '-2']);
       if (res2.output.includes('INIT-NEEDED') || res2.output.includes('INIT-HINT')) throw new Error('下次 init 不应再提示');
     },
   },
@@ -3059,7 +3890,7 @@ const SCENARIOS = [
     run: (dir) => {
       writeState(dir, { ...baseState('open'), last_intel_scan: new Date(Date.now() - 10 * 864e5).toISOString() });
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n');
-      const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID]);
       assertExit(res, 0);
       if (res.output.includes('INIT-NEEDED') || res.output.includes('INIT-HINT')) throw new Error('不应有初始化提示');
     },
@@ -3070,7 +3901,7 @@ const SCENARIOS = [
     name: '86 有 CONTEXT 无扫描记录 → INIT-HINT 文案无 null',
     run: (dir) => {
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n');
-      const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID]);
       assertExit(res, 0);
       assertOut(res, 'INIT-HINT');
       if (res.output.includes('null')) throw new Error('INIT-HINT 不应含 "null"（无扫描记录时用友好文案）');
@@ -3082,7 +3913,7 @@ const SCENARIOS = [
     name: '87 --init-context 无 CONTEXT → INIT-GENERATE 指引不生成',
     run: (dir) => {
       writeFile(dir, 'package.json', '{"name":"x"}');
-      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-context']);
       assertExit(res, 0);
       assertOut(res, 'INIT-GENERATE');
       if (fs.existsSync(path.join(dir, '.specs', 'CONTEXT.md'))) throw new Error('CONTEXT 不应由脚本生成（生成职责在 agent）');
@@ -3097,7 +3928,7 @@ const SCENARIOS = [
     run: (dir) => {
       writeFile(dir, 'CLAUDE.md', '# CLAUDE\n项目约定：使用 kebab-case 命名。\n');
       writeFile(dir, 'package.json', '{"name":"x"}');
-      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-context']);
       assertExit(res, 0);
       assertOut(res, 'INIT-GENERATE');
       assertOut(res, 'CLAUDE.md');
@@ -3109,7 +3940,7 @@ const SCENARIOS = [
     name: '89 --init-context 指引含代码信号',
     run: (dir) => {
       writeFile(dir, 'requirements.txt', 'pytest\n');
-      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-context']);
       assertExit(res, 0);
       assertOut(res, 'INIT-GENERATE');
       assertOut(res, '代码信号');
@@ -3122,7 +3953,7 @@ const SCENARIOS = [
     run: (dir) => {
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n## 技术栈\nx\n## 域语言\n| 术语 | 定义 |\n|---|---|\n| 例 | 定义 |\n## 已锁决策\n- [2026-08-01] 决策一\n## 默认偏好\nx\n## 既有抽象索引\nx\n## intel-scan 元数据\n- **last_intel_scan**: x\n- **scanner**: x\n- **下次重扫建议**: x\n');
       writeFile(dir, 'package.json', '{"name":"x"}');
-      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-context']);
       assertExit(res, 0);
       assertOut(res, 'INIT-DONE');
       const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -3139,7 +3970,7 @@ const SCENARIOS = [
     run: (dir) => {
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n');
       writeFile(dir, 'package.json', '{"name":"x"}');
-      let res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      let res = runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-context']);
       assertExit(res, 0);
       assertOut(res, 'INIT-VALIDATE-FAILED');
       assertOut(res, '重写');
@@ -3147,7 +3978,7 @@ const SCENARIOS = [
       if (st.last_intel_scan) throw new Error('校验失败不应写 last_intel_scan');
       // ② 段名变体（含正文提及）不满足必填段
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n## 技术栈补充\nx\n## 域语言说明\n| 术语 | 定义 |\n|---|---|\n| 例 | 定义 |\n## 已锁决策说明\n- [2026-08-01] 决策一\n## 默认偏好补充\nx\n## 既有抽象索引附录\nx\n## intel-scan 元数据附录\n- **last_intel_scan**: x\n- **scanner**: x\n- **下次重扫建议**: x\n正文提及 域语言 与 默认偏好 与 既有抽象索引（文本非标题）。\n');
-      res = runState(['init', CHANGE_ID + '-2', '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      res = runStateWithProtocol(dir, ['init', CHANGE_ID + '-2', '--init-context']);
       assertExit(res, 0);
       assertOut(res, 'INIT-VALIDATE-FAILED');
       st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -3169,7 +4000,7 @@ const SCENARIOS = [
         '~~~text', '## 默认偏好', '~~~',
         '',
       ].join('\n'));
-      res = runState(['init', CHANGE_ID + '-3', '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      res = runStateWithProtocol(dir, ['init', CHANGE_ID + '-3', '--init-context']);
       assertExit(res, 0);
       assertOut(res, 'INIT-VALIDATE-FAILED');
       st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -3184,7 +4015,7 @@ const SCENARIOS = [
       // 7 段齐全但已锁决策条目缺 [YYYY-MM-DD] 日期前缀（模板格式）
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n## 技术栈\nx\n## 域语言\n| 术语 | 定义 |\n|---|---|\n| 例 | 定义 |\n## 已锁决策\n- 决策缺日期前缀\n## 默认偏好\nx\n## 既有抽象索引\nx\n## intel-scan 元数据\n- **last_intel_scan**: x\n- **scanner**: x\n- **下次重扫建议**: x\n');
       writeFile(dir, 'package.json', '{"name":"x"}');
-      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-context']);
       assertExit(res, 0);
       assertOut(res, 'INIT-VALIDATE-FAILED');
       assertOut(res, '日期');
@@ -3199,7 +4030,7 @@ const SCENARIOS = [
     run: (dir) => {
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\n新项目骨架\n## 技术栈\nx\n## 域语言\n| 术语 | 定义 |\n|---|---|\n| （待沉淀） | 随 change 逐步补充 |\n## 已锁决策\n- （待沉淀——后续 change 按时间倒序追加）\n## 默认偏好\n- 待补充\n## 既有抽象索引\nx\n## intel-scan 元数据\n- **last_intel_scan**: x\n- **scanner**: x\n- **下次重扫建议**: x\n');
       writeFile(dir, 'package.json', '{"name":"x"}');
-      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-context']);
       assertExit(res, 0);
       assertOut(res, 'INIT-DONE');
       const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -3214,7 +4045,7 @@ const SCENARIOS = [
     run: (dir) => {
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n## 技术栈\nx\n## 域语言\n| 术语 | 定义 |\n|---|---|\n| 例 | 定义 |\n## 已锁决策\n- [2026-08-01] 决策一\n## 默认偏好\nx\n## 既有抽象索引\nx\n## intel-scan 元数据\n- **last_intel_scan**: x\n- **scanner**: x\n- **下次重扫建议**: x\n');
       writeFile(dir, 'package.json', '{"name":"x"}');
-      const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID]);
       assertExit(res, 0);
       assertOut(res, '记录扫描时间');
       if (res.output.includes('刷新')) throw new Error('CONTEXT 已就绪不应提示"刷新"（应提示记录扫描时间）');
@@ -3226,8 +4057,8 @@ const SCENARIOS = [
     name: '95 init 同 id 重跑 → WARN 防护不阻断',
     run: (dir) => {
       writeFile(dir, 'package.json', '{"name":"x"}');
-      runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
-      const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      runStateWithProtocol(dir, ['init', CHANGE_ID]);
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID]);
       assertExit(res, 0);
       assertOut(res, 'WARN: change ' + CHANGE_ID + ' 已存在');
       assertOut(res, '重置节点状态');
@@ -3301,8 +4132,7 @@ const SCENARIOS = [
       writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
       writeState(dir, baseState('open'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
-      const res = runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md']);
       assertExit(res, 0);
       assertOut(res, 'SKILL-LOAD: open flow-comet-change → .skill-loads/open-flow-comet-change.json');
       const markerPath = path.join(dir, '.specs', CHANGE_ID, '.skill-loads', 'open-flow-comet-change.json');
@@ -3330,22 +4160,21 @@ const SCENARIOS = [
     run: (dir) => {
       writeState(dir, baseState('open'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       // a) 缺参数（无 node/skill）
-      const rA = runState(['skill-load'], dir, env);
+      const rA = runStateWithProtocol(dir, ['skill-load']);
       assertExit(rA, 1);
       assertOut(rA, 'skill-load requires <node> <skill>');
       // b) node 非法（非内置节点）
-      const rB = runState(['skill-load', 'bogus', 'flow-comet-change'], dir, env);
+      const rB = runStateWithProtocol(dir, ['skill-load', 'bogus', 'flow-comet-change']);
       assertExit(rB, 1);
       assertOut(rB, 'skill-load node 非法');
       // c) skill 名含非法字符
-      const rC = runState(['skill-load', 'open', 'bad/name'], dir, env);
+      const rC = runStateWithProtocol(dir, ['skill-load', 'open', 'bad/name']);
       assertExit(rC, 1);
       assertOut(rC, 'skill-load skill 名非法');
       // d) --prompt 不在 flow-kit/prompts/ 下（指向场景内 reference 副本——文件存在可加载，
       //    归属校验拒绝；若归属校验被跳过则此处会成功写标记，断言即失效）
-      const rD = runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'reference/workflow-protocol.json'], dir, env);
+      const rD = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change', '--prompt', 'reference/workflow-protocol.json']);
       assertExit(rD, 1);
       assertOut(rD, 'skill-load --prompt 路径必须位于 flow-kit/prompts/ 下');
       // e) 自定义协议下未知节点同样拒绝（node 校验从内置清单改为当前协议节点集合
@@ -3369,8 +4198,7 @@ const SCENARIOS = [
     run: (dir) => {
       writeState(dir, baseState('open'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
-      const res = runState(['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })]);
       assertExit(res, 1);
       assertOut(res, 'BLOCKED');
       assertOut(res, '缺少对应声明标记');
@@ -3387,11 +4215,10 @@ const SCENARIOS = [
     run: (dir) => {
       writeState(dir, baseState('open'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
-      const sl = runState(['skill-load', 'open', 'flow-comet-change'], dir, env);
+      const sl = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change']);
       assertExit(sl, 0);
       assertOut(sl, 'SKILL-LOAD: open flow-comet-change');
-      const res = runState(['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })], dir, env);
+      const res = runStateWithProtocol(dir, ['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })]);
       assertExit(res, 0);
       assertOut(res, 'EVIDENCE: open');
       const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -3427,7 +4254,6 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\n## 验收准则（AC）\n');
       // 场景内 flow-kit/prompts/ 提示文件（真实 skill-load --prompt 指向——归属校验仅查前缀不读内容）
       writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       const loadsDir = path.join(dir, '.specs', CHANGE_ID, '.skill-loads');
       fs.mkdirSync(loadsDir, { recursive: true });
       // ① 机制已激活（.skill-loads/ 存在）但无 open-* 标记（仅他节点标记）→ BLOCKED
@@ -3439,7 +4265,7 @@ const SCENARIOS = [
       assertOut(resBlock, 'exit 缺协议声明标记');
       // ② 真实链路：skill-load --prompt 写入标记（protocol = basename）→ exit 通过
       const markerPath = path.join(loadsDir, 'open-flow-comet-change.json');
-      const sl = runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir, env);
+      const sl = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md']);
       assertExit(sl, 0);
       assertOut(sl, 'SKILL-LOAD: open flow-comet-change');
       const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
@@ -3452,7 +4278,7 @@ const SCENARIOS = [
       assertNotOut(resPass, 'BLOCKED');
       // ③ skill-load 未传 --prompt → 标记 protocol = null → exit BLOCKED（fail-closed：
       // 无协议声明不可通过——指引补 skill-load --prompt）
-      const slNull = runState(['skill-load', 'open', 'flow-comet-change'], dir, env);
+      const slNull = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change']);
       assertExit(slNull, 0);
       const markerNull = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
       if (markerNull.protocol !== null) {
@@ -3481,8 +4307,7 @@ const SCENARIOS = [
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
       writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-change.json',
         JSON.stringify({ node: 'open', skill: 'flow-comet-change', protocol: '0-change.md', at: '2999-12-31T00:00:00.000Z' }, null, 2) + '\n');
-      const res = runState(['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })]);
       assertExit(res, 1);
       assertOut(res, 'BLOCKED');
       assertOut(res, '标记必须先于记录声明');
@@ -3497,13 +4322,12 @@ const SCENARIOS = [
     run: (dir) => {
       writeState(dir, baseState('open'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       // ① 旧格式 record：completedChecks 无 required-skill 条目 → 无标记也通过
-      const resA = runState(['record', 'open', JSON.stringify({ summary: 'legacy', completedChecks: ['unit-tests'] })], dir, env);
+      const resA = runStateWithProtocol(dir, ['record', 'open', JSON.stringify({ summary: 'legacy', completedChecks: ['unit-tests'] })]);
       assertExit(resA, 0);
       assertOut(resA, 'EVIDENCE: open');
       // ② 无 completedChecks 的纯 summary 记录 → 通过
-      const resB = runState(['record', 'open', JSON.stringify({ summary: 'plain' })], dir, env);
+      const resB = runStateWithProtocol(dir, ['record', 'open', JSON.stringify({ summary: 'plain' })]);
       assertExit(resB, 0);
       // ③ exit open：M5 后 record 已自动补声明标记 → 无 SKILL-LOAD WARN,正常通过
       const st = baseState('open');
@@ -3745,7 +4569,7 @@ const SCENARIOS = [
       const st1 = baseState('execute'); // evidence 空——无豁免,触发"疑似未 exit"BLOCK
       writeState(dir, st1);
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true }); // findActiveChange 要求目录存在
-      const nx = runState(['next'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const nx = runStateWithProtocol(dir, ['next']);
       assertExit(nx, 1);
       assertOut(nx, 'BLOCKED');
       assertOut(nx, 'advance');
@@ -3808,7 +4632,7 @@ const SCENARIOS = [
       execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
       execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--allow-empty', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
       const branchBefore = execFileSync('git', ['branch', '--show-current'], { cwd: dir, encoding: 'utf8' }).trim();
-      const res = runState(['init', '--help'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', '--help']);
       assertExit(res, 1);
       assertOut(res, 'not a change name');
       assertOut(res, 'Usage: workflow-state.mjs init');
@@ -3822,7 +4646,7 @@ const SCENARIOS = [
         throw new Error('init --help 不应创建 .specs/--help 工件目录');
       }
       // ② 带前导空白的 flag-like 参数(如 " --help")经 trim 后同样应被拒绝
-      const res2 = runState(['init', ' --help'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res2 = runStateWithProtocol(dir, ['init', ' --help']);
       assertExit(res2, 1);
       assertOut(res2, 'not a change name');
       if (fs.existsSync(path.join(dir, '.specs', ' --help'))) {
@@ -3942,7 +4766,7 @@ const SCENARIOS = [
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why（为什么做）\nx');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\nx\n\n## 验收准则（AC）\n- Given x When y Then z');
-      const res = runState(['record', 'open', '{"summary":"done"}'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['record', 'open', '{"summary":"done"}']);
       assertExit(res, 0);
       const loads = path.join(dir, '.specs', CHANGE_ID, '.skill-loads');
       const changeMarker = path.join(loads, 'open-flow-comet-change.json');
@@ -4010,7 +4834,7 @@ const SCENARIOS = [
     name: '123 init 空仓库提示：无提交仓库的分支创建边界（M8）',
     run: (dir) => {
       execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
-      const res = runState(['init', 'empty-repo'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', 'empty-repo']);
       assertExit(res, 0);
       assertOut(res, 'EMPTY-REPO');
       // 子断言 ①:警告后不得实际创建分支(unborn HEAD 下 rev-parse 失败 → currentBranch=null
@@ -4179,7 +5003,7 @@ const SCENARIOS = [
       const res = runGuard(['exit', 'execute'], dir);
       assertExit(res, 1);
       assertOut(res, '缓存');
-      // 子断言:拦截消息须含关键词引导(声明级校验的执行者体验——级 4 实证:语义完整但
+      // 子断言:拦截消息须含关键词引导(声明级校验的执行者体验——真机回归实证:语义完整但
       // 缺关键词被拦,消息应指明所需关键词,防执行者无从下手)
       assertOut(res, '须含关键词');
     },
@@ -4222,7 +5046,7 @@ const SCENARIOS = [
       // ===== M-02 request 时刻归属门禁（AC-1/AC-2/AC-3 的 L1 面）=====
       // 夹具前提：新 change 驻留 execute + 本节点技能声明标记在场（否则先被技能声明门 BLOCK，
       // 测不到归属门禁本身）；协议副本由运行器放入 <dir>/reference/ 并显式指向（env 优先级）。
-      const reqEnv = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const reqEnv = { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) };
       const reqStatePath = path.join(dir, '.flow-comet', 'flow-comet-state.json');
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
       writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/execute-flow-comet-dev.json',
@@ -4296,7 +5120,7 @@ const SCENARIOS = [
         throw new Error('依赖未满足 BLOCK 不得落 handoffRequests: ' + JSON.stringify(stUnmet.evidence));
       }
       // 同构真实链路：next 对当前 TASK 实际输出 execute（依赖未满足/串行消化），与指引条件分支一致
-      const resUnmetNext = runState(['next'], dir, reqEnv);
+      const resUnmetNext = runStateWithProtocol(dir, ['next']);
       assertExit(resUnmetNext, 0);
       if (!/^NODE: execute$/m.test(resUnmetNext.output)) {
         throw new Error('依赖未满足时 next 应输出 execute（指引一致性锚）：\n' + resUnmetNext.output);
@@ -4339,7 +5163,7 @@ const SCENARIOS = [
     run: (dir) => {
       execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
       execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
-      const res = runState(['init', CHANGE_ID], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID]);
       assertExit(res, 0);
       const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (st.newChange !== true) throw new Error('init 未写入 newChange: true');
@@ -4392,7 +5216,7 @@ const SCENARIOS = [
       const st = baseState('open');
       writeState(dir, st);
       assertExit(runGuard(['entry', 'open'], dir), 0);
-      assertExit(runState(['record', 'open', '{"summary":"intake"}'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') }), 0);
+      assertExit(runStateWithProtocol(dir, ['record', 'open', '{"summary":"intake"}']), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why（为什么做）\nx');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\nx\n\n## 验收准则（AC）\n- Given x When y Then z');
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
@@ -4474,14 +5298,13 @@ const SCENARIOS = [
   {
     name: '136 verifyFailures 按 change 隔离:切换计数独立 + 旧字段迁移',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       // ① 旧字段迁移:旧 state(顶层 verifyFailures=2)→ verify-fail 并入当前 change(2+1=3)不超限
       const st = baseState('verify');
       st.verifyFailures = 2;
       writeState(dir, st);
       // 场景内 ch/ch2 目录(select 要求 change 目录存在)
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
-      const r1 = runState(['verify-fail'], dir, env);
+      const r1 = runStateWithProtocol(dir, ['verify-fail']);
       assertExit(r1, 0);
       assertOut(r1, 'VERIFY-FAIL: 3/3');
       const stAfter = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -4492,26 +5315,26 @@ const SCENARIOS = [
         throw new Error('旧顶层字段应已清除: ' + JSON.stringify(stAfter.verifyFailures));
       }
       // ② 同 change 第 4 次 → BLOCK(3 >= 3)
-      const r2 = runState(['verify-fail'], dir, env);
+      const r2 = runStateWithProtocol(dir, ['verify-fail']);
       assertExit(r2, 1);
       assertOut(r2, '超限');
       // ③ 切换 change:select ch2 → 计数独立(若实现仍用全局计数 3,此处会误 BLOCK = RED)
       writeFile(dir, '.specs/ch2/CHANGE.md', '# CHANGE\n## Why\nx\n');
-      const r3 = runState(['select', 'ch2'], dir, env);
+      const r3 = runStateWithProtocol(dir, ['select', 'ch2']);
       assertExit(r3, 0);
-      const r4 = runState(['verify-fail'], dir, env);
+      const r4 = runStateWithProtocol(dir, ['verify-fail']);
       assertExit(r4, 0);
       assertOut(r4, 'VERIFY-FAIL: 1/3');
       // ④ ch2 独立计数:连续 3 次后第 4 次 BLOCK
-      assertExit(runState(['verify-fail'], dir, env), 0);
-      assertExit(runState(['verify-fail'], dir, env), 0);
-      const r7 = runState(['verify-fail'], dir, env);
+      assertExit(runStateWithProtocol(dir, ['verify-fail']), 0);
+      assertExit(runStateWithProtocol(dir, ['verify-fail']), 0);
+      const r7 = runStateWithProtocol(dir, ['verify-fail']);
       assertExit(r7, 1);
       assertOut(r7, '超限');
       // ⑤ 切回 ch:原计数保留(3 → 仍超限,不串扰不回零)
-      const r8 = runState(['select', 'ch'], dir, env);
+      const r8 = runStateWithProtocol(dir, ['select', 'ch']);
       assertExit(r8, 0);
-      const r9 = runState(['verify-fail'], dir, env);
+      const r9 = runStateWithProtocol(dir, ['verify-fail']);
       assertExit(r9, 1);
       assertOut(r9, '超限');
       // ⑥ 计数隔离扩展（AC-5）：verify 失败计数与 Fix 归位轮次各自独立——verify-fail 只动
@@ -4521,11 +5344,11 @@ const SCENARIOS = [
       stIsolated.fixRoundsByChange = { ch: 2, ch2: 1 };
       writeState(dir, stIsolated);
       writeFile(dir, '.specs/ch3/CHANGE.md', '# CHANGE\n## Why\nx\n');
-      assertExit(runState(['select', 'ch3'], dir, env), 0);
+      assertExit(runStateWithProtocol(dir, ['select', 'ch3']), 0);
       const stCh3Before = readScenarioState(dir);
       stCh3Before.fixRoundsByChange = { ch: 2, ch2: 1, ch3: 5 };
       writeState(dir, stCh3Before);
-      const r10 = runState(['verify-fail'], dir, env);
+      const r10 = runStateWithProtocol(dir, ['verify-fail']);
       assertExit(r10, 0);
       assertOut(r10, 'VERIFY-FAIL: 1/3');
       const stCh3After = readScenarioState(dir);
@@ -4547,7 +5370,6 @@ const SCENARIOS = [
   {
     name: '137 next 不推走进行中节点:exit 被拦截后重跑路径保留',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       const st = baseState('review');
       st.completedNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute'];
       st.evidence.review = { summary: 'reviewed' }; // record 过但 exit 被拦截
@@ -4561,18 +5383,18 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', '# T01-SUMMARY\n## verify 输出\nx\n## 6 维自查\nx\n## 越界检查\nx\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## Critical\n\n无。\n\n## 发现\n\n- **问题A**: 某处问题 **[已修]**\n\n## 结论\n\n通过\n');
       // ① next:进行中节点(evidence 存在且未 exit)不被漂移校正推走(修复前校正到 verify = RED)
-      const r1 = runState(['next'], dir, env);
+      const r1 = runStateWithProtocol(dir, ['next']);
       assertExit(r1, 0);
       assertOut(r1, 'NODE: review');
       assertNotOut(r1, 'NODE: verify');
       // ② exit review 重跑路径保留:缺处置标记 → BLOCKED(新 change),补标记后通过
-      assertExit(runGuard(['entry', 'review'], dir, env), 0); // 新 change 强制先 entry
+      assertExit(runGuardWithProtocol(dir, ['entry', 'review']), 0); // 新 change 强制先 entry
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## Critical\n\n无。\n\n## 发现\n\n- **问题B**: 某处问题无处置标记\n\n## 结论\n\n通过\n');
-      const rBlock = runGuard(['exit', 'review'], dir, env);
+      const rBlock = runGuardWithProtocol(dir, ['exit', 'review']);
       assertExit(rBlock, 1);
       assertOut(rBlock, '处置状态标记');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## Critical\n\n无。\n\n## 发现\n\n- **问题B**: 某处问题 **[已修]**\n\n## 结论\n\n通过\n');
-      const rPass = runGuard(['exit', 'review', '--apply'], dir, env);
+      const rPass = runGuardWithProtocol(dir, ['exit', 'review', '--apply']);
       assertExit(rPass, 0);
       assertOut(rPass, 'ALL CHECKS PASSED');
     },
@@ -4862,7 +5684,7 @@ const SCENARIOS = [
       writeState(dir, st);
       // 形似对象字面量但未闭合（PowerShell 剥离内嵌引号后常见的损坏 JSON 形态）
       const bad = '{summary: "intake", completedChecks: ["unit-tests"]';
-      const res = runState(['record', 'open', bad], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['record', 'open', bad]);
       assertExit(res, 1);
       assertOut(res, '--json-file');
       // fail-closed：state 文件须保持原样（evidence.open 未被脏字符串污染）
@@ -4996,17 +5818,16 @@ const SCENARIOS = [
       const st = baseState('open');
       st.evidence.open = { summary: 'intake complete' };
       writeState(dir, st);
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       // ① --json-file 指向损坏 JSON（以 { 开头）→ "不是合法 JSON" + 长度元数据，不再建议 --json-file
       writeFile(dir, 'payload.json', '{summary: "broken", completedChecks: ["x"]');
-      const resFile = runState(['record', 'open', '--json-file', 'payload.json'], dir, env);
+      const resFile = runStateWithProtocol(dir, ['record', 'open', '--json-file', 'payload.json']);
       assertExit(resFile, 1);
       assertNotOut(resFile, '--json-file');
       assertOut(resFile, '不是合法 JSON');
       assertOut(resFile, 'length=');
       // ② 内联传参损坏（以 { 开头）→ 仍建议 --json-file（既有语义保留）
       const bad = '{summary: "broken"';
-      const resInline = runState(['record', 'open', bad], dir, env);
+      const resInline = runStateWithProtocol(dir, ['record', 'open', bad]);
       assertExit(resInline, 1);
       assertOut(resInline, '--json-file');
     },
@@ -5021,8 +5842,7 @@ const SCENARIOS = [
       const st = baseState('open');
       st.evidence.open = { summary: 'intake complete' };
       writeState(dir, st);
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
-      const res = runState(['record', 'open', '[plain-text-not-json'], dir, env);
+      const res = runStateWithProtocol(dir, ['record', 'open', '[plain-text-not-json']);
       assertExit(res, 1);
       if (!/--json-file|not valid JSON|不是合法 JSON/.test(res.output)) {
         throw new Error('fail-closed 应有提示（--json-file / not valid JSON / 不是合法 JSON），实际输出: ' + res.output);
@@ -5622,7 +6442,7 @@ const SCENARIOS = [
   {
     name: '162 技能加载前置门：request/record 无声明新 BLOCK / 旧 WARN',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const env = { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) };
       // ① handoff request 前置门：新 change、subagent-execute 节点无声明标记 → BLOCK
       const stReq = baseState('subagent-execute');
       stReq.newChange = true;
@@ -5634,13 +6454,13 @@ const SCENARIOS = [
       const stRec = baseState('plan');
       stRec.newChange = true;
       writeState(dir, stRec);
-      const resRec = runState(['record', 'plan', '{"summary":"plan done"}'], dir, env);
+      const resRec = runStateWithProtocol(dir, ['record', 'plan', '{"summary":"plan done"}']);
       assertExit(resRec, 1);
       assertOut(resRec, '先加载技能');
       // ③ 旧 change：record 无声明 → WARN 渐进不阻断
       const stOld = baseState('plan');
       writeState(dir, stOld);
-      const resOld = runState(['record', 'plan', '{"summary":"plan done"}'], dir, env);
+      const resOld = runStateWithProtocol(dir, ['record', 'plan', '{"summary":"plan done"}']);
       assertExit(resOld, 0);
       assertOut(resOld, 'WARN');
 
@@ -5719,7 +6539,7 @@ const SCENARIOS = [
       // ⑨ 协议无对应 enabled 节点 → 跳过归属门禁（删除 subagent-execute 节点）：驻留 execute
       // 但任务为并行 pending——若实现不做协议感知会误判目标 subagent-execute ≠ execute 而 BLOCK
       writeMarker('execute');
-      const proto = JSON.parse(fs.readFileSync(path.join(dir, 'reference', 'workflow-protocol.json'), 'utf8'));
+      const proto = JSON.parse(fs.readFileSync(scenarioProtocolPath(dir), 'utf8'));
       const noSubProto = { ...proto, nodes: proto.nodes.filter((n) => n.id !== 'subagent-execute') };
       writeFile(dir, 'reference/protocol-nosub.json', JSON.stringify(noSubProto, null, 2) + '\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskXml('P02', 'parallel="true" status="pending"', 'src/p02.mjs'));
@@ -5775,7 +6595,7 @@ const SCENARIOS = [
       if (readScenarioState(dir).evidence?.['subagent-execute']?.handoffRequests?.P04) {
         throw new Error('依赖未满足 BLOCK 不得落 handoffRequests');
       }
-      const resUnmetNext = runState(['next'], dir, env);
+      const resUnmetNext = runStateWithProtocol(dir, ['next']);
       assertExit(resUnmetNext, 0);
       if (!/^NODE: execute$/m.test(resUnmetNext.output)) {
         throw new Error('依赖未满足时 next 应输出 execute：\n' + resUnmetNext.output);
@@ -5788,7 +6608,7 @@ const SCENARIOS = [
       afterSerial.completedNodes = [...new Set([...(afterSerial.completedNodes || []), 'execute'])];
       afterSerial.evidence = { ...(afterSerial.evidence || {}), execute: { summary: 'serial digest done' } };
       writeState(dir, afterSerial);
-      const resDelegableNext = runState(['next'], dir, env);
+      const resDelegableNext = runStateWithProtocol(dir, ['next']);
       assertExit(resDelegableNext, 0);
       if (!/^NODE: subagent-execute$/m.test(resDelegableNext.output)) {
         throw new Error('依赖满足后 next 应输出 subagent-execute：\n' + resDelegableNext.output);
@@ -5797,7 +6617,7 @@ const SCENARIOS = [
         throw new Error('依赖满足后 next 应把工作归属推到 subagent-execute');
       }
       writeMarker('subagent-execute');
-      assertExit(runGuard(['entry', 'subagent-execute'], dir, env), 0);
+      assertExit(runGuardWithProtocol(dir, ['entry', 'subagent-execute']), 0);
       const resRecovered = runHandoff(['request', 'P04', 'now delegable'], dir, env);
       assertExit(resRecovered, 0);
       assertOut(resRecovered, 'HANDOFF REQUEST: P04');
@@ -5871,7 +6691,7 @@ const SCENARIOS = [
       assertExit(runState(['init', boundChange, '--init-skip', '--protocol', 'reference/protocol-bound.json'], dir), 0);
       writeFile(dir, '.specs/' + boundChange + '/TASK.md', taskXml('B01', 'parallel="false" status="pending"', 'src/b01.mjs'));
       const resBound = runHandoff(['request', 'B01', 'bound protocol serial'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+        { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) });
       assertExit(resBound, 0);
       assertOut(resBound, 'HANDOFF REQUEST: B01');
       assertNotOut(resBound, 'BLOCKED');
@@ -5890,7 +6710,7 @@ const SCENARIOS = [
       writeState(dir, boundMissingState);
       writeFile(dir, '.specs/' + boundChange + '/TASK.md', taskXml('B02', 'parallel="false" status="pending"', 'src/b02.mjs'));
       const resBoundMissing = runHandoff(['request', 'B02', 'bound protocol unreadable'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+        { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) });
       assertExit(resBoundMissing, 0);
       assertOut(resBoundMissing, 'WARN:');
       assertOut(resBoundMissing, '本次未执行归属校验');
@@ -5909,7 +6729,7 @@ const SCENARIOS = [
       writeState(dir, legacyBoundState);
       writeFile(dir, '.specs/' + boundChange + '/TASK.md', taskXml('B03', 'parallel="false" status="pending"', 'src/b03.mjs'));
       const resLegacyBound = runHandoff(['request', 'B03', 'legacy state no binding'], dir,
-        { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+        { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) });
       assertExit(resLegacyBound, 1);
       assertOut(resLegacyBound, 'BLOCKED: 任务 B03（串行 pending）应归属节点 execute');
     },
@@ -5921,20 +6741,19 @@ const SCENARIOS = [
   {
     name: '163 next / entry 输出点名 LOAD SKILL：用 Skill 工具，禁止跳过',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       // ① next：open 节点 → 输出点名 flow-comet-open
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
       const st = baseState('open');
       st.evidence.open = { summary: 'intake complete' };
       writeState(dir, st);
-      const resNext = runState(['next'], dir, env);
+      const resNext = runStateWithProtocol(dir, ['next']);
       assertExit(resNext, 0);
       assertOut(resNext, 'LOAD SKILL: flow-comet-open');
       assertOut(resNext, '禁止跳过');
       // ② guard entry：plan 节点 → 输出点名 flow-comet-plan
       const st2 = baseState('plan');
       writeState(dir, st2);
-      const resEntry = runGuard(['entry', 'plan'], dir, env);
+      const resEntry = runGuardWithProtocol(dir, ['entry', 'plan']);
       assertExit(resEntry, 0);
       assertOut(resEntry, 'LOAD SKILL: flow-comet-plan');
       assertOut(resEntry, '禁止跳过');
@@ -5977,7 +6796,6 @@ const SCENARIOS = [
   {
     name: '165 next 保护扩展：entered 未 record 节点不推走（保持 plan）',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why（为什么做）\n\nx');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\nx\n\n## 验收准则（AC）\n\n- Given x When y Then z');
@@ -5997,7 +6815,7 @@ const SCENARIOS = [
         directOverride: false,
       };
       writeState(dir, st);
-      const res = runState(['next'], dir, env);
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: plan');
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -6297,7 +7115,6 @@ const SCENARIOS = [
   {
     name: '172 多波混合推进完成：分趟自动路由直至清空进 review',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       const goNext = (currentNode, doneIds, completedExtra = []) => {
         writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + renderMultiWaveTasks(doneIds));
@@ -6316,7 +7133,7 @@ const SCENARIOS = [
           executionMode: 'subagent',
           directOverride: false,
         });
-        return runState(['next'], dir, env);
+        return runStateWithProtocol(dir, ['next']);
       };
       // 趟 0：无可委托并行（P 波依赖 T01 未完成）、串行 T01 pending → execute
       let res = goNext('execute', []);
@@ -6351,7 +7168,6 @@ const SCENARIOS = [
   {
     name: '173 单趟零进展 BLOCK：孤儿并行依赖无法满足（检查 depends_on）',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
         '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify><depends_on>T99</depends_on></task>\n');
@@ -6364,7 +7180,7 @@ const SCENARIOS = [
         executionMode: 'subagent',
         directOverride: false,
       });
-      const res = runState(['next'], dir, env);
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 1);
       assertOut(res, 'BLOCKED');
       assertOut(res, '孤儿并行');
@@ -6380,7 +7196,6 @@ const SCENARIOS = [
   {
     name: '174 委托节点二次进入完成判定：eligible 再入 → 趟间串行 → 清空进 review',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       const pDone = (id, deps) =>
         '<task id="' + id + '" status="done" parallel="true"><action>实现 ' + id + '</action><write_files>src/' + id.toLowerCase() + '.mjs</write_files><verify>node --check src/' + id.toLowerCase() + '.mjs</verify>' +
@@ -6401,19 +7216,19 @@ const SCENARIOS = [
         executionMode: 'subagent',
         directOverride: false,
       });
-      let res = runState(['next'], dir, env);
+      let res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: subagent-execute');
       // ② P02 也 done → 可委托集合为空、串行 T03 pending → 趟间回 execute
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1 + pDone('P02', 'P01') + t03(''));
-      res = runState(['next'], dir, env);
+      res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: execute');
       // ③ 全部 done + SUMMARY 在场 → 合取完成（无 eligible ∧ 无 serial pending）→ review
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1 + pDone('P02', 'P01') + t03('done'));
       writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent());
       writeFile(dir, '.specs/' + CHANGE_ID + '/T03-SUMMARY.md', summaryContent());
-      res = runState(['next'], dir, env);
+      res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: review');
     },
@@ -6425,7 +7240,6 @@ const SCENARIOS = [
   {
     name: '175 向后兼容等价：旧合法形态路由结果与旧期望一致',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       const goNext = (taskContent, currentNode, completedExtra = [], withExecuteEvidence = false) => {
         writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + taskContent);
@@ -6446,7 +7260,7 @@ const SCENARIOS = [
           executionMode: 'subagent',
           directOverride: false,
         });
-        return runState(['next'], dir, env);
+        return runStateWithProtocol(dir, ['next']);
       };
       // ① 全串行（含依赖链）→ execute
       let res = goNext(TASK_VALID_ALL_SERIAL, 'execute');
@@ -6478,7 +7292,6 @@ const SCENARIOS = [
   {
     name: '176 伪并行 WARN：仅写测试产物的并行任务提示依赖嫌疑且不阻断',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       writeState(dir, {
         activeChange: CHANGE_ID,
@@ -6554,7 +7367,7 @@ const SCENARIOS = [
           input: JSON.stringify(input),
           env: {
             ...inherited,
-            FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json'),
+            FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir),
             ...extraEnv,
           },
           encoding: 'utf8', timeout: 60000,
@@ -6778,19 +7591,143 @@ const SCENARIOS = [
     },
   },
 
-  // 184: 技能文本混排合法化语义文本锁——plan 与 subagent-execute 两 SKILL 权威源不得再含
+  // 184: 技能文本混排合法化语义文本锁（in-place 扩展：模板权威整句 / 入口 archive 读法 /
+  // 规划约束 / Codex-worktree 订正）——plan 与 subagent-execute 两 SKILL 权威源不得再含
   // 「连续块」「居首」旧波次形态约束表述，且依赖图语义描述（depends_on）在场、「用 Skill 工具」
-  // 两层加载句式保持（措辞锁族既有锚不破坏）。文本存在级断言（结构级由其余场景族覆盖）。
+  // 两层加载句式保持（措辞锁族既有锚不破坏）；模板权威声明覆盖 9 个既有成员（8 产出节点 + task）
+  // 与 5 个 flow-kit 阶段协议技能 = 14 个真实成员（题面 13 按 8+5 计数漏计 task；保留既有断言
+  // 优先，实际按 14 文件落地，成员边界见收口证据）——每份须在同一声明行内按序组合出现
+  // 「唯一权威 = 」/「`flow-kit/templates/**`」/「是历史证据」/「不是模板来源」/「上一轮就是这么写的」
+  // 且全数零命中旧反向声明「archive 是模板来源」；入口 SKILL 含 archive 三要素读法；plan / task
+  // 含规划约束判别句式与各自边界锚（以本节为准 / 以本节点为准），旧同层并行句零残留；
+  // worktree-notes / subagent-execute 含平台事实（multi_agent）与支持面（机制缺口）判别锚、
+  // 适用范围限定（不得外推 / 不可外推），旧独断句只允许以被反驳引用形态出现。
+  // 文本存在级断言（结构级由其余场景族覆盖）。
   {
     name: '184 技能文本锁：旧连续块/居首表述清零且依赖图语义描述在场',
     run: () => {
       const problems = [];
+      // —— 既有锚（原文语义与失败消息保持）——
       for (const skillDir of ['flow-comet-plan', 'flow-comet-subagent-execute']) {
         const text = fs.readFileSync(path.join(__dirname, '..', '..', skillDir, 'SKILL.md'), 'utf8');
         if (text.includes('连续块')) problems.push(skillDir + ' 含「连续块」旧形态约束表述');
         if (text.includes('居首')) problems.push(skillDir + ' 含「居首」旧位置约束表述');
         if (!text.includes('depends_on')) problems.push(skillDir + ' 缺依赖图语义描述（depends_on）');
         if (!text.includes('用 Skill 工具')) problems.push(skillDir + ' 缺「用 Skill 工具」两层加载句式');
+      }
+      // —— 模板权威整句声明：9 个既有成员 + 5 个 flow-kit 阶段协议技能（真实成员 14）——
+      const templateAuthoritySkills = [
+        'flow-comet-open', 'flow-comet-design', 'flow-comet-plan', 'flow-comet-execute',
+        'flow-comet-subagent-execute', 'flow-comet-review', 'flow-comet-verify', 'flow-comet-archive',
+        'flow-comet-task',
+        'flow-comet-change', 'flow-comet-requirement', 'flow-comet-dev', 'flow-comet-test',
+        'flow-comet-integration',
+      ];
+      // 整句级语义组合：同一段声明行内按序出现下列锚点，防止只留半句或把锚点拆到不同段落。
+      const authoritySentenceAnchors = [
+        '唯一权威 = ', '`flow-kit/templates/**`', '是历史证据', '不是模板来源', '上一轮就是这么写的',
+      ];
+      for (const skillDir of templateAuthoritySkills) {
+        const rel = skillDir + '/SKILL.md';
+        const text = fs.readFileSync(path.join(__dirname, '..', '..', skillDir, 'SKILL.md'), 'utf8');
+        const authorityLine = text.split(/\r?\n/).find((line) => line.includes('模板权威'));
+        if (!authorityLine) {
+          problems.push(rel + ' 缺模板权威整句声明（正向权威 + 反向历史证据组合缺失）');
+          continue;
+        }
+        let cursor = -1;
+        for (const anchor of authoritySentenceAnchors) {
+          const at = authorityLine.indexOf(anchor, cursor + 1);
+          if (at < 0) {
+            problems.push(rel + ' 模板权威整句缺「' + anchor + '」（整句语义组合）');
+          } else {
+            cursor = at;
+          }
+        }
+        if (text.includes('archive 是模板来源')) {
+          problems.push(rel + ' 含「archive 是模板来源」旧反向声明');
+        }
+      }
+      // —— 入口 archive 读法：三要素关键词在场 ——
+      {
+        const entry = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+        for (const keyword of ['flow-kit/templates', '何时可读', '不读什么']) {
+          if (!entry.includes(keyword)) {
+            problems.push('flow-comet/SKILL.md 缺「' + keyword + '」（入口 archive 读法三要素）');
+          }
+        }
+      }
+      // —— 规划约束：plan / task 判别句式 + GUIDANCE 委托消化 ——
+      {
+        const directLockPhrase = 'direct 不是并行任务的逃生口';
+        const r15Keywords = {
+          'flow-comet-plan': ['同一文件', '并发同伴', directLockPhrase],
+          'flow-comet-task': ['同一文件', '并发同伴', directLockPhrase],
+        };
+        const planText = fs.readFileSync(path.join(__dirname, '..', '..', 'flow-comet-plan', 'SKILL.md'), 'utf8');
+        const taskText = fs.readFileSync(path.join(__dirname, '..', '..', 'flow-comet-task', 'SKILL.md'), 'utf8');
+        for (const [skillDir, keywords] of Object.entries(r15Keywords)) {
+          const text = skillDir === 'flow-comet-plan' ? planText : taskText;
+          for (const keyword of keywords) {
+            if (!text.includes(keyword)) {
+              problems.push(skillDir + '/SKILL.md 缺「' + keyword + '」（规划期约束判别句式）');
+            }
+          }
+        }
+        if (planText.includes('Same layer = same wave (parallel execution)')) {
+          problems.push('flow-comet-plan/SKILL.md 残留「Same layer = same wave (parallel execution)」旧同层并行句');
+        }
+        if (!planText.includes('以本节为准')) {
+          problems.push('flow-comet-plan/SKILL.md 缺「以本节为准」（上游宽松语义显式覆盖锚）');
+        }
+        if (taskText.includes('同层并行，跨层串行')) {
+          problems.push('flow-comet-task/SKILL.md 残留「同层并行，跨层串行」旧波次句');
+        }
+        if (!taskText.includes('以本节点为准')) {
+          problems.push('flow-comet-task/SKILL.md 缺「以本节点为准」（上游宽松语义显式覆盖锚）');
+        }
+        const guidance = fs.readFileSync(path.join(__dirname, '..', 'GUIDANCE.md'), 'utf8');
+        if (!guidance.includes('仍必须由 subagent-execute 委托消化')) {
+          problems.push('flow-comet/GUIDANCE.md 缺「仍必须由 subagent-execute 委托消化」（direct 委托消化判别句）');
+        }
+      }
+      // —— Codex / worktree 订正：平台事实 + 支持面判别锚与适用范围限定在场、旧独断句
+      // 只允许以被反驳引用形态出现、fail-open 与未闭合限定在场、旧过宽句零残留 ——
+      {
+        const codexTexts = new Map([
+          ['reference/worktree-notes.md', fs.readFileSync(path.join(__dirname, '..', 'reference', 'worktree-notes.md'), 'utf8')],
+          ['flow-comet-subagent-execute/SKILL.md', fs.readFileSync(path.join(__dirname, '..', '..', 'flow-comet-subagent-execute', 'SKILL.md'), 'utf8')],
+        ]);
+        const refutedClaim = '「Codex 不能委派 / 不使用并行委托」';
+        for (const [rel, text] of codexTexts) {
+          for (const keyword of ['multi_agent', '机制缺口']) {
+            if (!text.includes(keyword)) {
+              problems.push(rel + ' 缺「' + keyword + '」（Codex 平台事实与支持面判别锚）');
+            }
+          }
+          // 旧独断句只允许以被反驳引用的完整形态出现：剥离该引用后不得再有残句。
+          if (text.split(refutedClaim).join('').includes('不使用并行委托')) {
+            problems.push(rel + ' 残留旧独断句「不使用并行委托」（非被反驳引用形态）');
+          }
+          if (!text.includes('不得外推') && !text.includes('不可外推')) {
+            problems.push(rel + ' 缺「不得外推 / 不可外推」适用范围限定');
+          }
+        }
+        const worktreeNotes = codexTexts.get('reference/worktree-notes.md');
+        for (const keyword of ['fail-open', '未闭合']) {
+          if (!worktreeNotes.includes(keyword)) {
+            problems.push('reference/worktree-notes.md 缺「' + keyword + '」（Codex/worktree 订正限定）');
+          }
+        }
+        if (worktreeNotes.includes('受支持的工作流仍是串行执行')) {
+          problems.push('reference/worktree-notes.md 残留「受支持的工作流仍是串行执行」旧独断句');
+        }
+        if (worktreeNotes.includes('写入仍会被协调者白名单拦截')) {
+          problems.push('reference/worktree-notes.md 残留「写入仍会被协调者白名单拦截」旧过宽句');
+        }
+        if (codexTexts.get('flow-comet-subagent-execute/SKILL.md').includes('写入会被协调者白名单拦截')) {
+          problems.push('flow-comet-subagent-execute/SKILL.md 残留「写入会被协调者白名单拦截」旧过宽句');
+        }
       }
       if (problems.length > 0) throw new Error('技能文本混排合法化语义不符: ' + problems.join('; '));
     },
@@ -7144,7 +8081,6 @@ const SCENARIOS = [
   {
     name: '198 多趟出口路由时序收敛：逐节点 exit --apply 后 next 输出 NODE 与 guard 出口 NODE 一致',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       const writeTask = (statusMap) => {
         const blk = (id, parallel, deps) =>
           '<task id="' + id + '"' + (parallel ? ' parallel="true"' : '') +
@@ -7178,7 +8114,7 @@ const SCENARIOS = [
       const assertConverge = (guardRes) => {
         assertExit(guardRes, 0);
         const gNode = nodeOf(guardRes.output);
-        const nextRes = runState(['next'], dir, env);
+        const nextRes = runStateWithProtocol(dir, ['next']);
         assertExit(nextRes, 0);
         const sNode = nodeOf(nextRes.output);
         if (gNode !== sNode) {
@@ -7262,7 +8198,7 @@ const SCENARIOS = [
       const res = runGuard(['exit', 'archive', '--apply'], dir);
       assertExit(res, 0);
       assertOut(res, 'NEXT: done');
-      const nextRes = runState(['next'], dir, env);
+      const nextRes = runStateWithProtocol(dir, ['next']);
       assertExit(nextRes, 0);
       assertOut(nextRes, 'NEXT: done');
     },
@@ -7315,17 +8251,34 @@ const SCENARIOS = [
       if (!srcStamp) throw new Error('权威源 loader 未提取到版本戳（场景前置失效）');
       const installed = fs.readFileSync(path.join(dshHome, 'plugins', 'dsh-flow-comet-bridge.mjs'), 'utf8');
       if (!installed.includes('BRIDGE_VERSION: ' + srcStamp[1])) throw new Error('覆盖后 loader 版本戳非权威源值');
-      // 子断言（发布同步守卫，以 INSTALLED_VERSION 为权威基准）：权威源 loader 的标记行、
-      // 导出常量与 INSTALLED_VERSION 三处同值——任一处漂移时安装副本的 bridge-check 会在已装
-      // 项目报版本偏斜（上方断言只证明「覆盖 == 权威源文件」，无法捕获跨文件/跨值分叉）。
+      // 子断言（发布同步守卫）：权威源 loader 的标记行、导出常量与载体 INSTALLED_VERSION
+      // 三处按 **bridge-check 既有语义**比较（MECHANISM 二·二十七「bridge-check 基础版本归一」：
+      // 剥离 dev 态后缀 `-<N>-g<hash>`、按基础版本比较；预发布标识不剥离）——任一处基础版本漂移
+      // 时安装副本的 bridge-check 会在已装项目报版本偏斜（上方断言只证明「覆盖 == 权威源文件」，
+      // 无法捕获跨文件/跨值分叉）。旧严格全等使主仓「dev 态副本 + 权威源」形态结构性必红（F6）；
+      // 归一后 dev 态同基础判同步，真实漂移仍必报（判别力见下方子锚表）。
       const installedVersion = fs.readFileSync(path.join(__dirname, '..', 'INSTALLED_VERSION'), 'utf8').trim();
       const exportMatch = /^export const version = '([^']+)';$/m.exec(srcText);
       if (!exportMatch) throw new Error('权威源 loader 未提取到 export version（场景前置失效）');
-      if (srcStamp[1] !== installedVersion || exportMatch[1] !== installedVersion) {
+      const syncProblems = bridgeStampSyncProblems(srcStamp[1], exportMatch[1], installedVersion);
+      if (syncProblems.length > 0) {
         throw new Error(
-          '权威源版本三处不一致（标记行=' + srcStamp[1] + ' / export=' + exportMatch[1] +
-          ' / INSTALLED_VERSION=' + installedVersion + '）——发布同步遗漏（bridge-check 会在安装副本报版本偏斜）'
+          '权威源版本三处基础版本不一致（标记行=' + srcStamp[1] + ' / export=' + exportMatch[1] +
+          ' / INSTALLED_VERSION=' + installedVersion + '）——发布同步遗漏（bridge-check 会在安装副本报版本偏斜）：' +
+          syncProblems.join('；')
         );
+      }
+      // in-place 锚（F6：发布同步守卫判别力双向证明，不新增顶层编号）——权威源 loader 的发布戳
+      // 与 dev 态副本 INSTALLED_VERSION 必须按 bridge-check 既有语义比较：剥离 dev 态后缀按基础
+      // 版本判同步（锚表正例即该真实形态），真实漂移（基础版本不同 / 发布版对发布版 / 预发布标识
+      // 不剥离）仍必报。
+      const baseVersion = fixtureBridgeBaseVersion(installedVersion);
+      for (const subAnchor of bridgeStampSyncSubAnchorCases(baseVersion, installedVersion)) {
+        const synced = subAnchor.problems.length === 0;
+        if (synced !== subAnchor.expectSync) {
+          throw new Error('发布同步守卫子锚失败（' + subAnchor.label + '）：期望'
+            + (subAnchor.expectSync ? '同步' : '报漂移') + '，实际 problems=' + JSON.stringify(subAnchor.problems));
+        }
       }
     },
   },
@@ -7492,7 +8445,6 @@ const SCENARIOS = [
   {
     name: '207 多趟平行转换 next 可达且与 guard NEXT 一致（完整时序锚）',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       const writeTask = (statusMap) => {
         const blk = (id, parallel, deps) =>
           '<task id="' + id + '"' + (parallel ? ' parallel="true"' : '') +
@@ -7522,7 +8474,7 @@ const SCENARIOS = [
       const assertConverge = (guardRes) => {
         assertExit(guardRes, 0);
         const gNode = nodeOf(guardRes.output);
-        const nextRes = runState(['next'], dir, env);
+        const nextRes = runStateWithProtocol(dir, ['next']);
         assertExit(nextRes, 0);
         const sNode = nodeOf(nextRes.output);
         if (gNode !== sNode) {
@@ -7594,7 +8546,7 @@ const SCENARIOS = [
       const resArch = runGuard(['exit', 'archive', '--apply'], dir);
       assertExit(resArch, 0);
       assertOut(resArch, 'NEXT: done');
-      const nextRes = runState(['next'], dir, env);
+      const nextRes = runStateWithProtocol(dir, ['next']);
       assertExit(nextRes, 0);
       assertOut(nextRes, 'NEXT: done');
     },
@@ -7606,7 +8558,6 @@ const SCENARIOS = [
   {
     name: '208 record 后未 exit 先 next 不漂移死结：后续 exit 仍可',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       // 前序产物（open/design 已完成,plan 已进入并 record——未 exit）
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## Why（为什么做）\n\nx\n\n## 范围（Scope）\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 用户故事（User Story）\n\nx\n\n## 验收准则（AC）\n\n- Given x When y Then z');
@@ -7627,7 +8578,7 @@ const SCENARIOS = [
       st.newChange = true;
       writeState(dir, st);
       // ① record 后未 exit 先 next：不把 currentNode 提前校正到 subagent-execute（路由后继）
-      const r1 = runState(['next'], dir, env);
+      const r1 = runStateWithProtocol(dir, ['next']);
       assertExit(r1, 0);
       assertOut(r1, 'NODE: plan');
       const stAfterNext = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -7640,7 +8591,7 @@ const SCENARIOS = [
       assertExit(rExit, 0);
       assertOut(rExit, 'ALL CHECKS PASSED');
       // ③ exit 推进后 next 路由到 subagent-execute（平行转换点——与 guard 出口一致）
-      const r2 = runState(['next'], dir, env);
+      const r2 = runStateWithProtocol(dir, ['next']);
       assertExit(r2, 0);
       assertOut(r2, 'NODE: subagent-execute');
     },
@@ -7652,7 +8603,6 @@ const SCENARIOS = [
   {
     name: '209 exit 漂移容忍：currentNode 已为文件推导下一节点且证据/产物齐 → exit 可过',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       // TASK 全 done（T01 串行）+ SUMMARY（execute 产物门控）
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
@@ -7697,7 +8647,6 @@ const SCENARIOS = [
   {
     name: '210 exit 漂移仍 BLOCK：漂移但证据/产物不齐（容错不放开未完成）',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
         '<task id="T01" status="done"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n');
@@ -7729,7 +8678,6 @@ const SCENARIOS = [
   {
     name: '211 路由诊断静默：剩余 pending 全串行（P→S 收尾转换）无 ROUTE WARN',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       const st = baseState('plan');
       st.completedNodes = ['open', 'design'];
@@ -7739,7 +8687,7 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
         '<task id="P01" parallel="true" status="done">\n  <action>do</action>\n  <verify>echo ok</verify>\n</task>\n' +
         '<task id="S01" parallel="false" status="pending">\n  <action>do serial</action>\n  <verify>echo ok</verify>\n</task>\n');
-      const res = runGuard(['exit', 'plan', '--apply'], dir, env);
+      const res = runGuardWithProtocol(dir, ['exit', 'plan', '--apply']);
       assertExit(res, 0);
       assertNotOut(res, 'ROUTE WARN');
       assertOut(res, 'ALL CHECKS PASSED');
@@ -7752,7 +8700,6 @@ const SCENARIOS = [
   {
     name: '212 路由诊断保持：parallel 缺 status（畸形块）仍报 ROUTE WARN',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       const st = baseState('plan');
       st.completedNodes = ['open', 'design'];
@@ -7763,7 +8710,7 @@ const SCENARIOS = [
         '<task id="P01" parallel="true" status="done">\n  <action>do</action>\n  <verify>echo ok</verify>\n</task>\n' +
         '<task id="P03" parallel="true">\n  <action>do malformed parallel</action>\n  <verify>echo ok</verify>\n</task>\n' +
         '<task id="S02" parallel="false" status="pending">\n  <action>do serial</action>\n  <verify>echo ok</verify>\n</task>\n');
-      const res = runGuard(['exit', 'plan', '--apply'], dir, env);
+      const res = runGuardWithProtocol(dir, ['exit', 'plan', '--apply']);
       assertExit(res, 0);
       assertOut(res, 'ROUTE WARN');
     },
@@ -7857,7 +8804,6 @@ const SCENARIOS = [
   {
     name: '216 directOverride 恢复：BLOCK 后补授权 / 回 subagent → exit 通过',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       const buildState = () => {
         const st = baseState('execute');
         st.completedNodes = ['open', 'design', 'plan'];
@@ -7886,7 +8832,7 @@ const SCENARIOS = [
       assertOut(rBlock, 'BLOCKED');
       // ② 恢复路径一：协调者 execution-mode direct（脚本写入授权留痕）→ exit 通过
       writeFile(dir, '.specs/' + CHANGE_ID + '/S01-SUMMARY.md', strictSummary('S01'));
-      const auth = runState(['execution-mode', 'direct'], dir, env);
+      const auth = runStateWithProtocol(dir, ['execution-mode', 'direct']);
       assertExit(auth, 0);
       assertOut(auth, 'DIRECT-AUTH');
       const st2 = readState();
@@ -7897,7 +8843,7 @@ const SCENARIOS = [
       assertExit(rAuth, 0);
       assertOut(rAuth, 'ALL CHECKS PASSED');
       // ③ 恢复路径二：回 subagent（清除 directOverride 与授权留痕）→ exit 通过
-      const back = runState(['execution-mode', 'subagent'], dir, env);
+      const back = runStateWithProtocol(dir, ['execution-mode', 'subagent']);
       assertExit(back, 0);
       const st3 = readState();
       if (st3.directOverride !== false || st3.directOverrideAt !== undefined) {
@@ -7946,7 +8892,6 @@ const SCENARIOS = [
   {
     name: '218 route-node 完成判定：done 任务 + 畸形块(缺 status) → next 仍回 execute',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
         '<task id="T01" status="done"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n' +
@@ -7961,7 +8906,7 @@ const SCENARIOS = [
         executionMode: 'subagent',
         directOverride: false,
       });
-      const res = runState(['next'], dir, env);
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: execute');
       assertNotOut(res, 'NODE: review');
@@ -8252,7 +9197,7 @@ const SCENARIOS = [
   {
     name: '229 感知层剥离：classic 资产有无不改变 hook 与 guard 判定（AC-5）',
     run: (dir) => {
-      const builtin = path.join(dir, 'reference', 'workflow-protocol.json');
+      const builtin = scenarioProtocolPath(dir);
       const build = (name, withClassic) => {
         const proj = path.join(dir, name);
         fs.mkdirSync(path.join(proj, 'reference'), { recursive: true });
@@ -8305,7 +9250,7 @@ const SCENARIOS = [
         const protocol = JSON.parse(JSON.stringify(builtinProtocol));
         protocol.kind = kind;
         fs.mkdirSync(path.join(proj, 'reference'), { recursive: true });
-        fs.copyFileSync(path.join(dir, 'reference', 'workflow-protocol.json'), path.join(proj, 'reference', 'workflow-protocol.json'));
+        fs.copyFileSync(scenarioProtocolPath(dir), path.join(proj, 'reference', 'workflow-protocol.json'));
         writeFile(proj, 'overlay-protocol.json', JSON.stringify(protocol, null, 2) + '\n');
         writeIntakeArtifacts(proj);
         const st = baseState('open');
@@ -8371,6 +9316,69 @@ const SCENARIOS = [
       }
       // ③ 系统测试集项数受检面：运行时派生 + 缺失 / 未同步 / 组判定 / 派生源缺失全分支
       exerciseSystemTestCountCheck(dir);
+      // ④ stale 检测（presence 之外的判别力）：在场 ≠ 同步——旧值不在场才是同步的另一半。
+      // 受检面 = 维护者面（docs/internal/ 全册 + CLAUDE.md）+ 参考册（reference/*.md，路径从本
+      // 脚本自身位置推导）；夹具用独立临时根驱动（夹具根下参考册缺席 → 该面为空，不误红）。
+      const staleRoot = makeTmp();
+      writeFile(staleRoot, 'docs/internal/DOC.md',
+        '当前 ' + SCENARIOS.length + ' 场景 全部通过。\n');
+      writeFile(staleRoot, 'CLAUDE.md', '回归基线：ALL ' + SCENARIOS.length + ' SCENARIOS PASSED\n');
+      if (staleCountProblems([SCENARIOS.length, 86], staleRoot).length !== 0) {
+        throw new Error('当前值不得被判成旧值: ' + JSON.stringify(staleCountProblems([SCENARIOS.length, 86], staleRoot)));
+      }
+      // 反例（旧 presence 判据必然放过：当前值在场即全绿，旁边的旧值不可见）
+      writeFile(staleRoot, 'docs/internal/DOC.md', '当前 ' + SCENARIOS.length + ' 场景；另有 120 场景 的记录。\n');
+      const staleOld = staleCountProblems([SCENARIOS.length, 86], staleRoot);
+      if (!(staleOld.some((p) => p.includes('旧值未标记') && p.includes('docs/internal/DOC.md:1')
+        && p.includes('120')))) {
+        throw new Error('无标记旧值未被报告（应含文件:行 + 旧值）: ' + JSON.stringify(staleOld));
+      }
+      // 历史标记豁免：已标注的历史值不是"未标记旧值"（四枚标记各取一例——标记清单本身也受锚）
+      for (const marked of ['（历史）120 场景。\n', '该值 120 场景 已过时。\n', '回顾：120 场景（history）。\n',
+        '本轮踩坑：模板里写过 120 场景。\n']) {
+        writeFile(staleRoot, 'docs/internal/DOC.md', marked);
+        if (staleCountProblems([SCENARIOS.length, 86], staleRoot).length !== 0) {
+          throw new Error('带历史标记的行不得报告: ' + JSON.stringify([marked, staleCountProblems([SCENARIOS.length, 86], staleRoot)]));
+        }
+      }
+      // 量程门：30 以下 / 400 以上不参与（年份、编号一类数字挡在外面）
+      writeFile(staleRoot, 'docs/internal/DOC.md', '夹具 7 场景 与 9999 场景。\n');
+      if (staleCountProblems([SCENARIOS.length, 86], staleRoot).length !== 0) {
+        throw new Error('量程外的数字不得参与: ' + JSON.stringify(staleCountProblems([SCENARIOS.length, 86], staleRoot)));
+      }
+      // 通用比值门控：同行未点名套件的 N/N 不参与（覆盖率一类通用比值不误伤）；点名套件才判
+      writeFile(staleRoot, 'docs/internal/DOC.md', '覆盖率 120/120。\n');
+      if (staleCountProblems([SCENARIOS.length, 86], staleRoot).length !== 0) {
+        throw new Error('同行未点名套件的通用比值不得参与: ' + JSON.stringify(staleCountProblems([SCENARIOS.length, 86], staleRoot)));
+      }
+      writeFile(staleRoot, 'docs/internal/DOC.md', 'guard-self-test 覆盖率 120/120。\n');
+      if (!staleCountProblems([SCENARIOS.length, 86], staleRoot).some((p) => p.includes('旧值未标记') && p.includes('120/120'))) {
+        throw new Error('点名套件的旧比值未被报告: ' + JSON.stringify(staleCountProblems([SCENARIOS.length, 86], staleRoot)));
+      }
+      writeFile(staleRoot, 'docs/internal/DOC.md', 'guard-self-test 覆盖率 120/121。\n');
+      if (staleCountProblems([SCENARIOS.length, 86], staleRoot).length !== 0) {
+        throw new Error('非等值比值不是计数形态（不得参与）: ' + JSON.stringify(staleCountProblems([SCENARIOS.length, 86], staleRoot)));
+      }
+      // 声明的 CLAUDE.md 形态：维护者面逐册纳入（夹具根下 CLAUDE.md 在场即入面）
+      writeFile(staleRoot, 'CLAUDE.md', '自检套件 120 场景。\n');
+      if (!staleCountProblems([SCENARIOS.length, 86], staleRoot).some((p) => p.includes('CLAUDE.md:1') && p.includes('旧值未标记'))) {
+        throw new Error('CLAUDE.md 未纳入 stale 受检面: ' + JSON.stringify(staleCountProblems([SCENARIOS.length, 86], staleRoot)));
+      }
+      // 读取失败可见化：与维护文档机检同型（同名目录 → 读取错误，不得静默跳过）
+      fs.mkdirSync(path.join(staleRoot, 'docs', 'internal', 'DIR.md'), { recursive: true });
+      if (!staleCountProblems([SCENARIOS.length, 86], staleRoot).some((p) => p.includes('无法读取: docs/internal/DIR.md'))) {
+        throw new Error('stale 受检面里的不可读目标被静默跳过: ' + JSON.stringify(staleCountProblems([SCENARIOS.length, 86], staleRoot)));
+      }
+      fs.rmSync(staleRoot, { recursive: true, force: true }); // 夹具根清理（残留目录由底部统一校验）
+      // ⑤ 面路径的推导纪律锚（同类断言回扫）：参考册受检面必须**从本脚本自身位置**推导——
+      //    权威源（.flow-comet/skills）与各安装副本（.claude / .agents / .dsh/skills）同一推导
+      //    覆盖；硬编码树根相对路径会在安装副本形态指向不存在的面（静默空面 = 未执行当通过）。
+      if (path.resolve(REPO_ROOT, REFERENCE_FACE_DIR_REL) !== path.resolve(__dirname, '..', 'reference')) {
+        throw new Error('参考册受检面必须由脚本自身位置推导（不得硬编码树根相对路径），实际: ' + REFERENCE_FACE_DIR_REL);
+      }
+      if (path.basename(REFERENCE_FACE_DIR_REL) !== 'reference') {
+        throw new Error('参考册受检面路径异常: ' + REFERENCE_FACE_DIR_REL);
+      }
     },
   },
 
@@ -8860,7 +9868,7 @@ const SCENARIOS = [
         '',
       ].join('\n'));
       writeFile(dir, 'package.json', '{"name":"x"}');
-      const res = runState(['init', CHANGE_ID, '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const res = runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-context']);
       assertExit(res, 0);
       assertOut(res, 'INIT-DONE');
       const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -8879,7 +9887,7 @@ const SCENARIOS = [
         '## intel-scan 元数据 ##', '- **last_intel_scan**: x', '- **scanner**: x', '- **下次重扫建议**: x',
         '',
       ].join('\n'));
-      const boundary = runState(['init', CHANGE_ID + '-2', '--init-context'], dir, { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') });
+      const boundary = runStateWithProtocol(dir, ['init', CHANGE_ID + '-2', '--init-context']);
       assertExit(boundary, 0);
       assertOut(boundary, 'INIT-VALIDATE-FAILED');
       assertOut(boundary, '项目概要');
@@ -8935,11 +9943,15 @@ const SCENARIOS = [
     },
   },
 
-  // 244: 维护文档机检（docs-governance）——docs/internal 死引用 + ROADMAP 最低结构。
+  // 244: 维护文档机检（docs-governance）——死引用 + ROADMAP 最低结构。
   // 判别力四类：正例（干净夹具通过）/ 反例（死引用必须报告且含来源与目标）/
   // 越界（ROADMAP 缺段必须报告）/ 恢复（修复后通过）；另锁「整组缺席即跳过」语义。
+  // 本批 in-place 扩展（不新增顶层编号）：① 三册显式扫描面（.specs 三册）正/反例；
+  // ② 树根相对形态解析正例与同族缺目标反例——后者是窄域规则的判别力证据（旧逻辑在顶层目录
+  // 不存在时直接跳过，必然放过）；③ 窄域边界负例（外部命名空间 / 已移除临时区仍跳过）；
+  // ④ maintainerFaceSkips 描述符正/反例。
   {
-    name: '244 维护文档机检：docs/internal 死引用与 ROADMAP 结构（docs-governance）',
+    name: '244 维护文档机检：死引用与 ROADMAP 结构（含三册扫描面与树根相对解析）',
     run: (dir) => {
       writeFile(dir, 'docs/internal/ROADMAP.md', '# 路线图\n\n## Now\n\n## Next\n\n## Later\n\n## Open decisions\n');
       writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/ROADMAP.md` 与 `docs/internal/missing-file.md`。\n');
@@ -8965,16 +9977,385 @@ const SCENARIOS = [
       if (internalDocsProblems(dir).length !== 0) {
         throw new Error('修复后应通过: ' + JSON.stringify(internalDocsProblems(dir)));
       }
+      // —— 扫描面扩展：三册显式清单（.specs/CONTEXT.md / LESSONS.md / CHANGELOG.md）——
+      // 正例：三册在场且互相引用（册间互引）→ 合法引用不得误报
+      writeFile(dir, '.specs/CONTEXT.md', '见 `docs/internal/ROADMAP.md` 与 `.specs/LESSONS.md`。\n');
+      writeFile(dir, '.specs/LESSONS.md', '见 `.specs/CONTEXT.md`。\n');
+      writeFile(dir, '.specs/CHANGELOG.md', '见 `.specs/LESSONS.md`。\n');
+      if (internalDocsProblems(dir).length !== 0) {
+        throw new Error('三册合法引用不得误报: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      // 反例：逐册注入一行死引用——每册都必须被扫到，且报告需带册名与行号
+      for (const [book, deadRef] of [
+        ['.specs/CONTEXT.md', 'docs/internal/missing-context-target.md'],
+        ['.specs/LESSONS.md', 'docs/internal/missing-lessons-target.md'],
+        ['.specs/CHANGELOG.md', 'docs/internal/missing-changelog-target.md'],
+      ]) {
+        writeFile(dir, book, '第一行。\n见 `' + deadRef + '`。\n');
+        const bookProblems = internalDocsProblems(dir);
+        if (!bookProblems.some((p) => p.includes(path.posix.basename(book) + ':2') && p.includes(deadRef))) {
+          throw new Error(book + ' 死引用未被报告（三册扫描面缺失）: ' + JSON.stringify(bookProblems));
+        }
+        if (bookProblems.length !== 1) {
+          throw new Error(book + ' 死引用判定应恰 1 条: ' + JSON.stringify(bookProblems));
+        }
+        writeFile(dir, book, '见 `.specs/CONTEXT.md`。\n'); // 修复 → 复绿
+      }
+      if (internalDocsProblems(dir).length !== 0) {
+        throw new Error('三册修复后应通过: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      // —— 解析基准扩展：树根相对形态（flow-comet-* 技能目录 / rules）——
+      // 正例：目标真实存在（技能树根 / 规则树根各一）→ 不报
+      writeFile(dir, '.flow-comet/skills/flow-comet-fixture/SKILL.md', '# fixture\n');
+      writeFile(dir, '.flow-comet/rules/fixture-rule.md', '# rule\n');
+      writeFile(dir, 'docs/internal/FIXTURE.md',
+        '见 `flow-comet-fixture/SKILL.md` 与 `rules/fixture-rule.md` 与 `docs/internal/ROADMAP.md`。\n');
+      const treePositive = internalDocsProblems(dir);
+      if (treePositive.length !== 0) {
+        throw new Error('树根相对形态（技能目录 / 规则树）既有目标应解析通过: ' + JSON.stringify(treePositive));
+      }
+      // 反例（窄域规则判别力）：同族形态但目标不存在，且顶层目录在仓库根不存在——
+      // 旧判定会以「顶层整体缺席 → 跳过」静默放行，窄域规则必须按死引用报告
+      writeFile(dir, 'docs/internal/FIXTURE.md',
+        '见 `flow-comet-missing-fixture/SKILL.md` 与 `rules/missing-rule.md` 与 `docs/internal/ROADMAP.md`。\n');
+      const treeNegative = internalDocsProblems(dir);
+      for (const deadRef of ['flow-comet-missing-fixture/SKILL.md', 'rules/missing-rule.md']) {
+        if (!treeNegative.some((p) => p.includes('FIXTURE.md:1') && p.includes(deadRef))) {
+          throw new Error('同族缺目标（' + deadRef + '）必须按死引用报告（窄域规则）: ' + JSON.stringify(treeNegative));
+        }
+      }
+      // —— 本批 in-place 增锚（声明式族：外部命名空间 / 退役命名空间 / 示例）——旧语义
+      // "顶层段不存在即静默跳过"在此被替换：允许面必须显式登记，未登记者一律按死引用报告
+      // （fail-closed；旧逻辑对下列②③两种形态都静默放过——判别力差异即反向构造证据）。
+      // ① 外部命名空间族（前缀声明）→ 仍跳过（平台侧命名空间在本仓库根天然不存在）
+      writeFile(dir, 'docs/internal/FIXTURE.md',
+        '见 `DSH_HOME/skills/x/SKILL.md` 与 `dsh-tui/lib/a.js` 与 `dsh-base/cordis.patch.yml` 与 `docs/internal/ROADMAP.md`。\n');
+      const externalProblems = internalDocsProblems(dir);
+      if (externalProblems.length !== 0) {
+        throw new Error('声明式外部命名空间族不得误报: ' + JSON.stringify(externalProblems));
+      }
+      // ② 退役命名空间：登记在案（记录迁移的决策件）→ 跳过；未登记文件里的同形态引用 → 必须按死引用报
+      writeFile(dir, '.specs/adr/ADR-009-runtime-namespace.md', '见 `.comet/config.yaml` 与 `.comet/flow-comet-state.json`。\n');
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `.comet/config.yaml` 与 `docs/internal/ROADMAP.md`。\n');
+      const retiredProblems = internalDocsProblems(dir);
+      if (!retiredProblems.some((p) => p.includes('FIXTURE.md:1') && p.includes('.comet/config.yaml'))) {
+        throw new Error('未登记的退役命名空间引用必须按死引用报告: ' + JSON.stringify(retiredProblems));
+      }
+      if (retiredProblems.some((p) => p.includes('ADR-009-runtime-namespace.md'))) {
+        throw new Error('登记在案的迁移记录件不得误报: ' + JSON.stringify(retiredProblems));
+      }
+      // ②b 允许面按角色 / 前缀匹配（改名不误报）：同一决策件 / 同族后续决策件换名后仍须跳过——
+      // 精确 ref 硬编码下改名即静默失配 → 合法历史迁移记录被误报死引用（误红会诱导维护者
+      // 删掉历史事实）。本锚即"改名后仍正确跳过"的反向构造。
+      fs.renameSync(path.join(dir, '.specs', 'adr', 'ADR-009-runtime-namespace.md'),
+        path.join(dir, '.specs', 'adr', 'ADR-009-runtime-namespace-renamed.md'));
+      writeFile(dir, '.specs/adr/ADR-010-namespace-followup.md', '见 `.comet/config.yaml`。\n');
+      const renamedProblems = internalDocsProblems(dir);
+      for (const renamed of ['ADR-009-runtime-namespace-renamed.md', 'ADR-010-namespace-followup.md']) {
+        if (renamedProblems.some((p) => p.includes(renamed))) {
+          throw new Error('决策件改名后不得误报死引用（按前缀匹配退役命名空间允许面）: ' + renamed
+            + ' → ' + JSON.stringify(renamedProblems));
+        }
+      }
+      // ②c 决策册角色匹配（角色面正 / 反例；角色判定直接锚 + 引用面不得被角色面放宽）
+      if (!isDeclaredReferenceSkip('.specs/CONTEXT.md', '.comet/config.yaml')
+        || !isDeclaredReferenceSkip('.specs/CONTEXT-decisions.md', '.comet/flow-comet-state.json')) {
+        throw new Error('决策册角色（含改名形态）必须按角色命中退役命名空间允许面');
+      }
+      if (isDeclaredReferenceSkip('.specs/CONTEXT-decisions.md', 'docs/internal/missing-target.md')
+        || isDeclaredReferenceSkip('.specs/OTHER.md', '.comet/config.yaml')) {
+        throw new Error('允许面不得面化：引用面（退役命名空间前缀）与文件面（角色 / 前缀）须同时命中');
+      }
+      // 反例（fail-closed 仍成立）：非登记角色的同形态引用 → 必须照报（允许面不得变成宽面）
+      writeFile(dir, '.specs/adr/ADR-008-unrelated.md', '见 `.comet/config.yaml`。\n');
+      const unrelatedProblems = internalDocsProblems(dir);
+      if (!unrelatedProblems.some((p) => p.includes('ADR-008-unrelated.md') && p.includes('.comet/config.yaml'))) {
+        throw new Error('非登记角色的退役命名空间引用必须照报: ' + JSON.stringify(unrelatedProblems));
+      }
+      fs.rmSync(path.join(dir, '.specs', 'adr', 'ADR-009-runtime-namespace-renamed.md'));
+      fs.rmSync(path.join(dir, '.specs', 'adr', 'ADR-010-namespace-followup.md'));
+      fs.rmSync(path.join(dir, '.specs', 'adr', 'ADR-008-unrelated.md'));
+      // 夹具移除后本组不再产生任何报告（判别力反向确认：上面三类断言确由这些夹具驱动，
+      // 不是被其它夹具的既有报告蒙对）。此处只对本组文件断言——docs/internal/FIXTURE.md
+      // 仍带着上一段夹具的未登记引用（其报告由上一段断言负责）。
+      const afterAllowlistCleanup = internalDocsProblems(dir);
+      for (const removed of ['ADR-009-runtime-namespace-renamed.md', 'ADR-010-namespace-followup.md', 'ADR-008-unrelated.md']) {
+        if (afterAllowlistCleanup.some((p) => p.includes(removed))) {
+          throw new Error('允许面夹具移除后不得再报该文件: ' + removed + ' → ' + JSON.stringify(afterAllowlistCleanup));
+        }
+      }
+      // ③ 已移除临时区（未登记形态）→ 必须报（真实残留曾因旧跳过语义长期不可见）
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `.verify-tools/level3-smoke.mjs` 与 `docs/internal/ROADMAP.md`。\n');
+      const residueProblems = internalDocsProblems(dir);
+      if (!residueProblems.some((p) => p.includes('FIXTURE.md:1') && p.includes('.verify-tools/level3-smoke.mjs'))) {
+        throw new Error('未登记的临时区引用必须按死引用报告: ' + JSON.stringify(residueProblems));
+      }
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/ROADMAP.md`。\n');
+      // —— 行号存在与不越界（结构级）：引用解析成功后才校验行号 ——
+      writeFile(dir, 'docs/internal/TARGET.md', '第一行\n第二行\n第三行\n');
+      writeFile(dir, 'docs/internal/FIXTURE.md',
+        '见 `docs/internal/TARGET.md:1` 与 `docs/internal/TARGET.md:1-3` 与 `docs/internal/TARGET.md:2,3`。\n');
+      if (internalDocsProblems(dir).length !== 0) {
+        throw new Error('合法行号引用（单值 / 区间 / 逗号列表）不得误报: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      // 反例：越界（旧实现只判路径存在性，行号部分根本不参与解析 → 必然放过）
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/TARGET.md:99`。\n');
+      const lineProblems = internalDocsProblems(dir);
+      if (!(lineProblems.some((p) => p.includes('行号越界') && p.includes('FIXTURE.md:1')
+        && p.includes('TARGET.md:99') && p.includes('目标共')))) {
+        throw new Error('越界行号未被报告（应含「行号越界」+ 受检文件:行 + 目标:行号 + 目标行数）: '
+          + JSON.stringify(lineProblems));
+      }
+      // 反例：下界（第 0 行不存在）
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/TARGET.md:0`。\n');
+      if (!internalDocsProblems(dir).some((p) => p.includes('行号越界') && p.includes('TARGET.md:0'))) {
+        throw new Error('下界越界（引用第 0 行）未被报告: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      // 反例：尾随换行不得让目标文件被算成"多一行"——3 行文件引 `:4` 必须越界
+      // （旧实现按 split 段数计行，尾随空段被算作一行 → :4 被放过；2026-10-01 PR 审查发现）
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/TARGET.md:4`。\n');
+      if (!internalDocsProblems(dir).some((p) => p.includes('行号越界') && p.includes('TARGET.md:4'))) {
+        throw new Error('尾随换行被算成额外一行（3 行目标文件引 :4 未报越界）: '
+          + JSON.stringify(internalDocsProblems(dir)));
+      }
+      // 反例：**空文件 = 0 行**——空目标文件的任何行号都越界（按 split 段数计会得 1 行 → `:1` 被放过）
+      writeFile(dir, 'docs/internal/EMPTY.md', '');
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/EMPTY.md:1`。\n');
+      if (!internalDocsProblems(dir).some((p) => p.includes('行号越界') && p.includes('EMPTY.md:1'))) {
+        throw new Error('空目标文件引 :1 未报越界（空文件应为 0 行）: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      fs.rmSync(path.join(dir, 'docs/internal', 'EMPTY.md'));
+      // 反例：区间上端越界（区间取两端逐一校验）
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/TARGET.md:2-99`。\n');
+      if (!internalDocsProblems(dir).some((p) => p.includes('行号越界') && p.includes('TARGET.md:99'))) {
+        throw new Error('区间上端越界未被报告: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      // 反例：逗号列表中的越界项
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/TARGET.md:1,99`。\n');
+      if (!internalDocsProblems(dir).some((p) => p.includes('行号越界') && p.includes('TARGET.md:99'))) {
+        throw new Error('逗号列表中的越界项未被报告: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      // 并列写法护栏：首段带文件扩展名的 token 不是路径引用（两个文件名并列）→ 不参与解析；
+      // 同一行里真实的越界引用照报（证明护栏没有把整行一起吞掉——判据必须收窄到"首段带扩展名"）
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `TEST.md/REVIEW.md` 与 `docs/internal/TARGET.md:99`。\n');
+      const parallelProblems = internalDocsProblems(dir);
+      if (parallelProblems.some((p) => p.includes('TEST.md/REVIEW.md'))) {
+        throw new Error('并列写法（首段带扩展名）不得按路径引用解析: ' + JSON.stringify(parallelProblems));
+      }
+      if (!parallelProblems.some((p) => p.includes('TARGET.md:99'))) {
+        throw new Error('并列写法护栏不得吞掉同一行的真实越界引用: ' + JSON.stringify(parallelProblems));
+      }
+      // 目标本身不存在时只报死引用，不叠报行号越界（同一处只报一次）
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/MISSING-TARGET.md:99`。\n');
+      const missingTargetProblems = internalDocsProblems(dir);
+      if (!missingTargetProblems.some((p) => p.includes('死引用') && p.includes('MISSING-TARGET.md'))) {
+        throw new Error('不存在的目标应报死引用: ' + JSON.stringify(missingTargetProblems));
+      }
+      if (missingTargetProblems.some((p) => p.includes('行号越界'))) {
+        throw new Error('目标不存在时不得叠报行号越界: ' + JSON.stringify(missingTargetProblems));
+      }
+      fs.rmSync(path.join(dir, 'docs/internal', 'TARGET.md'));
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/ROADMAP.md`。\n');
+      // —— 表头新鲜度（内容锚：表头日期 ≥ 正文最大日期；未声明表头 → 跳过）——
+      writeFile(dir, 'docs/internal/HEADER.md', '> 最后更新：2026-01-01\n\n正文提到 2026-02-02 的事。\n');
+      const staleHeaderProblems = internalDocsProblems(dir);
+      if (!(staleHeaderProblems.some((p) => p.includes('表头不新鲜') && p.includes('HEADER.md')
+        && p.includes('2026-01-01') && p.includes('2026-02-02')))) {
+        throw new Error('表头落后于正文最大日期未被报告（应含文件与两侧日期）: ' + JSON.stringify(staleHeaderProblems));
+      }
+      writeFile(dir, 'docs/internal/HEADER.md', '> 最后更新：2026-02-02\n\n正文提到 2026-02-02 的事。\n');
+      if (internalDocsProblems(dir).some((p) => p.includes('表头不新鲜'))) {
+        throw new Error('表头与正文最大日期相等（新鲜）不得误报: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      writeFile(dir, 'docs/internal/HEADER.md', '正文提到 2026-12-31 的事，但本册没声明表头。\n');
+      if (internalDocsProblems(dir).some((p) => p.includes('表头不新鲜'))) {
+        throw new Error('未声明表头的目标必须跳过（登记边界）: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      fs.rmSync(path.join(dir, 'docs/internal', 'HEADER.md'));
+      // —— `## Now` 段不得出现已归档 change-id（旧逻辑无此判据 → 必然放过）——
+      writeFile(dir, '.specs/archive/2026-01-01-archived-fixture/CHANGE.md', '# 归档夹具\n');
+      writeFile(dir, 'docs/internal/ROADMAP.md',
+        '# 路线图\n\n> 最后更新：2026-01-01\n\n## Now\n\n- 在办：archived-fixture 的后续\n\n## Next\n\n## Later\n\n## Open decisions\n');
+      const nowProblems = internalDocsProblems(dir);
+      if (!nowProblems.some((p) => p.includes('Now 段含已归档 change-id: archived-fixture'))) {
+        throw new Error('在办段引用已归档 change-id 未被报告: ' + JSON.stringify(nowProblems));
+      }
+      // 正例：同一 id 只出现在 Now 段之外 → 不报（判据只约束在办段，历史段本就该记已归档项）
+      writeFile(dir, 'docs/internal/ROADMAP.md',
+        '# 路线图\n\n> 最后更新：2026-01-01\n\n## Now\n\n- 在办：别的主题\n\n## Next\n\n## Later\n\n- 历史：archived-fixture\n\n## Open decisions\n');
+      if (internalDocsProblems(dir).some((p) => p.includes('Now 段含已归档'))) {
+        throw new Error('Now 段之外的归档 id 不得误报: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      // 反例：归档 id 必须**整词**匹配——`archived-fixture-v2` 含 `archived-fixture` 但不得误报
+      // （旧实现用 includes 子串匹配 → 短 id 会命中更长 id 或同族更长 id 的中间；2026-10-01 PR 审查发现）
+      writeFile(dir, 'docs/internal/ROADMAP.md',
+        '# 路线图\n\n> 最后更新：2026-01-01\n\n## Now\n\n- 在办：archived-fixture-v2 的后续\n\n## Next\n\n## Later\n\n## Open decisions\n');
+      if (internalDocsProblems(dir).some((p) => p.includes('Now 段含已归档 change-id'))) {
+        throw new Error('归档 id 子串误命中（archived-fixture-v2 不得命中 archived-fixture）: '
+          + JSON.stringify(internalDocsProblems(dir)));
+      }
+      // 定位口径锚：文件头目录说明行里出现被反引号包住的同名标题字样时，段定位必须仍命中真实
+      // 在办段（按行首标题扫描，而不是按子串首次出现位置切段——后者会切出极短窗口使判据恒过）
+      writeFile(dir, 'docs/internal/ROADMAP.md',
+        '# 路线图\n\n> 最后更新：2026-01-01\n\n目录说明：`## Now` 与 `## Next` 两段。\n\n## Now\n\n- 在办：archived-fixture\n\n## Next\n\n## Later\n\n## Open decisions\n');
+      if (!internalDocsProblems(dir).some((p) => p.includes('Now 段含已归档 change-id: archived-fixture'))) {
+        throw new Error('目录说明行含标题字样时仍须命中真实在办段（标题扫描口径）: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      fs.rmSync(path.join(dir, '.specs', 'archive'), { recursive: true, force: true });
+      writeFile(dir, 'docs/internal/ROADMAP.md', '# 路线图\n\n## Now\n\n## Next\n\n## Later\n\n## Open decisions\n');
+      // 缺席可见化描述符（正例）：维护者面全在场 → 无跳过描述符
+      if (maintainerFaceSkips(dir).length !== 0) {
+        throw new Error('维护者面在场时应无跳过描述符: ' + JSON.stringify(maintainerFaceSkips(dir)));
+      }
       // 越界：删段 → 结构问题必须报告
       writeFile(dir, 'docs/internal/ROADMAP.md', '# 路线图\n\n## Now\n## Next\n## Later\n');
       const structProblems = internalDocsProblems(dir);
       if (!structProblems.some((p) => p.includes('Open decisions'))) {
         throw new Error('ROADMAP 缺段未被报告: ' + JSON.stringify(structProblems));
       }
-      // 整组缺席（CI / worktree 形态）→ 跳过，不误红
-      fs.rmSync(path.join(dir, 'docs/internal'), { recursive: true, force: true });
+      // —— 本批 in-place 增锚（F4：读取失败可见化）——以同名目录替换 .md 文件 → readFileSync
+      // 抛 EISDIR（目录读取错误，跨平台同码）；旧实现 catch → continue 静默跳过，该目标既无
+      // FAIL 也无 SKIP（「未执行 ≠ 通过」的静默通道，L-079 同类）→ 必须报告
+      // 「无法读取: <rel>: <err 摘要>」。前置：ROADMAP 复原为完整结构，确保本锚的失败只可能
+      // 来自不可读目标（无结构噪声）。
+      writeFile(dir, 'docs/internal/ROADMAP.md', '# 路线图\n\n## Now\n\n## Next\n\n## Later\n\n## Open decisions\n');
       if (internalDocsProblems(dir).length !== 0) {
-        throw new Error('组目录缺席时应跳过: ' + JSON.stringify(internalDocsProblems(dir)));
+        throw new Error('不可读目标锚前置：干净夹具应通过: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      fs.mkdirSync(path.join(dir, 'docs/internal', 'UNREADABLE.md'), { recursive: true });
+      const unreadableProblems = internalDocsProblems(dir);
+      if (!unreadableProblems.some((p) => p.includes('无法读取: docs/internal/UNREADABLE.md'))) {
+        throw new Error('不可读目标被静默跳过（应报告「无法读取: <rel>: <err 摘要>」）: ' + JSON.stringify(unreadableProblems));
+      }
+      fs.rmSync(path.join(dir, 'docs/internal', 'UNREADABLE.md'), { recursive: true, force: true });
+      if (internalDocsProblems(dir).length !== 0) {
+        throw new Error('移除不可读目标后应复绿: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      // —— 本批 in-place 增锚（F4 语义的结构检查侧补齐）——：目标扫描的读取失败已可见化，但
+      // ROADMAP 结构检查此前仍对同一路径直接 readFileSync——ROADMAP 自身不可读（同名目录 →
+      // EISDIR / 访问类错误）时未捕获异常会把整个套件打成堆栈崩溃，而不是给出可见问题条目。
+      // 夹具把 ROADMAP.md 换成同名目录（其余受检面保持合法，失败只可能来自该目标）→ 断言
+      // 返回问题数组且含「无法读取: docs/internal/ROADMAP.md」（不是抛出），且不得以「结构缺段」
+      // 噪声替代读取失败可见化（读取失败即跳过四段结构检查）；移除目录、写回合法 ROADMAP → 复绿。
+      fs.rmSync(path.join(dir, 'docs/internal', 'ROADMAP.md'), { force: true });
+      fs.mkdirSync(path.join(dir, 'docs/internal', 'ROADMAP.md'), { recursive: true });
+      const unreadableRoadmap = internalDocsProblems(dir);
+      if (!Array.isArray(unreadableRoadmap)) {
+        throw new Error('ROADMAP 不可读时应返回问题数组（不得抛出）: ' + String(unreadableRoadmap));
+      }
+      if (!unreadableRoadmap.some((p) => p.includes('无法读取: docs/internal/ROADMAP.md'))) {
+        throw new Error('ROADMAP 自身不可读未被报告（应含「无法读取: docs/internal/ROADMAP.md」）: ' + JSON.stringify(unreadableRoadmap));
+      }
+      if (unreadableRoadmap.some((p) => p.includes('ROADMAP 结构缺段'))) {
+        throw new Error('ROADMAP 读取失败时不得继续四段结构检查: ' + JSON.stringify(unreadableRoadmap));
+      }
+      fs.rmSync(path.join(dir, 'docs/internal', 'ROADMAP.md'), { recursive: true, force: true });
+      writeFile(dir, 'docs/internal/ROADMAP.md', '# 路线图\n\n## Now\n\n## Next\n\n## Later\n\n## Open decisions\n');
+      if (internalDocsProblems(dir).length !== 0) {
+        throw new Error('ROADMAP 写回合法结构后应复绿: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      // 整组缺席（CI / worktree 形态）→ 跳过，不误红：目标面 = docs/internal 与 .specs/adr 与
+      // 三册——组缺席判据是「全部目标面缺席」（targets.length === 0），故夹具同步移除三册。
+      fs.rmSync(path.join(dir, 'docs/internal'), { recursive: true, force: true });
+      fs.rmSync(path.join(dir, '.specs'), { recursive: true, force: true });
+      if (internalDocsProblems(dir).length !== 0) {
+        throw new Error('目标面整组缺席时应跳过: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      // 缺席可见化描述符（反例）：维护者面整体缺席 → 逐面给出「面名 + 原因」，
+      // 供套件底部输出可见 SKIP 行；本节同时锁住「判定语义零变化」（上面跳过断言）。
+      const skips = maintainerFaceSkips(dir);
+      if (skips.length !== 2) {
+        throw new Error('维护者面缺席应给出 2 条跳过描述符，实际 ' + JSON.stringify(skips));
+      }
+      for (const skip of skips) {
+        if (typeof skip.face !== 'string' || skip.face.trim() === ''
+          || typeof skip.reason !== 'string' || skip.reason.trim() === '') {
+          throw new Error('跳过描述符须含面名与原因: ' + JSON.stringify(skip));
+        }
+      }
+      if (!skips.some((s) => s.face.includes('计数') && s.reason.includes('docs/internal'))) {
+        throw new Error('计数面跳过描述符应说明 docs/internal 缺席: ' + JSON.stringify(skips));
+      }
+      if (!skips.some((s) => s.face.includes('机检') && s.reason.includes('目标面'))) {
+        throw new Error('维护文档机检面跳过描述符应说明目标面缺席: ' + JSON.stringify(skips));
+      }
+      // —— 本批 in-place 增锚（公开产物零代号判据 + 词表镜像漂移判据）——
+      // 与 .githooks 词表单一来源同判据（该文件主仓私有、不随技能包分发；本文件内保留同义镜像，
+      // 两处同改）。① 表驱动等价性：词表**每个分支**各一条正例（分支被删 / 被收窄过头 → 该行
+      // 先红）与一条对应反例（分支被放宽成裸词 / 宽前缀 → 该行先红）——反例按"放宽后会被误
+      // 命中的合法或无关形态"选取，故"某分支被动过"必然落在某个（正例，反例）对上；
+      // ② 本文件注释层零残留（清理后不许回潮）；③ 词表镜像漂移判据夹具锚（同源 → 绿 /
+      // 改一字符 → 红且消息含两侧片段与长度 / 私有面缺席 → 显式"无法执行"而非静默放过）。
+      // 注意：形态字面量只能写在非注释行——本锚的②正是扫注释层。
+      const CODE_BRANCH_SAMPLES = [
+        ['场景编号', 'S12', 'S1234'],
+        ['修复族 id', 'T-FIX-01', 'FIX-01'],
+        ['批次连字符前缀', 'batch-2', 'batch-name'],
+        ['缺陷编号', 'D-12', 'D-abc'],
+        ['优先级编号', 'P3', 'P9'],
+        ['验证轮次', 'round 3', 'round-table'],
+        ['英文本地实践词', 'dogfood', 'dog food'],
+        ['内部标识词', '内部', '内卷'],
+        ['批次加编号', '批次 D', '批次发布'],
+        ['批加编号', '批 2', '第一批 2 次'],
+        ['批加编号（序数与批之间有空格）', '批 2', '第 1 批 2 次'],
+        ['级加编号', '级 3', '级联'],
+        ['验收代号', 'UAT-7', 'UAT-x'],
+        ['工作项编号', 'R-14', 'ADR-013'],
+        ['工作项编号（三位不截断）', 'R-14', 'R-123'],
+      ];
+      for (const [label, hit, miss] of CODE_BRANCH_SAMPLES) {
+        if (!PUBLIC_CODE_RE.test(hit)) {
+          throw new Error('词表分支缺失或被收窄过头（正例不再命中）: ' + label + ' → ' + JSON.stringify(hit));
+        }
+        if (PUBLIC_CODE_RE.test(miss)) {
+          throw new Error('词表分支被放宽（反例被误命中）: ' + label + ' → ' + JSON.stringify(miss));
+        }
+      }
+      for (const legit of ['PR-130', '维护批次', '批处理', 'Fix 批次']) {
+        if (PUBLIC_CODE_RE.test(legit)) {
+          throw new Error('合法相似子串被零代号判据误报: ' + legit);
+        }
+      }
+      // ③ 词表镜像漂移判据（夹具驱动；不依赖真实私有面在场——权威源与安装副本两形态都可跑）
+      const mirrorFixtureRel = path.posix.join('.githooks', 'internal-codes.mjs');
+      const mirrorText = 'export const BANNED = /' + PUBLIC_CODE_RE.source + '/;\n';
+      writeFile(dir, mirrorFixtureRel, mirrorText);
+      const mirrorOk = vocabularyMirrorProblems(dir);
+      if (mirrorOk.length !== 0) {
+        throw new Error('同源词表镜像不得报漂移: ' + JSON.stringify(mirrorOk));
+      }
+      // 逐字符比对必有判别力：镜像侧改动一个字符（这里放宽一条分支）→ 必报，且消息可定位
+      const driftedSource = PUBLIC_CODE_RE.source.replace('dogfood', 'dogfoods');
+      if (driftedSource === PUBLIC_CODE_RE.source) {
+        throw new Error('夹具前提失效：漂移注入未改变镜像 source（词表分支名已变）');
+      }
+      writeFile(dir, mirrorFixtureRel, 'export const BANNED = /' + driftedSource + '/;\n');
+      const driftProblems = vocabularyMirrorProblems(dir);
+      if (!driftProblems.some((p) => p.includes('词表镜像漂移') && p.includes('主仓侧片段')
+        && p.includes('套件侧片段') && p.includes('首个差异位置')
+        && p.includes(String(driftedSource.length)) && p.includes(String(PUBLIC_CODE_RE.source.length)))) {
+        throw new Error('镜像侧改动一个字符必须报漂移且消息含两侧片段与长度: ' + JSON.stringify(driftProblems));
+      }
+      writeFile(dir, mirrorFixtureRel, mirrorText);
+      if (vocabularyMirrorProblems(dir).length !== 0) {
+        throw new Error('镜像还原后应复绿: ' + JSON.stringify(vocabularyMirrorProblems(dir)));
+      }
+      // 私有面结构性缺席（安装副本形态）→ 显式"判据无法执行"，不得静默返回空
+      fs.rmSync(path.join(dir, '.githooks'), { recursive: true, force: true });
+      const mirrorMissing = vocabularyMirrorProblems(dir);
+      if (!mirrorMissing.some((p) => p.includes('无法执行') && p.includes(mirrorFixtureRel))) {
+        throw new Error('私有面缺席必须显式报告判据未执行（未验证 ≠ 通过）: ' + JSON.stringify(mirrorMissing));
+      }
+      const selfLines = fs.readFileSync(path.join(__dirname, 'guard-self-test.mjs'), 'utf8').split(/\r?\n/);
+      const commentHits = [];
+      for (let i = 0; i < selfLines.length; i += 1) {
+        if (!/^\s*(\/\/|\*|\/\*)/.test(selfLines[i])) continue;
+        const hit = selfLines[i].match(PUBLIC_CODE_RE);
+        if (hit) commentHits.push((i + 1) + ': ' + hit[0]);
+      }
+      if (commentHits.length !== 0) {
+        throw new Error('本文件注释层仍有未公开概念字样（判据锚：注释层零残留）: ' + commentHits.join(', '));
       }
     },
   },
@@ -10004,7 +11385,6 @@ const SCENARIOS = [
       writeIntakeArtifacts(dir);
       const taskPath = '.specs/' + CHANGE_ID + '/TASK.md';
       const statePath = path.join(dir, '.flow-comet', 'flow-comet-state.json');
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
         '# REVIEW\n\n## 发现\n\n### Critical\n\n- 无\n\n### Major\n\n- 无\n\n### Minor\n\n- 无\n\n## 结论\n\n审查发现需修复项，Fix 任务已追加；待 execute 出口完成后重新出口。\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
@@ -10120,12 +11500,12 @@ const SCENARIOS = [
         ...handoffFor(['T-FIX-01']),
       };
       writeState(dir, after);
-      assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md']), 0);
       const recDoneExit = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(recDoneExit, 0);
       assertOut(recDoneExit, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
       assertOut(recDoneExit, 'NODE: review');
-      assertExit(runState(['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md'], dir, env), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md']), 0);
       assertExit(runGuard(['entry', 'review'], dir), 0);
       const recDoneReview = runGuard(['exit', 'review', '--apply'], dir);
       assertExit(recDoneReview, 0);
@@ -10168,12 +11548,12 @@ const SCENARIOS = [
         ...handoffFor(['T-FIX-01']),
       };
       writeState(dir, after);
-      assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md']), 0);
       const recDoneVerifyExit = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(recDoneVerifyExit, 0);
       assertOut(recDoneVerifyExit, 'FIX-BATCH: 回源节点 verify（execute 出口已完成）');
       assertOut(recDoneVerifyExit, 'NODE: verify');
-      assertExit(runState(['skill-load', 'verify', 'flow-comet-verify', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'verify', 'flow-comet-verify', '--prompt', 'flow-kit/prompts/7-integration.md']), 0);
       assertExit(runGuard(['entry', 'verify'], dir), 0);
       const recDoneVerify = runGuard(['exit', 'verify', '--apply'], dir);
       assertExit(recDoneVerify, 0);
@@ -10208,7 +11588,7 @@ const SCENARIOS = [
       assertOut(rParBlock, 'BLOCKED: 存在未归位/未跑出口的 Fix 批次');
       assertNotOut(rParBlock, 'ALL CHECKS PASSED');
       writeState(dir, reviewState);
-      const rParNext = runState(['next'], dir, env);
+      const rParNext = runStateWithProtocol(dir, ['next']);
       assertExit(rParNext, 0);
       assertOut(rParNext, 'FIX-BATCH: 归位 subagent-execute（源节点 review）');
       assertOut(rParNext, 'NODE: subagent-execute');
@@ -10230,7 +11610,7 @@ const SCENARIOS = [
         ...handoffFor(['P-FIX-01']),
       };
       writeState(dir, after);
-      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md']), 0);
       const rParExit = runGuard(['exit', 'subagent-execute', '--apply'], dir);
       assertExit(rParExit, 0);
       assertOut(rParExit, 'FIX-BATCH: 回源节点 review（subagent-execute 出口已完成）');
@@ -10245,7 +11625,7 @@ const SCENARIOS = [
         || typeof parFamilyExit.taskSetSignature !== 'string' || parFamilyExit.taskSetSignature === '') {
         throw new Error('并行修复出口应记录本 change + taskSetSignature 的家族出口事件，实际 ' + JSON.stringify(parFamilyExit));
       }
-      assertExit(runState(['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md'], dir, env), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md']), 0);
       assertExit(runGuard(['entry', 'review'], dir), 0);
       const rParSource = runGuard(['exit', 'review', '--apply'], dir);
       assertExit(rParSource, 0);
@@ -10283,7 +11663,7 @@ const SCENARIOS = [
         ...handoffFor(['P-FIX-01']),
       };
       writeState(dir, after);
-      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md']), 0);
       const rDoneParExit = runGuard(['exit', 'subagent-execute', '--apply'], dir);
       assertExit(rDoneParExit, 0);
       assertOut(rDoneParExit, 'FIX-BATCH: 回源节点 review（subagent-execute 出口已完成）');
@@ -10315,7 +11695,6 @@ const SCENARIOS = [
   {
     name: '253 next Fix 回退态显式归位：review/verify 源 + 审计行（无 pending 反例不归位；done-but-unclosed 归位）',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       const taskPath = '.specs/' + CHANGE_ID + '/TASK.md';
       const base = {
@@ -10335,7 +11714,7 @@ const SCENARIOS = [
       // ① review 源：pending Fix 任务在场 → NODE: execute + 审计行 + 机器字段归位写盘
       writeFile(dir, taskPath, fixBatchTaskText('pending'));
       writeState(dir, base);
-      const resReview = runState(['next'], dir, env);
+      const resReview = runStateWithProtocol(dir, ['next']);
       assertExit(resReview, 0);
       assertOut(resReview, 'FIX-BATCH: 归位 execute（源节点 review）');
       assertOut(resReview, 'NODE: execute');
@@ -10355,7 +11734,7 @@ const SCENARIOS = [
         enteredNodes: [...base.enteredNodes, 'verify'],
         evidence: { ...base.evidence, review: { summary: 'review complete' }, verify: { summary: 'verify in progress' } },
       });
-      const resVerify = runState(['next'], dir, env);
+      const resVerify = runStateWithProtocol(dir, ['next']);
       assertExit(resVerify, 0);
       assertOut(resVerify, 'FIX-BATCH: 归位 execute（源节点 verify）');
       assertOut(resVerify, 'NODE: execute');
@@ -10372,7 +11751,7 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
         '# REVIEW\n\n## 发现\n\n### Critical\n\n- 无\n\n### Major\n\n- 无\n\n### Minor\n\n- 无\n\n## 结论\n\nFix 批次由 execute 完成，待回源重新出口。\n');
       writeState(dir, base);
-      const resNoFix = runState(['next'], dir, env);
+      const resNoFix = runStateWithProtocol(dir, ['next']);
       assertExit(resNoFix, 0);
       assertNotOut(resNoFix, 'FIX-BATCH: 归位 execute');
       // ③ 全局缺席：无 pending Fix 任务的回程态，state 侧无 Fix 因果——不得出现任何 FIX-BATCH
@@ -10387,7 +11766,7 @@ const SCENARIOS = [
       // ④ done-but-unclosed 回退态（全 done + history 最新 exit execute 签名仍是追加前值）：
       // next 同样显式归位 execute（修复前 done 变体无恢复通道，next 停在源节点）。
       writeState(dir, { ...base, history: fixBatchHistoryWithStaleExecuteExit() });
-      const resDoneRollback = runState(['next'], dir, env);
+      const resDoneRollback = runStateWithProtocol(dir, ['next']);
       assertExit(resDoneRollback, 0);
       assertOut(resDoneRollback, 'FIX-BATCH: 归位 execute（源节点 review）');
       assertOut(resDoneRollback, 'NODE: execute');
@@ -10401,7 +11780,7 @@ const SCENARIOS = [
       // 不得停在源节点，也不得错配回 execute。
       writeFile(dir, taskPath, fixBatchParallelTaskText('pending'));
       writeState(dir, base);
-      const resParallelReview = runState(['next'], dir, env);
+      const resParallelReview = runStateWithProtocol(dir, ['next']);
       assertExit(resParallelReview, 0);
       assertOut(resParallelReview, 'FIX-BATCH: 归位 subagent-execute（源节点 review）');
       assertOut(resParallelReview, 'NODE: subagent-execute');
@@ -10421,7 +11800,7 @@ const SCENARIOS = [
         enteredNodes: [...base.enteredNodes, 'verify'],
         evidence: { ...base.evidence, review: { summary: 'review complete' }, verify: { summary: 'verify in progress' } },
       });
-      const resParallelVerify = runState(['next'], dir, env);
+      const resParallelVerify = runStateWithProtocol(dir, ['next']);
       assertExit(resParallelVerify, 0);
       assertOut(resParallelVerify, 'FIX-BATCH: 归位 subagent-execute（源节点 verify）');
       assertOut(resParallelVerify, 'NODE: subagent-execute');
@@ -10436,7 +11815,7 @@ const SCENARIOS = [
       writeFile(dir, taskPath, fixBatchParallelTaskText('done'));
       writeFile(dir, '.specs/' + CHANGE_ID + '/P-FIX-01-SUMMARY.md', strictSummary('P-FIX-01'));
       writeState(dir, { ...base, history: fixBatchHistoryWithStaleFamilyExit('subagent-execute') });
-      const resDoneParallel = runState(['next'], dir, env);
+      const resDoneParallel = runStateWithProtocol(dir, ['next']);
       assertExit(resDoneParallel, 0);
       assertOut(resDoneParallel, 'FIX-BATCH: 归位 subagent-execute（源节点 review）');
       assertOut(resDoneParallel, 'NODE: subagent-execute');
@@ -10453,7 +11832,7 @@ const SCENARIOS = [
         const stRound = readScenarioState(dir);
         stRound.fixRoundsByChange = { [CHANGE_ID]: round - 1 };
         writeState(dir, stRound);
-        const resRound = runState(['next'], dir, env);
+        const resRound = runStateWithProtocol(dir, ['next']);
         assertExit(resRound, 0);
         assertOut(resRound, 'FIX-BATCH: 归位 execute（源节点 review）（第 ' + round + '/3 轮）');
         const stAfterRound = readScenarioState(dir);
@@ -10466,7 +11845,7 @@ const SCENARIOS = [
       writeState(dir, { ...base, fixRoundsByChange: { [CHANGE_ID]: 3 } });
       const statePath = path.join(dir, '.flow-comet', 'flow-comet-state.json');
       const beforeRound4 = fs.readFileSync(statePath, 'utf8');
-      const resRound4 = runState(['next'], dir, env);
+      const resRound4 = runStateWithProtocol(dir, ['next']);
       assertExit(resRound4, 1);
       assertOut(resRound4, 'BLOCKED: Fix 批次受控归位已达 3 轮上限');
       assertOut(resRound4, '继续修');
@@ -10485,7 +11864,7 @@ const SCENARIOS = [
       stBadOverride.evidence.review.fixRoundOverride = { round: 4 };
       writeState(dir, stBadOverride);
       const badOverrideBytes = fs.readFileSync(statePath, 'utf8');
-      const resBadOverride = runState(['next'], dir, env);
+      const resBadOverride = runStateWithProtocol(dir, ['next']);
       assertExit(resBadOverride, 1);
       assertOut(resBadOverride, 'BLOCKED: Fix 批次受控归位已达 3 轮上限');
       assertNotOut(resBadOverride, '（第 4/3 轮）');
@@ -10501,7 +11880,7 @@ const SCENARIOS = [
       const stOverride = JSON.parse(fs.readFileSync(statePath, 'utf8'));
       stOverride.evidence.review.fixRoundOverride = { round: 4, at: '2026-09-25T00:00:00.000Z', source: 'fixture-user' };
       writeState(dir, stOverride);
-      const resOverride = runState(['next'], dir, env);
+      const resOverride = runStateWithProtocol(dir, ['next']);
       assertExit(resOverride, 0);
       assertOut(resOverride, '（第 4/3 轮）');
       const stAuthorized = readScenarioState(dir);
@@ -10519,7 +11898,6 @@ const SCENARIOS = [
   {
     name: '254 next Fix 回程豁免：review 源（REVIEW.md 在场不跳过；无 inProgress 证据也不 BLOCK）',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', fixBatchTaskText('done'));
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
@@ -10540,7 +11918,7 @@ const SCENARIOS = [
       };
       // ① 真实回程态（review 已 entry）→ 审计行 + NODE: review + state 只读不改写
       writeState(dir, base);
-      const res = runState(['next'], dir, env);
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'RETURN: 回程源节点 review');
       assertOut(res, 'NODE: review');
@@ -10557,7 +11935,7 @@ const SCENARIOS = [
         enteredNodes: completedNodes.slice(),
         evidence: { execute: { summary: 'fix batch executed' }, 'subagent-execute': { summary: 'delegated' } },
       });
-      const resNoEvidence = runState(['next'], dir, env);
+      const resNoEvidence = runStateWithProtocol(dir, ['next']);
       assertExit(resNoEvidence, 0);
       assertOut(resNoEvidence, 'RETURN: 回程源节点 review');
       assertOut(resNoEvidence, 'NODE: review');
@@ -10569,7 +11947,7 @@ const SCENARIOS = [
       }
       // ③ 无任何 evidence 的引擎回程态 → 回程豁免先于「疑似未 exit」门禁，不 BLOCK
       writeState(dir, { ...base, enteredNodes: [], evidence: {} });
-      const resNoAnyEvidence = runState(['next'], dir, env);
+      const resNoAnyEvidence = runStateWithProtocol(dir, ['next']);
       assertExit(resNoAnyEvidence, 0);
       assertOut(resNoAnyEvidence, 'RETURN: 回程源节点 review');
       assertOut(resNoAnyEvidence, 'NODE: review');
@@ -10587,7 +11965,6 @@ const SCENARIOS = [
   {
     name: '255 next Fix 回程豁免：verify 源（TEST/UAT 在场不跳过；不漂移 archive/不 BLOCK）',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', fixBatchTaskText('done'));
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
@@ -10614,7 +11991,7 @@ const SCENARIOS = [
       };
       // ① 真实回程态（verify 已 entry）→ 审计行 + NODE: verify + state 只读不改写
       writeState(dir, base);
-      const res = runState(['next'], dir, env);
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'RETURN: 回程源节点 verify');
       assertOut(res, 'NODE: verify');
@@ -10631,7 +12008,7 @@ const SCENARIOS = [
         enteredNodes: completedNodes.slice(),
         evidence: { execute: { summary: 'fix batch executed' }, review: { summary: 'review complete' } },
       });
-      const resNoEvidence = runState(['next'], dir, env);
+      const resNoEvidence = runStateWithProtocol(dir, ['next']);
       assertExit(resNoEvidence, 0);
       assertOut(resNoEvidence, 'RETURN: 回程源节点 verify');
       assertOut(resNoEvidence, 'NODE: verify');
@@ -10643,7 +12020,7 @@ const SCENARIOS = [
       }
       // ③ 无任何 evidence → 回程豁免先于「疑似未 exit」门禁，不 BLOCK
       writeState(dir, { ...base, enteredNodes: [], evidence: {} });
-      const resNoAnyEvidence = runState(['next'], dir, env);
+      const resNoAnyEvidence = runStateWithProtocol(dir, ['next']);
       assertExit(resNoAnyEvidence, 0);
       assertOut(resNoAnyEvidence, 'RETURN: 回程源节点 verify');
       assertOut(resNoAnyEvidence, 'NODE: verify');
@@ -10657,7 +12034,6 @@ const SCENARIOS = [
   {
     name: '256 负例：正常多趟中间态（execute 已完成 + 可委托 parallel pending）不误分流',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', renderMultiWaveTasks(['T01', 'P01', 'P02', 'T02']));
       for (const id of ['T01', 'P01', 'P02', 'T02']) {
@@ -10678,7 +12054,7 @@ const SCENARIOS = [
         directOverride: false,
         newChange: true,
       });
-      const res = runState(['next'], dir, env);
+      const res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: subagent-execute');
       assertNotOut(res, 'NODE: review');
@@ -10697,7 +12073,6 @@ const SCENARIOS = [
   {
     name: '257 旧 change 兼容：无 newChange 的回退/回程态不新增 BLOCK 且 NODE 正确',
     run: (dir) => {
-      const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeIntakeArtifacts(dir);
       const taskPath = '.specs/' + CHANGE_ID + '/TASK.md';
       const completedNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute'];
@@ -10715,7 +12090,7 @@ const SCENARIOS = [
       // ① 旧 change 回退态（pending Fix 任务）→ NODE: execute + 审计行，不得 BLOCK
       writeFile(dir, taskPath, fixBatchTaskText('pending'));
       writeState(dir, oldState);
-      const resRollback = runState(['next'], dir, env);
+      const resRollback = runStateWithProtocol(dir, ['next']);
       assertExit(resRollback, 0);
       assertNotOut(resRollback, 'BLOCKED');
       assertOut(resRollback, 'FIX-BATCH: 归位 execute（源节点 review）');
@@ -10734,7 +12109,7 @@ const SCENARIOS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
         '# REVIEW\n\n## 发现\n\n### Critical\n\n- 无\n\n### Major\n\n- 无\n\n### Minor\n\n- 无\n\n## 结论\n\n待回源出口。\n');
       writeState(dir, oldState);
-      const resReturn = runState(['next'], dir, env);
+      const resReturn = runStateWithProtocol(dir, ['next']);
       assertExit(resReturn, 0);
       assertNotOut(resReturn, 'BLOCKED');
       assertOut(resReturn, 'RETURN: 回程源节点 review');
@@ -10747,7 +12122,7 @@ const SCENARIOS = [
       // RETURN 回程行——缺 taskSetSignature、TASK 无 Fix 段/编号 → 不得冒充 FIX-BATCH。
       writeFile(dir, taskPath, '# TASK\n\n' + fixTaskBlock('T01', 'done') + '\n');
       writeState(dir, oldState);
-      const resReturnNoMarker = runState(['next'], dir, env);
+      const resReturnNoMarker = runStateWithProtocol(dir, ['next']);
       assertExit(resReturnNoMarker, 0);
       assertNotOut(resReturnNoMarker, 'BLOCKED');
       assertNotOut(resReturnNoMarker, 'FIX-BATCH');
@@ -10760,13 +12135,13 @@ const SCENARIOS = [
   },
 
   // 258: 三节点 SKILL 文本锁（AC-9 / T05 已落地）——execute/review/verify 均含
-  // 「## Fix 批次状态机路径」段，段内含受控归位 + 回源节点跑出口 + 禁止绕过；不得把
+  // 「## 修复回路状态机路径」段，段内含受控归位 + 回源节点跑出口 + 禁止绕过；不得把
   // 直接 exit 源节点收场或 advance 当正常路径（反捷径文本锚）。
-  // 布局感知（级 3 e2e 副本缺陷）：技能树从 suite 脚本自身位置推导
+  // 布局感知（端到端冒烟副本缺陷）：技能树从 suite 脚本自身位置推导
   // （<skillsRoot>/flow-comet/scripts/ → 组件技能为 <skillsRoot> 下同级目录），权威源
   // .flow-comet/skills/ 与安装副本 .claude|.agents|.dsh/skills/ 同一相对布局通吃。
   {
-    name: '258 技能文本锁：三节点 SKILL 含 Fix 批次状态机路径（禁止直接 exit/advance 为正常路径）',
+    name: '258 技能文本锁：三节点 SKILL 含修复回路状态机路径（禁止直接 exit/advance 为正常路径）',
     run: (dir) => {
       const componentSkills = ['flow-comet-execute', 'flow-comet-review', 'flow-comet-verify'];
       // 布局感知回归锚（合成安装副本）：suite 位于 <skillsRoot>/flow-comet/scripts/ 时组件技能
@@ -10776,7 +12151,7 @@ const SCENARIOS = [
       const syntheticScriptsDir = path.join(syntheticSkillsRoot, 'flow-comet', 'scripts');
       for (const nodeSkill of componentSkills) {
         writeFile(dir, path.join('synthetic-carrier', '.claude', 'skills', nodeSkill, 'SKILL.md'),
-          '## Fix 批次状态机路径\n\n受控归位（合成布局锚）\n');
+          '## 修复回路状态机路径\n\n受控归位（合成布局锚）\n');
         const expected = path.join(syntheticSkillsRoot, nodeSkill, 'SKILL.md');
         const resolved = resolveComponentSkillFile(nodeSkill, syntheticScriptsDir);
         if (resolved !== expected) {
@@ -10798,27 +12173,27 @@ const SCENARIOS = [
       }
       // 真实三节点文本锁：从本 suite 自身位置推导技能树（不假定权威源布局）。逐份断言：
       // 段在场 + 6 关键词 + 反 advance 捷径 + 不得把直接 exit 源节点收场当正常路径；同时收集
-      // 段正文（同一区间：首个 ## Fix 批次状态机路径 → 下一 ## 或 EOF，标题不计入）供 F-4 互比。
+      // 段正文（同一区间：首个 ## 修复回路状态机路径 → 下一 ## 或 EOF，标题不计入）供 F-4 互比。
       const sectionEntries = [];
       for (const nodeSkill of componentSkills) {
         const file = resolveComponentSkillFile(nodeSkill);
         const text = fs.readFileSync(file, 'utf8');
-        const match = text.match(/(?:^|\r?\n)## Fix 批次状态机路径\r?\n([\s\S]*?)(?=\r?\n## |$)/);
+        const match = text.match(/(?:^|\r?\n)## 修复回路状态机路径\r?\n([\s\S]*?)(?=\r?\n## |$)/);
         if (!match) {
-          throw new Error(nodeSkill + ' SKILL.md 缺「## Fix 批次状态机路径」段');
+          throw new Error(nodeSkill + ' SKILL.md 缺「## 修复回路状态机路径」段');
         }
         const section = match[1];
         for (const keyword of ['受控归位', 'NODE: execute', '回源节点跑出口', 'entry <源节点>', 'exit <源节点> --apply', '禁止绕过']) {
           if (!section.includes(keyword)) {
-            throw new Error(nodeSkill + ' Fix 批次状态机路径段缺关键词: ' + keyword);
+            throw new Error(nodeSkill + ' 修复回路状态机路径段缺关键词: ' + keyword);
           }
         }
         if (section.includes('advance')) {
-          throw new Error(nodeSkill + ' Fix 批次状态机路径段不得把 advance 作为正常路径');
+          throw new Error(nodeSkill + ' 修复回路状态机路径段不得把 advance 作为正常路径');
         }
         for (const line of section.split(/\r?\n/)) {
           if (line.includes('直接') && line.includes('exit') && !/禁止|不得|会被 BLOCKED/.test(line)) {
-            throw new Error(nodeSkill + ' Fix 批次状态机路径段不得把直接 exit 源节点收场作为正常路径: ' + line.trim());
+            throw new Error(nodeSkill + ' 修复回路状态机路径段不得把直接 exit 源节点收场作为正常路径: ' + line.trim());
           }
         }
         // F-4 段一致性锁：CRLF→LF 归一、不 trim（行尾/空白差异同样算漂移），正文参与三份互比。
@@ -10829,7 +12204,7 @@ const SCENARIOS = [
       // 套件失败；失败信息给出三份 hash 与首处差异位置/上下文（L-064 反向构造证明判别力）。
       const emptyEntry = sectionEntries.find((entry) => entry.body.trim() === '');
       if (emptyEntry) {
-        throw new Error('Fix 批次状态机路径段不得为空: ' + emptyEntry.nodeSkill);
+        throw new Error('修复回路状态机路径段不得为空: ' + emptyEntry.nodeSkill);
       }
       const baselineEntry = sectionEntries[0];
       for (const entry of sectionEntries.slice(1)) {
@@ -10838,7 +12213,7 @@ const SCENARIOS = [
         let diffIndex = 0;
         while (diffIndex < limit && baselineEntry.body[diffIndex] === entry.body[diffIndex]) diffIndex += 1;
         const context = baselineEntry.body.slice(Math.max(0, diffIndex - 40), diffIndex + 40);
-        throw new Error('Fix 批次状态机路径段三份 SKILL 正文不一致（F-4 段一致性锁）：'
+        throw new Error('修复回路状态机路径段三份 SKILL 正文不一致（F-4 段一致性锁）：'
           + baselineEntry.nodeSkill + ' sha256=' + baselineEntry.hash
           + ' vs ' + entry.nodeSkill + ' sha256=' + entry.hash
           + '；首处差异 @' + diffIndex + '（基准上下文: ' + JSON.stringify(context) + '）');
@@ -11125,26 +12500,25 @@ const SCENARIOS = [
           + JSON.stringify(appliedEvent));
       }
       // ⑧ select 入口收紧：多段路径（归档相对路径形态）与保留目录名不得被选为 activeChange
-      const selectEnv = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       fs.mkdirSync(path.join(dir, '.specs', 'archive', '2026-09-26-' + CHANGE_ID), { recursive: true });
       const beforeSelect = readStateBytes(dir);
-      assertExit(runState(['select', 'archive/2026-09-26-' + CHANGE_ID], dir, selectEnv), 1);
+      assertExit(runStateWithProtocol(dir, ['select', 'archive/2026-09-26-' + CHANGE_ID]), 1);
       assertStateBytesUnchanged(dir, beforeSelect, 'select 归档相对路径');
-      assertExit(runState(['select', 'archive'], dir, selectEnv), 1);
+      assertExit(runStateWithProtocol(dir, ['select', 'archive']), 1);
       assertStateBytesUnchanged(dir, beforeSelect, 'select 保留目录名');
       // ⑧b 名字变体族：保留目录名大小写变体（ARCHIVE/Archive）、真实目录名的大小写变体（CH）与
       // 首尾空白变体在大小写不敏感文件系统上同样可达，但会让 activeChange 与实际目录名不一致
       // （轮次事件按 activeChange 精确匹配 → 配额被换键重置）→ 一律拒绝且 state 字节零改写
-      assertExit(runState(['select', 'ARCHIVE'], dir, selectEnv), 1);
+      assertExit(runStateWithProtocol(dir, ['select', 'ARCHIVE']), 1);
       assertStateBytesUnchanged(dir, beforeSelect, 'select 保留目录名大小写变体');
-      assertExit(runState(['select', 'Archive'], dir, selectEnv), 1);
+      assertExit(runStateWithProtocol(dir, ['select', 'Archive']), 1);
       assertStateBytesUnchanged(dir, beforeSelect, 'select 保留目录名混合大小写变体');
       const caseVariant = String(CHANGE_ID).toUpperCase();
       if (caseVariant !== CHANGE_ID) {
-        assertExit(runState(['select', caseVariant], dir, selectEnv), 1);
+        assertExit(runStateWithProtocol(dir, ['select', caseVariant]), 1);
         assertStateBytesUnchanged(dir, beforeSelect, 'select 真实目录名大小写变体');
       }
-      assertExit(runState(['select', ' ' + CHANGE_ID + ' '], dir, selectEnv), 1);
+      assertExit(runStateWithProtocol(dir, ['select', ' ' + CHANGE_ID + ' ']), 1);
       assertStateBytesUnchanged(dir, beforeSelect, 'select 首尾空白变体');
       if (readScenarioState(dir).activeChange !== CHANGE_ID) {
         throw new Error('被拒绝的 select 不得改写 activeChange：' + JSON.stringify(readScenarioState(dir).activeChange));
@@ -11369,23 +12743,25 @@ const SCENARIOS = [
   },
 
   // 264: history 事件类型集合静态锚（唯一事件类型例外 / 禁止扩散）——扫描引擎生产脚本的
-  // 事件类型字面量：写侧集合必须恰为 {exit-applied, reentry-applied}（reenter 写侧未落地即
-  // RED），读侧集合必须 ⊆ 允许集（出现第三种事件类型即红）；另锚 reentry-applied 写点必须
-  // 带 change 字段（事件对象的动态断言在 259 / 263）。
+  // 事件类型字面量：写侧集合必须恰为 {exit-applied, reentry-applied, replan-applied,
+  // advance-forced}（新增类型必须由引擎写侧真实落地 + 显式更新本锚，未落地即 RED），读侧集合
+  // 必须 ⊆ 允许集（出现允许集外的事件类型即红）；另锚新的两类写点必须带跨 change 归属字段
+  // （replan-applied → change）与「被跳过的出口门禁」标识（advance-forced → skipped：
+  // exit:<node>），事件对象的动态断言在 259 / 263 / 受控计划重校场景族。
   {
-    name: '264 history 事件类型集合静态锚：既有类型 + reentry-applied（新增即红）',
+    name: '264 history 事件类型集合静态锚：既有类型 + replan-applied / advance-forced（新增即红、判据不放宽）',
     run: () => {
-      const allowed = ['exit-applied', 'reentry-applied'];
+      const allowed = ['exit-applied', 'reentry-applied', 'replan-applied', 'advance-forced'];
       const scripts = fs.readdirSync(__dirname)
         .filter((f) => f.endsWith('.mjs') && f !== 'guard-self-test.mjs' && f !== 'system-test.mjs');
       const writers = new Set();
       const readers = new Set();
-      let writeSite = null;
+      const writeSites = new Map();
       for (const file of scripts) {
         const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
         for (const match of text.matchAll(/event:\s*'([a-z][a-z-]*)'/g)) {
           writers.add(match[1]);
-          if (match[1] === 'reentry-applied') writeSite = { file, text, index: match.index };
+          writeSites.set(match[1], { file, text, index: match.index });
         }
         for (const match of text.matchAll(/\.event\s*(?:===|!==)\s*'([a-z][a-z-]*)'/g)) {
           readers.add(match[1]);
@@ -11398,15 +12774,28 @@ const SCENARIOS = [
       }
       const missingWriters = allowed.filter((type) => !writers.has(type));
       if (missingWriters.length > 0) {
-        throw new Error('history 事件类型写侧缺类型（reenter 未落地即 RED）: ' + missingWriters.join(', ')
+        throw new Error('history 事件类型写侧缺类型（受控通道未落地即 RED）: ' + missingWriters.join(', ')
           + '；实际写侧=' + [...writers].join(','));
       }
-      if (!writeSite) {
-        throw new Error('reentry-applied 写点缺失（审计事件必须由引擎脚本写入）');
+      // 跨 change 归属字段锚：轮次/配额按 change 隔离依赖事件的 change 字段（reentry / replan 同判据）
+      const changeFieldTypes = ['reentry-applied', 'replan-applied'];
+      for (const type of changeFieldTypes) {
+        const site = writeSites.get(type);
+        if (!site) throw new Error(type + ' 写点缺失（审计事件必须由引擎脚本写入）');
+        const windowText = site.text.slice(site.index, site.index + 800);
+        if (!/\bchange\s*:/.test(windowText)) {
+          throw new Error(type + ' 写点必须带 change 字段（跨 change 轮次隔离依据）: ' + site.file);
+        }
       }
-      const windowText = writeSite.text.slice(writeSite.index, writeSite.index + 800);
-      if (!/\bchange\s*:/.test(windowText)) {
-        throw new Error('reentry-applied 写点必须带 change 字段（跨 change 轮次隔离依据）: ' + writeSite.file);
+      // 强制推进留痕锚：事件必须记录被跳过的出口门禁标识（skipped: ['exit:<node>']）
+      const forcedSite = writeSites.get('advance-forced');
+      if (!forcedSite) throw new Error('advance-forced 写点缺失（逃生口留痕必须由引擎脚本写入）');
+      const forcedWindow = forcedSite.text.slice(forcedSite.index, forcedSite.index + 800);
+      if (!/\bskipped\s*:/.test(forcedWindow)) {
+        throw new Error('advance-forced 写点必须带 skipped 字段（记录被跳过的出口门禁）: ' + forcedSite.file);
+      }
+      if (!/exit:/.test(forcedWindow)) {
+        throw new Error('advance-forced 写点的 skipped 值必须标识 exit:<node> 形态的门禁: ' + forcedSite.file);
       }
     },
   },
@@ -11466,6 +12855,797 @@ const SCENARIOS = [
       }
     },
   },
+
+  // 266: replan 授权 fail-closed（AC-2 / ADR-013 决策 5）——缺 --authorized-by / 空串 /
+  // 纯空白 / 缺 <reason> / 纯空白 reason → BLOCKED、state 字节（sha256）零改写、零备份、零事件；
+  // 授权形态由 route-node 纯函数单一权威判定（malformed → block + 合法形态放行对照）。
+  {
+    name: '266 replan 授权 fail-closed：缺/空/纯空白授权与缺原因 → BLOCKED 零改写 + 形态纯函数锚',
+    run: (dir) => {
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', REPLAN_TASK_INITIAL);
+      writeState(dir, replanExecuteState());
+      // entry 形态：真实记录修订前的任务集签名（后续修订使其成为「到期签名」）
+      assertExit(runGuard(['entry', 'execute'], dir), 0);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', REPLAN_TASK_REVISED);
+      const bytes = readStateBytes(dir);
+      const shaBefore = createHash('sha256').update(bytes, 'utf8').digest('hex');
+      const blockedCases = [
+        ['缺 --authorized-by（仅位置 reason）', ['replan', '计划有缺陷：新增并行任务']],
+        ['--authorized-by 空串', ['replan', '计划有缺陷：新增并行任务', '--authorized-by', '']],
+        ['--authorized-by 纯空白', ['replan', '计划有缺陷：新增并行任务', '--authorized-by', '   ']],
+        ['缺 <reason>（仅授权）', ['replan', '--authorized-by', 'user-approval']],
+        ['<reason> 纯空白', ['replan', '   ', '--authorized-by', 'user-approval']],
+      ];
+      for (const [label, args] of blockedCases) {
+        const res = runStateWithProtocol(dir, args);
+        assertExit(res, 1);
+        assertOut(res, 'BLOCKED');
+        assertStateBytesUnchanged(dir, bytes, label);
+        const shaNow = createHash('sha256').update(readStateBytes(dir), 'utf8').digest('hex');
+        if (shaNow !== shaBefore) {
+          throw new Error(label + '：state sha256 应零改写，实际 ' + shaNow + ' ≠ ' + shaBefore);
+        }
+      }
+      if (replanBackupFiles(dir).length !== 0) {
+        throw new Error('授权非法路径不得产生备份：' + JSON.stringify(replanBackupFiles(dir)));
+      }
+      if (replanEventsOf(readScenarioState(dir)).length !== 0) {
+        throw new Error('授权非法路径不得写审计事件：' + JSON.stringify(replanEventsOf(readScenarioState(dir))));
+      }
+      // 授权形态纯函数锚：malformed 一律 ok:false；合法形态 ok:true 且归一化字段完整
+      const valid = {
+        round: 1,
+        at: '2026-09-27T00:00:00.000Z',
+        source: 'user-approval',
+        reason: '计划有缺陷',
+        node: 'execute',
+      };
+      const parsedValid = assertReplanAuthorizationShape(valid, 'execute', true, '合法授权三元组');
+      if (!parsedValid.authorization || parsedValid.authorization.source !== 'user-approval'
+        || parsedValid.authorization.reason !== '计划有缺陷' || parsedValid.authorization.node !== 'execute') {
+        throw new Error('合法授权的归一化结果不完整：' + JSON.stringify(parsedValid.authorization));
+      }
+      const malformed = [
+        ['缺 authorization', undefined],
+        ['authorization 为数组', []],
+        ['round=0', { ...valid, round: 0 }],
+        ['round 非整数', { ...valid, round: 1.5 }],
+        ['round 类型错误', { ...valid, round: '1' }],
+        ['at 空串', { ...valid, at: '' }],
+        ['at 纯空白', { ...valid, at: '  ' }],
+        ['at 类型错误', { ...valid, at: 42 }],
+        ['source 空串', { ...valid, source: '' }],
+        ['source 纯空白', { ...valid, source: '  ' }],
+        ['source 类型错误', { ...valid, source: [] }],
+        ['node 与调用不一致', { ...valid, node: 'subagent-execute' }],
+      ];
+      for (const [label, authorization] of malformed) {
+        assertReplanAuthorizationShape(authorization, 'execute', false, label);
+      }
+      // 综合判定的未授权路径：非法授权 → block（不抛异常、不写盘；零改写由上方 CLI 用例锚定）
+      const decide = requireRouteNodeExport('resolveReplanDecision');
+      const decideState = replanExecuteState();
+      for (const [label, authorization] of malformed) {
+        const decision = decide({ protocol: readScenarioProtocol(dir), state: decideState, authorization });
+        if (!decision || decision.ok !== false || decision.action !== 'block') {
+          throw new Error('[' + label + '] resolveReplanDecision 应返回 block，实际 ' + JSON.stringify(decision));
+        }
+      }
+      // 纯函数族存在性锚（T03 交付面）：五项导出缺任一即本场景 RED
+      requireRouteNodeExport('replanRoundCount');
+      requireRouteNodeExport('replanRoundDecision');
+      requireRouteNodeExport('replanNoOpDecision');
+    },
+  },
+
+  // 267: replan 校验不豁免（ADR-013 决策 3 / 明确 out：replan 绝不做校验豁免）——依赖环 /
+  // 缺失依赖 / 缺 <verify> / 并行写冲突四类任务集在 replan 上一律 BLOCKED 且状态零改写；
+  // 并且 plan 出口与 replan 对同一输入给出同一机器分类。同源是结构事实而非注释声明（L-067）：
+  // 任务图分析与并行写冲突检测各只有一份实现（route-node.mjs 定义并导出），
+  // workflow-guard 静态 import 使用它。
+  {
+    name: '267 replan 校验不豁免：依赖环/缺失依赖/缺 verify/并行写冲突 → BLOCKED 零改写 + 单源锚',
+    run: async (dir) => {
+      const cases = [
+        ['依赖环', TASK_DEP_CYCLE, '依赖环', '依赖环'],
+        ['依赖不存在的任务', TASK_MISSING_DEP, '依赖不存在的任务', '依赖'],
+        ['缺 <verify> 字段', REPLAN_TASK_NO_VERIFY, '缺 <verify> 字段', 'verify'],
+        ['并行写冲突', TASK_PARALLEL_WRITE_CONFLICT, 'write_files', '并行写冲突'],
+      ];
+      for (const [label, taskContent, planExpected, replanExpected] of cases) {
+        // ① plan 出口（既有判定路径）对同一输入的机器分类
+        const planState = baseState('plan');
+        planState.evidence.plan = { summary: 'plan done' };
+        planState.newChange = true;
+        writeState(dir, planState);
+        const planRes = runPlanExit(dir, taskContent);
+        assertExit(planRes, 1);
+        assertOut(planRes, 'BLOCKED');
+        assertOut(planRes, planExpected);
+        // ② replan 对同一输入：同一分类 + BLOCKED + state 零改写
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskContent);
+        writeState(dir, replanExecuteState({ taskHash: REPLAN_STALE_SIGNATURE }));
+        const bytes = readStateBytes(dir);
+        const replanRes = runStateWithProtocol(dir, ['replan', '计划缺陷重校', '--authorized-by', 'user-approval']);
+        assertExit(replanRes, 1);
+        assertOut(replanRes, 'BLOCKED');
+        assertOut(replanRes, replanExpected);
+        assertStateBytesUnchanged(dir, bytes, 'replan ' + label);
+        // 显式 sha256 前后相同（字节零改写的独立哈希表达，L-069：断言覆盖完整契约而非关键词）
+        const shaBefore = createHash('sha256').update(bytes).digest('hex');
+        const shaAfter = createHash('sha256').update(readStateBytes(dir)).digest('hex');
+        if (shaBefore !== shaAfter) {
+          throw new Error(label + '：replan BLOCK 路径 state sha256 应前后相同，实际 '
+            + shaBefore + ' → ' + shaAfter);
+        }
+        if (replanBackupFiles(dir).length !== 0) {
+          throw new Error(label + '：校验失败路径不得产生备份');
+        }
+        if (replanEventsOf(readScenarioState(dir)).length !== 0) {
+          throw new Error(label + '：校验失败路径不得写审计事件');
+        }
+      }
+      // 读写弱判（read∩write，plan 出口同判据）：仅 WARN 不阻断——replan 照常重签、写重签前备份、
+      // 写审计事件（覆盖写写强判之外的非阻断分支，2026-09-28 PR 审查补锚）。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', TASK_PARALLEL_READ_OVERLAP);
+      writeState(dir, replanExecuteState({ taskHash: REPLAN_STALE_SIGNATURE }));
+      const readWarnRes = runStateWithProtocol(dir, ['replan', '计划缺陷重校', '--authorized-by', 'user-approval']);
+      assertExit(readWarnRes, 0);
+      assertOut(readWarnRes, 'REPLAN:');
+      assertOut(readWarnRes, 'WARN: TASK.md 并行任务 read∩write 隐式依赖嫌疑');
+      assertOut(readWarnRes, 'P02×P01(src/shared.mjs)');  // 输出为「读取方×写入方」（P02 读 P01 写路径）
+      if (replanBackupFiles(dir).length !== 1) {
+        throw new Error('read∩write 弱判不得阻断 replan：应恰有 1 份重签前备份，实际 '
+          + replanBackupFiles(dir).length);
+      }
+      if (replanEventsOf(readScenarioState(dir)).length !== 1) {
+        throw new Error('read∩write 弱判不得阻断 replan：应写入 1 条 replan-applied 审计事件，实际 '
+          + replanEventsOf(readScenarioState(dir)).length);
+      }
+      // 同源结构锚：任务图分析全引擎只有一处定义，且位于 route-node.mjs（可由 replan 复用）
+      const analyze = requireRouteNodeExport('analyzeDependencyGraph');
+      const cyclicBlocks = TASK_DEP_CYCLE.match(/<task[\s\S]*?<\/task>/g) || [];
+      const verdict = analyze(cyclicBlocks);
+      if (!verdict || verdict.cyclic !== true || !Array.isArray(verdict.cycleIds) || verdict.cycleIds.length === 0) {
+        throw new Error('route-node 导出的任务图分析对依赖环应返回 cyclic=true + cycleIds，实际 ' + JSON.stringify(verdict));
+      }
+      const missingVerdict = analyze(TASK_MISSING_DEP.match(/<task[\s\S]*?<\/task>/g) || []);
+      if (!missingVerdict || missingVerdict.missing.length === 0 || missingVerdict.cyclic !== false) {
+        throw new Error('route-node 导出的任务图分析对缺失依赖应返回 missing 明细，实际 ' + JSON.stringify(missingVerdict));
+      }
+      const engineScripts = engineScriptFiles();
+      const definitionFiles = engineScripts.filter((file) =>
+        /function\s+analyzeDependencyGraph\s*\(/.test(fs.readFileSync(path.join(__dirname, file), 'utf8')));
+      if (definitionFiles.length !== 1 || definitionFiles[0] !== 'route-node.mjs') {
+        throw new Error('任务图分析必须只有一份实现且位于 route-node.mjs（plan 出口与 replan 共用），实际定义处: '
+          + JSON.stringify(definitionFiles));
+      }
+      const guardText = fs.readFileSync(GUARD, 'utf8');
+      if (!/import[^;]*\banalyzeDependencyGraph\b[^;]*from\s*'\.\/route-node\.mjs'/.test(guardText)) {
+        throw new Error('workflow-guard.mjs 必须静态 import route-node 的任务图分析（不得内联第二份判定）');
+      }
+      // 并行写冲突检测单源锚（CR-2 抽取）：全引擎只有一份定义且位于 route-node.mjs，
+      // workflow-guard 静态 import 使用它（replan 与 plan 出口同一判据，禁止内联第二份）。
+      const conflictDefinitionFiles = engineScripts.filter((file) =>
+        /function\s+findParallelWriteConflicts\s*\(/.test(fs.readFileSync(path.join(__dirname, file), 'utf8')));
+      if (conflictDefinitionFiles.length !== 1 || conflictDefinitionFiles[0] !== 'route-node.mjs') {
+        throw new Error('并行写冲突检测必须只有一份实现且位于 route-node.mjs（plan 出口与 replan 共用），实际定义处: '
+          + JSON.stringify(conflictDefinitionFiles));
+      }
+      if (!/import[^;]*\bfindParallelWriteConflicts\b[^;]*from\s*'\.\/route-node\.mjs'/.test(guardText)) {
+        throw new Error('workflow-guard.mjs 必须静态 import route-node 的并行写冲突检测（不得内联第二份判定）');
+      }
+      // —— 本批 in-place 增锚（第三族：同文件跨任务且无依赖路径）——
+      // ① 单一实现锚（结构事实而非注释声明）：第三族的构件（修复任务族前缀常量 / 任务对键 /
+      //    依赖可达闭包）与结果产出在全引擎脚本里只能出现一次且位于 route-node.mjs——消费脚本
+      //    内自建第二份（依赖闭包或写入面交集实现）会在此变红。
+      for (const piece of ['FIX_TASK_ID_PREFIX', 'taskPairKey', 'reachableTaskIds']) {
+        const pieceFiles = engineScripts.filter((file) =>
+          new RegExp('\\b' + piece + '\\b').test(fs.readFileSync(path.join(__dirname, file), 'utf8')));
+        if (pieceFiles.length !== 1 || pieceFiles[0] !== 'route-node.mjs') {
+          throw new Error('第三族判定构件 ' + piece + ' 必须只出现在 route-node.mjs，实际: ' + JSON.stringify(pieceFiles));
+        }
+      }
+      const crossTaskProducerFiles = engineScripts.filter((file) =>
+        /const\s+crossTaskConflicts\s*=/.test(fs.readFileSync(path.join(__dirname, file), 'utf8')));
+      if (crossTaskProducerFiles.length !== 1 || crossTaskProducerFiles[0] !== 'route-node.mjs') {
+        throw new Error('第三族结果只能由 route-node.mjs 产出（不得在消费脚本内内联），实际: ' + JSON.stringify(crossTaskProducerFiles));
+      }
+      if (!/\bcrossTaskConflicts\b/.test(guardText)) {
+        throw new Error('workflow-guard.mjs 必须消费 route-node 的第三族结果（plan 出口判定）');
+      }
+      // ①b 修复族约定「只表达一次」锚（判别力升级：按表达式形态计数，不再只数标识符名）——
+      //     两条边界（id 前缀 / 「位于修复段内」）各只允许一处实现，第三族参与者排除与修复族
+      //     标记必须共用同一分类器；第二份等价前缀表达式（含内联前缀判定）在此变红。
+      //     旧锚只统计"哪个文件含该常量名"：第二份写法（不含该名字的等价正则）必然被放过——
+      //     本锚即对该盲区的判别力补齐。
+      for (const problem of fixFamilyBoundaryProblems()) {
+        throw new Error('修复族约定未被唯一表达: ' + problem);
+      }
+      // ①b-1 该判据自身的夹具锚（常驻判别力，不依赖外部临时注入）：同源形态 → 无问题；
+      //      逐条注入"同一约定被表达两次"的变体 → 逐条专项报告。夹具目录即判据的 scriptsDir
+      //      接缝（合成引擎脚本，不被执行、只被扫描）。
+      const engineFixtureDir = path.join(dir, 'engine-fixture');
+      // 夹具文本的权威前缀表达式自模块常量拼接（不在夹具里再写一份字面量——同源才测得准）
+      const canonicalPrefixDecl = 'const FIX_TASK_ID_PREFIX = ' + FIX_PREFIX_LITERAL_TEXT + ';';
+      const canonicalEngine = [
+        canonicalPrefixDecl,
+        'function fixTaskClassifier(taskContent, fixSectionTitle) {',
+        '  const section = fixSectionBody(taskContent, fixSectionTitle);',
+        '  const sectionBlocks = new Set(section === null ? [] : taskBlocks(section));',
+        '  return (block) => FIX_TASK_ID_PREFIX.test(taskOpeningAttrs(block).id) || sectionBlocks.has(block);',
+        '}',
+        'function fixTaskMarker(taskContent, fixSectionTitle) {',
+        '  const isFixTask = fixTaskClassifier(taskContent, fixSectionTitle);',
+        '  return taskBlocks(String(taskContent ?? "")).some((block) => isFixTask(block));',
+        '}',
+        'function collectCrossTaskConflicts({ taskContent = "", allBlocks = [] } = {}) {',
+        '  const isFixTask = fixTaskClassifier(taskContent);',
+        '  return allBlocks.filter((block) => !isFixTask(block));',
+        '}',
+        '',
+      ].join('\n');
+      const fixtureFileRel = path.join('engine-fixture', 'route-node.mjs');
+      writeFile(dir, fixtureFileRel, canonicalEngine);
+      const canonicalProblems = fixFamilyBoundaryProblems(engineFixtureDir);
+      if (canonicalProblems.length !== 0) {
+        throw new Error('唯一表达形态不得报问题（判据夹具模板）: ' + JSON.stringify(canonicalProblems));
+      }
+      const boundaryCases = [
+        ['第二份前缀表达式', canonicalEngine + 'const legacyFixPrefix = /^(T-FIX|P-FIX)/i;\n',
+          '第二份修复族 id 前缀表达式'],
+        ['内联前缀判定（id 字面量）', canonicalEngine + 'const legacyIds = ["T-FIX-01"];\n',
+          '修复族 id 字面量'],
+        ['前缀边界被删', canonicalEngine.replace(canonicalPrefixDecl, 'const FIX_TASK_ID_PREFIX = /nope/;'),
+          '修复族 id 前缀边界必须只表达一次'],
+        ['段内成员判定第二份',
+          canonicalEngine.replace('  return allBlocks.filter((block) => !isFixTask(block));',
+            '  sectionBlocks.has({});\n  return allBlocks.filter((block) => !isFixTask(block));'),
+          '段内成员判定）必须只表达一次'],
+        ['消费方自持边界（不共用分类器）',
+          canonicalEngine.replace('  const isFixTask = fixTaskClassifier(taskContent);',
+            '  const isFixTask = () => false;'),
+          '必须经唯一分类器判定修复族'],
+      ];
+      for (const [label, mutated, expected] of boundaryCases) {
+        writeFile(dir, fixtureFileRel, mutated);
+        const mutatedProblems = fixFamilyBoundaryProblems(engineFixtureDir);
+        if (!mutatedProblems.some((p) => p.includes(expected))) {
+          throw new Error('修复族边界反向夹具（' + label + '）未按预期报告「' + expected + '」: '
+            + JSON.stringify(mutatedProblems));
+        }
+      }
+      // ①c replan 消费锚（结构锚；replan 的真实命令链路由系统测试集承担，此处不重复造链路）：
+      //     第三族必须①被解构（只解构两族 = 静默丢失该判据，即修订通道可静默引入该形态）、
+      //     ②在 BLOCK 早于备份与写盘的位置判定、③消息与恢复指引与 plan 出口同族（新 change
+      //     阻断 / 旧 change 渐进）。断言写成对 workflow-state.mjs 文本的结构判定。
+      const stateText = fs.readFileSync(STATE, 'utf8');
+      const destructured = stateText.match(/const\s*\{([^}]*)\}\s*=\s*await\s+findParallelWriteConflicts\s*\(/);
+      if (destructured === null || !/\bcrossTaskConflicts\b/.test(destructured[1])) {
+        throw new Error('workflow-state.mjs 的 replan 必须解构 route-node 第三族结果'
+          + '（只解构两族即静默丢失该判据）: ' + JSON.stringify(destructured === null ? null : destructured[1].trim()));
+      }
+      const crossJudgeAt = stateText.indexOf('crossTaskConflicts.length > 0');
+      const backupAt = stateText.indexOf('-pre-replan.json');
+      if (crossJudgeAt < 0) {
+        throw new Error('workflow-state.mjs 的 replan 未消费第三族（缺判定分支）');
+      }
+      if (backupAt < 0 || crossJudgeAt > backupAt) {
+        throw new Error('replan 的第三族判定必须早于重签前备份（BLOCK 早于落盘的零改写语义）: '
+          + '判定位置 ' + crossJudgeAt + ' / 备份位置 ' + backupAt);
+      }
+      for (const message of ['同文件跨任务且无依赖路径', '补显式 depends_on 或合并为一个任务']) {
+        if (!stateText.includes(message)) {
+          throw new Error('replan 的第三族消息必须与 plan 出口同族（缺「' + message + '」）');
+        }
+      }
+      if (!/WARN: TASK\.md 同文件跨任务且无依赖路径（旧 change 渐进不阻断）/.test(stateText)) {
+        throw new Error('replan 的第三族必须保留旧 change 渐进分支（WARN 不阻断）');
+      }
+      // ② 行为锚（直接驱动判定函数，plan 出口与 replan 共用同一实现）：非修复同文件对命中、
+      //    修复任务族对不参与（其顺序由修复生命周期保证，回修同文件是必然形态）。
+      const findConflicts = requireRouteNodeExport('findParallelWriteConflicts');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n## 任务清单\n\n' + CROSS_TASK_PLAIN_PAIR);
+      const plainConflicts = await findConflicts(path.join(dir, '.specs', CHANGE_ID));
+      if (plainConflicts.crossTaskConflicts.length !== 1
+        || plainConflicts.crossTaskConflicts[0].files.join(',') !== 'src/shared.mjs') {
+        throw new Error('非修复同文件无依赖对必须命中第三族: ' + JSON.stringify(plainConflicts.crossTaskConflicts));
+      }
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n## 任务清单\n\n' + CROSS_TASK_FIX_PAIR);
+      const fixConflicts = await findConflicts(path.join(dir, '.specs', CHANGE_ID));
+      if (fixConflicts.crossTaskConflicts.length !== 0 || fixConflicts.writeConflicts.length !== 0) {
+        throw new Error('修复任务族对不得进入第三族（也不得进入写写强判）: ' + JSON.stringify(fixConflicts));
+      }
+      // ②-附 段归属分支 + 行尾归一（LF 与 CRLF 两形态都必须识别为修复族）：
+      //     段内块来自 LF 归一后的段体，而待判 block 来自原文——Windows 下原文是 CRLF，
+      //     不归一会让段内匹配失败 → 修复族对被当普通参与者误拦（2026-10-01 PR 审查发现）。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
+        '# TASK\n\n## 任务清单\n\n' + CROSS_TASK_FIX_SECTION_PAIR);
+      const sectionConflicts = await findConflicts(path.join(dir, '.specs', CHANGE_ID));
+      if (sectionConflicts.crossTaskConflicts.length !== 0 || sectionConflicts.writeConflicts.length !== 0) {
+        throw new Error('修复段内**非前缀 id** 的任务对不得进入第三族（段归属分支）: '
+          + JSON.stringify(sectionConflicts));
+      }
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
+        '# TASK\r\n\r\n## 任务清单\r\n\r\n' + CROSS_TASK_FIX_SECTION_PAIR.replace(/\n/g, '\r\n'));
+      const crlfConflicts = await findConflicts(path.join(dir, '.specs', CHANGE_ID));
+      if (crlfConflicts.crossTaskConflicts.length !== 0 || crlfConflicts.writeConflicts.length !== 0) {
+        throw new Error('CRLF 行尾下修复段归属判定必须一致（行尾归一口径）: ' + JSON.stringify(crlfConflicts));
+      }
+      // ③ 出口链路锚（新 change）：非修复对照对 → BLOCKED 且消息带任务对与重叠文件；
+      //    修复族对 → exit 0 且不出现该族消息（BLOCKED / WARN 两形态都不许有）。
+      const crossState = baseState('plan');
+      crossState.evidence.plan = { summary: 'plan done' };
+      crossState.newChange = true;
+      writeState(dir, crossState);
+      const plainRes = runPlanExit(dir, CROSS_TASK_PLAIN_PAIR);
+      assertExit(plainRes, 1);
+      assertOut(plainRes, 'BLOCKED');
+      assertOut(plainRes, '同文件跨任务且无依赖路径');
+      assertOut(plainRes, 'T01×T02');
+      assertOut(plainRes, 'src/shared.mjs');
+      assertOut(plainRes, 'depends_on');
+      writeState(dir, crossState);
+      const fixRes = runPlanExit(dir, CROSS_TASK_FIX_PAIR);
+      assertExit(fixRes, 0);
+      assertNotOut(fixRes, '同文件跨任务');
+      assertNotOut(fixRes, 'BLOCKED');
+      // ④ 混合夹具：两类并存 → 只报非修复对（修复族对不出现在消息里）
+      writeState(dir, crossState);
+      const mixedRes = runPlanExit(dir, CROSS_TASK_MIXED_PAIR);
+      assertExit(mixedRes, 1);
+      assertOut(mixedRes, 'BLOCKED');
+      assertOut(mixedRes, 'T01×T02');
+      assertNotOut(mixedRes, 'T-FIX-01×T-FIX-02');
+    },
+  },
+
+  // 268: replan 轮次上限与显式续轮（AC-3 / ADR-013 决策 6）——按 history 中本 change 的
+  // replan-applied 事件计数，上限 3：第 4 次 BLOCKED 且给出「继续 / 停止」人工裁决指引；
+  // --continue-round <n> 满足 n ≥ 已用 + 1 才放行并计入下一轮（审计事件 / 授权留痕带续轮标记）；
+  // n 不足则 BLOCK 零改写；轮次按 change 隔离（他 change 的事件不占本 change 配额）。
+  {
+    name: '268 replan 轮次上限 3 与显式续轮：超限 BLOCK 人工裁决·续轮放行计下一轮·授权不足 BLOCK·跨 change 隔离',
+    run: (dir) => {
+      const baseHistory = [replanHistoryEvent(1), replanHistoryEvent(2), replanHistoryEvent(3)];
+      const blockedCases = [
+        ['超限未续轮', []],
+        ['续轮授权轮次不足（n=3 < 已用+1）', ['--continue-round', '3']],
+      ];
+      for (const [label, extra] of blockedCases) {
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', REPLAN_TASK_REVISED);
+        writeState(dir, replanExecuteState({ history: [...baseHistory], taskHash: REPLAN_STALE_SIGNATURE }));
+        const bytes = readStateBytes(dir);
+        const res = runStateWithProtocol(dir, ['replan', '计划缺陷重校', '--authorized-by', 'user-approval', ...extra]);
+        assertExit(res, 1);
+        assertOut(res, 'BLOCKED');
+        assertOut(res, '继续');
+        assertOut(res, '停止');
+        assertStateBytesUnchanged(dir, bytes, label);
+        if (replanBackupFiles(dir).length !== 0) {
+          throw new Error(label + '：上限拦截不得产生备份');
+        }
+        if (replanEventsOf(readScenarioState(dir)).length !== 3) {
+          throw new Error(label + '：上限拦截不得追加审计事件');
+        }
+      }
+      // 显式续轮放行：n = 已用 + 1 → 计入第 4 轮（审计行标注续轮）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', REPLAN_TASK_REVISED);
+      writeState(dir, replanExecuteState({ history: [...baseHistory], taskHash: REPLAN_STALE_SIGNATURE }));
+      const continued = runStateWithProtocol(
+        dir, ['replan', '计划缺陷重校（上限后显式续轮）', '--authorized-by', 'admin-approval', '--continue-round', '4']);
+      assertExit(continued, 0);
+      assertOut(continued, 'REPLAN');
+      assertOut(continued, '续轮');
+      const continuedState = readScenarioState(dir);
+      const continuedEvents = replanEventsOf(continuedState);
+      if (continuedEvents.length !== 4) {
+        throw new Error('续轮放行应写入第 4 条 replan-applied 事件，实际 ' + JSON.stringify(continuedEvents.length));
+      }
+      const continuedEvent = continuedEvents[continuedEvents.length - 1];
+      if (continuedEvent.round !== 4 || continuedEvent.change !== CHANGE_ID
+        || continuedEvent.reason !== '计划缺陷重校（上限后显式续轮）'
+        || continuedEvent.continuationAuthorized !== true) {
+        throw new Error('续轮审计事件字段不符（round=4 / change / 续轮标记 / reason）：' + JSON.stringify(continuedEvent));
+      }
+      const continuedRecord = continuedState.evidence?.execute?.replanAuthorization;
+      if (!continuedRecord || continuedRecord.continuationAuthorized !== true
+        || continuedRecord.round !== 4 || continuedRecord.source !== 'admin-approval') {
+        throw new Error('续轮授权留痕不符：' + JSON.stringify(continuedRecord));
+      }
+      assertReplanSignatureRecorded(continuedState, REPLAN_TASK_REVISED, '续轮放行');
+      if (replanBackupFiles(dir).length !== 1) {
+        throw new Error('续轮放行应产生一份备份，实际 ' + JSON.stringify(replanBackupFiles(dir)));
+      }
+      // 跨 change 隔离：他 change 的 3 条事件不占本 change 配额 → 本 change 为第 1 轮
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', REPLAN_TASK_REVISED);
+      writeState(dir, replanExecuteState({
+        history: [replanHistoryEvent(1, 'other-change'), replanHistoryEvent(2, 'other-change'), replanHistoryEvent(3, 'other-change')],
+        taskHash: REPLAN_STALE_SIGNATURE,
+      }));
+      const isolated = runStateWithProtocol(dir, ['replan', '计划缺陷重校', '--authorized-by', 'user-approval']);
+      assertExit(isolated, 0);
+      assertOut(isolated, 'REPLAN');
+      assertOut(isolated, '1/3');
+      const isolatedEvent = replanEventsOf(readScenarioState(dir)).find((e) => e.change === CHANGE_ID);
+      if (!isolatedEvent || isolatedEvent.round !== 1) {
+        throw new Error('他 change 的轮次事件不应占用本 change 配额（本 change 应为第 1 轮），实际 '
+          + JSON.stringify(isolatedEvent));
+      }
+      // 轮次判定纯函数锚（阈值只从实现常量取——本锚同时锁上限 = 3）
+      const roundCount = requireRouteNodeExport('replanRoundCount');
+      if (roundCount({ history: baseHistory, changeName: CHANGE_ID }) !== 3) {
+        throw new Error('replanRoundCount 应统计本 change 的 replan-applied 事件数（3）');
+      }
+      if (roundCount({ history: baseHistory, changeName: 'other-change' }) !== 0) {
+        throw new Error('replanRoundCount 应按 change 过滤（他 change 应为 0）');
+      }
+      if (roundCount({ history: 'corrupted', changeName: CHANGE_ID }) !== 0) {
+        throw new Error('replanRoundCount 对非数组 history 应返回 0（旧 state 形态）');
+      }
+      const roundDecision = requireRouteNodeExport('replanRoundDecision');
+      const available = roundDecision({ history: [replanHistoryEvent(1)], changeName: CHANGE_ID });
+      if (!available || available.ok !== true || available.nextRound !== 2 || available.limit !== 3) {
+        throw new Error('replanRoundDecision 未达上限应放行并给出下一轮：' + JSON.stringify(available));
+      }
+      const capped = roundDecision({ history: baseHistory, changeName: CHANGE_ID });
+      if (!capped || capped.ok !== false || capped.limit !== 3) {
+        throw new Error('replanRoundDecision 达上限且无续轮应 blocked：' + JSON.stringify(capped));
+      }
+      const continuation = roundDecision({ history: baseHistory, changeName: CHANGE_ID, continuationAuthorized: true });
+      if (!continuation || continuation.ok !== true || continuation.nextRound !== 4) {
+        throw new Error('replanRoundDecision 持显式续轮授权应放行第 4 轮：' + JSON.stringify(continuation));
+      }
+    },
+  },
+
+  // 269: replan 幂等空操作（AC-5 / ADR-013 决策 9）——目标形态已成立（state.taskHash 已等于
+  // 当前 TASK.md 签名）时重复调用 = 空操作：可见提示 + 零备份 / 零轮次计数 / 零事件 /
+  // state 字节零改写（与 archive 重入的幂等锚同构）。
+  {
+    name: '269 replan 幂等空操作：重签后重复同形态 → 零备份·零轮次·零事件·零改写',
+    run: (dir) => {
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', REPLAN_TASK_REVISED);
+      writeState(dir, replanExecuteState({ taskHash: REPLAN_STALE_SIGNATURE }));
+      const first = runStateWithProtocol(dir, ['replan', '计划缺陷重校', '--authorized-by', 'user-approval']);
+      assertExit(first, 0);
+      assertOut(first, 'REPLAN');
+      const afterApply = readStateBytes(dir);
+      const appliedState = readScenarioState(dir);
+      if (replanEventsOf(appliedState).length !== 1) {
+        throw new Error('首次重签应恰写 1 条 replan-applied 事件，实际 '
+          + JSON.stringify(replanEventsOf(appliedState).length));
+      }
+      const backupsAfterApply = replanBackupFiles(dir);
+      if (backupsAfterApply.length !== 1) {
+        throw new Error('首次重签应恰产生一份备份，实际 ' + JSON.stringify(backupsAfterApply));
+      }
+      assertReplanSignatureRecorded(appliedState, REPLAN_TASK_REVISED, '首次重签');
+      // 同形态重复调用 → 空操作（零副作用）
+      const noop = runStateWithProtocol(dir, ['replan', '重复调用同形态', '--authorized-by', 'user-approval']);
+      assertExit(noop, 0);
+      assertOut(noop, '空操作');
+      assertNotOut(noop, 'BLOCKED');
+      assertStateBytesUnchanged(dir, afterApply, '重复同形态空操作');
+      if (!isDeepStrictEqual(replanBackupFiles(dir), backupsAfterApply)) {
+        throw new Error('空操作不得新增备份：' + JSON.stringify(replanBackupFiles(dir)));
+      }
+      if (replanEventsOf(readScenarioState(dir)).length !== 1) {
+        throw new Error('空操作不得写审计事件（history 长度漂移）');
+      }
+      // 空操作判定纯函数存在性锚（T04 编排消费的判定点）
+      requireRouteNodeExport('replanNoOpDecision');
+    },
+  },
+
+  // 270: 重签后 execute 出口放行（AC-1）——entry 后修订任务集（计划外新增并行就绪任务）使
+  // exit execute 撞签名门禁 → replan 重校重签 → 同一出口再跑通过（不再报签名不匹配）→
+  // next 正常路由到委托节点；审计事件 / 授权留痕 / 备份快照齐备，重签值与会话当前 TASK.md 同签。
+  {
+    name: '270 replan 重签后 exit execute --apply 通过：修订任务集（含并行就绪任务）→ 签名 BLOCKED → 重签 → 出口放行',
+    run: (dir) => {
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', REPLAN_TASK_INITIAL);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/S01-SUMMARY.md', strictSummary('S01'));
+      // 夹具忠实性修复（协调者授权 A · 夹具缺陷而非放宽带锚）：resolveNextNode 的 execute 前
+      // 产物门控按文件存在性判定（不读 completedNodes）——路由到委托节点要求 open / design 的
+      // 前置产物在场。此处补齐 CHANGE.md / REQUIREMENT.md / DESIGN.md（writeIntakeArtifacts
+      // 三件全写，其定义内已含 DESIGN.md），使夹具与真实链路的产物现场一致；不改任何断言 / 锚 /
+      // 判据 / 计数。
+      writeIntakeArtifacts(dir);
+      writeState(dir, replanExecuteState());
+      assertExit(runGuard(['entry', 'execute'], dir), 0);
+      // 任务集修订（#119 死锁现场）：新增计划外的并行就绪任务
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', REPLAN_TASK_REVISED);
+      const blockedBytes = readStateBytes(dir);
+      const blocked = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(blocked, 1);
+      assertOut(blocked, 'BLOCKED');
+      assertOut(blocked, '签名不匹配');
+      assertStateBytesUnchanged(dir, blockedBytes, '修订任务集后的签名门禁 BLOCK');
+      // 受控重校重签
+      const reason = '计划有缺陷：新增并行任务 P02';
+      const beforeReplan = readScenarioState(dir);
+      const res = runStateWithProtocol(dir, ['replan', reason, '--authorized-by', 'user-approval']);
+      assertExit(res, 0);
+      assertOut(res, 'REPLAN');
+      assertOut(res, 'execute');
+      assertOut(res, '1/3');
+      assertOut(res, 'user-approval');
+      assertOut(res, reason);
+      const st = readScenarioState(dir);
+      // 留痕（双写）：history 事件 + evidence.<node>.replanAuthorization
+      const events = replanEventsOf(st);
+      if (events.length !== 1) {
+        throw new Error('重签应恰写 1 条 replan-applied 事件，实际 ' + JSON.stringify(events));
+      }
+      const event = events[0];
+      if (event.change !== CHANGE_ID || event.node !== 'execute' || event.round !== 1
+        || event.authorizedBy !== 'user-approval' || event.reason !== reason
+        || typeof event.at !== 'string' || Number.isNaN(Date.parse(event.at))) {
+        throw new Error('replan-applied 事件字段不完整（change / node / round / reason / authorizedBy / at）：'
+          + JSON.stringify(event));
+      }
+      const record = st.evidence?.execute?.replanAuthorization;
+      if (!record || record.source !== 'user-approval' || record.reason !== reason || record.round !== 1
+        || typeof record.at !== 'string' || record.at.trim() === '') {
+        throw new Error('evidence.execute.replanAuthorization 授权留痕不完整：' + JSON.stringify(record));
+      }
+      // 重签值 = 当前 TASK.md 签名（事件同步记录同一签名）
+      const signed = assertReplanSignatureRecorded(st, REPLAN_TASK_REVISED, '重签');
+      if (!requireRouteNodeExport('sameTaskSetSignature')(event.taskSetSignature, signed)) {
+        throw new Error('replan-applied 事件记录的签名应与 state.taskHash 同签：'
+          + JSON.stringify({ event: event.taskSetSignature, state: st.taskHash }));
+      }
+      // 转移前备份：全量快照 + sha256 指纹在任何留痕面可核验（ADR-013 决策 7）
+      const backups = replanBackupFiles(dir);
+      if (backups.length !== 1) {
+        throw new Error('重签应恰产生一份备份，实际 ' + JSON.stringify(backups));
+      }
+      if (!/-pre-replan\.json$/.test(backups[0])) {
+        throw new Error('备份命名应为 <UTC ISO>-pre-replan.json，实际 ' + backups[0]);
+      }
+      const backupBytes = fs.readFileSync(path.join(dir, '.specs', CHANGE_ID, 'replan-backups', backups[0]));
+      const backupState = JSON.parse(backupBytes.toString('utf8'));
+      if (!isDeepStrictEqual(backupState, beforeReplan)) {
+        throw new Error('备份应为重签前的 state 全量快照');
+      }
+      const fingerprint = createHash('sha256').update(backupBytes).digest('hex');
+      const haystack = (JSON.stringify(st) + '\n' + outputText(res)).toLowerCase();
+      if (!haystack.includes(fingerprint)) {
+        throw new Error('备份 sha256 指纹未在任何留痕面出现（备份不可核验）: ' + fingerprint);
+      }
+      // 同一出口再跑：签名已重签 → 放行；并行就绪任务使 next 路由到委托节点
+      const exitRes = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(exitRes, 0);
+      assertOut(exitRes, 'ALL CHECKS PASSED');
+      if (!/^NODE: subagent-execute$/m.test(outputText(exitRes))) {
+        throw new Error('重签后出口应路由到委托节点（并行就绪任务），实际输出:\n' + outputText(exitRes));
+      }
+      const next = runStateWithProtocol(dir, ['next']);
+      assertExit(next, 0);
+      if (!/^NODE: subagent-execute$/m.test(outputText(next))) {
+        throw new Error('next 应正常路由到 subagent-execute，实际输出:\n' + outputText(next));
+      }
+    },
+  },
+
+  // 271: advance 留痕 + 状态可见（AC-4）——advance 仍推进（语义不变），但必须写
+  // history 事件 advance-forced（node + skipped: ['exit:<node>'] + reason: 'advance'）并打印
+  // ADVANCE-AUDIT；status 输出派生字段 forcedNodes 以 history 中本 change 的 advance-forced
+  // 事件为准（2026-09-28 PR 审查采纳）——record 后 advance / replanAuthorization 留痕后
+  // advance 两类真实反例都不得漏报；旧 state（无 history 字段）回退「completedNodes 含而
+  // evidence 不含」判据（当时 advance 无痕，无事件可依）。
+  // 正反断言（L-069）：被强制推进的节点必现；有出口证据但未被强制的不现。
+  {
+    name: '271 advance 留痕：advance-forced 事件 + status.forcedNodes 派生视图（含反向断言）',
+    run: (dir) => {
+      assertExit(runStateWithProtocol(dir, ['init', CHANGE_ID]), 0);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n\n推进留痕夹具。\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md',
+        '# REQUIREMENT\n\n## 用户故事\n\nx\n\n## 验收准则（AC）\n\n- 通过\n');
+      const res = runStateWithProtocol(dir, ['advance']);
+      assertExit(res, 0);
+      assertOut(res, 'Advanced to: design');
+      assertOut(res, 'ADVANCE-AUDIT');
+      assertOut(res, 'open');
+      const st = readScenarioState(dir);
+      const events = (st.history || []).filter((e) => e && e.event === 'advance-forced');
+      if (events.length !== 1) {
+        throw new Error('advance 应恰写 1 条 advance-forced 事件，实际 ' + JSON.stringify(events));
+      }
+      const event = events[0];
+      if (event.change !== CHANGE_ID || event.node !== 'open') {
+        throw new Error('advance-forced 事件应记录 change / 被推进节点，实际 ' + JSON.stringify(event));
+      }
+      if (!isDeepStrictEqual(event.skipped, ['exit:open'])) {
+        throw new Error("advance-forced 事件应记录被跳过的出口门禁 skipped: ['exit:open']，实际 "
+          + JSON.stringify(event.skipped));
+      }
+      if (event.reason !== 'advance') {
+        throw new Error('advance-forced 事件应记录 reason: \'advance\'，实际 ' + JSON.stringify(event.reason));
+      }
+      if (typeof event.at !== 'string' || Number.isNaN(Date.parse(event.at))) {
+        throw new Error('advance-forced 事件应带可解析时间戳，实际 ' + JSON.stringify(event.at));
+      }
+      const status = runStateWithProtocol(dir, ['status']);
+      assertExit(status, 0);
+      const parsed = parseStatusJson(status);
+      if (!Array.isArray(parsed.forcedNodes) || !parsed.forcedNodes.includes('open')) {
+        throw new Error('status.forcedNodes 应包含被强制推进且无出口证据的 open，实际 '
+          + JSON.stringify(parsed.forcedNodes));
+      }
+      if (parsed.forcedNodes.includes('design')) {
+        throw new Error('status.forcedNodes 只能包含已完成节点，实际 ' + JSON.stringify(parsed.forcedNodes));
+      }
+      // 反向：有出口证据且未被 advance 强制的 completed 节点不得进入 forcedNodes；
+      // 无出口证据但被 advance 强制的节点仍收录（事件判据）。事件派生下「强制」由 history 决定：
+      // 夹具把 advance-forced 事件挂到 design（open 只留 exit 证据），反向断言语义保持不变。
+      const st2 = readScenarioState(dir);
+      st2.completedNodes = ['open', 'design'];
+      st2.currentNode = 'plan';
+      st2.evidence = { ...(st2.evidence || {}), open: { summary: 'open exited' } };
+      st2.history = [advanceForcedEvent('design')];
+      writeState(dir, st2);
+      const status2 = runStateWithProtocol(dir, ['status']);
+      assertExit(status2, 0);
+      const parsed2 = parseStatusJson(status2);
+      if (!Array.isArray(parsed2.forcedNodes) || !parsed2.forcedNodes.includes('design')) {
+        throw new Error('无出口证据的 completed 节点应进入 forcedNodes，实际 ' + JSON.stringify(parsed2.forcedNodes));
+      }
+      if (parsed2.forcedNodes.includes('open')) {
+        throw new Error('有出口证据的 completed 节点不得进入 forcedNodes，实际 ' + JSON.stringify(parsed2.forcedNodes));
+      }
+      // (i) 有 record 出口证据且被 advance 强制 → 必须出现（旧「缺 evidence」推断会漏报）
+      const stRecord = replanExecuteState({
+        completedNodes: ['open', 'design'],
+        currentNode: 'plan',
+        evidence: { open: { summary: 'record 出口证据（advance 事件之外的真实证据）' } },
+        history: [advanceForcedEvent('open')],
+      });
+      writeState(dir, stRecord);
+      const statusRecord = runStateWithProtocol(dir, ['status']);
+      assertExit(statusRecord, 0);
+      const parsedRecord = parseStatusJson(statusRecord);
+      const failures271 = [];
+      if (!Array.isArray(parsedRecord.forcedNodes) || !parsedRecord.forcedNodes.includes('open')) {
+        failures271.push('(i) 有 record 证据且被 advance 强制的 open 应进入 forcedNodes，实际 '
+          + JSON.stringify(parsedRecord.forcedNodes));
+      }
+      // (ii) 只有 replanAuthorization 授权留痕且被 advance 强制 → 必须出现（旧对象判据会漏报）
+      const stAuth = replanExecuteState({
+        completedNodes: ['open', 'design'],
+        currentNode: 'plan',
+        evidence: {
+          open: { summary: 'open exited' },
+          design: {
+            replanAuthorization: {
+              round: 1,
+              at: '2026-09-28T00:00:00.000Z',
+              source: 'user',
+              reason: '计划重校',
+              backup: '.specs/' + CHANGE_ID + '/replan-backups/x.json',
+              fingerprint: '0'.repeat(64),
+            },
+          },
+        },
+        history: [advanceForcedEvent('design')],
+      });
+      writeState(dir, stAuth);
+      const statusAuth = runStateWithProtocol(dir, ['status']);
+      assertExit(statusAuth, 0);
+      const parsedAuth = parseStatusJson(statusAuth);
+      if (!Array.isArray(parsedAuth.forcedNodes) || !parsedAuth.forcedNodes.includes('design')) {
+        failures271.push('(ii) 仅有 replanAuthorization 留痕且被 advance 强制的 design 应进入 forcedNodes，实际 '
+          + JSON.stringify(parsedAuth.forcedNodes));
+      }
+      // (iv) 旧 state（无 history 字段）→ 回退「缺 evidence」判据仍生效
+      const stLegacy = replanExecuteState({
+        completedNodes: ['open', 'design'],
+        currentNode: 'plan',
+        evidence: { open: { summary: 'open exited' } },
+      });
+      delete stLegacy.history;
+      writeState(dir, stLegacy);
+      const statusLegacy = runStateWithProtocol(dir, ['status']);
+      assertExit(statusLegacy, 0);
+      const parsedLegacy = parseStatusJson(statusLegacy);
+      if (!Array.isArray(parsedLegacy.forcedNodes) || !parsedLegacy.forcedNodes.includes('design')) {
+        failures271.push('(iv) 旧 state（无 history）应回退缺 evidence 判据：design 应在 forcedNodes，实际 '
+          + JSON.stringify(parsedLegacy.forcedNodes));
+      }
+      if (parsedLegacy.forcedNodes.includes('open')) {
+        failures271.push('(iv) 旧 state（无 history）有出口证据的 open 不得进入 forcedNodes，实际 '
+          + JSON.stringify(parsedLegacy.forcedNodes));
+      }
+      if (failures271.length > 0) {
+        throw new Error('advance-forced 事件派生判据失败: ' + failures271.join(' | '));
+      }
+    },
+  },
+
+  // 274: M6 收窄——空退出豁免仅适用于「无任何串行任务」的全并行 change；含串行任务
+  // （parallel="false"/缺省，无论 pending/done）时豁免不生效，产物校验照常执行。
+  // 夹具用旧 change 语义（无 newChange）：done 缺 SUMMARY 在 M2 只 WARN → 放行与否
+  // 唯一取决于 M6 是否跳过 task-summaries 产物校验（隔离判据；新 change 由 M2 硬门先行，
+  // 无法观察 M6 行为）。修复前 emptyExitApproved 无条件跳过 → exit 0（本场景 RED）。
+  {
+    name: '274 execute exit BLOCKED：含串行任务的 change 空退出豁免不生效（M6 收窄）',
+    run: (dir) => {
+      const st = baseState('execute');
+      st.evidence.execute = { summary: '陈旧空退出标记', emptyExitApproved: true };
+      st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
+      writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
+        '# TASK\n\n<task id="T01" parallel="false" status="done"><action>串行任务已完成但缺 SUMMARY</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n');
+      const res = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, 'task-summaries');
+      assertOut(res, 'EMPTY-EXIT 未生效');
+      assertNotOut(res, '豁免已生效');
+      // 反向子锚：全并行 change 时豁免仍生效，且输出被跳过项清单（补既有全 parallel 通过锚）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
+        '# TASK\n\n<task id="P01" parallel="true" status="pending"><action>并行任务</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n');
+      const resParallel = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resParallel, 0);
+      assertOut(resParallel, '豁免已生效');
+      assertOut(resParallel, 'EMPTY-EXIT-SKIPPED');
+    },
+  },
+  // 275: replan 任务内容缺失 fail-closed（引擎既有分支的回归锚）——TASK.md 不存在 / 为空（0 字节）
+  // 时，真实 CLI 的 replan 必须 BLOCKED、消息给出 fail-closed 指引，且 state 字节零改写、零备份、
+  // 零审计事件（判定必须先于任何写盘；不得以「空任务集签名」判幂等空操作放行）。纯空白是边界：
+  // 非空串不落 task-content-missing，但同样 fail-closed 拒绝重签（无 <task> 块）。对照：同一夹具
+  // 下 TASK.md 恢复为可解析任务集 → replan 放行（证明 BLOCK 来自内容缺失而非夹具畸形）。
+  {
+    name: '275 replan 任务内容缺失/为空 → BLOCKED fail-closed 零改写（含放行对照）',
+    run: (dir) => {
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n\n任务内容缺失回归锚。\n');
+      writeState(dir, replanExecuteState({ taskHash: REPLAN_STALE_SIGNATURE }));
+      const beforeBytes = readStateBytes(dir);
+      const blockedCases = [
+        ['TASK.md 缺失', null],
+        ['TASK.md 为空（0 字节）', ''],
+      ];
+      for (const [label, content] of blockedCases) {
+        if (content === null) {
+          fs.rmSync(path.join(dir, '.specs', CHANGE_ID, 'TASK.md'), { force: true });
+        } else {
+          writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', content);
+        }
+        const res = runStateWithProtocol(dir, ['replan', '计划缺陷重校', '--authorized-by', 'user-approval']);
+        assertExit(res, 1);
+        assertOut(res, 'BLOCKED');
+        assertOut(res, '任务内容缺失');
+        assertOut(res, 'fail-closed');
+        assertOut(res, 'TASK.md');
+        assertStateBytesUnchanged(dir, beforeBytes, label);
+      }
+      // 边界：纯空白非空串 → 不落 task-content-missing，但同样拒绝重签（无 <task> 块），零改写
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '   \n');
+      const blank = runStateWithProtocol(dir, ['replan', '计划缺陷重校', '--authorized-by', 'user-approval']);
+      assertExit(blank, 1);
+      assertOut(blank, 'BLOCKED');
+      assertOut(blank, '无 <task> 块');
+      assertOut(blank, '零改写');
+      assertStateBytesUnchanged(dir, beforeBytes, 'TASK.md 纯空白');
+      // 三条 BLOCK 路径都不得产生备份 / 审计事件（写盘前拦截）
+      if (replanBackupFiles(dir).length !== 0) {
+        throw new Error('内容缺失路径不得产生备份: ' + JSON.stringify(replanBackupFiles(dir)));
+      }
+      if (replanEventsOf(readScenarioState(dir)).length !== 0) {
+        throw new Error('内容缺失路径不得写审计事件: ' + JSON.stringify(replanEventsOf(readScenarioState(dir))));
+      }
+      // 放行对照：同夹具下 TASK.md 可解析 → replan 真实重签成功（判别力：BLOCK 不是夹具畸形导致）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', REPLAN_TASK_INITIAL);
+      const ok = runStateWithProtocol(dir, ['replan', '计划缺陷重校', '--authorized-by', 'user-approval']);
+      assertExit(ok, 0);
+      assertOut(ok, 'REPLAN');
+      if (replanEventsOf(readScenarioState(dir)).length !== 1) {
+        throw new Error('放行对照应恰写 1 条 replan-applied 事件');
+      }
+    },
+  },
 ];
 // ---------- 运行 ----------
 
@@ -11477,7 +13657,7 @@ for (const sc of SCENARIOS) {
     // 场景 runRoot=tmpdir、内置协议默认路径在 packageRoot（tmpdir 外）→ 复制到 <dir>/reference/ 内，
     // 由 runGuard 的 FLOW_COMET_PROTOCOL env 指向场景内副本。场景内 writeFile('reference/...') 或
     // --protocol CLI 覆盖保持后写优先语义（CLI --protocol 优先级高于 env）。
-    const builtinCopy = path.join(dir, 'reference', 'workflow-protocol.json');
+    const builtinCopy = scenarioProtocolPath(dir);
     fs.mkdirSync(path.dirname(builtinCopy), { recursive: true });
     fs.copyFileSync(BUILTIN_PROTOCOL_SOURCE, builtinCopy);
     await sc.run(dir);
@@ -11487,7 +13667,8 @@ for (const sc of SCENARIOS) {
     failures.push({ name: sc.name, error: e.message });
     console.error('FAIL: ' + sc.name + '\n' + e.message);
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    // 清理失败不抛（见 cleanupTmpDir 注释）：残留由末尾判据报告，避免整轮崩
+    cleanupTmpDir(dir);
   }
 }
 
@@ -11499,6 +13680,17 @@ console.log('RESULT: ' + passed + '/' + SCENARIOS.length + ' scenarios passed');
 // ② 公开产物零代号：公开文档不得含过程代号（场景编号/修复编号/批次/缺陷编号/问题级/验证代号/验证轮次/未公开概念——历史 CHANGELOG 回归实证）。
 // 仅权威源检出执行；安装副本（目标项目）无 flow-comet 文档面，跳过。
 if (isAuthoritativeSourceRepo()) {
+  // ①a 受检面可见化（F2 防漂移）：实际受检文件数由模块级常量**推导**、不硬编码——分发组 =
+  // SCENARIO_COUNT_FILES ∪ SYSTEM_TEST_COUNT_FILES（后者为前者子集），维护者组 =
+  // SCENARIO_COUNT_FILES_MAINTAINER ∪ SYSTEM_TEST_COUNT_FILES_MAINTAINER（后者为前者子集）；
+  // 维护者面缺席（CI 全新检出 / worktree）时按组跳过语义只计分发面。本行是对外可复核的
+  // 「覆盖面事实」——清单增删/口径漂移在此直接可见，不再依赖人工核对注释（F2 根因）。
+  const distFaceCount = new Set([...SCENARIO_COUNT_FILES, ...SYSTEM_TEST_COUNT_FILES]).size;
+  const maintainerFaceCount = maintainerFacePresent()
+    ? new Set([...SCENARIO_COUNT_FILES_MAINTAINER, ...SYSTEM_TEST_COUNT_FILES_MAINTAINER]).size
+    : 0;
+  console.log('受检面: ' + (distFaceCount + maintainerFaceCount) + ' 文件（分发 ' + distFaceCount
+    + ' + 维护者 ' + maintainerFaceCount + '）');
   // ① 计数一致性受检清单（分发组恒检 + 维护者组整组在场时检；判据与场景 105 共用同一实现）
   // SCENARIO_COUNT_FILES(_MAINTAINER) / SYSTEM_TEST_COUNT_FILES(_MAINTAINER) 为模块级常量
   // （见文件头定义）——场景数与系统测试集项数两套计数合并检查
@@ -11513,22 +13705,27 @@ if (isAuthoritativeSourceRepo()) {
     console.error('FAIL: 维护文档机检\n' + problem);
   }
 
+  // ①c 维护者面缺席可见化：结构性缺席（worktree / CI 全新检出）不判失败（退出码不变、不误红），
+  // 但必须可见——逐面输出 SKIP 行（面名 + 原因 + 本检出未执行什么校验 + 回维护者主树重跑的指引）。
+  for (const skip of maintainerFaceSkips()) {
+    console.log('SKIP: ' + skip.face + ' — ' + skip.reason
+      + '；本次检出未执行该面校验，请在维护者主树重跑本套件（主树 L1），勿把跳过当成已校验。');
+  }
+
   // ② 公开文档零代号（公开产物纪律——CHANGELOG 历史 S 编号回归的教训，2026-08-10）
   const PUBLIC_DOCS = [
     'README.md', 'README-zh.md', 'CONTRIBUTING.md', 'CONTRIBUTING-zh.md',
     'SECURITY.md', 'SECURITY-zh.md', 'CODE_OF_CONDUCT.md', 'CODE_OF_CONDUCT-zh.md',
     'CHANGELOG.md', 'CHANGELOG-zh.md',
     'docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
-    'docs/USAGE.md', 'docs/USAGE-zh.md', 'docs/PROTOCOL.md', 'docs/PROTOCOL-zh.md',
+    'docs/USAGE.md', 'docs/USAGE-zh.md',
     'docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md', 'docs/VERSIONS.md', 'docs/VERSIONS-zh.md',
-    'docs/ECOSYSTEM.md', 'docs/ECOSYSTEM-zh.md',
     '.github/PULL_REQUEST_TEMPLATE.md',
     '.github/ISSUE_TEMPLATE/1-bug_report.yml', '.github/ISSUE_TEMPLATE/2-feature_request.yml',
     '.github/ISSUE_TEMPLATE/3-question.md', '.github/ISSUE_TEMPLATE/4-task.md',
   ];
-  // 与 .githooks/internal-codes.mjs 的 BANNED 保持同步（单一来源约定；本文件随 bundle
-  // 分发，不能 import 主仓私有 .githooks——改动词表时两份同改，行为必须一致）
-  const INTERNAL_CODE_RE = /\bS\d{1,3}\b|T-FIX|batch-(?![a-z])|D-\d+|P[0-7]\b|round\s*\d|dogfood|内部/;
+  // 词表判据 = 模块级 PUBLIC_CODE_RE（与 .githooks/internal-codes.mjs 的 BANNED 同判据，
+  // 见其定义处的同步约定；维护文档机检场景族另有该判据的判别力/边界锚）。
   for (const rel of PUBLIC_DOCS) {
     let text;
     try {
@@ -11540,15 +13737,36 @@ if (isAuthoritativeSourceRepo()) {
       console.error('FAIL: 公开产物零代号(' + rel + ')\n文件缺失: ' + e.message);
       continue;
     }
-    const m = text.match(INTERNAL_CODE_RE);
+    const m = text.match(PUBLIC_CODE_RE);
     if (m) {
       failures.push({ name: '公开产物零代号(' + rel + ')', error: rel + ' 含过程代号: "' + m[0] + '"' });
       console.error('FAIL: 公开产物零代号(' + rel + ')\n' + rel + ' 含过程代号: "' + m[0] + '"');
     }
   }
+
+  // ③ 词表镜像漂移（L-067 收口）：主仓私有的词表单一来源与套件内的同义镜像必须**逐字符
+  // 等价**——两侧此前只有注释互指"同步"、零一致性判据：主仓增补模式时分发侧扫描静默落后
+  // （新词可在公开面长期存活而套件全绿），反向则分发面误红。判据只读文件、不改任何判定语义。
+  for (const problem of vocabularyMirrorProblems()) {
+    failures.push({ name: '词表镜像漂移', error: problem });
+    console.error('FAIL: 词表镜像漂移\n' + problem);
+  }
+} else {
+  // 安装副本形态：.githooks 是主仓私有面（随 clone 不分发）→ 该判据**不适用**。结构性缺席
+  // 不判失败（退出码不变、不误红），但必须显式可见——未验证 ≠ 通过，不得静默跳过。
+  console.log('SKIP/NOT-APPLICABLE: 词表镜像漂移判据（.githooks 为主仓私有面）'
+    + '；本次检出无该私有面，未执行「词表单一来源 ↔ 套件同义镜像」的逐字符等价性比对'
+    + '——请在主仓私有面在场处重跑本套件（主树 L1），勿把不适用当成已校验。');
 }
 
 // 清理验证：自测套件自身创建的临时目录不留残留
+// 先做一次延迟重试：跨场景仍被占用的句柄（子进程退出、扫描器）可能晚于最后一个场景的清理才释放。
+// 只等**一次**（不是每个残留目录各等一次），再逐个重试；随后由下方单一判定点统一报告。
+const remainingDirs = createdDirs.filter((d) => fs.existsSync(d));
+if (remainingDirs.length > 0) {
+  sleepSync(300);
+  for (const d of remainingDirs) cleanupTmpDir(d);
+}
 const residue = createdDirs.filter((d) => fs.existsSync(d));
 if (residue.length > 0) {
   failures.push({ name: '临时目录清理', error: '残留目录: ' + residue.join(', ') });

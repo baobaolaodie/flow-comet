@@ -166,6 +166,21 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs reenter <target> --aut
 - **顺序**：命令成功后再写修复内容——archive 阶段写入白名单只放行 `.specs/<change-id>/KNOWN-ISSUES.md` 等少数路径；重入后写入权限跟随目标节点，此时才追加 Fix 任务 / 修改工件。
 - **边界**：归档移动已发生或 change 已 `completed` → BLOCKED，走人工处置或新 change / hotfix；重复调用同一目标 → 空操作（输出 `REENTRY: 空操作——…`，不备份、不计数、不改写 state），不会静默跳过。
 
+### 受控重校（`replan` · execute 源）
+
+计划在执行中被证明有缺陷、任务集因此需要修订时，用受控重校重新校验并重签任务集——不跳节点、不重置任何完成态：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs replan "<reason>" --authorized-by <source> [--continue-round <n>]
+```
+
+- **何时用**：`currentNode` 停在 `execute` / `subagent-execute`，且任务集在进入该节点后被修订、出口因此报「签名不匹配」时；修订后的任务集必须自身合法。
+- **授权**：每次调用都需要用户显式授权——`--authorized-by` 记录授权来源，位置参数记录原因；引擎把授权留痕写入当前节点的嵌套证据（`state.evidence.<node>.replanAuthorization`）。缺授权、值为空/纯空白或形态非法一律 BLOCKED，且 state 字节零改写。
+- **上限与显式续轮**：每 change 最多 3 轮；第 4 次 BLOCKED 并给出「继续 / 停止」人工裁决指引。人工裁决「继续」须追加 `--continue-round <n>`（正整数，且 n ≥ 已用轮次 + 1）作显式续轮授权：满足则放行并计入下一轮，审计行打印续轮标记；未到上限即传该参数、或轮次不足一律 BLOCKED 且零改写。轮次与审计事件记入 `state.history`（事件类型 `replan-applied`），成功输出 `REPLAN: <node> 重新校验通过（授权源 <source>；第 n/3 轮；备份 <file>）` 与 `REASON: <text>` 两行。
+- **备份**：改写前自动落 state 快照 `.specs/<change-id>/replan-backups/<UTC ISO>-pre-replan.json`（时间戳中的 `:` 替换为 `-`），并记录 sha256 指纹，供审查核验与手工回滚。
+- **幂等与零改写**：目标形态已成立时的重复同形态调用 = 空操作（输出 `REPLAN: 空操作——…`，不备份、不计数、不写事件、不改写 state），不会静默跳过。
+- **绝不豁免校验**：`replan` 只做「重新校验 + 重新签名」——判据与 plan 出口同源，处置按路径分列：**replan 重校**——任务块 / 每任务 `<verify>` / 任务图（依赖环 / 缺失依赖）任一不成立，或并行写冲突的写写（write∩write）成立，一律 BLOCKED（状态零改写）；读写（read∩write）仅 WARN 不阻断；7 字段完整性只在「新模板形态（含 `<name>`）+ 新 change」缺字段时 BLOCKED，其余情形 WARN 渐进。**plan 出口**——任务块 / 每任务 `<verify>` 缺失一律 BLOCKED；任务图的依赖环 / 缺失依赖与并行写冲突的写写，对新 change BLOCKED、旧 change WARN 渐进；读写对新旧 change 均仅 WARN。它不是绕过签名门禁，而是把「签名不匹配」重新收敛为「匹配」。
+
 ### Evidence Recording
 
 After completing a Node:
@@ -177,14 +192,18 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record <node-id> '{"su
 
 All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT.md, LESSONS.md, CHANGELOG.md).
 
+> **模板权威**：工件段形以 `flow-kit/templates/**` 为唯一权威。
+> **archive 定位与读法**：`.specs/archive/**` 是历史证据。**何时可读**：工作区文档明确要求（如断点续传 / 决策追溯），或某 guard 硬校验的约定在模板与 LESSONS 中查不到时；**读什么**：只取结构与证据；**不读什么**：不作为格式规范或决策依据，不得以归档工件对齐段形。
+
 ### Scripts
 
 > **命令路径的平台化**：本文件命令统一为**权威源设计形态** `node .claude/skills/flow-comet/scripts/...`。安装时由 prepare-env 按平台处理——Claude Code 平台零替换（即此形态）；Codex 平台自动替换为 `node .agents/skills/flow-comet/scripts/...`（技能安装于 `.agents/skills/`，Codex 自动发现）。相对引用（`reference/`、`flow-kit/`）不替换——随技能目录整体复制，相对位置不变。手动复制（方案 C）仅面向 Claude Code；Codex 请用安装器。
 
 | 脚本 | 用途 |
 |------|------|
-| `workflow-state.mjs` | 状态管理：init/status/next/select/record/advance/skill-load/execution-mode/config/verify-fail（verify 失败计数，第 4 次 BLOCKED）/reenter（archive 源受控重入） |
+| `workflow-state.mjs` | 状态管理：init/status/next/select/record/advance/skill-load/execution-mode/config/verify-fail（verify 失败计数，第 4 次 BLOCKED）/reenter（archive 源受控重入）/replan（execute 源计划重校重签） |
 | `workflow-state.mjs reenter` | 归档后受控重入：`reenter <target> --authorized-by <source> --reason <text> [--continue-round <n>]` 把工作归属退回 execute / subagent-execute / review / verify 之一（仅 archive 源、归档移动前、每次显式用户授权、每 change 上限 3 轮，超限继续需显式续轮授权） |
+| `workflow-state.mjs replan` | 计划重校重签：`replan <reason> --authorized-by <source> [--continue-round <n>]` 在 execute / subagent-execute 相位重跑任务图与字段校验并重录任务集签名（仅这两个相位、每次显式授权、每 change 上限 3 轮、超限继续需显式续轮、缺授权或形态非法一律 BLOCKED 且零改写；写盘前落备份；重复同形态为空操作；只重校重签、绝不豁免校验） |
 | `workflow-guard.mjs` | 节点门禁：entry/exit/verify 检查 |
 | `workflow-handoff.mjs` | 子代理交接：request/result/status |
 | `comet-plan.mjs` | 兼容别名入口（内容为 workflow-state 的别名壳） |

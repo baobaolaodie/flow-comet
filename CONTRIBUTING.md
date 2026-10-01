@@ -93,7 +93,7 @@ git branch -d hotfix/<description>
 
 - **Runtime**: Node.js ≥ 18 (ESM); the only third-party dependency is `@clack/prompts` (pinned exact version via `package-lock.json`), used only by the installer's interactive TTY multi-select with an automatic readline fallback — run `npm install` once after cloning; without it the installer falls back to readline, so the interactive selection shipped to users goes unexercised in your local runs
 - **Repo**: clone, run `npm install`, then verify the regression baseline runs:
-  `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 267 SCENARIOS PASSED` (two-tier baseline; also run `node .flow-comet/skills/flow-comet/scripts/system-test.mjs` → `ALL SYSTEM TESTS PASSED`, 82 items)
+  `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL (see VERSIONS) SCENARIOS PASSED` (two-tier baseline; also run `node .flow-comet/skills/flow-comet/scripts/system-test.mjs` → `ALL SYSTEM TESTS PASSED`, (see VERSIONS) items)
 - **Distribution surface**: the npm package boundary (`files` whitelist in `package.json`) and the `fcomet` / `flow-comet` bin entries are asserted in two places — CI's `installer` job (the merge gate) and `system-test` (reproducible locally, and from an installed copy the assertion reports "not applicable" instead of skipping silently). The engine self-test suite is not a distribution criterion.
 - **Authoring environment**: Claude Code (skills/hooks run in Claude Code sessions); the hook is installed via `prepare-env` into your project's `.claude/` (the same installer serves Codex via `--platform codex` and DeepSeek Harness (dsh) via `--platform dsh` — project-level skill tree, AGENTS.md managed rules, and a global bridge loader)
 - **For mechanism work**: read [docs/MECHANISM.md](docs/MECHANISM.md) for the mechanism semantics (behavior layer) before touching scripts
@@ -113,7 +113,7 @@ The hooks reject commits and pushes whose messages carry process codes — proje
 Before pushing, run the regression baseline:
 
 ```bash
-node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 267 SCENARIOS PASSED
+node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL (see VERSIONS) SCENARIOS PASSED
 ```
 
 CI handles the rest.
@@ -123,15 +123,24 @@ CI handles the rest.
 Open an issue with a clear description:
 
 - **Bug**: what happened vs expected, reproduction steps (or the exact BLOCKED/WARN message), environment (Node version, install method)
-- **Feature proposal**: the goal, the workflow you want, any skill combination you have in mind (see [PROTOCOL.md](docs/PROTOCOL.md) for custom protocols)
+- **Feature proposal**: the goal, the workflow you want, any skill combination you have in mind (see [Core Mechanisms → Custom protocols](docs/MECHANISM.md#custom-protocols))
 
 After the issue is confirmed: bug fixes use a `fix/` branch, features use a `feat/` branch — both PR into `dev` per the [Pull-request workflow](#pull-request-workflow).
+
+## Borrowing boundary
+
+flow-comet automates the [flow-kit](https://github.com/rihebty/flow-kit) methodology, so the boundary between "borrowed" and "ours" is part of the contribution rules:
+
+- **Methodology and artifacts are borrowed; files are not.** Stages, artifact formats, rule sets and the R1–R8 discipline come from the upstream project. Upstream template files must not be copied into this repository — section names are derived from the vendored templates at run time instead, so there is one source for their wording.
+- **The vendored copy is read-only.** A `flow-kit/` checkout in a project is a pinned format baseline: it is never edited, and a divergence from it is *declared* in our own artifacts rather than patched upstream-side. See ADR-008 for the acquisition rules.
+- **Upgrades are explicit.** The pinned snapshot moves only by a deliberate change that also records the new commit; nothing auto-follows upstream.
+- **Attribution.** flow-kit is MIT-licensed; the licence text ships with the vendored copy and the dependency is named in the README.
 
 ## Development standards
 
 - **Authoritative source**: edit skills/scripts under `.flow-comet/skills/` (the single source; `.claude/` copies are install artifacts — update them via `prepare-env`, never by hand)
 - **TDD**: every mechanism fix starts with a RED scenario in `guard-self-test.mjs` (watch it fail for the right reason), then GREEN, then full regression
-- **Regression baseline**: `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 267 SCENARIOS PASSED` (two-tier baseline; also run `node .flow-comet/skills/flow-comet/scripts/system-test.mjs` → `ALL SYSTEM TESTS PASSED`, 82 items) (mandatory after every change)
+- **Regression baseline**: `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL (see VERSIONS) SCENARIOS PASSED` (two-tier baseline; also run `node .flow-comet/skills/flow-comet/scripts/system-test.mjs` → `ALL SYSTEM TESTS PASSED`, (see VERSIONS) items) (mandatory after every change)
 - **Distribution contract**: the npm package name and the `fcomet` / `flow-comet` bin names become contract once released, and the package boundary is the `files` whitelist in `package.json` — fail-closed, never relaxed to a blacklist or a whole-directory include. Decision record: ADR-010.
 - **Documentation sync**: behavior-layer docs live in `docs/` (bilingual EN/zh — keep both in sync when a doc changes); implementation details stay out of public docs
 - **Bilingual discipline**: English docs contain no Chinese (except the language switcher, flow-kit artifact section names, and runtime message quotes); Chinese docs contain no long English sentences (except commands, URLs, and proper terms)
@@ -229,11 +238,11 @@ Force push is allowed on your own feature branch — feature branches carry no p
 ## Release approval sheet
 
 - Changes: PR list + one-line summary each
-- Verification: regression (267 scenarios) / installed-copy checks
+- Verification: regression ((see VERSIONS) scenarios) / installed-copy checks
 - Version: X.Y.Z (doc-only batches may skip the bump)
 ```
 
-**Release steps**: the five-step checklist (CHANGELOG → README badge → tag → prepare-env distribution → dev sync) lives in [VERSIONS.md](docs/VERSIONS.md).
+**Release steps**: the release checklist lives in [VERSIONS.md](docs/VERSIONS.md), the single authority for release steps and the version surface.
 
 **Release PR specifics**:
 - The release PR (dev → main) lists dev's change-level commits (by design — each PR = one change); merging it brings those commits into main via one merge commit per release

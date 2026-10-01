@@ -7,6 +7,8 @@ description: "flow-kit CHANGE 阶段协议：反问澄清、change-id 自动生�
 
 本 Skill 为 flow-comet 的 open 节点提供 flow-kit 的 CHANGE 反问协议。
 
+> **模板权威**：本技能产出工件的段形唯一权威 = `flow-kit/templates/**`；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+
 ## 加载
 
 读取 `flow-kit/prompts/0-change.md` 并按其执行。关键步骤：

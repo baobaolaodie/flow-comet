@@ -13,13 +13,16 @@
 //   F. 自动初始化（缺失提示/跳过记忆/新鲜静默/生成协作全链路）
 //   G. 分支模式（init 建分支/归档入口分支校验/一致性失配警告）
 //   H. verify 与归档（验证命令真实执行 + 超时配置/完整归档流程/归档路径声明标记查找/
-//      受控重入真实命令链路：授权门禁·转移·审计·备份指纹·幂等·轮次上限·手工回滚）
+//      受控重入真实命令链路：授权门禁·转移·审计·备份指纹·幂等·轮次上限·手工回滚/
+//      受控计划重校重签真实命令链路：修订任务集死锁→重签→出口放行·授权 fail-closed·
+//      轮次上限与显式续轮/强制推进留痕：advance-forced 事件 + status.forcedNodes 派生可见）
 //   I. 异常路径（损坏状态/缺工件出口/非法参数/状态字段类型非法）
 //   J. 文档一致性（双语健康检查/公开产物零代号检查——调用仓库本地工具）
 //   K. 安装器与平台（版本标识/多平台安装与平台化路径/codex hook JSON 契约/平台选择链/
 //      purge 语义/描述符驱动/dsh 平台断言/loader 版本戳重装断言/hook 注入形态无关断言与旧条目幂等升级/
-//      旧布局状态迁移后状态可读与流程可继续/分发面包体边界·可发布性清单与 bin 双入口（权威源真跑·
-//      副本回传显式「不适用」结果标记）与 init 词元红线）
+//      旧布局状态迁移后状态可读与流程可继续/契约核对 CLI 参数化目录解析与缺省回退回归锚/
+//      分发面包体边界·可发布性清单与 bin 双入口（权威源真跑·副本回传显式「不适用」结果标记）
+//      与 init 词元红线）
 //   L. 执行遗漏防护（entry 进入证据/空退出豁免/空仓库提示）
 //
 // 载体（与 guard-self-test 同构）：每项 = 独立临时目录（fs.mkdtemp）+ 内置协议副本复制到
@@ -47,6 +50,7 @@ const GUARD = path.join(__dirname, 'workflow-guard.mjs');
 const STATE = path.join(__dirname, 'workflow-state.mjs');
 const HOOK = path.join(__dirname, 'comet-hook-guard.mjs');
 const HANDOFF = path.join(__dirname, 'workflow-handoff.mjs');
+const CONTRACT = path.join(__dirname, 'contract-check.mjs');
 // 内置协议源文件（脚本所在技能包 reference/）：复制到 <tmp>/reference/ 内（受保护路径要求 runRoot 内）
 const BUILTIN_PROTOCOL_SOURCE = path.join(__dirname, '..', 'reference', 'workflow-protocol.json');
 const CHANGE_ID = 'ch';
@@ -1044,6 +1048,77 @@ function resolveReentryBackupPath(root, changeId, event) {
   return candidates.find((p) => fs.existsSync(p)) || null;
 }
 
+// ---------- 受控计划重校重签（replan）与强制推进留痕真实命令链路夹具（H9~H11 共用） ----------
+
+// 任务集构造：基础串行任务（status 可切）+ 可追加的并行就绪任务（计划外修订用）
+// + 可选的同文件跨任务对（第三族：两条串行任务写同一路径——并行形态会先被写写强判族命中，
+//   串行拆分才是「同文件跨任务且无依赖路径」的判据面；crossTaskPair='deps' 时补显式 depends_on）。
+function replanTaskText(options = {}) {
+  const lines = ['# TASK', '',
+    '<task id="S01" parallel="false" status="' + (options.s01Status || 'pending') + '">'
+    + '<action>实现 S01</action><write_files>src/s01.mjs</write_files>'
+    + '<verify>node --check src/s01.mjs</verify></task>'];
+  for (const id of options.parallelPending || []) {
+    lines.push('<task id="' + id + '" parallel="true" status="pending">'
+      + '<action>实现计划外新增的 ' + id + '</action>'
+      + '<write_files>src/' + id.toLowerCase() + '.mjs</write_files>'
+      + '<verify>node --check src/' + id.toLowerCase() + '.mjs</verify></task>');
+  }
+  if (options.crossTaskPair) {
+    const deps = options.crossTaskPair === 'deps' ? '<depends_on>X1</depends_on>' : '';
+    lines.push('<task id="X1" parallel="false" status="pending">'
+      + '<action>实现 X1</action><write_files>src/shared-cross.mjs</write_files>'
+      + '<verify>node --check src/shared-cross.mjs</verify></task>');
+    lines.push('<task id="X2" parallel="false" status="pending">'
+      + '<action>实现 X2</action><write_files>src/shared-cross.mjs</write_files>'
+      + '<verify>node --check src/shared-cross.mjs</verify>' + deps + '</task>');
+  }
+  return lines.join('\n') + '\n';
+}
+
+// execute 已 entry 的真实链路前奏：#init → open/design 出口 → plan 出口 → 任务集 → record +
+// entry execute（entry 真实记录任务集签名）。返回后调用方可修订任务集触发签名不匹配现场。
+function seedExecuteEntryState(dir, taskText) {
+  driveThroughDesign(dir);
+  writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskText);
+  assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md'], dir), 0);
+  assertExit(runState(['record', 'plan', '{"summary":"plan done"}'], dir), 0);
+  assertExit(runGuard(['entry', 'plan'], dir), 0);
+  const planExit = runGuard(['exit', 'plan', '--apply'], dir);
+  assertExit(planExit, 0);
+  assertNodeLine(planExit, 'execute');
+  assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
+  assertExit(runState(['record', 'execute', '{"summary":"implementation recorded"}'], dir), 0);
+  assertExit(runGuard(['entry', 'execute'], dir), 0);
+}
+
+// 串行 pending 任务的真实委托留证（execute 归属：request + result 契约回传）
+function completeSerialTaskWithHandoff(dir, taskId, writeFilesRel) {
+  assertExit(runHandoff(['request', taskId, taskId + ' 委托', '--write-files', writeFilesRel], dir), 0);
+  assertExit(runHandoff(['result', taskId, fullContract('abcd1234abcd1234abcd1234abcd1234abcd1234', taskId)], dir), 0);
+}
+
+// replan 备份清单（.specs/<id>/replan-backups/）
+function replanBackupFiles(dir, changeId = CHANGE_ID) {
+  const backupDir = path.join(dir, '.specs', changeId, 'replan-backups');
+  return fs.existsSync(backupDir) ? fs.readdirSync(backupDir).sort() : [];
+}
+
+// replan-applied 事件过滤（轮次按 change 从 history 派生）
+function replanEventsOf(state) {
+  return (state.history || []).filter((e) => e && e.event === 'replan-applied');
+}
+
+// status 输出的 JSON 块解析（命令行尾巴行不进 JSON）
+function parseStatusOutput(root) {
+  const res = runState(['status'], root);
+  assertExit(res, 0);
+  const start = res.output.indexOf('{');
+  const end = res.output.lastIndexOf('}');
+  if (start < 0 || end <= start) throw new Error('status 输出缺少 JSON 块:\n' + res.output);
+  return JSON.parse(res.output.slice(start, end + 1));
+}
+
 // ---------- 系统测试项（A~L 十二类） ----------
 
 const TEST_ITEMS = [
@@ -1629,8 +1704,12 @@ const TEST_ITEMS = [
     // 并行文件依赖检出（真实命令链路）：write∩write 重叠强判前移 plan 出口——同波次并行任务
     // 写同一路径（链式重命名的 .txt 事故面）→ 新 change BLOCKED（含重叠路径与 depends_on
     // 恢复指引）；按指引补显式 depends_on 后同出口恢复通过。read∩write 弱判：无显式关联并行对
-    // 一方读取对方写路径 → WARN 提示不 BLOCK（渐进）。修复前 plan 出口无此检测 = 预期 RED。
-    name: 'A16 plan 出口文件依赖检出：写写重叠 BLOCK 与恢复 + 读写弱判 WARN（真实命令）',
+    // 一方读取对方写路径 → WARN 提示不 BLOCK（渐进）。同一文件跨任务族：两个未完成任务写入面
+    // 重叠且彼此无依赖路径（串行拆分同样拦截）→ 新 change BLOCKED（消息含任务对与重叠文件）；
+    // 补显式 depends_on 后放行；旧 change 形态仅 WARN 不阻断；修复任务族（id 带修复前缀）
+    // 不参与该族——其顺序由修复生命周期保证，回修同一文件是必然形态。修复前 plan 出口无这些
+    // 检测 = 预期 RED。
+    name: 'A16 plan 出口文件依赖检出：写写重叠 BLOCK 与恢复 + 读写弱判 WARN + 同文件跨任务无依赖路径（真实命令）',
     run: (dir) => {
       driveThroughDesign(dir);
       const planEnv = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
@@ -1662,17 +1741,78 @@ const TEST_ITEMS = [
       assertOut(blocked, 'BLOCKED');
       assertOut(blocked, 'bak_a.txt');
       assertOut(blocked, 'depends_on');
+      // 同一文件跨任务族（负例）：两个非修复任务写入同一文件、彼此无依赖路径（串行拆分同样构成
+      // 「未显式排序的同文件多任务」）→ 新 change BLOCKED，消息含任务对与重叠文件 + 恢复指引。
+      // 同夹具并列一对修复任务（id 带修复前缀）写同一文件且无依赖路径——该族不参与判定，
+      // 消息中不得出现它们（其顺序由修复生命周期保证）。
+      const fixPair =
+        '<task id="T-FIX-01" status="pending"><action>修复 F1</action><write_files>src/fix.mjs</write_files><verify>node --check src/fix.mjs</verify></task>\n' +
+        '<task id="T-FIX-02" status="pending"><action>修复 F2</action><write_files>src/fix.mjs</write_files><verify>node --check src/fix.mjs</verify></task>\n';
+      const sameFileTask = (id, depsElement) =>
+        '<task id="' + id + '" status="pending"><action>实现 ' + id + '</action><write_files>src/x.mjs</write_files>' +
+        '<verify>node --check src/x.mjs</verify>' + depsElement + '</task>\n';
+      const sameFilePairNoDeps = sameFileTask('X1', '') + sameFileTask('X2', '');
+      const sameFilePairWithDeps = sameFileTask('X1', '') + sameFileTask('X2', '<depends_on>X1</depends_on>');
+      planTask(C1 + sameFilePairNoDeps + fixPair);
+      const sameFileBlocked = exitPlanNoApply();
+      assertExit(sameFileBlocked, 1);
+      assertOut(sameFileBlocked, 'BLOCKED');
+      assertOut(sameFileBlocked, '同文件跨任务且无依赖路径');
+      assertOut(sameFileBlocked, 'X1×X2');
+      assertOut(sameFileBlocked, 'src/x.mjs');
+      assertOut(sameFileBlocked, 'depends_on');
+      assertNotOut(sameFileBlocked, 'T-FIX-01');
+      assertNotOut(sameFileBlocked, 'src/fix.mjs');
+      // 修复任务族谓词边界（唯一谓词 = id 前缀 + 「位于 Fix 段内」两条边界，只在引擎内表达一次）：
+      // ① 形似而非修复编号的 id 不属修复族——「前缀后缺连字符」的形似编号在旧判据的宽松前缀下
+      //    整对被放过；正确判据下它与同文件无依赖路径对一律 BLOCKED。
+      const lookalikeFixPair =
+        '<task id="T-FIXUP-01" status="pending"><action>实现 T-FIXUP-01</action><write_files>src/lookalike.mjs</write_files><verify>node --check src/lookalike.mjs</verify></task>\n' +
+        '<task id="T-FIXUP-02" status="pending"><action>实现 T-FIXUP-02</action><write_files>src/lookalike.mjs</write_files><verify>node --check src/lookalike.mjs</verify></task>\n';
+      planTask(C1 + lookalikeFixPair);
+      const lookalikeBlocked = exitPlanNoApply();
+      assertExit(lookalikeBlocked, 1);
+      assertOut(lookalikeBlocked, 'BLOCKED');
+      assertOut(lookalikeBlocked, '同文件跨任务且无依赖路径');
+      assertOut(lookalikeBlocked, 'T-FIXUP-01×T-FIXUP-02');
+      assertOut(lookalikeBlocked, 'src/lookalike.mjs');
+      // ② Fix 段内、id 不带修复前缀的修复任务同属修复族——旧判据只认 id 前缀，会把段内这对当普通
+      //    参与者误 BLOCK；正确判据下段内任务整体不参与该族 → 出口放行且无该族消息。
+      const fixSectionPair =
+        '<task id="F01" status="pending"><action>修复 F01</action><write_files>src/fix-section.mjs</write_files><verify>node --check src/fix-section.mjs</verify></task>\n' +
+        '<task id="F02" status="pending"><action>修复 F02</action><write_files>src/fix-section.mjs</write_files><verify>node --check src/fix-section.mjs</verify></task>\n';
+      planTask(C1 + '\n## Fix 任务\n\n' + fixSectionPair);
+      const fixSectionRes = exitPlanNoApply();
+      assertExit(fixSectionRes, 0);
+      assertNotOut(fixSectionRes, '同文件跨任务且无依赖路径');
+      assertNotOut(fixSectionRes, 'BLOCKED');
+      // 旧 change 形态（无新 change 标记）：同形态仅 WARN 渐进不阻断，恢复指引仍在
+      planTask(C1 + sameFilePairNoDeps + fixPair);
+      const sameFileState = readStateFile(dir);
+      delete sameFileState.newChange;
+      writeState(dir, sameFileState);
+      const sameFileWarn = exitPlanNoApply();
+      assertExit(sameFileWarn, 0);
+      assertOut(sameFileWarn, 'WARN');
+      assertOut(sameFileWarn, '同文件跨任务且无依赖路径');
+      assertOut(sameFileWarn, 'X1×X2');
+      assertNotOut(sameFileWarn, 'BLOCKED');
+      writeState(dir, { ...sameFileState, newChange: true });
       // 恢复（CodeRabbit 采纳）：按指引补显式 depends_on，且 **P02 保持写原重叠路径 bak_a.txt**
       // （不改路径避开重叠）——证明「补 depends_on 解决原重叠」而非「改路径避开重叠」；补依赖后
       // P02 跨趟（dep 未满足，不在本趟可运行集合）→ 同波次并行对只剩 P01 → 重叠消失 → 同出口通过。
+      // 同一文件跨任务族同批恢复：X2 补 depends_on X1（重叠路径不改）；并列的修复任务对保持无依赖
+      // ——该族不参与判定，故不影响本出口通过。
       planTask(
         C1 +
         '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n' +
-        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify><depends_on>P01</depends_on></task>\n');
+        '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify><depends_on>P01</depends_on></task>\n' +
+        sameFilePairWithDeps + fixPair);
       const ok = exitPlanApply();
       assertExit(ok, 0);
       assertOut(ok, 'ALL CHECKS PASSED');
       assertNotOut(ok, 'BLOCKED');
+      assertNotOut(ok, '同文件跨任务且无依赖路径');
     },
   },
 
@@ -2806,7 +2946,7 @@ const TEST_ITEMS = [
       const status = runHandoff(['status'], dir);
       assertExit(status, 0);
       assertOut(status, '"handoffRequests"');
-      assertOut(status, '"handoffResults"');
+      assertOut(status, '"handoffResult"');
       assertOut(status, 'T01');
       // ④ 无效提交哈希 → 错误提示但记录不阻断（结果仍入库）
       const badHash = runHandoff(['result', 'T02', JSON.stringify({
@@ -3828,7 +3968,7 @@ const TEST_ITEMS = [
       if (fs.existsSync(path.join(dir, '.specs', 'arch-m5b'))) {
         throw new Error('M5 在双路径皆无时重建了活动目录(残留): .specs/arch-m5b/');
       }
-      // 变体:归档后 skill-load 报错须引导 record 自动补路径(级 4 实证:归档后手动声明
+      // 变体:归档后 skill-load 报错须引导 record 自动补路径(真实会话实证:归档后手动声明
       // 不可行,消息须指明 M5 自动补仍可写归档路径标记)
       const slArchive = runState(['skill-load', 'archive', 'flow-comet-integration'], dir);
       assertExit(slArchive, 1);
@@ -4124,6 +4264,206 @@ const TEST_ITEMS = [
       }
       if (reentryBackupFiles(dir).length !== 4) {
         throw new Error('组合链路不得新增 / 丢失备份（应为 4 份）: ' + JSON.stringify(reentryBackupFiles(dir)));
+      }
+    },
+  },
+
+  // ---------- H9~H11: 受控计划重校重签（replan）与强制推进留痕真实命令链路 ----------
+
+  {
+    name: 'H9 replan 解死锁：execute 相位修订任务集（含并行就绪任务）→ 重签 → 出口放行 → next 正常路由',
+    run: (dir) => {
+      seedExecuteEntryState(dir, replanTaskText());
+      // 真实委托留证（串行 pending → execute 归属）→ SUMMARY 齐备，出口四类校验可通过
+      completeSerialTaskWithHandoff(dir, 'S01', 'src/s01.mjs');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/S01-SUMMARY.md', execSummaryFixture('S01'));
+      // 任务集修订（死锁现场）：原任务完成 + 计划外新增的并行就绪任务
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', replanTaskText({ s01Status: 'done', parallelPending: ['P02'] }));
+      const beforeBytes = readStateBytes(dir);
+      // ① 前进被签名门禁挡住：exit execute → BLOCKED（任务集被修改）+ 零改写
+      const blocked = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(blocked, 1);
+      assertOut(blocked, 'BLOCKED');
+      assertOut(blocked, '签名不匹配');
+      if (!readStateBytes(dir).equals(beforeBytes)) throw new Error('签名门禁 BLOCK 改写了 state 字节');
+      // ② 受控重校重签（唯一合规出口）：授权 + 原因 + 重签 + 双写留痕 + 备份
+      const replan = runState(['replan', '计划有缺陷：新增并行任务 P02', '--authorized-by', '用户裁决'], dir);
+      assertExit(replan, 0);
+      assertOut(replan, 'REPLAN');
+      const st = readStateFile(dir);
+      const events = replanEventsOf(st);
+      if (events.length !== 1 || events[0].change !== CHANGE_ID || events[0].node !== 'execute') {
+        throw new Error('replan-applied 审计事件不符: ' + JSON.stringify(events));
+      }
+      if (!st.evidence || !st.evidence.execute || !st.evidence.execute.replanAuthorization) {
+        throw new Error('缺 evidence.execute.replanAuthorization 授权留痕: ' + JSON.stringify(st.evidence));
+      }
+      if (replanBackupFiles(dir).length !== 1) {
+        throw new Error('重签应恰产生一份备份: ' + JSON.stringify(replanBackupFiles(dir)));
+      }
+      // ③ 同一出口再跑 → 放行（不再报签名不匹配），路由到委托节点（并行就绪任务）
+      const exitRes = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(exitRes, 0);
+      assertOut(exitRes, 'ALL CHECKS PASSED');
+      assertNodeLine(exitRes, 'subagent-execute');
+      // ④ next 正常路由（死锁解除后可继续推进）
+      const next = runState(['next'], dir);
+      assertExit(next, 0);
+      assertNodeLine(next, 'subagent-execute');
+    },
+  },
+
+  {
+    name: 'H10 replan 授权 fail-closed 与轮次上限：未授权零改写 · 同文件跨任务族分级拦截与恢复 · 第 4 次 BLOCK · 显式续轮放行（真实命令）',
+    run: (dir) => {
+      seedExecuteEntryState(dir, replanTaskText());
+      // 修订任务集 → 进入「签名不匹配」的适用现场
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', replanTaskText({ parallelPending: ['P01'] }));
+      const beforeBytes = readStateBytes(dir);
+      // ① 缺授权 / 空授权 / 纯空白授权 / 缺原因 → BLOCKED 且 state 字节零改写、零备份、零事件
+      const blockedCalls = [
+        ['缺 --authorized-by', ['replan', '计划有缺陷：新增并行任务 P01']],
+        ['--authorized-by 空串', ['replan', '计划有缺陷：新增并行任务 P01', '--authorized-by', '']],
+        ['--authorized-by 纯空白', ['replan', '计划有缺陷：新增并行任务 P01', '--authorized-by', '   ']],
+        ['缺位置 reason', ['replan', '--authorized-by', '用户裁决']],
+      ];
+      for (const [label, args] of blockedCalls) {
+        const res = runState(args, dir);
+        assertExit(res, 1);
+        assertOut(res, 'BLOCKED');
+        if (!readStateBytes(dir).equals(beforeBytes)) throw new Error(label + '：改写了 state 字节');
+      }
+      if (replanBackupFiles(dir).length !== 0) {
+        throw new Error('未授权调用产生了备份: ' + JSON.stringify(replanBackupFiles(dir)));
+      }
+      if (replanEventsOf(readStateFile(dir)).length !== 0) {
+        throw new Error('未授权调用写入了 replan-applied 事件');
+      }
+      // ② 真实链路跑满 3 轮（每轮重新修订任务集 → 重签；轮次按 change 从事件派生）。第 1 轮以
+      // 「同文件跨任务且无依赖路径」的修订开场，逐档验证 replan 与 plan 出口同族的分级消费：
+      // 旧 change 形态仅 WARN 且照常重签（渐进不卡死）→ 新 change 形态 BLOCK 且状态零改写
+      // （BLOCK 早于备份与任何写盘：零新增备份、零新增事件、state 字节不变）→ 按恢复指引补显式
+      // depends_on 后复签通过（同一通道，不做校验豁免）。
+      const parallelIds = ['P01', 'P02', 'P03', 'P04'];
+      const oldChangeState = readStateFile(dir);
+      delete oldChangeState.newChange;
+      writeState(dir, oldChangeState);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
+        replanTaskText({ parallelPending: ['P01'], crossTaskPair: 'no-deps' }));
+      const crossWarn = runState(['replan', '计划缺陷重校 1（旧 change 形态）', '--authorized-by', '用户裁决'], dir);
+      assertExit(crossWarn, 0);
+      assertOut(crossWarn, 'REPLAN');
+      assertOut(crossWarn, 'WARN: TASK.md 同文件跨任务且无依赖路径');
+      assertOut(crossWarn, 'X1×X2(src/shared-cross.mjs)');
+      assertNotOut(crossWarn, 'BLOCKED');
+      if (replanEventsOf(readStateFile(dir)).length !== 1) {
+        throw new Error('旧 change 形态应照常重签并写入第 1 条 replan-applied 事件');
+      }
+      const afterWarnState = readStateFile(dir);
+      afterWarnState.newChange = true;
+      writeState(dir, afterWarnState);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
+        replanTaskText({ parallelPending: ['P01', 'P02'], crossTaskPair: 'no-deps' }));
+      const crossBytes = readStateBytes(dir);
+      const crossBlocked = runState(['replan', '计划缺陷重校（新 change 形态）', '--authorized-by', '用户裁决'], dir);
+      assertExit(crossBlocked, 1);
+      assertOut(crossBlocked, 'BLOCKED');
+      assertOut(crossBlocked, '同文件跨任务且无依赖路径');
+      assertOut(crossBlocked, 'X1×X2(src/shared-cross.mjs)');
+      assertOut(crossBlocked, '补显式 depends_on 或合并为一个任务');
+      assertNotOut(crossBlocked, 'REPLAN:');
+      if (!readStateBytes(dir).equals(crossBytes)) throw new Error('replan 第三族 BLOCK 改写了 state 字节');
+      if (replanBackupFiles(dir).length !== 1) {
+        throw new Error('replan 第三族 BLOCK 不得新增备份（应仍为第 1 轮那一份）: ' + JSON.stringify(replanBackupFiles(dir)));
+      }
+      if (replanEventsOf(readStateFile(dir)).length !== 1) {
+        throw new Error('replan 第三族 BLOCK 不得写入 replan-applied 事件');
+      }
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
+        replanTaskText({ parallelPending: ['P01', 'P02'], crossTaskPair: 'deps' }));
+      const crossRecovered = runState(['replan', '计划缺陷重校 2（已补 depends_on）', '--authorized-by', '用户裁决'], dir);
+      assertExit(crossRecovered, 0);
+      assertOut(crossRecovered, 'REPLAN');
+      if (replanEventsOf(readStateFile(dir)).length !== 2) {
+        throw new Error('补显式 depends_on 后复签应写入第 2 条 replan-applied 事件');
+      }
+      // 第 3 轮：常规修订（轮次按 change 从事件累计）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', replanTaskText({ parallelPending: parallelIds.slice(0, 3) }));
+      const thirdRound = runState(['replan', '计划缺陷重校 3', '--authorized-by', '用户裁决'], dir);
+      assertExit(thirdRound, 0);
+      assertOut(thirdRound, 'REPLAN');
+      if (replanEventsOf(readStateFile(dir)).length !== 3) {
+        throw new Error('第 3 轮后 replan-applied 事件数应为 3');
+      }
+      if (replanBackupFiles(dir).length !== 3) {
+        throw new Error('三轮应产生三份备份: ' + JSON.stringify(replanBackupFiles(dir)));
+      }
+      // ③ 第 4 次 → BLOCK + 人工裁决指引（继续 / 停止）+ state 字节零改写
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', replanTaskText({ parallelPending: parallelIds }));
+      const beforeFourth = readStateBytes(dir);
+      const fourth = runState(['replan', '计划缺陷重校（上限后未授权）', '--authorized-by', '用户裁决'], dir);
+      assertExit(fourth, 1);
+      assertOut(fourth, 'BLOCK');
+      assertOut(fourth, '继续');
+      assertOut(fourth, '停止');
+      if (!readStateBytes(dir).equals(beforeFourth)) throw new Error('超上限调用改写了 state 字节');
+      if (replanEventsOf(readStateFile(dir)).length !== 3) throw new Error('超上限调用写入了 replan-applied 事件');
+      if (replanBackupFiles(dir).length !== 3) {
+        throw new Error('超上限调用新增了备份: ' + JSON.stringify(replanBackupFiles(dir)));
+      }
+      // ④ 续轮授权不足（n < 已用 + 1）→ BLOCK 零改写：上限裁决点不可被残缺授权绕过
+      const insufficientBytes = readStateBytes(dir);
+      const insufficient = runState(['replan', '计划缺陷重校（续轮不足）', '--authorized-by', '用户授权', '--continue-round', '3'], dir);
+      assertExit(insufficient, 1);
+      assertOut(insufficient, 'BLOCK');
+      if (!readStateBytes(dir).equals(insufficientBytes)) throw new Error('续轮授权不足改写了 state 字节');
+      // ⑤ 显式授权续轮（n = 已用 + 1）→ 放行并计第 4 轮：审计行标注续轮，事件 / 留痕带续轮标记
+      const continued = runState(['replan', '计划缺陷重校（上限后显式续轮）', '--authorized-by', '用户授权续轮', '--continue-round', '4'], dir);
+      assertExit(continued, 0);
+      assertOut(continued, 'REPLAN');
+      assertOut(continued, '续轮');
+      const continuedState = readStateFile(dir);
+      const continuedEvents = replanEventsOf(continuedState);
+      const continuedEvent = continuedEvents[continuedEvents.length - 1];
+      if (!continuedEvent || continuedEvent.round !== 4 || continuedEvent.change !== CHANGE_ID
+        || continuedEvent.continuationAuthorized !== true) {
+        throw new Error('续轮审计事件字段不符（round=4 / change / 续轮标记）: ' + JSON.stringify(continuedEvent));
+      }
+      if (!continuedState.evidence || !continuedState.evidence.execute
+        || continuedState.evidence.execute.replanAuthorization.continuationAuthorized !== true) {
+        throw new Error('续轮授权留痕缺失: ' + JSON.stringify(continuedState.evidence && continuedState.evidence.execute));
+      }
+      if (replanBackupFiles(dir).length !== 4) {
+        throw new Error('续轮放行应新增一份备份（共 4 份）: ' + JSON.stringify(replanBackupFiles(dir)));
+      }
+    },
+  },
+
+  {
+    name: 'H11 advance 留痕：advance-forced 事件 + status.forcedNodes 派生可见（真实命令）',
+    run: (dir) => {
+      assertExit(runState(['init', CHANGE_ID, '--init-skip'], dir), 0);
+      writeIntakeArtifacts(dir);
+      const res = runState(['advance'], dir);
+      assertExit(res, 0);
+      assertOut(res, 'Advanced to: design');
+      assertOut(res, 'ADVANCE-AUDIT');
+      const st = readStateFile(dir);
+      const events = (st.history || []).filter((e) => e && e.event === 'advance-forced');
+      if (events.length !== 1) {
+        throw new Error('advance 应恰写一条 advance-forced 事件: ' + JSON.stringify(events));
+      }
+      const event = events[0];
+      if (event.node !== 'open' || event.change !== CHANGE_ID || event.reason !== 'advance') {
+        throw new Error('advance-forced 事件字段不符: ' + JSON.stringify(event));
+      }
+      if (JSON.stringify(event.skipped) !== JSON.stringify(['exit:open'])) {
+        throw new Error("advance-forced 事件应记录 skipped: ['exit:open']: " + JSON.stringify(event.skipped));
+      }
+      if (typeof event.at !== 'string' || event.at.trim() === '') throw new Error('advance-forced 缺 at: ' + JSON.stringify(event.at));
+      const status = parseStatusOutput(dir);
+      if (!Array.isArray(status.forcedNodes) || !status.forcedNodes.includes('open')) {
+        throw new Error('status.forcedNodes 应含强制推进且无出口证据的 open: ' + JSON.stringify(status.forcedNodes));
       }
     },
   },
@@ -4676,7 +5016,7 @@ const TEST_ITEMS = [
       console.log('  描述符驱动: ' + ids.length + ' 个平台逐一安装 + purge 冒烟通过✓');
     },
   },
-// ---------- K 扩展:dsh 平台断言（1.4.2 deepseek-harness-platform——安装器多平台） ----------
+// ---------- K 扩展:dsh 平台断言（1.4.2 deepseek-harness-platform——安装器多平台）（历史） ----------
 // 旧 dsh-plugin npm 包已废弃(对象 dsh-plugin/ 目录另行废弃清理)——以下断言覆盖
 // prepare-env --platform dsh 的项目级安装/AGENTS.md 托管区/桥接 loader/purge 清理恢复;
 // 断言全程 DSH_HOME=临时目录环境变量,禁止污染真实 ~/.dsh(AC-1/AC-4)
@@ -5006,7 +5346,7 @@ const TEST_ITEMS = [
         }
       }
       console.log('  delegationDepth 代理身份分派(子代理=执行者/协调者原链)✓');
-      // ⑦ apply 集成喂测（5.5 分派分支自动化回归——此前仅级 3 真实会话人工覆盖）：
+      // ⑦ apply 集成喂测（5.5 分派分支自动化回归——此前仅有真实会话人工覆盖）：
       //   mock ctx 捕获 tools/pre-execute 监听器，构造 exec 断言插件级行为、
       //   子代理(agentDepth>0)写源码放行 / 协调者走 guard 白名单 / 越界·形状 deny 不受身份、
       //   非 flow-comet 项目窄监听放行。复用 ⑤ 安装产物(target 为真实 dsh flow-comet 项目)：
@@ -5619,6 +5959,78 @@ const TEST_ITEMS = [
       assertPackageBoundary(pkgCtx.root);
       assertInitTokenContract(assertBinContract(pkgCtx.pkg, pkgCtx.root), dir);
       return marker;
+    },
+  },
+
+  // K19: 契约核对脚本 CLI 契约——五组真实命令断言（临时夹具 app/x.py 含 status 赋值、src/y.ts 含 status 比较）：
+  // ① 显式 --backend/--frontend → exit 0 且输出含两个实际解析路径与两侧真实命中；
+  // ② 缺省回退（cwd=夹具、无目录参数）→ exit 0 且两侧命中；
+  // ③ 悬空 --backend（缺值）→ exit 1 + 用法错误；
+  // ④ --project <夹具>（从夹具外运行）→ exit 0 且两侧命中（证明显式根优先于 cwd）；
+  // ⑤ 单横线操作数（--backend -bad-dir / --project -x / --frontend -y）→ exit 1 + 用法与非法操作数提示
+  //    （此前被当作目录接受、零命中仍 exit 0——fail-closed 缺口回归锚）。
+  // 夹具随所在项临时目录由运行器统一清理，不留残留。
+  {
+    name: 'K19 契约核对:显式目录解析与缺省回退·悬空参数用法错误·单横线操作数拒绝·--project 形态(真实命令序列)',
+    run: (dir) => {
+      if (!fs.existsSync(CONTRACT)) throw new Error('缺少 contract-check.mjs: ' + CONTRACT);
+      writeFile(dir, 'app/x.py', 'status = 3\n');
+      writeFile(dir, 'src/y.ts', 'status === 3\n');
+      const runContract = (args, cwd = dir) => {
+        const res = spawnSync(process.execPath, [CONTRACT, ...args], { cwd, encoding: 'utf8', timeout: 60000 });
+        return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+      };
+      // 输出头 `# <label>: <路径>` 取实际解析路径（断言脚本打印的是真实落点，而非回显参数）
+      const resolvedPath = (res, label) => {
+        const line = res.output.split(/\r?\n/).find((l) => l.startsWith('# ' + label + ': '));
+        if (!line) throw new Error('输出缺少 ' + label + ' 解析路径头:\n' + res.output);
+        return line.slice(('# ' + label + ': ').length).trim();
+      };
+      // ① 显式目录参数：exit 0 + 两个实际解析路径 + 两侧真实命中
+      const explicit = runContract(['status', '--backend', 'app', '--frontend', 'src']);
+      assertExit(explicit, 0);
+      assertOut(explicit, 'status = 3');
+      assertOut(explicit, 'status === 3');
+      const backendPath = resolvedPath(explicit, 'backend');
+      const frontendPath = resolvedPath(explicit, 'frontend');
+      if (path.basename(backendPath) !== 'app' || path.basename(frontendPath) !== 'src') {
+        throw new Error('解析路径落点错误: backend=' + backendPath + ' / frontend=' + frontendPath);
+      }
+      if (!fs.readFileSync(path.join(backendPath, 'x.py'), 'utf8').includes('status = 3')) {
+        throw new Error('backend 实际解析路径未指向夹具: ' + backendPath);
+      }
+      if (!fs.readFileSync(path.join(frontendPath, 'y.ts'), 'utf8').includes('status === 3')) {
+        throw new Error('frontend 实际解析路径未指向夹具: ' + frontendPath);
+      }
+      // ② 缺省回退：无目录参数时默认 <root>/app 与 <root>/src（root = cwd）
+      const fallback = runContract(['status']);
+      assertExit(fallback, 0);
+      assertOut(fallback, 'status = 3');
+      assertOut(fallback, 'status === 3');
+      // ③ 悬空 --backend：缺值即用法错误 + 非零退出
+      const dangling = runContract(['status', '--backend']);
+      assertExit(dangling, 1);
+      assertOut(dangling, '用法: node contract-check.mjs');
+      assertOut(dangling, '--backend 后缺少后端目录值');
+      // ④ --project 形态：从夹具外运行，显式项目根优先于 cwd（若被忽略则两侧都不命中）
+      const elsewhere = path.join(dir, 'elsewhere');
+      fs.mkdirSync(elsewhere, { recursive: true });
+      const viaProject = runContract(['status', '--project', dir], elsewhere);
+      assertExit(viaProject, 0);
+      assertOut(viaProject, 'status = 3');
+      assertOut(viaProject, 'status === 3');
+      // ⑤ 单横线操作数：取值以 '-' 开头（含单横线形态）→ 用法错误 + 非零退出，不被当作目录
+      //    （判据含选项名与非法操作数提示——只查 exit 1 无判别力，须证明拒绝理由在场）
+      const assertDashOperandRejected = (opt, bad) => {
+        const r = runContract(['status', opt, bad]);
+        assertExit(r, 1);
+        assertOut(r, '用法: node contract-check.mjs');
+        assertOut(r, opt + ' 的目录操作数不得以 - 开头');
+      };
+      assertDashOperandRejected('--backend', '-bad-dir');
+      assertDashOperandRejected('--project', '-x');
+      assertDashOperandRejected('--frontend', '-y');
+      console.log('  契约核对 CLI: 显式解析 + 缺省回退 + 悬空参数用法错误 + 单横线操作数拒绝 + --project 优先于 cwd ✓');
     },
   },
 

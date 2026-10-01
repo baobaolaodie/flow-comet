@@ -1,123 +1,97 @@
-<div align="right">
-
-[English](USAGE.md) · [中文](USAGE-zh.md)
-
-</div>
-
 # Usage
+
+How the workflow behaves, how a node is driven, where artifacts live, and what you actually invoke.
+
+Everything here is done inside the project you installed into, with the installed copy of the engine (`.claude/skills/flow-comet/scripts/` for Claude Code, `.agents/skills/...` for Codex, `.dsh/skills/...` for dsh). The authoritative source in a flow-comet checkout is for developing flow-comet itself; the engine also refuses to read a protocol file from outside the project root.
 
 ## The 8-node workflow
 
+| # | Node | Responsibility | Kind |
+|---|---|---|---|
+| 1 | `open` | Frame the change: why, what, scope, coarse acceptance line | control |
+| 2 | `design` | Tech-stack decision, decisions list, data flow, risks, out of scope | control |
+| 3 | `plan` | Wave/task breakdown with boundaries and a verify command per task | control |
+| 4 | `execute` | Coordinator-led task execution against that plan | control |
+| 5 | `subagent-execute` | Delegated task execution with a handoff request and a Return Contract | handoff |
+| 6 | `review` | Multi-round review; findings must carry a disposition | control |
+| 7 | `verify` | Integration verification; the exit actually runs the test commands | control |
+| 8 | `archive` | Compile leftovers, move the change into the archive, record it | control |
+
+`next` tells you where you are; `status` prints the machine state. Both are read-only.
+
+## How you use it
+
+You invoke the workflow once per session and it drives itself from there. In Claude Code that is the entry skill `/flow-comet`; in Codex, invoke the skill (`/use flow-comet`) or ask for the workflow in natural language; in DeepSeek Harness, invoke the `flow-comet` skill. The first call confirms scope, creates the change's branch, initializes the state and enters the first node; afterwards the workflow routes each stage and stops only at decision points.
+
+The per-node lifecycle described below is what the workflow runs for you — and what you run yourself when you are driving a node by hand (recovering a stuck change, or working inside the engine).
+
+## Driving a node
+
+Every node has the same lifecycle. The guard records the entry, you load the node's skill, declare it, work, record the node's evidence, and the guard validates the exit:
+
+```bash
+node <skills>/flow-comet/scripts/workflow-guard.mjs entry <node> --apply        # guard: enter
+node <skills>/flow-comet/scripts/workflow-state.mjs  skill-load <node> <skill>  # declare the loaded skill
+node <skills>/flow-comet/scripts/workflow-state.mjs  record <node> '{"summary":"..."}'
+node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         # guard: exit
 ```
-open → design → plan → execute ⇄ subagent-execute → review → verify → archive
-```
 
-**Mapping to flow-kit's 9 stages**: the `open` node produces both CHANGE and REQUIREMENT artifacts (`CHANGE.md` + `REQUIREMENT.md`); the rest map one-to-one (design = design stage; execute/subagent-execute = DEV/TEST execution split; review/verify/archive = REVIEW/INTEGRATION/ARCHIVE).
+`<skills>` is `.claude/skills` / `.agents/skills` / `.dsh/skills` depending on the platform. The two command surfaces are distinct:
 
-Routing is **derived from `.specs/` artifacts** (determineNode): missing files → the node stops there; unfinished tasks → stays at execute; everything done → advances through review/verify/archive.
+| Command | What it owns |
+|---|---|
+| `workflow-guard.mjs` | `entry` / `exit` — the gates. Exits validate the node's artifacts, sections, declarations and (for `verify`) run the test commands |
+| `workflow-state.mjs` | `init`, `status`, `next`, `select`, `record`, `verify-fail`, `advance`, `execution-mode`, `config`, `skill-load`, `bridge-check`, `reenter`, `replan` — the state machine and its bookkeeping |
 
-**Multi-pass routing between `execute` and `subagent-execute`** is dependency-topology driven: each pass enters `subagent-execute` to delegate the parallel tasks whose dependencies (`<depends_on>`) are satisfied, returns to `execute` for the runnable serial tasks between waves, and re-enters `subagent-execute` when the next parallel wave becomes eligible — alternating until no runnable task remains, then advancing to `review`. There is **no single-pass limit**: mixed topologies (serial → parallel → serial → parallel) are legal and are digested pass by pass by dependency topology; dependency cycles or missing dependencies are rejected at the plan exit (see [TROUBLESHOOTING](TROUBLESHOOTING.md)).
-
-### Node responsibilities
-
-| Node | Responsibility | Key artifacts | Exit validation (guard) |
-|------|---------------|---------------|------------------------|
-| **open** | CHANGE clarification + requirements (AC derivation) | `CHANGE.md` / `REQUIREMENT.md` / CONTEXT terms | Required sections (template-derived): `## Why` / `## 用户故事` / acceptance; CONTEXT orphan-section detection |
-| **design** | Tech-stack selection + architecture alignment + decisions | `DESIGN.md` (§0 stack / §0.5 architecture / decision list / risks) | §0 sections + `## 决策清单` (template-derived, numbered) |
-| **plan** | Atomic task breakdown (XML) + wave planning | `TASK.md` (`<task>` blocks with 7 fields + parallel markers) | task blocks + verify field |
-| **execute** | Serial task execution (coordinator delegates subagents; re-entered on each pass) | `<task-id>-SUMMARY.md` | SUMMARY six sections + 6-dimension self-check + mandatory `## 自检方法`; TASK signature hash (recorded at enter, compared at exit); takeover detection |
-| **subagent-execute** | Parallel task delegation (waves; re-entered per dependency topology) | same (one SUMMARY per task) | same + handoff evidence (Return Contract) |
-| **review** | 4-round review (spec compliance / code quality / UI visual / optional) | `REVIEW.md` (Critical/findings/conclusion) | ≥100B + required sections |
-| **verify** | Integration verification + UAT + failure diagnosis (≤3 rounds) | `TEST.md` / `UAT.md` / LESSONS nominations | verification commands actually executed; UAT.md exists; LESSONS numbering/placement |
-| **archive** | LESSONS nominations + archive + branch wrap-up | `.specs/archive/<date>-<id>/` / CHANGELOG | branch check (new mode); CHANGELOG ordering + registration hint |
+A node's exit refuses to pass when its artifacts are incomplete or malformed, when the skill-load declaration is missing, or when the entry was never recorded; each refusal prints the reason and the command that fixes it. Nothing about the state is stored in the conversation: re-derive it with `status` / `next`.
 
 ## Artifacts
 
-All workflow artifacts live in `.specs/` (project-level) and `.specs/<change-id>/` (per change):
+A change lives in `.specs/<change-id>/`:
 
-| File | Location | Purpose | Produced at |
-|------|----------|---------|-------------|
-| `CHANGE.md` | change dir | change proposal (Why/What/impact/scope-exclusion/acceptance line) | open |
-| `REQUIREMENT.md` | change dir | requirements + ACs (Given/When/Then) + v1·v2·out scope split | open |
-| `DESIGN.md` | change dir | technical decisions (§0 stack/§0.5 architecture/decision list/risks) | design |
-| `TASK.md` | change dir | atomic tasks (XML 7 fields + parallel markers + wave planning) | plan |
-| `<task-id>-SUMMARY.md` | change dir | per-task report (six sections: what/changed files/verify output/6-dim self-check/boundary check/self-check method) | execute / subagent-execute |
-| `<task-id>-PROGRESS.md` | change dir | mid-task context-window snapshot (temporary, deleted on completion, useful info migrated to SUMMARY) | execute (temporary) |
-| `TEST.md` | change dir | 5-tier test pyramid + verification commands + UAT script | review |
-| `REVIEW.md` | change dir | review report (Critical/findings/conclusion) | review |
-| `UAT.md` | change dir | acceptance results (per-item pass/fail) | verify |
-| `CONTEXT.md` | `.specs/` | project-level shared context (glossary/locked decisions/defaults) | open (append each time) |
-| `LESSONS.md` | `.specs/` | cross-task failure knowledge base (L-NNN numbered entries) | verify / archive |
-| `CHANGELOG.md` | `.specs/` | change log (table, newest date first) | archive |
-| `.flow-comet/flow-comet-state.json` | `.flow-comet/` | state machine (activeChange/currentNode/completedNodes/evidence/…) | throughout (script-managed) |
+| File | Written during | Holds |
+|---|---|---|
+| `CHANGE.md` | `open` | Why / what / impact / scope exclusions / coarse acceptance line / risks |
+| `REQUIREMENT.md` | `open` | User stories, acceptance criteria, scope split, non-functional needs |
+| `DESIGN.md` | `design` | Tech stack, decisions list, data flow, state machine, risks, §9 sedimentation notes |
+| `TASK.md` | `plan` | Wave plan, task blocks (name / read / write / action / verify / done / depends_on), status fields |
+| `<task-id>-SUMMARY.md` | `execute` | One per completed task: what was done, files changed, verify output, self-check, boundary check |
+| `REVIEW.md` | `review` | Review rounds and findings, each with a disposition marker |
+| `TEST.md` | `review` | The five-round test picture and the `## 验证命令` block that `verify` executes |
+| `UAT.md` | `verify` | Acceptance items and their results |
+| `KNOWN-ISSUES.md` | `archive` | Everything still open or explicitly out of scope |
+| `.skill-loads/` | every node | The declaration markers, one per node and skill |
 
-> **Append placement discipline**: CONTEXT terms → glossary table, decisions → locked-decision list; LESSONS → entries section by L-NNN; STATE/CHANGELOG → top (reverse order); rollback fixes → `## Fix 任务` section — guard detects violations (progressive WARN).
+On archive the whole directory moves to `.specs/archive/<YYYY-MM-DD>-<change-id>/` and a row is appended to `.specs/CHANGELOG.md`. Nothing in `.specs/` is committed: it is the runtime record of the work, kept out of the repository by the entry the installer manages in `.gitignore`.
 
-## Workflow discipline
+## Discipline the engine enforces
 
-- **`.specs/` artifacts are never committed**: SUMMARY / handoff / TASK and all other workflow artifacts stay in the working tree. If `git add` rejects them, that is correct behavior — **force-add (`-f`) is forbidden**.
-- **JSON payloads travel by file**: `record` and `workflow-handoff` payloads should be written to a UTF-8 file and passed with `--json-file <file>` instead of inline arguments — avoids Windows PowerShell quote stripping and silent JSON corruption.
-- **SUMMARY template discipline**: every SUMMARY must contain a `## 自检方法` section, placed **after the bounds check** (`## 越界检查`); the 6-dimension self-check must declare one of the three self-review values **in that `## 自检方法` section** — `brooks-review` (full Skill review), `cache-brooks` (manual execution from the plugin-cache protocol files), or `builtin-quickcheck` (built-in fallback — must declare the unavailability reason and the cache-attempt evidence).
-- **Pseudo-parallel hint**: if a parallel task's `write_files` contain only test files (`tests/` / `test_` prefixes) and no production code file, the plan exit emits a progressive **WARN** (not a BLOCK) listing the task ids and suggesting to add a `depends_on` declaration or merge the task into a vertical slice (production code + its tests in one task).
+- **Artifact fidelity** — a node's document must match the flow-kit template's header fields and section names; the guard refuses an exit otherwise.
+- **Evidence before exit** — `record <node>` writes the node's evidence, and the exit requires it (plus the skill-load declaration).
+- **Summary skeleton** — every completed task needs its `<task-id>-SUMMARY.md` with the template's sections, including the self-check and the boundary check.
+- **Tests actually run** — the `verify` exit executes the command block in `TEST.md` and counts failures; a failing command blocks the exit.
+- **Plan re-validation is controlled** — when the plan is proven wrong mid-node, `replan "<reason>" --authorized-by <source>` is the only compliant way to re-validate and re-sign the task set. It re-runs the same task-graph and field checks the plan exit runs, so it never waives any gate. Every call needs an explicit authorization, is capped at 3 rounds per change (a further round only via the explicit continuation parameter), writes a state backup before it changes anything, and a repeated call of the same shape is a no-op.
+- **Review findings stay visible** — each finding in `REVIEW.md` needs a disposition marker (fixed / escalated / deferred), and deferring a major finding asks for a user ruling.
+- **Coordinator boundary** — in the default `subagent` execution mode the coordinating session may not carry out tasks itself; the engine reports a takeover instead. The documented escape hatch is an explicit `record execute '{"parallelTakeoverApproved":true}'` declaration.
+- **Archive completeness** — the archive exit requires the archived directory and a `KNOWN-ISSUES.md` inside it (write "no leftovers" explicitly when there are none).
 
-## Branch mode
+## Branch mode and execution mode
 
-All branch operations are **executed automatically by Claude under the skill protocol** (no manual git):
+In a git project the engine works on a branch per change: `init <change-id>` creates and switches to `change/<change-id>`, and `next` reports the branch line. In a project without git the same line reports `none`.
 
-- First `/flow-comet` call creates the `change/<id>` branch (git repos), workflow runs on it; prefix configurable (`init --branch-prefix <prefix>`, e.g. `feat/`; a trailing `/` is added automatically if missing, default `change/`)
-- Archive wrap-up: merges back to main + deletes the branch (`enablePrReview=true` pushes + PR first; **pauses for your confirmation before merge**)
-- Branch-state consistency: `status`/`next` detect branch/activeChange mismatch → WARN (not BLOCK)
-- **Backward compatible**: old changes without a branch run unchanged (branch checks apply to new mode only)
-
-## Execution modes (executionMode)
-
-| Mode | Semantics | When |
-|------|-----------|------|
-| `subagent` (default) | Unified delegation: coordinator builds handoff → Agent worktree delegation → collects Return Contract → marks done | Default quality guarantee |
-| `direct` (escape hatch) | Main agent executes serial tasks directly (must load full flow-comet-dev protocol) | After explicit user switch (`workflow-state.mjs execution-mode direct`) |
-
-`directOverride` records "currently in user-confirmed direct" and is cleared when switching back to subagent.
+Execution mode defaults to `subagent` (implementation delegated to isolated subagents with a Return Contract). `execution-mode direct` switches the coordinator to doing the work itself and records the explicit authorization; `execution-mode subagent` switches back.
 
 ## User entry points
 
-In the target project, open a Claude Code session and enter (Codex: invoke the skill via `/use flow-comet` or natural language — same entry semantics):
-
 | Entry | Purpose |
-|-------|---------|
-| `/flow-comet` | Start or continue the 8-node workflow (auto-detects active change, routes to current node) |
-| `/flow-comet-compose` | Compose installed skills into a custom protocol (side command, not part of the 8-node flow — see [PROTOCOL.md](PROTOCOL.md)) |
-| `/flow-comet-evolve` | Scan archived changes' DESIGN §9, review sediment candidates in bulk (side) |
-| `/flow-comet-health` | Periodic health check: CONTEXT consistency / LESSONS scan / tech debt / redundancy (side) |
+|---|---|
+| `/flow-comet` | Start or continue the 8-node workflow — routes to the node the artifacts say you are on |
+| `/flow-comet-compose` | Compose installed skills into a custom protocol (side command, not part of the 8-node flow) — see [Custom protocols](MECHANISM.md#custom-protocols) |
 
-## Decision points
+The remaining skill directories in the installed tree (`flow-comet-open`, `-design`, `-plan`, `-execute`, `-subagent-execute`, `-review`, `-verify`, `-archive`, …) are the per-node skills the workflow loads as it advances; you do not invoke them directly. Two further skills ship as instruction-only side capabilities without engine support (`flow-comet-evolve`, `flow-comet-health`).
 
-flow-comet **pauses for your confirmation** at these points (everything else advances automatically):
+## Decisions and recovery
 
-| Node | Decision point |
-|------|----------------|
-| First call | change scope (when multiple valid interpretations exist) |
-| design | tech-stack selection (5–6 candidate cards) |
-| execute | destructive change detection (R4.6); schema migration (R4.5) |
-| review | Critical findings handling |
-| verify | 4th consecutive UAT failure: "continue / stop" |
-| archive | archiving + merging the change branch to main (irreversible) |
-| pre-archive | PR approve (when `enablePrReview` is on) |
+During a node you will occasionally have to decide something. The four classes — user decision, auto-handled, stop condition, manual handover — and the per-node list of decision points are in `reference/decision-points.md` inside the skill tree.
 
-## Script reference (executed automatically by Claude)
-
-These scripts are **run automatically by the flow-comet skill** — you normally never run them manually; use only for troubleshooting or advanced scenarios. Path: `<target project>/.claude/skills/flow-comet/scripts/` (Claude Code; Codex: `<target project>/.agents/skills/flow-comet/scripts/`):
-
-```bash
-node workflow-state.mjs status             # current state + branch consistency
-node workflow-state.mjs init <id> [--branch-prefix <prefix>] [--init-context|--init-skip]   # init change (auto branch, prefix default change/; --init-context prompts context generation — the agent reads existing docs and generates CONTEXT.md, re-run after generation to validate and record the scan timestamp; --init-skip records skip)
-node workflow-state.mjs next               # next node + SKILL
-node workflow-state.mjs record <node> '{...}' [--json-file <path>]   # record node evidence (--json-file reads the payload from a file, avoiding Windows PowerShell quote stripping)
-node workflow-state.mjs config set enablePrReview true         # enable PR review
-node workflow-state.mjs execution-mode <subagent|direct>       # switch execution mode (direct needs confirmation)
-node workflow-guard.mjs entry/exit <node> [--apply]            # node gates
-node workflow-handoff.mjs request|result|status [--json-file <path>]  # subagent delegation handoff (--json-file same as record)
-node workflow-state.mjs skill-load <node> <skill> [--prompt <path>]  # skill-load declaration (run by Claude; --prompt points at flow-kit/prompts/)
-node workflow-state.mjs verify-fail                            # verify failure counter (3 retries, 4th BLOCKED)
-```
-
-**Subagent delegation** (execute/subagent-execute nodes, executed by Claude): parse write_files from TASK.md → `workflow-handoff.mjs request` → Agent tool (`isolation: "worktree"`) delegation with Return Contract → `result` records evidence → guard validates the delegation.
+When a node is stuck: `status` shows the machine state, `next` shows the node and the command to continue, `advance` forces the state forward when it is genuinely out of step, and `select <change-id>` switches to another change. Symptoms and their fixes are grouped in [Troubleshooting](TROUBLESHOOTING.md).

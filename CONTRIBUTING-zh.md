@@ -93,7 +93,7 @@ git branch -d hotfix/<描述>
 
 - **运行时**：Node.js ≥ 18（ESM）；唯一第三方依赖是 `@clack/prompts`（经 `package-lock.json` 锁定精确版本），仅供安装器交互式 TTY 多选使用（不可用时自动回退 readline）——clone 后运行一次 `npm install`；未安装时安装器回退 readline，随包交付给用户的交互选择就不会在你的本地运行中被走到
 - **仓库**：clone、运行 `npm install`，然后验证回归基线可跑：
-  `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 267 SCENARIOS PASSED`（统一测试集两级基线，另需 `node .flow-comet/skills/flow-comet/scripts/system-test.mjs` → `ALL SYSTEM TESTS PASSED`，82 项）
+  `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL （见 VERSIONS） SCENARIOS PASSED`（统一测试集两级基线，另需 `node .flow-comet/skills/flow-comet/scripts/system-test.mjs` → `ALL SYSTEM TESTS PASSED`，（见 VERSIONS） 项）
 - **分发面**：npm 包体边界（`package.json` 的 `files` 白名单）与 `fcomet` / `flow-comet` 两个 bin 入口由两处断言把关——CI 的 `installer` job（合并门禁）与 `system-test`（本地可复跑；在安装副本内该项输出显式「不适用」而非静默跳过）。引擎自测套件不是分发判据。
 - **创作环境**：Claude Code（skill/hook 在 Claude Code 会话中运行）；hook 通过 `prepare-env` 安装到你的项目 `.claude/`（同一安装器服务 Codex（`--platform codex`）与 DeepSeek Harness（dsh，`--platform dsh`）——项目级技能树、AGENTS.md 托管规则与全局桥接 loader）
 - **机制相关工作**：动手改脚本前先读 [docs/MECHANISM.md](docs/MECHANISM.md) 了解机制语义（行为层）
@@ -113,7 +113,7 @@ hook 在提交与推送时拒绝含过程代号（修复编号、批次代号、
 推送前运行回归基线：
 
 ```bash
-node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 267 SCENARIOS PASSED
+node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL （见 VERSIONS） SCENARIOS PASSED
 ```
 
 其余由 CI 处理。
@@ -123,15 +123,24 @@ node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs   # → ALL 267 S
 开 Issue 时写清描述：
 
 - **Bug**：实际行为 vs 期望、复现步骤（或确切的 BLOCKED/WARN 消息）、环境（Node 版本、安装方式）
-- **Feature 提案**：目标、想要的工作流、你设想的 skill 组合（自定义协议见 [PROTOCOL-zh.md](docs/PROTOCOL-zh.md)）
+- **Feature 提案**：目标、想要的工作流、你设想的 skill 组合（自定义协议见[核心机制 → 自定义协议](docs/MECHANISM-zh.md#自定义协议)）
 
 Issue 确认后：bug 用 `fix/` 分支、feature 用 `feat/` 分支——都按[PR 流程](#pr-流程)合入 `dev`。
+
+## 借用边界
+
+flow-comet 自动化的是 [flow-kit](https://github.com/rihebty/flow-kit) 的方法学，因此"哪些是借来的、哪些是我们自己的"属于贡献规则的一部分：
+
+- **借的是方法学与工件形态，不是文件。** 阶段、工件格式、规则集与 R1–R8 纪律来自上游项目。**不得把上游模板文件复制进本仓库**——段名在运行时从 vendored 模板派生，从而保证措辞只有一个来源。
+- **vendored 副本只读。** 项目里的 `flow-kit/` 检出是锁定的格式基准：永不编辑；与它的分歧在**我们自己的工件里声明**，而不是去改上游那份。
+- **升级是显式动作。** 锁定的快照只会因一次刻意的改动（并记录新提交）而前移；没有任何自动跟随上游的机制。
+- **署名。** flow-kit 为 MIT 许可；许可原文随 vendored 副本分发，README 中也点名了该依赖。
 
 ## 开发规范
 
 - **权威源**：skill/脚本改动在 `.flow-comet/skills/`（单一权威源；`.claude/` 副本是安装产物——用 `prepare-env` 更新，勿手改）
 - **TDD**：每个机制修复先写 RED 场景（`guard-self-test.mjs`——确认以正确原因失败）→ GREEN → 全量回归
-- **回归基线**：`node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 267 SCENARIOS PASSED`（统一测试集两级基线，另需 `node .flow-comet/skills/flow-comet/scripts/system-test.mjs` → `ALL SYSTEM TESTS PASSED`，82 项）（每次改动后必须）
+- **回归基线**：`node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL （见 VERSIONS） SCENARIOS PASSED`（统一测试集两级基线，另需 `node .flow-comet/skills/flow-comet/scripts/system-test.mjs` → `ALL SYSTEM TESTS PASSED`，（见 VERSIONS） 项）（每次改动后必须）
 - **分发契约**：npm 包名与 `fcomet` / `flow-comet` 两个 bin 名一经发布即为契约；包体边界是 `package.json` 的 `files` 白名单——**fail-closed**，不得放宽为黑名单或整目录包含。决策记录：ADR-010。
 - **文档同步**：行为层文档在 `docs/`（中英双语——改文档时两语同步）；实现细节不进公开文档
 - **双语纪律**：英文文档不含中文（语言切换器、flow-kit 工件段名、运行时消息原文除外）；中文文档不含英文长句（命令、URL、专有术语除外）
@@ -229,11 +238,11 @@ git push --force-with-lease origin feat/<描述>            # feature 分支允�
 ## 发布审批单
 
 - 包含改动：PR 列表 + 每项一句话摘要
-- 验证结果：回归（267 场景）/ 安装副本验证
+- 验证结果：回归（（见 VERSIONS） 场景）/ 安装副本验证
 - 版本：X.Y.Z（文档批次可不 bump）
 ```
 
-**发布步骤**：五步清单（CHANGELOG → README 徽章 → tag → prepare-env 分发 → dev 同步）见 [VERSIONS-zh.md](docs/VERSIONS-zh.md)。
+**发布步骤**：发布清单见 [VERSIONS-zh.md](docs/VERSIONS-zh.md)——该文档是发布步骤与版本面的唯一权威。
 
 **发布 PR 要点**：
 - 发布 PR（dev → main）天然列出 dev 的全部 change 级提交（dev 是 change 级提交序列）——这是设计；合并后这些提交经每次发布的一个 merge 提交进入 main

@@ -24,6 +24,8 @@ Responsibility: CHANGE 反问 + REQUIREMENT 需求分析。生成 CHANGE.md 和 
 
 guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / templateSectionPatterns；「填得好不好」由 review 把关。
 
+> **模板权威**：本节点产出工件的段形唯一权威 = `flow-kit/templates/**`；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+
 # Open
 
 ## Node Goal
