@@ -336,17 +336,16 @@ function analyzeDependencyGraph(blocks) {
 //      探测，有显式关联=依赖已声明，跳过→合法拓扑零新增告警；
 //   ③ crossTaskConflicts（同文件跨任务且无依赖路径）：两个未完成任务（status 非 done）写入面重叠
 //      且两任务间不存在依赖路径（depends_on 传递闭包，双向任一可达即视为已显式排序 → 放行）——
-//      串行拆分出的同文件任务同样命中（未显式排序的同文件多任务）；修复任务族（id 以修复前缀
-//      开头的任务）不参与本族：其顺序由修复生命周期保证，回修同一文件是必然形态；与①按任务对
-//      去重（同一对已计入写写强判则不再计入本族）。
-// 路径解析按声明实际内容（换行切分 → 分号二次切分 → trim → 滤空与 HTML 注释），不做扩展名
-// 白名单过滤——txt/log/无扩展名路径同等检出（链式重命名的 .txt 事故面闭合；与既有自动解析
-// 同源实现）。开标签属性解析与 workflow-state 路由共享 taskOpeningAttrs（属性序无关；不读块内文本）。
+//      串行拆分出的同文件任务同样命中（未显式排序的同文件多任务）；修复任务族不参与本族（族谓词
+//      复用唯一权威 fixTaskClassifier，见该函数处）——其顺序由修复生命周期保证，回修同一文件是
+//      必然形态；与①按任务对去重（同一对已计入写写强判则不再计入本族）。
+// 编排与判定分离：族③计算抽为具名纯函数 collectCrossTaskConflicts（只做集合推导，无 fs / console /
+// process.exit / 入参改写），findParallelWriteConflicts 只负责读文件、解析、族①②与去重键的组织。
+// 路径解析 / 归一（parsePaths / normalizeTaskPath）为本模块单份实现，族①②③共用；依赖文本解析
+// 复用本模块 taskDependencyEligibility（依赖解析单一权威——不再另起第二份正则）。
+// 开标签属性解析与 workflow-state 路由共享 taskOpeningAttrs（属性序无关；不读块内文本）。
 // 2026-09-28 PR 审查采纳：由 workflow-guard.mjs 抽到本模块——plan 出口与 replan 重校消费同一实现，
 // 两侧各自决定强判（BLOCK）/弱判（WARN），判定本身只此一处（L-067 单一判据）。
-// 修复任务族 id 前缀（同文件跨任务族的参与者排除面）：修复任务回修同一文件是其生命周期的必然
-// 形态，顺序由修复生命周期保证而非 depends_on——故该族不参与第三族判定（族语义见上方块注释）。
-const FIX_TASK_ID_PREFIX = /^(T-FIX|P-FIX)/i;
 
 // 任务对键（无序——不依赖任务书写顺序；NUL 分隔，任务 id 不含 NUL）：同文件跨任务族与写写强判族
 // 按任务对去重时使用（同一对已计入写写强判则不再计入第三族）。
@@ -368,6 +367,72 @@ function reachableTaskIds(depsById, start) {
   return seen;
 }
 
+// 路径归一化（CodeRabbit 采纳）：分隔符统一 '/'、解 '.' 段（`./` / `a/./b`）、`..` 逃出项目根
+// 按越界处理（返回 null 不参与重叠比较）——`src/a.mjs` vs `src/./a.mjs` / `src\a.mjs` 变体不再
+// 绕过写写强判与读写弱判；与委托入口共用同一函数（两侧同语义）。族①②③共用本实现。
+function normalizeTaskPath(raw) {
+  const p = String(raw).trim();
+  if (p === '') return null;
+  const segments = p.replace(/\\/g, '/').split('/').filter((s) => s !== '' && s !== '.');
+  const out = [];
+  for (const seg of segments) {
+    if (seg === '..') {
+      if (out.length === 0) return null; // 逃出项目根 → 越界（不参与比较）
+      out.pop();
+    } else {
+      out.push(seg);
+    }
+  }
+  return out.join('/');
+}
+
+// 路径解析与既有自动解析同源：剥 HTML 注释 → 换行切分 → 分号二次切分 → trim → 滤空 → 归一。
+// 按声明实际内容解析，不做扩展名白名单过滤——txt/log/无扩展名路径同等检出（链式重命名的 .txt
+// 事故面闭合）。族①②③共用本实现，不另起第二份。
+function parsePaths(matchText) {
+  return String(matchText ?? '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .trim().split(/\s*\n\s*/).map((l) => l.trim()).filter(Boolean)
+    .flatMap((l) => l.split(';')).map((l) => l.trim()).filter(Boolean)
+    .map(normalizeTaskPath)
+    .filter((p) => p !== null && p !== '');
+}
+
+// 第三族（同文件跨任务且无依赖路径）计算——同模块具名纯函数：输入任务块 / 依赖图 / 既有族去重键，
+// 输出冲突对数组（{ a, b, files }）；无 fs / console / process.exit，不改任何入参。
+// taskContent 与 allBlocks 须同源（taskContent = 产出 allBlocks 的 TASK.md 文本）——修复任务族
+// 谓词需要全文以定位 Fix 段（段标题取该谓词的缺省回退常量，与 fixTaskMarker 的缺省一致）。
+function collectCrossTaskConflicts({ taskContent = '', allBlocks = [], depsById = new Map(), excludedPairKeys = new Set() } = {}) {
+  const isFixTask = fixTaskClassifier(taskContent);
+  const reachCache = new Map();
+  const reachableFrom = (id) => {
+    if (!reachCache.has(id)) reachCache.set(id, reachableTaskIds(depsById, id));
+    return reachCache.get(id);
+  };
+  const participants = [];
+  for (const block of allBlocks) {
+    const attrs = taskOpeningAttrs(block);
+    if (!attrs || !attrs.id || attrs.status === 'done' || isFixTask(block)) continue;
+    const wf = block.match(/<write_files>([\s\S]*?)<\/write_files>/);
+    if (!wf) continue;
+    const writes = new Set(parsePaths(wf[1]));
+    if (writes.size === 0) continue;
+    participants.push({ id: attrs.id, writes });
+  }
+  const conflicts = [];
+  for (let i = 0; i < participants.length; i++) {
+    for (let j = i + 1; j < participants.length; j++) {
+      if (excludedPairKeys.has(taskPairKey(participants[i].id, participants[j].id))) continue;
+      const overlap = [...participants[i].writes].filter((f) => participants[j].writes.has(f));
+      if (overlap.length === 0) continue;
+      if (reachableFrom(participants[i].id).has(participants[j].id)
+        || reachableFrom(participants[j].id).has(participants[i].id)) continue;
+      conflicts.push({ a: participants[i].id, b: participants[j].id, files: overlap });
+    }
+  }
+  return conflicts;
+}
+
 async function findParallelWriteConflicts(changeDir) {
   const taskFile = path.join(changeDir, 'TASK.md');
   let text;
@@ -376,44 +441,17 @@ async function findParallelWriteConflicts(changeDir) {
   // 依赖资格收窄：仅统计「本趟可运行」的并行任务——deps ⊆ doneIds；
   // 等待后续趟次的并行任务（依赖未满足）与已交付任务不参与同趟冲突判定，
   // 使 A→B 同写路径的跨趟合法计划不再被首趟误拦（与路由谓词同一口径）。
+  // 依赖文本解析与资格判定一律走 taskDependencyEligibility（依赖解析单一权威）——本函数不再自持
+  // 第二份 <depends_on> 解析，候选集过滤与读写弱判的「显式关联」判定同源。
   const doneIds = new Set(allBlocks
     .map((b) => taskOpeningAttrs(b))
     .filter((a) => a && a.id && a.status === 'done')
     .map((a) => a.id));
-  const dependsOnOf = (b) => {
-    const m = b.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
-    return m ? m[1].trim().split(/[,\s]+/).filter(Boolean) : [];
-  };
   const blocks = allBlocks.filter((b) => {
     const a = taskOpeningAttrs(b);
     if (!a || !a.parallel || a.status !== 'pending') return false;
-    return dependsOnOf(b).every((d) => doneIds.has(d));
+    return taskDependencyEligibility(b, doneIds).eligible;
   });
-  // 路径解析与既有自动解析同源：剥 HTML 注释 → 换行切分 → 分号二次切分 → trim → 滤空
-  // 路径归一化（CodeRabbit 采纳）：分隔符统一 '/'、解 '.' 段（`./` / `a/./b`）、`..` 逃出项目根
-  // 按越界处理（返回 null 不参与重叠比较）——`src/a.mjs` vs `src/./a.mjs` / `src\a.mjs` 变体不再
-  // 绕过写写强判与读写弱判；与委托入口共用同一函数（两侧同语义）。
-  const normalizeTaskPath = (raw) => {
-    const p = String(raw).trim();
-    if (p === '') return null;
-    const segments = p.replace(/\\/g, '/').split('/').filter((s) => s !== '' && s !== '.');
-    const out = [];
-    for (const seg of segments) {
-      if (seg === '..') {
-        if (out.length === 0) return null; // 逃出项目根 → 越界（不参与比较）
-        out.pop();
-      } else {
-        out.push(seg);
-      }
-    }
-    return out.join('/');
-  };
-  const parsePaths = (matchText) => String(matchText ?? '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .trim().split(/\s*\n\s*/).map((l) => l.trim()).filter(Boolean)
-    .flatMap((l) => l.split(';')).map((l) => l.trim()).filter(Boolean)
-    .map(normalizeTaskPath)
-    .filter((p) => p !== null && p !== '');
   const perTask = [];
   for (const b of blocks) {
     const a = taskOpeningAttrs(b);
@@ -423,7 +461,7 @@ async function findParallelWriteConflicts(changeDir) {
     if (!wf && !rf) continue;
     perTask.push({
       id: a.id,
-      deps: new Set(dependsOnOf(b)),
+      deps: new Set(taskDependencyEligibility(b).deps),
       writes: new Set(parsePaths(wf && wf[1])),
       reads: new Set(parsePaths(rf && rf[1])),
     });
@@ -443,38 +481,18 @@ async function findParallelWriteConflicts(changeDir) {
       if (readOverlap2.length) readWarnings.push({ a: perTask[j].id, b: perTask[i].id, files: readOverlap2 });
     }
   }
-  // 第三族：同文件跨任务且无依赖路径（族语义见上方块注释）。参与者 = status 非 done 且非修复
-  // 任务族；依赖路径 = depends_on 传递闭包（双向任一可达即已显式排序 → 放行）；与写写强判族
-  // 按任务对去重。写入面解析与归一复用同函数既有 parsePaths / normalizeTaskPath（不另起第二份）；
-  // 依赖图与依赖文本解析复用既有单一权威 analyzeDependencyGraph（其依赖解析走 taskDependencyEligibility）。
+  // 第三族：同文件跨任务且无依赖路径（族语义见上方块注释）。编排只做三件事——族①任务对去重键、
+  // 依赖图（analyzeDependencyGraph 单一权威，其依赖解析走 taskDependencyEligibility）、调用具名
+  // 纯函数 collectCrossTaskConflicts；参与者规则（status 非 done 且非修复任务族）与依赖闭包判定
+  // 全在该纯函数内，此处不内联第二份。
   const writePairKeys = new Set(writeConflicts.map((c) => taskPairKey(c.a, c.b)));
   const { depsById } = analyzeDependencyGraph(allBlocks);
-  const reachCache = new Map();
-  const reachableFrom = (id) => {
-    if (!reachCache.has(id)) reachCache.set(id, reachableTaskIds(depsById, id));
-    return reachCache.get(id);
-  };
-  const participants = [];
-  for (const b of allBlocks) {
-    const a = taskOpeningAttrs(b);
-    if (!a || !a.id || a.status === 'done' || FIX_TASK_ID_PREFIX.test(a.id)) continue;
-    const wf = b.match(/<write_files>([\s\S]*?)<\/write_files>/);
-    if (!wf) continue;
-    const writes = new Set(parsePaths(wf[1]));
-    if (writes.size === 0) continue;
-    participants.push({ id: a.id, writes });
-  }
-  const crossTaskConflicts = [];
-  for (let i = 0; i < participants.length; i++) {
-    for (let j = i + 1; j < participants.length; j++) {
-      if (writePairKeys.has(taskPairKey(participants[i].id, participants[j].id))) continue;
-      const overlap = [...participants[i].writes].filter((f) => participants[j].writes.has(f));
-      if (overlap.length === 0) continue;
-      if (reachableFrom(participants[i].id).has(participants[j].id)
-        || reachableFrom(participants[j].id).has(participants[i].id)) continue;
-      crossTaskConflicts.push({ a: participants[i].id, b: participants[j].id, files: overlap });
-    }
-  }
+  const crossTaskConflicts = collectCrossTaskConflicts({
+    taskContent: text,
+    allBlocks,
+    depsById,
+    excludedPairKeys: writePairKeys,
+  });
   return { writeConflicts, readWarnings, crossTaskConflicts };
 }
 
@@ -611,7 +629,8 @@ function latestExecuteExitEvent(history, changeName) {
 // guard exit 回程分支在写本次 exit-applied 事件之前调用本分类器：只用既有字段派生证据（history
 // 的 execute 家族出口签名 + TASK 内容结构标记），零新增 state 字段 / 事件类型。判据（DESIGN 决策 1）：
 //   divergence = 历史任一 execute 家族 exit-applied 事件记录的 taskSetSignature ≠ 当前任务集签名；
-//   marker     = 模板派生的 Fix 段内含 <task> 块，或全文任一任务 id 匹配 /^[TP]-FIX-/i；
+//   marker     = 模板派生的 Fix 段内含 <task> 块，或全文任一任务 id 命中修复族前缀（唯一谓词
+//                fixTaskClassifier / 其 id 边界常量 FIX_TASK_ID_PREFIX）；
 //   divergence ∨ marker → 'fix'；有签名且不发散 → 'normal'；无签名且无标记 → 'unknown'
 //   （旧 state 证据不足：中性输出、不 BLOCK，由调用方渲染）。
 // Fix 段标题由调用方传入（guard 从 flow-kit/templates/TASK.md 的 H2 派生）；缺失 / 空串
@@ -655,21 +674,35 @@ function fixSectionBody(taskContent, fixSectionTitle) {
   return lines.slice(start + 1, end).join('\n');
 }
 
-// Fix 任务结构标记：全文任一任务 id 匹配 /^[TP]-FIX-/i（覆盖文件尾追加等非规范落点）→ true；
-// 否则 Fix 段内出现 <task> 块（标题与任务需同段，段内无任务不误报）→ true；两者皆无 → false。
-// 解析复用 taskBlocks / taskOpeningAttrs（与路由、guard 校验共享同一 <task> 解析语义）。
-function fixTaskMarker(taskContent, fixSectionTitle) {
+// 修复任务族 id 前缀（唯一谓词的 id 边界，全模块只此一处定义）：含尾连字符——形似编号（前缀
+// 之后缺连字符的形态）不属该族；宽松前缀会把非修复编号整族放过（边界只在这里表达一次）。
+const FIX_TASK_ID_PREFIX = /^[TP]-FIX-/i;
+
+// 修复任务族唯一谓词（单一权威）：返回 (block) => boolean 的判定函数——命中 id 前缀，或任务块
+// 位于 Fix 段内（段定位复用 fixSectionBody / normalizeHeading 的既有标题语义，标题缺省回退
+// FIX_SECTION_TITLE_FALLBACK）。fixTaskMarker 与并行文件依赖第三族的参与者排除一律调用本函数，
+// 禁止任何消费方另起一套边界——id 前缀与「位于 Fix 段内」两条边界只在此处表达一次。
+function fixTaskClassifier(taskContent, fixSectionTitle) {
   const content = String(taskContent ?? '');
   const title = (typeof fixSectionTitle === 'string' && fixSectionTitle.trim() !== '')
     ? fixSectionTitle
     : FIX_SECTION_TITLE_FALLBACK;
-  const hasFixTaskId = taskBlocks(content).some((block) => {
-    const attrs = taskOpeningAttrs(block);
-    return Boolean(attrs && typeof attrs.id === 'string' && /^[TP]-FIX-/i.test(attrs.id));
-  });
-  if (hasFixTaskId) return true;
   const section = fixSectionBody(content, title);
-  return section !== null && taskBlocks(section).length > 0;
+  const sectionBlocks = new Set(section === null ? [] : taskBlocks(section));
+  return (block) => {
+    const attrs = taskOpeningAttrs(block);
+    if (!attrs || typeof attrs.id !== 'string') return false;
+    return FIX_TASK_ID_PREFIX.test(attrs.id) || sectionBlocks.has(block);
+  };
+}
+
+// Fix 任务结构标记：全文存在修复任务（id 命中修复族前缀——覆盖文件尾追加等非规范落点；或 Fix 段
+// 内出现 <task> 块——标题与任务需同段，段内无任务不误报）→ true；否则 false。判定一律经唯一谓词
+// fixTaskClassifier，本函数只做「是否存在」的聚合，不再自持边界。
+// 解析复用 taskBlocks / taskOpeningAttrs（与路由、guard 校验共享同一 <task> 解析语义）。
+function fixTaskMarker(taskContent, fixSectionTitle) {
+  const isFixTask = fixTaskClassifier(taskContent, fixSectionTitle);
+  return taskBlocks(String(taskContent ?? '')).some((block) => isFixTask(block));
 }
 
 // 回因分类唯一入口。签名：classifyFixReturnCause({ history, changeName, taskContent, fixSectionTitle })

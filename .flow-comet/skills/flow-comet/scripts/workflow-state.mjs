@@ -1885,12 +1885,25 @@ async function main() {
     // 本趟可运行（依赖已满足）的并行任务且 write_files 重叠，与 plan 出口使用同一实现
     // （route-node.findParallelWriteConflicts 单一来源）在此 BLOCK；必须早于备份与任何写盘，
     // BLOCK 路径 state 字节零改写。read∩write 弱判与 plan 出口同风格——仅 WARN 不阻断。
-    const { writeConflicts, readWarnings } = await findParallelWriteConflicts(path.join(runRoot, '.specs', changeName));
+    // 同文件跨任务且无依赖路径（第三族）同样在此消费：与 plan 出口同判据、同分级（新 change
+    // BLOCKED / 旧 change WARN），消息同族（任务对 `a×b(files)` + 恢复指引「补显式 depends_on 或
+    // 合并为一个任务」）——replan 是执行期唯一合法的任务集修订通道，不得成为该形态的豁免口。
+    const { writeConflicts, crossTaskConflicts, readWarnings } = await findParallelWriteConflicts(path.join(runRoot, '.specs', changeName));
     if (writeConflicts.length > 0) {
       console.error('BLOCKED: replan 检测到并行写冲突（'
         + writeConflicts.map((c) => c.a + '↔' + c.b + ': ' + c.files.join(',')).join('; ')
         + '）——replan 不做校验豁免，状态零改写；恢复: 调整 write_files 消除重叠后重试');
       process.exit(1);
+    }
+    if (crossTaskConflicts.length > 0) {
+      const crossDetail = crossTaskConflicts.map((c) => c.a + '×' + c.b + '(' + c.files.join(',') + ')').join('; ');
+      const crossGuide = '；恢复: 补显式 depends_on 或合并为一个任务后重试';
+      if (state.newChange === true) {
+        console.error('BLOCKED: TASK.md 同文件跨任务且无依赖路径: ' + crossDetail
+          + '——replan 不做校验豁免，状态零改写' + crossGuide);
+        process.exit(1);
+      }
+      console.error('WARN: TASK.md 同文件跨任务且无依赖路径（旧 change 渐进不阻断）: ' + crossDetail + crossGuide);
     }
     if (readWarnings.length > 0) {
       console.error('WARN: TASK.md 并行任务 read∩write 隐式依赖嫌疑（一方读取对方写路径，建议补显式 depends_on 声明）: '

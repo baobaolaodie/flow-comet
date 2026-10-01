@@ -1493,119 +1493,130 @@ async function main() {
   // plan exit 校验 TASK 含 task 块和 verify 字段
   if (node.id === 'plan' && state.activeChange) {
     const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
-    try {
-      const content = await fs.readFile(taskFile, 'utf8');
-      // <task> 块提取与属性解析统一走 task-parsing.mjs（开标签语义，属性序无关）
-      const taskList = extractTaskBlocks(content);
-      if (taskList.length === 0) {
-        console.error('BLOCKED: TASK.md 无 <task> 块');
-        process.exit(1);
-      }
-      const missingVerify = taskList.filter(b => !/<verify>/.test(b));
-      if (missingVerify.length > 0) {
-        console.error('BLOCKED: TASK.md 中 ' + missingVerify.length + ' 个 task 缺 <verify> 字段');
-        process.exit(1);
-      }
-      // 波次散文一致性检测: 波次散文一致性检测（WARN 渐进）——## 波次划分 的 Wave 行任务带 [P] 标记
-      // （并行语义）但 XML 任务无 parallel="true" → WARN（散文与机器路由依据不一致,以任务
-      // 标记为准）。容错:无并行语义的 Wave 行不参与比对;解析不到波次段跳过（不误报）。
-      const waveSection = content.match(/##\s*波次划分\s*\n([\s\S]*?)(?=\n##\s|\n---|\Z)/);
-      if (waveSection) {
-        const proseParallelIds = [];
-        for (const line of waveSection[1].split('\n')) {
-          if (!/(Wave|\d+\s*波|parallel|并行)/i.test(line)) continue; // 无并行语义行跳过
-          for (const m of line.matchAll(/([A-Z][A-Z0-9-]*)\[P\]/g)) proseParallelIds.push(m[1]);
-        }
-        if (proseParallelIds.length > 0) {
-          const xmlParallelIds = taskList
-            .filter(b => { const a = taskOpeningAttrs(b); return a && a.parallel; })
-            .map(b => (taskOpeningAttrs(b) || {}).id)
-            .filter(Boolean);
-          const missing = proseParallelIds.filter(id => !xmlParallelIds.includes(id));
-          if (missing.length > 0) {
-                    if (isNewChange(state)) {
-          console.error('BLOCKED: 波次散文标记任务为并行（[P]）但任务无 parallel="true"（新 change 强制散文与任务标记一致）;恢复: 对齐散文或任务标记');
+    // 读文件是唯一需要容错的动作（TASK.md 缺失 → 无内容可判，判据段不适用，保持既有语义）；
+    // 判据段独立成层——判据自身抛错不得被空 catch 吞掉：空 catch 会让整段文件依赖门禁（含既有
+    // 写写强判 BLOCK）静默失效，与「未验证 ≠ 通过」相悖。命中即显式报出原因并按 fail-closed 拒绝。
+    let content = null;
+    try { content = await fs.readFile(taskFile, 'utf8'); } catch { content = null; }
+    if (content !== null) {
+      try {
+        // <task> 块提取与属性解析统一走 task-parsing.mjs（开标签语义，属性序无关）
+        const taskList = extractTaskBlocks(content);
+        if (taskList.length === 0) {
+          console.error('BLOCKED: TASK.md 无 <task> 块');
           process.exit(1);
         }
-        console.error('WARN: 波次散文标记为并行（[P]）但任务无 parallel="true"——散文与任务标记不一致（以任务标记为准）: ' + missing.join(', '));
+        const missingVerify = taskList.filter(b => !/<verify>/.test(b));
+        if (missingVerify.length > 0) {
+          console.error('BLOCKED: TASK.md 中 ' + missingVerify.length + ' 个 task 缺 <verify> 字段');
+          process.exit(1);
+        }
+        // 波次散文一致性检测: 波次散文一致性检测（WARN 渐进）——## 波次划分 的 Wave 行任务带 [P] 标记
+        // （并行语义）但 XML 任务无 parallel="true" → WARN（散文与机器路由依据不一致,以任务
+        // 标记为准）。容错:无并行语义的 Wave 行不参与比对;解析不到波次段跳过（不误报）。
+        const waveSection = content.match(/##\s*波次划分\s*\n([\s\S]*?)(?=\n##\s|\n---|\Z)/);
+        if (waveSection) {
+          const proseParallelIds = [];
+          for (const line of waveSection[1].split('\n')) {
+            if (!/(Wave|\d+\s*波|parallel|并行)/i.test(line)) continue; // 无并行语义行跳过
+            for (const m of line.matchAll(/([A-Z][A-Z0-9-]*)\[P\]/g)) proseParallelIds.push(m[1]);
+          }
+          if (proseParallelIds.length > 0) {
+            const xmlParallelIds = taskList
+              .filter(b => { const a = taskOpeningAttrs(b); return a && a.parallel; })
+              .map(b => (taskOpeningAttrs(b) || {}).id)
+              .filter(Boolean);
+            const missing = proseParallelIds.filter(id => !xmlParallelIds.includes(id));
+            if (missing.length > 0) {
+                      if (isNewChange(state)) {
+            console.error('BLOCKED: 波次散文标记任务为并行（[P]）但任务无 parallel="true"（新 change 强制散文与任务标记一致）;恢复: 对齐散文或任务标记');
+            process.exit(1);
+          }
+          console.error('WARN: 波次散文标记为并行（[P]）但任务无 parallel="true"——散文与任务标记不一致（以任务标记为准）: ' + missing.join(', '));
+            }
           }
         }
-      }
-      // 波次分组校验重定义（依赖图校验决策 · 混排合法化）：原「并行块必须单个连续且居首/尾」形态约束废除——
-      // 串行任务位置不再受限，串→并→串 / 并→串→并 / 多波混合均合法（多趟循环路由按依赖拓扑分趟）。
-      // 改为依赖图校验：① 全部任务建依赖图（deps 边）做 Kahn 拓扑排序判环——有环即规划结构性死锁；
-      // ② 全部引用的任务 id 必须存在（无环图下「每个 parallel 任务的全部传递依赖存在且非环」
-      // ⟺ 直接引用都存在）。违规分级：新 change BLOCKED（含「依赖环」/缺失依赖明细 + depends_on
-      // 调整恢复指引）；旧 change 渐进 WARN 不阻断。波次散文一致性检测保留不动（与形态约束正交的既有独立检测，维持不变）。
-      const depGraph = analyzeDependencyGraph(taskList);
-      if (depGraph.cyclic || depGraph.missing.length > 0) {
-        const detail = depGraph.cyclic
-          ? '依赖环（拓扑排序无解，涉及任务: ' + depGraph.cycleIds.join(', ') + '）'
-          : '依赖不存在的任务: ' + depGraph.missing.map((m) => m.id + '→' + m.dep).join(', ');
-        const guide = ';恢复: 调整任务 depends_on——移除成环引用或改为真实存在的任务 id 后重试';
-        if (isNewChange(state)) {
-          console.error('BLOCKED: TASK.md ' + detail + '——依赖图不可满足（任务的依赖链必须存在且无环）' + guide);
-          process.exit(1);
+        // 波次分组校验重定义（依赖图校验决策 · 混排合法化）：原「并行块必须单个连续且居首/尾」形态约束废除——
+        // 串行任务位置不再受限，串→并→串 / 并→串→并 / 多波混合均合法（多趟循环路由按依赖拓扑分趟）。
+        // 改为依赖图校验：① 全部任务建依赖图（deps 边）做 Kahn 拓扑排序判环——有环即规划结构性死锁；
+        // ② 全部引用的任务 id 必须存在（无环图下「每个 parallel 任务的全部传递依赖存在且非环」
+        // ⟺ 直接引用都存在）。违规分级：新 change BLOCKED（含「依赖环」/缺失依赖明细 + depends_on
+        // 调整恢复指引）；旧 change 渐进 WARN 不阻断。波次散文一致性检测保留不动（与形态约束正交的既有独立检测，维持不变）。
+        const depGraph = analyzeDependencyGraph(taskList);
+        if (depGraph.cyclic || depGraph.missing.length > 0) {
+          const detail = depGraph.cyclic
+            ? '依赖环（拓扑排序无解，涉及任务: ' + depGraph.cycleIds.join(', ') + '）'
+            : '依赖不存在的任务: ' + depGraph.missing.map((m) => m.id + '→' + m.dep).join(', ');
+          const guide = ';恢复: 调整任务 depends_on——移除成环引用或改为真实存在的任务 id 后重试';
+          if (isNewChange(state)) {
+            console.error('BLOCKED: TASK.md ' + detail + '——依赖图不可满足（任务的依赖链必须存在且无环）' + guide);
+            process.exit(1);
+          }
+          console.error('WARN: TASK.md ' + detail + '——依赖图不可满足（旧 change 渐进不阻断）' + guide);
         }
-        console.error('WARN: TASK.md ' + detail + '——依赖图不可满足（旧 change 渐进不阻断）' + guide);
-      }
-      // 伪并行检测（真实载体验证暴露的设计盲区兜底）：如果一个标记为并行的任务只写测试文件
-      // 而无任何生产代码文件，它很可能隐式依赖某个实现类并行任务的产出（如测试 import
-      // 尚未存在的函数）。这种"伪并行"在多趟路由下会导致委托后测试失败。
-      // 启发式：并行任务的 write_files 全部匹配 tests/ 或 test_ 前缀 → 视为疑似伪并行。
-      // WARN 渐进不阻断——由执行者判断是否真独立（纯测试基础设施改动可合法全测试面）。
-      const testOnlyParallelIds = [];
-      for (const block of taskList) {
-        const attrs = taskOpeningAttrs(block);
-        if (!attrs || !attrs.parallel || attrs.status !== 'pending') continue;
-        const wfMatch = block.match(/<write_files>([\s\S]*?)<\/write_files>/);
-        if (!wfMatch) continue;
-        // 分号容错：与 workflow-handoff.mjs 自动解析同源实现（分号容错双点内联，与 workflow-handoff.mjs 同源互锚）——
-        // 换行切分后逐段按 ';' 二次切分、trim、滤空与 HTML 注释行（路径含分号的极端形态不支持，须换行书写）
-        const blockContent = wfMatch[1].replace(/<!--[\s\S]*?-->/g, '');
-        const filePaths = blockContent.trim().split(/\s*\n\s*/).map(l => l.trim()).filter(Boolean)
-          .flatMap(l => l.split(';')).map(l => l.trim()).filter(Boolean);
-        if (filePaths.length === 0) continue;
-        const prodFiles = filePaths.filter(f => !/(?:^|[\/\\])(?:__tests__\/|test_|tests?\/)|\.(?:test|spec)\.(?:mjs|js|jsx|ts|tsx|cjs)$/.test(f));
-        if (prodFiles.length === 0) {
-          testOnlyParallelIds.push(attrs.id || 'unknown');
+        // 伪并行检测（真实载体验证暴露的设计盲区兜底）：如果一个标记为并行的任务只写测试文件
+        // 而无任何生产代码文件，它很可能隐式依赖某个实现类并行任务的产出（如测试 import
+        // 尚未存在的函数）。这种"伪并行"在多趟路由下会导致委托后测试失败。
+        // 启发式：并行任务的 write_files 全部匹配 tests/ 或 test_ 前缀 → 视为疑似伪并行。
+        // WARN 渐进不阻断——由执行者判断是否真独立（纯测试基础设施改动可合法全测试面）。
+        const testOnlyParallelIds = [];
+        for (const block of taskList) {
+          const attrs = taskOpeningAttrs(block);
+          if (!attrs || !attrs.parallel || attrs.status !== 'pending') continue;
+          const wfMatch = block.match(/<write_files>([\s\S]*?)<\/write_files>/);
+          if (!wfMatch) continue;
+          // 分号容错：与 workflow-handoff.mjs 自动解析同源实现（分号容错双点内联，与 workflow-handoff.mjs 同源互锚）——
+          // 换行切分后逐段按 ';' 二次切分、trim、滤空与 HTML 注释行（路径含分号的极端形态不支持，须换行书写）
+          const blockContent = wfMatch[1].replace(/<!--[\s\S]*?-->/g, '');
+          const filePaths = blockContent.trim().split(/\s*\n\s*/).map(l => l.trim()).filter(Boolean)
+            .flatMap(l => l.split(';')).map(l => l.trim()).filter(Boolean);
+          if (filePaths.length === 0) continue;
+          const prodFiles = filePaths.filter(f => !/(?:^|[\/\\])(?:__tests__\/|test_|tests?\/)|\.(?:test|spec)\.(?:mjs|js|jsx|ts|tsx|cjs)$/.test(f));
+          if (prodFiles.length === 0) {
+            testOnlyParallelIds.push(attrs.id || 'unknown');
+          }
         }
-      }
-      if (testOnlyParallelIds.length > 0) {
-        console.error('WARN: 伪并行检测——以下并行任务仅写测试文件而无生产代码文件: '
-          + testOnlyParallelIds.join(', ')
-          + '。测试通常依赖实现产出的符号，可能存在隐式依赖；建议添加 depends_on 声明或合并为垂直切片');
-      }
-      // 并行文件依赖检测前移（触发面）：write∩write 写写强判（新 change BLOCKED / 旧 change
-      // WARN 渐进，与依赖环分级同先例）+ read∩write 读写弱判（仅无显式 depends_on 关联的并行对；
-      // WARN 提示级，新/旧均不 BLOCK——渐进提示）+ 同文件跨任务且无依赖路径（未完成任务写入面
-      // 重叠而两任务间无依赖路径——新 change BLOCKED / 旧 change WARN 渐进；串行拆分同样命中，
-      // 修复任务族不参与，族语义见 route-node 判定块注释）。与委托前既有拦截并存（委托前为第二道
-      // 写写锚，行为与消息保持既有语义不变）。
-      const { writeConflicts, readWarnings, crossTaskConflicts } = await findParallelWriteConflicts(path.join(runRoot, '.specs', state.activeChange));
-      if (writeConflicts.length > 0) {
-        const detail = writeConflicts.map((c) => `${c.a}×${c.b}(${c.files.join(',')})`).join('; ');
-        const guide = ';恢复: 补显式 depends_on 或拆为串行任务后重试';
-        if (isNewChange(state)) {
-          console.error('BLOCKED: TASK.md 并行任务 write_files 重叠（写写冲突，同波次并行会竞态覆盖）: ' + detail + guide);
-          process.exit(1);
+        if (testOnlyParallelIds.length > 0) {
+          console.error('WARN: 伪并行检测——以下并行任务仅写测试文件而无生产代码文件: '
+            + testOnlyParallelIds.join(', ')
+            + '。测试通常依赖实现产出的符号，可能存在隐式依赖；建议添加 depends_on 声明或合并为垂直切片');
         }
-        console.error('WARN: TASK.md 并行任务 write_files 重叠（写写冲突，建议补显式 depends_on 或拆为串行任务）: ' + detail + guide);
-      }
-      if (crossTaskConflicts.length > 0) {
-        const detail = crossTaskConflicts.map((c) => `${c.a}×${c.b}(${c.files.join(',')})`).join('; ');
-        const guide = ';恢复: 补显式 depends_on 或合并为一个任务后重试';
-        if (isNewChange(state)) {
-          console.error('BLOCKED: TASK.md 同文件跨任务且无依赖路径: ' + detail + guide);
-          process.exit(1);
+        // 并行文件依赖检测前移（触发面）：write∩write 写写强判（新 change BLOCKED / 旧 change
+        // WARN 渐进，与依赖环分级同先例）+ read∩write 读写弱判（仅无显式 depends_on 关联的并行对；
+        // WARN 提示级，新/旧均不 BLOCK——渐进提示）+ 同文件跨任务且无依赖路径（未完成任务写入面
+        // 重叠而两任务间无依赖路径——新 change BLOCKED / 旧 change WARN 渐进；串行拆分同样命中，
+        // 修复任务族不参与，族语义见 route-node 判定块注释）。与委托前既有拦截并存（委托前为第二道
+        // 写写锚，行为与消息保持既有语义不变）。
+        const { writeConflicts, readWarnings, crossTaskConflicts } = await findParallelWriteConflicts(path.join(runRoot, '.specs', state.activeChange));
+        if (writeConflicts.length > 0) {
+          const detail = writeConflicts.map((c) => `${c.a}×${c.b}(${c.files.join(',')})`).join('; ');
+          const guide = ';恢复: 补显式 depends_on 或拆为串行任务后重试';
+          if (isNewChange(state)) {
+            console.error('BLOCKED: TASK.md 并行任务 write_files 重叠（写写冲突，同波次并行会竞态覆盖）: ' + detail + guide);
+            process.exit(1);
+          }
+          console.error('WARN: TASK.md 并行任务 write_files 重叠（写写冲突，建议补显式 depends_on 或拆为串行任务）: ' + detail + guide);
         }
-        console.error('WARN: TASK.md 同文件跨任务且无依赖路径（建议补显式 depends_on 或合并为一个任务）: ' + detail + guide);
+        if (crossTaskConflicts.length > 0) {
+          const detail = crossTaskConflicts.map((c) => `${c.a}×${c.b}(${c.files.join(',')})`).join('; ');
+          const guide = ';恢复: 补显式 depends_on 或合并为一个任务后重试';
+          if (isNewChange(state)) {
+            console.error('BLOCKED: TASK.md 同文件跨任务且无依赖路径: ' + detail + guide);
+            process.exit(1);
+          }
+          console.error('WARN: TASK.md 同文件跨任务且无依赖路径（建议补显式 depends_on 或合并为一个任务）: ' + detail + guide);
+        }
+        if (readWarnings.length > 0) {
+          console.error('WARN: TASK.md 并行任务 read∩write 隐式依赖嫌疑（一方读取对方写路径，建议补显式 depends_on 声明）: '
+            + readWarnings.map((c) => `${c.a}×${c.b}(${c.files.join(',')})`).join('; '));
+        }
+      } catch (judgeError) {
+        console.error('BLOCKED: TASK.md 文件依赖判据未执行: '
+          + (judgeError && judgeError.message ? judgeError.message : String(judgeError))
+          + '——门禁无法完成校验，按 fail-closed 拒绝通过（未验证 ≠ 通过）');
+        process.exit(1);
       }
-      if (readWarnings.length > 0) {
-        console.error('WARN: TASK.md 并行任务 read∩write 隐式依赖嫌疑（一方读取对方写路径，建议补显式 depends_on 声明）: '
-          + readWarnings.map((c) => `${c.a}×${c.b}(${c.files.join(',')})`).join('; '));
-      }
-    } catch {}
+    }
   }
   // review exit 校验 REVIEW 含实质内容 + 发现区条目处置状态结构级校验
   if (node.id === 'review' && state.activeChange) {
