@@ -692,7 +692,11 @@ function fixTaskClassifier(taskContent, fixSectionTitle) {
   return (block) => {
     const attrs = taskOpeningAttrs(block);
     if (!attrs || typeof attrs.id !== 'string') return false;
-    return FIX_TASK_ID_PREFIX.test(attrs.id) || sectionBlocks.has(block);
+    if (FIX_TASK_ID_PREFIX.test(attrs.id)) return true;
+    // 行尾归一（与任务集签名的归一纪律同源）：fixSectionBody 产出 LF，而待判 block 来自原文
+    // （Windows 下可能是 CRLF）。不归一会让「Fix 段内非前缀 id」任务匹配失败——第三族把它当
+    // 普通参与者误拦，且 fixTaskMarker 同时失效。
+    return sectionBlocks.has(String(block ?? '').replace(/\r\n/g, '\n'));
   };
 }
 

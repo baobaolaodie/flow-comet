@@ -94,10 +94,12 @@ function resolveComponentSkillFile(nodeSkill, scriptsDir = __dirname) {
 // ——那会误伤公开面大量合法中文用法。
 // 2026-10-01 收窄一处：「批 + 数字」补中文序数否定环视——「第 N 批 + 数字」是普通计数短语
 // （合法中文用法），旧模式把它当未公开概念命中。序号与「批」之间隔着数字（阿拉伯或中文），
-// 故环视必须吸收这段数字（`(?<!第[0-9一二三四五六七八九十百千万]*)`，变长环视）；
-// 只排除中文序数前缀这一种形态，其余形态判定不变（只收窄不放宽）。无空格连写形态
-// （如「批次2」）刻意不命中：实测受检三层 0 处，放宽会增误报。
-const PUBLIC_CODE_RE = /\bS\d{1,3}\b|T-FIX|batch-(?![a-z])|D-\d+|P[0-7]\b|round\s*\d|dogfood|内部|批次 [A-Z0-9]|(?<!第[0-9一二三四五六七八九十百千万]*)批 ?\d|级 [0-9]|UAT-\d|(?<![A-Za-z])R-\d{2}/;
+// 故环视必须吸收这段数字（变长环视），且**允许两侧空格**（`第 1 批 2 次` 同属普通计数短语）；
+// 工作项编号补**尾界**（要求恰好两位，`R-123` 形态不命中）。以上均属"只收窄不放宽"；
+// 只排除这两类形态，其余判定不变。无空格连写形态（如「批次2」）刻意不命中：实测受检三层 0 处，
+// 放宽会增误报。本正则与 `.githooks/internal-codes.mjs` 的 `BANNED` 保持 **source 逐字符相等**
+// （主仓形态由镜像漂移判据强制，改一侧必须同步另一侧）。
+const PUBLIC_CODE_RE = /\bS\d{1,3}\b|T-FIX|batch-(?![a-z])|D-\d+|P[0-7]\b|round\s*\d|dogfood|内部|批次 [A-Z0-9]|(?<!第 ?[0-9一二三四五六七八九十百千万]* ?)批 ?\d|级 [0-9]|UAT-\d|(?<![A-Za-z])R-\d{2}(?![A-Za-z0-9_-])/;
 
 // 场景数一致性自检清单（15 文件 = 9 分发组 + 6 维护者组，全变体：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n）——
 // 数字由下方常量清单**推导**、不硬编码：9 = SCENARIO_COUNT_FILES 9 条与 SYSTEM_TEST_COUNT_FILES 4 条的
@@ -596,8 +598,11 @@ function roadmapNowArchivedProblems(rel, text, root = REPO_ROOT) {
   const nextMatch = nextRe.exec(rest);
   const section = nextMatch ? rest.slice(0, nextMatch.index) : rest;
   for (const { id, dir } of archivedChangeIds(root)) {
-    // 命中面 = id 及其路径形态（两形态都要判：只判路径会漏掉裸 id 写法）
-    if (section.includes(id) || section.includes(dir)) {
+    // 命中面 = id 及其路径形态（两形态都要判：只判路径会漏掉裸 id 写法）。
+    // id 用**整词**匹配（字母/数字/连字符为词字符）——直接 `includes(id)` 会让短 id 命中更长 id
+    // 或同族更长 id 的中间（如归档 id `archived-fixture` 命中 `archived-fixture-v2`），属假红。
+    const idRe = new RegExp('(?<![A-Za-z0-9_-])' + id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![A-Za-z0-9_-])');
+    if (idRe.test(section) || section.includes(dir)) {
       problems.push('Now 段含已归档 change-id: ' + id + '（' + rel + ' 的在办段引用了已归档记录 '
         + dir + '）——请从在办段移出（历史指针面记录）');
     }
@@ -613,7 +618,11 @@ function internalDocsProblems(root = REPO_ROOT) {
   const lineCountOf = (p) => {
     if (!lineCountCache.has(p)) {
       try {
-        lineCountCache.set(p, fs.readFileSync(p, 'utf8').split(/\r?\n/).length);
+        // 逻辑行数：**尾随换行不产生额外一行**（`a\nb\nc\n` = 3 行），空文件 = 0 行。
+        // 直接取 `split(/\r?\n/).length` 会把尾随空段算成一行 → `:N+1` 越界被漏报。
+        const parts = fs.readFileSync(p, 'utf8').split(/\r?\n/);
+        if (parts.length > 1 && parts[parts.length - 1] === '') parts.pop();
+        lineCountCache.set(p, parts.length);
       } catch {
         lineCountCache.set(p, null); // 目标瞬时不可读：存在性已通过，行号判据按不可判跳过
       }
@@ -1807,6 +1816,23 @@ const CROSS_TASK_MIXED_PAIR =
   + '<task id="T02" parallel="false" status="pending"><action>实现 T02</action><write_files>src/shared.mjs</write_files><verify>node --check src/shared.mjs</verify></task>\n'
   + '<task id="T-FIX-01" parallel="false" status="pending"><action>修复 T-FIX-01</action><write_files>src/other-shared.mjs</write_files><verify>node --check src/other-shared.mjs</verify></task>\n'
   + '<task id="T-FIX-02" parallel="false" status="pending"><action>修复 T-FIX-02</action><write_files>src/other-shared.mjs</write_files><verify>node --check src/other-shared.mjs</verify></task>\n';
+// ④ **段归属分支**夹具：修复段内的任务 id **不带**修复族前缀（F01/F02）——判定必须靠「位于修复
+// 任务段内」这条边界，而不是 id 命名。既有 ② 用的是带前缀 id，走的是 id 分支，段归属分支此前
+// 没有行为夹具（该分支的行尾归一口径缺陷因此漏过，2026-10-01 PR 审查发现后补）。
+// **块内必须跨行**：单行块在 LF 与 CRLF 下文本完全相同，行尾口径缺陷无从显现——真实 TASK.md
+// 的任务块本就跨行，夹具按真实形态构造（否则夹具自身无判别力）。
+const CROSS_TASK_FIX_SECTION_PAIR =
+  '## Fix 任务（来自 REVIEW）\n\n'
+  + '<task id="F01" parallel="false" status="pending">\n'
+  + '  <action>回修 F01</action>\n'
+  + '  <write_files>src/section-shared.mjs</write_files>\n'
+  + '  <verify>node --check src/section-shared.mjs</verify>\n'
+  + '</task>\n'
+  + '<task id="F02" parallel="false" status="pending">\n'
+  + '  <action>回修 F02</action>\n'
+  + '  <write_files>src/section-shared.mjs</write_files>\n'
+  + '  <verify>node --check src/section-shared.mjs</verify>\n'
+  + '</task>\n';
 
 // 波次分组场景公共路径：注入 TASK.md → entry plan（记录 enteredNodes，新 change 强制先 entry；
 // 旧 change 亦先 entry 避免 ENTER WARN 干扰断言）→ exit plan。返回 exit plan 结果。
@@ -10060,6 +10086,13 @@ const SCENARIOS = [
       if (!internalDocsProblems(dir).some((p) => p.includes('行号越界') && p.includes('TARGET.md:0'))) {
         throw new Error('下界越界（引用第 0 行）未被报告: ' + JSON.stringify(internalDocsProblems(dir)));
       }
+      // 反例：尾随换行不得让目标文件被算成"多一行"——3 行文件引 `:4` 必须越界
+      // （旧实现按 split 段数计行，尾随空段被算作一行 → :4 被放过；2026-10-01 PR 审查发现）
+      writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/TARGET.md:4`。\n');
+      if (!internalDocsProblems(dir).some((p) => p.includes('行号越界') && p.includes('TARGET.md:4'))) {
+        throw new Error('尾随换行被算成额外一行（3 行目标文件引 :4 未报越界）: '
+          + JSON.stringify(internalDocsProblems(dir)));
+      }
       // 反例：区间上端越界（区间取两端逐一校验）
       writeFile(dir, 'docs/internal/FIXTURE.md', '见 `docs/internal/TARGET.md:2-99`。\n');
       if (!internalDocsProblems(dir).some((p) => p.includes('行号越界') && p.includes('TARGET.md:99'))) {
@@ -10120,6 +10153,14 @@ const SCENARIOS = [
         '# 路线图\n\n> 最后更新：2026-01-01\n\n## Now\n\n- 在办：别的主题\n\n## Next\n\n## Later\n\n- 历史：archived-fixture\n\n## Open decisions\n');
       if (internalDocsProblems(dir).some((p) => p.includes('Now 段含已归档'))) {
         throw new Error('Now 段之外的归档 id 不得误报: ' + JSON.stringify(internalDocsProblems(dir)));
+      }
+      // 反例：归档 id 必须**整词**匹配——`archived-fixture-v2` 含 `archived-fixture` 但不得误报
+      // （旧实现用 includes 子串匹配 → 短 id 会命中更长 id 或同族更长 id 的中间；2026-10-01 PR 审查发现）
+      writeFile(dir, 'docs/internal/ROADMAP.md',
+        '# 路线图\n\n> 最后更新：2026-01-01\n\n## Now\n\n- 在办：archived-fixture-v2 的后续\n\n## Next\n\n## Later\n\n## Open decisions\n');
+      if (internalDocsProblems(dir).some((p) => p.includes('Now 段含已归档 change-id'))) {
+        throw new Error('归档 id 子串误命中（archived-fixture-v2 不得命中 archived-fixture）: '
+          + JSON.stringify(internalDocsProblems(dir)));
       }
       // 定位口径锚：文件头目录说明行里出现被反引号包住的同名标题字样时，段定位必须仍命中真实
       // 在办段（按行首标题扫描，而不是按子串首次出现位置切段——后者会切出极短窗口使判据恒过）
@@ -10225,9 +10266,11 @@ const SCENARIOS = [
         ['内部标识词', '内部', '内卷'],
         ['批次加编号', '批次 D', '批次发布'],
         ['批加编号', '批 2', '第一批 2 次'],
+        ['批加编号（序数与批之间有空格）', '批 2', '第 1 批 2 次'],
         ['级加编号', '级 3', '级联'],
         ['验收代号', 'UAT-7', 'UAT-x'],
         ['工作项编号', 'R-14', 'ADR-013'],
+        ['工作项编号（三位不截断）', 'R-14', 'R-123'],
       ];
       for (const [label, hit, miss] of CODE_BRANCH_SAMPLES) {
         if (!PUBLIC_CODE_RE.test(hit)) {
@@ -13080,6 +13123,22 @@ const SCENARIOS = [
       const fixConflicts = await findConflicts(path.join(dir, '.specs', CHANGE_ID));
       if (fixConflicts.crossTaskConflicts.length !== 0 || fixConflicts.writeConflicts.length !== 0) {
         throw new Error('修复任务族对不得进入第三族（也不得进入写写强判）: ' + JSON.stringify(fixConflicts));
+      }
+      // ②-附 段归属分支 + 行尾归一（LF 与 CRLF 两形态都必须识别为修复族）：
+      //     段内块来自 LF 归一后的段体，而待判 block 来自原文——Windows 下原文是 CRLF，
+      //     不归一会让段内匹配失败 → 修复族对被当普通参与者误拦（2026-10-01 PR 审查发现）。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
+        '# TASK\n\n## 任务清单\n\n' + CROSS_TASK_FIX_SECTION_PAIR);
+      const sectionConflicts = await findConflicts(path.join(dir, '.specs', CHANGE_ID));
+      if (sectionConflicts.crossTaskConflicts.length !== 0 || sectionConflicts.writeConflicts.length !== 0) {
+        throw new Error('修复段内**非前缀 id** 的任务对不得进入第三族（段归属分支）: '
+          + JSON.stringify(sectionConflicts));
+      }
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
+        '# TASK\r\n\r\n## 任务清单\r\n\r\n' + CROSS_TASK_FIX_SECTION_PAIR.replace(/\n/g, '\r\n'));
+      const crlfConflicts = await findConflicts(path.join(dir, '.specs', CHANGE_ID));
+      if (crlfConflicts.crossTaskConflicts.length !== 0 || crlfConflicts.writeConflicts.length !== 0) {
+        throw new Error('CRLF 行尾下修复段归属判定必须一致（行尾归一口径）: ' + JSON.stringify(crlfConflicts));
       }
       // ③ 出口链路锚（新 change）：非修复对照对 → BLOCKED 且消息带任务对与重叠文件；
       //    修复族对 → exit 0 且不出现该族消息（BLOCKED / WARN 两形态都不许有）。
