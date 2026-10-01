@@ -731,13 +731,14 @@ function makeTmp() {
 // 现改为「重试 + 容忍」：清理不了的目录留待末尾判据统一报告（可见失败，不静默、也不自杀）。
 const CLEANUP_RETRIES = 10;
 const CLEANUP_RETRY_DELAY_MS = 150;
+// 不返回清理状态：调用方不据它分支，且「清理成功」的**单一判定点**是末尾「临时目录清理」判据
+// （避免 helper 与调用方各自 existsSync 形成两套判定——Sourcery 评审指出，2026-10-01 收敛）。
 function cleanupTmpDir(dir) {
   try {
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: CLEANUP_RETRIES, retryDelay: CLEANUP_RETRY_DELAY_MS });
   } catch {
     // 交由末尾「临时目录清理」判据报告
   }
-  return !fs.existsSync(dir);
 }
 
 // 同步小睡（末尾延迟重试用；主线程可用 Atomics.wait 阻塞等待）
@@ -13760,11 +13761,11 @@ if (isAuthoritativeSourceRepo()) {
 
 // 清理验证：自测套件自身创建的临时目录不留残留
 // 先做一次延迟重试：跨场景仍被占用的句柄（子进程退出、扫描器）可能晚于最后一个场景的清理才释放。
-for (const d of createdDirs) {
-  if (fs.existsSync(d)) {
-    sleepSync(300);
-    cleanupTmpDir(d);
-  }
+// 只等**一次**（不是每个残留目录各等一次），再逐个重试；随后由下方单一判定点统一报告。
+const remainingDirs = createdDirs.filter((d) => fs.existsSync(d));
+if (remainingDirs.length > 0) {
+  sleepSync(300);
+  for (const d of remainingDirs) cleanupTmpDir(d);
 }
 const residue = createdDirs.filter((d) => fs.existsSync(d));
 if (residue.length > 0) {
