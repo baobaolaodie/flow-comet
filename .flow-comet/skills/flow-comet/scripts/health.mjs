@@ -177,10 +177,13 @@ function compressRanges(numbers) {
 
 // ---------- 确定性层 3：技术债表项数 ----------
 function collectDebt(text) {
-  if (text === null) return { exists: false, rows: 0, items: [] };
+  if (text === null) return { exists: false, rows: 0, items: [], level: null };
   const lines = text.split('\n');
   const start = lines.findIndex((line) => DEBT_HEADING.test(line));
-  if (start === -1) return { exists: false, rows: 0, items: [] };
+  if (start === -1) return { exists: false, rows: 0, items: [], level: null };
+  // 段标题的**实际层级**随读数一起回传：复现命令的段级必须取自这里——判据的层级区间是二~四级，
+  // 命令若硬编码 H3，`## 技术债` 的项目照抄命令就复现不出本报告的读数（命令与判据各说一套）。
+  const level = (lines[start].match(/^#+/) ?? [''])[0].length;
   const body = [];
   for (let i = start + 1; i < lines.length; i += 1) {
     const line = lines[i];
@@ -193,7 +196,7 @@ function collectDebt(text) {
   const items = dataRows
     .map((line) => (line.split('|')[1] ?? '').trim().replaceAll('`', ''))
     .filter((item) => item.length > 0);
-  return { exists: true, rows: dataRows.length, items };
+  return { exists: true, rows: dataRows.length, items, level };
 }
 
 // ---------- 确定性层 4：冗余工具在场判定（+ 首选项在场则跑） ----------
@@ -410,7 +413,10 @@ function renderDebtSection(push, debt) {
     if (debt.items.length > DEBT_ITEM_LIMIT) push('  - ……（仅列前 ' + DEBT_ITEM_LIMIT + ' 项，共 ' + debt.items.length + ' 项）');
   }
   push('- 判据：段内表格数据行计数（排除表头与分隔行）；段边界 = 下一个标题或分隔线');
-  push('- 复现命令：`sed -n \'/^### 技术债/,/^---/p\' ' + CONTEXT_DISPLAY + ' | grep -c \'^|\'`（含表头与分隔行，减去 2 即表项数）', '');
+  // 复现命令的段级**按判据动态取**：段在场 = 文档里真实命中的标题层级（判据的层级区间是二~四级）；
+  // 段缺席 = 没有可取的层级，退回该区间形态。两种情况都给出能复现本次读数（0 表项）的命令。
+  const levelToken = debt.exists ? '#'.repeat(debt.level) : '#\\{2,4\\}';
+  push('- 复现命令：`sed -n \'/^' + levelToken + ' 技术债/,/^---/p\' ' + CONTEXT_DISPLAY + ' | grep -c \'^|\'`（含表头与分隔行，减去 2 即表项数）', '');
 }
 
 function renderRedundancySection(push, redundancy, options, selfDisplay) {
@@ -439,6 +445,9 @@ function renderGitSection(push, git) {
   push('### 5 · 版本历史统计（git）', '');
   if (!git.isRepo) {
     push('- git 仓库：否——历史统计缺省（显式声明，不静默省略）');
+    // 本项在「不在仓库内」态同样要带复现命令：确定性层的每项都是机器可判的承诺，复现命令是它的
+    // 兑现方式——缺一项，该层就有一格不可复核（与在场态的两条命令对称）。
+    push('- 复现命令：`git rev-parse --is-inside-work-tree`（输出非 `true` / 退出码非 0 即不在仓库内）');
   } else {
     push('- git 仓库：是');
     push('- 提交总数：' + (git.commits === null ? '不可判（HEAD 无法解析）' : git.commits));

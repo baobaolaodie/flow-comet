@@ -2412,6 +2412,126 @@ function timeDisciplineTextProblems(label, text) {
   return problems;
 }
 
+// CRLF 行尾判据（场景 303 使用；纯函数 + 合成输入可驱动）：CRLF 文档的**每一条行**都必须以 CRLF
+// 终结——`split('\n')` 之后除末尾哨兵外每个元素都须以 `\r` 收尾，且文档得以换行收尾。返回违例
+// 行号（空数组 = 整篇行尾一致）。旧实现在「以换行收尾的文档」上直接于哨兵之后追加，拼出一条
+// **无 `\r` 的空行**：同一文件两种行尾，渲染层看不见、diff 层刺眼（REVIEW 实测形态）。
+function crlfLineViolations(text) {
+  const value = String(text);
+  const lines = value.split('\n');
+  const offenders = [];
+  if (!value.endsWith('\n')) offenders.push(lines.length);
+  for (let i = 0; i < lines.length - 1; i += 1) {
+    if (!lines[i].endsWith('\r')) offenders.push(i + 1);
+  }
+  return offenders;
+}
+
+// EVOLVE 报告列表符号判据（场景 304 使用；纯函数 + 合成输入可驱动）：报告行不得出现 `- -`
+// 双层列表符号——`  - ` 前缀与条目自带的 `- ` 叠加后渲染成「空壳父项 + 子项」，读者看到两条。
+function evolveReportBulletProblems(reportText) {
+  const problems = [];
+  const lines = String(reportText).split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^\s*-\s+-\s/.test(lines[i])) {
+      problems.push('第 ' + (i + 1) + ' 行出现双列表符号: ' + JSON.stringify(lines[i]));
+    }
+  }
+  return problems;
+}
+
+// 确定性层「每项都带可复现命令」判据（场景 306 使用，对应验收条款的该子句；纯函数 + 合成输入
+// 可驱动）：确定性层以 `### k · 名称` 分项，每个项内必须随附 `- 复现命令：` 行——项是「机器可判」
+// 的承诺，复现命令是它的兑现方式：缺一项，该层就有一格不可复核（读数与命令两边只在校验报告里
+// 出现过一次，读者无法自己重算）。返回问题描述数组（空 = 每项都有）。
+function deterministicReproProblems(reportText) {
+  const layer = /## 确定性层（机器可判）\n([\s\S]*?)(?=\n## |$)/.exec(String(reportText));
+  if (layer === null) return ['缺「## 确定性层（机器可判）」段'];
+  const chunks = layer[1].split(/\n(?=### )/).filter((chunk) => chunk.startsWith('### '));
+  if (chunks.length === 0) return ['确定性层零个分项（判据无从校验）'];
+  const problems = [];
+  for (const chunk of chunks) {
+    const title = chunk.split('\n')[0].replace(/^###\s*/, '').trim();
+    if (!/^- 复现命令：/m.test(chunk)) problems.push('确定性项缺复现命令: ' + title);
+  }
+  return problems;
+}
+
+// 上游覆盖声明四要素判据（场景 307 使用；纯函数 + 合成输入可驱动）。上游语义被本仓有意覆盖，
+// 声明此前是纯文本、无机检——读者无从判断「说没说清不采用什么」。四要素：
+//   ① 上游文件标记为**只读基准**；② **「不采用」栏** ≥1 条（逐条点名，不是笼统「有意偏离」）；
+//   ③ **「沿用上游」栏** ≥1 条（**指针式入口豁免**——细则在各自技能册，入口只留指针）；
+//   ④ **「以…为准」兜底语**（冲突时以本节为准）。
+// 「栏内条目」计数容忍两种行文形态：序号标记（①②③…）与顿号 / 分号列举——技能册一用序号、
+// 一用顿号，形态差异不是「有没有条目」的差异；判据只锚「栏在场且至少一条」。
+const OVERRIDE_CLAUSE_ITEM_MARKS = /[①②③④⑤⑥⑦⑧⑨⑩]/g;
+// 兜底语 = **冲突优先**声明（「以本节为准」式）：判据不认任何 `以…为准`——`以安装平台为准`
+// 一类是无关行文，`冲突以 state 为准` 一类是局部字段优先级，都会被它冒充满足。
+const OVERRIDE_FALLBACK_RE = /以(?:本节|本册|本文)[^\n。]{0,20}为准|冲突[^\n。]{1,60}为准/;
+// 声明块 = 「只读基准」所在行起，向后吞掉「空行 / 粗体栏名开头的段落 / 兜底语所在行」，直到首个
+// 既非空行、也不以 `**` 开头、也不含兜底语的行为止——四要素都必须落在**块内**。没有块边界，
+// 判据会被文件里别处的 `以…为准` / 局部优先级条款冒充满足（「锚偏弱」的另一种形态）。
+function overrideDeclarationBlock(text) {
+  const lines = String(text).split('\n');
+  const start = lines.findIndex((line) => line.includes('只读基准'));
+  if (start < 0) return null;
+  let end = start + 1;
+  for (let i = start; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (i > start && line.trim() !== '' && !line.startsWith('**') && !OVERRIDE_FALLBACK_RE.test(line)) break;
+    end = i + 1;
+  }
+  return lines.slice(start, end).join('\n');
+}
+function labeledClauseItemCount(text, label) {
+  const value = String(text);
+  const at = value.indexOf(label);
+  if (at < 0) return null;
+  const nextLine = value.indexOf('\n', at);
+  const line = value.slice(at, nextLine < 0 ? value.length : nextLine);
+  // 栏名之后先剥掉自身的粗体闭合与冒号，再截到**下一个栏名**（粗体 + 冒号形态）为止：
+  // 栏内联的粗体强调（`**确定性子集**（…）`）不是栏名，不能当成栏边界。
+  const rest = line.slice(label.length).replace(/^[*：:\s]+/, '');
+  const nextLabel = rest.search(/\*\*[^*]{1,20}\*\*\s*[:：]/);
+  const body = nextLabel < 0 ? rest : rest.slice(0, nextLabel);
+  const marked = (body.match(OVERRIDE_CLAUSE_ITEM_MARKS) ?? []).length;
+  const listed = body.split(/[、；]/).map((piece) => piece.trim()).filter((piece) => piece.length > 0).length;
+  return Math.max(marked, listed);
+}
+function overrideDeclarationProblems(label, text, { pointer = false } = {}) {
+  const problems = [];
+  const block = overrideDeclarationBlock(text);
+  if (block === null) return [label + ' 找不到覆盖声明块（缺「只读基准」标记）'];
+  if (!block.includes('只读基准')) problems.push(label + ' 未把上游文件标记为「只读基准」');
+  const notAdopted = labeledClauseItemCount(block, '不采用');
+  if (notAdopted === null) problems.push(label + ' 缺「不采用」栏');
+  else if (notAdopted === 0) problems.push(label + ' 的「不采用」栏零条目（须逐条点名上游语义）');
+  if (!pointer) {
+    const kept = labeledClauseItemCount(block, '沿用上游');
+    if (kept === null) problems.push(label + ' 缺「沿用上游」栏');
+    else if (kept === 0) problems.push(label + ' 的「沿用上游」栏零条目');
+  }
+  if (!OVERRIDE_FALLBACK_RE.test(block)) {
+    problems.push(label + ' 缺「以…为准」兜底语（冲突时以本节 / 本册为准）');
+  }
+  return problems;
+}
+
+// 覆盖声明里点名的上游工件路径（`flow-kit/prompts/...` 形态，含 `{a,b,c}.md` 花括号合写）：
+// 逐条展开为可 stat 的真实路径——声明的锚必须指向在场实体，不能指向幽灵路径。尖括号占位形态
+// （`flow-kit/prompts/<阶段>.md` 一类说明性写法）不是实体，直接排除。
+function upstreamArtifactPaths(text) {
+  const found = String(text).match(/flow-kit\/prompts\/[^\s`）()、，。]+\.md/g) ?? [];
+  const out = [];
+  for (const raw of found) {
+    if (raw.includes('<') || raw.includes('>')) continue;
+    const brace = /\{([^}]*)\}/.exec(raw);
+    if (brace === null) { out.push(raw); continue; }
+    for (const name of brace[1].split(',')) out.push(raw.replace(brace[0], name.trim()));
+  }
+  return out;
+}
+
 // 具名 import 断言（容忍多行 / 符号重排 / 其它符号共存）：source 为模块说明符（`./state-schema.mjs`）。
 // 与场景 154 的内联写法同判据，本处提为复用工具（原子写与元数据常量两处消费面都要断言）。
 function hasNamedImport(text, source, name) {
@@ -15689,6 +15809,223 @@ const SCENARIOS = [
       for (const symbol of ['formatLocalTimestamp', 'parseTimestamp']) {
         assertTrue(engineDefinitionHits(symbol).some((hit) => hit.file === 'time-utils.mjs'),
           'time-utils.mjs 未定义被点名的判据符号 ' + symbol + '（散文与实现脱节）');
+      }
+    },
+  },
+
+  // 303: 收尾打磨之首——`evolve` 在 **CRLF 文档**上追加「## evolve 元数据」段前不得留裸 LF 行。
+  // 复现形态（评审实测 `-->\r\n\n\r\n---`）：`split('\n')` 对「以换行收尾的文档」留有一个零长度
+  // 哨兵元素，旧实现直接在哨兵之后 push，于是拼出一条**无 `\r` 的空行**（同一文件两种行尾）。
+  // 断言面：整篇每条行都以 CRLF 终结（逐行行号可读）+ 追加块前后形态逐字 + LF 文档对照
+  // （证明修复不是「CRLF 专属补丁」——两种行尾约定下追加块都退化为**单空行**）。
+  {
+    name: '303 侧命令 CRLF 追加块：evolve 追加元数据段零裸 LF 行 · 两种行尾约定形态一致',
+    run: (dir) => {
+      writeFile(dir, '.specs/archive/2026-10-02-crlf/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n### 可复用抽象\n\n- CRLF 夹具条目\n');
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeState(dir, baseState('open'));
+
+      // ① CRLF 文档：夹具本身必须整篇 CRLF（否则「裸 LF」判据的前提不成立）
+      const crlfFixture = contextFixtureText({ tail: '<!-- crlf-tail -->' }).replace(/\n/g, '\r\n');
+      assertEqual(crlfLineViolations(crlfFixture).length, 0, '夹具前提不成立：CRLF 夹具本身含非 CRLF 行');
+      writeFile(dir, '.specs/CONTEXT.md', crlfFixture);
+
+      const applied = runSideScript(SIDE_EVOLVE, ['apply', '2026-10-02-crlf#1', '--root', dir], dir);
+      assertExit(applied, 0);
+      assertOut(applied, 'EVOLVE-OK');
+      const crlfText = fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8');
+      const violations = crlfLineViolations(crlfText);
+      assertEqual(violations.join(','), '',
+        'CRLF 文档追加后出现非 CRLF 行（行号）: ' + violations.join(','));
+      assertTrue(crlfText.includes('<!-- crlf-tail -->\r\n\r\n---\r\n\r\n## evolve 元数据\r\n\r\n'),
+        '追加块前后形态不符（期望单空行 + 全 CRLF）: '
+          + JSON.stringify(crlfText.slice(crlfText.indexOf('<!-- crlf-tail -->'))));
+      // 判别力（合成变异驱动同一判据）：把评审实测的修复前形态灌回真实文本 → 必报
+      const regressed = crlfText.replace('\r\n\r\n---\r\n', '\r\n\n\r\n---\r\n');
+      assertTrue(regressed !== crlfText, '反向构造前提不成立（追加块形态已变）');
+      assertTrue(crlfLineViolations(regressed).length > 0, '裸 LF 行未被判违规（判别力缺失）');
+
+      // ② LF 文档对照：行尾约定不变（单空行 + 全 LF），且不得被写入 CR
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText({ tail: '<!-- lf-tail -->' }));
+      writeState(dir, baseState('open'));
+      const appliedLf = runSideScript(SIDE_EVOLVE, ['apply', '2026-10-02-crlf#1', '--root', dir], dir);
+      assertExit(appliedLf, 0);
+      const lfText = fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8');
+      assertTrue(lfText.includes('<!-- lf-tail -->\n\n---\n\n## evolve 元数据\n\n'),
+        'LF 文档追加块形态回归: ' + JSON.stringify(lfText.slice(lfText.indexOf('<!-- lf-tail -->'))));
+      assertTrue(!lfText.includes('\r'), 'LF 文档被写入 CR（行尾约定不得被改写）');
+    },
+  },
+
+  // 304: 收尾打磨之二——EVOLVE 报告的「## 应用 patch」条目此前是 `  - ` 前缀与条目自带的 `- `
+  // 叠加（`  - - <条目>`）：Markdown 渲染成「空壳父项 + 子项」两条，报告读者数不清应用了几条。
+  // 断言面：报告零 `- -` 双符号行 + 条目行逐字（单符号）+ 父项在场（子项挂在正确的父项下）。
+  {
+    name: '304 EVOLVE 报告条目单一列表符号：零 `- -` 双符号行 · 条目行逐字',
+    run: (dir) => {
+      writeFile(dir, '.specs/archive/2026-10-02-report/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n### 可复用抽象\n\n- 报告条目夹具\n');
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeState(dir, baseState('open'));
+      const applied = runSideScript(SIDE_EVOLVE, ['apply', '2026-10-02-report#1', '--root', dir], dir);
+      assertExit(applied, 0);
+      assertOut(applied, 'EVOLVE-OK');
+
+      const date = requireModuleExport(timeUtilsModule, 'formatLocalDate', 'time-utils.mjs')(new Date());
+      const reportFile = path.join(dir, '.specs', 'evolve', date + '-EVOLVE.md');
+      assertTrue(fs.existsSync(reportFile), 'EVOLVE 报告未落盘: ' + reportFile);
+      const reportText = fs.readFileSync(reportFile, 'utf8');
+      const bulletProblems = evolveReportBulletProblems(reportText);
+      assertEqual(bulletProblems.length, 0, 'EVOLVE 报告列表符号: ' + bulletProblems.join(' | '));
+      assertTrue(reportText.includes('- [2026-10-02-report#1] → `.specs/CONTEXT.md`「既有抽象索引」'),
+        '报告缺应用项的父条目行: ' + JSON.stringify(reportText.slice(reportText.indexOf('## 应用 patch'))));
+      assertTrue(reportText.includes('  - 报告条目夹具 · 来源 @.specs/archive/2026-10-02-report/DESIGN.md'),
+        '报告条目行不是单一列表符号: ' + JSON.stringify(reportText.slice(reportText.indexOf('## 应用 patch'))));
+      // 判别力（合成变异驱动同一判据）：把双符号灌回真实报告 → 必报
+      const regressed = reportText.replace('  - 报告条目夹具', '  - - 报告条目夹具');
+      assertTrue(regressed !== reportText, '反向构造前提不成立（报告缺条目行）');
+      assertTrue(evolveReportBulletProblems(regressed).length > 0, '双列表符号未被判违规（判别力缺失）');
+    },
+  },
+
+  // 305: 收尾打磨之三——`health` 的「技术债表项数」复现命令此前硬编码 H3（`/^### 技术债/`），
+  // 而同一项的判据把段标题层级放宽到二~四级：`## 技术债` 的项目照抄命令复现不出报告读数
+  // （读数说 0，其实段在场有表项）——命令与判据各说一套。断言面：命令的层级取自文档里**真实
+  // 命中**的标题（H2 / H3 / H4 三态逐态），段缺席时退回判据的层级区间；H3 形态与修复前逐字等价。
+  {
+    name: '305 health 技术债复现命令按判据动态取段级：H2/H4 随文档 · 段缺席退回区间 · H3 逐字等价',
+    run: (dir) => {
+      const withDebt = (heading) => contextFixtureText()
+        + '\n' + heading + '（夹具技术债）\n\n| 项 | 说明 |\n|---|---|\n| 债 A | 说明 A |\n| 债 B | 说明 B |\n';
+      const reproLine = (levelToken) => "- 复现命令：`sed -n '/^" + levelToken
+        + " 技术债/,/^---/p' .specs/CONTEXT.md | grep -c '^|'`（含表头与分隔行，减去 2 即表项数）";
+
+      for (const [label, heading, token] of [['H3', '### 技术债', '###'], ['H2', '## 技术债', '##'], ['H4', '#### 技术债', '####']]) {
+        const root = path.join(dir, label.toLowerCase());
+        writeFile(root, '.specs/CONTEXT.md', withDebt(heading));
+        writeFile(root, '.specs/LESSONS.md', '# LESSONS\n\n### L-001 首条\n');
+        const res = runSideScript(SIDE_HEALTH, ['--root', root, '--stdout'], dir);
+        assertExit(res, 0);
+        assertOut(res, '- 表项数：2');
+        assertOut(res, reproLine(token));
+        if (token !== '###') assertNotOut(res, reproLine('###'));
+      }
+
+      // 段缺席：没有可取的层级 → 退回判据的层级区间（二~四级）形态；读数仍为 0（复现命令成立）
+      const absentRoot = path.join(dir, 'absent');
+      writeFile(absentRoot, '.specs/CONTEXT.md', contextFixtureText());
+      writeFile(absentRoot, '.specs/LESSONS.md', '# LESSONS\n\n### L-001 首条\n');
+      const absent = runSideScript(SIDE_HEALTH, ['--root', absentRoot, '--stdout'], dir);
+      assertExit(absent, 0);
+      assertOut(absent, '- 表项数：0');
+      assertOut(absent, reproLine('#\\{2,4\\}'));
+    },
+  },
+
+  // 306: 验收条款子句的机检锚——「确定性层**每项**都带可复现命令」。此前该子句只由「state 字节
+  // 零改写」间接代表（评审记为锚偏弱）：报告里说「逐项带计数与判据」，但「每项都有复现命令」
+  // 无人核。断言面：确定性层逐项都有 `- 复现命令：` 行（非仓库态与真实 git 仓库态两态）+ 逐项
+  // 抽掉该项的复现命令 → 每抽一次必报（判据不是只看第一项）。
+  {
+    name: '306 health 确定性层每项带复现命令：逐项机检 + 逐项抽掉必报 + git 两态覆盖',
+    run: (dir) => {
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeFile(dir, '.specs/LESSONS.md', '# LESSONS\n\n### L-001 首条\n');
+      const plain = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir);
+      assertExit(plain, 0);
+      assertOut(plain, '### 5 · 版本历史统计（git）');
+      const plainProblems = deterministicReproProblems(plain.output);
+      assertEqual(plainProblems.length, 0, '确定性层缺复现命令: ' + plainProblems.join(' | '));
+
+      // 逐项判别力（合成变异驱动同一判据）：确定性子集逐项各抽掉一次复现命令 → 每次都必报
+      const rows = plain.output.split('\n');
+      const starts = rows.map((line, i) => (line.startsWith('### ') ? i : -1)).filter((i) => i >= 0);
+      assertTrue(starts.length >= 5, '确定性层分项数不足（判据无从覆盖）: ' + starts.length);
+      for (const start of starts) {
+        const nextStart = rows.findIndex((line, i) => i > start && line.startsWith('### '));
+        const stop = nextStart < 0 ? rows.length : nextStart;
+        const at = rows.findIndex((line, i) => i > start && i < stop && line.startsWith('- 复现命令：'));
+        assertTrue(at >= 0, '确定性项缺复现命令: ' + rows[start]);
+        const mutated = [...rows.slice(0, at), ...rows.slice(at + 1)].join('\n');
+        assertTrue(deterministicReproProblems(mutated).length > 0,
+          '抽掉该项复现命令未被判违规（判别力缺失）: ' + rows[start]);
+      }
+
+      // git 在场态：另起一个真实仓库根（`git init`）→ 第 5 项走「是」分支，同样带复现命令
+      const repoRoot = path.join(dir, 'repo-root');
+      writeFile(repoRoot, '.specs/CONTEXT.md', contextFixtureText());
+      writeFile(repoRoot, '.specs/LESSONS.md', '# LESSONS\n\n### L-001 首条\n');
+      execFileSync('git', ['init', '-q'], { cwd: repoRoot, stdio: 'ignore' });
+      const inRepo = runSideScript(SIDE_HEALTH, ['--root', repoRoot, '--stdout'], dir);
+      assertExit(inRepo, 0);
+      assertOut(inRepo, '- git 仓库：是');
+      const repoProblems = deterministicReproProblems(inRepo.output);
+      assertEqual(repoProblems.length, 0, 'git 在场态确定性层缺复现命令: ' + repoProblems.join(' | '));
+    },
+  },
+
+  // 307: 覆盖声明四要素机检锚（评审登记的移交项）——三处「上游 vendored 只读」覆盖声明此前是
+  // **纯文本、无机检**。四要素：① 上游文件标记为只读基准（且点名的上游文件真实在场）；
+  // ② 「不采用」栏 ≥1 条；③ 「沿用上游」栏 ≥1 条（入口为**指针式** → 该栏豁免，细则在各自技能册）；
+  // ④ 「以…为准」兜底语。负向控制：把任一要素从**真实文本**里抽掉 → 必红。
+  {
+    name: '307 上游覆盖声明四要素：三处声明齐备 + 点名上游实体在场 + 逐要素抽掉必红',
+    run: () => {
+      const skillsRoot = skillsRootForScriptsDir(__dirname);
+      const declarations = [
+        { label: 'flow-comet-health/SKILL.md', file: path.join(skillsRoot, 'flow-comet-health', 'SKILL.md'), pointer: false },
+        { label: 'flow-comet-evolve/SKILL.md', file: path.join(skillsRoot, 'flow-comet-evolve', 'SKILL.md'), pointer: false },
+        { label: 'flow-comet/SKILL.md', file: path.join(skillsRoot, 'flow-comet', 'SKILL.md'), pointer: true },
+      ];
+      for (const declaration of declarations) {
+        const text = fs.readFileSync(declaration.file, 'utf8');
+        const problems = overrideDeclarationProblems(declaration.label, text, { pointer: declaration.pointer });
+        assertEqual(problems.length, 0, '覆盖声明四要素: ' + problems.join(' | '));
+
+        // 逐要素抽掉（真实文本驱动同一判据）：该要素必报——判据不恒真空过。
+        // 兜底语取**声明块内**的匹配（文件里别处的 `冲突…以文件为准` 一类行文不是该要素，
+        // 抽错目标会让判别力断言变成假绿）。
+        const probes = [
+          { element: '只读基准', strip: (value) => value.replaceAll('只读基准', '（反向构造：抽掉）') },
+          { element: '不采用栏', strip: (value) => value.replaceAll('不采用', '（反向构造：抽掉）') },
+          {
+            element: '兜底语',
+            strip: (value) => {
+              const blockFallback = OVERRIDE_FALLBACK_RE.exec(overrideDeclarationBlock(value));
+              return value.replace(blockFallback[0], '（反向构造：抽掉）');
+            },
+          },
+        ];
+        if (!declaration.pointer) {
+          probes.push({ element: '沿用上游栏', strip: (value) => value.replaceAll('沿用上游', '（反向构造：抽掉）') });
+        }
+        for (const probe of probes) {
+          const stripped = probe.strip(text);
+          assertTrue(stripped !== text, '反向构造前提不成立（文本缺该要素）: ' + declaration.label + ' / ' + probe.element);
+          assertTrue(overrideDeclarationProblems(declaration.label, stripped, { pointer: declaration.pointer })
+            .some((problem) => problem.includes(probe.element.replace(/栏$/, '')) || problem.includes('兜底语')),
+            '抽掉要素未被判违规（判别力缺失）: ' + declaration.label + ' / ' + probe.element);
+        }
+      }
+
+      // 点名的上游实体真实在场：vendored 上游面结构性缺席时输出可见 SKIP（未验证 ≠ 通过）。
+      // 取「声明块内」点名的路径——文件别处的说明性写法（`flow-kit/prompts/<阶段>.md` 占位）
+      // 不是本声明的落点。
+      const promptsRoot = path.join(REPO_ROOT, 'flow-kit', 'prompts');
+      if (fs.existsSync(promptsRoot)) {
+        for (const declaration of declarations) {
+          const block = overrideDeclarationBlock(fs.readFileSync(declaration.file, 'utf8'));
+          const paths = upstreamArtifactPaths(block);
+          assertTrue(paths.length > 0, declaration.label + ' 未点名任何上游工件（声明的锚缺落点）');
+          for (const rel of paths) {
+            assertTrue(fs.existsSync(path.join(REPO_ROOT, rel)),
+              declaration.label + ' 点名的上游文件不存在（锚指向幽灵实体）: ' + rel);
+          }
+        }
+      } else {
+        console.log('SKIP: 307 的上游实体面（flow-kit/prompts 为 vendored 上游面，可能结构性缺席）'
+          + '——本次检出未校验「覆盖声明点名的上游文件真实在场」，请在 vendored 上游在场处重跑本套件');
       }
     },
   },

@@ -20,7 +20,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 ### Changed
 
 - **The UI-DESIGN binding is enforced rather than advisory**: the design node's `flow-comet-ui-design` binding is `guarded`, and a structural criterion decides whether it applies — the visual-tone section counts as not applicable only when the not-applicable marker stands alone on its own line, leads a line, or sits in the value position of an applicability label, and ends on a word boundary, with the matched snippet echoed. A frontend change must load the skill, declare it and produce the UI-DESIGN artifact, while a non-frontend change prints a visible skip and needs neither; earlier changes keep the gradual warning. The shipped skill texts, the entry skill's bindings table and the entry guidance page all state the same level. **This is a behavior change for frontend changes: the design exit blocks until the artifact and the declaration are in place, and the recovery paths are printed with the block.**
-- **The two-tier regression baseline moved up with the new coverage**: the self-test suite now records 302 scenarios and the system test suite 92 items, and both counts stay machine-checked across the release surfaces.
+- **The two-tier regression baseline moved up with the new coverage**: the self-test suite now records 307 scenarios and the system test suite 92 items, and both counts stay machine-checked across the release surfaces.
 
 ## [1.6.1] - 2026-10-02
 

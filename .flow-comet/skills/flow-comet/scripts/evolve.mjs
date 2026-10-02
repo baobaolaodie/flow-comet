@@ -486,15 +486,26 @@ function fieldLine(key, value) {
   return '- **' + key + '**: `' + value + '`';
 }
 
+// 文件末尾追加「块」：`split('\n')` 对**以换行收尾**的文档留有一个零长度哨兵元素——它不是文档里的
+// 一行，而是「最后一行终结符」的占位。直接在哨兵之后 push 会拼出一条**裸 LF 空行**：CRLF 文档里
+// 同一文件出现两种行尾（评审实测 `-->\r\n\n\r\n---`），且末行终结符退化成一个孤立的 `\r`。
+// 追加前摘下哨兵、追加后放回 —— 整篇行尾一致，末尾换行约定不变（LF 文档同样收敛为**单空行**）。
+function appendBlock(lines, eol, blockLines) {
+  const sentinel = lines.length > 0 && lines[lines.length - 1] === '' ? lines.pop() : null;
+  for (const line of blockLines) lines.push(line + eol);
+  if (sentinel !== null) lines.push(sentinel);
+}
+
 // 双落点之段侧：在场则就地更新三字段，缺席则新建成段（段为可选段，缺席不报错）。eol = 文档行尾约定
 function upsertEvolveSection(lines, ts, scanner, eol = '') {
   const fields = [[STATE_KEY, ts], [SCANNER_FIELD, scanner], [SUGGESTION_FIELD, nextSuggestion()]];
   const section = findSection(lines, EVOLVE_SECTION, 2);
   if (!section) {
     const lastText = [...lines].reverse().find((line) => line.trim() !== '') ?? '';
-    if (lastText.trim() !== '---') lines.push(eol, '---' + eol);
-    lines.push(eol, '## ' + EVOLVE_SECTION + eol, eol,
-      ...fields.map(([key, value]) => fieldLine(key, value) + eol), eol);
+    const block = [];
+    if (lastText.trim() !== '---') block.push('', '---');
+    block.push('', '## ' + EVOLVE_SECTION, '', ...fields.map(([key, value]) => fieldLine(key, value)));
+    appendBlock(lines, eol, block);
     return;
   }
   const missing = [];
@@ -565,7 +576,9 @@ function reportBlocks(plan, ts, requested, applied, present) {
   } else {
     for (const candidate of applied) {
       lines.push('- [' + candidate.id + '] → `' + candidate.doc + '`「' + candidate.label + '」');
-      lines.push('  - ' + candidateEntry(candidate));
+      // 条目文本自带列表符号（candidateEntry 的 `- ` 前缀）——这里只加**缩进**，不再叠一层 `- `：
+      // `  - - <条目>` 会被 Markdown 渲染成「空壳父项 + 子项」两条，报告读者数不清应用了几条。
+      lines.push('  ' + candidateEntry(candidate));
     }
   }
   lines.push('', '## 跳过项 + 理由', '');
