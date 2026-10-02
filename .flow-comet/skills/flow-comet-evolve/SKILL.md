@@ -9,6 +9,8 @@ description: "Use only when explicitly invoked as /flow-comet-evolve; scan archi
 
 用户说「同步架构 / 整理沉淀 / evolve / 同步 CONTEXT」。本命令**只按显式调用与用户意图触发**——到期提示是提醒，不是自动加载条件。
 
+**覆盖声明（上游 vendored 只读）**：上游对应物 = `flow-kit/prompts/A-evolve.md`（只读基准，不修改）。**以下上游语义不采用**：① 载体 = 仓库根 `STATE.md` 的 `last_evolve_at` / `last_evolve_promoted` → 本仓载体 = **引擎 state**（`last_evolve_at`）+ `.specs/CONTEXT.md` 的 `## evolve 元数据` 段（本仓 `docs/internal/ARCHITECTURE.md` §六明确**不吸收** STATE.md 式跨会话状态跟踪）；② 已扫 change 清单写回 `STATE.md` 数组 → 本仓写进 `.specs/evolve/<日期>-EVOLVE.md` 报告，**不进 state**。**沿用上游**：只扫 `DESIGN.md` §9、逐项人工确认、禁止批量 promote、报告落 `.specs/evolve/`、60 天 / ≥5 个带沉淀段 change 的建议阈值。`## evolve 元数据` 段的**段形权威 = `flow-kit/templates/CONTEXT.md`**（`## intel-scan 元数据` 为同源先例；校验实现在 `context-init.mjs`）。本命令语义与产物形态**以本节为准**。
+
 **到期提示（引擎输出面）**：`node .claude/skills/flow-comet/scripts/workflow-state.mjs status` 在下列任一条件成立时输出一行 `EVOLVE-DUE:`（含上次沉淀时间、命中原因与「建议显式调用 evolve」指引）：`last_evolve_at` 距今 > 60 天，或该时刻之后新增 ≥ 5 个带 `§9` 的归档 change。未达阈值**不输出**（零噪音）；`last_evolve_at` 缺席（从未沉淀过）同样不提示——需要时手动跑本命令即可。
 
 ## 时间戳载体：引擎 state（不使用 STATE.md）

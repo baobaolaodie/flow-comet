@@ -11,6 +11,14 @@ description: "Use only when explicitly invoked as /flow-comet-health; periodic c
 
 **只按显式调用触发**：本命令不属于 8 节点流程，不被节点路由进入，也不在流程里自动跑（路由里的到期提示指向的是架构沉淀命令，不是本命令）。
 
+**覆盖声明（上游 vendored 只读）**：上游对应物 = `flow-kit/prompts/M-health.md`（只读基准，不修改）。
+
+**沿用上游**：① 不属于任何 change、不写 `CHANGE.md` / `REQUIREMENT.md`，直接产出健康报告；② 角色边界 = 只产报告 + 改造建议清单，不直接改代码；③ 报告落点 `.specs/health/<YYYY-MM-DD>-HEALTH.md`；④ 装了 `brooks-lint` 时走其体检并把结果并入报告（本仓作为**可选增补层**并入**同一份**报告并标注来源）；⑤ 冗余巡检**优先用工具**（`jscpd` / `knip` / `vulture` 等）并在报告里记明工具落点；⑥ 报告含**技术债优先级（Pain × Spread）**维度。
+
+**以下上游语义不采用**：① 由 agent 现场巡检产出定性结论 → 本仓改为**确定性收集器**（脚本采集可复现项，每项带计数与复现命令）；② 自动改写 `.specs/CONTEXT.md` 技术债段 / 自动开 change → 本仓**只读**（仅写体检报告，不改 CONTEXT、不开 change）；③ 无可选工具时以主观评分填空 → 本仓**显式降级声明**，不产出替代性评分；④ 未装工具时走「现场 grep 抓样」的低精度回退 → 本仓**直接记降级原因**，不产出替代性读数。
+
+本命令语义与报告形态**以本节为准**。
+
 ## 分层结构（防「绿报告」）
 
 一份报告三层，落在同一个文件 `.specs/health/<日期>-HEALTH.md`：

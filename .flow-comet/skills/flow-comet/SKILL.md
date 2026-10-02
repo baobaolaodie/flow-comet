@@ -77,7 +77,7 @@ description: "Use when the user wants the flow-comet managed workflow for flow-k
 
 ## 侧命令（横向命令 · 不进 8 节点流程）
 
-随包分发的三条**侧命令**不属于 8 节点流程：不参与节点路由，不被 `entry` / `exit` 门禁校验，也不会在流程里自动触发——一律由用户**显式调用**，涉及写入的动作要**人工逐项确认**。用户表达下列意图时，**不要** `init` 新 change、**不要** `entry` / `exit` 任何节点，直接加载对应技能并按其协议执行：
+随包分发的三条**侧命令**不属于 8 节点流程：不参与节点路由，不被 `entry` / `exit` 门禁校验，也不会在流程里自动触发——一律由用户**显式调用**，涉及写入的动作要**人工逐项确认**。**上游对应物（只读基准，不修改）**：`flow-kit/prompts/{A-evolve,M-health,I-intel-scan}.md`——三条命令均已按本仓语义**显式覆盖**上游表述（载体、产物落点、执行形态），**冲突处以各自技能册的「覆盖声明」与引擎实现为准**。用户表达下列意图时，**不要** `init` 新 change、**不要** `entry` / `exit` 任何节点，直接加载对应技能并按其协议执行：
 
 | 命令 | 触发词（用户怎么说） | 用途 | 落盘产物 | 技能 |
 |------|---------------------|------|---------|---------|
@@ -100,6 +100,7 @@ node .claude/skills/flow-comet/scripts/context-scan.mjs [--root <项目根>] [--
 - **不进 change 生命周期**：不写 `currentNode` / `completedNodes` / 节点证据，不替代任何节点产出。`evolve` 落 `last_evolve_at`、`context-scan` 落 `last_intel_scan`，两者都是**项目级元数据**，不是流程进展。
 - **人工确认不可跳过**：`evolve` 的候选必须逐条 review 后才 `apply`，禁止一次性整批写入；`health` 只出报告与建议，是否立项由用户决定，它自己不开 change。
 - **到期提示**：`node .claude/skills/flow-comet/scripts/workflow-state.mjs status` 在 `last_evolve_at` 距今 > 60 天，或该时刻之后新增 ≥ 5 个带 `§9` 的归档 change 时，输出一行 `EVOLVE-DUE:`（含上次沉淀时间与「建议显式调用 evolve」指引）；未达阈值**零输出**（从未跑过 evolve、无该字段的项目同样不提示）。提示只是提醒——不自动加载也不自动执行 `evolve`，是否同步由用户决定。
+- **时间纪律（侧命令的产物与判断同一口径）**：人可见时间戳一律**本地时间 + 显式偏移**（`YYYY-MM-DDTHH:mm:ss±HH:mm`；生成走 `time-utils.mjs` 单一权威，禁裸 `new Date()` 拼接）；时间**比较一律 `Date.parse` 差值**（兼容历史 `Z` 形态，禁字符串字典序、禁目测字形）；**判活与判时以文件 mtime 或 git 时间为准，`date` 与代理注册表不作基准**（归档窗口另取归档目录名的日期前缀）。这三条已写入**验证阶梯**的「环境 / 过程纪律」条，侧命令的报告、基线与到期判定都按它执行。
 
 ## Workflow Nodes
 
@@ -131,7 +132,7 @@ node .claude/skills/flow-comet/scripts/context-scan.mjs [--root <项目根>] [--
 
 **新 change 严格模式**：`init` 创建的 change 标记为"新"（`newChange: true`）——新 change 下全部内容级检查强制 BLOCKED（处置标记/缓存证据/波次散文/越权委托/SUMMARY 完整性/进入证据等）；旧 change（历史遗留,无标记）保持渐进 WARN。执行者可通过 `status` 确认当前 change 的新旧。
 
-> **design 行绑定的前端适用性**：`flow-comet-ui-design` 与协议一致为 `guarded`，但只对**前端 change** 适用——前端项目须先用 Skill 工具加载该技能，再运行 `skill-load design flow-comet-ui-design --prompt flow-kit/prompts/2a-ui-design.md` 建标记，并在 record 载荷带 `required-skill:design.flow-comet-ui-design`（design 出口不再自动补写该条目，缺工件或缺声明即 BLOCKED 并给出恢复路径）；非前端项目不加载、不声明，出口打印可见的 `UI-DESIGN: skipped（非前端）` 后放行；旧 change 保持渐进，缺件仅 WARN。前端判据是结构级的：`CHANGE.md` 的「视觉调性」段在场且段内未标注「不适用」。
+> **design 行绑定的前端适用性**：`flow-comet-ui-design` 与协议一致为 `guarded`，但只对**前端 change** 适用——前端项目须先用 Skill 工具加载该技能，再运行 `skill-load design flow-comet-ui-design --prompt flow-kit/prompts/2a-ui-design.md` 建标记，并在 record 载荷带 `required-skill:design.flow-comet-ui-design`（design 出口不再自动补写该条目，缺工件或缺声明即 BLOCKED 并给出恢复路径）；非前端项目不加载、不声明，出口打印可见的 `UI-DESIGN: skipped（非前端）` 后放行；旧 change 保持渐进，缺件仅 WARN。前端判据是**结构级**的：`CHANGE.md` 的「视觉调性」段在场，且段内的「不适用」标记成**结构形态**——该标记**独立行**、居**行首**（可带列表符号 / 引用 / 加粗），或写在适用性类标签（`适用性` / `适用范围` / `是否前端` / `视觉调性` / `前端` / `界面` / `适用`）的**字段值位**；标记之后须成**词形边界**（紧跟空白、标点或行尾），命中即回显**命中片段**自证。段内其它位置顺带提到「不适用」（如「不适用于暗色主题」）不算标注，仍判前端。
 
 **节点技能两层加载模型（入口层 · 双步硬规则）**：路由到节点后，以下两步**都不可跳过**：
 

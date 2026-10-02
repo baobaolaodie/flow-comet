@@ -1196,6 +1196,32 @@ function contextFixtureText() {
 
 // ---------- 系统测试项（A~M 十三类） ----------
 
+// AC-2：EVOLVE 报告的三个子句（`## 扫描范围` / `已扫 change 清单` / `未应用` 记账 + 未应用项段）
+// 判据——纯函数，合成输入可驱动判别力（缺任一子句 → 必报，见 M1 的反向构造）。
+function evolveReportClauseProblems(reportText) {
+  const problems = [];
+  if (!reportText.includes('## 扫描范围')) problems.push('缺「## 扫描范围」段');
+  if (!reportText.includes('- 已扫 change 清单：')) problems.push('缺「已扫 change 清单」行');
+  if (!/未应用 \d+ 条/.test(reportText)) problems.push('缺「未应用 N 条」记账');
+  if (!reportText.includes('## 未应用项')) problems.push('缺「## 未应用项」段');
+  return problems;
+}
+
+// AC-3：`## evolve 元数据` 三字段端到端判据（段在场 + 三字段齐备 + 取值与 state / 本次执行工具一致）。
+function evolveSectionFieldProblems(contextText, ts, scanner) {
+  const section = /## evolve 元数据[\s\S]*?(?=\n## |\s*$)/.exec(contextText);
+  if (section === null) return ['缺 `## evolve 元数据` 段'];
+  const body = section[0];
+  const problems = [];
+  for (const [key, value] of [['last_evolve_at', ts], ['scanner', scanner]]) {
+    const found = new RegExp('- \\*\\*' + key + '\\*\\*: `([^`]*)`').exec(body);
+    if (found === null) problems.push('段内缺字段 ' + key);
+    else if (found[1] !== value) problems.push('段内 ' + key + ' 取值不符: ' + JSON.stringify(found[1]));
+  }
+  if (!/- \*\*下次建议\*\*: `[^`]+`/.test(body)) problems.push('段内缺非空的 `下次建议` 字段');
+  return problems;
+}
+
 const TEST_ITEMS = [
   // ---------- A. 状态机与路由 ----------
 
@@ -6185,6 +6211,10 @@ const TEST_ITEMS = [
     run: (dir) => {
       writeFile(dir, '.specs/archive/2026-09-10-fixture/DESIGN.md',
         '# DESIGN\n\n## 5. 其它段\n\nOTHER-SECTION-MARKER\n\n## 9. 架构沉淀\n\n### 可复用抽象\n\n- 夹具抽象条目（真实链路）\n');
+      // 第二个归档 change 提供第二条候选（同段同类）：AC-2 的「只批准一项 → 其余候选零改动 +
+      // 报告按「未应用 N 条」记账」需要一条**未被批准**的真实候选，否则该子句恒为 0 条。
+      writeFile(dir, '.specs/archive/2026-09-10b-fixture/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n### 可复用抽象\n\n- 未被批准的夹具条目（其余候选零改动）\n');
       writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
       writeState(dir, baseState('open'));
 
@@ -6206,13 +6236,46 @@ const TEST_ITEMS = [
       if (!contextText.includes('来源 @.specs/archive/2026-09-10-fixture/DESIGN.md')) {
         throw new Error('条目缺来源标注');
       }
+      if (contextText.includes('未被批准的夹具条目')) {
+        throw new Error('未批准的候选被写入了目标文档（AC-2「仅该项被写入」被破坏）');
+      }
       const evolveReport = path.join(dir, '.specs', 'evolve', localDate() + '-EVOLVE.md');
       if (!fs.existsSync(evolveReport)) throw new Error('EVOLVE 报告未落盘: ' + evolveReport);
+
+      // AC-2 报告子句（此前只断言「报告存在」）：扫描范围 + 已扫 change 清单 + 未应用记账。
+      const reportText = fs.readFileSync(evolveReport, 'utf8');
+      const clauseProblems = evolveReportClauseProblems(reportText);
+      assertEqual(clauseProblems.length, 0, 'EVOLVE 报告缺 AC-2 声明的子句: ' + clauseProblems.join(' | '));
+      assertTrue(reportText.includes('2026-09-10b-fixture'),
+        '报告的「已扫 change 清单」未列出第二个归档 change');
+      assertTrue(reportText.includes('未应用 1 条'), '报告未按「本次应用 1 / 未应用 1」记账');
+      assertTrue(reportText.includes('2026-09-10b-fixture#1'), '「未应用项」段未列出未批准的候选 id');
+      // 判别力（合成输入驱动同一判据）：逐个子句从真实报告里移除 → 必报（判据不恒真空过）
+      for (const clause of ['## 扫描范围', '- 已扫 change 清单：', '## 未应用项']) {
+        const mutated = reportText.replace(clause, '（反向构造：子句被移除）');
+        assertTrue(mutated !== reportText, '反向构造前提不成立（真实报告缺子句）: ' + clause);
+        assertTrue(evolveReportClauseProblems(mutated).length > 0,
+          '报告缺子句未被判违规（判别力缺失）: ' + clause);
+      }
+
       const state = readStateFile(dir);
       if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/.test(String(state.last_evolve_at))) {
         throw new Error('双落点 state 侧形态非法: ' + JSON.stringify(state.last_evolve_at));
       }
       if (!contextText.includes(state.last_evolve_at)) throw new Error('双落点取值不一致（段侧与 state）');
+      // AC-3 三字段端到端（此前只断言时间戳一个）：段在场 + `last_evolve_at` / `scanner` /
+      // `下次建议` 齐备且取值与 state、本次执行工具一致。
+      const fieldProblems = evolveSectionFieldProblems(contextText, state.last_evolve_at, 'flow-comet-evolve');
+      assertEqual(fieldProblems.length, 0, 'AC-3 三字段端到端: ' + fieldProblems.join(' | '));
+      // 判别力（合成输入驱动同一判据）：三字段各自移除 / 取值写错 → 必报
+      const withoutField = contextText.replace(/- \*\*下次建议\*\*: `[^`]*`\n/, '');
+      assertTrue(withoutField !== contextText, '反向构造前提不成立（段内无「下次建议」字段）');
+      assertTrue(evolveSectionFieldProblems(withoutField, state.last_evolve_at, 'flow-comet-evolve').length > 0,
+        '段内缺「下次建议」字段未被判违规');
+      assertTrue(evolveSectionFieldProblems(contextText, state.last_evolve_at, 'other-scanner').length > 0,
+        '段内 scanner 取值与本次执行工具不符未被判违规');
+      assertTrue(evolveSectionFieldProblems(contextText.replace('## evolve 元数据', '## 其它段'),
+        state.last_evolve_at, 'flow-comet-evolve').length > 0, '段缺席未被判违规');
 
       const again = runSideScript(SIDE_EVOLVE, ['apply', '2026-09-10-fixture#1', '--root', dir], dir);
       assertExit(again, 0);
@@ -6364,6 +6427,41 @@ const TEST_ITEMS = [
       assertExit(passed, 0);
       assertOut(passed, 'ALL CHECKS PASSED');
       assertNotOut(passed, 'UI-DESIGN: skipped');
+
+      // AC-10 的「跳过」半（此前只在 L1）：第二个 change 走完整真实命令链路到 design 出口——
+      // ① fail-open 反向控制：段内自然句子「不适用于暗色主题…」不是结构形态 → 仍判前端、缺件 BLOCKED；
+      // ② 结构形态（`适用性` 标签的字段值位）→ 可见跳过 + 命中片段回显，且不要求工件与该声明。
+      const nfChange = CHANGE_ID + '-nf';
+      const nfChangeFile = path.join(dir, '.specs', nfChange, 'CHANGE.md');
+      assertExit(runState(['init', nfChange, '--init-skip'], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
+      writeIntakeArtifacts(dir, nfChange);
+      fs.appendFileSync(nfChangeFile,
+        '\n## 视觉调性（Visual Tone）\n\n不适用于暗色主题，本 change 仅覆盖浅色分支。\n');
+      assertExit(runState(['record', 'open', '{"summary":"intake complete"}'], dir), 0);
+      assertExit(runGuard(['entry', 'open'], dir), 0);
+      assertExit(runGuard(['exit', 'open', '--apply'], dir), 0);
+      assertExit(runState(['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md'], dir), 0);
+      writeFile(dir, '.specs/' + nfChange + '/DESIGN.md',
+        '# DESIGN\n\n- **Change ID**: ' + nfChange + '\n\n## 0. 技术栈选定\n\nNode.js(ESM)\n\n## 决策清单\n\n- [ ] 循环路由\n');
+      assertExit(runState(['record', 'design', '{"summary":"design done"}'], dir), 0);
+      assertExit(runGuard(['entry', 'design'], dir), 0);
+
+      const failOpen = runGuard(['exit', 'design'], dir);
+      assertExit(failOpen, 1);
+      assertOut(failOpen, 'BLOCKED: design 出口缺 UI-DESIGN.md');
+      assertNotOut(failOpen, 'UI-DESIGN: skipped');
+
+      // 恢复：改段为结构形态（`- 适用性：不适用（…）`）→ 同一 change 出口放行并回显命中片段
+      writeFile(dir, '.specs/' + nfChange + '/CHANGE.md',
+        '# CHANGE\n\n- **Change ID**: ' + nfChange + '\n\n## Why（为什么做）\n\n变更目标。\n\n'
+        + '## 视觉调性（Visual Tone）\n\n- 适用性：不适用（CLI 工具，无用户可见界面）\n');
+      const skipped = runGuard(['exit', 'design', '--apply'], dir);
+      assertExit(skipped, 0);
+      assertOut(skipped, 'UI-DESIGN: skipped（非前端）');
+      assertOut(skipped, '命中片段: - 适用性：不适用（CLI 工具，无用户可见界面）');
+      assertNotOut(skipped, 'required-skill:design.flow-comet-ui-design');
+      assertNotOut(skipped, 'BLOCKED');
     },
   },
 
@@ -6404,6 +6502,29 @@ const TEST_ITEMS = [
       assertOut(scan, 'after-baseline#1');
       assertNotOut(scan, 'before-baseline#');
       assertNotOut(scan, '无基线（首次运行，全量扫描）');
+
+      // AC-18 的第二个触发因（该时刻之后新增 ≥ 5 个带 §9 的归档 change）——同一条真实 `status` 链路：
+      // 基线换成新鲜值（未达天数阈值）→ 其后补 5 个带 §9 的归档 change → 提示改按新增数给出；
+      // 取走一个（4 个）→ 回到静默（零噪音）。基线换值仍走 `config set` 唯一写通道。
+      const freshBaseline = formatStamp(new Date(Date.now() - 30 * dayMs));
+      const setFresh = runState(['config', 'set', 'last_evolve_at', freshBaseline], dir);
+      assertExit(setFresh, 0);
+      assertOut(setFresh, 'CONFIG: last_evolve_at = ' + freshBaseline);
+      const freshStatus = runState(['status'], dir);
+      assertExit(freshStatus, 0);
+      assertNotOut(freshStatus, 'EVOLVE-DUE'); // 天数阈值未达 + 新基线之后新增 0（既有两条归档早于它）
+      const countArchive = (offset) => dateDaysAgo(30 - offset) + '-count-' + offset;
+      for (let offset = 1; offset <= 5; offset += 1) {
+        writeFile(dir, '.specs/archive/' + countArchive(offset) + '/DESIGN.md',
+          '# DESIGN\n\n## 9. 架构沉淀\n\n- 计数触发条目 ' + offset + '\n');
+      }
+      const byCount = runState(['status'], dir);
+      assertExit(byCount, 0);
+      assertOut(byCount, 'EVOLVE-DUE: 上次架构沉淀 ' + freshBaseline);
+      assertOut(byCount, '其后新增 5 个带 §9 的归档 change，达阈值 5 个');
+      assertEqual(parseStatusOutput(dir).status, 'running', '按新增数提示时 status 的 JSON 块解析');
+      fs.rmSync(path.join(dir, '.specs', 'archive', countArchive(5)), { recursive: true, force: true });
+      assertNotOut(runState(['status'], dir), 'EVOLVE-DUE');
     },
   },
 

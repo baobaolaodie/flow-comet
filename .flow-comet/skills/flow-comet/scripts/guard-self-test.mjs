@@ -2329,17 +2329,87 @@ function fingerprintChanges(before, after) {
 }
 
 // 定义处计数：某名字在本脚本同级目录（引擎脚本目录）内的定义次数——单源结构锚用
-function engineDefinitionHits(name) {
+// 定义面扫描（默认引擎脚本目录）。root 是可测性接缝：使「同名第二份定义 → 检出 2 处」能在合成
+// 目录上被场景驱动（场景 277 的反向构造），否则该判据只能靠人工实验证明判别力。
+function engineDefinitionHits(name, root = __dirname) {
   const pattern = new RegExp('(?:export\\s+)?(?:async\\s+)?function\\s+' + name + '\\b'
     + '|(?:export\\s+)?const\\s+' + name + '\\s*=', 'g');
   const hits = [];
-  for (const file of fs.readdirSync(__dirname).sort()) {
+  for (const file of fs.readdirSync(root).sort()) {
     if (!file.endsWith('.mjs')) continue;
-    const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
+    const text = fs.readFileSync(path.join(root, file), 'utf8');
     const count = (text.match(pattern) ?? []).length;
     if (count > 0) hits.push({ file, count });
   }
   return hits;
+}
+
+// 时间单源**消费面**判据（场景 277 使用；纯函数 + 合成输入可驱动）：每个符号必须同时满足
+// 「具名 import 自 time-utils.mjs」与「真实调用」才算真实消费。旧判据只看 `name + '('` 的子串——
+// 消费脚本里内联一份同名实现即可满足（判据被本地影子实现骗过），故必须查 import 来源。
+function timeSingleSourceConsumerProblems(text, symbols, file = '') {
+  const problems = [];
+  const prefix = file === '' ? '' : file + ' ';
+  for (const symbol of symbols) {
+    if (!hasNamedImport(text, './time-utils.mjs', symbol)) {
+      problems.push(prefix + '未从 time-utils.mjs 具名 import ' + symbol
+        + '（单源纪律：不得在消费脚本内联同名第二份实现）');
+    }
+    if (!text.includes(symbol + '(')) {
+      problems.push(prefix + '未真实消费 ' + symbol + '（单一权威应被调用）');
+    }
+  }
+  return problems;
+}
+
+// 前端判据**散文口径**判据（场景 286 使用；纯函数 + 合成输入可驱动）：引擎侧判据已升为结构形态
+// （独立行 / 行首 / 适用性标签的字段值位 + 词形边界 + 命中片段回显），五份分发文本是它的散文副本——
+// 副本必须陈述**结构形态**，不得残留旧口径（「段内不含 / 未标注字面『不适用』」这类把判据说成
+// 段内任意位置子串的表述，正是「一处措辞即关闸」fail-open 的文字版）。返回问题描述数组。
+const FRONTEND_CRITERION_STRUCTURE_GROUPS = [
+  ['独立行', '独占一行'],
+  ['行首'],
+  ['字段值位'],
+  ['词形边界'],
+  ['命中片段', '回显'],
+];
+// 旧口径的**显式措辞**（逐条对应改前的真实句子，收窄到这些形态以免误伤新口径的正常行文）。
+const FRONTEND_CRITERION_STALE_PROSE_RES = [
+  /段内\s*\*{0,2}(?:不含|不包含|未含|不得含|不得出现)\*{0,2}\s*(?:字面\s*)?「?不适用」?/,
+  /段内\s*\*{0,2}(?:标注|标记)\*{0,2}\s*「?不适用」?\s*(?:两个)?字面/,
+  /未标注\s*「不适用」/,
+  /不含\s*字面\s*「不适用」/,
+];
+function frontendCriterionProseProblems(label, text) {
+  const problems = [];
+  for (const group of FRONTEND_CRITERION_STRUCTURE_GROUPS) {
+    if (!group.some((token) => text.includes(token))) {
+      problems.push(label + ' 未陈述结构形态「' + group[0] + '」（散文副本须与引擎的结构判据同口径）');
+    }
+  }
+  for (const re of FRONTEND_CRITERION_STALE_PROSE_RES) {
+    const hit = re.exec(text);
+    if (hit !== null) problems.push(label + ' 残留旧口径表述: ' + JSON.stringify(hit[0]));
+  }
+  return problems;
+}
+
+// 时间纪律四条硬规则的**文本判据**（场景 302 使用；纯函数 + 合成输入可驱动）：入参是承载该纪律的
+// 文本（入口技能 / 验证阶梯），按规则逐条检查关键词组合；返回问题描述数组（空数组 = 四条齐备）。
+// 判别力由场景内的逐条移除构造常驻证明（移掉任一条的关键词 → 必报），不依赖人工实验。
+const TIME_DISCIPLINE_RULES = [
+  ['规则① 时间戳一律本地时间 + 显式偏移', ['本地时间 + 显式偏移']],
+  ['规则② 比较一律 Date.parse 差值', ['Date.parse']],
+  ['规则③ 判活 / 判时以 mtime 或 git 时间为准、date 不作基准', ['mtime', 'git 时间', '不作基准']],
+  ['规则④ 纪律已写入验证阶梯', ['验证阶梯']],
+];
+function timeDisciplineTextProblems(label, text) {
+  const problems = [];
+  for (const [rule, tokens] of TIME_DISCIPLINE_RULES) {
+    const missing = tokens.filter((token) => !text.includes(token));
+    if (missing.length > 0) problems.push(label + ' 缺 ' + rule + '（缺 ' + missing.join(' / ') + '）');
+  }
+  return problems;
 }
 
 // 具名 import 断言（容忍多行 / 符号重排 / 其它符号共存）：source 为模块说明符（`./state-schema.mjs`）。
@@ -14072,8 +14142,15 @@ const SCENARIOS = [
   },
 
   // 277: 单源结构锚——时间与窗口判据（formatLocalTimestamp / parseTimestamp / hasSection9 /
-  // isArchivedAfterTimestamp）在全引擎**各只有一处定义**，且四个消费脚本一律从 time-utils 取值；
-  // 注释互指不算同步（判据只认定义形态），第二份内联实现必然让本场景变红。
+  // isArchivedAfterTimestamp）在全引擎**各只有一处定义**，且四个消费脚本一律从 time-utils 取值。
+  // 判别力边界（修正旧注释的夸大——「第二份内联实现必然让本场景变红」只在**同名**时成立）：
+  //   ① 定义面按**同名定义**计数：同名第二份实现（函数声明 / const 箭头）即变红；
+  //   ② 消费面按**具名 import 自 time-utils.mjs + 真实调用**判定（不是纯文本存在性）：消费脚本
+  //      内联同名实现顶替导出会变红——旧判据 `text.includes(name + '(')` 会被内联同名实现满足，
+  //      属假绿形态（本锚升级的正是这半边）；
+  //   ③ **不在本锚覆盖内**：与单源导出**不同名**、且消费方仍保留一次真实调用的等价内联实现——
+  //      那类形态由各判据族的形态锚分族承担（如 295 日期前缀 / 298 裸拼接），本锚不冒充覆盖它。
+  // 判别力由两条合成反向构造常驻证明（同名第二份定义 / 未具名 import 的内联实现）。
   {
     name: '277 单源结构锚：时间与窗口判据全引擎各一处定义，四个消费脚本零内联',
     run: () => {
@@ -14092,12 +14169,40 @@ const SCENARIOS = [
       };
       for (const [file, symbols] of Object.entries(consumers)) {
         const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
-        assertTrue(text.includes("from './time-utils.mjs'"),
-          file + ' 未从 time-utils.mjs import（单源纪律：判据不得在本脚本内联第二份）');
-        for (const symbol of symbols) {
-          assertTrue(text.includes(symbol + '('), file + ' 未使用 ' + symbol + '（单一权威应被真实消费）');
-        }
+        const problems = timeSingleSourceConsumerProblems(text, symbols, file);
+        assertEqual(problems.length, 0, '消费面单源违规: ' + problems.join(' | '));
       }
+
+      // 反向构造 ①（合成目录 · 纯函数）：同名第二份定义 → 定义面检出 2（判据不恒真空过）。
+      // 样例经拼接构造，避免套件自身源码携带定义形态字面量而污染真实面计数（本套件同样在扫描面内）。
+      const definitionSample = (name) => 'function ' + name + '(date) { return String(date); }\n';
+      const synthetic = makeTmp();
+      try {
+        writeFile(synthetic, 'single.mjs', definitionSample('formatLocalTimestamp'));
+        assertEqual(engineDefinitionHits('formatLocalTimestamp', synthetic).length, 1, '合成目录单份定义检出数');
+        writeFile(synthetic, 'second.mjs', definitionSample('formatLocalTimestamp'));
+        assertEqual(engineDefinitionHits('formatLocalTimestamp', synthetic).length, 2,
+          '合成目录同名第二份定义检出数（判据须变红）');
+      } finally {
+        cleanupTmpDir(synthetic);
+      }
+
+      // 反向构造 ②（合成文本 · 纯函数）：内联同名实现顶替导出——旧子串判据会放过、本锚必须拒绝；
+      // 另两态证明判据不恒真（具名 import 但零调用 → 必报；具名 import + 真实调用 → 零问题）。
+      // 同一拼接纪律：调用形态的 `name + '('` 可以字面出现（它不是定义形态），定义形态不可。
+      const inlined = 'function ' + 'parseTimestamp(text) {\n  return Date.parse(text);\n}\n'
+        + "parseTimestamp('2026-10-02T10:00:00+08:00');\n";
+      assertTrue(inlined.includes('parseTimestamp('), '反向构造前提不成立：旧子串判据本应命中内联实现');
+      const inlinedProblems = timeSingleSourceConsumerProblems(inlined, ['parseTimestamp'], 'synthetic.mjs');
+      assertTrue(inlinedProblems.some((problem) => problem.includes('未从 time-utils.mjs 具名 import')),
+        '内联同名实现未被判违规（旧判据的假绿形态）: ' + JSON.stringify(inlinedProblems));
+      const importedOnly = "import { parseTimestamp } from './time-utils.mjs';\nconst unused = 1;\n";
+      assertTrue(timeSingleSourceConsumerProblems(importedOnly, ['parseTimestamp'], 'synthetic.mjs')
+        .some((problem) => problem.includes('未真实消费')), '具名 import 但零调用未被判违规');
+      const genuine = "import { parseTimestamp } from './time-utils.mjs';\n"
+        + 'export const instant = (value) => parseTimestamp(value);\n';
+      assertEqual(timeSingleSourceConsumerProblems(genuine, ['parseTimestamp'], 'synthetic.mjs').length, 0,
+        '具名 import + 真实调用不应被判违规');
     },
   },
 
@@ -14485,11 +14590,14 @@ const SCENARIOS = [
   },
 
   // 286: ui-design 强制等级的文本一致性锚——协议 `design.requiredSkillCalls[flow-comet-ui-design]`
-  // 为 `guarded`，四处技能文本（ui-design 技能 / 入口 SKILL / design 节点 SKILL / 入口展开册
-  // GUIDANCE）不得残留 `advisory` 表述且须同时点名该绑定与 `guarded`。等级只在协议里表达一次，
-  // 文本是它的散文副本：副本漂移即红（旧表述「advisory，不要求声明」正是被本锚拦下的形态）。
+  // 为 `guarded`，**五份**技能文本（ui-design 技能 / 入口 SKILL / design 节点 SKILL / 入口展开册
+  // GUIDANCE / change 阶段 SKILL）不得残留 `advisory` 表述且须同时点名该绑定与 `guarded`。等级只在
+  // 协议里表达一次，文本是它的散文副本：副本漂移即红（旧表述「advisory，不要求声明」正是被本锚拦下
+  // 的形态）。另锚**判据散文口径**：五份文本必须陈述引擎收紧后的**结构形态**（独立行 / 行首 /
+  // 适用性标签的字段值位 + 词形边界 + 命中片段回显），不得残留旧口径（「段内不含 / 未标注字面
+  // 『不适用』」——把判据说成段内任意位置子串，是「一处措辞即关闸」fail-open 的文字版）。
   {
-    name: '286 ui-design 强制等级一致性锚：协议 guarded + 四处技能文本零 advisory 残留',
+    name: '286 ui-design 强制等级一致性锚：协议 guarded + 五处技能文本零 advisory 残留 + 结构判据散文口径',
     run: () => {
       const protocol = JSON.parse(fs.readFileSync(SKILL_PROTOCOL_FILE, 'utf8'));
       const designNode = (protocol.nodes ?? []).find((node) => node.id === 'design');
@@ -14504,12 +14612,39 @@ const SCENARIOS = [
         'flow-comet/SKILL.md': path.join(skillsRoot, 'flow-comet', 'SKILL.md'),
         'flow-comet-design/SKILL.md': path.join(skillsRoot, 'flow-comet-design', 'SKILL.md'),
         'flow-comet/GUIDANCE.md': path.join(skillsRoot, 'flow-comet', 'GUIDANCE.md'),
+        'flow-comet-change/SKILL.md': path.join(skillsRoot, 'flow-comet-change', 'SKILL.md'),
       };
       for (const [label, file] of Object.entries(texts)) {
         const text = fs.readFileSync(file, 'utf8');
         assertTrue(!/advisory/i.test(text), label + ' 残留 advisory 等级表述（协议为 guarded）');
         assertTrue(text.includes('guarded'), label + ' 未点名 guarded 等级');
         assertTrue(text.includes('flow-comet-ui-design'), label + ' 未点名 flow-comet-ui-design 绑定');
+        const proseProblems = frontendCriterionProseProblems(label, text);
+        assertEqual(proseProblems.length, 0, '判据散文口径未对齐: ' + proseProblems.join(' | '));
+      }
+      // 反向构造（合成输入驱动同一判据，证明判据不恒真空过）：① 旧口径句逐条注入任一文本 → 必报；
+      // ② 结构词缺一 → 必报；③ 原地加回旧口径的真实文本副本 → 必报（「把旧口径加回任一文本即红」）。
+      const structuralSample = '前端判据是结构级的：独立行 / 行首 / 适用性标签的字段值位三种形态，'
+        + '标记后须成词形边界，命中片段回显。\n';
+      assertEqual(frontendCriterionProseProblems('sample', structuralSample).length, 0,
+        '结构口径样本不应被判违规（判据不恒真）');
+      const staleSamples = [
+        '前端判据是结构级的：`CHANGE.md` 的「视觉调性」段在场且段内未标注「不适用」。',
+        '段在场，段内**不含**字面「不适用」',
+        '非前端项目：在段内标注「不适用」两个字面。',
+      ];
+      for (const stale of staleSamples) {
+        const problems = frontendCriterionProseProblems('sample', structuralSample + stale + '\n');
+        assertTrue(problems.some((problem) => problem.includes('残留旧口径')),
+          '旧口径样本未被判违规: ' + JSON.stringify(stale) + ' → ' + JSON.stringify(problems));
+      }
+      for (const text of Object.values(texts)) {
+        const original = fs.readFileSync(text, 'utf8');
+        const regressed = original.replace('词形边界', '段内未标注「不适用」');
+        assertTrue(regressed !== original, '反向构造前提不成立：' + text + ' 缺「词形边界」字样');
+        assertTrue(frontendCriterionProseProblems('regressed', regressed)
+          .some((problem) => problem.includes('残留旧口径') || problem.includes('未陈述结构形态')),
+          '把旧口径加回真实文本未被判违规: ' + text);
       }
       // 行为口径的散文锚：非前端可见跳过 + 旧 change 渐进（与 285 的行为断言同源）
       const uiDesignSkill = fs.readFileSync(texts['flow-comet-ui-design/SKILL.md'], 'utf8');
@@ -15510,6 +15645,50 @@ const SCENARIOS = [
         assertEqual(inlineBackupHits(synthetic).length, 2, '合成目录第二份实现检出数（判据须变红）');
       } finally {
         cleanupTmpDir(synthetic);
+      }
+    },
+  },
+
+  // 302: AC-11 的四条时间硬规则文本锚（存在级，但**指真实实体**）：① 分发面技能文本（入口 SKILL
+  // 的侧命令「共同边界」）陈述规则 ①②③；② 验证阶梯（docs/internal/WORKING-METHOD.md 一·五 的
+  // 「环境 / 过程纪律·时间」条）承载规则 ①~③ 并落实 ④（纪律已写入阶梯本身）；③ 文本点名的实体
+  // 在树内真实存在——`time-utils.mjs` 在场且真实定义被点名的判据符号（防锚指向幽灵：散文提到的
+  // 东西必须在树里找得到）。维护者面结构性缺席（CI 全新检出 / worktree）时验证阶梯半边输出可见
+  // SKIP 行（未验证 ≠ 通过），分发面半边恒检。
+  {
+    name: '302 时间纪律四条硬规则文本锚：入口技能陈述 ①②③ + 验证阶梯承载四条 + 点名实体真实在场',
+    run: () => {
+      const skillsRoot = skillsRootForScriptsDir(__dirname);
+      const entrySkill = path.join(skillsRoot, 'flow-comet', 'SKILL.md');
+      const skillText = fs.readFileSync(entrySkill, 'utf8');
+      const skillProblems = timeDisciplineTextProblems('入口 SKILL', skillText);
+      assertEqual(skillProblems.length, 0, '时间纪律文本锚: ' + skillProblems.join(' | '));
+
+      // 反向构造（真实文本逐条移除 · 合成输入驱动同一判据）：任一条规则的关键词被移走 → 该条必报。
+      for (const [rule, tokens] of TIME_DISCIPLINE_RULES) {
+        const stripped = tokens.reduce((text, token) => text.replace(token, '（反向构造：移除）'), skillText);
+        assertTrue(stripped !== skillText, '反向构造前提不成立（入口 SKILL 缺该条关键词）: ' + rule);
+        assertTrue(timeDisciplineTextProblems('入口 SKILL', stripped).some((problem) => problem.includes(rule)),
+          '逐条移除未被判违规（判别力缺失）: ' + rule);
+      }
+
+      if (maintainerFacePresent()) {
+        const ladder = fs.readFileSync(path.join(REPO_ROOT, 'docs/internal/WORKING-METHOD.md'), 'utf8');
+        const ladderProblems = timeDisciplineTextProblems('验证阶梯', ladder);
+        assertEqual(ladderProblems.length, 0, '验证阶梯文本锚: ' + ladderProblems.join(' | '));
+        assertTrue(ladder.includes('环境 / 过程纪律'), '验证阶梯缺「环境 / 过程纪律」条（规则④的落点）');
+        assertTrue(ladder.includes('L-096'), '验证阶梯的时间纪律条未点名 L-096 实证（规则③的依据）');
+      } else {
+        console.log('SKIP: 302 的验证阶梯面（docs/internal/WORKING-METHOD.md 一·五「环境 / 过程纪律」条）'
+          + '——维护者面结构性缺席；本次检出未校验规则 ①~④ 已写入验证阶梯，请在维护者主树重跑本套件');
+      }
+
+      // 点名实体真实在场：time-utils.mjs（规则①②的单一权威）在场，且真实定义被点名的判据符号。
+      const timeUtilsFile = path.join(__dirname, 'time-utils.mjs');
+      assertTrue(fs.existsSync(timeUtilsFile), '入口 SKILL 的时间纪律点名 time-utils.mjs，但树内无此文件（锚指向幽灵实体）');
+      for (const symbol of ['formatLocalTimestamp', 'parseTimestamp']) {
+        assertTrue(engineDefinitionHits(symbol).some((hit) => hit.file === 'time-utils.mjs'),
+          'time-utils.mjs 未定义被点名的判据符号 ' + symbol + '（散文与实现脱节）');
       }
     },
   },
