@@ -3,6 +3,9 @@
 // 探测项目上下文状态 → 判决 A~F → 提示/静默；--init-context 全量生成 .specs/CONTEXT.md
 // 由 workflow-state.mjs init 分支调用；独立模块便于 guard-self-test 集成测试。
 // 文案为公开描述性中文（无未公开概念）。
+//
+// 本模块同时是「项目上下文」判定的单一来源：独立重扫命令 context-scan.mjs 复用同一组导出
+// （探测 / 判决 / 结构校验 / 生成指引 / 结构提取），不复制第二份实现——同一判据两份实现必然分叉。
 
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -194,6 +197,20 @@ const CONTEXT_FORMAT_CHECKS = [
     hint: '模板字段 last_intel_scan / scanner / 下次重扫建议',
   },
   {
+    // evolve 段是**可选段**：没跑过架构沉淀的项目不补段（缺席不报），跑过的项目段内三字段必须齐——
+    // 「跑过一次但字段写残」正是最需要拦的半成品（段在场却少字段，元数据双落点会静默失真）。
+    name: 'evolve 元数据三字段',
+    // 三字段判定**限定在段内**（sectionBody 切片）：全文 includes 会被别处的同名字段蒙混过关——
+    // 例如 intel-scan 段有 `**scanner**` 而 evolve 段少这一个字段，全文判定照样放行。
+    applies: (t) => sectionBody(t, '## evolve 元数据') !== null,
+    passes: (t) => {
+      const segment = sectionBody(t, '## evolve 元数据') ?? '';
+      return segment.includes('**last_evolve_at**') && segment.includes('**scanner**')
+        && (segment.includes('**下次建议**') || segment.includes('**下次同步建议**'));
+    },
+    hint: '字段 last_evolve_at / scanner / 下次建议；与 intel-scan 段同构',
+  },
+  {
     name: '域语言表格表头',
     applies: (t) => t.includes('## 域语言'),
     passes: (t) => /\|\s*术语\s*\|\s*定义\s*\|/.test(t),
@@ -223,11 +240,14 @@ function normalizeSectionName(name) {
 //   · 反引号围栏的信息串不得含反引号（否则是行内代码而非围栏）
 //   · 闭栏须与开栏同字符、长度不短于开栏、其后仅余空白；不同字符的围栏互不闭合
 //   · 围栏内的行（含 `## 标题`）一律不计入结构判定
-function stripFencedCodeBlocks(text) {
+function stripFencedCodeBlocksMapped(text) {
+  const rawLines = String(text ?? '').split('\n');
   const kept = [];
+  const rawLineIndex = []; // 结构行 → 原文行号（写回元数据字段时据此精确定位，不另写一份围栏规则）
   let fenceChar = null;
   let fenceLength = 0;
-  for (const line of String(text ?? '').split('\n')) {
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i];
     const fence = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
     if (fenceChar === null) {
       if (fence && !(fence[1][0] === '`' && fence[2].includes('`'))) {
@@ -236,6 +256,7 @@ function stripFencedCodeBlocks(text) {
         continue;
       }
       kept.push(line);
+      rawLineIndex.push(i);
       continue;
     }
     if (
@@ -248,7 +269,11 @@ function stripFencedCodeBlocks(text) {
       fenceLength = 0;
     }
   }
-  return kept.join('\n');
+  return { text: kept.join('\n'), rawLineIndex };
+}
+
+function stripFencedCodeBlocks(text) {
+  return stripFencedCodeBlocksMapped(text).text;
 }
 
 // 文档标题集合（ATX 标题行：行首 #~###### + 空白 + 标题文本；正文文本不参与）。
@@ -259,6 +284,30 @@ function headingSet(text) {
     set.add(normalizeSectionName(m[1]));
   }
   return set;
+}
+
+// 二级段标题在场判定 + 段体切片（与 headingSet 同一标题语法，但要求**恰好二级**）。
+// 格式检查的「段在场」与「段内字段」都用它们：正文里提到段名（例如术语表的定义列写
+// `## evolve 元数据`）不得算段在场——可选段的「缺席不报」语义完全依赖这一点；字段判定限定段内，
+// 否则别处的同名标签会替缺失字段蒙混过关。必填段的同名检查沿用历史 includes 写法（缺段另有
+// missingSections 兜底，报道面不变），故两条检查的在场判据措辞不同是刻意的，不是漏改。
+function sectionBody(body, headingName) {
+  const wanted = normalizeSectionName(headingName);
+  const kept = [];
+  let inSection = false;
+  for (const line of String(body ?? '').split('\n')) {
+    const heading = /^(#{1,6})[ \t]+(.+?)[ \t]*$/.exec(line);
+    if (heading) {
+      const level = heading[1].length;
+      if (inSection && level <= 2) break; // 到下一个同级或更高级标题即段结束
+      if (!inSection && level === 2 && normalizeSectionName(heading[2]) === wanted) {
+        inSection = true;
+        continue;
+      }
+    }
+    if (inSection) kept.push(line);
+  }
+  return inSection ? kept.join('\n') : null;
 }
 
 // 校验 .specs/CONTEXT.md 7 段结构 + 模板关键格式；文件缺失 = 全缺。返回
@@ -284,6 +333,73 @@ export async function validateContext(runRoot) {
     .filter((c) => c.applies(body) && !c.passes(body))
     .map((c) => c.name + '（' + c.hint + '）');
   return { missingSections, formatIssues, template: await probeTemplate(runRoot) };
+}
+
+// 抽象索引段名（模板段名归一后的形态：`## 既有抽象索引（…）` → `既有抽象索引`）
+const ABSTRACTION_SECTION = '既有抽象索引';
+// 元数据段名特征：段名以「元数据」结尾（`intel-scan 元数据` / `evolve 元数据` 同构）
+const METADATA_SECTION_SUFFIX = '元数据';
+// 元数据字段条目形态：`- **字段**: 值`（值可带括号说明，替换时只换首个取值词元）
+const METADATA_FIELD_LINE = /^\s*-\s*\*\*([^*]+)\*\*\s*[:：]\s*(.*)$/;
+// 表格分隔行（`|---|---|`）不是内容条目
+const TABLE_SEPARATOR_LINE = /^\|[\s:|-]+\|$/;
+
+// 抽象索引段内的一行是否算「条目」：忽略空行 / 引用块（说明性导语）/ 表格分隔行；
+// 其余行原样收录（压缩行内空白）——条目的**取值**即快照比对对象，不做语义归一。
+function abstractionItem(line) {
+  const text = String(line ?? '').trim();
+  if (text === '' || text.startsWith('>')) return null;
+  if (TABLE_SEPARATOR_LINE.test(text)) return null;
+  return text.replace(/\s+/g, ' ');
+}
+
+// CONTEXT 结构提取（独立重扫命令复用 · 与 validateContext 共用同一份结构知识）：
+// 围栏剥离 + 段名归一 + 标题判定都在本模块唯一表达——结构判定若在第二个模块重写，
+// 两处对「哪一行算结构」的口径必然分叉（同一判据两份实现）。本函数只做**提取**，不做判决。
+// 返回：
+//   · sections         —— 归一后的段名清单（文档序，含非基准段；用于「段新增 / 段消失」比对）
+//   · abstractionIndex —— { '<子段名>': ['<条目行>', …] }（`## 既有抽象索引` 段内；未分组条目归 '(未分组)'）
+//   · metadata         —— { '<段名>': { '<字段>': { value, lineIndex } } }（段名以「元数据」结尾的段；
+//                        lineIndex = 该字段行在**原文**中的行号，写回时据此精确替换，不重写整段）
+export function extractContextStructure(text) {
+  const { text: body, rawLineIndex } = stripFencedCodeBlocksMapped(text);
+  const lines = body.split('\n');
+  const sections = [];
+  const abstractionIndex = {};
+  const metadata = {};
+  let section = null;
+  let group = '(未分组)';
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const heading = /^(#{1,6})[ \t]+(.+?)[ \t]*$/.exec(line);
+    if (heading) {
+      const name = normalizeSectionName(heading[2]);
+      if (heading[1].length === 2) {
+        section = name;
+        group = '(未分组)';
+        sections.push(name);
+        continue;
+      }
+      if (heading[1].length === 3 && section === ABSTRACTION_SECTION) {
+        group = name;
+        continue;
+      }
+    }
+    if (section === ABSTRACTION_SECTION) {
+      const item = abstractionItem(line);
+      if (item !== null) {
+        if (!abstractionIndex[group]) abstractionIndex[group] = [];
+        abstractionIndex[group].push(item);
+      }
+      continue;
+    }
+    if (section !== null && section.endsWith(METADATA_SECTION_SUFFIX)) {
+      if (!metadata[section]) metadata[section] = {};
+      const field = METADATA_FIELD_LINE.exec(line);
+      if (field) metadata[section][field[1].trim()] = { value: field[2].trim(), lineIndex: rawLineIndex[i] };
+    }
+  }
+  return { sections, abstractionIndex, metadata };
 }
 
 // 生成指引（--init-context 时 CONTEXT 缺失或不满足模板时输出）——生成由 agent 全量阅读执行：
