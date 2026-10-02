@@ -1128,10 +1128,17 @@ const SIDE_CONTEXT_SCAN = path.join(__dirname, 'context-scan.mjs');
 const timeUtilsModule = await import(pathToFileURL(path.join(__dirname, 'time-utils.mjs')).href);
 const localDate = (value = new Date()) => timeUtilsModule.formatLocalDate(value);
 
+// 侧命令真实调用：协议环境与 runState / runGuard / runHook 同形（FLOW_COMET_PROTOCOL 指向场景内副本）
+// ——协议路径的唯一权威是 state-schema 的选择器（state.protocolPath > 环境变量 > 内置默认），侧命令
+// 的 state 通道子进程必须看到与门禁同一份来源。构造「无环境变量」的场景用 `{ FLOW_COMET_PROTOCOL: '' }`。
 function runSideScript(script, args, root, envOverrides = {}) {
   const res = spawnSync(process.execPath, [script, ...args], {
     cwd: root,
-    env: { ...process.env, ...envOverrides },
+    env: {
+      ...process.env,
+      FLOW_COMET_PROTOCOL: path.join(root, 'reference', 'workflow-protocol.json'),
+      ...envOverrides,
+    },
     encoding: 'utf8',
     timeout: 120000,
   });
@@ -6383,6 +6390,60 @@ const TEST_ITEMS = [
       assertOut(scan, 'after-baseline#1');
       assertNotOut(scan, 'before-baseline#');
       assertNotOut(scan, '无基线（首次运行，全量扫描）');
+    },
+  },
+
+  {
+    name: 'M6 侧命令 CLI 契约真实链路：--root 两形态·--help·未知参数一致 + 损坏 state fail-closed + 协议绑定独占',
+    run: (dir) => {
+      writeFile(dir, '.specs/archive/2026-10-02-fixture/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n### 可复用抽象\n\n- 契约夹具条目（真实链路）\n');
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeState(dir, baseState('open'));
+
+      // ① 三命令等号形与空格形等价（修复前 evolve 的等号形报「未知参数」exit 1）
+      const evolveEq = runSideScript(SIDE_EVOLVE, ['scan', '--root=' + dir], dir);
+      assertExit(evolveEq, 0);
+      assertOut(evolveEq, '2026-10-02-fixture#1');
+      const evolveSpace = runSideScript(SIDE_EVOLVE, ['scan', '--root', dir], dir);
+      assertExit(evolveSpace, 0);
+      assertOut(evolveSpace, 'EVOLVE: 窗口');
+      assertExit(runSideScript(SIDE_HEALTH, ['--root=' + dir], dir), 0);
+      assertExit(runSideScript(SIDE_CONTEXT_SCAN, ['--root=' + dir], dir), 0);
+
+      // ② `--help` 三命令一致（各列自身命令形态）；未知参数三命令一致（exit 1）
+      assertOut(runSideScript(SIDE_EVOLVE, ['--help'], dir), 'evolve.mjs apply');
+      assertOut(runSideScript(SIDE_HEALTH, ['-h'], dir), 'health.mjs');
+      assertOut(runSideScript(SIDE_CONTEXT_SCAN, ['--help'], dir), 'context-scan.mjs');
+      for (const script of [SIDE_EVOLVE, SIDE_HEALTH, SIDE_CONTEXT_SCAN]) {
+        const unknown = runSideScript(script, ['--bogus'], dir);
+        assertExit(unknown, 1);
+        assertOut(unknown, '未知参数: --bogus');
+      }
+
+      // ③ 损坏 state 的真实链路：scan 必须 BLOCKED 且零写入，不再输出「无基线（首次运行，全量扫描）」
+      const stateFile = path.join(dir, '.flow-comet', 'flow-comet-state.json');
+      const stateText = fs.readFileSync(stateFile, 'utf8');
+      fs.writeFileSync(stateFile, stateText.slice(0, Math.floor(stateText.length / 2)), 'utf8');
+      const before = treeFingerprint(dir);
+      const blocked = runSideScript(SIDE_EVOLVE, ['scan', '--root', dir], dir);
+      assertExit(blocked, 1);
+      assertOut(blocked, 'BLOCKED');
+      assertNotOut(blocked, '无基线（首次运行，全量扫描）');
+      if (treeFingerprint(dir) !== before) throw new Error('损坏 state 的 scan 轮有写入（树指纹应逐项一致）');
+
+      // ④ 协议绑定独占的真实链路：项目内约定副本坏掉 + state.protocolPath 好 → apply 必须成功
+      fs.copyFileSync(BUILTIN_PROTOCOL_SOURCE, path.join(dir, 'bound-protocol.json'));
+      fs.writeFileSync(path.join(dir, 'reference', 'workflow-protocol.json'),
+        '{"schemaVersion": 99, "nodes": []}\n', 'utf8');
+      writeState(dir, { ...baseState('open'), protocolPath: 'bound-protocol.json' });
+      const applied = runSideScript(SIDE_EVOLVE, ['apply', '2026-10-02-fixture#1', '--root', dir], dir,
+        { FLOW_COMET_PROTOCOL: '' });
+      assertExit(applied, 0);
+      assertOut(applied, 'EVOLVE-OK');
+      assertOut(applied, '双落点一致 state = ');
+      assertTrue(fs.existsSync(path.join(dir, '.specs', 'evolve', localDate() + '-EVOLVE.md')),
+        '协议绑定链路下 EVOLVE 报告未落盘');
     },
   },
 ];

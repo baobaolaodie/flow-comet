@@ -22,6 +22,10 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { probeProject, classify, validateContext, printGenerationGuide, extractContextStructure } from './context-init.mjs';
+// 参数解析走侧命令共用的单一实现（evolve.mjs 导出）：`--root` 两种形态 / `--stdout` / `--help` /
+// 未知参数各只在一处表达，三条横向命令的 CLI 契约因此同形（本文件不再自写一份脚手架）。
+// 同一模块另导出 state 三态读入口（readStateInfo）——本文件的读盘面与 evolve 共用同一条实现。
+import { parseSideCommandArgs, readStateInfo } from './evolve.mjs';
 import { archiveDateFromName, formatLocalDate, nowTimestamp } from './time-utils.mjs';
 import { RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, validateStateFields, writeJsonAtomic } from './state-schema.mjs';
 
@@ -40,26 +44,14 @@ function relativeLabel(root, file) {
   return path.relative(root, file).split(path.sep).join('/');
 }
 
-function parseArgs(argv) {
-  const options = { root: process.cwd(), stdout: false };
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (arg === '--root') {
-      const value = argv[i + 1];
-      if (typeof value !== 'string' || value.trim() === '') throw new Error('--root requires a directory path');
-      options.root = path.resolve(value.trim());
-      i += 1;
-    } else if (arg.startsWith('--root=')) {
-      const value = arg.slice('--root='.length).trim();
-      if (value === '') throw new Error('--root requires a directory path');
-      options.root = path.resolve(value);
-    } else if (arg === '--stdout') {
-      options.stdout = true;
-    } else {
-      throw new Error('未知参数: ' + arg + '（用法: context-scan.mjs [--root <项目根>] [--stdout]）');
-    }
-  }
-  return options;
+function usage() {
+  return [
+    '用法: node context-scan.mjs [--root <项目根>] [--stdout] [--help]',
+    '  --root <路径>  项目根（缺省 = 当前目录；`--root=<路径>` 等号形等价）',
+    '  --stdout       工件正文原样写到标准输出（与落盘内容一致）',
+    '  --help, -h     打印本用法后退出（不扫描）',
+    '说明: 工件落 .specs/context-scan/<日期>-SCAN.md；扫描时刻双落点（引擎 state + CONTEXT 段）。',
+  ].join('\n');
 }
 
 async function readTextFile(file) {
@@ -67,12 +59,8 @@ async function readTextFile(file) {
 }
 
 // 读引擎 state：解析失败与文件缺失必须分开——缺失是「项目未接入」（照常出工件），
-// 损坏是「状态不可信」（fail-closed，零元数据写入）。BOM 容忍与引擎读盘同形。
-async function readStateFile(file) {
-  let raw;
-  try { raw = await fs.readFile(file, 'utf8'); } catch { return { exists: false, state: null }; }
-  try { return { exists: true, state: JSON.parse(raw.replace(/^\uFEFF/, '')) }; } catch { return { exists: true, state: null }; }
-}
+// 损坏是「状态不可信」（fail-closed，零元数据写入）。三态判定与 BOM 容忍**不再在本文件内联第二份**：
+// 走 evolve.mjs 导出的 readStateInfo（同一条读入口被两条侧命令共用；第二条实现必然与另一条分叉）。
 
 // 基线 = .specs/context-scan/ 下最近一份 `<日期>-SCAN.md`。排序取**文件名日期**（随工件固化），
 // 不取 mtime——检出 / 复制会重写 mtime，据它判时间会得出相反结论。日期前缀的形态与日历
@@ -345,14 +333,15 @@ async function preflight({ root, probe, validation, contextText, stateInfo, stat
 }
 
 async function main() {
-  const options = parseArgs(process.argv.slice(2));
+  const options = parseSideCommandArgs(process.argv.slice(2), { usage: usage() });
+  if (options.help) { console.log(usage()); return 0; }
   const root = options.root;
   const contextFile = path.join(root, '.specs', 'CONTEXT.md');
   const stateFile = path.join(root, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME);
   const scannedAt = nowTimestamp();
 
   // ① 探测 / 判决 / 结构校验 / 结构提取——一律复用 context-init 的导出（本文件不另写一套）
-  const stateInfo = await readStateFile(stateFile);
+  const stateInfo = await readStateInfo(root);
   const probe = await probeProject(root, stateInfo.state);
   const verdict = classify(probe, stateInfo.state);
   const validation = await validateContext(root);

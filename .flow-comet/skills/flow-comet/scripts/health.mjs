@@ -26,6 +26,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { validateContext } from './context-init.mjs';
+import { parseSideCommandArgs } from './evolve.mjs';
 import { formatLocalDate, formatLocalTimestamp } from './time-utils.mjs';
 
 const SELF_FILE = fileURLToPath(import.meta.url);
@@ -71,29 +72,20 @@ const BROOKS_SKILL = 'brooks-health';
 
 function usage() {
   return [
-    '用法: node health.mjs [--root <项目根>] [--stdout]',
-    '  --root <路径>  项目根（缺省 = 当前目录）',
+    '用法: node health.mjs [--root <项目根>] [--stdout] [--help]',
+    '  --root <路径>  项目根（缺省 = 当前目录；`--root=<路径>` 等号形等价）',
     '  --stdout       报告同时写到标准输出（与落盘内容逐字节相同）',
+    '  --help, -h     打印本用法后退出（不产报告）',
     '说明: 只写 .specs/health/<日期>-HEALTH.md；不写运行状态、不改代码。',
   ].join('\n');
 }
 
+// 参数解析走侧命令共用的单一实现（evolve.mjs 导出的 parseSideCommandArgs）：`--root` 两种形态 /
+// `--stdout` / `--help` / 未知参数各只在一处表达，三条横向命令的 CLI 契约因此同形。
+// rootDisplay = 调用方原样给出的 --root 取值（报告里按人读形态回显与复现命令用）。
 function parseArgs(argv) {
-  const options = { root: process.cwd(), rootDisplay: '.', stdout: false, help: false };
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (arg === '--stdout') { options.stdout = true; continue; }
-    if (arg === '--help' || arg === '-h') { options.help = true; continue; }
-    if (arg === '--root' || arg.startsWith('--root=')) {
-      const value = arg === '--root' ? argv[i + 1] : arg.slice('--root='.length);
-      if (typeof value !== 'string' || value.trim() === '') throw new Error('--root 需要一个路径参数\n' + usage());
-      options.root = path.resolve(process.cwd(), value);
-      options.rootDisplay = value;
-      if (arg === '--root') i += 1;
-      continue;
-    }
-    throw new Error('未知参数: ' + arg + '\n' + usage());
-  }
+  const options = parseSideCommandArgs(argv, { usage: usage() });
+  options.rootDisplay = options.rootArg ?? '.';
   return options;
 }
 

@@ -3,24 +3,35 @@
 // 逐项应用 → patch 项目级文档 + 落 EVOLVE 报告 + 双落点时间戳。
 //
 // 用法：
-//   node evolve.mjs scan [--root <项目根>]
-//   node evolve.mjs apply <候选 id> [<候选 id> ...] [--root <项目根>] [--scanner <执行工具>]
+//   node evolve.mjs scan [--root <项目根>] [--stdout]
+//   node evolve.mjs apply <候选 id> [<候选 id> ...] [--root <项目根>] [--scanner <执行工具>] [--stdout]
+//   node evolve.mjs --help | -h
 //
 // 单一权威（L-067）：「沉淀段在场」判定（hasSection9）与归档窗口判定（isArchivedAfterTimestamp）
 // 一律 import time-utils.mjs；时间形态 / 解析 / 天差走 nowTimestamp / formatLocalDate /
 // parseTimestamp / daysSince——本模块不内联第二份时间正则，也不自行拼接时间字符串。
 // 模板段标题的归一走 route-node.mjs 导出的共享实现（normalizeHeading），不另起一份。
+// 协议路径走 state-schema.mjs 的 resolveProtocolPathWithState（唯一选择器），不自持候选布局表。
+// 侧命令 CLI 契约（parseSideCommandArgs）也落本模块：三条横向命令共用一份解析——
+// 本模块在导入时不执行命令（另两条在导入时即跑 main），是唯一可被安全导入的一方。
 //
 // 只读边界：scan 零写入；apply 的写入面只有三处——项目级文档（CONTEXT.md / ARCHITECTURE.md）、
 // .specs/evolve/ 下的报告、以及 state 的 last_evolve_at（经 workflow-state.mjs 的 config set
 // 通道写入，本脚本不直写 state 文件）。扫描内容严格限定在归档设计文档的沉淀段。
 
 import { spawnSync } from 'child_process';
-import { existsSync, promises as fs } from 'fs';
+import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { normalizeHeading } from './route-node.mjs';
-import { writeFileAtomic, EVOLVE_METADATA_SECTION, EVOLVE_METADATA_FIELDS } from './state-schema.mjs';
+import {
+  writeFileAtomic,
+  EVOLVE_METADATA_SECTION,
+  EVOLVE_METADATA_FIELDS,
+  resolveProtocolPathWithState,
+  RUNTIME_DIR,
+  RUNTIME_STATE_FILE_NAME,
+} from './state-schema.mjs';
 import {
   archiveDateFromName,
   daysSince,
@@ -35,6 +46,8 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+// 技能包根（协议默认落点与子进程 workflow-state.mjs 同源推导：脚本目录的上一级）
+const packageRoot = path.resolve(__dirname, '..');
 
 const SPECS_DIR = '.specs';
 const ARCHIVE_DIR = 'archive';
@@ -83,33 +96,77 @@ function escapeRegExp(text) {
 function usage() {
   return [
     '用法:',
-    '  node evolve.mjs scan [--root <项目根>]',
-    '  node evolve.mjs apply <候选 id> [<候选 id> ...] [--root <项目根>] [--scanner <执行工具>]',
+    '  node evolve.mjs scan [--root <项目根>] [--stdout]',
+    '  node evolve.mjs apply <候选 id> [<候选 id> ...] [--root <项目根>] [--scanner <执行工具>] [--stdout]',
+    '  node evolve.mjs --help | -h',
+    '说明:',
+    '  --root <目录>    项目根（缺省 = 当前目录；`--root=<目录>` 等号形等价）',
+    '  --scanner <文本> apply 落盘报告里的执行工具名（缺省 flow-comet-evolve）',
+    '  --stdout         scan 本就零写入且全量输出到标准输出；apply 时把本次追加进报告的内容原样输出',
+    '  --help, -h       打印本用法后退出（不做任何读写）',
   ].join('\n');
 }
 
+// ---------- 侧命令 CLI 契约（单一来源） ----------
+// 三条横向命令（evolve / health / context-scan）共用本解析器：`--root <目录>` 与 `--root=<目录>`
+// 两种形态、`--stdout`、`--help`/`-h`、未知参数**各只在此处表达一次**——此前三份自写脚手架必然分叉
+// （一条不支持等号形、`--help` 只有一条有、错误构造三份各写一遍）。位置参数语义（evolve 的
+// scan|apply 子命令与候选 id）与命令自有取值开关由调用方声明，本解析器不认识任何业务词元。
+// 契约要点：用法错误一律 throw（各命令顶层错误处理决定前缀，退出码统一 1）；`--help` 在位置参数
+// 之前短路（子命令之后写 `--help` 也只看用法）；取值开关悬空与未知参数一律可见报错，不静默忽略。
+export function parseSideCommandArgs(argv, { usage: usageText, valueOptions = {}, positionals = null } = {}) {
+  if (typeof usageText !== 'string' || usageText.trim() === '') {
+    throw new Error('parseSideCommandArgs 需要非空用法文本（--help 与用法错误共用同一份）');
+  }
+  const options = { root: process.cwd(), rootArg: null, stdout: false, help: false, values: {}, tokens: [] };
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i];
+    if (token === '--help' || token === '-h') { options.help = true; continue; }
+    if (token === '--stdout') { options.stdout = true; continue; }
+    if (token === '--root' || token.startsWith('--root=')) {
+      const value = token === '--root' ? argv[i + 1] : token.slice('--root='.length);
+      if (typeof value !== 'string' || value.trim() === '') throw new Error('--root 需要一个目录参数\n' + usageText);
+      options.root = path.resolve(value.trim());
+      options.rootArg = value;
+      if (token === '--root') i += 1;
+      continue;
+    }
+    const flag = Object.keys(valueOptions).find((name) => token === name || token.startsWith(name + '='));
+    if (flag) {
+      const value = token === flag ? argv[i + 1] : token.slice(flag.length + 1);
+      if (typeof value !== 'string' || value.trim() === '') {
+        throw new Error(flag + ' 需要' + valueOptions[flag] + '\n' + usageText);
+      }
+      options.values[flag] = value;
+      if (token === flag) i += 1;
+      continue;
+    }
+    if (token.startsWith('-') && token !== '-') throw new Error('未知参数: ' + token + '\n' + usageText);
+    options.tokens.push(token);
+  }
+  if (options.help) return options;
+  if (positionals) positionals(options);
+  return options;
+}
+
+// evolve 的位置参数语义：首词元是子命令，apply 的其余词元是候选 id（scan 不接受位置参数）。
+// 返回 { error } 形态沿用本命令既有约定（main 走 fail() → BLOCKED + exit 1）。
 export function parseArgs(argv) {
-  const options = { command: argv[0] ?? '', ids: [], root: process.cwd(), scanner: 'flow-comet-evolve' };
+  const options = parseSideCommandArgs(argv, {
+    usage: usage(),
+    valueOptions: { '--scanner': '一段文本' },
+    positionals: (parsed) => {
+      parsed.command = parsed.tokens[0] ?? '';
+      parsed.ids = parsed.tokens.slice(1);
+    },
+  });
+  options.scanner = options.values['--scanner'] ?? 'flow-comet-evolve';
+  if (options.help) return options;
   if (options.command !== 'scan' && options.command !== 'apply') {
     return { error: '未知子命令: ' + (options.command || '(空)') + '\n' + usage() };
   }
-  for (let i = 1; i < argv.length; i++) {
-    const token = argv[i];
-    if (token === '--root') {
-      const value = argv[++i];
-      if (!value) return { error: '--root 需要一个目录参数' };
-      options.root = path.resolve(value);
-      continue;
-    }
-    if (token === '--scanner') {
-      const value = argv[++i];
-      if (!value) return { error: '--scanner 需要一段文本' };
-      options.scanner = value;
-      continue;
-    }
-    if (token.startsWith('--')) return { error: '未知参数: ' + token + '\n' + usage() };
-    if (options.command !== 'apply') return { error: 'scan 不接受位置参数: ' + token };
-    options.ids.push(token);
+  if (options.command === 'scan' && options.ids.length > 0) {
+    return { error: 'scan 不接受位置参数: ' + options.ids[0] };
   }
   if (options.command === 'apply' && options.ids.length === 0) {
     return { error: 'apply 需要至少一个候选 id\n' + usage() };
@@ -283,18 +340,50 @@ async function pathExists(target) {
 
 // 写盘走状态层单一来源的原子写（state-schema.mjs 的 writeFileAtomic）：目标文档要么是旧内容、
 // 要么是新内容，不会留下被截断的半写状态。
-async function readState(root) {
-  const text = await readText(path.join(root, '.flow-comet', 'flow-comet-state.json'));
-  if (text === null) return null;
-  try { return JSON.parse(text.replace(/^\uFEFF/, '')); } catch { return null; }
+// state 读取三态（**单一实现**：本导出同时是 context-scan 的读入口）：**不在场**（文件缺失）/ 可读 /
+// **损坏**（在场但解析不出状态对象）。两者必须分开——把损坏折叠成「没有状态」，增量窗口会静默退化
+// 为全量，措辞还把不可信状态说成正常冷启动。读失败（权限 / 目录占位）同样按不可信处理，不冒充
+// 「不在场」。调用方按 `exists && state === null` 判损坏并 fail-closed。
+export async function readStateInfo(root) {
+  const file = path.join(root, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME);
+  let raw;
+  try {
+    raw = await fs.readFile(file, 'utf8');
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return { exists: false, state: null };
+    return { exists: true, state: null };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw.replace(/^\uFEFF/, ''));
+  } catch {
+    return { exists: true, state: null };
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { exists: true, state: null };
+  }
+  return { exists: true, state: parsed };
+}
+
+// 损坏态的统一处置（单一表达）：状态不可信 → fail-closed，绝不按「首次运行」放行，也不写任何东西。
+function unreadableStateError(root) {
+  return new Error('引擎状态文件在场但无法解析（' + RUNTIME_DIR + '/' + RUNTIME_STATE_FILE_NAME
+    + '，根 ' + root + '）——本次零写入、零候选；先修复该文件再重跑'
+    + '（项目本未接入时删除它，即回到「state 不在场」口径）');
 }
 
 export async function scanProject(root) {
-  const state = await readState(root);
-  const stored = state && typeof state[STATE_KEY] === 'string' ? state[STATE_KEY].trim() : '';
+  const stateInfo = await readStateInfo(root);
+  if (stateInfo.exists && stateInfo.state === null) throw unreadableStateError(root);
+  const stored = stateInfo.state && typeof stateInfo.state[STATE_KEY] === 'string'
+    ? stateInfo.state[STATE_KEY].trim() : '';
   const baseline = stored !== '' && !Number.isNaN(parseTimestamp(stored)) ? stored : '';
-  const baselineNote = stored === '' ? '无基线（首次运行，全量扫描）'
-    : baseline === '' ? '上次沉淀时间不可解析（按全量扫描）' : '';
+  // 三态措辞互斥（单一表达）：「首次运行」只限「state 可读且字段缺席」——不在场与损坏各有自己的
+  // 说法，任何一个都不得冒充冷启动（措辞即判定，误导性措辞等于把缺陷藏起来）。
+  const baselineNote = baseline !== '' ? ''
+    : !stateInfo.exists ? '无基线（state 不在场——项目未接入，按全量扫描）'
+      : stored === '' ? '无基线（首次运行，全量扫描）'
+        : '上次沉淀时间不可解析（按全量扫描）';
 
   const archiveRoot = path.join(root, SPECS_DIR, ARCHIVE_DIR);
   let names = [];
@@ -326,6 +415,8 @@ export async function scanProject(root) {
   const scanned = changes.filter((change) => change.inWindow);
   return {
     root,
+    state: stateInfo.state,
+    stateExists: stateInfo.exists,
     baseline,
     baselineNote,
     changes,
@@ -336,7 +427,7 @@ export async function scanProject(root) {
 
 function describeWindow(plan) {
   const since = plan.baseline === ''
-    ? '窗口 起始 = ' + (plan.baselineNote || '无基线（首次运行，全量扫描）')
+    ? '窗口 起始 = ' + plan.baselineNote
     : '窗口 起始 = ' + plan.baseline + '（距今 ' + daysSince(plan.baseline).toFixed(1) + ' 天）';
   const withSediment = plan.scanned.filter((change) => change.hasSediment).length;
   return since + ' · 归档 ' + plan.changes.length + ' 个 · 窗口内 ' + plan.scanned.length
@@ -446,7 +537,7 @@ function reportBlocks(plan, ts, requested, applied, present) {
   const lines = [];
   lines.push('## 扫描范围', '');
   lines.push('- 起始：' + (plan.baseline === ''
-    ? (plan.baselineNote || '无基线（首次运行，全量扫描）')
+    ? plan.baselineNote + '（窗口内 = 全部归档 change）'
     : plan.baseline + '（距今 ' + daysSince(plan.baseline).toFixed(1) + ' 天）之后归档的 change'));
   lines.push('- 归档 ' + plan.changes.length + ' 个 · 窗口内 ' + plan.scanned.length + ' 个 · 含沉淀段 '
     + plan.scanned.filter((change) => change.hasSediment).length + ' 个');
@@ -506,33 +597,30 @@ async function writeReport(root, plan, ts, requested, applied, present) {
     ? ['', '---', '', '> 运行 ' + ts + ' · 应用 ' + applied.length + ' 条（在场 ' + present.length + ' 条）', '', ...blocks].join('\n')
     : ['# 架构演进同步 · ' + date, '', ...blocks].join('\n');
   await fs.appendFile(file, body, 'utf8');
-  return file;
+  // 本次追加的正文回传调用方：`--stdout` 原样输出**本次写入的内容**（与落盘块逐字节相同，
+  // 不是一个重新渲染的近似物——重渲染会与落盘漂移，恰好是「--stdout 与落盘一致」的反面）。
+  return { file, body };
 }
 
-// state 通道的协议文件受保护读取要求协议位于项目根内。项目自带协议副本时显式指向它
-// （项目自定义协议约定 `reference/workflow-protocol.json`；权威源布局另列一处），
-// 其余情况沿用调用方环境——已装技能包的项目里，默认解析就落在项目根内。
-function stateEnv(root) {
-  const candidates = [
-    path.join(root, 'reference', 'workflow-protocol.json'),
-    path.join(root, '.flow-comet', 'skills', 'flow-comet', 'reference', 'workflow-protocol.json'),
-  ];
-  const found = candidates.find((file) => existsSync(file));
-  if (!found) return { ...process.env };
-  return { ...process.env, FLOW_COMET_PROTOCOL: found };
-}
-
-function writeStateTimestamp(root, ts, out = console) {
+// state 通道的协议路径（单一来源）：子进程 workflow-state.mjs 的受保护读取要求协议文件位于项目根内，
+// 而「协议在哪」的唯一权威是 state-schema.mjs 的 resolveProtocolPathWithState（state.protocolPath >
+// FLOW_COMET_PROTOCOL 环境变量 > 内置默认，与 guard 同一入口）。本模块只把该选择结果透传给子进程
+// （FLOW_COMET_PROTOCOL），**不再自持候选布局表**：那张表是第二套「协议在哪」的表达——state 已绑定
+// 协议的项目会被它盖过（绑定静默失效，判定落到另一份协议上），布局变化也无人提醒。
+function writeStateTimestamp(root, ts, state, out = console) {
+  const resolved = resolveProtocolPathWithState({ packageRoot, runRoot: root, state, cliArgs: [] });
   const result = spawnSync(process.execPath, [path.join(__dirname, STATE_SCRIPT), 'config', 'set', STATE_KEY, ts], {
     cwd: root,
-    env: stateEnv(root),
+    env: { ...process.env, FLOW_COMET_PROTOCOL: resolved.protocolPath },
     encoding: 'utf8',
   });
   const text = ((result.stdout ?? '') + (result.stderr ?? '')).trim();
   if (text !== '') out.log(text);
   if (result.status !== 0) {
     throw new Error('state 写入通道失败（时间戳未推进；项目级文档已落盘、报告未落盘，重跑同一命令按幂等处理）'
-      + '——若为协议文件不在项目根内的判定失败，请在项目内放置 reference/workflow-protocol.json 后重试');
+      + '——协议路径来源 ' + resolved.source + '（' + resolved.protocolPath + '），按 state.protocolPath > '
+      + 'FLOW_COMET_PROTOCOL > 内置默认的顺序解析且不回退候选布局：请修正 state.protocolPath'
+      + ' 或把它指向项目内的协议副本后重试');
   }
 }
 
@@ -595,14 +683,15 @@ async function runApply(options, out = console) {
     present.push(...result.present);
   }
 
-  writeStateTimestamp(options.root, ts, out);
-  const state = await readState(options.root);
-  if (!state || state[STATE_KEY] !== ts) {
-    throw new Error('state 回读不一致: 期望 ' + ts + ' 实得 ' + String(state && state[STATE_KEY]));
+  writeStateTimestamp(options.root, ts, plan.state, out);
+  const readBack = await readStateInfo(options.root);
+  if (!readBack.state || readBack.state[STATE_KEY] !== ts) {
+    throw new Error('state 回读不一致: 期望 ' + ts + ' 实得 ' + String(readBack.state && readBack.state[STATE_KEY]));
   }
 
   const report = await writeReport(options.root, plan, ts, requested, applied, present);
-  out.log('EVOLVE-REPORT: ' + path.relative(options.root, report).split(path.sep).join('/'));
+  out.log('EVOLVE-REPORT: ' + path.relative(options.root, report.file).split(path.sep).join('/'));
+  if (options.stdout) out.log(report.body);
   out.log('EVOLVE: 双落点一致 state = ' + ts + ' · 段 = ' + ts + '（state 为唯一真相）');
   out.log('EVOLVE-OK');
 }
@@ -610,6 +699,7 @@ async function runApply(options, out = console) {
 async function main(argv) {
   const options = parseArgs(argv);
   if (options.error) fail(options.error);
+  if (options.help) { console.log(usage()); return; }
   if (options.command === 'scan') await runScan(options);
   else await runApply(options);
 }

@@ -2281,11 +2281,19 @@ function assertEqual(actual, expected, label) {
   }
 }
 
-// 侧命令真实调用（cwd = 项目根；--root 由调用方显式传入——侧命令不进 8 节点流程）
+// 侧命令真实调用（cwd = 项目根；--root 由调用方显式传入——侧命令不进 8 节点流程）。
+// FLOW_COMET_PROTOCOL 注入场景内协议副本，与 runGuard / runStateWithProtocol 同一表达：协议路径的
+// 唯一权威是 state-schema 的选择器（state.protocolPath > 环境变量 > 内置默认），侧命令的子进程
+// （workflow-state 通道）因此要看到与门禁同一份协议来源——平台侧注入环境变量正是真实项目形态。
+// 需要构造「无环境变量」的场景用 `{ FLOW_COMET_PROTOCOL: '' }` 覆盖（空串按未设置处理）。
 function runSideScript(script, args, root, envOverrides = {}) {
   const res = spawnSync(process.execPath, [script, ...args], {
     cwd: root,
-    env: { ...process.env, ...envOverrides },
+    env: {
+      ...process.env,
+      FLOW_COMET_PROTOCOL: path.join(root, 'reference', 'workflow-protocol.json'),
+      ...envOverrides,
+    },
     encoding: 'utf8',
     timeout: 120000,
   });
@@ -14718,6 +14726,218 @@ const SCENARIOS = [
         '旧别名未被收窄（仍静默通过）: ' + JSON.stringify(aliasedIssues));
       assertTrue(aliasedIssues.some((issue) => issue.includes('下次同步建议') && issue.includes('不再接受')),
         '旧别名未给出可见格式提示: ' + JSON.stringify(aliasedIssues));
+    },
+  },
+
+  // 293: 侧命令 CLI 契约——三条横向命令的 `--root` 两种形态 / `--stdout` / `--help` /
+  // 未知参数走**同一份**共享助手：等号形三命令一致（修复前 evolve 报「未知参数: --root=.」exit 1）、
+  // `--help`/`-h` 三命令一致（修复前只有 health 有）、空格形与未知参数的退出码语义保持不变；
+  // 位置参数语义由各命令自持（evolve 的 scan/apply 子命令与候选 id）。结构锚：带引号的 `--root`
+  // 解析形态与「未知参数」构造在三条命令里**只允许出现在共享助手一处**，第二份自写脚手架即红。
+  {
+    name: '293 侧命令 CLI 契约：--root 两形态·--stdout·--help 三命令同形 + 未知参数语义不变 + 解析面单源',
+    run: (dir) => {
+      writeFile(dir, '.specs/archive/2026-10-02-cli/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n### 可复用抽象\n\n- CLI 契约夹具条目\n');
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeState(dir, baseState('open'));
+
+      // ① 等号形 `--root=<目录>`：三命令等价（修复前 evolve 是唯一不支持的一条）
+      const evolveEq = runSideScript(SIDE_EVOLVE, ['scan', '--root=' + dir], dir);
+      assertExit(evolveEq, 0);
+      assertOut(evolveEq, 'EVOLVE: 窗口');
+      assertOut(evolveEq, '2026-10-02-cli#1');
+      const healthEq = runSideScript(SIDE_HEALTH, ['--root=' + dir, '--stdout'], dir);
+      assertExit(healthEq, 0);
+      assertOut(healthEq, '## 确定性层（机器可判）');
+      const scanEq = runSideScript(SIDE_CONTEXT_SCAN, ['--root=' + dir], dir);
+      assertExit(scanEq, 0);
+      assertOut(scanEq, 'CONTEXT-SCAN-DONE');
+
+      // ② 空格形 `--root <目录>`：向后兼容（三命令语义不变）
+      const evolveSpace = runSideScript(SIDE_EVOLVE, ['scan', '--root', dir], dir);
+      assertExit(evolveSpace, 0);
+      assertOut(evolveSpace, 'EVOLVE: 窗口');
+      const healthSpace = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir);
+      assertExit(healthSpace, 0);
+      assertOut(healthSpace, '## 确定性层（机器可判）');
+      const scanSpace = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
+      assertExit(scanSpace, 0);
+      assertOut(scanSpace, 'CONTEXT-SCAN-DONE');
+
+      // ③ `--help` / `-h`：三命令一律打印**自己的**用法后 exit 0（用法里各自列出自身命令形态）
+      const helpCases = [
+        { args: ['--help'], keywords: ['evolve.mjs scan', 'evolve.mjs apply', '--stdout'] },
+        { args: ['-h'], keywords: ['health.mjs', '--root', '--stdout'] },
+        { args: ['--help'], keywords: ['context-scan.mjs', '--root', '--stdout'] },
+      ];
+      const helpScripts = [SIDE_EVOLVE, SIDE_HEALTH, SIDE_CONTEXT_SCAN];
+      for (let i = 0; i < helpScripts.length; i += 1) {
+        const res = runSideScript(helpScripts[i], helpCases[i].args, dir);
+        assertExit(res, 0);
+        for (const keyword of helpCases[i].keywords) assertOut(res, keyword);
+      }
+      // 子命令之后的 `--help` 同样短路（不因缺候选 id 报用法错误）
+      const applyHelp = runSideScript(SIDE_EVOLVE, ['apply', '--help'], dir);
+      assertExit(applyHelp, 0);
+      assertOut(applyHelp, 'evolve.mjs apply');
+      // `--stdout` 三命令均被接受（evolve 的 scan 本就全量输出到标准输出）
+      assertExit(runSideScript(SIDE_EVOLVE, ['scan', '--stdout', '--root', dir], dir), 0);
+      // evolve 的 `--stdout` 语义 = 本次追加进报告的内容原样输出（与落盘块逐字节相同）；
+      // 命令自有取值开关的等号形同样走共享助手（`--scanner=<文本>`）
+      const applyOut = runSideScript(SIDE_EVOLVE,
+        ['apply', '2026-10-02-cli#1', '--root', dir, '--stdout', '--scanner=契约夹具扫描器'], dir);
+      assertExit(applyOut, 0);
+      assertOut(applyOut, 'EVOLVE-OK');
+      const today = requireModuleExport(timeUtilsModule, 'formatLocalDate', 'time-utils.mjs')(new Date());
+      const evolveReport = fs.readFileSync(path.join(dir, '.specs', 'evolve', today + '-EVOLVE.md'), 'utf8');
+      assertTrue(applyOut.output.includes(evolveReport),
+        '--stdout 输出应与落盘报告块逐字节一致（stdout 与文件各自渲染即漂移）');
+      assertTrue(fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8').includes('契约夹具扫描器'),
+        '命令自有取值开关（--scanner=<文本>）未生效');
+
+      // ④ 未知参数：三命令一律 exit 1 且点名该词元（既有退出码语义不变）
+      for (const script of helpScripts) {
+        const unknown = runSideScript(script, ['--bogus'], dir);
+        assertExit(unknown, 1);
+        assertOut(unknown, '未知参数: --bogus');
+      }
+      // 位置参数语义按命令自持：evolve 的 scan 拒位置参数、apply 缺候选 id 仍报用法错误
+      const scanExtra = runSideScript(SIDE_EVOLVE, ['scan', 'extra'], dir);
+      assertExit(scanExtra, 1);
+      assertOut(scanExtra, 'scan 不接受位置参数: extra');
+      const applyEmpty = runSideScript(SIDE_EVOLVE, ['apply', '--root', dir], dir);
+      assertExit(applyEmpty, 1);
+      assertOut(applyEmpty, 'apply 需要至少一个候选 id');
+      // 取值开关悬空 → 用法错误（三命令同一文案、同一退出码）
+      for (const script of helpScripts) {
+        const dangling = runSideScript(script, ['--root'], dir);
+        assertExit(dangling, 1);
+        assertOut(dangling, '--root 需要一个目录参数');
+      }
+
+      // ⑤ 结构锚：解析形态只此一处（共享助手）；两个消费方具名 import + 真实调用
+      const parseFace = new Map(helpScripts.map((script) => [path.basename(script), fs.readFileSync(script, 'utf8')]));
+      const rootTokenFiles = [...parseFace].filter(([, text]) => text.includes("'--root'")).map(([file]) => file);
+      assertEqual(rootTokenFiles.join(','), 'evolve.mjs',
+        '带引号的 `--root` 解析形态应只出现在共享助手一处（实际: ' + (rootTokenFiles.join(',') || '无') + '）');
+      const unknownTokenFiles = [...parseFace].filter(([, text]) => text.includes('未知参数: ')).map(([file]) => file);
+      assertEqual(unknownTokenFiles.join(','), 'evolve.mjs',
+        '「未知参数」构造应只出现在共享助手一处（实际: ' + (unknownTokenFiles.join(',') || '无') + '）');
+      for (const file of ['health.mjs', 'context-scan.mjs']) {
+        const text = parseFace.get(file);
+        assertTrue(hasNamedImport(text, './evolve.mjs', 'parseSideCommandArgs'),
+          file + ' 未从共享助手模块具名 import parseSideCommandArgs（第二份脚手架或未接线）');
+        assertTrue(text.includes('parseSideCommandArgs('), file + ' 未真实调用共享助手');
+      }
+    },
+  },
+
+  // 294: 损坏 state 的 fail-closed 与「首次运行」口径收窄 + 协议路径单源——
+  // ① state 文件在场但不可解析（含顶层非对象）→ `evolve scan` BLOCKED 且零写入，不再谎称
+  //    「无基线（首次运行，全量扫描）」把增量窗口静默退化为全量；② 「首次运行」只限
+  //    「state 可读且字段缺席」，state 不在场另有措辞（不冒充首次运行）；③ 协议路径走
+  //    state-schema 的唯一选择器：state.protocolPath 绑定**独占**（项目内约定副本坏掉也必须成功、
+  //    绑定本身坏掉也不回退候选布局），本模块零候选布局表。
+  {
+    name: '294 损坏 state fail-closed：scan/apply BLOCKED 零写入·首次运行口径收窄 + 协议路径走单源选择器',
+    run: (dir) => {
+      writeFile(dir, '.specs/archive/2026-10-02-state/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n### 可复用抽象\n\n- 状态口径夹具条目\n');
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      const stateFile = path.join(dir, '.flow-comet', 'flow-comet-state.json');
+      writeState(dir, baseState('open'));
+
+      // ① state 不在场：显式点名「state 不在场」，不冒充「首次运行」（全量扫描仍可用）
+      fs.rmSync(stateFile);
+      const noState = runSideScript(SIDE_EVOLVE, ['scan', '--root', dir], dir);
+      assertExit(noState, 0);
+      assertOut(noState, 'state 不在场');
+      assertNotOut(noState, '无基线（首次运行，全量扫描）');
+
+      // ② state 可读且字段缺席 = 唯一的「首次运行」口径（全量扫描）
+      writeState(dir, baseState('open'));
+      const firstRun = runSideScript(SIDE_EVOLVE, ['scan', '--root', dir], dir);
+      assertExit(firstRun, 0);
+      assertOut(firstRun, '无基线（首次运行，全量扫描）');
+      assertOut(firstRun, '窗口内 1 个');
+
+      // ③ 损坏 state（JSON 截断）：fail-closed —— BLOCKED + 零写入，不再退化成全量扫描
+      const stateText = fs.readFileSync(stateFile, 'utf8');
+      const truncated = stateText.slice(0, Math.max(1, Math.floor(stateText.length / 2)));
+      fs.writeFileSync(stateFile, truncated, 'utf8');
+      const damagedBytes = readStateBytes(dir);
+      const before = treeFingerprint(dir);
+      const blocked = runSideScript(SIDE_EVOLVE, ['scan', '--root', dir], dir);
+      assertExit(blocked, 1);
+      assertOut(blocked, 'BLOCKED');
+      assertOut(blocked, '无法解析');
+      assertNotOut(blocked, '首次运行');
+      assertNotOut(blocked, '候选清单');
+      assertEqual(readStateBytes(dir), damagedBytes, '损坏 state 的 scan 轮改写了 state');
+      assertEqual(fingerprintChanges(before, treeFingerprint(dir)).join(' | '), '',
+        '损坏 state 的 scan 轮有写入');
+
+      // ④ 顶层非对象（数组）同样判「不可信」——不得冒充「字段缺席」
+      fs.writeFileSync(stateFile, '[]\n', 'utf8');
+      const arrayState = runSideScript(SIDE_EVOLVE, ['scan', '--root', dir], dir);
+      assertExit(arrayState, 1);
+      assertOut(arrayState, 'BLOCKED');
+      assertOut(arrayState, '无法解析');
+
+      // ⑤ 损坏态下 apply 同样 fail-closed：目标文档 / 报告 / state 三处零改动
+      fs.writeFileSync(stateFile, truncated, 'utf8');
+      const contextBefore = fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8');
+      const applyBlocked = runSideScript(SIDE_EVOLVE, ['apply', '2026-10-02-state#1', '--root', dir], dir);
+      assertExit(applyBlocked, 1);
+      assertOut(applyBlocked, 'BLOCKED');
+      assertEqual(fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8'), contextBefore,
+        '损坏 state 的 apply 轮改写了目标文档');
+      assertTrue(!fs.existsSync(path.join(dir, '.specs', 'evolve')), '损坏 state 的 apply 轮落了报告');
+
+      // ⑥ 协议路径单源：state.protocolPath 绑定独占——项目内约定副本坏掉，绑定好 → 必须成功
+      //   （修复前的候选布局表先命中 <根>/reference/workflow-protocol.json → 子进程按坏协议 BLOCK）
+      writeFile(dir, '.specs/archive/2026-10-02-proto/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n### 可复用抽象\n\n- 协议绑定夹具条目\n');
+      fs.writeFileSync(path.join(dir, 'reference', 'workflow-protocol.json'),
+        '{"schemaVersion": 99, "nodes": []}\n', 'utf8');
+      fs.copyFileSync(SKILL_PROTOCOL_FILE, path.join(dir, 'bound-protocol.json'));
+      writeState(dir, { ...baseState('open'), protocolPath: 'bound-protocol.json' });
+      const bound = runSideScript(SIDE_EVOLVE, ['apply', '2026-10-02-proto#1', '--root', dir], dir,
+        { FLOW_COMET_PROTOCOL: '' });
+      assertExit(bound, 0);
+      assertOut(bound, 'EVOLVE-OK');
+      assertTrue(fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8').includes('协议绑定夹具条目'),
+        '状态绑定协议下的 apply 未落盘条目');
+
+      // ⑦ 绑定本身坏掉 → fail-closed 可见（不回退项目内约定副本），指引指向绑定修正
+      fs.copyFileSync(SKILL_PROTOCOL_FILE, path.join(dir, 'reference', 'workflow-protocol.json'));
+      fs.writeFileSync(path.join(dir, 'broken-protocol.json'), '{"schemaVersion": 99, "nodes": []}\n', 'utf8');
+      writeState(dir, { ...baseState('open'), protocolPath: 'broken-protocol.json' });
+      const brokenBytes = readStateBytes(dir);
+      const broken = runSideScript(SIDE_EVOLVE, ['apply', '2026-10-02-proto#1', '--root', dir], dir,
+        { FLOW_COMET_PROTOCOL: '' });
+      assertExit(broken, 1);
+      assertOut(broken, 'state 写入通道失败');
+      assertOut(broken, 'state.protocolPath');
+      assertEqual(readStateBytes(dir), brokenBytes, '绑定损坏的 apply 轮改写了 state');
+
+      // ⑧ 结构锚：本模块不再自持候选布局表；协议路径只经 state-schema 的唯一导出选择；
+      //    state 三态读入口两条侧命令共用一个实现（第二份内联即红）
+      const evolveText = fs.readFileSync(SIDE_EVOLVE, 'utf8');
+      assertTrue(hasNamedImport(evolveText, './state-schema.mjs', 'resolveProtocolPathWithState'),
+        'evolve.mjs 未从 state-schema.mjs 具名 import 协议路径选择器');
+      assertTrue(evolveText.includes('resolveProtocolPathWithState('), 'evolve.mjs 未真实调用协议路径选择器');
+      assertTrue(!evolveText.includes("'reference', 'workflow-protocol.json'"),
+        'evolve.mjs 仍自持项目内约定副本候选（第二套「协议在哪」表达）');
+      assertTrue(!evolveText.includes("'.flow-comet', 'skills'"),
+        'evolve.mjs 仍自持权威源布局候选（第二套「协议在哪」表达）');
+      const scanText = fs.readFileSync(SIDE_CONTEXT_SCAN, 'utf8');
+      assertTrue(hasNamedImport(scanText, './evolve.mjs', 'readStateInfo'),
+        'context-scan.mjs 未共用 state 三态读入口（第二份读盘实现）');
+      assertTrue(scanText.includes('readStateInfo('), 'context-scan.mjs 未真实调用共用的 state 读入口');
+      assertTrue(!/function\s+readStateFile\b/.test(scanText),
+        'context-scan.mjs 仍保留本地 state 读实现（三态判定第二份表达）');
     },
   },
 ];
