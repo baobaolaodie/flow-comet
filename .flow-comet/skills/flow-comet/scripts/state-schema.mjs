@@ -4,6 +4,7 @@
 // 只校验存在字段的类型。调用方负责 BLOCKED / exit(1) 处理。
 import path from 'path';
 import { resolveProtocol } from './protocol-utils.mjs';
+import { isValidTimestamp } from './time-utils.mjs';
 
 // ---------- 运行时路径常量（单一来源）----------
 // 「状态文件在哪」曾是一个被独立表达在 6 处的决策（协议 state.statePath、workflow-state 默认值、
@@ -95,6 +96,11 @@ export const STATE_FIELD_VALIDATORS = [
   { field: 'ai_context_doc', check: (v) => typeof v === 'string' || v === null },
   // auto-init-detection: 上次全量初始化扫描时间（ISO 日期字符串或 null）
   { field: 'last_intel_scan', check: (v) => typeof v === 'string' || v === null },
+  // evolve 元数据: 上次架构沉淀时刻（本地时间 + 显式偏移，兼容历史 `Z` 形态）。写通道 =
+  // `config set last_evolve_at`——脚本不直写该字段。形态或日历不可自洽的值一律 fail-closed 拒绝
+  // 写入（不修补不猜测，判定单一来源 = time-utils 的 isValidTimestamp）；「从未跑过 evolve」用
+  // **字段缺席**表达，故不接受 null（显式空值会让到期判定与缺席歧义）。
+  { field: 'last_evolve_at', check: (v) => isValidTimestamp(v) },
   // 协议来源绑定（init 持久化解析后的协议路径；旧 state 缺字段 = 未绑定，归属门禁渐进回退环境变量/默认）
   { field: 'protocolPath', check: (v) => typeof v === 'string' || v === null || v === undefined },
   // 审计历史（事件追加数组）：存在即必须是数组——非数组是审计历史损坏，一律 fail-closed 拒绝写入，
