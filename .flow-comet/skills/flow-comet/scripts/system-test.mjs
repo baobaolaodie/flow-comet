@@ -1175,6 +1175,15 @@ function assertTrue(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+// 跨过下一个秒边界（`last_intel_scan` 为秒级精度：同一秒内的两次写入取值可能相同，双落点漂移不可判）。
+// 轮询到「严格晚于目标秒」才返回——等待上限约 1.05s，比固定 sleep 短且不受调用时刻影响。
+function waitForNextSecond() {
+  const target = Math.floor(Date.now() / 1000) + 1;
+  while (Math.floor(Date.now() / 1000) <= target) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+  }
+}
+
 // 七段 CONTEXT 骨架（域语言段带模板表格表头；intel-scan 元数据段三字段齐——结构校验的通过形态）。
 // 与 guard-self-test.mjs 的同名夹具**同形镜像**（两份载体刻意独立、不互相 import：夹具若从被测模块
 // 派生，锚点会退化成同义反复）——改段名 / 字段名时必须两份同改（与词表镜像同纪律）。
@@ -6579,6 +6588,52 @@ const TEST_ITEMS = [
       assertOut(applied, '双落点一致 state = ');
       assertTrue(fs.existsSync(path.join(dir, '.specs', 'evolve', localDate() + '-EVOLVE.md')),
         '协议绑定链路下 EVOLVE 报告未落盘');
+    },
+  },
+
+  {
+    name: 'M7 扫描时刻双落点真实链路：先扫后 init 的漂移可见 + state 形态统一 + 重扫收敛 + 一致时静默',
+    run: (dir) => {
+      const parse = timeUtilsModule.parseTimestamp;
+      assertExit(runState(['init', CHANGE_ID, '--init-skip'], dir), 0);
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+
+      // ① 首扫：双落点建立（段侧与 state 同刻同形态）
+      const scan = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
+      assertExit(scan, 0);
+      assertOut(scan, 'CONTEXT-SCAN-DONE');
+      const scanned = readStateFile(dir).last_intel_scan;
+      assertTrue(readText(dir, '.specs/CONTEXT.md').includes(scanned), '首扫后段侧应与 state 同刻同形态');
+
+      // ② 真实时间流逝（跨过下一个秒边界）——秒级精度下同一秒内的两次写入取值可能相同，漂移不可判
+      waitForNextSecond();
+
+      // ③ 原症状顺序：`init --init-context` 记录扫描时刻——形态统一（本地时间 + 显式偏移）+ 漂移可见
+      const reinit = runState(['init', CHANGE_ID, '--init-context'], dir);
+      assertExit(reinit, 0);
+      assertOut(reinit, 'INIT-DONE');
+      const stateAfter = readStateFile(dir).last_intel_scan;
+      assertTrue(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/.test(stateAfter),
+        'init 写入的扫描时刻形态非「本地时间 + 显式偏移」: ' + stateAfter);
+      assertTrue(parse(stateAfter) > parse(scanned),
+        'init 写入的扫描时刻应晚于首扫（不得回退）: ' + stateAfter + ' vs ' + scanned);
+      assertTrue(readText(dir, '.specs/CONTEXT.md').includes(scanned),
+        'init 不应改写 CONTEXT 段（该段行的写通道是 context-scan）');
+      assertOut(reinit, 'INIT-NOTICE');
+      assertOut(reinit, stateAfter);
+      assertOut(reinit, scanned);
+      assertOut(reinit, 'context-scan');
+
+      // ④ 重扫收敛 → 双落点一致；此后未刷新路径的 init 零提示（不误报）
+      const converge = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
+      assertExit(converge, 0);
+      assertOut(converge, 'CONTEXT-SCAN-DONE');
+      const converged = readStateFile(dir).last_intel_scan;
+      assertTrue(readText(dir, '.specs/CONTEXT.md').includes(converged), '重扫后双落点应收敛');
+      const quiet = runState(['init', CHANGE_ID], dir);
+      assertExit(quiet, 0);
+      assertEqual(readStateFile(dir).last_intel_scan, converged, '未刷新路径应原样保留既有扫描时刻');
+      assertNotOut(quiet, 'INIT-NOTICE');
     },
   },
 ];

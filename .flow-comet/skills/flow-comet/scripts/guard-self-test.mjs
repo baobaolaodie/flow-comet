@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · flow-comet 引擎自测套件（场景数以 SCENARIOS.length 为准：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、计数一致性自检（场景数 + 系统测试集项数）、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退）、并行文件依赖检测（写写重叠强判前移 plan 出口 + read 读写弱判渐进 + 触发面排除 + 委托前保持锚 + 扩展名闭合）、directOverride 授权约束（协调者授权留痕正例 / 执行者自切无授权 BLOCK / 越界改 state hook 拦截 / 恢复双路径）、hook state 大小写变体拦截（win32/darwin 闭合 / 其他平台放行）、路由完成判定 fail-closed（缺/未知 status 畸形块不提前放行）、并行文件依赖路径归一化（`.` 段变体重叠检出）、运行时文件位置迁移（白名单搬移 / 迁移前备份与回退 / 新旧并存·符号链接·内容损坏三边界 / 失败保护 / gitignore 三形态保守纳管与幂等）、Comet 感知层剥离（classic 资产有无判定一致 / overlay 协议不再进入叠加分支 + 源码符号检索）、自检清单条目缺失显式报告、受控计划重校重签（replan 授权 fail-closed / 轮次上限与显式续轮 / 幂等空操作 / 重签后 execute 出口放行 / 校验不豁免与任务图分析单源锚）与强制推进留痕（advance-forced 事件 / status.forcedNodes 派生视图））
+// C1 · flow-comet 引擎自测套件（场景数以 SCENARIOS.length 为准：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、计数一致性自检（场景数 + 系统测试集项数）、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退）、并行文件依赖检测（写写重叠强判前移 plan 出口 + read 读写弱判渐进 + 触发面排除 + 委托前保持锚 + 扩展名闭合）、directOverride 授权约束（协调者授权留痕正例 / 执行者自切无授权 BLOCK / 越界改 state hook 拦截 / 恢复双路径）、hook state 大小写变体拦截（win32/darwin 闭合 / 其他平台放行）、路由完成判定 fail-closed（缺/未知 status 畸形块不提前放行）、并行文件依赖路径归一化（`.` 段变体重叠检出）、运行时文件位置迁移（白名单搬移 / 迁移前备份与回退 / 新旧并存·符号链接·内容损坏三边界 / 失败保护 / gitignore 三形态保守纳管与幂等）、Comet 感知层剥离（classic 资产有无判定一致 / overlay 协议不再进入叠加分支 + 源码符号检索）、自检清单条目缺失显式报告、受控计划重校重签（replan 授权 fail-closed / 轮次上限与显式续轮 / 幂等空操作 / 重签后 execute 出口放行 / 校验不豁免与任务图分析单源锚）与强制推进留痕（advance-forced 事件 / status.forcedNodes 派生视图）、扫描时刻双落点一致（init 侧的形态单一来源 + 漂移可见提示 + 段名/字段名跨文件一致））
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .flow-comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -2625,8 +2625,8 @@ const BARE_ISO_SIDE_COMMANDS = ['health.mjs', 'evolve.mjs', 'context-scan.mjs'];
 const BARE_ISO_ENGINE_WHITELIST = [
   {
     file: 'workflow-state.mjs',
-    count: 8,
-    reason: 'state 的机器字段时间戳（createdAt / last_intel_scan / 事件 at / 授权与覆盖时刻）：Z 形已随既有 state 与事件流持久化，迁移须同批处理历史值的解析与比较，留专门窗口（登记 KNOWN-ISSUES）',
+    count: 7,
+    reason: 'state 的机器字段时间戳（createdAt / 事件 at / 授权与覆盖时刻）：Z 形已随既有 state 与事件流持久化，迁移须同批处理历史值的解析与比较，留专门窗口（登记 KNOWN-ISSUES）；扫描时刻（last_intel_scan）已迁出本条——写入走 time-utils 的 nowTimestamp（场景 308 的形态锚 + 277 的单源消费面看守）',
   },
   {
     file: 'workflow-handoff.mjs',
@@ -2644,9 +2644,38 @@ const BARE_ISO_ENGINE_WHITELIST = [
     reason: 'L2 套件夹具构造的 round 覆盖时刻（测试载体，非人可见面）：随 state 时间形态迁移批次一并改',
   },
 ];
+// intel-scan 元数据「段名 / 字段名」字面量的跨文件一致判据（纯函数 + 合成输入可驱动）：双落点判据在
+// init 侧按「段名 + 字段名」定位段内取值，段行的写通道在 context-scan 侧——同一条命名决定落在两处
+// 声明里（单一来源收口须改到测试面之外的脚本，见场景 309 的登记）。字面量若各自漂移，init 侧会
+// **静默**退化成「段不在场」（零提示）——静默面正是该机制要消灭的形态，故此处让「两处声明逐字相等」
+// 可机检。返回问题描述数组（空数组 = 一致）。
+const INTEL_NAME_DECL_RE = /const\s+(INTEL_SECTION(?:_NAME)?|INTEL_FIELD(?:_NAME)?)\s*=\s*'([^']+)'/g;
+function intelMetadataNameDeclarations(text) {
+  const out = {};
+  for (const match of String(text).matchAll(INTEL_NAME_DECL_RE)) {
+    out[match[1].startsWith('INTEL_SECTION') ? 'section' : 'field'] = match[2];
+  }
+  return out;
+}
+function intelMetadataNameProblems(consumerText, producerText) {
+  const problems = [];
+  const consumer = intelMetadataNameDeclarations(consumerText);
+  const producer = intelMetadataNameDeclarations(producerText);
+  for (const role of ['section', 'field']) {
+    const label = role === 'section' ? '段名' : '字段名';
+    if (consumer[role] === undefined) { problems.push('init 侧未声明 intel-scan ' + label + '字面量'); continue; }
+    if (producer[role] === undefined) { problems.push('重扫命令侧未声明 intel-scan ' + label + '字面量'); continue; }
+    if (consumer[role] !== producer[role]) {
+      problems.push('intel-scan ' + label + '字面量两处声明不一致: init 侧 ' + JSON.stringify(consumer[role])
+        + ' / 重扫命令侧 ' + JSON.stringify(producer[role]) + '（段侧定位会静默退化为「段不在场」）');
+    }
+  }
+  return problems;
+}
+
 // 行注释剥离（`//` 之后非代码）：判据的语义是「代码里有没有裸拼接」，散文引用不算实现。
 // 字符串里的 `//`（URL 一类）会把其后内容当注释剥掉——只可能**少计**（判据变松），而白名单面
-// 另有精确条数锚（14 处）兜底；不为注释识别引入字符串感知的复杂度。
+// 另有精确条数锚（13 处）兜底；不为注释识别引入字符串感知的复杂度。
 function stripLineComments(text) {
   return text.split('\n').map((line) => {
     const at = line.indexOf('//');
@@ -14261,8 +14290,9 @@ const SCENARIOS = [
     },
   },
 
-  // 277: 单源结构锚——时间与窗口判据（formatLocalTimestamp / parseTimestamp / hasSection9 /
-  // isArchivedAfterTimestamp）在全引擎**各只有一处定义**，且四个消费脚本一律从 time-utils 取值。
+  // 277: 单源结构锚——时间与窗口判据（formatLocalTimestamp / nowTimestamp / parseTimestamp /
+  // hasSection9 / isArchivedAfterTimestamp）在全引擎**各只有一处定义**，且四个消费脚本一律从
+  // time-utils 取值（含 init 写扫描时刻的 nowTimestamp：形态单一来源是双落点一致的形态前提）。
   // 判别力边界（修正旧注释的夸大——「第二份内联实现必然让本场景变红」只在**同名**时成立）：
   //   ① 定义面按**同名定义**计数：同名第二份实现（函数声明 / const 箭头）即变红；
   //   ② 消费面按**具名 import 自 time-utils.mjs + 真实调用**判定（不是纯文本存在性）：消费脚本
@@ -14274,7 +14304,7 @@ const SCENARIOS = [
   {
     name: '277 单源结构锚：时间与窗口判据全引擎各一处定义，四个消费脚本零内联',
     run: () => {
-      const singleSource = ['formatLocalTimestamp', 'parseTimestamp', 'hasSection9', 'isArchivedAfterTimestamp'];
+      const singleSource = ['formatLocalTimestamp', 'nowTimestamp', 'parseTimestamp', 'hasSection9', 'isArchivedAfterTimestamp'];
       for (const name of singleSource) {
         const hits = engineDefinitionHits(name);
         assertEqual(hits.length, 1, name + ' 的定义面数量（全引擎应恰 1 处）实际 ' + JSON.stringify(hits));
@@ -14282,7 +14312,7 @@ const SCENARIOS = [
         assertEqual(hits[0].count, 1, name + ' 在 ' + hits[0].file + ' 内的定义处数');
       }
       const consumers = {
-        'workflow-state.mjs': ['isValidTimestamp', 'daysSince', 'hasSection9', 'isArchivedAfterTimestamp'],
+        'workflow-state.mjs': ['isValidTimestamp', 'daysSince', 'hasSection9', 'isArchivedAfterTimestamp', 'nowTimestamp', 'parseTimestamp'],
         'evolve.mjs': ['parseTimestamp', 'hasSection9', 'isArchivedAfterTimestamp', 'nowTimestamp'],
         'context-scan.mjs': ['nowTimestamp', 'formatLocalDate', 'archiveDateFromName'],
         'health.mjs': ['formatLocalTimestamp', 'formatLocalDate'],
@@ -15536,11 +15566,11 @@ const SCENARIOS = [
 
   // 298: 禁裸拼接静态锚（DESIGN R4 的落地）——时间形态 / 格式化的唯一权威是 time-utils.mjs：
   // 三条侧命令零容忍（人可见报告 / CLI 摘要行 / 备份名）；其余引擎脚本走**显式白名单 + 逐条理由**
-  // （既有 14 处都是已持久化的机器字段，迁移留专门窗口）。判别力两条：① 白名单判定是纯函数，
+  // （既有 13 处都是已持久化的机器字段，迁移留专门窗口）。判别力两条：① 白名单判定是纯函数，
   // 合成输入可驱动「条数漂移（增 / 减）」与「未登记文件」三态必报；② 合成引擎目录注入第二处
   // 裸拼接 → 检出必增（证明真实面判据不恒真空过）。
   {
-    name: '298 禁裸拼接静态锚：三侧命令零容忍 + 引擎 14 处显式白名单（逐条理由）+ 合成反向构造',
+    name: '298 禁裸拼接静态锚：三侧命令零容忍 + 引擎 13 处显式白名单（逐条理由）+ 合成反向构造',
     run: () => {
       // ① 三条侧命令零容忍（人可见面的时间形态只许走 time-utils）
       const sideHits = bareIsoTimestampHits(__dirname, BARE_ISO_SIDE_COMMANDS);
@@ -15549,7 +15579,7 @@ const SCENARIOS = [
 
       // ② 其余引擎脚本 = 精确白名单：条数逐文件相等 + 每条例外带非空理由
       const engineHits = bareIsoTimestampHits(__dirname).filter((hit) => !BARE_ISO_SIDE_COMMANDS.includes(hit.file));
-      assertEqual(engineHits.reduce((sum, hit) => sum + hit.count, 0), 14, '引擎既有裸拼接落点总数（白名单代数）');
+      assertEqual(engineHits.reduce((sum, hit) => sum + hit.count, 0), 13, '引擎既有裸拼接落点总数（白名单代数）');
       const problems = bareIsoWhitelistProblems(engineHits, BARE_ISO_ENGINE_WHITELIST);
       assertEqual(problems.length, 0, '白名单漂移: ' + problems.join(' | '));
       for (const entry of BARE_ISO_ENGINE_WHITELIST) {
@@ -15558,7 +15588,8 @@ const SCENARIOS = [
       }
 
       // ③ 白名单判定的判别力（纯函数 · 合成输入）：等价集合不报；三类漂移各自必报
-      const equivalent = [{ file: 'a.mjs', count: 8 }, { file: 'b.mjs', count: 4 }, { file: 'c.mjs', count: 1 }, { file: 'd.mjs', count: 1 }];
+      //    （合成等价集合的条数取真实白名单首条的当前值——它必须与常量同值，否则第 1 条断言即红）
+      const equivalent = [{ file: 'a.mjs', count: 7 }, { file: 'b.mjs', count: 4 }, { file: 'c.mjs', count: 1 }, { file: 'd.mjs', count: 1 }];
       const whitelist = BARE_ISO_ENGINE_WHITELIST.map((entry, index) => ({ ...entry, file: equivalent[index].file }));
       assertEqual(bareIsoWhitelistProblems(equivalent, whitelist).length, 0, '等价集合不应报白名单漂移');
       const newcomer = bareIsoWhitelistProblems([...equivalent, { file: 'newcomer.mjs', count: 1 }], whitelist);
@@ -15566,10 +15597,10 @@ const SCENARIOS = [
         '未登记文件的裸拼接未被判定: ' + JSON.stringify(newcomer));
       const grown = bareIsoWhitelistProblems(
         equivalent.map((hit, index) => (index === 0 ? { ...hit, count: hit.count + 1 } : hit)), whitelist);
-      assertTrue(grown.some((problem) => problem.includes('白名单 8 处 / 实际 9 处')),
+      assertTrue(grown.some((problem) => problem.includes('白名单 7 处 / 实际 8 处')),
         '白名单条数增长未被判定: ' + JSON.stringify(grown));
       const shrunk = bareIsoWhitelistProblems(equivalent.slice(1), whitelist);
-      assertTrue(shrunk.some((problem) => problem.includes('白名单 8 处 / 实际 0 处')),
+      assertTrue(shrunk.some((problem) => problem.includes('白名单 7 处 / 实际 0 处')),
         '已迁移落点未同步收窄白名单未被判定: ' + JSON.stringify(shrunk));
 
       // ④ 合成引擎目录反向构造：单处 → 检出 1；再注入一处 → 检出 2（判据不恒真空过）。
@@ -16027,6 +16058,129 @@ const SCENARIOS = [
         console.log('SKIP: 307 的上游实体面（flow-kit/prompts 为 vendored 上游面，可能结构性缺席）'
           + '——本次检出未校验「覆盖声明点名的上游文件真实在场」，请在 vendored 上游在场处重跑本套件');
       }
+    },
+  },
+
+  // 308: `last_intel_scan` 双落点一致（原症状顺序 · 真实链路）——先 `context-scan` 建双落点，真实时间
+  // 流逝后再跑 `init --init-context`：state 侧取值必须以**统一形态**（本地时间 + 显式偏移，经
+  // time-utils）写入；段侧不由 init 改写（段行的唯一写通道是 context-scan，其改写与备份实现只有
+  // 一份）；两者取值不一致时**必须有可见提示**并点名收敛命令——修复前是「写 `Z` 形态 + 段未更新 +
+  // 零提示」的静默漂移。反向控制：两处取值一致时零提示（不误报），且未刷新路径不改写既有取值。
+  {
+    name: '308 双落点一致：先扫后 init 的漂移可见 + state 形态统一 + 重扫收敛后零提示',
+    run: (dir) => {
+      const parse = requireModuleExport(timeUtilsModule, 'parseTimestamp', 'time-utils.mjs');
+      const extract = requireModuleExport(contextInitModule, 'extractContextStructure', 'context-init.mjs');
+      const readContext = () => fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8');
+      const readLandedState = () => JSON.parse(
+        fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8')).last_intel_scan;
+      // 段侧取值的读取口径与生产侧同源：结构提取定位字段 → 剥掉 markdown 引号（引号不是形态差异）
+      const readLandedSection = () => {
+        const field = extract(readContext()).metadata['intel-scan 元数据'];
+        return field === undefined ? undefined : field.last_intel_scan.value.replaceAll('`', '');
+      };
+
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeState(dir, baseState('open'));
+
+      // ① 首扫：双落点建立且同刻同形态
+      const scan = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
+      assertExit(scan, 0);
+      assertOut(scan, 'CONTEXT-SCAN-DONE');
+      const scanned = readLandedState();
+      assertEqual(readLandedSection(), scanned, '首扫后双落点应同刻同形态');
+
+      // ② 真实时间流逝——时间戳是秒级精度，同一秒内的两次写入取值可能相同（漂移不可判）
+      sleepSync(1100);
+
+      // ③ 原症状顺序：`init --init-context`（CONTEXT 校验通过路径 → 记录扫描时刻）
+      const reinit = runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-context']);
+      assertExit(reinit, 0);
+      assertOut(reinit, 'INIT-DONE');
+      const stateAfter = readLandedState();
+      assertTrue(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/.test(stateAfter),
+        'init 写入的扫描时刻形态非「本地时间 + 显式偏移」: ' + stateAfter);
+      assertTrue(parse(stateAfter) > parse(scanned),
+        'init 写入的扫描时刻应晚于首扫（不得回退）: ' + stateAfter + ' vs ' + scanned);
+      assertEqual(readLandedSection(), scanned, 'init 不应改写 CONTEXT 段（该段行的写通道是 context-scan）');
+      // 漂移不得静默：提示在场 + 两侧取值回显 + 点名收敛命令
+      assertOut(reinit, 'INIT-NOTICE');
+      assertOut(reinit, stateAfter);
+      assertOut(reinit, scanned);
+      assertOut(reinit, 'context-scan');
+
+      // ④ 收敛：重扫一次 → 双落点同刻同形态
+      const converge = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
+      assertExit(converge, 0);
+      assertOut(converge, 'CONTEXT-SCAN-DONE');
+      const converged = readLandedState();
+      assertEqual(readLandedSection(), converged, '重扫后双落点应收敛为同刻同形态');
+
+      // ⑤ 反向控制：取值一致时的 init（未授权刷新 → 原样保留既有扫描时刻）零提示
+      const quiet = runStateWithProtocol(dir, ['init', CHANGE_ID]);
+      assertExit(quiet, 0);
+      assertEqual(readLandedState(), converged, '未刷新路径应原样保留既有扫描时刻');
+      assertNotOut(quiet, 'INIT-NOTICE');
+    },
+  },
+
+  // 309: 漂移判据的形态边界与反向控制（判别力 + 零误报）——① **同一时刻的两种形态**（state 为历史
+  // `Z` 值、段侧为本地偏移）也判漂移：提示在场且点名形态差异（修复前该形态零提示、state 被原样保留）；
+  // ② 段缺席 = 无可比对面 → 零提示（不无中生有）；③ 段内取值不可解析（占位）→ 仍判漂移（不静默）；
+  // 提示一律不阻断 init（exit 0）；④ 判据输入端的两条命名声明（段名 / 字段名）跨文件逐字一致——
+  // 两处各写一份字面量是本机制的既有形态（单一来源收口须改到写边界外的脚本，见 SUMMARY 的已知接受），
+  // 故此处把「不得静默漂移」机检化：任一侧改名即红，而漂移的后果正是 ② 的静默路径。
+  {
+    name: '309 漂移判据边界：同刻不同形态必报 + 段缺席零误报 + 段内占位取值不静默 + 命名声明跨文件一致',
+    run: (dir) => {
+      const readContext = () => fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8');
+      const readLandedState = () => JSON.parse(
+        fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8')).last_intel_scan;
+
+      // ① state = `Z` 形态（历史写入的真实形态）；段 = 同一时刻的「本地时间 + 显式偏移」
+      const zForm = '2026-09-24T18:14:23Z';
+      const localForm = '2026-09-25T02:14:23+08:00';
+      writeState(dir, { ...baseState('open'), last_intel_scan: zForm });
+      writeFile(dir, '.specs/CONTEXT.md',
+        contextFixtureText().replace('`2026-09-01T10:00:00+08:00`', localForm));
+      const sameMoment = runStateWithProtocol(dir, ['init', CHANGE_ID]);
+      assertExit(sameMoment, 0);
+      assertOut(sameMoment, 'INIT-NOTICE');
+      assertOut(sameMoment, '同刻不同形态');
+      assertOut(sameMoment, zForm);
+      assertOut(sameMoment, localForm);
+      assertEqual(readLandedState(), zForm, '未刷新路径不得改写既有扫描时刻');
+
+      // ② 段缺席（CONTEXT 不含 intel-scan 段）→ 无可比对面 → 零提示
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText({ intelSection: false }));
+      const noSection = runStateWithProtocol(dir, ['init', CHANGE_ID + '-no-section']);
+      assertExit(noSection, 0);
+      assertNotOut(noSection, 'INIT-NOTICE');
+
+      // ③ 段内取值不可解析（占位形态）→ 仍判漂移（静默放过会让「段侧从未被正确写入」长期不可见）
+      writeFile(dir, '.specs/CONTEXT.md',
+        contextFixtureText().replace('`2026-09-01T10:00:00+08:00`', '`（待扫描）`'));
+      const placeholder = runStateWithProtocol(dir, ['init', CHANGE_ID + '-placeholder']);
+      assertExit(placeholder, 0);
+      assertOut(placeholder, 'INIT-NOTICE');
+      assertOut(placeholder, '（待扫描）');
+
+      // ④ 命名声明跨文件一致（结构锚 + 反向构造）：init 侧按段名 / 字段名定位段内取值，两处声明
+      //    漂移会让判据静默退化成 ② 的「无可比对面」——故两处字面量必须逐字相等，合成改写即红。
+      const consumerText = fs.readFileSync(path.join(__dirname, 'workflow-state.mjs'), 'utf8');
+      const producerText = fs.readFileSync(SIDE_CONTEXT_SCAN, 'utf8');
+      const namingProblems = intelMetadataNameProblems(consumerText, producerText);
+      assertEqual(namingProblems.length, 0, 'intel-scan 命名声明漂移: ' + namingProblems.join(' | '));
+      const tamperedSection = producerText.replace("'intel-scan 元数据'", "'intel-scan 元数据（漂移）'");
+      assertTrue(tamperedSection !== producerText, '反向构造前提不成立：重扫命令侧缺段名字面量声明');
+      assertTrue(intelMetadataNameProblems(consumerText, tamperedSection)
+        .some((problem) => problem.includes('段名字面量两处声明不一致')),
+      '段名漂移未被判定（判别力缺失）');
+      const tamperedField = producerText.replace("'last_intel_scan'", "'last_intel_scan_v2'");
+      assertTrue(tamperedField !== producerText, '反向构造前提不成立：重扫命令侧缺字段名字面量声明');
+      assertTrue(intelMetadataNameProblems(consumerText, tamperedField)
+        .some((problem) => problem.includes('字段名字面量两处声明不一致')),
+      '字段名漂移未被判定（判别力缺失）');
     },
   },
 ];

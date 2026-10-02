@@ -7,8 +7,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, SKILL_PROTOCOL_FILES, inspectWorkflowPathSegments } from './protocol-utils.mjs';
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, looksLikeObjectLiteral, writeJsonAtomic, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, toPersistedProtocolPath } from './state-schema.mjs';
-import { isValidTimestamp, daysSince, isArchivedAfterTimestamp, hasSection9, EVOLVE_STALE_DAYS, EVOLVE_DUE_NEW_ARCHIVE_CHANGES } from './time-utils.mjs';
-import { probeProject, classify, printDetection, validateContext, printGenerationGuide, skipInit } from './context-init.mjs';
+import { isValidTimestamp, daysSince, isArchivedAfterTimestamp, hasSection9, nowTimestamp, parseTimestamp, EVOLVE_STALE_DAYS, EVOLVE_DUE_NEW_ARCHIVE_CHANGES } from './time-utils.mjs';
+import { probeProject, classify, printDetection, validateContext, printGenerationGuide, extractContextStructure, skipInit } from './context-init.mjs';
 import { taskOpeningAttrs, taskBlocks } from './task-parsing.mjs';
 import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, resolveReentryDecision, resolveReplanDecision, analyzeDependencyGraph, findParallelWriteConflicts, isSingleSegmentChangeName, REENTRY_ROUND_LIMIT, REENTRY_TARGET_NODE_IDS, REPLAN_ROUND_LIMIT, EXECUTE_FAMILY_NODE_IDS } from './route-node.mjs';
 
@@ -744,6 +744,54 @@ async function runBridgeCheck() {
   }
 }
 
+// ---------- intel-scan 双落点一致性（init 的检测侧） ----------
+// `last_intel_scan` 是**双落点**字段：引擎 state（机器真相、schema 校验）与 `.specs/CONTEXT.md` 的
+// `## intel-scan 元数据` 段（项目可见）。段行的改写——含改写前备份与结构校验——只有 context-scan
+// 一条通道一份实现；init 侧因此**不写段**（在第二处复制段行改写判据必然与前者分叉），只承担两条：
+//   ① 形态对齐：state 侧取值一律经 time-utils 的 nowTimestamp()（本地时间 + 显式偏移），与
+//      context-scan 写入的形态同源；历史 `Z` 形态继续可解析（不迁移）。
+//   ② 漂移可见：写完后与段侧取值比对——不一致（含**同一时刻的两种形态**、段内取值不可解析）即
+//      输出可见提示并点名收敛命令；一致则静默（不误报）。
+const INTEL_SECTION_NAME = 'intel-scan 元数据';
+const INTEL_FIELD_NAME = 'last_intel_scan';
+
+// 段侧取值词元的归一：字段值可能写成 `` `2026-…` ``（markdown 引号）或裸值——引号不是形态差异，
+// 归一后再比对（否则引号形态会让提示恒亮 = 噪声，把「提示」变成没人看的行）。
+function normalizeIntelFieldValue(value) {
+  return String(value).trim().replace(/^`+/, '').replace(/`+$/, '').trim();
+}
+
+// 漂移判定（纯函数）：两侧取值不一致时返回差异类别，一致（或任一侧缺席）返回 null（不误报）。
+function intelScanDriftKind(stateValue, sectionValue) {
+  if (typeof stateValue !== 'string' || typeof sectionValue !== 'string') return null;
+  if (stateValue === sectionValue) return null;
+  const atSection = parseTimestamp(sectionValue);
+  if (Number.isNaN(atSection)) return '段内取值不是合法时间戳';
+  const atState = parseTimestamp(stateValue);
+  if (!Number.isNaN(atState) && atState === atSection) return '同刻不同形态';
+  return '刻与形态均不一致';
+}
+
+// 双落点比对（读盘 + 输出）：段侧文档缺席 / 段或缺字段不在场 = 无可比对面 → 静默（不无中生有）；
+// 检出漂移 → 可见提示（stdout，与 INIT-* 提示同族且不阻断 init），点名两侧取值与收敛命令。
+async function reportIntelScanDrift(contextFile, stateValue) {
+  let contextText;
+  try {
+    contextText = await fs.readFile(contextFile, 'utf8');
+  } catch {
+    return; // 段侧文档不可读 = 无可比对面
+  }
+  const fields = extractContextStructure(contextText).metadata[INTEL_SECTION_NAME];
+  if (!fields || !fields[INTEL_FIELD_NAME]) return; // 段或缺字段不在场 = 无可比对面
+  const landed = normalizeIntelFieldValue(fields[INTEL_FIELD_NAME].value);
+  const kind = intelScanDriftKind(stateValue, landed);
+  if (kind === null) return;
+  console.log('INIT-NOTICE: ' + INTEL_FIELD_NAME + ' 双落点不一致（' + kind + '）——引擎 state = '
+    + stateValue + '；`.specs/CONTEXT.md` 的 `## ' + INTEL_SECTION_NAME + '` 段 = ' + landed
+    + '。本命令只写 state（该段行的写通道是 context-scan）；运行 context-scan 即把两处收敛为'
+    + '同刻同形态（冲突时以 state 为准）。');
+}
+
 async function main() {
   // 协议解析: 协议加载 = resolveProtocol 解析路径 + 受保护读取 + fail-closed schema 校验
   // （读失败/校验失败直接 throw，沿用现有错误处理风格）
@@ -869,9 +917,12 @@ async function main() {
       // 项目级上下文字段跨 change 保留（迁移旧 state；--init-context 刷新扫描时间；--init-skip 记拒绝）
       ...(prevState?.ai_context_doc !== undefined ? { ai_context_doc: prevState.ai_context_doc } : {}),
       ...(initSkip ? { ai_context_doc: 'none' } : {}),
-      // last_intel_scan 仅在校验通过后写入（agent 生成 → 脚本校验 7 段 → 记录扫描时间）
+      // last_intel_scan 仅在校验通过后写入（agent 生成 → 脚本校验 7 段 → 记录扫描时间）；形态一律经
+      // time-utils 的 nowTimestamp()（本地时间 + 显式偏移）——与 context-scan 的落点形态同源，不在本
+      // 脚本内联第二份格式化。段侧**不在本命令的写面内**（该段行的改写与备份只有 context-scan 一份
+      // 实现）：两处取值不一致由 reportIntelScanDrift 检出并给出可见提示，不静默漂移。
       ...(ctxValid === true
-        ? { last_intel_scan: new Date().toISOString() }
+        ? { last_intel_scan: nowTimestamp() }
         : (prevState?.last_intel_scan !== undefined ? { last_intel_scan: prevState.last_intel_scan } : {})),
       // last_evolve_at 同为**项目级**字段（evolve 的跨 change 基线，写通道 = config set）——init 换
       // change 必须原样保留：丢了它，增量窗口静默退化为全量扫描、到期提示从此不再触发（保留判据与
@@ -879,6 +930,10 @@ async function main() {
       ...(prevState?.last_evolve_at !== undefined ? { last_evolve_at: prevState.last_evolve_at } : {})
     };
     await writeState(state);
+    // 扫描时刻的双落点一致性（state ↔ `.specs/CONTEXT.md` 的 `## intel-scan 元数据` 段）：本命令写
+    // state 后即比对段侧取值——不一致（含同一时刻的两种形态）输出可见提示并点名收敛命令；一致或
+    // 无可比对面则静默（不误报）。段行的写通道只有 context-scan，故此处是检测、不是第二份改写实现。
+    await reportIntelScanDrift(path.join(specsRoot, 'CONTEXT.md'), state.last_intel_scan);
     // init 创建 .specs/<id>/ 目录——文件即真相从 init 起成立，findActiveChange 立即可识别
     //（此前 init 后 next/status 报 No active change，与 SKILL 启动协议 init → next 矛盾）
     const specsChangeDir = path.join(specsRoot, changeName);
