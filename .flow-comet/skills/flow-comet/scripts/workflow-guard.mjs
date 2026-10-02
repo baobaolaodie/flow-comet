@@ -805,6 +805,7 @@ let templateSectionPatternsCache = null;
 
 const TEMPLATE_FALLBACK_SECTION_PATTERNS = {
   changeWhy: /^##\s*Why\b/im,
+  changeVisualTone: /^##\s*视觉调性/im,
   requirementUserStory: /^##\s*用户故事/im,
   requirementAcceptance: /##\s*(验收准则|验收标准|AC|Acceptance Criteria)/i,
   designDecisionList: /^##\s*\d*\.?\s*决策清单/m,
@@ -857,6 +858,51 @@ async function templateSectionPatterns() {
   templateSectionPatternsCache = result;
   templateSectionPatternsCacheRoot = runRoot;
   return result;
+}
+
+// ===== ui-design 适用性门控（前端判据 · 结构级，不做语义）=====
+// 协议 design 节点的 ui-design 绑定为 guarded，但它「仅前端」适用 ⇒ 出口自动补 required-skill
+// 声明对该绑定失效（须真实 skill-load 声明），判据不成立（非前端）时按 advisory 处理并在出口
+// 输出可见跳过行（不留假绿：跳过是显式记录，非静默省略）。
+// 判据必须结构性可判：CHANGE.md 的「视觉调性」段在场且段内不含字面「不适用」⇒ 前端；段缺席 /
+// 段内标注「不适用」⇒ 非前端。段名基准从 flow-kit/templates/CHANGE.md 派生（与 C2/M3 同源，
+// 模板缺失 → 内置骨架名），不做段名第二实现。
+// 登记表按 <nodeId>.<skill> 键控——只有登记在此且 enforcement==='guarded' 的绑定改变出口自动补
+// 语义，其余节点/绑定路径逐字不变（自动补语义改动面收敛于此表）。
+const APPLICABILITY_GATED_BINDINGS = new Set(['design.flow-comet-ui-design']);
+const VISUAL_TONE_NOT_APPLICABLE = '不适用';
+
+// 「视觉调性」段正文（段标题之后、下一个 H2 之前；段缺席 → null）
+async function visualToneSectionBody(changeName) {
+  if (!changeName) return null;
+  let text;
+  try {
+    text = await fs.readFile(path.join(runRoot, '.specs', changeName, 'CHANGE.md'), 'utf8');
+  } catch {
+    return null;
+  }
+  const headingPattern = (await templateSectionPatterns())
+    .pick('change', ['视觉调性'], TEMPLATE_FALLBACK_SECTION_PATTERNS.changeVisualTone);
+  let body = null;
+  for (const line of String(text).replace(/\uFEFF/g, '').split(/\r?\n/)) {
+    if (/^##\s+/.test(line)) {
+      if (body !== null) break; // 到达下一个 H2 → 本段结束
+      if (headingPattern.test(line)) body = '';
+      continue;
+    }
+    if (body !== null) body += line + '\n';
+  }
+  return body;
+}
+
+// 前端判据：{ applicable, reason }——applicable=true 表示本 change 判为前端项目
+async function frontendCriterion(changeName) {
+  const body = await visualToneSectionBody(changeName);
+  if (body === null) return { applicable: false, reason: '「视觉调性」段缺席（判非前端）' };
+  if (body.includes(VISUAL_TONE_NOT_APPLICABLE)) {
+    return { applicable: false, reason: '「视觉调性」段标注「不适用」（判非前端）' };
+  }
+  return { applicable: true, reason: '「视觉调性」段在场且未标注「不适用」（判前端）' };
 }
 
 // Fix 段标题从 <runRoot>/flow-kit/templates/TASK.md 派生（单一模板源 + 模块级缓存 + runRoot 键控）：
@@ -1488,6 +1534,25 @@ async function main() {
           process.exit(1);
         }
       } catch {}
+    }
+  }
+  // design 出口 ui-design 工件门（适用性分派）——前端判据（结构级）成立 ⇒ 要求 UI-DESIGN.md 在场
+  // （新 change 缺件 BLOCKED + 恢复指引；旧 change WARN 渐进不卡死，不静默放行）；判据不成立
+  // （非前端）⇒ 输出可见 `UI-DESIGN: skipped（非前端）` 后照常放行（显式跳过，不留假绿）。
+  if (node.id === 'design' && state.activeChange) {
+    const frontend = await frontendCriterion(state.activeChange);
+    if (!frontend.applicable) {
+      console.error('UI-DESIGN: skipped（非前端）——' + frontend.reason + '，不要求 UI-DESIGN.md');
+    } else if (!(await fileExists(path.join(runRoot, '.specs', state.activeChange, 'UI-DESIGN.md')))) {
+      const recovery = '补 .specs/' + state.activeChange + '/UI-DESIGN.md（加载 flow-comet-ui-design 并按其协议产出 design token / 反 AI-slop 自检），'
+        + '或在 .specs/' + state.activeChange + '/CHANGE.md 的「视觉调性」段标注「不适用」（非前端项目）后重试 exit design';
+      if (isNewChange(state)) {
+        console.error('BLOCKED: design 出口缺 UI-DESIGN.md——' + frontend.reason + '，前端项目须产出 UI-DESIGN.md');
+        console.error('恢复: ' + recovery);
+        process.exit(1);
+      }
+      console.error('UI-DESIGN WARN: 缺 .specs/' + state.activeChange + '/UI-DESIGN.md——' + frontend.reason + '（旧 change 渐进不阻断；新 change 将强制）');
+      console.error('恢复: ' + recovery);
     }
   }
   // plan exit 校验 TASK 含 task 块和 verify 字段
@@ -2299,11 +2364,17 @@ async function main() {
       }
     }
 
-  // 自动补 required-skill completedChecks——节点被完成即视为其实现 skill 已加载
+  // 自动补 required-skill completedChecks——节点被完成即视为其实现 skill 已加载。
+  // 分派（ui-design 门）：仅「guarded 且适用性判据成立（判前端）」的登记绑定停止自动补——该绑定
+  // 须真实 skill-load 声明，由下方 missingRequiredSkillChecks 拦截；判据不成立（非前端）或未
+  // 登记的绑定 → 逐字保持原自动补语义（其它节点/绑定不受影响）。
   if ((node.requiredSkillCalls ?? []).length > 0) {
     const checks = Array.isArray(evidence.completedChecks) ? evidence.completedChecks : [];
     for (const binding of node.requiredSkillCalls ?? []) {
       const check = 'required-skill:' + node.id + '.' + binding.skill;
+      const applicabilityGated = binding.enforcement === 'guarded'
+        && APPLICABILITY_GATED_BINDINGS.has(node.id + '.' + binding.skill);
+      if (applicabilityGated && (await frontendCriterion(state.activeChange)).applicable) continue;
       if (!checks.includes(check)) checks.push(check);
     }
     evidence.completedChecks = checks;
@@ -2329,6 +2400,15 @@ async function main() {
   const missingRequired = missingRequiredSkillChecks(node, evidence);
   if (missingRequired.length > 0) {
     console.error('BLOCKED: missing required Skill evidence: ' + missingRequired.join(', '));
+    // ui-design 门：适用性门控绑定缺的是「真实 skill-load 声明」（出口不再自动补写）——给出补齐路径
+    for (const binding of node.requiredSkillCalls ?? []) {
+      const check = 'required-skill:' + node.id + '.' + binding.skill;
+      if (missingRequired.includes(check) && APPLICABILITY_GATED_BINDINGS.has(node.id + '.' + binding.skill)) {
+        console.error('恢复: ' + check + ' 不再由出口自动补写（guarded + 适用性判据成立）——先加载 ' + binding.skill
+          + ' 并运行 workflow-state.mjs skill-load ' + node.id + ' ' + binding.skill
+          + ' --prompt <flow-kit/prompts/ 协议文件> 声明已加载后重试 exit');
+      }
+    }
     process.exit(1);
   }
   const missingAugmentations = missingAugmentationChecks(node, evidence);
