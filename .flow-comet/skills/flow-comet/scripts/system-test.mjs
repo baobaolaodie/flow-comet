@@ -1119,7 +1119,75 @@ function parseStatusOutput(root) {
   return JSON.parse(res.output.slice(start, end + 1));
 }
 
-// ---------- 系统测试项（A~L 十二类） ----------
+// ---------- 侧命令（evolve / health / context-scan）与 ui-design 门：真实命令链路材料 ----------
+// 与 guard-self-test 同构：判据走真实 CLI；零写入判据用树指纹（相对路径清单 + 文件 sha256）。
+const SIDE_EVOLVE = path.join(__dirname, 'evolve.mjs');
+const SIDE_HEALTH = path.join(__dirname, 'health.mjs');
+const SIDE_CONTEXT_SCAN = path.join(__dirname, 'context-scan.mjs');
+// 时间形态的单一来源：侧命令产物的日期分量按同一实现推导（测试侧不复制第二份格式化）
+const timeUtilsModule = await import(pathToFileURL(path.join(__dirname, 'time-utils.mjs')).href);
+const localDate = (value = new Date()) => timeUtilsModule.formatLocalDate(value);
+
+function runSideScript(script, args, root, envOverrides = {}) {
+  const res = spawnSync(process.execPath, [script, ...args], {
+    cwd: root,
+    env: { ...process.env, ...envOverrides },
+    encoding: 'utf8',
+    timeout: 120000,
+  });
+  return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+}
+
+function treeFingerprint(root) {
+  const rows = [];
+  const walk = (dir) => {
+    const entries = fs.readdirSync(dir, { withFileTypes: true })
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      const rel = path.relative(root, full).split(path.sep).join('/');
+      if (entry.isDirectory()) { rows.push(rel + '/'); walk(full); continue; }
+      rows.push(rel + ' ' + createHash('sha256').update(fs.readFileSync(full)).digest('hex'));
+    }
+  };
+  walk(root);
+  return rows.join('\n');
+}
+
+function readText(root, rel) {
+  return fs.readFileSync(path.join(root, rel), 'utf8');
+}
+
+function assertEqual(actual, expected, label) {
+  if (actual !== expected) {
+    throw new Error(label + '：期望 ' + JSON.stringify(expected) + '，实际 ' + JSON.stringify(actual));
+  }
+}
+
+function assertTrue(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+// 七段 CONTEXT 骨架（域语言段带模板表格表头；intel-scan 元数据段三字段齐——结构校验的通过形态）。
+// 与 guard-self-test.mjs 的同名夹具**同形镜像**（两份载体刻意独立、不互相 import：夹具若从被测模块
+// 派生，锚点会退化成同义反复）——改段名 / 字段名时必须两份同改（与词表镜像同纪律）。
+function contextFixtureText() {
+  return [
+    '# 项目上下文', '',
+    '## 项目概要', '', '- 夹具概要', '',
+    '## 技术栈', '', '- Node.js（ESM）', '',
+    '## 域语言', '', '| 术语 | 定义 |', '|---|---|', '| 夹具 | 测试用 |', '',
+    '## 已锁决策', '', '- [2026-09-01] 夹具决策 — 来自 @.specs/CONTEXT.md', '',
+    '## 默认偏好', '', '- 夹具偏好', '',
+    '## 既有抽象索引', '', '- 夹具既有抽象', '',
+    '## intel-scan 元数据', '',
+    '- **last_intel_scan**: 2026-09-01T10:00:00+08:00',
+    '- **scanner**: flow-comet',
+    '- **下次重扫建议**: 3 个月后', '',
+  ].join('\n');
+}
+
+// ---------- 系统测试项（A~M 十三类） ----------
 
 const TEST_ITEMS = [
   // ---------- A. 状态机与路由 ----------
@@ -6100,6 +6168,181 @@ const TEST_ITEMS = [
       const r = runState(['init', CHANGE_ID, '--init-skip'], dir);
       assertExit(r, 0);
       assertOut(r, 'EMPTY-REPO');
+    },
+  },
+
+  // ---------- M. 侧命令（evolve / health / context-scan）与 ui-design 门：真实命令链路 ----------
+
+  {
+    name: 'M1 evolve 真实链路：scan 零写入 → apply 落盘·报告·双落点 → 幂等 → 反例零改动',
+    run: (dir) => {
+      writeFile(dir, '.specs/archive/2026-09-10-fixture/DESIGN.md',
+        '# DESIGN\n\n## 5. 其它段\n\nOTHER-SECTION-MARKER\n\n## 9. 架构沉淀\n\n### 可复用抽象\n\n- 夹具抽象条目（真实链路）\n');
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeState(dir, baseState('open'));
+
+      const before = treeFingerprint(dir);
+      const scan = runSideScript(SIDE_EVOLVE, ['scan', '--root', dir], dir);
+      assertExit(scan, 0);
+      assertOut(scan, 'EVOLVE: 窗口');
+      assertOut(scan, '2026-09-10-fixture#1');
+      assertNotOut(scan, 'OTHER-SECTION-MARKER');
+      if (treeFingerprint(dir) !== before) throw new Error('scan 必须零写入（树指纹应逐项一致）');
+
+      const apply = runSideScript(SIDE_EVOLVE,
+        ['apply', '2026-09-10-fixture#1', '--root', dir, '--scanner', 'flow-comet-evolve'], dir);
+      assertExit(apply, 0);
+      assertOut(apply, 'EVOLVE-OK');
+      assertOut(apply, 'EVOLVE: 双落点一致 state = ');
+      const contextText = readText(dir, '.specs/CONTEXT.md');
+      if (!contextText.includes('夹具抽象条目（真实链路）')) throw new Error('目标段未出现已批准的条目');
+      if (!contextText.includes('来源 @.specs/archive/2026-09-10-fixture/DESIGN.md')) {
+        throw new Error('条目缺来源标注');
+      }
+      const evolveReport = path.join(dir, '.specs', 'evolve', localDate() + '-EVOLVE.md');
+      if (!fs.existsSync(evolveReport)) throw new Error('EVOLVE 报告未落盘: ' + evolveReport);
+      const state = readStateFile(dir);
+      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/.test(String(state.last_evolve_at))) {
+        throw new Error('双落点 state 侧形态非法: ' + JSON.stringify(state.last_evolve_at));
+      }
+      if (!contextText.includes(state.last_evolve_at)) throw new Error('双落点取值不一致（段侧与 state）');
+
+      const again = runSideScript(SIDE_EVOLVE, ['apply', '2026-09-10-fixture#1', '--root', dir], dir);
+      assertExit(again, 0);
+      assertOut(again, 'EVOLVE-OK');
+      const occurrences = readText(dir, '.specs/CONTEXT.md').split('夹具抽象条目（真实链路）').length - 1;
+      assertEqual(occurrences, 1, '重复应用同一候选的条目出现次数（幂等）');
+
+      const stateBefore = readStateBytes(dir);
+      const contextBefore = readText(dir, '.specs/CONTEXT.md');
+      const unknown = runSideScript(SIDE_EVOLVE, ['apply', 'no-such-id#1', '--root', dir], dir);
+      assertExit(unknown, 1);
+      assertOut(unknown, '候选 id 未找到');
+      if (!readStateBytes(dir).equals(stateBefore)) throw new Error('未知 id 反例改写了 state');
+      assertEqual(readText(dir, '.specs/CONTEXT.md'), contextBefore, '未知 id 反例改写了目标文档');
+
+      writeFile(dir, '.specs/archive/2026-09-11-contract/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n### 跨模块契约\n\n- 夹具契约条目\n');
+      const absent = runSideScript(SIDE_EVOLVE, ['apply', '2026-09-11-contract#1', '--root', dir], dir);
+      assertExit(absent, 1);
+      assertOut(absent, '目标文档不在场');
+      if (!readStateBytes(dir).equals(stateBefore)) throw new Error('目标文档缺席反例改写了 state');
+      assertEqual(readText(dir, '.specs/CONTEXT.md'), contextBefore, '目标文档缺席反例改写了目标文档');
+    },
+  },
+
+  {
+    name: 'M2 health 真实链路：确定性层 + 增补层两态自洽 + --stdout 与落盘一致 + 不写 state',
+    run: (dir) => {
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeFile(dir, '.specs/LESSONS.md', '# LESSONS\n\n### L-001 首条\n\n### L-002 次条\n');
+      writeState(dir, baseState('open'));
+      const stateBytes = readStateBytes(dir);
+
+      const res = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir);
+      assertExit(res, 0);
+      assertOut(res, '## 确定性层（机器可判）');
+      assertOut(res, '- 缺失编号（0）：无');
+      assertOut(res, '## 增补层（代码体检工具的 4 维结果 · 可选）');
+      assertOut(res, '## 降级声明');
+      assertOut(res, '## 易变行声明（两次运行的允许差异集合）');
+      // 两态自洽：在场判定与降级声明必须同向（环境决定哪一态，形态不得自相矛盾）
+      const present = res.output.includes('- **在场判定**：在场');
+      assertEqual(res.output.includes('- **brooks-lint**：在场'), present, '增补层在场判定与降级声明的同向性');
+      assertOut(res, present ? '- **来源标注（必填）**' : '- **brooks-lint**：不可用——探测面逐项未命中');
+
+      const reportFile = path.join(dir, '.specs', 'health', localDate() + '-HEALTH.md');
+      assertTrue(fs.existsSync(reportFile), '报告未按 <日期>-HEALTH.md 形态落盘: ' + reportFile);
+      assertEqual(fs.readFileSync(reportFile, 'utf8'), res.output, '--stdout 输出与落盘报告逐字节');
+      if (!readStateBytes(dir).equals(stateBytes)) throw new Error('health 改写了运行状态文件');
+
+      // 对照态：隔离 HOME/USERPROFILE（用户级落点全部缺席）→ 增补层逐项不在场仍 exit 0
+      const isolatedHome = path.join(dir, 'isolated-home');
+      fs.mkdirSync(isolatedHome, { recursive: true });
+      const isolated = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir,
+        { HOME: isolatedHome, USERPROFILE: isolatedHome });
+      assertExit(isolated, 0);
+      assertOut(isolated, '- **在场判定**：不在场——下列探测面逐项未命中（未安装 / 未加载）');
+      assertOut(isolated, '- **brooks-lint**：不可用——探测面逐项未命中');
+      assertOut(isolated, '## 确定性层（机器可判）');
+      if (!readStateBytes(dir).equals(stateBytes)) throw new Error('health 对照态改写了运行状态文件');
+    },
+  },
+
+  {
+    name: 'M3 context-scan 真实链路：init 后首扫建基线 → 工件变化 → 重扫出差分 + 双落点 + 不扰动路由',
+    run: (dir) => {
+      assertExit(runState(['init', CHANGE_ID, '--init-skip'], dir), 0);
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+
+      const first = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
+      assertExit(first, 0);
+      assertOut(first, 'CONTEXT-SCAN: 基线 无（本次为基线，无差异可比）');
+      assertOut(first, 'CONTEXT-SCAN-DONE');
+      const stateAfterFirst = readStateFile(dir);
+      assertEqual(stateAfterFirst.currentNode, 'open', '重扫不得改动路由字段 currentNode');
+      assertEqual(stateAfterFirst.activeChange, CHANGE_ID, '重扫不得改动 activeChange');
+
+      const contextText = readText(dir, '.specs/CONTEXT.md');
+      writeFile(dir, '.specs/CONTEXT.md',
+        contextText.replace('## 既有抽象索引\n', '## 既有抽象索引\n\n- 新增抽象条目（真实链路）\n'));
+      const second = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
+      assertExit(second, 0);
+      assertOut(second, '差异 新增 1 ');
+      assertOut(second, 'CONTEXT-SCAN-DONE');
+
+      const report = readText(dir, '.specs/context-scan/' + localDate() + '-SCAN.md');
+      assertTrue(report.includes('### 新增（1）'), '工件缺「新增（1）」段');
+      assertTrue(report.includes('新增抽象条目（真实链路）'), '工件的新增段未列出新增的抽象索引条目');
+      const stateAfterSecond = readStateFile(dir);
+      assertTrue(report.includes(stateAfterSecond.last_intel_scan), '工件与 state 的扫描时刻不一致');
+      assertTrue(readText(dir, '.specs/CONTEXT.md').includes(stateAfterSecond.last_intel_scan),
+        'CONTEXT 段侧与 state 的扫描时刻不一致（双落点）');
+
+      const status = runState(['status'], dir);
+      assertExit(status, 0);
+      assertEqual(parseStatusOutput(dir).currentNode, 'open', '重扫后 status 的节点推导');
+    },
+  },
+
+  {
+    name: 'M4 ui-design 门真实链路：entry design → 缺件 BLOCK → 补件·声明 → exit --apply 放行',
+    run: (dir) => {
+      assertExit(runState(['init', CHANGE_ID], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
+      writeIntakeArtifacts(dir);
+      fs.appendFileSync(path.join(dir, '.specs', CHANGE_ID, 'CHANGE.md'),
+        '\n## 视觉调性（Visual Tone）\n\n现代、克制的工具型界面。\n');
+      assertExit(runState(['record', 'open', '{"summary":"intake complete"}'], dir), 0);
+      assertExit(runGuard(['entry', 'open'], dir), 0);
+      assertExit(runGuard(['exit', 'open', '--apply'], dir), 0);
+
+      assertExit(runState(['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md'], dir), 0);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md',
+        '# DESIGN\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 0. 技术栈选定\n\nNode.js(ESM)\n\n## 决策清单\n\n- [ ] 循环路由\n');
+      assertExit(runState(['record', 'design', '{"summary":"design done"}'], dir), 0);
+      assertExit(runGuard(['entry', 'design'], dir), 0);
+
+      // 负例：前端判据成立（「视觉调性」段在场且未标不适用）而工件缺席 → BLOCKED + 恢复路径
+      const blocked = runGuard(['exit', 'design'], dir);
+      assertExit(blocked, 1);
+      assertOut(blocked, 'BLOCKED: design 出口缺 UI-DESIGN.md');
+      assertOut(blocked, '恢复: 补 .specs/' + CHANGE_ID + '/UI-DESIGN.md');
+
+      // 恢复：补工件 + 真实 skill-load 声明（出口不再自动补写该绑定）→ 出口放行并落状态
+      writeFile(dir, '.specs/' + CHANGE_ID + '/UI-DESIGN.md',
+        '# UI-DESIGN\n\n## 1. 设计 token\n\n- 主色 `oklch(0.6 0.1 250)`\n');
+      const undeclared = runGuard(['exit', 'design'], dir);
+      assertExit(undeclared, 1);
+      assertOut(undeclared, 'required-skill:design.flow-comet-ui-design');
+      assertOut(undeclared, '不再由出口自动补写');
+      assertExit(runState(['skill-load', 'design', 'flow-comet-ui-design', '--prompt', 'flow-kit/prompts/2a-ui-design.md'], dir), 0);
+      assertExit(runState(['record', 'design',
+        '{"summary":"design done with ui-design","completedChecks":["required-skill:design.flow-comet-design","required-skill:design.flow-comet-ui-design"]}'], dir), 0);
+      const passed = runGuard(['exit', 'design', '--apply'], dir);
+      assertExit(passed, 0);
+      assertOut(passed, 'ALL CHECKS PASSED');
+      assertNotOut(passed, 'UI-DESIGN: skipped');
     },
   },
 ];

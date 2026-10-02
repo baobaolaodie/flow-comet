@@ -12,6 +12,16 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **三条侧命令现以确定性脚本交付，而非散文说明**：架构沉淀同步（`evolve`）、健康巡检（`health`）与项目上下文重扫（`context-scan`）随包分发为脚本，**不进 8 节点流程**——一律显式调用，不参与路由，不读写节点证据，各自只写自己的报告。`evolve scan` 只读，列出上次同步以来的窗口内、归档设计文档中的沉淀候选；`evolve apply` 只写入逐项批准的条目，落报告并把同步时刻双落点记录。`health` 产出分层报告——机器可判读数、可选增补层与显式降级声明——同一冻结树上两次运行的可判行逐字节一致，允许的差异在报告内自行声明。`context-scan` 重扫项目上下文，与上次基线逐项比对，无可比对时显式说明。
+- **时间与到期判定的单一权威**：时间戳的生成、解析与到期窗口现由同一模块承担——落盘形态为本地时间 + 显式偏移，历史 UTC 形态继续兼容，分量回环校验拒绝日历不自洽的取值而不是静默滚动。状态视图在上次架构沉淀已到期时追加一行提示：或距上次同步超过阈值，或其后又新增了足够多带沉淀段的归档 change；未达阈值时保持静默。
+
+### 变更
+
+- **UI-DESIGN 绑定改为强制而非建议**：设计节点的 `flow-comet-ui-design` 绑定等级为 `guarded`，并由结构性判据决定是否适用——change 的视觉调性段在场且未标注「不适用」。前端 change 必须加载该技能、声明并产出 UI-DESIGN 工件；非前端 change 打印可见的跳过后两者都不要求；较早的 change 保持渐进告警。随包分发的技能文本、入口技能的绑定表与入口展开册陈述同一等级。**这对前端 change 是行为变更：设计出口会一直拦住，直到工件与声明到位，拦截时一并给出恢复路径。**
+- **两级回归基线随新增覆盖上移**：自测套件现记录 286 场景、系统测试集 90 项，两个计数继续受发布面机检约束。
+
 ## [1.6.1] - 2026-10-02
 
 本版本汇总 1.6.0 之后积累的工作：公开文档按「每个主题一个权威」重构，双语检查改为比较结构而非行数；维护文档纳入回归套件校验，并在跳过时显式说明跳过了什么；执行中被证明有缺陷的计划可经显式授权通道就地修订——重跑同一套检查且不做豁免、改写前留状态备份、每次使用留痕并设轮次上限；强制推进现在留痕并在状态视图中可见；把一个文件拆进多个任务却无声明顺序的计划在计划出口被拦；回归套件在夹具目录仍被占用时不再中止整轮。 ([#118](https://github.com/baobaolaodie/flow-comet/pull/118)) ([#120](https://github.com/baobaolaodie/flow-comet/pull/120)) ([#121](https://github.com/baobaolaodie/flow-comet/pull/121)) ([#126](https://github.com/baobaolaodie/flow-comet/pull/126)) ([#127](https://github.com/baobaolaodie/flow-comet/pull/127)) ([#128](https://github.com/baobaolaodie/flow-comet/pull/128)) ([#130](https://github.com/baobaolaodie/flow-comet/pull/130)) ([#131](https://github.com/baobaolaodie/flow-comet/pull/131)) ([#132](https://github.com/baobaolaodie/flow-comet/pull/132))

@@ -121,7 +121,7 @@ node .claude/skills/flow-comet/scripts/context-scan.mjs [--root <项目根>] [--
 | 节点 | Implementation | Required Calls | Enforcement |
 |------|---------------|----------------|-------------|
 | open | flow-comet-open | flow-comet-change, flow-comet-requirement | guarded |
-| design | flow-comet-design | flow-comet-design, flow-comet-ui-design (advisory，不要求声明) | guarded |
+| design | flow-comet-design | flow-comet-design, flow-comet-ui-design (guarded，仅前端适用——前端须先 skill-load 声明) | guarded |
 | plan | flow-comet-plan | flow-comet-task | guarded |
 | execute | flow-comet-execute | flow-comet-dev | guarded |
 | subagent-execute | flow-comet-subagent-execute | flow-comet-dev (handoff) | handoff-guarded |
@@ -130,6 +130,8 @@ node .claude/skills/flow-comet/scripts/context-scan.mjs [--root <项目根>] [--
 | archive | flow-comet-archive | flow-comet-integration | guarded |
 
 **新 change 严格模式**：`init` 创建的 change 标记为"新"（`newChange: true`）——新 change 下全部内容级检查强制 BLOCKED（处置标记/缓存证据/波次散文/越权委托/SUMMARY 完整性/进入证据等）；旧 change（历史遗留,无标记）保持渐进 WARN。执行者可通过 `status` 确认当前 change 的新旧。
+
+> **design 行绑定的前端适用性**：`flow-comet-ui-design` 与协议一致为 `guarded`，但只对**前端 change** 适用——前端项目须先用 Skill 工具加载该技能，再运行 `skill-load design flow-comet-ui-design --prompt flow-kit/prompts/2a-ui-design.md` 建标记，并在 record 载荷带 `required-skill:design.flow-comet-ui-design`（design 出口不再自动补写该条目，缺工件或缺声明即 BLOCKED 并给出恢复路径）；非前端项目不加载、不声明，出口打印可见的 `UI-DESIGN: skipped（非前端）` 后放行；旧 change 保持渐进，缺件仅 WARN。前端判据是结构级的：`CHANGE.md` 的「视觉调性」段在场且段内未标注「不适用」。
 
 **节点技能两层加载模型（入口层 · 双步硬规则）**：路由到节点后，以下两步**都不可跳过**：
 

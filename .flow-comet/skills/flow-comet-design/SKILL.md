@@ -107,11 +107,11 @@ The design node reads CHANGE.md and REQUIREMENT.md, then produces DESIGN.md thro
 
 | Skill | Enforcement | Reason |
 |-------|-------------|--------|
-| `flow-comet-ui-design` | Advisory（仅前端项目触发） | Produces UI-DESIGN.md with design tokens, anti-AI-slop check, visual north star——advisory 条目不要求 skill-load 声明（record D3 只校验执行者实际声明的 guarded 条目） |
+| `flow-comet-ui-design` | Guarded（仅前端项目触发） | Produces UI-DESIGN.md with design tokens, anti-AI-slop check, visual north star——前端 change 须先 `skill-load` 建标记并在 record 载荷带 `required-skill:design.flow-comet-ui-design`（出口不再自动补写）；非前端项目不加载不声明；旧 change 渐进 WARN |
 
 **加载声明（阶段层 · 双步硬规则）**：本节点技能已由入口路由经 Skill 工具加载（你正在阅读的就是它）；本节点 Required Skill Calls 的加载与声明同样不可跳过：
 
-1. 本节点的同名条目已随路由加载——同名 required 条目（`flow-comet-design`）无需重复加载，仅需运行下方声明命令（只读取 SKILL.md 文件不叫加载，**不得跳过**真正的 Skill 工具注入步骤）。`flow-comet-ui-design` 为 advisory 条目——仅前端项目用 Skill 工具加载其已装副本，非前端项目不加载不声明；若前端项目把 `required-skill:design.flow-comet-ui-design` 记入 completedChecks，也必须先运行对应 skill-load 声明（D3 校验声明过的条目）。
+1. 本节点的同名条目已随路由加载——同名 required 条目（`flow-comet-design`）无需重复加载，仅需运行下方声明命令（只读取 SKILL.md 文件不叫加载，**不得跳过**真正的 Skill 工具注入步骤）。`flow-comet-ui-design` 为 **guarded 但仅前端适用**的条目——前端项目用 Skill 工具加载其已装副本后**必须**运行对应 `skill-load` 声明建标记，并在 record 载荷带 `required-skill:design.flow-comet-ui-design`（出口不再自动补写该条目，缺声明即拦截）；非前端项目不加载不声明（出口打印可见的 `UI-DESIGN: skipped（非前端）` 后放行）；旧 change 保持渐进，缺件仅 WARN。
 2. 加载完成后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
 
 ```bash
