@@ -2373,18 +2373,48 @@ function contextFixtureText({ evolveSection = null, intelSection = true, tail = 
 // design 出口 ui-design 门夹具：CHANGE.md 的「视觉调性」段是结构级前端判据的输入面
 const VISUAL_TONE_APPLICABLE = '## 视觉调性（Visual Tone）\n\n现代、克制的工具型界面。\n';
 const VISUAL_TONE_NOT_APPLICABLE = '## 视觉调性（Visual Tone）\n\n不适用（非前端项目）。\n';
+// 负向标记的另外几种形态（判据不接受裸子串，只接受结构形态）：
+// 行首形态（标记 + 破折号理由，非独立行）
+const VISUAL_TONE_LINE_HEAD_MARKER = '## 视觉调性（Visual Tone）\n\n不适用 —— CLI 工具，无用户可见界面。\n';
+// 字段值位（`- 适用性：不适用`）
+const VISUAL_TONE_FIELD_MARKER = '## 视觉调性（Visual Tone）\n\n- 适用性：不适用（CLI 工具，无用户可见界面）\n';
+// 子维度字段（标签不是适用性标签）——结构形态在场，但主体是暗色主题，不得关掉整道门
+const VISUAL_TONE_SUBDIMENSION_FIELD = '## 视觉调性（Visual Tone）\n\n- 选定：克制工具型\n- 暗色主题：不适用\n';
+// 自然句子（标记词出现在行首与句内，但都不成结构形态）——不得据它把前端 change 改判非前端
+const VISUAL_TONE_NATURAL_SENTENCE = '## 视觉调性（Visual Tone）\n\n不适用于暗色主题，本 change 仅覆盖浅色分支。\n';
 
-function writeDesignExitFixture(dir, { newChange, visualTone, uiDesign, declareUiDesign, changeName = CHANGE_ID }) {
+// ui-design 门键控夹具：以内置协议副本（runGuardWithProtocol 指向的同一路径）为基准改写 design
+// 节点的 flow-comet-ui-design 绑定——'guarded'（默认形态，写回）/ 'advisory'（等级降级）/
+// 'absent'（删掉绑定）。协议副本是「门是否在场」的唯一输入面。
+function writeUiDesignBindingVariant(dir, variant) {
+  const file = scenarioProtocolPath(dir);
+  const protocol = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const design = (protocol.nodes ?? []).find((node) => node.id === 'design');
+  if (!design) throw new Error('内置协议缺 design 节点（夹具前提不成立）');
+  const kept = (design.requiredSkillCalls ?? []).filter((call) => call.skill !== 'flow-comet-ui-design');
+  if (variant !== 'absent') {
+    kept.push({
+      skill: 'flow-comet-ui-design', operation: 'require', scope: 'main', enforcement: variant, reason: 'UI-DESIGN（仅前端）',
+    });
+  }
+  design.requiredSkillCalls = kept;
+  fs.writeFileSync(file, JSON.stringify(protocol, null, 2) + '\n');
+}
+
+function writeDesignExitFixture(dir, {
+  newChange, visualTone, uiDesign, declareUiDesign, changeName = CHANGE_ID, changeTail = '', declareDesign = true,
+}) {
   writeFile(dir, 'flow-kit/templates/DESIGN.md', '# DESIGN 模板\n\n## 0. 技术栈选型\n## 1. 技术决策清单\n');
   const state = baseState('design');
   state.newChange = newChange === true;
   state.enteredNodes = ['design'];
-  const checks = ['required-skill:design.flow-comet-design'];
+  const checks = [];
+  if (declareDesign) checks.push('required-skill:design.flow-comet-design');
   if (declareUiDesign) checks.push('required-skill:design.flow-comet-ui-design');
   state.evidence.design = { summary: 'design done', completedChecks: checks };
   writeState(dir, state);
   writeFile(dir, '.specs/' + changeName + '/CHANGE.md',
-    '# CHANGE\n\n- **Change ID**: ' + changeName + '\n\n## Why（为什么做）\n\n夹具。\n\n' + visualTone);
+    '# CHANGE\n\n- **Change ID**: ' + changeName + '\n\n## Why（为什么做）\n\n夹具。\n\n' + visualTone + changeTail);
   writeFile(dir, '.specs/' + changeName + '/DESIGN.md',
     '# DESIGN\n\n- **Change ID**: ' + changeName + '\n\n## 0. 技术栈选型\n\nNode（纯脚本）\n\n## 1. 技术决策清单\n\n- [ ] 决策 1\n');
   if (uiDesign) {
@@ -14332,6 +14362,185 @@ const SCENARIOS = [
       assertOut(scan, 'after-baseline#1');
       assertNotOut(scan, 'before-baseline#');
       assertNotOut(scan, '无基线（首次运行，全量扫描）');
+    },
+  },
+
+  // 288: ui-design 工件门按协议绑定键控（负例面：协议删掉绑定）——闸门开关由协议里的 binding
+  // 表达（在场 ∧ 等级 = guarded），门禁侧只复用同一登记表 / requiredSkillCalls 查询，不存在第二份
+  // 键表。四类：负例（删绑定 → 门随绑定退场，且留可见「门未启用」行，不静默消失）/ 正例（绑定在
+  // 场且 guarded → 前端缺件仍 BLOCKED，键控未误伤既有语义）/ 越界（绑定缺席时 design 的另一
+  // guarded 绑定仍由出口自动补写——其它绑定路径逐字不变）/ 恢复（协议写回 guarded 绑定 → 门重新
+  // 拦住，键控是活判据不是一次性快照）。
+  {
+    name: '288 ui-design 门按协议绑定键控：删绑定门退场（可见行）/ 在场仍拦 / 其它绑定零改动 / 写回即恢复',
+    run: (dir) => {
+      // 负例：协议删掉该绑定 → 前端判据成立且缺件也不再拦（门随绑定退场）
+      writeUiDesignBindingVariant(dir, 'absent');
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: true,
+      });
+      const absent = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(absent, 0);
+      assertOut(absent, 'ALL CHECKS PASSED');
+      assertOut(absent, 'UI-DESIGN: 门未启用（协议 design 节点未登记 flow-comet-ui-design 绑定）');
+      assertNotOut(absent, 'BLOCKED');
+      assertNotOut(absent, 'UI-DESIGN: skipped');
+
+      // 越界：绑定缺席时 design 的另一 guarded 绑定（flow-comet-design）仍由出口自动补写——
+      // 零真实声明也放行，证明自动补语义只在登记表命中的绑定上改道
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: false, declareDesign: false,
+      });
+      const otherBindings = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(otherBindings, 0);
+      assertOut(otherBindings, 'ALL CHECKS PASSED');
+
+      // 正例：协议写回 guarded 绑定 → 同一夹具、同一 change 立刻恢复拦截（与既有语义逐字一致）
+      writeUiDesignBindingVariant(dir, 'guarded');
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: true,
+      });
+      const guardedInPlace = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(guardedInPlace, 1);
+      assertOut(guardedInPlace, 'BLOCKED: design 出口缺 UI-DESIGN.md');
+      assertNotOut(guardedInPlace, 'UI-DESIGN: 门未启用');
+
+      // 恢复：补齐工件 + 真实声明 → 出口放行（恢复路径未被键控改动波及）
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: true,
+      });
+      const recovered = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(recovered, 0);
+      assertOut(recovered, 'ALL CHECKS PASSED');
+    },
+  },
+
+  // 289: ui-design 工件门按协议绑定键控（负例面：等级降回 advisory）——`enforcement` 是该门的单一
+  // 表达处：等级非 guarded ⇒ 门不适用，且该绑定的出口自动补写回到未登记路径的原语义（声明照旧
+  // 由出口代记）。四类：负例（advisory → 不再拦）/ 正例（写回 guarded → 仍拦）/ 越界（同一节点
+  // 的另一绑定不受影响）/ 恢复（等级回到 guarded 即恢复拦截）。
+  {
+    name: '289 ui-design 门按协议等级键控：调回 advisory 不再拦且自动补写原语义 / 写回 guarded 即恢复',
+    run: (dir) => {
+      // 负例：等级调回 advisory → 缺工件 + 零真实声明也放行（自动补写保持原语义）
+      writeUiDesignBindingVariant(dir, 'advisory');
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: false,
+      });
+      const advisory = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(advisory, 0);
+      assertOut(advisory, 'ALL CHECKS PASSED');
+      assertOut(advisory, 'UI-DESIGN: 门未启用（协议 design 绑定等级 = advisory，非 guarded）');
+      assertNotOut(advisory, 'BLOCKED');
+      assertNotOut(advisory, 'UI-DESIGN: skipped');
+
+      // 越界：同一节点的另一 guarded 绑定零真实声明仍放行（自动补语义未被本次键控改道）
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: false, declareDesign: false,
+      });
+      const otherBindings = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(otherBindings, 0);
+      assertOut(otherBindings, 'ALL CHECKS PASSED');
+
+      // 正例：等级写回 guarded → 缺件与缺声明双拦截同时回来
+      writeUiDesignBindingVariant(dir, 'guarded');
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: true,
+      });
+      const guardedInPlace = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(guardedInPlace, 1);
+      assertOut(guardedInPlace, 'BLOCKED: design 出口缺 UI-DESIGN.md');
+      assertNotOut(guardedInPlace, 'UI-DESIGN: 门未启用');
+
+      // 恢复：补齐工件 + 真实声明 → 放行
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: true,
+      });
+      const recovered = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(recovered, 0);
+      assertOut(recovered, 'ALL CHECKS PASSED');
+    },
+  },
+
+  // 290: 前端判据的负向标记是结构约束（不是裸子串）——三种结构形态（独立行 / 行首 / 字段值位）
+  // 任一命中即判非前端并**回显命中片段**；自然句子与子维度字段里的标记词一律不关掉整道门。
+  // 四类：负例（行首的「不适用于暗色主题」与结构形态的 `- 暗色主题：不适用` → 仍判前端，前端
+  // 缺件照样 BLOCKED）/ 正例（独立行带括注、行首带理由、字段值位三种形态可见跳过并回显片段）/
+  // 越界（段外独立行不参与判据，判据限段内）/ 恢复（改段即放行）。
+  {
+    name: '290 负向标记结构约束：独立行·行首·字段值位跳过并回显片段 / 自然句子·子维度字段·段外标记不关闸',
+    run: (dir) => {
+      // 负例：自然句子（标记词在行首且后接「于」，句内再出现一次）→ 判据仍是前端 ⇒ 缺件 BLOCKED
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_NATURAL_SENTENCE, uiDesign: false, declareUiDesign: true,
+      });
+      const naturalSentence = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(naturalSentence, 1);
+      assertOut(naturalSentence, 'BLOCKED: design 出口缺 UI-DESIGN.md');
+      assertNotOut(naturalSentence, 'UI-DESIGN: skipped');
+      assertNotOut(naturalSentence, '命中片段');
+
+      // 负例（结构形态的越界面）：子维度字段 `- 暗色主题：不适用` 是结构形态但主体不是本 change
+      // 的适用性 ⇒ 仍判前端（标签表把可误伤的字段形态挡在外面）
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_SUBDIMENSION_FIELD, uiDesign: false, declareUiDesign: true,
+      });
+      const subDimensionField = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(subDimensionField, 1);
+      assertOut(subDimensionField, 'BLOCKED: design 出口缺 UI-DESIGN.md');
+      assertNotOut(subDimensionField, 'UI-DESIGN: skipped');
+
+      // 越界：标记出现在「视觉调性」段之外的独立行 → 不参与判据（判据限段内）
+      writeDesignExitFixture(dir, {
+        newChange: true,
+        visualTone: VISUAL_TONE_APPLICABLE,
+        changeTail: '\n## 范围排除（Out of Scope）\n\n不适用。\n',
+        uiDesign: false,
+        declareUiDesign: true,
+      });
+      const outsideSection = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(outsideSection, 1);
+      assertOut(outsideSection, 'BLOCKED: design 出口缺 UI-DESIGN.md');
+      assertNotOut(outsideSection, 'UI-DESIGN: skipped');
+
+      // 正例 A：独立行（带括注理由）→ 可见跳过 + 回显命中片段
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_NOT_APPLICABLE, uiDesign: false, declareUiDesign: false,
+      });
+      const standalone = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(standalone, 0);
+      assertOut(standalone, 'UI-DESIGN: skipped（非前端）');
+      assertOut(standalone, '命中片段: 不适用（非前端项目）。');
+      assertNotOut(standalone, 'BLOCKED');
+
+      // 正例 B：字段值位（`- 适用性：不适用（…）`）→ 同样判非前端（结构形态之二，非行首）
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_FIELD_MARKER, uiDesign: false, declareUiDesign: false,
+      });
+      const fieldValue = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(fieldValue, 0);
+      assertOut(fieldValue, 'UI-DESIGN: skipped（非前端）');
+      assertOut(fieldValue, '命中片段: - 适用性：不适用（CLI 工具，无用户可见界面）');
+      assertNotOut(fieldValue, 'BLOCKED');
+
+      // 正例 C：行首形态（标记 + 破折号理由，非独立行）→ 同样判非前端
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_LINE_HEAD_MARKER, uiDesign: false, declareUiDesign: false,
+      });
+      const lineHead = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(lineHead, 0);
+      assertOut(lineHead, 'UI-DESIGN: skipped（非前端）');
+      assertOut(lineHead, '命中片段: 不适用 —— CLI 工具，无用户可见界面。');
+      assertNotOut(lineHead, 'BLOCKED');
+
+      // 恢复：把调性段改成结构形态（标注路径）→ 同一 change 放行，命中片段一并回显
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_NOT_APPLICABLE, uiDesign: false, declareUiDesign: false,
+      });
+      const recovered = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(recovered, 0);
+      assertOut(recovered, 'UI-DESIGN: skipped（非前端）');
+      assertOut(recovered, '命中片段: 不适用（非前端项目）。');
     },
   },
 ];
