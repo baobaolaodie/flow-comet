@@ -73,6 +73,33 @@ description: "Use when the user wants the flow-comet managed workflow for flow-k
 | "跳过 entry 直接 exit,反正没检查" | 新 change 未 entry 直接 exit → BLOCKED(进入检查不可跳过);旧 change WARN 渐进 |
 | "SUMMARY 不写,任务先标 done" | 新 change done 任务缺 SUMMARY → BLOCKED(产物完整性强制);旧 change WARN 渐进 |
 | "subagent-execute 阶段，我直接改源码更快" | 协调者禁令：subagent-execute 阶段主会话禁止写源码（hook 白名单只允许 .specs/，Write/Edit 与 Bash 写命令均物理拦截），必须 worktree 委托子代理 |
+| "用户要健康检查 / 同步架构，我给他 init 一个新 change" | 三条侧命令（evolve / health / context-scan）**不进 8 节点流程**——它们不路由、不 entry/exit、不写节点证据；按下方「侧命令」小节的命令面直接执行即可 |
+
+## 侧命令（横向命令 · 不进 8 节点流程）
+
+随包分发的三条**侧命令**不属于 8 节点流程：不参与节点路由，不被 `entry` / `exit` 门禁校验，也不会在流程里自动触发——一律由用户**显式调用**，涉及写入的动作要**人工逐项确认**。用户表达下列意图时，**不要** `init` 新 change、**不要** `entry` / `exit` 任何节点，直接加载对应技能并按其协议执行：
+
+| 命令 | 触发词（用户怎么说） | 用途 | 落盘产物 | 技能 |
+|------|---------------------|------|---------|---------|
+| `evolve` | 同步架构 / 整理沉淀 / evolve / 同步 CONTEXT | 扫归档 change 设计文档的架构沉淀段（`§9`）→ 候选清单 → **逐项** review 后 patch 项目级文档 | `.specs/evolve/<日期>-EVOLVE.md` | `flow-comet-evolve` |
+| `health` | 健康检查 / health / 体检 / 技术债扫描 / 巡检 / 代码库健康度 | 确定性收集器出一份体检报告（代码体检工具在场时并入其 4 维结果并标注来源，缺席则显式降级声明） | `.specs/health/<日期>-HEALTH.md` | `flow-comet-health` |
+| `context-scan` | 重扫上下文 / 刷新 CONTEXT / context-scan | 重跑上下文探测 → 与上次基线逐项比对（新增 / 消失 / 变更）→ 更新扫描时间 | `.specs/context-scan/<日期>-SCAN.md` | 无独立技能，按下方命令面直接执行 |
+
+命令面（路径随安装平台替换——见「Scripts」小节的平台化说明；`--root` 缺省为当前目录）：
+
+```bash
+node .claude/skills/flow-comet/scripts/evolve.mjs scan [--root <项目根>]
+node .claude/skills/flow-comet/scripts/evolve.mjs apply <候选 id> [<候选 id> ...] [--root <项目根>] [--scanner <执行工具>]
+node .claude/skills/flow-comet/scripts/health.mjs [--root <项目根>] [--stdout]
+node .claude/skills/flow-comet/scripts/context-scan.mjs [--root <项目根>] [--stdout]
+```
+
+**共同边界**：
+
+- **只读优先**：任何写入都要显式参数或显式确认；侧命令不改业务代码，也不改 hook 判定语义。
+- **不进 change 生命周期**：不写 `currentNode` / `completedNodes` / 节点证据，不替代任何节点产出。`evolve` 落 `last_evolve_at`、`context-scan` 落 `last_intel_scan`，两者都是**项目级元数据**，不是流程进展。
+- **人工确认不可跳过**：`evolve` 的候选必须逐条 review 后才 `apply`，禁止一次性整批写入；`health` 只出报告与建议，是否立项由用户决定，它自己不开 change。
+- **到期提示**：`node .claude/skills/flow-comet/scripts/workflow-state.mjs status` 在 `last_evolve_at` 距今 > 60 天，或该时刻之后新增 ≥ 5 个带 `§9` 的归档 change 时，输出一行 `EVOLVE-DUE:`（含上次沉淀时间与「建议显式调用 evolve」指引）；未达阈值**零输出**（从未跑过 evolve、无该字段的项目同样不提示）。提示只是提醒——不自动加载也不自动执行 `evolve`，是否同步由用户决定。
 
 ## Workflow Nodes
 
