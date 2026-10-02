@@ -10,6 +10,8 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号记录于九处，由 CI 在发布面对账保持一致：发布 git tag；README 徽章、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 与本文档（各含两种语言）；权威源 `.flow-comet/skills/flow-comet/INSTALLED_VERSION`；以及 npm 包的 `package.json` 的 `version`。
 
+## [Unreleased]
+
 ## [1.6.1] - 2026-10-02
 
 本版本汇总 1.6.0 之后积累的工作：公开文档按「每个主题一个权威」重构，双语检查改为比较结构而非行数；维护文档纳入回归套件校验，并在跳过时显式说明跳过了什么；执行中被证明有缺陷的计划可经显式授权通道就地修订——重跑同一套检查且不做豁免、改写前留状态备份、每次使用留痕并设轮次上限；强制推进现在留痕并在状态视图中可见；把一个文件拆进多个任务却无声明顺序的计划在计划出口被拦；回归套件在夹具目录仍被占用时不再中止整轮。 ([#118](https://github.com/baobaolaodie/flow-comet/pull/118)) ([#120](https://github.com/baobaolaodie/flow-comet/pull/120)) ([#121](https://github.com/baobaolaodie/flow-comet/pull/121)) ([#126](https://github.com/baobaolaodie/flow-comet/pull/126)) ([#127](https://github.com/baobaolaodie/flow-comet/pull/127)) ([#128](https://github.com/baobaolaodie/flow-comet/pull/128)) ([#130](https://github.com/baobaolaodie/flow-comet/pull/130)) ([#131](https://github.com/baobaolaodie/flow-comet/pull/131)) ([#132](https://github.com/baobaolaodie/flow-comet/pull/132))
