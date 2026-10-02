@@ -2365,16 +2365,17 @@ async function main() {
     }
 
   // 自动补 required-skill completedChecks——节点被完成即视为其实现 skill 已加载。
-  // 分派（ui-design 门）：仅「guarded 且适用性判据成立（判前端）」的登记绑定停止自动补——该绑定
-  // 须真实 skill-load 声明，由下方 missingRequiredSkillChecks 拦截；判据不成立（非前端）或未
-  // 登记的绑定 → 逐字保持原自动补语义（其它节点/绑定不受影响）。
+  // 分派（ui-design 门）：仅「guarded 且适用性判据成立（判前端）」的登记绑定在**新 change**
+  // 上停止自动补——该绑定须真实 skill-load 声明，由下方 missingRequiredSkillChecks 拦截；
+  // 判据不成立（非前端）、旧 change（渐进兼容——自动补写保持原语义，工件门照常 WARN）或未登记
+  // 的绑定 → 逐字保持原自动补语义（其它节点/绑定不受影响）。
   if ((node.requiredSkillCalls ?? []).length > 0) {
     const checks = Array.isArray(evidence.completedChecks) ? evidence.completedChecks : [];
     for (const binding of node.requiredSkillCalls ?? []) {
       const check = 'required-skill:' + node.id + '.' + binding.skill;
       const applicabilityGated = binding.enforcement === 'guarded'
         && APPLICABILITY_GATED_BINDINGS.has(node.id + '.' + binding.skill);
-      if (applicabilityGated && (await frontendCriterion(state.activeChange)).applicable) continue;
+      if (applicabilityGated && isNewChange(state) && (await frontendCriterion(state.activeChange)).applicable) continue;
       if (!checks.includes(check)) checks.push(check);
     }
     evidence.completedChecks = checks;
