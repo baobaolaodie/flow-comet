@@ -23,7 +23,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { probeProject, classify, validateContext, printGenerationGuide, extractContextStructure } from './context-init.mjs';
 import { archiveDateFromName, formatLocalDate, nowTimestamp } from './time-utils.mjs';
-import { RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, validateStateFields } from './state-schema.mjs';
+import { RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, validateStateFields, writeJsonAtomic } from './state-schema.mjs';
 
 // 工件目录与命名（横向命令不在 change 生命周期内，落独立的领域目录）
 const SCAN_DIR_SEGMENT = 'context-scan';
@@ -279,21 +279,14 @@ function replaceContextTimestamp(contextText, structure, value) {
   return { text: lines.join('\n'), reason: null };
 }
 
-// 写引擎 state 的扫描时刻：路径与字段校验走 state-schema 的既有导出；写盘与引擎同形
-// （先写同目录临时文件再改名，目标要么旧内容要么新内容，不出现半写状态）。
+// 写引擎 state 的扫描时刻：路径与字段校验走 state-schema 的既有导出；写盘走同一原子写导出
+// （目标要么旧内容要么新内容，不出现半写状态；临时文件固定同目录，rename 不跨卷）。
 async function writeStateTimestamp(stateFile, state, value) {
   const bad = validateStateFields({ ...state, [INTEL_FIELD]: value });
   if (bad.length > 0) return { updated: false, reason: '字段校验不通过: ' + bad.join(', ') };
   const next = { ...state };
   next[INTEL_FIELD] = value;
-  const temporary = stateFile + '.tmp';
-  try {
-    await fs.writeFile(temporary, JSON.stringify(next, null, 2) + '\n', 'utf8');
-    await fs.rename(temporary, stateFile);
-  } catch (error) {
-    try { await fs.rm(temporary, { force: true }); } catch { /* 清理失败不掩盖原始写错误 */ }
-    throw error;
-  }
+  await writeJsonAtomic(stateFile, next);
   return { updated: true, reason: null };
 }
 

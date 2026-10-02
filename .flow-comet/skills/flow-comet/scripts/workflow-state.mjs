@@ -6,7 +6,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, SKILL_PROTOCOL_FILES, inspectWorkflowPathSegments } from './protocol-utils.mjs';
-import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, looksLikeObjectLiteral, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, toPersistedProtocolPath } from './state-schema.mjs';
+import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, looksLikeObjectLiteral, writeJsonAtomic, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, toPersistedProtocolPath } from './state-schema.mjs';
 import { isValidTimestamp, daysSince, isArchivedAfterTimestamp, hasSection9, EVOLVE_STALE_DAYS, EVOLVE_DUE_NEW_ARCHIVE_CHANGES } from './time-utils.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide, skipInit } from './context-init.mjs';
 import { taskOpeningAttrs, taskBlocks } from './task-parsing.mjs';
@@ -35,21 +35,10 @@ async function readJson(file) {
   return JSON.parse((await fs.readFile(file, 'utf8')).replace(/^﻿/, ''));
 }
 
-// JSON 写盘统一走原子写：先写同目录临时文件，再 rename 覆盖目标——目标文件要么是旧内容、
-// 要么是新内容，不会出现被截断的半写状态。写失败（磁盘满 / 权限 / 目标被占用）时清理临时文件
-// 后抛出，调用方按 fail-closed 处理。状态下发是单写者形态（机器字段只由脚本通道写），
-// 固定临时名与目标同目录，保证 rename 不跨卷。
-async function writeJson(file, value) {
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  const temporary = file + '.tmp';
-  try {
-    await fs.writeFile(temporary, JSON.stringify(value, null, 2) + '\n', 'utf8');
-    await fs.rename(temporary, file);
-  } catch (error) {
-    try { await fs.rm(temporary, { force: true }); } catch { /* 清理失败不掩盖原始写错误 */ }
-    throw error;
-  }
-}
+// JSON 写盘统一走状态层单一来源的原子写（state-schema.mjs 的 writeJsonAtomic → writeFileAtomic）：
+// 先写同目录临时文件再 rename 覆盖目标——目标要么旧内容、要么新内容，不会出现被截断的半写状态；
+// 写失败（磁盘满 / 权限 / 目标被占用）清理临时文件后抛出，调用方按 fail-closed 处理。mkdir recursive
+// 由该实现承担（.skill-loads/ 等标记目录不存在时创建）；状态下发是单写者形态（机器字段只由脚本通道写）。
 
 async function fileExists(file) {
   try { await fs.access(file); return true; } catch { return false; }
@@ -486,7 +475,7 @@ async function writeState(state) {
     console.error('BLOCKED: state 字段类型非法: ' + bad[0]);
     process.exit(1);
   }
-  await writeJson(statePath, state);
+  await writeJsonAtomic(statePath, state);
 }
 
 // .specs/ 下必须存在名字「逐字相等」的目录条目（change 名唯一性判据）。大小写不敏感文件系统
@@ -1221,7 +1210,7 @@ async function main() {
     if (promptArg !== null && !protocolUnderFlowKitPrompts(promptArg)) {
       throw new Error('skill-load --prompt 路径必须位于 flow-kit/prompts/ 下（flow-kit 为 vendored 上游，协议提示只读引用）: ' + promptArg);
     }
-    // 声明标记写入：.skill-loads/ 目录不存在时创建（writeJson 自带 mkdir recursive）；
+    // 声明标记写入：.skill-loads/ 目录不存在时创建（writeJsonAtomic 自带 mkdir recursive）；
     // 同 node-skill 重复调用覆盖（记录最新声明）
     const changeName = await findActiveChange();
     if (!changeName) {
@@ -1236,7 +1225,7 @@ async function main() {
     const marker = { node: nodeId, skill: skillName, protocol: promptArg === null ? null : path.basename(promptArg), at: new Date().toISOString() };
     // specsRoot 已含 .specs/，相对路径为 <change-id>/.skill-loads/<node>-<skill>.json
     const markerRel = path.posix.join(changeName, '.skill-loads', nodeId + '-' + skillName + '.json');
-    await writeJson(path.join(specsRoot, markerRel), marker);
+    await writeJsonAtomic(path.join(specsRoot, markerRel), marker);
     console.log('SKILL-LOAD: ' + nodeId + ' ' + skillName + ' → .skill-loads/' + nodeId + '-' + skillName + '.json');
     return;
   }
@@ -1338,7 +1327,7 @@ async function main() {
       // M5 标记目录解析:活动路径优先;change 已归档(活动目录不存在但归档目录存在)
       // 时写归档路径——防重建已归档的活动目录(归档移动语义;与 findSkillLoadsDir 双路径一致)。
       // 跳过条件:活动与归档均无 .skill-loads **且活动 change 目录已不存在**(归档移动后)
-      // ——此时 writeJson 的 mkdir recursive 会把已归档的活动目录残留回来(修复前实测缺陷);
+      // ——此时 writeJsonAtomic 的 mkdir recursive 会把已归档的活动目录残留回来(修复前实测缺陷);
       // 活动 change 目录仍存在(正常流程)时创建 .skill-loads 子目录是 M5 的正常职责,不跳过
       const activeLoadsDir = path.join(specsRoot, markerChange, '.skill-loads');
       let targetLoadsDir = activeLoadsDir;
@@ -1363,7 +1352,7 @@ async function main() {
             // 1-requirement.md 而非节点首文件 0-change.md——修复前所有 skill 都写首文件,
             // 标记的协议归属语义错误;exit 校验只查归属集合故能通过,但标记不可信)
             const skillProtoFiles = SKILL_PROTOCOL_FILES[binding.skill] ?? [];
-            await writeJson(markerFile, {
+            await writeJsonAtomic(markerFile, {
               node: nodeId,
               skill: binding.skill,
               protocol: skillProtoFiles.length > 0 ? skillProtoFiles[0] : null,

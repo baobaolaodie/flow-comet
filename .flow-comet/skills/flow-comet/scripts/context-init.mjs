@@ -9,6 +9,7 @@
 
 import { promises as fs } from 'fs';
 import path from 'path';
+import { EVOLVE_METADATA_SECTION, EVOLVE_METADATA_FIELDS } from './state-schema.mjs';
 
 // 既有 AI 上下文文档探测清单（与 flow-kit 入场判定同源：AGENTS/CLAUDE/Cursor/Windsurf/Copilot/Cline）
 const AI_DOC_CANDIDATES = [
@@ -169,6 +170,10 @@ async function contextSections(runRoot) {
   return derived ?? CONTEXT_SECTIONS_FALLBACK;
 }
 
+// `## evolve 元数据` 第三字段的**旧别名**：并行协作期两条产出线各自定名时留下的双写容差，全库
+// 无任何生产者，故已从通过判据移除（取值单形 = state-schema 的 EVOLVE_METADATA_FIELDS）。本常量
+// 只用于**提示**：既有文档带该别名时，报错文案点名它并给出应写字段，让格式问题可见且可改写。
+const EVOLVE_DEPRECATED_SUGGESTION_FIELD = '下次同步建议';
 // 模板关键格式检查（flow-kit/templates/CONTEXT.md 基准——段存在时校验其内格式，确定性检查）
 const CONTEXT_FORMAT_CHECKS = [
   {
@@ -199,16 +204,21 @@ const CONTEXT_FORMAT_CHECKS = [
   {
     // evolve 段是**可选段**：没跑过架构沉淀的项目不补段（缺席不报），跑过的项目段内三字段必须齐——
     // 「跑过一次但字段写残」正是最需要拦的半成品（段在场却少字段，元数据双落点会静默失真）。
-    name: 'evolve 元数据三字段',
+    // 段名与三字段名都取自 state-schema.mjs 的单一常量集（写方 evolve.mjs 同源），本处不再写字面量。
+    name: EVOLVE_METADATA_SECTION + '三字段',
     // 三字段判定**限定在段内**（sectionBody 切片）：全文 includes 会被别处的同名字段蒙混过关——
     // 例如 intel-scan 段有 `**scanner**` 而 evolve 段少这一个字段，全文判定照样放行。
-    applies: (t) => sectionBody(t, '## evolve 元数据') !== null,
+    applies: (t) => sectionBody(t, '## ' + EVOLVE_METADATA_SECTION) !== null,
+    // 通过判据是**单形**的：取值只认常量集（写方真实产出的三个字段名）。旧的协作期容差别名
+    // （`下次同步建议`）没有任何生产者，已从判据中移除——容纳它就是「校验集合 ⊃ 生产集合」，
+    // 写残的段会被静默放行。带旧别名的既有文档由下方 hint 给出可见的改写指引，不是静默失败。
     passes: (t) => {
-      const segment = sectionBody(t, '## evolve 元数据') ?? '';
-      return segment.includes('**last_evolve_at**') && segment.includes('**scanner**')
-        && (segment.includes('**下次建议**') || segment.includes('**下次同步建议**'));
+      const segment = sectionBody(t, '## ' + EVOLVE_METADATA_SECTION) ?? '';
+      return EVOLVE_METADATA_FIELDS.every((field) => segment.includes('**' + field + '**'));
     },
-    hint: '字段 last_evolve_at / scanner / 下次建议；与 intel-scan 段同构',
+    hint: '字段 ' + EVOLVE_METADATA_FIELDS.join(' / ') + '；与 intel-scan 段同构'
+      + '（旧别名「' + EVOLVE_DEPRECATED_SUGGESTION_FIELD + '」不再接受，请改写为「'
+      + EVOLVE_METADATA_FIELDS[2] + '」）',
   },
   {
     name: '域语言表格表头',

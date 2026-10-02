@@ -2256,6 +2256,7 @@ function vocabularyMirrorProblems(root = REPO_ROOT) {
 
 const timeUtilsModule = await import(pathToFileURL(path.join(__dirname, 'time-utils.mjs')).href);
 const contextInitModule = await import(pathToFileURL(path.join(__dirname, 'context-init.mjs')).href);
+const stateSchemaModule = await import(pathToFileURL(path.join(__dirname, 'state-schema.mjs')).href);
 
 const SIDE_EVOLVE = path.join(__dirname, 'evolve.mjs');
 const SIDE_HEALTH = path.join(__dirname, 'health.mjs');
@@ -2332,6 +2333,45 @@ function engineDefinitionHits(name) {
   }
   return hits;
 }
+
+// 具名 import 断言（容忍多行 / 符号重排 / 其它符号共存）：source 为模块说明符（`./state-schema.mjs`）。
+// 与场景 154 的内联写法同判据，本处提为复用工具（原子写与元数据常量两处消费面都要断言）。
+function hasNamedImport(text, source, name) {
+  const pattern = /import\s*\{([\s\S]*?)\}\s*from\s*['"]([^'"]+)['"]/g;
+  let match;
+  while ((match = pattern.exec(String(text))) !== null) {
+    if (match[2] !== source) continue;
+    const names = match[1].split(',').map((piece) => piece.trim().split(/\s+as\s+/).pop());
+    if (names.includes(name)) return true;
+  }
+  return false;
+}
+
+// 原子写惯用法指纹（两条件同现于一个文件）：`+ '.tmp'` 拼接 + `fs.rename(` 落位——即「同目录固定
+// 临时名 + rename」的写法。**收敛面 = 任务写边界内的写盘脚本**（状态/侧命令的state 与文档落盘），
+// 由调用方显式传入清单：`workflow-guard.mjs` 的受保护写入是**独立的安全硬化通道**（临时名含 pid +
+// 随机段、写后 fsync 与快照复核、保护目录校验），不属于本惯用法，且不在本任务写边界内——它的
+// 排除在场景里另有**边界锚**看守（形态一旦退回本惯用法即变红），不是静默跳过。
+// root 是可测性接缝（默认引擎脚本目录）：使「第二份实现 → 检出 2 处」能在合成目录上被场景驱动，
+// 否则该判据只能靠人工实验证明判别力、回归时可能被改成恒真空过（场景 291 反向构造）。
+// 套件自身不是引擎写盘面（夹具文本会携带惯用法样例），排除在扫描外。
+const ATOMIC_TEMP_SUFFIX_RE = /\+\s*'\.tmp'/g;
+const ENGINE_IDIOM_SCAN_EXCLUDE = new Set(['guard-self-test.mjs', 'system-test.mjs']);
+function atomicWriteIdiomHits(root = __dirname, files = null) {
+  const candidates = files ?? fs.readdirSync(root).sort()
+    .filter((file) => file.endsWith('.mjs') && !ENGINE_IDIOM_SCAN_EXCLUDE.has(file));
+  const hits = [];
+  for (const file of candidates) {
+    const text = fs.readFileSync(path.join(root, file), 'utf8');
+    const count = (text.match(ATOMIC_TEMP_SUFFIX_RE) ?? []).length;
+    if (count > 0 && text.includes('fs.rename(')) hits.push({ file, count });
+  }
+  return hits;
+}
+// 原子写收敛面（本任务写边界内的写盘脚本 + 单源模块）：全引擎只应有 state-schema.mjs 一处实现。
+const ATOMIC_WRITE_CONVERGENCE_FACE = [
+  'state-schema.mjs', 'workflow-state.mjs', 'workflow-handoff.mjs', 'evolve.mjs', 'context-scan.mjs',
+];
 
 // CONTEXT.md 夹具（七段骨架 + 可选 evolve 段）——夹具不装 flow-kit 模板时 validateContext
 // 取内置基准段名；`intel-scan 元数据` / `evolve 元数据` 字段行与模板同形。
@@ -5929,16 +5969,8 @@ const SCENARIOS = [
       assertOut(res, 'SINGLE SOURCE OK');
 
       // ===== F-3（AC-5）：三消费脚本 execute 家族成员单一来源静态锁 ====
-      // ① import 断言：枚举 import 语句后匹配 source + 具名符号（容忍重排/多行/其它符号共存）。
-      const importRe = /import\s*\{([\s\S]*?)\}\s*from\s*['"]([^'"]+)['"]/g;
-      const hasNamedImport = (text, source, name) => {
-        importRe.lastIndex = 0;
-        let m;
-        while ((m = importRe.exec(text)) !== null) {
-          if (m[2] === source && m[1].split(',').some((s) => s.trim() === name)) return true;
-        }
-        return false;
-      };
+      // ① import 断言走模块级 hasNamedImport（同一判据只实现一次——本场景原先内联了同形闭包，
+      // 两处实现会在容忍面上漂移）。
       // ② 内联 pair 检测器：`=== 'execute'` 与 `=== 'subagent-execute'` 经 `||` 直连（正反顺序）。
       // 只命中双侧 === || === 组合；单节点分支（&& / 单 compare）、协议判定、证据键不命中
       //（下方合成正/负例自锚，防检测器退化为永不生效或误伤允许形态）。
@@ -14541,6 +14573,151 @@ const SCENARIOS = [
       assertExit(recovered, 0);
       assertOut(recovered, 'UI-DESIGN: skipped（非前端）');
       assertOut(recovered, '命中片段: 不适用（非前端项目）。');
+    },
+  },
+
+  // 291: 原子写单一来源——「同目录固定 `.tmp` + rename + 失败清理」惯用法在收敛面（状态 / 侧命令 /
+  // handoff 的写盘脚本 + 单源模块）内恰一处实现（落点 = 既有单源模块 state-schema.mjs），三个侧命令
+  // 与 handoff 的 state 直写一律消费同一导出、零内联。判别力两条：① 具名导出被真实消费（import +
+  // 调用，不是纯文本存在性）；② **合成目录反向构造**——把第二份实现丢进合成引擎目录，检出数必须
+  // 从 1 变 2（证明检出不恒真空过）。guard 的受保护写入按边界锚显式排除，不静默跳过。
+  {
+    name: '291 原子写单一来源：收敛面内一处实现 + 四消费方零内联 + 合成反向构造判别力',
+    run: async () => {
+      // ① 惯用法唯一实现（收敛面 = 本任务写边界内的写盘脚本 + 单源模块）
+      const idiom = atomicWriteIdiomHits(__dirname, ATOMIC_WRITE_CONVERGENCE_FACE);
+      assertEqual(idiom.length, 1, '原子写惯用法实现面（收敛面内应恰 1 处）实际 ' + JSON.stringify(idiom));
+      assertEqual(idiom[0].file, 'state-schema.mjs', '原子写惯用法落点文件');
+      assertEqual(idiom[0].count, 1, 'state-schema.mjs 内惯用法处数');
+
+      // ①b 边界锚（可见，不静默排除）：guard 的受保护写入是独立安全硬化通道——唯一临时名 + 快照
+      // 复核；形态一旦退回「固定 `<目标>.tmp`」惯用法即变红，强制重新评估它是否落回收敛面。
+      const guardText = fs.readFileSync(path.join(__dirname, 'workflow-guard.mjs'), 'utf8');
+      assertTrue(guardText.includes('String(process.pid)') && /Math\.random\(\)\.toString\(16\)/.test(guardText),
+        'workflow-guard 的受保护写入不再是「唯一临时名」硬化通道——须重新评估原子写收敛面');
+      assertTrue(hasNamedImport(guardText, './state-schema.mjs', 'RUNTIME_STATE_PATH'),
+        'workflow-guard 未从 state-schema.mjs import 运行时路径常量（单源关系被破坏，收敛面须重评）');
+
+      // ② 具名导出唯一定义 + 行为可用（落盘、无临时残留、失败路径 fail-closed）
+      const writeAtomic = requireModuleExport(stateSchemaModule, 'writeFileAtomic', 'state-schema.mjs');
+      const definition = engineDefinitionHits('writeFileAtomic');
+      assertEqual(definition.length, 1, 'writeFileAtomic 定义面（全引擎应恰 1 处）实际 ' + JSON.stringify(definition));
+      assertEqual(definition[0].file, 'state-schema.mjs', 'writeFileAtomic 定义文件');
+      const probe = makeTmp();
+      try {
+        const target = path.join(probe, 'nested', 'out.json');
+        await writeAtomic(target, '{"ok":true}\n');
+        assertEqual(fs.readFileSync(target, 'utf8'), '{"ok":true}\n', '原子写落盘内容');
+        assertTrue(!fs.existsSync(target + '.tmp'), '原子写成功路径不得残留临时文件');
+        const blocked = path.join(probe, 'blocked.txt');
+        fs.mkdirSync(blocked + '.tmp');
+        let thrown = null;
+        try { await writeAtomic(blocked, '半写'); } catch (e) { thrown = e; }
+        assertTrue(thrown !== null, '临时路径被占用时原子写必须抛错（fail-closed）');
+        assertTrue(!fs.existsSync(blocked), '失败路径不得留下半写目标文件');
+      } finally {
+        cleanupTmpDir(probe);
+      }
+
+      // ③ 四个消费方：具名 import 自 state-schema.mjs + 真实调用 + 零内联第二份实现
+      const consumers = {
+        'workflow-state.mjs': 'writeJsonAtomic',
+        'workflow-handoff.mjs': 'writeJsonAtomic',
+        'evolve.mjs': 'writeFileAtomic',
+        'context-scan.mjs': 'writeJsonAtomic',
+      };
+      for (const [file, symbol] of Object.entries(consumers)) {
+        const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
+        assertTrue(hasNamedImport(text, './state-schema.mjs', symbol),
+          file + ' 未从 state-schema.mjs import ' + symbol + '（单源纪律：写盘不得在本脚本内联第二份）');
+        assertTrue(text.includes(symbol + '('), file + ' 未真实消费 ' + symbol + '（单一权威应被调用）');
+        const inline = (text.match(ATOMIC_TEMP_SUFFIX_RE) ?? []).length;
+        assertEqual(inline, 0, file + ' 仍内联原子写惯用法（第二份实现）处数');
+      }
+
+      // ④ 反向构造：合成引擎目录（单文件 1 处 → 检出 1；再放第二份实现 → 检出 2）——
+      // 证明③的判据确实会因第二份实现变红，而非恒真空过。
+      const synthetic = makeTmp();
+      try {
+        writeFile(synthetic, 'single.mjs',
+          "export async function duplicateWriter(file, text) {\n"
+          + "  const temporary = file + '.tmp';\n"
+          + '  await fs.writeFile(temporary, text);\n'
+          + '  await fs.rename(temporary, file);\n'
+          + '}\n');
+        assertEqual(atomicWriteIdiomHits(synthetic).length, 1, '合成目录单实现检出数');
+        writeFile(synthetic, 'second.mjs',
+          "async function anotherWriter(file, text) {\n"
+          + "  const temporary = file + '.tmp';\n"
+          + '  await fs.writeFile(temporary, text);\n'
+          + '  await fs.rename(temporary, file);\n'
+          + '}\n');
+        assertEqual(atomicWriteIdiomHits(synthetic).length, 2, '合成目录第二份实现检出数（判据须变红）');
+      } finally {
+        cleanupTmpDir(synthetic);
+      }
+    },
+  },
+
+  // 292: evolve 元数据字段面单一来源——`## evolve 元数据` 的段名与三字段名在 state-schema.mjs
+  // 唯一导出，写方（evolve）与校验方（context-init）同源消费、零内联字面量；容差收窄到单形：
+  // 无生产者的旧别名「下次同步建议」不再被静默接受，而是**可见**的格式提示（点名旧别名 + 应改
+  // 写的字段名）。写→校一致性用真实链路：evolve apply 生成的段必须零格式问题通过校验。
+  {
+    name: '292 evolve 元数据单一来源：常量集唯一导出·写校同源·旧别名收窄为可见提示',
+    run: async (dir) => {
+      // ① 常量集唯一导出 + 取值单形（去掉无生产者的旧别名是**取值**层面的收窄）
+      for (const name of ['EVOLVE_METADATA_SECTION', 'EVOLVE_METADATA_FIELDS']) {
+        const hits = engineDefinitionHits(name);
+        assertEqual(hits.length, 1, name + ' 定义面（全引擎应恰 1 处）实际 ' + JSON.stringify(hits));
+        assertEqual(hits[0].file, 'state-schema.mjs', name + ' 定义文件');
+      }
+      const section = requireModuleExport(stateSchemaModule, 'EVOLVE_METADATA_SECTION', 'state-schema.mjs');
+      const fields = requireModuleExport(stateSchemaModule, 'EVOLVE_METADATA_FIELDS', 'state-schema.mjs');
+      assertEqual(section, 'evolve 元数据', '段名常量取值');
+      assertEqual(fields.join(','), ['last_evolve_at', 'scanner', '下次建议'].join(','), '三字段常量取值');
+
+      // ② 写方与校验方同源消费 + 零内联字面量（第二份表达即变红）
+      for (const file of ['evolve.mjs', 'context-init.mjs']) {
+        const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
+        assertTrue(hasNamedImport(text, './state-schema.mjs', 'EVOLVE_METADATA_SECTION'),
+          file + ' 未从 state-schema.mjs import 段名常量');
+        assertTrue(text.includes('EVOLVE_METADATA_FIELDS'), file + ' 未消费字段常量集');
+        assertTrue(!/'evolve 元数据'/.test(text), file + ' 仍内联段名字面量（第二份表达）');
+        assertTrue(!/'下次建议'/.test(text), file + ' 仍内联第三字段字面量（第二份表达）');
+      }
+
+      // ③ 写→校一致性（真实链路）：evolve apply 产出的段必须被校验方无问题接收
+      writeFile(dir, '.specs/archive/2026-10-02-fixture/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n### 可复用抽象\n\n- 夹具抽象条目（元数据单一来源）\n');
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeState(dir, baseState('open'));
+      const apply = runSideScript(SIDE_EVOLVE, ['apply', '2026-10-02-fixture#1', '--root', dir], dir);
+      assertExit(apply, 0);
+      assertOut(apply, 'EVOLVE-OK');
+      const written = fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8');
+      for (const field of fields) {
+        assertTrue(written.includes('**' + field + '**'), '写方产出的段缺字段 ' + field);
+      }
+      const validate = requireModuleExport(contextInitModule, 'validateContext', 'context-init.mjs');
+      const consistent = await validate(dir);
+      assertEqual(consistent.missingSections.length, 0,
+        '夹具七段骨架缺段: ' + JSON.stringify(consistent.missingSections));
+      assertEqual(consistent.formatIssues.length, 0,
+        '写方产物未通过校验方（同源失配）: ' + JSON.stringify(consistent.formatIssues));
+
+      // ④ 容差收窄判别力：旧别名顶替第三字段 → 必报，且提示点名旧别名与应写字段（可见，不静默）
+      const aliased = contextFixtureText({ evolveSection: [
+        '- **' + fields[0] + '**: `2026-10-02T10:00:00+08:00`',
+        '- **' + fields[1] + '**: `flow-comet-evolve`',
+        '- **下次同步建议**: 约 60 天后',
+      ] });
+      writeFile(dir, '.specs/CONTEXT.md', aliased);
+      const aliasedIssues = (await validate(dir)).formatIssues;
+      assertTrue(aliasedIssues.some((issue) => issue.includes('evolve 元数据三字段')),
+        '旧别名未被收窄（仍静默通过）: ' + JSON.stringify(aliasedIssues));
+      assertTrue(aliasedIssues.some((issue) => issue.includes('下次同步建议') && issue.includes('不再接受')),
+        '旧别名未给出可见格式提示: ' + JSON.stringify(aliasedIssues));
     },
   },
 ];

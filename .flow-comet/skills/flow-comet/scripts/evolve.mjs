@@ -20,6 +20,7 @@ import { existsSync, promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { normalizeHeading } from './route-node.mjs';
+import { writeFileAtomic, EVOLVE_METADATA_SECTION, EVOLVE_METADATA_FIELDS } from './state-schema.mjs';
 import {
   archiveDateFromName,
   daysSince,
@@ -44,8 +45,10 @@ const ARCHITECTURE_FILE = 'ARCHITECTURE.md';
 const DOC_CONTEXT = SPECS_DIR + '/' + CONTEXT_FILE;
 const DOC_ARCHITECTURE = SPECS_DIR + '/' + ARCHITECTURE_FILE;
 const STATE_SCRIPT = 'workflow-state.mjs';
-const EVOLVE_SECTION = 'evolve 元数据';
-const STATE_KEY = 'last_evolve_at';
+// `## evolve 元数据` 的段名与三字段名来自 state-schema.mjs 的单一常量集（写方 = 本节 / 校验方 =
+// context-init.mjs 的格式校验同源）；段侧字段序即常量序，双落点首字段与 state 的 STATE_KEY 同名。
+const EVOLVE_SECTION = EVOLVE_METADATA_SECTION;
+const [STATE_KEY, SCANNER_FIELD, SUGGESTION_FIELD] = EVOLVE_METADATA_FIELDS;
 const SOURCE_PREFIX = '来源 @.specs/' + ARCHIVE_DIR + '/';
 
 // 候选落点：目标文档 + 目标段。段名按模板标题的前缀匹配（标题常带括注后缀）。
@@ -278,19 +281,8 @@ async function pathExists(target) {
   try { await fs.access(target); return true; } catch { return false; }
 }
 
-// 写盘走原子写（同目录临时文件 + rename，与引擎其余写盘同形）：目标文件要么是旧内容、
+// 写盘走状态层单一来源的原子写（state-schema.mjs 的 writeFileAtomic）：目标文档要么是旧内容、
 // 要么是新内容，不会留下被截断的半写状态。
-async function writeFileAtomic(file, text) {
-  const temporary = file + '.tmp';
-  try {
-    await fs.writeFile(temporary, text, 'utf8');
-    await fs.rename(temporary, file);
-  } catch (error) {
-    try { await fs.rm(temporary, { force: true }); } catch { /* 清理失败不掩盖原始写错误 */ }
-    throw error;
-  }
-}
-
 async function readState(root) {
   const text = await readText(path.join(root, '.flow-comet', 'flow-comet-state.json'));
   if (text === null) return null;
@@ -395,7 +387,7 @@ function fieldLine(key, value) {
 
 // 双落点之段侧：在场则就地更新三字段，缺席则新建成段（段为可选段，缺席不报错）。eol = 文档行尾约定
 function upsertEvolveSection(lines, ts, scanner, eol = '') {
-  const fields = [[STATE_KEY, ts], ['scanner', scanner], ['下次建议', nextSuggestion()]];
+  const fields = [[STATE_KEY, ts], [SCANNER_FIELD, scanner], [SUGGESTION_FIELD, nextSuggestion()]];
   const section = findSection(lines, EVOLVE_SECTION, 2);
   if (!section) {
     const lastText = [...lines].reverse().find((line) => line.trim() !== '') ?? '';
