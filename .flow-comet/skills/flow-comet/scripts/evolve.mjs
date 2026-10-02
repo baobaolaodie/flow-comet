@@ -10,6 +10,8 @@
 // 单一权威（L-067）：「沉淀段在场」判定（hasSection9）与归档窗口判定（isArchivedAfterTimestamp）
 // 一律 import time-utils.mjs；时间形态 / 解析 / 天差走 nowTimestamp / formatLocalDate /
 // parseTimestamp / daysSince——本模块不内联第二份时间正则，也不自行拼接时间字符串。
+// 「改写前备份」的命名族与失败处置走 state-schema.mjs 的 backupBeforeWrite（单一来源）——
+// 本模块不再自持 `.bak-` 命名族与复制调用（第二处表达）。
 // 模板段标题的归一走 route-node.mjs 导出的共享实现（normalizeHeading），不另起一份。
 // 协议路径走 state-schema.mjs 的 resolveProtocolPathWithState（唯一选择器），不自持候选布局表。
 // 侧命令 CLI 契约（parseSideCommandArgs）也落本模块：三条横向命令共用一份解析——
@@ -26,6 +28,7 @@ import { fileURLToPath } from 'url';
 import { normalizeHeading } from './route-node.mjs';
 import {
   writeFileAtomic,
+  backupBeforeWrite,
   EVOLVE_METADATA_SECTION,
   EVOLVE_METADATA_FIELDS,
   resolveProtocolPathWithState,
@@ -108,6 +111,13 @@ function usage() {
 }
 
 // ---------- 侧命令 CLI 契约（单一来源） ----------
+// 根相对 POSIX 路径标签：三条横向命令的 CLI 摘要行与工件段落都要把绝对路径显示成项目根相对形态
+// （跨机器可读、可直接粘回命令行）。此前 evolve 内联、context-scan 自持一份同名助手——同一显示
+// 决定的第二份表达；现由本模块（侧命令共享助手的既有落点）导出，三条命令同源消费。
+export function relativeLabel(root, file) {
+  return path.relative(root, file).split(path.sep).join('/');
+}
+
 // 三条横向命令（evolve / health / context-scan）共用本解析器：`--root <目录>` 与 `--root=<目录>`
 // 两种形态、`--stdout`、`--help`/`-h`、未知参数**各只在此处表达一次**——此前三份自写脚手架必然分叉
 // （一条不支持等号形、`--help` 只有一条有、错误构造三份各写一遍）。位置参数语义（evolve 的
@@ -499,7 +509,7 @@ function upsertEvolveSection(lines, ts, scanner, eol = '') {
   if (missing.length > 0) lines.splice(bodyInsertIndex(lines, section), 0, ...missing);
 }
 
-// 落盘一个目标文档：备份 → 追加条目 → 同批更新元数据段（仅 CONTEXT.md）。
+// 落盘一个目标文档：备份（共享助手，单一来源）→ 追加条目 → 同批更新元数据段（仅 CONTEXT.md）。
 // 插入行沿用文档自身的行尾约定——CRLF 文档里插入 LF 行会造成同一文件两种行尾。
 async function patchDocument(root, doc, entries, ts, scanner, out = console) {
   const file = path.join(root, doc);
@@ -526,8 +536,7 @@ async function patchDocument(root, doc, entries, ts, scanner, out = console) {
   if (doc === DOC_CONTEXT) upsertEvolveSection(lines, ts, scanner, eol);
   const updated = lines.join('\n');
   if (updated !== original) {
-    const backup = file + '.bak-' + formatLocalDate(parseTimestamp(ts));
-    await fs.copyFile(file, backup);
+    await backupBeforeWrite(file, ts);
     await writeFileAtomic(file, updated);
   }
   return { written, present };
@@ -690,7 +699,7 @@ async function runApply(options, out = console) {
   }
 
   const report = await writeReport(options.root, plan, ts, requested, applied, present);
-  out.log('EVOLVE-REPORT: ' + path.relative(options.root, report.file).split(path.sep).join('/'));
+  out.log('EVOLVE-REPORT: ' + relativeLabel(options.root, report.file));
   if (options.stdout) out.log(report.body);
   out.log('EVOLVE: 双落点一致 state = ' + ts + ' · 段 = ' + ts + '（state 为唯一真相）');
   out.log('EVOLVE-OK');

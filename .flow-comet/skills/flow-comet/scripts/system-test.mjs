@@ -6260,8 +6260,22 @@ const TEST_ITEMS = [
 
       const reportFile = path.join(dir, '.specs', 'health', localDate() + '-HEALTH.md');
       assertTrue(fs.existsSync(reportFile), '报告未按 <日期>-HEALTH.md 形态落盘: ' + reportFile);
-      assertEqual(fs.readFileSync(reportFile, 'utf8'), res.output, '--stdout 输出与落盘报告逐字节');
+      // `--stdout` = 落盘报告正文原样在前 + `HEALTH:` 审计行追加在后（审计行是 CLI 摘要，
+      // 不进报告字节——报告仍是唯一写入面；正文部分与落盘逐字节一致）
+      const reportText = fs.readFileSync(reportFile, 'utf8');
+      assertTrue(res.output.startsWith(reportText), '--stdout 的报告正文应与落盘逐字节一致（审计行追加在后）');
+      assertOut(res, 'HEALTH: 报告 `.specs/health/' + localDate() + '-HEALTH.md`');
+      assertOut(res, 'HEALTH-DONE');
       if (!readStateBytes(dir).equals(stateBytes)) throw new Error('health 改写了运行状态文件');
+
+      // 审计行与报告路径**恒输出**：不带 `--stdout` 时 stdout 只给摘要（报告正文不回流），
+      // 调用方据此确认「跑没跑、落在哪」——此前该形态 stdout 为空、报告路径无处可见。
+      const quiet = runSideScript(SIDE_HEALTH, ['--root', dir], dir);
+      assertExit(quiet, 0);
+      assertOut(quiet, 'HEALTH: 报告 `.specs/health/' + localDate() + '-HEALTH.md`');
+      assertOut(quiet, 'HEALTH-DONE');
+      assertTrue(!quiet.output.includes('## 确定性层（机器可判）'), '不带 --stdout 时报告正文不应回流到标准输出');
+      if (!readStateBytes(dir).equals(stateBytes)) throw new Error('不带 --stdout 的一轮改写了运行状态文件');
 
       // 对照态：隔离 HOME/USERPROFILE（用户级落点全部缺席）→ 增补层逐项不在场仍 exit 0
       const isolatedHome = path.join(dir, 'isolated-home');

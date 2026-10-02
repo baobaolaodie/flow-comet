@@ -12,7 +12,9 @@
 // 只读边界：
 //   · 读：.specs/CONTEXT.md、.specs/LESSONS.md、.specs/health/*.md（基线）、git 历史、
 //     可选工具的在场探测（文件 / 路径判定）；
-//   · 写：仅一份报告 .specs/health/<日期>-HEALTH.md；--stdout 时把同一份内容原样打到标准输出；
+//   · 写：仅一份报告 .specs/health/<日期>-HEALTH.md；`--stdout` 时把报告正文原样打到标准输出；
+//   · 标准输出另**恒**输出 `HEALTH:` 审计行（报告路径 / 日期 / 增补层在场 / 基线）——不带
+//     `--stdout` 时只有审计行（报告正文不回流）；
 //   · 不写运行状态（不触碰 .flow-comet/flow-comet-state.json，不新增任何状态字段）；
 //   · 时间与**基线报告名的日期判据**一律走 time-utils.mjs 单一来源（本地时间 + 显式偏移；日期前缀
 //     的形态与日历自洽由同一实现判定），不在本文件内联第二份格式化 / 第二份前缀正则——同一判据
@@ -21,6 +23,14 @@
 // 复现性纪律：报告中的「机器可判项」必须可逐字节复现；两次运行允许不同的行由报告末尾的
 // 「易变行声明」逐条列出（差异集合显式标注，不靠口头约定）。基线对比取「最近一份**日期不同**的
 // 历史报告」——同日重跑不与自己对比，否则报告自我污染、复现性判据失效。
+//
+// 读数快照的**键形态单一来源**：字段表（SNAPSHOT_FIELDS）是键名与取值的唯一表达处，写方
+// （buildSnapshot）与读方（parseSnapshot / 基线对比）都从它派生——读方不再自行表达键形态。
+// 两侧各写一份表达的后果实测过：写方发含大写字母的键、读方的键形态正则只认全小写，4 个键的
+// 基线对比恒输出「（基线无此读数）」——逐键趋势静默失效且不报错（假绿形态）。
+//
+// 可选工具的超时预算：单次调用上限 60s（与巡检预算一致）。超时与运行失败同走「降级原因」可见
+// 路径（原因里回显本次预算），不中断报告、不冒充成功读数。
 
 import { execFileSync } from 'child_process';
 import { existsSync, promises as fs } from 'fs';
@@ -28,7 +38,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { validateContext } from './context-init.mjs';
-import { parseSideCommandArgs } from './evolve.mjs';
+import { parseSideCommandArgs, relativeLabel } from './evolve.mjs';
 import { archiveDateFromName, formatLocalDate, formatLocalTimestamp } from './time-utils.mjs';
 
 const SELF_FILE = fileURLToPath(import.meta.url);
@@ -40,7 +50,9 @@ const HEALTH_DIR_DISPLAY = '.specs/health';
 const REPORT_SUFFIX = '-HEALTH.md';
 
 const GIT_TIMEOUT_MS = 20000;
-const TOOL_TIMEOUT_MS = 120000;
+// 可选工具（冗余扫描）的单次调用上限：60s 预算内——超出预算的等待不算「巡检」，超时与非零
+// 退出同走 runJscpd 的降级路径（原因可见，报告不中断）。
+const TOOL_TIMEOUT_MS = 60000;
 
 // 条目编号标题：`### L-<三位数字>`（后接非数字 / 非字母，避免吞掉更长编号）
 const LESSON_HEADING = /^### L-(\d{3})(?![\dA-Za-z])/;
@@ -50,8 +62,9 @@ const DEBT_HEADING = /^#{2,4}[ \t]*技术债/;
 const TABLE_SEPARATOR = /^\|[\s:|-]+\|$/;
 // 提交主题的约定式类型前缀（`type(scope): subject` / `type!: subject`）
 const COMMIT_KIND = /^([a-z][a-z-]*)(?:\([^)]*\))?!?:/;
-// 快照行（`key=value`）：下份报告据此做增量对比
-const SNAPSHOT_LINE = /^([a-z0-9_.]+)=(.*)$/;
+// 快照行（`key=value`）：读方**不表达键形态**——键身份由 SNAPSHOT_FIELDS 判定（两侧同源），
+// 此处只做「首个 `=` 之前是非空白串」的通用切分。
+const SNAPSHOT_LINE = /^([^=\s]+)=(.*)$/;
 
 const DEBT_ITEM_LIMIT = 20;
 const KIND_ITEM_LIMIT = 12;
@@ -75,7 +88,7 @@ function usage() {
   return [
     '用法: node health.mjs [--root <项目根>] [--stdout] [--help]',
     '  --root <路径>  项目根（缺省 = 当前目录；`--root=<路径>` 等号形等价）',
-    '  --stdout       报告同时写到标准输出（与落盘内容逐字节相同）',
+    '  --stdout       报告正文原样写到标准输出（与落盘逐字节相同；摘要行追加在其后）',
     '  --help, -h     打印本用法后退出（不产报告）',
     '说明: 只写 .specs/health/<日期>-HEALTH.md；不写运行状态、不改代码。',
   ].join('\n');
@@ -245,7 +258,8 @@ async function runJscpd(runRoot, toolPath, targets) {
       targets,
     };
   } catch (error) {
-    return { status: 'degraded', reason: '工具在场但运行未完成（' + String(error.message).split('\n')[0] + '）' };
+    // 失败原因可见且自证：回显本次超时预算，便于区分「超时」与「工具自身报错」；读数不落 `ok`。
+    return { status: 'degraded', reason: '工具在场但运行未完成（超时预算 ' + TOOL_TIMEOUT_MS + ' ms；' + String(error.message).split('\n')[0] + '）' };
   } finally {
     try { await fs.rm(outDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 150 }); } catch { /* 临时区清理失败不影响报告 */ }
   }
@@ -343,7 +357,8 @@ function parseSnapshot(text) {
     if (/^```/.test(line)) { fenced = !fenced; continue; }
     if (!fenced) continue;
     const m = SNAPSHOT_LINE.exec(line);
-    if (m) values[m[1]] = m[2];
+    // 键身份由字段表判定：表外的键（旧版本残留 / 形态不符）不属于本版本的读数面，不冒充读数。
+    if (m && SNAPSHOT_KEYS.has(m[1])) values[m[1]] = m[2];
   }
   return values;
 }
@@ -532,29 +547,54 @@ function renderReport(input) {
   return lines.join('\n') + '\n';
 }
 
+// 读数快照字段表（**键形态的单一来源**）：键名与取值只在本表表达一次——写方 buildSnapshot 与
+// 读方 parseSnapshot / 基线对比都从本表派生，任一侧不再自持第二份键名或键形态。字段顺序 =
+// 报告里快照块的书写顺序（同一冻结树两次运行逐字节一致的前提）。
+function jscpdOf(readings) {
+  return readings.redundancy.tools.find((tool) => tool.name === 'jscpd') ?? null;
+}
+
+const SNAPSHOT_FIELDS = [
+  { key: 'context.exists', value: (r) => String(r.context.exists) },
+  { key: 'context.lineCount', value: (r) => String(r.context.lineCount) },
+  { key: 'context.missingSections', value: (r) => String(r.context.missingSections.length) },
+  { key: 'context.formatIssues', value: (r) => String(r.context.formatIssues.length) },
+  { key: 'lessons.exists', value: (r) => String(r.lessons.exists) },
+  { key: 'lessons.entries', value: (r) => String(r.lessons.entries) },
+  { key: 'lessons.min', value: (r) => (r.lessons.min === null ? 'none' : String(r.lessons.min)) },
+  { key: 'lessons.max', value: (r) => (r.lessons.max === null ? 'none' : String(r.lessons.max)) },
+  { key: 'lessons.missing', value: (r) => String(r.lessons.missing.length) },
+  { key: 'lessons.duplicates', value: (r) => String(r.lessons.duplicates.length) },
+  { key: 'debt.exists', value: (r) => String(r.debt.exists) },
+  { key: 'debt.rows', value: (r) => String(r.debt.rows) },
+  { key: 'redundancy.targets', value: (r) => (r.redundancy.targets.length === 0 ? 'none' : r.redundancy.targets.join(',')) },
+  { key: 'redundancy.jscpd', value: (r) => (jscpdOf(r)?.path ? (r.redundancy.run && r.redundancy.run.status === 'ok' ? 'ok' : 'present') : 'absent') },
+  { key: 'git.isRepo', value: (r) => String(r.git.isRepo) },
+  { key: 'git.commits', value: (r) => (r.git.commits === null ? 'none' : String(r.git.commits)) },
+  { key: 'git.head', value: (r) => r.git.head ?? 'none' },
+  { key: 'brooks.present', value: (r) => String(r.brooks.present) },
+];
+// 键身份集合由字段表派生（读方判定「这一行是不是本版本的读数」）。
+const SNAPSHOT_KEYS = new Set(SNAPSHOT_FIELDS.map((field) => field.key));
+
 function buildSnapshot(readings) {
-  const { context, lessons, debt, redundancy, git, brooks } = readings;
-  const jscpd = redundancy.tools.find((tool) => tool.name === 'jscpd');
-  return [
-    { key: 'context.exists', value: String(context.exists) },
-    { key: 'context.lineCount', value: String(context.lineCount) },
-    { key: 'context.missingSections', value: String(context.missingSections.length) },
-    { key: 'context.formatIssues', value: String(context.formatIssues.length) },
-    { key: 'lessons.exists', value: String(lessons.exists) },
-    { key: 'lessons.entries', value: String(lessons.entries) },
-    { key: 'lessons.min', value: lessons.min === null ? 'none' : String(lessons.min) },
-    { key: 'lessons.max', value: lessons.max === null ? 'none' : String(lessons.max) },
-    { key: 'lessons.missing', value: String(lessons.missing.length) },
-    { key: 'lessons.duplicates', value: String(lessons.duplicates.length) },
-    { key: 'debt.exists', value: String(debt.exists) },
-    { key: 'debt.rows', value: String(debt.rows) },
-    { key: 'redundancy.targets', value: redundancy.targets.length === 0 ? 'none' : redundancy.targets.join(',') },
-    { key: 'redundancy.jscpd', value: jscpd.path ? (redundancy.run && redundancy.run.status === 'ok' ? 'ok' : 'present') : 'absent' },
-    { key: 'git.isRepo', value: String(git.isRepo) },
-    { key: 'git.commits', value: git.commits === null ? 'none' : String(git.commits) },
-    { key: 'git.head', value: git.head ?? 'none' },
-    { key: 'brooks.present', value: String(brooks.present) },
-  ];
+  return SNAPSHOT_FIELDS.map((field) => ({ key: field.key, value: field.value(readings) }));
+}
+
+// 结果摘要（前缀行供机检检索）：审计行与**报告落盘路径恒输出**（不带 `--stdout` 亦然）——
+// 报告是唯一写入面，调用方至少要能从标准输出确认「跑没跑、落在哪、基线是谁、增补层在不在场」。
+// `--stdout` 时报告正文原样在前（与落盘逐字节一致），审计行追加在后且不混进报告字节。
+// 审计行内容当日确定（日期 / 在场判定 / 基线）——不引入新的易变行。
+function printResult({ stdout, root, reportText, reportPath, date, baseline, brooks }) {
+  const output = [];
+  if (stdout) output.push(reportText, '');
+  output.push('HEALTH: 报告 `' + relativeLabel(root, reportPath) + '`');
+  output.push('HEALTH: 日期 ' + date + ' · 增补层 ' + (brooks.present ? '在场' : '不在场')
+    + ' · 基线 ' + (baseline
+      ? '`' + relativeLabel(root, path.join(root, '.specs', 'health', baseline.name)) + '`'
+      : '无（本次为基线，无差异可比）'));
+  output.push('HEALTH-DONE');
+  console.log(output.join('\n'));
 }
 
 async function main(argv) {
@@ -596,7 +636,7 @@ async function main(argv) {
   const reportPath = path.join(options.root, '.specs', 'health', date + REPORT_SUFFIX);
   await fs.mkdir(path.dirname(reportPath), { recursive: true });
   await fs.writeFile(reportPath, report, 'utf8');
-  if (options.stdout) process.stdout.write(report);
+  printResult({ stdout: options.stdout, root: options.root, reportText: report, reportPath, date, baseline, brooks });
   return 0;
 }
 

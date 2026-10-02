@@ -5,7 +5,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { resolveProtocol } from './protocol-utils.mjs';
-import { isValidTimestamp } from './time-utils.mjs';
+import { formatLocalDate, isValidTimestamp, parseTimestamp } from './time-utils.mjs';
 
 // ---------- 运行时路径常量（单一来源）----------
 // 「状态文件在哪」曾是一个被独立表达在 6 处的决策（协议 state.statePath、workflow-state 默认值、
@@ -44,6 +44,19 @@ export async function writeFileAtomic(file, text) {
 // JSON 落盘（state / 标记文件）：序列化形态与收敛前逐字一致（2 空格缩进 + 末尾换行）。
 export async function writeJsonAtomic(file, value) {
   await writeFileAtomic(file, JSON.stringify(value, null, 2) + '\n');
+}
+
+// ---------- 改写前备份（单一来源） ----------
+// 「改写人可见文档之前，先把改写前版本复制到目标同目录的 `<文档>.bak-<本地日期>`」这一决定曾由
+// evolve.mjs 与 context-scan.mjs 各表达一份（同形但两份）：命名族或失败处置一旦演进，只改一侧
+// 即静默分叉——与原子写同址收敛，两个消费方只消费本导出。
+// 语义与收敛前逐字等价：日期分量走 time-utils（本地日期的单一权威；非法时刻抛错 → fail-closed）、
+// 同目录同名（同日重复改写覆盖当日备份，不堆积）、复制失败即抛出（调用方按 fail-closed 处理：
+// 目标文档与 state 都保持原值）。返回值与 writeFileAtomic 同形 = 无（不造无人消费的 API 面）。
+// 调用方负责「取值真变化才备份」——无变化就没有可备份的「改写前版本」。
+export async function backupBeforeWrite(file, timestamp) {
+  const backup = file + '.bak-' + formatLocalDate(parseTimestamp(timestamp));
+  await fs.copyFile(file, backup);
 }
 
 // ---------- 协议来源解析（state 持久化绑定 · 单一权威） ----------
