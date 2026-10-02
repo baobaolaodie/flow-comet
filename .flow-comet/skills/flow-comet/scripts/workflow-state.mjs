@@ -883,7 +883,11 @@ async function main() {
       // last_intel_scan 仅在校验通过后写入（agent 生成 → 脚本校验 7 段 → 记录扫描时间）
       ...(ctxValid === true
         ? { last_intel_scan: new Date().toISOString() }
-        : (prevState?.last_intel_scan !== undefined ? { last_intel_scan: prevState.last_intel_scan } : {}))
+        : (prevState?.last_intel_scan !== undefined ? { last_intel_scan: prevState.last_intel_scan } : {})),
+      // last_evolve_at 同为**项目级**字段（evolve 的跨 change 基线，写通道 = config set）——init 换
+      // change 必须原样保留：丢了它，增量窗口静默退化为全量扫描、到期提示从此不再触发（保留判据与
+      // 上一行同形：字段缺席 = 从未跑过 evolve，不得凭空制造该字段——state-schema 不接受 null）
+      ...(prevState?.last_evolve_at !== undefined ? { last_evolve_at: prevState.last_evolve_at } : {})
     };
     await writeState(state);
     // init 创建 .specs/<id>/ 目录——文件即真相从 init 起成立，findActiveChange 立即可识别

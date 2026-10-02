@@ -14281,6 +14281,59 @@ const SCENARIOS = [
         'ui-design 技能缺旧 change 渐进口径');
     },
   },
+
+  // 287: 真实 `init` 跨 change 的 evolve 基线保留——`last_evolve_at` 与 `last_intel_scan` 同形
+  // （两者都是**项目级**字段：换 change 不该丢）。场景 278/279 的窗口与到期锚全用 `writeState` 直注
+  // （覆盖缺口：那条旁路绕开了 init 的保留清单，本缺陷因此完整逃过 286+90）；
+  // 本场景**全程只走真实 `init` 子命令**，证明的是「跨 change 持久性」这条正常路径：
+  //   设基线 → init 新 change → 基线仍在 + `status` 的 EVOLVE-DUE 仍生效 + `evolve scan` 窗口仍按基线过滤。
+  // 断言面刻意覆盖 C1 的全部三条后果（字段丢失 / 到期提示消失 / 窗口静默退化为全量）。
+  {
+    name: '287 真实 init 跨 change：last_evolve_at 保留（基线在场·到期提示仍生效·扫描窗口仍过滤）',
+    run: (dir) => {
+      const formatStamp = requireModuleExport(timeUtilsModule, 'formatLocalTimestamp', 'time-utils.mjs');
+      const formatDate = requireModuleExport(timeUtilsModule, 'formatLocalDate', 'time-utils.mjs');
+      const dayMs = 24 * 60 * 60 * 1000;
+      const dateDaysAgo = (days) => formatDate(new Date(Date.now() - days * dayMs));
+      // 窗口两侧各一条带 §9 的归档 change（窗口过滤按目录名日期前缀判定，基线落在两者之间）
+      writeFile(dir, '.specs/archive/' + dateDaysAgo(101) + '-before-baseline/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n- 窗口外条目\n');
+      writeFile(dir, '.specs/archive/' + dateDaysAgo(99) + '-after-baseline/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n- 窗口内条目\n');
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+
+      // ① 真实 init 建首个 change → 经**唯一写通道**落基线（100 天前：到期判据按天数必然触发）
+      assertExit(runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-skip']), 0);
+      const baseline = formatStamp(new Date(Date.now() - 100 * dayMs));
+      const setRes = runStateWithProtocol(dir, ['config', 'set', 'last_evolve_at', baseline]);
+      assertExit(setRes, 0);
+      assertOut(setRes, 'CONFIG: last_evolve_at = ' + baseline);
+
+      // ② 真实 init 换 change——跨 change 的全部动作就是这一步（不碰 writeState）
+      const secondInit = runStateWithProtocol(dir, ['init', CHANGE_ID + '-2', '--init-skip']);
+      assertExit(secondInit, 0);
+      const state = JSON.parse(readStateBytes(dir));
+      assertEqual(state.activeChange, CHANGE_ID + '-2', 'init 后 activeChange');
+      assertEqual(state.last_evolve_at, baseline, 'init 跨 change 保留 last_evolve_at');
+
+      // ③ 到期提示仍生效（AC-18 的跨 change 形态）+ 提示行在场时 status 的 JSON 块仍可解析
+      const status = runStateWithProtocol(dir, ['status']);
+      assertExit(status, 0);
+      assertOut(status, 'EVOLVE-DUE: 上次架构沉淀 ' + baseline);
+      assertOut(status, '超阈值 60 天');
+      assertEqual(parseStatusJson(status).status, 'running', '提示行在场时 status 的 JSON 块解析');
+
+      // ④ 增量窗口仍按基线过滤（AC-4 的跨 change 形态）：窗口内入选、窗口外排除，
+      //    且**不**退回「无基线（首次运行，全量扫描）」——后者正是窗口静默退化为全量的形态
+      const scan = runSideScript(SIDE_EVOLVE, ['scan', '--root', dir], dir);
+      assertExit(scan, 0);
+      assertOut(scan, '窗口 起始 = ' + baseline);
+      assertOut(scan, '归档 2 个 · 窗口内 1 个 · 含沉淀段 1 个');
+      assertOut(scan, 'after-baseline#1');
+      assertNotOut(scan, 'before-baseline#');
+      assertNotOut(scan, '无基线（首次运行，全量扫描）');
+    },
+  },
 ];
 // ---------- 运行 ----------
 

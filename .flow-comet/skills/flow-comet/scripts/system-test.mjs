@@ -6345,6 +6345,46 @@ const TEST_ITEMS = [
       assertNotOut(passed, 'UI-DESIGN: skipped');
     },
   },
+
+  {
+    name: 'M5 evolve 基线跨 change 保留：真实 init 换 change → 基线在场 + 到期提示 + 窗口过滤',
+    run: (dir) => {
+      const formatStamp = timeUtilsModule.formatLocalTimestamp;
+      const dayMs = 24 * 60 * 60 * 1000;
+      const dateDaysAgo = (days) => localDate(new Date(Date.now() - days * dayMs));
+      // 窗口两侧各一条带 §9 的归档 change；基线落在两者之间（窗口过滤按目录名日期前缀）
+      writeFile(dir, '.specs/archive/' + dateDaysAgo(101) + '-before-baseline/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n- 窗口外条目\n');
+      writeFile(dir, '.specs/archive/' + dateDaysAgo(99) + '-after-baseline/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n- 窗口内条目\n');
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+
+      // 跨 change 的持久性只走真实命令：init 首个 change → 唯一写通道落基线 → init 换 change
+      assertExit(runState(['init', CHANGE_ID, '--init-skip'], dir), 0);
+      const baseline = formatStamp(new Date(Date.now() - 100 * dayMs));
+      const setRes = runState(['config', 'set', 'last_evolve_at', baseline], dir);
+      assertExit(setRes, 0);
+      assertOut(setRes, 'CONFIG: last_evolve_at = ' + baseline);
+      assertExit(runState(['init', CHANGE_ID + '-2', '--init-skip'], dir), 0);
+      const state = readStateFile(dir);
+      assertEqual(state.activeChange, CHANGE_ID + '-2', 'init 后 activeChange');
+      assertEqual(state.last_evolve_at, baseline, 'init 跨 change 保留 last_evolve_at');
+
+      const status = runState(['status'], dir);
+      assertExit(status, 0);
+      assertOut(status, 'EVOLVE-DUE: 上次架构沉淀 ' + baseline);
+      assertOut(status, '超阈值 60 天');
+      assertEqual(parseStatusOutput(dir).status, 'running', '提示行在场时 status 的 JSON 块解析');
+
+      const scan = runSideScript(SIDE_EVOLVE, ['scan', '--root', dir], dir);
+      assertExit(scan, 0);
+      assertOut(scan, '窗口 起始 = ' + baseline);
+      assertOut(scan, '归档 2 个 · 窗口内 1 个 · 含沉淀段 1 个');
+      assertOut(scan, 'after-baseline#1');
+      assertNotOut(scan, 'before-baseline#');
+      assertNotOut(scan, '无基线（首次运行，全量扫描）');
+    },
+  },
 ];
 
 // ---------- 运行 ----------
