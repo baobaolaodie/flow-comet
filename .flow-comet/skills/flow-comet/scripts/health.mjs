@@ -14,7 +14,9 @@
 //     可选工具的在场探测（文件 / 路径判定）；
 //   · 写：仅一份报告 .specs/health/<日期>-HEALTH.md；--stdout 时把同一份内容原样打到标准输出；
 //   · 不写运行状态（不触碰 .flow-comet/flow-comet-state.json，不新增任何状态字段）；
-//   · 时间一律走 time-utils.mjs 单一来源（本地时间 + 显式偏移），不在本文件内联第二份格式化。
+//   · 时间与**基线报告名的日期判据**一律走 time-utils.mjs 单一来源（本地时间 + 显式偏移；日期前缀
+//     的形态与日历自洽由同一实现判定），不在本文件内联第二份格式化 / 第二份前缀正则——同一判据
+//     两份实现必然分叉：自写前缀正则会把 `2026-02-30-HEALTH.md` 一类日历不自洽的名字采作基线。
 //
 // 复现性纪律：报告中的「机器可判项」必须可逐字节复现；两次运行允许不同的行由报告末尾的
 // 「易变行声明」逐条列出（差异集合显式标注，不靠口头约定）。基线对比取「最近一份**日期不同**的
@@ -27,7 +29,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { validateContext } from './context-init.mjs';
 import { parseSideCommandArgs } from './evolve.mjs';
-import { formatLocalDate, formatLocalTimestamp } from './time-utils.mjs';
+import { archiveDateFromName, formatLocalDate, formatLocalTimestamp } from './time-utils.mjs';
 
 const SELF_FILE = fileURLToPath(import.meta.url);
 const SELF_DIR = path.dirname(SELF_FILE);
@@ -36,7 +38,6 @@ const CONTEXT_DISPLAY = '.specs/CONTEXT.md';
 const LESSONS_DISPLAY = '.specs/LESSONS.md';
 const HEALTH_DIR_DISPLAY = '.specs/health';
 const REPORT_SUFFIX = '-HEALTH.md';
-const REPORT_DATE_PREFIX = /^(\d{4}-\d{2}-\d{2})/;
 
 const GIT_TIMEOUT_MS = 20000;
 const TOOL_TIMEOUT_MS = 120000;
@@ -305,11 +306,13 @@ async function collectBrooks(runRoot) {
 }
 
 // ---------- 基线：最近一份「日期不同」的历史报告 + 其读数快照 ----------
-// 报告文件名约定（日期前缀 + 固定后缀）只在本函数里表达一次，避免与写盘路径各写一份字面量。
+// 报告文件名约定（日期前缀 + 固定后缀）只在本函数里表达一次，避免与写盘路径各写一份字面量；
+// 日期前缀的**形态与日历自洽**判定复用 time-utils 的同一实现（归档日期判据的单一权威）——
+// 本文件不另写前缀正则：两份判据必然分叉，而日历不自洽的名字（`2026-02-30-HEALTH.md`）会让
+// 基线对比输出看似有据的 ↑/↓ 趋势。
 function reportDateOf(name) {
   if (!name.endsWith(REPORT_SUFFIX)) return null;
-  const m = REPORT_DATE_PREFIX.exec(name);
-  return m ? m[1] : null;
+  return archiveDateFromName(name);
 }
 
 async function readBaseline(runRoot, currentDate) {

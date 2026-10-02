@@ -11,7 +11,8 @@
 //
 // 边界：
 //   · 不生成也不重写 CONTEXT.md 的内容（生成是 agent 全量阅读的职责）；只替换元数据字段那一行的
-//     首个取值词元，行尾说明文字原样保留；
+//     首个取值词元，行尾说明文字原样保留；改写该行**之前先落备份**（同目录 `.bak-<本地日期>`，
+//     与 evolve 同形；复制不成功即整轮 fail-closed——目标文档与 state 都保持原值）；
 //   · 结构或格式校验不通过时零元数据写入，只输出补齐指引（与首次接入同规则：校验通过才记录扫描时间）；
 //   · 不新建 state 文件——项目没有接入过就没有状态可更新，输出提示即可，不凭空造状态；
 //   · 工件落 .specs/context-scan/<日期>-SCAN.md；同日重扫覆盖同名工件（覆盖前的内容即本次基线）。
@@ -26,7 +27,7 @@ import { probeProject, classify, validateContext, printGenerationGuide, extractC
 // 未知参数各只在一处表达，三条横向命令的 CLI 契约因此同形（本文件不再自写一份脚手架）。
 // 同一模块另导出 state 三态读入口（readStateInfo）——本文件的读盘面与 evolve 共用同一条实现。
 import { parseSideCommandArgs, readStateInfo } from './evolve.mjs';
-import { archiveDateFromName, formatLocalDate, nowTimestamp } from './time-utils.mjs';
+import { archiveDateFromName, formatLocalDate, nowTimestamp, parseTimestamp } from './time-utils.mjs';
 import { RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, validateStateFields, writeJsonAtomic } from './state-schema.mjs';
 
 // 工件目录与命名（横向命令不在 change 生命周期内，落独立的领域目录）
@@ -279,12 +280,19 @@ async function writeStateTimestamp(stateFile, state, value) {
 }
 
 // 双落点更新扫描时刻：CONTEXT 段在前、state 在后——段写不进去就绝不动 state（避免半边更新）。
+// 改写 CONTEXT.md 前先落一份备份，形态与 evolve 一致（同目录 `.bak-<本地日期>` 命名族、内容 =
+// 改写前版本、复制失败即抛出 → 整轮 fail-closed）；同日重复改写同名覆盖（不堆积）；取值未变
+// （同一秒内重扫）时既不改写也不落备份——无变化就没有可备份的「改写前版本」。
 async function updateScanTimestamp({ root, contextFile, contextText, structure, stateInfo, stateFile, scannedAt }) {
   const contextUpdate = replaceContextTimestamp(contextText, structure, scannedAt);
   if (contextUpdate.text === null) {
     return { ok: false, reason: 'CONTEXT.md 的 `' + INTEL_SECTION + '` 段未更新（' + contextUpdate.reason + '）——state 保持原值，两处仍一致。' };
   }
-  await fs.writeFile(contextFile, contextUpdate.text, 'utf8');
+  if (contextUpdate.text !== contextText) {
+    const backupFile = contextFile + '.bak-' + formatLocalDate(parseTimestamp(scannedAt));
+    await fs.copyFile(contextFile, backupFile);
+    await fs.writeFile(contextFile, contextUpdate.text, 'utf8');
+  }
   if (!stateInfo.exists) {
     console.log('CONTEXT-SCAN: state 未找到（' + relativeLabel(root, stateFile) + '）——项目未接入过，本次只更新 CONTEXT 段。');
     return { ok: true, stateUpdated: false };

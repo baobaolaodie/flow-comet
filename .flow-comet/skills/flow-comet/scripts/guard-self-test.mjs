@@ -2381,6 +2381,56 @@ const ATOMIC_WRITE_CONVERGENCE_FACE = [
   'state-schema.mjs', 'workflow-state.mjs', 'workflow-handoff.mjs', 'evolve.mjs', 'context-scan.mjs',
 ];
 
+// 日期前缀判据的**表达式形态**扫描（与原子写惯用法同型）：报告 / 工件名的「日期前缀」判定只许由
+// time-utils.mjs 表达一处——本判据认的形态是「日期三分量以**字面连字符**相接」的前缀写法
+// （`/^(\d{4}-\d{2}-\d{2})/` 一类），在其它脚本内联第二份即为单源违规（注释互指同源不作数，
+// 判据只认形态）。时刻形态 `\d{4})-(\d{2})-(\d{2})T…`（`TIMESTAMP_SHAPE`）是另一个判据面，同样
+// 落在 time-utils 一处，不在本形态内。**收敛面 = 本任务写边界内的日期前缀消费方 + 单源模块**：
+// `workflow-guard.mjs` 的两处日期匹配是**文档内容**里的日期条目匹配（行锚 + `matchAll(.../gm)`），
+// 不是文件名前缀判定，且不在本任务写边界内——该排除在场景里另有**边界锚**看守（形态一旦不再是
+// 内容条目匹配即变红），不是静默跳过。root 是可测性接缝（默认引擎脚本目录）：使「第二份实现 →
+// 检出 2 处」能在合成目录上被场景驱动，否则该判据只能靠人工实验证明判别力、回归时可能被改成
+// 恒真空过（场景 295 反向构造）。
+const DATE_PREFIX_LITERAL_RE = /\\d\{4\}-\\d\{2\}-\\d\{2\}/g;
+const DATE_PREFIX_CONVERGENCE_FACE = ['time-utils.mjs', 'health.mjs', 'context-scan.mjs'];
+function datePrefixRegexpHits(root = __dirname, files = null) {
+  const candidates = files ?? fs.readdirSync(root).sort().filter((file) => file.endsWith('.mjs'));
+  const hits = [];
+  for (const file of candidates) {
+    const text = fs.readFileSync(path.join(root, file), 'utf8');
+    const count = (text.match(DATE_PREFIX_LITERAL_RE) ?? []).length;
+    if (count > 0) hits.push({ file, count });
+  }
+  return hits;
+}
+
+// 备份命名形态（与 evolve 同族）：目标文档同目录的 `<文档>.bak-<本地日期>`。两侧同形的判据是
+// 「同一表达式形态」——`'.bak-' + formatLocalDate(` 各自表达一次；退回「无备份」或改用别的命名族
+// 即变红（场景 296）。
+const BACKUP_NAME_FORM = "'.bak-' + formatLocalDate(";
+
+// health 报告夹具：报告名的日期前缀与读数快照都是**构造出来的输入面**——快照哨兵值只在被采作
+// 基线时才出现在新报告里（哨兵 → `999999 → …`），据此可判「当前基线到底是哪一份」，不必解析
+// 报告结构。哨兵键取全小写键（快照行的键形态判据只认小写字母与 `.` / `_`），与既有 `context.exists`
+// 一类保持一致。
+function healthReportFixture(date, sentinelEntries) {
+  return [
+    '# 健康巡检 · ' + date,
+    '',
+    '## 读数快照（机器可读 · 供下次报告对比）',
+    '',
+    '```text',
+    'lessons.exists=true',
+    'lessons.entries=' + sentinelEntries,
+    '```',
+    '',
+    '## 与上次对比',
+    '',
+    '- 基线：无（夹具报告）',
+    '',
+  ].join('\n');
+}
+
 // CONTEXT.md 夹具（七段骨架 + 可选 evolve 段）——夹具不装 flow-kit 模板时 validateContext
 // 取内置基准段名；`intel-scan 元数据` / `evolve 元数据` 字段行与模板同形。
 // 与 system-test.mjs 的同名夹具**同形镜像**（两份载体刻意独立、不互相 import：夹具若从被测模块
@@ -14938,6 +14988,119 @@ const SCENARIOS = [
       assertTrue(scanText.includes('readStateInfo('), 'context-scan.mjs 未真实调用共用的 state 读入口');
       assertTrue(!/function\s+readStateFile\b/.test(scanText),
         'context-scan.mjs 仍保留本地 state 读实现（三态判定第二份表达）');
+    },
+  },
+
+  // 295: health 基线日期判据单源——报告名的「日期前缀 + 日历自洽」判定收敛到 time-utils
+  //（真实消费 `archiveDateFromName`），本模块不再自写前缀正则：日历不自洽的
+  // `2026-02-30-HEALTH.md` 不再被采作基线（旧实现单独在场时直接采作基线、并输出看似有据的
+  // ↑/↓ 趋势；与合法旧报告并存时又因「取排序最后一份」必然取到它）。判据面配**合成目录
+  // 反向构造**：第二份前缀正则丢进合成引擎目录必须被检出（证明形态判据不恒真空过）。
+  {
+    name: '295 health 基线日期判据单源：日历不自洽前缀不入选·合法旧报告入选 + 零自写前缀正则',
+    run: (dir) => {
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeState(dir, baseState('open'));
+
+      // ① 负例：前缀形态合法、日历不自洽（2026-02-30 不存在）——不得被采作基线。快照哨兵
+      //    `lessons.entries=123456` 一旦出现在输出里，即证明这份报告被当成了基线。
+      writeFile(dir, '.specs/health/2026-02-30-HEALTH.md', healthReportFixture('2026-02-30', 123456));
+      const invalidOnly = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir);
+      assertExit(invalidOnly, 0);
+      assertOut(invalidOnly, '基线：无（`.specs/health` 下无日期不同的历史报告）');
+      assertNotOut(invalidOnly, '2026-02-30-HEALTH.md');
+      assertNotOut(invalidOnly, '123456');
+
+      // ② 正例 + 越界：合法旧报告与日历不自洽者并存 → 取合法那份（日历不自洽的名字排序在后，
+      //    旧实现「取最后一份」必然取到它 → 哨兵串成 123456 而非 999999）
+      writeFile(dir, '.specs/health/2026-01-05-HEALTH.md', healthReportFixture('2026-01-05', 999999));
+      const picked = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir);
+      assertExit(picked, 0);
+      assertOut(picked, '基线：`.specs/health/2026-01-05-HEALTH.md`');
+      assertOut(picked, '`lessons.entries`：999999 → ');
+      assertNotOut(picked, '2026-02-30-HEALTH.md');
+      assertNotOut(picked, '123456');
+
+      // ③ 结构锚：health 真实消费 time-utils 的日期判定；收敛面内只许 time-utils 表达该形态
+      const healthText = fs.readFileSync(SIDE_HEALTH, 'utf8');
+      assertTrue(hasNamedImport(healthText, './time-utils.mjs', 'archiveDateFromName'),
+        'health.mjs 未从 time-utils.mjs 具名 import archiveDateFromName（日期判据第二份表达）');
+      assertTrue(healthText.includes('archiveDateFromName('),
+        'health.mjs 未真实消费 archiveDateFromName（单一权威应被调用）');
+      const faceHits = datePrefixRegexpHits(__dirname, DATE_PREFIX_CONVERGENCE_FACE);
+      assertEqual(faceHits.length, 1, '日期前缀形态实现面（收敛面内应恰 1 处）实际 ' + JSON.stringify(faceHits));
+      assertEqual(faceHits[0].file, 'time-utils.mjs', '日期前缀形态落点文件');
+
+      // ③b 边界锚（可见，不静默排除）：guard 的两处日期匹配是文档**内容**里的日期条目匹配
+      //（行锚 + `matchAll(.../gm)`），不是文件名前缀判定，且不在本任务写边界内——形态一旦
+      // 改变即变红，强制重评收敛面。
+      const guardText = fs.readFileSync(path.join(__dirname, 'workflow-guard.mjs'), 'utf8');
+      assertEqual((guardText.match(/matchAll\(\/\^[^\n]*\\d\{4\}-\\d\{2\}-\\d\{2\}[^\n]*\/gm\)/g) ?? []).length, 2,
+        'workflow-guard 的日期匹配不再是「行锚 + 内容条目」两处形态——须重评日期前缀判据的收敛面');
+
+      // ④ 反向构造：合成引擎目录（单份前缀正则 → 检出 1；再放第二份 → 检出 2）
+      const synthetic = makeTmp();
+      try {
+        writeFile(synthetic, 'single.mjs', "const REPORT_DATE_PREFIX = /^(\\d{4}-\\d{2}-\\d{2})/;\n");
+        assertEqual(datePrefixRegexpHits(synthetic).length, 1, '合成目录单实现检出数');
+        writeFile(synthetic, 'second.mjs',
+          "function reportDateOf(name) {\n  return /^(\\d{4}-\\d{2}-\\d{2})/.exec(name);\n}\n");
+        assertEqual(datePrefixRegexpHits(synthetic).length, 2, '合成目录第二份实现检出数（判据须变红）');
+      } finally {
+        cleanupTmpDir(synthetic);
+      }
+    },
+  },
+
+  // 296: context-scan 改写 CONTEXT.md 前落备份——与 evolve **同形**（同目录 + `.bak-<本地日期>`
+  // 命名族 + 复制失败即整轮 fail-closed）：备份内容 = 改写前版本；同日重复改写只保留一份当日
+  // 备份（同名覆盖，不堆积）；复制不成功时目标与 state 逐字节不变（备份**先于**写入，不是事后补）。
+  {
+    name: '296 context-scan 改写前落备份：同形命名·内容为改写前版本·复制失败 fail-closed 零写入',
+    run: (dir) => {
+      const contextFile = path.join(dir, '.specs', 'CONTEXT.md');
+      const original = contextFixtureText();
+      const today = requireModuleExport(timeUtilsModule, 'formatLocalDate', 'time-utils.mjs')(new Date());
+      writeFile(dir, '.specs/CONTEXT.md', original);
+      writeState(dir, baseState('open'));
+
+      // ① 改写落备份：同目录、命名族 `.bak-<日期>`、内容 = 改写前版本；双落点写入照常
+      const first = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
+      assertExit(first, 0);
+      const backups = fs.readdirSync(path.join(dir, '.specs'))
+        .filter((name) => /^CONTEXT\.md\.bak-\d{4}-\d{2}-\d{2}$/.test(name));
+      assertEqual(backups.length, 1, '改写前的备份份数（应恰 1 份同目录 `.bak-<日期>`）实际 ' + JSON.stringify(backups));
+      assertEqual(backups[0], 'CONTEXT.md.bak-' + today, '备份命名（应为改写当日的本地日期）');
+      assertEqual(fs.readFileSync(path.join(dir, '.specs', backups[0]), 'utf8'), original, '备份内容应为改写前版本');
+      assertTrue(fs.readFileSync(contextFile, 'utf8') !== original, 'CONTEXT.md 未被改写（夹具前提不成立）');
+
+      // ② 同日再改写：同名覆盖——只保留一份当日备份，内容为该轮改写前版本（不堆积、链路不丢）
+      const intermediate = contextFixtureText().replace('2026-09-01T10:00:00+08:00', '2026-09-02T10:00:00+08:00');
+      writeFile(dir, '.specs/CONTEXT.md', intermediate);
+      const second = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
+      assertExit(second, 0);
+      assertEqual(fs.readdirSync(path.join(dir, '.specs'))
+        .filter((name) => name.startsWith('CONTEXT.md.bak-')).length, 1, '同日重复改写的当日备份份数');
+      assertEqual(fs.readFileSync(path.join(dir, '.specs', backups[0]), 'utf8'), intermediate,
+        '第二轮的备份内容应为该轮改写前版本');
+
+      // ③ 复制不成功 → fail-closed：目标文档与 state 逐字节不变（备份先于写入，写入面不留半态）
+      writeFile(dir, '.specs/CONTEXT.md', original);
+      const stateBytes = readStateBytes(dir);
+      fs.rmSync(path.join(dir, '.specs', backups[0]), { force: true });
+      fs.mkdirSync(path.join(dir, '.specs', backups[0]));
+      const blocked = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
+      assertExit(blocked, 1);
+      assertOut(blocked, 'BLOCKED');
+      assertEqual(fs.readFileSync(contextFile, 'utf8'), original, '备份失败的一轮改写了 CONTEXT.md');
+      assertStateBytesUnchanged(dir, stateBytes, '备份失败的一轮');
+
+      // ④ 形态同源锚：两处备份命名走同一表达式形态（`.bak-` + 本地日期）——任一侧退回「无备份」
+      //    或另起命名族即变红
+      for (const file of ['evolve.mjs', 'context-scan.mjs']) {
+        const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
+        assertTrue(text.includes(BACKUP_NAME_FORM), file + ' 的备份命名不再走 `.bak-` + 本地日期形态');
+      }
     },
   },
 ];
