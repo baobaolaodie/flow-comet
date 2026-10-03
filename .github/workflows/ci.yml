@@ -262,14 +262,16 @@ jobs:
             install: { authority: 'docs/INSTALLATION.md', twin: 'docs/INSTALLATION-zh.md', sentinel: ['Verify the installation'], forbidden: ['README.md','docs/USAGE.md','docs/MECHANISM.md','docs/TROUBLESHOOTING.md'], mustLink: ['README.md'] },
             workflow: { authority: 'docs/USAGE.md', twin: 'docs/USAGE-zh.md', sentinel: ['## The 8-node workflow','## User entry points'], forbidden: ['README.md','docs/INSTALLATION.md','docs/MECHANISM.md'], mustLink: ['README.md','docs/MECHANISM.md'] },
             troubleshooting: { authority: 'docs/TROUBLESHOOTING.md', twin: 'docs/TROUBLESHOOTING-zh.md', sentinel: ['## Symptoms'], forbidden: ['README.md','docs/INSTALLATION.md','docs/MECHANISM.md'], mustLink: ['README.md','docs/INSTALLATION.md'] },
-            release: { authority: 'docs/VERSIONS.md', twin: 'docs/VERSIONS-zh.md', sentinel: ['Update CHANGELOG','Nine places'], forbidden: ['README.md','CONTRIBUTING.md','docs/MECHANISM.md'], mustLink: ['README.md','CONTRIBUTING.md'] },
+            release: { authority: 'docs/VERSIONS.md', twin: 'docs/VERSIONS-zh.md', sentinel: ['Update CHANGELOG','Version record surfaces'], forbidden: ['README.md','CONTRIBUTING.md','docs/MECHANISM.md'], mustLink: ['README.md','CONTRIBUTING.md'] },
             behaviour: { authority: 'docs/MECHANISM.md', twin: 'docs/MECHANISM-zh.md', sentinel: ['## Behaviour contract','## Custom protocols'], forbidden: ['README.md','docs/INSTALLATION.md','docs/USAGE.md'], mustLink: ['README.md','docs/USAGE.md'] },
             contributing: { authority: 'CONTRIBUTING.md', twin: 'CONTRIBUTING-zh.md', sentinel: ['## Borrowing boundary'], forbidden: ['README.md','docs/MECHANISM.md'], mustLink: ['README.md'] },
             history: { authority: 'CHANGELOG.md', twin: 'CHANGELOG-zh.md', sentinel: ['All notable changes to this project'], forbidden: ['README.md','docs/MECHANISM.md','docs/VERSIONS.md'], mustLink: ['README.md'] },
             upstream: { authority: 'README.md', twin: 'README-zh.md', sentinel: ['## Relationship to the upstream project'], forbidden: ['docs/MECHANISM.md','docs/INSTALLATION.md'], mustLink: [] },
             security: { authority: 'SECURITY.md', twin: null, sentinel: [], forbidden: ['README.md'], mustLink: ['README.md'] },
           };
-          const COUNTS_SENTINEL = ['badge/version-', 'Nine places'];
+          // Sentinel phrases stay count-free on purpose ('Version record surfaces'): a sentinel that
+          // carries a count goes red the moment the count is corrected. Same marker in the local check.
+          const COUNTS_SENTINEL = ['badge/version-', 'Version record surfaces'];
           const RELEASE_AUTHORITY = ['docs/VERSIONS.md','docs/VERSIONS-zh.md'];
           const INTERNALS = ['comet-hook-guard.mjs','comet-hook-guard','dsh-bridge.mjs','delegationDepth','reentryAuthorization'];
           const PUBLIC = ['README.md','README-zh.md','CONTRIBUTING.md','CONTRIBUTING-zh.md','CHANGELOG.md','CHANGELOG-zh.md','docs/INSTALLATION.md','docs/INSTALLATION-zh.md','docs/USAGE.md','docs/USAGE-zh.md','docs/MECHANISM.md','docs/MECHANISM-zh.md','docs/TROUBLESHOOTING.md','docs/TROUBLESHOOTING-zh.md','docs/VERSIONS.md','docs/VERSIONS-zh.md'];
