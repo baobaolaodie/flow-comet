@@ -3,7 +3,7 @@ import { execFileSync } from 'child_process';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { validateStateFields, looksLikeObjectLiteral, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, resolveProtocolPathWithState } from './state-schema.mjs';
+import { validateStateFields, looksLikeObjectLiteral, writeJsonAtomic, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, resolveProtocolPathWithState } from './state-schema.mjs';
 import { EXECUTE_FAMILY_NODE_IDS, protocolNodeEnabled, resolveDelegationTarget, taskDependencyEligibility } from './route-node.mjs';
 import {
   readProtocolFile,
@@ -256,8 +256,10 @@ async function writeState(state) {
     console.error('BLOCKED: state 字段类型非法: ' + bad[0]);
     process.exit(1);
   }
-  await fs.mkdir(path.dirname(statePath), { recursive: true });
-  await fs.writeFile(statePath, JSON.stringify(state, null, 2) + '\n', 'utf8');
+  // 落盘形态与引擎其余 state 写入对齐：同一原子写导出（原先直写会让同一 state 文件出现
+  // 「脚本通道原子、handoff 非原子」两种形态——半写窗口正是该文件最不可接受的损坏面）。
+  // 错误语义不变：写失败照常上抛（临时文件已清理），调用方按既有 fail-closed 处理。
+  await writeJsonAtomic(statePath, state);
 }
 
 // ---------- request 归属门禁（只读判定） ----------

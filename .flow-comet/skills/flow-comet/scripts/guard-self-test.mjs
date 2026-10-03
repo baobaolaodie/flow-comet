@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// C1 · flow-comet 引擎自测套件（场景数以 SCENARIOS.length 为准：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、计数一致性自检（场景数 + 系统测试集项数）、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退）、并行文件依赖检测（写写重叠强判前移 plan 出口 + read 读写弱判渐进 + 触发面排除 + 委托前保持锚 + 扩展名闭合）、directOverride 授权约束（协调者授权留痕正例 / 执行者自切无授权 BLOCK / 越界改 state hook 拦截 / 恢复双路径）、hook state 大小写变体拦截（win32/darwin 闭合 / 其他平台放行）、路由完成判定 fail-closed（缺/未知 status 畸形块不提前放行）、并行文件依赖路径归一化（`.` 段变体重叠检出）、运行时文件位置迁移（白名单搬移 / 迁移前备份与回退 / 新旧并存·符号链接·内容损坏三边界 / 失败保护 / gitignore 三形态保守纳管与幂等）、Comet 感知层剥离（classic 资产有无判定一致 / overlay 协议不再进入叠加分支 + 源码符号检索）、自检清单条目缺失显式报告、受控计划重校重签（replan 授权 fail-closed / 轮次上限与显式续轮 / 幂等空操作 / 重签后 execute 出口放行 / 校验不豁免与任务图分析单源锚）与强制推进留痕（advance-forced 事件 / status.forcedNodes 派生视图））
+// C1 · flow-comet 引擎自测套件（场景数以 SCENARIOS.length 为准：节点门禁 entry/exit 校验正反例与 WARN 渐进、自定义协议加载路由与防线、TASK 签名与 next 推进、handoff Return Contract 与时间序、init 状态机与 hook 写白名单、CONTEXT 自动初始化检测、completedChecks 真实性声明机制（skill-load/record/exit 校验 + 交叉自洽 + 旧兼容）、init 参数误用防护、执行遗漏防护、严格模式、验证失败计数按变更隔离、多趟路由依赖图校验（环/缺失依赖 BLOCK 与混排合法锚）、契约解析失败检测、计数一致性自检（场景数 + 系统测试集项数）、prepare-env 平台选择链、零提交边界与入口首部强制、多趟出口硬化（可运行串行放行与拦截双向锚、单行分号 write_files 容错、收尾态路由静默、死结提示与技能文本锁）、installer 新链路（flow-kit 获取五态 / 桥接健康六态 / 他方保持 / 强制回退）、并行文件依赖检测（写写重叠强判前移 plan 出口 + read 读写弱判渐进 + 触发面排除 + 委托前保持锚 + 扩展名闭合）、directOverride 授权约束（协调者授权留痕正例 / 执行者自切无授权 BLOCK / 越界改 state hook 拦截 / 恢复双路径）、hook state 大小写变体拦截（win32/darwin 闭合 / 其他平台放行）、路由完成判定 fail-closed（缺/未知 status 畸形块不提前放行）、并行文件依赖路径归一化（`.` 段变体重叠检出）、运行时文件位置迁移（白名单搬移 / 迁移前备份与回退 / 新旧并存·符号链接·内容损坏三边界 / 失败保护 / gitignore 三形态保守纳管与幂等）、Comet 感知层剥离（classic 资产有无判定一致 / overlay 协议不再进入叠加分支 + 源码符号检索）、自检清单条目缺失显式报告、受控计划重校重签（replan 授权 fail-closed / 轮次上限与显式续轮 / 幂等空操作 / 重签后 execute 出口放行 / 校验不豁免与任务图分析单源锚）与强制推进留痕（advance-forced 事件 / status.forcedNodes 派生视图）、扫描时刻双落点一致（init 侧的形态单一来源 + 漂移可见提示 + 段名/字段名跨文件一致））
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .flow-comet/flow-comet-state.json
 // （currentNode + evidence + executionMode:'subagent'，满足前置校验）+
@@ -143,6 +143,10 @@ const SCENARIO_COUNT_FILES_MAINTAINER = [
   'CLAUDE.md',
 ];
 const MAINTAINER_DOC_DIR = 'docs/internal';
+// 本仓 CONTEXT 工件（**流程工件面**：.specs/ 被 gitignore）。存在性即「维护者形态」判据——
+// CI 全新检出 / worktree 下结构性缺席，依赖它的场景须输出**可见 SKIP**（未验证 ≠ 通过），
+// 不得把「文件不在场」当成「校验通过」。与 docs/internal/（MAINTAINER_DOC_DIR）同源缺席。
+const REPO_CONTEXT_FILE = path.join(REPO_ROOT, '.specs', 'CONTEXT.md');
 // 三册显式清单（维护文档机检扫描面；与 docs/internal/*.md、.specs/adr/*.md 并列）：
 // 知识权威累积面，更新频率高——写入即需校验。显式清单（不用 .specs/*.md 通配）可预测、
 // 可按册 allowlist，未来新增册需手工登记（与计数受检清单同纪律）。
@@ -2249,7 +2253,624 @@ function vocabularyMirrorProblems(root = REPO_ROOT) {
   return problems;
 }
 
-// ---------- 17 个场景 ----------
+// ---------- 侧命令锚点材料（evolve / health / context-scan + 到期提示 + ui-design 强制等级） ----------
+// 三条侧命令与 ui-design 门是横向机制：判据一律走**真实 CLI**（spawn）或**模块导出**（动态导入
+// 同一实现），套件内不复制第二份判据。零写入判据用**树指纹**（相对路径清单 + 文件 sha256）表达——
+// 「跑完没变」与「跑前跑后一致」是同一判据的两种说法，此处只实现一次。
+
+const timeUtilsModule = await import(pathToFileURL(path.join(__dirname, 'time-utils.mjs')).href);
+const contextInitModule = await import(pathToFileURL(path.join(__dirname, 'context-init.mjs')).href);
+const stateSchemaModule = await import(pathToFileURL(path.join(__dirname, 'state-schema.mjs')).href);
+
+const SIDE_EVOLVE = path.join(__dirname, 'evolve.mjs');
+const SIDE_HEALTH = path.join(__dirname, 'health.mjs');
+const SIDE_CONTEXT_SCAN = path.join(__dirname, 'context-scan.mjs');
+const SKILL_PROTOCOL_FILE = path.join(__dirname, '..', 'reference', 'workflow-protocol.json');
+
+function requireModuleExport(moduleObject, name, where) {
+  const value = moduleObject[name];
+  if (value === undefined) {
+    throw new Error(where + ' 缺导出 ' + name + '（套件锚点前提失效：单一实现被改名 / 移除）');
+  }
+  return value;
+}
+
+function assertTrue(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+function assertEqual(actual, expected, label) {
+  if (actual !== expected) {
+    throw new Error(label + '：期望 ' + JSON.stringify(expected) + '，实际 ' + JSON.stringify(actual));
+  }
+}
+
+// 侧命令真实调用（cwd = 项目根；--root 由调用方显式传入——侧命令不进 8 节点流程）。
+// FLOW_COMET_PROTOCOL 注入场景内协议副本，与 runGuard / runStateWithProtocol 同一表达：协议路径的
+// 唯一权威是 state-schema 的选择器（state.protocolPath > 环境变量 > 内置默认），侧命令的子进程
+// （workflow-state 通道）因此要看到与门禁同一份协议来源——平台侧注入环境变量正是真实项目形态。
+// 需要构造「无环境变量」的场景用 `{ FLOW_COMET_PROTOCOL: '' }` 覆盖（空串按未设置处理）。
+function runSideScript(script, args, root, envOverrides = {}) {
+  const res = spawnSync(process.execPath, [script, ...args], {
+    cwd: root,
+    env: {
+      ...process.env,
+      FLOW_COMET_PROTOCOL: path.join(root, 'reference', 'workflow-protocol.json'),
+      ...envOverrides,
+    },
+    encoding: 'utf8',
+    timeout: 120000,
+  });
+  return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+}
+
+// 树指纹：目录（含空目录）与文件内容的 sha256，按相对路径排序
+function treeFingerprint(root) {
+  const rows = [];
+  const walk = (dir) => {
+    const entries = fs.readdirSync(dir, { withFileTypes: true })
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      const rel = path.relative(root, full).split(path.sep).join('/');
+      if (entry.isDirectory()) { rows.push(rel + '/'); walk(full); continue; }
+      rows.push(rel + ' ' + createHash('sha256').update(fs.readFileSync(full)).digest('hex'));
+    }
+  };
+  walk(root);
+  return rows.join('\n');
+}
+
+function fingerprintChanges(before, after) {
+  const beforeRows = before === '' ? [] : before.split('\n');
+  const afterRows = after === '' ? [] : after.split('\n');
+  const beforeSet = new Set(beforeRows);
+  const afterSet = new Set(afterRows);
+  return [
+    ...beforeRows.filter((row) => !afterSet.has(row)).map((row) => '消失: ' + row),
+    ...afterRows.filter((row) => !beforeSet.has(row)).map((row) => '新增: ' + row),
+  ];
+}
+
+// 定义处计数：某名字在本脚本同级目录（引擎脚本目录）内的定义次数——单源结构锚用
+// 定义面扫描（默认引擎脚本目录）。root 是可测性接缝：使「同名第二份定义 → 检出 2 处」能在合成
+// 目录上被场景驱动（场景 277 的反向构造），否则该判据只能靠人工实验证明判别力。
+function engineDefinitionHits(name, root = __dirname) {
+  const pattern = new RegExp('(?:export\\s+)?(?:async\\s+)?function\\s+' + name + '\\b'
+    + '|(?:export\\s+)?const\\s+' + name + '\\s*=', 'g');
+  const hits = [];
+  for (const file of fs.readdirSync(root).sort()) {
+    if (!file.endsWith('.mjs')) continue;
+    const text = fs.readFileSync(path.join(root, file), 'utf8');
+    const count = (text.match(pattern) ?? []).length;
+    if (count > 0) hits.push({ file, count });
+  }
+  return hits;
+}
+
+// 时间单源**消费面**判据（场景 277 使用；纯函数 + 合成输入可驱动）：每个符号必须同时满足
+// 「具名 import 自 time-utils.mjs」与「真实调用」才算真实消费。旧判据只看 `name + '('` 的子串——
+// 消费脚本里内联一份同名实现即可满足（判据被本地影子实现骗过），故必须查 import 来源。
+function timeSingleSourceConsumerProblems(text, symbols, file = '') {
+  const problems = [];
+  const prefix = file === '' ? '' : file + ' ';
+  for (const symbol of symbols) {
+    if (!hasNamedImport(text, './time-utils.mjs', symbol)) {
+      problems.push(prefix + '未从 time-utils.mjs 具名 import ' + symbol
+        + '（单源纪律：不得在消费脚本内联同名第二份实现）');
+    }
+    if (!text.includes(symbol + '(')) {
+      problems.push(prefix + '未真实消费 ' + symbol + '（单一权威应被调用）');
+    }
+  }
+  return problems;
+}
+
+// 前端判据**散文口径**判据（场景 286 使用；纯函数 + 合成输入可驱动）：引擎侧判据已升为结构形态
+// （独立行 / 行首 / 适用性标签的字段值位 + 词形边界 + 命中片段回显），五份分发文本是它的散文副本——
+// 副本必须陈述**结构形态**，不得残留旧口径（「段内不含 / 未标注字面『不适用』」这类把判据说成
+// 段内任意位置子串的表述，正是「一处措辞即关闸」fail-open 的文字版）。返回问题描述数组。
+const FRONTEND_CRITERION_STRUCTURE_GROUPS = [
+  ['独立行', '独占一行'],
+  ['行首'],
+  ['字段值位'],
+  ['词形边界'],
+  ['命中片段', '回显'],
+];
+// 旧口径的**显式措辞**（逐条对应改前的真实句子，收窄到这些形态以免误伤新口径的正常行文）。
+const FRONTEND_CRITERION_STALE_PROSE_RES = [
+  /段内\s*\*{0,2}(?:不含|不包含|未含|不得含|不得出现)\*{0,2}\s*(?:字面\s*)?「?不适用」?/,
+  /段内\s*\*{0,2}(?:标注|标记)\*{0,2}\s*「?不适用」?\s*(?:两个)?字面/,
+  /未标注\s*「不适用」/,
+  /不含\s*字面\s*「不适用」/,
+];
+function frontendCriterionProseProblems(label, text) {
+  const problems = [];
+  for (const group of FRONTEND_CRITERION_STRUCTURE_GROUPS) {
+    if (!group.some((token) => text.includes(token))) {
+      problems.push(label + ' 未陈述结构形态「' + group[0] + '」（散文副本须与引擎的结构判据同口径）');
+    }
+  }
+  for (const re of FRONTEND_CRITERION_STALE_PROSE_RES) {
+    const hit = re.exec(text);
+    if (hit !== null) problems.push(label + ' 残留旧口径表述: ' + JSON.stringify(hit[0]));
+  }
+  return problems;
+}
+
+// 时间纪律四条硬规则的**文本判据**（场景 302 使用；纯函数 + 合成输入可驱动）：入参是承载该纪律的
+// 文本（入口技能 / 验证阶梯），按规则逐条检查关键词组合；返回问题描述数组（空数组 = 四条齐备）。
+// 判别力由场景内的逐条移除构造常驻证明（移掉任一条的关键词 → 必报），不依赖人工实验。
+const TIME_DISCIPLINE_RULES = [
+  ['规则① 时间戳一律本地时间 + 显式偏移', ['本地时间 + 显式偏移']],
+  ['规则② 比较一律 Date.parse 差值', ['Date.parse']],
+  ['规则③ 判活 / 判时以 mtime 或 git 时间为准、date 不作基准', ['mtime', 'git 时间', '不作基准']],
+  ['规则④ 纪律已写入验证阶梯', ['验证阶梯']],
+];
+function timeDisciplineTextProblems(label, text) {
+  const problems = [];
+  for (const [rule, tokens] of TIME_DISCIPLINE_RULES) {
+    const missing = tokens.filter((token) => !text.includes(token));
+    if (missing.length > 0) problems.push(label + ' 缺 ' + rule + '（缺 ' + missing.join(' / ') + '）');
+  }
+  return problems;
+}
+
+// CRLF 行尾判据（场景 303 使用；纯函数 + 合成输入可驱动）：CRLF 文档的**每一条行**都必须以 CRLF
+// 终结——`split('\n')` 之后除末尾哨兵外每个元素都须以 `\r` 收尾，且文档得以换行收尾。返回违例
+// 行号（空数组 = 整篇行尾一致）。旧实现在「以换行收尾的文档」上直接于哨兵之后追加，拼出一条
+// **无 `\r` 的空行**：同一文件两种行尾，渲染层看不见、diff 层刺眼（REVIEW 实测形态）。
+function crlfLineViolations(text) {
+  const value = String(text);
+  const lines = value.split('\n');
+  const offenders = [];
+  if (!value.endsWith('\n')) offenders.push(lines.length);
+  for (let i = 0; i < lines.length - 1; i += 1) {
+    if (!lines[i].endsWith('\r')) offenders.push(i + 1);
+  }
+  return offenders;
+}
+
+// EVOLVE 报告列表符号判据（场景 304 使用；纯函数 + 合成输入可驱动）：报告行不得出现 `- -`
+// 双层列表符号——`  - ` 前缀与条目自带的 `- ` 叠加后渲染成「空壳父项 + 子项」，读者看到两条。
+function evolveReportBulletProblems(reportText) {
+  const problems = [];
+  const lines = String(reportText).split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^\s*-\s+-\s/.test(lines[i])) {
+      problems.push('第 ' + (i + 1) + ' 行出现双列表符号: ' + JSON.stringify(lines[i]));
+    }
+  }
+  return problems;
+}
+
+// 确定性层「每项都带可复现命令」判据（场景 306 使用，对应验收条款的该子句；纯函数 + 合成输入
+// 可驱动）：确定性层以 `### k · 名称` 分项，每个项内必须随附 `- 复现命令：` 行——项是「机器可判」
+// 的承诺，复现命令是它的兑现方式：缺一项，该层就有一格不可复核（读数与命令两边只在校验报告里
+// 出现过一次，读者无法自己重算）。返回问题描述数组（空 = 每项都有）。
+function deterministicReproProblems(reportText) {
+  const layer = /## 确定性层（机器可判）\n([\s\S]*?)(?=\n## |$)/.exec(String(reportText));
+  if (layer === null) return ['缺「## 确定性层（机器可判）」段'];
+  const chunks = layer[1].split(/\n(?=### )/).filter((chunk) => chunk.startsWith('### '));
+  if (chunks.length === 0) return ['确定性层零个分项（判据无从校验）'];
+  const problems = [];
+  for (const chunk of chunks) {
+    const title = chunk.split('\n')[0].replace(/^###\s*/, '').trim();
+    if (!/^- 复现命令：/m.test(chunk)) problems.push('确定性项缺复现命令: ' + title);
+  }
+  return problems;
+}
+
+// 上游覆盖声明四要素判据（场景 307 使用；纯函数 + 合成输入可驱动）。上游语义被本仓有意覆盖，
+// 声明此前是纯文本、无机检——读者无从判断「说没说清不采用什么」。四要素：
+//   ① 上游文件标记为**只读基准**；② **「不采用」栏** ≥1 条（逐条点名，不是笼统「有意偏离」）；
+//   ③ **「沿用上游」栏** ≥1 条（**指针式入口豁免**——细则在各自技能册，入口只留指针）；
+//   ④ **「以…为准」兜底语**（冲突时以本节为准）。
+// 「栏内条目」计数容忍两种行文形态：序号标记（①②③…）与顿号 / 分号列举——技能册一用序号、
+// 一用顿号，形态差异不是「有没有条目」的差异；判据只锚「栏在场且至少一条」。
+const OVERRIDE_CLAUSE_ITEM_MARKS = /[①②③④⑤⑥⑦⑧⑨⑩]/g;
+// 兜底语 = **冲突优先**声明（「以本节为准」式）：判据不认任何 `以…为准`——`以安装平台为准`
+// 一类是无关行文，`冲突以 state 为准` 一类是局部字段优先级，都会被它冒充满足。
+const OVERRIDE_FALLBACK_RE = /以(?:本节|本册|本文)[^\n。]{0,20}为准|冲突[^\n。]{1,60}为准/;
+// 声明块 = 「只读基准」所在行起，向后吞掉「空行 / 粗体栏名开头的段落 / 兜底语所在行」，直到首个
+// 既非空行、也不以 `**` 开头、也不含兜底语的行为止——四要素都必须落在**块内**。没有块边界，
+// 判据会被文件里别处的 `以…为准` / 局部优先级条款冒充满足（「锚偏弱」的另一种形态）。
+function overrideDeclarationBlock(text) {
+  const lines = String(text).split('\n');
+  const start = lines.findIndex((line) => line.includes('只读基准'));
+  if (start < 0) return null;
+  let end = start + 1;
+  for (let i = start; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (i > start && line.trim() !== '' && !line.startsWith('**') && !OVERRIDE_FALLBACK_RE.test(line)) break;
+    end = i + 1;
+  }
+  return lines.slice(start, end).join('\n');
+}
+function labeledClauseItemCount(text, label) {
+  const value = String(text);
+  const at = value.indexOf(label);
+  if (at < 0) return null;
+  const nextLine = value.indexOf('\n', at);
+  const line = value.slice(at, nextLine < 0 ? value.length : nextLine);
+  // 栏名之后先剥掉自身的粗体闭合与冒号，再截到**下一个栏名**（粗体 + 冒号形态）为止：
+  // 栏内联的粗体强调（`**确定性子集**（…）`）不是栏名，不能当成栏边界。
+  const rest = line.slice(label.length).replace(/^[*：:\s]+/, '');
+  const nextLabel = rest.search(/\*\*[^*]{1,20}\*\*\s*[:：]/);
+  const body = nextLabel < 0 ? rest : rest.slice(0, nextLabel);
+  const marked = (body.match(OVERRIDE_CLAUSE_ITEM_MARKS) ?? []).length;
+  const listed = body.split(/[、；]/).map((piece) => piece.trim()).filter((piece) => piece.length > 0).length;
+  return Math.max(marked, listed);
+}
+function overrideDeclarationProblems(label, text, { pointer = false } = {}) {
+  const problems = [];
+  const block = overrideDeclarationBlock(text);
+  if (block === null) return [label + ' 找不到覆盖声明块（缺「只读基准」标记）'];
+  if (!block.includes('只读基准')) problems.push(label + ' 未把上游文件标记为「只读基准」');
+  const notAdopted = labeledClauseItemCount(block, '不采用');
+  if (notAdopted === null) problems.push(label + ' 缺「不采用」栏');
+  else if (notAdopted === 0) problems.push(label + ' 的「不采用」栏零条目（须逐条点名上游语义）');
+  if (!pointer) {
+    const kept = labeledClauseItemCount(block, '沿用上游');
+    if (kept === null) problems.push(label + ' 缺「沿用上游」栏');
+    else if (kept === 0) problems.push(label + ' 的「沿用上游」栏零条目');
+  }
+  if (!OVERRIDE_FALLBACK_RE.test(block)) {
+    problems.push(label + ' 缺「以…为准」兜底语（冲突时以本节 / 本册为准）');
+  }
+  return problems;
+}
+
+// 覆盖声明里点名的上游工件路径（`flow-kit/prompts/...` 形态，含 `{a,b,c}.md` 花括号合写）：
+// 逐条展开为可 stat 的真实路径——声明的锚必须指向在场实体，不能指向幽灵路径。尖括号占位形态
+// （`flow-kit/prompts/<阶段>.md` 一类说明性写法）不是实体，直接排除。
+function upstreamArtifactPaths(text) {
+  const found = String(text).match(/flow-kit\/prompts\/[^\s`）()、，。]+\.md/g) ?? [];
+  const out = [];
+  for (const raw of found) {
+    if (raw.includes('<') || raw.includes('>')) continue;
+    const brace = /\{([^}]*)\}/.exec(raw);
+    if (brace === null) { out.push(raw); continue; }
+    for (const name of brace[1].split(',')) out.push(raw.replace(brace[0], name.trim()));
+  }
+  return out;
+}
+
+// 具名 import 断言（容忍多行 / 符号重排 / 其它符号共存）：source 为模块说明符（`./state-schema.mjs`）。
+// 与场景 154 的内联写法同判据，本处提为复用工具（原子写与元数据常量两处消费面都要断言）。
+function hasNamedImport(text, source, name) {
+  const pattern = /import\s*\{([\s\S]*?)\}\s*from\s*['"]([^'"]+)['"]/g;
+  let match;
+  while ((match = pattern.exec(String(text))) !== null) {
+    if (match[2] !== source) continue;
+    const names = match[1].split(',').map((piece) => piece.trim().split(/\s+as\s+/).pop());
+    if (names.includes(name)) return true;
+  }
+  return false;
+}
+
+// 原子写惯用法指纹（两条件同现于一个文件）：`+ '.tmp'` 拼接 + `fs.rename(` 落位——即「同目录固定
+// 临时名 + rename」的写法。**收敛面 = 任务写边界内的写盘脚本**（状态/侧命令的state 与文档落盘），
+// 由调用方显式传入清单：`workflow-guard.mjs` 的受保护写入是**独立的安全硬化通道**（临时名含 pid +
+// 随机段、写后 fsync 与快照复核、保护目录校验），不属于本惯用法，且不在本任务写边界内——它的
+// 排除在场景里另有**边界锚**看守（形态一旦退回本惯用法即变红），不是静默跳过。
+// root 是可测性接缝（默认引擎脚本目录）：使「第二份实现 → 检出 2 处」能在合成目录上被场景驱动，
+// 否则该判据只能靠人工实验证明判别力、回归时可能被改成恒真空过（场景 291 反向构造）。
+// 套件自身不是引擎写盘面（夹具文本会携带惯用法样例），排除在扫描外。
+const ATOMIC_TEMP_SUFFIX_RE = /\+\s*'\.tmp'/g;
+const ENGINE_IDIOM_SCAN_EXCLUDE = new Set(['guard-self-test.mjs', 'system-test.mjs']);
+function atomicWriteIdiomHits(root = __dirname, files = null) {
+  const candidates = files ?? fs.readdirSync(root).sort()
+    .filter((file) => file.endsWith('.mjs') && !ENGINE_IDIOM_SCAN_EXCLUDE.has(file));
+  const hits = [];
+  for (const file of candidates) {
+    const text = fs.readFileSync(path.join(root, file), 'utf8');
+    const count = (text.match(ATOMIC_TEMP_SUFFIX_RE) ?? []).length;
+    if (count > 0 && text.includes('fs.rename(')) hits.push({ file, count });
+  }
+  return hits;
+}
+// 原子写收敛面（本任务写边界内的写盘脚本 + 单源模块）：全引擎只应有 state-schema.mjs 一处实现。
+const ATOMIC_WRITE_CONVERGENCE_FACE = [
+  'state-schema.mjs', 'workflow-state.mjs', 'workflow-handoff.mjs', 'evolve.mjs', 'context-scan.mjs',
+];
+
+// 日期前缀判据的**表达式形态**扫描（与原子写惯用法同型）：报告 / 工件名的「日期前缀」判定只许由
+// time-utils.mjs 表达一处——本判据认的形态是「日期三分量以**字面连字符**相接」的前缀写法
+// （`/^(\d{4}-\d{2}-\d{2})/` 一类），在其它脚本内联第二份即为单源违规（注释互指同源不作数，
+// 判据只认形态）。时刻形态 `\d{4})-(\d{2})-(\d{2})T…`（`TIMESTAMP_SHAPE`）是另一个判据面，同样
+// 落在 time-utils 一处，不在本形态内。**收敛面 = 本任务写边界内的日期前缀消费方 + 单源模块**：
+// `workflow-guard.mjs` 的两处日期匹配是**文档内容**里的日期条目匹配（行锚 + `matchAll(.../gm)`），
+// 不是文件名前缀判定，且不在本任务写边界内——该排除在场景里另有**边界锚**看守（形态一旦不再是
+// 内容条目匹配即变红），不是静默跳过。root 是可测性接缝（默认引擎脚本目录）：使「第二份实现 →
+// 检出 2 处」能在合成目录上被场景驱动，否则该判据只能靠人工实验证明判别力、回归时可能被改成
+// 恒真空过（场景 295 反向构造）。
+const DATE_PREFIX_LITERAL_RE = /\\d\{4\}-\\d\{2\}-\\d\{2\}/g;
+const DATE_PREFIX_CONVERGENCE_FACE = ['time-utils.mjs', 'health.mjs', 'context-scan.mjs'];
+function datePrefixRegexpHits(root = __dirname, files = null) {
+  const candidates = files ?? fs.readdirSync(root).sort().filter((file) => file.endsWith('.mjs'));
+  const hits = [];
+  for (const file of candidates) {
+    const text = fs.readFileSync(path.join(root, file), 'utf8');
+    const count = (text.match(DATE_PREFIX_LITERAL_RE) ?? []).length;
+    if (count > 0) hits.push({ file, count });
+  }
+  return hits;
+}
+
+// 备份实现形态（改写前版本落盘）：`命名族字面量 + fs.copyFile(` 同现于一个文件即「一份备份实现」。
+// 收敛面 = 单源模块 state-schema.mjs + 两个消费方：实现只许落在单源模块一处，消费方只许具名
+// import 后消费导出（此前 evolve 与 context-scan 各写一份——命名族或失败处置再演进时只改到一侧）。
+// root / files 是可测性接缝（默认引擎脚本目录）：使「第二份实现 → 检出 2 处」能在合成目录上被场景
+// 驱动，否则该判据只能靠人工实验证明判别力、回归时可能被改成恒真空过（场景 301）。
+const BACKUP_NAME_LITERAL = "'.bak-'";
+const BACKUP_IMPL_FACE = ['state-schema.mjs', 'evolve.mjs', 'context-scan.mjs'];
+function inlineBackupHits(root = __dirname, files = null) {
+  const candidates = files ?? fs.readdirSync(root).sort().filter((file) => file.endsWith('.mjs'));
+  const hits = [];
+  for (const file of candidates) {
+    const text = fs.readFileSync(path.join(root, file), 'utf8');
+    if (!text.includes(BACKUP_NAME_LITERAL)) continue;
+    const count = (text.match(/await fs\.copyFile\(/g) ?? []).length;
+    if (count > 0) hits.push({ file, count });
+  }
+  return hits;
+}
+
+// 裸时间拼接静态锚（DESIGN R4「禁裸拼接」）：时间形态 / 格式化的唯一权威是 time-utils.mjs。
+// 两面判据——① 三条侧命令**零容忍**（它们的产物是人可见报告、CLI 摘要行与备份名）；
+// ② 其余引擎脚本走**显式白名单 + 逐条理由**：既有落点都是已持久化的机器字段（state 时刻 /
+// handoff 工件字段 / 审计事件），迁移须连同一批历史值的解析与比较面，留专门窗口并登记债务；
+// 白名单**精确匹配**（新增与消失都必须显式改这里，不许静默漂移）。判据只看代码不看散文：
+// 行注释剥掉后计数——注释里的反例引用不是「实现」（time-utils 的头部注释就引用了该形态）。
+// root / files 是可测性接缝：合成目录可驱动「新增即红」（场景 298）。
+const BARE_ISO_TIMESTAMP_RE = /new Date\(\)\.toISOString\(\)/g;
+const BARE_ISO_SIDE_COMMANDS = ['health.mjs', 'evolve.mjs', 'context-scan.mjs'];
+const BARE_ISO_ENGINE_WHITELIST = [
+  {
+    file: 'workflow-state.mjs',
+    count: 7,
+    reason: 'state 的机器字段时间戳（createdAt / 事件 at / 授权与覆盖时刻）：Z 形已随既有 state 与事件流持久化，迁移须同批处理历史值的解析与比较，留专门窗口（登记 KNOWN-ISSUES）；扫描时刻（last_intel_scan）已迁出本条——写入走 time-utils 的 nowTimestamp（场景 308 的形态锚 + 277 的单源消费面看守）',
+  },
+  {
+    file: 'workflow-handoff.mjs',
+    count: 4,
+    reason: 'handoff 请求 / 结果的机器字段（requestedAt / revokedAt / completedAt）：Z 形是既有 handoff 工件契约，须与 workflow-state 同批迁移',
+  },
+  {
+    file: 'workflow-guard.mjs',
+    count: 1,
+    reason: 'exit-applied 审计事件的机器时刻：非人可见报告面，随事件流时间形态一并迁移',
+  },
+  {
+    file: 'system-test.mjs',
+    count: 1,
+    reason: 'L2 套件夹具构造的 round 覆盖时刻（测试载体，非人可见面）：随 state 时间形态迁移批次一并改',
+  },
+];
+// intel-scan 元数据「段名 / 字段名」字面量的跨文件一致判据（纯函数 + 合成输入可驱动）：双落点判据在
+// init 侧按「段名 + 字段名」定位段内取值，段行的写通道在 context-scan 侧——同一条命名决定落在两处
+// 声明里（单一来源收口须改到测试面之外的脚本，见场景 309 的登记）。字面量若各自漂移，init 侧会
+// **静默**退化成「段不在场」（零提示）——静默面正是该机制要消灭的形态，故此处让「两处声明逐字相等」
+// 可机检。返回问题描述数组（空数组 = 一致）。
+const INTEL_NAME_DECL_RE = /const\s+(INTEL_SECTION(?:_NAME)?|INTEL_FIELD(?:_NAME)?)\s*=\s*'([^']+)'/g;
+function intelMetadataNameDeclarations(text) {
+  const out = {};
+  for (const match of String(text).matchAll(INTEL_NAME_DECL_RE)) {
+    out[match[1].startsWith('INTEL_SECTION') ? 'section' : 'field'] = match[2];
+  }
+  return out;
+}
+function intelMetadataNameProblems(consumerText, producerText) {
+  const problems = [];
+  const consumer = intelMetadataNameDeclarations(consumerText);
+  const producer = intelMetadataNameDeclarations(producerText);
+  for (const role of ['section', 'field']) {
+    const label = role === 'section' ? '段名' : '字段名';
+    if (consumer[role] === undefined) { problems.push('init 侧未声明 intel-scan ' + label + '字面量'); continue; }
+    if (producer[role] === undefined) { problems.push('重扫命令侧未声明 intel-scan ' + label + '字面量'); continue; }
+    if (consumer[role] !== producer[role]) {
+      problems.push('intel-scan ' + label + '字面量两处声明不一致: init 侧 ' + JSON.stringify(consumer[role])
+        + ' / 重扫命令侧 ' + JSON.stringify(producer[role]) + '（段侧定位会静默退化为「段不在场」）');
+    }
+  }
+  return problems;
+}
+
+// 行注释剥离（`//` 之后非代码）：判据的语义是「代码里有没有裸拼接」，散文引用不算实现。
+// 字符串里的 `//`（URL 一类）会把其后内容当注释剥掉——只可能**少计**（判据变松），而白名单面
+// 另有精确条数锚（13 处）兜底；不为注释识别引入字符串感知的复杂度。
+function stripLineComments(text) {
+  return text.split('\n').map((line) => {
+    const at = line.indexOf('//');
+    return at === -1 ? line : line.slice(0, at);
+  }).join('\n');
+}
+function bareIsoTimestampHits(root = __dirname, files = null) {
+  const candidates = files ?? fs.readdirSync(root).sort().filter((file) => file.endsWith('.mjs'));
+  const hits = [];
+  for (const file of candidates) {
+    const text = stripLineComments(fs.readFileSync(path.join(root, file), 'utf8'));
+    const count = (text.match(BARE_ISO_TIMESTAMP_RE) ?? []).length;
+    if (count > 0) hits.push({ file, count });
+  }
+  return hits;
+}
+// 白名单判定（纯函数，合成输入可驱动）：条数漂移（增 / 减）与未登记文件各自必报。
+function bareIsoWhitelistProblems(hits, whitelist) {
+  const problems = [];
+  const actual = new Map(hits.map((hit) => [hit.file, hit.count]));
+  for (const entry of whitelist) {
+    const count = actual.get(entry.file) ?? 0;
+    if (count === entry.count) continue;
+    problems.push(entry.file + ' 白名单 ' + entry.count + ' 处 / 实际 ' + count
+      + ' 处（须显式改白名单：新增落点先迁移到 time-utils，已迁移的落点同步收窄；理由：' + entry.reason + '）');
+  }
+  for (const hit of hits) {
+    if (whitelist.some((entry) => entry.file === hit.file)) continue;
+    problems.push(hit.file + ' 未登记白名单（' + hit.count
+      + ' 处）——人可见面禁新增裸时间拼接，改用 time-utils.mjs 的 nowTimestamp / formatLocalTimestamp');
+  }
+  return problems;
+}
+
+// health 报告夹具：报告名的日期前缀与读数快照都是**构造出来的输入面**——快照哨兵值只在被采作
+// 基线时才出现在新报告里（哨兵 → `999999 → …`），据此可判「当前基线到底是哪一份」，不必解析
+// 报告结构。哨兵键取全小写键（快照行的键形态判据只认小写字母与 `.` / `_`），与既有 `context.exists`
+// 一类保持一致。
+function healthReportFixture(date, sentinelEntries) {
+  return [
+    '# 健康巡检 · ' + date,
+    '',
+    '## 读数快照（机器可读 · 供下次报告对比）',
+    '',
+    '```text',
+    'lessons.exists=true',
+    'lessons.entries=' + sentinelEntries,
+    '```',
+    '',
+    '## 与上次对比',
+    '',
+    '- 基线：无（夹具报告）',
+    '',
+  ].join('\n');
+}
+
+// 读数快照的**往返夹具**：把生产者自己产出的快照段整段（不解析、不重排、不改键名）当作历史
+// 基线喂回去——写方与读方的键形态是否同源，由「每个产出的键都能被读回」这一往返判定，而不是
+// 由套件再持一份键形态（第三份表达只会掩盖同一类缺陷）。此前写方发 6 个含大写字母的键、读方的
+// 键形态正则只认全小写，这 6 个键在对比段恒判「（基线无此读数）」：逐键趋势静默失效且不报错。
+function healthReportWithSnapshot(date, snapshotSectionText) {
+  return [
+    '# 健康巡检 · ' + date,
+    '',
+    snapshotSectionText.trimEnd(),
+    '',
+    '## 与上次对比',
+    '',
+    '- 基线：无（夹具报告）',
+    '',
+  ].join('\n');
+}
+// 报告里「## 读数快照」段的原文切片（往返夹具的输入 = 生产面的真实字节）
+function snapshotSectionOf(reportText) {
+  const start = reportText.indexOf('## 读数快照');
+  if (start === -1) return null;
+  const rest = reportText.slice(start);
+  const end = rest.indexOf('\n## ', 1);
+  return end === -1 ? rest : rest.slice(0, end);
+}
+// 快照段内的读数条数（`key=value` 行，排除围栏与空行）——往返判据的「应读到条数」由生产面原文派生
+function snapshotEntryCount(sectionText) {
+  return sectionText.split('\n').filter((line) => /^[^`\s][^=]*=/.test(line)).length;
+}
+
+// CONTEXT.md 夹具（七段骨架 + 可选 evolve 段）——夹具不装 flow-kit 模板时 validateContext
+// 取内置基准段名；`intel-scan 元数据` / `evolve 元数据` 字段行与模板同形。
+// 与 system-test.mjs 的同名夹具**同形镜像**（两份载体刻意独立、不互相 import：夹具若从被测模块
+// 派生，锚点会退化成同义反复）——改段名 / 字段名时必须两份同改（与词表镜像同纪律）。
+const CONTEXT_BASE_SECTION_NAMES = ['项目概要', '技术栈', '域语言', '已锁决策', '默认偏好', '既有抽象索引'];
+// 段侧扫描时刻的取值与行尾说明：**真实生成件形态**（`--init-context` 的 CONTEXT 生成物 = 取值词元 +
+// 行尾说明；写侧 `context-scan` 只替换首个取值词元、说明原样保留）。夹具取这一形态——裸取值词元
+// 夹具下「读侧取整行剩余文本」的口径缺陷在两级基线下都不可见（见场景 308 的单变量对照）。
+const INTEL_FIELD_VALUE = '2026-09-01T10:00:00+08:00';
+const INTEL_FIELD_SUFFIX = ' （首次接入生成时留占位；由 `init --init-context` 或 `context-scan` 记录扫描时间）';
+const INTEL_METADATA_FIELD_LINES = [
+  '- **last_intel_scan**: ' + INTEL_FIELD_VALUE + INTEL_FIELD_SUFFIX,
+  '- **scanner**: `flow-comet`',
+  '- **下次重扫建议**: 3 个月后',
+];
+const EVOLVE_METADATA_FIELD_LINES = [
+  '- **last_evolve_at**: `2026-09-01T10:00:00+08:00`',
+  '- **scanner**: `flow-comet-evolve`',
+  '- **下次建议**: 约 60 天后，或新增 ≥ 5 个带 §9 内容的 change 之后',
+];
+
+function contextFixtureText({ evolveSection = null, intelSection = true, tail = '' } = {}) {
+  const lines = ['# 项目上下文', ''];
+  for (const name of CONTEXT_BASE_SECTION_NAMES) {
+    lines.push('## ' + name, '');
+    if (name === '已锁决策') {
+      lines.push('- [2026-09-01] 夹具决策 — 来自 @.specs/CONTEXT.md', '');
+      continue;
+    }
+    if (name === '域语言') {
+      // 域语言段须带模板表格表头（格式判据：`| 术语 | 定义 |`）
+      lines.push('| 术语 | 定义 |', '|---|---|', '| 夹具 | 测试用上下文 |', '');
+      continue;
+    }
+    lines.push('- 夹具条目（' + name + '）', '');
+  }
+  if (intelSection) lines.push('## intel-scan 元数据', '', ...INTEL_METADATA_FIELD_LINES, '');
+  if (evolveSection !== null) lines.push('## evolve 元数据', '', ...evolveSection, '');
+  if (tail !== '') lines.push(tail, '');
+  return lines.join('\n');
+}
+
+// 段侧取值的读取口径：结构提取返回的是**整行剩余文本**（取值词元 + markdown 引号 + 行尾说明），
+// 而写侧（`context-scan` 的 `INTEL_FIELD_LINE`）只替换首个 `(\S+)` 取值词元、说明原样保留——
+// 断言必须与写侧同口径取词元，否则「带说明行」会被判成不一致（本缺陷的成因即读侧取整行）。
+function intelFieldToken(value) {
+  return String(value).trim().split(/\s+/)[0].replace(/^`+/, '').replace(/`+$/, '');
+}
+
+// design 出口 ui-design 门夹具：CHANGE.md 的「视觉调性」段是结构级前端判据的输入面
+const VISUAL_TONE_APPLICABLE = '## 视觉调性（Visual Tone）\n\n现代、克制的工具型界面。\n';
+const VISUAL_TONE_NOT_APPLICABLE = '## 视觉调性（Visual Tone）\n\n不适用（非前端项目）。\n';
+// 负向标记的另外几种形态（判据不接受裸子串，只接受结构形态）：
+// 行首形态（标记 + 破折号理由，非独立行）
+const VISUAL_TONE_LINE_HEAD_MARKER = '## 视觉调性（Visual Tone）\n\n不适用 —— CLI 工具，无用户可见界面。\n';
+// 字段值位（`- 适用性：不适用`）
+const VISUAL_TONE_FIELD_MARKER = '## 视觉调性（Visual Tone）\n\n- 适用性：不适用（CLI 工具，无用户可见界面）\n';
+// 子维度字段（标签不是适用性标签）——结构形态在场，但主体是暗色主题，不得关掉整道门
+const VISUAL_TONE_SUBDIMENSION_FIELD = '## 视觉调性（Visual Tone）\n\n- 选定：克制工具型\n- 暗色主题：不适用\n';
+// 自然句子（标记词出现在行首与句内，但都不成结构形态）——不得据它把前端 change 改判非前端
+const VISUAL_TONE_NATURAL_SENTENCE = '## 视觉调性（Visual Tone）\n\n不适用于暗色主题，本 change 仅覆盖浅色分支。\n';
+
+// ui-design 门键控夹具：以内置协议副本（runGuardWithProtocol 指向的同一路径）为基准改写 design
+// 节点的 flow-comet-ui-design 绑定——'guarded'（默认形态，写回）/ 'advisory'（等级降级）/
+// 'absent'（删掉绑定）。协议副本是「门是否在场」的唯一输入面。
+function writeUiDesignBindingVariant(dir, variant) {
+  const file = scenarioProtocolPath(dir);
+  const protocol = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const design = (protocol.nodes ?? []).find((node) => node.id === 'design');
+  if (!design) throw new Error('内置协议缺 design 节点（夹具前提不成立）');
+  const kept = (design.requiredSkillCalls ?? []).filter((call) => call.skill !== 'flow-comet-ui-design');
+  if (variant !== 'absent') {
+    kept.push({
+      skill: 'flow-comet-ui-design', operation: 'require', scope: 'main', enforcement: variant, reason: 'UI-DESIGN（仅前端）',
+    });
+  }
+  design.requiredSkillCalls = kept;
+  fs.writeFileSync(file, JSON.stringify(protocol, null, 2) + '\n');
+}
+
+function writeDesignExitFixture(dir, {
+  newChange, visualTone, uiDesign, declareUiDesign, changeName = CHANGE_ID, changeTail = '', declareDesign = true,
+}) {
+  writeFile(dir, 'flow-kit/templates/DESIGN.md', '# DESIGN 模板\n\n## 0. 技术栈选型\n## 1. 技术决策清单\n');
+  const state = baseState('design');
+  state.newChange = newChange === true;
+  state.enteredNodes = ['design'];
+  const checks = [];
+  if (declareDesign) checks.push('required-skill:design.flow-comet-design');
+  if (declareUiDesign) checks.push('required-skill:design.flow-comet-ui-design');
+  state.evidence.design = { summary: 'design done', completedChecks: checks };
+  writeState(dir, state);
+  writeFile(dir, '.specs/' + changeName + '/CHANGE.md',
+    '# CHANGE\n\n- **Change ID**: ' + changeName + '\n\n## Why（为什么做）\n\n夹具。\n\n' + visualTone + changeTail);
+  writeFile(dir, '.specs/' + changeName + '/DESIGN.md',
+    '# DESIGN\n\n- **Change ID**: ' + changeName + '\n\n## 0. 技术栈选型\n\nNode（纯脚本）\n\n## 1. 技术决策清单\n\n- [ ] 决策 1\n');
+  if (uiDesign) {
+    writeFile(dir, '.specs/' + changeName + '/UI-DESIGN.md',
+      '# UI-DESIGN\n\n## 1. 设计 token\n\n- 主色 `oklch(0.6 0.1 250)`\n');
+  } else {
+    // 同一目录里连续构造四个子用例：缺席必须真实缺席（残留上一用例的工件会让缺件门形同虚设）
+    fs.rmSync(path.join(dir, '.specs', changeName, 'UI-DESIGN.md'), { force: true });
+  }
+}
+
+// ---------- 场景表 ----------
 
 const SCENARIOS = [
   // 1: open exit 通过（模板段名 CHANGE "## Why（为什么做）" + REQUIREMENT "## 用户故事（User Story）" + 验收段）——带模板验证 C2 派生
@@ -5752,16 +6373,8 @@ const SCENARIOS = [
       assertOut(res, 'SINGLE SOURCE OK');
 
       // ===== F-3（AC-5）：三消费脚本 execute 家族成员单一来源静态锁 ====
-      // ① import 断言：枚举 import 语句后匹配 source + 具名符号（容忍重排/多行/其它符号共存）。
-      const importRe = /import\s*\{([\s\S]*?)\}\s*from\s*['"]([^'"]+)['"]/g;
-      const hasNamedImport = (text, source, name) => {
-        importRe.lastIndex = 0;
-        let m;
-        while ((m = importRe.exec(text)) !== null) {
-          if (m[2] === source && m[1].split(',').some((s) => s.trim() === name)) return true;
-        }
-        return false;
-      };
+      // ① import 断言走模块级 hasNamedImport（同一判据只实现一次——本场景原先内联了同形闭包，
+      // 两处实现会在容忍面上漂移）。
       // ② 内联 pair 检测器：`=== 'execute'` 与 `=== 'subagent-execute'` 经 `||` 直连（正反顺序）。
       // 只命中双侧 === || === 组合；单节点分支（&& / 单 compare）、协议判定、证据键不命中
       //（下方合成正/负例自锚，防检测器退化为永不生效或误伤允许形态）。
@@ -13644,6 +14257,2078 @@ const SCENARIOS = [
       if (replanEventsOf(readScenarioState(dir)).length !== 1) {
         throw new Error('放行对照应恰写 1 条 replan-applied 事件');
       }
+    },
+  },
+
+  // 276: 时间形态三态——本地 `+HH:mm` 与历史 `Z`（含毫秒）合法且解析等值；纯日期 / 缺时区 /
+  // 偏移缺冒号 / 日历不自洽（2026-02-30，Date.parse 会静默滚动）一律非法。判据走 time-utils
+  // 的导出（与消费脚本同一实现，不在套件里复制第二份）。
+  {
+    name: '276 时间形态三态：本地 +HH:mm / 历史 Z（含毫秒）合法等值，形态不符与日历不自洽非法',
+    run: () => {
+      const parse = requireModuleExport(timeUtilsModule, 'parseTimestamp', 'time-utils.mjs');
+      const format = requireModuleExport(timeUtilsModule, 'formatLocalTimestamp', 'time-utils.mjs');
+      const isValid = requireModuleExport(timeUtilsModule, 'isValidTimestamp', 'time-utils.mjs');
+
+      const localWithOffset = '2026-10-02T18:30:00+08:00';
+      const zulu = '2026-10-02T10:30:00Z';
+      const zuluMillis = '2026-10-02T10:30:00.500Z';
+      assertEqual(parse(localWithOffset), Date.parse(localWithOffset), '本地 +HH:mm 形态解析');
+      assertEqual(parse(zulu), Date.parse(zulu), '历史 Z 形态解析');
+      assertEqual(parse(zuluMillis), Date.parse(zuluMillis), '历史 Z + 毫秒解析');
+      assertEqual(parse(localWithOffset), parse(zulu), '同一时刻的两种形态解析等值');
+      assertEqual(parse(zuluMillis) - parse(zulu), 500, '毫秒分量参与解析');
+
+      const illegal = [
+        ['2026-10-02', '纯日期（无法表达时刻）'],
+        ['2026-10-02T10:30:00', '缺时区'],
+        ['2026-10-02T10:30:00+0800', '偏移缺冒号'],
+        ['2026-10-02T10:30:00+24:00', '偏移越界'],
+        ['2026-10-02T10:30:00-08:60', '偏移分钟越界'],
+        ['2026-02-30T00:00:00Z', '日历不自洽'],
+        ['2026-13-01T00:00:00Z', '月份越界'],
+        ['不是时间', '垃圾值'],
+        ['', '空串'],
+        [null, '非字符串'],
+      ];
+      for (const [value, label] of illegal) {
+        assertTrue(Number.isNaN(parse(value)),
+          '非法形态未被拒绝: ' + label + ' = ' + JSON.stringify(value));
+        assertTrue(!isValid(value), 'isValidTimestamp 未拒绝非法形态: ' + label);
+      }
+
+      // 生成侧：本地时间 + 显式偏移；生成 → 解析回环等值（秒级精度）
+      const instant = Date.parse('2026-10-02T10:30:15Z');
+      const formatted = format(new Date(instant));
+      assertTrue(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/.test(formatted),
+        '生成形态非「本地时间 + 显式偏移」: ' + formatted);
+      assertEqual(parse(formatted), instant, '生成 → 解析回环');
+    },
+  },
+
+  // 277: 单源结构锚——时间与窗口判据（formatLocalTimestamp / nowTimestamp / parseTimestamp /
+  // hasSection9 / isArchivedAfterTimestamp）在全引擎**各只有一处定义**，且四个消费脚本一律从
+  // time-utils 取值（含 init 写扫描时刻的 nowTimestamp：形态单一来源是双落点一致的形态前提）。
+  // 判别力边界（修正旧注释的夸大——「第二份内联实现必然让本场景变红」只在**同名**时成立）：
+  //   ① 定义面按**同名定义**计数：同名第二份实现（函数声明 / const 箭头）即变红；
+  //   ② 消费面按**具名 import 自 time-utils.mjs + 真实调用**判定（不是纯文本存在性）：消费脚本
+  //      内联同名实现顶替导出会变红——旧判据 `text.includes(name + '(')` 会被内联同名实现满足，
+  //      属假绿形态（本锚升级的正是这半边）；
+  //   ③ **不在本锚覆盖内**：与单源导出**不同名**、且消费方仍保留一次真实调用的等价内联实现——
+  //      那类形态由各判据族的形态锚分族承担（如 295 日期前缀 / 298 裸拼接），本锚不冒充覆盖它。
+  // 判别力由两条合成反向构造常驻证明（同名第二份定义 / 未具名 import 的内联实现）。
+  {
+    name: '277 单源结构锚：时间与窗口判据全引擎各一处定义，四个消费脚本零内联',
+    run: () => {
+      const singleSource = ['formatLocalTimestamp', 'nowTimestamp', 'parseTimestamp', 'hasSection9', 'isArchivedAfterTimestamp'];
+      for (const name of singleSource) {
+        const hits = engineDefinitionHits(name);
+        assertEqual(hits.length, 1, name + ' 的定义面数量（全引擎应恰 1 处）实际 ' + JSON.stringify(hits));
+        assertEqual(hits[0].file, 'time-utils.mjs', name + ' 的定义文件');
+        assertEqual(hits[0].count, 1, name + ' 在 ' + hits[0].file + ' 内的定义处数');
+      }
+      const consumers = {
+        'workflow-state.mjs': ['isValidTimestamp', 'daysSince', 'hasSection9', 'isArchivedAfterTimestamp', 'nowTimestamp', 'parseTimestamp'],
+        'evolve.mjs': ['parseTimestamp', 'hasSection9', 'isArchivedAfterTimestamp', 'nowTimestamp'],
+        'context-scan.mjs': ['nowTimestamp', 'formatLocalDate', 'archiveDateFromName'],
+        'health.mjs': ['formatLocalTimestamp', 'formatLocalDate'],
+      };
+      for (const [file, symbols] of Object.entries(consumers)) {
+        const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
+        const problems = timeSingleSourceConsumerProblems(text, symbols, file);
+        assertEqual(problems.length, 0, '消费面单源违规: ' + problems.join(' | '));
+      }
+
+      // 反向构造 ①（合成目录 · 纯函数）：同名第二份定义 → 定义面检出 2（判据不恒真空过）。
+      // 样例经拼接构造，避免套件自身源码携带定义形态字面量而污染真实面计数（本套件同样在扫描面内）。
+      const definitionSample = (name) => 'function ' + name + '(date) { return String(date); }\n';
+      const synthetic = makeTmp();
+      try {
+        writeFile(synthetic, 'single.mjs', definitionSample('formatLocalTimestamp'));
+        assertEqual(engineDefinitionHits('formatLocalTimestamp', synthetic).length, 1, '合成目录单份定义检出数');
+        writeFile(synthetic, 'second.mjs', definitionSample('formatLocalTimestamp'));
+        assertEqual(engineDefinitionHits('formatLocalTimestamp', synthetic).length, 2,
+          '合成目录同名第二份定义检出数（判据须变红）');
+      } finally {
+        cleanupTmpDir(synthetic);
+      }
+
+      // 反向构造 ②（合成文本 · 纯函数）：内联同名实现顶替导出——旧子串判据会放过、本锚必须拒绝；
+      // 另两态证明判据不恒真（具名 import 但零调用 → 必报；具名 import + 真实调用 → 零问题）。
+      // 同一拼接纪律：调用形态的 `name + '('` 可以字面出现（它不是定义形态），定义形态不可。
+      const inlined = 'function ' + 'parseTimestamp(text) {\n  return Date.parse(text);\n}\n'
+        + "parseTimestamp('2026-10-02T10:00:00+08:00');\n";
+      assertTrue(inlined.includes('parseTimestamp('), '反向构造前提不成立：旧子串判据本应命中内联实现');
+      const inlinedProblems = timeSingleSourceConsumerProblems(inlined, ['parseTimestamp'], 'synthetic.mjs');
+      assertTrue(inlinedProblems.some((problem) => problem.includes('未从 time-utils.mjs 具名 import')),
+        '内联同名实现未被判违规（旧判据的假绿形态）: ' + JSON.stringify(inlinedProblems));
+      const importedOnly = "import { parseTimestamp } from './time-utils.mjs';\nconst unused = 1;\n";
+      assertTrue(timeSingleSourceConsumerProblems(importedOnly, ['parseTimestamp'], 'synthetic.mjs')
+        .some((problem) => problem.includes('未真实消费')), '具名 import 但零调用未被判违规');
+      const genuine = "import { parseTimestamp } from './time-utils.mjs';\n"
+        + 'export const instant = (value) => parseTimestamp(value);\n';
+      assertEqual(timeSingleSourceConsumerProblems(genuine, ['parseTimestamp'], 'synthetic.mjs').length, 0,
+        '具名 import + 真实调用不应被判违规');
+    },
+  },
+
+  // 278: evolve 增量窗口与历史 `Z` 兼容——窗口内入选 / 窗口外排除 / 无基线全量；扫描严格限定在
+  // 设计文档的沉淀段（其它段的标记串不得出现在输出）；`scan` 零写入用树指纹对照。
+  {
+    name: '278 evolve 窗口：窗口内入选·窗口外排除·无基线全量 + 历史 Z 兼容 + 只读沉淀段 + 零写入',
+    run: (dir) => {
+      writeFile(dir, '.specs/archive/2026-08-20-old/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n- 窗口外条目\n');
+      writeFile(dir, '.specs/archive/2026-09-10-new/DESIGN.md',
+        '# DESIGN\n\n## 5. 其它段\n\nOTHER-SECTION-MARKER\n\n## 9. 架构沉淀\n\n- 窗口内条目\n');
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      const state = baseState('open');
+      state.last_evolve_at = '2026-09-01T00:00:00Z'; // 历史 Z 形态基线
+      writeState(dir, state);
+
+      const before = treeFingerprint(dir);
+      const res = runSideScript(SIDE_EVOLVE, ['scan', '--root', dir], dir);
+      assertExit(res, 0);
+      assertOut(res, 'EVOLVE: 扫描');
+      assertOut(res, '窗口 起始 = 2026-09-01T00:00:00Z');
+      assertOut(res, '归档 2 个 · 窗口内 1 个 · 含沉淀段 1 个');
+      assertOut(res, '2026-09-10-new#1');
+      assertNotOut(res, '2026-08-20-old#');
+      assertNotOut(res, 'OTHER-SECTION-MARKER'); // 只读沉淀段：其它段的标记串不进候选
+      const written = fingerprintChanges(before, treeFingerprint(dir));
+      assertEqual(written.length, 0, 'scan 必须零写入，实际树变化: ' + JSON.stringify(written));
+
+      // 等值的 `+00:00` 形态给出同一窗口（兼容历史 Z 与本地偏移两种写法，不是两套语义）
+      const offsetState = { ...state, last_evolve_at: '2026-09-01T00:00:00+00:00' };
+      writeState(dir, offsetState);
+      const offsetRes = runSideScript(SIDE_EVOLVE, ['scan', '--root', dir], dir);
+      assertExit(offsetRes, 0);
+      assertOut(offsetRes, '窗口 起始 = 2026-09-01T00:00:00+00:00');
+      assertOut(offsetRes, '窗口内 1 个');
+      assertNotOut(offsetRes, '上次沉淀时间不可解析');
+
+      // 不可解析的基线 → 显式按全量扫描（不静默当成「无新增」）
+      writeState(dir, { ...state, last_evolve_at: '不是时间' });
+      const broken = runSideScript(SIDE_EVOLVE, ['scan', '--root', dir], dir);
+      assertExit(broken, 0);
+      assertOut(broken, '上次沉淀时间不可解析（按全量扫描）');
+      assertOut(broken, '窗口内 2 个');
+
+      // 无基线（字段缺席）→ 全量扫描
+      writeState(dir, baseState('open'));
+      const noBaseline = runSideScript(SIDE_EVOLVE, ['scan', '--root', dir], dir);
+      assertExit(noBaseline, 0);
+      assertOut(noBaseline, '无基线（首次运行，全量扫描）');
+      assertOut(noBaseline, '窗口内 2 个');
+      assertOut(noBaseline, '2026-08-20-old#1');
+    },
+  },
+
+  // 279: 到期提示两因与静默——「距今 > 60 天」或「该时刻之后新增 ≥ 5 个带 §9 的归档 change」
+  // 达阈值即输出 `EVOLVE-DUE`（提示行不含花括号，status 的 JSON 块仍可被既有消费方解析）；
+  // 未达阈值 / 字段缺席（从未跑过 evolve）一律零输出；非法值经 `config set` 写入 → BLOCKED 零改写。
+  {
+    name: '279 到期提示：按天数·按新增数达阈值提示，未达阈值与字段缺席静默，JSON 块可解析',
+    run: (dir) => {
+      const formatStamp = requireModuleExport(timeUtilsModule, 'formatLocalTimestamp', 'time-utils.mjs');
+      const formatDate = requireModuleExport(timeUtilsModule, 'formatLocalDate', 'time-utils.mjs');
+      const dayMs = 24 * 60 * 60 * 1000;
+      const stampDaysAgo = (days) => formatStamp(new Date(Date.now() - days * dayMs));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why（为什么做）\n\n夹具。\n');
+
+      // ① 按天数：距今 100 天 → 提示行 + JSON 块仍可解析
+      writeState(dir, { ...baseState('open'), last_evolve_at: stampDaysAgo(100) });
+      const aged = runStateWithProtocol(dir, ['status']);
+      assertExit(aged, 0);
+      assertOut(aged, 'EVOLVE-DUE: 上次架构沉淀');
+      assertOut(aged, '超阈值 60 天');
+      assertEqual(parseStatusJson(aged).status, 'running', '提示行在场时 status 的 JSON 块解析');
+
+      // ② 未达阈值（新鲜）→ 静默；③ 字段缺席（从未跑过 evolve）→ 同样静默
+      writeState(dir, { ...baseState('open'), last_evolve_at: stampDaysAgo(1) });
+      assertNotOut(runStateWithProtocol(dir, ['status']), 'EVOLVE-DUE');
+      writeState(dir, baseState('open'));
+      assertNotOut(runStateWithProtocol(dir, ['status']), 'EVOLVE-DUE');
+
+      // ④ 按新增数：基线之后 5 个带 §9 的归档 change → 提示；取走一个（4 个）→ 静默
+      const baselineMs = Date.now() - 30 * dayMs;
+      const baselineStamp = formatStamp(new Date(baselineMs));
+      const archiveDirName = (offsetDays) => formatDate(new Date(baselineMs + offsetDays * dayMs)) + '-new-' + offsetDays;
+      for (let offset = 1; offset <= 5; offset += 1) {
+        writeFile(dir, '.specs/archive/' + archiveDirName(offset) + '/DESIGN.md',
+          '# DESIGN\n\n## 9. 架构沉淀\n\n- 条目 ' + offset + '\n');
+      }
+      writeState(dir, { ...baseState('open'), last_evolve_at: baselineStamp });
+      const byCount = runStateWithProtocol(dir, ['status']);
+      assertExit(byCount, 0);
+      assertOut(byCount, 'EVOLVE-DUE: 上次架构沉淀');
+      assertOut(byCount, '其后新增 5 个带 §9 的归档 change，达阈值 5 个');
+      parseStatusJson(byCount);
+      fs.rmSync(path.join(dir, '.specs', 'archive', archiveDirName(5)), { recursive: true, force: true });
+      assertNotOut(runStateWithProtocol(dir, ['status']), 'EVOLVE-DUE');
+
+      // ⑤ 非法值经唯一写通道写入 → BLOCKED 且 state 字节零改写
+      const beforeBytes = readStateBytes(dir);
+      const illegal = runStateWithProtocol(dir, ['config', 'set', 'last_evolve_at', '2026-02-30T00:00:00Z']);
+      assertExit(illegal, 1);
+      assertOut(illegal, 'BLOCKED');
+      assertOut(illegal, 'last_evolve_at');
+      assertStateBytesUnchanged(dir, beforeBytes, 'last_evolve_at 非法值');
+    },
+  },
+
+  // 280: health 复现性——同一冻结树两次运行，差异必须落在报告的「易变行声明」集合内（声明的
+  // 差异集合之外逐字节一致）；`--stdout` 与落盘逐字节相同；state 零改写（报告是唯一写入面）。
+  {
+    name: '280 health 两次运行：易变行声明之外逐字节一致 + --stdout 与落盘相同 + state 零改写',
+    run: (dir) => {
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeFile(dir, '.specs/LESSONS.md', '# LESSONS\n\n### L-001 首条\n\n### L-002 次条\n');
+      writeState(dir, baseState('open'));
+      const stateBytes = readStateBytes(dir);
+
+      const first = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir);
+      assertExit(first, 0);
+      assertOut(first, '## 确定性层（机器可判）');
+      assertOut(first, '### 1 · 项目上下文一致性');
+      assertOut(first, '### 2 · 经验条目编号连续性');
+      assertOut(first, '- 缺失编号（0）：无');
+      assertOut(first, '## 增补层（代码体检工具的 4 维结果 · 可选）');
+      assertOut(first, '## 降级声明');
+      assertOut(first, '## 易变行声明（两次运行的允许差异集合）');
+
+      const second = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir);
+      assertExit(second, 0);
+      const volatilePrefixes = ['- **生成时间**：', '- 最近 30 天提交数：'];
+      const firstLines = first.output.split('\n');
+      const secondLines = second.output.split('\n');
+      const differing = [];
+      for (let i = 0; i < Math.max(firstLines.length, secondLines.length); i += 1) {
+        if (firstLines[i] === secondLines[i]) continue;
+        const line = firstLines[i] ?? secondLines[i] ?? '';
+        if (volatilePrefixes.some((prefix) => line.startsWith(prefix))) continue;
+        differing.push('第 ' + (i + 1) + ' 行 ' + JSON.stringify(firstLines[i]) + ' → ' + JSON.stringify(secondLines[i]));
+      }
+      assertEqual(differing.length, 0, '两次运行的差异落在易变行声明之外: ' + differing.join(' | '));
+
+      const today = requireModuleExport(timeUtilsModule, 'formatLocalDate', 'time-utils.mjs')(new Date());
+      const reportFile = path.join(dir, '.specs', 'health', today + '-HEALTH.md');
+      assertTrue(fs.existsSync(reportFile), '报告未按 <日期>-HEALTH.md 形态落盘: ' + reportFile);
+      // `--stdout` = 落盘报告正文原样在前 + `HEALTH:` 审计行追加在后：审计行是 CLI 摘要而非报告
+      // 内容，不进报告字节（报告仍是唯一写入面）；正文部分与落盘逐字节一致。
+      const reportText = fs.readFileSync(reportFile, 'utf8');
+      assertTrue(second.output.startsWith(reportText),
+        '--stdout 的报告正文应与落盘逐字节一致（审计行追加在后）: ' + JSON.stringify(second.output.slice(0, 120)));
+      assertOut(second, 'HEALTH: 报告 `.specs/health/' + today + '-HEALTH.md`');
+      assertOut(second, 'HEALTH-DONE');
+      assertOut(second, '- **写入边界**：只写本报告文件；不改代码、不写运行状态文件（本命令不新增任何状态字段）');
+      assertStateBytesUnchanged(dir, stateBytes, 'health 运行后');
+      // 同日重跑不与自己对比（否则报告自我污染、复现性判据失效）
+      assertOut(second, '基线：无（`.specs/health` 下无日期不同的历史报告）');
+    },
+  },
+
+  // 281: health 缺可选工具的两态之一——隔离 HOME/USERPROFILE（用户级插件缓存与用户技能目录
+  // 都落主目录）→ 增补层逐项不在场、降级声明可见，确定性层照常完整、退出码 0（可选工具缺席
+  // 不构成失败；本机实际装有 brooks，故须隔离而不是假设）。
+  {
+    name: '281 health 隔离 HOME：增补层逐项不在场 + 降级声明可见 + 确定性层完整 + exit 0',
+    run: (dir) => {
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeFile(dir, '.specs/LESSONS.md', '# LESSONS\n\n### L-001 首条\n');
+      const isolatedHome = path.join(dir, 'isolated-home');
+      fs.mkdirSync(isolatedHome, { recursive: true });
+
+      const isolated = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir,
+        { HOME: isolatedHome, USERPROFILE: isolatedHome });
+      assertExit(isolated, 0);
+      assertOut(isolated, '- **在场判定**：不在场——下列探测面逐项未命中（未安装 / 未加载）');
+      assertOut(isolated, 'Claude Code 插件缓存（用户级）');
+      assertOut(isolated, '- **降级**：4 维结果缺省；报告只由确定性层构成（判据不因缺可选工具而失败）');
+      assertOut(isolated, '- **brooks-lint**：不可用——探测面逐项未命中');
+      assertOut(isolated, '## 确定性层（机器可判）');
+      assertOut(isolated, '### 5 · 版本历史统计（git）');
+      assertOut(isolated, '缺席不影响本命令成功（退出码 0）');
+
+      // 对照：未隔离运行同样以完整报告 + 退出码 0 收尾（在场与否随环境，报告形态不变）
+      const openEnv = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir);
+      assertExit(openEnv, 0);
+      assertOut(openEnv, '- **探测面（固定清单 · 逐项判定）**：');
+      assertOut(openEnv, '## 确定性层（机器可判）');
+    },
+  },
+
+  // 282: context-scan 首次无基线与二次差异——首次显式声明「本次为基线，无差异可比」；第二次
+  // 逐项比对出新增；同一秒连续重扫不得误 BLOCK；双落点（state 的 last_intel_scan 与 CONTEXT
+  // 的 `## intel-scan 元数据` 字段）取值一致；工件含机器快照标记。
+  {
+    name: '282 context-scan 首次无基线 → 二次差异：新增可比 + 同秒重扫 exit 0 + 双落点一致',
+    run: (dir) => {
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeState(dir, baseState('open'));
+
+      const first = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
+      assertExit(first, 0);
+      assertOut(first, 'CONTEXT-SCAN: 基线 无（本次为基线，无差异可比）');
+      assertOut(first, 'CONTEXT-SCAN: 差异 无（本次为基线，无差异可比）');
+      assertOut(first, 'CONTEXT-SCAN-DONE');
+
+      const today = requireModuleExport(timeUtilsModule, 'formatLocalDate', 'time-utils.mjs')(new Date());
+      const reportFile = path.join(dir, '.specs', 'context-scan', today + '-SCAN.md');
+      assertTrue(fs.existsSync(reportFile), '扫描工件未落盘: ' + reportFile);
+      const reportText = fs.readFileSync(reportFile, 'utf8');
+      assertTrue(reportText.includes('<!-- context-scan-snapshot -->'), '工件缺机器快照标记');
+      assertTrue(/```json\r?\n/.test(reportText.slice(reportText.indexOf('<!-- context-scan-snapshot -->'))),
+        '机器快照标记之后缺 json 块');
+
+      // 同一秒连续重扫（取值未变）不得被误判成字段行形态不符
+      const immediate = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
+      assertExit(immediate, 0);
+      assertOut(immediate, 'CONTEXT-SCAN-DONE');
+
+      // 双落点：state 的 last_intel_scan 与 CONTEXT 段内字段**取值词元**一致（夹具段行带行尾说明）
+      const structure = requireModuleExport(contextInitModule, 'extractContextStructure', 'context-init.mjs')(
+        fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8'));
+      const landed = intelFieldToken(structure.metadata['intel-scan 元数据'].last_intel_scan.value);
+      const stateFile = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      assertEqual(stateFile.last_intel_scan, landed, '双落点取值（state 与 CONTEXT 段）');
+      assertTrue(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/.test(landed),
+        '落盘扫描时刻形态非「本地时间 + 显式偏移」: ' + landed);
+
+      // 二次差异：新增一份 AI 上下文文档 → 差异段「新增」列出该条目（条目在工件内，摘要行只给计数）
+      writeFile(dir, 'AGENTS.md', '# AGENTS\n\n夹具。\n');
+      const second = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
+      assertExit(second, 0);
+      assertOut(second, 'CONTEXT-SCAN: 基线');
+      assertOut(second, '差异 新增 1 ');
+      assertOut(second, 'CONTEXT-SCAN-DONE');
+      const diffReport = fs.readFileSync(reportFile, 'utf8');
+      assertTrue(diffReport.includes('### 新增（1）'), '工件缺「新增（1）」段');
+      assertTrue(diffReport.includes('- AI 上下文文档 · AGENTS.md'),
+        '工件的新增段未列出新增的 AI 上下文文档');
+    },
+  },
+
+  // 283: context-scan 四类边界——① 既有基线不含机器快照 → 显式「无法比对」（不静默省略差异段）；
+  // ② 结构校验不通过的一轮零写入且基线不前进（工件与 state 逐字节不变）；③ 未初始化项目 →
+  // INIT-GENERATE 指引 + 零写入 + exit 1；④ state 在场但字段非法 → CONTEXT 段零改写
+  // （校验先于两次写入，双落点不被拆成两半）。
+  {
+    name: '283 context-scan 边界：旧基线无快照显式无法比对 / BLOCK 轮不推进基线 / 未初始化零写入 / state 字段非法零改写',
+    run: (dir) => {
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeState(dir, baseState('open'));
+
+      // ① 旧基线不含机器快照（人读工件的历史形态）
+      const legacyBaseline = path.join(dir, '.specs', 'context-scan', '2020-01-01-SCAN.md');
+      fs.mkdirSync(path.dirname(legacyBaseline), { recursive: true });
+      fs.writeFileSync(legacyBaseline, '# 项目上下文重扫报告 · 2020-01-01\n\n（历史工件，无机器快照块）\n', 'utf8');
+      const legacyRes = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
+      assertExit(legacyRes, 0);
+      assertOut(legacyRes, 'CONTEXT-SCAN: 差异 无（既有基线不含机器快照，无法比对）');
+      assertOut(legacyRes, 'CONTEXT-SCAN-DONE');
+
+      // ② 结构校验不通过的一轮：零写入，基线不前进
+      const today = requireModuleExport(timeUtilsModule, 'formatLocalDate', 'time-utils.mjs')(new Date());
+      const baselineFile = path.join(dir, '.specs', 'context-scan', today + '-SCAN.md');
+      assertTrue(fs.existsSync(baselineFile), '本轮基线工件应在场: ' + baselineFile);
+      const baselineBytes = fs.readFileSync(baselineFile);
+      const stateBytes = readStateBytes(dir);
+      fs.writeFileSync(path.join(dir, '.specs', 'CONTEXT.md'),
+        contextFixtureText().replace('## 默认偏好\n', ''), 'utf8');
+      const blocked = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
+      assertExit(blocked, 1);
+      assertOut(blocked, 'BLOCKED: CONTEXT.md 未通过结构校验');
+      assertTrue(fs.readFileSync(baselineFile).equals(baselineBytes), 'BLOCK 的一轮改写了基线工件');
+      assertStateBytesUnchanged(dir, stateBytes, 'context-scan BLOCK 轮');
+
+      // ③ 未初始化项目：INIT-GENERATE 指引 + 零写入 + exit 1
+      const fresh = path.join(dir, 'fresh-project');
+      fs.mkdirSync(fresh, { recursive: true });
+      const freshBefore = treeFingerprint(fresh);
+      const freshRes = runSideScript(SIDE_CONTEXT_SCAN, ['--root', fresh], fresh);
+      assertExit(freshRes, 1);
+      assertOut(freshRes, 'INIT-GENERATE');
+      assertOut(freshRes, 'BLOCKED');
+      const freshChanges = fingerprintChanges(freshBefore, treeFingerprint(fresh));
+      assertEqual(freshChanges.length, 0, '未初始化项目必须零写入，实际树变化: ' + JSON.stringify(freshChanges));
+
+      // ④ state 在场但字段非法（写闸门会拒）：CONTEXT 段必须零改写。校验此前排在 CONTEXT 改写之后
+      //   ⇒ 段侧先落新扫描时刻、state 侧被拒，双落点被拆成两半（且段侧指向引擎根本不认的时刻）。
+      //   与同一命令的损坏态判定（preflight ②：状态不可信 → 零元数据写入）是同一姿态。
+      const badStateRoot = path.join(dir, 'bad-state-field');
+      writeFile(badStateRoot, '.specs/CONTEXT.md', contextFixtureText());
+      writeState(badStateRoot, { ...baseState('open'), executionMode: 'not-a-mode' });
+      const badContextBefore = fs.readFileSync(path.join(badStateRoot, '.specs', 'CONTEXT.md'));
+      const badStateBytes = readStateBytes(badStateRoot);
+      const badStateRes = runSideScript(SIDE_CONTEXT_SCAN, ['--root', badStateRoot], badStateRoot);
+      assertExit(badStateRes, 1);
+      assertOut(badStateRes, 'BLOCKED');
+      assertTrue(fs.readFileSync(path.join(badStateRoot, '.specs', 'CONTEXT.md')).equals(badContextBefore),
+        'state 字段非法的一轮改写了 CONTEXT 段（双落点被拆成两半）');
+      assertStateBytesUnchanged(badStateRoot, badStateBytes, 'context-scan state 字段非法轮');
+    },
+  },
+
+  // 284: 本仓 CONTEXT 的七段校验 + 可选的 `## evolve 元数据` 段语义——缺席不报（没跑过架构
+  // 沉淀的项目不补段）；在场则三字段必须齐（跑过一次却写残的半成品正是要拦的形态）；判据
+  // **限定在段内**（别处的同名字段不得让残缺的 evolve 段蒙混过关）。
+  // ① 是本仓真实文件的**维护者形态**断言（.specs/ 被 gitignore）：文件结构性缺席（CI 全新检出 /
+  // worktree）时输出可见 SKIP 行（未验证 ≠ 通过），**在场时判据逐字不变**；②~⑤ 恒检（夹具驱动）。
+  {
+    name: '284 CONTEXT 七段校验 + evolve 元数据可选段：缺席不报·在场缺一即报·判据限段内',
+    run: async () => {
+      const validate = requireModuleExport(contextInitModule, 'validateContext', 'context-init.mjs');
+
+      // ① 本仓 CONTEXT.md 通过七段校验（真实文件，非夹具）——文件缺席即非维护者形态，可见跳过
+      if (fs.existsSync(REPO_CONTEXT_FILE)) {
+        const repo = await validate(REPO_ROOT);
+        assertEqual(repo.missingSections.length, 0, '本仓 CONTEXT.md 缺段: ' + JSON.stringify(repo.missingSections));
+        assertEqual(repo.formatIssues.length, 0, '本仓 CONTEXT.md 格式问题: ' + JSON.stringify(repo.formatIssues));
+      } else {
+        console.log('SKIP: 284 的本仓 CONTEXT 面（.specs/CONTEXT.md 为流程工件面，可能结构性缺席）'
+          + '——本仓 CONTEXT 缺席 = 非维护者形态；本次检出未校验本仓 CONTEXT.md 的七段与 evolve 元数据段语义，'
+          + '请在维护者主树重跑本套件');
+      }
+
+      // ② 夹具：七段齐备、evolve 段缺席 → 通过（可选段的缺席不报）
+      const project = makeTmp();
+      try {
+        writeFile(project, '.specs/CONTEXT.md', contextFixtureText());
+        const absent = await validate(project);
+        assertEqual(absent.missingSections.length, 0, '七段骨架缺段: ' + JSON.stringify(absent.missingSections));
+        assertEqual(absent.formatIssues.length, 0, 'evolve 段缺席不应报格式问题: ' + JSON.stringify(absent.formatIssues));
+
+        // ③ evolve 段在场且三字段齐 → 通过
+        writeFile(project, '.specs/CONTEXT.md',
+          contextFixtureText({ evolveSection: EVOLVE_METADATA_FIELD_LINES }));
+        const complete = await validate(project);
+        assertEqual(complete.formatIssues.length, 0, 'evolve 段齐备仍报格式问题: ' + JSON.stringify(complete.formatIssues));
+
+        // ④ 段内缺一个字段 → 报「evolve 元数据三字段」
+        writeFile(project, '.specs/CONTEXT.md',
+          contextFixtureText({ evolveSection: EVOLVE_METADATA_FIELD_LINES.slice(0, 2) }));
+        const incomplete = await validate(project);
+        assertTrue(incomplete.formatIssues.some((issue) => issue.includes('evolve 元数据三字段')),
+          'evolve 段缺字段未报出: ' + JSON.stringify(incomplete.formatIssues));
+
+        // ⑤ 判据限段内：缺的那个字段出现在**其它段**里，不得让残缺的 evolve 段蒙混过关
+        writeFile(project, '.specs/CONTEXT.md', contextFixtureText({
+          evolveSection: EVOLVE_METADATA_FIELD_LINES.slice(0, 2),
+          tail: '## 其它段\n\n- **下次建议**: 别处的同名字段',
+        }));
+        const outside = await validate(project);
+        assertTrue(outside.formatIssues.some((issue) => issue.includes('evolve 元数据三字段')),
+          '判据未限定段内（别处的同名字段放行了残缺段）: ' + JSON.stringify(outside.formatIssues));
+      } finally {
+        cleanupTmpDir(project);
+      }
+    },
+  },
+
+  // 285: design 出口 ui-design 门四类——正例（前端齐备 + 真实声明 → 放行）/ 负例（缺工件
+  // BLOCKED、缺声明 BLOCKED 且不再自动补写）/ 越界（非前端 → 可见跳过，不要求工件与声明）/
+  // 恢复（旧 change 前端缺件 → WARN 渐进不卡死）。前端判据是结构级：CHANGE.md「视觉调性」段。
+  {
+    name: '285 ui-design 门四类：前端齐备放行 / 前端缺件 BLOCK / 非前端可见跳过 / 旧 change WARN',
+    run: (dir) => {
+      // 正例：前端（「视觉调性」段在场且未标注不适用）+ 工件齐备 + 真实声明
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: true,
+      });
+      const positive = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(positive, 0);
+      assertOut(positive, 'ALL CHECKS PASSED');
+      assertNotOut(positive, 'UI-DESIGN: skipped');
+
+      // 负例 A：前端缺 UI-DESIGN.md → BLOCKED + 两条恢复路径
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: true,
+      });
+      const missingArtifact = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(missingArtifact, 1);
+      assertOut(missingArtifact, 'BLOCKED: design 出口缺 UI-DESIGN.md');
+      assertOut(missingArtifact, '恢复: 补 .specs/' + CHANGE_ID + '/UI-DESIGN.md');
+
+      // 负例 B：工件齐备但缺 `required-skill:design.flow-comet-ui-design` → BLOCKED（出口不再自动补写）
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: false,
+      });
+      const missingDeclaration = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(missingDeclaration, 1);
+      assertOut(missingDeclaration, 'BLOCKED: missing required Skill evidence: required-skill:design.flow-comet-ui-design');
+      assertOut(missingDeclaration, '不再由出口自动补写');
+
+      // 越界：非前端（「视觉调性」段标注不适用）→ 可见跳过，不要求工件、也不要求该声明
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_NOT_APPLICABLE, uiDesign: false, declareUiDesign: false,
+      });
+      const nonFrontend = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(nonFrontend, 0);
+      assertOut(nonFrontend, 'UI-DESIGN: skipped（非前端）');
+      assertOut(nonFrontend, 'ALL CHECKS PASSED');
+
+      // 恢复：旧 change 前端缺件 → WARN 渐进（不阻断，也不静默放行）
+      writeDesignExitFixture(dir, {
+        newChange: false, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: true,
+      });
+      const legacy = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(legacy, 0);
+      assertOut(legacy, 'UI-DESIGN WARN: 缺 .specs/' + CHANGE_ID + '/UI-DESIGN.md');
+      assertOut(legacy, '旧 change 渐进不阻断');
+    },
+  },
+
+  // 286: ui-design 强制等级的文本一致性锚——协议 `design.requiredSkillCalls[flow-comet-ui-design]`
+  // 为 `guarded`，**五份**技能文本（ui-design 技能 / 入口 SKILL / design 节点 SKILL / 入口展开册
+  // GUIDANCE / change 阶段 SKILL）不得残留 `advisory` 表述且须同时点名该绑定与 `guarded`。等级只在
+  // 协议里表达一次，文本是它的散文副本：副本漂移即红（旧表述「advisory，不要求声明」正是被本锚拦下
+  // 的形态）。另锚**判据散文口径**：五份文本必须陈述引擎收紧后的**结构形态**（独立行 / 行首 /
+  // 适用性标签的字段值位 + 词形边界 + 命中片段回显），不得残留旧口径（「段内不含 / 未标注字面
+  // 『不适用』」——把判据说成段内任意位置子串，是「一处措辞即关闸」fail-open 的文字版）。
+  {
+    name: '286 ui-design 强制等级一致性锚：协议 guarded + 五处技能文本零 advisory 残留 + 结构判据散文口径',
+    run: () => {
+      const protocol = JSON.parse(fs.readFileSync(SKILL_PROTOCOL_FILE, 'utf8'));
+      const designNode = (protocol.nodes ?? []).find((node) => node.id === 'design');
+      assertTrue(designNode !== undefined, '协议缺 design 节点');
+      const binding = (designNode.requiredSkillCalls ?? []).find((call) => call.skill === 'flow-comet-ui-design');
+      assertTrue(binding !== undefined, '协议 design 节点缺 flow-comet-ui-design 绑定');
+      assertEqual(binding.enforcement, 'guarded', '协议 flow-comet-ui-design 绑定的强制等级');
+
+      const skillsRoot = skillsRootForScriptsDir(__dirname);
+      const texts = {
+        'flow-comet-ui-design/SKILL.md': path.join(skillsRoot, 'flow-comet-ui-design', 'SKILL.md'),
+        'flow-comet/SKILL.md': path.join(skillsRoot, 'flow-comet', 'SKILL.md'),
+        'flow-comet-design/SKILL.md': path.join(skillsRoot, 'flow-comet-design', 'SKILL.md'),
+        'flow-comet/GUIDANCE.md': path.join(skillsRoot, 'flow-comet', 'GUIDANCE.md'),
+        'flow-comet-change/SKILL.md': path.join(skillsRoot, 'flow-comet-change', 'SKILL.md'),
+      };
+      for (const [label, file] of Object.entries(texts)) {
+        const text = fs.readFileSync(file, 'utf8');
+        assertTrue(!/advisory/i.test(text), label + ' 残留 advisory 等级表述（协议为 guarded）');
+        assertTrue(text.includes('guarded'), label + ' 未点名 guarded 等级');
+        assertTrue(text.includes('flow-comet-ui-design'), label + ' 未点名 flow-comet-ui-design 绑定');
+        const proseProblems = frontendCriterionProseProblems(label, text);
+        assertEqual(proseProblems.length, 0, '判据散文口径未对齐: ' + proseProblems.join(' | '));
+      }
+      // 反向构造（合成输入驱动同一判据，证明判据不恒真空过）：① 旧口径句逐条注入任一文本 → 必报；
+      // ② 结构词缺一 → 必报；③ 原地加回旧口径的真实文本副本 → 必报（「把旧口径加回任一文本即红」）。
+      const structuralSample = '前端判据是结构级的：独立行 / 行首 / 适用性标签的字段值位三种形态，'
+        + '标记后须成词形边界，命中片段回显。\n';
+      assertEqual(frontendCriterionProseProblems('sample', structuralSample).length, 0,
+        '结构口径样本不应被判违规（判据不恒真）');
+      const staleSamples = [
+        '前端判据是结构级的：`CHANGE.md` 的「视觉调性」段在场且段内未标注「不适用」。',
+        '段在场，段内**不含**字面「不适用」',
+        '非前端项目：在段内标注「不适用」两个字面。',
+      ];
+      for (const stale of staleSamples) {
+        const problems = frontendCriterionProseProblems('sample', structuralSample + stale + '\n');
+        assertTrue(problems.some((problem) => problem.includes('残留旧口径')),
+          '旧口径样本未被判违规: ' + JSON.stringify(stale) + ' → ' + JSON.stringify(problems));
+      }
+      for (const text of Object.values(texts)) {
+        const original = fs.readFileSync(text, 'utf8');
+        const regressed = original.replace('词形边界', '段内未标注「不适用」');
+        assertTrue(regressed !== original, '反向构造前提不成立：' + text + ' 缺「词形边界」字样');
+        assertTrue(frontendCriterionProseProblems('regressed', regressed)
+          .some((problem) => problem.includes('残留旧口径') || problem.includes('未陈述结构形态')),
+          '把旧口径加回真实文本未被判违规: ' + text);
+      }
+      // 行为口径的散文锚：非前端可见跳过 + 旧 change 渐进（与 285 的行为断言同源）
+      const uiDesignSkill = fs.readFileSync(texts['flow-comet-ui-design/SKILL.md'], 'utf8');
+      assertTrue(uiDesignSkill.includes('UI-DESIGN: skipped（非前端）'), 'ui-design 技能缺非前端跳过口径');
+      assertTrue(uiDesignSkill.includes('旧 change') && uiDesignSkill.includes('WARN'),
+        'ui-design 技能缺旧 change 渐进口径');
+    },
+  },
+
+  // 287: 真实 `init` 跨 change 的 evolve 基线保留——`last_evolve_at` 与 `last_intel_scan` 同形
+  // （两者都是**项目级**字段：换 change 不该丢）。场景 278/279 的窗口与到期锚全用 `writeState` 直注
+  // （覆盖缺口：那条旁路绕开了 init 的保留清单，本缺陷因此完整逃过 286+90）；
+  // 本场景**全程只走真实 `init` 子命令**，证明的是「跨 change 持久性」这条正常路径：
+  //   设基线 → init 新 change → 基线仍在 + `status` 的 EVOLVE-DUE 仍生效 + `evolve scan` 窗口仍按基线过滤。
+  // 断言面刻意覆盖 C1 的全部三条后果（字段丢失 / 到期提示消失 / 窗口静默退化为全量）。
+  {
+    name: '287 真实 init 跨 change：last_evolve_at 保留（基线在场·到期提示仍生效·扫描窗口仍过滤）',
+    run: (dir) => {
+      const formatStamp = requireModuleExport(timeUtilsModule, 'formatLocalTimestamp', 'time-utils.mjs');
+      const formatDate = requireModuleExport(timeUtilsModule, 'formatLocalDate', 'time-utils.mjs');
+      const dayMs = 24 * 60 * 60 * 1000;
+      const dateDaysAgo = (days) => formatDate(new Date(Date.now() - days * dayMs));
+      // 窗口两侧各一条带 §9 的归档 change（窗口过滤按目录名日期前缀判定，基线落在两者之间）
+      writeFile(dir, '.specs/archive/' + dateDaysAgo(101) + '-before-baseline/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n- 窗口外条目\n');
+      writeFile(dir, '.specs/archive/' + dateDaysAgo(99) + '-after-baseline/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n- 窗口内条目\n');
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+
+      // ① 真实 init 建首个 change → 经**唯一写通道**落基线（100 天前：到期判据按天数必然触发）
+      assertExit(runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-skip']), 0);
+      const baseline = formatStamp(new Date(Date.now() - 100 * dayMs));
+      const setRes = runStateWithProtocol(dir, ['config', 'set', 'last_evolve_at', baseline]);
+      assertExit(setRes, 0);
+      assertOut(setRes, 'CONFIG: last_evolve_at = ' + baseline);
+
+      // ② 真实 init 换 change——跨 change 的全部动作就是这一步（不碰 writeState）
+      const secondInit = runStateWithProtocol(dir, ['init', CHANGE_ID + '-2', '--init-skip']);
+      assertExit(secondInit, 0);
+      const state = JSON.parse(readStateBytes(dir));
+      assertEqual(state.activeChange, CHANGE_ID + '-2', 'init 后 activeChange');
+      assertEqual(state.last_evolve_at, baseline, 'init 跨 change 保留 last_evolve_at');
+
+      // ③ 到期提示仍生效（AC-18 的跨 change 形态）+ 提示行在场时 status 的 JSON 块仍可解析
+      const status = runStateWithProtocol(dir, ['status']);
+      assertExit(status, 0);
+      assertOut(status, 'EVOLVE-DUE: 上次架构沉淀 ' + baseline);
+      assertOut(status, '超阈值 60 天');
+      assertEqual(parseStatusJson(status).status, 'running', '提示行在场时 status 的 JSON 块解析');
+
+      // ④ 增量窗口仍按基线过滤（AC-4 的跨 change 形态）：窗口内入选、窗口外排除，
+      //    且**不**退回「无基线（首次运行，全量扫描）」——后者正是窗口静默退化为全量的形态
+      const scan = runSideScript(SIDE_EVOLVE, ['scan', '--root', dir], dir);
+      assertExit(scan, 0);
+      assertOut(scan, '窗口 起始 = ' + baseline);
+      assertOut(scan, '归档 2 个 · 窗口内 1 个 · 含沉淀段 1 个');
+      assertOut(scan, 'after-baseline#1');
+      assertNotOut(scan, 'before-baseline#');
+      assertNotOut(scan, '无基线（首次运行，全量扫描）');
+    },
+  },
+
+  // 288: ui-design 工件门按协议绑定键控（负例面：协议删掉绑定）——闸门开关由协议里的 binding
+  // 表达（在场 ∧ 等级 = guarded），门禁侧只复用同一登记表 / requiredSkillCalls 查询，不存在第二份
+  // 键表。四类：负例（删绑定 → 门随绑定退场，且留可见「门未启用」行，不静默消失）/ 正例（绑定在
+  // 场且 guarded → 前端缺件仍 BLOCKED，键控未误伤既有语义）/ 越界（绑定缺席时 design 的另一
+  // guarded 绑定仍由出口自动补写——其它绑定路径逐字不变）/ 恢复（协议写回 guarded 绑定 → 门重新
+  // 拦住，键控是活判据不是一次性快照）。
+  {
+    name: '288 ui-design 门按协议绑定键控：删绑定门退场（可见行）/ 在场仍拦 / 其它绑定零改动 / 写回即恢复',
+    run: (dir) => {
+      // 负例：协议删掉该绑定 → 前端判据成立且缺件也不再拦（门随绑定退场）
+      writeUiDesignBindingVariant(dir, 'absent');
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: true,
+      });
+      const absent = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(absent, 0);
+      assertOut(absent, 'ALL CHECKS PASSED');
+      assertOut(absent, 'UI-DESIGN: 门未启用（协议 design 节点未登记 flow-comet-ui-design 绑定）');
+      assertNotOut(absent, 'BLOCKED');
+      assertNotOut(absent, 'UI-DESIGN: skipped');
+
+      // 越界：绑定缺席时 design 的另一 guarded 绑定（flow-comet-design）仍由出口自动补写——
+      // 零真实声明也放行，证明自动补语义只在登记表命中的绑定上改道
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: false, declareDesign: false,
+      });
+      const otherBindings = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(otherBindings, 0);
+      assertOut(otherBindings, 'ALL CHECKS PASSED');
+
+      // 正例：协议写回 guarded 绑定 → 同一夹具、同一 change 立刻恢复拦截（与既有语义逐字一致）
+      writeUiDesignBindingVariant(dir, 'guarded');
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: true,
+      });
+      const guardedInPlace = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(guardedInPlace, 1);
+      assertOut(guardedInPlace, 'BLOCKED: design 出口缺 UI-DESIGN.md');
+      assertNotOut(guardedInPlace, 'UI-DESIGN: 门未启用');
+
+      // 恢复：补齐工件 + 真实声明 → 出口放行（恢复路径未被键控改动波及）
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: true,
+      });
+      const recovered = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(recovered, 0);
+      assertOut(recovered, 'ALL CHECKS PASSED');
+    },
+  },
+
+  // 289: ui-design 工件门按协议绑定键控（负例面：等级降回 advisory）——`enforcement` 是该门的单一
+  // 表达处：等级非 guarded ⇒ 门不适用，且该绑定的出口自动补写回到未登记路径的原语义（声明照旧
+  // 由出口代记）。四类：负例（advisory → 不再拦）/ 正例（写回 guarded → 仍拦）/ 越界（同一节点
+  // 的另一绑定不受影响）/ 恢复（等级回到 guarded 即恢复拦截）。
+  {
+    name: '289 ui-design 门按协议等级键控：调回 advisory 不再拦且自动补写原语义 / 写回 guarded 即恢复',
+    run: (dir) => {
+      // 负例：等级调回 advisory → 缺工件 + 零真实声明也放行（自动补写保持原语义）
+      writeUiDesignBindingVariant(dir, 'advisory');
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: false,
+      });
+      const advisory = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(advisory, 0);
+      assertOut(advisory, 'ALL CHECKS PASSED');
+      assertOut(advisory, 'UI-DESIGN: 门未启用（协议 design 绑定等级 = advisory，非 guarded）');
+      assertNotOut(advisory, 'BLOCKED');
+      assertNotOut(advisory, 'UI-DESIGN: skipped');
+
+      // 越界：同一节点的另一 guarded 绑定零真实声明仍放行（自动补语义未被本次键控改道）
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: false, declareDesign: false,
+      });
+      const otherBindings = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(otherBindings, 0);
+      assertOut(otherBindings, 'ALL CHECKS PASSED');
+
+      // 正例：等级写回 guarded → 缺件与缺声明双拦截同时回来
+      writeUiDesignBindingVariant(dir, 'guarded');
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: true,
+      });
+      const guardedInPlace = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(guardedInPlace, 1);
+      assertOut(guardedInPlace, 'BLOCKED: design 出口缺 UI-DESIGN.md');
+      assertNotOut(guardedInPlace, 'UI-DESIGN: 门未启用');
+
+      // 恢复：补齐工件 + 真实声明 → 放行
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: true,
+      });
+      const recovered = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(recovered, 0);
+      assertOut(recovered, 'ALL CHECKS PASSED');
+    },
+  },
+
+  // 290: 前端判据的负向标记是结构约束（不是裸子串）——三种结构形态（独立行 / 行首 / 字段值位）
+  // 任一命中即判非前端并**回显命中片段**；自然句子与子维度字段里的标记词一律不关掉整道门。
+  // 四类：负例（行首的「不适用于暗色主题」与结构形态的 `- 暗色主题：不适用` → 仍判前端，前端
+  // 缺件照样 BLOCKED）/ 正例（独立行带括注、行首带理由、字段值位三种形态可见跳过并回显片段）/
+  // 越界（段外独立行不参与判据，判据限段内）/ 恢复（改段即放行）。
+  {
+    name: '290 负向标记结构约束：独立行·行首·字段值位跳过并回显片段 / 自然句子·子维度字段·段外标记不关闸',
+    run: (dir) => {
+      // 负例：自然句子（标记词在行首且后接「于」，句内再出现一次）→ 判据仍是前端 ⇒ 缺件 BLOCKED
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_NATURAL_SENTENCE, uiDesign: false, declareUiDesign: true,
+      });
+      const naturalSentence = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(naturalSentence, 1);
+      assertOut(naturalSentence, 'BLOCKED: design 出口缺 UI-DESIGN.md');
+      assertNotOut(naturalSentence, 'UI-DESIGN: skipped');
+      assertNotOut(naturalSentence, '命中片段');
+
+      // 负例（结构形态的越界面）：子维度字段 `- 暗色主题：不适用` 是结构形态但主体不是本 change
+      // 的适用性 ⇒ 仍判前端（标签表把可误伤的字段形态挡在外面）
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_SUBDIMENSION_FIELD, uiDesign: false, declareUiDesign: true,
+      });
+      const subDimensionField = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(subDimensionField, 1);
+      assertOut(subDimensionField, 'BLOCKED: design 出口缺 UI-DESIGN.md');
+      assertNotOut(subDimensionField, 'UI-DESIGN: skipped');
+
+      // 越界：标记出现在「视觉调性」段之外的独立行 → 不参与判据（判据限段内）
+      writeDesignExitFixture(dir, {
+        newChange: true,
+        visualTone: VISUAL_TONE_APPLICABLE,
+        changeTail: '\n## 范围排除（Out of Scope）\n\n不适用。\n',
+        uiDesign: false,
+        declareUiDesign: true,
+      });
+      const outsideSection = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(outsideSection, 1);
+      assertOut(outsideSection, 'BLOCKED: design 出口缺 UI-DESIGN.md');
+      assertNotOut(outsideSection, 'UI-DESIGN: skipped');
+
+      // 正例 A：独立行（带括注理由）→ 可见跳过 + 回显命中片段
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_NOT_APPLICABLE, uiDesign: false, declareUiDesign: false,
+      });
+      const standalone = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(standalone, 0);
+      assertOut(standalone, 'UI-DESIGN: skipped（非前端）');
+      assertOut(standalone, '命中片段: 不适用（非前端项目）。');
+      assertNotOut(standalone, 'BLOCKED');
+
+      // 正例 B：字段值位（`- 适用性：不适用（…）`）→ 同样判非前端（结构形态之二，非行首）
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_FIELD_MARKER, uiDesign: false, declareUiDesign: false,
+      });
+      const fieldValue = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(fieldValue, 0);
+      assertOut(fieldValue, 'UI-DESIGN: skipped（非前端）');
+      assertOut(fieldValue, '命中片段: - 适用性：不适用（CLI 工具，无用户可见界面）');
+      assertNotOut(fieldValue, 'BLOCKED');
+
+      // 正例 C：行首形态（标记 + 破折号理由，非独立行）→ 同样判非前端
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_LINE_HEAD_MARKER, uiDesign: false, declareUiDesign: false,
+      });
+      const lineHead = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(lineHead, 0);
+      assertOut(lineHead, 'UI-DESIGN: skipped（非前端）');
+      assertOut(lineHead, '命中片段: 不适用 —— CLI 工具，无用户可见界面。');
+      assertNotOut(lineHead, 'BLOCKED');
+
+      // 恢复：把调性段改成结构形态（标注路径）→ 同一 change 放行，命中片段一并回显
+      writeDesignExitFixture(dir, {
+        newChange: true, visualTone: VISUAL_TONE_NOT_APPLICABLE, uiDesign: false, declareUiDesign: false,
+      });
+      const recovered = runGuardWithProtocol(dir, ['exit', 'design']);
+      assertExit(recovered, 0);
+      assertOut(recovered, 'UI-DESIGN: skipped（非前端）');
+      assertOut(recovered, '命中片段: 不适用（非前端项目）。');
+    },
+  },
+
+  // 291: 原子写单一来源——「同目录固定 `.tmp` + rename + 失败清理」惯用法在收敛面（状态 / 侧命令 /
+  // handoff 的写盘脚本 + 单源模块）内恰一处实现（落点 = 既有单源模块 state-schema.mjs），三个侧命令
+  // 与 handoff 的 state 直写一律消费同一导出、零内联。判别力两条：① 具名导出被真实消费（import +
+  // 调用，不是纯文本存在性）；② **合成目录反向构造**——把第二份实现丢进合成引擎目录，检出数必须
+  // 从 1 变 2（证明检出不恒真空过）。guard 的受保护写入按边界锚显式排除，不静默跳过。
+  {
+    name: '291 原子写单一来源：收敛面内一处实现 + 四消费方零内联 + 合成反向构造判别力',
+    run: async () => {
+      // ① 惯用法唯一实现（收敛面 = 本任务写边界内的写盘脚本 + 单源模块）
+      const idiom = atomicWriteIdiomHits(__dirname, ATOMIC_WRITE_CONVERGENCE_FACE);
+      assertEqual(idiom.length, 1, '原子写惯用法实现面（收敛面内应恰 1 处）实际 ' + JSON.stringify(idiom));
+      assertEqual(idiom[0].file, 'state-schema.mjs', '原子写惯用法落点文件');
+      assertEqual(idiom[0].count, 1, 'state-schema.mjs 内惯用法处数');
+
+      // ①b 边界锚（可见，不静默排除）：guard 的受保护写入是独立安全硬化通道——唯一临时名 + 快照
+      // 复核；形态一旦退回「固定 `<目标>.tmp`」惯用法即变红，强制重新评估它是否落回收敛面。
+      const guardText = fs.readFileSync(path.join(__dirname, 'workflow-guard.mjs'), 'utf8');
+      assertTrue(guardText.includes('String(process.pid)') && /Math\.random\(\)\.toString\(16\)/.test(guardText),
+        'workflow-guard 的受保护写入不再是「唯一临时名」硬化通道——须重新评估原子写收敛面');
+      assertTrue(hasNamedImport(guardText, './state-schema.mjs', 'RUNTIME_STATE_PATH'),
+        'workflow-guard 未从 state-schema.mjs import 运行时路径常量（单源关系被破坏，收敛面须重评）');
+
+      // ② 具名导出唯一定义 + 行为可用（落盘、无临时残留、失败路径 fail-closed）
+      const writeAtomic = requireModuleExport(stateSchemaModule, 'writeFileAtomic', 'state-schema.mjs');
+      const definition = engineDefinitionHits('writeFileAtomic');
+      assertEqual(definition.length, 1, 'writeFileAtomic 定义面（全引擎应恰 1 处）实际 ' + JSON.stringify(definition));
+      assertEqual(definition[0].file, 'state-schema.mjs', 'writeFileAtomic 定义文件');
+      const probe = makeTmp();
+      try {
+        const target = path.join(probe, 'nested', 'out.json');
+        await writeAtomic(target, '{"ok":true}\n');
+        assertEqual(fs.readFileSync(target, 'utf8'), '{"ok":true}\n', '原子写落盘内容');
+        assertTrue(!fs.existsSync(target + '.tmp'), '原子写成功路径不得残留临时文件');
+        const blocked = path.join(probe, 'blocked.txt');
+        fs.mkdirSync(blocked + '.tmp');
+        let thrown = null;
+        try { await writeAtomic(blocked, '半写'); } catch (e) { thrown = e; }
+        assertTrue(thrown !== null, '临时路径被占用时原子写必须抛错（fail-closed）');
+        assertTrue(!fs.existsSync(blocked), '失败路径不得留下半写目标文件');
+      } finally {
+        cleanupTmpDir(probe);
+      }
+
+      // ③ 四个消费方：具名 import 自 state-schema.mjs + 真实调用 + 零内联第二份实现
+      const consumers = {
+        'workflow-state.mjs': 'writeJsonAtomic',
+        'workflow-handoff.mjs': 'writeJsonAtomic',
+        'evolve.mjs': 'writeFileAtomic',
+        'context-scan.mjs': 'writeJsonAtomic',
+      };
+      for (const [file, symbol] of Object.entries(consumers)) {
+        const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
+        assertTrue(hasNamedImport(text, './state-schema.mjs', symbol),
+          file + ' 未从 state-schema.mjs import ' + symbol + '（单源纪律：写盘不得在本脚本内联第二份）');
+        assertTrue(text.includes(symbol + '('), file + ' 未真实消费 ' + symbol + '（单一权威应被调用）');
+        const inline = (text.match(ATOMIC_TEMP_SUFFIX_RE) ?? []).length;
+        assertEqual(inline, 0, file + ' 仍内联原子写惯用法（第二份实现）处数');
+      }
+
+      // ④ 反向构造：合成引擎目录（单文件 1 处 → 检出 1；再放第二份实现 → 检出 2）——
+      // 证明③的判据确实会因第二份实现变红，而非恒真空过。
+      const synthetic = makeTmp();
+      try {
+        writeFile(synthetic, 'single.mjs',
+          "export async function duplicateWriter(file, text) {\n"
+          + "  const temporary = file + '.tmp';\n"
+          + '  await fs.writeFile(temporary, text);\n'
+          + '  await fs.rename(temporary, file);\n'
+          + '}\n');
+        assertEqual(atomicWriteIdiomHits(synthetic).length, 1, '合成目录单实现检出数');
+        writeFile(synthetic, 'second.mjs',
+          "async function anotherWriter(file, text) {\n"
+          + "  const temporary = file + '.tmp';\n"
+          + '  await fs.writeFile(temporary, text);\n'
+          + '  await fs.rename(temporary, file);\n'
+          + '}\n');
+        assertEqual(atomicWriteIdiomHits(synthetic).length, 2, '合成目录第二份实现检出数（判据须变红）');
+      } finally {
+        cleanupTmpDir(synthetic);
+      }
+    },
+  },
+
+  // 292: evolve 元数据字段面单一来源——`## evolve 元数据` 的段名与三字段名在 state-schema.mjs
+  // 唯一导出，写方（evolve）与校验方（context-init）同源消费、零内联字面量；容差收窄到单形：
+  // 无生产者的旧别名「下次同步建议」不再被静默接受，而是**可见**的格式提示（点名旧别名 + 应改
+  // 写的字段名）。写→校一致性用真实链路：evolve apply 生成的段必须零格式问题通过校验。
+  {
+    name: '292 evolve 元数据单一来源：常量集唯一导出·写校同源·旧别名收窄为可见提示',
+    run: async (dir) => {
+      // ① 常量集唯一导出 + 取值单形（去掉无生产者的旧别名是**取值**层面的收窄）
+      for (const name of ['EVOLVE_METADATA_SECTION', 'EVOLVE_METADATA_FIELDS']) {
+        const hits = engineDefinitionHits(name);
+        assertEqual(hits.length, 1, name + ' 定义面（全引擎应恰 1 处）实际 ' + JSON.stringify(hits));
+        assertEqual(hits[0].file, 'state-schema.mjs', name + ' 定义文件');
+      }
+      const section = requireModuleExport(stateSchemaModule, 'EVOLVE_METADATA_SECTION', 'state-schema.mjs');
+      const fields = requireModuleExport(stateSchemaModule, 'EVOLVE_METADATA_FIELDS', 'state-schema.mjs');
+      assertEqual(section, 'evolve 元数据', '段名常量取值');
+      assertEqual(fields.join(','), ['last_evolve_at', 'scanner', '下次建议'].join(','), '三字段常量取值');
+
+      // ② 写方与校验方同源消费 + 零内联字面量（第二份表达即变红）
+      for (const file of ['evolve.mjs', 'context-init.mjs']) {
+        const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
+        assertTrue(hasNamedImport(text, './state-schema.mjs', 'EVOLVE_METADATA_SECTION'),
+          file + ' 未从 state-schema.mjs import 段名常量');
+        assertTrue(text.includes('EVOLVE_METADATA_FIELDS'), file + ' 未消费字段常量集');
+        assertTrue(!/'evolve 元数据'/.test(text), file + ' 仍内联段名字面量（第二份表达）');
+        assertTrue(!/'下次建议'/.test(text), file + ' 仍内联第三字段字面量（第二份表达）');
+      }
+
+      // ③ 写→校一致性（真实链路）：evolve apply 产出的段必须被校验方无问题接收
+      writeFile(dir, '.specs/archive/2026-10-02-fixture/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n### 可复用抽象\n\n- 夹具抽象条目（元数据单一来源）\n');
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeState(dir, baseState('open'));
+      const apply = runSideScript(SIDE_EVOLVE, ['apply', '2026-10-02-fixture#1', '--root', dir], dir);
+      assertExit(apply, 0);
+      assertOut(apply, 'EVOLVE-OK');
+      const written = fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8');
+      for (const field of fields) {
+        assertTrue(written.includes('**' + field + '**'), '写方产出的段缺字段 ' + field);
+      }
+      const validate = requireModuleExport(contextInitModule, 'validateContext', 'context-init.mjs');
+      const consistent = await validate(dir);
+      assertEqual(consistent.missingSections.length, 0,
+        '夹具七段骨架缺段: ' + JSON.stringify(consistent.missingSections));
+      assertEqual(consistent.formatIssues.length, 0,
+        '写方产物未通过校验方（同源失配）: ' + JSON.stringify(consistent.formatIssues));
+
+      // ④ 容差收窄判别力：旧别名顶替第三字段 → 必报，且提示点名旧别名与应写字段（可见，不静默）
+      const aliased = contextFixtureText({ evolveSection: [
+        '- **' + fields[0] + '**: `2026-10-02T10:00:00+08:00`',
+        '- **' + fields[1] + '**: `flow-comet-evolve`',
+        '- **下次同步建议**: 约 60 天后',
+      ] });
+      writeFile(dir, '.specs/CONTEXT.md', aliased);
+      const aliasedIssues = (await validate(dir)).formatIssues;
+      assertTrue(aliasedIssues.some((issue) => issue.includes('evolve 元数据三字段')),
+        '旧别名未被收窄（仍静默通过）: ' + JSON.stringify(aliasedIssues));
+      assertTrue(aliasedIssues.some((issue) => issue.includes('下次同步建议') && issue.includes('不再接受')),
+        '旧别名未给出可见格式提示: ' + JSON.stringify(aliasedIssues));
+    },
+  },
+
+  // 293: 侧命令 CLI 契约——三条横向命令的 `--root` 两种形态 / `--stdout` / `--help` /
+  // 未知参数走**同一份**共享助手：等号形三命令一致（修复前 evolve 报「未知参数: --root=.」exit 1）、
+  // `--help`/`-h` 三命令一致（修复前只有 health 有）、空格形与未知参数的退出码语义保持不变；
+  // 位置参数语义由各命令自持（evolve 的 scan/apply 子命令与候选 id）。结构锚：带引号的 `--root`
+  // 解析形态与「未知参数」构造在三条命令里**只允许出现在共享助手一处**，第二份自写脚手架即红。
+  {
+    name: '293 侧命令 CLI 契约：--root 两形态·--stdout·--help 三命令同形 + 未知参数语义不变 + 解析面单源',
+    run: (dir) => {
+      writeFile(dir, '.specs/archive/2026-10-02-cli/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n### 可复用抽象\n\n- CLI 契约夹具条目\n');
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeState(dir, baseState('open'));
+
+      // ① 等号形 `--root=<目录>`：三命令等价（修复前 evolve 是唯一不支持的一条）
+      const evolveEq = runSideScript(SIDE_EVOLVE, ['scan', '--root=' + dir], dir);
+      assertExit(evolveEq, 0);
+      assertOut(evolveEq, 'EVOLVE: 窗口');
+      assertOut(evolveEq, '2026-10-02-cli#1');
+      const healthEq = runSideScript(SIDE_HEALTH, ['--root=' + dir, '--stdout'], dir);
+      assertExit(healthEq, 0);
+      assertOut(healthEq, '## 确定性层（机器可判）');
+      const scanEq = runSideScript(SIDE_CONTEXT_SCAN, ['--root=' + dir], dir);
+      assertExit(scanEq, 0);
+      assertOut(scanEq, 'CONTEXT-SCAN-DONE');
+
+      // ② 空格形 `--root <目录>`：向后兼容（三命令语义不变）
+      const evolveSpace = runSideScript(SIDE_EVOLVE, ['scan', '--root', dir], dir);
+      assertExit(evolveSpace, 0);
+      assertOut(evolveSpace, 'EVOLVE: 窗口');
+      const healthSpace = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir);
+      assertExit(healthSpace, 0);
+      assertOut(healthSpace, '## 确定性层（机器可判）');
+      const scanSpace = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
+      assertExit(scanSpace, 0);
+      assertOut(scanSpace, 'CONTEXT-SCAN-DONE');
+
+      // ③ `--help` / `-h`：三命令一律打印**自己的**用法后 exit 0（用法里各自列出自身命令形态）
+      const helpCases = [
+        { args: ['--help'], keywords: ['evolve.mjs scan', 'evolve.mjs apply', '--stdout'] },
+        { args: ['-h'], keywords: ['health.mjs', '--root', '--stdout'] },
+        { args: ['--help'], keywords: ['context-scan.mjs', '--root', '--stdout'] },
+      ];
+      const helpScripts = [SIDE_EVOLVE, SIDE_HEALTH, SIDE_CONTEXT_SCAN];
+      for (let i = 0; i < helpScripts.length; i += 1) {
+        const res = runSideScript(helpScripts[i], helpCases[i].args, dir);
+        assertExit(res, 0);
+        for (const keyword of helpCases[i].keywords) assertOut(res, keyword);
+      }
+      // 子命令之后的 `--help` 同样短路（不因缺候选 id 报用法错误）
+      const applyHelp = runSideScript(SIDE_EVOLVE, ['apply', '--help'], dir);
+      assertExit(applyHelp, 0);
+      assertOut(applyHelp, 'evolve.mjs apply');
+      // `--stdout` 三命令均被接受（evolve 的 scan 本就全量输出到标准输出）
+      assertExit(runSideScript(SIDE_EVOLVE, ['scan', '--stdout', '--root', dir], dir), 0);
+      // evolve 的 `--stdout` 语义 = 本次追加进报告的内容原样输出（与落盘块逐字节相同）；
+      // 命令自有取值开关的等号形同样走共享助手（`--scanner=<文本>`）
+      const applyOut = runSideScript(SIDE_EVOLVE,
+        ['apply', '2026-10-02-cli#1', '--root', dir, '--stdout', '--scanner=契约夹具扫描器'], dir);
+      assertExit(applyOut, 0);
+      assertOut(applyOut, 'EVOLVE-OK');
+      const today = requireModuleExport(timeUtilsModule, 'formatLocalDate', 'time-utils.mjs')(new Date());
+      const evolveReport = fs.readFileSync(path.join(dir, '.specs', 'evolve', today + '-EVOLVE.md'), 'utf8');
+      assertTrue(applyOut.output.includes(evolveReport),
+        '--stdout 输出应与落盘报告块逐字节一致（stdout 与文件各自渲染即漂移）');
+      assertTrue(fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8').includes('契约夹具扫描器'),
+        '命令自有取值开关（--scanner=<文本>）未生效');
+
+      // ④ 未知参数：三命令一律 exit 1 且点名该词元（既有退出码语义不变）
+      for (const script of helpScripts) {
+        const unknown = runSideScript(script, ['--bogus'], dir);
+        assertExit(unknown, 1);
+        assertOut(unknown, '未知参数: --bogus');
+      }
+      // 位置参数语义按命令自持：evolve 的 scan 拒位置参数、apply 缺候选 id 仍报用法错误
+      const scanExtra = runSideScript(SIDE_EVOLVE, ['scan', 'extra'], dir);
+      assertExit(scanExtra, 1);
+      assertOut(scanExtra, 'scan 不接受位置参数: extra');
+      const applyEmpty = runSideScript(SIDE_EVOLVE, ['apply', '--root', dir], dir);
+      assertExit(applyEmpty, 1);
+      assertOut(applyEmpty, 'apply 需要至少一个候选 id');
+      // 取值开关悬空 → 用法错误（三命令同一文案、同一退出码）
+      for (const script of helpScripts) {
+        const dangling = runSideScript(script, ['--root'], dir);
+        assertExit(dangling, 1);
+        assertOut(dangling, '--root 需要一个目录参数');
+      }
+
+      // ⑤ 结构锚：解析形态只此一处（共享助手）；两个消费方具名 import + 真实调用
+      const parseFace = new Map(helpScripts.map((script) => [path.basename(script), fs.readFileSync(script, 'utf8')]));
+      const rootTokenFiles = [...parseFace].filter(([, text]) => text.includes("'--root'")).map(([file]) => file);
+      assertEqual(rootTokenFiles.join(','), 'evolve.mjs',
+        '带引号的 `--root` 解析形态应只出现在共享助手一处（实际: ' + (rootTokenFiles.join(',') || '无') + '）');
+      const unknownTokenFiles = [...parseFace].filter(([, text]) => text.includes('未知参数: ')).map(([file]) => file);
+      assertEqual(unknownTokenFiles.join(','), 'evolve.mjs',
+        '「未知参数」构造应只出现在共享助手一处（实际: ' + (unknownTokenFiles.join(',') || '无') + '）');
+      for (const file of ['health.mjs', 'context-scan.mjs']) {
+        const text = parseFace.get(file);
+        assertTrue(hasNamedImport(text, './evolve.mjs', 'parseSideCommandArgs'),
+          file + ' 未从共享助手模块具名 import parseSideCommandArgs（第二份脚手架或未接线）');
+        assertTrue(text.includes('parseSideCommandArgs('), file + ' 未真实调用共享助手');
+      }
+    },
+  },
+
+  // 294: 损坏 state 的 fail-closed 与「首次运行」口径收窄 + 协议路径单源——
+  // ① state 文件在场但不可解析（含顶层非对象）→ `evolve scan` BLOCKED 且零写入，不再谎称
+  //    「无基线（首次运行，全量扫描）」把增量窗口静默退化为全量；② 「首次运行」只限
+  //    「state 可读且字段缺席」，state 不在场另有措辞（不冒充首次运行）；③ 协议路径走
+  //    state-schema 的唯一选择器：state.protocolPath 绑定**独占**（项目内约定副本坏掉也必须成功、
+  //    绑定本身坏掉也不回退候选布局），本模块零候选布局表。
+  {
+    name: '294 损坏 state fail-closed：scan/apply BLOCKED 零写入·首次运行口径收窄 + 协议路径走单源选择器',
+    run: (dir) => {
+      writeFile(dir, '.specs/archive/2026-10-02-state/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n### 可复用抽象\n\n- 状态口径夹具条目\n');
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      const stateFile = path.join(dir, '.flow-comet', 'flow-comet-state.json');
+      writeState(dir, baseState('open'));
+
+      // ① state 不在场：显式点名「state 不在场」，不冒充「首次运行」（全量扫描仍可用）
+      fs.rmSync(stateFile);
+      const noState = runSideScript(SIDE_EVOLVE, ['scan', '--root', dir], dir);
+      assertExit(noState, 0);
+      assertOut(noState, 'state 不在场');
+      assertNotOut(noState, '无基线（首次运行，全量扫描）');
+
+      // ② state 可读且字段缺席 = 唯一的「首次运行」口径（全量扫描）
+      writeState(dir, baseState('open'));
+      const firstRun = runSideScript(SIDE_EVOLVE, ['scan', '--root', dir], dir);
+      assertExit(firstRun, 0);
+      assertOut(firstRun, '无基线（首次运行，全量扫描）');
+      assertOut(firstRun, '窗口内 1 个');
+
+      // ③ 损坏 state（JSON 截断）：fail-closed —— BLOCKED + 零写入，不再退化成全量扫描
+      const stateText = fs.readFileSync(stateFile, 'utf8');
+      const truncated = stateText.slice(0, Math.max(1, Math.floor(stateText.length / 2)));
+      fs.writeFileSync(stateFile, truncated, 'utf8');
+      const damagedBytes = readStateBytes(dir);
+      const before = treeFingerprint(dir);
+      const blocked = runSideScript(SIDE_EVOLVE, ['scan', '--root', dir], dir);
+      assertExit(blocked, 1);
+      assertOut(blocked, 'BLOCKED');
+      assertOut(blocked, '无法解析');
+      assertNotOut(blocked, '首次运行');
+      assertNotOut(blocked, '候选清单');
+      assertEqual(readStateBytes(dir), damagedBytes, '损坏 state 的 scan 轮改写了 state');
+      assertEqual(fingerprintChanges(before, treeFingerprint(dir)).join(' | '), '',
+        '损坏 state 的 scan 轮有写入');
+
+      // ④ 顶层非对象（数组）同样判「不可信」——不得冒充「字段缺席」
+      fs.writeFileSync(stateFile, '[]\n', 'utf8');
+      const arrayState = runSideScript(SIDE_EVOLVE, ['scan', '--root', dir], dir);
+      assertExit(arrayState, 1);
+      assertOut(arrayState, 'BLOCKED');
+      assertOut(arrayState, '无法解析');
+
+      // ⑤ 损坏态下 apply 同样 fail-closed：目标文档 / 报告 / state 三处零改动
+      fs.writeFileSync(stateFile, truncated, 'utf8');
+      const contextBefore = fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8');
+      const applyBlocked = runSideScript(SIDE_EVOLVE, ['apply', '2026-10-02-state#1', '--root', dir], dir);
+      assertExit(applyBlocked, 1);
+      assertOut(applyBlocked, 'BLOCKED');
+      assertEqual(fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8'), contextBefore,
+        '损坏 state 的 apply 轮改写了目标文档');
+      assertTrue(!fs.existsSync(path.join(dir, '.specs', 'evolve')), '损坏 state 的 apply 轮落了报告');
+
+      // ⑥ 协议路径单源：state.protocolPath 绑定独占——项目内约定副本坏掉，绑定好 → 必须成功
+      //   （修复前的候选布局表先命中 <根>/reference/workflow-protocol.json → 子进程按坏协议 BLOCK）
+      writeFile(dir, '.specs/archive/2026-10-02-proto/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n### 可复用抽象\n\n- 协议绑定夹具条目\n');
+      fs.writeFileSync(path.join(dir, 'reference', 'workflow-protocol.json'),
+        '{"schemaVersion": 99, "nodes": []}\n', 'utf8');
+      fs.copyFileSync(SKILL_PROTOCOL_FILE, path.join(dir, 'bound-protocol.json'));
+      writeState(dir, { ...baseState('open'), protocolPath: 'bound-protocol.json' });
+      const bound = runSideScript(SIDE_EVOLVE, ['apply', '2026-10-02-proto#1', '--root', dir], dir,
+        { FLOW_COMET_PROTOCOL: '' });
+      assertExit(bound, 0);
+      assertOut(bound, 'EVOLVE-OK');
+      assertTrue(fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8').includes('协议绑定夹具条目'),
+        '状态绑定协议下的 apply 未落盘条目');
+
+      // ⑦ 绑定本身坏掉 → fail-closed 可见（不回退项目内约定副本），指引指向绑定修正
+      fs.copyFileSync(SKILL_PROTOCOL_FILE, path.join(dir, 'reference', 'workflow-protocol.json'));
+      fs.writeFileSync(path.join(dir, 'broken-protocol.json'), '{"schemaVersion": 99, "nodes": []}\n', 'utf8');
+      writeState(dir, { ...baseState('open'), protocolPath: 'broken-protocol.json' });
+      const brokenBytes = readStateBytes(dir);
+      const broken = runSideScript(SIDE_EVOLVE, ['apply', '2026-10-02-proto#1', '--root', dir], dir,
+        { FLOW_COMET_PROTOCOL: '' });
+      assertExit(broken, 1);
+      assertOut(broken, 'state 写入通道失败');
+      assertOut(broken, 'state.protocolPath');
+      assertEqual(readStateBytes(dir), brokenBytes, '绑定损坏的 apply 轮改写了 state');
+
+      // ⑧ 写入前先验 state 通道（协议闸门）：通道排在文档之后，不预验就有半成品——候选**未应用过**
+      //   （目标文档必然会被改写），绑定指向 schema 非法的根内副本 ⇒ 必须零文档改动、零报告、零 state。
+      const halfRoot = path.join(dir, 'half-write');
+      writeFile(halfRoot, '.specs/CONTEXT.md', contextFixtureText());
+      writeFile(halfRoot, '.specs/archive/2026-10-02-half/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n### 可复用抽象\n\n- 半成品夹具条目\n');
+      fs.writeFileSync(path.join(halfRoot, 'broken-protocol.json'), '{"schemaVersion": 99, "nodes": []}\n', 'utf8');
+      writeState(halfRoot, { ...baseState('open'), protocolPath: 'broken-protocol.json' });
+      const halfContextBefore = fs.readFileSync(path.join(halfRoot, '.specs', 'CONTEXT.md'));
+      const halfStateBefore = readStateBytes(halfRoot);
+      const half = runSideScript(SIDE_EVOLVE, ['apply', '2026-10-02-half#1', '--root', halfRoot], halfRoot,
+        { FLOW_COMET_PROTOCOL: '' });
+      assertExit(half, 1);
+      assertOut(half, 'state 写入通道失败');
+      assertOut(half, 'state.protocolPath');
+      assertTrue(fs.readFileSync(path.join(halfRoot, '.specs', 'CONTEXT.md')).equals(halfContextBefore),
+        'state 通道不可用的 apply 轮改写了目标文档（写入前未验通道 ⇒ 半成品）');
+      assertStateBytesUnchanged(halfRoot, halfStateBefore, 'state 通道不可用的 apply 轮');
+      assertTrue(!fs.existsSync(path.join(halfRoot, '.specs', 'evolve')),
+        'state 通道不可用的 apply 轮落了报告');
+
+      // ⑨ 第二条确定性闸门（state 字段非法）同样必须在文档写入之前拦下——通道预验不能只验协议。
+      //   协议经 state.protocolPath 绑到根内合法副本（这一格只考字段闸门，不考协议闸门）。
+      const fieldRoot = path.join(dir, 'half-write-field');
+      writeFile(fieldRoot, '.specs/CONTEXT.md', contextFixtureText());
+      writeFile(fieldRoot, '.specs/archive/2026-10-02-field/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n### 可复用抽象\n\n- 字段闸门夹具条目\n');
+      fs.mkdirSync(path.join(fieldRoot, 'reference'), { recursive: true });
+      fs.copyFileSync(SKILL_PROTOCOL_FILE, path.join(fieldRoot, 'reference', 'workflow-protocol.json'));
+      writeState(fieldRoot, {
+        ...baseState('open'), executionMode: 'not-a-mode', protocolPath: 'reference/workflow-protocol.json',
+      });
+      const fieldContextBefore = fs.readFileSync(path.join(fieldRoot, '.specs', 'CONTEXT.md'));
+      const fieldStateBefore = readStateBytes(fieldRoot);
+      const fieldGate = runSideScript(SIDE_EVOLVE, ['apply', '2026-10-02-field#1', '--root', fieldRoot], fieldRoot,
+        { FLOW_COMET_PROTOCOL: '' });
+      assertExit(fieldGate, 1);
+      assertOut(fieldGate, 'state 写入通道失败');
+      assertOut(fieldGate, 'executionMode');
+      assertTrue(fs.readFileSync(path.join(fieldRoot, '.specs', 'CONTEXT.md')).equals(fieldContextBefore),
+        'state 字段非法的一轮改写了目标文档（写入前未验字段闸门 ⇒ 半成品）');
+      assertStateBytesUnchanged(fieldRoot, fieldStateBefore, 'state 字段非法的 apply 轮');
+
+      // ⑩ 结构锚：本模块不再自持候选布局表；协议路径只经 state-schema 的唯一导出选择；
+      //    state 三态读入口两条侧命令共用一个实现（第二份内联即红）
+      const evolveText = fs.readFileSync(SIDE_EVOLVE, 'utf8');
+      assertTrue(hasNamedImport(evolveText, './state-schema.mjs', 'resolveProtocolPathWithState'),
+        'evolve.mjs 未从 state-schema.mjs 具名 import 协议路径选择器');
+      assertTrue(evolveText.includes('resolveProtocolPathWithState('), 'evolve.mjs 未真实调用协议路径选择器');
+      assertTrue(!evolveText.includes("'reference', 'workflow-protocol.json'"),
+        'evolve.mjs 仍自持项目内约定副本候选（第二套「协议在哪」表达）');
+      assertTrue(!evolveText.includes("'.flow-comet', 'skills'"),
+        'evolve.mjs 仍自持权威源布局候选（第二套「协议在哪」表达）');
+      const scanText = fs.readFileSync(SIDE_CONTEXT_SCAN, 'utf8');
+      assertTrue(hasNamedImport(scanText, './evolve.mjs', 'readStateInfo'),
+        'context-scan.mjs 未共用 state 三态读入口（第二份读盘实现）');
+      assertTrue(scanText.includes('readStateInfo('), 'context-scan.mjs 未真实调用共用的 state 读入口');
+      assertTrue(!/function\s+readStateFile\b/.test(scanText),
+        'context-scan.mjs 仍保留本地 state 读实现（三态判定第二份表达）');
+    },
+  },
+
+  // 295: health 基线日期判据单源——报告名的「日期前缀 + 日历自洽」判定收敛到 time-utils
+  //（真实消费 `archiveDateFromName`），本模块不再自写前缀正则：日历不自洽的
+  // `2026-02-30-HEALTH.md` 不再被采作基线（旧实现单独在场时直接采作基线、并输出看似有据的
+  // ↑/↓ 趋势；与合法旧报告并存时又因「取排序最后一份」必然取到它）。判据面配**合成目录
+  // 反向构造**：第二份前缀正则丢进合成引擎目录必须被检出（证明形态判据不恒真空过）。
+  {
+    name: '295 health 基线日期判据单源：日历不自洽前缀不入选·合法旧报告入选 + 零自写前缀正则',
+    run: (dir) => {
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeState(dir, baseState('open'));
+
+      // ① 负例：前缀形态合法、日历不自洽（2026-02-30 不存在）——不得被采作基线。快照哨兵
+      //    `lessons.entries=123456` 一旦出现在输出里，即证明这份报告被当成了基线。
+      writeFile(dir, '.specs/health/2026-02-30-HEALTH.md', healthReportFixture('2026-02-30', 123456));
+      const invalidOnly = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir);
+      assertExit(invalidOnly, 0);
+      assertOut(invalidOnly, '基线：无（`.specs/health` 下无日期不同的历史报告）');
+      assertNotOut(invalidOnly, '2026-02-30-HEALTH.md');
+      assertNotOut(invalidOnly, '123456');
+
+      // ② 正例 + 越界：合法旧报告与日历不自洽者并存 → 取合法那份（日历不自洽的名字排序在后，
+      //    旧实现「取最后一份」必然取到它 → 哨兵串成 123456 而非 999999）
+      writeFile(dir, '.specs/health/2026-01-05-HEALTH.md', healthReportFixture('2026-01-05', 999999));
+      const picked = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir);
+      assertExit(picked, 0);
+      assertOut(picked, '基线：`.specs/health/2026-01-05-HEALTH.md`');
+      assertOut(picked, '`lessons.entries`：999999 → ');
+      assertNotOut(picked, '2026-02-30-HEALTH.md');
+      assertNotOut(picked, '123456');
+
+      // ③ 结构锚：health 真实消费 time-utils 的日期判定；收敛面内只许 time-utils 表达该形态
+      const healthText = fs.readFileSync(SIDE_HEALTH, 'utf8');
+      assertTrue(hasNamedImport(healthText, './time-utils.mjs', 'archiveDateFromName'),
+        'health.mjs 未从 time-utils.mjs 具名 import archiveDateFromName（日期判据第二份表达）');
+      assertTrue(healthText.includes('archiveDateFromName('),
+        'health.mjs 未真实消费 archiveDateFromName（单一权威应被调用）');
+      const faceHits = datePrefixRegexpHits(__dirname, DATE_PREFIX_CONVERGENCE_FACE);
+      assertEqual(faceHits.length, 1, '日期前缀形态实现面（收敛面内应恰 1 处）实际 ' + JSON.stringify(faceHits));
+      assertEqual(faceHits[0].file, 'time-utils.mjs', '日期前缀形态落点文件');
+
+      // ③b 边界锚（可见，不静默排除）：guard 的两处日期匹配是文档**内容**里的日期条目匹配
+      //（行锚 + `matchAll(.../gm)`），不是文件名前缀判定，且不在本任务写边界内——形态一旦
+      // 改变即变红，强制重评收敛面。
+      const guardText = fs.readFileSync(path.join(__dirname, 'workflow-guard.mjs'), 'utf8');
+      assertEqual((guardText.match(/matchAll\(\/\^[^\n]*\\d\{4\}-\\d\{2\}-\\d\{2\}[^\n]*\/gm\)/g) ?? []).length, 2,
+        'workflow-guard 的日期匹配不再是「行锚 + 内容条目」两处形态——须重评日期前缀判据的收敛面');
+
+      // ④ 反向构造：合成引擎目录（单份前缀正则 → 检出 1；再放第二份 → 检出 2）
+      const synthetic = makeTmp();
+      try {
+        writeFile(synthetic, 'single.mjs', "const REPORT_DATE_PREFIX = /^(\\d{4}-\\d{2}-\\d{2})/;\n");
+        assertEqual(datePrefixRegexpHits(synthetic).length, 1, '合成目录单实现检出数');
+        writeFile(synthetic, 'second.mjs',
+          "function reportDateOf(name) {\n  return /^(\\d{4}-\\d{2}-\\d{2})/.exec(name);\n}\n");
+        assertEqual(datePrefixRegexpHits(synthetic).length, 2, '合成目录第二份实现检出数（判据须变红）');
+      } finally {
+        cleanupTmpDir(synthetic);
+      }
+    },
+  },
+
+  // 296: context-scan 改写 CONTEXT.md 前落备份——命名族（目标文档同目录 + `.bak-<本地日期>`）与
+  // 失败处置由 state-schema.mjs 的共享助手单源提供（消费关系与零内联见场景 301）：备份内容 =
+  // 改写前版本；同日重复改写只保留一份当日备份（同名覆盖，不堆积）；复制不成功时目标与 state
+  // 逐字节不变（备份**先于**写入，不是事后补）。
+  {
+    name: '296 context-scan 改写前落备份：同形命名·内容为改写前版本·复制失败 fail-closed 零写入',
+    run: (dir) => {
+      const contextFile = path.join(dir, '.specs', 'CONTEXT.md');
+      const original = contextFixtureText();
+      const today = requireModuleExport(timeUtilsModule, 'formatLocalDate', 'time-utils.mjs')(new Date());
+      writeFile(dir, '.specs/CONTEXT.md', original);
+      writeState(dir, baseState('open'));
+
+      // ① 改写落备份：同目录、命名族 `.bak-<日期>`、内容 = 改写前版本；双落点写入照常
+      const first = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
+      assertExit(first, 0);
+      const backups = fs.readdirSync(path.join(dir, '.specs'))
+        .filter((name) => /^CONTEXT\.md\.bak-\d{4}-\d{2}-\d{2}$/.test(name));
+      assertEqual(backups.length, 1, '改写前的备份份数（应恰 1 份同目录 `.bak-<日期>`）实际 ' + JSON.stringify(backups));
+      assertEqual(backups[0], 'CONTEXT.md.bak-' + today, '备份命名（应为改写当日的本地日期）');
+      assertEqual(fs.readFileSync(path.join(dir, '.specs', backups[0]), 'utf8'), original, '备份内容应为改写前版本');
+      assertTrue(fs.readFileSync(contextFile, 'utf8') !== original, 'CONTEXT.md 未被改写（夹具前提不成立）');
+
+      // ② 同日再改写：同名覆盖——只保留一份当日备份，内容为该轮改写前版本（不堆积、链路不丢）
+      const intermediate = contextFixtureText().replace('2026-09-01T10:00:00+08:00', '2026-09-02T10:00:00+08:00');
+      writeFile(dir, '.specs/CONTEXT.md', intermediate);
+      const second = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
+      assertExit(second, 0);
+      assertEqual(fs.readdirSync(path.join(dir, '.specs'))
+        .filter((name) => name.startsWith('CONTEXT.md.bak-')).length, 1, '同日重复改写的当日备份份数');
+      assertEqual(fs.readFileSync(path.join(dir, '.specs', backups[0]), 'utf8'), intermediate,
+        '第二轮的备份内容应为该轮改写前版本');
+
+      // ③ 复制不成功 → fail-closed：目标文档与 state 逐字节不变（备份先于写入，写入面不留半态）
+      writeFile(dir, '.specs/CONTEXT.md', original);
+      const stateBytes = readStateBytes(dir);
+      fs.rmSync(path.join(dir, '.specs', backups[0]), { force: true });
+      fs.mkdirSync(path.join(dir, '.specs', backups[0]));
+      const blocked = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
+      assertExit(blocked, 1);
+      assertOut(blocked, 'BLOCKED');
+      assertEqual(fs.readFileSync(contextFile, 'utf8'), original, '备份失败的一轮改写了 CONTEXT.md');
+      assertStateBytesUnchanged(dir, stateBytes, '备份失败的一轮');
+
+      // ④ 命名族与失败处置的**同源**判据已随备份助手抽取移到场景 301（唯一定义 + 两消费方零内联
+      //    + 合成反向构造）：此处不重复表达同一判据，只保留上面的真实行为锚。
+    },
+  },
+
+  // 297: health 的审计行与报告落盘路径**恒输出**——报告是唯一写入面，调用方至少要能从标准输出
+  // 确认「跑没跑、落在哪、基线是谁」：不带 `--stdout` 时此前 stdout 为空（审计行 0 命中），
+  // 报告路径无处可见；`--stdout` 时报告正文在前、审计行追加在后（正文仍是落盘字节，审计行不进
+  // 报告）。审计行内容当日确定（日期 / 在场判定 / 基线），不引入新的易变行。另锚：审计行用的
+  // CLI 路径标签是三条侧命令的**共享助手**（evolve.mjs 唯一定义），不给同一显示决定留下第二份。
+  {
+    name: '297 health 审计行恒输出：HEALTH: 行与报告落盘路径（不带 --stdout 亦然）+ 正文不回流 + --help 不产报告',
+    run: (dir) => {
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeState(dir, baseState('open'));
+      const today = requireModuleExport(timeUtilsModule, 'formatLocalDate', 'time-utils.mjs')(new Date());
+      const reportFile = path.join(dir, '.specs', 'health', today + '-HEALTH.md');
+      const reportLine = 'HEALTH: 报告 `.specs/health/' + today + '-HEALTH.md`';
+
+      // ① 不带 `--stdout`：审计行与报告路径仍必须输出，且**不**把报告正文回流
+      const quiet = runSideScript(SIDE_HEALTH, ['--root', dir], dir);
+      assertExit(quiet, 0);
+      assertOut(quiet, reportLine);
+      assertOut(quiet, 'HEALTH-DONE');
+      assertNotOut(quiet, '## 确定性层（机器可判）');
+      // 审计行点名的路径必须是真实落盘的工件（文案与产物同源）
+      assertTrue(fs.existsSync(reportFile), '审计行点名的报告未落盘: ' + reportFile);
+
+      // ② 带 `--stdout`：报告正文在前（与落盘逐字节一致）、审计行在后
+      const loud = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir);
+      assertExit(loud, 0);
+      assertOut(loud, reportLine);
+      assertOut(loud, 'HEALTH-DONE');
+      const reportText = fs.readFileSync(reportFile, 'utf8');
+      assertTrue(loud.output.startsWith(reportText), '--stdout 的报告正文应与落盘逐字节一致（审计行追加在后）');
+      assertTrue(loud.output.indexOf('HEALTH-DONE') > loud.output.indexOf(reportText),
+        '审计行应在报告正文之后（顺序反了会让消费方把摘要当正文）');
+
+      // ③ 审计行回显本次采用的基线：合法旧报告在场时点名它（同日重跑不与自己对比）
+      writeFile(dir, '.specs/health/2026-01-05-HEALTH.md', healthReportFixture('2026-01-05', 999999));
+      const withBaseline = runSideScript(SIDE_HEALTH, ['--root', dir], dir);
+      assertExit(withBaseline, 0);
+      assertOut(withBaseline, 'HEALTH: 日期 ' + today);
+      assertOut(withBaseline, '基线 `.specs/health/2026-01-05-HEALTH.md`');
+
+      // ④ `--help` 短路：打用法、不产报告、不输出审计行（用法面语义不变）
+      const help = runSideScript(SIDE_HEALTH, ['--help'], dir);
+      assertExit(help, 0);
+      assertOut(help, 'health.mjs');
+      assertNotOut(help, 'HEALTH: 报告');
+
+      // ⑤ 结构锚：CLI 路径标签**单一来源**（三条命令的摘要行同形）——定义只在共享助手模块
+      //    evolve.mjs（侧命令共享助手的既有落点），另两条具名 import 后真实调用；第二份同名
+      //    助手（或改回各处内联）即红。
+      const labelDefinition = engineDefinitionHits('relativeLabel');
+      assertEqual(labelDefinition.length, 1, 'relativeLabel 定义面（全引擎应恰 1 处）实际 ' + JSON.stringify(labelDefinition));
+      assertEqual(labelDefinition[0].file, 'evolve.mjs', 'relativeLabel 定义文件');
+      for (const file of ['health.mjs', 'context-scan.mjs']) {
+        const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
+        assertTrue(hasNamedImport(text, './evolve.mjs', 'relativeLabel'),
+          file + ' 未从共享助手模块 import 路径标签（第二份同名助手或未接线）');
+        assertTrue(text.includes('relativeLabel('), file + ' 未真实调用共享路径标签');
+      }
+    },
+  },
+
+  // 298: 禁裸拼接静态锚（DESIGN R4 的落地）——时间形态 / 格式化的唯一权威是 time-utils.mjs：
+  // 三条侧命令零容忍（人可见报告 / CLI 摘要行 / 备份名）；其余引擎脚本走**显式白名单 + 逐条理由**
+  // （既有 13 处都是已持久化的机器字段，迁移留专门窗口）。判别力两条：① 白名单判定是纯函数，
+  // 合成输入可驱动「条数漂移（增 / 减）」与「未登记文件」三态必报；② 合成引擎目录注入第二处
+  // 裸拼接 → 检出必增（证明真实面判据不恒真空过）。
+  {
+    name: '298 禁裸拼接静态锚：三侧命令零容忍 + 引擎 13 处显式白名单（逐条理由）+ 合成反向构造',
+    run: () => {
+      // ① 三条侧命令零容忍（人可见面的时间形态只许走 time-utils）
+      const sideHits = bareIsoTimestampHits(__dirname, BARE_ISO_SIDE_COMMANDS);
+      assertEqual(sideHits.length, 0,
+        '侧命令出现裸时间拼接（人可见面须走 time-utils 的 nowTimestamp / formatLocalTimestamp）: ' + JSON.stringify(sideHits));
+
+      // ② 其余引擎脚本 = 精确白名单：条数逐文件相等 + 每条例外带非空理由
+      const engineHits = bareIsoTimestampHits(__dirname).filter((hit) => !BARE_ISO_SIDE_COMMANDS.includes(hit.file));
+      assertEqual(engineHits.reduce((sum, hit) => sum + hit.count, 0), 13, '引擎既有裸拼接落点总数（白名单代数）');
+      const problems = bareIsoWhitelistProblems(engineHits, BARE_ISO_ENGINE_WHITELIST);
+      assertEqual(problems.length, 0, '白名单漂移: ' + problems.join(' | '));
+      for (const entry of BARE_ISO_ENGINE_WHITELIST) {
+        assertTrue(typeof entry.reason === 'string' && entry.reason.length >= 20,
+          entry.file + ' 的白名单条目缺理由（豁免必须是显式且有据的，不是静默名单）');
+      }
+
+      // ③ 白名单判定的判别力（纯函数 · 合成输入）：等价集合不报；三类漂移各自必报
+      //    （合成等价集合的条数取真实白名单首条的当前值——它必须与常量同值，否则第 1 条断言即红）
+      const equivalent = [{ file: 'a.mjs', count: 7 }, { file: 'b.mjs', count: 4 }, { file: 'c.mjs', count: 1 }, { file: 'd.mjs', count: 1 }];
+      const whitelist = BARE_ISO_ENGINE_WHITELIST.map((entry, index) => ({ ...entry, file: equivalent[index].file }));
+      assertEqual(bareIsoWhitelistProblems(equivalent, whitelist).length, 0, '等价集合不应报白名单漂移');
+      const newcomer = bareIsoWhitelistProblems([...equivalent, { file: 'newcomer.mjs', count: 1 }], whitelist);
+      assertTrue(newcomer.some((problem) => problem.includes('newcomer.mjs') && problem.includes('未登记白名单')),
+        '未登记文件的裸拼接未被判定: ' + JSON.stringify(newcomer));
+      const grown = bareIsoWhitelistProblems(
+        equivalent.map((hit, index) => (index === 0 ? { ...hit, count: hit.count + 1 } : hit)), whitelist);
+      assertTrue(grown.some((problem) => problem.includes('白名单 7 处 / 实际 8 处')),
+        '白名单条数增长未被判定: ' + JSON.stringify(grown));
+      const shrunk = bareIsoWhitelistProblems(equivalent.slice(1), whitelist);
+      assertTrue(shrunk.some((problem) => problem.includes('白名单 7 处 / 实际 0 处')),
+        '已迁移落点未同步收窄白名单未被判定: ' + JSON.stringify(shrunk));
+
+      // ④ 合成引擎目录反向构造：单处 → 检出 1；再注入一处 → 检出 2（判据不恒真空过）。
+      //    样例经拼接构造，避免套件自身源码携带该字面量而污染真实面计数（本套件同样在扫描面内）。
+      const bareIsoSample = 'new Date().' + 'toISOString()';
+      const synthetic = makeTmp();
+      try {
+        writeFile(synthetic, 'one.mjs', 'export const a = () => ' + bareIsoSample + ';\n');
+        assertEqual(bareIsoTimestampHits(synthetic).length, 1, '合成目录单处检出数');
+        writeFile(synthetic, 'two.mjs', 'export const b = () => ' + bareIsoSample + ';\n');
+        assertEqual(bareIsoTimestampHits(synthetic).length, 2, '合成目录第二处检出数（判据须变红）');
+        // 注释里的引用不算实现（判据只看代码）
+        writeFile(synthetic, 'three.mjs', '// 反例引用: ' + bareIsoSample + '\nexport const c = 1;\n');
+        assertEqual(bareIsoTimestampHits(synthetic).length, 2, '行注释中的引用不应计入实现面');
+      } finally {
+        cleanupTmpDir(synthetic);
+      }
+    },
+  },
+
+  // 299: 可选工具超时预算（60s 内）+ 超时不静默——常量与调用点同源，且「工具在场但运行未完成」
+  // 必须把降级原因（含本次超时预算）写进报告、快照读数按 `present` 而非 `ok` 落盘，退出码仍 0
+  // （可选工具不可用不是失败）。判别力：常量越预算即红；夹具工具（在场但跑不起来）触发同一
+  // 失败分支，报告里必须看到降级原因——不静默、不冒充成功读数。
+  {
+    name: '299 工具超时收口：常量 ≤ 60s 且与调用点同源 + 在场但运行失败必记降级原因（含预算）',
+    run: (dir) => {
+      const healthText = fs.readFileSync(SIDE_HEALTH, 'utf8');
+      const match = /const TOOL_TIMEOUT_MS = (\d+);/.exec(healthText);
+      assertTrue(match !== null, 'health.mjs 缺工具超时常量 TOOL_TIMEOUT_MS');
+      const budget = Number(match[1]);
+      assertTrue(budget > 0 && budget <= 60000, '工具超时常量超出 60s 预算: ' + budget + ' ms');
+      assertTrue(/timeout: TOOL_TIMEOUT_MS/.test(healthText), '工具调用未消费超时常量（常量会变成装饰）');
+      assertTrue(healthText.includes('超时预算'), '降级原因未回显本次超时预算（超时须可自证，不静默）');
+
+      // 真实链路：夹具工具「在场」（探面命中 <根>/node_modules/.bin/）但跑不起来 → 同一失败分支
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeFile(dir, '.specs/LESSONS.md', '# LESSONS\n\n### L-001 首条\n\n### L-002 次条\n');
+      fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+      fs.mkdirSync(path.join(dir, 'node_modules', '.bin'), { recursive: true });
+      const toolPath = path.join(dir, 'node_modules', '.bin', 'jscpd');
+      fs.writeFileSync(toolPath, '#!/usr/bin/env node\nprocess.exit(3);\n', 'utf8');
+      fs.chmodSync(toolPath, 0o755);
+      const res = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir);
+      assertExit(res, 0);
+      assertOut(res, '未采集——工具在场但运行未完成（超时预算 ' + budget + ' ms；');
+      assertOut(res, 'redundancy.jscpd=present');
+      assertNotOut(res, 'redundancy.jscpd=ok');
+      assertOut(res, '- **jscpd**：在场——字面重复块读数见「冗余扫描」段');
+    },
+  },
+
+  // 300: 读数快照的键形态**单一来源**——往返判据：把生产者自己产出的快照段整段当作历史基线
+  // 喂回去，每个产出的键都必须被读回（零「基线无此读数」、条数与产出条数相等）；反例：给写方
+  // 真实产出的键写异常值 → 必出趋势行；近形状键（大小写不符）不得被读走。此前写方发 6 个含
+  // 大写字母的键、读方的键形态正则只认全小写：6/18 个键恒判「（基线无此读数）」，逐键趋势
+  // 静默失效且不报错（假绿形态）。
+  {
+    name: '300 快照键形态单一来源：产出快照往返零「基线无此读数」+ 真实键异常值必出趋势行 + 近形状键不误读',
+    run: (dir) => {
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeFile(dir, '.specs/LESSONS.md', '# LESSONS\n\n### L-001 首条\n\n### L-002 次条\n');
+      writeState(dir, baseState('open'));
+
+      // ① 生产面自证：先跑一次拿到真实报告，取其快照段原文（不解析、不重排）
+      const firstRun = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir);
+      assertExit(firstRun, 0);
+      const firstReport = fs.readFileSync(path.join(dir, '.specs', 'health',
+        requireModuleExport(timeUtilsModule, 'formatLocalDate', 'time-utils.mjs')(new Date()) + '-HEALTH.md'), 'utf8');
+      const section = snapshotSectionOf(firstReport);
+      assertTrue(section !== null, '报告缺「## 读数快照」段（往返夹具前提不成立）');
+      const producedEntries = snapshotEntryCount(section);
+      assertTrue(producedEntries >= 10, '快照条数异常（往返判据的样本太小）: ' + producedEntries);
+
+      // ② 往返：产出快照整段当作 2026-01-05 的历史基线 → 每个键都必须被读回
+      writeFile(dir, '.specs/health/2026-01-05-HEALTH.md', healthReportWithSnapshot('2026-01-05', section));
+      const roundTrip = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir);
+      assertExit(roundTrip, 0);
+      assertOut(roundTrip, '基线：`.specs/health/2026-01-05-HEALTH.md`');
+      assertNotOut(roundTrip, '（基线无此读数）');
+      const unchanged = (roundTrip.output.match(/（无变化）/g) ?? []).length;
+      assertEqual(unchanged, producedEntries, '往返后逐键「无变化」条数应等于产出条数（有键没被读回）');
+
+      // ③ 真实产出的键（含此前恒被判「基线无此读数」的驼峰键）写异常值 → 必出趋势行
+      const anomalous = section
+        .replace(/(^|\n)context\.lineCount=[^\n]*/, '$1context.lineCount=999999')
+        .replace(/(^|\n)git\.head=[^\n]*/, '$1git.head=ffffffff');
+      writeFile(dir, '.specs/health/2026-01-06-HEALTH.md', healthReportWithSnapshot('2026-01-06', anomalous));
+      const trend = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir);
+      assertExit(trend, 0);
+      assertOut(trend, '基线：`.specs/health/2026-01-06-HEALTH.md`');
+      assertOut(trend, '`context.lineCount`：999999 → ');
+      assertOut(trend, '`git.head`：ffffffff → ');
+      assertNotOut(trend, '999999（基线无此读数）');
+      assertNotOut(trend, 'ffffffff（基线无此读数）');
+
+      // ④ 近形状键（大小写不符）不是本版本的读数面：不得被读走（报「基线无此读数」而非伪造趋势）
+      const nearMiss = section.replace(/(^|\n)context\.lineCount=[^\n]*/, '$1context.linecount=888888');
+      writeFile(dir, '.specs/health/2026-01-07-HEALTH.md', healthReportWithSnapshot('2026-01-07', nearMiss));
+      const miss = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir);
+      assertExit(miss, 0);
+      assertOut(miss, '基线：`.specs/health/2026-01-07-HEALTH.md`');
+      assertNotOut(miss, '888888');
+      assertOut(miss, '`context.lineCount`：');
+      assertOut(miss, '（基线无此读数）');
+    },
+  },
+
+  // 301: 备份改写前版本**单一来源**——命名族（目标文档同目录 + `.bak-<本地日期>`）与失败处置
+  // 收敛为 state-schema.mjs 的单一导出（与原子写同址），evolve 与 context-scan 只消费导出：
+  // 命名族或失败处置再演进时不会只改到一侧。判别力：① 定义面唯一 + 两消费方零内联（第二份
+  // 实现 → 收敛面内检出 2 处）；② evolve 真实链路（备份 = 改写前版本、命名族命中当日日期、
+  // 复制失败整轮 fail-closed：目标文档 / state / 报告三处零改动，与 context-scan 同处置）；
+  // ③ 合成目录反向构造证明①的判据不恒真空过。
+  {
+    name: '301 备份助手单一来源：state-schema 唯一导出·两消费方零内联 + evolve 真实链路 fail-closed',
+    run: async (dir) => {
+      // ① 收敛面内恰一处实现（命名族字面量 + 复制调用同现者）——修复前 evolve 与 context-scan
+      //    各一份（同形但两份），此断言即「第二份实现必红」的落点
+      const impl = inlineBackupHits(__dirname, BACKUP_IMPL_FACE);
+      assertEqual(impl.length, 1, '备份实现面（收敛面内应恰 1 处）实际 ' + JSON.stringify(impl));
+      assertEqual(impl[0].file, 'state-schema.mjs', '备份实现落点文件');
+
+      // ② 定义面唯一 + 两消费方具名 import 与真实调用
+      const definition = engineDefinitionHits('backupBeforeWrite');
+      assertEqual(definition.length, 1, 'backupBeforeWrite 定义面（全引擎应恰 1 处）实际 ' + JSON.stringify(definition));
+      assertEqual(definition[0].file, 'state-schema.mjs', 'backupBeforeWrite 定义文件');
+      const backupHelper = requireModuleExport(stateSchemaModule, 'backupBeforeWrite', 'state-schema.mjs');
+      for (const file of ['evolve.mjs', 'context-scan.mjs']) {
+        const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
+        assertTrue(hasNamedImport(text, './state-schema.mjs', 'backupBeforeWrite'),
+          file + ' 未从 state-schema.mjs 具名 import 备份助手（第二份实现或未接线）');
+        assertTrue(text.includes('backupBeforeWrite('), file + ' 未真实调用共享备份助手');
+      }
+
+      // ③ 单一导出的行为（命名族由共享实现派生：`.bak-<本地日期>`，内容 = 改写前版本）
+      const today = requireModuleExport(timeUtilsModule, 'formatLocalDate', 'time-utils.mjs')(new Date());
+      const stamp = requireModuleExport(timeUtilsModule, 'nowTimestamp', 'time-utils.mjs')();
+      const probe = makeTmp();
+      try {
+        const target = path.join(probe, 'doc.md');
+        writeFile(probe, 'doc.md', '改写前内容\n');
+        await backupHelper(target, stamp);
+        const produced = target + '.bak-' + today;
+        assertTrue(fs.existsSync(produced), '备份未按「同目录 + 当日本地日期」落点: ' + produced);
+        assertEqual(fs.readFileSync(produced, 'utf8'), '改写前内容\n', '备份内容应为改写前版本');
+      } finally {
+        cleanupTmpDir(probe);
+      }
+
+      // ④ evolve 真实链路：apply 落备份（内容 = 改写前版本）
+      writeFile(dir, '.specs/archive/2026-10-02-backup/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n### 可复用抽象\n\n- 备份单一来源夹具条目\n');
+      const original = contextFixtureText();
+      const contextFile = path.join(dir, '.specs', 'CONTEXT.md');
+      const backupFile = contextFile + '.bak-' + today;
+      writeFile(dir, '.specs/CONTEXT.md', original);
+      writeState(dir, baseState('open'));
+      const apply = runSideScript(SIDE_EVOLVE, ['apply', '2026-10-02-backup#1', '--root', dir], dir);
+      assertExit(apply, 0);
+      assertTrue(fs.existsSync(backupFile), 'evolve apply 未落改写前备份: ' + backupFile);
+      assertEqual(fs.readFileSync(backupFile, 'utf8'), original, '备份内容应为改写前版本');
+      assertTrue(fs.readFileSync(contextFile, 'utf8') !== original, 'CONTEXT.md 未被改写（夹具前提不成立）');
+
+      // ⑤ 复制不成功 → fail-closed：目标文档 / state / 报告三处零改动（与 context-scan 同处置）
+      writeFile(dir, '.specs/CONTEXT.md', original);
+      const stateBytes = readStateBytes(dir);
+      const reportFile = path.join(dir, '.specs', 'evolve', today + '-EVOLVE.md');
+      const reportBefore = fs.readFileSync(reportFile);
+      fs.rmSync(backupFile, { force: true });
+      fs.mkdirSync(backupFile);
+      const blocked = runSideScript(SIDE_EVOLVE, ['apply', '2026-10-02-backup#1', '--root', dir], dir);
+      assertExit(blocked, 1);
+      assertOut(blocked, 'BLOCKED');
+      assertEqual(fs.readFileSync(contextFile, 'utf8'), original, '备份失败的 apply 轮改写了 CONTEXT.md');
+      assertStateBytesUnchanged(dir, stateBytes, '备份失败的 apply 轮');
+      assertTrue(fs.readFileSync(reportFile).equals(reportBefore), '备份失败的 apply 轮改写了报告');
+
+      // ⑥ 合成目录反向构造：单实现 → 1；再放第二份 → 2
+      const synthetic = makeTmp();
+      try {
+        writeFile(synthetic, 'single.mjs',
+          "export async function duplicateBackup(file, ts) {\n"
+          + "  const backup = file + '.bak-' + ts;\n"
+          + '  await fs.copyFile(file, backup);\n'
+          + '}\n');
+        assertEqual(inlineBackupHits(synthetic).length, 1, '合成目录单实现检出数');
+        writeFile(synthetic, 'second.mjs',
+          "async function anotherBackup(file, ts) {\n"
+          + "  const backup = file + '.bak-' + ts;\n"
+          + '  await fs.copyFile(file, backup);\n'
+          + '}\n');
+        assertEqual(inlineBackupHits(synthetic).length, 2, '合成目录第二份实现检出数（判据须变红）');
+      } finally {
+        cleanupTmpDir(synthetic);
+      }
+    },
+  },
+
+  // 302: AC-11 的四条时间硬规则文本锚（存在级，但**指真实实体**）：① 分发面技能文本（入口 SKILL
+  // 的侧命令「共同边界」）陈述规则 ①②③；② 验证阶梯（docs/internal/WORKING-METHOD.md 一·五 的
+  // 「环境 / 过程纪律·时间」条）承载规则 ①~③ 并落实 ④（纪律已写入阶梯本身）；③ 文本点名的实体
+  // 在树内真实存在——`time-utils.mjs` 在场且真实定义被点名的判据符号（防锚指向幽灵：散文提到的
+  // 东西必须在树里找得到）。维护者面结构性缺席（CI 全新检出 / worktree）时验证阶梯半边输出可见
+  // SKIP 行（未验证 ≠ 通过），分发面半边恒检。
+  {
+    name: '302 时间纪律四条硬规则文本锚：入口技能陈述 ①②③ + 验证阶梯承载四条 + 点名实体真实在场',
+    run: () => {
+      const skillsRoot = skillsRootForScriptsDir(__dirname);
+      const entrySkill = path.join(skillsRoot, 'flow-comet', 'SKILL.md');
+      const skillText = fs.readFileSync(entrySkill, 'utf8');
+      const skillProblems = timeDisciplineTextProblems('入口 SKILL', skillText);
+      assertEqual(skillProblems.length, 0, '时间纪律文本锚: ' + skillProblems.join(' | '));
+
+      // 反向构造（真实文本逐条移除 · 合成输入驱动同一判据）：任一条规则的关键词被移走 → 该条必报。
+      for (const [rule, tokens] of TIME_DISCIPLINE_RULES) {
+        const stripped = tokens.reduce((text, token) => text.replace(token, '（反向构造：移除）'), skillText);
+        assertTrue(stripped !== skillText, '反向构造前提不成立（入口 SKILL 缺该条关键词）: ' + rule);
+        assertTrue(timeDisciplineTextProblems('入口 SKILL', stripped).some((problem) => problem.includes(rule)),
+          '逐条移除未被判违规（判别力缺失）: ' + rule);
+      }
+
+      if (maintainerFacePresent()) {
+        const ladder = fs.readFileSync(path.join(REPO_ROOT, 'docs/internal/WORKING-METHOD.md'), 'utf8');
+        const ladderProblems = timeDisciplineTextProblems('验证阶梯', ladder);
+        assertEqual(ladderProblems.length, 0, '验证阶梯文本锚: ' + ladderProblems.join(' | '));
+        assertTrue(ladder.includes('环境 / 过程纪律'), '验证阶梯缺「环境 / 过程纪律」条（规则④的落点）');
+        assertTrue(ladder.includes('L-096'), '验证阶梯的时间纪律条未点名 L-096 实证（规则③的依据）');
+      } else {
+        console.log('SKIP: 302 的验证阶梯面（docs/internal/WORKING-METHOD.md 一·五「环境 / 过程纪律」条）'
+          + '——维护者面结构性缺席；本次检出未校验规则 ①~④ 已写入验证阶梯，请在维护者主树重跑本套件');
+      }
+
+      // 点名实体真实在场：time-utils.mjs（规则①②的单一权威）在场，且真实定义被点名的判据符号。
+      const timeUtilsFile = path.join(__dirname, 'time-utils.mjs');
+      assertTrue(fs.existsSync(timeUtilsFile), '入口 SKILL 的时间纪律点名 time-utils.mjs，但树内无此文件（锚指向幽灵实体）');
+      for (const symbol of ['formatLocalTimestamp', 'parseTimestamp']) {
+        assertTrue(engineDefinitionHits(symbol).some((hit) => hit.file === 'time-utils.mjs'),
+          'time-utils.mjs 未定义被点名的判据符号 ' + symbol + '（散文与实现脱节）');
+      }
+    },
+  },
+
+  // 303: 收尾打磨之首——`evolve` 在 **CRLF 文档**上追加「## evolve 元数据」段前不得留裸 LF 行。
+  // 复现形态（评审实测 `-->\r\n\n\r\n---`）：`split('\n')` 对「以换行收尾的文档」留有一个零长度
+  // 哨兵元素，旧实现直接在哨兵之后 push，于是拼出一条**无 `\r` 的空行**（同一文件两种行尾）。
+  // 断言面：整篇每条行都以 CRLF 终结（逐行行号可读）+ 追加块前后形态逐字 + LF 文档对照
+  // （证明修复不是「CRLF 专属补丁」——两种行尾约定下追加块都退化为**单空行**）。
+  {
+    name: '303 侧命令 CRLF 追加块：evolve 追加元数据段零裸 LF 行 · 两种行尾约定形态一致',
+    run: (dir) => {
+      writeFile(dir, '.specs/archive/2026-10-02-crlf/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n### 可复用抽象\n\n- CRLF 夹具条目\n');
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeState(dir, baseState('open'));
+
+      // ① CRLF 文档：夹具本身必须整篇 CRLF（否则「裸 LF」判据的前提不成立）
+      const crlfFixture = contextFixtureText({ tail: '<!-- crlf-tail -->' }).replace(/\n/g, '\r\n');
+      assertEqual(crlfLineViolations(crlfFixture).length, 0, '夹具前提不成立：CRLF 夹具本身含非 CRLF 行');
+      writeFile(dir, '.specs/CONTEXT.md', crlfFixture);
+
+      const applied = runSideScript(SIDE_EVOLVE, ['apply', '2026-10-02-crlf#1', '--root', dir], dir);
+      assertExit(applied, 0);
+      assertOut(applied, 'EVOLVE-OK');
+      const crlfText = fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8');
+      const violations = crlfLineViolations(crlfText);
+      assertEqual(violations.join(','), '',
+        'CRLF 文档追加后出现非 CRLF 行（行号）: ' + violations.join(','));
+      assertTrue(crlfText.includes('<!-- crlf-tail -->\r\n\r\n---\r\n\r\n## evolve 元数据\r\n\r\n'),
+        '追加块前后形态不符（期望单空行 + 全 CRLF）: '
+          + JSON.stringify(crlfText.slice(crlfText.indexOf('<!-- crlf-tail -->'))));
+      // 判别力（合成变异驱动同一判据）：把评审实测的修复前形态灌回真实文本 → 必报
+      const regressed = crlfText.replace('\r\n\r\n---\r\n', '\r\n\n\r\n---\r\n');
+      assertTrue(regressed !== crlfText, '反向构造前提不成立（追加块形态已变）');
+      assertTrue(crlfLineViolations(regressed).length > 0, '裸 LF 行未被判违规（判别力缺失）');
+
+      // ② LF 文档对照：行尾约定不变（单空行 + 全 LF），且不得被写入 CR
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText({ tail: '<!-- lf-tail -->' }));
+      writeState(dir, baseState('open'));
+      const appliedLf = runSideScript(SIDE_EVOLVE, ['apply', '2026-10-02-crlf#1', '--root', dir], dir);
+      assertExit(appliedLf, 0);
+      const lfText = fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8');
+      assertTrue(lfText.includes('<!-- lf-tail -->\n\n---\n\n## evolve 元数据\n\n'),
+        'LF 文档追加块形态回归: ' + JSON.stringify(lfText.slice(lfText.indexOf('<!-- lf-tail -->'))));
+      assertTrue(!lfText.includes('\r'), 'LF 文档被写入 CR（行尾约定不得被改写）');
+    },
+  },
+
+  // 304: 收尾打磨之二——EVOLVE 报告的「## 应用 patch」条目此前是 `  - ` 前缀与条目自带的 `- `
+  // 叠加（`  - - <条目>`）：Markdown 渲染成「空壳父项 + 子项」两条，报告读者数不清应用了几条。
+  // 断言面：报告零 `- -` 双符号行 + 条目行逐字（单符号）+ 父项在场（子项挂在正确的父项下）。
+  {
+    name: '304 EVOLVE 报告条目单一列表符号：零 `- -` 双符号行 · 条目行逐字',
+    run: (dir) => {
+      writeFile(dir, '.specs/archive/2026-10-02-report/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n### 可复用抽象\n\n- 报告条目夹具\n');
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeState(dir, baseState('open'));
+      const applied = runSideScript(SIDE_EVOLVE, ['apply', '2026-10-02-report#1', '--root', dir], dir);
+      assertExit(applied, 0);
+      assertOut(applied, 'EVOLVE-OK');
+
+      const date = requireModuleExport(timeUtilsModule, 'formatLocalDate', 'time-utils.mjs')(new Date());
+      const reportFile = path.join(dir, '.specs', 'evolve', date + '-EVOLVE.md');
+      assertTrue(fs.existsSync(reportFile), 'EVOLVE 报告未落盘: ' + reportFile);
+      const reportText = fs.readFileSync(reportFile, 'utf8');
+      const bulletProblems = evolveReportBulletProblems(reportText);
+      assertEqual(bulletProblems.length, 0, 'EVOLVE 报告列表符号: ' + bulletProblems.join(' | '));
+      assertTrue(reportText.includes('- [2026-10-02-report#1] → `.specs/CONTEXT.md`「既有抽象索引」'),
+        '报告缺应用项的父条目行: ' + JSON.stringify(reportText.slice(reportText.indexOf('## 应用 patch'))));
+      assertTrue(reportText.includes('  - 报告条目夹具 · 来源 @.specs/archive/2026-10-02-report/DESIGN.md'),
+        '报告条目行不是单一列表符号: ' + JSON.stringify(reportText.slice(reportText.indexOf('## 应用 patch'))));
+      // 判别力（合成变异驱动同一判据）：把双符号灌回真实报告 → 必报
+      const regressed = reportText.replace('  - 报告条目夹具', '  - - 报告条目夹具');
+      assertTrue(regressed !== reportText, '反向构造前提不成立（报告缺条目行）');
+      assertTrue(evolveReportBulletProblems(regressed).length > 0, '双列表符号未被判违规（判别力缺失）');
+    },
+  },
+
+  // 305: 收尾打磨之三——`health` 的「技术债表项数」复现命令此前硬编码 H3（`/^### 技术债/`），
+  // 而同一项的判据把段标题层级放宽到二~四级：`## 技术债` 的项目照抄命令复现不出报告读数
+  // （读数说 0，其实段在场有表项）——命令与判据各说一套。
+  // 同一条判据的残留边界（同批收口）：段边界此前按「任意 H1~H4 标题」截断，段内**子标题**之后的
+  // 表格整段丢失（`## 技术债` + `### 明细` 与 `### 技术债` + `#### 明细` 都读成 0 表项）——层级
+  // 必须与段标题自身比较。断言面 = 标题层级 × 有无子标题的**六格矩阵**（H4 + 更深子标题是控制格：
+  // 更深子标题本就不该截断），复现命令的段终点同步改为「同级或更高级标题，或分隔线」而与判据同源。
+  {
+    name: '305 health 技术债段级与段边界按判据动态取：H2/H3/H4 × 子标题六格矩阵 · 段缺席退回区间',
+    run: (dir) => {
+      const withDebt = (heading, sub) => contextFixtureText()
+        + '\n' + heading + '（夹具技术债）\n\n' + (sub === '' ? '' : sub + '\n\n')
+        + '| 项 | 说明 |\n|---|---|\n| 债 A | 说明 A |\n| 债 B | 说明 B |\n';
+      // 复现命令的段级与段终点都取自判据本身（段级 = 文档里真实命中的标题层级；终点 = 同级或更
+      // 高级标题，或分隔线）——命令与读数才是同一件事的两种说法。
+      const reproLine = (bound) => "- 复现命令：`awk 'f&&(/^#{1," + bound
+        + "}[[:space:]]/||/^-{3,}[[:space:]]*$/){exit} /^#{2,4}[[:space:]]*技术债/{f=1} f' .specs/CONTEXT.md"
+        + " | grep -c '^|'`（含表头与分隔行，减去 2 即表项数）";
+
+      for (const [label, heading, sub, bound] of [
+        ['H2', '## 技术债', '', '2'],
+        ['H2-sub', '## 技术债', '### 明细', '2'],
+        ['H3', '### 技术债', '', '3'],
+        ['H3-sub', '### 技术债', '#### 明细', '3'],
+        ['H4', '#### 技术债', '', '4'],
+        ['H4-sub', '#### 技术债', '##### 明细', '4'],
+      ]) {
+        const root = path.join(dir, label.toLowerCase());
+        writeFile(root, '.specs/CONTEXT.md', withDebt(heading, sub));
+        writeFile(root, '.specs/LESSONS.md', '# LESSONS\n\n### L-001 首条\n');
+        const res = runSideScript(SIDE_HEALTH, ['--root', root, '--stdout'], dir);
+        assertExit(res, 0);
+        assertOut(res, '- 表项数：2');
+        assertOut(res, reproLine(bound));
+        if (bound !== '3') assertNotOut(res, reproLine('3'));
+      }
+      // 命令形态已换（段终点须能表达「同级或更高级」）——旧的 `/^---/` 单终点形态不得再出现
+      const h2 = runSideScript(SIDE_HEALTH, ['--root', path.join(dir, 'h2'), '--stdout'], dir);
+      assertNotOut(h2, "- 复现命令：`sed -n ");
+
+      // 段缺席：没有可取的层级 → 退回判据的层级区间（二~四级）形态；读数仍为 0（复现命令成立）
+      const absentRoot = path.join(dir, 'absent');
+      writeFile(absentRoot, '.specs/CONTEXT.md', contextFixtureText());
+      writeFile(absentRoot, '.specs/LESSONS.md', '# LESSONS\n\n### L-001 首条\n');
+      const absent = runSideScript(SIDE_HEALTH, ['--root', absentRoot, '--stdout'], dir);
+      assertExit(absent, 0);
+      assertOut(absent, '- 表项数：0');
+      assertOut(absent, reproLine('4'));
+    },
+  },
+
+  // 306: 验收条款子句的机检锚——「确定性层**每项**都带可复现命令」。此前该子句只由「state 字节
+  // 零改写」间接代表（评审记为锚偏弱）：报告里说「逐项带计数与判据」，但「每项都有复现命令」
+  // 无人核。断言面：确定性层逐项都有 `- 复现命令：` 行（非仓库态与真实 git 仓库态两态）+ 逐项
+  // 抽掉该项的复现命令 → 每抽一次必报（判据不是只看第一项）。
+  {
+    name: '306 health 确定性层每项带复现命令：逐项机检 + 逐项抽掉必报 + git 两态覆盖',
+    run: (dir) => {
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeFile(dir, '.specs/LESSONS.md', '# LESSONS\n\n### L-001 首条\n');
+      const plain = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir);
+      assertExit(plain, 0);
+      assertOut(plain, '### 5 · 版本历史统计（git）');
+      const plainProblems = deterministicReproProblems(plain.output);
+      assertEqual(plainProblems.length, 0, '确定性层缺复现命令: ' + plainProblems.join(' | '));
+
+      // 逐项判别力（合成变异驱动同一判据）：确定性子集逐项各抽掉一次复现命令 → 每次都必报
+      const rows = plain.output.split('\n');
+      const starts = rows.map((line, i) => (line.startsWith('### ') ? i : -1)).filter((i) => i >= 0);
+      assertTrue(starts.length >= 5, '确定性层分项数不足（判据无从覆盖）: ' + starts.length);
+      for (const start of starts) {
+        const nextStart = rows.findIndex((line, i) => i > start && line.startsWith('### '));
+        const stop = nextStart < 0 ? rows.length : nextStart;
+        const at = rows.findIndex((line, i) => i > start && i < stop && line.startsWith('- 复现命令：'));
+        assertTrue(at >= 0, '确定性项缺复现命令: ' + rows[start]);
+        const mutated = [...rows.slice(0, at), ...rows.slice(at + 1)].join('\n');
+        assertTrue(deterministicReproProblems(mutated).length > 0,
+          '抽掉该项复现命令未被判违规（判别力缺失）: ' + rows[start]);
+      }
+
+      // git 在场态：另起一个真实仓库根（`git init`）→ 第 5 项走「是」分支，同样带复现命令
+      const repoRoot = path.join(dir, 'repo-root');
+      writeFile(repoRoot, '.specs/CONTEXT.md', contextFixtureText());
+      writeFile(repoRoot, '.specs/LESSONS.md', '# LESSONS\n\n### L-001 首条\n');
+      execFileSync('git', ['init', '-q'], { cwd: repoRoot, stdio: 'ignore' });
+      const inRepo = runSideScript(SIDE_HEALTH, ['--root', repoRoot, '--stdout'], dir);
+      assertExit(inRepo, 0);
+      assertOut(inRepo, '- git 仓库：是');
+      const repoProblems = deterministicReproProblems(inRepo.output);
+      assertEqual(repoProblems.length, 0, 'git 在场态确定性层缺复现命令: ' + repoProblems.join(' | '));
+    },
+  },
+
+  // 307: 覆盖声明四要素机检锚（评审登记的移交项）——三处「上游 vendored 只读」覆盖声明此前是
+  // **纯文本、无机检**。四要素：① 上游文件标记为只读基准（且点名的上游文件真实在场）；
+  // ② 「不采用」栏 ≥1 条；③ 「沿用上游」栏 ≥1 条（入口为**指针式** → 该栏豁免，细则在各自技能册）；
+  // ④ 「以…为准」兜底语。负向控制：把任一要素从**真实文本**里抽掉 → 必红。
+  {
+    name: '307 上游覆盖声明四要素：三处声明齐备 + 点名上游实体在场 + 逐要素抽掉必红',
+    run: () => {
+      const skillsRoot = skillsRootForScriptsDir(__dirname);
+      const declarations = [
+        { label: 'flow-comet-health/SKILL.md', file: path.join(skillsRoot, 'flow-comet-health', 'SKILL.md'), pointer: false },
+        { label: 'flow-comet-evolve/SKILL.md', file: path.join(skillsRoot, 'flow-comet-evolve', 'SKILL.md'), pointer: false },
+        { label: 'flow-comet/SKILL.md', file: path.join(skillsRoot, 'flow-comet', 'SKILL.md'), pointer: true },
+      ];
+      for (const declaration of declarations) {
+        const text = fs.readFileSync(declaration.file, 'utf8');
+        const problems = overrideDeclarationProblems(declaration.label, text, { pointer: declaration.pointer });
+        assertEqual(problems.length, 0, '覆盖声明四要素: ' + problems.join(' | '));
+
+        // 逐要素抽掉（真实文本驱动同一判据）：该要素必报——判据不恒真空过。
+        // 兜底语取**声明块内**的匹配（文件里别处的 `冲突…以文件为准` 一类行文不是该要素，
+        // 抽错目标会让判别力断言变成假绿）。
+        const probes = [
+          { element: '只读基准', strip: (value) => value.replaceAll('只读基准', '（反向构造：抽掉）') },
+          { element: '不采用栏', strip: (value) => value.replaceAll('不采用', '（反向构造：抽掉）') },
+          {
+            element: '兜底语',
+            strip: (value) => {
+              const blockFallback = OVERRIDE_FALLBACK_RE.exec(overrideDeclarationBlock(value));
+              return value.replace(blockFallback[0], '（反向构造：抽掉）');
+            },
+          },
+        ];
+        if (!declaration.pointer) {
+          probes.push({ element: '沿用上游栏', strip: (value) => value.replaceAll('沿用上游', '（反向构造：抽掉）') });
+        }
+        for (const probe of probes) {
+          const stripped = probe.strip(text);
+          assertTrue(stripped !== text, '反向构造前提不成立（文本缺该要素）: ' + declaration.label + ' / ' + probe.element);
+          assertTrue(overrideDeclarationProblems(declaration.label, stripped, { pointer: declaration.pointer })
+            .some((problem) => problem.includes(probe.element.replace(/栏$/, '')) || problem.includes('兜底语')),
+            '抽掉要素未被判违规（判别力缺失）: ' + declaration.label + ' / ' + probe.element);
+        }
+      }
+
+      // 点名的上游实体真实在场：vendored 上游面结构性缺席时输出可见 SKIP（未验证 ≠ 通过）。
+      // 取「声明块内」点名的路径——文件别处的说明性写法（`flow-kit/prompts/<阶段>.md` 占位）
+      // 不是本声明的落点。
+      const promptsRoot = path.join(REPO_ROOT, 'flow-kit', 'prompts');
+      if (fs.existsSync(promptsRoot)) {
+        for (const declaration of declarations) {
+          const block = overrideDeclarationBlock(fs.readFileSync(declaration.file, 'utf8'));
+          const paths = upstreamArtifactPaths(block);
+          assertTrue(paths.length > 0, declaration.label + ' 未点名任何上游工件（声明的锚缺落点）');
+          for (const rel of paths) {
+            assertTrue(fs.existsSync(path.join(REPO_ROOT, rel)),
+              declaration.label + ' 点名的上游文件不存在（锚指向幽灵实体）: ' + rel);
+          }
+        }
+      } else {
+        console.log('SKIP: 307 的上游实体面（flow-kit/prompts 为 vendored 上游面，可能结构性缺席）'
+          + '——本次检出未校验「覆盖声明点名的上游文件真实在场」，请在 vendored 上游在场处重跑本套件');
+      }
+    },
+  },
+
+  // 308: `last_intel_scan` 双落点一致（原症状顺序 · 真实链路）——先 `context-scan` 建双落点，真实时间
+  // 流逝后再跑 `init --init-context`：state 侧取值必须以**统一形态**（本地时间 + 显式偏移，经
+  // time-utils）写入；段侧不由 init 改写（段行的唯一写通道是 context-scan，其改写与备份实现只有
+  // 一份）；两者取值不一致时**必须有可见提示**并点名收敛命令——修复前是「写 `Z` 形态 + 段未更新 +
+  // 零提示」的静默漂移。反向控制：两处取值一致时零提示（不误报），且未刷新路径不改写既有取值。
+  // 段行夹具 = **真实生成件形态**（取值词元 + 行尾说明，见 INTEL_FIELD_SUFFIX）：读侧若按整行剩余
+  // 文本比对，则同刻同形态（②）与收敛后（⑥）都会恒亮、漂移类别退化成「段内取值不是合法时间戳」
+  // （④）——三条都是本场景的判据；⑦ 单变量对照（只剥掉说明）证明判别条件是词元口径而非说明本身。
+  {
+    name: '308 双落点一致：带行尾说明的段行同刻静默 + 漂移类别正确 + 重扫收敛后零提示 + 单变量对照',
+    run: (dir) => {
+      const parse = requireModuleExport(timeUtilsModule, 'parseTimestamp', 'time-utils.mjs');
+      const extract = requireModuleExport(contextInitModule, 'extractContextStructure', 'context-init.mjs');
+      const readContext = () => fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8');
+      const readLandedState = () => JSON.parse(
+        fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8')).last_intel_scan;
+      // 段侧取值的读取口径与生产侧同源：结构提取定位字段 → 取**取值词元**（写侧只换词元，说明原样保留）
+      const readLandedSection = () => {
+        const field = extract(readContext()).metadata['intel-scan 元数据'];
+        return field === undefined ? undefined : intelFieldToken(field.last_intel_scan.value);
+      };
+
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
+      writeState(dir, baseState('open'));
+
+      // ① 首扫：双落点建立且同刻同形态；段行的行尾说明原样保留（写侧只替换取值词元）
+      const scan = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
+      assertExit(scan, 0);
+      assertOut(scan, 'CONTEXT-SCAN-DONE');
+      const scanned = readLandedState();
+      assertEqual(readLandedSection(), scanned, '首扫后双落点应同刻同形态');
+      assertTrue(readContext().includes(INTEL_FIELD_SUFFIX), '重扫改写了段行的行尾说明（写侧只应替换取值词元）');
+
+      // ② 带行尾说明的同刻同形态 ⇒ **静默**（未刷新路径的 init 不改写既有取值）——整行口径的读侧在此恒亮
+      const quietLanded = runStateWithProtocol(dir, ['init', CHANGE_ID]);
+      assertExit(quietLanded, 0);
+      assertEqual(readLandedState(), scanned, '未刷新路径应原样保留既有扫描时刻');
+      assertNotOut(quietLanded, 'INIT-NOTICE');
+
+      // ③ 真实时间流逝——时间戳是秒级精度，同一秒内的两次写入取值可能相同（漂移不可判）
+      sleepSync(1100);
+
+      // ④ 原症状顺序：`init --init-context`（CONTEXT 校验通过路径 → 记录扫描时刻）
+      const reinit = runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-context']);
+      assertExit(reinit, 0);
+      assertOut(reinit, 'INIT-DONE');
+      const stateAfter = readLandedState();
+      assertTrue(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/.test(stateAfter),
+        'init 写入的扫描时刻形态非「本地时间 + 显式偏移」: ' + stateAfter);
+      assertTrue(parse(stateAfter) > parse(scanned),
+        'init 写入的扫描时刻应晚于首扫（不得回退）: ' + stateAfter + ' vs ' + scanned);
+      assertEqual(readLandedSection(), scanned, 'init 不应改写 CONTEXT 段（该段行的写通道是 context-scan）');
+      // 漂移不得静默：提示在场 + 两侧取值回显 + 点名收敛命令 + **类别正确**（两侧同为「本地时间 +
+      // 显式偏移」形态、仅时刻不同 ⇒ 「刻与形态均不一致」；行尾说明不得把类别打成取值非法）
+      assertOut(reinit, 'INIT-NOTICE');
+      assertOut(reinit, stateAfter);
+      assertOut(reinit, scanned);
+      assertOut(reinit, '刻与形态均不一致');
+      assertNotOut(reinit, '段内取值不是合法时间戳');
+      assertOut(reinit, 'context-scan');
+
+      // ⑤ 收敛：重扫一次 → 双落点同刻同形态（行尾说明原样保留）
+      const converge = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
+      assertExit(converge, 0);
+      assertOut(converge, 'CONTEXT-SCAN-DONE');
+      const converged = readLandedState();
+      assertEqual(readLandedSection(), converged, '重扫后双落点应收敛为同刻同形态');
+      assertTrue(readContext().includes(INTEL_FIELD_SUFFIX), '收敛轮改写了段行的行尾说明');
+
+      // ⑥ 收敛后：取值一致时的 init（未授权刷新 → 原样保留既有扫描时刻）零提示——提示承诺的收敛可达
+      const quiet = runStateWithProtocol(dir, ['init', CHANGE_ID]);
+      assertExit(quiet, 0);
+      assertEqual(readLandedState(), converged, '未刷新路径应原样保留既有扫描时刻');
+      assertNotOut(quiet, 'INIT-NOTICE');
+
+      // ⑦ 单变量对照：**只**剥掉段行的行尾说明（取值词元不变、state 不变）→ 仍然静默——判别条件是
+      //    「取值词元」口径而非「有没有说明」；裸取值行（无说明）是写侧支持的既有形态，须继续正确
+      const bareLine = readContext().replace(INTEL_FIELD_SUFFIX, '');
+      assertTrue(bareLine !== readContext(), '单变量对照前提不成立：段行不含夹具行尾说明');
+      writeFile(dir, '.specs/CONTEXT.md', bareLine);
+      const quietBare = runStateWithProtocol(dir, ['init', CHANGE_ID]);
+      assertExit(quietBare, 0);
+      assertNotOut(quietBare, 'INIT-NOTICE');
+
+      // ⑧ 向后兼容：取值词元带 markdown 引号（`` `…` ``；模板/旧夹具形态）时按词元归一后比对 → 静默
+      writeFile(dir, '.specs/CONTEXT.md',
+        contextFixtureText().replace(INTEL_FIELD_VALUE + INTEL_FIELD_SUFFIX,
+          '`' + converged + '`' + INTEL_FIELD_SUFFIX));
+      const quietQuoted = runStateWithProtocol(dir, ['init', CHANGE_ID]);
+      assertExit(quietQuoted, 0);
+      assertNotOut(quietQuoted, 'INIT-NOTICE');
+    },
+  },
+
+  // 309: 漂移判据的形态边界与反向控制（判别力 + 零误报）——① **同一时刻的两种形态**（state 为历史
+  // `Z` 值、段侧为本地偏移）也判漂移：提示在场且点名形态差异（修复前该形态零提示、state 被原样保留）；
+  // ② 段缺席 = 无可比对面 → 零提示（不无中生有）；③ 段内取值不可解析（占位）→ 仍判漂移（不静默）；
+  // 提示一律不阻断 init（exit 0）；④ 判据输入端的两条命名声明（段名 / 字段名）跨文件逐字一致——
+  // 段行夹具一律**带行尾说明**（真实生成件形态）：整行口径的读侧会让 ① 退化成「取值非法」、③ 的
+  // 类别也由说明决定——故 ① 显式断言「同刻不同形态」且不得落到取值非法类别。
+  // 两处各写一份字面量是本机制的既有形态（单一来源收口须改到写边界外的脚本，见 SUMMARY 的已知接受），
+  // 故此处把「不得静默漂移」机检化：任一侧改名即红，而漂移的后果正是 ② 的静默路径。
+  {
+    name: '309 漂移判据边界：同刻不同形态必报 + 段缺席零误报 + 段内占位取值不静默 + 命名声明跨文件一致',
+    run: (dir) => {
+      const readContext = () => fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8');
+      const readLandedState = () => JSON.parse(
+        fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8')).last_intel_scan;
+
+      // ① state = `Z` 形态（历史写入的真实形态）；段 = 同一时刻的「本地时间 + 显式偏移」，**带行尾说明**
+      //    （真实生成件形态）——两侧同刻 ⇒ 类别必须是「同刻不同形态」，不得退化成取值非法
+      const zForm = '2026-09-24T18:14:23Z';
+      const localForm = '2026-09-25T02:14:23+08:00';
+      writeState(dir, { ...baseState('open'), last_intel_scan: zForm });
+      writeFile(dir, '.specs/CONTEXT.md',
+        contextFixtureText().replace(INTEL_FIELD_VALUE, localForm));
+      const sameMoment = runStateWithProtocol(dir, ['init', CHANGE_ID]);
+      assertExit(sameMoment, 0);
+      assertOut(sameMoment, 'INIT-NOTICE');
+      assertOut(sameMoment, '同刻不同形态');
+      assertNotOut(sameMoment, '段内取值不是合法时间戳');
+      assertOut(sameMoment, zForm);
+      assertOut(sameMoment, localForm);
+      assertEqual(readLandedState(), zForm, '未刷新路径不得改写既有扫描时刻');
+
+      // ② 段缺席（CONTEXT 不含 intel-scan 段）→ 无可比对面 → 零提示
+      writeFile(dir, '.specs/CONTEXT.md', contextFixtureText({ intelSection: false }));
+      const noSection = runStateWithProtocol(dir, ['init', CHANGE_ID + '-no-section']);
+      assertExit(noSection, 0);
+      assertNotOut(noSection, 'INIT-NOTICE');
+
+      // ③ 段内取值词元不可解析（占位形态）→ 仍判漂移且点明该类别（静默放过会让「段侧从未被正确
+      //    写入」长期不可见）；占位词元之后的说明不参与判定（类别由词元决定）
+      writeFile(dir, '.specs/CONTEXT.md',
+        contextFixtureText().replace(INTEL_FIELD_VALUE, '（待扫描）'));
+      const placeholder = runStateWithProtocol(dir, ['init', CHANGE_ID + '-placeholder']);
+      assertExit(placeholder, 0);
+      assertOut(placeholder, 'INIT-NOTICE');
+      assertOut(placeholder, '段内取值不是合法时间戳');
+      assertOut(placeholder, '（待扫描）');
+
+      // ④ 取值词元口径的夹具前提（合成输入 · 纯函数口径）：段行带行尾说明时，结构提取返回的是
+      //    「词元 + 说明」整串——按整行比对会落「取值非法」（缺陷形态），按词元比对才落正确类别
+      //    （类别本身已在 ① 的真实命令面断言）。此处把夹具形态与词元提取钉住：夹具若退回裸词元，
+      //    本锚立即红（防「缺陷形态重新变得不可见」的假绿）。
+      const fieldsWithSuffix = requireModuleExport(contextInitModule, 'extractContextStructure', 'context-init.mjs')(
+        contextFixtureText()).metadata['intel-scan 元数据'].last_intel_scan.value;
+      assertTrue(fieldsWithSuffix.includes(INTEL_FIELD_SUFFIX),
+        '夹具段行未带行尾说明（真实生成件形态前提不成立）: ' + JSON.stringify(fieldsWithSuffix));
+      assertTrue(intelFieldToken(fieldsWithSuffix) === INTEL_FIELD_VALUE,
+        '取值词元口径提取错误: ' + JSON.stringify(intelFieldToken(fieldsWithSuffix)));
+
+      // ⑤ 命名声明跨文件一致（结构锚 + 反向构造）：init 侧按段名 / 字段名定位段内取值，两处声明
+      //    漂移会让判据静默退化成 ② 的「无可比对面」——故两处字面量必须逐字相等，合成改写即红。
+      const consumerText = fs.readFileSync(path.join(__dirname, 'workflow-state.mjs'), 'utf8');
+      const producerText = fs.readFileSync(SIDE_CONTEXT_SCAN, 'utf8');
+      const namingProblems = intelMetadataNameProblems(consumerText, producerText);
+      assertEqual(namingProblems.length, 0, 'intel-scan 命名声明漂移: ' + namingProblems.join(' | '));
+      const tamperedSection = producerText.replace("'intel-scan 元数据'", "'intel-scan 元数据（漂移）'");
+      assertTrue(tamperedSection !== producerText, '反向构造前提不成立：重扫命令侧缺段名字面量声明');
+      assertTrue(intelMetadataNameProblems(consumerText, tamperedSection)
+        .some((problem) => problem.includes('段名字面量两处声明不一致')),
+      '段名漂移未被判定（判别力缺失）');
+      const tamperedField = producerText.replace("'last_intel_scan'", "'last_intel_scan_v2'");
+      assertTrue(tamperedField !== producerText, '反向构造前提不成立：重扫命令侧缺字段名字面量声明');
+      assertTrue(intelMetadataNameProblems(consumerText, tamperedField)
+        .some((problem) => problem.includes('字段名字面量两处声明不一致')),
+      '字段名漂移未被判定（判别力缺失）');
     },
   },
 ];

@@ -1,31 +1,72 @@
 ---
 name: flow-comet-health
-description: "Use only when explicitly invoked as /flow-comet-health; periodic codebase health check: CONTEXT consistency, LESSONS scanning, tech-debt review, redundancy scan. Not part of the 8-node flow."
+description: "Use only when explicitly invoked as /flow-comet-health; periodic codebase health check driven by a deterministic collector (CONTEXT consistency, LESSONS numbering continuity, tech-debt count, redundancy tool probe, git history) plus an optional brooks-lint supplement layer with explicit degradation notes. Not part of the 8-node flow."
 ---
 
 # flow-comet-health（横向命令 · 巡检）
 
 ## 触发
 
-用户说「健康检查 / health / 体检 / 技术债扫描 / 巡检」。
+用户说「健康检查 / health / 体检 / 技术债扫描 / 巡检 / 代码库健康度」。
 
-## 前置依赖
+**只按显式调用触发**：本命令不属于 8 节点流程，不被节点路由进入，也不在流程里自动跑（路由里的到期提示指向的是架构沉淀命令，不是本命令）。
 
-- 装了 brooks-lint → 优先 `/brooks-health`（4 维综合体检；Codex 用 `$brooks-health`）
-- 未装 brooks-lint → 用内置巡检清单降级
+**覆盖声明（上游 vendored 只读）**：上游对应物 = `flow-kit/prompts/M-health.md`（只读基准，不修改）。
+
+**沿用上游**：① 不属于任何 change、不写 `CHANGE.md` / `REQUIREMENT.md`，直接产出健康报告；② 角色边界 = 只产报告 + 改造建议清单，不直接改代码；③ 报告落点 `.specs/health/<YYYY-MM-DD>-HEALTH.md`；④ 装了 `brooks-lint` 时走其体检并把结果并入报告（本仓作为**可选增补层**并入**同一份**报告并标注来源）；⑤ 冗余巡检**优先用工具**（`jscpd` / `knip` / `vulture` 等）并在报告里记明工具落点；⑥ 报告含**技术债优先级（Pain × Spread）**维度。
+
+**以下上游语义不采用**：① 由 agent 现场巡检产出定性结论 → 本仓改为**确定性收集器**（脚本采集可复现项，每项带计数与复现命令）；② 自动改写 `.specs/CONTEXT.md` 技术债段 / 自动开 change → 本仓**只读**（仅写体检报告，不改 CONTEXT、不开 change）；③ 无可选工具时以主观评分填空 → 本仓**显式降级声明**，不产出替代性评分；④ 未装工具时走「现场 grep 抓样」的低精度回退 → 本仓**直接记降级原因**，不产出替代性读数。
+
+本命令语义与报告形态**以本节为准**。
+
+## 分层结构（防「绿报告」）
+
+一份报告三层，落在同一个文件 `.specs/health/<日期>-HEALTH.md`：
+
+| 层 | 内容 | 产出者 |
+|---|---|---|
+| 确定性层 | 项目上下文一致性 · 经验条目编号连续性 · 技术债表项数 · 冗余工具在场判定 · 版本历史统计 | `health.mjs`（逐项带计数与判据） |
+| 增补层 | 代码体检工具的 4 维结果（代码质量 / 架构 / 技术债 / 测试质量） | agent：工具在场时执行体检技能，结果**并入同一份报告**并标注来源 |
+| 降级声明 | 可选工具不在场的原因 + 判据说明 | `health.mjs`（每份报告都有） |
+
+判据只锚「**确定性层完整 + 降级声明可见**」：可选工具缺席不构成失败，但**不能**用主观评分去填它的空位。
 
 ## 流程
 
-1. 读 `.specs/CONTEXT.md` + `.specs/LESSONS.md` + 最近 1 份 `.specs/health/*.md`（对比基线）
-2. 抽样 5 个最近改动频繁的 src/ 模块 + 5 个测试文件 + 最近 30 天 git log
-3. 检查：
-   - CONTEXT 与代码一致性（既有抽象索引是否过期）
-   - LESSONS 是否需新增 / superseded
-   - 技术债项（Pain × Spread 优先级）
-   - 冗余（死代码 / 重复实现）——提示走 jscpd / knip / vulture 工具级扫描
-4. 产出 `.specs/health/<date>.md` 报告 + 更新 CONTEXT 技术债段
+1. 跑确定性收集器（命令路径以安装平台为准，下同）：
 
-## 边界
+   ```bash
+   node .claude/skills/flow-comet/scripts/health.mjs --root . --stdout
+   ```
 
-- 业务代码只读；写入仅限巡检报告（`.specs/health/<date>.md`）与 CONTEXT 技术债段——不自动改业务代码
-- 发现的冗余/债项排入 backlog，不在本命令内修
+   落盘 `.specs/health/<日期>-HEALTH.md`；`--stdout` 打印与落盘**逐字节相同**的内容，便于两次运行对照。
+
+2. 看报告「增补层」的在场判定：
+   - **在场**：执行代码体检技能（`brooks-health`），把 4 维结果填进增补层的四个槽位，并在来源标注行写明命中落点；
+   - **不在场**：保留降级声明，不产出替代性评分——报告以确定性层为全部内容。用户要求定性判断时另走代码审查流程，不把主观分写进这份报告。
+
+3. 读「与上次对比」段：与最近一份**日期不同**的历史报告逐项对读数。首份报告会显式声明「无差异可比」，不是静默省略。
+
+4. 把需要动手的发现整理成改造建议清单交给用户（按优先级分组）。本命令不改代码；要落地时另开 change。
+
+## 复现性纪律
+
+- 报告里每个机器可判项都带计数与判据；同一冻结树连续两次运行，除报告末尾「易变行声明」列出的差异集合（生成时刻行 / 最近 30 天统计行 / 跨日时的文件名与基线选择）外**逐字节一致**。
+- 出现差异集合之外的差异 → 按缺陷处理：先 `git status` 确认是否有人在此期间改了树，再查收集器判据是否引入了环境依赖。
+- 报告由脚本整份重写：agent 填进增补层的内容会在下次运行时被覆盖；需要长期留档时把报告复制到项目自己的归档位置。
+
+## 降级纪律（可选工具）
+
+可选工具（代码体检工具、字面重复块 / 未用导出 / 未用依赖 / 死代码扫描器）**不在依赖面**：缺席、不可用、版本不符，一律走「显式声明原因 + 只出确定性子集」。
+
+- 报告「降级声明」段逐项写明缺席工具与探面（扫描器：`node_modules/.bin/` 与 `PATH`；代码体检工具另含用户级缓存 / 用户技能目录与项目内三平台技能目录）。
+- 工具在场但运行未完成（版本差异 / 平台包装器限制 / 超时）同样记进该段——**不静默降级**，也不让命令失败。
+- 要让某个维度从「未采集」变成「有读数」，装工具后重跑本命令即可：不需要改流程，也不需要改运行状态。
+
+## 只读边界
+
+- **读**：`.specs/CONTEXT.md`、`.specs/LESSONS.md`、`.specs/health/*.md`（基线）、版本历史、可选工具的在场探测。
+- **写**：只写 `.specs/health/<日期>-HEALTH.md` 一份报告。
+- **不写运行状态**：不触碰 `.flow-comet/flow-comet-state.json`，本命令不新增任何状态字段（横向命令不进 change 生命周期）。
+- **不改业务代码**，也不自动改写 `.specs/CONTEXT.md` / `.specs/LESSONS.md`：发现项只进报告与建议清单——就地改写会让「巡检」变成隐式写入通道。
+- **不自动开 change**：是否立项由用户决定。

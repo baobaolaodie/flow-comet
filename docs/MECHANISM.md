@@ -49,6 +49,20 @@ Work runs as a change: artifacts in `.specs/<change-id>/`, a git branch per chan
 
 State is always re-derivable: `status` prints the machine view, `next` prints the node and the command to continue, `advance` forces the state forward when it is genuinely out of step, and `select <change-id>` switches to another change. A node that refuses an exit prints what is missing; the fix is always to add what the message names, never to edit the state file by hand.
 
+## Side commands
+
+Three commands ship with the installed skill tree but stay outside the 8-node flow: `evolve`, `health` and `context-scan`. They work on the project as a whole rather than inside a single change, so they never route, never pass a node's entry or exit gate, and never record node evidence. Nothing triggers them for you either: you invoke them explicitly. `evolve` asks you to approve its candidates one by one before it writes anything; `health` writes its report when you invoke it; and `context-scan` writes its report and its scan metadata when you invoke it.
+
+| Command | Reach for it when | What it leaves behind |
+|---|---|---|
+| `evolve` | Architecture sediment has piled up in archived changes and should be reviewed and folded back into the project's own documents | A report under `.specs/evolve/<YYYY-MM-DD>-EVOLVE.md`, plus the project documents patched for the candidates you approved one by one |
+| `health` | You want a periodic picture of the codebase and its debt before deciding what to pick up | A report under `.specs/health/<YYYY-MM-DD>-HEALTH.md`; the findings are advice, and turning one into work is a separate decision |
+| `context-scan` | The project's context document should be re-probed and compared against the previous scan | A snapshot and the difference list under `.specs/context-scan/<YYYY-MM-DD>-SCAN.md` |
+
+Two boundaries are worth keeping in mind. A side command never moves the workflow on: it records no progress and cannot stand in for a node's artifacts, so it is never a shortcut past a gate. It reports rather than decides as well: `evolve` writes only what you approve item by item, `health` leaves every finding for you to act on, and none of them opens a change on your behalf. The status view adds one line when architecture sediment is due — a reminder that suggests the command and runs nothing by itself.
+
+The protocol composer is the one further side command and is described under [Custom protocols](#custom-protocols); the entry points and the platform-specific command paths are in [Usage](USAGE.md).
+
 ## Custom protocols
 
 `/flow-comet-compose` is a side command (not part of the 8-node flow) that guides you through composing any installed skill into a custom workflow protocol in JSON. The custom protocol is then driven by the same engine — state routing, guard validation and hook interception — with no new runtime capability required. The built-in 8-node protocol remains the default and is not replaced.
