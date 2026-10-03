@@ -15,6 +15,7 @@
 //     首个取值词元，行尾说明文字原样保留；改写该行**之前先落备份**（目标同目录 `.bak-<本地日期>`，
 //     经共享助手落盘；复制不成功即整轮 fail-closed——目标文档与 state 都保持原值）；
 //   · 结构或格式校验不通过时零元数据写入，只输出补齐指引（与首次接入同规则：校验通过才记录扫描时间）；
+//   · state 在场时字段校验先于两次写入——校验不通过则 CONTEXT 段与 state 都保持原值（不留半写）；
 //   · 不新建 state 文件——项目没有接入过就没有状态可更新，输出提示即可，不凭空造状态；
 //   · 工件落 .specs/context-scan/<日期>-SCAN.md；同日重扫覆盖同名工件（覆盖前的内容即本次基线）。
 //
@@ -285,6 +286,15 @@ async function updateScanTimestamp({ root, contextFile, contextText, structure, 
   const contextUpdate = replaceContextTimestamp(contextText, structure, scannedAt);
   if (contextUpdate.text === null) {
     return { ok: false, reason: 'CONTEXT.md 的 `' + INTEL_SECTION + '` 段未更新（' + contextUpdate.reason + '）——state 保持原值，两处仍一致。' };
+  }
+  // state 在场时**先**校验本次要写入的字段（判据 = 写闸门用的同一个 validateStateFields 导出）：
+  // 校验不通过即两处都不动。判据的输入在两次写入之前就齐了——先改文档会把双落点拆成两半
+  // （段侧已指向新扫描时刻、state 侧被拒，段侧那个时刻引擎根本不认，而 state 才是权威侧）。
+  if (stateInfo.exists) {
+    const bad = validateStateFields({ ...stateInfo.state, [INTEL_FIELD]: scannedAt });
+    if (bad.length > 0) {
+      return { ok: false, reason: '引擎 state 字段校验不通过（' + bad.join(', ') + '）——两处均未改写；先修状态再重跑。' };
+    }
   }
   if (contextUpdate.text !== contextText) {
     await backupBeforeWrite(contextFile, scannedAt);

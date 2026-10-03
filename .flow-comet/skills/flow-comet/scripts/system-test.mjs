@@ -6296,6 +6296,46 @@ const TEST_ITEMS = [
       const occurrences = readText(dir, '.specs/CONTEXT.md').split('夹具抽象条目（真实链路）').length - 1;
       assertEqual(occurrences, 1, '重复应用同一候选的条目出现次数（幂等）');
 
+      // 幂等判据不得依赖**当天日期**：标记注释里写的是当次运行的本地日期，隔天重跑时它必然失配；
+      // 而条目文本一旦被人工改写，`body.includes(entry)` 也同时失配 ⇒ 同一候选被二次插入。
+      // 两臂同变异、单变量——对照臂只改条目文本（标记保持当天），处理臂再把标记日期改到过去
+      // （= 隔天重跑的等效输入）：后者若仍幂等，就说明判别依据与日期无关，而对照臂同时证明
+      // 「条目被改写」本身不会让判据失效（不是靠变异把两臂都弄红）。
+      // 变异必须**打断条目文本本身**（在来源标注之前插入）：只往行尾追加的话，`entry` 仍是该行的
+      // 连续子串，`body.includes(entry)` 照旧命中——变异就没碰到要考的那条判据（锚会恒绿）。
+      const editEntry = (text) => {
+        const lines = text.split('\n');
+        const at = lines.findIndex((line) => line.includes('夹具抽象条目（真实链路）'));
+        assertTrue(at >= 0, '反向构造前提不成立（目标段无该条目行）');
+        lines[at] = lines[at].replace(' · 来源 @.specs/', ' · 人工改写 · 来源 @.specs/');
+        assertTrue(lines[at].includes(' · 人工改写 · 来源 @.specs/'),
+          '反向构造前提不成立（条目行未含来源标注，变异无处落点）');
+        return lines.join('\n');
+      };
+      const backdate = (text, date) => {
+        const from = '<!-- flow-comet-evolve ' + localDate() + ':';
+        assertTrue(text.includes(from), '反向构造前提不成立（目标段无当日标记注释）');
+        return text.replace(from, '<!-- flow-comet-evolve ' + date + ':');
+      };
+      const countEntry = () => readText(dir, '.specs/CONTEXT.md').split('夹具抽象条目（真实链路）').length - 1;
+      const edited = editEntry(readText(dir, '.specs/CONTEXT.md'));
+      assertTrue(!edited.includes('- 夹具抽象条目（真实链路） · 来源 @.specs/'),
+        '反向构造前提不成立（条目文本仍是连续子串，entry 判据未被扰动）');
+      writeFile(dir, '.specs/CONTEXT.md', edited);
+      const sameDay = runSideScript(SIDE_EVOLVE, ['apply', '2026-09-10-fixture#1', '--root', dir], dir);
+      assertExit(sameDay, 0);
+      assertOut(sameDay, 'EVOLVE-OK');
+      assertNotOut(sameDay, 'EVOLVE-APPLY: [2026-09-10-fixture#1]');
+      assertEqual(countEntry(), 1, '条目文本被改写后同日重跑：同一候选被二次插入');
+
+      writeFile(dir, '.specs/CONTEXT.md',
+        backdate(editEntry(readText(dir, '.specs/CONTEXT.md')), '2000-01-01'));
+      const crossDay = runSideScript(SIDE_EVOLVE, ['apply', '2026-09-10-fixture#1', '--root', dir], dir);
+      assertExit(crossDay, 0);
+      assertOut(crossDay, 'EVOLVE-OK');
+      assertNotOut(crossDay, 'EVOLVE-APPLY: [2026-09-10-fixture#1]');
+      assertEqual(countEntry(), 1, '跨日重跑同一候选：标记的日期分量失配 → 条目被二次插入');
+
       const stateBefore = readStateBytes(dir);
       const contextBefore = readText(dir, '.specs/CONTEXT.md');
       const unknown = runSideScript(SIDE_EVOLVE, ['apply', 'no-such-id#1', '--root', dir], dir);

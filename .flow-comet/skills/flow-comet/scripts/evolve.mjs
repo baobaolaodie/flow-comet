@@ -26,12 +26,14 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { normalizeHeading } from './route-node.mjs';
+import { readProtocolFile, validateProtocolSchema } from './protocol-utils.mjs';
 import {
   writeFileAtomic,
   backupBeforeWrite,
   EVOLVE_METADATA_SECTION,
   EVOLVE_METADATA_FIELDS,
   resolveProtocolPathWithState,
+  validateStateFields,
   RUNTIME_DIR,
   RUNTIME_STATE_FILE_NAME,
 } from './state-schema.mjs';
@@ -334,6 +336,14 @@ function candidateComment(candidate, ts) {
   return '  <!-- flow-comet-evolve ' + formatLocalDate(parseTimestamp(ts)) + ': from ' + candidate.id + ' -->';
 }
 
+// 幂等判据的「日期无关」身份片段：标记注释的形态是 `<!-- flow-comet-evolve <当次运行的本地日期>:
+// from <id> -->`——日期分量**每次运行都不同**，拿整条注释做包含判定，隔天重跑必然失配；此时若条目
+// 文本又被人工改写过（`body.includes(entry)` 同时失配），同一候选就会被二次插入。判定只取与时刻
+// 无关的身份段：写盘形态不变（既有的旧标记同样被识别，不回改用户文档），判据也不再随日期失效。
+function candidateMarker(candidate) {
+  return ': from ' + candidate.id + ' -->';
+}
+
 function nextSuggestion() {
   return '约 ' + EVOLVE_STALE_DAYS + ' 天后，或新增 ≥ ' + EVOLVE_DUE_NEW_ARCHIVE_CHANGES + ' 个带 §9 内容的 change 之后';
 }
@@ -536,7 +546,7 @@ async function patchDocument(root, doc, entries, ts, scanner, out = console) {
       throw new Error('目标段未找到: ' + candidate.doc + '「' + candidate.label + '」');
     }
     const body = lines.slice(insertion.start + 1, insertion.end).join('\n');
-    if (body.includes(entry) || body.includes(candidateComment(candidate, ts).trim())) {
+    if (body.includes(entry) || body.includes(candidateMarker(candidate))) {
       present.push(candidate);
       continue;
     }
@@ -646,14 +656,46 @@ function writeStateTimestamp(root, ts, state, out = console) {
   }
 }
 
+// state 通道预检（与 validateInsertions 同址、同理由：写入前全验，避免「第一份已写、第二处抛错」的
+// 半成品）。目标文档落盘**不可回滚**，而 state 通道排在文档之后——通道不可用时先写的文档就成了半成品
+// （条目已在场、`## evolve 元数据` 段已推进，state 却停在原值，双落点被拆成两半）。这里在任何文档改动
+// 之前把通道的两条确定性闸门各走一遍：① 协议能不能用（受保护读取 + schema 校验——与子进程
+// workflow-state.mjs 的 main 首两步同源）；② 本次要写入的 state 字段合不合法（validateStateFields——
+// 与子进程 writeState 同一判据）。判据一律**消费单一来源**，本模块不复刻第二份「通道能不能用」的实现。
+// 预检通过后通道仍可能因 I/O 失败（磁盘满 / 权限 / 占用）——那部分不可预判，故失败消息如实分述，
+// 不谎称「零改动」。
+async function preflightStateChannel(root, ts, state) {
+  const resolved = resolveProtocolPathWithState({ packageRoot, runRoot: root, state, cliArgs: [] });
+  let reason = null;
+  let guidance = '按 state.protocolPath > FLOW_COMET_PROTOCOL > 内置默认的顺序解析且不回退候选布局：'
+    + '请修正 state.protocolPath 或把它指向项目内的协议副本后重试';
+  try {
+    validateProtocolSchema(await readProtocolFile(root, resolved.protocolPath));
+  } catch (error) {
+    reason = error && error.message ? error.message : String(error);
+  }
+  if (reason === null) {
+    const projected = { ...(state && typeof state === 'object' ? state : {}), [STATE_KEY]: ts };
+    const bad = validateStateFields(projected);
+    if (bad.length > 0) {
+      reason = 'state 字段校验不通过: ' + bad.join(', ');
+      guidance = '先修正上述 state 字段再重试（本次写入 ' + STATE_KEY + '）';
+    }
+  }
+  if (reason === null) return;
+  fail('state 写入通道失败（写入前预检不通过：' + reason + '）——本次零文档改动（写入前全验，不留半成品）；'
+    + '协议路径来源 ' + resolved.source + '（' + resolved.protocolPath + '），' + guidance);
+}
+
 async function runScan(options, out = console) {
   const plan = await scanProject(options.root);
   await printScan(plan, out);
   return plan;
 }
 
-// 写入前预检：每个候选的目标段都能定位。多目标文档时先全验后写——避免「第一份已写、第二份
-// 抛错」的半成品（预检失败即零改动退出）。
+// 写入前预检（两道，均在**任何文档改动之前**否决，预检失败即零改动退出）：
+//   ① 每个候选的目标段都能定位——多目标文档时先全验后写，避免「第一份已写、第二份抛错」的半成品；
+//   ② state 通道可用（协议 + 字段两条确定性闸门，见 preflightStateChannel）。
 async function validateInsertions(root, requested) {
   const texts = new Map();
   for (const candidate of requested) {
@@ -692,6 +734,8 @@ async function runApply(options, out = console) {
   out.log('EVOLVE: ' + describeWindow(plan));
   await validateInsertions(options.root, requested);
   const ts = nowTimestamp();
+  // 第二道写入前全验：state 通道（文档一旦落盘就不可回滚，通道排在文档之后）
+  await preflightStateChannel(options.root, ts, plan.state);
   const byDoc = new Map();
   for (const candidate of requested) {
     if (!byDoc.has(candidate.doc)) byDoc.set(candidate.doc, []);
