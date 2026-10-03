@@ -8,7 +8,7 @@
 
 本项目的所有显著变更都记录在此文件中。
 
-格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本号记录于九处，由 CI 在发布面对账保持一致：发布 git tag；README 徽章、[docs/VERSIONS-zh.md](docs/VERSIONS-zh.md) 与本文档（各含两种语言）；权威源 `.flow-comet/skills/flow-comet/INSTALLED_VERSION`；以及 npm 包的 `package.json` 的 `version`。
+格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本记录在哪些位置见 [docs/VERSIONS-zh.md](docs/VERSIONS-zh.md)，由 CI 在发布面对账保持一致。
 
 ## [Unreleased]
 
