@@ -51,7 +51,7 @@ State is always re-derivable: `status` prints the machine view, `next` prints th
 
 ## Side commands
 
-Three commands ship with the installed skill tree but stay outside the 8-node flow: `evolve`, `health` and `context-scan`. They work on the project as a whole rather than inside a single change, so they never route, never pass a node's entry or exit gate, and never record node evidence. Nothing triggers them for you either: you invoke them explicitly, and a step that writes asks for your confirmation first.
+Three commands ship with the installed skill tree but stay outside the 8-node flow: `evolve`, `health` and `context-scan`. They work on the project as a whole rather than inside a single change, so they never route, never pass a node's entry or exit gate, and never record node evidence. Nothing triggers them for you either: you invoke them explicitly. `evolve` asks you to approve its candidates one by one before it writes anything; `health` writes its report when you invoke it; and `context-scan` writes its report and its scan metadata when you invoke it.
 
 | Command | Reach for it when | What it leaves behind |
 |---|---|---|
