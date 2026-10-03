@@ -1187,6 +1187,10 @@ function waitForNextSecond() {
 // 七段 CONTEXT 骨架（域语言段带模板表格表头；intel-scan 元数据段三字段齐——结构校验的通过形态）。
 // 与 guard-self-test.mjs 的同名夹具**同形镜像**（两份载体刻意独立、不互相 import：夹具若从被测模块
 // 派生，锚点会退化成同义反复）——改段名 / 字段名时必须两份同改（与词表镜像同纪律）。
+// `last_intel_scan` 行取**真实生成件形态**：取值词元 + 行尾说明（`--init-context` 的生成物即此形；
+// 写侧 `context-scan` 只替换首个取值词元、说明原样保留）——裸取值词元夹具下「读侧取整行剩余文本」
+// 的口径缺陷在本项不可见（见 M7 的单变量对照）。
+const INTEL_FIELD_SUFFIX = ' （首次接入生成时留占位；由 `init --init-context` 或 `context-scan` 记录扫描时间）';
 function contextFixtureText() {
   return [
     '# 项目上下文', '',
@@ -1197,7 +1201,7 @@ function contextFixtureText() {
     '## 默认偏好', '', '- 夹具偏好', '',
     '## 既有抽象索引', '', '- 夹具既有抽象', '',
     '## intel-scan 元数据', '',
-    '- **last_intel_scan**: 2026-09-01T10:00:00+08:00',
+    '- **last_intel_scan**: 2026-09-01T10:00:00+08:00' + INTEL_FIELD_SUFFIX,
     '- **scanner**: flow-comet',
     '- **下次重扫建议**: 3 个月后', '',
   ].join('\n');
@@ -6591,24 +6595,37 @@ const TEST_ITEMS = [
     },
   },
 
+  // M7 扫描时刻双落点真实链路（夹具段行 = 真实生成件形态：取值词元 + 行尾说明）——① 首扫后同刻同
+  // 形态即**静默**（整行口径的读侧在此恒亮）② 真漂移必须提示且**类别正确**（不得误报「段内取值
+  // 不是合法时间戳」）③ 提示点名的 `context-scan` 跑过后，未刷新路径的 `init` **静默**（收敛可达）
+  // ④ 单变量对照：只剥掉行尾说明仍静默（判别条件是词元口径，不是有没有说明）。
   {
-    name: 'M7 扫描时刻双落点真实链路：先扫后 init 的漂移可见 + state 形态统一 + 重扫收敛 + 一致时静默',
+    name: 'M7 扫描时刻双落点真实链路：带说明行同刻静默 + 漂移类别正确 + 重扫收敛 + 单变量对照',
     run: (dir) => {
       const parse = timeUtilsModule.parseTimestamp;
       assertExit(runState(['init', CHANGE_ID, '--init-skip'], dir), 0);
       writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
 
-      // ① 首扫：双落点建立（段侧与 state 同刻同形态）
+      // ① 首扫：双落点建立（段侧与 state 同刻同形态）；段行的行尾说明原样保留（写侧只换取值词元）
       const scan = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
       assertExit(scan, 0);
       assertOut(scan, 'CONTEXT-SCAN-DONE');
       const scanned = readStateFile(dir).last_intel_scan;
       assertTrue(readText(dir, '.specs/CONTEXT.md').includes(scanned), '首扫后段侧应与 state 同刻同形态');
+      assertTrue(readText(dir, '.specs/CONTEXT.md').includes(INTEL_FIELD_SUFFIX),
+        '重扫改写了段行的行尾说明（写侧只应替换取值词元）');
+
+      // ①' 带说明行的同刻同形态 ⇒ 静默（未刷新路径的 init 不改写既有取值）
+      const quietLanded = runState(['init', CHANGE_ID], dir);
+      assertExit(quietLanded, 0);
+      assertEqual(readStateFile(dir).last_intel_scan, scanned, '未刷新路径应原样保留既有扫描时刻');
+      assertNotOut(quietLanded, 'INIT-NOTICE');
 
       // ② 真实时间流逝（跨过下一个秒边界）——秒级精度下同一秒内的两次写入取值可能相同，漂移不可判
       waitForNextSecond();
 
       // ③ 原症状顺序：`init --init-context` 记录扫描时刻——形态统一（本地时间 + 显式偏移）+ 漂移可见
+      //    且类别正确（两侧同为本地+偏移形态、仅时刻不同 ⇒ 「刻与形态均不一致」）
       const reinit = runState(['init', CHANGE_ID, '--init-context'], dir);
       assertExit(reinit, 0);
       assertOut(reinit, 'INIT-DONE');
@@ -6622,9 +6639,11 @@ const TEST_ITEMS = [
       assertOut(reinit, 'INIT-NOTICE');
       assertOut(reinit, stateAfter);
       assertOut(reinit, scanned);
+      assertOut(reinit, '刻与形态均不一致');
+      assertNotOut(reinit, '段内取值不是合法时间戳');
       assertOut(reinit, 'context-scan');
 
-      // ④ 重扫收敛 → 双落点一致；此后未刷新路径的 init 零提示（不误报）
+      // ④ 重扫收敛 → 双落点一致（行尾说明仍在）；此后未刷新路径的 init 零提示（不误报）
       const converge = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
       assertExit(converge, 0);
       assertOut(converge, 'CONTEXT-SCAN-DONE');
@@ -6634,6 +6653,14 @@ const TEST_ITEMS = [
       assertExit(quiet, 0);
       assertEqual(readStateFile(dir).last_intel_scan, converged, '未刷新路径应原样保留既有扫描时刻');
       assertNotOut(quiet, 'INIT-NOTICE');
+
+      // ⑤ 单变量对照：**只**剥掉段行的行尾说明（取值词元不变、state 不变）→ 仍然静默
+      const bare = readText(dir, '.specs/CONTEXT.md').replace(INTEL_FIELD_SUFFIX, '');
+      assertTrue(bare !== readText(dir, '.specs/CONTEXT.md'), '单变量对照前提不成立：段行不含夹具行尾说明');
+      writeFile(dir, '.specs/CONTEXT.md', bare);
+      const quietBare = runState(['init', CHANGE_ID], dir);
+      assertExit(quietBare, 0);
+      assertNotOut(quietBare, 'INIT-NOTICE');
     },
   },
 ];

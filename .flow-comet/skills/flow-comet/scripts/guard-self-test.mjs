@@ -2766,8 +2766,13 @@ function snapshotEntryCount(sectionText) {
 // 与 system-test.mjs 的同名夹具**同形镜像**（两份载体刻意独立、不互相 import：夹具若从被测模块
 // 派生，锚点会退化成同义反复）——改段名 / 字段名时必须两份同改（与词表镜像同纪律）。
 const CONTEXT_BASE_SECTION_NAMES = ['项目概要', '技术栈', '域语言', '已锁决策', '默认偏好', '既有抽象索引'];
+// 段侧扫描时刻的取值与行尾说明：**真实生成件形态**（`--init-context` 的 CONTEXT 生成物 = 取值词元 +
+// 行尾说明；写侧 `context-scan` 只替换首个取值词元、说明原样保留）。夹具取这一形态——裸取值词元
+// 夹具下「读侧取整行剩余文本」的口径缺陷在两级基线下都不可见（见场景 308 的单变量对照）。
+const INTEL_FIELD_VALUE = '2026-09-01T10:00:00+08:00';
+const INTEL_FIELD_SUFFIX = ' （首次接入生成时留占位；由 `init --init-context` 或 `context-scan` 记录扫描时间）';
 const INTEL_METADATA_FIELD_LINES = [
-  '- **last_intel_scan**: `2026-09-01T10:00:00+08:00`',
+  '- **last_intel_scan**: ' + INTEL_FIELD_VALUE + INTEL_FIELD_SUFFIX,
   '- **scanner**: `flow-comet`',
   '- **下次重扫建议**: 3 个月后',
 ];
@@ -2796,6 +2801,13 @@ function contextFixtureText({ evolveSection = null, intelSection = true, tail = 
   if (evolveSection !== null) lines.push('## evolve 元数据', '', ...evolveSection, '');
   if (tail !== '') lines.push(tail, '');
   return lines.join('\n');
+}
+
+// 段侧取值的读取口径：结构提取返回的是**整行剩余文本**（取值词元 + markdown 引号 + 行尾说明），
+// 而写侧（`context-scan` 的 `INTEL_FIELD_LINE`）只替换首个 `(\S+)` 取值词元、说明原样保留——
+// 断言必须与写侧同口径取词元，否则「带说明行」会被判成不一致（本缺陷的成因即读侧取整行）。
+function intelFieldToken(value) {
+  return String(value).trim().split(/\s+/)[0].replace(/^`+/, '').replace(/`+$/, '');
 }
 
 // design 出口 ui-design 门夹具：CHANGE.md 的「视觉调性」段是结构级前端判据的输入面
@@ -14570,10 +14582,10 @@ const SCENARIOS = [
       assertExit(immediate, 0);
       assertOut(immediate, 'CONTEXT-SCAN-DONE');
 
-      // 双落点：state 的 last_intel_scan 与 CONTEXT 段内字段取值一致
+      // 双落点：state 的 last_intel_scan 与 CONTEXT 段内字段**取值词元**一致（夹具段行带行尾说明）
       const structure = requireModuleExport(contextInitModule, 'extractContextStructure', 'context-init.mjs')(
         fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8'));
-      const landed = structure.metadata['intel-scan 元数据'].last_intel_scan.value.replaceAll('`', '');
+      const landed = intelFieldToken(structure.metadata['intel-scan 元数据'].last_intel_scan.value);
       const stateFile = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       assertEqual(stateFile.last_intel_scan, landed, '双落点取值（state 与 CONTEXT 段）');
       assertTrue(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/.test(landed),
@@ -16066,34 +16078,44 @@ const SCENARIOS = [
   // time-utils）写入；段侧不由 init 改写（段行的唯一写通道是 context-scan，其改写与备份实现只有
   // 一份）；两者取值不一致时**必须有可见提示**并点名收敛命令——修复前是「写 `Z` 形态 + 段未更新 +
   // 零提示」的静默漂移。反向控制：两处取值一致时零提示（不误报），且未刷新路径不改写既有取值。
+  // 段行夹具 = **真实生成件形态**（取值词元 + 行尾说明，见 INTEL_FIELD_SUFFIX）：读侧若按整行剩余
+  // 文本比对，则同刻同形态（②）与收敛后（⑥）都会恒亮、漂移类别退化成「段内取值不是合法时间戳」
+  // （④）——三条都是本场景的判据；⑦ 单变量对照（只剥掉说明）证明判别条件是词元口径而非说明本身。
   {
-    name: '308 双落点一致：先扫后 init 的漂移可见 + state 形态统一 + 重扫收敛后零提示',
+    name: '308 双落点一致：带行尾说明的段行同刻静默 + 漂移类别正确 + 重扫收敛后零提示 + 单变量对照',
     run: (dir) => {
       const parse = requireModuleExport(timeUtilsModule, 'parseTimestamp', 'time-utils.mjs');
       const extract = requireModuleExport(contextInitModule, 'extractContextStructure', 'context-init.mjs');
       const readContext = () => fs.readFileSync(path.join(dir, '.specs', 'CONTEXT.md'), 'utf8');
       const readLandedState = () => JSON.parse(
         fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8')).last_intel_scan;
-      // 段侧取值的读取口径与生产侧同源：结构提取定位字段 → 剥掉 markdown 引号（引号不是形态差异）
+      // 段侧取值的读取口径与生产侧同源：结构提取定位字段 → 取**取值词元**（写侧只换词元，说明原样保留）
       const readLandedSection = () => {
         const field = extract(readContext()).metadata['intel-scan 元数据'];
-        return field === undefined ? undefined : field.last_intel_scan.value.replaceAll('`', '');
+        return field === undefined ? undefined : intelFieldToken(field.last_intel_scan.value);
       };
 
       writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
       writeState(dir, baseState('open'));
 
-      // ① 首扫：双落点建立且同刻同形态
+      // ① 首扫：双落点建立且同刻同形态；段行的行尾说明原样保留（写侧只替换取值词元）
       const scan = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
       assertExit(scan, 0);
       assertOut(scan, 'CONTEXT-SCAN-DONE');
       const scanned = readLandedState();
       assertEqual(readLandedSection(), scanned, '首扫后双落点应同刻同形态');
+      assertTrue(readContext().includes(INTEL_FIELD_SUFFIX), '重扫改写了段行的行尾说明（写侧只应替换取值词元）');
 
-      // ② 真实时间流逝——时间戳是秒级精度，同一秒内的两次写入取值可能相同（漂移不可判）
+      // ② 带行尾说明的同刻同形态 ⇒ **静默**（未刷新路径的 init 不改写既有取值）——整行口径的读侧在此恒亮
+      const quietLanded = runStateWithProtocol(dir, ['init', CHANGE_ID]);
+      assertExit(quietLanded, 0);
+      assertEqual(readLandedState(), scanned, '未刷新路径应原样保留既有扫描时刻');
+      assertNotOut(quietLanded, 'INIT-NOTICE');
+
+      // ③ 真实时间流逝——时间戳是秒级精度，同一秒内的两次写入取值可能相同（漂移不可判）
       sleepSync(1100);
 
-      // ③ 原症状顺序：`init --init-context`（CONTEXT 校验通过路径 → 记录扫描时刻）
+      // ④ 原症状顺序：`init --init-context`（CONTEXT 校验通过路径 → 记录扫描时刻）
       const reinit = runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-context']);
       assertExit(reinit, 0);
       assertOut(reinit, 'INIT-DONE');
@@ -16103,24 +16125,45 @@ const SCENARIOS = [
       assertTrue(parse(stateAfter) > parse(scanned),
         'init 写入的扫描时刻应晚于首扫（不得回退）: ' + stateAfter + ' vs ' + scanned);
       assertEqual(readLandedSection(), scanned, 'init 不应改写 CONTEXT 段（该段行的写通道是 context-scan）');
-      // 漂移不得静默：提示在场 + 两侧取值回显 + 点名收敛命令
+      // 漂移不得静默：提示在场 + 两侧取值回显 + 点名收敛命令 + **类别正确**（两侧同为「本地时间 +
+      // 显式偏移」形态、仅时刻不同 ⇒ 「刻与形态均不一致」；行尾说明不得把类别打成取值非法）
       assertOut(reinit, 'INIT-NOTICE');
       assertOut(reinit, stateAfter);
       assertOut(reinit, scanned);
+      assertOut(reinit, '刻与形态均不一致');
+      assertNotOut(reinit, '段内取值不是合法时间戳');
       assertOut(reinit, 'context-scan');
 
-      // ④ 收敛：重扫一次 → 双落点同刻同形态
+      // ⑤ 收敛：重扫一次 → 双落点同刻同形态（行尾说明原样保留）
       const converge = runSideScript(SIDE_CONTEXT_SCAN, ['--root', dir], dir);
       assertExit(converge, 0);
       assertOut(converge, 'CONTEXT-SCAN-DONE');
       const converged = readLandedState();
       assertEqual(readLandedSection(), converged, '重扫后双落点应收敛为同刻同形态');
+      assertTrue(readContext().includes(INTEL_FIELD_SUFFIX), '收敛轮改写了段行的行尾说明');
 
-      // ⑤ 反向控制：取值一致时的 init（未授权刷新 → 原样保留既有扫描时刻）零提示
+      // ⑥ 收敛后：取值一致时的 init（未授权刷新 → 原样保留既有扫描时刻）零提示——提示承诺的收敛可达
       const quiet = runStateWithProtocol(dir, ['init', CHANGE_ID]);
       assertExit(quiet, 0);
       assertEqual(readLandedState(), converged, '未刷新路径应原样保留既有扫描时刻');
       assertNotOut(quiet, 'INIT-NOTICE');
+
+      // ⑦ 单变量对照：**只**剥掉段行的行尾说明（取值词元不变、state 不变）→ 仍然静默——判别条件是
+      //    「取值词元」口径而非「有没有说明」；裸取值行（无说明）是写侧支持的既有形态，须继续正确
+      const bareLine = readContext().replace(INTEL_FIELD_SUFFIX, '');
+      assertTrue(bareLine !== readContext(), '单变量对照前提不成立：段行不含夹具行尾说明');
+      writeFile(dir, '.specs/CONTEXT.md', bareLine);
+      const quietBare = runStateWithProtocol(dir, ['init', CHANGE_ID]);
+      assertExit(quietBare, 0);
+      assertNotOut(quietBare, 'INIT-NOTICE');
+
+      // ⑧ 向后兼容：取值词元带 markdown 引号（`` `…` ``；模板/旧夹具形态）时按词元归一后比对 → 静默
+      writeFile(dir, '.specs/CONTEXT.md',
+        contextFixtureText().replace(INTEL_FIELD_VALUE + INTEL_FIELD_SUFFIX,
+          '`' + converged + '`' + INTEL_FIELD_SUFFIX));
+      const quietQuoted = runStateWithProtocol(dir, ['init', CHANGE_ID]);
+      assertExit(quietQuoted, 0);
+      assertNotOut(quietQuoted, 'INIT-NOTICE');
     },
   },
 
@@ -16128,6 +16171,8 @@ const SCENARIOS = [
   // `Z` 值、段侧为本地偏移）也判漂移：提示在场且点名形态差异（修复前该形态零提示、state 被原样保留）；
   // ② 段缺席 = 无可比对面 → 零提示（不无中生有）；③ 段内取值不可解析（占位）→ 仍判漂移（不静默）；
   // 提示一律不阻断 init（exit 0）；④ 判据输入端的两条命名声明（段名 / 字段名）跨文件逐字一致——
+  // 段行夹具一律**带行尾说明**（真实生成件形态）：整行口径的读侧会让 ① 退化成「取值非法」、③ 的
+  // 类别也由说明决定——故 ① 显式断言「同刻不同形态」且不得落到取值非法类别。
   // 两处各写一份字面量是本机制的既有形态（单一来源收口须改到写边界外的脚本，见 SUMMARY 的已知接受），
   // 故此处把「不得静默漂移」机检化：任一侧改名即红，而漂移的后果正是 ② 的静默路径。
   {
@@ -16137,16 +16182,18 @@ const SCENARIOS = [
       const readLandedState = () => JSON.parse(
         fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8')).last_intel_scan;
 
-      // ① state = `Z` 形态（历史写入的真实形态）；段 = 同一时刻的「本地时间 + 显式偏移」
+      // ① state = `Z` 形态（历史写入的真实形态）；段 = 同一时刻的「本地时间 + 显式偏移」，**带行尾说明**
+      //    （真实生成件形态）——两侧同刻 ⇒ 类别必须是「同刻不同形态」，不得退化成取值非法
       const zForm = '2026-09-24T18:14:23Z';
       const localForm = '2026-09-25T02:14:23+08:00';
       writeState(dir, { ...baseState('open'), last_intel_scan: zForm });
       writeFile(dir, '.specs/CONTEXT.md',
-        contextFixtureText().replace('`2026-09-01T10:00:00+08:00`', localForm));
+        contextFixtureText().replace(INTEL_FIELD_VALUE, localForm));
       const sameMoment = runStateWithProtocol(dir, ['init', CHANGE_ID]);
       assertExit(sameMoment, 0);
       assertOut(sameMoment, 'INIT-NOTICE');
       assertOut(sameMoment, '同刻不同形态');
+      assertNotOut(sameMoment, '段内取值不是合法时间戳');
       assertOut(sameMoment, zForm);
       assertOut(sameMoment, localForm);
       assertEqual(readLandedState(), zForm, '未刷新路径不得改写既有扫描时刻');
@@ -16157,15 +16204,28 @@ const SCENARIOS = [
       assertExit(noSection, 0);
       assertNotOut(noSection, 'INIT-NOTICE');
 
-      // ③ 段内取值不可解析（占位形态）→ 仍判漂移（静默放过会让「段侧从未被正确写入」长期不可见）
+      // ③ 段内取值词元不可解析（占位形态）→ 仍判漂移且点明该类别（静默放过会让「段侧从未被正确
+      //    写入」长期不可见）；占位词元之后的说明不参与判定（类别由词元决定）
       writeFile(dir, '.specs/CONTEXT.md',
-        contextFixtureText().replace('`2026-09-01T10:00:00+08:00`', '`（待扫描）`'));
+        contextFixtureText().replace(INTEL_FIELD_VALUE, '（待扫描）'));
       const placeholder = runStateWithProtocol(dir, ['init', CHANGE_ID + '-placeholder']);
       assertExit(placeholder, 0);
       assertOut(placeholder, 'INIT-NOTICE');
+      assertOut(placeholder, '段内取值不是合法时间戳');
       assertOut(placeholder, '（待扫描）');
 
-      // ④ 命名声明跨文件一致（结构锚 + 反向构造）：init 侧按段名 / 字段名定位段内取值，两处声明
+      // ④ 取值词元口径的夹具前提（合成输入 · 纯函数口径）：段行带行尾说明时，结构提取返回的是
+      //    「词元 + 说明」整串——按整行比对会落「取值非法」（缺陷形态），按词元比对才落正确类别
+      //    （类别本身已在 ① 的真实命令面断言）。此处把夹具形态与词元提取钉住：夹具若退回裸词元，
+      //    本锚立即红（防「缺陷形态重新变得不可见」的假绿）。
+      const fieldsWithSuffix = requireModuleExport(contextInitModule, 'extractContextStructure', 'context-init.mjs')(
+        contextFixtureText()).metadata['intel-scan 元数据'].last_intel_scan.value;
+      assertTrue(fieldsWithSuffix.includes(INTEL_FIELD_SUFFIX),
+        '夹具段行未带行尾说明（真实生成件形态前提不成立）: ' + JSON.stringify(fieldsWithSuffix));
+      assertTrue(intelFieldToken(fieldsWithSuffix) === INTEL_FIELD_VALUE,
+        '取值词元口径提取错误: ' + JSON.stringify(intelFieldToken(fieldsWithSuffix)));
+
+      // ⑤ 命名声明跨文件一致（结构锚 + 反向构造）：init 侧按段名 / 字段名定位段内取值，两处声明
       //    漂移会让判据静默退化成 ② 的「无可比对面」——故两处字面量必须逐字相等，合成改写即红。
       const consumerText = fs.readFileSync(path.join(__dirname, 'workflow-state.mjs'), 'utf8');
       const producerText = fs.readFileSync(SIDE_CONTEXT_SCAN, 'utf8');
