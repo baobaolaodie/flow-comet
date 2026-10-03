@@ -187,7 +187,11 @@ function collectDebt(text) {
   const body = [];
   for (let i = start + 1; i < lines.length; i += 1) {
     const line = lines[i];
-    if (/^#{1,4}[ \t]/.test(line) || /^-{3,}[ \t]*$/.test(line)) break;
+    // 段边界 = 下一个**同级或更高级**标题，或分隔线。层级必须与段标题自身比较：按「任意 H1~H4
+    // 标题」截断会把段内子标题之后的表格整段丢掉——`## 技术债` + `### 明细` 与 `### 技术债` +
+    // `#### 明细` 都被读成 0 表项（深于段标题的子标题属于段内，不是段边界）。
+    const heading = /^(#{1,6})[ \t]/.exec(line);
+    if ((heading !== null && heading[1].length <= level) || /^-{3,}[ \t]*$/.test(line)) break;
     body.push(line);
   }
   const tableRows = body.map((line) => line.trim()).filter((line) => line.startsWith('|'));
@@ -412,11 +416,14 @@ function renderDebtSection(push, debt) {
     for (const item of debt.items.slice(0, DEBT_ITEM_LIMIT)) push('  - ' + item);
     if (debt.items.length > DEBT_ITEM_LIMIT) push('  - ……（仅列前 ' + DEBT_ITEM_LIMIT + ' 项，共 ' + debt.items.length + ' 项）');
   }
-  push('- 判据：段内表格数据行计数（排除表头与分隔行）；段边界 = 下一个标题或分隔线');
-  // 复现命令的段级**按判据动态取**：段在场 = 文档里真实命中的标题层级（判据的层级区间是二~四级）；
-  // 段缺席 = 没有可取的层级，退回该区间形态。两种情况都给出能复现本次读数（0 表项）的命令。
-  const levelToken = debt.exists ? '#'.repeat(debt.level) : '#\\{2,4\\}';
-  push('- 复现命令：`sed -n \'/^' + levelToken + ' 技术债/,/^---/p\' ' + CONTEXT_DISPLAY + ' | grep -c \'^|\'`（含表头与分隔行，减去 2 即表项数）', '');
+  push('- 判据：段内表格数据行计数（排除表头与分隔行）；段边界 = 下一个同级或更高级标题，或分隔线');
+  // 复现命令的段级与段终点都**按判据动态取**：段级 = 文档里真实命中的标题层级（判据的层级区间是
+  // 二~四级）；段终点 = 同级或更高级标题，或分隔线。此前用 `sed` 的单终点 `/^---/` 表达不了「同级或
+  // 更高级标题」——段以标题（而非分隔线）收尾时会把下一段的表格一并数进来，命令与判据各说一套。
+  // 段缺席 = 没有可取的层级，退回该区间的上界。两种情况都给出能复现本次读数的命令。
+  const bound = debt.exists ? String(debt.level) : '4';
+  push('- 复现命令：`awk \'f&&(/^#{1,' + bound + '}[[:space:]]/||/^-{3,}[[:space:]]*$/){exit} '
+    + '/^#{2,4}[[:space:]]*技术债/{f=1} f\' ' + CONTEXT_DISPLAY + ' | grep -c \'^|\'`（含表头与分隔行，减去 2 即表项数）', '');
 }
 
 function renderRedundancySection(push, redundancy, options, selfDisplay) {

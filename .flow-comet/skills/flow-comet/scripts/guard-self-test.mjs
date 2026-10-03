@@ -14609,11 +14609,12 @@ const SCENARIOS = [
     },
   },
 
-  // 283: context-scan 三类边界——① 既有基线不含机器快照 → 显式「无法比对」（不静默省略差异段）；
+  // 283: context-scan 四类边界——① 既有基线不含机器快照 → 显式「无法比对」（不静默省略差异段）；
   // ② 结构校验不通过的一轮零写入且基线不前进（工件与 state 逐字节不变）；③ 未初始化项目 →
-  // INIT-GENERATE 指引 + 零写入 + exit 1。
+  // INIT-GENERATE 指引 + 零写入 + exit 1；④ state 在场但字段非法 → CONTEXT 段零改写
+  // （校验先于两次写入，双落点不被拆成两半）。
   {
-    name: '283 context-scan 边界：旧基线无快照显式无法比对 / BLOCK 轮不推进基线 / 未初始化零写入',
+    name: '283 context-scan 边界：旧基线无快照显式无法比对 / BLOCK 轮不推进基线 / 未初始化零写入 / state 字段非法零改写',
     run: (dir) => {
       writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
       writeState(dir, baseState('open'));
@@ -14651,6 +14652,21 @@ const SCENARIOS = [
       assertOut(freshRes, 'BLOCKED');
       const freshChanges = fingerprintChanges(freshBefore, treeFingerprint(fresh));
       assertEqual(freshChanges.length, 0, '未初始化项目必须零写入，实际树变化: ' + JSON.stringify(freshChanges));
+
+      // ④ state 在场但字段非法（写闸门会拒）：CONTEXT 段必须零改写。校验此前排在 CONTEXT 改写之后
+      //   ⇒ 段侧先落新扫描时刻、state 侧被拒，双落点被拆成两半（且段侧指向引擎根本不认的时刻）。
+      //   与同一命令的损坏态判定（preflight ②：状态不可信 → 零元数据写入）是同一姿态。
+      const badStateRoot = path.join(dir, 'bad-state-field');
+      writeFile(badStateRoot, '.specs/CONTEXT.md', contextFixtureText());
+      writeState(badStateRoot, { ...baseState('open'), executionMode: 'not-a-mode' });
+      const badContextBefore = fs.readFileSync(path.join(badStateRoot, '.specs', 'CONTEXT.md'));
+      const badStateBytes = readStateBytes(badStateRoot);
+      const badStateRes = runSideScript(SIDE_CONTEXT_SCAN, ['--root', badStateRoot], badStateRoot);
+      assertExit(badStateRes, 1);
+      assertOut(badStateRes, 'BLOCKED');
+      assertTrue(fs.readFileSync(path.join(badStateRoot, '.specs', 'CONTEXT.md')).equals(badContextBefore),
+        'state 字段非法的一轮改写了 CONTEXT 段（双落点被拆成两半）');
+      assertStateBytesUnchanged(badStateRoot, badStateBytes, 'context-scan state 字段非法轮');
     },
   },
 
@@ -15398,7 +15414,50 @@ const SCENARIOS = [
       assertOut(broken, 'state.protocolPath');
       assertEqual(readStateBytes(dir), brokenBytes, '绑定损坏的 apply 轮改写了 state');
 
-      // ⑧ 结构锚：本模块不再自持候选布局表；协议路径只经 state-schema 的唯一导出选择；
+      // ⑧ 写入前先验 state 通道（协议闸门）：通道排在文档之后，不预验就有半成品——候选**未应用过**
+      //   （目标文档必然会被改写），绑定指向 schema 非法的根内副本 ⇒ 必须零文档改动、零报告、零 state。
+      const halfRoot = path.join(dir, 'half-write');
+      writeFile(halfRoot, '.specs/CONTEXT.md', contextFixtureText());
+      writeFile(halfRoot, '.specs/archive/2026-10-02-half/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n### 可复用抽象\n\n- 半成品夹具条目\n');
+      fs.writeFileSync(path.join(halfRoot, 'broken-protocol.json'), '{"schemaVersion": 99, "nodes": []}\n', 'utf8');
+      writeState(halfRoot, { ...baseState('open'), protocolPath: 'broken-protocol.json' });
+      const halfContextBefore = fs.readFileSync(path.join(halfRoot, '.specs', 'CONTEXT.md'));
+      const halfStateBefore = readStateBytes(halfRoot);
+      const half = runSideScript(SIDE_EVOLVE, ['apply', '2026-10-02-half#1', '--root', halfRoot], halfRoot,
+        { FLOW_COMET_PROTOCOL: '' });
+      assertExit(half, 1);
+      assertOut(half, 'state 写入通道失败');
+      assertOut(half, 'state.protocolPath');
+      assertTrue(fs.readFileSync(path.join(halfRoot, '.specs', 'CONTEXT.md')).equals(halfContextBefore),
+        'state 通道不可用的 apply 轮改写了目标文档（写入前未验通道 ⇒ 半成品）');
+      assertStateBytesUnchanged(halfRoot, halfStateBefore, 'state 通道不可用的 apply 轮');
+      assertTrue(!fs.existsSync(path.join(halfRoot, '.specs', 'evolve')),
+        'state 通道不可用的 apply 轮落了报告');
+
+      // ⑨ 第二条确定性闸门（state 字段非法）同样必须在文档写入之前拦下——通道预验不能只验协议。
+      //   协议经 state.protocolPath 绑到根内合法副本（这一格只考字段闸门，不考协议闸门）。
+      const fieldRoot = path.join(dir, 'half-write-field');
+      writeFile(fieldRoot, '.specs/CONTEXT.md', contextFixtureText());
+      writeFile(fieldRoot, '.specs/archive/2026-10-02-field/DESIGN.md',
+        '# DESIGN\n\n## 9. 架构沉淀\n\n### 可复用抽象\n\n- 字段闸门夹具条目\n');
+      fs.mkdirSync(path.join(fieldRoot, 'reference'), { recursive: true });
+      fs.copyFileSync(SKILL_PROTOCOL_FILE, path.join(fieldRoot, 'reference', 'workflow-protocol.json'));
+      writeState(fieldRoot, {
+        ...baseState('open'), executionMode: 'not-a-mode', protocolPath: 'reference/workflow-protocol.json',
+      });
+      const fieldContextBefore = fs.readFileSync(path.join(fieldRoot, '.specs', 'CONTEXT.md'));
+      const fieldStateBefore = readStateBytes(fieldRoot);
+      const fieldGate = runSideScript(SIDE_EVOLVE, ['apply', '2026-10-02-field#1', '--root', fieldRoot], fieldRoot,
+        { FLOW_COMET_PROTOCOL: '' });
+      assertExit(fieldGate, 1);
+      assertOut(fieldGate, 'state 写入通道失败');
+      assertOut(fieldGate, 'executionMode');
+      assertTrue(fs.readFileSync(path.join(fieldRoot, '.specs', 'CONTEXT.md')).equals(fieldContextBefore),
+        'state 字段非法的一轮改写了目标文档（写入前未验字段闸门 ⇒ 半成品）');
+      assertStateBytesUnchanged(fieldRoot, fieldStateBefore, 'state 字段非法的 apply 轮');
+
+      // ⑩ 结构锚：本模块不再自持候选布局表；协议路径只经 state-schema 的唯一导出选择；
       //    state 三态读入口两条侧命令共用一个实现（第二份内联即红）
       const evolveText = fs.readFileSync(SIDE_EVOLVE, 'utf8');
       assertTrue(hasNamedImport(evolveText, './state-schema.mjs', 'resolveProtocolPathWithState'),
@@ -15946,26 +16005,43 @@ const SCENARIOS = [
 
   // 305: 收尾打磨之三——`health` 的「技术债表项数」复现命令此前硬编码 H3（`/^### 技术债/`），
   // 而同一项的判据把段标题层级放宽到二~四级：`## 技术债` 的项目照抄命令复现不出报告读数
-  // （读数说 0，其实段在场有表项）——命令与判据各说一套。断言面：命令的层级取自文档里**真实
-  // 命中**的标题（H2 / H3 / H4 三态逐态），段缺席时退回判据的层级区间；H3 形态与修复前逐字等价。
+  // （读数说 0，其实段在场有表项）——命令与判据各说一套。
+  // 同一条判据的残留边界（同批收口）：段边界此前按「任意 H1~H4 标题」截断，段内**子标题**之后的
+  // 表格整段丢失（`## 技术债` + `### 明细` 与 `### 技术债` + `#### 明细` 都读成 0 表项）——层级
+  // 必须与段标题自身比较。断言面 = 标题层级 × 有无子标题的**六格矩阵**（H4 + 更深子标题是控制格：
+  // 更深子标题本就不该截断），复现命令的段终点同步改为「同级或更高级标题，或分隔线」而与判据同源。
   {
-    name: '305 health 技术债复现命令按判据动态取段级：H2/H4 随文档 · 段缺席退回区间 · H3 逐字等价',
+    name: '305 health 技术债段级与段边界按判据动态取：H2/H3/H4 × 子标题六格矩阵 · 段缺席退回区间',
     run: (dir) => {
-      const withDebt = (heading) => contextFixtureText()
-        + '\n' + heading + '（夹具技术债）\n\n| 项 | 说明 |\n|---|---|\n| 债 A | 说明 A |\n| 债 B | 说明 B |\n';
-      const reproLine = (levelToken) => "- 复现命令：`sed -n '/^" + levelToken
-        + " 技术债/,/^---/p' .specs/CONTEXT.md | grep -c '^|'`（含表头与分隔行，减去 2 即表项数）";
+      const withDebt = (heading, sub) => contextFixtureText()
+        + '\n' + heading + '（夹具技术债）\n\n' + (sub === '' ? '' : sub + '\n\n')
+        + '| 项 | 说明 |\n|---|---|\n| 债 A | 说明 A |\n| 债 B | 说明 B |\n';
+      // 复现命令的段级与段终点都取自判据本身（段级 = 文档里真实命中的标题层级；终点 = 同级或更
+      // 高级标题，或分隔线）——命令与读数才是同一件事的两种说法。
+      const reproLine = (bound) => "- 复现命令：`awk 'f&&(/^#{1," + bound
+        + "}[[:space:]]/||/^-{3,}[[:space:]]*$/){exit} /^#{2,4}[[:space:]]*技术债/{f=1} f' .specs/CONTEXT.md"
+        + " | grep -c '^|'`（含表头与分隔行，减去 2 即表项数）";
 
-      for (const [label, heading, token] of [['H3', '### 技术债', '###'], ['H2', '## 技术债', '##'], ['H4', '#### 技术债', '####']]) {
+      for (const [label, heading, sub, bound] of [
+        ['H2', '## 技术债', '', '2'],
+        ['H2-sub', '## 技术债', '### 明细', '2'],
+        ['H3', '### 技术债', '', '3'],
+        ['H3-sub', '### 技术债', '#### 明细', '3'],
+        ['H4', '#### 技术债', '', '4'],
+        ['H4-sub', '#### 技术债', '##### 明细', '4'],
+      ]) {
         const root = path.join(dir, label.toLowerCase());
-        writeFile(root, '.specs/CONTEXT.md', withDebt(heading));
+        writeFile(root, '.specs/CONTEXT.md', withDebt(heading, sub));
         writeFile(root, '.specs/LESSONS.md', '# LESSONS\n\n### L-001 首条\n');
         const res = runSideScript(SIDE_HEALTH, ['--root', root, '--stdout'], dir);
         assertExit(res, 0);
         assertOut(res, '- 表项数：2');
-        assertOut(res, reproLine(token));
-        if (token !== '###') assertNotOut(res, reproLine('###'));
+        assertOut(res, reproLine(bound));
+        if (bound !== '3') assertNotOut(res, reproLine('3'));
       }
+      // 命令形态已换（段终点须能表达「同级或更高级」）——旧的 `/^---/` 单终点形态不得再出现
+      const h2 = runSideScript(SIDE_HEALTH, ['--root', path.join(dir, 'h2'), '--stdout'], dir);
+      assertNotOut(h2, "- 复现命令：`sed -n ");
 
       // 段缺席：没有可取的层级 → 退回判据的层级区间（二~四级）形态；读数仍为 0（复现命令成立）
       const absentRoot = path.join(dir, 'absent');
@@ -15974,7 +16050,7 @@ const SCENARIOS = [
       const absent = runSideScript(SIDE_HEALTH, ['--root', absentRoot, '--stdout'], dir);
       assertExit(absent, 0);
       assertOut(absent, '- 表项数：0');
-      assertOut(absent, reproLine('#\\{2,4\\}'));
+      assertOut(absent, reproLine('4'));
     },
   },
 
