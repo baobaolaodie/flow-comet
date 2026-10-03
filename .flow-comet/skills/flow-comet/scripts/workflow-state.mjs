@@ -6,8 +6,9 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, SKILL_PROTOCOL_FILES, inspectWorkflowPathSegments } from './protocol-utils.mjs';
-import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, looksLikeObjectLiteral, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, toPersistedProtocolPath } from './state-schema.mjs';
-import { probeProject, classify, printDetection, validateContext, printGenerationGuide, skipInit } from './context-init.mjs';
+import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, looksLikeObjectLiteral, writeJsonAtomic, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, toPersistedProtocolPath } from './state-schema.mjs';
+import { isValidTimestamp, daysSince, isArchivedAfterTimestamp, hasSection9, nowTimestamp, parseTimestamp, EVOLVE_STALE_DAYS, EVOLVE_DUE_NEW_ARCHIVE_CHANGES } from './time-utils.mjs';
+import { probeProject, classify, printDetection, validateContext, printGenerationGuide, extractContextStructure, skipInit } from './context-init.mjs';
 import { taskOpeningAttrs, taskBlocks } from './task-parsing.mjs';
 import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, resolveReentryDecision, resolveReplanDecision, analyzeDependencyGraph, findParallelWriteConflicts, isSingleSegmentChangeName, REENTRY_ROUND_LIMIT, REENTRY_TARGET_NODE_IDS, REPLAN_ROUND_LIMIT, EXECUTE_FAMILY_NODE_IDS } from './route-node.mjs';
 
@@ -34,21 +35,10 @@ async function readJson(file) {
   return JSON.parse((await fs.readFile(file, 'utf8')).replace(/^﻿/, ''));
 }
 
-// JSON 写盘统一走原子写：先写同目录临时文件，再 rename 覆盖目标——目标文件要么是旧内容、
-// 要么是新内容，不会出现被截断的半写状态。写失败（磁盘满 / 权限 / 目标被占用）时清理临时文件
-// 后抛出，调用方按 fail-closed 处理。状态下发是单写者形态（机器字段只由脚本通道写），
-// 固定临时名与目标同目录，保证 rename 不跨卷。
-async function writeJson(file, value) {
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  const temporary = file + '.tmp';
-  try {
-    await fs.writeFile(temporary, JSON.stringify(value, null, 2) + '\n', 'utf8');
-    await fs.rename(temporary, file);
-  } catch (error) {
-    try { await fs.rm(temporary, { force: true }); } catch { /* 清理失败不掩盖原始写错误 */ }
-    throw error;
-  }
-}
+// JSON 写盘统一走状态层单一来源的原子写（state-schema.mjs 的 writeJsonAtomic → writeFileAtomic）：
+// 先写同目录临时文件再 rename 覆盖目标——目标要么旧内容、要么新内容，不会出现被截断的半写状态；
+// 写失败（磁盘满 / 权限 / 目标被占用）清理临时文件后抛出，调用方按 fail-closed 处理。mkdir recursive
+// 由该实现承担（.skill-loads/ 等标记目录不存在时创建）；状态下发是单写者形态（机器字段只由脚本通道写）。
 
 async function fileExists(file) {
   try { await fs.access(file); return true; } catch { return false; }
@@ -424,6 +414,58 @@ function printBranchLine(activeChange, branchPrefix = 'change/') {
   }
 }
 
+// ---------- evolve 到期提示（AC-18：达阈值才输出，未达阈值零噪音） ----------
+
+// 该时刻之后归档、且 DESIGN.md 带 §9 的 change 数。归档时刻取目录名日期前缀（flow-kit 约定
+// archive/<YYYY-MM-DD>-<change-id>，该标签随提交固化、跨 clone 稳定）；「归档于何时」与「§9 是否
+// 在场」两个判定都走 time-utils 单一来源——不在本脚本内联第二份表达式（L-067）。
+// 读取失败 / 非目录 / 无 DESIGN.md / 无 §9 一律不计入（不误报）。
+async function countSection9ArchivesSince(timestamp) {
+  const archiveRoot = path.join(specsRoot, 'archive');
+  let entries = [];
+  try {
+    entries = await fs.readdir(archiveRoot, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  let count = 0;
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !isArchivedAfterTimestamp(entry.name, timestamp)) continue;
+    let design = '';
+    try {
+      design = await fs.readFile(path.join(archiveRoot, entry.name, 'DESIGN.md'), 'utf8');
+    } catch {
+      continue;
+    }
+    if (hasSection9(design)) count += 1;
+  }
+  return count;
+}
+
+// 到期提示：`last_evolve_at` 距今 > 60 天，或其后新增 ≥ 5 个带 §9 的归档 change → 输出一行；
+// 否则**不打印任何行**（AC-18 反例锚：未达阈值零噪音）。旧 state 无该字段 = 从未跑过 evolve →
+// 静默（本批不强制未接入 evolve 的项目补字段：无基线可判时不制造噪音）。提示行内不含花括号——
+// status 的 JSON 块按「首个 { 到末个 }」截取（既有消费方 parseStatusJson 同形）。
+async function printEvolveDueHint(state) {
+  const lastEvolveAt = state && typeof state.last_evolve_at === 'string' ? state.last_evolve_at : '';
+  if (!isValidTimestamp(lastEvolveAt)) return;
+  const elapsedDays = daysSince(lastEvolveAt);
+  if (Number.isNaN(elapsedDays)) return;
+  const staleByAge = elapsedDays > EVOLVE_STALE_DAYS;
+  const newArchives = await countSection9ArchivesSince(lastEvolveAt);
+  const staleByCount = newArchives >= EVOLVE_DUE_NEW_ARCHIVE_CHANGES;
+  if (!staleByAge && !staleByCount) return;
+  const reasons = [];
+  if (staleByAge) {
+    reasons.push('距今 ' + Math.floor(elapsedDays) + ' 天，超阈值 ' + EVOLVE_STALE_DAYS + ' 天');
+  }
+  if (staleByCount) {
+    reasons.push('其后新增 ' + newArchives + ' 个带 §9 的归档 change，达阈值 ' + EVOLVE_DUE_NEW_ARCHIVE_CHANGES + ' 个');
+  }
+  console.log('EVOLVE-DUE: 上次架构沉淀 ' + lastEvolveAt + '（' + reasons.join('；')
+    + '）——建议显式调用 evolve（/flow-comet-evolve）同步 CONTEXT.md');
+}
+
 // C6: writeState 写入前校验已知字段类型（fail-closed：非法 → BLOCKED 拒绝写入，不修复不猜测）
 // 未知字段允许（前向兼容）；缺字段允许（readState 默认补）；只校验存在字段的类型。
 // 内置节点常量: 校验表已迁移到 state-schema.mjs（唯一来源），行为与迁移前的内联表完全一致（对第一个非法字段输出后退出）
@@ -433,7 +475,7 @@ async function writeState(state) {
     console.error('BLOCKED: state 字段类型非法: ' + bad[0]);
     process.exit(1);
   }
-  await writeJson(statePath, state);
+  await writeJsonAtomic(statePath, state);
 }
 
 // .specs/ 下必须存在名字「逐字相等」的目录条目（change 名唯一性判据）。大小写不敏感文件系统
@@ -702,6 +744,61 @@ async function runBridgeCheck() {
   }
 }
 
+// ---------- intel-scan 双落点一致性（init 的检测侧） ----------
+// `last_intel_scan` 是**双落点**字段：引擎 state（机器真相、schema 校验）与 `.specs/CONTEXT.md` 的
+// `## intel-scan 元数据` 段（项目可见）。段行的改写——含改写前备份与结构校验——只有 context-scan
+// 一条通道一份实现；init 侧因此**不写段**（在第二处复制段行改写判据必然与前者分叉），只承担两条：
+//   ① 形态对齐：state 侧取值一律经 time-utils 的 nowTimestamp()（本地时间 + 显式偏移），与
+//      context-scan 写入的形态同源；历史 `Z` 形态继续可解析（不迁移）。
+//   ② 漂移可见：写完后与段侧取值比对（口径 = **取值词元**，与段行写通道替换的那个词元同口径）——
+//      不一致（含**同一时刻的两种形态**、段内取值不可解析）即输出可见提示并点名收敛命令；一致则
+//      静默（不误报）；带行尾说明的段行不构成差异（说明由写通道原样保留，不是取值的一部分）。
+const INTEL_SECTION_NAME = 'intel-scan 元数据';
+const INTEL_FIELD_NAME = 'last_intel_scan';
+
+// 段侧取值词元的归一：`extractContextStructure` 返回的是字段行冒号后的**整行剩余文本**
+// （取值词元 + 可选的 markdown 引号 + 可选的行尾说明），而段行的写通道 `context-scan` 按
+// `INTEL_FIELD_LINE = (…)(\S+)([\s\S]*)` 只替换**首个取值词元**、行尾说明原样保留（首次接入的
+// CONTEXT 生成物即「词元 + 说明」形态）。读侧因此必须取同一口径的词元再比对：按整行剩余文本比对时，
+// 带说明的段行与 state 永不相等 ⇒ 同刻同形态也恒亮「不一致」、类别退化成「段内取值不是合法时间戳」，
+// 提示点名的 `context-scan` 收敛承诺不可达（提示噪声化 = 没人看的行）。
+// 空白切分与写侧正则的 `\S+` 同一字符类语义；行结构（段名 / 字段行形态）仍唯一来自
+// extractContextStructure——本函数只做「词元 + 引号」归一，不解析段行（L-067 单一来源）。
+function normalizeIntelFieldValue(value) {
+  return String(value).trim().split(/\s+/)[0].replace(/^`+/, '').replace(/`+$/, '').trim();
+}
+
+// 漂移判定（纯函数）：两侧取值不一致时返回差异类别，一致（或任一侧缺席）返回 null（不误报）。
+function intelScanDriftKind(stateValue, sectionValue) {
+  if (typeof stateValue !== 'string' || typeof sectionValue !== 'string') return null;
+  if (stateValue === sectionValue) return null;
+  const atSection = parseTimestamp(sectionValue);
+  if (Number.isNaN(atSection)) return '段内取值不是合法时间戳';
+  const atState = parseTimestamp(stateValue);
+  if (!Number.isNaN(atState) && atState === atSection) return '同刻不同形态';
+  return '刻与形态均不一致';
+}
+
+// 双落点比对（读盘 + 输出）：段侧文档缺席 / 段或缺字段不在场 = 无可比对面 → 静默（不无中生有）；
+// 检出漂移 → 可见提示（stdout，与 INIT-* 提示同族且不阻断 init），点名两侧取值与收敛命令。
+async function reportIntelScanDrift(contextFile, stateValue) {
+  let contextText;
+  try {
+    contextText = await fs.readFile(contextFile, 'utf8');
+  } catch {
+    return; // 段侧文档不可读 = 无可比对面
+  }
+  const fields = extractContextStructure(contextText).metadata[INTEL_SECTION_NAME];
+  if (!fields || !fields[INTEL_FIELD_NAME]) return; // 段或缺字段不在场 = 无可比对面
+  const landed = normalizeIntelFieldValue(fields[INTEL_FIELD_NAME].value);
+  const kind = intelScanDriftKind(stateValue, landed);
+  if (kind === null) return;
+  console.log('INIT-NOTICE: ' + INTEL_FIELD_NAME + ' 双落点不一致（' + kind + '）——引擎 state = '
+    + stateValue + '；`.specs/CONTEXT.md` 的 `## ' + INTEL_SECTION_NAME + '` 段 = ' + landed
+    + '。本命令只写 state（该段行的写通道是 context-scan）；运行 context-scan 即把两处收敛为'
+    + '同刻同形态（冲突时以 state 为准）。');
+}
+
 async function main() {
   // 协议解析: 协议加载 = resolveProtocol 解析路径 + 受保护读取 + fail-closed schema 校验
   // （读失败/校验失败直接 throw，沿用现有错误处理风格）
@@ -827,12 +924,23 @@ async function main() {
       // 项目级上下文字段跨 change 保留（迁移旧 state；--init-context 刷新扫描时间；--init-skip 记拒绝）
       ...(prevState?.ai_context_doc !== undefined ? { ai_context_doc: prevState.ai_context_doc } : {}),
       ...(initSkip ? { ai_context_doc: 'none' } : {}),
-      // last_intel_scan 仅在校验通过后写入（agent 生成 → 脚本校验 7 段 → 记录扫描时间）
+      // last_intel_scan 仅在校验通过后写入（agent 生成 → 脚本校验 7 段 → 记录扫描时间）；形态一律经
+      // time-utils 的 nowTimestamp()（本地时间 + 显式偏移）——与 context-scan 的落点形态同源，不在本
+      // 脚本内联第二份格式化。段侧**不在本命令的写面内**（该段行的改写与备份只有 context-scan 一份
+      // 实现）：两处取值不一致由 reportIntelScanDrift 检出并给出可见提示，不静默漂移。
       ...(ctxValid === true
-        ? { last_intel_scan: new Date().toISOString() }
-        : (prevState?.last_intel_scan !== undefined ? { last_intel_scan: prevState.last_intel_scan } : {}))
+        ? { last_intel_scan: nowTimestamp() }
+        : (prevState?.last_intel_scan !== undefined ? { last_intel_scan: prevState.last_intel_scan } : {})),
+      // last_evolve_at 同为**项目级**字段（evolve 的跨 change 基线，写通道 = config set）——init 换
+      // change 必须原样保留：丢了它，增量窗口静默退化为全量扫描、到期提示从此不再触发（保留判据与
+      // 上一行同形：字段缺席 = 从未跑过 evolve，不得凭空制造该字段——state-schema 不接受 null）
+      ...(prevState?.last_evolve_at !== undefined ? { last_evolve_at: prevState.last_evolve_at } : {})
     };
     await writeState(state);
+    // 扫描时刻的双落点一致性（state ↔ `.specs/CONTEXT.md` 的 `## intel-scan 元数据` 段）：本命令写
+    // state 后即比对段侧取值——不一致（含同一时刻的两种形态）输出可见提示并点名收敛命令；一致或
+    // 无可比对面则静默（不误报）。段行的写通道只有 context-scan，故此处是检测、不是第二份改写实现。
+    await reportIntelScanDrift(path.join(specsRoot, 'CONTEXT.md'), state.last_intel_scan);
     // init 创建 .specs/<id>/ 目录——文件即真相从 init 起成立，findActiveChange 立即可识别
     //（此前 init 后 next/status 报 No active change，与 SKILL 启动协议 init → next 矛盾）
     const specsChangeDir = path.join(specsRoot, changeName);
@@ -874,6 +982,8 @@ async function main() {
     const changeName = await findActiveChange();
     if (!changeName) {
       console.log(JSON.stringify({ status: 'no-change', message: 'No active change in .specs/' }, null, 2));
+      // 到期提示属**项目级**元数据（与是否有 active change 无关）：无活跃 change 时同样按阈值输出
+      await printEvolveDueHint(await readState());
       return;
     }
     const state = await readState();
@@ -921,6 +1031,7 @@ async function main() {
       newChange: state.newChange === true
     }, null, 2));
     printBranchLine(changeName, state.branchPrefix ?? 'change/');
+    await printEvolveDueHint(state);
     return;
   }
 
@@ -1161,7 +1272,7 @@ async function main() {
     if (promptArg !== null && !protocolUnderFlowKitPrompts(promptArg)) {
       throw new Error('skill-load --prompt 路径必须位于 flow-kit/prompts/ 下（flow-kit 为 vendored 上游，协议提示只读引用）: ' + promptArg);
     }
-    // 声明标记写入：.skill-loads/ 目录不存在时创建（writeJson 自带 mkdir recursive）；
+    // 声明标记写入：.skill-loads/ 目录不存在时创建（writeJsonAtomic 自带 mkdir recursive）；
     // 同 node-skill 重复调用覆盖（记录最新声明）
     const changeName = await findActiveChange();
     if (!changeName) {
@@ -1176,7 +1287,7 @@ async function main() {
     const marker = { node: nodeId, skill: skillName, protocol: promptArg === null ? null : path.basename(promptArg), at: new Date().toISOString() };
     // specsRoot 已含 .specs/，相对路径为 <change-id>/.skill-loads/<node>-<skill>.json
     const markerRel = path.posix.join(changeName, '.skill-loads', nodeId + '-' + skillName + '.json');
-    await writeJson(path.join(specsRoot, markerRel), marker);
+    await writeJsonAtomic(path.join(specsRoot, markerRel), marker);
     console.log('SKILL-LOAD: ' + nodeId + ' ' + skillName + ' → .skill-loads/' + nodeId + '-' + skillName + '.json');
     return;
   }
@@ -1278,7 +1389,7 @@ async function main() {
       // M5 标记目录解析:活动路径优先;change 已归档(活动目录不存在但归档目录存在)
       // 时写归档路径——防重建已归档的活动目录(归档移动语义;与 findSkillLoadsDir 双路径一致)。
       // 跳过条件:活动与归档均无 .skill-loads **且活动 change 目录已不存在**(归档移动后)
-      // ——此时 writeJson 的 mkdir recursive 会把已归档的活动目录残留回来(修复前实测缺陷);
+      // ——此时 writeJsonAtomic 的 mkdir recursive 会把已归档的活动目录残留回来(修复前实测缺陷);
       // 活动 change 目录仍存在(正常流程)时创建 .skill-loads 子目录是 M5 的正常职责,不跳过
       const activeLoadsDir = path.join(specsRoot, markerChange, '.skill-loads');
       let targetLoadsDir = activeLoadsDir;
@@ -1303,7 +1414,7 @@ async function main() {
             // 1-requirement.md 而非节点首文件 0-change.md——修复前所有 skill 都写首文件,
             // 标记的协议归属语义错误;exit 校验只查归属集合故能通过,但标记不可信)
             const skillProtoFiles = SKILL_PROTOCOL_FILES[binding.skill] ?? [];
-            await writeJson(markerFile, {
+            await writeJsonAtomic(markerFile, {
               node: nodeId,
               skill: binding.skill,
               protocol: skillProtoFiles.length > 0 ? skillProtoFiles[0] : null,
@@ -1328,7 +1439,8 @@ async function main() {
   }
 
   if (command === 'config') {
-    // E1: 配置命令——config set <key> <value>；branchMode 只读（init 自动判定），enablePrReview 手动开关
+    // E1: 配置命令——config set <key> <value>；branchMode 只读（init 自动判定），enablePrReview 手动
+    // 开关，last_evolve_at 为 evolve 元数据时刻（形态校验 fail-closed，写通道唯一）
     const sub = process.argv[3];
     const key = process.argv[4];
     const value = process.argv[5];
@@ -1349,7 +1461,21 @@ async function main() {
       console.log('CONFIG: enablePrReview = ' + state.enablePrReview);
       return;
     }
-    console.error('BLOCKED: 未知配置键: ' + key + '（支持: enablePrReview；branchMode 由 init 自动判定）');
+    // evolve 元数据时间戳（脚本不直写 state，项目级字段一律经本通道）。形态非法 → BLOCK
+    // 且**零改写**（校验先于读 state 与写盘；writeState 侧的字段校验表是第二道闸，同一判据）。
+    if (key === 'last_evolve_at') {
+      if (!isValidTimestamp(value)) {
+        console.error('BLOCKED: config set 值非法（last_evolve_at 必须为本地时间 + 显式偏移形态 '
+          + 'YYYY-MM-DDTHH:mm:ss±HH:mm，兼容历史 Z 形态）: ' + value);
+        process.exit(1);
+      }
+      const state = await readState();
+      state.last_evolve_at = value;
+      await writeState(state);
+      console.log('CONFIG: last_evolve_at = ' + state.last_evolve_at);
+      return;
+    }
+    console.error('BLOCKED: 未知配置键: ' + key + '（支持: enablePrReview, last_evolve_at；branchMode 由 init 自动判定）');
     process.exit(1);
   }
 

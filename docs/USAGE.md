@@ -88,7 +88,7 @@ Execution mode defaults to `subagent` (implementation delegated to isolated suba
 | `/flow-comet` | Start or continue the 8-node workflow — routes to the node the artifacts say you are on |
 | `/flow-comet-compose` | Compose installed skills into a custom protocol (side command, not part of the 8-node flow) — see [Custom protocols](MECHANISM.md#custom-protocols) |
 
-The remaining skill directories in the installed tree (`flow-comet-open`, `-design`, `-plan`, `-execute`, `-subagent-execute`, `-review`, `-verify`, `-archive`, …) are the per-node skills the workflow loads as it advances; you do not invoke them directly. Two further skills ship as instruction-only side capabilities without engine support (`flow-comet-evolve`, `flow-comet-health`).
+The remaining skill directories in the installed tree (`flow-comet-open`, `-design`, `-plan`, `-execute`, `-subagent-execute`, `-review`, `-verify`, `-archive`, …) are the per-node skills the workflow loads as it advances; you do not invoke them directly. Three further commands ship with the same tree — `evolve`, `health` and `context-scan` — each backed by a deterministic script on the engine side. They stay outside the 8-node flow and run only when you invoke them explicitly; [Side commands](MECHANISM.md#side-commands) covers what each one does.
 
 ## Decisions and recovery
 

@@ -98,7 +98,7 @@ flow-kit 9 阶段工作流的 workflow-kernel 实现。保留 flow-kit 的全部
 | 节点 | Implementation | Required Calls | Enforcement |
 |------|---------------|----------------|-------------|
 | open | flow-comet-open | flow-comet-change, flow-comet-requirement | guarded |
-| design | flow-comet-design | flow-comet-design, flow-comet-ui-design (advisory，不要求声明) | guarded |
+| design | flow-comet-design | flow-comet-design, flow-comet-ui-design (guarded，仅前端适用——前端须先 skill-load 建标记 + record 载荷带 `required-skill:design.flow-comet-ui-design`；非前端不加载不声明；旧 change 渐进 WARN) | guarded |
 | plan | flow-comet-plan | flow-comet-task | guarded |
 | execute | flow-comet-execute | flow-comet-dev | guarded |
 | subagent-execute | flow-comet-subagent-execute | flow-comet-dev (handoff) | handoff-guarded |
@@ -117,7 +117,9 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <ski
 
 > **跑声明命令 ≠ 加载**：声明只把“哪次会话加载了哪个 skill、按哪份协议工作”写进状态供 exit/record 核对；真正加载只有第 1 步的 Skill 工具能做到。协议的引用示例：execute / subagent-execute 节点加载 flow-comet-dev 时用 `--prompt flow-kit/prompts/4-dev.md`（DEV 阶段协议），交付物按 `flow-kit/templates/SUMMARY.md` 模板填写并补写 `## 自检方法` 段。
 
-节点退出（exit）与证据记录（record）会核对声明标记。声明如实记录执行者动作——加载了哪个 skill、按哪份协议工作——**不等于产出证明**；产出是否正确由产物结构校验与门禁把关。**技能加载前置门**：新 change 的 required 条目不再自动补写——handoff request / record 前必须已有本节点声明标记（先加载、再声明、后干活）；声明标记自动补写仅对旧 change 兜底（按协议 requiredSkillCalls 代记，标记带 `auto: true`），手动声明仍推荐（如实记录加载动作与协议文件）。advisory 条目（如 flow-comet-ui-design，仅前端触发）不要求 skill-load 声明——record 只校验执行者实际声明的条目。
+节点退出（exit）与证据记录（record）会核对声明标记。声明如实记录执行者动作——加载了哪个 skill、按哪份协议工作——**不等于产出证明**；产出是否正确由产物结构校验与门禁把关。**技能加载前置门**：新 change 的 required 条目不再自动补写——handoff request / record 前必须已有本节点声明标记（先加载、再声明、后干活）；声明标记自动补写仅对旧 change 兜底（按协议 requiredSkillCalls 代记，标记带 `auto: true`），手动声明仍推荐（如实记录加载动作与协议文件）。`flow-comet-ui-design` 与协议同等级（`guarded`）且**仅前端适用**：前端 change 须先加载并 `skill-load` 声明、record 载荷带 `required-skill:design.flow-comet-ui-design`（出口不再自动补写）；非前端不加载不声明（出口输出可见的 `UI-DESIGN: skipped（非前端）`）；旧 change 渐进，缺件仅 WARN。前端判据是**结构级**的：`CHANGE.md` 的「视觉调性」段在场，且段内的「不适用」标记成**结构形态**——**独立行**、居**行首**（可带列表符号 / 引用 / 加粗），或写在适用性类标签的**字段值位**；标记之后须成**词形边界**（紧跟空白、标点或行尾），命中即回显**命中片段**。段内其它位置顺带提到「不适用」不算标注，仍判前端。
+
+> **侧命令**：`evolve`（架构沉淀同步）/ `health`（健康巡检）/ `context-scan`（上下文重扫）三条横向命令**不进 8 节点流程**——不路由、不 entry/exit、不写节点证据，一律由用户显式调用；触发词、命令面与落盘产物见主 `SKILL.md` 的「侧命令」小节（单一来源，本文不复述其命令表）。
 
 ## Guardrails And Evidence
 

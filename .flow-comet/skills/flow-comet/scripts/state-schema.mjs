@@ -2,8 +2,10 @@
 // 内置节点常量：自 workflow-state.mjs 的内联表原样迁移，供 workflow-state / workflow-guard / workflow-handoff 三脚本共用。
 // 语义（与迁移前的内联表完全一致）：存在字段逐一校验；未知字段放行（前向兼容）；缺字段放行（readState 默认补）；
 // 只校验存在字段的类型。调用方负责 BLOCKED / exit(1) 处理。
+import { promises as fs } from 'fs';
 import path from 'path';
 import { resolveProtocol } from './protocol-utils.mjs';
+import { formatLocalDate, isValidTimestamp, parseTimestamp } from './time-utils.mjs';
 
 // ---------- 运行时路径常量（单一来源）----------
 // 「状态文件在哪」曾是一个被独立表达在 6 处的决策（协议 state.statePath、workflow-state 默认值、
@@ -19,6 +21,43 @@ export const RUNTIME_STATE_PATH = RUNTIME_DIR + '/' + RUNTIME_STATE_FILE_NAME;
 // 只导出完整相对路径——消费方（guard 的跨命名空间探测）按整文件路径使用，导出裸目录名属于无消费方的
 // 死 API 面（且会诱使调用方自行拼路径，重新引入第二处决策）。
 export const LEGACY_RUNTIME_STATE_PATH = '.comet/' + RUNTIME_STATE_FILE_NAME;
+
+// ---------- 原子写（单一来源） ----------
+// 「同目录固定 `.tmp` + rename + 失败清理」这一写盘策略的**唯一实现**：workflow-state / workflow-handoff /
+// evolve / context-scan 曾各写一份（一次策略修正只落一处，另几处静默漂移）。先写同目录临时文件再 rename
+// 覆盖目标——目标要么旧内容、要么新内容，不会出现被截断的半写状态；固定临时名与目标同目录，保证 rename
+// 不跨卷，故状态下发（单写者形态）不需要按写入者区分临时名。
+// 写失败（磁盘满 / 权限 / 目标被占用）清理临时文件后抛出，调用方按 fail-closed 处理。
+// mkdir recursive 前置由本函数承担：调用方不再各自补目录（旧三份实现里只有一份带 mkdir）。
+export async function writeFileAtomic(file, text) {
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const temporary = file + '.tmp';
+  try {
+    await fs.writeFile(temporary, text, 'utf8');
+    await fs.rename(temporary, file);
+  } catch (error) {
+    try { await fs.rm(temporary, { force: true }); } catch { /* 清理失败不掩盖原始写错误 */ }
+    throw error;
+  }
+}
+
+// JSON 落盘（state / 标记文件）：序列化形态与收敛前逐字一致（2 空格缩进 + 末尾换行）。
+export async function writeJsonAtomic(file, value) {
+  await writeFileAtomic(file, JSON.stringify(value, null, 2) + '\n');
+}
+
+// ---------- 改写前备份（单一来源） ----------
+// 「改写人可见文档之前，先把改写前版本复制到目标同目录的 `<文档>.bak-<本地日期>`」这一决定曾由
+// evolve.mjs 与 context-scan.mjs 各表达一份（同形但两份）：命名族或失败处置一旦演进，只改一侧
+// 即静默分叉——与原子写同址收敛，两个消费方只消费本导出。
+// 语义与收敛前逐字等价：日期分量走 time-utils（本地日期的单一权威；非法时刻抛错 → fail-closed）、
+// 同目录同名（同日重复改写覆盖当日备份，不堆积）、复制失败即抛出（调用方按 fail-closed 处理：
+// 目标文档与 state 都保持原值）。返回值与 writeFileAtomic 同形 = 无（不造无人消费的 API 面）。
+// 调用方负责「取值真变化才备份」——无变化就没有可备份的「改写前版本」。
+export async function backupBeforeWrite(file, timestamp) {
+  const backup = file + '.bak-' + formatLocalDate(parseTimestamp(timestamp));
+  await fs.copyFile(file, backup);
+}
 
 // ---------- 协议来源解析（state 持久化绑定 · 单一权威） ----------
 // init 解析出的协议路径持久化在 state.protocolPath：项目根内 → 根相对 POSIX 形态（随项目迁移），
@@ -95,12 +134,28 @@ export const STATE_FIELD_VALIDATORS = [
   { field: 'ai_context_doc', check: (v) => typeof v === 'string' || v === null },
   // auto-init-detection: 上次全量初始化扫描时间（ISO 日期字符串或 null）
   { field: 'last_intel_scan', check: (v) => typeof v === 'string' || v === null },
+  // evolve 元数据: 上次架构沉淀时刻（本地时间 + 显式偏移，兼容历史 `Z` 形态）。写通道 =
+  // `config set last_evolve_at`——脚本不直写该字段。形态或日历不可自洽的值一律 fail-closed 拒绝
+  // 写入（不修补不猜测，判定单一来源 = time-utils 的 isValidTimestamp）；「从未跑过 evolve」用
+  // **字段缺席**表达，故不接受 null（显式空值会让到期判定与缺席歧义）。
+  // 该字段同时是 `.specs/CONTEXT.md` 的 `## evolve 元数据` 段首字段（段侧字段名见本文件
+  // EVOLVE_METADATA_FIELDS——双落点两处取值必须一致，冲突以 state 为准）。
+  { field: 'last_evolve_at', check: (v) => isValidTimestamp(v) },
   // 协议来源绑定（init 持久化解析后的协议路径；旧 state 缺字段 = 未绑定，归属门禁渐进回退环境变量/默认）
   { field: 'protocolPath', check: (v) => typeof v === 'string' || v === null || v === undefined },
   // 审计历史（事件追加数组）：存在即必须是数组——非数组是审计历史损坏，一律 fail-closed 拒绝写入，
   // 不得由任何写点静默清空覆盖（否则既有事件与轮次派生同时丢失）。旧 state 缺字段 = 空历史（放行）。
   { field: 'history', check: (v) => Array.isArray(v) },
 ];
+
+// ---------- `## evolve 元数据` 段（单一来源） ----------
+// 该段的段名与三字段名**唯一表达处**：写方（evolve.mjs 的双落点段侧）与校验方（context-init.mjs 的
+// CONTEXT 格式校验）都从这里取，不再各自字面量（两处表达必然漂移：校验集合 ⊃ 生产集合时，写方
+// 从不产出的字段名会被静默容差接受）。段是**可选段**：没跑过架构沉淀的项目不补段（缺席不报）。
+// 第三字段是「下次建议」——旧的并行协作期容差别名（「下次同步建议」）**无任何生产者**，已从取值中
+// 移除；旧文档若带该别名会被校验方拦下并给出可见的格式提示（见 context-init.mjs）。
+export const EVOLVE_METADATA_SECTION = 'evolve 元数据';
+export const EVOLVE_METADATA_FIELDS = ['last_evolve_at', 'scanner', '下次建议'];
 
 // 返回非法字段名数组（空 = 合法）。仅校验存在字段；unknown / 缺失字段一律放行。
 export function validateStateFields(state) {

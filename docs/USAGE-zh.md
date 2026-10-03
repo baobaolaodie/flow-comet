@@ -88,7 +88,7 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 | `/flow-comet` | 开始或继续 8 节点工作流——按工件推导当前节点并路由 |
 | `/flow-comet-compose` | 把已安装技能组合成自定义协议（侧命令，不在 8 节点链上）——见[自定义协议](MECHANISM-zh.md#自定义协议) |
 
-安装树里其余的技能目录（`flow-comet-open`、`-design`、`-plan`、`-execute`、`-subagent-execute`、`-review`、`-verify`、`-archive` 等）是工作流推进时按节点加载的技能，不需要你直接调用。另有两个仅以说明形式存在的侧能力（`flow-comet-evolve`、`flow-comet-health`），当前没有引擎支持。
+安装树里其余的技能目录（`flow-comet-open`、`-design`、`-plan`、`-execute`、`-subagent-execute`、`-review`、`-verify`、`-archive` 等）是工作流推进时按节点加载的技能，不需要你直接调用。另有三条侧命令随同一棵技能树分发——`evolve`、`health`、`context-scan`——每条都有引擎侧的确定性脚本支撑。它们都在 8 节点流程之外，只有你显式调用才会执行；各自做什么见[侧命令](MECHANISM-zh.md#侧命令)。
 
 ## 决策与恢复
 
