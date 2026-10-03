@@ -33,10 +33,10 @@
     "release": {
       "authority": "docs/VERSIONS.md",
       "twin": "docs/VERSIONS-zh.md",
-      "sentinel": ["Update CHANGELOG", "Nine places"],
+      "sentinel": ["Update CHANGELOG", "Version record surfaces"],
       "forbidden_in": ["README.md", "CONTRIBUTING.md", "docs/MECHANISM.md"],
       "must_link": ["README.md", "CONTRIBUTING.md"],
-      "why": "Version semantics, the nine surfaces and the release checklist drifted once already (five steps vs seven); contributors are sent here instead of a second copy."
+      "why": "Version semantics, the version record surfaces and the release checklist drifted once already (five steps vs seven); contributors are sent here instead of a second copy. The sentinel phrases stay count-free on purpose: one that carries the count breaks as soon as the count is corrected."
     },
     "behaviour": {
       "authority": "docs/MECHANISM.md",
@@ -81,7 +81,7 @@
   },
   "counts": {
     "policy": "Scenario and item counts may appear only on the README badge line and in the release authority; every other public surface says see VERSIONS instead of repeating a number.",
-    "sentinel": ["badge/version-", "Nine places"],
+    "sentinel": ["badge/version-", "Version record surfaces"],
     "release_authority": ["docs/VERSIONS.md", "docs/VERSIONS-zh.md"]
   },
   "internals": {

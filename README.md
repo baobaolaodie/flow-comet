@@ -162,7 +162,7 @@ flow-comet automates the methodology of [flow-kit](https://github.com/rihebty/fl
 | [Usage](docs/USAGE.md) | The 8-node workflow, the per-node lifecycle and its commands, artifacts, branch mode, execution modes, user entry points |
 | [Core Mechanisms](docs/MECHANISM.md) | The behaviour contract, the three defense layers, guard validation, and custom protocols |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Symptoms grouped by where they bite: installation, first run, a stuck node, platform |
-| [Versions](docs/VERSIONS.md) | Version semantics, the nine version surfaces, and the release checklist |
+| [Versions](docs/VERSIONS.md) | Version semantics, the places that record the version, and the release checklist |
 | [CHANGELOG](CHANGELOG.md) | Per-version history |
 | [Contributing](CONTRIBUTING.md) | Contribution flow and the borrowing boundary |
 | [Security](SECURITY.md) | Reporting a vulnerability |
