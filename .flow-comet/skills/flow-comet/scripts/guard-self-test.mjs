@@ -143,6 +143,10 @@ const SCENARIO_COUNT_FILES_MAINTAINER = [
   'CLAUDE.md',
 ];
 const MAINTAINER_DOC_DIR = 'docs/internal';
+// 本仓 CONTEXT 工件（**流程工件面**：.specs/ 被 gitignore）。存在性即「维护者形态」判据——
+// CI 全新检出 / worktree 下结构性缺席，依赖它的场景须输出**可见 SKIP**（未验证 ≠ 通过），
+// 不得把「文件不在场」当成「校验通过」。与 docs/internal/（MAINTAINER_DOC_DIR）同源缺席。
+const REPO_CONTEXT_FILE = path.join(REPO_ROOT, '.specs', 'CONTEXT.md');
 // 三册显式清单（维护文档机检扫描面；与 docs/internal/*.md、.specs/adr/*.md 并列）：
 // 知识权威累积面，更新频率高——写入即需校验。显式清单（不用 .specs/*.md 通配）可预测、
 // 可按册 allowlist，未来新增册需手工登记（与计数受检清单同纪律）。
@@ -14653,15 +14657,23 @@ const SCENARIOS = [
   // 284: 本仓 CONTEXT 的七段校验 + 可选的 `## evolve 元数据` 段语义——缺席不报（没跑过架构
   // 沉淀的项目不补段）；在场则三字段必须齐（跑过一次却写残的半成品正是要拦的形态）；判据
   // **限定在段内**（别处的同名字段不得让残缺的 evolve 段蒙混过关）。
+  // ① 是本仓真实文件的**维护者形态**断言（.specs/ 被 gitignore）：文件结构性缺席（CI 全新检出 /
+  // worktree）时输出可见 SKIP 行（未验证 ≠ 通过），**在场时判据逐字不变**；②~⑤ 恒检（夹具驱动）。
   {
     name: '284 CONTEXT 七段校验 + evolve 元数据可选段：缺席不报·在场缺一即报·判据限段内',
     run: async () => {
       const validate = requireModuleExport(contextInitModule, 'validateContext', 'context-init.mjs');
 
-      // ① 本仓 CONTEXT.md 通过七段校验（真实文件，非夹具）
-      const repo = await validate(REPO_ROOT);
-      assertEqual(repo.missingSections.length, 0, '本仓 CONTEXT.md 缺段: ' + JSON.stringify(repo.missingSections));
-      assertEqual(repo.formatIssues.length, 0, '本仓 CONTEXT.md 格式问题: ' + JSON.stringify(repo.formatIssues));
+      // ① 本仓 CONTEXT.md 通过七段校验（真实文件，非夹具）——文件缺席即非维护者形态，可见跳过
+      if (fs.existsSync(REPO_CONTEXT_FILE)) {
+        const repo = await validate(REPO_ROOT);
+        assertEqual(repo.missingSections.length, 0, '本仓 CONTEXT.md 缺段: ' + JSON.stringify(repo.missingSections));
+        assertEqual(repo.formatIssues.length, 0, '本仓 CONTEXT.md 格式问题: ' + JSON.stringify(repo.formatIssues));
+      } else {
+        console.log('SKIP: 284 的本仓 CONTEXT 面（.specs/CONTEXT.md 为流程工件面，可能结构性缺席）'
+          + '——本仓 CONTEXT 缺席 = 非维护者形态；本次检出未校验本仓 CONTEXT.md 的七段与 evolve 元数据段语义，'
+          + '请在维护者主树重跑本套件');
+      }
 
       // ② 夹具：七段齐备、evolve 段缺席 → 通过（可选段的缺席不报）
       const project = makeTmp();
