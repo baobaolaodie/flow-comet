@@ -15,8 +15,8 @@ Responsibility: 委托 [P] 并行任务给子代理，要求加载 flow-comet-de
 
 职责分工（趟次协作）：本节点负责**并行委托**（`parallel="true"` 且依赖已满足的任务，同一趟内同时发出）——委托节点可多次往返：每趟委托当时全部依赖已满足的并行任务，趟间由 execute 节点串行消化，直至不存在依赖已满足的可并行 pending 且无串行残留。execute 节点负责**串行委托**（非 parallel 任务，一次一个）。两者共用同一委托证据库（handoff 记录在 subagent-execute evidence）。序列形态不是本节点的关注点：全并行、全串行、串→并、并→串及任意混排均合法（合法性只取决于 `depends_on` 无环且引用存在；依赖环与缺失依赖已在 plan 出口拦截并附恢复指引），到达本节点的任务序列由多趟路由按依赖拓扑自动分趟消化。
 
-> **Codex 平台事实与 flow-comet 当前支持面（2026-09-30 记录）**：**平台事实**——Codex 的常规用法是交互式 CLI（`codex` 无子命令）与会话内 agent，`codex exec` 只是 headless 子面；原生多代理 `multi_agent` 为 stable、默认启用（`codex features list` 可查），本机真实交互式会话日志中记录到 `spawn_agent` / `wait_agent` / `close_agent` 的实际调用——因此「Codex 不能委派 / 不使用并行委托」**不是平台事实**。**已关闭的机制缺口**——本节点此前记录「原生子代理形态未被守卫 / 白名单 / 隔离模型覆盖」的**机制缺口**，已由身份分派（载荷 `agent_id`，ADR-014 决策 2/3）关闭：**三平台均可并行委派，差异只在谁建树**（Codex 无自动建树、默认共享工作区）；headless 子面实测见下（仅 `codex exec`，不得外推）。
-> **并行安全四属性契约（两册同锁 · 逐字一致）**：契约对象是**四属性**，不是 worktree——`worktree` 只是属性①「写权限」的**实现之一**，不是契约本身；「一律 worktree」的口号已作废（ADR-014 决策 1）。三平台在同一判据下平行对等，**唯一差异是「谁建树」**。
+> **Codex 平台事实与 flow-comet 当前支持面（2026-09-30 记录）**：**平台事实**——Codex 的常规用法是交互式 CLI（`codex` 无子命令）与会话内 agent，`codex exec` 只是 headless 子面；原生多代理 `multi_agent` 为 stable、默认启用（`codex features list` 可查），本机真实交互式会话日志中记录到 `spawn_agent` / `wait_agent` / `close_agent` 的实际调用——因此「Codex 不能委派 / 不使用并行委托」**不是平台事实**。**已关闭的机制缺口**——本节点此前记录「原生子代理形态未被守卫 / 白名单 / 隔离模型覆盖」的**机制缺口**，已由身份分派（载荷 `agent_id`）关闭：**三平台均可并行委派，差异只在谁建树**（Codex 无自动建树、默认共享工作区）；headless 子面实测见下（仅 `codex exec`，不得外推）。
+> **并行安全四属性契约（两册同锁 · 逐字一致）**：契约对象是**四属性**，不是 worktree——`worktree` 只是属性①「写权限」的**实现之一**，不是契约本身；「一律 worktree」的口号已作废（本仓决策：契约对象 = 四属性，worktree 降为实现之一）。三平台在同一判据下平行对等，**唯一差异是「谁建树」**。
 >
 > | # | 属性 | 含义 | 满足形态 |
 > |---|------|------|----------|
@@ -30,10 +30,10 @@ Responsibility: 委托 [P] 并行任务给子代理，要求加载 flow-comet-de
 > | 平台 | ① 写权限通道 | 谁建树 | ②③④ |
 > |------|--------------|--------|-------|
 > | **Claude Code** | 身份分派（载荷含 `agent_id`）；`.claude/worktrees/**` 路径前缀为**兼容通道**，不是唯一通道 | harness 可自动建树（`Agent` 工具的 `isolation: "worktree"`——①的一种实现，非强制） | 三平台同形 |
-> | **Codex** | 身份分派（载荷含 `agent_id` / `agent_type`；P9 真机实测：子代理载荷 12 键含 `agent_id`，主线程 10 键不含） | 无自动建树——默认**共享工作区** | 三平台同形 |
+> | **Codex** | 身份分派（载荷含 `agent_id` / `agent_type`；真机实测：子代理载荷 12 键含 `agent_id`，主线程 10 键不含） | 无自动建树——默认**共享工作区** | 三平台同形 |
 > | **dsh** | 身份分派（桥接以环境变量 `FLOW_COMET_AGENT_DEPTH` 透传正整数身份深度；0 / 缺失 = 协调者） | 平台**进程内子代理**，不建树 | 三平台同形 |
 >
-> **判级口径（三态；未覆盖项显式标注、不得写成已支持）**：**证实**——Codex 交互式会话的原生子代理载荷含 `agent_id`（P9 真机）· dsh 身份分派通道 · CC 的 `.claude/worktrees/**` 兼容通道（历史实证）。**推翻**——「Codex 载荷无身份字段」只对 `codex exec` headless 主线程成立，**不得外推**为平台结论。**未覆盖（显式标注，不得写成已支持）**——非 Windows 环境的 Codex 形态 · `agent_type` 取值域 · 嵌套委派载荷 · Codex hook 触发稳定性（实测 3/21；补 `--dangerously-bypass-approvals-and-sandbox` 后 5/5，**不得写成稳定保证**）· CC `isolation: "worktree"` 的真实落点（P1 探针待补）· dsh 子代理能否带独立 cwd（P5 探针待补）。
+> **判级口径（三态；未覆盖项显式标注、不得写成已支持）**：**证实**——Codex 交互式会话的原生子代理载荷含 `agent_id`（2026-10-04/05 真机会话实测）· dsh 身份分派通道 · CC 的 `.claude/worktrees/**` 兼容通道（历史实证）。**推翻**——「Codex 载荷无身份字段」只对 `codex exec` headless 主线程成立，**不得外推**为平台结论。**未覆盖（显式标注，不得写成已支持）**——非 Windows 环境的 Codex 形态 · `agent_type` 取值域 · 嵌套委派载荷 · Codex hook 触发稳定性（实测 3/21；补 `--dangerously-bypass-approvals-and-sandbox` 后 5/5，**不得写成稳定保证**）· CC 隔离树的真实落点探针待补 · dsh 子代理能否带独立 cwd 的探针待补。
 >
 > **dsh 平台委托方式（实测核对）**：dsh 的子代理是平台**进程内子代理**（不创建独立工作区）——写入守卫按**会话身份分派**：桥接**不再短路**，而是把身份深度以环境变量 `FLOW_COMET_AGENT_DEPTH` 透传给守卫（**身份与最小保护集的整条判定统一由守卫拥有**，单一实现）；身份深度为正整数 ⇒ 放行（**最小保护集除外**）、**项目内任意路径可写（含 gitignored）**，因此**无需隔离区**；直接委托即可，不需要 worktree（**无需隔离区 ≠ 无需边界**：`write_files` 互斥与提交时点纪律仍是硬前置）。**通用边界**：同一工作区内的并行子代理会看到彼此未提交的中间态——任务的 `write_files` 边界与提交时点即相互隔离纪律（本节点第 1 步的 write_files 互斥检查因此仍是硬前置）。
 > **旧结论（实测 2026-08-13；证据已不可复核，未纳入 2026-09-30 重测矩阵——不得作为现行结论）**：worktree 的 `.git` 是主仓共享——`workspace-write`/`git-write-access` 沙箱均被 Codex 硬拦截（index.lock / objects / COMMIT_EDITMSG Permission denied）；子代理必须用 `sandbox_mode="danger-full-access"` 才能完成 git 提交（worktree 隔离已限定写范围，full-access 仅用于让 git 提交可行）。**信任边界**：`danger-full-access` 是宿主级信任边界（不隔离凭据/网络访问）——仅委托可信子代理，并移除委托环境中的不必要凭据。以上仅作历史留档；现行结论以探针结论与后续契约为准。
@@ -134,7 +134,7 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
    - **提交面 pathspec 纪律（五要素，见 Guidance 同名小节）**：子代理必须用 `git add -- <自己字面路径>` + `git commit -- <同一路径>`，锁失败重试，禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`（适用条件：**多个写者共享同一工作区**；各自独立工作区内的局部 `reset` / `clean` 不在禁令内）。
    - **集成纪律（四要素，见 Guidance 同名小节）**：协调者集成时优先 `git merge --no-ff`；降级 `cherry-pick` 必须记因；集成顺序按 `depends_on` 拓扑序 + 同层 task id 升序；冲突按**机械冲突 / 语义冲突**两类分别处置（后者必须中止并上抛）。
 
-3. **Delegate to subagents**（三平台同一判据，差异只在谁建树）: **Claude Code 平台**：直接委托子代理——守卫按**身份判据优先于路径判据**放行（载荷含 `agent_id` ⇒ 子代理语义）；`Agent` 工具的 `isolation: "worktree"` 是属性①的一种实现（**可选，非强制**，见「并行安全四属性契约」）；`.claude/worktrees/**` 路径前缀通道仍为兼容通道。**dsh 平台**：直接委托平台进程内子代理——守卫按会话身份分派（身份深度为正整数 ⇒ 放行（**最小保护集除外**）、项目内任意路径可写（含 gitignored）），**无需隔离区**；同一工作区的并行子代理会看到彼此未提交中间态，靠 `write_files` 边界互斥与提交时点作相互隔离纪律（**无需隔离区 ≠ 无需边界**）。**Codex 平台**：直接委托原生子代理（`spawn_agent` 等）——守卫按身份分派放行（P9 真机实测载荷含 `agent_id` / `agent_type`）；默认**共享工作区**，同样靠 `write_files` 边界互斥与提交时点纪律。手工 `git worktree add <任意路径>` **不是受支持路径**、不得作为绕过手段；**不得用 File API 直写等规避通道代替**（绕过写入防线不是受支持路径）。Each subagent (all three platforms):
+3. **Delegate to subagents**（三平台同一判据，差异只在谁建树）: **Claude Code 平台**：直接委托子代理——守卫按**身份判据优先于路径判据**放行（载荷含 `agent_id` ⇒ 子代理语义）；`Agent` 工具的 `isolation: "worktree"` 是属性①的一种实现（**可选，非强制**，见「并行安全四属性契约」）；`.claude/worktrees/**` 路径前缀通道仍为兼容通道。**dsh 平台**：直接委托平台进程内子代理——守卫按会话身份分派（身份深度为正整数 ⇒ 放行（**最小保护集除外**）、项目内任意路径可写（含 gitignored）），**无需隔离区**；同一工作区的并行子代理会看到彼此未提交中间态，靠 `write_files` 边界互斥与提交时点作相互隔离纪律（**无需隔离区 ≠ 无需边界**）。**Codex 平台**：直接委托原生子代理（`spawn_agent` 等）——守卫按身份分派放行（真机实测：载荷含 `agent_id` / `agent_type`）；默认**共享工作区**，同样靠 `write_files` 边界互斥与提交时点纪律。手工 `git worktree add <任意路径>` **不是受支持路径**、不得作为绕过手段；**不得用 File API 直写等规避通道代替**（绕过写入防线不是受支持路径）。Each subagent (all three platforms):
    - Reads TASK.md for its specific task block.
    - Executes the full TDD protocol (RED/GREEN/REFACTOR). **纯文档/纯配置任务无生产代码可测时，`redEvidence` 与 `greenEvidence` 均允许 `{"command":"N/A (non-code task)","output":"..."}` 形态**（guard W1-D 接受此形状；不得伪造测试输出）。
    - Greps existing abstractions (R6.4).

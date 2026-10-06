@@ -56,7 +56,7 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 
 ### 并行安全四属性契约与三平台通道对照表（两册同锁 · 与 subagent-execute 册同句同表）
 
-> **并行安全四属性契约（两册同锁 · 逐字一致）**：契约对象是**四属性**，不是 worktree——`worktree` 只是属性①「写权限」的**实现之一**，不是契约本身；「一律 worktree」的口号已作废（ADR-014 决策 1）。三平台在同一判据下平行对等，**唯一差异是「谁建树」**。
+> **并行安全四属性契约（两册同锁 · 逐字一致）**：契约对象是**四属性**，不是 worktree——`worktree` 只是属性①「写权限」的**实现之一**，不是契约本身；「一律 worktree」的口号已作废（本仓决策：契约对象 = 四属性，worktree 降为实现之一）。三平台在同一判据下平行对等，**唯一差异是「谁建树」**。
 >
 > | # | 属性 | 含义 | 满足形态 |
 > |---|------|------|----------|
@@ -70,10 +70,10 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 > | 平台 | ① 写权限通道 | 谁建树 | ②③④ |
 > |------|--------------|--------|-------|
 > | **Claude Code** | 身份分派（载荷含 `agent_id`）；`.claude/worktrees/**` 路径前缀为**兼容通道**，不是唯一通道 | harness 可自动建树（`Agent` 工具的 `isolation: "worktree"`——①的一种实现，非强制） | 三平台同形 |
-> | **Codex** | 身份分派（载荷含 `agent_id` / `agent_type`；P9 真机实测：子代理载荷 12 键含 `agent_id`，主线程 10 键不含） | 无自动建树——默认**共享工作区** | 三平台同形 |
+> | **Codex** | 身份分派（载荷含 `agent_id` / `agent_type`；真机实测：子代理载荷 12 键含 `agent_id`，主线程 10 键不含） | 无自动建树——默认**共享工作区** | 三平台同形 |
 > | **dsh** | 身份分派（桥接以环境变量 `FLOW_COMET_AGENT_DEPTH` 透传正整数身份深度；0 / 缺失 = 协调者） | 平台**进程内子代理**，不建树 | 三平台同形 |
 >
-> **判级口径（三态；未覆盖项显式标注、不得写成已支持）**：**证实**——Codex 交互式会话的原生子代理载荷含 `agent_id`（P9 真机）· dsh 身份分派通道 · CC 的 `.claude/worktrees/**` 兼容通道（历史实证）。**推翻**——「Codex 载荷无身份字段」只对 `codex exec` headless 主线程成立，**不得外推**为平台结论。**未覆盖（显式标注，不得写成已支持）**——非 Windows 环境的 Codex 形态 · `agent_type` 取值域 · 嵌套委派载荷 · Codex hook 触发稳定性（实测 3/21；补 `--dangerously-bypass-approvals-and-sandbox` 后 5/5，**不得写成稳定保证**）· CC `isolation: "worktree"` 的真实落点（P1 探针待补）· dsh 子代理能否带独立 cwd（P5 探针待补）。
+> **判级口径（三态；未覆盖项显式标注、不得写成已支持）**：**证实**——Codex 交互式会话的原生子代理载荷含 `agent_id`（2026-10-04/05 真机会话实测）· dsh 身份分派通道 · CC 的 `.claude/worktrees/**` 兼容通道（历史实证）。**推翻**——「Codex 载荷无身份字段」只对 `codex exec` headless 主线程成立，**不得外推**为平台结论。**未覆盖（显式标注，不得写成已支持）**——非 Windows 环境的 Codex 形态 · `agent_type` 取值域 · 嵌套委派载荷 · Codex hook 触发稳定性（实测 3/21；补 `--dangerously-bypass-approvals-and-sandbox` 后 5/5，**不得写成稳定保证**）· CC 隔离树的真实落点探针待补 · dsh 子代理能否带独立 cwd 的探针待补。
 
 ### 提交面 pathspec 纪律（五要素 · 带适用条件 · 两册同锁 · 逐字一致）
 
