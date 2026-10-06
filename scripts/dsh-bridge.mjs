@@ -16,6 +16,11 @@
 //      spawn cwd 必须 = 会话项目根（相对 file_path 按 cwd 解析——
 //      cwd≠项目根会 fail-open；不得以设 env 替代 cwd）。协议文件天然在
 //      项目内（skill 包 reference/ 随树复制）——无需 FLOW_COMET_PROTOCOL 机制。
+//   5.5 身份信号透传（「D9 实现位置修订」/ ADR-014 决策 5）：spawn 时注入 env
+//      FLOW_COMET_AGENT_DEPTH = agentDepth(exec) 的数字字符串（0 = 协调者/缺失，
+//      正整数 = 子代理）。身份判定与最小保护集的**整条判据由守卫独占实现**；
+//      桥接只搬运信号，不判保护集、不复制白名单逻辑（L-067 单一权威）。
+//      子代理因此不在桥接侧短路：一律过守卫（AC-20 豁免收窄）。
 //   6. 决策映射：exit 0 → next() 放行；exit 2 → deny（BLOCK 消息 + 恢复指引
 //      透传）；其它/异常 → fail-closed deny + WARN。
 //
@@ -23,7 +28,8 @@
 //   - 不注册 fs/write-intent 槽位（single-slot 守卫瀑布无 deny 面，
 //     不 shadow 官方 dsh-fs-observation-policy）；
 //   - 不做 fs/observed 审计（v1 极薄）；
-//   - 不做技能注册/AGENTS.md 注入（安装器职责）。
+//   - 不做技能注册/AGENTS.md 注入（安装器职责）；
+//   - 不做身份 / 保护集判定（守卫是唯一判定实现——本文件只透传 depth 信号）。
 //
 // 纯 ESM、零第三方依赖，仅使用 Node.js 内置模块。dsh 官方插件形态：
 // ESM 模块导出 { name, apply }，ctx 由 dsh 注入。
@@ -222,12 +228,12 @@ export function sessionCwd(exec) {
   return null;
 }
 
-// 代理身份分派（dsh 子代理=执行者）：dsh 子代理 spawn/fork provider 的
+// 代理身份读取（dsh 子代理=执行者）：dsh 子代理 spawn/fork provider 的
 // childSessionMeta 把 delegationDepth=parentDepth+1 写入子代理 session header
 // （dsh-subagent 源码锚定，rc.6）——协调者=0/缺失，子代理>0。从 exec.agent.session
-// 读取（与 sessionCwd 同级字段），供监听侧区分执行者与协调者——子代理写源码是
-// 执行者职责（对应 CC worktree 子代理物理自由写），协调者走 guard 白名单拦截。
-// 非法值（NaN/负数/字符串/null/缺字段）一律按协调者处理（fail-closed 语义）。
+// 读取（与 sessionCwd 同级字段）。本纯函数只负责**取值与归一化**（非法值一律 0，
+// fail-closed 语义）；身份语义的判定在守卫侧（经 runGuard 以 env 透传），
+// 桥接不自行裁决身份放行（L-067）。
 export function agentDepth(exec) {
   const depth = exec?.agent?.session?.header?.delegationDepth;
   return typeof depth === 'number' && Number.isFinite(depth) && depth > 0 ? depth : 0;
@@ -274,8 +280,10 @@ export function mapGuardExit(code, stderr, stdout) {
 
 // ---------------------------------------------------------------------------
 // 判定核心子进程调用（stdin JSON {tool_name, tool_input} -> exit code）
+// agentDepthValue = agentDepth(exec) 的归一化结果（0 = 协调者/缺失；正整数 = 子代理），
+// 以 env FLOW_COMET_AGENT_DEPTH 透传给守卫——守卫侧与载荷 agent_id 归并为同一判据。
 // ---------------------------------------------------------------------------
-function runGuard(projectRoot, canonicalName, toolInput, signal) {
+function runGuard(projectRoot, canonicalName, toolInput, signal, agentDepthValue) {
   return new Promise((resolve) => {
     const guardPath = resolveGuardPath(projectRoot);
     const child = spawn(
@@ -288,6 +296,11 @@ function runGuard(projectRoot, canonicalName, toolInput, signal) {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
         signal,
+        // 身份信号透传（「D9 实现位置修订」/ ADR-014 决策 5）：depth 以数字字符串注入
+        // 子进程 env，由守卫与载荷 agent_id 归并为**同一判据**（守卫是身份与保护集的
+        // 唯一判定实现——桥接不复制保护集判定、不复制白名单逻辑，L-067）。
+        // 沿用既有 env 注入形态 {...process.env, VAR}（与 evolve.mjs 的协议 env 同形）。
+        env: { ...process.env, FLOW_COMET_AGENT_DEPTH: String(agentDepthValue) },
       },
     );
     let stdout = '';
@@ -396,7 +409,7 @@ export function apply(ctx) {
         return { kind: 'deny', reason };
       }
       // running（activeChange + status running/undefined）：继续走既有第 5 步包含性校验、
-      // 5.5 身份分派、第 6 步 guard 白名单——全部现状不变。
+      // 5.5 身份信号透传、第 6 步 guard 判定（身份与保护集统一由守卫裁决）。
 
       // 5. 包含性校验（Write/Edit）：越界直接 deny，不进 guard。
       if (canonicalName === 'Write' || canonicalName === 'Edit') {
@@ -418,14 +431,12 @@ export function apply(ctx) {
         mapped.input.file_path = normalizedTarget;
       }
 
-      // 5.5 代理身份分派：delegationDepth > 0 = 子代理（执行者）——其写源码是
-      //     执行者职责（对应 CC worktree 子代理物理隔离），跳过 guard 白名单判定直接
-      //     放行；协调者（0/缺失）走原 guard 白名单（协调者禁令物理拦截保留）。
-      //     形状 fail-closed 与项目根包含性校验在上方已对子代理同样执行——子代理也不得
-      //     越界写项目根外/参数形状不符（fail-closed 纪律不因身份放宽）。
-      if (agentDepth(exec) > 0) {
-        return next();
-      }
+      // 5.5 代理身份信号：agentDepth(exec) > 0 = 子代理（执行者）。桥接**不再短路**——
+      //     身份信号随守卫调用透传（env FLOW_COMET_AGENT_DEPTH），身份判定与最小保护集
+      //     拦截的整条判据由守卫独占实现（「D9 实现位置修订」/ ADR-014 决策 5：保护集
+      //     判据不得出现第二份实现，L-067）。既有纪律保持：形状 fail-closed 与项目根
+      //     包含性校验在上方已执行——子代理也不得越界写项目根外 / 参数形状不符。
+      const agentDepthValue = agentDepth(exec);
 
       // 6. 项目本地 guard 调用。guard 文件缺失（安装未完成/被删除）-> WARN +
       //    next() 放行（不阻断非 flow-comet 语义）；spawn 异常（ENOENT 等）->
@@ -439,7 +450,13 @@ export function apply(ctx) {
         return next();
       }
 
-      const decision = await runGuard(projectRoot, canonicalName, mapped.input, exec?.signal);
+      const decision = await runGuard(
+        projectRoot,
+        canonicalName,
+        mapped.input,
+        exec?.signal,
+        agentDepthValue,
+      );
       if (decision.kind === 'allow') {
         return next();
       }
