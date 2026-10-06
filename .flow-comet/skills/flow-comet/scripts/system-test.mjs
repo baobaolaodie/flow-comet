@@ -1823,7 +1823,7 @@ const TEST_ITEMS = [
     // 补显式 depends_on 后放行；旧 change 形态仅 WARN 不阻断；修复任务族（id 带修复前缀）
     // 不参与该族——其顺序由修复生命周期保证，回修同一文件是必然形态。修复前 plan 出口无这些
     // 检测 = 预期 RED。
-    name: 'A16 plan 出口文件依赖检出：写写重叠 BLOCK 与恢复 + 读写弱判 WARN + 同文件跨任务无依赖路径（真实命令）',
+    name: 'A16 plan 出口文件依赖检出：写写重叠 BLOCK 与恢复 + glob 单侧/双侧/不重叠 + 读写弱判 WARN + 同文件跨任务无依赖路径（真实命令）',
     run: (dir) => {
       driveThroughDesign(dir);
       const planEnv = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
@@ -1855,6 +1855,39 @@ const TEST_ITEMS = [
       assertOut(blocked, 'BLOCKED');
       assertOut(blocked, 'bak_a.txt');
       assertOut(blocked, 'depends_on');
+      // glob 形态重叠（单侧元字符 × 字面路径）：修复前逐字相等判定漏检 ⇒ 静默放行（本段即 RED）；
+      // 反向构造：改为互不重叠 / 段数不等 / 段内不匹配 ⇒ 放行（判据不恒真空过）；双侧 glob ⇒ 保守判重叠。
+      const globPair = (firstWrite, secondWrite, secondDeps = '') =>
+        C1 +
+        '<task id="G01" parallel="true" status="pending"><action>实现 G01</action><write_files>' + firstWrite + '</write_files><verify>node --check src/x.mjs</verify></task>\n' +
+        '<task id="G02" parallel="true" status="pending"><action>实现 G02</action><write_files>' + secondWrite + '</write_files><verify>node --check src/x.mjs</verify>' + secondDeps + '</task>\n';
+      planTask(globPair('src/glob/*.mjs', 'src/glob/foo.mjs'));
+      const globBlocked = exitPlanNoApply();
+      assertExit(globBlocked, 1);
+      assertOut(globBlocked, 'BLOCKED');
+      assertOut(globBlocked, 'G01×G02');
+      assertOut(globBlocked, 'src/glob/*.mjs');
+      assertOut(globBlocked, 'src/glob/foo.mjs');
+      assertOut(globBlocked, 'depends_on');
+      planTask(globPair('src/glob/*.mjs', 'src/glob/deep/foo.mjs'));
+      const depthMismatch = exitPlanNoApply();
+      assertExit(depthMismatch, 0);
+      assertNotOut(depthMismatch, 'BLOCKED');
+      planTask(globPair('src/glob/*.mjs', 'src/glob/foo.js'));
+      const suffixMismatch = exitPlanNoApply();
+      assertExit(suffixMismatch, 0);
+      assertNotOut(suffixMismatch, 'BLOCKED');
+      planTask(globPair('src/glob/*.mjs', 'src/glob/*.js'));
+      const doubleGlob = exitPlanNoApply();
+      assertExit(doubleGlob, 1);
+      assertOut(doubleGlob, 'BLOCKED');
+      assertOut(doubleGlob, 'G01×G02');
+      // 恢复（真实链路）：按指引补显式 depends_on（重叠路径不改）⇒ 同一出口放行
+      planTask(globPair('src/glob/*.mjs', 'src/glob/foo.mjs', '<depends_on>G01</depends_on>'));
+      const globRecovered = exitPlanNoApply();
+      assertExit(globRecovered, 0);
+      assertOut(globRecovered, 'ALL CHECKS PASSED');
+      assertNotOut(globRecovered, 'BLOCKED');
       // 同一文件跨任务族（负例）：两个非修复任务写入同一文件、彼此无依赖路径（串行拆分同样构成
       // 「未显式排序的同文件多任务」）→ 新 change BLOCKED，消息含任务对与重叠文件 + 恢复指引。
       // 同夹具并列一对修复任务（id 带修复前缀）写同一文件且无依赖路径——该族不参与判定，
@@ -3584,7 +3617,7 @@ const TEST_ITEMS = [
   },
 
   {
-    name: 'C3 委托后 exit：证据键名契约与契约校验（通过 / 空交接拦截）',
+    name: 'C3 委托后 exit：证据键名契约与契约校验（通过 / 空交接拦截 / 在飞委托拦·收工放行 / 留痕可读）',
     run: (dir) => {
       gitInit(dir);
       writeFile(dir, 'src/p1.mjs', 'export const x = 1;\n');
@@ -3652,6 +3685,38 @@ const TEST_ITEMS = [
       const rDeclPass = runGuard(['exit', 'subagent-execute'], dir);
       assertExit(rDeclPass, 0);
       assertOut(rDeclPass, 'ALL CHECKS PASSED');
+      // ⑬ 验证隔离真实链路（在飞委托 = 写者未收工）：登记第二个委托请求而不落结果 ⇒ 出口
+      //     BLOCKED 并点名未收工任务 + 恢复指引；收工（落结果）后同一出口放行——「同一时刻只有
+      //     一个写者」的机器可判形态走真实命令序列（request → exit 拦 → result → exit 放行）。
+      writeFile(dir, 'src/p2.mjs', 'export const y = 2;\n');
+      execFileSync('git', ['add', 'src/p2.mjs'], { cwd: dir });
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'feat: p2'], { cwd: dir });
+      const hash2 = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+      assertExit(runHandoff(['request', 'P02', '委托实现 P02', '--write-files', 'src/p2.mjs'], dir), 0);
+      const inFlightBlocked = runGuard(['exit', 'subagent-execute'], dir);
+      assertExit(inFlightBlocked, 1);
+      assertOut(inFlightBlocked, '在飞委托');
+      assertOut(inFlightBlocked, '待写入者收工后重跑');
+      assertOut(inFlightBlocked, 'P02');
+      assertExit(runHandoff(['result', 'P02', fullContract(hash2, 'P02')], dir), 0);
+      const collected = runGuard(['exit', 'subagent-execute'], dir);
+      assertExit(collected, 0);
+      assertOut(collected, 'ALL CHECKS PASSED');
+      assertNotOut(collected, '在飞委托');
+      // ⑭ 派遣留痕可读且零新增 state 顶层字段：留痕落在既有嵌套字段（与 handoffRequests /
+      //     handoffResult 同族），state 顶层不得出现任何留痕族键。
+      const stTrace = readStateFile(dir);
+      if (!stTrace.evidence?.['subagent-execute']?.handoffRequests?.P02) {
+        throw new Error('委派留痕未落嵌套证据字段（handoffRequests.P02 缺失）: ' + JSON.stringify(stTrace.evidence));
+      }
+      if (stTrace.handoffRequests !== undefined || stTrace.handoffResult !== undefined) {
+        throw new Error('留痕出现在 state 顶层字段（应为嵌套同族形态）');
+      }
+      for (const key of Object.keys(stTrace)) {
+        if (/handoff|delegation|dispatch|trace/i.test(key)) {
+          throw new Error('state 顶层出现留痕族字段: ' + key + '（零新增顶层字段约束被破坏）');
+        }
+      }
     },
   },
 
@@ -5321,7 +5386,7 @@ const TEST_ITEMS = [
   // 形状不符 fail-closed/项目根包含性含 8.3 短路径/退出码映射/guard 路径存在漂移防护；
   // apply 集成：tools/pre-execute 监听器分派——子代理放行/协调者走 guard/越界·形状 deny 不受身份）
   {
-    name: 'K11 桥接 loader:纯函数与 apply 分派断言(映射/包含性/退出映射/身份分派)',
+    name: 'K11 桥接 loader:纯函数与 apply 分派断言(映射/包含性/退出映射/身份分派/最小保护集)',
     run: async (dir) => {
       const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
       if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
@@ -5484,14 +5549,15 @@ const TEST_ITEMS = [
       // 项目根常规用长形态（与桥接对 file_path 的规范化一致，对应真实会话规范 cwd）；
       // 短形态 cwd 的场景由桥接的项目根规范化修复，⑦f 断言锁死（fail-open 已封闭）。
       const longTarget = bridge.realpathExistingPath(target); // realpathSync.native——展开 8.3 短名
-      // ⑦a 子代理（depth=1）写项目内源码 → next() 被调（跳过 guard 白名单放行）
+      // ⑦a 子代理（depth=1）写项目内源码 → next() 被调（守卫按身份分派放行——桥接不短路，
+      //     身份深度随 env 透传，判定与最小保护集统一由守卫拥有）
       {
         let usedNext = false;
         const res = await preExec(
           { name: 'Write', arguments: { file_path: path.join(longTarget, 'src', 'a.mjs') }, agent: { cwd: longTarget, session: { header: { delegationDepth: 1 } } } },
           () => { usedNext = true; },
         );
-        if (!usedNext) throw new Error('子代理写源码应放行(next 被调)——5.5 分派分支缺失');
+        if (!usedNext) throw new Error('子代理写源码应放行(next 被调)——身份分派分支缺失');
         if (res) throw new Error('子代理写源码不应返回 deny: ' + JSON.stringify(res));
       }
       // ⑦b 协调者（delegationDepth 缺失=0）同目标写 → 走真实 guard 白名单 → BLOCK deny
@@ -5556,7 +5622,36 @@ const TEST_ITEMS = [
           throw new Error('短形态 cwd 协调者写源码应走 guard 白名单拦截(deny): ' + JSON.stringify(res));
         }
       }
-      console.log('  bridge.apply 分派集成(子代理放行/协调者拦/越界·形状 deny 不受身份)✓');
+      // ⑦g 最小保护集在桥接侧真实生效（身份放行不放行机器面）：子代理（depth=1）写项目内
+      //    机器状态文件 → 桥接透传身份深度、守卫保护集 BLOCK → deny；对照 = ⑦a 同身份写源码
+      //    放行。反向构造：桥接恢复「身份短路直接 next」⇒ 本断言必红（保护集形同虚设）。
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'Write', arguments: { file_path: path.join(longTarget, '.flow-comet', 'flow-comet-state.json') }, agent: { cwd: longTarget, session: { header: { delegationDepth: 1 } } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('子代理写机器状态文件不应 next——身份放行不得放行最小保护集');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('state 文件')) {
+          throw new Error('子代理写机器状态文件应 deny(含 state 文件语义): ' + JSON.stringify(res));
+        }
+      }
+      // ⑦h 最小保护集的协议目标同判：子代理（depth=1）写本次运行实际生效的协议文件
+      //    （守卫按自身 packageRoot 解析——安装副本内的 reference/workflow-protocol.json）
+      //    → deny；该路径在项目根内，故本断言与 ⑦d 的越界 deny 相互独立（保护集非越界判定）。
+      {
+        const protocolInTarget = path.join(longTarget, '.dsh', 'skills', 'flow-comet', 'reference', 'workflow-protocol.json');
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'Write', arguments: { file_path: protocolInTarget }, agent: { cwd: longTarget, session: { header: { delegationDepth: 1 } } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('子代理写协议保护路径不应 next——身份放行不得放行协议面');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('协议文件')) {
+          throw new Error('子代理写协议保护路径应 deny(含协议文件语义): ' + JSON.stringify(res));
+        }
+      }
+      console.log('  bridge.apply 分派集成(子代理放行/协调者拦/越界·形状 deny 不受身份/保护集拦)✓');
     },
   },
 
