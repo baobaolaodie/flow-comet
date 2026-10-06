@@ -104,12 +104,16 @@ export function mapToolInput(canonicalName, args) {
 
 // ---------------------------------------------------------------------------
 // 项目根包含性：Write/Edit 的 file_path 必须解析后仍位于 projectRoot 内。
-// 越界路径若交给 guard 子进程，writeTargetFromHookInput 会因 target=null
-// 跳过白名单判定（fail-open），因此必须在插件侧直接 fail-closed deny。
+// 插件侧对越界路径直接 fail-closed deny 是**前置层**（该调用不进 guard 子进程），
+// 不再是「补 guard fail-open」：guard 的写入目标解析已收敛为单一实现
+// resolveWriteTarget（comet-hook-guard.mjs），越界返回 insideRunRoot=false /
+// targetRel=null，「runRoot 外写入关断」与 Bash 分支同判拦截（ADR-014 决策 6）——
+// 越界写不再静默放行。
 // Windows 8.3 短路径（如 LONGYI~1）与长路径在词法上不同，直接 path.relative
-// 会把项目内短路径误判为越界；因此先 realpath 展开已存在部分再执行包含性
-// 判断。realpathSync.native：Windows 上 fs.realpathSync（libuv）不展开 8.3
-// 短名，native 变体才会把 LONGYI~1 规范化为 LongYinHaHa（Windows 实证）。
+// 会把项目内短路径误判为越界；该词法误判的失败方向现为 fail-closed（误 BLOCK），
+// 不再是静默放行，故仍先 realpath 展开已存在部分再执行包含性判断（消误拦）。
+// realpathSync.native：Windows 上 fs.realpathSync（libuv）不展开 8.3 短名，
+// native 变体才会把 LONGYI~1 规范化为 LongYinHaHa（Windows 实证）。
 // ---------------------------------------------------------------------------
 export function realpathExistingPath(p) {
   try {
@@ -423,9 +427,10 @@ export function apply(ctx) {
           console.warn(reason);
           return { kind: 'deny', reason };
         }
-        // 通过后传规范化长路径（realpath 展开 8.3 短路径）——guard 的
-        // writeTargetFromHookInput 只做词法 path.relative，短路径会解析出
-        // target=null 从而跳过白名单判定（fail-open）。
+        // 通过后传规范化长路径（realpath 展开 8.3 短路径）——guard 的写入目标解析
+        // resolveWriteTarget 只做词法 path.relative：短路径会被判为根外（targetRel=null），
+        // 失败方向是「runRoot 外写入关断」下的**误 BLOCK**（fail-closed），不再是
+        // target=null 跳过白名单判定的静默放行。
         const normalizedTarget = realpathExistingPath(path.resolve(projectRoot, mapped.target));
         mapped.target = normalizedTarget;
         mapped.input.file_path = normalizedTarget;
