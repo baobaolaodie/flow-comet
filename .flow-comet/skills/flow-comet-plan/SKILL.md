@@ -42,6 +42,7 @@ guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好�
 - **① 同一文件 ⇒ 同一任务**：一个文件只能有一个任务 owner；必须拆分时，在波次划分中显式排序并写明拆分理由与依赖方向，不得把同一文件的两处改动拆成无依赖的两个任务。
 - **② [P] 只给本波确有并发同伴的任务**：`parallel="true"` 仅适用于同波确有其他可并行同伴、且 write_files 互不重叠的任务；孤立任务一律串行——「互不冲突」只是必要条件，不等于应标 `[P]`。
 - **③ [P] × direct 模式**：`[P]` 任务只在 `subagent-execute` 节点委托消化；direct 模式只放行**串行任务**的主代理直写，`parallel="true"` 任务在 direct 下仍必须委托——direct 不是并行任务的逃生口。共享工作区下以 `write_files` 互斥 + 提交时点（提交前 diff 边界）作为并行子代理的相互隔离纪律。
+- **④ 四属性可满足（并行安全的契约对象）**：标 `[P]` 前确认**并行安全四属性**（① 写权限 · ② 提交隔离 · ③ 验证隔离 · ④ 集成纪律）都能满足——worktree 只是「① 写权限」的实现之一，**不是** `[P]` 的前提。四属性的**含义与三平台通道**以入口册「并行委派契约（四属性）· 三平台通道」为单一来源，本节只点名不复述（同一口径两处表达必分叉）。
 
 **上游语义显式覆盖**：flow-kit 上游（`flow-kit/prompts/3-task.md` 等 vendored 只读文件）的宽松语义——「无冲突即可标 [P]」「同层即同波并行」——以本节为准（显式覆盖；上游只读，不做修改）。
 
@@ -69,7 +70,7 @@ This node decomposes the technical design into atomic, executable tasks with cle
 
 3. **Decompose by file conflict (vertical slices)**: Split tasks by file conflict, NOT by horizontal layers. Each task should be a vertical slice (one feature through model/API/UI) not a horizontal layer (all models first, then all APIs). Target: 2-10 minutes per task in fresh context. Do not split one file across tasks; if unavoidable, declare explicit order and reason.
 
-4. **Mark parallel tasks with [P]**: only tasks with a genuine concurrent companion in the same wave and non-overlapping write_files get `parallel="true"`; isolated tasks are serial; under direct mode `[P]` tasks are still delegated at subagent-execute.
+4. **Mark parallel tasks with [P]**: only tasks with a genuine concurrent companion in the same wave and non-overlapping write_files get `parallel="true"`; isolated tasks are serial; under direct mode `[P]` tasks are still delegated at subagent-execute. Each `[P]` task must also satisfy the four parallel-safety properties (write permission / commit isolation / verification isolation / integration discipline) — the contract object, with worktree as but one implementation of write permission and never a precondition; the entry SKILL's contract section is the single source for the per-platform channel facts.
 
 5. **Declare depends_on**: Each task explicitly declares which tasks it depends on.
 
