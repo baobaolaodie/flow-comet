@@ -5541,8 +5541,10 @@ const SCENARIOS = [
   // 113: plan 出口波次散文一致性检测——TASK 的 ## 波次划分 Wave 行任务带 [P]
   // 标记（并行语义）但 XML 任务无 parallel="true" → WARN（散文与机器路由依据不一致,
   // 以任务标记为准）;XML 补齐 parallel → 无 WARN。容错:无并行语义的 Wave 行不参与比对。
+  // ③④ 追加同判据的段尾分支回归锚（波次段即文末，新 change 形态 ⇒ 必 BLOCK）：段尾判定若
+  // 不成立，该检查会被整段静默跳过——下一条 [P] 行漏扫的同族形态见上一场景。
   {
-    name: '113 plan exit：波次散文与并行标记不一致 → WARN',
+    name: '113 plan exit：波次散文与并行标记不一致 → WARN（旧 change）/ BLOCK（新 change，含段即文末形态）',
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
@@ -5565,6 +5567,30 @@ const SCENARIOS = [
       assertExit(res2, 0);
       assertNotOut(res2, '波次散文');
       assertOut(res2, 'ALL CHECKS PASSED');
+      // ③ 段即文末形态（新 change）：段提取的段尾判定第三个分支——波次段**即文末**（其后再无段
+      //    标题、亦无分隔线）。先跑「抽掉必报」对照：同 ④ 夹具仅去掉散文行的 [P] 标记 ⇒ 无并行
+      //    语义行 ⇒ 放行（该对照因此在任一态都可观测到）。
+      const stEof = baseState('plan');
+      stEof.evidence.plan = { summary: 'plan done' };
+      stEof.newChange = true;
+      writeState(dir, stEof);
+      assertExit(runGuard(['entry', 'plan'], dir), 0);
+      const taskT01Eof = '<task id="T01"><action>a</action><write_files>f</write_files><verify>v</verify><done>d</done></task>\n';
+      const eofHead = '# TASK\n\n## 波次划分\n\nWave 1 (parallel): ';
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', eofHead + 'T01\n\n' + taskT01Eof);
+      const resEofControl = runGuard(['exit', 'plan'], dir);
+      assertExit(resEofControl, 0);
+      assertNotOut(resEofControl, 'BLOCKED');
+      // ④ 同 ③ 夹具补回 [P] 标记（唯一变量）→ 段尾判定须成立、该检查不得被整段静默跳过 ⇒ BLOCK。
+      //    夹具形态自证（判别力前提）：波次段之后不得再出现段标题 / 分隔线——否则该夹具退化为
+      //    「段后有下一段标题」形态，段尾第三分支失去覆盖而断言在两种写法下都成立（假绿）。
+      const eofFixture = eofHead + 'T01[P]\n\n' + taskT01Eof;
+      assertTrue(!/\n##\s|\n---/.test(eofFixture.slice(eofFixture.indexOf('## 波次划分'))),
+        '夹具形态前提不成立：波次段须为文末（其后不得再出现段标题或分隔线），否则段尾分支无覆盖');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', eofFixture);
+      const resEof = runGuard(['exit', 'plan'], dir);
+      assertExit(resEof, 1);
+      assertOutMatches(resEof, /波次散文标记任务为并行（\[P\]）但任务无 parallel="true"/, '波次段即文末时检查被整段跳过');
     },
   },
 
@@ -5953,19 +5979,49 @@ const SCENARIOS = [
     },
   },
 
-  // 127: R1——新 change 波次散文不一致 → BLOCKED
+  // 127: R1——新 change 波次散文不一致 → BLOCKED。波次段提取的「段尾」判定在此留一格判别夹具 +
+  // 一格单变量对照：① 段后紧跟下一段标题、段内无大写 Z（阳性对照，检查本身在场，两态同判）；
+  // ② 段内**早于** [P] 行出现大写 Z（机检标记字面量形态）但散文行无 [P] 标记（「抽掉必报」对照：
+  // 去掉 [P] 这一个变量 ⇒ 无并行语义行 ⇒ 放行，两态同判）；③ 同 ② 的夹具补回 [P] 标记 ⇒ 段体
+  // 若在段内首个大写 Z 处提前收尾，该 [P] 行整行漏扫 ⇒ 本应 BLOCK 却静默放过（③ 即该形态的
+  // 常驻回归锚）。段即文末的第二形态见下一场景（同判据、另一段尾分支，独立成景以便单轮同时可见）。
+  // 两格夹具各自带「形态前提」断言（Z 早于 [P] 行）——形态漂移会让锚静默退化成假绿。
   {
-    name: '127 plan exit BLOCKED：新 change 波次散文不一致（R1）',
+    name: '127 plan exit BLOCKED：新 change 波次散文不一致（R1；段内大写 Z 早于 [P] 行形态）',
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'planned' };
       st.newChange = true;
       writeState(dir, st);
       assertExit(runGuard(['entry', 'plan'], dir), 0);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n## 波次划分\n\nWave 1 (parallel): T01[P]\n\n## 任务清单\n\n<task id="T01"><action>a</action><write_files>f</write_files><verify>v</verify><done>d</done></task>\n');
+      const planTask = (text) => writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', text);
+      const taskT01 = '<task id="T01"><action>a</action><write_files>f</write_files><verify>v</verify><done>d</done></task>\n';
+      // 判别句式锚（非裸子串）：拦因句 + 判据分支，抽掉该句即红
+      const waveBlocked = /波次散文标记任务为并行（\[P\]）但任务无 parallel="true"/;
+      // 大写 Z 说明行：段内早于 [P] 行，且自身不含并行语义词（避免截断态/完整态的行筛选差异）
+      const waveZNote = '- 机检标记形态说明（ZERO-LOGIC-CHANGE-OK）';
+      // ① 段后有下一段标题、段内无 Z → BLOCK（阳性对照：两态同判）
+      planTask('# TASK\n\n## 波次划分\n\nWave 1 (parallel): T01[P]\n\n## 任务清单\n\n' + taskT01);
       const res = runGuard(['exit', 'plan'], dir);
       assertExit(res, 1);
-      assertOut(res, '波次');
+      assertOutMatches(res, waveBlocked, '波次散文不一致');
+      // 段内大写 Z 说明行 + 散文行共用夹具（散文行的 [P] 标记为唯一变量）：② 不带 [P]（抽掉必报
+      // 对照）、③ 带 [P]（判别夹具）。形态自证：大写 Z 必须**早于** [P] 行——若 Z 排在 [P] 行之后，
+      // 段体截断点落在该行之后、该行仍会被扫描，本族断言在两种写法下都成立（假绿 ⇒ 零判别力）。
+      const zWaveFixture = (marker) => '# TASK\n\n## 波次划分\n\n' + waveZNote + '\n\nWave 1 (parallel): T01' + marker + '\n\n## 任务清单\n\n' + taskT01;
+      assertTrue(zWaveFixture('[P]').indexOf(waveZNote) < zWaveFixture('[P]').indexOf('T01[P]'),
+        '夹具形态前提不成立：大写 Z 说明行须早于 [P] 行，否则段尾截断不影响该行扫描（锚零判别力）');
+      // ② 抽掉必报自证（单变量对照）：段内大写 Z 说明行在场、散文行无 [P] 标记 → 放行
+      planTask(zWaveFixture(''));
+      const resNoMarker = runGuard(['exit', 'plan'], dir);
+      assertExit(resNoMarker, 0);
+      assertNotOut(resNoMarker, 'BLOCKED');
+      assertOut(resNoMarker, 'ALL CHECKS PASSED');
+      // ③ 同一夹具补回散文行的 [P] 标记（唯一变量）→ 段内大写 Z 之后的 [P] 行不得漏扫 ⇒ BLOCK
+      planTask(zWaveFixture('[P]'));
+      const resZ = runGuard(['exit', 'plan'], dir);
+      assertExit(resZ, 1);
+      assertOutMatches(resZ, waveBlocked, '段内大写 Z 之后的 [P] 行漏扫');
     },
   },
 
@@ -7115,8 +7171,10 @@ const SCENARIOS = [
   // 首部 4 字段（Change ID/Task ID/完成时间/AI 角色）+ 段序（含 flow-comet 增量 ## 自检方法 段）。
   // 缺任一：新 change BLOCK（exit 1 + 缺失点与恢复指引）；合法变体（编号前缀/括号后缀/大小写）通过；
   // 旧 change → WARN 渐进。当前 guard 只查 verify输出/6维自查/越界检查 3 段存在 → 缺标题等场景 RED。
+  // ⑫⑬ 追加 6 维自查段提取的段尾判定回归锚（段内大写 Z 早于方法名 ⇒ 不得误拦；方法声明真缺席 ⇒
+  // 仍须 BLOCK）——与模板保真共用同一新 change 严格出口链路。
   {
-    name: '159 execute exit SUMMARY 模板保真：缺标题/首部/段序新 BLOCK，合法变体通过，旧 WARN',
+    name: '159 execute exit SUMMARY 模板保真：缺标题/首部/段序新 BLOCK，合法变体通过，旧 WARN；6 维段内大写 Z 不误拦 + 未声明仍 BLOCK',
     run: (dir) => {
       const marker = () => {
         fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
@@ -7279,6 +7337,39 @@ const SCENARIOS = [
       assertExit(res11, 1);
       assertOut(res11, 'BLOCKED');
       assertOut(res11, '自检方法');
+      // ⑫ 6 维自查段提取的段尾判定（常驻回归锚 · 假阳性误拦位点）：段内**早于**方法名出现大写 Z
+      //    （机检标记字面量形态）——串尾若被写成字面字符 Z，惰性段体在段内首个 Z 处提前收尾，
+      //    段内的方法声明被截掉 ⇒ 出口误判「6 维自查未声明自检方法」而 BLOCK。
+      //    单变量对照：与 ⑨/⑩ 的无 Z 合规基线相比只多一行 Z 说明（同一份 dims 原文逐字不变），
+      //    两者都必须 PASS——即该行不得改变判定（既不放宽也不误拦）。
+      const zNote = '> 本任务 diff 属零逻辑改动（机检标记 ZERO-LOGIC-CHANGE-OK），按协议执行 PR Review。';
+      const withSixDim = (six) => fullSections.map((s) => (s === sectionText.sixDim ? six : s));
+      const sixDimZFirst = sectionText.sixDim.replace('## 6 维自查\n\n', '## 6 维自查\n\n' + zNote + '\n\n');
+      assertTrue(sixDimZFirst !== sectionText.sixDim, '单变量前提不成立：6 维自查段标题形态变化，Z 说明行未插入');
+      assertEqual(sixDimZFirst.replace('## 6 维自查\n\n' + zNote + '\n\n', '## 6 维自查\n\n'),
+        sectionText.sixDim, '单变量前提不成立：Z 说明行不是与无 Z 基线的唯一差异');
+      assertTrue(sixDimZFirst.indexOf(zNote) < sixDimZFirst.indexOf('brooks-review'),
+        '夹具形态前提不成立：Z 说明行须早于方法声明，否则段尾截断不影响该声明（锚零判别力）');
+      setupExecute(true);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# SUMMARY: T01 - 实现 T01', fullSections));
+      const res12Base = runGuard(['exit', 'execute'], dir);
+      assertExit(res12Base, 0);
+      assertOut(res12Base, 'ALL CHECKS PASSED');
+      setupExecute(true);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# SUMMARY: T01 - 实现 T01', withSixDim(sixDimZFirst)));
+      const res12 = runGuard(['exit', 'execute'], dir);
+      assertExit(res12, 0);
+      assertOut(res12, 'ALL CHECKS PASSED');
+      assertNotOut(res12, 'BLOCKED');
+      // ⑬ 判据未放宽对照 + 抽掉必报自证：同 ⑫ 夹具仅抽掉 6 维段内的方法声明行（其余逐字不变）
+      //    ⇒ 6 维自查段确实未声明自检方法 ⇒ 仍须 BLOCK，且拦因须落在该判据上（而非段空 / 段缺席）。
+      const sixDimNoDecl = sixDimZFirst.replace('- 功能: 通过（brooks-review 已跑）', '- 功能: 通过（内置快查）');
+      assertTrue(sixDimNoDecl !== sixDimZFirst, '对照夹具前提不成立：6 维段内方法声明行未命中');
+      setupExecute(true);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', compose('# SUMMARY: T01 - 实现 T01', withSixDim(sixDimNoDecl)));
+      const res13 = runGuard(['exit', 'execute'], dir);
+      assertExit(res13, 1);
+      assertOut(res13, '6 维自查未声明使用 /brooks-review');
     },
   },
 

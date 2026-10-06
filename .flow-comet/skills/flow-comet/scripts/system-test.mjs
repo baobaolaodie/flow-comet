@@ -845,6 +845,20 @@ function execSummaryFixture(taskId) {
   ].join('\n');
 }
 
+// 同夹具的「段内大写 Z 早于方法名」变体（真实机检标记形态）：6 维自查段体首行是含大写 Z 的机检
+// 标记说明，方法声明行在其后。段尾判定若把大写 Z 当串尾（惰性段体在段内首个 Z 处提前收尾），
+// 方法声明被截掉 ⇒ execute 家族出口误判「6 维自查未声明自检方法」而 BLOCK。
+// 夹具前提不成立（段标题形态变化）即抛错——不让变体静默退化成与基线逐字节相同的形态。
+function execSummaryWithMachineMarker(taskId) {
+  const base = execSummaryFixture(taskId);
+  const sixDimHead = '## 6 维自查\n\n';
+  if (!base.includes(sixDimHead)) {
+    throw new Error('夹具前提失效：SUMMARY 夹具缺 6 维自查段标题形态 ' + JSON.stringify(sixDimHead));
+  }
+  return base.replace(sixDimHead,
+    sixDimHead + '> 本任务 diff 属零逻辑改动（机检标记 ZERO-LOGIC-CHANGE-OK），按协议执行 PR Review。\n\n');
+}
+
 // ---------- Fix 批次真实命令链路夹具（A21~A23 共用） ----------
 
 // 串行任务块（字段齐备：可过 task-parsing 解析与 guard 结构校验）
@@ -4421,7 +4435,8 @@ const TEST_ITEMS = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md',
         '# DESIGN\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 0. 技术栈选定\n\nNode.js(ESM)\n\n## 决策清单\n\n- [ ] 循环路由\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', fixBatchTaskText('pending'));
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', execSummaryFixture('T01'));
+      // 段内大写 Z 形态的 SUMMARY（方法声明在其后）：该出口的 exit 0 即「段尾判定正确」的真实链路锚
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', execSummaryWithMachineMarker('T01'));
       // 源节点前序产物齐备：REVIEW.md 在场（已处置）——否则回源 verify 出口后的产物推导会把
       // 下一跳判回 review（产物即真相），组合链路的终点断言无法到达 archive。
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', fixBatchReviewDoc(true));
@@ -4446,6 +4461,10 @@ const TEST_ITEMS = [
       const execExit = runGuard(['exit', 'execute', '--apply'], dir, env);
       assertExit(execExit, 0);
       assertOut(execExit, 'ALL CHECKS PASSED');
+      // 段尾判定锚（新 / 旧 change 两态都不许出现该拦因）：T01 的 6 维自查段内大写 Z 在方法声明
+      // **之前**——段体若把大写 Z 当串尾而提前收尾，该出口会报「6 维自查未声明使用」（新 change
+      // BLOCK / 旧 change 同句 WARN），本条对两态都构成判别。
+      assertNotOut(execExit, '6 维自查未声明使用');
       assertOut(execExit, 'FIX-BATCH: 回源节点 verify（execute 出口已完成）');
       assertNodeLine(execExit, 'verify');
       assertNotNodeLine(execExit, 'archive');
@@ -4462,6 +4481,19 @@ const TEST_ITEMS = [
         if (!/##\s*6 维自查/.test(summaryText) || !/##\s*自检方法/.test(summaryText)) {
           throw new Error(summaryName + ' 缺六维自查 / 自检方法段（execute 家族出口之一）');
         }
+      }
+      // 夹具形态自证（判别力前提 · 抽掉必报的反面）：T01 的 6 维自查段内「大写 Z 说明行」必须
+      // **早于**方法声明、且两者都在该段内——否则上面那次出口放行与该段尾判定无关，锚会静默
+      // 退化成假绿（形态不符即抛错，不静默跳过）。
+      const t01SummaryText = fs.readFileSync(path.join(dir, '.specs', CHANGE_ID, 'T01-SUMMARY.md'), 'utf8');
+      const sixDimAt = t01SummaryText.indexOf('## 6 维自查');
+      const nextSectionAt = sixDimAt >= 0 ? t01SummaryText.indexOf('\n## ', sixDimAt) : -1;
+      const zMarkerAt = sixDimAt >= 0 ? t01SummaryText.indexOf('ZERO-LOGIC-CHANGE-OK', sixDimAt) : -1;
+      const declaredAt = sixDimAt >= 0 ? t01SummaryText.indexOf('brooks-review', sixDimAt) : -1;
+      if (!(sixDimAt >= 0 && zMarkerAt > sixDimAt && declaredAt > zMarkerAt
+        && (nextSectionAt === -1 || declaredAt < nextSectionAt))) {
+        throw new Error('T01-SUMMARY 的 6 维自查段须为「大写 Z 说明行在前、方法声明行在后」形态（段尾判定锚的判别力前提）: '
+          + JSON.stringify({ sixDimAt, zMarkerAt, declaredAt, nextSectionAt }));
       }
       const execEvent = (chainState.history || [])
         .filter((e) => e.event === 'exit-applied' && e.node === 'execute')
