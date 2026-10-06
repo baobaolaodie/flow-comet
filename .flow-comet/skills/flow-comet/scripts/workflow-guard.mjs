@@ -1655,7 +1655,11 @@ async function main() {
         // 波次散文一致性检测: 波次散文一致性检测（WARN 渐进）——## 波次划分 的 Wave 行任务带 [P] 标记
         // （并行语义）但 XML 任务无 parallel="true" → WARN（散文与机器路由依据不一致,以任务
         // 标记为准）。容错:无并行语义的 Wave 行不参与比对;解析不到波次段跳过（不误报）。
-        const waveSection = content.match(/##\s*波次划分\s*\n([\s\S]*?)(?=\n##\s|\n---|\Z)/);
+        // 段尾判定 = 下一个段标题（\n## ）或分隔线（\n---）或**输入末尾**。JS 正则没有 \Z：
+        // \Z 是「未知转义 ⇒ 字面字符 Z」，惰性匹配一遇段内大写 Z 就提前收尾，段被静默截断
+        // （含 ZERO- 一类机检标记的 TASK 会整段漏检）。串尾一律用 (?![\s\S]) 真断言——
+        // 它只是「此处之后已无任何字符」，不受行首/行尾标志影响，与「多行模式下的 $」语义无歧义。
+        const waveSection = content.match(/##\s*波次划分\s*\n([\s\S]*?)(?=\n##\s|\n---|(?![\s\S]))/);
         if (waveSection) {
           const proseParallelIds = [];
           for (const line of waveSection[1].split('\n')) {
@@ -1846,7 +1850,9 @@ async function main() {
       try {
         const content = await fs.readFile(path.join(changeDir, f), 'utf8');
         // 段终止 lookahead 用 \n##\s（而非 \n##）：###/#### 级子标题（如 "### 🟢 R1"）是段内内容，不是段结束
-        const sixDim = content.match(/##\s*6\s*维自查[\s\S]*?(?=\n##\s|\n---|\Z)/i);
+        // 段尾同样 = 段标题 / 分隔线 / 输入末尾；末尾一律写 (?![\s\S])，不得写 \Z
+        // （JS 无 \Z——它是「字面字符 Z」，且本正则带 i 标志，连小写 z 都会命中，段被静默截断）
+        const sixDim = content.match(/##\s*6\s*维自查[\s\S]*?(?=\n##\s|\n---|(?![\s\S]))/i);
         // C1: 6 维自查段非空——去掉所有标题行后剩余实质内容 ≥ 10 字符
         // 按行过滤标题（/^\s*#/）比正则替换稳健：任何标题格式（emoji 🟢/中英文/数字）都不计入内容
         const dimBody = sixDim ? sixDim[0].split('\n').filter(l => !/^\s*#/.test(l)).join('').trim() : '';
