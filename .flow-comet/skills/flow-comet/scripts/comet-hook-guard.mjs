@@ -658,9 +658,29 @@ async function readHookInput() {
   }
 }
 
+// 盘符根拼写归一（单一实现——只由下方写入目标解析消费，不得在别处再写一份同义归一，L-067）。
+// Windows 上 Git-Bash 类 shell 把 `D:\<剩余>` 写作 `/d/<剩余>`（盘符小写 + 正斜杠）。win32 的
+// 目标解析把该拼写读成「**当前盘根**下的 \d\<剩余>」而非 `D:\<剩余>`：同一文件于是被判成根外，
+// 词法相对化与物理同一性两道保护集判据同时失守（身份放行下保护集是唯一防线 ⇒ 静默放行）。
+// 故必须在**解析之前**归一到盘符拼写——归一落在此处，全部消费方（白名单 / 保护集 / 根外关断）
+// 自动同判，且同一文件的各等价拼写（大小写、正反斜杠）收敛到同一结果。
+// 形态严格限定为**单字母盘符根**：盘符字母之后必须是路径分隔符或字符串结束。放宽这一条会把
+// `/dev/<…>`、`/etc/<…>`、`/tmp/<…>` 一类普通 POSIX 绝对路径误读成 `<盘符>:\ev\<…>`。
+// 非 win32 平台该拼写是货真价实的 POSIX 绝对路径，语义不同——不归一（保持既有判定）。
+const DRIVE_ROOT_SPELLING_RE = /^\/([A-Za-z])(?=\/|$)/;
+function normalizeDriveRootSpelling(rawTarget) {
+  if (process.platform !== 'win32') return rawTarget;
+  const match = DRIVE_ROOT_SPELLING_RE.exec(rawTarget);
+  if (match === null) return rawTarget;
+  const drive = match[1].toUpperCase() + ':';
+  const rest = rawTarget.slice(2);
+  return rest === '' ? drive + '/' : drive + rest;
+}
+
 // 写入目标解析（单一实现——白名单判定 / 保护集判定 / runRoot 外关断三条判定共用，禁止各处
 // 再写一份相对化口径）。`rawTarget` 为 file_path 或命令级写入 token：绝对路径原样、相对路径
-// 按 runRoot 解析。返回结构：
+// 按 runRoot 解析；Windows 的盘符根拼写先经上方同义归一（否则同一文件的不同拼写会异判）。
+// 返回结构：
 //   insideRunRoot=true  → targetRel = 相对 runRoot 的 POSIX 路径（白名单前缀匹配 / 状态文件比较）
 //   insideRunRoot=false → targetRel = null（项目根之外；由「runRoot 外写入关断」与 Bash 分支同判）
 // 无写入语义（非字符串 / 空串）→ null（该目标不参与任何判定）。
@@ -668,7 +688,7 @@ function resolveWriteTarget(rawTarget) {
   if (typeof rawTarget !== 'string') return null;
   const trimmed = rawTarget.trim();
   if (trimmed === '') return null;
-  const absolute = path.resolve(runRoot, trimmed);
+  const absolute = path.resolve(runRoot, normalizeDriveRootSpelling(trimmed));
   const relative = path.relative(runRoot, absolute);
   const outside =
     path.isAbsolute(relative) || relative === '..' || relative.startsWith('..' + path.sep);

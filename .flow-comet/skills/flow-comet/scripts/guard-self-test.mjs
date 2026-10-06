@@ -10946,6 +10946,83 @@ const SCENARIOS = [
       } else {
         console.error('WARN: 当前平台无法构造目录链接，保护集别名形态断言降级（词法判定仍由 ⑨ 覆盖）');
       }
+      // ⑨d 盘符根拼写（Windows 上 Git-Bash 类 shell 的 `/d/<剩余>` 形态）与盘符拼写**同判**：
+      //     win32 的目标解析把 `/d/<剩余>` 读成「当前盘根下的 \d\<剩余>」而非 `D:\<剩余>` ⇒
+      //     词法相对化判为根外（相对路径为空）⇒ 状态文件判据被跳过；物理判据对错解路径 stat
+      //     失败 ⇒ 两道判据同时失守——身份放行下保护集形同虚设（fail-open）。归一入口唯一
+      //     （既有写入目标解析），故两条判据同时闭合、各等价拼写同判。
+      //     该拼写是 Windows 上 Git-Bash 类 shell 的自然产物；非 win32 平台它是普通 POSIX
+      //     绝对路径，语义不同 ⇒ 显式不适用（不静默跳过——未验证 ≠ 通过）。
+      const hasDriveRoot = /^[A-Za-z]:[\\/]/.test(dir);
+      if (process.platform === 'win32' && hasDriveRoot) {
+        const driveRootSpelling = (p) => '/' + p[0].toLowerCase() + p.slice(2).replaceAll('\\', '/');
+        for (const [label, target, marker] of [
+          ['机器状态文件', stateFileTarget, 'state 文件'],
+          ['协议保护路径', protocolFileTarget, '协议文件'],
+        ]) {
+          const exits = [];
+          const forms = [['盘符根拼写', driveRootSpelling(target)], ['盘符拼写', posix(target)]];
+          for (const [formLabel, form] of forms) {
+            const viaWrite = runHook(['before_tool'], dir,
+              { tool_name: 'Write', tool_input: { file_path: form }, agent_id: 'agent-abc123' });
+            assertExit(viaWrite, 2);
+            assertOut(viaWrite, marker);
+            const viaBash = runHook(['before_tool'], dir,
+              { tool_name: 'Bash', tool_input: { command: 'cp "' + form + '" "' + form + '"' }, agent_id: 'agent-abc123' });
+            assertExit(viaBash, 2);
+            assertOut(viaBash, marker);
+            exits.push(viaWrite.status, viaBash.status);
+            if (formLabel === '盘符根拼写') {
+              // 盘符字母大写变体同归一（同族拼写不得因大小写漏判）
+              const upper = runHook(['before_tool'], dir,
+                { tool_name: 'Write', tool_input: { file_path: '/' + form[1].toUpperCase() + form.slice(2) }, agent_id: 'agent-abc123' });
+              assertExit(upper, 2);
+              assertOut(upper, marker);
+            }
+          }
+          if (exits.some((code) => code !== exits[0])) {
+            throw new Error(label + ' 的两种拼写应同判，实际 exit: ' + JSON.stringify(exits));
+          }
+          if (label === '机器状态文件') {
+            // 协调者路径（无身份）同样闭合：命令级写入的盘符根拼写命中状态文件判据 ⇒ 报文点名
+            // 目标类别（修复前落到「不在允许范围」兜底分支——证明目标确被抽取，缺口在判定）
+            const msysMain = driveRootSpelling(target);
+            const asMain = runHook(['before_tool'], dir,
+              { tool_name: 'Bash', tool_input: { command: 'cp "' + msysMain + '" "' + msysMain + '"' } });
+            assertExit(asMain, 2);
+            assertOut(asMain, marker);
+          }
+        }
+        // ⑨e 对照：同一身份写普通源码的盘符根拼写 ⇒ 放行（归一不得把保护集扩大到其余路径）
+        const msysSource = driveRootSpelling(whitelistOutside);
+        const msysSourceWrite = runHook(['before_tool'], dir,
+          { tool_name: 'Write', tool_input: { file_path: msysSource }, agent_id: 'agent-abc123' });
+        assertExit(msysSourceWrite, 0);
+        assertOut(msysSourceWrite, '(subagent identity)');
+        const msysSourceBash = runHook(['before_tool'], dir,
+          { tool_name: 'Bash', tool_input: { command: 'cp "' + msysSource + '" "' + msysSource + '"' }, agent_id: 'agent-abc123' });
+        assertExit(msysSourceBash, 0);
+        // ⑨f 单字母限定（`/dev`、`/etc` 一类多字母首段不得被当作盘符根）：该目标按「当前盘根下的
+        //     同名目录」解析 ⇒ 项目根之外 ⇒ 协调者拦截报文带根外语义。若归一放宽为「首字母后不要求
+        //     分隔符」，目标被改写成盘符相对形态后落在项目根内 ⇒ 报文语义改变 ⇒ 本断言必红。
+        const notDriveRoot = '/' + dir[0].toLowerCase() + 'ev/probe.md';
+        const notDriveRootRes = runHook(['before_tool'], dir,
+          { tool_name: 'Write', tool_input: { file_path: notDriveRoot } });
+        assertExit(notDriveRootRes, 2);
+        assertOut(notDriveRootRes, '项目根之外');
+      } else {
+        // 非 win32：该拼写是**普通 POSIX 绝对路径**，归一只许在 win32 生效（否则同一目标会被改写成
+        //     项目根内的相对形态，报文失去根外语义）。本断言锁的是「平台限定」这半边——正向断言在
+        //     本平台不适用，故此处改为可判别的替代锚（断言失败即说明归一变无条件）。
+        const posixSpelling = '/d/probe.md';
+        const posixRes = runHook(['before_tool'], dir,
+          { tool_name: 'Write', tool_input: { file_path: posixSpelling } });
+        assertExit(posixRes, 2);
+        assertOut(posixRes, '项目根之外');
+        console.error('注意: 本平台无盘符根形态，盘符根拼写的归一等价性断言**显式不适用**'
+          + '（dsh/pwsh 与 Codex/cmd 不产生该拼写；win32 侧为唯一判别面）——已改为断言平台限定半边'
+          + '（该拼写在本平台不得被归一到项目根内）；未验证 ≠ 通过');
+      }
 
       // ⑩ apply_patch 承载形态的耐久锚（in-place 扩展）：补丁正文写在 tool_input.command、
       //    载荷无 file_path——目标须由补丁摘要行抽出后才进入既有判定入口（白名单与最小保护集

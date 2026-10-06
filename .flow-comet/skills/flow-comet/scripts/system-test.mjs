@@ -5732,6 +5732,38 @@ const TEST_ITEMS = [
           throw new Error('子代理写协议保护路径应 deny(含协议文件语义): ' + JSON.stringify(res));
         }
       }
+      // ⑦i 最小保护集对盘符根拼写（Windows 上 Git-Bash 类 shell 的 `/d/<剩余>` 形态）同样成立：
+      //    Bash 命令级写入的目标经既有提取器抽出后按写入目标解析的字面归一处理 ⇒ 与盘符拼写
+      //    同判 deny。归一前该拼写被错解到「当前盘根之下」⇒ 保护集两道判据同时空转（身份放行
+      //    下静默 next = fail-open）。对照 = 同一身份的盘符根拼写源码仍放行（保护集不扩大）。
+      //    该拼写是 Windows 上 Git-Bash 类 shell 的自然产物；非 win32 载体上它是普通 POSIX 绝对
+      //    路径，语义不同 ⇒ 显式不适用（不静默跳过——未验证 ≠ 通过）。
+      const hasDriveRoot = /^[A-Za-z]:[\\/]/.test(longTarget);
+      if (process.platform === 'win32' && hasDriveRoot) {
+        const driveRootSpelling = (p) => '/' + p[0].toLowerCase() + p.slice(2).replaceAll('\\', '/');
+        const spellingCases = [
+          ['机器状态文件', driveRootSpelling(path.join(longTarget, '.flow-comet', 'flow-comet-state.json')), 'state 文件'],
+          ['项目内源码', driveRootSpelling(path.join(longTarget, 'src', 'a.mjs')), null],
+        ];
+        for (const [label, spelled, denyMarker] of spellingCases) {
+          let usedNext = false;
+          const res = await preExec(
+            { name: 'Bash', arguments: { command: 'cp "' + spelled + '" "' + spelled + '"' }, agent: { cwd: longTarget, session: { header: { delegationDepth: 1 } } } },
+            () => { usedNext = true; },
+          );
+          if (denyMarker === null) {
+            if (!usedNext) throw new Error(label + '的盘符根拼写应放行(next)——保护集不得扩大: ' + JSON.stringify(res));
+            continue;
+          }
+          if (usedNext) throw new Error(label + '的盘符根拼写不应 next——身份放行不得放行最小保护集');
+          if (!res || res.kind !== 'deny' || !res.reason.includes(denyMarker)) {
+            throw new Error(label + '的盘符根拼写应 deny(含 ' + denyMarker + ' 语义): ' + JSON.stringify(res));
+          }
+        }
+        console.log('  盘符根拼写与盘符拼写同判(机器面 deny / 源码放行)✓');
+      } else {
+        console.log('  (盘符根拼写断言显式不适用——非 win32 载体上该拼写是普通 POSIX 绝对路径)');
+      }
       console.log('  bridge.apply 分派集成(子代理放行/协调者拦/越界·形状 deny 不受身份/保护集拦)✓');
     },
   },
