@@ -79,7 +79,7 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 
 在 git 项目里，引擎按 change 开分支：`init <change-id>` 会创建并切换到 `change/<change-id>`，`next` 会打印分支行；没有 git 的项目里该行显示 `none`。
 
-执行模式默认 `subagent`（实现工作委托给隔离子代理，附 Return Contract）。`execution-mode direct` 切到协调者亲自执行并记录显式授权；`execution-mode subagent` 切回。
+执行模式默认 `subagent`（实现工作委托给子代理，附 Return Contract，按四属性契约执行——写权限、提交隔离、验证隔离、集成纪律，见[并行委派](MECHANISM-zh.md#并行委派)）。`execution-mode direct` 切到协调者亲自执行并记录显式授权；`execution-mode subagent` 切回。
 
 ## 用户入口
 

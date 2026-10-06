@@ -79,7 +79,7 @@ On archive the whole directory moves to `.specs/archive/<YYYY-MM-DD>-<change-id>
 
 In a git project the engine works on a branch per change: `init <change-id>` creates and switches to `change/<change-id>`, and `next` reports the branch line. In a project without git the same line reports `none`.
 
-Execution mode defaults to `subagent` (implementation delegated to isolated subagents with a Return Contract). `execution-mode direct` switches the coordinator to doing the work itself and records the explicit authorization; `execution-mode subagent` switches back.
+Execution mode defaults to `subagent` (implementation delegated to subagents with a Return Contract, under the four-attribute contract — write permission, commit isolation, verification isolation and integration discipline; see [Parallel delegation](MECHANISM.md#parallel-delegation)). `execution-mode direct` switches the coordinator to doing the work itself and records the explicit authorization; `execution-mode subagent` switches back.
 
 ## User entry points
 
