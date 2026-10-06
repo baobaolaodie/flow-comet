@@ -132,15 +132,15 @@ node .claude/skills/flow-comet/scripts/context-scan.mjs [--root <项目根>] [--
 
 | 属性 | Claude Code | Codex | dsh |
 |------|-------------|-------|-----|
-| ① 写权限 | 载荷 `agent_id`——**未覆盖**（P9 探针只跑 Codex）：依据为上游 schema 原文（以 `agent_id` 区分主线程与子代理）+ 本批引擎喂测；真机会话复核待补 | 载荷 `agent_id` + `agent_type`——**证实**（P9：子代理载荷 12 键含二者、主线程 10 键不含）；守卫读 `agent_id`，与 CC 同一判据 | 桥接透传 `delegationDepth`——**证实**（0.1.7-rc.2 全接缝重认证；本批收窄为「最小保护集除外」） |
+| ① 写权限 | 载荷 `agent_id`——**未覆盖**（该次实测只覆盖 Codex）：依据为上游 schema 原文（以 `agent_id` 区分主线程与子代理）+ 本批引擎喂测；真机会话复核待补 | 载荷 `agent_id` + `agent_type`——**证实**（实测：子代理载荷 12 键含二者、主线程 10 键不含）；守卫读 `agent_id`，与 CC 同一判据 | 桥接透传 `delegationDepth`——**证实**（0.1.7-rc.2 全接缝重认证；本批收窄为「最小保护集除外」） |
 | ② 提交隔离 | pathspec 纪律（多写者共享同一工作区形态） | 同左 | 同左 |
 | ③ 验证隔离 | `subagent-execute` 出口锚：有 request 无 result（新 change BLOCKED / 旧 change WARN 渐进） | 同左 | 同左 |
 | ④ 集成纪律 | `merge --no-ff` 优先；降级 cherry-pick 必记因 | 同左 | 同左 |
-| **谁建树**（三平台唯一差异） | 可选：harness `isolation: "worktree"` 建独立树，或共享工作区直写 | 协调者**显式** `git worktree add` 并在委派 prompt 指定 `workdir`（原生子代理无自动建树；**证实** P9-f 可指向独立目录并落盘），或共享工作区直写 | **不建树**：进程内子代理、同一工作区运行——**无需隔离区 ≠ 无需边界**（`write_files` 互斥 + 提交时点 + 最小保护集仍构成边界） |
+| **谁建树**（三平台唯一差异） | 可选：harness `isolation: "worktree"` 建独立树，或共享工作区直写 | 协调者**显式** `git worktree add` 并在委派 prompt 指定 `workdir`（原生子代理无自动建树；**证实**：子代理可被指向独立目录并落盘），或共享工作区直写 | **不建树**：进程内子代理、同一工作区运行——**无需隔离区 ≠ 无需边界**（`write_files` 互斥 + 提交时点 + 最小保护集仍构成边界） |
 
-**P9 实测口径（`.specs/p9-codex-probe-2026-10-04.md` 为唯一事实源）**：交互式 Codex 会话触发 `PreToolUse`（启动有 hook 信任提示）· 原生子代理工具调用触发 · `spawn_agent` / `wait_agent` / `close_agent` 类调用各自触发 · 子代理可被指向独立 worktree · 全局 `~/.codex/hooks.json` 与项目级 hook **并存生效**（合并规则未覆盖）。
+**交互式 Codex 实测口径（唯一事实源 = `.specs/p9-codex-probe-2026-10-04.md`）**：交互式 Codex 会话触发 `PreToolUse`（启动有 hook 信任提示）· 原生子代理工具调用触发 · `spawn_agent` / `wait_agent` / `close_agent` 类调用各自触发 · 子代理可被指向独立 worktree · 全局 `~/.codex/hooks.json` 与项目级 hook **并存生效**（合并规则未覆盖）。
 
-**已知边界（不得写成机械保证）**：① Codex 载荷 `cwd` = 会话根，**与实际工作目录无关**（P9 证实）⇒ 路径判定在 Codex 上必错，故判定序为**身份先于路径**；② 身份判据是**声明式信任边界**——守卫读到的 `agent_id` 来自宿主载荷，本机制**不声称能证明**其真实来源；③ P9 结论只覆盖「Windows + 交互式 Codex TUI + 该版本」形态，`agent_type` 取值域、嵌套委派载荷、非 Windows 环境**未覆盖**。
+**已知边界（不得写成机械保证）**：① Codex 载荷 `cwd` = 会话根，**与实际工作目录无关**（实测证实）⇒ 路径判定在 Codex 上必错，故判定序为**身份先于路径**；② 身份判据是**声明式信任边界**——守卫读到的 `agent_id` 来自宿主载荷，本机制**不声称能证明**其真实来源；③ 该次实测结论只覆盖「Windows + 交互式 Codex TUI + 该版本」形态，`agent_type` 取值域、嵌套委派载荷、非 Windows 环境**未覆盖**。
 
 **四属性的机制落点**：① 由守卫的身份短路 + 最小保护集承载（`comet-hook-guard.mjs`）· ② / ④ 见 `flow-comet-subagent-execute` 与 `flow-comet-execute` 两册的提交 / 集成纪律 · ③ 由 `subagent-execute` 出口校验承载。
 
