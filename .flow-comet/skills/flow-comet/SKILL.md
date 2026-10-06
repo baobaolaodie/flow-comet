@@ -132,7 +132,7 @@ node .claude/skills/flow-comet/scripts/context-scan.mjs [--root <项目根>] [--
 
 | 属性 | Claude Code | Codex | dsh |
 |------|-------------|-------|-----|
-| ① 写权限 | 载荷 `agent_id`——**未覆盖**（该次实测只覆盖 Codex）：依据为上游 schema 原文（以 `agent_id` 区分主线程与子代理）+ 本批引擎喂测；真机会话复核待补 | 载荷 `agent_id` + `agent_type`——**证实**（实测：子代理载荷 12 键含二者、主线程 10 键不含）；守卫读 `agent_id`，与 CC 同一判据 | 桥接透传 `delegationDepth`——**证实**（0.1.7-rc.2 全接缝重认证；本批收窄为「最小保护集除外」） |
+| ① 写权限 | 载荷 `agent_id` / `agent_type`——**证实**（真机实测：子代理载荷含二者、主会话载荷不含；与 Codex 同一判据） | 载荷 `agent_id` + `agent_type`——**证实**（实测：子代理载荷 12 键含二者、主线程 10 键不含）；守卫读 `agent_id`，与 CC 同一判据 | 桥接透传 `delegationDepth`——**证实**（0.1.7-rc.2 全接缝重认证；本批收窄为「最小保护集除外」） |
 | ② 提交隔离 | pathspec 纪律（多写者共享同一工作区形态） | 同左 | 同左 |
 | ③ 验证隔离 | `subagent-execute` 出口锚：有 request 无 result（新 change BLOCKED / 旧 change WARN 渐进） | 同左 | 同左 |
 | ④ 集成纪律 | `merge --no-ff` 优先；降级 cherry-pick 必记因 | 同左 | 同左 |
@@ -140,7 +140,17 @@ node .claude/skills/flow-comet/scripts/context-scan.mjs [--root <项目根>] [--
 
 **交互式 Codex 实测口径（唯一事实源 = `.specs/p9-codex-probe-2026-10-04.md`）**：交互式 Codex 会话触发 `PreToolUse`（启动有 hook 信任提示）· 原生子代理工具调用触发 · `spawn_agent` / `wait_agent` / `close_agent` 类调用各自触发 · 子代理可被指向独立 worktree · 全局 `~/.codex/hooks.json` 与项目级 hook **并存生效**（合并规则未覆盖）。
 
-**已知边界（不得写成机械保证）**：① Codex 载荷 `cwd` = 会话根，**与实际工作目录无关**（实测证实）⇒ 路径判定在 Codex 上必错，故判定序为**身份先于路径**；② 身份判据是**声明式信任边界**——守卫读到的 `agent_id` 来自宿主载荷，本机制**不声称能证明**其真实来源；③ 该次实测结论只覆盖「Windows + 交互式 Codex TUI + 该版本」形态，`agent_type` 取值域、嵌套委派载荷、非 Windows 环境**未覆盖**。
+**已知边界（不得写成机械保证）**：① Codex 载荷 `cwd` = 会话根，**与实际工作目录无关**（实测证实）⇒ 路径判定在 Codex 上必错，故判定序为**身份先于路径**；② 身份判据是**声明式信任边界**——守卫读到的 `agent_id` 来自宿主载荷，本机制**不声称能证明**其真实来源；③ 该次实测结论只覆盖「Windows + 交互式 Codex TUI + 该版本」形态；CC 侧身份判据的真机实测条件同样是**限定形态**——**Windows + CC v2.1.177 + `permission_mode = bypassPermissions` + 一次性仓库载体**。`agent_type` 取值域、嵌套委派载荷、非 Windows 环境、非 `bypassPermissions` 权限模式**均未覆盖**（未覆盖 ≠ 已验证，不得写成已支持）。
+
+**三平台 `cwd` 语义对照（真机实测新增的精确事实 · 「身份先于路径」的精确理由）**——同为载荷 `cwd`，三平台语义各不相同；下表**三行各自独立**，缺一行即口径残缺：
+
+| 平台 | 载荷 `cwd` 的实际语义 | 对路径判定的影响 |
+|------|----------------------|------------------|
+| **Claude Code** | **子代理的工作目录**（`…\.claude\worktrees\<agent-id>`） | **路径判定是正确的** |
+| **Codex** | **恒等于会话根**（子代理在 worktree 写入而 `cwd` 仍是主工程） | **路径判定必错** |
+| **dsh** | 载荷**无** `cwd`（桥接另读会话 header cwd） | 路径判定**不适用** |
+
+> ⇒ **不是「路径判定普遍不可靠」，而是三平台 `cwd` 语义各不相同（正确 / 恒错 / 无）——只有身份判据是三平台同义的**。该对照只解释**为什么必须身份优先**，**不构成**「可以改走路径判定」的依据：契约仍走**身份判据**（三条通道同义）。
 
 **四属性的机制落点**：① 由守卫的身份短路 + 最小保护集承载（`comet-hook-guard.mjs`）· ② / ④ 见 `flow-comet-subagent-execute` 与 `flow-comet-execute` 两册的提交 / 集成纪律 · ③ 由 `subagent-execute` 出口校验承载。
 

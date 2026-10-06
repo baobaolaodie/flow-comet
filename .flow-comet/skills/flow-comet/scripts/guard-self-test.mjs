@@ -8870,6 +8870,11 @@ const SCENARIOS = [
           '**留痕的边界（诚实声明 · 与 `directOverride` / `completedChecks` / `reentryAuthorization` 同族）**',
           '留痕记录的是「**发生过委派**」，**不是**对执行者身份的物理证明',
           '与 `completedChecks` 只能记录声明、`directOverride` 只能记录授权、`reentryAuthorization` 只能记录授权源同理',
+          // CC 行判级升格（真机实测落地）：平台表通道描述 + 判级口径的证实条目——两册同锁块内逐字
+          // 一致，抽掉任一句必红（`L-106` 判别句式，非裸子串）；未覆盖项保留权限模式边界。
+          '> | **Claude Code** | 身份分派（载荷含 `agent_id` / `agent_type`——**证实**：真机实测子代理载荷含二者、主会话载荷不含，与 Codex 同一判据）',
+          'CC 子代理载荷含 `agent_id` / `agent_type`（真机实测：子代理载荷含二者、主会话载荷不含，与 Codex 同一判据）',
+          '非 `bypassPermissions` 权限模式下的载荷形态',
         ];
         const phraseGroups = [
           ['提交面 pathspec 纪律', pathspecLockPhrases],
@@ -8917,6 +8922,62 @@ const SCENARIOS = [
           const revertedStatus = text + '\n未获机制明文放行。\n';
           if (!lockProblemsFor(rel, revertedStatus).some((p) => p.includes('未获机制明文放行'))) {
             problems.push(rel + ' 反向构造判别力缺失（还原现状表述未被判违规）');
+          }
+        }
+        // —— CC 行判级升格 + 三平台 cwd 语义对照（真机实测落地；入口册 + reference 平台表两处承载）——
+        // 判级由「未覆盖」升为「证实」后，四处文本各承载落地形态：入口册（用户可见总表 + 已知边界旁的
+        // 三平台 cwd 对照）· reference 平台表 · 两册同锁块（由上方 contractLockPhrases 锚定，逐字一致）。
+        // 锚一律取**段内独有判别句式**（裸子串会被同文件其它上下文满足而恒真——`L-106`）；cwd 对照表
+        // **逐行有锚**（三行各自独立，缺任一行即判残缺）；旧「未覆盖」判级句零残留（升格不彻底即红）。
+        const entrySkillText = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+        const worktreeNotesText = fs.readFileSync(path.join(__dirname, '..', 'reference', 'worktree-notes.md'), 'utf8');
+        const identityUpgradeGroups = [
+          ['flow-comet/SKILL.md', entrySkillText, [
+            '| ① 写权限 | 载荷 `agent_id` / `agent_type`——**证实**（真机实测：子代理载荷含二者、主会话载荷不含；与 Codex 同一判据） |',
+            '**三平台 `cwd` 语义对照（真机实测新增的精确事实 · 「身份先于路径」的精确理由）**',
+            '| **Claude Code** | **子代理的工作目录**（`…\\.claude\\worktrees\\<agent-id>`） | **路径判定是正确的** |',
+            '| **Codex** | **恒等于会话根**（子代理在 worktree 写入而 `cwd` 仍是主工程） | **路径判定必错** |',
+            '| **dsh** | 载荷**无** `cwd`（桥接另读会话 header cwd） | 路径判定**不适用** |',
+            '三平台 `cwd` 语义各不相同（正确 / 恒错 / 无）——只有身份判据是三平台同义的',
+            '非 `bypassPermissions` 权限模式**均未覆盖**',
+          ]],
+          ['reference/worktree-notes.md', worktreeNotesText, [
+            '载荷 `agent_id` / `agent_type`——**证实**（真机实测：子代理载荷含二者、主会话载荷不含；与 Codex 同一判据）',
+            '**三平台 `cwd` 语义对照（真机实测新增的精确事实 · 「身份先于路径」的精确理由）**——同为载荷 `cwd`，三平台语义各不相同，逐行如下（三行各自独立，缺一行即口径残缺）',
+            '| **Claude Code** | **子代理的工作目录**（`…\\.claude\\worktrees\\<agent-id>`） | **路径判定是正确的** |',
+            '| **Codex** | **恒等于会话根**（子代理在 worktree 写入而 `cwd` 仍是主工程，见 4.5） | **路径判定必错** |',
+            '| **dsh** | 载荷**无** `cwd`（桥接另读会话 header cwd，见 4.6） | 路径判定**不适用** |',
+            '三平台 `cwd` 语义各不相同（正确 / 恒错 / 无）——只有身份判据是三平台同义的',
+          ]],
+        ];
+        const staleUpgradePhrases = ['该次实测只覆盖 Codex', '真机会话复核待补', 'CC 隔离树的真实落点探针待补'];
+        const upgradeProblemsFor = (rel, text, phrases) => {
+          const out = [];
+          for (const phrase of phrases) {
+            if (!text.includes(phrase)) {
+              out.push(rel + ' 缺「CC 行升格 / 三平台 cwd 对照」判别句式：' + phrase.slice(0, 40) + '…');
+            }
+          }
+          for (const stale of staleUpgradePhrases) {
+            if (text.includes(stale)) {
+              out.push(rel + ' 残留 CC 行旧「未覆盖」判级表述：' + stale);
+            }
+          }
+          return out;
+        };
+        for (const [rel, text, phrases] of identityUpgradeGroups) {
+          problems.push(...upgradeProblemsFor(rel, text, phrases));
+          // 反向构造（同一判据驱动）：逐句抽掉 ⇒ 必报该句缺失；旧判级句还原 ⇒ 必报残留。
+          for (const phrase of phrases) {
+            if (!text.includes(phrase)) continue; // 缺失已由上方真实判据报告
+            const stripped = text.split(phrase).join('（反向构造：抽掉）');
+            if (!upgradeProblemsFor(rel, stripped, phrases).some((p) => p.includes(phrase.slice(0, 40)))) {
+              problems.push(rel + ' 反向构造判别力缺失（抽掉该句未被判违规）: ' + phrase.slice(0, 40) + '…');
+            }
+          }
+          const revertedUpgrade = text + '\n该次实测只覆盖 Codex；真机会话复核待补。\n';
+          if (!upgradeProblemsFor(rel, revertedUpgrade, phrases).some((p) => p.includes('旧「未覆盖」判级表述'))) {
+            problems.push(rel + ' 反向构造判别力缺失（还原旧「未覆盖」判级句未被判残留）');
           }
         }
         // —— 文本 ↔ 实现一致锚：文本点名的实现常量 / 载荷键名 / 受保护目标必须与引擎同值 ——
