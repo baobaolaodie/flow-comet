@@ -9,7 +9,9 @@ import {
   readWorkflowProtectedFile,
   resolveProtocol,
   validateProtocolSchema,
+  workflowFileObjectIdentity,
   workflowPathInside,
+  workflowSameFileObject,
 } from './protocol-utils.mjs';
 // 运行时路径常量（单一来源：state-schema.mjs）——本脚本每次工具调用都会执行，故此处只 import
 // 同包内的本地 ESM 模块（与已存在的 protocol-utils.mjs import 同型，实测无可感知开销）；
@@ -352,6 +354,35 @@ function blockStateFileWrite(target) {
   );
 }
 
+// ── 身份判据（ADR-014 决策 2：三平台同一、无平台分支）────────────────────────────
+// 载荷 `agent_id` 在场（CC / Codex 原生子代理，真机载荷实测形态）或环境变量
+// FLOW_COMET_AGENT_DEPTH 为正整数（dsh 桥接透传）⇒ 子代理语义。两输入面归并为**一个**判据
+// （消费方只问「是不是子代理」），不得下沉为 `if (platform === ...)` 之类的平台分支。
+// 取值形态按实证收窄：载荷面只认**非空字符串**（空串 / 缺失 / 非字符串一律非身份）；env 面只认
+// **纯十进制正整数字符串**（"0" = 协调者 ⇒ 非身份；空串 / 负数 / 小数 / 带杂质一律非身份）。
+// 收窄方向是 fail-closed：不命中的形态退回既有路径判定——该回退态即 AC-2 (b) 写死的「维持现状」，
+// 不得读成新判据的放宽。
+function payloadAgentIdentity(input) {
+  if (!input || typeof input !== 'object') return '';
+  const raw = input.agent_id;
+  return typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : '';
+}
+
+function agentDepthIdentity(value) {
+  if (typeof value !== 'string') return 0;
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return 0;
+  const depth = Number.parseInt(trimmed, 10);
+  return Number.isSafeInteger(depth) && depth > 0 ? depth : 0;
+}
+
+function subagentIdentity(input) {
+  return (
+    payloadAgentIdentity(input) !== '' ||
+    agentDepthIdentity(process.env.FLOW_COMET_AGENT_DEPTH) > 0
+  );
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..');
 // 项目根判定兜底链（级3 cwd 漂移实测暴露的 H5 残留缺口收口）：
@@ -390,6 +421,77 @@ const runRoot = (() => {
 // 协议路径取 env FLOW_COMET_PROTOCOL 或默认 <packageRoot>/reference/workflow-protocol.json
 const protocolPath = resolveProtocol(packageRoot, runRoot, []);
 
+// ── 最小保护集（ADR-014 决策 4）：身份在场时仍受拦的两个目标 ─────────────────────
+// ① 机器状态文件（判据 = 上方 blockedStateFileTarget，取值来源 state-schema.mjs 的
+//    RUNTIME_STATE_PATH）；② 本次运行**实际生效**的协议文件（取值来源 = 上方 protocol-utils
+//    resolveProtocol 的解析结果——本文件不另造第二份协议路径口径）。
+// 同一性判定复用 protocol-utils 既有受保护路径判据 workflowPathInside（互含 ⇒ 同一路径）：
+// 路径归一/相对化只此一份，本文件不新增第二份路径判据（L-067）。大小写敏感性与状态文件判据
+// 同口径（共用 CASE_INSENSITIVE_FS 策略常量；win32 的 path.relative 本身已按小写比较）。
+function isSameWorkflowPath(left, right) {
+  const fold = (value) => (CASE_INSENSITIVE_FS ? value.toLowerCase() : value);
+  const a = fold(path.resolve(left));
+  const b = fold(path.resolve(right));
+  return workflowPathInside(a, b) && workflowPathInside(b, a);
+}
+
+function blockedProtocolFileTarget(absoluteTarget) {
+  return isSameWorkflowPath(protocolPath, absoluteTarget);
+}
+
+// 保护集的**物理**同一性判定（词法判定的别名闭合）：8.3 短路径 / 符号链接 / junction / 硬链接
+// 是同一文件实体的不同拼写，词法比较看不见它们（身份放行下保护集是唯一防线，故须闭合）。
+// 判据复用 protocol-utils.mjs 导出的文件身份比较判据（workflowFileObjectIdentity +
+// workflowSameFileObject）——本文件不新增第二份文件身份判据（L-067）。
+// 目标不存在（新建文件是常态）或 stat 失败 ⇒ 无法证明同一 ⇒ 返回 false（退回词法判定）；
+// 诚实边界：物理判定只证明「此刻存在且同一」，不证明「将来仍同一」（与 TOCTOU 同族的既有限制）。
+async function isSameProtectedFileObject(targetAbsolute, protectedAbsolute) {
+  try {
+    const [targetStat, protectedStat] = await Promise.all([
+      fs.stat(targetAbsolute, { bigint: true }),
+      fs.stat(protectedAbsolute, { bigint: true }),
+    ]);
+    return workflowSameFileObject(
+      workflowFileObjectIdentity(targetStat),
+      workflowFileObjectIdentity(protectedStat),
+    );
+  } catch {
+    return false;
+  }
+}
+
+// 拦截报文沿用既有 hookBlock 风格（主行 BLOCKED + 详情行恢复指引）——新增判定不引入新输出形态。
+function blockProtocolFileWrite(target) {
+  hookBlock(
+    `BLOCKED: 协议文件 "${target}" 禁工具写（身份放行不放行协议保护路径——协议变更走协议文件通道）`,
+    '恢复: 协议文件由人工/安装器通道维护；不得由工具写覆盖运行中协议'
+  );
+}
+
+// 身份在场时的最小保护集执行：候选写入目标逐个判定，命中即以既有报文风格拦截（hookBlock
+// 不返回）；未命中 ⇒ 返回（调用方按子代理语义放行）。判定入口唯一——身份短路与保护集判定都在此收口。
+// 两个目标各双判据：词法同一性（规范拼写）+ 物理同一性（别名形态）。
+async function enforceMinimalProtectionSet(hookInput) {
+  const stateFileAbsolute = path.join(runRoot, ...STATE_FILE_REL.split('/'));
+  for (const candidate of protectedCandidateTargets(hookInput)) {
+    const resolvedTarget = resolveWriteTarget(candidate);
+    if (resolvedTarget === null) continue;
+    if (
+      blockedProtocolFileTarget(resolvedTarget.absolute) ||
+      (await isSameProtectedFileObject(resolvedTarget.absolute, protocolPath))
+    ) {
+      blockProtocolFileWrite(resolvedTarget.raw);
+    }
+    if (resolvedTarget.targetRel !== null) {
+      if (
+        blockedStateFileTarget(resolvedTarget.targetRel) ||
+        (await isSameProtectedFileObject(resolvedTarget.absolute, stateFileAbsolute))
+      ) {
+        blockStateFileWrite(resolvedTarget.raw);
+      }
+    }
+  }
+}
 
 const WORKFLOW_PROJECT_FILE_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -507,23 +609,52 @@ async function readHookInput() {
   }
 }
 
-// 计算写入目标相对 runRoot 的路径（正斜杠分隔，供 PHASE_WRITE_WHITELIST 前缀匹配）。
-// 无法解析或目标在项目根之外时返回 null。
-function writeTargetFromHookInput(input) {
+// 写入目标解析（单一实现——白名单判定 / 保护集判定 / runRoot 外关断三条判定共用，禁止各处
+// 再写一份相对化口径）。`rawTarget` 为 file_path 或命令级写入 token：绝对路径原样、相对路径
+// 按 runRoot 解析。返回结构：
+//   insideRunRoot=true  → targetRel = 相对 runRoot 的 POSIX 路径（白名单前缀匹配 / 状态文件比较）
+//   insideRunRoot=false → targetRel = null（项目根之外；由「runRoot 外写入关断」与 Bash 分支同判）
+// 无写入语义（非字符串 / 空串）→ null（该目标不参与任何判定）。
+function resolveWriteTarget(rawTarget) {
+  if (typeof rawTarget !== 'string') return null;
+  const trimmed = rawTarget.trim();
+  if (trimmed === '') return null;
+  const absolute = path.resolve(runRoot, trimmed);
+  const relative = path.relative(runRoot, absolute);
+  const outside =
+    path.isAbsolute(relative) || relative === '..' || relative.startsWith('..' + path.sep);
+  return {
+    raw: trimmed,
+    absolute,
+    insideRunRoot: !outside,
+    targetRel: outside ? null : relative === '' ? '.' : relative.replaceAll('\\', '/'),
+  };
+}
+
+// file_path 载荷面提取（单一实现：file_path 形态判定与保护集候选共用同一提取口径）。
+function toolFilePathFromHookInput(input) {
   if (!input || typeof input !== 'object') return null;
   const toolInput =
     input.tool_input && typeof input.tool_input === 'object' ? input.tool_input : null;
-  const filePath =
-    toolInput && typeof toolInput.file_path === 'string' ? toolInput.file_path : null;
-  if (!filePath) return null;
-  const absolute = path.isAbsolute(filePath)
-    ? path.resolve(filePath)
-    : path.resolve(runRoot, filePath);
-  const relative = path.relative(runRoot, absolute);
-  if (path.isAbsolute(relative) || relative === '..' || relative.startsWith('..' + path.sep)) {
-    return null;
+  return toolInput && typeof toolInput.file_path === 'string' ? toolInput.file_path : null;
+}
+
+// file_path 形态（Write / Edit / …）：载荷无 file_path ⇒ null（无写入语义，不判定）。
+// 与命令级 token 共用 resolveWriteTarget——同一路径不因所选工具而异。
+function fileWriteTargetFromHookInput(input) {
+  return resolveWriteTarget(toolFilePathFromHookInput(input));
+}
+
+// 保护集判定的候选目标（工具形态适配，单一实现）：Bash 取命令级写入 token（与下方 Bash 分支
+// 同一提取器）；其余工具取 file_path。无写入语义 ⇒ 空数组（身份放行不对无写入语义的调用做判定）。
+function protectedCandidateTargets(input) {
+  if (input && typeof input === 'object' && input.tool_name === 'Bash') {
+    const toolInput =
+      input.tool_input && typeof input.tool_input === 'object' ? input.tool_input : null;
+    return codexWriteTargetsFromCommand(toolInput ? toolInput.command : null);
   }
-  return relative === '' ? '.' : relative.replaceAll('\\', '/');
+  const filePath = toolFilePathFromHookInput(input);
+  return filePath === null ? [] : [filePath];
 }
 
 // 声明化写入白名单：协议 writeWhitelist（节点 id → 路径前缀数组）优先；
@@ -595,7 +726,22 @@ async function main() {
   const { whitelist: PHASE_WRITE_WHITELIST, declared } = await resolvePhaseWriteWhitelist(executionMode);
 
   const hookInput = await readHookInput();
-  const target = writeTargetFromHookInput(hookInput);
+
+  // ── ①【ADR-014 决策 2·3】身份短路：身份判据**先于**路径判据求值 ──────────────────────
+  // 身份在场（载荷 agent_id / env FLOW_COMET_AGENT_DEPTH>0）⇒ 直接进入子代理语义：**不再做路径
+  // 审计**（不解析白名单、不判隔离区、不判 runRoot 内外），只判最小保护集——两个机器面目标
+  // （状态文件 / 本次运行生效的协议文件）命中即 BLOCK，未命中即放行（见 enforceMinimalProtectionSet）。
+  // 顺序锚（AC-4 ②）：身份在场 + 目标在 runRoot 之外 ⇒ 放行；顺序若反转（先解析路径）必 BLOCK。
+  // 放行覆盖「手工 worktree / 独立工作区」形态：路径判定在平台载荷 cwd ≠ 实际工作目录时不可用
+  // （交互式真机探针实证），故身份通道不以路径为前置。
+  if (subagentIdentity(hookInput)) {
+    await enforceMinimalProtectionSet(hookInput);
+    hookOk('(subagent identity)');
+    return;
+  }
+
+  const fileTarget = fileWriteTargetFromHookInput(hookInput);
+  const target = fileTarget ? fileTarget.targetRel : null;
 
   // R5: Bash 工具写路径适配(CC 与 Codex 通用)——Bash 工具的 command 字符串(无 file_path),
   // 解析写入目标按当前节点白名单判定(与 file_path 判定同语义);未命中写入模式 = 无写入语义,放行。
@@ -608,9 +754,8 @@ async function main() {
       // 声明模式未列出节点 → fail-closed(同 file_path 判定);缺省表无此节点 → 协调者默认 .specs/
       const effectiveWhitelist = whitelist || (declared ? null : ['.specs/']);
       for (const t of writeTargets) {
-        const absolute = path.resolve(runRoot, t);
-        const rel = path.relative(runRoot, absolute);
-        const targetRel = (path.isAbsolute(rel) || rel === '..' || rel.startsWith('..' + path.sep)) ? null : rel.replaceAll('\\', '/');
+        const resolvedTarget = resolveWriteTarget(t);
+        const targetRel = resolvedTarget ? resolvedTarget.targetRel : null;
         if (targetRel !== null && blockedStateFileTarget(targetRel)) {
           blockStateFileWrite(t);
         }
@@ -648,6 +793,18 @@ async function main() {
     }
     hookOk();
     return;
+  }
+
+  // ── ②【ADR-014 决策 6】runRoot 外写入的 fail-open 关断（两分支对称）──────────────────
+  // file_path 解析为项目根之外时，与上方 Bash 分支**同判**：该分支对 targetRel === null 的目标
+  // 同样落入 `allowed=false` → 拦截。修复前 file_path 分支在此静默落入后继流程（越界写无痕放过），
+  // Bash 分支却拦截 —— 同一目标因工具而异。判定条件与 Bash 分支逐条对齐（有写入语义 + currentNode
+  // 在场）；身份在场者已由上方 ① 短路放行，故「手工 worktree 绝对路径写入」不受本关断影响。
+  if (fileTarget && !fileTarget.insideRunRoot && currentNode) {
+    hookBlock(
+      `BLOCKED: 写入 "${fileTarget.raw}" 不在当前节点 "${currentNode}" 允许范围（目标在项目根之外）`,
+      '恢复: 改用项目根内的路径；子代理经身份通道放行（载荷 agent_id / 环境变量 FLOW_COMET_AGENT_DEPTH）'
+    );
   }
 
   if (currentNode && target) {
