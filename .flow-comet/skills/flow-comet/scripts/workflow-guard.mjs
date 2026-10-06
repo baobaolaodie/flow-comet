@@ -645,6 +645,19 @@ function hasNonEmptyHandoffResult(evidence) {
   );
 }
 
+// AC-8 / D12 在飞委托判定（验证隔离「同一时刻只有一个写者」）——handoffRequests 中存在条目而
+// handoffResult 无对应记录 = 写者未收工的既有可判形态。判据单处求值（出口校验唯一消费方）。
+// 三态收敛：无 evidence['subagent-execute'] / 无 handoffRequests 条目 ⇒ 返回空数组（调用方零输出，
+// 不制造噪音）；全部有对应 result ⇒ 同样空数组（放行）。锚定既有字段，零新增 state 顶层字段。
+function inFlightHandoffRequests(evidence) {
+  const requests = evidence && typeof evidence === 'object' ? evidence.handoffRequests : null;
+  if (!requests || typeof requests !== 'object' || Array.isArray(requests)) return [];
+  const results = evidence.handoffResult && typeof evidence.handoffResult === 'object' && !Array.isArray(evidence.handoffResult)
+    ? evidence.handoffResult
+    : {};
+  return Object.keys(requests).filter((taskId) => results[taskId] === undefined || results[taskId] === null);
+}
+
 function schemaMap(protocol) {
   return new Map((protocol.outputSchemas ?? []).map((schema) => [schema.id, schema]));
 }
@@ -1802,6 +1815,25 @@ async function main() {
         console.error('恢复: 由协调者执行 workflow-state.mjs execution-mode direct 显式授权（写入授权审计记录）后重试 exit；或 execution-mode subagent 切回（清除 directOverride）后重试 exit；禁止手改 state 机器字段');
         process.exit(1);
       }
+    }
+  }
+  // W1-E: 验证隔离「同一时刻只有一个写者」出口校验（AC-8 / D4 / D12）——读
+  // state.evidence['subagent-execute'].handoffRequests：存在条目且**至少一个无对应 handoffResult**
+  // ⇒ 在飞委托（写者未收工，跑全量判据会被未提交中间态污染）：新 change BLOCKED（含恢复指引
+  // 「待写入者收工后重跑」）/ 旧 change WARN 渐进；全部有对应 result ⇒ 放行；无该证据对象 ⇒ 零输出。
+  // 落点 = 出口校验流（与其余 violations / WARN 同风格，不新增独立命令面）；判据经
+  // inFlightHandoffRequests 单处求值（与 W1-D 的 result 侧契约校验正交，不重复判定）。
+  if (EXECUTE_FAMILY_NODE_IDS.has(node.id)) {
+    const inFlight = inFlightHandoffRequests(state.evidence?.['subagent-execute']);
+    if (inFlight.length > 0) {
+      const inFlightDetail = '存在在飞委托（handoffRequests 有 request 无对应 handoffResult）: '
+        + inFlight.join(', ') + '——验证隔离要求同一时刻只有一个写者（写者未收工）';
+      if (isNewChange(state)) {
+        console.error('BLOCKED: ' + inFlightDetail);
+        console.error('恢复: 待写入者收工后重跑——子代理回传后用 workflow-handoff.mjs result <task-id> <Return Contract> 记录结果再重试 exit；若该委托已作废，先撤销对应 request 记录');
+        process.exit(1);
+      }
+      console.error('WARN: ' + inFlightDetail + '（旧 change 渐进不阻断；待写入者收工后重跑全量判据）');
     }
   }
   // W1-B: execute / subagent-execute 出口校验每份 SUMMARY 含三个必填段 + 6 维自查非空 + 自检方法
