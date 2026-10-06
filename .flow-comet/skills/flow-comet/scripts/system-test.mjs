@@ -3269,6 +3269,55 @@ const TEST_ITEMS = [
         throw new Error('零提交 result 应真实写入 state');
       }
 
+      // ⑫b 并行 × 零提交（真实 request/result 链路）：同一零提交资格在 parallel="true" 任务上
+      //     照常成立——并行维度不改四属性映射：① 写权限走身份通道、② 提交隔离走既有 noCommit
+      //     资格（零提交 ⇒ 无提交，提交隔离由「无提交」满足）。任务归属 subagent-execute
+      //     （并行 pending），request 记 noCommit:true、result 回传无 commitHash 的零提交契约
+      //     ⇒ exit 0、不因并行维度被契约校验拦。前提在场锚：TASK.md 该任务确带 parallel="true"，
+      //     且归属校验真实执行（协议可读、节点已 entry——不静默退化成串行/跳过形态）。
+      const parallelTaskPath = path.join(dir, '.specs', CHANGE_ID, 'TASK.md');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
+        '# TASK\n\n<task id="P16" parallel="true" status="pending"><action>并行账本同步</action>'
+        + '<write_files>.specs/' + CHANGE_ID + '/P16-SUMMARY.md</write_files>'
+        + '<verify>echo ok</verify></task>\n');
+      if (!fs.readFileSync(parallelTaskPath, 'utf8').includes('<task id="P16" parallel="true" status="pending">')) {
+        throw new Error('并行 × 零提交锚的前提失效：TASK.md 未标 parallel="true"');
+      }
+      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
+      const stParallel = readStateFile(dir);
+      stParallel.currentNode = 'subagent-execute';
+      stParallel.enteredNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute'];
+      stParallel.newChange = true;
+      writeState(dir, stParallel);
+      const parallelEnv = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
+      const reqParallel = runHandoff(['request', 'P16', '并行零提交任务委托'], dir, parallelEnv);
+      assertExit(reqParallel, 0);
+      assertOut(reqParallel, 'HANDOFF REQUEST: P16');
+      assertOut(reqParallel, 'HANDOFF 零提交资格: P16');
+      assertNotOut(reqParallel, '本次未执行归属校验');
+      assertNotOut(reqParallel, '尚未 entry');
+      const parallelReqRecord = readStateFile(dir).evidence['subagent-execute'].handoffRequests.P16;
+      if (!parallelReqRecord || parallelReqRecord.noCommit !== true) {
+        throw new Error('并行任务的字面 gitignored write_files 应同样记录 noCommit:true: ' + JSON.stringify(parallelReqRecord));
+      }
+      const resParallel = runHandoff(['result', 'P16', JSON.stringify({
+        status: 'DONE', taskId: 'P16', noCommit: true,
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        redEvidence: { command: 'echo ok' },
+        greenEvidence: { command: 'echo ok', output: 'ok' },
+      })], dir);
+      assertExit(resParallel, 0);
+      assertOut(resParallel, 'HANDOFF RESULT: P16');
+      assertOut(resParallel, 'HANDOFF 零提交: P16');
+      assertNotOut(resParallel, 'HANDOFF ERROR');
+      assertNotOut(resParallel, 'BLOCKED');
+      const parallelResultRecord = readStateFile(dir).evidence['subagent-execute'].handoffResult.P16;
+      if (!parallelResultRecord || parallelResultRecord.result?.noCommit !== true
+        || parallelResultRecord.result.commitHash !== undefined) {
+        throw new Error('并行零提交 result 应写入无 commitHash 的契约: ' + JSON.stringify(parallelResultRecord));
+      }
+      console.log('  AC-9 并行×零提交: parallel="true" 任务 request 记 noCommit:true → result 无 commitHash 契约通过（exit 0）✓');
+
       // ⑬ 零提交负例：无资格形态（glob / .. 越界 / 非 git 仓 / tracked 文件）→ request 不记 noCommit
       const assertNoCommitNotRecorded = (root, taskId, label) => {
         const requestState = readStateFile(root);

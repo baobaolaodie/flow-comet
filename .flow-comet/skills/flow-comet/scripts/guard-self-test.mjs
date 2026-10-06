@@ -2876,6 +2876,197 @@ function writeDesignExitFixture(dir, {
   }
 }
 
+// ---------- 锚助手（模块级具名实现：场景主体只调用，避免长体内插） ----------
+
+// apply_patch heredoc 目标解析的耐久锚。载荷形态 = Codex 承载补丁的真实调用
+// （tool_name="Bash"、补丁正文在 tool_input.command、载荷无 file_path）：四类补丁摘要行
+// （Update / Add / Delete / Move to）× 身份 / 协调者白名单两态 × 定界符变体 × 反例组。
+// 判据含**内建反向构造**（L-064）：把守卫副本的补丁解析停用（解析器入口早退）后，同一组
+// 载荷里预期拦截的用例必须**全部**翻成放行——证明本锚断言的不是恒真形态。副本落在场景临时
+// 目录（只复制守卫与其三个同包依赖），不触碰权威源文件（零写入、零临时改名）。
+// 保护集第二目标按**本次运行实际生效的协议文件**取值（FLOW_COMET_PROTOCOL 的解析结果），
+// 不是「任意名为 workflow-protocol.json 的文件」——同名异路径用例（allow）即该边界的判别锚。
+function applyPatchPayloadMatrix() {
+  const stateTarget = '.flow-comet/flow-comet-state.json';
+  const protocolTarget = 'reference/workflow-protocol.json'; // = 本场景实际生效的协议路径
+  const sameNameElsewhere = '.specs/' + CHANGE_ID + '/workflow-protocol.json';
+  const srcTarget = 'src/patched.mjs';
+  const specsTarget = '.specs/' + CHANGE_ID + '/patched.md';
+  const identity = { agent_id: 'agent-abc123' };
+  // 补丁承载形态：`apply_patch <<'PATCH'` + 正文 + 定界行；dash / 引号形态按 shell 语义拼装。
+  const patchCommand = (bodyLines, { delimiter = "'PATCH'", dash = false, close = true } = {}) => {
+    const closing = (dash ? '\t' : '') + delimiter.replace(/^["']|["']$/g, '');
+    const lines = ['apply_patch <<' + (dash ? '-' : '') + delimiter, '*** Begin Patch', ...bodyLines];
+    if (close) lines.push(closing);
+    return lines.join('\n');
+  };
+  const payloads = [];
+  const add = (label, command, expect, withIdentity = true) =>
+    payloads.push({ label, command, expect, identity: withIdentity ? identity : {} });
+  // ① 四类摘要行 × 身份态 → 机器状态文件仍受拦（保护集，身份放行不放行它）
+  for (const header of ['*** Update File:', '*** Add File:', '*** Delete File:', '*** Move to:']) {
+    add('身份 + ' + header + ' state 文件', patchCommand([header + ' ' + stateTarget]), 'block');
+  }
+  // ② 身份态对照：普通源码放行（不过宽）；实际生效的协议文件受拦；**同名异路径**放行（判据是
+  //    解析结果而非文件名——保护集第二目标的边界）
+  add('身份 + Update File 普通源码', patchCommand(['*** Update File: ' + srcTarget]), 'allow');
+  add('身份 + Update File 生效协议文件', patchCommand(['*** Update File: ' + protocolTarget]), 'block');
+  add('身份 + Update File 同名异路径协议文件', patchCommand(['*** Update File: ' + sameNameElsewhere]), 'allow');
+  // ③ 协调者白名单态（无身份）：.specs/ 放行；源码拦截；state 文件仍受拦（保护集无条件）
+  add('无身份 + Update File .specs/ 工件', patchCommand(['*** Update File: ' + specsTarget]), 'allow', false);
+  add('无身份 + Update File 源码', patchCommand(['*** Update File: ' + srcTarget]), 'block', false);
+  add('无身份 + Update File state 文件', patchCommand(['*** Update File: ' + stateTarget]), 'block', false);
+  // ④ 定界符变体 × state 文件 × 身份态 → 仍受拦
+  add('双引号定界符', patchCommand(['*** Update File: ' + stateTarget], { delimiter: '"PATCH"' }), 'block');
+  add('裸定界符', patchCommand(['*** Update File: ' + stateTarget], { delimiter: 'PATCH' }), 'block');
+  add('<<- 制表符定界行', patchCommand(['*** Update File: ' + stateTarget], { delimiter: "'PATCH'", dash: true }), 'block');
+  // ⑤ 反例：定界符之后的散行不得被吞并（吞并会把下游命令的参数读成写入目标）；正文无摘要行、
+  //    非 heredoc 的内联文本、引号内同名文本、无命令名的摘要行一律不误报
+  add('定界符后散行不吞并',
+    patchCommand(['*** Update File: ' + specsTarget]) + '\n*** Update File: ' + stateTarget, 'allow');
+  add('正文无摘要行', patchCommand(['@@ -1 +1 @@', '-old', '+new']), 'allow');
+  add('内联文本无 heredoc', 'echo "*** Update File: ' + stateTarget + '"', 'allow');
+  add('引号内 apply_patch 文本', 'echo "apply_patch <<\'PATCH\'"', 'allow');
+  add('无 apply_patch 命令名', 'grep -n "*** Update File: ' + stateTarget + '" patch.diff', 'allow');
+  // ⑥ 未闭合 heredoc：按「正文到命令末尾」处理（偏拦截方向的 fail-closed），摘要行仍被抽出
+  add('未闭合 heredoc', patchCommand(['*** Update File: ' + stateTarget], { close: false }), 'block');
+  return payloads;
+}
+
+// 单组载荷求值（真实守卫与反向构造副本共用）：cwd / runRoot / 协议路径与场景夹具一致。
+function runApplyPatchPayload(dir, hookPath, payload) {
+  const res = spawnSync(process.execPath, [hookPath, 'before_tool'], {
+    cwd: dir,
+    input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: payload.command }, ...payload.identity }),
+    env: {
+      ...process.env,
+      FLOW_COMET_RUN_ROOT: dir,
+      FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json'),
+    },
+    encoding: 'utf8',
+    timeout: 60000,
+  });
+  return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+}
+
+// 矩阵求值（单一实现）：逐组比对期望出口码与拦截报文，返回问题串。
+function applyPatchVerdictProblems(dir, hookPath, payloads) {
+  const problems = [];
+  for (const payload of payloads) {
+    const expected = payload.expect === 'block' ? 2 : 0;
+    const res = runApplyPatchPayload(dir, hookPath, payload);
+    if (res.status !== expected) {
+      problems.push('apply_patch 锚（' + payload.label + '）预期 exit ' + expected
+        + '，实际 exit ' + res.status + '：' + res.output.trim().slice(0, 120));
+    } else if (payload.expect === 'block' && !res.output.includes('BLOCKED')) {
+      problems.push('apply_patch 锚（' + payload.label + '）拦截报文缺 BLOCKED：' + res.output.trim().slice(0, 120));
+    }
+  }
+  return problems;
+}
+
+// 耐久锚主体：真实矩阵 + 内建反向构造（L-064）。
+function applyPatchAnchorProblems(dir) {
+  const payloads = applyPatchPayloadMatrix();
+  const problems = applyPatchVerdictProblems(dir, HOOK, payloads);
+  // 内建反向构造（L-064）：停用补丁解析 ⇒ 依赖该解析的拦截用例必须全部变红（此处判红）。
+  const probeDir = path.join(dir, 'probe-scripts');
+  fs.mkdirSync(probeDir, { recursive: true });
+  for (const rel of ['comet-hook-guard.mjs', 'protocol-utils.mjs', 'state-schema.mjs', 'time-utils.mjs']) {
+    fs.copyFileSync(path.join(__dirname, rel), path.join(probeDir, rel));
+  }
+  const probeHookPath = path.join(probeDir, 'comet-hook-guard.mjs');
+  const probeSource = fs.readFileSync(probeHookPath, 'utf8');
+  const entry = probeSource.indexOf('function applyPatchHeredocs(command) {');
+  if (entry < 0) {
+    problems.push('反向构造探针无法定位补丁解析入口（实现已改名——锚与实现漂移）');
+    return problems;
+  }
+  const brace = probeSource.indexOf('{', entry);
+  fs.writeFileSync(probeHookPath,
+    probeSource.slice(0, brace + 1) + '\n  return []; // 反向构造：停用补丁解析\n' + probeSource.slice(brace + 1), 'utf8');
+  let flipped = 0;
+  for (const payload of payloads) {
+    const res = runApplyPatchPayload(dir, probeHookPath, payload);
+    if (payload.expect === 'block') {
+      if (res.status === 0) flipped += 1;
+      else problems.push('反向构造判别力缺失（' + payload.label + ' 在解析停用后仍拦截）');
+    } else if (res.status !== 0) {
+      problems.push('反向构造引入新拦截（' + payload.label + ' 在解析停用后被拦）');
+    }
+  }
+  const blockCases = payloads.filter((p) => p.expect === 'block').length;
+  if (flipped !== blockCases) {
+    problems.push('反向构造未覆盖全部拦截用例（' + flipped + '/' + blockCases + ' 翻红）');
+  }
+  console.log('ANCHOR: apply_patch 目标解析矩阵 ' + payloads.length + ' 组（四类摘要行 × 身份/白名单两态 × '
+    + '定界符变体 × 反例；反向构造停用解析后 ' + flipped + '/' + blockCases + ' 组拦截用例全部翻红）');
+  fs.rmSync(probeDir, { recursive: true, force: true });
+  return problems;
+}
+
+// 段内 glob 语义两处实现的等价性锚（route-node 的计划期重叠判定 ↔ workflow-handoff 的提交
+// 子集校验）：同一 (声明, 字面) 矩阵两侧求值必须同判——否则「形态同源 + 漂移可见」无凭据。
+// 等价域 = **已归一**声明 × git 报告的**字面**路径（route-node 侧入参经计划期归一；handoff 侧
+// 的文件名来自 git，永不含 glob）。域外边界显式声明：双侧 glob 的保守重叠判定在 handoff 侧无
+// 对应物（提交文件名不可能是 glob），不在等价断言内。
+function globEquivalenceProblems(dir) {
+  const problems = [];
+  const overlaps = requireRouteNodeExport('collectPathOverlaps');
+  execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
+  const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
+  const commitFile = (rel) => {
+    writeFile(dir, rel, 'export const probe = 1;\n');
+    git('add', '--', rel);
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'chore: glob probe ' + rel);
+    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+  };
+  const hashes = new Map();
+  const hashFor = (rel) => {
+    if (!hashes.has(rel)) hashes.set(rel, commitFile(rel));
+    return hashes.get(rel);
+  };
+  // 矩阵：{ pattern: 已归一声明, literal: 真实提交路径, covered: 两侧应同判的结论 }
+  const matrix = [
+    { pattern: 'src/*.mjs', literal: 'src/a.mjs', covered: true, label: '段内通配命中' },
+    { pattern: 'src/*.mjs', literal: 'src/b.ts', covered: false, label: '段内通配扩展名不符' },
+    { pattern: 'src/*.mjs', literal: 'src/deep/a.mjs', covered: false, label: '段数不等不跨 /' },
+    { pattern: 'src/*', literal: 'src/a.mjs', covered: true, label: '整段通配' },
+    { pattern: 'src/a.mjs', literal: 'src/a.mjs', covered: true, label: '字面相等' },
+    { pattern: 'src/foo.mjs', literal: 'src/foobar.mjs', covered: false, label: '字面非前缀匹配' },
+    { pattern: 'SRC/*.mjs', literal: 'src/a.mjs', covered: false, label: '大小写不同不命中' },
+    { pattern: 'src/a?.mjs', literal: 'src/a1.mjs', covered: false, label: '非 * 元字符按字面（两侧同口径）' },
+  ];
+  let index = 0;
+  for (const cell of matrix) {
+    index += 1;
+    const taskId = 'E' + String(index).padStart(2, '0');
+    const routeSide = overlaps([cell.pattern], [cell.literal]).length > 0;
+    assertExit(runHandoff(['request', taskId, '--write-files', cell.pattern], dir), 0);
+    const handoffSide = runHandoff(['result', taskId, JSON.stringify({
+      status: 'DONE', taskId, commitHash: hashFor(cell.literal),
+      completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+      redEvidence: { command: 'echo ok' },
+      greenEvidence: { command: 'echo ok', output: 'ok' },
+    })], dir);
+    const handoffCovered = handoffSide.status === 0;
+    if (!handoffCovered && !handoffSide.output.includes('超出 writeFiles 范围')) {
+      problems.push('等价性锚（' + cell.label + '）提交子集校验未给出可判定结论：'
+        + handoffSide.output.trim().slice(0, 120));
+      continue;
+    }
+    if (routeSide !== cell.covered || handoffCovered !== cell.covered) {
+      problems.push('glob 语义两处实现不一致（' + cell.label + '）：声明 ' + cell.pattern + ' × 字面 '
+        + cell.literal + ' 期望 ' + cell.covered + '，route-node=' + routeSide + '，handoff=' + handoffCovered);
+    }
+  }
+  const coveredCount = matrix.filter((c) => c.covered).length;
+  console.log('ANCHOR: 段内 glob 等价性矩阵 ' + matrix.length + ' 格（命中 ' + coveredCount + ' / 不命中 '
+    + (matrix.length - coveredCount) + '）——route-node 计划期重叠判定与 workflow-handoff 提交子集校验同判；'
+    + '任一恒真或恒假实现即红');
+  return problems;
+}
+
 // ---------- 场景表 ----------
 
 const SCENARIOS = [
@@ -3148,6 +3339,38 @@ const SCENARIOS = [
       assertExit(res, 0);
       assertOut(res, 'ALL CHECKS PASSED');
       assertNotOut(res, '在飞委托');
+
+      // ①b 并行 × 零提交通过出口（AC-9）：parallel done 任务的留痕为「request 记 noCommit:true +
+      //     result 回传无 commitHash 的零提交契约」⇒ 出口按该资格豁免缺 commitHash，不因并行维度
+      //     而拦。判别力内建对照：同一并行任务去掉 request 的 noCommit 资格 ⇒ 必按缺 commitHash
+      //     拦截——证明豁免由资格驱动，不是并行维度的恒真形态。
+      const zeroParallelTask = '<task id="P01" status="done" parallel="true"><action>并行零提交</action>'
+        + '<write_files>.specs/' + CHANGE_ID + '/P01-SUMMARY.md</write_files><verify>echo ok</verify></task>\n';
+      const zeroParallelResult = (taskId) => ({
+        result: {
+          status: 'DONE', taskId, noCommit: true,
+          completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+          redEvidence: { command: 'echo ok' },
+          greenEvidence: { command: 'echo ok', output: 'ok' },
+        },
+      });
+      const zeroParallel = { ...baseState('subagent-execute') };
+      zeroParallel.evidence['subagent-execute'] = {
+        summary: 'parallel zero-commit task collected',
+        handoffRequests: { P01: { writeFiles: ['.specs/' + CHANGE_ID + '/P01-SUMMARY.md'], noCommit: true } },
+        handoffResult: { P01: zeroParallelResult('P01') },
+      };
+      writeState(dir, zeroParallel);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + zeroParallelTask);
+      const zeroParallelExit = runGuard(['exit', 'subagent-execute'], dir);
+      assertExit(zeroParallelExit, 0);
+      assertNotOut(zeroParallelExit, '缺 commitHash');
+      const unqualifiedParallel = JSON.parse(JSON.stringify(zeroParallel));
+      delete unqualifiedParallel.evidence['subagent-execute'].handoffRequests.P01.noCommit;
+      writeState(dir, unqualifiedParallel);
+      const unqualifiedExit = runGuard(['exit', 'subagent-execute'], dir);
+      assertExit(unqualifiedExit, 1);
+      assertOut(unqualifiedExit, '缺 commitHash');
 
       // ② 在飞委托（有 request 无对应 result）⇒ 新 change BLOCKED，报文点名未收工任务并给恢复指引
       const inFlight = { ...baseState('subagent-execute'), newChange: true };
@@ -8545,6 +8768,17 @@ const SCENARIOS = [
           '**证实**——Codex 交互式会话的原生子代理载荷含 `agent_id`',
           '**推翻**——「Codex 载荷无身份字段」只对 `codex exec` headless 主线程成立，**不得外推**为平台结论。',
           '**未覆盖（显式标注，不得写成已支持）**',
+          // 写面含 gitignored 面的四属性映射（AC-9 文本侧）：写权限走身份通道、提交隔离走既有
+          // noCommit 资格——两册同锁块内逐字一致，抽掉任一句必红（L-106 判别句式，非裸子串）。
+          '**写面含 gitignored 面的任务（四属性映射 · 与其他任务同一判据）**',
+          '① **写权限**仍走**身份通道**',
+          '② **提交隔离**走既有 **`noCommit` 资格**',
+          '**并行 × 零提交**因此合法',
+          // 留痕的诚实边界（AC-22 文本侧）：留痕证明「发生过委派」，不证明执行者身份——
+          // 与 directOverride / completedChecks / reentryAuthorization 同族。
+          '**留痕的边界（诚实声明 · 与 `directOverride` / `completedChecks` / `reentryAuthorization` 同族）**',
+          '留痕记录的是「**发生过委派**」，**不是**对执行者身份的物理证明',
+          '与 `completedChecks` 只能记录声明、`directOverride` 只能记录授权、`reentryAuthorization` 只能记录授权源同理',
         ];
         const phraseGroups = [
           ['提交面 pathspec 纪律', pathspecLockPhrases],
@@ -8646,6 +8880,11 @@ const SCENARIOS = [
           if (!handoff.includes("state.evidence['subagent-execute'].handoffRequests")) {
             out.push('留痕未落在嵌套证据（与文本声称的同族嵌套形态不一致）');
           }
+          // ⑥ 零提交资格字段与落库形态：文本声称「提交隔离走既有 noCommit 资格」——实现必须在
+          //    request 侧真实记录该字段（文本说 A、实现说 B 即红）。
+          if (!handoff.includes('noCommit: true')) {
+            out.push('零提交资格落库形态与文本声称的 request 记录不一致（缺 noCommit: true）');
+          }
           for (const [rel, text] of books) {
             if (!text.includes('.flow-comet/flow-comet-state.json')) {
               out.push(rel + ' 缺最小保护集目标字面（机器状态文件）');
@@ -8655,6 +8894,9 @@ const SCENARIOS = [
             }
             if (!text.includes('handoffRequests') || !text.includes('handoffResult')) {
               out.push(rel + ' 缺留痕字段名（handoffRequests / handoffResult）');
+            }
+            if (!text.includes('noCommit')) {
+              out.push(rel + ' 缺零提交资格字段名（noCommit）');
             }
           }
           return out;
@@ -8671,7 +8913,9 @@ const SCENARIOS = [
           ['环境变量改名', { guard: guardSrc.replaceAll('FLOW_COMET_AGENT_DEPTH', 'FLOW_COMET_DEPTH') }, '环境变量身份深度'],
           ['状态文件路径常量改名', { schema: stateSchemaSrc.replace("RUNTIME_STATE_FILE_NAME = 'flow-comet-state.json'", "RUNTIME_STATE_FILE_NAME = 'state.json'") }, '状态文件路径常量'],
           ['留痕落点改顶层', { handoff: handoffSrc.replaceAll("state.evidence['subagent-execute'].handoffRequests", 'state.handoffRequests') }, '留痕未落在嵌套证据'],
+          ['零提交落库形态改名', { handoff: handoffSrc.replaceAll('noCommit: true', 'zeroCommitFlag: true') }, '零提交资格落库形态'],
           ['文本侧目标字面缺失', { books: new Map([...bookTexts].map(([rel, text]) => [rel, text.split('.flow-comet/flow-comet-state.json').join('（反向构造：抽掉）')])) }, '机器状态文件'],
+          ['文本侧零提交字段缺失', { books: new Map([...bookTexts].map(([rel, text]) => [rel, text.split('noCommit').join('（反向构造：抽掉）')])) }, '零提交资格字段名'],
         ];
         for (const [probeLabel, override, expected] of consistencyProbes) {
           const probed = { ...consistencySources, ...override };
@@ -9317,6 +9561,15 @@ const SCENARIOS = [
         '<task id="G02" parallel="true" status="pending"><action>实现 G02</action><write_files>src/foo.mjs</write_files><verify>node --check src/x.mjs</verify><depends_on>M01</depends_on></task>\n');
       assertExit(transitiveDep, 0);
       assertNotOut(transitiveDep, 'BLOCKED');
+
+      // ③g 等价性锚（in-place 扩展）：段内 glob 语义的两处实现——route-node 的计划期重叠判定
+      //     （collectPathOverlaps）与 workflow-handoff 的提交子集校验（matchWriteFilePattern）
+      //     ——对同一 (声明, 字面) 矩阵必须同判。两侧各测一侧不叫等价：此锚同一矩阵两侧求值。
+      //     反向构造内建：矩阵里每一格都先断「两侧同判」，任一侧语义漂移即红（判别力由同一判据驱动）。
+      const globProblems = globEquivalenceProblems(dir);
+      if (globProblems.length > 0) {
+        throw new Error('段内 glob 语义两处实现等价性锚失败: ' + globProblems.join('; '));
+      }
     },
   },
 
@@ -10601,6 +10854,14 @@ const SCENARIOS = [
         assertOut(viaAlias, 'BLOCKED');
       } else {
         console.error('WARN: 当前平台无法构造目录链接，保护集别名形态断言降级（词法判定仍由 ⑨ 覆盖）');
+      }
+
+      // ⑩ apply_patch 承载形态的耐久锚（in-place 扩展）：补丁正文写在 tool_input.command、
+      //    载荷无 file_path——目标须由补丁摘要行抽出后才进入既有判定入口（白名单与最小保护集
+      //    共用同一返回值）。判据与内建反向构造见模块级 applyPatchAnchorProblems。
+      const patchProblems = applyPatchAnchorProblems(dir);
+      if (patchProblems.length > 0) {
+        throw new Error('apply_patch 目标解析锚失败: ' + patchProblems.join('; '));
       }
     },
   },
