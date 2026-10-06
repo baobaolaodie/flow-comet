@@ -11,7 +11,7 @@ Complete the `execute` Node for `flow-comet`.
 
 Responsibility: 按 TASK.md 逐任务执行（**执行模式按 executionMode**：subagent 默认统一委托子代理、direct 逃生口主代理直写）。串行任务的 TDD + 6 维自查 + LESSONS 扫描 + diff 边界 verify 由执行者承担，无论哪种模式都必须加载 flow-comet-dev 协议。
 
-In subagent mode (default) this node is a coordinator: it does not write implementation code directly — it delegates the pending serial tasks to fresh-context subagents via the Agent tool (worktree isolation), each subagent applies the full dev protocol (TDD RED/GREEN/REFACTOR, LESSONS scan, existing abstraction grep, self-review, diff boundary verification, atomic commits) and returns a Return Contract. 趟次协作：并行委托节点（subagent-execute）可多次往返——每趟委托全部依赖已满足的并行任务，本节点在趟间消化串行任务，直至两者清空。The coordinator records handoff evidence, verifies each SUMMARY, and marks tasks done in TASK.md. In direct mode (escape hatch, user-confirmed) the main agent implements serial tasks directly — see 执行模型 below.
+In subagent mode (default) this node is a coordinator: it does not write implementation code directly — it delegates the pending serial tasks to fresh-context subagents (all three platforms delegate under one identity-based criterion; worktree isolation is one optional implementation of attribute ①, not a requirement — see the four-attribute contract below), each subagent applies the full dev protocol (TDD RED/GREEN/REFACTOR, LESSONS scan, existing abstraction grep, self-review, diff boundary verification, atomic commits) and returns a Return Contract. 趟次协作：并行委托节点（subagent-execute）可多次往返——每趟委托全部依赖已满足的并行任务，本节点在趟间消化串行任务，直至两者清空。The coordinator records handoff evidence, verifies each SUMMARY, and marks tasks done in TASK.md. In direct mode (escape hatch, user-confirmed) the main agent implements serial tasks directly — see 执行模型 below.
 
 ## Guidance
 
@@ -29,7 +29,7 @@ guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好�
 
 ### 执行模型（按 executionMode，用户显式选择）
 
-- **subagent（默认）**: 统一委托子代理——协调者流程（构造 handoff → Agent worktree 委托 → 收集 Return Contract → 验收标 done）
+- **subagent（默认）**: 统一委托子代理——协调者流程（构造 handoff → 按平台通道委托（三平台同一身份判据；worktree 为属性①的可选实现）→ 收集 Return Contract → 验收标 done）
 - **direct（逃生口，需用户显式切换）**: 主代理直接执行串行任务——但必须加载 flow-comet-dev 完整协议
   （TDD/6 维自查/越界检查/原子 commit），SUMMARY 必填段 + `## 自检方法` 强制（guard 校验兜底）
 - 无论哪种模式：`parallel="true"` 任务始终由 subagent-execute 并行委托，不在此节点执行。
@@ -44,7 +44,7 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 
 **TASK 签名校验（C3，execute 期间）**：entry execute 时记录任务集签名（行尾规范化 + 标记属性剥离）；exit 时比对——execute 期间 TASK.md **只允许改开标签的标记属性**（`status` done/pending；时间戳如需记录写在开标签属性如 `completed_at`——签名剥离白名单允许；**禁止写入 action/其他 task 内容**），增删任务/改 action/改边界/改其他内容会在 exit 被 BLOCKED（签名不匹配）。回退修复任务（review/verify 发现缺陷追加）须先经 review 流程追加到 `## Fix 任务` 段，再按下方「修复回路状态机路径」受控归位 execute，并由 entry execute 刷新签名（端到端验证实证：直接注入任务会被签名拦截）。
 
-本节点**不直接写实现代码**。所有 pending 任务统一通过 Agent 工具委托 fresh-context 子代理执行（加载 flow-comet-dev + 回传 Return Contract）。
+本节点**不直接写实现代码**。所有 pending 任务统一委托 fresh-context 子代理执行（加载 flow-comet-dev + 回传 Return Contract）；委托通道按平台（差异只在谁建树），见下方「并行安全四属性契约」与三平台通道对照表。
 
 - `parallel="true"` 的 pending 任务由 subagent-execute 节点负责并行委托
 - execute 遍历 TASK.md 时，遇到 `parallel="true" status="pending"` 的任务块应**跳过**
@@ -53,6 +53,48 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
   2. 若已进入 execute 且确认无串行任务可做：按正常 exit 流程处理（record execute evidence + 满足产物校验），需要豁免越俎代庖检测时用 `record execute '{"parallelTakeoverApproved":true}'` 显式声明；[P] 任务由 execute 完成属越权委托——新 change BLOCKED（旧 change WARN 渐进）
   3. **显式空退出豁免（新 change 可用）**：确认全 parallel 无串行可做且无法路由时，用 `record execute '{"emptyExitApproved":true}'` 显式声明后 exit 通过（跳过串行 pending 与产物校验；防规划错误仍默认 BLOCKED——豁免须显式声明；exit 输出 EMPTY-EXIT 审计提示）
 - determineNode 路由逻辑会优先检测依赖已满足的 parallel 任务并路由到 subagent-execute；若 determineNode 路由到了 execute，说明当前趟存在需要 execute 处理的串行任务（此时应执行而非空退出）——串行消化完成后再次路由，剩余并行任务回到 subagent-execute 的下一趟（多趟循环直至无可并行 pending 且无串行残留）
+
+### 并行安全四属性契约与三平台通道对照表（两册同锁 · 与 subagent-execute 册同句同表）
+
+> **并行安全四属性契约（两册同锁 · 逐字一致）**：契约对象是**四属性**，不是 worktree——`worktree` 只是属性①「写权限」的**实现之一**，不是契约本身；「一律 worktree」的口号已作废（ADR-014 决策 1）。三平台在同一判据下平行对等，**唯一差异是「谁建树」**。
+>
+> | # | 属性 | 含义 | 满足形态 |
+> |---|------|------|----------|
+> | ① | **写权限** | 每个写者必须有一条被守卫认可的写入通道 | **身份分派**（CC / Codex 载荷含 `agent_id` ⇒ 子代理语义；dsh 桥接以环境变量 `FLOW_COMET_AGENT_DEPTH` 透传正整数身份深度）——**worktree 只是本属性的实现之一**，不是必须；**最小保护集除外**：身份在场时 `.flow-comet/flow-comet-state.json` 与 `reference/workflow-protocol.json` 仍受拦（三平台一致 BLOCKED） |
+> | ② | **提交隔离** | 提交只含自己 `write_files` 的字面路径 | 提交面 pathspec 纪律五要素（见 Guidance 同名小节） |
+> | ③ | **验证隔离** | 同一时刻只有一个写者：全量判据不得与在飞写者并行 | 出口校验锚 = `handoffRequests` 有 request 无对应 `handoffResult` ⇒ 新 change BLOCKED / 旧 change WARN；全部有 result ⇒ 放行；无证据 ⇒ 零输出 |
+> | ④ | **集成纪律** | 机制选择 / 顺序 / 审计 / 冲突处置四项均有明文规则 | 集成纪律四要素（见 Guidance 同名小节） |
+>
+> **三平台通道对照表（四属性 × 三平台；差异只在「谁建树」）**：
+>
+> | 平台 | ① 写权限通道 | 谁建树 | ②③④ |
+> |------|--------------|--------|-------|
+> | **Claude Code** | 身份分派（载荷含 `agent_id`）；`.claude/worktrees/**` 路径前缀为**兼容通道**，不是唯一通道 | harness 可自动建树（`Agent` 工具的 `isolation: "worktree"`——①的一种实现，非强制） | 三平台同形 |
+> | **Codex** | 身份分派（载荷含 `agent_id` / `agent_type`；P9 真机实测：子代理载荷 12 键含 `agent_id`，主线程 10 键不含） | 无自动建树——默认**共享工作区** | 三平台同形 |
+> | **dsh** | 身份分派（桥接以环境变量 `FLOW_COMET_AGENT_DEPTH` 透传正整数身份深度；0 / 缺失 = 协调者） | 平台**进程内子代理**，不建树 | 三平台同形 |
+>
+> **判级口径（三态；未覆盖项显式标注、不得写成已支持）**：**证实**——Codex 交互式会话的原生子代理载荷含 `agent_id`（P9 真机）· dsh 身份分派通道 · CC 的 `.claude/worktrees/**` 兼容通道（历史实证）。**推翻**——「Codex 载荷无身份字段」只对 `codex exec` headless 主线程成立，**不得外推**为平台结论。**未覆盖（显式标注，不得写成已支持）**——非 Windows 环境的 Codex 形态 · `agent_type` 取值域 · 嵌套委派载荷 · Codex hook 触发稳定性（实测 3/21；补 `--dangerously-bypass-approvals-and-sandbox` 后 5/5，**不得写成稳定保证**）· CC `isolation: "worktree"` 的真实落点（P1 探针待补）· dsh 子代理能否带独立 cwd（P5 探针待补）。
+
+### 提交面 pathspec 纪律（五要素 · 带适用条件 · 两册同锁 · 逐字一致）
+
+**适用条件（先读）**：本条纪律适用于「**多个写者共享同一工作区**」形态——并发写者同处一个工作树（CC 非 worktree 委托 / Codex 共享工作区 / dsh 进程内子代理）。**各自独立工作区（worktree 等）内的局部 `reset` / `clean` 不在禁令内**（那是写者对自有工作区的正常整理）；但只要本趟存在**任一**共享工作区的写者，本条即对整个并行趟生效。
+
+五要素（缺一不可）：
+
+1. **`git add -- <自己字面路径>`**：逐条字面路径（取自本任务 `write_files`），禁用 `.` / `-A` / `-u` 等宽泛形态。
+2. **`git commit -- <同一路径>`**：提交以 pathspec 限定范围，保证提交只含自己的文件；路径集与上一步**逐字一致**。
+3. **锁失败重试**：并发提交会撞 `index.lock` / `cannot lock ref`——**失败即重试**（临时仓真并发实测：20 提交 / 25 次锁失败全部重试成功）；不得因锁失败改用宽泛命令。
+4. **禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`**：无 pathspec 的 `git add`、`git commit -a`、`git stash`、`git clean`、`git reset` 一律禁止——它们作用于整个共享工作区。
+5. **为什么**：并发写者共享**同一个索引与工作树**——宽泛命令存在**并发索引竞态**：一方 `add -A` 会把另一方的半成品纳入自己的提交（串味 / 多文件提交）；`stash` / `clean` / `reset` 更会直接破坏同伴的未提交工作。
+
+### 集成纪律（四要素 · 两册同锁 · 逐字一致）
+
+1. **机制选择**：优先 **`git merge --no-ff`**（保留父子关系、可审计；comet 先例：集成用 `--no-ff`、交付用 `--ff-only`）；冲突难解时**降级 `git cherry-pick` 并强制记因**（审计行写明降级原因）——cherry-pick 丢失父子关系、审计弱，故只作降级路径。
+2. **顺序（确定性规则）**：先按 `depends_on` 的**拓扑序**集成（被依赖者先入）；同一拓扑层内按 **task id 升序**（计划期固定的稳定键，与完成先后无关）。**不得依赖书写顺序** / 提交到达顺序 / 完成先后等运行期不确定量。
+3. **审计留痕**：每次集成输出一行审计行 `INTEGRATE: <task-id> <commitHash> → <集成提交>`；降级路径为 `INTEGRATE: <task-id> <commitHash> via cherry-pick -- 降级原因：<原因>`。映射（task-id → commitHash → 集成提交）记入该趟流程记录（`<task-id>-SUMMARY.md` / handoff evidence 文本字段）。**判级**：审计行是**执行纪律**（review 把关），本节点不声称存在机械门禁校验它。
+4. **冲突处置（两类分别动作）**：
+   - **机械冲突**（不改用户可见行为：同一文件不同区域 / 相邻行 / 纯格式）：执行者**可自行解决**——解决后必须跑**合并后验证**（该任务 `verify` + 受影响任务的判据），并在审计行记录冲突与解决方式。
+   - **语义冲突**（两侧对同一行为 / 契约 / 接口给出不同语义：同一函数语义分叉、同一 AC 的两种实现、公共 API 形状不一致）：**必须中止集成并上抛**（记 BLOCKED + 恢复指引），**不得**由执行者自行拍板；由协调者 / 用户裁决（补 `depends_on`、拆任务或开新 change）。
 
 ### Prerequisites
 
@@ -68,8 +110,9 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 对 TASK.md 每个 pending 串行任务，协调者执行：
 
 1. **读 task 块，构造 handoff request**：读 `<task>` XML 块（`action` / `read_files` / `write_files` / `verify` / `done`）。若内容有歧义，停下询问——不要猜。构造 handoff request 内容：task 全文 + DESIGN §0/§0.5 + AC + read/write_files 边界。运行 `node .claude/skills/flow-comet/scripts/workflow-handoff.mjs request <task-id>` 记录。**委托即记 request**——直接记录 result 而无对应 request 时,write_files 允许列表为空会被 BLOCKED(新 change 强制委托边界),补 request 后再重录 result 即可(执行者实证)。
-2. **委托子代理**：用 Agent 工具（`isolation: "worktree"`）委托 fresh-context 子代理。handoff prompt 强制协议：子代理用 **Skill 工具**加载 flow-comet-dev 并按 `flow-kit/prompts/4-dev.md` 协议执行（TDD RED/GREEN/REFACTOR、LESSONS 扫描、既有抽象 grep、verify、6 维自查、越界检查、原子 commit `<type>(<scope>): <subject>`（scope 推荐可选：子系统短词；禁 change-id/日期作 scope；任务号放提交正文尾注 Task: <task-id>，change-id 不入标题）），按 `flow-kit/templates/SUMMARY.md` 模板写 `.specs/<change-id>/<task-id>-SUMMARY.md`（标题/首部/段序保真，另补 flow-comet 增量 `## 自检方法` 段），回传 Return Contract（含 commitHash + greenEvidence + completedChecks + selfReview）。**SUMMARY 自引用 hash 注**：提交内容无法包含自身 hash——若子代理 amend 提交,SUMMARY 内记录的 commitHash 为 amend 前值属预期(文件集一致即可,以实际提交对象为准)。
+2. **委托子代理**：按平台通道委托 fresh-context 子代理（三平台同一身份判据，差异只在谁建树；`isolation: "worktree"` 是属性①的可选实现，非强制——见「并行安全四属性契约」）。handoff prompt 强制协议：子代理用 **Skill 工具**加载 flow-comet-dev 并按 `flow-kit/prompts/4-dev.md` 协议执行（TDD RED/GREEN/REFACTOR、LESSONS 扫描、既有抽象 grep、verify、6 维自查、越界检查、原子 commit `<type>(<scope>): <subject>`（scope 推荐可选：子系统短词；禁 change-id/日期作 scope；任务号放提交正文尾注 Task: <task-id>，change-id 不入标题）），按 `flow-kit/templates/SUMMARY.md` 模板写 `.specs/<change-id>/<task-id>-SUMMARY.md`（标题/首部/段序保真，另补 flow-comet 增量 `## 自检方法` 段），回传 Return Contract（含 commitHash + greenEvidence + completedChecks + selfReview）。**SUMMARY 自引用 hash 注**：提交内容无法包含自身 hash——若子代理 amend 提交,SUMMARY 内记录的 commitHash 为 amend 前值属预期(文件集一致即可,以实际提交对象为准)。
    **提交从属规则**:任务专属的 `<task-id>-SUMMARY.md`(位于 `.specs/<change-id>/`,是 flow-comet 强制产物)允许随任务提交属流程默认豁免——目标仓库的既有规定优先,若目标仓库忽略清单等既有规定拒绝其入库,被拒即为正确行为,严禁 force-add 强加越库提交;委托校验对任务摘要的豁免属于校验宽容度,不是入库指令。
+   **提交面 pathspec 纪律（五要素，见 Guidance 同名小节）**：handoff prompt 必须要求子代理用 `git add -- <自己字面路径>` + `git commit -- <同一路径>` 提交、锁失败重试、禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`（适用条件：**多个写者共享同一工作区**；各自独立工作区内的局部 `reset` / `clean` 不在禁令内）。**集成纪律（四要素，见 Guidance 同名小节）**：协调者集成时优先 `git merge --no-ff`、降级 `cherry-pick` 记因、顺序按 `depends_on` 拓扑序 + 同层 task id 升序、冲突按机械 / 语义两类分别处置。
 3. **记录 handoff result**：子代理回传后，运行 `node .claude/skills/flow-comet/scripts/workflow-handoff.mjs result <task-id> '<JSON>'` 记录（Return Contract 含 commitHash + greenEvidence + completedChecks + selfReview）。
 4. **验收 SUMMARY，TASK.md 标 done**：确认 SUMMARY 按 `flow-kit/templates/SUMMARY.md` 填写且**模板保真**（标题 `# SUMMARY:` / 首部 4 字段 / 段序一致）、含 `## 自检方法` 段（声明 brooks-review / cache-brooks / builtin-quickcheck 三值之一）、verify 输出真实、6 维自查与越界检查有实质内容；通过后在 TASK.md 将任务标 `status="done"` 并加时间戳。
 5. **下一个 pending 任务**：重复步骤 1-4。
