@@ -343,7 +343,7 @@ function analyzeDependencyGraph(blocks) {
 // process.exit / 入参改写），findParallelWriteConflicts 只负责读文件、解析、族①②与去重键的组织。
 // 路径解析 / 归一（parsePaths / normalizeTaskPath）为本模块单份实现，族①②③共用；依赖文本解析
 // 复用本模块 taskDependencyEligibility（依赖解析单一权威——不再另起第二份正则）。
-// 路径**重叠判定**（含 glob 语义 · DESIGN D7）同样是本模块单份实现：具名纯函数 collectPathOverlaps，
+// 路径**重叠判定**（含 glob 语义 · 见 DESIGN 的路径重叠判定决策）同样是本模块单份实现：具名纯函数 collectPathOverlaps，
 // 族①②③一律经它比较——任一族内联第二份比较逻辑即违规（L-067 / AC-5 单源判据）。
 // 开标签属性解析与 workflow-state 路由共享 taskOpeningAttrs（属性序无关；不读块内文本）。
 // 2026-09-28 PR 审查采纳：由 workflow-guard.mjs 抽到本模块——plan 出口与 replan 重校消费同一实现，
@@ -404,7 +404,7 @@ function parsePaths(matchText) {
 // （literalRelativePosixPath 的 /[*?[]/）同口径；「什么算 glob」不另立第三套定义。
 const GLOB_MAGIC_CHAR = /[*?[]/;
 
-// 路径重叠判定（族①②③共用的唯一具名纯函数 · DESIGN D7/D11 · AC-5）：入参为两组**已归一**路径
+// 路径重叠判定（族①②③共用的唯一具名纯函数 · 见 DESIGN 的重叠判定与判据单源决策 · AC-5）：入参为两组**已归一**路径
 // 声明（normalizeTaskPath 产物，分隔符统一 `/`），返回重叠描述串数组（直接进冲突消息的 files 字段）
 // 或空数组（不重叠）；无 fs / console / process.exit，不改任何入参。
 // 三形态：
