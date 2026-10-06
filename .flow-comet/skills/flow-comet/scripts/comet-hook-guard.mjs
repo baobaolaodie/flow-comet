@@ -143,6 +143,39 @@ function unquotedSegmentEnd(command, masked, from) {
   return command.length;
 }
 
+// apply_patch heredoc 正文定位（Codex 承载补丁的真实调用形态：tool_name="Bash"、补丁正文写在 command
+// 文本里、载荷没有 file_path）。识别按**行语义**而非 token 形状：命令名必须是 apply_patch，其前只允许
+// 空白或「同段前置命令 + 分隔符」（`cd x && apply_patch …` 可认，引号内的同名文本因不满足前缀形态不认），
+// 命令名与重定向之间不得出现分隔符或别的重定向（`[^;&|<>]*` 收口）。命令名不受引号掩码影响——真实
+// 载荷里有把该命令包在宿主 here-string 里传入的形态，按行文本识别才能覆盖。
+// 正文止于与定界串等值的整行（`<<-` 形态允许行首制表符），**不越过定界行**——否则后续命令行会被吞进
+// 正文，下游命令的参数会被读成写入目标而误拦。
+// 未闭合形态按「正文到命令末尾」处理：产出与否取决于正文里是否真有补丁摘要行，最坏是多产出一个目标
+// （偏拦截方向），不会漏掉补丁真正要写的文件。
+function applyPatchHeredocs(command) {
+  const bodies = [];
+  const startRe = /^(?:[^;&|<>]*[;&|]+[ \t]*)?[ \t]*apply_patch\b[^;&|<>]*<<(-?)[ \t]*("[^"]*"|'[^']*'|[^\s;&|<>]+)/i;
+  const lines = command.split('\n');
+  for (let index = 0; index < lines.length; index++) {
+    const start = startRe.exec(lines[index].replace(/\r$/, ''));
+    if (!start) continue;
+    const delimiter = start[2].replace(/^["']|["']$/g, '');
+    if (delimiter === '') continue;
+    const stripLeadingTabs = start[1] === '-';
+    let bodyEnd = lines.length;
+    for (let cursor = index + 1; cursor < lines.length; cursor++) {
+      const line = lines[cursor].replace(/\r$/, '');
+      if ((stripLeadingTabs ? line.replace(/^\t+/, '') : line) === delimiter) {
+        bodyEnd = cursor;
+        break;
+      }
+    }
+    bodies.push(lines.slice(index + 1, bodyEnd).join('\n'));
+    index = bodyEnd; // 正文不再参与起始扫描（同一段正文不会被解析两次）
+  }
+  return bodies;
+}
+
 function codexWriteTargetsFromCommand(command) {
   if (typeof command !== 'string' || command.trim() === '') return [];
   const targets = [];
@@ -227,6 +260,18 @@ function codexWriteTargetsFromCommand(command) {
     let t = (isCopyMove ? m[3] : m[2]) || '';
     t = t.trim().replace(/^["']|["']$/g, '');
     if (t && t !== 'NUL' && t !== '/dev/null' && !targets.includes(t)) targets.push(t);
+  }
+  // apply_patch heredoc 的补丁摘要行（见上方 applyPatchHeredocs）：`*** Update File: <p>` /
+  // `*** Add File: <p>` / `*** Delete File: <p>` / `*** Move to: <p>` 各带一个写入目标，
+  // 抽取后与其余形态**同流**——本函数的返回值既是白名单判定的输入，也是最小保护集判定的输入
+  // （调用方共用），故此处不新增第二份判定；路径归一与同一性比较沿用既有 resolveWriteTarget 与
+  // protocol-utils 的包含性判据。值经既有 addTarget 归一（剥引号 / 过滤空设备 / 去重）。
+  const patchHeaderRe = /^\*\*\*\s+(?:Update File|Add File|Delete File|Move to):\s*(.+?)\s*$/;
+  for (const body of applyPatchHeredocs(command)) {
+    for (const rawLine of body.split('\n')) {
+      const header = patchHeaderRe.exec(rawLine.replace(/\r$/, ''));
+      if (header) addTarget(header[1]);
+    }
   }
   return targets;
 }
@@ -358,6 +403,8 @@ function blockStateFileWrite(target) {
 // 载荷 `agent_id` 在场（CC / Codex 原生子代理，真机载荷实测形态）或环境变量
 // FLOW_COMET_AGENT_DEPTH 为正整数（dsh 桥接透传）⇒ 子代理语义。两输入面归并为**一个**判据
 // （消费方只问「是不是子代理」），不得下沉为 `if (platform === ...)` 之类的平台分支。
+// dsh 面按**实现位置修订**（规划期落定）：桥接只把委派深度透传进环境变量，身份判定与保护集判定的
+// 整条都归本文件独占——桥接不再持有任何一份判定，两侧没有分叉的余地（归因以本节为准）。
 // 取值形态按实证收窄：载荷面只认**非空字符串**（空串 / 缺失 / 非字符串一律非身份）；env 面只认
 // **纯十进制正整数字符串**（"0" = 协调者 ⇒ 非身份；空串 / 负数 / 小数 / 带杂质一律非身份）。
 // 收窄方向是 fail-closed：不命中的形态退回既有路径判定——该回退态即 AC-2 (b) 写死的「维持现状」，
@@ -422,6 +469,8 @@ const runRoot = (() => {
 const protocolPath = resolveProtocol(packageRoot, runRoot, []);
 
 // ── 最小保护集（ADR-014 决策 4）：身份在场时仍受拦的两个目标 ─────────────────────
+// 判定的整条实现只在本文件（dsh 桥接按**实现位置修订**只透传身份信号、不另存一份保护集判定），
+// 故「桥接侧加保护集判定」的旧插入位置描述已被该修订取代——归因以本节为准。
 // ① 机器状态文件（判据 = 上方 blockedStateFileTarget，取值来源 state-schema.mjs 的
 //    RUNTIME_STATE_PATH）；② 本次运行**实际生效**的协议文件（取值来源 = 上方 protocol-utils
 //    resolveProtocol 的解析结果——本文件不另造第二份协议路径口径）。
@@ -731,6 +780,9 @@ async function main() {
   // 身份在场（载荷 agent_id / env FLOW_COMET_AGENT_DEPTH>0）⇒ 直接进入子代理语义：**不再做路径
   // 审计**（不解析白名单、不判隔离区、不判 runRoot 内外），只判最小保护集——两个机器面目标
   // （状态文件 / 本次运行生效的协议文件）命中即 BLOCK，未命中即放行（见 enforceMinimalProtectionSet）。
+  // 实现位置修订（规划期落定）：dsh 侧的身份信号由桥接**透传**（环境变量），身份判定与保护集判定的
+  // 整条都归本文件独占——桥接不再持有任何判定，故不存在第二份实现与其分叉；决策表里「桥接侧加保护集
+  // 判定」的插入位置描述已被该修订取代，归因以本节与最小保护集段为准。
   // 顺序锚（AC-4 ②）：身份在场 + 目标在 runRoot 之外 ⇒ 放行；顺序若反转（先解析路径）必 BLOCK。
   // 放行覆盖「手工 worktree / 独立工作区」形态：路径判定在平台载荷 cwd ≠ 实际工作目录时不可用
   // （交互式真机探针实证），故身份通道不以路径为前置。
