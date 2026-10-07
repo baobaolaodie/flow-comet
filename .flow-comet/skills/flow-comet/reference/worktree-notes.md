@@ -39,7 +39,7 @@ git ls-tree <branch> <path>      # 确认产物在目标仓库哪个分支、路
 
 ## 4.5. Codex 平台：原生多代理与身份通道（交互式实测订正 2026-10-04/05）
 
-**平台事实（交互式实测证实；取证记录见 `.specs/p9-codex-probe-2026-10-04.md`）**：Codex 的常规用法是交互式 CLI（`codex` 无子命令）与会话内 agent，`codex exec` 只是 headless 子面；原生多代理 `multi_agent` 为 stable、默认启用（`codex features list` 可查）。交互式会话**触发**项目级 `PreToolUse`（启动时有 hook 信任提示，用户选信任后生效）；**原生子代理的工具调用同样触发**；子代理载荷 **12 键、含 `agent_id` + `agent_type`**（主线程 10 键、两者皆无；本机实测 `agent_type=default`）；`spawn_agent` / `multi_agent_v1wait_agent` / `multi_agent_v1close_agent` 三种委派调用**各自触发** PreToolUse（派遣行为本身可观察）；子代理可被指向独立目录（worktree）并成功落盘；用户全局 `~/.codex/hooks.json` 与项目级 hook **并存生效**。
+**平台事实（交互式实测证实；该次取证为一次性工件、已按仓库纪律清理，口径以下文陈述为准）**：Codex 的常规用法是交互式 CLI（`codex` 无子命令）与会话内 agent，`codex exec` 只是 headless 子面；原生多代理 `multi_agent` 为 stable、默认启用（`codex features list` 可查）。交互式会话**触发**项目级 `PreToolUse`（启动时有 hook 信任提示，用户选信任后生效）；**原生子代理的工具调用同样触发**；子代理载荷 **12 键、含 `agent_id` + `agent_type`**（主线程 10 键、两者皆无；本机实测 `agent_type=default`）；`spawn_agent` / `multi_agent_v1wait_agent` / `multi_agent_v1close_agent` 三种委派调用**各自触发** PreToolUse（派遣行为本身可观察）；子代理可被指向独立目录（worktree）并成功落盘；用户全局 `~/.codex/hooks.json` 与项目级 hook **并存生效**。
 
 **同批推翻的三条旧结论**：①「Codex 载荷无身份字段」（`agent_id`/`agent_type` 皆无）——该结论**只对 `codex exec` headless 主线程成立**（见下方 headless 子面实测），交互式 + 原生子代理**有**；②「载荷含 `workdir`」——**不含**，子代理写调用 `tool_input` 只有 `command` 一个键；③「worktree 内写入被 hook 拦」——**不是 hook 拦的**：首次 `Set-Content` 报 PowerShell `PermissionDenied`（exit 1），加 `sandbox_permissions="require_escalated"` 后 exit 0 成功 ⇒ 拦截者是 **Codex 自身沙箱**，且可经提权越过（与 flow-comet 守卫是**两层独立防线**，不可互相替代，也不得把沙箱行为记成守卫行为）。
 
