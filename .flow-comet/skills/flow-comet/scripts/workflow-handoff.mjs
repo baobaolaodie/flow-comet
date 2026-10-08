@@ -11,6 +11,9 @@ import {
   inspectWorkflowPathSegments,
 } from './protocol-utils.mjs';
 import { taskAttrsById, taskBlocks, taskOpeningAttrs } from './task-parsing.mjs';
+// 时间形态单一权威（新增写入路径一律走本模块，禁自行拼接）：撤回留痕的时刻生成走 nowTimestamp，
+// 人可见回显走 formatLocalTimestamp（本地时间 + 显式偏移），解析走 parseTimestamp。
+import { nowTimestamp, formatLocalTimestamp, parseTimestamp } from './time-utils.mjs';
 
 // workflow-handoff.mjs: Record subagent handoff evidence
 // evidence 统一记录在 subagent-execute 名下作为委托证据库——execute（串行委托）与 subagent-execute（并行委托）共用。不改成节点参数，保持最小改动。
@@ -235,7 +238,12 @@ async function revalidateResultZeroCommit(state, taskId, handoffReq) {
   // 避免 WARN 声称已撤销而 state 仍是旧值。
   await writeState(state);
   const reasonText = ZERO_COMMIT_REVOKE_REASON_TEXT[verdict.reason] || verdict.reason;
-  const detail = '任务 ' + taskId + ' 零提交资格 result 重验失败（' + reasonText + '）——request evidence noCommit=false, revokedAt=' + handoffReq.revokedAt + ', revokeReason=' + verdict.reason;
+  // 人可见时间戳一律本地时间 + 显式偏移（时间纪律）：revokedAt 是既有的机器字段（历史 Z 形态，
+  // 同族迁移窗口内保持原样），但把它原样拼进这条给人看的消息即违反人可见口径——此处按标准形态
+  // 回显；历史值不可解析时回显原值（可见降级，不静默改写、不谎称已格式化）。
+  const revokedAtMs = parseTimestamp(handoffReq.revokedAt);
+  const revokedAtDisplay = Number.isNaN(revokedAtMs) ? String(handoffReq.revokedAt) : formatLocalTimestamp(revokedAtMs);
+  const detail = '任务 ' + taskId + ' 零提交资格 result 重验失败（' + reasonText + '）——request evidence noCommit=false, revokedAt=' + revokedAtDisplay + ', revokeReason=' + verdict.reason;
   if (state.newChange === true) {
     // 新 change 只落 request 资格撤销；此刻尚未默认 handoffResult，确保「不落 result」不是文案承诺
     console.error('HANDOFF ERROR: ' + detail + '；新 change 不落 result，出口校验不再豁免缺 commitHash。恢复: 修正 write_files / .gitignore 与路径形态后重新 request，或回传含合法 commitHash 的 Return Contract');
@@ -744,7 +752,8 @@ async function main() {
         + '（withdrawnAt=' + target.withdrawnAt + ', withdrawnBy=' + target.withdrawnBy + '）');
       process.exit(1);
     }
-    target.withdrawnAt = new Date().toISOString();
+    // 新写入路径统一走时间单一权威（本地时间 + 显式偏移）：不在此自行拼接时刻字面。
+    target.withdrawnAt = nowTimestamp();
     target.withdrawnBy = withdrawnBy.trim();
     if (typeof withdrawReason === 'string' && withdrawReason.trim() !== '') {
       target.withdrawReason = withdrawReason.trim();

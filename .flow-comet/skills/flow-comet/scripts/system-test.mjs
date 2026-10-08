@@ -3789,6 +3789,12 @@ const TEST_ITEMS = [
       if (!Array.isArray(p03.writeFiles) || p03.writeFiles[0] !== 'src/p3.mjs') {
         throw new Error('撤回不得删除原 request 字段（writeFiles 应原样保留）: ' + JSON.stringify(p03));
       }
+      // 时间纪律（真实链路）：新写入路径走 time-utils 单一权威 ⇒ withdrawnAt 为标准形态
+      // （本地时间 + 显式偏移），非裸 Z 拼接。
+      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/.test(p03.withdrawnAt)) {
+        throw new Error('withdrawnAt 应为标准形态（本地时间 + 显式偏移，走 time-utils 的 nowTimestamp）: '
+          + JSON.stringify(p03.withdrawnAt));
+      }
       const releasedExit = runGuard(['exit', 'subagent-execute'], dir);
       assertExit(releasedExit, 0);
       assertOut(releasedExit, 'ALL CHECKS PASSED');

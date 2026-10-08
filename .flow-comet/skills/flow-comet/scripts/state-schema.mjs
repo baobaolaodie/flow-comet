@@ -223,7 +223,8 @@ export function setFixRoundsFor(state, value) {
 }
 
 // ---------- 撤回留痕判据(单一来源:workflow-handoff.mjs 与 workflow-guard.mjs 共用) ----------
-// 「已撤回」= request 记录上**同时**存在非空 withdrawnAt(ISO 时间戳)与非空 withdrawnBy(来源),
+// 「已撤回」= request 记录上**同时**存在非空 withdrawnAt(时间戳;新写入走 time-utils 的 nowTimestamp
+// ——本地时间 + 显式偏移,判据只要求非空字符串,故历史 Z 形态同样被接受)与非空 withdrawnBy(来源),
 // 缺一不算撤回——只写其中一个字段的手改形态不构成撤回证据,守卫照旧按在飞委托处理(fail-closed:
 // 判据不得只看单一字段,否则「带时间戳与来源」的留痕要求形同虚设)。
 // 撤回是**终态**:记录不删除(历史留痕),只在原记录上加法式落两个字段。

@@ -2651,8 +2651,8 @@ const BARE_ISO_ENGINE_WHITELIST = [
   },
   {
     file: 'workflow-handoff.mjs',
-    count: 5,
-    reason: 'handoff 请求 / 结果的机器字段（requestedAt / revokedAt / completedAt / 撤回留痕 withdrawnAt）：Z 形是既有 handoff 工件契约，须与 workflow-state 同批迁移',
+    count: 4,
+    reason: 'handoff 请求 / 结果的机器字段（requestedAt / revokedAt / completedAt）：Z 形是既有 handoff 工件契约，须与 workflow-state 同批迁移；新增的撤回留痕不走本条——withdrawnAt 由 time-utils 的 nowTimestamp 生成（本地时间 + 显式偏移），人可见回显亦按标准形态格式化',
   },
   {
     file: 'workflow-guard.mjs',
@@ -2696,7 +2696,7 @@ function intelMetadataNameProblems(consumerText, producerText) {
 
 // 行注释剥离（`//` 之后非代码）：判据的语义是「代码里有没有裸拼接」，散文引用不算实现。
 // 字符串里的 `//`（URL 一类）会把其后内容当注释剥掉——只可能**少计**（判据变松），而白名单面
-// 另有精确条数锚（14 处）兜底；不为注释识别引入字符串感知的复杂度。
+// 另有精确条数锚（13 处）兜底；不为注释识别引入字符串感知的复杂度。
 function stripLineComments(text) {
   return text.split('\n').map((line) => {
     const at = line.indexOf('//');
@@ -3459,6 +3459,15 @@ const SCENARIOS = [
       const p02Withdrawn = stWithdrawn.evidence['subagent-execute'].handoffRequests.P02;
       if (typeof p02Withdrawn.withdrawnAt !== 'string' || p02Withdrawn.withdrawnAt.trim() === '') {
         throw new Error('撤回应落 withdrawnAt 时间戳: ' + JSON.stringify(p02Withdrawn));
+      }
+      // 时间纪律：新写入路径走 time-utils 单一权威 ⇒ 标准形态为本地时间 + 显式偏移；裸 Z 形态
+      // （自行拼接的产物）在此必红，且 298 的白名单代数会同时漂移（两条判据互相印证）。
+      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/.test(p02Withdrawn.withdrawnAt)) {
+        throw new Error('withdrawnAt 应为标准形态（本地时间 + 显式偏移，走 time-utils 的 nowTimestamp）: '
+          + JSON.stringify(p02Withdrawn.withdrawnAt));
+      }
+      if (Number.isNaN(timeUtilsModule.parseTimestamp(p02Withdrawn.withdrawnAt))) {
+        throw new Error('withdrawnAt 应可被时间单一权威解析: ' + JSON.stringify(p02Withdrawn.withdrawnAt));
       }
       if (p02Withdrawn.withdrawnBy !== 'coordinator') {
         throw new Error('撤回应落 withdrawnBy 来源: ' + JSON.stringify(p02Withdrawn));
@@ -16996,11 +17005,12 @@ const SCENARIOS = [
 
   // 298: 禁裸拼接静态锚（DESIGN R4 的落地）——时间形态 / 格式化的唯一权威是 time-utils.mjs：
   // 三条侧命令零容忍（人可见报告 / CLI 摘要行 / 备份名）；其余引擎脚本走**显式白名单 + 逐条理由**
-  // （既有 14 处都是已持久化的机器字段，迁移留专门窗口）。判别力两条：① 白名单判定是纯函数，
+  // （既有 13 处都是已持久化的机器字段，迁移留专门窗口；新增写入路径一律走 time-utils，不得把
+  // 白名单当增量口——撤回留痕 withdrawnAt 即按此落 nowTimestamp）。判别力两条：① 白名单判定是纯函数，
   // 合成输入可驱动「条数漂移（增 / 减）」与「未登记文件」三态必报；② 合成引擎目录注入第二处
   // 裸拼接 → 检出必增（证明真实面判据不恒真空过）。
   {
-    name: '298 禁裸拼接静态锚：三侧命令零容忍 + 引擎 14 处显式白名单（逐条理由）+ 合成反向构造',
+    name: '298 禁裸拼接静态锚：三侧命令零容忍 + 引擎 13 处显式白名单（逐条理由）+ 合成反向构造',
     run: () => {
       // ① 三条侧命令零容忍（人可见面的时间形态只许走 time-utils）
       const sideHits = bareIsoTimestampHits(__dirname, BARE_ISO_SIDE_COMMANDS);
@@ -17009,7 +17019,7 @@ const SCENARIOS = [
 
       // ② 其余引擎脚本 = 精确白名单：条数逐文件相等 + 每条例外带非空理由
       const engineHits = bareIsoTimestampHits(__dirname).filter((hit) => !BARE_ISO_SIDE_COMMANDS.includes(hit.file));
-      assertEqual(engineHits.reduce((sum, hit) => sum + hit.count, 0), 14, '引擎既有裸拼接落点总数（白名单代数）');
+      assertEqual(engineHits.reduce((sum, hit) => sum + hit.count, 0), 13, '引擎既有裸拼接落点总数（白名单代数）');
       const problems = bareIsoWhitelistProblems(engineHits, BARE_ISO_ENGINE_WHITELIST);
       assertEqual(problems.length, 0, '白名单漂移: ' + problems.join(' | '));
       for (const entry of BARE_ISO_ENGINE_WHITELIST) {
@@ -17019,7 +17029,7 @@ const SCENARIOS = [
 
       // ③ 白名单判定的判别力（纯函数 · 合成输入）：等价集合不报；三类漂移各自必报
       //    （合成等价集合的条数取真实白名单首条的当前值——它必须与常量同值，否则第 1 条断言即红）
-      const equivalent = [{ file: 'a.mjs', count: 7 }, { file: 'b.mjs', count: 5 }, { file: 'c.mjs', count: 1 }, { file: 'd.mjs', count: 1 }];
+      const equivalent = [{ file: 'a.mjs', count: 7 }, { file: 'b.mjs', count: 4 }, { file: 'c.mjs', count: 1 }, { file: 'd.mjs', count: 1 }];
       const whitelist = BARE_ISO_ENGINE_WHITELIST.map((entry, index) => ({ ...entry, file: equivalent[index].file }));
       assertEqual(bareIsoWhitelistProblems(equivalent, whitelist).length, 0, '等价集合不应报白名单漂移');
       const newcomer = bareIsoWhitelistProblems([...equivalent, { file: 'newcomer.mjs', count: 1 }], whitelist);
