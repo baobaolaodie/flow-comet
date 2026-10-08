@@ -2,7 +2,7 @@
   import { constants as fsConstants, promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, RUNTIME_STATE_PATH, LEGACY_RUNTIME_STATE_PATH, resolveProtocolPathWithState, hasProtocolCliArg } from './state-schema.mjs';
+import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, RUNTIME_STATE_PATH, LEGACY_RUNTIME_STATE_PATH, resolveProtocolPathWithState, hasProtocolCliArg, handoffRequestWithdrawn } from './state-schema.mjs';
 import { readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, workflowPathInside, inspectWorkflowProtectedPath, readWorkflowProtectedFile, workflowFileObjectIdentity, workflowSameFileObject, workflowSameFileStat } from './protocol-utils.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from './task-parsing.mjs';
 import { resolveNextNode, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS, TASK_SET_SIGNATURE_ALGO, taskSetSignature, parseTaskSetSignature, sameTaskSetSignature, taskSetSignatureVersionSkew, classifyFixReturnCause, normalizeHeading, FIX_SECTION_TITLE_FALLBACK, analyzeDependencyGraph, findParallelWriteConflicts } from './route-node.mjs';
@@ -649,13 +649,20 @@ function hasNonEmptyHandoffResult(evidence) {
 // handoffResult 无对应记录 = 写者未收工的既有可判形态。判据单处求值（出口校验唯一消费方）。
 // 三态收敛：无 evidence['subagent-execute'] / 无 handoffRequests 条目 ⇒ 返回空数组（调用方零输出，
 // 不制造噪音）；全部有对应 result ⇒ 同样空数组（放行）。锚定既有字段，零新增 state 顶层字段。
+// 已撤回的 request 不构成在飞委托（2026-10-07 补撤回通道）：零提交复验失败 / 写边界被拒之后
+// request 可能留在「有 request 无 result」态而命令面无从撤回——`workflow-handoff.mjs withdraw`
+// 在原地落留痕（withdrawnAt + withdrawnBy，历史不删），守卫据此放行出口。判据复用
+// state-schema.mjs 的单一实现（撤回留痕两字段齐备才算撤回），本文件不另写一份。
 function inFlightHandoffRequests(evidence) {
   const requests = evidence && typeof evidence === 'object' ? evidence.handoffRequests : null;
   if (!requests || typeof requests !== 'object' || Array.isArray(requests)) return [];
   const results = evidence.handoffResult && typeof evidence.handoffResult === 'object' && !Array.isArray(evidence.handoffResult)
     ? evidence.handoffResult
     : {};
-  return Object.keys(requests).filter((taskId) => results[taskId] === undefined || results[taskId] === null);
+  return Object.keys(requests).filter((taskId) => {
+    if (handoffRequestWithdrawn(requests[taskId])) return false;
+    return results[taskId] === undefined || results[taskId] === null;
+  });
 }
 
 function schemaMap(protocol) {
@@ -1824,7 +1831,8 @@ async function main() {
   // W1-E: 验证隔离「同一时刻只有一个写者」出口校验（AC-8 · 判级决策见 ADR-014）——读
   // state.evidence['subagent-execute'].handoffRequests：存在条目且**至少一个无对应 handoffResult**
   // ⇒ 在飞委托（写者未收工，跑全量判据会被未提交中间态污染）：新 change BLOCKED（含恢复指引
-  // 「待写入者收工后重跑」）/ 旧 change WARN 渐进；全部有对应 result ⇒ 放行；无该证据对象 ⇒ 零输出。
+  // 「待写入者收工后重跑 / 已作废则撤回」）/ 旧 change WARN 渐进；全部有对应 result ⇒ 放行；
+  // 已撤回（withdrawnAt + withdrawnBy 齐备）的 request 不构成在飞委托 ⇒ 放行；无该证据对象 ⇒ 零输出。
   // 落点 = 出口校验流（与其余 violations / WARN 同风格，不新增独立命令面）；判据经
   // inFlightHandoffRequests 单处求值（与 W1-D 的 result 侧契约校验正交，不重复判定）。
   if (EXECUTE_FAMILY_NODE_IDS.has(node.id)) {
@@ -1834,10 +1842,10 @@ async function main() {
         + inFlight.join(', ') + '——验证隔离要求同一时刻只有一个写者（写者未收工）';
       if (isNewChange(state)) {
         console.error('BLOCKED: ' + inFlightDetail);
-        console.error('恢复: 待写入者收工后重跑——子代理回传后用 workflow-handoff.mjs result <task-id> <Return Contract> 记录结果再重试 exit；若该委托已作废，先撤销对应 request 记录');
+        console.error('恢复: 待写入者收工后重跑——子代理回传后用 workflow-handoff.mjs result <task-id> <Return Contract> 记录结果再重试 exit；若该委托已作废（零提交复验失败 / 写边界被拒后遗弃），用 workflow-handoff.mjs withdraw <task-id> --by <来源> [--reason <原因>] 撤回后再重试 exit（撤回留痕 withdrawnAt/withdrawnBy，已撤回 = 终态，历史不删）');
         process.exit(1);
       }
-      console.error('WARN: ' + inFlightDetail + '（旧 change 渐进不阻断；待写入者收工后重跑全量判据）');
+      console.error('WARN: ' + inFlightDetail + '（旧 change 渐进不阻断；待写入者收工后重跑全量判据；已作废的委托可用 workflow-handoff.mjs withdraw <task-id> --by <来源> 撤回）');
     }
   }
   // W1-B: execute / subagent-execute 出口校验每份 SUMMARY 含三个必填段 + 6 维自查非空 + 自检方法

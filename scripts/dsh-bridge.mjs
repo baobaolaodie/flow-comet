@@ -18,7 +18,11 @@
 //      项目内（skill 包 reference/ 随树复制）——无需 FLOW_COMET_PROTOCOL 机制。
 //   5.5 身份信号透传（「D9 实现位置修订」/ ADR-014 决策 5）：spawn 时注入 env
 //      FLOW_COMET_AGENT_DEPTH = agentDepth(exec) 的数字字符串（0 = 协调者/缺失，
-//      正整数 = 子代理）。身份判定与最小保护集的**整条判据由守卫独占实现**；
+//      正整数 = 子代理）**并同时注入桥接通道标记 FLOW_COMET_AGENT_DEPTH_SOURCE =
+//      'dsh-bridge'**（2026-10-07 作用域收紧）：守卫要求标记与深度**同时在场**才接受
+//      env 面身份——CC / Codex 生成的 hook 直接调守卫、不经本桥接，即使继承了深度变量
+//      也不得据此走子代理路径。标记由本文件唯一注入，守卫侧按同一字面判据读取。
+//      身份判定与最小保护集的**整条判据由守卫独占实现**；
 //      桥接只搬运信号，不判保护集、不复制白名单逻辑（L-067 单一权威）。
 //      子代理因此不在桥接侧短路：一律过守卫（AC-20 豁免收窄）。
 //   6. 决策映射：exit 0 → next() 放行；exit 2 → deny（BLOCK 消息 + 恢复指引
@@ -303,8 +307,14 @@ function runGuard(projectRoot, canonicalName, toolInput, signal, agentDepthValue
         // 身份信号透传（「D9 实现位置修订」/ ADR-014 决策 5）：depth 以数字字符串注入
         // 子进程 env，由守卫与载荷 agent_id 归并为**同一判据**（守卫是身份与保护集的
         // 唯一判定实现——桥接不复制保护集判定、不复制白名单逻辑，L-067）。
+        // 通道标记（2026-10-07 作用域收紧）：与深度**成对**注入，作为「这次调用来自桥接」
+        // 的自证；守卫按精确等值校验——标记不在场时深度变量一律不作数（继承形态不成立）。
         // 沿用既有 env 注入形态 {...process.env, VAR}（与 evolve.mjs 的协议 env 同形）。
-        env: { ...process.env, FLOW_COMET_AGENT_DEPTH: String(agentDepthValue) },
+        env: {
+          ...process.env,
+          FLOW_COMET_AGENT_DEPTH: String(agentDepthValue),
+          FLOW_COMET_AGENT_DEPTH_SOURCE: 'dsh-bridge',
+        },
       },
     );
     let stdout = '';
@@ -437,7 +447,8 @@ export function apply(ctx) {
       }
 
       // 5.5 代理身份信号：agentDepth(exec) > 0 = 子代理（执行者）。桥接**不再短路**——
-      //     身份信号随守卫调用透传（env FLOW_COMET_AGENT_DEPTH），身份判定与最小保护集
+      //     身份信号随守卫调用透传（env FLOW_COMET_AGENT_DEPTH + 通道标记
+      //     FLOW_COMET_AGENT_DEPTH_SOURCE），身份判定与最小保护集
       //     拦截的整条判据由守卫独占实现（「D9 实现位置修订」/ ADR-014 决策 5：保护集
       //     判据不得出现第二份实现，L-067）。既有纪律保持：形状 fail-closed 与项目根
       //     包含性校验在上方已执行——子代理也不得越界写项目根外 / 参数形状不符。

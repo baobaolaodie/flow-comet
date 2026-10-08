@@ -400,13 +400,20 @@ function blockStateFileWrite(target) {
 }
 
 // ── 身份判据（ADR-014 决策 2：三平台同一、无平台分支）────────────────────────────
-// 载荷 `agent_id` 在场（CC / Codex 原生子代理，真机载荷实测形态）或环境变量
+// 载荷 `agent_id` 在场（CC / Codex 原生子代理，真机载荷实测形态）或**桥接通道自证在场**且环境变量
 // FLOW_COMET_AGENT_DEPTH 为正整数（dsh 桥接透传）⇒ 子代理语义。两输入面归并为**一个**判据
 // （消费方只问「是不是子代理」），不得下沉为 `if (platform === ...)` 之类的平台分支。
 // dsh 面按**实现位置修订**（规划期落定）：桥接只把委派深度透传进环境变量，身份判定与保护集判定的
 // 整条都归本文件独占——桥接不再持有任何一份判定，两侧没有分叉的余地（归因以本节为准）。
+// env 面的作用域收紧（2026-10-07）：CC / Codex 生成的 hook **直接**调用本文件、并不自证是 dsh——
+// 只看深度变量时，该变量一旦被继承进这些 hook 的进程环境（父进程导出 / 包装脚本转发），守卫就会在
+// phase / worktree / runRoot 检查**之前**走子代理路径返回，只剩最小保护集兜底。故桥接在注入深度的
+// 同时注入**通道标记** FLOW_COMET_AGENT_DEPTH_SOURCE=dsh-bridge；env 面身份**要求两者同时在场**
+// （标记缺失或值不符 ⇒ 恒按协调者语义，即便深度为正整数）——判据只读环境变量，**不从载荷形状
+// 推断桥接**（载荷形状是宿主合同，不是通道证据）。
 // 取值形态按实证收窄：载荷面只认**非空字符串**（空串 / 缺失 / 非字符串一律非身份）；env 面只认
-// **纯十进制正整数字符串**（"0" = 协调者 ⇒ 非身份；空串 / 负数 / 小数 / 带杂质一律非身份）。
+// **纯十进制正整数字符串**（"0" = 协调者 ⇒ 非身份；空串 / 负数 / 小数 / 带杂质一律非身份）；
+// 通道标记只认**精确等值**（大小写 / 空白变体一律不认）。
 // 收窄方向是 fail-closed：不命中的形态退回既有路径判定——该回退态即 AC-2 (b) 写死的「维持现状」，
 // 不得读成新判据的放宽。
 function payloadAgentIdentity(input) {
@@ -423,11 +430,16 @@ function agentDepthIdentity(value) {
   return Number.isSafeInteger(depth) && depth > 0 ? depth : 0;
 }
 
+// 桥接通道自证（取值与守卫侧判据同源的常量放在本文件——单一实现，桥接只按同一字面注入）：
+// 标记在场才说明这次调用来自 dsh 桥接；标记不在场 ⇒ env 面身份恒为 0（继承来的深度变量不作数）。
+const BRIDGE_DEPTH_CHANNEL_MARKER = 'dsh-bridge';
+function bridgedAgentDepthIdentity() {
+  if (process.env.FLOW_COMET_AGENT_DEPTH_SOURCE !== BRIDGE_DEPTH_CHANNEL_MARKER) return 0;
+  return agentDepthIdentity(process.env.FLOW_COMET_AGENT_DEPTH);
+}
+
 function subagentIdentity(input) {
-  return (
-    payloadAgentIdentity(input) !== '' ||
-    agentDepthIdentity(process.env.FLOW_COMET_AGENT_DEPTH) > 0
-  );
+  return payloadAgentIdentity(input) !== '' || bridgedAgentDepthIdentity() > 0;
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -797,9 +809,11 @@ async function main() {
   const hookInput = await readHookInput();
 
   // ── ①【ADR-014 决策 2·3】身份短路：身份判据**先于**路径判据求值 ──────────────────────
-  // 身份在场（载荷 agent_id / env FLOW_COMET_AGENT_DEPTH>0）⇒ 直接进入子代理语义：**不再做路径
-  // 审计**（不解析白名单、不判隔离区、不判 runRoot 内外），只判最小保护集——两个机器面目标
-  // （状态文件 / 本次运行生效的协议文件）命中即 BLOCK，未命中即放行（见 enforceMinimalProtectionSet）。
+  // 身份在场（载荷 agent_id / 桥接通道标记在场且 env FLOW_COMET_AGENT_DEPTH>0）⇒ 直接进入子代理
+  // 语义：**不再做路径审计**（不解析白名单、不判隔离区、不判 runRoot 内外），只判最小保护集——两个
+  // 机器面目标（状态文件 / 本次运行生效的协议文件）命中即 BLOCK，未命中即放行。
+  // env 面的短路**要求桥接通道标记同时在场**（见上方身份判据段）：直接调用本文件的 CC / Codex hook
+  // 即使继承了深度变量也不进此分支——它们走协调者语义（白名单 / runRoot / worktree 检查照常执行）。
   // 实现位置修订（规划期落定）：dsh 侧的身份信号由桥接**透传**（环境变量），身份判定与保护集判定的
   // 整条都归本文件独占——桥接不再持有任何判定，故不存在第二份实现与其分叉；决策表里「桥接侧加保护集
   // 判定」的插入位置描述已被该修订取代，归因以本节与最小保护集段为准。
@@ -875,7 +889,7 @@ async function main() {
   if (fileTarget && !fileTarget.insideRunRoot && currentNode) {
     hookBlock(
       `BLOCKED: 写入 "${fileTarget.raw}" 不在当前节点 "${currentNode}" 允许范围（目标在项目根之外）`,
-      '恢复: 改用项目根内的路径；子代理经身份通道放行（载荷 agent_id / 环境变量 FLOW_COMET_AGENT_DEPTH）'
+      '恢复: 改用项目根内的路径；子代理经身份通道放行（载荷 agent_id / 桥接透传的环境变量 FLOW_COMET_AGENT_DEPTH，且桥接通道标记 FLOW_COMET_AGENT_DEPTH_SOURCE 在场）'
     );
   }
 

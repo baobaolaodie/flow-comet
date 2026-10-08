@@ -826,6 +826,17 @@ function runHook(args, root, input, envOverrides = {}) {
   return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
 }
 
+// 桥接身份透传契约（套件侧单一构造点，与真实桥接同形）：dsh 桥接在注入身份深度的**同时**注入
+// 通道标记 FLOW_COMET_AGENT_DEPTH_SOURCE='dsh-bridge'；守卫要求两者同时在场才接受 env 面身份。
+// 套件里凡是要表达「经桥接通道的子代理身份」，一律经本函数构造 env——变量名/标记值只此一处，
+// 免得各处手抄而与守卫或桥接漂移。反向形态（只注入深度、不注入标记）由身份族的继承形态断言覆盖。
+function bridgeIdentityEnv(depthValue) {
+  return {
+    FLOW_COMET_AGENT_DEPTH: depthValue,
+    FLOW_COMET_AGENT_DEPTH_SOURCE: 'dsh-bridge',
+  };
+}
+
 // 跑 scripts/prepare-env.mjs（真实安装器——平台选择链场景）。cwd=临时目录；
 // envOverrides 可覆盖 DSH_HOME（dsh 平台 installHooks 写 $DSH_HOME——场景必须设
 // DSH_HOME=临时目录环境变量,禁止污染真实 ~/.dsh；spawn 非 TTY:走探测/默认路径,不触发交互）
@@ -2640,8 +2651,8 @@ const BARE_ISO_ENGINE_WHITELIST = [
   },
   {
     file: 'workflow-handoff.mjs',
-    count: 4,
-    reason: 'handoff 请求 / 结果的机器字段（requestedAt / revokedAt / completedAt）：Z 形是既有 handoff 工件契约，须与 workflow-state 同批迁移',
+    count: 5,
+    reason: 'handoff 请求 / 结果的机器字段（requestedAt / revokedAt / completedAt / 撤回留痕 withdrawnAt）：Z 形是既有 handoff 工件契约，须与 workflow-state 同批迁移',
   },
   {
     file: 'workflow-guard.mjs',
@@ -2685,7 +2696,7 @@ function intelMetadataNameProblems(consumerText, producerText) {
 
 // 行注释剥离（`//` 之后非代码）：判据的语义是「代码里有没有裸拼接」，散文引用不算实现。
 // 字符串里的 `//`（URL 一类）会把其后内容当注释剥掉——只可能**少计**（判据变松），而白名单面
-// 另有精确条数锚（13 处）兜底；不为注释识别引入字符串感知的复杂度。
+// 另有精确条数锚（14 处）兜底；不为注释识别引入字符串感知的复杂度。
 function stripLineComments(text) {
   return text.split('\n').map((line) => {
     const at = line.indexOf('//');
@@ -3406,6 +3417,103 @@ const SCENARIOS = [
       const silent = runGuard(['exit', 'subagent-execute'], dir);
       assertNotOut(silent, '在飞委托');
       assertNotOut(silent, '待写入者收工后重跑');
+
+      // ②c 撤回通道（在飞委托族的 in-place 扩展）：被遗弃的 request 可经受支持接口撤回——撤回在
+      //     **原记录**上加法式落留痕（withdrawnAt 时间戳 + withdrawnBy 来源），守卫按同一判据把已撤回
+      //     的 request 移出在飞集合 ⇒ 出口放行；记录本身不删除（历史留痕），重新委托时撤回落痕转入
+      //     previousWithdrawals 而非被静默丢弃。已撤回 = **终态**：重复撤回被拒、撤回后 result 被拒。
+      //     判据要求留痕**两字段齐备**才成立（只写时间戳的手改形态仍按在飞处理——fail-closed）。
+      //     反向构造：守卫不忽略已撤回的 request ⇒ ②c-3 必红；判据只看单一字段 ⇒ ②c-6 必红。
+      const withdrawRequests = () => ({
+        P01: { writeFiles: ['src/p1.mjs'] },
+        P02: { writeFiles: ['src/p2.mjs'], requestedAt: '2026-10-07T00:00:00.000Z' },
+      });
+      const withdrawCase = { ...baseState('subagent-execute'), newChange: true };
+      withdrawCase.enteredNodes = ['subagent-execute'];
+      withdrawCase.evidence['subagent-execute'] = {
+        summary: 'delegated, one request abandoned',
+        handoffRequests: withdrawRequests(),
+        handoffResult: handoffFor(['P01']),
+      };
+      writeState(dir, withdrawCase);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1 + TASK_P2);
+      // 严格形态（newChange:true）下 done 任务须有对应 SUMMARY——补两份，使「撤回 ⇒ 出口放行」
+      // 的断言落在**唯一**阻塞点（在飞委托）上，而不是被无关门禁干扰。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', strictSummary('P01'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P02-SUMMARY.md', strictSummary('P02'));
+      // ②c-0 撤回前：P02 在飞 ⇒ 出口拦（撤回通道的必要性前提 + 恢复指引点名该命令）
+      const beforeWithdraw = runGuard(['exit', 'subagent-execute'], dir);
+      assertExit(beforeWithdraw, 1);
+      assertOut(beforeWithdraw, 'P02');
+      assertOut(beforeWithdraw, 'workflow-handoff.mjs withdraw');
+      // ②c-1 真实 CLI 撤回：缺 --by 先被拒（留痕来源不可缺省）⇒ 补齐后撤回成功
+      const noBy = runHandoff(['withdraw', 'P02'], dir);
+      assertExit(noBy, 1);
+      assertOut(noBy, '--by');
+      const withdrawn = runHandoff(['withdraw', 'P02', '--by', 'coordinator', '--reason', '零提交复验失败后作废'], dir);
+      assertExit(withdrawn, 0);
+      assertOut(withdrawn, 'HANDOFF WITHDRAW: P02');
+      assertOut(withdrawn, 'withdrawnAt=');
+      // ②c-2 留痕在场且历史不删：撤回两字段齐备，原 request 字段（writeFiles / requestedAt）原样保留
+      const stWithdrawn = JSON.parse(readStateBytes(dir));
+      const p02Withdrawn = stWithdrawn.evidence['subagent-execute'].handoffRequests.P02;
+      if (typeof p02Withdrawn.withdrawnAt !== 'string' || p02Withdrawn.withdrawnAt.trim() === '') {
+        throw new Error('撤回应落 withdrawnAt 时间戳: ' + JSON.stringify(p02Withdrawn));
+      }
+      if (p02Withdrawn.withdrawnBy !== 'coordinator') {
+        throw new Error('撤回应落 withdrawnBy 来源: ' + JSON.stringify(p02Withdrawn));
+      }
+      if (p02Withdrawn.withdrawReason !== '零提交复验失败后作废') {
+        throw new Error('撤回原因应留痕: ' + JSON.stringify(p02Withdrawn));
+      }
+      if (!Array.isArray(p02Withdrawn.writeFiles) || p02Withdrawn.writeFiles[0] !== 'src/p2.mjs'
+        || p02Withdrawn.requestedAt !== '2026-10-07T00:00:00.000Z') {
+        throw new Error('撤回不得删除原 request 字段（writeFiles / requestedAt 应原样保留）: ' + JSON.stringify(p02Withdrawn));
+      }
+      // ②c-3 撤回后 ⇒ 出口放行（守卫忽略已撤回的 request；同一出口、同一 state 其余字段不变）
+      const afterWithdraw = runGuard(['exit', 'subagent-execute'], dir);
+      assertExit(afterWithdraw, 0);
+      assertOut(afterWithdraw, 'ALL CHECKS PASSED');
+      assertNotOut(afterWithdraw, '在飞委托');
+      // ②c-4 终态之一：重复撤回被拒，且不改写既有留痕
+      const withdrawAgain = runHandoff(['withdraw', 'P02', '--by', 'coordinator'], dir);
+      assertExit(withdrawAgain, 1);
+      assertOut(withdrawAgain, '终态');
+      const stAfterAgain = JSON.parse(readStateBytes(dir));
+      if (stAfterAgain.evidence['subagent-execute'].handoffRequests.P02.withdrawnAt !== p02Withdrawn.withdrawnAt) {
+        throw new Error('重复撤回不得改写既有撤回留痕');
+      }
+      // ②c-5 终态之二：已撤回的 request 不再接受 result（撤回语义不被事后「复活」绕过）
+      const resultAfterWithdraw = runHandoff(['result', 'P02', '{"commitHash":"deadbee","completedChecks":[]}'], dir);
+      assertExit(resultAfterWithdraw, 1);
+      assertOut(resultAfterWithdraw, '已撤回（终态）');
+      // ②c-6 判据要求留痕两字段齐备：抽掉 withdrawnBy（手改形态）⇒ 重新计为在飞委托 ⇒ 出口回收
+      const strippedWithdraw = JSON.parse(readStateBytes(dir));
+      delete strippedWithdraw.evidence['subagent-execute'].handoffRequests.P02.withdrawnBy;
+      writeState(dir, strippedWithdraw);
+      const restripped = runGuard(['exit', 'subagent-execute'], dir);
+      assertExit(restripped, 1);
+      assertOut(restripped, '在飞委托');
+      // ②c-7 撤回 → 重新委托：撤回落痕转入 previousWithdrawals，不被静默丢弃
+      //     （先补回 ②c-6 抽掉的来源字段——那一抽是为验证判据要求两字段齐备，不是状态终态）
+      strippedWithdraw.evidence['subagent-execute'].handoffRequests.P02.withdrawnBy = 'coordinator';
+      writeState(dir, strippedWithdraw);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/subagent-execute-flow-comet-dev.json',
+        JSON.stringify({ node: 'subagent-execute', skill: 'flow-comet-dev', at: '2026-10-07T00:00:00.000Z' }, null, 2) + '\n');
+      assertExit(runHandoff(['request', 'P02', '重新委托 P02', '--write-files', 'src/p2.mjs'], dir), 0);
+      const stReRequest = JSON.parse(readStateBytes(dir));
+      const p02ReRequested = stReRequest.evidence['subagent-execute'].handoffRequests.P02;
+      if (p02ReRequested.withdrawnAt !== undefined) {
+        throw new Error('重新委托应重置当前态（withdrawnAt 不得残留在当前字段）: ' + JSON.stringify(p02ReRequested));
+      }
+      if (!Array.isArray(p02ReRequested.previousWithdrawals) || p02ReRequested.previousWithdrawals.length !== 1
+        || p02ReRequested.previousWithdrawals[0].withdrawnBy !== 'coordinator') {
+        throw new Error('重新委托不得静默丢弃撤回落痕（应转入 previousWithdrawals）: ' + JSON.stringify(p02ReRequested));
+      }
+      // ②c-8 撤回只作用于已记录的 request：未知任务被拒、不新建记录
+      const withdrawUnknown = runHandoff(['withdraw', 'P99', '--by', 'coordinator'], dir);
+      assertExit(withdrawUnknown, 1);
+      assertOut(withdrawUnknown, '无对应 request 记录');
 
       // ④ 派遣留痕的静态锚（零新增 state 顶层字段）：留痕只允许落在既有嵌套字段
       //    evidence['subagent-execute'] 下——引擎脚本不得出现顶层留痕键赋值；顶层字段清单
@@ -8856,6 +8964,12 @@ const SCENARIOS = [
           '| ① | **写权限** | 每个写者必须有一条被守卫认可的写入通道 |',
           '| ③ | **验证隔离** | 同一时刻只有一个写者：全量判据不得与在飞写者并行 |',
           '出口校验锚 = `handoffRequests` 有 request 无对应 `handoffResult` ⇒ 新 change BLOCKED / 旧 change WARN；全部有 result ⇒ 放行；无证据 ⇒ 零输出',
+          // 撤回通道（被遗弃的交接的受支持出口）与桥接通道标记（env 面身份的作用域收紧）：
+          // 两册同锁块内逐字一致，抽掉任一句必红（L-106 判别句式，非裸子串）。
+          '**已撤回的 request 不构成在飞委托**',
+          '`workflow-handoff.mjs withdraw <task-id> --by <来源>` 在原记录上留痕 `withdrawnAt` + `withdrawnBy`，已撤回 = 终态、历史不删',
+          '**并同时注入桥接通道标记 `FLOW_COMET_AGENT_DEPTH_SOURCE`——守卫要求标记与深度同时在场才接受该通道**',
+          '**+ 通道标记 `FLOW_COMET_AGENT_DEPTH_SOURCE`**；0 / 缺失 / 无标记 = 协调者',
           '**证实**——Codex 交互式会话的原生子代理载荷含 `agent_id`',
           '**推翻**——「Codex 载荷无身份字段」只对 `codex exec` headless 主线程成立，**不得外推**为平台结论。',
           '**未覆盖（显式标注，不得写成已支持）**',
@@ -8992,8 +9106,11 @@ const SCENARIOS = [
         }
         const stateSchemaSrc = fs.readFileSync(path.join(__dirname, 'state-schema.mjs'), 'utf8');
         const handoffSrc = fs.readFileSync(path.join(__dirname, 'workflow-handoff.mjs'), 'utf8');
+        // 出口校验（节点门禁）脚本的另一册：在飞委托判据落在 workflow-guard.mjs（hook 守卫只做写入
+        // 拦截，两者同包不同册）——撤回留痕被判据消费这一条须在**该**源上核对。
+        const workflowGuardSrc = fs.readFileSync(path.join(__dirname, 'workflow-guard.mjs'), 'utf8');
         // 一致性判据（单一实现：真实判据与反向构造探针共用本函数）。
-        const consistencyProblems = ({ guard, bridge, schema, handoff, books }) => {
+        const consistencyProblems = ({ guard, bridge, schema, handoff, workflowGuard, books }) => {
           const out = [];
           // ① 身份判据的载荷键：文本声称判据 = agent_id；引擎身份判据段必须读取该键。
           const regionStart = guard.indexOf('function payloadAgentIdentity');
@@ -9019,6 +9136,28 @@ const SCENARIOS = [
             // 此处不判违规也不静默当通过（未验证 ≠ 通过）。
           } else if (!bridge.includes('FLOW_COMET_AGENT_DEPTH')) {
             out.push('桥接未透传环境变量身份深度（与文本 / 守卫不一致）');
+          }
+          // ③b 桥接通道标记的名单一与值单一（env 面身份的作用域收紧）：守卫读取处、守卫判据常量、
+          //     桥接注入处三处同值；缺任一处即「文本声称需标记自证、实现却直接认深度」的分叉。
+          //     文本侧的判据由两册同锁块承载（见上方 contractLockPhrases 的标记判别句）。
+          if (!guard.includes('process.env.FLOW_COMET_AGENT_DEPTH_SOURCE')) {
+            out.push('守卫未读取桥接通道标记（env 面身份的作用域收紧无实现承载）');
+          }
+          if (!guard.includes("BRIDGE_DEPTH_CHANNEL_MARKER = 'dsh-bridge'")) {
+            out.push('守卫缺桥接通道标记的判据常量（标记值无单一来源）');
+          }
+          if (bridge === null) {
+            // 同上：安装副本形态无仓库根 scripts/，该侧锚不适用。
+          } else if (!/FLOW_COMET_AGENT_DEPTH_SOURCE:\s*'dsh-bridge'/.test(bridge)) {
+            out.push('桥接未注入桥接通道标记 ' + "'dsh-bridge'" + '（守卫要求标记在场，桥接不注入即通道失效）');
+          }
+          // ③c 撤回留痕的字段名与判据落点：文本点名的两个字段由单一实现判定，且守卫的在飞判据
+          //     必须消费该实现（缺一即「文本说撤回可放行、实现仍按在飞拦」）。
+          if (!schema.includes('withdrawnAt') || !schema.includes('withdrawnBy')) {
+            out.push('撤回留痕字段名未落在单一判据实现（与文本声称的 withdrawnAt / withdrawnBy 不一致）');
+          }
+          if (!/handoffRequestWithdrawn\(requests\[taskId\]\)/.test(workflowGuard)) {
+            out.push('在飞委托判据未消费撤回留痕判据（撤回的 request 仍会被计为在飞）');
           }
           // ④ 最小保护集的两个目标：实现侧取值来源（状态文件路径常量 + 协议解析结果）与文本字面同值。
           if (!schema.includes("RUNTIME_DIR = '.flow-comet'")
@@ -9050,10 +9189,15 @@ const SCENARIOS = [
             if (!text.includes('noCommit')) {
               out.push(rel + ' 缺零提交资格字段名（noCommit）');
             }
+            // 桥接通道标记名（env 面身份的作用域收紧）：两册文本须点名标记本身——只说「env 透传
+            // 深度」会让读者以为继承来的深度变量也能当身份用（正是收紧前的缺口表述）。
+            if (!text.includes('FLOW_COMET_AGENT_DEPTH_SOURCE')) {
+              out.push(rel + ' 缺桥接通道标记名（文本声称 env 面身份需标记自证，却未点名标记）');
+            }
           }
           return out;
         };
-        const consistencySources = { guard: guardSrc, bridge: bridgeSrc, schema: stateSchemaSrc, handoff: handoffSrc, books: bookTexts };
+        const consistencySources = { guard: guardSrc, bridge: bridgeSrc, schema: stateSchemaSrc, handoff: handoffSrc, workflowGuard: workflowGuardSrc, books: bookTexts };
         problems.push(...consistencyProblems(consistencySources));
         // 反向构造（同一判据驱动）：逐项把实现侧常量改成与文本不同的值 ⇒ 必报（文本说 A、实现说 B 即红）。
         const consistencyProbes = [
@@ -9063,6 +9207,15 @@ const SCENARIOS = [
               "function payloadAgentIdentity(input) { const probe = input.agent_type;\n"),
           }, 'agent_type'],
           ['环境变量改名', { guard: guardSrc.replaceAll('FLOW_COMET_AGENT_DEPTH', 'FLOW_COMET_DEPTH') }, '环境变量身份深度'],
+          // 桥接通道标记（env 面身份的作用域收紧）与撤回通道：逐项抽掉实现侧或文本侧的承载 ⇒ 必报。
+          ['桥接标记读取抽掉', { guard: guardSrc.replaceAll('process.env.FLOW_COMET_AGENT_DEPTH_SOURCE', 'process.env.FLOW_COMET_DEPTH_SOURCE') }, '桥接通道标记'],
+          ['桥接标记判据常量改名', { guard: guardSrc.replace("BRIDGE_DEPTH_CHANNEL_MARKER = 'dsh-bridge'", "BRIDGE_DEPTH_CHANNEL_MARKER = 'bridge'") }, '标记值无单一来源'],
+          // 桥接源在安装副本形态结构性缺席（见上方 SKIP 行）：该探针不构造——未验证 ≠ 通过，
+          // 由 SKIP 行显式声明；不构造也不得让整块判据崩掉（缺席面不得变成套件错误）。
+          ...(bridgeSrc === null ? [] : [['桥接注入标记值漂移', { bridge: bridgeSrc.replaceAll("FLOW_COMET_AGENT_DEPTH_SOURCE: 'dsh-bridge'", "FLOW_COMET_AGENT_DEPTH_SOURCE: 'other'") }, '桥接未注入桥接通道标记']]),
+          ['撤回留痕字段改名', { schema: stateSchemaSrc.replaceAll('withdrawnBy', 'cancelledBy') }, '撤回留痕字段名未落在单一判据实现'],
+          ['在飞判据不消费撤回留痕', { workflowGuard: workflowGuardSrc.replace('handoffRequestWithdrawn(requests[taskId])', 'false') }, '在飞委托判据未消费撤回留痕判据'],
+          ['文本侧桥接标记名缺失', { books: new Map([...bookTexts].map(([rel, text]) => [rel, text.split('FLOW_COMET_AGENT_DEPTH_SOURCE').join('（反向构造：抽掉）')])) }, '桥接通道标记名'],
           ['状态文件路径常量改名', { schema: stateSchemaSrc.replace("RUNTIME_STATE_FILE_NAME = 'flow-comet-state.json'", "RUNTIME_STATE_FILE_NAME = 'state.json'") }, '状态文件路径常量'],
           ['留痕落点改顶层', { handoff: handoffSrc.replaceAll("state.evidence['subagent-execute'].handoffRequests", 'state.handoffRequests') }, '留痕未落在嵌套证据'],
           ['零提交落库形态改名', { handoff: handoffSrc.replaceAll('noCommit: true', 'zeroCommitFlag: true') }, '零提交资格落库形态'],
@@ -9073,6 +9226,149 @@ const SCENARIOS = [
           const probed = { ...consistencySources, ...override };
           if (!consistencyProblems(probed).some((p) => p.includes(expected))) {
             problems.push('反向构造判别力缺失（' + probeLabel + ' 未被判不一致）');
+          }
+        }
+      }
+      // —— 公开面口径机检（文档不说假话）：公开机制册的判级须与技能册一致、公开变更日志的新增
+      //    条目须带**编号** PR 链接、技能册的已关闭缺口与建树适用面须写成本文。三面各自可判，
+      //    并配反向构造（抽掉新表述 / 还原旧表述 ⇒ 必报）。公开面在安装副本形态结构性缺席：
+      //    缺席时输出可见 SKIP（未验证 ≠ 通过），不得静默当通过。
+      {
+        const publicDocRelPaths = ['docs/MECHANISM.md', 'docs/MECHANISM-zh.md', 'CHANGELOG.md', 'CHANGELOG-zh.md'];
+        const publicDocs = new Map(publicDocRelPaths.map((rel) => {
+          const abs = path.join(REPO_ROOT, rel);
+          return [rel, fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : null];
+        }));
+        const missingDocFaces = [...publicDocs].filter(([, text]) => text === null).map(([rel]) => rel);
+        if (missingDocFaces.length > 0) {
+          console.log('SKIP: 184 的公开面口径锚（' + missingDocFaces.join(', ') + '）——本次检出无该公开文档面，'
+            + '未校验「公开机制册判级与技能册一致 / 变更日志新增条目链接带编号 / 建树适用面成文」，请在权威源检出重跑本套件');
+        }
+        const subagentFaceText = fs.readFileSync(
+          path.join(__dirname, '..', '..', 'flow-comet-subagent-execute', 'SKILL.md'), 'utf8');
+        const entryFaceText = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+        const worktreeFaceText = fs.readFileSync(path.join(__dirname, '..', 'reference', 'worktree-notes.md'), 'utf8');
+        const treeScopeSentence = '**建树选择的适用面**';
+        const treeBypassSentence = '**以建树绕过边界**不受支持';
+        const staleTreeBan = '手工 `git worktree add <任意路径>` **不是受支持路径**';
+        const gapClosureSentence = '该缺口现已被守卫关闭';
+        // 公开变更日志的 Unreleased 段切片（止于下一个版本标题）。
+        const unreleasedSectionOf = (text) => {
+          const start = text.indexOf('## [Unreleased]');
+          if (start < 0) return null;
+          const next = text.indexOf('\n## [', start + 1);
+          return text.slice(start, next < 0 ? text.length : next);
+        };
+        // 一致性判据（单一实现：真实判据与反向构造探针共用本函数）。
+        const publicFaceProblems = ({ mechanism, mechanismZh, changelog, changelogZh, subagentBook, entryBook, worktreeBook }) => {
+          const out = [];
+          // 公开机制册双语判级：CC 行「证实 + 限定形态」，未覆盖项照旧标注，旧判级句零残留。
+          const gradeCases = [
+            ['docs/MECHANISM.md', mechanism,
+              'payload `agent_id` / `agent_type` — **verified**, in a stated shape only',
+              ['`agent_type`', 'nested delegations', 'non-Windows environments', 'remain uncovered'],
+              'payload `agent_id` — **not yet covered**'],
+            ['docs/MECHANISM-zh.md', mechanismZh,
+              '载荷 `agent_id` / `agent_type`——**证实**，且**限定形态**',
+              ['`agent_type` 取值域', '嵌套委派载荷', '非 Windows 环境', '仍未覆盖'],
+              '载荷 `agent_id`——真机会话**尚未覆盖**'],
+          ];
+          for (const [rel, text, phrase, keep, stale] of gradeCases) {
+            if (text === null) continue;
+            if (!text.includes(phrase)) out.push(rel + ' 未把 CC 身份通道标为证实（缺判别句：' + phrase.slice(0, 30) + '…）');
+            for (const item of keep) {
+              if (!text.includes(item)) out.push(rel + ' 判级升格时丢了限定形态 / 未覆盖项（缺「' + item + '」）');
+            }
+            if (text.includes(stale)) out.push(rel + ' 残留旧判级表述「' + stale + '」');
+          }
+          // 公开变更日志：Unreleased 段内条目数与带编号 PR 链接数一致，且不得有空链接。
+          for (const [rel, text] of [['CHANGELOG.md', changelog], ['CHANGELOG-zh.md', changelogZh]]) {
+            if (text === null) continue;
+            const section = unreleasedSectionOf(text);
+            if (section === null) { out.push(rel + ' 缺 Unreleased 段（新增条目无处登记）'); continue; }
+            const entries = (section.match(/^- /gm) ?? []).length;
+            const numbered = (section.match(/\/pull\/\d+/g) ?? []).length;
+            const bare = (section.match(/\/pull\/\)/g) ?? []).length;
+            if (bare > 0) out.push(rel + ' 新增条目含空 PR 链接（pull/ 无编号）×' + bare);
+            if (entries > 0 && numbered !== entries) {
+              out.push(rel + ' 新增条目与带编号 PR 链接数不一致（条目 ' + entries + ' / 链接 ' + numbered + '）');
+            }
+          }
+          // 已关闭缺口：两册的陈旧注释须以「已关闭 + 当前判据」形态在场（边界陈述保留）。
+          const gapCases = [
+            ['flow-comet-subagent-execute/SKILL.md', subagentBook, ['**fail-open**', '**同判**', '补丁体按行语义解析出']],
+            ['reference/worktree-notes.md', worktreeBook, ['**fail-open**', '**未闭合**', '补丁体按行语义解析出']],
+          ];
+          for (const [rel, text, keep] of gapCases) {
+            if (text === null) continue;
+            if (!text.includes(gapClosureSentence)) {
+              out.push(rel + ' 未把已关闭的守卫缺口写成本文（缺「' + gapClosureSentence + '」——陈旧注释仍在描述现状）');
+            }
+            for (const item of keep) {
+              if (!text.includes(item)) out.push(rel + ' 已关闭缺口的当前判据 / 边界陈述缺失（缺「' + item + '」）');
+            }
+          }
+          // 建树适用面：三册同写「显式建树受支持 / 以建树绕过边界不受支持」，旧一刀切禁令零残留。
+          for (const [rel, text] of [
+            ['flow-comet/SKILL.md', entryBook],
+            ['flow-comet-subagent-execute/SKILL.md', subagentBook],
+            ['reference/worktree-notes.md', worktreeBook],
+          ]) {
+            if (text === null) continue;
+            if (!text.includes(treeScopeSentence)) out.push(rel + ' 未写清建树适用面（缺「' + treeScopeSentence + '」）');
+            if (!text.includes(treeBypassSentence)) out.push(rel + ' 未写清绕过面边界（缺「' + treeBypassSentence + '」）');
+            if (text.includes(staleTreeBan)) {
+              out.push(rel + ' 残留一刀切禁令「' + staleTreeBan + '…」（与入口册平台通道表口径相反）');
+            }
+          }
+          return out;
+        };
+        // 面缺席（安装副本形态）时的 null 安全改写：缺席面既无真实判据也无反向构造，
+        // 由上方 SKIP 行显式声明未验证；探针循环再跳过含缺席面的探针（不静默当通过）。
+        const patchText = (text, from, to) => (text === null ? null : text.split(from).join(to));
+        const publicFaceSources = {
+          mechanism: publicDocs.get('docs/MECHANISM.md'),
+          mechanismZh: publicDocs.get('docs/MECHANISM-zh.md'),
+          changelog: publicDocs.get('CHANGELOG.md'),
+          changelogZh: publicDocs.get('CHANGELOG-zh.md'),
+          subagentBook: subagentFaceText,
+          entryBook: entryFaceText,
+          worktreeBook: worktreeFaceText,
+        };
+        problems.push(...publicFaceProblems(publicFaceSources));
+        // 反向构造（同一判据驱动）：逐项抽掉新表述 / 还原旧表述 ⇒ 必报该问题。
+        const publicFaceProbes = [
+          ['公开册判级回退', {
+            mechanism: patchText(publicFaceSources.mechanism, 'payload `agent_id` / `agent_type` — **verified**, in a stated shape only', 'payload `agent_id` — **not yet covered** in a real session, in a stated shape only'),
+            mechanismZh: patchText(publicFaceSources.mechanismZh, '载荷 `agent_id` / `agent_type`——**证实**，且**限定形态**', '载荷 `agent_id`——真机会话**尚未覆盖**，且**限定形态**'),
+          }, '残留旧判级表述'],
+          ['公开册限定形态抽掉', {
+            mechanism: patchText(publicFaceSources.mechanism, 'nested delegations', 'REMOVED'),
+            mechanismZh: patchText(publicFaceSources.mechanismZh, '嵌套委派载荷', 'REMOVED'),
+          }, '丢了限定形态'],
+          ['变更日志链接编号抽掉', {
+            changelog: patchText(publicFaceSources.changelog, '/pull/145', '/pull/'),
+            changelogZh: patchText(publicFaceSources.changelogZh, '/pull/145', '/pull/'),
+          }, '空 PR 链接'],
+          ['已关闭缺口注解抽掉', {
+            subagentBook: publicFaceSources.subagentBook.split(gapClosureSentence).join('REMOVED'),
+            worktreeBook: publicFaceSources.worktreeBook.split(gapClosureSentence).join('REMOVED'),
+          }, '未把已关闭的守卫缺口写成本文'],
+          ['建树适用面句抽掉', {
+            entryBook: publicFaceSources.entryBook.split(treeScopeSentence).join('REMOVED'),
+            subagentBook: publicFaceSources.subagentBook.split(treeScopeSentence).join('REMOVED'),
+            worktreeBook: publicFaceSources.worktreeBook.split(treeScopeSentence).join('REMOVED'),
+          }, '未写清建树适用面'],
+          ['旧一刀切禁令还原', {
+            subagentBook: publicFaceSources.subagentBook + '\n' + staleTreeBan + '，不得作为绕过手段。\n',
+          }, '残留一刀切禁令'],
+        ];
+        for (const [probeLabel, override, expected] of publicFaceProbes) {
+          const probed = { ...publicFaceSources, ...override };
+          // 含缺席面的探针不执行（该面既无真实判据也无反向构造）——上方 SKIP 行已显式声明未验证。
+          if (Object.values(probed).some((value) => value === null)) continue;
+          if (!publicFaceProblems(probed).some((problem) => problem.includes(expected))) {
+            problems.push('公开面口径反向构造判别力缺失（' + probeLabel + ' 未被判违规）');
           }
         }
       }
@@ -10787,7 +11083,7 @@ const SCENARIOS = [
   // ④ 追加（物理包含性）：隔离区**内**指向区外的符号链接/junction 是同一前缀下的第二种逃逸——
   // 词法归一化对它无能为力（路径字符串确实以隔离区前缀开头），必须按真实落点判定。
   {
-    name: '232 hook 判定一致性：worktree 放行双分支一致 + 穿越仍拦 + 身份三态 × 最小保护集 + runRoot 外对称',
+    name: '232 hook 判定一致性：worktree 放行双分支一致 + 穿越仍拦 + 身份三态 × 桥接标记在场判据 × 最小保护集 + runRoot 外对称',
     run: (dir) => {
       writeState(dir, { ...baseState('subagent-execute'), status: 'running' });
       const insideWorktree = path.join(dir, '.claude', 'worktrees', 'agent-abc123', 'src', 'x.mjs');
@@ -10873,14 +11169,38 @@ const SCENARIOS = [
       const viaMainThread = runHook(['before_tool'], dir, identityPayload({}));
       assertExit(viaMainThread, 2);
       assertOut(viaMainThread, 'BLOCKED');
-      // ⑥c dsh 桥接身份透传（环境变量正整数）⇒ 与载荷面归并为同一判据 ⇒ 放行
-      const viaDepth = runHook(['before_tool'], dir, identityPayload({}), { FLOW_COMET_AGENT_DEPTH: '1' });
+      // ⑥c dsh 桥接身份透传（环境变量正整数 + 桥接通道标记）⇒ 与载荷面归并为同一判据 ⇒ 放行
+      const viaDepth = runHook(['before_tool'], dir, identityPayload({}), bridgeIdentityEnv('1'));
       assertExit(viaDepth, 0);
       assertOut(viaDepth, '(subagent identity)');
+      // ⑥c2 env 面作用域收紧：**只有深度变量在场、桥接通道标记不在场** ⇒ 按协调者语义（白名单外
+      //     源码仍 BLOCK）——CC / Codex 生成的 hook 直接调用本文件、并不自证是桥接，继承来的深度
+      //     变量不得据此走子代理路径（否则守卫在 phase / worktree / runRoot 检查之前就返回）。
+      //     反向构造：守卫去掉标记要求 ⇒ ⑥c2 必红（同载荷被误判为子代理而放行）。
+      for (const inheritedDepth of ['1', '2', '9']) {
+        const inherited = runHook(['before_tool'], dir, identityPayload({}), { FLOW_COMET_AGENT_DEPTH: inheritedDepth });
+        assertExit(inherited, 2);
+        assertOut(inherited, 'BLOCKED');
+        assertNotOut(inherited, '(subagent identity)');
+      }
+      // ⑥c3 标记形态收窄（fail-closed）：值不符 / 大小写变体 / 空白变体 / 空串 / 非桥接来源一律不算
+      for (const marker of ['', ' ', 'dsh', 'DSH-BRIDGE', 'Dsh-Bridge', 'dsh-bridge ', ' dsh-bridge', 'bridged']) {
+        const res = runHook(['before_tool'], dir, identityPayload({}),
+          { FLOW_COMET_AGENT_DEPTH: '1', FLOW_COMET_AGENT_DEPTH_SOURCE: marker });
+        assertExit(res, 2);
+        assertOut(res, 'BLOCKED');
+      }
+      // ⑥c4 标记在场但深度非法 ⇒ 仍非身份（两条判据都闭合：标记只证明通道，不代替取值形态收窄）
+      for (const raw of ['0', '', 'abc', '-1']) {
+        const res = runHook(['before_tool'], dir, identityPayload({}),
+          { FLOW_COMET_AGENT_DEPTH: raw, FLOW_COMET_AGENT_DEPTH_SOURCE: 'dsh-bridge' });
+        assertExit(res, 2);
+        assertOut(res, 'BLOCKED');
+      }
       // ⑥d 取值形态收窄（fail-closed 方向）：'0'（协调者）/ 空串 / 纯空白 / 非十进制 / 负数 /
       //    小数 / 科学计数 / 带符号 一律非身份 ⇒ 退回路径判定（不得读成放宽）
       for (const raw of ['0', '', '  ', 'abc', '-1', '1.5', '1e1', '+1', '2x']) {
-        const res = runHook(['before_tool'], dir, identityPayload({}), { FLOW_COMET_AGENT_DEPTH: raw });
+        const res = runHook(['before_tool'], dir, identityPayload({}), bridgeIdentityEnv(raw));
         assertExit(res, 2);
         assertOut(res, 'BLOCKED');
       }
@@ -10971,9 +11291,13 @@ const SCENARIOS = [
         assertExit(viaIdentityBash, 2);
         assertOut(viaIdentityBash, 'BLOCKED');
         const viaDepthWrite = runHook(['before_tool'], dir,
-          { tool_name: 'Write', tool_input: { file_path: target } }, { FLOW_COMET_AGENT_DEPTH: '2' });
+          { tool_name: 'Write', tool_input: { file_path: target } }, bridgeIdentityEnv('2'));
         assertExit(viaDepthWrite, 2);
         assertOut(viaDepthWrite, 'BLOCKED');
+        // 报文须点名保护集类别（经桥接通道身份放行下的拦截理由）：协调者路径的报语文义不同
+        // （state 文件另有同族点名的协调者分支，协议面则是「不在允许范围」）⇒ 本断言锁住「身份
+        // 在场仍走保护集判定」而非靠白名单兜底（判别力见 ⑥c2 的继承形态对照）。
+        assertOut(viaDepthWrite, label === '机器状态文件' ? 'state 文件' : '协议文件');
         const codexIdentityBlock = runHook(['before_tool', '--platform', 'codex'], dir,
           { tool_name: 'Write', tool_input: { file_path: target }, agent_id: 'agent-abc123' });
         assertExit(codexIdentityBlock, 0);
@@ -16672,11 +16996,11 @@ const SCENARIOS = [
 
   // 298: 禁裸拼接静态锚（DESIGN R4 的落地）——时间形态 / 格式化的唯一权威是 time-utils.mjs：
   // 三条侧命令零容忍（人可见报告 / CLI 摘要行 / 备份名）；其余引擎脚本走**显式白名单 + 逐条理由**
-  // （既有 13 处都是已持久化的机器字段，迁移留专门窗口）。判别力两条：① 白名单判定是纯函数，
+  // （既有 14 处都是已持久化的机器字段，迁移留专门窗口）。判别力两条：① 白名单判定是纯函数，
   // 合成输入可驱动「条数漂移（增 / 减）」与「未登记文件」三态必报；② 合成引擎目录注入第二处
   // 裸拼接 → 检出必增（证明真实面判据不恒真空过）。
   {
-    name: '298 禁裸拼接静态锚：三侧命令零容忍 + 引擎 13 处显式白名单（逐条理由）+ 合成反向构造',
+    name: '298 禁裸拼接静态锚：三侧命令零容忍 + 引擎 14 处显式白名单（逐条理由）+ 合成反向构造',
     run: () => {
       // ① 三条侧命令零容忍（人可见面的时间形态只许走 time-utils）
       const sideHits = bareIsoTimestampHits(__dirname, BARE_ISO_SIDE_COMMANDS);
@@ -16685,7 +17009,7 @@ const SCENARIOS = [
 
       // ② 其余引擎脚本 = 精确白名单：条数逐文件相等 + 每条例外带非空理由
       const engineHits = bareIsoTimestampHits(__dirname).filter((hit) => !BARE_ISO_SIDE_COMMANDS.includes(hit.file));
-      assertEqual(engineHits.reduce((sum, hit) => sum + hit.count, 0), 13, '引擎既有裸拼接落点总数（白名单代数）');
+      assertEqual(engineHits.reduce((sum, hit) => sum + hit.count, 0), 14, '引擎既有裸拼接落点总数（白名单代数）');
       const problems = bareIsoWhitelistProblems(engineHits, BARE_ISO_ENGINE_WHITELIST);
       assertEqual(problems.length, 0, '白名单漂移: ' + problems.join(' | '));
       for (const entry of BARE_ISO_ENGINE_WHITELIST) {
@@ -16695,7 +17019,7 @@ const SCENARIOS = [
 
       // ③ 白名单判定的判别力（纯函数 · 合成输入）：等价集合不报；三类漂移各自必报
       //    （合成等价集合的条数取真实白名单首条的当前值——它必须与常量同值，否则第 1 条断言即红）
-      const equivalent = [{ file: 'a.mjs', count: 7 }, { file: 'b.mjs', count: 4 }, { file: 'c.mjs', count: 1 }, { file: 'd.mjs', count: 1 }];
+      const equivalent = [{ file: 'a.mjs', count: 7 }, { file: 'b.mjs', count: 5 }, { file: 'c.mjs', count: 1 }, { file: 'd.mjs', count: 1 }];
       const whitelist = BARE_ISO_ENGINE_WHITELIST.map((entry, index) => ({ ...entry, file: equivalent[index].file }));
       assertEqual(bareIsoWhitelistProblems(equivalent, whitelist).length, 0, '等价集合不应报白名单漂移');
       const newcomer = bareIsoWhitelistProblems([...equivalent, { file: 'newcomer.mjs', count: 1 }], whitelist);

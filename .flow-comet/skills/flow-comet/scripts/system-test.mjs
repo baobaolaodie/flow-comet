@@ -3766,7 +3766,37 @@ const TEST_ITEMS = [
       assertExit(collected, 0);
       assertOut(collected, 'ALL CHECKS PASSED');
       assertNotOut(collected, '在飞委托');
-      // ⑭ 派遣留痕可读且零新增 state 顶层字段：留痕落在既有嵌套字段（与 handoffRequests /
+      // ⑮ 撤回通道真实链路（被遗弃的交接的受支持出口）：登记第三个委托而不落结果 ⇒ 出口拦并给出
+      //    该命令的恢复指引；用 workflow-handoff.mjs withdraw 撤回（原地留痕 withdrawnAt /
+      //    withdrawnBy，历史不删）⇒ 同一出口放行。反向构造：守卫不忽略已撤回的 request ⇒ 放行断言
+      //    必红；撤回是终态 ⇒ 同一条目再次 result 被拒（撤回不被事后「复活」）。
+      assertExit(runHandoff(['request', 'P03', '委托实现 P03', '--write-files', 'src/p3.mjs'], dir), 0);
+      const abandonedBlocked = runGuard(['exit', 'subagent-execute'], dir);
+      assertExit(abandonedBlocked, 1);
+      assertOut(abandonedBlocked, '在飞委托');
+      assertOut(abandonedBlocked, 'workflow-handoff.mjs withdraw');
+      const noSource = runHandoff(['withdraw', 'P03'], dir);
+      assertExit(noSource, 1);
+      assertOut(noSource, '--by');
+      const withdrawRes = runHandoff(['withdraw', 'P03', '--by', 'coordinator', '--reason', '零提交复验失败后作废'], dir);
+      assertExit(withdrawRes, 0);
+      assertOut(withdrawRes, 'HANDOFF WITHDRAW: P03');
+      const stWithdraw = readStateFile(dir);
+      const p03 = stWithdraw.evidence?.['subagent-execute']?.handoffRequests?.P03;
+      if (!p03 || typeof p03.withdrawnAt !== 'string' || p03.withdrawnAt.trim() === '' || p03.withdrawnBy !== 'coordinator') {
+        throw new Error('撤回留痕未落原记录（withdrawnAt + withdrawnBy）: ' + JSON.stringify(p03));
+      }
+      if (!Array.isArray(p03.writeFiles) || p03.writeFiles[0] !== 'src/p3.mjs') {
+        throw new Error('撤回不得删除原 request 字段（writeFiles 应原样保留）: ' + JSON.stringify(p03));
+      }
+      const releasedExit = runGuard(['exit', 'subagent-execute'], dir);
+      assertExit(releasedExit, 0);
+      assertOut(releasedExit, 'ALL CHECKS PASSED');
+      assertNotOut(releasedExit, '在飞委托');
+      const revived = runHandoff(['result', 'P03', fullContract(hash2, 'P03')], dir);
+      assertExit(revived, 1);
+      assertOut(revived, '已撤回（终态）');
+      // ⑯ 派遣留痕可读且零新增 state 顶层字段：留痕落在既有嵌套字段（与 handoffRequests /
       //     handoffResult 同族），state 顶层不得出现任何留痕族键。
       const stTrace = readStateFile(dir);
       if (!stTrace.evidence?.['subagent-execute']?.handoffRequests?.P02) {
@@ -5763,6 +5793,44 @@ const TEST_ITEMS = [
         console.log('  盘符根拼写与盘符拼写同判(机器面 deny / 源码放行)✓');
       } else {
         console.log('  (盘符根拼写断言显式不适用——非 win32 载体上该拼写是普通 POSIX 绝对路径)');
+      }
+      // ⑦j 桥接通道标记的作用域收紧（同型真实链路格）：CC / Codex 生成的 hook **直接**调用守卫、
+      //    不经桥接——同一目标、同一深度值，经桥接 ⇒ 放行（⑦a 已覆盖），绕过桥接直接调守卫
+      //    ⇒ 深度变量虽在场也不作数：守卫按协调者语义走白名单 ⇒ deny；同一调用补上通道标记
+      //    ⇒ 按键控的身份通道放行（证明判据键在标记上，不是「直接调用一律拦」）。
+      //    反向构造：守卫去掉标记要求 ⇒ 继承形态必红（继承来的深度变量被当成子代理身份 ⇒ 源码写入放行）。
+      {
+        const guardAbs = path.join(longTarget, guardRel);
+        const probeInput = JSON.stringify({
+          tool_name: 'Write',
+          tool_input: { file_path: path.join(longTarget, 'src', 'c.mjs') },
+        });
+        const directEnvs = [
+          ['继承形态（无通道标记）', { FLOW_COMET_AGENT_DEPTH: '1' }, 2],
+          ['通道标记在场', { FLOW_COMET_AGENT_DEPTH: '1', FLOW_COMET_AGENT_DEPTH_SOURCE: 'dsh-bridge' }, 0],
+          ['标记值不符（近形状）', { FLOW_COMET_AGENT_DEPTH: '1', FLOW_COMET_AGENT_DEPTH_SOURCE: 'dsh' }, 2],
+        ];
+        for (const [label, overrides, expected] of directEnvs) {
+          const res = spawnSync(process.execPath, [guardAbs, 'before_tool'], {
+            cwd: longTarget,
+            input: probeInput,
+            env: { ...process.env, ...overrides },
+            encoding: 'utf8',
+            timeout: 60000,
+          });
+          const out = String(res.stdout || '') + String(res.stderr || '');
+          if ((res.status ?? 1) !== expected) {
+            throw new Error('桥接通道标记直接调用格「' + label + '」预期 exit ' + expected
+              + '，实际 exit ' + String(res.status) + ': ' + out.trim().slice(0, 160));
+          }
+          if (expected === 2 && !out.includes('BLOCKED')) {
+            throw new Error('桥接通道标记直接调用格「' + label + '」拦截报文缺 BLOCKED: ' + out.trim().slice(0, 160));
+          }
+          if (expected === 0 && !out.includes('(subagent identity)')) {
+            throw new Error('桥接通道标记直接调用格「' + label + '」应走身份通道放行: ' + out.trim().slice(0, 160));
+          }
+        }
+        console.log('  桥接通道标记：继承形态按协调者拦 / 标记在场走身份放行 / 近形状标记不认 ✓');
       }
       console.log('  bridge.apply 分派集成(子代理放行/协调者拦/越界·形状 deny 不受身份/保护集拦)✓');
     },
