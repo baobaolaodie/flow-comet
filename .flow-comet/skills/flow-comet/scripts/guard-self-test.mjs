@@ -3446,6 +3446,19 @@ const SCENARIOS = [
       assertExit(beforeWithdraw, 1);
       assertOut(beforeWithdraw, 'P02');
       assertOut(beforeWithdraw, 'workflow-handoff.mjs withdraw');
+      // ②c-0b 前置拒绝（适用面自洽）：P01 已收工（handoffResult 在场）⇒ 撤回被拒（非零退出 + 报文
+      //       写清为何拒 + 恢复指引），且 state 字节零改写（不落留痕、不动既有 request / result——
+      //       撤回的适用面是「在飞且被遗弃的 request」，与动作自述一致）。
+      //       反向构造：把该前置拒绝去掉 ⇒「撤回已收工的委托」又变 exit 0，本格必红。
+      const bytesBeforeCompletedWithdraw = readStateBytes(dir);
+      const completedWithdraw = runHandoff(['withdraw', 'P01', '--by', 'user'], dir);
+      assertExit(completedWithdraw, 1);
+      assertOut(completedWithdraw, '已收工');
+      assertOut(completedWithdraw, 'handoffResult 在场');
+      assertOut(completedWithdraw, '撤回只适用于被遗弃的 request');
+      assertOut(completedWithdraw, '恢复:');
+      assertNotOut(completedWithdraw, 'HANDOFF WITHDRAW');
+      assertStateBytesUnchanged(dir, bytesBeforeCompletedWithdraw, '撤回已收工的委托被拒');
       // ②c-1 真实 CLI 撤回：缺 --by 先被拒（留痕来源不可缺省）⇒ 补齐后撤回成功
       const noBy = runHandoff(['withdraw', 'P02'], dir);
       assertExit(noBy, 1);
@@ -3523,6 +3536,17 @@ const SCENARIOS = [
       const withdrawUnknown = runHandoff(['withdraw', 'P99', '--by', 'coordinator'], dir);
       assertExit(withdrawUnknown, 1);
       assertOut(withdrawUnknown, '无对应 request 记录');
+      // ②c-9 前置拒绝的边界（与守卫同一把尺子）：handoffResult 的**显式 null 占位**读作未收工——
+      //       守卫的两处消费方（在飞判据按 undefined / null，越俎代庖检测按 falsy）都把它读作
+      //       「无结果」，故撤回仍可用，不给「出口拦 + 撤回拒」留下无出口的死角
+      //       （真实链路：先 request，再落空占位，再撤回）。
+      assertExit(runHandoff(['request', 'P03', '遗弃的在飞委托', '--write-files', 'src/p3.mjs'], dir), 0);
+      const nullPlaceholderState = JSON.parse(readStateBytes(dir));
+      nullPlaceholderState.evidence['subagent-execute'].handoffResult.P03 = null;
+      writeState(dir, nullPlaceholderState);
+      const nullPlaceholderWithdraw = runHandoff(['withdraw', 'P03', '--by', 'coordinator'], dir);
+      assertExit(nullPlaceholderWithdraw, 0);
+      assertOut(nullPlaceholderWithdraw, 'HANDOFF WITHDRAW: P03');
 
       // ④ 派遣留痕的静态锚（零新增 state 顶层字段）：留痕只允许落在既有嵌套字段
       //    evidence['subagent-execute'] 下——引擎脚本不得出现顶层留痕键赋值；顶层字段清单

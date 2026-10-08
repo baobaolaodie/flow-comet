@@ -20,7 +20,7 @@ import { nowTimestamp, formatLocalTimestamp, parseTimestamp } from './time-utils
 // Usage:
 //   node workflow-handoff.mjs request <task-id> <description> [--write-files <files...>]  -- record handoff request (W2-D: optional writeFiles allow-list)
 //   node workflow-handoff.mjs result <task-id> <result-or-JSON>  -- record handoff result (W1-D: JSON Return Contract; W2-D: commitHash subset check; : completedChecks 规范化; redEvidence 时间顺序校验)
-//   node workflow-handoff.mjs withdraw <task-id> --by <source> [--reason <text>]  -- 撤回被遗弃的 request（留痕：withdrawnAt + withdrawnBy；已撤回 = 终态）
+//   node workflow-handoff.mjs withdraw <task-id> --by <source> [--reason <text>]  -- 撤回被遗弃的 request（前置：目标无 handoffResult——已收工者拒绝撤回；留痕：withdrawnAt + withdrawnBy；已撤回 = 终态）
 //   node workflow-handoff.mjs status                           -- show all handoff evidence
 
 // 归属门禁读取协议用：与其它脚本同源（packageRoot 默认协议；env 可覆盖），不消费 request 参数。
@@ -720,6 +720,13 @@ async function main() {
     // 任何历史字段（description / requestedAt / writeFiles / noCommit 原样保留）；守卫按同一判据
     // （state-schema.handoffRequestWithdrawn）把已撤回的 request 排除在在飞委托之外。
     // 已撤回 = **终态**：重复撤回被拒（不改写既有留痕），已撤回的 request 也不再接受 result。
+    // 适用面自洽（前置拒绝）：可撤回的只有**在飞且被遗弃**的 request——已在册 handoffResult 的
+    // 委托（已收工）不在其列：对已收工的委托落撤回落痕，只会在同一 taskId 上造出「result 与
+    // withdrawnAt/withdrawnBy 并存」的组合态，而没有任何判据消费它（守卫的在飞判据只读 request
+    // 侧，越俎代庖检测只读 result 侧）。判据与守卫的在飞判据**互补**（同一把尺子，不另立一份）：
+    // 无对应 result = 未收工 = 可撤回；显式 null 占位与「键缺失」同读为未收工（守卫在飞判据按
+    // undefined / null，越俎代庖检测按 falsy），故不阻断撤回——不给「出口拦 + 撤回拒」留下
+    // 无出口的死角。本拒绝**不删改**任何既有记录（request / result 一律原样），恢复指引见下方报文。
     const taskId = process.argv[3];
     const withdrawArgs = process.argv.slice(4);
     let withdrawnBy = null;
@@ -750,6 +757,19 @@ async function main() {
     if (handoffRequestWithdrawn(target)) {
       console.error('HANDOFF ERROR: 任务 ' + taskId + ' 的委托已撤回（终态）——不得重复撤回、不得改写既有撤回留痕'
         + '（withdrawnAt=' + target.withdrawnAt + ', withdrawnBy=' + target.withdrawnBy + '）');
+      process.exit(1);
+    }
+    // 前置拒绝（适用面自洽）：目标已收工（handoffResult 在场且非空占位）⇒ 拒绝撤回，报文写清
+    // 「为什么拒」与恢复指引。**不删改**任何既有记录：本路径在 writeState 之前退出，state 字节零改写。
+    const deliveredResult = handoff && typeof handoff === 'object' && handoff.handoffResult
+      && typeof handoff.handoffResult === 'object' && !Array.isArray(handoff.handoffResult)
+      ? handoff.handoffResult[taskId]
+      : undefined;
+    if (deliveredResult !== undefined && deliveredResult !== null) {
+      console.error('HANDOFF ERROR: 任务 ' + taskId + ' 的委托已收工（handoffResult 在场）——撤回只适用于被遗弃的'
+        + ' request（零提交复验失败 / 写边界被拒之后遗弃的在飞 request），已收工的委托无须撤回：其 result 已在册；'
+        + '恢复: 如需更正该任务的结果，走既有通道重新发起 workflow-handoff.mjs request ' + taskId
+        + ' <description> 后回传新的 result（新记录覆盖该任务的当前态，历史记录不删除）');
       process.exit(1);
     }
     // 新写入路径统一走时间单一权威（本地时间 + 显式偏移）：不在此自行拼接时刻字面。
