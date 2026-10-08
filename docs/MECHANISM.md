@@ -51,8 +51,8 @@ The guard decides by identity, not by path: when the host marks the caller as a 
 
 | Platform | Delegation | Workspace (who builds the tree) | Write-permission channel |
 |---|---|---|---|
-| Claude Code | the `Agent` tool | the harness may build an isolated tree, or the subagent shares the workspace | payload `agent_id` — **not yet covered** in a real session (upstream schema and engine feed tests only) |
-| dsh | the platform's in-process subagent | none — the subagent shares the workspace | identity depth passed through the bridge — **verified** |
+| Claude Code | the `Agent` tool | the harness may build an isolated tree, or the subagent shares the workspace | payload `agent_id` / `agent_type` — **verified**, in a stated shape only (Windows + Claude Code v2.1.177 + `permission_mode = bypassPermissions` + a one-off repository carrier); the value domain of `agent_type`, nested delegations and non-Windows environments remain uncovered |
+| dsh | the platform's in-process subagent | none — the subagent shares the workspace | identity depth passed through the bridge together with its channel marker — **verified** |
 | Codex | native multi-agent sessions | shared workspace, or a tree the coordinator builds explicitly | payload `agent_id` — **verified** in an interactive session |
 
 Coverage is stated per row and stays that way: an uncovered item is not written as supported. The only platform difference left is who builds the tree. On a shared workspace the boundary comes from disjoint task write-sets, commit-time discipline and the minimal protected set.
