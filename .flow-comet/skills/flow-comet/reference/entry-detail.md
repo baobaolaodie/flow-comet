@@ -1,11 +1,9 @@
----
-name: flow-comet
-description: "Use when the user wants the flow-comet managed workflow for flow-kit 9 阶段工作流的 workflow-kernel 实现。工件直接读写 .specs/, explicitly invokes /flow-comet, or persisted workflow state identifies one unambiguous active run. Route through this entry Skill; do not invoke its internal Node Skills directly."
----
+# 入口册展开版（手写区详细协议）
 
-# flow-comet
-
-> 手写区详细协议——主 SKILL.md 的展开版（可选阅读；主 SKILL.md 与本文冲突时以本文为准，本文以外的部分以 SKILL.md 为准，协议定义以 `reference/workflow-protocol.json` 为准）。
+> **读者对象**：需要手写区协议细节（而非只要路由判据）的执行者与协调者——典型是核对机器拥有字段的管理者、查入口册各小节的展开表述。
+> **何时读**：当你要核对某个字段由谁管理、要判定某次 state 变更该走哪条命令，或要查入口册某小节的展开表述时读。
+>
+> 本文是主 `SKILL.md` 的**展开版**（由 `GUIDANCE.md` 改名而来）；路由判据、锚点句与各段要点以 `SKILL.md` 为准，本文承载**未被 SKILL.md 保留的细节**，协议定义以 `reference/workflow-protocol.json` 为准。
 
 flow-kit 9 阶段工作流的 workflow-kernel 实现。保留 flow-kit 的全部产物模板、规则体系和 LESSONS 知识库，用脚本自动管理状态和阶段路由。
 
@@ -156,18 +154,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <ski
 
 ### 受控重校（`replan` · execute 源）
 
-计划在执行中被证明有缺陷、任务集因此需要修订时，用受控重校重新校验并重签任务集——不跳节点、不重置任何完成态：
-
-```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs replan "<reason>" --authorized-by <source> [--continue-round <n>]
-```
-
-- **何时用**：`currentNode` 停在 `execute` / `subagent-execute`，且任务集在进入该节点后被修订、出口因此报「签名不匹配」时；修订后的任务集必须自身合法。
-- **授权**：每次调用都需要用户显式授权——`--authorized-by` 记录授权来源，位置参数记录原因；引擎把授权留痕写入当前节点的嵌套证据（`state.evidence.<node>.replanAuthorization`）。缺授权、值为空/纯空白或形态非法一律 BLOCKED，且 state 字节零改写。
-- **上限与显式续轮**：每 change 最多 3 轮；第 4 次 BLOCKED 并给出「继续 / 停止」人工裁决指引。人工裁决「继续」须追加 `--continue-round <n>`（正整数，且 n ≥ 已用轮次 + 1）作显式续轮授权：满足则放行并计入下一轮，审计行打印续轮标记；未到上限即传该参数、或轮次不足一律 BLOCKED 且零改写。轮次与审计事件记入 `state.history`（事件类型 `replan-applied`），成功输出 `REPLAN: <node> 重新校验通过（授权源 <source>；第 n/3 轮；备份 <file>）` 与 `REASON: <text>` 两行。
-- **备份**：改写前自动落 state 快照 `.specs/<change-id>/replan-backups/<UTC ISO>-pre-replan.json`（时间戳中的 `:` 替换为 `-`），并记录 sha256 指纹，供审查核验与手工回滚。
-- **幂等与零改写**：目标形态已成立时的重复同形态调用 = 空操作（输出 `REPLAN: 空操作——…`，不备份、不计数、不写事件、不改写 state），不会静默跳过。
-- **绝不豁免校验**：`replan` 只做「重新校验 + 重新签名」——判据与 plan 出口同源，处置按路径分列：**replan 重校**——任务块 / 每任务 `<verify>` / 任务图（依赖环 / 缺失依赖）任一不成立，或并行写冲突的写写（write∩write）成立，一律 BLOCKED（状态零改写）；读写（read∩write）仅 WARN 不阻断；7 字段完整性只在「新模板形态（含 `<name>`）+ 新 change」缺字段时 BLOCKED，其余情形 WARN 渐进。**plan 出口**——任务块 / 每任务 `<verify>` 缺失一律 BLOCKED；任务图的依赖环 / 缺失依赖与并行写冲突的写写，对新 change BLOCKED、旧 change WARN 渐进；读写对新旧 change 均仅 WARN。它不是绕过签名门禁，而是把「签名不匹配」重新收敛为「匹配」。
+**规格已单一化**：`replan` 的完整规格（何时用 / 授权留痕 / 上限与显式续轮 / 备份 / 幂等 / 「绝不豁免校验」的判据同源对照）归 `reference/replan.md` 一处；本文不复述，入口册只留 4 行要点与条件句。命令面：`node .claude/skills/flow-comet/scripts/workflow-state.mjs replan "<reason>" --authorized-by <source> [--continue-round <n>]`。
 
 ### Evidence Recording
 
@@ -199,12 +186,12 @@ All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT
 
 ### 机器拥有字段
 
-以下字段只能由 `workflow-state.mjs` 和 `workflow-guard.mjs` 脚本管理，不应被手动编辑：
+以下字段只能由 `workflow-state.mjs` 和 `workflow-guard.mjs` 脚本管理，**绝不手改**：
 
 | 字段 | 说明 | 管理者 |
 |------|------|--------|
-| `currentNode` | 当前活动节点 | workflow-state.mjs next/advance |
-| `completedNodes` | 已完成节点列表 | workflow-guard.mjs exit --apply |
+| `currentNode` | 当前活动节点 | workflow-state.mjs next/advance/reenter |
+| `completedNodes` | 已完成节点列表 | workflow-guard.mjs exit --apply / workflow-state.mjs reenter |
 | `evidence` | 节点证据记录 | workflow-state.mjs record |
 | `verifyFailures` | verify 失败计数 | workflow-guard.mjs (auto-increment) |
 | `verifyFailuresByChange` | 按 change 隔离的失败计数（keyed by change-id） | workflow-state.mjs / state-schema.mjs helper |
@@ -213,5 +200,7 @@ All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT
 | `directOverride` | direct 是否用户显式确认 | workflow-state.mjs execution-mode direct |
 
 手动修改这些字段可能导致 guard 校验不一致。若需修正状态，使用 `workflow-state.mjs advance` 或 `workflow-state.mjs select`。
+
+`workflow-state.mjs reenter` 是 `currentNode` / `completedNodes` / `status` 的受控脚本写入点：它先落备份、写授权留痕与审计事件，再转移工作归属；除该命令与上述脚本外，不要用其他方式改这些字段。
 
 The route, Output Schemas, required Skill calls, and recovery state are defined by `reference/workflow-protocol.json`. 恢复语义见 `reference/recovery.md`。
