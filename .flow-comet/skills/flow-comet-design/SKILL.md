@@ -3,7 +3,7 @@ name: flow-comet-design
 description: "Use only when explicitly invoked as /flow-comet-design or routed by the flow-comet entry/runtime to the design Node; complete Design for flow-comet. Do not use for ordinary standalone tasks or as the workflow entry."
 ---
 
-<!-- 手写区详细协议见 GUIDANCE.md（可选阅读） -->
+<!-- 手写区详细协议见 ../flow-comet/reference/entry-detail.md（可选阅读） -->
 
 # Design
 
@@ -58,11 +58,11 @@ This node transforms requirements into an actionable technical design. It produc
 
 5. **Data flow / architecture diagram (section 2)**: ASCII or Mermaid diagram showing data/event flow, key state machines, boundaries.
 
-6. **ADR (section 3)**: For any decision that could be reversed later, write ADR to `.specs/adr/<NNN>-<title>.md` with Context / Decision / Consequences structure.
+6. **ADR (section 4)**: For any decision that could be reversed later, write ADR to `.specs/adr/<NNN>-<title>.md` with Context / Decision / Consequences structure.
 
-7. **Risk assessment (section 4)**: At least 3 risks (implementation / launch / long-term debt), each with mitigation.
+7. **Risk assessment (section 5)**: At least 3 risks (implementation / launch / long-term debt), each with mitigation.
 
-8. **Out of scope (section 5)**: Explicitly list what this design does NOT solve but will need future attention.
+8. **Out of scope (section 6)**: Explicitly list what this design does NOT solve but will need future attention.
 
 9. **Architecture sedimentation suggestions (section 9)**: If this change introduces project-level reusable value (new abstractions, tech decisions, cross-module contracts, dependency changes, forbidden-list updates), fill section 9. Otherwise write "No architecture sedimentation suggestions for this change."
 
@@ -111,9 +111,9 @@ The design node reads CHANGE.md and REQUIREMENT.md, then produces DESIGN.md thro
 
 **加载声明（阶段层 · 双步硬规则）**：本节点技能已由入口路由经 Skill 工具加载（你正在阅读的就是它）；本节点 Required Skill Calls 的加载与声明同样不可跳过：
 
-1. 本节点的同名条目已随路由加载——同名 required 条目（`flow-comet-design`）无需重复加载，仅需运行下方声明命令（只读取 SKILL.md 文件不叫加载，**不得跳过**真正的 Skill 工具注入步骤）。`flow-comet-ui-design` 为 **guarded 但仅前端适用**的条目——前端项目用 Skill 工具加载其已装副本后**必须**运行对应 `skill-load` 声明建标记，并在 record 载荷带 `required-skill:design.flow-comet-ui-design`（出口不再自动补写该条目，缺声明即拦截）；非前端项目不加载不声明（出口打印可见的 `UI-DESIGN: skipped（非前端）` 后放行）；旧 change 保持渐进，缺件仅 WARN。
+1. 本节点的同名条目已随路由加载——同名 required 条目（`flow-comet-design`）无需重复加载，仅需运行下方声明命令（只读取 SKILL.md 文件不叫加载，**不得跳过**真正的 Skill 工具注入步骤）。`flow-comet-ui-design` 为 **guarded 但仅前端适用**的条目——前端项目用 Skill 工具加载其已装副本后**必须**运行对应 `skill-load` 声明建标记，并在 record 载荷带 `required-skill:design.flow-comet-ui-design`；非前端项目不加载不声明（出口打印可见的 `UI-DESIGN: skipped（非前端）` 后放行）；旧 change 保持渐进，缺件仅 WARN。
 
-> **前端判据（结构级 · 与引擎同口径）**：`CHANGE.md` 的「视觉调性」段在场，且段内的「不适用」标记成**结构形态**时才判非前端——标记**独立行**、居**行首**（可带列表符号 / 引用 / 加粗），或写在适用性类标签（`适用性` / `适用范围` / `是否前端` / `视觉调性` / `前端` / `界面` / `适用`）的**字段值位**；标记之后须成**词形边界**（紧跟空白、标点或行尾），命中即回显**命中片段**。段内其它位置顺带提到「不适用」（如「不适用于暗色主题」）不算标注，仍判前端、仍要求 UI-DESIGN.md 与 `guarded` 声明。
+> **前端判据（结构级 · 唯一权威 → `flow-comet-ui-design` 册的「触发与跳过」段）**：判据全文与 `guarded` 绑定的判级口径都在该册——本节不复述，判定与出口行为一律以该册为准。
 2. 加载完成后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
 
 ```bash
@@ -160,6 +160,6 @@ If the script prints `SKILL: flow-comet-plan`, load that Skill next.
 
 1. Re-run entry check to confirm workflow state.
 2. Read `.specs/<change-id>/DESIGN.md` — 轻量流程允许 `.specs/<change-id>/DESIGN-lite.md`(guard 同口径:DESIGN.md 优先、DESIGN-lite 兜底)——if exists with section 0 populated and user confirmed, design phase is done.
-3. If the design doc exists but incomplete, resume from the first missing section (check 0, 0.5, 1-5, 9).
+3. If the design doc exists but incomplete, resume from the first missing section (check 0, 0.5, 1-6, 9).
 4. If frontend project: check `.specs/<change-id>/UI-DESIGN.md` existence.
 5. Do not repeat confirmed decisions. Resume from the first incomplete artifact.
