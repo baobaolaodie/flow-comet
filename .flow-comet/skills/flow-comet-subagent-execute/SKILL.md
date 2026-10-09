@@ -98,8 +98,6 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
 
 > **要核对授权留痕 / 轮次与续轮审计 / 备份指纹 / 归档侧重入边界时读 `reference/fix-loop.md`**：受控重入的完整规格在该文件。
 
-> **受控重入的完整规格（授权留痕 / 轮次与续轮审计 / 备份指纹 / 边界清单）见 `reference/fix-loop.md`：当你判定需要把工作归属退回既有生命周期、或要核对归档侧重入边界时读它。**
-
 ### Prerequisites
 
 - `.specs/<change-id>/TASK.md` must exist with at least one task marked `parallel="true"` and `status="pending"`.
