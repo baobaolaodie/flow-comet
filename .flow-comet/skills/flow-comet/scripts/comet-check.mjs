@@ -16,7 +16,6 @@ const required = [
   "../flow-comet-review/SKILL.md",
   "../flow-comet-verify/SKILL.md",
   "../flow-comet-archive/SKILL.md",
-  "reference/resolved-skills.json",
   "reference/workflow-protocol.json",
   "reference/decision-points.md",
   "reference/recovery.md",
