@@ -3,7 +3,7 @@ name: flow-comet-subagent-execute
 description: "Use only when explicitly invoked as /flow-comet-subagent-execute or routed by the flow-comet entry/runtime to the subagent-execute Node; complete Subagent Execute for flow-comet. Do not use for ordinary standalone tasks or as the workflow entry."
 ---
 
-<!-- 手写区详细协议见 GUIDANCE.md（可选阅读） -->
+<!-- 本册的详规与表见 ../flow-comet/reference/entry-detail.md（按需读，见各节指针） -->
 
 # Subagent Execute
 
@@ -15,8 +15,8 @@ Responsibility: 委托 [P] 并行任务给子代理，要求加载 flow-comet-de
 
 职责分工（趟次协作）：本节点负责**并行委托**（`parallel="true"` 且依赖已满足的任务，同一趟内同时发出）——委托节点可多次往返：每趟委托当时全部依赖已满足的并行任务，趟间由 execute 节点串行消化，直至不存在依赖已满足的可并行 pending 且无串行残留。execute 节点负责**串行委托**（非 parallel 任务，一次一个）。两者共用同一委托证据库（handoff 记录在 subagent-execute evidence）。序列形态不是本节点的关注点：全并行、全串行、串→并、并→串及任意混排均合法（合法性只取决于 `depends_on` 无环且引用存在；依赖环与缺失依赖已在 plan 出口拦截并附恢复指引），到达本节点的任务序列由多趟路由按依赖拓扑自动分趟消化。
 
-> **Codex 平台事实与 flow-comet 当前支持面（2026-09-30 记录）**：**平台事实**——Codex 的常规用法是交互式 CLI（`codex` 无子命令）与会话内 agent，`codex exec` 只是 headless 子面；原生多代理 `multi_agent` 为 stable、默认启用（`codex features list` 可查），本机真实交互式会话日志中记录到 `spawn_agent` / `wait_agent` / `close_agent` 的实际调用——因此「Codex 不能委派 / 不使用并行委托」**不是平台事实**。**已关闭的机制缺口**——本节点此前记录「原生子代理形态未被守卫 / 白名单 / 隔离模型覆盖」的**机制缺口**，已由身份分派（载荷 `agent_id`）关闭：**三平台均可并行委派，差异只在谁建树**（Codex 无自动建树、默认共享工作区）；headless 子面实测见下（仅 `codex exec`，不得外推）。
-> **并行安全四属性契约（两册同锁 · 逐字一致）**：契约对象是**四属性**，不是 worktree——`worktree` 只是属性①「写权限」的**实现之一**，不是契约本身；「一律 worktree」的口号已作废（本仓决策：契约对象 = 四属性，worktree 降为实现之一）。三平台在同一判据下平行对等，**唯一差异是「谁建树」**。
+> **平台事实与判级口径（证据与过程记录）**：Codex 原生多代理 `multi_agent` 为 stable、默认启用，「Codex 不能委派 / 不使用并行委托」**不是平台事实**——该**机制缺口**已由身份分派（载荷 `agent_id`）关闭（**三平台均可并行委派，差异只在谁建树**）；三平台通道对照表、逐平台载荷字段与判级口径（证实 / 推翻 / 未覆盖）、已知边界、旧结论留档、headless 子面实测订正见 `reference/platform-facts.md`：**要判定某平台的能力边界、或要引用某条平台结论时读它。**
+> **并行安全四属性契约**：契约对象是**四属性**，不是 worktree——`worktree` 只是属性①「写权限」的**实现之一**，不是契约本身；「一律 worktree」的口号已作废（本仓决策：契约对象 = 四属性，worktree 降为实现之一）。三平台在同一判据下平行对等，**唯一差异是「谁建树」**。
 >
 > | # | 属性 | 含义 | 满足形态 |
 > |---|------|------|----------|
@@ -25,23 +25,12 @@ Responsibility: 委托 [P] 并行任务给子代理，要求加载 flow-comet-de
 > | ③ | **验证隔离** | 同一时刻只有一个写者：全量判据不得与在飞写者并行 | 出口校验锚 = `handoffRequests` 有 request 无对应 `handoffResult` ⇒ 新 change BLOCKED / 旧 change WARN；全部有 result ⇒ 放行；无证据 ⇒ 零输出（**已撤回的 request 不构成在飞委托**：`workflow-handoff.mjs withdraw <task-id> --by <来源>` 在原记录上留痕 `withdrawnAt` + `withdrawnBy`，已撤回 = 终态、历史不删） |
 > | ④ | **集成纪律** | 机制选择 / 顺序 / 审计 / 冲突处置四项均有明文规则 | 集成纪律四要素（见 Guidance 同名小节） |
 >
-> **三平台通道对照表（四属性 × 三平台；差异只在「谁建树」）**：
->
-> | 平台 | ① 写权限通道 | 谁建树 | ②③④ |
-> |------|--------------|--------|-------|
-> | **Claude Code** | 身份分派（载荷含 `agent_id` / `agent_type`——**证实**：真机实测子代理载荷含二者、主会话载荷不含，与 Codex 同一判据）；`.claude/worktrees/**` 路径前缀为**兼容通道**，不是唯一通道 | harness 可自动建树（`Agent` 工具的 `isolation: "worktree"`——①的一种实现，非强制） | 三平台同形 |
-> | **Codex** | 身份分派（载荷含 `agent_id` / `agent_type`；真机实测：子代理载荷 12 键含 `agent_id`，主线程 10 键不含） | 无自动建树——默认**共享工作区** | 三平台同形 |
-> | **dsh** | 身份分派（桥接以环境变量 `FLOW_COMET_AGENT_DEPTH` 透传正整数身份深度 **+ 通道标记 `FLOW_COMET_AGENT_DEPTH_SOURCE`**；0 / 缺失 / 无标记 = 协调者） | 平台**进程内子代理**，不建树 | 三平台同形 |
->
 > **写面含 gitignored 面的任务（四属性映射 · 与其他任务同一判据）**：任务 `write_files` 全为 gitignored 字面路径时，四属性的满足方式不变——① **写权限**仍走**身份通道**（载荷 `agent_id` / 环境变量身份深度 ⇒ 子代理语义放行，项目内任意路径可写（含 gitignored）；gitignored 只是路径属性，不是通道差异）；② **提交隔离**走既有 **`noCommit` 资格**（request 按 `.gitignore` 命中记 `noCommit:true` ⇒ 任务零提交，「提交只含自己 `write_files` 的字面路径」由**无提交**满足，不是放宽校验；资格 fail-closed：glob / `..` 越界 / 非 git 仓 / tracked 文件 / 链接逃逸一律不授予，result 时刻按同一判据重验，失败即撤销资格）；③④ 与其他任务同形（同一时刻单写者 + 集成四要素）。**并行 × 零提交**因此合法：任务可标 `parallel="true"` 并被并行委派，出口校验按 request 的 `noCommit` 资格豁免缺 `commitHash`。
 > **留痕的边界（诚实声明 · 与 `directOverride` / `completedChecks` / `reentryAuthorization` 同族）**：留痕记录的是「**发生过委派**」，**不是**对执行者身份的物理证明——`handoffRequests` / `handoffResult` 只证明协调者写下过 request 与 result 两条记录，不证明写入确实由子代理完成；与 `completedChecks` 只能记录声明、`directOverride` 只能记录授权、`reentryAuthorization` 只能记录授权源同理。声明与事实不符属流程违规，验收以 transcript 可见的委派触发为准。
 >
-> **判级口径（三态；未覆盖项显式标注、不得写成已支持）**：**证实**——Codex 交互式会话的原生子代理载荷含 `agent_id`（2026-10-04/05 真机会话实测）· CC 子代理载荷含 `agent_id` / `agent_type`（真机实测：子代理载荷含二者、主会话载荷不含，与 Codex 同一判据）· dsh 身份分派通道 · CC 的 `.claude/worktrees/**` 兼容通道（历史实证）。**推翻**——「Codex 载荷无身份字段」只对 `codex exec` headless 主线程成立，**不得外推**为平台结论。**未覆盖（显式标注，不得写成已支持）**——非 Windows 环境的 Codex 形态 · `agent_type` 取值域 · 嵌套委派载荷 · Codex hook 触发稳定性（实测 3/21；补 `--dangerously-bypass-approvals-and-sandbox` 后 5/5，**不得写成稳定保证**）· 非 `bypassPermissions` 权限模式下的载荷形态 · dsh 子代理能否带独立 cwd 的探针待补。
->
 > **dsh 平台委托方式（实测核对）**：dsh 的子代理是平台**进程内子代理**（不创建独立工作区）——写入守卫按**会话身份分派**：桥接**不再短路**，而是把身份深度以环境变量 `FLOW_COMET_AGENT_DEPTH` **连同通道标记 `FLOW_COMET_AGENT_DEPTH_SOURCE`** 透传给守卫（**身份与最小保护集的整条判定统一由守卫拥有**，单一实现；守卫要求标记与深度同时在场才接受该通道——CC / Codex 生成的 hook 直接调守卫、不走桥接，继承来的深度变量不构成身份）；身份深度为正整数 ⇒ 放行（**最小保护集除外**）、**项目内任意路径可写（含 gitignored）**，因此**无需隔离区**；直接委托即可，不需要 worktree（**无需隔离区 ≠ 无需边界**：`write_files` 互斥与提交时点纪律仍是硬前置）。**通用边界**：同一工作区内的并行子代理会看到彼此未提交的中间态——任务的 `write_files` 边界与提交时点即相互隔离纪律（本节点第 1 步的 write_files 互斥检查因此仍是硬前置）。
-> **旧结论（实测 2026-08-13；证据已不可复核，未纳入 2026-09-30 重测矩阵——不得作为现行结论）**：worktree 的 `.git` 是主仓共享——`workspace-write`/`git-write-access` 沙箱均被 Codex 硬拦截（index.lock / objects / COMMIT_EDITMSG Permission denied）；子代理必须用 `sandbox_mode="danger-full-access"` 才能完成 git 提交（worktree 隔离已限定写范围，full-access 仅用于让 git 提交可行）。**信任边界**：`danger-full-access` 是宿主级信任边界（不隔离凭据/网络访问）——仅委托可信子代理，并移除委托环境中的不必要凭据。以上仅作历史留档；现行结论以探针结论与后续契约为准。
-> **headless 子面实测与 hook 会话 root 订正（依据 2026-09-30 真机重测；codex-cli 0.146.0 / Windows；仅 `codex exec --json --ephemeral` headless 子面；不得外推为平台结论）**：旧结论「手工 worktree 内的写入会被协调者白名单拦住、会话 root 仍是主仓库」被**推翻并收窄**——实测 hook 进程 cwd == 载荷 `cwd` == 会话工作根（cwd=项目 / `-C` / 手工 worktree 三形态）；**Codex 原生子代理（`spawn_agent`）形态未覆盖，不得外推**。手工 worktree 形态下相对路径写入**不会**被拦：worktree 通常缺 gitignored 运行态 state → 守卫走「无活跃 workflow」放行；若 hook 命令仍指向主仓安装副本（runRoot 外），守卫因「workflow protocol file must stay inside the project root」报错退出，Codex 将 hook 失败降级为非阻塞 → 写入照常落地。**静态喂测（独立复现）**：守卫白名单只覆盖**解析后仍在 runRoot 内**的目标；`Write/Edit` 的 `file_path` 解析为 runRoot 外时跳过判定（**fail-open**，记录时点**未闭合**）——**该缺口现已被守卫关闭**：runRoot 外写入与 Bash 写命令分支**同判** `BLOCKED`（修复前的两分支不对称是历史形态），身份在场者由身份判据先行放行；记录时点的缺口表述作为边界留档保留，现行判据见守卫的 runRoot 外关断段。**`apply_patch`**：会触发 PreToolUse，但 `tool_name="Bash"`、补丁正文在 `tool_input.command`（heredoc）、**无 `file_path`**；记录时点守卫不解析补丁体 → 目标不被提取、放行（独立复验复现了载荷与守卫盲区）——**该缺口现已被守卫关闭**：补丁体按行语义解析出 `*** Update File:` / `*** Add File:` / `*** Delete File:` / `*** Move to:` 摘要行的目标后与其余写入形态**同流**（白名单与最小保护集共用同一判定入口），身份在场者仍受最小保护集拦截；「文件确实落盘」子项在复验环境因 apply_patch shim 失败未复现，首次真机重测环境曾落盘——按此差异如实理解。**hook 触发条件**：隔离 `CODEX_HOME` 无持久信任时默认 headless **不执行**项目 hook；`hooks` 特性默认 enabled、可被项目配置/开关覆盖；`codex_hooks` 是 deprecated 别名；per-invocation 信任是必要因素之一，但独立复验显示 trust-only 触发**不稳定**（3/21；补 `--dangerously-bypass-approvals-and-sandbox` 后 5/5）——**不得写成稳定/确定性保证**；持久信任与交互式 TUI 形态未覆盖。**CC 的判据不同**：CC 的守卫以**身份判据优先于路径判据**（载荷含 `agent_id` ⇒ 子代理语义）；`.claude/worktrees/**` 路径前缀通道仍然在场，属**兼容通道**（写入落在该区内即放行，`file_path` 与 Bash 命令两条判定路径同语义），不再是唯一通道。
-> **受支持路径（三平台同一判据，差异只在谁建树）**：① **CC 平台**——直接委托子代理（守卫按身份分派放行）；`Agent` 工具的 `isolation: "worktree"` 是属性①的一种实现（**非强制**，见步骤 3）；② **dsh 平台**——直接委托平台进程内子代理（守卫按身份分派放行，**无需隔离区**；保持 `write_files` 边界与提交时点纪律）；③ **Codex 平台**——直接委托原生子代理（`spawn_agent` 等，守卫按身份分派放行；默认共享工作区，保持 `write_files` 边界与提交时点纪律）。**建树选择的适用面**：协调者显式 `git worktree add <路径>`（手工建树）**是受支持的建树选择**——在委派 prompt 里指定 `workdir`，写入由身份通道放行（原生子代理无自动建树）；**以建树绕过边界**不受支持——用独立树规避协调者禁令 / 最小保护集 / `write_files` 互斥与提交时点纪律 / handoff 与 Return Contract 证据，或把 worktree 当作四属性的替代品。headless 子面实测见上（仅 `codex exec`，不得外推）。
+>
+> **受支持路径（三平台同一判据，差异只在谁建树）**：① **CC 平台**——直接委托子代理（守卫按身份分派放行）；`Agent` 工具的 `isolation: "worktree"` 是属性①的一种实现（**非强制**，见步骤 3）；② **dsh 平台**——直接委托平台进程内子代理（守卫按身份分派放行，**无需隔离区**；保持 `write_files` 边界与提交时点纪律）；③ **Codex 平台**——直接委托原生子代理（`spawn_agent` 等，守卫按身份分派放行；默认共享工作区，保持 `write_files` 边界与提交时点纪律）。**建树选择的适用面**：协调者显式 `git worktree add <路径>`（手工建树）**是受支持的建树选择**——在委派 prompt 里指定 `workdir`，写入由身份通道放行（原生子代理无自动建树）；**以建树绕过边界**不受支持——用独立树规避协调者禁令 / 最小保护集 / `write_files` 互斥与提交时点纪律 / handoff 与 Return Contract 证据，或把 worktree 当作四属性的替代品。headless 子面实测见 `reference/platform-facts.md`（仅 `codex exec`，不得外推）。
 > **不提供/不使用规避通道**：绕开守卫命令级检测的写法（如用 Python `open()` 等 File API 直写）**不是受支持路径**——它绕过的是写入防线本身（防线失效时无拦截、无记录），与三层防御的设计相反。需要越出边界时一律走上面的受支持路径，或如实上报 BLOCKED，**不得以更换工具形态绕过**。handoff 记录（workflow-handoff request/result）与 Return Contract 校验机制不变。
 
 ## Guidance
@@ -74,44 +63,49 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
 
 ### 协调者禁令（最高优先级）
 
-主会话是协调者，不是执行者。禁止在主会话直接修改源码或执行实现。源码只能委托子代理完成，**委托形态按平台（差异只在谁建树）**：**CC = 直接委托子代理**（`isolation: "worktree"` 是属性①的可选实现，非强制）；**dsh = 直接委托平台进程内子代理（无需隔离区；无需隔离区 ≠ 无需边界）**；**Codex = 直接委托原生子代理（`spawn_agent` 等，默认共享工作区）**——三平台同一身份判据放行，见上方「并行安全四属性契约」与三平台通道对照表。子代理派发失败时，主会话**不得接管实现**——记录当前任务为 BLOCKED 并走 Recovery。协调者只允许更新：TASK.md（标记 done）、`<task>-SUMMARY.md`、handoff evidence（workflow-handoff.mjs result）。
+主会话是协调者，不是执行者。禁止在主会话直接修改源码或执行实现。源码只能委托子代理完成，**委托形态按平台（差异只在谁建树）**：**CC = 直接委托子代理**（`isolation: "worktree"` 是属性①的可选实现，非强制）；**dsh = 直接委托平台进程内子代理（无需隔离区；无需隔离区 ≠ 无需边界）**；**Codex = 直接委托原生子代理（`spawn_agent` 等，默认共享工作区）**——三平台同一身份判据放行，见上方「并行安全四属性契约」；三平台通道对照表与平台判级口径见 `reference/platform-facts.md`。子代理派发失败时，主会话**不得接管实现**——记录当前任务为 BLOCKED 并走 Recovery。协调者只允许更新：TASK.md（标记 done）、`<task>-SUMMARY.md`、handoff evidence（workflow-handoff.mjs result）。
 
-### 提交面 pathspec 纪律（五要素 · 带适用条件 · 两册同锁 · 逐字一致）
+### 提交面 pathspec 纪律（要点 · 全文见 `reference/commit-discipline.md`）
 
-**适用条件（先读）**：本条纪律适用于「**多个写者共享同一工作区**」形态——并发写者同处一个工作树（CC 非 worktree 委托 / Codex 共享工作区 / dsh 进程内子代理）。**各自独立工作区（worktree 等）内的局部 `reset` / `clean` 不在禁令内**（那是写者对自有工作区的正常整理）；但只要本趟存在**任一**共享工作区的写者，本条即对整个并行趟生效。
+**适用条件**：并发写者共处一个工作树时（CC 非 worktree 委托 / Codex 共享工作区 / dsh 进程内子代理）本条生效；**各自独立工作区（worktree 等）内的局部 `reset` / `clean` 不在禁令内**——但只要本趟有**任一**共享工作区的写者，本条即覆盖整个并行趟。
 
 五要素（缺一不可）：
 
 1. **`git add -- <自己字面路径>`**：逐条字面路径（取自本任务 `write_files`），禁用 `.` / `-A` / `-u` 等宽泛形态。
-2. **`git commit -- <同一路径>`**：提交以 pathspec 限定范围，保证提交只含自己的文件；路径集与上一步**逐字一致**。
-3. **锁失败重试**：并发提交会撞 `index.lock` / `cannot lock ref`——**失败即重试**（临时仓真并发实测：20 提交 / 25 次锁失败全部重试成功）；不得因锁失败改用宽泛命令。
-4. **禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`**：无 pathspec 的 `git add`、`git commit -a`、`git stash`、`git clean`、`git reset` 一律禁止——它们作用于整个共享工作区。
-5. **为什么**：并发写者共享**同一个索引与工作树**——宽泛命令存在**并发索引竞态**：一方 `add -A` 会把另一方的半成品纳入自己的提交（串味 / 多文件提交）；`stash` / `clean` / `reset` 更会直接破坏同伴的未提交工作。
+2. **`git commit -- <同一路径>`**：路径集与上一步**逐字一致**——提交只含自己的文件。
+3. **锁失败重试**：并发提交会撞 `index.lock` / `cannot lock ref`，**失败即重试**，不得因此改用宽泛命令。
+4. **禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`**：它们作用于整个共享工作区。
+5. **为什么**：并发写者共享**同一索引与工作树**，宽泛命令有**并发索引竞态**（把同伴半成品纳入自己的提交），`stash` / `clean` / `reset` 还会直接破坏同伴的未提交工作。
 
-**并行波次附加两条（与上列五要素并列适用 · 不改其语义与适用条件）**：
+**并行波次另加两条**：禁用 `git commit --amend`（HEAD 会被并行写者推进——确需修正必须**先断言 `git rev-parse HEAD` 等于自己刚提交的哈希**，否则改用**新提交追加**）；**误改后的自救通道**是第 4 条的定向例外——先断言 HEAD 即被误改的那次提交，再 `git reset --soft <自己的父提交>`（**只用 `--soft`**），最后以 **pathspec** 重建自己的提交；**无合法修复通道时人会暗改**（见 ADR-013 记录的同型教训）。
 
-- **并行波次禁用 `git commit --amend`**：共享工作区下 HEAD 会被并行写者推进——`--amend` 改的是 **HEAD 指向的提交**、不一定是「你的提交」，会把同伴的提交连同提交信息一并改写（本仓实测撞过：amend 误改了另一并行任务的提交，经 `reset --soft` 复原，内容零损失）。确需修正时必须**先断言 `git rev-parse HEAD` 等于自己刚提交的哈希**，否则一律改用**新提交追加**。
-- **误改后的自救通道（与上列第 4 条的定向例外）**：合法修复路径 = **先断言** `git rev-parse HEAD` 即被误改的那次提交，再 `git reset --soft <自己的父提交>` 回退（**只用 `--soft`**：只移动 HEAD、不动索引与工作树，同伴的未提交工作零影响），最后以 **pathspec** 重建自己的提交。纪律必须留出这条明路——让执行者**不必违规**（force-push / 手改历史）即可收拾；**无合法修复通道时人会暗改**（见 ADR-013 记录的同型教训）。
+> **要判定提交边界、撞上锁或误改要收拾时读 `reference/commit-discipline.md`**：五要素逐条判据、命令完整形态与实测依据在该文件。
 
-### 集成纪律（四要素 · 两册同锁 · 逐字一致）
+### 集成纪律（要点 · 全文见 `reference/commit-discipline.md`）
 
-1. **机制选择**：优先 **`git merge --no-ff`**（保留父子关系、可审计；comet 先例：集成用 `--no-ff`、交付用 `--ff-only`）；冲突难解时**降级 `git cherry-pick` 并强制记因**（审计行写明降级原因）——cherry-pick 丢失父子关系、审计弱，故只作降级路径。
-2. **顺序（确定性规则）**：先按 `depends_on` 的**拓扑序**集成（被依赖者先入）；同一拓扑层内按 **task id 升序**（计划期固定的稳定键，与完成先后无关）。**不得依赖书写顺序** / 提交到达顺序 / 完成先后等运行期不确定量。
-3. **审计留痕**：每次集成输出一行审计行 `INTEGRATE: <task-id> <commitHash> → <集成提交>`；降级路径为 `INTEGRATE: <task-id> <commitHash> via cherry-pick -- 降级原因：<原因>`。映射（task-id → commitHash → 集成提交）记入该趟流程记录（`<task-id>-SUMMARY.md` / handoff evidence 文本字段）。**判级**：审计行是**执行纪律**（review 把关），本节点不声称存在机械门禁校验它。
-4. **冲突处置（两类分别动作）**：
-   - **机械冲突**（不改用户可见行为：同一文件不同区域 / 相邻行 / 纯格式）：执行者**可自行解决**——解决后必须跑**合并后验证**（该任务 `verify` + 受影响任务的判据），并在审计行记录冲突与解决方式。
-   - **语义冲突**（两侧对同一行为 / 契约 / 接口给出不同语义：同一函数语义分叉、同一 AC 的两种实现、公共 API 形状不一致）：**必须中止集成并上抛**（记 BLOCKED + 恢复指引），**不得**由执行者自行拍板；由协调者 / 用户裁决（补 `depends_on`、拆任务或开新 change）。
+四要素：
+
+1. **机制选择**：优先 **`git merge --no-ff`**（保留父子关系、可审计；comet 先例：集成用 `--no-ff`、交付用 `--ff-only`）；冲突难解时**降级 `git cherry-pick` 并强制记因**。
+2. **顺序（确定性规则）**：按 `depends_on` 的**拓扑序**（被依赖者先入），同一拓扑层内按 **task id 升序**——**不得依赖书写顺序** / 提交到达顺序 / 完成先后等运行期不确定量。
+3. **审计留痕**：每次集成输出一行 `INTEGRATE: <task-id> <commitHash> → <集成提交>`（降级路径记降级原因），映射记入该趟流程记录；**判级**：审计行是**执行纪律**（review 把关），本节点不声称存在机械门禁校验它。
+4. **冲突处置（两类分别动作）**：**机械冲突**（不改用户可见行为）执行者**可自行解决**，解决后必须跑**合并后验证**并在审计行记因；**语义冲突**（两侧对同一行为 / 契约 / 接口给出不同语义）**必须中止集成并上抛**（记 BLOCKED + 恢复指引，由协调者 / 用户裁决）——**不得**由执行者自行拍板。
+
+> **要在集成前定规则、或遇冲突 / 降级要判定时读 `reference/commit-discipline.md`**：四要素的完整判据与 comet 先例在该文件。
 
 ### 受控重入打开的修复场景（archive 源）
 
-缺陷在归档后才暴露、且归档移动尚未发生时，可先由用户显式授权把工作归属退回本节点或 `execute` / `review` / `verify`，再按常规委托与出口流程完成修复。重入命令：`node .claude/skills/flow-comet/scripts/workflow-state.mjs reenter <target> --authorized-by <source> --reason <text> [--continue-round <n>]`——每次调用都需要用户显式授权，每 change 上限 3 轮（达上限后凭显式续轮授权 `--continue-round <n>`（n ≥ 已用轮次 + 1）可继续并计入下一轮）；重入前自动落 state 备份快照（`.specs/<change-id>/.reentry-backups/`）；成功打印 `REENTRY: archive → <target>（授权源 <source>；第 n/3 轮；备份 <file>）` 与 `REASON: <text>` 行（续轮审计行为 `第 n 轮（显式授权续轮，上限 3）`），与 Fix 回炉的 `FIX-BATCH` 行、正常多趟收尾的 `RETURN` 行三态可区分。归档移动已发生或 change 已 `completed` 时重入 BLOCKED，须走人工处置或新 change，不得静默跳过。重入只改工作归属，不写任何闭合标记，也不跳过本节点入口 / 出口门禁；重入后并行任务的委托证据、write_files 边界与 Return Contract 校验与常规流程完全一致；重复调用同一目标为空操作（输出 `REENTRY: 空操作——…`，不备份、不计数、不改写 state）。
+缺陷在归档后才暴露、且归档移动尚未发生时，可先由用户显式授权把工作归属退回本节点或 `execute` / `review` / `verify`，再按常规委托与出口流程完成修复。命令：`node .claude/skills/flow-comet/scripts/workflow-state.mjs reenter <target> --authorized-by <source> --reason <text> [--continue-round <n>]`。要点：**每次调用都需要用户显式授权**（不得由执行者自决）；每 change 上限 3 轮，达上限后凭 `--continue-round <n>`（n ≥ 已用轮次 + 1）显式续轮；重入前自动落 state 快照（`.specs/<change-id>/.reentry-backups/`）；成功打印 `REENTRY:` 行与 `REASON: <text>` 行（与 `FIX-BATCH` / `RETURN` 行三态可区分）。归档移动已发生或 change 已 `completed` ⇒ 重入 BLOCKED（走人工处置或新 change，**不得静默跳过**）；重入只改工作归属——不写闭合标记、不跳过本节点入口 / 出口门禁，重入后仍按本节点常规流程校验委托证据与 write_files 边界。
+
+> **要核对授权留痕 / 轮次与续轮审计 / 备份指纹 / 归档侧重入边界时读 `reference/fix-loop.md`**：受控重入的完整规格在该文件。
+
+> **受控重入的完整规格（授权留痕 / 轮次与续轮审计 / 备份指纹 / 边界清单）见 `reference/fix-loop.md`：当你判定需要把工作归属退回既有生命周期、或要核对归档侧重入边界时读它。**
 
 ### Prerequisites
 
 - `.specs/<change-id>/TASK.md` must exist with at least one task marked `parallel="true"` and `status="pending"`.
 - `.specs/<change-id>/DESIGN.md` or `DESIGN-lite.md` must exist.
 - `.specs/LESSONS.md` must exist (or be created).
-- Delegation capability, split by platform: **Claude Code** requires the `Agent` tool (subagents are delegated with it; `isolation: "worktree"` is one optional implementation of attribute ①, not a requirement); **dsh** requires the platform's in-process delegation capability (subagents carry an identity depth > 0, share the workspace, and need no isolation directory); **Codex** requires the platform's native multi-agent capability (real, stable and default-enabled — its regular usage is the interactive CLI — and its subagents share the workspace by default). All three platforms delegate under the same identity criterion (payload `agent_id` for Claude Code / Codex; the bridge-forwarded identity signal for dsh), so the only difference is who creates the tree. A manually created `git worktree` is not a supported path (see the "受支持路径" section above).
+- Delegation capability, split by platform: **Claude Code** requires the `Agent` tool (subagents are delegated with it; `isolation: "worktree"` is one optional implementation of attribute ①, not a requirement); **dsh** requires the platform's in-process delegation capability (subagents carry an identity depth > 0, share the workspace, and need no isolation directory); **Codex** requires the platform's native multi-agent capability (real, stable and default-enabled — its regular usage is the interactive CLI — and its subagents share the workspace by default). All three platforms delegate under the same identity criterion (payload `agent_id` for Claude Code / Codex; the bridge-forwarded identity signal for dsh), so the only difference is who creates the tree. A manually created `git worktree` **is a supported tree-creation choice** (see the "受支持路径" section above): point the delegation prompt at its `workdir` and the write is admitted through the identity channel (native subagents do not create a tree automatically). What is **not** supported is **using a tree to bypass the boundaries** — evading the coordinator prohibition / the minimum protection set / `write_files` mutual exclusion and commit-timing discipline / handoff and Return Contract evidence, or treating the worktree as a substitute for the four attributes.
 
 ### Steps
 
