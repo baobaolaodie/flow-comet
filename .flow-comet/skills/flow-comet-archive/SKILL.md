@@ -28,19 +28,13 @@ This node finalizes a completed change by extracting reusable lessons from the d
 
 1. **Scan SUMMARY.md files for lessons**: Read all `<task-id>-SUMMARY.md` files in `.specs/<change-id>/`. Focus on "decisions and deviations" sections. Also check any remaining `<task-id>-PROGRESS.md` "excluded solutions" sections.
 
-2. **Apply nomination criteria**: For each potential lesson:
-   - Debugging/trial-and-error took > 30 minutes -> nominate.
-   - Error is not task-specific, other tasks would hit it too -> nominate.
-   - Reasonable probability of retry within 6 months -> nominate.
-   - Otherwise do not nominate (avoid pollution of LESSONS.md).
+2. **Apply nomination criteria**: 三条判据（含「其余一律不提名」兜底）见 `flow-comet-integration` 册的「LESSONS 提名」段——该段是判据的**单一权威**，本册不复述、以该册为准。
 
 3. **Add qualifying lessons to LESSONS.md**: For each nominated lesson:
-   - Assign next `L-NNN` number (continuing from existing).
    - Fill required fields: label, keywords, applicable tech stack, status (active).
-   - Save to `.specs/LESSONS.md` — 新条目编号 = 当前最大编号 + 1,插入 `## 条目区` 末尾(文件内升序,继续现有编号),**禁止文件尾追加与乱序插入**。
-   - **Do NOT archive LESSONS.md** — it is a project-level permanent file that accumulates across changes.
+   - 写回 `.specs/LESSONS.md`；编号、插入位置与「不随 change 归档」的判定**以 `flow-comet-integration` 册「LESSONS 提名」段为准**（本册不复述）。
 
-4. **Check existing lessons for superseded/deprecated**: Scan existing active lessons in `.specs/LESSONS.md`. If this change's lessons or outcomes supersede or deprecate existing entries, update their status accordingly.
+4. **Check existing lessons for superseded/deprecated**: 扫描 `.specs/LESSONS.md` 的 active 条目，被本次结论取代 / 废弃的更新其状态——判定口径以 `flow-comet-integration` 册「LESSONS 提名」段为准（本册不复述）。
 
 5. **Compile the leftover issues list (problem-handling principle)**: Before the move, collect everything that remains open or known-limited in this change:
    - REVIEW.md findings marked `[转待办]` (deferred — recorded but not fixed) plus any known limitations captured during the change.

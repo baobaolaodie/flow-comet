@@ -57,13 +57,7 @@ guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好�
 
 4. **Auto-retry limit (R2.6)**: verify 失败自动重试 ≤ 3 次（机器计数 verifyFailures）；第 4 次失败必须暂停问用户「继续修 / 停止」。Do not auto-retry beyond 3 times.
 
-5. **LESSONS nomination**: Before archiving, scan all `*-SUMMARY.md` "decisions and deviations" sections and any `*-PROGRESS.md` "excluded solutions" sections. Apply nomination criteria:
-   - Debugging/trial-and-error took > 30 minutes -> nominate.
-   - Error is not task-specific, other tasks would hit it too -> nominate.
-   - Reasonable probability of retry within 6 months -> nominate.
-   - Otherwise do not nominate (avoid pollution).
-   - Add qualifying lessons to `.specs/LESSONS.md` with next L-NNN number — 新条目编号 = 当前最大编号 + 1,插入 `## 条目区` 末尾(文件内升序,继续现有编号),**禁止文件尾追加与乱序插入**.
-   - Check existing active lessons for superseded/deprecated status.
+5. **LESSONS nomination**: Before archiving, scan all `*-SUMMARY.md` "decisions and deviations" sections and any `*-PROGRESS.md` "excluded solutions" sections. 判据（三条判据 + 不提名兜底 + 编号续接与插入位置 + superseded 状态更新）见 `flow-comet-integration` 册的「LESSONS 提名」段——该段是判据的**单一权威**，本册不复述、以该册为准；提名结果按该册写回 `.specs/LESSONS.md`。
 
 The full verification protocol, UAT format, and failure diagnosis are in:
 - `flow-kit/prompts/7-integration.md` (INTEGRATION phase, verification + UAT sections)
