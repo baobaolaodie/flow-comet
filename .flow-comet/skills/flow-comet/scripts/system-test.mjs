@@ -600,6 +600,42 @@ function assertPackageBoundary(root) {
   console.log('  包体边界: ' + files.length + ' 文件，技能树 ' + skillsOnDisk.length + ' 文件逐文件在场，私有面零命中 ✓');
 }
 
+// ③b workflow contract 检查（`comet-check.mjs`）：包内**必含面清单**的自动锚。它此前全仓无任何
+// CI/套件调用——清单漂移没有红灯（本批移出两个参考文件时只能靠手工同步清单）。判据两层：
+//   ① 真实执行权威源的该脚本 → exit 0 且输出 `workflow-contract-ok`（清单与真实树一致）；
+//   ② 反向构造（同一判据驱动）：把技能树复制到临时载体、删掉清单里的一个必含文件 → 该脚本必须
+//      exit ≠ 0 且报 `Missing required workflow contract files`（清单是真在查，不是恒真输出）。
+function assertWorkflowContractCheck(scratch) {
+  const checker = path.join(__dirname, 'comet-check.mjs');
+  if (!fs.existsSync(checker)) throw new Error('缺少 comet-check.mjs: ' + checker);
+  const runChecker = (script) => {
+    const res = spawnSync(process.execPath, [script], { cwd: path.dirname(script), encoding: 'utf8', timeout: 60000 });
+    return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+  };
+  const real = runChecker(checker);
+  if (real.status !== 0 || !real.output.includes('workflow-contract-ok')) {
+    throw new Error('comet-check.mjs 未通过（包内必含面清单与真实树漂移）\n退出码 ' + real.status
+      + '\n输出:\n' + real.output);
+  }
+  // 反向构造：临时载体上一份技能树副本，删掉清单中的一个必含文件 ⇒ 必失败。
+  const carrier = path.join(scratch, 'contract-carrier');
+  fs.mkdirSync(carrier, { recursive: true });
+  fs.cpSync(path.join(__dirname, '..', '..'), path.join(carrier, 'skills'), { recursive: true });
+  const copiedChecker = path.join(carrier, 'skills', 'flow-comet', 'scripts', 'comet-check.mjs');
+  const removedRel = path.join('skills', 'flow-comet', 'reference', 'decision-points.md');
+  const removedAbs = path.join(carrier, removedRel);
+  if (!fs.existsSync(removedAbs)) {
+    throw new Error('反向构造前提不成立：清单必含文件不在副本内 ' + removedRel);
+  }
+  fs.rmSync(removedAbs);
+  const broken = runChecker(copiedChecker);
+  if (broken.status === 0 || !broken.output.includes('Missing required workflow contract files')) {
+    throw new Error('comet-check.mjs 反向构造判别力缺失（删掉清单必含文件后仍通过）\n退出码 '
+      + broken.status + '\n输出:\n' + broken.output);
+  }
+  console.log('  workflow contract 检查: 权威源 exit 0（workflow-contract-ok）+ 缺件副本必失败 ✓');
+}
+
 // ③ bin 双入口契约：两个命令名同指同一安装器（同一实现 = 行为一致的结构事实）。返回安装器绝对路径。
 function assertBinContract(pkg, root) {
   const binTarget = 'scripts/prepare-env.mjs';
@@ -6353,6 +6389,7 @@ const TEST_ITEMS = [
       }
       assertPublishableManifest(pkgCtx.pkg);
       assertPackageBoundary(pkgCtx.root);
+      assertWorkflowContractCheck(dir);
       assertInitTokenContract(assertBinContract(pkgCtx.pkg, pkgCtx.root), dir);
       return marker;
     },

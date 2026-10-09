@@ -83,6 +83,27 @@ function resolveComponentSkillFile(nodeSkill, scriptsDir = __dirname) {
   return file;
 }
 
+// 技能树分发面文档遍历（返回 [相对 skillsRoot 的斜杠路径, 绝对路径]）：全部 `*.md`
+//（各册 `SKILL.md` + `flow-comet/reference/**.md`）。用于「持某锚句的文本集合」「相对路径引用
+// 可解析性」这类**跨册面**判据——单一册判据不用它，避免判据面被无谓放大。
+function skillTreeDocFiles(scriptsDir = __dirname) {
+  const root = skillsRootForScriptsDir(scriptsDir);
+  const out = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const abs = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(abs);
+        continue;
+      }
+      if (!entry.name.endsWith('.md')) continue;
+      out.push([path.relative(root, abs).replaceAll('\\', '/'), abs]);
+    }
+  };
+  walk(root);
+  return out;
+}
+
 // 公开产物零代号判据（与 .githooks/internal-codes.mjs 的 BANNED 保持同步——单一来源约定：
 // 本文件随技能包分发，不能 import 主仓私有的 .githooks；改动词表时两份同改，行为必须一致）。
 // 等价性不只靠注释约定：底部自检在权威源检出下读该私有件**逐字符比对**（主仓形态），安装副本
@@ -2378,6 +2399,549 @@ function timeSingleSourceConsumerProblems(text, symbols, file = '') {
     }
     if (!text.includes(symbol + '(')) {
       problems.push(prefix + '未真实消费 ' + symbol + '（单一权威应被调用）');
+    }
+  }
+  return problems;
+}
+
+// 两层加载模型的**入口层**判据（场景 167 使用；纯函数 + 合成输入可驱动）：入口册与入口展开册
+// 各须含入口层锚点句（「Skill 工具加载该节点的 Implementation 技能」）与「前置门」表述，且不得含
+// Implementation/Required 混淆句式与无限定自动补表述。返回问题描述数组。
+function twoLayerEntryProblems(rel, text) {
+  const out = [];
+  if (text.includes('见上方 Required Calls 表')) out.push(rel + ' 含 Implementation/Required 混淆句式');
+  if (text.includes('record 会自动补写缺失的声明标记')) out.push(rel + ' 含无限定自动补表述');
+  if (!text.includes('Skill 工具加载该节点的 Implementation 技能')) out.push(rel + ' 缺入口层锚点句');
+  if (!text.includes('前置门')) out.push(rel + ' 缺前置门表述');
+  return out;
+}
+
+// 技能加载措辞判据（场景 164 使用；纯函数 + 合成输入可驱动）：主 SKILL / 入口展开册 / 八个节点册
+// 各须含「Skill 工具」与「不得跳过 / 禁止跳过」两条存在级锚点句（加载 = Skill 工具注入会话，
+// 只读文件不叫加载）。返回问题描述数组（空 = 两条齐备）；判别力由场景内的逐条抽掉构造常驻证明。
+function skillLoadingWordingProblems(rel, text) {
+  const out = [];
+  if (!text.includes('Skill 工具')) out.push(rel + ' 缺「Skill 工具」');
+  if (!text.includes('不得跳过') && !text.includes('禁止跳过')) out.push(rel + ' 缺「不得跳过/禁止跳过」');
+  return out;
+}
+
+// 委托纪律三块归一处（场景 184 的 ⑥ 使用；纯函数 + 合成输入可驱动）：ADR-016 把「两册三块逐字
+// 一致（切片 ≥400 字符）+ 两册各持 41 条判别句」重定向为「两册各自的要点句在场 + 权威处唯一 +
+// 留正文的判别句逐句留原文但**不再要求两册相同**」。归一处：pathspec 五要素与集成四要素的**全文**
+// → `reference/commit-discipline.md`；四属性契约（能力契约锚）→ 两册正文 + 入口册 + 平台事实册。
+//   ① 要素级 token 组：措辞可分叉（逐字锁已作废），但**要素一条不得缺**（两册 + 权威处同时受限）；
+//   ② 权威处正文在场：权威处独有的判别句必须在该文件（缺句即红）；
+//   ③ 权威处唯一：权威处正文**回流任一册即红**——这一侧原逐字锁完全没有（它**要求**两册各持一份）；
+//   ④ 证据与判级类判别句（随平台事实移走）：只在权威处，回流册子即红；
+//   ⑤ 条件句指针：两册各自须指向 commit-discipline / platform-facts / fix-loop 三个权威文件。
+const COMMIT_DISCIPLINE_REL = 'flow-comet/reference/commit-discipline.md';
+const PLATFORM_FACTS_REL = 'flow-comet/reference/platform-facts.md';
+const COMMIT_DISCIPLINE_ELEMENT_GROUPS = [
+  ['提交面 pathspec 纪律 · 适用条件', ['**各自独立工作区（worktree 等）内的局部 `reset` / `clean` 不在禁令内**']],
+  ['提交面 pathspec 纪律 · 要素 1（字面路径集）',
+    ['`git add -- <自己字面路径>`', '`git commit -- <同一路径>`', 'write_files']],
+  ['提交面 pathspec 纪律 · 要素 2（锁失败重试）', ['锁失败重试', 'index.lock', '失败即重试']],
+  ['提交面 pathspec 纪律 · 要素 3（禁裸命令）',
+    ['禁裸', '`commit -a`', '`stash`', '`clean`', '`reset`']],
+  ['提交面 pathspec 纪律 · 要素 4（为什么 · 索引竞态）', ['并发索引竞态', '索引与工作树']],
+  ['提交面 pathspec 纪律 · 要素 5（并行波次附加两条）', ['`git commit --amend`', '`--soft`']],
+  ['集成纪律 · 要素 1（机制选择）', ['`git merge --no-ff`', 'cherry-pick']],
+  ['集成纪律 · 要素 2（顺序）', ['拓扑序', 'task id 升序']],
+  ['集成纪律 · 要素 3（审计留痕）', ['INTEGRATE: <task-id> <commitHash> → <集成提交>']],
+  ['集成纪律 · 要素 4（冲突处置两类）', ['机械冲突', '语义冲突', '上抛']],
+];
+// 权威处**正文**（逐字搬运进 `commit-discipline.md` 的原句；实测两册均无这些整句——回流即红）。
+const COMMIT_DISCIPLINE_AUTHORITY_PHRASES = [
+  '2. **`git commit -- <同一路径>`**：提交以 pathspec 限定范围，保证提交只含自己的文件；路径集与上一步**逐字一致**。',
+  '3. **锁失败重试**：并发提交会撞 `index.lock` / `cannot lock ref`——**失败即重试**（临时仓真并发实测：20 提交 / 25 次锁失败全部重试成功）；不得因锁失败改用宽泛命令。',
+  '5. **为什么**：并发写者共享**同一个索引与工作树**——宽泛命令存在**并发索引竞态**：一方 `add -A` 会把另一方的半成品纳入自己的提交（串味 / 多文件提交）；`stash` / `clean` / `reset` 更会直接破坏同伴的未提交工作。',
+  '**并行波次附加两条（与上列五要素并列适用 · 不改其语义与适用条件）**：',
+  '- **并行波次禁用 `git commit --amend`**：共享工作区下 HEAD 会被并行写者推进——`--amend` 改的是 **HEAD 指向的提交**、不一定是「你的提交」，会把同伴的提交连同提交信息一并改写（本仓实测撞过：amend 误改了另一并行任务的提交，经 `reset --soft` 复原，内容零损失）。确需修正时必须**先断言 `git rev-parse HEAD` 等于自己刚提交的哈希**，否则一律改用**新提交追加**。',
+  '- **误改后的自救通道（与上列第 4 条的定向例外）**：合法修复路径 = **先断言** `git rev-parse HEAD` 即被误改的那次提交，再 `git reset --soft <自己的父提交>` 回退（**只用 `--soft`**：只移动 HEAD、不动索引与工作树，同伴的未提交工作零影响），最后以 **pathspec** 重建自己的提交。纪律必须留出这条明路——让执行者**不必违规**（force-push / 手改历史）即可收拾；**无合法修复通道时人会暗改**（见 ADR-013 记录的同型教训）。',
+  '2. **顺序（确定性规则）**：先按 `depends_on` 的**拓扑序**集成（被依赖者先入）；同一拓扑层内按 **task id 升序**（计划期固定的稳定键，与完成先后无关）。**不得依赖书写顺序** / 提交到达顺序 / 完成先后等运行期不确定量。',
+  '3. **审计留痕**：每次集成输出一行审计行 `INTEGRATE: <task-id> <commitHash> → <集成提交>`；降级路径为 `INTEGRATE: <task-id> <commitHash> via cherry-pick -- 降级原因：<原因>`。映射（task-id → commitHash → 集成提交）记入该趟流程记录（`<task-id>-SUMMARY.md` / handoff evidence 文本字段）。**判级**：审计行是**执行纪律**（review 把关），本节点不声称存在机械门禁校验它。',
+  '   - **机械冲突**（不改用户可见行为：同一文件不同区域 / 相邻行 / 纯格式）：执行者**可自行解决**——解决后必须跑**合并后验证**（该任务 `verify` + 受影响任务的判据），并在审计行记录冲突与解决方式。',
+  '   - **语义冲突**（两侧对同一行为 / 契约 / 接口给出不同语义：同一函数语义分叉、同一 AC 的两种实现、公共 API 形状不一致）：**必须中止集成并上抛**（记 BLOCKED + 恢复指引），**不得**由执行者自行拍板；由协调者 / 用户裁决（补 `depends_on`、拆任务或开新 change）。',
+];
+// 四属性契约（能力契约锚 · ADR-016 明示「该怎么干」类 ⇒ 留两册正文；两册不再要求逐字相同）。
+const PARALLEL_CONTRACT_BOOK_PHRASES = [
+  '> **并行安全四属性契约**：契约对象是**四属性**，不是 worktree',
+  '| ① | **写权限** | 每个写者必须有一条被守卫认可的写入通道 |',
+  '| ③ | **验证隔离** | 同一时刻只有一个写者：全量判据不得与在飞写者并行 |',
+  '出口校验锚 = `handoffRequests` 有 request 无对应 `handoffResult` ⇒ 新 change BLOCKED / 旧 change WARN；全部有 result ⇒ 放行；无证据 ⇒ 零输出',
+  '**已撤回的 request 不构成在飞委托**',
+  '`workflow-handoff.mjs withdraw <task-id> --by <来源>` 在原记录上留痕 `withdrawnAt` + `withdrawnBy`，已撤回 = 终态、历史不删',
+  '**并同时注入桥接通道标记 `FLOW_COMET_AGENT_DEPTH_SOURCE`——守卫要求标记与深度同时在场才接受该通道**',
+  '**写面含 gitignored 面的任务（四属性映射 · 与其他任务同一判据）**',
+  '① **写权限**仍走**身份通道**',
+  '② **提交隔离**走既有 **`noCommit` 资格**',
+  '**并行 × 零提交**因此合法',
+  '**留痕的边界（诚实声明 · 与 `directOverride` / `completedChecks` / `reentryAuthorization` 同族）**',
+  '留痕记录的是「**发生过委派**」，**不是**对执行者身份的物理证明',
+  '与 `completedChecks` 只能记录声明、`directOverride` 只能记录授权、`reentryAuthorization` 只能记录授权源同理',
+];
+// 四属性的四个属性名（硬约束要求保留的能力契约锚；两册正文逐册在场）。
+const PARALLEL_CONTRACT_ATTRIBUTE_NAMES = ['**写权限**', '**提交隔离**', '**验证隔离**', '**集成纪律**'];
+// 证据与判级类判别句（ADR-016 ⑥：随平台事实移走）——只在 `platform-facts.md`，回流册子即红。
+const CONTRACT_EVIDENCE_AUTHORITY_PHRASES = [
+  '**+ 通道标记 `FLOW_COMET_AGENT_DEPTH_SOURCE`**；0 / 缺失 / 无标记 = 协调者',
+  '**证实**——Codex 交互式会话的原生子代理载荷含 `agent_id`',
+  '**推翻**——「Codex 载荷无身份字段」只对 `codex exec` headless 主线程成立，**不得外推**为平台结论。',
+  '**未覆盖（显式标注，不得写成已支持）**',
+  '> | **Claude Code** | 身份分派（载荷含 `agent_id` / `agent_type`——**证实**：真机实测子代理载荷含二者、主会话载荷不含，与 Codex 同一判据）',
+  'CC 子代理载荷含 `agent_id` / `agent_type`（真机实测：子代理载荷含二者、主会话载荷不含，与 Codex 同一判据）',
+  '非 `bypassPermissions` 权限模式下的载荷形态',
+];
+// 两册各自须持的三个条件句指针（`reference/fix-loop.md` 属修复回路段，见场景 258）。
+const DELEGATION_POINTER_RELS = [
+  'reference/commit-discipline.md', 'reference/platform-facts.md', 'reference/fix-loop.md',
+];
+function delegationDisciplineProblems({ books, elementDocs, authorityTexts }) {
+  const problems = [];
+  for (const [rel, text] of elementDocs) {
+    for (const [label, tokens] of COMMIT_DISCIPLINE_ELEMENT_GROUPS) {
+      const missing = tokens.filter((token) => !text.includes(token));
+      if (missing.length > 0) {
+        problems.push(rel + ' 缺「' + label + '」要点句（缺 token: ' + missing.join(' / ') + '）');
+      }
+    }
+  }
+  const authorityText = authorityTexts.get(COMMIT_DISCIPLINE_REL);
+  for (const phrase of COMMIT_DISCIPLINE_AUTHORITY_PHRASES) {
+    if (!authorityText.includes(phrase)) {
+      problems.push(COMMIT_DISCIPLINE_REL + ' 缺权威处判别句：' + phrase.slice(0, 40) + '…');
+    }
+    for (const [rel, text] of books) {
+      if (text.includes(phrase)) {
+        problems.push(rel + ' 回流了 ' + COMMIT_DISCIPLINE_REL + ' 的权威处正文：' + phrase.slice(0, 40) + '…');
+      }
+    }
+  }
+  for (const [rel, text] of books) {
+    for (const phrase of PARALLEL_CONTRACT_BOOK_PHRASES) {
+      if (!text.includes(phrase)) {
+        problems.push(rel + ' 缺四属性契约判别句：' + phrase.slice(0, 40) + '…');
+      }
+    }
+    for (const attribute of PARALLEL_CONTRACT_ATTRIBUTE_NAMES) {
+      if (!text.includes(attribute)) {
+        problems.push(rel + ' 缺四属性契约属性名：' + attribute);
+      }
+    }
+    for (const pointer of DELEGATION_POINTER_RELS) {
+      if (!text.includes(pointer)) {
+        problems.push(rel + ' 缺条件句（指针不在场）: ' + pointer);
+      }
+    }
+  }
+  const evidenceText = authorityTexts.get(PLATFORM_FACTS_REL);
+  for (const phrase of CONTRACT_EVIDENCE_AUTHORITY_PHRASES) {
+    if (!evidenceText.includes(phrase)) {
+      problems.push(PLATFORM_FACTS_REL + ' 缺证据与判级判别句：' + phrase.slice(0, 40) + '…');
+    }
+    for (const [rel, text] of books) {
+      if (text.includes(phrase)) {
+        problems.push(rel + ' 回流了证据与判级判别句：' + phrase.slice(0, 40) + '…（权威处唯一）');
+      }
+    }
+  }
+  return problems;
+}
+
+// 前端判据散文口径（场景 286 使用；纯函数 + 合成文本面可驱动）：ADR-016 把原「五份文本**各自**
+// 陈述五个结构 token」重定向为「**一处权威**（`flow-comet-ui-design` 册的「触发与跳过」段陈述
+// 结构形态三种 + 词形边界 + 命中片段回显）+ **各引用册指针在场**（条件句指向该册，缺即红）+
+// **该口径正文唯一**（块级跨距：任何其它分发文本不得含权威口径段的 ≥ `FRONTEND_CRITERION_BLOCK_SPAN`
+// 字符逐字副本——短片段（要素名 / 命令形态 / 互指指针 / 压缩要点句）天然重合，按 T-03 实测建议
+// 取块级跨距，避免必然假红）。反向构造的目标随之从「每份文本」改到**权威处**。
+const FRONTEND_CRITERION_AUTHORITY_REL = 'flow-comet-ui-design/SKILL.md';
+const FRONTEND_CRITERION_BLOCK_SPAN = 120;
+// 各引用册的指针判别句式（逐册 token 组：必须同指该唯一权威，缺一册即红）。
+const FRONTEND_CRITERION_POINTER_RELS = [
+  ['flow-comet/SKILL.md', ['唯一权威是 `flow-comet-ui-design` 册']],
+  ['flow-comet-design/SKILL.md', ['唯一权威 → `flow-comet-ui-design` 册', '「触发与跳过」段']],
+  ['flow-comet-change/SKILL.md', ['**判据与强制等级（唯一权威）**', '`flow-comet-ui-design` 册的「触发与跳过」段']],
+];
+function frontendCriterionAuthorityBlock(text) {
+  const match = /「结构形态」的三种任一[\s\S]*?仍判前端。/.exec(text);
+  return match ? match[0] : null;
+}
+function frontendCriterionRedirectProblems({ authorityRel, authorityText, pointerDocs, docs }) {
+  const problems = [];
+  // ① 一处权威：结构形态五 token 齐备（同一判据前端散文函数）+ 旧口径零残留。
+  problems.push(...frontendCriterionProseProblems(authorityRel, authorityText));
+  const block = frontendCriterionAuthorityBlock(authorityText);
+  if (block === null) {
+    problems.push(authorityRel + ' 缺权威口径段（「结构形态」三种任一 → 仍判前端 的整段）');
+  } else if (block.length < FRONTEND_CRITERION_BLOCK_SPAN) {
+    problems.push(authorityRel + ' 权威口径段过短（' + block.length + ' 字符 < '
+      + FRONTEND_CRITERION_BLOCK_SPAN + '）——正文唯一性判据无从成立');
+  }
+  // ② 各引用册指针在场：每册须含指向该权威的条件句（缺任一册即红）。
+  for (const [rel, tokens] of FRONTEND_CRITERION_POINTER_RELS) {
+    const text = pointerDocs.get(rel);
+    if (text === undefined) {
+      problems.push(rel + ' 不在场（前端判据的引用册指针无从校验）');
+      continue;
+    }
+    const missing = tokens.filter((token) => !text.includes(token));
+    if (missing.length > 0) {
+      problems.push(rel + ' 指针不在场（缺指向 ' + authorityRel + ' 的条件句 token: ' + missing.join(' / ') + '）');
+    }
+  }
+  // ③ 正文唯一：权威口径段不得在第二份分发文本里逐字出现（块级跨距）。
+  if (block !== null) {
+    for (const [rel, text] of docs) {
+      if (rel === authorityRel) continue;
+      const span = longestCommonSpan(block, text);
+      if (span.length >= FRONTEND_CRITERION_BLOCK_SPAN) {
+        problems.push(rel + ' 出现结构判据口径的第二份正文（连续同文 ' + span.length + ' 字符 ≥ '
+          + FRONTEND_CRITERION_BLOCK_SPAN + '）——权威处唯一');
+      }
+    }
+  }
+  return problems;
+}
+
+// 修复回路状态机路径（场景 258 使用；纯函数 + 合成输入可驱动）：ADR-016 把「三册段正文 sha256
+// 完全一致」的逐字锁重定向为「三册各含要点句与条件句 + 该段正文**仅一处**（权威 =
+// `reference/fix-loop.md`）+ 原 6 个关键词与『禁 `advance` 作正常路径』断言**迁到权威处**」。
+// 要点句取**要素级 token 组**（措辞可分叉——ADR-016 明示三册口径一致但不再要求逐字相同）；
+// 「仅一处」用块级跨距（连续同文 ≥ `FIX_LOOP_BLOCK_SPAN` 字符）判：册子的要点句与权威段落天然
+// 局部重合（公式化命令形态 / 要素名），短片段不计——只有把权威段落**整段复制回册子**才红。
+const FIX_LOOP_AUTHORITY_REL = 'flow-comet/reference/fix-loop.md';
+const FIX_LOOP_SECTION_HEADING = '## 修复回路状态机路径';
+const FIX_LOOP_AUTHORITY_KEYWORDS = [
+  '受控归位', 'NODE: execute', '回源节点跑出口', 'entry <源节点>', 'exit <源节点> --apply', '禁止绕过',
+];
+const FIX_LOOP_BLOCK_SPAN = 120;
+const FIX_LOOP_BOOK_ELEMENT_GROUPS = [
+  ['追加 Fix 任务', ['## Fix 任务', '禁止文件尾追加']],
+  ['受控归位 execute', ['受控归位', 'NODE: execute']],
+  ['execute 四类出口', ['record execute', 'exit execute --apply', '任务集签名']],
+  ['回源节点跑出口', ['回源节点跑出口', 'entry <源节点>', 'exit <源节点> --apply']],
+  ['禁止绕过', ['禁止绕过', 'BLOCKED']],
+  ['条件句指针', ['reference/fix-loop.md']],
+];
+// 段切片（同一区间：首个 `## 修复回路状态机路径` → 下一 `##` 或 EOF，标题不计入）。
+function fixLoopStateMachineSectionOf(text) {
+  const match = text.match(/(?:^|\r?\n)## 修复回路状态机路径\r?\n([\s\S]*?)(?=\r?\n## |$)/);
+  return match ? match[1].replace(/\r\n/g, '\n') : null;
+}
+function fixLoopStateMachineProblems({ books, authority }) {
+  const problems = [];
+  for (const [rel, text] of books) {
+    const section = fixLoopStateMachineSectionOf(text);
+    if (section === null) {
+      problems.push(rel + ' SKILL.md 缺「' + FIX_LOOP_SECTION_HEADING + '」段');
+      continue;
+    }
+    if (section.trim() === '') problems.push(rel + ' 修复回路状态机路径段不得为空');
+    for (const [label, tokens] of FIX_LOOP_BOOK_ELEMENT_GROUPS) {
+      const missing = tokens.filter((token) => !section.includes(token));
+      if (missing.length > 0) {
+        problems.push(rel + ' 缺「' + label + '」要点句（缺 token: ' + missing.join(' / ') + '）');
+      }
+    }
+    // 反捷径（册内一侧）：`advance` 不作正常路径；「直接 exit 源节点收场」只允许以被禁形态出现。
+    if (section.includes('advance')) {
+      problems.push(rel + ' 修复回路状态机路径段不得把 advance 作为正常路径');
+    }
+    for (const line of section.split(/\r?\n/)) {
+      if (line.includes('直接') && line.includes('exit') && !/禁止|不得|会被 BLOCKED/.test(line)) {
+        problems.push(rel + ' 修复回路状态机路径段不得把直接 exit 源节点收场作为正常路径: ' + line.trim());
+      }
+    }
+  }
+  // 权威处：原 6 个关键词 + 反 advance + 「禁止直接 exit 收场」断言全部迁到该文件。
+  const authoritySection = fixLoopStateMachineSectionOf(authority);
+  if (authoritySection === null) {
+    problems.push(FIX_LOOP_AUTHORITY_REL + ' 缺「' + FIX_LOOP_SECTION_HEADING + '」段（唯一权威处缺失）');
+    return problems;
+  }
+  for (const keyword of FIX_LOOP_AUTHORITY_KEYWORDS) {
+    if (!authoritySection.includes(keyword)) {
+      problems.push(FIX_LOOP_AUTHORITY_REL + ' 修复回路段缺关键词: ' + keyword);
+    }
+  }
+  if (authoritySection.includes('advance')) {
+    problems.push(FIX_LOOP_AUTHORITY_REL + ' 修复回路段不得把 advance 作为正常路径');
+  }
+  let hasForbiddenForm = false;
+  for (const line of authoritySection.split(/\r?\n/)) {
+    if (line.includes('直接') && line.includes('exit') && /禁止|不得|会被 BLOCKED/.test(line)) hasForbiddenForm = true;
+    if (line.includes('直接') && line.includes('exit') && !/禁止|不得|会被 BLOCKED/.test(line)) {
+      problems.push(FIX_LOOP_AUTHORITY_REL + ' 修复回路段不得把直接 exit 源节点收场作为正常路径: ' + line.trim());
+    }
+  }
+  if (!hasForbiddenForm) {
+    problems.push(FIX_LOOP_AUTHORITY_REL + ' 修复回路段缺「禁止直接 exit 源节点收场」的显式断言（原册内断言未随迁）');
+  }
+  // 正文唯一：权威段落整段回流任一册即红（块级跨距 ≥ FIX_LOOP_BLOCK_SPAN）。比对面取**整册正文**：
+  // 复制回流的落点不限于同名小节（换个标题贴进别处同样算第二份正文）。
+  for (const [rel, text] of books) {
+    const span = longestCommonSpan(authoritySection, text);
+    if (span.length >= FIX_LOOP_BLOCK_SPAN) {
+      problems.push(rel + ' 出现 ' + FIX_LOOP_AUTHORITY_REL + ' 的第二份正文（该段正文仅一处；连续同文 '
+        + span.length + ' 字符 ≥ ' + FIX_LOOP_BLOCK_SPAN + '）');
+    }
+  }
+  return problems;
+}
+
+// 技能树正文里的**相对路径引用必须解析得到**（场景 184 附；纯函数 + 合成输入可驱动）：本轮
+// `GUIDANCE.md` → `reference/entry-detail.md` 的改名曾造成 5 册死引用而**零红灯**——技能树正文的
+// 相对引用此前没有任何机检覆盖（只能靠人工/子代理顺带发现）。判据面刻意收窄到技能树内的
+// `reference/**.md|json` 相对引用，逐条候选路径 = ① 引用处文件所在目录；② `<skillsRoot>/flow-comet/`
+//（跨技能相对引用先例：`flow-comet-compose` 引 `../flow-comet/reference/workflow-protocol.json`）。
+// `flow-kit/**` 一类**技能树外**引用不在判据面（其根随安装形态变化，由项目根决定）。
+const SKILL_TREE_REFERENCE_RE = /(?<!flow-kit\/)(?<![\w./-])(?:\.\.\/flow-comet\/)?reference\/[A-Za-z0-9._-]+\.(?:md|json)/g;
+function skillTreeReferenceProblems(docs, skillsRoot) {
+  const problems = [];
+  for (const [rel, text] of docs) {
+    const dir = path.posix.dirname(rel);
+    for (const ref of new Set(text.match(SKILL_TREE_REFERENCE_RE) ?? [])) {
+      const tail = ref.replace(/^\.\.\/flow-comet\//, '');
+      const candidates = [
+        path.posix.normalize(path.posix.join(dir, ref)),
+        path.posix.normalize(path.posix.join('flow-comet', tail)),
+      ];
+      if (!candidates.some((candidate) => fs.existsSync(path.join(skillsRoot, candidate)))) {
+        problems.push(rel + ' 的相对路径引用解析不到: ' + ref + '（候选: ' + candidates.join(' / ') + '）');
+      }
+    }
+  }
+  return problems;
+}
+
+// CC 行判级升格 + 三平台 cwd 语义对照（场景 184 的 ⑦ 使用；纯函数 + 合成文本面可驱动）：判级由
+// 「未覆盖」升为「证实」后，落地形态由**两处**承载——入口册（用户可见总表 + 已知边界旁的三平台
+// `cwd` 对照，7 条字面量是能力契约锚，本批明文保留）与 `reference/platform-facts.md`（原
+// `reference/worktree-notes.md` 的同一批整句随文件移出技能树后**逐字搬入**的新落点）。判据：
+// 「两处正文在场 + 其余册零回流（唯一处）+ 旧「未覆盖」判级句零残留」。
+const IDENTITY_UPGRADE_ENTRY_PHRASES = [
+  '| ① 写权限 | 载荷 `agent_id` / `agent_type`——**证实**（真机实测：子代理载荷含二者、主会话载荷不含；与 Codex 同一判据） |',
+  '**三平台 `cwd` 语义对照（真机实测新增的精确事实 · 「身份先于路径」的精确理由）**',
+  '| **Claude Code** | **子代理的工作目录**（`…\\.claude\\worktrees\\<agent-id>`） | **路径判定是正确的** |',
+  '| **Codex** | **恒等于会话根**（子代理在 worktree 写入而 `cwd` 仍是主工程） | **路径判定必错** |',
+  '| **dsh** | 载荷**无** `cwd`（桥接另读会话 header cwd） | 路径判定**不适用** |',
+  '三平台 `cwd` 语义各不相同（正确 / 恒错 / 无）——只有身份判据是三平台同义的',
+  '非 `bypassPermissions` 权限模式**均未覆盖**',
+];
+const IDENTITY_UPGRADE_AUTHORITY_PHRASES = [
+  '载荷 `agent_id` / `agent_type`——**证实**（真机实测：子代理载荷含二者、主会话载荷不含；与 Codex 同一判据）',
+  '**三平台 `cwd` 语义对照（真机实测新增的精确事实 · 「身份先于路径」的精确理由）**——同为载荷 `cwd`，三平台语义各不相同；下表**三行各自独立**，缺一行即口径残缺：',
+  '| **Claude Code** | **子代理的工作目录**（`…\\.claude\\worktrees\\<agent-id>`） | **路径判定是正确的** |',
+  '| **Codex** | **恒等于会话根**（子代理在 worktree 写入而 `cwd` 仍是主工程） | **路径判定必错** |',
+  '| **dsh** | 载荷**无** `cwd`（桥接另读会话 header cwd） | 路径判定**不适用** |',
+  '三平台 `cwd` 语义各不相同（正确 / 恒错 / 无）——只有身份判据是三平台同义的',
+];
+const IDENTITY_UPGRADE_STALE_PHRASES = ['该次实测只覆盖 Codex', '真机会话复核待补', 'CC 隔离树的真实落点探针待补'];
+function identityUpgradeProblems({ entry, facts, others }) {
+  const problems = [];
+  for (const phrase of IDENTITY_UPGRADE_ENTRY_PHRASES) {
+    if (!entry.includes(phrase)) {
+      problems.push('flow-comet/SKILL.md 缺「CC 行升格 / 三平台 cwd 对照」判别句式：' + phrase.slice(0, 40) + '…');
+    }
+  }
+  for (const phrase of IDENTITY_UPGRADE_AUTHORITY_PHRASES) {
+    if (!facts.includes(phrase)) {
+      problems.push(PLATFORM_FACTS_REL + ' 缺「CC 行升格 / 三平台 cwd 对照」判别句式：' + phrase.slice(0, 40) + '…');
+    }
+  }
+  const carried = [...IDENTITY_UPGRADE_ENTRY_PHRASES, ...IDENTITY_UPGRADE_AUTHORITY_PHRASES];
+  for (const [rel, text] of others) {
+    for (const phrase of carried) {
+      if (text.includes(phrase)) {
+        problems.push(rel + ' 回流了 cwd 对照 / CC 判级句（唯一处 = 入口册 + 平台事实册）：'
+          + phrase.slice(0, 40) + '…');
+      }
+    }
+  }
+  for (const [rel, text] of [['flow-comet/SKILL.md', entry], [PLATFORM_FACTS_REL, facts]]) {
+    for (const stale of IDENTITY_UPGRADE_STALE_PHRASES) {
+      if (text.includes(stale)) {
+        problems.push(rel + ' 残留 CC 行旧「未覆盖」判级表述：' + stale);
+      }
+    }
+  }
+  return problems;
+}
+
+// 平台事实（场景 184 的 ⑤ / ⑦ 使用；纯函数 + 合成输入可驱动）：Codex 平台事实与支持面的判别句
+// 随 `worktree-notes.md` 移出技能树后**唯一权威处** = `flow-comet/reference/platform-facts.md`
+//（T07 已按「逐字搬运，不重写」搬入）。判据三侧：① 权威处在场（判别句 + 旧独断句只允许被反驳
+// 引用形态 + 适用范围限定 + fail-open / 未闭合的现判据）；② 各引用册**指针在场**；③ **证据正文
+// 不回流册子**（权威处唯一——原逐字锁「多处各持一份」的方向已反转）。
+// `PLATFORM_FACTS_ONLY_PHRASES` 是**证据与过程记录**类判别句（按 ADR-016 的「证据与判级随平台事实
+// 移走」分类）：它们只允许出现在权威处，回流任一册即红。
+const PLATFORM_FACTS_ONLY_PHRASES = [
+  '**旧结论（实测 2026-08-13；证据已不可复核',
+  '`codex features list` 可查',
+  '本机真实交互式会话日志中记录到 `spawn_agent` / `wait_agent` / `close_agent` 的实际调用',
+  '**静态喂测（独立复现）**',
+  '**hook 触发条件**：隔离 `CODEX_HOME` 无持久信任时默认 headless **不执行**项目 hook',
+  '实测 3/21；补 `--dangerously-bypass-approvals-and-sandbox` 后 5/5',
+  '**交互式 Codex 实测口径',
+];
+function platformFactsAuthorityProblems(rel, facts, pointerBooks) {
+  const problems = [];
+  const refutedClaim = '「Codex 不能委派 / 不使用并行委托」';
+  for (const keyword of ['multi_agent', '机制缺口']) {
+    if (!facts.includes(keyword)) {
+      problems.push(rel + ' 缺「' + keyword + '」（Codex 平台事实与支持面判别锚）');
+    }
+  }
+  // 旧独断句只允许以被反驳引用的完整形态出现：剥离该引用后不得再有残句。
+  if (facts.split(refutedClaim).join('').includes('不使用并行委托')) {
+    problems.push(rel + ' 残留旧独断句「不使用并行委托」（非被反驳引用形态）');
+  }
+  if (!facts.includes('不得外推') && !facts.includes('不可外推')) {
+    problems.push(rel + ' 缺「不得外推 / 不可外推」适用范围限定');
+  }
+  for (const keyword of ['fail-open', '未闭合']) {
+    if (!facts.includes(keyword)) {
+      problems.push(rel + ' 缺「' + keyword + '」（Codex/worktree 订正限定）');
+    }
+  }
+  for (const [stale, label] of [
+    ['受支持的工作流仍是串行执行', '旧独断句'],
+    ['写入仍会被协调者白名单拦截', '旧过宽句'],
+  ]) {
+    if (facts.includes(stale)) problems.push(rel + ' 残留「' + stale + '」' + label);
+  }
+  for (const phrase of PLATFORM_FACTS_ONLY_PHRASES) {
+    if (!facts.includes(phrase)) {
+      problems.push(rel + ' 缺证据与过程记录判别句：' + phrase.slice(0, 40) + '…');
+    }
+  }
+  for (const [bookRel, text] of pointerBooks) {
+    if (!text.includes('reference/platform-facts.md')) {
+      problems.push(bookRel + ' 缺「reference/platform-facts.md」条件句（平台事实的引用册指针不在场）');
+    }
+    for (const phrase of PLATFORM_FACTS_ONLY_PHRASES) {
+      if (text.includes(phrase)) {
+        problems.push(bookRel + ' 回流了平台事实的证据正文：' + phrase.slice(0, 40) + '…（权威处唯一）');
+      }
+    }
+    if (text.includes('写入会被协调者白名单拦截')) {
+      problems.push(bookRel + ' 残留「写入会被协调者白名单拦截」旧过宽句');
+    }
+  }
+  return problems;
+}
+
+// 模板权威声明（场景 184 的 ② 使用；纯函数 + 合成文档面可驱动）：ADR-016 把原「14 册同持整句」
+// 的逐字锁重定向为「单一权威 + 指针在场 + 正文唯一」三件套。本函数是**单一实现**——真实判据与
+// 反向构造探针共用，逐条对应重定向后的一侧：
+//   · 指针在场：每份文档须含模板权威锚句，句内按序组合五个锚点（整句语义组合，防拆句 / 半句）；
+//   · 该句只在 1 处（册内一侧）：同一文档出现第二处锚行即红（重复回潮的同册形态）；
+//   · 单一权威：持锚行必须点名 `flow-kit/templates/**`——段形权威只能指向这一个来源；
+//   · 正文唯一（块级跨距）：声明的**展开副本**（连续同文 ≥ `TEMPLATE_AUTHORITY_BLOCK_SPAN` 字符，
+//     取旧逐字锁的切片粒度 400）不得出现第二份。**粒度说明**（`LESSONS` 候选取证）：短锚句是
+//     ADR-015 B 类子规则 2 允许的「要点 / 指针」形态（各册按语境表述），公式化短片段天然重合 ⇒
+//     按 T-03 实测建议取块级跨距而非短子串查重，避免必然假红；展开成正文段落后被复制即红。
+const TEMPLATE_AUTHORITY_SKILLS = [
+  'flow-comet-open', 'flow-comet-design', 'flow-comet-plan', 'flow-comet-execute',
+  'flow-comet-subagent-execute', 'flow-comet-review', 'flow-comet-verify', 'flow-comet-archive',
+  'flow-comet-task',
+  'flow-comet-change', 'flow-comet-requirement', 'flow-comet-dev', 'flow-comet-test',
+  'flow-comet-integration',
+];
+const TEMPLATE_AUTHORITY_ANCHORS = [
+  '唯一权威 = ', '`flow-kit/templates/**`', '是历史证据', '不是模板来源', '上一轮就是这么写的',
+];
+// 整句形态**专有**的展开锚点（短指针形态不含）：出现任一条即要求整句按序齐备（半句 / 拆句防护）。
+const TEMPLATE_AUTHORITY_EXPANSION_ANCHORS = [
+  '唯一权威 = ', '是历史证据', '不是模板来源', '上一轮就是这么写的',
+];
+const TEMPLATE_AUTHORITY_BLOCK_SPAN = 400;
+// 「模板权威」声明的**段落切片**：锚行所在的那一段连续引用行（`>` 块）——展开副本的判据面。
+function templateAuthorityParagraphs(text) {
+  const lines = text.split(/\r?\n/);
+  const out = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!lines[i].includes('模板权威')) continue;
+    let start = i;
+    while (start > 0 && lines[start - 1].startsWith('>')) start -= 1;
+    let end = i;
+    while (end + 1 < lines.length && lines[end + 1].startsWith('>')) end += 1;
+    out.push(lines.slice(start, end + 1).join('\n'));
+  }
+  return out;
+}
+// 最长连续同文跨距（返回该片段本身；空串 = 无重合）。
+function longestCommonSpan(a, b) {
+  const left = String(a);
+  const right = String(b);
+  let best = '';
+  const dp = new Array(right.length + 1).fill(0);
+  for (let i = 1; i <= left.length; i += 1) {
+    let prev = 0;
+    for (let j = 1; j <= right.length; j += 1) {
+      const tmp = dp[j];
+      if (left[i - 1] === right[j - 1]) {
+        dp[j] = prev + 1;
+        if (dp[j] > best.length) best = left.slice(i - dp[j], i);
+      } else {
+        dp[j] = 0;
+      }
+      prev = tmp;
+    }
+  }
+  return best;
+}
+function templateAuthorityProblems(docs) {
+  const problems = [];
+  const paragraphs = [];
+  for (const [rel, text] of docs) {
+    const lines = text.split(/\r?\n/).filter((line) => line.includes('模板权威'));
+    if (lines.length === 0) {
+      problems.push(rel + ' 缺模板权威整句声明（正向权威 + 反向历史证据组合缺失）');
+      continue;
+    }
+    if (lines.length > 1) {
+      problems.push(rel + ' 模板权威锚句出现 ' + lines.length + ' 处（同一册只允许 1 处）');
+    }
+    const line = lines[0];
+    // 指针在场（两形态皆算、缺一即红）：① **短指针形态**——点名唯一权威 `flow-kit/templates/**`；
+    // ② **整句形态**——锚点按序组合（正向权威 + 反向历史证据）。ADR-016 的方向是「13 册留短指针」，
+    // 故两种形态都必须算通过（当前 14 册为整句形态、入口册与入口展开册为短指针形态，判据对**两种
+    // 布局都成立**——书籍侧若按 ADR 收敛成短指针，本锚不会因此变红）。
+    if (!line.includes('`flow-kit/templates/**`')) {
+      problems.push(rel + ' 的模板权威行未指向 `flow-kit/templates/**`（段形权威被指到别处）');
+    }
+    if (!line.includes('唯一权威')) {
+      problems.push(rel + ' 的模板权威行未声明「唯一权威」（指针未指向唯一来源）');
+    }
+    // 半句 / 拆句防护：一旦行内出现**整句形态专有**的展开锚点（历史证据 / 反向声明 / 收口句），
+    // 五个锚点必须按序齐备（不得只留半句）——短指针形态只点名唯一权威，不触发本项。
+    const expansionAnchors = TEMPLATE_AUTHORITY_EXPANSION_ANCHORS.filter((anchor) => line.includes(anchor));
+    if (expansionAnchors.length > 0) {
+      let cursor = -1;
+      for (const anchor of TEMPLATE_AUTHORITY_ANCHORS) {
+        const at = line.indexOf(anchor, cursor + 1);
+        if (at < 0) {
+          problems.push(rel + ' 模板权威整句缺「' + anchor + '」（整句语义组合）');
+        } else {
+          cursor = at;
+        }
+      }
+    }
+    if (text.includes('archive 是模板来源')) {
+      problems.push(rel + ' 含「archive 是模板来源」旧反向声明');
+    }
+    for (const paragraph of templateAuthorityParagraphs(text)) paragraphs.push([rel, paragraph]);
+  }
+  for (let i = 0; i < paragraphs.length; i += 1) {
+    for (let j = i + 1; j < paragraphs.length; j += 1) {
+      if (paragraphs[i][0] === paragraphs[j][0]) continue;
+      const span = longestCommonSpan(paragraphs[i][1], paragraphs[j][1]);
+      if (span.length >= TEMPLATE_AUTHORITY_BLOCK_SPAN) {
+        problems.push('模板权威声明出现第二份展开正文（' + paragraphs[i][0] + ' ↔ ' + paragraphs[j][0]
+          + '，连续同文 ' + span.length + ' 字符 ≥ ' + TEMPLATE_AUTHORITY_BLOCK_SPAN + '）');
+      }
     }
   }
   return problems;
@@ -7928,28 +8492,34 @@ const SCENARIOS = [
     },
   },
 
-  // 164: 技能加载措辞（设计语义 / AC-16）——主 SKILL（SKILL.md / GUIDANCE.md）与节点 SKILL
-  // 须含「Skill 工具」与「不得跳过/禁止跳过」。当前主 SKILL 已含、部分节点 SKILL 已含，但
-  // open/design/plan/verify/archive 等节点 SKILL 缺 → 预期 RED。
+  // 164: 技能加载措辞（设计语义 / AC-16）——主 SKILL（SKILL.md + 入口展开册）与节点 SKILL
+  // 须含「Skill 工具」与「不得跳过/禁止跳过」。入口展开册随 `GUIDANCE.md` 改名同步为
+  // `reference/entry-detail.md`（判据强度不变：仍是同两条存在级锚点句，只是文件名换了）。
+  // 判据抽成纯函数（单一实现）：真实判据与反向构造探针共用，逐份抽掉任一条锚点必红。
   {
     name: '164 技能加载措辞：主 SKILL 与节点 SKILL 含 Skill 工具 + 不得/禁止跳过',
     run: (dir) => {
       const files = [
-        path.join(__dirname, '..', 'SKILL.md'),
-        path.join(__dirname, '..', 'GUIDANCE.md'),
+        [path.join('flow-comet', 'SKILL.md'), path.join(__dirname, '..', 'SKILL.md')],
+        [path.join('flow-comet', 'reference', 'entry-detail.md'),
+          path.join(__dirname, '..', 'reference', 'entry-detail.md')],
         ...['flow-comet-open', 'flow-comet-design', 'flow-comet-plan', 'flow-comet-execute',
           'flow-comet-subagent-execute', 'flow-comet-review', 'flow-comet-verify', 'flow-comet-archive']
-          .map((s) => path.join(__dirname, '..', '..', s, 'SKILL.md')),
+          .map((s) => [path.join(s, 'SKILL.md'), path.join(__dirname, '..', '..', s, 'SKILL.md')]),
       ];
-      const relativeBase = path.join(__dirname, '..', '..', '..');
       const missing = [];
-      for (const f of files) {
+      for (const [rel, f] of files) {
         const text = fs.readFileSync(f, 'utf8');
-        const hasTool = text.includes('Skill 工具');
-        const hasSkip = text.includes('不得跳过') || text.includes('禁止跳过');
-        if (!hasTool || !hasSkip) {
-          const why = !hasTool && !hasSkip ? '缺「Skill 工具」与「不得/禁止跳过」' : (hasTool ? '缺「不得/禁止跳过」' : '缺「Skill 工具」');
-          missing.push(path.relative(relativeBase, f) + ' ' + why);
+        missing.push(...skillLoadingWordingProblems(rel, text));
+        // 反向构造（同一判据驱动）：逐条锚点句抽掉 ⇒ 必报该条缺失——存在级锚点不得恒真空过。
+        for (const [label, stripped] of [
+          ['Skill 工具', text.split('Skill 工具').join('（反向构造：抽掉）')],
+          ['不得跳过/禁止跳过', text.split('禁止跳过').join('（反向构造：抽掉）').split('不得跳过').join('（反向构造：抽掉）')],
+        ]) {
+          if (stripped === text) continue; // 该条本就不在场，缺失已由真实判据报告
+          if (!skillLoadingWordingProblems(rel, stripped).some((p) => p.includes(label))) {
+            missing.push(rel + ' 反向构造判别力缺失（抽掉「' + label + '」未被判缺失）');
+          }
         }
       }
       if (missing.length > 0) {
@@ -8030,6 +8600,7 @@ const SCENARIOS = [
   // 167: 两层加载模型措辞——阶段层禁止在节点 SKILL 内指示用 Skill 工具加载任何节点实现技能
   //（本节点技能已由入口路由经 Skill 工具加载）；入口层禁止 Implementation/Required 混淆句式；
   // 全部 10 文件禁止无限定「record 会自动补写缺失的声明标记」表述（与新 change 技能加载前置门矛盾）。
+  // 入口层的第二份随 `GUIDANCE.md` 改名同步为 `reference/entry-detail.md`（判据强度不变）。
   {
     name: '167 两层加载模型措辞：禁自加载句式/禁混淆句式/自动补分新旧',
     run: () => {
@@ -8046,12 +8617,30 @@ const SCENARIOS = [
         if (text.includes(autoFill)) problems.push(id + ' 含无限定自动补表述');
         if (!text.includes(stageAnchor)) problems.push(id + ' 缺阶段层锚点句');
       }
-      for (const name of ['SKILL.md', 'GUIDANCE.md']) {
-        const text = fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
-        if (text.includes('见上方 Required Calls 表')) problems.push(name + ' 含 Implementation/Required 混淆句式');
-        if (text.includes(autoFill)) problems.push(name + ' 含无限定自动补表述');
-        if (!text.includes(entryAnchor)) problems.push(name + ' 缺入口层锚点句');
-        if (!text.includes('前置门')) problems.push(name + ' 缺前置门表述');
+      const entryLevelFiles = [
+        ['flow-comet/SKILL.md', path.join(__dirname, '..', 'SKILL.md')],
+        ['flow-comet/reference/entry-detail.md', path.join(__dirname, '..', 'reference', 'entry-detail.md')],
+      ];
+      for (const [rel, file] of entryLevelFiles) {
+        const text = fs.readFileSync(file, 'utf8');
+        problems.push(...twoLayerEntryProblems(rel, text));
+        // 反向构造（同一判据驱动）：逐条锚点句抽掉 ⇒ 必报；还原混淆句式 / 无限定自动补表述 ⇒ 必报。
+        for (const [label, stripped] of [
+          ['入口层锚点句', text.split(entryAnchor).join('（反向构造：抽掉）')],
+          ['前置门', text.split('前置门').join('（反向构造：抽掉）')],
+        ]) {
+          if (stripped === text) continue; // 该条本就不在场，缺失已由真实判据报告
+          if (!twoLayerEntryProblems(rel, stripped).some((p) => p.includes(label))) {
+            problems.push(rel + ' 反向构造判别力缺失（抽掉「' + label + '」未被判缺失）');
+          }
+        }
+        const regressed = text + '\n见上方 Required Calls 表。' + autoFill + '。\n';
+        const regressedProblems = twoLayerEntryProblems(rel, regressed);
+        for (const label of ['Implementation/Required 混淆句式', '无限定自动补表述']) {
+          if (!regressedProblems.some((p) => p.includes(label))) {
+            problems.push(rel + ' 反向构造判别力缺失（还原「' + label + '」未被判违规）');
+          }
+        }
       }
       if (problems.length > 0) throw new Error('两层加载模型措辞不符: ' + problems.join('; '));
     },
@@ -8760,24 +9349,30 @@ const SCENARIOS = [
   },
 
   // 184: 技能文本混排合法化语义文本锁（in-place 扩展：模板权威整句 / 入口 archive 读法 /
-  // 规划约束 / Codex-worktree 订正）——plan 与 subagent-execute 两 SKILL 权威源不得再含
+  // 规划约束 / Codex 平台事实）——plan 与 subagent-execute 两 SKILL 权威源不得再含
   // 「连续块」「居首」旧波次形态约束表述，且依赖图语义描述（depends_on）在场、「用 Skill 工具」
-  // 两层加载句式保持（措辞锁族既有锚不破坏）；模板权威声明覆盖 9 个既有成员（8 产出节点 + task）
-  // 与 5 个 flow-kit 阶段协议技能 = 14 个真实成员（题面 13 按 8+5 计数漏计 task；保留既有断言
-  // 优先，实际按 14 文件落地，成员边界见收口证据）——每份须在同一声明行内按序组合出现
-  // 「唯一权威 = 」/「`flow-kit/templates/**`」/「是历史证据」/「不是模板来源」/「上一轮就是这么写的」
-  // 且全数零命中旧反向声明「archive 是模板来源」；入口 SKILL 含 archive 三要素读法；plan / task
-  // 含规划约束判别句式与各自边界锚（以本节为准 / 以本节点为准），旧同层并行句零残留；
-  // worktree-notes / subagent-execute 含平台事实（multi_agent）与支持面（机制缺口）判别锚、
-  // 适用范围限定（不得外推 / 不可外推），旧独断句只允许以被反驳引用形态出现。
+  // 两层加载句式保持（措辞锁族既有锚不破坏）。
+  // **逐字锁重定向（ADR-016）**：原「同一文字须在多册出现」的硬锁一律改为「单一权威 + 指针在场 +
+  // 正文唯一」三件套，每条新锚自带反向构造（抽掉目标文字必红——`LESSONS` L-106 判别句式，非裸子串）：
+  //   ② 模板权威：14 册各自的锚句**即指向唯一权威 `flow-kit/templates/**` 的指针**（整句语义组合
+  //      仍在场，缺任一册即红）；「该句只在 1 处」落在**册内一侧**（每册恰一处——同册复制第二份即红），
+  //      并补「作者面唯一」：全部持锚行的分发文本必须同指 `flow-kit/templates/**`（指向别处即红）。
+  //   ⑤ 平台事实：判别句随 `worktree-notes.md` 移出而迁入 `reference/platform-facts.md`（T07 已搬入）
+  //      ——判据改为「权威文件在场 + 判别句在权威处 + 各引用册指针在场 + 判别句**不再回流册子**」。
+  //   ⑥ 三块归一处：`reference/commit-discipline.md` 持 pathspec 五要素与集成四要素**全文**（权威处），
+  //      两册只留要点句（**不再要求逐字一致**，逐字锁已作废）；权威处独有的「证据与判级」判别句
+  //      回流任一册即红。
+  //   ⑦ 入口册的 7 条字面量与「建树适用面两句」保留（能力契约锚）；`worktree-notes.md` 的 6 条整句
+  //      随文件移出改锚到 `reference/platform-facts.md`，并断言各引用册指针在场。
+  //   ⑧ 文本↔实现一致（文本不得说谎）：**保留原样**——它不是「多册同文字」类锁，本批不动。
+  //   附：技能树正文的相对路径引用必须解析得到（本轮 `GUIDANCE.md` 改名曾造成 5 册死引用而零红灯）。
   // 文本存在级断言（结构级由其余场景族覆盖）。
-  // in-place 扩展（委托契约纪律文本锁）：两册（委托册 / 串行册）的四属性契约块、提交面 pathspec
-  // 纪律块与集成纪律块**区段级逐字一致**（单册漂移即红）；三个块各自的判别句式逐册锚定（五要素 +
-  // 适用条件 + 并行波次附加两条：禁 `--amend` 与自救通道；集成四要素；四属性与三态判级）；
-  // 旧表述零残留（无条件 worktree 口号仅允许被反驳形态、「未获机制明文放行」清零）；文本点名的
-  // 实现常量 / 载荷键名 / 受保护目标与引擎实现逐项对照（文本说 A、实现说 B 即红）。
+  // in-place 扩展（委托契约纪律文本锁）：两册（委托册 / 串行册）各自须含四属性契约、提交面 pathspec
+  // 纪律与集成纪律的**要点句与条件句**；旧表述零残留（无条件 worktree 口号仅允许被反驳形态、
+  // 「未获机制明文放行」清零）；文本点名的实现常量 / 载荷键名 / 受保护目标与引擎实现逐项对照
+  //（文本说 A、实现说 B 即红）。
   {
-    name: '184 技能文本锁：旧波次表述清零 + 委托契约两册逐字一致 + 纪律判别句式 + 文本↔实现一致',
+    name: '184 技能文本锁：模板权威指针在场 + 三块归一处 + 纪律判别句式 + 文本↔实现一致',
     run: () => {
       const problems = [];
       // —— 既有锚（原文语义与失败消息保持）——
@@ -8788,37 +9383,90 @@ const SCENARIOS = [
         if (!text.includes('depends_on')) problems.push(skillDir + ' 缺依赖图语义描述（depends_on）');
         if (!text.includes('用 Skill 工具')) problems.push(skillDir + ' 缺「用 Skill 工具」两层加载句式');
       }
-      // —— 模板权威整句声明：9 个既有成员 + 5 个 flow-kit 阶段协议技能（真实成员 14）——
-      const templateAuthoritySkills = [
-        'flow-comet-open', 'flow-comet-design', 'flow-comet-plan', 'flow-comet-execute',
-        'flow-comet-subagent-execute', 'flow-comet-review', 'flow-comet-verify', 'flow-comet-archive',
-        'flow-comet-task',
-        'flow-comet-change', 'flow-comet-requirement', 'flow-comet-dev', 'flow-comet-test',
-        'flow-comet-integration',
-      ];
-      // 整句级语义组合：同一段声明行内按序出现下列锚点，防止只留半句或把锚点拆到不同段落。
-      const authoritySentenceAnchors = [
-        '唯一权威 = ', '`flow-kit/templates/**`', '是历史证据', '不是模板来源', '上一轮就是这么写的',
-      ];
+      // —— ② 模板权威（重定向后的三件套）——成员面与整句锚点取自模块级常量（单一来源）：
+      // 9 个既有成员 + 5 个 flow-kit 阶段协议技能 = 14 个真实成员（含 task）；受检面另加
+      // 入口册与入口展开册（两者是「短指针」形态的既有持有者）。
+      const templateAuthoritySkills = TEMPLATE_AUTHORITY_SKILLS;
+      const templateAuthorityDocs = new Map();
       for (const skillDir of templateAuthoritySkills) {
-        const rel = skillDir + '/SKILL.md';
-        const text = fs.readFileSync(path.join(__dirname, '..', '..', skillDir, 'SKILL.md'), 'utf8');
-        const authorityLine = text.split(/\r?\n/).find((line) => line.includes('模板权威'));
-        if (!authorityLine) {
-          problems.push(rel + ' 缺模板权威整句声明（正向权威 + 反向历史证据组合缺失）');
-          continue;
-        }
-        let cursor = -1;
-        for (const anchor of authoritySentenceAnchors) {
-          const at = authorityLine.indexOf(anchor, cursor + 1);
-          if (at < 0) {
-            problems.push(rel + ' 模板权威整句缺「' + anchor + '」（整句语义组合）');
-          } else {
-            cursor = at;
+        templateAuthorityDocs.set(skillDir + '/SKILL.md',
+          fs.readFileSync(path.join(__dirname, '..', '..', skillDir, 'SKILL.md'), 'utf8'));
+      }
+      templateAuthorityDocs.set('flow-comet/SKILL.md', fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8'));
+      templateAuthorityDocs.set('flow-comet/reference/entry-detail.md',
+        fs.readFileSync(path.join(__dirname, '..', 'reference', 'entry-detail.md'), 'utf8'));
+      problems.push(...templateAuthorityProblems(templateAuthorityDocs));
+      // 反向构造（同一判据驱动，逐条对应重定向后的两侧）：
+      // ① 同一册复制第二份锚行 ⇒ 必报「只允许 1 处」（重复回潮的同册形态）；
+      // ② 权威目标改指别处 ⇒ 必报「未指向」（单一权威侧）；
+      // ③ 同一段 ≥400 字符展开副本落进两份文档 ⇒ 必报「第二份展开正文」（正文唯一侧）；
+      // ④ 抽掉某册锚句 ⇒ 必报该册缺声明（指针在场侧）。
+      {
+        const openRel = 'flow-comet-open/SKILL.md';
+        const changeRel = 'flow-comet-change/SKILL.md';
+        const openText = templateAuthorityDocs.get(openRel);
+        const changeText = templateAuthorityDocs.get(changeRel);
+        const anchorLine = openText.split(/\r?\n/).find((l) => l.includes('模板权威'));
+        const expansion = '> **模板权威**：段形唯一权威 = `flow-kit/templates/**`；'
+          + '（展开副本，反向构造探针）' + 'y'.repeat(TEMPLATE_AUTHORITY_BLOCK_SPAN) + '\n';
+        const probes = [
+          ['同册复制第二份锚行', new Map(templateAuthorityDocs).set(openRel, openText + '\n' + anchorLine + '\n'),
+            '只允许 1 处'],
+          ['权威目标改指别处', new Map(templateAuthorityDocs).set(openRel,
+            openText.split('`flow-kit/templates/**`').join('`.specs/archive/**`')), '未指向'],
+          ['展开副本落进两份文档', new Map(templateAuthorityDocs)
+            .set(openRel, openText + '\n' + expansion)
+            .set(changeRel, changeText + '\n' + expansion), '第二份展开正文'],
+          ['抽掉某册锚句', new Map(templateAuthorityDocs).set(openRel,
+            openText.split(anchorLine).join('（反向构造：抽掉锚句）')), '缺模板权威'],
+        ];
+        for (const [label, probed, expected] of probes) {
+          if (!templateAuthorityProblems(probed).some((p) => p.includes(expected))) {
+            problems.push('反向构造判别力缺失（模板权威: ' + label + ' 未被判违规）');
           }
         }
-        if (text.includes('archive 是模板来源')) {
-          problems.push(rel + ' 含「archive 是模板来源」旧反向声明');
+      }
+      // 作者面完备性：持「模板权威」声明的技能树文本集合须**恰好**等于受检面（多出来的持锚文本
+      // 是「第二份正文」的入口——例如某册偷偷加一条自己的权威声明）。
+      {
+        const expectedHolders = [...templateAuthorityDocs.keys()].sort();
+        const actualHolders = skillTreeDocFiles()
+          .filter(([, file]) => fs.readFileSync(file, 'utf8').includes('模板权威'))
+          .map(([rel]) => rel)
+          .sort();
+        for (const rel of actualHolders) {
+          if (!expectedHolders.includes(rel)) {
+            problems.push(rel + ' 持有「模板权威」声明但不在受检面内（第二处权威声明的入口）');
+          }
+        }
+        if (actualHolders.length !== expectedHolders.length) {
+          problems.push('持模板权威声明的技能树文本数 ' + actualHolders.length
+            + ' ≠ 受检面 ' + expectedHolders.length + '（实际: ' + actualHolders.join(', ') + '）');
+        }
+      }
+      // —— 附：技能树正文的相对路径引用必须解析得到（本轮改名造成 5 册死引用而**零红灯**）——
+      {
+        const skillsRootAbs = path.join(__dirname, '..', '..');
+        const treeDocs = new Map(skillTreeDocFiles().map(([rel, file]) => [rel, fs.readFileSync(file, 'utf8')]));
+        problems.push(...skillTreeReferenceProblems(treeDocs, skillsRootAbs));
+        // 反向构造（同一判据驱动）：① 把引用改写成不存在的目标 ⇒ 必报「解析不到」；
+        // ② 抽掉引用 ⇒ 判据面收缩但**不误报**（证明判据只在引用在场时发声，不恒真）。
+        const sampleEntry = [...treeDocs].find(([, text]) => SKILL_TREE_REFERENCE_RE.test(text));
+        SKILL_TREE_REFERENCE_RE.lastIndex = 0;
+        if (!sampleEntry) {
+          problems.push('相对路径引用判据的前提不成立：技能树里找不到任何 reference/ 相对引用');
+        } else {
+          const [sampleRel, sampleText] = sampleEntry;
+          const sampleRef = sampleText.match(SKILL_TREE_REFERENCE_RE)[0];
+          const broken = new Map(treeDocs).set(sampleRel,
+            sampleText.split(sampleRef).join('reference/renamed-away-fixture.md'));
+          if (!skillTreeReferenceProblems(broken, skillsRootAbs).some((p) => p.includes('解析不到'))) {
+            problems.push('反向构造判别力缺失（死引用未被判「解析不到」）: ' + sampleRel + ' → ' + sampleRef);
+          }
+          const dropped = new Map(treeDocs).set(sampleRel, sampleText.split(sampleRef).join(''));
+          if (skillTreeReferenceProblems(dropped, skillsRootAbs).some((p) => p.startsWith(sampleRel))) {
+            problems.push('相对路径引用判据误报（抽掉引用后仍报该册）: ' + sampleRel);
+          }
         }
       }
       // —— 入口 archive 读法：三要素关键词在场 ——
@@ -8859,187 +9507,142 @@ const SCENARIOS = [
         if (!taskText.includes('以本节点为准')) {
           problems.push('flow-comet-task/SKILL.md 缺「以本节点为准」（上游宽松语义显式覆盖锚）');
         }
-        const guidance = fs.readFileSync(path.join(__dirname, '..', 'GUIDANCE.md'), 'utf8');
+        const guidanceRel = 'flow-comet/reference/entry-detail.md';
+        const guidance = fs.readFileSync(path.join(__dirname, '..', 'reference', 'entry-detail.md'), 'utf8');
         if (!guidance.includes('仍必须由 subagent-execute 委托消化')) {
-          problems.push('flow-comet/GUIDANCE.md 缺「仍必须由 subagent-execute 委托消化」（direct 委托消化判别句）');
+          problems.push(guidanceRel + ' 缺「仍必须由 subagent-execute 委托消化」（direct 委托消化判别句）');
         }
       }
-      // —— Codex / worktree 订正：平台事实 + 支持面判别锚与适用范围限定在场、旧独断句
-      // 只允许以被反驳引用形态出现、fail-open 与未闭合限定在场、旧过宽句零残留 ——
+      // —— ⑤ Codex 平台事实与支持面（**判别句随 `worktree-notes.md` 移出技能树而迁入
+      // `reference/platform-facts.md`**，ADR-016）：判据 = 权威文件在场 + 判别句在权威处
+      //（含被反驳引用形态、适用范围限定、fail-open / 未闭合的现判据）+ 各引用册指针在场 +
+      // **判别句不再回流册子**（权威处唯一——原「两处各自须含」的逐字锁已作废）。
       {
-        const codexTexts = new Map([
-          ['reference/worktree-notes.md', fs.readFileSync(path.join(__dirname, '..', 'reference', 'worktree-notes.md'), 'utf8')],
+        const platformFactsRel = 'flow-comet/reference/platform-facts.md';
+        const factsFile = path.join(__dirname, '..', 'reference', 'platform-facts.md');
+        const pointerBooks = [
           ['flow-comet-subagent-execute/SKILL.md', fs.readFileSync(path.join(__dirname, '..', '..', 'flow-comet-subagent-execute', 'SKILL.md'), 'utf8')],
-        ]);
-        const refutedClaim = '「Codex 不能委派 / 不使用并行委托」';
-        for (const [rel, text] of codexTexts) {
-          for (const keyword of ['multi_agent', '机制缺口']) {
-            if (!text.includes(keyword)) {
-              problems.push(rel + ' 缺「' + keyword + '」（Codex 平台事实与支持面判别锚）');
+          ['flow-comet-execute/SKILL.md', fs.readFileSync(path.join(__dirname, '..', '..', 'flow-comet-execute', 'SKILL.md'), 'utf8')],
+          ['flow-comet/SKILL.md', fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8')],
+        ];
+        if (!fs.existsSync(factsFile)) {
+          problems.push(platformFactsRel + ' 不在场（判别句的唯一权威处缺失——原 worktree-notes 的锚无处可寻）');
+        } else {
+          const facts = fs.readFileSync(factsFile, 'utf8');
+          problems.push(...platformFactsAuthorityProblems(platformFactsRel, facts, pointerBooks));
+          // 反向构造（同一判据驱动）：① 权威处逐条抽掉判别句 ⇒ 必报缺句；② 判别句回流任一册 ⇒ 必报
+          //（「权威处唯一」——原逐字锁**要求**两处各持一份，恰恰抓不到回流）；③ 旧独断句 / 旧过宽句
+          // 还原进权威处 ⇒ 必报残留。
+          for (const phrase of [...PLATFORM_FACTS_ONLY_PHRASES, 'fail-open', '未闭合']) {
+            const stripped = facts.split(phrase).join('（反向构造：抽掉）');
+            if (stripped === facts) continue;
+            if (!platformFactsAuthorityProblems(platformFactsRel, stripped, pointerBooks)
+              .some((p) => p.includes(phrase.slice(0, 20)))) {
+              problems.push('反向构造判别力缺失（平台事实: 抽掉「' + phrase.slice(0, 20) + '…」未被判缺失）');
             }
           }
-          // 旧独断句只允许以被反驳引用的完整形态出现：剥离该引用后不得再有残句。
-          if (text.split(refutedClaim).join('').includes('不使用并行委托')) {
-            problems.push(rel + ' 残留旧独断句「不使用并行委托」（非被反驳引用形态）');
+          for (const phrase of PLATFORM_FACTS_ONLY_PHRASES) {
+            const injected = pointerBooks.map(([rel, text]) => [rel, text + '\n' + phrase + '\n']);
+            if (!platformFactsAuthorityProblems(platformFactsRel, facts, injected)
+              .some((p) => p.includes('回流了平台事实的证据正文'))) {
+              problems.push('反向构造判别力缺失（平台事实: 把证据正文复制回册子未被判违规）');
+            }
           }
-          if (!text.includes('不得外推') && !text.includes('不可外推')) {
-            problems.push(rel + ' 缺「不得外推 / 不可外推」适用范围限定');
+          const revertedFacts = platformFactsAuthorityProblems(platformFactsRel,
+            facts + '\n受支持的工作流仍是串行执行。写入仍会被协调者白名单拦截。\n', pointerBooks);
+          for (const label of ['旧独断句', '旧过宽句']) {
+            if (!revertedFacts.some((p) => p.includes(label))) {
+              problems.push('反向构造判别力缺失（平台事实: 还原' + label + '未被判残留）');
+            }
           }
-        }
-        const worktreeNotes = codexTexts.get('reference/worktree-notes.md');
-        for (const keyword of ['fail-open', '未闭合']) {
-          if (!worktreeNotes.includes(keyword)) {
-            problems.push('reference/worktree-notes.md 缺「' + keyword + '」（Codex/worktree 订正限定）');
+          const revertedClaimFacts = platformFactsAuthorityProblems(platformFactsRel,
+            facts + '\n不使用并行委托。\n', pointerBooks);
+          if (!revertedClaimFacts.some((p) => p.includes('非被反驳引用形态'))) {
+            problems.push('反向构造判别力缺失（平台事实: 还原裸旧独断句未被判违规）');
           }
-        }
-        if (worktreeNotes.includes('受支持的工作流仍是串行执行')) {
-          problems.push('reference/worktree-notes.md 残留「受支持的工作流仍是串行执行」旧独断句');
-        }
-        if (worktreeNotes.includes('写入仍会被协调者白名单拦截')) {
-          problems.push('reference/worktree-notes.md 残留「写入仍会被协调者白名单拦截」旧过宽句');
-        }
-        if (codexTexts.get('flow-comet-subagent-execute/SKILL.md').includes('写入会被协调者白名单拦截')) {
-          problems.push('flow-comet-subagent-execute/SKILL.md 残留「写入会被协调者白名单拦截」旧过宽句');
+          if (!platformFactsAuthorityProblems(platformFactsRel, facts, [
+            ...pointerBooks.slice(0, 1).map(([rel, text]) => [rel, text.split('`reference/platform-facts.md`').join('（反向构造：抽掉指针）')]),
+            ...pointerBooks.slice(1),
+          ]).some((p) => p.includes('引用册指针不在场'))) {
+            problems.push('反向构造判别力缺失（平台事实: 抽掉引用册指针未被判违规）');
+          }
         }
       }
-      // —— 委托契约纪律文本锁（in-place 扩展）：两册同锁区段逐字一致 + 判别句式锚 + 文本↔实现一致 ——
-      // 两册（委托册与串行册）承载同一条纪律：契约块与两个纪律块必须**逐字一致**（单册漂移即红），
-      // 且每条约束用**判别句式**锚定（裸子串会被同文件其它上下文满足而恒真——故锚点取整句，
-      // 删句必红）。文本点名的实现常量 / 载荷键名另与引擎实现逐项对照（文本说 A、实现说 B 即红）。
+      // —— ⑥ 三块归一处（ADR-016）：原「两册三块逐字一致（切片 ≥400 字符）+ 两册各持 41 条判别句」
+      // 的逐字锁**作废**，改为「两册各自的要点句在场 + 权威处唯一 + 留正文的判别句逐句留原文但
+      // **不再要求两册相同**」。归一处：pathspec 与集成 → `reference/commit-discipline.md` 全文；
+      // 四属性契约 → 入口册 + `reference/platform-facts.md`。判别句按性质分流：属「该怎么干」的
+      // 留两册正文（外部原则：非显然的坑留正文），属「证据与判级」的随平台事实移走。
       {
         const bookTexts = new Map([
           ['flow-comet-subagent-execute/SKILL.md', fs.readFileSync(path.join(__dirname, '..', '..', 'flow-comet-subagent-execute', 'SKILL.md'), 'utf8')],
           ['flow-comet-execute/SKILL.md', fs.readFileSync(path.join(__dirname, '..', '..', 'flow-comet-execute', 'SKILL.md'), 'utf8')],
         ]);
-        // 区段切片（含起始标题行，止于下一个二级/三级标题）：用于两侧逐字比对。
-        const sectionOf = (text, heading) => {
-          const start = text.indexOf(heading);
-          if (start < 0) return null;
-          const rest = text.slice(start + heading.length);
-          const nextHeading = rest.search(/\r?\n#{2,3} /);
-          return text.slice(start, nextHeading < 0 ? text.length : start + heading.length + nextHeading + 1);
-        };
-        // 契约块切片：起于四属性契约声明行，止于判级口径行的行尾（两册其后各接不同小节，
-        // 故不按下一标题切片——按共同终止行切片，两侧可比）。
-        const contractBlockOf = (text) => {
-          const start = text.indexOf('> **并行安全四属性契约（两册同锁 · 逐字一致）**');
-          if (start < 0) return null;
-          const gradeAt = text.indexOf('> **判级口径', start);
-          if (gradeAt < 0) return null;
-          const lineEnd = text.indexOf('\n', gradeAt);
-          return text.slice(start, lineEnd < 0 ? text.length : lineEnd);
-        };
-        const verbatimSections = [
-          ['并行安全四属性契约块', contractBlockOf],
-          ['提交面 pathspec 纪律块', (text) => sectionOf(text, '### 提交面 pathspec 纪律')],
-          ['集成纪律块', (text) => sectionOf(text, '### 集成纪律')],
-        ];
-        // 区段一致判据（单一实现：真实判据与反向构造探针共用本函数）。
-        const verbatimProblems = (label, leftRel, left, rightRel, right) => {
-          const out = [];
-          if (left === null || right === null) {
-            out.push(label + ' 两册同锁区段切片为空（缺起始行或终止行）');
-            return out;
-          }
-          if (left.length < 400) out.push(label + ' 切片过短（' + left.length + ' 字符）——同锁区段疑似被截断');
-          if (left !== right) {
-            out.push(label + ' 两册不一致（' + leftRel + ' ↔ ' + rightRel + ' 逐字比对失败）——单册漂移');
-          }
-          return out;
-        };
-        for (const [label, extract] of verbatimSections) {
-          const extracted = [...bookTexts].map(([rel, text]) => [rel, extract(text)]);
-          const [leftRel, left] = extracted[0];
-          const [rightRel, right] = extracted[1];
-          problems.push(...verbatimProblems(label, leftRel, left, rightRel, right));
-          // 反向构造（同一判据驱动）：篡改任一侧一个字符 ⇒ 必判不一致；两区段互不相同 ⇒ 切片不空转。
-          if (left !== null && right !== null) {
-            const tampered = verbatimProblems(label, leftRel, left, rightRel, right + ' ');
-            if (!tampered.some((p) => p.includes('两册不一致'))) {
-              problems.push(label + ' 反向构造判别力缺失（单侧篡改未被判不一致）');
-            }
+        const commitDisciplineText = fs.readFileSync(
+          path.join(__dirname, '..', 'reference', 'commit-discipline.md'), 'utf8');
+        const elementDocs = new Map([...bookTexts, [COMMIT_DISCIPLINE_REL, commitDisciplineText]]);
+        const authorityTexts = new Map([
+          [COMMIT_DISCIPLINE_REL, commitDisciplineText],
+          [PLATFORM_FACTS_REL, fs.readFileSync(path.join(__dirname, '..', 'reference', 'platform-facts.md'), 'utf8')],
+          ['flow-comet/SKILL.md', fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8')],
+        ]);
+        const disciplineSources = { books: bookTexts, elementDocs, authorityTexts };
+        problems.push(...delegationDisciplineProblems(disciplineSources));
+        // 反向构造（同一判据驱动）：逐条抽掉 ⇒ 必报；逐条回流 ⇒ 必报。判别力不依赖人工实验：
+        // 要素级 token / 权威处判别句 / 能力契约判别句 / 条件句指针 / 证据与判级判别句五组各取全量。
+        const subRel = 'flow-comet-subagent-execute/SKILL.md';
+        const exRel = 'flow-comet-execute/SKILL.md';
+        const strip = (text, phrase) => text.split(phrase).join('（反向构造：抽掉）');
+        const withBook = (rel, text) => ({ ...disciplineSources, books: new Map(bookTexts).set(rel, text) });
+        const withElementDoc = (rel, text) => ({ ...disciplineSources, elementDocs: new Map(elementDocs).set(rel, text) });
+        const withAuthority = (rel, text) => ({ ...disciplineSources, authorityTexts: new Map(authorityTexts).set(rel, text) });
+        for (const [label, tokens] of COMMIT_DISCIPLINE_ELEMENT_GROUPS) {
+          const stripped = strip(elementDocs.get(subRel), tokens[0]);
+          if (stripped === elementDocs.get(subRel)) continue;
+          if (!delegationDisciplineProblems(withElementDoc(subRel, stripped)).some((p) => p.includes(label))) {
+            problems.push('反向构造判别力缺失（' + label + ' 的要点 token 被抽掉未被判缺）');
           }
         }
-        const pathspecSection = sectionOf(bookTexts.get('flow-comet-subagent-execute/SKILL.md'), '### 提交面 pathspec 纪律');
-        const integrationSection = sectionOf(bookTexts.get('flow-comet-subagent-execute/SKILL.md'), '### 集成纪律');
-        if (pathspecSection !== null && integrationSection !== null && pathspecSection === integrationSection) {
-          problems.push('两个纪律块的切片相同（切片实现空转——逐字比对形同虚设）');
-        }
-        // 判别句式锚（逐册）：五要素 + 适用条件 + 并行波次附加两条（禁 amend / 自救通道）。
-        const pathspecLockPhrases = [
-          '**适用条件（先读）**：本条纪律适用于「**多个写者共享同一工作区**」形态',
-          '**各自独立工作区（worktree 等）内的局部 `reset` / `clean` 不在禁令内**',
-          '1. **`git add -- <自己字面路径>`**：逐条字面路径（取自本任务 `write_files`），禁用 `.` / `-A` / `-u` 等宽泛形态。',
-          '2. **`git commit -- <同一路径>`**：提交以 pathspec 限定范围，保证提交只含自己的文件；路径集与上一步**逐字一致**。',
-          '3. **锁失败重试**：并发提交会撞 `index.lock` / `cannot lock ref`——**失败即重试**',
-          '4. **禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`**',
-          '5. **为什么**：并发写者共享**同一个索引与工作树**——宽泛命令存在**并发索引竞态**',
-          '**并行波次附加两条（与上列五要素并列适用 · 不改其语义与适用条件）**：',
-          '- **并行波次禁用 `git commit --amend`**：共享工作区下 HEAD 会被并行写者推进',
-          '确需修正时必须**先断言 `git rev-parse HEAD` 等于自己刚提交的哈希**，否则一律改用**新提交追加**。',
-          '- **误改后的自救通道（与上列第 4 条的定向例外）**：合法修复路径 = **先断言** `git rev-parse HEAD` 即被误改的那次提交，再 `git reset --soft <自己的父提交>` 回退',
-          '（**只用 `--soft`**：只移动 HEAD、不动索引与工作树，同伴的未提交工作零影响），最后以 **pathspec** 重建自己的提交',
-          '**无合法修复通道时人会暗改**',
-        ];
-        // 判别句式锚（逐册）：集成纪律实质四要素（机制选择 / 顺序 / 审计 / 冲突处置）。
-        const integrationLockPhrases = [
-          '1. **机制选择**：优先 **`git merge --no-ff`**（保留父子关系、可审计',
-          '冲突难解时**降级 `git cherry-pick` 并强制记因**（审计行写明降级原因）',
-          '2. **顺序（确定性规则）**：先按 `depends_on` 的**拓扑序**集成（被依赖者先入）；同一拓扑层内按 **task id 升序**（计划期固定的稳定键，与完成先后无关）。**不得依赖书写顺序**',
-          '3. **审计留痕**：每次集成输出一行审计行 `INTEGRATE: <task-id> <commitHash> → <集成提交>`',
-          '**判级**：审计行是**执行纪律**（review 把关），本节点不声称存在机械门禁校验它。',
-          '- **机械冲突**（不改用户可见行为：同一文件不同区域 / 相邻行 / 纯格式）：执行者**可自行解决**',
-          '- **语义冲突**（两侧对同一行为 / 契约 / 接口给出不同语义：同一函数语义分叉、同一 AC 的两种实现、公共 API 形状不一致）：**必须中止集成并上抛**',
-        ];
-        // 判别句式锚（逐册）：四属性契约与三态判级（未覆盖项显式标注、不得写成已支持）。
-        const contractLockPhrases = [
-          '> **并行安全四属性契约（两册同锁 · 逐字一致）**：契约对象是**四属性**，不是 worktree',
-          '| ① | **写权限** | 每个写者必须有一条被守卫认可的写入通道 |',
-          '| ③ | **验证隔离** | 同一时刻只有一个写者：全量判据不得与在飞写者并行 |',
-          '出口校验锚 = `handoffRequests` 有 request 无对应 `handoffResult` ⇒ 新 change BLOCKED / 旧 change WARN；全部有 result ⇒ 放行；无证据 ⇒ 零输出',
-          // 撤回通道（被遗弃的交接的受支持出口）与桥接通道标记（env 面身份的作用域收紧）：
-          // 两册同锁块内逐字一致，抽掉任一句必红（L-106 判别句式，非裸子串）。
-          '**已撤回的 request 不构成在飞委托**',
-          '`workflow-handoff.mjs withdraw <task-id> --by <来源>` 在原记录上留痕 `withdrawnAt` + `withdrawnBy`，已撤回 = 终态、历史不删',
-          '**并同时注入桥接通道标记 `FLOW_COMET_AGENT_DEPTH_SOURCE`——守卫要求标记与深度同时在场才接受该通道**',
-          '**+ 通道标记 `FLOW_COMET_AGENT_DEPTH_SOURCE`**；0 / 缺失 / 无标记 = 协调者',
-          '**证实**——Codex 交互式会话的原生子代理载荷含 `agent_id`',
-          '**推翻**——「Codex 载荷无身份字段」只对 `codex exec` headless 主线程成立，**不得外推**为平台结论。',
-          '**未覆盖（显式标注，不得写成已支持）**',
-          // 写面含 gitignored 面的四属性映射（AC-9 文本侧）：写权限走身份通道、提交隔离走既有
-          // noCommit 资格——两册同锁块内逐字一致，抽掉任一句必红（L-106 判别句式，非裸子串）。
-          '**写面含 gitignored 面的任务（四属性映射 · 与其他任务同一判据）**',
-          '① **写权限**仍走**身份通道**',
-          '② **提交隔离**走既有 **`noCommit` 资格**',
-          '**并行 × 零提交**因此合法',
-          // 留痕的诚实边界（AC-22 文本侧）：留痕证明「发生过委派」，不证明执行者身份——
-          // 与 directOverride / completedChecks / reentryAuthorization 同族。
-          '**留痕的边界（诚实声明 · 与 `directOverride` / `completedChecks` / `reentryAuthorization` 同族）**',
-          '留痕记录的是「**发生过委派**」，**不是**对执行者身份的物理证明',
-          '与 `completedChecks` 只能记录声明、`directOverride` 只能记录授权、`reentryAuthorization` 只能记录授权源同理',
-          // CC 行判级升格（真机实测落地）：平台表通道描述 + 判级口径的证实条目——两册同锁块内逐字
-          // 一致，抽掉任一句必红（`L-106` 判别句式，非裸子串）；未覆盖项保留权限模式边界。
-          '> | **Claude Code** | 身份分派（载荷含 `agent_id` / `agent_type`——**证实**：真机实测子代理载荷含二者、主会话载荷不含，与 Codex 同一判据）',
-          'CC 子代理载荷含 `agent_id` / `agent_type`（真机实测：子代理载荷含二者、主会话载荷不含，与 Codex 同一判据）',
-          '非 `bypassPermissions` 权限模式下的载荷形态',
-        ];
-        const phraseGroups = [
-          ['提交面 pathspec 纪律', pathspecLockPhrases],
-          ['集成纪律', integrationLockPhrases],
-          ['四属性契约', contractLockPhrases],
-        ];
-        // 文本锁判据（单一实现：真实判据与反向构造探针共用本函数）——缺句与旧表述残留。
-        const lockProblemsFor = (rel, text) => {
-          const out = [];
-          for (const [label, phrases] of phraseGroups) {
-            for (const phrase of phrases) {
-              if (!text.includes(phrase)) {
-                out.push(rel + ' 缺「' + label + '」判别句式：' + phrase.slice(0, 40) + '…');
-              }
-            }
+        for (const phrase of COMMIT_DISCIPLINE_AUTHORITY_PHRASES) {
+          if (!commitDisciplineText.includes(phrase)) continue; // 缺失已由真实判据报告
+          if (!delegationDisciplineProblems(withAuthority(COMMIT_DISCIPLINE_REL, strip(commitDisciplineText, phrase)))
+            .some((p) => p.includes(phrase.slice(0, 40)))) {
+            problems.push('反向构造判别力缺失（抽掉 ' + COMMIT_DISCIPLINE_REL + ' 权威处判别句未被判缺）: '
+              + phrase.slice(0, 40) + '…');
           }
-          // 旧表述零残留：无条件 worktree 口号只允许以「已作废」的被反驳形态出现；
-          // 「未获机制明文放行」现状表述一律清零（集成纪律已成文）。
+          if (!delegationDisciplineProblems(withBook(subRel, bookTexts.get(subRel) + '\n' + phrase + '\n'))
+            .some((p) => p.includes('回流了'))) {
+            problems.push('反向构造判别力缺失（权威处正文回流册子未被判违规）: ' + phrase.slice(0, 40) + '…');
+          }
+        }
+        for (const phrase of PARALLEL_CONTRACT_BOOK_PHRASES) {
+          if (!bookTexts.get(exRel).includes(phrase)) continue;
+          if (!delegationDisciplineProblems(withBook(exRel, strip(bookTexts.get(exRel), phrase)))
+            .some((p) => p.includes(phrase.slice(0, 40)))) {
+            problems.push('反向构造判别力缺失（抽掉四属性契约判别句未被判缺）: ' + phrase.slice(0, 40) + '…');
+          }
+        }
+        for (const pointer of DELEGATION_POINTER_RELS) {
+          const stripped = bookTexts.get(subRel).split(pointer).join('（反向构造：抽掉指针）');
+          if (!delegationDisciplineProblems(withBook(subRel, stripped)).some((p) => p.includes('指针不在场'))) {
+            problems.push('反向构造判别力缺失（抽掉条件句指针未被判违规）: ' + pointer);
+          }
+        }
+        for (const phrase of CONTRACT_EVIDENCE_AUTHORITY_PHRASES) {
+          if (!authorityTexts.get(PLATFORM_FACTS_REL).includes(phrase)) continue;
+          if (!delegationDisciplineProblems(withAuthority(PLATFORM_FACTS_REL,
+            strip(authorityTexts.get(PLATFORM_FACTS_REL), phrase))).some((p) => p.includes(phrase.slice(0, 40)))) {
+            problems.push('反向构造判别力缺失（抽掉证据与判级判别句未被判缺）: ' + phrase.slice(0, 40) + '…');
+          }
+          if (!delegationDisciplineProblems(withBook(subRel, bookTexts.get(subRel) + '\n' + phrase + '\n'))
+            .some((p) => p.includes('回流了证据与判级判别句'))) {
+            problems.push('反向构造判别力缺失（证据与判级判别句回流册子未被判违规）: ' + phrase.slice(0, 40) + '…');
+          }
+        }
+        // 旧表述零残留（原文语义与失败消息保持）：无条件 worktree 口号只允许以「已作废」的被反驳
+        // 形态出现；「未获机制明文放行」现状表述一律清零（集成纪律已成文）。配逐条反向构造。
+        const staleResidueProblems = (rel, text) => {
+          const out = [];
           if (text.split('「一律 worktree」的口号已作废').join('').includes('一律 worktree')) {
             out.push(rel + ' 残留无条件 worktree 口号（非被反驳形态）');
           }
@@ -9049,82 +9652,71 @@ const SCENARIOS = [
           return out;
         };
         for (const [rel, text] of bookTexts) {
-          problems.push(...lockProblemsFor(rel, text));
-          // 反向构造（真实文本驱动同一判据）：逐句抽掉 → 同一判据必报该句缺失——判别力内建，
-          // 不依赖人工反向构造（裸子串锚会被别处上下文满足而抽掉不红，此处逐句必红）。
-          for (const [, phrases] of phraseGroups) {
-            for (const phrase of phrases) {
-              if (!text.includes(phrase)) continue; // 缺失已由上方真实判据报告
-              const stripped = text.split(phrase).join('（反向构造：抽掉）');
-              if (!lockProblemsFor(rel, stripped).some((p) => p.includes(phrase.slice(0, 40)))) {
-                problems.push(rel + ' 反向构造判别力缺失（抽掉该句未被判违规）: ' + phrase.slice(0, 40) + '…');
-              }
-            }
-          }
-          // 旧表述锚的反向构造：把被反驳形态还原成无条件口号 / 现状表述 ⇒ 必报。
+          problems.push(...staleResidueProblems(rel, text));
           const revertedSlogan = text.split('「一律 worktree」的口号已作废').join('一律 worktree 是必须的');
-          if (!lockProblemsFor(rel, revertedSlogan).some((p) => p.includes('无条件 worktree 口号'))) {
+          if (!staleResidueProblems(rel, revertedSlogan).some((p) => p.includes('无条件 worktree 口号'))) {
             problems.push(rel + ' 反向构造判别力缺失（还原无条件 worktree 口号未被判违规）');
           }
           const revertedStatus = text + '\n未获机制明文放行。\n';
-          if (!lockProblemsFor(rel, revertedStatus).some((p) => p.includes('未获机制明文放行'))) {
+          if (!staleResidueProblems(rel, revertedStatus).some((p) => p.includes('未获机制明文放行'))) {
             problems.push(rel + ' 反向构造判别力缺失（还原现状表述未被判违规）');
           }
         }
-        // —— CC 行判级升格 + 三平台 cwd 语义对照（真机实测落地；入口册 + reference 平台表两处承载）——
-        // 判级由「未覆盖」升为「证实」后，四处文本各承载落地形态：入口册（用户可见总表 + 已知边界旁的
-        // 三平台 cwd 对照）· reference 平台表 · 两册同锁块（由上方 contractLockPhrases 锚定，逐字一致）。
-        // 锚一律取**段内独有判别句式**（裸子串会被同文件其它上下文满足而恒真——`L-106`）；cwd 对照表
-        // **逐行有锚**（三行各自独立，缺任一行即判残缺）；旧「未覆盖」判级句零残留（升格不彻底即红）。
+        // —— ⑦ CC 行判级升格 + 三平台 cwd 语义对照（真机实测落地）——重定向后判据 = 「权威处
+        // 正文在场 + 各引用册指针在场 + **仅两处承载**」：入口册的 7 条字面量是**能力契约锚**（本
+        // 批明文保留），原 `reference/worktree-notes.md` 的 6 条整句随文件移出技能树而改锚到
+        // `reference/platform-facts.md`（T07 逐字搬入）；两组文本都不得散进其余册（唯一处 = 入口册
+        // + 平台事实册）。锚一律取**段内独有判别句式**（裸子串会被同文件其它上下文满足而恒真——
+        // `L-106`）；cwd 对照表**逐行有锚**（三行各自独立，缺任一行即判残缺）；旧「未覆盖」判级句零残留。
         const entrySkillText = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
-        const worktreeNotesText = fs.readFileSync(path.join(__dirname, '..', 'reference', 'worktree-notes.md'), 'utf8');
-        const identityUpgradeGroups = [
-          ['flow-comet/SKILL.md', entrySkillText, [
-            '| ① 写权限 | 载荷 `agent_id` / `agent_type`——**证实**（真机实测：子代理载荷含二者、主会话载荷不含；与 Codex 同一判据） |',
-            '**三平台 `cwd` 语义对照（真机实测新增的精确事实 · 「身份先于路径」的精确理由）**',
-            '| **Claude Code** | **子代理的工作目录**（`…\\.claude\\worktrees\\<agent-id>`） | **路径判定是正确的** |',
-            '| **Codex** | **恒等于会话根**（子代理在 worktree 写入而 `cwd` 仍是主工程） | **路径判定必错** |',
-            '| **dsh** | 载荷**无** `cwd`（桥接另读会话 header cwd） | 路径判定**不适用** |',
-            '三平台 `cwd` 语义各不相同（正确 / 恒错 / 无）——只有身份判据是三平台同义的',
-            '非 `bypassPermissions` 权限模式**均未覆盖**',
-          ]],
-          ['reference/worktree-notes.md', worktreeNotesText, [
-            '载荷 `agent_id` / `agent_type`——**证实**（真机实测：子代理载荷含二者、主会话载荷不含；与 Codex 同一判据）',
-            '**三平台 `cwd` 语义对照（真机实测新增的精确事实 · 「身份先于路径」的精确理由）**——同为载荷 `cwd`，三平台语义各不相同，逐行如下（三行各自独立，缺一行即口径残缺）',
-            '| **Claude Code** | **子代理的工作目录**（`…\\.claude\\worktrees\\<agent-id>`） | **路径判定是正确的** |',
-            '| **Codex** | **恒等于会话根**（子代理在 worktree 写入而 `cwd` 仍是主工程，见 4.5） | **路径判定必错** |',
-            '| **dsh** | 载荷**无** `cwd`（桥接另读会话 header cwd，见 4.6） | 路径判定**不适用** |',
-            '三平台 `cwd` 语义各不相同（正确 / 恒错 / 无）——只有身份判据是三平台同义的',
-          ]],
-        ];
-        const staleUpgradePhrases = ['该次实测只覆盖 Codex', '真机会话复核待补', 'CC 隔离树的真实落点探针待补'];
-        const upgradeProblemsFor = (rel, text, phrases) => {
-          const out = [];
-          for (const phrase of phrases) {
-            if (!text.includes(phrase)) {
-              out.push(rel + ' 缺「CC 行升格 / 三平台 cwd 对照」判别句式：' + phrase.slice(0, 40) + '…');
-            }
+        const platformFactsText = fs.readFileSync(path.join(__dirname, '..', 'reference', 'platform-facts.md'), 'utf8');
+        const otherBooks = new Map([
+          ['flow-comet-subagent-execute/SKILL.md', bookTexts.get('flow-comet-subagent-execute/SKILL.md')],
+          ['flow-comet-execute/SKILL.md', bookTexts.get('flow-comet-execute/SKILL.md')],
+        ]);
+        for (const [, file] of skillTreeDocFiles()) {
+          const rel = path.relative(path.join(__dirname, '..', '..'), file).replaceAll('\\', '/');
+          if (rel === 'flow-comet/SKILL.md' || rel === 'flow-comet/reference/platform-facts.md') continue;
+          if (otherBooks.has(rel)) continue;
+          otherBooks.set(rel, fs.readFileSync(file, 'utf8'));
+        }
+        const upgradeSources = { entry: entrySkillText, facts: platformFactsText, others: otherBooks };
+        problems.push(...identityUpgradeProblems(upgradeSources));
+        // 反向构造（同一判据驱动）：① 权威处 / 入口册逐句抽掉 ⇒ 必报该句缺失；② 把整句复制进
+        // 其余任一册 ⇒ 必报「回流」（唯一处的方向——原两处锁**要求**多份，抓不到散播）；③ 旧判级
+        // 句还原 ⇒ 必报残留。
+        for (const [side, phrase] of [
+          ...IDENTITY_UPGRADE_ENTRY_PHRASES.map((p) => ['entry', p]),
+          ...IDENTITY_UPGRADE_AUTHORITY_PHRASES.map((p) => ['facts', p]),
+        ]) {
+          const source = side === 'entry' ? entrySkillText : platformFactsText;
+          if (!source.includes(phrase)) continue; // 缺失已由真实判据报告
+          const stripped = identityUpgradeProblems({
+            ...upgradeSources, [side]: source.split(phrase).join('（反向构造：抽掉）'),
+          });
+          if (!stripped.some((p) => p.includes(phrase.slice(0, 40)))) {
+            problems.push('反向构造判别力缺失（抽掉「CC 行升格 / 三平台 cwd 对照」判别句未被判缺）: '
+              + phrase.slice(0, 40) + '…');
           }
-          for (const stale of staleUpgradePhrases) {
-            if (text.includes(stale)) {
-              out.push(rel + ' 残留 CC 行旧「未覆盖」判级表述：' + stale);
-            }
+        }
+        const injectedBookRel = 'flow-comet-subagent-execute/SKILL.md';
+        for (const phrase of [...IDENTITY_UPGRADE_ENTRY_PHRASES, ...IDENTITY_UPGRADE_AUTHORITY_PHRASES]) {
+          const injected = identityUpgradeProblems({
+            ...upgradeSources,
+            others: new Map(otherBooks).set(injectedBookRel, otherBooks.get(injectedBookRel) + '\n' + phrase + '\n'),
+          });
+          if (!injected.some((p) => p.includes('回流'))) {
+            problems.push('反向构造判别力缺失（cwd 对照 / CC 判级句散进其余册未被判违规）: ' + phrase.slice(0, 40) + '…');
           }
-          return out;
-        };
-        for (const [rel, text, phrases] of identityUpgradeGroups) {
-          problems.push(...upgradeProblemsFor(rel, text, phrases));
-          // 反向构造（同一判据驱动）：逐句抽掉 ⇒ 必报该句缺失；旧判级句还原 ⇒ 必报残留。
-          for (const phrase of phrases) {
-            if (!text.includes(phrase)) continue; // 缺失已由上方真实判据报告
-            const stripped = text.split(phrase).join('（反向构造：抽掉）');
-            if (!upgradeProblemsFor(rel, stripped, phrases).some((p) => p.includes(phrase.slice(0, 40)))) {
-              problems.push(rel + ' 反向构造判别力缺失（抽掉该句未被判违规）: ' + phrase.slice(0, 40) + '…');
-            }
-          }
-          const revertedUpgrade = text + '\n该次实测只覆盖 Codex；真机会话复核待补。\n';
-          if (!upgradeProblemsFor(rel, revertedUpgrade, phrases).some((p) => p.includes('旧「未覆盖」判级表述'))) {
-            problems.push(rel + ' 反向构造判别力缺失（还原旧「未覆盖」判级句未被判残留）');
+        }
+        for (const stale of IDENTITY_UPGRADE_STALE_PHRASES) {
+          const revertedUpgrade = identityUpgradeProblems({
+            ...upgradeSources,
+            entry: entrySkillText + '\n' + stale + '。\n',
+            facts: platformFactsText + '\n' + stale + '。\n',
+          });
+          if (!revertedUpgrade.some((p) => p.includes('旧「未覆盖」判级表述'))) {
+            problems.push('反向构造判别力缺失（还原旧「未覆盖」判级句未被判残留）: ' + stale);
           }
         }
         // —— 文本 ↔ 实现一致锚：文本点名的实现常量 / 载荷键名 / 受保护目标必须与引擎同值 ——
@@ -9280,7 +9872,8 @@ const SCENARIOS = [
         const subagentFaceText = fs.readFileSync(
           path.join(__dirname, '..', '..', 'flow-comet-subagent-execute', 'SKILL.md'), 'utf8');
         const entryFaceText = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
-        const worktreeFaceText = fs.readFileSync(path.join(__dirname, '..', 'reference', 'worktree-notes.md'), 'utf8');
+        // 第三面随 `worktree-notes.md` 移出技能树改读 `reference/platform-facts.md`（判别句新落点）。
+        const factsFaceText = fs.readFileSync(path.join(__dirname, '..', 'reference', 'platform-facts.md'), 'utf8');
         const treeScopeSentence = '**建树选择的适用面**';
         const treeBypassSentence = '**以建树绕过边界**不受支持';
         const staleTreeBan = '手工 `git worktree add <任意路径>` **不是受支持路径**';
@@ -9293,7 +9886,7 @@ const SCENARIOS = [
           return text.slice(start, next < 0 ? text.length : next);
         };
         // 一致性判据（单一实现：真实判据与反向构造探针共用本函数）。
-        const publicFaceProblems = ({ mechanism, mechanismZh, changelog, changelogZh, subagentBook, entryBook, worktreeBook }) => {
+        const publicFaceProblems = ({ mechanism, mechanismZh, changelog, changelogZh, subagentBook, entryBook, factsBook }) => {
           const out = [];
           // 公开机制册双语判级：CC 行「证实 + 限定形态」，未覆盖项照旧标注，旧判级句零残留。
           const gradeCases = [
@@ -9327,10 +9920,10 @@ const SCENARIOS = [
               out.push(rel + ' 新增条目与带编号 PR 链接数不一致（条目 ' + entries + ' / 链接 ' + numbered + '）');
             }
           }
-          // 已关闭缺口：两册的陈旧注释须以「已关闭 + 当前判据」形态在场（边界陈述保留）。
+          // 已关闭缺口：**权威处**（`reference/platform-facts.md`）的陈旧注释须以「已关闭 + 当前判据」
+          // 形态在场（边界陈述保留）；两册**不得**再持该证据段正文（随平台事实移走——回流即红）。
           const gapCases = [
-            ['flow-comet-subagent-execute/SKILL.md', subagentBook, ['**fail-open**', '**同判**', '补丁体按行语义解析出']],
-            ['reference/worktree-notes.md', worktreeBook, ['**fail-open**', '**未闭合**', '补丁体按行语义解析出']],
+            [PLATFORM_FACTS_REL, factsBook, ['**fail-open**', '**未闭合**', '补丁体按行语义解析出']],
           ];
           for (const [rel, text, keep] of gapCases) {
             if (text === null) continue;
@@ -9341,11 +9934,18 @@ const SCENARIOS = [
               if (!text.includes(item)) out.push(rel + ' 已关闭缺口的当前判据 / 边界陈述缺失（缺「' + item + '」）');
             }
           }
-          // 建树适用面：三册同写「显式建树受支持 / 以建树绕过边界不受支持」，旧一刀切禁令零残留。
+          for (const [rel, text] of [['flow-comet-subagent-execute/SKILL.md', subagentBook]]) {
+            if (text === null) continue;
+            if (text.includes(gapClosureSentence)) {
+              out.push(rel + ' 回流了已关闭缺口的证据段正文（缺「' + gapClosureSentence + '」段的权威处唯一）');
+            }
+          }
+          // 建树适用面：三处同写「显式建树受支持 / 以建树绕过边界不受支持」（能力契约锚，ADR-016 保留），
+          // 旧一刀切禁令零残留。
           for (const [rel, text] of [
             ['flow-comet/SKILL.md', entryBook],
             ['flow-comet-subagent-execute/SKILL.md', subagentBook],
-            ['reference/worktree-notes.md', worktreeBook],
+            [PLATFORM_FACTS_REL, factsBook],
           ]) {
             if (text === null) continue;
             if (!text.includes(treeScopeSentence)) out.push(rel + ' 未写清建树适用面（缺「' + treeScopeSentence + '」）');
@@ -9366,7 +9966,7 @@ const SCENARIOS = [
           changelogZh: publicDocs.get('CHANGELOG-zh.md'),
           subagentBook: subagentFaceText,
           entryBook: entryFaceText,
-          worktreeBook: worktreeFaceText,
+          factsBook: factsFaceText,
         };
         problems.push(...publicFaceProblems(publicFaceSources));
         // 反向构造（同一判据驱动）：逐项抽掉新表述 / 还原旧表述 ⇒ 必报该问题。
@@ -9384,13 +9984,15 @@ const SCENARIOS = [
             changelogZh: patchText(publicFaceSources.changelogZh, '/pull/145', '/pull/'),
           }, '空 PR 链接'],
           ['已关闭缺口注解抽掉', {
-            subagentBook: publicFaceSources.subagentBook.split(gapClosureSentence).join('REMOVED'),
-            worktreeBook: publicFaceSources.worktreeBook.split(gapClosureSentence).join('REMOVED'),
+            factsBook: publicFaceSources.factsBook.split(gapClosureSentence).join('REMOVED'),
           }, '未把已关闭的守卫缺口写成本文'],
+          ['已关闭缺口证据回流册子', {
+            subagentBook: publicFaceSources.subagentBook + '\n' + gapClosureSentence + '：补丁体按行语义解析出。\n',
+          }, '回流了已关闭缺口的证据段正文'],
           ['建树适用面句抽掉', {
             entryBook: publicFaceSources.entryBook.split(treeScopeSentence).join('REMOVED'),
             subagentBook: publicFaceSources.subagentBook.split(treeScopeSentence).join('REMOVED'),
-            worktreeBook: publicFaceSources.worktreeBook.split(treeScopeSentence).join('REMOVED'),
+            factsBook: publicFaceSources.factsBook.split(treeScopeSentence).join('REMOVED'),
           }, '未写清建树适用面'],
           ['旧一刀切禁令还原', {
             subagentBook: publicFaceSources.subagentBook + '\n' + staleTreeBan + '，不得作为绕过手段。\n',
@@ -14164,52 +14766,75 @@ const SCENARIOS = [
         || !missingError.includes(path.join('flow-comet-execute', 'SKILL.md'))) {
         throw new Error('组件技能缺失时未显式失败并给指引: ' + JSON.stringify(missingError));
       }
-      // 真实三节点文本锁：从本 suite 自身位置推导技能树（不假定权威源布局）。逐份断言：
-      // 段在场 + 6 关键词 + 反 advance 捷径 + 不得把直接 exit 源节点收场当正常路径；同时收集
-      // 段正文（同一区间：首个 ## 修复回路状态机路径 → 下一 ## 或 EOF，标题不计入）供 F-4 互比。
-      const sectionEntries = [];
+      // 真实三节点文本锁（ADR-016 重定向）：原「三册段正文 sha256 完全一致」的逐字锁**作废**，
+      // 改为「三册各含要点句与条件句 + 该段正文**仅一处**（权威 = `reference/fix-loop.md`）+
+      // 原 6 关键词与「禁 `advance` 作正常路径」断言**迁到权威处**」。判据抽成纯函数（单一实现：
+      // 真实判据与反向构造探针共用），逐条自带反向构造。
+      const componentTexts = new Map();
       for (const nodeSkill of componentSkills) {
-        const file = resolveComponentSkillFile(nodeSkill);
-        const text = fs.readFileSync(file, 'utf8');
-        const match = text.match(/(?:^|\r?\n)## 修复回路状态机路径\r?\n([\s\S]*?)(?=\r?\n## |$)/);
-        if (!match) {
-          throw new Error(nodeSkill + ' SKILL.md 缺「## 修复回路状态机路径」段');
-        }
-        const section = match[1];
-        for (const keyword of ['受控归位', 'NODE: execute', '回源节点跑出口', 'entry <源节点>', 'exit <源节点> --apply', '禁止绕过']) {
-          if (!section.includes(keyword)) {
-            throw new Error(nodeSkill + ' 修复回路状态机路径段缺关键词: ' + keyword);
+        componentTexts.set(nodeSkill, fs.readFileSync(resolveComponentSkillFile(nodeSkill), 'utf8'));
+      }
+      const fixLoopAuthorityPath = path.join(__dirname, '..', 'reference', 'fix-loop.md');
+      if (!fs.existsSync(fixLoopAuthorityPath)) {
+        throw new Error(FIX_LOOP_AUTHORITY_REL + ' 不在场（修复回路段的唯一权威处缺失）');
+      }
+      const fixLoopAuthorityText = fs.readFileSync(fixLoopAuthorityPath, 'utf8');
+      const fixLoopSources = { books: componentTexts, authority: fixLoopAuthorityText };
+      const fixLoopProblems = fixLoopStateMachineProblems(fixLoopSources);
+      if (fixLoopProblems.length > 0) {
+        throw new Error('修复回路状态机路径文本锁不符（重定向后判据）: ' + fixLoopProblems.join('; '));
+      }
+      // 反向构造（同一判据驱动，逐条对应重定向后的两侧）：
+      // ① 逐册抽掉任一要点 token ⇒ 必报（三册各自的要点句在场）；
+      // ② 权威处逐条抽掉关键词 ⇒ 必报（原 6 关键词已迁到权威处）；
+      // ③ 把权威段落复制进任一册 ⇒ 必报「第二份正文」（正文唯一——原 sha256 锁**要求**三份一致，
+      //    恰恰抓不到这一侧）；④ 册内还原 `advance` 捷径 / 直接 exit 收场 ⇒ 必报。
+      const stripFixLoopToken = (text, token) => text.split(token).join('（反向构造：抽掉）');
+      for (const [nodeSkill, text] of componentTexts) {
+        for (const [label, tokens] of FIX_LOOP_BOOK_ELEMENT_GROUPS) {
+          const probed = new Map(componentTexts).set(nodeSkill, stripFixLoopToken(text, tokens[0]));
+          if (probed.get(nodeSkill) === text) continue;
+          if (!fixLoopStateMachineProblems({ ...fixLoopSources, books: probed }).some((p) => p.includes(label))) {
+            throw new Error('反向构造判别力缺失（' + nodeSkill + ' 抽掉「' + label + '」要点 token 未被判违规）');
           }
         }
-        if (section.includes('advance')) {
-          throw new Error(nodeSkill + ' 修复回路状态机路径段不得把 advance 作为正常路径');
-        }
-        for (const line of section.split(/\r?\n/)) {
-          if (line.includes('直接') && line.includes('exit') && !/禁止|不得|会被 BLOCKED/.test(line)) {
-            throw new Error(nodeSkill + ' 修复回路状态机路径段不得把直接 exit 源节点收场作为正常路径: ' + line.trim());
-          }
-        }
-        // F-4 段一致性锁：CRLF→LF 归一、不 trim（行尾/空白差异同样算漂移），正文参与三份互比。
-        const normalized = section.replace(/\r\n/g, '\n');
-        sectionEntries.push({ nodeSkill, body: normalized, hash: createHash('sha256').update(normalized, 'utf8').digest('hex') });
       }
-      // F-4：三份段正文必须非空且逐字完全一致（当前无合法 per-node 差异）——任一单文件漂移即
-      // 套件失败；失败信息给出三份 hash 与首处差异位置/上下文（L-064 反向构造证明判别力）。
-      const emptyEntry = sectionEntries.find((entry) => entry.body.trim() === '');
-      if (emptyEntry) {
-        throw new Error('修复回路状态机路径段不得为空: ' + emptyEntry.nodeSkill);
+      for (const keyword of FIX_LOOP_AUTHORITY_KEYWORDS) {
+        if (!fixLoopAuthorityText.includes(keyword)) continue; // 缺失已由真实判据报告
+        if (!fixLoopStateMachineProblems({
+          ...fixLoopSources, authority: stripFixLoopToken(fixLoopAuthorityText, keyword),
+        }).some((p) => p.includes(keyword))) {
+          throw new Error('反向构造判别力缺失（权威处抽掉关键词 «' + keyword + '» 未被判违规）');
+        }
       }
-      const baselineEntry = sectionEntries[0];
-      for (const entry of sectionEntries.slice(1)) {
-        if (entry.body === baselineEntry.body) continue;
-        const limit = Math.min(baselineEntry.body.length, entry.body.length);
-        let diffIndex = 0;
-        while (diffIndex < limit && baselineEntry.body[diffIndex] === entry.body[diffIndex]) diffIndex += 1;
-        const context = baselineEntry.body.slice(Math.max(0, diffIndex - 40), diffIndex + 40);
-        throw new Error('修复回路状态机路径段三份 SKILL 正文不一致（F-4 段一致性锁）：'
-          + baselineEntry.nodeSkill + ' sha256=' + baselineEntry.hash
-          + ' vs ' + entry.nodeSkill + ' sha256=' + entry.hash
-          + '；首处差异 @' + diffIndex + '（基准上下文: ' + JSON.stringify(context) + '）');
+      const fixLoopAuthoritySection = fixLoopStateMachineSectionOf(fixLoopAuthorityText);
+      const copyInto = 'flow-comet-review';
+      const reviewText = componentTexts.get(copyInto).replace(/\r\n/g, '\n');
+      const reviewSection = fixLoopStateMachineSectionOf(reviewText);
+      const duplicated = fixLoopStateMachineProblems({
+        ...fixLoopSources,
+        books: new Map(componentTexts).set(copyInto, reviewText.split(reviewSection).join(fixLoopAuthoritySection)),
+      });
+      if (!duplicated.some((p) => p.includes('第二份正文'))) {
+        throw new Error('反向构造判别力缺失（权威段落整段回流册子未被判「第二份正文」）');
+      }
+      const advanceRel = 'flow-comet-verify';
+      const advanceText = componentTexts.get(advanceRel).replace(/\r\n/g, '\n');
+      const advanceSection = fixLoopStateMachineSectionOf(advanceText);
+      const advanceProbe = new Map(componentTexts).set(advanceRel,
+        advanceText.split(advanceSection).join(advanceSection + '\n用 advance 直接推进即可。\n'));
+      if (!fixLoopStateMachineProblems({ ...fixLoopSources, books: advanceProbe })
+        .some((p) => p.includes('advance'))) {
+        throw new Error('反向构造判别力缺失（册内还原 advance 捷径未被判违规）');
+      }
+      const exitRel = 'flow-comet-review';
+      const exitText = componentTexts.get(exitRel).replace(/\r\n/g, '\n');
+      const exitSection = fixLoopStateMachineSectionOf(exitText);
+      const directExitProbe = new Map(componentTexts).set(exitRel,
+        exitText.split(exitSection).join(exitSection + '\n直接跑 exit review 收场即可。\n'));
+      if (!fixLoopStateMachineProblems({ ...fixLoopSources, books: directExitProbe })
+        .some((p) => p.includes('直接 exit'))) {
+        throw new Error('反向构造判别力缺失（册内还原「直接 exit 收场」未被判违规）');
       }
     },
   },
@@ -16161,11 +16786,14 @@ const SCENARIOS = [
 
   // 286: ui-design 强制等级的文本一致性锚——协议 `design.requiredSkillCalls[flow-comet-ui-design]`
   // 为 `guarded`，**五份**技能文本（ui-design 技能 / 入口 SKILL / design 节点 SKILL / 入口展开册
-  // GUIDANCE / change 阶段 SKILL）不得残留 `advisory` 表述且须同时点名该绑定与 `guarded`。等级只在
-  // 协议里表达一次，文本是它的散文副本：副本漂移即红（旧表述「advisory，不要求声明」正是被本锚拦下
-  // 的形态）。另锚**判据散文口径**：五份文本必须陈述引擎收紧后的**结构形态**（独立行 / 行首 /
-  // 适用性标签的字段值位 + 词形边界 + 命中片段回显），不得残留旧口径（「段内不含 / 未标注字面
-  // 『不适用』」——把判据说成段内任意位置子串，是「一处措辞即关闸」fail-open 的文字版）。
+  // `reference/entry-detail.md` / change 阶段 SKILL）不得残留 `advisory` 表述且须同时点名该绑定与
+  // `guarded`。等级只在协议里表达一次，文本是它的散文副本：副本漂移即红（旧表述「advisory，不要求
+  // 声明」正是被本锚拦下的形态）。
+  // **判据散文口径（ADR-016 重定向）**：原判据要求**五份文本各自**陈述五个结构 token，且反向构造
+  // 断言**每份**文本都含「词形边界」——T05 把口径收归 `flow-comet-ui-design` 册一处权威后，那一侧
+  // 会以两种方式失败（五份各自的 token 缺失 + 反向构造前提不成立）。新判据三件套：**一处权威**
+  //（ui-design 册陈述五个结构 token 且零旧口径）+ **入口册指针在场**（各引用册以条件句指向该册）
+  // + **该口径正文唯一**（块级跨距：任何其它分发文本不得含权威口径段的 ≥120 字符逐字副本）。
   {
     name: '286 ui-design 强制等级一致性锚：协议 guarded + 五处技能文本零 advisory 残留 + 结构判据散文口径',
     run: () => {
@@ -16181,19 +16809,30 @@ const SCENARIOS = [
         'flow-comet-ui-design/SKILL.md': path.join(skillsRoot, 'flow-comet-ui-design', 'SKILL.md'),
         'flow-comet/SKILL.md': path.join(skillsRoot, 'flow-comet', 'SKILL.md'),
         'flow-comet-design/SKILL.md': path.join(skillsRoot, 'flow-comet-design', 'SKILL.md'),
-        'flow-comet/GUIDANCE.md': path.join(skillsRoot, 'flow-comet', 'GUIDANCE.md'),
+        'flow-comet/reference/entry-detail.md': path.join(skillsRoot, 'flow-comet', 'reference', 'entry-detail.md'),
         'flow-comet-change/SKILL.md': path.join(skillsRoot, 'flow-comet-change', 'SKILL.md'),
       };
+      const textByRel = new Map();
       for (const [label, file] of Object.entries(texts)) {
         const text = fs.readFileSync(file, 'utf8');
+        textByRel.set(label, text);
         assertTrue(!/advisory/i.test(text), label + ' 残留 advisory 等级表述（协议为 guarded）');
         assertTrue(text.includes('guarded'), label + ' 未点名 guarded 等级');
         assertTrue(text.includes('flow-comet-ui-design'), label + ' 未点名 flow-comet-ui-design 绑定');
-        const proseProblems = frontendCriterionProseProblems(label, text);
-        assertEqual(proseProblems.length, 0, '判据散文口径未对齐: ' + proseProblems.join(' | '));
       }
-      // 反向构造（合成输入驱动同一判据，证明判据不恒真空过）：① 旧口径句逐条注入任一文本 → 必报；
-      // ② 结构词缺一 → 必报；③ 原地加回旧口径的真实文本副本 → 必报（「把旧口径加回任一文本即红」）。
+      // —— 结构判据散文口径的三件套（重定向后判据；纯函数 + 合成文本面驱动）——
+      const criterionSources = {
+        authorityRel: FRONTEND_CRITERION_AUTHORITY_REL,
+        authorityText: textByRel.get(FRONTEND_CRITERION_AUTHORITY_REL),
+        pointerDocs: new Map(FRONTEND_CRITERION_POINTER_RELS.map(([rel]) => [rel, textByRel.get(rel)])),
+        docs: new Map(skillTreeDocFiles().map(([rel, file]) => [rel, fs.readFileSync(file, 'utf8')])),
+      };
+      const criterionProblems = frontendCriterionRedirectProblems(criterionSources);
+      assertEqual(criterionProblems.length, 0, '判据散文口径未对齐: ' + criterionProblems.join(' | '));
+      // 反向构造（合成输入驱动同一判据，证明它不恒真空过）：
+      // ① 结构词缺一 → 必报；② 旧口径句注入权威处 → 必报「残留旧口径」；
+      // ③ 权威口径段复制进第二册 → 必报「第二份正文」（原「五份各自陈述」的方向已反转）；
+      // ④ 抽掉入口册指针 → 必报「指针不在场」。
       const structuralSample = '前端判据是结构级的：独立行 / 行首 / 适用性标签的字段值位三种形态，'
         + '标记后须成词形边界，命中片段回显。\n';
       assertEqual(frontendCriterionProseProblems('sample', structuralSample).length, 0,
@@ -16204,18 +16843,40 @@ const SCENARIOS = [
         '非前端项目：在段内标注「不适用」两个字面。',
       ];
       for (const stale of staleSamples) {
-        const problems = frontendCriterionProseProblems('sample', structuralSample + stale + '\n');
-        assertTrue(problems.some((problem) => problem.includes('残留旧口径')),
-          '旧口径样本未被判违规: ' + JSON.stringify(stale) + ' → ' + JSON.stringify(problems));
+        const probed = frontendCriterionRedirectProblems({
+          ...criterionSources,
+          authorityText: criterionSources.authorityText + '\n' + stale + '\n',
+        });
+        assertTrue(probed.some((problem) => problem.includes('残留旧口径')),
+          '旧口径样本未被判违规: ' + JSON.stringify(stale) + ' → ' + JSON.stringify(probed));
       }
-      for (const text of Object.values(texts)) {
-        const original = fs.readFileSync(text, 'utf8');
-        const regressed = original.replace('词形边界', '段内未标注「不适用」');
-        assertTrue(regressed !== original, '反向构造前提不成立：' + text + ' 缺「词形边界」字样');
-        assertTrue(frontendCriterionProseProblems('regressed', regressed)
-          .some((problem) => problem.includes('残留旧口径') || problem.includes('未陈述结构形态')),
-          '把旧口径加回真实文本未被判违规: ' + text);
+      for (const group of FRONTEND_CRITERION_STRUCTURE_GROUPS) {
+        // OR 组的反向构造必须抽掉**整组** token（只抽一个会被组内另一形态满足而恒真）。
+        const strippedText = group.reduce((acc, token) => acc.split(token).join('（反向构造：抽掉）'),
+          criterionSources.authorityText);
+        const stripped = frontendCriterionRedirectProblems({
+          ...criterionSources,
+          authorityText: strippedText,
+        });
+        assertTrue(stripped.some((problem) => problem.includes('未陈述结构形态')),
+          '权威处抽掉结构形态组「' + group.join(' / ') + '」未被判违规: ' + JSON.stringify(stripped));
       }
+      const criterionBlock = frontendCriterionAuthorityBlock(criterionSources.authorityText);
+      assertTrue(criterionBlock !== null, '权威口径段切片为空（缺「结构形态」三种任一 → 仍判前端 的整段）');
+      const copied = frontendCriterionRedirectProblems({
+        ...criterionSources,
+        docs: new Map(criterionSources.docs).set('flow-comet-design/SKILL.md',
+          criterionSources.docs.get('flow-comet-design/SKILL.md') + '\n' + criterionBlock + '\n'),
+      });
+      assertTrue(copied.some((problem) => problem.includes('第二份正文')),
+        '权威口径段复制进第二册未被判违规: ' + JSON.stringify(copied));
+      const pointerStripped = frontendCriterionRedirectProblems({
+        ...criterionSources,
+        pointerDocs: new Map([...criterionSources.pointerDocs].map(([rel, text]) => [rel,
+          text.split('唯一权威').join('（反向构造：抽掉指针）')])),
+      });
+      assertTrue(pointerStripped.some((problem) => problem.includes('指针不在场')),
+        '抽掉各册指针未被判违规: ' + JSON.stringify(pointerStripped));
       // 行为口径的散文锚：非前端可见跳过 + 旧 change 渐进（与 285 的行为断言同源）
       const uiDesignSkill = fs.readFileSync(texts['flow-comet-ui-design/SKILL.md'], 'utf8');
       assertTrue(uiDesignSkill.includes('UI-DESIGN: skipped（非前端）'), 'ui-design 技能缺非前端跳过口径');
