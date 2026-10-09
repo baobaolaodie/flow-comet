@@ -76,7 +76,7 @@ flow-kit 9 阶段工作流的 workflow-kernel 实现。保留 flow-kit 的全部
 | "guard 失败了，让用户决定" | 先自动诊断并执行唯一安全修复；无合法动作时才报告停止条件 |
 | "跳过 entry 直接 exit，反正没检查" | 新 change 未 entry 直接 exit → BLOCKED（进入检查不可跳过）；旧 change WARN 渐进 |
 | "SUMMARY 不写，任务先标 done" | 新 change done 任务缺 SUMMARY → BLOCKED（产物完整性强制）；旧 change WARN 渐进 |
-| "subagent-execute 阶段，我直接改源码更快" | 协调者禁令：subagent-execute 阶段主会话禁止写源码（hook 白名单只允许 .specs/，Write/Edit 与 Bash 写命令均物理拦截），必须 worktree 委托子代理 |
+| "subagent-execute 阶段，我直接改源码更快" | 协调者禁令：subagent-execute 阶段主会话禁止写源码（hook 白名单只允许 .specs/，Write/Edit 与 Bash 写命令均物理拦截），必须委托子代理——委托走**身份通道**（三平台同一判据），worktree 只是「① 写权限」的实现之一，不是委托前提 |
 
 ## Workflow Nodes
 
@@ -91,7 +91,7 @@ flow-kit 9 阶段工作流的 workflow-kernel 实现。保留 flow-kit 的全部
 | verify | control | 集成验证 + UAT | flowkit.verify.v1 |
 | archive | control | 归档 + LESSONS | flowkit.archive.v1 |
 
-> **并行任务路由（节点顺序是动态的 · 多趟语义）**：TASK 含依赖已满足的 `parallel="true" status="pending"` 任务时路由到 subagent-execute——每趟委托全部依赖已满足的并行任务；子代理返回后重新判定：仍有可并行 pending 就再次进入 subagent-execute（委托节点可多次往返），存在串行 pending 时回 execute 消化一趟再循环。委托节点的完成 = 不存在依赖已满足的可并行 pending 且无串行残留；并行/串行交错的混排序列合法，唯一前置拦截是依赖环（plan 出口校验并附恢复指引）。全部为串行任务时走 execute，行为不变。`next` 的输出始终是权威——以 `NODE:` 输出为准，不按静态顺序推断。direct 模式下 `parallel="true"` 任务仍必须由 subagent-execute 委托消化；direct 仅覆盖串行任务的主代理直写。
+> **并行任务路由（节点顺序是动态的 · 多趟语义）**：TASK 含依赖已满足的 `parallel="true" status="pending"` 任务时路由到 subagent-execute——每趟委托全部依赖已满足的并行任务；子代理返回后重新判定：仍有可并行 pending 就再次进入 subagent-execute（委托节点可多次往返），存在串行 pending 时回 execute 消化一趟再循环。委托节点的完成 = 不存在依赖已满足的可并行 pending 且无串行残留；并行/串行交错的混排序列合法，唯一前置拦截是依赖环（plan 出口校验并附恢复指引）。全部为串行任务时走 execute，行为不变。`next` 的输出始终是权威——以 `NODE:` 输出为准，不按静态顺序推断。direct 模式下 `parallel="true"` 任务仍必须由 subagent-execute 委托消化；direct 仅覆盖串行任务的主代理直写。**并行委派契约（四属性）与三平台通道**的单一来源 = 主 `SKILL.md` 的「并行委派契约（四属性）· 三平台通道」小节——本文只留指针，不复述平台事实（同一口径两处表达必分叉）。
 
 ## Skill Bindings
 
@@ -195,7 +195,7 @@ All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT
 | `workflow-handoff.mjs` | 子代理交接：request/result/status |
 | `comet-plan.mjs` | 兼容别名入口（内容为 workflow-state 的别名壳） |
 | `comet-check.mjs` | workflow contract 检查 |
-| `comet-hook-guard.mjs` | 文件写入边界守卫（phase 白名单：subagent-execute 阶段只允许 .specs/；隔离委托的工作区 `.claude/worktrees/**` 放行——`Write`/`Edit` 与 `Bash` 写命令两条判定路径同语义） |
+| `comet-hook-guard.mjs` | 文件写入边界守卫（**身份判据先于路径判据**：载荷 `agent_id` / 桥接透传的 `delegationDepth` 在场 ⇒ 子代理语义放行；最小保护集 `.flow-comet/flow-comet-state.json` 与 `reference/workflow-protocol.json` 在身份在场时**仍拦**；无身份走 phase 白名单——subagent-execute 阶段只允许 .specs/，`.claude/worktrees/**` 前缀保留为兼容路径；`Write`/`Edit` 与 `Bash` 写命令两条判定路径同语义，runRoot 外一致拦截） |
 
 ### 机器拥有字段
 

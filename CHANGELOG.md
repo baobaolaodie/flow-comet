@@ -12,6 +12,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added
+
+- **Delegation is decided by the caller's identity, on every supported platform**: the guard reads the agent identity the host puts in the payload and applies subagent semantics before it resolves any path, with no platform-specific branch. On Codex this closes a real gap — an interactive session carries the identity for its native subagents, whereas a headless run does not, and it was the headless finding that had been read as a platform limit. A minimal protected set (the state file and the protocol file) stays blocked for subagents, and a write aimed outside the project root is judged the same way whether it arrives as a file edit or as a shell command. ([#145](https://github.com/baobaolaodie/flow-comet/pull/145))
+- **A delegation is recorded when it is handed off**: the handoff is written into the execution node's evidence, so the run shows what was delegated. The record states that a delegation happened; it does not prove who executed it, and it is documented that way. ([#145](https://github.com/baobaolaodie/flow-comet/pull/145))
+- **Write-conflict checks understand patterns**: a task write-set containing a pattern is matched against the other side's literal paths, and two patterns are treated as overlapping — so a pattern-versus-file overlap can no longer pass the planning exit unnoticed. ([#145](https://github.com/baobaolaodie/flow-comet/pull/145))
+- **The full checks wait for a writer to finish**: while a delegated task has been handed off and not yet reported back, running the full verification is refused with recovery guidance instead of measuring a half-written tree; changes created before the rule get a warning. ([#145](https://github.com/baobaolaodie/flow-comet/pull/145))
+- **Commit and integration discipline are written into the node skills**: subagents commit only their own literal paths, retry when the index is locked and avoid whole-tree commands; the coordinator integrates by merge and falls back to a cherry-pick only with a recorded reason. ([#145](https://github.com/baobaolaodie/flow-comet/pull/145))
+
+### Changed
+
+- **Parallel delegation is defined by four attributes instead of one shape**: the contract is write permission, commit isolation, verification isolation and integration discipline; an isolated worktree implements the first of them and is no longer a precondition for delegating work. Subagents may share the workspace, with the boundary coming from disjoint task write-sets, commit-time discipline and a minimal protected set. ([#145](https://github.com/baobaolaodie/flow-comet/pull/145))
+- **The public documents no longer describe every delegation as isolated**: the platform notes state per platform which delegation channel is verified and which is still uncovered, and name the only remaining difference — who builds a workspace. ([#145](https://github.com/baobaolaodie/flow-comet/pull/145))
+
 ## [1.6.2] - 2026-10-03
 
 A release gathering the work accumulated after 1.6.1: three side commands ship as deterministic scripts that never enter the eight-node flow — architecture-sediment sync, the health inspection and the project-context rescan — with a single authority for timestamps and for the sync-due decision behind them; and the UI-DESIGN binding is enforced rather than advisory, so a frontend change has to produce the design artifact and declare it before the design exit opens. ([#136](https://github.com/baobaolaodie/flow-comet/pull/136))

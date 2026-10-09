@@ -16,6 +16,15 @@
 //      spawn cwd 必须 = 会话项目根（相对 file_path 按 cwd 解析——
 //      cwd≠项目根会 fail-open；不得以设 env 替代 cwd）。协议文件天然在
 //      项目内（skill 包 reference/ 随树复制）——无需 FLOW_COMET_PROTOCOL 机制。
+//   5.5 身份信号透传（「D9 实现位置修订」/ ADR-014 决策 5）：spawn 时注入 env
+//      FLOW_COMET_AGENT_DEPTH = agentDepth(exec) 的数字字符串（0 = 协调者/缺失，
+//      正整数 = 子代理）**并同时注入桥接通道标记 FLOW_COMET_AGENT_DEPTH_SOURCE =
+//      'dsh-bridge'**（2026-10-07 作用域收紧）：守卫要求标记与深度**同时在场**才接受
+//      env 面身份——CC / Codex 生成的 hook 直接调守卫、不经本桥接，即使继承了深度变量
+//      也不得据此走子代理路径。标记由本文件唯一注入，守卫侧按同一字面判据读取。
+//      身份判定与最小保护集的**整条判据由守卫独占实现**；
+//      桥接只搬运信号，不判保护集、不复制白名单逻辑（L-067 单一权威）。
+//      子代理因此不在桥接侧短路：一律过守卫（AC-20 豁免收窄）。
 //   6. 决策映射：exit 0 → next() 放行；exit 2 → deny（BLOCK 消息 + 恢复指引
 //      透传）；其它/异常 → fail-closed deny + WARN。
 //
@@ -23,7 +32,8 @@
 //   - 不注册 fs/write-intent 槽位（single-slot 守卫瀑布无 deny 面，
 //     不 shadow 官方 dsh-fs-observation-policy）；
 //   - 不做 fs/observed 审计（v1 极薄）；
-//   - 不做技能注册/AGENTS.md 注入（安装器职责）。
+//   - 不做技能注册/AGENTS.md 注入（安装器职责）；
+//   - 不做身份 / 保护集判定（守卫是唯一判定实现——本文件只透传 depth 信号）。
 //
 // 纯 ESM、零第三方依赖，仅使用 Node.js 内置模块。dsh 官方插件形态：
 // ESM 模块导出 { name, apply }，ctx 由 dsh 注入。
@@ -98,12 +108,16 @@ export function mapToolInput(canonicalName, args) {
 
 // ---------------------------------------------------------------------------
 // 项目根包含性：Write/Edit 的 file_path 必须解析后仍位于 projectRoot 内。
-// 越界路径若交给 guard 子进程，writeTargetFromHookInput 会因 target=null
-// 跳过白名单判定（fail-open），因此必须在插件侧直接 fail-closed deny。
+// 插件侧对越界路径直接 fail-closed deny 是**前置层**（该调用不进 guard 子进程），
+// 不再是「补 guard fail-open」：guard 的写入目标解析已收敛为单一实现
+// resolveWriteTarget（comet-hook-guard.mjs），越界返回 insideRunRoot=false /
+// targetRel=null，「runRoot 外写入关断」与 Bash 分支同判拦截（ADR-014 决策 6）——
+// 越界写不再静默放行。
 // Windows 8.3 短路径（如 LONGYI~1）与长路径在词法上不同，直接 path.relative
-// 会把项目内短路径误判为越界；因此先 realpath 展开已存在部分再执行包含性
-// 判断。realpathSync.native：Windows 上 fs.realpathSync（libuv）不展开 8.3
-// 短名，native 变体才会把 LONGYI~1 规范化为 LongYinHaHa（Windows 实证）。
+// 会把项目内短路径误判为越界；该词法误判的失败方向现为 fail-closed（误 BLOCK），
+// 不再是静默放行，故仍先 realpath 展开已存在部分再执行包含性判断（消误拦）。
+// realpathSync.native：Windows 上 fs.realpathSync（libuv）不展开 8.3 短名，
+// native 变体才会把 LONGYI~1 规范化为 LongYinHaHa（Windows 实证）。
 // ---------------------------------------------------------------------------
 export function realpathExistingPath(p) {
   try {
@@ -222,12 +236,12 @@ export function sessionCwd(exec) {
   return null;
 }
 
-// 代理身份分派（dsh 子代理=执行者）：dsh 子代理 spawn/fork provider 的
+// 代理身份读取（dsh 子代理=执行者）：dsh 子代理 spawn/fork provider 的
 // childSessionMeta 把 delegationDepth=parentDepth+1 写入子代理 session header
 // （dsh-subagent 源码锚定，rc.6）——协调者=0/缺失，子代理>0。从 exec.agent.session
-// 读取（与 sessionCwd 同级字段），供监听侧区分执行者与协调者——子代理写源码是
-// 执行者职责（对应 CC worktree 子代理物理自由写），协调者走 guard 白名单拦截。
-// 非法值（NaN/负数/字符串/null/缺字段）一律按协调者处理（fail-closed 语义）。
+// 读取（与 sessionCwd 同级字段）。本纯函数只负责**取值与归一化**（非法值一律 0，
+// fail-closed 语义）；身份语义的判定在守卫侧（经 runGuard 以 env 透传），
+// 桥接不自行裁决身份放行（L-067）。
 export function agentDepth(exec) {
   const depth = exec?.agent?.session?.header?.delegationDepth;
   return typeof depth === 'number' && Number.isFinite(depth) && depth > 0 ? depth : 0;
@@ -274,8 +288,10 @@ export function mapGuardExit(code, stderr, stdout) {
 
 // ---------------------------------------------------------------------------
 // 判定核心子进程调用（stdin JSON {tool_name, tool_input} -> exit code）
+// agentDepthValue = agentDepth(exec) 的归一化结果（0 = 协调者/缺失；正整数 = 子代理），
+// 以 env FLOW_COMET_AGENT_DEPTH 透传给守卫——守卫侧与载荷 agent_id 归并为同一判据。
 // ---------------------------------------------------------------------------
-function runGuard(projectRoot, canonicalName, toolInput, signal) {
+function runGuard(projectRoot, canonicalName, toolInput, signal, agentDepthValue) {
   return new Promise((resolve) => {
     const guardPath = resolveGuardPath(projectRoot);
     const child = spawn(
@@ -288,6 +304,17 @@ function runGuard(projectRoot, canonicalName, toolInput, signal) {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
         signal,
+        // 身份信号透传（「D9 实现位置修订」/ ADR-014 决策 5）：depth 以数字字符串注入
+        // 子进程 env，由守卫与载荷 agent_id 归并为**同一判据**（守卫是身份与保护集的
+        // 唯一判定实现——桥接不复制保护集判定、不复制白名单逻辑，L-067）。
+        // 通道标记（2026-10-07 作用域收紧）：与深度**成对**注入，作为「这次调用来自桥接」
+        // 的自证；守卫按精确等值校验——标记不在场时深度变量一律不作数（继承形态不成立）。
+        // 沿用既有 env 注入形态 {...process.env, VAR}（与 evolve.mjs 的协议 env 同形）。
+        env: {
+          ...process.env,
+          FLOW_COMET_AGENT_DEPTH: String(agentDepthValue),
+          FLOW_COMET_AGENT_DEPTH_SOURCE: 'dsh-bridge',
+        },
       },
     );
     let stdout = '';
@@ -396,7 +423,7 @@ export function apply(ctx) {
         return { kind: 'deny', reason };
       }
       // running（activeChange + status running/undefined）：继续走既有第 5 步包含性校验、
-      // 5.5 身份分派、第 6 步 guard 白名单——全部现状不变。
+      // 5.5 身份信号透传、第 6 步 guard 判定（身份与保护集统一由守卫裁决）。
 
       // 5. 包含性校验（Write/Edit）：越界直接 deny，不进 guard。
       if (canonicalName === 'Write' || canonicalName === 'Edit') {
@@ -410,22 +437,22 @@ export function apply(ctx) {
           console.warn(reason);
           return { kind: 'deny', reason };
         }
-        // 通过后传规范化长路径（realpath 展开 8.3 短路径）——guard 的
-        // writeTargetFromHookInput 只做词法 path.relative，短路径会解析出
-        // target=null 从而跳过白名单判定（fail-open）。
+        // 通过后传规范化长路径（realpath 展开 8.3 短路径）——guard 的写入目标解析
+        // resolveWriteTarget 只做词法 path.relative：短路径会被判为根外（targetRel=null），
+        // 失败方向是「runRoot 外写入关断」下的**误 BLOCK**（fail-closed），不再是
+        // target=null 跳过白名单判定的静默放行。
         const normalizedTarget = realpathExistingPath(path.resolve(projectRoot, mapped.target));
         mapped.target = normalizedTarget;
         mapped.input.file_path = normalizedTarget;
       }
 
-      // 5.5 代理身份分派：delegationDepth > 0 = 子代理（执行者）——其写源码是
-      //     执行者职责（对应 CC worktree 子代理物理隔离），跳过 guard 白名单判定直接
-      //     放行；协调者（0/缺失）走原 guard 白名单（协调者禁令物理拦截保留）。
-      //     形状 fail-closed 与项目根包含性校验在上方已对子代理同样执行——子代理也不得
-      //     越界写项目根外/参数形状不符（fail-closed 纪律不因身份放宽）。
-      if (agentDepth(exec) > 0) {
-        return next();
-      }
+      // 5.5 代理身份信号：agentDepth(exec) > 0 = 子代理（执行者）。桥接**不再短路**——
+      //     身份信号随守卫调用透传（env FLOW_COMET_AGENT_DEPTH + 通道标记
+      //     FLOW_COMET_AGENT_DEPTH_SOURCE），身份判定与最小保护集
+      //     拦截的整条判据由守卫独占实现（「D9 实现位置修订」/ ADR-014 决策 5：保护集
+      //     判据不得出现第二份实现，L-067）。既有纪律保持：形状 fail-closed 与项目根
+      //     包含性校验在上方已执行——子代理也不得越界写项目根外 / 参数形状不符。
+      const agentDepthValue = agentDepth(exec);
 
       // 6. 项目本地 guard 调用。guard 文件缺失（安装未完成/被删除）-> WARN +
       //    next() 放行（不阻断非 flow-comet 语义）；spawn 异常（ENOENT 等）->
@@ -439,7 +466,13 @@ export function apply(ctx) {
         return next();
       }
 
-      const decision = await runGuard(projectRoot, canonicalName, mapped.input, exec?.signal);
+      const decision = await runGuard(
+        projectRoot,
+        canonicalName,
+        mapped.input,
+        exec?.signal,
+        agentDepthValue,
+      );
       if (decision.kind === 'allow') {
         return next();
       }

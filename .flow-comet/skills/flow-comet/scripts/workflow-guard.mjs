@@ -2,7 +2,7 @@
   import { constants as fsConstants, promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, RUNTIME_STATE_PATH, LEGACY_RUNTIME_STATE_PATH, resolveProtocolPathWithState, hasProtocolCliArg } from './state-schema.mjs';
+import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor, RUNTIME_STATE_PATH, LEGACY_RUNTIME_STATE_PATH, resolveProtocolPathWithState, hasProtocolCliArg, handoffRequestWithdrawn } from './state-schema.mjs';
 import { readProtocolFile, validateProtocolSchema, NODE_PROTOCOL_FILES, workflowPathInside, inspectWorkflowProtectedPath, readWorkflowProtectedFile, workflowFileObjectIdentity, workflowSameFileObject, workflowSameFileStat } from './protocol-utils.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from './task-parsing.mjs';
 import { resolveNextNode, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, EXECUTE_FAMILY_NODE_IDS, TASK_SET_SIGNATURE_ALGO, taskSetSignature, parseTaskSetSignature, sameTaskSetSignature, taskSetSignatureVersionSkew, classifyFixReturnCause, normalizeHeading, FIX_SECTION_TITLE_FALLBACK, analyzeDependencyGraph, findParallelWriteConflicts } from './route-node.mjs';
@@ -643,6 +643,26 @@ function hasNonEmptyHandoffResult(evidence) {
     !Array.isArray(handoff) &&
     Object.keys(handoff).length > 0
   );
+}
+
+// AC-8 在飞委托判定（验证隔离「同一时刻只有一个写者」）——handoffRequests 中存在条目而
+// handoffResult 无对应记录 = 写者未收工的既有可判形态。判据单处求值（出口校验唯一消费方）。
+// 三态收敛：无 evidence['subagent-execute'] / 无 handoffRequests 条目 ⇒ 返回空数组（调用方零输出，
+// 不制造噪音）；全部有对应 result ⇒ 同样空数组（放行）。锚定既有字段，零新增 state 顶层字段。
+// 已撤回的 request 不构成在飞委托（2026-10-07 补撤回通道）：零提交复验失败 / 写边界被拒之后
+// request 可能留在「有 request 无 result」态而命令面无从撤回——`workflow-handoff.mjs withdraw`
+// 在原地落留痕（withdrawnAt + withdrawnBy，历史不删），守卫据此放行出口。判据复用
+// state-schema.mjs 的单一实现（撤回留痕两字段齐备才算撤回），本文件不另写一份。
+function inFlightHandoffRequests(evidence) {
+  const requests = evidence && typeof evidence === 'object' ? evidence.handoffRequests : null;
+  if (!requests || typeof requests !== 'object' || Array.isArray(requests)) return [];
+  const results = evidence.handoffResult && typeof evidence.handoffResult === 'object' && !Array.isArray(evidence.handoffResult)
+    ? evidence.handoffResult
+    : {};
+  return Object.keys(requests).filter((taskId) => {
+    if (handoffRequestWithdrawn(requests[taskId])) return false;
+    return results[taskId] === undefined || results[taskId] === null;
+  });
 }
 
 function schemaMap(protocol) {
@@ -1642,7 +1662,11 @@ async function main() {
         // 波次散文一致性检测: 波次散文一致性检测（WARN 渐进）——## 波次划分 的 Wave 行任务带 [P] 标记
         // （并行语义）但 XML 任务无 parallel="true" → WARN（散文与机器路由依据不一致,以任务
         // 标记为准）。容错:无并行语义的 Wave 行不参与比对;解析不到波次段跳过（不误报）。
-        const waveSection = content.match(/##\s*波次划分\s*\n([\s\S]*?)(?=\n##\s|\n---|\Z)/);
+        // 段尾判定 = 下一个段标题（\n## ）或分隔线（\n---）或**输入末尾**。JS 正则没有 \Z：
+        // \Z 是「未知转义 ⇒ 字面字符 Z」，惰性匹配一遇段内大写 Z 就提前收尾，段被静默截断
+        // （含 ZERO- 一类机检标记的 TASK 会整段漏检）。串尾一律用 (?![\s\S]) 真断言——
+        // 它只是「此处之后已无任何字符」，不受行首/行尾标志影响，与「多行模式下的 $」语义无歧义。
+        const waveSection = content.match(/##\s*波次划分\s*\n([\s\S]*?)(?=\n##\s|\n---|(?![\s\S]))/);
         if (waveSection) {
           const proseParallelIds = [];
           for (const line of waveSection[1].split('\n')) {
@@ -1804,6 +1828,26 @@ async function main() {
       }
     }
   }
+  // W1-E: 验证隔离「同一时刻只有一个写者」出口校验（AC-8 · 判级决策见 ADR-014）——读
+  // state.evidence['subagent-execute'].handoffRequests：存在条目且**至少一个无对应 handoffResult**
+  // ⇒ 在飞委托（写者未收工，跑全量判据会被未提交中间态污染）：新 change BLOCKED（含恢复指引
+  // 「待写入者收工后重跑 / 已作废则撤回」）/ 旧 change WARN 渐进；全部有对应 result ⇒ 放行；
+  // 已撤回（withdrawnAt + withdrawnBy 齐备）的 request 不构成在飞委托 ⇒ 放行；无该证据对象 ⇒ 零输出。
+  // 落点 = 出口校验流（与其余 violations / WARN 同风格，不新增独立命令面）；判据经
+  // inFlightHandoffRequests 单处求值（与 W1-D 的 result 侧契约校验正交，不重复判定）。
+  if (EXECUTE_FAMILY_NODE_IDS.has(node.id)) {
+    const inFlight = inFlightHandoffRequests(state.evidence?.['subagent-execute']);
+    if (inFlight.length > 0) {
+      const inFlightDetail = '存在在飞委托（handoffRequests 有 request 无对应 handoffResult）: '
+        + inFlight.join(', ') + '——验证隔离要求同一时刻只有一个写者（写者未收工）';
+      if (isNewChange(state)) {
+        console.error('BLOCKED: ' + inFlightDetail);
+        console.error('恢复: 待写入者收工后重跑——子代理回传后用 workflow-handoff.mjs result <task-id> <Return Contract> 记录结果再重试 exit；若该委托已作废（零提交复验失败 / 写边界被拒后遗弃），用 workflow-handoff.mjs withdraw <task-id> --by <来源> [--reason <原因>] 撤回后再重试 exit（撤回留痕 withdrawnAt/withdrawnBy，已撤回 = 终态，历史不删）');
+        process.exit(1);
+      }
+      console.error('WARN: ' + inFlightDetail + '（旧 change 渐进不阻断；待写入者收工后重跑全量判据；已作废的委托可用 workflow-handoff.mjs withdraw <task-id> --by <来源> 撤回）');
+    }
+  }
   // W1-B: execute / subagent-execute 出口校验每份 SUMMARY 含三个必填段 + 6 维自查非空 + 自检方法
   if (EXECUTE_FAMILY_NODE_IDS.has(node.id)) {
     const changeDir = path.join(runRoot, '.specs', state.activeChange ?? '');
@@ -1814,7 +1858,9 @@ async function main() {
       try {
         const content = await fs.readFile(path.join(changeDir, f), 'utf8');
         // 段终止 lookahead 用 \n##\s（而非 \n##）：###/#### 级子标题（如 "### 🟢 R1"）是段内内容，不是段结束
-        const sixDim = content.match(/##\s*6\s*维自查[\s\S]*?(?=\n##\s|\n---|\Z)/i);
+        // 段尾同样 = 段标题 / 分隔线 / 输入末尾；末尾一律写 (?![\s\S])，不得写 \Z
+        // （JS 无 \Z——它是「字面字符 Z」，且本正则带 i 标志，连小写 z 都会命中，段被静默截断）
+        const sixDim = content.match(/##\s*6\s*维自查[\s\S]*?(?=\n##\s|\n---|(?![\s\S]))/i);
         // C1: 6 维自查段非空——去掉所有标题行后剩余实质内容 ≥ 10 字符
         // 按行过滤标题（/^\s*#/）比正则替换稳健：任何标题格式（emoji 🟢/中英文/数字）都不计入内容
         const dimBody = sixDim ? sixDim[0].split('\n').filter(l => !/^\s*#/.test(l)).join('').trim() : '';

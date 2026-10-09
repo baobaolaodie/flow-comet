@@ -17,7 +17,7 @@ The behaviour layer: what the engine guarantees, how a node's exit is validated,
 | ② Guard validation | Node entry and exit are validated against evidence: required artifacts and sections, recorded node evidence, the skill-load declaration, the task-set signature, summaries for completed tasks, review dispositions, and the test commands that `verify` actually runs | the guard's `entry` / `exit` |
 | ③ State and schema validation | Every state write is validated against the schema (field types, nested records), and unwritable shapes are rejected rather than silently normalized | the state machine's write path |
 
-The same discipline gives the coordinator an enforced boundary: in the default execution mode the coordinating session may not carry out implementation tasks itself (the engine reports the takeover). Implementation is delegated to isolated subagents that must return a verifiable contract — a commit, the real output of their verification, and the checks they declared.
+The same discipline gives the coordinator an enforced boundary: in the default execution mode the coordinating session may not carry out implementation tasks itself (the engine reports the takeover). Implementation is delegated to subagents that must return a verifiable contract — a commit, the real output of their verification, and the checks they declared. What makes parallel delegation safe is a contract of four attributes — write permission, commit isolation, verification isolation and integration discipline; an isolated worktree implements the first of them, but it is one option rather than the contract itself, and a shared workspace is a supported shape.
 
 **Hook blocking semantics and their limits.** The hook blocks a write by exiting with status 2 and printing the reason; in an interactive platform session that is a refusal. Two platform-level preconditions are worth knowing, because when they are missing the hook *cannot* refuse even though the mechanism is intact:
 
@@ -43,7 +43,19 @@ Because the checks are structural, a payload that looks like a contract but cann
 
 ## Execution model
 
-Work runs as a change: artifacts in `.specs/<change-id>/`, a git branch per change when the project is a git repository (`change/<change-id>`), and one node at a time. Implementation is delegated to subagents that work in isolation and return a contract; the coordinator may not write source in the default mode. A change that needs repair after review returns through the execution node's lifecycle rather than being patched in place, so the same exit gates apply to the repair as to the original work.
+Work runs as a change: artifacts in `.specs/<change-id>/`, a git branch per change when the project is a git repository (`change/<change-id>`), and one node at a time. Implementation is delegated to subagents under that four-attribute contract, and they return the contract's evidence; the coordinator may not write source in the default mode. A change that needs repair after review returns through the execution node's lifecycle rather than being patched in place, so the same exit gates apply to the repair as to the original work.
+
+### Parallel delegation
+
+The guard decides by identity, not by path: when the host marks the caller as a subagent, subagent semantics apply before any path is resolved, and the write whitelist that binds the coordinating session no longer decides the outcome. A minimal protected set — the state file and the protocol file — stays blocked for subagents either way, because editing those by hand is what breaks the state.
+
+| Platform | Delegation | Workspace (who builds the tree) | Write-permission channel |
+|---|---|---|---|
+| Claude Code | the `Agent` tool | the harness may build an isolated tree, or the subagent shares the workspace | payload `agent_id` / `agent_type` — **verified**, in a stated shape only (Windows + Claude Code v2.1.177 + `permission_mode = bypassPermissions` + a one-off repository carrier); the value domain of `agent_type`, nested delegations and non-Windows environments remain uncovered |
+| dsh | the platform's in-process subagent | none — the subagent shares the workspace | identity depth passed through the bridge together with its channel marker — **verified** |
+| Codex | native multi-agent sessions | shared workspace, or a tree the coordinator builds explicitly | payload `agent_id` — **verified** in an interactive session |
+
+Coverage is stated per row and stays that way: an uncovered item is not written as supported. The only platform difference left is who builds the tree. On a shared workspace the boundary comes from disjoint task write-sets, commit-time discipline and the minimal protected set.
 
 ## Recovery
 

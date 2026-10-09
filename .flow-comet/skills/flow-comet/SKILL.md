@@ -72,7 +72,7 @@ description: "Use when the user wants the flow-comet managed workflow for flow-k
 | "guard 失败了，让用户决定" | 先自动诊断并执行唯一安全修复；无合法动作时才报告停止条件 |
 | "跳过 entry 直接 exit,反正没检查" | 新 change 未 entry 直接 exit → BLOCKED(进入检查不可跳过);旧 change WARN 渐进 |
 | "SUMMARY 不写,任务先标 done" | 新 change done 任务缺 SUMMARY → BLOCKED(产物完整性强制);旧 change WARN 渐进 |
-| "subagent-execute 阶段，我直接改源码更快" | 协调者禁令：subagent-execute 阶段主会话禁止写源码（hook 白名单只允许 .specs/，Write/Edit 与 Bash 写命令均物理拦截），必须 worktree 委托子代理 |
+| "subagent-execute 阶段，我直接改源码更快" | 协调者禁令：subagent-execute 阶段主会话禁止写源码（hook 白名单只允许 .specs/，Write/Edit 与 Bash 写命令均物理拦截），必须委托子代理——委托走**身份通道**（三平台同一判据），worktree 只是「① 写权限」的实现之一，不是委托前提 |
 | "用户要健康检查 / 同步架构，我给他 init 一个新 change" | 三条侧命令（evolve / health / context-scan）**不进 8 节点流程**——它们不路由、不 entry/exit、不写节点证据；按下方「侧命令」小节的命令面直接执行即可 |
 
 ## 侧命令（横向命令 · 不进 8 节点流程）
@@ -116,6 +116,43 @@ node .claude/skills/flow-comet/scripts/context-scan.mjs [--root <项目根>] [--
 | archive | control | 归档 + LESSONS | flowkit.archive.v1 |
 
 > **并行任务路由（节点顺序是动态的 · 多趟语义）**：TASK 含依赖已满足的 `parallel="true" status="pending"` 任务时路由到 subagent-execute——每趟委托全部依赖已满足的并行任务；子代理返回后重新判定：仍有可并行 pending 就再次进入 subagent-execute（委托节点可多次往返），存在串行 pending 时回 execute 消化一趟再循环。委托节点的完成 = 不存在依赖已满足的可并行 pending 且无串行残留；并行/串行交错的混排序列合法，唯一前置拦截是依赖环（plan 出口校验并附恢复指引）。全部为串行任务时走 execute，行为不变。`next` 的输出始终是权威——以 `NODE:` 输出为准，不按静态顺序推断。
+
+### 并行委派契约（四属性）· 三平台通道
+
+并行委派的契约对象是**并行安全四属性**——worktree（隔离工作区）只是「① 写权限」的一种打包实现，**不是契约本身**，也不是并行委托的前提：
+
+| 属性 | 含义（本节为口径单一来源） |
+|------|---------------------------|
+| ① 写权限 | 子代理写入目标的**放行依据**（含 gitignored 面）：身份在场 ⇒ 子代理语义放行；**最小保护集**（`.flow-comet/flow-comet-state.json`、`reference/workflow-protocol.json`）在身份在场时**仍拦** |
+| ② 提交隔离 | 各写者只提交**自己的字面路径**（`git add -- <路径>` / `git commit -- <同一路径>`；多个写者共享同一工作区时禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`） |
+| ③ 验证隔离 | **同一时刻只有一个写者**（有 request 无对应 result 的在飞委托 ⇒ 不跑全量判据，待写入者收工后重跑；已作废的委托经 `workflow-handoff.mjs withdraw <task-id> --by <来源>` 撤回，留痕 `withdrawnAt` + `withdrawnBy`，已撤回 = 终态、历史不删） |
+| ④ 集成纪律 | 协调者按确定性规则**显式、可审计**地集成（`merge --no-ff` 优先、冲突难解时降级 cherry-pick 并记因；机械冲突与语义冲突分别处置） |
+
+**三平台通道（属性 × 平台）**——判级只取三态（**证实 / 推翻 / 未覆盖**）；**未覆盖 ≠ 已验证**，不得写成已支持：
+
+| 属性 | Claude Code | Codex | dsh |
+|------|-------------|-------|-----|
+| ① 写权限 | 载荷 `agent_id` / `agent_type`——**证实**（真机实测：子代理载荷含二者、主会话载荷不含；与 Codex 同一判据） | 载荷 `agent_id` + `agent_type`——**证实**（实测：子代理载荷 12 键含二者、主线程 10 键不含）；守卫读 `agent_id`，与 CC 同一判据 | 桥接透传 `delegationDepth` **+ 通道标记**（`FLOW_COMET_AGENT_DEPTH_SOURCE`，守卫要求两者同时在场才接受 env 面身份——继承来的深度变量不作数）——**证实**（0.1.7-rc.2 全接缝重认证；本批收窄为「最小保护集除外」） |
+| ② 提交隔离 | pathspec 纪律（多写者共享同一工作区形态） | 同左 | 同左 |
+| ③ 验证隔离 | `subagent-execute` 出口锚：有 request 无 result（新 change BLOCKED / 旧 change WARN 渐进） | 同左 | 同左 |
+| ④ 集成纪律 | `merge --no-ff` 优先；降级 cherry-pick 必记因 | 同左 | 同左 |
+| **谁建树**（三平台唯一差异） | 可选：harness `isolation: "worktree"` 建独立树，或共享工作区直写 | 协调者**显式** `git worktree add` 并在委派 prompt 指定 `workdir`（原生子代理无自动建树；**证实**：子代理可被指向独立目录并落盘），或共享工作区直写；**建树选择的适用面**：协调者显式 `git worktree add <路径>`（手工建树）**是受支持的建树选择**——在委派 prompt 里指定 `workdir`，写入由身份通道放行（原生子代理无自动建树）；**以建树绕过边界**不受支持——用独立树规避协调者禁令 / 最小保护集 / `write_files` 互斥与提交时点纪律 / handoff 与 Return Contract 证据，或把 worktree 当作四属性的替代品。 | **不建树**：进程内子代理、同一工作区运行——**无需隔离区 ≠ 无需边界**（`write_files` 互斥 + 提交时点 + 最小保护集仍构成边界） |
+
+**交互式 Codex 实测口径（口径以下文陈述为准；该次取证为**一次性工件**、已按仓库纪律清理——**分发产物不得把结论挂靠一次性路径**）**：交互式 Codex 会话触发 `PreToolUse`（启动有 hook 信任提示）· 原生子代理工具调用触发 · `spawn_agent` / `wait_agent` / `close_agent` 类调用各自触发 · 子代理可被指向独立 worktree · 全局 `~/.codex/hooks.json` 与项目级 hook **并存生效**（合并规则未覆盖）。
+
+**已知边界（不得写成机械保证）**：① Codex 载荷 `cwd` = 会话根，**与实际工作目录无关**（实测证实）⇒ 路径判定在 Codex 上必错，故判定序为**身份先于路径**；② 身份判据是**声明式信任边界**——守卫读到的 `agent_id` 来自宿主载荷，本机制**不声称能证明**其真实来源；③ 该次实测结论只覆盖「Windows + 交互式 Codex TUI + 该版本」形态；CC 侧身份判据的真机实测条件同样是**限定形态**——**Windows + CC v2.1.177 + `permission_mode = bypassPermissions` + 一次性仓库载体**。`agent_type` 取值域、嵌套委派载荷、非 Windows 环境、非 `bypassPermissions` 权限模式**均未覆盖**（未覆盖 ≠ 已验证，不得写成已支持）。
+
+**三平台 `cwd` 语义对照（真机实测新增的精确事实 · 「身份先于路径」的精确理由）**——同为载荷 `cwd`，三平台语义各不相同；下表**三行各自独立**，缺一行即口径残缺：
+
+| 平台 | 载荷 `cwd` 的实际语义 | 对路径判定的影响 |
+|------|----------------------|------------------|
+| **Claude Code** | **子代理的工作目录**（`…\.claude\worktrees\<agent-id>`） | **路径判定是正确的** |
+| **Codex** | **恒等于会话根**（子代理在 worktree 写入而 `cwd` 仍是主工程） | **路径判定必错** |
+| **dsh** | 载荷**无** `cwd`（桥接另读会话 header cwd） | 路径判定**不适用** |
+
+> ⇒ **不是「路径判定普遍不可靠」，而是三平台 `cwd` 语义各不相同（正确 / 恒错 / 无）——只有身份判据是三平台同义的**。该对照只解释**为什么必须身份优先**，**不构成**「可以改走路径判定」的依据：契约仍走**身份判据**（三条通道同义）。
+
+**四属性的机制落点**：① 由守卫的身份短路 + 最小保护集承载（`comet-hook-guard.mjs`）· ② / ④ 见 `flow-comet-subagent-execute` 与 `flow-comet-execute` 两册的提交 / 集成纪律 · ③ 由 `subagent-execute` 出口校验承载。
 
 ## Skill Bindings
 
@@ -238,7 +275,7 @@ All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT
 | `workflow-handoff.mjs` | 子代理交接：request/result/status |
 | `comet-plan.mjs` | 兼容别名入口（内容为 workflow-state 的别名壳） |
 | `comet-check.mjs` | workflow contract 检查 |
-| `comet-hook-guard.mjs` | 文件写入边界守卫（phase 白名单：subagent-execute 阶段只允许 .specs/；隔离委托的工作区 `.claude/worktrees/**` 放行——`Write`/`Edit` 与 `Bash` 写命令两条判定路径同语义） |
+| `comet-hook-guard.mjs` | 文件写入边界守卫（**身份判据先于路径判据**：载荷 `agent_id` / 桥接透传的 `delegationDepth` 在场 ⇒ 子代理语义放行；最小保护集 `.flow-comet/flow-comet-state.json` 与 `reference/workflow-protocol.json` 在身份在场时**仍拦**；无身份走 phase 白名单——subagent-execute 阶段只允许 .specs/，`.claude/worktrees/**` 前缀保留为兼容路径；`Write`/`Edit` 与 `Bash` 写命令两条判定路径同语义，runRoot 外一致拦截） |
 
 ### 机器拥有字段
 
