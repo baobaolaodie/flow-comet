@@ -760,12 +760,7 @@ function assertInstallerUpgradePathCleanup(scratch) {
   fs.mkdirSync(target, { recursive: true });
   seedForeignFlowKit(target); // 预置同名非上游目录：flow-kit 走「已跳过」路径，零网络接触
   const skillsRoot = path.join(target, '.claude', 'skills');
-  const runInstall = () => {
-    const res = spawnSync(process.execPath, [installer, '--target', target, '--platform', 'claude-code'], {
-      cwd: pkgCtx.root, encoding: 'utf8', timeout: 120000,
-    });
-    return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
-  };
+  const runInstall = () => runInstallerOnce(installer, target);
   const mustNotExist = (rel, label) => {
     const p = path.join(skillsRoot, rel);
     if (fs.existsSync(p)) throw new Error('升级重装后权威源已不存在的生成物仍残留（' + label + '）: ' + p);
@@ -831,6 +826,124 @@ function assertInstallerUpgradePathCleanup(scratch) {
     throw new Error('幂等失配：第二次重装仍报告清理动作:\n' + again.output);
   }
   console.log('  升级路径清理: 残留 4 项消失（文件 / 嵌套文件 / 目录树 / 空目录）+ 6 条反向探针保留 + 输出可核对 + 幂等 ✓');
+}
+
+// 安装器单次真实运行（两处安装器分发面断言共用同一命令形态——同一知识只有一份实现）
+function runInstallerOnce(script, target) {
+  const res = spawnSync(process.execPath, [script, '--target', target, '--platform', 'claude-code'], {
+    cwd: target, encoding: 'utf8', timeout: 120000,
+  });
+  return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+}
+
+// 把 linkPath 置为指向 targetDir 的链接（夹具构造与清理共用）：递归删除会跟随链接目标，
+// 故先按链接自身解链，再删可能残留的普通目录。
+function replaceWithLink(linkPath, targetDir) {
+  try {
+    if (fs.lstatSync(linkPath).isSymbolicLink()) fs.unlinkSync(linkPath);
+  } catch { /* 不在场——无需解链 */ }
+  fs.rmSync(linkPath, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+  fs.symlinkSync(targetDir, linkPath, 'junction');
+}
+
+// 镜像清理的**根级** fail-closed 断言（同上一条属同一分发面项）——判据 = 真实安装器命令序列 + 文件系统事实：
+//   根以下的条目层检查拦不住「镜像根自身是链接」：readdir 会跟随进链接目标，清理动作落在**项目之外**，
+//   而播报打印的仍是项目内的表象路径（真实落点不可见）。两条判据各需一个变体驱动，缺任一变体则
+//   对应那条判据整体缺席也不会有红灯：
+//     变体 A「镜像根自身是指向项目外目录的链接」 ⇒ 根级链接判据（不跟随）；
+//     变体 B「父级目录是链接、镜像根自身是普通目录」 ⇒ 真实路径包含性判据（词法路径仍在项目内，
+//       只有解析真实路径才能证否；此变体下 A 判据必然不命中，故它是包含性判据的独占探针）。
+//   断言（两变体同）：链接目标内的项目外文件**必不消失** + 输出含逐条保留原因 + 重复运行零删除项。
+//   反向构造见 assertMirrorRootReverseConstruction（同一判据驱动，证明断言不恒真空过）。
+function assertMirrorRootLinkFailClosed(scratch, pkgCtx) {
+  if (pkgCtx.kind === 'copy') {
+    console.log('  不适用（安装副本侧：' + pkgCtx.reason + '）——镜像清理根级判据的探针仅权威源侧可判，本组计通过');
+    return;
+  }
+  const installer = path.join(pkgCtx.root, 'scripts', 'prepare-env.mjs');
+  // 变体 A：镜像根自身 = 指向项目外目录的链接
+  const targetA = path.join(scratch, 'mirror-root-link-self');
+  const outsideA = path.join(scratch, 'mirror-root-link-self-outside');
+  seedForeignFlowKit(targetA);
+  writeFile(outsideA, 'EXTERNAL-NOTE.md', 'out-of-tree user content\n');
+  writeFile(outsideA, path.posix.join('nested', 'DEEP-NOTE.md'), 'out-of-tree user content\n');
+  replaceWithLink(path.join(targetA, '.claude', 'skills', 'flow-comet'), outsideA);
+  // 变体 B：父级目录 = 链接（镜像根自身是目标内的普通目录）
+  const targetB = path.join(scratch, 'mirror-root-link-ancestor');
+  const outsideB = path.join(scratch, 'mirror-root-link-ancestor-outside');
+  seedForeignFlowKit(targetB);
+  writeFile(outsideB, path.posix.join('flow-comet', 'EXTERNAL-NOTE.md'), 'out-of-tree user content\n');
+  replaceWithLink(path.join(targetB, '.claude', 'skills'), outsideB);
+  const mirrorB = path.join(targetB, '.claude', 'skills', 'flow-comet');
+  if (!fs.existsSync(mirrorB) || fs.lstatSync(mirrorB).isSymbolicLink()) {
+    throw new Error('变体 B 前提失效：镜像根自身不是普通目录（应只有父级是链接）: ' + mirrorB);
+  }
+  const variants = [
+    { label: '镜像根自身为链接', target: targetA, outsideFile: path.join(outsideA, 'EXTERNAL-NOTE.md'), reasonPattern: /镜像根是符号链接\/junction/ },
+    { label: '镜像根真实路径越界', target: targetB, outsideFile: path.join(outsideB, 'flow-comet', 'EXTERNAL-NOTE.md'), reasonPattern: /越出目标项目根/ },
+  ];
+  for (const v of variants) assertLinkTargetPreserved(installer, v);
+  assertMirrorRootReverseConstruction(scratch, pkgCtx, installer, variants);
+  console.log('  镜像清理根级判据: 根自身为链接 / 真实路径越界 两变体下项目外文件保全 + 保留原因可见 + 幂等；'
+    + '反向构造（判据改恒真）两变体必被越界删除 ✓');
+}
+
+// 「链接目标内的项目外文件必不消失」断言（两变体同形）：项目外文件仍在 + 输出含逐条保留原因 +
+// 原因指明命中的判据 + 重复运行零删除项且文件仍在（保留是**可见的决定**，不是静默跳过）。
+function assertLinkTargetPreserved(installer, { label, target, outsideFile, reasonPattern }) {
+  const first = runInstallerOnce(installer, target);
+  assertExit(first, 0);
+  if (!fs.existsSync(outsideFile)) {
+    throw new Error(label + '：镜像清理越界删除了项目之外的文件（真实落点 ' + outsideFile + '）\n输出:\n' + first.output);
+  }
+  if (!first.output.includes('镜像清理保留')) {
+    throw new Error(label + '：输出未逐条打印保留原因——fail-closed 保留必须是可见的决定\n输出:\n' + first.output);
+  }
+  if (!reasonPattern.test(first.output)) {
+    throw new Error(label + '：保留原因未指明命中判据（缺 ' + reasonPattern + '）\n输出:\n' + first.output);
+  }
+  const second = runInstallerOnce(installer, target);
+  assertExit(second, 0);
+  if (second.output.includes('镜像清理: 已删除')) {
+    throw new Error(label + '：重复运行仍报告删除动作（幂等失配）\n输出:\n' + second.output);
+  }
+  if (!fs.existsSync(outsideFile)) {
+    throw new Error(label + '：重复运行后项目之外的文件消失（' + outsideFile + '）');
+  }
+}
+
+// 反向构造（同一判据驱动）：把两处根级判据分别中和为恒真后重跑同一变体 ⇒ 项目外文件**必被删除**；
+// 判据落点漂移（判据句被改写）时「前提不成立」先行报错，避免变异无处落点而假绿。
+// 变异副本建在临时载体上并自带捆绑源（安装器从**自身位置**推导权威树，故载体需含 .flow-comet/skills）。
+function assertMirrorRootReverseConstruction(scratch, pkgCtx, installer, variants) {
+  const carrier = path.join(scratch, 'mirror-root-carrier');
+  const original = fs.readFileSync(installer, 'utf8');
+  const neutralizedContainment = original.replace(
+    'if (!isRealPathInside(dstRoot, projectRoot)) {',
+    'if (false && !isRealPathInside(dstRoot, projectRoot)) {'
+  );
+  if (neutralizedContainment === original) {
+    throw new Error('反向构造前提不成立：真实路径包含性判据的落点未找到（判据句已漂移，变异无处落点）');
+  }
+  const neutralized = neutralizedContainment.replace(
+    'if (rootStat.isSymbolicLink()) {',
+    'if (false && rootStat.isSymbolicLink()) {'
+  );
+  if (neutralized === neutralizedContainment) {
+    throw new Error('反向构造前提不成立：根级链接判据的落点未找到（判据句已漂移，变异无处落点）');
+  }
+  fs.mkdirSync(path.join(carrier, 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(carrier, 'scripts', 'prepare-env.mjs'), neutralized, 'utf8');
+  fs.cpSync(path.join(pkgCtx.root, '.flow-comet', 'skills'), path.join(carrier, '.flow-comet', 'skills'), { recursive: true });
+  const mutated = path.join(carrier, 'scripts', 'prepare-env.mjs');
+  for (const v of variants) {
+    const res = runInstallerOnce(mutated, v.target);
+    assertExit(res, 0);
+    if (fs.existsSync(v.outsideFile)) {
+      throw new Error(v.label + ' 反向构造判别力缺失：判据被中和后项目之外的文件仍在（断言可能是恒真空过）\n输出:\n' + res.output);
+    }
+  }
 }
 
 // ---------- 桥接 loader 版本戳重装断言助手（临时 DSH_HOME 重装链路） ----------
@@ -6468,7 +6581,9 @@ const TEST_ITEMS = [
 
   // K18: 分发面（npm 包形态）——可发布性清单 + 包体边界 + bin 双入口 + init 词元形态与红线
   // + 安装器升级路径清理（镜像目录内「权威源已不存在」的条目在重装后必须消失：含反向探针
-  // 与幂等断言；`.claude/rules` 一类无命名空间的生成面 fail-closed 不纳入删除面）。
+  // 与幂等断言；`.claude/rules` 一类无命名空间的生成面 fail-closed 不纳入删除面）
+  // + 安装器镜像清理的**根级** fail-closed（镜像根自身为链接 / 真实路径越出项目根两变体：
+  // 项目外文件必不消失 + 保留原因可见 + 幂等 + 反向构造证明判别力）。
   // 权威源侧真跑断言（npm pack --dry-run 的真实产物清单在场才算通过）；安装副本侧输出显式
   // 「不适用」行并回传同语义的结果标记计通过（禁止静默跳过——「未验证 ≠ 通过」）。
   // 各断言见上方同名助手；结果标记由运行器按环境判据断言（distributionSurface 契约）。
@@ -6484,6 +6599,9 @@ const TEST_ITEMS = [
       // 安装器分发面断言（升级路径清理）：权威源侧真跑真实命令序列，安装副本侧输出显式
       // 「不适用」行（两侧都出声——副本侧不是静默跳过）；故置于环境分支之前调用。
       assertInstallerUpgradePathCleanup(dir);
+      // 安装器分发面断言（镜像清理的根级 fail-closed）：同一注入点的第二组判据——根自身为链接 /
+      // 真实路径越界两变体 + 反向构造；副本侧同样输出显式「不适用」行。
+      assertMirrorRootLinkFailClosed(dir, pkgCtx);
       if (pkgCtx.kind === 'copy') {
         console.log('  不适用（安装副本侧：' + pkgCtx.reason + '）——包体边界/bin 断言仅权威源侧可判，本项计通过');
         return marker;
