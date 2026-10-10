@@ -10,7 +10,7 @@ Find your symptom, run the command. Everything here assumes you are inside the p
 
 **The command printed usage and exited non-zero** — that is the no-argument behaviour: with no arguments at all the installer only prints its usage. Add the intent: `fcomet init`, or `fcomet --target <dir>`, or `--platform <name>`.
 
-**It installed the wrong platform** — re-run with the platform named explicitly: `fcomet init --platform claude-code`, `--platform codex`, `--platform dsh`, or a comma-separated list / `all`. Re-running is idempotent; it does not delete what is already there.
+**It installed the wrong platform** — re-run with the platform named explicitly: `fcomet init --platform claude-code`, `--platform codex`, `--platform dsh`, or a comma-separated list / `all`. Re-running is idempotent, and it does not delete anything outside the managed skill directories; cleanup inside them is decided by location — do not place your own files there.
 
 **`.gitignore` was not updated** — check you ran the installer in a project (not inside the flow-comet repository itself, where `.flow-comet/` must stay tracked). The managed entry is appended, never replacing existing lines.
 
