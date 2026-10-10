@@ -2992,6 +2992,173 @@ function templateAuthorityProblems(docs) {
   return problems;
 }
 
+// ——— 7 字段集合的文本 ↔ 实现一致锚（场景 184 使用） ———
+// 唯一权威 = `workflow-guard.mjs` 的 `TASK7_REQUIRED` 常量（plan 出口判据的集合来源）。锚**从常量派生**
+// 集合后再与技能树文本逐处对账：任一处枚举与判据分叉即红——「两册三处而两级基线全绿」的成因正是
+// 「同一口径另写一份、且没有断言绑定」（`LESSONS` L-067）；锚里**不得把集合再抄一遍**（抄一遍就是
+// 又造一处同口径表达）。
+const TASK7_AUTHORITY_CONSTANT = 'TASK7_REQUIRED';
+// 「7 字段」标记（中文 / 英文两形态）：标记与枚举**同行**是当前唯一形态；标记行不带枚举（指针形态，
+// 如「集合见上表」）不算缺席——判据只对「标记 + 枚举」同场的行发声。
+const TASK7_MARKER_RE = /7\s*个?\s*字段|7 required fields|7-field set/;
+// 斜杠枚举形态（`` `name` / `read_files` / … ``；同时覆盖无引号的裸形态）。
+const TASK7_RUN_RE = /(?:`?[a-z][a-z_]*`?[ \t]*\/[ \t]*)+`?[a-z][a-z_]*`?/g;
+// 枚举处数基线 = 当前技能树「标记 + 枚举」同场的处数（plan 册 3 处 + task 册 1 处）。处数下降即
+// 「枚举被删 / 被改写成非斜杠形态」——与集合改名一样必须让锚红；新增处不受限（同样逐处对账）。
+const TASK7_ENUMERATION_MIN = 4;
+
+// 从实现侧常量**派生** 7 字段集合（null = 权威常量缺席 ⇒ 由调用方报红，锚里不写第二份集合）。
+function task7RequiredSet(guardSrc) {
+  const match = guardSrc.match(new RegExp('const\\s+' + TASK7_AUTHORITY_CONSTANT + '\\s*=\\s*\\[([^\\]]*)\\]'));
+  if (!match) return null;
+  const fields = match[1].split(',')
+    .map((part) => part.trim().replace(/^['"]|['"]$/g, ''))
+    .filter((part) => part !== '');
+  return fields.length > 0 ? fields : null;
+}
+
+// 值恰好等于权威集合的常量名（断言 BLOCKED 文案**从常量派生**用——文案里再写字面集合即第二处同口径表达）。
+function task7ConstantNames(src, fieldSet) {
+  const names = [];
+  const re = /const\s+([A-Za-z_$][\w$]*)\s*=\s*\[([^\]]*)\];/g;
+  let match;
+  while ((match = re.exec(src)) !== null) {
+    const fields = match[2].split(',')
+      .map((part) => part.trim().replace(/^['"]|['"]$/g, ''))
+      .filter((part) => part !== '');
+    if (fields.length === fieldSet.length && fields.every((field, index) => field === fieldSet[index])) {
+      names.push(match[1]);
+    }
+  }
+  return names;
+}
+
+// 技能树「7 字段」枚举行扫描（真实判据与反向构造探针共用同一实现；每处记原始片段供探针精确改行）。
+function task7EnumerationRuns(fieldSet, docs) {
+  const runs = [];
+  for (const [rel, text] of docs) {
+    text.split(/\r?\n/).forEach((line, index) => {
+      const marker = line.match(TASK7_MARKER_RE);
+      if (!marker) return;
+      for (const raw of line.match(TASK7_RUN_RE) ?? []) {
+        const tokens = raw.split('/').map((token) => token.trim().replace(/`/g, ''));
+        if (tokens.length < 3) continue;
+        // 只认「字段枚举」：过半数 token 落在派生集合内（同行的其它斜杠短语不参与）。
+        if (tokens.filter((token) => fieldSet.includes(token)).length * 2 <= tokens.length) continue;
+        runs.push({ rel, line: index + 1, raw, tokens, marker: /字段/.test(marker[0]) ? 'zh' : 'en' });
+      }
+    });
+  }
+  return runs;
+}
+
+// 判据：每处「7 字段」枚举必须与派生集合**逐字同序同值**；双语形态与处数基线同守。
+function task7EnumerationProblems(fieldSet, docs) {
+  const out = [];
+  const runs = task7EnumerationRuns(fieldSet, docs);
+  const expected = fieldSet.join('/');
+  for (const run of runs) {
+    const actual = run.tokens.join('/');
+    if (actual !== expected) {
+      out.push(run.rel + ':' + run.line + ' 的 7 字段枚举与实现集合不一致（文本 ' + actual + ' / 实现 ' + expected + '）');
+    }
+  }
+  if (runs.length < TASK7_ENUMERATION_MIN) {
+    out.push('技能树「7 字段」标记同行枚举处数 ' + runs.length + ' < 基线 ' + TASK7_ENUMERATION_MIN
+      + '（枚举被删或被改写成非斜杠形态即失锁；受检处: ' + (runs.map((run) => run.rel + ':' + run.line).join(', ') || '无') + '）');
+  }
+  if (!runs.some((run) => run.marker === 'zh')) out.push('7 字段枚举缺中文形态（双语覆盖不足）');
+  if (!runs.some((run) => run.marker === 'en')) out.push('7 字段枚举缺英文形态（双语覆盖不足）');
+  const holders = [...new Set(runs.map((run) => run.rel))];
+  if (holders.length < 2) out.push('7 字段枚举只落在 ' + holders.length + ' 份文本（plan / task 两册各持一处是基线）');
+  return out;
+}
+
+// 判据：「文案落后于判据」静默面——两处 BLOCKED 文案的集合字符串必须从判据常量派生（文案区域须出现
+// 「值等于权威集合的常量」的 .join('/')，且不得再现该集合的字面拼接）。构造方式变了、渲染结果不变。
+function task7MessageDerivationProblems(fieldSet, sources) {
+  const out = [];
+  const joined = fieldSet.join('/');
+  for (const [rel, src] of Object.entries(sources)) {
+    const at = src.indexOf('任务缺 7 字段（');
+    if (at < 0) {
+      out.push(rel + ' 未找到「任务缺 7 字段」文案锚点（文案派生判据无从对账）');
+      continue;
+    }
+    const region = src.slice(at, at + 240);
+    const constants = task7ConstantNames(src, fieldSet);
+    if (constants.length === 0) {
+      out.push(rel + ' 未找到值等于权威集合的常量（判据与文案的共同来源缺席）');
+      continue;
+    }
+    if (!constants.some((name) => region.includes(name + ".join('/')"))) {
+      out.push(rel + ' 的 7 字段 BLOCKED 文案未从判据常量派生（缺 <常量>.join(\'/\')）——文案会静默落后于判据');
+    }
+    if (region.includes(joined)) {
+      out.push(rel + ' 的 7 字段 BLOCKED 文案又写了一遍字面集合（' + joined + '）——第二处同口径表达');
+    }
+  }
+  return out;
+}
+
+// 7 字段集合锚的聚合判据（真实判据 + 反向构造探针；场景 184 调用，返回问题描述数组）。
+function task7SetAnchorProblems({ guardSrc, stateSrc, docs }) {
+  const out = [];
+  const fieldSet = task7RequiredSet(guardSrc);
+  if (fieldSet === null || fieldSet.length !== 7) {
+    out.push('workflow-guard.mjs 的 ' + TASK7_AUTHORITY_CONSTANT
+      + ' 常量缺席或元素数 ≠ 7（7 字段集合的唯一权威不在场，文本侧无从对账）');
+    return out;
+  }
+  const sources = { 'workflow-guard.mjs': guardSrc, 'workflow-state.mjs': stateSrc };
+  out.push(...task7EnumerationProblems(fieldSet, docs));
+  out.push(...task7MessageDerivationProblems(fieldSet, sources));
+  out.push(...task7ReverseConstructionProblems(fieldSet, docs, sources));
+  return out;
+}
+
+// 反向构造（`LESSONS` L-106：判别句式 + 反向构造；与真实判据同一实现驱动）：逐项把锚的输入改坏 ⇒ 必红。
+function task7ReverseConstructionProblems(fieldSet, docs, sources) {
+  const out = [];
+  const replaceRunLine = (targetDocs, run, mutate) => new Map(targetDocs).set(run.rel,
+    (targetDocs.get(run.rel) ?? '').split(/\r?\n/)
+      .map((line, index) => (index === run.line - 1 ? mutate(line) : line)).join('\n'));
+  const sample = task7EnumerationRuns(fieldSet, docs).find((run) => run.tokens.includes('depends_on'));
+  if (sample === undefined) {
+    out.push('7 字段枚举反向构造的前提不成立：技能树里找不到含 depends_on 的枚举');
+    return out;
+  }
+  const at = sample.rel + ':' + sample.line;
+  const probes = [
+    ['把 ' + at + ' 的 depends_on 换成 id',
+      () => task7EnumerationProblems(fieldSet, replaceRunLine(docs, sample,
+        (line) => line.replace(sample.raw, sample.raw.replace('depends_on', 'id')))), '与实现集合不一致'],
+    ['抽掉 ' + at + ' 的整处枚举',
+      () => task7EnumerationProblems(fieldSet, replaceRunLine(docs, sample,
+        (line) => line.replace(sample.raw, '（反向构造：抽掉枚举）'))), '枚举处数'],
+    ['把 id 追加成第 8 项',
+      () => task7EnumerationProblems(fieldSet, replaceRunLine(docs, sample,
+        (line) => line.replace(sample.raw, sample.raw + ' / id'))), '与实现集合不一致'],
+    ['实现侧常量把 depends_on 改成 dependsOn',
+      () => task7EnumerationProblems(fieldSet.map((field) => (field === 'depends_on' ? 'dependsOn' : field)), docs),
+      '与实现集合不一致'],
+    ['文案回写字面集合',
+      () => task7MessageDerivationProblems(fieldSet, { ...sources,
+        'workflow-guard.mjs': sources['workflow-guard.mjs'].replace(
+          TASK7_AUTHORITY_CONSTANT + ".join('/')", "'" + fieldSet.join('/') + "'") }), '又写了一遍字面集合'],
+    ['文案抽掉派生',
+      () => task7MessageDerivationProblems(fieldSet, { ...sources,
+        'workflow-state.mjs': sources['workflow-state.mjs'].replace("replanTask7Required.join('/')", "'7 字段'") }),
+      '未从判据常量派生'],
+  ];
+  for (const [label, probe, expected] of probes) {
+    if (!probe().some((problem) => problem.includes(expected))) {
+      out.push('反向构造判别力缺失（' + label + ' 未被判违规）');
+    }
+  }
+  return out;
+}
+
 // 前端判据**散文口径**判据（场景 286 使用；纯函数 + 合成输入可驱动）：引擎侧判据已升为结构形态
 // （独立行 / 行首 / 适用性标签的字段值位 + 词形边界 + 命中片段回显），五份分发文本是它的散文副本——
 // 副本必须陈述**结构形态**，不得残留旧口径（「段内不含 / 未标注字面『不适用』」这类把判据说成
@@ -9960,6 +10127,17 @@ const SCENARIOS = [
           }
         }
       }
+      // —— 7 字段集合的文本 ↔ 实现一致锚（文本不得说谎的**根治**面：任一处枚举分叉即红）——
+      // 判据与反向构造探针见模块级 `task7SetAnchorProblems`（单一实现）：唯一权威 = `workflow-guard.mjs`
+      // 的 `TASK7_REQUIRED` 常量（plan 出口判据的集合来源），技能树侧枚举**从该常量派生**后逐处对账——
+      // 锚里不写第二份集合（第二份同口径表达会在判据演进时分叉，`LESSONS` L-067）；覆盖双语形态与斜杠
+      // 枚举形态，同批固化「文案落后于判据」静默面（两处 BLOCKED 文案从判据常量派生）。反向构造（L-106）：
+      // 任一处枚举改字段名（depends_on → id）/ 抽掉整处枚举 / 常量侧改名 / 文案回写字面集合 ⇒ 必红。
+      problems.push(...task7SetAnchorProblems({
+        guardSrc: fs.readFileSync(path.join(__dirname, 'workflow-guard.mjs'), 'utf8'),
+        stateSrc: fs.readFileSync(path.join(__dirname, 'workflow-state.mjs'), 'utf8'),
+        docs: new Map(skillTreeDocFiles().map(([rel, file]) => [rel, fs.readFileSync(file, 'utf8')])),
+      }));
       // —— 公开面口径机检（文档不说假话）：公开机制册的判级须与技能册一致、公开变更日志的新增
       //    条目须带**编号** PR 链接、技能册的已关闭缺口与建树适用面须写成本文。三面各自可判，
       //    并配反向构造（抽掉新表述 / 还原旧表述 ⇒ 必报）。公开面在安装副本形态结构性缺席：

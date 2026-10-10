@@ -1221,6 +1221,288 @@ function assertNotNodeLine(res, nodeId) {
   }
 }
 
+// ---------- explain <node> 契约对账（节点现问） ----------
+// 期望值一律**现场从协议 JSON 派生**（本段不手抄第二份字段表）：解析实现输出后逐字段与
+// `nodes[] / outputSchemas[]` 的声明比对。行前缀与分隔符是契约形态的一部分——不可解析即报问题
+// （不静默跳过）。反向构造探针复用同一判据（声明侧抽掉一条 guardrail / 一个 artifact / 改描述）。
+
+// ARTIFACT 行：`<id> [<kind>] required|optional → <路径 | 路径>`（kind 可缺省；无路径 → 未声明路径）。
+function parseExplainArtifactLine(value) {
+  const arrow = value.split(' → ');
+  if (arrow.length !== 2) throw new Error('ARTIFACT 行缺「… → 路径」形态: ' + value);
+  const requiredMatch = arrow[0].match(/ (required|optional)$/);
+  if (!requiredMatch) throw new Error('ARTIFACT 行缺 required/optional 标注: ' + value);
+  const head = arrow[0].slice(0, arrow[0].length - requiredMatch[0].length);
+  const kindMatch = head.match(/^(.*) \[([^\]]+)\]$/);
+  return {
+    id: kindMatch ? kindMatch[1] : head,
+    kind: kindMatch ? kindMatch[2] : null,
+    required: requiredMatch[1] === 'required',
+    paths: arrow[1] === '(未声明路径)' ? [] : arrow[1].split(' | '),
+  };
+}
+
+// GUARDRAIL 行：`<id> | <label> | <validation>`。
+function parseExplainGuardrailLine(value) {
+  const parts = value.split(' | ');
+  if (parts.length !== 3) throw new Error('GUARDRAIL 行缺三段（id | label | validation）: ' + value);
+  return { id: parts[0], label: parts[1], validation: parts[2] };
+}
+
+// REQUIRED-SKILL 行：`<skill> | scope=<…> | enforcement=<…> | reason=<…>`。
+function parseExplainSkillLine(value) {
+  const parts = value.split(' | ');
+  if (parts.length !== 4) throw new Error('REQUIRED-SKILL 行缺四段（skill | scope= | enforcement= | reason=）: ' + value);
+  const [skill, scope, enforcement, reason] = parts;
+  if (!scope.startsWith('scope=') || !enforcement.startsWith('enforcement=') || !reason.startsWith('reason=')) {
+    throw new Error('REQUIRED-SKILL 行的键名形态不符: ' + value);
+  }
+  return { skill, scope: scope.slice(6), enforcement: enforcement.slice(12), reason: reason.slice(7) };
+}
+
+function parseExplainOutput(output) {
+  const parsed = {
+    attributes: {}, schemas: [], artifacts: [], evidence: [], guardrails: [], guardrailsNone: false,
+    skills: [], skillsNone: false, commands: [],
+  };
+  let schemaIndex = -1;
+  for (const rawLine of String(output).split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line === '') continue;
+    const value = line.slice(line.indexOf(': ') + 2);
+    if (line.startsWith('NODE: ')) parsed.attributes.node = value;
+    else if (line.startsWith('LABEL: ')) parsed.attributes.label = value;
+    else if (line.startsWith('KIND: ')) parsed.attributes.kind = value;
+    else if (line.startsWith('DISABLED: ')) parsed.attributes.disabled = value;
+    else if (line.startsWith('OUTPUT-SCHEMA: ')) {
+      parsed.schemas.push(value);
+      schemaIndex += 1;
+      parsed.artifacts.push([]);
+      parsed.evidence.push([]);
+    } else if (line.startsWith('ARTIFACT: ')) {
+      if (schemaIndex < 0) throw new Error('ARTIFACT 行先于 OUTPUT-SCHEMA 行: ' + line);
+      parsed.artifacts[schemaIndex].push(parseExplainArtifactLine(value));
+    } else if (line.startsWith('EVIDENCE: ')) {
+      if (schemaIndex < 0) throw new Error('EVIDENCE 行先于 OUTPUT-SCHEMA 行: ' + line);
+      parsed.evidence[schemaIndex].push(value);
+    } else if (line.startsWith('GUARDRAIL: ')) {
+      if (value === '(none)') parsed.guardrailsNone = true;
+      else parsed.guardrails.push(parseExplainGuardrailLine(value));
+    } else if (line.startsWith('REQUIRED-SKILL: ')) {
+      if (value === '(none)') parsed.skillsNone = true;
+      else parsed.skills.push(parseExplainSkillLine(value));
+    } else if (line.startsWith('COMMAND ')) parsed.commands.push(line);
+    else throw new Error('explain 输出含未识别的行形态: ' + line);
+  }
+  return parsed;
+}
+
+// 期望值比对（解析结果 vs 协议声明；两侧同源，锚里不手抄字段表）。
+function expectExplainField(problems, nodeId, actual, declared, field) {
+  if (actual !== declared) {
+    problems.push('节点 ' + nodeId + ' 的 ' + field + ' 与协议声明不一致: 输出 '
+      + JSON.stringify(actual) + ' / 声明 ' + JSON.stringify(declared));
+  }
+}
+
+// ① outputSchema 名与描述 + ② 每个 artifact 的 id·kind·required·路径（pathBase: specs-root ⇒ .specs/
+// 前缀）与每个 evidence 的 id (required)。
+function explainSchemaProblems(node, parsed, schemaById) {
+  const problems = [];
+  const declaredSchemas = node.outputSchemas ?? [];
+  const expectedSchemaLines = declaredSchemas.length === 0
+    ? ['(none)']
+    : declaredSchemas.map((schemaId) => {
+      const schema = schemaById.get(schemaId);
+      return schemaId + (schema && schema.description ? ' — ' + schema.description : '');
+    });
+  expectExplainField(problems, node.id, parsed.schemas.join(' ␟ '), expectedSchemaLines.join(' ␟ '), 'OUTPUT-SCHEMA 行');
+  declaredSchemas.forEach((schemaId, index) => {
+    const schema = schemaById.get(schemaId);
+    const declaredArtifacts = (schema?.artifacts ?? []).map((artifact) => ({
+      id: artifact.id ?? '(unnamed)',
+      kind: artifact.kind ?? null,
+      required: artifact.required !== false,
+      paths: (artifact.paths ?? []).map((declaredPath) =>
+        (artifact.pathBase === 'specs-root' ? '.specs/' : '') + String(declaredPath)),
+    }));
+    const actualArtifacts = parsed.artifacts[index] ?? [];
+    const artifactsMatch = actualArtifacts.length === declaredArtifacts.length
+      && actualArtifacts.every((actual, position) => actual.id === declaredArtifacts[position].id
+        && actual.kind === declaredArtifacts[position].kind
+        && actual.required === declaredArtifacts[position].required
+        && actual.paths.join(' | ') === declaredArtifacts[position].paths.join(' | '));
+    if (!artifactsMatch) {
+      problems.push('节点 ' + node.id + '/' + schemaId + ' 的 artifact 对账不一致: 输出 '
+        + JSON.stringify(actualArtifacts) + ' / 声明 ' + JSON.stringify(declaredArtifacts));
+    }
+    const declaredEvidence = (schema?.evidence ?? []).length === 0
+      ? '(none)'
+      : (schema.evidence ?? []).map((evidence) =>
+        evidence.id + (evidence.required === false ? ' (optional)' : ' (required)')).join(' | ');
+    expectExplainField(problems, node.id, (parsed.evidence[index] ?? []).join(' | '),
+      declaredEvidence, schemaId + ' 的 EVIDENCE 行');
+  });
+  return problems;
+}
+
+// ③ 每条 guardrail 的 id·label·validation 与 ④ 每条 requiredSkillCall 的 skill·scope·enforcement·reason
+// （空集合 → '(none)' 行的在场性同判）。
+function explainGuardrailAndSkillProblems(node, parsed) {
+  const problems = [];
+  const declaredGuardrails = (node.guardrails ?? []).map((guardrail) => ({
+    id: guardrail.id ?? '(unnamed)', label: guardrail.label ?? '-', validation: guardrail.validation ?? '-',
+  }));
+  if ((declaredGuardrails.length === 0) !== parsed.guardrailsNone) {
+    problems.push('节点 ' + node.id + ' 的 guardrail 空集合形态与声明不一致（(none) 行在场性不符）');
+  }
+  expectExplainField(problems, node.id, JSON.stringify(parsed.guardrails), JSON.stringify(declaredGuardrails), 'guardrail');
+  const declaredSkills = (node.requiredSkillCalls ?? []).map((call) => ({
+    skill: call.skill ?? '(unnamed)', scope: call.scope ?? '-',
+    enforcement: call.enforcement ?? '-', reason: call.reason ?? '-',
+  }));
+  if ((declaredSkills.length === 0) !== parsed.skillsNone) {
+    problems.push('节点 ' + node.id + ' 的 requiredSkillCall 空集合形态与声明不一致（(none) 行在场性不符）');
+  }
+  expectExplainField(problems, node.id, JSON.stringify(parsed.skills), JSON.stringify(declaredSkills), 'requiredSkillCall');
+  return problems;
+}
+
+// ⑤ 三条命令：节点 id 与 --apply 形态 + 脚本根形态（三条同根、指向技能包 scripts 目录）。
+function explainCommandProblems(node, parsed) {
+  const commandPatterns = [
+    [/^COMMAND entry: node (.+?)\/workflow-guard\.mjs entry (.+)$/, 'entry'],
+    [/^COMMAND exit: node (.+?)\/workflow-guard\.mjs exit (.+) --apply$/, 'exit'],
+    [/^COMMAND record: node (.+?)\/workflow-state\.mjs record (.+) '\{"summary":"<完成摘要>"\}'$/, 'record'],
+  ];
+  if (parsed.commands.length !== commandPatterns.length) {
+    return ['节点 ' + node.id + ' 的 COMMAND 行数 ' + parsed.commands.length + ' ≠ 3'];
+  }
+  const problems = [];
+  const scriptsRoots = new Set();
+  parsed.commands.forEach((line, index) => {
+    const [pattern, kind] = commandPatterns[index];
+    const match = line.match(pattern);
+    if (!match) {
+      problems.push('节点 ' + node.id + ' 的 ' + kind + ' 命令形态不符: ' + line);
+      return;
+    }
+    scriptsRoots.add(match[1]);
+    if (match[2] !== node.id) problems.push('节点 ' + node.id + ' 的 ' + kind + ' 命令节点 id 不符: ' + match[2]);
+  });
+  if (scriptsRoots.size !== 1) {
+    problems.push('节点 ' + node.id + ' 的三条命令脚本根不一致: ' + [...scriptsRoots].join(' / '));
+  }
+  const scriptsRoot = [...scriptsRoots][0] ?? '';
+  if (!/skills\/flow-comet\/scripts$/.test(scriptsRoot)) {
+    problems.push('节点 ' + node.id + ' 的命令脚本根不指向技能包 scripts 目录: ' + scriptsRoot);
+  } else if (__dirname.replace(/\\/g, '/').includes('/.flow-comet/skills/')
+    && scriptsRoot !== '.claude/skills/flow-comet/scripts') {
+    // 权威源检出：命令路径 = 设计形态（安装副本按运行根形态化，已由上面同一判据约束）
+    problems.push('权威源检出的命令脚本根应为设计形态 .claude/skills/flow-comet/scripts: ' + scriptsRoot);
+  }
+  return problems;
+}
+
+// 逐字段对账（单一实现：真实判据与反向构造探针共用）：四类字段 + 三条命令。
+function explainContractProblems(protocol, explainOutputs) {
+  const problems = [];
+  const schemaById = new Map((protocol.outputSchemas ?? []).map((schema) => [schema.id, schema]));
+  for (const node of protocol.nodes ?? []) {
+    const output = explainOutputs.get(node.id);
+    if (typeof output !== 'string') {
+      problems.push('节点 ' + node.id + ' 缺 explain 输出（未对账）');
+      continue;
+    }
+    let parsed;
+    try {
+      parsed = parseExplainOutput(output);
+    } catch (error) {
+      problems.push('节点 ' + node.id + ' 的 explain 输出形态不可解析: ' + error.message);
+      continue;
+    }
+    expectExplainField(problems, node.id, parsed.attributes.node, node.id, 'NODE');
+    expectExplainField(problems, node.id, parsed.attributes.label ?? null, node.label ?? null, 'LABEL');
+    expectExplainField(problems, node.id, parsed.attributes.kind ?? null, node.kind ?? null, 'KIND');
+    expectExplainField(problems, node.id, parsed.attributes.disabled ?? null,
+      node.disabled === true ? 'true（该节点在当前协议中被停用）' : null, 'DISABLED');
+    problems.push(...explainSchemaProblems(node, parsed, schemaById));
+    problems.push(...explainGuardrailAndSkillProblems(node, parsed));
+    problems.push(...explainCommandProblems(node, parsed));
+  }
+  return problems;
+}
+
+// explain 的三种 fail-closed 形态（非法节点 / 缺参 / 拿选项当节点名）：都非零退出并列出全部合法节点。
+function assertExplainFailClosed(dir, protocolDecl) {
+  const legalNodes = protocolDecl.nodes.map((protocolNode) => protocolNode.id).join('/');
+  const forms = [
+    ['非法节点', ['explain', 'not-a-node'], 'explain node 非法: not-a-node'],
+    ['缺参', ['explain'], 'explain requires a <node> id'],
+    ['选项当节点名', ['explain', '--help'], 'explain requires a <node> id'],
+  ];
+  for (const [form, args, expected] of forms) {
+    const res = runState(args, dir);
+    assertExit(res, 1);
+    assertOut(res, expected);
+    assertOut(res, legalNodes);
+    if (form === '非法节点') assertOut(res, '（协议节点: ' + legalNodes + '）');
+  }
+}
+
+// 夹具协议（声明副本）下的 explain 输出——真实协议 env 通道；夹具文件跑完即清。
+function explainOutputsForDeclaration(dir, decl) {
+  const probeProtocolFile = path.join(dir, 'reference', 'workflow-protocol-probe.json');
+  fs.writeFileSync(probeProtocolFile, JSON.stringify(decl, null, 2), 'utf8');
+  const outputs = new Map();
+  for (const protocolNode of decl.nodes) {
+    const res = runState(['explain', protocolNode.id], dir, { FLOW_COMET_PROTOCOL: probeProtocolFile });
+    assertExit(res, 0);
+    outputs.set(protocolNode.id, res.output);
+  }
+  fs.rmSync(probeProtocolFile, { force: true });
+  return outputs;
+}
+
+// 反向构造（L-106）：把协议声明副本的一条 guardrail / 一个 artifact 抽掉、改一条 schema 描述 ⇒ 对账
+// 必报对应字段（证明断言不恒真空过）。返回问题描述数组（空 = 判别力齐备）。
+function explainReverseConstructionProblems(dir, protocolDecl, explainOutputs) {
+  const probeNode = protocolDecl.nodes.find((protocolNode) => (protocolNode.guardrails ?? []).length > 0);
+  const probeSchema = (protocolDecl.outputSchemas ?? []).find((schema) => (schema.artifacts ?? []).length > 0);
+  const owner = probeSchema === undefined ? undefined
+    : protocolDecl.nodes.find((protocolNode) => (protocolNode.outputSchemas ?? []).includes(probeSchema.id));
+  if (probeNode === undefined || probeSchema === undefined || owner === undefined) {
+    return ['反向构造前提不成立：协议声明里找不到带 guardrail 的节点 / 带 artifact 的 schema / schema 归属节点'];
+  }
+  const variants = [
+    ['抽掉一条 guardrail', (decl) => {
+      decl.nodes.find((protocolNode) => protocolNode.id === probeNode.id).guardrails = [];
+    }, probeNode.id, 'guardrail'],
+    ['抽掉一个 artifact', (decl) => {
+      decl.outputSchemas.find((schema) => schema.id === probeSchema.id).artifacts = [];
+    }, owner.id, 'artifact'],
+    ['改掉一条 schema 描述', (decl) => {
+      const target = decl.outputSchemas.find((schema) => schema.id === probeSchema.id);
+      target.description = (probeSchema.description ?? '') + '（反向构造探针）';
+    }, owner.id, 'OUTPUT-SCHEMA'],
+  ];
+  const problems = [];
+  for (const [form, mutate, affectedNodeId, expectedField] of variants) {
+    const mutatedDecl = JSON.parse(JSON.stringify(protocolDecl));
+    mutate(mutatedDecl);
+    const probeOutputs = explainOutputsForDeclaration(dir, mutatedDecl);
+    if (probeOutputs.get(affectedNodeId) === explainOutputs.get(affectedNodeId)) {
+      problems.push('反向构造前提不成立（' + form + '：夹具协议未改变 explain 输出——协议 env 通道未生效）');
+      continue;
+    }
+    const probeProblems = explainContractProblems(protocolDecl, probeOutputs);
+    if (!probeProblems.some((problem) => problem.includes(expectedField))) {
+      problems.push('反向构造判别力缺失（' + form + ' 未被判分叉）: ' + (probeProblems.join('; ') || '（零问题）'));
+    }
+  }
+  return problems;
+}
+
 // 混排多波 TASK：双并行开路 → 串行衔接(依赖双并行)→ 收尾并行(依赖串行衔接)。
 // 各任务 status 由入参映射（任务 id → 'pending'|'done'）控制；status 变更不影响任务集签名
 // （签名仅保留 id/parallel 与块内容，剥离 status 类属性）。串行衔接置于两并行波之间——
@@ -1560,6 +1842,31 @@ const TEST_ITEMS = [
       const s2 = runState(['status'], dir);
       assertExit(s2, 0);
       assertOut(s2, '"currentNode": "design"');
+      // —— explain <node>：节点现问契约（真实子进程，零 mock；契约声明源 = 协议 JSON）——
+      // 8 节点逐个逐字段对账（label / kind / outputSchema 名与描述 / artifact / evidence / guardrail /
+      // requiredSkillCall / 三条命令）+ 三种 fail-closed 形态 + 只读性 + 反向构造（声明副本抽掉一条
+      // guardrail / 一个 artifact、改一条 schema 描述 ⇒ 对账必报；判据与探针见模块级单一实现）。
+      const protocolDecl = JSON.parse(fs.readFileSync(path.join(dir, 'reference', 'workflow-protocol.json'), 'utf8'));
+      const stateFilePath = path.join(dir, '.flow-comet', 'flow-comet-state.json');
+      const stateHashBefore = createHash('sha256').update(fs.readFileSync(stateFilePath)).digest('hex');
+      const statusBefore = runState(['status'], dir);
+      const explainOutputs = new Map();
+      for (const protocolNode of protocolDecl.nodes) {
+        const res = runState(['explain', protocolNode.id], dir);
+        assertExit(res, 0);
+        assertOut(res, 'NODE: ' + protocolNode.id);
+        explainOutputs.set(protocolNode.id, res.output);
+      }
+      const contractProblems = explainContractProblems(protocolDecl, explainOutputs);
+      assertTrue(contractProblems.length === 0,
+        'explain 输出与协议 JSON 声明不一致: ' + contractProblems.join('; '));
+      // 只读性：调用前后状态文件 sha256 全等 + status 读数逐字不变（explain 不写 state、不改路由）
+      assertEqual(createHash('sha256').update(fs.readFileSync(stateFilePath)).digest('hex'), stateHashBefore,
+        'explain 改写了状态文件（只读通道被破坏）');
+      assertEqual(runState(['status'], dir).output, statusBefore.output, 'explain 改动了路由读数（只读通道被破坏）');
+      assertExplainFailClosed(dir, protocolDecl);
+      const probeProblems = explainReverseConstructionProblems(dir, protocolDecl, explainOutputs);
+      assertTrue(probeProblems.length === 0, '反向构造判别力缺失: ' + probeProblems.join('; '));
       // 无 state 无工件 → no-change 兜底
       fs.rmSync(path.join(dir, '.flow-comet'), { recursive: true });
       const s3 = runState(['status'], dir);

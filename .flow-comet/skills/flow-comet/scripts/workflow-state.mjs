@@ -2059,7 +2059,9 @@ async function main() {
     }
     if (replanTask7Broken.length > 0) {
       if (replanTask7NewFormat && state.newChange === true) {
-        console.error('BLOCKED: TASK.md 任务缺 7 字段（name/read_files/write_files/action/verify/done/depends_on）: '
+        // 文案的集合字符串**从判据常量派生**（不得在此再写一遍字面集合——第二处同口径表达会在
+        // 判据演进时静默落后于实现；构造方式不改变渲染结果）。
+        console.error('BLOCKED: TASK.md 任务缺 7 字段（' + replanTask7Required.join('/') + '）: '
           + replanTask7Broken.join('; ') + '；恢复: 对照 flow-kit/templates/TASK.md 补齐每个 <task> 的缺字段后重试；replan 不做校验豁免');
         process.exit(1);
       }
