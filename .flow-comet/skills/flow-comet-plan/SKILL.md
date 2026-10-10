@@ -97,7 +97,7 @@ The full task decomposition protocol, XML template, and constraints are in:
 
 This node is truly done when:
 - `.specs/<change-id>/TASK.md` exists in XML format.
-- At least one `<task>` block exists; every task carries a `<verify>` field (the full seven-field shape — id/name/read_files/write_files/action/verify/done — is the execution discipline, review-checked; guard enforces the subset).
+- At least one `<task>` block exists; every task carries a `<verify>` field, and the 7-field set `name` / `read_files` / `write_files` / `action` / `verify` / `done` / `depends_on` is present (`id` is an **attribute** of the `<task>` element, not a field) — field **presence** is enforced by the guard (missing any field on a new-format task in a new change = exit BLOCKED; old-format templates / old changes degrade to WARN), while **field content quality** is judged by review.
 - Every `verify` field is an executable command (not a description).
 - Every `write_files` is strictly within DESIGN.md touched + new modules range (not in forbidden list).
 - Every `[P]` mark has a genuine concurrent companion in its wave with non-overlapping `write_files`; isolated tasks are serial (a fully serial plan is valid when no genuine companion exists).
