@@ -49,7 +49,7 @@ npm 安装时两者输出同一个值（该包对应的发布版本）。标识�
 | Codex | `.agents/skills/`（19 个技能） | `.codex/hooks.json` 中的 `PreToolUse` 条目，以及 `.codex/config.toml` 里的 `hooks = true` | `AGENTS.md` 托管块 |
 | DeepSeek Harness（dsh） | `.dsh/skills/`（19 个技能） | `$DSH_HOME/cordis.patch.yml` 托管块，指向复制到 `$DSH_HOME/plugins/` 的桥接 loader | `AGENTS.md` 托管块 |
 
-三个平台都会同时得到 `flow-kit/`（模板与规则）以及一条管理 `.flow-comet/` 运行时目录的 `.gitignore` 条目。安装器是非破坏性的：项目里既有的内容不会被删除；已有的 `.gitignore` 保留原内容，只追加托管条目。
+三个平台都会同时得到 `flow-kit/`（模板与规则）以及一条管理 `.flow-comet/` 运行时目录的 `.gitignore` 条目。安装器是非破坏性的：项目里既有的内容不会被删除；已有的 `.gitignore` 保留原内容，只追加托管条目。「非破坏性」指的是你自己的内容：安装器会清理它自己上次生成、而当前技能包已不再包含的文件——仅限它安装在平台技能树下的 flow-comet 技能目录内，且归属无法判定时一律保留。
 
 ## 各平台首次使用
 
