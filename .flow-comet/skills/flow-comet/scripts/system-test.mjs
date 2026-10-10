@@ -1368,12 +1368,13 @@ function explainGuardrailAndSkillProblems(node, parsed) {
   return problems;
 }
 
-// ⑤ 三条命令：节点 id 与 --apply 形态 + 脚本根形态（三条同根、指向技能包 scripts 目录）。
+// ⑤ 三条命令：节点 id 与 --apply 形态 + 脚本根形态（三条同根、指向技能包 scripts 目录）+ 脚本
+// 路径整体带双引号（含空格的安装根下不被 shell 分词——引号是契约形态的一部分，缺引号即红）。
 function explainCommandProblems(node, parsed) {
   const commandPatterns = [
-    [/^COMMAND entry: node (.+?)\/workflow-guard\.mjs entry (.+)$/, 'entry'],
-    [/^COMMAND exit: node (.+?)\/workflow-guard\.mjs exit (.+) --apply$/, 'exit'],
-    [/^COMMAND record: node (.+?)\/workflow-state\.mjs record (.+) '\{"summary":"<完成摘要>"\}'$/, 'record'],
+    [/^COMMAND entry: node "(.+?)\/workflow-guard\.mjs" entry (.+)$/, 'entry'],
+    [/^COMMAND exit: node "(.+?)\/workflow-guard\.mjs" exit (.+) --apply$/, 'exit'],
+    [/^COMMAND record: node "(.+?)\/workflow-state\.mjs" record (.+) '\{"summary":"<完成摘要>"\}'$/, 'record'],
   ];
   if (parsed.commands.length !== commandPatterns.length) {
     return ['节点 ' + node.id + ' 的 COMMAND 行数 ' + parsed.commands.length + ' ≠ 3'];
@@ -1465,7 +1466,8 @@ function explainOutputsForDeclaration(dir, decl) {
 }
 
 // 反向构造（L-106）：把协议声明副本的一条 guardrail / 一个 artifact 抽掉、改一条 schema 描述 ⇒ 对账
-// 必报对应字段（证明断言不恒真空过）。返回问题描述数组（空 = 判别力齐备）。
+// 必报对应字段；再把真实输出里的脚本路径引号去掉 ⇒ 必报命令形态不符（证明断言不恒真空过——
+// 没有这一侧，把引号从实现里拿掉也能全绿）。返回问题描述数组（空 = 判别力齐备）。
 function explainReverseConstructionProblems(dir, protocolDecl, explainOutputs) {
   const probeNode = protocolDecl.nodes.find((protocolNode) => (protocolNode.guardrails ?? []).length > 0);
   const probeSchema = (protocolDecl.outputSchemas ?? []).find((schema) => (schema.artifacts ?? []).length > 0);
@@ -1498,6 +1500,26 @@ function explainReverseConstructionProblems(dir, protocolDecl, explainOutputs) {
     const probeProblems = explainContractProblems(protocolDecl, probeOutputs);
     if (!probeProblems.some((problem) => problem.includes(expectedField))) {
       problems.push('反向构造判别力缺失（' + form + ' 未被判分叉）: ' + (probeProblems.join('; ') || '（零问题）'));
+    }
+  }
+  // ④ 引号形态（③ 的另一面，不需重跑）：真实输出去掉脚本路径引号 ⇒ 逐节点必报命令形态不符。
+  const dequoted = new Map();
+  for (const [nodeId, output] of explainOutputs) {
+    const text = String(output);
+    const stripped = text.replace(/(node )"([^"\n]*\.mjs)"/g, '$1$2');
+    if (stripped === text) {
+      problems.push('反向构造前提不成立（节点 ' + nodeId + ' 的输出里没有带引号的脚本路径——引号判据无从判别）');
+      continue;
+    }
+    dequoted.set(nodeId, stripped);
+  }
+  if (dequoted.size > 0) {
+    const dequotedProblems = explainContractProblems(protocolDecl, new Map([...explainOutputs, ...dequoted]));
+    for (const nodeId of dequoted.keys()) {
+      if (!dequotedProblems.some((problem) => problem.includes('节点 ' + nodeId + ' 的')
+        && problem.includes('命令形态不符'))) {
+        problems.push('反向构造判别力缺失（去掉节点 ' + nodeId + ' 的脚本路径引号未被判命令形态不符）');
+      }
     }
   }
   return problems;

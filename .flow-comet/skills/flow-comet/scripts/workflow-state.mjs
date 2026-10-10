@@ -865,12 +865,14 @@ function printNodeSkillCalls(node) {
   }
 }
 
-// ④ 三条命令（entry / exit / record，按节点 id 与平台化路径形态生成）
+// ④ 三条命令（entry / exit / record，按节点 id 与平台化路径形态生成）。脚本路径整体加双引号：
+// 安装根含空格时未加引号的路径会被 shell 按空格切分（只剩路径首段被当作脚本），打印出来的命令
+// 便跑不了——加引号后三种平台语义下都是**单一参数**（引号本身对无空格路径无害）。
 function printNodeCommands(node) {
   const scriptsDir = platformScriptsDir();
-  console.log('COMMAND entry: node ' + scriptsDir + '/workflow-guard.mjs entry ' + node.id);
-  console.log('COMMAND exit: node ' + scriptsDir + '/workflow-guard.mjs exit ' + node.id + ' --apply');
-  console.log('COMMAND record: node ' + scriptsDir + '/workflow-state.mjs record ' + node.id
+  console.log('COMMAND entry: node "' + scriptsDir + '/workflow-guard.mjs" entry ' + node.id);
+  console.log('COMMAND exit: node "' + scriptsDir + '/workflow-guard.mjs" exit ' + node.id + ' --apply');
+  console.log('COMMAND record: node "' + scriptsDir + '/workflow-state.mjs" record ' + node.id
     + " '{\"summary\":\"<完成摘要>\"}'");
 }
 
