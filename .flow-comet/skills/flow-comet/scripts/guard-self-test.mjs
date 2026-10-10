@@ -3003,9 +3003,18 @@ const TASK7_AUTHORITY_CONSTANT = 'TASK7_REQUIRED';
 const TASK7_MARKER_RE = /7\s*个?\s*字段|7 required fields|7-field set/;
 // 斜杠枚举形态（`` `name` / `read_files` / … ``；同时覆盖无引号的裸形态）。
 const TASK7_RUN_RE = /(?:`?[a-z][a-z_]*`?[ \t]*\/[ \t]*)+`?[a-z][a-z_]*`?/g;
-// 枚举处数基线 = 当前技能树「标记 + 枚举」同场的处数（plan 册 3 处 + task 册 1 处）。处数下降即
-// 「枚举被删 / 被改写成非斜杠形态」——与集合改名一样必须让锚红；新增处不受限（同样逐处对账）。
-const TASK7_ENUMERATION_MIN = 4;
+// **已知站点基线**（每站 = 该枚举行上独有的判别句式，即站点的身份）：锚**逐站点**断言「该站点仍持与派生
+// 集合一致的枚举」——任一处丢失（改成指针 / 删掉该行 / 抽掉枚举）即红；**新增站点不受限**（自动进入逐处
+// 对账，不因新增而红）。身份**不用 `file:line`**：行号随无关编辑漂移，会把「无关改动」误判成「站点丢失」
+// （同族自锁——报错方向指向锚而非真实原因）。**站点集合是处数的唯一事实源**（无独立处数常量）。
+const TASK7_KNOWN_SITES = [
+  { rel: 'flow-comet-plan/SKILL.md', anchor: '| TASK.md | 至少一个' },
+  { rel: 'flow-comet-plan/SKILL.md', anchor: 'Populate 7 required fields per task' },
+  { rel: 'flow-comet-plan/SKILL.md', anchor: 'the 7-field set' },
+  { rel: 'flow-comet-task/SKILL.md', anchor: '**每任务 7 字段**' },
+];
+// 探针期望哨兵：该探针要求**零问题**（合法新增站点不得被判违规）——与「必报某问题」的期望区分。
+const TASK7_ZERO_PROBLEMS = '（该探针要求零问题）';
 
 // 从实现侧常量**派生** 7 字段集合（null = 权威常量缺席 ⇒ 由调用方报红，锚里不写第二份集合）。
 function task7RequiredSet(guardSrc) {
@@ -3033,44 +3042,66 @@ function task7ConstantNames(src, fieldSet) {
   return names;
 }
 
+// 单行「标记同行枚举」提取（逐处对账与站点断言共用同一实现）：返回 { raw, tokens } 列表。
+function task7LineEnumerationTokens(fieldSet, line) {
+  if (!TASK7_MARKER_RE.test(line)) return [];
+  const out = [];
+  for (const raw of line.match(TASK7_RUN_RE) ?? []) {
+    const tokens = raw.split('/').map((token) => token.trim().replace(/`/g, ''));
+    if (tokens.length < 3) continue;
+    // 只认「字段枚举」：过半数 token 落在派生集合内（同行的其它斜杠短语不参与）。
+    if (tokens.filter((token) => fieldSet.includes(token)).length * 2 <= tokens.length) continue;
+    out.push({ raw, tokens });
+  }
+  return out;
+}
+
 // 技能树「7 字段」枚举行扫描（真实判据与反向构造探针共用同一实现；每处记原始片段供探针精确改行）。
 function task7EnumerationRuns(fieldSet, docs) {
   const runs = [];
   for (const [rel, text] of docs) {
     text.split(/\r?\n/).forEach((line, index) => {
-      const marker = line.match(TASK7_MARKER_RE);
-      if (!marker) return;
-      for (const raw of line.match(TASK7_RUN_RE) ?? []) {
-        const tokens = raw.split('/').map((token) => token.trim().replace(/`/g, ''));
-        if (tokens.length < 3) continue;
-        // 只认「字段枚举」：过半数 token 落在派生集合内（同行的其它斜杠短语不参与）。
-        if (tokens.filter((token) => fieldSet.includes(token)).length * 2 <= tokens.length) continue;
-        runs.push({ rel, line: index + 1, raw, tokens, marker: /字段/.test(marker[0]) ? 'zh' : 'en' });
+      for (const { raw, tokens } of task7LineEnumerationTokens(fieldSet, line)) {
+        runs.push({ rel, line: index + 1, raw, tokens });
       }
     });
   }
   return runs;
 }
 
-// 判据：每处「7 字段」枚举必须与派生集合**逐字同序同值**；双语形态与处数基线同守。
+// 已知站点上的枚举行（站点在场断言与站点级反向构造探针共用同一实现）。
+function task7KnownSiteRuns(fieldSet, docs) {
+  const runs = [];
+  for (const site of TASK7_KNOWN_SITES) {
+    const text = docs.get(site.rel);
+    if (typeof text !== 'string') continue;
+    text.split(/\r?\n/).forEach((line, index) => {
+      if (!line.includes(site.anchor)) return;
+      for (const { raw, tokens } of task7LineEnumerationTokens(fieldSet, line)) {
+        runs.push({ site, rel: site.rel, line: index + 1, raw, tokens });
+      }
+    });
+  }
+  return runs;
+}
+
+// 判据：① 每处「标记同行枚举」须与派生集合**逐字同序同值**（含新增站点）；② 每个**已知站点**仍须持有
+// 这样的枚举——站点丢失即红（这才是「处数下降即红」的站点级实现，且不与「新增站点」对冲）。
 function task7EnumerationProblems(fieldSet, docs) {
   const out = [];
-  const runs = task7EnumerationRuns(fieldSet, docs);
   const expected = fieldSet.join('/');
-  for (const run of runs) {
+  for (const run of task7EnumerationRuns(fieldSet, docs)) {
     const actual = run.tokens.join('/');
     if (actual !== expected) {
       out.push(run.rel + ':' + run.line + ' 的 7 字段枚举与实现集合不一致（文本 ' + actual + ' / 实现 ' + expected + '）');
     }
   }
-  if (runs.length < TASK7_ENUMERATION_MIN) {
-    out.push('技能树「7 字段」标记同行枚举处数 ' + runs.length + ' < 基线 ' + TASK7_ENUMERATION_MIN
-      + '（枚举被删或被改写成非斜杠形态即失锁；受检处: ' + (runs.map((run) => run.rel + ':' + run.line).join(', ') || '无') + '）');
+  const siteRuns = task7KnownSiteRuns(fieldSet, docs);
+  for (const site of TASK7_KNOWN_SITES) {
+    if (siteRuns.some((run) => run.site === site)) continue;
+    out.push('已知 7 字段站点「' + site.anchor + '」（' + site.rel + '）的标记同行枚举不在场'
+      + '（该行已改为指针 / 被删 / 枚举被抽掉，或已不含实现集合的多数项）');
   }
-  if (!runs.some((run) => run.marker === 'zh')) out.push('7 字段枚举缺中文形态（双语覆盖不足）');
-  if (!runs.some((run) => run.marker === 'en')) out.push('7 字段枚举缺英文形态（双语覆盖不足）');
-  const holders = [...new Set(runs.map((run) => run.rel))];
-  if (holders.length < 2) out.push('7 字段枚举只落在 ' + holders.length + ' 份文本（plan / task 两册各持一处是基线）');
   return out;
 }
 
@@ -3117,31 +3148,49 @@ function task7SetAnchorProblems({ guardSrc, stateSrc, docs }) {
   return out;
 }
 
-// 反向构造（`LESSONS` L-106：判别句式 + 反向构造；与真实判据同一实现驱动）：逐项把锚的输入改坏 ⇒ 必红。
+// 反向构造（`LESSONS` L-106：判别句式 + 反向构造；与真实判据同一实现驱动）：逐项把锚的输入改坏 ⇒ 必红；
+// 另含**判别力方向**探针——合法新增站点必须**零问题**（防「全局计数地板」式自锁：以总量取红的探针会让
+// 「新增一处」与「丢失一处」对冲，且把报错方向指向探针而非真实原因）。
 function task7ReverseConstructionProblems(fieldSet, docs, sources) {
   const out = [];
   const replaceRunLine = (targetDocs, run, mutate) => new Map(targetDocs).set(run.rel,
     (targetDocs.get(run.rel) ?? '').split(/\r?\n/)
       .map((line, index) => (index === run.line - 1 ? mutate(line) : line)).join('\n'));
-  const sample = task7EnumerationRuns(fieldSet, docs).find((run) => run.tokens.includes('depends_on'));
+  const dropRunLine = (targetDocs, run) => new Map(targetDocs).set(run.rel,
+    (targetDocs.get(run.rel) ?? '').split(/\r?\n/)
+      .filter((line, index) => index !== run.line - 1).join('\n'));
+  const appendSite = (targetDocs, rel, fields) => new Map(targetDocs).set(rel,
+    (targetDocs.get(rel) ?? '') + '\n（反向构造：新增站点）7 字段：' + fields.join(' / ') + '\n');
+  const sample = task7KnownSiteRuns(fieldSet, docs)[0];
   if (sample === undefined) {
-    out.push('7 字段枚举反向构造的前提不成立：技能树里找不到含 depends_on 的枚举');
+    out.push('7 字段枚举反向构造的前提不成立：已知站点上找不到与派生集合一致的枚举');
     return out;
   }
-  const at = sample.rel + ':' + sample.line;
+  const siteLabel = '已知站点「' + sample.site.anchor + '」（' + sample.rel + ':' + sample.line + '）';
   const probes = [
-    ['把 ' + at + ' 的 depends_on 换成 id',
+    // 站点丢失面（「处数下降即红」的站点级实现）：抽掉该站点整处枚举 / 删掉整行 ⇒ 必红
+    ['抽掉 ' + siteLabel + ' 的整处枚举（改指针形态）',
+      () => task7EnumerationProblems(fieldSet, replaceRunLine(docs, sample,
+        (line) => line.replace(sample.raw, '（反向构造：改为指针形态）'))), '已知 7 字段站点'],
+    ['删掉 ' + siteLabel + ' 整行',
+      () => task7EnumerationProblems(fieldSet, dropRunLine(docs, sample)), '已知 7 字段站点'],
+    // 新增站点面（自锁回归）：合法新增必须零问题；错误新增仍必红
+    ['新增一处集合正确的站点（不得被判违规）',
+      () => task7EnumerationProblems(fieldSet, appendSite(docs, sample.rel, fieldSet)), TASK7_ZERO_PROBLEMS],
+    ['新增一处集合错误的新站点',
+      () => task7EnumerationProblems(fieldSet, appendSite(docs, sample.rel,
+        fieldSet.map((field) => (field === 'depends_on' ? 'id' : field)))), '与实现集合不一致'],
+    // 集合分叉面
+    ['把 ' + siteLabel + ' 的 depends_on 换成 id',
       () => task7EnumerationProblems(fieldSet, replaceRunLine(docs, sample,
         (line) => line.replace(sample.raw, sample.raw.replace('depends_on', 'id')))), '与实现集合不一致'],
-    ['抽掉 ' + at + ' 的整处枚举',
-      () => task7EnumerationProblems(fieldSet, replaceRunLine(docs, sample,
-        (line) => line.replace(sample.raw, '（反向构造：抽掉枚举）'))), '枚举处数'],
     ['把 id 追加成第 8 项',
       () => task7EnumerationProblems(fieldSet, replaceRunLine(docs, sample,
         (line) => line.replace(sample.raw, sample.raw + ' / id'))), '与实现集合不一致'],
     ['实现侧常量把 depends_on 改成 dependsOn',
       () => task7EnumerationProblems(fieldSet.map((field) => (field === 'depends_on' ? 'dependsOn' : field)), docs),
       '与实现集合不一致'],
+    // 文案派生面（⑧）：构造方式回退 / 派生被抽掉 ⇒ 必红
     ['文案回写字面集合',
       () => task7MessageDerivationProblems(fieldSet, { ...sources,
         'workflow-guard.mjs': sources['workflow-guard.mjs'].replace(
@@ -3151,9 +3200,18 @@ function task7ReverseConstructionProblems(fieldSet, docs, sources) {
         'workflow-state.mjs': sources['workflow-state.mjs'].replace("replanTask7Required.join('/')", "'7 字段'") }),
       '未从判据常量派生'],
   ];
+  // 探针判定只看**相对当前文本的新增问题**（`ambient` 差分）：工作树本身已红时，探针不得把
+  // 「环境里已有的问题」记成自己的判别力（否则报错方向会指向探针，而不是指向真实原因）。
+  const ambient = task7EnumerationProblems(fieldSet, docs);
   for (const [label, probe, expected] of probes) {
-    if (!probe().some((problem) => problem.includes(expected))) {
-      out.push('反向构造判别力缺失（' + label + ' 未被判违规）');
+    const added = probe().filter((problem) => !ambient.includes(problem));
+    const passed = expected === TASK7_ZERO_PROBLEMS
+      ? added.length === 0
+      : added.some((problem) => problem.includes(expected));
+    if (!passed) {
+      out.push(expected === TASK7_ZERO_PROBLEMS
+        ? '反向构造判别力缺失（' + label + ' 被判违规——锚对合法扩展自锁）: ' + added.join('; ')
+        : '反向构造判别力缺失（' + label + ' 未被判违规）');
     }
   }
   return out;
