@@ -2715,6 +2715,51 @@ function skillTreeReferenceProblems(docs, skillsRoot) {
   return problems;
 }
 
+// **成对展开文件的指针不得指错**（场景 184 附 2；纯函数 + 合成输入可驱动）：本仓是「`SKILL.md` 手写区 +
+// **同目录同名 `GUIDANCE.md` 展开版**」的成对形态——册首注释里的**裸文件名**指本册自己那份。修"死引用"
+// 的过程里四册曾被改成指向**入口册**的展开版（`../flow-comet/reference/entry-detail.md`）：目标确实存在、
+// 上面那条解析判据全绿，但它**指错了文档**，各册展开版里的独有内容从此再无入口可读——「**能解析 ≠ 指对了**」。
+// 判据 = ① 同目录有同名 `GUIDANCE.md` 的册 ⇒ 指针必须是裸文件名 `GUIDANCE.md`（本册那份）；
+// ② 入口册（无同名展开版，展开版为 `reference/entry-detail.md`）⇒ **唯一例外**，指针必须是该文件；
+// ③ 既无同名展开版又非入口册的册 ⇒ 不允许出现该指针（在册里指谁都是指错）。
+// 取目标用**注释整句的捕获组**（不是"是否含 `GUIDANCE.md` 子串"）——裸子串判据会被同文件其它
+// 上下文满足而恒真空过（L-106），下文的反向构造即证「换成别处的展开版必红」。
+const PAIRED_GUIDANCE_ENTRY_REL = 'flow-comet/SKILL.md';
+const PAIRED_GUIDANCE_ENTRY_TARGET = 'reference/entry-detail.md';
+const PAIRED_GUIDANCE_POINTER_RE = /<!--\s*手写区详细协议见\s*([^\s（）]+)（可选阅读）\s*-->/g;
+function pairedGuidancePointerProblems(docs, skillsRoot) {
+  const problems = [];
+  for (const [rel, text] of docs) {
+    if (!rel.endsWith('/SKILL.md')) continue;
+    const dir = path.posix.dirname(rel);
+    if (dir.includes('/')) continue; // 只判册根层（`<册>/SKILL.md`）
+    const targets = [...text.matchAll(PAIRED_GUIDANCE_POINTER_RE)].map((match) => match[1]);
+    const hasOwnGuidance = fs.existsSync(path.join(skillsRoot, dir, 'GUIDANCE.md'));
+    if (targets.length === 0) {
+      if (hasOwnGuidance) {
+        problems.push(rel + ' 缺「手写区详细协议见 …」指针（同目录有 GUIDANCE.md ⇒ 指针须在场且指向本册）');
+      }
+      continue;
+    }
+    if (targets.length > 1) {
+      problems.push(rel + ' 的「手写区详细协议见 …」指针出现 ' + targets.length + ' 处（只允许 1 处）');
+    }
+    const expected = hasOwnGuidance ? 'GUIDANCE.md'
+      : (rel === PAIRED_GUIDANCE_ENTRY_REL ? PAIRED_GUIDANCE_ENTRY_TARGET : null);
+    if (expected === null) {
+      problems.push(rel + ' 的「手写区详细协议见 …」指针指向 ' + targets.join(' / ')
+        + '，但该册既无同目录 GUIDANCE.md 也非入口册（无配对展开版即不得保留指针）');
+      continue;
+    }
+    for (const target of targets) {
+      if (target !== expected) {
+        problems.push(rel + ' 的「手写区详细协议见 ' + target + '」指错文档（应为 ' + expected + '）');
+      }
+    }
+  }
+  return problems;
+}
+
 // CC 行判级升格 + 三平台 cwd 语义对照（场景 184 的 ⑦ 使用；纯函数 + 合成文本面可驱动）：判级由
 // 「未覆盖」升为「证实」后，落地形态由**两处**承载——入口册（用户可见总表 + 已知边界旁的三平台
 // `cwd` 对照，7 条字面量是能力契约锚，本批明文保留）与 `reference/platform-facts.md`（原
@@ -9366,6 +9411,9 @@ const SCENARIOS = [
   //      随文件移出改锚到 `reference/platform-facts.md`，并断言各引用册指针在场。
   //   ⑧ 文本↔实现一致（文本不得说谎）：**保留原样**——它不是「多册同文字」类锁，本批不动。
   //   附：技能树正文的相对路径引用必须解析得到（本轮 `GUIDANCE.md` 改名曾造成 5 册死引用而零红灯）。
+  //   附 2：成对展开文件的指针**不得指错**——「能解析 ≠ 指对了」：同目录带同名 `GUIDANCE.md` 的册，
+  //     册首「手写区详细协议见 …」必须是本册裸文件名；入口册（展开版为 `reference/entry-detail.md`）
+  //     是唯一例外。解析判据只证明目标**存在**，证明不了**指对了**——本附与之互补。
   // 文本存在级断言（结构级由其余场景族覆盖）。
   // in-place 扩展（委托契约纪律文本锁）：两册（委托册 / 串行册）各自须含四属性契约、提交面 pathspec
   // 纪律与集成纪律的**要点句与条件句**；旧表述零残留（无条件 worktree 口号仅允许被反驳形态、
@@ -9466,6 +9514,64 @@ const SCENARIOS = [
           const dropped = new Map(treeDocs).set(sampleRel, sampleText.split(sampleRef).join(''));
           if (skillTreeReferenceProblems(dropped, skillsRootAbs).some((p) => p.startsWith(sampleRel))) {
             problems.push('相对路径引用判据误报（抽掉引用后仍报该册）: ' + sampleRel);
+          }
+        }
+        // —— 附 2：成对展开文件的指针不得指错（上一条只证明目标**存在**，本条判**指对了**）——
+        {
+          const bookRels = [...treeDocs.keys()].filter((rel) => rel.endsWith('/SKILL.md')
+            && !path.posix.dirname(rel).includes('/'));
+          const hasOwnGuidance = (rel) => fs.existsSync(path.join(skillsRootAbs, path.posix.dirname(rel), 'GUIDANCE.md'));
+          const pairedRels = bookRels.filter(hasOwnGuidance);
+          const entryHasOwn = hasOwnGuidance(PAIRED_GUIDANCE_ENTRY_REL);
+          // 前提：成对形态在场（否则判据空转）+ 入口册的例外目标在场（入口册无同名展开版时）。
+          if (pairedRels.length === 0) {
+            problems.push('成对指针判据的前提不成立：技能树里找不到任何带同目录 GUIDANCE.md 的册');
+          }
+          if (!entryHasOwn
+            && !fs.existsSync(path.join(skillsRootAbs, path.posix.dirname(PAIRED_GUIDANCE_ENTRY_REL),
+              PAIRED_GUIDANCE_ENTRY_TARGET))) {
+            problems.push('成对指针判据的前提不成立：入口册展开版 ' + PAIRED_GUIDANCE_ENTRY_TARGET + ' 不在场（唯一例外无处指向）');
+          }
+          problems.push(...pairedGuidancePointerProblems(treeDocs, skillsRootAbs));
+          // 反向构造（同一判据驱动）：① 带同目录 GUIDANCE 的册改指**入口册**展开版 ⇒ 必报「指错文档」；
+          // ② 改指**另一册**的展开版 ⇒ 必报（另一侧形态，证明判据不靠"是否含 GUIDANCE.md 子串"恒真）；
+          // ③ 入口册改指裸文件名 ⇒ 必报（唯一例外侧）；④ 抽掉指针 ⇒ 必报缺指针；⑤ 同册第二处指针 ⇒ 必报
+          // 重复；⑥ 无配对展开版的册带指针 ⇒ 必报；⑦ 无配对展开版的册不带指针 ⇒ **零误报**（判据不恒真）。
+          const pointerProbe = (rel, target) => new Map(treeDocs).set(rel,
+            (treeDocs.get(rel) ?? '').replace(PAIRED_GUIDANCE_POINTER_RE,
+              '<!-- 手写区详细协议见 ' + target + '（可选阅读） -->'));
+          const probeRel = pairedRels.find((rel) => rel !== PAIRED_GUIDANCE_ENTRY_REL);
+          const otherProbeRel = pairedRels.find((rel) => rel !== probeRel);
+          const quietRel = bookRels.find((rel) => rel !== PAIRED_GUIDANCE_ENTRY_REL && !hasOwnGuidance(rel));
+          const probeText = treeDocs.get(probeRel) ?? '';
+          const pointerLine = probeText.match(PAIRED_GUIDANCE_POINTER_RE)?.[0] ?? '';
+          if (!probeRel || !otherProbeRel || !quietRel || !pointerLine) {
+            problems.push('成对指针反向构造的前提不成立：成对册不足两册 / 无无配对展开版的非入口册 / 探针册无指针行');
+          } else {
+            const probes = [
+              ['册改指入口册展开版', pointerProbe(probeRel, '../flow-comet/reference/entry-detail.md'), '指错文档'],
+              ['册改指另一册展开版', pointerProbe(probeRel,
+                '../' + path.posix.dirname(otherProbeRel) + '/GUIDANCE.md'), '指错文档'],
+              ['抽掉指针', new Map(treeDocs).set(probeRel, probeText.replace(PAIRED_GUIDANCE_POINTER_RE, '')),
+                '缺「手写区详细协议见 …」指针'],
+              ['同册第二处指针', new Map(treeDocs).set(probeRel, probeText + '\n' + pointerLine), '只允许 1 处'],
+              ['无配对展开版的册带指针', new Map(treeDocs).set(quietRel,
+                (treeDocs.get(quietRel) ?? '') + '\n' + pointerLine), '既无同目录 GUIDANCE.md 也非入口册'],
+            ];
+            if (!entryHasOwn) {
+              probes.push(['入口册改指裸文件名', pointerProbe(PAIRED_GUIDANCE_ENTRY_REL, 'GUIDANCE.md'), '指错文档']);
+            }
+            for (const [label, probed, expected] of probes) {
+              if (!pairedGuidancePointerProblems(probed, skillsRootAbs).some((p) => p.includes(expected))) {
+                problems.push('反向构造判别力缺失（成对指针: ' + label + ' 未被判违规）');
+              }
+            }
+          }
+          if (!quietRel) {
+            problems.push('成对指针反向构造的前提不成立：找不到无配对展开版的非入口册');
+          } else if (pairedGuidancePointerProblems(new Map([[quietRel,
+            (treeDocs.get(quietRel) ?? '').replace(PAIRED_GUIDANCE_POINTER_RE, '')]]), skillsRootAbs).length !== 0) {
+            problems.push('成对指针判据误报（无配对展开版且不带指针的册被判违规）: ' + quietRel);
           }
         }
       }

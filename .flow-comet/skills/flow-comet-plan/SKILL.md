@@ -3,7 +3,7 @@ name: flow-comet-plan
 description: "Use only when explicitly invoked as /flow-comet-plan or routed by the flow-comet entry/runtime to the plan Node; complete Plan for flow-comet. Do not use for ordinary standalone tasks or as the workflow entry."
 ---
 
-<!-- 手写区详细协议见 ../flow-comet/reference/entry-detail.md（可选阅读） -->
+<!-- 手写区详细协议见 GUIDANCE.md（可选阅读） -->
 
 # Plan
 
@@ -19,9 +19,9 @@ Responsibility: 拆原子任务（XML 格式）+ 波次划分。生成 TASK.md�
 
 | 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
 |------|-------------------------------|-----------------------------------|
-| TASK.md | 至少一个 `<task>` 块 + 每个任务含 `<verify>` 字段 | `id` / `name` / `read_files` / `write_files` / `action` / `done` 等字段（执行纪律，review 把关） |
+| TASK.md | 至少一个 `<task>` 块 + 每个任务含 `<verify>` 字段 + 新格式任务的 7 字段在场（`name` / `read_files` / `write_files` / `action` / `verify` / `done` / `depends_on`） | 任务规模 / 粒度 / 字段内容质量（模板要求，guard 不拦）——**填得好不好**由 review 把关 |
 
-guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
+guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B：任务块结构、每任务 `<verify>`、**新格式任务的 7 字段在场**都由 guard 拦（新 change 缺任一 = 出口 BLOCKED；旧格式模板 / 旧 change 渐进 WARN）；「填得好不好」——字段内容质量与任务粒度——由 review 把关。
 
 > **模板权威**：本节点产出工件的段形唯一权威 = `flow-kit/templates/**`；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
 
@@ -161,7 +161,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record plan '{"summary
 | Guardrail ID | Label | Validation Type |
 |--------------|-------|-----------------|
 | `plan-artifacts` | TASK.md exists with XML tasks | artifact-exists |
-| `task-fields-complete` | All tasks have 7 required fields | 执行纪律（review 把关），guard 不校验 |
+| `task-fields-complete` | All tasks have 7 required fields | 结构在场（新格式任务缺任一字段 = 出口 BLOCKED；旧格式模板 / 旧 change 渐进 WARN）——**字段内容质量**由 review 把关 |
 | `write-files-safe` | No write_files in DESIGN forbidden list | 执行纪律（review 把关），guard 不校验 |
 | `has-parallel` | At least 1 [P] task (if applicable) | 执行纪律（review 把关），guard 不校验 |
 
