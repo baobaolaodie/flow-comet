@@ -22,6 +22,7 @@
 //      purge 语义/描述符驱动/dsh 平台断言/loader 版本戳重装断言/hook 注入形态无关断言与旧条目幂等升级/
 //      旧布局状态迁移后状态可读与流程可继续/契约核对 CLI 参数化目录解析与缺省回退回归锚/
 //      分发面包体边界·可发布性清单与 bin 双入口（权威源真跑·副本回传显式「不适用」结果标记）
+//      ·安装器升级路径清理（权威源已删除或改名的生成物不得残留·反向探针 + 幂等）
 //      与 init 词元红线）
 //   L. 执行遗漏防护（entry 进入证据/空退出豁免/空仓库提示）
 //
@@ -735,6 +736,101 @@ function assertInitTokenContract(installer, cwd) {
     fs.rmSync(emptyDir, { recursive: true, force: true });
   }
   console.log('  init 词元: `init --help` 退 0 且含 fcomet init / 裸形态行为不变 / 变形·重复词元 4 例退 1 且报未知参数 ✓');
+}
+
+// ---------- 安装器升级路径清理断言助手（生成物镜像面：权威源已删除 / 改名的条目不得残留） ----------
+
+// 升级路径清理断言（分发面：安装器的生成物镜像面）——判据 = 真实安装器命令序列 + 文件系统事实，
+// 而不是「安装器退出码为 0」（后者会被「安装照常成功」恒真满足，清理实现整体缺席也不会变红）：
+//   ① 删该删的：镜像目录内「权威源已不存在」的条目，重装后必须消失（含清空后的目录本身）；
+//   ② 不该删的必不删（反向探针，逐条）：权威源仍存在的文件 / 用户自有技能（无 flow-comet
+//      命名空间）/ 命名空间内但权威源整个技能目录不在场（安装器没有生成清单，无法判定该目录
+//      「确由上次生成写入」）/ copyTree 目标但路径不含命名空间（.claude/rules）/ 项目根用户文件；
+//   ③ 输出可核对：被清理条目逐条打印；④ 幂等：第二次重装零清理项、零报错。
+// 夹具名刻意取合成形态，不占用真实工件名（将来权威源重新引入同名文件时夹具前提不失配）——
+// 同时以「权威源确实不含该名」为前提断言，防止夹具退化成恒真空过。
+function assertInstallerUpgradePathCleanup(scratch) {
+  const pkgCtx = resolvePackageContext();
+  if (pkgCtx.kind === 'copy') {
+    console.log('  不适用（安装副本侧：' + pkgCtx.reason + '）——安装器升级路径清理断言仅权威源侧可判，本项计通过');
+    return;
+  }
+  const installer = path.join(pkgCtx.root, 'scripts', 'prepare-env.mjs');
+  const target = path.join(scratch, 'upgrade-path');
+  fs.mkdirSync(target, { recursive: true });
+  seedForeignFlowKit(target); // 预置同名非上游目录：flow-kit 走「已跳过」路径，零网络接触
+  const skillsRoot = path.join(target, '.claude', 'skills');
+  const runInstall = () => {
+    const res = spawnSync(process.execPath, [installer, '--target', target, '--platform', 'claude-code'], {
+      cwd: pkgCtx.root, encoding: 'utf8', timeout: 120000,
+    });
+    return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+  };
+  const mustNotExist = (rel, label) => {
+    const p = path.join(skillsRoot, rel);
+    if (fs.existsSync(p)) throw new Error('升级重装后权威源已不存在的生成物仍残留（' + label + '）: ' + p);
+  };
+  const mustExist = (rel, label) => {
+    const p = path.join(skillsRoot, rel);
+    if (!fs.existsSync(p)) throw new Error('升级重装误删了不该删的条目（' + label + '）: ' + p);
+  };
+  // ① 首次安装（等价「上一代生成物」：内容与权威源一致）
+  assertExit(runInstall(), 0);
+  // ② 夹具：模拟上一代生成、而权威源已删除 / 改名的三类形态（文件 / 嵌套文件 / 目录树 + 空目录）
+  const staleFile = 'flow-comet/legacy-guidance.md';
+  const staleNested = 'flow-comet/reference/legacy-notes.md';
+  const staleDir = 'flow-comet/reference/legacy-subagents';
+  const staleEmptyDir = 'flow-comet/reference/legacy-empty';
+  writeFile(target, path.posix.join('.claude/skills', staleFile), 'stale\n');
+  writeFile(target, path.posix.join('.claude/skills', staleNested), 'stale\n');
+  writeFile(target, path.posix.join('.claude/skills', staleDir, 'author.md'), 'stale\n');
+  fs.mkdirSync(path.join(skillsRoot, staleEmptyDir), { recursive: true });
+  for (const rel of [staleFile, staleNested, staleDir, staleEmptyDir]) {
+    if (fs.existsSync(path.join(pkgCtx.root, '.flow-comet', 'skills', rel))) {
+      throw new Error('夹具前提失效：权威源已含 ' + rel + '——请改用其它合成名');
+    }
+  }
+  // ③ 反向探针夹具（不该删的必不删）
+  writeFile(target, '.claude/skills/my-own-skill/SKILL.md', 'user skill\n');
+  writeFile(target, '.claude/skills/flow-comet-fork/SKILL.md', 'unattributable dir\n');
+  writeFile(target, '.claude/rules/user-rule.md', 'user rule\n');
+  writeFile(target, 'USER_KEEP.md', 'user file\n');
+  // ④ 升级重装（真实安装器第二次运行同一平台）
+  const upgrade = runInstall();
+  assertExit(upgrade, 0);
+  // ⑤ 删该删的（三类形态逐条）
+  mustNotExist(staleFile, '改名残留文件');
+  mustNotExist(staleNested, '移出残留文件');
+  mustNotExist(staleDir, '残留目录（内容清空后应一并移除）');
+  mustNotExist(staleEmptyDir, '残留空目录');
+  // ⑥ 不该删的必不删（逐条反向探针）
+  mustExist('flow-comet/reference/entry-detail.md', '权威源仍存在的文件');
+  mustExist('flow-comet/SKILL.md', '权威源技能主体');
+  mustExist('my-own-skill/SKILL.md', '用户自有技能（无 flow-comet 命名空间）');
+  mustExist('flow-comet-fork/SKILL.md', '命名空间内但权威源整个技能目录不在场——归属不可判定，fail-closed 保留');
+  if (!fs.existsSync(path.join(target, '.claude', 'rules', 'user-rule.md'))) {
+    throw new Error('白名单外生成面（.claude/rules）的用户文件被误删');
+  }
+  if (!fs.existsSync(path.join(target, 'USER_KEEP.md'))) throw new Error('项目根用户文件被误删');
+  // ⑦ 输出可核对：被清理条目逐条打印（人可复核「删了什么」）
+  for (const rel of [staleFile, staleNested, staleDir, staleEmptyDir]) {
+    const name = path.posix.basename(rel);
+    if (!upgrade.output.includes(name)) {
+      throw new Error('清理输出未逐条打印被清理条目（缺 ' + name + '）:\n' + upgrade.output);
+    }
+  }
+  // ⑦b 播报标记钉死：⑧ 的「重跑无清理项」是**负向**断言——标记一旦改名它便恒真；正向锚在此
+  // （标记须在首次升级输出里在场），标记契约的漂移因此必然红，而不是静默失效。
+  if (!upgrade.output.includes('镜像清理: 已删除')) {
+    throw new Error('升级重装输出缺清理播报标记「镜像清理: 已删除」:\n' + upgrade.output);
+  }
+  // ⑧ 幂等：第二次重装零清理项、零报错（重复跑不删多、不重复打印）
+  const again = runInstall();
+  assertExit(again, 0);
+  if (again.output.includes('镜像清理')) {
+    throw new Error('幂等失配：第二次重装仍报告清理动作:\n' + again.output);
+  }
+  console.log('  升级路径清理: 残留 4 项消失（文件 / 嵌套文件 / 目录树 / 空目录）+ 6 条反向探针保留 + 输出可核对 + 幂等 ✓');
 }
 
 // ---------- 桥接 loader 版本戳重装断言助手（临时 DSH_HOME 重装链路） ----------
@@ -6370,10 +6466,12 @@ const TEST_ITEMS = [
     },
   },
 
-  // K18: 分发面（npm 包形态）——可发布性清单 + 包体边界 + bin 双入口 + init 词元形态与红线。
+  // K18: 分发面（npm 包形态）——可发布性清单 + 包体边界 + bin 双入口 + init 词元形态与红线
+  // + 安装器升级路径清理（镜像目录内「权威源已不存在」的条目在重装后必须消失：含反向探针
+  // 与幂等断言；`.claude/rules` 一类无命名空间的生成面 fail-closed 不纳入删除面）。
   // 权威源侧真跑断言（npm pack --dry-run 的真实产物清单在场才算通过）；安装副本侧输出显式
   // 「不适用」行并回传同语义的结果标记计通过（禁止静默跳过——「未验证 ≠ 通过」）。
-  // 四组断言见上方同名助手；结果标记由运行器按环境判据断言（distributionSurface 契约）。
+  // 各断言见上方同名助手；结果标记由运行器按环境判据断言（distributionSurface 契约）。
   {
     name: 'K18 分发面:环境判据与包体边界·bin 双入口(权威源真跑/副本显式不适用)与 init 词元红线',
     distributionSurface: true,
@@ -6383,6 +6481,9 @@ const TEST_ITEMS = [
       assertPackageContextJudgment(dir);
       const pkgCtx = resolvePackageContext();
       const marker = DISTRIBUTION_MARKERS[pkgCtx.kind];
+      // 安装器分发面断言（升级路径清理）：权威源侧真跑真实命令序列，安装副本侧输出显式
+      // 「不适用」行（两侧都出声——副本侧不是静默跳过）；故置于环境分支之前调用。
+      assertInstallerUpgradePathCleanup(dir);
       if (pkgCtx.kind === 'copy') {
         console.log('  不适用（安装副本侧：' + pkgCtx.reason + '）——包体边界/bin 断言仅权威源侧可判，本项计通过');
         return marker;

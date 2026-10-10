@@ -87,6 +87,60 @@ jobs:
           node .claude/skills/flow-comet/scripts/workflow-state.mjs status | grep -q "no-change"             || { echo "冒烟失败 / smoke failed: status"; exit 1; }
           node .claude/skills/flow-comet/scripts/workflow-state.mjs init smoke-check --init-skip | grep -q "Initialized"             || { echo "冒烟失败 / smoke failed: init"; exit 1; }
           node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry open | grep -q "ENTRY OK"             || { echo "冒烟失败 / smoke failed: entry"; exit 1; }
+      - name: '升级路径残留清理 / Upgrade-path stale artifact cleanup'
+        run: |
+          # 判据(与本地系统测试集 K18 的升级路径清理断言是同一条判据的两份**独立实现**——
+          # 改动任一侧都必须同时改另一侧,不共享实现;比对项:① 该删的三类残留 ② 该留的四类
+          # 反向探针 ③ 清理输出逐条可核对 ④ 重复运行零清理项):
+          #   安装器只覆盖不删除 ⇒ 权威源里已删除 / 改名的文件会在目标副本里永久残留。
+          #   本步构造「上一代生成物」夹具并重装,断言残留消失、不该删的仍在(防止误删用户文件)。
+          WORK="$RUNNER_TEMP/upgrade-path"
+          SK="$WORK/.claude/skills"
+          rm -rf "$WORK"
+          mkdir -p "$WORK"
+          # 预置同名非上游目录:flow-kit 获取走「已存在但非上游克隆,已跳过」路径,本步零网络接触
+          mkdir -p "$WORK/flow-kit"
+          git -C "$WORK/flow-kit" init -q
+          git -C "$WORK/flow-kit" remote add origin https://example.com/not-flow-kit.git
+          node scripts/prepare-env.mjs --target "$WORK" --platform claude-code >/dev/null
+          # 夹具①:权威源已不存在的三类形态(文件 / 嵌套在镜像子目录的文件 / 目录树 + 空目录)
+          mkdir -p "$SK/flow-comet/reference/legacy-subagents" "$SK/flow-comet/reference/legacy-empty"
+          touch "$SK/flow-comet/legacy-guidance.md"
+          touch "$SK/flow-comet/reference/legacy-notes.md"
+          touch "$SK/flow-comet/reference/legacy-subagents/author.md"
+          # 夹具②:反向探针(不该删的——用户自有技能 / 命名空间内但权威源整个技能目录不在场 /
+          # 无命名空间的生成面 / 项目根用户文件)
+          mkdir -p "$SK/my-own-skill" "$SK/flow-comet-fork" "$WORK/.claude/rules"
+          touch "$SK/my-own-skill/SKILL.md"
+          touch "$SK/flow-comet-fork/SKILL.md"
+          touch "$WORK/.claude/rules/user-rule.md"
+          touch "$WORK/USER_KEEP.md"
+          LOG="$RUNNER_TEMP/upgrade-path.log"
+          node scripts/prepare-env.mjs --target "$WORK" --platform claude-code > "$LOG"
+          # ① 该删的必删
+          for stale in flow-comet/legacy-guidance.md flow-comet/reference/legacy-notes.md flow-comet/reference/legacy-subagents flow-comet/reference/legacy-empty; do
+            if [ -e "$SK/$stale" ]; then echo "残留未清理 / stale artifact not removed: $stale"; exit 1; fi
+          done
+          # ② 不该删的必不删(逐条反向探针)
+          for keep in flow-comet/SKILL.md flow-comet/reference/entry-detail.md my-own-skill/SKILL.md flow-comet-fork/SKILL.md; do
+            if [ ! -e "$SK/$keep" ]; then echo "误删 / wrongly removed: $keep"; exit 1; fi
+          done
+          if [ ! -e "$WORK/.claude/rules/user-rule.md" ]; then echo "误删 / wrongly removed: .claude/rules/user-rule.md"; exit 1; fi
+          if [ ! -e "$WORK/USER_KEEP.md" ]; then echo "误删 / wrongly removed: USER_KEEP.md"; exit 1; fi
+          # ③ 清理输出逐条可核对(人可复核删了什么)
+          for name in legacy-guidance.md legacy-notes.md legacy-subagents legacy-empty; do
+            grep -q "$name" "$LOG" || { echo "清理输出未逐条打印 / cleanup log missing entry: $name"; exit 1; }
+          done
+          # ③b 播报标记钉死:④ 的「重跑无清理项」是**负向**断言——标记一旦改名它便恒真;
+          # 正向锚在此,标记契约漂移必然红而不是静默失效
+          grep -q "镜像清理: 已删除" "$LOG" || { echo "清理播报标记缺失 / cleanup marker missing"; exit 1; }
+          # ④ 幂等:重复运行零清理项且零报错
+          node scripts/prepare-env.mjs --target "$WORK" --platform claude-code > "$RUNNER_TEMP/upgrade-path-2.log"
+          if grep -q "镜像清理" "$RUNNER_TEMP/upgrade-path-2.log"; then
+            echo "幂等失配 / not idempotent: cleanup reported on re-run"; exit 1;
+          fi
+          echo "upgrade-path cleanup OK: stale artifacts removed, keepers preserved, log verifiable, re-run clean"
+
       - name: '分发面断言 / Distribution surface (pack boundary & bin)'
         run: |
           # shellcheck disable=SC2016
