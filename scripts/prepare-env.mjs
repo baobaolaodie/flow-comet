@@ -1713,13 +1713,16 @@ async function main() {
     if (skillNames.length === 0) {
       throw new Error(`权威源中未找到任何 flow-comet* skill 目录: ${skillsSrc}`);
     }
+    // 3.1 定向清理**先于复制**：镜像目录内「权威源已不存在」的条目（升级路径残留——见
+    // cleanStaleMirrorEntries 的白名单与 fail-closed 说明；只覆盖不删除会让改名/移出的文件在
+    // 副本里永久残留）。清理抛 EACCES / EPERM / EBUSY 时安装中止（错误 fatal，不吞）——此时
+    // 尚未复制任何技能树，副本里不会留下「已复制但平台路径未替换、版本标识未写」的半成品树；
+    // 清理判据只比对权威源与镜像现状，与复制是否已发生无关，故前置不改变删除面。
+    cleanStaleMirrorEntries(skillsSrc, skillRoot, skillNames, target);
     for (const name of skillNames) {
       copyTree(path.join(skillsSrc, name), path.join(skillRoot, name), stats);
       stats.skills.push(name);
     }
-    // 3.5 定向清理：镜像目录内「权威源已不存在」的条目（升级路径残留——见 cleanStaleMirrorEntries
-    // 的白名单与 fail-closed 说明；只覆盖不删除会让改名/移出的文件在副本里永久残留）
-    cleanStaleMirrorEntries(skillsSrc, skillRoot, skillNames, target);
     const replacedFiles = applyPathReplacements(skillRoot, platform.pathReplacements);
     if (replacedFiles > 0) {
       console.log(`[flow-comet] 平台路径替换: ${replacedFiles} 个 .md 文件（${platform.label} 命令路径）`);
