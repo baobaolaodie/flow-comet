@@ -28,22 +28,17 @@ This node finalizes a completed change by extracting reusable lessons from the d
 
 1. **Scan SUMMARY.md files for lessons**: Read all `<task-id>-SUMMARY.md` files in `.specs/<change-id>/`. Focus on "decisions and deviations" sections. Also check any remaining `<task-id>-PROGRESS.md` "excluded solutions" sections.
 
-2. **Apply nomination criteria**: For each potential lesson:
-   - Debugging/trial-and-error took > 30 minutes -> nominate.
-   - Error is not task-specific, other tasks would hit it too -> nominate.
-   - Reasonable probability of retry within 6 months -> nominate.
-   - Otherwise do not nominate (avoid pollution of LESSONS.md).
+2. **Apply nomination criteria**: 三条判据（含「其余一律不提名」兜底）见 `flow-comet-integration` 册的「LESSONS 提名」段——该段是判据的**单一权威**，本册不复述、以该册为准。
 
 3. **Add qualifying lessons to LESSONS.md**: For each nominated lesson:
-   - Assign next `L-NNN` number (continuing from existing).
    - Fill required fields: label, keywords, applicable tech stack, status (active).
-   - Save to `.specs/LESSONS.md` — 新条目编号 = 当前最大编号 + 1,插入 `## 条目区` 末尾(文件内升序,继续现有编号),**禁止文件尾追加与乱序插入**。
-   - **Do NOT archive LESSONS.md** — it is a project-level permanent file that accumulates across changes.
+   - 写回 `.specs/LESSONS.md`；编号、插入位置与「不随 change 归档」的判定**以 `flow-comet-integration` 册「LESSONS 提名」段为准**（本册不复述）。
 
-4. **Check existing lessons for superseded/deprecated**: Scan existing active lessons in `.specs/LESSONS.md`. If this change's lessons or outcomes supersede or deprecate existing entries, update their status accordingly.
+4. **Check existing lessons for superseded/deprecated**: 扫描 `.specs/LESSONS.md` 的 active 条目，被本次结论取代 / 废弃的更新其状态——判定口径以 `flow-comet-integration` 册「LESSONS 提名」段为准（本册不复述）。
 
 5. **Compile the leftover issues list (problem-handling principle)**: Before the move, collect everything that remains open or known-limited in this change:
    - REVIEW.md findings marked `[转待办]` (deferred — recorded but not fixed) plus any known limitations captured during the change.
+   - **需要模板时**读 `reference/KNOWN-ISSUES-template.md`（当你归档时要编遗留清单、需要模板时读它）——含「遗留清单」段骨架与「使用说明」（模板本身是分发产物：零过程代号；归档实例不受此限）。
    - Write `.specs/<change-id>/KNOWN-ISSUES.md` — each entry: issue description, why it was deferred, and where it may surface again.
    - The file moves with the change into `.specs/archive/<YYYY-MM-DD>-<change-id>/` (archived alongside the other artifacts), so the leftover issues never silently vanish after archive.
    - If there are no leftovers, still state that explicitly in the file (e.g. "无遗留问题" / "No known leftover issues").
@@ -64,7 +59,7 @@ This node finalizes a completed change by extracting reusable lessons from the d
    Archived to .specs/archive/<YYYY-MM-DD>-<change-id>/
    遗留问题清单（KNOWN-ISSUES.md，随工件归档）: <each leftover issue, or 无>
    This change's DESIGN section 9 has N architecture sedimentation candidates, deferred for batch sync.
-   Recommended: run A-evolve workflow after >= 5 changes or 60 days to batch-review and patch CONTEXT.md.
+   Recommended: run A-evolve workflow after >= 5 个带 `§9` 的归档 change，或距上次沉淀 > 60 天（阈值与入口册 `EVOLVE-DUE` 提示同口径）——批量 review 后 patch CONTEXT.md。
    ```
 
 10. **Record evidence**: Run `node .claude/skills/flow-comet/scripts/workflow-state.mjs record archive '<evidence JSON>'` to record archive completion.
@@ -73,18 +68,14 @@ This node finalizes a completed change by extracting reusable lessons from the d
 
 ### 归档后发现缺陷（受控重入）
 
-归档已 entry 但归档移动尚未发生（`.specs/<change-id>/` 仍在原位、`status !== 'completed'`）时，review / verify / 执行阶段发现的新缺陷按下列边界处置：
+归档已 entry 但归档移动尚未发生（`.specs/<change-id>/` 仍在原位、`status !== 'completed'`）时，review / verify / 执行阶段发现的新缺陷**不得**在归档阶段就地修完——工作归属须先受控归位回既有生命周期，再按修复回路收口。要点：
 
-- **未移动** → 受控重入：由用户显式授权后运行
-
-  ```bash
-  node .claude/skills/flow-comet/scripts/workflow-state.mjs reenter <target> --authorized-by <source> --reason <text> [--continue-round <n>]
-  ```
-
-  目标限 `execute` / `subagent-execute` / `review` / `verify` 之一；每次调用都需要用户显式授权，每 change 上限 3 轮（达上限后凭显式续轮授权 `--continue-round <n>`（n ≥ 已用轮次 + 1）可继续并计入下一轮）；命令先自动落 state 备份快照（`.specs/<change-id>/.reentry-backups/`），再转移工作归属，并打印 `REENTRY: archive → <target>（授权源 <source>；第 n/3 轮；备份 <file>）` 与 `REASON: <text>` 行（续轮审计行为 `第 n 轮（显式授权续轮，上限 3）`）。缺授权、目标越界、超上限或归档移动已发生一律 BLOCKED（state 字节零改写），不会静默跳过。
+- **未移动** → 受控重入：由用户显式授权后运行 `node .claude/skills/flow-comet/scripts/workflow-state.mjs reenter <target> --authorized-by <source> --reason <text>`——目标限 `execute` / `subagent-execute` / `review` / `verify` 之一；每次调用都需要用户显式授权，每 change 上限 3 轮（达上限后凭显式续轮授权 `--continue-round <n>`，n ≥ 已用轮次 + 1）；命令先自动落 state 备份快照（`.specs/<change-id>/.reentry-backups/`），再转移工作归属；缺授权、目标越界、超上限或归档移动已发生一律 BLOCKED（state 字节零改写），不会静默跳过。
 - **已移动 / 已合并** → 人工处置或新 change：归档移动已发生（`.specs/archive/<日期>-<change-id>/`）或 change 已 `completed` / 已合并时，受控重入不适用（不承诺把文件搬回原位）；走人工处置，或把修复放进新 change / hotfix，并在遗留清单里登记指针。
+- **写权限顺序（先转移后写 TASK）**：先跑 `reenter` 完成转移（写入权限随即跟随目标节点），再在目标节点权限内追加 Fix 任务 / 修改工件；archive 阶段 hook 对 change 目录只放行 `KNOWN-ISSUES.md` 这一个精确文件（另有 `.specs/archive/`、`.specs/CHANGELOG.md`、`.specs/LESSONS.md`、`STATE.md`），**不要试图在归档阶段先写 TASK.md**。
+- **回源路径不因归档而放宽**：修复回路本身不变——回到 `execute` 生命周期时照样跑完四类出口，随后**回源节点跑出口**（`entry <源节点>` → `exit <源节点> --apply`）；受控重入只改工作归属，不写任何闭合标记，也**禁止绕过**目标节点入口 / 出口与源节点出口门禁。
 
-**写权限顺序（先转移后写 TASK）**：archive 阶段 hook 对 change 目录只放行 `KNOWN-ISSUES.md` 这一个精确文件（另有 `.specs/archive/`、`.specs/CHANGELOG.md`、`.specs/LESSONS.md`、`STATE.md`），TASK.md 的修复任务写入不在放行面内。顺序固定为：先跑 `reenter` 完成转移（写入权限随即跟随目标节点），再在目标节点权限内追加 Fix 任务 / 修改工件——不要试图在 archive 阶段先写 TASK.md。若重入成功后追加任务失败，用 `next` / `status` 核对归属；重复调用同一目标为空操作（不备份、不计数、不改写 state）。
+**何时读完整规格**：要核对完整边界——命令全形与三态审计行（`REENTRY:` / `FIX-BATCH: 归位` / `RETURN:`）的区分、备份快照与 sha256 指纹、续轮授权形态与轮次记账、重复调用同一目标的空操作语义、「已移动 / 已合并」的处置面——读 `reference/fix-loop.md`（**当你归档后发现缺陷、要把工作归属受控归位回既有生命周期时读它**）。
 
 ### 归档提交（R4.1 交付闭环）
 

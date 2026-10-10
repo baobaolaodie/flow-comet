@@ -2410,7 +2410,9 @@ async function main() {
         if (broken.length > 0) {
           if (planNewFormat) {
             if (isNewChange(state)) {
-              console.error('BLOCKED: TASK.md 任务缺 7 字段（name/read_files/write_files/action/verify/done/depends_on）: ' + broken.join('; '));
+              // 文案的集合字符串**从判据常量派生**（不得在此再写一遍字面集合——第二处同口径表达会在
+              // 判据演进时静默落后于实现；构造方式不改变渲染结果）。
+              console.error('BLOCKED: TASK.md 任务缺 7 字段（' + TASK7_REQUIRED.join('/') + '）: ' + broken.join('; '));
               console.error('恢复: 对照 flow-kit/templates/TASK.md 补齐每个 <task> 的缺字段后重试 exit；新 change 强制任务块结构完整');
               process.exit(1);
             }

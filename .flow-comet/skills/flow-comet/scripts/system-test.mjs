@@ -22,6 +22,7 @@
 //      purge 语义/描述符驱动/dsh 平台断言/loader 版本戳重装断言/hook 注入形态无关断言与旧条目幂等升级/
 //      旧布局状态迁移后状态可读与流程可继续/契约核对 CLI 参数化目录解析与缺省回退回归锚/
 //      分发面包体边界·可发布性清单与 bin 双入口（权威源真跑·副本回传显式「不适用」结果标记）
+//      ·安装器升级路径清理（权威源已删除或改名的生成物不得残留·反向探针 + 幂等）
 //      与 init 词元红线）
 //   L. 执行遗漏防护（entry 进入证据/空退出豁免/空仓库提示）
 //
@@ -600,6 +601,42 @@ function assertPackageBoundary(root) {
   console.log('  包体边界: ' + files.length + ' 文件，技能树 ' + skillsOnDisk.length + ' 文件逐文件在场，私有面零命中 ✓');
 }
 
+// ③b workflow contract 检查（`comet-check.mjs`）：包内**必含面清单**的自动锚。它此前全仓无任何
+// CI/套件调用——清单漂移没有红灯（本批移出两个参考文件时只能靠手工同步清单）。判据两层：
+//   ① 真实执行权威源的该脚本 → exit 0 且输出 `workflow-contract-ok`（清单与真实树一致）；
+//   ② 反向构造（同一判据驱动）：把技能树复制到临时载体、删掉清单里的一个必含文件 → 该脚本必须
+//      exit ≠ 0 且报 `Missing required workflow contract files`（清单是真在查，不是恒真输出）。
+function assertWorkflowContractCheck(scratch) {
+  const checker = path.join(__dirname, 'comet-check.mjs');
+  if (!fs.existsSync(checker)) throw new Error('缺少 comet-check.mjs: ' + checker);
+  const runChecker = (script) => {
+    const res = spawnSync(process.execPath, [script], { cwd: path.dirname(script), encoding: 'utf8', timeout: 60000 });
+    return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+  };
+  const real = runChecker(checker);
+  if (real.status !== 0 || !real.output.includes('workflow-contract-ok')) {
+    throw new Error('comet-check.mjs 未通过（包内必含面清单与真实树漂移）\n退出码 ' + real.status
+      + '\n输出:\n' + real.output);
+  }
+  // 反向构造：临时载体上一份技能树副本，删掉清单中的一个必含文件 ⇒ 必失败。
+  const carrier = path.join(scratch, 'contract-carrier');
+  fs.mkdirSync(carrier, { recursive: true });
+  fs.cpSync(path.join(__dirname, '..', '..'), path.join(carrier, 'skills'), { recursive: true });
+  const copiedChecker = path.join(carrier, 'skills', 'flow-comet', 'scripts', 'comet-check.mjs');
+  const removedRel = path.join('skills', 'flow-comet', 'reference', 'decision-points.md');
+  const removedAbs = path.join(carrier, removedRel);
+  if (!fs.existsSync(removedAbs)) {
+    throw new Error('反向构造前提不成立：清单必含文件不在副本内 ' + removedRel);
+  }
+  fs.rmSync(removedAbs);
+  const broken = runChecker(copiedChecker);
+  if (broken.status === 0 || !broken.output.includes('Missing required workflow contract files')) {
+    throw new Error('comet-check.mjs 反向构造判别力缺失（删掉清单必含文件后仍通过）\n退出码 '
+      + broken.status + '\n输出:\n' + broken.output);
+  }
+  console.log('  workflow contract 检查: 权威源 exit 0（workflow-contract-ok）+ 缺件副本必失败 ✓');
+}
+
 // ③ bin 双入口契约：两个命令名同指同一安装器（同一实现 = 行为一致的结构事实）。返回安装器绝对路径。
 function assertBinContract(pkg, root) {
   const binTarget = 'scripts/prepare-env.mjs';
@@ -699,6 +736,214 @@ function assertInitTokenContract(installer, cwd) {
     fs.rmSync(emptyDir, { recursive: true, force: true });
   }
   console.log('  init 词元: `init --help` 退 0 且含 fcomet init / 裸形态行为不变 / 变形·重复词元 4 例退 1 且报未知参数 ✓');
+}
+
+// ---------- 安装器升级路径清理断言助手（生成物镜像面：权威源已删除 / 改名的条目不得残留） ----------
+
+// 升级路径清理断言（分发面：安装器的生成物镜像面）——判据 = 真实安装器命令序列 + 文件系统事实，
+// 而不是「安装器退出码为 0」（后者会被「安装照常成功」恒真满足，清理实现整体缺席也不会变红）：
+//   ① 删该删的：镜像目录内「权威源已不存在」的条目，重装后必须消失（含清空后的目录本身）；
+//   ② 不该删的必不删（反向探针，逐条）：权威源仍存在的文件 / 用户自有技能（无 flow-comet
+//      命名空间）/ 命名空间内但权威源整个技能目录不在场（安装器没有生成清单，无法判定该目录
+//      「确由上次生成写入」）/ copyTree 目标但路径不含命名空间（.claude/rules）/ 项目根用户文件；
+//   ③ 输出可核对：被清理条目逐条打印；④ 幂等：第二次重装零清理项、零报错。
+// 夹具名刻意取合成形态，不占用真实工件名（将来权威源重新引入同名文件时夹具前提不失配）——
+// 同时以「权威源确实不含该名」为前提断言，防止夹具退化成恒真空过。
+function assertInstallerUpgradePathCleanup(scratch) {
+  const pkgCtx = resolvePackageContext();
+  if (pkgCtx.kind === 'copy') {
+    console.log('  不适用（安装副本侧：' + pkgCtx.reason + '）——安装器升级路径清理断言仅权威源侧可判，本项计通过');
+    return;
+  }
+  const installer = path.join(pkgCtx.root, 'scripts', 'prepare-env.mjs');
+  const target = path.join(scratch, 'upgrade-path');
+  fs.mkdirSync(target, { recursive: true });
+  seedForeignFlowKit(target); // 预置同名非上游目录：flow-kit 走「已跳过」路径，零网络接触
+  const skillsRoot = path.join(target, '.claude', 'skills');
+  const runInstall = () => runInstallerOnce(installer, target);
+  const mustNotExist = (rel, label) => {
+    const p = path.join(skillsRoot, rel);
+    if (fs.existsSync(p)) throw new Error('升级重装后权威源已不存在的生成物仍残留（' + label + '）: ' + p);
+  };
+  const mustExist = (rel, label) => {
+    const p = path.join(skillsRoot, rel);
+    if (!fs.existsSync(p)) throw new Error('升级重装误删了不该删的条目（' + label + '）: ' + p);
+  };
+  // ① 首次安装（等价「上一代生成物」：内容与权威源一致）
+  assertExit(runInstall(), 0);
+  // ② 夹具：模拟上一代生成、而权威源已删除 / 改名的三类形态（文件 / 嵌套文件 / 目录树 + 空目录）
+  const staleFile = 'flow-comet/legacy-guidance.md';
+  const staleNested = 'flow-comet/reference/legacy-notes.md';
+  const staleDir = 'flow-comet/reference/legacy-subagents';
+  const staleEmptyDir = 'flow-comet/reference/legacy-empty';
+  writeFile(target, path.posix.join('.claude/skills', staleFile), 'stale\n');
+  writeFile(target, path.posix.join('.claude/skills', staleNested), 'stale\n');
+  writeFile(target, path.posix.join('.claude/skills', staleDir, 'author.md'), 'stale\n');
+  fs.mkdirSync(path.join(skillsRoot, staleEmptyDir), { recursive: true });
+  for (const rel of [staleFile, staleNested, staleDir, staleEmptyDir]) {
+    if (fs.existsSync(path.join(pkgCtx.root, '.flow-comet', 'skills', rel))) {
+      throw new Error('夹具前提失效：权威源已含 ' + rel + '——请改用其它合成名');
+    }
+  }
+  // ③ 反向探针夹具（不该删的必不删）
+  writeFile(target, '.claude/skills/my-own-skill/SKILL.md', 'user skill\n');
+  writeFile(target, '.claude/skills/flow-comet-fork/SKILL.md', 'unattributable dir\n');
+  writeFile(target, '.claude/rules/user-rule.md', 'user rule\n');
+  writeFile(target, 'USER_KEEP.md', 'user file\n');
+  // ④ 升级重装（真实安装器第二次运行同一平台）
+  const upgrade = runInstall();
+  assertExit(upgrade, 0);
+  // ⑤ 删该删的（三类形态逐条）
+  mustNotExist(staleFile, '改名残留文件');
+  mustNotExist(staleNested, '移出残留文件');
+  mustNotExist(staleDir, '残留目录（内容清空后应一并移除）');
+  mustNotExist(staleEmptyDir, '残留空目录');
+  // ⑥ 不该删的必不删（逐条反向探针）
+  mustExist('flow-comet/reference/entry-detail.md', '权威源仍存在的文件');
+  mustExist('flow-comet/SKILL.md', '权威源技能主体');
+  mustExist('my-own-skill/SKILL.md', '用户自有技能（无 flow-comet 命名空间）');
+  mustExist('flow-comet-fork/SKILL.md', '命名空间内但权威源整个技能目录不在场——归属不可判定，fail-closed 保留');
+  if (!fs.existsSync(path.join(target, '.claude', 'rules', 'user-rule.md'))) {
+    throw new Error('白名单外生成面（.claude/rules）的用户文件被误删');
+  }
+  if (!fs.existsSync(path.join(target, 'USER_KEEP.md'))) throw new Error('项目根用户文件被误删');
+  // ⑦ 输出可核对：被清理条目逐条打印（人可复核「删了什么」）
+  for (const rel of [staleFile, staleNested, staleDir, staleEmptyDir]) {
+    const name = path.posix.basename(rel);
+    if (!upgrade.output.includes(name)) {
+      throw new Error('清理输出未逐条打印被清理条目（缺 ' + name + '）:\n' + upgrade.output);
+    }
+  }
+  // ⑦b 播报标记钉死：⑧ 的「重跑无清理项」是**负向**断言——标记一旦改名它便恒真；正向锚在此
+  // （标记须在首次升级输出里在场），标记契约的漂移因此必然红，而不是静默失效。
+  if (!upgrade.output.includes('镜像清理: 已删除')) {
+    throw new Error('升级重装输出缺清理播报标记「镜像清理: 已删除」:\n' + upgrade.output);
+  }
+  // ⑧ 幂等：第二次重装零清理项、零报错（重复跑不删多、不重复打印）
+  const again = runInstall();
+  assertExit(again, 0);
+  if (again.output.includes('镜像清理')) {
+    throw new Error('幂等失配：第二次重装仍报告清理动作:\n' + again.output);
+  }
+  console.log('  升级路径清理: 残留 4 项消失（文件 / 嵌套文件 / 目录树 / 空目录）+ 6 条反向探针保留 + 输出可核对 + 幂等 ✓');
+}
+
+// 安装器单次真实运行（两处安装器分发面断言共用同一命令形态——同一知识只有一份实现）
+function runInstallerOnce(script, target) {
+  const res = spawnSync(process.execPath, [script, '--target', target, '--platform', 'claude-code'], {
+    cwd: target, encoding: 'utf8', timeout: 120000,
+  });
+  return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+}
+
+// 把 linkPath 置为指向 targetDir 的链接（夹具构造与清理共用）：递归删除会跟随链接目标，
+// 故先按链接自身解链，再删可能残留的普通目录。
+function replaceWithLink(linkPath, targetDir) {
+  try {
+    if (fs.lstatSync(linkPath).isSymbolicLink()) fs.unlinkSync(linkPath);
+  } catch { /* 不在场——无需解链 */ }
+  fs.rmSync(linkPath, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+  fs.symlinkSync(targetDir, linkPath, 'junction');
+}
+
+// 镜像清理的**根级** fail-closed 断言（同上一条属同一分发面项）——判据 = 真实安装器命令序列 + 文件系统事实：
+//   根以下的条目层检查拦不住「镜像根自身是链接」：readdir 会跟随进链接目标，清理动作落在**项目之外**，
+//   而播报打印的仍是项目内的表象路径（真实落点不可见）。两条判据各需一个变体驱动，缺任一变体则
+//   对应那条判据整体缺席也不会有红灯：
+//     变体 A「镜像根自身是指向项目外目录的链接」 ⇒ 根级链接判据（不跟随）；
+//     变体 B「父级目录是链接、镜像根自身是普通目录」 ⇒ 真实路径包含性判据（词法路径仍在项目内，
+//       只有解析真实路径才能证否；此变体下 A 判据必然不命中，故它是包含性判据的独占探针）。
+//   断言（两变体同）：链接目标内的项目外文件**必不消失** + 输出含逐条保留原因 + 重复运行零删除项。
+//   反向构造见 assertMirrorRootReverseConstruction（同一判据驱动，证明断言不恒真空过）。
+function assertMirrorRootLinkFailClosed(scratch, pkgCtx) {
+  if (pkgCtx.kind === 'copy') {
+    console.log('  不适用（安装副本侧：' + pkgCtx.reason + '）——镜像清理根级判据的探针仅权威源侧可判，本组计通过');
+    return;
+  }
+  const installer = path.join(pkgCtx.root, 'scripts', 'prepare-env.mjs');
+  // 变体 A：镜像根自身 = 指向项目外目录的链接
+  const targetA = path.join(scratch, 'mirror-root-link-self');
+  const outsideA = path.join(scratch, 'mirror-root-link-self-outside');
+  seedForeignFlowKit(targetA);
+  writeFile(outsideA, 'EXTERNAL-NOTE.md', 'out-of-tree user content\n');
+  writeFile(outsideA, path.posix.join('nested', 'DEEP-NOTE.md'), 'out-of-tree user content\n');
+  replaceWithLink(path.join(targetA, '.claude', 'skills', 'flow-comet'), outsideA);
+  // 变体 B：父级目录 = 链接（镜像根自身是目标内的普通目录）
+  const targetB = path.join(scratch, 'mirror-root-link-ancestor');
+  const outsideB = path.join(scratch, 'mirror-root-link-ancestor-outside');
+  seedForeignFlowKit(targetB);
+  writeFile(outsideB, path.posix.join('flow-comet', 'EXTERNAL-NOTE.md'), 'out-of-tree user content\n');
+  replaceWithLink(path.join(targetB, '.claude', 'skills'), outsideB);
+  const mirrorB = path.join(targetB, '.claude', 'skills', 'flow-comet');
+  if (!fs.existsSync(mirrorB) || fs.lstatSync(mirrorB).isSymbolicLink()) {
+    throw new Error('变体 B 前提失效：镜像根自身不是普通目录（应只有父级是链接）: ' + mirrorB);
+  }
+  const variants = [
+    { label: '镜像根自身为链接', target: targetA, outsideFile: path.join(outsideA, 'EXTERNAL-NOTE.md'), reasonPattern: /镜像根是符号链接\/junction/ },
+    { label: '镜像根真实路径越界', target: targetB, outsideFile: path.join(outsideB, 'flow-comet', 'EXTERNAL-NOTE.md'), reasonPattern: /越出目标项目根/ },
+  ];
+  for (const v of variants) assertLinkTargetPreserved(installer, v);
+  assertMirrorRootReverseConstruction(scratch, pkgCtx, installer, variants);
+  console.log('  镜像清理根级判据: 根自身为链接 / 真实路径越界 两变体下项目外文件保全 + 保留原因可见 + 幂等；'
+    + '反向构造（判据改恒真）两变体必被越界删除 ✓');
+}
+
+// 「链接目标内的项目外文件必不消失」断言（两变体同形）：项目外文件仍在 + 输出含逐条保留原因 +
+// 原因指明命中的判据 + 重复运行零删除项且文件仍在（保留是**可见的决定**，不是静默跳过）。
+function assertLinkTargetPreserved(installer, { label, target, outsideFile, reasonPattern }) {
+  const first = runInstallerOnce(installer, target);
+  assertExit(first, 0);
+  if (!fs.existsSync(outsideFile)) {
+    throw new Error(label + '：镜像清理越界删除了项目之外的文件（真实落点 ' + outsideFile + '）\n输出:\n' + first.output);
+  }
+  if (!first.output.includes('镜像清理保留')) {
+    throw new Error(label + '：输出未逐条打印保留原因——fail-closed 保留必须是可见的决定\n输出:\n' + first.output);
+  }
+  if (!reasonPattern.test(first.output)) {
+    throw new Error(label + '：保留原因未指明命中判据（缺 ' + reasonPattern + '）\n输出:\n' + first.output);
+  }
+  const second = runInstallerOnce(installer, target);
+  assertExit(second, 0);
+  if (second.output.includes('镜像清理: 已删除')) {
+    throw new Error(label + '：重复运行仍报告删除动作（幂等失配）\n输出:\n' + second.output);
+  }
+  if (!fs.existsSync(outsideFile)) {
+    throw new Error(label + '：重复运行后项目之外的文件消失（' + outsideFile + '）');
+  }
+}
+
+// 反向构造（同一判据驱动）：把两处根级判据分别中和为恒真后重跑同一变体 ⇒ 项目外文件**必被删除**；
+// 判据落点漂移（判据句被改写）时「前提不成立」先行报错，避免变异无处落点而假绿。
+// 变异副本建在临时载体上并自带捆绑源（安装器从**自身位置**推导权威树，故载体需含 .flow-comet/skills）。
+function assertMirrorRootReverseConstruction(scratch, pkgCtx, installer, variants) {
+  const carrier = path.join(scratch, 'mirror-root-carrier');
+  const original = fs.readFileSync(installer, 'utf8');
+  const neutralizedContainment = original.replace(
+    'if (!isRealPathInside(dstRoot, projectRoot)) {',
+    'if (false && !isRealPathInside(dstRoot, projectRoot)) {'
+  );
+  if (neutralizedContainment === original) {
+    throw new Error('反向构造前提不成立：真实路径包含性判据的落点未找到（判据句已漂移，变异无处落点）');
+  }
+  const neutralized = neutralizedContainment.replace(
+    'if (rootStat.isSymbolicLink()) {',
+    'if (false && rootStat.isSymbolicLink()) {'
+  );
+  if (neutralized === neutralizedContainment) {
+    throw new Error('反向构造前提不成立：根级链接判据的落点未找到（判据句已漂移，变异无处落点）');
+  }
+  fs.mkdirSync(path.join(carrier, 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(carrier, 'scripts', 'prepare-env.mjs'), neutralized, 'utf8');
+  fs.cpSync(path.join(pkgCtx.root, '.flow-comet', 'skills'), path.join(carrier, '.flow-comet', 'skills'), { recursive: true });
+  const mutated = path.join(carrier, 'scripts', 'prepare-env.mjs');
+  for (const v of variants) {
+    const res = runInstallerOnce(mutated, v.target);
+    assertExit(res, 0);
+    if (fs.existsSync(v.outsideFile)) {
+      throw new Error(v.label + ' 反向构造判别力缺失：判据被中和后项目之外的文件仍在（断言可能是恒真空过）\n输出:\n' + res.output);
+    }
+  }
 }
 
 // ---------- 桥接 loader 版本戳重装断言助手（临时 DSH_HOME 重装链路） ----------
@@ -974,6 +1219,310 @@ function assertNotNodeLine(res, nodeId) {
   if (new RegExp('^NODE: ' + nodeId + '$', 'm').test(res.output)) {
     throw new Error('输出不应包含行 NODE: ' + nodeId + '（exit ' + res.status + '）\n实际输出:\n' + res.output);
   }
+}
+
+// ---------- explain <node> 契约对账（节点现问） ----------
+// 期望值一律**现场从协议 JSON 派生**（本段不手抄第二份字段表）：解析实现输出后逐字段与
+// `nodes[] / outputSchemas[]` 的声明比对。行前缀与分隔符是契约形态的一部分——不可解析即报问题
+// （不静默跳过）。反向构造探针复用同一判据（声明侧抽掉一条 guardrail / 一个 artifact / 改描述）。
+
+// ARTIFACT 行：`<id> [<kind>] required|optional → <路径 | 路径>`（kind 可缺省；无路径 → 未声明路径）。
+function parseExplainArtifactLine(value) {
+  const arrow = value.split(' → ');
+  if (arrow.length !== 2) throw new Error('ARTIFACT 行缺「… → 路径」形态: ' + value);
+  const requiredMatch = arrow[0].match(/ (required|optional)$/);
+  if (!requiredMatch) throw new Error('ARTIFACT 行缺 required/optional 标注: ' + value);
+  const head = arrow[0].slice(0, arrow[0].length - requiredMatch[0].length);
+  const kindMatch = head.match(/^(.*) \[([^\]]+)\]$/);
+  return {
+    id: kindMatch ? kindMatch[1] : head,
+    kind: kindMatch ? kindMatch[2] : null,
+    required: requiredMatch[1] === 'required',
+    paths: arrow[1] === '(未声明路径)' ? [] : arrow[1].split(' | '),
+  };
+}
+
+// GUARDRAIL 行：`<id> | <label> | <validation>`。
+function parseExplainGuardrailLine(value) {
+  const parts = value.split(' | ');
+  if (parts.length !== 3) throw new Error('GUARDRAIL 行缺三段（id | label | validation）: ' + value);
+  return { id: parts[0], label: parts[1], validation: parts[2] };
+}
+
+// REQUIRED-SKILL 行：`<skill> | scope=<…> | enforcement=<…> | reason=<…>`。
+function parseExplainSkillLine(value) {
+  const parts = value.split(' | ');
+  if (parts.length !== 4) throw new Error('REQUIRED-SKILL 行缺四段（skill | scope= | enforcement= | reason=）: ' + value);
+  const [skill, scope, enforcement, reason] = parts;
+  if (!scope.startsWith('scope=') || !enforcement.startsWith('enforcement=') || !reason.startsWith('reason=')) {
+    throw new Error('REQUIRED-SKILL 行的键名形态不符: ' + value);
+  }
+  return { skill, scope: scope.slice(6), enforcement: enforcement.slice(12), reason: reason.slice(7) };
+}
+
+function parseExplainOutput(output) {
+  const parsed = {
+    attributes: {}, schemas: [], artifacts: [], evidence: [], guardrails: [], guardrailsNone: false,
+    skills: [], skillsNone: false, commands: [],
+  };
+  let schemaIndex = -1;
+  for (const rawLine of String(output).split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line === '') continue;
+    const value = line.slice(line.indexOf(': ') + 2);
+    if (line.startsWith('NODE: ')) parsed.attributes.node = value;
+    else if (line.startsWith('LABEL: ')) parsed.attributes.label = value;
+    else if (line.startsWith('KIND: ')) parsed.attributes.kind = value;
+    else if (line.startsWith('DISABLED: ')) parsed.attributes.disabled = value;
+    else if (line.startsWith('OUTPUT-SCHEMA: ')) {
+      parsed.schemas.push(value);
+      schemaIndex += 1;
+      parsed.artifacts.push([]);
+      parsed.evidence.push([]);
+    } else if (line.startsWith('ARTIFACT: ')) {
+      if (schemaIndex < 0) throw new Error('ARTIFACT 行先于 OUTPUT-SCHEMA 行: ' + line);
+      parsed.artifacts[schemaIndex].push(parseExplainArtifactLine(value));
+    } else if (line.startsWith('EVIDENCE: ')) {
+      if (schemaIndex < 0) throw new Error('EVIDENCE 行先于 OUTPUT-SCHEMA 行: ' + line);
+      parsed.evidence[schemaIndex].push(value);
+    } else if (line.startsWith('GUARDRAIL: ')) {
+      if (value === '(none)') parsed.guardrailsNone = true;
+      else parsed.guardrails.push(parseExplainGuardrailLine(value));
+    } else if (line.startsWith('REQUIRED-SKILL: ')) {
+      if (value === '(none)') parsed.skillsNone = true;
+      else parsed.skills.push(parseExplainSkillLine(value));
+    } else if (line.startsWith('COMMAND ')) parsed.commands.push(line);
+    else throw new Error('explain 输出含未识别的行形态: ' + line);
+  }
+  return parsed;
+}
+
+// 期望值比对（解析结果 vs 协议声明；两侧同源，锚里不手抄字段表）。
+function expectExplainField(problems, nodeId, actual, declared, field) {
+  if (actual !== declared) {
+    problems.push('节点 ' + nodeId + ' 的 ' + field + ' 与协议声明不一致: 输出 '
+      + JSON.stringify(actual) + ' / 声明 ' + JSON.stringify(declared));
+  }
+}
+
+// ① outputSchema 名与描述 + ② 每个 artifact 的 id·kind·required·路径（pathBase: specs-root ⇒ .specs/
+// 前缀）与每个 evidence 的 id (required)。
+function explainSchemaProblems(node, parsed, schemaById) {
+  const problems = [];
+  const declaredSchemas = node.outputSchemas ?? [];
+  const expectedSchemaLines = declaredSchemas.length === 0
+    ? ['(none)']
+    : declaredSchemas.map((schemaId) => {
+      const schema = schemaById.get(schemaId);
+      return schemaId + (schema && schema.description ? ' — ' + schema.description : '');
+    });
+  expectExplainField(problems, node.id, parsed.schemas.join(' ␟ '), expectedSchemaLines.join(' ␟ '), 'OUTPUT-SCHEMA 行');
+  declaredSchemas.forEach((schemaId, index) => {
+    const schema = schemaById.get(schemaId);
+    const declaredArtifacts = (schema?.artifacts ?? []).map((artifact) => ({
+      id: artifact.id ?? '(unnamed)',
+      kind: artifact.kind ?? null,
+      required: artifact.required !== false,
+      paths: (artifact.paths ?? []).map((declaredPath) =>
+        (artifact.pathBase === 'specs-root' ? '.specs/' : '') + String(declaredPath)),
+    }));
+    const actualArtifacts = parsed.artifacts[index] ?? [];
+    const artifactsMatch = actualArtifacts.length === declaredArtifacts.length
+      && actualArtifacts.every((actual, position) => actual.id === declaredArtifacts[position].id
+        && actual.kind === declaredArtifacts[position].kind
+        && actual.required === declaredArtifacts[position].required
+        && actual.paths.join(' | ') === declaredArtifacts[position].paths.join(' | '));
+    if (!artifactsMatch) {
+      problems.push('节点 ' + node.id + '/' + schemaId + ' 的 artifact 对账不一致: 输出 '
+        + JSON.stringify(actualArtifacts) + ' / 声明 ' + JSON.stringify(declaredArtifacts));
+    }
+    const declaredEvidence = (schema?.evidence ?? []).length === 0
+      ? '(none)'
+      : (schema.evidence ?? []).map((evidence) =>
+        evidence.id + (evidence.required === false ? ' (optional)' : ' (required)')).join(' | ');
+    expectExplainField(problems, node.id, (parsed.evidence[index] ?? []).join(' | '),
+      declaredEvidence, schemaId + ' 的 EVIDENCE 行');
+  });
+  return problems;
+}
+
+// ③ 每条 guardrail 的 id·label·validation 与 ④ 每条 requiredSkillCall 的 skill·scope·enforcement·reason
+// （空集合 → '(none)' 行的在场性同判）。
+function explainGuardrailAndSkillProblems(node, parsed) {
+  const problems = [];
+  const declaredGuardrails = (node.guardrails ?? []).map((guardrail) => ({
+    id: guardrail.id ?? '(unnamed)', label: guardrail.label ?? '-', validation: guardrail.validation ?? '-',
+  }));
+  if ((declaredGuardrails.length === 0) !== parsed.guardrailsNone) {
+    problems.push('节点 ' + node.id + ' 的 guardrail 空集合形态与声明不一致（(none) 行在场性不符）');
+  }
+  expectExplainField(problems, node.id, JSON.stringify(parsed.guardrails), JSON.stringify(declaredGuardrails), 'guardrail');
+  const declaredSkills = (node.requiredSkillCalls ?? []).map((call) => ({
+    skill: call.skill ?? '(unnamed)', scope: call.scope ?? '-',
+    enforcement: call.enforcement ?? '-', reason: call.reason ?? '-',
+  }));
+  if ((declaredSkills.length === 0) !== parsed.skillsNone) {
+    problems.push('节点 ' + node.id + ' 的 requiredSkillCall 空集合形态与声明不一致（(none) 行在场性不符）');
+  }
+  expectExplainField(problems, node.id, JSON.stringify(parsed.skills), JSON.stringify(declaredSkills), 'requiredSkillCall');
+  return problems;
+}
+
+// ⑤ 三条命令：节点 id 与 --apply 形态 + 脚本根形态（三条同根、指向技能包 scripts 目录）+ 脚本
+// 路径整体带双引号（含空格的安装根下不被 shell 分词——引号是契约形态的一部分，缺引号即红）。
+function explainCommandProblems(node, parsed) {
+  const commandPatterns = [
+    [/^COMMAND entry: node "(.+?)\/workflow-guard\.mjs" entry (.+)$/, 'entry'],
+    [/^COMMAND exit: node "(.+?)\/workflow-guard\.mjs" exit (.+) --apply$/, 'exit'],
+    [/^COMMAND record: node "(.+?)\/workflow-state\.mjs" record (.+) '\{"summary":"<完成摘要>"\}'$/, 'record'],
+  ];
+  if (parsed.commands.length !== commandPatterns.length) {
+    return ['节点 ' + node.id + ' 的 COMMAND 行数 ' + parsed.commands.length + ' ≠ 3'];
+  }
+  const problems = [];
+  const scriptsRoots = new Set();
+  parsed.commands.forEach((line, index) => {
+    const [pattern, kind] = commandPatterns[index];
+    const match = line.match(pattern);
+    if (!match) {
+      problems.push('节点 ' + node.id + ' 的 ' + kind + ' 命令形态不符: ' + line);
+      return;
+    }
+    scriptsRoots.add(match[1]);
+    if (match[2] !== node.id) problems.push('节点 ' + node.id + ' 的 ' + kind + ' 命令节点 id 不符: ' + match[2]);
+  });
+  if (scriptsRoots.size !== 1) {
+    problems.push('节点 ' + node.id + ' 的三条命令脚本根不一致: ' + [...scriptsRoots].join(' / '));
+  }
+  const scriptsRoot = [...scriptsRoots][0] ?? '';
+  if (!/skills\/flow-comet\/scripts$/.test(scriptsRoot)) {
+    problems.push('节点 ' + node.id + ' 的命令脚本根不指向技能包 scripts 目录: ' + scriptsRoot);
+  } else if (__dirname.replace(/\\/g, '/').includes('/.flow-comet/skills/')
+    && scriptsRoot !== '.claude/skills/flow-comet/scripts') {
+    // 权威源检出：命令路径 = 设计形态（安装副本按运行根形态化，已由上面同一判据约束）
+    problems.push('权威源检出的命令脚本根应为设计形态 .claude/skills/flow-comet/scripts: ' + scriptsRoot);
+  }
+  return problems;
+}
+
+// 逐字段对账（单一实现：真实判据与反向构造探针共用）：四类字段 + 三条命令。
+function explainContractProblems(protocol, explainOutputs) {
+  const problems = [];
+  const schemaById = new Map((protocol.outputSchemas ?? []).map((schema) => [schema.id, schema]));
+  for (const node of protocol.nodes ?? []) {
+    const output = explainOutputs.get(node.id);
+    if (typeof output !== 'string') {
+      problems.push('节点 ' + node.id + ' 缺 explain 输出（未对账）');
+      continue;
+    }
+    let parsed;
+    try {
+      parsed = parseExplainOutput(output);
+    } catch (error) {
+      problems.push('节点 ' + node.id + ' 的 explain 输出形态不可解析: ' + error.message);
+      continue;
+    }
+    expectExplainField(problems, node.id, parsed.attributes.node, node.id, 'NODE');
+    expectExplainField(problems, node.id, parsed.attributes.label ?? null, node.label ?? null, 'LABEL');
+    expectExplainField(problems, node.id, parsed.attributes.kind ?? null, node.kind ?? null, 'KIND');
+    expectExplainField(problems, node.id, parsed.attributes.disabled ?? null,
+      node.disabled === true ? 'true（该节点在当前协议中被停用）' : null, 'DISABLED');
+    problems.push(...explainSchemaProblems(node, parsed, schemaById));
+    problems.push(...explainGuardrailAndSkillProblems(node, parsed));
+    problems.push(...explainCommandProblems(node, parsed));
+  }
+  return problems;
+}
+
+// explain 的三种 fail-closed 形态（非法节点 / 缺参 / 拿选项当节点名）：都非零退出并列出全部合法节点。
+function assertExplainFailClosed(dir, protocolDecl) {
+  const legalNodes = protocolDecl.nodes.map((protocolNode) => protocolNode.id).join('/');
+  const forms = [
+    ['非法节点', ['explain', 'not-a-node'], 'explain node 非法: not-a-node'],
+    ['缺参', ['explain'], 'explain requires a <node> id'],
+    ['选项当节点名', ['explain', '--help'], 'explain requires a <node> id'],
+  ];
+  for (const [form, args, expected] of forms) {
+    const res = runState(args, dir);
+    assertExit(res, 1);
+    assertOut(res, expected);
+    assertOut(res, legalNodes);
+    if (form === '非法节点') assertOut(res, '（协议节点: ' + legalNodes + '）');
+  }
+}
+
+// 夹具协议（声明副本）下的 explain 输出——真实协议 env 通道；夹具文件跑完即清。
+function explainOutputsForDeclaration(dir, decl) {
+  const probeProtocolFile = path.join(dir, 'reference', 'workflow-protocol-probe.json');
+  fs.writeFileSync(probeProtocolFile, JSON.stringify(decl, null, 2), 'utf8');
+  const outputs = new Map();
+  for (const protocolNode of decl.nodes) {
+    const res = runState(['explain', protocolNode.id], dir, { FLOW_COMET_PROTOCOL: probeProtocolFile });
+    assertExit(res, 0);
+    outputs.set(protocolNode.id, res.output);
+  }
+  fs.rmSync(probeProtocolFile, { force: true });
+  return outputs;
+}
+
+// 反向构造（L-106）：把协议声明副本的一条 guardrail / 一个 artifact 抽掉、改一条 schema 描述 ⇒ 对账
+// 必报对应字段；再把真实输出里的脚本路径引号去掉 ⇒ 必报命令形态不符（证明断言不恒真空过——
+// 没有这一侧，把引号从实现里拿掉也能全绿）。返回问题描述数组（空 = 判别力齐备）。
+function explainReverseConstructionProblems(dir, protocolDecl, explainOutputs) {
+  const probeNode = protocolDecl.nodes.find((protocolNode) => (protocolNode.guardrails ?? []).length > 0);
+  const probeSchema = (protocolDecl.outputSchemas ?? []).find((schema) => (schema.artifacts ?? []).length > 0);
+  const owner = probeSchema === undefined ? undefined
+    : protocolDecl.nodes.find((protocolNode) => (protocolNode.outputSchemas ?? []).includes(probeSchema.id));
+  if (probeNode === undefined || probeSchema === undefined || owner === undefined) {
+    return ['反向构造前提不成立：协议声明里找不到带 guardrail 的节点 / 带 artifact 的 schema / schema 归属节点'];
+  }
+  const variants = [
+    ['抽掉一条 guardrail', (decl) => {
+      decl.nodes.find((protocolNode) => protocolNode.id === probeNode.id).guardrails = [];
+    }, probeNode.id, 'guardrail'],
+    ['抽掉一个 artifact', (decl) => {
+      decl.outputSchemas.find((schema) => schema.id === probeSchema.id).artifacts = [];
+    }, owner.id, 'artifact'],
+    ['改掉一条 schema 描述', (decl) => {
+      const target = decl.outputSchemas.find((schema) => schema.id === probeSchema.id);
+      target.description = (probeSchema.description ?? '') + '（反向构造探针）';
+    }, owner.id, 'OUTPUT-SCHEMA'],
+  ];
+  const problems = [];
+  for (const [form, mutate, affectedNodeId, expectedField] of variants) {
+    const mutatedDecl = JSON.parse(JSON.stringify(protocolDecl));
+    mutate(mutatedDecl);
+    const probeOutputs = explainOutputsForDeclaration(dir, mutatedDecl);
+    if (probeOutputs.get(affectedNodeId) === explainOutputs.get(affectedNodeId)) {
+      problems.push('反向构造前提不成立（' + form + '：夹具协议未改变 explain 输出——协议 env 通道未生效）');
+      continue;
+    }
+    const probeProblems = explainContractProblems(protocolDecl, probeOutputs);
+    if (!probeProblems.some((problem) => problem.includes(expectedField))) {
+      problems.push('反向构造判别力缺失（' + form + ' 未被判分叉）: ' + (probeProblems.join('; ') || '（零问题）'));
+    }
+  }
+  // ④ 引号形态（③ 的另一面，不需重跑）：真实输出去掉脚本路径引号 ⇒ 逐节点必报命令形态不符。
+  const dequoted = new Map();
+  for (const [nodeId, output] of explainOutputs) {
+    const text = String(output);
+    const stripped = text.replace(/(node )"([^"\n]*\.mjs)"/g, '$1$2');
+    if (stripped === text) {
+      problems.push('反向构造前提不成立（节点 ' + nodeId + ' 的输出里没有带引号的脚本路径——引号判据无从判别）');
+      continue;
+    }
+    dequoted.set(nodeId, stripped);
+  }
+  if (dequoted.size > 0) {
+    const dequotedProblems = explainContractProblems(protocolDecl, new Map([...explainOutputs, ...dequoted]));
+    for (const nodeId of dequoted.keys()) {
+      if (!dequotedProblems.some((problem) => problem.includes('节点 ' + nodeId + ' 的')
+        && problem.includes('命令形态不符'))) {
+        problems.push('反向构造判别力缺失（去掉节点 ' + nodeId + ' 的脚本路径引号未被判命令形态不符）');
+      }
+    }
+  }
+  return problems;
 }
 
 // 混排多波 TASK：双并行开路 → 串行衔接(依赖双并行)→ 收尾并行(依赖串行衔接)。
@@ -1303,7 +1852,7 @@ const TEST_ITEMS = [
   },
 
   {
-    name: 'A4 status：节点推导与无活跃兜底',
+    name: 'A4 status/explain：节点推导、节点现问契约（逐字段对账 + fail-closed + 只读）与无活跃兜底',
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
       // 无产物 → 首节点
@@ -1315,6 +1864,31 @@ const TEST_ITEMS = [
       const s2 = runState(['status'], dir);
       assertExit(s2, 0);
       assertOut(s2, '"currentNode": "design"');
+      // —— explain <node>：节点现问契约（真实子进程，零 mock；契约声明源 = 协议 JSON）——
+      // 8 节点逐个逐字段对账（label / kind / outputSchema 名与描述 / artifact / evidence / guardrail /
+      // requiredSkillCall / 三条命令）+ 三种 fail-closed 形态 + 只读性 + 反向构造（声明副本抽掉一条
+      // guardrail / 一个 artifact、改一条 schema 描述 ⇒ 对账必报；判据与探针见模块级单一实现）。
+      const protocolDecl = JSON.parse(fs.readFileSync(path.join(dir, 'reference', 'workflow-protocol.json'), 'utf8'));
+      const stateFilePath = path.join(dir, '.flow-comet', 'flow-comet-state.json');
+      const stateHashBefore = createHash('sha256').update(fs.readFileSync(stateFilePath)).digest('hex');
+      const statusBefore = runState(['status'], dir);
+      const explainOutputs = new Map();
+      for (const protocolNode of protocolDecl.nodes) {
+        const res = runState(['explain', protocolNode.id], dir);
+        assertExit(res, 0);
+        assertOut(res, 'NODE: ' + protocolNode.id);
+        explainOutputs.set(protocolNode.id, res.output);
+      }
+      const contractProblems = explainContractProblems(protocolDecl, explainOutputs);
+      assertTrue(contractProblems.length === 0,
+        'explain 输出与协议 JSON 声明不一致: ' + contractProblems.join('; '));
+      // 只读性：调用前后状态文件 sha256 全等 + status 读数逐字不变（explain 不写 state、不改路由）
+      assertEqual(createHash('sha256').update(fs.readFileSync(stateFilePath)).digest('hex'), stateHashBefore,
+        'explain 改写了状态文件（只读通道被破坏）');
+      assertEqual(runState(['status'], dir).output, statusBefore.output, 'explain 改动了路由读数（只读通道被破坏）');
+      assertExplainFailClosed(dir, protocolDecl);
+      const probeProblems = explainReverseConstructionProblems(dir, protocolDecl, explainOutputs);
+      assertTrue(probeProblems.length === 0, '反向构造判别力缺失: ' + probeProblems.join('; '));
       // 无 state 无工件 → no-change 兜底
       fs.rmSync(path.join(dir, '.flow-comet'), { recursive: true });
       const s3 = runState(['status'], dir);
@@ -6334,10 +6908,14 @@ const TEST_ITEMS = [
     },
   },
 
-  // K18: 分发面（npm 包形态）——可发布性清单 + 包体边界 + bin 双入口 + init 词元形态与红线。
+  // K18: 分发面（npm 包形态）——可发布性清单 + 包体边界 + bin 双入口 + init 词元形态与红线
+  // + 安装器升级路径清理（镜像目录内「权威源已不存在」的条目在重装后必须消失：含反向探针
+  // 与幂等断言；`.claude/rules` 一类无命名空间的生成面 fail-closed 不纳入删除面）
+  // + 安装器镜像清理的**根级** fail-closed（镜像根自身为链接 / 真实路径越出项目根两变体：
+  // 项目外文件必不消失 + 保留原因可见 + 幂等 + 反向构造证明判别力）。
   // 权威源侧真跑断言（npm pack --dry-run 的真实产物清单在场才算通过）；安装副本侧输出显式
   // 「不适用」行并回传同语义的结果标记计通过（禁止静默跳过——「未验证 ≠ 通过」）。
-  // 四组断言见上方同名助手；结果标记由运行器按环境判据断言（distributionSurface 契约）。
+  // 各断言见上方同名助手；结果标记由运行器按环境判据断言（distributionSurface 契约）。
   {
     name: 'K18 分发面:环境判据与包体边界·bin 双入口(权威源真跑/副本显式不适用)与 init 词元红线',
     distributionSurface: true,
@@ -6347,12 +6925,19 @@ const TEST_ITEMS = [
       assertPackageContextJudgment(dir);
       const pkgCtx = resolvePackageContext();
       const marker = DISTRIBUTION_MARKERS[pkgCtx.kind];
+      // 安装器分发面断言（升级路径清理）：权威源侧真跑真实命令序列，安装副本侧输出显式
+      // 「不适用」行（两侧都出声——副本侧不是静默跳过）；故置于环境分支之前调用。
+      assertInstallerUpgradePathCleanup(dir);
+      // 安装器分发面断言（镜像清理的根级 fail-closed）：同一注入点的第二组判据——根自身为链接 /
+      // 真实路径越界两变体 + 反向构造；副本侧同样输出显式「不适用」行。
+      assertMirrorRootLinkFailClosed(dir, pkgCtx);
       if (pkgCtx.kind === 'copy') {
         console.log('  不适用（安装副本侧：' + pkgCtx.reason + '）——包体边界/bin 断言仅权威源侧可判，本项计通过');
         return marker;
       }
       assertPublishableManifest(pkgCtx.pkg);
       assertPackageBoundary(pkgCtx.root);
+      assertWorkflowContractCheck(dir);
       assertInitTokenContract(assertBinContract(pkgCtx.pkg, pkgCtx.root), dir);
       return marker;
     },

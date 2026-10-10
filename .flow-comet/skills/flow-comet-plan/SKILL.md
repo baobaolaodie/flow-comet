@@ -19,9 +19,9 @@ Responsibility: 拆原子任务（XML 格式）+ 波次划分。生成 TASK.md�
 
 | 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
 |------|-------------------------------|-----------------------------------|
-| TASK.md | 至少一个 `<task>` 块 + 每个任务含 `<verify>` 字段 | `id` / `name` / `read_files` / `write_files` / `action` / `done` 等字段（执行纪律，review 把关） |
+| TASK.md | 至少一个 `<task>` 块 + 每个任务含 `<verify>` 字段 + 新格式任务的 7 字段在场（`name` / `read_files` / `write_files` / `action` / `verify` / `done` / `depends_on`） | 任务规模 / 粒度 / 字段内容质量（模板要求，guard 不拦）——**填得好不好**由 review 把关 |
 
-guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
+guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B：任务块结构、每任务 `<verify>`、**新格式任务的 7 字段在场**都由 guard 拦（新 change 缺任一 = 出口 BLOCKED；旧格式模板 / 旧 change 渐进 WARN）；「填得好不好」——字段内容质量与任务粒度——由 review 把关。
 
 > **模板权威**：本节点产出工件的段形唯一权威 = `flow-kit/templates/**`；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
 
@@ -31,7 +31,7 @@ guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好�
 
 **约束本体**：并行任务按依赖关系组织——每个并行任务显式声明 `depends_on`，合法性只取决于依赖图本身：`depends_on` 无环且引用的任务都存在，规划即合法。全并行、全串行、串→并、并→串四种基本形态与任意混排序列（如 `S→P→S`、`P→S→P`）一律放行——引擎按依赖拓扑自动分趟（每趟委托全部依赖已满足的并行任务，趟间回串行消化），混排序列由多趟路由按依赖拓扑自动分趟消化，并行任务的先后位置不受任何限制。
 
-**唯一硬性拦截：依赖环与缺失依赖**。任务间依赖不得成环（如 A→B→A），`depends_on` 也不得引用不存在的任务 id 或构成不可满足的依赖链；只有这两类依赖图缺陷会在规划出口被 BLOCKED 并附恢复指引——按提示调整涉环任务的 `depends_on` 后重新 exit 即可通过。
+**硬性拦截（规划出口 BLOCKED，附恢复指引）**：任务块结构（至少一个 `<task>` 块）/ 每任务 `<verify>` 字段 / 新格式任务的 7 字段在场（集合见上表；新 change 缺任一即 BLOCKED，旧格式模板 / 旧 change 渐进 WARN）/ 任务图依赖环 / 缺失依赖（`depends_on` 引用不存在的任务 id）/ 并行写写冲突（并行任务 `write_files` 重叠）——任一项不成立即在规划出口被 BLOCKED（读写重叠仅 WARN），按提示修正后重新 exit 即可通过。任务间依赖不得成环（如 A→B→A），也不得构成不可满足的依赖链。
 
 **警示**：落笔时先画依赖方向再标 [P]，避免出口返工。
 
@@ -74,8 +74,7 @@ This node decomposes the technical design into atomic, executable tasks with cle
 
 5. **Declare depends_on**: Each task explicitly declares which tasks it depends on.
 
-6. **Populate 7 required fields per task**:
-   - `id`: Format T01, T02, T02-1 etc. Continuous numbering.
+6. **Populate 7 required fields per task** — `name` / `read_files` / `write_files` / `action` / `verify` / `done` / `depends_on` (the exact set the plan exit gate enforces). `id` is **not** one of the seven fields: it is an attribute of the `<task>` element (`<task id="T01" parallel="true" status="pending">`) — format T01, T02, T02-1 etc., continuous numbering. `depends_on` is a field, and its element must be present (write an empty element when the task has no dependency):
    - `name`: One sentence.
    - `read_files`: Files the task is allowed to read. Must include reuse targets from DESIGN 0.5. Supports glob patterns.
    - `write_files`: Files the task is allowed to create/modify/delete. Must NOT include forbidden modules from DESIGN 0.5. Strictly controlled.
@@ -98,7 +97,7 @@ The full task decomposition protocol, XML template, and constraints are in:
 
 This node is truly done when:
 - `.specs/<change-id>/TASK.md` exists in XML format.
-- At least one `<task>` block exists; every task carries a `<verify>` field (the full seven-field shape — id/name/read_files/write_files/action/verify/done — is the execution discipline, review-checked; guard enforces the subset).
+- At least one `<task>` block exists; every task carries a `<verify>` field, and the 7-field set `name` / `read_files` / `write_files` / `action` / `verify` / `done` / `depends_on` is present (`id` is an **attribute** of the `<task>` element, not a field) — field **presence** is enforced by the guard (missing any field on a new-format task in a new change = exit BLOCKED; old-format templates / old changes degrade to WARN), while **field content quality** is judged by review.
 - Every `verify` field is an executable command (not a description).
 - Every `write_files` is strictly within DESIGN.md touched + new modules range (not in forbidden list).
 - Every `[P]` mark has a genuine concurrent companion in its wave with non-overlapping `write_files`; isolated tasks are serial (a fully serial plan is valid when no genuine companion exists).
@@ -161,7 +160,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record plan '{"summary
 | Guardrail ID | Label | Validation Type |
 |--------------|-------|-----------------|
 | `plan-artifacts` | TASK.md exists with XML tasks | artifact-exists |
-| `task-fields-complete` | All tasks have 7 required fields | 执行纪律（review 把关），guard 不校验 |
+| `task-fields-complete` | All tasks have 7 required fields | 结构在场（新格式任务缺任一字段 = 出口 BLOCKED；旧格式模板 / 旧 change 渐进 WARN）——**字段内容质量**由 review 把关 |
 | `write-files-safe` | No write_files in DESIGN forbidden list | 执行纪律（review 把关），guard 不校验 |
 | `has-parallel` | At least 1 [P] task (if applicable) | 执行纪律（review 把关），guard 不校验 |
 

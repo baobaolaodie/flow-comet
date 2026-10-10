@@ -49,7 +49,7 @@ What the installer should have produced:
 | Codex | `.agents/skills/` (19 skills) | a `PreToolUse` entry in `.codex/hooks.json`, plus `hooks = true` in `.codex/config.toml` | a managed block in `AGENTS.md` |
 | DeepSeek Harness (dsh) | `.dsh/skills/` (19 skills) | a managed block in `$DSH_HOME/cordis.patch.yml` referring to the bridge loader copied into `$DSH_HOME/plugins/` | a managed block in `AGENTS.md` |
 
-All three platforms also get `flow-kit/` (templates and rules) and a `.gitignore` entry managing the `.flow-comet/` runtime directory. The installer is non-destructive: nothing already present in the project is deleted, and an existing `.gitignore` keeps its contents — the managed entry is appended.
+All three platforms also get `flow-kit/` (templates and rules) and a `.gitignore` entry managing the `.flow-comet/` runtime directory. The installer is non-destructive: nothing already present in the project is deleted, and an existing `.gitignore` keeps its contents — the managed entry is appended. "Non-destructive" refers to what exists outside those skill directories: cleanup is decided by **location** — the installer removes only paths that sit inside the flow-comet skill directories it installed under the platform's skill tree and that the current skill set no longer contains. Those directories are managed by the installer, so do not place your own files in them (they will be overwritten or cleaned up).
 
 ## First use per platform
 

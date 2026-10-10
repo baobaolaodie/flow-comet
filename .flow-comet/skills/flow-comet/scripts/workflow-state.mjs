@@ -799,6 +799,83 @@ async function reportIntelScanDrift(contextFile, stateValue) {
     + '同刻同形态（冲突时以 state 为准）。');
 }
 
+// ---------- explain（节点现问：只读派生自协议 JSON） ----------
+
+// 命令路径形态（平台化）：权威源保持设计形态 .claude/skills/（与册子命令形态一致，安装时由
+// prepare-env 的 pathReplacements 平台化）；安装副本按脚本自定位输出运行根相对形态——.claude /
+// .agents / .dsh 乃至将来新增的平台根同一推导覆盖，无需在此登记平台清单；落在运行根之外
+// （用户级安装）时输出脚本自身的绝对路径。不得硬编码单一形态：pathReplacements 只处理 .md
+// （prepare-env 的 applyPathReplacements 按扩展名过滤），脚本内的字面量在安装副本上不会被
+// 替换——硬编码 .claude 会让 Codex / dsh 单平台安装的 explain 输出不存在的命令路径。
+function platformScriptsDir() {
+  const posixDir = __dirname.replace(/\\/g, '/');
+  if (posixDir.includes('/.flow-comet/skills/')) return '.claude/skills/flow-comet/scripts';
+  const relative = path.relative(runRoot, __dirname).split(path.sep).join('/');
+  if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return posixDir;
+  return relative;
+}
+
+// ① 该节点的 outputSchema 名与产物路径（含 evidence id）。产物根语义与状态机 / guard 的节点完成
+// 判定一致：'specs-root' → .specs/；'project' / 缺省 → 项目根。悬空 schema 引用如实标注、不编造
+// 产物（自定义协议允许悬空引用，route-node 的产物推导同样容忍）。
+function printNodeArtifacts(protocol, node) {
+  const schemaById = new Map((protocol.outputSchemas ?? []).map((schema) => [schema.id, schema]));
+  const schemaIds = node.outputSchemas ?? [];
+  if (schemaIds.length === 0) console.log('OUTPUT-SCHEMA: (none)');
+  for (const schemaId of schemaIds) {
+    const schema = schemaById.get(schemaId);
+    console.log('OUTPUT-SCHEMA: ' + schemaId + (schema && schema.description ? ' — ' + schema.description : ''));
+    if (!schema) {
+      console.log('  ARTIFACT: (none)——协议 outputSchemas[] 未声明该 schema，无法派生产物路径');
+      continue;
+    }
+    for (const artifact of schema.artifacts ?? []) {
+      // 同一 artifact 的 paths 为互斥备选（命中任一即产物存在，与节点完成判定同语义）
+      const artifactRoot = artifact.pathBase === 'specs-root' ? '.specs/' : '';
+      const paths = (artifact.paths ?? []).map((declaredPath) => artifactRoot + String(declaredPath));
+      console.log('  ARTIFACT: ' + (artifact.id ?? '(unnamed)')
+        + (artifact.kind ? ' [' + artifact.kind + ']' : '')
+        + (artifact.required === false ? ' optional' : ' required')
+        + ' → ' + (paths.length > 0 ? paths.join(' | ') : '(未声明路径)'));
+    }
+    const evidenceIds = (schema.evidence ?? []).map((evidence) => evidence.id
+      + (evidence.required === false ? ' (optional)' : ' (required)'));
+    console.log('  EVIDENCE: ' + (evidenceIds.length > 0 ? evidenceIds.join(' | ') : '(none)'));
+  }
+}
+
+// ② guardrails 表（id / label / validation）
+function printNodeGuardrails(node) {
+  const guardrails = node.guardrails ?? [];
+  if (guardrails.length === 0) console.log('GUARDRAIL: (none)');
+  for (const guardrail of guardrails) {
+    console.log('GUARDRAIL: ' + (guardrail.id ?? '(unnamed)') + ' | ' + (guardrail.label ?? '-')
+      + ' | ' + (guardrail.validation ?? '-'));
+  }
+}
+
+// ③ requiredSkillCalls（skill / scope / enforcement / reason）
+function printNodeSkillCalls(node) {
+  const calls = node.requiredSkillCalls ?? [];
+  if (calls.length === 0) console.log('REQUIRED-SKILL: (none)');
+  for (const call of calls) {
+    console.log('REQUIRED-SKILL: ' + (call.skill ?? '(unnamed)')
+      + ' | scope=' + (call.scope ?? '-') + ' | enforcement=' + (call.enforcement ?? '-')
+      + ' | reason=' + (call.reason ?? '-'));
+  }
+}
+
+// ④ 三条命令（entry / exit / record，按节点 id 与平台化路径形态生成）。脚本路径整体加双引号：
+// 安装根含空格时未加引号的路径会被 shell 按空格切分（只剩路径首段被当作脚本），打印出来的命令
+// 便跑不了——加引号后三种平台语义下都是**单一参数**（引号本身对无空格路径无害）。
+function printNodeCommands(node) {
+  const scriptsDir = platformScriptsDir();
+  console.log('COMMAND entry: node "' + scriptsDir + '/workflow-guard.mjs" entry ' + node.id);
+  console.log('COMMAND exit: node "' + scriptsDir + '/workflow-guard.mjs" exit ' + node.id + ' --apply');
+  console.log('COMMAND record: node "' + scriptsDir + '/workflow-state.mjs" record ' + node.id
+    + " '{\"summary\":\"<完成摘要>\"}'");
+}
+
 async function main() {
   // 协议解析: 协议加载 = resolveProtocol 解析路径 + 受保护读取 + fail-closed schema 校验
   // （读失败/校验失败直接 throw，沿用现有错误处理风格）
@@ -1984,7 +2061,9 @@ async function main() {
     }
     if (replanTask7Broken.length > 0) {
       if (replanTask7NewFormat && state.newChange === true) {
-        console.error('BLOCKED: TASK.md 任务缺 7 字段（name/read_files/write_files/action/verify/done/depends_on）: '
+        // 文案的集合字符串**从判据常量派生**（不得在此再写一遍字面集合——第二处同口径表达会在
+        // 判据演进时静默落后于实现；构造方式不改变渲染结果）。
+        console.error('BLOCKED: TASK.md 任务缺 7 字段（' + replanTask7Required.join('/') + '）: '
           + replanTask7Broken.join('; ') + '；恢复: 对照 flow-kit/templates/TASK.md 补齐每个 <task> 的缺字段后重试；replan 不做校验豁免');
         process.exit(1);
       }
@@ -2123,7 +2202,34 @@ async function main() {
     return;
   }
 
-  throw new Error('Unknown command: ' + command + '. Use: init, status, next, select, record, verify-fail, advance, execution-mode, config, skill-load, bridge-check, reenter, replan');
+  if (command === 'explain') {
+    // 只读派生（ADR-015 附条）：「某节点产出什么 / 门禁是什么 / 要加载什么 / 跑哪三条命令」此前
+    // 只在册子里手抄，本命令把它暴露为节点现问通道。数据全部取自协议 JSON 的 nodes[] 与
+    // outputSchemas[]——零新事实源、零状态读写（不写 state、不改路由、不绕门禁，与 bridge-check
+    // 同为纯读通道）。节点 id 非法 → fail-closed 并列出协议内全部合法节点。
+    const explainNodeId = process.argv[3];
+    const legalNodeIds = (protocol.nodes ?? []).map((node) => node.id);
+    // 缺参 / 纯空白 / 拿选项当节点名（如 --help）→ 用法错误（fail-closed，不猜）
+    if (typeof explainNodeId !== 'string' || explainNodeId.trim() === '' || explainNodeId.startsWith('--')) {
+      throw new Error('explain requires a <node> id. 用法: workflow-state.mjs explain <node>'
+        + '（合法节点: ' + legalNodeIds.join('/') + '）');
+    }
+    const explainNode = (protocol.nodes ?? []).find((node) => node.id === explainNodeId);
+    if (!explainNode) {
+      throw new Error('explain node 非法: ' + explainNodeId + '（协议节点: ' + legalNodeIds.join('/') + '）');
+    }
+    console.log('NODE: ' + explainNode.id);
+    if (explainNode.label) console.log('LABEL: ' + explainNode.label);
+    if (explainNode.kind) console.log('KIND: ' + explainNode.kind);
+    if (explainNode.disabled === true) console.log('DISABLED: true（该节点在当前协议中被停用）');
+    printNodeArtifacts(protocol, explainNode);
+    printNodeGuardrails(explainNode);
+    printNodeSkillCalls(explainNode);
+    printNodeCommands(explainNode);
+    return;
+  }
+
+  throw new Error('Unknown command: ' + command + '. Use: init, status, next, select, record, verify-fail, advance, execution-mode, config, skill-load, bridge-check, reenter, replan, explain');
 }
 
 main().catch(error => {
