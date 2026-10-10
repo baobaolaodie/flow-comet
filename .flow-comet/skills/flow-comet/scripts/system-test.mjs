@@ -1830,7 +1830,7 @@ const TEST_ITEMS = [
   },
 
   {
-    name: 'A4 status：节点推导与无活跃兜底',
+    name: 'A4 status/explain：节点推导、节点现问契约（逐字段对账 + fail-closed + 只读）与无活跃兜底',
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
       // 无产物 → 首节点
