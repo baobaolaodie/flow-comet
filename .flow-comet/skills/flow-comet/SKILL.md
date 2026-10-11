@@ -261,9 +261,10 @@ All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT
 
 | 脚本 | 用途 |
 |------|------|
-| `workflow-state.mjs` | 状态管理：init/status/next/select/record/advance/skill-load/execution-mode/config/verify-fail（verify 失败计数，第 4 次 BLOCKED）/reenter（archive 源受控重入）/replan（execute 源计划重校重签） |
+| `workflow-state.mjs` | 状态管理：init/status/next/select/record/advance/skill-load/execution-mode/config/verify-fail（verify 失败计数，第 4 次 BLOCKED）/reenter（archive 源受控重入）/replan（execute 源计划重校重签）/explain（节点现问） |
 | `workflow-state.mjs reenter` | 归档后受控重入：`reenter <target> --authorized-by <source> --reason <text> [--continue-round <n>]` 把工作归属退回 execute / subagent-execute / review / verify 之一（仅 archive 源、归档移动前、每次显式用户授权、每 change 上限 3 轮，超限继续需显式续轮授权） |
 | `workflow-state.mjs replan` | 计划重校重签：`replan <reason> --authorized-by <source> [--continue-round <n>]` 在 execute / subagent-execute 相位重跑任务图与字段校验并重录任务集签名（仅这两个相位、每次显式授权、每 change 上限 3 轮、超限继续需显式续轮、缺授权或形态非法一律 BLOCKED 且零改写；写盘前落备份；重复同形态为空操作；只重校重签、绝不豁免校验） |
+| `workflow-state.mjs explain` | 节点现问（只读）：`explain <node>` 从协议 JSON 现算出该节点的产物路径与证据 id、门禁（guardrails）、必需技能声明，以及 entry / exit / record 三条命令（脚本路径按平台形态生成；不写状态、不改路由，节点名非法一律拒绝并列出合法取值）。需要可照抄的完整命令时跑它——命令形态以它的输出为准 |
 | `workflow-guard.mjs` | 节点门禁：entry/exit/verify 检查 |
 | `workflow-handoff.mjs` | 子代理交接：request/result/status |
 | `comet-plan.mjs` | 兼容别名入口（内容为 workflow-state 的别名壳） |

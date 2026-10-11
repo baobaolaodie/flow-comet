@@ -41,9 +41,9 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 | 命令 | 负责什么 |
 |---|---|
 | `workflow-guard.mjs` | `entry` / `exit` —— 门禁。出口校验该节点的工件、段、声明，并在 `verify` 时**真跑**测试命令 |
-| `workflow-state.mjs` | `init`、`status`、`next`、`select`、`record`、`verify-fail`、`advance`、`execution-mode`、`config`、`skill-load`、`bridge-check`、`reenter`、`replan` —— 状态机与记账 |
+| `workflow-state.mjs` | `init`、`status`、`next`、`select`、`record`、`verify-fail`、`advance`、`execution-mode`、`config`、`skill-load`、`bridge-check`、`reenter`、`replan`、`explain` —— 状态机与记账 |
 
-节点的出口会在以下情况拒绝通过：工件不完整或形态不合规、缺少技能加载声明、或从未记录进入；每次拒绝都会打印原因与修复命令。状态不存放在对话里：随时用 `status` / `next` 重新推导。
+节点的出口会在以下情况拒绝通过：工件不完整或形态不合规、缺少技能加载声明、或从未记录进入；每次拒绝都会打印原因与修复命令。状态不存放在对话里：随时用 `status` / `next` 重新推导；单个节点的产物、门禁与命令用 `explain <node>` 现问，不必从节点技能册里手抄。
 
 ## 工件
 

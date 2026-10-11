@@ -41,9 +41,9 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 | Command | What it owns |
 |---|---|
 | `workflow-guard.mjs` | `entry` / `exit` — the gates. Exits validate the node's artifacts, sections, declarations and (for `verify`) run the test commands |
-| `workflow-state.mjs` | `init`, `status`, `next`, `select`, `record`, `verify-fail`, `advance`, `execution-mode`, `config`, `skill-load`, `bridge-check`, `reenter`, `replan` — the state machine and its bookkeeping |
+| `workflow-state.mjs` | `init`, `status`, `next`, `select`, `record`, `verify-fail`, `advance`, `execution-mode`, `config`, `skill-load`, `bridge-check`, `reenter`, `replan`, `explain` — the state machine and its bookkeeping |
 
-A node's exit refuses to pass when its artifacts are incomplete or malformed, when the skill-load declaration is missing, or when the entry was never recorded; each refusal prints the reason and the command that fixes it. Nothing about the state is stored in the conversation: re-derive it with `status` / `next`.
+A node's exit refuses to pass when its artifacts are incomplete or malformed, when the skill-load declaration is missing, or when the entry was never recorded; each refusal prints the reason and the command that fixes it. Nothing about the state is stored in the conversation: re-derive it with `status` / `next`, and ask a single node for its artifacts, guardrails and commands with `explain <node>` instead of copying them from the node skill.
 
 ## Artifacts
 
