@@ -9,6 +9,12 @@ The behaviour layer: what the engine guarantees, how a node's exit is validated,
 - **Fail-closed by default.** When a decision cannot be proven safe — the protocol file cannot be read, the state or a payload cannot be parsed, the workflow status is unknown, a path cannot be shown to stay inside the project — the engine refuses instead of proceeding. Only clearly idle states (no change, or a completed change) are treated as unconstrained.
 - **Declared boundaries.** Anything that looks like user authority — accepting a repair round past its cap, re-entering an archived change, taking over a task from the coordinator — must be an explicit, recorded declaration. The engine treats silence as refusal.
 
+### Installation cleanup
+
+Reinstalling over an existing copy also removes what that copy should no longer hold: inside the skill directories the installer manages under the platform's skill tree, a path the current skill set no longer contains is deleted, so a page that was renamed or moved away does not stay behind in the installed copy. The cleanup is decided by location and it fails closed: nothing outside those directories is looked at, and inside them anything it cannot prove it manages is kept with the reason printed — a managed directory that is itself a link or that resolves outside the project, a symbolic link, a path whose type differs from the source, and a directory that is still non-empty once the removals are done. It runs before anything is copied, so a cleanup that cannot complete stops the run before the copy begins; a path that cannot be read is not treated as absent; each removal and each keep is printed; and a re-run removes nothing further.
+
+What the installer manages is the current skill set itself, so a whole skill directory that is no longer part of it is never entered — a directory someone made by hand and one whose skill was removed cannot be told apart from the outside. That case is left to an explicit reset (`--purge`) rather than guessed at.
+
 ## Three defense layers
 
 | Layer | What it does | Where it is enforced |
@@ -40,6 +46,8 @@ At each node the guard answers a fixed set of questions; a "no" is a refusal wit
 | Are the archive directory and its leftover list in place? | `archive` |
 
 Because the checks are structural, a payload that looks like a contract but cannot be parsed is rejected the same way a missing file is — the engine never guesses.
+
+A node's requirements can also be asked for instead of looked up in the node books: `workflow-state.mjs explain <node>` prints that node's output schemas with their artifact paths and evidence ids, its guardrails, the skills it requires, and its entry, exit and record commands in the form this installation runs them. Every line is derived from the protocol the engine already reads, so the answer cannot drift from what the gates enforce. The command is read-only — it writes no state and changes no routing — and an unknown node name is refused together with the list of the valid ones.
 
 ## Execution model
 
