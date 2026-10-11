@@ -2883,10 +2883,15 @@ function platformFactsAuthorityProblems(rel, facts, pointerBooks) {
 //   · 指针在场：每份文档须含模板权威锚句，句内按序组合五个锚点（整句语义组合，防拆句 / 半句）；
 //   · 该句只在 1 处（册内一侧）：同一文档出现第二处锚行即红（重复回潮的同册形态）；
 //   · 单一权威：持锚行必须点名 `flow-kit/templates/**`——段形权威只能指向这一个来源；
-//   · 正文唯一（块级跨距）：声明的**展开副本**（连续同文 ≥ `TEMPLATE_AUTHORITY_BLOCK_SPAN` 字符，
-//     取旧逐字锁的切片粒度 400）不得出现第二份。**粒度说明**（`LESSONS` 候选取证）：短锚句是
-//     ADR-015 B 类子规则 2 允许的「要点 / 指针」形态（各册按语境表述），公式化短片段天然重合 ⇒
-//     按 T-03 实测建议取块级跨距而非短子串查重，避免必然假红；展开成正文段落后被复制即红。
+//   · 正文唯一（声明块的**正文部分**）：判据面 = 锚行所在的 `>` 块**减去锚行本身**——锚行是全册
+//     **按形态要求必须持有**的指针句（「本节点」9 册 / 「本技能」5 册逐字同文属**设计要求**，不是
+//     重复），把它算进判据面必然要么假红要么恒真；块内锚行之外的正文行才是「第二份正文」的入口。
+//     阈值**按对派生自受保护内容**：一对正文以**较短一侧的实际块长**为界——只要一侧的正文整段
+//     （或更长）出现在另一侧即红，两侧各写各的措辞不误伤。**旧写死阈值 400 的教训**（`LESSONS`
+//     候选取证）：旧判据面含锚行且阈值写死 400，而实测块长只有 109 / 211（入口册与
+//     `reference/entry-detail.md` 曾各持同一段 211 字符块 = 锚行 + archive 读法行）⇒ 锚**数学
+//     不可触发**、真实重复就在眼前却恒绿（Coverage Illusion 型假绿）；阈值改为从受保护内容派生
+//     后，该对真实重复当场变红，本批同批把重复收成「一处 + 指针」。
 const TEMPLATE_AUTHORITY_SKILLS = [
   'flow-comet-open', 'flow-comet-design', 'flow-comet-plan', 'flow-comet-execute',
   'flow-comet-subagent-execute', 'flow-comet-review', 'flow-comet-verify', 'flow-comet-archive',
@@ -2901,8 +2906,7 @@ const TEMPLATE_AUTHORITY_ANCHORS = [
 const TEMPLATE_AUTHORITY_EXPANSION_ANCHORS = [
   '唯一权威 = ', '是历史证据', '不是模板来源', '上一轮就是这么写的',
 ];
-const TEMPLATE_AUTHORITY_BLOCK_SPAN = 400;
-// 「模板权威」声明的**段落切片**：锚行所在的那一段连续引用行（`>` 块）——展开副本的判据面。
+// 「模板权威」声明的**段落切片**：锚行所在的那一段连续引用行（`>` 块）——正文唯一判据的判据面。
 function templateAuthorityParagraphs(text) {
   const lines = text.split(/\r?\n/);
   const out = [];
@@ -2915,6 +2919,11 @@ function templateAuthorityParagraphs(text) {
     out.push(lines.slice(start, end + 1).join('\n'));
   }
   return out;
+}
+// 声明块的**正文部分** = 块内锚行之外的引用行（锚行是每册必须逐字持有的指针句，见上；空串 =
+// 该册只有锚行一行，正文唯一判据对它不发声——「只持指针」是设计要求，不是重复）。
+function templateAuthorityBody(paragraph) {
+  return paragraph.split('\n').filter((line) => !line.includes('模板权威')).join('\n');
 }
 // 最长连续同文跨距（返回该片段本身；空串 = 无重合）。
 function longestCommonSpan(a, b) {
@@ -2977,16 +2986,36 @@ function templateAuthorityProblems(docs) {
     if (text.includes('archive 是模板来源')) {
       problems.push(rel + ' 含「archive 是模板来源」旧反向声明');
     }
-    for (const paragraph of templateAuthorityParagraphs(text)) paragraphs.push([rel, paragraph]);
+    for (const paragraph of templateAuthorityParagraphs(text)) {
+      paragraphs.push([rel, templateAuthorityBody(paragraph)]);
+    }
   }
   for (let i = 0; i < paragraphs.length; i += 1) {
     for (let j = i + 1; j < paragraphs.length; j += 1) {
-      if (paragraphs[i][0] === paragraphs[j][0]) continue;
-      const span = longestCommonSpan(paragraphs[i][1], paragraphs[j][1]);
-      if (span.length >= TEMPLATE_AUTHORITY_BLOCK_SPAN) {
-        problems.push('模板权威声明出现第二份展开正文（' + paragraphs[i][0] + ' ↔ ' + paragraphs[j][0]
-          + '，连续同文 ' + span.length + ' 字符 ≥ ' + TEMPLATE_AUTHORITY_BLOCK_SPAN + '）');
+      const [relA, bodyA] = paragraphs[i];
+      const [relB, bodyB] = paragraphs[j];
+      if (relA === relB || bodyA === '' || bodyB === '') continue;
+      const span = longestCommonSpan(bodyA, bodyB);
+      // 阈值**按对派生自受保护内容**（较短一侧的实际正文块长）：一侧的正文整段出现在另一侧即红。
+      const derived = Math.min(bodyA.length, bodyB.length);
+      if (span.length >= derived) {
+        problems.push('模板权威声明出现第二份展开正文（' + relA + ' ↔ ' + relB
+          + '，连续同文 ' + span.length + ' 字符 ≥ 较短一侧正文块长 ' + derived + '）');
       }
+    }
+  }
+  return problems;
+}
+// 作者面完备性判据（纯函数；真实判据与反向构造探针共用）：实际持「模板权威」声明的技能树文本
+// 必须**登记**在受检面（`TEMPLATE_AUTHORITY_SKILLS` + 入口册两件）里；未登记 ⇒ 报「未登记的
+// 权威声明」，报错指向真实动作（登记新册）。**单向判定**：受检面成员**缺**声明由
+// `templateAuthorityProblems` 的逐份「缺模板权威整句声明」覆盖，故不需要计数相等——计数相等
+// 正是同文件别处判据注释明确反对的「以总量取红」自锁探针（合法扩册先撞红，报错指向锚）。
+function templateAuthorityRegistrationProblems(actualHolders, expectedHolders) {
+  const problems = [];
+  for (const rel of actualHolders) {
+    if (!expectedHolders.includes(rel)) {
+      problems.push(rel + ' 持有「模板权威」声明但未登记在受检面（新增册须同批登记 TEMPLATE_AUTHORITY_SKILLS）');
     }
   }
   return problems;
@@ -9672,24 +9701,26 @@ const SCENARIOS = [
       // 反向构造（同一判据驱动，逐条对应重定向后的两侧）：
       // ① 同一册复制第二份锚行 ⇒ 必报「只允许 1 处」（重复回潮的同册形态）；
       // ② 权威目标改指别处 ⇒ 必报「未指向」（单一权威侧）；
-      // ③ 同一段 ≥400 字符展开副本落进两份文档 ⇒ 必报「第二份展开正文」（正文唯一侧）；
+      // ③ **真实文本变异**（不再用合成 `'y'.repeat(n)` 串）：把入口册的声明块**原样**搬进另一册
+      //    ——判据面里的那册原块被**替换**掉，故不触发「同册第二处锚句」，只可能由正文唯一判据
+      //    发声 ⇒ 必报「第二份展开正文」（旧探针只证明比较器能用，证不了判据面选得对）；
       // ④ 抽掉某册锚句 ⇒ 必报该册缺声明（指针在场侧）。
       {
         const openRel = 'flow-comet-open/SKILL.md';
-        const changeRel = 'flow-comet-change/SKILL.md';
         const openText = templateAuthorityDocs.get(openRel);
-        const changeText = templateAuthorityDocs.get(changeRel);
         const anchorLine = openText.split(/\r?\n/).find((l) => l.includes('模板权威'));
-        const expansion = '> **模板权威**：段形唯一权威 = `flow-kit/templates/**`；'
-          + '（展开副本，反向构造探针）' + 'y'.repeat(TEMPLATE_AUTHORITY_BLOCK_SPAN) + '\n';
+        const entryBlock = templateAuthorityParagraphs(templateAuthorityDocs.get('flow-comet/SKILL.md'))[0] ?? '';
+        const openBlock = templateAuthorityParagraphs(openText)[0] ?? '';
+        if (entryBlock === '' || openBlock === '' || templateAuthorityBody(entryBlock) === '') {
+          problems.push('正文唯一反向构造的前提不成立：入口册声明块缺失 / 无正文行（无法构造真实变异探针）');
+        }
         const probes = [
           ['同册复制第二份锚行', new Map(templateAuthorityDocs).set(openRel, openText + '\n' + anchorLine + '\n'),
             '只允许 1 处'],
           ['权威目标改指别处', new Map(templateAuthorityDocs).set(openRel,
             openText.split('`flow-kit/templates/**`').join('`.specs/archive/**`')), '未指向'],
-          ['展开副本落进两份文档', new Map(templateAuthorityDocs)
-            .set(openRel, openText + '\n' + expansion)
-            .set(changeRel, changeText + '\n' + expansion), '第二份展开正文'],
+          ['入口册声明块原样搬进另一册', new Map(templateAuthorityDocs)
+            .set(openRel, openText.split(openBlock).join(entryBlock)), '第二份展开正文'],
           ['抽掉某册锚句', new Map(templateAuthorityDocs).set(openRel,
             openText.split(anchorLine).join('（反向构造：抽掉锚句）')), '缺模板权威'],
         ];
@@ -9699,22 +9730,30 @@ const SCENARIOS = [
           }
         }
       }
-      // 作者面完备性：持「模板权威」声明的技能树文本集合须**恰好**等于受检面（多出来的持锚文本
-      // 是「第二份正文」的入口——例如某册偷偷加一条自己的权威声明）。
+      // 作者面完备性（判据 = **登记**，不是**计数相等**）：新增持锚文本必须**显式登记**在受检面
+      // 常量里，否则报「未登记的权威声明」——报错指向真实动作（把新册登记进 `TEMPLATE_AUTHORITY_SKILLS`
+      // 并同批加声明）。**不做计数相等**：同文件别处的判据注释明确反对「以总量取红」的自锁探针
+      //（合法扩册会先撞红、报错方向指向锚而非真实动作）；受检面成员**缺**声明由
+      // `templateAuthorityProblems` 的逐份「缺模板权威整句声明」覆盖，故登记判据**单向**判定即可。
       {
         const expectedHolders = [...templateAuthorityDocs.keys()].sort();
         const actualHolders = skillTreeDocFiles()
           .filter(([, file]) => fs.readFileSync(file, 'utf8').includes('模板权威'))
           .map(([rel]) => rel)
           .sort();
-        for (const rel of actualHolders) {
-          if (!expectedHolders.includes(rel)) {
-            problems.push(rel + ' 持有「模板权威」声明但不在受检面内（第二处权威声明的入口）');
+        problems.push(...templateAuthorityRegistrationProblems(actualHolders, expectedHolders));
+        // 反向构造（同一判据驱动）：① 未登记的新持有者 ⇒ 必报「未登记」；② 同批登记（把新册加进
+        // 受检面常量）⇒ **零问题**（合法扩册不再先红——旧计数相等判据正是在这一步撞红）。
+        const registeredProbe = 'flow-comet-probe-node/SKILL.md';
+        for (const [label, holders, expected, shouldReport] of [
+          ['未登记的新持有者', [...actualHolders, registeredProbe], expectedHolders, true],
+          ['同批登记后的新持有者', [...actualHolders, registeredProbe], [...expectedHolders, registeredProbe], false],
+        ]) {
+          const reported = templateAuthorityRegistrationProblems(holders, expected)
+            .some((p) => p.includes(registeredProbe));
+          if (reported !== shouldReport) {
+            problems.push('反向构造判别力缺失（模板权威登记: ' + label + (shouldReport ? ' 未被判违规' : ' 被误判违规') + '）');
           }
-        }
-        if (actualHolders.length !== expectedHolders.length) {
-          problems.push('持模板权威声明的技能树文本数 ' + actualHolders.length
-            + ' ≠ 受检面 ' + expectedHolders.length + '（实际: ' + actualHolders.join(', ') + '）');
         }
       }
       // —— 附：技能树正文的相对路径引用必须解析得到（本轮改名造成 5 册死引用而**零红灯**）——

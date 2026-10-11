@@ -169,7 +169,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record <node-id> '{"su
 All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT.md, LESSONS.md, CHANGELOG.md).
 
 > **模板权威**：工件段形以 `flow-kit/templates/**` 为唯一权威。
-> **archive 定位与读法**：`.specs/archive/**` 是历史证据。**何时可读**：工作区文档明确要求（如断点续传 / 决策追溯），或某 guard 硬校验的约定在模板与 LESSONS 中查不到时；**读什么**：只取结构与证据；**不读什么**：不作为格式规范或决策依据，不得以归档工件对齐段形。
+> **archive 定位与读法**：见主 `SKILL.md` 的「Artifact Paths」小节（单一来源——「何时可读 / 读什么 / 不读什么」的三段判据只在那一处表达，本文不复述）。
 
 ### Scripts
 
