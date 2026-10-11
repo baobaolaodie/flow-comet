@@ -10292,12 +10292,25 @@ const SCENARIOS = [
         const treeBypassSentence = '**以建树绕过边界**不受支持';
         const staleTreeBan = '手工 `git worktree add <任意路径>` **不是受支持路径**';
         const gapClosureSentence = '该缺口现已被守卫关闭';
-        // 公开变更日志的 Unreleased 段切片（止于下一个版本标题）。
-        const unreleasedSectionOf = (text) => {
-          const start = text.indexOf('## [Unreleased]');
-          if (start < 0) return null;
+        // 公开变更日志的段切片（止于下一个版本标题）。
+        const sectionAt = (text, start) => {
           const next = text.indexOf('\n## [', start + 1);
           return text.slice(start, next < 0 ? text.length : next);
+        };
+        const unreleasedSectionOf = (text) => {
+          const start = text.indexOf('## [Unreleased]');
+          return start < 0 ? null : sectionAt(text, start);
+        };
+        // 「最新条目段」（判据与反向构造共用同一切片，单一实现）：dev 态新增条目在 `## [Unreleased]`；
+        // 发布结算把条目移入最新版本段、Unreleased 只留空标题——这是仓库既有发布形态（`v1.6.2` tag 即
+        // 「空 Unreleased + 版本段」，`v1.6.1` tag 甚至无 Unreleased 段）。只切 Unreleased 段的实现
+        // 在发布态必然失配，故：Unreleased 段有条目则取之，否则回退到最新版本段。
+        const newestEntriesSectionOf = (text) => {
+          const unreleased = unreleasedSectionOf(text);
+          if (unreleased !== null && /^- /m.test(unreleased)) return unreleased;
+          const versioned = text.search(/^## \[\d+\.\d+\.\d+/m);
+          if (versioned >= 0) return sectionAt(text, versioned);
+          return unreleased;
         };
         // 一致性判据（单一实现：真实判据与反向构造探针共用本函数）。
         const publicFaceProblems = ({ mechanism, mechanismZh, changelog, changelogZh, subagentBook, entryBook, factsBook }) => {
@@ -10321,14 +10334,16 @@ const SCENARIOS = [
             }
             if (text.includes(stale)) out.push(rel + ' 残留旧判级表述「' + stale + '」');
           }
-          // 公开变更日志：Unreleased 段内条目数与带编号 PR 链接数一致，且不得有空链接。
+          // 公开变更日志：最新条目段的条目数与**条目行内**带编号 PR 链接数一致，且不得有空链接。
+          // 计数面限定在条目行——版本段的摘要行另按惯例携带 PR 链接，段级计数会把摘要行读成条目失配。
           for (const [rel, text] of [['CHANGELOG.md', changelog], ['CHANGELOG-zh.md', changelogZh]]) {
             if (text === null) continue;
-            const section = unreleasedSectionOf(text);
-            if (section === null) { out.push(rel + ' 缺 Unreleased 段（新增条目无处登记）'); continue; }
-            const entries = (section.match(/^- /gm) ?? []).length;
-            const numbered = (section.match(/\/pull\/\d+/g) ?? []).length;
-            const bare = (section.match(/\/pull\/\)/g) ?? []).length;
+            const section = newestEntriesSectionOf(text);
+            if (section === null) { out.push(rel + ' 缺 Unreleased 段与版本段（新增条目无处登记）'); continue; }
+            const entryLines = section.split('\n').filter((line) => line.startsWith('- '));
+            const entries = entryLines.length;
+            const numbered = entryLines.reduce((n, line) => n + (line.match(/\/pull\/\d+/g) ?? []).length, 0);
+            const bare = entryLines.reduce((n, line) => n + (line.match(/\/pull\/\)/g) ?? []).length, 0);
             if (bare > 0) out.push(rel + ' 新增条目含空 PR 链接（pull/ 无编号）×' + bare);
             if (entries > 0 && numbered !== entries) {
               out.push(rel + ' 新增条目与带编号 PR 链接数不一致（条目 ' + entries + ' / 链接 ' + numbered + '）');
@@ -10393,10 +10408,6 @@ const SCENARIOS = [
             mechanism: patchText(publicFaceSources.mechanism, 'nested delegations', 'REMOVED'),
             mechanismZh: patchText(publicFaceSources.mechanismZh, '嵌套委派载荷', 'REMOVED'),
           }, '丢了限定形态'],
-          ['变更日志链接编号抽掉', {
-            changelog: patchText(publicFaceSources.changelog, '/pull/145', '/pull/'),
-            changelogZh: patchText(publicFaceSources.changelogZh, '/pull/145', '/pull/'),
-          }, '空 PR 链接'],
           ['已关闭缺口注解抽掉', {
             factsBook: publicFaceSources.factsBook.split(gapClosureSentence).join('REMOVED'),
           }, '未把已关闭的守卫缺口写成本文'],
@@ -10412,12 +10423,98 @@ const SCENARIOS = [
             subagentBook: publicFaceSources.subagentBook + '\n' + staleTreeBan + '，不得作为绕过手段。\n',
           }, '残留一刀切禁令'],
         ];
+        // 链接编号反向构造（**两面各自取目标、各自断言**）：目标数据驱动——取「最新条目段」条目行内第一处
+        // `/pull/<编号>`，两面各按自己的取值抽掉编号，两面都须报出空链接。写死批次编号的实现会在结算把
+        // 条目移入版本段后恒不命中（判别力静默归零），批次更替后同样过期；只取英文侧编号的实现会让中文侧
+        // 的判据在编号分叉或回归时不被覆盖。
+        // 公开面缺席（安装副本形态）时不做该探针——上方 SKIP 行已显式声明未验证，不在此另报。
+        const newestEntryLinkOf = (text) => ((newestEntriesSectionOf(text) ?? '')
+          .split('\n').filter((line) => line.startsWith('- ')).join('\n')
+          .match(/\/pull\/\d+/) ?? [null])[0];
+        const changelogFacesPresent = publicFaceSources.changelog !== null && publicFaceSources.changelogZh !== null;
+        if (changelogFacesPresent) {
+          const linkEn = newestEntryLinkOf(publicFaceSources.changelog);
+          const linkZh = newestEntryLinkOf(publicFaceSources.changelogZh);
+          if (linkEn === null || linkZh === null) {
+            problems.push('公开面口径反向构造目标缺失：最新条目段内无带编号 PR 链接（无从反证，不表示为通过）');
+          } else {
+            const strippedProblems = publicFaceProblems({
+              ...publicFaceSources,
+              changelog: patchText(publicFaceSources.changelog, linkEn, '/pull/'),
+              changelogZh: patchText(publicFaceSources.changelogZh, linkZh, '/pull/'),
+            });
+            for (const rel of ['CHANGELOG.md', 'CHANGELOG-zh.md']) {
+              if (!strippedProblems.some((problem) => problem.startsWith(rel + ' 新增条目含空 PR 链接'))) {
+                problems.push('公开面口径反向构造判别力缺失（变更日志链接编号抽掉：' + rel + ' 未被判违规）');
+              }
+            }
+          }
+        }
         for (const [probeLabel, override, expected] of publicFaceProbes) {
           const probed = { ...publicFaceSources, ...override };
           // 含缺席面的探针不执行（该面既无真实判据也无反向构造）——上方 SKIP 行已显式声明未验证。
           if (Object.values(probed).some((value) => value === null)) continue;
           if (!publicFaceProblems(probed).some((problem) => problem.includes(expected))) {
             problems.push('公开面口径反向构造判别力缺失（' + probeLabel + ' 未被判违规）');
+          }
+        }
+        // 发布结算形态锚（本判据在发布态失配的回归锚）：把 dev 态变更日志改写成发布结算后的形态——
+        // Unreleased 只留空标题、条目连同条目行内的 PR 链接落在最新版本段——判据须零问题，且链接编号
+        // 反向构造在此形态下仍必报（只切 Unreleased 段 + 写死批次编号的实现在此形态下必红）。
+        {
+          const settled = (text) => {
+            if (text === null) return null;
+            const section = unreleasedSectionOf(text);
+            if (section === null) return null;
+            // 树本身已是发布态（Unreleased 无条目）时无从构造该转换：此时真实判据与数据驱动探针
+            // 已直接覆盖发布态，本锚跳过（不静默当通过——覆盖由上方真实判据承担）。
+            if (!/^- /m.test(section)) return null;
+            const headingStart = text.indexOf('## [Unreleased]');
+            const nextVersion = text.indexOf('\n## [', headingStart + 1);
+            if (nextVersion < 0) return null;
+            const body = section.slice(section.indexOf('\n') + 1).replace(/^\n+/, '');
+            // 前缀止于 Unreleased 标题行末——条目**只**出现在合成的版本段下（前缀若带到条目，判据仍会
+            // 选中 Unreleased 段，本锚就变成空转的恒真锚）。
+            return text.slice(0, headingStart + '## [Unreleased]'.length)
+              + '\n\n## [9.9.9] - 2099-01-01\n\nA release gathering the settled work.\n\n' + body
+              + text.slice(nextVersion);
+          };
+          const settledSources = {
+            ...publicFaceSources,
+            changelog: settled(publicFaceSources.changelog),
+            changelogZh: settled(publicFaceSources.changelogZh),
+          };
+          if (Object.values(settledSources).every((value) => value !== null)) {
+            // 构造自证：合成后 Unreleased 段须为空、最新条目段须是合成的版本段——否则本锚没有真正构造
+            // 出发布形态（静默空转），直接判红。
+            for (const [rel, text] of [['CHANGELOG.md', settledSources.changelog], ['CHANGELOG-zh.md', settledSources.changelogZh]]) {
+              if (/^- /m.test(unreleasedSectionOf(text) ?? '')) {
+                problems.push('发布结算形态锚构造失效（' + rel + '）：合成后 Unreleased 段仍带条目，未真正构造发布形态');
+              }
+              if (!/^## \[9\.9\.9\]/m.test(newestEntriesSectionOf(text) ?? '')) {
+                problems.push('发布结算形态锚构造失效（' + rel + '）：最新条目段未回退到合成的版本段');
+              }
+            }
+            const settledProblems = publicFaceProblems(settledSources);
+            if (settledProblems.length > 0) {
+              problems.push('发布结算形态（Unreleased 空标题 + 条目在最新版本段）下判据误报: ' + settledProblems.join('; '));
+            }
+            const settledLinkEn = newestEntryLinkOf(settledSources.changelog);
+            const settledLinkZh = newestEntryLinkOf(settledSources.changelogZh);
+            if (settledLinkEn === null || settledLinkZh === null) {
+              problems.push('发布结算形态下链接编号反向构造目标缺失：最新条目段内无带编号 PR 链接');
+            } else {
+              const reversedProblems = publicFaceProblems({
+                ...settledSources,
+                changelog: patchText(settledSources.changelog, settledLinkEn, '/pull/'),
+                changelogZh: patchText(settledSources.changelogZh, settledLinkZh, '/pull/'),
+              });
+              for (const rel of ['CHANGELOG.md', 'CHANGELOG-zh.md']) {
+                if (!reversedProblems.some((problem) => problem.startsWith(rel + ' 新增条目含空 PR 链接'))) {
+                  problems.push('发布结算形态下链接编号反向构造判别力缺失（抽掉条目行内编号：' + rel + ' 未被判违规）');
+                }
+              }
+            }
           }
         }
       }
