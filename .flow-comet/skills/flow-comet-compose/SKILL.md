@@ -15,7 +15,7 @@ description: "Use only when explicitly invoked as /flow-comet-compose. Not part 
 - **guard 校验**：`workflow-guard.mjs` 按节点 guardrail（artifact-exists / evidence-only / state-transition）做阶段门禁
 - **hook 拦截**：`comet-hook-guard.mjs` 按 writeWhitelist 做写入边界守卫
 
-**内置 8 节点协议不可被取代**：`reference/workflow-protocol.json`（open→design→plan→execute→subagent-execute→review→verify→archive）永远是默认工作流；自定义协议只在用户显式指定时加载（见「与内置协议的关系」）。
+**内置 8 节点协议不可被取代**：`../flow-comet/reference/workflow-protocol.json`（open→design→plan→execute→subagent-execute→review→verify→archive）永远是默认工作流；自定义协议只在用户显式指定时加载（见「与内置协议的关系」）。
 
 ## 交互流程（逐步）
 
