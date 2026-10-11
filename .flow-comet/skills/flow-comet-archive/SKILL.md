@@ -38,7 +38,7 @@ This node finalizes a completed change by extracting reusable lessons from the d
 
 5. **Compile the leftover issues list (problem-handling principle)**: Before the move, collect everything that remains open or known-limited in this change:
    - REVIEW.md findings marked `[转待办]` (deferred — recorded but not fixed) plus any known limitations captured during the change.
-   - **需要模板时**读 `reference/KNOWN-ISSUES-template.md`（当你归档时要编遗留清单、需要模板时读它）——含「遗留清单」段骨架与「使用说明」（模板本身是分发产物：零过程代号；归档实例不受此限）。
+   - **需要模板时**读 `../flow-comet/reference/KNOWN-ISSUES-template.md`（当你归档时要编遗留清单、需要模板时读它）——含「遗留清单」段骨架与「使用说明」（模板本身是分发产物：零过程代号；归档实例不受此限）。
    - Write `.specs/<change-id>/KNOWN-ISSUES.md` — each entry: issue description, why it was deferred, and where it may surface again.
    - The file moves with the change into `.specs/archive/<YYYY-MM-DD>-<change-id>/` (archived alongside the other artifacts), so the leftover issues never silently vanish after archive.
    - If there are no leftovers, still state that explicitly in the file (e.g. "无遗留问题" / "No known leftover issues").
@@ -75,7 +75,7 @@ This node finalizes a completed change by extracting reusable lessons from the d
 - **写权限顺序（先转移后写 TASK）**：先跑 `reenter` 完成转移（写入权限随即跟随目标节点），再在目标节点权限内追加 Fix 任务 / 修改工件；archive 阶段 hook 对 change 目录只放行 `KNOWN-ISSUES.md` 这一个精确文件（另有 `.specs/archive/`、`.specs/CHANGELOG.md`、`.specs/LESSONS.md`、`STATE.md`），**不要试图在归档阶段先写 TASK.md**。
 - **回源路径不因归档而放宽**：修复回路本身不变——回到 `execute` 生命周期时照样跑完四类出口，随后**回源节点跑出口**（`entry <源节点>` → `exit <源节点> --apply`）；受控重入只改工作归属，不写任何闭合标记，也**禁止绕过**目标节点入口 / 出口与源节点出口门禁。
 
-**何时读完整规格**：要核对完整边界——命令全形与三态审计行（`REENTRY:` / `FIX-BATCH: 归位` / `RETURN:`）的区分、备份快照与 sha256 指纹、续轮授权形态与轮次记账、重复调用同一目标的空操作语义、「已移动 / 已合并」的处置面——读 `reference/fix-loop.md`（**当你归档后发现缺陷、要把工作归属受控归位回既有生命周期时读它**）。
+**何时读完整规格**：要核对完整边界——命令全形与三态审计行（`REENTRY:` / `FIX-BATCH: 归位` / `RETURN:`）的区分、备份快照与 sha256 指纹、续轮授权形态与轮次记账、重复调用同一目标的空操作语义、「已移动 / 已合并」的处置面——读 `../flow-comet/reference/fix-loop.md`（**当你归档后发现缺陷、要把工作归属受控归位回既有生命周期时读它**）。
 
 ### 归档提交（R4.1 交付闭环）
 

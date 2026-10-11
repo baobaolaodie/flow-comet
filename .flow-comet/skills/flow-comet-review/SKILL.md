@@ -136,7 +136,7 @@ review 发现 Critical / Major 后的修复必须回到 `execute` 节点生命�
 4. **回源节点跑出口**：回到源节点后跑该节点出口门禁（`entry <源节点>` → `exit <源节点> --apply`），通过后继续 review → verify 的正常路由，必要时进入下一轮 Fix 闭环。
 5. **禁止绕过**：驻留源节点不归位、顺手改完后直接跑源节点 exit 收场会被 BLOCKED；不得用跳过归位或出口门禁的手段（含手动改写 `.flow-comet/flow-comet-state.json`）替代本路径。
 
-**何时读完整规格**：要核对完整判据——Fix 任务与任务集签名的时序、受控归位的完整判定条件、`FIX-BATCH` / `RETURN` 审计行三态语义与回源节点的回程豁免、绕过的失败面与恢复指引——读 `reference/fix-loop.md`（**当你 review 发现缺陷、要开修复回路把工作退回 execute 生命周期时读它**）。
+**何时读完整规格**：要核对完整判据——Fix 任务与任务集签名的时序、受控归位的完整判定条件、`FIX-BATCH` / `RETURN` 审计行三态语义与回源节点的回程豁免、绕过的失败面与恢复指引——读 `../flow-comet/reference/fix-loop.md`（**当你 review 发现缺陷、要开修复回路把工作退回 execute 生命周期时读它**）。
 
 ## Entry Check
 

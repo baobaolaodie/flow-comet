@@ -2693,20 +2693,34 @@ function fixLoopStateMachineProblems({ books, authority }) {
 // 技能树正文里的**相对路径引用必须解析得到**（场景 184 附；纯函数 + 合成输入可驱动）：本轮
 // `GUIDANCE.md` → `reference/entry-detail.md` 的改名曾造成 5 册死引用而**零红灯**——技能树正文的
 // 相对引用此前没有任何机检覆盖（只能靠人工/子代理顺带发现）。判据面刻意收窄到技能树内的
-// `reference/**.md|json` 相对引用，逐条候选路径 = ① 引用处文件所在目录；② `<skillsRoot>/flow-comet/`
-//（跨技能相对引用先例：`flow-comet-compose` 引 `../flow-comet/reference/workflow-protocol.json`）。
+// `reference/**.md|json` 相对引用。
+// **解析基准 = 引用处所在册的册根**（不是「任何册都按入口册册根解析」）：裸形态 `reference/<file>`
+// 是**册根相对**形态，故候选 = ① 引用处文件所在目录（入口册 `SKILL.md` 与入口册 `reference/**`
+// 展开面正是这一形态）；② 引用处**所在册的册根**（`<册>/reference/<file>`，覆盖展开面文件引用
+// 同册兄弟文件的写法）。跨册引用必须写**显式形态** `../flow-comet/reference/<file>`（先例 =
+// `flow-comet-compose` 引 `../flow-comet/reference/workflow-protocol.json`），只对该形态接受
+// **入口册册根**这一额外候选——裸形态在节点册里因此**解析不到即红**：节点册没有 `reference/`
+// 目录，而旧实现给每个引用合成「入口册册根」第二候选，把节点册里的裸指针一律静默判绿
+//（**为抓这一类而写的锚放过了这一类的实例**，2026-10-11 实测）。
 // `flow-kit/**` 一类**技能树外**引用不在判据面（其根随安装形态变化，由项目根决定）。
 const SKILL_TREE_REFERENCE_RE = /(?<!flow-kit\/)(?<![\w./-])(?:\.\.\/flow-comet\/)?reference\/[A-Za-z0-9._-]+\.(?:md|json)/g;
+const SKILL_TREE_ENTRY_BOOK = 'flow-comet';
+const SKILL_TREE_EXPLICIT_REFERENCE_PREFIX = '../flow-comet/';
+function skillTreeReferenceCandidates(rel, ref) {
+  const tail = ref.replace(/^\.\.\/flow-comet\//, '');
+  const explicit = ref.startsWith(SKILL_TREE_EXPLICIT_REFERENCE_PREFIX);
+  // 裸形态按**引用处所在册的册根**解析；跨册解析只对显式形态开放（收窄点）。
+  const crossBookRoot = explicit ? SKILL_TREE_ENTRY_BOOK : rel.split('/')[0];
+  return [
+    path.posix.normalize(path.posix.join(path.posix.dirname(rel), ref)),
+    path.posix.normalize(path.posix.join(crossBookRoot, tail)),
+  ];
+}
 function skillTreeReferenceProblems(docs, skillsRoot) {
   const problems = [];
   for (const [rel, text] of docs) {
-    const dir = path.posix.dirname(rel);
     for (const ref of new Set(text.match(SKILL_TREE_REFERENCE_RE) ?? [])) {
-      const tail = ref.replace(/^\.\.\/flow-comet\//, '');
-      const candidates = [
-        path.posix.normalize(path.posix.join(dir, ref)),
-        path.posix.normalize(path.posix.join('flow-comet', tail)),
-      ];
+      const candidates = skillTreeReferenceCandidates(rel, ref);
       if (!candidates.some((candidate) => fs.existsSync(path.join(skillsRoot, candidate)))) {
         problems.push(rel + ' 的相对路径引用解析不到: ' + ref + '（候选: ' + candidates.join(' / ') + '）');
       }
@@ -9762,7 +9776,9 @@ const SCENARIOS = [
         const treeDocs = new Map(skillTreeDocFiles().map(([rel, file]) => [rel, fs.readFileSync(file, 'utf8')]));
         problems.push(...skillTreeReferenceProblems(treeDocs, skillsRootAbs));
         // 反向构造（同一判据驱动）：① 把引用改写成不存在的目标 ⇒ 必报「解析不到」；
-        // ② 抽掉引用 ⇒ 判据面收缩但**不误报**（证明判据只在引用在场时发声，不恒真）。
+        // ② 抽掉引用 ⇒ 判据面收缩但**不误报**（证明判据只在引用在场时发声，不恒真）；
+        // ③ **形态收窄侧**：把节点册里的一处**显式跨册**指针改回**裸形态** ⇒ 必报「解析不到」
+        //（旧实现给裸形态合成「入口册册根」候选，这一改法当时**判绿**——正是假绿本身）。
         const sampleEntry = [...treeDocs].find(([, text]) => SKILL_TREE_REFERENCE_RE.test(text));
         SKILL_TREE_REFERENCE_RE.lastIndex = 0;
         if (!sampleEntry) {
@@ -9778,6 +9794,21 @@ const SCENARIOS = [
           const dropped = new Map(treeDocs).set(sampleRel, sampleText.split(sampleRef).join(''));
           if (skillTreeReferenceProblems(dropped, skillsRootAbs).some((p) => p.startsWith(sampleRel))) {
             problems.push('相对路径引用判据误报（抽掉引用后仍报该册）: ' + sampleRel);
+          }
+        }
+        const explicitEntry = [...treeDocs].find(([rel, text]) => !rel.startsWith(SKILL_TREE_ENTRY_BOOK + '/')
+          && text.includes(SKILL_TREE_EXPLICIT_REFERENCE_PREFIX));
+        if (!explicitEntry) {
+          problems.push('形态收窄反向构造的前提不成立：节点册里找不到显式跨册指针'
+            + '（`' + SKILL_TREE_EXPLICIT_REFERENCE_PREFIX + 'reference/…`）');
+        } else {
+          const [nodeRel, nodeText] = explicitEntry;
+          const explicitRef = nodeText.match(
+            new RegExp('\\.\\.\\/flow-comet\\/reference\\/[A-Za-z0-9._-]+\\.(?:md|json)'))[0];
+          const reverted = new Map(treeDocs).set(nodeRel,
+            nodeText.split(explicitRef).join(explicitRef.replace(SKILL_TREE_EXPLICIT_REFERENCE_PREFIX, '')));
+          if (!skillTreeReferenceProblems(reverted, skillsRootAbs).some((p) => p.includes('解析不到'))) {
+            problems.push('反向构造判别力缺失（节点册指针改回裸形态未被判违规）: ' + nodeRel + ' → ' + explicitRef);
           }
         }
         // —— 附 2：成对展开文件的指针不得指错（上一条只证明目标**存在**，本条判**指对了**）——
@@ -9931,7 +9962,9 @@ const SCENARIOS = [
             problems.push('反向构造判别力缺失（平台事实: 还原裸旧独断句未被判违规）');
           }
           if (!platformFactsAuthorityProblems(platformFactsRel, facts, [
-            ...pointerBooks.slice(0, 1).map(([rel, text]) => [rel, text.split('`reference/platform-facts.md`').join('（反向构造：抽掉指针）')]),
+            // 抽掉指针按**文件名子串**（不带反引号、不带前缀）——指针形态从裸形态统一为显式跨册形态
+            // 时本探针仍有效（形态变化不得让反向构造静默失效）。
+            ...pointerBooks.slice(0, 1).map(([rel, text]) => [rel, text.split('reference/platform-facts.md').join('（反向构造：抽掉指针）')]),
             ...pointerBooks.slice(1),
           ]).some((p) => p.includes('引用册指针不在场'))) {
             problems.push('反向构造判别力缺失（平台事实: 抽掉引用册指针未被判违规）');

@@ -44,9 +44,9 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 
 **TASK 签名校验（C3，execute 期间）**：entry execute 时记录任务集签名（行尾规范化 + 标记属性剥离）；exit 时比对——execute 期间 TASK.md **只允许改开标签的标记属性**（`status` done/pending；时间戳如需记录写在开标签属性如 `completed_at`——签名剥离白名单允许；**禁止写入 action/其他 task 内容**），增删任务/改 action/改边界/改其他内容会在 exit 被 BLOCKED（签名不匹配）。回退修复任务（review/verify 发现缺陷追加）须先经 review 流程追加到 `## Fix 任务` 段，再按下方「修复回路状态机路径」受控归位 execute，并由 entry execute 刷新签名（端到端验证实证：直接注入任务会被签名拦截）。
 
-**任务集已修订 ⇒ 出口报「签名不匹配」时的合法出口**：**不要手改状态**——跑 `workflow-state.mjs replan "<原因>" --authorized-by <来源>` 重校重签（需用户显式授权；**要判定该不该重校、或签名不匹配要处置时读 `reference/replan.md`**）。
+**任务集已修订 ⇒ 出口报「签名不匹配」时的合法出口**：**不要手改状态**——跑 `workflow-state.mjs replan "<原因>" --authorized-by <来源>` 重校重签（需用户显式授权；**要判定该不该重校、或签名不匹配要处置时读 `../flow-comet/reference/replan.md`**）。
 
-本节点**不直接写实现代码**。所有 pending 任务统一委托 fresh-context 子代理执行（加载 flow-comet-dev + 回传 Return Contract）；委托通道按平台（差异只在谁建树），见下方「并行安全四属性契约」与 `reference/platform-facts.md`（三平台通道对照表）。
+本节点**不直接写实现代码**。所有 pending 任务统一委托 fresh-context 子代理执行（加载 flow-comet-dev + 回传 Return Contract）；委托通道按平台（差异只在谁建树），见下方「并行安全四属性契约」与 `../flow-comet/reference/platform-facts.md`（三平台通道对照表）。
 
 - `parallel="true"` 的 pending 任务由 subagent-execute 节点负责并行委托
 - execute 遍历 TASK.md 时，遇到 `parallel="true" status="pending"` 的任务块应**跳过**
@@ -62,7 +62,7 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 >
 > | # | 属性 | 含义 | 满足形态 |
 > |---|------|------|----------|
-> | ① | **写权限** | 每个写者必须有一条被守卫认可的写入通道 | **身份分派**（CC / Codex 载荷含 `agent_id` ⇒ 子代理语义；dsh 桥接以环境变量 `FLOW_COMET_AGENT_DEPTH` 透传正整数身份深度，**并同时注入桥接通道标记 `FLOW_COMET_AGENT_DEPTH_SOURCE`——守卫要求标记与深度同时在场才接受该通道**）——**worktree 只是本属性的实现之一**，不是必须；**最小保护集除外**：身份在场时 `.flow-comet/flow-comet-state.json` 与 `reference/workflow-protocol.json` 仍受拦（三平台一致 BLOCKED） |
+> | ① | **写权限** | 每个写者必须有一条被守卫认可的写入通道 | **身份分派**（CC / Codex 载荷含 `agent_id` ⇒ 子代理语义；dsh 桥接以环境变量 `FLOW_COMET_AGENT_DEPTH` 透传正整数身份深度，**并同时注入桥接通道标记 `FLOW_COMET_AGENT_DEPTH_SOURCE`——守卫要求标记与深度同时在场才接受该通道**）——**worktree 只是本属性的实现之一**，不是必须；**最小保护集除外**：身份在场时 `.flow-comet/flow-comet-state.json` 与 `../flow-comet/reference/workflow-protocol.json` 仍受拦（三平台一致 BLOCKED） |
 > | ② | **提交隔离** | 提交只含自己 `write_files` 的字面路径 | 提交面 pathspec 纪律五要素（见 Guidance 同名小节） |
 > | ③ | **验证隔离** | 同一时刻只有一个写者：全量判据不得与在飞写者并行 | 出口校验锚 = `handoffRequests` 有 request 无对应 `handoffResult` ⇒ 新 change BLOCKED / 旧 change WARN；全部有 result ⇒ 放行；无证据 ⇒ 零输出（**已撤回的 request 不构成在飞委托**：`workflow-handoff.mjs withdraw <task-id> --by <来源>` 在原记录上留痕 `withdrawnAt` + `withdrawnBy`，已撤回 = 终态、历史不删） |
 > | ④ | **集成纪律** | 机制选择 / 顺序 / 审计 / 冲突处置四项均有明文规则 | 集成纪律四要素（见 Guidance 同名小节） |
@@ -70,7 +70,7 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 > **写面含 gitignored 面的任务（四属性映射 · 与其他任务同一判据）**：任务 `write_files` 全为 gitignored 字面路径时，四属性的满足方式不变——① **写权限**仍走**身份通道**（载荷 `agent_id` / 环境变量身份深度 ⇒ 子代理语义放行，项目内任意路径可写（含 gitignored）；gitignored 只是路径属性，不是通道差异）；② **提交隔离**走既有 **`noCommit` 资格**（request 按 `.gitignore` 命中记 `noCommit:true` ⇒ 任务零提交，「提交只含自己 `write_files` 的字面路径」由**无提交**满足，不是放宽校验；资格 fail-closed：glob / `..` 越界 / 非 git 仓 / tracked 文件 / 链接逃逸一律不授予，result 时刻按同一判据重验，失败即撤销资格）；③④ 与其他任务同形（同一时刻单写者 + 集成四要素）。**并行 × 零提交**因此合法：任务可标 `parallel="true"` 并被并行委派，出口校验按 request 的 `noCommit` 资格豁免缺 `commitHash`。
 > **留痕的边界（诚实声明 · 与 `directOverride` / `completedChecks` / `reentryAuthorization` 同族）**：留痕记录的是「**发生过委派**」，**不是**对执行者身份的物理证明——`handoffRequests` / `handoffResult` 只证明协调者写下过 request 与 result 两条记录，不证明写入确实由子代理完成；与 `completedChecks` 只能记录声明、`directOverride` 只能记录授权、`reentryAuthorization` 只能记录授权源同理。声明与事实不符属流程违规，验收以 transcript 可见的委派触发为准。
 >
-> **平台事实（三平台通道 · 判级三态 · 实测与边界）**：要判定平台能力（能否并行委派 / 谁建树 / 写通道是什么）或引用判级口径时读 `reference/platform-facts.md`——三平台通道对照表、判级三态（证实 / 推翻 / 未覆盖）与该次实测的限定边界原文在该文件，本册不复述。
+> **平台事实（三平台通道 · 判级三态 · 实测与边界）**：要判定平台能力（能否并行委派 / 谁建树 / 写通道是什么）或引用判级口径时读 `../flow-comet/reference/platform-facts.md`——三平台通道对照表、判级三态（证实 / 推翻 / 未覆盖）与该次实测的限定边界原文在该文件，本册不复述。
 
 ### 提交面 pathspec 纪律（要点 · 带适用条件）
 
@@ -84,7 +84,7 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 4. **并行波次禁用 `git commit --amend`**：共享工作区下 HEAD 会被并行写者推进；确需修正必须**先断言 `git rev-parse HEAD` 等于自己刚提交的哈希**，否则一律改用**新提交追加**。
 5. **误改后的自救通道**（第 3 条「禁 `reset`」的定向例外）：断言 HEAD 后 `git reset --soft <自己的父提交>`（**只用 `--soft`**），再以 **pathspec** 重建自己的提交。
 
-> **要判定提交边界、或撞上锁 / 误改要收拾时读 `reference/commit-discipline.md`**——五要素与并行波次附加两条的完整判据（含实测依据）在该文件。
+> **要判定提交边界、或撞上锁 / 误改要收拾时读 `../flow-comet/reference/commit-discipline.md`**——五要素与并行波次附加两条的完整判据（含实测依据）在该文件。
 
 ### 集成纪律（要点）
 
@@ -95,7 +95,7 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 3. **审计留痕**：每次集成输出一行 `INTEGRATE: <task-id> <commitHash> → <集成提交>`（降级路径记降级原因），映射（task-id → commitHash → 集成提交）记入该趟流程记录（`<task-id>-SUMMARY.md` / handoff evidence 文本字段）；**判级**：审计行是**执行纪律**（review 把关），本节点不声称存在机械门禁校验它。
 4. **冲突处置（两类分别动作）**：**机械冲突**（不改用户可见行为）执行者**可自行解决** + 必须跑**合并后验证**并在审计行记因；**语义冲突**（两侧对同一行为 / 契约 / 接口给出不同语义）**必须中止集成并上抛**（记 BLOCKED + 恢复指引，由协调者 / 用户裁决）——不得由执行者自行拍板。
 
-> **要在集成前定规则、或遇冲突 / 降级要判定时读 `reference/commit-discipline.md`**——四要素的完整判据与 comet 先例在该文件。
+> **要在集成前定规则、或遇冲突 / 降级要判定时读 `../flow-comet/reference/commit-discipline.md`**——四要素的完整判据与 comet 先例在该文件。
 
 ### Prerequisites
 
@@ -104,7 +104,7 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 - `.specs/LESSONS.md` must exist (or be created from template if missing).
 - For frontend/UI tasks: `.specs/<change-id>/UI-DESIGN.md` must exist.
 - 若当前任务的 `<task-id>-PROGRESS.md`（位于 `.specs/<change>/`；与 Recovery 段及归档期 `*-PROGRESS.md` 扫描同口径）存在，必须先读取"已排除方案"段（R1.6 反重复），确认当前计划不在排除列表中。完成后删除该文件，有用信息迁移至 SUMMARY。
-- 委托前按 `reference/dirty-worktree.md` 检查脏工作树（`.specs/<change-id>/` 未提交工件会触发 entry execute 的 WORKTREE WARN；verify 前为自查建议，无 guard 检查）。
+- 委托前按 `../flow-comet/reference/dirty-worktree.md` 检查脏工作树（`.specs/<change-id>/` 未提交工件会触发 entry execute 的 WORKTREE WARN；verify 前为自查建议，无 guard 检查）。
 
 ### Steps（subagent 模式 · 协调者流程，统一委托子代理）
 
@@ -160,7 +160,7 @@ review / verify 发现缺陷后的修复**必须回到 `execute` 节点生命周
 5. **回源节点跑出口**：回到源节点后 `next` 应输出 `NODE: review` / `NODE: verify`（不因产物已存在而跳过），随后 `entry <源节点>` → `exit <源节点> --apply`；通过后继续正常路由（必要时进入下一轮 Fix 闭环）。
 6. **禁止绕过**：不归位、顺手改完直接跑源节点 exit 收场、或手改 `.flow-comet/flow-comet-state.json` 一律 BLOCKED——不得用跳过归位 / 出口门禁的手段替代本路径。
 
-> **要判定该不该开修复回路、要受控归位或受控重入、核对归档侧重入边界时读 `reference/fix-loop.md`**——上述 6 步的完整判据 + 受控重入完整规格（archive 源：`workflow-state.mjs reenter <target> --authorized-by <source> --reason <text>`，每次需用户显式授权、每 change 上限 3 轮、自动落 state 备份、打印 `REENTRY` 审计行）+ 归档侧边界原文在该文件。
+> **要判定该不该开修复回路、要受控归位或受控重入、核对归档侧重入边界时读 `../flow-comet/reference/fix-loop.md`**——上述 6 步的完整判据 + 受控重入完整规格（archive 源：`workflow-state.mjs reenter <target> --authorized-by <source> --reason <text>`，每次需用户显式授权、每 change 上限 3 轮、自动落 state 备份、打印 `REENTRY` 审计行）+ 归档侧边界原文在该文件。
 
 ## Entry Check
 
