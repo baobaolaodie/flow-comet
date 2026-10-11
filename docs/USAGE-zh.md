@@ -41,9 +41,9 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 | 命令 | 负责什么 |
 |---|---|
 | `workflow-guard.mjs` | `entry` / `exit` —— 门禁。出口校验该节点的工件、段、声明，并在 `verify` 时**真跑**测试命令 |
-| `workflow-state.mjs` | `init`、`status`、`next`、`select`、`record`、`verify-fail`、`advance`、`execution-mode`、`config`、`skill-load`、`bridge-check`、`reenter`、`replan` —— 状态机与记账 |
+| `workflow-state.mjs` | `init`、`status`、`next`、`select`、`record`、`verify-fail`、`advance`、`execution-mode`、`config`、`skill-load`、`bridge-check`、`reenter`、`replan`、`explain` —— 状态机与记账 |
 
-节点的出口会在以下情况拒绝通过：工件不完整或形态不合规、缺少技能加载声明、或从未记录进入；每次拒绝都会打印原因与修复命令。状态不存放在对话里：随时用 `status` / `next` 重新推导。
+节点的出口会在以下情况拒绝通过：工件不完整或形态不合规、缺少技能加载声明、或从未记录进入；每次拒绝都会打印原因与修复命令。状态不存放在对话里：随时用 `status` / `next` 重新推导；单个节点的产物、门禁与命令用 `explain <node>` 现问，不必从节点技能册里手抄。
 
 ## 工件
 
@@ -79,7 +79,7 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 
 在 git 项目里，引擎按 change 开分支：`init <change-id>` 会创建并切换到 `change/<change-id>`，`next` 会打印分支行；没有 git 的项目里该行显示 `none`。
 
-执行模式默认 `subagent`（实现工作委托给隔离子代理，附 Return Contract）。`execution-mode direct` 切到协调者亲自执行并记录显式授权；`execution-mode subagent` 切回。
+执行模式默认 `subagent`（实现工作委托给子代理，附 Return Contract，按四属性契约执行——写权限、提交隔离、验证隔离、集成纪律，见[并行委派](MECHANISM-zh.md#并行委派)）。`execution-mode direct` 切到协调者亲自执行并记录显式授权；`execution-mode subagent` 切回。
 
 ## 用户入口
 

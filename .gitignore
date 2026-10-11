@@ -30,3 +30,7 @@ scripts/reset-dogfood.mjs
 scripts/check-codes-local.mjs
 scripts/check-docs-local.mjs
 scripts/check-issues-local.mjs
+
+# 本地测量与接线工具（重构期调查工具，gitignore 不随发布分发）
+scripts/measure-duplication.mjs
+scripts/check-reference-wiring.mjs

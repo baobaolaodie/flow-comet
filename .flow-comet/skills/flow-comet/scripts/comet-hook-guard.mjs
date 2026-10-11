@@ -9,7 +9,9 @@ import {
   readWorkflowProtectedFile,
   resolveProtocol,
   validateProtocolSchema,
+  workflowFileObjectIdentity,
   workflowPathInside,
+  workflowSameFileObject,
 } from './protocol-utils.mjs';
 // 运行时路径常量（单一来源：state-schema.mjs）——本脚本每次工具调用都会执行，故此处只 import
 // 同包内的本地 ESM 模块（与已存在的 protocol-utils.mjs import 同型，实测无可感知开销）；
@@ -141,6 +143,39 @@ function unquotedSegmentEnd(command, masked, from) {
   return command.length;
 }
 
+// apply_patch heredoc 正文定位（Codex 承载补丁的真实调用形态：tool_name="Bash"、补丁正文写在 command
+// 文本里、载荷没有 file_path）。识别按**行语义**而非 token 形状：命令名必须是 apply_patch，其前只允许
+// 空白或「同段前置命令 + 分隔符」（`cd x && apply_patch …` 可认，引号内的同名文本因不满足前缀形态不认），
+// 命令名与重定向之间不得出现分隔符或别的重定向（`[^;&|<>]*` 收口）。命令名不受引号掩码影响——真实
+// 载荷里有把该命令包在宿主 here-string 里传入的形态，按行文本识别才能覆盖。
+// 正文止于与定界串等值的整行（`<<-` 形态允许行首制表符），**不越过定界行**——否则后续命令行会被吞进
+// 正文，下游命令的参数会被读成写入目标而误拦。
+// 未闭合形态按「正文到命令末尾」处理：产出与否取决于正文里是否真有补丁摘要行，最坏是多产出一个目标
+// （偏拦截方向），不会漏掉补丁真正要写的文件。
+function applyPatchHeredocs(command) {
+  const bodies = [];
+  const startRe = /^(?:[^;&|<>]*[;&|]+[ \t]*)?[ \t]*apply_patch\b[^;&|<>]*<<(-?)[ \t]*("[^"]*"|'[^']*'|[^\s;&|<>]+)/i;
+  const lines = command.split('\n');
+  for (let index = 0; index < lines.length; index++) {
+    const start = startRe.exec(lines[index].replace(/\r$/, ''));
+    if (!start) continue;
+    const delimiter = start[2].replace(/^["']|["']$/g, '');
+    if (delimiter === '') continue;
+    const stripLeadingTabs = start[1] === '-';
+    let bodyEnd = lines.length;
+    for (let cursor = index + 1; cursor < lines.length; cursor++) {
+      const line = lines[cursor].replace(/\r$/, '');
+      if ((stripLeadingTabs ? line.replace(/^\t+/, '') : line) === delimiter) {
+        bodyEnd = cursor;
+        break;
+      }
+    }
+    bodies.push(lines.slice(index + 1, bodyEnd).join('\n'));
+    index = bodyEnd; // 正文不再参与起始扫描（同一段正文不会被解析两次）
+  }
+  return bodies;
+}
+
 function codexWriteTargetsFromCommand(command) {
   if (typeof command !== 'string' || command.trim() === '') return [];
   const targets = [];
@@ -225,6 +260,18 @@ function codexWriteTargetsFromCommand(command) {
     let t = (isCopyMove ? m[3] : m[2]) || '';
     t = t.trim().replace(/^["']|["']$/g, '');
     if (t && t !== 'NUL' && t !== '/dev/null' && !targets.includes(t)) targets.push(t);
+  }
+  // apply_patch heredoc 的补丁摘要行（见上方 applyPatchHeredocs）：`*** Update File: <p>` /
+  // `*** Add File: <p>` / `*** Delete File: <p>` / `*** Move to: <p>` 各带一个写入目标，
+  // 抽取后与其余形态**同流**——本函数的返回值既是白名单判定的输入，也是最小保护集判定的输入
+  // （调用方共用），故此处不新增第二份判定；路径归一与同一性比较沿用既有 resolveWriteTarget 与
+  // protocol-utils 的包含性判据。值经既有 addTarget 归一（剥引号 / 过滤空设备 / 去重）。
+  const patchHeaderRe = /^\*\*\*\s+(?:Update File|Add File|Delete File|Move to):\s*(.+?)\s*$/;
+  for (const body of applyPatchHeredocs(command)) {
+    for (const rawLine of body.split('\n')) {
+      const header = patchHeaderRe.exec(rawLine.replace(/\r$/, ''));
+      if (header) addTarget(header[1]);
+    }
   }
   return targets;
 }
@@ -352,6 +399,49 @@ function blockStateFileWrite(target) {
   );
 }
 
+// ── 身份判据（ADR-014 决策 2：三平台同一、无平台分支）────────────────────────────
+// 载荷 `agent_id` 在场（CC / Codex 原生子代理，真机载荷实测形态）或**桥接通道自证在场**且环境变量
+// FLOW_COMET_AGENT_DEPTH 为正整数（dsh 桥接透传）⇒ 子代理语义。两输入面归并为**一个**判据
+// （消费方只问「是不是子代理」），不得下沉为 `if (platform === ...)` 之类的平台分支。
+// dsh 面按**实现位置修订**（规划期落定）：桥接只把委派深度透传进环境变量，身份判定与保护集判定的
+// 整条都归本文件独占——桥接不再持有任何一份判定，两侧没有分叉的余地（归因以本节为准）。
+// env 面的作用域收紧（2026-10-07）：CC / Codex 生成的 hook **直接**调用本文件、并不自证是 dsh——
+// 只看深度变量时，该变量一旦被继承进这些 hook 的进程环境（父进程导出 / 包装脚本转发），守卫就会在
+// phase / worktree / runRoot 检查**之前**走子代理路径返回，只剩最小保护集兜底。故桥接在注入深度的
+// 同时注入**通道标记** FLOW_COMET_AGENT_DEPTH_SOURCE=dsh-bridge；env 面身份**要求两者同时在场**
+// （标记缺失或值不符 ⇒ 恒按协调者语义，即便深度为正整数）——判据只读环境变量，**不从载荷形状
+// 推断桥接**（载荷形状是宿主合同，不是通道证据）。
+// 取值形态按实证收窄：载荷面只认**非空字符串**（空串 / 缺失 / 非字符串一律非身份）；env 面只认
+// **纯十进制正整数字符串**（"0" = 协调者 ⇒ 非身份；空串 / 负数 / 小数 / 带杂质一律非身份）；
+// 通道标记只认**精确等值**（大小写 / 空白变体一律不认）。
+// 收窄方向是 fail-closed：不命中的形态退回既有路径判定——该回退态即 AC-2 (b) 写死的「维持现状」，
+// 不得读成新判据的放宽。
+function payloadAgentIdentity(input) {
+  if (!input || typeof input !== 'object') return '';
+  const raw = input.agent_id;
+  return typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : '';
+}
+
+function agentDepthIdentity(value) {
+  if (typeof value !== 'string') return 0;
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return 0;
+  const depth = Number.parseInt(trimmed, 10);
+  return Number.isSafeInteger(depth) && depth > 0 ? depth : 0;
+}
+
+// 桥接通道自证（取值与守卫侧判据同源的常量放在本文件——单一实现，桥接只按同一字面注入）：
+// 标记在场才说明这次调用来自 dsh 桥接；标记不在场 ⇒ env 面身份恒为 0（继承来的深度变量不作数）。
+const BRIDGE_DEPTH_CHANNEL_MARKER = 'dsh-bridge';
+function bridgedAgentDepthIdentity() {
+  if (process.env.FLOW_COMET_AGENT_DEPTH_SOURCE !== BRIDGE_DEPTH_CHANNEL_MARKER) return 0;
+  return agentDepthIdentity(process.env.FLOW_COMET_AGENT_DEPTH);
+}
+
+function subagentIdentity(input) {
+  return payloadAgentIdentity(input) !== '' || bridgedAgentDepthIdentity() > 0;
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..');
 // 项目根判定兜底链（级3 cwd 漂移实测暴露的 H5 残留缺口收口）：
@@ -390,6 +480,79 @@ const runRoot = (() => {
 // 协议路径取 env FLOW_COMET_PROTOCOL 或默认 <packageRoot>/reference/workflow-protocol.json
 const protocolPath = resolveProtocol(packageRoot, runRoot, []);
 
+// ── 最小保护集（ADR-014 决策 4）：身份在场时仍受拦的两个目标 ─────────────────────
+// 判定的整条实现只在本文件（dsh 桥接按**实现位置修订**只透传身份信号、不另存一份保护集判定），
+// 故「桥接侧加保护集判定」的旧插入位置描述已被该修订取代——归因以本节为准。
+// ① 机器状态文件（判据 = 上方 blockedStateFileTarget，取值来源 state-schema.mjs 的
+//    RUNTIME_STATE_PATH）；② 本次运行**实际生效**的协议文件（取值来源 = 上方 protocol-utils
+//    resolveProtocol 的解析结果——本文件不另造第二份协议路径口径）。
+// 同一性判定复用 protocol-utils 既有受保护路径判据 workflowPathInside（互含 ⇒ 同一路径）：
+// 路径归一/相对化只此一份，本文件不新增第二份路径判据（L-067）。大小写敏感性与状态文件判据
+// 同口径（共用 CASE_INSENSITIVE_FS 策略常量；win32 的 path.relative 本身已按小写比较）。
+function isSameWorkflowPath(left, right) {
+  const fold = (value) => (CASE_INSENSITIVE_FS ? value.toLowerCase() : value);
+  const a = fold(path.resolve(left));
+  const b = fold(path.resolve(right));
+  return workflowPathInside(a, b) && workflowPathInside(b, a);
+}
+
+function blockedProtocolFileTarget(absoluteTarget) {
+  return isSameWorkflowPath(protocolPath, absoluteTarget);
+}
+
+// 保护集的**物理**同一性判定（词法判定的别名闭合）：8.3 短路径 / 符号链接 / junction / 硬链接
+// 是同一文件实体的不同拼写，词法比较看不见它们（身份放行下保护集是唯一防线，故须闭合）。
+// 判据复用 protocol-utils.mjs 导出的文件身份比较判据（workflowFileObjectIdentity +
+// workflowSameFileObject）——本文件不新增第二份文件身份判据（L-067）。
+// 目标不存在（新建文件是常态）或 stat 失败 ⇒ 无法证明同一 ⇒ 返回 false（退回词法判定）；
+// 诚实边界：物理判定只证明「此刻存在且同一」，不证明「将来仍同一」（与 TOCTOU 同族的既有限制）。
+async function isSameProtectedFileObject(targetAbsolute, protectedAbsolute) {
+  try {
+    const [targetStat, protectedStat] = await Promise.all([
+      fs.stat(targetAbsolute, { bigint: true }),
+      fs.stat(protectedAbsolute, { bigint: true }),
+    ]);
+    return workflowSameFileObject(
+      workflowFileObjectIdentity(targetStat),
+      workflowFileObjectIdentity(protectedStat),
+    );
+  } catch {
+    return false;
+  }
+}
+
+// 拦截报文沿用既有 hookBlock 风格（主行 BLOCKED + 详情行恢复指引）——新增判定不引入新输出形态。
+function blockProtocolFileWrite(target) {
+  hookBlock(
+    `BLOCKED: 协议文件 "${target}" 禁工具写（身份放行不放行协议保护路径——协议变更走协议文件通道）`,
+    '恢复: 协议文件由人工/安装器通道维护；不得由工具写覆盖运行中协议'
+  );
+}
+
+// 身份在场时的最小保护集执行：候选写入目标逐个判定，命中即以既有报文风格拦截（hookBlock
+// 不返回）；未命中 ⇒ 返回（调用方按子代理语义放行）。判定入口唯一——身份短路与保护集判定都在此收口。
+// 两个目标各双判据：词法同一性（规范拼写）+ 物理同一性（别名形态）。
+async function enforceMinimalProtectionSet(hookInput) {
+  const stateFileAbsolute = path.join(runRoot, ...STATE_FILE_REL.split('/'));
+  for (const candidate of protectedCandidateTargets(hookInput)) {
+    const resolvedTarget = resolveWriteTarget(candidate);
+    if (resolvedTarget === null) continue;
+    if (
+      blockedProtocolFileTarget(resolvedTarget.absolute) ||
+      (await isSameProtectedFileObject(resolvedTarget.absolute, protocolPath))
+    ) {
+      blockProtocolFileWrite(resolvedTarget.raw);
+    }
+    if (resolvedTarget.targetRel !== null) {
+      if (
+        blockedStateFileTarget(resolvedTarget.targetRel) ||
+        (await isSameProtectedFileObject(resolvedTarget.absolute, stateFileAbsolute))
+      ) {
+        blockStateFileWrite(resolvedTarget.raw);
+      }
+    }
+  }
+}
 
 const WORKFLOW_PROJECT_FILE_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -507,23 +670,72 @@ async function readHookInput() {
   }
 }
 
-// 计算写入目标相对 runRoot 的路径（正斜杠分隔，供 PHASE_WRITE_WHITELIST 前缀匹配）。
-// 无法解析或目标在项目根之外时返回 null。
-function writeTargetFromHookInput(input) {
+// 盘符根拼写归一（单一实现——只由下方写入目标解析消费，不得在别处再写一份同义归一，L-067）。
+// Windows 上 Git-Bash 类 shell 把 `D:\<剩余>` 写作 `/d/<剩余>`（盘符小写 + 正斜杠）。win32 的
+// 目标解析把该拼写读成「**当前盘根**下的 \d\<剩余>」而非 `D:\<剩余>`：同一文件于是被判成根外，
+// 词法相对化与物理同一性两道保护集判据同时失守（身份放行下保护集是唯一防线 ⇒ 静默放行）。
+// 故必须在**解析之前**归一到盘符拼写——归一落在此处，全部消费方（白名单 / 保护集 / 根外关断）
+// 自动同判，且同一文件的各等价拼写（大小写、正反斜杠）收敛到同一结果。
+// 形态严格限定为**单字母盘符根**：盘符字母之后必须是路径分隔符或字符串结束。放宽这一条会把
+// `/dev/<…>`、`/etc/<…>`、`/tmp/<…>` 一类普通 POSIX 绝对路径误读成 `<盘符>:\ev\<…>`。
+// 非 win32 平台该拼写是货真价实的 POSIX 绝对路径，语义不同——不归一（保持既有判定）。
+const DRIVE_ROOT_SPELLING_RE = /^\/([A-Za-z])(?=\/|$)/;
+function normalizeDriveRootSpelling(rawTarget) {
+  if (process.platform !== 'win32') return rawTarget;
+  const match = DRIVE_ROOT_SPELLING_RE.exec(rawTarget);
+  if (match === null) return rawTarget;
+  const drive = match[1].toUpperCase() + ':';
+  const rest = rawTarget.slice(2);
+  return rest === '' ? drive + '/' : drive + rest;
+}
+
+// 写入目标解析（单一实现——白名单判定 / 保护集判定 / runRoot 外关断三条判定共用，禁止各处
+// 再写一份相对化口径）。`rawTarget` 为 file_path 或命令级写入 token：绝对路径原样、相对路径
+// 按 runRoot 解析；Windows 的盘符根拼写先经上方同义归一（否则同一文件的不同拼写会异判）。
+// 返回结构：
+//   insideRunRoot=true  → targetRel = 相对 runRoot 的 POSIX 路径（白名单前缀匹配 / 状态文件比较）
+//   insideRunRoot=false → targetRel = null（项目根之外；由「runRoot 外写入关断」与 Bash 分支同判）
+// 无写入语义（非字符串 / 空串）→ null（该目标不参与任何判定）。
+function resolveWriteTarget(rawTarget) {
+  if (typeof rawTarget !== 'string') return null;
+  const trimmed = rawTarget.trim();
+  if (trimmed === '') return null;
+  const absolute = path.resolve(runRoot, normalizeDriveRootSpelling(trimmed));
+  const relative = path.relative(runRoot, absolute);
+  const outside =
+    path.isAbsolute(relative) || relative === '..' || relative.startsWith('..' + path.sep);
+  return {
+    raw: trimmed,
+    absolute,
+    insideRunRoot: !outside,
+    targetRel: outside ? null : relative === '' ? '.' : relative.replaceAll('\\', '/'),
+  };
+}
+
+// file_path 载荷面提取（单一实现：file_path 形态判定与保护集候选共用同一提取口径）。
+function toolFilePathFromHookInput(input) {
   if (!input || typeof input !== 'object') return null;
   const toolInput =
     input.tool_input && typeof input.tool_input === 'object' ? input.tool_input : null;
-  const filePath =
-    toolInput && typeof toolInput.file_path === 'string' ? toolInput.file_path : null;
-  if (!filePath) return null;
-  const absolute = path.isAbsolute(filePath)
-    ? path.resolve(filePath)
-    : path.resolve(runRoot, filePath);
-  const relative = path.relative(runRoot, absolute);
-  if (path.isAbsolute(relative) || relative === '..' || relative.startsWith('..' + path.sep)) {
-    return null;
+  return toolInput && typeof toolInput.file_path === 'string' ? toolInput.file_path : null;
+}
+
+// file_path 形态（Write / Edit / …）：载荷无 file_path ⇒ null（无写入语义，不判定）。
+// 与命令级 token 共用 resolveWriteTarget——同一路径不因所选工具而异。
+function fileWriteTargetFromHookInput(input) {
+  return resolveWriteTarget(toolFilePathFromHookInput(input));
+}
+
+// 保护集判定的候选目标（工具形态适配，单一实现）：Bash 取命令级写入 token（与下方 Bash 分支
+// 同一提取器）；其余工具取 file_path。无写入语义 ⇒ 空数组（身份放行不对无写入语义的调用做判定）。
+function protectedCandidateTargets(input) {
+  if (input && typeof input === 'object' && input.tool_name === 'Bash') {
+    const toolInput =
+      input.tool_input && typeof input.tool_input === 'object' ? input.tool_input : null;
+    return codexWriteTargetsFromCommand(toolInput ? toolInput.command : null);
   }
-  return relative === '' ? '.' : relative.replaceAll('\\', '/');
+  const filePath = toolFilePathFromHookInput(input);
+  return filePath === null ? [] : [filePath];
 }
 
 // 声明化写入白名单：协议 writeWhitelist（节点 id → 路径前缀数组）优先；
@@ -595,7 +807,27 @@ async function main() {
   const { whitelist: PHASE_WRITE_WHITELIST, declared } = await resolvePhaseWriteWhitelist(executionMode);
 
   const hookInput = await readHookInput();
-  const target = writeTargetFromHookInput(hookInput);
+
+  // ── ①【ADR-014 决策 2·3】身份短路：身份判据**先于**路径判据求值 ──────────────────────
+  // 身份在场（载荷 agent_id / 桥接通道标记在场且 env FLOW_COMET_AGENT_DEPTH>0）⇒ 直接进入子代理
+  // 语义：**不再做路径审计**（不解析白名单、不判隔离区、不判 runRoot 内外），只判最小保护集——两个
+  // 机器面目标（状态文件 / 本次运行生效的协议文件）命中即 BLOCK，未命中即放行。
+  // env 面的短路**要求桥接通道标记同时在场**（见上方身份判据段）：直接调用本文件的 CC / Codex hook
+  // 即使继承了深度变量也不进此分支——它们走协调者语义（白名单 / runRoot / worktree 检查照常执行）。
+  // 实现位置修订（规划期落定）：dsh 侧的身份信号由桥接**透传**（环境变量），身份判定与保护集判定的
+  // 整条都归本文件独占——桥接不再持有任何判定，故不存在第二份实现与其分叉；决策表里「桥接侧加保护集
+  // 判定」的插入位置描述已被该修订取代，归因以本节与最小保护集段为准。
+  // 顺序锚（AC-4 ②）：身份在场 + 目标在 runRoot 之外 ⇒ 放行；顺序若反转（先解析路径）必 BLOCK。
+  // 放行覆盖「手工 worktree / 独立工作区」形态：路径判定在平台载荷 cwd ≠ 实际工作目录时不可用
+  // （交互式真机探针实证），故身份通道不以路径为前置。
+  if (subagentIdentity(hookInput)) {
+    await enforceMinimalProtectionSet(hookInput);
+    hookOk('(subagent identity)');
+    return;
+  }
+
+  const fileTarget = fileWriteTargetFromHookInput(hookInput);
+  const target = fileTarget ? fileTarget.targetRel : null;
 
   // R5: Bash 工具写路径适配(CC 与 Codex 通用)——Bash 工具的 command 字符串(无 file_path),
   // 解析写入目标按当前节点白名单判定(与 file_path 判定同语义);未命中写入模式 = 无写入语义,放行。
@@ -608,9 +840,8 @@ async function main() {
       // 声明模式未列出节点 → fail-closed(同 file_path 判定);缺省表无此节点 → 协调者默认 .specs/
       const effectiveWhitelist = whitelist || (declared ? null : ['.specs/']);
       for (const t of writeTargets) {
-        const absolute = path.resolve(runRoot, t);
-        const rel = path.relative(runRoot, absolute);
-        const targetRel = (path.isAbsolute(rel) || rel === '..' || rel.startsWith('..' + path.sep)) ? null : rel.replaceAll('\\', '/');
+        const resolvedTarget = resolveWriteTarget(t);
+        const targetRel = resolvedTarget ? resolvedTarget.targetRel : null;
         if (targetRel !== null && blockedStateFileTarget(targetRel)) {
           blockStateFileWrite(t);
         }
@@ -648,6 +879,18 @@ async function main() {
     }
     hookOk();
     return;
+  }
+
+  // ── ②【ADR-014 决策 6】runRoot 外写入的 fail-open 关断（两分支对称）──────────────────
+  // file_path 解析为项目根之外时，与上方 Bash 分支**同判**：该分支对 targetRel === null 的目标
+  // 同样落入 `allowed=false` → 拦截。修复前 file_path 分支在此静默落入后继流程（越界写无痕放过），
+  // Bash 分支却拦截 —— 同一目标因工具而异。判定条件与 Bash 分支逐条对齐（有写入语义 + currentNode
+  // 在场）；身份在场者已由上方 ① 短路放行，故「手工 worktree 绝对路径写入」不受本关断影响。
+  if (fileTarget && !fileTarget.insideRunRoot && currentNode) {
+    hookBlock(
+      `BLOCKED: 写入 "${fileTarget.raw}" 不在当前节点 "${currentNode}" 允许范围（目标在项目根之外）`,
+      '恢复: 改用项目根内的路径；子代理经身份通道放行（载荷 agent_id / 桥接透传的环境变量 FLOW_COMET_AGENT_DEPTH，且桥接通道标记 FLOW_COMET_AGENT_DEPTH_SOURCE 在场）'
+    );
   }
 
   if (currentNode && target) {

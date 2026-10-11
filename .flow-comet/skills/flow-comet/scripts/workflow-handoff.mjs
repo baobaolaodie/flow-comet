@@ -3,7 +3,7 @@ import { execFileSync } from 'child_process';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { validateStateFields, looksLikeObjectLiteral, writeJsonAtomic, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, resolveProtocolPathWithState } from './state-schema.mjs';
+import { validateStateFields, looksLikeObjectLiteral, writeJsonAtomic, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, resolveProtocolPathWithState, handoffRequestWithdrawn } from './state-schema.mjs';
 import { EXECUTE_FAMILY_NODE_IDS, protocolNodeEnabled, resolveDelegationTarget, taskDependencyEligibility } from './route-node.mjs';
 import {
   readProtocolFile,
@@ -11,12 +11,16 @@ import {
   inspectWorkflowPathSegments,
 } from './protocol-utils.mjs';
 import { taskAttrsById, taskBlocks, taskOpeningAttrs } from './task-parsing.mjs';
+// 时间形态单一权威（新增写入路径一律走本模块，禁自行拼接）：撤回留痕的时刻生成走 nowTimestamp，
+// 人可见回显走 formatLocalTimestamp（本地时间 + 显式偏移），解析走 parseTimestamp。
+import { nowTimestamp, formatLocalTimestamp, parseTimestamp } from './time-utils.mjs';
 
 // workflow-handoff.mjs: Record subagent handoff evidence
 // evidence 统一记录在 subagent-execute 名下作为委托证据库——execute（串行委托）与 subagent-execute（并行委托）共用。不改成节点参数，保持最小改动。
 // Usage:
 //   node workflow-handoff.mjs request <task-id> <description> [--write-files <files...>]  -- record handoff request (W2-D: optional writeFiles allow-list)
 //   node workflow-handoff.mjs result <task-id> <result-or-JSON>  -- record handoff result (W1-D: JSON Return Contract; W2-D: commitHash subset check; : completedChecks 规范化; redEvidence 时间顺序校验)
+//   node workflow-handoff.mjs withdraw <task-id> --by <source> [--reason <text>]  -- 撤回被遗弃的 request（前置：目标无 handoffResult——已收工者拒绝撤回；留痕：withdrawnAt + withdrawnBy；已撤回 = 终态）
 //   node workflow-handoff.mjs status                           -- show all handoff evidence
 
 // 归属门禁读取协议用：与其它脚本同源（packageRoot 默认协议；env 可覆盖），不消费 request 参数。
@@ -234,7 +238,12 @@ async function revalidateResultZeroCommit(state, taskId, handoffReq) {
   // 避免 WARN 声称已撤销而 state 仍是旧值。
   await writeState(state);
   const reasonText = ZERO_COMMIT_REVOKE_REASON_TEXT[verdict.reason] || verdict.reason;
-  const detail = '任务 ' + taskId + ' 零提交资格 result 重验失败（' + reasonText + '）——request evidence noCommit=false, revokedAt=' + handoffReq.revokedAt + ', revokeReason=' + verdict.reason;
+  // 人可见时间戳一律本地时间 + 显式偏移（时间纪律）：revokedAt 是既有的机器字段（历史 Z 形态，
+  // 同族迁移窗口内保持原样），但把它原样拼进这条给人看的消息即违反人可见口径——此处按标准形态
+  // 回显；历史值不可解析时回显原值（可见降级，不静默改写、不谎称已格式化）。
+  const revokedAtMs = parseTimestamp(handoffReq.revokedAt);
+  const revokedAtDisplay = Number.isNaN(revokedAtMs) ? String(handoffReq.revokedAt) : formatLocalTimestamp(revokedAtMs);
+  const detail = '任务 ' + taskId + ' 零提交资格 result 重验失败（' + reasonText + '）——request evidence noCommit=false, revokedAt=' + revokedAtDisplay + ', revokeReason=' + verdict.reason;
   if (state.newChange === true) {
     // 新 change 只落 request 资格撤销；此刻尚未默认 handoffResult，确保「不落 result」不是文案承诺
     console.error('HANDOFF ERROR: ' + detail + '；新 change 不落 result，出口校验不再豁免缺 commitHash。恢复: 修正 write_files / .gitignore 与路径形态后重新 request，或回传含合法 commitHash 的 Return Contract');
@@ -496,10 +505,24 @@ async function main() {
     // 记 noCommit:true；不具资格 → 不记 noCommit、不阻断原流程（保持既有完整提交子集校验）。
     const literalIgnoredEligible = taskResolved && writeFiles.length > 0
       && (await classifyWriteFilesProvablyIgnored(writeFiles)).eligible;
+    // 撤回后再委托：新 request 覆盖当前态，但**不静默删除**撤回历史——已撤回记录的留痕转入
+    // previousWithdrawals 数组（加法式保留，可审计「撤回 → 重新委托」的顺序）。
+    const priorRecord = state.evidence['subagent-execute'].handoffRequests[taskId];
+    const priorWithdrawals = priorRecord && Array.isArray(priorRecord.previousWithdrawals)
+      ? priorRecord.previousWithdrawals
+      : [];
+    const carriedWithdrawals = handoffRequestWithdrawn(priorRecord)
+      ? [...priorWithdrawals, {
+        withdrawnAt: priorRecord.withdrawnAt,
+        withdrawnBy: priorRecord.withdrawnBy,
+        ...(priorRecord.withdrawReason ? { withdrawReason: priorRecord.withdrawReason } : {}),
+      }]
+      : priorWithdrawals;
     state.evidence['subagent-execute'].handoffRequests[taskId] = {
       description, requestedAt: new Date().toISOString(),
       ...(writeFiles.length ? { writeFiles } : {}),
-      ...(zeroEligible || literalIgnoredEligible ? { noCommit: true } : {})
+      ...(zeroEligible || literalIgnoredEligible ? { noCommit: true } : {}),
+      ...(carriedWithdrawals.length ? { previousWithdrawals: carriedWithdrawals } : {})
     };
     await writeState(state);
     if (literalIgnoredEligible) {
@@ -551,6 +574,16 @@ async function main() {
     state.evidence['subagent-execute'] = state.evidence['subagent-execute'] || {};
     const handoffReq = state.evidence['subagent-execute'].handoffRequests?.[taskId];
     const hasRequest = !!handoffReq && typeof handoffReq === 'object';
+    // 已撤回 = 终态（撤回通道的闭合半边）：撤回后的 request 不再接受 result——否则被撤回的委托
+    // 可被事后「复活」，撤回语义与守卫的放行判据（同一判据）分叉。要重新委托该任务须重新 request
+    // （新 request 记录会覆盖该 taskId 的当前态，撤回留痕以「撤回后重新委托」的顺序可审计）。
+    if (handoffRequestWithdrawn(handoffReq)) {
+      console.error('BLOCKED: 任务 ' + taskId + ' 的委托已撤回（终态）——不再接受 result'
+        + '（withdrawnAt=' + handoffReq.withdrawnAt + ', withdrawnBy=' + handoffReq.withdrawnBy + '）'
+        + '；恢复: 若该任务仍需执行，重新发起 workflow-handoff.mjs request ' + taskId
+        + ' <description> 后再回传结果');
+      process.exit(1);
+    }
     // m-13：result 重验在默认 handoffResult 之前——新 change 失败路径只落 request.noCommit=false，
     // 不落下空 handoffResult 充当 result 载体；重验通过/旧 change 之后才初始化结果容器。
     if (await revalidateResultZeroCommit(state, taskId, handoffReq) === 'block') process.exit(1);
@@ -680,6 +713,80 @@ async function main() {
     return;
   }
 
+  if (action === 'withdraw') {
+    // 撤回通道（受支持的出口解卡路径）：零提交复验失败 / 写边界被拒之后，request 可能留在
+    // 「有 request 无 result」态而命令面无从撤回——守卫的出口校验据此永久卡住。本动作在原记录上
+    // **加法式**落留痕（withdrawnAt 时间戳 + withdrawnBy 来源，可选 withdrawReason），**不删除**
+    // 任何历史字段（description / requestedAt / writeFiles / noCommit 原样保留）；守卫按同一判据
+    // （state-schema.handoffRequestWithdrawn）把已撤回的 request 排除在在飞委托之外。
+    // 已撤回 = **终态**：重复撤回被拒（不改写既有留痕），已撤回的 request 也不再接受 result。
+    // 适用面自洽（前置拒绝）：可撤回的只有**在飞且被遗弃**的 request——已在册 handoffResult 的
+    // 委托（已收工）不在其列：对已收工的委托落撤回落痕，只会在同一 taskId 上造出「result 与
+    // withdrawnAt/withdrawnBy 并存」的组合态，而没有任何判据消费它（守卫的在飞判据只读 request
+    // 侧，越俎代庖检测只读 result 侧）。判据与守卫的在飞判据**互补**（同一把尺子，不另立一份）：
+    // 无对应 result = 未收工 = 可撤回；显式 null 占位与「键缺失」同读为未收工（守卫在飞判据按
+    // undefined / null，越俎代庖检测按 falsy），故不阻断撤回——不给「出口拦 + 撤回拒」留下
+    // 无出口的死角。本拒绝**不删改**任何既有记录（request / result 一律原样），恢复指引见下方报文。
+    const taskId = process.argv[3];
+    const withdrawArgs = process.argv.slice(4);
+    let withdrawnBy = null;
+    let withdrawReason = null;
+    for (let i = 0; i < withdrawArgs.length; i++) {
+      const arg = withdrawArgs[i];
+      if (arg === '--by') { withdrawnBy = withdrawArgs[i + 1]; i += 1; continue; }
+      if (typeof arg === 'string' && arg.startsWith('--by=')) { withdrawnBy = arg.slice('--by='.length); continue; }
+      if (arg === '--reason') { withdrawReason = withdrawArgs[i + 1]; i += 1; continue; }
+      if (typeof arg === 'string' && arg.startsWith('--reason=')) { withdrawReason = arg.slice('--reason='.length); continue; }
+    }
+    if (!taskId) {
+      console.error('Usage: workflow-handoff.mjs withdraw <task-id> --by <source> [--reason <text>]');
+      process.exit(1);
+    }
+    if (typeof withdrawnBy !== 'string' || withdrawnBy.trim() === '') {
+      console.error('Usage: workflow-handoff.mjs withdraw <task-id> --by <source> [--reason <text>]——撤回须留痕来源（--by 不可缺省）');
+      process.exit(1);
+    }
+    const handoff = state.evidence?.['subagent-execute'];
+    const target = handoff && typeof handoff === 'object' && handoff.handoffRequests && typeof handoff.handoffRequests === 'object'
+      ? handoff.handoffRequests[taskId]
+      : null;
+    if (!target || typeof target !== 'object') {
+      console.error('HANDOFF ERROR: 任务 ' + taskId + ' 无对应 request 记录——无可撤回的委托（撤回只作用于已记录的 request，不新建记录）');
+      process.exit(1);
+    }
+    if (handoffRequestWithdrawn(target)) {
+      console.error('HANDOFF ERROR: 任务 ' + taskId + ' 的委托已撤回（终态）——不得重复撤回、不得改写既有撤回留痕'
+        + '（withdrawnAt=' + target.withdrawnAt + ', withdrawnBy=' + target.withdrawnBy + '）');
+      process.exit(1);
+    }
+    // 前置拒绝（适用面自洽）：目标已收工（handoffResult 在场且非空占位）⇒ 拒绝撤回，报文写清
+    // 「为什么拒」与恢复指引。**不删改**任何既有记录：本路径在 writeState 之前退出，state 字节零改写。
+    const deliveredResult = handoff && typeof handoff === 'object' && handoff.handoffResult
+      && typeof handoff.handoffResult === 'object' && !Array.isArray(handoff.handoffResult)
+      ? handoff.handoffResult[taskId]
+      : undefined;
+    if (deliveredResult !== undefined && deliveredResult !== null) {
+      console.error('HANDOFF ERROR: 任务 ' + taskId + ' 的委托已收工（handoffResult 在场）——撤回只适用于被遗弃的'
+        + ' request（零提交复验失败 / 写边界被拒之后遗弃的在飞 request），已收工的委托无须撤回：其 result 已在册；'
+        + '恢复: 如需更正该任务的结果，走既有通道重新发起 workflow-handoff.mjs request ' + taskId
+        + ' <description> 后回传新的 result（新记录覆盖该任务的当前态，历史记录不删除）');
+      process.exit(1);
+    }
+    // 新写入路径统一走时间单一权威（本地时间 + 显式偏移）：不在此自行拼接时刻字面。
+    target.withdrawnAt = nowTimestamp();
+    target.withdrawnBy = withdrawnBy.trim();
+    if (typeof withdrawReason === 'string' && withdrawReason.trim() !== '') {
+      target.withdrawReason = withdrawReason.trim();
+    }
+    await writeState(state);
+    console.error('HANDOFF 撤回留痕: ' + taskId + ' — withdrawnAt=' + target.withdrawnAt
+      + ', withdrawnBy=' + target.withdrawnBy
+      + (target.withdrawReason ? ', withdrawReason=' + target.withdrawReason : '')
+      + '（原 request 字段原样保留；已撤回 = 终态，守卫不再将其计为在飞委托）');
+    console.log('HANDOFF WITHDRAW: ' + taskId);
+    return;
+  }
+
   if (action === 'status') {
     const handoff = state.evidence?.['subagent-execute'] || {};
     console.log(JSON.stringify({
@@ -690,7 +797,7 @@ async function main() {
     return;
   }
 
-  console.error('Unknown action: ' + action + '. Use: request, result, status');
+  console.error('Unknown action: ' + action + '. Use: request, result, withdraw, status');
   process.exit(1);
 }
 

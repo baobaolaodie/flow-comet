@@ -134,9 +134,13 @@ Evidence: `intake-summary` (required)
 
 ## Evidence Record
 
+Record the node after the artifacts exist and before running the exit (the exit validates the evidence is present). Ask the engine for this node's commands — the printed `record` command carries the platform-correct script path, so there is no copy here to drift:
+
 ```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs record open '{"summary":"CHANGE.md + REQUIREMENT.md generated, user confirmed"}'
+node .claude/skills/flow-comet/scripts/workflow-state.mjs explain open
 ```
+
+A good `summary` names what was produced, for example `CHANGE.md + REQUIREMENT.md generated, user confirmed`.
 
 ## Guardrails
 

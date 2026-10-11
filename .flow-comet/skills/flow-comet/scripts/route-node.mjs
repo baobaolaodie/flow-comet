@@ -343,6 +343,8 @@ function analyzeDependencyGraph(blocks) {
 // process.exit / 入参改写），findParallelWriteConflicts 只负责读文件、解析、族①②与去重键的组织。
 // 路径解析 / 归一（parsePaths / normalizeTaskPath）为本模块单份实现，族①②③共用；依赖文本解析
 // 复用本模块 taskDependencyEligibility（依赖解析单一权威——不再另起第二份正则）。
+// 路径**重叠判定**（含 glob 语义 · 见 DESIGN 的路径重叠判定决策）同样是本模块单份实现：具名纯函数 collectPathOverlaps，
+// 族①②③一律经它比较——任一族内联第二份比较逻辑即违规（L-067 / AC-5 单源判据）。
 // 开标签属性解析与 workflow-state 路由共享 taskOpeningAttrs（属性序无关；不读块内文本）。
 // 2026-09-28 PR 审查采纳：由 workflow-guard.mjs 抽到本模块——plan 出口与 replan 重校消费同一实现，
 // 两侧各自决定强判（BLOCK）/弱判（WARN），判定本身只此一处（L-067 单一判据）。
@@ -398,6 +400,50 @@ function parsePaths(matchText) {
     .filter((p) => p !== null && p !== '');
 }
 
+// 元字符判定：glob 魔法 = `*` / `?` / `[` 三类——与 workflow-handoff.mjs 的字面路径资格判定
+// （literalRelativePosixPath 的 /[*?[]/）同口径；「什么算 glob」不另立第三套定义。
+const GLOB_MAGIC_CHAR = /[*?[]/;
+
+// 路径重叠判定（族①②③共用的唯一具名纯函数 · 见 DESIGN 的重叠判定与判据单源决策 · AC-5）：入参为两组**已归一**路径
+// 声明（normalizeTaskPath 产物，分隔符统一 `/`），返回重叠描述串数组（直接进冲突消息的 files 字段）
+// 或空数组（不重叠）；无 fs / console / process.exit，不改任何入参。
+// 三形态：
+//   ① 两侧均无元字符 ⇒ 既有字面相等语义（逐字等价：相等报该路径本身——消费方消息零变化）；
+//   ② 单侧含元字符 ⇒ 用该侧模式匹配另一侧字面路径：**段数必须相等**（`*` 不跨 `/`，`**` 亦非递归）、
+//      段内 `*` 匹配段内任意字符（`[^/]*`）、其余字符字面锚定（正则元字符转义）；段内无 `*` 即不命中；
+//   ③ 双侧均含 glob ⇒ **保守视为重叠**（宁可误拦不可漏检——漏检正是本判据要修的缺陷）；无共同字面
+//      路径可报，故报两侧声明。
+// ②的语义**对齐基准** = workflow-handoff.mjs 的 matchWriteFilePattern（:94）：该函数未导出、所在模块
+// 又是 CLI 顶层脚本（import 即执行 main），物理不可复用；故在本模块内按同一形态实现并在此锚定基准
+// 位置——基准若变，此处必须同步（漂移可见；不互指「同源」了事，L-067 修法子句）。零第三方 glob 库
+// （ADR-007）：复用本模块既有 escapeRegExp（转义集与基准内联转义一致）。
+function collectPathOverlaps(leftPaths, rightPaths) {
+  const overlaps = [];
+  for (const left of leftPaths) {
+    for (const right of rightPaths) {
+      if (left === right) { overlaps.push(left); continue; }        // ① 逐字相等（含两侧同 glob）
+      const leftGlob = GLOB_MAGIC_CHAR.test(left);
+      const rightGlob = GLOB_MAGIC_CHAR.test(right);
+      if (!leftGlob && !rightGlob) continue;                        // ① 两侧字面且不等 ⇒ 不重叠
+      if (leftGlob && rightGlob) {                                  // ③ 双侧 glob：保守判重叠
+        overlaps.push(left + ' ∩ ' + right);
+        continue;
+      }
+      const patternSegments = (leftGlob ? left : right).split('/');  // ② 单侧 glob：模式 × 字面
+      const literalSegments = (leftGlob ? right : left).split('/');
+      if (patternSegments.length !== literalSegments.length) continue;
+      const matched = patternSegments.every((seg, index) => {
+        if (seg === literalSegments[index]) return true;
+        if (!seg.includes('*')) return false;
+        return new RegExp('^' + seg.split('*').map(escapeRegExp).join('[^/]*') + '$')
+          .test(literalSegments[index]);
+      });
+      if (matched) overlaps.push(left + ' ∩ ' + right);
+    }
+  }
+  return overlaps;
+}
+
 // 第三族（同文件跨任务且无依赖路径）计算——同模块具名纯函数：输入任务块 / 依赖图 / 既有族去重键，
 // 输出冲突对数组（{ a, b, files }）；无 fs / console / process.exit，不改任何入参。
 // taskContent 与 allBlocks 须同源（taskContent = 产出 allBlocks 的 TASK.md 文本）——修复任务族
@@ -423,7 +469,7 @@ function collectCrossTaskConflicts({ taskContent = '', allBlocks = [], depsById 
   for (let i = 0; i < participants.length; i++) {
     for (let j = i + 1; j < participants.length; j++) {
       if (excludedPairKeys.has(taskPairKey(participants[i].id, participants[j].id))) continue;
-      const overlap = [...participants[i].writes].filter((f) => participants[j].writes.has(f));
+      const overlap = collectPathOverlaps(participants[i].writes, participants[j].writes);
       if (overlap.length === 0) continue;
       if (reachableFrom(participants[i].id).has(participants[j].id)
         || reachableFrom(participants[j].id).has(participants[i].id)) continue;
@@ -470,14 +516,14 @@ async function findParallelWriteConflicts(changeDir) {
   const readWarnings = [];
   for (let i = 0; i < perTask.length; i++) {
     for (let j = i + 1; j < perTask.length; j++) {
-      const overlap = [...perTask[i].writes].filter((f) => perTask[j].writes.has(f));
+      const overlap = collectPathOverlaps(perTask[i].writes, perTask[j].writes);
       if (overlap.length) writeConflicts.push({ a: perTask[i].id, b: perTask[j].id, files: overlap });
       // 读写弱判触发面：仅无显式 depends_on 关联的并行对（有显式关联=依赖已声明，跳过）
       const associated = perTask[i].deps.has(perTask[j].id) || perTask[j].deps.has(perTask[i].id);
       if (associated) continue;
-      const readOverlap = [...perTask[i].reads].filter((f) => perTask[j].writes.has(f));
+      const readOverlap = collectPathOverlaps(perTask[i].reads, perTask[j].writes);
       if (readOverlap.length) readWarnings.push({ a: perTask[i].id, b: perTask[j].id, files: readOverlap });
-      const readOverlap2 = [...perTask[j].reads].filter((f) => perTask[i].writes.has(f));
+      const readOverlap2 = collectPathOverlaps(perTask[j].reads, perTask[i].writes);
       if (readOverlap2.length) readWarnings.push({ a: perTask[j].id, b: perTask[i].id, files: readOverlap2 });
     }
   }
@@ -1331,6 +1377,7 @@ export {
   FIX_SECTION_TITLE_FALLBACK,
   analyzeDependencyGraph,
   findParallelWriteConflicts,
+  collectPathOverlaps,
   normalizeHeading,
   classifyFixReturnCause,
   resolveFixRollbackDecision,

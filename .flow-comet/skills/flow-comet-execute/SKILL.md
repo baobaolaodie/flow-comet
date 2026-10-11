@@ -11,7 +11,7 @@ Complete the `execute` Node for `flow-comet`.
 
 Responsibility: 按 TASK.md 逐任务执行（**执行模式按 executionMode**：subagent 默认统一委托子代理、direct 逃生口主代理直写）。串行任务的 TDD + 6 维自查 + LESSONS 扫描 + diff 边界 verify 由执行者承担，无论哪种模式都必须加载 flow-comet-dev 协议。
 
-In subagent mode (default) this node is a coordinator: it does not write implementation code directly — it delegates the pending serial tasks to fresh-context subagents via the Agent tool (worktree isolation), each subagent applies the full dev protocol (TDD RED/GREEN/REFACTOR, LESSONS scan, existing abstraction grep, self-review, diff boundary verification, atomic commits) and returns a Return Contract. 趟次协作：并行委托节点（subagent-execute）可多次往返——每趟委托全部依赖已满足的并行任务，本节点在趟间消化串行任务，直至两者清空。The coordinator records handoff evidence, verifies each SUMMARY, and marks tasks done in TASK.md. In direct mode (escape hatch, user-confirmed) the main agent implements serial tasks directly — see 执行模型 below.
+In subagent mode (default) this node is a coordinator: it does not write implementation code directly — it delegates the pending serial tasks to fresh-context subagents (all three platforms delegate under one identity-based criterion; worktree isolation is one optional implementation of attribute ①, not a requirement — see the four-attribute contract below), each subagent applies the full dev protocol (TDD RED/GREEN/REFACTOR, LESSONS scan, existing abstraction grep, self-review, diff boundary verification, atomic commits) and returns a Return Contract. 趟次协作：并行委托节点（subagent-execute）可多次往返——每趟委托全部依赖已满足的并行任务，本节点在趟间消化串行任务，直至两者清空。The coordinator records handoff evidence, verifies each SUMMARY, and marks tasks done in TASK.md. In direct mode (escape hatch, user-confirmed) the main agent implements serial tasks directly — see 执行模型 below.
 
 ## Guidance
 
@@ -29,7 +29,7 @@ guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好�
 
 ### 执行模型（按 executionMode，用户显式选择）
 
-- **subagent（默认）**: 统一委托子代理——协调者流程（构造 handoff → Agent worktree 委托 → 收集 Return Contract → 验收标 done）
+- **subagent（默认）**: 统一委托子代理——协调者流程（构造 handoff → 按平台通道委托（三平台同一身份判据；worktree 为属性①的可选实现）→ 收集 Return Contract → 验收标 done）
 - **direct（逃生口，需用户显式切换）**: 主代理直接执行串行任务——但必须加载 flow-comet-dev 完整协议
   （TDD/6 维自查/越界检查/原子 commit），SUMMARY 必填段 + `## 自检方法` 强制（guard 校验兜底）
 - 无论哪种模式：`parallel="true"` 任务始终由 subagent-execute 并行委托，不在此节点执行。
@@ -44,7 +44,9 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 
 **TASK 签名校验（C3，execute 期间）**：entry execute 时记录任务集签名（行尾规范化 + 标记属性剥离）；exit 时比对——execute 期间 TASK.md **只允许改开标签的标记属性**（`status` done/pending；时间戳如需记录写在开标签属性如 `completed_at`——签名剥离白名单允许；**禁止写入 action/其他 task 内容**），增删任务/改 action/改边界/改其他内容会在 exit 被 BLOCKED（签名不匹配）。回退修复任务（review/verify 发现缺陷追加）须先经 review 流程追加到 `## Fix 任务` 段，再按下方「修复回路状态机路径」受控归位 execute，并由 entry execute 刷新签名（端到端验证实证：直接注入任务会被签名拦截）。
 
-本节点**不直接写实现代码**。所有 pending 任务统一通过 Agent 工具委托 fresh-context 子代理执行（加载 flow-comet-dev + 回传 Return Contract）。
+**任务集已修订 ⇒ 出口报「签名不匹配」时的合法出口**：**不要手改状态**——跑 `workflow-state.mjs replan "<原因>" --authorized-by <来源>` 重校重签（需用户显式授权；**要判定该不该重校、或签名不匹配要处置时读 `../flow-comet/reference/replan.md`**）。
+
+本节点**不直接写实现代码**。所有 pending 任务统一委托 fresh-context 子代理执行（加载 flow-comet-dev + 回传 Return Contract）；委托通道按平台（差异只在谁建树），见下方「并行安全四属性契约」与 `../flow-comet/reference/platform-facts.md`（三平台通道对照表）。
 
 - `parallel="true"` 的 pending 任务由 subagent-execute 节点负责并行委托
 - execute 遍历 TASK.md 时，遇到 `parallel="true" status="pending"` 的任务块应**跳过**
@@ -52,7 +54,48 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
   1. 正常流程下 determineNode 的 路由逻辑会**直接路由到 subagent-execute**（无需经过 execute 空退出）——协调者确认 路由逻辑生效（`NODE: subagent-execute`）后直接进入该节点
   2. 若已进入 execute 且确认无串行任务可做：按正常 exit 流程处理（record execute evidence + 满足产物校验），需要豁免越俎代庖检测时用 `record execute '{"parallelTakeoverApproved":true}'` 显式声明；[P] 任务由 execute 完成属越权委托——新 change BLOCKED（旧 change WARN 渐进）
   3. **显式空退出豁免（新 change 可用）**：确认全 parallel 无串行可做且无法路由时，用 `record execute '{"emptyExitApproved":true}'` 显式声明后 exit 通过（跳过串行 pending 与产物校验；防规划错误仍默认 BLOCKED——豁免须显式声明；exit 输出 EMPTY-EXIT 审计提示）
-- determineNode 路由逻辑会优先检测依赖已满足的 parallel 任务并路由到 subagent-execute；若 determineNode 路由到了 execute，说明当前趟存在需要 execute 处理的串行任务（此时应执行而非空退出）——串行消化完成后再次路由，剩余并行任务回到 subagent-execute 的下一趟（多趟循环直至无可并行 pending 且无串行残留）
+- determineNode 路由逻辑会优先检测依赖已满足的 parallel 任务并路由到 subagent-execute；若 determineNode 路由到了 execute，说明当前趟存在需要 execute 处理的串行任务（此时应执行而非空退出——**除非已显式声明空退出豁免** `emptyExitApproved`，见上条第 3 项）——串行消化完成后再次路由，剩余并行任务回到 subagent-execute 的下一趟（多趟循环直至无可并行 pending 且无串行残留）
+
+### 并行安全四属性契约
+
+> **并行安全四属性契约**：契约对象是**四属性**，不是 worktree——`worktree` 只是属性①「写权限」的**实现之一**，不是契约本身；「一律 worktree」的口号已作废（本仓决策：契约对象 = 四属性，worktree 降为实现之一）。三平台在同一判据下平行对等，**唯一差异是「谁建树」**。
+>
+> | # | 属性 | 含义 | 满足形态 |
+> |---|------|------|----------|
+> | ① | **写权限** | 每个写者必须有一条被守卫认可的写入通道 | **身份分派**（CC / Codex 载荷含 `agent_id` ⇒ 子代理语义；dsh 桥接以环境变量 `FLOW_COMET_AGENT_DEPTH` 透传正整数身份深度，**并同时注入桥接通道标记 `FLOW_COMET_AGENT_DEPTH_SOURCE`——守卫要求标记与深度同时在场才接受该通道**）——**worktree 只是本属性的实现之一**，不是必须；**最小保护集除外**：身份在场时 `.flow-comet/flow-comet-state.json` 与 `../flow-comet/reference/workflow-protocol.json` 仍受拦（三平台一致 BLOCKED） |
+> | ② | **提交隔离** | 提交只含自己 `write_files` 的字面路径 | 提交面 pathspec 纪律五要素（见 Guidance 同名小节） |
+> | ③ | **验证隔离** | 同一时刻只有一个写者：全量判据不得与在飞写者并行 | 出口校验锚 = `handoffRequests` 有 request 无对应 `handoffResult` ⇒ 新 change BLOCKED / 旧 change WARN；全部有 result ⇒ 放行；无证据 ⇒ 零输出（**已撤回的 request 不构成在飞委托**：`workflow-handoff.mjs withdraw <task-id> --by <来源>` 在原记录上留痕 `withdrawnAt` + `withdrawnBy`，已撤回 = 终态、历史不删） |
+> | ④ | **集成纪律** | 机制选择 / 顺序 / 审计 / 冲突处置四项均有明文规则 | 集成纪律四要素（见 Guidance 同名小节） |
+>
+> **写面含 gitignored 面的任务（四属性映射 · 与其他任务同一判据）**：任务 `write_files` 全为 gitignored 字面路径时，四属性的满足方式不变——① **写权限**仍走**身份通道**（载荷 `agent_id` / 环境变量身份深度 ⇒ 子代理语义放行，项目内任意路径可写（含 gitignored）；gitignored 只是路径属性，不是通道差异）；② **提交隔离**走既有 **`noCommit` 资格**（request 按 `.gitignore` 命中记 `noCommit:true` ⇒ 任务零提交，「提交只含自己 `write_files` 的字面路径」由**无提交**满足，不是放宽校验；资格 fail-closed：glob / `..` 越界 / 非 git 仓 / tracked 文件 / 链接逃逸一律不授予，result 时刻按同一判据重验，失败即撤销资格）；③④ 与其他任务同形（同一时刻单写者 + 集成四要素）。**并行 × 零提交**因此合法：任务可标 `parallel="true"` 并被并行委派，出口校验按 request 的 `noCommit` 资格豁免缺 `commitHash`。
+> **留痕的边界（诚实声明 · 与 `directOverride` / `completedChecks` / `reentryAuthorization` 同族）**：留痕记录的是「**发生过委派**」，**不是**对执行者身份的物理证明——`handoffRequests` / `handoffResult` 只证明协调者写下过 request 与 result 两条记录，不证明写入确实由子代理完成；与 `completedChecks` 只能记录声明、`directOverride` 只能记录授权、`reentryAuthorization` 只能记录授权源同理。声明与事实不符属流程违规，验收以 transcript 可见的委派触发为准。
+>
+> **平台事实（三平台通道 · 判级三态 · 实测与边界）**：要判定平台能力（能否并行委派 / 谁建树 / 写通道是什么）或引用判级口径时读 `../flow-comet/reference/platform-facts.md`——三平台通道对照表、判级三态（证实 / 推翻 / 未覆盖）与该次实测的限定边界原文在该文件，本册不复述。
+
+### 提交面 pathspec 纪律（要点 · 带适用条件）
+
+**适用条件（先读）**：本条纪律适用于「**多个写者共享同一工作区**」形态——并发写者同处一个工作树（CC 非 worktree 委托 / Codex 共享工作区 / dsh 进程内子代理）。**各自独立工作区（worktree 等）内的局部 `reset` / `clean` 不在禁令内**；但只要本趟存在**任一**共享工作区的写者，本条即对整个并行趟生效。
+
+要点（五要素 + 并行波次附加两条）：
+
+1. **`git add -- <自己字面路径>`** + **`git commit -- <同一路径>`**：逐条字面路径（取自本任务 `write_files`），两步路径集逐字一致——提交只含自己的文件；禁用 `.` / `-A` / `-u` 等宽泛形态。
+2. **锁失败重试**：并发提交撞 `index.lock` / `cannot lock ref` ⇒ **失败即重试**，不得因锁失败改用宽泛命令。
+3. **禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`**：并发写者共享**同一个索引与工作树**——宽泛命令有**并发索引竞态**（把同伴半成品纳入自己的提交），`stash` / `clean` / `reset` 更会破坏同伴的未提交工作。
+4. **并行波次禁用 `git commit --amend`**：共享工作区下 HEAD 会被并行写者推进；确需修正必须**先断言 `git rev-parse HEAD` 等于自己刚提交的哈希**，否则一律改用**新提交追加**。
+5. **误改后的自救通道**（第 3 条「禁 `reset`」的定向例外）：断言 HEAD 后 `git reset --soft <自己的父提交>`（**只用 `--soft`**），再以 **pathspec** 重建自己的提交。
+
+> **要判定提交边界、或撞上锁 / 误改要收拾时读 `../flow-comet/reference/commit-discipline.md`**——五要素与并行波次附加两条的完整判据（含实测依据）在该文件。
+
+### 集成纪律（要点）
+
+要点（四要素）：
+
+1. **机制选择**：优先 **`git merge --no-ff`**（保留父子关系、可审计；comet 先例：集成用 `--no-ff`、交付用 `--ff-only`）；冲突难解时**降级 `git cherry-pick` 并强制记因**（审计行写明降级原因）。
+2. **顺序（确定性规则）**：先按 `depends_on` 的**拓扑序**（被依赖者先入），同一拓扑层内按 **task id 升序**——**不得依赖书写顺序** / 提交到达顺序 / 完成先后等运行期不确定量。
+3. **审计留痕**：每次集成输出一行 `INTEGRATE: <task-id> <commitHash> → <集成提交>`（降级路径记降级原因），映射（task-id → commitHash → 集成提交）记入该趟流程记录（`<task-id>-SUMMARY.md` / handoff evidence 文本字段）；**判级**：审计行是**执行纪律**（review 把关），本节点不声称存在机械门禁校验它。
+4. **冲突处置（两类分别动作）**：**机械冲突**（不改用户可见行为）执行者**可自行解决** + 必须跑**合并后验证**并在审计行记因；**语义冲突**（两侧对同一行为 / 契约 / 接口给出不同语义）**必须中止集成并上抛**（记 BLOCKED + 恢复指引，由协调者 / 用户裁决）——不得由执行者自行拍板。
+
+> **要在集成前定规则、或遇冲突 / 降级要判定时读 `../flow-comet/reference/commit-discipline.md`**——四要素的完整判据与 comet 先例在该文件。
 
 ### Prerequisites
 
@@ -61,15 +104,16 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 - `.specs/LESSONS.md` must exist (or be created from template if missing).
 - For frontend/UI tasks: `.specs/<change-id>/UI-DESIGN.md` must exist.
 - 若当前任务的 `<task-id>-PROGRESS.md`（位于 `.specs/<change>/`；与 Recovery 段及归档期 `*-PROGRESS.md` 扫描同口径）存在，必须先读取"已排除方案"段（R1.6 反重复），确认当前计划不在排除列表中。完成后删除该文件，有用信息迁移至 SUMMARY。
-- 委托前按 `reference/dirty-worktree.md` 检查脏工作树（`.specs/<change-id>/` 未提交工件会触发 entry execute 的 WORKTREE WARN；verify 前为自查建议，无 guard 检查）。
+- 委托前按 `../flow-comet/reference/dirty-worktree.md` 检查脏工作树（`.specs/<change-id>/` 未提交工件会触发 entry execute 的 WORKTREE WARN；verify 前为自查建议，无 guard 检查）。
 
 ### Steps（subagent 模式 · 协调者流程，统一委托子代理）
 
 对 TASK.md 每个 pending 串行任务，协调者执行：
 
 1. **读 task 块，构造 handoff request**：读 `<task>` XML 块（`action` / `read_files` / `write_files` / `verify` / `done`）。若内容有歧义，停下询问——不要猜。构造 handoff request 内容：task 全文 + DESIGN §0/§0.5 + AC + read/write_files 边界。运行 `node .claude/skills/flow-comet/scripts/workflow-handoff.mjs request <task-id>` 记录。**委托即记 request**——直接记录 result 而无对应 request 时,write_files 允许列表为空会被 BLOCKED(新 change 强制委托边界),补 request 后再重录 result 即可(执行者实证)。
-2. **委托子代理**：用 Agent 工具（`isolation: "worktree"`）委托 fresh-context 子代理。handoff prompt 强制协议：子代理用 **Skill 工具**加载 flow-comet-dev 并按 `flow-kit/prompts/4-dev.md` 协议执行（TDD RED/GREEN/REFACTOR、LESSONS 扫描、既有抽象 grep、verify、6 维自查、越界检查、原子 commit `<type>(<scope>): <subject>`（scope 推荐可选：子系统短词；禁 change-id/日期作 scope；任务号放提交正文尾注 Task: <task-id>，change-id 不入标题）），按 `flow-kit/templates/SUMMARY.md` 模板写 `.specs/<change-id>/<task-id>-SUMMARY.md`（标题/首部/段序保真，另补 flow-comet 增量 `## 自检方法` 段），回传 Return Contract（含 commitHash + greenEvidence + completedChecks + selfReview）。**SUMMARY 自引用 hash 注**：提交内容无法包含自身 hash——若子代理 amend 提交,SUMMARY 内记录的 commitHash 为 amend 前值属预期(文件集一致即可,以实际提交对象为准)。
+2. **委托子代理**：按平台通道委托 fresh-context 子代理（三平台同一身份判据，差异只在谁建树；`isolation: "worktree"` 是属性①的可选实现，非强制——见「并行安全四属性契约」）。handoff prompt 强制协议：子代理用 **Skill 工具**加载 flow-comet-dev 并按 `flow-kit/prompts/4-dev.md` 协议执行（TDD RED/GREEN/REFACTOR、LESSONS 扫描、既有抽象 grep、verify、6 维自查、越界检查、原子 commit `<type>(<scope>): <subject>`（scope 推荐可选：子系统短词；禁 change-id/日期作 scope；任务号放提交正文尾注 Task: <task-id>，change-id 不入标题）），按 `flow-kit/templates/SUMMARY.md` 模板写 `.specs/<change-id>/<task-id>-SUMMARY.md`（标题/首部/段序保真，另补 flow-comet 增量 `## 自检方法` 段），回传 Return Contract（含 commitHash + greenEvidence + completedChecks + selfReview）。**SUMMARY 自引用 hash 注**：提交内容无法包含自身 hash——若子代理 amend 提交,SUMMARY 内记录的 commitHash 为 amend 前值属预期(文件集一致即可,以实际提交对象为准)。
    **提交从属规则**:任务专属的 `<task-id>-SUMMARY.md`(位于 `.specs/<change-id>/`,是 flow-comet 强制产物)允许随任务提交属流程默认豁免——目标仓库的既有规定优先,若目标仓库忽略清单等既有规定拒绝其入库,被拒即为正确行为,严禁 force-add 强加越库提交;委托校验对任务摘要的豁免属于校验宽容度,不是入库指令。
+   **提交面 pathspec 纪律（五要素，见 Guidance 同名小节）**：handoff prompt 必须要求子代理用 `git add -- <自己字面路径>` + `git commit -- <同一路径>` 提交、锁失败重试、禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`（适用条件：**多个写者共享同一工作区**；各自独立工作区内的局部 `reset` / `clean` 不在禁令内）。**集成纪律（四要素，见 Guidance 同名小节）**：协调者集成时优先 `git merge --no-ff`、降级 `cherry-pick` 记因、顺序按 `depends_on` 拓扑序 + 同层 task id 升序、冲突按机械 / 语义两类分别处置。
 3. **记录 handoff result**：子代理回传后，运行 `node .claude/skills/flow-comet/scripts/workflow-handoff.mjs result <task-id> '<JSON>'` 记录（Return Contract 含 commitHash + greenEvidence + completedChecks + selfReview）。
 4. **验收 SUMMARY，TASK.md 标 done**：确认 SUMMARY 按 `flow-kit/templates/SUMMARY.md` 填写且**模板保真**（标题 `# SUMMARY:` / 首部 4 字段 / 段序一致）、含 `## 自检方法` 段（声明 brooks-review / cache-brooks / builtin-quickcheck 三值之一）、verify 输出真实、6 维自查与越界检查有实质内容；通过后在 TASK.md 将任务标 `status="done"` 并加时间戳。
 5. **下一个 pending 任务**：重复步骤 1-4。
@@ -107,18 +151,16 @@ This node is truly done when:
 
 ## 修复回路状态机路径
 
-review / verify 发现缺陷后的修复必须回到 `execute` 节点生命周期内完成，禁止驻留源节点「顺手修完」；引擎按以下路径强制闭环（`<源节点>` 为 review 或 verify）：
+review / verify 发现缺陷后的修复**必须回到 `execute` 节点生命周期内完成**，禁止驻留源节点「顺手修完」；路径要点（`<源节点>` = review 或 verify）：
 
-1. **追加 Fix 任务**：在 `.specs/<change-id>/TASK.md` 的 `## Fix 任务` 段内追加编号修复任务（完整任务字段），**禁止文件尾追加**；任务集修订必须在 `entry` 之前完成。
-2. **受控归位 execute**：运行 `workflow-state next`（完整命令：`node .claude/skills/flow-comet/scripts/workflow-state.mjs next`），或运行 `workflow-guard entry execute`（完整命令：`node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry execute`）。处于 Fix 回退态（源节点驻留 + 存在 pending Fix 任务 + 当前路由判定为 execute）时，引擎把当前节点受控归位为 `execute`（`currentNode=execute`），并输出 `FIX-BATCH` 审计行（`next` 同时输出 `NODE: execute`）；用 `workflow-state.mjs status` 确认 `stateCurrentNode` 已是 `execute` 再开工；若未归位，先按 `next` / `status` 的输出核对任务状态与路由，不要未经归位硬开工。
-3. **执行修复**：按 execute 节点生命周期完成全部 Fix 任务（委托/直写规则不变）；`entry execute` 刷新任务集签名，锁定追加后的任务集——归位后不得再增删任务或修改任务内容。
-4. **跑 execute 四类出口**：`record execute` → `exit execute --apply`。四类出口门禁真实执行——**全任务 done / 逐任务 SUMMARY 完备 / 6 维自查 + 自检方法声明 / 任务集签名一致**；任一缺失即 BLOCKED 并给出恢复指引。通过后，引擎在 Fix 二次完成时把当前节点推回源节点（review 或 verify）。
-   - **guard exit 回源审计行语义（Fix vs RETURN）**：真实修复回路二次完成保留 `FIX-BATCH: 回源节点 <源节点>`（真实 Fix 回炉的机器锚）；正常多趟收尾（任务集签名全等且无 Fix 标记）输出中性 `RETURN: 回源节点 <源节点>`（非 Fix 回修）；旧 state 缺闭合/修复证据（无签名事件且无 Fix 标记）输出 `RETURN: 回源节点 <源节点>（旧 state 缺闭合/修复证据，未分类）`，不冒充 Fix、不 BLOCK；上述分类只改审计行文本，路由与 state 写入零变化。此处 `RETURN:` 仅指审计行前缀，与子代理 handoff 的 Return Contract 无关。
-5. **回源节点跑出口**：回到源节点后运行 `next`，Fix 回程豁免生效时应输出 `NODE: review` 或 `NODE: verify`（不会因源节点产物已存在而跳过）；若仍输出后续节点，说明回程条件未满足，先核对状态机归属与任务状态，不要继续推进。随后执行 `entry <源节点>` → `exit <源节点> --apply` 跑源节点出口门禁（即 entry/exit 源节点）；通过后继续正常路由（review → verify；verify → archive），必要时进入下一轮 Fix 闭环。
-   - **`next` 回程审计行语义**：回程豁免行始终输出中性 `RETURN: 回程源节点 <源节点>`（源节点产物在场且未出口；保留源节点跑出口），不再输出 FIX-BATCH；受控归位行的 `FIX-BATCH: 归位 <execute 家族>` 保留（真实 Fix 回退行），两者不得混同。
-6. **禁止绕过**：驻留源节点不归位、顺手改完后直接跑源节点 exit 收场会被 BLOCKED（存在未归位/未跑出口的修复回路），必须按上述路径恢复；不得用跳过归位或出口门禁的手段（含手动改写 `.flow-comet/flow-comet-state.json`）替代本路径。
+1. **追加 Fix 任务**：写进 `.specs/<change-id>/TASK.md` 的 `## Fix 任务` 段（完整任务字段），**禁止文件尾追加**；任务集修订必须在 `entry` 之前完成。
+2. **受控归位 execute**：`workflow-state next`（或 `workflow-guard entry execute`）⇒ 引擎把当前节点受控归位为 `execute`（`currentNode=execute`）并输出 `FIX-BATCH` 审计行（`next` 同时输出 `NODE: execute`）；用 `status` 确认 `stateCurrentNode` 已是 `execute` 再开工，未归位不得硬开工。
+3. **执行修复 + 跑 execute 四类出口**：按节点生命周期完成全部 Fix 任务（委托 / 直写规则不变）→ `record execute` → `exit execute --apply`——**全任务 done / 逐任务 SUMMARY 完备 / 6 维自查 + 自检方法声明 / 任务集签名一致**，任一缺失即 BLOCKED 并给恢复指引；`entry execute` 刷新并锁定追加后的任务集（**归位后不得再增删任务或改任务内容**）；通过后引擎在二次完成时把当前节点推回源节点。
+4. **审计行三态**：真实 Fix 回炉保留 `FIX-BATCH: 回源节点 <源节点>`；正常多趟收尾（签名全等且无 Fix 标记）输出中性 `RETURN: 回源节点 <源节点>`；旧 state 缺闭合 / 修复证据输出 `RETURN: …（旧 state 缺闭合/修复证据，未分类）`——分类只改审计行文本，路由与 state 写入零变化（`RETURN:` 是审计行前缀，与子代理的 Return Contract 无关）。
+5. **回源节点跑出口**：回到源节点后 `next` 应输出 `NODE: review` / `NODE: verify`（不因产物已存在而跳过），随后 `entry <源节点>` → `exit <源节点> --apply`；通过后继续正常路由（必要时进入下一轮 Fix 闭环）。
+6. **禁止绕过**：不归位、顺手改完直接跑源节点 exit 收场、或手改 `.flow-comet/flow-comet-state.json` 一律 BLOCKED——不得用跳过归位 / 出口门禁的手段替代本路径。
 
-**由受控重入打开的场景（archive 源）**：缺陷在归档后才暴露、且归档移动尚未发生时，可先由用户显式授权把工作归属退回 `execute` / `subagent-execute` / `review` / `verify` 之一，再按本节路径回到 execute 生命周期完成修复。重入命令：`node .claude/skills/flow-comet/scripts/workflow-state.mjs reenter <target> --authorized-by <source> --reason <text> [--continue-round <n>]`——每次调用都需要用户显式授权，每 change 上限 3 轮（达上限后凭显式续轮授权 `--continue-round <n>`（n ≥ 已用轮次 + 1）可继续并计入下一轮）；重入前自动落 state 备份快照（`.specs/<change-id>/.reentry-backups/`）；成功打印 `REENTRY: archive → <target>（授权源 <source>；第 n/3 轮；备份 <file>）` 与 `REASON: <text>` 行（续轮审计行为 `第 n 轮（显式授权续轮，上限 3）`），与 Fix 回炉的 `FIX-BATCH` 行、正常多趟收尾的 `RETURN` 行三态可区分。归档移动已发生或 change 已 `completed` 时重入 BLOCKED，须走人工处置或新 change，不得静默跳过。重入只改工作归属，不写任何闭合标记，也不跳过目标节点入口 / 出口与源节点出口门禁；重复调用同一目标为空操作（输出 `REENTRY: 空操作——…`，不备份、不计数、不改写 state）。
+> **要判定该不该开修复回路、要受控归位或受控重入、核对归档侧重入边界时读 `../flow-comet/reference/fix-loop.md`**——上述 6 步的完整判据 + 受控重入完整规格（archive 源：`workflow-state.mjs reenter <target> --authorized-by <source> --reason <text>`，每次需用户显式授权、每 change 上限 3 轮、自动落 state 备份、打印 `REENTRY` 审计行）+ 归档侧边界原文在该文件。
 
 ## Entry Check
 
