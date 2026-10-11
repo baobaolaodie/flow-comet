@@ -12,6 +12,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+## [1.6.3] - 2026-10-11
+
+A release gathering the work accumulated after 1.6.2: how a delegation is judged is now the same on every supported platform — it rests on the identity the host reports for the caller rather than on how the workspace was built — with the four properties that make parallel work safe written down, every delegation recorded when it is handed off, and the commit and integration discipline written into the node skills; node guidance is read on demand instead of being repeated across the node skills, the facts about a node can be asked for with a read-only command, the pages that are not for the agent's use no longer ship with the installed skill tree, reinstalling no longer leaves generated files behind, and the check that requires every new changelog entry to carry a numbered pull-request link keeps working once a release moves those entries into the version section. ([#145](https://github.com/baobaolaodie/flow-comet/pull/145)) ([#146](https://github.com/baobaolaodie/flow-comet/pull/146)) ([#147](https://github.com/baobaolaodie/flow-comet/pull/147))
+
 ### Added
 
 - **Delegation is decided by the caller's identity, on every supported platform**: the guard reads the agent identity the host puts in the payload and applies subagent semantics before it resolves any path, with no platform-specific branch. On Codex this closes a real gap — an interactive session carries the identity for its native subagents, whereas a headless run does not, and it was the headless finding that had been read as a platform limit. A minimal protected set (the state file and the protocol file) stays blocked for subagents, and a write aimed outside the project root is judged the same way whether it arrives as a file edit or as a shell command. ([#145](https://github.com/baobaolaodie/flow-comet/pull/145))
