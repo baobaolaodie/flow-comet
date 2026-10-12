@@ -40,9 +40,9 @@ Find your symptom, run the command. Everything here assumes you are inside the p
 
 **`BLOCKED: missing Output Schema artifacts`** — the archive exit wants the archived directory and its leftover list. Move the change directory into `.specs/archive/<date>-<change-id>/` and make sure `KNOWN-ISSUES.md` exists inside it (write "no leftovers" explicitly if there are none).
 
-**`BROOKS-LINT WARN: … builtin-quickcheck 但未声明缓存尝试证据`** — the summary declares the built-in quick check without naming why the review engine was unavailable and what was read in its place. Add both — the reason and the cache-attempt evidence — or install the engine and run the full review. This one warns; it does not block the node.
+**`BLOCKED: SUMMARY 使用 builtin-quickcheck 未声明…（新 change 强制）`** — a new change that declares the built-in quick check must state both why the review engine was unavailable and what was read in its place — name the plugin cache, the cached protocol files or their path. Missing either half refuses the exit; a change created before the rule warns instead.
 
-**`BLOCKED: SUMMARY 的 6 维自查未声明使用 /brooks-review`** — the declaration is matched as a literal string: a heading such as `# Brooks-Lint Review` is not read as the method name. Write `brooks-review` (or `cache-brooks`) inside the self-check section, or state the reason in the self-check-method section.
+**`BLOCKED: SUMMARY 的 6 维自查未声明使用 /brooks-review`** — the declaration is matched as a literal string **inside the self-check section**: a heading such as `# Brooks-Lint Review` is not read as the method name, and a reason written in the self-check-method section does not satisfy this check. Write `brooks-review` (or `cache-brooks`) in the self-check section itself.
 
 ### Platform
 

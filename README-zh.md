@@ -133,9 +133,9 @@ cat .claude/skills/flow-comet/INSTALLED_VERSION    # 写进本项目的版本标
 
 ## 推荐搭配：brooks-lint
 
-本工作流的质量检查建立在 [brooks-lint](https://github.com/hyhmrright/brooks-lint) 的腐化风险框架之上——它是一个第三方（MIT）审查引擎，以十二本经典工程书为判据；发现按 Symptom → Source → Consequence → Remedy 四要素给出，附书目引用与 0~100 健康分，含 PR 审查、架构审计、技术债、测试质量、体检仪表板与全量清扫六个模式。上游 flow-kit 方法论在同样的阶段推荐它，本引擎把这条偏好机械化：装上它之后，逐任务的六维自查、review 节点的代码质量轮、测试质量检查与 `health` 侧命令的增补层都会走它。
+本工作流的质量检查建立在 [brooks-lint](https://github.com/hyhmrright/brooks-lint) 的腐化风险框架之上——它是一个第三方（MIT）审查引擎，以十二本经典工程书为判据；发现按 Symptom → Source → Consequence → Remedy 四要素给出，附书目引用与 0~100 健康分，含 PR 审查、架构审计、技术债、测试质量、体检仪表板与全量清扫六个模式。上游 flow-kit 方法论在同样的阶段推荐它，本引擎把这条偏好机械化：装上它之后，逐任务的六维自查、review 节点的代码质量轮与测试质量检查都会走它，`health` 侧命令把它的四维结果并入自己的报告。
 
-**强烈推荐**——想要完整质量档位就装上。没有它工作流照样跑完：上述检查回退到内置六维快查，某次运行也可能提示审查引擎不可用。它不是依赖，flow-comet 侧无需任何配置，且它支持同样的三个平台。从[它的仓库](https://github.com/hyhmrright/brooks-lint)安装，那里列出了各平台的命令。
+**强烈推荐**——想要完整质量档位就装上。没有它工作流照样跑完：自查与审查轮回退到内置六维快查，协议文件仍可读时也可改为直接按该协议手工执行；测试质量检查回退到内置清单；`health` 的增补层留空，并给出显式降级声明。它不是依赖，flow-comet 侧无需任何配置，且它支持同样的三个平台。从[它的仓库](https://github.com/hyhmrright/brooks-lint)安装，那里列出了各平台的命令。
 
 ## 真实运行产物展示
 

@@ -61,7 +61,7 @@ Platform-level behaviour (what blocks what, and the limits) is described in [Cor
 
 ## Recommended companion: brooks-lint
 
-The workflow's quality checks prefer [brooks-lint](https://github.com/hyhmrright/brooks-lint), a third-party (MIT) review engine that diagnoses code against twelve classic engineering books. Installing it is strongly recommended for the full quality bar, and it is not required: without it those checks fall back to a built-in six-dimension quick check, and a run may say the review engine was unavailable. It supports the same three platforms as this engine, it is installed separately from flow-comet, and nothing on the flow-comet side needs configuring afterwards. Install it from its repository — its README lists the per-platform commands.
+The workflow's quality checks prefer [brooks-lint](https://github.com/hyhmrright/brooks-lint), a third-party (MIT) review engine that diagnoses code against twelve classic engineering books. Installing it is strongly recommended for the full quality bar, and it is not required: without it the self-check and the review round fall back to the built-in six-dimension quick check (or to the review protocol followed by hand while its files are still readable), the test-quality check falls back to a built-in checklist, and the `health` supplement is left empty with an explicit degradation line. It supports the same three platforms as this engine, it is installed separately from flow-comet, and nothing on the flow-comet side needs configuring afterwards. Install it from its repository — its README lists the per-platform commands.
 
 ## Moving a project after installation
 

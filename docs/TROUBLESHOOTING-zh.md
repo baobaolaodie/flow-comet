@@ -40,9 +40,9 @@
 
 **`BLOCKED: missing Output Schema artifacts`** —— 归档出口要求归档目录与其遗留清单。把 change 目录移入 `.specs/archive/<日期>-<change-id>/`，并确保其内存在 `KNOWN-ISSUES.md`（无遗留也要显式写明）。
 
-**`BROOKS-LINT WARN: … builtin-quickcheck 但未声明缓存尝试证据`** —— 摘要声明走内置快查，却没说审查引擎为什么不可用、替读的是什么。两者都补上——不可用原因与缓存尝试证据——或者装上引擎跑完整审查。这条只告警，不阻断节点。
+**`BLOCKED: SUMMARY 使用 builtin-quickcheck 未声明…（新 change 强制）`** —— 新 change 声明走内置快查时，必须同时写明审查引擎为什么不可用、以及替读了什么——点名插件缓存、缓存协议文件或它们的路径。缺任一半都会拒绝出口；规则生效前创建的 change 只告警。
 
-**`BLOCKED: SUMMARY 的 6 维自查未声明使用 /brooks-review`** —— 该声明按字面匹配：写成 `# Brooks-Lint Review` 这样的标题不会被读成方法名。在自查段里写出 `brooks-review`（或 `cache-brooks`），或在自检方法段说明理由。
+**`BLOCKED: SUMMARY 的 6 维自查未声明使用 /brooks-review`** —— 该声明在**自查段内**按字面匹配：写成 `# Brooks-Lint Review` 这样的标题不会被读成方法名，且只在自检方法段写理由不满足这项校验。请在自查段本身写出 `brooks-review`（或 `cache-brooks`）。
 
 ### 平台
 
