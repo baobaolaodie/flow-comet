@@ -106,6 +106,7 @@ If you use skill-based disciplines like [superpowers](https://github.com/obra/su
 | **GSD** | Spec-driven development meta-prompt / context-engineering workflow | Milestones → slices → tasks; fresh context per stage with pre-inlined context; worktree isolation + UAT | **Idea source (same lane)** — fresh-context execution and stage gates align; no script state-machine routing, relies on prompt discipline |
 | **spec-kit** (GitHub) | SDD toolkit: Spec → Plan → Tasks → Implement | Each stage feeds markdown artifacts to the next; task format with order IDs, parallel `[P]` markers, file paths | **Idea source (same lane)** — task-with-file-paths/parallel-marker shape is same-origin with flow-kit TASK; no stage-transition enforcement |
 | **claude-task-master** | AI-driven task management (MCP + CLI) | PRD parsing → task decomposition → dependency graph → next-task orchestration | **Complement** — manages the task layer only (decomposition/ordering/dependencies), not stage gates, artifact validation, or write permissions |
+| **brooks-lint** (hyhmrright) | Third-party review engine grounded in twelve classic engineering books: 6 production + 6 test decay risks, cited findings, 0–100 health score, six modes | Installed as a skill or plugin; the workflow calls its review, audit, test and health commands | **Recommended companion (MIT, not a dependency)** — supplies the diagnosis the self-check and review rounds prefer, with a built-in fallback when absent |
 
 ### Vertical comparison: manual flow-kit → flow-comet
 
@@ -127,6 +128,12 @@ If you use skill-based disciplines like [superpowers](https://github.com/obra/su
 5. **Protocol-driven, minimal dependency, install-and-run** — the built-in 8-node flow works out of the box; any installed skill can be composed into a custom protocol on the same engine; Node.js 18+; the only third-party dependency is `@clack/prompts`, used exclusively by the installer's TTY multi-select (with an automatic readline fallback otherwise); one command installs it.
 
 **Fit**: flow-comet is built for long-running, multi-session development changes on Claude Code — the discipline it automates pays off when a change spans hours and multiple sessions. It is not a general CI/CD or project-management tool; Codex and DeepSeek Harness are supported (see [Installation](docs/INSTALLATION.md#platforms)), other platforms (Gemini / Cursor) are not guaranteed.
+
+## Recommended: brooks-lint
+
+The quality checks in this workflow are grounded in the decay-risk framework of [brooks-lint](https://github.com/hyhmrright/brooks-lint) — a third-party (MIT) review engine that diagnoses code against twelve classic engineering books, with findings stated as Symptom → Source → Consequence → Remedy, book citations and a 0–100 health score across six modes: PR review, architecture audit, tech debt, test quality, health dashboard and full sweep. The upstream flow-kit methodology recommends it for the same stages this engine automates, and the engine mechanizes that preference: once it is installed, the per-task self-check, the review node's code-quality round, the test-quality check and the `health` side command's supplement layer run through it.
+
+**Strongly recommended** if you want the full quality bar. Without it the workflow still completes — those checks fall back to a built-in six-dimension quick check, and a run may report that the review engine was unavailable. It is not a dependency, nothing needs configuring on the flow-comet side, and it supports the same three platforms. Install it from [its repository](https://github.com/hyhmrright/brooks-lint), whose README lists the per-platform commands.
 
 ## Real-run artifacts
 

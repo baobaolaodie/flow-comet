@@ -59,6 +59,10 @@ All three platforms also get `flow-kit/` (templates and rules) and a `.gitignore
 
 Platform-level behaviour (what blocks what, and the limits) is described in [Core Mechanisms](MECHANISM.md); symptom-driven fixes are in [Troubleshooting](TROUBLESHOOTING.md).
 
+## Recommended companion: brooks-lint
+
+The workflow's quality checks prefer [brooks-lint](https://github.com/hyhmrright/brooks-lint), a third-party (MIT) review engine that diagnoses code against twelve classic engineering books. Installing it is strongly recommended for the full quality bar, and it is not required: without it those checks fall back to a built-in six-dimension quick check, and a run may say the review engine was unavailable. It supports the same three platforms as this engine, it is installed separately from flow-comet, and nothing on the flow-comet side needs configuring afterwards. Install it from its repository — its README lists the per-platform commands.
+
 ## Moving a project after installation
 
 The Codex hook command is written with the **absolute path** of the project it was installed into, so a project that is moved or renamed keeps a hook pointing at the old location — re-run `fcomet init` in the moved project to rewrite it. Claude Code's hook refers to the project directory through the platform's own variable and does not have this problem; the dsh bridge is global and refers to the project at runtime.

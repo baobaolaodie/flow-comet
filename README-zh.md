@@ -108,6 +108,7 @@ cat .claude/skills/flow-comet/INSTALLED_VERSION    # 写进本项目的版本标
 | **GSD** | 规范驱动开发的元提示/上下文工程工作流 | 里程碑→切片→任务；每阶段 fresh context 预内联上下文；工作树隔离 + UAT | **思想来源（同类）**——fresh-context 执行与阶段门思想一致；无脚本状态机路由，靠提示词纪律 |
 | **spec-kit**（GitHub） | SDD 工具包：Spec→Plan→Tasks→Implement | 每阶段产 markdown 工件喂给下一阶段；任务格式带顺序 ID、并行标记 [P]、文件路径 | **思想来源（同类）**——任务带文件路径/并行标记的形态与 flow-kit TASK 同源；无阶段迁移强制 |
 | **claude-task-master** | AI 驱动的任务管理系统（MCP + CLI） | PRD 解析→任务分解→依赖图→next_task 编排 | **补足**——只管任务层（分解/排序/依赖），不管阶段门、工件验证与写权限 |
+| **brooks-lint**（hyhmrright） | 第三方审查引擎：以十二本经典工程书为判据，六类生产码 + 六类测试腐化风险，发现带书目引用与 0~100 健康分，含六个模式 | 以技能/插件形式安装；工作流调用其 review / audit / test / health 命令 | **推荐搭配（MIT，非依赖）**——为自查与审查轮提供诊断；缺席时走内置回退 |
 
 ### 纵向对比：手动 flow-kit → flow-comet
 
@@ -129,6 +130,12 @@ cat .claude/skills/flow-comet/INSTALLED_VERSION    # 写进本项目的版本标
 5. **协议驱动、最小依赖、安装即用**——内置 8 节点流程开箱即用；任意已装技能可组合成自定义协议跑在同一引擎；Node.js 18+；第三方依赖仅 `@clack/prompts`，且仅安装器 TTY 多选使用（其余场景自动回退 readline）；一条命令装入目标项目。
 
 **适用场景**：flow-comet 面向 Claude Code 上耗时数小时、跨多会话的开发 change——纪律自动化的价值在长任务中体现。它不是通用 CI/CD 或项目管理工具；Codex 与 DeepSeek Harness 受支持（见[安装](docs/INSTALLATION-zh.md#平台)），其他平台（Gemini / Cursor）不保证支持。
+
+## 推荐搭配：brooks-lint
+
+本工作流的质量检查建立在 [brooks-lint](https://github.com/hyhmrright/brooks-lint) 的腐化风险框架之上——它是一个第三方（MIT）审查引擎，以十二本经典工程书为判据；发现按 Symptom → Source → Consequence → Remedy 四要素给出，附书目引用与 0~100 健康分，含 PR 审查、架构审计、技术债、测试质量、体检仪表板与全量清扫六个模式。上游 flow-kit 方法论在同样的阶段推荐它，本引擎把这条偏好机械化：装上它之后，逐任务的六维自查、review 节点的代码质量轮、测试质量检查与 `health` 侧命令的增补层都会走它。
+
+**强烈推荐**——想要完整质量档位就装上。没有它工作流照样跑完：上述检查回退到内置六维快查，某次运行也可能提示审查引擎不可用。它不是依赖，flow-comet 侧无需任何配置，且它支持同样的三个平台。从[它的仓库](https://github.com/hyhmrright/brooks-lint)安装，那里列出了各平台的命令。
 
 ## 真实运行产物展示
 
