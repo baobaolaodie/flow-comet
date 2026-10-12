@@ -40,6 +40,10 @@
 
 **`BLOCKED: missing Output Schema artifacts`** —— 归档出口要求归档目录与其遗留清单。把 change 目录移入 `.specs/archive/<日期>-<change-id>/`，并确保其内存在 `KNOWN-ISSUES.md`（无遗留也要显式写明）。
 
+**`BLOCKED: SUMMARY 使用 builtin-quickcheck 未声明…（新 change 强制）`** —— 新 change 声明走内置快查时，必须同时写明审查引擎为什么不可用、以及替读了什么——点名插件缓存、缓存协议文件或它们的路径。缺任一半都会拒绝出口；规则生效前创建的 change 只告警。
+
+**`BLOCKED: SUMMARY 的 6 维自查未声明使用 /brooks-review`** —— 该声明在**自查段内**按字面匹配：写成 `# Brooks-Lint Review` 这样的标题不会被读成方法名，且只在自检方法段写理由不满足这项校验。请在自查段本身写出 `brooks-review`（或 `cache-brooks`）。
+
 ### 平台
 
 **移动项目后 Codex hook 失效** —— Codex hook 记录的是安装时的绝对路径。在新位置重跑 `fcomet init --platform codex`。

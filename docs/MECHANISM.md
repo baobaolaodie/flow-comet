@@ -60,11 +60,14 @@ At each node the guard answers a fixed set of questions; a "no" is a refusal wit
 | Was the entry recorded, and is the node's skill-load declaration present? | every node |
 | Do the node's documents exist, with the template's header fields and section names? | `open`, `design`, `plan`, `review`, `archive` |
 | Are all tasks complete, with a summary per completed task and an unchanged task set? | `execute`, `subagent-execute` |
+| Is the self-check declared, and does a degraded one carry its evidence? | `execute`, `subagent-execute` (the SUMMARY's self-check section) |
 | Did the verification actually run, and did it pass? | `verify` (runs the command block in `TEST.md`) |
 | Does every review finding carry a disposition, and does a deferred major finding have a user ruling? | `review` |
 | Are the archive directory and its leftover list in place? | `archive` |
 
 Because the checks are structural, a payload that looks like a contract but cannot be parsed is rejected the same way a missing file is — the engine never guesses.
+
+The self-check is validated as a declaration, not as a judgement of quality: the summary must name how the six-dimension review was run — the review engine when it was available, the engine's protocol files read by hand when it could not be loaded, or the built-in quick check as the last resort — and the built-in form must also state why the engine was unavailable and what was read instead. The engine checks the wording only; whether the review was any good remains a review-time judgement.
 
 A node's requirements can also be asked for instead of looked up in the node books: `workflow-state.mjs explain <node>` prints that node's output schemas with their artifact paths and evidence ids, its guardrails, the skills it requires, and its entry, exit and record commands in the form this installation runs them. Every line is derived from the protocol the engine already reads, so the answer cannot drift from what the gates enforce. The command is read-only — it writes no state and changes no routing — and an unknown node name is refused together with the list of the valid ones.
 
@@ -97,6 +100,8 @@ Three commands ship with the installed skill tree but stay outside the 8-node fl
 | `evolve` | Architecture sediment has piled up in archived changes and should be reviewed and folded back into the project's own documents | A report under `.specs/evolve/<YYYY-MM-DD>-EVOLVE.md`, plus the project documents patched for the candidates you approved one by one |
 | `health` | You want a periodic picture of the codebase and its debt before deciding what to pick up | A report under `.specs/health/<YYYY-MM-DD>-HEALTH.md`; the findings are advice, and turning one into work is a separate decision |
 | `context-scan` | The project's context document should be re-probed and compared against the previous scan | A snapshot and the difference list under `.specs/context-scan/<YYYY-MM-DD>-SCAN.md` |
+
+When a code-health tool is present, its four-dimension result is folded into the same report with its source named; when it is absent the report keeps an explicit degradation line. A missing optional tool never fails the command.
 
 Two boundaries are worth keeping in mind. A side command never moves the workflow on: it records no progress and cannot stand in for a node's artifacts, so it is never a shortcut past a gate. It reports rather than decides as well: `evolve` writes only what you approve item by item, `health` leaves every finding for you to act on, and none of them opens a change on your behalf. The status view adds one line when architecture sediment is due — a reminder that suggests the command and runs nothing by itself.
 
