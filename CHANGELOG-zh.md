@@ -12,6 +12,10 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **推荐搭配写入公开面**：README、安装、核心机制与故障排查四份文档现在都覆盖 brooks-lint——它是第三方审查引擎，逐任务自查与审查轮建立在其腐化风险框架之上——含装上之后的变化与未装时的行为。([#150](https://github.com/baobaolaodie/flow-comet/pull/150))
+
 ## [1.6.3] - 2026-10-11
 
 本版本汇总 1.6.2 之后积累的工作：委派判据在三个受支持平台上统一——依据宿主载荷里的调用方身份，而非工作区由谁建立——并行安全的四属性成文，每次委派在交接时留下记录，提交与集成纪律写入节点技能；节点作业指导改为按需读取而不再跨册复述，节点事实可用只读命令现问，不属于 agent 使用的页面不再随安装的技能树提供，重装也不再留下生成文件，要求「每条新增条目带编号 PR 链接」的判据在发布把条目移入版本段后也照常生效。 ([#145](https://github.com/baobaolaodie/flow-comet/pull/145)) ([#146](https://github.com/baobaolaodie/flow-comet/pull/146)) ([#147](https://github.com/baobaolaodie/flow-comet/pull/147))
