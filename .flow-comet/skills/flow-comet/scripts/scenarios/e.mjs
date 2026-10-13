@@ -1,6 +1,7 @@
 // 场景组 e — 单一来源静态锁 · 零提交滥用负例 · 模板保真扩展 · verify 降级
 // 元素形态：`{ name, run }`；计数由 `lib/count-derivation.mjs` 从本目录聚合，不手抄数字。
-// 组界按场景名前缀与文件内既有分段划，与入口 `SCENARIOS` 的拼接顺序一致。
+// 组界：场景序列按组文件规模上限连续分区——本文件头部两项（154 · 155）落在 scenarios/d.mjs 尾部；
+// 分区只搬文件，场景名/内容与拼接顺序不变（见 scenarios/d.mjs 头注）。
 
 import fs from 'fs';
 import path from 'path';
@@ -53,137 +54,6 @@ export const ENTRIES = [
   // 启发式安全侧边界锚定 / 零提交正式语义 / SUMMARY·TASK7·三文档模板保真 / 技能加载前置门 /
   // next·entry 输出点名 / 技能加载措辞 / next 进行中节点保护扩展） ----------
 
-  // 154: 单一来源静态锁（设计语义 / AC-1 + F-3 / AC-5）——① `looksLikeObjectLiteral` 只许有一处
-  // 实现（单源模块由导出符号反查），state/handoff 侧（含拆分后的 `lib/`）一律具名取用、不得自带
-  // 第二份定义（单一来源 fail-closed）；② F-3：消费 `EXECUTE_FAMILY_NODE_IDS` 的脚本（消费面 =
-  // 入口 ∪ `lib/**`，由真实引用派生）均须从单源取用，且源码中不得再出现 execute 家族成员内联 pair
-  //（<ident> === 'execute' || <ident> === 'subagent-execute'，正反顺序）→ 0 命中。
-  // 允许清单：单节点分支 / hasSubagentNode 协议判定 / 证据键与文案不参与 pair 断言。
-  // ② 该轮修复在既有场景内扩展（不新增顶层编号）。
-
-  {
-    name: '154 单一来源静态锁：looksLikeObjectLiteral 单源 + EXECUTE_FAMILY_NODE_IDS 消费面（入口 ∪ lib）零内联 pair',
-    run: (dir) => {
-      const issues = [];
-      // ① 单一来源静态锁：单源模块**反查**（不写文件名），消费面由引擎面文本真实引用派生
-      const lookup = engineDefinitionModule('looksLikeObjectLiteral');
-      if (lookup === null) {
-        throw new Error('looksLikeObjectLiteral 的单一来源定义面不唯一（应恰一处）: '
-          + JSON.stringify(engineDefinitionHits('looksLikeObjectLiteral')));
-      }
-      const texts = engineScriptTexts();
-      for (const problem of singleSourceImportProblems({
-        symbol: 'looksLikeObjectLiteral', sourceRel: lookup.file, texts,
-      })) issues.push(problem);
-
-      // ①b 反向构造（同一判据驱动 · 探针目标数据驱动）：逐项改坏输入 ⇒ 必报，还原 ⇒ 复绿。
-      const sourceText = texts.get(lookup.file);
-      if (typeof sourceText !== 'string') throw new Error('反查所得单源模块不在场: ' + lookup.file);
-      const firstConsumer = [...texts.keys()].find((rel) => rel !== lookup.file
-        && new RegExp('import\\s*\\{[^}]*\\blooksLikeObjectLiteral\\b').test(texts.get(rel)));
-      if (firstConsumer === undefined) throw new Error('反向构造前提不成立：找不到具名取用的消费方');
-      const consumerText = texts.get(firstConsumer);
-      const probes = [
-        ['消费方自带第二份定义',
-          new Map(texts).set(firstConsumer,
-            consumerText + '\nfunction looksLikeObjectLiteral(raw) { return false; }\n'), '自带第二份'],
-        ['源侧定义被抽掉（单源面被破坏）',
-          new Map(texts).set(lookup.file,
-            sourceText.replace('function looksLikeObjectLiteral', 'function renamedObjectLiteralProbe')), '单一来源被破坏'],
-        ['消费方不再取用（import 被抽掉）',
-          new Map(texts).set(firstConsumer, dropNamedImport(consumerText, 'looksLikeObjectLiteral')), '未从'],
-      ];
-      for (const [label, mutated, expected] of probes) {
-        const reported = singleSourceImportProblems({
-          symbol: 'looksLikeObjectLiteral', sourceRel: lookup.file, texts: mutated,
-        });
-        if (!reported.some((problem) => problem.includes(expected))) {
-          issues.push('反向构造判别力缺失（' + label + ' 未被判违规）');
-        }
-      }
-      if (singleSourceImportProblems({
-        symbol: 'looksLikeObjectLiteral', sourceRel: lookup.file, texts,
-      }).length !== 0) issues.push('反向构造还原后未复绿（判据受输入顺序影响）');
-
-      // ===== F-3（AC-5）：execute 家族成员单一来源静态锁 =====
-      // ① import 断言：说明符由消费方位置推导（`lib/` 内是 `'../route-node.mjs'`），消费面 =
-      // 入口 ∪ `lib/**`（由真实引用派生——迁移后的消费方自动进入对账，不写文件名清单）。
-      // ② 内联 pair 检测器：`=== 'execute'` 与 `=== 'subagent-execute'` 经 `||` 直连（正反顺序）。
-      // 只命中双侧 === || === 组合；单节点分支（&& / 单 compare）、协议判定、证据键不命中
-      //（下方合成正/负例自锚，防检测器退化为永不生效或误伤允许形态）。
-      const pairRe = /(?:[A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*\s*===\s*'execute'\s*\)?\s*\|\|\s*\(?\s*[A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*\s*===\s*'subagent-execute')|(?:[A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*\s*===\s*'subagent-execute'\s*\)?\s*\|\|\s*\(?\s*[A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*\s*===\s*'execute')/g;
-      const detectorPositive = [
-        "(node.id === 'execute' || node.id === 'subagent-execute')",
-        "(detectedNode === 'subagent-execute' || detectedNode === 'execute')",
-        "(nodeId === 'execute' || requestNode === 'subagent-execute')",
-      ];
-      const detectorNegative = [
-        "if (node.id === 'execute' && state.activeChange) {",
-        "if (node.id === 'subagent-execute' && state.activeChange) {",
-        "(protocol.nodes ?? []).some(n => n.id === 'subagent-execute')",
-        "state.evidence['subagent-execute'] = state.evidence['subagent-execute'] || {};",
-        "hasSubagentNode(protocol)",
-      ];
-      for (const candidate of detectorPositive) {
-        pairRe.lastIndex = 0;
-        if (!pairRe.test(candidate)) issues.push('内联 pair 检测器自身失效：未命中已知历史形态 ' + JSON.stringify(candidate));
-      }
-      for (const candidate of detectorNegative) {
-        pairRe.lastIndex = 0;
-        if (pairRe.test(candidate)) issues.push('内联 pair 检测器误报允许形态：' + JSON.stringify(candidate));
-      }
-      const familySource = engineDefinitionModule('EXECUTE_FAMILY_NODE_IDS');
-      if (familySource === null) {
-        throw new Error('EXECUTE_FAMILY_NODE_IDS 的单一来源定义面不唯一（应恰一处）: '
-          + JSON.stringify(engineDefinitionHits('EXECUTE_FAMILY_NODE_IDS')));
-      }
-      // 单一来源面（定义唯一 + 消费面一律取用）：同一判据驱动，消费面由真实引用派生
-      for (const problem of singleSourceImportProblems({
-        symbol: 'EXECUTE_FAMILY_NODE_IDS', sourceRel: familySource.file, texts,
-      })) issues.push(problem);
-      const familyConsumers = engineConsumersOf('EXECUTE_FAMILY_NODE_IDS').filter((rel) => rel !== familySource.file);
-      if (familyConsumers.length === 0) issues.push('execute 家族消费面为空（受检面收缩？）');
-      for (const rel of familyConsumers) {
-        const text = fs.readFileSync(path.join(SCRIPTS_DIR, rel), 'utf8');
-        const sourceLines = text.split('\n');
-        pairRe.lastIndex = 0;
-        let m;
-        while ((m = pairRe.exec(text)) !== null) {
-          const lineNo = text.slice(0, m.index).split('\n').length;
-          issues.push(rel + ':' + lineNo + ' 出现 execute 家族成员内联 pair（应改用 EXECUTE_FAMILY_NODE_IDS.has(...)）: ' + sourceLines[lineNo - 1].trim());
-        }
-      }
-      if (issues.length > 0) throw new Error(issues.join(String.fromCharCode(10)));
-    },
-  },
-
-  // 155: record 契约解析失败消息分级（设计语义 / AC-3）——--json-file 传入损坏 JSON（以 { 开头）
-  // → 报"文件内容不是合法 JSON" + 长度元数据，且不再建议使用 --json-file；内联传参损坏仍建议
-  // --json-file。当前两分支同一英文文案（都建议 use --json-file）→ ① 断言 RED。
-  {
-    name: '155 record 契约解析失败消息分级：--json-file 损坏提示非合法；内联仍提示 --json-file',
-    run: (dir) => {
-      const st = baseState('open');
-      st.evidence.open = { summary: 'intake complete' };
-      writeState(dir, st);
-      // ① --json-file 指向损坏 JSON（以 { 开头）→ "不是合法 JSON" + 长度元数据，不再建议 --json-file
-      writeFile(dir, 'payload.json', '{summary: "broken", completedChecks: ["x"]');
-      const resFile = runStateWithProtocol(dir, ['record', 'open', '--json-file', 'payload.json']);
-      assertExit(resFile, 1);
-      assertNotOut(resFile, '--json-file');
-      assertOut(resFile, '不是合法 JSON');
-      assertOut(resFile, 'length=');
-      // ② 内联传参损坏（以 { 开头）→ 仍建议 --json-file（既有语义保留）
-      const bad = '{summary: "broken"';
-      const resInline = runStateWithProtocol(dir, ['record', 'open', bad]);
-      assertExit(resInline, 1);
-      assertOut(resInline, '--json-file');
-    },
-  },
-
-  // 156: 疑似对象启发式安全侧边界锚定（设计语义 / AC-4）——内联纯文本恰好以 [ 开头 → 启发式判为
-  // 疑似对象、JSON.parse 失败 → fail-closed（exit 1 + 提示、不落库）。当前即如此 → 本场景 GREEN
-  // （只锚定现状，不改行为）。
   {
     name: '156 启发式安全侧边界：内联纯文本以 [ 开头 → fail-closed（锚定现状）',
     run: (dir) => {
