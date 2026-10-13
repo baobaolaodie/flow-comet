@@ -196,7 +196,7 @@ jobs:
           # 逐条对齐、同一判据,但不是共享实现:改动任一侧都必须同步另一侧。
           #   ① 清单可发布性:private 缺席 / license 为 MIT / engines.node 为 >=18
           #                                                  ← assertPublishableManifest
-          #   ② 包体边界:必含面 / 私有面零命中 / scripts 面两项 /
+          #   ② 包体边界:必含面 / 私有面零命中 / scripts 面八项(入口 2 + scripts/lib 6) /
           #      顶层白名单 fail-closed / 技能树逐文件在场   ← assertPackageBoundary
           #   ③ bin 双入口契约                               ← assertBinContract
           # 同步清单(两份实现没有任何机制能发现彼此已不同步,故把「本侧覆盖了什么」写死在此;
@@ -225,24 +225,39 @@ jobs:
             if (nodeFloor !== ">=18")
               problems.push(`package.json engines.node must be ">=18" (documented runtime requirement): ${JSON.stringify(nodeFloor)}`);
 
-            // ② 必需面:19 个 flow-comet* 技能目录 + rules + 两个随包脚本
+            // ② 必需面:19 个 flow-comet* 技能目录 + rules + 随包 scripts 面(白名单见下)
             const skills = [...new Set(entries
               .filter((p) => p.startsWith(".flow-comet/skills/"))
               .map((p) => p.split("/")[2]))];
             if (skills.length !== 19 || !skills.every((s) => s.startsWith("flow-comet")))
               problems.push(`skill tree count mismatch (expected 19): ${skills.length} flow-comet* dirs packed`);
-            for (const must of [".flow-comet/rules/flow-comet-orchestration.md",
-                                "scripts/prepare-env.mjs", "scripts/dsh-bridge.mjs"])
+
+            // 包内 scripts 面的唯一白名单(② 必需在场 与 ④ 零越界共用同一常量):
+            // bin 双入口两个 + scripts/lib 下随包安装器模块六个。
+            // package.json 的 files 以目录级纳入 scripts/lib(新增模块随目录进包),
+            // 故新增模块若未登记在此即被判越界——不会静默随包发布;删除登记项则由 ② 判缺。
+            // 与本地系统测试集 assertPackageBoundary 的 allowedScripts 同集合(逐字一致):
+            // 改动任一侧都必须同步另一侧(两面是独立实现,没有任何机制能发现彼此已不同步)。
+            const allowedScripts = [
+              "scripts/prepare-env.mjs",
+              "scripts/dsh-bridge.mjs",
+              "scripts/lib/installer-platforms.mjs",
+              "scripts/lib/installer-migrate.mjs",
+              "scripts/lib/installer-hooks.mjs",
+              "scripts/lib/installer-loader.mjs",
+              "scripts/lib/installer-cleanup.mjs",
+              "scripts/lib/installer-flowkit.mjs",
+            ];
+            for (const must of [".flow-comet/rules/flow-comet-orchestration.md", ...allowedScripts])
               if (!entries.includes(must)) problems.push(`required entry missing from pack: ${must}`);
 
             // ③ 私有面:零命中(.githooks/ 文件头明文"主仓私有,不分发"——零配置时实测进包)
-            // ④ 本地工具脚本:scripts/ 下只允许两个随包脚本
+            // ④ 本地工具脚本:scripts/ 下只允许白名单内的随包脚本(仓库本地工具默认不得进包)
             const forbidden = [".githooks/", "docs/internal/", ".specs/", "CLAUDE.md", "AGENTS.md", ".github/", "images/"];
-            const packedScripts = ["scripts/prepare-env.mjs", "scripts/dsh-bridge.mjs"];
             for (const p of entries) {
               if (forbidden.some((x) => p === x.replace(/\/$/, "") || p.startsWith(x)))
                 problems.push(`private entry leaked into pack: ${p}`);
-              if (p.startsWith("scripts/") && !packedScripts.includes(p))
+              if (p.startsWith("scripts/") && !allowedScripts.includes(p))
                 problems.push(`local tool script leaked into pack: ${p}`);
             }
 
