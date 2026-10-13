@@ -1,11 +1,11 @@
 // items/g.mjs — G 组条目（分支模式）
 //
 // 组文件约定：`export const ENTRIES = [...]`（元素含 name 与 run；计数派生按此聚合，见 lib/count-derivation.mjs）。
-// 组内夹具与条目同址；跨组共用夹具从 a.mjs / k.mjs 取（组文件之间单向，无环）。
+// 跨组共用夹具在 lib/system-fixtures.mjs（组文件只承载 ENTRIES 数据与组内私有夹具，组文件之间零 import）。
 
 import { execFileSync, spawnSync } from 'child_process';
 import { assertExit, assertOut, baseState, runGuard, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
-import { CHANGE_ID, gitBranch, gitInit } from './a.mjs';
+import { CHANGE_ID, gitBranch, gitInit } from '../lib/system-fixtures.mjs';
 
 export const ENTRIES = [
   // ---------- G. 分支模式 ----------

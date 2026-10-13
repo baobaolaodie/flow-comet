@@ -1,12 +1,12 @@
 // items/e.mjs — E 组条目（自定义协议）
 //
 // 组文件约定：`export const ENTRIES = [...]`（元素含 name 与 run；计数派生按此聚合，见 lib/count-derivation.mjs）。
-// 组内夹具与条目同址；跨组共用夹具从 a.mjs / k.mjs 取（组文件之间单向，无环）。
+// 跨组共用夹具在 lib/system-fixtures.mjs（组文件只承载 ENTRIES 数据与组内私有夹具，组文件之间零 import）。
 
 import fs from 'fs';
 import path from 'path';
 import { assertExit, assertNotOut, assertOut, runGuard, runState, writeFile } from '../lib/test-helpers.mjs';
-import { readStateFile } from './a.mjs';
+import { readStateFile } from '../lib/system-fixtures.mjs';
 
 // 自定义协议（compose-demo）：3 节点 brainstorm/tdd/codereview（避开内置 8 节点 id）——
 // 协议数据化路由 + 通用层防线对自定义节点生效；无 writeWhitelist（hook 回退内置缺省表）

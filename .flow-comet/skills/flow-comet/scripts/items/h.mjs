@@ -1,14 +1,14 @@
 // items/h.mjs — H 组条目（verify 与归档）
 //
 // 组文件约定：`export const ENTRIES = [...]`（元素含 name 与 run；计数派生按此聚合，见 lib/count-derivation.mjs）。
-// 组内夹具与条目同址；跨组共用夹具从 a.mjs / k.mjs 取（组文件之间单向，无环）。
+// 跨组共用夹具在 lib/system-fixtures.mjs（组文件只承载 ENTRIES 数据与组内私有夹具，组文件之间零 import）。
 
 import fs from 'fs';
 import path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 import { createHash } from 'crypto';
 import { assertExit, assertNotOut, assertOut, runGuard, runHandoff, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
-import { CHANGE_ID, assertNodeLine, assertNotNodeLine, completeFixTaskAndRecord, driveThroughDesign, execSummaryFixture, fixBatchReviewDoc, fixBatchTaskText, fullContract, parseStatusOutput, readStateBytes, readStateFile, writeIntakeArtifacts } from './a.mjs';
+import { CHANGE_ID, assertNodeLine, assertNotNodeLine, completeFixTaskAndRecord, driveThroughDesign, execSummaryFixture, fixBatchReviewDoc, fixBatchTaskText, fullContract, parseStatusOutput, readStateBytes, readStateFile, writeIntakeArtifacts } from '../lib/system-fixtures.mjs';
 
 // 同夹具的「段内大写 Z 早于方法名」变体（真实机检标记形态）：6 维自查段体首行是含大写 Z 的机检
 // 标记说明，方法声明行在其后。段尾判定若把大写 Z 当串尾（惰性段体在段内首个 Z 处提前收尾），

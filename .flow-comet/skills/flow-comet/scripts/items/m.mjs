@@ -1,7 +1,7 @@
 // items/m.mjs — M 组条目（侧命令与 ui-design 门）
 //
 // 组文件约定：`export const ENTRIES = [...]`（元素含 name 与 run；计数派生按此聚合，见 lib/count-derivation.mjs）。
-// 组内夹具与条目同址；跨组共用夹具从 a.mjs / k.mjs 取（组文件之间单向，无环）。
+// 跨组共用夹具在 lib/system-fixtures.mjs（组文件只承载 ENTRIES 数据与组内私有夹具，组文件之间零 import）。
 
 import fs from 'fs';
 import path from 'path';
@@ -9,7 +9,7 @@ import { execFileSync, spawnSync } from 'child_process';
 import { createHash } from 'crypto';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { assertEqual, assertExit, assertNotOut, assertOut, assertTrue, baseState, runGuard, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
-import { CHANGE_ID, parseStatusOutput, readStateBytes, readStateFile, writeIntakeArtifacts } from './a.mjs';
+import { CHANGE_ID, parseStatusOutput, readStateBytes, readStateFile, writeIntakeArtifacts } from '../lib/system-fixtures.mjs';
 
 // 路径推导基准：技能包 scripts/ 目录（与套件入口同基准）
 const SCRIPTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
