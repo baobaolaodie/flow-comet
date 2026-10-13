@@ -673,12 +673,34 @@ export function maintainerFaceSkips(root = REPO_ROOT) {
   return skips;
 }
 
-// 系统测试集项数受检面的分支夹具（场景 231 用）：逐条驱动组文件派生、条目缺失、项数未同步、
-// 维护者组整组在场判定、派生源缺失——判据统一是「显式报告、不静默跳过」（AC-14 同型）。
+// 系统测试集项数受检面的分支夹具（场景 231 用）：逐条驱动组文件派生、组文件契约违约（导出非数组 /
+// 空数组 / 元素缺 name 各自 fail-closed 且指名文件）、条目缺失、项数未同步、维护者组整组在场判定、
+// 组文件目录缺失（目录缺席 / 空目录 / 套件入口在场三种输入形态）——判据统一是「显式报告、不静默
+// 跳过」（AC-14 同型）。
 // 夹具根即受检根：数据层按组文件约定建在 <dir>/scripts/items/ 下，并把该 scripts/ 作为派生的
 // 可测接缝传入——派生值必须是「读组文件」得来，不是常量。
 export async function exerciseSystemTestCountCheck(dir) {
   const scriptsDir = path.join(dir, 'scripts');
+  // 契约违约探针：写一份畸形组文件 → 派生必须抛错，且消息指名该文件与违约形态（fail-closed；
+  // 分支若改成静默计 0，这里即红）。文件名逐组不同——ESM 按 URL 缓存模块，同名复用会取回上一份
+  // 已求值的模块。验完即删，后续步骤仍以 3 条合法条目为前提。
+  const expectContractError = async (fileName, source, ...expected) => {
+    const rel = path.posix.join('items', fileName);
+    writeFile(scriptsDir, rel, source);
+    let caught = null;
+    try {
+      await systemItemCount(scriptsDir);
+    } catch (e) {
+      caught = e;
+    }
+    fs.rmSync(path.join(scriptsDir, rel));
+    if (!caught) throw new Error('组文件违约未被 fail-closed 抛出（静默计数）: ' + rel);
+    for (const frag of [rel, ...expected]) {
+      if (!String(caught.message).includes(frag)) {
+        throw new Error('组文件违约报告未指向「' + frag + '」: ' + caught.message);
+      }
+    }
+  };
   // ① 组文件派生：两份组文件共 3 条 → 派生值必须是 3（证明计数是读出来的，不是硬编码）
   writeFile(scriptsDir, 'items/a.mjs', 'export const ENTRIES = [\n'
     + '  { name: \'x1\', run: () => {} },\n'
@@ -695,7 +717,11 @@ export async function exerciseSystemTestCountCheck(dir) {
   if (clean.length !== 0) {
     throw new Error('受检面齐备且同步时不应报告问题: ' + JSON.stringify(clean));
   }
-  // ② 移走一个条目（幽灵条目形态）→ 显式报告缺失项（列出文件名）
+  // ② 组文件契约违约三形态（AC-9 的「篡改」支）：各自 fail-closed，消息含文件名 + 违约形态
+  await expectContractError('bad-nonarray.mjs', 'export const ENTRIES = {};\n', '未导出 ENTRIES 数组');
+  await expectContractError('bad-empty.mjs', 'export const ENTRIES = [];\n', '为空数组');
+  await expectContractError('bad-noname.mjs', 'export const ENTRIES = [\n  { run: () => {} },\n];\n', '缺 name 字段');
+  // ③ 移走一个条目（幽灵条目形态）→ 显式报告缺失项（列出文件名）
   const missingRel = 'CHANGELOG-zh.md';
   if (!SYSTEM_TEST_COUNT_FILES.includes(missingRel)) throw new Error('夹具前提失效：' + missingRel + ' 不在受检清单内');
   fs.rmSync(path.join(dir, missingRel));
@@ -703,30 +729,54 @@ export async function exerciseSystemTestCountCheck(dir) {
   if (!missingProblems.some((p) => p.includes('缺失') && p.includes(missingRel))) {
     throw new Error('系统测试集项数缺失条目未被显式报告: ' + JSON.stringify(missingProblems));
   }
-  // ③ 条目在场但项数未同步 → 同样上报（缺省放过即为静默失检）
+  // ④ 条目在场但项数未同步 → 同样上报（缺省放过即为静默失检）
   writeFile(dir, missingRel, '未同步的内容\n');
   const stale = (await systemTestCountSyncProblems(dir, scriptsDir)).join(' | ');
   if (!stale.includes('未同步') || !stale.includes(missingRel)) {
     throw new Error('系统测试集项数未同步条目未被上报: ' + stale);
   }
-  // ④ 维护者组整组在场判定：组目录缺席 → 整组跳过（CI 全新检出形态，不可判成假红）
+  // ⑤ 维护者组整组在场判定：组目录缺席 → 整组跳过（CI 全新检出形态，不可判成假红）
   writeFile(dir, missingRel, itemCount + ' items\n');
   const groupAbsent = await systemTestCountSyncProblems(dir, scriptsDir);
   if (groupAbsent.length !== 0) {
     throw new Error('组目录缺席时应整组跳过: ' + JSON.stringify(groupAbsent));
   }
-  // ⑤ 组目录在场 → 逐条严检：成员缺席照样显式报告（"整组跳过"不等于"组内在场者免检"）
+  // ⑥ 组目录在场 → 逐条严检：成员缺席照样显式报告（"整组跳过"不等于"组内在场者免检"）
   writeFile(dir, path.posix.join(MAINTAINER_DOC_DIR, 'stand-in.md'), 'stand-in\n');
   const mntMissing = await systemTestCountSyncProblems(dir, scriptsDir);
   if (!mntMissing.some((p) => p.includes('缺失') && p.includes(SYSTEM_TEST_COUNT_FILES_MAINTAINER[0]))) {
     throw new Error('维护者组成员缺席未被显式报告: ' + JSON.stringify(mntMissing));
   }
-  // ⑥ 派生源缺失（组文件目录与回退源脚本都移走）→ 显式报告，不静默跳过
-  fs.rmSync(path.join(scriptsDir, 'items'), { recursive: true, force: true });
-  const noSource = (await systemTestCountSyncProblems(dir, scriptsDir)).join(' | ');
-  if (!noSource.includes('缺失') || !noSource.includes('system-test.mjs')) {
-    throw new Error('项数派生源缺失未被显式报告: ' + noSource);
-  }
+  // ⑦ 组文件目录缺失 → fail-closed 且指向真实缺口（组文件目录），不静默计 0。三种输入形态：
+  // A 目录缺席 / A′ 空目录 / B 真实安装形态（目录缺席而套件入口在场——派生不得回落去解析入口文本，
+  // 改动前此处抛 `ReferenceError: GROUP_A is not defined`）。
+  const itemsDir = path.join(scriptsDir, 'items');
+  const expectMissingDir = async (label) => {
+    let caught = null;
+    try {
+      await systemItemCount(scriptsDir);
+    } catch (e) {
+      caught = e;
+    }
+    if (!caught || caught.code !== 'COUNT_SOURCE_MISSING') {
+      throw new Error(label + '：组文件目录缺失未抛 COUNT_SOURCE_MISSING: '
+        + (caught ? (caught.code + ' ' + caught.message) : '未抛错'));
+    }
+    if (!String(caught.message).includes(itemsDir)) {
+      throw new Error(label + '：缺失报告未指向组文件目录 ' + itemsDir + ': ' + caught.message);
+    }
+    const reported = (await systemTestCountSyncProblems(dir, scriptsDir)).join(' | ');
+    if (!reported.includes('缺失') || !reported.includes('scripts/items')) {
+      throw new Error(label + '：消费方的显式「缺失」报告未指向组文件目录: ' + reported);
+    }
+  };
+  fs.rmSync(itemsDir, { recursive: true, force: true });
+  await expectMissingDir('形态 A（目录缺席）');
+  fs.mkdirSync(itemsDir, { recursive: true });
+  await expectMissingDir('形态 A′（空目录）');
+  fs.rmSync(itemsDir, { recursive: true, force: true });
+  writeFile(scriptsDir, 'system-test.mjs', 'const TEST_ITEMS = [\n  ...GROUP_A,\n];\n');
+  await expectMissingDir('形态 B（组文件目录缺席，套件入口在场）');
 }
 // ---------- 词表镜像漂移判据（主仓私有单一来源 ↔ 分发套件的同义镜像） ----------
 // 背景：套件随技能包分发、不能 import 主仓私有的 .githooks（该面不随 clone 分发），故套件内
