@@ -23,15 +23,20 @@ import {
   CROSS_TASK_MIXED_PAIR,
   CROSS_TASK_PLAIN_PAIR,
   FIX_PREFIX_LITERAL_TEXT,
-  GUARD,
   SCRIPTS_DIR,
-  STATE,
   TASK_DEP_CYCLE,
   TASK_MISSING_DEP,
   TASK_PARALLEL_READ_OVERLAP,
   TASK_PARALLEL_WRITE_CONFLICT,
   customProtocol,
+  dropNamedImport,
+  engineCodeText,
+  engineConsumersOf,
+  engineDefinitionHits,
+  engineDefinitionModule,
+  engineReachableFrom,
   engineScriptFiles,
+  engineScriptTexts,
   fixFamilyBoundaryProblems,
   runPlanExit,
   strictSummary,
@@ -67,6 +72,9 @@ import {
   runStateWithProtocol,
   writeReentryChangeDir,
 } from '../lib/test-assertions.mjs';
+import {
+  singleSourceImportProblems,
+} from '../lib/text-anchor-checks.mjs';
 
 export const ENTRIES = [
 
@@ -611,18 +619,17 @@ export const ENTRIES = [
     },
   },
 
-  // 264: history 事件类型集合静态锚（唯一事件类型例外 / 禁止扩散）——扫描引擎生产脚本的
-  // 事件类型字面量：写侧集合必须恰为 {exit-applied, reentry-applied, replan-applied,
-  // advance-forced}（新增类型必须由引擎写侧真实落地 + 显式更新本锚，未落地即 RED），读侧集合
-  // 必须 ⊆ 允许集（出现允许集外的事件类型即红）；另锚新的两类写点必须带跨 change 归属字段
-  // （replan-applied → change）与「被跳过的出口门禁」标识（advance-forced → skipped：
+  // 264: history 事件类型集合静态锚（唯一事件类型例外 / 禁止扩散）——扫描**引擎实现面**（入口 ∪
+  // `lib/**`，递归）的事件类型字面量：写侧集合必须恰为 {exit-applied, reentry-applied,
+  // replan-applied, advance-forced}（新增类型必须由引擎写侧真实落地 + 显式更新本锚，未落地即
+  // RED），读侧集合必须 ⊆ 允许集（出现允许集外的事件类型即红）；另锚新的两类写点必须带跨 change
+  // 归属字段（replan-applied → change）与「被跳过的出口门禁」标识（advance-forced → skipped：
   // exit:<node>），事件对象的动态断言在 259 / 263 / 受控计划重校场景族。
   {
     name: '264 history 事件类型集合静态锚：既有类型 + replan-applied / advance-forced（新增即红、判据不放宽）',
     run: () => {
       const allowed = ['exit-applied', 'reentry-applied', 'replan-applied', 'advance-forced'];
-      const scripts = fs.readdirSync(SCRIPTS_DIR)
-        .filter((f) => f.endsWith('.mjs') && f !== 'guard-self-test.mjs' && f !== 'system-test.mjs');
+      const scripts = engineScriptFiles();
       const writers = new Set();
       const readers = new Set();
       const writeSites = new Map();
@@ -880,57 +887,104 @@ export const ENTRIES = [
       if (!missingVerdict || missingVerdict.missing.length === 0 || missingVerdict.cyclic !== false) {
         throw new Error('route-node 导出的任务图分析对缺失依赖应返回 missing 明细，实际 ' + JSON.stringify(missingVerdict));
       }
-      const engineScripts = engineScriptFiles();
-      const definitionFiles = engineScripts.filter((file) =>
-        /function\s+analyzeDependencyGraph\s*\(/.test(fs.readFileSync(path.join(SCRIPTS_DIR, file), 'utf8')));
-      if (definitionFiles.length !== 1 || definitionFiles[0] !== 'route-node.mjs') {
-        throw new Error('任务图分析必须只有一份实现且位于 route-node.mjs（plan 出口与 replan 共用），实际定义处: '
-          + JSON.stringify(definitionFiles));
+      // 同源结构锚：任务图分析与并行写冲突检测在**引擎面内**只有一处定义，消费方（入口 ∪
+      // `lib/**`，由真实引用派生）一律从单源取用——「实现位于哪个文件名」不再在锚里存第二份事实
+      //（落点由导出符号反查），模块再切分 / 再搬家不必改锚。判据与反向构造探针共用
+      // `singleSourceImportProblems`（单一实现）。
+      const engineTexts = engineScriptTexts();
+      const singleSourceCases = [
+        ['analyzeDependencyGraph', '任务图分析'],
+        ['findParallelWriteConflicts', '并行写冲突检测'],
+      ];
+      for (const [symbol, label] of singleSourceCases) {
+        const source = engineDefinitionModule(symbol);
+        if (source === null) {
+          throw new Error(label + '必须只有一份实现（全引擎面内），实际定义处: '
+            + JSON.stringify(engineDefinitionHits(symbol)));
+        }
+        const sourceProblems = singleSourceImportProblems({ symbol, sourceRel: source.file, texts: engineTexts });
+        if (sourceProblems.length > 0) {
+          throw new Error(label + '单源面被破坏（消费方须从 ' + source.file + ' 或其再导出枢纽取用）: '
+            + sourceProblems.join(' | '));
+        }
+        // 反向构造（同一判据驱动 · 探针目标数据驱动）：① 消费方自建第二份定义 ⇒ 必红；
+        // ② 消费方 import 被抽掉 ⇒ 必红；两项都改坏后判据仍须在还原输入上复绿。
+        const consumer = engineConsumersOf(symbol).find((rel) => rel !== source.file);
+        if (consumer === undefined) throw new Error('反向构造前提不成立：' + symbol + ' 找不到消费方');
+        const consumerText = engineTexts.get(consumer);
+        const probes = [
+          [consumer + ' 自建第二份定义',
+            new Map(engineTexts).set(consumer, consumerText + '\nfunction ' + symbol + '(probe) { return null; }\n'),
+            '单一来源被破坏'],
+          [consumer + ' 不再取用（import 被抽掉）',
+            new Map(engineTexts).set(consumer, dropNamedImport(consumerText, symbol)),
+            '未从'],
+        ];
+        for (const [probeLabel, mutated, expected] of probes) {
+          const reported = singleSourceImportProblems({ symbol, sourceRel: source.file, texts: mutated });
+          if (!reported.some((problem) => problem.includes(expected))) {
+            throw new Error('反向构造判别力缺失（' + probeLabel + ' 未被判违规）: ' + JSON.stringify(reported));
+          }
+        }
       }
-      const guardText = fs.readFileSync(GUARD, 'utf8');
-      if (!/import[^;]*\banalyzeDependencyGraph\b[^;]*from\s*'\.\/route-node\.mjs'/.test(guardText)) {
-        throw new Error('workflow-guard.mjs 必须静态 import route-node 的任务图分析（不得内联第二份判定）');
-      }
-      // 并行写冲突检测单源锚（CR-2 抽取）：全引擎只有一份定义且位于 route-node.mjs，
-      // workflow-guard 静态 import 使用它（replan 与 plan 出口同一判据，禁止内联第二份）。
-      const conflictDefinitionFiles = engineScripts.filter((file) =>
-        /function\s+findParallelWriteConflicts\s*\(/.test(fs.readFileSync(path.join(SCRIPTS_DIR, file), 'utf8')));
-      if (conflictDefinitionFiles.length !== 1 || conflictDefinitionFiles[0] !== 'route-node.mjs') {
-        throw new Error('并行写冲突检测必须只有一份实现且位于 route-node.mjs（plan 出口与 replan 共用），实际定义处: '
-          + JSON.stringify(conflictDefinitionFiles));
-      }
-      if (!/import[^;]*\bfindParallelWriteConflicts\b[^;]*from\s*'\.\/route-node\.mjs'/.test(guardText)) {
-        throw new Error('workflow-guard.mjs 必须静态 import route-node 的并行写冲突检测（不得内联第二份判定）');
+      // 第三族结果的产者/消费者面：产出只在唯一模块（下面 267b ① 覆盖构件面），此处锁「guard 链
+      // 必须真的消费它」——消费方由真实引用派生，落在 guard 入口的 import 闭包内（不写文件名）。
+      const guardClosure = engineReachableFrom(['workflow-guard.mjs']);
+      const thirdFamilyConsumers = engineConsumersOf('crossTaskConflicts')
+        .filter((rel) => guardClosure.has(rel));
+      if (thirdFamilyConsumers.length === 0) {
+        throw new Error('workflow-guard 的判定链未消费第三族结果（plan 出口判定缺失；消费方须在 guard 入口的 import 闭包内）');
       }
     },
   },
 
-  // 267b: 同源静态锚（第三族：同文件跨任务且无依赖路径）——判定构件与结果产出在全引擎脚本里
-  // 只能出现一次且位于 route-node.mjs；修复族「只表达一次」边界锚 + 该判据自身的合成夹具锚；
-  // replan 侧结构锚（解构 / BLOCK 早于备份 / 消息与恢复指引与 plan 出口同族）。
+  // 267b: 同源静态锚（第三族：同文件跨任务且无依赖路径）——判定构件与结果产出在**引擎面**（入口 ∪
+  // `lib/**`，由真实引用派生）里只能出现一次（落点由符号反查，不写文件名）；修复族「只表达一次」
+  // 边界锚 + 该判据自身的合成夹具锚；replan 侧结构锚（解构 / BLOCK 早于备份 / 消息与恢复指引与
+  // plan 出口同族）。
   {
     name: '267b 第三族同源静态锚：构件唯一表达 + 修复族边界锚 + replan 消费锚',
     run: (dir) => {
-      const engineScripts = engineScriptFiles();
-      const guardText = fs.readFileSync(GUARD, 'utf8');
       // —— 本批 in-place 增锚（第三族：同文件跨任务且无依赖路径）——
-      // ① 单一实现锚（结构事实而非注释声明）：第三族的构件（修复任务族前缀常量 / 任务对键 /
-      //    依赖可达闭包）与结果产出在全引擎脚本里只能出现一次且位于 route-node.mjs——消费脚本
-      //    内自建第二份（依赖闭包或写入面交集实现）会在此变红。
-      for (const piece of ['FIX_TASK_ID_PREFIX', 'taskPairKey', 'reachableTaskIds']) {
-        const pieceFiles = engineScripts.filter((file) =>
-          new RegExp('\\b' + piece + '\\b').test(fs.readFileSync(path.join(SCRIPTS_DIR, file), 'utf8')));
-        if (pieceFiles.length !== 1 || pieceFiles[0] !== 'route-node.mjs') {
-          throw new Error('第三族判定构件 ' + piece + ' 必须只出现在 route-node.mjs，实际: ' + JSON.stringify(pieceFiles));
+      // ① 单一表达锚（结构事实而非注释声明）：第三族的构件（修复任务族前缀常量 / 任务对键 /
+      //    依赖可达闭包）与结果产出在引擎面内只能出现一次——消费脚本内自建第二份（依赖闭包或
+      //    写入面交集实现）会在此变红。落点不写文件名（构件在哪个模块由符号自身回答）；注释行
+      //    不计（注释里提到标识符是说明，不是第二份实现）。
+      //    真实判据与下方的反向构造探针**共用本函数**（同一判据只有一处实现，探针才不会与锚漂移）。
+      const thirdFamilyProblems = (texts) => {
+        const out = [];
+        for (const piece of ['FIX_TASK_ID_PREFIX', 'taskPairKey', 'reachableTaskIds']) {
+          const pieceRe = new RegExp('\\b' + piece + '\\b');
+          const holders = [...texts.entries()]
+            .filter(([, text]) => pieceRe.test(engineCodeText(text))).map(([rel]) => rel);
+          if (holders.length !== 1) {
+            out.push('第三族判定构件 ' + piece + ' 必须只在一个引擎模块里表达，实际: ' + JSON.stringify(holders));
+          }
+        }
+        const producers = [...texts.entries()]
+          .filter(([, text]) => /const\s+crossTaskConflicts\s*=/.test(engineCodeText(text))).map(([rel]) => rel);
+        if (producers.length !== 1) {
+          out.push('第三族结果只能由一个引擎模块产出（不得在消费脚本内内联），实际: ' + JSON.stringify(producers));
+        }
+        return out;
+      };
+      const thirdFamilyTexts = engineScriptTexts();
+      const thirdFamilyFound = thirdFamilyProblems(thirdFamilyTexts);
+      if (thirdFamilyFound.length > 0) throw new Error(thirdFamilyFound.join(' | '));
+      // ①b 反向构造（判别力**数据驱动**，不依赖全局计数地板）：把构件名 / 结果产出扩散到第二个
+      //     引擎模块 ⇒ 同一判据必红；还原输入 ⇒ 复绿。
+      const thirdFamilyProbes = [
+        ['构件名扩散到第二个模块', 'lib/guard-gates.mjs', '\nconst probeTaskPairKey = taskPairKey;\n'],
+        ['第三族结果在第二个模块产出', 'lib/guard-gates.mjs', '\nconst crossTaskConflicts = [];\n'],
+      ];
+      for (const [probeLabel, rel, injected] of thirdFamilyProbes) {
+        const mutated = new Map(thirdFamilyTexts).set(rel, thirdFamilyTexts.get(rel) + injected);
+        if (thirdFamilyProblems(mutated).length === 0) {
+          throw new Error('反向构造判别力缺失（' + probeLabel + ' 未被判违规）');
         }
       }
-      const crossTaskProducerFiles = engineScripts.filter((file) =>
-        /const\s+crossTaskConflicts\s*=/.test(fs.readFileSync(path.join(SCRIPTS_DIR, file), 'utf8')));
-      if (crossTaskProducerFiles.length !== 1 || crossTaskProducerFiles[0] !== 'route-node.mjs') {
-        throw new Error('第三族结果只能由 route-node.mjs 产出（不得在消费脚本内内联），实际: ' + JSON.stringify(crossTaskProducerFiles));
-      }
-      if (!/\bcrossTaskConflicts\b/.test(guardText)) {
-        throw new Error('workflow-guard.mjs 必须消费 route-node 的第三族结果（plan 出口判定）');
+      if (thirdFamilyProblems(thirdFamilyTexts).length !== 0) {
+        throw new Error('反向构造还原后未复绿（判据受输入顺序影响）');
       }
       // ①b 修复族约定「只表达一次」锚（判别力升级：按表达式形态计数，不再只数标识符名）——
       //     两条边界（id 前缀 / 「位于修复段内」）各只允许一处实现，第三族参与者排除与修复族
@@ -996,27 +1050,54 @@ export const ENTRIES = [
       // ①c replan 消费锚（结构锚；replan 的真实命令链路由系统测试集承担，此处不重复造链路）：
       //     第三族必须①被解构（只解构两族 = 静默丢失该判据，即修订通道可静默引入该形态）、
       //     ②在 BLOCK 早于备份与写盘的位置判定、③消息与恢复指引与 plan 出口同族（新 change
-      //     阻断 / 旧 change 渐进）。断言写成对 workflow-state.mjs 文本的结构判定。
-      const stateText = fs.readFileSync(STATE, 'utf8');
-      const destructured = stateText.match(/const\s*\{([^}]*)\}\s*=\s*await\s+findParallelWriteConflicts\s*\(/);
-      if (destructured === null || !/\bcrossTaskConflicts\b/.test(destructured[1])) {
-        throw new Error('workflow-state.mjs 的 replan 必须解构 route-node 第三族结果'
-          + '（只解构两族即静默丢失该判据）: ' + JSON.stringify(destructured === null ? null : destructured[1].trim()));
+      //     阻断 / 旧 change 渐进）。判据读的是**replan 命令实现所在模块**的文本——落点由导出
+      //     符号反查（`runReplan`），不写文件名（模块再切分不必改锚）。
+      const replanModule = engineDefinitionModule('runReplan');
+      if (replanModule === null) {
+        throw new Error('replan 命令的实现落点不唯一（应恰一处）: '
+          + JSON.stringify(engineDefinitionHits('runReplan')));
       }
-      const crossJudgeAt = stateText.indexOf('crossTaskConflicts.length > 0');
-      const backupAt = stateText.indexOf('-pre-replan.json');
-      if (crossJudgeAt < 0) {
-        throw new Error('workflow-state.mjs 的 replan 未消费第三族（缺判定分支）');
-      }
-      if (backupAt < 0 || crossJudgeAt > backupAt) {
-        throw new Error('replan 的第三族判定必须早于重签前备份（BLOCK 早于落盘的零改写语义）: '
-          + '判定位置 ' + crossJudgeAt + ' / 备份位置 ' + backupAt);
-      }
-      for (const message of ['同文件跨任务且无依赖路径', '补显式 depends_on 或合并为一个任务']) {
-        if (!stateText.includes(message)) {
-          throw new Error('replan 的第三族消息必须与 plan 出口同族（缺「' + message + '」）');
+      const stateText = replanModule.text;
+      const replanProblems = (text) => {
+        const out = [];
+        const destructured = text.match(/const\s*\{([^}]*)\}\s*=\s*await\s+findParallelWriteConflicts\s*\(/);
+        if (destructured === null || !/\bcrossTaskConflicts\b/.test(destructured[1])) {
+          out.push('replan 必须解构第三族结果（只解构两族即静默丢失该判据）: '
+            + JSON.stringify(destructured === null ? null : destructured[1].trim()));
+        }
+        const crossJudgeAt = text.indexOf('crossTaskConflicts.length > 0');
+        const backupAt = text.indexOf('-pre-replan.json');
+        if (crossJudgeAt < 0) out.push('replan 未消费第三族（缺判定分支）');
+        else if (backupAt < 0 || crossJudgeAt > backupAt) {
+          out.push('replan 的第三族判定必须早于重签前备份（BLOCK 早于落盘的零改写语义）: '
+            + '判定位置 ' + crossJudgeAt + ' / 备份位置 ' + backupAt);
+        }
+        for (const message of ['同文件跨任务且无依赖路径', '补显式 depends_on 或合并为一个任务']) {
+          if (!text.includes(message)) out.push('replan 的第三族消息必须与 plan 出口同族（缺「' + message + '」）');
+        }
+        return out;
+      };
+      const replanFound = replanProblems(stateText);
+      if (replanFound.length > 0) throw new Error(replanModule.file + ': ' + replanFound.join(' | '));
+      // 反向构造（同一判据驱动 · 目标数据驱动）：逐项抽掉承载 ⇒ 必红；还原 ⇒ 复绿。
+      const replanProbes = [
+        ['第三族解构被抽掉',
+          stateText.replace('crossTaskConflicts, ', ''), 'replan 必须解构第三族结果'],
+        ['第三族判定被抽掉',
+          stateText.replace('crossTaskConflicts.length > 0', 'writeConflicts.length > 0'), 'replan 未消费第三族'],
+        ['判定挪到备份之后',
+          stateText.replace('-pre-replan.json', 'crossTaskConflicts.length > 0')
+            .replace('crossTaskConflicts.length > 0', '-pre-replan.json'), '必须早于重签前备份'],
+        ['同族消息被抽掉',
+          stateText.replaceAll('同文件跨任务且无依赖路径', '（反向构造：抽掉）'), '必须与 plan 出口同族'],
+      ];
+      for (const [probeLabel, mutated, expected] of replanProbes) {
+        if (mutated === stateText) throw new Error('反向构造前提不成立（' + probeLabel + ' 未改变输入）');
+        if (!replanProblems(mutated).some((problem) => problem.includes(expected))) {
+          throw new Error('反向构造判别力缺失（' + probeLabel + ' 未被判违规）');
         }
       }
+      if (replanProblems(stateText).length !== 0) throw new Error('反向构造还原后未复绿');
       if (!/WARN: TASK\.md 同文件跨任务且无依赖路径（旧 change 渐进不阻断）/.test(stateText)) {
         throw new Error('replan 的第三族必须保留旧 change 渐进分支（WARN 不阻断）');
       }

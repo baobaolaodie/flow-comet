@@ -804,11 +804,202 @@ export function assertGitignoreManaged(result) {
 
 // ---------- 结构锚的共享判定（判别力升级：按表达式形态计数，而不只是数标识符名） ----------
 
-// 引擎脚本集（不含套件自身与系统测试集）：结构锚共用同一清单——多处各写一份过滤表达式会在
-// 清单口径变化时漂移（同一事实的第二实现）。
+// ---------- 引擎实现面（结构锚的单一受检面） ----------
+// 结构锚测的是**引擎实现面**，不是「scripts/ 顶层的文件名集合」：判定族下沉到 `lib/` 后，按顶层
+// 平铺扫描的锚对迁出的实现**静默失明**（不红、继续绿——比红更危险），故受检面按**模块图派生**：
+// 入口（顶层 `.mjs`，除两个套件入口）∪ 从入口静态可达的模块。套件自持模块（夹具 / 断言 / 文本锚
+// 判据 / 计数派生）与两个数据目录（`scenarios/`、`items/`）因此落在面外——它们的文本本身携带被禁
+// 形态的**样例**（夹具输入、反向构造探针），是判据的输入而非引擎实现；它们的分发面纪律由词表
+// 扫描的递归面（注释层零代号，含数据目录）另行看守。
+// 面无文件名清单：模块再搬家 / 再切分不必改锚；面收缩同样有读数（迁移后的实现若掉出面，白名单
+// 「实际 0 处」一类断言即红，不静默）。
+export const SUITE_ENTRY_FILES = new Set(['guard-self-test.mjs', 'system-test.mjs']);
+
+// 静态导入 / 再导出的相对说明符（`from '…'` / `import('…')` / 裸 `import '…'`）：模块图的边。
+function staticImportSpecifiers(text) {
+  const out = [];
+  for (const match of String(text).matchAll(/(?:from|import)\s*\(?\s*['"](\.[^'"]+)['"]/g)) out.push(match[1]);
+  return out;
+}
+
+// 说明符 → 技能树内相对路径（posix 形态）；越出脚本目录或非 `.mjs` 时返回 null。
+export function resolveEngineSpecifier(fromRel, specifier) {
+  const target = path.posix.normalize(path.posix.join(path.posix.dirname(fromRel), specifier));
+  if (!target.endsWith('.mjs') || target.startsWith('..')) return null;
+  return target;
+}
+
+// 从给定根集合出发的静态可达闭包（模块图的 BFS）：返回相对路径集合。
+export function engineReachableFrom(roots, scriptsDir = SCRIPTS_DIR) {
+  const queue = [...roots];
+  const seen = new Set();
+  while (queue.length > 0) {
+    const rel = queue.shift();
+    if (seen.has(rel)) continue;
+    const abs = path.join(scriptsDir, rel);
+    if (!fs.existsSync(abs)) continue;
+    seen.add(rel);
+    for (const specifier of staticImportSpecifiers(fs.readFileSync(abs, 'utf8'))) {
+      const target = resolveEngineSpecifier(rel, specifier);
+      if (target !== null && !seen.has(target)) queue.push(target);
+    }
+  }
+  return seen;
+}
+
+// 引擎实现面（相对路径，已排序）：入口（顶层 `.mjs`，除两个套件入口）∪ 从入口静态可达的模块
+// ∪ `lib/` 下**非套件自持**的模块。第三项是刻意的保守面：掉进 `lib/` 却还没被入口 import 的文件
+// （第二份实现最省事的藏身处、或迁移途中尚未接线的模块）同样必须可见——否则「放一处第二份实现」
+// 会静默无感。套件自持面由**模块图**排除（只被套件入口可达者），不是文件名清单。
 export function engineScriptFiles(scriptsDir = SCRIPTS_DIR) {
-  return fs.readdirSync(scriptsDir)
-    .filter((f) => f.endsWith('.mjs') && f !== 'guard-self-test.mjs' && f !== 'system-test.mjs');
+  const topLevel = fs.readdirSync(scriptsDir).filter((name) => name.endsWith('.mjs'));
+  const entries = topLevel.filter((name) => !SUITE_ENTRY_FILES.has(name)).sort();
+  const face = engineReachableFrom(entries, scriptsDir);
+  const suiteRoots = topLevel.filter((name) => SUITE_ENTRY_FILES.has(name));
+  const suiteOwned = engineReachableFrom(suiteRoots, scriptsDir);
+  for (const rel of libModules(scriptsDir)) {
+    if (!suiteOwned.has(rel)) face.add(rel);
+  }
+  return [...face].sort();
+}
+
+// 递归列举目录下的 `.mjs`（相对路径，posix 分隔）：`scriptTreeFiles` 与 `libModules` 的唯一 walker。
+function walkModules(dir, prefix) {
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) out.push(...walkModules(path.join(dir, entry.name), prefix + entry.name + '/'));
+    else if (entry.name.endsWith('.mjs')) out.push(prefix + entry.name);
+  }
+  return out;
+}
+
+// `lib/` 下的全部模块（相对路径）：只在引擎面派生中用（面自身不写成文件名清单）。
+function libModules(scriptsDir) {
+  const libDir = path.join(scriptsDir, 'lib');
+  if (!fs.existsSync(libDir)) return [];
+  return walkModules(libDir, '').map((rel) => 'lib/' + rel);
+}
+
+// 技能树内**全部**脚本文件（入口 + `lib/**` + `scenarios/**` + `items/**`，递归派生）：分发面
+// 文本纪律（注释层零代号 / 计数派生）的受检面——与引擎实现面不同，它**包含**套件自持模块与数据
+// 目录（它们的注释同样随技能包分发）。
+export function scriptTreeFiles(scriptsDir = SCRIPTS_DIR) {
+  return walkModules(scriptsDir, '').sort();
+}
+
+// 引擎面的**真实形态 shadow 树**（递归受检面探针用）：把引擎面（入口 + `lib/**`）整棵复制到
+// `<shadowRoot>`，调用方再往里放「第二份实现」——结构锚若不递归就看不到 `lib/` 内的新增。
+// 三处探针（277 定义面 / 291 惯用法 / 298 裸拼接）共用本夹具：真实形态的构造只写一遍。
+// 返回 shadow 脚本目录路径。
+export function copyEngineTree(shadowRoot, scriptsDir = SCRIPTS_DIR) {
+  const scripts = path.join(shadowRoot, 'scripts');
+  fs.mkdirSync(path.join(scripts, 'lib'), { recursive: true });
+  for (const rel of fs.readdirSync(scriptsDir)) {
+    if (rel.endsWith('.mjs')) fs.copyFileSync(path.join(scriptsDir, rel), path.join(scripts, rel));
+  }
+  for (const rel of engineScriptFiles(scriptsDir)) {
+    if (!rel.includes('/')) continue;
+    const target = path.join(scripts, rel);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(scriptsDir, rel), target);
+  }
+  return scripts;
+}
+
+// 引擎面模块文本：相对路径 → 文本（面内读取的单一入口）。
+export function engineScriptTexts(scriptsDir = SCRIPTS_DIR) {
+  const out = new Map();
+  for (const rel of engineScriptFiles(scriptsDir)) {
+    out.set(rel, fs.readFileSync(path.join(scriptsDir, rel), 'utf8'));
+  }
+  return out;
+}
+
+// 代码层文本（注释行剥离）：结构锚判「代码里有没有某形态」——注释里提到标识符是说明，不是实现
+// （与检查工具的注释层口径同源：行首 `//` / `*` / `/*` 才算注释行）。
+export function engineCodeText(text) {
+  return String(text).split(/\r?\n/).filter((line) => !isScriptCommentLine(line)).join('\n');
+}
+
+// 消费面（入口 ∪ `lib/**`）：面内**引用**某符号的模块——由真实引用派生，不写文件名清单，
+// 故模块搬迁 / 再切分不会让判据静默失焦，新增消费方自动进入对账。
+export function engineConsumersOf(name, scriptsDir = SCRIPTS_DIR) {
+  const pattern = new RegExp('\\b' + name + '\\b');
+  return engineScriptFiles(scriptsDir).filter((rel) =>
+    pattern.test(engineCodeText(fs.readFileSync(path.join(scriptsDir, rel), 'utf8'))));
+}
+
+// 从具名 import 列表里摘掉一个名字（反向构造用；名前 / 名后 / 唯一项三种位置都覆盖）：
+// 摘掉后消费方仍引用该符号 ⇒ 「未从单源取用」必报。位置感知是必须的——只处理「名字后带逗号」
+// 的写法在名字位于列表末位时会静默不改，探针遂退化为恒绿（无判别力）。
+export function dropNamedImport(text, name) {
+  return String(text)
+    .replace(new RegExp('(import\\s*\\{[^}]*?)\\b' + name + '\\b\\s*,\\s*'), '$1')
+    .replace(new RegExp('(import\\s*\\{[^}]*?)\\s*,\\s*\\b' + name + '\\b'), '$1');
+}
+
+// 定义形态（函数声明 / 常量赋值）的单一表达式：定义面计数与「单源静态锁」共用——两处各写一份
+// 会在口径演进时分叉（L-067 形态）。
+export function engineDefinitionPattern(name, flags = '') {
+  return new RegExp('(?:export\\s+)?(?:async\\s+)?function\\s+' + name + '\\b'
+    + '|(?:export\\s+)?const\\s+' + name + '\\s*=', flags);
+}
+
+// 定义处计数（结构锚的单源半边）：某名字在引擎面内的定义次数（函数声明 / 常量赋值）。
+// scriptsDir 是可测性接缝：使「同名第二份定义 → 检出 2 处」能在合成目录上被场景驱动（场景 277 的
+// 反向构造），否则该判据只能靠人工实验证明判别力。
+export function engineDefinitionHits(name, scriptsDir = SCRIPTS_DIR) {
+  const pattern = engineDefinitionPattern(name, 'g');
+  const hits = [];
+  for (const rel of engineScriptFiles(scriptsDir)) {
+    const count = (fs.readFileSync(path.join(scriptsDir, rel), 'utf8').match(pattern) ?? []).length;
+    if (count > 0) hits.push({ file: rel, count });
+  }
+  return hits;
+}
+
+// **反查定义模块**（判据形态：落点由导出符号派生，不写文件名常量）：定义处恰好一处时返回
+// { file, text }；零处或非唯一（第二份实现）时返回 null——调用方据此显式报「前提失效」，
+// 不静默取第一个。
+export function engineDefinitionModule(name, scriptsDir = SCRIPTS_DIR) {
+  const hits = engineDefinitionHits(name, scriptsDir);
+  if (hits.length !== 1 || hits[0].count !== 1) return null;
+  return { file: hits[0].file, text: fs.readFileSync(path.join(scriptsDir, hits[0].file), 'utf8') };
+}
+
+// 模块是否**再导出**某符号（`export { … }` / `export { … } from '…'`）：re-export 枢纽
+// （route-node.mjs 一类）是合法取用面，消费方从枢纽或从定义模块取用都算单一来源。
+export function reExportsSymbol(text, symbol) {
+  for (const match of String(text).matchAll(/export\s*\{([^}]*)\}/g)) {
+    const names = match[1].split(',').map((piece) => piece.trim().split(/\s+as\s+/).pop());
+    if (names.includes(symbol)) return true;
+  }
+  return false;
+}
+
+// 消费方是否**从单源取用**某符号（取用面的**唯一**实现）：三种合法形态——① 具名 `import` 的
+// 说明符解析后落在单源模块；② 落在再导出该符号的面内模块（re-export 枢纽合法）；③
+// `export { … } from '<单源>'`（转出枢纽自己不消费符号，也是单源通道而非第二份实现）。
+// 说明符由消费方位置推导，不写死 `'./x.mjs'`（模块位于 `lib/` 时是 `'../x.mjs'`），模块再搬家
+// 不必改锚。`texts` 给定时用它解析枢纽（纯函数形态，合成输入可驱动）；否则读 `scriptsDir` 磁盘。
+export function engineImportsSymbolFrom({ text, consumerRel, symbol, sourceRel, scriptsDir = SCRIPTS_DIR, texts = null }) {
+  const targetText = (target) => {
+    if (texts !== null) return texts.get(target) ?? null;
+    const abs = path.join(scriptsDir, target);
+    return fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : null;
+  };
+  const reachesSource = (specifier) => {
+    const target = resolveEngineSpecifier(consumerRel, specifier);
+    if (target === null) return false;
+    if (target === sourceRel) return true;
+    const hub = targetText(target);
+    return hub !== null && reExportsSymbol(hub, symbol);
+  };
+  const names = (list) => list.split(',').flatMap((piece) => piece.trim().split(/\s+as\s+/)).map((piece) => piece.trim());
+  for (const match of String(text).matchAll(/(?:import|export)\s*\{([\s\S]*?)\}\s*from\s*['"]([^'"]+)['"]/g)) {
+    if (names(match[1]).includes(symbol) && reachesSource(match[2])) return true;
+  }
+  return false;
 }
 
 // 注释行判定：与检查工具的注释层口径一致（行首 // / /* / * 才算注释行，行尾注释不在此列）。
@@ -859,11 +1050,9 @@ export function fixFamilyBoundarySites(scriptsDir = SCRIPTS_DIR) {
     idLiterals: [],
     sectionMemberships: [],
     prefixUsesByFile: new Map(),
-    texts: new Map(),
   };
   for (const file of engineScriptFiles(scriptsDir)) {
     const text = fs.readFileSync(path.join(scriptsDir, file), 'utf8');
-    sites.texts.set(file, text);
     const lines = text.split(/\r?\n/);
     let prefixUses = 0;
     for (let i = 0; i < lines.length; i += 1) {
@@ -889,11 +1078,25 @@ export function fixFamilyBoundarySites(scriptsDir = SCRIPTS_DIR) {
   return sites;
 }
 
+// 修复族边界判据的**落点反查**：边界常量的定义模块由导出符号派生（不写文件名）。定义面零处或
+// 非唯一（第二份实现）时返回 { problems }——调用方原样上报，不静默取第一个。
+function fixFamilyBoundaryIndex(scriptsDir) {
+  const definition = engineDefinitionModule('FIX_TASK_ID_PREFIX', scriptsDir);
+  if (definition === null) {
+    return {
+      problems: ['修复族 id 边界常量 FIX_TASK_ID_PREFIX 的定义面不唯一（全引擎应恰一处）: '
+        + JSON.stringify(engineDefinitionHits('FIX_TASK_ID_PREFIX', scriptsDir))],
+    };
+  }
+  return { identifierModule: definition.file, text: definition.text };
+}
+
 // 修复族约定「只表达一次」判定（AC-15 判别力锚）：返回问题描述数组（空数组 = 唯一表达）。
 // 判别力设计——旧锚按**标识符名**统计（哪个文件里出现该常量名），对"同一约定被表达两次"
 // 零判别力：第二份等价前缀表达式（交替式写法）不含该常量名 → 旧锚必放过（虚假单一来源信心）。
 // 本判据按**表达式形态**计数（扫描见 fixFamilyBoundarySites），四条一起构成"约定被表达两次即红"：
-//   ① id 前缀边界：唯一前缀正则字面量只允许出现一次，且必须位于 route-node.mjs；
+//   ① id 前缀边界：唯一前缀正则字面量只允许出现一次，且必须落在**该常量的定义模块**内（落点由
+//      导出符号反查——模块搬家不必改锚，"唯一实现位于哪个文件名"不再在锚里存第二份事实）；
 //   ② 第二份表达式：引擎代码行不得出现其它含 FIX 词干的正则字面量，也不得出现修复族 id 的
 //      字符串字面量（`.startsWith(...)` 一类内联前缀判定形态）；
 //   ③ 段内边界：段内成员判定（`sectionBlocks.has(`）只允许出现一次——「位于修复段内」这条
@@ -904,8 +1107,10 @@ export function fixFamilyBoundarySites(scriptsDir = SCRIPTS_DIR) {
 export function fixFamilyBoundaryProblems(scriptsDir = SCRIPTS_DIR) {
   const problems = [];
   const sites = fixFamilyBoundarySites(scriptsDir);
-  if (sites.prefixLiterals.length !== 1 || !sites.prefixLiterals[0].startsWith('route-node.mjs:')) {
-    problems.push('修复族 id 前缀边界必须只表达一次且位于 route-node.mjs，实际出现处: '
+  const index = fixFamilyBoundaryIndex(scriptsDir);
+  if (index.problems !== undefined) return index.problems;
+  if (sites.prefixLiterals.length !== 1 || !sites.prefixLiterals[0].startsWith(index.identifierModule + ':')) {
+    problems.push('修复族 id 前缀边界必须只表达一次且落在其定义模块（' + index.identifierModule + '），实际出现处: '
       + JSON.stringify(sites.prefixLiterals));
   }
   if (sites.otherFixRegexes.length !== 0) {
@@ -922,15 +1127,15 @@ export function fixFamilyBoundaryProblems(scriptsDir = SCRIPTS_DIR) {
   }
   // 边界常量的使用面：定义 1 处 + 唯一分类器内 1 次 test = 2（其他消费方一律经分类器）
   const prefixUseTotal = [...sites.prefixUsesByFile.values()].reduce((a, b) => a + b, 0);
-  if (prefixUseTotal !== 2 || sites.prefixUsesByFile.size !== 1 || !sites.prefixUsesByFile.has('route-node.mjs')) {
+  if (prefixUseTotal !== 2 || sites.prefixUsesByFile.size !== 1
+    || !sites.prefixUsesByFile.has(index.identifierModule)) {
     problems.push('修复族 id 边界常量的使用面必须恰为「定义 + 唯一分类器内一次判定」，实际: '
       + JSON.stringify([...sites.prefixUsesByFile.entries()]));
   }
-  const routeText = sites.texts.get('route-node.mjs') ?? '';
   for (const fnName of ['fixTaskMarker', 'collectCrossTaskConflicts']) {
-    const body = functionBodyText(routeText, fnName);
+    const body = functionBodyText(index.text, fnName);
     if (body === null) {
-      problems.push('结构锚前提失效：route-node.mjs 未找到 ' + fnName + ' 的定义');
+      problems.push('结构锚前提失效：' + index.identifierModule + ' 未找到 ' + fnName + ' 的定义');
       continue;
     }
     if (!/fixTaskClassifier\s*\(/.test(body)) {
@@ -1012,31 +1217,16 @@ export function fingerprintChanges(before, after) {
   ];
 }
 
-// 定义处计数：某名字在本脚本同级目录（引擎脚本目录）内的定义次数——单源结构锚用
-// 定义面扫描（默认引擎脚本目录）。root 是可测性接缝：使「同名第二份定义 → 检出 2 处」能在合成
-// 目录上被场景驱动（场景 277 的反向构造），否则该判据只能靠人工实验证明判别力。
-export function engineDefinitionHits(name, root = SCRIPTS_DIR) {
-  const pattern = new RegExp('(?:export\\s+)?(?:async\\s+)?function\\s+' + name + '\\b'
-    + '|(?:export\\s+)?const\\s+' + name + '\\s*=', 'g');
-  const hits = [];
-  for (const file of fs.readdirSync(root).sort()) {
-    if (!file.endsWith('.mjs')) continue;
-    const text = fs.readFileSync(path.join(root, file), 'utf8');
-    const count = (text.match(pattern) ?? []).length;
-    if (count > 0) hits.push({ file, count });
-  }
-  return hits;
-}
-
 // 时间单源**消费面**判据（场景 277 使用；纯函数 + 合成输入可驱动）：每个符号必须同时满足
-// 「具名 import 自 time-utils.mjs」与「真实调用」才算真实消费。旧判据只看 `name + '('` 的子串——
-// 消费脚本里内联一份同名实现即可满足（判据被本地影子实现骗过），故必须查 import 来源。
-export function timeSingleSourceConsumerProblems(text, symbols, file = '') {
+// 「具名 import 自单源模块」与「真实调用」才算真实消费。旧判据只看 `name + '('` 的子串——
+// 消费脚本里内联一份同名实现即可满足（判据被本地影子实现骗过），故必须查 import 来源；
+// 说明符由消费方位置推导（`lib/` 内是 `'../time-utils.mjs'`），不写死单层形态。
+export function timeSingleSourceConsumerProblems(text, symbols, file = '', sourceRel = 'time-utils.mjs', scriptsDir = SCRIPTS_DIR) {
   const problems = [];
   const prefix = file === '' ? '' : file + ' ';
   for (const symbol of symbols) {
-    if (!hasNamedImport(text, './time-utils.mjs', symbol)) {
-      problems.push(prefix + '未从 time-utils.mjs 具名 import ' + symbol
+    if (!engineImportsSymbolFrom({ text, consumerRel: file, symbol, sourceRel, scriptsDir })) {
+      problems.push(prefix + '未从 ' + sourceRel + ' 取用 ' + symbol
         + '（单源纪律：不得在消费脚本内联同名第二份实现）');
     }
     if (!text.includes(symbol + '(')) {

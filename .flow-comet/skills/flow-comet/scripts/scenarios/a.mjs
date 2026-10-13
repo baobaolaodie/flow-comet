@@ -24,6 +24,7 @@ import {
   TASK_P1,
   TASK_P2,
   composeState,
+  engineScriptFiles,
   handoffFor,
   strictSummary,
   summaryContent,
@@ -504,12 +505,11 @@ export const ENTRIES = [
       assertOut(nullPlaceholderWithdraw, 'HANDOFF WITHDRAW: P03');
 
       // ④ 派遣留痕的静态锚（零新增 state 顶层字段）：留痕只允许落在既有嵌套字段
-      //    evidence['subagent-execute'] 下——引擎脚本不得出现顶层留痕键赋值；顶层字段清单
-      //    以状态字段校验器为单一来源（新增顶层字段必须先过校验器，否则本锚即红）。
-      const engineScripts = [
-        'workflow-state.mjs', 'workflow-guard.mjs', 'workflow-handoff.mjs',
-        'route-node.mjs', 'comet-hook-guard.mjs', 'state-schema.mjs',
-      ];
+      //    evidence['subagent-execute'] 下——引擎脚本不得出现顶层留痕键赋值；受检面 = **引擎实现面**
+      //（入口 ∪ `lib/**`，递归，由模块图派生——迁移到 `lib/` 的写盘路径不再掉出受检面）；
+      //    顶层字段清单以状态字段校验器为单一来源（新增顶层字段必须先过校验器，否则本锚即红）。
+      const engineSources = Object.fromEntries(engineScriptFiles()
+        .map((script) => [script, fs.readFileSync(path.join(SCRIPTS_DIR, script), 'utf8')]));
       const traceShapeProblems = ({ scripts, handoff, schema }) => {
         const out = [];
         const topLevelTraceWriteRe = /\bstate\.(handoffRequests|handoffResult|delegationTrace|dispatchTrace|delegations)\b/;
@@ -535,7 +535,6 @@ export const ENTRIES = [
         }
         return out;
       };
-      const engineSources = Object.fromEntries(engineScripts.map((script) => [script, fs.readFileSync(path.join(SCRIPTS_DIR, script), 'utf8')]));
       const handoffSource = engineSources['workflow-handoff.mjs'];
       const schemaSource = engineSources['state-schema.mjs'];
       const traceSources = { scripts: engineSources, handoff: handoffSource, schema: schemaSource };

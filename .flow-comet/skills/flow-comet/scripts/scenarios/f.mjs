@@ -26,6 +26,8 @@ import {
   TASK_VALID_ALL_SERIAL,
   TASK_VALID_PS,
   TASK_VALID_SP,
+  engineDefinitionHits,
+  engineDefinitionModule,
   handoffFor,
   renderMultiWaveTasks,
   runPlanExit,
@@ -1058,11 +1060,17 @@ export const ENTRIES = [
         }
         const stateSchemaSrc = fs.readFileSync(path.join(SCRIPTS_DIR, 'state-schema.mjs'), 'utf8');
         const handoffSrc = fs.readFileSync(path.join(SCRIPTS_DIR, 'workflow-handoff.mjs'), 'utf8');
-        // 出口校验（节点门禁）脚本的另一册：在飞委托判据落在 workflow-guard.mjs（hook 守卫只做写入
-        // 拦截，两者同包不同册）——撤回留痕被判据消费这一条须在**该**源上核对。
-        const workflowGuardSrc = fs.readFileSync(path.join(SCRIPTS_DIR, 'workflow-guard.mjs'), 'utf8');
+        // 在飞委托判据的落点**按导出符号反查**（不写文件名）：判据模块 = 定义 inFlightHandoffRequests
+        // 的引擎模块（hook 守卫只做写入拦截，两者同包不同册）——「撤回的 request 不再计为在飞」这一条
+        // 必须在**该模块**里被消费（锚不按文件名取文本，模块搬家 / 再切分不必改锚）。
+        const inFlightModule = engineDefinitionModule('inFlightHandoffRequests');
+        if (inFlightModule === null) {
+          throw new Error('在飞委托判据的定义面不唯一（应恰一处）: '
+            + JSON.stringify(engineDefinitionHits('inFlightHandoffRequests')));
+        }
+        const inFlightJudgeSrc = inFlightModule.text;
         // 一致性判据（单一实现：真实判据与反向构造探针共用本函数）。
-        const consistencyProblems = ({ guard, bridge, schema, handoff, workflowGuard, books }) => {
+        const consistencyProblems = ({ guard, bridge, schema, handoff, inFlightJudge, books }) => {
           const out = [];
           // ① 身份判据的载荷键：文本声称判据 = agent_id；引擎身份判据段必须读取该键。
           const regionStart = guard.indexOf('function payloadAgentIdentity');
@@ -1108,7 +1116,7 @@ export const ENTRIES = [
           if (!schema.includes('withdrawnAt') || !schema.includes('withdrawnBy')) {
             out.push('撤回留痕字段名未落在单一判据实现（与文本声称的 withdrawnAt / withdrawnBy 不一致）');
           }
-          if (!/handoffRequestWithdrawn\(requests\[taskId\]\)/.test(workflowGuard)) {
+          if (!/handoffRequestWithdrawn\(requests\[taskId\]\)/.test(inFlightJudge)) {
             out.push('在飞委托判据未消费撤回留痕判据（撤回的 request 仍会被计为在飞）');
           }
           // ④ 最小保护集的两个目标：实现侧取值来源（状态文件路径常量 + 协议解析结果）与文本字面同值。
@@ -1149,7 +1157,7 @@ export const ENTRIES = [
           }
           return out;
         };
-        const consistencySources = { guard: guardSrc, bridge: bridgeSrc, schema: stateSchemaSrc, handoff: handoffSrc, workflowGuard: workflowGuardSrc, books: bookTexts };
+        const consistencySources = { guard: guardSrc, bridge: bridgeSrc, schema: stateSchemaSrc, handoff: handoffSrc, inFlightJudge: inFlightJudgeSrc, books: bookTexts };
         problems.push(...consistencyProblems(consistencySources));
         // 反向构造（同一判据驱动）：逐项把实现侧常量改成与文本不同的值 ⇒ 必报（文本说 A、实现说 B 即红）。
         const consistencyProbes = [
@@ -1166,7 +1174,7 @@ export const ENTRIES = [
           // 由 SKIP 行显式声明；不构造也不得让整块判据崩掉（缺席面不得变成套件错误）。
           ...(bridgeSrc === null ? [] : [['桥接注入标记值漂移', { bridge: bridgeSrc.replaceAll("FLOW_COMET_AGENT_DEPTH_SOURCE: 'dsh-bridge'", "FLOW_COMET_AGENT_DEPTH_SOURCE: 'other'") }, '桥接未注入桥接通道标记']]),
           ['撤回留痕字段改名', { schema: stateSchemaSrc.replaceAll('withdrawnBy', 'cancelledBy') }, '撤回留痕字段名未落在单一判据实现'],
-          ['在飞判据不消费撤回留痕', { workflowGuard: workflowGuardSrc.replace('handoffRequestWithdrawn(requests[taskId])', 'false') }, '在飞委托判据未消费撤回留痕判据'],
+          ['在飞判据不消费撤回留痕', { inFlightJudge: inFlightJudgeSrc.replace('handoffRequestWithdrawn(requests[taskId])', 'false') }, '在飞委托判据未消费撤回留痕判据'],
           ['文本侧桥接标记名缺失', { books: new Map([...bookTexts].map(([rel, text]) => [rel, text.split('FLOW_COMET_AGENT_DEPTH_SOURCE').join('（反向构造：抽掉）')])) }, '桥接通道标记名'],
           ['状态文件路径常量改名', { schema: stateSchemaSrc.replace("RUNTIME_STATE_FILE_NAME = 'flow-comet-state.json'", "RUNTIME_STATE_FILE_NAME = 'state.json'") }, '状态文件路径常量'],
           ['留痕落点改顶层', { handoff: handoffSrc.replaceAll("state.evidence['subagent-execute'].handoffRequests", 'state.handoffRequests') }, '留痕未落在嵌套证据'],
@@ -1185,22 +1193,21 @@ export const ENTRIES = [
     },
   },
 
-  // 184e: 文本 ↔ 实现一致族——7 字段集合锚（枚举自 `workflow-guard.mjs` 的 `TASK7_REQUIRED`
-  // 常量派生后逐处对账）+ 公开面口径机检（公开机制册判级一致 / 变更日志条目带编号 PR 链接 /
-  // 已关闭缺口与建树适用面成文；公开面缺席时输出可见 SKIP）。
+  // 184e: 文本 ↔ 实现一致族——7 字段集合锚（枚举自 `TASK7_REQUIRED` 常量派生后逐处对账；常量
+  // 所在模块与文案派生模块**按符号反查**、不写文件名）+ 公开面口径机检（公开机制册判级一致 /
+  // 变更日志条目带编号 PR 链接 / 已关闭缺口与建树适用面成文；公开面缺席时输出可见 SKIP）。
   {
     name: '184e 技能文本锁：7 字段集合文本↔实现一致 + 公开面口径机检',
     run: () => {
       const problems = [];
       // —— 7 字段集合的文本 ↔ 实现一致锚（文本不得说谎的**根治**面：任一处枚举分叉即红）——
-      // 判据与反向构造探针见模块级 `task7SetAnchorProblems`（单一实现）：唯一权威 = `workflow-guard.mjs`
-      // 的 `TASK7_REQUIRED` 常量（plan 出口判据的集合来源），技能树侧枚举**从该常量派生**后逐处对账——
-      // 锚里不写第二份集合（第二份同口径表达会在判据演进时分叉）；覆盖双语形态与斜杠
-      // 枚举形态，同批固化「文案落后于判据」静默面（两处 BLOCKED 文案从判据常量派生）。反向构造：
-      // 任一处枚举改字段名（depends_on → id）/ 抽掉整处枚举 / 常量侧改名 / 文案回写字面集合 ⇒ 必红。
+      // 判据与反向构造探针见模块级 `task7SetAnchorProblems`（单一实现）：唯一权威 = `TASK7_REQUIRED`
+      // 常量（plan 出口判据的集合来源），技能树侧枚举**从该常量派生**后逐处对账——锚里不写第二份
+      // 集合（第二份同口径表达会在判据演进时分叉）；覆盖双语形态与斜杠枚举形态，同批固化「文案
+      // 落后于判据」静默面（两处 BLOCKED 文案从判据常量派生）。两个实现侧落点（权威常量模块 /
+      // 文案派生模块）由导出符号在引擎面内反查——模块再切分不必改锚。反向构造：任一处枚举改字段名
+      //（depends_on → id）/ 抽掉整处枚举 / 常量侧改名 / 文案回写字面集合 ⇒ 必红。
       problems.push(...task7SetAnchorProblems({
-        guardSrc: fs.readFileSync(path.join(SCRIPTS_DIR, 'workflow-guard.mjs'), 'utf8'),
-        stateSrc: fs.readFileSync(path.join(SCRIPTS_DIR, 'workflow-state.mjs'), 'utf8'),
         docs: new Map(skillTreeDocFiles().map(([rel, file]) => [rel, fs.readFileSync(file, 'utf8')])),
       }));
       // —— 公开面口径机检（文档不说假话）：公开机制册的判级须与技能册一致、公开变更日志的新增

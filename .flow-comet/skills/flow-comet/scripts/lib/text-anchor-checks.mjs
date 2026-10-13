@@ -20,6 +20,13 @@ import {
   HOOK,
   REPO_ROOT,
   SCRIPTS_DIR,
+  engineCodeText,
+  engineConsumersOf,
+  engineDefinitionModule,
+  engineDefinitionPattern,
+  engineImportsSymbolFrom,
+  engineScriptFiles,
+  engineScriptTexts,
 } from './test-fixtures.mjs';
 import {
   requireRouteNodeExport,
@@ -1546,26 +1553,47 @@ export function task7MessageDerivationProblems(fieldSet, sources) {
   return out;
 }
 
-// 7 字段集合锚的聚合判据（真实判据 + 反向构造探针；场景 184 调用，返回问题描述数组）。
-export function task7SetAnchorProblems({ guardSrc, stateSrc, docs }) {
+// 7 字段集合锚的聚合判据（真实判据 + 反向构造探针；场景 184e 调用，返回问题描述数组）。
+// **落点反查**（判据形态：不写文件名）：权威常量所在模块与文案派生所在模块都由符号在引擎面内
+// 反查——模块再切分 / 再搬家不必改锚（"唯一权威在 workflow-guard.mjs 里" 这类布局事实不再在
+// 锚里存第二份）；两者任一不在场即显式报前提失效。
+export function task7SetAnchorProblems({ docs, scriptsDir = SCRIPTS_DIR }) {
   const out = [];
-  const fieldSet = task7RequiredSet(guardSrc);
-  if (fieldSet === null || fieldSet.length !== 7) {
-    out.push('workflow-guard.mjs 的 ' + TASK7_AUTHORITY_CONSTANT
-      + ' 常量缺席或元素数 ≠ 7（7 字段集合的唯一权威不在场，文本侧无从对账）');
+  const authority = engineDefinitionModule(TASK7_AUTHORITY_CONSTANT, scriptsDir);
+  if (authority === null) {
+    out.push(TASK7_AUTHORITY_CONSTANT + ' 常量缺席或其定义面不唯一（7 字段集合的唯一权威不在场，文本侧无从对账）: '
+      + JSON.stringify(engineDefinitionHits(TASK7_AUTHORITY_CONSTANT, scriptsDir)));
     return out;
   }
-  const sources = { 'workflow-guard.mjs': guardSrc, 'workflow-state.mjs': stateSrc };
+  const fieldSet = task7RequiredSet(authority.text);
+  if (fieldSet === null || fieldSet.length !== 7) {
+    out.push(authority.file + ' 的 ' + TASK7_AUTHORITY_CONSTANT
+      + ' 常量元素数 ≠ 7（7 字段集合的唯一权威不在场，文本侧无从对账）');
+    return out;
+  }
+  const derivationRels = engineConsumersOf('replanTask7Required', scriptsDir);
+  if (derivationRels.length !== 1) {
+    out.push('7 字段文案的派生落点不唯一（全引擎应恰一个模块持有 replanTask7Required）: '
+      + JSON.stringify(derivationRels));
+    return out;
+  }
+  const sources = {
+    [authority.file]: authority.text,
+    [derivationRels[0]]: fs.readFileSync(path.join(scriptsDir, derivationRels[0]), 'utf8'),
+  };
   out.push(...task7EnumerationProblems(fieldSet, docs));
   out.push(...task7MessageDerivationProblems(fieldSet, sources));
-  out.push(...task7ReverseConstructionProblems(fieldSet, docs, sources));
+  out.push(...task7ReverseConstructionProblems(fieldSet, docs, sources, {
+    authorityRel: authority.file,
+    derivationRel: derivationRels[0],
+  }));
   return out;
 }
 
 // 反向构造（判别句式 + 反向构造；与真实判据同一实现驱动）：逐项把锚的输入改坏 ⇒ 必红；
 // 另含**判别力方向**探针——合法新增站点必须**零问题**（防「全局计数地板」式自锁：以总量取红的探针会让
 // 「新增一处」与「丢失一处」对冲，且把报错方向指向探针而非真实原因）。
-export function task7ReverseConstructionProblems(fieldSet, docs, sources) {
+export function task7ReverseConstructionProblems(fieldSet, docs, sources, locations) {
   const out = [];
   const replaceRunLine = (targetDocs, run, mutate) => new Map(targetDocs).set(run.rel,
     (targetDocs.get(run.rel) ?? '').split(/\r?\n/)
@@ -1604,14 +1632,14 @@ export function task7ReverseConstructionProblems(fieldSet, docs, sources) {
     ['实现侧常量把 depends_on 改成 dependsOn',
       () => task7EnumerationProblems(fieldSet.map((field) => (field === 'depends_on' ? 'dependsOn' : field)), docs),
       '与实现集合不一致'],
-    // 文案派生面（⑧）：构造方式回退 / 派生被抽掉 ⇒ 必红
+    // 文案派生面（⑧）：构造方式回退 / 派生被抽掉 ⇒ 必红（探针改坏的是**反查所得**的两个落点）
     ['文案回写字面集合',
       () => task7MessageDerivationProblems(fieldSet, { ...sources,
-        'workflow-guard.mjs': sources['workflow-guard.mjs'].replace(
+        [locations.authorityRel]: sources[locations.authorityRel].replace(
           TASK7_AUTHORITY_CONSTANT + ".join('/')", "'" + fieldSet.join('/') + "'") }), '又写了一遍字面集合'],
     ['文案抽掉派生',
       () => task7MessageDerivationProblems(fieldSet, { ...sources,
-        'workflow-state.mjs': sources['workflow-state.mjs'].replace("replanTask7Required.join('/')", "'7 字段'") }),
+        [locations.derivationRel]: sources[locations.derivationRel].replace("replanTask7Required.join('/')", "'7 字段'") }),
       '未从判据常量派生'],
   ];
   // 探针判定只看**相对当前文本的新增问题**（`ambient` 差分）：工作树本身已红时，探针不得把
@@ -1802,18 +1830,14 @@ export function upstreamArtifactPaths(text) {
 }
 
 // 原子写惯用法指纹（两条件同现于一个文件）：`+ '.tmp'` 拼接 + `fs.rename(` 落位——即「同目录固定
-// 临时名 + rename」的写法。**收敛面 = 任务写边界内的写盘脚本**（状态/侧命令的state 与文档落盘），
-// 由调用方显式传入清单：`workflow-guard.mjs` 的受保护写入是**独立的安全硬化通道**（临时名含 pid +
-// 随机段、写后 fsync 与快照复核、保护目录校验），不属于本惯用法，且不在本任务写边界内——它的
-// 排除在场景里另有**边界锚**看守（形态一旦退回本惯用法即变红），不是静默跳过。
-// root 是可测性接缝（默认引擎脚本目录）：使「第二份实现 → 检出 2 处」能在合成目录上被场景驱动，
+// 临时名 + rename」的写法。**受检面 = 引擎实现面（入口 ∪ `lib/`）**，唯一实现只许落在原子写的
+// 单一来源模块；受保护写入是**独立的安全硬化通道**（临时名含 pid + 随机段），由 uniqueTempNameHits
+// 的**形态锚**认出并作为已登记例外（形态一旦退回本惯用法即红），不是静默排除。
+// root / files 是可测性接缝：使「第二份实现 → 检出 2 处」能在合成目录上被场景驱动，
 // 否则该判据只能靠人工实验证明判别力、回归时可能被改成恒真空过（场景 291 反向构造）。
-// 套件自身不是引擎写盘面（夹具文本会携带惯用法样例），排除在扫描外。
 export const ATOMIC_TEMP_SUFFIX_RE = /\+\s*'\.tmp'/g;
-export const ENGINE_IDIOM_SCAN_EXCLUDE = new Set(['guard-self-test.mjs', 'system-test.mjs']);
 export function atomicWriteIdiomHits(root = SCRIPTS_DIR, files = null) {
-  const candidates = files ?? fs.readdirSync(root).sort()
-    .filter((file) => file.endsWith('.mjs') && !ENGINE_IDIOM_SCAN_EXCLUDE.has(file));
+  const candidates = files ?? engineScriptFiles(root);
   const hits = [];
   for (const file of candidates) {
     const text = fs.readFileSync(path.join(root, file), 'utf8');
@@ -1822,25 +1846,45 @@ export function atomicWriteIdiomHits(root = SCRIPTS_DIR, files = null) {
   }
   return hits;
 }
-// 原子写收敛面（本任务写边界内的写盘脚本 + 单源模块）：全引擎只应有 state-schema.mjs 一处实现。
-export const ATOMIC_WRITE_CONVERGENCE_FACE = [
-  'state-schema.mjs', 'workflow-state.mjs', 'workflow-handoff.mjs', 'evolve.mjs', 'context-scan.mjs',
-];
+
+// 「唯一临时名」硬化通道的**形态锚**：临时名含 pid + 随机段（固定同目录名会被并发写者互相覆盖，
+// 故受保护写入必须唯一化）。它按形态定位、不写文件名——通道退回「固定 `.tmp`」惯用法时检出 0 处
+// 即红（强制重评它是否落回原子写收敛面）。原子写受检面据此把它认成**已登记例外**而非漏网。
+const UNIQUE_TEMP_PID_RE = /String\(process\.pid\)/;
+const UNIQUE_TEMP_RANDOM_RE = /Math\.random\(\)\.toString\(16\)/;
+export function uniqueTempNameHits(root = SCRIPTS_DIR, files = null) {
+  const candidates = files ?? engineScriptFiles(root);
+  const hits = [];
+  for (const file of candidates) {
+    const text = fs.readFileSync(path.join(root, file), 'utf8');
+    if (UNIQUE_TEMP_PID_RE.test(text) && UNIQUE_TEMP_RANDOM_RE.test(text)) hits.push({ file });
+  }
+  return hits;
+}
 
 // 日期前缀判据的**表达式形态**扫描（与原子写惯用法同型）：报告 / 工件名的「日期前缀」判定只许由
 // time-utils.mjs 表达一处——本判据认的形态是「日期三分量以**字面连字符**相接」的前缀写法
 // （`/^(\d{4}-\d{2}-\d{2})/` 一类），在其它脚本内联第二份即为单源违规（注释互指同源不作数，
 // 判据只认形态）。时刻形态 `\d{4})-(\d{2})-(\d{2})T…`（`TIMESTAMP_SHAPE`）是另一个判据面，同样
-// 落在 time-utils 一处，不在本形态内。**收敛面 = 本任务写边界内的日期前缀消费方 + 单源模块**：
-// `workflow-guard.mjs` 的两处日期匹配是**文档内容**里的日期条目匹配（行锚 + `matchAll(.../gm)`），
-// 不是文件名前缀判定，且不在本任务写边界内——该排除在场景里另有**边界锚**看守（形态一旦不再是
-// 内容条目匹配即变红），不是静默跳过。root 是可测性接缝（默认引擎脚本目录）：使「第二份实现 →
-// 检出 2 处」能在合成目录上被场景驱动，否则该判据只能靠人工实验证明判别力、回归时可能被改成
-// 恒真空过（场景 295 反向构造）。
+// 落在 time-utils 一处，不在本形态内。**受检面 = 引擎实现面**：归档日志的日期条目匹配（行锚 +
+// `matchAll(.../gm)`）是**文档内容**里的日期匹配、不是文件名前缀判定，由 dateContentMatchHits 的
+// **形态锚**认出并作为已登记例外（形态一旦不再是内容条目匹配即红），不是静默排除。
+// root / files 是可测性接缝：使「第二份实现 → 检出 2 处」能在合成目录上被场景驱动，
+// 否则该判据只能靠人工实验证明判别力、回归时可能被改成恒真空过（场景 295 反向构造）。
 export const DATE_PREFIX_LITERAL_RE = /\\d\{4\}-\\d\{2\}-\\d\{2\}/g;
-export const DATE_PREFIX_CONVERGENCE_FACE = ['time-utils.mjs', 'health.mjs', 'context-scan.mjs'];
+// 归档日志日期条目的形态锚（`matchAll(/^…\d{4}-\d{2}-\d{2}…/gm)`）：按形态定位、不写文件名。
+const DATE_CONTENT_MATCH_RE = /matchAll\(\/\^[^\n]*\\d\{4\}-\\d\{2\}-\\d\{2\}[^\n]*\/gm\)/g;
+export function dateContentMatchHits(root = SCRIPTS_DIR, files = null) {
+  const candidates = files ?? engineScriptFiles(root);
+  const hits = [];
+  for (const file of candidates) {
+    const count = (fs.readFileSync(path.join(root, file), 'utf8').match(DATE_CONTENT_MATCH_RE) ?? []).length;
+    if (count > 0) hits.push({ file, count });
+  }
+  return hits;
+}
 export function datePrefixRegexpHits(root = SCRIPTS_DIR, files = null) {
-  const candidates = files ?? fs.readdirSync(root).sort().filter((file) => file.endsWith('.mjs'));
+  const candidates = files ?? engineScriptFiles(root);
   const hits = [];
   for (const file of candidates) {
     const text = fs.readFileSync(path.join(root, file), 'utf8');
@@ -1858,7 +1902,7 @@ export function datePrefixRegexpHits(root = SCRIPTS_DIR, files = null) {
 export const BACKUP_NAME_LITERAL = "'.bak-'";
 export const BACKUP_IMPL_FACE = ['state-schema.mjs', 'evolve.mjs', 'context-scan.mjs'];
 export function inlineBackupHits(root = SCRIPTS_DIR, files = null) {
-  const candidates = files ?? fs.readdirSync(root).sort().filter((file) => file.endsWith('.mjs'));
+  const candidates = files ?? engineScriptFiles(root);
   const hits = [];
   for (const file of candidates) {
     const text = fs.readFileSync(path.join(root, file), 'utf8');
@@ -1878,11 +1922,23 @@ export function inlineBackupHits(root = SCRIPTS_DIR, files = null) {
 // root / files 是可测性接缝：合成目录可驱动「新增即红」（场景 298）。
 export const BARE_ISO_TIMESTAMP_RE = /new Date\(\)\.toISOString\(\)/g;
 export const BARE_ISO_SIDE_COMMANDS = ['health.mjs', 'evolve.mjs', 'context-scan.mjs'];
+// 条目按**落点**登记（迁移后的实现在 `lib/`：state 机器字段随拆分分落三个命令模块；白名单面
+// 与受检面同口径——递归的引擎面，数据层夹具不登记）。
 export const BARE_ISO_ENGINE_WHITELIST = [
   {
-    file: 'workflow-state.mjs',
-    count: 7,
-    reason: 'state 的机器字段时间戳（createdAt / 事件 at / 授权与覆盖时刻）：Z 形已随既有 state 与事件流持久化，迁移须同批处理历史值的解析与比较，留专门窗口（登记 KNOWN-ISSUES）；扫描时刻（last_intel_scan）已迁出本条——写入走 time-utils 的 nowTimestamp（场景 308 的形态锚 + 277 的单源消费面看守）',
+    file: 'lib/state-commands-flow.mjs',
+    count: 3,
+    reason: 'state 的机器字段时间戳（init 的 createdAt / record 的记录时刻 / 强制推进事件的 at）：Z 形已随既有 state 与事件流持久化，迁移须同批处理历史值的解析与比较，留专门窗口（登记 KNOWN-ISSUES）；扫描时刻（last_intel_scan）已迁出本条——写入走 time-utils 的 nowTimestamp（场景 308 的形态锚 + 277 的单源消费面看守）',
+  },
+  {
+    file: 'lib/state-commands-admin.mjs',
+    count: 2,
+    reason: 'state 的机器字段时间戳（execution-mode 的 directOverrideAt 授权留痕 / skill-load 标记的 at）：与 state 其余时刻同形、同批迁移；标记 at 的**读取**已走 time-utils 的比较面（场景 277 的单源消费面看守）',
+  },
+  {
+    file: 'lib/state-commands-recovery.mjs',
+    count: 2,
+    reason: '受控重入 / 重校授权的机器时刻（authorizedAt）：随 state 事件流时间形态一并迁移；轮次推导已由综合判定派生，本条只剩落盘时刻',
   },
   {
     file: 'workflow-handoff.mjs',
@@ -1893,11 +1949,6 @@ export const BARE_ISO_ENGINE_WHITELIST = [
     file: 'workflow-guard.mjs',
     count: 1,
     reason: 'exit-applied 审计事件的机器时刻：非人可见报告面，随事件流时间形态一并迁移',
-  },
-  {
-    file: 'system-test.mjs',
-    count: 1,
-    reason: 'L2 套件夹具构造的 round 覆盖时刻（测试载体，非人可见面）：随 state 时间形态迁移批次一并改',
   },
 ];
 // intel-scan 元数据「段名 / 字段名」字面量的跨文件一致判据（纯函数 + 合成输入可驱动）：双落点判据在
@@ -1939,7 +1990,7 @@ export function stripLineComments(text) {
   }).join('\n');
 }
 export function bareIsoTimestampHits(root = SCRIPTS_DIR, files = null) {
-  const candidates = files ?? fs.readdirSync(root).sort().filter((file) => file.endsWith('.mjs'));
+  const candidates = files ?? engineScriptFiles(root);
   const hits = [];
   for (const file of candidates) {
     const text = stripLineComments(fs.readFileSync(path.join(root, file), 'utf8'));
@@ -1966,6 +2017,48 @@ export function bareIsoWhitelistProblems(hits, whitelist) {
   return problems;
 }
 
+// 分发面源码的**注释层零代号**判据（纯函数 + 合成输入可驱动）：受检面由调用方给定的
+// { rel → 文本 } 派生（生产侧 = 技能树内全部脚本，递归），注释行判定与词表判据同口径
+//（行首 `//` / `*` / `/*` 才算注释行）。旧形态只扫套件入口单文件——拆分后注释量最大的新模块
+// 全在面外，判据仍在而判别力消失；故受检面与反向构造探针都由本函数驱动（单一实现）。
+export function commentCodeProblems(texts) {
+  const out = [];
+  for (const [rel, text] of texts) {
+    const lines = String(text).split(/\r?\n/);
+    for (let i = 0; i < lines.length; i += 1) {
+      if (!/^\s*(\/\/|\*|\/\*)/.test(lines[i])) continue;
+      const hit = lines[i].match(PUBLIC_CODE_RE);
+      if (hit) out.push(rel + ':' + (i + 1) + ': ' + hit[0]);
+    }
+  }
+  return out;
+}
+
+// 单一来源静态锁（纯函数 + 合成输入可驱动）：某符号的实现只许落在**单源模块**一处，
+// 消费面（入口 ∪ `lib/**`）一律具名取用、不得自带第二份定义。判据形态两处都不写文件名：
+// 单源模块由调用方**反查**（engineDefinitionModule）传入，消费方由 `texts` 的真实引用派生
+// （所以模块再切分 / 再搬家不必改锚，新增消费方自动进入对账）。
+export function singleSourceImportProblems({ symbol, sourceRel, texts }) {
+  const out = [];
+  const definitionRe = engineDefinitionPattern(symbol);
+  const mentionRe = new RegExp('\\b' + symbol + '\\b');
+  const definers = [...texts.entries()].filter(([, text]) => definitionRe.test(text)).map(([rel]) => rel);
+  if (definers.length !== 1 || definers[0] !== sourceRel) {
+    out.push('单一来源被破坏：' + symbol + ' 的实现面应为 [' + sourceRel + ']，实际 ' + JSON.stringify(definers));
+  }
+  for (const [rel, text] of texts) {
+    if (rel === sourceRel) continue;
+    if (!mentionRe.test(engineCodeText(text))) continue;
+    if (definitionRe.test(text)) {
+      out.push(rel + ' 自带第二份 ' + symbol + ' 定义（应取用单一来源）');
+      continue;
+    }
+    // 取用面走**唯一实现**（import 自单源 / import 自再导出枢纽 / `export … from` 单源）
+    const taken = engineImportsSymbolFrom({ text, consumerRel: rel, symbol, sourceRel, texts });
+    if (!taken) out.push(rel + ' 未从 ' + sourceRel + ' 取用 ' + symbol + '（单一来源 fail-closed）');
+  }
+  return out;
+}
 // health 报告夹具：报告名的日期前缀与读数快照都是**构造出来的输入面**——快照哨兵值只在被采作
 // 基线时才出现在新报告里（哨兵 → `999999 → …`），据此可判「当前基线到底是哪一份」，不必解析
 // 报告结构。哨兵键取全小写键（快照行的键形态判据只认小写字母与 `.` / `_`），与既有 `context.exists`

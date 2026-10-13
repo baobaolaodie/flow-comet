@@ -24,7 +24,10 @@ import {
   SIDE_EVOLVE,
   SIDE_HEALTH,
   contextInitModule,
+  copyEngineTree,
   engineDefinitionHits,
+  engineReachableFrom,
+  engineScriptFiles,
   hasNamedImport,
   makeTmp,
   requireModuleExport,
@@ -43,7 +46,6 @@ import {
   BACKUP_IMPL_FACE,
   BARE_ISO_ENGINE_WHITELIST,
   BARE_ISO_SIDE_COMMANDS,
-  DATE_PREFIX_CONVERGENCE_FACE,
   INTEL_FIELD_SUFFIX,
   INTEL_FIELD_VALUE,
   OVERRIDE_FALLBACK_RE,
@@ -52,6 +54,7 @@ import {
   bareIsoWhitelistProblems,
   contextFixtureText,
   crlfLineViolations,
+  dateContentMatchHits,
   datePrefixRegexpHits,
   deterministicReproProblems,
   evolveReportBulletProblems,
@@ -59,6 +62,7 @@ import {
   healthReportWithSnapshot,
   inlineBackupHits,
   intelFieldToken,
+  intelMetadataNameDeclarations,
   intelMetadataNameProblems,
   maintainerFacePresent,
   overrideDeclarationBlock,
@@ -107,16 +111,25 @@ export const ENTRIES = [
         'health.mjs 未从 time-utils.mjs 具名 import archiveDateFromName（日期判据第二份表达）');
       assertTrue(healthText.includes('archiveDateFromName('),
         'health.mjs 未真实消费 archiveDateFromName（单一权威应被调用）');
-      const faceHits = datePrefixRegexpHits(SCRIPTS_DIR, DATE_PREFIX_CONVERGENCE_FACE);
-      assertEqual(faceHits.length, 1, '日期前缀形态实现面（收敛面内应恰 1 处）实际 ' + JSON.stringify(faceHits));
-      assertEqual(faceHits[0].file, 'time-utils.mjs', '日期前缀形态落点文件');
+      const faceHits = datePrefixRegexpHits(SCRIPTS_DIR);
+      const contentMatchHits = dateContentMatchHits(SCRIPTS_DIR);
+      assertEqual(contentMatchHits.length, 1,
+        '归档日志日期条目匹配（文档内容面）应恰一处，实际 ' + JSON.stringify(contentMatchHits));
+      assertEqual(contentMatchHits[0].count, 2, '归档日志日期条目匹配处数（行锚 + 内容条目两处形态）');
+      const allowedDateSites = new Set(['time-utils.mjs', contentMatchHits[0].file]);
+      const unexpected = faceHits.filter((hit) => !allowedDateSites.has(hit.file));
+      assertEqual(unexpected.length, 0,
+        '日期前缀形态只许由 time-utils.mjs 表达（内容条目匹配通道除外），出现第二份实现: ' + JSON.stringify(unexpected));
+      assertEqual(faceHits.find((hit) => hit.file === 'time-utils.mjs')?.count, 1,
+        'time-utils.mjs 内日期前缀形态处数（应恰 1 处单源表达）实际 ' + JSON.stringify(faceHits));
 
-      // ③b 边界锚（可见，不静默排除）：guard 的两处日期匹配是文档**内容**里的日期条目匹配
-      //（行锚 + `matchAll(.../gm)`），不是文件名前缀判定，且不在本任务写边界内——形态一旦
-      // 改变即变红，强制重评收敛面。
-      const guardText = fs.readFileSync(path.join(SCRIPTS_DIR, 'workflow-guard.mjs'), 'utf8');
-      assertEqual((guardText.match(/matchAll\(\/\^[^\n]*\\d\{4\}-\\d\{2\}-\\d\{2\}[^\n]*\/gm\)/g) ?? []).length, 2,
-        'workflow-guard 的日期匹配不再是「行锚 + 内容条目」两处形态——须重评日期前缀判据的收敛面');
+      // ③b 边界锚（可见，不静默排除）：归档日志的两处日期匹配是文档**内容**里的日期条目匹配
+      //（行锚 + `matchAll(.../gm)`），不是文件名前缀判定——上一步的允许集正是由**形态锚**认出的
+      // 这一处通道（不写文件名）；它还必须在 **guard 的判定链**内（例外不许漂到无关模块），
+      // 形态一旦改变即变红（检出 0 处），强制重评日期前缀判据的收敛面。
+      const guardClosure = engineReachableFrom(['workflow-guard.mjs']);
+      assertTrue(guardClosure.has(contentMatchHits[0].file),
+        '归档日志日期条目匹配通道必须落在 guard 的判定链内（例外不许漂到无关模块）: ' + contentMatchHits[0].file);
 
       // ④ 反向构造：合成引擎目录（单份前缀正则 → 检出 1；再放第二份 → 检出 2）
       const synthetic = makeTmp();
@@ -243,22 +256,23 @@ export const ENTRIES = [
   },
 
   // 298: 禁裸拼接静态锚（DESIGN R4 的落地）——时间形态 / 格式化的唯一权威是 time-utils.mjs：
-  // 三条侧命令零容忍（人可见报告 / CLI 摘要行 / 备份名）；其余引擎脚本走**显式白名单 + 逐条理由**
-  // （既有 13 处都是已持久化的机器字段，迁移留专门窗口；新增写入路径一律走 time-utils，不得把
-  // 白名单当增量口——撤回留痕 withdrawnAt 即按此落 nowTimestamp）。判别力两条：① 白名单判定是纯函数，
-  // 合成输入可驱动「条数漂移（增 / 减）」与「未登记文件」三态必报；② 合成引擎目录注入第二处
-  // 裸拼接 → 检出必增（证明真实面判据不恒真空过）。
+  // 三条侧命令零容忍（人可见报告 / CLI 摘要行 / 备份名）；其余**引擎面**（入口 ∪ `lib/**`，递归）
+  // 走**显式白名单 + 逐条理由**（既有落点都是已持久化的机器字段，迁移留专门窗口；新增写入路径
+  // 一律走 time-utils，不得把白名单当增量口——撤回留痕 withdrawnAt 即按此落 nowTimestamp）。
+  // 判别力两条：① 白名单判定是纯函数，合成输入可驱动「条数漂移（增 / 减）」与「未登记文件」三态
+  // 必报；② 反向构造：第二处裸拼接注入 `lib/` ⇒ 真实面检出必增（证明递归面不恒真空过）。
+  // 注：白名单条目逐文件**精确对账**（增 / 减各自独立方向），不另设全局总数地板——总量型判据会让
+  //「合法新增一处」与「丢失一处」对冲，并把报错方向指向探针（本仓既有教训）。
   {
-    name: '298 禁裸拼接静态锚：三侧命令零容忍 + 引擎 13 处显式白名单（逐条理由）+ 合成反向构造',
+    name: '298 禁裸拼接静态锚：三侧命令零容忍 + 引擎面显式白名单（逐条理由）+ 反向构造',
     run: () => {
       // ① 三条侧命令零容忍（人可见面的时间形态只许走 time-utils）
       const sideHits = bareIsoTimestampHits(SCRIPTS_DIR, BARE_ISO_SIDE_COMMANDS);
       assertEqual(sideHits.length, 0,
         '侧命令出现裸时间拼接（人可见面须走 time-utils 的 nowTimestamp / formatLocalTimestamp）: ' + JSON.stringify(sideHits));
 
-      // ② 其余引擎脚本 = 精确白名单：条数逐文件相等 + 每条例外带非空理由
+      // ② 其余引擎面 = 精确白名单：条数逐文件相等 + 每条例外带非空理由
       const engineHits = bareIsoTimestampHits(SCRIPTS_DIR).filter((hit) => !BARE_ISO_SIDE_COMMANDS.includes(hit.file));
-      assertEqual(engineHits.reduce((sum, hit) => sum + hit.count, 0), 13, '引擎既有裸拼接落点总数（白名单代数）');
       const problems = bareIsoWhitelistProblems(engineHits, BARE_ISO_ENGINE_WHITELIST);
       assertEqual(problems.length, 0, '白名单漂移: ' + problems.join(' | '));
       for (const entry of BARE_ISO_ENGINE_WHITELIST) {
@@ -267,19 +281,20 @@ export const ENTRIES = [
       }
 
       // ③ 白名单判定的判别力（纯函数 · 合成输入）：等价集合不报；三类漂移各自必报
-      //    （合成等价集合的条数取真实白名单首条的当前值——它必须与常量同值，否则第 1 条断言即红）
-      const equivalent = [{ file: 'a.mjs', count: 7 }, { file: 'b.mjs', count: 4 }, { file: 'c.mjs', count: 1 }, { file: 'd.mjs', count: 1 }];
+      //    （合成等价集合由**白名单自身**的条数派生——不手抄数字，也不会随条目增删失配）
+      const equivalent = BARE_ISO_ENGINE_WHITELIST.map((entry, index) => ({ file: 'probe-' + index + '.mjs', count: entry.count }));
       const whitelist = BARE_ISO_ENGINE_WHITELIST.map((entry, index) => ({ ...entry, file: equivalent[index].file }));
+      const firstCount = equivalent[0].count;
       assertEqual(bareIsoWhitelistProblems(equivalent, whitelist).length, 0, '等价集合不应报白名单漂移');
       const newcomer = bareIsoWhitelistProblems([...equivalent, { file: 'newcomer.mjs', count: 1 }], whitelist);
       assertTrue(newcomer.some((problem) => problem.includes('newcomer.mjs') && problem.includes('未登记白名单')),
         '未登记文件的裸拼接未被判定: ' + JSON.stringify(newcomer));
       const grown = bareIsoWhitelistProblems(
         equivalent.map((hit, index) => (index === 0 ? { ...hit, count: hit.count + 1 } : hit)), whitelist);
-      assertTrue(grown.some((problem) => problem.includes('白名单 7 处 / 实际 8 处')),
+      assertTrue(grown.some((problem) => problem.includes('白名单 ' + firstCount + ' 处 / 实际 ' + (firstCount + 1) + ' 处')),
         '白名单条数增长未被判定: ' + JSON.stringify(grown));
       const shrunk = bareIsoWhitelistProblems(equivalent.slice(1), whitelist);
-      assertTrue(shrunk.some((problem) => problem.includes('白名单 7 处 / 实际 0 处')),
+      assertTrue(shrunk.some((problem) => problem.includes('白名单 ' + firstCount + ' 处 / 实际 0 处')),
         '已迁移落点未同步收窄白名单未被判定: ' + JSON.stringify(shrunk));
 
       // ④ 合成引擎目录反向构造：单处 → 检出 1；再注入一处 → 检出 2（判据不恒真空过）。
@@ -296,6 +311,22 @@ export const ENTRIES = [
         assertEqual(bareIsoTimestampHits(synthetic).length, 2, '行注释中的引用不应计入实现面');
       } finally {
         cleanupTmpDir(synthetic);
+      }
+
+      // ⑤ 递归面探针（真实形态 shadow 树）：引擎脚本树整棵复制后，在 `lib/` 下注入一处裸拼接 ⇒
+      //    检出必增（平铺扫描的旧形态只看顶层、对 `lib/` 内新增静默失明——正是本锚修复的缺陷形态）。
+      const shadow = makeTmp();
+      try {
+        const shadowScripts = copyEngineTree(shadow);
+        const baseHits = bareIsoTimestampHits(shadowScripts);
+        writeFile(shadowScripts, path.join('lib', 'probe.mjs'),
+          'export const probe = () => ' + bareIsoSample + ';\n');
+        const grownHits = bareIsoTimestampHits(shadowScripts);
+        assertEqual(grownHits.length, baseHits.length + 1,
+          'lib/ 下的第二处裸拼接必须被递归面检出（平铺面会静默失明）: '
+          + JSON.stringify({ base: baseHits.length, grown: grownHits.length }));
+      } finally {
+        cleanupTmpDir(shadow);
       }
     },
   },
@@ -911,7 +942,17 @@ export const ENTRIES = [
 
       // ⑤ 命名声明跨文件一致（结构锚 + 反向构造）：init 侧按段名 / 字段名定位段内取值，两处声明
       //    漂移会让判据静默退化成 ② 的「无可比对面」——故两处字面量必须逐字相等，合成改写即红。
-      const consumerText = fs.readFileSync(path.join(SCRIPTS_DIR, 'workflow-state.mjs'), 'utf8');
+      //    落点**按形态反查**（不写文件名）：声明 intel-scan 段名 / 字段名字面量的引擎模块，写侧 =
+      //    重扫命令本身，读侧 = 其余的那个声明方（迁移后的落点是 `lib/state-intelscan.mjs`）。
+      const consumerDeclarers = engineScriptFiles().filter((rel) =>
+        Object.keys(intelMetadataNameDeclarations(fs.readFileSync(path.join(SCRIPTS_DIR, rel), 'utf8'))).length > 0);
+      assertEqual(consumerDeclarers.length, 2,
+        'intel-scan 命名声明应恰两处（写侧 + 读侧），实际: ' + JSON.stringify(consumerDeclarers));
+      const producerRel = path.relative(SCRIPTS_DIR, SIDE_CONTEXT_SCAN).split(path.sep).join('/');
+      const consumerRel = consumerDeclarers.find((rel) => rel !== producerRel);
+      assertTrue(consumerRel !== undefined,
+        'intel-scan 命名声明的写侧（重扫命令）不在声明方内: ' + JSON.stringify(consumerDeclarers));
+      const consumerText = fs.readFileSync(path.join(SCRIPTS_DIR, consumerRel), 'utf8');
       const producerText = fs.readFileSync(SIDE_CONTEXT_SCAN, 'utf8');
       const namingProblems = intelMetadataNameProblems(consumerText, producerText);
       assertEqual(namingProblems.length, 0, 'intel-scan 命名声明漂移: ' + namingProblems.join(' | '));

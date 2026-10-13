@@ -25,7 +25,10 @@ import {
   SIDE_HEALTH,
   SKILL_PROTOCOL_FILE,
   contextInitModule,
+  copyEngineTree,
+  engineConsumersOf,
   engineDefinitionHits,
+  engineScriptTexts,
   fingerprintChanges,
   handoffFor,
   hasNamedImport,
@@ -54,7 +57,6 @@ import {
 } from '../lib/test-assertions.mjs';
 import {
   ATOMIC_TEMP_SUFFIX_RE,
-  ATOMIC_WRITE_CONVERGENCE_FACE,
   EVOLVE_METADATA_FIELD_LINES,
   FRONTEND_CRITERION_AUTHORITY_REL,
   FRONTEND_CRITERION_POINTER_RELS,
@@ -72,6 +74,8 @@ import {
   frontendCriterionProseProblems,
   frontendCriterionRedirectProblems,
   intelFieldToken,
+  singleSourceImportProblems,
+  uniqueTempNameHits,
   writeDesignExitFixture,
   writeUiDesignBindingVariant,
 } from '../lib/text-anchor-checks.mjs';
@@ -209,35 +213,46 @@ export const ENTRIES = [
   },
 
   // 277: 单源结构锚——时间与窗口判据（formatLocalTimestamp / nowTimestamp / parseTimestamp /
-  // hasSection9 / isArchivedAfterTimestamp）在全引擎**各只有一处定义**，且四个消费脚本一律从
-  // time-utils 取值（含 init 写扫描时刻的 nowTimestamp：形态单一来源是双落点一致的形态前提）。
-  // 判别力边界（修正旧注释的夸大——「第二份内联实现必然让本场景变红」只在**同名**时成立）：
+  // hasSection9 / isArchivedAfterTimestamp）在全引擎**各只有一处定义**，消费方（**消费面 = 入口 ∪
+  // `lib/**`**，由真实引用派生，不写文件名清单）一律从 time-utils 取值（含 init 写扫描时刻的
+  // nowTimestamp：形态单一来源是双落点一致的形态前提）。判据形态：消费方与其取用符号由代码里的
+  // 真实引用派生——模块再切分 / 再搬家不必改锚，新增消费方自动进入对账；说明符由消费方位置解析
+  //（`lib/` 内是 `'../time-utils.mjs'`），不写死单层形态。
+  // 判别力边界（「第二份内联实现必然让本场景变红」只在**同名**时成立）：
   //   ① 定义面按**同名定义**计数：同名第二份实现（函数声明 / const 箭头）即变红；
-  //   ② 消费面按**具名 import 自 time-utils.mjs + 真实调用**判定（不是纯文本存在性）：消费脚本
-  //      内联同名实现顶替导出会变红——旧判据 `text.includes(name + '(')` 会被内联同名实现满足，
-  //      属假绿形态（本锚升级的正是这半边）；
+  //   ② 消费面按**具名取用自单源模块 + 真实调用**判定（不是纯文本存在性）：消费脚本内联同名实现
+  //      顶替导出会变红——旧判据 `text.includes(name + '(')` 会被内联同名实现满足，属假绿形态；
   //   ③ **不在本锚覆盖内**：与单源导出**不同名**、且消费方仍保留一次真实调用的等价内联实现——
   //      那类形态由各判据族的形态锚分族承担（如 295 日期前缀 / 298 裸拼接），本锚不冒充覆盖它。
-  // 判别力由两条合成反向构造常驻证明（同名第二份定义 / 未具名 import 的内联实现）。
+  // 判别力由合成反向构造（同名第二份定义 / 未具名取用的内联实现）+ 递归面探针（真实形态 shadow
+  // 树：`lib/` 下放第二份实现 → 定义面检出 2）常驻证明。
   {
-    name: '277 单源结构锚：时间与窗口判据全引擎各一处定义，四个消费脚本零内联',
+    name: '277 单源结构锚：时间与窗口判据全引擎各一处定义，消费面（入口 ∪ lib）零内联',
     run: () => {
       const singleSource = ['formatLocalTimestamp', 'nowTimestamp', 'parseTimestamp', 'hasSection9', 'isArchivedAfterTimestamp'];
+      const sourceRel = 'time-utils.mjs';
       for (const name of singleSource) {
         const hits = engineDefinitionHits(name);
         assertEqual(hits.length, 1, name + ' 的定义面数量（全引擎应恰 1 处）实际 ' + JSON.stringify(hits));
-        assertEqual(hits[0].file, 'time-utils.mjs', name + ' 的定义文件');
+        assertEqual(hits[0].file, sourceRel, name + ' 的定义文件');
         assertEqual(hits[0].count, 1, name + ' 在 ' + hits[0].file + ' 内的定义处数');
       }
-      const consumers = {
-        'workflow-state.mjs': ['isValidTimestamp', 'daysSince', 'hasSection9', 'isArchivedAfterTimestamp', 'nowTimestamp', 'parseTimestamp'],
-        'evolve.mjs': ['parseTimestamp', 'hasSection9', 'isArchivedAfterTimestamp', 'nowTimestamp'],
-        'context-scan.mjs': ['nowTimestamp', 'formatLocalDate', 'archiveDateFromName'],
-        'health.mjs': ['formatLocalTimestamp', 'formatLocalDate'],
-      };
-      for (const [file, symbols] of Object.entries(consumers)) {
-        const text = fs.readFileSync(path.join(SCRIPTS_DIR, file), 'utf8');
-        const problems = timeSingleSourceConsumerProblems(text, symbols, file);
+      // 消费面（派生）：逐符号取真实引用者、去掉单源模块本身 —— 旧形态的四文件白名单在此被
+      // 「入口 ∪ lib/**」取代（迁移到 lib/ 的消费方不再掉出受检面）。
+      const consumerSymbols = ['isValidTimestamp', 'daysSince', 'hasSection9', 'isArchivedAfterTimestamp',
+        'nowTimestamp', 'parseTimestamp', 'formatLocalTimestamp', 'formatLocalDate', 'archiveDateFromName'];
+      const texts = engineScriptTexts();
+      const consumerFace = new Map();
+      for (const symbol of consumerSymbols) {
+        for (const rel of engineConsumersOf(symbol)) {
+          if (rel === sourceRel) continue;
+          consumerFace.set(rel, [...(consumerFace.get(rel) ?? []), symbol]);
+        }
+      }
+      assertTrue(consumerFace.size >= 4,
+        '时间单源消费面收缩（入口 ∪ lib 的消费方应≥4 个模块）: ' + JSON.stringify([...consumerFace.keys()]));
+      for (const [file, symbols] of consumerFace) {
+        const problems = timeSingleSourceConsumerProblems(texts.get(file), symbols, file, sourceRel);
         assertEqual(problems.length, 0, '消费面单源违规: ' + problems.join(' | '));
       }
 
@@ -255,22 +270,43 @@ export const ENTRIES = [
         cleanupTmpDir(synthetic);
       }
 
+      // 反向构造 ①b（递归面探针 · **真实形态 shadow 树**）：把引擎脚本树整棵复制到合成根，在 `lib/`
+      // 下放一处同名第二份实现 ⇒ 定义面检出 2。平铺扫描的旧形态只看顶层 ⇒ 这里恒为 1（本探针即
+      // 红）——这正是「迁出的实现对结构锚静默失明」的缺陷形态。
+      const shadow = makeTmp();
+      try {
+        const shadowScripts = copyEngineTree(shadow);
+        assertEqual(engineDefinitionHits('formatLocalTimestamp', shadowScripts).length, 1,
+          'shadow 树基线（单份定义）检出数');
+        writeFile(shadowScripts, path.join('lib', 'second.mjs'), definitionSample('formatLocalTimestamp'));
+        assertEqual(engineDefinitionHits('formatLocalTimestamp', shadowScripts).length, 2,
+          'lib/ 下的第二份实现必须被递归面检出（平铺面会静默失明）');
+      } finally {
+        cleanupTmpDir(shadow);
+      }
+
       // 反向构造 ②（合成文本 · 纯函数）：内联同名实现顶替导出——旧子串判据会放过、本锚必须拒绝；
       // 另两态证明判据不恒真（具名 import 但零调用 → 必报；具名 import + 真实调用 → 零问题）。
       // 同一拼接纪律：调用形态的 `name + '('` 可以字面出现（它不是定义形态），定义形态不可。
       const inlined = 'function ' + 'parseTimestamp(text) {\n  return Date.parse(text);\n}\n'
         + "parseTimestamp('2026-10-02T10:00:00+08:00');\n";
       assertTrue(inlined.includes('parseTimestamp('), '反向构造前提不成立：旧子串判据本应命中内联实现');
-      const inlinedProblems = timeSingleSourceConsumerProblems(inlined, ['parseTimestamp'], 'synthetic.mjs');
-      assertTrue(inlinedProblems.some((problem) => problem.includes('未从 time-utils.mjs 具名 import')),
+      const inlinedProblems = timeSingleSourceConsumerProblems(inlined, ['parseTimestamp'], 'synthetic.mjs', sourceRel);
+      assertTrue(inlinedProblems.some((problem) => problem.includes('未从 ' + sourceRel + ' 取用')),
         '内联同名实现未被判违规（旧判据的假绿形态）: ' + JSON.stringify(inlinedProblems));
       const importedOnly = "import { parseTimestamp } from './time-utils.mjs';\nconst unused = 1;\n";
-      assertTrue(timeSingleSourceConsumerProblems(importedOnly, ['parseTimestamp'], 'synthetic.mjs')
+      assertTrue(timeSingleSourceConsumerProblems(importedOnly, ['parseTimestamp'], 'synthetic.mjs', sourceRel)
         .some((problem) => problem.includes('未真实消费')), '具名 import 但零调用未被判违规');
       const genuine = "import { parseTimestamp } from './time-utils.mjs';\n"
         + 'export const instant = (value) => parseTimestamp(value);\n';
-      assertEqual(timeSingleSourceConsumerProblems(genuine, ['parseTimestamp'], 'synthetic.mjs').length, 0,
+      assertEqual(timeSingleSourceConsumerProblems(genuine, ['parseTimestamp'], 'synthetic.mjs', sourceRel).length, 0,
         '具名 import + 真实调用不应被判违规');
+      // 说明符由**消费方位置**解析（lib/ 内是 `'../time-utils.mjs'`）：同一对（import + 调用）在 lib/
+      // 位置采样必须同样零问题——写死 `'./time-utils.mjs'` 的旧形态在此必然误红。
+      const genuineInLib = "import { parseTimestamp } from '../time-utils.mjs';\n"
+        + 'export const instant = (value) => parseTimestamp(value);\n';
+      assertEqual(timeSingleSourceConsumerProblems(genuineInLib, ['parseTimestamp'], 'lib/x.mjs', sourceRel).length, 0,
+        'lib/ 位置的单源取用不应被判违规（说明符须按消费方位置解析）');
     },
   },
 
@@ -1014,33 +1050,37 @@ export const ENTRIES = [
     },
   },
 
-  // 291: 原子写单一来源——「同目录固定 `.tmp` + rename + 失败清理」惯用法在收敛面（状态 / 侧命令 /
-  // handoff 的写盘脚本 + 单源模块）内恰一处实现（落点 = 既有单源模块 state-schema.mjs），三个侧命令
-  // 与 handoff 的 state 直写一律消费同一导出、零内联。判别力两条：① 具名导出被真实消费（import +
-  // 调用，不是纯文本存在性）；② **合成目录反向构造**——把第二份实现丢进合成引擎目录，检出数必须
-  // 从 1 变 2（证明检出不恒真空过）。guard 的受保护写入按边界锚显式排除，不静默跳过。
+  // 291: 原子写单一来源——「同目录固定 `.tmp` + rename + 失败清理」惯用法在**引擎面**（入口 ∪
+  // `lib/**`）内只允许两处形态：单一来源模块 state-schema.mjs 的**唯一实现**，与 guard 的受保护
+  // 写入**硬化通道**（唯一临时名；由形态锚认出，是已登记例外而非漏网）。消费方（**消费面 = 入口 ∪
+  // `lib/**`**，由真实引用派生）一律消费同一导出、零内联。判别力：① 具名导出被真实消费（import +
+  // 调用，不是纯文本存在性）；② **反向构造**——第二份实现丢进合成引擎目录，检出数必须从 2 变 3
+  //（证明检出不恒真空过）；③ 递归面探针（真实形态 shadow 树：`lib/` 下放第二份实现必红）。
   {
-    name: '291 原子写单一来源：收敛面内一处实现 + 四消费方零内联 + 合成反向构造判别力',
+    name: '291 原子写单一来源：引擎面唯一实现 + 硬化通道边界锚 + 消费面零内联 + 反向构造判别力',
     run: async () => {
-      // ① 惯用法唯一实现（收敛面 = 本任务写边界内的写盘脚本 + 单源模块）
-      const idiom = atomicWriteIdiomHits(SCRIPTS_DIR, ATOMIC_WRITE_CONVERGENCE_FACE);
-      assertEqual(idiom.length, 1, '原子写惯用法实现面（收敛面内应恰 1 处）实际 ' + JSON.stringify(idiom));
-      assertEqual(idiom[0].file, 'state-schema.mjs', '原子写惯用法落点文件');
-      assertEqual(idiom[0].count, 1, 'state-schema.mjs 内惯用法处数');
-
-      // ①b 边界锚（可见，不静默排除）：guard 的受保护写入是独立安全硬化通道——唯一临时名 + 快照
-      // 复核；形态一旦退回「固定 `<目标>.tmp`」惯用法即变红，强制重新评估它是否落回收敛面。
-      const guardText = fs.readFileSync(path.join(SCRIPTS_DIR, 'workflow-guard.mjs'), 'utf8');
-      assertTrue(guardText.includes('String(process.pid)') && /Math\.random\(\)\.toString\(16\)/.test(guardText),
-        'workflow-guard 的受保护写入不再是「唯一临时名」硬化通道——须重新评估原子写收敛面');
-      assertTrue(hasNamedImport(guardText, './state-schema.mjs', 'RUNTIME_STATE_PATH'),
-        'workflow-guard 未从 state-schema.mjs import 运行时路径常量（单源关系被破坏，收敛面须重评）');
-
-      // ② 具名导出唯一定义 + 行为可用（落盘、无临时残留、失败路径 fail-closed）
-      const writeAtomic = requireModuleExport(stateSchemaModule, 'writeFileAtomic', 'state-schema.mjs');
+      // ① 惯用法唯一实现（受检面 = 引擎面；硬化通道由 ①b 的形态锚认出并计入允许集）
+      const idiom = atomicWriteIdiomHits(SCRIPTS_DIR);
+      const hardening = uniqueTempNameHits(SCRIPTS_DIR);
+      assertEqual(hardening.length, 1, '「唯一临时名」硬化通道应恰一处（形态锚）实际 ' + JSON.stringify(hardening));
       const definition = engineDefinitionHits('writeFileAtomic');
       assertEqual(definition.length, 1, 'writeFileAtomic 定义面（全引擎应恰 1 处）实际 ' + JSON.stringify(definition));
       assertEqual(definition[0].file, 'state-schema.mjs', 'writeFileAtomic 定义文件');
+      assertEqual(idiom.length, 2, '原子写惯用法在引擎面内应恰两处（唯一实现 + 硬化通道）实际 ' + JSON.stringify(idiom));
+      assertEqual(idiom.find((hit) => hit.file === definition[0].file)?.count, 1,
+        '唯一实现模块内惯用法处数（应为 1）实际 ' + JSON.stringify(idiom));
+      assertTrue(idiom.some((hit) => hit.file === hardening[0].file),
+        '硬化通道必须同时是惯用法指纹的一处（形态退回固定 `.tmp` 时本锚与 ①b 同时变红）');
+
+      // ①b 边界锚（可见，不静默排除）：guard 的受保护写入是独立安全硬化通道——唯一临时名 + 快照
+      // 复核；形态一旦退回「固定 `<目标>.tmp`」惯用法即红（检出 0 处），强制重新评估它是否落回收敛面。
+      const guardText = engineScriptTexts().get('workflow-guard.mjs');
+      assertEqual(typeof guardText, 'string', 'workflow-guard.mjs 不在引擎面内（受检面收缩？）');
+      assertTrue(hasNamedImport(guardText, './state-schema.mjs', 'RUNTIME_STATE_PATH'),
+        'workflow-guard 未从 state-schema.mjs import 运行时路径常量（单源关系被破坏，收敛面须重评）');
+
+      // ② 具名导出行为可用（落盘、无临时残留、失败路径 fail-closed）
+      const writeAtomic = requireModuleExport(stateSchemaModule, 'writeFileAtomic', 'state-schema.mjs');
       const probe = makeTmp();
       try {
         const target = path.join(probe, 'nested', 'out.json');
@@ -1057,20 +1097,48 @@ export const ENTRIES = [
         cleanupTmpDir(probe);
       }
 
-      // ③ 四个消费方：具名 import 自 state-schema.mjs + 真实调用 + 零内联第二份实现
-      const consumers = {
-        'workflow-state.mjs': 'writeJsonAtomic',
-        'workflow-handoff.mjs': 'writeJsonAtomic',
-        'evolve.mjs': 'writeFileAtomic',
-        'context-scan.mjs': 'writeJsonAtomic',
-      };
-      for (const [file, symbol] of Object.entries(consumers)) {
-        const text = fs.readFileSync(path.join(SCRIPTS_DIR, file), 'utf8');
-        assertTrue(hasNamedImport(text, './state-schema.mjs', symbol),
-          file + ' 未从 state-schema.mjs import ' + symbol + '（单源纪律：写盘不得在本脚本内联第二份）');
-        assertTrue(text.includes(symbol + '('), file + ' 未真实消费 ' + symbol + '（单一权威应被调用）');
+      // ③ 消费面（派生 · 入口 ∪ lib/**）：具名取用自单源模块 + 真实调用 + 零内联第二份实现
+      const atomicSymbols = ['writeJsonAtomic', 'writeFileAtomic'];
+      const texts = engineScriptTexts();
+      const consumers = new Map();
+      for (const symbol of atomicSymbols) {
+        for (const rel of engineConsumersOf(symbol)) {
+          if (rel === definition[0].file) continue;
+          consumers.set(rel, [...(consumers.get(rel) ?? []), symbol]);
+        }
+      }
+      assertTrue(consumers.size >= 4,
+        '原子写消费面收缩（入口 ∪ lib 的消费方应≥4 个模块）: ' + JSON.stringify([...consumers.keys()]));
+      for (const [file, symbols] of consumers) {
+        const text = texts.get(file);
+        for (const symbol of symbols) {
+          assertTrue(text.includes(symbol + '('), file + ' 未真实消费 ' + symbol + '（单一权威应被调用）');
+        }
         const inline = (text.match(ATOMIC_TEMP_SUFFIX_RE) ?? []).length;
         assertEqual(inline, 0, file + ' 仍内联原子写惯用法（第二份实现）处数');
+      }
+      // 单源面（定义唯一 + 消费方一律取用）：同一判据驱动，消费面由真实引用派生
+      for (const symbol of atomicSymbols) {
+        const symbolProblems = singleSourceImportProblems({ symbol, sourceRel: definition[0].file, texts });
+        assertEqual(symbolProblems.length, 0, '原子写单源面被破坏（' + symbol + '）: ' + symbolProblems.join(' | '));
+      }
+
+      // ④ 反向构造（数据驱动 · 不依赖全局计数地板）：真实形态 shadow 树——`lib/` 下放第二份实现
+      // ⇒ 惯用法检出数从 2 变 3（平铺面只会看到顶层那 1 处，本探针即红）。
+      const shadow = makeTmp();
+      try {
+        const shadowScripts = copyEngineTree(shadow);
+        assertEqual(atomicWriteIdiomHits(shadowScripts).length, 2, 'shadow 树基线（唯一实现 + 硬化通道）');
+        writeFile(shadowScripts, path.join('lib', 'second.mjs'),
+          "export async function duplicateWriter(file, text) {\n"
+          + "  const temporary = file + '.tmp';\n"
+          + '  await fs.writeFile(temporary, text);\n'
+          + '  await fs.rename(temporary, file);\n'
+          + '}\n');
+        assertEqual(atomicWriteIdiomHits(shadowScripts).length, 3,
+          'lib/ 下的第二份实现必须被递归面检出（平铺面会静默失明）');
+      } finally {
+        cleanupTmpDir(shadow);
       }
 
       // ④ 反向构造：合成引擎目录（单文件 1 处 → 检出 1；再放第二份实现 → 检出 2）——

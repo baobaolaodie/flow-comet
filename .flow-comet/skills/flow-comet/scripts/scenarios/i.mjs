@@ -19,6 +19,7 @@ import {
   SCRIPTS_DIR,
   handoffFor,
   routeNodeModule,
+  scriptTreeFiles,
   strictSummary,
   writeIntakeArtifacts,
 } from '../lib/test-fixtures.mjs';
@@ -38,6 +39,7 @@ import {
 } from '../lib/test-assertions.mjs';
 import {
   PUBLIC_CODE_RE,
+  commentCodeProblems,
   internalDocsProblems,
   isDeclaredReferenceSkip,
   maintainerFaceSkips,
@@ -531,15 +533,39 @@ export const ENTRIES = [
       if (!mirrorMissing.some((p) => p.includes('无法执行') && p.includes(mirrorFixtureRel))) {
         throw new Error('私有面缺席必须显式报告判据未执行（未验证 ≠ 通过）: ' + JSON.stringify(mirrorMissing));
       }
-      const selfLines = fs.readFileSync(path.join(SCRIPTS_DIR, 'guard-self-test.mjs'), 'utf8').split(/\r?\n/);
-      const commentHits = [];
-      for (let i = 0; i < selfLines.length; i += 1) {
-        if (!/^\s*(\/\/|\*|\/\*)/.test(selfLines[i])) continue;
-        const hit = selfLines[i].match(PUBLIC_CODE_RE);
-        if (hit) commentHits.push((i + 1) + ': ' + hit[0]);
+      // ② 分发面源码的**注释层零残留**（清理后不许回潮）：受检面 = 技能树内全部脚本（入口 + `lib/**`
+      //    + `scenarios/**` + `items/**`，递归派生）——拆分后注释量最大的新模块全在面内；旧形态只扫
+      //    入口单文件（19,023 行 → 211 行）会让判据仍在、判别力消失（拆分的隐蔽缺陷形态）。
+      //    注释行判定与词表判据同口径（行首 `//` / `*` / `/*`）；真实判据与反向构造探针共用
+      //    `commentCodeProblems`（单一实现，探针不与锚漂移）。
+      const selfFace = scriptTreeFiles();
+      const faceTexts = new Map(selfFace.map((rel) => [rel, fs.readFileSync(path.join(SCRIPTS_DIR, rel), 'utf8')]));
+      const commentFound = commentCodeProblems(faceTexts);
+      if (commentFound.length !== 0) {
+        throw new Error('分发面源码注释层仍有未公开概念字样（判据锚：注释层零残留）: ' + commentFound.join(', '));
       }
-      if (commentHits.length !== 0) {
-        throw new Error('本文件注释层仍有未公开概念字样（判据锚：注释层零残留）: ' + commentHits.join(', '));
+      // ②b 面有效性（防「面收缩成空集」的恒真空过）：受检面必须覆盖到 `lib/` 与 `scenarios/`。
+      if (!selfFace.some((rel) => rel.startsWith('lib/')) || !selfFace.some((rel) => rel.startsWith('scenarios/'))) {
+        throw new Error('注释层受检面未覆盖 lib/ 与 scenarios/（受检面收缩，判据退化为恒真）: '
+          + JSON.stringify(selfFace.slice(0, 8)));
+      }
+      // ②c 反向构造（判别力数据驱动）：在**面内**任取一个 `lib/` 文件注入一处过程代号**注释行** ⇒
+      //     必红；还原 ⇒ 复绿。样例经拼接构造（本判据自身就写在面内文件里，字面量直写会自伤）。
+      const probeRel = selfFace.find((rel) => rel.startsWith('lib/'));
+      if (probeRel === undefined) throw new Error('反向构造前提不成立：面内无 lib/ 文件');
+      const probeSample = 'S' + '99 场景编号（反向构造）';
+      const injectedInFace = new Map(faceTexts).set(probeRel, faceTexts.get(probeRel) + '\n// ' + probeSample + '\n');
+      if (!commentCodeProblems(injectedInFace).some((problem) => problem.startsWith(probeRel + ':'))) {
+        throw new Error('反向构造判别力缺失（面内注入过程代号注释未被判违规）');
+      }
+      if (commentCodeProblems(faceTexts).length !== 0) {
+        throw new Error('反向构造还原后未复绿（判据受输入顺序影响）');
+      }
+      // ②d 面边界为真：受检面 = 技能树内**脚本**（`.mjs`）全集——同树的文档 / `reference/` 不参与
+      //     （受检面由脚本目录树派生，非脚本文件结构性地不在其中）。
+      const nonScript = selfFace.filter((rel) => !rel.endsWith('.mjs'));
+      if (nonScript.length !== 0) {
+        throw new Error('注释层受检面混入非脚本文件（面边界失效）: ' + JSON.stringify(nonScript.slice(0, 5)));
       }
     },
   },

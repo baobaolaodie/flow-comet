@@ -20,15 +20,16 @@ import {
 } from '../lib/test-helpers.mjs';
 import {
   CHANGE_ID,
-  GUARD,
-  HANDOFF,
   REPO_ROOT,
   SCRIPTS_DIR,
-  STATE,
   TASK_DONE,
   TASK_SERIAL_PENDING,
+  engineConsumersOf,
+  engineDefinitionHits,
+  engineDefinitionModule,
+  engineScriptTexts,
+  dropNamedImport,
   handoffFor,
-  hasNamedImport,
   makeTmp,
   runPlanExit,
   writeIntakeArtifacts,
@@ -41,6 +42,7 @@ import {
   scenarioProtocolPath,
 } from '../lib/test-assertions.mjs';
 import {
+  singleSourceImportProblems,
   skillLoadingWordingProblems,
   twoLayerEntryProblems,
 } from '../lib/text-anchor-checks.mjs';
@@ -51,39 +53,61 @@ export const ENTRIES = [
   // 启发式安全侧边界锚定 / 零提交正式语义 / SUMMARY·TASK7·三文档模板保真 / 技能加载前置门 /
   // next·entry 输出点名 / 技能加载措辞 / next 进行中节点保护扩展） ----------
 
-  // 154: 单一来源静态锁（设计语义 / AC-1 + F-3 / AC-5）——① workflow-state.mjs 与
-  // workflow-handoff.mjs 不得各自定义 looksLikeObjectLiteral，必须从 state-schema.mjs import
-  //（单一来源 fail-closed）；② F-3：workflow-guard/state/handoff 三消费脚本均须从
-  // route-node.mjs import EXECUTE_FAMILY_NODE_IDS，且源码中不得再出现 execute 家族成员内联 pair
+  // 154: 单一来源静态锁（设计语义 / AC-1 + F-3 / AC-5）——① `looksLikeObjectLiteral` 只许有一处
+  // 实现（单源模块由导出符号反查），state/handoff 侧（含拆分后的 `lib/`）一律具名取用、不得自带
+  // 第二份定义（单一来源 fail-closed）；② F-3：消费 `EXECUTE_FAMILY_NODE_IDS` 的脚本（消费面 =
+  // 入口 ∪ `lib/**`，由真实引用派生）均须从单源取用，且源码中不得再出现 execute 家族成员内联 pair
   //（<ident> === 'execute' || <ident> === 'subagent-execute'，正反顺序）→ 0 命中。
   // 允许清单：单节点分支 / hasSubagentNode 协议判定 / 证据键与文案不参与 pair 断言。
   // ② 该轮修复在既有场景内扩展（不新增顶层编号）。
 
   {
-    name: '154 单一来源静态锁：state/handoff 不内置 looksLikeObjectLiteral + 三消费脚本 import EXECUTE_FAMILY_NODE_IDS 且无内联 pair',
+    name: '154 单一来源静态锁：looksLikeObjectLiteral 单源 + EXECUTE_FAMILY_NODE_IDS 消费面（入口 ∪ lib）零内联 pair',
     run: (dir) => {
-      const schemaPath = path.join(SCRIPTS_DIR, 'state-schema.mjs');
-      const script = `
-        const fs = require('fs');
-        const state = fs.readFileSync(process.argv[1], 'utf8');
-        const handoff = fs.readFileSync(process.argv[2], 'utf8');
-        const schema = fs.readFileSync(process.argv[3], 'utf8');
-        const issues = [];
-        if (/function\\s+looksLikeObjectLiteral\\s*\\(/.test(state)) issues.push('workflow-state.mjs 仍自带 looksLikeObjectLiteral 定义');
-        if (/function\\s+looksLikeObjectLiteral\\s*\\(/.test(handoff)) issues.push('workflow-handoff.mjs 仍自带 looksLikeObjectLiteral 定义');
-        if (!/looksLikeObjectLiteral/.test(schema)) issues.push('state-schema.mjs 未导出共享判定');
-        if (!/import\\s*\\{[^}]*looksLikeObjectLiteral[^}]*\\}\\s*from\\s*['"]\\.\\/state-schema\\.mjs['"]/.test(state)) issues.push('workflow-state.mjs 未从 state-schema.mjs import');
-        if (!/import\\s*\\{[^}]*looksLikeObjectLiteral[^}]*\\}\\s*from\\s*['"]\\.\\/state-schema\\.mjs['"]/.test(handoff)) issues.push('workflow-handoff.mjs 未从 state-schema.mjs import');
-        if (issues.length > 0) { console.error(issues.join('; ')); process.exit(1); }
-        console.log('SINGLE SOURCE OK');
-      `;
-      const res = spawnSync(process.execPath, ['-e', script, STATE, HANDOFF, schemaPath], { encoding: 'utf8', timeout: 60000 });
-      assertExit(res, 0);
-      assertOut(res, 'SINGLE SOURCE OK');
+      const issues = [];
+      // ① 单一来源静态锁：单源模块**反查**（不写文件名），消费面由引擎面文本真实引用派生
+      const lookup = engineDefinitionModule('looksLikeObjectLiteral');
+      if (lookup === null) {
+        throw new Error('looksLikeObjectLiteral 的单一来源定义面不唯一（应恰一处）: '
+          + JSON.stringify(engineDefinitionHits('looksLikeObjectLiteral')));
+      }
+      const texts = engineScriptTexts();
+      for (const problem of singleSourceImportProblems({
+        symbol: 'looksLikeObjectLiteral', sourceRel: lookup.file, texts,
+      })) issues.push(problem);
 
-      // ===== F-3（AC-5）：三消费脚本 execute 家族成员单一来源静态锁 ====
-      // ① import 断言走模块级 hasNamedImport（同一判据只实现一次——本场景原先内联了同形闭包，
-      // 两处实现会在容忍面上漂移）。
+      // ①b 反向构造（同一判据驱动 · 探针目标数据驱动）：逐项改坏输入 ⇒ 必报，还原 ⇒ 复绿。
+      const sourceText = texts.get(lookup.file);
+      if (typeof sourceText !== 'string') throw new Error('反查所得单源模块不在场: ' + lookup.file);
+      const firstConsumer = [...texts.keys()].find((rel) => rel !== lookup.file
+        && new RegExp('import\\s*\\{[^}]*\\blooksLikeObjectLiteral\\b').test(texts.get(rel)));
+      if (firstConsumer === undefined) throw new Error('反向构造前提不成立：找不到具名取用的消费方');
+      const consumerText = texts.get(firstConsumer);
+      const probes = [
+        ['消费方自带第二份定义',
+          new Map(texts).set(firstConsumer,
+            consumerText + '\nfunction looksLikeObjectLiteral(raw) { return false; }\n'), '自带第二份'],
+        ['源侧定义被抽掉（单源面被破坏）',
+          new Map(texts).set(lookup.file,
+            sourceText.replace('function looksLikeObjectLiteral', 'function renamedObjectLiteralProbe')), '单一来源被破坏'],
+        ['消费方不再取用（import 被抽掉）',
+          new Map(texts).set(firstConsumer, dropNamedImport(consumerText, 'looksLikeObjectLiteral')), '未从'],
+      ];
+      for (const [label, mutated, expected] of probes) {
+        const reported = singleSourceImportProblems({
+          symbol: 'looksLikeObjectLiteral', sourceRel: lookup.file, texts: mutated,
+        });
+        if (!reported.some((problem) => problem.includes(expected))) {
+          issues.push('反向构造判别力缺失（' + label + ' 未被判违规）');
+        }
+      }
+      if (singleSourceImportProblems({
+        symbol: 'looksLikeObjectLiteral', sourceRel: lookup.file, texts,
+      }).length !== 0) issues.push('反向构造还原后未复绿（判据受输入顺序影响）');
+
+      // ===== F-3（AC-5）：execute 家族成员单一来源静态锁 =====
+      // ① import 断言：说明符由消费方位置推导（`lib/` 内是 `'../route-node.mjs'`），消费面 =
+      // 入口 ∪ `lib/**`（由真实引用派生——迁移后的消费方自动进入对账，不写文件名清单）。
       // ② 内联 pair 检测器：`=== 'execute'` 与 `=== 'subagent-execute'` 经 `||` 直连（正反顺序）。
       // 只命中双侧 === || === 组合；单节点分支（&& / 单 compare）、协议判定、证据键不命中
       //（下方合成正/负例自锚，防检测器退化为永不生效或误伤允许形态）。
@@ -100,7 +124,6 @@ export const ENTRIES = [
         "state.evidence['subagent-execute'] = state.evidence['subagent-execute'] || {};",
         "hasSubagentNode(protocol)",
       ];
-      const issues = [];
       for (const candidate of detectorPositive) {
         pairRe.lastIndex = 0;
         if (!pairRe.test(candidate)) issues.push('内联 pair 检测器自身失效：未命中已知历史形态 ' + JSON.stringify(candidate));
@@ -109,22 +132,25 @@ export const ENTRIES = [
         pairRe.lastIndex = 0;
         if (pairRe.test(candidate)) issues.push('内联 pair 检测器误报允许形态：' + JSON.stringify(candidate));
       }
-      const familySources = [
-        ['workflow-guard.mjs', GUARD],
-        ['workflow-state.mjs', STATE],
-        ['workflow-handoff.mjs', HANDOFF],
-      ];
-      for (const [sourceName, sourceFile] of familySources) {
-        const text = fs.readFileSync(sourceFile, 'utf8');
-        if (!hasNamedImport(text, './route-node.mjs', 'EXECUTE_FAMILY_NODE_IDS')) {
-          issues.push(sourceName + ' 未从 ./route-node.mjs import EXECUTE_FAMILY_NODE_IDS（execute 家族成员须单一来源）');
-        }
+      const familySource = engineDefinitionModule('EXECUTE_FAMILY_NODE_IDS');
+      if (familySource === null) {
+        throw new Error('EXECUTE_FAMILY_NODE_IDS 的单一来源定义面不唯一（应恰一处）: '
+          + JSON.stringify(engineDefinitionHits('EXECUTE_FAMILY_NODE_IDS')));
+      }
+      // 单一来源面（定义唯一 + 消费面一律取用）：同一判据驱动，消费面由真实引用派生
+      for (const problem of singleSourceImportProblems({
+        symbol: 'EXECUTE_FAMILY_NODE_IDS', sourceRel: familySource.file, texts,
+      })) issues.push(problem);
+      const familyConsumers = engineConsumersOf('EXECUTE_FAMILY_NODE_IDS').filter((rel) => rel !== familySource.file);
+      if (familyConsumers.length === 0) issues.push('execute 家族消费面为空（受检面收缩？）');
+      for (const rel of familyConsumers) {
+        const text = fs.readFileSync(path.join(SCRIPTS_DIR, rel), 'utf8');
         const sourceLines = text.split('\n');
         pairRe.lastIndex = 0;
         let m;
         while ((m = pairRe.exec(text)) !== null) {
           const lineNo = text.slice(0, m.index).split('\n').length;
-          issues.push(sourceName + ':' + lineNo + ' 出现 execute 家族成员内联 pair（应改用 EXECUTE_FAMILY_NODE_IDS.has(...)）: ' + sourceLines[lineNo - 1].trim());
+          issues.push(rel + ':' + lineNo + ' 出现 execute 家族成员内联 pair（应改用 EXECUTE_FAMILY_NODE_IDS.has(...)）: ' + sourceLines[lineNo - 1].trim());
         }
       }
       if (issues.length > 0) throw new Error(issues.join(String.fromCharCode(10)));
