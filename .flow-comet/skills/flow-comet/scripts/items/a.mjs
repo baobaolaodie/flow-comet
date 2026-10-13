@@ -771,7 +771,7 @@ export const ENTRIES = [
 
   {
     name: 'A9 record：基础证据记录',
-    run: (dir) => {
+    run: (dir, outcomes) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
       assertExit(runState(['skill-load', 'open', 'flow-comet-change'], dir), 0);
       // JSON payload → evidence 写入 + next 提示
@@ -806,6 +806,8 @@ export const ENTRIES = [
       const outsideTarget = path.join(dir, '..', 'outside-symlink-target.json');
       fs.writeFileSync(outsideTarget, '{"summary":"outside"}', 'utf8');
       const symlinkPath = path.join(dir, 'payload-link.json');
+      // 平台限制:Windows 创建符号链接需开发者模式/管理员——创建失败时登记显式「不适用（平台原因）」
+      // 并由运行器逐条出声（不复用条件分支的静默跳过:未验证 ≠ 通过）。
       // 仅 symlink 创建包在 try 内——断言移出 catch,防断言失败被误报为平台跳过
       // (修复前 try 包住 runState/断言,真实回归会被吞为"平台不支持跳过")
       let symlinkCreated = false;
@@ -813,7 +815,8 @@ export const ENTRIES = [
         fs.symlinkSync(outsideTarget, symlinkPath);
         symlinkCreated = true;
       } catch (e) {
-        console.log('  (symlink 负例跳过——当前平台不支持创建符号链接: ' + e.code + ')');
+        outcomes.notApplicablePlatform('A9 --json-file 符号链接越界负例',
+          '本平台不支持创建符号链接（' + e.code + '）');
       }
       if (symlinkCreated) {
         const rfSym = runState(['record', 'open', '--json-file', 'payload-link.json'], dir);

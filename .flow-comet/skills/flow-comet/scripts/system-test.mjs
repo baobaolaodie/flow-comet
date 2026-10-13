@@ -16,6 +16,10 @@
 // 结果标记：分发面项（distributionSurface）必须回传机器可读标记，运行器按结构化环境判据断言——
 // 权威源侧 `distribution:executed@source` / 安装副本侧 `distribution:not-applicable@copy`；
 // 缺标记（静默跳过）或与环境不符（判定写反）都判失败（「未验证 ≠ 通过」）。
+// 三态读数：收尾行按**条目**打印 `passed / not-applicable / not-executed` 三态计数——不适用
+// （安装副本侧）与未执行（本地工具缺失）不并入「通过」，未执行的项不再无痕计通过。
+// 条目内的平台条件子断言由运行器逐条出声（`OUTCOME: <项> · <子断言> → not-applicable@platform`）：
+// 它不是条目自身的态（其余断言已真跑），故不进条目级三态分区。
 // 测试项命名与输出为公开面——零过程代号（场景编号/修复编号/批次/缺陷编号/未公开概念）。
 //
 // 运行: node .flow-comet/skills/flow-comet/scripts/system-test.mjs
@@ -36,8 +40,8 @@ import { ENTRIES as GROUP_J } from './items/j.mjs';
 import { ENTRIES as GROUP_K } from './items/k.mjs';
 import { ENTRIES as GROUP_L } from './items/l.mjs';
 import { ENTRIES as GROUP_M } from './items/m.mjs';
-// 分发面项的结果标记判据（组内判据单源，运行器复用同一实现）
-import { assertDistributionOutcome } from './items/k.mjs';
+// 分发面项的结果标记判据 + 子断言登记 + 三态映射（组内判据单源，运行器复用同一实现）
+import { assertDistributionOutcome, createOutcomeRecorder, distributionState } from './items/k.mjs';
 
 // 条目顺序 = 组顺序（A → M）：逐项输出顺序是既有读数的一部分
 const TEST_ITEMS = [
@@ -46,6 +50,8 @@ const TEST_ITEMS = [
 ];
 
 let passed = 0;
+let notApplicable = 0;
+let notExecuted = 0;
 const failures = [];
 const createdDirs = [];
 
@@ -53,11 +59,23 @@ const createdDirs = [];
 
 for (const item of TEST_ITEMS) {
   const dir = makeTmp({ prefix: 'flow-comet-system-test-', protocol: true, register: createdDirs });
+  const outcomes = createOutcomeRecorder();
   try {
-    const marker = await item.run(dir);
+    const marker = await item.run(dir, outcomes);
+    // 条目内平台条件子断言的不适用：逐条出声（条目自身的面已真跑，故不改写条目的态）
+    for (const sub of outcomes.drain()) {
+      console.log('OUTCOME: ' + item.name + ' · ' + sub.assertion + ' → ' + sub.marker);
+    }
     // 分发面项的机器可读结果标记：缺标记（静默跳过）或与环境不符（判定写反）都判该项失败
     if (item.distributionSurface) assertDistributionOutcome(item.name, marker);
-    passed += 1;
+    // 三态读数：不适用 / 未执行不计入「通过」（未验证 ≠ 通过）
+    const state = item.distributionSurface ? distributionState(marker) : 'passed';
+    if (state === null) {
+      throw new Error('分发面结果标记没有三态归属（条目级不得回传子断言态）: ' + JSON.stringify(marker));
+    }
+    if (state === 'passed') passed += 1;
+    else if (state === 'not-applicable') notApplicable += 1;
+    else notExecuted += 1;
     console.log('PASS: ' + item.name);
   } catch (e) {
     failures.push({ name: item.name, error: e.message });
@@ -67,7 +85,11 @@ for (const item of TEST_ITEMS) {
   }
 }
 
-console.log('SYSTEM TEST: ' + passed + '/' + TEST_ITEMS.length + ' passed');
+// 收尾读数两段：`N/M passed` 是套件判词（N = 未失败项数，与既有输出纪律同形），括号内是该判词
+// 的三态分解（严格通过 / 不适用 / 未执行，三者相加 = N）——「不适用」「未执行」因此可见，
+// 不再无痕计入「通过」。
+console.log('SYSTEM TEST: ' + (passed + notApplicable + notExecuted) + '/' + TEST_ITEMS.length + ' passed'
+  + ' (passed ' + passed + ' / not-applicable ' + notApplicable + ' / not-executed ' + notExecuted + ')');
 
 // 清理验证：套件自身创建的临时目录不留残留
 const residue = createdDirs.filter((d) => fs.existsSync(d));

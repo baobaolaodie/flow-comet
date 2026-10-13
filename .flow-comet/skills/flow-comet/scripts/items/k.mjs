@@ -108,12 +108,29 @@ function assertPackageContextJudgment(scratch) {
 }
 
 // 分发面结果标记（机器可读）：本套件在权威源与安装副本两侧都会运行，而断言只在权威源侧真跑——
-// 两侧的区别（「已执行」/「不适用」）必须留在运行器可捕获的结果里，不能只打 console 行靠人工核验。
-// 映射两行即两侧的正反锚点：权威源侧回传 executed、安装副本侧回传 not-applicable，写反则该侧判失败。
-const DISTRIBUTION_MARKERS = {
+// 两侧的区别（「已执行」/「不适用」/「未执行」）必须留在运行器可捕获的结果里，不能只打 console 行
+// 靠人工核验。前两行即两侧的正反锚点：权威源侧回传 executed、安装副本侧回传 not-applicable，
+// 写反则该侧判失败。另两态是「真跑了但没验成」的两类原因，只在权威源侧出现：
+//   platform     平台条件不满足（条目内某条子断言在本环境无法构造前置）；
+//   toolMissing  本地工具缺失（仓库本地检查器不随克隆分发，整项无从执行）。
+export const DISTRIBUTION_MARKERS = {
   source: 'distribution:executed@source',
   copy: 'distribution:not-applicable@copy',
+  platform: 'distribution:not-applicable@platform',
+  toolMissing: 'distribution:not-executed@tool-missing',
 };
+
+// 三态读数（运行器收尾行用）：条目级标记 → 状态，**不适用 / 未执行不得并入「通过」**。
+// platform 不在表内——它是条目内**子断言**的态（条目自身的面已真跑），不是条目的态；
+// 它与条目级三态分区互不混淆（子断言由运行器逐条打印，见 createOutcomeRecorder）。
+const DISTRIBUTION_ITEM_STATES = {
+  [DISTRIBUTION_MARKERS.source]: 'passed',
+  [DISTRIBUTION_MARKERS.copy]: 'not-applicable',
+  [DISTRIBUTION_MARKERS.toolMissing]: 'not-executed',
+};
+export function distributionState(marker) {
+  return DISTRIBUTION_ITEM_STATES[marker] || null;
+}
 
 // K14 安装副本侧「不适用」说明：K14 分支与契约夹具共用同一字面量来源（防两处文案漂移）。
 const K14_COPY_DETAIL = '桥接 loader 版本戳重装断言仅权威源侧可判';
@@ -121,6 +138,8 @@ const K14_COPY_DETAIL = '桥接 loader 版本戳重装断言仅权威源侧可�
 // 运行器侧标记契约校验（分发面项）：标记必须显式在场且与结构化环境判据推出的期望值一致。
 //   缺标记 = 该项走了静默跳过（「未验证 ≠ 通过」，与显式「不适用」是两回事）→ 失败；
 //   标记与环境不符 = 环境判据写反（副本侧假红 / 权威源侧静默漏检）→ 失败。
+// 两个原因态（platform / toolMissing）只在权威源侧真跑时产生——副本侧在早期分支已回传
+// not-applicable@copy，故它们出现在副本环境即判定写错（把原因态当成了副本态）。
 // ctx 是可注入接缝（默认按真实环境判据解析）：使两侧错配与非法 marker 的失败路径能由夹具
 // 合成 ctx 真实驱动（否则这些分支没有调用者，判定被改宽也没有断言能拦住）。
 export function assertDistributionOutcome(itemName, marker, ctx = resolvePackageContext()) {
@@ -130,11 +149,67 @@ export function assertDistributionOutcome(itemName, marker, ctx = resolvePackage
       + '）——禁止静默跳过');
   }
   const expected = DISTRIBUTION_MARKERS[ctx.kind];
-  if (marker !== expected) {
+  const reasonState = marker === DISTRIBUTION_MARKERS.platform || marker === DISTRIBUTION_MARKERS.toolMissing;
+  // 原因态（platform / toolMissing）只允许在权威源侧出现——副本侧在早期分支就回传了
+  // not-applicable@copy，此处出现原因态即判定写错（原因态被当成了副本态的替代）。
+  if (marker !== expected && !(reasonState && ctx.kind === 'source')) {
     throw new Error('分发面结果标记与环境判据不符：本环境应 ' + expected + '，实际 ' + marker
       + '（判定写反会让该侧静默漏检或假红）');
   }
   console.log('OUTCOME: ' + itemName + ' → ' + marker);
+}
+
+// 平台条件子断言的结果登记（「不适用（平台原因）」面）：子断言不是条目本身——它的不适用不改写条目
+// 自己的读数，而是**自己出声**（相邻的显式行 + 运行器收尾的机器可读 OUTCOME 行），使「未验证」
+// 在日志与证据里可逐条核对，不再无痕计入通过。记录器由运行器按项创建、作为 run(dir, outcomes) 的
+// 第二参数注入（无跨文件可变全局状态，也不会串项）。
+export function createOutcomeRecorder() {
+  const recorded = [];
+  return {
+    notApplicablePlatform(assertion, reason) {
+      if (typeof assertion !== 'string' || assertion.trim() === ''
+          || typeof reason !== 'string' || reason.trim() === '') {
+        throw new Error('平台不适用回传契约要求非空 assertion 与 reason，实际 '
+          + JSON.stringify({ assertion, reason }));
+      }
+      recorded.push({ assertion, reason, marker: DISTRIBUTION_MARKERS.platform });
+      console.log('  不适用（平台原因：' + reason + '）——' + assertion + '（该子断言本环境无法验证；未验证 ≠ 通过）');
+    },
+    drain() { return recorded.splice(0, recorded.length); },
+  };
+}
+
+// 分发面条目的统一接入（安装器/平台链路断言）：权威源侧真跑，安装副本侧回传显式
+// 「不适用（安装副本侧）」标记——两侧都出声，杜绝「裸 return 静默跳过仍计通过」。
+// 条目在自己的定义处用 `surface: '<说明>'` 声明「我属分发面、不适用的是哪个面」，导出前经本函数
+// 接入：接入后条目上的是既有契约字段 `distributionSurface: true`（运行器按该字段断言标记）。
+// copy 判定与「已执行」回传只写一份（单源不复制），声明就在条目旁边（不另立名单——名单会与
+// 条目漂移且缺失时无人发现）。
+export function applyDistributionSurface(entry) {
+  if (!entry || entry.surface === undefined) return entry;
+  const { surface, ...rest } = entry;
+  if (typeof surface !== 'string' || surface.trim() === '') {
+    throw new Error('分发面声明 surface 必须是非空说明（条目 ' + entry.name + '），实际 ' + JSON.stringify(surface));
+  }
+  if (typeof rest.run !== 'function' || typeof rest.name !== 'string') {
+    throw new Error('分发面条目接入契约要求 name 与 run，实际 ' + JSON.stringify(Object.keys(rest)));
+  }
+  return {
+    name: rest.name,
+    distributionSurface: true,
+    // async：条目自身可能是 async（K11/K12）——不 await 会把 Promise 当结果回传（marker 丢失）
+    run: async (dir, outcomes) => {
+      const ctx = resolvePackageContext();
+      if (ctx.kind === 'copy') {
+        const outcome = copyDistributionOutcome(ctx, surface);
+        console.log(outcome.message);
+        return outcome.marker;
+      }
+      const result = await rest.run(dir, outcomes);
+      // 权威源侧：条目跑完即回传「已执行」——除非条目自己回传了更具体的态（原因态）
+      return result === undefined ? DISTRIBUTION_MARKERS.source : result;
+    },
+  };
 }
 
 // copy 形态「不适用」回传：文案与机器可读结果标记同源产出（文案是「非静默跳过」的证据）。
@@ -151,10 +226,11 @@ function copyDistributionOutcome(ctx, detail) {
 }
 
 // 分发面回传契约夹具（环境无关；K14 在副本 early-return 之前调用，故两侧都会真跑）：
-//   ① 三类失败路径负例必须 throw——copy ctx + source marker / source ctx + copy marker /
-//      undefined 或非法 marker（缺可注入 ctx 接缝时这些路径没有任何调用者）；
-//   ② 接缝正例：两侧 marker 与 ctx 匹配时必须通过；
-//   ③ copy 形态真实判据 + helper 文案/marker 同源产出。
+//   ① 失败路径负例必须 throw——copy ctx + source marker / source ctx + copy marker /
+//      undefined 或非法 marker / 副本环境回传两个「原因态」（缺可注入 ctx 接缝时这些路径没有调用者）；
+//   ② 接缝正例：两侧 marker 与 ctx 匹配时必须通过（含两个原因态）；
+//   ③ copy 形态真实判据 + helper 文案/marker 同源产出；
+//   ④ 子断言记录器契约：登记 → 摘要行 → 取空；空 assertion/reason 必须 fail-closed。
 function assertDistributionOutcomeContract(scratch) {
   const expectThrow = (fn, label) => {
     let threw = null;
@@ -166,9 +242,13 @@ function assertDistributionOutcomeContract(scratch) {
   expectThrow(() => assertDistributionOutcome('分发面契约夹具:source ctx + copy marker', DISTRIBUTION_MARKERS.copy, { kind: 'source' }), 'source ctx + copy marker');
   expectThrow(() => assertDistributionOutcome('分发面契约夹具:undefined marker', undefined, { kind: 'copy', reason: '夹具' }), 'undefined marker');
   expectThrow(() => assertDistributionOutcome('分发面契约夹具:非法 marker', 'distribution:unknown', { kind: 'copy', reason: '夹具' }), '非法 marker');
+  expectThrow(() => assertDistributionOutcome('分发面契约夹具:copy ctx + platform marker', DISTRIBUTION_MARKERS.platform, { kind: 'copy', reason: '夹具' }), 'copy ctx + platform marker');
+  expectThrow(() => assertDistributionOutcome('分发面契约夹具:copy ctx + tool-missing marker', DISTRIBUTION_MARKERS.toolMissing, { kind: 'copy', reason: '夹具' }), 'copy ctx + tool-missing marker');
   // ② 接缝正例
   assertDistributionOutcome('分发面契约夹具:copy 正例', DISTRIBUTION_MARKERS.copy, { kind: 'copy', reason: '夹具' });
   assertDistributionOutcome('分发面契约夹具:source 正例', DISTRIBUTION_MARKERS.source, { kind: 'source' });
+  assertDistributionOutcome('分发面契约夹具:platform 正例', DISTRIBUTION_MARKERS.platform, { kind: 'source' });
+  assertDistributionOutcome('分发面契约夹具:tool-missing 正例', DISTRIBUTION_MARKERS.toolMissing, { kind: 'source' });
   // ③ copy 形态真实判据 + helper 文案/marker 同源
   const copyCtx = resolvePackageContext(path.join(scratch, 'k14-copy-probe'));
   if (copyCtx.kind !== 'copy' || typeof copyCtx.reason !== 'string' || copyCtx.reason.trim() === '') {
@@ -185,7 +265,33 @@ function assertDistributionOutcomeContract(scratch) {
   }
   // ④ helper 非 copy ctx 必须 fail-closed（不得把 source marker 伪装成「不适用」）
   expectThrow(() => copyDistributionOutcome({ kind: 'source' }, 'x'), 'copy helper 非 copy ctx');
-  console.log('  分发面回传契约: copy 文案/marker + 两侧正例 + 三类失败路径负例 ✓');
+  // ⑤ 子断言记录器契约：登记即出声（显式行）+ 摘要可逐条取回 + 取空后不再重复；畸形入参 fail-closed。
+  const recorder = createOutcomeRecorder();
+  if (recorder.drain().length !== 0) throw new Error('子断言记录器初始应为空');
+  expectThrow(() => recorder.notApplicablePlatform('', 'x'), '记录器空 assertion');
+  expectThrow(() => recorder.notApplicablePlatform('x', '  '), '记录器空 reason');
+  recorder.notApplicablePlatform('分发面契约夹具:平台子断言', '夹具平台原因');
+  const drained = recorder.drain();
+  if (drained.length !== 1 || drained[0].marker !== DISTRIBUTION_MARKERS.platform
+      || drained[0].assertion !== '分发面契约夹具:平台子断言' || drained[0].reason !== '夹具平台原因') {
+    throw new Error('子断言记录器回传失配: ' + JSON.stringify(drained));
+  }
+  if (recorder.drain().length !== 0) throw new Error('子断言记录器取空后不得重复产出（跨项串味）');
+  // ⑥ 三态读数映射：三个条目级标记各有归属，「未执行 / 不适用」不得落回 passed
+  const stateOf = [
+    [DISTRIBUTION_MARKERS.source, 'passed'],
+    [DISTRIBUTION_MARKERS.copy, 'not-applicable'],
+    [DISTRIBUTION_MARKERS.toolMissing, 'not-executed'],
+    [DISTRIBUTION_MARKERS.platform, null],
+    [undefined, null],
+  ];
+  for (const [marker, expected] of stateOf) {
+    if (distributionState(marker) !== expected) {
+      throw new Error('三态读数映射失配: ' + JSON.stringify(marker) + ' 应 ' + JSON.stringify(expected)
+        + '，实际 ' + JSON.stringify(distributionState(marker)));
+    }
+  }
+  console.log('  分发面回传契约: copy 文案/marker + 两侧与两原因态正例 + 四类失败路径负例 + 子断言记录器/三态映射 ✓');
 }
 
 // 跑 `npm pack --dry-run --json`（只读，不产出 tarball）并解析出产物相对路径清单。
@@ -239,7 +345,23 @@ function assertPublishableManifest(pkg) {
   console.log('  清单可发布性: private 缺席 / license=' + pkg.license + ' / engines.node=' + nodeFloor + ' ✓');
 }
 
-// ② 包体边界：必含面在场 / 私有面零命中 / scripts 面精确等于两项 / 顶层白名单 fail-closed /
+// 随包 scripts/ 面的唯一白名单（包体边界与本项反向构造的载体共用同一常量）：bin 双入口两个 +
+// `scripts/lib/` 下安装器的六个职责模块（入口静态 import 全部六个，缺一即启动失败）。
+// `package.json` 的 `files` 以**目录级**纳入 `scripts/lib`（新增模块不登记即被判越界，fail-closed），
+// 故「实际进包集合」由本白名单判等：多一件 = 未纳管进包，少一件 = 发布后 ERR_MODULE_NOT_FOUND。
+// CI 的 installer job 是同一判据的**独立实现**（两侧没有任何机制能发现彼此失同步，改动任一侧必须同步）。
+export const PACKED_SCRIPTS = [
+  'scripts/prepare-env.mjs',
+  'scripts/dsh-bridge.mjs',
+  'scripts/lib/installer-platforms.mjs',
+  'scripts/lib/installer-migrate.mjs',
+  'scripts/lib/installer-hooks.mjs',
+  'scripts/lib/installer-loader.mjs',
+  'scripts/lib/installer-cleanup.mjs',
+  'scripts/lib/installer-flowkit.mjs',
+];
+
+// ② 包体边界：必含面在场 / 私有面零命中 / scripts 面精确等于白名单 / 顶层白名单 fail-closed /
 // 权威源技能树逐文件在场（漏收 = 安装期炸或平台静默退化——协议 JSON 也在内）。
 function assertPackageBoundary(root) {
   const files = runNpmPackDryRun(root);
@@ -247,8 +369,7 @@ function assertPackageBoundary(root) {
   const required = [
     ['.flow-comet/skills', () => packedUnder('.flow-comet/skills')],
     ['.flow-comet/rules/flow-comet-orchestration.md', () => files.includes('.flow-comet/rules/flow-comet-orchestration.md')],
-    ['scripts/prepare-env.mjs', () => files.includes('scripts/prepare-env.mjs')],
-    ['scripts/dsh-bridge.mjs', () => files.includes('scripts/dsh-bridge.mjs')],
+    ...PACKED_SCRIPTS.map((p) => [p, () => files.includes(p)]),
   ];
   for (const [label, ok] of required) {
     if (!ok()) throw new Error('包体缺少必需路径: ' + label);
@@ -259,9 +380,8 @@ function assertPackageBoundary(root) {
     const hit = files.filter((p) => p === prefix.replace(/\/$/, '') || p.startsWith(prefix));
     if (hit.length > 0) throw new Error('包体含私有面路径 ' + prefix + ': ' + hit.slice(0, 5).join(', '));
   }
-  // 随包 scripts/ 面精确等于两项（本地工具脚本——提交钩子安装器/本地检查器一类——不得进包）
-  const allowedScripts = ['scripts/dsh-bridge.mjs', 'scripts/prepare-env.mjs'];
-  const extraScripts = files.filter((p) => p.startsWith('scripts/') && !allowedScripts.includes(p));
+  // 随包 scripts/ 面精确等于白名单（本地工具脚本——提交钩子安装器/本地检查器一类——不得进包）
+  const extraScripts = files.filter((p) => p.startsWith('scripts/') && !PACKED_SCRIPTS.includes(p));
   if (extraScripts.length > 0) {
     throw new Error('包体含未纳管的 scripts/ 条目（本地工具脚本不得进包）: ' + extraScripts.join(', '));
   }
@@ -278,7 +398,8 @@ function assertPackageBoundary(root) {
     .map((p) => '.flow-comet/skills/' + p.replaceAll('\\', '/'));
   const missingSkills = skillsOnDisk.filter((p) => !files.includes(p));
   if (missingSkills.length > 0) throw new Error('包体漏收技能树文件: ' + missingSkills.slice(0, 5).join(', '));
-  console.log('  包体边界: ' + files.length + ' 文件，技能树 ' + skillsOnDisk.length + ' 文件逐文件在场，私有面零命中 ✓');
+  console.log('  包体边界: ' + files.length + ' 文件，技能树 ' + skillsOnDisk.length + ' 文件逐文件在场，'
+    + 'scripts 面 ' + PACKED_SCRIPTS.length + ' 项精确在场（零越界），私有面零命中 ✓');
 }
 
 // ③b workflow contract 检查（`comet-check.mjs`）：包内**必含面清单**的自动锚。它此前全仓无任何
@@ -595,22 +716,26 @@ function assertLinkTargetPreserved(installer, { label, target, outsideFile, reas
 
 // 反向构造（同一判据驱动）：把两处根级判据分别中和为恒真后重跑同一变体 ⇒ 项目外文件**必被删除**；
 // 判据落点漂移（判据句被改写）时「前提不成立」先行报错，避免变异无处落点而假绿。
-// 变异副本建在临时载体上并自带捆绑源（安装器从**自身位置**推导权威树，故载体需含 .flow-comet/skills）。
+// 变异目标按**模块身份**定位（两处判据都在 lib/installer-cleanup.mjs——描述符/清理职责的归属模块，
+// 见设计模块图），不再平铺扫描全部模块；判据句仍按**内容**确认在场（句子漂移 ⇒ 前提不成立，红）。
+// 载体按**真实包内 scripts 面**落位（PACKED_SCRIPTS，与包体边界判据同集合）：照着整个 scripts/ 目录
+// 搬运会把仓库本地工具也带进载体，使载体比真实包更宽——被拆出的模块即使掉出包体白名单，
+// 载体里仍在场（安装照跑），反向构造因此对该类缺口零判别力。
 function assertMirrorRootReverseConstruction(scratch, pkgCtx, installer, variants) {
   const carrier = path.join(scratch, 'mirror-root-carrier');
-  const carrierScripts = path.join(carrier, 'scripts');
-  // 安装器按职责分模块（scripts/lib/）：整个安装器目录落位，判据句按**内容**定位到实际所在文件
-  // （不假定判据留在入口——否则模块搬家即「变异无处落点」）
-  fs.cpSync(path.dirname(installer), carrierScripts, { recursive: true });
-  const moduleFiles = [
-    path.join(carrierScripts, 'prepare-env.mjs'),
-    ...fs.readdirSync(path.join(carrierScripts, 'lib')).filter((f) => f.endsWith('.mjs')).sort()
-      .map((f) => path.join(carrierScripts, 'lib', f)),
-  ];
+  for (const rel of PACKED_SCRIPTS) {
+    const dest = path.join(carrier, ...rel.split('/'));
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(path.join(pkgCtx.root, ...rel.split('/')), dest);
+  }
+  const cleanupModule = path.join(carrier, 'scripts', 'lib', 'installer-cleanup.mjs');
+  if (!fs.existsSync(cleanupModule)) {
+    throw new Error('反向构造前提不成立：随包 scripts 面缺安装器清理模块 ' + cleanupModule);
+  }
   const neutralize = (sentence) => {
-    const file = moduleFiles.find((f) => fs.readFileSync(f, 'utf8').includes(sentence));
-    if (!file) return false;
-    fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(sentence, sentence.replace('if (', 'if (false && ')), 'utf8');
+    const text = fs.readFileSync(cleanupModule, 'utf8');
+    if (!text.includes(sentence)) return false;
+    fs.writeFileSync(cleanupModule, text.replace(sentence, sentence.replace('if (', 'if (false && ')), 'utf8');
     return true;
   };
   if (!neutralize('if (!isRealPathInside(dstRoot, projectRoot)) {')) {
@@ -620,7 +745,7 @@ function assertMirrorRootReverseConstruction(scratch, pkgCtx, installer, variant
     throw new Error('反向构造前提不成立：根级链接判据的落点未找到（判据句已漂移，变异无处落点）');
   }
   fs.cpSync(path.join(pkgCtx.root, '.flow-comet', 'skills'), path.join(carrier, '.flow-comet', 'skills'), { recursive: true });
-  const mutated = path.join(carrierScripts, 'prepare-env.mjs');
+  const mutated = path.join(carrier, 'scripts', 'prepare-env.mjs');
   for (const v of variants) {
     const res = runInstallerOnce(mutated, v.target);
     assertExit(res, 0);
@@ -729,14 +854,15 @@ function collectManagedHookCommands(configObj) {
 // 多趟链路 SUMMARY 夹具（SUMMARY 模板保真全量满足：标题首行 # SUMMARY: + 首部 4 字段 +
 // 段序 做了什么→改动文件→verify 输出→6 维自查→越界检查→自检方法；6 维声明 brooks-review）
 
-export const ENTRIES = [
+// ③ K 组条目表。带 `surface` 声明的条目在导出前统一接入分发面契约（见 applyDistributionSurface）。
+const RAW_ENTRIES = [
   // ---------- K. 安装器 ----------
 
   {
     name: 'K1 安装器：版本标识由安装器生成且精确反映源仓库状态',
+    surface: '版本标识解析（包内直跑 + git describe 信任边界）仅权威源侧可判',
     run: (dir) => {
       const repoRoot = path.resolve(SCRIPTS_DIR, '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       if (!fs.existsSync(installer)) throw new Error('缺少 prepare-env.mjs');
       const target = path.join(dir, 'j3-target');
@@ -767,11 +893,23 @@ export const ENTRIES = [
       // 故此处断言它即覆盖两条路径。修复前实测：输出宿主 tag（9.9.9），且 init 把它写进项目。
       const host = path.join(dir, 'trust-host');
       const pkg = path.join(host, 'node_modules', 'flow-comet');
-      fs.mkdirSync(path.join(pkg, 'scripts'), { recursive: true });
       fs.mkdirSync(path.join(pkg, '.flow-comet', 'skills', 'flow-comet'), { recursive: true });
-      fs.copyFileSync(installer, path.join(pkg, 'scripts', 'prepare-env.mjs'));
-      // 安装器按职责分模块（scripts/lib/）：包内直跑须连同模块目录一起落位
-      fs.cpSync(path.join(repoRoot, 'scripts', 'lib'), path.join(pkg, 'scripts', 'lib'), { recursive: true });
+      // 假包载体**按真实包形态落位**：scripts/ 面照 `package.json` 的 `files` 白名单搬运
+      // （目录级条目递归），不照仓库 scripts/ 目录整搬。载体比真实包更宽时，「模块掉出白名单」
+      // 这类缺口在载体里不会 ERR_MODULE_NOT_FOUND——包内直跑照样成功，断言静默失明。
+      const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+      const packedScripts = (manifest.files || []).filter((e) => typeof e === 'string' && e.startsWith('scripts/'));
+      if (packedScripts.length === 0) {
+        throw new Error('package.json 的 files 白名单未声明任何 scripts/ 条目（包内直跑无从构造）');
+      }
+      for (const rel of packedScripts) {
+        const from = path.join(repoRoot, ...rel.split('/'));
+        const to = path.join(pkg, ...rel.split('/'));
+        if (!fs.existsSync(from)) throw new Error('files 白名单声明的路径不在场: ' + rel);
+        fs.mkdirSync(path.dirname(to), { recursive: true });
+        if (fs.statSync(from).isDirectory()) fs.cpSync(from, to, { recursive: true });
+        else fs.copyFileSync(from, to);
+      }
       fs.copyFileSync(srcVersionFile, path.join(pkg, '.flow-comet', 'skills', 'flow-comet', 'INSTALLED_VERSION'));
       execFileSync('git', ['init', '-q'], { cwd: host, stdio: 'ignore' });
       execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: host, stdio: 'ignore' });
@@ -799,9 +937,9 @@ export const ENTRIES = [
   // (含 --platform codex 托管命令)+ AGENTS.md 托管区内联 + 纯 codex 不生成 .claude/ + 版本标识
   {
     name: 'K2 安装器:codex 平台安装(技能/路径替换/hooks.json/AGENTS 托管区)',
+    surface: 'codex 平台安装产物断言仅权威源侧可判（副本内无安装器源码面）',
     run: (dir) => {
       const repoRoot = path.resolve(SCRIPTS_DIR, '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       const target = path.join(dir, 'k2-target');
       fs.mkdirSync(target, { recursive: true });
@@ -938,9 +1076,9 @@ export const ENTRIES = [
   // K4: 平台选择链——--platform 显式(两平台互不串扰)/ 无 TTY 探测(项目已有 .codex/ 或 .claude/)/ 两者皆无默认
   {
     name: 'K4 安装器:平台选择链(显式/无 TTY 探测/默认)',
+    surface: '平台选择链断言仅权威源侧可判（需真实安装器与探测环境）',
     run: (dir) => {
       const repoRoot = path.resolve(SCRIPTS_DIR, '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return;
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       const run = (target, envOverrides = {}) => spawnSync(process.execPath, [installer, '--target', target], { cwd: repoRoot, encoding: 'utf8', timeout: 120000, env: { ...process.env, ...envOverrides } });
       // ① --platform claude-code 显式 → .claude/skills 生成,.agents 不生成
@@ -1040,9 +1178,9 @@ export const ENTRIES = [
   // K5: purge 语义——缺 --yes 拒绝(不破坏)/ --purge --yes 清理重建 / 用户内容(生成物外)保留
   {
     name: 'K5 安装器:purge 语义(缺 --yes 拒绝/重建/用户内容保留)',
+    surface: 'purge 语义断言仅权威源侧可判（需真实安装器命令序列）',
     run: (dir) => {
       const repoRoot = path.resolve(SCRIPTS_DIR, '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return;
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       const run = (target, extra) => spawnSync(process.execPath, [installer, '--target', target, ...extra], { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
       // ① codex 平台:首次安装 + 用户内容(项目根,非生成物)
@@ -1131,26 +1269,34 @@ export const ENTRIES = [
   // main 零改动);对源码提取的全部平台逐一真实安装冒烟(未来新增平台自动纳入测试)
   {
     name: 'K6 安装器:平台描述符驱动(全平台安装冒烟 + main 统一调度)',
+    surface: '平台描述符与全平台安装冒烟仅权威源侧可判（需安装器模块树）',
     run: (dir) => {
       const repoRoot = path.resolve(SCRIPTS_DIR, '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return;
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
-      const src = fs.readFileSync(installer, 'utf8');
-      // ① main 统一调度:平台分支标识已消除(新增平台 = 描述符条目,main 零改动)
-      if (src.includes('isClaudeCode')) {
-        throw new Error('prepare-env main 仍含平台分支标识 isClaudeCode(应迁入描述符)');
+      // ① main 统一调度:平台分支标识已消除(新增平台 = 描述符条目,main 零改动)。
+      // 受检面 = 入口 + scripts/lib 模块树——平台分支若以同形标识长回模块里,只扫入口会静默失明。
+      const libDir = path.join(path.dirname(installer), 'lib');
+      const branchSurface = [
+        ['入口', installer],
+        ...fs.readdirSync(libDir).filter((f) => f.endsWith('.mjs')).sort()
+          .map((f) => ['lib/' + f, path.join(libDir, f)]),
+      ];
+      for (const [label, file] of branchSurface) {
+        if (fs.readFileSync(file, 'utf8').includes('isClaudeCode')) {
+          throw new Error('安装器 ' + label + ' 仍含平台分支标识 isClaudeCode(应迁入描述符)');
+        }
       }
       // ② 描述符完整性:平台 id 从描述符块提取(防块外误匹配);聚合块须含 4 个平台函数
       // (installHooks/installRules/purge/overwriteDescription——未来新增平台缺任一函数时,
       // 下方逐平台 purge 冒烟会因 platform.purge 未定义而真实失败)
-      // 描述符随安装器分模块（scripts/lib/）：在安装器的模块树里按内容定位描述符块
-      const installerLib = path.join(path.dirname(installer), 'lib');
-      const moduleTexts = [src, ...(fs.existsSync(installerLib)
-        ? fs.readdirSync(installerLib).filter((f) => f.endsWith('.mjs')).sort()
-          .map((f) => fs.readFileSync(path.join(installerLib, f), 'utf8'))
-        : [])];
-      const platformBlock = moduleTexts.map((t) => t.match(/const PLATFORMS = \{[\s\S]*?\n\};/)).find(Boolean);
-      if (!platformBlock) throw new Error('未找到 PLATFORMS 描述符表');
+      // 描述符随安装器分模块:按**模块身份**读 lib/installer-platforms.mjs(描述符职责的归属模块,
+      // 见设计模块图),不再平铺扫描模块树——扫到谁由目录顺序决定,模块搬家即静默失明。
+      const descriptorModule = path.join(libDir, 'installer-platforms.mjs');
+      if (!fs.existsSync(descriptorModule)) {
+        throw new Error('缺少平台描述符模块(安装器模块图的描述符归属文件): ' + descriptorModule);
+      }
+      const platformBlock = fs.readFileSync(descriptorModule, 'utf8').match(/const PLATFORMS = \{[\s\S]*?\n\};/);
+      if (!platformBlock) throw new Error('平台描述符模块未找到 PLATFORMS 描述符表: ' + descriptorModule);
       const ids = [...platformBlock[0].matchAll(/^\s{2}'([a-z-]+)':\s*\{/gm)].map((m) => m[1]);
       if (!ids.includes('claude-code') || !ids.includes('codex')) {
         throw new Error('PLATFORMS 应含 claude-code/codex: ' + ids.join(', '));
@@ -1184,9 +1330,9 @@ export const ENTRIES = [
   // 安装树清单与权威源一致;全程 DSH_HOME=临时目录(AC-1)
   {
     name: 'K7 安装器:dsh 平台安装(技能/pathReplacements/版本标识/树一致)',
+    surface: 'dsh 平台安装产物与树一致断言仅权威源侧可判',
     run: (dir) => {
       const repoRoot = path.resolve(SCRIPTS_DIR, '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       const dshHome = path.join(dir, 'k7-dsh-home');
       const target = path.join(dir, 'k7-target');
@@ -1226,9 +1372,9 @@ export const ENTRIES = [
   // (codex/dsh 共用注入函数与托管区标记——AC-4)
   {
     name: 'K8 安装器:dsh AGENTS.md 托管区(用户内容保留 + 幂等重装)',
+    surface: 'AGENTS.md 托管区注入与幂等断言仅权威源侧可判',
     run: (dir) => {
       const repoRoot = path.resolve(SCRIPTS_DIR, '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       const dshHome = path.join(dir, 'k8-dsh-home');
       const target = path.join(dir, 'k8-target');
@@ -1263,9 +1409,9 @@ export const ENTRIES = [
   // $DSH_HOME 解析 = 显式 DSH_HOME > ~/.dsh——测试隔离到临时目录)
   {
     name: 'K9 桥接 loader:源文件/语法/复制与托管块注入(读-合并-写)',
+    surface: '桥接 loader 就位与托管块注入断言仅权威源侧可判',
     run: (dir) => {
       const repoRoot = path.resolve(SCRIPTS_DIR, '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       // ① 权威源 loader 存在 + 语法检查
       const loader = path.join(repoRoot, 'scripts', 'dsh-bridge.mjs');
       if (!fs.existsSync(loader)) throw new Error('缺少 scripts/dsh-bridge.mjs');
@@ -1315,9 +1461,9 @@ export const ENTRIES = [
   // (唯一 flow-comet 技能移除后 .dsh/skills 与 .dsh 变空 → 一并清理)
   {
     name: 'K10 安装器:dsh purge 清理恢复(缺 --yes 拒绝/删除后重建/用户内容保留/空目录清理)',
+    surface: 'dsh purge 清理恢复断言仅权威源侧可判',
     run: (dir) => {
       const repoRoot = path.resolve(SCRIPTS_DIR, '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       const dshHome = path.join(dir, 'k10-dsh-home');
       const run = (target, extra) => spawnSync(process.execPath, [installer, '--target', target, '--platform', 'dsh', ...extra], {
@@ -1366,9 +1512,9 @@ export const ENTRIES = [
   // apply 集成：tools/pre-execute 监听器分派——子代理放行/协调者走 guard/越界·形状 deny 不受身份）
   {
     name: 'K11 桥接 loader:纯函数与 apply 分派断言(映射/包含性/退出映射/身份分派/最小保护集)',
-    run: async (dir) => {
+    surface: '桥接 loader 纯函数与 pre-execute 分派断言仅权威源侧可判',
+    run: async (dir, outcomes) => {
       const repoRoot = path.resolve(SCRIPTS_DIR, '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       // 动态 import(套件运行器逐项 await)——dsh-bridge.mjs 仅在权威源仓库根 scripts/,
       // 安装副本缺失时整体跳过(与 K 组其余项同语义);静态 import 会让安装副本套件整体崩
       const loader = path.join(repoRoot, 'scripts', 'dsh-bridge.mjs');
@@ -1436,7 +1582,8 @@ export const ENTRIES = [
         }
         console.log('  8.3 短路径别名经 realpath 归一化为长形态判定 ✓');
       } else {
-        console.log('  (8.3 短路径别名不可解析——平台跳过)');
+        outcomes.notApplicablePlatform('K11 ③b 8.3 短路径别名归一化断言',
+          '本载体的临时目录不产生 8.3 短形态（POSIX / 已禁用 8dot3name）');
       }
       // ④ mapGuardExit:exit 0 → allow / exit 2 → deny(恢复指引 + detail 透传)/ 其它 → fail-closed
       if (bridge.mapGuardExit(0, '', '').kind !== 'allow') throw new Error('exit 0 应 allow');
@@ -1660,7 +1807,8 @@ export const ENTRIES = [
         }
         console.log('  盘符根拼写与盘符拼写同判(机器面 deny / 源码放行)✓');
       } else {
-        console.log('  (盘符根拼写断言显式不适用——非 win32 载体上该拼写是普通 POSIX 绝对路径)');
+        outcomes.notApplicablePlatform('K11 ⑦i 最小保护集盘符根拼写断言',
+          '非 win32 载体上 `/d/<剩余>` 是普通 POSIX 绝对路径，保护集语义不同');
       }
       // ⑦j 桥接通道标记的作用域收紧（同型真实链路格）：CC / Codex 生成的 hook **直接**调用守卫、
       //    不经桥接——同一目标、同一深度值，经桥接 ⇒ 放行（⑦a 已覆盖），绕过桥接直接调守卫
@@ -1714,9 +1862,9 @@ export const ENTRIES = [
   //   apply 过，模块级幂等标记会让二次 apply 跳过（applied=true），必须全新模块实例才能捕获监听器。
   {
     name: 'K12 桥接 loader:流程态门断言(无state/无activeChange/completed放行·非法JSON/未知status deny)',
+    surface: '桥接流程态门（active-change 门与 fail-closed 分支）断言仅权威源侧可判',
     run: async (dir) => {
       const repoRoot = path.resolve(SCRIPTS_DIR, '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       const loader = path.join(repoRoot, 'scripts', 'dsh-bridge.mjs');
       if (!fs.existsSync(loader)) throw new Error('缺少 scripts/dsh-bridge.mjs');
       const bridge = await import(pathToFileURL(loader).href + '?k12=' + Date.now()); // 全新模块实例(applied=false)
@@ -1820,9 +1968,9 @@ export const ENTRIES = [
   // 断言不锁定 %VAR% 引号/变量词形——注入命令实测微调不再破坏套件。
   {
     name: 'K13 安装器:hook 注入形态无关断言(basename+项目根引用)+旧条目幂等升级',
+    surface: 'hook 注入形态与幂等升级断言仅权威源侧可判',
     run: (dir) => {
       const repoRoot = path.resolve(SCRIPTS_DIR, '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       // ① 形态分类器:新旧托管形态均被 basename 识别;项目根引用特征仅根引用形态命中
       for (const legacy of [
@@ -2034,9 +2182,9 @@ export const ENTRIES = [
 
   {
     name: 'K15 桥接 loader:同源重装断言(首次安装后版本一致)',
+    surface: '同源重装后的 loader 版本一致断言仅权威源侧可判',
     run: (dir) => {
       const repoRoot = path.resolve(SCRIPTS_DIR, '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       const loader = path.join(repoRoot, 'scripts', 'dsh-bridge.mjs');
       if (!fs.existsSync(loader)) throw new Error('缺少 scripts/dsh-bridge.mjs');
@@ -2070,9 +2218,9 @@ export const ENTRIES = [
 
   {
     name: 'K16 桥接 loader:purge 后重建路径回归(loader 恢复与再装收敛)',
+    surface: 'purge 后 loader 重建路径回归断言仅权威源侧可判',
     run: (dir) => {
       const repoRoot = path.resolve(SCRIPTS_DIR, '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       const loader = path.join(repoRoot, 'scripts', 'dsh-bridge.mjs');
       if (!fs.existsSync(loader)) throw new Error('缺少 scripts/dsh-bridge.mjs');
@@ -2118,9 +2266,9 @@ export const ENTRIES = [
   // 正常推进、Comet 资产与用户文件原位未动。端到端执行断言（真实命令序列，非形态断言）。
   {
     name: 'K17 状态迁移:旧布局项目安装后状态可读且流程可继续',
+    surface: '旧布局状态迁移与节点推进断言仅权威源侧可判',
     run: (dir) => {
       const repoRoot = path.resolve(SCRIPTS_DIR, '..', '..', '..', '..');
-      if (!fs.existsSync(path.join(repoRoot, '.flow-comet', 'skills', 'flow-comet'))) return; // 安装副本无权威源
       const installer = path.join(repoRoot, 'scripts', 'prepare-env.mjs');
       const target = path.join(dir, 'k17-target');
       const legacyDir = path.join(target, '.comet');
@@ -2304,3 +2452,5 @@ export const ENTRIES = [
   },
 
 ];
+
+export const ENTRIES = RAW_ENTRIES.map(applyDistributionSurface);
