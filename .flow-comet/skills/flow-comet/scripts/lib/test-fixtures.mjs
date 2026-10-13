@@ -564,7 +564,7 @@ export const TASK_TFIX =
 
 // ---------- 波次分组合法性场景任务集（T01 新增） ----------
 // parallel="true" = 并行任务，parallel="false"/缺省 = 串行任务；序列判定以 <task> 块出现顺序为准。
-// 回归（bot 审查 · 解析一致性）：混排集里 P01 写成属性序 status 在前（status="pending" parallel="true"），
+// 回归：混排集里 P01 写成属性序 status 在前（status="pending" parallel="true"），
 // 且串行任务 T01 的 <action> 文本内含 literal parallel="true" 字样（不改变语义）——开标签解析
 // 属性序无关且不被块内文本干扰（旧整块查找会误判 T01 为并行 → 混排漏报）。
 // 串→并→串（S→P→S）：串行 T01 → 并行 P01/P02 → 串行 T02（混排，禁止）
@@ -939,7 +939,7 @@ export function dropNamedImport(text, name) {
 }
 
 // 定义形态（函数声明 / 常量赋值）的单一表达式：定义面计数与「单源静态锁」共用——两处各写一份
-// 会在口径演进时分叉（L-067 形态）。
+// 会在口径演进时分叉。
 export function engineDefinitionPattern(name, flags = '') {
   return new RegExp('(?:export\\s+)?(?:async\\s+)?function\\s+' + name + '\\b'
     + '|(?:export\\s+)?const\\s+' + name + '\\s*=', flags);

@@ -1214,7 +1214,7 @@ export const ENTRIES = [
 
   // 170: 零提交旁路收紧——noCommit 结果若携带 tracked 提交：新 change BLOCKED / 旧 change
   // HANDOFF WARN；空提交（--allow-empty）正例通过。锚定 AC-1（防「空 write_files 声明」
-  // 成为携带任意提交的逃逸口——bot 评审 Major）。
+  // 成为携带任意提交的逃逸口）。
   // ④ F-6 请求侧补 tracked 负例：write_files 路径虽被 .gitignore 命中、但该路径已 tracked
   //（index-aware check-ignore 退出 1）→ 不记 noCommit（tracked 提交仍走完整子集校验）。
   {
