@@ -106,7 +106,7 @@ export function classify(probe, state) {
 }
 
 // 输出提示（公开描述性文案；INIT-NEEDED 含预算说明与参数指引）
-// C 优化（2026-08-10）：CONTEXT 已满足模板但无扫描记录（agent 生成后未重跑）→
+// CONTEXT 已满足模板但无扫描记录（agent 生成后未重跑）→
 // 提示精准动作（记录扫描时间）而非误导性的"刷新"文案。
 export async function printDetection(runRoot, probe, verdict, out = console) {
   if (verdict === 'skip') return;
@@ -133,7 +133,7 @@ export async function printDetection(runRoot, probe, verdict, out = console) {
 }
 
 // CONTEXT 模板 7 段标题（校验基准——agent 生成后脚本校验结构完整性）
-// 2026-08-10 改进：段清单从 flow-kit/templates/CONTEXT.md 解析派生（括号前前缀），
+// 段清单从 flow-kit/templates/CONTEXT.md 解析派生（括号前前缀），
 // 模板缺失/解析不到时 fallback 内置（对齐 C2 段名校验模板派生模式，消灭手抄漂移）。
 const CONTEXT_SECTIONS_FALLBACK = [
   '## 项目概要',
