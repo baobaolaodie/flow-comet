@@ -39,7 +39,7 @@ cd <你的项目>
 fcomet init
 ```
 
-`fcomet` 与 `flow-comet` 是同一个安装器的两个命令名。只要其它参数已经表达了意图，`init` 词元可以省略（`fcomet --target <dir>` 等价）；`--target` 本身也可省略，缺省为当前目录。**不带任何参数**时只打印用法并非零退出，不会安装。在交互式终端里，未传 `--platform` 的运行会询问装哪个平台，并按探测到的痕迹预勾选；非交互用 `--platform claude-code`、`--platform codex`、`--platform dsh`，或用逗号组合（如 `--platform claude-code,dsh`）与 `--platform all`。重复执行同一条命令是**幂等更新**。升级全局包只换 CLI——要让项目里的副本更新，需在该项目重跑 `fcomet init`。
+`fcomet` 与 `flow-comet` 是同一个安装器的两个命令名。只要其它参数已经表达了意图，`init` 词元可以省略（`fcomet --target <dir>` 等价）；`--target` 本身也可省略，缺省为当前目录。**不带任何参数**时只打印用法并非零退出，不会安装。在交互式终端里，未传 `--platform` 的运行会询问装哪个平台，标出探测到的痕迹并把它作为默认值；非交互用 `--platform claude-code`、`--platform codex`、`--platform dsh`，或用逗号组合（如 `--platform claude-code,dsh`）与 `--platform all`。重复执行同一条命令是**幂等更新**。升级全局包只换 CLI——要让项目里的副本更新，需在该项目重跑 `fcomet init`。
 
 **验证**：
 
@@ -76,7 +76,7 @@ cat .claude/skills/flow-comet/INSTALLED_VERSION    # 写进本项目的版本标
 
 ## 真实运行产物
 
-一次完整 8 节点运行会留下下面这条工件链——它是一次真实归档的 change（端到端测试项目，2026-08-13），保留在本仓库里作为质量参照：CHANGE / REQUIREMENT / DESIGN / TASK / 六段 SUMMARY / 带处置标记的 REVIEW / TEST / UAT / KNOWN-ISSUES / skill-load 声明标记。
+一次完整 8 节点运行会留下下面这条工件链——[一次真实归档的 change](docs/examples/processor-pipeline/)（端到端测试项目，2026-08-13），保留在本仓库里作为质量参照：CHANGE / REQUIREMENT / DESIGN / TASK / 六段 SUMMARY / 带处置标记的 REVIEW / TEST / UAT / KNOWN-ISSUES / skill-load 声明标记。
 
 ```
 processor-pipeline/            （归档 change，完整产物集）
@@ -99,7 +99,7 @@ processor-pipeline/            （归档 change，完整产物集）
 流程是 flow-kit 的 9 个阶段；引擎把它们跑成 8 个节点。CHANGE 与 REQUIREMENT 由 `open` 覆盖，TEST 与 REVIEW 由 `review` 覆盖，DEV 则按执行模式跑成 `execute` 或 `subagent-execute`。每个节点的出口都先被校验，下一个节点才会打开——`verify` 出口会真实执行 `TEST.md` 里的命令——每个节点的工件都落在 `.specs/<change-id>/` 下。
 
 <p align="center">
-  <img src="assets/readme/workflow.svg" width="100%" alt="flow-kit 的 9 个阶段映射到引擎的 8 个节点：CHANGE 与 REQUIREMENT 合并为 open，TEST 与 REVIEW 合并为 review，DEV 按执行模式跑成 execute 或 subagent-execute，每段转换都有一道闸门" />
+  <img src="assets/readme/workflow.gif" width="100%" alt="动效示意图：flow-kit 的 9 个阶段映射到引擎的 8 个节点——CHANGE 与 REQUIREMENT 合并为 open，TEST 与 REVIEW 合并为 review，DEV 按执行模式跑成 execute 或 subagent-execute，每段转换都有一道闸门" />
 </p>
 
 手动驱动一个节点、每个节点产出什么工件、以及两套命令面，见[使用](docs/USAGE-zh.md)；引擎保证什么、节点出口如何被校验，见[核心机制](docs/MECHANISM-zh.md)。

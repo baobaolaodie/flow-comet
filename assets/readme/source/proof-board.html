@@ -1,4 +1,15 @@
 <!doctype html>
+<!--
+  Layout source for assets/readme/proof-board.png. The two captures are placed at
+  their native pixel size — never upscaled — and the board is rendered once with:
+
+    chrome --headless=new --disable-gpu --hide-scrollbars
+           --force-device-scale-factor=2 --window-size=1200,320
+           --screenshot=assets/readme/proof-board.png
+           file:///<repo>/assets/readme/source/proof-board.html
+
+  Image paths are relative to this file, so the board renders from any checkout.
+-->
 <html lang="en"><head><meta charset="utf-8"><title>proof-board</title>
 <style>
   html, body { margin: 0; padding: 0; overflow: hidden; background: #ffffff; }
@@ -24,12 +35,12 @@
   <div class="label mono">REAL RUNS · TWO UNEDITED TERMINAL CAPTURES</div>
 
   <div class="card" id="cardA">
-    <img src="file:///D:/LongYinHaHa/VSCode/flow-comet/images/long-run-4h-and-skill-triggering.png" width="561" height="99" alt="">
+    <img src="../long-run-4h-and-skill-triggering.png" width="561" height="99" alt="">
     <div class="cap">4-hour session: the workflow skills keep loading</div>
   </div>
 
   <div class="card" id="cardB">
-    <img src="file:///D:/LongYinHaHa/VSCode/flow-comet/images/long-run-5h.png" width="328" height="52" alt="">
+    <img src="../long-run-5h.png" width="328" height="52" alt="">
     <div class="cap">5-hour run: verification and UAT at the end</div>
   </div>
 

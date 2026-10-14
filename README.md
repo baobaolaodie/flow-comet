@@ -39,7 +39,7 @@ cd <your project>
 fcomet init
 ```
 
-`fcomet` and `flow-comet` are two names for the same installer. The `init` token may be omitted whenever another argument expresses the intent (`fcomet --target <dir>`), and `--target` itself defaults to the current directory; called with no arguments at all the command prints its usage and exits non-zero instead of installing. On a terminal, a run without `--platform` asks which platform to set up, pre-ticking whatever it detects in the project; for a non-interactive pick use `--platform claude-code`, `--platform codex`, `--platform dsh`, a comma-separated combination such as `--platform claude-code,dsh`, or `--platform all`. Re-running the same command updates an existing install and is idempotent. Upgrading the global package only replaces the CLI — run `fcomet init` in a project again to refresh that project's copy.
+`fcomet` and `flow-comet` are two names for the same installer. The `init` token may be omitted whenever another argument expresses the intent (`fcomet --target <dir>`), and `--target` itself defaults to the current directory; called with no arguments at all the command prints its usage and exits non-zero instead of installing. On a terminal, a run without `--platform` asks which platform to set up, marking whatever it detects in the project and offering it as the default; for a non-interactive pick use `--platform claude-code`, `--platform codex`, `--platform dsh`, a comma-separated combination such as `--platform claude-code,dsh`, or `--platform all`. Re-running the same command updates an existing install and is idempotent. Upgrading the global package only replaces the CLI — run `fcomet init` in a project again to refresh that project's copy.
 
 **Verify**:
 
@@ -76,7 +76,7 @@ Prerequisites, all four install options, the per-platform verification steps and
 
 ## Real-run artifacts
 
-A complete 8-node run leaves the artifact trail below — a real archived change from the end-to-end test project (2026-08-13), kept in this repository as the quality reference: CHANGE / REQUIREMENT / DESIGN / TASK / six-section summaries / REVIEW with disposition markers / TEST / UAT / KNOWN-ISSUES / skill-load declaration markers.
+A complete 8-node run leaves the artifact trail below — [a real archived change](docs/examples/processor-pipeline/) from the end-to-end test project (2026-08-13), kept in this repository as the quality reference: CHANGE / REQUIREMENT / DESIGN / TASK / six-section summaries / REVIEW with disposition markers / TEST / UAT / KNOWN-ISSUES / skill-load declaration markers.
 
 ```
 processor-pipeline/            (archived change, full artifact set)
@@ -99,7 +99,7 @@ Two captures from real sessions of this project, unedited: a workflow skill load
 The process is flow-kit's nine stages; the engine runs them as eight nodes. CHANGE and REQUIREMENT are covered by `open`, TEST and REVIEW by `review`, and DEV runs as `execute` or `subagent-execute` depending on the execution mode. Every node's exit is validated before the next one opens — the `verify` exit really executes the commands in `TEST.md` — and each node's artifacts land under `.specs/<change-id>/`.
 
 <p align="center">
-  <img src="assets/readme/workflow.svg" width="100%" alt="Nine flow-kit stages mapped onto the engine's eight nodes: CHANGE and REQUIREMENT merge into open, TEST and REVIEW into review, DEV runs as execute or subagent-execute, and every transition carries a gate" />
+  <img src="assets/readme/workflow.gif" width="100%" alt="An animated diagram mapping the nine flow-kit stages onto the engine's eight nodes: CHANGE and REQUIREMENT merge into open, TEST and REVIEW into review, DEV runs as execute or subagent-execute, and every transition carries a gate" />
 </p>
 
 Driving a node by hand, the artifacts each node produces, and the two command surfaces are documented in [Usage](docs/USAGE.md); what the engine guarantees and how a node's exit is validated are in [Core Mechanisms](docs/MECHANISM.md).
