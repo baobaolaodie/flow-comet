@@ -10,6 +10,7 @@ import { EXECUTE_FAMILY_NODE_IDS, normalizeHeading } from '../route-node.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from '../task-parsing.mjs';
 import { runRoot, fileExists } from './guard-state-io.mjs';
 import { isNewChange, templateSectionPatterns } from './guard-routing.mjs';
+import { TASK7_REQUIRED } from './task-graph.mjs';
 
 // 段名归一化：委托 route-node 共享 heading 归一（单一权威）——去标题标记 / 尾部括号（如
 // Why（为什么做）→ Why）/ 编号前缀（1. 决策清单 → 决策清单）/ 闭合 ATX，去首尾空白 + 小写。
@@ -215,9 +216,8 @@ export async function runSummaryTemplateFidelityGate({ node, state }) {
 // name/read_files/write_files/action/verify/done/depends_on；缺任一 → 新 BLOCK / 旧 WARN。
 // 开标签解析/整块提取沿用 task-parsing.mjs（属性序无关）。宽容：任务块采用旧式一字段形态
 // （无 <name> 标记）的 TASK 视为旧格式 → 仅渐进 WARN（不误拦既有波次/路由回归载体）；采用新
-// 模板形态（含 <name>）则按 7 字段强校验。
-export const TASK7_REQUIRED = ['name', 'read_files', 'write_files', 'action', 'verify', 'done', 'depends_on'];
-
+// 模板形态（含 <name>）则按 7 字段强校验。字段集从 `task-graph.mjs` 的单一权威常量取用（执行期
+// `replan` 判据同源）——本模块不得再写一份字面集合，否则两侧会在规则演进时分叉。
 export async function runTaskSevenFieldGate({ node, state }) {
   if (node.id !== 'plan' || !state.activeChange) return;
   const task7File = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');

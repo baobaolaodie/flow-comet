@@ -2,13 +2,18 @@
 // 承载：① 协议节点顺序 / 启用 / 任务文件路径（route · protocolNodeEnabled · protocolTaskFilePath ·
 // EXECUTE_FAMILY_NODE_IDS）；② 任务依赖解析与依赖图（taskDependencyEligibility · analyzeDependencyGraph）；
 // ③ 并行写冲突检测三族（findParallelWriteConflicts 及其构件）；④ 任务集签名与版本语义 ·
-// history 事件归属 · change 名形态 · 修复任务族文本谓词。
+// history 事件归属 · change 名形态 · 修复任务族文本谓词；⑤ 任务块 7 字段集合（TASK7_REQUIRED）。
 // 纯判定：只读 TASK.md 文本、协议对象与 state.history，无 console 输出、无 process.exit、无 state 写入。
 // 依赖方向：本模块不 import 其他 lib 模块（lib 层最底层）——入口与兄弟模块单向依赖本模块。
 import { promises as fs } from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
 import { taskBlocks, taskOpeningAttrs } from '../task-parsing.mjs';
+
+// 任务块 7 字段集合（单一权威）：plan 出口的 TASK 完整性门禁与执行期 `replan` 的重签判据共用本常量。
+// `replan` 是执行期唯一允许修订任务集的通道，两侧判据必须同源——任何一侧另写一份字面集合，都会在
+// 规则演进时静默分叉（plan 出口会拒的任务集被 `replan` 放行）。消费方一律 import 取用。
+export const TASK7_REQUIRED = ['name', 'read_files', 'write_files', 'action', 'verify', 'done', 'depends_on'];
 
 // 节点顺序 = 协议 nodes 顺序（disabled 过滤）。全部节点排序判定共用本实现（单一来源）。
 export function route(protocol) {

@@ -12,6 +12,7 @@ import { taskOpeningAttrs, taskBlocks } from '../task-parsing.mjs';
 import { validateStateFields } from '../state-schema.mjs';
 import { inspectWorkflowPathSegments } from '../protocol-utils.mjs';
 import { fileExists, inspectReentryChangeDir, readJson, readState, runRootDir, specsDir, stateFile, writeState } from './state-io.mjs';
+import { TASK7_REQUIRED } from './task-graph.mjs';
 
 // reenter <target> --authorized-by <source> --reason <text> [--continue-round <n>]
 // 受控重入（archive 源回边）：archive 已 entry 且归档移动尚未发生时，用户显式授权把工作归属
@@ -420,13 +421,14 @@ export async function runReplan(protocol, argv) {
       + '；恢复: 调整任务 depends_on——移除成环引用或改为真实存在的任务 id 后重试');
     process.exit(1);
   }
-  // 任务字段完整性（与 plan 出口同一判据）：新模板形态（含 <name>）且新 change → BLOCK；
-  // 旧式一字段形态 / 旧 change 保持渐进 WARN（不放大既有语义）。
-  const replanTask7Required = ['name', 'read_files', 'write_files', 'action', 'verify', 'done', 'depends_on'];
+  // 任务字段完整性（与 plan 出口同一判据）：字段集从 `task-graph.mjs` 的单一权威常量取用——本模块
+  // 是执行期唯一允许修订任务集的通道，若在此另写一份字面集合，plan 出口会拒的任务集将被 replan
+  // 静默放行。新模板形态（含 <name>）且新 change → BLOCK；旧式一字段形态 / 旧 change 保持渐进
+  // WARN（不放大既有语义）。
   const replanTask7NewFormat = taskList.some((block) => /<name\b/i.test(block));
   const replanTask7Broken = [];
   for (const block of taskList) {
-    const missing = replanTask7Required.filter((field) => !new RegExp('</?' + field + '\\b', 'i').test(block));
+    const missing = TASK7_REQUIRED.filter((field) => !new RegExp('</?' + field + '\\b', 'i').test(block));
     if (missing.length > 0) {
       const idAttr = (taskOpeningAttrs(block) || {}).id || '?';
       replanTask7Broken.push((idAttr !== '?' ? idAttr + ' ' : '') + '缺 ' + missing.join('/'));
@@ -436,7 +438,7 @@ export async function runReplan(protocol, argv) {
     if (replanTask7NewFormat && state.newChange === true) {
       // 文案的集合字符串**从判据常量派生**（不得在此再写一遍字面集合——第二处同口径表达会在
       // 判据演进时静默落后于实现；构造方式不改变渲染结果）。
-      console.error('BLOCKED: TASK.md 任务缺 7 字段（' + replanTask7Required.join('/') + '）: '
+      console.error('BLOCKED: TASK.md 任务缺 7 字段（' + TASK7_REQUIRED.join('/') + '）: '
         + replanTask7Broken.join('; ') + '；恢复: 对照 flow-kit/templates/TASK.md 补齐每个 <task> 的缺字段后重试；replan 不做校验豁免');
       process.exit(1);
     }

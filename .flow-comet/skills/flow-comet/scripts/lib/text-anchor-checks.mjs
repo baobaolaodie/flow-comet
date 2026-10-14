@@ -21,7 +21,6 @@ import {
   REPO_ROOT,
   SCRIPTS_DIR,
   engineCodeText,
-  engineConsumersOf,
   engineDefinitionModule,
   engineDefinitionPattern,
   engineImportsSymbolFrom,
@@ -1464,11 +1463,14 @@ export function templateAuthorityRegistrationProblems(actualHolders, expectedHol
 }
 
 // ——— 7 字段集合的文本 ↔ 实现一致锚（场景 184 使用） ———
-// 唯一权威 = `workflow-guard.mjs` 的 `TASK7_REQUIRED` 常量（plan 出口判据的集合来源）。锚**从常量派生**
-// 集合后再与技能树文本逐处对账：任一处枚举与判据分叉即红——「两册三处而两级基线全绿」的成因正是
-// 「同一口径另写一份、且没有断言绑定」；锚里**不得把集合再抄一遍**（抄一遍就是
-// 又造一处同口径表达）。
+// 唯一权威 = 引擎的 `TASK7_REQUIRED` 常量（plan 出口判据与执行期 `replan` 判据的共同集合来源；所在
+// 模块由导出符号反查，锚里不写文件名）。锚**从常量派生**集合后再与技能树文本逐处对账：任一处枚举
+// 与判据分叉即红——「两册三处而两级基线全绿」的成因正是「同一口径另写一份、且没有断言绑定」；锚里
+// **不得把集合再抄一遍**（抄一遍就是又造一处同口径表达）。
 export const TASK7_AUTHORITY_CONSTANT = 'TASK7_REQUIRED';
+// 7 字段 BLOCKED 文案的**渲染片段**：文案落点由该片段在引擎面内反查。常量已下沉到最底层模块——
+// 「权威常量所在模块」与「渲染文案的模块」不再同址，落点判定不得再假定两者合一。
+export const TASK7_MESSAGE_ANCHOR = '任务缺 7 字段（';
 // 「7 字段」标记（中文 / 英文两形态）：标记与枚举**同行**是当前唯一形态；标记行不带枚举（指针形态，
 // 如「集合见上表」）不算缺席——判据只对「标记 + 枚举」同场的行发声。
 export const TASK7_MARKER_RE = /7\s*个?\s*字段|7 required fields|7-field set/;
@@ -1509,6 +1511,29 @@ export function task7ConstantNames(src, fieldSet) {
     if (fields.length === fieldSet.length && fields.every((field, index) => field === fieldSet[index])) {
       names.push(match[1]);
     }
+  }
+  return names;
+}
+
+// 文案落点（判据形态：不写文件名）：引擎面内**渲染**该 BLOCKED 文案的模块——注释层引用不是渲染点
+// （`engineCodeText` 去注释行）。常量搬家、落点新增都不必改锚：新增落点自动进入逐处对账。
+export function task7MessageSites(scriptsDir = SCRIPTS_DIR) {
+  return [...engineScriptTexts(scriptsDir)]
+    .filter(([, text]) => engineCodeText(text).includes(TASK7_MESSAGE_ANCHOR))
+    .map(([rel]) => rel);
+}
+
+// 值等于权威集合的常量名（文案派生的合法来源）：① 本模块自持的字面常量（`const NAME = [<集合>];`）；
+// ② **单源取用**的权威常量（以具名 import 从权威模块取用，含经再导出枢纽的情形）——常量下沉到最底层
+// 模块后，文案落点不再自持字面量，取用共享常量同样是「从判据常量派生」，判据「不得再写一遍字面
+// 集合」不变。
+export function task7DerivationNames(src, fieldSet, { rel, authorityRel, scriptsDir = SCRIPTS_DIR } = {}) {
+  const names = task7ConstantNames(src, fieldSet);
+  if (rel !== undefined && authorityRel !== undefined
+    && engineImportsSymbolFrom({
+      text: src, consumerRel: rel, symbol: TASK7_AUTHORITY_CONSTANT, sourceRel: authorityRel, scriptsDir,
+    })) {
+    names.push(TASK7_AUTHORITY_CONSTANT);
   }
   return names;
 }
@@ -1576,19 +1601,20 @@ export function task7EnumerationProblems(fieldSet, docs) {
   return out;
 }
 
-// 判据：「文案落后于判据」静默面——两处 BLOCKED 文案的集合字符串必须从判据常量派生（文案区域须出现
-// 「值等于权威集合的常量」的 .join('/')，且不得再现该集合的字面拼接）。构造方式变了、渲染结果不变。
-export function task7MessageDerivationProblems(fieldSet, sources) {
+// 判据：「文案落后于判据」静默面——每处 BLOCKED 文案的集合字符串必须从**值等于权威集合的常量**
+// 派生（文案区域须出现该常量的 .join('/')，且不得再现该集合的字面拼接）。构造方式变了、渲染结果
+// 不变；`sources` = 文案落点（rel → 文本），`context.authorityRel` 供单源取用判定用。
+export function task7MessageDerivationProblems(fieldSet, sources, context = {}) {
   const out = [];
   const joined = fieldSet.join('/');
-  for (const [rel, src] of Object.entries(sources)) {
-    const at = src.indexOf('任务缺 7 字段（');
+  for (const [rel, src] of sources) {
+    const at = src.indexOf(TASK7_MESSAGE_ANCHOR);
     if (at < 0) {
       out.push(rel + ' 未找到「任务缺 7 字段」文案锚点（文案派生判据无从对账）');
       continue;
     }
     const region = src.slice(at, at + 240);
-    const constants = task7ConstantNames(src, fieldSet);
+    const constants = task7DerivationNames(src, fieldSet, { ...context, rel });
     if (constants.length === 0) {
       out.push(rel + ' 未找到值等于权威集合的常量（判据与文案的共同来源缺席）');
       continue;
@@ -1604,9 +1630,9 @@ export function task7MessageDerivationProblems(fieldSet, sources) {
 }
 
 // 7 字段集合锚的聚合判据（真实判据 + 反向构造探针；场景 184e 调用，返回问题描述数组）。
-// **落点反查**（判据形态：不写文件名）：权威常量所在模块与文案派生所在模块都由符号在引擎面内
-// 反查——模块再切分 / 再搬家不必改锚（"唯一权威在 workflow-guard.mjs 里" 这类布局事实不再在
-// 锚里存第二份）；两者任一不在场即显式报前提失效。
+// **落点反查**（判据形态：不写文件名）：权威常量所在模块由导出符号反查、文案落点由渲染片段反查——
+// 模块再切分 / 再搬家不必改锚（"唯一权威在 workflow-guard.mjs 里" 这类布局事实不再在锚里存第二份）；
+// 常量模块与文案落点**各自独立**反查（常量下沉后两者不再同址）；任一前提不在场即显式报失效。
 export function task7SetAnchorProblems({ docs, scriptsDir = SCRIPTS_DIR }) {
   const out = [];
   const authority = engineDefinitionModule(TASK7_AUTHORITY_CONSTANT, scriptsDir);
@@ -1621,29 +1647,26 @@ export function task7SetAnchorProblems({ docs, scriptsDir = SCRIPTS_DIR }) {
       + ' 常量元素数 ≠ 7（7 字段集合的唯一权威不在场，文本侧无从对账）');
     return out;
   }
-  const derivationRels = engineConsumersOf('replanTask7Required', scriptsDir);
-  if (derivationRels.length !== 1) {
-    out.push('7 字段文案的派生落点不唯一（全引擎应恰一个模块持有 replanTask7Required）: '
-      + JSON.stringify(derivationRels));
+  // 文案落点（plan 出口门禁 + 执行期 replan 各一处）须都在场：任一处文案被删 / 改成指针，文案派生
+  // 判定面即残缺——按**前提失效**显式报（不静默取小集后照样判绿）。
+  const messageRels = task7MessageSites(scriptsDir);
+  if (messageRels.length < 2) {
+    out.push('7 字段 BLOCKED 文案落点不足两处（plan 出口门禁与 replan 出口须各自渲染该文案）: '
+      + JSON.stringify(messageRels));
     return out;
   }
-  const sources = {
-    [authority.file]: authority.text,
-    [derivationRels[0]]: fs.readFileSync(path.join(scriptsDir, derivationRels[0]), 'utf8'),
-  };
+  const sources = new Map(messageRels.map((rel) => [rel, fs.readFileSync(path.join(scriptsDir, rel), 'utf8')]));
+  const context = { authorityRel: authority.file, scriptsDir };
   out.push(...task7EnumerationProblems(fieldSet, docs));
-  out.push(...task7MessageDerivationProblems(fieldSet, sources));
-  out.push(...task7ReverseConstructionProblems(fieldSet, docs, sources, {
-    authorityRel: authority.file,
-    derivationRel: derivationRels[0],
-  }));
+  out.push(...task7MessageDerivationProblems(fieldSet, sources, context));
+  out.push(...task7ReverseConstructionProblems(fieldSet, docs, sources, context));
   return out;
 }
 
 // 反向构造（判别句式 + 反向构造；与真实判据同一实现驱动）：逐项把锚的输入改坏 ⇒ 必红；
 // 另含**判别力方向**探针——合法新增站点必须**零问题**（防「全局计数地板」式自锁：以总量取红的探针会让
 // 「新增一处」与「丢失一处」对冲，且把报错方向指向探针而非真实原因）。
-export function task7ReverseConstructionProblems(fieldSet, docs, sources, locations) {
+export function task7ReverseConstructionProblems(fieldSet, docs, sources, context) {
   const out = [];
   const replaceRunLine = (targetDocs, run, mutate) => new Map(targetDocs).set(run.rel,
     (targetDocs.get(run.rel) ?? '').split(/\r?\n/)
@@ -1653,6 +1676,9 @@ export function task7ReverseConstructionProblems(fieldSet, docs, sources, locati
       .filter((line, index) => index !== run.line - 1).join('\n'));
   const appendSite = (targetDocs, rel, fields) => new Map(targetDocs).set(rel,
     (targetDocs.get(rel) ?? '') + '\n（反向构造：新增站点）7 字段：' + fields.join(' / ') + '\n');
+  // 文案落点全数改写（逐个落点同改：文案面探针须证明**每一处**落点的派生都被判据守住，而不是只守住
+  // 反查所得的第一个）。
+  const rewriteSourceTexts = (from, to) => new Map([...sources].map(([rel, src]) => [rel, src.replaceAll(from, to)]));
   const sample = task7KnownSiteRuns(fieldSet, docs)[0];
   if (sample === undefined) {
     out.push('7 字段枚举反向构造的前提不成立：已知站点上找不到与派生集合一致的枚举');
@@ -1682,14 +1708,14 @@ export function task7ReverseConstructionProblems(fieldSet, docs, sources, locati
     ['实现侧常量把 depends_on 改成 dependsOn',
       () => task7EnumerationProblems(fieldSet.map((field) => (field === 'depends_on' ? 'dependsOn' : field)), docs),
       '与实现集合不一致'],
-    // 文案派生面（⑧）：构造方式回退 / 派生被抽掉 ⇒ 必红（探针改坏的是**反查所得**的两个落点）
+    // 文案派生面（⑧）：构造方式回退 / 派生被抽掉 ⇒ 必红（探针改坏的是**反查所得**的全部文案落点）
     ['文案回写字面集合',
-      () => task7MessageDerivationProblems(fieldSet, { ...sources,
-        [locations.authorityRel]: sources[locations.authorityRel].replace(
-          TASK7_AUTHORITY_CONSTANT + ".join('/')", "'" + fieldSet.join('/') + "'") }), '又写了一遍字面集合'],
+      () => task7MessageDerivationProblems(fieldSet,
+        rewriteSourceTexts(TASK7_AUTHORITY_CONSTANT + ".join('/')", "'" + fieldSet.join('/') + "'"), context),
+      '又写了一遍字面集合'],
     ['文案抽掉派生',
-      () => task7MessageDerivationProblems(fieldSet, { ...sources,
-        [locations.derivationRel]: sources[locations.derivationRel].replace("replanTask7Required.join('/')", "'7 字段'") }),
+      () => task7MessageDerivationProblems(fieldSet,
+        rewriteSourceTexts(TASK7_AUTHORITY_CONSTANT + ".join('/')", "'7 字段'"), context),
       '未从判据常量派生'],
   ];
   // 探针判定只看**相对当前文本的新增问题**（`ambient` 差分）：工作树本身已红时，探针不得把
