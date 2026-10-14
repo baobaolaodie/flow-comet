@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="hero-title hero-desc">
+  <title id="hero-title">flow-comet — an automated execution engine for the flow-kit 9-stage workflow</title>
+  <desc id="hero-desc">The project mark — a heavy ring closed by a green gate — beside the name, one plain-language sentence about the engine, and four attributes. On the right, the engine's eight nodes are drawn as a rail in which every transition carries a gate mark.</desc>
+  <defs>
+    <style>
+      .sans { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="420" rx="22" fill="#0B1016"/>
+
+  <!-- ── the mark: a cycle closed by a gate ─────────────────────── -->
+  <g transform="translate(56 56) scale(1.625)">
+    <path d="M46 14 A21 21 0 1 0 46 50" fill="none" stroke="#E6EDF3" stroke-width="9" stroke-linecap="butt"/>
+    <rect x="41" y="21" width="11" height="22" fill="#4CAF50"/>
+  </g>
+
+  <!-- ── identity ───────────────────────────────────────────────── -->
+  <text class="mono" x="184" y="106" font-size="18" letter-spacing="2" fill="#8B98A8">FOR THE FLOW-KIT 9-STAGE WORKFLOW</text>
+  <text class="sans" x="184" y="156" font-size="58" font-weight="700" fill="#E6EDF3">flow-comet</text>
+
+  <text class="sans" x="56" y="242" font-size="24" fill="#E6EDF3">An automated execution engine that turns AI coding</text>
+  <text class="sans" x="56" y="274" font-size="24" fill="#E6EDF3">discipline into a verifiable state machine.</text>
+  <text class="mono" x="56" y="332" font-size="19" fill="#8B98A8">deterministic · protocol-driven</text>
+  <text class="mono" x="56" y="362" font-size="19" fill="#8B98A8">guard-validated · subagent-isolated</text>
+
+  <!-- ── the eight-node rail ────────────────────────────────────── -->
+  <rect x="660" y="40" width="484" height="340" rx="16" fill="#141B24" stroke="#243040" stroke-width="1.5"/>
+  <text class="mono" x="692" y="82" font-size="18" letter-spacing="1.6" fill="#8B98A8">8 NODES · EVERY EXIT IS A GATE</text>
+  <line x1="692" y1="100" x2="1112" y2="100" stroke="#243040" stroke-width="1.5"/>
+  <line x1="706" y1="134" x2="706" y2="336" stroke="#243040" stroke-width="2"/>
+  <g fill="#4CAF50">
+    <circle cx="706" cy="134" r="5"/>
+    <circle cx="706" cy="163" r="5"/>
+    <circle cx="706" cy="192" r="5"/>
+    <circle cx="706" cy="221" r="5"/>
+    <circle cx="706" cy="250" r="5"/>
+    <circle cx="706" cy="279" r="5"/>
+    <circle cx="706" cy="308" r="5"/>
+    <circle cx="706" cy="336" r="5"/>
+  </g>
+  <g class="mono" font-size="20" fill="#E6EDF3">
+    <text x="732" y="141">open</text>
+    <text x="732" y="170">design</text>
+    <text x="732" y="199">plan</text>
+    <text x="732" y="228">execute</text>
+    <text x="732" y="257">subagent-execute</text>
+    <text x="732" y="286">review</text>
+    <text x="732" y="315">verify</text>
+    <text x="732" y="343">archive</text>
+  </g>
+  <g stroke="#2E6B33" stroke-width="2">
+    <line x1="699" y1="148" x2="713" y2="148"/>
+    <line x1="699" y1="177" x2="713" y2="177"/>
+    <line x1="699" y1="206" x2="713" y2="206"/>
+    <line x1="699" y1="235" x2="713" y2="235"/>
+    <line x1="699" y1="264" x2="713" y2="264"/>
+    <line x1="699" y1="293" x2="713" y2="293"/>
+    <line x1="699" y1="322" x2="713" y2="322"/>
+  </g>
+  <text class="mono" x="1112" y="360" font-size="18" fill="#8B98A8" text-anchor="end">artifacts land in .specs/</text>
+</svg>

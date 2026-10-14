@@ -1,0 +1,47 @@
+{
+  "source": "assets/readme/workflow.svg",
+  "animated_svg": "assets/readme/source/workflow-motion.svg",
+  "published": "assets/readme/workflow.gif",
+  "static_fallback": "assets/readme/workflow.svg",
+  "width": 1200,
+  "fps": 10,
+  "duration": 4.8,
+  "frames": 48,
+  "colors": 128,
+  "dither": "none",
+  "max_size_mb": 2.0,
+  "renderer": "Chrome frame sheet (rsvg-convert and sips are unavailable on this host)",
+  "reveals": [
+    {
+      "family": "flow-kit stage labels",
+      "start": 0.0,
+      "per_item_step": 0.08,
+      "ease": "cubic-bezier(.22,.61,.36,1)",
+      "travel": "opacity only"
+    },
+    {
+      "family": "gate marks",
+      "start": 0.6,
+      "per_item_step": 0.08,
+      "ease": "cubic-bezier(.22,.61,.36,1)",
+      "travel": "scaleY 0 to 1"
+    },
+    {
+      "family": "engine node names",
+      "start": 1.4,
+      "per_item_step": 0.08,
+      "ease": "cubic-bezier(.22,.61,.36,1)",
+      "travel": "opacity .15 to 1"
+    }
+  ],
+  "hold": {
+    "start": 2.6,
+    "end": 4.4,
+    "note": "settled frames are identical"
+  },
+  "exit": {
+    "start": 4.4,
+    "end": 4.8,
+    "note": "last frame matches the first frame"
+  }
+}
