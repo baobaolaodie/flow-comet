@@ -7,7 +7,7 @@
 //   node evolve.mjs apply <候选 id> [<候选 id> ...] [--root <项目根>] [--scanner <执行工具>] [--stdout]
 //   node evolve.mjs --help | -h
 //
-// 单一权威（L-067）：「沉淀段在场」判定（hasSection9）与归档窗口判定（isArchivedAfterTimestamp）
+// 单一权威：「沉淀段在场」判定（hasSection9）与归档窗口判定（isArchivedAfterTimestamp）
 // 一律 import time-utils.mjs；时间形态 / 解析 / 天差走 nowTimestamp / formatLocalDate /
 // parseTimestamp / daysSince——本模块不内联第二份时间正则，也不自行拼接时间字符串。
 // 「改写前备份」的命名族与失败处置走 state-schema.mjs 的 backupBeforeWrite（单一来源）——
@@ -114,15 +114,15 @@ function usage() {
 
 // ---------- 侧命令 CLI 契约（单一来源） ----------
 // 根相对 POSIX 路径标签：三条横向命令的 CLI 摘要行与工件段落都要把绝对路径显示成项目根相对形态
-// （跨机器可读、可直接粘回命令行）。此前 evolve 内联、context-scan 自持一份同名助手——同一显示
-// 决定的第二份表达；现由本模块（侧命令共享助手的既有落点）导出，三条命令同源消费。
+// （跨机器可读、可直接粘回命令行）。同一显示决定不得有第二份表达（两份必然分叉）——由本模块
+// （侧命令共享助手的既有落点）唯一导出，三条命令同源消费。
 export function relativeLabel(root, file) {
   return path.relative(root, file).split(path.sep).join('/');
 }
 
 // 三条横向命令（evolve / health / context-scan）共用本解析器：`--root <目录>` 与 `--root=<目录>`
-// 两种形态、`--stdout`、`--help`/`-h`、未知参数**各只在此处表达一次**——此前三份自写脚手架必然分叉
-// （一条不支持等号形、`--help` 只有一条有、错误构造三份各写一遍）。位置参数语义（evolve 的
+// 两种形态、`--stdout`、`--help`/`-h`、未知参数**各只在此处表达一次**——多份自写脚手架必然分叉
+// （一条不支持等号形、`--help` 只有一条有、错误构造各写一遍）。位置参数语义（evolve 的
 // scan|apply 子命令与候选 id）与命令自有取值开关由调用方声明，本解析器不认识任何业务词元。
 // 契约要点：用法错误一律 throw（各命令顶层错误处理决定前缀，退出码统一 1）；`--help` 在位置参数
 // 之前短路（子命令之后写 `--help` 也只看用法）；取值开关悬空与未知参数一律可见报错，不静默忽略。
@@ -498,7 +498,7 @@ function fieldLine(key, value) {
 
 // 文件末尾追加「块」：`split('\n')` 对**以换行收尾**的文档留有一个零长度哨兵元素——它不是文档里的
 // 一行，而是「最后一行终结符」的占位。直接在哨兵之后 push 会拼出一条**裸 LF 空行**：CRLF 文档里
-// 同一文件出现两种行尾（评审实测 `-->\r\n\n\r\n---`），且末行终结符退化成一个孤立的 `\r`。
+// 同一文件出现两种行尾（实测 `-->\r\n\n\r\n---`），且末行终结符退化成一个孤立的 `\r`。
 // 追加前摘下哨兵、追加后放回 —— 整篇行尾一致，末尾换行约定不变（LF 文档同样收敛为**单空行**）。
 function appendBlock(lines, eol, blockLines) {
   const sentinel = lines.length > 0 && lines[lines.length - 1] === '' ? lines.pop() : null;

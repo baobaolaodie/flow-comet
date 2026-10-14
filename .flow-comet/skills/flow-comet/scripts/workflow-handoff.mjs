@@ -90,7 +90,7 @@ async function resolveJsonFileWithinRunRoot(jsonFile) {
 // 精确条目要求完全相等(不用前缀匹配——src/foo 不得匹配 src/foobar);
 // 段内含 * 的部分通配(如 src/*.test.js、src/*.mjs)转锚定正则匹配
 // 路径分隔符归一（单一来源）：Windows 反斜杠 → POSIX `/`；matchWriteFilePattern 与
-// F-6 字面路径资格判定共用（同口径两处实现必分叉——L-067）。
+// F-6 字面路径资格判定共用——同口径两处实现必然分叉，故共用同一实现。
 function toPosixPath(value) {
   return String(value).replace(/\\/g, '/');
 }
@@ -153,7 +153,7 @@ function gitIndexTracksPath(rel) {
 // 不用 --no-index、不 import prepare-env（不分发）。
 // 路径扫描增强（m-13）：runRoot 先 realpath 归一；对每个字面路径的最近已存在祖先逐段 lstat，
 // 任一段为 symlink/junction（或物理逃出 runRoot）→ fail-closed（目标不存在不算失败）。
-// 逐段扫描复用 protocol-utils 的单一权威，本处不得另写第二份 symlink/包含判据（L-067）。
+// 逐段扫描复用 protocol-utils 的单一权威，本处不得另写第二份 symlink/包含判据。
 // 失败类别（稳定机器码，作为 result 撤销审计的 revokeReason）：invalid-path（glob / 绝对路径 /
 // `..` 逃逸等字面形态不成立）、stale-eligibility（忽略规则变化，路径不再被证明 gitignored）、
 // became-tracked（路径已在 index 中）、symlink-junction-escape（祖先段 symlink/junction 或
@@ -448,7 +448,7 @@ async function main() {
       description = args.join(' ') || 'pending';
     }
     // 若未显式传 --write-files，从 TASK.md 自动解析（orchestrator 无需手动提取文件列表）。
-    // 解析三态（bot 评审收紧）：① 匹配到任务块且 <write_files> 存在 → 按内容分类；
+    // 解析三态：① 匹配到任务块且 <write_files> 存在 → 按内容分类；
     // ② 任务块缺失或块内无 <write_files> 元素 → 任务不可解析，新 change BLOCK，旧 change
     // WARN 且不设 noCommit（防未解析任务静默变零提交逃逸口）；③ TASK.md 读不到同 ②。
     // TASK.md 只读一次：任务开标签属性解析（归属门禁）复用 task-parsing.mjs；
@@ -559,7 +559,7 @@ async function main() {
       // "非 Return Contract"掩盖真因）
       // 消息按参数来源分级（设计语义 / AC-3）:--json-file 传入且文件内容损坏 →
       // "文件内容不是合法 JSON" + 长度元数据;内联传参损坏 → 保留 --json-file 建议。
-      // 安全(bot 审查):错误消息与 workflow-state record 统一——只含固定前缀 +
+      // 错误消息与 workflow-state record 统一（安全口径）——只含固定前缀 +
       // 长度元数据,绝不打印 raw 内容(含截断)。
       if (looksLikeObjectLiteral(raw)) {
         if (jsonFile !== null) {
@@ -600,7 +600,7 @@ async function main() {
     const isZeroCommit = hasRequest && (reqWriteFiles.length === 0 || reqNoCommit);
     if (isZeroCommit) {
       console.error('HANDOFF 零提交: ' + taskId + ' — 无 tracked 写文件（write_files 为空或全部可证明 gitignored），已跳过提交文件子集校验');
-      // 零提交边界收紧（bot 评审实证逃逸口）：声明零提交的结果若携带含 tracked 文件的提交，
+      // 零提交边界收紧：声明零提交的结果若携带含 tracked 文件的提交，
       // 等于从「空 write_files」旁路逃逸——新 change BLOCK / 旧 change WARN。探测异常降级
       // WARN 不阻断（对齐 M4 提交对象确认提示先例）。
       const zeroHash = (typeof parsed === 'object' && parsed !== null && parsed.commitHash && /^[0-9a-f]{7,40}$/i.test(String(parsed.commitHash)))

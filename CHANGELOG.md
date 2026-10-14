@@ -16,6 +16,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 - **The recommended companion is documented**: the README, Installation, Core Mechanisms and Troubleshooting pages now cover brooks-lint — the third-party review engine whose decay-risk framework the per-task self-check and the review rounds are built on — including what changes once it is installed and what a run does without it. ([#150](https://github.com/baobaolaodie/flow-comet/pull/150))
 
+### Changed
+
+- **The engine scripts and both regression suites are split into focused modules**: the engine's decision logic, the self-test scenario set and the system test item set now live in small single-purpose modules beside the entry points they belong to, while those entry-point paths and every engine behaviour stay unchanged, and the fixtures both suites share have moved into a module of their own. The recorded baseline follows the split — 325 scenarios, with the 93 system test items unchanged. ([#151](https://github.com/baobaolaodie/flow-comet/pull/151))
+
 ## [1.6.3] - 2026-10-11
 
 A release gathering the work accumulated after 1.6.2: how a delegation is judged is now the same on every supported platform — it rests on the identity the host reports for the caller rather than on how the workspace was built — with the four properties that make parallel work safe written down, every delegation recorded when it is handed off, and the commit and integration discipline written into the node skills; node guidance is read on demand instead of being repeated across the node skills, the facts about a node can be asked for with a read-only command, the pages that are not for the agent's use no longer ship with the installed skill tree, reinstalling no longer leaves generated files behind, and the check that requires every new changelog entry to carry a numbered pull-request link keeps working once a release moves those entries into the version section. ([#145](https://github.com/baobaolaodie/flow-comet/pull/145)) ([#146](https://github.com/baobaolaodie/flow-comet/pull/146)) ([#147](https://github.com/baobaolaodie/flow-comet/pull/147))

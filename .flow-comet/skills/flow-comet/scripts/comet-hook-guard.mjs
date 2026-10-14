@@ -53,7 +53,7 @@ function hookOk(extra) {
 }
 
 // 拦截输出：Codex 分支输出 {"decision":"block",reason} + exit 0（实测确认的 Codex deny 通道——
-// 2026-08-13 Codex 0.146：exit 2 / permissionDecision:"deny" 均不被 enforce,decision:"block"+exit 0 生效）;
+// exit 2 / permissionDecision:"deny" 均不被 enforce,decision:"block"+exit 0 生效）;
 // Claude Code 分支既有文本 + exit 2。
 function hookBlock(mainLine, detailLine) {
   if (isCodex) {
@@ -378,9 +378,9 @@ async function agentWorktreeWriteStaysIsolated(targetRel) {
 // （fail-closed）。hook 拦工具不拦脚本——脚本通道天然不触发 PreToolUse，不受影响。
 // 与 M1 归档白名单收窄同型：保护机器文件不被越权手改（含 direct 模式下白名单 [''] 曾
 // 放行 state 写入的 fail-open 缺口——执行者自切 direct 越权写的物理入口）。
-// 大小写变体闭合（CodeRabbit 采纳）：win32/darwin 文件系统大小写不敏感，`.Flow-Comet/Flow-Comet-
+// 大小写变体闭合：win32/darwin 文件系统大小写不敏感，`.Flow-Comet/Flow-Comet-
 // State.json` 与机器状态文件指向同一实体——目标路径先 toLowerCase() 再与机器状态相对路径
-// 比较，变体同等 BLOCK（修复前精确等值比较被变体绕过 → fail-open）。其他平台
+// 比较，变体同等 BLOCK（精确等值比较会被变体绕过 → fail-open）。其他平台
 // （大小写敏感文件系统）变体是不同文件，保持精确等值比较（不误拦合法路径）。
 // 取值唯一来源 = state-schema.mjs 的 RUNTIME_STATE_PATH（项目根相对的 POSIX 路径）。
 // 本文件不再硬编码该路径——命名空间/文件名变更只改 state-schema.mjs 一处。
@@ -405,7 +405,7 @@ function blockStateFileWrite(target) {
 // （消费方只问「是不是子代理」），不得下沉为 `if (platform === ...)` 之类的平台分支。
 // dsh 面按**实现位置修订**（规划期落定）：桥接只把委派深度透传进环境变量，身份判定与保护集判定的
 // 整条都归本文件独占——桥接不再持有任何一份判定，两侧没有分叉的余地（归因以本节为准）。
-// env 面的作用域收紧（2026-10-07）：CC / Codex 生成的 hook **直接**调用本文件、并不自证是 dsh——
+// env 面的作用域收紧：CC / Codex 生成的 hook **直接**调用本文件、并不自证是 dsh——
 // 只看深度变量时，该变量一旦被继承进这些 hook 的进程环境（父进程导出 / 包装脚本转发），守卫就会在
 // phase / worktree / runRoot 检查**之前**走子代理路径返回，只剩最小保护集兜底。故桥接在注入深度的
 // 同时注入**通道标记** FLOW_COMET_AGENT_DEPTH_SOURCE=dsh-bridge；env 面身份**要求两者同时在场**
@@ -487,7 +487,7 @@ const protocolPath = resolveProtocol(packageRoot, runRoot, []);
 //    RUNTIME_STATE_PATH）；② 本次运行**实际生效**的协议文件（取值来源 = 上方 protocol-utils
 //    resolveProtocol 的解析结果——本文件不另造第二份协议路径口径）。
 // 同一性判定复用 protocol-utils 既有受保护路径判据 workflowPathInside（互含 ⇒ 同一路径）：
-// 路径归一/相对化只此一份，本文件不新增第二份路径判据（L-067）。大小写敏感性与状态文件判据
+// 路径归一/相对化只此一份，本文件不新增第二份路径判据。大小写敏感性与状态文件判据
 // 同口径（共用 CASE_INSENSITIVE_FS 策略常量；win32 的 path.relative 本身已按小写比较）。
 function isSameWorkflowPath(left, right) {
   const fold = (value) => (CASE_INSENSITIVE_FS ? value.toLowerCase() : value);
@@ -503,7 +503,7 @@ function blockedProtocolFileTarget(absoluteTarget) {
 // 保护集的**物理**同一性判定（词法判定的别名闭合）：8.3 短路径 / 符号链接 / junction / 硬链接
 // 是同一文件实体的不同拼写，词法比较看不见它们（身份放行下保护集是唯一防线，故须闭合）。
 // 判据复用 protocol-utils.mjs 导出的文件身份比较判据（workflowFileObjectIdentity +
-// workflowSameFileObject）——本文件不新增第二份文件身份判据（L-067）。
+// workflowSameFileObject）——本文件不新增第二份文件身份判据。
 // 目标不存在（新建文件是常态）或 stat 失败 ⇒ 无法证明同一 ⇒ 返回 false（退回词法判定）；
 // 诚实边界：物理判定只证明「此刻存在且同一」，不证明「将来仍同一」（与 TOCTOU 同族的既有限制）。
 async function isSameProtectedFileObject(targetAbsolute, protectedAbsolute) {
@@ -565,8 +565,8 @@ const WORKFLOW_PROJECT_FILE_MAX_BYTES = 2 * 1024 * 1024;
 
 // 受保护路径三判据（workflowPathInside / inspectWorkflowProtectedPath /
 // readWorkflowProtectedFile）与私有身份比较函数是 protocol-utils.mjs 的**单一来源**——
-// 本文件此前各持一份逐字节相同的副本，两侧注释互指「同源」；副本已删除，改为 import
-// （见文件头 import 列表）。改判据只需改 protocol-utils.mjs 一处。
+// 本文件不另持副本（两份逐字节相同的副本必然分叉，互指「同源」的注释不是同步机制），
+// 一律 import（见文件头 import 列表）——改判据只需改 protocol-utils.mjs 一处。
 
 function workflowRelativeSegments(value, label, allowWildcards = false) {
   if (typeof value !== 'string') throw new Error(label + ' must be a string');
@@ -670,7 +670,7 @@ async function readHookInput() {
   }
 }
 
-// 盘符根拼写归一（单一实现——只由下方写入目标解析消费，不得在别处再写一份同义归一，L-067）。
+// 盘符根拼写归一（单一实现——只由下方写入目标解析消费，不得在别处再写一份同义归一）。
 // Windows 上 Git-Bash 类 shell 把 `D:\<剩余>` 写作 `/d/<剩余>`（盘符小写 + 正斜杠）。win32 的
 // 目标解析把该拼写读成「**当前盘根**下的 \d\<剩余>」而非 `D:\<剩余>`：同一文件于是被判成根外，
 // 词法相对化与物理同一性两道保护集判据同时失守（身份放行下保护集是唯一防线 ⇒ 静默放行）。
@@ -773,8 +773,6 @@ async function resolvePhaseWriteWhitelist(executionMode) {
       // archive 白名单:归档阶段仅遗留清单(KNOWN-ISSUES.md)可写入 change 目录(先写后移),
       // 其余 change 工件不可改(收窄为精确文件——放宽到整个目录会让归档阶段可改任意
       // 工件且无校验,防线变宽);<change-id> 占位符由 targetAllowed 替换为当前 change;
-      // 目录移动由 .specs/archive/ 覆盖(2026-08-15 修复:此前仅 .specs/archive/ 导致按文档
-      // 流程被 BLOCK;2026-08-16 收窄为精确文件)
       'archive':          ['.specs/archive/', '.specs/<change-id>/KNOWN-ISSUES.md', '.specs/CHANGELOG.md', '.specs/LESSONS.md', 'STATE.md'],
     },
     declared: false,
@@ -883,7 +881,7 @@ async function main() {
 
   // ── ②【ADR-014 决策 6】runRoot 外写入的 fail-open 关断（两分支对称）──────────────────
   // file_path 解析为项目根之外时，与上方 Bash 分支**同判**：该分支对 targetRel === null 的目标
-  // 同样落入 `allowed=false` → 拦截。修复前 file_path 分支在此静默落入后继流程（越界写无痕放过），
+  // 同样落入 `allowed=false` → 拦截。否则 file_path 分支会静默落入后继流程（越界写无痕放过），
   // Bash 分支却拦截 —— 同一目标因工具而异。判定条件与 Bash 分支逐条对齐（有写入语义 + currentNode
   // 在场）；身份在场者已由上方 ① 短路放行，故「手工 worktree 绝对路径写入」不受本关断影响。
   if (fileTarget && !fileTarget.insideRunRoot && currentNode) {
@@ -904,7 +902,7 @@ async function main() {
         hookBlock(`BLOCKED: phase "${currentNode}" 不允许写入 "${target}"`, `允许范围: ${whitelist.join(', ')}`);
       }
     } else if (declared) {
-      // 审查补充（2026-08-08）：协议声明了 writeWhitelist 但未列出当前节点 → fail-closed 拒绝
+      // 协议声明了 writeWhitelist 但未列出当前节点 → fail-closed 拒绝
       // （漏声明节点不放行——防协议作者漏列导致防线出洞）
       hookBlock(`BLOCKED: phase "${currentNode}" 未在协议 writeWhitelist 中声明，默认拒绝写入 "${target}"`, `请在协议 writeWhitelist 中为节点 "${currentNode}" 声明允许的路径前缀`);
     } else {
