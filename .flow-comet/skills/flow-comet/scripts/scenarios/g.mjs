@@ -266,26 +266,42 @@ export const ENTRIES = [
       }
       // ⑨ 便携复制的**使用面**锚：会复制目录的模块必须走同一个便携实现。⑧ 只证明工具本身可用，
       // 锚不住「谁在用它」——system-fixtures 与 items/k 曾直接用 fs.cpSync，中文路径检出里整套
-      // 会静默中断（无失败报告、无总结行，最容易被误读成通过）。判据两半：**全树**扫描使用形态
-      // 零命中 + 定义唯一且落在共享层 test-helpers。
+      // 会静默中断（无失败报告、无总结行，最容易被误读成通过）。
       //
-      // 两条逃逸路径是外部审查指出的，均已封住：写死文件清单会漏掉**新增**的复制模块；只认点号
-      // 访问形态会被计算属性写法绕过。故改为走遍 scripts/ 全部 .mjs、并同时匹配点号与方括号两种
-      // 访问形态；模式与针一律拼接构造，注释里也不写带括号的调用形态字面量——断言所在文件会被
-      // 自己扫到（本注释第一版写了调用形态字面量，实测把自己判成了违规）。
+      // 判据形状（两轮外部审查共指出四条逃逸/误报路径，均已按下述规则收口）：
+      //   · **全树扫描**：不再有文件清单——写死清单会漏掉新增的复制模块。
+      //   · **只在代码行上匹配**（跳过注释行）：注释里写个调用样子不该把套件判红（本锚第一版就
+      //     因此把自己判成违规——注释里写了带括号的调用形态字面量）。
+      //   · **要求调用形态**：点号访问、方括号访问、裸标识符调用三种写法都要带左括号才算；
+      //     光是一个引号里的属性读不算（否则字符串与说明文字会误报）。
+      //   · **补「导入绑定」这一路**：解构导入（`import { … } from 'fs'`）含 `as` 别名先在导入处
+      //     拦下——裸标识符调用的唯一来路就是它，拦住导入即等于拦住别名写法。导入规则同样只看
+      //     代码行：本注释第一版把导入写法当例子写在注释里，锚又把自己判成了违规。
       //
-      // **判据的诚实边界**：本判据覆盖的是「实测会静默崩溃的那个 API」。若将来改用 `fs.cp`（Promise
-      // 形态）或外部复制命令，须**先补 Windows + 非 ASCII 源路径的实测**，再决定是否纳入本判据——
+      // **判据的诚实边界**：动态拼名（`fs['cp' + 'Sync']`）不在覆盖内——那是刻意规避，名称型回归
+      // 守卫不承担这个职责（要覆盖它得引入解析器，而全仓只允许一个第三方依赖）。其它复制通道
+      // （`fs.cp` 等）同理：**先补 Windows + 非 ASCII 源路径的实测**，再决定是否纳入本判据——
       // 不要把「没测过」当成「没问题」，也不要在没有实测的情况下扩大模式。
       {
         const cpName = 'cp' + 'Sync';
-        const cpUsage = new RegExp('\\.' + cpName + '\\s*\\(|\\[\\s*[\'"]' + cpName + '[\'"]\\s*\\]');
+        const isCommentLine = (line) => /^\s*(\/\/|\/\*|\*)/.test(line);
+        const codeOnly = (text) => text.split(/\r?\n/).filter((l) => !isCommentLine(l)).join('\n');
+        const cpCalls = new RegExp(
+          '\\.' + cpName + '\\s*\\('
+          + '|\\[\\s*[\'"]' + cpName + '[\'"]\\s*\\]\\s*\\('
+          + '|(?:^|[^\\w.$])' + cpName + '\\s*\\(',
+        );
+        const cpImport = new RegExp('\\b' + cpName + '\\b[^;]*from\\s*[\'"]');
         const offenders = [];
         const walkScripts = (root) => {
           for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
             const full = path.join(root, entry.name);
             if (entry.isDirectory()) walkScripts(full);
-            else if (entry.name.endsWith('.mjs') && cpUsage.test(fs.readFileSync(full, 'utf8'))) offenders.push(full);
+            else if (entry.name.endsWith('.mjs')) {
+              const text = fs.readFileSync(full, 'utf8');
+              const code = codeOnly(text);
+              if (cpCalls.test(code) || cpImport.test(code)) offenders.push(full);
+            }
           }
         };
         walkScripts(SCRIPTS_DIR);
