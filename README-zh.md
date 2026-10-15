@@ -39,7 +39,7 @@ cd <你的项目>
 fcomet init
 ```
 
-`fcomet` 与 `flow-comet` 是同一个安装器的两个命令名。只要其它参数已经表达了意图，`init` 词元可以省略（`fcomet --target <dir>` 等价）；`--target` 本身也可省略，缺省为当前目录。**不带任何参数**时只打印用法并非零退出，不会安装。在交互式终端里，未传 `--platform` 的运行会询问装哪个平台，标出探测到的痕迹并把它作为默认值；非交互用 `--platform claude-code`、`--platform codex`、`--platform dsh`，或用逗号组合（如 `--platform claude-code,dsh`）与 `--platform all`。重复执行同一条命令是**幂等更新**。升级全局包只换 CLI——要让项目里的副本更新，需在该项目重跑 `fcomet init`。
+`fcomet` 与 `flow-comet` 是同一个安装器的两个命令名。只要其它参数已经表达了意图，`init` 词元可以省略（`fcomet --target <dir>` 等价）；`--target` 本身也可省略，缺省为当前目录。**不带任何参数**时只打印用法并非零退出，不会安装。在交互式终端里，未传 `--platform` 的运行会询问装哪个平台——方向键选择器会预选探测到的平台，回退提示则以探测到的平台为回车默认值（多平台痕迹并存时为 Claude Code）；非交互用 `--platform claude-code`、`--platform codex`、`--platform dsh`，或用逗号组合（如 `--platform claude-code,dsh`）与 `--platform all`。重复执行同一条命令是**幂等更新**。升级全局包只换 CLI——要让项目里的副本更新，需在该项目重跑 `fcomet init`。
 
 **验证**：
 
