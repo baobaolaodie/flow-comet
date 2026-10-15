@@ -18,6 +18,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import {
   assertExit,
   assertOut,
+  copyTreePortable,
   runGuard,
   runState,
   writeFile,
@@ -230,20 +231,6 @@ export function writeBridgeFixture(dir, overrides = {}) {
 // 发布标记，无法表达「载体 INSTALLED_VERSION 为 dev 态（git describe 后缀）」的形态；
 // 只有以副本自身脚本运行才能构造真实 dev 态载体（与 prepare-env 安装出的形态同构）。
 // 返回 { dshHome, skillCopy }；loader 戳由调用方指定，与 INSTALLED_VERSION 可不同。
-// 便携递归复制：不使用 fs.cpSync——实测在 Windows 且**源路径含非 ASCII 字符**时 cpSync 会让
-// 进程静默崩溃（同一进程内 ASCII 源正常、中文源直接退出，逐文件复制两种源都正常），使本套件在
-// 路径含中文的项目内无法跑完。逐目录逐文件复制无此问题，且复制完整性与内容可断言。
-export function copyTreePortable(src, dst) {
-  fs.mkdirSync(dst, { recursive: true });
-  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-    const from = path.join(src, entry.name);
-    const to = path.join(dst, entry.name);
-    if (entry.isDirectory()) copyTreePortable(from, to);
-    else if (entry.isFile()) fs.copyFileSync(from, to);
-    else if (entry.isSymbolicLink()) fs.symlinkSync(fs.readlinkSync(from), to);
-  }
-}
-
 export function writeInstalledCopyBridgeFixture(dir, { installedVersion, loaderStamp }) {
   const skillCopy = path.join(dir, '.dsh', 'skills', 'flow-comet');
   copyTreePortable(path.join(SCRIPTS_DIR, '..'), skillCopy);

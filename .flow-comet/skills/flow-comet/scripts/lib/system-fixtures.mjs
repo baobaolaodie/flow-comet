@@ -20,7 +20,7 @@ import path from 'path';
 import os from 'os';
 import { execFileSync, spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import { assertExit, assertOut, runGuard, runState, writeFile, writeState } from './test-helpers.mjs';
+import { assertExit, assertOut, copyTreePortable, runGuard, runState, writeFile, writeState } from './test-helpers.mjs';
 
 // 路径推导基准：技能包 scripts/ 目录（与套件入口同基准）
 export const SCRIPTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -1006,7 +1006,7 @@ export function assertWorkflowContractCheck(scratch) {
   // 反向构造：临时载体上一份技能树副本，删掉清单中的一个必含文件 ⇒ 必失败。
   const carrier = path.join(scratch, 'contract-carrier');
   fs.mkdirSync(carrier, { recursive: true });
-  fs.cpSync(path.join(SCRIPTS_DIR, '..', '..'), path.join(carrier, 'skills'), { recursive: true });
+  copyTreePortable(path.join(SCRIPTS_DIR, '..', '..'), path.join(carrier, 'skills'));
   const copiedChecker = path.join(carrier, 'skills', 'flow-comet', 'scripts', 'comet-check.mjs');
   const removedRel = path.join('skills', 'flow-comet', 'reference', 'decision-points.md');
   const removedAbs = path.join(carrier, removedRel);
@@ -1328,7 +1328,7 @@ function assertMirrorRootReverseConstruction(scratch, pkgCtx, installer, variant
   if (!neutralize('if (rootStat.isSymbolicLink()) {')) {
     throw new Error('反向构造前提不成立：根级链接判据的落点未找到（判据句已漂移，变异无处落点）');
   }
-  fs.cpSync(path.join(pkgCtx.root, '.flow-comet', 'skills'), path.join(carrier, '.flow-comet', 'skills'), { recursive: true });
+  copyTreePortable(path.join(pkgCtx.root, '.flow-comet', 'skills'), path.join(carrier, '.flow-comet', 'skills'));
   const mutated = path.join(carrier, 'scripts', 'prepare-env.mjs');
   for (const v of variants) {
     const res = runInstallerOnce(mutated, v.target);

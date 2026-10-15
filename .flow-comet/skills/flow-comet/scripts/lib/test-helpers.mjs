@@ -206,6 +206,23 @@ export function assertEqual(actual, expected, label) {
 
 // ---------- 伪造材料 ----------
 
+// 便携递归复制：**复制目录一律走这里**（两个套件的夹具、条目与场景共同使用）。不使用
+// fs.cpSync——实测在 Windows 且**源路径含非 ASCII 字符**时 cpSync 会让进程静默崩溃（同一进程内
+// ASCII 源正常、中文源直接退出，逐目录逐文件复制两种源都正常），使套件在路径含中文的项目内
+// 无声中断：没有失败报告、没有总结行，最容易被误读成通过。逐目录逐文件复制无此问题，且复制
+// 完整性与内容可断言。落点选共享层而非任一夹具模块：两个夹具模块互不 import，各自复制一份
+// 必然分叉。
+export function copyTreePortable(src, dst) {
+  fs.mkdirSync(dst, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const from = path.join(src, entry.name);
+    const to = path.join(dst, entry.name);
+    if (entry.isDirectory()) copyTreePortable(from, to);
+    else if (entry.isFile()) fs.copyFileSync(from, to);
+    else if (entry.isSymbolicLink()) fs.symlinkSync(fs.readlinkSync(from), to);
+  }
+}
+
 // 最小合法 state（夹具起点）：字段与状态校验器的类型要求同形；node 为当前节点。
 export function baseState(node) {
   return {
