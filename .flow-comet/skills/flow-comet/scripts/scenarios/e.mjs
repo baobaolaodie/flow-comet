@@ -54,6 +54,8 @@ export const ENTRIES = [
   // 启发式安全侧边界锚定 / 零提交正式语义 / SUMMARY·TASK7·三文档模板保真 / 技能加载前置门 /
   // next·entry 输出点名 / 技能加载措辞 / next 进行中节点保护扩展） ----------
 
+  // 156: 疑似对象启发式安全侧边界锚定（设计语义 / AC-4）——内联纯文本恰好以 [ 开头 → 启发式判为
+  // 疑似对象、JSON.parse 失败 → fail-closed（exit 1 + 提示、不落库）。当前即如此 → 本场景 GREEN
   {
     name: '156 启发式安全侧边界：内联纯文本以 [ 开头 → fail-closed（锚定现状）',
     run: (dir) => {
