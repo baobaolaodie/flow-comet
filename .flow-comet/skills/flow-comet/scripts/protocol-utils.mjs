@@ -99,7 +99,7 @@ export async function inspectWorkflowPathSegments(
 }
 
 // 兼容既有消费方（readWorkflowProtectedFile / comet-hook-guard）：受保护读取使用同一段
-// 扫描权威；这里是委托而非第二份实现（L-067 单一权威）。
+// 扫描权威；这里是委托而非第二份实现（单一权威）。
 export async function inspectWorkflowProtectedPath(
   projectRoot,
   target,
@@ -326,7 +326,7 @@ export function validateProtocolSchema(protocol) {
   if (!Array.isArray(protocol.nodes) || protocol.nodes.length === 0) {
     throw new Error('workflow protocol nodes must be a non-empty array');
   }
-  // 审查补充（2026-08-08）：nodes 元素结构校验——空对象/缺 id 的 node 会在
+  // nodes 元素结构校验——空对象/缺 id 的 node 会在
   // determineNode 等消费方崩溃，校验层应 fail-closed 提前拦截
   for (const node of protocol.nodes) {
     if (!node || typeof node !== 'object' || Array.isArray(node)) {

@@ -4,17 +4,15 @@
 
 </div>
 
-<h1 align="center">flow-comet</h1>
-
 <p align="center">
-  <strong>An automated execution engine that turns AI coding discipline into a verifiable state machine — for the flow-kit 9-stage workflow, built for Claude Code, Codex, and DeepSeek Harness.</strong>
-  <br />
-  <em>For AI coding workflows — deterministic state machine · protocol-driven · guard-validated · subagent-isolated</em>
+  <img src="assets/readme/hero.svg" width="100%" alt="flow-comet — the project mark beside the name, and the engine's eight nodes drawn as a rail in which every transition carries a gate" />
 </p>
 
 <p align="center">
-  <a href="#quick-start"><img src="https://img.shields.io/badge/Quick_Start-4CAF50?style=for-the-badge" alt="Quick Start" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="License" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow?style=flat" alt="License: MIT" /></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js_%E2%89%A518-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js 18+" /></a>
+  <a href="https://github.com/baobaolaodie/flow-comet/actions"><img src="https://img.shields.io/github/actions/workflow/status/baobaolaodie/flow-comet/ci.yml?style=flat" alt="CI status" /></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.6.4-blue.svg" alt="Version 1.6.4" /></a>
 </p>
 
 <p align="center">
@@ -22,13 +20,6 @@
   <a href="https://github.com/openai/codex"><img src="https://img.shields.io/badge/Codex-10A37F?style=flat&logoColor=white" alt="Codex" /></a>
   <a href="https://github.com/deepseek-ai/deepseek-harness"><img src="https://img.shields.io/badge/DeepSeek_Harness-4D6BFE?style=flat&logoColor=white" alt="DeepSeek Harness" /></a>
   <a href="https://github.com/rihebty/flow-kit"><img src="https://img.shields.io/badge/flow--kit-4CAF50?style=flat" alt="flow-kit" /></a>
-  <a href="https://github.com/rpamis/comet"><img src="https://img.shields.io/badge/comet-4CAF50?style=flat" alt="comet" /></a>
-</p>
-
-<p align="center">
-  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js_%E2%89%A518-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js 18+" /></a>
-  <a href="https://github.com/baobaolaodie/flow-comet/actions"><img src="https://img.shields.io/github/actions/workflow/status/baobaolaodie/flow-comet/ci.yml?style=flat" alt="CI" /></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.6.3-blue.svg" alt="Version" /></a>
 </p>
 
 ---
@@ -48,7 +39,7 @@ cd <your project>
 fcomet init
 ```
 
-`fcomet` and `flow-comet` are two names for the same installer. The `init` token may be omitted whenever another argument expresses the intent (`fcomet --target <dir>`), and `--target` itself defaults to the current directory; called with no arguments at all the command prints its usage and exits non-zero instead of installing. On a terminal the first run asks which platform to set up; for a non-interactive pick use `--platform claude-code`, `--platform codex`, `--platform dsh`, a comma-separated combination such as `--platform claude-code,dsh`, or `--platform all`. Re-running the same command updates an existing install and is idempotent. Upgrading the global package only replaces the CLI — run `fcomet init` in a project again to refresh that project's copy.
+`fcomet` and `flow-comet` are two names for the same installer. The `init` token may be omitted whenever another argument expresses the intent (`fcomet --target <dir>`), and `--target` itself defaults to the current directory; called with no arguments at all the command prints its usage and exits non-zero instead of installing. On a terminal, a run without `--platform` asks which platform to set up — the arrow-key selector pre-selects the platforms it detects, and the fallback prompt takes the detected platform as its default (Claude Code when several traces are present); for a non-interactive pick use `--platform claude-code`, `--platform codex`, `--platform dsh`, a comma-separated combination such as `--platform claude-code,dsh`, or `--platform all`. Re-running the same command updates an existing install and is idempotent. Upgrading the global package only replaces the CLI — run `fcomet init` in a project again to refresh that project's copy.
 
 **Verify**:
 
@@ -71,66 +62,21 @@ The first call confirms scope, then creates the branch for the change, initializ
 
 To see where it is, just ask it — or inspect it from the command line with `status` and `next` in the project (the per-platform paths are in [Installation](docs/INSTALLATION.md)).
 
-Artifacts live in `.specs/<change-id>/`; on archive they move to `.specs/archive/<date>-<change-id>/` and a row is added to `.specs/CHANGELOG.md`. The node-by-node walkthrough — including what the workflow runs underneath, and how to drive a node by hand when you need to — is in [Usage](docs/USAGE.md).
+Artifacts live in `.specs/<change-id>/`; on archive they move to `.specs/archive/<date>-<change-id>/` and a row is appended at the top of `.specs/CHANGELOG.md`. The node-by-node walkthrough — including what the workflow runs underneath, and how to drive a node by hand when you need to — is in [Usage](docs/USAGE.md).
 
 ## Pick a platform
 
 | Platform | Skills install to | Hook / bridge | First use |
 |---|---|---|---|
 | Claude Code (default) | `.claude/skills/` | `settings.local.json` → `hooks.PreToolUse` | the workspace must be trusted; headless sessions need that trust pre-accepted |
-| Codex | `.agents/skills/` | `.codex/hooks.json`, plus a managed block in `AGENTS.md` | trust the project hook once (interactive), or pass the automation flag for scripted runs — see [Installation](docs/INSTALLATION.md) |
+| Codex | `.agents/skills/` | `.codex/hooks.json`, plus a managed block in `AGENTS.md` | trust the project hook once (interactive), or pass the automation flag for scripted runs |
 | DeepSeek Harness (dsh) | `.dsh/skills/` | global bridge loader under `$DSH_HOME`, plus a managed block in `AGENTS.md` | no hook-trust step |
 
 Prerequisites, all four install options, the per-platform verification steps and uninstall/reset behaviour: [Installation](docs/INSTALLATION.md).
 
-## Why
-
-If you use skill-based disciplines like [superpowers](https://github.com/obra/superpowers), [OpenSpec](https://github.com/Fission-AI/OpenSpec), or [GSD](https://github.com/open-gsd/gsd-core), you know the pain: discipline relies on the model's compliance, and progress lives in chat history. flow-comet turns the flow-kit 9-stage process (CHANGE → REQUIREMENT → DESIGN → TASK → DEV → TEST → REVIEW → INTEGRATION → ARCHIVE) from a discipline-dependent manual flow into a **verifiable deterministic state machine**:
-
-- **Automated routing** — scripts manage stage transitions, guard validations, and hook-based write interception
-- **Protocol-driven** — the built-in 8-node protocol is the default workflow; custom protocols composed from any installed skill run on the same engine (see [Custom Protocols](docs/MECHANISM.md#custom-protocols))
-- **Three defense layers** — physical write interception (hook), coordinator prohibition, and exit takeover detection
-- **Subagent-isolated execution** — implementation work is delegated to fresh-context subagents with a verifiable Return Contract
-- **File-as-truth recovery** — state is derived from `.specs/` artifacts, so recovery never depends on conversation history
-
-## Why flow-comet
-
-### Horizontal comparison
-
-| Project | Positioning | Mechanism | Relationship to flow-comet |
-|---------|-------------|-----------|---------------------------|
-| **flow-kit** | Pure-Markdown methodology pack: 9-stage process + `.specs/` templates + R1-R8 rules, zero runtime | Humans load prompt files stage by stage; state flows through `.md` artifacts | **Dependency / base** — flow-comet is its automation layer; artifacts and rules fully inherited |
-| **OpenSpec** (Fission-AI) | Spec-driven development framework: a lightweight spec layer before coding | `openspec/` directory, one proposal/specs/design/tasks per change, propose→apply→verify→archive | **Idea source + lighter alternative** — spec-first thinking fused into flow-kit; standalone use is lighter (no state machine, no stage gates) |
-| **Superpowers** (obra) | Claude Code skill set + full dev methodology | Composable skills (brainstorm/plan/TDD/debug/review), triggered by context, enforced by instructions | **Idea source + partial overlap** — skill-based discipline relies on model compliance; flow-comet scripts and machine-verifies the same discipline |
-| **comet** (rpamis) | Resumable long-task workflows + skill platform: protocol state machine, guard gates, hook interception | `/comet` routes by config; Classic = OpenSpec + Superpowers 5-stage state machine | **Mechanism source** — flow-comet borrows its mechanism shapes (protocol-as-truth, script-owned state, guard gates, hook whitelist) and drops its platform facilities (eval/publish); state does not interoperate with Comet Classic |
-| **GSD** | Spec-driven development meta-prompt / context-engineering workflow | Milestones → slices → tasks; fresh context per stage with pre-inlined context; worktree isolation + UAT | **Idea source (same lane)** — fresh-context execution and stage gates align; no script state-machine routing, relies on prompt discipline |
-| **spec-kit** (GitHub) | SDD toolkit: Spec → Plan → Tasks → Implement | Each stage feeds markdown artifacts to the next; task format with order IDs, parallel `[P]` markers, file paths | **Idea source (same lane)** — task-with-file-paths/parallel-marker shape is same-origin with flow-kit TASK; no stage-transition enforcement |
-| **claude-task-master** | AI-driven task management (MCP + CLI) | PRD parsing → task decomposition → dependency graph → next-task orchestration | **Complement** — manages the task layer only (decomposition/ordering/dependencies), not stage gates, artifact validation, or write permissions |
-
-### Vertical comparison: manual flow-kit → flow-comet
-
-| Dimension | Manual flow-kit (discipline) | flow-comet (automated) |
-|-----------|------------------------------|------------------------|
-| Stage routing | Humans remember the flow and load prompts manually; skipping stages is on you | Scripts derive the current node from `.specs/` artifacts and route automatically; order violations are blocked |
-| Validation | Humans eyeball artifacts against the rules; TEST.md commands "should" run | Guards enforce required artifacts/sections at every node entry/exit; verify actually executes the TEST.md commands and counts failures |
-| Discipline enforcement | Rules are markdown text the model may ignore | Three defense layers: write whitelist physically blocks out-of-scope writes / coordinator prohibition / exit takeover detection |
-| Recovery | Depends on conversation memory; progress is lost across sessions | File-as-truth: re-derive the node from `.specs/` and auto-correct state; any session resumes correctly |
-| Parallel implementation | Humans coordinate multiple windows, easy to overstep | One delegation contract on every supported platform — write permission, commit isolation, verification isolation and integration discipline. The guard decides by the caller's identity, an isolated worktree is one implementation of write permission rather than a requirement, and the only platform difference is who builds the tree (per-platform channels and what is not yet covered: [Parallel delegation](docs/MECHANISM.md#parallel-delegation)). Subagents return a verified contract (commit hash + evidence) and the coordinator cannot write source |
-| Decision burden | A confirmation point at every stage, humans answer everything | Decisions are classified (user-decided / auto-handled / stop conditions / manual handover); humans only intervene at key points (scope, tech stack, breaking changes, review findings, archive) |
-
-### Why pick flow-comet
-
-1. **Discipline goes from "self-discipline" to "machine-checked"** — every stage entry/exit has script validation: artifacts complete, sections filled, verify commands actually run, tasks stay in bounds.
-2. **No lost progress across sessions** — where you are is always derived from `.specs/` artifacts, never from conversation memory; reopen and continue from the right node.
-3. **Implementation and coordination are separated, and the separation is enforced** — implementation runs in fresh-context subagents that must return a verified contract; the guard decides by the caller's identity before it resolves any path, so an isolated worktree is one way to provide write permission rather than a requirement, and the only platform difference is who builds the tree. The coordinator is banned from writing source, and the write whitelist blocks violations at the physical layer.
-4. **The native automation layer for flow-kit** — not a re-invention: artifact formats, rules, and stages are identical to flow-kit; a flow-kit project upgrades to a machine-driven flow by installing flow-comet, no migration needed.
-5. **Protocol-driven, minimal dependency, install-and-run** — the built-in 8-node flow works out of the box; any installed skill can be composed into a custom protocol on the same engine; Node.js 18+; the only third-party dependency is `@clack/prompts`, used exclusively by the installer's TTY multi-select (with an automatic readline fallback otherwise); one command installs it.
-
-**Fit**: flow-comet is built for long-running, multi-session development changes on Claude Code — the discipline it automates pays off when a change spans hours and multiple sessions. It is not a general CI/CD or project-management tool; Codex and DeepSeek Harness are supported (see [Installation](docs/INSTALLATION.md#platforms)), other platforms (Gemini / Cursor) are not guaranteed.
-
 ## Real-run artifacts
 
-A complete 8-node run produces the full artifact trail shown in [docs/examples/processor-pipeline](docs/examples/processor-pipeline/) — a real archived change (end-to-end test project, 2026-08-13): CHANGE / REQUIREMENT / DESIGN / TASK / six-section summaries / REVIEW with disposition markers / TEST / UAT / KNOWN-ISSUES / skill-load declaration markers.
+A complete 8-node run leaves the artifact trail below — [a real archived change](docs/examples/processor-pipeline/) from the end-to-end test project (2026-08-13), kept in this repository as the quality reference: CHANGE / REQUIREMENT / DESIGN / TASK / six-section summaries / REVIEW with disposition markers / TEST / UAT / KNOWN-ISSUES / skill-load declaration markers.
 
 ```
 processor-pipeline/            (archived change, full artifact set)
@@ -142,13 +88,50 @@ processor-pipeline/            (archived change, full artifact set)
 └── .skill-loads/               (11 skill-load declaration markers)
 ```
 
-**Stable skill triggering** — workflow skills keep loading correctly through a 4h+ session:
+Two captures from real sessions of this project, unedited: a workflow skill loading normally more than four hours in, and the end of a five-hour run whose verify exit had already executed the test commands.
 
-![Skill triggering](images/long-run-4h-and-skill-triggering.png)
+<p align="center">
+  <img src="assets/readme/proof-board.png" width="100%" alt="Two terminal captures: a workflow skill loading four hours into a session, and the end of a five-hour run after verification" />
+</p>
 
-**5-hour verification run** — full validation and UAT at the end of a 5h14m session (↓399k tokens):
+## How it works
 
-![Verification run](images/long-run-5h.png)
+The process is flow-kit's nine stages; the engine runs them as eight nodes. CHANGE and REQUIREMENT are covered by `open`, TEST and REVIEW by `review`, and DEV runs as `execute` or `subagent-execute` depending on the execution mode. Every node's exit is validated before the next one opens — the `verify` exit really executes the commands in `TEST.md` — and each node's artifacts land under `.specs/<change-id>/`.
+
+<p align="center">
+  <img src="assets/readme/workflow.gif" width="100%" alt="An animated diagram mapping the nine flow-kit stages onto the engine's eight nodes: CHANGE and REQUIREMENT merge into open, TEST and REVIEW into review, DEV runs as execute or subagent-execute, and every transition carries a gate" />
+</p>
+
+Driving a node by hand, the artifacts each node produces, and the two command surfaces are documented in [Usage](docs/USAGE.md); what the engine guarantees and how a node's exit is validated are in [Core Mechanisms](docs/MECHANISM.md).
+
+## Why flow-comet
+
+1. **Discipline goes from "self-discipline" to "machine-checked"** — every stage entry/exit has script validation: artifacts complete, sections filled, verify commands actually run, tasks stay in bounds.
+2. **No lost progress across sessions** — where you are is always derived from `.specs/` artifacts, never from conversation memory; reopen and continue from the right node.
+3. **Implementation and coordination are separated, and the separation is enforced** — implementation runs in fresh-context subagents that must return a verified contract; the guard decides by the caller's identity before it resolves any path, so an isolated worktree is one way to provide write permission rather than a requirement. The coordinator is banned from writing source, and writes outside the current node's scope are refused by the hook. The layers themselves are described in [Core Mechanisms](docs/MECHANISM.md).
+
+### Related projects
+
+<p align="center">
+  <img src="assets/readme/related-projects.svg" width="100%" alt="How flow-comet relates to the projects it is compared with: five sources aggregated through flow-kit, comet as an early mechanism reference that is now decoupled, and brooks-lint as an optional integration" />
+</p>
+
+| Project | What it is, and how it works | Relationship to flow-comet |
+|---|---|---|
+| **flow-kit** | Pure-Markdown methodology pack: 9-stage process, `.specs/` templates, R1–R8 rules, no runtime. You load the stage prompts by hand; state travels through `.md` artifacts. An install pins a specific commit. | **Dependency — the base, and the aggregation point.** flow-comet is its automation layer and inherits its artifacts and rules; the projects below reached flow-comet through it. |
+| **OpenSpec** (Fission-AI) | Spec-driven development framework: a lightweight spec layer before coding. One `proposal` / `specs` / `design` / `tasks` set per change under `openspec/`; the default profile runs propose → apply → sync → archive. | **Aggregated through flow-kit** (idea source). Standalone it stays lighter: no state machine, no gates. |
+| **Superpowers** (obra) | Agentic skills framework plus a full development methodology, installed per harness across Claude Code, Codex, Cursor, Gemini CLI and more. Skills trigger by context and are enforced by instructions. | **Aggregated through flow-kit** (idea source, partial overlap). Discipline lives in skill text and relies on model compliance; flow-comet machine-checks the same discipline. |
+| **comet** (rpamis) | Resumable long-running task workflow and skill platform: a five-stage state machine, stage guards, hook write-interception. `/comet` routes from config and defaults to its Native branch. | **Early mechanism reference, now decoupled.** The hook-injection shape and script-owned state came from here; the naming was decoupled and state does not interoperate. Only its Classic branch carries the OpenSpec + Superpowers lineage. |
+| **GSD** | Spec-driven development meta-prompt and context-engineering workflow: milestones → phases → plans, a fresh context window per agent with scoped payloads, worktree isolation and a UAT gate. | **Aggregated through flow-kit** (idea source, same lane). Fresh-context execution and stage gates align; routing stays prompt-driven. |
+| **spec-kit** (GitHub) | SDD toolkit: Specify → Plan → Tasks → Implement → Converge. Each stage feeds markdown artifacts to the next, with order ids, `[P]` parallel markers and file paths in the task block. | **Aggregated through flow-kit** (idea source, same lane). That task-block shape is what flow-kit's TASK template inherited; stage transitions are not enforced. |
+| **claude-task-master** | AI-driven task management over MCP and a CLI: PRD parsing → task breakdown → dependency graph → next-task orchestration. Distributed under MIT with Commons Clause. | **Aggregated through flow-kit** (complement). Covers the task layer only: no stage gates, no artifact validation, no write permissions. |
+| **brooks-lint** (hyhmrright) | Third-party review engine grounded in twelve classic engineering books: 6 production and 6 test decay risks, findings cited as Symptom → Source → Consequence → Remedy, a 0–100 health score and six modes. | **Optional integration (MIT, not a dependency).** Where installed, five of its six commands back the self-check and review rounds; absent, the workflow degrades along a declared fallback chain. |
+
+**Fit**: flow-comet is built for long-running, multi-session development changes. The contract is the same on all three platforms — write permission, commit isolation, verification isolation and integration discipline — while the depth of testing differs per platform, and the per-platform coverage is stated in [Core Mechanisms](docs/MECHANISM.md#parallel-delegation). It is not a general CI/CD or project-management tool; other platforms (Gemini / Cursor) are not guaranteed.
+
+## Recommended: brooks-lint
+
+The quality checks are grounded in the decay-risk framework of [brooks-lint](https://github.com/hyhmrright/brooks-lint), a third-party (MIT) review engine that diagnoses code against twelve classic engineering books. Where it is installed, the per-task self-check, the review node's code-quality round and the test-quality check run through it, and the `health` side command folds its result into its report; where it is not, the workflow still completes along a declared fallback chain and says so. It is not a dependency and nothing needs configuring on the flow-comet side; its installer covers more platforms than this project does, with a different depth of verification per platform — the details are in [Installation](docs/INSTALLATION.md).
 
 ## Relationship to the upstream project
 
@@ -173,13 +156,13 @@ Full guide in [CONTRIBUTING.md](CONTRIBUTING.md) — branch model (`feature → 
 
 1. Branch from `dev`: `git checkout dev && git checkout -b feat/<description>`
 2. Edit skills/scripts under `.flow-comet/skills/` (authoritative source); TDD with RED scenario first
-3. Run regression: `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 309 SCENARIOS PASSED`
+3. Run regression: `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 325 SCENARIOS PASSED`
 4. Open a PR into `dev` (squash — one change-level commit); release PR `dev → main` (merge — dev's change-level commits enter main, and dev stops leading after each release)
 
-CI enforces the repository conventions automatically on every PR and push (regression, PR discipline, version consistency, dead links). Local hooks (commit/push message checks) install with `node scripts/install-commit-hook.mjs` — see [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
+CI enforces the repository conventions automatically on every PR and push: regression, installer reproducibility, workflow and bilingual-mirror quality, PR discipline, version consistency, and dead links. Local hooks (commit/push message checks) install with `node scripts/install-commit-hook.mjs` — see [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
 
 ## License
 
 [MIT](LICENSE) © 2026 baobaolaodie
 
-flow-comet depends on [flow-kit](https://github.com/rihebty/flow-kit) (MIT) and [Comet](https://github.com/rpamis/comet) (MIT).
+flow-comet depends on [flow-kit](https://github.com/rihebty/flow-kit) (MIT). Its mechanism shapes were borrowed from [Comet](https://github.com/rpamis/comet) (MIT), which it does not depend on.

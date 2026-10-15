@@ -1,7 +1,7 @@
-// time-utils.mjs: 时间形态 / 解析 / 到期阈值的单一权威（单源纪律 · L-067）
+// time-utils.mjs: 时间形态 / 解析 / 到期阈值的单一权威（单源纪律）
 //
 // 为什么单独成域：时间戳曾散落各脚本以 `new Date().toISOString()` 生成、以字符串拼接消费——
-// 同一事实的多个表达在时区面必然分叉（L-096：`date` 读数在 UTC 与 +0800 间抖动，目测判时得出过
+// 同一事实的多个表达在时区面必然分叉（`date` 读数在 UTC 与 +0800 间抖动，目测判时得出过
 // 相反结论）。本模块是「生成 / 解析 / 阈值比较 / 归档窗口判定」的唯一实现：
 //   · 生成：本地时间 + 显式偏移 `YYYY-MM-DDTHH:mm:ss±HH:mm`（人读为本地时间、机器可无损解析）
 //   · 解析：`Date.parse` + 分量回环校验（兼容历史 `Z` 形态；`2026-02-30` 一类不可自洽形态拒绝）
@@ -97,7 +97,7 @@ export function daysSince(timestamp, reference = Date.now()) {
 
 // 归档目录名 → 归档日期 `YYYY-MM-DD`；非约定命名或日期不可自洽 → null。
 // 取目录名而非 mtime：目录名随提交固化（跨 clone / checkout 稳定），mtime 会被检出重写——
-// 用 mtime 判「归档于何时」在全新检出上会把整仓历史当成新增（L-096 的「mtime 判时」用于
+// 用 mtime 判「归档于何时」在全新检出上会把整仓历史当成新增（「mtime 判时」用于
 // 判活场景，归档窗口判据需要的是**随工件固化的时刻标签**）。
 export function archiveDateFromName(dirName) {
   if (typeof dirName !== 'string') return null;
@@ -123,7 +123,7 @@ export const EVOLVE_DUE_NEW_ARCHIVE_CHANGES = 5;
 // ---------- 到期窗口的输入面：§9 沉淀段在场判定 ----------
 // 为什么在「时间」模块里：AC-18 的到期判据 = 时间阈值 + 窗口内「带 §9 的归档 change」计数——两者
 // 同为**到期窗口判据**的组成部分。若 §9 在场判定在 status 提示与 evolve 扫描各写一份，两个消费面
-// 会各自漂移（L-067：注释互指同源不是同步机制），故由本模块唯一表达，消费方 import。
+// 会各自漂移（注释互指同源不是同步机制），故由本模块唯一表达，消费方 import。
 // 上游锚 = flow-kit 7-integration 的 `grep -c '^### 9\.' DESIGN.md`；本仓归档 DESIGN.md 用
 // `## 9.` 形态，故层级放宽到 2~4 并容忍 `§9` 写法。只作「有无」判定，不解析条目内容。
 const SECTION9_HEADING = /^#{2,4}\s*§?\s*9\s*[.、·]/m;

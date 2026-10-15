@@ -1,0 +1,50 @@
+<!doctype html>
+<!--
+  Layout source for assets/readme/proof-board.png. The two captures are placed at
+  their native pixel size — never upscaled — and the board is rendered once with:
+
+    chrome --headless=new --disable-gpu --hide-scrollbars
+           --force-device-scale-factor=2 --window-size=1200,320
+           --screenshot=assets/readme/proof-board.png
+           file:///<repo>/assets/readme/source/proof-board.html
+
+  Image paths are relative to this file, so the board renders from any checkout.
+-->
+<html lang="en"><head><meta charset="utf-8"><title>proof-board</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #ffffff; }
+  #board {
+    width: 1200px; height: 320px; box-sizing: border-box; position: relative;
+    background: #0B1016; border-radius: 22px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+    color: #E6EDF3;
+  }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .label { position: absolute; left: 56px; top: 32px; font-size: 18px; letter-spacing: 1.8px; color: #8B98A8; }
+  .card { position: absolute; top: 66px; background: #141B24; border: 1px solid #243040; border-radius: 14px; padding: 16px; box-sizing: border-box; }
+  .card img { display: block; }
+  .cap { margin-top: 12px; font-size: 20px; color: #8B98A8; }
+  #cardA { left: 56px; width: 593px; }
+  #cardB { left: 673px; width: 378px; }
+  .note { position: absolute; left: 56px; font-size: 18px; line-height: 26px; color: #8B98A8; }
+  .noteA { top: 258px; }
+  .noteB { top: 284px; }
+</style></head>
+<body>
+<div id="board">
+  <div class="label mono">REAL RUNS · TWO UNEDITED TERMINAL CAPTURES</div>
+
+  <div class="card" id="cardA">
+    <img src="../long-run-4h-and-skill-triggering.png" width="561" height="99" alt="">
+    <div class="cap">4-hour session: the workflow skills keep loading</div>
+  </div>
+
+  <div class="card" id="cardB">
+    <img src="../long-run-5h.png" width="328" height="52" alt="">
+    <div class="cap">5-hour run: verification and UAT at the end</div>
+  </div>
+
+  <div class="note noteA">Left: a node's skill loading normally more than four hours into the same session.</div>
+  <div class="note noteB">Right: the end of a five-hour run — the verify exit had executed the test commands.</div>
+</div>
+</body></html>
