@@ -12,6 +12,10 @@
 
 ## [Unreleased]
 
+## [1.6.4] - 2026-10-15
+
+本次发布汇集 1.6.3 之后积累的工作：入口页按项目自己的素材重做——徽标、一张说明 flow-kit 的 9 个阶段如何变成 8 个节点的图、一张说明邻近项目真实关系的关系图，以及一块证据板——对比表每一行都按那些项目今天的实际说法核对过；引擎脚本与两套回归套件按职责拆成小模块、引擎行为零变化，记录的基线随拆分上移；推荐搭配 brooks-lint 现已写入公开面。([#150](https://github.com/baobaolaodie/flow-comet/pull/150)) ([#151](https://github.com/baobaolaodie/flow-comet/pull/151)) ([#152](https://github.com/baobaolaodie/flow-comet/pull/152))
+
 ### 新增
 
 - **推荐搭配写入公开面**：README、安装、核心机制与故障排查四份文档现在都覆盖 brooks-lint——它是第三方审查引擎，逐任务自查与审查轮建立在其腐化风险框架之上——含装上之后的变化与未装时的行为。([#150](https://github.com/baobaolaodie/flow-comet/pull/150))

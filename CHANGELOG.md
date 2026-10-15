@@ -12,6 +12,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+## [1.6.4] - 2026-10-15
+
+A release gathering the work accumulated after 1.6.3: the entrance page is rebuilt around the project's own material — a mark, a diagram of how flow-kit's nine stages become the eight nodes, a map of how the neighbouring projects actually relate, and an evidence board — with every comparison row checked against what those projects say today; the engine scripts and both regression suites are split into focused modules without changing any engine behaviour, and the recorded baseline follows the split; and the recommended companion, brooks-lint, is now documented across the public pages. ([#150](https://github.com/baobaolaodie/flow-comet/pull/150)) ([#151](https://github.com/baobaolaodie/flow-comet/pull/151)) ([#152](https://github.com/baobaolaodie/flow-comet/pull/152))
+
 ### Added
 
 - **The recommended companion is documented**: the README, Installation, Core Mechanisms and Troubleshooting pages now cover brooks-lint — the third-party review engine whose decay-risk framework the per-task self-check and the review rounds are built on — including what changes once it is installed and what a run does without it. ([#150](https://github.com/baobaolaodie/flow-comet/pull/150))
