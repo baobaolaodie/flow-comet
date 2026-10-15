@@ -266,31 +266,60 @@ export const ENTRIES = [
       }
       // ⑨ 便携复制的**使用面**锚：会复制目录的模块必须走同一个便携实现。⑧ 只证明工具本身可用，
       // 锚不住「谁在用它」——system-fixtures 与 items/k 曾直接用 fs.cpSync，中文路径检出里整套
-      // 会静默中断（无失败报告、无总结行，最容易被误读成通过）。判据两半：调用形态零命中
-      // （注释里的说明文字不带括号，不会误伤）+ 定义唯一且落在共享层 test-helpers。
+      // 会静默中断（无失败报告、无总结行，最容易被误读成通过）。
+      //
+      // 判据形状（两轮外部审查共指出四条逃逸/误报路径，均已按下述规则收口）：
+      //   · **全树扫描**：不再有文件清单——写死清单会漏掉新增的复制模块。
+      //   · **只在代码行上匹配**（跳过注释行）：注释里写个调用样子不该把套件判红（本锚第一版就
+      //     因此把自己判成违规——注释里写了带括号的调用形态字面量）。
+      //   · **要求调用形态**：点号访问、方括号访问、裸标识符调用三种写法都要带左括号才算；
+      //     光是一个引号里的属性读不算（否则字符串与说明文字会误报）。
+      //   · **补「导入绑定」这一路**：解构导入（`import { … } from 'fs'`）含 `as` 别名先在导入处
+      //     拦下——裸标识符调用的唯一来路就是它，拦住导入即等于拦住别名写法。导入规则同样只看
+      //     代码行：本注释第一版把导入写法当例子写在注释里，锚又把自己判成了违规。
+      //
+      // **判据的诚实边界**：动态拼名（`fs['cp' + 'Sync']`）不在覆盖内——那是刻意规避，名称型回归
+      // 守卫不承担这个职责（要覆盖它得引入解析器，而全仓只允许一个第三方依赖）。其它复制通道
+      // （`fs.cp` 等）同理：**先补 Windows + 非 ASCII 源路径的实测**，再决定是否纳入本判据——
+      // 不要把「没测过」当成「没问题」，也不要在没有实测的情况下扩大模式。
       {
-        const copyCallSites = [
-          path.join(SCRIPTS_DIR, 'lib', 'system-fixtures.mjs'),
-          path.join(SCRIPTS_DIR, 'items', 'k.mjs'),
-          path.join(SCRIPTS_DIR, 'lib', 'test-fixtures.mjs'),
-        ];
-        for (const file of copyCallSites) {
-          if (/\.cpSync\s*\(/.test(fs.readFileSync(file, 'utf8'))) {
-            throw new Error('仍在使用 fs.cpSync 复制目录（中文路径检出会静默崩溃）：' + path.basename(file));
-          }
-        }
-        const defs = [];
-        // 针由两段拼成：本断言自身就在这个文件里，写成一整个字面量会被自己命中，
-        // 把「唯一一处定义」误判成两处（实测踩到过一次）。
-        const defNeedle = 'export function copy' + 'TreePortable';
+        const cpName = 'cp' + 'Sync';
+        const isCommentLine = (line) => /^\s*(\/\/|\/\*|\*)/.test(line);
+        const codeOnly = (text) => text.split(/\r?\n/).filter((l) => !isCommentLine(l)).join('\n');
+        const cpCalls = new RegExp(
+          '\\.' + cpName + '\\s*\\('
+          + '|\\[\\s*[\'"]' + cpName + '[\'"]\\s*\\]\\s*\\('
+          + '|(?:^|[^\\w.$])' + cpName + '\\s*\\(',
+        );
+        const cpImport = new RegExp('\\b' + cpName + '\\b[^;]*from\\s*[\'"]');
+        const offenders = [];
         const walkScripts = (root) => {
           for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
             const full = path.join(root, entry.name);
             if (entry.isDirectory()) walkScripts(full);
-            else if (entry.name.endsWith('.mjs') && fs.readFileSync(full, 'utf8').includes(defNeedle)) defs.push(full);
+            else if (entry.name.endsWith('.mjs')) {
+              const text = fs.readFileSync(full, 'utf8');
+              const code = codeOnly(text);
+              if (cpCalls.test(code) || cpImport.test(code)) offenders.push(full);
+            }
           }
         };
         walkScripts(SCRIPTS_DIR);
+        if (offenders.length) {
+          throw new Error('仍在直接使用 cpSync 复制目录（中文路径检出会静默崩溃，请走 copyTreePortable）：'
+            + offenders.map((f) => path.relative(SCRIPTS_DIR, f).replace(/\\/g, '/')).join(', '));
+        }
+        const defs = [];
+        // 针同样拼接：本断言自身就在这个文件里，整字面量会自指命中（实测踩到过一次）。
+        const defNeedle = 'export function copy' + 'TreePortable';
+        const walkDefs = (root) => {
+          for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+            const full = path.join(root, entry.name);
+            if (entry.isDirectory()) walkDefs(full);
+            else if (entry.name.endsWith('.mjs') && fs.readFileSync(full, 'utf8').includes(defNeedle)) defs.push(full);
+          }
+        };
+        walkDefs(SCRIPTS_DIR);
         if (defs.length !== 1 || path.basename(defs[0]) !== 'test-helpers.mjs') {
           throw new Error('copyTreePortable 的定义必须是唯一且落在 test-helpers.mjs，实际：'
             + (defs.map((f) => path.basename(f)).join(', ') || '零处'));
