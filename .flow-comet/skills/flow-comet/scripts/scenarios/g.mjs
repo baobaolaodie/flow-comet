@@ -266,31 +266,44 @@ export const ENTRIES = [
       }
       // ⑨ 便携复制的**使用面**锚：会复制目录的模块必须走同一个便携实现。⑧ 只证明工具本身可用，
       // 锚不住「谁在用它」——system-fixtures 与 items/k 曾直接用 fs.cpSync，中文路径检出里整套
-      // 会静默中断（无失败报告、无总结行，最容易被误读成通过）。判据两半：调用形态零命中
-      // （注释里的说明文字不带括号，不会误伤）+ 定义唯一且落在共享层 test-helpers。
+      // 会静默中断（无失败报告、无总结行，最容易被误读成通过）。判据两半：**全树**扫描使用形态
+      // 零命中 + 定义唯一且落在共享层 test-helpers。
+      //
+      // 两条逃逸路径是外部审查指出的，均已封住：写死文件清单会漏掉**新增**的复制模块；只认点号
+      // 访问形态会被计算属性写法绕过。故改为走遍 scripts/ 全部 .mjs、并同时匹配点号与方括号两种
+      // 访问形态；模式与针一律拼接构造，注释里也不写带括号的调用形态字面量——断言所在文件会被
+      // 自己扫到（本注释第一版写了调用形态字面量，实测把自己判成了违规）。
+      //
+      // **判据的诚实边界**：本判据覆盖的是「实测会静默崩溃的那个 API」。若将来改用 `fs.cp`（Promise
+      // 形态）或外部复制命令，须**先补 Windows + 非 ASCII 源路径的实测**，再决定是否纳入本判据——
+      // 不要把「没测过」当成「没问题」，也不要在没有实测的情况下扩大模式。
       {
-        const copyCallSites = [
-          path.join(SCRIPTS_DIR, 'lib', 'system-fixtures.mjs'),
-          path.join(SCRIPTS_DIR, 'items', 'k.mjs'),
-          path.join(SCRIPTS_DIR, 'lib', 'test-fixtures.mjs'),
-        ];
-        for (const file of copyCallSites) {
-          if (/\.cpSync\s*\(/.test(fs.readFileSync(file, 'utf8'))) {
-            throw new Error('仍在使用 fs.cpSync 复制目录（中文路径检出会静默崩溃）：' + path.basename(file));
-          }
-        }
-        const defs = [];
-        // 针由两段拼成：本断言自身就在这个文件里，写成一整个字面量会被自己命中，
-        // 把「唯一一处定义」误判成两处（实测踩到过一次）。
-        const defNeedle = 'export function copy' + 'TreePortable';
+        const cpName = 'cp' + 'Sync';
+        const cpUsage = new RegExp('\\.' + cpName + '\\s*\\(|\\[\\s*[\'"]' + cpName + '[\'"]\\s*\\]');
+        const offenders = [];
         const walkScripts = (root) => {
           for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
             const full = path.join(root, entry.name);
             if (entry.isDirectory()) walkScripts(full);
-            else if (entry.name.endsWith('.mjs') && fs.readFileSync(full, 'utf8').includes(defNeedle)) defs.push(full);
+            else if (entry.name.endsWith('.mjs') && cpUsage.test(fs.readFileSync(full, 'utf8'))) offenders.push(full);
           }
         };
         walkScripts(SCRIPTS_DIR);
+        if (offenders.length) {
+          throw new Error('仍在直接使用 cpSync 复制目录（中文路径检出会静默崩溃，请走 copyTreePortable）：'
+            + offenders.map((f) => path.relative(SCRIPTS_DIR, f).replace(/\\/g, '/')).join(', '));
+        }
+        const defs = [];
+        // 针同样拼接：本断言自身就在这个文件里，整字面量会自指命中（实测踩到过一次）。
+        const defNeedle = 'export function copy' + 'TreePortable';
+        const walkDefs = (root) => {
+          for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+            const full = path.join(root, entry.name);
+            if (entry.isDirectory()) walkDefs(full);
+            else if (entry.name.endsWith('.mjs') && fs.readFileSync(full, 'utf8').includes(defNeedle)) defs.push(full);
+          }
+        };
+        walkDefs(SCRIPTS_DIR);
         if (defs.length !== 1 || path.basename(defs[0]) !== 'test-helpers.mjs') {
           throw new Error('copyTreePortable 的定义必须是唯一且落在 test-helpers.mjs，实际：'
             + (defs.map((f) => path.basename(f)).join(', ') || '零处'));
