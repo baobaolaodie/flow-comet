@@ -1,4 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 64 64" role="img" aria-labelledby="t d"><title id="t">brand mark b3 — a cycle closed by a gate</title><desc id="d">A heavy ring is opened on the right and closed again by a green block: the loop only completes once the gate is passed.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 64 64" role="img" aria-labelledby="t d">
+  <!--
+    The project mark: a heavy ring opened on the right and closed again by a green
+    block, so the loop only completes once the gate is passed.
+
+    The same geometry is drawn inline inside assets/readme/hero.svg, because an SVG
+    loaded through <img> cannot pull in another SVG file. The two copies are one
+    design in two places — edit both together, or change the hero to draw from this
+    file's coordinates.
+  -->
+  <title id="t">flow-comet mark — a cycle closed by a gate</title>
+  <desc id="d">A heavy ring is opened on the right and closed again by a green block: the loop only completes once the gate is passed.</desc>
   <path d="M46 14 A21 21 0 1 0 46 50" fill="none" stroke="#E6EDF3" stroke-width="9" stroke-linecap="butt"/>
   <rect x="41" y="21" width="11" height="22" fill="#4CAF50"/>
 </svg>
