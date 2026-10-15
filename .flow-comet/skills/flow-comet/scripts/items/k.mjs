@@ -11,7 +11,7 @@ import path from 'path';
 import os from 'os';
 import { execFileSync, spawnSync } from 'child_process';
 import { pathToFileURL } from 'url';
-import { assertExit, assertNotOut, assertOut, baseState, runHook, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
+import { assertExit, assertNotOut, assertOut, baseState, copyTreePortable, runHook, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
 import { SCRIPTS_DIR, collectTreeFiles, resolvePackageContext, K14_COPY_DETAIL, copyDistributionOutcome, assertDistributionOutcomeContract, readBridgeSourceVersion, stampBridgeLoader, assertInstalledCopyBridgeVersionSemantics, seedForeignFlowKit, isManagedHookCommand, hasProjectRootRef, assertManagedHookEntry, collectManagedHookCommands, CHANGE_ID, gitInit, DISTRIBUTION_MARKERS, applyDistributionSurface } from '../lib/system-fixtures.mjs';
 
 const RAW_ENTRIES = [
@@ -66,7 +66,7 @@ const RAW_ENTRIES = [
         const to = path.join(pkg, ...rel.split('/'));
         if (!fs.existsSync(from)) throw new Error('files 白名单声明的路径不在场: ' + rel);
         fs.mkdirSync(path.dirname(to), { recursive: true });
-        if (fs.statSync(from).isDirectory()) fs.cpSync(from, to, { recursive: true });
+        if (fs.statSync(from).isDirectory()) copyTreePortable(from, to);
         else fs.copyFileSync(from, to);
       }
       fs.copyFileSync(srcVersionFile, path.join(pkg, '.flow-comet', 'skills', 'flow-comet', 'INSTALLED_VERSION'));

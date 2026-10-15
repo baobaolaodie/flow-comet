@@ -12,6 +12,7 @@ import {
   assertNotOut,
   assertOut,
   baseState,
+  copyTreePortable,
   runGuard,
   runHook,
   writeFile,
@@ -24,7 +25,6 @@ import {
   SCRIPTS_DIR,
   bridgeStampSyncProblems,
   bridgeStampSyncSubAnchorCases,
-  copyTreePortable,
   fixtureBridgeBaseVersion,
   fixtureIsBridgeDevVersion,
   handoffFor,
@@ -262,6 +262,38 @@ export const ENTRIES = [
           if (expected[i] !== actual[i]) {
             throw new Error('非 ASCII 源路径的递归复制内容不一致（第 ' + (i + 1) + ' 项）：期望 ' + expected[i] + '，实际 ' + actual[i]);
           }
+        }
+      }
+      // ⑨ 便携复制的**使用面**锚：会复制目录的模块必须走同一个便携实现。⑧ 只证明工具本身可用，
+      // 锚不住「谁在用它」——system-fixtures 与 items/k 曾直接用 fs.cpSync，中文路径检出里整套
+      // 会静默中断（无失败报告、无总结行，最容易被误读成通过）。判据两半：调用形态零命中
+      // （注释里的说明文字不带括号，不会误伤）+ 定义唯一且落在共享层 test-helpers。
+      {
+        const copyCallSites = [
+          path.join(SCRIPTS_DIR, 'lib', 'system-fixtures.mjs'),
+          path.join(SCRIPTS_DIR, 'items', 'k.mjs'),
+          path.join(SCRIPTS_DIR, 'lib', 'test-fixtures.mjs'),
+        ];
+        for (const file of copyCallSites) {
+          if (/\.cpSync\s*\(/.test(fs.readFileSync(file, 'utf8'))) {
+            throw new Error('仍在使用 fs.cpSync 复制目录（中文路径检出会静默崩溃）：' + path.basename(file));
+          }
+        }
+        const defs = [];
+        // 针由两段拼成：本断言自身就在这个文件里，写成一整个字面量会被自己命中，
+        // 把「唯一一处定义」误判成两处（实测踩到过一次）。
+        const defNeedle = 'export function copy' + 'TreePortable';
+        const walkScripts = (root) => {
+          for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+            const full = path.join(root, entry.name);
+            if (entry.isDirectory()) walkScripts(full);
+            else if (entry.name.endsWith('.mjs') && fs.readFileSync(full, 'utf8').includes(defNeedle)) defs.push(full);
+          }
+        };
+        walkScripts(SCRIPTS_DIR);
+        if (defs.length !== 1 || path.basename(defs[0]) !== 'test-helpers.mjs') {
+          throw new Error('copyTreePortable 的定义必须是唯一且落在 test-helpers.mjs，实际：'
+            + (defs.map((f) => path.basename(f)).join(', ') || '零处'));
         }
       }
       const { dshHome, installedVersion } = writeBridgeFixture(dir, { loaderStamp: '9.9.9-fixture-skew' });
