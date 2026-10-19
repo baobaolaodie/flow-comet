@@ -119,10 +119,10 @@ The design node reads CHANGE.md and REQUIREMENT.md, then produces DESIGN.md thro
 1. 本节点的同名条目已随路由加载——同名 required 条目（`flow-comet-design`）无需重复加载，仅需运行下方声明命令（只读取 SKILL.md 文件不叫加载，**不得跳过**真正的 Skill 工具注入步骤）。`flow-comet-ui-design` 为 **guarded 但仅前端适用**的条目——前端项目用 Skill 工具加载其已装副本后**必须**运行对应 `skill-load` 声明建标记，并在 record 载荷带 `required-skill:design.flow-comet-ui-design`；非前端项目不加载不声明（出口打印可见的 `UI-DESIGN: skipped（非前端）` 后放行）；旧 change 保持渐进，缺件仅 WARN。
 
 > **前端判据（结构级 · 唯一权威 → `flow-comet-ui-design` 册的「触发与跳过」段）**：判据全文与 `guarded` 绑定的判级口径都在该册——本节不复述，判定与出口行为一律以该册为准。
-2. 加载完成后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+2. 加载完成后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）。`--templates` 声明本节点该读的产出物模板：`design` 的必填模板是 `DESIGN.md`；**前端 change 另加 `UI-DESIGN.md` 时写成 `--templates DESIGN.md,UI-DESIGN.md`**（`UI-DESIGN` 属可选声明，非前端不加）：
 
 ```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load design flow-comet-design --prompt flow-kit/prompts/2-design.md
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load design flow-comet-design --prompt flow-kit/prompts/2-design.md --templates DESIGN.md
 ```
 
 > **跑 skill-load 声明命令 ≠ 加载**：声明只把“哪次会话加载了哪个 skill、按哪份协议工作”写进状态供 exit/record 核对；真正加载只有第 1 步的 Skill 工具能做到。

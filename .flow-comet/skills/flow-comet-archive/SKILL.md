@@ -151,6 +151,8 @@ Load `flow-comet-integration` during this Node and record completed check `requi
 node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load archive flow-comet-integration --prompt flow-kit/prompts/7-integration.md
 ```
 
+> **零模板节点省略 `--templates`**：archive 的产出物模板映射为空（KNOWN-ISSUES.md 无上游模板），命令**不带** `--templates`——省略即视为空集，与节点映射一致并通过；多写模板名反而会与映射不一致而被拦。
+
 > **跑 skill-load 声明命令 ≠ 加载**：声明只把“哪次会话加载了哪个 skill、按哪份协议工作”写进状态供 exit/record 核对；真正加载只有第 1 步的 Skill 工具能做。
 
 ## Augmentations

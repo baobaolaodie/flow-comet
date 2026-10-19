@@ -42,7 +42,7 @@ description: "flow-kit 2a UI-DESIGN 阶段协议：美学方向 + design tokens 
 `design` 节点对本技能的绑定等级 = **guarded**（见 `../flow-comet/reference/workflow-protocol.json` 的 `requiredSkillCalls`）。前端 change 的完整动作是**先加载、再声明、后干活**：
 
 1. 用 Skill 工具加载本技能（只读取 SKILL.md 文件不叫加载）；
-2. 立即声明已加载：`node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load design flow-comet-ui-design --prompt flow-kit/prompts/2a-ui-design.md`；
+2. 立即声明已加载：`node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load design flow-comet-ui-design --prompt flow-kit/prompts/2a-ui-design.md --templates DESIGN.md`（`--templates` 声明 design 节点的产出物模板；前端要一并声明 UI-DESIGN 时写 `--templates DESIGN.md,UI-DESIGN.md`）；
 3. 把 `required-skill:design.flow-comet-ui-design` 记进 design 节点的 evidence（`record` / handoff 载荷）。
 
 design 出口的核对口径：

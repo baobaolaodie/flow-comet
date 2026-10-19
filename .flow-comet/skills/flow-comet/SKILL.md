@@ -179,7 +179,7 @@ node .claude/skills/flow-comet/scripts/context-scan.mjs [--root <项目根>] [--
 
 **新 change 严格模式**：`init` 创建的 change 标记为"新"（`newChange: true`）——新 change 下全部内容级检查强制 BLOCKED（处置标记/缓存证据/波次散文/越权委托/SUMMARY 完整性/进入证据等）；旧 change（历史遗留,无标记）保持渐进 WARN。执行者可通过 `status` 确认当前 change 的新旧。
 
-> **design 行绑定的前端适用性**：`flow-comet-ui-design` 与协议一致为 `guarded`，但只对**前端 change** 适用——**触发与跳过判据的唯一权威是 `flow-comet-ui-design` 册**；结构形态按其口径压缩为：`CHANGE.md` 的「视觉调性」段在场，段内「不适用」标记须成**独立行**、居**行首**，或写在适用性类标签的**字段值位**，标记之后须成**词形边界**（命中即回显**命中片段**自证）。前端须先用 Skill 工具加载该技能 + `skill-load design flow-comet-ui-design --prompt flow-kit/prompts/2a-ui-design.md` 建标记，并在 record 载荷带 `required-skill:design.flow-comet-ui-design`；非前端不加载、不声明，出口打印可见的 `UI-DESIGN: skipped（非前端）` 后放行；旧 change 缺件仅 WARN。
+> **design 行绑定的前端适用性**：`flow-comet-ui-design` 与协议一致为 `guarded`，但只对**前端 change** 适用——**触发与跳过判据的唯一权威是 `flow-comet-ui-design` 册**；结构形态按其口径压缩为：`CHANGE.md` 的「视觉调性」段在场，段内「不适用」标记须成**独立行**、居**行首**，或写在适用性类标签的**字段值位**，标记之后须成**词形边界**（命中即回显**命中片段**自证）。前端须先用 Skill 工具加载该技能 + `skill-load design flow-comet-ui-design --prompt flow-kit/prompts/2a-ui-design.md --templates DESIGN.md` 建标记，并在 record 载荷带 `required-skill:design.flow-comet-ui-design`；非前端不加载、不声明，出口打印可见的 `UI-DESIGN: skipped（非前端）` 后放行；旧 change 缺件仅 WARN。
 
 **节点技能两层加载模型（入口层 · 双步硬规则）**：路由到节点后，以下两步**都不可跳过**：
 
@@ -187,8 +187,10 @@ node .claude/skills/flow-comet/scripts/context-scan.mjs [--root <项目根>] [--
 2. 随后按该节点 SKILL 的 Required Skill Calls，用 Skill 工具加载协议技能（与 Implementation 同名的条目已随路由加载，无需重复加载），加载完成后**立即**逐条运行声明命令（open/review 等涉及多个协议文件的节点，每个协议文件对应一条声明命令）：
 
 ```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <skill> --prompt flow-kit/prompts/<阶段>.md
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <skill> --prompt flow-kit/prompts/<阶段>.md --templates <模板基名,...>
 ```
+
+> **`--templates` 是内置节点的必填声明**（每个声明标记各写**全清单**，与节点映射一致）：open → `CHANGE.md,REQUIREMENT.md` · design → `DESIGN.md`（前端 change 可再加 `UI-DESIGN.md`）· plan → `TASK.md` · execute / subagent-execute → `SUMMARY.md` · review → `REVIEW.md,TEST.md` · verify / archive → **零模板节点，省略该参数**（省略即空集；多写反而不一致）。声明集合由引擎校验：漏写 / 多写 / 错名在新 change 下即 BLOCK，旧 change 仅 WARN。
 
 > **跑声明命令 ≠ 加载**：声明只把“哪次会话加载了哪个 skill、按哪份协议工作”写进状态供 exit/record 核对；真正加载只有第 1 步的 Skill 工具能做到。协议的引用示例：execute / subagent-execute 节点加载 flow-comet-dev 时用 `--prompt flow-kit/prompts/4-dev.md`（DEV 阶段协议），交付物按 `flow-kit/templates/SUMMARY.md` 模板填写并补写 `## 自检方法` 段。
 
