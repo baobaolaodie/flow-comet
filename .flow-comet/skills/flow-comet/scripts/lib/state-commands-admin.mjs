@@ -4,6 +4,13 @@ import path from 'path';
 import { isValidTimestamp } from '../time-utils.mjs';
 import { verifyFailuresFor, setVerifyFailuresFor, writeJsonAtomic } from '../state-schema.mjs';
 import { findActiveChange, readState, writeState, specsDir } from './state-io.mjs';
+import {
+  describeTemplateList,
+  findTemplatesArg,
+  nodeTemplateDeclaration,
+  templateDeclarationProblems,
+  templateDeclareCommand,
+} from '../protocol-utils.mjs';
 import { findPromptArg, protocolUnderFlowKitPrompts } from './state-skillmarkers.mjs';
 
 // config set <key> <value>——branchMode 只读（init 自动判定），enablePrReview 手动
@@ -75,16 +82,17 @@ export async function runExecutionMode(argv) {
   return;
 }
 
-// skill-load <node> <skill> [--prompt <path>]——写声明标记
-// .specs/<change-id>/.skill-loads/<node>-<skill>.json（{ node, skill, protocol, at }）；
-// record 校验 completedChecks 的 required-skill 条目以此为准。
+// skill-load <node> <skill> [--prompt <path>] [--templates <a.md,b.md>]——写声明标记
+// .specs/<change-id>/.skill-loads/<node>-<skill>.json
+// （{ node, skill, protocol, templates, at }）；record 校验 completedChecks 的 required-skill 条目
+// 与节点模板声明以此为准。
 // 诚实边界：标记是"声明"而非物理证明——运行时没有 Skill 调用观察点，脚本无法确认执行者
 // 真实加载过该 skill；标记仅记录"执行者主动声明已加载"，由流程纪律兜底。
 export async function runSkillLoad(protocol, argv) {
   const nodeId = argv[3];
   const skillName = argv[4];
   if (!nodeId || !skillName) {
-    throw new Error('skill-load requires <node> <skill>. 用法: workflow-state.mjs skill-load <node> <skill> [--prompt <path>]');
+    throw new Error('skill-load requires <node> <skill>. 用法: workflow-state.mjs skill-load <node> <skill> [--prompt <path>] [--templates <a.md,b.md>]');
   }
   // 参数校验：node 为当前协议节点集合之一（动态读取协议 nodes[].id——内置 +
   // 自定义，compose 自定义协议节点可声明）；协议外节点名依然非法（fail-closed）。
@@ -103,6 +111,36 @@ export async function runSkillLoad(protocol, argv) {
   if (promptArg !== null && !protocolUnderFlowKitPrompts(promptArg)) {
     throw new Error('skill-load --prompt 路径必须位于 flow-kit/prompts/ 下（flow-kit 为 vendored 上游，协议提示只读引用）: ' + promptArg);
   }
+  // 产出物模板声明（C4 / C11）：置入既有标记 JSON 的 templates 数组（节点级一份）。
+  // 内置节点：声明集合必须与 C3 映射一致（required ⊆ declared ⊆ required ∪ optional）——新 change
+  // 缺失 / 多写 / 漏写 / 错名一律 BLOCK（fail-closed），旧 change 只在「显式传了不一致的清单」时
+  // WARN（渐进兼容：旧项目不可能一夜补齐声明，缺失由 record 侧统一给提示，不在声明处重复报）。
+  // 自定义协议节点：不比对集合（ADR-002 特化层，C12：协议声明什么就记什么）。
+  const templateArg = findTemplatesArg(argv.slice(3));
+  const templateDeclaration = nodeTemplateDeclaration((protocol.nodes ?? []).find((item) => item.id === nodeId));
+  if (templateDeclaration.source === 'builtin') {
+    const isNewChange = (await readState()).newChange === true;
+    const requiredNames = describeTemplateList(templateDeclaration.required);
+    const declareCommand = templateDeclareCommand(templateDeclaration, { nodeId, skillName });
+    const reportUnsoundDeclaration = (reason) => {
+      if (isNewChange) {
+        console.error('BLOCKED: ' + reason + '——重跑 ' + declareCommand + ' 重新声明后重试');
+        process.exit(1);
+      }
+      console.error('WARN: ' + reason + '——重跑 ' + declareCommand + ' 重新声明（旧 change 渐进不阻断）');
+    };
+    const problems = templateDeclarationProblems(templateDeclaration, templateArg.values);
+    if (!templateArg.provided && templateDeclaration.required.length > 0 && isNewChange) {
+      reportUnsoundDeclaration('节点 ' + nodeId + ' 的模板声明缺失（C3 映射: ' + requiredNames + '）');
+    }
+    if (templateArg.provided && (problems.missing.length > 0 || problems.extra.length > 0)) {
+      const detail = [];
+      if (problems.missing.length > 0) detail.push('漏写: ' + problems.missing.join('、'));
+      if (problems.extra.length > 0) detail.push('多写/错名: ' + problems.extra.join('、'));
+      reportUnsoundDeclaration('节点 ' + nodeId + ' 的模板声明与节点映射不一致（' + detail.join('；')
+        + '；映射要求: ' + requiredNames + '）');
+    }
+  }
   // 声明标记写入：.skill-loads/ 目录不存在时创建（writeJsonAtomic 自带 mkdir recursive）；
   // 同 node-skill 重复调用覆盖（记录最新声明）
   const changeName = await findActiveChange();
@@ -115,7 +153,7 @@ export async function runSkillLoad(protocol, argv) {
   // 校验的节点协议映射表 basename 精确比对同值（真实链路 skill-load → exit 一致）；未传 --prompt →
   // null（无协议声明，exit 校验 fail-closed）。若写 resolveProtocol 解析后的完整绝对路径，与
   // 节点协议映射表的 basename 比对必然失败（真实链路必 BLOCKED——机制实际不可用）。
-  const marker = { node: nodeId, skill: skillName, protocol: promptArg === null ? null : path.basename(promptArg), at: new Date().toISOString() };
+  const marker = { node: nodeId, skill: skillName, protocol: promptArg === null ? null : path.basename(promptArg), templates: templateArg.values, at: new Date().toISOString() };
   // specsDir 已含 .specs/，相对路径为 <change-id>/.skill-loads/<node>-<skill>.json
   const markerRel = path.posix.join(changeName, '.skill-loads', nodeId + '-' + skillName + '.json');
   await writeJsonAtomic(path.join(specsDir(), markerRel), marker);

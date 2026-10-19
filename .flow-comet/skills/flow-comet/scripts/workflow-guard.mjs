@@ -14,7 +14,12 @@ import {
   setVerifyFailuresFor,
   validateStateFields,
 } from './state-schema.mjs';
-import { readProtocolFile, validateProtocolSchema } from './protocol-utils.mjs';
+import {
+  nodeTemplateDeclaration,
+  readProtocolFile,
+  templatePointerLines,
+  validateProtocolSchema,
+} from './protocol-utils.mjs';
 import {
   EXECUTE_FAMILY_NODE_IDS,
   TASK_SET_SIGNATURE_ALGO,
@@ -40,7 +45,7 @@ import {
   printNext,
   route,
 } from './lib/guard-routing.mjs';
-import { checkUiDesignArtifact } from './lib/guard-uidesign.mjs';
+import { checkUiDesignArtifact, frontendCriterion } from './lib/guard-uidesign.mjs';
 import {
   runIntakeDocFidelityGate,
   runSummaryTemplateFidelityGate,
@@ -151,6 +156,20 @@ async function main() {
   state.completedNodes = Array.isArray(state.completedNodes) ? state.completedNodes : [];
   state.evidence = state.evidence && typeof state.evidence === 'object' ? state.evidence : {};
   if (command === 'entry') {
+    // 产出物模板指针（加载链的第一环）：引擎推导、不依赖纪律——内置节点取 C3 映射（协议副本没写
+    // node.templates 也照样打印），自定义协议节点取协议里的 node.templates 声明，零模板节点不打印。
+    // 条件模板（design 的 UI-DESIGN）只在 CHANGE.md 「视觉调性」判为前端时追出：前端判据归属
+    // guard-uidesign 的 frontendCriterion（单一实现），此处只消费，不写第二份。
+    // 先于门禁链输出：即使后面的入口校验拦下，执行者也能先看到该读哪份模板。
+    const declaration = nodeTemplateDeclaration(node);
+    if (declaration.required.length > 0 || declaration.optional.length > 0) {
+      const frontend = declaration.optional.length > 0
+        ? (await frontendCriterion(state.activeChange)).applicable === true
+        : false;
+      for (const line of templatePointerLines(declaration, { label: 'READ TEMPLATE', conditional: frontend })) {
+        console.log(line);
+      }
+    }
     await runEntryGates({ protocol, node, state, file });
     return;
   }

@@ -107,13 +107,13 @@ function replanTaskText(options = {}) {
 function seedExecuteEntryState(dir, taskText) {
   driveThroughDesign(dir);
   writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskText);
-  assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md'], dir), 0);
+  assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir), 0);
   assertExit(runState(['record', 'plan', '{"summary":"plan done"}'], dir), 0);
   assertExit(runGuard(['entry', 'plan'], dir), 0);
   const planExit = runGuard(['exit', 'plan', '--apply'], dir);
   assertExit(planExit, 0);
   assertNodeLine(planExit, 'execute');
-  assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
+  assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir), 0);
   assertExit(runState(['record', 'execute', '{"summary":"implementation recorded"}'], dir), 0);
   assertExit(runGuard(['entry', 'execute'], dir), 0);
 }
@@ -229,7 +229,7 @@ export const ENTRIES = [
       // 遗留清单(协议 required 产物——随目录移动进归档)
       writeFile(dir, '.specs/arch-mk/KNOWN-ISSUES.md', '# KNOWN-ISSUES\n\n无遗留问题\n');
       // 归档前声明标记（open + archive 节点）
-      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
       assertExit(runState(['skill-load', 'archive', 'flow-comet-integration', '--prompt', 'flow-kit/prompts/7-integration.md'], dir), 0);
       // 节点推进到归档（模拟前序节点出口已完成的状态）
       const st0 = readStateFile(dir);
@@ -260,7 +260,7 @@ export const ENTRIES = [
       writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
       writeFile(dir, 'flow-kit/prompts/7-integration.md', '# 阶段 7 · INTEGRATION\n\n## 角色\n\n你是 Integrationer。\n');
       // 手动 skill-load(活动路径标记,随目录移动进归档)
-      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
       assertExit(runState(['skill-load', 'archive', 'flow-comet-integration', '--prompt', 'flow-kit/prompts/7-integration.md'], dir), 0);
       // 推进到 archive
       const st0 = readStateFile(dir);

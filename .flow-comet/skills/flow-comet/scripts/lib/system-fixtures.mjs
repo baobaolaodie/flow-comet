@@ -21,6 +21,7 @@ import os from 'os';
 import { execFileSync, spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { assertExit, assertOut, copyTreePortable, runGuard, runState, writeFile, writeState } from './test-helpers.mjs';
+import { NODE_ARTIFACT_TEMPLATES } from '../protocol-utils.mjs';
 
 // 路径推导基准：技能包 scripts/ 目录（与套件入口同基准）
 export const SCRIPTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -48,9 +49,12 @@ export function gitBranch(root) {
 }
 
 
-// open 阶段工件（CHANGE 含 Why；REQUIREMENT 含 用户故事 + 验收准则——通过出口校验的完整形态）
+// open 阶段工件（CHANGE 含 Why；REQUIREMENT 含 用户故事 + 验收准则——通过出口校验的完整形态）。
+// 「视觉调性」是 CHANGE 模板的条件段且新 change 要求在场：夹具按其结构形态标注「不适用」
+//（独立行 + 理由），使前端判据稳定地判为非前端——不写这段会让 ui-design 门对新 change 报「段缺席」。
 export function writeIntakeArtifacts(root, changeId = CHANGE_ID) {
-  writeFile(root, '.specs/' + changeId + '/CHANGE.md', '# CHANGE\n\n- **Change ID**: ' + changeId + '\n\n## Why（为什么做）\n\n变更目标。\n');
+  writeFile(root, '.specs/' + changeId + '/CHANGE.md', '# CHANGE\n\n- **Change ID**: ' + changeId
+    + '\n\n## Why（为什么做）\n\n变更目标。\n\n## 视觉调性\n\n不适用（夹具：后端任务，无用户可见界面）。\n');
   writeFile(root, '.specs/' + changeId + '/REQUIREMENT.md', '# REQUIREMENT\n\n- **Change ID**: ' + changeId + '\n\n## 用户故事（User Story）\n\n用户需求。\n\n## 验收准则（AC）\n\n- 通过标准\n');
 }
 
@@ -116,6 +120,10 @@ export function execSummaryFixture(taskId) {
     '## 自检方法',
     '',
     'brooks-review',
+    '',
+    '## LESSONS 扫描',
+    '',
+    '无 active 条目命中（夹具：本任务 write_files 与 .specs/LESSONS.md 关键词行无交集）。',
     '',
   ].join('\n');
 }
@@ -219,7 +227,7 @@ export function writeFixBatchFixture(dir, { kind, fixStatus, newChange = true, p
 export function completeFixTaskAndRecord(dir, env) {
   writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', fixBatchTaskText('done'));
   writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-01-SUMMARY.md', execSummaryFixture('T-FIX-01'));
-  assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+  assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
   const rec = runState(['record', 'execute', '{"summary":"fix batch executed","parallelTakeoverApproved":true}'], dir, env);
   assertExit(rec, 0);
   assertOut(rec, 'EVIDENCE: execute');
@@ -285,7 +293,7 @@ function parseExplainSkillLine(value) {
 function parseExplainOutput(output) {
   const parsed = {
     attributes: {}, schemas: [], artifacts: [], evidence: [], guardrails: [], guardrailsNone: false,
-    skills: [], skillsNone: false, commands: [],
+    skills: [], skillsNone: false, templates: [], commands: [],
   };
   let schemaIndex = -1;
   for (const rawLine of String(output).split(/\r?\n/)) {
@@ -313,6 +321,8 @@ function parseExplainOutput(output) {
     } else if (line.startsWith('REQUIRED-SKILL: ')) {
       if (value === '(none)') parsed.skillsNone = true;
       else parsed.skills.push(parseExplainSkillLine(value));
+    } else if (/^TEMPLATE(?:（条件模板）)?: /.test(line)) {
+      parsed.templates.push(line);
     } else if (line.startsWith('COMMAND ')) parsed.commands.push(line);
     else throw new Error('explain 输出含未识别的行形态: ' + line);
   }
@@ -390,7 +400,22 @@ function explainGuardrailAndSkillProblems(node, parsed) {
   return problems;
 }
 
-// ⑤ 三条命令：节点 id 与 --apply 形态 + 脚本根形态（三条同根、指向技能包 scripts 目录）+ 脚本
+// ⑤ 模板指针行：内置节点取引擎 C3 映射、自定义协议节点取 node.templates，零模板节点不打印。
+// 期望值在这里**独立构造**（不调 explain 侧的格式化函数）：措辞、路径根或 .md 后缀的漂移
+// 才能被这条锥抓到。
+function explainTemplateProblems(node, parsed) {
+  const builtin = NODE_ARTIFACT_TEMPLATES[node.id];
+  const required = builtin ? builtin.required : (node.templates ?? []);
+  const optional = builtin ? (builtin.optional ?? []) : [];
+  const expected = [];
+  for (const name of required) expected.push('TEMPLATE: flow-kit/templates/' + name + '.md');
+  for (const name of optional) expected.push('TEMPLATE（条件模板）: flow-kit/templates/' + name + '.md（仅前端 change）');
+  if (JSON.stringify(parsed.templates) === JSON.stringify(expected)) return [];
+  return ['节点 ' + node.id + ' 的 TEMPLATE 行与节点模板声明不一致: 输出 '
+    + JSON.stringify(parsed.templates) + ' / 期望 ' + JSON.stringify(expected)];
+}
+
+// ⑥ 三条命令：节点 id 与 --apply 形态 + 脚本根形态（三条同根、指向技能包 scripts 目录）+ 脚本
 // 路径整体带双引号（含空格的安装根下不被 shell 分词——引号是契约形态的一部分，缺引号即红）。
 function explainCommandProblems(node, parsed) {
   const commandPatterns = [
@@ -427,7 +452,7 @@ function explainCommandProblems(node, parsed) {
   return problems;
 }
 
-// 逐字段对账（单一实现：真实判据与反向构造探针共用）：四类字段 + 三条命令。
+// 逐字段对账（单一实现：真实判据与反向构造探针共用）：五类字段 + 三条命令。
 export function explainContractProblems(protocol, explainOutputs) {
   const problems = [];
   const schemaById = new Map((protocol.outputSchemas ?? []).map((schema) => [schema.id, schema]));
@@ -451,6 +476,7 @@ export function explainContractProblems(protocol, explainOutputs) {
       node.disabled === true ? 'true（该节点在当前协议中被停用）' : null, 'DISABLED');
     problems.push(...explainSchemaProblems(node, parsed, schemaById));
     problems.push(...explainGuardrailAndSkillProblems(node, parsed));
+    problems.push(...explainTemplateProblems(node, parsed));
     problems.push(...explainCommandProblems(node, parsed));
   }
   return problems;
@@ -544,6 +570,26 @@ export function explainReverseConstructionProblems(dir, protocolDecl, explainOut
       }
     }
   }
+  // ⑤ 模板指针行的另一面（不需重跑）：真实输出去掉首条 TEMPLATE 行 ⇒ 逐节点必报 TEMPLATE 不一致。
+  // 没有这一侧，把模板行从实现里拿掉也能全绿（对账恒真空过）。
+  const strippedTemplates = new Map();
+  for (const [nodeId, output] of explainOutputs) {
+    const lines = String(output).split(/\r?\n/);
+    const index = lines.findIndex((line) => line.startsWith('TEMPLATE: '));
+    if (index < 0) continue;
+    strippedTemplates.set(nodeId, [...lines.slice(0, index), ...lines.slice(index + 1)].join('\n'));
+  }
+  if (strippedTemplates.size === 0) {
+    problems.push('反向构造前提不成立：没有任何节点的 explain 输出含 TEMPLATE: 行（模板指针判据无从判别）');
+  } else {
+    const templateProblems = explainContractProblems(protocolDecl, new Map([...explainOutputs, ...strippedTemplates]));
+    for (const nodeId of strippedTemplates.keys()) {
+      if (!templateProblems.some((problem) => problem.includes('节点 ' + nodeId + ' 的')
+        && problem.includes('TEMPLATE 行'))) {
+        problems.push('反向构造判别力缺失（去掉节点 ' + nodeId + ' 的 TEMPLATE 行未被判不一致）');
+      }
+    }
+  }
   return problems;
 }
 
@@ -570,12 +616,12 @@ export function multiWaveTaskContent(statusMap) {
 // 新 change 两层加载模型下逐节点 skill-load → record → entry → exit --apply 全程驱动。
 export function driveThroughDesign(dir) {
   assertExit(runState(['init', CHANGE_ID], dir), 0);
-  assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
+  assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
   writeIntakeArtifacts(dir);
   assertExit(runState(['record', 'open', '{"summary":"intake complete"}'], dir), 0);
   assertExit(runGuard(['entry', 'open'], dir), 0);
   assertExit(runGuard(['exit', 'open', '--apply'], dir), 0);
-  assertExit(runState(['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md'], dir), 0);
+  assertExit(runState(['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md', '--templates', 'DESIGN.md'], dir), 0);
   writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md',
     '# DESIGN\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 0. 技术栈选定\n\nNode.js(ESM)\n\n## 决策清单\n\n- [ ] 循环路由\n');
   assertExit(runState(['record', 'design', '{"summary":"design done"}'], dir), 0);

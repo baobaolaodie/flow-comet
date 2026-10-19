@@ -6,6 +6,14 @@
 // 由 handoff result 的 commitHash/greenEvidence 审计性兜底。
 import { promises as fs } from 'fs';
 import path from 'path';
+import {
+  describeTemplateList,
+  nodeTemplateDeclaration,
+  normalizeTemplateName,
+  templateDeclarationProblems,
+  templateDeclareCommand,
+  templateKeyOf,
+} from '../protocol-utils.mjs';
 import { fileExists, readJson, specsDir } from './state-io.mjs';
 
 // --prompt 原始参数提取（skill-load 专用参数）：--protocol 由 resolveProtocol 全局解析
@@ -95,6 +103,58 @@ export async function hasNodeSkillDeclaration(nodeId, changeName) {
   const archived = await findSkillLoadsDir(changeName);
   if (archived !== null && archived.dir !== activeDir) return scan(archived.dir);
   return false;
+}
+
+// 模板声明核对（C11）：节点的产出物模板声明落在 .skill-loads/<node>-*.json 的 templates 数组里，
+// 集合必须与 C3 映射一致（required ⊆ declared ⊆ required ∪ optional）。同一节点可有多个 skill 标记
+// （open 有 change / requirement），取并集——节点级一份声明被任一标记满足即可（skill-load 每次
+// 都写全清单）。新 change 缺失 / 多写 / 漏写 / 错名 → BLOCK；旧 change → WARN（渐进兼容，C10）。
+// 不比对的三种情形：非内置节点（C12：自定义协议按自己的声明走）、无活动 change、声明机制未激活
+//（无 .skill-loads/ 或本节点无标记）——后者由「缺少技能加载声明标记」门负责，不重复报
+//（与 exit 侧协议声明校验的「未激活不追溯」同一口径）。
+// 零模板的内置节点（verify / archive）省略 --templates 即视为空集，通过。
+export async function verifyTemplateDeclaration({ protocol, nodeId, changeName, newChange }) {
+  const declaration = nodeTemplateDeclaration((protocol?.nodes ?? []).find((node) => node.id === nodeId));
+  if (declaration.source !== 'builtin' || !changeName) return { ok: true };
+  const loadsDir = await findSkillLoadsDir(changeName);
+  if (loadsDir === null) return { ok: true };
+  const prefix = nodeId + '-';
+  const markers = (await fs.readdir(loadsDir.dir).catch(() => []))
+    .filter((name) => name.startsWith(prefix) && name.endsWith('.json'));
+  if (markers.length === 0) return { ok: true };
+  const declared = [];
+  let explicitMarkers = 0;
+  for (const markerName of markers) {
+    let marker;
+    try {
+      marker = await readJson(path.join(loadsDir.dir, markerName));
+    } catch {
+      continue; // 损坏标记由既有声明校验报（本判据不抢报）
+    }
+    // record 自动补写的标记（auto）是引擎写的，不是执行者的声明——它不承担模板声明义务
+    // （exit 侧已有「建议手动 skill-load」提示），不拿它算缺失
+    if (marker?.auto === true) continue;
+    explicitMarkers += 1;
+    if (!Array.isArray(marker?.templates)) continue; // 旧标记无该字段 = 未声明
+    for (const name of marker.templates) {
+      if (typeof name !== 'string' || name.trim() === '') continue;
+      if (!declared.some((existing) => templateKeyOf(existing) === templateKeyOf(name))) {
+        declared.push(normalizeTemplateName(name));
+      }
+    }
+  }
+  // 只有自动标记（无执行者声明）→ 不在这里要求模板集（旧 change 的声明机制本就未激活）
+  if (explicitMarkers === 0) return { ok: true };
+  const problems = templateDeclarationProblems(declaration, declared);
+  if (problems.missing.length === 0 && problems.extra.length === 0) return { ok: true };
+  const detail = [];
+  if (problems.missing.length > 0) detail.push('漏写: ' + problems.missing.join('、'));
+  if (problems.extra.length > 0) detail.push('多写/错名: ' + problems.extra.join('、'));
+  const declareCommand = templateDeclareCommand(declaration, { nodeId });
+  const reason = '节点 ' + nodeId + ' 的模板声明与节点映射不一致（' + detail.join('；')
+    + '；映射要求: ' + describeTemplateList(declaration.required) + '）——重跑 ' + declareCommand + ' 重新声明';
+  if (newChange === true) return { ok: false, reason };
+  return { ok: true, warn: reason };
 }
 
 // completedChecks 真实性校验。解析 completedChecks 的 required-skill:<node>.<skill>

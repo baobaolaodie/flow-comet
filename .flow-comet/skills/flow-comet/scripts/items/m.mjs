@@ -354,7 +354,7 @@ export const ENTRIES = [
     name: 'M4 ui-design 门真实链路：entry design → 缺件 BLOCK → 补件·声明 → exit --apply 放行',
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
-      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
       writeIntakeArtifacts(dir);
       fs.appendFileSync(path.join(dir, '.specs', CHANGE_ID, 'CHANGE.md'),
         '\n## 视觉调性（Visual Tone）\n\n现代、克制的工具型界面。\n');
@@ -362,7 +362,7 @@ export const ENTRIES = [
       assertExit(runGuard(['entry', 'open'], dir), 0);
       assertExit(runGuard(['exit', 'open', '--apply'], dir), 0);
 
-      assertExit(runState(['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md'], dir), 0);
+      assertExit(runState(['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md', '--templates', 'DESIGN.md'], dir), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md',
         '# DESIGN\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 0. 技术栈选定\n\nNode.js(ESM)\n\n## 决策清单\n\n- [ ] 循环路由\n');
       assertExit(runState(['record', 'design', '{"summary":"design done"}'], dir), 0);
@@ -381,7 +381,7 @@ export const ENTRIES = [
       assertExit(undeclared, 1);
       assertOut(undeclared, 'required-skill:design.flow-comet-ui-design');
       assertOut(undeclared, '不再由出口自动补写');
-      assertExit(runState(['skill-load', 'design', 'flow-comet-ui-design', '--prompt', 'flow-kit/prompts/2a-ui-design.md'], dir), 0);
+      assertExit(runState(['skill-load', 'design', 'flow-comet-ui-design', '--prompt', 'flow-kit/prompts/2a-ui-design.md', '--templates', 'DESIGN.md'], dir), 0);
       assertExit(runState(['record', 'design',
         '{"summary":"design done with ui-design","completedChecks":["required-skill:design.flow-comet-design","required-skill:design.flow-comet-ui-design"]}'], dir), 0);
       const passed = runGuard(['exit', 'design', '--apply'], dir);
@@ -395,14 +395,14 @@ export const ENTRIES = [
       const nfChange = CHANGE_ID + '-nf';
       const nfChangeFile = path.join(dir, '.specs', nfChange, 'CHANGE.md');
       assertExit(runState(['init', nfChange, '--init-skip'], dir), 0);
-      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
       writeIntakeArtifacts(dir, nfChange);
       fs.appendFileSync(nfChangeFile,
         '\n## 视觉调性（Visual Tone）\n\n不适用于暗色主题，本 change 仅覆盖浅色分支。\n');
       assertExit(runState(['record', 'open', '{"summary":"intake complete"}'], dir), 0);
       assertExit(runGuard(['entry', 'open'], dir), 0);
       assertExit(runGuard(['exit', 'open', '--apply'], dir), 0);
-      assertExit(runState(['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md'], dir), 0);
+      assertExit(runState(['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md', '--templates', 'DESIGN.md'], dir), 0);
       writeFile(dir, '.specs/' + nfChange + '/DESIGN.md',
         '# DESIGN\n\n- **Change ID**: ' + nfChange + '\n\n## 0. 技术栈选定\n\nNode.js(ESM)\n\n## 决策清单\n\n- [ ] 循环路由\n');
       assertExit(runState(['record', 'design', '{"summary":"design done"}'], dir), 0);
