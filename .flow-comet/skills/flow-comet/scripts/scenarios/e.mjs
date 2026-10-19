@@ -419,7 +419,8 @@ export const ENTRIES = [
         what: '## 做了什么\n\n实现 T01（TDD：先写失败场景再实现）。',
         files: '## 改动文件\n\n| 文件 | 性质 | 说明 |\n|---|---|---|\n| src/t1.mjs | 修改 | 实现 T01 |',
         verify: '## verify 输出\n\n```\nnode --check src/t1.mjs\n```',
-        sixDim: '## 6 维自查\n\n- 功能: 通过（brooks-review 已跑）\n- 性能: 无影响\n- 安全: 无影响\n- 兼容: 通过\n- 可观测: 通过\n- 可维护: 通过',
+        sixDim: '## 6 维自查\n\n- 功能: 通过（brooks-review 已跑）\n- 性能: 无影响\n- 安全: 无影响\n- 兼容: 通过\n- 可观测: 通过\n- 可维护: 通过'
+          + '\n\n### 已知接受 + 理由\n\n- 无（夹具）。\n\n### 已知小问题\n\n- 无（夹具）。',
         db: '## 数据库迁移\n\nN/A：本任务无 schema 变更。',
         bounds: '## 越界检查\n\n仅修改 src/t1.mjs，无越界。',
         breaking: '## 破坏性变更\n\nN/A：本任务不涉及破坏性变更。',
@@ -427,17 +428,26 @@ export const ENTRIES = [
         newWork: '## 是否触发新工作\n\n无。',
         done: '## 完成判定\n\n- TASK.md 中对应任务已勾选：是',
         method: '## 自检方法\n\nbrooks-review',
+        // LESSONS 扫描 = 登记的增量段（位于自检方法之后或文末）——SUMMARY 出口的必填增量段，
+        // 夹具缺它会被增量段门禁拦下，掩盖本场景被测的标题/首部/段序判据。
+        lessons: '## LESSONS 扫描\n\n无 active 条目命中（夹具）。',
       };
       // 模板序 = flow-kit/templates/SUMMARY.md 全部 H2（含 5 个条件段）；## 自检方法 不属骨架，
-      // 单独按位置校核（文末或紧随 ## 越界检查两种合法位置）。
+      // 单独按位置校核（紧随 ## 越界检查、或位于骨架段全部之后两种合法位置；其后允许跟登记的
+      // 增量段 ## LESSONS 扫描）。
       const skeletonOrder = [sectionText.what, sectionText.files, sectionText.verify, sectionText.sixDim,
         sectionText.db, sectionText.bounds, sectionText.breaking, sectionText.deviation, sectionText.newWork, sectionText.done];
-      const fullSections = [...skeletonOrder, sectionText.method]; // 自检方法在文末（合法位置一）
-      const afterBoundsSections = [...skeletonOrder.slice(0, 6), sectionText.method, ...skeletonOrder.slice(6)]; // 紧随越界（合法位置二）
-      const illegalSelfSections = [...skeletonOrder.slice(0, 4), sectionText.method, ...skeletonOrder.slice(4)]; // 自检方法夹在中间（非法）
-      const missingTailSections = [...skeletonOrder.slice(0, 9), sectionText.method]; // 缺尾段 完成判定
+      const fullSections = [...skeletonOrder, sectionText.method, sectionText.lessons]; // 自检方法在骨架段之后（合法位置一）
+      const afterBoundsSections = [
+        ...skeletonOrder.slice(0, 6), sectionText.method, sectionText.lessons, ...skeletonOrder.slice(6),
+      ]; // 紧随越界（合法位置二）
+      const illegalSelfSections = [
+        ...skeletonOrder.slice(0, 4), sectionText.method, sectionText.lessons, ...skeletonOrder.slice(4),
+      ]; // 自检方法夹在中间（非法）
+      const missingTailSections = [...skeletonOrder.slice(0, 9), sectionText.method, sectionText.lessons]; // 缺尾段 完成判定
       const outOfOrderSections = [
-        ...skeletonOrder.slice(0, 5), sectionText.bounds, sectionText.db, ...skeletonOrder.slice(6), sectionText.method,
+        ...skeletonOrder.slice(0, 5), sectionText.bounds, sectionText.db, ...skeletonOrder.slice(6),
+        sectionText.method, sectionText.lessons,
       ]; // 数据库迁移排到越界检查之后（段序偏离）
       const compose = (title, order) =>
         [title, '', header, '', '---', '', order.join('\n\n')].join('\n');
@@ -469,7 +479,7 @@ export const ENTRIES = [
       assertOut(res2, 'BLOCKED');
       // ③ 新 change：段序乱（自检方法提前、做了什么滞后）→ BLOCK
       const scrambled = [
-        sectionText.verify, sectionText.bounds, sectionText.sixDim, sectionText.method,
+        sectionText.verify, sectionText.bounds, sectionText.sixDim, sectionText.method, sectionText.lessons,
         sectionText.what, sectionText.files, sectionText.db, sectionText.breaking,
         sectionText.deviation, sectionText.newWork, sectionText.done,
       ];
