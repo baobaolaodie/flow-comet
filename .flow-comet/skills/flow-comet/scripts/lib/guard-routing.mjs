@@ -11,6 +11,7 @@ import { inspectWorkflowProtectedPath } from '../protocol-utils.mjs';
 import { taskOpeningAttrs } from '../task-parsing.mjs';
 import { resolveNextNode, normalizeHeading, FIX_SECTION_TITLE_FALLBACK } from '../route-node.mjs';
 import { runRoot, fileExists, workflowRelativeSegments } from './guard-state-io.mjs';
+import { buildSkeleton } from './guard-artifact-skeleton.mjs';
 
 // 新旧 change 区分——init 写入的 newChange: true = 新 change（严格，不依赖 entry——防系统性
 // 跳 entry 绕过）；缺失/非 true（旧 change）= 渐进 WARN 兼容。
@@ -303,8 +304,10 @@ export async function findSkillLoadsDir(root, changeName) {
   return null;
 }
 
-// 段名校验从模板自动派生——读 <runRoot>/flow-kit/templates/{CHANGE,REQUIREMENT,DESIGN,SUMMARY}.md
-// 提取全部 ^## 段名，正则化生成宽松匹配模式；模板目录/文件缺失时 fallback 内置段名。
+// 段名校验基准从模板自动派生——骨架计算统一委托 lib/guard-artifact-skeleton.mjs（单一实现：读
+// <runRoot>/flow-kit/templates/<DOC>.md + reference/artifact-templates.json，按 runRoot 缓存；段名
+// 归一复用 route-node 的 normalizeHeading）。本模块只把骨架投影成既有消费方要的 { name, regex } 形态
+// ——不自持模板读取，也不另写一份段名派生。模板缺失 → 空数组，调用方按既有语义回落到内置段名。
 export const TEMPLATE_FALLBACK_SECTION_PATTERNS = {
   changeWhy: /^##\s*Why\b/im,
   changeVisualTone: /^##\s*视觉调性/im,
@@ -313,46 +316,17 @@ export const TEMPLATE_FALLBACK_SECTION_PATTERNS = {
   designDecisionList: /^##\s*\d*\.?\s*决策清单/m,
 };
 
-let templateSectionPatternsCacheRoot = null;
-let templateSectionPatternsCache = null;
+// 模板段名 → 宽松匹配正则：实现随段名归一移到骨架模块（单一出处），此处转出保持既有导出面。
+export { headingPattern as templateSectionPattern } from './guard-artifact-skeleton.mjs';
 
-// 模板段名 → 宽松匹配正则：编号前缀（1. / 0.5）可选 + 段名主体字面匹配 + 尾部括号内容（如 （AC））可选
-export function templateSectionPattern(rawName) {
-  const name = String(rawName).trim();
-  const body = name
-    .replace(/[（(][^）)\n]*[）)]\s*$/u, '')   // 去尾部括号内容：Why（为什么做）→ Why
-    .replace(/^\d+(?:\.\d+)?\.?\s*/u, '')       // 去编号前缀：1. 决策清单 → 决策清单
-    .trim();
-  const escaped = escapeRegExp(body || name);
-  return new RegExp(
-    '^##\\s*(?:\\d+(?:\\.\\d+)?\\.?\\s*)?' + escaped + '\\s*(?:[（(][^\\n）)]*[）)])?\\s*$',
-    'im',
-  );
-}
-
-// 读取模板全部段名生成模式列表（模块级缓存，避免每次 exit 重复读文件）；pick 按关键词选段，找不到 → fallback
+// 读取模板全部段名生成模式列表：键形（change / requirement / design / summary）与 tpl[key] 的
+// { name, regex } 数组形态、pick 的按关键词选段语义一律保持既有——只把数据源换成骨架模块（缓存与
+// 模板读取归它一处负责，本模块不再自持 runRoot 键控的第二份缓存）。
 export async function templateSectionPatterns() {
-  if (templateSectionPatternsCacheRoot === runRoot && templateSectionPatternsCache) {
-    return templateSectionPatternsCache;
-  }
-  const templateDir = path.join(runRoot, 'flow-kit', 'templates');
   const result = { change: [], requirement: [], design: [], summary: [] };
-  for (const [key, fileName] of Object.entries({
-    change: 'CHANGE.md',
-    requirement: 'REQUIREMENT.md',
-    design: 'DESIGN.md',
-    summary: 'SUMMARY.md',
-  })) {
-    const templateFile = path.join(templateDir, fileName);
-    if (await fileExists(templateFile)) {
-      try {
-        const text = await fs.readFile(templateFile, 'utf8');
-        for (const match of text.matchAll(/^##\s+(.+)$/gmu)) {
-          const sectionName = match[1].trim();
-          result[key].push({ name: sectionName, regex: templateSectionPattern(sectionName) });
-        }
-      } catch {}
-    }
+  for (const key of Object.keys(result)) {
+    const skeleton = await buildSkeleton(key);
+    result[key] = skeleton.sections.map((section) => ({ name: section.name, regex: section.pattern }));
   }
   result.pick = (key, keywords, fallback) => {
     for (const section of result[key] ?? []) {
@@ -360,8 +334,6 @@ export async function templateSectionPatterns() {
     }
     return fallback;
   };
-  templateSectionPatternsCache = result;
-  templateSectionPatternsCacheRoot = runRoot;
   return result;
 }
 
