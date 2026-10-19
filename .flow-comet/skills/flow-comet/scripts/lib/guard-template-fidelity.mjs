@@ -381,18 +381,17 @@ export async function evaluateArtifact(key, text, options = {}) {
   return { skeleton, derived, issues };
 }
 
-// 单工件判定（纯函数，不输出）：硬问题（阻断级）与软问题（只告警的结构子段）分开，供报错编排合并。
-export function assessArtifact({ fileLabel, skeleton, derived, issues, structureSeverity = 'block' }) {
-  const hardIssues = structureSeverity === 'block' ? issues : { ...issues, structure: [] };
+// 单工件判定（纯函数，不输出）：把问题清单压成报错编排要的形态（是否阻断 + 类别 + 提示账本键）。
+// 结构子段缺席与其它结构问题同权——父段「适用」时子段必须在场（AC-2/AC-8），不按工件分叉。
+export function assessArtifact({ fileLabel, skeleton, derived, issues }) {
   return {
     fileLabel,
     key: skeleton.key,
     skeleton,
     derived,
-    hardIssues,
-    hard: hasAnyIssue(hardIssues),
-    categories: hintCategories(hardIssues),
-    softStructure: structureSeverity === 'block' ? [] : issues.structure,
+    hardIssues: issues,
+    hard: hasAnyIssue(issues),
+    categories: hintCategories(issues),
   };
 }
 
@@ -423,7 +422,7 @@ function releasePassedHints(hints, assessments) {
 
 // 报错编排（单一实现）：模板缺席 → 未校验行；有硬问题 → 两阶段 BLOCKED/WARN；全过 → 清记忆键。
 // 同一出口的全部工件合并成一次报告——逐件 exit 会让执行者修一个再撞下一个，而这次出口的所有
-// 结构问题一次就能看全。structureSeverity='warn' 的工件（DESIGN）其结构子段缺席只发可见告警。
+// 结构问题一次就能看全。
 export async function reportArtifactStructure({ changeDir, state, assessments }) {
   for (const item of assessments) {
     if (!item.derived) {
@@ -449,12 +448,6 @@ export async function reportArtifactStructure({ changeDir, state, assessments })
     }
   } else if (releasePassedHints(hints, assessments)) {
     await writeHints(hintsFile, hints);
-  }
-  for (const item of assessments) {
-    if (item.softStructure.length === 0) continue;
-    console.error('TEMPLATE-STRUCTURE WARN: ' + item.fileLabel + ' 缺结构子段 '
-      + item.softStructure.length + ' 项: ' + item.softStructure.join('、')
-      + '（' + item.key + ' 的结构子段挂在条件段之下，详略由项目实际决定；只告警不阻断）');
   }
 }
 
@@ -574,8 +567,8 @@ async function expandArtifactTargets(changeDir, targets) {
 const INTAKE_HEADER_KEYS = new Set(['CHANGE', 'REQUIREMENT', 'DESIGN']);
 
 // 产出物的结构门（各节点出口）：受门禁的节点逐个校验本节点产出的登记工件（模板权威）。导出名沿用
-// 既有调用面（workflow-guard 的固定出口链）。DESIGN 的结构子段全部挂在条件段（0.5 brownfield /
-// 9 软约束）之下，详略由项目实际决定 → 缺席只发可见告警（structureSeverity='warn'）。
+// 既有调用面（workflow-guard 的固定出口链）。所有工件同一口径：父段「适用」时结构子段必须在场
+// （缺席即阻断，AC-2/AC-8），只有父段整段 N/A / 不适用时子段才豁免——不按工件分叉。
 export async function runIntakeDocFidelityGate({ node, state }) {
   if (!state.activeChange) return;
   const declaration = nodeTemplateDeclaration(node);
@@ -606,7 +599,6 @@ export async function runIntakeDocFidelityGate({ node, state }) {
       skeleton: evaluated.skeleton,
       derived: evaluated.derived,
       issues: evaluated.issues,
-      structureSeverity: String(key).toUpperCase() === 'DESIGN' ? 'warn' : 'block',
     }));
   }
   if (assessments.length > 0) await reportArtifactStructure({ changeDir, state, assessments });
