@@ -997,14 +997,17 @@ export const ENTRIES = [
       const resArchive = exitNode(dir, 'archive');
       assertExit(resArchive, 1);
       assertOut(resArchive, '### L-501');
-      // ④ 反向构造：迁移（改级 + 留在条目区）后三处通过
+      // ④ 反向构造：迁移（改级 + 留在条目区）后三处通过——archive 一侧须同时给出齐全的归档提名
+      // 证据（TA-19 起「缺 lessonsNomination 即拦」是独立判据，本条只验证旧形态迁移已消失）。
       setupOpen(dir);
       writeFile(dir, '.specs/LESSONS.md', LESSONS_FIXTURE);
       assertExit(exitNode(dir, 'open'), 0);
       setupVerify(dir);
       writeFile(dir, '.specs/LESSONS.md', LESSONS_FIXTURE);
       assertExit(exitNode(dir, 'verify'), 0);
-      setupArchive(dir);
+      setupArchive(dir, {
+        evidence: { lessonsNomination: { scanned: 2, nominated: ['L-501'], reasonIfNone: '' } },
+      });
       const archiveOk = exitNode(dir, 'archive');
       assertExit(archiveOk, 0);
     },
@@ -1088,8 +1091,10 @@ export const ENTRIES = [
   {
     name: 'TA-20 项目级工件：CONTEXT 缺段拦、UI-DESIGN 缺 frontmatter 键拦、ARCHITECTURE 只读报告',
     run: async (dir) => {
-      // ① CONTEXT 缺段（文件存在才查）
+      // ① CONTEXT 缺段（文件存在才查）——段清单基准来自 CONTEXT 模板，故夹具根必须带模板：
+      // 模板缺席时判据按 C9 整体跳过并显式「未校验（模板缺失）」，该形态由 TA-21 覆盖。
       setupOpen(dir);
+      writeTemplateFixture(dir, 'CONTEXT');
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT — 项目共享上下文\n\n## 项目概要\n\n夹具。\n');
       const resContext = exitNode(dir, 'open');
       assertExit(resContext, 1);
