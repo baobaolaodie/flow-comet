@@ -37,19 +37,19 @@ Responsibility: 委托 [P] 并行任务给子代理，要求加载 flow-comet-de
 
 ### 必填段清单（结构+存在级）
 
-| 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
-|------|-------------------------------|-----------------------------------|
-| SUMMARY.md | `## verify 输出` / `## 6 维自查`（须含实质内容）/ `## 越界检查` / `## 自检方法` | `## 做了什么` / `## 改动文件` 等（执行纪律，review 把关） |
+| 文件（模板 = `flow-kit/templates/<DOC>.md`） | 左栏 · 无条件段（模板 H2，缺席 / 空正文 = BLOCKED） | 右栏 · 条件段（**标题必须在场**，正文可写 `N/A`）/ 增量段（按登记位置） |
+|------|------|------|
+| `SUMMARY.md` | `## 做了什么（一段话）` / `## 改动文件` / `## verify 输出（必填）` / `## 6 维自查`（须含实质内容）/ `## 越界检查（必填）` / `## 是否触发新工作` / `## 完成判定`；首部四字段 `Change ID` / `Task ID` / `完成时间` / `AI 角色` 必填 | **条件段**：`## 数据库迁移（涉及 schema 变更必填）` / `## 破坏性变更（涉及破坏性改动必填）` / `## 决策与偏离（如有）`——标题必须在场，不适用写 `N/A`；**增量段**：`## 自检方法`（整段必填，紧随 `## 越界检查` 或文末）、`## LESSONS 扫描`（整段必填，紧随 `## 自检方法`） |
 
-> **注意**：flow-kit 的 SUMMARY 模板**不含 `## 自检方法` 段**——该段是 flow-comet 的强制增量（guard 校验自检方法声明）。使用 `flow-kit/templates/SUMMARY.md` 填写后，**必须按上方必填段清单补写 `## 自检方法` 段**，否则新 change 的 exit 会被 BLOCKED。
+> **注意**：flow-kit 的 SUMMARY 模板**不含 `## 自检方法` 与 `## LESSONS 扫描` 两段**——它们是 flow-comet 登记的增量段。使用 `flow-kit/templates/SUMMARY.md` 填写后，**必须按上方右栏补写这两段**，否则新 change 的 exit 会被 BLOCKED。
 >
 > **无 parallel 任务时**：若路由到此节点但 TASK.md 无 `parallel="true" status="pending"` 任务（如全部任务已被 execute 串行处理），按常规流程记录证据后直接退出（entry → record → exit），不要空转等待。
 
 加载声明（阶段层 · 双步硬规则）见下文 Required Skill Calls 节。
 
-guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
+guard 校验见 workflow-guard.mjs 的委托出口门禁（必填段 + 6 维自查实质内容 + 自检方法声明三值 + LESSONS 扫描段与命中核对）与模板骨架派生（段标题 / 段序 / 首部字段 / 增量段位置）；「填得好不好」由 review 把关。
 
-> **模板权威**：本节点产出工件的段形唯一权威 = `flow-kit/templates/**`；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+> **模板权威**：本节点产出工件的段形 = **上游模板 + 本仓登记的增量段**——唯一权威 = `flow-kit/templates/**`（段与正文），条件段 / 结构子段 / 增量段与指纹由 `../flow-comet/reference/artifact-templates.json` 登记；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
 
 # Subagent Execute
 
@@ -129,6 +129,7 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
    - Explicit requirement to return `completedChecks` in the Return Contract containing `required-skill:subagent-execute.flow-comet-dev`（证明已加载 implementation skill；guard W1-D 严格校验，缺失 → exit BLOCKED，无旧 change 豁免）。Skill 工具不可用而走降级时该条目标记仍按契约回传，但必须与 `skillToolFallback` 降级声明并排出现——只回传标记而无声明视为不实声明，orchestrator 不得记录 result。
    - The task's `read_files` and `write_files` boundaries.
    - Instruction to produce `<task-id>-SUMMARY.md` in `.specs/<change-id>/` following the `flow-kit/templates/SUMMARY.md` template（标题/首部/段序保真，另补 flow-comet 增量 `## 自检方法` 段）。
+   - **写前读模板（固定句式）**：「开工前先读 <本任务产出物的模板路径>，按其标题 / 首部 / 段序填写，并按本仓登记补写增量段」——模板路径逐任务给出（本节点默认 `flow-kit/templates/SUMMARY.md`）；只写「按模板填写」视为委托前检查未完成。
    - **提交边界警告**:提交**只含该任务 write_files 范围内的文件**(含测试文件)——不得包含 TASK.md 与其他协调者维护的 .specs 工件(新 change 提交越界 BLOCKED;实测子代理提交含 TASK.md 被 W2-D 拦截)。**提交从属规则**:任务专属的 `<task-id>-SUMMARY.md`(位于 `.specs/<change-id>/`,是 flow-comet 强制产物)允许随任务提交属流程默认豁免——目标仓库的既有规定优先,若目标仓库忽略清单等既有规定拒绝其入库,被拒即为正确行为,严禁 force-add 强加越库提交;委托校验对任务摘要的豁免属于校验宽容度,不是入库指令。
 
    - **提交面 pathspec 纪律（五要素，见 Guidance 同名小节）**：子代理必须用 `git add -- <自己字面路径>` + `git commit -- <同一路径>`，锁失败重试，禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`（适用条件：**多个写者共享同一工作区**；各自独立工作区内的局部 `reset` / `clean` 不在禁令内）。

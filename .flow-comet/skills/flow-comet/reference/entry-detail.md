@@ -168,8 +168,10 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record <node-id> '{"su
 
 All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT.md, LESSONS.md, CHANGELOG.md).
 
-> **模板权威**：工件段形以 `flow-kit/templates/**` 为唯一权威。
+> **模板权威**：工件段形 = **上游模板 + 本仓登记的增量段**——`flow-kit/templates/**` 是唯一权威，增量段与条件段登记见 `reference/artifact-templates.json`。
 > **archive 定位与读法**：见主 `SKILL.md` 的「Artifact Paths」小节（单一来源——「何时可读 / 读什么 / 不读什么」的三段判据只在那一处表达，本文不复述）。
+
+> **要核对某工件的条件段 / 结构子段 / 增量段登记时，先读 `reference/artifact-template-overlay.md`**（逐工件的人类可读登记册；快照与指纹以登记表 JSON 为准）。
 
 ### Scripts
 

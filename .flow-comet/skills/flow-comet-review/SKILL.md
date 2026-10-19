@@ -17,13 +17,17 @@ This node performs a structured multi-round review of the implemented change, ch
 
 ### 必填段清单（结构+存在级）
 
-| 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
-|------|-------------------------------|-----------------------------------|
-| REVIEW.md | 文件 ≥ 100 字节；发现区条目处置标记（`[已修]` / `[升级]` / `[转待办]`——新 change 缺失 BLOCKED,旧 change WARN 渐进）；**Major `[转待办]` 须有用户裁决记录**（同段、文末或单独段落「用户裁决：接受延期」+ 指向该条目 + `[升级]` 承接——单独段落与条目以空行分隔、位置不限）——缺失新 change BLOCKED / 旧 change WARN 渐进 | `## Critical` / `## 发现` / `## 结论` 等段（结构要求，guard 不拦段名） |
+| 文件（模板 = `flow-kit/templates/<DOC>.md`） | 左栏 · 无条件段（模板 H2，缺席 / 空正文 = BLOCKED） | 右栏 · 条件段（**标题必须在场**，正文可写 `N/A`）/ 增量段（按登记位置） |
+|------|------|------|
+| `REVIEW.md` | `## 第一轮 · Spec 合规审查` / `## 第二轮 · 代码质量审查（6 维衰退风险）` / `## 总结`；结构子段 `### 2.0 TEST.md 5 轮金字塔完整性` / `### 2.1` / `### 2.2` / `### 2.3` 在父段在场时必在场；文件 ≥ 100 字节；首部字段 `Change ID` / `审查时间` / `审查者` / `总体结论` 已在场时值不得为空（键集不强制） | **条件段**：`## 第三轮 · UI 视觉审查（仅前端）` / `## 第四轮 · 补充审查（按触发条件）`——标题必须在场，不适用写 `N/A`（其结构子段 `### 4.1` / `### 4.2` 在父段适用时必在场）；**增量段**：发现条目的**处置标记**（`[已修]` / `[升级]` / `[转待办]`，必填，写在 `### 2.2 6 维诊断 · 详细发现` 段内） |
 
-guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
+发现写在模板外的 `## 发现` 而 `### 2.2` 无条目 → 新 change BLOCKED（条目记录在非模板位置等于静默丢弃）；**Major `[转待办]` 须有用户裁决记录**（同段、文末或单独段落「用户裁决：接受延期」+ 指向该条目 + `[升级]` 承接——单独段落与条目以空行分隔、位置不限），缺失新 change BLOCKED / 旧 change WARN 渐进。
 
-> **模板权威**：本节点产出工件的段形唯一权威 = `flow-kit/templates/**`；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+本出口同时按模板校验 `TEST.md` 的骨架（5 轮段与结构子段）——细目见 `flow-comet-test` 册；`## 验证命令` 增量段的执行与校验在 verify 出口。
+
+guard 校验见 workflow-guard.mjs 的 review 出口门禁（发现区处置标记 / 发现位置 / Major 延期裁决 / 模板骨架）与模板骨架派生（段标题 / 段序 / 首部字段 / 增量段位置）；「填得好不好」由 review 自身把关。
+
+> **模板权威**：本节点产出工件的段形 = **上游模板 + 本仓登记的增量段**——唯一权威 = `flow-kit/templates/**`（段与正文），条件段 / 结构子段 / 增量段与指纹由 `../flow-comet/reference/artifact-templates.json` 登记；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
 
 ### 必查清单（review 逐项核对 · 执行者交付纪律）
 
@@ -201,7 +205,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record review '{"summa
 | `review-evidence` | REVIEW.md exists | artifact-exists |
 | `critical-resolved` | 0 unacknowledged Critical items | 执行纪律（review 把关），guard 不校验 |
 | `no-code-changes` | Reviewer did not modify code files | 执行纪律（review 把关），guard 不校验 |
-| `test-pyramid-checked` | TEST.md 5-round completeness verified | 执行纪律（review 把关），guard 不校验 |
+| `test-pyramid-checked` | TEST.md 5 轮金字塔的结构在场（各轮 H2 标题 + 结构子段）+ REVIEW 的 `### 2.0` 完整性小节 | 结构级（guard 强制：`TEST.md` 骨架与 `### 2.0` 子段缺席即 BLOCKED，条件轮写 `N/A` 放行）；5 轮内容质量仍由 review 自己把关 |
 
 ## Exit Check
 

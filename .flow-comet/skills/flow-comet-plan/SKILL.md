@@ -17,13 +17,15 @@ Responsibility: 拆原子任务（XML 格式）+ 波次划分。生成 TASK.md�
 
 ### 必填段清单（结构+存在级）
 
-| 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
-|------|-------------------------------|-----------------------------------|
-| TASK.md | 至少一个 `<task>` 块 + 每个任务含 `<verify>` 字段 + 新格式任务的 7 字段在场（`name` / `read_files` / `write_files` / `action` / `verify` / `done` / `depends_on`） | 任务规模 / 粒度 / 字段内容质量（模板要求，guard 不拦）——**填得好不好**由 review 把关 |
+| 文件（模板 = `flow-kit/templates/<DOC>.md`） | 左栏 · 无条件段（模板 H2，缺席 / 空正文 = BLOCKED） | 右栏 · 条件段（**标题必须在场**，正文可写 `N/A`）/ 增量段（按登记位置） |
+|------|------|------|
+| TASK.md | 至少一个 `<task>` 块 + 每个任务含 `<verify>` 字段 + 新格式任务的 7 字段在场（`name` / `read_files` / `write_files` / `action` / `verify` / `done` / `depends_on`）；模板 5 个 H2 段 `## 波次划分` / `## 任务清单` / `## 状态字段说明` / `## 阻塞日志` / `## Fix 任务（来自 REVIEW / INTEGRATION）` | 无模板条件段、无增量段（5 个 H2 全部无条件）——任务块的 7 字段与任务图（依赖环 / 缺失依赖 / 并行写写冲突）属元素级判据，见下方「硬性拦截」段 |
 
-guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B：任务块结构、每任务 `<verify>`、**新格式任务的 7 字段在场**都由 guard 拦（新 change 缺任一 = 出口 BLOCKED；旧格式模板 / 旧 change 渐进 WARN）；「填得好不好」——字段内容质量与任务粒度——由 review 把关。
+首部字段 `Change ID` / `关联` 已在场时值不得为空（键集不强制）。
 
-> **模板权威**：本节点产出工件的段形唯一权威 = `flow-kit/templates/**`；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B：任务块结构、每任务 `<verify>`、**新格式任务的 7 字段在场**、以及 TASK.md 的模板骨架（段标题 / 段序 / 首部字段值非空）都由 guard 拦（新 change 缺任一 = 出口 BLOCKED；旧格式模板 / 旧 change 渐进 WARN）；「填得好不好」——字段内容质量与任务粒度——由 review 把关。
+
+> **模板权威**：本节点产出工件的段形 = **上游模板 + 本仓登记的增量段**——唯一权威 = `flow-kit/templates/**`（段与正文），条件段 / 结构子段 / 增量段与指纹由 `../flow-comet/reference/artifact-templates.json` 登记；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
 
 波次散文一致性：`## 波次划分` 中标记为并行（[P]）的任务必须与 XML 任务 `parallel="true"` 一致——新 change 不一致 BLOCKED（旧 change WARN 渐进）。
 

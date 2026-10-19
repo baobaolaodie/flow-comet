@@ -15,7 +15,7 @@ This node finalizes a completed change by extracting reusable lessons from the d
 
 ## Guidance
 
-> **模板权威**：本节点产出工件的段形唯一权威 = `flow-kit/templates/**`；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+> **模板权威**：本节点产出工件的段形 = **上游模板 + 本仓登记的增量段**——唯一权威 = `flow-kit/templates/**`（段与正文），条件段 / 结构子段 / 增量段与指纹由 `../flow-comet/reference/artifact-templates.json` 登记；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
 
 ### Prerequisites
 
@@ -181,7 +181,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record archive '{"summ
 | Guardrail ID | Label | Validation Type |
 |--------------|-------|-----------------|
 | `archive-evidence` | Archive directory exists, source removed | state-transition |
-| `changelog-updated` | CHANGELOG.md has new entry | 执行纪律（review 把关），guard 不校验（倒序位置有 WARN 渐进检查） |
+| `changelog-updated` | CHANGELOG.md 有新条目，且表格条目按日期倒序 | 结构级（guard 强制：`CHANGELOG.md` 表格日期倒序——新 change 非倒序即 BLOCKED、旧 change WARN；未含本 change 标识只 WARN 提示补登记）；条目内容与格式由 review 把关 |
 | `lessons-preserved` | LESSONS.md still in .specs/ (not archived) | 执行纪律（review 把关），guard 不校验 |
 | `user-confirmed` | User confirmed archive before execution | 执行纪律（review 把关），guard 不校验 |
 

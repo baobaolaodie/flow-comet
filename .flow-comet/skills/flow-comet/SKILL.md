@@ -7,6 +7,18 @@ description: "Use when the user wants the flow-comet managed workflow for flow-k
 
 # flow-comet
 
+## 协议覆盖声明（phase-gated · 上游 vendored 只读基准）
+
+**上游只读基准**：`flow-kit/prompts/**` 与 `flow-kit/templates/**` 是随包引入的上游 vendored 基准，本仓**只读引用、不修改**；下列是本仓有意的方向修正，逐条可审计。
+
+**不采用（逐条点名）**：① flow-kit 设计原则里的「artifact-first，不是 phase-gated（阶段可压缩、可回炉）」——本仓是 **phase-gated**：8 节点 entry/exit 门 + 节点顺序门，`currentNode` 不匹配即 BLOCKED；② 上游各 prompt 的段表只作内容指引、不作段形来源——`flow-kit/prompts/0-change.md` 的 CHANGE 自检 5 段清单、`flow-kit/prompts/2-design.md` 的 §3 / §4 编号（与模板的 3 / 4 / 5 互换）、`flow-kit/prompts/5-test.md` 的 H3 编号（与模板 H3 错位）一律不采用。
+
+**沿用上游**：工件优先级（`.specs/<change-id>/` 是唯一进度真相，可回炉重进）与各阶段的内容协议（反问 / 决策清单 / 5 轮金字塔 / LESSONS 提名）全部沿用；段名、段序与结构子段以 `flow-kit/templates/**` 加 `reference/artifact-templates.json` 为唯一来源。
+
+**阶段门是工件门的加强，不是替代**：工件仍是唯一真相，阶段门只把「缺工件」从「事后发现」提前到「出口拦截」——不能拿阶段门替代工件本身。
+
+**以本节为准**：本节的 phase-gated 反转全局生效；其余覆盖项按各自小节划定适用面，节点册与技能册另有覆盖声明的，以该册声明为准。
+
 ## Decision Core
 
 ### 自动节点检测
@@ -252,8 +264,10 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record <node-id> '{"su
 
 All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT.md, LESSONS.md, CHANGELOG.md).
 
-> **模板权威**：工件段形以 `flow-kit/templates/**` 为唯一权威。
+> **模板权威**：工件段形 = **上游模板 + 本仓登记的增量段**——`flow-kit/templates/**` 是唯一权威（段与正文），条件段 / 结构子段 / 增量段与指纹由 `reference/artifact-templates.json` 登记。
 > **archive 定位与读法**：`.specs/archive/**` 是历史证据。**何时可读**：工作区文档明确要求（如断点续传 / 决策追溯），或某 guard 硬校验的约定在模板与 LESSONS 中查不到时；**读什么**：只取结构与证据；**不读什么**：不作为格式规范或决策依据，不得以归档工件对齐段形。
+
+> **要判定某一段是上游模板段还是本仓登记的增量段、或要核对某工件的条件段与结构子段登记时，先读 `reference/artifact-template-overlay.md`**（按登记表派生的人类可读册：逐工件的标题形态 / 首部字段 / 无条件段 / 条件段 / 结构子段 / 增量段与位置）。
 
 ### Scripts
 

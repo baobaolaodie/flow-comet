@@ -17,16 +17,16 @@ This node performs the final integration verification: running all automated tes
 
 ### 必填段清单（结构+存在级）
 
-| 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
-|------|-------------------------------|-----------------------------------|
-| TEST.md | `## 验证命令`（exit verify 真实执行） | `## 测试矩阵` 等段（5 轮金字塔，review 把关） |
-| UAT.md | `## 验收结果` | 其余（执行纪律，review 把关） |
+| 文件（模板 = `flow-kit/templates/<DOC>.md`） | 左栏 · 无条件段（模板 H2，缺席 / 空正文 = BLOCKED） | 右栏 · 条件段（**标题必须在场**，正文可写 `N/A`）/ 增量段（按登记位置） |
+|------|------|------|
+| `TEST.md` | `## 验证命令`（本仓登记的**增量段**，必填，位置不限但标题后必须紧跟代码块）——exit verify 真实执行其中的命令并计数失败 | 上游模板段（`flow-kit/templates/TEST.md` 的 5 轮 H2 与结构子段）在 **review 出口**按模板校验；verify 的节点映射无模板，本出口不做段名 / 段序校验 |
+| `UAT.md` | **仅存在性**——guard 只查 `.specs/<change-id>/UAT.md` 在场（UAT 无上游模板，不校验段名与段序） | `## 验收结果` 等段：格式与内容由 UAT 执行与 review 把关，guard 不判段名 |
 
-> **注意**：flow-kit 的 TEST 模板**不含 `## 验证命令` 段**——该段是 flow-comet 的强制增量（exit verify 会真实执行其中的命令并计数失败）。使用 `flow-kit/templates/TEST.md` 填写后，**必须按上方必填段清单补写 `## 验证命令` 段**，否则 exit verify 会被 BLOCKED。**排版约束**：`## 验证命令` 标题后必须**紧跟**代码块（` ``` `），标题与代码块之间**不得插入任何说明行**（如 blockquote 说明——guard 正则要求标题后直接是代码块）；段名可带括号后缀。UAT.md 同理：flow-kit 无独立 UAT 模板（UAT 脚本格式见 5-test.md 1.2 节），产出时按上方必填段清单写 `## 验收结果` 段。
+> **注意**：flow-kit 的 TEST 模板**不含 `## 验证命令` 段**——该段是 flow-comet 登记的增量段（exit verify 会真实执行其中的命令并计数失败）。使用 `flow-kit/templates/TEST.md` 填写后，**必须按上方右栏补写 `## 验证命令` 段**，否则 exit verify 会被 BLOCKED。**排版约束**：`## 验证命令` 标题后必须**紧跟**代码块（` ``` `），标题与代码块之间**不得插入任何说明行**（如 blockquote 说明——guard 正则要求标题后直接是代码块）；段名可带括号后缀。UAT.md 同理：flow-kit 无独立 UAT 模板（UAT 脚本格式见 5-test.md 1.2 节），本出口只查文件在场——`## 验收结果` 段按惯例填写，格式由 UAT 执行与 review 把关。
 
-guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
+guard 校验见 workflow-guard.mjs 的 verify 出口门禁（`## 验证命令` 增量段真实执行 + 失败计数 + LESSONS 条目形态与条目区）；UAT.md 只查存在性，「填得好不好」由 review 与 UAT 执行把关。
 
-> **模板权威**：本节点产出工件的段形唯一权威 = `flow-kit/templates/**`；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+> **模板权威**：本节点产出工件的段形 = **上游模板 + 本仓登记的增量段**——唯一权威 = `flow-kit/templates/**`（段与正文），条件段 / 结构子段 / 增量段与指纹由 `../flow-comet/reference/artifact-templates.json` 登记；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
 
 ### Prerequisites
 
@@ -151,7 +151,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record verify '{"summa
 | `verify-evidence` | UAT.md exists | artifact-exists |
 | `automation-passed` | All automated checks pass (real output) | 执行纪律（review 把关），guard 不校验 |
 | `retry-limit` | No more than 3 auto-retries（机器计数 verifyFailures，第 4 次 BLOCKED） | process-check |
-| `lessons-nominated` | LESSONS.md updated with new entries（完成提名扫描；仅当有合格条目时更新——无合格条目不强制新增，避免噪音条目） | 执行纪律（review 把关），guard 不校验 |
+| `lessons-nominated` | LESSONS.md 条目形态与条目区合规（完成提名扫描；仅当有合格条目时更新——无合格条目不强制新增，避免噪音条目） | 结构级（guard 强制：本出口校验 `.specs/LESSONS.md` 的条目写 `### L-NNN`、位于条目区、编号升序——新 change 违反即 BLOCKED，旧 change WARN）；「是否有合格条目」由执行者把关，归档时另以 `evidence.lessonsNomination` 核对 |
 
 ## Exit Check
 
