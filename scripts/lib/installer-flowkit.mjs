@@ -5,6 +5,8 @@
  * 归属不可确认即跳过并给手动指引；clone / checkout 的失败**不抛错**——外网故障不得绑架安装器
  * 的其余职责（技能树、规则、hook 注入照常完成，进程照常 exit 0）。把这条链路独立成模块，是为
  * 了让「什么情况下会改动用户目录」只有一个落点可审——答案必须是「只有目标不存在时」。
+ * 降级态的统一口径是「未校验（模板缺失）」：获取点给怎么补（命令），进程结尾单独明示后果与
+ * 修复方法（两处分工见 FLOW_KIT_DEGRADED_NOTICE 上方的说明）。
  *
  * 依赖方向：本模块是叶子（只用 node 内置模块与 git 命令）。
  */
@@ -28,12 +30,45 @@ function gitErrorFirstLine(err) {
   return String(err && err.message ? err.message : err).split('\n')[0].trim();
 }
 
-/** 手动获取指引（clone/checkout 失败或目录非上游克隆时打印——含上游 URL 与目标路径;不抛错） */
+/**
+ * 手动获取指引（clone/checkout 失败或目录非上游克隆时打印——含上游 URL 与目标路径;不抛错）：
+ * 这里只负责「怎么补」，用户可见的结论（影响 / 原因 / 修复方法）留到进程结尾单独明示——
+ * 获取段在平台摘要之前执行，结论留在这一段里会被后面的平台清单与摘要顶出视野。
+ */
 function printFlowKitManualGuide(target) {
   const flowKitDir = path.join(target, 'flow-kit');
   console.warn(`[flow-comet] 手动获取指引: git clone ${FLOW_KIT_UPSTREAM_URL} "${flowKitDir}"`);
   console.warn(`[flow-comet] 然后锁定快照: git -C "${flowKitDir}" checkout --detach ${FLOW_KIT_LOCKED_COMMIT.slice(0, FLOW_KIT_SHORT_SHA_LEN)}`);
-  console.warn('[flow-comet] 未获取 flow-kit 时技能协议引用悬空、guard 段名基准退化为内置 fallback——其余安装职责不受影响。');
+  console.warn('[flow-comet] 后果: 模板校验将不可用——各节点出口输出「未校验（模板缺失）」而不比对模板段形；技能册的模板引用同时悬空。其余安装职责不受影响。');
+}
+
+/**
+ * 安装结尾的降级结论（未校验（模板缺失））：影响 / 原因 / 修复方法三行，挂在进程结尾打印。
+ * 与获取点的手动指引分工：那里给命令（现在就能照做），这里给结论（安装结束时的状态与后果）。
+ * 只有真的拿不到模板时才挂（获取成功、HEAD 只读失败但目录在场都不挂——模板仍在磁盘上，
+ * 结构校验照常可用）。调用契约：只由 prepare-env CLI 进程调用——结尾提示挂在 process 'exit'
+ * 上，若将来被库内导入复用，提示会跟着宿主进程退出一起打印（不可断言、会污染输出）。
+ */
+const FLOW_KIT_DEGRADED_NOTICE = [
+  '[flow-comet] 提醒: 本次安装未获取 flow-kit 模板——产出物不会做模板校验。',
+  '[flow-comet]   影响: 各节点出口输出「未校验（模板缺失）」而不拦缺段 / 乱序 / 空段（结构校验不可用）。',
+  '[flow-comet]   原因: flow-kit/templates 未就位（自动获取失败，或同名目录归属无法确认已跳过——安装器绝不改动已有目录）。',
+  '[flow-comet]   修复: 网络可用时重跑本安装器；或按上方手动获取指引 clone 上游后 checkout --detach 到锁定快照。',
+].join('\n') + '\n';
+
+let flowKitDegradedNoticeScheduled = false;
+
+/** 挂一次结尾结论（重复调用幂等；退出阶段只能用同步写——console 在 exit 阶段不保证刷出） */
+function scheduleFlowKitDegradedNotice() {
+  if (flowKitDegradedNoticeScheduled) return;
+  flowKitDegradedNoticeScheduled = true;
+  process.once('exit', () => {
+    try {
+      fs.writeSync(2, FLOW_KIT_DEGRADED_NOTICE);
+    } catch {
+      // 结尾提示是尽力而为：写不出去也不得改变退出码（exit 0 / 非破坏契约的底线）
+    }
+  });
 }
 
 /**
@@ -60,7 +95,8 @@ function flowKitOriginStatus(flowKitDir) {
  *   路径 2 已存在且 .git 存在且 origin 匹配上游 → 只读 rev-parse HEAD 并输出与锁定点差异影响,绝不改动;
  *   路径 3 已存在但不满足归属判定 → 摘要"非上游克隆,已跳过"+ 手动指引,不改动;
  *   路径 4 clone/checkout 任一失败 → 警告 + 手动获取指引,**不抛错**（D5——外网故障不得绑架安装器
- *          其余职责,进程照常 exit 0）;各平台 purge 清单永不包含 flow-kit（D6,见 PLATFORMS 表头注释）。
+ *          其余职责,进程照常 exit 0）;3、4 两条降级路径都在安装结尾补一句「未校验（模板缺失）」
+ *          的影响 / 原因 / 修复方法;各平台 purge 清单永不包含 flow-kit（D6,见 PLATFORMS 表头注释）。
  */
 export function ensureFlowKit(target) {
   const flowKitDir = path.join(target, 'flow-kit');
@@ -81,6 +117,7 @@ export function ensureFlowKit(target) {
       // 路径 4：clone/checkout 任一失败 → WARN + 手动指引,不抛错
       console.warn(`[flow-comet] 警告: flow-kit 自动获取失败（${gitErrorFirstLine(err)}）`);
       printFlowKitManualGuide(target);
+      scheduleFlowKitDegradedNotice();
     }
     return;
   }
@@ -94,6 +131,7 @@ export function ensureFlowKit(target) {
     }
     console.log('[flow-comet] 目录存在但非上游克隆，已跳过');
     printFlowKitManualGuide(target);
+    scheduleFlowKitDegradedNotice();
     return;
   }
   // 路径 2：上游克隆 → 只读检测并输出差异影响（D4——绝不 fetch/checkout 改动用户克隆）

@@ -9,7 +9,8 @@
 #   installer            prepare-env reproducibility + distribution surface (publishable
 #                        manifest / pack boundary incl. top-level allowlist and per-file
 #                        skill tree / bin contract) + installed-copy smoke test
-#   quality              workflow yaml validity (actionlint) + bilingual mirror symmetry
+#   quality              workflow yaml validity (actionlint) + bilingual mirror symmetry +
+#                        template registry fingerprint matches the locked snapshot (no network)
 #   pr-policy            PR template completeness (5 bilingual sections + 17 checkboxes,
 #                        deletion = fail) / feature-branch prefix / dev-main sync /
 #                        CHANGELOG self-check verification /
@@ -441,6 +442,32 @@ jobs:
           });
           if (failed) { console.log(failed + ' single-authority checks failed'); process.exit(1); }
           console.log('single-authority check passed');
+          EOF
+
+      - name: '模板登记表指纹 ↔ 锁定快照 / Template registry fingerprint matches locked snapshot'
+        run: |
+          # 判据：登记表 reference/artifact-templates.json 的 templateCommit 必须等于安装器锁定点
+          # FLOW_KIT_LOCKED_COMMIT——两侧各自演进时，运行期骨架基准（模板段形）与安装器实际拉取的
+          # 上游快照会悄悄分叉。一致时零输出（静默）；不一致时红并打印两侧取值与来源文件；
+          # 只读本地文件，零网络，不依赖 flow-kit 是否检出。
+          node - <<'EOF'
+          const fs = require('fs');
+          const REGISTRY = '.flow-comet/skills/flow-comet/reference/artifact-templates.json';
+          const INSTALLER = 'scripts/lib/installer-flowkit.mjs';
+          // 只认整行字面量声明：常量被改名 / 被改成非字面量都必须让本步红，不得回落到「找不到即通过」
+          const locked = fs.readFileSync(INSTALLER, 'utf8').match(/^const FLOW_KIT_LOCKED_COMMIT = '([0-9a-f]{40})';$/m);
+          if (!locked) {
+            console.error('锁定点未按预期形态声明 / FLOW_KIT_LOCKED_COMMIT literal not found: ' + INSTALLER);
+            process.exit(1);
+          }
+          const registry = JSON.parse(fs.readFileSync(REGISTRY, 'utf8')).templateCommit;
+          if (registry !== locked[1]) {
+            console.error('登记表指纹与锁定快照不一致 / template registry fingerprint drift:');
+            console.error('  ' + REGISTRY + ' -> templateCommit = ' + registry);
+            console.error('  ' + INSTALLER + ' -> FLOW_KIT_LOCKED_COMMIT = ' + locked[1]);
+            console.error('升级锁定点时须同批更新登记表：templateCommit 与每份模板的 sha256 一起改，否则校验基准与实际模板分叉。');
+            process.exit(1);
+          }
           EOF
 
 
