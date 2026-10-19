@@ -28,7 +28,9 @@ Find your symptom, run the command. Everything here assumes you are inside the p
 
 **`BLOCKED: … 缺少技能加载声明标记`** — load the node's skill and declare it: `workflow-state.mjs skill-load <node> <skill>`, then repeat the `record` and the exit.
 
-**`BLOCKED: … 模板保真校验失败`** — the node's document is missing a header field or a section the flow-kit template defines. Compare it with `flow-kit/templates/<DOC>.md` and add the named field or section; the message names what it wanted.
+**`BLOCKED: … 模板结构校验失败`** — one of the document's checks failed: title form, header fields, the section set or its order, a blank body, or text copied verbatim from the template. The message works in two stages: **the first failure gives only the template path and a count per category** (for example "3 sections missing"), which you fix against `flow-kit/templates/<DOC>.md`; **the section names are listed only when the same document fails again** — that ledger lives in `.specs/<change>/.template-hints.json` and is cleared once the document passes. A conditional section keeps its heading (write `N/A` in the body), a structural subsection is not required when its parent section is `N/A` as a whole, and sections you add beyond the template are not checked.
+
+**The exit reports a document as unchecked because its template is missing** — `flow-kit/templates/<DOC>.md` is not in the project root, so every template-derived check for that document is skipped — **unchecked is not passed**. Restore the flow-kit templates as the installation page describes and retry; if the same line blames the registry instead, the skill tree is missing `reference/artifact-templates.json` and needs reinstalling. `UAT.md` and the archive's leftovers list have no upstream template, so they are never part of this check: only their existence is required.
 
 **`BLOCKED: … TASK.md 任务集被修改（签名不匹配）`** — the task set changed after the execution node was entered. Restore the task list and re-enter the node (or add the work as a new task before entering), rather than editing tasks mid-flight.
 

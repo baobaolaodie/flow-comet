@@ -66,7 +66,7 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 
 ## 引擎强制的纪律
 
-- **工件保真** —— 节点文档必须符合 flow-kit 模板的首部字段与段名，否则守卫拒绝出口。
+- **工件保真** —— 引擎在节点出口逐工件校验七类 change 文档（`CHANGE`、`REQUIREMENT`、`DESIGN`、`TASK`、每份 `<任务号>-SUMMARY`、`REVIEW`、`TEST`），判据按 flow-kit 模板：标题形态、首部字段、段集合与段序、空正文、照抄模板占位符。被校验的段集合 = 上游模板的全骨架 + 本仓登记的**增量段**（如 SUMMARY 的 `## 自检方法`、`## LESSONS 扫描`，TEST 的 `## 验证命令`），逐工件对应哪一出口见[守卫校验](MECHANISM-zh.md#守卫校验)。条件段保留标题、正文可写 `N/A`；父段整段 `N/A` 时其结构子段不要求；你在模板之外自加的段不参与校验。项目级工件按「在哪被消费就在哪查」处理——`CONTEXT.md` 在 `open`，`LESSONS.md` 在 `open`、`verify` 与 `archive`，`UI-DESIGN.md` 存在才查，而 `.specs/ARCHITECTURE.md` 只由侧命令只读检查。`UAT.md` 与遗留清单没有上游模板，只查存在性；模板缺席的工件报「未校验」而不是「通过」。
 - **先证据后出口** —— `record <node>` 写入节点证据，出口要求它存在（外加技能加载声明）。
 - **摘要骨架** —— 每个完成任务都要有 `<任务号>-SUMMARY.md`，含模板规定的各段（包括自检与越界检查）。
 - **测试真跑** —— `verify` 出口执行 `TEST.md` 里的命令块并统计失败；命令失败即阻断出口。

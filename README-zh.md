@@ -118,7 +118,7 @@ processor-pipeline/            （归档 change，完整产物集）
 
 | 项目 | 它是什么、怎么运作 | 与 flow-comet 的关系 |
 |---|---|---|
-| **flow-kit** | 纯 Markdown 方法论包：9 阶段流程、`.specs/` 模板、R1–R8 规则，零运行时。阶段 prompt 由人手动加载，状态经 `.md` 工件传递。安装时锁定一个具体提交。 | **依赖 —— 底座，同时是汇聚点。** flow-comet 是它的执行自动化层，工件与规则完全继承；下表各家的思路经它汇聚而来。 |
+| **flow-kit** | 纯 Markdown 方法论包：9 阶段流程、`.specs/` 模板、R1–R8 规则，零运行时。阶段 prompt 由人手动加载，状态经 `.md` 工件传递。安装时锁定一个具体提交。 | **依赖 —— 底座，同时是汇聚点。** flow-comet 是它的执行自动化层：模板、规则与工件形态都继承上游，本仓只追加上游没有的增量段；工件形态以模板为唯一权威，没有上游模板的文档（`UAT`、归档的遗留清单）只查存在性。下表各家的思路经它汇聚而来。 |
 | **OpenSpec**（Fission-AI） | 规范驱动开发框架：编码前加一层轻量规范。`openspec/` 目录下每个变更一套 `proposal` / `specs` / `design` / `tasks`；默认档流程为 propose → apply → sync → archive。 | **经 flow-kit 汇聚**（思想来源）。独立使用时更轻：没有状态机，也没有阶段门。 |
 | **Superpowers**（obra） | agentic 技能框架 + 完整开发方法论，按平台分别安装，覆盖 Claude Code、Codex、Cursor、Gemini CLI 等。技能按上下文触发，靠指令约束。 | **经 flow-kit 汇聚**（思想来源，部分重叠）。纪律写在技能文本里、依赖模型自觉；flow-comet 把同款纪律机器校验化。 |
 | **comet**（rpamis） | 可恢复的长任务工作流 + 技能平台：五阶段状态机、阶段守卫、hook 写入拦截。`/comet` 按配置路由，默认走 Native 分支。 | **早期机制参考，现已解耦。** hook 注入形态与脚本管状态来自这里；命名已解耦、状态不互通。只有它的 Classic 分支才带 OpenSpec + Superpowers 血统。 |

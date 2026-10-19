@@ -131,7 +131,7 @@ After the issue is confirmed: bug fixes use a `fix/` branch, features use a `fea
 
 flow-comet automates the [flow-kit](https://github.com/rihebty/flow-kit) methodology, so the boundary between "borrowed" and "ours" is part of the contribution rules:
 
-- **Methodology and artifacts are borrowed; files are not.** Stages, artifact formats, rule sets and the R1–R8 discipline come from the upstream project. Upstream template files must not be copied into this repository — section names are derived from the vendored templates at run time instead, so there is one source for their wording.
+- **Methodology and artifacts are borrowed; files are not.** Stages, artifact formats, rule sets and the R1–R8 discipline come from the upstream project. Upstream template files must not be copied into this repository — section names are assembled at run time from two parts: the full skeleton of the vendored upstream templates, plus the increment sections this repository registers on top (such as `## 自检方法`, `## LESSONS 扫描` and `## 验证命令`). Their wording still has exactly one source, and the sections this repository needs beyond upstream are expressed without copying upstream files.
 - **The vendored copy is read-only.** A `flow-kit/` checkout in a project is a pinned format baseline: it is never edited, and a divergence from it is *declared* in our own artifacts rather than patched upstream-side. See ADR-008 for the acquisition rules.
 - **Upgrades are explicit.** The pinned snapshot moves only by a deliberate change that also records the new commit; nothing auto-follows upstream.
 - **Attribution.** flow-kit is MIT-licensed; the licence text ships with the vendored copy and the dependency is named in the README.

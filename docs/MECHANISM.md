@@ -58,12 +58,28 @@ At each node the guard answers a fixed set of questions; a "no" is a refusal wit
 | Question | Applies to |
 |---|---|
 | Was the entry recorded, and is the node's skill-load declaration present? | every node |
-| Do the node's documents exist, with the template's header fields and section names? | `open`, `design`, `plan`, `review`, `archive` |
+| Do the node's documents exist, with the template's header fields and section names? | `open`, `design`, `plan`, `execute`, `subagent-execute`, `review`, `verify`, `archive` — each node is judged only on the documents it writes (next table) |
 | Are all tasks complete, with a summary per completed task and an unchanged task set? | `execute`, `subagent-execute` |
 | Is the self-check declared, and does a degraded one carry its evidence? | `execute`, `subagent-execute` (the SUMMARY's self-check section) |
 | Did the verification actually run, and did it pass? | `verify` (runs the command block in `TEST.md`) |
 | Does every review finding carry a disposition, and does a deferred major finding have a user ruling? | `review` |
 | Are the archive directory and its leftover list in place? | `archive` |
+
+Template shape is answered per document rather than per node, because two nodes can write one document between them and one node writes two:
+
+| Node | Documents whose shape is checked |
+|---|---|
+| `open` | `CHANGE.md`, `REQUIREMENT.md`, and the project's `CONTEXT.md` when it exists |
+| `design` | `DESIGN.md`; on a frontend change also `UI-DESIGN.md`, whose shape is checked once it exists |
+| `plan` | `TASK.md`, on top of the seven fields each task block must carry |
+| `execute`, `subagent-execute` | every `<task-id>-SUMMARY.md` |
+| `review` | `REVIEW.md` |
+| `verify` | `TEST.md`; `UAT.md` has no upstream template and is checked for existence only |
+| `archive` | none — its leftover list has no upstream template either, so only its existence is checked |
+
+The template decides the skeleton; what a template cannot express comes from the registry that ships with the skill tree — which sections are conditional, which subsections are structural, which sections this repository adds on top, and the title form and header keys the message quotes. Three boundaries follow. A conditional section must keep its heading and may say `N/A` in its body; a section marked optional may be deleted outright; a structural subsection is required once its parent section applies, and is not required when the parent is `N/A` as a whole. Sections you add beyond the template are ignored rather than refused. And when the template — or the registry — is missing, the affected documents are reported as unchecked, never as passed: there is deliberately no built-in copy of the skeleton to fall back on.
+
+A mismatch at any of those exits — `open`, `design`, `plan`, `execute`, `subagent-execute`, `review`, `verify` — prints `BLOCKED` with the template's path and one count per category; the section names themselves — `段名` in the message — are listed only when the same document fails again. `archive` stays out of that chain: its leftover list has no skeleton to compare against.
 
 Because the checks are structural, a payload that looks like a contract but cannot be parsed is rejected the same way a missing file is — the engine never guesses.
 
@@ -89,7 +105,7 @@ Coverage is stated per row and stays that way: an uncovered item is not written 
 
 ## Recovery
 
-State is always re-derivable: `status` prints the machine view, `next` prints the node and the command to continue, `advance` forces the state forward when it is genuinely out of step, and `select <change-id>` switches to another change. A node that refuses an exit prints what is missing; the fix is always to add what the message names, never to edit the state file by hand.
+State is always re-derivable: `status` prints the machine view, `next` prints the node and the command to continue, `advance` forces the state forward when it is genuinely out of step, and `select <change-id>` switches to another change. A node that refuses an exit prints its reason; the fix is always to add what the message names — the template path and a count per category on the first refusal, the section names on the next — never to edit the state file by hand.
 
 ## Side commands
 
