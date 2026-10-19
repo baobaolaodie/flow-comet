@@ -242,7 +242,11 @@ function renderDoc(key, opts = {}) {
   for (const increment of entry.increments ?? []) {
     if (increment.kind === 'marker') continue;
     if (matchesAny(increment.section, opts.omit)) continue;
-    const text = ['## ' + increment.section, '', INCREMENT_BODIES[increment.section] ?? defaultBody(), ''].join('\n');
+    // 增量段正文同样接受 opts.body 覆盖（命中回应这类「可自定义正文」的判据需要构造正例）；
+    // INCREMENT_BODIES 保留为兜底——自检方法段的默认正文是 brooks 判据的输入，不能被 defaultBody() 顶掉。
+    const override = (opts.body ?? []).find(([needle]) => increment.section.includes(needle));
+    const text = ['## ' + increment.section, '',
+      override ? override[1] : (INCREMENT_BODIES[increment.section] ?? defaultBody()), ''].join('\n');
     const anchor = anchors.find(([needle]) => increment.section.includes(needle));
     if (anchor) {
       const idx = blocks.findIndex((block) => block.name.includes(anchor[1]));
