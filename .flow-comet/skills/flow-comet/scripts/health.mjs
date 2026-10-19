@@ -3,15 +3,16 @@
 //
 // 报告分层：
 //   · 确定性层：文件 / 结构可判项——项目上下文段与格式、经验条目编号连续性、技术债表项数、
-//     可选工具在场判定、版本历史统计。每项都带计数与判据；同一冻结树两次运行逐字节一致。
+//     可选工具在场判定、版本历史统计、架构文档结构（`.specs/ARCHITECTURE.md`，可选工件）。
+//     每项都带计数与判据；同一冻结树两次运行逐字节一致。
 //   · 增补层：代码体检工具（brooks-lint）在场时，由 agent 执行其 4 维体检并把结果并入同一份
 //     报告、标注来源；脚本不执行 agent 技能，缺省保留占位而不伪造结论。
 //   · 降级声明：可选外部工具不在场时显式声明原因。判据只锚「确定性层完整 + 降级声明可见」——
 //     环境缺可选工具不构成失败（这些工具是可选项，不是依赖）。
 //
 // 只读边界：
-//   · 读：.specs/CONTEXT.md、.specs/LESSONS.md、.specs/health/*.md（基线）、git 历史、
-//     可选工具的在场探测（文件 / 路径判定）；
+//   · 读：.specs/CONTEXT.md、.specs/LESSONS.md、.specs/ARCHITECTURE.md（结构检查，可选）、
+//     .specs/health/*.md（基线）、git 历史、可选工具的在场探测（文件 / 路径判定）；
 //   · 写：仅一份报告 .specs/health/<日期>-HEALTH.md；`--stdout` 时把报告正文原样打到标准输出；
 //   · 标准输出另**恒**输出 `HEALTH:` 审计行（报告路径 / 日期 / 增补层在场 / 基线）——不带
 //     `--stdout` 时只有审计行（报告正文不回流）；
@@ -38,7 +39,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { validateContext } from './context-init.mjs';
-import { parseSideCommandArgs, relativeLabel } from './evolve.mjs';
+import { collectArchitectureStructure, parseSideCommandArgs, relativeLabel } from './evolve.mjs';
 import { archiveDateFromName, formatLocalDate, formatLocalTimestamp } from './time-utils.mjs';
 
 const SELF_FILE = fileURLToPath(import.meta.url);
@@ -468,6 +469,26 @@ function renderGitSection(push, git) {
   push('');
 }
 
+// 确定性层 6：架构文档结构（C19 / AC-20③）——只读报告，不阻断：结构问题不影响退出码，也不写状态。
+// 判据实现与 evolve 的「结构问题」段**同源**（evolve.mjs 的 collectArchitectureStructure）：两处各写
+// 一套段形比对必然分叉（同一判据两份实现的老账）。
+function renderArchitectureSection(push, architecture, selfDisplay, options) {
+  push('### 6 · 架构文档结构（' + architecture.display + ' · 只读）', '');
+  push('- 文件：`' + architecture.display + '`（' + (architecture.exists ? '在场' : '缺失') + '）');
+  if (!architecture.exists) {
+    push('- 检查：跳过——' + architecture.note);
+  } else if (!architecture.checked) {
+    push('- 检查：未校验（' + architecture.note + '）');
+  } else {
+    push('- 结构问题（' + architecture.problems.length + '）：' + (architecture.problems.length === 0 ? '无' : ''));
+    for (const problem of architecture.problems) push('  - ' + problem);
+  }
+  push('- 判据：' + (architecture.basis
+    ?? '8 个 H2 段 + §3 的 `### ADR-<数字>` 条目字段键（骨架来自 flow-kit/templates/ARCHITECTURE.md）')
+    + '；只读报告，不阻断、不写状态');
+  push('- 复现命令：`node ' + selfDisplay + ' --root ' + options.rootDisplay + ' --stdout`', '');
+}
+
 function renderSupplementSection(push, brooks) {
   push('## 增补层（代码体检工具的 4 维结果 · 可选）', '');
   push('- **在场判定**：' + (brooks.present ? '在场' : '不在场——下列探测面逐项未命中（未安装 / 未加载）'));
@@ -555,6 +576,7 @@ function renderReport(input) {
   renderDebtSection(push, input.debt);
   renderRedundancySection(push, input.redundancy, input.options, input.selfDisplay);
   renderGitSection(push, input.git);
+  renderArchitectureSection(push, input.architecture, input.selfDisplay, input.options);
   renderSupplementSection(push, input.brooks);
   renderDegradationSection(push, input.redundancy, input.brooks);
   renderSnapshotSection(push, input.snapshot);
@@ -627,6 +649,7 @@ async function main(argv) {
   const context = await collectContext(options.root);
   const lessons = collectLessons(lessonsText);
   const debt = collectDebt(contextText);
+  const architecture = await collectArchitectureStructure(options.root);
   const redundancy = await collectRedundancy(options.root);
   const git = collectGit(options.root);
   const brooks = await collectBrooks(options.root);
@@ -642,6 +665,7 @@ async function main(argv) {
     context,
     lessons,
     debt,
+    architecture,
     redundancy,
     git,
     brooks,

@@ -20,12 +20,17 @@
 // 只读边界：scan 零写入；apply 的写入面只有三处——项目级文档（CONTEXT.md / ARCHITECTURE.md）、
 // .specs/evolve/ 下的报告、以及 state 的 last_evolve_at（经 workflow-state.mjs 的 config set
 // 通道写入，本脚本不直写 state 文件）。扫描内容严格限定在归档设计文档的沉淀段。
+//
+// 另：scan 末尾输出「结构问题」段——`.specs/ARCHITECTURE.md` 在场时按模板（8 个 H2）+ §3 的
+// `### ADR-<数字>` 条目形态报告结构问题；文件缺席 / 骨架不可派生时声明跳过或未校验。该段与沉淀
+// 候选互不依赖，且**只读、不阻断、不写 state**（结构问题不进退出码）。
 
 import { spawnSync } from 'child_process';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { normalizeHeading } from './route-node.mjs';
+import { buildSkeleton } from './lib/guard-artifact-skeleton.mjs';
 import { readProtocolFile, validateProtocolSchema } from './protocol-utils.mjs';
 import {
   writeFileAtomic,
@@ -62,6 +67,14 @@ const CONTEXT_FILE = 'CONTEXT.md';
 const ARCHITECTURE_FILE = 'ARCHITECTURE.md';
 const DOC_CONTEXT = SPECS_DIR + '/' + CONTEXT_FILE;
 const DOC_ARCHITECTURE = SPECS_DIR + '/' + ARCHITECTURE_FILE;
+// 项目级工件检查的骨架键（大小写不敏感；登记表用模板基名大写）
+const ARCHITECTURE_KEY = 'ARCHITECTURE';
+// ADR 条目（行锚定）：模板 §3 的 `### ADR-<数字> · <标题>` 形态。模板里的占位条目（`### ADR-NNN`）
+// 是字段键的**形态样例**而非真 ADR，不参与条目校验。
+const ADR_ENTRY = /^###[ \t]+ADR-(\d+)(?![0-9A-Za-z])/u;
+const ADR_PLACEHOLDER = /^###[ \t]+ADR-(?:NNN|<)/u;
+// 条目字段行 = `- **状态**：…`（半角 / 全角冒号都认）。行锚定：正文里提一句「代价」不算填了该字段。
+const ADR_FIELD = /^[ \t]*[-*][ \t]+\*\*(.+?)\*\*[ \t]*[:：]/u;
 const STATE_SCRIPT = 'workflow-state.mjs';
 // `## evolve 元数据` 的段名与三字段名来自 state-schema.mjs 的单一常量集（写方 = 本节 / 校验方 =
 // context-init.mjs 的格式校验同源）；段侧字段序即常量序，双落点首字段与 state 的 STATE_KEY 同名。
@@ -487,7 +500,168 @@ async function printScan(plan, out = console) {
   if (plan.scanned.length > 0) {
     out.log('EVOLVE: 已扫 change 清单：' + plan.scanned.map(changeSummary).join(' · '));
   }
+  await printArchitectureStructure(plan.root, out);
   out.log('EVOLVE: 应用请执行 evolve.mjs apply <id> --root <根>（未应用的候选不会写入）');
+}
+
+// ---------- 项目级工件：ARCHITECTURE 结构检查（只读 · 不阻断） ----------
+// 依据 DESIGN-CLARIFICATIONS C19 / AC-20③：`.specs/ARCHITECTURE.md` 存在时校验模板的 8 个 H2 段
+// 与 §3 下 `### ADR-<数字>` 条目的 7 个字段键（无 ADR 条目时该段可只写「暂无」，不算问题）。
+// 文件缺席 → 跳过并说明；骨架不可派生（模板 / 登记表缺席）→ 未校验并说明——D7/C13 取消内置兜底，
+// 但同样不得把「无法比对」静默说成「通过」。
+// 只读边界：零写入、不写 state、不参与退出码——结构问题只进报告（侧命令不阻断任何流程）。
+// 单一实现纪律（L-067）：段形取骨架模块（模板 + 登记表）；ADR 条目形态**从模板 §3 直接派生**
+// （登记表未登记 ADR 条目形态，C19），字段键因此不在本文件里另写一份字面清单。
+export async function collectArchitectureStructure(root) {
+  const display = DOC_ARCHITECTURE;
+  const text = await readText(path.join(root, DOC_ARCHITECTURE));
+  if (text === null) {
+    return {
+      display,
+      exists: false,
+      checked: false,
+      note: '文件不在场（可选工件，项目未采用）',
+      problems: [],
+      basis: null,
+    };
+  }
+  const skeleton = await buildSkeleton(ARCHITECTURE_KEY, { runRoot: root });
+  if (!skeleton.derived) {
+    return { display, exists: true, checked: false, note: skeletonGapNote(skeleton), problems: [], basis: null };
+  }
+  const templateText = skeleton.file === null
+    ? null
+    : await readText(path.resolve(root, ...skeleton.file.split('/')));
+  const adrFieldKeys = adrFieldKeysOfTemplate(templateText);
+  const problems = h2SectionProblems(skeleton, text).concat(adrEntryProblems(text.split('\n'), adrFieldKeys));
+  return {
+    display,
+    exists: true,
+    checked: true,
+    note: null,
+    problems,
+    basis: architectureBasis(skeleton, adrFieldKeys),
+  };
+}
+
+// 缺的 H2 段（段名宽容匹配委托骨架里的 headingPattern）：聚合成一条问题——8 个段逐个报会把报告
+// 撞成清单，读者要的是「哪几个缺」。
+function h2SectionProblems(skeleton, text) {
+  const missing = skeleton.sections.filter((section) => !section.pattern.test(text));
+  if (missing.length === 0) return [];
+  return ['缺 H2 段 ' + missing.length + '/' + skeleton.sections.length + '：'
+    + missing.map((section) => section.name).join(' · ')];
+}
+
+// 报告里的「依据」行：段数与 ADR 字段键都取自实际比对用的源（骨架 / 模板），不另抄一份数字。
+function architectureBasis(skeleton, adrFieldKeys) {
+  const sections = skeleton.sections.length + ' 个 H2 段（骨架 = `' + skeleton.file + '` + 登记表）';
+  return adrFieldKeys.length === 0
+    ? sections + '；§3 ADR 条目未校验（模板 §3 无字段样例）'
+    : sections + '；§3 的 `### ADR-<数字>` 条目 ' + adrFieldKeys.length + ' 个字段键（' + adrFieldKeys.join(' · ') + '）';
+}
+
+// 骨架不可派生的原因 → 人读一句（措辞与 D7/C13 一致：声明「未校验」，不冒充「通过」）
+function skeletonGapNote(skeleton) {
+  switch (skeleton.reason) {
+    case 'template-missing':
+      return '模板缺失 · `flow-kit/templates/' + ARCHITECTURE_FILE + '`';
+    case 'template-undeclared':
+      return '登记表未声明 ARCHITECTURE 的模板路径';
+    case 'template-empty':
+      return '模板无 H2 段 · `flow-kit/templates/' + ARCHITECTURE_FILE + '`';
+    case 'registry-missing':
+    case 'registry-unreadable':
+      return '登记表不可读（`reference/artifact-templates.json`：' + skeleton.reason + '）';
+    case 'unknown-key':
+      return '登记表未登记 ARCHITECTURE';
+    default:
+      return '骨架不可派生（' + String(skeleton.reason) + '）';
+  }
+}
+
+// §3（ADR 列表）的段范围 = 标题行带 ADR 的那个 H2。段名在不同项目里可能被改写（「架构决策记录」不带
+// ADR 字样），定位不到时返回 null——调用方退回全文范围；形态判据只认行锚定的 `### ADR-<数字>`，
+// 正文里引用 ADR 编号不会被当成条目。
+function adrSectionRange(lines) {
+  for (let i = 0; i < lines.length; i += 1) {
+    const heading = headingOf(lines[i]);
+    if (heading === null || heading.level !== 2) continue;
+    if (!/adr/iu.test(stripCr(lines[i]))) continue;
+    return { start: i, end: sectionEnd(lines, i, 2, lines.length) };
+  }
+  return null;
+}
+
+// 模板 §3 的 ADR 条目字段键：优先取占位条目（`### ADR-NNN`）的字段键；模板没有占位条目时取 §3 内
+// 条目字段键的并集；两者都取不到 → 空列表（该项声明「未校验」，不拿空清单去判「字段齐备」）。
+function adrFieldKeysOfTemplate(templateText) {
+  const lines = String(templateText ?? '').replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n').split('\n');
+  const range = adrSectionRange(lines);
+  if (range === null) return [];
+  const entries = adrEntries(lines, range);
+  const placeholder = entries.find((entry) => ADR_PLACEHOLDER.test(entry.title) && entry.keys.length > 0);
+  return [...new Set(placeholder !== undefined ? placeholder.keys : entries.flatMap((entry) => entry.keys))];
+}
+
+// §3 条目校验：每个 `### ADR-<数字>` 条目必须在自己块内出现全部字段键（占位条目 id 为 null，不校验）。
+function adrEntryProblems(lines, adrFieldKeys) {
+  if (adrFieldKeys.length === 0) return [];
+  const range = adrSectionRange(lines) ?? { start: -1, end: lines.length };
+  const problems = [];
+  for (const entry of adrEntries(lines, range)) {
+    if (entry.id === null) continue;
+    const missing = adrFieldKeys.filter((key) => !entry.keys.includes(normalizeFieldKey(key)));
+    if (missing.length > 0) {
+      problems.push('§3 ' + entry.id + ' 缺字段 ' + missing.length + '/' + adrFieldKeys.length + '：'
+        + missing.join(' · '));
+    }
+  }
+  return problems;
+}
+
+// §3 内的条目切分（**单一实现**：模板侧取字段键、工件侧校验字段都从这里来）：条目 = 一个 1~3 级
+// 标题开始、到下一个 1~3 级标题前的块（`####` 属于块内）。id 只对 `### ADR-<数字>` 赋值——模板里的
+// `ADR-NNN` 占位条目因此只贡献字段键形态，永远不被当作真 ADR 去校验。
+function adrEntries(lines, range) {
+  const entries = [];
+  let current = null;
+  for (let i = range.start + 1; i < range.end; i += 1) {
+    const line = stripCr(lines[i]);
+    if (/^#{1,3}[ \t]/u.test(line)) {
+      const adr = ADR_ENTRY.exec(line);
+      current = { title: line, id: adr === null ? null : 'ADR-' + adr[1], keys: [] };
+      entries.push(current);
+      continue;
+    }
+    const field = ADR_FIELD.exec(line);
+    if (field !== null && current !== null) current.keys.push(normalizeFieldKey(field[1]));
+  }
+  return entries;
+}
+
+function normalizeFieldKey(raw) {
+  return String(raw).replace(/\s+/gu, ' ').trim().toLowerCase();
+}
+
+// 「结构问题」段（AC-20③ / C19）：三个分支各有独立措辞——文件缺席（跳过）/ 骨架不可派生（未校验）
+// / 实际比对（0 项或逐条列出）。只读、不阻断：结构问题不进退出码，也不写 state。
+async function printArchitectureStructure(root, out) {
+  const structure = await collectArchitectureStructure(root);
+  const head = 'EVOLVE: 结构问题（' + structure.display + '）：';
+  if (!structure.exists) {
+    out.log(head + '跳过——' + structure.note);
+    return;
+  }
+  if (!structure.checked) {
+    out.log(head + '未校验（' + structure.note + '）');
+    return;
+  }
+  out.log(head + (structure.problems.length === 0
+    ? '0 项'
+    : structure.problems.length + ' 项（只读报告，不阻断）'));
+  for (const problem of structure.problems) out.log('  - ' + problem);
+  out.log('EVOLVE: 结构问题依据：' + structure.basis);
 }
 
 // ---------- 应用 ----------
