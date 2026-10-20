@@ -543,3 +543,55 @@ export function templatePointerLines(declaration, options = {}) {
   }
   return lines;
 }
+
+// ---------- 节点协议提示词：加载链的另一半 ----------
+//
+// 与模板并列的两条权威：提示词（flow-kit/prompts/）是**步骤权威**——这一步怎么做、交代什么；
+// 模板（flow-kit/templates/）是**段形权威**——产出长什么样。两者都在 entry 打印、都由 skill-load
+// 声明，缺一即未完成加载。
+//
+// 路径根与映射各只有一处：映射复用既有的 NODE_PROTOCOL_FILES（出口协议声明校验与 M5 自动补声明
+// 共用），本段只提供指针形态与声明一致性判据，不复制映射表。
+
+export const PROMPT_ROOT = 'flow-kit/prompts';
+
+// 条件提示词（与条件模板同构）：只对特定技能适用的协议文件——不参与入口打印（入口打印的是该节点
+// 必读的步骤权威），但属于该节点的协议面，故参与声明一致性判据。目前唯一的条件件是 design 节点的
+// UI-DESIGN 阶段：前端 change 才加载 flow-comet-ui-design 并声明 `2a-ui-design.md`。
+export const NODE_CONDITIONAL_PROMPTS = {
+  design: ['2a-ui-design.md'],
+};
+
+// 节点 → 上游协议提示文件（仅内置节点有 vendored 提示词）。自定义协议节点由 compose 只组合已装技能，
+// 提示词路径仍由 skill-load --prompt 显式声明——不在协议里编造一份（与模板的 C12 语义同构）。
+export function nodePromptFiles(node) {
+  if (!node || typeof node !== 'object') return [];
+  const files = NODE_PROTOCOL_FILES[node.id];
+  return Array.isArray(files) ? [...files] : [];
+}
+
+// 提示词文件 → 指针路径（`2-design.md` → `flow-kit/prompts/2-design.md`）。
+export function promptPointerPath(file) {
+  return PROMPT_ROOT + '/' + file;
+}
+
+// 入口指针行：一行一个协议文件（open / review 这类多文件节点各一行）。零提示词节点返回空数组——
+// 与零模板节点同语义（不打印，也不编造路径）。
+export function promptPointerLines(node) {
+  return nodePromptFiles(node).map((file) => 'READ PROMPT: ' + promptPointerPath(file));
+}
+
+// 声明一致性判据（入口侧）：skill-load 声明的 --prompt 必须落在该节点的协议面内——
+// 节点协议文件 ∪ 该节点的条件提示词。返回 null（通过）或 { declared, expected }；expected 供报文
+// 给出可照抄的路径。未声明（null / 空串）不在此判——缺失由出口「缺协议声明标记」门负责，
+// 本判据只判「声明了但声明错」这一形态。
+export function promptDeclarationConflict({ node, declaredProtocol } = {}) {
+  const nodeFiles = nodePromptFiles(node);
+  if (nodeFiles.length === 0) return null;
+  const declared = typeof declaredProtocol === 'string'
+    ? (declaredProtocol.replaceAll('\\', '/').split('/').filter((part) => part !== '').pop() ?? '')
+    : '';
+  if (declared === '') return null;
+  const expected = [...nodeFiles, ...(NODE_CONDITIONAL_PROMPTS[node?.id] ?? [])];
+  return expected.includes(declared) ? null : { declared, expected };
+}
