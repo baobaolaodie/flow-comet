@@ -94,6 +94,29 @@ function writeTemplateFixture(dir, key) {
   writeFile(dir, docRel(key), templateFixtureText(key));
 }
 
+// 模板夹具（示例表格形态）：把某段正文替换成一张带示例数据行的表。用于构造「照抄模板里的示例
+// 表格」的逐字判据——真实模板在两种检出下形态不同（vendored 真迹 / 按登记表合成），这里显式给出
+// 等价段形 + 示例数据，使夹具同构；判据只看模板该段正文是否属成品形态（示例表格行），不看措辞。
+function writeTableTemplateFixture(dir, key, sectionNeedle, tableText) {
+  const lines = templateFixtureText(key).replace(/\uFEFF/g, '').replace(/\r\n?/g, '\n').split('\n');
+  const out = [];
+  let skipping = false;
+  let replaced = false;
+  for (const line of lines) {
+    if (/^##\s+/.test(line)) {
+      skipping = line.includes(sectionNeedle);
+      replaced = replaced || skipping;
+      if (skipping) out.push(line, '', tableText, '');
+      else out.push(line);
+      continue;
+    }
+    if (skipping) continue;
+    out.push(line);
+  }
+  if (!replaced) throw new Error('夹具构造失败：模板段不在场 ' + key + ' / ' + sectionNeedle);
+  writeFile(dir, docRel(key), out.join('\n'));
+}
+
 // 模板某段正文（行锚定：段标题之后、下一个 H2 之前；首尾空行剥掉）。
 function templateSectionBody(key, needle) {
   const lines = templateFixtureText(key).replace(/\uFEFF/g, '').replace(/\r\n?/g, '\n').split('\n');
@@ -626,8 +649,9 @@ export const ENTRIES = [
     },
   },
 
-  // TA-06 · 照抄模板占位符被拦（AC-6）——某段正文与模板该段逐字相同 → 判未填 → BLOCKED；
-  // 改写一个字符 → 通过（单变量对照）。
+  // TA-06 · 照抄模板正文被拦（AC-6）——① 含待填位的模板正文（尖括号占位 / 复选框）逐字相同 →
+  // 判未填 → BLOCKED；② 模板正文为成品形态（示例表格行）同样逐字比对——SUMMARY「改动文件」照抄
+  // 模板里的示例文件清单（别的项目的文件）→ BLOCKED；两处各配「改写一个字符 → 通过」的单变量对照。
   {
     name: 'TA-06 与模板该段逐字相同判未填：照抄占位符拦，改写后通过',
     run: async (dir) => {
@@ -645,6 +669,28 @@ export const ENTRIES = [
       const ok = exitNode(dir, 'open');
       assertExit(ok, 0);
       assertOut(ok, 'ALL CHECKS PASSED');
+      // ③ 模板正文为成品形态：示例表格行（无尖括号占位 / 复选框）照抄同样判未填。
+      // 夹具自建该段正文（示例文件清单是「已填好的别的项目」形态），模板夹具与工件写同一内容。
+      const exampleTable = [
+        '| 文件 | 性质 | 说明 |',
+        '|---|---|---|',
+        '| `src/example/Fixture.ts` | 新增 | 模板示例行：实现夹具能力 |',
+        '| `src/example/fixture.test.ts` | 新增 | 模板示例行：单元测试 |',
+      ].join('\n');
+      setupExecute(dir);
+      writeTableTemplateFixture(dir, 'SUMMARY', '改动文件', exampleTable);
+      writeFile(dir, CHANGE_DIR + '/T01-SUMMARY.md', renderDoc('SUMMARY', { body: [['改动文件', exampleTable]] }));
+      const copiedTable = exitNode(dir, 'execute');
+      assertExit(copiedTable, 1);
+      assertOut(copiedTable, '改动文件');
+      assertOut(copiedTable, '逐字');
+      // ④ 反向构造（判别力）：只改表格里一个值（换成本任务自己的文件）→ 通过
+      const rewrittenTable = exampleTable.replace('src/example/Fixture.ts', 'src/real/Real.ts');
+      assertTrue(rewrittenTable !== exampleTable, '夹具前提不成立：改写未改变示例表');
+      writeFile(dir, CHANGE_DIR + '/T01-SUMMARY.md', renderDoc('SUMMARY', { body: [['改动文件', rewrittenTable]] }));
+      const okTable = exitNode(dir, 'execute');
+      assertExit(okTable, 0);
+      assertOut(okTable, 'ALL CHECKS PASSED');
     },
   },
 
@@ -670,9 +716,10 @@ export const ENTRIES = [
     },
   },
 
-  // TA-08 · 条件子段与父段豁免（AC-8）——① 前端 change 的 UI-DESIGN 缺 `### Button (Primary)`
-  // → BLOCKED（注意 Primary / Secondary 归一后同键：只写 Secondary 不得算 Primary 在场）；
-  // ② 非前端 change 的 TEST 第 4 轮整段 N/A 且缺 4.1~4.4 子段 → 通过（父段 N/A → 子段不要求）。
+  // TA-08 · 条件子段与父段豁免（AC-8）+ 可选段语义（C-1）——① 前端 change 的 UI-DESIGN 缺
+  // `### Button (Primary)` → BLOCKED（注意 Primary / Secondary 归一后同键：只写 Secondary 不得算
+  // Primary 在场）；② 非前端 change 的 TEST 第 4 轮整段 N/A 且缺 4.1~4.4 子段 → 通过（父段 N/A →
+  // 子段不要求）；⑤⑥ UI-DESIGN §0（optional）整段删除合法，但保留标题就得填。
   {
     name: 'TA-08 条件子段与父段豁免：UI-DESIGN 缺 Button (Primary) 拦；TEST 第 4 轮 N/A 放行',
     run: async (dir) => {
@@ -702,6 +749,28 @@ export const ENTRIES = [
       const resRound4 = exitNode(dir, 'verify');
       assertExit(resRound4, 1);
       assertOut(resRound4, '跨浏览器');
+      // ⑤ 可选段（optional）语义：UI-DESIGN §0 是模板自述「greenfield 删掉此段」的可选段——
+      // 整段缺席合法，不得报「条件段标题缺席」（与 conditional 分流；conditional 仍要求标题在场，见 TA-07）。
+      setupDesign(dir, {
+        changeOpts: frontendChange,
+        uiDesign: uiDesignDoc({ omit: ['0. 视觉语汇对齐'] }),
+        declareUiDesign: true,
+      });
+      writeFrontendDesignMarkers(dir);
+      const okOptional = exitNode(dir, 'design');
+      assertExit(okOptional, 0);
+      assertOut(okOptional, 'ALL CHECKS PASSED');
+      // ⑥ 反向构造（判别力）：保留 §0 标题但正文空、且不带 0.1~0.3 子段 → 必拦
+      // （可选段「保留即须填」——缺席与留空壳是两件事）
+      setupDesign(dir, {
+        changeOpts: frontendChange,
+        uiDesign: uiDesignDoc({ body: [['视觉语汇对齐', '   ']], subsectionOmit: ['0.1', '0.2', '0.3'] }),
+        declareUiDesign: true,
+      });
+      writeFrontendDesignMarkers(dir);
+      const resEmptyOptional = exitNode(dir, 'design');
+      assertExit(resEmptyOptional, 1);
+      assertOut(resEmptyOptional, '0.1');
     },
   },
 

@@ -1,8 +1,8 @@
 // 产出物模板结构门禁（守卫模块）：标题形态 / 首部字段（键 + 非空值）/ 全骨架（模板 H2 + 登记表
-// 结构型 H3，模板外多余段不参与）/ 段序 / 空正文（六词白名单）/ 与模板该段逐字相同（判未填）/
-// 条件段标题必须在场 / 增量段位置。段名与结构一律由 lib/guard-artifact-skeleton.mjs 的骨架派生
-// （模板是内容权威，登记表只补条件段/结构子段/增量段/首部/标题形态）——本模块不自持段名清单，
-// 段名归一复用 route-node 的 normalizeHeading。
+// 结构型 H3，模板外多余段不参与）/ 段序 / 空正文（六词白名单）/ 与模板该段正文逐字相同（判未填，
+// 含模板里的示例表格行）/ 条件段标题必须在场（可选段按模板自述可整段删除）/ 增量段位置。段名与
+// 结构一律由 lib/guard-artifact-skeleton.mjs 的骨架派生（模板是内容权威，登记表只补条件段/结构
+// 子段/增量段/首部/标题形态）——本模块不自持段名清单，段名归一复用 route-node 的 normalizeHeading。
 //
 // 模板整份缺失（derived=false，含登记表缺失 registry-missing，C13）→ 模板派生判据全部跳过并输出
 // 「未校验（模板缺失）」；标题形态与首部字段来自登记表而非模板正文，照常校验（既有语义）。
@@ -149,11 +149,41 @@ function emptyIssues() {
   };
 }
 
-// 模板正文是否「留了待填位」：尖括号占位符（排除 HTML 注释）或复选框。表头 / 图例 / 空表格 /
-// 占位注释这类正文本身就是成品的段（TASK 的状态字段说明、空阻塞日志、Fix 任务占位区）照抄不算
-// 未填——对它们做逐字比对只会把合法工件判成空壳（自指试跑在真实 TASK.md 上实证）。
+// 表格分隔行（`|---|---|`）：其后的行才是数据行，表头行不参与「示例数据」判定。
+const TABLE_SEPARATOR_LINE = /^\s*\|(?:\s*:?-{2,}:?\s*\|)+\s*$/u;
+
+// 模板正文里的**示例表格行**是成品形态：照抄它等于把别的项目的示例内容（如 SUMMARY「改动文件」
+// 的示例文件清单）当成自己的工件内容。空表格（只有表头 / 分隔行 / 全空单元行）不属示例数据——
+// 照抄空表与「这一项没有内容」同义。
+function tableHasExampleRow(body) {
+  let afterSeparator = false;
+  for (const line of String(body ?? '').split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '' || !trimmed.startsWith('|')) {
+      afterSeparator = false;
+      continue;
+    }
+    if (TABLE_SEPARATOR_LINE.test(trimmed)) {
+      afterSeparator = true;
+      continue;
+    }
+    if (!afterSeparator) continue;
+    const cells = trimmed.replace(/^\|/u, '').replace(/\|$/u, '').split('|').map((cell) => cell.trim());
+    if (cells.some((cell) => cell !== '')) return true;
+  }
+  return false;
+}
+
+// 模板正文是否留了待填位：尖括号占位符（排除 HTML 注释）或未勾选复选框——照抄即未填。
 function templateBodyHasFillInSlot(body) {
   return /<(?!\/?!--)[^<>\n]+>/u.test(body) || /^\s*[-*]\s*\[\s*\]/mu.test(body);
+}
+
+// 模板正文是否「成品形态」：留了待填位，或本身已是示例成品（示例表格行）。只有这类正文才做逐字
+// 比对——表头 / 图例 / 空表格 / 占位注释这类正文本身就是骨架的段，照抄不算未填（自指试跑在真实
+// TASK.md 的状态字段说明、空阻塞日志、Fix 任务占位区上实证）。
+function templateBodyIsFinishedForm(body) {
+  return templateBodyHasFillInSlot(body) || tableHasExampleRow(body);
 }
 
 function collectSectionIssues({ text, skeleton, template, issues }) {
@@ -167,10 +197,13 @@ function collectSectionIssues({ text, skeleton, template, issues }) {
   for (const section of outline.sections) {
     if (indexByNorm.has(section.norm) && !matched.has(section.norm)) matched.set(section.norm, section);
   }
+  // 标题缺席分两类（模板自述决定，不得并成一支）：conditional = 模板标注「条件适用 / 如有」，
+  // 标题必须在场（正文可写 N/A）；optional = 模板允许整段删除（UI-DESIGN §0「greenfield 删掉此段」），
+  // 整段缺席合法——把 optional 当 conditional 会把按模板指示删段的工件拦死（C-1）。
   for (const section of skeleton.sections) {
     if (matched.has(section.norm)) continue;
-    if (section.conditional === true || section.optional === true) issues.conditional.push(section.name);
-    else issues.missing.push(section.name);
+    if (section.conditional === true) issues.conditional.push(section.name);
+    else if (section.optional !== true) issues.missing.push(section.name);
   }
   // 段序：只对模板骨架段排序，模板外多余段直接跳过（AC-10）
   let lastIndex = -1;
@@ -206,7 +239,9 @@ function collectSectionIssues({ text, skeleton, template, issues }) {
     if (template === null) continue;
     const templateSection = template.sections.find((item) => item.norm === section.norm);
     const templateBody = templateSection ? bodyText(templateSection.bodyLines) : '';
-    if (templateBody !== '' && body === templateBody && templateBodyHasFillInSlot(templateBody)) {
+    // 与模板该段正文逐字相同 ⇒ 判未填：模板正文留了待填位（占位符 / 复选框）或本身是示例成品
+    // （示例表格行）时，逐字相同只可能是照抄模板（AC-6）；模板正文本身即骨架形态的段不判。
+    if (templateBody !== '' && body === templateBody && templateBodyIsFinishedForm(templateBody)) {
       issues.verbatim.push(section.name);
     }
   }
@@ -439,7 +474,7 @@ export async function reportArtifactStructure({ changeDir, state, assessments })
       for (const line of lines) console.error('BLOCKED: ' + line);
       const templatePaths = [...new Set(failing.map((item) => item.skeleton.file ?? '（未登记模板路径）'))];
       console.error('恢复: 对照 ' + templatePaths.join(' / ') + ' 修正标题 / 首部字段 / 段序，并按模板补齐缺失的 H2 与结构型 H3 标题'
-        + '（条件段与无内容段正文可写 N/A）后重试 exit；同一工件再次失败时会列出具体段名'
+        + '（条件段与无内容段正文可写 N/A；可选段按模板自述可整段删除）后重试 exit；同一工件再次失败时会列出具体段名'
         + '（已记录在 .specs/' + (state.activeChange ?? '<change>') + '/' + HINT_FILE_NAME + '）');
       process.exit(1);
     }
