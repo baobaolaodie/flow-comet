@@ -52,9 +52,13 @@ export function gitBranch(root) {
 // open 阶段工件（CHANGE 含 Why；REQUIREMENT 含 用户故事 + 验收准则——通过出口校验的完整形态）。
 // 「视觉调性」是 CHANGE 模板的条件段且新 change 要求在场：夹具按其结构形态标注「不适用」
 //（独立行 + 理由），使前端判据稳定地判为非前端——不写这段会让 ui-design 门对新 change 报「段缺席」。
-export function writeIntakeArtifacts(root, changeId = CHANGE_ID) {
+// visualTone 覆盖该段正文：需要判为「前端」的夹具（或需要构造段内自然句子负例的夹具）**改这一段**，
+// 不要另追加第二个「视觉调性」段——同名段重复时判据取首段，追加对首段没有影响。
+export const DEFAULT_VISUAL_TONE = '不适用（夹具：后端任务，无用户可见界面）。';
+
+export function writeIntakeArtifacts(root, changeId = CHANGE_ID, { visualTone = DEFAULT_VISUAL_TONE } = {}) {
   writeFile(root, '.specs/' + changeId + '/CHANGE.md', '# CHANGE\n\n- **Change ID**: ' + changeId
-    + '\n\n## Why（为什么做）\n\n变更目标。\n\n## 视觉调性\n\n不适用（夹具：后端任务，无用户可见界面）。\n');
+    + '\n\n## Why（为什么做）\n\n变更目标。\n\n## 视觉调性\n\n' + visualTone + '\n');
   writeFile(root, '.specs/' + changeId + '/REQUIREMENT.md', '# REQUIREMENT\n\n- **Change ID**: ' + changeId + '\n\n## 用户故事（User Story）\n\n用户需求。\n\n## 验收准则（AC）\n\n- 通过标准\n');
 }
 
@@ -75,6 +79,20 @@ export function fullContract(commitHash, taskId) {
 
 // 仓库本地验证工具执行（仅主仓存在、不随克隆分发；副本上文件缺失自动跳过）：
 // 返回 { status, output }（spawnSync 原始结果 output 是数组，统一拼接成字符串供断言）
+
+// archive 记录的证据 JSON：含归档提名三要素（扫描份数 / 提名编号 / 无提名理由）。新 change 的 archive
+// 出口会核对 evidence.lessonsNomination——夹具只写 summary 会被提名门拦下，掩盖各条目真正被测的
+// 归档/路由判据。summaryIds = 该夹具已写入的 `*-SUMMARY.md` 任务号（扫描份数按此对账，不另抄数字）。
+export function archiveRecordJson(summary, summaryIds = []) {
+  return JSON.stringify({
+    summary,
+    lessonsNomination: {
+      scanned: summaryIds.length,
+      nominated: [],
+      reasonIfNone: '夹具：本 change 无沉淀候选入库',
+    },
+  });
+}
 
 // 多趟链路 SUMMARY 夹具（SUMMARY 模板保真全量满足：标题首行 # SUMMARY: + 首部 4 字段 +
 // 段序 做了什么→改动文件→verify 输出→6 维自查→越界检查→自检方法；6 维声明 brooks-review）

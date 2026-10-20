@@ -12,6 +12,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added
+
+- **Workflow artifacts are now checked against the templates they come from**: each node names the templates it reads, and the exit compares the artifact's heading forms, section order, empty sections and copied-through placeholders against the upstream template plus this repository's registered additions — a first failure points at the template while a repeat names the missing sections, a missing template says so explicitly instead of passing silently, and the project-level documents travel the same path. The recorded baseline follows the new coverage — 350 scenarios and 95 items in the system test suite. ([#159](https://github.com/baobaolaodie/flow-comet/pull/159))
+
 ## [1.6.4] - 2026-10-15
 
 A release gathering the work accumulated after 1.6.3: the entrance page is rebuilt around the project's own material — a mark, a diagram of how flow-kit's nine stages become the eight nodes, a map of how the neighbouring projects actually relate, and an evidence board — with every comparison row checked against what those projects say today; the engine scripts and both regression suites are split into focused modules without changing any engine behaviour, and the recorded baseline follows the split; the test suites now copy fixture trees through one portable helper, so a checkout whose path contains non-ASCII characters no longer stops them without a report; and the recommended companion, brooks-lint, is now documented across the public pages. ([#150](https://github.com/baobaolaodie/flow-comet/pull/150)) ([#151](https://github.com/baobaolaodie/flow-comet/pull/151)) ([#152](https://github.com/baobaolaodie/flow-comet/pull/152)) ([#157](https://github.com/baobaolaodie/flow-comet/pull/157))

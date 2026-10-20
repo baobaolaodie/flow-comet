@@ -8,7 +8,7 @@
 // evolve / health）一律调用本模块，不得自持「读模板 + 抽 H2」的派生副本。段名归一复用 route-node 的
 // normalizeHeading（去编号 / 去尾部括号 / 大小写归一），本模块不另写第二份段名归一。
 //
-// 模板缺席：derived=false 且 sections 为空（取消内置骨架兜底，D7）——调用方据此跳过校验并显式声明
+// 模板缺席：derived=false 且 sections 为空（不内置任何兜底骨架）——调用方据此跳过校验并显式声明
 // 「未校验（模板缺失）」。本模块对「登记表缺失 / 模板缺失 / 键未知」一律不抛错。
 //
 // 缓存：按 runRoot 键控（同一进程内每个项目根只算一次）。返回的骨架对象是共享缓存值，消费方只读。
@@ -143,7 +143,7 @@ function buildSections(templateHeadings, registeredSections) {
   return markUniqueness(sections, () => '');
 }
 
-// 结构型 H3 由登记表显式列举（D3：不用正则识别示例条目——示例条目是书写样例，不是骨架）
+// 结构型 H3 由登记表显式列举（不用正则识别示例条目——示例条目是书写样例，不是骨架）
 function buildStructureSubsections(registeredSubsections) {
   const subsections = [];
   for (const entry of Array.isArray(registeredSubsections) ? registeredSubsections : []) {
@@ -261,7 +261,7 @@ export async function buildSkeleton(key, opts = {}) {
   return skeleton;
 }
 
-// 模板指纹（D12）：登记表锁定的 commit + sha256 与实际模板读数。drift 三态——true/false = 可比对
+// 模板指纹：登记表锁定的 commit + sha256 与实际模板读数。drift 三态——true/false = 可比对
 // 且结论明确，null = 无从判断（模板或登记表读数缺失）；「模板是否可读」看 actualSha256 是否为 null，
 // 不另设第二个字段表达同一事实。发版期检查据此报红，运行期只做轻提示。
 export async function templateFingerprint(key, opts = {}) {

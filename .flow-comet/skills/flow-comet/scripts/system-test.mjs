@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// system-test.mjs — flow-comet 系统测试集（真实命令序列覆盖 A~M 十三类机制面）
+// system-test.mjs — flow-comet 系统测试集（真实命令序列覆盖 A~N 十四类机制面）
 //
 // 定位：guard-self-test 是引擎脚本的场景级回归（夹具构造为主；场景数以该套件运行输出的
 // ALL <n> SCENARIOS PASSED 为准）；本套件是**系统级**测试——每个测试项走真实命令序列
 // （init → record → guard exit → handoff → hook …），覆盖 flow-comet 全部机制面：
 //   A 状态机与路由 · B 声明机制 · C 委托链路 · D hook 写白名单 · E 自定义协议 ·
 //   F 自动初始化 · G 分支模式 · H verify 与归档 · I 异常路径 · J 文档一致性 ·
-//   K 安装器与平台 · L 执行遗漏防护 · M 侧命令与 ui-design 门。
-//   条目与夹具按组落在 items/a..m.mjs（本文件只做运行与收口）。
+//   K 安装器与平台 · L 执行遗漏防护 · M 侧命令与 ui-design 门 · N 加载链声明集合与安装器降级口径。
+//   条目与夹具按组落在 items/a..n.mjs（本文件只做运行与收口）。
 //
 // 载体：每项 = 独立临时目录（内置协议副本预置到 <tmp>/reference/——受保护路径要求协议文件位于
 // runRoot 内）+ spawnSync 真实命令序列 + 断言退出码与输出关键词；测试项跑完清理临时目录。
@@ -40,13 +40,14 @@ import { ENTRIES as GROUP_J } from './items/j.mjs';
 import { ENTRIES as GROUP_K } from './items/k.mjs';
 import { ENTRIES as GROUP_L } from './items/l.mjs';
 import { ENTRIES as GROUP_M } from './items/m.mjs';
+import { ENTRIES as GROUP_N } from './items/n.mjs';
 // 分发面项的结果标记判据 + 子断言登记 + 三态映射（组内判据单源，运行器复用同一实现）
 import { assertDistributionOutcome, createOutcomeRecorder, distributionState } from './items/k.mjs';
 
-// 条目顺序 = 组顺序（A → M）：逐项输出顺序是既有读数的一部分
+// 条目顺序 = 组顺序（A → N）：逐项输出顺序是既有读数的一部分
 const TEST_ITEMS = [
   ...GROUP_A, ...GROUP_B, ...GROUP_C, ...GROUP_D, ...GROUP_E, ...GROUP_F, ...GROUP_G,
-  ...GROUP_H, ...GROUP_I, ...GROUP_J, ...GROUP_K, ...GROUP_L, ...GROUP_M,
+  ...GROUP_H, ...GROUP_I, ...GROUP_J, ...GROUP_K, ...GROUP_L, ...GROUP_M, ...GROUP_N,
 ];
 
 let passed = 0;

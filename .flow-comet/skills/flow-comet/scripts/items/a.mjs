@@ -11,7 +11,7 @@ import fs from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
 import { assertEqual, assertExit, assertNotOut, assertOut, assertTrue, baseState, runGuard, runHandoff, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
-import { multiWaveTaskContent, explainContractProblems, assertExplainFailClosed, explainReverseConstructionProblems, CHANGE_ID, readStateFile, gitInit, gitBranch, writeIntakeArtifacts, fullContract, execSummaryFixture, assertNodeLine, driveThroughDesign } from '../lib/system-fixtures.mjs';
+import { archiveRecordJson, multiWaveTaskContent, explainContractProblems, assertExplainFailClosed, explainReverseConstructionProblems, CHANGE_ID, readStateFile, gitInit, gitBranch, writeIntakeArtifacts, fullContract, execSummaryFixture, assertNodeLine, driveThroughDesign } from '../lib/system-fixtures.mjs';
 
 // skill-load 的模板声明（节点级，C3/AC-13 加载链）：参数化的委托驱动按节点查表——夹具是真实命令
 // 序列，声明集合要与节点映射一致（集合不一致时引擎按 C11 fail-closed 拦截）。
@@ -626,7 +626,10 @@ export const ENTRIES = [
       // 归档出口：两侧均 NEXT: done
       assertExit(runState(['skill-load', 'archive', 'flow-comet-archive', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
       writeFile(dir, '.specs/archive/2026-08-28-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# 遗留问题\n\n无。\n');
-      assertExit(runState(['record', 'archive', '{"summary":"archive complete"}'], dir, env), 0);
+      // 归档提名随证据落盘：本 change 写了 6 份任务 SUMMARY（并行 4 份 + 串行 2 份，扫描份数按
+      // 同一清单对账）。提名门缺字段即拦，与本条被测的路由收敛判据无关。
+      assertExit(runState(['record', 'archive',
+        archiveRecordJson('archive complete', ['P01', 'P02', 'S01', 'P03', 'P04', 'S02'])], dir, env), 0);
       assertExit(runGuard(['entry', 'archive'], dir), 0);
       const res = runGuard(['exit', 'archive', '--apply'], dir);
       assertExit(res, 0);
@@ -882,7 +885,10 @@ export const ENTRIES = [
       // 归档出口：两侧均 NEXT: done
       assertExit(runState(['skill-load', 'archive', 'flow-comet-archive', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
       writeFile(dir, '.specs/archive/2026-08-28-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# 遗留问题\n\n无。\n');
-      assertExit(runState(['record', 'archive', '{"summary":"archive complete"}'], dir, env), 0);
+      // 归档提名随证据落盘：本 change 写了 6 份任务 SUMMARY（并行 4 份 + 串行 2 份，扫描份数按
+      // 同一清单对账）。提名门缺字段即拦，与本条被测的路由收敛判据无关。
+      assertExit(runState(['record', 'archive',
+        archiveRecordJson('archive complete', ['P01', 'P02', 'S01', 'P03', 'P04', 'S02'])], dir, env), 0);
       assertExit(runGuard(['entry', 'archive'], dir), 0);
       const resArch = runGuard(['exit', 'archive', '--apply'], dir);
       assertExit(resArch, 0);

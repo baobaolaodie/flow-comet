@@ -217,12 +217,16 @@ function renderDoc(key, opts = {}) {
 
   const blocks = [];
   for (const section of sections) {
-    const text = ['## ' + section.heading, '', bodyFor(key, section, opts), ''].join('\n');
+    const body = bodyFor(key, section, opts);
+    const text = ['## ' + section.heading, '', body, ''].join('\n');
     blocks.push({ name: section.name, text });
     for (const [anchor, inserted] of opts.insertAfter ?? []) {
       if (section.name.includes(anchor)) blocks.push({ name: anchor + '#inserted', text: inserted + '\n' });
     }
-    if (section.conditional === true) continue;
+    // 条件段的正文仍是「不适用」占位 → 父段不适用，其结构子段不必在场；正文被覆盖成实质内容
+    // = 父段适用 → 结构子段必须在场（子段缺席即 BLOCK，无 WARN 让步）。不区分这一点会让夹具
+    // 自相矛盾：写了实质正文却不带子段，合规判据必然把它判成缺段。
+    if (section.conditional === true && body === CONDITIONAL_BODY) continue;
     for (const child of (entry.structureSubsections ?? []).filter((item) => item.parent === section.name)) {
       if (matchesAny(child.name, opts.subsectionOmit)) continue;
       blocks.push({
@@ -703,6 +707,8 @@ export const ENTRIES = [
 
   // TA-09 · 段名宽容四变体（AC-9）——省括号 / 括号不同 / 大小写不同 → 均通过；核心词不同
   // （`0.5 架构对齐`）→ BLOCKED。
+  // 正例的两个条件父段（`0.5 既有架构对齐` / `9. 架构沉淀建议`）都给实质正文 = 父段适用 → 其结构
+  // 子段（0.5.1~0.5.3 与 9.1~9.5）必须同时在场的合规形态；只改父段标题的写法，不得动子段。
   {
     name: 'TA-09 段名宽容：省括号/换括号/大小写三变体通过，核心词不同的段名拦',
     run: async (dir) => {
@@ -712,11 +718,16 @@ export const ENTRIES = [
         ['形态差异', '0.5 既有架构对齐（B2 老项目护栏）'],
         ['大小写', '0.5 既有架构对齐（BROWNFIELD 必填）'],
       ];
+      // 两个条件父段的实质正文（父段适用 → 登记表列出的结构子段逐条要求）
+      const applicableBodies = [
+        ['既有架构对齐', '本 change 触碰的既有模块与沿用对照见下表（夹具）。'],
+        ['架构沉淀建议', '本 change 有可复用的沉淀候选，逐项见各子段（夹具）。'],
+      ];
       for (const [label, heading] of variants) {
         setupDesign(dir, {
           designOpts: {
             rename: [['既有架构对齐', heading]],
-            body: [['既有架构对齐', '本 change 触碰的既有模块与沿用对照见下表（夹具）。']],
+            body: applicableBodies,
           },
         });
         const res = exitNode(dir, 'design');
@@ -724,11 +735,18 @@ export const ENTRIES = [
           + res.status + '\n' + res.output);
         assertOut(res, 'ALL CHECKS PASSED');
       }
+      // 反向构造（判别力）：父段适用却抽掉结构子段 → 必拦（证明子段要求真的在跑，正例不是空转）
+      setupDesign(dir, {
+        designOpts: { body: applicableBodies, subsectionOmit: ['0.5.2'] },
+      });
+      const resSubsection = exitNode(dir, 'design');
+      assertExit(resSubsection, 1);
+      assertOut(resSubsection, '0.5.2');
       // 反向构造：核心词不同（既有架构对齐 → 架构对齐）→ 拦
       setupDesign(dir, {
         designOpts: {
           rename: [['既有架构对齐', '0.5 架构对齐']],
-          body: [['既有架构对齐', '本 change 触碰的既有模块与沿用对照见下表（夹具）。']],
+          body: applicableBodies,
         },
       });
       const resCore = exitNode(dir, 'design');
@@ -1109,12 +1127,23 @@ export const ENTRIES = [
       const resUiKey = exitNode(dir, 'design');
       assertExit(resUiKey, 1);
       assertOut(resUiKey, 'motion');
-      // ③ ARCHITECTURE 缺段 → 侧命令只读报告（不阻断）
+      // ③ ARCHITECTURE 缺段 → 侧命令只读报告（不阻断）。模板夹具必须在场：骨架不可派生时报告走
+      // 「未校验（模板缺失）」分支，此时只断言「结构问题」在降级面上空转——真实比对分支才是被测面。
+      writeTemplateFixture(dir, 'ARCHITECTURE');
       writeFile(dir, '.specs/ARCHITECTURE.md', '# ARCHITECTURE — 项目级系统架构（活文档）\n\n## 1. 系统概览\n\n夹具。\n');
       const side = runSideCommand(dir, 'evolve.mjs', ['scan', '--root', dir, '--stdout']);
       assertExit(side, 0);
       assertOut(side, '结构问题');
       assertOut(side, 'ARCHITECTURE');
+      assertOut(side, '缺 H2 段 7/8');   // 8 个 H2 段只写了 1 个
+      assertOut(side, '2. 模块清单');     // 逐条列出缺哪个段名，不是只报数量
+      assertNotOut(side, '未校验');       // 走的是真实比对分支，不是模板缺席降级
+      assertNotOut(side, 'BLOCKED');      // 只读报告：结构问题不进退出码、不阻断
+      // 反向构造（判别力）：按模板补齐 8 个 H2 段 → 同一判据报 0 项（证明「缺段」不是常量输出）
+      writeFile(dir, '.specs/ARCHITECTURE.md', renderDoc('ARCHITECTURE'));
+      const sideOk = runSideCommand(dir, 'evolve.mjs', ['scan', '--root', dir, '--stdout']);
+      assertExit(sideOk, 0);
+      assertOut(sideOk, '结构问题（.specs/ARCHITECTURE.md）：0 项');
     },
   },
 

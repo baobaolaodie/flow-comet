@@ -8,7 +8,7 @@ import path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 import { createHash } from 'crypto';
 import { assertExit, assertNotOut, assertOut, runGuard, runHandoff, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
-import { CHANGE_ID, assertNodeLine, assertNotNodeLine, completeFixTaskAndRecord, driveThroughDesign, execSummaryFixture, fixBatchReviewDoc, fixBatchTaskText, fullContract, parseStatusOutput, readStateBytes, readStateFile, writeIntakeArtifacts } from '../lib/system-fixtures.mjs';
+import { archiveRecordJson, CHANGE_ID, assertNodeLine, assertNotNodeLine, completeFixTaskAndRecord, driveThroughDesign, execSummaryFixture, fixBatchReviewDoc, fixBatchTaskText, fullContract, parseStatusOutput, readStateBytes, readStateFile, writeIntakeArtifacts } from '../lib/system-fixtures.mjs';
 
 // 同夹具的「段内大写 Z 早于方法名」变体（真实机检标记形态）：6 维自查段体首行是含大写 Z 的机检
 // 标记说明，方法声明行在其后。段尾判定若把大写 Z 当串尾（惰性段体在段内首个 Z 处提前收尾），
@@ -191,7 +191,8 @@ export const ENTRIES = [
       const st0 = readStateFile(dir);
       st0.currentNode = 'archive';
       writeState(dir, st0);
-      assertExit(runState(['record', 'archive', '{"summary":"archived"}'], dir), 0);
+      // 归档提名随证据落盘（该 change 无任务 SUMMARY → 扫描 0 份，理由写明无候选入库）
+      assertExit(runState(['record', 'archive', archiveRecordJson('archived')], dir), 0);
       // ① 未移动（无归档目录）→ 出口拦截（缺归档产物）
       assertExit(runGuard(['entry', 'archive'], dir), 0);
       const blocked = runGuard(['exit', 'archive'], dir);
@@ -235,7 +236,8 @@ export const ENTRIES = [
       const st0 = readStateFile(dir);
       st0.currentNode = 'archive';
       writeState(dir, st0);
-      assertExit(runState(['record', 'archive', '{"summary":"archived"}'], dir), 0);
+      // 归档提名随证据落盘（该 change 无任务 SUMMARY → 扫描 0 份，理由写明无候选入库）
+      assertExit(runState(['record', 'archive', archiveRecordJson('archived')], dir), 0);
       // 移动（标记随目录进入归档路径）
       fs.mkdirSync(path.join(dir, '.specs', 'archive'), { recursive: true });
       fs.renameSync(path.join(dir, '.specs', 'arch-mk'), path.join(dir, '.specs', 'archive', '2026-08-11-arch-mk'));

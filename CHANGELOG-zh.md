@@ -12,6 +12,10 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **工件现在按它来自的模板校验**：每个节点声明自己读了哪几份模板，出口将工件的标题形态、段序、空段与照抄占位符对照「上游模板 + 本仓登记的增量段」——首次失败指向模板，再犯点名缺段，模板缺席时明确说明而不静默通过，项目级文档走同一条路径。记录的基线随新增覆盖上移——350 场景、95 项系统测试。([#159](https://github.com/baobaolaodie/flow-comet/pull/159))
+
 ## [1.6.4] - 2026-10-15
 
 本次发布汇集 1.6.3 之后积累的工作：入口页按项目自己的素材重做——徽标、一张说明 flow-kit 的 9 个阶段如何变成 8 个节点的图、一张说明邻近项目真实关系的关系图，以及一块证据板——对比表每一行都按那些项目今天的实际说法核对过；引擎脚本与两套回归套件按职责拆成小模块、引擎行为零变化，记录的基线随拆分上移；测试套件改用同一个便携助手复制夹具目录树，检出路径含非 ASCII 字符时不再无声中断；推荐搭配 brooks-lint 现已写入公开面。([#150](https://github.com/baobaolaodie/flow-comet/pull/150)) ([#151](https://github.com/baobaolaodie/flow-comet/pull/151)) ([#152](https://github.com/baobaolaodie/flow-comet/pull/152)) ([#157](https://github.com/baobaolaodie/flow-comet/pull/157))

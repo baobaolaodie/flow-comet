@@ -507,7 +507,7 @@ async function printScan(plan, out = console) {
 // ---------- 项目级工件：ARCHITECTURE 结构检查（只读 · 不阻断） ----------
 // 依据 DESIGN-CLARIFICATIONS C19 / AC-20③：`.specs/ARCHITECTURE.md` 存在时校验模板的 8 个 H2 段
 // 与 §3 下 `### ADR-<数字>` 条目的 7 个字段键（无 ADR 条目时该段可只写「暂无」，不算问题）。
-// 文件缺席 → 跳过并说明；骨架不可派生（模板 / 登记表缺席）→ 未校验并说明——D7/C13 取消内置兜底，
+// 文件缺席 → 跳过并说明；骨架不可派生（模板 / 登记表缺席）→ 未校验并说明——不内置兜底骨架，
 // 但同样不得把「无法比对」静默说成「通过」。
 // 只读边界：零写入、不写 state、不参与退出码——结构问题只进报告（侧命令不阻断任何流程）。
 // 单一实现纪律（L-067）：段形取骨架模块（模板 + 登记表）；ADR 条目形态**从模板 §3 直接派生**
@@ -561,7 +561,7 @@ function architectureBasis(skeleton, adrFieldKeys) {
     : sections + '；§3 的 `### ADR-<数字>` 条目 ' + adrFieldKeys.length + ' 个字段键（' + adrFieldKeys.join(' · ') + '）';
 }
 
-// 骨架不可派生的原因 → 人读一句（措辞与 D7/C13 一致：声明「未校验」，不冒充「通过」）
+// 骨架不可派生的原因 → 人读一句（措辞与「未校验」口径一致：声明「未校验」，不冒充「通过」）
 function skeletonGapNote(skeleton) {
   switch (skeleton.reason) {
     case 'template-missing':

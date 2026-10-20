@@ -75,7 +75,7 @@ export function runInFlightHandoffGate({ node, state }) {
 // 条目执行，本门禁只判「在场 + 命中回应」，不写第二份位置判据（L-067）。
 //
 // 停用词表与命中上限单处定义：改口径只改这三个常量。关键词行（`- **关键词**:`）是唯一参与命中计算
-// 的字段——无关键词行的旧条目不参与（D11：给旧条目一个不被误命中的通道）。
+// 的字段——无关键词行的旧条目不参与（给旧条目一个不被误命中的通道）。
 const LESSONS_SCAN_SECTION = 'LESSONS 扫描';
 const LESSONS_HIT_LIMIT = 5;
 const LESSONS_PATH_STOPWORDS = new Set([
@@ -149,7 +149,7 @@ function lessonsPathTokens(writeFilesText) {
 
 // LESSONS 条目：`### L-NNN` 标题开启一个条目，块内 `- **关键词**:` 行的词元即命中输入；下一个 H2
 // 结束条目区（区外的 `###` 不参与）。围栏代码块内是书写样例（模板里的「条目格式」示例即此形态），
-// 按行扫描会被误当成真条目——围栏内一律跳过。无关键词行的条目不进结果集（旧条目跳过，D11）。
+// 按行扫描会被误当成真条目——围栏内一律跳过。无关键词行的条目不进结果集（旧条目跳过）。
 function lessonsEntries(lessonsText) {
   const entries = [];
   let current = null;

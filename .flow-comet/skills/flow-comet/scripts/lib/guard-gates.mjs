@@ -76,7 +76,7 @@ const REVIEW_FINDINGS_PLACEHOLDER_RE =
 
 // 发现区作用域基准从 REVIEW 骨架派生（模板 `### 2.2 6 维诊断 · 详细发现（4 要素…）` → 结构子段
 // 「详细发现」）——段名归一是骨架模块的单一实现，此处不另写段名正则。模板缺席 → primary=null，
-// 模板位置判据整体跳过（D7/C9：模板派生判据不臆造；旧形态解析与处置校验照常）。同一父段的其它
+// 模板位置判据整体跳过（模板派生判据不臆造；旧形态解析与处置校验照常）。同一父段的其它
 // 结构子段（2.0 / 2.1 / 2.3）在模板位置作用域内结束该子段；段内其它 H3（如 brooks 输出的
 // `### 🔴 R1 …` 分区）是严重度分区，不结束作用域。
 async function reviewFindingScope() {
@@ -458,10 +458,10 @@ export async function runArchiveBranchMergeGate({ node, state }) {
 // 「未发现」）。前端判定沿用 CHANGE.md「视觉调性」段的既有判据（单一实现）。
 const CONTEXT_FRONTEND_ONLY_SUBSECTION = '自定义 hooks';
 
-// CONTEXT 模板段问题清单：段集合取自骨架（模板 = 内容权威，D1），段标题按段名归一匹配（忽略编号 /
+// CONTEXT 模板段问题清单：段集合取自骨架（模板 = 内容权威），段标题按段名归一匹配（忽略编号 /
 // 括号后缀 / 大小写，AC-9）；父段缺席时不再列其子段（父段已单独报出，避免同一事实重复计数）。
 // 模板缺席（derived=false）→ 返回 null：模板派生判据整体跳过，由调用方输出显式「未校验（模板缺失）」
-// ——不退回任何内置段名副本（D7/C9）。
+// ——不退回任何内置段名副本。
 async function contextTemplateProblems(state, content) {
   const skeleton = await buildSkeleton('CONTEXT');
   if (!skeleton.derived) return null;

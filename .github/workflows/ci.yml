@@ -4,7 +4,7 @@
 # (All checks are enforced server-side and independently.)
 #
 # 检查映射 / Check mapping:
-#   regression           guard self-test (325 scenarios incl. scenario-count & public-artifact
+#   regression           guard self-test (350 scenarios incl. scenario-count & public-artifact
 #                        code self-checks) / script syntax / BOM guard
 #   installer            prepare-env reproducibility + distribution surface (publishable
 #                        manifest / pack boundary incl. top-level allowlist and per-file
@@ -466,6 +466,72 @@ jobs:
             console.error('  ' + REGISTRY + ' -> templateCommit = ' + registry);
             console.error('  ' + INSTALLER + ' -> FLOW_KIT_LOCKED_COMMIT = ' + locked[1]);
             console.error('升级锁定点时须同批更新登记表：templateCommit 与每份模板的 sha256 一起改，否则校验基准与实际模板分叉。');
+            process.exit(1);
+          }
+          EOF
+
+      - name: '模板段表 ↔ 登记表 / Template section tables match the registry'
+        run: |
+          # 与上一指纹步互补：指纹管「模板内容有没有变」，本步管「册子教的段名是不是真的存在」。
+          # 7 册 SKILL.md 的「必填段清单」表是执行者实际读到的段名清单，登记表是门禁实际比对的段集合；
+          # 两侧各自演进时，册子会教人写一个已经不存在的段（模板改名后册子照旧绿灯）。
+          # ① 表内段名（反引号 `## …` / `### …`，含按编号引用如 `### 2.2`）必须能在登记表解析到
+          #    （段 / 结构子段 / 增量段三者之一）；
+          # ② 登记表为本仓登记的增量段（overlay 段）必须在该册表里被提到。
+          # 一致时零输出（静默）；不一致时逐条打印文件 + 段名；只读本地文件，零网络。
+          node --input-type=module - <<'EOF'
+          import fs from 'node:fs';
+          const { normalizeHeading } = await import('./.flow-comet/skills/flow-comet/scripts/route-node.mjs');
+          const SKILLS = ['flow-comet-open', 'flow-comet-design', 'flow-comet-plan', 'flow-comet-execute',
+            'flow-comet-subagent-execute', 'flow-comet-review', 'flow-comet-verify'];
+          const REGISTRY = '.flow-comet/skills/flow-comet/reference/artifact-templates.json';
+          // UAT 无上游模板（登记表刻意没有该键）——册子按「仅存在性」登记，属登记口径内的豁免。
+          const NO_TEMPLATE_DOCS = new Set(['UAT']);
+          const registry = JSON.parse(fs.readFileSync(REGISTRY, 'utf8'));
+          const problems = [];
+          let checkedRows = 0;
+          for (const skill of SKILLS) {
+            const rel = '.flow-comet/skills/' + skill + '/SKILL.md';
+            const lines = fs.readFileSync(rel, 'utf8').split('\n');
+            const start = lines.findIndex((line) => line.includes('必填段清单'));
+            if (start === -1) { problems.push(rel + ' 缺「必填段清单」表'); continue; }
+            let sawRow = false;
+            for (let i = start + 1; i < lines.length; i += 1) {
+              const line = lines[i];
+              if (!line.startsWith('|')) { if (sawRow) break; continue; }
+              if (/^\|\s*-+/.test(line) || line.includes('文件（模板')) continue;
+              const cells = line.split('|').slice(1, -1).map((cell) => cell.trim());
+              const docMatch = cells[0].match(/`([A-Z][A-Z-]*\.md)`/) ?? cells[0].match(/^([A-Z][A-Z-]*\.md)$/);
+              if (docMatch === null) { if (sawRow) break; problems.push(rel + ' 表行首栏未按 `<DOC>.md` 给出: ' + cells[0]); continue; }
+              sawRow = true;
+              checkedRows += 1;
+              const docKey = docMatch[1].replace(/\.md$/, '');
+              if (NO_TEMPLATE_DOCS.has(docKey)) continue;
+              const entry = registry.templates[docKey];
+              if (!entry) { problems.push(rel + ' 引用了登记表里不存在的文档键: ' + docKey); continue; }
+              const known = new Set();
+              const registeredNames = [];
+              for (const section of entry.sections ?? []) { known.add(normalizeHeading(section.name)); registeredNames.push(section.name); }
+              for (const sub of entry.structureSubsections ?? []) { known.add(normalizeHeading(sub.name)); registeredNames.push(sub.name); }
+              for (const increment of entry.increments ?? []) { known.add(normalizeHeading(increment.section)); registeredNames.push(increment.section); }
+              const body = cells.slice(1).join(' | ');
+              for (const match of body.matchAll(/`(#{2,4})\s*([^`]+)`/g)) {
+                const name = match[2].trim();
+                const byNumber = /^\d+(?:\.\d+)*\.?$/.test(name);
+                const resolved = byNumber
+                  ? registeredNames.some((reg) => reg.trim().startsWith(name))
+                  : known.has(normalizeHeading(name));
+                if (!resolved) problems.push(rel + ' 的 ' + docKey + ' 段表列了登记表里没有的段名: ' + match[1] + ' ' + name);
+              }
+              for (const increment of entry.increments ?? []) {
+                if (!body.includes(increment.section)) problems.push(rel + ' 的 ' + docKey + ' 段表未提到登记表登记的增量段: ' + increment.section);
+              }
+            }
+            if (!sawRow) problems.push(rel + ' 的「必填段清单」表没有可解析的文档行');
+          }
+          if (problems.length > 0) {
+            console.error('段名集合不一致 / section table drift（受检行 ' + checkedRows + '）:');
+            for (const problem of problems) console.error('  - ' + problem);
             process.exit(1);
           }
           EOF
