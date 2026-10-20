@@ -79,13 +79,33 @@ function templatePlaceholder(sectionName) {
   return '模板占位正文（' + sectionName + '）：照抄本行即视为未填写。';
 }
 
+// 登记表合成形态的段正文覆盖：LESSONS 的「条目格式」段是条目字段键判据（C20）的唯一派生源——
+// CI 全新检出没有 vendored 模板时也要给出等价书写样例，否则该判据在 CI 里会退化成「无法派生」而空转。
+const TEMPLATE_BODY_FIXTURES = {
+  LESSONS: [[
+    '条目格式',
+    [
+      '```markdown',
+      '### L-NNN · [tag1, tag2] 标题（一行内说清，便于目录扫读）',
+      '',
+      '- **首发**: <change-id> · <task-id> · <YYYY-MM-DD>',
+      '- **上次复核**: <YYYY-MM-DD>',
+      '- **适用栈**: <例 React 18+ / Node 20 / SQLite 当前 schema>',
+      '- **状态**: active / superseded-by:L-MMM / deprecated:<原因>',
+      '- **关键词**: <空格分隔，方便 grep；用任务里会出现的词>',
+      '```',
+    ].join('\n'),
+  ]],
+};
+
 function templateFixtureText(key) {
   const realFile = path.join(REPO_ROOT, ...docRel(key).split('/'));
   if (fs.existsSync(realFile)) return fs.readFileSync(realFile, 'utf8');
   const entry = docEntry(key);
   const lines = [docTitle(key), ''];
   for (const section of entry.sections ?? []) {
-    lines.push('## ' + section.name, '', templatePlaceholder(section.name), '');
+    const override = (TEMPLATE_BODY_FIXTURES[key] ?? []).find(([needle]) => section.name.includes(needle));
+    lines.push('## ' + section.name, '', override ? override[1] : templatePlaceholder(section.name), '');
   }
   return lines.join('\n');
 }
@@ -207,6 +227,15 @@ function bodyFor(key, section, opts) {
   return section.conditional === true ? CONDITIONAL_BODY : defaultBody();
 }
 
+// 结构子段的正文：opts.body 的段名片段覆盖优先（构造「2.2 下的发现条目」这类子段正文形态），
+// 其次段级默认正文（BODY_OVERRIDES，如 REVIEW 2.2 的列表项发现），最后才是通用占位正文。
+function subsectionBody(key, name, opts) {
+  const override = (opts.body ?? []).find(([needle]) => name.includes(needle));
+  if (override) return override[1];
+  const registered = BODY_OVERRIDES.find(([docKey, needle]) => docKey === key && name.includes(needle));
+  return registered ? registered[2] : '本子段按模板要求填写：实质内容（夹具）。';
+}
+
 function matchesAny(name, needles) {
   return (needles ?? []).some((needle) => name.includes(needle));
 }
@@ -254,7 +283,7 @@ function renderDoc(key, opts = {}) {
       if (matchesAny(child.name, opts.subsectionOmit)) continue;
       blocks.push({
         name: child.name,
-        text: ['### ' + child.name, '', '本子段按模板要求填写：实质内容（夹具）。', ''].join('\n'),
+        text: ['### ' + child.name, '', subsectionBody(key, child.name, opts), ''].join('\n'),
       });
     }
   }
@@ -1023,7 +1052,10 @@ export const ENTRIES = [
   },
 
   // TA-16 · REVIEW 发现必须在模板位置（AC-16）——① 发现写在 `## 发现` 而 `### 2.2` 下无条目
-  // → BLOCKED 并提示迁移到 2.2；② 按模板写在 2.2 → 通过。
+  // → BLOCKED 并提示迁移到 2.2；② 按模板写在 2.2 → 通过；③ 模板范例形态（`### 🔴 …` + 粗体
+  // 字段）同样是「发现」——缺处置标记 → BLOCKED（修复前该形态整段静默空过 = RED），同内容改回
+  // 列表项 → 同样 BLOCKED（书写形态不改变判别力），带处置标记的 H3 条目 → 通过；④ H3 Major
+  // [转待办] 无用户裁决 → BLOCKED，同段裁决 + [升级] 承接 → 通过（严重度按标题前缀派生）。
   {
     name: 'TA-16 REVIEW 发现位置：写在 ## 发现 而 2.2 空则拦，写在 2.2 通过',
     run: async (dir) => {
@@ -1041,6 +1073,51 @@ export const ENTRIES = [
       const ok = exitNode(dir, 'review');
       assertExit(ok, 0);
       assertOut(ok, 'ALL CHECKS PASSED');
+      // ③ H3 + 粗体字段形态（模板 2.2 的书写范例）缺处置标记 → BLOCKED
+      const h3Finding = [
+        '### 🔴 C-2 · 夹具 H3 形态的发现：按模板范例书写',
+        '**Symptom**：某处存在一个可记录的衰退风险',
+        '**Source**：夹具来源',
+        '**Consequence**：若不修会怎样',
+        '**Remedy**：怎么改',
+        '**生成 fix 任务**：T-FIX-99',
+      ].join('\n');
+      setupReview(dir, { body: [['2.2', h3Finding]] });
+      const h3Missing = exitNode(dir, 'review');
+      assertExit(h3Missing, 1);
+      assertOut(h3Missing, 'BLOCKED');
+      assertOut(h3Missing, '发现区 1 项');   // H3 条目被计入发现（未识别时计数为 0）
+      // ④ 同内容换回列表项形态 → 同样被拦（同一判据对两种写法同等判别）
+      setupReview(dir, {
+        body: [['2.2', '- **C-2 · 夹具 H3 形态的发现：按模板范例书写**：某处存在一个可记录的衰退风险']],
+      });
+      const listMissing = exitNode(dir, 'review');
+      assertExit(listMissing, 1);
+      assertOut(listMissing, 'BLOCKED');
+      assertOut(listMissing, '发现区 1 项');
+      // ⑤ 反向构造：H3 条目在标题行带处置标记 → 通过
+      setupReview(dir, { body: [['2.2', h3Finding.replace('按模板范例书写', '按模板范例书写 [已修]')]] });
+      const h3Done = exitNode(dir, 'review');
+      assertExit(h3Done, 0);
+      assertOut(h3Done, 'ALL CHECKS PASSED');
+      // ⑥ H3 Major [转待办] 无用户裁决记录 → BLOCKED
+      setupReview(dir, {
+        body: [['2.2', ['### 🟡 M-2 · 夹具 H3 形态的延期 [转待办]',
+          '**Symptom**：某处问题', '**Remedy**：下一 change 首修'].join('\n')]],
+      });
+      const h3Deferred = exitNode(dir, 'review');
+      assertExit(h3Deferred, 1);
+      assertOut(h3Deferred, 'BLOCKED');
+      assertOut(h3Deferred, 'M-2');       // 严重度按 H3 标题前缀派生 → 计入 Major 延期门禁
+      assertOut(h3Deferred, '用户裁决');
+      // ⑦ 反向构造：同段用户裁决 + [升级] 承接 → 通过
+      setupReview(dir, {
+        body: [['2.2', ['### 🟡 M-2 · 夹具 H3 形态的延期 [升级] [转待办]（用户裁决：接受延期，下一 change 首修）',
+          '**Symptom**：某处问题'].join('\n')]],
+      });
+      const h3Adjudicated = exitNode(dir, 'review');
+      assertExit(h3Adjudicated, 0);
+      assertOut(h3Adjudicated, 'ALL CHECKS PASSED');
     },
   },
 
@@ -1097,6 +1174,80 @@ export const ENTRIES = [
       });
       const archiveOk = exitNode(dir, 'archive');
       assertExit(archiveOk, 0);
+      // ⑤ C20 字段键：新 change 的模板形态新条目缺 5 键任一 → BLOCKED（字段键从 LESSONS 模板的
+      // 「条目格式」书写样例派生，不在门禁里写第二份字面清单；模板夹具在场是判据可派生前提）。
+      setupVerify(dir);
+      writeTemplateFixture(dir, 'LESSONS');
+      writeFile(dir, '.specs/LESSONS.md', [
+        '# LESSONS — 跨任务失败知识库（夹具）',
+        '',
+        '## 条目区（夹具）',
+        '',
+        '### L-503 · [proc] 夹具新条目只有标题与关键词行',
+        '',
+        '- **关键词**: fixture field gate',
+        '',
+        '夹具条目正文：只有关键词行，缺其余字段键。',
+        '',
+      ].join('\n'));
+      const missingFields = exitNode(dir, 'verify');
+      assertExit(missingFields, 1);
+      assertOut(missingFields, 'BLOCKED');
+      assertOut(missingFields, 'L-503');
+      assertOut(missingFields, '首发');
+      // ⑤b 新条目只有标题与正文（无任何字段键）同样 BLOCKED——正面回应「新条目可绕过关键词扫描」的
+      // 失效模式（修复前整类条目静默通过 = RED）。
+      writeFile(dir, '.specs/LESSONS.md', [
+        '# LESSONS — 跨任务失败知识库（夹具）',
+        '',
+        '## 条目区（夹具）',
+        '',
+        '### L-506 · [proc] 夹具只有标题与正文的新条目',
+        '',
+        '夹具条目正文：一个字段键都没有。',
+        '',
+      ].join('\n'));
+      const noFieldKeys = exitNode(dir, 'verify');
+      assertExit(noFieldKeys, 1);
+      assertOut(noFieldKeys, 'BLOCKED');
+      assertOut(noFieldKeys, 'L-506');
+      // ⑥ 迁移形态旧条目（`### L-NNN:` 冒号标题，迁移保留原标题形态）缺字段 → 只 WARN，不阻断
+      setupVerify(dir);
+      writeTemplateFixture(dir, 'LESSONS');
+      writeFile(dir, '.specs/LESSONS.md', [
+        '# LESSONS — 跨任务失败知识库（夹具）',
+        '',
+        '## 条目区（夹具）',
+        '',
+        '### L-504: 夹具迁移形态条目',
+        '',
+        '夹具迁移条目正文：迁移保留原标题形态，无字段行。',
+        '',
+      ].join('\n'));
+      const migratedOld = exitNode(dir, 'verify');
+      assertExit(migratedOld, 0);
+      assertOut(migratedOld, 'L-504');
+      assertOut(migratedOld, 'WARN');
+      // ⑦ 反向构造：新条目补全 5 键 → 通过
+      writeFile(dir, '.specs/LESSONS.md', [
+        '# LESSONS — 跨任务失败知识库（夹具）',
+        '',
+        '## 条目区（夹具）',
+        '',
+        '### L-505 · [proc] 夹具完整条目',
+        '',
+        '- **首发**: ' + CHANGE_ID + ' · T01 · 2026-10-20',
+        '- **上次复核**: 2026-10-20',
+        '- **适用栈**: Node 18+ / 夹具',
+        '- **状态**: active',
+        '- **关键词**: fixture complete entry',
+        '',
+        '夹具条目正文。',
+        '',
+      ].join('\n'));
+      const fieldsOk = exitNode(dir, 'verify');
+      assertExit(fieldsOk, 0);
+      assertOut(fieldsOk, 'ALL CHECKS PASSED');
     },
   },
 

@@ -61,12 +61,16 @@ function markerProtocolBasename(value) {
 
 // REVIEW.md 发现区解析——发现的合法位置是模板位置 `### 2.2 …详细发现`（REVIEW 模板的结构子段）；
 // 旧形态 `## 发现` 段（历史 REVIEW 的写法）继续按同一套条目口径解析，供旧 change 渐进处置与迁移
-// 提示。发现项 = 列表项（"- **" 无序 / "1. **" 有序，两种列表形态同口径解析）；"无" 条目
-// （"- 无" / "无（...）"）表示该级别无发现，豁免。条目块包含其后的非空续行（同一段落），直到空行
-// / 下一条目 / 下一个标题。严重度只取该条目自身的标题/行首——所属 "### Major" 分区，或标题（加粗
-// 部分）内带 [Major] 标签（真实 REVIEW 常用扁平有序列表 + 条目内级别标签的写法）；条目正文引用
-// 他条的 [Major] 字样不改变本条严重度。返回 { title, scope, lines, isMajor, ordinal }。
+// 提示。发现项有两种合法书写形态：① 列表项（"- **" 无序 / "1. **" 有序，两种列表形态同口径解析）；
+// ② 模板范例形态（flow-kit/templates/REVIEW.md 2.2 的书写样例 `### 🔴 R<x> · <名字>：<结论>` +
+// 粗体字段行）——模板位置下以严重度 token 起头的 H3 同样是发现，标题行即条目自身的第一行（处置
+// 标记按该行判定）。不以严重度 token 起头的 H3（如 `### Major`）仍是严重度分区。旧 `## 发现` 段
+// 保持列表项口径（历史写法，避免把分区标题误判成发现）。"无"条目（"- 无" / "无（...）"）表示该
+// 级别无发现，豁免。条目块包含其后的非空续行，直到空行 / 下一条目 / 下一个标题。严重度只取该条目
+// 自身的标题/行首——所属 "### Major" 分区，或标题（加粗部分 / H3 严重度 token）内带级别信息；
+// 条目正文引用他条的 [Major] 字样不改变本条严重度。返回 { title, scope, lines, isMajor, ordinal }。
 const REVIEW_FINDING_ITEM_RE = /^\s*(?:[-*+]|\d+[.)])\s*\*\*(.+?)\*\*/;
+const REVIEW_SEVERITY_TOKEN_RE = /^(?:🔴|🟡|🟢|\[\s*(?:critical|major|minor)\s*\])\s*/iu;
 const REVIEW_DISPOSITION_RE = /\[已修\]|\[升级\]|\[转待办\]/;
 const REVIEW_MAJOR_LABEL_RE = /\[\s*Major\s*\]/i;
 const REVIEW_ADJUDICATION_RE = /用户裁决\s*[:：]\s*接受延期/;
@@ -93,6 +97,14 @@ async function reviewFindingScope() {
   };
 }
 
+// H3 条目形态的严重度从标题前缀的严重度 token 派生（模板范例的 🔴/🟡/🟢；另接受文字标签形态的
+// [Critical]/[Major]/[Minor]）——Major 延期裁决门禁对 H3 条目与列表项同口径。
+function reviewSubheadingIsMajor(heading) {
+  const token = (String(heading).match(REVIEW_SEVERITY_TOKEN_RE) ?? [])[0] ?? '';
+  if (/🔴|🟡/u.test(token) || /critical|major/iu.test(token)) return true;
+  return REVIEW_MAJOR_LABEL_RE.test(heading);
+}
+
 function reviewFindingsItems(text, scope = { primary: null, siblings: [] }) {
   const items = [];
   let mode = 'none'; // 'none' | 'legacy'（旧 ## 发现）| 'primary'（模板位置 2.2）
@@ -117,7 +129,19 @@ function reviewFindingsItems(text, scope = { primary: null, siblings: [] }) {
           severity = '';
           continue;
         }
-        severity = h3[1].trim();
+        // 模板范例形态：严重度 token 起头的 H3 = 发现条目（标题行即条目自身第一行，处置标记
+        // 与列表项同口径按该行判定），续行是粗体字段 / 正文，直到空行或下一个标题。
+        const heading = h3[1].trim();
+        if (REVIEW_SEVERITY_TOKEN_RE.test(heading)) {
+          current = {
+            title: heading.replace(REVIEW_SEVERITY_TOKEN_RE, '').trim() || heading,
+            scope: 'primary',
+            lines: [line],
+            isMajor: reviewSubheadingIsMajor(heading),
+          };
+          continue;
+        }
+        severity = heading;
         continue;
       }
       if (mode === 'none' && scope.primary !== null && scope.primary.test(line)) {
@@ -517,10 +541,19 @@ export async function runContextAppendGate({ node, state }) {
 //    change BLOCKED 并逐行给「文件:行号 → 改法」，旧 change WARN 渐进；
 // ② 条目区外条目（条目区锚点用段名归一，容忍模板标题的括号后缀，如 `## 条目区（夹具）`）与
 //    ③ 同段内编号递增——两条保持既有作用面（verify / archive），不随 ① 扩到 open；
-// ④ archive 出口核对 evidence.lessonsNomination：扫描份数 = 该 change 内 SUMMARY 份数、提名编号在
+// ④ `### L-NNN` 条目的字段键（C20）——键集合从 LESSONS 模板「条目格式」段的书写样例派生；新 change
+//    的新条目缺任一键 BLOCKED，旧条目（迁移形态 / 首发指向别的 change）与旧 change 只 WARN；
+// ⑤ archive 出口核对 evidence.lessonsNomination：扫描份数 = 该 change 内 SUMMARY 份数、提名编号在
 //    LESSONS 中真实存在、无提名时理由非空——归档提名留痕且可核对。
 const LESSONS_LEGACY_ENTRY_RE = /^##\s+(L-\d+)\b/u;
 const LESSONS_ENTRY_ZONE_NAMES = ['条目区', '活跃条目', '已解决条目'];
+// `### L-NNN` 条目块（后接非数字/非字母，避免吞掉更长编号）。模板条目形态 = `### L-NNN · [tag] 标题`
+// （「条目格式」段给出的书写样例）；迁移形态（`### L-NNN:` 冒号标题）与裸标题（`### L-NNN`）等
+// 历史写法一律按旧条目处置（不足字段只 WARN）——新条目的判定因此只看「模板标题形态 + 字段键」。
+const LESSONS_ENTRY_HEADING_RE = /^###\s*(L-\d+)(?![\dA-Za-z])/u;
+const LESSONS_TEMPLATE_HEADING_RE = /^###\s*L-\d+\s*·/u;
+// 字段键行：`- **<键>**: <值>`（条目正文里的粗体小标题不带列表符，不会命中）。
+const LESSONS_FIELD_LINE_RE = /^[-*]\s*\*\*(.+?)\*\*\s*[:：]\s*(.*)$/u;
 
 // 旧形态条目行（行号 1 基）：迁移指引逐行可执行，执行者不必自己数行号。
 function lessonsLegacyEntries(content) {
@@ -650,7 +683,112 @@ function checkLessonsZoneAndOrder({ content, state }) {
   }
 }
 
-// ④ archive 出口的归档提名核对（对账 SUMMARY 份数 / 提名编号存在性 / 无提名理由）——归档提名
+// ④ 条目字段键（C20）：键集合从 LESSONS 模板「条目格式」段的书写样例派生（不写字面第二份清单）。
+// 模板缺席 / 无「条目格式」段 / 样例无字段行 → null——调用方显式声明「未校验（模板缺失）」，不臆造。
+async function lessonsEntryFieldKeys() {
+  const skeleton = await buildSkeleton('LESSONS');
+  if (!skeleton.derived) return null;
+  const formatSection = skeleton.sections.find((section) => section.norm.includes('条目格式'));
+  if (!formatSection) return null;
+  let text;
+  try { text = await fs.readFile(skeleton.file, 'utf8'); } catch { return null; }
+  const keys = [];
+  let inSection = false;
+  let inFence = false;
+  for (const line of String(text).replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n').split('\n')) {
+    if (!inSection) {
+      if (formatSection.pattern.test(line)) inSection = true;
+      continue;
+    }
+    if (/^##\s+/u.test(line)) break;
+    if (/^\s*```/u.test(line)) { inFence = !inFence; continue; }
+    if (!inFence) continue;
+    const matched = line.match(LESSONS_FIELD_LINE_RE);
+    if (matched) keys.push(matched[1].trim());
+  }
+  return keys.length > 0 ? keys : null;
+}
+
+// `### L-NNN` 条目块：标题行 + 其后各行，直到下一个 H2/H3 标题；围栏内的书写样例不算条目
+// （模板的条目格式样例就是 fenced 形态）——与 LESSONS 关键词扫描的围栏口径一致。
+function lessonsEntryBlocks(content) {
+  const blocks = [];
+  let current = null;
+  let inFence = false;
+  String(content).replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n').split('\n').forEach((line, index) => {
+    if (/^\s*```/u.test(line)) {
+      inFence = !inFence;
+      if (current) current.lines.push(line);
+      return;
+    }
+    if (inFence) {
+      if (current) current.lines.push(line);
+      return;
+    }
+    if (/^#{2,3}\s/u.test(line)) {
+      const matched = line.match(LESSONS_ENTRY_HEADING_RE);
+      current = matched === null ? null : { id: matched[1], line: index + 1, heading: line, lines: [line] };
+      if (current) blocks.push(current);
+      return;
+    }
+    if (current) current.lines.push(line);
+  });
+  return blocks;
+}
+
+// 旧条目判定（结构级，不做语义判断）：非模板标题形态（迁移冒号形态 / 裸标题等历史写法，含 T11
+// 迁移保留原标题形态的条目）或「首发」键指向别的 change。其余缺字段条目按「新条目」处置——
+// 新条目只有标题与正文（无任何字段键）时同样落在 BLOCK 分支（M-5 的失效模式）。
+function lessonsEntryIsOld(block, originKey, state) {
+  if (!LESSONS_TEMPLATE_HEADING_RE.test(block.heading)) return true;
+  if (originKey === null) return false;
+  for (const line of block.lines.slice(1)) {
+    const matched = line.match(LESSONS_FIELD_LINE_RE);
+    if (matched && matched[1].trim() === originKey) {
+      const origin = matched[2].trim();
+      return origin !== '' && !origin.includes(state.activeChange);
+    }
+  }
+  return false;
+}
+
+// ④ 字段键存在性（C20）：新 change 的新条目缺任一键 → BLOCKED；旧条目 / 旧 change → WARN 渐进。
+function checkLessonsEntryFields({ content, node, state, keys }) {
+  const originKey = keys.find((key) => key.includes('首发')) ?? null;
+  const blocked = [];
+  const warned = [];
+  for (const block of lessonsEntryBlocks(content)) {
+    const present = new Map();
+    for (const line of block.lines.slice(1)) {
+      const matched = line.match(LESSONS_FIELD_LINE_RE);
+      if (matched && !present.has(matched[1].trim())) present.set(matched[1].trim(), matched[2].trim());
+    }
+    const missing = keys.filter((key) => !present.has(key));
+    if (missing.length === 0) continue;
+    (lessonsEntryIsOld(block, originKey, state) ? warned : blocked)
+      .push({ id: block.id, line: block.line, missing });
+  }
+  const describe = (entry) => '.specs/LESSONS.md:' + entry.line + ' ' + entry.id
+    + '（缺 ' + entry.missing.join('/') + '）';
+  if (warned.length > 0) {
+    console.error('LESSONS WARN: LESSONS.md 有 ' + warned.length + ' 条旧条目缺字段键（迁移/既有条目渐进不阻断）: '
+      + warned.map(describe).join('、'));
+  }
+  if (blocked.length === 0) return;
+  const guide = '恢复: 按 flow-kit/templates/LESSONS.md「条目格式」段补全字段键（' + keys.join(' / ')
+    + '；正文块不强制）后重试 exit ' + node.id;
+  if (!isNewChange(state)) {
+    console.error('LESSONS WARN: LESSONS.md 有 ' + blocked.length + ' 条条目缺字段键（旧 change 渐进不阻断）: '
+      + blocked.map(describe).join('、') + '；' + guide);
+    return;
+  }
+  console.error('BLOCKED: LESSONS.md 有 ' + blocked.length + ' 条新条目缺字段键（新 change 强制新条目按模板条目格式书写）:');
+  for (const entry of blocked) console.error('  - ' + describe(entry));
+  console.error(guide);
+  process.exit(1);
+}
+
+// ⑤ archive 出口的归档提名核对（对账 SUMMARY 份数 / 提名编号存在性 / 无提名理由）——归档提名
 // 留痕且可核对。新 change BLOCKED / 旧 change WARN（C10）。
 async function checkLessonsNomination({ state }) {
   const problems = await lessonsNominationProblems(state);
@@ -672,7 +810,16 @@ export async function runLessonsZoneGate({ node, state }) {
   try { content = await fs.readFile(lessonsFile, 'utf8'); } catch { content = null; }
   if (content !== null) {
     checkLessonsEntryForm({ content, node, state });
-    if (node.id !== 'open') checkLessonsZoneAndOrder({ content, state });
+    if (node.id !== 'open') {
+      checkLessonsZoneAndOrder({ content, state });
+      const fieldKeys = await lessonsEntryFieldKeys();
+      if (fieldKeys === null) {
+        console.error('LESSONS 条目字段 未校验（模板缺失）——flow-kit/templates/LESSONS.md 或其「条目格式」样例缺席，'
+          + '字段键无法派生（修复: 按安装指引获取 flow-kit 模板后重试）');
+      } else {
+        checkLessonsEntryFields({ content, node, state, keys: fieldKeys });
+      }
+    }
   }
   if (node.id === 'archive') await checkLessonsNomination({ state });
 }
