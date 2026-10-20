@@ -35,6 +35,7 @@ import {
   handoffFor,
 } from '../lib/test-fixtures.mjs';
 import { scenarioProtocolPath } from '../lib/test-assertions.mjs';
+import { maintainerFacePresent } from '../lib/text-anchor-checks.mjs';
 
 // ---------- 登记表与模板夹具（夹具输入面，不是判据） ----------
 
@@ -1413,10 +1414,16 @@ export const ENTRIES = [
       const unknown = await skeleton.templateFingerprint('NO-SUCH-TEMPLATE', { runRoot: cleanRoot });
       assertTrue(unknown.derived === false && unknown.reason === 'unknown-key',
         '未知模板键应显式标注 unknown-key，实际: ' + JSON.stringify(unknown));
-      // ④ 发版期检查接线：CI 已包含登记表指纹比对步骤
-      const ci = repoFileText('.github/workflows/ci.yml');
-      assertTrue(ci.includes('artifact-templates.json'),
-        '发版期检查应比对登记表指纹（CI 需引用 reference/artifact-templates.json）');
+      // ④ 发版期检查接线：CI 已包含登记表指纹比对步骤。CI workflow 属主仓分发面（安装副本无
+      // `.github/`）：结构性缺席时输出可见 SKIP（未验证 ≠ 通过），不让缺席把整条场景判红。
+      const ciRel = '.github/workflows/ci.yml';
+      if (!repoFileExists(ciRel)) {
+        console.log('SKIP: TA-22 的发版期检查接线面（' + ciRel + ' 不在本检出）——本次检出未校验 CI 是否比对'
+          + '登记表指纹，请在权威源检出重跑本套件（未验证 ≠ 通过）');
+      } else {
+        assertTrue(repoFileText(ciRel).includes('artifact-templates.json'),
+          '发版期检查应比对登记表指纹（CI 需引用 reference/artifact-templates.json）');
+      }
     },
   },
 
@@ -1495,6 +1502,7 @@ export const ENTRIES = [
     name: 'TA-24 公开面口径：5 对双语去除 overclaim，机制表覆盖全出口，排查给两阶段指引',
     run: () => {
       const docs = new Map();
+      const missingFaces = [];
       const pairs = [
         ['README.md', 'README-zh.md'],
         ['CONTRIBUTING.md', 'CONTRIBUTING-zh.md'],
@@ -1503,12 +1511,19 @@ export const ENTRIES = [
         ['docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md'],
       ];
       for (const [en, zh] of pairs) {
-        if (!repoFileExists(en) || !repoFileExists(zh)) {
-          console.log('SKIP: 公开面口径判据——' + (repoFileExists(en) ? zh : en) + ' 不在本检出');
+        const missing = [en, zh].filter((rel) => !repoFileExists(rel));
+        if (missing.length > 0) {
+          missingFaces.push(...missing);
           continue;
         }
         docs.set(en, repoFileText(en));
         docs.set(zh, repoFileText(zh));
+      }
+      // 公开面在安装副本形态结构性缺席（目标项目只有技能包，无本仓公开文档）：整面输出一条可见
+      // SKIP（未验证 ≠ 通过）——缺席既不算「判据违规」，也不静默当成已校验。
+      if (missingFaces.length > 0) {
+        console.log('SKIP: TA-24 的公开面口径判据（' + [...new Set(missingFaces)].join('、') + ' 不在本检出）——'
+          + '本次检出未校验 5 对双语公开文档的 overclaim / 机制表 / 排查指引口径，请在权威源检出重跑本套件（未验证 ≠ 通过）');
       }
       const rules = [
         { rel: 'README-zh.md', label: '去 overclaim（继承表述）', exclude: ['完全继承'] },
@@ -1518,7 +1533,9 @@ export const ENTRIES = [
         { rel: 'docs/TROUBLESHOOTING-zh.md', label: '两阶段报错指引', include: ['两阶段'] },
         { rel: 'docs/MECHANISM-zh.md', label: '机制表覆盖全出口', include: ['段名是否符合模板'] },
       ];
-      const problems = textRuleProblems(docs, rules);
+      // 判据只落在本检出真实存在的文档上：缺席面已由上方 SKIP 行显式声明未验证。
+      const activeRules = rules.filter((rule) => docs.has(rule.rel));
+      const problems = textRuleProblems(docs, activeRules);
       // 机制表一行的出口清单覆盖：execute / verify 必须在列（旧表只列 5 个出口）
       for (const [rel, needNodes] of [
         ['docs/MECHANISM-zh.md', ['execute', 'verify']],
@@ -1535,8 +1552,9 @@ export const ENTRIES = [
           if (!row.includes(node)) problems.push(rel + ' 机制行未覆盖出口 ' + node + '（口径落后于门禁范围）');
         }
       }
-      // 变异探针：正向（overclaim 写回 / 口径改回旧形态）与反向（补上缺失口径 ⇒ 不再报）
-      assertProbesDiscriminate(problems, docs, rules, [
+      // 变异探针：正向（overclaim 写回 / 口径改回旧形态）与反向（补上缺失口径 ⇒ 不再报）。
+      // 含缺席面的探针不执行——上方 SKIP 行已显式声明该面未验证。
+      const activeProbes = [
         ['overclaim 写回', 'README-zh.md', (text) => text + '\n工件与规则完全继承。\n', '仍含旧表述「完全继承」'],
         ['段名来源改回运行时派生', 'CONTRIBUTING-zh.md',
           (text) => text + '\n段名在运行时从 vendored 模板派生。\n', '仍含旧表述「段名在运行时从 vendored 模板派生」'],
@@ -1544,7 +1562,8 @@ export const ENTRIES = [
           (text) => text + '\n## 缺段报错（两阶段）\n\n首次只给模板路径与类别计数，再犯才列段名。\n', '缺「两阶段」', false],
         ['补上增量段口径', 'docs/USAGE-zh.md',
           (text) => text + '\n工件保真 = 上游模板段 + 本仓增量段。\n', '缺「增量段」', false],
-      ]);
+      ].filter(([, rel]) => docs.has(rel));
+      assertProbesDiscriminate(problems, docs, activeRules, activeProbes);
       if (problems.length > 0) throw new Error('公开面口径不符: ' + problems.join('; '));
     },
   },
@@ -1556,6 +1575,14 @@ export const ENTRIES = [
     name: 'TA-25 治理落盘：4 条 ADR + 已锁决策/机制册/发布清单/指导文件同步 + 债务登记',
     run: () => {
       const problems = [];
+      // 治理落盘面 = 维护者主树面（docs/internal/ + CLAUDE.md + .specs 流程工件面）。安装副本
+      // 结构性缺席该面时输出一条可见 SKIP（未验证 ≠ 通过）：载体自带的 CONTEXT / ADR 与本仓治理
+      // 面同名不同物，不能拿它们当本批落盘证据，也不该因它们的存在把场景判红。
+      if (!maintainerFacePresent()) {
+        console.log('SKIP: TA-25 的治理落盘判据（docs/internal/ 维护者面与 .specs 流程工件面结构性缺席）——'
+          + '本次检出未校验 4 条 ADR、已锁决策/机制册/发布清单/指导文件同步与债务登记，请在维护者主树重跑本套件（未验证 ≠ 通过）');
+        return;
+      }
       // ① 4 条 ADR 在场（编号 + 主题骨架）
       const adrDir = path.join(REPO_ROOT, '.specs', 'adr');
       const adrNumbers = ['018', '019', '020', '021'];
