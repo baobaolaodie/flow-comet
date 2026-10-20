@@ -28,6 +28,66 @@ function normalizeTemplateText(text) {
   return String(text ?? '').replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n');
 }
 
+// vendored flow-kit 的版本读数：项目根下 flow-kit/ 的 git HEAD（安装器按锁定快照 --detach 检出，
+// 开发检出通常在分支上）。只读 HEAD 与 ref 两个小文件，不起 git 子进程、不写任何东西；读不到 /
+// 非常规形态一律返回 null——「无从判断」不等于「版本不符」，不得据此提示。
+async function readVendoredCommit(root) {
+  const flowKitDir = path.join(root, 'flow-kit');
+  let gitDir = path.join(flowKitDir, '.git');
+  try {
+    if ((await fs.stat(gitDir)).isFile()) {
+      // worktree / 子模块形态：.git 是指针文件（gitdir: <路径>）
+      const matched = normalizeTemplateText(await fs.readFile(gitDir, 'utf8')).trim().match(/^gitdir:\s*(.+)$/u);
+      if (matched === null) return null;
+      gitDir = path.resolve(flowKitDir, matched[1].trim());
+    }
+  } catch {
+    return null;
+  }
+  let head = null;
+  try {
+    head = normalizeTemplateText(await fs.readFile(path.join(gitDir, 'HEAD'), 'utf8')).trim();
+  } catch {
+    return null;
+  }
+  if (/^[0-9a-f]{40}$/u.test(head)) return head;
+  const symbolic = head.match(/^ref:\s*(\S+)$/u);
+  if (symbolic === null) return null;
+  const ref = symbolic[1];
+  try {
+    const sha = normalizeTemplateText(await fs.readFile(path.join(gitDir, ...ref.split('/')), 'utf8')).trim();
+    if (/^[0-9a-f]{40}$/u.test(sha)) return sha;
+  } catch {
+    // 松引用缺席时退到 packed-refs（git gc 后的正常形态）
+  }
+  try {
+    const packed = normalizeTemplateText(await fs.readFile(path.join(gitDir, 'packed-refs'), 'utf8'));
+    for (const line of packed.split('\n')) {
+      const matched = line.match(/^([0-9a-f]{40})\s+(\S+)$/u);
+      if (matched !== null && matched[2] === ref) return matched[1];
+    }
+  } catch {
+    // 两个落点都读不到——按「无从判断」处理
+  }
+  return null;
+}
+
+// 运行期轻提示：登记表锁定的快照 commit 与项目 vendored flow-kit 的 HEAD 不一致时，打一行
+// 提示即返回——不阻断任何门禁、不改状态、不落盘。每个项目根在同一进程内只判定一次（骨架按根缓存，
+// 重复判定只会得到同一结论）。
+const vendoredCommitChecked = new Set();
+
+async function maybeWarnVendoredCommit(root, lockedCommit) {
+  if (typeof lockedCommit !== 'string' || lockedCommit === '') return;
+  if (vendoredCommitChecked.has(root)) return;
+  vendoredCommitChecked.add(root);
+  const vendored = await readVendoredCommit(root);
+  if (vendored === null || vendored === lockedCommit) return;
+  console.error('TEMPLATE-FINGERPRINT WARN: 项目 flow-kit 检出 ' + vendored.slice(0, 12)
+    + ' ≠ 登记表锁定快照 ' + lockedCommit.slice(0, 12)
+    + ' —— 骨架按登记表快照校验（不阻断）；升级 flow-kit 时须同批更新 reference/artifact-templates.json 的 templateCommit 与每模板 sha256');
+}
+
 // 标题行提取（行锚定）：只认行首 ATX 标题。非锚定子串命中会被正文里「引用段名」劫持（L-128）。
 function headingLines(text, level) {
   const matcher = HEADING_LINE[level];
@@ -232,6 +292,7 @@ async function computeSkeleton(requestedKey, root) {
     .digest('hex');
   skeleton.derived = skeleton.sections.length > 0;
   if (!skeleton.derived) skeleton.reason = 'template-empty';
+  await maybeWarnVendoredCommit(root, skeleton.templateCommit);
   return skeleton;
 }
 
@@ -263,7 +324,8 @@ export async function buildSkeleton(key, opts = {}) {
 
 // 模板指纹：登记表锁定的 commit + sha256 与实际模板读数。drift 三态——true/false = 可比对
 // 且结论明确，null = 无从判断（模板或登记表读数缺失）；「模板是否可读」看 actualSha256 是否为 null，
-// 不另设第二个字段表达同一事实。发版期检查据此报红，运行期只做轻提示。
+// 不另设第二个字段表达同一事实。发版期检查据此报红；运行期只做轻提示（computeSkeleton 的
+// maybeWarnVendoredCommit——本函数自身不打印）。
 export async function templateFingerprint(key, opts = {}) {
   const skeleton = await buildSkeleton(key, opts);
   const drift = skeleton.templateSha256 !== null && skeleton.actualSha256 !== null
