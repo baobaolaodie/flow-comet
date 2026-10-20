@@ -1352,7 +1352,7 @@ export const ENTRIES = [
   },
 
   // 171: 入口文档首部 Change ID 新 change 强制——标题/段序合规但缺 `- **Change ID**:`
-  // 首部字段：新 change open 出口 BLOCKED（文案「首部缺 Change ID」）；旧 change WARN 渐进。
+  // 首部字段：新 change open 出口 BLOCKED（模板保真门的文案「首部缺字段: Change ID」）；旧 change WARN 渐进。
   // （对齐 AC「标题·首部·段序」统一强制口径——此前仅 softWarning 与承诺不符。）
   {
     name: '171 入口首部 Change ID 新 BLOCK / 旧 WARN',
@@ -1378,7 +1378,7 @@ export const ENTRIES = [
       const resBad = runGuard(['exit', 'open'], dir);
       assertExit(resBad, 1);
       assertOut(resBad, 'BLOCKED');
-      assertOut(resBad, '首部缺 Change ID');
+      assertOut(resBad, '首部缺字段: Change ID');
       // ② 新 change 含首部字段 → 通过
       writeChange(true);
       const resGood = runGuard(['exit', 'open'], dir);
