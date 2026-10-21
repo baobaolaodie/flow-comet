@@ -45,8 +45,9 @@ const TONE_MARKER_FIELD_VALUE = new RegExp(String.raw`(?:^|[\s|])(?:\*\*)?(?:`
   + TONE_MARKER_FIELD_LABELS + String.raw`)(?:\*\*)?\s*[:：]\s*(?:\*\*)?`
   + VISUAL_TONE_NOT_APPLICABLE + String.raw`(?:\*\*)?` + TONE_MARKER_TAIL);
 
-// 「视觉调性」段读取三态（区分「CHANGE.md 不存在」「段缺席」「段在场」——三者判据不同：文件
-// 不存在时本门没有输入，交给其余门禁处理；段缺席才按 newChange 分级，C10）。
+// 「视觉调性」段读取四态（区分「CHANGE.md 不存在」「模板整份缺失」「段缺席」「段在场」——四者判据
+// 不同：文件不存在时本门没有输入，交给其余门禁处理；模板整份缺失时段名无从派生（no-basis，按
+// 「未校验」显式跳过）；段缺席才按 newChange 分级，C10）。
 async function visualToneSectionState(changeName) {
   if (!changeName) return { state: 'file-missing', body: null };
   let text;
@@ -57,6 +58,13 @@ async function visualToneSectionState(changeName) {
   }
   const headingPattern = (await templateSectionPatterns())
     .pick('change', ['视觉调性'], TEMPLATE_FALLBACK_SECTION_PATTERNS.changeVisualTone);
+  // 整份模板缺席时 pick 返回可判别的跳过判据（TEMPLATE_SECTION_SKIP：skip 标记 + `.test` 恒真）。
+  // 不能拿它扫描：`.test` 恒真会让 CHANGE.md 的**首个小节**被当成「视觉调性」段（错的输入 = 错的
+  // 判据）。此时段名无从派生，显式报 no-basis 由调用方按「未校验（模板缺失）」处理；模板在场时
+  // pick 返回正则或 fallback，行为不变。
+  if (headingPattern !== null && typeof headingPattern === 'object' && headingPattern.skip === true) {
+    return { state: 'no-basis', body: null };
+  }
   let body = null;
   for (const line of String(text).replace(/\uFEFF/g, '').split(/\r?\n/)) {
     if (/^##\s+/.test(line)) {
@@ -97,12 +105,22 @@ export function applicabilityGatedBinding(node, skill) {
 }
 
 // 前端判据：{ applicable, reason, toneState }——applicable=true 表示本 change 判为前端项目。
-// toneState 让调用方区分「段缺席」与「段内标注不适用」：前者在新 change 上必须拦（不能静默降级成
-// 非前端），后者是执行者显式声明，直接放行。
+// toneState 让调用方区分「段缺席」「模板整份缺失（no-basis，判据无依据）」与「段内标注不适用」：
+// 段缺席在新 change 上必须拦（不能静默降级成非前端），最后一种是执行者显式声明，直接放行；
+// no-basis 按「未校验」显式跳过，由调用方决定如何发声。
 export async function frontendCriterion(changeName) {
   const tone = await visualToneSectionState(changeName);
   if (tone.state === 'file-missing') {
     return { applicable: false, reason: 'CHANGE.md 不存在（本门无输入）', toneState: tone.state };
+  }
+  if (tone.state === 'no-basis') {
+    // 模板整份缺失 ⇒ 段名无从派生，本判据没有输入依据。不猜（不用首个小节冒充「视觉调性」段），
+    // 也不判前端：交给调用方按「未校验（模板缺失）」显式跳过（未验证 ≠ 通过，C9）。
+    return {
+      applicable: false,
+      reason: '「视觉调性」段判据无可依据（模板整份缺失，段名无从派生）',
+      toneState: tone.state,
+    };
   }
   if (tone.state === 'section-missing') {
     return { applicable: false, reason: '「视觉调性」段缺席', toneState: tone.state };
@@ -132,6 +150,12 @@ export async function checkUiDesignArtifact(node, state) {
     return;
   }
   const frontend = await frontendCriterion(state.activeChange);
+  if (frontend.toneState === 'no-basis') {
+    // 模板整份缺失：适用性门控的输入判据不存在，按「未校验」显式跳过（不静默通过，也不误报非前端）。
+    console.error('UI-DESIGN 未校验（模板缺失）——flow-kit/templates/CHANGE.md 不在项目根，'
+      + '「视觉调性」段名无从派生，适用性门控跳过');
+    return;
+  }
   if (frontend.toneState === 'section-missing') {
     // 段缺席不再默认判非前端：新 change 由 open 出口的条件段门禁拦，此处兜底同口径拦下，
     // 要求执行者显式写「不适用」（缺席与声明不适用是两件事，只有后者是决策）。
