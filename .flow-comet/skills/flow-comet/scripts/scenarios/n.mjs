@@ -920,6 +920,21 @@ export const ENTRIES = [
       assertExit(legacyRes, 0);
       assertOut(legacyRes, 'WARN');
       assertNotOut(legacyRes, 'BLOCKED');
+      // ③ D49：design 侧同一判据——CHANGE.md「视觉调性」段缺席，新 change 由 uidesign 门兜底拦，
+      // 不再默认判非前端（段缺席与段内声明「不适用」是两件事，只有后者是决策）。
+      setupDesign(dir, { changeOpts: { omit: ['视觉调性'] } });
+      const designNew = exitNode(dir, 'design');
+      assertExit(designNew, 1);
+      assertOut(designNew, '「视觉调性」段缺席');
+      assertOut(designNew, '新 change 须显式标注「不适用」');
+      // ④ 反向构造（同一份缺损工件，唯一差异 = state 缺 newChange 标记）：旧 change 兼容跳过、不阻断。
+      setupDesign(dir, { changeOpts: { omit: ['视觉调性'] } });
+      const designLegacy = baseState('design');
+      designLegacy.evidence.design = { summary: 'design done' };
+      writeState(dir, designLegacy);
+      const designLegacyRes = exitNode(dir, 'design');
+      assertExit(designLegacyRes, 0);
+      assertOut(designLegacyRes, '旧 change 兼容');
     },
   },
 
@@ -1582,6 +1597,26 @@ export const ENTRIES = [
       writeFile(driftRoot, docRel('SUMMARY'), templateFixtureText('SUMMARY') + '\n漂移探针。\n');
       const drifted = await skeleton.templateFingerprint('SUMMARY', { runRoot: driftRoot });
       assertTrue(drifted.drift === true, '模板被改写后应判漂移，实际: ' + JSON.stringify(drifted));
+      // ②b D43 指纹归一化：BOM / 行尾是检出噪音——同一内容的 LF 形态与 BOM+CRLF 形态必须同指纹
+      // （归一化由骨架模块单实现）。反向构造：内容真变一行 → 指纹必不同，证明「同值」不是恒等判据。
+      const lfText = templateFixtureText('SUMMARY').replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n');
+      const bomCrlfText = '\uFEFF' + lfText.replace(/\n/gu, '\r\n');
+      assertTrue(bomCrlfText.startsWith('\uFEFF') && bomCrlfText.includes('\r\n'),
+        '夹具前提不成立：BOM+CRLF 形态未构造出来');
+      const crlfRoot = path.join(dir, 'crlf');
+      writeFile(crlfRoot, docRel('SUMMARY'), bomCrlfText);
+      const byCrlf = await skeleton.templateFingerprint('SUMMARY', { runRoot: crlfRoot });
+      assertTrue(byCrlf.derived === true, 'BOM+CRLF 模板应仍可派生，实际: ' + JSON.stringify(byCrlf));
+      assertTrue(byCrlf.actualSha256 === clean.actualSha256,
+        'BOM+CRLF 与 LF 形态应同指纹（行尾/BOM 不改变指纹），实际: '
+        + byCrlf.actualSha256 + ' vs ' + clean.actualSha256);
+      // 反向构造（判别力）：同一构造再加一行 → 指纹必不同（否则「同值」可能只是判据恒等）
+      const mutatedRoot = path.join(dir, 'crlf-mutated');
+      writeFile(mutatedRoot, docRel('SUMMARY'), bomCrlfText + '\n归一化探针。\n');
+      const byMutated = await skeleton.templateFingerprint('SUMMARY', { runRoot: mutatedRoot });
+      assertTrue(byMutated.actualSha256 !== clean.actualSha256,
+        '内容多一行后指纹必须不同（归一化不得吞掉内容），实际仍为 ' + byMutated.actualSha256);
+
       // ③ 关外键：登记表没有的模板键 → 显式未知（不静默当作「无漂移」）
       const unknown = await skeleton.templateFingerprint('NO-SUCH-TEMPLATE', { runRoot: cleanRoot });
       assertTrue(unknown.derived === false && unknown.reason === 'unknown-key',
@@ -1666,6 +1701,13 @@ export const ENTRIES = [
         label: '覆盖声明四要素',
         include: ['只读', '不采用', '沿用', '以本节为准'],
       });
+      // D46：四要素在场不等于方向反转还在——「本仓是 phase-gated」对抗上游 artifact-first 的那句是
+      // 覆盖声明的实质（既引用上游又表态取向），抽掉它四要素仍全在，故单独锚。
+      rules.push({
+        rel: 'flow-comet/SKILL.md',
+        label: 'phase-gated 反转句',
+        include: ['artifact-first', '本仓是 **phase-gated**：8 节点 entry/exit 门'],
+      });
       rules.push({
         rel: 'flow-comet-review/SKILL.md',
         label: 'Guardrails 行与新门禁同步',
@@ -1694,6 +1736,9 @@ export const ENTRIES = [
           (text) => text + '\n| 左栏：无条件段 | 右栏：条件段 / 增量段（flow-kit/templates/ 派生） |\n', '缺「无条件段」', false],
         ['抽掉覆盖声明要素', 'flow-comet/SKILL.md', (text) => text.replace(/以本节为准/g, ''), '缺「以本节为准」'],
         ['补上覆盖声明要素', 'flow-comet/SKILL.md', (text) => text + '\n与本册冲突时以本节为准。\n沿用项见上表。\n', '缺「以本节为准」', false],
+        ['抽掉 phase-gated 反转句', 'flow-comet/SKILL.md',
+          (text) => text.replace('本仓是 **phase-gated**：8 节点 entry/exit 门', '本仓方向与上游一致'),
+          '缺「本仓是 **phase-gated**：8 节点 entry/exit 门」'],
         ['Guardrails 行改回旧表述', 'flow-comet-review/SKILL.md',
           (text) => text.replace('test-pyramid-checked',
             'test-pyramid-checked` | TEST.md 5-round completeness verified | 执行纪律（review 把关），guard 不校验'), 'guard 不校验'],
