@@ -17,6 +17,8 @@ This node finalizes a completed change by extracting reusable lessons from the d
 
 > **模板权威**：本节点产出工件的段形 = **上游模板 + 本仓登记的增量段**——唯一权威 = `flow-kit/templates/**`（段与正文），条件段 / 结构子段 / 增量段与指纹由 `../flow-comet/reference/artifact-templates.json` 登记；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
 
+加载顺序：先读 `READ PROMPT:` 指向的节点提示词（步骤权威），再读 `READ TEMPLATE:` 指向的模板（段形权威）；`--prompt` 错路径会在入口被拦下。
+
 ### Prerequisites
 
 - `.specs/<change-id>/UAT.md` must exist with all items passed (from verify node).

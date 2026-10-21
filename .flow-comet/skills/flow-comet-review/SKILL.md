@@ -29,6 +29,8 @@ guard 校验见 workflow-guard.mjs 的 review 出口门禁（发现区处置标�
 
 > **模板权威**：本节点产出工件的段形 = **上游模板 + 本仓登记的增量段**——唯一权威 = `flow-kit/templates/**`（段与正文），条件段 / 结构子段 / 增量段与指纹由 `../flow-comet/reference/artifact-templates.json` 登记；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
 
+加载顺序：先读 `READ PROMPT:` 指向的节点提示词（步骤权威），再读 `READ TEMPLATE:` 指向的模板（段形权威）；`--prompt` 错路径会在入口被拦下。
+
 ### 必查清单（review 逐项核对 · 执行者交付纪律）
 
 - [ ] **工件模板保真**：每份交付工件（`*-SUMMARY.md` / TASK / CHANGE / REQUIREMENT / DESIGN）的**标题 / 首部字段 / 段序**与对应模板一致——SUMMARY 按 `flow-kit/templates/SUMMARY.md` 填写并含 `## 自检方法` 段；执行者按 `flow-kit/prompts/4-dev.md` 协议交付。

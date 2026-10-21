@@ -9,6 +9,8 @@ description: "flow-kit TEST 阶段协议：5 轮测试金字塔（功能/性能/
 
 > **模板权威**：本技能产出工件的段形 = **上游模板 + 本仓登记的增量段**——唯一权威 = `flow-kit/templates/**`（段与正文），条件段 / 结构子段 / 增量段与指纹由 `../flow-comet/reference/artifact-templates.json` 登记；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
 
+加载顺序：先读 `READ PROMPT:` 指向的节点提示词（步骤权威），再读 `READ TEMPLATE:` 指向的模板（段形权威）；`--prompt` 错路径会在入口被拦下。
+
 ## 加载
 
 读取 `flow-kit/prompts/5-test.md` 并按其执行。

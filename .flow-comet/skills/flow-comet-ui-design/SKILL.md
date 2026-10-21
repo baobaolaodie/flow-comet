@@ -9,6 +9,8 @@ description: "flow-kit 2a UI-DESIGN 阶段协议：美学方向 + design tokens 
 
 ## 加载
 
+加载顺序：先读 `READ PROMPT:` 指向的节点提示词（步骤权威），再读 `READ TEMPLATE:` 指向的模板（段形权威）；`--prompt` 错路径会在入口被拦下。
+
 读取 `flow-kit/prompts/2a-ui-design.md` 并按其执行。
 
 ## 关键检查
