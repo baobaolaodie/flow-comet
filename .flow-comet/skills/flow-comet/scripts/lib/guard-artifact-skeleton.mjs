@@ -158,6 +158,7 @@ function baseSkeleton(key, reason) {
     headerFields: [],
     frontmatterKeys: [],
     sections: [],
+    registryOnlySections: [],
     structureSubsections: [],
     increments: [],
     templateCommit: null,
@@ -181,8 +182,10 @@ function markUniqueness(entries, scopeOf) {
   return entries;
 }
 
-// H2 骨架 = 模板标题行（顺序即模板顺序）+ 登记表标记。模板有而登记表没有的段仍然在骨架内
-// （模板是权威），只是没有条件/可选标记且 registered=false——这正是登记表滞后的可见信号。
+// H2 骨架 = 模板标题行（顺序即模板顺序）+ 登记表标记。段集合以**模板**为准（C14），两个方向分开：
+// 模板有而登记表没登记的段按无条件段处理（模板是权威，不告警）；登记表登记了而模板里没有的段按模板
+// 忽略，但作为独立集合（registryOnlySections）报出——它是登记表滞后 / 上游删段的唯一可见信号
+// （D17），静默丢弃会让「模板权威」变成单向失明。
 function buildSections(templateHeadings, registeredSections) {
   const registered = new Map();
   for (const entry of Array.isArray(registeredSections) ? registeredSections : []) {
@@ -198,11 +201,14 @@ function buildSections(templateHeadings, registeredSections) {
       index,
       conditional: flags?.conditional === true,
       optional: flags?.optional === true,
-      registered: flags !== undefined,
       pattern: headingPattern(name, 2),
     };
   });
-  return markUniqueness(sections, () => '');
+  const templateNorms = new Set(sections.map((section) => section.norm));
+  const registryOnlySections = [...registered.entries()]
+    .filter(([norm]) => !templateNorms.has(norm))
+    .map(([, entry]) => entry.name);
+  return { sections: markUniqueness(sections, () => ''), registryOnlySections };
 }
 
 // 结构型 H3 由登记表显式列举（不用正则识别示例条目——示例条目是书写样例，不是骨架）
@@ -286,7 +292,9 @@ async function computeSkeleton(requestedKey, root) {
     return skeleton;
   }
 
-  skeleton.sections = buildSections(headingLines(text, 2), entry.sections);
+  const built = buildSections(headingLines(text, 2), entry.sections);
+  skeleton.sections = built.sections;
+  skeleton.registryOnlySections = built.registryOnlySections;
   skeleton.structureSubsections = buildStructureSubsections(entry.structureSubsections);
   skeleton.increments = buildIncrements(entry.increments);
   skeleton.actualSha256 = createHash('sha256')
@@ -294,6 +302,15 @@ async function computeSkeleton(requestedKey, root) {
     .digest('hex');
   skeleton.derived = skeleton.sections.length > 0;
   if (!skeleton.derived) skeleton.reason = 'template-empty';
+  // 登记表比模板多登记的段：按模板忽略（不阻断），但必须可见——否则登记表滞后只能等发版期指纹
+  // 检查才发现（且指纹只报「模板变了」，不说「哪段没用了」）。每个根 + 每个模板键只判一次（骨架
+  // 按根缓存），故不会重复刷屏。
+  if (skeleton.registryOnlySections.length > 0) {
+    console.error('TEMPLATE-REGISTRY WARN: 登记表登记的段在模板里不存在 '
+      + skeleton.registryOnlySections.length + ' 处（' + skeleton.registryOnlySections.join('、')
+      + '；模板 ' + skeleton.file + '）——段集合以模板为准，已按忽略处理（不阻断）；'
+      + '请同批更新 reference/artifact-templates.json');
+  }
   await maybeWarnVendoredCommit(root, skeleton.templateCommit);
   return skeleton;
 }

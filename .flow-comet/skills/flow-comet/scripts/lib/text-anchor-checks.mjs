@@ -2275,6 +2275,10 @@ export function writeDesignExitFixture(dir, {
   newChange, visualTone, uiDesign, declareUiDesign, changeName = CHANGE_ID, changeTail = '', declareDesign = true,
 }) {
   writeFile(dir, 'flow-kit/templates/DESIGN.md', '# DESIGN 模板\n\n## 0. 技术栈选型\n## 1. 技术决策清单\n');
+  // CHANGE 模板同样在场：design 出口的前端判据用 `pick('change', ['视觉调性'])` 在**模板派生**的段名表里
+  // 定位该段——整份模板缺席时命名段判据按 C9 跳过（不回落），夹具缺 CHANGE 模板会让这条判据失去输入面
+  // （模板缺席下的跳过另由 TA-21 覆盖）。
+  writeFile(dir, 'flow-kit/templates/CHANGE.md', '# CHANGE 模板\n\n## Why（为什么做）\n\n## 视觉调性（前端项目必填）\n');
   const state = baseState('design');
   state.newChange = newChange === true;
   state.enteredNodes = ['design'];

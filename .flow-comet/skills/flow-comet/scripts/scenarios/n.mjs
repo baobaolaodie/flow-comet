@@ -142,6 +142,29 @@ function writeTableTemplateFixture(dir, key, sectionNeedle, tableText) {
   writeFile(dir, docRel(key), out.join('\n'));
 }
 
+// 模板夹具（删段形态）：把某段整段（标题 + 正文）从模板里删掉——构造「上游回退 / 模板比登记表少
+// 一段」的滞后面，用于 C14「登记表多出的段被忽略并 WARN」与 C9「整份缺席 vs 只缺某段」两组判据。
+// 行锚定只删 `## ` 起始的段块（正文里引用段名不会劫持，L-128）。
+function writeTemplateFixtureOmittingSection(dir, key, sectionNeedle) {
+  const lines = templateFixtureText(key).replace(/\uFEFF/g, '').replace(/\r\n?/g, '\n').split('\n');
+  const out = [];
+  let skipping = false;
+  let removed = false;
+  for (const line of lines) {
+    if (/^##\s+/.test(line)) {
+      skipping = line.includes(sectionNeedle);
+      removed = removed || skipping;
+      if (skipping) continue;
+      out.push(line);
+      continue;
+    }
+    if (skipping) continue;
+    out.push(line);
+  }
+  if (!removed) throw new Error('夹具构造失败：模板段不在场 ' + key + ' / ' + sectionNeedle);
+  writeFile(dir, docRel(key), out.join('\n'));
+}
+
 // 模板某段正文（行锚定：段标题之后、下一个 H2 之前；首尾空行剥掉）。
 function templateSectionBody(key, needle) {
   const lines = templateFixtureText(key).replace(/\uFEFF/g, '').replace(/\r\n?/g, '\n').split('\n');
@@ -1490,6 +1513,53 @@ export const ENTRIES = [
       const ordered = exitNode(dir, 'execute');
       assertExit(ordered, 0);
       assertOut(ordered, 'ALL CHECKS PASSED');
+
+      // ⑤ C9 前半句（D42）：整份模板缺席 ⇒ 命名段检查**全部跳过**（含 pick 类）。夹具：没有
+      // flow-kit/templates/，且 CHANGE.md 连 `## Why` 都没有——旧实现拿
+      // `TEMPLATE_FALLBACK_SECTION_PATTERNS.changeWhy` 判「缺必填段」而 BLOCKED，与「模板缺失全部
+      // 跳过」相反。跳过后必须放行，且输出仍显式声明未校验（跳过可见、不是静默通过，L-079）。
+      fs.rmSync(path.join(dir, 'flow-kit'), { recursive: true, force: true });
+      resetFixture(dir);
+      writeFile(dir, CHANGE_DIR + '/CHANGE.md', renderDoc('CHANGE', { omit: ['Why'] }));
+      writeFile(dir, CHANGE_DIR + '/REQUIREMENT.md', renderDoc('REQUIREMENT'));
+      const openState = () => {
+        const next = newChangeState('open');
+        next.evidence.open = { summary: 'intake complete' };
+        return next;
+      };
+      writeState(dir, openState());
+      const noFallback = exitNode(dir, 'open');
+      assertExit(noFallback, 0);
+      assertNotOut(noFallback, '缺必填段');
+      assertOut(noFallback, '未校验');
+      assertOut(noFallback, '模板缺失');
+
+      // ⑥ C9 后半句（反向构造）：模板**在场**但该段名缺席（上游改版）⇒ 命名段 fallback 仍生效。
+      // 同一缺 Why 的工件在「模板不含 Why」的夹具上必须被拦——否则「整份缺席不回落」会被写成
+      // 「干脆不查」。
+      resetFixture(dir);
+      writeTemplateFixtureOmittingSection(dir, 'CHANGE', 'Why');
+      writeFile(dir, CHANGE_DIR + '/CHANGE.md', renderDoc('CHANGE', { omit: ['Why'] }));
+      writeFile(dir, CHANGE_DIR + '/REQUIREMENT.md', renderDoc('REQUIREMENT'));
+      writeState(dir, openState());
+      const fallbackStill = exitNode(dir, 'open');
+      assertExit(fallbackStill, 1);
+      assertOut(fallbackStill, '缺必填段');
+
+      // ⑦ 判据形态（同一 pick 的两态）：整份模板缺席 ⇒ 返回显式「跳过」判据（`skip` 标记 +
+      // `.test` 恒真），不是 fallback 正则、也不是 null——消费方里有闭包外直接 `.test` 的调用点
+      // （「视觉调性」段读取），返回 null 会把「跳过」退化成 TypeError 崩溃（未校验变失败）。
+      const routing = await import('../lib/guard-routing.mjs');
+      const underivedPatterns = await routing.templateSectionPatterns({ runRoot: path.join(dir, 'bare-root') });
+      const skippedPick = underivedPatterns.pick('change', ['Why'], routing.TEMPLATE_FALLBACK_SECTION_PATTERNS.changeWhy);
+      assertTrue(skippedPick !== routing.TEMPLATE_FALLBACK_SECTION_PATTERNS.changeWhy
+        && skippedPick?.skip === true
+        && skippedPick.test('不含 Why 的夹具正文（旧实现据此判缺段）') === true,
+      '整份模板缺席时 pick 应返回显式跳过判据（不回落 fallback），实际: ' + String(skippedPick));
+      const derivedPatterns = await routing.templateSectionPatterns({ runRoot: dir });
+      const fallbackPick = derivedPatterns.pick('change', ['Why'], routing.TEMPLATE_FALLBACK_SECTION_PATTERNS.changeWhy);
+      assertTrue(fallbackPick instanceof RegExp && fallbackPick.test('## Why（为什么做）'),
+        '模板在场但缺该段名时 pick 仍回落 fallback 正则（C9 后半句），实际: ' + String(fallbackPick));
     },
   },
 
@@ -1525,6 +1595,43 @@ export const ENTRIES = [
         assertTrue(repoFileText(ciRel).includes('artifact-templates.json'),
           '发版期检查应比对登记表指纹（CI 需引用 reference/artifact-templates.json）');
       }
+
+      // ⑤ C14 / D17（正例）：登记表登记的段在模板里不存在（模板回退 / 上游删段）⇒ 按模板为准忽略
+      // 并**可见 WARN**，不阻断。旧实现把这批登记项静默丢弃（`registered` 标志算出后无消费方），
+      // 登记表滞后因此不可见。单位面看骨架把这类段单独报出；端到端看门禁真实发声且不阻断。
+      const staleRoot = path.join(dir, 'stale');
+      writeTemplateFixtureOmittingSection(staleRoot, 'CHANGE', '视觉调性');
+      const stale = await skeleton.buildSkeleton('CHANGE', { runRoot: staleRoot });
+      const toneEntry = (docEntry('CHANGE').sections ?? []).find((section) => section.name.includes('视觉调性'));
+      assertTrue(toneEntry !== undefined, '登记表 CHANGE 缺「视觉调性」段（夹具前提不成立）');
+      assertTrue(stale.derived === true, '模板仍在场（只少一段）时应可派生，实际: ' + JSON.stringify(stale));
+      assertTrue((stale.registryOnlySections ?? []).includes(toneEntry.name),
+        '登记表多出的段应被单独报出（不是静默丢弃），实际: ' + JSON.stringify(stale.registryOnlySections));
+      resetFixture(dir);
+      writeTemplateFixtureOmittingSection(dir, 'CHANGE', '视觉调性');
+      writeFile(dir, CHANGE_DIR + '/CHANGE.md', renderDoc('CHANGE'));
+      writeFile(dir, CHANGE_DIR + '/REQUIREMENT.md', renderDoc('REQUIREMENT'));
+      const openState = () => {
+        const next = newChangeState('open');
+        next.evidence.open = { summary: 'intake complete' };
+        return next;
+      };
+      writeState(dir, openState());
+      const warned = exitNode(dir, 'open');
+      assertExit(warned, 0);
+      assertOut(warned, 'TEMPLATE-REGISTRY WARN');
+      assertOut(warned, '视觉调性');
+      assertNotOut(warned, 'BLOCKED');
+
+      // ⑥ C14 / D17（反例）：登记表与模板一致 ⇒ 同一门禁不得发声（WARN 是滞后信号，不是常驻噪音，
+      // 否则真信号会被自己淹没）。
+      setupOpen(dir);
+      const fresh = await skeleton.buildSkeleton('CHANGE', { runRoot: dir });
+      assertTrue(fresh.registryOnlySections.length === 0,
+        '登记表与模板一致时不得报「多出的段」，实际: ' + JSON.stringify(fresh.registryOnlySections));
+      const quiet = exitNode(dir, 'open');
+      assertExit(quiet, 0);
+      assertNotOut(quiet, 'TEMPLATE-REGISTRY WARN');
     },
   },
 

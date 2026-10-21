@@ -303,7 +303,7 @@ export async function findSkillLoadsDir(root, changeName) {
 // 段名校验基准从模板自动派生——骨架计算统一委托 lib/guard-artifact-skeleton.mjs（单一实现：读
 // <runRoot>/flow-kit/templates/<DOC>.md + reference/artifact-templates.json，按 runRoot 缓存；段名
 // 归一复用 route-node 的 normalizeHeading）。本模块只把骨架投影成既有消费方要的 { name, regex } 形态
-// ——不自持模板读取，也不另写一份段名派生。模板缺失 → 空数组，调用方按既有语义回落到内置段名。
+// ——不自持模板读取，也不另写一份段名派生。模板整份缺失 → 该键的空数组（pick 据此跳过，见下）。
 //
 // 「模板缺席时的段名回退清单」唯一来源同样在骨架模块（D16）：此处只转出既有导出面，不另存字面
 // 清单——消费方（含 lib/guard-uidesign.mjs）的取用路径因此不变。
@@ -314,21 +314,36 @@ export { headingPattern as templateSectionPattern } from './guard-artifact-skele
 
 // 读取模板全部段名生成模式列表：键形（change / requirement / design / summary）与 tpl[key] 的
 // { name, regex } 数组形态、pick 的按关键词选段语义一律保持既有——只把数据源换成骨架模块（缓存与
-// 模板读取归它一处负责，本模块不再自持 runRoot 键控的第二份缓存）。
-export async function templateSectionPatterns() {
+// 模板读取归它一处负责，本模块不再自持 runRoot 键控的第二份缓存）。opts.runRoot 与骨架同一出入口
+// （缺省用运行上下文根；场景可指向夹具根）。
+export async function templateSectionPatterns(opts = {}) {
   const result = { change: [], requirement: [], design: [], summary: [] };
   for (const key of Object.keys(result)) {
-    const skeleton = await buildSkeleton(key);
+    const skeleton = await buildSkeleton(key, opts);
     result[key] = skeleton.sections.map((section) => ({ name: section.name, regex: section.pattern }));
   }
+  // 命名段选取：模板整份缺席（sections 为空）⇒ **跳过**，不回落段名兜底正则（C9：模板整份缺失时
+  // 模板派生判据全部跳过，fallback 只在「模板在场但某个具体段名缺失」时生效）。既有消费方里有闭包
+  // 外直接 `.test` 的调用点（「视觉调性」段读取），返回 null 会把「跳过」退化成 TypeError 崩溃——
+  // 未校验变成失败，同样不是 C9 的「跳过」，故返回可判别的跳过判据（见 TEMPLATE_SECTION_SKIP）。
   result.pick = (key, keywords, fallback) => {
-    for (const section of result[key] ?? []) {
+    const sections = result[key] ?? [];
+    if (sections.length === 0) return TEMPLATE_SECTION_SKIP;
+    for (const section of sections) {
       if (keywords.some((keyword) => section.name.includes(keyword))) return section.regex;
     }
     return fallback;
   };
   return result;
 }
+
+// 「跳过」判据的唯一形态：`.test` 恒真（消费方形态即 `pattern.test(text)` ⇒ 该段检查不生效），
+// `skip` 标记让调用方与场景能区分「跳过」与「判据通过」。整份模板缺席时的跳过可见性由产出物结构
+// 门禁的「未校验（模板缺失）」行承担，pick 不再重复打印（同一事实两处措辞会先漂移）。
+export const TEMPLATE_SECTION_SKIP = Object.freeze({
+  skip: true,
+  test: () => true,
+});
 
 // Fix 段标题从 <runRoot>/flow-kit/templates/TASK.md 派生（单一模板源 + 模块级缓存 + runRoot 键控）：
 // 扫描模板全部 H2，用 route-node 共享 heading 归一（单一权威，含闭合 ATX）识别 Fix 段标题；无匹配

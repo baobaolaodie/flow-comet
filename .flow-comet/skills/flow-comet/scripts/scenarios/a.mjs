@@ -54,9 +54,12 @@ export const ENTRIES = [
     },
   },
 
-  // 2: open exit BLOCKED——CHANGE.md 缺 Why 段
+  // 2: open exit 模板缺席——CHANGE.md 缺 Why 段：命名段判据跳过，但跳过必须可见（C9）
+  // 模板整份缺席（夹具没有 flow-kit/templates/）时 pick 不再回落到命名段兜底正则 ⇒ 「缺必填段」
+  // 判据不生效；但「不阻断」不等于「静默通过」——产出物结构门禁必须逐工件报到「未校验（模板缺失）」，
+  // 跳过因此自证（L-079）。模板在场但该段名缺席时 fallback 仍生效，见 TA-21 的反向构造。
   {
-    name: '02 open exit BLOCKED：CHANGE 缺 Why 段',
+    name: '02 open exit 模板缺席：CHANGE 缺 Why 段不阻断，但显式报到「未校验（模板缺失）」',
     run: (dir) => {
       const st = baseState('open');
       st.evidence.open = { summary: 'intake complete' };
@@ -64,16 +67,21 @@ export const ENTRIES = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## 变更目标\n\n## 方案\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\n## 验收准则（AC）\n');
       const res = runGuard(['exit', 'open'], dir);
-      assertExit(res, 1);
-      assertOut(res, 'BLOCKED');
-      assertOut(res, 'CHANGE.md 缺必填段');
+      assertExit(res, 0);
+      assertOut(res, '未校验（模板缺失）: CHANGE.md');
+      assertNotOut(res, '缺必填段');
+      assertNotOut(res, 'BLOCKED');
     },
   },
 
   // 3: open exit BLOCKED——REQUIREMENT.md 缺验收段（且无 Given 豁免）
+  // 判据面是模板派生的段名表，故夹具带 REQUIREMENT 模板：模板缺席时该判据按 C9 跳过（见第 2 例），
+  // 这里测的是「模板在场」的真实路径。
   {
     name: '03 open exit BLOCKED：REQUIREMENT 缺验收段',
     run: (dir) => {
+      writeFile(dir, 'flow-kit/templates/REQUIREMENT.md',
+        '# REQUIREMENT 模板\n\n## 用户故事（User Story）\n## 验收准则（Acceptance Criteria）\n');
       const st = baseState('open');
       st.evidence.open = { summary: 'intake complete' };
       writeState(dir, st);
@@ -102,9 +110,11 @@ export const ENTRIES = [
   },
 
   // 5: design exit BLOCKED——缺 ## 决策清单 段
+  // 同第 3 例：判据面是模板派生的段名表，夹具带 DESIGN 模板（模板缺席时该判据按 C9 跳过）。
   {
     name: '05 design exit BLOCKED：缺决策清单',
     run: (dir) => {
+      writeFile(dir, 'flow-kit/templates/DESIGN.md', '# DESIGN 模板\n\n## 0. 技术栈选型\n## 1. 技术决策清单\n');
       const st = baseState('design');
       st.evidence.design = { summary: 'design done' };
       writeState(dir, st);
