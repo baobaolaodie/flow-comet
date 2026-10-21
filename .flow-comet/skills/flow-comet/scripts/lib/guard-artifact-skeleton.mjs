@@ -7,6 +7,8 @@
 // 单一实现纪律（L-067）：骨架只在本模块计算。任何门禁（guard-routing / guard-template-fidelity /
 // evolve / health）一律调用本模块，不得自持「读模板 + 抽 H2」的派生副本。段名归一复用 route-node 的
 // normalizeHeading（去编号 / 去尾部括号 / 大小写归一），本模块不另写第二份段名归一。
+// 「模板缺席时的段名清单」同样只在本模块登记（文件末尾的段名清单段）——消费方只 import，不自持
+// 第二份字面清单（D16）。
 //
 // 模板缺席：derived=false 且 sections 为空（不内置任何兜底骨架）——调用方据此跳过校验并显式声明
 // 「未校验（模板缺失）」。本模块对「登记表缺失 / 模板缺失 / 键未知」一律不抛错。
@@ -353,3 +355,35 @@ export async function allSkeletons(opts = {}) {
   }
   return out;
 }
+
+// ---------- 段名清单（全系统唯一一份）----------
+//
+// 模板缺席（模板未安装 / 登记表不可读）时仍然要生效的判据基准：模板缺席恰恰没有骨架可派生，所以
+// 这些名字不可能由骨架算出来——它们是「模板缺席也要拦」的既有判据输入。此前它们以字面清单分散在
+// 骨架模块之外的三处门禁模块里，「段名从哪来」因此有两个答案；现在一律在此登记，消费方只 import，
+// 不得自持字面清单（静态单源锁 + 变异探针见 scenarios/n.mjs 的 TA-21）。
+//
+// 段名归一仍由消费方复用 route-node 的 normalizeHeading——本模块不另写第二份归一。
+
+// SUMMARY 模板缺席时的段序兜底：登记表不可读 / 模板未安装时，SUMMARY 门禁仍判乱序与缺段。
+export const LEGACY_SUMMARY_ORDER = ['做了什么', '改动文件', 'verify 输出', '6 维自查', '越界检查', '自检方法'];
+
+// 模板缺席时 open / design 出口的段名回退（键形态保持不变，消费方按既有键取用）。
+export const TEMPLATE_FALLBACK_SECTION_PATTERNS = {
+  changeWhy: /^##\s*Why\b/im,
+  changeVisualTone: /^##\s*视觉调性/im,
+  requirementUserStory: /^##\s*用户故事/im,
+  requirementAcceptance: /##\s*(验收准则|验收标准|AC|Acceptance Criteria)/i,
+  designDecisionList: /^##\s*\d*\.?\s*决策清单/m,
+};
+
+// LESSONS 扫描段名：登记表缺席时的回退名，同时是登记表 increment 的查找键。
+export const LESSONS_SCAN_SECTION = 'LESSONS 扫描';
+
+// SUMMARY 必填三段：每个 change 目录下每份 *-SUMMARY.md 都要在场（既有存在性判据，与模板派生
+// 判据并行——它不依赖模板是否安装，故同样属于「段名基准」而不是骨架派生值）。
+export const SUMMARY_REQUIRED_SECTIONS = [
+  { regex: /##\s*verify\s*输出/i, label: '## verify 输出' },
+  { regex: /##\s*6\s*维自查/i, label: '## 6 维自查' },
+  { regex: /##\s*(越界检查|边界检查)/i, label: '## 越界检查' },
+];

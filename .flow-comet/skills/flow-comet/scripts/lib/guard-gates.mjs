@@ -23,10 +23,13 @@ import {
 } from '../route-node.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from '../task-parsing.mjs';
 import { runRoot, fileExists, writeJson } from './guard-state-io.mjs';
-import { buildSkeleton, headingPattern } from './guard-artifact-skeleton.mjs';
-import { frontendCriterion } from './guard-uidesign.mjs';
 import {
   TEMPLATE_FALLBACK_SECTION_PATTERNS,
+  buildSkeleton,
+  headingPattern,
+} from './guard-artifact-skeleton.mjs';
+import { frontendCriterion } from './guard-uidesign.mjs';
+import {
   evidenceFor,
   findSkillLoadsDir,
   hasEvidenceField,

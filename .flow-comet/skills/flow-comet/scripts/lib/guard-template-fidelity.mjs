@@ -20,7 +20,7 @@ import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from '../task-parsi
 import { nodeTemplateDeclaration, readProtocolFile, templateKeyOf } from '../protocol-utils.mjs';
 import { runRoot, fileExists, protocolPath } from './guard-state-io.mjs';
 import { isNewChange } from './guard-routing.mjs';
-import { buildSkeleton } from './guard-artifact-skeleton.mjs';
+import { buildSkeleton, LEGACY_SUMMARY_ORDER } from './guard-artifact-skeleton.mjs';
 import { TASK7_REQUIRED } from './task-graph.mjs';
 
 const HINT_FILE_NAME = '.template-hints.json';
@@ -487,23 +487,23 @@ export async function reportArtifactStructure({ changeDir, state, assessments })
 }
 
 // SUMMARY 模板缺席时的既有段序兜底（无模板可派生骨架时仍拦乱序/缺段——这是模板权威门禁落地前
-// 就有的判据，保留它避免「模板缺席 = 连乱序也不看」的倒退）。
-const LEGACY_SUMMARY_ORDER = ['做了什么', '改动文件', 'verify 输出', '6 维自查', '越界检查', '自检方法']
-  .map((name) => normalizeHeading(name));
+// 就有的判据，保留它避免「模板缺席 = 连乱序也不看」的倒退）。清单唯一来源 = 骨架模块的导出
+// （本模块不自持第二份段名清单，只做归一）。
+const LEGACY_SUMMARY_ORDER_NORMALIZED = LEGACY_SUMMARY_ORDER.map((name) => normalizeHeading(name));
 
 function addLegacySummaryIssues(text, issues) {
   const outline = parseOutline(text);
   const seen = new Set();
   let lastIndex = -1;
   for (const section of outline.sections) {
-    const index = LEGACY_SUMMARY_ORDER.indexOf(section.norm);
+    const index = LEGACY_SUMMARY_ORDER_NORMALIZED.indexOf(section.norm);
     if (index === -1) continue;
     if (index < lastIndex && issues.order === null) issues.order = { heading: section.raw };
     lastIndex = Math.max(lastIndex, index);
     seen.add(index);
   }
-  for (let index = 0; index < LEGACY_SUMMARY_ORDER.length; index += 1) {
-    if (!seen.has(index)) issues.missing.push(LEGACY_SUMMARY_ORDER[index]);
+  for (let index = 0; index < LEGACY_SUMMARY_ORDER_NORMALIZED.length; index += 1) {
+    if (!seen.has(index)) issues.missing.push(LEGACY_SUMMARY_ORDER_NORMALIZED[index]);
   }
 }
 

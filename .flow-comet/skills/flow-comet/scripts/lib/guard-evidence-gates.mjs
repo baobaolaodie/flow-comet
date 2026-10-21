@@ -24,7 +24,7 @@ import {
   verifySummaries,
 } from './guard-routing.mjs';
 import { applicabilityGatedBinding, frontendCriterion } from './guard-uidesign.mjs';
-import { buildSkeleton, headingPattern } from './guard-artifact-skeleton.mjs';
+import { buildSkeleton, headingPattern, LESSONS_SCAN_SECTION } from './guard-artifact-skeleton.mjs';
 
 // directOverride 授权约束（direct 是用户决策点，不可自决——机制约束）——execute / subagent-execute
 // 出口校验：executionMode=direct 且 directOverride=true（显式直显授权态）须存在授权审计记录
@@ -74,9 +74,9 @@ export function runInFlightHandoffGate({ node, state }) {
 // 登记表（reference/artifact-templates.json 的 SUMMARY.increments）——位置语义由模板保真门禁按同一
 // 条目执行，本门禁只判「在场 + 命中回应」，不写第二份位置判据（L-067）。
 //
-// 停用词表与命中上限单处定义：改口径只改这三个常量。关键词行（`- **关键词**:`）是唯一参与命中计算
-// 的字段——无关键词行的旧条目不参与（给旧条目一个不被误命中的通道）。
-const LESSONS_SCAN_SECTION = 'LESSONS 扫描';
+// 停用词表与命中上限单处定义（段名从骨架模块取用，不在本模块自持第二份清单）。关键词行
+// （`- **关键词**:`）是唯一参与命中计算的字段——无关键词行的旧条目不参与（给旧条目一个不被
+// 误命中的通道）。
 const LESSONS_HIT_LIMIT = 5;
 const LESSONS_PATH_STOPWORDS = new Set([
   // 目录布局噪音

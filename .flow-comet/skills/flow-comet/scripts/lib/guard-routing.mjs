@@ -11,7 +11,7 @@ import { inspectWorkflowProtectedPath } from '../protocol-utils.mjs';
 import { taskOpeningAttrs } from '../task-parsing.mjs';
 import { resolveNextNode, normalizeHeading, FIX_SECTION_TITLE_FALLBACK } from '../route-node.mjs';
 import { runRoot, fileExists, workflowRelativeSegments } from './guard-state-io.mjs';
-import { buildSkeleton } from './guard-artifact-skeleton.mjs';
+import { SUMMARY_REQUIRED_SECTIONS, buildSkeleton } from './guard-artifact-skeleton.mjs';
 
 // 新旧 change 区分——init 写入的 newChange: true = 新 change（严格，不依赖 entry——防系统性
 // 跳 entry 绕过）；缺失/非 true（旧 change）= 渐进 WARN 兼容。
@@ -19,12 +19,8 @@ export function isNewChange(state) {
   return state.newChange === true;
 }
 
-// flow-kit SUMMARY 模板必填段（正则匹配，大小写不敏感 + 变体兼容）
-export const SUMMARY_REQUIRED_SECTIONS = [
-  { regex: /##\s*verify\s*输出/i, label: '## verify 输出' },
-  { regex: /##\s*6\s*维自查/i, label: '## 6 维自查' },
-  { regex: /##\s*(越界检查|边界检查)/i, label: '## 越界检查' },
-];
+// flow-kit SUMMARY 模板必填段（正则匹配，大小写不敏感 + 变体兼容）——清单唯一来源是骨架模块，
+// 此处只取用（本模块不再自持第二份段名清单）。
 
 // 校验 change 目录下每份 *-SUMMARY.md 含 SUMMARY 模板的三个必填段。用正则（大小写不敏感 +
 // 变体兼容）——避免现有 SUMMARY 格式漂移导致误 BLOCKED。
@@ -308,13 +304,10 @@ export async function findSkillLoadsDir(root, changeName) {
 // <runRoot>/flow-kit/templates/<DOC>.md + reference/artifact-templates.json，按 runRoot 缓存；段名
 // 归一复用 route-node 的 normalizeHeading）。本模块只把骨架投影成既有消费方要的 { name, regex } 形态
 // ——不自持模板读取，也不另写一份段名派生。模板缺失 → 空数组，调用方按既有语义回落到内置段名。
-export const TEMPLATE_FALLBACK_SECTION_PATTERNS = {
-  changeWhy: /^##\s*Why\b/im,
-  changeVisualTone: /^##\s*视觉调性/im,
-  requirementUserStory: /^##\s*用户故事/im,
-  requirementAcceptance: /##\s*(验收准则|验收标准|AC|Acceptance Criteria)/i,
-  designDecisionList: /^##\s*\d*\.?\s*决策清单/m,
-};
+//
+// 「模板缺席时的段名回退清单」唯一来源同样在骨架模块（D16）：此处只转出既有导出面，不另存字面
+// 清单——消费方（含 lib/guard-uidesign.mjs）的取用路径因此不变。
+export { TEMPLATE_FALLBACK_SECTION_PATTERNS } from './guard-artifact-skeleton.mjs';
 
 // 模板段名 → 宽松匹配正则：实现随段名归一移到骨架模块（单一出处），此处转出保持既有导出面。
 export { headingPattern as templateSectionPattern } from './guard-artifact-skeleton.mjs';

@@ -32,10 +32,14 @@ import {
   SCRIPTS_DIR,
   TASK_DONE,
   customProtocol,
+  dropNamedImport,
+  engineDefinitionHits,
+  engineDefinitionModule,
+  engineScriptTexts,
   handoffFor,
 } from '../lib/test-fixtures.mjs';
 import { scenarioProtocolPath } from '../lib/test-assertions.mjs';
-import { maintainerFacePresent } from '../lib/text-anchor-checks.mjs';
+import { maintainerFacePresent, singleSourceImportProblems } from '../lib/text-anchor-checks.mjs';
 
 // ---------- 登记表与模板夹具（夹具输入面，不是判据） ----------
 
@@ -1370,8 +1374,10 @@ export const ENTRIES = [
 
   // TA-21 · 模板缺席时降级并显式声明（AC-21）——夹具根没有 flow-kit/templates/ → 不阻断，输出显式
   // 「未校验（模板缺失）」。反向构造：模板在场时同一工件必被拦（证明不是判据空转）。
+  // ③④ 追加 D16：模板缺席时仍要生效的四份段名清单（SUMMARY 段序兜底 / open·design 段名回退 /
+  // LESSONS 扫描段名 / SUMMARY 必填三段）只许骨架模块登记一份——静态单源锁 + 行为侧反向构造。
   {
-    name: 'TA-21 模板缺席降级：不阻断且显式输出「未校验（模板缺失）」；模板在场时同夹具被拦',
+    name: 'TA-21 模板缺席降级：不阻断且显式输出「未校验（模板缺失）」；模板在场时同夹具被拦；段名清单单源锁',
     run: async (dir) => {
       // ① 模板缺席：只写工件，不写 flow-kit/templates/
       writeFile(dir, CHANGE_DIR + '/CHANGE.md', renderDoc('CHANGE', { omit: ['影响面'] }));
@@ -1389,6 +1395,101 @@ export const ENTRIES = [
       const blocked = exitNode(dir, 'open');
       assertExit(blocked, 1);
       assertOut(blocked, 'BLOCKED');
+
+      // ③ 段名清单单一来源静态锁（D16）：四份清单的定义面必须落在**骨架模块**（由骨架实现符号
+      // `buildSkeleton` 反查，不写文件名），消费面由文本里的真实引用派生（模块搬迁 / 新增消费方
+      // 不必改锚）。消费方只取用：自带第二份定义、或改从别处取用，都由同一判据判定违规。
+      const skeletonModule = engineDefinitionModule('buildSkeleton');
+      assertTrue(skeletonModule !== null,
+        '骨架实现的定义面应恰一处（反查失败）: ' + JSON.stringify(engineDefinitionHits('buildSkeleton')));
+      const texts = engineScriptTexts();
+      const segmentSymbols = [
+        'LEGACY_SUMMARY_ORDER',
+        'TEMPLATE_FALLBACK_SECTION_PATTERNS',
+        'LESSONS_SCAN_SECTION',
+        'SUMMARY_REQUIRED_SECTIONS',
+      ];
+      const issues = [];
+      for (const symbol of segmentSymbols) {
+        const lookup = engineDefinitionModule(symbol);
+        if (lookup === null) {
+          issues.push(symbol + ' 的定义面不唯一（应恰一处）: ' + JSON.stringify(engineDefinitionHits(symbol)));
+          continue;
+        }
+        if (lookup.file !== skeletonModule.file) {
+          issues.push(symbol + ' 的清单落在 ' + lookup.file + '（唯一来源应是骨架模块 ' + skeletonModule.file + '）');
+        }
+        for (const problem of singleSourceImportProblems({ symbol, sourceRel: lookup.file, texts })) {
+          issues.push(problem);
+        }
+      }
+      assertTrue(issues.length === 0, '段名清单单源违规: ' + issues.join(' | '));
+
+      // ③b 反向构造（同一判据驱动 · 逐项改坏输入 ⇒ 必报，还原 ⇒ 复绿）：四份清单逐份证明判别力，
+      // 不是「只有某一份碰巧被测到」。
+      {
+        const sourceRel = skeletonModule.file;
+        const sourceText = texts.get(sourceRel);
+        for (const symbol of segmentSymbols) {
+          const consumer = [...texts.keys()].find((rel) => rel !== sourceRel
+            && new RegExp('import\\s*\\{[^}]*\\b' + symbol + '\\b').test(texts.get(rel)));
+          if (consumer === undefined) {
+            issues.push('反向构造前提不成立：找不到 ' + symbol + ' 的具名取用消费方');
+            continue;
+          }
+          const consumerText = texts.get(consumer);
+          // 探针对象带 changed（变异落在哪个文件），前提检查按它判定——不拿展示用 label 当控制流。
+          const probes = [
+            ['消费方自带第二份定义',
+              new Map(texts).set(consumer, consumerText + '\nconst ' + symbol + ' = [];\n'), '自带第二份', consumer],
+            ['源侧定义被抽掉（单源面被破坏）',
+              new Map(texts).set(sourceRel,
+                sourceText.replace('export const ' + symbol + ' =', 'const renamedSegmentOrderProbe =')),
+              '单一来源被破坏', sourceRel],
+            ['消费方不再取用（import 被抽掉）',
+              new Map(texts).set(consumer, dropNamedImport(consumerText, symbol)), '未从', consumer],
+          ];
+          for (const [label, mutated, expected, changed] of probes) {
+            if (mutated.get(changed) === texts.get(changed)) {
+              issues.push(symbol + ' 反向构造前提失效（' + label + '）：变异未改变 ' + changed);
+              continue;
+            }
+            const reported = singleSourceImportProblems({ symbol, sourceRel, texts: mutated });
+            if (!reported.some((problem) => problem.includes(expected))) {
+              issues.push(symbol + ' 反向构造判别力缺失（' + label + ' 未被判违规）');
+            }
+          }
+          if (singleSourceImportProblems({ symbol, sourceRel, texts }).length !== 0) {
+            issues.push(symbol + ' 反向构造还原后未复绿（判据受输入顺序影响）');
+          }
+        }
+        assertTrue(issues.length === 0, '段名清单单源锁反向构造失败: ' + issues.join(' | '));
+      }
+
+      // ④ 行为侧反向构造：模板缺席时 SUMMARY 的段序判据确实吃清单——负例（段序偏离）被拦、
+      // 正例（按模板段序）通过；清单若与真实段序脱节，两格至少一格红（清单不是摆设）。
+      const executeState = () => {
+        const next = newChangeState('execute');
+        next.evidence.execute = { summary: 'executed' };
+        next.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
+        return next;
+      };
+      resetFixture(dir);
+      writeBaseline(dir);
+      writeFile(dir, CHANGE_DIR + '/TASK.md', '# TASK\n\n## 任务清单\n\n' + TASK_DONE);
+      // 负例：把「做了什么」挪到「越界检查」之后 → 偏离兜底段序 → BLOCKED（模板缺席也判）
+      writeFile(dir, CHANGE_DIR + '/T01-SUMMARY.md', renderDoc('SUMMARY', { swap: [['做了什么', '越界检查']] }));
+      writeState(dir, executeState());
+      const outOfOrder = exitNode(dir, 'execute');
+      assertExit(outOfOrder, 1);
+      assertOut(outOfOrder, '未校验');
+      assertOut(outOfOrder, '段序');
+      // 正例：段序按清单 → 通过
+      writeFile(dir, CHANGE_DIR + '/T01-SUMMARY.md', renderDoc('SUMMARY'));
+      writeState(dir, executeState());
+      const ordered = exitNode(dir, 'execute');
+      assertExit(ordered, 0);
+      assertOut(ordered, 'ALL CHECKS PASSED');
     },
   },
 
