@@ -43,7 +43,9 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 | `workflow-guard.mjs` | `entry` / `exit` — the gates. Exits validate the node's artifacts, sections, declarations and (for `verify`) run the test commands |
 | `workflow-state.mjs` | `init`, `status`, `next`, `select`, `record`, `verify-fail`, `advance`, `execution-mode`, `config`, `skill-load`, `bridge-check`, `reenter`, `replan`, `explain` — the state machine and its bookkeeping |
 
-A node's exit refuses to pass when its artifacts are incomplete or malformed, when the skill-load declaration is missing, or when the entry was never recorded; each refusal prints the reason and the command that fixes it. Nothing about the state is stored in the conversation: re-derive it with `status` / `next`, and ask a single node for its artifacts, guardrails and commands with `explain <node>` instead of copying them from the node skill.
+`skill-load` carries the two pointers the entry printed. `--prompt <flow-kit/prompts/…>` names the node's protocol file — one of the node's own, or the entry refuses the declaration — and `--templates <DOC.md,...>` names its templates as one comma-separated list, written out on every declaration. The list must match the node exactly: a missing, extra or misspelled name is refused on a new change and only warned on an older one. `verify` and `archive` have no templates and take no `--templates`; a custom protocol follows the `templates` that protocol declares.
+
+A node's exit refuses to pass when its artifacts are incomplete or malformed, when the skill-load declaration is missing, or when the entry was never recorded; each refusal prints the reason and the command that fixes it. Nothing about the state is stored in the conversation: re-derive it with `status` / `next`, and ask a single node for its artifacts, guardrails, commands and the `TEMPLATE:` path it gates with `explain <node>` instead of copying them from the node skill.
 
 ## Artifacts
 

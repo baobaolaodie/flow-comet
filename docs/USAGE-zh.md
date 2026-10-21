@@ -43,7 +43,9 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 | `workflow-guard.mjs` | `entry` / `exit` —— 门禁。出口校验该节点的工件、段、声明，并在 `verify` 时**真跑**测试命令 |
 | `workflow-state.mjs` | `init`、`status`、`next`、`select`、`record`、`verify-fail`、`advance`、`execution-mode`、`config`、`skill-load`、`bridge-check`、`reenter`、`replan`、`explain` —— 状态机与记账 |
 
-节点的出口会在以下情况拒绝通过：工件不完整或形态不合规、缺少技能加载声明、或从未记录进入；每次拒绝都会打印原因与修复命令。状态不存放在对话里：随时用 `status` / `next` 重新推导；单个节点的产物、门禁与命令用 `explain <node>` 现问，不必从节点技能册里手抄。
+`skill-load` 要带上入口打印的那两条指针。`--prompt <flow-kit/prompts/…>` 指向该节点的协议文件——只能是它自己的那几份，否则入口拒绝这条声明；`--templates <DOC.md,...>` 以逗号分隔的完整清单声明该节点的模板，每次声明各写一遍。清单必须与该节点完全一致：缺失、多写或错名在新的 change 上被拒绝、旧 change 只告警。`verify` 与 `archive` 没有模板，不传 `--templates`；自定义协议按协议自己声明的 `templates` 走。
+
+节点的出口会在以下情况拒绝通过：工件不完整或形态不合规、缺少技能加载声明、或从未记录进入；每次拒绝都会打印原因与修复命令。状态不存放在对话里：随时用 `status` / `next` 重新推导；单个节点的产物、门禁、命令与它把关的 `TEMPLATE:` 路径用 `explain <node>` 现问，不必从节点技能册里手抄。
 
 ## 工件
 
