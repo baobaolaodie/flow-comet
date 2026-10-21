@@ -87,11 +87,29 @@ The self-check is validated as a declaration, not as a judgement of quality: the
 
 A node's requirements can also be asked for instead of looked up in the node books: `workflow-state.mjs explain <node>` prints that node's output schemas with their artifact paths and evidence ids, its guardrails, the skills it requires, the `TEMPLATE:` line for the documents it gates (a node without a template prints none), and its entry, exit and record commands in the form this installation runs them. Every line is derived from the protocol the engine already reads, so the answer cannot drift from what the gates enforce. The command is read-only — it writes no state and changes no routing — and an unknown node name is refused together with the list of the valid ones.
 
+### Template snapshot and fingerprint
+
+The registry pins the template set it was built from: `templateCommit` names the upstream commit, and every template carries the sha256 of its text after the same normalization the skeleton uses — the byte-order mark dropped and CRLF or CR folded to LF, so a line-ending difference does not change the fingerprint. That snapshot is checked where the templates can be materialized: the quality job checks out the upstream commit the registry names, recomputes every template's hash through the skeleton module the gates use, and fails on any difference, on a template that cannot be derived, or on a registry commit that disagrees with the one the installer locks. Moving the snapshot therefore takes one change that updates the registry and the installer's lock together.
+
+At run time the fingerprint is a hint rather than a gate. The guard reads only the vendored checkout's `HEAD` — no git subprocess, nothing written — and prints `TEMPLATE-FINGERPRINT WARN` when that commit differs from the registry's, then keeps validating the skeleton against the registry snapshot; the line is printed at most once per project root in a process and never blocks a node. An uncommitted byte edit to a template does not raise it either: the per-template hashes are compared in the quality job, where the locked snapshot is present, not on every exit.
+
+### Archive nomination
+
+The archive exit reads the nomination record instead of trusting a summary sentence: `lessonsNomination` states how many task summaries were scanned, which lessons were nominated, and — when none were — why. The scan count must equal the number of `*-SUMMARY.md` files the change actually holds, wherever its directory sits when the exit runs; every nominated id must exist in `LESSONS.md` as a real entry; and an empty nomination list must carry a non-empty reason. Anything else is refused, together with the `record` command that replaces the evidence.
+
+The check is structural like the rest: it proves the reading happened and the ids are real, not that the nominated lessons are worth keeping — that judgement stays in review. A change created before the rule is warned rather than blocked.
+
 ### Loading a node
 
 Entering a node hands you its two pointers before any gate runs, always in the same order: `READ PROMPT:` names the protocol prompt under `flow-kit/prompts/` — the step authority, how this step is carried out — and `READ TEMPLATE:` names the template under `flow-kit/templates/` — the shape authority, what the artifact looks like. The order carries the meaning: the step first, the shape second. A node with no upstream template (`verify`, `archive`) prints only the prompt line, and a node with no bundled prompt prints only the template line. Neither line ever names a path that does not exist, and neither depends on the coordinator remembering to say it.
 
 Both pointers are declared when the node's skill is loaded, which is what keeps the declaration auditable against the artifacts: `--prompt` must name one of the node's own protocol files, and a declaration pointing anywhere else is refused at the next entry together with the command that re-declares it; `--templates` must match the node's template set exactly, where a missing, extra or misspelled name is refused on a new change and only warned on an older one, a node whose set is empty omits the flag, and a custom protocol node follows the `templates` its own protocol declares. The declaration records what you were told to read; the artifact gates remain the proof that it was read.
+
+### Declared overrides of the upstream protocol
+
+The two authorities named above — the prompt for the step, the template for the shape — can disagree. Where an upstream prompt's own section numbering or section list departs from the template, neither side is followed silently: the divergence is declared, in the entry skill and in a node book where the override is narrower, as a named list of the upstream files that stay a read-only baseline, the upstream wording that is not adopted, what is carried over, and which declaration prevails where more than one applies.
+
+An override is a declaration, not an edit: the vendored files under `flow-kit/prompts/` and `flow-kit/templates/` stay read-only, so every divergence remains auditable against an untouched upstream. The phase gate that refuses an out-of-order node strengthens the artifact gate rather than replacing it — the artifacts remain the truth, and the gate only moves a missing artifact from a late discovery to a refused exit.
 
 ## Execution model
 

@@ -36,6 +36,10 @@ Find your symptom, run the command. Everything here assumes you are inside the p
 
 **The exit reports a document as unchecked because its template is missing** — `flow-kit/templates/<DOC>.md` is not in the project root, so every template-derived check for that document is skipped — **unchecked is not passed**. Restore the flow-kit templates as the installation page describes and retry; if the same line blames the registry instead, the skill tree is missing `reference/artifact-templates.json` and needs reinstalling. `UAT.md` and the archive's leftovers list have no upstream template, so they are never part of this check: only their existence is required.
 
+**`TEMPLATE-FINGERPRINT WARN`** — the registry's locked upstream commit and the checkout under `flow-kit/` disagree. It is a hint, not a block: the skeleton keeps being checked against the registry snapshot. Check `flow-kit/` out at the commit the registry names, or update `templateCommit` together with every template's sha256 — the quality job compares the two sides and refuses a half-done update.
+
+**`TEMPLATE-REGISTRY WARN`** — the registry lists a section its template no longer has. The template decides the section set, so the section is ignored and the run continues; the warning stays until the registry is corrected, which means updating `reference/artifact-templates.json` in the same change that removed the section.
+
 **`BLOCKED: … TASK.md 任务集被修改（签名不匹配）`** — the task set changed after the execution node was entered. Restore the task list and re-enter the node (or add the work as a new task before entering), rather than editing tasks mid-flight.
 
 **`BLOCKED: done 任务 … 缺少 <id>-SUMMARY.md`** — every completed task needs its summary document with the template's sections. Write it, or revert the task to pending if it is not actually done.
