@@ -27,5 +27,7 @@ Responsibility: 技术栈选型 + ADR + 数据流。生成 DESIGN.md。
 node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load design flow-comet-design --prompt flow-kit/prompts/2-design.md --templates DESIGN.md
 ```
 
+加载顺序：先 `READ PROMPT:`（步骤权威），有模板的节点再 `READ TEMPLATE:`（段形权威）；design 前端另有一行条件提示词 `2a-ui-design`。
+
 guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / templateSectionPatterns；「填得好不好」由 review 把关。
 

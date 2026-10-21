@@ -23,7 +23,7 @@ This node performs a structured multi-round review of the implemented change, ch
 
 发现写在模板外的 `## 发现` 而 `### 2.2` 无条目 → 新 change BLOCKED（条目记录在非模板位置等于静默丢弃）；**Major `[转待办]` 须有用户裁决记录**（同段、文末或单独段落「用户裁决：接受延期」+ 指向该条目 + `[升级]` 承接——单独段落与条目以空行分隔、位置不限），缺失新 change BLOCKED / 旧 change WARN 渐进。
 
-本出口同时按模板校验 `TEST.md` 的骨架（5 轮段与结构子段）——细目见 `flow-comet-test` 册；`## 验证命令` 增量段的执行与校验在 verify 出口。
+本出口**声明加载** `TEST.md` 并做 **5 轮完整性过程检查**（细目见 `flow-comet-test` 册）；`TEST.md` 的**结构骨架校验在 verify 出口**（`flowkit.verify.v1`），不在本出口——`## 验证命令` 增量段的执行与校验同样在 verify 出口。
 
 guard 校验见 workflow-guard.mjs 的 review 出口门禁（发现区处置标记 / 发现位置 / Major 延期裁决 / 模板骨架）与模板骨架派生（段标题 / 段序 / 首部字段 / 增量段位置）；「填得好不好」由 review 自身把关。
 
