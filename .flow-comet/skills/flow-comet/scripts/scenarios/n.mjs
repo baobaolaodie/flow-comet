@@ -920,7 +920,7 @@ export const ENTRIES = [
       assertExit(legacyRes, 0);
       assertOut(legacyRes, 'WARN');
       assertNotOut(legacyRes, 'BLOCKED');
-      // ③ D49：design 侧同一判据——CHANGE.md「视觉调性」段缺席，新 change 由 uidesign 门兜底拦，
+      // ③ design 侧段缺席：同一判据——CHANGE.md「视觉调性」段缺席，新 change 由 uidesign 门兜底拦，
       // 不再默认判非前端（段缺席与段内声明「不适用」是两件事，只有后者是决策）。
       setupDesign(dir, { changeOpts: { omit: ['视觉调性'] } });
       const designNew = exitNode(dir, 'design');
@@ -1413,7 +1413,7 @@ export const ENTRIES = [
 
   // TA-21 · 模板缺席时降级并显式声明（AC-21）——夹具根没有 flow-kit/templates/ → 不阻断，输出显式
   // 「未校验（模板缺失）」。反向构造：模板在场时同一工件必被拦（证明不是判据空转）。
-  // ③④ 追加 D16：模板缺席时仍要生效的四份段名清单（SUMMARY 段序兜底 / open·design 段名回退 /
+  // ③④ 追加「段名清单单一来源」：模板缺席时仍要生效的四份段名清单（SUMMARY 段序兜底 / open·design 段名回退 /
   // LESSONS 扫描段名 / SUMMARY 必填三段）只许骨架模块登记一份——静态单源锁 + 行为侧反向构造。
   {
     name: 'TA-21 模板缺席降级：不阻断且显式输出「未校验（模板缺失）」；模板在场时同夹具被拦；段名清单单源锁',
@@ -1435,7 +1435,7 @@ export const ENTRIES = [
       assertExit(blocked, 1);
       assertOut(blocked, 'BLOCKED');
 
-      // ③ 段名清单单一来源静态锁（D16）：四份清单的定义面必须落在**骨架模块**（由骨架实现符号
+      // ③ 段名清单单一来源静态锁：四份清单的定义面必须落在**骨架模块**（由骨架实现符号
       // `buildSkeleton` 反查，不写文件名），消费面由文本里的真实引用派生（模块搬迁 / 新增消费方
       // 不必改锚）。消费方只取用：自带第二份定义、或改从别处取用，都由同一判据判定违规。
       const skeletonModule = engineDefinitionModule('buildSkeleton');
@@ -1530,7 +1530,7 @@ export const ENTRIES = [
       assertExit(ordered, 0);
       assertOut(ordered, 'ALL CHECKS PASSED');
 
-      // ⑤ C9 前半句（D42）：整份模板缺席 ⇒ 命名段检查**全部跳过**（含 pick 类）。夹具：没有
+      // ⑤ 模板整份缺席：命名段检查**全部跳过**（含 pick 类）。夹具：没有
       // flow-kit/templates/，且 CHANGE.md 连 `## Why` 都没有——旧实现拿
       // `TEMPLATE_FALLBACK_SECTION_PATTERNS.changeWhy` 判「缺必填段」而 BLOCKED，与「模板缺失全部
       // 跳过」相反。跳过后必须放行，且输出仍显式声明未校验（跳过可见、不是静默通过，L-079）。
@@ -1597,7 +1597,7 @@ export const ENTRIES = [
       writeFile(driftRoot, docRel('SUMMARY'), templateFixtureText('SUMMARY') + '\n漂移探针。\n');
       const drifted = await skeleton.templateFingerprint('SUMMARY', { runRoot: driftRoot });
       assertTrue(drifted.drift === true, '模板被改写后应判漂移，实际: ' + JSON.stringify(drifted));
-      // ②b D43 指纹归一化：BOM / 行尾是检出噪音——同一内容的 LF 形态与 BOM+CRLF 形态必须同指纹
+      // ②b 指纹归一化：BOM / 行尾是检出噪音——同一内容的 LF 形态与 BOM+CRLF 形态必须同指纹
       // （归一化由骨架模块单实现）。反向构造：内容真变一行 → 指纹必不同，证明「同值」不是恒等判据。
       const lfText = templateFixtureText('SUMMARY').replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n');
       const bomCrlfText = '\uFEFF' + lfText.replace(/\n/gu, '\r\n');
@@ -1632,7 +1632,7 @@ export const ENTRIES = [
           '发版期检查应比对登记表指纹（CI 需引用 reference/artifact-templates.json）');
       }
 
-      // ⑤ C14 / D17（正例）：登记表登记的段在模板里不存在（模板回退 / 上游删段）⇒ 按模板为准忽略
+      // ⑤ 登记表与模板分叉（正例）：登记表登记的段在模板里不存在（模板回退 / 上游删段）⇒ 按模板为准忽略
       // 并**可见 WARN**，不阻断。旧实现把这批登记项静默丢弃（`registered` 标志算出后无消费方），
       // 登记表滞后因此不可见。单位面看骨架把这类段单独报出；端到端看门禁真实发声且不阻断。
       const staleRoot = path.join(dir, 'stale');
@@ -1659,7 +1659,7 @@ export const ENTRIES = [
       assertOut(warned, '视觉调性');
       assertNotOut(warned, 'BLOCKED');
 
-      // ⑥ C14 / D17（反例）：登记表与模板一致 ⇒ 同一门禁不得发声（WARN 是滞后信号，不是常驻噪音，
+      // ⑥ 登记表与模板分叉（反例）：登记表与模板一致 ⇒ 同一门禁不得发声（WARN 是滞后信号，不是常驻噪音，
       // 否则真信号会被自己淹没）。
       setupOpen(dir);
       const fresh = await skeleton.buildSkeleton('CHANGE', { runRoot: dir });
@@ -1701,7 +1701,7 @@ export const ENTRIES = [
         label: '覆盖声明四要素',
         include: ['只读', '不采用', '沿用', '以本节为准'],
       });
-      // D46：四要素在场不等于方向反转还在——「本仓是 phase-gated」对抗上游 artifact-first 的那句是
+      // phase-gated 反转句：四要素在场不等于方向反转还在——「本仓是 phase-gated」对抗上游 artifact-first 的那句是
       // 覆盖声明的实质（既引用上游又表态取向），抽掉它四要素仍全在，故单独锚。
       rules.push({
         rel: 'flow-comet/SKILL.md',

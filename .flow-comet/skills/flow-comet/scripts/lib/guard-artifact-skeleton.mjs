@@ -8,7 +8,7 @@
 // evolve / health）一律调用本模块，不得自持「读模板 + 抽 H2」的派生副本。段名归一复用 route-node 的
 // normalizeHeading（去编号 / 去尾部括号 / 大小写归一），本模块不另写第二份段名归一。
 // 「模板缺席时的段名清单」同样只在本模块登记（文件末尾的段名清单段）——消费方只 import，不自持
-// 第二份字面清单（D16）。
+// 第二份字面清单（段名清单单一来源）。
 //
 // 模板缺席：derived=false 且 sections 为空（不内置任何兜底骨架）——调用方据此跳过校验并显式声明
 // 「未校验（模板缺失）」。本模块对「登记表缺失 / 模板缺失 / 键未知」一律不抛错。
@@ -185,7 +185,7 @@ function markUniqueness(entries, scopeOf) {
 // H2 骨架 = 模板标题行（顺序即模板顺序）+ 登记表标记。段集合以**模板**为准（C14），两个方向分开：
 // 模板有而登记表没登记的段按无条件段处理（模板是权威，不告警）；登记表登记了而模板里没有的段按模板
 // 忽略，但作为独立集合（registryOnlySections）报出——它是登记表滞后 / 上游删段的唯一可见信号
-// （D17），静默丢弃会让「模板权威」变成单向失明。
+// （登记表与模板分叉），静默丢弃会让「模板权威」变成单向失明。
 function buildSections(templateHeadings, registeredSections) {
   const registered = new Map();
   for (const entry of Array.isArray(registeredSections) ? registeredSections : []) {

@@ -305,7 +305,7 @@ export async function findSkillLoadsDir(root, changeName) {
 // 归一复用 route-node 的 normalizeHeading）。本模块只把骨架投影成既有消费方要的 { name, regex } 形态
 // ——不自持模板读取，也不另写一份段名派生。模板整份缺失 → 该键的空数组（pick 据此跳过，见下）。
 //
-// 「模板缺席时的段名回退清单」唯一来源同样在骨架模块（D16）：此处只转出既有导出面，不另存字面
+// 「模板缺席时的段名回退清单」唯一来源同样在骨架模块（段名清单单一来源）：此处只转出既有导出面，不另存字面
 // 清单——消费方（含 lib/guard-uidesign.mjs）的取用路径因此不变。
 export { TEMPLATE_FALLBACK_SECTION_PATTERNS } from './guard-artifact-skeleton.mjs';
 
