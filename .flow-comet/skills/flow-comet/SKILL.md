@@ -190,7 +190,7 @@ node .claude/skills/flow-comet/scripts/context-scan.mjs [--root <项目根>] [--
 node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <skill> --prompt flow-kit/prompts/<阶段>.md --templates <模板基名,...>
 ```
 
-> **提示词 = 步骤权威、模板 = 段形权威，两者缺一即未完成加载**：`--prompt` 指向的 `flow-kit/prompts/<阶段>.md` 规定这一步**怎么做**（流程步骤、检查项、交接物），`--templates` 指向的 `flow-kit/templates/<DOC>.md` 规定产出**长什么样**（标题、段序、段形）。节点入口依次打印 `READ PROMPT:` 与 `READ TEMPLATE:` 两行——**两条都要读**，只读其一不算加载完成。`--prompt` 必须是该节点的协议文件（以入口打印的 `READ PROMPT:` 行为准）；错路径由入口（核对已写下的声明）与出口（核对节点协议集）两侧拦下（BLOCKED），不会静默写成一条与节点无关的声明。
+> **提示词 = 步骤权威、模板 = 段形权威，两者缺一即未完成加载**：`--prompt` 指向的 `flow-kit/prompts/<阶段>.md` 规定这一步**怎么做**（流程步骤、检查项、交接物），`--templates` 指向的 `flow-kit/templates/<DOC>.md` 规定产出**长什么样**（标题、段序、段形）。节点入口依次打印 `READ PROMPT:` 与 `READ TEMPLATE:` 两行——**有模板的节点两条 READ 行都要读；零模板节点（verify / archive）只有 `READ PROMPT:`。**`--prompt` 必须是该节点的协议文件（以入口打印的 `READ PROMPT:` 行为准）；错路径由入口（核对已写下的声明）与出口（核对节点协议集）两侧拦下（BLOCKED），不会静默写成一条与节点无关的声明。
 
 > **`--templates` 是内置节点的必填声明**（每个声明标记各写**全清单**，与节点映射一致）：open → `CHANGE.md,REQUIREMENT.md` · design → `DESIGN.md`（前端 change 可再加 `UI-DESIGN.md`）· plan → `TASK.md` · execute / subagent-execute → `SUMMARY.md` · review → `REVIEW.md,TEST.md` · verify / archive → **零模板节点，省略该参数**（省略即空集；多写反而不一致）。声明集合由引擎校验：漏写 / 多写 / 错名在新 change 下即 BLOCK，旧 change 仅 WARN。
 

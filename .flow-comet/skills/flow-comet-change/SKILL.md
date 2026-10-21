@@ -9,8 +9,6 @@ description: "flow-kit CHANGE 阶段协议：反问澄清、change-id 自动生�
 
 > **模板权威**：本技能产出工件的段形 = **上游模板 + 本仓登记的增量段**——唯一权威 = `flow-kit/templates/**`（段与正文），条件段 / 结构子段 / 增量段与指纹由 `../flow-comet/reference/artifact-templates.json` 登记；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
 
-加载顺序：先读 `READ PROMPT:` 指向的节点提示词（步骤权威），再读 `READ TEMPLATE:` 指向的模板（段形权威）；`--prompt` 错路径会在入口被拦下。
-
 ## 上游段表不采用（覆盖声明）
 
 `flow-kit/prompts/0-change.md` 的自检清单把 CHANGE.md 写成 5 段（Why / What / 影响面 / 范围排除 / 验收线）——**这 5 段清单不采用**作段表：它漏了 `视觉调性` 与 `风险与未知`。段名与段序以 `flow-kit/templates/CHANGE.md` 的 7 个 H2 为准（`视觉调性` 是标题必须在场的条件段，`架构层影响声明` 是本仓登记的可选增量段）。
