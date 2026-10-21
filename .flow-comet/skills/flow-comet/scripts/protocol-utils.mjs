@@ -555,9 +555,9 @@ export function templatePointerLines(declaration, options = {}) {
 
 export const PROMPT_ROOT = 'flow-kit/prompts';
 
-// 条件提示词（与条件模板同构）：只对特定技能适用的协议文件——不参与入口打印（入口打印的是该节点
-// 必读的步骤权威），但属于该节点的协议面，故参与声明一致性判据。目前唯一的条件件是 design 节点的
-// UI-DESIGN 阶段：前端 change 才加载 flow-comet-ui-design 并声明 `2a-ui-design.md`。
+// 条件提示词（与条件模板同构）：只对特定技能适用的协议文件——必读清单之外的协议面成员，参与声明
+// 一致性判据；入口按前端判据追出（非前端不打印）。目前唯一的条件件是 design 节点的 UI-DESIGN 阶段：
+// 前端 change 才加载 flow-comet-ui-design 并声明 `2a-ui-design.md`。
 export const NODE_CONDITIONAL_PROMPTS = {
   design: ['2a-ui-design.md'],
 };
@@ -577,8 +577,16 @@ export function promptPointerPath(file) {
 
 // 入口指针行：一行一个协议文件（open / review 这类多文件节点各一行）。零提示词节点返回空数组——
 // 与零模板节点同语义（不打印，也不编造路径）。
-export function promptPointerLines(node) {
-  return nodePromptFiles(node).map((file) => 'READ PROMPT: ' + promptPointerPath(file));
+// conditional=true 时追出条件提示词行（与 templatePointerLines 的条件行同形：同一前端判据、同一措辞
+// 形态）；非前端 change 上条件文件只是「不适用」，不是缺件，故不打印。
+export function promptPointerLines(node, options = {}) {
+  const lines = nodePromptFiles(node).map((file) => 'READ PROMPT: ' + promptPointerPath(file));
+  if (options.conditional === true) {
+    for (const file of NODE_CONDITIONAL_PROMPTS[node?.id] ?? []) {
+      lines.push('READ PROMPT（条件提示词）: ' + promptPointerPath(file) + '（仅前端 change）');
+    }
+  }
+  return lines;
 }
 
 // 声明一致性判据（入口侧）：skill-load 声明的 --prompt 必须落在该节点的协议面内——

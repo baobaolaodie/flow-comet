@@ -994,7 +994,8 @@ export const ENTRIES = [
   //   ① `entry <内置节点>` 先打 `READ PROMPT:` 再打 `READ TEMPLATE:`，顺序按输出行索引判
   //      （不是只查两行在不在——行序是语义的一部分）；
   //   ② 声明别的节点的协议文件（open 声明 execute 的 4-dev.md）→ 入口 BLOCK，报文点名「与节点协议文件不符」；
-  //   ③ design 的 2a-ui-design.md 是条件提示词（属该节点协议面）→ 不拦；换成无关文件 → 拦；
+  //   ③ design 的 2a-ui-design.md 是条件提示词（属该节点协议面）→ 不拦；入口按前端判据追出条件行
+  //      （非前端不打印，反向构造即同一夹具只改「视觉调性」）；换成无关文件 → 拦；
   //   ④ record 缺 `--templates` 声明 → BLOCK，补上 → 放行；⑤ explain 现问输出 `TEMPLATE:` 行。
   // 反向构造：②③ 各用真实 skill-load 只改 --prompt（其余参数不变）构造正例——排除「标记存在与否」
   // 这另一变量；① 另带「同一判据 + 变异探针」，对调两条指针后判据必须翻假，否则顺序断言退化成包含断言。
@@ -1062,13 +1063,32 @@ export const ENTRIES = [
       assertExit(correctedPrompt, 0);
       assertNotOut(correctedPrompt, '与节点协议文件不符');
 
-      // ③ 条件提示词不误拦：design 声明 2a-ui-design.md（条件提示词，属该节点协议面）→ 放行
-      setupDesign(dir);
+      // ③ 条件提示词不误拦 + 按前端判定打印：design 声明 2a-ui-design.md（条件提示词，属该节点协议面）
+      // → 放行；前端 change 的入口追出条件行（与条件模板行对称），非前端 change 不打印。
+      const frontendChange = { body: [['视觉调性', '- **选定**：6 有机 / Organic\n- **理由**：前端夹具']] };
+      const conditionalPromptLine = 'READ PROMPT（条件提示词）: flow-kit/prompts/2a-ui-design.md（仅前端 change）';
+      // 条件行判据：逐行精确匹配（不用「包含文件名」的宽写法——标签或尾注漂移同样该红）。
+      const hasConditionalPromptLine = (text) => text.split(/\r?\n/).includes(conditionalPromptLine);
+      setupDesign(dir, { changeOpts: frontendChange });
       assertExit(skillLoad('design', 'flow-comet-design', '2-design.md', 'DESIGN.md'), 0);
       assertExit(skillLoad('design', 'flow-comet-ui-design', '2a-ui-design.md', 'DESIGN.md,UI-DESIGN.md'), 0);
       const conditionalOk = runGuard(['entry', 'design'], dir);
       assertExit(conditionalOk, 0);
       assertNotOut(conditionalOk, '与节点协议文件不符');
+      assertOut(conditionalOk, 'READ PROMPT: flow-kit/prompts/2-design.md');
+      assertTrue(hasConditionalPromptLine(conditionalOk.output),
+        '前端 change 的 entry 未打印条件提示词行 ' + JSON.stringify(conditionalPromptLine)
+        + '\n实际输出:\n' + conditionalOk.output);
+      // 反向构造（同一判据 + 单变量）：只把「视觉调性」改成「不适用」→ 前端判据为假，条件行必须消失
+      // （实现若无视判据无条件打印，此处必红）；必填提示词行不受影响。
+      setupDesign(dir, { changeOpts: { body: [['视觉调性', '不适用']] } });
+      assertExit(skillLoad('design', 'flow-comet-design', '2-design.md', 'DESIGN.md'), 0);
+      assertExit(skillLoad('design', 'flow-comet-ui-design', '2a-ui-design.md', 'DESIGN.md,UI-DESIGN.md'), 0);
+      const conditionalSkipped = runGuard(['entry', 'design'], dir);
+      assertExit(conditionalSkipped, 0);
+      assertOut(conditionalSkipped, 'READ PROMPT: flow-kit/prompts/2-design.md');
+      assertTrue(!hasConditionalPromptLine(conditionalSkipped.output),
+        '非前端 change 的 entry 不应打印条件提示词行\n实际输出:\n' + conditionalSkipped.output);
       // 反向构造：真实命令只把 --prompt 换成无关文件 → 同一夹具立刻拦
       assertExit(skillLoad('design', 'flow-comet-ui-design', '3-task.md', 'DESIGN.md,UI-DESIGN.md'), 0);
       const conditionalWrong = runGuard(['entry', 'design'], dir);

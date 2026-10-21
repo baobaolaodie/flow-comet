@@ -15,6 +15,7 @@ import {
   validateStateFields,
 } from './state-schema.mjs';
 import {
+  NODE_CONDITIONAL_PROMPTS,
   nodeTemplateDeclaration,
   promptDeclarationConflict,
   promptPointerLines,
@@ -197,19 +198,24 @@ async function main() {
     // 这一步怎么做，再知道产出长什么样。两者都先于门禁链输出：即使后面的入口校验拦下，执行者也先
     // 看到该读什么。提示词路径由 protocol-utils 的 NODE_PROTOCOL_FILES 单一提供（与出口协议声明
     // 校验同源），零提示词的自定义协议节点不打印。
-    for (const line of promptPointerLines(node)) {
+    //
+    // 条件指针（条件提示词 / 条件模板）共用一条前端判据：CHANGE.md「视觉调性」判为前端才追出。判据
+    // 归属 guard-uidesign 的 frontendCriterion（单一实现），此处只消费、不写第二份；两类条件指针取
+    // 同一个 frontend 值——同一 change 上不可能得出两种结论。任一侧登记了条件文件（模板 optional 或
+    // 节点条件提示词）就求值：缺一侧不等于非前端。
+    const declaration = nodeTemplateDeclaration(node);
+    const hasConditionalPointer = declaration.optional.length > 0
+      || (NODE_CONDITIONAL_PROMPTS[node.id] ?? []).length > 0;
+    const frontend = hasConditionalPointer
+      ? (await frontendCriterion(state.activeChange)).applicable === true
+      : false;
+    for (const line of promptPointerLines(node, { conditional: frontend })) {
       console.log(line);
     }
     // 产出物模板指针（加载链的第一环）：引擎推导、不依赖纪律——内置节点取 C3 映射（协议副本没写
     // node.templates 也照样打印），自定义协议节点取协议里的 node.templates 声明，零模板节点不打印。
-    // 条件模板（design 的 UI-DESIGN）只在 CHANGE.md 「视觉调性」判为前端时追出：前端判据归属
-    // guard-uidesign 的 frontendCriterion（单一实现），此处只消费，不写第二份。
     // 先于门禁链输出：即使后面的入口校验拦下，执行者也能先看到该读哪份模板。
-    const declaration = nodeTemplateDeclaration(node);
     if (declaration.required.length > 0 || declaration.optional.length > 0) {
-      const frontend = declaration.optional.length > 0
-        ? (await frontendCriterion(state.activeChange)).applicable === true
-        : false;
       for (const line of templatePointerLines(declaration, { label: 'READ TEMPLATE', conditional: frontend })) {
         console.log(line);
       }
