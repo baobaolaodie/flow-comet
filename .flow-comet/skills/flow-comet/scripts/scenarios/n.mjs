@@ -975,35 +975,106 @@ export const ENTRIES = [
   // 加载链与协议面
   // ============================================================================================
 
-  // TA-13 · 加载链三件套（AC-13）——entry 打印 `READ TEMPLATE: <模板路径>`；skill-load 未带模板
-  // 声明的标记 → record 对新 change BLOCKED 并提示 `--templates`；explain 输出 `TEMPLATE:` 行。
-  // 反向构造：标记声明了模板 → record 不拦。
+  // TA-13 · 加载链（AC-13）——入口的两条指针（步骤权威 / 段形权威）与声明面：
+  //   ① `entry <内置节点>` 先打 `READ PROMPT:` 再打 `READ TEMPLATE:`，顺序按输出行索引判
+  //      （不是只查两行在不在——行序是语义的一部分）；
+  //   ② 声明别的节点的协议文件（open 声明 execute 的 4-dev.md）→ 入口 BLOCK，报文点名「与节点协议文件不符」；
+  //   ③ design 的 2a-ui-design.md 是条件提示词（属该节点协议面）→ 不拦；换成无关文件 → 拦；
+  //   ④ record 缺 `--templates` 声明 → BLOCK，补上 → 放行；⑤ explain 现问输出 `TEMPLATE:` 行。
+  // 反向构造：②③ 各用真实 skill-load 只改 --prompt（其余参数不变）构造正例——排除「标记存在与否」
+  // 这另一变量；① 另带「同一判据 + 变异探针」，对调两条指针后判据必须翻假，否则顺序断言退化成包含断言。
+  // 声明面走真实命令而非手写标记：标记形态由生产写入路径产生，正是场景最容易与真实链路分叉的地方。
   {
-    name: 'TA-13 加载链：entry 打印 READ TEMPLATE，record 缺 --templates 声明拦，explain 有 TEMPLATE 行',
+    name: 'TA-13 加载链：entry 先 READ PROMPT 后 READ TEMPLATE，--prompt 错路径入口拦（条件提示词放行），record 缺 --templates 拦，explain 有 TEMPLATE 行',
     run: async (dir) => {
-      writeTemplateFixture(dir, 'DESIGN');
-      const st = newChangeState('design');
-      writeState(dir, st);
-      // ① entry 打印模板指针（引擎推导，不依赖纪律）
-      const entry = runGuard(['entry', 'design'], dir);
+      // 声明走真实命令 skill-load（而不是手写标记 JSON）：标记形态（protocol 取 basename、templates
+      // 清单）由生产写入路径产生，入口判据读到的就是真实链路的形态。
+      const skillLoad = (node, skill, prompt, templates) => runState(
+        ['skill-load', node, skill, '--prompt', 'flow-kit/prompts/' + prompt, '--templates', templates],
+        dir,
+      );
+      // 反例标记只能手写：skill-load 对新 change 拒绝「缺模板」的声明（那正是 ④ 要构造的缺陷态）。
+      const writeMarker = (node, skill, protocol) => writeFile(
+        dir,
+        CHANGE_DIR + '/.skill-loads/' + node + '-' + skill + '.json',
+        JSON.stringify({ node, skill, protocol, at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n',
+      );
+      const removeMarker = (node, skill) => fs.rmSync(
+        path.join(dir, CHANGE_DIR, '.skill-loads', node + '-' + skill + '.json'),
+        { force: true },
+      );
+      // 行序判据（单一函数供正向断言与变异探针共用）：两条指针都在场，且全部提示词行在全部模板行之前。
+      const lineIndexes = (lines, prefix) => lines
+        .map((line, index) => (line.startsWith(prefix) ? index : -1))
+        .filter((index) => index !== -1);
+      const promptLinesBeforeTemplates = (text) => {
+        const lines = text.split('\n');
+        const promptAt = lineIndexes(lines, 'READ PROMPT:');
+        const templateAt = lineIndexes(lines, 'READ TEMPLATE:');
+        return promptAt.length > 0 && templateAt.length > 0
+          && Math.max(...promptAt) < Math.min(...templateAt);
+      };
+
+      // ① 顺序：open 是两提示词 + 两模板的节点，取「最后一条提示词 < 第一条模板」的收敛形态
+      setupOpen(dir);
+      const load = skillLoad('open', 'flow-comet-change', '0-change.md', 'CHANGE.md,REQUIREMENT.md');
+      assertExit(load, 0);
+      assertOut(load, 'SKILL-LOAD: open flow-comet-change');
+      const entry = runGuard(['entry', 'open'], dir);
       assertExit(entry, 0);
-      assertOut(entry, 'READ TEMPLATE: flow-kit/templates/DESIGN.md');
-      // ② 标记缺模板声明 → record BLOCKED 且提示 --templates
-      writeFile(dir, CHANGE_DIR + '/.skill-loads/design-flow-comet-design.json',
-        JSON.stringify({ node: 'design', skill: 'flow-comet-design', protocol: '2-design.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+      assertOut(entry, 'READ PROMPT: flow-kit/prompts/0-change.md');
+      assertOut(entry, 'READ PROMPT: flow-kit/prompts/1-requirement.md');
+      assertOut(entry, 'READ TEMPLATE: flow-kit/templates/CHANGE.md');
+      assertTrue(promptLinesBeforeTemplates(entry.output),
+        '入口两条指针顺序错：READ PROMPT 行应全部先于 READ TEMPLATE 行\n实际输出:\n' + entry.output);
+      // 反向构造（同一判据 + 变异探针）：对调两串标签后同一判据必须翻假
+      const swapped = entry.output.replace(/READ (PROMPT|TEMPLATE):/g,
+        (match, label) => 'READ ' + (label === 'PROMPT' ? 'TEMPLATE' : 'PROMPT') + ':');
+      assertTrue(swapped !== entry.output, '变异探针前提失效：入口输出里没有可对调的两条指针');
+      assertTrue(!promptLinesBeforeTemplates(swapped), '顺序判据不具判别力：对调两条指针后仍判通过');
+
+      // ② 错路径：open 声明 execute 的协议文件 4-dev.md → 入口 BLOCK（报文点名不符）
+      // 声明命令本身只校验 flow-kit/prompts/ 前缀，归属判定由入口负责——故这里真实命令成功、入口拦。
+      assertExit(skillLoad('open', 'flow-comet-change', '4-dev.md', 'CHANGE.md,REQUIREMENT.md'), 0);
+      const wrongPrompt = runGuard(['entry', 'open'], dir);
+      assertExit(wrongPrompt, 1);
+      assertOut(wrongPrompt, 'BLOCKED');
+      assertOut(wrongPrompt, '与节点协议文件不符');
+      assertOut(wrongPrompt, '4-dev.md');
+      // 反向构造：真实命令只把 --prompt 改回本节点协议文件 → 放行（拦点是被声明的路径，不是标记存在性）
+      assertExit(skillLoad('open', 'flow-comet-change', '0-change.md', 'CHANGE.md,REQUIREMENT.md'), 0);
+      const correctedPrompt = runGuard(['entry', 'open'], dir);
+      assertExit(correctedPrompt, 0);
+      assertNotOut(correctedPrompt, '与节点协议文件不符');
+
+      // ③ 条件提示词不误拦：design 声明 2a-ui-design.md（条件提示词，属该节点协议面）→ 放行
+      setupDesign(dir);
+      assertExit(skillLoad('design', 'flow-comet-design', '2-design.md', 'DESIGN.md'), 0);
+      assertExit(skillLoad('design', 'flow-comet-ui-design', '2a-ui-design.md', 'DESIGN.md,UI-DESIGN.md'), 0);
+      const conditionalOk = runGuard(['entry', 'design'], dir);
+      assertExit(conditionalOk, 0);
+      assertNotOut(conditionalOk, '与节点协议文件不符');
+      // 反向构造：真实命令只把 --prompt 换成无关文件 → 同一夹具立刻拦
+      assertExit(skillLoad('design', 'flow-comet-ui-design', '3-task.md', 'DESIGN.md,UI-DESIGN.md'), 0);
+      const conditionalWrong = runGuard(['entry', 'design'], dir);
+      assertExit(conditionalWrong, 1);
+      assertOut(conditionalWrong, 'BLOCKED');
+      assertOut(conditionalWrong, '与节点协议文件不符');
+      assertOut(conditionalWrong, '3-task.md');
+      // 移除条件提示词声明，④⑤ 回到单声明形态（与原有 record / explain 断言同形）
+      removeMarker('design', 'flow-comet-ui-design');
+
+      // ④ 标记缺模板声明 → record BLOCKED 且提示 --templates；反向构造：声明了模板 → 放行
+      writeMarker('design', 'flow-comet-design', '2-design.md');
       const recordBlocked = runState(['record', 'design', '{"summary":"design done"}'], dir);
       assertExit(recordBlocked, 1);
       assertOut(recordBlocked, '--templates');
-      // ③ 反向构造：标记声明了模板 → record 放行
-      writeFile(dir, CHANGE_DIR + '/.skill-loads/design-flow-comet-design.json',
-        JSON.stringify({
-          node: 'design', skill: 'flow-comet-design', protocol: '2-design.md',
-          templates: ['DESIGN'], at: '2026-08-01T00:00:00.000Z',
-        }, null, 2) + '\n');
+      assertExit(skillLoad('design', 'flow-comet-design', '2-design.md', 'DESIGN.md'), 0);
       const recordOk = runState(['record', 'design', '{"summary":"design done"}'], dir);
       assertExit(recordOk, 0);
       assertNotOut(recordOk, 'BLOCKED');
-      // ④ explain 现问输出模板行
+
+      // ⑤ explain 现问输出模板行
       const explain = runState(['explain', 'design'], dir);
       assertExit(explain, 0);
       assertOut(explain, 'TEMPLATE:');
