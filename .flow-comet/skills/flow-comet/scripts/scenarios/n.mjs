@@ -85,9 +85,24 @@ function templatePlaceholder(sectionName) {
   return '<模板占位正文（' + sectionName + '）：照抄本行即视为未填写。>';
 }
 
-// 登记表合成形态的段正文覆盖：LESSONS 的「条目格式」段是条目字段键判据（C20）的唯一派生源——
-// CI 全新检出没有 vendored 模板时也要给出等价书写样例，否则该判据在 CI 里会退化成「无法派生」而空转。
+// 登记表合成形态的段正文覆盖：LESSONS 的「条目格式」段是条目字段键判据（C20）的唯一派生源，
+// ARCHITECTURE 的「ADR 列表」段是 §3 条目字段键判据的唯一派生源——CI 全新检出没有 vendored 模板时
+// 也要给出等价书写样例，否则该判据在 CI 里会退化成「无法派生」而空转（报告只能声明未校验）。
 const TEMPLATE_BODY_FIXTURES = {
+  ARCHITECTURE: [[
+    'ADR 列表',
+    [
+      '### ADR-NNN · <标题>',
+      '',
+      '- **状态**：proposed | accepted | deprecated | superseded by ADR-NNN',
+      '- **取舍**：…',
+      '- **决定**：…',
+      '- **理由**：…',
+      '- **代价**：…',
+      '- **来源 change**：<change-id 或 (initial)>',
+      '- **推翻成本**：低 / 中 / 高',
+    ].join('\n'),
+  ]],
   LESSONS: [[
     '条目格式',
     [
@@ -1464,6 +1479,8 @@ export const ENTRIES = [
       assertOut(resUiKey, 'motion');
       // ③ ARCHITECTURE 缺段 → 侧命令只读报告（不阻断）。模板夹具必须在场：骨架不可派生时报告走
       // 「未校验（模板缺失）」分支，此时只断言「结构问题」在降级面上空转——真实比对分支才是被测面。
+      // 夹具自带 §3 的占位 ADR 条目（TEMPLATE_BODY_FIXTURES）——没有 vendored 模板的检出按登记表
+      // 合成的模板因此与真迹同构，§3 字段键派生同样真跑（不会退化成「结构问题依据」里的未校验）。
       writeTemplateFixture(dir, 'ARCHITECTURE');
       writeFile(dir, '.specs/ARCHITECTURE.md', '# ARCHITECTURE — 项目级系统架构（活文档）\n\n## 1. 系统概览\n\n夹具。\n');
       const side = runSideCommand(dir, 'evolve.mjs', ['scan', '--root', dir, '--stdout']);
@@ -1652,22 +1669,34 @@ export const ENTRIES = [
 
   // TA-22 · 版本漂移在发版期被发现（AC-22）——登记表记录的模板指纹与锁定快照不一致 → 漂移可判；
   // 一致时零漂移。反向构造：改写一个字节后 drift 必为 true（同一判据函数）。
+  // 指纹判据的输入必须是模板真迹：没有 vendored 模板的检出（CI 全新检出）里夹具按登记表合成段形，
+  // 合成文本的 sha 与登记表锁定的 sha 天然不可比——此时「一致 → 无漂移」无从执行，不得当作通过
+  // （未验证 ≠ 通过），也不得据此断言漂移（登记表并没有错）。真迹在场才全强度执行，否则可见 SKIP。
   {
-    name: 'TA-22 指纹漂移：模板与锁定快照一致判无漂移，改一字节判漂移',
+    name: 'TA-22 指纹漂移：模板与锁定快照一致判无漂移，改一字节判漂移（模板非真迹时显式 SKIP）',
     run: async (dir) => {
       const skeleton = await import('../lib/guard-artifact-skeleton.mjs');
       // 骨架按项目根缓存——漂移对比必须落在另一个项目根上，否则读到的是缓存值（判据空转）
       const cleanRoot = path.join(dir, 'clean');
       const driftRoot = path.join(dir, 'drift');
+      const realTemplateRel = docRel('SUMMARY');
+      const realTemplatePresent = fs.existsSync(path.join(REPO_ROOT, ...realTemplateRel.split('/')));
       // ① 一致 → drift === false
-      writeFile(cleanRoot, docRel('SUMMARY'), templateFixtureText('SUMMARY'));
+      writeFile(cleanRoot, realTemplateRel, templateFixtureText('SUMMARY'));
       const clean = await skeleton.templateFingerprint('SUMMARY', { runRoot: cleanRoot });
       assertTrue(clean.derived === true, '模板在场时骨架应可派生（derived=true），实际: ' + JSON.stringify(clean));
-      assertTrue(clean.drift === false, '模板与登记表指纹一致时应判无漂移，实际: ' + JSON.stringify(clean));
-      // ② 反向构造：改一个字节 → drift === true
-      writeFile(driftRoot, docRel('SUMMARY'), templateFixtureText('SUMMARY') + '\n漂移探针。\n');
-      const drifted = await skeleton.templateFingerprint('SUMMARY', { runRoot: driftRoot });
-      assertTrue(drifted.drift === true, '模板被改写后应判漂移，实际: ' + JSON.stringify(drifted));
+      if (realTemplatePresent) {
+        assertTrue(clean.drift === false, '模板与登记表指纹一致时应判无漂移，实际: ' + JSON.stringify(clean));
+        // ② 反向构造：改一个字节 → drift === true
+        writeFile(driftRoot, realTemplateRel, templateFixtureText('SUMMARY') + '\n漂移探针。\n');
+        const drifted = await skeleton.templateFingerprint('SUMMARY', { runRoot: driftRoot });
+        assertTrue(drifted.drift === true, '模板被改写后应判漂移，实际: ' + JSON.stringify(drifted));
+      } else {
+        console.log('SKIP: TA-22 的指纹漂移判据（模板非真迹：本检出无 vendored ' + realTemplateRel
+          + '，夹具按登记表合成段形，实测 sha ' + clean.actualSha256 + ' 与登记表锁定 '
+          + clean.recordedSha256 + ' 不可比）——本次检出未执行「一致 → 无漂移 / 改一字节 → 漂移」，'
+          + '请在权威源检出重跑本套件（未验证 ≠ 通过）');
+      }
       // ②b 指纹归一化：BOM / 行尾是检出噪音——同一内容的 LF 形态与 BOM+CRLF 形态必须同指纹
       // （归一化由骨架模块单实现）。反向构造：内容真变一行 → 指纹必不同，证明「同值」不是恒等判据。
       const lfText = templateFixtureText('SUMMARY').replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n');
