@@ -1708,6 +1708,13 @@ export const ENTRIES = [
         label: 'phase-gated 反转句',
         include: ['artifact-first', '本仓是 **phase-gated**：8 节点 entry/exit 门'],
       });
+      // 方向反转之外还须说明阶段门与工件门的关系：只有「有门」说不出门守的是什么，抽掉该句入口册
+      // 读起来就像拿阶段门替代工件（「阶段门 = 工件检查的替代品」正是本仓要挡的过度解读）。
+      rules.push({
+        rel: 'flow-comet/SKILL.md',
+        label: '阶段门与工件门的关系句',
+        include: ['阶段门是工件门的加强，不是替代'],
+      });
       rules.push({
         rel: 'flow-comet-review/SKILL.md',
         label: 'Guardrails 行与新门禁同步',
@@ -1739,6 +1746,9 @@ export const ENTRIES = [
         ['抽掉 phase-gated 反转句', 'flow-comet/SKILL.md',
           (text) => text.replace('本仓是 **phase-gated**：8 节点 entry/exit 门', '本仓方向与上游一致'),
           '缺「本仓是 **phase-gated**：8 节点 entry/exit 门」'],
+        ['抽掉阶段门关系句', 'flow-comet/SKILL.md',
+          (text) => text.replace('阶段门是工件门的加强，不是替代', ''),
+          '缺「阶段门是工件门的加强，不是替代」'],
         ['Guardrails 行改回旧表述', 'flow-comet-review/SKILL.md',
           (text) => text.replace('test-pyramid-checked',
             'test-pyramid-checked` | TEST.md 5-round completeness verified | 执行纪律（review 把关），guard 不校验'), 'guard 不校验'],

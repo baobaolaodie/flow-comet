@@ -354,6 +354,12 @@ export const ENTRIES = [
     name: 'M4 ui-design 门真实链路：entry design → 缺件 BLOCK → 补件·声明 → exit --apply 放行',
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
+      // 夹具根的模板：适用性判据的「视觉调性」段名从 CHANGE 模板派生——模板缺席时门按 C9 显式
+      // 「未校验（模板缺失）」跳过（降级路径由 TA-21 覆盖），本项要测的是门本身，故模板必须在场。
+      // 段形只登记本项工件实际写出的段：模板是段形权威，多写一段就会让出口先被结构门拦下，
+      // 测不到 ui-design 门（CHANGE 见 writeIntakeArtifacts，DESIGN 见下方夹具）。
+      writeFile(dir, 'flow-kit/templates/CHANGE.md', '# CHANGE 模板（夹具）\n\n## Why（为什么做）\n\n## 视觉调性（前端项目必填）\n');
+      writeFile(dir, 'flow-kit/templates/DESIGN.md', '# DESIGN 模板（夹具）\n\n## 0. 技术栈选定\n\n## 1. 决策清单\n');
       assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
       // 前端判据要的是「视觉调性段在场且未标不适用」：intake 夹具直接写实质调性（不追加同名段）。
       writeIntakeArtifacts(dir, CHANGE_ID, { visualTone: '现代、克制的工具型界面。' });
