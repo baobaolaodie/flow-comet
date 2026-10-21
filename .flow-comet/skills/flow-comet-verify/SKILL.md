@@ -19,7 +19,7 @@ This node performs the final integration verification: running all automated tes
 
 | 文件（模板 = `flow-kit/templates/<DOC>.md`） | 左栏 · 无条件段（模板 H2，缺席 / 空正文 = BLOCKED） | 右栏 · 条件段（**标题必须在场**，正文可写 `N/A`）/ 增量段（按登记位置） |
 |------|------|------|
-| `TEST.md` | `## 验证命令`（本仓登记的**增量段**，必填，位置不限但标题后必须紧跟代码块）——exit verify 真实执行其中的命令并计数失败 | 上游模板段（`flow-kit/templates/TEST.md` 的 5 轮 H2 与结构子段）在 **review 出口**按模板校验；verify 的节点映射无模板，本出口不做段名 / 段序校验 |
+| `TEST.md` | `## 验证命令`（本仓登记的**增量段**，必填，位置不限但标题后必须紧跟代码块）——exit verify 真实执行其中的命令并计数失败 | `TEST.md` 的 5 轮 H2 与结构子段**在本出口**按登记表骨架校验（`flowkit.verify.v1` 的 artifacts 含 TEST.md；UAT 未登记 → 跳过）。verify 的**模板声明**为空集，但结构校验来自节点 `outputSchemas`，不来自模板声明 |
 | `UAT.md` | **仅存在性**——guard 只查 `.specs/<change-id>/UAT.md` 在场（UAT 无上游模板，不校验段名与段序） | `## 验收结果` 等段：格式与内容由 UAT 执行与 review 把关，guard 不判段名 |
 
 > **注意**：flow-kit 的 TEST 模板**不含 `## 验证命令` 段**——该段是 flow-comet 登记的增量段（exit verify 会真实执行其中的命令并计数失败）。使用 `flow-kit/templates/TEST.md` 填写后，**必须按上方右栏补写 `## 验证命令` 段**，否则 exit verify 会被 BLOCKED。**排版约束**：`## 验证命令` 标题后必须**紧跟**代码块（` ``` `），标题与代码块之间**不得插入任何说明行**（如 blockquote 说明——guard 正则要求标题后直接是代码块）；段名可带括号后缀。UAT.md 同理：flow-kit 无独立 UAT 模板（UAT 脚本格式见 5-test.md 1.2 节），本出口只查文件在场——`## 验收结果` 段按惯例填写，格式由 UAT 执行与 review 把关。
@@ -122,7 +122,7 @@ Load `flow-comet-integration` during this Node and record completed check `requi
 node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load verify flow-comet-integration --prompt flow-kit/prompts/7-integration.md
 ```
 
-> **零模板节点省略 `--templates`**：verify 的产出物模板映射为空（UAT.md 无上游模板，TEST.md 的结构校验在 review 出口），命令**不带** `--templates`——省略即视为空集，与节点映射一致并通过；不要「为保险」补一个模板名（多写会与映射不一致而被拦）。
+> **零模板节点省略 `--templates`**：verify 的产出物模板映射为空（UAT.md 无上游模板；TEST.md 的结构校验在 verify 出口（本节点），review 只做 5 轮完整性过程检查），命令**不带** `--templates`——省略即视为空集，与节点映射一致并通过；不要「为保险」补一个模板名（多写会与映射不一致而被拦）。
 
 > **跑 skill-load 声明命令 ≠ 加载**：声明只把“哪次会话加载了哪个 skill、按哪份协议工作”写进状态供 exit/record 核对；真正加载只有第 1 步的 Skill 工具能做。
 

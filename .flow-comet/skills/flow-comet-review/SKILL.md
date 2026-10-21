@@ -207,7 +207,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record review '{"summa
 | `review-evidence` | REVIEW.md exists | artifact-exists |
 | `critical-resolved` | 0 unacknowledged Critical items | 执行纪律（review 把关），guard 不校验 |
 | `no-code-changes` | Reviewer did not modify code files | 执行纪律（review 把关），guard 不校验 |
-| `test-pyramid-checked` | TEST.md 5 轮金字塔的结构在场（各轮 H2 标题 + 结构子段）+ REVIEW 的 `### 2.0` 完整性小节 | 结构级（guard 强制：`TEST.md` 骨架与 `### 2.0` 子段缺席即 BLOCKED，条件轮写 `N/A` 放行）；5 轮内容质量仍由 review 自己把关 |
+| `test-pyramid-checked` | TEST.md 5 轮金字塔的结构在场（各轮 H2 标题 + 结构子段）+ REVIEW 的 `### 2.0` 完整性小节 | 结构级（`### 2.0` 子段由 REVIEW 模板骨架在本出口强制；`TEST.md` 骨架由 verify 出口按登记表校验——缺席即 BLOCKED，条件轮写 `N/A` 放行）；5 轮内容质量仍由 review 自己把关 |
 
 ## Exit Check
 

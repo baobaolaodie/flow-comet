@@ -44,4 +44,4 @@ description: "flow-kit TEST 阶段协议：5 轮测试金字塔（功能/性能/
 
 ## 使用范围
 
-TEST.md 的**结构在场**由 review 出口按模板骨架校验（5 轮 H2 与结构子段，条件轮写 `N/A` 放行）；**5 轮内容质量**由 review 节点第 2 轮检查（`### 2.0 TEST.md 5 轮金字塔完整性` 小节）。brooks-lint 已装时用 `/brooks-test`（Codex 用 `$brooks-test`），未装时用内置清单。
+TEST.md 的**结构在场**由 **verify 出口**按登记表骨架校验（5 轮 H2 与结构子段，条件轮写 `N/A` 放行）；**5 轮内容质量**由 review 节点第 2 轮检查（`### 2.0 TEST.md 5 轮金字塔完整性` 小节）。brooks-lint 已装时用 `/brooks-test`（Codex 用 `$brooks-test`），未装时用内置清单。
