@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // flow-comet 引擎自测套件（L1 回归基线的载体）
 //
-// 本文件 = runner + 底部自检（收口判据）。场景数据在 scenarios/{a..m}.mjs（按机制面分组），
+// 本文件 = runner + 底部自检（收口判据）。场景数据在 scenarios/{a..n}.mjs（按机制面分组），
 // 夹具 / 断言 / 文本锚判据在 lib/ 下，与 system-test 共享的工具与计数派生各有单一来源模块。
 //
 // 每个场景 = 独立临时目录（fs.mkdtemp）+ 伪造 .flow-comet/flow-comet-state.json（currentNode +
@@ -54,6 +54,7 @@ import { ENTRIES as SCENARIOS_J } from './scenarios/j.mjs';
 import { ENTRIES as SCENARIOS_K } from './scenarios/k.mjs';
 import { ENTRIES as SCENARIOS_L } from './scenarios/l.mjs';
 import { ENTRIES as SCENARIOS_M } from './scenarios/m.mjs';
+import { ENTRIES as SCENARIOS_N } from './scenarios/n.mjs';
 
 let passed = 0;
 const failures = [];
@@ -72,6 +73,7 @@ const SCENARIOS = [
   ...SCENARIOS_K,
   ...SCENARIOS_L,
   ...SCENARIOS_M,
+  ...SCENARIOS_N,
 ];
 
 // ---------- 运行 ----------

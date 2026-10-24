@@ -1042,7 +1042,10 @@ export const ENTRIES = [
           '## verify 输出\n\n```\nnode --check src/t1.mjs\n```',
           '## 6 维自查\n\n- 功能: 通过（brooks-review 已跑）\n- 性能: 无影响\n- 安全: 无影响\n- 兼容: 通过\n- 可观测: 通过\n- 可维护: 通过',
           '## 越界检查\n\n仅修改 src/t1.mjs，无越界。',
-          '## 自检方法\n\nbrooks-review', '',
+          '## 自检方法\n\nbrooks-review',
+          // LESSONS 扫描 = 登记的必填增量段（位于自检方法之后或文末）：缺它会被增量段门禁拦下，
+          // 掩盖本场景被测的漂移容忍判据。
+          '## LESSONS 扫描\n\n无 active 条目命中（夹具）。', '',
         ].join('\n'));
       // 漂移态：completedNodes=[open,design,plan]（execute 未 completed——欠账），currentNode=review
       // （路由已越过 execute——execute 证据/产物齐）；evidence.execute + enteredNodes 含 execute（防 R2 拦）

@@ -21,7 +21,7 @@ export const ENTRIES = [
       writeState(dir, baseState('execute'));
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
         '# TASK\n\n<task id="T01" status="done" parallel="true">\n  <action>实现 T01</action>\n  <write_files>src/t1.mjs</write_files>\n  <verify>node --check src/t1.mjs</verify>\n</task>\n');
-      assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
+      assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir), 0);
       writeFile(dir, 'src/t1.mjs', 'export const x = 1;\n');
       execFileSync('git', ['add', 'src/t1.mjs'], { cwd: dir });
       execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'feat: t1'], { cwd: dir });
@@ -255,7 +255,7 @@ export const ENTRIES = [
       if (!fs.readFileSync(parallelTaskPath, 'utf8').includes('<task id="P16" parallel="true" status="pending">')) {
         throw new Error('并行 × 零提交锚的前提失效：TASK.md 未标 parallel="true"');
       }
-      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
+      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir), 0);
       const stParallel = readStateFile(dir);
       stParallel.currentNode = 'subagent-execute';
       stParallel.enteredNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute'];
@@ -359,7 +359,7 @@ export const ENTRIES = [
       execFileSync('git', ['add', 'src/p02.mjs'], { cwd: dir });
       execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'feat: p02'], { cwd: dir });
       const p02Hash = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
-      assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
+      assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir), 0);
       const ownershipStatePath = path.join(dir, '.flow-comet', 'flow-comet-state.json');
       const ownershipBytes = fs.readFileSync(ownershipStatePath, 'utf8');
       const wrongNode = runHandoff(['request', 'P02', 'P02 委托', '--write-files', 'src/p02.mjs'], dir, ownershipEnv);
@@ -382,7 +382,7 @@ export const ENTRIES = [
       if (readStateFile(dir).currentNode !== 'subagent-execute') {
         throw new Error('next 未按路由校正 state.currentNode: ' + JSON.stringify(readStateFile(dir).currentNode));
       }
-      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
+      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir), 0);
       assertExit(runGuard(['entry', 'subagent-execute'], dir), 0);
       const correctedRequest = runHandoff(['request', 'P02', 'P02 委托', '--write-files', 'src/p02.mjs'], dir, ownershipEnv);
       assertExit(correctedRequest, 0);
@@ -648,7 +648,7 @@ export const ENTRIES = [
       const hash = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
       // ① 空交接拦截：record 仅写空 handoffResult → 出口缺证据（无委托不可 exit）
       assertExit(runState(['init', CHANGE_ID], dir), 0);
-      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
+      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir), 0);
       assertExit(runState(['record', 'subagent-execute', '{"handoffResult":{}}'], dir), 0);
       const stEmpty = readStateFile(dir);
       stEmpty.currentNode = 'subagent-execute';
@@ -703,7 +703,7 @@ export const ENTRIES = [
       const rDeclBlock = runGuard(['exit', 'subagent-execute'], dir);
       assertExit(rDeclBlock, 1);
       assertOut(rDeclBlock, 'exit 缺协议声明标记');
-      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
+      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir), 0);
       const rDeclPass = runGuard(['exit', 'subagent-execute'], dir);
       assertExit(rDeclPass, 0);
       assertOut(rDeclPass, 'ALL CHECKS PASSED');

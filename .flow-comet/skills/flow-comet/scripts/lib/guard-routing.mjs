@@ -11,6 +11,7 @@ import { inspectWorkflowProtectedPath } from '../protocol-utils.mjs';
 import { taskOpeningAttrs } from '../task-parsing.mjs';
 import { resolveNextNode, normalizeHeading, FIX_SECTION_TITLE_FALLBACK } from '../route-node.mjs';
 import { runRoot, fileExists, workflowRelativeSegments } from './guard-state-io.mjs';
+import { SUMMARY_REQUIRED_SECTIONS, buildSkeleton } from './guard-artifact-skeleton.mjs';
 
 // 新旧 change 区分——init 写入的 newChange: true = 新 change（严格，不依赖 entry——防系统性
 // 跳 entry 绕过）；缺失/非 true（旧 change）= 渐进 WARN 兼容。
@@ -18,12 +19,8 @@ export function isNewChange(state) {
   return state.newChange === true;
 }
 
-// flow-kit SUMMARY 模板必填段（正则匹配，大小写不敏感 + 变体兼容）
-export const SUMMARY_REQUIRED_SECTIONS = [
-  { regex: /##\s*verify\s*输出/i, label: '## verify 输出' },
-  { regex: /##\s*6\s*维自查/i, label: '## 6 维自查' },
-  { regex: /##\s*(越界检查|边界检查)/i, label: '## 越界检查' },
-];
+// flow-kit SUMMARY 模板必填段（正则匹配，大小写不敏感 + 变体兼容）——清单唯一来源是骨架模块，
+// 此处只取用（本模块不再自持第二份段名清单）。
 
 // 校验 change 目录下每份 *-SUMMARY.md 含 SUMMARY 模板的三个必填段。用正则（大小写不敏感 +
 // 变体兼容）——避免现有 SUMMARY 格式漂移导致误 BLOCKED。
@@ -303,67 +300,50 @@ export async function findSkillLoadsDir(root, changeName) {
   return null;
 }
 
-// 段名校验从模板自动派生——读 <runRoot>/flow-kit/templates/{CHANGE,REQUIREMENT,DESIGN,SUMMARY}.md
-// 提取全部 ^## 段名，正则化生成宽松匹配模式；模板目录/文件缺失时 fallback 内置段名。
-export const TEMPLATE_FALLBACK_SECTION_PATTERNS = {
-  changeWhy: /^##\s*Why\b/im,
-  changeVisualTone: /^##\s*视觉调性/im,
-  requirementUserStory: /^##\s*用户故事/im,
-  requirementAcceptance: /##\s*(验收准则|验收标准|AC|Acceptance Criteria)/i,
-  designDecisionList: /^##\s*\d*\.?\s*决策清单/m,
-};
+// 段名校验基准从模板自动派生——骨架计算统一委托 lib/guard-artifact-skeleton.mjs（单一实现：读
+// <runRoot>/flow-kit/templates/<DOC>.md + reference/artifact-templates.json，按 runRoot 缓存；段名
+// 归一复用 route-node 的 normalizeHeading）。本模块只把骨架投影成既有消费方要的 { name, regex } 形态
+// ——不自持模板读取，也不另写一份段名派生。模板整份缺失 → 该键的空数组（pick 据此跳过，见下）。
+//
+// 「模板缺席时的段名回退清单」唯一来源同样在骨架模块（段名清单单一来源）：此处只转出既有导出面，不另存字面
+// 清单——消费方（含 lib/guard-uidesign.mjs）的取用路径因此不变。
+export { TEMPLATE_FALLBACK_SECTION_PATTERNS } from './guard-artifact-skeleton.mjs';
 
-let templateSectionPatternsCacheRoot = null;
-let templateSectionPatternsCache = null;
+// 模板段名 → 宽松匹配正则：实现随段名归一移到骨架模块（单一出处），此处转出保持既有导出面。
+export { headingPattern as templateSectionPattern } from './guard-artifact-skeleton.mjs';
 
-// 模板段名 → 宽松匹配正则：编号前缀（1. / 0.5）可选 + 段名主体字面匹配 + 尾部括号内容（如 （AC））可选
-export function templateSectionPattern(rawName) {
-  const name = String(rawName).trim();
-  const body = name
-    .replace(/[（(][^）)\n]*[）)]\s*$/u, '')   // 去尾部括号内容：Why（为什么做）→ Why
-    .replace(/^\d+(?:\.\d+)?\.?\s*/u, '')       // 去编号前缀：1. 决策清单 → 决策清单
-    .trim();
-  const escaped = escapeRegExp(body || name);
-  return new RegExp(
-    '^##\\s*(?:\\d+(?:\\.\\d+)?\\.?\\s*)?' + escaped + '\\s*(?:[（(][^\\n）)]*[）)])?\\s*$',
-    'im',
-  );
-}
-
-// 读取模板全部段名生成模式列表（模块级缓存，避免每次 exit 重复读文件）；pick 按关键词选段，找不到 → fallback
-export async function templateSectionPatterns() {
-  if (templateSectionPatternsCacheRoot === runRoot && templateSectionPatternsCache) {
-    return templateSectionPatternsCache;
-  }
-  const templateDir = path.join(runRoot, 'flow-kit', 'templates');
+// 读取模板全部段名生成模式列表：键形（change / requirement / design / summary）与 tpl[key] 的
+// { name, regex } 数组形态、pick 的按关键词选段语义一律保持既有——只把数据源换成骨架模块（缓存与
+// 模板读取归它一处负责，本模块不再自持 runRoot 键控的第二份缓存）。opts.runRoot 与骨架同一出入口
+// （缺省用运行上下文根；场景可指向夹具根）。
+export async function templateSectionPatterns(opts = {}) {
   const result = { change: [], requirement: [], design: [], summary: [] };
-  for (const [key, fileName] of Object.entries({
-    change: 'CHANGE.md',
-    requirement: 'REQUIREMENT.md',
-    design: 'DESIGN.md',
-    summary: 'SUMMARY.md',
-  })) {
-    const templateFile = path.join(templateDir, fileName);
-    if (await fileExists(templateFile)) {
-      try {
-        const text = await fs.readFile(templateFile, 'utf8');
-        for (const match of text.matchAll(/^##\s+(.+)$/gmu)) {
-          const sectionName = match[1].trim();
-          result[key].push({ name: sectionName, regex: templateSectionPattern(sectionName) });
-        }
-      } catch {}
-    }
+  for (const key of Object.keys(result)) {
+    const skeleton = await buildSkeleton(key, opts);
+    result[key] = skeleton.sections.map((section) => ({ name: section.name, regex: section.pattern }));
   }
+  // 命名段选取：模板整份缺席（sections 为空）⇒ **跳过**，不回落段名兜底正则（C9：模板整份缺失时
+  // 模板派生判据全部跳过，fallback 只在「模板在场但某个具体段名缺失」时生效）。既有消费方里有闭包
+  // 外直接 `.test` 的调用点（「视觉调性」段读取），返回 null 会把「跳过」退化成 TypeError 崩溃——
+  // 未校验变成失败，同样不是 C9 的「跳过」，故返回可判别的跳过判据（见 TEMPLATE_SECTION_SKIP）。
   result.pick = (key, keywords, fallback) => {
-    for (const section of result[key] ?? []) {
+    const sections = result[key] ?? [];
+    if (sections.length === 0) return TEMPLATE_SECTION_SKIP;
+    for (const section of sections) {
       if (keywords.some((keyword) => section.name.includes(keyword))) return section.regex;
     }
     return fallback;
   };
-  templateSectionPatternsCache = result;
-  templateSectionPatternsCacheRoot = runRoot;
   return result;
 }
+
+// 「跳过」判据的唯一形态：`.test` 恒真（消费方形态即 `pattern.test(text)` ⇒ 该段检查不生效），
+// `skip` 标记让调用方与场景能区分「跳过」与「判据通过」。整份模板缺席时的跳过可见性由产出物结构
+// 门禁的「未校验（模板缺失）」行承担，pick 不再重复打印（同一事实两处措辞会先漂移）。
+export const TEMPLATE_SECTION_SKIP = Object.freeze({
+  skip: true,
+  test: () => true,
+});
 
 // Fix 段标题从 <runRoot>/flow-kit/templates/TASK.md 派生（单一模板源 + 模块级缓存 + runRoot 键控）：
 // 扫描模板全部 H2，用 route-node 共享 heading 归一（单一权威，含闭合 ATX）识别 Fix 段标题；无匹配

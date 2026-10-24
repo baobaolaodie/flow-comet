@@ -10,7 +10,19 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). The places that record the version are listed in [docs/VERSIONS.md](docs/VERSIONS.md), and CI keeps them in agreement on the release surface.
 
-## [Unreleased]
+## [1.6.5] - 2026-10-24
+
+### Added
+
+- **Workflow artifacts are now checked against the templates they come from**: each node names the templates it reads, and the exit compares the artifact's heading forms, section order, empty sections and copied-through placeholders against the upstream template plus this repository's registered additions — a first failure points at the template while a repeat names the missing sections, a missing template says so explicitly instead of passing silently, and the project-level documents travel the same path. The recorded baseline follows the new coverage — 350 scenarios and 95 items in the system test suite. ([#159](https://github.com/baobaolaodie/flow-comet/pull/159))
+- **Two requirements that used to rely on the node books are now checked by the engine**: entering a node prints that node's protocol prompt before the template lines, and `workflow-state.mjs skill-load --prompt` must name the same protocol file — a wrong path is refused rather than recorded silently; every task summary now carries a `## LESSONS 扫描` section beside the `## 自检方法` declaration, that section answering the entries the engine derives from the task's `write_files`, and the archive exit verifies the nomination evidence — how many summaries were scanned, that every nominated entry exists, and a reason when nothing is nominated. ([#159](https://github.com/baobaolaodie/flow-comet/pull/159))
+- **A frontend design reads one more prompt**: entering the design node for a change whose visual-tone section marks it as frontend prints an additional conditional `READ PROMPT` line pointing at `2a-ui-design.md`, decided by the same structural criterion as the conditional template line and omitted for non-frontend changes. ([#159](https://github.com/baobaolaodie/flow-comet/pull/159))
+
+### Changed
+
+- **Breaking: loading a node's skills now declares the templates that node reads**: `workflow-state.mjs skill-load` requires `--templates <a.md,b.md>` for a built-in node with at least one template, and the declared set must match the node's template mapping exactly — missing, extra or misspelled names block a new change while an older change only warns; a node that reads no template (verify / archive) may leave the flag out, and a custom protocol declares the templates of its own nodes. ([#159](https://github.com/baobaolaodie/flow-comet/pull/159))
+- **Breaking: a lesson written as a level-two heading is now refused at three exits**: entries in the project lesson book must sit inside the entry area as `### L-NNN`, and a `## L-NNN` heading blocks a new change at the open, verify and archive exits — the report prints `file:line → write ### L-NNN` for each offending line, an older change only warns, and numbering and out-of-area checks stay on verify and archive. ([#159](https://github.com/baobaolaodie/flow-comet/pull/159))
+- **Optional sections may be dropped whole**: a section the template marks as optional can be deleted outright, while a conditional section keeps its heading and may say `N/A` inside — an optional section you keep still has to be filled. ([#159](https://github.com/baobaolaodie/flow-comet/pull/159))
 
 ## [1.6.4] - 2026-10-15
 

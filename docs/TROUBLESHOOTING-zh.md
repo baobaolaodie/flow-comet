@@ -28,7 +28,17 @@
 
 **`BLOCKED: … 缺少技能加载声明标记`** —— 加载该节点技能并声明：`workflow-state.mjs skill-load <node> <skill>`，然后重做 `record` 与出口。
 
-**`BLOCKED: … 模板保真校验失败`** —— 节点文档缺少 flow-kit 模板规定的首部字段或段。对照 `flow-kit/templates/<DOC>.md` 补上被点名的字段或段。
+**`BLOCKED: … skill-load 声明 --prompt 与节点协议文件不符`** —— 该节点已写下的某条声明指向了节点协议面之外的路径。用报文给出的路径（`flow-kit/prompts/<file>`）重跑 `skill-load`；校验发生在下一次入口，所以重跑声明即可，不要手改标记。
+
+**`BLOCKED: … 的模板声明与节点映射不一致`** —— `--templates` 清单与该节点的模板不一致。报文会点名漏写或多写/错名的项，并给出可直接照抄的重新声明命令：`open` 写 `CHANGE.md,REQUIREMENT.md`，`design` 写 `DESIGN.md`（前端 change 再加 `UI-DESIGN.md`），`plan` 写 `TASK.md`，`execute` / `subagent-execute` 写 `SUMMARY.md`，`review` 写 `REVIEW.md,TEST.md`；`verify` 与 `archive` 没有模板，省略该参数。在本规则之前创建的 change 只告警不拒绝。
+
+**`BLOCKED: … 模板结构校验失败`** —— 工件的标题形态、首部字段、段集合或段序、空正文、照抄模板占位符里有一项不合模板。报文分两阶段：**首次只给模板路径与类别计数**（例如「缺段 3 项」），对照 `flow-kit/templates/<DOC>.md` 补齐；**同一工件再次失败时才列段名**——这份记账在 `.specs/<change>/.template-hints.json`，工件通过后自动清除。条件段保留标题、正文写 `N/A` 即可；父段整段 `N/A` 时其结构子段不要求；模板之外自加的段不参与校验。
+
+**出口打印「未校验（模板缺失）」** —— 项目根没有 `flow-kit/templates/<DOC>.md`，这份工件的模板派生段形判据整体跳过——**未校验不等于通过**。按安装页的指引取回 flow-kit 模板后重试；若同一行说的是登记表缺失，那是技能包缺 `reference/artifact-templates.json`，重装技能包即可。`UAT.md` 与归档的遗留清单没有上游模板，永远不进这条校验：只要求存在性。
+
+**`TEMPLATE-FINGERPRINT WARN`** —— 登记表锁定的上游提交与 `flow-kit/` 下的检出不一致。它是提示，不是阻断：骨架仍按登记表快照校验。把 `flow-kit/` 检出到登记表点名的提交，或把 `templateCommit` 与每份模板的 sha256 一起更新——quality 作业会比对两侧，只改一半会被判红。
+
+**`TEMPLATE-REGISTRY WARN`** —— 登记表登记了某个段，而它的模板里已经没有这个段。段集合由模板决定，因此该段按忽略处理、运行继续；告警会一直在，直到登记表被订正——在删掉该段的那次改动里更新 `reference/artifact-templates.json`。
 
 **`BLOCKED: … TASK.md 任务集被修改（签名不匹配）`** —— 进入执行节点后任务集被改动。恢复任务清单后重新进入节点（或把新工作作为任务在进入前加好），不要在流程中途改任务。
 

@@ -25,6 +25,11 @@ import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from '../task-parsi
 import { runRoot, fileExists, writeJson } from './guard-state-io.mjs';
 import {
   TEMPLATE_FALLBACK_SECTION_PATTERNS,
+  buildSkeleton,
+  headingPattern,
+} from './guard-artifact-skeleton.mjs';
+import { frontendCriterion } from './guard-uidesign.mjs';
+import {
   evidenceFor,
   findSkillLoadsDir,
   hasEvidenceField,
@@ -57,20 +62,55 @@ function markerProtocolBasename(value) {
   return String(value).replaceAll('\\', '/').split('/').pop() || null;
 }
 
-// REVIEW.md 发现区条目解析——"## 发现" 段下的发现项 = 列表项（"- **" 无序 / "1. **" 有序，
-// 两种列表形态同口径解析）；"无" 条目（"- 无" / "无（...）"）表示该级别无发现，豁免。条目块包含
-// 其后的非空续行（同一段落），直到空行 / 下一条目 / 下一个标题。严重度只取该条目自身的标题/行首
-// ——所属 "### Major" 分区，或标题（加粗部分）内带 [Major] 标签（真实 REVIEW 常用扁平有序列表 +
-// 条目内级别标签的写法）；条目正文引用他条的 [Major] 字样不改变本条严重度。
-// 返回 { title, lines, isMajor, ordinal }。
+// REVIEW.md 发现区解析——发现的合法位置是模板位置 `### 2.2 …详细发现`（REVIEW 模板的结构子段）；
+// 旧形态 `## 发现` 段（历史 REVIEW 的写法）继续按同一套条目口径解析，供旧 change 渐进处置与迁移
+// 提示。发现项有两种合法书写形态：① 列表项（"- **" 无序 / "1. **" 有序，两种列表形态同口径解析）；
+// ② 模板范例形态（flow-kit/templates/REVIEW.md 2.2 的书写样例 `### 🔴 R<x> · <名字>：<结论>` +
+// 粗体字段行）——模板位置下以严重度 token 起头的 H3 同样是发现，标题行即条目自身的第一行（处置
+// 标记按该行判定）。不以严重度 token 起头的 H3（如 `### Major`）仍是严重度分区。旧 `## 发现` 段
+// 保持列表项口径（历史写法，避免把分区标题误判成发现）。"无"条目（"- 无" / "无（...）"）表示该
+// 级别无发现，豁免。条目块包含其后的非空续行，直到空行 / 下一条目 / 下一个标题。严重度只取该条目
+// 自身的标题/行首——所属 "### Major" 分区，或标题（加粗部分 / H3 严重度 token）内带级别信息；
+// 条目正文引用他条的 [Major] 字样不改变本条严重度。返回 { title, scope, lines, isMajor, ordinal }。
 const REVIEW_FINDING_ITEM_RE = /^\s*(?:[-*+]|\d+[.)])\s*\*\*(.+?)\*\*/;
+const REVIEW_SEVERITY_TOKEN_RE = /^(?:🔴|🟡|🟢|\[\s*(?:critical|major|minor)\s*\])\s*/iu;
 const REVIEW_DISPOSITION_RE = /\[已修\]|\[升级\]|\[转待办\]/;
 const REVIEW_MAJOR_LABEL_RE = /\[\s*Major\s*\]/i;
 const REVIEW_ADJUDICATION_RE = /用户裁决\s*[:：]\s*接受延期/;
+// 旧形态段的「空段」形态：占位词与「无」条目不构成内容（迁移提示只在旧段真有内容时给）。
+const REVIEW_FINDINGS_PLACEHOLDER_RE =
+  /^(?:[-*+]\s*)?(?:\*\*)?(?:无|不适用|未涉及|无变更|N\/A|—|（无）|\(无\))(?:\*\*)?[。.；;，,]?$/iu;
 
-function reviewFindingsItems(text) {
+// 发现区作用域基准从 REVIEW 骨架派生（模板 `### 2.2 6 维诊断 · 详细发现（4 要素…）` → 结构子段
+// 「详细发现」）——段名归一是骨架模块的单一实现，此处不另写段名正则。模板缺席 → primary=null，
+// 模板位置判据整体跳过（模板派生判据不臆造；旧形态解析与处置校验照常）。同一父段的其它
+// 结构子段（2.0 / 2.1 / 2.3）在模板位置作用域内结束该子段；段内其它 H3（如 brooks 输出的
+// `### 🔴 R1 …` 分区）是严重度分区，不结束作用域。
+async function reviewFindingScope() {
+  const skeleton = await buildSkeleton('REVIEW');
+  const subsections = skeleton.derived ? skeleton.structureSubsections : [];
+  const primary = subsections.find((entry) => entry.norm.includes('详细发现')) ?? null;
+  return {
+    primary: primary === null ? null : primary.pattern,
+    siblings: primary === null
+      ? []
+      : subsections
+        .filter((entry) => entry !== primary && entry.parentNorm === primary.parentNorm)
+        .map((entry) => entry.pattern),
+  };
+}
+
+// H3 条目形态的严重度从标题前缀的严重度 token 派生（模板范例的 🔴/🟡/🟢；另接受文字标签形态的
+// [Critical]/[Major]/[Minor]）——Major 延期裁决门禁对 H3 条目与列表项同口径。
+function reviewSubheadingIsMajor(heading) {
+  const token = (String(heading).match(REVIEW_SEVERITY_TOKEN_RE) ?? [])[0] ?? '';
+  if (/🔴|🟡/u.test(token) || /critical|major/iu.test(token)) return true;
+  return REVIEW_MAJOR_LABEL_RE.test(heading);
+}
+
+function reviewFindingsItems(text, scope = { primary: null, siblings: [] }) {
   const items = [];
-  let inFindings = false;
+  let mode = 'none'; // 'none' | 'legacy'（旧 ## 发现）| 'primary'（模板位置 2.2）
   let severity = '';
   let current = null;
   const pushCurrent = () => { if (current) { items.push(current); current = null; } };
@@ -78,23 +118,51 @@ function reviewFindingsItems(text) {
     const h2 = line.match(/^##\s+(.+?)\s*$/);
     if (h2) {
       pushCurrent();
-      inFindings = /^发现/.test(h2[1]);
       severity = '';
+      mode = /^发现/.test(h2[1].trim()) ? 'legacy' : 'none';
       continue;
     }
-    if (!inFindings) continue;
     const h3 = line.match(/^###\s+(.+?)\s*$/);
     if (h3) {
       pushCurrent();
+      if (mode === 'primary') {
+        // 兄弟结构子段结束模板位置作用域；其余三级标题只是严重度分区
+        if ((scope.siblings ?? []).some((pattern) => pattern.test(line))) {
+          mode = 'none';
+          severity = '';
+          continue;
+        }
+        // 模板范例形态：严重度 token 起头的 H3 = 发现条目（标题行即条目自身第一行，处置标记
+        // 与列表项同口径按该行判定），续行是粗体字段 / 正文，直到空行或下一个标题。
+        const heading = h3[1].trim();
+        if (REVIEW_SEVERITY_TOKEN_RE.test(heading)) {
+          current = {
+            title: heading.replace(REVIEW_SEVERITY_TOKEN_RE, '').trim() || heading,
+            scope: 'primary',
+            lines: [line],
+            isMajor: reviewSubheadingIsMajor(heading),
+          };
+          continue;
+        }
+        severity = heading;
+        continue;
+      }
+      if (mode === 'none' && scope.primary !== null && scope.primary.test(line)) {
+        mode = 'primary';
+        severity = '';
+        continue;
+      }
       severity = h3[1].trim();
       continue;
     }
+    if (mode === 'none') continue;
     const m = line.match(REVIEW_FINDING_ITEM_RE);
     if (m) {
       pushCurrent();
       const title = m[1].trim();
       current = {
         title,
+        scope: mode,
         lines: [line],
         isMajor: /^major\b/i.test(severity) || REVIEW_MAJOR_LABEL_RE.test(title),
       };
@@ -110,11 +178,30 @@ function reviewFindingsItems(text) {
   return items;
 }
 
+// 旧形态 `## 发现` 段是否有实质内容（占位词 / 子标题 / 空行不计）：写在旧段而模板位置无条目时
+// 触发迁移提示——只在旧段真有内容时给，避免空段或只写「无」的旧 REVIEW 被误报。
+function reviewLegacyFindingsHasContent(text) {
+  let inLegacy = false;
+  for (const line of String(text).split(/\r?\n/)) {
+    const h2 = line.match(/^##\s+(.+?)\s*$/);
+    if (h2) {
+      inLegacy = /^发现/.test(h2[1].trim());
+      continue;
+    }
+    if (!inLegacy) continue;
+    if (/^#{3,6}\s+/.test(line)) continue;
+    const trimmed = line.trim();
+    if (trimmed === '' || REVIEW_FINDINGS_PLACEHOLDER_RE.test(trimmed)) continue;
+    return true;
+  }
+  return false;
+}
+
 // 发现区条目处置标记存在性：返回缺处置状态标记（[已修]/[升级]/[转待办]）的条目标题列表——结构级
 // 校验（不做语义判断：标记存在即视为已处置）。发现项（含 Minor；无序与有序条目同口径，均不得
 // "记录后无声消失"）的处置标记以该条目自身标题/行首为准——正文引用他条标记不参与判定。
-function reviewFindingsMissingDisposition(text) {
-  return reviewFindingsItems(text)
+function reviewFindingsMissingDisposition(text, scope = { primary: null, siblings: [] }) {
+  return reviewFindingsItems(text, scope)
     .filter((item) => !/^无/.test(item.title)) // "无" 条目豁免
     // 四要素字段行豁免：REVIEW 发现条目的 Symptom/Source/Consequence/Remedy 是 brooks 审查输出
     // 格式的字段行（带 ** 加粗），不是发现条目本身——不豁免会误判为"发现项缺处置标记"（执行者按
@@ -142,9 +229,9 @@ function reviewAdjudicationPointsTo(record, item) {
 // 处置）。Minor 不参与；Major [升级]/[已修] 直接放行。条目自身的处置标记（[转待办]）只认该条目标题
 // /行首（无序与有序同口径），正文续行引用他条标记不触发本门禁；[升级] 承接可出现在条目自身块或
 // 用户裁决记录中（承接非本条处置）。
-function reviewDeferredMajorProblems(text) {
+function reviewDeferredMajorProblems(text, scope = { primary: null, siblings: [] }) {
   const textValue = String(text);
-  const items = reviewFindingsItems(textValue);
+  const items = reviewFindingsItems(textValue, scope);
   const paragraphs = textValue.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
   const problems = [];
   for (const item of items) {
@@ -392,63 +479,355 @@ export async function runArchiveBranchMergeGate({ node, state }) {
 // 特化校验按节点 id 绑定（ADR-002 分层）：内置节点 id 触发 flow-kit 契约校验；自定义协议节点不
 // 误触发（通用层防线对其生效）。
 // 追加位置结构检测（全部 WARN 不 BLOCK）——防 CONTEXT/LESSONS/STATE/CHANGELOG 文件尾追加破坏
-// 插入位置纪律。
+// 插入位置纪律；open 出口另做 CONTEXT 模板段校验（项目级工件不受 C3 节点映射约束，也不要求
+// skill-load 声明模板——C17）。
+// 条件子段（C21）：`自定义 hooks（前端）` 只在前端 change 要求；其余子段无条件要求（未发现的写
+// 「未发现」）。前端判定沿用 CHANGE.md「视觉调性」段的既有判据（单一实现）。
+const CONTEXT_FRONTEND_ONLY_SUBSECTION = '自定义 hooks';
+
+// CONTEXT 模板段问题清单：段集合取自骨架（模板 = 内容权威），段标题按段名归一匹配（忽略编号 /
+// 括号后缀 / 大小写，AC-9）；父段缺席时不再列其子段（父段已单独报出，避免同一事实重复计数）。
+// 模板缺席（derived=false）→ 返回 null：模板派生判据整体跳过，由调用方输出显式「未校验（模板缺失）」
+// ——不退回任何内置段名副本。
+async function contextTemplateProblems(state, content) {
+  const skeleton = await buildSkeleton('CONTEXT');
+  if (!skeleton.derived) return null;
+  const problems = [];
+  for (const section of skeleton.sections) {
+    if (!section.pattern.test(content)) problems.push('缺段「## ' + section.name + '」');
+  }
+  const frontend = await frontendCriterion(state.activeChange);
+  for (const sub of skeleton.structureSubsections) {
+    if (!frontend.applicable && sub.name.includes(CONTEXT_FRONTEND_ONLY_SUBSECTION)) continue;
+    const parent = skeleton.sections.find((section) => section.name === sub.parent);
+    if (parent && !parent.pattern.test(content)) continue;
+    if (!sub.pattern.test(content)) problems.push('缺子段「### ' + sub.name + '」');
+  }
+  return problems;
+}
+
 export async function runContextAppendGate({ node, state }) {
   if (node.id !== 'open' || !state.activeChange) return;
   const contextFile = path.join(runRoot, '.specs', 'CONTEXT.md');
-  try {
-    const content = await fs.readFile(contextFile, 'utf8');
-    const m = content.match(/^## (术语|已锁决策|决策|术语表)[（(][^\n]*(?:追加|update)[^\n]*$/im);
-    if (m) {
-      if (isNewChange(state)) {
-        console.error('BLOCKED: CONTEXT.md 检测到孤立追加段（新 change 强制插入既有结构段）;恢复: 把内容移入术语表/已锁决策段');
-        process.exit(1);
-      }
-      console.error('WARN: CONTEXT.md 检测到孤立追加段（术语/决策应插入既有结构段）：' + m[0].replace(/^##\s*/, '').trim());
+  if (!(await fileExists(contextFile))) return; // 项目级工件可缺席：文件存在才查
+  let content = null;
+  try { content = await fs.readFile(contextFile, 'utf8'); } catch { content = null; }
+  if (content === null) return;
+  const m = content.match(/^## (术语|已锁决策|决策|术语表)[（(][^\n]*(?:追加|update)[^\n]*$/im);
+  if (m) {
+    if (isNewChange(state)) {
+      console.error('BLOCKED: CONTEXT.md 检测到孤立追加段（新 change 强制插入既有结构段）;恢复: 把内容移入术语表/已锁决策段');
+      process.exit(1);
     }
-  } catch {}
+    console.error('WARN: CONTEXT.md 检测到孤立追加段（术语/决策应插入既有结构段）：' + m[0].replace(/^##\s*/, '').trim());
+  }
+  const problems = await contextTemplateProblems(state, content);
+  if (problems === null) {
+    // 模板缺席：段形校验跳过但显式声明（未验证 ≠ 通过），修复指引给出取模板的途径
+    console.error('CONTEXT 未校验（模板缺失）——flow-kit/templates/CONTEXT.md 不在项目根，段形校验跳过'
+      + '（修复: 按安装指引获取 flow-kit 模板后重试）');
+    return;
+  }
+  if (problems.length === 0) return;
+  if (isNewChange(state)) {
+    console.error('BLOCKED: CONTEXT.md 有 ' + problems.length + ' 处与模板段形不符（新 change 强制项目上下文按模板段形书写）:');
+    for (const problem of problems) console.error('  - ' + problem);
+    console.error('恢复: 按 flow-kit/templates/CONTEXT.md 补齐段标题（未发现的写「未发现」；前端子段按条件段裁剪）后重试 exit open');
+    process.exit(1);
+  }
+  console.error('WARN: CONTEXT.md 有 ' + problems.length + ' 处与模板段形不符（旧 change 渐进不阻断）: '
+    + problems.join('、'));
 }
 
-// LESSONS.md 结构检测（verify / archive 出口）：条目区外条目 + 同段内编号递增
-export async function runLessonsZoneGate({ node, state }) {
-  if ((node.id !== 'verify' && node.id !== 'archive') || !state.activeChange) return;
+// LESSONS.md 结构检测（每条判据的作用面逐个交代）：
+// ① 旧形态 `## L-NNN`（条目写成二级标题）——open / verify / archive 三处出口都拦（AC-17），新
+//    change BLOCKED 并逐行给「文件:行号 → 改法」，旧 change WARN 渐进；
+// ② 条目区外条目（条目区锚点用段名归一，容忍模板标题的括号后缀，如 `## 条目区（夹具）`）与
+//    ③ 同段内编号递增——两条保持既有作用面（verify / archive），不随 ① 扩到 open；
+// ④ `### L-NNN` 条目的字段键（C20）——键集合从 LESSONS 模板「条目格式」段的书写样例派生；新 change
+//    的新条目缺任一键 BLOCKED，旧条目（迁移形态 / 首发指向别的 change）与旧 change 只 WARN；
+// ⑤ archive 出口核对 evidence.lessonsNomination：扫描份数 = 该 change 内 SUMMARY 份数、提名编号在
+//    LESSONS 中真实存在、无提名时理由非空——归档提名留痕且可核对。
+const LESSONS_LEGACY_ENTRY_RE = /^##\s+(L-\d+)\b/u;
+const LESSONS_ENTRY_ZONE_NAMES = ['条目区', '活跃条目', '已解决条目'];
+// `### L-NNN` 条目块（后接非数字/非字母，避免吞掉更长编号）。模板条目形态 = `### L-NNN · [tag] 标题`
+// （「条目格式」段给出的书写样例）；迁移形态（`### L-NNN:` 冒号标题）与裸标题（`### L-NNN`）等
+// 历史写法一律按旧条目处置（不足字段只 WARN）——新条目的判定因此只看「模板标题形态 + 字段键」。
+const LESSONS_ENTRY_HEADING_RE = /^###\s*(L-\d+)(?![\dA-Za-z])/u;
+const LESSONS_TEMPLATE_HEADING_RE = /^###\s*L-\d+\s*·/u;
+// 字段键行：`- **<键>**: <值>`（条目正文里的粗体小标题不带列表符，不会命中）。
+const LESSONS_FIELD_LINE_RE = /^[-*]\s*\*\*(.+?)\*\*\s*[:：]\s*(.*)$/u;
+
+// 旧形态条目行（行号 1 基）：迁移指引逐行可执行，执行者不必自己数行号。
+function lessonsLegacyEntries(content) {
+  const hits = [];
+  String(content).split(/\r?\n/).forEach((line, index) => {
+    const matched = line.match(LESSONS_LEGACY_ENTRY_RE);
+    if (matched) hits.push({ line: index + 1, id: matched[1] });
+  });
+  return hits;
+}
+
+// 该 change 的 SUMMARY 份数（C6：先看活动目录，目录已移入归档时看 `.specs/archive/*-<change>/`；
+// 两处都不存在 → null = 归档产物缺失——不可核对的份数不当作 0）。
+async function changeSummaryCount(changeName) {
+  const activeDir = path.join(runRoot, '.specs', changeName);
+  let dir = null;
+  if (await fileExists(activeDir)) {
+    dir = activeDir;
+  } else {
+    const archiveRoot = path.join(runRoot, '.specs', 'archive');
+    const entries = await fs.readdir(archiveRoot).catch(() => []);
+    const archived = entries.find((entry) => entry.endsWith('-' + changeName));
+    if (archived) dir = path.join(archiveRoot, archived);
+  }
+  if (dir === null) return null;
+  const files = await fs.readdir(dir).catch(() => []);
+  return files.filter((name) => name.endsWith('-SUMMARY.md')).length;
+}
+
+// LESSONS 里已登记的条目编号（旧形态与迁移后的新形态都算「编号存在」——形态由 ① 单独校验，
+// 存在性只判编号是否真实登记）。
+async function lessonsEntryNumbers() {
   const lessonsFile = path.join(runRoot, '.specs', 'LESSONS.md');
-  try {
-    const content = await fs.readFile(lessonsFile, 'utf8');
-    // 条目区锚点兼容：## 条目区（模板）/ ## 活跃条目 + ## 已解决条目（实际项目结构）——取最早条目段
-    const zoneIndex = (() => {
-      const hits = ['条目区', '活跃条目', '已解决条目']
-        .map(s => content.search(new RegExp('^##\\s*' + s + '\\s*$', 'm')))
-        .filter(i => i !== -1);
-      return hits.length ? Math.min(...hits) : -1;
-    })();
-    const headings = [...content.matchAll(/^###\s*L-(\d+)/gm)];
-    if (zoneIndex !== -1) {
-      const outside = headings.some(h => h.index < zoneIndex);
-      if (outside) {
-        if (isNewChange(state)) {
-          console.error('BLOCKED: LESSONS.md 有条目在条目区外（新 change 强制条目插入条目区）;恢复: 移入条目区');
-          process.exit(1);
-        }
-        // 诊断信息附带 zoneIndex/条目位置——偶发 WARN 排查时可直接定位（文件时序/编码差异兜底）
-        console.error('WARN: LESSONS.md 有条目在条目区外(zoneIndex=' + zoneIndex + ', 条目数=' + headings.length + ', 区外条目: ' + headings.filter(h => h.index < zoneIndex).map(h => 'L-' + h[1]).join(',') + ')');
+  let content;
+  try { content = await fs.readFile(lessonsFile, 'utf8'); } catch { return new Set(); }
+  const numbers = new Set();
+  for (const matched of String(content).matchAll(/^#{2,3}\s*L-(\d+)/gm)) numbers.add(parseInt(matched[1], 10));
+  return numbers;
+}
+
+// 归档提名核对（结构级）：evidence.lessonsNomination = { scanned, nominated[], reasonIfNone }。
+async function lessonsNominationProblems(state) {
+  const nomination = evidenceFor(state, 'archive')?.lessonsNomination;
+  if (!nomination || typeof nomination !== 'object' || Array.isArray(nomination)) {
+    return ['缺 evidence.lessonsNomination（应记录 { scanned, nominated[], reasonIfNone }）'];
+  }
+  const problems = [];
+  const actual = await changeSummaryCount(state.activeChange);
+  if (actual === null) {
+    problems.push('该 change 的工件目录缺失（.specs/<change>/ 与 .specs/archive/*-<change>/ 都不存在），无从核对扫描份数');
+  } else if (nomination.scanned !== actual) {
+    problems.push('扫描份数 ' + JSON.stringify(nomination.scanned ?? null)
+      + ' ≠ 该 change 内 *-SUMMARY.md 份数 ' + actual);
+  }
+  if (!Array.isArray(nomination.nominated)) {
+    problems.push('lessonsNomination.nominated 须为数组（无提名写 []）');
+  } else if (nomination.nominated.length === 0) {
+    if (!(typeof nomination.reasonIfNone === 'string' && nomination.reasonIfNone.trim() !== '')) {
+      problems.push('无提名时 lessonsNomination.reasonIfNone 不能为空（写明本轮为何没有条目入库）');
+    }
+  } else {
+    const known = await lessonsEntryNumbers();
+    for (const id of nomination.nominated) {
+      const matched = typeof id === 'string' ? id.match(/^L-(\d+)$/iu) : null;
+      if (matched === null) {
+        problems.push('提名编号格式非法: ' + JSON.stringify(id) + '（应为 L-NNN）');
+      } else if (!known.has(parseInt(matched[1], 10))) {
+        problems.push('提名编号在 LESSONS.md 中不存在: ' + id);
       }
     }
-    const nums = headings.map(h => parseInt(h[1], 10));
-    // 分段检测：按 ## 标题分段，仅同段内比较编号递增（多段 LESSONS 如「活跃条目/已解决条目」编号体系可独立）
-    const sectionStarts = [...content.matchAll(/^##\s+.*$/gm)].map(m => m.index);
-    for (let i = 1; i < nums.length; i++) {
-      const sameSection = !sectionStarts.some(s => s > headings[i - 1].index && s < headings[i].index);
-      if (sameSection && nums[i] <= nums[i - 1]) {
-        if (isNewChange(state)) {
-          console.error('BLOCKED: LESSONS.md 条目编号乱序（新 change 强制按编号插入条目区）;恢复: 按 L-NNN 顺序插入');
-          process.exit(1);
-        }
-        console.error('WARN: LESSONS.md 条目编号乱序（L-' + String(nums[i]).padStart(3, '0') + ' 应按序插入条目区）');
-        break;
+  }
+  return problems;
+}
+
+// ① 旧形态条目（`## L-NNN`）：open / verify / archive 三处出口都拦（AC-17）——报文逐行给「文件:
+// 行号 → 改法」，迁移口径 = 改级 + 移入条目区 + 按编号排序。新 change BLOCKED / 旧 change WARN。
+function checkLessonsEntryForm({ content, node, state }) {
+  const legacyEntries = lessonsLegacyEntries(content);
+  if (legacyEntries.length === 0) return;
+  if (isNewChange(state)) {
+    console.error('BLOCKED: LESSONS.md 有 ' + legacyEntries.length + ' 条旧形态条目（## L-NNN）——新 change 强制条目写成三级标题并置于条目区:');
+    for (const entry of legacyEntries) {
+      console.error('  - .specs/LESSONS.md:' + entry.line + ' → 改成 "### ' + entry.id + '"（并移入 ## 条目区，按编号升序）');
+    }
+    console.error('恢复: 逐行按上述改法迁移（改级 + 移入条目区 + 按编号排序）后重试 exit ' + node.id);
+    process.exit(1);
+  }
+  console.error('WARN: LESSONS.md 有 ' + legacyEntries.length + ' 条旧形态条目（应为 ### L-NNN 并置于条目区；旧 change 渐进不阻断）: '
+    + legacyEntries.map((entry) => '.specs/LESSONS.md:' + entry.line + ' → ### ' + entry.id).join('、'));
+}
+
+// ② 条目区外条目 + ③ 同段内编号递增：既有结构判据保持原作用面（verify / archive）——open 出口只
+// 新增 ① 的旧形态迁移判据，不顺手把这两条扩张到 open（判据作用面按 AC 逐个交代）。
+function checkLessonsZoneAndOrder({ content, state }) {
+  // 条目区锚点（段名归一：条目区 / 活跃条目 / 已解决条目，容忍括号后缀）——取最早条目段
+  const zoneIndex = (() => {
+    const hits = LESSONS_ENTRY_ZONE_NAMES
+      .map((name) => content.search(headingPattern(name, 2)))
+      .filter((index) => index !== -1);
+    return hits.length ? Math.min(...hits) : -1;
+  })();
+  const headings = [...content.matchAll(/^###\s*L-(\d+)/gm)];
+  if (zoneIndex !== -1) {
+    const outside = headings.some(h => h.index < zoneIndex);
+    if (outside) {
+      if (isNewChange(state)) {
+        console.error('BLOCKED: LESSONS.md 有条目在条目区外（新 change 强制条目插入条目区）;恢复: 移入条目区');
+        process.exit(1);
+      }
+      // 诊断信息附带 zoneIndex/条目位置——偶发 WARN 排查时可直接定位（文件时序/编码差异兜底）
+      console.error('WARN: LESSONS.md 有条目在条目区外(zoneIndex=' + zoneIndex + ', 条目数=' + headings.length + ', 区外条目: ' + headings.filter(h => h.index < zoneIndex).map(h => 'L-' + h[1]).join(',') + ')');
+    }
+  }
+  const nums = headings.map(h => parseInt(h[1], 10));
+  // 分段检测：按 ## 标题分段，仅同段内比较编号递增（多段 LESSONS 如「活跃条目/已解决条目」编号体系可独立）
+  const sectionStarts = [...content.matchAll(/^##\s+.*$/gm)].map(m => m.index);
+  for (let i = 1; i < nums.length; i++) {
+    const sameSection = !sectionStarts.some(s => s > headings[i - 1].index && s < headings[i].index);
+    if (sameSection && nums[i] <= nums[i - 1]) {
+      if (isNewChange(state)) {
+        console.error('BLOCKED: LESSONS.md 条目编号乱序（新 change 强制按编号插入条目区）;恢复: 按 L-NNN 顺序插入');
+        process.exit(1);
+      }
+      console.error('WARN: LESSONS.md 条目编号乱序（L-' + String(nums[i]).padStart(3, '0') + ' 应按序插入条目区）');
+      break;
+    }
+  }
+}
+
+// ④ 条目字段键（C20）：键集合从 LESSONS 模板「条目格式」段的书写样例派生（不写字面第二份清单）。
+// 模板缺席 / 无「条目格式」段 / 样例无字段行 → null——调用方显式声明「未校验（模板缺失）」，不臆造。
+async function lessonsEntryFieldKeys() {
+  const skeleton = await buildSkeleton('LESSONS');
+  if (!skeleton.derived) return null;
+  const formatSection = skeleton.sections.find((section) => section.norm.includes('条目格式'));
+  if (!formatSection) return null;
+  // 模板按 runRoot 解析：登记表的 file 是项目根相对路径，而 guard 可能在与项目根不同的 cwd
+  // 被调起（运行上下文由 FLOW_COMET_RUN_ROOT 给定）。按 cwd 读会在模板在场时也判「模板缺失」，
+  // 字段键无从派生 → C20 静默退化为「未校验」。
+  let text;
+  try { text = await fs.readFile(path.join(runRoot, skeleton.file), 'utf8'); } catch { return null; }
+  const keys = [];
+  let inSection = false;
+  let inFence = false;
+  for (const line of String(text).replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n').split('\n')) {
+    if (!inSection) {
+      if (formatSection.pattern.test(line)) inSection = true;
+      continue;
+    }
+    if (/^##\s+/u.test(line)) break;
+    if (/^\s*```/u.test(line)) { inFence = !inFence; continue; }
+    if (!inFence) continue;
+    const matched = line.match(LESSONS_FIELD_LINE_RE);
+    if (matched) keys.push(matched[1].trim());
+  }
+  return keys.length > 0 ? keys : null;
+}
+
+// `### L-NNN` 条目块：标题行 + 其后各行，直到下一个 H2/H3 标题；围栏内的书写样例不算条目
+// （模板的条目格式样例就是 fenced 形态）——与 LESSONS 关键词扫描的围栏口径一致。
+function lessonsEntryBlocks(content) {
+  const blocks = [];
+  let current = null;
+  let inFence = false;
+  String(content).replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n').split('\n').forEach((line, index) => {
+    if (/^\s*```/u.test(line)) {
+      inFence = !inFence;
+      if (current) current.lines.push(line);
+      return;
+    }
+    if (inFence) {
+      if (current) current.lines.push(line);
+      return;
+    }
+    if (/^#{2,3}\s/u.test(line)) {
+      const matched = line.match(LESSONS_ENTRY_HEADING_RE);
+      current = matched === null ? null : { id: matched[1], line: index + 1, heading: line, lines: [line] };
+      if (current) blocks.push(current);
+      return;
+    }
+    if (current) current.lines.push(line);
+  });
+  return blocks;
+}
+
+// 旧条目判定（结构级，不做语义判断）：非模板标题形态（迁移冒号形态 / 裸标题等历史写法，含 T11
+// 迁移保留原标题形态的条目）或「首发」键指向别的 change。其余缺字段条目按「新条目」处置——
+// 新条目只有标题与正文（无任何字段键）时同样落在 BLOCK 分支（M-5 的失效模式）。
+function lessonsEntryIsOld(block, originKey, state) {
+  if (!LESSONS_TEMPLATE_HEADING_RE.test(block.heading)) return true;
+  if (originKey === null) return false;
+  for (const line of block.lines.slice(1)) {
+    const matched = line.match(LESSONS_FIELD_LINE_RE);
+    if (matched && matched[1].trim() === originKey) {
+      const origin = matched[2].trim();
+      return origin !== '' && !origin.includes(state.activeChange);
+    }
+  }
+  return false;
+}
+
+// ④ 字段键存在性（C20）：新 change 的新条目缺任一键 → BLOCKED；旧条目 / 旧 change → WARN 渐进。
+function checkLessonsEntryFields({ content, node, state, keys }) {
+  const originKey = keys.find((key) => key.includes('首发')) ?? null;
+  const blocked = [];
+  const warned = [];
+  for (const block of lessonsEntryBlocks(content)) {
+    const present = new Map();
+    for (const line of block.lines.slice(1)) {
+      const matched = line.match(LESSONS_FIELD_LINE_RE);
+      if (matched && !present.has(matched[1].trim())) present.set(matched[1].trim(), matched[2].trim());
+    }
+    const missing = keys.filter((key) => !present.has(key));
+    if (missing.length === 0) continue;
+    (lessonsEntryIsOld(block, originKey, state) ? warned : blocked)
+      .push({ id: block.id, line: block.line, missing });
+  }
+  const describe = (entry) => '.specs/LESSONS.md:' + entry.line + ' ' + entry.id
+    + '（缺 ' + entry.missing.join('/') + '）';
+  if (warned.length > 0) {
+    console.error('LESSONS WARN: LESSONS.md 有 ' + warned.length + ' 条旧条目缺字段键（迁移/既有条目渐进不阻断）: '
+      + warned.map(describe).join('、'));
+  }
+  if (blocked.length === 0) return;
+  const guide = '恢复: 按 flow-kit/templates/LESSONS.md「条目格式」段补全字段键（' + keys.join(' / ')
+    + '；正文块不强制）后重试 exit ' + node.id;
+  if (!isNewChange(state)) {
+    console.error('LESSONS WARN: LESSONS.md 有 ' + blocked.length + ' 条条目缺字段键（旧 change 渐进不阻断）: '
+      + blocked.map(describe).join('、') + '；' + guide);
+    return;
+  }
+  console.error('BLOCKED: LESSONS.md 有 ' + blocked.length + ' 条新条目缺字段键（新 change 强制新条目按模板条目格式书写）:');
+  for (const entry of blocked) console.error('  - ' + describe(entry));
+  console.error(guide);
+  process.exit(1);
+}
+
+// ⑤ archive 出口的归档提名核对（对账 SUMMARY 份数 / 提名编号存在性 / 无提名理由）——归档提名
+// 留痕且可核对。新 change BLOCKED / 旧 change WARN（C10）。
+async function checkLessonsNomination({ state }) {
+  const problems = await lessonsNominationProblems(state);
+  if (problems.length === 0) return;
+  if (isNewChange(state)) {
+    console.error('BLOCKED: archive 出口的 evidence.lessonsNomination 不成立（' + problems.length + ' 项）:');
+    for (const problem of problems) console.error('  - ' + problem);
+    console.error('恢复: workflow-state.mjs record archive \'{"summary":"<归档摘要>","lessonsNomination":'
+      + '{"scanned":<该 change 内 SUMMARY 份数>,"nominated":["L-NNN"],"reasonIfNone":"<无提名时的理由>"}}\' 补齐后重试 exit archive');
+    process.exit(1);
+  }
+  console.error('NOMINATION WARN: evidence.lessonsNomination 不成立（旧 change 渐进不阻断）: ' + problems.join('；'));
+}
+
+export async function runLessonsZoneGate({ node, state }) {
+  if (!['open', 'verify', 'archive'].includes(node.id) || !state.activeChange) return;
+  const lessonsFile = path.join(runRoot, '.specs', 'LESSONS.md');
+  let content = null;
+  try { content = await fs.readFile(lessonsFile, 'utf8'); } catch { content = null; }
+  if (content !== null) {
+    checkLessonsEntryForm({ content, node, state });
+    if (node.id !== 'open') {
+      checkLessonsZoneAndOrder({ content, state });
+      const fieldKeys = await lessonsEntryFieldKeys();
+      if (fieldKeys === null) {
+        console.error('LESSONS 条目字段 未校验（模板缺失）——flow-kit/templates/LESSONS.md 或其「条目格式」样例缺席，'
+          + '字段键无法派生（修复: 按安装指引获取 flow-kit 模板后重试）');
+      } else {
+        checkLessonsEntryFields({ content, node, state, keys: fieldKeys });
       }
     }
-  } catch {}
+  }
+  if (node.id === 'archive') await checkLessonsNomination({ state });
 }
 
 // STATE.md / CHANGELOG.md 倒序检测（archive 出口）：决策日志与表格条目应顶部插入（新→旧）
@@ -752,7 +1131,26 @@ export async function runReviewExitGate({ node, state }) {
     // [转待办]（归档时进 KNOWN-ISSUES）。结构级校验，WARN 渐进不 BLOCK：旧 REVIEW 未按新格式写标记
     // 只警告不阻断（防旧 REVIEW 卡死），执行者补标记后可消除。
     const reviewText = await fs.readFile(reviewFile, 'utf8');
-    const missingDisposition = reviewFindingsMissingDisposition(reviewText);
+    // 发现位置（模板 2.2）：发现写在旧 `## 发现` 而模板位置 `### 2.2 …详细发现` 下无条目——旧段不被
+    // 任何出口消费，等于「记录后静默丢弃」。新 change BLOCKED + 逐条迁移指引；旧 change WARN 渐进。
+    // 模板缺席（primary=null）时不判位置：模板派生判据不臆造（C9），旧形态解析与处置校验照常。
+    const scope = await reviewFindingScope();
+    const findings = reviewFindingsItems(reviewText, scope);
+    const misplacedFindings = scope.primary !== null
+      && !findings.some((item) => item.scope === 'primary')
+      && reviewLegacyFindingsHasContent(reviewText);
+    if (misplacedFindings) {
+      const templateFile = (await buildSkeleton('REVIEW')).file ?? 'flow-kit/templates/REVIEW.md';
+      if (isNewChange(state)) {
+        console.error('BLOCKED: REVIEW.md 的发现写在模板外的段「## 发现」，而模板位置（第二轮下的 2.2 详细发现）无条目——新 change 强制写在模板位置');
+        console.error('恢复: 把「## 发现」下的条目逐条移入「### 2.2 …详细发现」段内（模板: ' + templateFile
+          + '），删除旧段后重试 exit review');
+        process.exit(1);
+      }
+      console.error('REVIEW WARN: REVIEW.md 的发现写在模板外的段「## 发现」，模板位置 2.2 详细发现 无条目'
+        + '——迁移到 2.2 后本警告消除（旧 change 渐进不阻断；模板: ' + templateFile + '）');
+    }
+    const missingDisposition = reviewFindingsMissingDisposition(reviewText, scope);
     if (missingDisposition.length > 0) {
       if (isNewChange(state)) {
         console.error('BLOCKED: REVIEW.md 发现区 ' + missingDisposition.length + ' 项条目缺处置状态标记（[已修]/[升级]/[转待办]）——新 change 强制每项发现须有处置');
@@ -767,7 +1165,7 @@ export async function runReviewExitGate({ node, state }) {
     // 条目标 [转待办] 时须同时存在用户裁决记录（同段或文末含「用户裁决：接受延期」且指向该条目，
     // 并由 [升级] 承接）；缺失 → 新 change BLOCKED / 旧 change WARN 渐进。Minor 不受影响；
     // Major [升级]/[已修] 直接放行。
-    const deferredMajor = reviewDeferredMajorProblems(reviewText);
+    const deferredMajor = reviewDeferredMajorProblems(reviewText, scope);
     if (deferredMajor.length > 0) {
       const guide = '；恢复: 先把 Major 改为 [升级] 交用户裁决；用户接受延期后在同段或文末记录「用户裁决：接受延期」并指向该条目（由 [升级] 承接）';
       if (isNewChange(state)) {

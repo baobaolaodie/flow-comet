@@ -17,14 +17,16 @@ Responsibility: CHANGE 反问 + REQUIREMENT 需求分析。生成 CHANGE.md 和 
 
 ### 必填段清单（结构+存在级）
 
-| 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
-|------|-------------------------------|-----------------------------------|
-| CHANGE.md | `## Why（为什么做）` | `## 影响面` / `## 范围排除` / `## 风险与未知` 等 |
-| REQUIREMENT.md | `## 用户故事` / `## 验收准则（AC）` | `## 范围切分` / `## 非功能性需求` 等 |
+| 文件（模板 = `flow-kit/templates/<DOC>.md`） | 左栏 · 无条件段（模板 H2，缺席 / 空正文 = BLOCKED） | 右栏 · 条件段（**标题必须在场**，正文可写 `N/A`）/ 增量段（按登记位置） |
+|------|------|------|
+| `CHANGE.md` | `## Why（为什么做）` / `## What（做什么）` / `## 影响面` / `## 范围排除（这次不做）` / `## 验收线（粗粒度，不是 AC）` / `## 风险与未知`；首部 `Change ID` 必填 | **条件段**：`## 视觉调性（前端项目必填，由 0-change 步骤 0.6 预选填入）`——标题必须在场，非前端以结构形态标注「不适用」；**增量段**：`## 架构层影响声明`（可选，位置 = 文末 / `## 风险与未知` 之后） |
+| `REQUIREMENT.md` | `## 用户故事` / `## 验收准则（AC）` / `## 范围切分` / `## 非功能性需求` / `## 依赖与假设`；`## 范围切分` 的结构子段 `### v1（本次必做）` / `### v2（下一轮考虑，不本次）` / `### out（永远不做）` 在父段适用时必在场；首部 `Change ID` 必填 | 无模板条件段、无增量段——`## 范围切分` 整段写 `N/A` 时其结构子段随之豁免 |
 
-guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / templateSectionPatterns；「填得好不好」由 review 把关。
+模板缺席（`flow-kit/templates/` 不在场）时骨架无从派生：该工件**不校验**并输出「未校验（模板缺失）」，不拿内置骨架顶替。guard 校验见 workflow-guard.mjs 的出口门禁与模板骨架派生（条件段 / 结构子段 / 增量段的位置与必填性来自 `../flow-comet/reference/artifact-templates.json` 登记）；「填得好不好」由 review 把关。
 
-> **模板权威**：本节点产出工件的段形唯一权威 = `flow-kit/templates/**`；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+> **模板权威**：本节点产出工件的段形 = **上游模板 + 本仓登记的增量段**——唯一权威 = `flow-kit/templates/**`（段与正文），条件段 / 结构子段 / 增量段与指纹由 `../flow-comet/reference/artifact-templates.json` 登记；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+
+加载顺序：先读 `READ PROMPT:`（`0-change`、`1-requirement`），再读 `READ TEMPLATE:`（`CHANGE`、`REQUIREMENT`）。
 
 # Open
 
@@ -111,11 +113,11 @@ The open node loads `flow-comet-change` for the CHANGE phase (structured questio
 **加载声明（阶段层 · 双步硬规则）**：本节点技能已由入口路由经 Skill 工具加载（你正在阅读的就是它）；本节点 Required Skill Calls 的加载与声明同样不可跳过：
 
 1. **用 Skill 工具加载** `flow-comet-change` 与 `flow-comet-requirement`（本节点 Required Skill Calls）。**不得跳过**——只读取 SKILL.md 文件不叫加载；真正让这两个 skill 的指令生效的是 Skill 工具把它们注入本次会话。
-2. 加载完成后**立即**运行声明命令，每个协议文件对应一条（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+2. 加载完成后**立即**运行声明命令，每个协议文件对应一条（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）。`--templates` 声明本节点该读的产出物模板，**每条命令都写全清单**（两个标记各一份，节点级取并集）：
 
 ```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-change --prompt flow-kit/prompts/0-change.md
-node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-requirement --prompt flow-kit/prompts/1-requirement.md
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-change --prompt flow-kit/prompts/0-change.md --templates CHANGE.md,REQUIREMENT.md
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-requirement --prompt flow-kit/prompts/1-requirement.md --templates CHANGE.md,REQUIREMENT.md
 ```
 
 > **跑 skill-load 声明命令 ≠ 加载**：声明只把“哪次会话加载了哪个 skill、按哪份协议工作”写进状态供 exit/record 核对；真正加载只有第 1 步的 Skill 工具能做到。

@@ -7,6 +7,18 @@ description: "Use when the user wants the flow-comet managed workflow for flow-k
 
 # flow-comet
 
+## 协议覆盖声明（phase-gated · 上游 vendored 只读基准）
+
+**上游只读基准**：`flow-kit/prompts/**` 与 `flow-kit/templates/**` 是随包引入的上游 vendored 基准，本仓**只读引用、不修改**；下列是本仓有意的方向修正，逐条可审计。
+
+**不采用（逐条点名）**：① flow-kit 设计原则里的「artifact-first，不是 phase-gated（阶段可压缩、可回炉）」——本仓是 **phase-gated**：8 节点 entry/exit 门 + 节点顺序门，`currentNode` 不匹配即 BLOCKED；② 上游各 prompt 的段表只作内容指引、不作段形来源——`flow-kit/prompts/0-change.md` 的 CHANGE 自检 5 段清单、`flow-kit/prompts/2-design.md` 的 §3 / §4 编号（与模板的 3 / 4 / 5 互换）、`flow-kit/prompts/5-test.md` 的 H3 编号（与模板 H3 错位）一律不采用。
+
+**沿用上游**：工件优先级（`.specs/<change-id>/` 是唯一进度真相，可回炉重进）与各阶段的内容协议（反问 / 决策清单 / 5 轮金字塔 / LESSONS 提名）全部沿用；段名、段序与结构子段以 `flow-kit/templates/**` 加 `reference/artifact-templates.json` 为唯一来源。
+
+**阶段门是工件门的加强，不是替代**：工件仍是唯一真相，阶段门只把「缺工件」从「事后发现」提前到「出口拦截」——不能拿阶段门替代工件本身。
+
+**以本节为准**：本节的 phase-gated 反转全局生效；其余覆盖项按各自小节划定适用面，节点册与技能册另有覆盖声明的，以该册声明为准。
+
 ## Decision Core
 
 ### 自动节点检测
@@ -167,7 +179,7 @@ node .claude/skills/flow-comet/scripts/context-scan.mjs [--root <项目根>] [--
 
 **新 change 严格模式**：`init` 创建的 change 标记为"新"（`newChange: true`）——新 change 下全部内容级检查强制 BLOCKED（处置标记/缓存证据/波次散文/越权委托/SUMMARY 完整性/进入证据等）；旧 change（历史遗留,无标记）保持渐进 WARN。执行者可通过 `status` 确认当前 change 的新旧。
 
-> **design 行绑定的前端适用性**：`flow-comet-ui-design` 与协议一致为 `guarded`，但只对**前端 change** 适用——**触发与跳过判据的唯一权威是 `flow-comet-ui-design` 册**；结构形态按其口径压缩为：`CHANGE.md` 的「视觉调性」段在场，段内「不适用」标记须成**独立行**、居**行首**，或写在适用性类标签的**字段值位**，标记之后须成**词形边界**（命中即回显**命中片段**自证）。前端须先用 Skill 工具加载该技能 + `skill-load design flow-comet-ui-design --prompt flow-kit/prompts/2a-ui-design.md` 建标记，并在 record 载荷带 `required-skill:design.flow-comet-ui-design`；非前端不加载、不声明，出口打印可见的 `UI-DESIGN: skipped（非前端）` 后放行；旧 change 缺件仅 WARN。
+> **design 行绑定的前端适用性**：`flow-comet-ui-design` 与协议一致为 `guarded`，但只对**前端 change** 适用——**触发与跳过判据的唯一权威是 `flow-comet-ui-design` 册**；结构形态按其口径压缩为：`CHANGE.md` 的「视觉调性」段在场，段内「不适用」标记须成**独立行**、居**行首**，或写在适用性类标签的**字段值位**，标记之后须成**词形边界**（命中即回显**命中片段**自证）。前端须先用 Skill 工具加载该技能 + `skill-load design flow-comet-ui-design --prompt flow-kit/prompts/2a-ui-design.md --templates DESIGN.md` 建标记，并在 record 载荷带 `required-skill:design.flow-comet-ui-design`；非前端不加载、不声明，出口打印可见的 `UI-DESIGN: skipped（非前端）` 后放行；旧 change 缺件仅 WARN。
 
 **节点技能两层加载模型（入口层 · 双步硬规则）**：路由到节点后，以下两步**都不可跳过**：
 
@@ -175,8 +187,12 @@ node .claude/skills/flow-comet/scripts/context-scan.mjs [--root <项目根>] [--
 2. 随后按该节点 SKILL 的 Required Skill Calls，用 Skill 工具加载协议技能（与 Implementation 同名的条目已随路由加载，无需重复加载），加载完成后**立即**逐条运行声明命令（open/review 等涉及多个协议文件的节点，每个协议文件对应一条声明命令）：
 
 ```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <skill> --prompt flow-kit/prompts/<阶段>.md
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <skill> --prompt flow-kit/prompts/<阶段>.md --templates <模板基名,...>
 ```
+
+> **提示词 = 步骤权威、模板 = 段形权威，两者缺一即未完成加载**：`--prompt` 指向的 `flow-kit/prompts/<阶段>.md` 规定这一步**怎么做**（流程步骤、检查项、交接物），`--templates` 指向的 `flow-kit/templates/<DOC>.md` 规定产出**长什么样**（标题、段序、段形）。节点入口先打印 `READ PROMPT:`；**有模板的节点**再打印 `READ TEMPLATE:`（verify / archive 为零模板节点，只打印一行）；**两条 READ 行都要读**。design 的**前端** change 还会多打印一行 `READ PROMPT（条件提示词）: …2a-ui-design.md…`（按 `frontendCriterion` 判定；非前端不打印）。`--prompt` 必须是该节点的协议文件（以入口打印的 `READ PROMPT:` 行为准）；错路径由入口（核对已写下的声明）与出口（核对节点协议集）两侧拦下（BLOCKED），不会静默写成一条与节点无关的声明。
+
+> **`--templates` 是内置节点的必填声明**（每个声明标记各写**全清单**，与节点映射一致）：open → `CHANGE.md,REQUIREMENT.md` · design → `DESIGN.md`（前端 change 可再加 `UI-DESIGN.md`）· plan → `TASK.md` · execute / subagent-execute → `SUMMARY.md` · review → `REVIEW.md,TEST.md` · verify / archive → **零模板节点，省略该参数**（省略即空集；多写反而不一致）。声明集合由引擎校验：漏写 / 多写 / 错名在新 change 下即 BLOCK，旧 change 仅 WARN。
 
 > **跑声明命令 ≠ 加载**：声明只把“哪次会话加载了哪个 skill、按哪份协议工作”写进状态供 exit/record 核对；真正加载只有第 1 步的 Skill 工具能做到。协议的引用示例：execute / subagent-execute 节点加载 flow-comet-dev 时用 `--prompt flow-kit/prompts/4-dev.md`（DEV 阶段协议），交付物按 `flow-kit/templates/SUMMARY.md` 模板填写并补写 `## 自检方法` 段。
 
@@ -252,8 +268,10 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record <node-id> '{"su
 
 All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT.md, LESSONS.md, CHANGELOG.md).
 
-> **模板权威**：工件段形以 `flow-kit/templates/**` 为唯一权威。
+> **模板权威**：工件段形 = **上游模板 + 本仓登记的增量段**——`flow-kit/templates/**` 是唯一权威（段与正文），条件段 / 结构子段 / 增量段与指纹由 `reference/artifact-templates.json` 登记。
 > **archive 定位与读法**：`.specs/archive/**` 是历史证据。**何时可读**：工作区文档明确要求（如断点续传 / 决策追溯），或某 guard 硬校验的约定在模板与 LESSONS 中查不到时；**读什么**：只取结构与证据；**不读什么**：不作为格式规范或决策依据，不得以归档工件对齐段形。
+
+> **要判定某一段是上游模板段还是本仓登记的增量段、或要核对某工件的条件段与结构子段登记时，先读 `reference/artifact-template-overlay.md`**（按登记表派生的人类可读册：逐工件的标题形态 / 首部字段 / 无条件段 / 条件段 / 结构子段 / 增量段与位置）。
 
 ### Scripts
 

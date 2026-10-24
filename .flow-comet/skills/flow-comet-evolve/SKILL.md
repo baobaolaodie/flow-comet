@@ -32,6 +32,7 @@ node .claude/skills/flow-comet/scripts/evolve.mjs scan --root .
 - **只读**每个 `.specs/archive/<日期>-<change-id>/DESIGN.md` 的架构沉淀段（第 9 节）——**不读该文档的其它段**，防 change 级冻结决策被错误升级为项目级
 - 输出候选清单：`<归档目录名>#<序号>` + 条目 + 目标文档；并列出本次已扫的 change（含无沉淀段、无 `DESIGN.md` 的目录），扫描范围对用户完全可见
 - 候选落点按沉淀子段归类：可复用抽象 / 禁动清单 → `CONTEXT.md`「既有抽象索引」；项目级技术决策 → `CONTEXT.md`「已锁决策」；依赖 → `CONTEXT.md`「技术栈」；跨模块契约 → `ARCHITECTURE.md`「跨模块契约」（该文档不在场时需先建立，否则应用会被拒绝且零改动）
+- **「结构问题」段（只读上报，与沉淀候选互不依赖）**：同一条命令末尾输出 `EVOLVE: 结构问题（.specs/ARCHITECTURE.md）：…`——`.specs/ARCHITECTURE.md` 在场时按上游模板的 8 个 H2 与「ADR 列表」段的 `### ADR-<数字>` 条目字段形态比对；文件缺席输出「跳过」、骨架不可派生输出「未校验」、可比对时输出 0 项或逐条问题。该段**不进退出码、不写 state**，也不改变候选清单
 
 ### 2. 逐项 review（用户参与，不可跳过）
 

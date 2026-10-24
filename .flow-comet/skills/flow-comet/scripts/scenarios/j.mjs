@@ -338,12 +338,12 @@ export const ENTRIES = [
         ...handoffFor(['T-FIX-01']),
       };
       writeState(dir, after);
-      assertExit(runStateWithProtocol(dir, ['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md']), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md']), 0);
       const recDoneExit = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(recDoneExit, 0);
       assertOut(recDoneExit, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
       assertOut(recDoneExit, 'NODE: review');
-      assertExit(runStateWithProtocol(dir, ['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md']), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md', '--templates', 'REVIEW.md,TEST.md']), 0);
       assertExit(runGuard(['entry', 'review'], dir), 0);
       const recDoneReview = runGuard(['exit', 'review', '--apply'], dir);
       assertExit(recDoneReview, 0);
@@ -386,7 +386,7 @@ export const ENTRIES = [
         ...handoffFor(['T-FIX-01']),
       };
       writeState(dir, after);
-      assertExit(runStateWithProtocol(dir, ['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md']), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md']), 0);
       const recDoneVerifyExit = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(recDoneVerifyExit, 0);
       assertOut(recDoneVerifyExit, 'FIX-BATCH: 回源节点 verify（execute 出口已完成）');
@@ -448,7 +448,7 @@ export const ENTRIES = [
         ...handoffFor(['P-FIX-01']),
       };
       writeState(dir, after);
-      assertExit(runStateWithProtocol(dir, ['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md']), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md']), 0);
       const rParExit = runGuard(['exit', 'subagent-execute', '--apply'], dir);
       assertExit(rParExit, 0);
       assertOut(rParExit, 'FIX-BATCH: 回源节点 review（subagent-execute 出口已完成）');
@@ -463,7 +463,7 @@ export const ENTRIES = [
         || typeof parFamilyExit.taskSetSignature !== 'string' || parFamilyExit.taskSetSignature === '') {
         throw new Error('并行修复出口应记录本 change + taskSetSignature 的家族出口事件，实际 ' + JSON.stringify(parFamilyExit));
       }
-      assertExit(runStateWithProtocol(dir, ['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md']), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md', '--templates', 'REVIEW.md,TEST.md']), 0);
       assertExit(runGuard(['entry', 'review'], dir), 0);
       const rParSource = runGuard(['exit', 'review', '--apply'], dir);
       assertExit(rParSource, 0);
@@ -501,7 +501,7 @@ export const ENTRIES = [
         ...handoffFor(['P-FIX-01']),
       };
       writeState(dir, after);
-      assertExit(runStateWithProtocol(dir, ['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md']), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md']), 0);
       const rDoneParExit = runGuard(['exit', 'subagent-execute', '--apply'], dir);
       assertExit(rDoneParExit, 0);
       assertOut(rDoneParExit, 'FIX-BATCH: 回源节点 review（subagent-execute 出口已完成）');

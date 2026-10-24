@@ -7,7 +7,11 @@ description: "flow-kit CHANGE 阶段协议：反问澄清、change-id 自动生�
 
 本 Skill 为 flow-comet 的 open 节点提供 flow-kit 的 CHANGE 反问协议。
 
-> **模板权威**：本技能产出工件的段形唯一权威 = `flow-kit/templates/**`；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+> **模板权威**：本技能产出工件的段形 = **上游模板 + 本仓登记的增量段**——唯一权威 = `flow-kit/templates/**`（段与正文），条件段 / 结构子段 / 增量段与指纹由 `../flow-comet/reference/artifact-templates.json` 登记；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+
+## 上游段表不采用（覆盖声明）
+
+`flow-kit/prompts/0-change.md` 的自检清单把 CHANGE.md 写成 5 段（Why / What / 影响面 / 范围排除 / 验收线）——**这 5 段清单不采用**作段表：它漏了 `视觉调性` 与 `风险与未知`。段名与段序以 `flow-kit/templates/CHANGE.md` 的 7 个 H2 为准（`视觉调性` 是标题必须在场的条件段，`架构层影响声明` 是本仓登记的可选增量段）。
 
 ## 加载
 
@@ -32,7 +36,7 @@ description: "flow-kit CHANGE 阶段协议：反问澄清、change-id 自动生�
 
 - **判据与强制等级（唯一权威）**：判据全文与 `guarded` 绑定、`required-skill:design.flow-comet-ui-design` 声明要求、非前端 `UI-DESIGN: skipped（非前端）` 的出口口径都在 `flow-comet-ui-design` 册的「触发与跳过」段——本节不复述，只描述怎么填段。
 - **前端项目**：按步骤 0.6 的预选结果填段（选定 / 理由 / 参考产品 / 明确排除），不要以结构形态标注「不适用」。
-- **非前端项目**：保留该段并以**结构形态**标注「不适用」（可附一句理由，例如「CLI 工具，无用户可见界面」）。段缺席同样按非前端处理，但缺席不留可读证据，故约定**显式标注**。
+- **非前端项目**：保留该段并以**结构形态**标注「不适用」（可附一句理由，例如「CLI 工具，无用户可见界面」）。**段缺席不再默认判非前端**——新 change 的「视觉调性」是标题必须在场的条件段，**缺席即拦**（open 出口的骨架校验与 design 出口的适用性门控都会拦）；缺席只对旧 change 兼容（沿用旧口径判非前端，出口打印 `UI-DESIGN: skipped（旧 change 兼容）`）。
 - **改判走本阶段**：change 进行中要改前端 / 非前端判定，回到这里改这一个段，不在 design / execute / verify 里就地绕开判据——改段即改变了 design 出口的判据输入。
 
 ## 状态推进

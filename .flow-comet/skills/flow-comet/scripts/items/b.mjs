@@ -86,7 +86,7 @@ export const ENTRIES = [
       assertNodeLine(a21PostNext, 'review');
 
       // ⑤ 回源 review 出口门禁真实执行：缺处置标记 → BLOCKED；补齐后同出口通过并推进 verify
-      assertExit(runState(['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md'], dir, env), 0);
+      assertExit(runState(['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md', '--templates', 'REVIEW.md,TEST.md'], dir, env), 0);
       assertExit(runGuard(['entry', 'review'], dir, env), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', fixBatchReviewDoc(false));
       const gate = runGuard(['exit', 'review', '--apply'], dir, env);
@@ -247,7 +247,7 @@ export const ENTRIES = [
       assertOut(rClosedExit, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
       assertNotOut(rClosedExit, 'RETURN: 回源节点');
       assertNodeLine(rClosedExit, 'review');
-      assertExit(runState(['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md'], dir, env), 0);
+      assertExit(runState(['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md', '--templates', 'REVIEW.md,TEST.md'], dir, env), 0);
       assertExit(runGuard(['entry', 'review'], dir, env), 0);
       const rReviewPass = runGuard(['exit', 'review', '--apply'], dir, env);
       assertExit(rReviewPass, 0);
@@ -280,7 +280,7 @@ export const ENTRIES = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', fixBatchParallelTaskText('done'));
       writeFile(dir, '.specs/' + CHANGE_ID + '/P-FIX-01-SUMMARY.md', execSummaryFixture('P-FIX-01'));
       // 委托前先加载节点技能声明（新 change 两层加载模型：request 命令要求标记在位）。
-      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
       for (const taskId of ['T01', 'P-FIX-01']) {
         assertExit(runHandoff(['request', taskId, taskId + ' 委托', '--write-files', 'src/' + taskId.toLowerCase() + '.mjs'], dir), 0);
         assertExit(runHandoff(['result', taskId, fullContract('abcd1234abcd1234abcd1234abcd1234abcd1234', taskId)], dir), 0);
@@ -296,7 +296,7 @@ export const ENTRIES = [
       if (pSt.currentNode !== 'review') {
         throw new Error('并行修复第二趟出口应回源 review，实际 ' + JSON.stringify(pSt.currentNode));
       }
-      assertExit(runState(['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md'], dir, env), 0);
+      assertExit(runState(['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md', '--templates', 'REVIEW.md,TEST.md'], dir, env), 0);
       assertExit(runGuard(['entry', 'review'], dir, env), 0);
       const pReviewPass = runGuard(['exit', 'review', '--apply'], dir, env);
       assertExit(pReviewPass, 0);
@@ -407,7 +407,7 @@ export const ENTRIES = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', fixBatchTwoFixTaskText('done', 'done'));
       writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-01-SUMMARY.md', execSummaryFixture('T-FIX-01'));
       writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-02-SUMMARY.md', execSummaryFixture('T-FIX-02'));
-      assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+      assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
       assertExit(runState(['record', 'execute', '{"summary":"fix wave two executed","parallelTakeoverApproved":true}'], dir, env), 0);
       const wave2 = runGuard(['exit', 'execute', '--apply'], dir, env);
       assertExit(wave2, 0);
@@ -466,7 +466,7 @@ export const ENTRIES = [
         executionMode: 'subagent',
         directOverride: false,
       });
-      assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+      assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
       assertExit(runState(['record', 'execute', '{"summary":"legacy state closure","parallelTakeoverApproved":true}'], dir, env), 0);
       const legacyExit = runGuard(['exit', 'execute', '--apply'], dir, env);
       assertExit(legacyExit, 0);
@@ -500,7 +500,7 @@ export const ENTRIES = [
         for (let i = 1; i <= n; i++) {
           writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-0' + i + '-SUMMARY.md', execSummaryFixture('T-FIX-0' + i));
         }
-        assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+        assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
         // entry 记录 taskHash：签名值必须带算法版本前缀（新链路 vN 前缀形态）
         assertExit(runGuard(['entry', 'execute'], dir, env), 0);
         const stHash = readStateFile(dir);
@@ -628,7 +628,7 @@ export const ENTRIES = [
       // 清掉本项先前 verify 子场景遗留的 TEST/UAT，使回程路由确定为 verify（夹具前提）
       fs.rmSync(path.join(dir, '.specs', CHANGE_ID, 'TEST.md'), { force: true });
       fs.rmSync(path.join(dir, '.specs', CHANGE_ID, 'UAT.md'), { force: true });
-      assertExit(runState(['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md'], dir, env), 0);
+      assertExit(runState(['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md', '--templates', 'REVIEW.md,TEST.md'], dir, env), 0);
       assertExit(runGuard(['entry', 'review'], dir, env), 0);
       const skewExit = runGuard(['exit', 'review', '--apply'], dir, env);
       assertExit(skewExit, 0);
@@ -646,7 +646,7 @@ export const ENTRIES = [
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
       writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
-      const res = runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir);
+      const res = runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir);
       assertExit(res, 0);
       assertOut(res, 'SKILL-LOAD: open flow-comet-change');
       const markerPath = path.join(dir, '.specs', CHANGE_ID, '.skill-loads', 'open-flow-comet-change.json');
@@ -708,7 +708,7 @@ export const ENTRIES = [
     name: 'B4 record：声明后记录通过',
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
-      assertExit(runState(['skill-load', 'open', 'flow-comet-change'], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
       const res = runState(['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })], dir);
       assertExit(res, 0);
       assertOut(res, 'EVIDENCE: open');
@@ -749,7 +749,7 @@ export const ENTRIES = [
     name: 'B7 record：委托范围条目豁免（有委托通过 / 无委托拦截）',
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
-      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev'], dir), 0);
+      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--templates', 'SUMMARY.md'], dir), 0);
       const payload = JSON.stringify({ summary: 'delegated', completedChecks: ['required-skill:subagent-execute.flow-comet-dev'] });
       // 无委托记录 → 拦截（handoff scope 条目以共用证据库的委托记录为证据）
       const blocked = runState(['record', 'subagent-execute', payload], dir);
@@ -774,7 +774,7 @@ export const ENTRIES = [
     name: 'B8 exit：协议声明标记校验（record 自动补通过 / 手动声明 / 空协议·损坏拦截）',
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
-      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
       writeIntakeArtifacts(dir);
       writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
       // ① M5: record 自动补声明标记 → 出口通过（无需手动 skill-load）
@@ -787,14 +787,14 @@ export const ENTRIES = [
       assertOut(rAuto, 'ALL CHECKS PASSED');
       assertNotOut(rAuto, 'BLOCKED');
       // ② 手动 skill-load --prompt（protocol = basename）覆盖自动标记 → 出口通过
-      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
       const rPass = runGuard(['exit', 'open'], dir);
       assertExit(rPass, 0);
       assertOut(rPass, 'ALL CHECKS PASSED');
       assertNotOut(rPass, 'BLOCKED');
       // ③ 未传 --prompt → 标记 protocol = null → 拦截（fail-closed；open 两个 requiredSkillCalls 均覆盖为 null）
-      assertExit(runState(['skill-load', 'open', 'flow-comet-change'], dir), 0);
-      assertExit(runState(['skill-load', 'open', 'flow-comet-requirement'], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-requirement', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
       const rNull = runGuard(['exit', 'open'], dir);
       assertExit(rNull, 1);
       assertOut(rNull, 'exit 缺协议声明标记');
@@ -811,7 +811,7 @@ export const ENTRIES = [
     name: 'B9 旧项目兼容：record 自动补声明后照常通过',
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
-      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
       // 旧格式记录：completedChecks 无 required-skill 条目 → 不校验标记,通过
       const rA = runState(['record', 'open', JSON.stringify({ summary: 'legacy', completedChecks: ['unit-tests'] })], dir);
       assertExit(rA, 0);

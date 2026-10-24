@@ -43,7 +43,9 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 | `workflow-guard.mjs` | `entry` / `exit` —— 门禁。出口校验该节点的工件、段、声明，并在 `verify` 时**真跑**测试命令 |
 | `workflow-state.mjs` | `init`、`status`、`next`、`select`、`record`、`verify-fail`、`advance`、`execution-mode`、`config`、`skill-load`、`bridge-check`、`reenter`、`replan`、`explain` —— 状态机与记账 |
 
-节点的出口会在以下情况拒绝通过：工件不完整或形态不合规、缺少技能加载声明、或从未记录进入；每次拒绝都会打印原因与修复命令。状态不存放在对话里：随时用 `status` / `next` 重新推导；单个节点的产物、门禁与命令用 `explain <node>` 现问，不必从节点技能册里手抄。
+`skill-load` 要带上入口打印的那两条指针。`--prompt <flow-kit/prompts/…>` 指向该节点的协议文件——只能是它自己的那几份，否则入口拒绝这条声明；`--templates <DOC.md,...>` 以逗号分隔的完整清单声明该节点的模板，每次声明各写一遍。清单必须与该节点完全一致：缺失、多写或错名在新的 change 上被拒绝、旧 change 只告警。`verify` 与 `archive` 没有模板，不传 `--templates`；自定义协议按协议自己声明的 `templates` 走。
+
+节点的出口会在以下情况拒绝通过：工件不完整或形态不合规、缺少技能加载声明、或从未记录进入；每次拒绝都会打印原因与修复命令。状态不存放在对话里：随时用 `status` / `next` 重新推导；单个节点的产物、门禁、命令与它把关的 `TEMPLATE:` 路径用 `explain <node>` 现问，不必从节点技能册里手抄。
 
 ## 工件
 
@@ -66,7 +68,7 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 
 ## 引擎强制的纪律
 
-- **工件保真** —— 节点文档必须符合 flow-kit 模板的首部字段与段名，否则守卫拒绝出口。
+- **工件保真** —— 引擎在节点出口逐工件校验七类 change 文档（`CHANGE`、`REQUIREMENT`、`DESIGN`、`TASK`、每份 `<任务号>-SUMMARY`、`REVIEW`、`TEST`），判据按 flow-kit 模板：标题形态、首部字段、段集合与段序、空正文、照抄模板占位符。被校验的段集合 = 上游模板的全骨架 + 本仓登记的**增量段**（如 SUMMARY 的 `## 自检方法`、`## LESSONS 扫描`，TEST 的 `## 验证命令`），逐工件对应哪一出口见[守卫校验](MECHANISM-zh.md#守卫校验)。条件段保留标题、正文可写 `N/A`；父段整段 `N/A` 时其结构子段不要求；你在模板之外自加的段不参与校验。项目级工件按「在哪被消费就在哪查」处理——`CONTEXT.md` 在 `open`，`LESSONS.md` 在 `open`、`verify` 与 `archive`，`UI-DESIGN.md` 存在才查，而 `.specs/ARCHITECTURE.md` 只由侧命令只读检查。`UAT.md` 与遗留清单没有上游模板，只查存在性；模板缺席的工件报「未校验」而不是「通过」。
 - **先证据后出口** —— `record <node>` 写入节点证据，出口要求它存在（外加技能加载声明）。
 - **摘要骨架** —— 每个完成任务都要有 `<任务号>-SUMMARY.md`，含模板规定的各段（包括自检与越界检查）。
 - **测试真跑** —— `verify` 出口执行 `TEST.md` 里的命令块并统计失败；命令失败即阻断出口。

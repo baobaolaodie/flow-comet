@@ -209,8 +209,8 @@ const RAW_ENTRIES = [
     run: (dir) => {
       gitInit(dir);
       assertExit(runState(['init', CHANGE_ID, '--init-skip'], dir), 0);
-      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
-      assertExit(runState(['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md'], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
+      assertExit(runState(['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md', '--templates', 'DESIGN.md'], dir), 0);
       writeIntakeArtifacts(dir);
       // ① entry open 记录进入标记
       assertExit(runGuard(['entry', 'open'], dir), 0);

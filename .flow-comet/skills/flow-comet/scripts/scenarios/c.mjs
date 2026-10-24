@@ -56,7 +56,7 @@ export const ENTRIES = [
       writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
       writeState(dir, baseState('open'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
-      const res = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md']);
+      const res = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md']);
       assertExit(res, 0);
       assertOut(res, 'SKILL-LOAD: open flow-comet-change → .skill-loads/open-flow-comet-change.json');
       const markerPath = path.join(dir, '.specs', CHANGE_ID, '.skill-loads', 'open-flow-comet-change.json');
@@ -139,7 +139,7 @@ export const ENTRIES = [
     run: (dir) => {
       writeState(dir, baseState('open'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
-      const sl = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change']);
+      const sl = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change', '--templates', 'CHANGE.md,REQUIREMENT.md']);
       assertExit(sl, 0);
       assertOut(sl, 'SKILL-LOAD: open flow-comet-change');
       const res = runStateWithProtocol(dir, ['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })]);
@@ -189,7 +189,7 @@ export const ENTRIES = [
       assertOut(resBlock, 'exit 缺协议声明标记');
       // ② 真实链路：skill-load --prompt 写入标记（protocol = basename）→ exit 通过
       const markerPath = path.join(loadsDir, 'open-flow-comet-change.json');
-      const sl = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md']);
+      const sl = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md']);
       assertExit(sl, 0);
       assertOut(sl, 'SKILL-LOAD: open flow-comet-change');
       const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
@@ -202,7 +202,7 @@ export const ENTRIES = [
       assertNotOut(resPass, 'BLOCKED');
       // ③ skill-load 未传 --prompt → 标记 protocol = null → exit BLOCKED（fail-closed：
       // 无协议声明不可通过——指引补 skill-load --prompt）
-      const slNull = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change']);
+      const slNull = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change', '--templates', 'CHANGE.md,REQUIREMENT.md']);
       assertExit(slNull, 0);
       const markerNull = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
       if (markerNull.protocol !== null) {

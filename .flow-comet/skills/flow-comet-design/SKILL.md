@@ -17,15 +17,22 @@ Responsibility: 技术栈选型 + ADR + 数据流。生成 DESIGN.md(轻量流�
 
 ### 必填段清单（结构+存在级）
 
-| 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
-|------|-------------------------------|-----------------------------------|
-| DESIGN.md | `## 0.` 技术栈段 / `## 1. 决策清单` | `## 0.5 架构对齐` / `## 风险` / `## 数据流` 等 |
+| 文件（模板 = `flow-kit/templates/<DOC>.md`） | 左栏 · 无条件段（模板 H2，缺席 / 空正文 = BLOCKED） | 右栏 · 条件段（**标题必须在场**，正文可写 `N/A`）/ 增量段（按登记位置） |
+|------|------|------|
+| `DESIGN.md` | `## 0. 技术栈选定` / `## 1. 决策清单` / `## 2. 数据流 / 架构图` / `## 5. 风险` / `## 6. 不在范围`；首部 `Change ID` 必填 | **条件段**：`## 0.5 既有架构对齐` / `## 3. 关键状态机（如有）` / `## 4. ADR 索引` / `## 9. 架构沉淀建议`——标题必须在场，不适用写 `N/A`；`## 0.5` 的结构子段 `### 0.5.1` ~ `### 0.5.3`、`## 9` 的 `### 9.1` ~ `### 9.5` 在父段适用时必在场；**增量段**：无 |
+| `UI-DESIGN.md`（仅前端 change） | frontmatter 八个顶层键（name / description / colors / typography / spacing / rounded / motion / shadow）与 `## 1.` ~ `## 10.` 十个 H2 段 | **可选段**：`## 0. 视觉语汇对齐`（仅 brownfield 填，greenfield 可整段删除——模板允许删除的唯一段，删则其 `### 0.1` ~ `### 0.3` 一并豁免）；**增量段**：无 |
+
+模板缺席（`flow-kit/templates/` 不在场）时骨架无从派生：该工件**不校验**并输出「未校验（模板缺失）」，不拿内置骨架顶替。
+
+**上游段表不采用（覆盖声明）**：`flow-kit/prompts/2-design.md` 的职责小节把 §3 写成 ADR、§4 写成风险，而模板的顺序是 `## 3. 关键状态机` / `## 4. ADR 索引` / `## 5. 风险`——**这两处编号互换不采用**：段名、段序与结构子段一律以 `flow-kit/templates/DESIGN.md` 为准。
 
 > **决策清单段名须与模板精确一致**:guard 按 flow-kit 模板段名派生校验——模板段为 `## 1. 决策清单`(编号可选),**不要写成"技术决策清单"等变体**(2-design.md 指引的"技术决策"是内容要求,不是段名;实测:写变体段名会被拦截)。
 
-guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / templateSectionPatterns；「填得好不好」由 review 把关。
+guard 校验见 workflow-guard.mjs 的出口门禁与模板骨架派生（条件段 / 结构子段 / 增量段的位置与必填性来自 `../flow-comet/reference/artifact-templates.json` 登记）；「填得好不好」由 review 把关。
 
-> **模板权威**：本节点产出工件的段形唯一权威 = `flow-kit/templates/**`；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+> **模板权威**：本节点产出工件的段形 = **上游模板 + 本仓登记的增量段**——唯一权威 = `flow-kit/templates/**`（段与正文），条件段 / 结构子段 / 增量段与指纹由 `../flow-comet/reference/artifact-templates.json` 登记；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+
+加载顺序：先读 `READ PROMPT:`（`2-design`；前端另加 `2a-ui-design`），再读 `READ TEMPLATE:`（`DESIGN`；前端另加 `UI-DESIGN`，可选）。
 
 # Design
 
@@ -114,10 +121,10 @@ The design node reads CHANGE.md and REQUIREMENT.md, then produces DESIGN.md thro
 1. 本节点的同名条目已随路由加载——同名 required 条目（`flow-comet-design`）无需重复加载，仅需运行下方声明命令（只读取 SKILL.md 文件不叫加载，**不得跳过**真正的 Skill 工具注入步骤）。`flow-comet-ui-design` 为 **guarded 但仅前端适用**的条目——前端项目用 Skill 工具加载其已装副本后**必须**运行对应 `skill-load` 声明建标记，并在 record 载荷带 `required-skill:design.flow-comet-ui-design`；非前端项目不加载不声明（出口打印可见的 `UI-DESIGN: skipped（非前端）` 后放行）；旧 change 保持渐进，缺件仅 WARN。
 
 > **前端判据（结构级 · 唯一权威 → `flow-comet-ui-design` 册的「触发与跳过」段）**：判据全文与 `guarded` 绑定的判级口径都在该册——本节不复述，判定与出口行为一律以该册为准。
-2. 加载完成后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+2. 加载完成后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）。`--templates` 声明本节点该读的产出物模板：`design` 的必填模板是 `DESIGN.md`；**前端 change 另加 `UI-DESIGN.md` 时写成 `--templates DESIGN.md,UI-DESIGN.md`**（`UI-DESIGN` 属可选声明，非前端不加）：
 
 ```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load design flow-comet-design --prompt flow-kit/prompts/2-design.md
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load design flow-comet-design --prompt flow-kit/prompts/2-design.md --templates DESIGN.md
 ```
 
 > **跑 skill-load 声明命令 ≠ 加载**：声明只把“哪次会话加载了哪个 skill、按哪份协议工作”写进状态供 exit/record 核对；真正加载只有第 1 步的 Skill 工具能做到。
@@ -146,7 +153,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record design '{"summa
 |--------------|-------|-----------------|
 | `design-artifacts` | DESIGN.md (or DESIGN-lite.md) exists with section 0 | artifact-exists |
 | `architecture-aligned` | Section 0.5 populated for brownfield | 执行纪律（review 把关），guard 不校验 |
-| `ui-design-artifacts` | UI-DESIGN.md exists for frontend projects | 执行纪律（review 把关），guard 不校验 |
+| `ui-design-artifacts` | UI-DESIGN.md exists for frontend projects | 结构级（guard 强制：前端 change 缺 `.specs/<change-id>/UI-DESIGN.md` → 新 change BLOCKED、旧 change WARN；判定依据 = `CHANGE.md` 的「视觉调性」段，判据见 `flow-comet-ui-design` 册） |
 
 ## Exit Check
 

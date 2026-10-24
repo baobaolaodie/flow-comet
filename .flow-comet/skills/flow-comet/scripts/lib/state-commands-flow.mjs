@@ -12,7 +12,7 @@ import { looksLikeObjectLiteral, toPersistedProtocolPath, writeJsonAtomic } from
 import { nowTimestamp } from '../time-utils.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide } from '../context-init.mjs';
 import { fileExists, findActiveChange, readState, writeState, specsDir, runRootDir, hasExactSpecsEntry } from './state-io.mjs';
-import { hasNodeSkillDeclaration, verifySkillLoadMarkers, findSkillLoadsDir } from './state-skillmarkers.mjs';
+import { hasNodeSkillDeclaration, verifySkillLoadMarkers, findSkillLoadsDir, verifyTemplateDeclaration } from './state-skillmarkers.mjs';
 import { determineNode, normalAdvanceExempt } from './state-determine.mjs';
 import { isInsideWorkTree, gitBranchName, branchExists, printBranchLine } from './state-branch.mjs';
 import { printEvolveDueHint } from './state-evolve-hint.mjs';
@@ -600,6 +600,20 @@ export async function runRecord(protocol, argv) {
         process.exit(1);
       }
       console.error('WARN: 节点 ' + nodeId + ' 缺少技能加载声明标记（.skill-loads/' + nodeId + '-*.json）——' + loadGuide + '（旧 change 渐进不阻断，记录继续）');
+    }
+    // 模板声明核对（C11）——声明标记里必须有与该节点映射一致的 templates 集合：新 change
+    // 缺失 / 多写 / 漏写 / 错名 BLOCK（fail-closed，不让人「声明了但说得不对」），旧 change WARN。
+    // 自定义协议节点不比对（C12）；无活动 change / 声明机制未激活时不在这里报（见该函数的边界注释）。
+    const templateCheck = await verifyTemplateDeclaration({
+      protocol,
+      nodeId,
+      changeName: markerChange,
+      newChange: state.newChange === true,
+    });
+    if (templateCheck.warn) console.error('WARN: ' + templateCheck.warn);
+    if (!templateCheck.ok) {
+      console.error('BLOCKED: ' + templateCheck.reason);
+      process.exit(1);
     }
   }
   // 声明自动化——record 时按协议 requiredSkillCalls 自动补写缺失的声明标记

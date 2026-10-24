@@ -1,4 +1,5 @@
-// 证据与产物门禁（守卫模块）：直显授权约束、在飞委托、SUMMARY 必填段与自检方法、execute 出口、
+// 证据与产物门禁（守卫模块）：直显授权约束、在飞委托、SUMMARY 必填段与自检方法、LESSONS 扫描段
+// 与命中核对、execute 出口、
 // verify 出口（真实执行验证命令并记录失败计数）、Return Contract、subagent-execute 摘要与多趟完成
 // 判定、required-skill / schema / 产物 存在性门禁——即「完成声明必须有证据与产物」这一族判据。
 //
@@ -7,7 +8,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor } from '../state-schema.mjs';
-import { EXECUTE_FAMILY_NODE_IDS, analyzeDependencyGraph } from '../route-node.mjs';
+import { EXECUTE_FAMILY_NODE_IDS, analyzeDependencyGraph, normalizeHeading } from '../route-node.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from '../task-parsing.mjs';
 import { runRoot, fileExists, statePath, writeJson } from './guard-state-io.mjs';
 import {
@@ -23,6 +24,7 @@ import {
   verifySummaries,
 } from './guard-routing.mjs';
 import { applicabilityGatedBinding, frontendCriterion } from './guard-uidesign.mjs';
+import { buildSkeleton, headingPattern, LESSONS_SCAN_SECTION } from './guard-artifact-skeleton.mjs';
 
 // directOverride 授权约束（direct 是用户决策点，不可自决——机制约束）——execute / subagent-execute
 // 出口校验：executionMode=direct 且 directOverride=true（显式直显授权态）须存在授权审计记录
@@ -65,8 +67,194 @@ export function runInFlightHandoffGate({ node, state }) {
   }
 }
 
+// ---------- LESSONS 扫描（R1.8 · AC-18：开工前扫描可核对）----------
+//
+// 两条判据：① 每份 *-SUMMARY.md 含 `## LESSONS 扫描` 增量段；② 按任务 write_files 的路径段与该
+// 段内应回应的条目编号（关键词求交、取前 5）必须逐条出现在该段里。段名 / 必填 / 位置三件事都来自
+// 登记表（reference/artifact-templates.json 的 SUMMARY.increments）——位置语义由模板保真门禁按同一
+// 条目执行，本门禁只判「在场 + 命中回应」，不写第二份位置判据（L-067）。
+//
+// 停用词表与命中上限单处定义（段名从骨架模块取用，不在本模块自持第二份清单）。关键词行
+// （`- **关键词**:`）是唯一参与命中计算的字段——无关键词行的旧条目不参与（给旧条目一个不被
+// 误命中的通道）。
+const LESSONS_HIT_LIMIT = 5;
+const LESSONS_PATH_STOPWORDS = new Set([
+  // 目录布局噪音
+  'src', 'lib', 'libs', 'app', 'apps', 'core', 'pkg', 'packages', 'bin', 'dist', 'build', 'out',
+  'tmp', 'temp', 'test', 'tests', 'spec', 'specs', 'unit', 'e2e', 'fixture', 'fixtures',
+  'mock', 'mocks', 'docs', 'doc', 'scripts', 'script', 'assets', 'static', 'public',
+  'config', 'configs', 'utils', 'util', 'helpers', 'helper', 'common', 'shared', 'internal',
+  'modules', 'module', 'components', 'pages', 'views', 'styles', 'data', 'types', 'index',
+  // 扩展名 / 备份后缀残片
+  'mjs', 'cjs', 'jsx', 'tsx', 'json', 'yaml', 'yml', 'toml', 'lock', 'bak', 'log', 'txt', 'css',
+]);
+
+const LESSONS_ENTRY_HEADING = /^###\s*L-(\d+)\b/u;
+const LESSONS_KEYWORD_LINE = /^[-*\s]*\*\*关键词\*\*\s*[:：]\s*(.+)$/u;
+
+// 段名 / 必填来自登记表；登记表或模板缺席时退回段名常量并保持必填——扫描段由 AC-18 要求，不因模板
+// 派生失败而免检（「模板缺失」只让模板派生判据跳过，不让扫描声明消失）。
+async function lessonsScanRule() {
+  const skeleton = await buildSkeleton('summary');
+  const wanted = normalizeHeading(LESSONS_SCAN_SECTION);
+  const entry = (skeleton.increments ?? []).find((item) => item.norm === wanted);
+  if (entry && entry.kind === 'section') {
+    return {
+      name: entry.section,
+      required: entry.required,
+      pattern: entry.pattern ?? headingPattern(entry.section, 2),
+      registered: true,
+    };
+  }
+  return { name: LESSONS_SCAN_SECTION, required: true, pattern: headingPattern(LESSONS_SCAN_SECTION, 2), registered: false };
+}
+
+// write_files 原文（键 = 任务 id）。块提取与开标签解析复用 task-parsing 的既有实现，只读元素文本。
+async function taskWriteFiles(changeDir) {
+  const out = new Map();
+  let text = '';
+  try {
+    text = await fs.readFile(path.join(changeDir, 'TASK.md'), 'utf8');
+  } catch {
+    return out;
+  }
+  for (const block of extractTaskBlocks(text)) {
+    const attrs = taskOpeningAttrs(block);
+    if (!attrs || !attrs.id) continue;
+    const writeFiles = block.match(/<write_files>([\s\S]*?)<\/write_files>/i);
+    if (writeFiles) out.set(attrs.id, writeFiles[1]);
+  }
+  return out;
+}
+
+// 路径段 → 词元：目录名与文件主干（去最后一层扩展名）按非字母数字切分，长度 ≥3、去停用词、去纯数字。
+// 只在「命中计算」这一侧做长度与停用词过滤——条目关键词侧原样保留，过滤口径不扩散成第二份规则。
+function lessonsPathTokens(writeFilesText) {
+  const tokens = new Set();
+  for (const raw of String(writeFilesText ?? '').split(/[\n;]+/u)) {
+    const segments = raw.trim().replace(/\\/gu, '/').split('/').filter((s) => s !== '' && s !== '.' && s !== '..');
+    segments.forEach((segment, index) => {
+      const body = index === segments.length - 1 ? segment.replace(/\.[^.]*$/u, '') : segment;
+      for (const piece of body.split(/[^0-9A-Za-z\u4e00-\u9fff]+/u)) {
+        const token = piece.toLowerCase();
+        if ([...token].length < 3) continue;
+        if (/^\d+$/u.test(token)) continue;
+        if (LESSONS_PATH_STOPWORDS.has(token)) continue;
+        tokens.add(token);
+      }
+    });
+  }
+  return tokens;
+}
+
+// LESSONS 条目：`### L-NNN` 标题开启一个条目，块内 `- **关键词**:` 行的词元即命中输入；下一个 H2
+// 结束条目区（区外的 `###` 不参与）。围栏代码块内是书写样例（模板里的「条目格式」示例即此形态），
+// 按行扫描会被误当成真条目——围栏内一律跳过。无关键词行的条目不进结果集（旧条目跳过）。
+function lessonsEntries(lessonsText) {
+  const entries = [];
+  let current = null;
+  let inFence = false;
+  for (const line of String(lessonsText ?? '').replace(/\r\n?/gu, '\n').split('\n')) {
+    if (/^\s*```/u.test(line)) { inFence = !inFence; continue; }
+    if (inFence) continue;
+    if (/^##\s/u.test(line)) { current = null; continue; }
+    const heading = line.match(LESSONS_ENTRY_HEADING);
+    if (heading) {
+      current = { id: 'L-' + String(Number(heading[1])).padStart(3, '0'), tokens: [], order: entries.length };
+      entries.push(current);
+      continue;
+    }
+    if (current === null) continue;
+    const keyword = line.match(LESSONS_KEYWORD_LINE);
+    if (!keyword) continue;
+    for (const piece of keyword[1].split(/[\s,，、;；/|]+/u)) {
+      const token = piece.trim().toLowerCase();
+      if (token !== '') current.tokens.push(token);
+    }
+  }
+  return entries.filter((entry) => entry.tokens.length > 0);
+}
+
+// 命中计算：路径词元 × 条目关键词词元求交，共享词元多的条目优先（相关度），同分按条目出现顺序
+// （结果确定、可复核），取前 LESSONS_HIT_LIMIT 条。
+function lessonsHits(pathTokens, entries) {
+  if (pathTokens.size === 0) return [];
+  const scored = [];
+  for (const entry of entries) {
+    const shared = [...new Set(entry.tokens.filter((token) => pathTokens.has(token)))];
+    if (shared.length === 0) continue;
+    scored.push({ id: entry.id, shared, order: entry.order });
+  }
+  scored.sort((a, b) => b.shared.length - a.shared.length || a.order - b.order);
+  return scored.slice(0, LESSONS_HIT_LIMIT);
+}
+
+// 段正文：命中段标题行之后、到下一个 H2 / 分隔线 / 文件尾（行锚定——正文里「引用段名」不劫持匹配）。
+// 围栏代码块内的 `## ` 与 `---` 是正文示例，不当作段边界。段缺席返回 null（与「段在场但正文为空」
+// 区分：前者是缺声明，后者由正文判据另行处理）。
+function lessonsScanBody(content, pattern) {
+  const lines = String(content ?? '').replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n').split('\n');
+  const start = lines.findIndex((line) => pattern.test(line));
+  if (start === -1) return null;
+  const body = [];
+  let inFence = false;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^\s*```/u.test(lines[i])) inFence = !inFence;
+    if (!inFence && (/^##\s/u.test(lines[i]) || /^---\s*$/u.test(lines[i]))) break;
+    body.push(lines[i]);
+  }
+  return body.join('\n');
+}
+
+// 编号在段内出现的判定：两侧非数字边界（L-501 不算命中 L-5012），大小写不敏感（执行者常写小写
+// `l-501`）。转义集不含 `-`——字符类外的连字符本就是字面量，而在 `u` 标志下 `\-` 是非法转义
+// （会抛 Invalid regular expression）。
+function mentionsLessonsId(body, id) {
+  const escaped = id.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  return new RegExp('(^|[^0-9])' + escaped + '(?![0-9])', 'iu').test(body);
+}
+
+// 每份 SUMMARY 的两条判据 → 问题描述数组（分级由调用方按 isNewChange 决定：新 change BLOCKED /
+// 旧 change WARN——C10 无例外）。TASK.md 或 .specs/LESSONS.md 缺席时对应输入为空：段在场判据照常，
+// 命中计算自然为空集（无条目可命中）。
+async function lessonsScanProblems(changeDir, summaryFiles) {
+  if (summaryFiles.length === 0) return [];
+  const rule = await lessonsScanRule();
+  const lessonsText = await fs.readFile(path.join(runRoot, '.specs', 'LESSONS.md'), 'utf8').catch(() => '');
+  const entries = lessonsEntries(lessonsText);
+  const writeFilesById = await taskWriteFiles(changeDir);
+  const problems = [];
+  for (const file of summaryFiles) {
+    let content = '';
+    try {
+      content = await fs.readFile(path.join(changeDir, file), 'utf8');
+    } catch (error) {
+      // 读失败不得静默跳过（L-079：依赖解析失败必须可见）——判据无法求值本身就是问题，按同一分级上报。
+      problems.push(file + ' 无法读取（' + String(error?.message ?? error) + '）——LESSONS 扫描判据无法求值');
+      continue;
+    }
+    const body = lessonsScanBody(content, rule.pattern);
+    if (body === null) {
+      if (rule.required) {
+        problems.push(file + ' 缺 ## ' + rule.name + ' 段（SUMMARY 增量段须声明扫描结果与命中回应'
+          + (rule.registered ? '；位置按登记表登记：自检方法之后' : '') + '）');
+      }
+      continue;
+    }
+    const taskId = file.replace(/-SUMMARY\.md$/iu, '');
+    const hits = lessonsHits(lessonsPathTokens(writeFilesById.get(taskId) ?? ''), entries);
+    const unanswered = hits.filter((hit) => !mentionsLessonsId(body, hit.id));
+    if (unanswered.length > 0) {
+      problems.push(file + ' 的 ## ' + rule.name + ' 段未回应命中条目 '
+        + unanswered.map((hit) => hit.id + '（关键词: ' + hit.shared.join('、') + '）').join('、')
+        + '——R1.8 要求逐条声明「仍适用 / 差异是 X」');
+    }
+  }
+  return problems;
+}
+
 // execute / subagent-execute 出口校验每份 SUMMARY 含三个必填段 + 6 维自查非空 + 自检方法声明
-// （brooks-review / cache-brooks / builtin-quickcheck 三级降级路径）
+// （brooks-review / cache-brooks / builtin-quickcheck 三级降级路径）+ LESSONS 扫描段与命中核对
 export async function runSummarySectionsGate({ node, state }) {
   if (!EXECUTE_FAMILY_NODE_IDS.has(node.id)) return;
   const changeDir = path.join(runRoot, '.specs', state.activeChange ?? '');
@@ -136,8 +324,23 @@ export async function runSummarySectionsGate({ node, state }) {
       }
     } catch {}
   }
+  // LESSONS 扫描（AC-18）：每份 SUMMARY 的扫描段在场 + 命中条目逐条回应。分级沿用既有语义——
+  // 新 change BLOCKED / 旧 change WARN（C10 无例外）。
+  const lessonsProblems = await lessonsScanProblems(changeDir, summaryFiles);
+  if (lessonsProblems.length > 0) {
+    if (isNewChange(state)) {
+      violations.push(...lessonsProblems);
+    } else {
+      for (const problem of lessonsProblems) {
+        console.error('LESSONS SCAN WARN: ' + problem + '（旧 change 渐进，不阻断；新 change 将强制）');
+      }
+    }
+  }
   if (violations.length > 0) {
     console.error('BLOCKED: SUMMARY 关键段校验失败: ' + violations.join('; '));
+    if (lessonsProblems.length > 0 && isNewChange(state)) {
+      console.error('恢复: 按 flow-kit/templates/SUMMARY.md 在 ## 自检方法 之后补 ## LESSONS 扫描 段，并逐条写出命中条目编号与差异声明（无命中写「无 active 条目命中」）；命中来源 = TASK.md 该任务 write_files 的路径段 × .specs/LESSONS.md 条目的关键词行');
+    }
     process.exit(1);
   }
 }

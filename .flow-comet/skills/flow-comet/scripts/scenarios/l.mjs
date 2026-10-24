@@ -74,6 +74,7 @@ import {
   frontendCriterionProseProblems,
   frontendCriterionRedirectProblems,
   intelFieldToken,
+  maintainerFacePresent,
   singleSourceImportProblems,
   uniqueTempNameHits,
   writeDesignExitFixture,
@@ -611,21 +612,28 @@ export const ENTRIES = [
   // 284: 本仓 CONTEXT 的七段校验 + 可选的 `## evolve 元数据` 段语义——缺席不报（没跑过架构
   // 沉淀的项目不补段）；在场则三字段必须齐（跑过一次却写残的半成品正是要拦的形态）；判据
   // **限定在段内**（别处的同名字段不得让残缺的 evolve 段蒙混过关）。
-  // ① 是本仓真实文件的**维护者形态**断言（.specs/ 被 gitignore）：文件结构性缺席（CI 全新检出 /
-  // worktree）时输出可见 SKIP 行（未验证 ≠ 通过），**在场时判据逐字不变**；②~⑤ 恒检（夹具驱动）。
+  // ① 是本仓真实文件的**维护者形态**断言（.specs/ 被 gitignore）：先过维护者面门控（docs/internal/
+  // 缺席 = 载体/CI 形态），再查流程工件文件本身是否在场——两种结构性缺席都输出可见 SKIP 行
+  // （未验证 ≠ 通过），**维护者面与文件都在场时判据逐字不变**；②~⑤ 恒检（夹具驱动）。
   {
     name: '284 CONTEXT 七段校验 + evolve 元数据可选段：缺席不报·在场缺一即报·判据限段内',
     run: async () => {
       const validate = requireModuleExport(contextInitModule, 'validateContext', 'context-init.mjs');
 
-      // ① 本仓 CONTEXT.md 通过七段校验（真实文件，非夹具）——文件缺席即非维护者形态，可见跳过
-      if (fs.existsSync(REPO_CONTEXT_FILE)) {
+      // ① 本仓 CONTEXT.md 通过七段校验（真实文件，非夹具）——先过维护者面门控：载体（安装副本）
+      // 自带的 .specs/CONTEXT.md 是载体自己的上下文，与本仓 CONTEXT 同名不同物（e2e 实测只有 3 个
+      // H2）。拿它当本仓证据 = 让载体形态静默通过或判红，故维护者面缺席时显式 SKIP。
+      if (!maintainerFacePresent()) {
+        console.log('SKIP: 284 的本仓 CONTEXT 面（载体缺失维护者面：docs/internal/ 不在本检出）'
+          + '——本次检出未校验本仓 CONTEXT.md 的七段与 evolve 元数据段语义，请在维护者主树重跑本套件'
+          + '（跳过 ≠ 已通过，未验证 ≠ 通过）');
+      } else if (fs.existsSync(REPO_CONTEXT_FILE)) {
         const repo = await validate(REPO_ROOT);
         assertEqual(repo.missingSections.length, 0, '本仓 CONTEXT.md 缺段: ' + JSON.stringify(repo.missingSections));
         assertEqual(repo.formatIssues.length, 0, '本仓 CONTEXT.md 格式问题: ' + JSON.stringify(repo.formatIssues));
       } else {
         console.log('SKIP: 284 的本仓 CONTEXT 面（.specs/CONTEXT.md 为流程工件面，可能结构性缺席）'
-          + '——本仓 CONTEXT 缺席 = 非维护者形态；本次检出未校验本仓 CONTEXT.md 的七段与 evolve 元数据段语义，'
+          + '——本仓 CONTEXT 缺席 = 非维护者工作副本形态；本次检出未校验本仓 CONTEXT.md 的七段与 evolve 元数据段语义，'
           + '请在维护者主树重跑本套件');
       }
 

@@ -405,10 +405,12 @@ export function composeState(overrides = {}) {
 
 // 完整 SUMMARY：六段齐全（## verify 输出 / ## 6 维自查 / ## 越界检查 / ## 做了什么 / ## 改动文件 / ## 自检方法）
 // 6 维自查默认含实质内容且声明 brooks-review；method='' 表示去掉 ## 自检方法 段（旧格式场景）
+// 结构子段与增量段按模板骨架补齐（`### 已知接受 + 理由` / `### 已知小问题` / `## LESSONS 扫描`）：
+// 这些 H3/增量段已成为新 change 的必填结构，夹具缺它们会被结构门当成工件缺陷而不是被测行为。
 export function summaryContent(options = {}) {
   const sixDim = options.sixDim !== undefined
     ? options.sixDim
-    : '## 6 维自查\n\n- 功能: 通过（brooks-review 已跑）\n- 性能: 无影响\n- 安全: 无影响\n- 兼容: 通过\n- 可观测: 通过\n- 可维护: 通过';
+    : '## 6 维自查\n\n- 功能: 通过（brooks-review 已跑）\n- 性能: 无影响\n- 安全: 无影响\n- 兼容: 通过\n- 可观测: 通过\n- 可维护: 通过\n\n### 已知接受 + 理由\n\n- 无（夹具）。\n\n### 已知小问题\n\n- 无（夹具）。';
   const method = options.method !== undefined ? options.method : '## 自检方法\n\nbrooks-review';
   return [
     '# T01-SUMMARY',
@@ -435,12 +437,18 @@ export function summaryContent(options = {}) {
     '',
     method,
     '',
+    '## LESSONS 扫描',
+    '',
+    '无 active 条目命中（夹具）。',
+    '',
   ].join('\n');
 }
 
 // 新 change 模板保真 SUMMARY（M1 严格形态：# SUMMARY: 标题 + 首部 4 字段 + 段序保真——
 // directOverride 授权约束场景（213~216）用：新 change 出口强制模板保真，旧 summaryContent
 // 无 # SUMMARY: 标题会被 M1 BLOCKED，不能用于正例/恢复场景）
+// 结构子段（### 已知接受 + 理由 / ### 已知小问题）与增量段（## 自检方法 / ## LESSONS 扫描）按模板
+// 骨架补齐——新 change 缺它们属工件缺陷，不应让夹具自身触发结构门。
 export function strictSummary(taskId) {
   return [
     '# SUMMARY: ' + taskId + ' - 实现 ' + taskId,
@@ -477,6 +485,14 @@ export function strictSummary(taskId) {
     '- 可观测: 通过',
     '- 可维护: 通过',
     '',
+    '### 已知接受 + 理由',
+    '',
+    '- 无（夹具）。',
+    '',
+    '### 已知小问题',
+    '',
+    '- 无（夹具）。',
+    '',
     '## 数据库迁移',
     '',
     'N/A：本任务无 schema 变更（条件段按模板占位）。',
@@ -504,6 +520,10 @@ export function strictSummary(taskId) {
     '## 自检方法',
     '',
     'brooks-review',
+    '',
+    '## LESSONS 扫描',
+    '',
+    '无 active 条目命中（夹具）。',
     '',
   ].join('\n');
 }
