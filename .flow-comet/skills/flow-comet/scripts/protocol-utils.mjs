@@ -523,12 +523,18 @@ export function templatePointerPath(name) {
 // 重新声明的命令指引（skill-load 校验失败与 record 声明核对两处共用）：两处本说的是同一件事
 // 「怎么重新声明」——各拼一份必然分叉（命令形态改一次要改两地方）。零模板节点不拼 --templates
 // （省略即空集，与 C11 的「可省略」一致）；无 skill 名的场景用 <skill> 占位。
+// --prompt 一并拼上：模板与提示词是同一次声明的两面，而 skill-load 重跑会**覆写**同一标记——
+// 只补 --templates 的指引会把 protocol 写成 null，下一次 exit 反被判「缺协议声明标记」（恢复步骤
+// 自己弄坏协议声明）。路径取该节点的首个内置协议文件，与入口的 READ PROMPT 同源；自定义节点没有
+// 内置映射（协议自己也声明提示词路径）→ 不拼，不编造路径也不打占位符。
 export function templateDeclareCommand(declaration, { nodeId, skillName } = {}) {
   const skill = typeof skillName === 'string' && skillName !== '' ? skillName : '<skill>';
   const flag = declaration.required.length > 0
     ? ' --templates ' + declaration.required.map((name) => name + '.md').join(',')
     : '';
-  return 'workflow-state.mjs skill-load ' + nodeId + ' ' + skill + flag;
+  const promptFile = (NODE_PROTOCOL_FILES[nodeId] ?? [])[0];
+  const promptFlag = typeof promptFile === 'string' ? ' --prompt ' + promptPointerPath(promptFile) : '';
+  return 'workflow-state.mjs skill-load ' + nodeId + ' ' + skill + flag + promptFlag;
 }
 
 // 指针行（入口与 explain 共用：同一判据一份实现，两处输出措辞一致）。

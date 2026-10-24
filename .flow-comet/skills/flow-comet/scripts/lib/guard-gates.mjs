@@ -693,8 +693,11 @@ async function lessonsEntryFieldKeys() {
   if (!skeleton.derived) return null;
   const formatSection = skeleton.sections.find((section) => section.norm.includes('条目格式'));
   if (!formatSection) return null;
+  // 模板按 runRoot 解析：登记表的 file 是项目根相对路径，而 guard 可能在与项目根不同的 cwd
+  // 被调起（运行上下文由 FLOW_COMET_RUN_ROOT 给定）。按 cwd 读会在模板在场时也判「模板缺失」，
+  // 字段键无从派生 → C20 静默退化为「未校验」。
   let text;
-  try { text = await fs.readFile(skeleton.file, 'utf8'); } catch { return null; }
+  try { text = await fs.readFile(path.join(runRoot, skeleton.file), 'utf8'); } catch { return null; }
   const keys = [];
   let inSection = false;
   let inFence = false;

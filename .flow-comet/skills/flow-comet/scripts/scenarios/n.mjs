@@ -1049,6 +1049,16 @@ export const ENTRIES = [
       assertTrue(swapped !== entry.output, '变异探针前提失效：入口输出里没有可对调的两条指针');
       assertTrue(!promptLinesBeforeTemplates(swapped), '顺序判据不具判别力：对调两条指针后仍判通过');
 
+      // ①b 指针不校验文件在否：模板整体缺席时两行照常打印——指针标识的是「该读哪份模板」，文件
+      // 缺席由产出物门禁的「未校验（模板缺失）」报告（公开文档的口径以此为准）。
+      fs.rmSync(path.join(dir, 'flow-kit'), { recursive: true, force: true });
+      assertTrue(!fs.existsSync(path.join(dir, 'flow-kit', 'templates', 'CHANGE.md')),
+        '夹具前提失效：模板文件应确实不在磁盘上（否则本条退化成「指针必指向已有文件」的旧表述）');
+      const noTemplateEntry = runGuard(['entry', 'open'], dir);
+      assertExit(noTemplateEntry, 0);
+      assertOut(noTemplateEntry, 'READ TEMPLATE: flow-kit/templates/CHANGE.md');
+      assertOut(noTemplateEntry, 'READ PROMPT: flow-kit/prompts/0-change.md');
+
       // ② 错路径：open 声明 execute 的协议文件 4-dev.md → 入口 BLOCK（报文点名不符）
       // 声明命令本身只校验 flow-kit/prompts/ 前缀，归属判定由入口负责——故这里真实命令成功、入口拦。
       assertExit(skillLoad('open', 'flow-comet-change', '4-dev.md', 'CHANGE.md,REQUIREMENT.md'), 0);
@@ -1104,6 +1114,11 @@ export const ENTRIES = [
       const recordBlocked = runState(['record', 'design', '{"summary":"design done"}'], dir);
       assertExit(recordBlocked, 1);
       assertOut(recordBlocked, '--templates');
+      // 重新声明指引同时给出 --prompt：模板与提示词是同一次声明的两面，而 skill-load 重跑会覆写
+      // 同一标记——只补 --templates 会把 protocol 写成 null，下一次 exit 反被判「缺协议声明标记」。
+      // 记录侧没有 skill 名（只有它仍是 <skill> 占位）；提示词路径必须是真实路径，不是占位符。
+      assertOut(recordBlocked, '--prompt flow-kit/prompts/2-design.md');
+      assertNotOut(recordBlocked, '--prompt <');
       assertExit(skillLoad('design', 'flow-comet-design', '2-design.md', 'DESIGN.md'), 0);
       const recordOk = runState(['record', 'design', '{"summary":"design done"}'], dir);
       assertExit(recordOk, 0);
@@ -1171,14 +1186,31 @@ export const ENTRIES = [
       const builtinUndeclared = runGuard(['exit', 'open'], dir);
       assertExit(builtinUndeclared, 1);
       assertOut(builtinUndeclared, 'BLOCKED');
+      // ④ 重新声明指引的提示词面（单一来源的直接判据）：内置节点拼该节点首个协议文件的真实路径
+      // （与入口 READ PROMPT 同源）；自定义节点没有内置映射 → 不拼（不编造路径，也不打占位符）。
+      const { nodeTemplateDeclaration, templateDeclareCommand } = await import('../protocol-utils.mjs');
+      const builtinCommand = templateDeclareCommand(
+        nodeTemplateDeclaration({ id: 'execute' }), { nodeId: 'execute', skillName: 'flow-comet-dev' });
+      assertTrue(builtinCommand === 'workflow-state.mjs skill-load execute flow-comet-dev'
+        + ' --templates SUMMARY.md --prompt flow-kit/prompts/4-dev.md',
+        '内置节点的重新声明命令应带真实提示词路径，实际: ' + builtinCommand);
+      const customCommand = templateDeclareCommand(
+        nodeTemplateDeclaration({ id: 'brainstorm', templates: ['CHANGE'] }), { nodeId: 'brainstorm', skillName: 'fixture-skill' });
+      assertTrue(customCommand === 'workflow-state.mjs skill-load brainstorm fixture-skill --templates CHANGE.md',
+        '自定义节点无内置提示词映射时不应拼 --prompt，实际: ' + customCommand);
     },
   },
 
   // TA-15 · 报错两阶段与记忆（AC-15）——同一工件首次因缺段被拦：只给模板路径 + 类别计数，不列段名；
   // 再犯：列出段名；工件通过后标记清除。反向构造：修复后复检 + 标记文件不再记录该工件。
+  // 记忆按**文件**计：execute 出口的多份 *-SUMMARY.md 共用同一个模板键，各份必须独立记忆——同一次
+  // 出口各自首败不互相升级，修好一份即释放该份的键（不许被另一份的失败永久保键）。
   {
-    name: 'TA-15 两阶段报错：首次不列段名、再犯列段名、通过后清标记',
+    name: 'TA-15 两阶段报错：首次不列段名、再犯列段名、通过后清标记（多份 SUMMARY 各记各的）',
     run: async (dir) => {
+      // 单份工件的失败行（同一份工件在报告里占一行；用于按文件断言，避免整串输出互相串味）
+      const failureLine = (res, file) => res.output.split(/\r?\n/)
+        .find((line) => line.includes(file + ' 模板结构校验失败')) ?? '';
       setupExecute(dir, { omit: ['是否触发新工作'] });
       const first = exitNode(dir, 'execute');
       assertExit(first, 1);
@@ -1198,6 +1230,45 @@ export const ENTRIES = [
         || !JSON.stringify(JSON.parse(fs.readFileSync(hintFile, 'utf8'))).toUpperCase().includes('SUMMARY');
       assertTrue(cleared, '工件通过后应清除该工件的两阶段标记，实际: '
         + (fs.existsSync(hintFile) ? fs.readFileSync(hintFile, 'utf8') : '(文件已删)'));
+      // ⑤ 两份 SUMMARY 同一次出口各自首败 → 都不升级（后一份不许继承前一份刚写下的键）
+      const omitSection = (res, file) => {
+        const line = failureLine(res, file);
+        assertTrue(line !== '', '两份 SUMMARY 都应出现在同一次出口的失败报告里（缺 ' + file + '）');
+        return line.includes('是否触发新工作');
+      };
+      setupExecute(dir, { omit: ['是否触发新工作'] });
+      writeFile(dir, CHANGE_DIR + '/T02-SUMMARY.md', renderDoc('SUMMARY', { omit: ['是否触发新工作'] }));
+      const pairFirst = exitNode(dir, 'execute');
+      assertExit(pairFirst, 1);
+      assertTrue(!omitSection(pairFirst, 'T01-SUMMARY.md'), 'T01 首败不应列段名: ' + failureLine(pairFirst, 'T01-SUMMARY.md'));
+      assertTrue(!omitSection(pairFirst, 'T02-SUMMARY.md'),
+        'T02 首败不应列段名（另一份刚写下的键不许把它升级成再犯）: ' + failureLine(pairFirst, 'T02-SUMMARY.md'));
+      const pairKeys = Object.keys(JSON.parse(fs.readFileSync(hintFile, 'utf8')));
+      for (const file of ['T01-SUMMARY.md', 'T02-SUMMARY.md']) {
+        assertTrue(pairKeys.some((key) => key.includes(file)),
+          '记忆账本应按文件分开记录（缺 ' + file + '）: ' + pairKeys.join(', '));
+      }
+      // ⑥ 反向构造：两份都再犯 → 两份都列段名（按文件记忆不削弱「再犯」判据）
+      const pairSecond = exitNode(dir, 'execute');
+      assertExit(pairSecond, 1);
+      for (const file of ['T01-SUMMARY.md', 'T02-SUMMARY.md']) {
+        assertTrue(omitSection(pairSecond, file), file + ' 再犯应列出段名: ' + failureLine(pairSecond, file));
+      }
+      // ⑦ 修好一份、另一份仍红 → 修好的那份释放记忆键；再坏一次仍算首败（同一次出口里的另一份
+      // 仍在失败，不许把它拖回再犯）。
+      writeFile(dir, CHANGE_DIR + '/T01-SUMMARY.md', renderDoc('SUMMARY'));
+      const oneFixed = exitNode(dir, 'execute');
+      assertExit(oneFixed, 1);   // T02 仍缺段：出口照常拦
+      assertTrue(omitSection(oneFixed, 'T02-SUMMARY.md'),
+        '仍失败的 T02 应保持再犯形态: ' + failureLine(oneFixed, 'T02-SUMMARY.md'));
+      const afterFixKeys = Object.keys(JSON.parse(fs.readFileSync(hintFile, 'utf8')));
+      assertTrue(!afterFixKeys.some((key) => key.includes('T01-SUMMARY.md')),
+        '修好的 T01 应释放其记忆键（不许靠 T02 的失败永久保键）: ' + afterFixKeys.join(', '));
+      writeFile(dir, CHANGE_DIR + '/T01-SUMMARY.md', renderDoc('SUMMARY', { omit: ['是否触发新工作'] }));
+      const brokeAgain = exitNode(dir, 'execute');
+      assertExit(brokeAgain, 1);
+      assertTrue(!omitSection(brokeAgain, 'T01-SUMMARY.md'),
+        '释放后再次坏掉应按首败处理（不列段名）: ' + failureLine(brokeAgain, 'T01-SUMMARY.md'));
     },
   },
 
@@ -1345,6 +1416,22 @@ export const ENTRIES = [
       assertOut(missingFields, 'BLOCKED');
       assertOut(missingFields, 'L-503');
       assertOut(missingFields, '首发');
+      // ⑤c runRoot 与 cwd 漂移：字段键从 runRoot 下的模板派生——guard 可能在与项目根不同的 cwd
+      // 被调起（运行上下文由 FLOW_COMET_RUN_ROOT 给定）。按 cwd 解析会在模板在场时也判「模板缺失」，
+      // C20 随之静默退化为未校验；反向断言同一份夹具不得出现该降级行。
+      const cwdOffset = path.join(dir, 'cwd-offset');
+      fs.mkdirSync(cwdOffset, { recursive: true });
+      const drift = spawnSync(process.execPath, [path.join(SCRIPTS_DIR, 'workflow-guard.mjs'), 'exit', 'verify', '--apply'], {
+        cwd: cwdOffset,
+        env: { ...process.env, FLOW_COMET_RUN_ROOT: dir, FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) },
+        encoding: 'utf8',
+        timeout: 60000,
+      });
+      const driftRes = { status: drift.status ?? 1, output: String(drift.stdout ?? '') + String(drift.stderr ?? '') };
+      assertExit(driftRes, 1);
+      assertOut(driftRes, 'BLOCKED');
+      assertOut(driftRes, 'L-503');
+      assertNotOut(driftRes, 'LESSONS 条目字段 未校验（模板缺失）');
       // ⑤b 新条目只有标题与正文（无任何字段键）同样 BLOCKED——正面回应「新条目可绕过关键词扫描」的
       // 失效模式（修复前整类条目静默通过 = RED）。
       writeFile(dir, '.specs/LESSONS.md', [

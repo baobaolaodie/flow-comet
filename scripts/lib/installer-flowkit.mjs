@@ -48,12 +48,14 @@ function printFlowKitManualGuide(target) {
  * 只有真的拿不到模板时才挂（获取成功、HEAD 只读失败但目录在场都不挂——模板仍在磁盘上，
  * 结构校验照常可用）。调用契约：只由 prepare-env CLI 进程调用——结尾提示挂在 process 'exit'
  * 上，若将来被库内导入复用，提示会跟着宿主进程退出一起打印（不可断言、会污染输出）。
+ * 修复行的措辞约束：`flow-kit/` 已存在但归属无法确认时，重跑会落回同一条跳过分支（安装器绝不
+ * 改动已有目录）——所以「重跑」只在移走/处理该目录或按手动步骤补齐之后才是修复，不能单说重跑。
  */
 const FLOW_KIT_DEGRADED_NOTICE = [
   '[flow-comet] 提醒: 本次安装未获取 flow-kit 模板——产出物不会做模板校验。',
   '[flow-comet]   影响: 各节点出口输出「未校验（模板缺失）」而不拦缺段 / 乱序 / 空段（结构校验不可用）。',
   '[flow-comet]   原因: flow-kit/templates 未就位（自动获取失败，或同名目录归属无法确认已跳过——安装器绝不改动已有目录）。',
-  '[flow-comet]   修复: 网络可用时重跑本安装器；或按上方手动获取指引 clone 上游后 checkout --detach 到锁定快照。',
+  '[flow-comet]   修复: 先移走或处理现有 flow-kit/ 目录，或按上方手动获取指引补齐，再重跑本安装器。',
 ].join('\n') + '\n';
 
 let flowKitDegradedNoticeScheduled = false;

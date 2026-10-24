@@ -9,7 +9,7 @@
 import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
-import { assertExit, assertNotOut, assertOut, runState, writeState } from '../lib/test-helpers.mjs';
+import { assertExit, assertNotOut, assertOut, assertTrue, runState, writeState } from '../lib/test-helpers.mjs';
 import { CHANGE_ID, SCRIPTS_DIR, applyDistributionSurface, readStateFile } from '../lib/system-fixtures.mjs';
 
 const DESIGN_SKILL_ARGS = ['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md'];
@@ -35,13 +35,27 @@ const RAW_ENTRIES = [
         throw new Error('声明标记应如实记录声明的模板清单（去掉 .md 后缀），实际: ' + JSON.stringify(marker.templates));
       }
 
-      // ② 多写：允许集外的模板（TASK）→ BLOCKED，并回显「怎么重新声明」的可执行命令
+      // ② 多写：允许集外的模板（TASK）→ BLOCKED，并回显「怎么重新声明」的可执行命令（模板与提示词
+      // 同一次声明：命令必须带 --prompt，否则照抄重跑会把同一标记的 protocol 覆写成 null）
       const extra = runState([...DESIGN_SKILL_ARGS, '--templates', 'DESIGN.md,TASK.md'], dir);
       assertExit(extra, 1);
       assertOut(extra, 'BLOCKED');
       assertOut(extra, '多写/错名: TASK');
       assertOut(extra, '映射要求: DESIGN');
-      assertOut(extra, 'workflow-state.mjs skill-load design flow-comet-design --templates DESIGN.md');
+      assertOut(extra, 'workflow-state.mjs skill-load design flow-comet-design --templates DESIGN.md --prompt flow-kit/prompts/2-design.md');
+      assertNotOut(extra, '--prompt <');
+      const declareLine = extra.output.split(/\r?\n/).find((line) => line.includes('workflow-state.mjs skill-load design')) ?? '';
+      assertTrue(declareLine !== '', 'BLOCKED 报文应给出可照抄的重新声明命令');
+      // 照抄报文里的命令重跑（只取命令词元：报文尾部是中文说明，不是参数）——标记的 protocol 必须
+      // 仍在，否则下一次 exit 会被「缺协议声明标记」拦下（恢复步骤自己弄坏协议声明）。
+      const printedArgs = declareLine.slice(declareLine.indexOf('workflow-state.mjs')).split(/\s+/u)
+        .filter((token) => token !== '' && !/[\u4e00-\u9fff]/u.test(token))
+        .slice(1);
+      const redeclared = runState(printedArgs, dir);
+      assertExit(redeclared, 0);
+      const redeclaredMarker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+      assertTrue(redeclaredMarker.protocol === '2-design.md',
+        '照抄重新声明命令后 protocol 不应变成 null，实际: ' + JSON.stringify(redeclaredMarker.protocol));
 
       // ③ 漏写：显式空清单（--templates=）→ BLOCKED 且点名漏掉的必填项
       const missing = runState([...DESIGN_SKILL_ARGS, '--templates='], dir);
@@ -103,7 +117,11 @@ const RAW_ENTRIES = [
       assertOut(degraded, '未校验（模板缺失）');
       assertOut(degraded, '影响: 各节点出口输出');
       assertOut(degraded, '原因: flow-kit/templates 未就位');
-      assertOut(degraded, '修复: 网络可用时重跑本安装器');
+      // 修复行不许把「重跑」当成对已存在目录的修复——目录在但归属无法确认时，重跑会落回同一条
+      // 跳过分支；须先移走/处理该目录或按手动步骤补齐，再重跑。
+      assertOut(degraded, '修复: 先移走或处理现有 flow-kit/ 目录');
+      assertOut(degraded, '按上方手动获取指引补齐，再重跑本安装器');
+      assertNotOut(degraded, '修复: 网络可用时重跑本安装器');
       assertOut(degraded, '手动获取指引: git clone');
       // 非破坏：预置目录原样保留（安装器绝不改动已有目录）
       if (!fs.existsSync(path.join(degradedTarget, 'flow-kit'))) {

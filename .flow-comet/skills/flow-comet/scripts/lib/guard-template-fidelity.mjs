@@ -430,13 +430,23 @@ export function assessArtifact({ fileLabel, skeleton, derived, issues }) {
   };
 }
 
+// 记忆键 = 工件键 + 文件：同一个模板键会被多份工件共用（execute 出口的每份 *-SUMMARY.md 都是
+// SUMMARY），只按键记忆会让后一份工件继承前一份的「再犯」状态——同一次出口就升级成列段名，而修好
+// 其中一份时另一份的失败又替它保住了键。
+function hintKeyOf(item) {
+  return item.key + ':' + item.fileLabel;
+}
+
 // 提示账本（两阶段记忆的纯逻辑，不写盘）：把失败记进 hints 并给出各工件的报告行；escalate = 该工件
-// 上一次也失败过（此时列出段名）。
+// 上一次也失败过（此时列出段名）。escalate 取自**进入本次报告前**的账本快照——同一次报告里两份
+// 工件各自首败时互不升级。
 function planFailureLines(hints, failing) {
   const lines = [];
+  const previous = new Set(Object.keys(hints));
   for (const item of failing) {
-    const escalate = Object.prototype.hasOwnProperty.call(hints, item.key);
-    hints[item.key] = { failedAt: new Date().toISOString(), categories: item.categories };
+    const hintKey = hintKeyOf(item);
+    const escalate = previous.has(hintKey);
+    hints[hintKey] = { failedAt: new Date().toISOString(), categories: item.categories };
     lines.push(item.fileLabel + ' 模板结构校验失败: '
       + formatIssueParts(item.hardIssues, { escalate }).join('; ')
       + '（模板: ' + (item.skeleton.file ?? '（登记表未登记模板路径）') + '）');
@@ -444,18 +454,21 @@ function planFailureLines(hints, failing) {
   return lines;
 }
 
-// 通过的工件释放其记忆键（返回是否有改动，避免无谓写盘）。
+// 通过的工件释放其记忆键（返回是否有改动，避免无谓写盘）。通过面在**每次**报告都释放——只在
+// 「全部通过」时释放，会让已修好的工件在别的工件仍失败时留着旧键，下次再坏就被当成再犯。
 function releasePassedHints(hints, assessments) {
   let changed = false;
   for (const item of assessments) {
-    if (!Object.prototype.hasOwnProperty.call(hints, item.key)) continue;
-    delete hints[item.key];
+    const hintKey = hintKeyOf(item);
+    if (!Object.prototype.hasOwnProperty.call(hints, hintKey)) continue;
+    delete hints[hintKey];
     changed = true;
   }
   return changed;
 }
 
-// 报错编排（单一实现）：模板缺席 → 未校验行；有硬问题 → 两阶段 BLOCKED/WARN；全过 → 清记忆键。
+// 报错编排（单一实现）：模板缺席 → 未校验行；有硬问题 → 两阶段 BLOCKED/WARN；通过面每次都释放
+// 记忆键（与本次出口是否还有其他工件失败无关）。
 // 同一出口的全部工件合并成一次报告——逐件 exit 会让执行者修一个再撞下一个，而这次出口的所有
 // 结构问题一次就能看全。
 export async function reportArtifactStructure({ changeDir, state, assessments }) {
@@ -467,6 +480,7 @@ export async function reportArtifactStructure({ changeDir, state, assessments })
   const failing = assessments.filter((item) => item.hard);
   const hintsFile = path.join(changeDir, HINT_FILE_NAME);
   const hints = await readHints(hintsFile);
+  const released = releasePassedHints(hints, assessments.filter((item) => !item.hard));
   if (failing.length > 0) {
     const lines = planFailureLines(hints, failing);
     await writeHints(hintsFile, hints);
@@ -481,7 +495,7 @@ export async function reportArtifactStructure({ changeDir, state, assessments })
     for (const line of lines) {
       console.error('TEMPLATE-STRUCTURE WARN: ' + line + '（旧 change 渐进，不阻断；新 change 将强制）');
     }
-  } else if (releasePassedHints(hints, assessments)) {
+  } else if (released) {
     await writeHints(hintsFile, hints);
   }
 }
