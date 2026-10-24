@@ -12,7 +12,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow?style=flat" alt="License: MIT" /></a>
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js_%E2%89%A518-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js 18+" /></a>
   <a href="https://github.com/baobaolaodie/flow-comet/actions"><img src="https://img.shields.io/github/actions/workflow/status/baobaolaodie/flow-comet/ci.yml?style=flat" alt="CI status" /></a>
-  <a href="CHANGELOG-zh.md"><img src="https://img.shields.io/badge/version-1.6.4-blue.svg" alt="Version 1.6.4" /></a>
+  <a href="CHANGELOG-zh.md"><img src="https://img.shields.io/badge/version-1.6.5-blue.svg" alt="Version 1.6.5" /></a>
 </p>
 
 <p align="center">
