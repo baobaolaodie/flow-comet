@@ -118,7 +118,7 @@ Driving a node by hand, the artifacts each node produces, and the two command su
 
 | Project | What it is, and how it works | Relationship to flow-comet |
 |---|---|---|
-| **flow-kit** | Pure-Markdown methodology pack: 9-stage process, `.specs/` templates, R1–R8 rules, no runtime. You load the stage prompts by hand; state travels through `.md` artifacts. An install pins a specific commit. | **Dependency — the base, and the aggregation point.** flow-comet is its automation layer and inherits its artifacts and rules; the projects below reached flow-comet through it. |
+| **flow-kit** | Pure-Markdown methodology pack: 9-stage process, `.specs/` templates, R1–R8 rules, no runtime. You load the stage prompts by hand; state travels through `.md` artifacts. An install pins a specific commit. | **Dependency — the base, and the aggregation point.** flow-comet is its automation layer: templates, rules and artifact shapes are inherited from upstream, and this repository only adds the increment sections upstream does not define; the template is the sole authority on shape, and documents without an upstream template (`UAT`, the archive's leftovers list) are checked for existence only. The projects below reached flow-comet through it. |
 | **OpenSpec** (Fission-AI) | Spec-driven development framework: a lightweight spec layer before coding. One `proposal` / `specs` / `design` / `tasks` set per change under `openspec/`; the default profile runs propose → apply → sync → archive. | **Aggregated through flow-kit** (idea source). Standalone it stays lighter: no state machine, no gates. |
 | **Superpowers** (obra) | Agentic skills framework plus a full development methodology, installed per harness across Claude Code, Codex, Cursor, Gemini CLI and more. Skills trigger by context and are enforced by instructions. | **Aggregated through flow-kit** (idea source, partial overlap). Discipline lives in skill text and relies on model compliance; flow-comet machine-checks the same discipline. |
 | **comet** (rpamis) | Resumable long-running task workflow and skill platform: a five-stage state machine, stage guards, hook write-interception. `/comet` routes from config and defaults to its Native branch. | **Early mechanism reference, now decoupled.** The hook-injection shape and script-owned state came from here; the naming was decoupled and state does not interoperate. Only its Classic branch carries the OpenSpec + Superpowers lineage. |
@@ -156,7 +156,7 @@ Full guide in [CONTRIBUTING.md](CONTRIBUTING.md) — branch model (`feature → 
 
 1. Branch from `dev`: `git checkout dev && git checkout -b feat/<description>`
 2. Edit skills/scripts under `.flow-comet/skills/` (authoritative source); TDD with RED scenario first
-3. Run regression: `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 325 SCENARIOS PASSED`
+3. Run regression: `node .flow-comet/skills/flow-comet/scripts/guard-self-test.mjs` → `ALL 350 SCENARIOS PASSED`
 4. Open a PR into `dev` (squash — one change-level commit); release PR `dev → main` (merge — dev's change-level commits enter main, and dev stops leading after each release)
 
 CI enforces the repository conventions automatically on every PR and push: regression, installer reproducibility, workflow and bilingual-mirror quality, PR discipline, version consistency, and dead links. Local hooks (commit/push message checks) install with `node scripts/install-commit-hook.mjs` — see [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.

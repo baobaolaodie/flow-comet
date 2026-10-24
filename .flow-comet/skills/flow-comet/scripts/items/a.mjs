@@ -11,7 +11,24 @@ import fs from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
 import { assertEqual, assertExit, assertNotOut, assertOut, assertTrue, baseState, runGuard, runHandoff, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
-import { multiWaveTaskContent, explainContractProblems, assertExplainFailClosed, explainReverseConstructionProblems, CHANGE_ID, readStateFile, gitInit, gitBranch, writeIntakeArtifacts, fullContract, execSummaryFixture, assertNodeLine, driveThroughDesign } from '../lib/system-fixtures.mjs';
+import { archiveRecordJson, multiWaveTaskContent, explainContractProblems, assertExplainFailClosed, explainReverseConstructionProblems, CHANGE_ID, readStateFile, gitInit, gitBranch, writeIntakeArtifacts, fullContract, execSummaryFixture, assertNodeLine, driveThroughDesign } from '../lib/system-fixtures.mjs';
+
+// skill-load 的模板声明（节点级，C3/AC-13 加载链）：参数化的委托驱动按节点查表——夹具是真实命令
+// 序列，声明集合要与节点映射一致（集合不一致时引擎按 C11 fail-closed 拦截）。
+const TEMPLATE_DECLARATION = {
+  open: 'CHANGE.md,REQUIREMENT.md',
+  design: 'DESIGN.md',
+  plan: 'TASK.md',
+  execute: 'SUMMARY.md',
+  'subagent-execute': 'SUMMARY.md',
+  review: 'REVIEW.md,TEST.md',
+};
+
+function skillLoadArgs(nodeId, skill, prompt) {
+  const args = ['skill-load', nodeId, skill, '--prompt', prompt];
+  if (TEMPLATE_DECLARATION[nodeId]) args.push('--templates', TEMPLATE_DECLARATION[nodeId]);
+  return args;
+}
 
 export const ENTRIES = [
   // ---------- A. 状态机与路由 ----------
@@ -116,7 +133,7 @@ export const ENTRIES = [
     name: 'A5 next：推进与状态漂移校正',
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
-      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
       writeIntakeArtifacts(dir);
       assertExit(runState(['record', 'open', '{"summary":"intake complete"}'], dir), 0);
       // 真实出口：exit open --apply（未激活声明机制 → 兼容警告 + 通过）
@@ -198,7 +215,7 @@ export const ENTRIES = [
     name: 'A9 record：基础证据记录',
     run: (dir, outcomes) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
-      assertExit(runState(['skill-load', 'open', 'flow-comet-change'], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
       // JSON payload → evidence 写入 + next 提示
       const res = runState(['record', 'open', '{"summary":"recorded"}'], dir);
       assertExit(res, 0);
@@ -360,7 +377,7 @@ export const ENTRIES = [
       // 对未实现循环路由的引擎本用例 RED 属预期(单趟限制下委托节点完成后不再路由回)。
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
         multiWaveTaskContent({ P01: 'pending', P02: 'pending', S01: 'pending', P03: 'pending' }));
-      assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md'], dir), 0);
+      assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir), 0);
       assertExit(runState(['record', 'plan', '{"summary":"plan done"}'], dir), 0);
       assertExit(runGuard(['entry', 'plan'], dir), 0);
       const rPlan = runGuard(['exit', 'plan', '--apply'], dir);
@@ -369,8 +386,8 @@ export const ENTRIES = [
       // 首趟路由:首波双并行无前置依赖 → 直接进入委托节点
       assertOut(rPlan, 'NODE: subagent-execute');
       // 两层加载模型:执行域两节点的手动声明标记(record 前置门;一次声明后续趟次复用)
-      assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
-      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
+      assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir), 0);
+      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir), 0);
 
       // 单趟完成动作:TASK.md 标 done(status 变更不影响任务集签名)+ SUMMARY 夹具 + 真实 handoff 委托回传
       const completeTasks = (ids) => {
@@ -485,7 +502,7 @@ export const ENTRIES = [
         '<task id="X1" parallel="true" status="pending"><action>实现 X1</action><write_files>src/x1.mjs</write_files><verify>node --check src/x1.mjs</verify><depends_on>X2</depends_on></task>\n' +
         '<task id="X2" parallel="true" status="pending"><action>实现 X2</action><write_files>src/x2.mjs</write_files><verify>node --check src/x2.mjs</verify><depends_on>X1</depends_on></task>\n';
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + cyclic);
-      assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md'], dir), 0);
+      assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir), 0);
       assertExit(runState(['record', 'plan', '{"summary":"plan drafted"}'], dir), 0);
       assertExit(runGuard(['entry', 'plan'], dir), 0);
       const blocked = runGuard(['exit', 'plan', '--apply'], dir);
@@ -543,7 +560,7 @@ export const ENTRIES = [
       // next 对「currentNode 无 evidence 且非固定路由后继」的委托跳转态按正常推进豁免不放行，
       // 仅断言 guard 侧 NODE；直接后继/回流态（next 可确认）才做双侧收敛断言。
       const drive = (nodeId, skill, prompt, prepare, { expectedNode, converge = true } = {}) => {
-        assertExit(runState(['skill-load', nodeId, skill, '--prompt', prompt], dir, env), 0);
+        assertExit(runState(skillLoadArgs(nodeId, skill, prompt), dir, env), 0);
         prepare();
         assertExit(runGuard(['entry', nodeId], dir), 0);
         const res = runGuard(['exit', nodeId, '--apply'], dir);
@@ -609,7 +626,10 @@ export const ENTRIES = [
       // 归档出口：两侧均 NEXT: done
       assertExit(runState(['skill-load', 'archive', 'flow-comet-archive', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
       writeFile(dir, '.specs/archive/2026-08-28-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# 遗留问题\n\n无。\n');
-      assertExit(runState(['record', 'archive', '{"summary":"archive complete"}'], dir, env), 0);
+      // 归档提名随证据落盘：本 change 写了 6 份任务 SUMMARY（并行 4 份 + 串行 2 份，扫描份数按
+      // 同一清单对账）。提名门缺字段即拦，与本条被测的路由收敛判据无关。
+      assertExit(runState(['record', 'archive',
+        archiveRecordJson('archive complete', ['P01', 'P02', 'S01', 'P03', 'P04', 'S02'])], dir, env), 0);
       assertExit(runGuard(['entry', 'archive'], dir), 0);
       const res = runGuard(['exit', 'archive', '--apply'], dir);
       assertExit(res, 0);
@@ -636,7 +656,7 @@ export const ENTRIES = [
       // 非 --apply 出口（弱判/强判阶段不推进状态，避免 apply 后 currentNode 偏离 plan）
       const exitPlanNoApply = () => runGuard(['exit', 'plan'], dir, planEnv);
       const exitPlanApply = () => runGuard(['exit', 'plan', '--apply'], dir, planEnv);
-      assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md'], dir), 0);
+      assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir), 0);
       assertExit(runState(['record', 'plan', '{"summary":"plan drafted"}'], dir), 0);
       assertExit(runGuard(['entry', 'plan'], dir), 0);
       const planTask = (taskBody) => writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + taskBody);
@@ -800,7 +820,7 @@ export const ENTRIES = [
       };
       // drive 收敛面全量：每个转换点（含平行跳转与趟间回流）都断言 next 可达且与 guard 出口 NODE 一致
       const drive = (nodeId, skill, prompt, prepare, { expectedNode } = {}) => {
-        assertExit(runState(['skill-load', nodeId, skill, '--prompt', prompt], dir, env), 0);
+        assertExit(runState(skillLoadArgs(nodeId, skill, prompt), dir, env), 0);
         prepare();
         assertExit(runGuard(['entry', nodeId], dir), 0);
         const res = runGuard(['exit', nodeId, '--apply'], dir);
@@ -865,7 +885,10 @@ export const ENTRIES = [
       // 归档出口：两侧均 NEXT: done
       assertExit(runState(['skill-load', 'archive', 'flow-comet-archive', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
       writeFile(dir, '.specs/archive/2026-08-28-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# 遗留问题\n\n无。\n');
-      assertExit(runState(['record', 'archive', '{"summary":"archive complete"}'], dir, env), 0);
+      // 归档提名随证据落盘：本 change 写了 6 份任务 SUMMARY（并行 4 份 + 串行 2 份，扫描份数按
+      // 同一清单对账）。提名门缺字段即拦，与本条被测的路由收敛判据无关。
+      assertExit(runState(['record', 'archive',
+        archiveRecordJson('archive complete', ['P01', 'P02', 'S01', 'P03', 'P04', 'S02'])], dir, env), 0);
       assertExit(runGuard(['entry', 'archive'], dir), 0);
       const resArch = runGuard(['exit', 'archive', '--apply'], dir);
       assertExit(resArch, 0);
@@ -894,14 +917,14 @@ export const ENTRIES = [
       // 驱动至 plan 出口（真实命令：init→open→design 见 driveThroughDesign，随后 plan 三连）
       driveThroughDesign(dir);
       writeTask({ S01: 'pending' });
-      assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md'], dir, env), 0);
+      assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir, env), 0);
       assertExit(runState(['record', 'plan', '{"summary":"plan complete"}'], dir, env), 0);
       assertExit(runGuard(['entry', 'plan'], dir), 0);
       assertExit(runGuard(['exit', 'plan', '--apply'], dir), 0);
       // execute 完整完成（产物 + record + entry，真实命令）——仅差 completedNodes（欠账）
       writeTask({ S01: 'done' });
       writeFile(dir, '.specs/' + CHANGE_ID + '/S01-SUMMARY.md', execSummaryFixture('S01'));
-      assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+      assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
       assertExit(runState(['record', 'execute', '{"summary":"executed","parallelTakeoverApproved":true}'], dir, env), 0);
       assertExit(runGuard(['entry', 'execute'], dir), 0);
       // R-1 欠账漂移态：currentNode 漂移到文件推导下一节点 review（execute 未 completed）
@@ -940,7 +963,7 @@ export const ENTRIES = [
       };
       driveThroughDesign(dir);
       writeTask({ P01: 'pending', S01: 'pending' });
-      assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md'], dir, env), 0);
+      assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir, env), 0);
       assertExit(runState(['record', 'plan', '{"summary":"plan complete"}'], dir, env), 0);
       assertExit(runGuard(['entry', 'plan'], dir), 0);
       assertExit(runGuard(['exit', 'plan', '--apply'], dir), 0);
@@ -948,7 +971,7 @@ export const ENTRIES = [
       // 发起委托前先 skill-load 声明（handoff request 前置门——先声明再发起委托，与既有委托链同序）
       writeTask({ P01: 'done', S01: 'pending' });
       writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', execSummaryFixture('P01'));
-      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-subagent-execute', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+      assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-subagent-execute', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
       assertExit(runHandoff(['request', 'P01', 'P01 委托', '--write-files', 'src/p01.mjs'], dir), 0);
       assertExit(runHandoff(['result', 'P01', fullContract('abcd1234abcd1234abcd1234abcd1234abcd1234', 'P01')], dir), 0);
       assertExit(runState(['record', 'subagent-execute', '{"summary":"wave 1 delegated and collected"}'], dir, env), 0);
@@ -995,14 +1018,14 @@ export const ENTRIES = [
       // 驱动至 execute（真实命令：init→open→design→plan 出口）
       driveThroughDesign(dir);
       writeTask({ S01: 'pending' });
-      assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md'], dir, env), 0);
+      assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir, env), 0);
       assertExit(runState(['record', 'plan', '{"summary":"plan complete"}'], dir, env), 0);
       assertExit(runGuard(['entry', 'plan'], dir), 0);
       assertExit(runGuard(['exit', 'plan', '--apply'], dir), 0);
       // execute 完整完成（产物 + record + entry，真实命令）
       writeTask({ S01: 'done' });
       writeFile(dir, '.specs/' + CHANGE_ID + '/S01-SUMMARY.md', execSummaryFixture('S01'));
-      assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md'], dir, env), 0);
+      assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
       assertExit(runState(['record', 'execute', '{"summary":"executed"}'], dir, env), 0);
       assertExit(runGuard(['entry', 'execute'], dir), 0);
       // 执行者自切 direct（directOverride=true 但无授权审计记录——B 方案前的自切/遗留形态）

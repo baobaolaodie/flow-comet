@@ -28,7 +28,17 @@ Find your symptom, run the command. Everything here assumes you are inside the p
 
 **`BLOCKED: … 缺少技能加载声明标记`** — load the node's skill and declare it: `workflow-state.mjs skill-load <node> <skill>`, then repeat the `record` and the exit.
 
-**`BLOCKED: … 模板保真校验失败`** — the node's document is missing a header field or a section the flow-kit template defines. Compare it with `flow-kit/templates/<DOC>.md` and add the named field or section; the message names what it wanted.
+**`BLOCKED: … skill-load 声明 --prompt 与节点协议文件不符`** — a declaration already written for this node names a protocol file outside the node's own set. Re-run `skill-load` with the path the message prints (`flow-kit/prompts/<file>`); the declaration is checked at the next entry, so re-declare instead of editing the marker.
+
+**`BLOCKED: … 的模板声明与节点映射不一致`** — the `--templates` list does not match the node's templates. The message names what is missing or extra and prints the command that re-declares it: `open` takes `CHANGE.md,REQUIREMENT.md`, `design` `DESIGN.md` (plus `UI-DESIGN.md` on a frontend change), `plan` `TASK.md`, `execute` / `subagent-execute` `SUMMARY.md`, `review` `REVIEW.md,TEST.md`; `verify` and `archive` have none and omit the flag. A change created before this rule warns instead of refusing.
+
+**`BLOCKED: … 模板结构校验失败`** — one of the document's checks failed: title form, header fields, the section set or its order, a blank body, or text copied verbatim from the template. The message works in two stages: **the first failure gives only the template path and a count per category** (for example "3 sections missing"), which you fix against `flow-kit/templates/<DOC>.md`; **the section names are listed only when the same document fails again** — that ledger lives in `.specs/<change>/.template-hints.json` and is cleared once the document passes. A conditional section keeps its heading (write `N/A` in the body), a structural subsection is not required when its parent section is `N/A` as a whole, and sections you add beyond the template are not checked.
+
+**The exit reports a document as unchecked because its template is missing** — `flow-kit/templates/<DOC>.md` is not in the project root, so every template-derived check for that document is skipped — **unchecked is not passed**. Restore the flow-kit templates as the installation page describes and retry; if the same line blames the registry instead, the skill tree is missing `reference/artifact-templates.json` and needs reinstalling. `UAT.md` and the archive's leftovers list have no upstream template, so they are never part of this check: only their existence is required.
+
+**`TEMPLATE-FINGERPRINT WARN`** — the registry's locked upstream commit and the checkout under `flow-kit/` disagree. It is a hint, not a block: the skeleton keeps being checked against the registry snapshot. Check `flow-kit/` out at the commit the registry names, or update `templateCommit` together with every template's sha256 — the quality job compares the two sides and refuses a half-done update.
+
+**`TEMPLATE-REGISTRY WARN`** — the registry lists a section its template no longer has. The template decides the section set, so the section is ignored and the run continues; the warning stays until the registry is corrected, which means updating `reference/artifact-templates.json` in the same change that removed the section.
 
 **`BLOCKED: … TASK.md 任务集被修改（签名不匹配）`** — the task set changed after the execution node was entered. Restore the task list and re-enter the node (or add the work as a new task before entering), rather than editing tasks mid-flight.
 

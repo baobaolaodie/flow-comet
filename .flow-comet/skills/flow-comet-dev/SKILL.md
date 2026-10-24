@@ -7,7 +7,7 @@ description: "flow-kit DEV 阶段协议：TDD + 6 维自查 + diff 边界 verify
 
 本 Skill 为 flow-comet 的 execute/subagent-execute 节点提供 flow-kit 的完整开发规则集。
 
-> **模板权威**：本技能产出工件的段形唯一权威 = `flow-kit/templates/**`；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+> **模板权威**：本技能产出工件的段形 = **上游模板 + 本仓登记的增量段**——唯一权威 = `flow-kit/templates/**`（段与正文），条件段 / 结构子段 / 增量段与指纹由 `../flow-comet/reference/artifact-templates.json` 登记；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
 
 ## 加载
 

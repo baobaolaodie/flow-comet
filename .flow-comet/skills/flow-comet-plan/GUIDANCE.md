@@ -15,9 +15,19 @@ Responsibility: 拆原子任务（XML 格式）+ 波次划分。生成 TASK.md�
 
 ### 必填段清单（结构+存在级）
 
-| 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
-|------|-------------------------------|-----------------------------------|
-| TASK.md | 至少一个 `<task>` 块 + 每个任务含 `<verify>` 字段 + 新格式任务的 7 字段在场（集合见本册 `SKILL.md`「必填段清单」表行；单一权威 = 技能脚本的 `lib/task-graph.mjs` 导出的 `TASK7_REQUIRED` 常量，本文不复述集合） | 任务规模 / 粒度 / 字段内容质量（模板要求，guard 不拦）——**填得好不好**由 review 把关；`id` 是 `<task>` 元素的属性（不是字段：`<task id="T01" parallel="true" status="pending">`） |
+段形唯一权威 = `flow-kit/templates/TASK.md` + 登记表 `../flow-comet/reference/artifact-templates.json`（模板缺席时出口输出「未校验（模板缺失）」）。
+
+| 文件 | 无条件段（缺席 = BLOCKED） | 条件段与增量段（在场才校验 / 位置按登记表） |
+|------|---------------------------|-------------------------------------------|
+| TASK.md | `## 波次划分` / `## 任务清单` / `## 状态字段说明` / `## 阻塞日志` / `## Fix 任务（来自 REVIEW / INTEGRATION）`（以上段形按模板）+ 至少一个 `<task>` 块 + 每个任务含 `<verify>` 字段 + 新格式任务的 7 字段在场（集合见本册 `SKILL.md`「必填段清单」表行；单一权威 = 技能脚本的 `lib/task-graph.mjs` 导出的 `TASK7_REQUIRED` 常量，本文不复述集合） | 无（任务规模 / 粒度 / 字段内容质量属模板要求，guard 不拦，由 review 把关）；`id` 是 `<task>` 元素的属性（不是字段：`<task id="T01" parallel="true" status="pending">`） |
+
+声明本次读到的模板：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load plan flow-comet-plan --prompt flow-kit/prompts/3-task.md --templates TASK.md
+```
+
+加载顺序：先 `READ PROMPT:`（步骤权威），有模板的节点再 `READ TEMPLATE:`（段形权威）；design 前端另有一行条件提示词 `2a-ui-design`。
 
 guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
 

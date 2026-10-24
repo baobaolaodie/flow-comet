@@ -17,13 +17,17 @@ Responsibility: 拆原子任务（XML 格式）+ 波次划分。生成 TASK.md�
 
 ### 必填段清单（结构+存在级）
 
-| 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
-|------|-------------------------------|-----------------------------------|
-| TASK.md | 至少一个 `<task>` 块 + 每个任务含 `<verify>` 字段 + 新格式任务的 7 字段在场（`name` / `read_files` / `write_files` / `action` / `verify` / `done` / `depends_on`） | 任务规模 / 粒度 / 字段内容质量（模板要求，guard 不拦）——**填得好不好**由 review 把关 |
+| 文件（模板 = `flow-kit/templates/<DOC>.md`） | 左栏 · 无条件段（模板 H2，缺席 / 空正文 = BLOCKED） | 右栏 · 条件段（**标题必须在场**，正文可写 `N/A`）/ 增量段（按登记位置） |
+|------|------|------|
+| TASK.md | 至少一个 `<task>` 块 + 每个任务含 `<verify>` 字段 + 新格式任务的 7 字段在场（`name` / `read_files` / `write_files` / `action` / `verify` / `done` / `depends_on`）；模板 5 个 H2 段 `## 波次划分` / `## 任务清单` / `## 状态字段说明` / `## 阻塞日志` / `## Fix 任务（来自 REVIEW / INTEGRATION）` | 无模板条件段、无增量段（5 个 H2 全部无条件）——任务块的 7 字段与任务图（依赖环 / 缺失依赖 / 并行写写冲突）属元素级判据，见下方「硬性拦截」段 |
 
-guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B：任务块结构、每任务 `<verify>`、**新格式任务的 7 字段在场**都由 guard 拦（新 change 缺任一 = 出口 BLOCKED；旧格式模板 / 旧 change 渐进 WARN）；「填得好不好」——字段内容质量与任务粒度——由 review 把关。
+首部字段 `Change ID` / `关联` 已在场时值不得为空（键集不强制）。
 
-> **模板权威**：本节点产出工件的段形唯一权威 = `flow-kit/templates/**`；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B：任务块结构、每任务 `<verify>`、**新格式任务的 7 字段在场**、以及 TASK.md 的模板骨架（段标题 / 段序 / 首部字段值非空）都由 guard 拦（新 change 缺任一 = 出口 BLOCKED；旧格式模板 / 旧 change 渐进 WARN）；「填得好不好」——字段内容质量与任务粒度——由 review 把关。
+
+> **模板权威**：本节点产出工件的段形 = **上游模板 + 本仓登记的增量段**——唯一权威 = `flow-kit/templates/**`（段与正文），条件段 / 结构子段 / 增量段与指纹由 `../flow-comet/reference/artifact-templates.json` 登记；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+
+加载顺序：先读 `READ PROMPT:`（`3-task`），再读 `READ TEMPLATE:`（`TASK`）。
 
 波次散文一致性：`## 波次划分` 中标记为并行（[P]）的任务必须与 XML 任务 `parallel="true"` 一致——新 change 不一致 BLOCKED（旧 change WARN 渐进）。
 
@@ -131,10 +135,10 @@ The plan node loads `flow-comet-task` to perform task decomposition. It reads DE
 **加载声明（阶段层 · 双步硬规则）**：本节点技能已由入口路由经 Skill 工具加载（你正在阅读的就是它）；本节点 Required Skill Calls 的加载与声明同样不可跳过：
 
 1. **用 Skill 工具加载** `flow-comet-task`（本节点 Required Skill Call）。**不得跳过**——只读取 SKILL.md 文件不叫加载；真正让 flow-comet-task 指令生效的是 Skill 工具把它注入本次会话。
-2. 加载完成后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+2. 加载完成后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）。`--templates` 声明本节点该读的产出物模板（plan → `TASK.md`）：
 
 ```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load plan flow-comet-task --prompt flow-kit/prompts/3-task.md
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load plan flow-comet-task --prompt flow-kit/prompts/3-task.md --templates TASK.md
 ```
 
 > **跑 skill-load 声明命令 ≠ 加载**：声明只把“哪次会话加载了哪个 skill、按哪份协议工作”写进状态供 exit/record 核对；真正加载只有第 1 步的 Skill 工具能做到。

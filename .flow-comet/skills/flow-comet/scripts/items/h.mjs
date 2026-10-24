@@ -8,7 +8,7 @@ import path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 import { createHash } from 'crypto';
 import { assertExit, assertNotOut, assertOut, runGuard, runHandoff, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
-import { CHANGE_ID, assertNodeLine, assertNotNodeLine, completeFixTaskAndRecord, driveThroughDesign, execSummaryFixture, fixBatchReviewDoc, fixBatchTaskText, fullContract, parseStatusOutput, readStateBytes, readStateFile, writeIntakeArtifacts } from '../lib/system-fixtures.mjs';
+import { archiveRecordJson, CHANGE_ID, assertNodeLine, assertNotNodeLine, completeFixTaskAndRecord, driveThroughDesign, execSummaryFixture, fixBatchReviewDoc, fixBatchTaskText, fullContract, parseStatusOutput, readStateBytes, readStateFile, writeIntakeArtifacts } from '../lib/system-fixtures.mjs';
 
 // 同夹具的「段内大写 Z 早于方法名」变体（真实机检标记形态）：6 维自查段体首行是含大写 Z 的机检
 // 标记说明，方法声明行在其后。段尾判定若把大写 Z 当串尾（惰性段体在段内首个 Z 处提前收尾），
@@ -107,13 +107,13 @@ function replanTaskText(options = {}) {
 function seedExecuteEntryState(dir, taskText) {
   driveThroughDesign(dir);
   writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskText);
-  assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md'], dir), 0);
+  assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir), 0);
   assertExit(runState(['record', 'plan', '{"summary":"plan done"}'], dir), 0);
   assertExit(runGuard(['entry', 'plan'], dir), 0);
   const planExit = runGuard(['exit', 'plan', '--apply'], dir);
   assertExit(planExit, 0);
   assertNodeLine(planExit, 'execute');
-  assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md'], dir), 0);
+  assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir), 0);
   assertExit(runState(['record', 'execute', '{"summary":"implementation recorded"}'], dir), 0);
   assertExit(runGuard(['entry', 'execute'], dir), 0);
 }
@@ -191,7 +191,8 @@ export const ENTRIES = [
       const st0 = readStateFile(dir);
       st0.currentNode = 'archive';
       writeState(dir, st0);
-      assertExit(runState(['record', 'archive', '{"summary":"archived"}'], dir), 0);
+      // 归档提名随证据落盘（该 change 无任务 SUMMARY → 扫描 0 份，理由写明无候选入库）
+      assertExit(runState(['record', 'archive', archiveRecordJson('archived')], dir), 0);
       // ① 未移动（无归档目录）→ 出口拦截（缺归档产物）
       assertExit(runGuard(['entry', 'archive'], dir), 0);
       const blocked = runGuard(['exit', 'archive'], dir);
@@ -229,13 +230,14 @@ export const ENTRIES = [
       // 遗留清单(协议 required 产物——随目录移动进归档)
       writeFile(dir, '.specs/arch-mk/KNOWN-ISSUES.md', '# KNOWN-ISSUES\n\n无遗留问题\n');
       // 归档前声明标记（open + archive 节点）
-      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
       assertExit(runState(['skill-load', 'archive', 'flow-comet-integration', '--prompt', 'flow-kit/prompts/7-integration.md'], dir), 0);
       // 节点推进到归档（模拟前序节点出口已完成的状态）
       const st0 = readStateFile(dir);
       st0.currentNode = 'archive';
       writeState(dir, st0);
-      assertExit(runState(['record', 'archive', '{"summary":"archived"}'], dir), 0);
+      // 归档提名随证据落盘（该 change 无任务 SUMMARY → 扫描 0 份，理由写明无候选入库）
+      assertExit(runState(['record', 'archive', archiveRecordJson('archived')], dir), 0);
       // 移动（标记随目录进入归档路径）
       fs.mkdirSync(path.join(dir, '.specs', 'archive'), { recursive: true });
       fs.renameSync(path.join(dir, '.specs', 'arch-mk'), path.join(dir, '.specs', 'archive', '2026-08-11-arch-mk'));
@@ -260,7 +262,7 @@ export const ENTRIES = [
       writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
       writeFile(dir, 'flow-kit/prompts/7-integration.md', '# 阶段 7 · INTEGRATION\n\n## 角色\n\n你是 Integrationer。\n');
       // 手动 skill-load(活动路径标记,随目录移动进归档)
-      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
       assertExit(runState(['skill-load', 'archive', 'flow-comet-integration', '--prompt', 'flow-kit/prompts/7-integration.md'], dir), 0);
       // 推进到 archive
       const st0 = readStateFile(dir);

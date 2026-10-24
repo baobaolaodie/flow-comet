@@ -1,0 +1,387 @@
+{
+  "schemaVersion": 1,
+  "templateCommit": "9b5dda7206ae841230f118348d660ad8d0ae2830",
+  "templateRoot": "flow-kit/templates",
+  "hashAlgorithm": "sha256",
+  "hashNormalization": "utf8 · 去 BOM · CRLF/CR 归一为 LF（行尾差异不应改变指纹）",
+  "semantics": {
+    "sections": "模板全部 H2 的结构登记。name 逐字取自模板标题行；conditional = 模板自身标注「条件适用 / 可整段 N/A / 如有」，标题必须在场；optional = 模板允许整段删除（当前仅 UI-DESIGN §0，greenfield 删）。",
+    "structureSubsections": "结构型 H3 的显式清单（模板里真有结构含义的子段）。示例条目（🔴 R<x> / 🔴 T<x> / ADR-NNN / AC-1 / L-001）一律不登记——它们是书写样例，不是骨架。parent = 所属 H2 的逐字标题。",
+    "increments": "flow-comet 在本仓追加的增量段（上游模板没有）：kind=section 为整段，kind=marker 为段内条目级标记。position.mode：after-or-end（紧随 afterSection 或文末）/ end（文末）/ anywhere（位置不限，另有 constraint）/ within（写在 section 指定的段内）。required 表示内置节点必填。",
+    "titlePattern": "按标题行匹配的工整形态（大小写不敏感）；titleForm 是模板里那行的字面形态，供报错文案使用。",
+    "headerFields": "首部 `- **字段**:` 键名清单（值非空才算填）。",
+    "frontmatterKeys": "YAML frontmatter 顶层键（仅 UI-DESIGN；行级解析，不引入 YAML 库）。",
+    "sha256": "模板文件按 hashNormalization 归一后的 sha256；与 templateCommit 一起构成锁定快照，发版期机检比对。"
+  },
+  "templates": {
+    "ARCHITECTURE": {
+      "file": "flow-kit/templates/ARCHITECTURE.md",
+      "titlePattern": "^#\\s*ARCHITECTURE\\b",
+      "titleForm": "# ARCHITECTURE — 项目级系统架构（活文档）",
+      "headerFields": ["维护者", "首次创建", "最近修订", "当前 ADR 编号最大值"],
+      "sections": [
+        { "name": "1. 系统概览" },
+        { "name": "2. 模块清单 + 边界" },
+        { "name": "3. ADR 列表（Architecture Decision Records · 不可逆决策清单）" },
+        { "name": "4. 跨模块契约" },
+        { "name": "5. 扩展点（Where to plug in new things）" },
+        { "name": "6. 容量 / 性能边界（Where things break）" },
+        { "name": "7. 已知技术债 + 长期方向" },
+        { "name": "8. 修订历史" }
+      ],
+      "structureSubsections": [
+        { "name": "1.1 一句话定位", "parent": "1. 系统概览" },
+        { "name": "1.2 服务边界图", "parent": "1. 系统概览" },
+        { "name": "1.3 关键非功能性指标（NFR 基线）", "parent": "1. 系统概览" },
+        { "name": "2.1 模块表", "parent": "2. 模块清单 + 边界" },
+        { "name": "2.2 模块依赖规则（hard rules）", "parent": "2. 模块清单 + 边界" },
+        { "name": "4.1 公共 HTTP API", "parent": "4. 跨模块契约" },
+        { "name": "4.2 事件总线", "parent": "4. 跨模块契约" },
+        { "name": "4.3 数据库 schema（顶层关系，详细 schema 走 migrations）", "parent": "4. 跨模块契约" },
+        { "name": "4.4 共享配置项", "parent": "4. 跨模块契约" }
+      ],
+      "increments": [],
+      "sha256": "441567c3d1e8ff99842191c6191726ca88e0b6ac4585629b3dbe7d64ee6b30b7"
+    },
+    "CHANGE": {
+      "file": "flow-kit/templates/CHANGE.md",
+      "titlePattern": "^#\\s*CHANGE\\b",
+      "titleForm": "# CHANGE: <一句话标题>",
+      "headerFields": ["Change ID", "创建日期", "路径建议", "状态"],
+      "sections": [
+        { "name": "Why（为什么做）" },
+        { "name": "What（做什么）" },
+        { "name": "视觉调性（前端项目必填，由 0-change 步骤 0.6 预选填入）", "conditional": true },
+        { "name": "影响面" },
+        { "name": "范围排除（这次不做）" },
+        { "name": "验收线（粗粒度，不是 AC）" },
+        { "name": "风险与未知" }
+      ],
+      "structureSubsections": [],
+      "increments": [
+        {
+          "section": "架构层影响声明",
+          "kind": "section",
+          "required": false,
+          "position": { "mode": "end", "afterSection": "风险与未知" }
+        }
+      ],
+      "sha256": "6be07ca0d639bd06c48db556a1072fa94f161a2c7c1b7fa01343fb561bd885d0"
+    },
+    "CONTEXT": {
+      "file": "flow-kit/templates/CONTEXT.md",
+      "titlePattern": "^#\\s*CONTEXT\\b",
+      "titleForm": "# CONTEXT — 项目共享上下文",
+      "headerFields": [],
+      "sections": [
+        { "name": "项目概要" },
+        { "name": "技术栈（团队级默认 / 已锁定）" },
+        { "name": "域语言（术语表）" },
+        { "name": "已锁决策" },
+        { "name": "默认偏好（AI 在缺省时按此决策）" },
+        { "name": "既有抽象索引（来自 I-intel-scan · 防 AI 重复实现 · B5 老项目护栏）" },
+        { "name": "intel-scan 元数据" }
+      ],
+      "structureSubsections": [
+        { "name": "HTTP 客户端", "parent": "既有抽象索引（来自 I-intel-scan · 防 AI 重复实现 · B5 老项目护栏）" },
+        { "name": "数据库访问", "parent": "既有抽象索引（来自 I-intel-scan · 防 AI 重复实现 · B5 老项目护栏）" },
+        { "name": "状态管理", "parent": "既有抽象索引（来自 I-intel-scan · 防 AI 重复实现 · B5 老项目护栏）" },
+        { "name": "工具函数（utils / helpers）", "parent": "既有抽象索引（来自 I-intel-scan · 防 AI 重复实现 · B5 老项目护栏）" },
+        { "name": "自定义 hooks（前端）", "parent": "既有抽象索引（来自 I-intel-scan · 防 AI 重复实现 · B5 老项目护栏）" },
+        { "name": "错误处理", "parent": "既有抽象索引（来自 I-intel-scan · 防 AI 重复实现 · B5 老项目护栏）" },
+        { "name": "Schema / 迁移", "parent": "既有抽象索引（来自 I-intel-scan · 防 AI 重复实现 · B5 老项目护栏）" },
+        { "name": "命名约定", "parent": "既有抽象索引（来自 I-intel-scan · 防 AI 重复实现 · B5 老项目护栏）" },
+        { "name": "禁动清单（AI 不许\"顺手\"碰）", "parent": "既有抽象索引（来自 I-intel-scan · 防 AI 重复实现 · B5 老项目护栏）" },
+        { "name": "技术债（来自 M-health · 给 AI 在 2-design / 4-dev 时参考，别再加同类债）", "parent": "既有抽象索引（来自 I-intel-scan · 防 AI 重复实现 · B5 老项目护栏）" }
+      ],
+      "increments": [],
+      "sha256": "c9a99f69cbae55b1d43c0691b1478bc851035588342f2df744b878023e4496e4"
+    },
+    "DESIGN": {
+      "file": "flow-kit/templates/DESIGN.md",
+      "titlePattern": "^#\\s*DESIGN\\b",
+      "titleForm": "# DESIGN: <change 标题>",
+      "headerFields": ["Change ID", "关联", "作者"],
+      "sections": [
+        { "name": "0. 技术栈选定" },
+        { "name": "0.5 既有架构对齐（brownfield 必填 · 来自 2-design 步骤 0.5 / B2 老项目护栏）", "conditional": true },
+        { "name": "1. 决策清单" },
+        { "name": "2. 数据流 / 架构图" },
+        { "name": "3. 关键状态机（如有）", "conditional": true },
+        { "name": "4. ADR 索引", "conditional": true },
+        { "name": "5. 风险" },
+        { "name": "6. 不在范围" },
+        { "name": "9. 架构沉淀建议（本 change 完成后供 `A-evolve` 同步用 · 软约束）", "conditional": true }
+      ],
+      "structureSubsections": [
+        { "name": "0.5.1 本次 change 触碰的既有模块", "parent": "0.5 既有架构对齐（brownfield 必填 · 来自 2-design 步骤 0.5 / B2 老项目护栏）" },
+        { "name": "0.5.2 既有抽象沿用对照表", "parent": "0.5 既有架构对齐（brownfield 必填 · 来自 2-design 步骤 0.5 / B2 老项目护栏）" },
+        { "name": "0.5.3 沿用模式 vs 引入新模式", "parent": "0.5 既有架构对齐（brownfield 必填 · 来自 2-design 步骤 0.5 / B2 老项目护栏）" },
+        { "name": "9.1 新增的可复用抽象（建议 append 到 CONTEXT 「既有抽象索引」段）", "parent": "9. 架构沉淀建议（本 change 完成后供 `A-evolve` 同步用 · 软约束）" },
+        { "name": "9.2 新增 / 改变的项目级技术决策（建议 append 到 CONTEXT「已锁技术决策」段 · 或将来升 ARCHITECTURE.md「ADR 列表」）", "parent": "9. 架构沉淀建议（本 change 完成后供 `A-evolve` 同步用 · 软约束）" },
+        { "name": "9.3 新增 / 修改的跨模块契约（API / Schema / 事件总线）（建议 append 到 CONTEXT「跨模块契约」段）", "parent": "9. 架构沉淀建议（本 change 完成后供 `A-evolve` 同步用 · 软约束）" },
+        { "name": "9.4 新增 / 升级的依赖（建议 append 到 CONTEXT「技术栈」段）", "parent": "9. 架构沉淀建议（本 change 完成后供 `A-evolve` 同步用 · 软约束）" },
+        { "name": "9.5 禁动清单变化（建议 patch CONTEXT「禁动清单」段）", "parent": "9. 架构沉淀建议（本 change 完成后供 `A-evolve` 同步用 · 软约束）" }
+      ],
+      "increments": [],
+      "sha256": "d81cf5d13cb85d0919da4d02811f2384b4ea4b2c798245102254d64860c2216f"
+    },
+    "LESSONS": {
+      "file": "flow-kit/templates/LESSONS.md",
+      "titlePattern": "^#\\s*LESSONS\\b",
+      "titleForm": "# LESSONS — 跨任务失败知识库",
+      "headerFields": [],
+      "sections": [
+        { "name": "标签索引" },
+        { "name": "使用方式" },
+        { "name": "条目格式（复制此模板新增）" },
+        { "name": "提名条件（满足任一即建议入库）" },
+        { "name": "复核与剪枝（每个 ARCHIVE 步骤顺手做）" },
+        { "name": "条目区（实际项目里把下面的示例替换成你的真实条目）", "conditional": true }
+      ],
+      "structureSubsections": [
+        { "name": "写代码前（DEV 阶段，R1.8）", "parent": "使用方式" },
+        { "name": "任务完成后（INTEGRATION ARCHIVE 步骤）", "parent": "使用方式" }
+      ],
+      "increments": [],
+      "sha256": "1417667297b05088101f9c280e092b16dd49d627d7134aa2f5e85755a6992327"
+    },
+    "PROGRESS": {
+      "file": "flow-kit/templates/PROGRESS.md",
+      "titlePattern": "^#\\s*PROGRESS\\b",
+      "titleForm": "# PROGRESS: <T01 - 任务名>",
+      "headerFields": ["Change ID", "Task ID", "暂停时间", "触发清窗的信号"],
+      "sections": [
+        { "name": "已完成的子步骤" },
+        { "name": "当前正在做（清窗那一刻的状态）" },
+        { "name": "已排除的方案（反重复关键）" },
+        { "name": "待确认的假设" },
+        { "name": "临时记下的线索 / 文件位置" },
+        { "name": "恢复指引（给下一会话的 AI）" }
+      ],
+      "structureSubsections": [],
+      "increments": [],
+      "sha256": "6726107309553ee567c71982cdd4a78a025abe1da9a9b174ed2701cb4c713eb8"
+    },
+    "REQUIREMENT": {
+      "file": "flow-kit/templates/REQUIREMENT.md",
+      "titlePattern": "^#\\s*REQUIREMENT\\b",
+      "titleForm": "# REQUIREMENT: <change 标题>",
+      "headerFields": ["Change ID", "关联"],
+      "sections": [
+        { "name": "用户故事" },
+        { "name": "验收准则（AC）" },
+        { "name": "范围切分" },
+        { "name": "非功能性需求" },
+        { "name": "依赖与假设" }
+      ],
+      "structureSubsections": [
+        { "name": "v1（本次必做）", "parent": "范围切分" },
+        { "name": "v2（下一轮考虑，不本次）", "parent": "范围切分" },
+        { "name": "out（永远不做）", "parent": "范围切分" }
+      ],
+      "increments": [],
+      "sha256": "a8f662f5711b19d3af5eb7a019f3fae8f55499319be6d97da6ccb935dba59213"
+    },
+    "REVIEW": {
+      "file": "flow-kit/templates/REVIEW.md",
+      "titlePattern": "^#\\s*REVIEW\\b",
+      "titleForm": "# REVIEW: <change 标题>",
+      "headerFields": ["Change ID", "审查时间", "审查者", "总体结论"],
+      "sections": [
+        { "name": "第一轮 · Spec 合规审查" },
+        { "name": "第二轮 · 代码质量审查（6 维衰退风险）" },
+        { "name": "第三轮 · UI 视觉审查（仅前端 · 见 6-review.md 第 3 节）", "conditional": true },
+        { "name": "第四轮 · 补充审查（按触发条件）", "conditional": true },
+        { "name": "总结" }
+      ],
+      "structureSubsections": [
+        { "name": "2.0 TEST.md 5 轮金字塔完整性", "parent": "第二轮 · 代码质量审查（6 维衰退风险）" },
+        { "name": "2.1 6 维诊断 · 严重度统计", "parent": "第二轮 · 代码质量审查（6 维衰退风险）" },
+        { "name": "2.2 6 维诊断 · 详细发现（4 要素 · 来自 brooks-lint 输出 / 内置回退）", "parent": "第二轮 · 代码质量审查（6 维衰退风险）" },
+        { "name": "2.3 架构依赖图（大型 change · 来自 /brooks-audit）", "parent": "第二轮 · 代码质量审查（6 维衰退风险）" },
+        { "name": "4.1 技术债评估（来自 /brooks-debt，仅里程碑 / 重构）", "parent": "第四轮 · 补充审查（按触发条件）" },
+        { "name": "4.2 跨模型分歧", "parent": "第四轮 · 补充审查（按触发条件）" }
+      ],
+      "increments": [
+        {
+          "section": "处置标记",
+          "kind": "marker",
+          "required": true,
+          "position": {
+            "mode": "within",
+            "section": "2.2 6 维诊断 · 详细发现（4 要素 · 来自 brooks-lint 输出 / 内置回退）"
+          }
+        }
+      ],
+      "sha256": "929305dc9f087ac469587ad01149eeae9329599103ccaeefb23bb59da9ce5678"
+    },
+    "STATE": {
+      "file": "flow-kit/templates/STATE.md",
+      "titlePattern": "^#\\s*STATE\\b",
+      "titleForm": "# STATE — 跨会话项目状态",
+      "headerFields": [],
+      "sections": [
+        { "name": "当前位置" },
+        { "name": "阻塞与待决策" },
+        { "name": "决策日志（最近 10 条，倒序）" },
+        { "name": "已归档 Changes（最近 5 个，倒序）" },
+        { "name": "横向命令状态（GO.md / 各 prompt 会读这里决定要不要主动提示）" },
+        { "name": "健康检查（AI 每次会话开始前自检）" }
+      ],
+      "structureSubsections": [],
+      "increments": [],
+      "sha256": "71d23fe1b21c11bd6e9fd701eb4494b97b816368f91462fa3c28ad0f5a5ce20f"
+    },
+    "SUMMARY": {
+      "file": "flow-kit/templates/SUMMARY.md",
+      "titlePattern": "^#\\s*SUMMARY\\b",
+      "titleForm": "# SUMMARY: <T01 - 任务名>",
+      "headerFields": ["Change ID", "Task ID", "完成时间", "AI 角色"],
+      "sections": [
+        { "name": "做了什么（一段话）" },
+        { "name": "改动文件" },
+        { "name": "verify 输出（必填）" },
+        { "name": "6 维自查（生产代码改动必填 · 来自 4-dev 步骤 4）" },
+        { "name": "数据库迁移（涉及 schema 变更必填 · 来自 4-dev 步骤 1.7 / R4.5）", "conditional": true },
+        { "name": "越界检查（必填 · 来自 4-dev 步骤 5 / R6.5 / B3 老项目护栏）" },
+        { "name": "破坏性变更（涉及破坏性改动必填 · 来自 4-dev 步骤 1.8 / R4.6 / B4 老项目护栏）", "conditional": true },
+        { "name": "决策与偏离（如有）", "conditional": true },
+        { "name": "是否触发新工作" },
+        { "name": "完成判定" }
+      ],
+      "structureSubsections": [
+        { "name": "已知接受 + 理由（🟡 Major 项不修的）", "parent": "6 维自查（生产代码改动必填 · 来自 4-dev 步骤 4）" },
+        { "name": "已知小问题（🟢 Minor 项可省的）", "parent": "6 维自查（生产代码改动必填 · 来自 4-dev 步骤 4）" },
+        { "name": "Schema Diff", "parent": "数据库迁移（涉及 schema 变更必填 · 来自 4-dev 步骤 1.7 / R4.5）" },
+        { "name": "迁移文件", "parent": "数据库迁移（涉及 schema 变更必填 · 来自 4-dev 步骤 1.7 / R4.5）" },
+        { "name": "执行状态", "parent": "数据库迁移（涉及 schema 变更必填 · 来自 4-dev 步骤 1.7 / R4.5）" },
+        { "name": "提醒（用户选\"只生成 SQL\" 或未检测到凭据时必填）", "parent": "数据库迁移（涉及 schema 变更必填 · 来自 4-dev 步骤 1.7 / R4.5）" },
+        { "name": "判定命中", "parent": "破坏性变更（涉及破坏性改动必填 · 来自 4-dev 步骤 1.8 / R4.6 / B4 老项目护栏）" },
+        { "name": "引用图（必填 · grep 结果）", "parent": "破坏性变更（涉及破坏性改动必填 · 来自 4-dev 步骤 1.8 / R4.6 / B4 老项目护栏）" },
+        { "name": "反问用户结果", "parent": "破坏性变更（涉及破坏性改动必填 · 来自 4-dev 步骤 1.8 / R4.6 / B4 老项目护栏）" },
+        { "name": "回归测试覆盖", "parent": "破坏性变更（涉及破坏性改动必填 · 来自 4-dev 步骤 1.8 / R4.6 / B4 老项目护栏）" }
+      ],
+      "increments": [
+        {
+          "section": "自检方法",
+          "kind": "section",
+          "required": true,
+          "position": { "mode": "after-or-end", "afterSection": "越界检查（必填 · 来自 4-dev 步骤 5 / R6.5 / B3 老项目护栏）" }
+        },
+        {
+          "section": "LESSONS 扫描",
+          "kind": "section",
+          "required": true,
+          "position": { "mode": "after-or-end", "afterSection": "自检方法" }
+        }
+      ],
+      "sha256": "baf611a42e49772cf57e924d2c9fa6a793dfc85cef5a4946b74a7bb2c6923277"
+    },
+    "TASK": {
+      "file": "flow-kit/templates/TASK.md",
+      "titlePattern": "^#\\s*TASK\\b",
+      "titleForm": "# TASK: <change 标题>",
+      "headerFields": ["Change ID", "关联"],
+      "sections": [
+        { "name": "波次划分" },
+        { "name": "任务清单" },
+        { "name": "状态字段说明" },
+        { "name": "阻塞日志" },
+        { "name": "Fix 任务（来自 REVIEW / INTEGRATION）" }
+      ],
+      "structureSubsections": [],
+      "increments": [],
+      "sha256": "2638a2c247ede93c10ea57f9a30e56168e1e44e9f64ef69b03573d4c3bf0b7de"
+    },
+    "TEST": {
+      "file": "flow-kit/templates/TEST.md",
+      "titlePattern": "^#\\s*TEST\\b",
+      "titleForm": "# TEST: <change 标题>",
+      "headerFields": ["Change ID", "关联", "项目类型"],
+      "sections": [
+        { "name": "0. 本次测试范围声明（5 轮金字塔）" },
+        { "name": "第 1 轮 · 功能测试" },
+        { "name": "第 2 轮 · 性能测试", "conditional": true },
+        { "name": "第 3 轮 · 安全测试", "conditional": true },
+        { "name": "第 4 轮 · 兼容性测试", "conditional": true },
+        { "name": "第 5 轮 · 可观测性验证", "conditional": true },
+        { "name": "新增测试登记" },
+        { "name": "回归保护" }
+      ],
+      "structureSubsections": [
+        { "name": "1.1 测试矩阵（AC → 用例）", "parent": "第 1 轮 · 功能测试" },
+        { "name": "1.2 UAT 脚本", "parent": "第 1 轮 · 功能测试" },
+        { "name": "1.3 覆盖率", "parent": "第 1 轮 · 功能测试" },
+        { "name": "1.4 边界 / 错误路径用例", "parent": "第 1 轮 · 功能测试" },
+        { "name": "1.5 测试质量自检（6 维测试衰退风险）", "parent": "第 1 轮 · 功能测试" },
+        { "name": "1.6 测试质量记事（backlog）", "parent": "第 1 轮 · 功能测试" },
+        { "name": "2.1 性能预算（来自 REQUIREMENT.md 非功能性需求）", "parent": "第 2 轮 · 性能测试" },
+        { "name": "2.2 实测结果", "parent": "第 2 轮 · 性能测试" },
+        { "name": "2.3 工具输出", "parent": "第 2 轮 · 性能测试" },
+        { "name": "2.4 退步项处理", "parent": "第 2 轮 · 性能测试" },
+        { "name": "3.1 依赖漏洞", "parent": "第 3 轮 · 安全测试" },
+        { "name": "3.2 秘钥扫描", "parent": "第 3 轮 · 安全测试" },
+        { "name": "3.3 SAST", "parent": "第 3 轮 · 安全测试" },
+        { "name": "3.4 OWASP Top 10", "parent": "第 3 轮 · 安全测试" },
+        { "name": "4.1 跨浏览器（Web）", "parent": "第 4 轮 · 兼容性测试" },
+        { "name": "4.2 视口", "parent": "第 4 轮 · 兼容性测试" },
+        { "name": "4.3 数据迁移（涉及 schema 变更必填）", "parent": "第 4 轮 · 兼容性测试" },
+        { "name": "4.4 跨版本", "parent": "第 4 轮 · 兼容性测试" },
+        { "name": "5.1 日志", "parent": "第 5 轮 · 可观测性验证" },
+        { "name": "5.2 指标", "parent": "第 5 轮 · 可观测性验证" },
+        { "name": "5.3 链路追踪", "parent": "第 5 轮 · 可观测性验证" },
+        { "name": "5.4 告警 + 健康检查", "parent": "第 5 轮 · 可观测性验证" }
+      ],
+      "increments": [
+        {
+          "section": "验证命令",
+          "kind": "section",
+          "required": true,
+          "position": { "mode": "anywhere", "constraint": "code-block-follows" }
+        }
+      ],
+      "sha256": "98f5fc15ca29ad7e300556e58376a25ace2a32f74cad86c4515e3b809221e2e0"
+    },
+    "UI-DESIGN": {
+      "file": "flow-kit/templates/UI-DESIGN.md",
+      "titlePattern": "^#\\s*UI\\s+Design\\b",
+      "titleForm": "# UI Design: <项目名>",
+      "headerFields": [],
+      "frontmatterKeys": ["name", "description", "colors", "typography", "spacing", "rounded", "motion", "shadow"],
+      "sections": [
+        { "name": "0. 视觉语汇对齐（仅 brownfield 填 · greenfield 删掉此段）", "optional": true },
+        { "name": "1. 美学北极星" },
+        { "name": "2. 4 个决策问题（开工前回答）" },
+        { "name": "3. 颜色系统" },
+        { "name": "4. 字体系统" },
+        { "name": "5. 间距 & 圆角 & 动效" },
+        { "name": "6. 关键组件规约" },
+        { "name": "7. Do's and Don'ts（本项目特定）" },
+        { "name": "8. 占位符策略（反伪造 · 对应 R8.9）" },
+        { "name": "9. 反 AI-slop 自检结果" },
+        { "name": "10. 触发任务" }
+      ],
+      "structureSubsections": [
+        { "name": "0.1 观察报告（代码为源）", "parent": "0. 视觉语汇对齐（仅 brownfield 填 · greenfield 删掉此段）" },
+        { "name": "0.2 用户校准结论", "parent": "0. 视觉语汇对齐（仅 brownfield 填 · greenfield 删掉此段）" },
+        { "name": "0.3 应用策略", "parent": "0. 视觉语汇对齐（仅 brownfield 填 · greenfield 删掉此段）" },
+        { "name": "v0 确认摸路", "parent": "1. 美学北极星" },
+        { "name": "Primary", "parent": "3. 颜色系统" },
+        { "name": "Neutral", "parent": "3. 颜色系统" },
+        { "name": "命名规则", "parent": "3. 颜色系统" },
+        { "name": "层次表", "parent": "4. 字体系统" },
+        { "name": "Button (Primary)", "parent": "6. 关键组件规约" },
+        { "name": "Button (Secondary)", "parent": "6. 关键组件规约" },
+        { "name": "Input / Field", "parent": "6. 关键组件规约" },
+        { "name": "Card / Container", "parent": "6. 关键组件规约" },
+        { "name": "Navigation", "parent": "6. 关键组件规约" },
+        { "name": "Typography Hierarchy", "parent": "6. 关键组件规约" },
+        { "name": "Do", "parent": "7. Do's and Don'ts（本项目特定）" },
+        { "name": "Don't（除了通用 anti-patterns，本项目额外禁止）", "parent": "7. Do's and Don'ts（本项目特定）" }
+      ],
+      "increments": [],
+      "sha256": "5e8a7cfea23a4d5690849c8e816b8635eb8d7ab9bba8a2c41689f96cddffc6f5"
+    }
+  }
+}

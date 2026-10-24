@@ -4,6 +4,7 @@
 // 读写（不写 state、不改路由、不绕门禁，与 bridge-check 同为纯读通道）。节点 id 非法 →
 // fail-closed 并列出协议内全部合法节点。
 import path from 'path';
+import { nodeTemplateDeclaration, templatePointerLines } from '../protocol-utils.mjs';
 import { runRootDir } from './state-io.mjs';
 
 // 命令路径形态（平台化）：权威源保持设计形态 .claude/skills/（与册子命令形态一致，安装时由
@@ -21,7 +22,22 @@ function platformScriptsDir(scriptsDir) {
   return relative;
 }
 
-// ① 该节点的 outputSchema 名与产物路径（含 evidence id）。产物根语义与状态机 / guard 的节点完成
+// ① 产出物模板现问（加载链的第三环）：与 entry 的 READ TEMPLATE 行同源同实现（protocol-utils
+// 的 templatePointerLines），只换标签——两处措辞一处维护。零模板节点不打印。
+// 条件模板行在本通道无条件列出（本通道不读状态、不判前端），并显式标注「仅前端 change」：是否
+// 真的适用由 CHANGE.md 的视觉调性段决定，design 的入口会按 frontendCriterion 追出。
+function printNodeTemplates(node) {
+  const declaration = nodeTemplateDeclaration(node);
+  if (declaration.required.length === 0 && declaration.optional.length === 0) return;
+  for (const line of templatePointerLines(declaration, {
+    label: 'TEMPLATE',
+    conditional: declaration.optional.length > 0,
+  })) {
+    console.log(line);
+  }
+}
+
+// ② 该节点的 outputSchema 名与产物路径（含 evidence id）。产物根语义与状态机 / guard 的节点完成
 // 判定一致：'specs-root' → .specs/；'project' / 缺省 → 项目根。悬空 schema 引用如实标注、不编造
 // 产物（自定义协议允许悬空引用，route-node 的产物推导同样容忍）。
 function printNodeArtifacts(protocol, node) {
@@ -98,6 +114,7 @@ export function runExplain(protocol, argv, scriptsDir) {
   if (explainNode.label) console.log('LABEL: ' + explainNode.label);
   if (explainNode.kind) console.log('KIND: ' + explainNode.kind);
   if (explainNode.disabled === true) console.log('DISABLED: true（该节点在当前协议中被停用）');
+  printNodeTemplates(explainNode);
   printNodeArtifacts(protocol, explainNode);
   printNodeGuardrails(explainNode);
   printNodeSkillCalls(explainNode);

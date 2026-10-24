@@ -17,15 +17,17 @@ In subagent mode (default) this node is a coordinator: it does not write impleme
 
 ### 必填段清单（结构+存在级）
 
-| 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
-|------|-------------------------------|-----------------------------------|
-| SUMMARY.md | `## verify 输出` / `## 6 维自查`（须含实质内容）/ `## 越界检查` / `## 自检方法` | `## 做了什么` / `## 改动文件` 等（执行纪律，review 把关） |
+| 文件（模板 = `flow-kit/templates/<DOC>.md`） | 左栏 · 无条件段（模板 H2，缺席 / 空正文 = BLOCKED） | 右栏 · 条件段（**标题必须在场**，正文可写 `N/A`）/ 增量段（按登记位置） |
+|------|------|------|
+| `SUMMARY.md` | `## 做了什么（一段话）` / `## 改动文件` / `## verify 输出（必填）` / `## 6 维自查`（须含实质内容）/ `## 越界检查（必填）` / `## 是否触发新工作` / `## 完成判定`；首部四字段 `Change ID` / `Task ID` / `完成时间` / `AI 角色` 必填 | **条件段**：`## 数据库迁移（涉及 schema 变更必填 · 来自 4-dev 步骤 1.7 / R4.5）` / `## 破坏性变更（涉及破坏性改动必填 · 来自 4-dev 步骤 1.8 / R4.6 / B4 老项目护栏）` / `## 决策与偏离（如有）`——标题必须在场，不适用写 `N/A`；**增量段**：`## 自检方法`（整段必填，紧随 `## 越界检查` 或文末）、`## LESSONS 扫描`（整段必填，紧随 `## 自检方法`） |
 
-> **注意**：flow-kit 的 SUMMARY 模板**不含 `## 自检方法` 段**——该段是 flow-comet 的强制增量（guard 校验自检方法声明）。使用 `flow-kit/templates/SUMMARY.md` 填写后，**必须按上方必填段清单补写 `## 自检方法` 段**（声明 brooks-review / cache-brooks / builtin-quickcheck 三值之一及降级证据），否则新 change 的 exit 会被 BLOCKED。
+> **注意**：flow-kit 的 SUMMARY 模板**不含 `## 自检方法` 与 `## LESSONS 扫描` 两段**——它们是 flow-comet 登记的增量段（前者校验自检方法声明，后者校验开工前扫描可核对）。使用 `flow-kit/templates/SUMMARY.md` 填写后，**必须按上方右栏补写这两段**：`## 自检方法` 声明 brooks-review / cache-brooks / builtin-quickcheck 三值之一及降级证据，`## LESSONS 扫描` 声明命中条目与逐条回应；否则新 change 的 exit 会被 BLOCKED。
 
-guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
+guard 校验见 workflow-guard.mjs 的 execute 出口门禁（必填段 + 6 维自查实质内容 + 自检方法声明三值 + LESSONS 扫描段与命中核对）与模板骨架派生（段标题 / 段序 / 首部字段 / 增量段位置）；「填得好不好」由 review 把关。
 
-> **模板权威**：本节点产出工件的段形唯一权威 = `flow-kit/templates/**`；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+> **模板权威**：本节点产出工件的段形 = **上游模板 + 本仓登记的增量段**——唯一权威 = `flow-kit/templates/**`（段与正文），条件段 / 结构子段 / 增量段与指纹由 `../flow-comet/reference/artifact-templates.json` 登记；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+
+加载顺序：先读 `READ PROMPT:`（`4-dev`），再读 `READ TEMPLATE:`（`SUMMARY`）。
 
 ### 执行模型（按 executionMode，用户显式选择）
 
@@ -114,8 +116,9 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 2. **委托子代理**：按平台通道委托 fresh-context 子代理（三平台同一身份判据，差异只在谁建树；`isolation: "worktree"` 是属性①的可选实现，非强制——见「并行安全四属性契约」）。handoff prompt 强制协议：子代理用 **Skill 工具**加载 flow-comet-dev 并按 `flow-kit/prompts/4-dev.md` 协议执行（TDD RED/GREEN/REFACTOR、LESSONS 扫描、既有抽象 grep、verify、6 维自查、越界检查、原子 commit `<type>(<scope>): <subject>`（scope 推荐可选：子系统短词；禁 change-id/日期作 scope；任务号放提交正文尾注 Task: <task-id>，change-id 不入标题）），按 `flow-kit/templates/SUMMARY.md` 模板写 `.specs/<change-id>/<task-id>-SUMMARY.md`（标题/首部/段序保真，另补 flow-comet 增量 `## 自检方法` 段），回传 Return Contract（含 commitHash + greenEvidence + completedChecks + selfReview）。**SUMMARY 自引用 hash 注**：提交内容无法包含自身 hash——若子代理 amend 提交,SUMMARY 内记录的 commitHash 为 amend 前值属预期(文件集一致即可,以实际提交对象为准)。
    **提交从属规则**:任务专属的 `<task-id>-SUMMARY.md`(位于 `.specs/<change-id>/`,是 flow-comet 强制产物)允许随任务提交属流程默认豁免——目标仓库的既有规定优先,若目标仓库忽略清单等既有规定拒绝其入库,被拒即为正确行为,严禁 force-add 强加越库提交;委托校验对任务摘要的豁免属于校验宽容度,不是入库指令。
    **提交面 pathspec 纪律（五要素，见 Guidance 同名小节）**：handoff prompt 必须要求子代理用 `git add -- <自己字面路径>` + `git commit -- <同一路径>` 提交、锁失败重试、禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`（适用条件：**多个写者共享同一工作区**；各自独立工作区内的局部 `reset` / `clean` 不在禁令内）。**集成纪律（四要素，见 Guidance 同名小节）**：协调者集成时优先 `git merge --no-ff`、降级 `cherry-pick` 记因、顺序按 `depends_on` 拓扑序 + 同层 task id 升序、冲突按机械 / 语义两类分别处置。
+   **写前读模板（handoff prompt 固定句式）**：prompt 必须写明「开工前先读 <本任务产出物的模板路径>，按其标题 / 首部 / 段序填写，并按本仓登记补写增量段」——模板路径逐任务给出（本节点默认 `flow-kit/templates/SUMMARY.md`）；只写「按模板填写」视为委托前检查未完成，不得发出委托。
 3. **记录 handoff result**：子代理回传后，运行 `node .claude/skills/flow-comet/scripts/workflow-handoff.mjs result <task-id> '<JSON>'` 记录（Return Contract 含 commitHash + greenEvidence + completedChecks + selfReview）。
-4. **验收 SUMMARY，TASK.md 标 done**：确认 SUMMARY 按 `flow-kit/templates/SUMMARY.md` 填写且**模板保真**（标题 `# SUMMARY:` / 首部 4 字段 / 段序一致）、含 `## 自检方法` 段（声明 brooks-review / cache-brooks / builtin-quickcheck 三值之一）、verify 输出真实、6 维自查与越界检查有实质内容；通过后在 TASK.md 将任务标 `status="done"` 并加时间戳。
+4. **验收 SUMMARY，TASK.md 标 done**：确认 SUMMARY 按 `flow-kit/templates/SUMMARY.md` 填写且**模板保真**（标题 `# SUMMARY:` / 首部 4 字段 / 段序一致）、含 `## 自检方法` 与 `## LESSONS 扫描` 两个增量段（前者声明 brooks-review / cache-brooks / builtin-quickcheck 三值之一）、verify 输出真实、6 维自查与越界检查有实质内容；通过后在 TASK.md 将任务标 `status="done"` 并加时间戳。
 5. **下一个 pending 任务**：重复步骤 1-4。
 
 > 原 Steps 的 TDD / LESSONS / verify / 6 维自查 / 越界检查 / commit 协议**移入 handoff prompt 作为子代理的强制协议**，协调者不亲自执行。
@@ -185,10 +188,10 @@ Load `flow-comet-dev` during this Node and record completed check `required-skil
 **加载声明（阶段层 · 双步硬规则）**：本节点技能已由入口路由经 Skill 工具加载（你正在阅读的就是它）；本节点 Required Skill Calls 的加载与声明同样不可跳过：
 
 1. **用 Skill 工具加载** `flow-comet-dev`（本节点 Required Skill Call）。**不得跳过**——只读取 SKILL.md 文件不叫加载；真正让 flow-comet-dev 指令生效的是 Skill 工具把它注入本次会话。委托子代理时，子代理同样必须用 Skill 工具加载 flow-comet-dev（按 `flow-kit/prompts/4-dev.md` 协议执行）。
-2. 加载完成后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+2. 加载完成后**立即**运行声明命令（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）。`--templates` 声明本节点该读的产出物模板（execute → `SUMMARY.md`）：
 
 ```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load execute flow-comet-dev --prompt flow-kit/prompts/4-dev.md
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load execute flow-comet-dev --prompt flow-kit/prompts/4-dev.md --templates SUMMARY.md
 ```
 
 > **跑 skill-load 声明命令 ≠ 加载**：声明只把“哪次会话加载了哪个 skill、按哪份协议工作”写进状态供 exit/record 核对；真正加载只有第 1 步的 Skill 工具能做到。
@@ -220,7 +223,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record execute '{"summ
 |--------------|-------|-----------------|
 | `build-evidence` | At least one SUMMARY.md produced | artifact-exists |
 | `all-tasks-done` | All tasks in TASK.md have status="done"（pending 串行任务 → BLOCKED）；done 任务须有对应 SUMMARY（新 change 强制 BLOCKED，旧 change WARN 渐进） | content-check |
-| `verify-output-real` | Every SUMMARY.md has verify output (not fabricated) | 执行纪律（review 把关），guard 不校验 |
+| `verify-output-real` | Every SUMMARY.md has verify output (not fabricated) | 结构级（guard 强制：`## verify 输出` 段在场且正文非空，骨架校验同批拦截）；输出是否真实由 review 把关（伪造不可机检） |
 | `no-design-changes` | REQUIREMENT.md and DESIGN.md not modified | 执行纪律（review 把关），guard 不校验 |
 | `self-check-method` | Every SUMMARY.md declares `## 自检方法`（brooks-review / cache-brooks / builtin-quickcheck） | W1-B 段级校验 |
 

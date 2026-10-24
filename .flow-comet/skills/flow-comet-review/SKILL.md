@@ -17,13 +17,19 @@ This node performs a structured multi-round review of the implemented change, ch
 
 ### 必填段清单（结构+存在级）
 
-| 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
-|------|-------------------------------|-----------------------------------|
-| REVIEW.md | 文件 ≥ 100 字节；发现区条目处置标记（`[已修]` / `[升级]` / `[转待办]`——新 change 缺失 BLOCKED,旧 change WARN 渐进）；**Major `[转待办]` 须有用户裁决记录**（同段、文末或单独段落「用户裁决：接受延期」+ 指向该条目 + `[升级]` 承接——单独段落与条目以空行分隔、位置不限）——缺失新 change BLOCKED / 旧 change WARN 渐进 | `## Critical` / `## 发现` / `## 结论` 等段（结构要求，guard 不拦段名） |
+| 文件（模板 = `flow-kit/templates/<DOC>.md`） | 左栏 · 无条件段（模板 H2，缺席 / 空正文 = BLOCKED） | 右栏 · 条件段（**标题必须在场**，正文可写 `N/A`）/ 增量段（按登记位置） |
+|------|------|------|
+| `REVIEW.md` | `## 第一轮 · Spec 合规审查` / `## 第二轮 · 代码质量审查（6 维衰退风险）` / `## 总结`；结构子段 `### 2.0 TEST.md 5 轮金字塔完整性` / `### 2.1` / `### 2.2` / `### 2.3` 在父段在场时必在场；文件 ≥ 100 字节；首部字段 `Change ID` / `审查时间` / `审查者` / `总体结论` 已在场时值不得为空（键集不强制） | **条件段**：`## 第三轮 · UI 视觉审查（仅前端）` / `## 第四轮 · 补充审查（按触发条件）`——标题必须在场，不适用写 `N/A`（其结构子段 `### 4.1` / `### 4.2` 在父段适用时必在场）；**增量段**：发现条目的**处置标记**（`[已修]` / `[升级]` / `[转待办]`，必填，写在 `### 2.2 6 维诊断 · 详细发现` 段内） |
 
-guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好不好」由 review 把关。
+发现写在模板外的 `## 发现` 而 `### 2.2` 无条目 → 新 change BLOCKED（条目记录在非模板位置等于静默丢弃）；**Major `[转待办]` 须有用户裁决记录**（同段、文末或单独段落「用户裁决：接受延期」+ 指向该条目 + `[升级]` 承接——单独段落与条目以空行分隔、位置不限），缺失新 change BLOCKED / 旧 change WARN 渐进。
 
-> **模板权威**：本节点产出工件的段形唯一权威 = `flow-kit/templates/**`；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+本出口**声明加载** `TEST.md` 并做 **5 轮完整性过程检查**（细目见 `flow-comet-test` 册）；`TEST.md` 的**结构骨架校验在 verify 出口**（`flowkit.verify.v1`），不在本出口——`## 验证命令` 增量段的执行与校验同样在 verify 出口。
+
+guard 校验见 workflow-guard.mjs 的 review 出口门禁（发现区处置标记 / 发现位置 / Major 延期裁决 / 模板骨架）与模板骨架派生（段标题 / 段序 / 首部字段 / 增量段位置）；「填得好不好」由 review 自身把关。
+
+> **模板权威**：本节点产出工件的段形 = **上游模板 + 本仓登记的增量段**——唯一权威 = `flow-kit/templates/**`（段与正文），条件段 / 结构子段 / 增量段与指纹由 `../flow-comet/reference/artifact-templates.json` 登记；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+
+加载顺序：先读 `READ PROMPT:`（`6-review`、`5-test`），再读 `READ TEMPLATE:`（`REVIEW`、`TEST`）。
 
 ### 必查清单（review 逐项核对 · 执行者交付纪律）
 
@@ -164,11 +170,11 @@ Load `flow-comet-test` during this Node and record completed check `required-ski
 **加载声明（阶段层 · 双步硬规则）**：本节点技能已由入口路由经 Skill 工具加载（你正在阅读的就是它）；本节点 Required Skill Calls 的加载与声明同样不可跳过：
 
 1. 本节点的同名条目已随路由加载——同名 required 条目（`flow-comet-review`）无需重复加载，仅需运行下方对应声明命令（只读取 SKILL.md 文件不叫加载，**不得跳过**真正的 Skill 工具注入步骤）。`flow-comet-test` 为本节点 Required Skill Call，每次 review **必须用 Skill 工具加载**。
-2. 加载完成后**立即**运行声明命令，每个协议文件对应一条（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）：
+2. 加载完成后**立即**运行声明命令，每个协议文件对应一条（节点退出与证据记录会核对声明标记；声明如实记录加载动作，不等于产出证明）。`--templates` 声明本节点该读的产出物模板（review → `REVIEW.md` + `TEST.md`，两条命令各写全清单）：
 
 ```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load review flow-comet-review --prompt flow-kit/prompts/6-review.md
-node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load review flow-comet-test --prompt flow-kit/prompts/5-test.md
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load review flow-comet-review --prompt flow-kit/prompts/6-review.md --templates REVIEW.md,TEST.md
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load review flow-comet-test --prompt flow-kit/prompts/5-test.md --templates REVIEW.md,TEST.md
 ```
 
 > **跑 skill-load 声明命令 ≠ 加载**：声明只把“哪次会话加载了哪个 skill、按哪份协议工作”写进状态供 exit/record 核对；真正加载只有第 1 步的 Skill 工具能做到。
@@ -201,7 +207,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record review '{"summa
 | `review-evidence` | REVIEW.md exists | artifact-exists |
 | `critical-resolved` | 0 unacknowledged Critical items | 执行纪律（review 把关），guard 不校验 |
 | `no-code-changes` | Reviewer did not modify code files | 执行纪律（review 把关），guard 不校验 |
-| `test-pyramid-checked` | TEST.md 5-round completeness verified | 执行纪律（review 把关），guard 不校验 |
+| `test-pyramid-checked` | TEST.md 5 轮金字塔的结构在场（各轮 H2 标题 + 结构子段）+ REVIEW 的 `### 2.0` 完整性小节 | 结构级（`### 2.0` 子段由 REVIEW 模板骨架在本出口强制；`TEST.md` 骨架由 verify 出口按登记表校验——缺席即 BLOCKED，条件轮写 `N/A` 放行）；5 轮内容质量仍由 review 自己把关 |
 
 ## Exit Check
 

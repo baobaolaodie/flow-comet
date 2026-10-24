@@ -4,12 +4,14 @@
 # (All checks are enforced server-side and independently.)
 #
 # 检查映射 / Check mapping:
-#   regression           guard self-test (325 scenarios incl. scenario-count & public-artifact
+#   regression           guard self-test (350 scenarios incl. scenario-count & public-artifact
 #                        code self-checks) / script syntax / BOM guard
 #   installer            prepare-env reproducibility + distribution surface (publishable
 #                        manifest / pack boundary incl. top-level allowlist and per-file
 #                        skill tree / bin contract) + installed-copy smoke test
-#   quality              workflow yaml validity (actionlint) + bilingual mirror symmetry
+#   quality              workflow yaml validity (actionlint) + bilingual mirror symmetry +
+#                        template registry fingerprint matches the locked snapshot
+#                        (snapshot checked out at the pinned commit, then every hash re-computed)
 #   pr-policy            PR template completeness (5 bilingual sections + 17 checkboxes,
 #                        deletion = fail) / feature-branch prefix / dev-main sync /
 #                        CHANGELOG self-check verification /
@@ -441,6 +443,148 @@ jobs:
           });
           if (failed) { console.log(failed + ' single-authority checks failed'); process.exit(1); }
           console.log('single-authority check passed');
+          EOF
+
+      - name: '取锁定快照 / Materialize the locked flow-kit snapshot'
+        id: snapshot
+        run: |
+          # 模板目录不入库（flow-kit/ 被 gitignore），逐模板重算指纹必须有真实模板内容：
+          # 按登记表的 templateCommit 从上游检出同一快照到 flow-kit/——与安装器在目标项目里的
+          # 落点同形，登记表里的 file 路径（flow-kit/templates/*.md）因此可直接使用。
+          node - <<'EOF'
+          const fs = require('fs');
+          const REGISTRY = '.flow-comet/skills/flow-comet/reference/artifact-templates.json';
+          const commit = JSON.parse(fs.readFileSync(REGISTRY, 'utf8')).templateCommit;
+          if (!/^[0-9a-f]{40}$/.test(String(commit))) {
+            console.error('登记表未声明合法的 templateCommit / invalid templateCommit: ' + commit);
+            process.exit(1);
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, 'commit=' + commit + '\n');
+          EOF
+      - uses: actions/checkout@v4
+        with:
+          repository: rihebty/flow-kit
+          ref: ${{ steps.snapshot.outputs.commit }}
+          path: flow-kit
+
+      - name: '模板登记表指纹 ↔ 锁定快照 / Template registry fingerprint matches locked snapshot'
+        run: |
+          # 判据：登记表 reference/artifact-templates.json 的 templateCommit 必须等于安装器锁定点
+          # FLOW_KIT_LOCKED_COMMIT——两侧各自演进时，运行期骨架基准（模板段形）与安装器实际拉取的
+          # 上游快照会悄悄分叉。
+          # 第二判据：每份模板的 sha256 必须与锁定快照的实测值一致——只比 commit 时，模板被就地
+          # 改写（commit 不变）仍然绿。重算走骨架模块的单一实现（归一化与哈希口径只在那一处，
+          # 门禁与 CI 不会各自演化出第二份判据）；快照已按锁定 commit 检出到 flow-kit/。
+          # 一致时只打一行汇总，不一致时逐条打印 key + 两侧取值。
+          node --input-type=module - <<'EOF'
+          import fs from 'node:fs';
+          const REGISTRY = '.flow-comet/skills/flow-comet/reference/artifact-templates.json';
+          const INSTALLER = 'scripts/lib/installer-flowkit.mjs';
+          // 只认整行字面量声明：常量被改名 / 被改成非字面量都必须让本步红，不得回落到「找不到即通过」
+          const locked = fs.readFileSync(INSTALLER, 'utf8').match(/^const FLOW_KIT_LOCKED_COMMIT = '([0-9a-f]{40})';$/m);
+          if (!locked) {
+            console.error('锁定点未按预期形态声明 / FLOW_KIT_LOCKED_COMMIT literal not found: ' + INSTALLER);
+            process.exit(1);
+          }
+          const registryData = JSON.parse(fs.readFileSync(REGISTRY, 'utf8'));
+          if (registryData.templateCommit !== locked[1]) {
+            console.error('登记表指纹与锁定快照不一致 / template registry fingerprint drift:');
+            console.error('  ' + REGISTRY + ' -> templateCommit = ' + registryData.templateCommit);
+            console.error('  ' + INSTALLER + ' -> FLOW_KIT_LOCKED_COMMIT = ' + locked[1]);
+            console.error('升级锁定点时须同批更新登记表：templateCommit 与每份模板的 sha256 一起改，否则校验基准与实际模板分叉。');
+            process.exit(1);
+          }
+          const { allSkeletons } = await import('./.flow-comet/skills/flow-comet/scripts/lib/guard-artifact-skeleton.mjs');
+          const skeletons = Object.entries(await allSkeletons());
+          if (skeletons.length === 0) {
+            console.error('登记表没有任何模板条目 / registry lists no templates: ' + REGISTRY);
+            process.exit(1);
+          }
+          const drift = [];
+          for (const [key, skeleton] of skeletons) {
+            // 模板缺席 / 空模板都让本步红：锁定快照里必须有可派生的模板，否则骨架基准无从谈起
+            if (!skeleton.derived) {
+              drift.push(key + '：锁定快照未派生骨架（' + skeleton.reason + '）');
+              continue;
+            }
+            if (skeleton.templateSha256 !== skeleton.actualSha256) {
+              drift.push(key + '（' + skeleton.file + '）\n      登记表 recorded: ' + skeleton.templateSha256
+                + '\n      实测   actual  : ' + skeleton.actualSha256);
+            }
+          }
+          if (drift.length > 0) {
+            console.error('模板内容与登记表不一致 / template content drift（' + drift.length + ' / ' + skeletons.length + '）:');
+            for (const line of drift) console.error('  ' + line);
+            console.error('改模板须同批更新登记表的 sha256（与 templateCommit 同步），否则骨架按旧段形判工件。');
+            process.exit(1);
+          }
+          console.log('模板指纹一致 / registry fingerprint matches the locked snapshot: ' + skeletons.length + ' templates');
+          EOF
+
+      - name: '模板段表 ↔ 登记表 / Template section tables match the registry'
+        run: |
+          # 与上一指纹步互补：指纹管「模板内容有没有变」，本步管「册子教的段名是不是真的存在」。
+          # 7 册 SKILL.md 的「必填段清单」表是执行者实际读到的段名清单，登记表是门禁实际比对的段集合；
+          # 两侧各自演进时，册子会教人写一个已经不存在的段（模板改名后册子照旧绿灯）。
+          # ① 表内段名（反引号 `## …` / `### …`，含按编号引用如 `### 2.2`）必须能在登记表解析到
+          #    （段 / 结构子段 / 增量段三者之一）；
+          # ② 登记表为本仓登记的增量段（overlay 段）必须在该册表里被提到。
+          # 一致时零输出（静默）；不一致时逐条打印文件 + 段名；只读本地文件，零网络。
+          node --input-type=module - <<'EOF'
+          import fs from 'node:fs';
+          const { normalizeHeading } = await import('./.flow-comet/skills/flow-comet/scripts/route-node.mjs');
+          const SKILLS = ['flow-comet-open', 'flow-comet-design', 'flow-comet-plan', 'flow-comet-execute',
+            'flow-comet-subagent-execute', 'flow-comet-review', 'flow-comet-verify'];
+          const REGISTRY = '.flow-comet/skills/flow-comet/reference/artifact-templates.json';
+          // UAT 无上游模板（登记表刻意没有该键）——册子按「仅存在性」登记，属登记口径内的豁免。
+          const NO_TEMPLATE_DOCS = new Set(['UAT']);
+          const registry = JSON.parse(fs.readFileSync(REGISTRY, 'utf8'));
+          const problems = [];
+          let checkedRows = 0;
+          for (const skill of SKILLS) {
+            const rel = '.flow-comet/skills/' + skill + '/SKILL.md';
+            const lines = fs.readFileSync(rel, 'utf8').split('\n');
+            const start = lines.findIndex((line) => line.includes('必填段清单'));
+            if (start === -1) { problems.push(rel + ' 缺「必填段清单」表'); continue; }
+            let sawRow = false;
+            for (let i = start + 1; i < lines.length; i += 1) {
+              const line = lines[i];
+              if (!line.startsWith('|')) { if (sawRow) break; continue; }
+              if (/^\|\s*-+/.test(line) || line.includes('文件（模板')) continue;
+              const cells = line.split('|').slice(1, -1).map((cell) => cell.trim());
+              const docMatch = cells[0].match(/`([A-Z][A-Z-]*\.md)`/) ?? cells[0].match(/^([A-Z][A-Z-]*\.md)$/);
+              if (docMatch === null) { if (sawRow) break; problems.push(rel + ' 表行首栏未按 `<DOC>.md` 给出: ' + cells[0]); continue; }
+              sawRow = true;
+              checkedRows += 1;
+              const docKey = docMatch[1].replace(/\.md$/, '');
+              if (NO_TEMPLATE_DOCS.has(docKey)) continue;
+              const entry = registry.templates[docKey];
+              if (!entry) { problems.push(rel + ' 引用了登记表里不存在的文档键: ' + docKey); continue; }
+              const known = new Set();
+              const registeredNames = [];
+              for (const section of entry.sections ?? []) { known.add(normalizeHeading(section.name)); registeredNames.push(section.name); }
+              for (const sub of entry.structureSubsections ?? []) { known.add(normalizeHeading(sub.name)); registeredNames.push(sub.name); }
+              for (const increment of entry.increments ?? []) { known.add(normalizeHeading(increment.section)); registeredNames.push(increment.section); }
+              const body = cells.slice(1).join(' | ');
+              for (const match of body.matchAll(/`(#{2,4})\s*([^`]+)`/g)) {
+                const name = match[2].trim();
+                const byNumber = /^\d+(?:\.\d+)*\.?$/.test(name);
+                const resolved = byNumber
+                  ? registeredNames.some((reg) => reg.trim().startsWith(name))
+                  : known.has(normalizeHeading(name));
+                if (!resolved) problems.push(rel + ' 的 ' + docKey + ' 段表列了登记表里没有的段名: ' + match[1] + ' ' + name);
+              }
+              for (const increment of entry.increments ?? []) {
+                if (!body.includes(increment.section)) problems.push(rel + ' 的 ' + docKey + ' 段表未提到登记表登记的增量段: ' + increment.section);
+              }
+            }
+            if (!sawRow) problems.push(rel + ' 的「必填段清单」表没有可解析的文档行');
+          }
+          if (problems.length > 0) {
+            console.error('段名集合不一致 / section table drift（受检行 ' + checkedRows + '）:');
+            for (const problem of problems) console.error('  - ' + problem);
+            process.exit(1);
+          }
           EOF
 
 

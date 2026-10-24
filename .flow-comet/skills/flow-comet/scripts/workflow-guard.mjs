@@ -14,7 +14,16 @@ import {
   setVerifyFailuresFor,
   validateStateFields,
 } from './state-schema.mjs';
-import { readProtocolFile, validateProtocolSchema } from './protocol-utils.mjs';
+import {
+  NODE_CONDITIONAL_PROMPTS,
+  nodeTemplateDeclaration,
+  promptDeclarationConflict,
+  promptPointerLines,
+  promptPointerPath,
+  readProtocolFile,
+  templatePointerLines,
+  validateProtocolSchema,
+} from './protocol-utils.mjs';
 import {
   EXECUTE_FAMILY_NODE_IDS,
   TASK_SET_SIGNATURE_ALGO,
@@ -40,7 +49,7 @@ import {
   printNext,
   route,
 } from './lib/guard-routing.mjs';
-import { checkUiDesignArtifact } from './lib/guard-uidesign.mjs';
+import { checkUiDesignArtifact, frontendCriterion } from './lib/guard-uidesign.mjs';
 import {
   runIntakeDocFidelityGate,
   runSummaryTemplateFidelityGate,
@@ -115,6 +124,40 @@ async function resolveGuardProtocolPath() {
   return resolveProtocolPathWithState({ packageRoot, runRoot, state });
 }
 
+// skill-load 声明里的 --prompt 与节点协议文件的一致性（入口侧）：扫描本节点已写下的声明标记，
+// 任何一条显式声明的协议文件落在该节点协议面之外 → BLOCK。判据单实现在 protocol-utils 的
+// promptDeclarationConflict，本函数只负责读标记目录；出口侧的「至少一个标记 ∈ 节点协议集」门落在
+// guard-gates——两处同源不同层（入口判「每条声明都对」，出口判「本节点确有可用声明」）。
+async function checkPromptDeclarations({ node, state }) {
+  if (!state.activeChange) return;
+  const loadsDir = path.join(runRoot, '.specs', state.activeChange, '.skill-loads');
+  let names;
+  try {
+    names = await fs.readdir(loadsDir);
+  } catch {
+    return; // 声明机制未激活（本节点还没写过声明）：入口不追溯，缺失由出口声明门报
+  }
+  const prefix = node.id + '-';
+  const conflicts = [];
+  for (const name of names.filter((entry) => entry.startsWith(prefix) && entry.endsWith('.json'))) {
+    let marker;
+    try {
+      marker = JSON.parse(await fs.readFile(path.join(loadsDir, name), 'utf8'));
+    } catch {
+      continue; // 损坏标记由出口声明门报，不在这里抢报（同一缺陷不写两处措辞）
+    }
+    if (marker?.auto === true) continue; // 引擎代记的标记不是执行者的声明
+    const conflict = promptDeclarationConflict({ node, declaredProtocol: marker?.protocol });
+    if (conflict) conflicts.push({ name, ...conflict });
+  }
+  if (conflicts.length === 0) return;
+  console.error('BLOCKED: 节点 ' + node.id + ' 的 skill-load 声明 --prompt 与节点协议文件不符——'
+    + conflicts.map((conflict) => conflict.name + ' 声明 ' + conflict.declared
+      + '（应为 ' + conflict.expected.map(promptPointerPath).join(' / ') + '）').join('；')
+    + '；重跑 skill-load ' + node.id + ' <skill> --prompt <上述协议文件> 重新声明后重试');
+  process.exit(1);
+}
+
 async function main() {
   // 包装 console.error 统计 WARN 输出（转发原实现，行为不变）
   console.error = (...args) => {
@@ -151,6 +194,35 @@ async function main() {
   state.completedNodes = Array.isArray(state.completedNodes) ? state.completedNodes : [];
   state.evidence = state.evidence && typeof state.evidence === 'object' ? state.evidence : {};
   if (command === 'entry') {
+    // 加载链的两条指针：先步骤权威（协议提示词），再段形权威（产出物模板）——顺序即语义：先知道
+    // 这一步怎么做，再知道产出长什么样。两者都先于门禁链输出：即使后面的入口校验拦下，执行者也先
+    // 看到该读什么。提示词路径由 protocol-utils 的 NODE_PROTOCOL_FILES 单一提供（与出口协议声明
+    // 校验同源），零提示词的自定义协议节点不打印。
+    //
+    // 条件指针（条件提示词 / 条件模板）共用一条前端判据：CHANGE.md「视觉调性」判为前端才追出。判据
+    // 归属 guard-uidesign 的 frontendCriterion（单一实现），此处只消费、不写第二份；两类条件指针取
+    // 同一个 frontend 值——同一 change 上不可能得出两种结论。任一侧登记了条件文件（模板 optional 或
+    // 节点条件提示词）就求值：缺一侧不等于非前端。
+    const declaration = nodeTemplateDeclaration(node);
+    const hasConditionalPointer = declaration.optional.length > 0
+      || (NODE_CONDITIONAL_PROMPTS[node.id] ?? []).length > 0;
+    const frontend = hasConditionalPointer
+      ? (await frontendCriterion(state.activeChange)).applicable === true
+      : false;
+    for (const line of promptPointerLines(node, { conditional: frontend })) {
+      console.log(line);
+    }
+    // 产出物模板指针（加载链的第一环）：引擎推导、不依赖纪律——内置节点取 C3 映射（协议副本没写
+    // node.templates 也照样打印），自定义协议节点取协议里的 node.templates 声明，零模板节点不打印。
+    // 先于门禁链输出：即使后面的入口校验拦下，执行者也能先看到该读哪份模板。
+    if (declaration.required.length > 0 || declaration.optional.length > 0) {
+      for (const line of templatePointerLines(declaration, { label: 'READ TEMPLATE', conditional: frontend })) {
+        console.log(line);
+      }
+    }
+    // 已写下的声明必须与节点协议文件一致（错路径 fail-closed）——把「读哪份提示词」从散文要求变成
+    // 入口可核对的判据；未声明 / 自动标记不在此判，缺失仍由出口声明门负责。
+    await checkPromptDeclarations({ node, state });
     await runEntryGates({ protocol, node, state, file });
     return;
   }

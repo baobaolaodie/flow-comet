@@ -58,18 +58,58 @@ At each node the guard answers a fixed set of questions; a "no" is a refusal wit
 | Question | Applies to |
 |---|---|
 | Was the entry recorded, and is the node's skill-load declaration present? | every node |
-| Do the node's documents exist, with the template's header fields and section names? | `open`, `design`, `plan`, `review`, `archive` |
+| Do the node's documents exist, with the template's header fields and section names? | `open`, `design`, `plan`, `execute`, `subagent-execute`, `review`, `verify`, `archive` — each node is judged only on the documents it writes (next table) |
 | Are all tasks complete, with a summary per completed task and an unchanged task set? | `execute`, `subagent-execute` |
 | Is the self-check declared, and does a degraded one carry its evidence? | `execute`, `subagent-execute` (the SUMMARY's self-check section) |
 | Did the verification actually run, and did it pass? | `verify` (runs the command block in `TEST.md`) |
 | Does every review finding carry a disposition, and does a deferred major finding have a user ruling? | `review` |
 | Are the archive directory and its leftover list in place? | `archive` |
 
+Template shape is answered per document rather than per node, because two nodes can write one document between them and one node writes two:
+
+| Node | Documents whose shape is checked |
+|---|---|
+| `open` | `CHANGE.md`, `REQUIREMENT.md`, and the project's `CONTEXT.md` when it exists |
+| `design` | `DESIGN.md`; on a frontend change also `UI-DESIGN.md`, whose shape is checked once it exists |
+| `plan` | `TASK.md`, on top of the seven fields each task block must carry |
+| `execute`, `subagent-execute` | every `<task-id>-SUMMARY.md` |
+| `review` | `REVIEW.md` |
+| `verify` | `TEST.md`; `UAT.md` has no upstream template and is checked for existence only |
+| `archive` | none — its leftover list has no upstream template either, so only its existence is checked |
+
+The template decides the skeleton; what a template cannot express comes from the registry that ships with the skill tree — which sections are conditional, which subsections are structural, which sections this repository adds on top, and the title form and header keys the message quotes. Four boundaries follow. A conditional section must keep its heading and may say `N/A` in its body; a section marked optional may be deleted outright; a structural subsection is required once its parent section applies, and is not required when the parent is `N/A` as a whole. Sections you add beyond the template are ignored rather than refused. And when the template — or the registry — is missing, the affected documents are reported as unchecked, never as passed: there is deliberately no built-in copy of the skeleton to fall back on.
+
+A mismatch at any of those exits — `open`, `design`, `plan`, `execute`, `subagent-execute`, `review`, `verify` — prints `BLOCKED` with the template's path and one count per category; the section names themselves — `段名` in the message — are listed only when the same document fails again. `archive` stays out of that chain: its leftover list has no skeleton to compare against.
+
 Because the checks are structural, a payload that looks like a contract but cannot be parsed is rejected the same way a missing file is — the engine never guesses.
 
 The self-check is validated as a declaration, not as a judgement of quality: the summary must name how the six-dimension review was run — the review engine when it was available, the engine's protocol files read by hand when it could not be loaded, or the built-in quick check as the last resort — and the built-in form must also state why the engine was unavailable and what was read instead. That declaration is checked in two places, and they are separate: the self-check-method section must name the method, and the six-dimension section must carry the method name as well — a summary that declares the built-in quick check in the method section still needs `brooks-review` or `cache-brooks` in the six-dimension section, which is the requirement the troubleshooting page states from the other side. The engine checks the wording only; whether the review was any good remains a review-time judgement.
 
-A node's requirements can also be asked for instead of looked up in the node books: `workflow-state.mjs explain <node>` prints that node's output schemas with their artifact paths and evidence ids, its guardrails, the skills it requires, and its entry, exit and record commands in the form this installation runs them. Every line is derived from the protocol the engine already reads, so the answer cannot drift from what the gates enforce. The command is read-only — it writes no state and changes no routing — and an unknown node name is refused together with the list of the valid ones.
+A node's requirements can also be asked for instead of looked up in the node books: `workflow-state.mjs explain <node>` prints that node's output schemas with their artifact paths and evidence ids, its guardrails, the skills it requires, the `TEMPLATE:` line for the documents it gates (a node without a template prints none), and its entry, exit and record commands in the form this installation runs them. Every line is derived from the protocol the engine already reads, so the answer cannot drift from what the gates enforce. The command is read-only — it writes no state and changes no routing — and an unknown node name is refused together with the list of the valid ones.
+
+### Template snapshot and fingerprint
+
+The registry pins the template set it was built from: `templateCommit` names the upstream commit, and every template carries the sha256 of its text after the same normalization the skeleton uses — the byte-order mark dropped and CRLF or CR folded to LF, so a line-ending difference does not change the fingerprint. That snapshot is checked where the templates can be materialized: the quality job checks out the upstream commit the registry names, recomputes every template's hash through the skeleton module the gates use, and fails on any difference, on a template that cannot be derived, or on a registry commit that disagrees with the one the installer locks. Moving the snapshot therefore takes one change that updates the registry and the installer's lock together.
+
+At run time the fingerprint is a hint rather than a gate. The guard reads only the vendored checkout's `HEAD` — no git subprocess, nothing written — and prints `TEMPLATE-FINGERPRINT WARN` when that commit differs from the registry's, then keeps validating the skeleton against the registry snapshot; the line is printed at most once per project root in a process and never blocks a node. An uncommitted byte edit to a template does not raise it either: the per-template hashes are compared in the quality job, where the locked snapshot is present, not on every exit.
+
+### Archive nomination
+
+The archive exit reads the nomination record instead of trusting a summary sentence: `lessonsNomination` states how many task summaries were scanned, which lessons were nominated, and — when none were — why. The scan count must equal the number of `*-SUMMARY.md` files the change actually holds, wherever its directory sits when the exit runs; every nominated id must exist in `LESSONS.md` as a real entry; and an empty nomination list must carry a non-empty reason. Anything else is refused, together with the `record` command that replaces the evidence.
+
+The check is structural like the rest: it proves the reading happened and the ids are real, not that the nominated lessons are worth keeping — that judgement stays in review. A change created before the rule is warned rather than blocked.
+
+### Loading a node
+
+Entering a node hands you its two pointers before any gate runs, always in the same order: `READ PROMPT:` names the protocol prompt under `flow-kit/prompts/` — the step authority, how this step is carried out — and `READ TEMPLATE:` names the template under `flow-kit/templates/` — the shape authority, what the artifact looks like. The order carries the meaning: the step first, the shape second. A node with no upstream template (`verify`, `archive`) prints only the prompt line, and a node with no bundled prompt prints only the template line. Neither line promises that the file is there: the pointer identifies the template the step should read, and a missing template is reported as unchecked (template missing) rather than passed silently. Neither line depends on the coordinator remembering to say it. On a frontend change the template line likewise gains one conditional line for UI-DESIGN.md, printed only when the CHANGE.md visual-tone section marks the change as frontend. The `design` node also prints one conditional prompt line on a frontend change — `READ PROMPT` for `2a-ui-design.md` — decided by the same structural criterion as the conditional `READ TEMPLATE` line and omitted for non-frontend changes; it is left out as well when the `CHANGE` template is missing, since the criterion then has no basis.
+
+Both pointers are declared when the node's skill is loaded, which is what keeps the declaration auditable against the artifacts: `--prompt` must name one of the node's own protocol files, and a declaration pointing anywhere else is refused at the next entry together with the command that re-declares it; `--templates` must match the node's template set exactly, where a missing, extra or misspelled name is refused on a new change and only warned on an older one, a node whose set is empty omits the flag, and a custom protocol node follows the `templates` its own protocol declares. The declaration records what you were told to read; the artifact gates remain the proof that it was read.
+
+### Declared overrides of the upstream protocol
+
+The two authorities named above — the prompt for the step, the template for the shape — can disagree. Where an upstream prompt's own section numbering or section list departs from the template, neither side is followed silently: the divergence is declared, in the entry skill and in a node book where the override is narrower, as a named list of the upstream files that stay a read-only baseline, the upstream wording that is not adopted, what is carried over, and which declaration prevails where more than one applies.
+
+An override is a declaration, not an edit: the vendored files under `flow-kit/prompts/` and `flow-kit/templates/` stay read-only, so every divergence remains auditable against an untouched upstream. The phase gate that refuses an out-of-order node strengthens the artifact gate rather than replacing it — the artifacts remain the truth, and the gate only moves a missing artifact from a late discovery to a refused exit.
 
 ## Execution model
 
@@ -89,7 +129,7 @@ Coverage is stated per row and stays that way: an uncovered item is not written 
 
 ## Recovery
 
-State is always re-derivable: `status` prints the machine view, `next` prints the node and the command to continue, `advance` forces the state forward when it is genuinely out of step, and `select <change-id>` switches to another change. A node that refuses an exit prints what is missing; the fix is always to add what the message names, never to edit the state file by hand.
+State is always re-derivable: `status` prints the machine view, `next` prints the node and the command to continue, `advance` forces the state forward when it is genuinely out of step, and `select <change-id>` switches to another change. A node that refuses an exit prints its reason; the fix is always to add what the message names — the template path and a count per category on the first refusal, the section names on the next — never to edit the state file by hand.
 
 ## Side commands
 

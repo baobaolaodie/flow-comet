@@ -38,6 +38,10 @@
       "outputSchemas": [
         "flowkit.intake.v1"
       ],
+      "templates": [
+        "CHANGE",
+        "REQUIREMENT"
+      ],
       "guardrails": [
         {
           "id": "intake-artifacts",
@@ -84,6 +88,9 @@
       "outputSchemas": [
         "flowkit.design.v1"
       ],
+      "templates": [
+        "DESIGN"
+      ],
       "guardrails": [
         {
           "id": "design-artifacts",
@@ -123,6 +130,9 @@
       "outputSchemas": [
         "flowkit.plan.v1"
       ],
+      "templates": [
+        "TASK"
+      ],
       "guardrails": [
         {
           "id": "plan-artifacts",
@@ -161,6 +171,9 @@
       "outputSchemas": [
         "flowkit.execution.v1"
       ],
+      "templates": [
+        "SUMMARY"
+      ],
       "guardrails": [
         {
           "id": "build-evidence",
@@ -198,6 +211,9 @@
       ],
       "outputSchemas": [
         "flowkit.handoff.v1"
+      ],
+      "templates": [
+        "SUMMARY"
       ],
       "guardrails": [
         {
@@ -244,6 +260,10 @@
       "outputSchemas": [
         "flowkit.review.v1"
       ],
+      "templates": [
+        "REVIEW",
+        "TEST"
+      ],
       "guardrails": [
         {
           "id": "review-evidence",
@@ -282,6 +302,7 @@
       "outputSchemas": [
         "flowkit.verify.v1"
       ],
+      "templates": [],
       "guardrails": [
         {
           "id": "verify-evidence",
@@ -320,6 +341,7 @@
       "outputSchemas": [
         "flowkit.archive.v1"
       ],
+      "templates": [],
       "guardrails": [
         {
           "id": "archive-evidence",

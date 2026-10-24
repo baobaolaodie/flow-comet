@@ -43,7 +43,9 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 | `workflow-guard.mjs` | `entry` / `exit` — the gates. Exits validate the node's artifacts, sections, declarations and (for `verify`) run the test commands |
 | `workflow-state.mjs` | `init`, `status`, `next`, `select`, `record`, `verify-fail`, `advance`, `execution-mode`, `config`, `skill-load`, `bridge-check`, `reenter`, `replan`, `explain` — the state machine and its bookkeeping |
 
-A node's exit refuses to pass when its artifacts are incomplete or malformed, when the skill-load declaration is missing, or when the entry was never recorded; each refusal prints the reason and the command that fixes it. Nothing about the state is stored in the conversation: re-derive it with `status` / `next`, and ask a single node for its artifacts, guardrails and commands with `explain <node>` instead of copying them from the node skill.
+`skill-load` carries the two pointers the entry printed. `--prompt <flow-kit/prompts/…>` names the node's protocol file — one of the node's own, or the entry refuses the declaration — and `--templates <DOC.md,...>` names its templates as one comma-separated list, written out on every declaration. The list must match the node exactly: a missing, extra or misspelled name is refused on a new change and only warned on an older one. `verify` and `archive` have no templates and take no `--templates`; a custom protocol follows the `templates` that protocol declares.
+
+A node's exit refuses to pass when its artifacts are incomplete or malformed, when the skill-load declaration is missing, or when the entry was never recorded; each refusal prints the reason and the command that fixes it. Nothing about the state is stored in the conversation: re-derive it with `status` / `next`, and ask a single node for its artifacts, guardrails, commands and the `TEMPLATE:` path it gates with `explain <node>` instead of copying them from the node skill.
 
 ## Artifacts
 
@@ -66,7 +68,7 @@ On archive the whole directory moves to `.specs/archive/<YYYY-MM-DD>-<change-id>
 
 ## Discipline the engine enforces
 
-- **Artifact fidelity** — a node's document must match the flow-kit template's header fields and section names; the guard refuses an exit otherwise.
+- **Artifact fidelity** — the engine gates seven change documents, each at the exit that reads it (`CHANGE`, `REQUIREMENT`, `DESIGN`, `TASK`, each `<task-id>-SUMMARY`, `REVIEW`, `TEST`), against the flow-kit template: title form, header fields, the section set and its order, blank bodies, and text copied verbatim from the template. The section set is the upstream template's skeleton plus the **increment sections** this repository registers on top (a summary carries `## 自检方法` and `## LESSONS 扫描`, the test document carries `## 验证命令`); [Guard validation](MECHANISM.md#guard-validation) pairs each document with its exit. A conditional section keeps its heading and may say `N/A` inside; a structural subsection is not required when its parent section is `N/A` as a whole; sections you add beyond the template are not checked. Project-level documents are checked where they are consumed — `CONTEXT.md` at `open`, `LESSONS.md` at `open`, `verify` and `archive`, `UI-DESIGN.md` whenever it exists — while `.specs/ARCHITECTURE.md` is only read by the side commands. `UAT.md` and the leftovers list have no upstream template, so they are checked for existence; a document whose template is missing is reported as unchecked rather than passed.
 - **Evidence before exit** — `record <node>` writes the node's evidence, and the exit requires it (plus the skill-load declaration).
 - **Summary skeleton** — every completed task needs its `<task-id>-SUMMARY.md` with the template's sections, including the self-check and the boundary check.
 - **Tests actually run** — the `verify` exit executes the command block in `TEST.md` and counts failures; a failing command blocks the exit.

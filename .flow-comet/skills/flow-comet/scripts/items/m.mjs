@@ -354,15 +354,20 @@ export const ENTRIES = [
     name: 'M4 ui-design 门真实链路：entry design → 缺件 BLOCK → 补件·声明 → exit --apply 放行',
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
-      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
-      writeIntakeArtifacts(dir);
-      fs.appendFileSync(path.join(dir, '.specs', CHANGE_ID, 'CHANGE.md'),
-        '\n## 视觉调性（Visual Tone）\n\n现代、克制的工具型界面。\n');
+      // 夹具根的模板：适用性判据的「视觉调性」段名从 CHANGE 模板派生——模板缺席时门按 C9 显式
+      // 「未校验（模板缺失）」跳过（降级路径由 TA-21 覆盖），本项要测的是门本身，故模板必须在场。
+      // 段形只登记本项工件实际写出的段：模板是段形权威，多写一段就会让出口先被结构门拦下，
+      // 测不到 ui-design 门（CHANGE 见 writeIntakeArtifacts，DESIGN 见下方夹具）。
+      writeFile(dir, 'flow-kit/templates/CHANGE.md', '# CHANGE 模板（夹具）\n\n## Why（为什么做）\n\n## 视觉调性（前端项目必填）\n');
+      writeFile(dir, 'flow-kit/templates/DESIGN.md', '# DESIGN 模板（夹具）\n\n## 0. 技术栈选定\n\n## 1. 决策清单\n');
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
+      // 前端判据要的是「视觉调性段在场且未标不适用」：intake 夹具直接写实质调性（不追加同名段）。
+      writeIntakeArtifacts(dir, CHANGE_ID, { visualTone: '现代、克制的工具型界面。' });
       assertExit(runState(['record', 'open', '{"summary":"intake complete"}'], dir), 0);
       assertExit(runGuard(['entry', 'open'], dir), 0);
       assertExit(runGuard(['exit', 'open', '--apply'], dir), 0);
 
-      assertExit(runState(['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md'], dir), 0);
+      assertExit(runState(['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md', '--templates', 'DESIGN.md'], dir), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md',
         '# DESIGN\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 0. 技术栈选定\n\nNode.js(ESM)\n\n## 决策清单\n\n- [ ] 循环路由\n');
       assertExit(runState(['record', 'design', '{"summary":"design done"}'], dir), 0);
@@ -375,13 +380,14 @@ export const ENTRIES = [
       assertOut(blocked, '恢复: 补 .specs/' + CHANGE_ID + '/UI-DESIGN.md');
 
       // 恢复：补工件 + 真实 skill-load 声明（出口不再自动补写该绑定）→ 出口放行并落状态
+      // 工件形态按模板：标题 = `# UI Design: <项目名>`（登记表 titleForm），不是「# UI-DESIGN」。
       writeFile(dir, '.specs/' + CHANGE_ID + '/UI-DESIGN.md',
-        '# UI-DESIGN\n\n## 1. 设计 token\n\n- 主色 `oklch(0.6 0.1 250)`\n');
+        '# UI Design: 夹具项目\n\n## 1. 设计 token\n\n- 主色 `oklch(0.6 0.1 250)`\n');
       const undeclared = runGuard(['exit', 'design'], dir);
       assertExit(undeclared, 1);
       assertOut(undeclared, 'required-skill:design.flow-comet-ui-design');
       assertOut(undeclared, '不再由出口自动补写');
-      assertExit(runState(['skill-load', 'design', 'flow-comet-ui-design', '--prompt', 'flow-kit/prompts/2a-ui-design.md'], dir), 0);
+      assertExit(runState(['skill-load', 'design', 'flow-comet-ui-design', '--prompt', 'flow-kit/prompts/2a-ui-design.md', '--templates', 'DESIGN.md'], dir), 0);
       assertExit(runState(['record', 'design',
         '{"summary":"design done with ui-design","completedChecks":["required-skill:design.flow-comet-design","required-skill:design.flow-comet-ui-design"]}'], dir), 0);
       const passed = runGuard(['exit', 'design', '--apply'], dir);
@@ -393,16 +399,14 @@ export const ENTRIES = [
       // ① fail-open 反向控制：段内自然句子「不适用于暗色主题…」不是结构形态 → 仍判前端、缺件 BLOCKED；
       // ② 结构形态（`适用性` 标签的字段值位）→ 可见跳过 + 命中片段回显，且不要求工件与该声明。
       const nfChange = CHANGE_ID + '-nf';
-      const nfChangeFile = path.join(dir, '.specs', nfChange, 'CHANGE.md');
       assertExit(runState(['init', nfChange, '--init-skip'], dir), 0);
-      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md'], dir), 0);
-      writeIntakeArtifacts(dir, nfChange);
-      fs.appendFileSync(nfChangeFile,
-        '\n## 视觉调性（Visual Tone）\n\n不适用于暗色主题，本 change 仅覆盖浅色分支。\n');
+      assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
+      // 段内自然句子（非结构形态）→ 前端判据不认，仍判前端；写在同一段里，不追加同名段。
+      writeIntakeArtifacts(dir, nfChange, { visualTone: '不适用于暗色主题，本 change 仅覆盖浅色分支。' });
       assertExit(runState(['record', 'open', '{"summary":"intake complete"}'], dir), 0);
       assertExit(runGuard(['entry', 'open'], dir), 0);
       assertExit(runGuard(['exit', 'open', '--apply'], dir), 0);
-      assertExit(runState(['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md'], dir), 0);
+      assertExit(runState(['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md', '--templates', 'DESIGN.md'], dir), 0);
       writeFile(dir, '.specs/' + nfChange + '/DESIGN.md',
         '# DESIGN\n\n- **Change ID**: ' + nfChange + '\n\n## 0. 技术栈选定\n\nNode.js(ESM)\n\n## 决策清单\n\n- [ ] 循环路由\n');
       assertExit(runState(['record', 'design', '{"summary":"design done"}'], dir), 0);

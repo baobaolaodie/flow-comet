@@ -15,7 +15,9 @@ This node finalizes a completed change by extracting reusable lessons from the d
 
 ## Guidance
 
-> **模板权威**：本节点产出工件的段形唯一权威 = `flow-kit/templates/**`；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+> **模板权威**：本节点产出工件的段形 = **上游模板 + 本仓登记的增量段**——唯一权威 = `flow-kit/templates/**`（段与正文），条件段 / 结构子段 / 增量段与指纹由 `../flow-comet/reference/artifact-templates.json` 登记；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
+
+本节点零模板：只有 `READ PROMPT:`（`7-integration`），没有 `READ TEMPLATE:`。
 
 ### Prerequisites
 
@@ -151,6 +153,8 @@ Load `flow-comet-integration` during this Node and record completed check `requi
 node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load archive flow-comet-integration --prompt flow-kit/prompts/7-integration.md
 ```
 
+> **零模板节点省略 `--templates`**：archive 的产出物模板映射为空（KNOWN-ISSUES.md 无上游模板），命令**不带** `--templates`——省略即视为空集，与节点映射一致并通过；多写模板名反而会与映射不一致而被拦。
+
 > **跑 skill-load 声明命令 ≠ 加载**：声明只把“哪次会话加载了哪个 skill、按哪份协议工作”写进状态供 exit/record 核对；真正加载只有第 1 步的 Skill 工具能做。
 
 ## Augmentations
@@ -181,7 +185,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record archive '{"summ
 | Guardrail ID | Label | Validation Type |
 |--------------|-------|-----------------|
 | `archive-evidence` | Archive directory exists, source removed | state-transition |
-| `changelog-updated` | CHANGELOG.md has new entry | 执行纪律（review 把关），guard 不校验（倒序位置有 WARN 渐进检查） |
+| `changelog-updated` | CHANGELOG.md 有新条目，且表格条目按日期倒序 | 结构级（guard 强制：`CHANGELOG.md` 表格日期倒序——新 change 非倒序即 BLOCKED、旧 change WARN；未含本 change 标识只 WARN 提示补登记）；条目内容与格式由 review 把关 |
 | `lessons-preserved` | LESSONS.md still in .specs/ (not archived) | 执行纪律（review 把关），guard 不校验 |
 | `user-confirmed` | User confirmed archive before execution | 执行纪律（review 把关），guard 不校验 |
 

@@ -2017,6 +2017,11 @@ export const BARE_ISO_ENGINE_WHITELIST = [
     reason: '受控重入 / 重校授权的机器时刻（authorizedAt）：随 state 事件流时间形态一并迁移；轮次推导已由综合判定派生，本条只剩落盘时刻',
   },
   {
+    file: 'lib/guard-template-fidelity.mjs',
+    count: 1,
+    reason: '两阶段提示的时间戳（.template-hints.json 的 failedAt）为引擎运行时值，非拼接的公开文案：它是引擎自写的机器字段（Z 形随提示文件持久化），迁移须与历史提示文件的读取同批处理，留专门窗口',
+  },
+  {
     file: 'workflow-handoff.mjs',
     count: 4,
     reason: 'handoff 请求 / 结果的机器字段（requestedAt / revokedAt / completedAt）：Z 形是既有 handoff 工件契约，须与 workflow-state 同批迁移；新增的撤回留痕不走本条——withdrawnAt 由 time-utils 的 nowTimestamp 生成（本地时间 + 显式偏移），人可见回显亦按标准形态格式化',
@@ -2270,6 +2275,10 @@ export function writeDesignExitFixture(dir, {
   newChange, visualTone, uiDesign, declareUiDesign, changeName = CHANGE_ID, changeTail = '', declareDesign = true,
 }) {
   writeFile(dir, 'flow-kit/templates/DESIGN.md', '# DESIGN 模板\n\n## 0. 技术栈选型\n## 1. 技术决策清单\n');
+  // CHANGE 模板同样在场：design 出口的前端判据用 `pick('change', ['视觉调性'])` 在**模板派生**的段名表里
+  // 定位该段——整份模板缺席时命名段判据按 C9 跳过（不回落），夹具缺 CHANGE 模板会让这条判据失去输入面
+  // （模板缺席下的跳过另由 TA-21 覆盖）。
+  writeFile(dir, 'flow-kit/templates/CHANGE.md', '# CHANGE 模板\n\n## Why（为什么做）\n\n## 视觉调性（前端项目必填）\n');
   const state = baseState('design');
   state.newChange = newChange === true;
   state.enteredNodes = ['design'];

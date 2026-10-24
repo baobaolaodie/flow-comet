@@ -341,6 +341,13 @@ export function validateProtocolSchema(protocol) {
     if (node.requiredSkillCalls !== undefined && !Array.isArray(node.requiredSkillCalls)) {
       throw new Error('workflow protocol node.requiredSkillCalls must be an array');
     }
+    // 可选字段 templates（节点 → 产出物模板 basename 清单）：缺省 = 该节点不声明模板。
+    // 只校验形态（非空字符串数组），集合语义由加载链按 C3/C12 判定——schema 不持有节点映射。
+    if (node.templates !== undefined
+      && (!Array.isArray(node.templates)
+        || node.templates.some((name) => typeof name !== 'string' || name.trim() === ''))) {
+      throw new Error('workflow protocol node.templates must be an array of non-empty strings');
+    }
   }
   if (Object.prototype.hasOwnProperty.call(protocol, 'writeWhitelist')) {
     checkWriteWhitelistShape(protocol.writeWhitelist);
@@ -397,3 +404,208 @@ export const SKILL_PROTOCOL_FILES = {
   'flow-comet-review': ['6-review.md'],
   'flow-comet-integration': ['7-integration.md'],
 };
+
+// ---------- 产出物模板：节点级声明（加载链的单一语义来源） ----------
+//
+// 内置节点的产出物模板映射 = C3 的唯一权威表达处。required = 节点级必需模板；optional 表达「条件模板」
+// （design 的 UI-DESIGN 仅前端 change 适用）。前端判定不在本模块：入口打印的条件行由 guard-uidesign
+// 的 frontendCriterion 决定，避免在协议层写第二份前端判据。
+//
+// 与 reference/artifact-templates.json 的关系：登记表是「模板内容骨架」的权威（file / 段形 / 指纹），
+// 本表只表达「哪个节点该声明哪些模板」（加载链面）；两者用同一模板基名键相交。
+export const NODE_ARTIFACT_TEMPLATES = {
+  open: { required: ['CHANGE', 'REQUIREMENT'] },
+  design: { required: ['DESIGN'], optional: ['UI-DESIGN'] },
+  plan: { required: ['TASK'] },
+  execute: { required: ['SUMMARY'] },
+  'subagent-execute': { required: ['SUMMARY'] },
+  review: { required: ['REVIEW', 'TEST'] },
+  verify: { required: [] },
+  archive: { required: [] },
+};
+
+// 模板文件根（指针行的相对根）——模板文件本身的绝对位置由登记表的 file 字段承载，这里只拼声明名。
+export const TEMPLATE_ROOT = 'flow-kit/templates';
+
+// 模板名归一：去空白与尾随 .md（声明允许 `DESIGN` / `DESIGN.md` 两种写法）；大小写保留书写者原样，
+// 比较一律走 templateKeyOf 的小写键（登记表键大写，手写声明常常小写）。
+export function normalizeTemplateName(value) {
+  return String(value ?? '').trim().replace(/\.md$/i, '');
+}
+
+export function templateKeyOf(value) {
+  return normalizeTemplateName(value).toLowerCase();
+}
+
+// 逗号分隔的模板清单（`--templates CHANGE.md,REQUIREMENT.md`；单模板可省略逗号）→ 去重保序数组。
+export function parseTemplateList(value) {
+  const names = [];
+  const seen = new Set();
+  for (const raw of String(value ?? '').split(',')) {
+    const name = normalizeTemplateName(raw);
+    if (name === '') continue;
+    const key = templateKeyOf(name);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    names.push(name);
+  }
+  return names;
+}
+
+// --templates 原始参数收集：支持 `--templates a,b` 与 `--templates=a,b`，可重复出现（累加去重）。
+// 后随参数是另一个选项（以 -- 开头）时不把它当成模板名（fail-closed 地当作「空清单」）。
+// 返回 { provided, values }：provided 区分「未传该参数」与「传了空清单」——前者对内置节点是缺失声明。
+export function findTemplatesArg(cliArgs) {
+  let provided = false;
+  const names = [];
+  const collect = (raw) => {
+    provided = true;
+    for (const name of parseTemplateList(raw)) {
+      if (!names.some((existing) => templateKeyOf(existing) === templateKeyOf(name))) names.push(name);
+    }
+  };
+  for (let index = 0; index < (cliArgs ?? []).length; index++) {
+    const arg = cliArgs[index];
+    if (arg === '--templates') {
+      const next = cliArgs[index + 1];
+      const hasValue = typeof next === 'string' && !next.startsWith('--');
+      collect(hasValue ? next : '');
+      if (hasValue) index += 1;
+      continue;
+    }
+    if (typeof arg === 'string' && arg.startsWith('--templates=')) {
+      collect(arg.slice('--templates='.length));
+    }
+  }
+  return { provided, values: names };
+}
+
+// 节点 → 模板声明。内置节点取引擎映射（协议副本删掉 node.templates 也不失效——内置节点不依赖协议
+// 自称）；自定义协议节点取协议里的 node.templates（ADR-002 特化层：未声明 = 零模板）。
+export function nodeTemplateDeclaration(node) {
+  if (!node || typeof node !== 'object') return { source: 'none', required: [], optional: [] };
+  const builtin = NODE_ARTIFACT_TEMPLATES[node.id];
+  if (builtin) {
+    return { source: 'builtin', required: [...builtin.required], optional: [...(builtin.optional ?? [])] };
+  }
+  const declared = Array.isArray(node.templates)
+    ? node.templates.filter((name) => typeof name === 'string' && name.trim() !== '').map(normalizeTemplateName)
+    : [];
+  return declared.length > 0
+    ? { source: 'protocol', required: declared, optional: [] }
+    : { source: 'none', required: [], optional: [] };
+}
+
+// 声明集合比对（C11）：required ⊆ declared ⊆ required ∪ optional。返回 { missing, extra }——两者
+// 皆空即通过。extra 覆盖「多写」与「错名」（都不在允许集合里）。
+export function templateDeclarationProblems(declaration, declared) {
+  const required = new Map(declaration.required.map((name) => [templateKeyOf(name), name]));
+  const allowed = new Set([
+    ...required.keys(),
+    ...(declaration.optional ?? []).map((name) => templateKeyOf(name)),
+  ]);
+  const seen = new Map((declared ?? []).map((name) => [templateKeyOf(name), name]));
+  const missing = [...required].filter(([key]) => !seen.has(key)).map(([, name]) => name);
+  const extra = [...seen].filter(([key]) => !allowed.has(key)).map(([, name]) => name);
+  return { missing, extra };
+}
+
+// 声明清单 → 易读形态（报文用；空清单写「零模板」——比空字符串诚实）。
+export function describeTemplateList(names) {
+  return Array.isArray(names) && names.length > 0 ? names.join('、') : '零模板';
+}
+
+// 模板基名 → 指针路径（`DESIGN` → `flow-kit/templates/DESIGN.md`）。
+export function templatePointerPath(name) {
+  return TEMPLATE_ROOT + '/' + normalizeTemplateName(name) + '.md';
+}
+
+// 重新声明的命令指引（skill-load 校验失败与 record 声明核对两处共用）：两处本说的是同一件事
+// 「怎么重新声明」——各拼一份必然分叉（命令形态改一次要改两地方）。零模板节点不拼 --templates
+// （省略即空集，与 C11 的「可省略」一致）；无 skill 名的场景用 <skill> 占位。
+// --prompt 一并拼上：模板与提示词是同一次声明的两面，而 skill-load 重跑会**覆写**同一标记——
+// 只补 --templates 的指引会把 protocol 写成 null，下一次 exit 反被判「缺协议声明标记」（恢复步骤
+// 自己弄坏协议声明）。路径取该节点的首个内置协议文件，与入口的 READ PROMPT 同源；自定义节点没有
+// 内置映射（协议自己也声明提示词路径）→ 不拼，不编造路径也不打占位符。
+export function templateDeclareCommand(declaration, { nodeId, skillName } = {}) {
+  const skill = typeof skillName === 'string' && skillName !== '' ? skillName : '<skill>';
+  const flag = declaration.required.length > 0
+    ? ' --templates ' + declaration.required.map((name) => name + '.md').join(',')
+    : '';
+  const promptFile = (NODE_PROTOCOL_FILES[nodeId] ?? [])[0];
+  const promptFlag = typeof promptFile === 'string' ? ' --prompt ' + promptPointerPath(promptFile) : '';
+  return 'workflow-state.mjs skill-load ' + nodeId + ' ' + skill + flag + promptFlag;
+}
+
+// 指针行（入口与 explain 共用：同一判据一份实现，两处输出措辞一致）。
+// label：内置入口用 `READ TEMPLATE`，现问通道用 `TEMPLATE`；conditional=true 时追出条件模板行。
+export function templatePointerLines(declaration, options = {}) {
+  const label = typeof options.label === 'string' && options.label !== '' ? options.label : 'TEMPLATE';
+  const lines = declaration.required.map((name) => label + ': ' + templatePointerPath(name));
+  if (options.conditional === true) {
+    for (const name of declaration.optional ?? []) {
+      lines.push(label + '（条件模板）: ' + templatePointerPath(name) + '（仅前端 change）');
+    }
+  }
+  return lines;
+}
+
+// ---------- 节点协议提示词：加载链的另一半 ----------
+//
+// 与模板并列的两条权威：提示词（flow-kit/prompts/）是**步骤权威**——这一步怎么做、交代什么；
+// 模板（flow-kit/templates/）是**段形权威**——产出长什么样。两者都在 entry 打印、都由 skill-load
+// 声明，缺一即未完成加载。
+//
+// 路径根与映射各只有一处：映射复用既有的 NODE_PROTOCOL_FILES（出口协议声明校验与 M5 自动补声明
+// 共用），本段只提供指针形态与声明一致性判据，不复制映射表。
+
+export const PROMPT_ROOT = 'flow-kit/prompts';
+
+// 条件提示词（与条件模板同构）：只对特定技能适用的协议文件——必读清单之外的协议面成员，参与声明
+// 一致性判据；入口按前端判据追出（非前端不打印）。目前唯一的条件件是 design 节点的 UI-DESIGN 阶段：
+// 前端 change 才加载 flow-comet-ui-design 并声明 `2a-ui-design.md`。
+export const NODE_CONDITIONAL_PROMPTS = {
+  design: ['2a-ui-design.md'],
+};
+
+// 节点 → 上游协议提示文件（仅内置节点有 vendored 提示词）。自定义协议节点由 compose 只组合已装技能，
+// 提示词路径仍由 skill-load --prompt 显式声明——不在协议里编造一份（与模板的 C12 语义同构）。
+export function nodePromptFiles(node) {
+  if (!node || typeof node !== 'object') return [];
+  const files = NODE_PROTOCOL_FILES[node.id];
+  return Array.isArray(files) ? [...files] : [];
+}
+
+// 提示词文件 → 指针路径（`2-design.md` → `flow-kit/prompts/2-design.md`）。
+export function promptPointerPath(file) {
+  return PROMPT_ROOT + '/' + file;
+}
+
+// 入口指针行：一行一个协议文件（open / review 这类多文件节点各一行）。零提示词节点返回空数组——
+// 与零模板节点同语义（不打印，也不编造路径）。
+// conditional=true 时追出条件提示词行（与 templatePointerLines 的条件行同形：同一前端判据、同一措辞
+// 形态）；非前端 change 上条件文件只是「不适用」，不是缺件，故不打印。
+export function promptPointerLines(node, options = {}) {
+  const lines = nodePromptFiles(node).map((file) => 'READ PROMPT: ' + promptPointerPath(file));
+  if (options.conditional === true) {
+    for (const file of NODE_CONDITIONAL_PROMPTS[node?.id] ?? []) {
+      lines.push('READ PROMPT（条件提示词）: ' + promptPointerPath(file) + '（仅前端 change）');
+    }
+  }
+  return lines;
+}
+
+// 声明一致性判据（入口侧）：skill-load 声明的 --prompt 必须落在该节点的协议面内——
+// 节点协议文件 ∪ 该节点的条件提示词。返回 null（通过）或 { declared, expected }；expected 供报文
+// 给出可照抄的路径。未声明（null / 空串）不在此判——缺失由出口「缺协议声明标记」门负责，
+// 本判据只判「声明了但声明错」这一形态。
+export function promptDeclarationConflict({ node, declaredProtocol } = {}) {
+  const nodeFiles = nodePromptFiles(node);
+  if (nodeFiles.length === 0) return null;
+  const declared = typeof declaredProtocol === 'string'
+    ? (declaredProtocol.replaceAll('\\', '/').split('/').filter((part) => part !== '').pop() ?? '')
+    : '';
+  if (declared === '') return null;
+  const expected = [...nodeFiles, ...(NODE_CONDITIONAL_PROMPTS[node?.id] ?? [])];
+  return expected.includes(declared) ? null : { declared, expected };
+}

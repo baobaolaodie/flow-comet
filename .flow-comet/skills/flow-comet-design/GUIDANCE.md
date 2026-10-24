@@ -15,9 +15,19 @@ Responsibility: 技术栈选型 + ADR + 数据流。生成 DESIGN.md。
 
 ### 必填段清单（结构+存在级）
 
-| 文件 | guard 强制段（缺失 = BLOCKED） | 其余模板段（模板要求，guard 不拦） |
-|------|-------------------------------|-----------------------------------|
-| DESIGN.md | `## 0.` 技术栈段 / `## 1. 决策清单` | `## 0.5 架构对齐` / `## 风险` / `## 数据流` 等 |
+段形唯一权威 = `flow-kit/templates/DESIGN.md` + 登记表 `../flow-comet/reference/artifact-templates.json`（模板缺席时出口输出「未校验（模板缺失）」）。
+
+| 文件 | 无条件段（缺席 = BLOCKED） | 条件段与增量段（在场才校验 / 结构子段随父段） |
+|------|---------------------------|-------------------------------------------|
+| DESIGN.md | `## 0. 技术栈选定` / `## 1. 决策清单` / `## 2. 数据流 / 架构图` / `## 5. 风险` / `## 6. 不在范围` | 条件段：`## 0.5 既有架构对齐`（标题必须在场；父段适用时其结构子段 0.5.1~0.5.3 必须同时在，整段写「不适用」才豁免）/ `## 3. 关键状态机` / `## 4. ADR 索引` / `## 9. 架构沉淀建议`（适用时子段 9.1~9.5 必须在场） |
+
+前端 change 另生成 `UI-DESIGN.md`（标题形态 `# UI Design: <项目名>` + frontmatter 键齐备）；非前端须在 CHANGE.md 的 `## 视觉调性` 段以结构形态标注「不适用」。声明本次读到的模板：
+
+```bash
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load design flow-comet-design --prompt flow-kit/prompts/2-design.md --templates DESIGN.md
+```
+
+加载顺序：先 `READ PROMPT:`（步骤权威），有模板的节点再 `READ TEMPLATE:`（段形权威）；design 前端另有一行条件提示词 `2a-ui-design`。
 
 guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / templateSectionPatterns；「填得好不好」由 review 把关。
 

@@ -12,6 +12,18 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **工件现在按它来自的模板校验**：每个节点声明自己读了哪几份模板，出口将工件的标题形态、段序、空段与照抄占位符对照「上游模板 + 本仓登记的增量段」——首次失败指向模板，再犯点名缺段，模板缺席时明确说明而不静默通过，项目级文档走同一条路径。记录的基线随新增覆盖上移——350 场景、95 项系统测试。([#159](https://github.com/baobaolaodie/flow-comet/pull/159))
+- **两条原本只写在节点册里的要求现在由引擎核对**：进入节点时先在模板行之前打印该节点的协议提示词，`workflow-state.mjs skill-load --prompt` 必须指向同一份协议文件——写错路径会被拒绝，而不是静默记录；每份任务 SUMMARY 在 `## 自检方法` 声明之外新增 `## LESSONS 扫描` 段，逐条回应引擎按该任务 `write_files` 算出的命中条目；archive 出口核对提名证据——扫描份数、提名编号是否真实存在、无提名时的理由。([#159](https://github.com/baobaolaodie/flow-comet/pull/159))
+- **前端的 design 多读一份提示词**：当 change 的「视觉调性」段被判为前端时，进入 design 节点会额外打印一行 `READ PROMPT（条件提示词）: …2a-ui-design.md…`，判定与条件模板行同源；非前端 change 不打印。([#159](https://github.com/baobaolaodie/flow-comet/pull/159))
+
+### 变更
+
+- **Breaking——加载节点技能时必须声明该节点要读的模板**：`workflow-state.mjs skill-load` 对至少有一份模板的内置节点新增必填参数 `--templates <a.md,b.md>`，声明集合必须与节点模板映射完全一致——多写、漏写、错名在当前 change 上一律拦截，旧 change 只警告；零模板节点（verify / archive）可以省略该参数，自定义协议按自身声明。([#159](https://github.com/baobaolaodie/flow-comet/pull/159))
+- **Breaking——写成二级标题的教训条目现在会在三个出口被拒**：项目教训册的条目必须位于条目区并写成 `### L-NNN`，`## L-NNN` 在当前 change 的 open、verify、archive 三处出口被拒——报文逐行给出「文件:行号 → 应改成 `### L-NNN`」，旧 change 只警告，编号连续性与条目区外检测仍只落在 verify 与 archive。([#159](https://github.com/baobaolaodie/flow-comet/pull/159))
+- **可选段允许整段删除**：模板标注为可选的段可以整段删掉；条件段则必须保留标题、正文写 `N/A` 即可——保留可选段时仍须填写。([#159](https://github.com/baobaolaodie/flow-comet/pull/159))
+
 ## [1.6.4] - 2026-10-15
 
 本次发布汇集 1.6.3 之后积累的工作：入口页按项目自己的素材重做——徽标、一张说明 flow-kit 的 9 个阶段如何变成 8 个节点的图、一张说明邻近项目真实关系的关系图，以及一块证据板——对比表每一行都按那些项目今天的实际说法核对过；引擎脚本与两套回归套件按职责拆成小模块、引擎行为零变化，记录的基线随拆分上移；测试套件改用同一个便携助手复制夹具目录树，检出路径含非 ASCII 字符时不再无声中断；推荐搭配 brooks-lint 现已写入公开面。([#150](https://github.com/baobaolaodie/flow-comet/pull/150)) ([#151](https://github.com/baobaolaodie/flow-comet/pull/151)) ([#152](https://github.com/baobaolaodie/flow-comet/pull/152)) ([#157](https://github.com/baobaolaodie/flow-comet/pull/157))
