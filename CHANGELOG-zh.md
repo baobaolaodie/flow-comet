@@ -10,7 +10,7 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本记录在哪些位置见 [docs/VERSIONS-zh.md](docs/VERSIONS-zh.md)，由 CI 在发布面对账保持一致。
 
-## [Unreleased]
+## [1.6.5] - 2026-10-24
 
 ### 新增
 
