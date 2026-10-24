@@ -16,6 +16,7 @@
 
 - **工件现在按它来自的模板校验**：每个节点声明自己读了哪几份模板，出口将工件的标题形态、段序、空段与照抄占位符对照「上游模板 + 本仓登记的增量段」——首次失败指向模板，再犯点名缺段，模板缺席时明确说明而不静默通过，项目级文档走同一条路径。记录的基线随新增覆盖上移——350 场景、95 项系统测试。([#159](https://github.com/baobaolaodie/flow-comet/pull/159))
 - **两条原本只写在节点册里的要求现在由引擎核对**：进入节点时先在模板行之前打印该节点的协议提示词，`workflow-state.mjs skill-load --prompt` 必须指向同一份协议文件——写错路径会被拒绝，而不是静默记录；每份任务 SUMMARY 在 `## 自检方法` 声明之外新增 `## LESSONS 扫描` 段，逐条回应引擎按该任务 `write_files` 算出的命中条目；archive 出口核对提名证据——扫描份数、提名编号是否真实存在、无提名时的理由。([#159](https://github.com/baobaolaodie/flow-comet/pull/159))
+- **前端的 design 多读一份提示词**：当 change 的「视觉调性」段被判为前端时，进入 design 节点会额外打印一行 `READ PROMPT（条件提示词）: …2a-ui-design.md…`，判定与条件模板行同源；非前端 change 不打印。([#159](https://github.com/baobaolaodie/flow-comet/pull/159))
 
 ### 变更
 
