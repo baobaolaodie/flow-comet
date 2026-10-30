@@ -54,6 +54,10 @@ Find your symptom, run the command. Everything here assumes you are inside the p
 
 **`BLOCKED: SUMMARY 的 6 维自查未声明使用 /brooks-review`** — the declaration is matched as a literal string **inside the self-check section**: a heading such as `# Brooks-Lint Review` is not read as the method name, and a reason written in the self-check-method section does not satisfy this check. Write `brooks-review` (or `cache-brooks`) in the self-check section itself.
 
+**The exit refuses a summary over a missing structural subsection although the section says N/A** — the marker has to open the body. Rewrite the body so `N/A` is its first token (a short reason may follow) instead of putting an explanation in front of it or folding the marker into a sentence; bold, a block quote, a list bullet, parentheses and backticks around the marker are accepted. The message also names the parent section a misplaced subsection actually sits under, and states how to write the section when it truly does not apply.
+
+**`next` keeps pointing at the node I have just finished** — an entered node that has not exited still owns the route. Run `record` and then `exit <node>`; the `ROUTE` line in `status` and the `WHY` line in `next` say why it is stopped there, and running the exit check without `--apply` shows what is still missing.
+
 ### Platform
 
 **Codex hook stopped working after moving the project** — the Codex hook stores the absolute path it was installed with. Re-run `fcomet init --platform codex` in the project's new location.
