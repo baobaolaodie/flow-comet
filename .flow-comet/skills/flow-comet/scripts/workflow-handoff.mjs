@@ -368,9 +368,11 @@ async function assessRequestOwnership(state, taskAttrs, taskContent) {
 
 // 渲染归属判定结果（只输出与退出，不写 state）：
 // 协议不可读 → 可见 WARN（含原因与「本次未执行归属校验」）后放行，不静默、不阻断。
-// 不可委托 → 新 change BLOCK / 旧 change 可见 WARN 后继续；恢复指引以 workflow-state next 的
-// 实际 NODE 输出为准，不固定指向 next 不会输出的节点（依赖未满足时路由按串行消化走 execute）。
-// 归属目标不匹配 → 同样先按 next 的路由指引进入；正确节点未 entry → 可见 WARN 不阻断。
+// 不可委托 / 归属目标不匹配 → 新 change BLOCK / 旧 change 可见 WARN 后继续；恢复指引统一为
+// 「先对当前节点 record + exit（退出后路由自动前进到目标节点），不要在未 exit 前 entry 目标
+// 节点」，再按 next 的实际 NODE 输出确认——不承诺先 next 再 entry 目标节点（当前节点已 entry
+// 未 exit 时该路径会被节点顺序门拦）。不可委托分支不固定指向 next 不会输出的委托节点。
+// 正确节点未 entry → 可见 WARN 不阻断。
 function reportRequestOwnership(state, taskId, taskAttrs, ownership) {
   const kind = taskAttrs && taskAttrs.parallel === true ? '并行' : '串行';
   const current = String(state.currentNode);
@@ -384,7 +386,13 @@ function reportRequestOwnership(state, taskId, taskAttrs, ownership) {
     const detail = '任务 ' + taskId + '（' + kind + ' pending）当前不可委托：依赖未满足'
       + (unmet.length > 0 ? '（未完成: ' + unmet.join(', ') + '）' : '')
       + '；原始 currentNode=' + current;
-    const guide = '恢复指引: 运行 workflow-state next，按输出的 NODE 进入；若输出 execute 表示依赖未满足'
+    // 与 mismatch 分支同批对齐：当前节点若已 entry 未 exit，直接 entry 目标节点会被节点顺序门
+    // 拦（"按 NODE 进入"隐含了未 exit 就进下一节点）。自然路径是先对当前节点 record + exit——
+    // 退出后路由自动前进，next 的 NODE 输出才有可执行语义；依赖未满足时 next 仍输出 execute
+    //（该任务按串行消化），待可委托后再 request。
+    const guide = '恢复指引: 若当前节点已 entry 未 exit，先对当前节点 ' + current
+      + ' record + exit（退出后路由会自动前进），不要在未 exit 前 entry 目标节点；随后运行 workflow-state next，'
+      + '按输出的 NODE 进入；若输出 execute 表示依赖未满足'
       + '（该任务当前按串行消化），待任务变为可委托（next 输出对应委托节点）后再 request';
     if (state.newChange === true) {
       console.error('BLOCKED: ' + detail + '——' + guide + '；本次请求未写入 state，也未记录 handoffRequests');
@@ -396,9 +404,15 @@ function reportRequestOwnership(state, taskId, taskAttrs, ownership) {
   if (ownership.verdict === 'mismatch') {
     const detail = '任务 ' + taskId + '（' + kind + ' pending）应归属节点 '
       + ownership.targetNode + '，原始 currentNode=' + current;
-    const guide = '恢复指引: 运行 workflow-state next 查看当前路由，按 NODE 输出进入'
-      + '（本任务归属节点 ' + ownership.targetNode + '：workflow-state entry ' + ownership.targetNode
-      + ' 或 workflow-guard entry ' + ownership.targetNode + '）后再发起委托';
+    // 恢复路径不承诺"先 next 再 entry 目标节点"：当前节点已 entry 未 exit 时，节点顺序门会拦
+    // 目标节点的 entry（"当前节点未收尾"正是本分支的常见现场）。自然路径是先对当前节点
+    // record + exit——退出后路由自动前进到目标节点，再按 next 的输出进入；目标节点名保留在
+    // 括号里，但语义改为"当前节点 exit 之后才 entry"。
+    const guide = '恢复指引: 先对当前节点 ' + current + ' record + exit（退出后路由会自动前进到目标节点），'
+      + '不要在未 exit 前 entry 目标节点（本任务归属节点 ' + ownership.targetNode
+      + '：等当前节点 exit 后，再用 workflow-state entry ' + ownership.targetNode
+      + ' 或 workflow-guard entry ' + ownership.targetNode + '）'
+      + '；随后用 workflow-state next 查看当前路由并按 NODE 输出确认';
     if (state.newChange === true) {
       console.error('BLOCKED: ' + detail + '——' + guide + '；本次请求未写入 state，也未记录 handoffRequests');
       process.exit(1);
@@ -699,10 +713,10 @@ async function main() {
     // 不 BLOCK 不拒绝（避免卡死流程）；commitHash 非法格式维持上方现有 HANDOFF ERROR 行为不变
     if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
       if (!parsed.greenEvidence || typeof parsed.greenEvidence !== 'object' || typeof parsed.greenEvidence.command !== 'string') {
-        console.error('HANDOFF WARN: ' + taskId + ' 缺 greenEvidence（未执行 TDD GREEN？）');
+        console.error('HANDOFF WARN: ' + taskId + ' 缺 greenEvidence（未执行 TDD GREEN？）——evidence 形状: {command, output}（command 与 output 两个字段，至少给 command）');
       }
       if (!parsed.redEvidence || typeof parsed.redEvidence !== 'object' || typeof parsed.redEvidence.command !== 'string') {
-        console.error('HANDOFF WARN: ' + taskId + ' 缺 redEvidence（未执行 TDD RED？）');
+        console.error('HANDOFF WARN: ' + taskId + ' 缺 redEvidence（未执行 TDD RED？）——evidence 形状: {command, output}（command 与 output 两个字段，至少给 command）');
       }
     }
     state.evidence['subagent-execute'].handoffResult[taskId] = {
@@ -710,6 +724,11 @@ async function main() {
     };
     await writeState(state);
     console.log('HANDOFF RESULT: ' + taskId);
+    // 结果已记录 → 追加一行预检提示（仅成功路径；失败/拦截路径在上方已 exit，不会走到这里）：
+    // exit 不带 --apply 会跑完整出口门禁但不写 state，用于把"攒到节点收尾才发现"的反馈前移。
+    // 当前节点取 state.currentNode（state 原值，不取任何派生节点），与 --apply 的目标同一口径。
+    console.log('PREFLIGHT: SUMMARY 结构尚未校验——可运行 node .claude/skills/flow-comet/scripts/workflow-guard.mjs exit '
+      + String(state.currentNode ?? '<节点>') + ' 但不带 --apply 预检（跑完整门禁、不推进状态）');
     return;
   }
 

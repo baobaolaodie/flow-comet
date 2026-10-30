@@ -33,6 +33,7 @@ import {
 import {
   runGuardWithProtocol,
   runStateWithProtocol,
+  scenarioProtocolPath,
 } from '../lib/test-assertions.mjs';
 
 export const ENTRIES = [
@@ -53,6 +54,25 @@ export const ENTRIES = [
       const res = runGuard(['exit', 'subagent-execute'], dir);
       assertExit(res, 0);
       assertOut(res, 'ALL CHECKS PASSED');
+
+      // ---------- 缺证据阻塞给出可复制恢复命令（in-place 扩展；不新增场景条目） ----------
+      // ① 移除 evidence.summary（record 只写 summary 的合法路径）→ exit 命中 missing Output
+      // Schema evidence；BLOCKED 行之后必须给出可照抄的 record 命令，照抄执行后同一 exit 通过。
+      const stateFile = path.join(dir, '.flow-comet', 'flow-comet-state.json');
+      const stNoEvidence = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+      delete stNoEvidence.evidence['subagent-execute'].summary;
+      writeState(dir, stNoEvidence);
+      const resNoEvidence = runGuard(['exit', 'subagent-execute'], dir);
+      assertExit(resNoEvidence, 1);
+      assertOut(resNoEvidence, 'BLOCKED: missing Output Schema evidence');
+      assertOut(resNoEvidence, 'node .claude/skills/flow-comet/scripts/workflow-state.mjs record subagent-execute');
+      assertOut(resNoEvidence, '{"summary":"<本节点完成摘要>"}');
+      assertOut(resNoEvidence, '后重试 exit');
+      // 照抄恢复命令（同一 CLI 形态）→ 同一 exit 通过（恢复路径可执行，不只是「知道缺什么」）
+      assertExit(runStateWithProtocol(dir, ['record', 'subagent-execute', '{"summary":"补记本节点完成摘要"}']), 0);
+      const resEvidenceRecovered = runGuard(['exit', 'subagent-execute'], dir);
+      assertExit(resEvidenceRecovered, 0);
+      assertOut(resEvidenceRecovered, 'ALL CHECKS PASSED');
     },
   },
 
@@ -122,10 +142,25 @@ export const ENTRIES = [
       const res1 = runHandoff(['result', 'P01', redOnly], dir);
       assertExit(res1, 0);
       assertOut(res1, 'HANDOFF RESULT: P01');
+      // ③ 缺证据的 WARN 点名 Return Contract 的 shape（只差 command 时不必猜字段怎么填）
+      assertOut(res1, 'HANDOFF WARN: P01 缺 greenEvidence');
+      assertOut(res1, '{command, output}');
+      assertOut(res1, 'command 与 output 两个字段');
       const both = '{"redEvidence":{"command":"node --check src/p1.mjs"},"greenEvidence":{"command":"node --check src/p1.mjs"}}';
       const res2 = runHandoff(['result', 'P01', both], dir);
       assertExit(res2, 0);
       assertOut(res2, 'HANDOFF RESULT: P01');
+      // result 成功路径在 HANDOFF RESULT 之后追加 PREFLIGHT（SUMMARY 结构预检提示）——当前节点
+      // 取自 state.currentNode；该行不得改写既有 HANDOFF RESULT 前缀，也不得出现在失败路径。
+      assertOut(res2, 'PREFLIGHT: SUMMARY 结构尚未校验');
+      assertOut(res2, 'node .claude/skills/flow-comet/scripts/workflow-guard.mjs exit subagent-execute');
+      assertOut(res2, '但不带 --apply');
+      assertOut(res2, '跑完整门禁、不推进状态');
+      const resultLineAt = res2.output.indexOf('HANDOFF RESULT: P01');
+      const preflightLineAt = res2.output.indexOf('PREFLIGHT:');
+      if (!(resultLineAt >= 0 && preflightLineAt > resultLineAt)) {
+        throw new Error('PREFLIGHT 行必须追加在 HANDOFF RESULT 之后（既有前缀不得改写）：\n' + res2.output);
+      }
       const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       const rec = st.evidence['subagent-execute'].handoffResult['P01'].result;
       if (!rec.redEvidence.recordedAt || typeof rec.redEvidence.recordedAt !== 'string') {
@@ -151,6 +186,8 @@ export const ENTRIES = [
       const res2 = runHandoff(['result', 'P01', backfill], dir);
       assertExit(res2, 1);
       assertOut(res2, 'redEvidence 事后补录');
+      // 拦截路径不打印 PREFLIGHT（提示只在「结果已记录、可以预检了」的成功路径出现）
+      assertNotOut(res2, 'PREFLIGHT');
     },
   },
 
@@ -201,6 +238,22 @@ export const ENTRIES = [
       const res = runGuard(['exit', 'execute'], dir);
       assertExit(res, 1);
       assertOut(res, 'TASK.md 任务集被修改');
+
+      // ---------- replan 成功行说明「重签了什么、没有做什么」（in-place 扩展） ----------
+      // ② 签名不一致 BLOCK 后的合规出路是 replan：成功行保持既有 REPLAN: 前缀不变，其后追加
+      // 一行事实说明——已重签 state.taskHash（值前缀标出版本），且 TASK.md 内容未改写、plan
+      // 节点证据未重记（防执行者误以为 replan 会重写计划工件或重跑 plan 出口）。
+      const resReplan = runStateWithProtocol(dir, ['replan', '任务集按实测修订', '--authorized-by', 'user-approval']);
+      assertExit(resReplan, 0);
+      assertOut(resReplan, 'REPLAN: execute');
+      assertOut(resReplan, '已重签 state.taskHash（值前缀 v1:');
+      assertOut(resReplan, 'TASK.md 内容未改写');
+      assertOut(resReplan, 'plan 节点证据未重记');
+      const replanLineAt = resReplan.output.indexOf('REPLAN: execute');
+      const replanDetailAt = resReplan.output.indexOf('已重签 state.taskHash');
+      if (!(replanLineAt >= 0 && replanDetailAt > replanLineAt)) {
+        throw new Error('replan 事实说明必须在 REPLAN 成功行之后（前缀语义不变）：\n' + resReplan.output);
+      }
     },
   },
 
@@ -404,6 +457,73 @@ export const ENTRIES = [
       const res2 = runGuard(['entry', 'subagent-execute'], dir);
       assertExit(res2, 0);
       assertOut(res2, 'ENTRY OK');
+
+      // ---------- request 归属受阻的新恢复路径（in-place 扩展） ----------
+      // ④ 串行 pending 任务在 subagent-execute 发起 request → 归属门禁 BLOCK。报文不再承诺
+      // 「先 next 再 entry 目标节点」（当前节点已 entry 未 exit 时会被节点顺序门拦），改为
+      // 「先对当前节点 record + exit（退出后路由自动前进到目标节点）」；并断言按此指引真能走通。
+      const stateFile = path.join(dir, '.flow-comet', 'flow-comet-state.json');
+      const loadsDir = path.join(dir, '.specs', CHANGE_ID, '.skill-loads');
+      fs.mkdirSync(loadsDir, { recursive: true });
+      writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/subagent-execute-flow-comet-dev.json',
+        JSON.stringify({
+          node: 'subagent-execute',
+          skill: 'flow-comet-dev',
+          protocol: '4-dev.md',
+          templates: ['SUMMARY'],
+          at: '2026-08-01T00:00:00.000Z',
+        }, null, 2) + '\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n## 0. 技术栈\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n'
+        + '<task id="S01" parallel="false" status="pending">\n'
+        + '  <name>串行任务 S01</name>\n'
+        + '  <read_files>.specs/' + CHANGE_ID + '/TASK.md</read_files>\n'
+        + '  <write_files>src/s01.mjs</write_files>\n'
+        + '  <action>实现 S01</action>\n'
+        + '  <verify>node --check src/s01.mjs</verify>\n'
+        + '  <done>完成 S01</done>\n'
+        + '  <depends_on></depends_on>\n'
+        + '</task>\n');
+      const reqState = baseState('subagent-execute');
+      reqState.newChange = true;
+      reqState.completedNodes = ['open', 'design', 'plan'];
+      reqState.evidence = {
+        open: { summary: 'open done' },
+        design: { summary: 'design done' },
+        plan: { summary: 'plan done' },
+      };
+      writeState(dir, reqState);
+      // 真实 entry（记录 enteredNodes + 任务集签名；request 前置门要求本节点声明标记，已写）
+      assertExit(runGuardWithProtocol(dir, ['entry', 'subagent-execute']), 0);
+      const bytesBeforeRequest = fs.readFileSync(stateFile, 'utf8');
+      const resOwnership = runHandoff(['request', 'S01', 'serial slice'], dir,
+        { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) });
+      assertExit(resOwnership, 1);
+      assertOut(resOwnership, 'BLOCKED: 任务 S01（串行 pending）应归属节点 execute');
+      // 新指引：先 record + exit 当前节点；不再承诺「先 next 再 entry 目标节点」
+      assertOut(resOwnership, '先对当前节点 subagent-execute record + exit');
+      assertOut(resOwnership, '不要在未 exit 前 entry 目标节点');
+      assertOut(resOwnership, 'workflow-state next');
+      assertOut(resOwnership, 'entry execute');
+      assertNotOut(resOwnership, '查看当前路由，按 NODE 输出进入');
+      assertNotOut(resOwnership, 'HANDOFF REQUEST');
+      if (fs.readFileSync(stateFile, 'utf8') !== bytesBeforeRequest) {
+        throw new Error('归属受阻 BLOCK 必须 state 字节零改写');
+      }
+      // 照报文操作：record 当前节点 + exit --apply（退出后路由自动前进到目标节点）
+      assertExit(runStateWithProtocol(dir, ['record', 'subagent-execute', '{"summary":"串行任务需回 execute 节点执行"}']), 0);
+      const exitOwnership = runGuardWithProtocol(dir, ['exit', 'subagent-execute', '--apply']);
+      assertExit(exitOwnership, 0);
+      const stateAfterRecovery = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+      if (stateAfterRecovery.currentNode !== 'execute') {
+        throw new Error('按新指引 record+exit 后 currentNode 应前进到 execute，实际: '
+          + JSON.stringify(stateAfterRecovery.currentNode));
+      }
+      const nextAfterRecovery = runStateWithProtocol(dir, ['next']);
+      assertExit(nextAfterRecovery, 0);
+      assertOut(nextAfterRecovery, 'NODE: execute');
     },
   },
 

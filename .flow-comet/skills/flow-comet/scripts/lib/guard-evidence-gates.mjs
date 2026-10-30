@@ -712,6 +712,10 @@ export async function runEvidenceCompletionGate({ protocol, node, state, evidenc
   const missingSchemaEvidence = missingRequiredSchemaEvidence(protocol, node, evidence);
   if (missingSchemaEvidence.length > 0) {
     console.error('BLOCKED: missing Output Schema evidence: ' + missingSchemaEvidence.join(', '));
+    // 阻塞消息给可照抄的下一步：record 只写 summary 即视为产出证据（与判据同一口径），
+    // 照抄执行后同一 exit 即可通过——不再让执行者从字段清单反推该跑什么命令。
+    console.error('恢复: node .claude/skills/flow-comet/scripts/workflow-state.mjs record ' + node.id
+      + ` '{"summary":"<本节点完成摘要>"}' 后重试 exit`);
     process.exit(1);
   }
 }
