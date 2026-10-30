@@ -156,7 +156,7 @@ export const ENTRIES = [
 
   // 8: execute exit 通过（enter 记录 taskHash + SUMMARY 六段 + 6 维实质 + 自检方法 + handoff 齐 + TASK 全 done）
   {
-    name: '08 execute exit 通过（enter 后未改 TASK，签名匹配）',
+    name: '08 execute exit 通过（enter 后未改 TASK，签名匹配）+ 未 exit 时 status/next 共用节点视图',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
@@ -190,6 +190,60 @@ export const ENTRIES = [
       const resVariantNeg = runGuard(['exit', 'execute'], dir);
       assertExit(resVariantNeg, 1);
       assertOut(resVariantNeg, '自检方法');
+
+      // ---------- 节点视图收敛（in-place 扩展） ----------
+      // 构造「execute 已 entry 未 exit、产物推导已指向其后继 review」的态：此前 status 只报
+      // 推导节点 review、next 的进行中保护报 execute——同一事实两处说法。收敛后 status 增
+      // routeNode（= next 的 NODE）与 ROUTE: 三视图对账行；next 增 WHY: 停留原因与 execute
+      // 家族的 PREFLIGHT: 预检提示；既有 currentNode（产物推导）/ stateCurrentNode（state
+      // 原值）语义逐字不变，且两条命令都不写 state。
+      // 说明：不新增场景条目是本仓「场景数 = 受检面计数」约束下的 in-place 扩展形态（同场景 15）。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n');
+      const viewState = JSON.parse(readStateBytes(dir));
+      viewState.completedNodes = ['open', 'design', 'plan'];
+      viewState.enteredNodes = ['open', 'design', 'plan', 'execute'];
+      viewState.evidence = {
+        ...viewState.evidence,
+        open: { summary: 'open complete' },
+        design: { summary: 'design complete' },
+        plan: { summary: 'plan complete' },
+      };
+      writeState(dir, viewState);
+      const viewBytes = readStateBytes(dir);
+      const statusView = runState(['status'], dir);
+      assertExit(statusView, 0);
+      const statusRouteNode = (statusView.output.match(/"routeNode":\s*"([^"]+)"/) ?? [])[1];
+      if (statusRouteNode !== 'execute') {
+        throw new Error('status.routeNode 应为进行中节点 execute（= next 的 NODE），实际: '
+          + JSON.stringify(statusRouteNode) + '\n实际输出:\n' + statusView.output);
+      }
+      assertOut(statusView, '"currentNode": "review"'); // 产物推导语义不变（SUMMARY 已齐 → review）
+      assertOut(statusView, '"stateCurrentNode": "execute"'); // state 原值语义不变
+      const routeLine = statusView.output.split('\n').find((line) => line.startsWith('ROUTE: '));
+      if (!routeLine) throw new Error('status 缺少 ROUTE: 诊断行\n实际输出:\n' + statusView.output);
+      for (const token of ['derived=review', 'state=execute', 'route=execute', '先 exit execute']) {
+        if (!routeLine.includes(token)) throw new Error('ROUTE: 行缺少 ' + token + '：' + routeLine);
+      }
+      assertStateBytesUnchanged(dir, viewBytes, 'status 是只读视图（ROUTE 诊断不得写 state）');
+      const nextView = runState(['next'], dir);
+      assertExit(nextView, 0);
+      const nextNode = (nextView.output.match(/^NODE: (.+)$/m) ?? [])[1];
+      if (nextNode !== statusRouteNode) {
+        throw new Error('status.routeNode 与 next 的 NODE 不一致（同一事实两处说法）：'
+          + JSON.stringify(statusRouteNode) + ' vs ' + JSON.stringify(nextNode));
+      }
+      const whyLine = nextView.output.split('\n').find((line) => line.startsWith('WHY: '));
+      if (!whyLine) throw new Error('next 缺少 WHY: 停留原因行\n实际输出:\n' + nextView.output);
+      if (!whyLine.includes('已 entry 未 exit')) {
+        throw new Error('WHY: 行应说明进行中原因（已 entry 未 exit）：' + whyLine);
+      }
+      assertOut(nextView, 'PREFLIGHT: ');
+      assertOut(nextView, 'workflow-guard.mjs exit execute');
+      assertOut(nextView, '不带 --apply');
+      assertOut(nextView, '不推进状态');
+      assertStateBytesUnchanged(dir, viewBytes, 'next 进行中保护不得写 state（routeNode 与 NODE 同源）');
     },
   },
 
@@ -799,6 +853,9 @@ export const ENTRIES = [
       const res = runState(['status', '--protocol', custom], dir);
       assertExit(res, 0);
       assertOut(res, '"currentNode": "codereview"');
+      // 无 exit 推进史（completedNodes 空）→ 进行中保护不触发，routeNode 与产物推导同一节点
+      // （反过度修复锚：若把「导入后继保护」放宽到无推进史形态，本断言即红）
+      assertOut(res, '"routeNode": "codereview"');
     },
   },
 

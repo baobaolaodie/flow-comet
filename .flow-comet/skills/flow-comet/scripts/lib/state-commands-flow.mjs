@@ -76,6 +76,89 @@ function printNext(protocol, nodeId, executionMode = 'subagent') {
   }
 }
 
+// ---------- 节点视图（单一实现）：state 原值 / 产物推导 / 进行中保护 → 路由视图 ----------
+// 「我现在该在哪个节点」只有这一份判定（同一事实两处实现必然分叉——LESSONS 的路由单一权威族）。
+// 收敛前 next 内联一份、status 只报产物推导：同一 state 下两条命令报不同节点，执行者按任一输出
+// 行动都可能撞上节点顺序门禁。收敛后三视图各归其位：
+//   derivedNode = 产物推导（既有键 currentNode 的语义，逐字不变）；
+//   stateNode   = state.currentNode 原值（既有键 stateCurrentNode 的语义，逐字不变）；
+//   routeNode   = 经「进行中保护」后的路由视图（next 的 NODE 行的唯一来源）。
+// 纯判定：只读 state 与产物，不写 state、不打印（展示由各命令渲染）。
+async function resolveNodeView({ changeName, protocol, state }) {
+  const completedArr = Array.isArray(state.completedNodes) ? state.completedNodes : [];
+  const derivedNode = await determineNode(changeName, protocol, completedArr);
+  // 进行中节点保护：currentNode 未 exit（不在 completedNodes）且已 entry（enteredNodes 含该节点）
+  // 或已 record（evidence 记录过）→ 视为进行中（可能 exit 被内容级拦截后重跑），不校正推走——
+  // 否则被拦截节点的 exit 前置校验（currentNode 匹配）无法重跑，advance/select 均不恢复 → 死结
+  // （实测教训）。旧 state 无 enteredNodes 时回退 evidence 判定（既有语义不回归）。
+  const currentNodeEvidence = state.currentNode && state.evidence && typeof state.evidence === 'object'
+    ? state.evidence[state.currentNode]
+    : null;
+  const currentNodeEntered = !!(
+    state.enteredNodes && Array.isArray(state.enteredNodes) && state.enteredNodes.includes(state.currentNode)
+  );
+  const routeIds = route(protocol).map((n) => n.id);
+  const currentNodeIdx = state.currentNode ? routeIds.indexOf(state.currentNode) : -1;
+  // 推导为 currentNode 的**路由后继**（与 guard 出口同源：把 currentNode 视为已完成再加入
+  // completedNodes 求 resolveNextNode）→ 该节点产物已齐待 exit、路由自然推进到 derivedNode
+  // （平行转换 plan→subagent-execute、趟间回流 subagent-execute→execute 均属此形态）→ 保护。
+  // 反过度修复锚（同族：产物全齐但无推进史形态）：completedNodes 为空（无任何 exit 推进史，
+  // currentNode 仅是初始陈旧节点）时不做路由后继保护——产物推导继续生效推进到最终节点。
+  // 推导跳跃/跨节点或回退 → 产物权威校正(漂移,防过度修复)。静态直接后继兜底（串行推进原语义）。
+  const routingSuccessorOfCurrent = state.currentNode
+    ? await determineNode(changeName, protocol, [...completedArr, state.currentNode])
+    : null;
+  const routingSuccessorProtects = !!(completedArr.length > 0
+    && routingSuccessorOfCurrent !== null
+    && routingSuccessorOfCurrent === derivedNode);
+  const derivedIsDirectSuccessor = currentNodeIdx >= 0
+    && currentNodeIdx + 1 < routeIds.length
+    && routeIds[currentNodeIdx + 1] === derivedNode;
+  const derivedIsSuccessor = routingSuccessorProtects || derivedIsDirectSuccessor;
+  const inProgress = !!(
+    state.currentNode
+    && !completedArr.includes(state.currentNode)
+    && (currentNodeEntered
+      || (currentNodeEvidence && typeof currentNodeEvidence === 'object' && !Array.isArray(currentNodeEvidence)))
+    && derivedIsSuccessor
+  );
+  return {
+    derivedNode,
+    stateNode: state.currentNode ?? null,
+    routeNode: inProgress ? state.currentNode : derivedNode,
+    inProgress,
+  };
+}
+
+// 人读诊断（status）：JSON 块之后的一行三视图对账——derived = 产物推导、state = state 原值、
+// route = 路由视图（= next 的 NODE）；进行中时点名「先 exit」的恢复动作。前缀严格为 `ROUTE: `。
+function formatRouteLine(view) {
+  return 'derived=' + (view.derivedNode ?? 'null') + '（产物推导）'
+    + ' state=' + (view.stateNode ?? 'null') + '（state 原值）'
+    + ' route=' + (view.routeNode ?? 'null') + '（路由视图）'
+    + (view.inProgress
+      ? '；进行中：' + view.stateNode + ' 已 entry 未 exit——先 exit ' + view.stateNode + ' 再推进'
+      : '');
+}
+
+// 人读诊断（next）：为什么停在这个节点。进行中 = 已 entry 未 exit（保护生效）；否则为产物推导。
+// 只属于共享节点视图路径：Fix 归位 / 回程分支已有 FIX-BATCH / RETURN 行说明停留原因，不重复。
+function printWhyLine(view) {
+  if (view.routeNode === null) return;
+  const reason = view.inProgress
+    ? '停在 ' + view.routeNode + '——已 entry 未 exit（进行中保护），先 exit ' + view.routeNode + ' 再推进'
+    : '产物推导指向 ' + view.routeNode + '（无进行中节点）';
+  console.log('WHY: ' + reason);
+}
+
+// 预检提示（next）：只在 execute / subagent-execute 路由上打印——exit 不带 --apply 就是完整出口
+// 门禁的预检（写盘只在 --apply 分支），让反馈前移到任务收尾而不是节点收尾。
+function printPreflightLine(nodeId) {
+  if (!nodeId || !EXECUTE_FAMILY_NODE_IDS.has(nodeId)) return;
+  console.log('PREFLIGHT: 可运行 workflow-guard.mjs exit ' + nodeId
+    + '（不带 --apply）预检——跑完整出口门禁，但不推进状态');
+}
+
 // init <change-id> [--branch-prefix <prefix>] [--init-context|--init-skip]
 // protocolPath = 入口 resolveProtocol 解析出的协议路径（协议来源绑定的持久化取值）
 export async function runInit(protocol, argv, protocolPath) {
@@ -254,7 +337,10 @@ export async function runStatus(protocol) {
     return;
   }
   const state = await readState();
-  const detectedNode = await determineNode(changeName, protocol, state.completedNodes);
+  // 节点视图（与 next 共用同一判定）：currentNode 仍取产物推导（既有键语义逐字不变），
+  // routeNode 才是经「进行中保护」后的路由视图（= next 的 NODE 行）。
+  const nodeView = await resolveNodeView({ changeName, protocol, state });
+  const detectedNode = nodeView.derivedNode;
   // 派生视图（ADR-013 决策 11；改为事件为准）：被强制推进的节点以
   // state.history 中本 change 的 advance-forced 事件为唯一判据——按 change 过滤（兼容旧事件
   // 无 change 字段），取 e.node 集合后与 completedNodes 求交。旧「completedNodes 含而 evidence
@@ -286,6 +372,8 @@ export async function runStatus(protocol) {
     change: changeName,
     currentNode: detectedNode,
     stateCurrentNode: state.currentNode,
+    // 增量字段：next 会打印的路由视图（进行中保护后的节点）；不写 state、既有键语义不变
+    routeNode: nodeView.routeNode,
     completedNodes: state.completedNodes,
     forcedNodes,
     executionMode: state.executionMode ?? 'subagent',
@@ -297,6 +385,7 @@ export async function runStatus(protocol) {
     // 新旧 change 标记——newChange true = 新 change(严格模式);false/缺失 = 旧 change(渐进)
     newChange: state.newChange === true
   }, null, 2));
+  console.log('ROUTE: ' + formatRouteLine(nodeView));
   printBranchLine(changeName, state.branchPrefix ?? 'change/');
   await printEvolveDueHint(state);
   return;
@@ -334,6 +423,7 @@ export async function runNext(protocol) {
     await writeState(state);
     console.log('FIX-BATCH: 归位 ' + fixRollbackDecision.target + '（源节点 ' + sourceNode + '）' + rollbackRound.auditSuffix);
     printNext(protocol, fixRollbackDecision.target, state.executionMode ?? 'subagent');
+    printPreflightLine(fixRollbackDecision.target);
     printBranchLine(changeName, state.branchPrefix ?? 'change/');
     return;
   }
@@ -392,7 +482,10 @@ export async function runNext(protocol) {
       }
     }
   }
-  const detectedNode = await determineNode(changeName, protocol, state.completedNodes);
+  // 节点视图（与 status 共用同一「进行中保护」判定，见 resolveNodeView）：derivedNode 供零进展
+  // 防呆与漂移校正使用，routeNode 才是输出节点（next 的 NODE 行）。
+  const nodeView = await resolveNodeView({ changeName, protocol, state });
+  const detectedNode = nodeView.derivedNode;
   // 单趟零进展防呆（三重防呆决策之二·状态机侧）：路由落在 execute/subagent-execute，但既无可委托的并行任务
   // （依赖已满足集合为空）又无串行 pending，且 TASK 未全 done——剩余 pending 全部是依赖无法满足的
   // 孤儿并行任务（数据异常：depends_on 引用不存在的任务 id 或执行期出现依赖环）→ BLOCKED，
@@ -424,54 +517,19 @@ export async function runNext(protocol) {
       } catch {}
     }
   }
-  // 状态漂移自动校正——以文件产物为准（determineNode）校正 state.currentNode。
-  // 进行中节点保护:currentNode 未 exit(不在 completedNodes)且已记录 evidence(record 过)
-  // → 视为节点进行中(可能 exit 被内容级拦截后重跑),不校正推走——否则被拦截节点
-  // 的 exit 前置校验(currentNode 匹配)无法重跑,advance/select 均不恢复 → 死结(实测教训)
-  const currentNodeEvidence = state.currentNode && state.evidence && typeof state.evidence === 'object'
-    ? state.evidence[state.currentNode]
-    : null;
-  // 进行中节点保护扩展：保护从"已 record"扩展为"已 entry（enteredNodes 含该节点）且未 exit"。
-  // 已 entry 但未 record 的节点（如刚进入、产物已齐、premature next）同样视为进行中——
-  // 不校正推走（否则该节点 exit 前置 currentNode 校验无法重跑 → 死结）。旧 state 无
-  // enteredNodes 时回退到 evidence 判定（既有语义不回归）。
-  const currentNodeEntered = !!(
-    state.enteredNodes && Array.isArray(state.enteredNodes) && state.enteredNodes.includes(state.currentNode)
-  );
-  const routeIds = route(protocol).map((n) => n.id);
-  const currentNodeIdx = state.currentNode ? routeIds.indexOf(state.currentNode) : -1;
-  // 推导为 currentNode 的**路由后继**（与 guard 出口同源：把 currentNode 视为已完成再加入
-  // completedNodes 求 resolveNextNode）→ 该节点产物已齐待 exit、路由自然推进到 detectedNode
-  // （平行转换 plan→subagent-execute、趟间回流 subagent-execute→execute 均属此形态）→ 保护。
-  // 反过度修复锚（同族：产物全齐但无推进史形态）：completedNodes 为空（无任何 exit 推进史，currentNode 仅是初始
-  // 陈旧节点）时不做路由后继保护——产物推导继续生效推进到最终节点（自定义协议产物全齐的
-  // 「部分完成但产物齐」形态仍路由到最后节点）。静态直接后继兜底（串行推进原语义）。
-  // 推导跳跃/跨节点或回退 → 产物权威校正(漂移,防过度修复)。
-  const routingSuccessorOfCurrent = state.currentNode
-    ? await determineNode(changeName, protocol, [...completedArr, state.currentNode])
-    : null;
-  const routingSuccessorProtects = !!(completedArr.length > 0
-    && routingSuccessorOfCurrent !== null
-    && routingSuccessorOfCurrent === detectedNode);
-  const derivedIsDirectSuccessor = currentNodeIdx >= 0
-    && currentNodeIdx + 1 < routeIds.length
-    && routeIds[currentNodeIdx + 1] === detectedNode;
-  const derivedIsSuccessor = routingSuccessorProtects || derivedIsDirectSuccessor;
-  const inProgress = !!(
-    state.currentNode
-    && !completedArr.includes(state.currentNode)
-    && (currentNodeEntered
-      || (currentNodeEvidence && typeof currentNodeEvidence === 'object' && !Array.isArray(currentNodeEvidence)))
-    && derivedIsSuccessor
-  );
-  if (!inProgress && state.currentNode !== detectedNode) {
+  // 状态漂移自动校正——以文件产物为准（determineNode）校正 state.currentNode。进行中节点不校正
+  // （已 entry / 已 record 且未 exit、路由仍在其后继）：判定统一在 resolveNodeView 内，本命令不再
+  // 内联第二份（与 status 共用；被拦截节点若被推走，其 exit 前置 currentNode 校验无法重跑 → 死结）。
+  if (!nodeView.inProgress && state.currentNode !== detectedNode) {
     state.currentNode = detectedNode;
     await writeState(state);
   }
-  // 进行中节点保护:不校正时输出也跟随 currentNode(而非产物推导的 detectedNode——
-  // 否则 state 保持 review 但输出 NODE: verify,执行者按输出 action 仍然死结)
-  const printNode = inProgress ? state.currentNode : detectedNode;
+  // 输出跟随路由视图：进行中时输出 state.currentNode（而非产物推导——否则 state 保持 review 但
+  // 输出 NODE: verify，执行者按输出 action 仍然死结）；非进行中即产物推导节点。
+  const printNode = nodeView.routeNode;
   printNext(protocol, printNode, state.executionMode ?? 'subagent');
+  printWhyLine(nodeView);
+  printPreflightLine(printNode);
   printBranchLine(changeName, state.branchPrefix ?? 'change/');
   return;
 }
