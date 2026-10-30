@@ -792,7 +792,9 @@ export const ENTRIES = [
   // TA-08 · 条件子段与父段豁免（AC-8）+ 可选段语义（C-1）——① 前端 change 的 UI-DESIGN 缺
   // `### Button (Primary)` → BLOCKED（注意 Primary / Secondary 归一后同键：只写 Secondary 不得算
   // Primary 在场）；② 非前端 change 的 TEST 第 4 轮整段 N/A 且缺 4.1~4.4 子段 → 通过（父段 N/A →
-  // 子段不要求）；⑤⑥ UI-DESIGN §0（optional）整段删除合法，但保留标题就得填。
+  // 子段不要求）；⑤⑥ UI-DESIGN §0（optional）整段删除合法，但保留标题就得填；⑦ 四种包裹
+  // 符号（**N/A** / > N/A / - N/A / （N/A））都算整段不适用、⑧ 「**见 N/A**」不算（不吞真句子）
+  // 且报文给出规范写法；⑨⑩ 缺子段时点名「实际挂在 X 段下」/「实际在文末」。
   {
     name: 'TA-08 条件子段与父段豁免：UI-DESIGN 缺 Button (Primary) 拦；TEST 第 4 轮 N/A 放行',
     run: async (dir) => {
@@ -844,6 +846,45 @@ export const ENTRIES = [
       const resEmptyOptional = exitNode(dir, 'design');
       assertExit(resEmptyOptional, 1);
       assertOut(resEmptyOptional, '0.1');
+      // ⑦ 整段不适用的包裹符号（AC-8）：粗体 / 引用 / 列表 / 括号四种写法都是同一个词的包装——
+      // 第 4 轮正文写成这些形态、其结构子段 4.1~4.4 全缺席 → 不报缺子段（父段豁免生效）。
+      for (const wrapped of ['**N/A**', '> N/A', '- N/A', '（N/A）']) {
+        setupVerify(dir, { body: [['兼容性测试', wrapped]], subsectionOmit: ['4.1', '4.2', '4.3', '4.4'] });
+        const resWrapped = exitNode(dir, 'verify');
+        assertTrue(resWrapped.status === 0, '第 4 轮正文「' + wrapped + '」应视为整段不适用、豁免结构子段，实际 exit '
+          + resWrapped.status + '\n' + resWrapped.output);
+        assertOut(resWrapped, 'ALL CHECKS PASSED');
+      }
+      // ⑧ 反例（AC-9）：包装里是「见 N/A」这类真句子（剥掉包装后开头不是白名单词）→ 仍报缺子段；
+      // 父段有正文却不落白名单，报文同时给出规范写法（AC-10）。
+      setupVerify(dir, { body: [['兼容性测试', '**见 N/A**']], subsectionOmit: ['4.1', '4.2', '4.3', '4.4'] });
+      const resSentence = exitNode(dir, 'verify');
+      assertExit(resSentence, 1);
+      assertOut(resSentence, '缺结构子段');
+      assertOut(resSentence, '4.1');
+      assertOut(resSentence, '若要整段不适用，请以 N/A 开头（不要加粗或引用）');
+      // ⑨ 诊断一（挂错父段）：4.3 实际写在「第 5 轮 · 可观测性验证」下 → 报文点名实际归属
+      // （只加定位说明，不改归属算法）。
+      setupVerify(dir, {
+        body: [['兼容性测试', '实测了三种视口组合的兼容性结论。']],
+        subsectionOmit: ['4.3'],
+        insertAfter: [['可观测性验证', '### 4.3 数据迁移（涉及 schema 变更必填）\n\n夹具：误挂在第 5 轮下的子段。\n']],
+      });
+      const resMisplaced = exitNode(dir, 'verify');
+      assertExit(resMisplaced, 1);
+      assertOut(resMisplaced, '缺结构子段');
+      assertOut(resMisplaced, '实际挂在');
+      assertOut(resMisplaced, '第 5 轮 · 可观测性验证 段下');
+      // ⑩ 诊断一（文末）：4.4 被贴到模板骨架之外（文末「附录」段之下）→ 报文写「实际在文末」。
+      setupVerify(dir, {
+        body: [['兼容性测试', '实测了三种视口组合的兼容性结论。']],
+        subsectionOmit: ['4.4'],
+        extra: ['## 附录\n\n### 4.4 跨版本\n\n夹具：误贴在文末的子段。'],
+      });
+      const resTail = exitNode(dir, 'verify');
+      assertExit(resTail, 1);
+      assertOut(resTail, '缺结构子段');
+      assertOut(resTail, '实际在文末');
     },
   },
 

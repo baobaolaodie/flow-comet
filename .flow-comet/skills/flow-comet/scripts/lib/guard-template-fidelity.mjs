@@ -33,6 +33,21 @@ const FRONTMATTER_KEY_LINE = /^([A-Za-z][\w-]*)\s*:\s*(.*)$/u;
 const NOT_APPLICABLE_BODY =
   /^(?:无变更|不适用|未涉及|N\/A|无|—)(?=$|[\s，。；、,;.:：!！?？…—()（）【】「」『』“”"'])/iu;
 
+// 包裹符号（AC-8）：粗体 / 下划线 / 引用 / 列表 / 有序列表 / 括号 / 反引号只是同一个词的写法，
+// 不改变「整段只有一个白名单词」这一事实。剥离只用于本判据，**剥离后仍须以白名单词开头**
+// （AC-9：「**见 N/A**」「（说明：N/A）」剥掉包装后开头是实词，仍是已填）；只剥包装、不扩词表。
+const NOT_APPLICABLE_WRAPPER_LEAD = /^(?:\*\*|__|>|[-*+]|\d+[.)、．]|[（(]|`)\s*/u;
+const NOT_APPLICABLE_WRAPPER_TAIL = /\s*(?:\*\*|__|`)$/u;
+
+function bareNotApplicableBody(text) {
+  let stripped = text;
+  for (;;) {
+    const next = stripped.replace(NOT_APPLICABLE_WRAPPER_LEAD, '').replace(NOT_APPLICABLE_WRAPPER_TAIL, '');
+    if (next === stripped) return stripped;
+    stripped = next;
+  }
+}
+
 function literalRegExp(text) {
   return String(text ?? '').replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 }
@@ -145,6 +160,7 @@ function emptyIssues() {
     empty: [],
     verbatim: [],
     structure: [],
+    structureAdvice: [],
     increments: [],
   };
 }
@@ -186,6 +202,34 @@ function templateBodyIsFinishedForm(body) {
   return templateBodyHasFillInSlot(body) || tableHasExampleRow(body);
 }
 
+// 结构子段的键：unique=false 的（如 Button (Primary)/(Secondary)）按带括号的精确名，其余按
+// 归一名——「在场判定」与「实际挂在哪的诊断」共用这一份键，避免同一口径写两处。
+function structureSubsectionMatches(docSub, sub) {
+  return sub.unique === false
+    ? docSub.qualified === qualifiedHeading(sub.name)
+    : docSub.norm === sub.norm;
+}
+
+// 缺结构子段时的定位诊断：同名 H3 若实际写在别的骨架父段下、或落在模板骨架之外（文末的模板外
+// 段落），报错点名它真正的位置。这里只读地找「同名 H3 出现在哪」——归属判定仍是
+// 上面的 subsectionsByParent 一份，本函数不改归属、也不参与豁免。
+function locateStructureSubsection(occurrences, lastSkeletonIndex, sub) {
+  for (const occurrence of occurrences) {
+    if (!structureSubsectionMatches(occurrence, sub)) continue;
+    if (occurrence.index > lastSkeletonIndex) return { kind: 'tail' };
+    if (occurrence.registered) {
+      // 挂在本父段下的同名 H3 已在候选集里（found 为真）——走到这里只可能是重复骨架段，
+      // 不给指向自己的误导性定位。
+      return occurrence.section.norm === sub.parentNorm
+        ? null
+        : { kind: 'parent', heading: occurrence.section.raw };
+    }
+    // 模板外 H2 下的 H3：按「其上最近的骨架 H2」归因（与归属算法同口径）。
+    return { kind: 'parent', heading: occurrence.enclosing.raw };
+  }
+  return null;
+}
+
 function collectSectionIssues({ text, skeleton, template, issues }) {
   const outline = parseOutline(text);
   const indexByNorm = new Map();
@@ -221,15 +265,33 @@ function collectSectionIssues({ text, skeleton, template, issues }) {
     if (sub.parentNorm !== null) parentNorms.add(sub.parentNorm);
   }
   // 结构子段归属到「其上最近的骨架 H2」：模板外多余段（如工具输出贴入的 `## Findings`）夹在父段与
-  // 子段之间时不切断归属（AC-10：多余段不参与骨架判定）。
+  // 子段之间时不切断归属（AC-10：多余段不参与骨架判定）。occurrences 是同一份归属数据的旁路记录
+  // （H3 所在的 H2 + 最近的骨架 H2），只供「缺子段时它实际挂在哪」的诊断使用，不参与归属判定。
   const subsectionsByParent = new Map();
-  let enclosingNorm = null;
-  for (const section of outline.sections) {
-    if (indexByNorm.has(section.norm)) enclosingNorm = section.norm;
-    if (enclosingNorm === null) continue;
-    if (!subsectionsByParent.has(enclosingNorm)) subsectionsByParent.set(enclosingNorm, []);
-    subsectionsByParent.get(enclosingNorm).push(...section.subsections);
+  const subsectionOccurrences = [];
+  let enclosing = null;
+  for (let index = 0; index < outline.sections.length; index += 1) {
+    const section = outline.sections[index];
+    const registered = indexByNorm.has(section.norm);
+    if (registered) enclosing = section;
+    if (enclosing === null) continue;
+    if (!subsectionsByParent.has(enclosing.norm)) subsectionsByParent.set(enclosing.norm, []);
+    subsectionsByParent.get(enclosing.norm).push(...section.subsections);
+    for (const docSub of section.subsections) {
+      subsectionOccurrences.push({
+        index,
+        registered,
+        section,
+        enclosing,
+        norm: docSub.norm,
+        qualified: docSub.qualified,
+      });
+    }
   }
+  const lastSkeletonIndex = outline.sections.reduce(
+    (last, section, index) => (indexByNorm.has(section.norm) ? index : last),
+    -1,
+  );
   for (const section of skeleton.sections) {
     const docSection = matched.get(section.norm);
     if (!docSection) continue;
@@ -245,16 +307,25 @@ function collectSectionIssues({ text, skeleton, template, issues }) {
       issues.verbatim.push(section.name);
     }
   }
-  // 结构子段：父段在场才要求；父段整段 N/A → 子段不要求（AC-8 ②）
+  // 结构子段：父段在场才要求；父段整段 N/A → 子段不要求（AC-8 ②）。父段的「整段不适用」接受
+  // 包裹符号，但剥掉包装后仍要以白名单词开头（AC-8 / AC-9）。
   for (const sub of skeleton.structureSubsections) {
     const parent = sub.parentNorm === null ? null : matched.get(sub.parentNorm);
     if (!parent) continue;
-    if (NOT_APPLICABLE_BODY.test(bodyText(parent.bodyLines))) continue;
+    const parentBody = bodyText(parent.bodyLines);
+    if (NOT_APPLICABLE_BODY.test(bareNotApplicableBody(parentBody))) continue;
     const candidates = subsectionsByParent.get(sub.parentNorm) ?? parent.subsections;
-    const found = candidates.some((docSub) => (sub.unique === false
-      ? docSub.qualified === qualifiedHeading(sub.name)
-      : docSub.norm === sub.norm));
-    if (!found) issues.structure.push(sub.name);
+    const found = candidates.some((docSub) => structureSubsectionMatches(docSub, sub));
+    if (found) continue;
+    issues.structure.push({
+      name: sub.name,
+      placement: locateStructureSubsection(subsectionOccurrences, lastSkeletonIndex, sub),
+    });
+    // 父段有正文却没落白名单（如写成「整段不适用」/「见 N/A」）：子段仍要求，并给出可照抄的
+    // 写法（AC-10）；空正文不提示——父段正文由子段承载时它本就是空的。
+    if (parentBody !== '' && !issues.structureAdvice.includes(parent.name)) {
+      issues.structureAdvice.push(parent.name);
+    }
   }
   // 增量段：只校验在场者的位置（必填与否由登记表 required + 各自门禁决定，本模块不做存在性兜底）
   for (const increment of skeleton.increments) {
@@ -346,6 +417,11 @@ function hintCategories(issues) {
   return [...categories];
 }
 
+// 缺子段定位的人读文本：挂在另一个骨架父段下 / 落在模板骨架之外（文末）。
+function placementText(placement) {
+  return placement.kind === 'tail' ? '实际在文末' : '实际挂在 ' + placement.heading + ' 段下';
+}
+
 function formatIssueParts(issues, { escalate }) {
   const parts = [];
   if (issues.title !== null) parts.push('标题形态不符（模板首行: `' + issues.title.expected + '`）');
@@ -366,7 +442,14 @@ function formatIssueParts(issues, { escalate }) {
     parts.push('与模板该段正文逐字相同（判未填）' + issues.verbatim.length + ' 项: ' + issues.verbatim.join('、'));
   }
   if (issues.structure.length > 0) {
-    parts.push('缺结构子段 ' + issues.structure.length + ' 项: ' + issues.structure.join('、'));
+    const entries = issues.structure.map((entry) => (entry.placement === null
+      ? entry.name
+      : entry.name + '（' + placementText(entry.placement) + '）'));
+    parts.push('缺结构子段 ' + issues.structure.length + ' 项: ' + entries.join('、'));
+  }
+  if (issues.structureAdvice.length > 0) {
+    parts.push('父段「' + issues.structureAdvice.join('」「') + '」正文不在「整段不适用」白名单——'
+      + '若要整段不适用，请以 N/A 开头（不要加粗或引用）');
   }
   if (issues.increments.length > 0) parts.push('增量段位置非法: ' + issues.increments.join('、'));
   return parts;
