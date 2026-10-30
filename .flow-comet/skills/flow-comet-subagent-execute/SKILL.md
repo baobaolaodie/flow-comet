@@ -137,7 +137,10 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
    - **提交面 pathspec 纪律（五要素，见 Guidance 同名小节）**：子代理必须用 `git add -- <自己字面路径>` + `git commit -- <同一路径>`，锁失败重试，禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`（适用条件：**多个写者共享同一工作区**；各自独立工作区内的局部 `reset` / `clean` 不在禁令内）。
    - **集成纪律（四要素，见 Guidance 同名小节）**：协调者集成时优先 `git merge --no-ff`；降级 `cherry-pick` 必须记因；集成顺序按 `depends_on` 拓扑序 + 同层 task id 升序；冲突按**机械冲突 / 语义冲突**两类分别处置（后者必须中止并上抛）。
 
-3. **Delegate to subagents**（三平台同一判据，差异只在谁建树）: **Claude Code 平台**：直接委托子代理——守卫按**身份判据优先于路径判据**放行（载荷含 `agent_id` ⇒ 子代理语义）；`Agent` 工具的 `isolation: "worktree"` 是属性①的一种实现（**可选，非强制**，见「并行安全四属性契约」）；`.claude/worktrees/**` 路径前缀通道仍为兼容通道。**dsh 平台**：直接委托平台进程内子代理——守卫按会话身份分派（身份深度为正整数 ⇒ 放行（**最小保护集除外**）、项目内任意路径可写（含 gitignored）），**无需隔离区**；同一工作区的并行子代理会看到彼此未提交中间态，靠 `write_files` 边界互斥与提交时点作相互隔离纪律（**无需隔离区 ≠ 无需边界**）。**Codex 平台**：直接委托原生子代理（`spawn_agent` 等）——守卫按身份分派放行（真机实测：载荷含 `agent_id` / `agent_type`）；默认**共享工作区**，同样靠 `write_files` 边界互斥与提交时点纪律。**建树选择的适用面**：协调者显式 `git worktree add <路径>`（手工建树）**是受支持的建树选择**——在委派 prompt 里指定 `workdir`，写入由身份通道放行（原生子代理无自动建树）；**以建树绕过边界**不受支持——用独立树规避协调者禁令 / 最小保护集 / `write_files` 互斥与提交时点纪律 / handoff 与 Return Contract 证据，或把 worktree 当作四属性的替代品。**不得用 File API 直写等规避通道代替**（绕过写入防线不是受支持路径）。Each subagent (all three platforms):
+3. **Delegate to subagents**（三平台同一判据，差异只在谁建树）:
+   **委托顺序（硬顺序）**：先让 request 成功，再启动子代理——同一任务的 `workflow-handoff.mjs request` 与子代理启动是串行两步，禁止把 request 与子代理启动放进同一个并发调用（例如 `Promise.all` 里同时发 request 与 Agent / spawn_agent）。这是执行纪律，不是机制拦截：平台工具层没有可挂的判定点，引擎不会替你排队；未 request 的委托无法记录 result（write_files 允许列表为空会被 BLOCKED）。
+   **Delegation order (mandatory)**: a successful request first, then launch the subagent — the `workflow-handoff.mjs request` call and the subagent launch are two sequential steps; never inside one concurrent call (e.g. request plus Agent / spawn_agent in the same `Promise.all`). This is execution discipline, not a mechanism interception: the platform tool layer offers no hook point, so the engine will not queue it for you; a delegation without a request cannot record its result (the write_files allow-list is empty → BLOCKED).
+   **Claude Code 平台**：直接委托子代理——守卫按**身份判据优先于路径判据**放行（载荷含 `agent_id` ⇒ 子代理语义）；`Agent` 工具的 `isolation: "worktree"` 是属性①的一种实现（**可选，非强制**，见「并行安全四属性契约」）；`.claude/worktrees/**` 路径前缀通道仍为兼容通道。**dsh 平台**：直接委托平台进程内子代理——守卫按会话身份分派（身份深度为正整数 ⇒ 放行（**最小保护集除外**）、项目内任意路径可写（含 gitignored）），**无需隔离区**；同一工作区的并行子代理会看到彼此未提交中间态，靠 `write_files` 边界互斥与提交时点作相互隔离纪律（**无需隔离区 ≠ 无需边界**）。**Codex 平台**：直接委托原生子代理（`spawn_agent` 等）——守卫按身份分派放行（真机实测：载荷含 `agent_id` / `agent_type`）；默认**共享工作区**，同样靠 `write_files` 边界互斥与提交时点纪律。**建树选择的适用面**：协调者显式 `git worktree add <路径>`（手工建树）**是受支持的建树选择**——在委派 prompt 里指定 `workdir`，写入由身份通道放行（原生子代理无自动建树）；**以建树绕过边界**不受支持——用独立树规避协调者禁令 / 最小保护集 / `write_files` 互斥与提交时点纪律 / handoff 与 Return Contract 证据，或把 worktree 当作四属性的替代品。**不得用 File API 直写等规避通道代替**（绕过写入防线不是受支持路径）。Each subagent (all three platforms):
    - Reads TASK.md for its specific task block.
    - Executes the full TDD protocol (RED/GREEN/REFACTOR). **纯文档/纯配置任务无生产代码可测时，`redEvidence` 与 `greenEvidence` 均允许 `{"command":"N/A (non-code task)","output":"..."}` 形态**（guard W1-D 接受此形状；不得伪造测试输出）。
    - Greps existing abstractions (R6.4).
@@ -149,16 +152,19 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
    - Writes `<task-id>-SUMMARY.md` to `.specs/<change-id>/`.
    - Returns evidence via `workflow-handoff.mjs result <task-id>`.
 
-4. **Collect evidence**: After all subagents complete, verify each returned:
+4. **每任务预检（不带 `--apply`）**：每个子代理回传、`workflow-handoff.mjs result` 记下之后立即运行 `node .claude/skills/flow-comet/scripts/workflow-guard.mjs exit subagent-execute` —— 它跑完整出口门禁并报告问题，不推进状态、不写 state；`--apply` 仍只在节点收尾时用。价值：当场看到该任务 SUMMARY 的结构问题（缺段 / 段序 / 首部字段），而不是攒到节点出口一起爆——出口链按序报出挡路的第一个问题，问题多时逐次预检逐个收口；边界：它只是**提前看到**——判定标准与节点收尾那次完全一样，不跑也能过 exit，只是晚知道。
+   **Per-task preflight (no `--apply`)**: after each subagent returns and its result is recorded, run `node .claude/skills/flow-comet/scripts/workflow-guard.mjs exit subagent-execute` — it runs the full exit gate and reports problems, without advancing or writing workflow state; `--apply` stays reserved for the node's own exit. Value: the task's SUMMARY structure problems (missing section / section order / header fields) surface right away instead of piling up at the node exit — the exit chain reports the first blocking problem in order, so repeated preflights close them one at a time. Boundary: this only makes them visible earlier — the acceptance criteria are identical to the node exit, so a skipped preflight still passes, just later.
+
+5. **Collect evidence**: After all subagents complete, verify each returned:
    - SUMMARY.md exists in `.specs/<change-id>/` and is **模板保真**（按 `flow-kit/templates/SUMMARY.md`：标题 `# SUMMARY:` / 首部 4 字段 / 段序一致，含 `## 自检方法` 段）。
    - Verify output is real (not fabricated).
    - Handoff evidence is recorded.
 
-5. **Mark done**: Update TASK.md — set `status="done"` for all completed parallel tasks.
+6. **Mark done**: Update TASK.md — set `status="done"` for all completed parallel tasks.
 
-6. **Record overall evidence**: Run `node .claude/skills/flow-comet/scripts/workflow-state.mjs record subagent-execute '<evidence JSON>'` to record completion.
+7. **Record overall evidence**: Run `node .claude/skills/flow-comet/scripts/workflow-state.mjs record subagent-execute '<evidence JSON>'` to record completion.
 
-7. **Exit check**: Run exit check.
+8. **Exit check**: Run exit check.
 
 ## Return Contract（子代理必须回传）
 
@@ -201,6 +207,7 @@ This node is truly done when:
 - **Agent thought**: "Subagent can figure out what to do from context." **Actual risk**: Subagent not loading `flow-comet-dev` means it skips TDD, LESSONS scan, diff boundary check, and self-review. The handoff prompt must explicitly require flow-comet-dev.
 - **Agent thought**: "Subagent might need to touch related files for context." **Actual risk**: Subagent exceeding `write_files` boundaries creates merge conflicts with other parallel subagents. Strict boundary enforcement is mandatory.
 - **Agent thought**: "One subagent finished, mark it done immediately." **Actual risk**: Marking tasks done before all subagents complete can cause issues if a later subagent fails and needs to reference completed work. Wait for all, then batch mark.
+- **Agent thought**: "同时发 request 和启动子代理，省一个来回。" **Actual risk**: 先让 request 成功，再启动子代理——禁止把 request 与子代理启动放进同一个并发调用（例如 `Promise.all`）；这是执行纪律，不是机制拦截，未 request 的委托无法记录 result（write_files 允许列表为空会被 BLOCKED）。The order is mandatory: **a successful request first, then launch the subagent**, **never inside one concurrent call**; this is **execution discipline, not a mechanism interception** — the platform tool layer has no hook point to enforce it.
 
 ## Entry Check
 

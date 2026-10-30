@@ -893,8 +893,11 @@ export const ENTRIES = [
 
   // 184d: 三块归一处（ADR-016）——pathspec / 集成纪律归 `reference/commit-discipline.md`、四属性
   // 契约归入口册与平台事实册；「要点句在场 + 权威处唯一 + 判别句不再要求两册逐字一致」。
+  // 原位扩展（反馈面纪律）：两册各自的流程步骤须含「每任务预检」（跑完整出口门禁但不带 --apply、
+  // 不推进状态）与「先 request 成功再启动子代理」的硬顺序句（禁放进同一个并发调用；如实注明是
+  // 执行纪律而非机制拦截），中英双语同册一致；每条锚自带反向构造（抽掉即红）。
   {
-    name: '184d 技能文本锁：三块归一处与委托契约纪律要点句',
+    name: '184d 技能文本锁：三块归一处、委托契约纪律要点句与每任务预检顺序',
     run: () => {
       const problems = [];
       // —— ⑥ 三块归一处（ADR-016）：原「两册三块逐字一致（切片 ≥400 字符）+ 两册各持 41 条判别句」
@@ -1186,6 +1189,46 @@ export const ENTRIES = [
           const probed = { ...consistencySources, ...override };
           if (!consistencyProblems(probed).some((p) => p.includes(expected))) {
             problems.push('反向构造判别力缺失（' + probeLabel + ' 未被判不一致）');
+          }
+        }
+        // —— 每任务预检步骤 + 委托顺序纪律（反馈面纪律文本锁 · 两册中英双语）——
+        // 判据 = 两组关键句在**两册各自**的正文里逐条在案：预检（不带 --apply / 不推进状态 / 判定标准不变）
+        // 与委托顺序（先 request 成功再启动子代理 / 禁放进同一个并发调用 / 纪律不是机制拦截），中英各一份。
+        // 反向构造：逐册逐句抽掉 ⇒ 必报该册缺该句（抽掉用全量 split/join，不是只替换首处）。
+        {
+          const preflightOrderAnchors = [
+            ['每任务预检 · 不带 --apply（中文）', '每任务预检（不带 `--apply`）'],
+            ['每任务预检 · 不推进状态（中文）', '它跑完整出口门禁并报告问题，不推进状态、不写 state；`--apply` 仍只在节点收尾时用'],
+            ['每任务预检 · 判定标准不变（中文）', '判定标准与节点收尾那次完全一样'],
+            ['每任务预检（英文）', '**Per-task preflight (no `--apply`)**'],
+            ['每任务预检 · 不写 state（英文）', 'without advancing or writing workflow state'],
+            ['每任务预检 · 判定标准不变（英文）', 'the acceptance criteria are identical'],
+            ['委托顺序 · 先 request 后委托（中文）', '先让 request 成功，再启动子代理'],
+            ['委托顺序 · 禁同一并发调用（中文）', '禁止把 request 与子代理启动放进同一个并发调用'],
+            ['委托顺序 · 纪律不是拦截（中文）', '这是执行纪律，不是机制拦截'],
+            ['委托顺序（英文）', 'a successful request first, then launch the subagent'],
+            ['委托顺序 · 禁同一并发调用（英文）', 'never inside one concurrent call'],
+            ['委托顺序 · 纪律不是拦截（英文）', 'execution discipline, not a mechanism interception'],
+          ];
+          const preflightOrderProblems = (books) => {
+            const out = [];
+            for (const [rel, text] of books) {
+              for (const [label, anchor] of preflightOrderAnchors) {
+                if (!text.includes(anchor)) {
+                  out.push(rel + ' 缺「' + label + '」（关键句不在场：' + anchor.slice(0, 28) + '…）');
+                }
+              }
+            }
+            return out;
+          };
+          problems.push(...preflightOrderProblems(bookTexts));
+          for (const [rel, text] of bookTexts) {
+            for (const [label, anchor] of preflightOrderAnchors) {
+              const probed = new Map(bookTexts).set(rel, text.split(anchor).join('（反向构造：抽掉）'));
+              if (!preflightOrderProblems(probed).some((p) => p.startsWith(rel) && p.includes(label))) {
+                problems.push('反向构造判别力缺失（' + rel + ' 抽掉「' + label + '」未被判缺）');
+              }
+            }
           }
         }
       }
