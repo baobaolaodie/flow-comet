@@ -1372,6 +1372,32 @@ export const ENTRIES = [
       const satisfiedPreflight = runGuard(['exit', 'open', '--preflight', '--protocol', customProtocolFile], dir);
       assertExit(satisfiedPreflight, 0);
       assertOut(satisfiedPreflight, 'ALL CHECKS PASSED');
+
+      // ⑥ 参数面收紧（in-place 扩展）：同一命令形态、同一夹具，只改参数的拼写——单横线疑似旗标
+      // （`-apply` 单横线笔误 / `-h`）与节点之后的多余位置参数，修复前都被静默忽略（`-apply` 既不
+      // 落盘也不报错，看起来像一次成功的预演；多余的裸词同样无人认领）。现在两者一律是用法错误、
+      // 非零退出，且不得进入任何门禁链——参数面因此与「已知旗标 + 一个节点名」逐字对得上。
+      const singleDashFlag = runGuard(['exit', 'open', '--preflight', '-apply'], dir);
+      assertExit(singleDashFlag, 1);
+      assertOut(singleDashFlag, '用法错误');
+      assertOut(singleDashFlag, '-apply');
+      assertNotOut(singleDashFlag, 'ALL CHECKS PASSED');
+      const shortFlag = runGuard(['exit', 'open', '-h'], dir);
+      assertExit(shortFlag, 1);
+      assertOut(shortFlag, '用法错误');
+      assertOut(shortFlag, '-h');
+      // 多余位置参数：--protocol 的取值不算位置参数（两者在同一命令里并存，判据不得把取值当多余项）。
+      const extraOperand = runGuard(
+        ['exit', 'open', '--preflight', '--protocol', customProtocolFile, 'extra-operand'], dir);
+      assertExit(extraOperand, 1);
+      assertOut(extraOperand, '用法错误');
+      assertOut(extraOperand, 'extra-operand');
+      assertNotOut(extraOperand, 'ALL CHECKS PASSED');
+      // 正对照：同一夹具的合法形态（--protocol 取值 + 无多余操作数）仍然通过——上面三条不是
+      // 「预检一律失败」的同义反复。
+      const legalAgain = runGuard(['exit', 'open', '--preflight', '--protocol', customProtocolFile], dir);
+      assertExit(legalAgain, 0);
+      assertOut(legalAgain, 'ALL CHECKS PASSED');
     },
   },
 

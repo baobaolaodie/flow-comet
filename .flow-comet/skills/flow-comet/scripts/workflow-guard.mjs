@@ -123,6 +123,40 @@ function assertKnownExitArgs(argv) {
   }
 }
 
+// exit 的位置参数面（与上面的旗标白名单同属一道 fail-closed 判定）：argv[3] 是唯一的位置参数
+// （节点名），其后不再接受任何裸位置参数；单横线开头的 token（单横线笔误的 -apply、-h、-）不是
+// 本仓任何脚本的旗标形态（全局旗标一律双横线），按「疑似旗标写错」判用法错误。修复前这两种形态
+// 都被静默忽略：exit execute -apply 既不落盘也不报错，看起来像一次成功的预演；多余的裸词同样
+// 无人认领。判据取「节点名 + 已知旗标」的正面形态，不猜意图；--protocol 的取值是旗标的操作数、
+// 不是位置参数（两者在同一命令里并存），故解析时随该旗标一起跳过。
+const EXIT_SUSPECTED_FLAG_RE = /^-(?!--)/u;
+function assertExitOperandSurface(argv) {
+  const args = argv.slice(3); // 索引 0 = 节点名（唯一允许的位置参数）
+  const suspected = [];
+  const extra = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (typeof arg !== 'string' || index === 0) continue;
+    if (arg === '--protocol') {
+      index += 1; // 取值（缺失时由 resolveProtocol 报 requires a path argument，与白名单判定同口径）
+      continue;
+    }
+    if (arg.startsWith('--')) continue; // 已知 / 未知双横线旗标已由 assertKnownExitArgs 判过，不在此抢报
+    if (EXIT_SUSPECTED_FLAG_RE.test(arg)) suspected.push(arg);
+    else extra.push(arg);
+  }
+  if (suspected.length > 0) {
+    throw new Error('用法错误: exit 收到疑似旗标 ' + suspected.join(' ')
+      + '——本仓旗标一律以 -- 开头；exit 只接受 --apply / --preflight / --protocol <path>'
+      + '（用法: workflow-guard.mjs exit <node> [--apply] [--preflight]）');
+  }
+  if (extra.length > 0) {
+    throw new Error('用法错误: exit 只接受一个位置参数（节点名），多余位置参数: ' + extra.join(' ')
+      + '——其余一律用已知旗标（--apply / --preflight / --protocol <path>）'
+      + '（用法: workflow-guard.mjs exit <node> [--apply] [--preflight]）');
+  }
+}
+
 // WARN 计数——entry/exit 成功路径末尾输出汇总行（可观测性；追加不改变既有输出）
 let __warnCount = 0;
 const __origError = console.error;
@@ -191,8 +225,12 @@ async function checkPromptDeclarations({ node, state }) {
 async function main() {
   // 参数解析 fail-closed（先于任何语义校验）：未知 `--*` 不是「忽略即可」的噪音，而是「这条命令
   // 实际跑的不是你以为的那条」。只在 exit 上启用——entry / verify 的参数面由既有校验覆盖，本条
-  // 针对的正是预检分支所在的命令。
-  if (command === 'exit') assertKnownExitArgs(process.argv);
+  // 针对的正是预检分支所在的命令。旗标白名单之后紧接着判位置参数面（节点名唯一、单横线疑似旗标
+  // 一律用法错误），两者合起来才是「一个节点名 + 已知旗标」的完整参数面。
+  if (command === 'exit') {
+    assertKnownExitArgs(process.argv);
+    assertExitOperandSurface(process.argv);
+  }
   // 结构化预检的参数防护（fail-closed）：--preflight 只读、只与 `exit <node>` 搭配。
   // 与 --apply 同时给没有任何合法语义（一个只读、一个落盘）→ 用法错误非零退出，不猜意图；
   // 其它命令（entry / verify / 未知命令）同样拒绝——预检不是第二套入口门禁。
