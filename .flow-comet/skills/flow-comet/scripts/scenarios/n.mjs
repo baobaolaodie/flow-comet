@@ -585,6 +585,63 @@ function assertProbesDiscriminate(problems, docs, rules, probes) {
   }
 }
 
+// 机制表行判据（同一函数驱动真实断言与变异探针）。机制行按**结构**定位，不按「首个含某组词的行」：
+// 文档正文随时可能为另一条修正补进既含「段名」又有 plan 的段落，词形判据会被它抢位（已实证的失效形态）。
+// 结构 = markdown 表格的数据行（表头 + 分隔行 + 连续 | 行）；机制行取其中末列（适用面列）点名出口名
+// 最多的那一行——那正是「这套形状校验适用于哪些出口」的口径声明。
+const EXIT_NODES = ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review', 'verify', 'archive'];
+
+function markdownTableRows(text) {
+  const lines = text.split(/\r?\n/);
+  const rows = [];
+  for (let i = 0; i + 1 < lines.length; i++) {
+    if (!/^\s*\|/.test(lines[i]) || !/^\s*\|[\s:|-]*-[\s:|-]*\|?\s*$/.test(lines[i + 1])) continue;
+    let j = i + 2;
+    for (; j < lines.length && /^\s*\|/.test(lines[j]); j++) rows.push({ index: j, raw: lines[j] });
+    i = j - 1;
+  }
+  return rows;
+}
+
+function markdownCells(raw) {
+  // 本仓公开文档的表格单元格不含转义竖线，故按 | 直接切分。
+  return raw.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim());
+}
+
+function findMechanismRow(text) {
+  let best = null;
+  for (const row of markdownTableRows(text)) {
+    const appliesTo = markdownCells(row.raw).pop() ?? '';
+    const exits = EXIT_NODES.filter((node) => appliesTo.includes('`' + node + '`'));
+    if (best === null || exits.length > best.exits.length) best = { ...row, appliesTo, exits };
+  }
+  return best !== null && best.exits.length > 0 ? best : null;
+}
+
+// 机制行必须覆盖全部 8 个出口（旧表只列 5 个）：抽掉任一出口即判违规，判据不放宽。
+function mechanismRowProblems(docs) {
+  const problems = [];
+  for (const rel of ['docs/MECHANISM-zh.md', 'docs/MECHANISM.md']) {
+    const text = docs.get(rel);
+    if (typeof text !== 'string') continue; // 缺席面已由场景内的 SKIP 行显式声明未验证
+    const row = findMechanismRow(text);
+    if (row === null) {
+      problems.push(rel + ' 缺「节点文档是否符合模板」机制行（无法核对出口面）');
+      continue;
+    }
+    for (const node of EXIT_NODES) {
+      if (!row.exits.includes(node)) problems.push(rel + ' 机制行未覆盖出口 ' + node + '（口径落后于门禁范围）');
+    }
+  }
+  return problems;
+}
+
+// 失效形态复现用：旧判据「首个同时含『段名』且匹配 open|design|plan 的行」。只被正锚探针用来确认
+// 「插入的段落确实会被旧判据抢位」——证明正锚构造有效，不参与真实断言。
+function legacyMechanismLine(text) {
+  return text.split(/\r?\n/).find((line) => line.includes('段名') && /open|design|plan/.test(line)) ?? '';
+}
+
 export const ENTRIES = [
 
   // ============================================================================================
@@ -2080,20 +2137,36 @@ export const ENTRIES = [
       // 判据只落在本检出真实存在的文档上：缺席面已由上方 SKIP 行显式声明未验证。
       const activeRules = rules.filter((rule) => docs.has(rule.rel));
       const problems = textRuleProblems(docs, activeRules);
-      // 机制表一行的出口清单覆盖：execute / verify 必须在列（旧表只列 5 个出口）
-      for (const [rel, needNodes] of [
-        ['docs/MECHANISM-zh.md', ['execute', 'verify']],
-        ['docs/MECHANISM.md', ['execute', 'verify']],
-      ]) {
-        const text = docs.get(rel);
-        if (typeof text !== 'string') continue;
-        const row = text.split(/\r?\n/).find((line) => line.includes('段名') && /open|design|plan/.test(line)) ?? '';
-        if (row === '') {
-          problems.push(rel + ' 缺「节点文档是否符合模板」机制行（无法核对出口面）');
-          continue;
+      // 机制行的出口清单覆盖：行按结构定位（机制表里适用面最宽的那行），8 个出口一个都不能少。
+      problems.push(...mechanismRowProblems(docs));
+      // 机制行判据自己的变异探针（同一函数驱动）——词形定位的失效形态与「判据恒真」各配一条：
+      //  正锚：把「含『段名』且提到 plan」的段落插到机制表之前，结构定位不得被抢位；
+      //  反向：从机制行抽掉一个出口 ⇒ 必须报「未覆盖出口」。
+      const zhMechanism = docs.get('docs/MECHANISM-zh.md');
+      if (typeof zhMechanism === 'string') {
+        const hijack = '结构预检只跑结构那一半：缺 H2 段只按类别报计数，具体段名留到节点收尾的完整 `exit`；'
+          + '`plan` 节点的任务块另查七字段。';
+        const hijacked = hijack + '\n' + zhMechanism;
+        // 正锚比对「定位到哪一行」，不比对报文——否则真实断言先红时探针会被遮蔽，看不出判别力。
+        const beforeRow = findMechanismRow(zhMechanism);
+        const afterRow = findMechanismRow(hijacked);
+        if (legacyMechanismLine(hijacked) === legacyMechanismLine(zhMechanism)) {
+          problems.push('正锚构造前提失效（段名段落未被词形判据抢位）');
+        } else if (beforeRow === null || afterRow === null || afterRow.index !== beforeRow.index + 1) {
+          problems.push('机制行定位被抢位：插入的「段名 + plan」段落改写了定位结果');
         }
-        for (const node of needNodes) {
-          if (!row.includes(node)) problems.push(rel + ' 机制行未覆盖出口 ' + node + '（口径落后于门禁范围）');
+        if (beforeRow === null) {
+          problems.push('反向构造前提失效（未定位到机制行）');
+        } else {
+          const lines = zhMechanism.split(/\r?\n/);
+          lines[beforeRow.index] = lines[beforeRow.index].replace('`execute`', '');
+          const gutted = lines.join('\n');
+          if (gutted === zhMechanism) {
+            problems.push('反向构造前提失效（机制行未发生变化）');
+          } else if (!mechanismRowProblems(new Map(docs).set('docs/MECHANISM-zh.md', gutted))
+            .some((problem) => problem.includes('未覆盖出口 execute'))) {
+            problems.push('反向构造判别力缺失（抽掉出口 execute 未被判违规）');
+          }
         }
       }
       // 变异探针：正向（overclaim 写回 / 口径改回旧形态）与反向（补上缺失口径 ⇒ 不再报）。
