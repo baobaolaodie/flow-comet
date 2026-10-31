@@ -10,6 +10,7 @@ import { validateStateFields } from '../state-schema.mjs';
 import {
   NODE_PROTOCOL_FILES,
   nodeTemplateDeclaration,
+  templateKeyFromArtifactName,
   templateKeyOf,
   templatePointerPath,
 } from '../protocol-utils.mjs';
@@ -1344,12 +1345,13 @@ function declaredArtifactDisplayPath(pathBase, declaredPath) {
 }
 
 // 声明工件 → 模板指针：仅当该工件的模板键落在**本节点声明**的模板集合内才给模板路径（自定义节点
-// 未声明模板时不编造路径）。模板键派生与模板保真门禁同口径（产物名去通配前缀后的基名 →
-// templateKeyOf），不在此另写节点→模板映射表。
+// 未声明模板时不编造路径）。模板键派生与模板保真门禁**同一实现**（protocol-utils 的
+// templateKeyFromArtifactName）——本函数只保留「在声明集合里找回该键的名字 + 拼指针」，不再自持
+// 一份派生副本（两处副本漂移正是本 change 要收掉的东西）。键为 null（工件名里没有可派生的名字）
+// 时不给指针：降级为不打印模板路径，绝不拼一个空名字。
 function declaredArtifactTemplatePointer(declaration, declaredPath) {
-  const base = String(declaredPath ?? '').split('/').pop();
-  const tail = base.includes('*') ? base.split('*').pop() : base;
-  const key = templateKeyOf(tail.replace(/^[^A-Za-z0-9]+/u, ''));
+  const key = templateKeyFromArtifactName(declaredPath);
+  if (key === null) return null;
   const name = [...declaration.required, ...declaration.optional]
     .find((item) => templateKeyOf(item) === key);
   return name ? templatePointerPath(name) : null;

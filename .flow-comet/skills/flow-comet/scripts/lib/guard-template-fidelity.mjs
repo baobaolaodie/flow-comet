@@ -17,7 +17,12 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { EXECUTE_FAMILY_NODE_IDS, normalizeHeading } from '../route-node.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from '../task-parsing.mjs';
-import { nodeTemplateDeclaration, readProtocolFile, templateKeyOf } from '../protocol-utils.mjs';
+import {
+  nodeTemplateDeclaration,
+  readProtocolFile,
+  templateKeyFromArtifactName,
+  templateKeyOf,
+} from '../protocol-utils.mjs';
 import { runRoot, fileExists, protocolPath } from './guard-state-io.mjs';
 import { isNewChange } from './guard-routing.mjs';
 import { buildSkeleton, LEGACY_SUMMARY_ORDER } from './guard-artifact-skeleton.mjs';
@@ -705,15 +710,10 @@ export async function runSummaryTemplateFidelityGate({ node, state }) {
 // 节点 → 待校验工件：单一来源 = 协议。**该节点是否受模板门禁**由 protocol-utils 的
 // nodeTemplateDeclaration 决定（内置节点取引擎映射、自定义节点取协议 node.templates，未声明 =
 // 零模板 ⇒ 不校验，ADR-002 特化层）；**产出哪份工件**取该节点 outputSchemas 的 artifacts[].paths
-// （`<change-id>/…` 基），模板基名从工件名派生（`TASK.md` → TASK、`*-SUMMARY.md` → SUMMARY；`.md`
-// 的剥离沿用 protocol-utils 的 templateKeyOf 单一实现）——本模块不另写节点→工件映射。
+// （`<change-id>/…` 基），工件名 → 模板键的派生取 protocol-utils 的 templateKeyFromArtifactName
+// （与结构预检的模板指针**同一实现**：口径只有一处，本模块不再持副本）——本模块不另写节点→工件映射。
 // SUMMARY 由 execute 家族的专用门负责（它还要消费无模板时的兜底段序），此处跳过以免同一工件被
 // 两条门重复判定。
-function templateKeyFromArtifactName(namePattern) {
-  const base = String(namePattern ?? '').split('*').pop().replace(/^[^A-Za-z0-9]+/u, '');
-  return base === '' ? null : templateKeyOf(base);
-}
-
 async function nodeArtifactTargets(node) {
   let protocol = null;
   try {
@@ -729,7 +729,9 @@ async function nodeArtifactTargets(node) {
       for (const pattern of artifact.paths ?? []) {
         const segments = String(pattern ?? '').replaceAll('\\', '/').split('/');
         if (segments.length !== 2 || segments[0] !== '<change-id>') continue;
-        const key = templateKeyFromArtifactName(segments[1]);
+        // 传整条声明路径：路径归一（取末段、通配取末个 `*` 之后）由共享派生统一承担，
+        // 两处消费面因此走的是同一段归一逻辑，而不是各自先切一刀再交给共用的键归一。
+        const key = templateKeyFromArtifactName(pattern);
         if (key === null) continue;
         targets.push({ key, namePattern: segments[1] });
       }

@@ -437,6 +437,24 @@ export function templateKeyOf(value) {
   return normalizeTemplateName(value).toLowerCase();
 }
 
+// 声明工件名 → 模板键（单一实现）：「节点声明的哪份工件对应哪份模板」只在此派生，两个消费面共用——
+// 结构预检（缺件报文里的模板指针）与模板保真门禁（该工件用哪份骨架校验）。两处曾各持一份等价实现，
+// 副本一旦漂移，预检与收尾就会对同一份工件给出两套口径（同类副本漂移在本 change 已发生过一次）。
+// 口径（以模板保真门禁的既有实现为基准，它更新）：
+//   ① 路径归一：`\` 与 `/` 同权（与 workflowRelativeSegments 对声明路径的口径一致），只取末段——
+//      调用方传整条声明路径（`<change-id>/*-SUMMARY.md`）或裸文件名都可以；
+//   ② 通配：取末个 `*` 之后（通配只出现在文件名前缀：`*-SUMMARY.md` → `-SUMMARY.md`）；
+//   ③ 去首部非字母数字（`-SUMMARY` → `SUMMARY`）：通配残渣不是名字的一部分；
+//   ④ 空基名 → null（没有可派生的名字）——调用方据此「不给模板指针 / 不校验」，不臆造键；
+//   ⑤ 键归一（去尾 `.md` + 小写）由 templateKeyOf 承担，不在此另写一份。
+// 只回答「键」，不回答「该节点是否允许这份模板」：声明集合比对（C11）与指针格式化留在调用方——
+// 两侧对未知键的处置本就不同（预检不编造指针、模板保真门禁跳过未登记工件）。
+export function templateKeyFromArtifactName(value) {
+  const base = String(value ?? '').replaceAll('\\', '/').split('/').pop();
+  const tail = base.split('*').pop().replace(/^[^A-Za-z0-9]+/u, '');
+  return tail === '' ? null : templateKeyOf(tail);
+}
+
 // 逗号分隔的模板清单（`--templates CHANGE.md,REQUIREMENT.md`；单模板可省略逗号）→ 去重保序数组。
 export function parseTemplateList(value) {
   const names = [];
