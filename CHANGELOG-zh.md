@@ -10,6 +10,21 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本记录在哪些位置见 [docs/VERSIONS-zh.md](docs/VERSIONS-zh.md)，由 CI 在发布面对账保持一致。
 
+## [Unreleased]
+
+### 新增
+
+- **引擎能在节点收尾之前告诉你某份任务摘要还缺什么**：`workflow-guard.mjs exit <节点> --preflight` 只跑结构性门禁——声明工件在场、摘要关键段、模板骨架、入口骨架——不写 state、不写提示账本，且不允许与 `--apply` 同时使用。两册执行技能与两处运行期提示都改为指向它，完整 `exit`（不带 `--apply`）仍是节点收尾的全链预演。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+
+### 变更
+
+- **`status`、`next`、`record` 现在给出同一个节点**：`status` 输出 `routeNode` 与 `ROUTE:` 对账行（产物推导 / state 原值 / 路由视图），`next` 打印 `WHY:`，`record` 走同一判定——在修复回路里三者一致，不再指向会被门禁拦下的节点。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **`status.coordinatorMode` 改为跟随路由视图**，不再保留第二套推导，一个响应里不会出现两个"当前节点"（进行中态的取值变化可观察）。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+
+### 修复
+
+- **写成粗体或带理由的"不适用"现在被接受**：校验前剥掉包裹符号（粗体、引用、列表、括号、反引号），含 `**N/A**（理由）`；而 `**见 N/A**` 仍算已填并照常报错。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **恢复提示给出的是能照着跑的命令**：`record` 命令按平台推导、整条加引号、并注明适用哪些 shell；对应测试直接执行打印出来的命令，而不是替换成夹具路径。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 ## [1.6.5] - 2026-10-24
 
 ### 新增

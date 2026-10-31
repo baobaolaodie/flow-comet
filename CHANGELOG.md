@@ -10,6 +10,21 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). The places that record the version are listed in [docs/VERSIONS.md](docs/VERSIONS.md), and CI keeps them in agreement on the release surface.
 
+## [Unreleased]
+
+### Added
+
+- **The engine can point at what a task summary is still missing, before the node closes**: `workflow-guard.mjs exit <node> --preflight` runs only the structural gates — declared artifacts present, summary key sections, template skeleton, intake skeleton — never writes state or the hint ledger, and refuses to be combined with `--apply`. The per-task checklist in both executor books and the two runtime hints now point at it, while a full `exit` (without `--apply`) stays the end-of-node rehearsal. ([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+
+### Changed
+
+- **`status`, `next` and `record` name the same node**: `status` reports `routeNode` plus a `ROUTE:` line (derived / state / route), `next` prints `WHY:`, and `record` uses the same view — in a fix batch the three agree instead of pointing at a node the guard would reject. ([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **`status.coordinatorMode` follows the routing view** instead of a second derivation, so one response no longer carries two answers for "current node" (observable change in the in-progress state). ([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+
+### Fixed
+
+- **A summary that marks a section "not applicable" in bold, or adds a reason, is accepted**: the wrapper forms (bold, quote, list, parentheses, backticks) are stripped before the check, `**N/A**（reason）` included, while `**see N/A**` still counts as filled in and is reported. ([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **Recovery hints print commands you can actually run**: the `record` command is derived per platform, quoted as a whole, and names the shell it works in; its test executes the printed command instead of substituting the harness path. ([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 ## [1.6.5] - 2026-10-24
 
 ### Added
