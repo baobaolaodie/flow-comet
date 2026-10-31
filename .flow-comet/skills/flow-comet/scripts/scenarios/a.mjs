@@ -402,6 +402,9 @@ export const ENTRIES = [
         throw new Error('record 处于进行中态：NODE 应为路由视图 execute（不是产物推导的 review），实际: '
           + JSON.stringify(recordNode) + '\nrecord 输出:\n' + recordView.output);
       }
+      // 正常态不受影响：非边界态的 record 照常给出节点与 NEXT: auto，边界态那句不得漏到这里。
+      assertOut(recordView, 'NEXT: auto');
+      assertNotOut(recordView, 'NEXT: blocked');
       if (recordNode !== nextNode || recordNode !== statusRouteNode) {
         throw new Error('record 的 NODE 与 next / status.routeNode 不同源（同一事实三处说法）：'
           + JSON.stringify({ record: recordNode, next: nextNode, statusRouteNode })
@@ -665,6 +668,30 @@ export const ENTRIES = [
       }
       assertStateBytesUnchanged(dir, blockedFixBytes, 'next 的 BLOCK 分支在任何写盘之前（state 字节零改写）');
 
+      // record 是这条事实的**第四个说法**（in-place 扩展）：边界态下它的尾巴仍按旧路径打印
+      // NEXT: done——同一 state 上 next 已 BLOCKED、status.routeNode 已是 null，record 却说
+      // 「没有下一节点了」。record 走共享节点视图，边界态命中时同样不得给出下一节点（next 此刻
+      // 不打印 NODE），改用与 ROUTE: 行同源的一句；判定本身零写盘——轮次与 currentNode 不动，
+      // record 的写面仍只是它自己的证据（录证据是它的职责，不是判定副作用）。
+      const recordBlockedFix = runState(['record', 'execute', '{"summary":"execute recorded while the fix batch is blocked"}'], dir);
+      assertExit(recordBlockedFix, 0);
+      assertOut(recordBlockedFix, 'EVIDENCE: execute');
+      assertNotOut(recordBlockedFix, 'NEXT: done');
+      if (/^NODE: /m.test(recordBlockedFix.output)) {
+        throw new Error('边界态下 record 不得给出下一节点（next 此刻不打印 NODE）\n实际输出:\n' + recordBlockedFix.output);
+      }
+      assertOut(recordBlockedFix, 'NEXT: blocked（Fix 批次受控归位已达 3 轮上限');
+      assertOut(recordBlockedFix, '先按恢复指引处理');
+      const recordBlockedFixState = JSON.parse(readStateBytes(dir));
+      if (recordBlockedFixState.fixRoundsByChange?.[CHANGE_ID] !== 3) {
+        throw new Error('record 的边界态判定不得计轮次（Fix 计数应保持 3），实际: '
+          + JSON.stringify(recordBlockedFixState.fixRoundsByChange) + '\nrecord 输出:\n' + recordBlockedFix.output);
+      }
+      if (recordBlockedFixState.currentNode !== 'review') {
+        throw new Error('record 的边界态判定不得改写 currentNode（应保持 review），实际: '
+          + JSON.stringify(recordBlockedFixState.currentNode));
+      }
+
       // 零进展态（孤儿并行任务：depends_on 指向不存在的任务 id）——同样「next BLOCKED / status 无节点」
       writeFile(dir, fixTaskPath, '# TASK\n\n'
         + '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/p01.mjs</write_files><verify>node --check src/p01.mjs</verify><depends_on>NOPE</depends_on></task>\n');
@@ -702,6 +729,17 @@ export const ENTRIES = [
         throw new Error('零进展态：next 必须 BLOCKED、不得打印 NODE\n实际输出:\n' + zeroProgressNext.output);
       }
       assertStateBytesUnchanged(dir, zeroProgressBytes, '零进展态下 next 的 BLOCK 分支不得写 state');
+
+      // 零进展态同样：record 不得把「没有下一节点」说成 NEXT: done，原因与 ROUTE: 行同源。
+      const recordZeroProgress = runState(['record', 'execute', '{"summary":"execute recorded while routing is stuck"}'], dir);
+      assertExit(recordZeroProgress, 0);
+      assertOut(recordZeroProgress, 'EVIDENCE: execute');
+      assertNotOut(recordZeroProgress, 'NEXT: done');
+      if (/^NODE: /m.test(recordZeroProgress.output)) {
+        throw new Error('零进展态下 record 不得给出下一节点（next 此刻不打印 NODE）\n实际输出:\n' + recordZeroProgress.output);
+      }
+      assertOut(recordZeroProgress, 'NEXT: blocked（路由零进展');
+      assertOut(recordZeroProgress, '先按恢复指引处理');
 
       // RETURN 回程构造态（源节点未 entry、无 evidence）：产物已把路由推到源节点之后 → next 保留
       // 源节点跑出口。NODE 必须与 status.routeNode 同一值（旧实现直接打印 state.currentNode，status

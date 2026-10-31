@@ -910,6 +910,15 @@ export async function runRecord(protocol, argv) {
   // （record 只写证据，不写 currentNode，视图是纯读）。
   const changeName = state.activeChange || await findActiveChange();
   const nodeView = changeName ? await resolveNodeView({ changeName, protocol, state }) : null;
+  // 边界态（next 会 BLOCKED、不打印 NODE）：record 是同一事实的第四个输出面，尾巴不得再声称
+  // 「NEXT: done」——那是在说「没有下一节点了」，与 next 的 BLOCKED、status.routeNode=null 相反。
+  // 命中时改打与 ROUTE: 行同源的一句（原因 + 先按恢复指引处理），NODE / SKILL 一律不打（next 此刻
+  // 也不打）。blocked 来自共享视图在 state 副本上的只读预演：轮次与 currentNode 不动，本命令的写面
+  // 仍只有它自己的证据。
+  if (nodeView?.blocked) {
+    console.log('NEXT: blocked（' + nodeView.blocked.reason + '；先按恢复指引处理）');
+    return;
+  }
   printNext(protocol, nodeView?.routeNode ?? null, state.executionMode ?? 'subagent');
   return;
 }
