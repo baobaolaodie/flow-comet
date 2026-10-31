@@ -28,7 +28,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 ### Fixed
 
 - **A summary that marks a section "not applicable" in bold, or adds a reason, is accepted**: the wrapper forms (bold, quote, list, parentheses, backticks) are stripped before the check, `**N/A**（reason）` included, while `**see N/A**` still counts as filled in and is reported. ([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
-- **Recovery hints print commands you can actually run**: the `record` command is derived per platform, quoted as a whole, and names the shell it works in; its test executes the printed command instead of substituting the harness path. ([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **Recovery hints print commands you can actually run**: the `record` command is derived per platform, quoted as a whole, and names the shell it works in; its test executes the printed command instead of substituting the harness path.
+- **A deleted public mechanism document now fails the documentation check**: the check decides the shape first — a checkout carrying the public documentation map must carry every public document on it, so removing a file is a failure that names it; only a checkout with no public documents at all (an installed skill tree, the npm package) reports a visible skip, and that skip still says the surface was not verified. ([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 
 ## [1.6.5] - 2026-10-24
 

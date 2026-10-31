@@ -46,6 +46,9 @@ import { maintainerFacePresent, singleSourceImportProblems } from '../lib/text-a
 const REGISTRY_FILE = path.join(SCRIPTS_DIR, '..', 'reference', 'artifact-templates.json');
 const CHANGE_DIR = '.specs/' + CHANGE_ID;
 const SKILLS_ROOT = path.join(SCRIPTS_DIR, '..', '..');
+// 公开文档面的形态判据：权威映射（公开文档面的唯一声明处）。它在场 = 本检出声明了公开文档面；
+// 它整份缺席 = 合法的不含公开文档形态（安装副本只带技能树；npm 包按 files 白名单不含 docs/）。
+const PUBLIC_FACE_MAP = 'docs/authority-map.json';
 
 let registryMemo;
 function artifactRegistry() {
@@ -549,6 +552,17 @@ function repoFileExists(rel) {
   return fs.existsSync(path.join(REPO_ROOT, ...rel.split('/')));
 }
 
+// 公开面缺席判据（同一实现驱动真实断言与变异探针）：本检出声明了公开文档面时（权威映射在场），
+// 该面任何一份文档缺席都是判据失效——「两份机制册都被删」若只落一条 SKIP，公开面机制文档整份
+// 消失而套件仍绿。缺席的读法不能由「少了哪份文件」自行决定：只有整面不声明（权威映射缺席）才是
+// 合法的「不在本检出」，由调用方输出可见 SKIP 并声明未校验。
+function publicFaceAbsenceProblems(docs) {
+  const missing = [...docs].filter(([, text]) => typeof text !== 'string').map(([rel]) => rel);
+  if (missing.length === 0) return [];
+  return ['公开面文档不在检出面: ' + missing.join('、')
+    + '（本检出已声明公开文档面 ' + PUBLIC_FACE_MAP + '；文档缺席即判据失效，不是「本次未校验」）'];
+}
+
 // 文本判据（同一函数驱动真实断言与变异探针）：rules = [{ rel, label, include[], exclude[] }]。
 function textRuleProblems(docs, rules) {
   const problems = [];
@@ -623,7 +637,7 @@ function mechanismRowProblems(docs) {
   const problems = [];
   for (const rel of ['docs/MECHANISM-zh.md', 'docs/MECHANISM.md']) {
     const text = docs.get(rel);
-    if (typeof text !== 'string') continue; // 缺席面已由场景内的 SKIP 行显式声明未验证
+    if (typeof text !== 'string') continue; // 缺席面由调用方的缺席判据逐份点名（本函数只判在场的机制行）
     const row = findMechanismRow(text);
     if (row === null) {
       problems.push(rel + ' 缺「节点文档是否符合模板」机制行（无法核对出口面）');
@@ -2219,11 +2233,14 @@ export const ENTRIES = [
   // TA-24 · 公开面不再说假话（AC-24）——5 对双语公开文本的覆盖表述与实际门禁范围一致：不再有
   // 「完全继承 / 段名在运行时派生」这类 overclaim；机制册的「哪些节点查段名」表覆盖全部出口；
   // 故障排查给出两阶段报错指引；工件保真条点明本仓增量段。
+  //
+  // 缺席的**两种读法**（判据面形态先判，再判内容）：本检出声明了公开文档面（权威映射在场）时，
+  // 该面任何一份文档缺席都是判据失效——「两份机制册都被删」= 公开面机制文档不在检出面，判红，
+  // 不能只落一条 SKIP；只有整面不声明（安装副本只带技能树、npm 包按 files 白名单不含 docs/）
+  // 才是合法的「本检出没有这一面」，此时输出可见 SKIP 并明确写「本次未校验」，仍不算通过。
   {
-    name: 'TA-24 公开面口径：5 对双语去除 overclaim，机制表覆盖全出口，排查给两阶段指引',
+    name: 'TA-24 公开面口径：5 对双语去除 overclaim，机制表覆盖全出口，缺席即红（整面缺席才 SKIP）',
     run: () => {
-      const docs = new Map();
-      const missingFaces = [];
       const pairs = [
         ['README.md', 'README-zh.md'],
         ['CONTRIBUTING.md', 'CONTRIBUTING-zh.md'],
@@ -2231,20 +2248,28 @@ export const ENTRIES = [
         ['docs/MECHANISM.md', 'docs/MECHANISM-zh.md'],
         ['docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md'],
       ];
-      for (const [en, zh] of pairs) {
-        const missing = [en, zh].filter((rel) => !repoFileExists(rel));
-        if (missing.length > 0) {
-          missingFaces.push(...missing);
-          continue;
-        }
-        docs.set(en, repoFileText(en));
-        docs.set(zh, repoFileText(zh));
-      }
-      // 公开面在安装副本形态结构性缺席（目标项目只有技能包，无本仓公开文档）：整面输出一条可见
-      // SKIP（未验证 ≠ 通过）——缺席既不算「判据违规」，也不静默当成已校验。
-      if (missingFaces.length > 0) {
-        console.log('SKIP: TA-24 的公开面口径判据（' + [...new Set(missingFaces)].join('、') + ' 不在本检出）——'
+      // 形态判据先于内容判据：权威映射缺席 = 本检出不含公开文档（安装副本 / npm 包形态），
+      // 整面输出一条可见 SKIP——不是「已校验」，也不把合法形态判红。
+      if (!repoFileExists(PUBLIC_FACE_MAP)) {
+        console.log('SKIP: TA-24 的公开面口径判据（此形态不含公开文档：' + PUBLIC_FACE_MAP + ' 不在本检出）——'
           + '本次检出未校验 5 对双语公开文档的 overclaim / 机制表 / 排查指引口径，请在权威源检出重跑本套件（未验证 ≠ 通过）');
+        return;
+      }
+      // 判据面完整在册（缺席用 null 占位而不是从集合里删掉）：缺席由下面的缺席判据逐份点名，
+      // 「少了哪份文件」因此是**判据事实**，不是可以静默缩小的受检面。
+      const docs = new Map();
+      for (const [en, zh] of pairs) {
+        for (const rel of [en, zh]) docs.set(rel, repoFileExists(rel) ? repoFileText(rel) : null);
+      }
+      const problems = publicFaceAbsenceProblems(docs);
+      // 缺席判据的变异探针（同一实现、纯内存）：抽掉两份机制册 ⇒ 必须报「不在检出面」。修复前
+      // 「两份机制册都被删」只落一条 SKIP（缺席被读成未校验），公开面机制文档整份消失而套件仍绿。
+      // 缺失在判据面里表现为「键在场、文本为 null」（与真实路径同一形态：文件不在 ≠ 键被删）。
+      const shrunk = new Map(docs);
+      for (const rel of ['docs/MECHANISM.md', 'docs/MECHANISM-zh.md']) shrunk.set(rel, null);
+      const absenceProbe = publicFaceAbsenceProblems(shrunk);
+      if (absenceProbe.length === 0 || !absenceProbe[0].includes('docs/MECHANISM.md')) {
+        problems.push('反向构造判别力缺失（抽掉两份机制册未被判「不在检出面」）');
       }
       const rules = [
         { rel: 'README-zh.md', label: '去 overclaim（继承表述）', exclude: ['完全继承'] },
@@ -2254,9 +2279,9 @@ export const ENTRIES = [
         { rel: 'docs/TROUBLESHOOTING-zh.md', label: '两阶段报错指引', include: ['两阶段'] },
         { rel: 'docs/MECHANISM-zh.md', label: '机制表覆盖全出口', include: ['段名是否符合模板'] },
       ];
-      // 判据只落在本检出真实存在的文档上：缺席面已由上方 SKIP 行显式声明未验证。
-      const activeRules = rules.filter((rule) => docs.has(rule.rel));
-      const problems = textRuleProblems(docs, activeRules);
+      // 内容判据跑全表（不再按「本检出有没有这份文件」缩小）：缺席的文档在规则面里报「不在判据面内」，
+      // 缺席本身已由上方缺席判据逐份点名——受检面不因文件消失而静默变窄。
+      problems.push(...textRuleProblems(docs, rules));
       // 机制行的出口清单覆盖：行按结构定位（机制表里适用面最宽的那行），8 个出口一个都不能少。
       problems.push(...mechanismRowProblems(docs));
       // 机制行判据自己的变异探针（同一函数驱动）——词形定位的失效形态与「判据恒真」各配一条：
@@ -2290,7 +2315,7 @@ export const ENTRIES = [
         }
       }
       // 变异探针：正向（overclaim 写回 / 口径改回旧形态）与反向（补上缺失口径 ⇒ 不再报）。
-      // 含缺席面的探针不执行——上方 SKIP 行已显式声明该面未验证。
+      // 文本探针只在该文档真实在场时执行：缺席的文档无法被「改写」，其缺席已由缺席判据判红。
       const activeProbes = [
         ['overclaim 写回', 'README-zh.md', (text) => text + '\n工件与规则完全继承。\n', '仍含旧表述「完全继承」'],
         ['段名来源改回运行时派生', 'CONTRIBUTING-zh.md',
@@ -2299,8 +2324,8 @@ export const ENTRIES = [
           (text) => text + '\n## 缺段报错（两阶段）\n\n首次只给模板路径与类别计数，再犯才列段名。\n', '缺「两阶段」', false],
         ['补上增量段口径', 'docs/USAGE-zh.md',
           (text) => text + '\n工件保真 = 上游模板段 + 本仓增量段。\n', '缺「增量段」', false],
-      ].filter(([, rel]) => docs.has(rel));
-      assertProbesDiscriminate(problems, docs, activeRules, activeProbes);
+      ].filter(([, rel]) => typeof docs.get(rel) === 'string');
+      assertProbesDiscriminate(problems, docs, rules, activeProbes);
       if (problems.length > 0) throw new Error('公开面口径不符: ' + problems.join('; '));
     },
   },
