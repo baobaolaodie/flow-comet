@@ -36,6 +36,7 @@ import {
   assertStateBytesUnchanged,
   fixBatchTaskText,
   readStateBytes,
+  scenarioProtocolPath,
 } from '../lib/test-assertions.mjs';
 // 命令文本的唯一实现（平台化脚本根 + 整条路径加引号）：m2 直接以它作为期望值，断言运行期
 // 输出与 handoff 的 PREFLIGHT 同源同形——不是「看起来都像命令」。
@@ -187,9 +188,15 @@ export const ENTRIES = [
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
       writeState(dir, st2);
+      // AC-2 正向锚：裸 exit（不带 --apply）是节点收尾的全链预演——跑完整门禁但不落盘，并显式
+      // 提示 --apply 才推进。反向对照在场景 14（--preflight 通过路径不得打印 --apply 引导）：
+      // 两个只读面各守一侧，preflight 只跑结构子集、裸 exit 必须真跑到「可落盘」这一步。
+      const bareExitBytes = readStateBytes(dir);
       const res = runGuard(['exit', 'execute'], dir);
       assertExit(res, 0);
       assertOut(res, 'ALL CHECKS PASSED');
+      assertOut(res, 'APPLY: rerun with --apply');
+      assertStateBytesUnchanged(dir, bareExitBytes, '裸 exit（不带 --apply）是全链预演：门禁全过后也不得改写 state');
       // 变体:自检方法段名带括号后缀(执行者按模板标题原样书写,如 "## 自检方法（声明 brooks-review 或 builtin-quickcheck）")
       // → 段名识别放宽后通过,无"旧格式"兼容 WARN
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent({
@@ -262,22 +269,24 @@ export const ENTRIES = [
         throw new Error('WHY: 行应说明进行中原因（已 entry 未 exit）：' + whyLine);
       }
       assertOut(nextView, 'PREFLIGHT: ');
-      // 平台化形态：脚本路径整条加引号，命令在引号之后接 exit <节点>（裸脚本名的旧形态由 m2 的
-      // 解析断言与反向锚共同排除）。
-      assertOut(nextView, 'workflow-guard.mjs" exit execute');
-      assertOut(nextView, '不带 --apply');
-      assertOut(nextView, '不推进状态');
+      // 平台化形态：脚本路径整条加引号，命令在引号之后接 exit <节点> --preflight（裸脚本名的旧
+      // 形态由 m2 的解析断言与反向锚共同排除）。预检节点取路由视图（= NODE 行），且必须与
+      // 「完整 exit（不带 --apply）才是全链预演」的说明句同行——同一个 PREFLIGHT 不再指两条命令。
+      assertOut(nextView, 'workflow-guard.mjs" exit execute --preflight');
+      assertOut(nextView, '做结构预检（只跑结构性门禁，不写 state、不推进状态）');
+      assertOut(nextView, '完整 exit（不带 --apply）是节点收尾的全链预演');
+      assertNotOut(nextView, '（不带 --apply）预检——跑完整出口门禁');
       assertStateBytesUnchanged(dir, viewBytes, 'next 进行中保护不得写 state（routeNode 与 NODE 同源）');
 
       // m2：next 的 PREFLIGHT 行必须与 handoff result 的平台化形态同源——命令从输出解析后，
       // 逐字等于脚本命令单一实现的产物（同一 scriptsDir / runRoot），而不是裸脚本名。
-      const preflightCommand = (nextView.output.match(/PREFLIGHT: 可运行 (node .+?)（不带 --apply）/) ?? [])[1];
+      const preflightCommand = (nextView.output.match(/PREFLIGHT: 可运行 (node .+?) 做结构预检/) ?? [])[1];
       if (!preflightCommand) {
-        throw new Error('next 的 PREFLIGHT 行缺可解析的平台化命令（应为 node "<脚本路径>" exit <节点>）：\n'
+        throw new Error('next 的 PREFLIGHT 行缺可解析的平台化命令（应为 node "<脚本路径>" exit <节点> --preflight）：\n'
           + nextView.output);
       }
       const expectedPreflightCommand = scriptCommand({
-        scriptsDir: SCRIPTS_DIR, runRoot: dir, script: 'workflow-guard.mjs', args: ['exit', 'execute'],
+        scriptsDir: SCRIPTS_DIR, runRoot: dir, script: 'workflow-guard.mjs', args: ['exit', 'execute', '--preflight'],
       });
       if (preflightCommand !== expectedPreflightCommand) {
         throw new Error('next 的 PREFLIGHT 命令未走平台化单一实现：'
@@ -286,9 +295,13 @@ export const ENTRIES = [
       // 反向锚：裸脚本名形态（旧输出）不得残留——它正是「照抄到非 .claude 安装会落空」的形态。
       assertNotOut(nextView, 'PREFLIGHT: 可运行 workflow-guard.mjs');
       // 两个输出面同形：同一节点下 handoff result 打印的同一条命令必须逐字相同（不是各写一份）。
-      const handoffPre = runHandoff(['result', 'T01', '{"greenEvidence":{"command":"node --check src/t1.mjs"},"redEvidence":{"command":"node --check src/t1.mjs"}}'], dir);
+      // handoff 侧的路由视图要解析协议（与 next 同一判定），而 runHandoff 默认不注入协议副本——
+      // 显式传入场景协议路径（与 runState 的默认注入同源）。
+      const handoffPre = runHandoff(['result', 'T01', '{"greenEvidence":{"command":"node --check src/t1.mjs"},"redEvidence":{"command":"node --check src/t1.mjs"}}'], dir, {
+        FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir),
+      });
       assertExit(handoffPre, 0);
-      const handoffPreflightCommand = (handoffPre.output.match(/PREFLIGHT: SUMMARY 结构尚未校验——可运行 (node .+?) 但不带 --apply/) ?? [])[1];
+      const handoffPreflightCommand = (handoffPre.output.match(/PREFLIGHT: SUMMARY 结构尚未校验——可运行 (node .+?) 做结构预检/) ?? [])[1];
       if (!handoffPreflightCommand) {
         throw new Error('handoff result 的 PREFLIGHT 行缺可解析的平台化命令：\n' + handoffPre.output);
       }
@@ -394,6 +407,27 @@ export const ENTRIES = [
       assertExit(nextAfterRollback, 0);
       assertOut(nextAfterRollback, 'NODE: execute');
       assertStateBytesUnchanged(dir, bytesAfterRollback, '归位后的共享视图路径不得改写 state');
+
+      // handoff result 侧同源（缺陷复现）：Fix 归位态下 state.currentNode=review，取原值会打印
+      // exit review——该节点此刻正被 Fix 批次门禁拦着；路由视图是 execute。两处提示（next /
+      // handoff result）必须同一节点，且都带结构预检与全链预演两句。
+      writeState(dir, fixState);
+      const fixHandoff = runHandoff(['result', 'T02',
+        '{"greenEvidence":{"command":"node --check src/t2.mjs"},"redEvidence":{"command":"node --check src/t2.mjs"}}'], dir, {
+        FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir),
+      });
+      assertExit(fixHandoff, 0);
+      const fixHandoffCommand = (fixHandoff.output.match(/PREFLIGHT: SUMMARY 结构尚未校验——可运行 (node .+?) 做结构预检/) ?? [])[1];
+      if (!fixHandoffCommand) {
+        throw new Error('Fix 归位态下 handoff result 的 PREFLIGHT 行缺可解析命令：\n' + fixHandoff.output);
+      }
+      const expectedFixHandoffCommand = scriptCommand({
+        scriptsDir: SCRIPTS_DIR, runRoot: dir, script: 'workflow-guard.mjs', args: ['exit', 'execute', '--preflight'],
+      });
+      if (fixHandoffCommand !== expectedFixHandoffCommand) {
+        throw new Error('Fix 归位态下 handoff result 的预检节点应取路由视图 execute（不是 state.currentNode 原值 review）：'
+          + JSON.stringify(fixHandoffCommand) + '（期望 ' + JSON.stringify(expectedFixHandoffCommand) + '）');
+      }
 
       // 保护谓词的路由序号条件（反过度保护）：verify 驻留但 REVIEW.md 缺失 → 产物推导回退
       // review（derived 在 currentNode 之前，不是路由后继），进行中保护不得把路由钉在 verify 上；

@@ -99,7 +99,9 @@ function printNext(protocol, nodeId, executionMode = 'subagent') {
 //   stateNode   = state.currentNode 原值（既有键 stateCurrentNode 的语义，逐字不变）；
 //   routeNode   = 经「进行中保护」/「Fix 受控归位」后的路由视图（next 的 NODE 行的唯一来源）。
 // 纯判定：只读 state 与产物，不写 state、不打印（展示由各命令渲染）。
-async function resolveNodeView({ changeName, protocol, state }) {
+// 消费方：status / next（本模块）与 workflow-handoff 的 result 提示（import 本函数，不复制第二份
+// 判定——Fix 归位态若在 handoff 侧另取 state.currentNode，会指到被 Fix 批次门禁拦下的源节点）。
+export async function resolveNodeView({ changeName, protocol, state }) {
   const completedArr = Array.isArray(state.completedNodes) ? state.completedNodes : [];
   const derivedNode = await determineNode(changeName, protocol, completedArr);
   // 进行中节点保护：currentNode 未 exit（不在 completedNodes）且已 entry（enteredNodes 含该节点）
@@ -212,15 +214,24 @@ function printWhyLine(view) {
   console.log('WHY: ' + reason);
 }
 
-// 预检提示（next）：只在 execute / subagent-execute 路由上打印——exit 不带 --apply 就是完整出口
-// 门禁的预检（写盘只在 --apply 分支），让反馈前移到任务收尾而不是节点收尾。
-function printPreflightLine(nodeId) {
-  if (!nodeId || !EXECUTE_FAMILY_NODE_IDS.has(nodeId)) return;
+// 结构预检提示的命令段（单一实现，两个运行期输出面共用：next 与 handoff result）：--preflight 只跑
+// 结构性门禁（不写 state、不写提示账本、不推进状态），它**不是**节点收尾的预演——完整 exit（不带
+// --apply）才是全链预演。两句必须同行，否则同一个 PREFLIGHT 会被读成两条命令（复审实证）。节点由
+// 调用方按**路由视图**传入（与 NODE 行同源），不得取 state 原值：Fix 归位态下源节点的 exit 会被
+// Fix 批次门禁拦下。
+export function structuralPreflightHint(nodeId) {
   // 命令文本与 handoff result 的 PREFLIGHT 走同一实现（scriptCommand）：平台化脚本根 + 整条
   // 路径加引号——裸脚本名在 codex / dsh 单平台安装上照抄会落空（pathReplacements 只处理 .md）。
-  console.log('PREFLIGHT: 可运行 ' + scriptCommand({
-    scriptsDir, runRoot: runRootDir(), script: 'workflow-guard.mjs', args: ['exit', nodeId],
-  }) + '（不带 --apply）预检——跑完整出口门禁，但不推进状态');
+  return '可运行 ' + scriptCommand({
+    scriptsDir, runRoot: runRootDir(), script: 'workflow-guard.mjs', args: ['exit', nodeId, '--preflight'],
+  }) + ' 做结构预检（只跑结构性门禁，不写 state、不推进状态）；完整 exit（不带 --apply）是节点收尾的全链预演';
+}
+
+// 预检提示（next）：只在 execute / subagent-execute 路由上打印——让每任务的模板结构反馈前移到
+// 任务收尾，而不是攒到节点出口。贴什么命令、两句如何分工见 structuralPreflightHint（单一实现）。
+function printPreflightLine(nodeId) {
+  if (!nodeId || !EXECUTE_FAMILY_NODE_IDS.has(nodeId)) return;
+  console.log('PREFLIGHT: ' + structuralPreflightHint(nodeId));
 }
 
 // init <change-id> [--branch-prefix <prefix>] [--init-context|--init-skip]

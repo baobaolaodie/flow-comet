@@ -33,6 +33,7 @@ import {
   writeCustomProtocol,
 } from '../lib/test-fixtures.mjs';
 import {
+  readStateBytes,
   requireRouteNodeExport,
   runGuardWithProtocol,
   runStateWithProtocol,
@@ -250,7 +251,9 @@ export const ENTRIES = [
       writeState(dir, baseState('subagent-execute'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
       const redOnly = '{"redEvidence":{"command":"node --check src/p1.mjs"}}';
-      const res1 = runHandoff(['result', 'P01', redOnly], dir);
+      const res1 = runHandoff(['result', 'P01', redOnly], dir, {
+        FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir),
+      });
       assertExit(res1, 0);
       assertOut(res1, 'HANDOFF RESULT: P01');
       // ③ 缺证据的 WARN 点名 Return Contract 的 shape（只差 command 时不必猜字段怎么填）
@@ -258,21 +261,41 @@ export const ENTRIES = [
       assertOut(res1, '{command, output}');
       assertOut(res1, 'command 与 output 两个字段');
       const both = '{"redEvidence":{"command":"node --check src/p1.mjs"},"greenEvidence":{"command":"node --check src/p1.mjs"}}';
-      const res2 = runHandoff(['result', 'P01', both], dir);
+      const res2 = runHandoff(['result', 'P01', both], dir, {
+        FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir),
+      });
       assertExit(res2, 0);
       assertOut(res2, 'HANDOFF RESULT: P01');
-      // result 成功路径在 HANDOFF RESULT 之后追加 PREFLIGHT（SUMMARY 结构预检提示）——当前节点
-      // 取自 state.currentNode；该行不得改写既有 HANDOFF RESULT 前缀，也不得出现在失败路径。
+      // result 成功路径在 HANDOFF RESULT 之后追加 PREFLIGHT（SUMMARY 结构预检提示）——节点取路由
+      // 视图（与 next 的 NODE / status.routeNode 同源），不是 state.currentNode 原值；该行不得改写
+      // 既有 HANDOFF RESULT 前缀，也不得出现在失败路径。--preflight 只跑结构性门禁，与「完整 exit
+      // （不带 --apply）才是全链预演」两句必须同行，否则同一个 PREFLIGHT 指了两条命令。
       assertOut(res2, 'PREFLIGHT: SUMMARY 结构尚未校验');
-      assertOut(res2, '但不带 --apply');
-      assertOut(res2, '跑完整门禁、不推进状态');
-      // PREFLIGHT 命令同样从输出解析（不再与字面串比对）：加引号的脚本路径 + exit <当前节点>。
-      const preflightCommand = (res2.output.match(/可运行 (node .+?) 但不带 --apply/) || [])[1];
+      assertOut(res2, '做结构预检（只跑结构性门禁，不写 state、不推进状态）');
+      assertOut(res2, '完整 exit（不带 --apply）是节点收尾的全链预演');
+      // 路由视图的独立参照：status 是只读视图，其 routeNode 就是 next 会打印的节点。
+      const routeView = runState(['status'], dir);
+      assertExit(routeView, 0);
+      const routeNode = (routeView.output.match(/"routeNode":\s*"([^"]+)"/) ?? [])[1];
+      if (!routeNode) {
+        throw new Error('status 缺 routeNode（无法独立核对 PREFLIGHT 节点）:\n' + routeView.output);
+      }
+      // PREFLIGHT 命令同样从输出解析（不再与字面串比对）：加引号的脚本路径 + exit <路由视图节点> --preflight。
+      const preflightCommand = (res2.output.match(/PREFLIGHT: SUMMARY 结构尚未校验——可运行 (node .+?) 做结构预检/) || [])[1];
       if (!preflightCommand) {
         throw new Error('PREFLIGHT 行缺可解析的 exit 命令:\n' + res2.output);
       }
-      if (!/^node "[^"]+" exit subagent-execute$/.test(preflightCommand)) {
-        throw new Error('PREFLIGHT 命令形态应为「整条加引号的脚本路径 + exit <当前节点>」，实际: ' + preflightCommand);
+      const printedNode = preflightCommand.match(/^node "[^"]+" exit (\S+) --preflight$/);
+      if (!printedNode) {
+        throw new Error('PREFLIGHT 命令形态应为「整条加引号的脚本路径 + exit <节点> --preflight」，实际: ' + preflightCommand);
+      }
+      if (printedNode[1] !== routeNode) {
+        throw new Error('PREFLIGHT 节点应取路由视图（与 status.routeNode 同源）：'
+          + JSON.stringify(printedNode[1]) + ' vs ' + JSON.stringify(routeNode));
+      }
+      const rawCurrentNode = JSON.parse(readStateBytes(dir)).currentNode;
+      if (printedNode[1] === rawCurrentNode) {
+        throw new Error('PREFLIGHT 节点不得取 state.currentNode 原值（该夹具的路由视图与 state 原值不同）: ' + rawCurrentNode);
       }
       const resultLineAt = res2.output.indexOf('HANDOFF RESULT: P01');
       const preflightLineAt = res2.output.indexOf('PREFLIGHT:');
@@ -288,6 +311,16 @@ export const ENTRIES = [
         throw new Error('greenEvidence 未附带 recordedAt: ' + JSON.stringify(rec.greenEvidence));
       }
 
+      // 协议不可读的降级形态（result 成功路径）：不拿 state.currentNode 原值凑一条可能指错节点的
+      // 命令，只留「先确认协议可读」的指引与全链预演说明——提示面不得反过来让已落盘的成功路径失败，
+      // 也不得在无法解析路由视图时编造节点。
+      const noProtocol = runHandoff(['result', 'P01', both], dir);
+      assertExit(noProtocol, 0);
+      assertOut(noProtocol, 'PREFLIGHT: SUMMARY 结构尚未校验');
+      assertOut(noProtocol, '暂时无法解析路由节点');
+      assertOut(noProtocol, '完整 exit（不带 --apply）是节点收尾的全链预演');
+      assertNotOut(noProtocol, '可运行 node');
+
       // ---------- PREFLIGHT 命令的真实执行（安装副本 + 含空格的路径；in-place 扩展） ----------
       // ④ 平台化推导必须是**运行形态**的结果，而不是写死的平台字面量：把技能树复制到运行根下
       // 含空格的相对目录，用副本自身跑 workflow-handoff —— 打印出的路径须带那个空格、整条加引号、
@@ -300,7 +333,7 @@ export const ENTRIES = [
         });
       assertExit(resCopy, 0);
       assertOut(resCopy, 'HANDOFF RESULT: P01');
-      const copyPreflightCommand = (resCopy.output.match(/可运行 (node .+?) 但不带 --apply/) || [])[1];
+      const copyPreflightCommand = (resCopy.output.match(/PREFLIGHT: SUMMARY 结构尚未校验——可运行 (node .+?) 做结构预检/) || [])[1];
       if (!copyPreflightCommand) {
         throw new Error('副本形态的 PREFLIGHT 行缺可解析的 exit 命令:\n' + resCopy.output);
       }
@@ -315,14 +348,14 @@ export const ENTRIES = [
         FLOW_COMET_RUN_ROOT: dir,
         FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir),
       });
-      // 预检 = 跑完整出口门禁但不推进状态：须有真实门禁判决（该夹具本身不完整，通过/阻塞都算真跑），
+      // 预检 = 只跑结构性门禁、不推进状态：须有真实门禁判决（该夹具本身不完整，通过/阻塞都算真跑），
       // 且 state 字节零改写。
       if (!/(ALL CHECKS PASSED|BLOCKED:)/.test(resPreflight.output)) {
         throw new Error('PREFLIGHT 命令未真正跑到出口门禁（无门禁判决）: exit ' + resPreflight.status
           + '\n' + resPreflight.output);
       }
       if (fs.readFileSync(stateFile, 'utf8') !== stateBytesBeforePreflight) {
-        throw new Error('PREFLIGHT（不带 --apply）不得改写 state');
+        throw new Error('PREFLIGHT（--preflight）不得改写 state');
       }
     },
   },
