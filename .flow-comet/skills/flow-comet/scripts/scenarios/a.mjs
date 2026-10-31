@@ -568,6 +568,66 @@ export const ENTRIES = [
       assertExit(waveNext, 0);
       assertOut(waveNext, 'NODE: subagent-execute');
       assertStateBytesUnchanged(dir, waveBytes, '执行家族回边仍属进行中保护：next 不得把 currentNode 推回 execute');
+
+      // 序号条件的第三枚构造（正向守护，in-place 扩展）：derived 落在 currentNode **之前不止一步**。
+      // 既有两枚反向构造里 derived 都是 currentNode 的直接前驱（verify→review 回退 / 执行家族的趟间
+      // 回边），故「只豁免直接前驱、更早的一律按进行中保护」这种收窄它们照样全绿。此处让派生的
+      // execute 与驻留的 review 隔着一整个执行家族，且保护链条上的其余前提**全部成立**——currentNode
+      // 已 entry 未 exit、路由后继推导（把 currentNode 视为已完成再求值）恰等于 derivedNode——只有
+      // 序号条件为假：路由必须跟随产物推导回到 execute，不得被保护钉在更晚的 review 上。
+      writeFile(dir, fixTaskPath, fixBatchTaskText('done'));
+      fs.rmSync(path.join(dir, '.specs/' + CHANGE_ID, 'T01-SUMMARY.md'), { force: true });
+      writeState(dir, {
+        activeChange: CHANGE_ID,
+        currentNode: 'review',
+        completedNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
+        enteredNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review'],
+        evidence: {
+          open: { summary: 'open complete' },
+          design: { summary: 'design complete' },
+          plan: { summary: 'plan complete' },
+          execute: { summary: 'executed' },
+          review: { summary: 'review in progress — SUMMARY 在此后被移除' },
+        },
+        verifyFailures: 0,
+        executionMode: 'subagent',
+        directOverride: false,
+        newChange: true,
+      });
+      const behindBytes = readStateBytes(dir);
+      const behindStatus = runState(['status'], dir);
+      assertExit(behindStatus, 0);
+      assertOut(behindStatus, '"currentNode": "execute"');      // 产物推导：SUMMARY 缺席 → 回到 execute
+      assertOut(behindStatus, '"stateCurrentNode": "review"');  // state 原值语义不变
+      assertOut(behindStatus, '"routeNode": "execute"');        // 路由视图跟随产物推导
+      assertNotOut(behindStatus, '"routeNode": "review"');      // 不得被进行中保护钉在更晚的 currentNode
+      const behindRouteLine = behindStatus.output.split('\n').find((line) => line.startsWith('ROUTE: '));
+      if (!behindRouteLine) throw new Error('status 缺少 ROUTE: 诊断行\n实际输出:\n' + behindStatus.output);
+      for (const token of ['derived=execute', 'state=review', 'route=execute']) {
+        if (!behindRouteLine.includes(token)) {
+          throw new Error('derived 早于 currentNode 时 ROUTE: 行缺少 ' + token + '：' + behindRouteLine);
+        }
+      }
+      if (behindRouteLine.includes('进行中')) {
+        throw new Error('derived 早于 currentNode 时 ROUTE: 行不得声明进行中（保护不成立）：' + behindRouteLine);
+      }
+      assertStateBytesUnchanged(dir, behindBytes, 'status 是只读视图（早于 currentNode 的 derived 不改写 state）');
+      const behindNext = runState(['next'], dir);
+      assertExit(behindNext, 0);
+      assertOut(behindNext, 'NODE: execute');
+      const behindWhy = behindNext.output.split('\n').find((line) => line.startsWith('WHY: '));
+      if (!behindWhy) throw new Error('next 缺少 WHY: 解释行\n实际输出:\n' + behindNext.output);
+      if (!behindWhy.includes('产物推导')) {
+        throw new Error('早于 currentNode 的 derived 应报产物推导（不是进行中保护）：' + behindWhy);
+      }
+      if (behindWhy.includes('进行中保护')) {
+        throw new Error('早于 currentNode 的 derived 不得套用进行中保护：' + behindWhy);
+      }
+      // 非进行中 → 漂移校正照常落盘：state.currentNode 回到产物推导的 execute
+      if (JSON.parse(readStateBytes(dir)).currentNode !== 'execute') {
+        throw new Error('derived 早于 currentNode 时应被产物权威校正回 execute，实际 state.currentNode: '
+          + JSON.stringify(JSON.parse(readStateBytes(dir)).currentNode) + '\nnext 输出:\n' + behindNext.output);
+      }
     },
   },
 

@@ -783,6 +783,17 @@ export const ENTRIES = [
       assertExit(resNotEntered, 0);
       assertOut(resNotEntered, 'WARN: 任务 S02 的归属节点 execute 与原始 currentNode 一致');
       assertOut(resNotEntered, '尚未 entry');
+      // 报文须点明缺的是哪个节点的 entry（只说「尚未 entry」等于让人自己猜），并给出可照抄的恢复
+      // 动作：两条 entry 命令（状态命令族与门禁族）按节点名给全；且这是 WARN 不是 BLOCK——
+      // 请求照常落库（与⑤的 BLOCK 分支成对：同一门禁的两种判级各自的可观测结果都要在场）。
+      assertOut(resNotEntered, 'enteredNodes 缺 execute');
+      assertOut(resNotEntered, 'workflow-state entry execute');
+      assertOut(resNotEntered, 'workflow-guard entry execute');
+      assertNotOut(resNotEntered, 'BLOCKED');
+      const recNotEntered = readScenarioState(dir).evidence?.['subagent-execute']?.handoffRequests?.S02;
+      if (!recNotEntered) {
+        throw new Error('未 entry 的 WARN 不应阻断落库，实际 handoffRequests.S02: ' + JSON.stringify(recNotEntered));
+      }
       assertOut(resNotEntered, 'HANDOFF REQUEST: S02');
       // ⑦ done 任务补录（非 pending）→ 归属门禁跳过，不误伤
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskXml('D01', 'parallel="true" status="done"', 'src/d01.mjs'));

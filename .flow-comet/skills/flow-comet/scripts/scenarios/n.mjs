@@ -1328,6 +1328,50 @@ export const ENTRIES = [
         nodeTemplateDeclaration({ id: 'brainstorm', templates: ['CHANGE'] }), { nodeId: 'brainstorm', skillName: 'fixture-skill' });
       assertTrue(customCommand === 'workflow-state.mjs skill-load brainstorm fixture-skill --templates CHANGE.md',
         '自定义节点无内置提示词映射时不应拼 --prompt，实际: ' + customCommand);
+
+      // ⑤ --preflight 与自定义协议的组合（in-place 扩展）：结构预检的**声明工件**判据必须来自命令行
+      // 指定的那份协议。造法 = 内置协议副本 + 给 open 节点追加一件只在这份协议里声明的 file 类产物，
+      // 同一夹具跑两次、唯一变量是 --protocol：不指这份协议时没人会去查那件产物，指了就按它拦。
+      // 环境变量（= 上面的对照侧）先复位成**未经改写的**内置副本——本场景 ③ 曾把该副本的模板声明
+      // 改过，带着它做对照就不是单变量了。故「忽略 CLI 参数」与「内置判据写死」两种退化都会让第一次
+      // 调用变成通过（或缺件不被点名）。
+      const builtinProtocolCopy = JSON.parse(
+        fs.readFileSync(path.join(SCRIPTS_DIR, '..', 'reference', 'workflow-protocol.json'), 'utf8'));
+      writeFile(dir, 'reference/workflow-protocol.json', JSON.stringify(builtinProtocolCopy, null, 2) + '\n');
+      const protocolWithExtraArtifact = {
+        ...builtinProtocolCopy,
+        nodes: builtinProtocolCopy.nodes.map((node) => (node.id === 'open'
+          ? { ...node, outputSchemas: [...node.outputSchemas, 'fixture.extra-artifact.v1'] }
+          : node)),
+        outputSchemas: [...builtinProtocolCopy.outputSchemas, {
+          id: 'fixture.extra-artifact.v1',
+          description: '协议追加的 open 产物（只在本自定义协议里声明）',
+          artifacts: [{
+            id: 'custom-evidence', kind: 'file', required: true,
+            paths: ['<change-id>/custom-evidence.md'], pathBase: 'specs-root',
+          }],
+          evidence: [],
+        }],
+      };
+      const customProtocolFile = path.join(dir, 'reference', 'custom-preflight-protocol.json');
+      writeFile(dir, 'reference/custom-preflight-protocol.json', JSON.stringify(protocolWithExtraArtifact, null, 2) + '\n');
+      setupOpen(dir);
+      const customPreflight = runGuard(['exit', 'open', '--preflight', '--protocol', customProtocolFile], dir);
+      assertExit(customPreflight, 1);
+      assertOut(customPreflight, '声明工件缺失');
+      assertOut(customPreflight, '.specs/' + CHANGE_ID + '/custom-evidence.md');
+      assertTrue(!fs.existsSync(path.join(dir, CHANGE_DIR, '.template-hints.json')),
+        '--preflight 不得写提示账本（自定义协议下同样是只读）');
+      // 反向对照（单变量 = 少一个 --protocol）：同一夹具、同一节点、同一命令形态 → 内置副本里没有
+      // 这件产物，故不报缺件（同时排除「预检本来就一律报缺件」这一读法）。
+      const builtinPreflight = runGuard(['exit', 'open', '--preflight'], dir);
+      assertExit(builtinPreflight, 0);
+      assertNotOut(builtinPreflight, 'custom-evidence.md');
+      // 正例：按自定义协议声明的路径补上该产物 → 同一命令转为通过（判据跟着协议走，不是恒拦）
+      writeFile(dir, CHANGE_DIR + '/custom-evidence.md', '# 追加产物\n\n自定义协议声明的结构输入。\n');
+      const satisfiedPreflight = runGuard(['exit', 'open', '--preflight', '--protocol', customProtocolFile], dir);
+      assertExit(satisfiedPreflight, 0);
+      assertOut(satisfiedPreflight, 'ALL CHECKS PASSED');
     },
   },
 
@@ -1399,6 +1443,32 @@ export const ENTRIES = [
       assertExit(brokeAgain, 1);
       assertTrue(!omitSection(brokeAgain, 'T01-SUMMARY.md'),
         '释放后再次坏掉应按首败处理（不列段名）: ' + failureLine(brokeAgain, 'T01-SUMMARY.md'));
+
+      // ⑧ --preflight 与完整 exit 的两阶段差异（in-place 扩展）：预检只读、不维护提示账本，故同一
+      // 节点连跑两次预检都停在报文的**首段**（只报类别计数）；写账本的是完整 exit，它才在第二次
+      // 点名段名。两侧都得锁住——预检若改成写账本，第二次预检会提前把段名用掉（「先读模板」的
+      // 引导被绕开）；完整 exit 若不写账本，第二次仍只报计数（两阶段报错退化成单阶段）。
+      setupExecute(dir, { omit: ['是否触发新工作'] });
+      assertTrue(!fs.existsSync(hintFile), '夹具起点不应有提示账本');
+      const preFirst = runGuard(['exit', 'execute', '--preflight'], dir);
+      assertExit(preFirst, 1);
+      assertOut(preFirst, '缺段 1 项');
+      assertNotOut(preFirst, '是否触发新工作');
+      assertTrue(!fs.existsSync(hintFile), '--preflight 不得写提示账本（首段形态的前提）');
+      const preSecond = runGuard(['exit', 'execute', '--preflight'], dir);
+      assertExit(preSecond, 1);
+      assertOut(preSecond, '缺段 1 项');
+      assertNotOut(preSecond, '是否触发新工作');
+      assertTrue(!fs.existsSync(hintFile), '第二次 --preflight 仍不得写提示账本（不升级成列段名）');
+      // 同一节点、同一工件、同一缺损：完整 exit 首次只报计数并开账本，第二次点名段名。
+      const fullFirst = exitNode(dir, 'execute');
+      assertExit(fullFirst, 1);
+      assertOut(fullFirst, '缺段 1 项');
+      assertNotOut(fullFirst, '是否触发新工作');
+      assertTrue(fs.existsSync(hintFile), '完整 exit 首次失败应写提示账本（再犯才有「再犯」可言）');
+      const fullSecond = exitNode(dir, 'execute');
+      assertExit(fullSecond, 1);
+      assertOut(fullSecond, '缺段 1 项: 是否触发新工作');
     },
   },
 
