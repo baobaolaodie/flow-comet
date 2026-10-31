@@ -87,12 +87,19 @@ function markerProtocolBasename(value) {
 // 保持列表项口径（历史写法，避免把分区标题误判成发现）。"无"条目（"- 无" / "无（...）"）表示该
 // 级别无发现，豁免。条目块包含其后的非空续行，直到空行 / 下一条目 / 下一个标题。严重度只取该条目
 // 自身的标题/行首——所属 "### Major" 分区，或标题（加粗部分 / H3 严重度 token）内带级别信息；
-// 条目正文引用他条的 [Major] 字样不改变本条严重度。返回 { title, scope, lines, isMajor, ordinal }。
+// 条目正文引用他条的 [Major] 字样不改变本条严重度。返回
+// { title, scope, lines, isMajor, isMinor, ordinal }——isMinor 只认显式判为 Minor 的形态（### Minor
+// 分区 / [Minor] 标签 / 🟢 前缀），未标严重度的条目不假装是 Minor（Minor 判定理由门禁据此不误判）。
 const REVIEW_FINDING_ITEM_RE = /^\s*(?:[-*+]|\d+[.)])\s*\*\*(.+?)\*\*/;
 const REVIEW_SEVERITY_TOKEN_RE = /^(?:🔴|🟡|🟢|\[\s*(?:critical|major|minor)\s*\])\s*/iu;
 const REVIEW_DISPOSITION_RE = /\[已修\]|\[升级\]|\[转待办\]/;
 const REVIEW_MAJOR_LABEL_RE = /\[\s*Major\s*\]/i;
+const REVIEW_MINOR_LABEL_RE = /\[\s*Minor\s*\]/i;
 const REVIEW_ADJUDICATION_RE = /用户裁决\s*[:：]\s*接受延期/;
+// Minor 判定理由的固定形态：条目块内以「判 Minor：」开头的一行（后接一句话理由）。只做结构级
+// 判定（行首标签存在即视为已自证），行号前缀的列表记号 / 引用记号是 Markdown 行级噪音、不改变
+// 该行的标签身份，故允许出现在标签之前。
+const REVIEW_MINOR_JUSTIFICATION_RE = /^\s*(?:(?:[-*+]|\d+[.)])\s+|>\s*)*判\s*Minor\s*[:：]/;
 // 旧形态段的「空段」形态：占位词与「无」条目不构成内容（迁移提示只在旧段真有内容时给）。
 const REVIEW_FINDINGS_PLACEHOLDER_RE =
   /^(?:[-*+]\s*)?(?:\*\*)?(?:无|不适用|未涉及|无变更|N\/A|—|（无）|\(无\))(?:\*\*)?[。.；;，,]?$/iu;
@@ -117,11 +124,18 @@ async function reviewFindingScope() {
 }
 
 // H3 条目形态的严重度从标题前缀的严重度 token 派生（模板范例的 🔴/🟡/🟢；另接受文字标签形态的
-// [Critical]/[Major]/[Minor]）——Major 延期裁决门禁对 H3 条目与列表项同口径。
+// [Critical]/[Major]/[Minor]）——延期裁决门禁对 H3 条目与列表项同口径。
 function reviewSubheadingIsMajor(heading) {
   const token = (String(heading).match(REVIEW_SEVERITY_TOKEN_RE) ?? [])[0] ?? '';
   if (/🔴|🟡/u.test(token) || /critical|major/iu.test(token)) return true;
   return REVIEW_MAJOR_LABEL_RE.test(heading);
+}
+
+// H3 条目的 Minor 形态（模板范例的 🟢 / 文字标签 [Minor]）——与 reviewSubheadingIsMajor 同一派生面。
+function reviewSubheadingIsMinor(heading) {
+  const token = (String(heading).match(REVIEW_SEVERITY_TOKEN_RE) ?? [])[0] ?? '';
+  if (/🟢/u.test(token) || /minor/iu.test(token)) return true;
+  return REVIEW_MINOR_LABEL_RE.test(heading);
 }
 
 function reviewFindingsItems(text, scope = { primary: null, siblings: [] }) {
@@ -157,6 +171,7 @@ function reviewFindingsItems(text, scope = { primary: null, siblings: [] }) {
             scope: 'primary',
             lines: [line],
             isMajor: reviewSubheadingIsMajor(heading),
+            isMinor: reviewSubheadingIsMinor(heading),
           };
           continue;
         }
@@ -181,6 +196,7 @@ function reviewFindingsItems(text, scope = { primary: null, siblings: [] }) {
         scope: mode,
         lines: [line],
         isMajor: /^major\b/i.test(severity) || REVIEW_MAJOR_LABEL_RE.test(title),
+        isMinor: /^minor\b/i.test(severity) || REVIEW_MINOR_LABEL_RE.test(title),
       };
       continue;
     }
@@ -213,17 +229,24 @@ function reviewLegacyFindingsHasContent(text) {
   return false;
 }
 
+// 发现条目本身（排除不是发现的条目）：
+// · "无" 条目（"- 无" / "无（...）"）表示该级别无发现；
+// · 四要素字段行：REVIEW 发现条目的 Symptom/Source/Consequence/Remedy 是 brooks 审查输出的字段行
+//   （带 ** 加粗），不是与条目并列的发现——不排除会把字段行当成"缺处置的发现"。精确匹配完整
+//   标签（允许尾冒号）——"Source maps expose paths" 这类以 Source 开头的真实发现标题不得被前缀
+//   匹配误豁免。
+// 处置标记 / 延期裁决 / Minor 判定理由三处门禁共用这一口径：同一豁免清单三处各写一份必然分叉。
+function reviewRealFindings(items) {
+  return items
+    .filter((item) => !/^无/.test(item.title))
+    .filter((item) => !/^(?:Symptom|Source|Consequence|Remedy)\s*:?\s*$/i.test(item.title));
+}
+
 // 发现区条目处置标记存在性：返回缺处置状态标记（[已修]/[升级]/[转待办]）的条目标题列表——结构级
 // 校验（不做语义判断：标记存在即视为已处置）。发现项（含 Minor；无序与有序条目同口径，均不得
 // "记录后无声消失"）的处置标记以该条目自身标题/行首为准——正文引用他条标记不参与判定。
 function reviewFindingsMissingDisposition(text, scope = { primary: null, siblings: [] }) {
-  return reviewFindingsItems(text, scope)
-    .filter((item) => !/^无/.test(item.title)) // "无" 条目豁免
-    // 四要素字段行豁免：REVIEW 发现条目的 Symptom/Source/Consequence/Remedy 是 brooks 审查输出
-    // 格式的字段行（带 ** 加粗），不是发现条目本身——不豁免会误判为"发现项缺处置标记"（执行者按
-    // 4 要素格式书写时被误 BLOCKED）。精确匹配完整标签（允许尾冒号）——"Source maps expose paths"
-    // 这类以 Source 开头的真实发现标题不得被前缀匹配误豁免（其处置校验必须照常进行）
-    .filter((item) => !/^(?:Symptom|Source|Consequence|Remedy)\s*:?\s*$/i.test(item.title))
+  return reviewRealFindings(reviewFindingsItems(text, scope))
     .filter((item) => !REVIEW_DISPOSITION_RE.test(item.lines[0]))
     .map((item) => item.title);
 }
@@ -239,20 +262,29 @@ function reviewAdjudicationPointsTo(record, item) {
   return core.length >= 6 && record.includes(core);
 }
 
-// Major 延期裁决门禁：发现区任何 Major 条目处置为 [转待办] 时，必须同时存在用户裁决记录——同段
-// （条目自身段落）或文末其余段落含「用户裁决：接受延期」且指向该条目，并由 [升级] 承接（条目自身
-// 块或裁决记录含 [升级]）。任一缺失 → 返回条目标题（调用方按新 change BLOCK / 旧 change WARN 渐进
-// 处置）。Minor 不参与；Major [升级]/[已修] 直接放行。条目自身的处置标记（[转待办]）只认该条目标题
-// /行首（无序与有序同口径），正文续行引用他条标记不触发本门禁；[升级] 承接可出现在条目自身块或
-// 用户裁决记录中（承接非本条处置）。
-function reviewDeferredMajorProblems(text, scope = { primary: null, siblings: [] }) {
+// 条目自身的严重度标签（报文里点名用）：Major / Minor 之外是"未标严重度"——延期门禁对任何严重度
+// 生效，未标严重度同样要裁决记录，报文得让执行者看清是哪一类。
+function reviewItemSeverityLabel(item) {
+  if (item.isMajor) return 'Major';
+  if (item.isMinor) return 'Minor';
+  return '未标严重度';
+}
+
+// 延期裁决门禁：发现区任何条目（**任何严重度**，含 Minor）处置为 [转待办] 时，必须同时存在用户裁决
+// 记录——同段（条目自身段落）或其它段落（位置不限，须与条目以空行分隔）含「用户裁决：接受延期」且
+// 指向该条目，并由 [升级] 承接（条目自身块或裁决记录含 [升级]）。任一缺失 → 返回该条目（调用方按
+// 新 change BLOCK / 旧 change WARN 渐进处置）。只认 [已修]/[升级] 的条目直接放行：它们的处置不是
+// 延期，没有用户决策点。条目自身的处置标记（[转待办]）只认该条目标题/行首（无序与有序同口径），
+// 正文续行引用他条标记不触发本门禁；[升级] 承接可出现在条目自身块或用户裁决记录中（承接非本条处置）。
+// 历史语义：本门禁曾只覆盖 Major——Minor 的自行延期因此长期无门槛，成为延期积压的制度口子。
+function reviewDeferredFindingProblems(text, scope = { primary: null, siblings: [] }) {
   const textValue = String(text);
-  const items = reviewFindingsItems(textValue, scope);
+  const items = reviewRealFindings(reviewFindingsItems(textValue, scope));
   const paragraphs = textValue.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
   const problems = [];
   for (const item of items) {
     const ownLine = item.lines[0];
-    if (!item.isMajor || !/\[转待办\]/.test(ownLine)) continue;
+    if (!/\[转待办\]/.test(ownLine)) continue;
     const block = item.lines.join('\n');
     const escalatedInBlock = /\[升级\]/.test(block);
     const blockTrimmed = block.trim();
@@ -262,9 +294,21 @@ function reviewDeferredMajorProblems(text, scope = { primary: null, siblings: []
       if (paragraph === blockTrimmed) return false; // 跳过条目自身段落
       return (escalatedInBlock || /\[升级\]/.test(paragraph)) && reviewAdjudicationPointsTo(paragraph, item);
     });
-    if (!matched) problems.push(item.title);
+    if (!matched) problems.push({ title: item.title, severity: reviewItemSeverityLabel(item) });
   }
   return problems;
+}
+
+// Minor 判定理由门禁：判为 Minor 的条目按 Minor 处置（延期）时，须在条目块内自证判据——一行以
+// 「判 Minor：」开头的一句话理由。结构级判定（行首标签存在即已自证），不做语义判断：理由写得好不好
+// 不是脚本能判的，脚本只保证"判 Minor"这个动作留下可复核的依据。只覆盖 [转待办] 的 Minor 条目——
+// [已修]/[升级] 的条目没有"按 Minor 放行"这回事，不受约束；未标严重度的条目也不在此门禁内（先由
+// 延期裁决门禁要求裁决记录）。
+function reviewMinorJustificationProblems(text, scope = { primary: null, siblings: [] }) {
+  return reviewRealFindings(reviewFindingsItems(text, scope))
+    .filter((item) => item.isMinor && /\[转待办\]/.test(item.lines[0]))
+    .filter((item) => !item.lines.some((line) => REVIEW_MINOR_JUSTIFICATION_RE.test(line)))
+    .map((item) => item.title);
 }
 
 // 节点 entry 链：受控归位 → 归档分支校验 → 委托前并行写冲突 → 委托前工件 commit 提示 →
@@ -1178,21 +1222,40 @@ export async function runReviewExitGate({ node, state }) {
         ' 项条目缺处置状态标记（[已修]/[升级]/[转待办]）: ' + missingDisposition.join('、') +
         '——未处置的发现（含 Minor）不应无声消失，补标记后本警告消除（渐进不阻断）');
     }
-    // Major 延期裁决门禁：Major 的处置是用户决策点——reviewer 不得自行 [转待办]。结构校验：Major
-    // 条目标 [转待办] 时须同时存在用户裁决记录（同段或文末含「用户裁决：接受延期」且指向该条目，
-    // 并由 [升级] 承接）；缺失 → 新 change BLOCKED / 旧 change WARN 渐进。Minor 不受影响；
-    // Major [升级]/[已修] 直接放行。
-    const deferredMajor = reviewDeferredMajorProblems(reviewText, scope);
-    if (deferredMajor.length > 0) {
-      const guide = '；恢复: 先把 Major 改为 [升级] 交用户裁决；用户接受延期后在同段或文末记录「用户裁决：接受延期」并指向该条目（由 [升级] 承接）';
+    // 延期裁决门禁：延期是用户决策点——reviewer 不得自行把任何严重度的发现标 [转待办]。结构校验：
+    // 条目标 [转待办] 时须同时存在用户裁决记录（同段或其它段落含「用户裁决：接受延期」且指向该条目，
+    // 并由 [升级] 承接）；缺失 → 新 change BLOCKED / 旧 change WARN 渐进。只以 [已修]/[升级] 处置的
+    // 条目直接放行（不是延期，没有决策点）。Minor 并入同一门禁：此前只有 Major 受约束，Minor 可自行
+    // 延期，延期因此长期无门槛积压。
+    //
+    // Minor 判定理由门禁：按 Minor 延期的条目须在条目块内自证判据——一行「判 Minor：<理由>」。结构级
+    // 校验（理由内容不做语义判断）；缺失 → 新 change BLOCKED / 旧 change WARN 渐进。
+    const deferredFindings = reviewDeferredFindingProblems(reviewText, scope);
+    const minorUnjustified = reviewMinorJustificationProblems(reviewText, scope);
+    if (deferredFindings.length > 0) {
+      const named = deferredFindings.map((p) => p.title + '（' + p.severity + '）').join('、');
+      const guide = '；恢复: 把该条目补 [升级] 交用户裁决；用户接受延期后，在与该条目以空行分隔的段落写'
+        + '「用户裁决：接受延期 —— 发现 <条目标识>：<理由>」，并由 [升级] 承接（条目内或该段落带 [升级]）。'
+        + '示例: 「- **F1 · 标题**：[升级] [转待办]」+ 空行 +「用户裁决：接受延期 —— 发现 F1：下一 change 首修」';
       if (isNewChange(state)) {
-        console.error('BLOCKED: REVIEW.md 发现区 ' + deferredMajor.length + ' 项 Major 条目为 [转待办] 但缺少用户裁决记录（Major 不得由 reviewer 自行转待办）: ' + deferredMajor.join('、') + guide);
-        process.exit(1);
+        console.error('BLOCKED: REVIEW.md 发现区 ' + deferredFindings.length + ' 项条目为 [转待办] 但缺少用户裁决记录——任何严重度（含 Minor）的延期都不得由 reviewer 自行决定: ' + named + guide);
+      } else {
+        console.error('REVIEW WARN: REVIEW.md 发现区 ' + deferredFindings.length
+          + ' 项条目为 [转待办] 但缺少用户裁决记录: ' + named
+          + '——任何严重度（含 Minor）的延期都不得由 reviewer 自行决定' + guide + '（渐进不阻断）');
       }
-      console.error('REVIEW WARN: REVIEW.md 发现区 ' + deferredMajor.length +
-        ' 项 Major 条目为 [转待办] 但缺少用户裁决记录: ' + deferredMajor.join('、') +
-        '——Major 不得由 reviewer 自行转待办' + guide + '（渐进不阻断）');
     }
+    if (minorUnjustified.length > 0) {
+      const guide = '；恢复: 在该条目块内（与条目标题之间不留空行）补一行「判 Minor：<一句话理由>」，'
+        + '示例: 「判 Minor：仅影响日志措辞，不改变行为与接口」；若实际达到 Major 级，改标 Major 并把延期交用户裁决';
+      if (isNewChange(state)) {
+        console.error('BLOCKED: REVIEW.md 发现区 ' + minorUnjustified.length + ' 项 Minor 条目缺判定理由——判为 Minor 须自证判据，否则不得按 Minor 延期: ' + minorUnjustified.join('、') + guide);
+      } else {
+        console.error('REVIEW WARN: REVIEW.md 发现区 ' + minorUnjustified.length
+          + ' 项 Minor 条目缺判定理由: ' + minorUnjustified.join('、') + guide + '（渐进不阻断）');
+      }
+    }
+    if (isNewChange(state) && (deferredFindings.length > 0 || minorUnjustified.length > 0)) process.exit(1);
   } catch {}
 }
 

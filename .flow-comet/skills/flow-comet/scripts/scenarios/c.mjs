@@ -552,12 +552,13 @@ export const ENTRIES = [
       assertExit(res, 0);
       assertOut(res, 'REVIEW WARN');
       assertOut(res, 'ALL CHECKS PASSED');
-      // ② 同一条目带 [转待办] 处置标记 → 无 REVIEW WARN
+      // ② 同一条目带 [转待办] 处置标记 → 不再报「缺处置状态标记」（该条已有处置去向；Minor 延期
+      // 另受裁决/判据门槛约束，旧 change 只 WARN 不阻断）
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
         '# REVIEW\n\n## 发现\n\n### Critical\n\n无\n\n### Major\n\n无\n\n### Minor\n\n- **m-1 · 示例发现**：描述 [转待办]\n\n## 结论\n\n通过\n');
       const res2 = runGuard(['exit', 'review'], dir);
       assertExit(res2, 0);
-      assertNotOut(res2, 'REVIEW WARN');
+      assertNotOut(res2, '缺处置状态标记');
       assertOut(res2, 'ALL CHECKS PASSED');
       // ③ 有序条目（1. **...**）与无序同口径——缺处置标记 → 旧 change 仍渐进 REVIEW WARN
       // （修复前 .filter((item) => !item.ordered) 使有序条目静默通过 = RED）
@@ -567,12 +568,12 @@ export const ENTRIES = [
       assertExit(resOrdered, 0);
       assertOut(resOrdered, 'REVIEW WARN');
       assertNotOut(resOrdered, 'BLOCKED');
-      // ④ 有序 Minor 带 [转待办] → 无该渐进告警（有序条目接入校验不误报已处置项）
+      // ④ 有序 Minor 带 [转待办] → 无「缺处置状态标记」告警（有序条目接入校验不误报已处置项）
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
         '# REVIEW\n\n## 发现\n\n1. **m-3 · 有序小项**：某处小问题，已登记下一 change 跟踪处置 [转待办]\n\n## 结论\n\n通过\n');
       const resOrderedOk = runGuard(['exit', 'review'], dir);
       assertExit(resOrderedOk, 0);
-      assertNotOut(resOrderedOk, 'REVIEW WARN');
+      assertNotOut(resOrderedOk, '缺处置状态标记');
       assertOut(resOrderedOk, 'ALL CHECKS PASSED');
     },
   },
@@ -1067,10 +1068,11 @@ export const ENTRIES = [
   },
 
   // 125: R1——新 change(newChange:true)review 处置标记缺失 → BLOCKED(旧 change WARN 保留)；
-  // 并内扩 Major 延期待裁决门禁三态+一反例：无用户裁决 BLOCK / 同段或文末裁决（由 [升级]
-  // 承接）放行 / Minor [转待办] 不受影响 / 有裁决但缺 [升级] 承接仍 BLOCK。
+  // 并内扩延期裁决门禁（覆盖任何严重度，含 Minor）：无用户裁决 BLOCK / 同段或其它段落裁决（由
+  // [升级] 承接）放行 / 有裁决但缺 [升级] 承接仍 BLOCK；Minor 另须在条目块内自证判据
+  // 「判 Minor：<一句话理由>」，缺则该条按 Minor 延期不成立。
   {
-    name: '125 review exit BLOCKED：新 change 处置标记缺失 + Major 延期待裁决（R1）',
+    name: '125 review exit BLOCKED：新 change 处置标记缺失 + 延期待裁决（R1）',
     run: (dir) => {
       const st = baseState('review');
       st.evidence.review = { summary: 'reviewed' };
@@ -1111,11 +1113,32 @@ export const ENTRIES = [
       assertExit(resAdjudicated, 0);
       assertOut(resAdjudicated, 'ALL CHECKS PASSED');
       assertNotOut(resAdjudicated, '用户裁决');
-      // 子断言:Minor [转待办] 不受影响 → 放行
-      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-1 · 小项**：某处小问题 [转待办]\n\n## 结论\n\n通过\n');
+      // 子断言:Minor [转待办] 与 Major 同口径——无用户裁决记录 → BLOCKED(报文点名条目 + 给出
+      // 裁决记录形态；修复前 Minor 可自行延期直接放行 = RED)
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-1 · 小项**：某处小问题 [转待办]\n  判 Minor：仅影响日志措辞，不改变行为与接口\n\n## 结论\n\n通过\n');
       const resMinor = runGuard(['exit', 'review'], dir);
-      assertExit(resMinor, 0);
-      assertOut(resMinor, 'ALL CHECKS PASSED');
+      assertExit(resMinor, 1);
+      assertOut(resMinor, 'BLOCKED');
+      assertOut(resMinor, 'm-1 · 小项');
+      assertOut(resMinor, '用户裁决：接受延期');
+      // 子断言:同一条目补上裁决记录（指向该条目 + [升级] 承接）→ 放行
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-1 · 小项**：某处小问题 [升级] [转待办]\n  判 Minor：仅影响日志措辞，不改变行为与接口\n\n- 用户裁决：接受延期 —— 发现 m-1：下一 change 首修。\n\n## 结论\n\n通过\n');
+      const resMinorAdjudicated = runGuard(['exit', 'review'], dir);
+      assertExit(resMinorAdjudicated, 0);
+      assertOut(resMinorAdjudicated, 'ALL CHECKS PASSED');
+      assertNotOut(resMinorAdjudicated, 'BLOCKED');
+      // 子断言:Minor 条目缺判定理由「判 Minor：<理由>」→ BLOCKED(报文点名条目 + 给出形态)；
+      // 补上判据后放行(裁决记录仍在，缺的只是 Minor 判据本身)
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-5 · 缺判据的小项**：某处小问题 [升级] [转待办]\n\n- 用户裁决：接受延期 —— 发现 m-5：下一 change 首修。\n\n## 结论\n\n通过\n');
+      const resMinorNoReason = runGuard(['exit', 'review'], dir);
+      assertExit(resMinorNoReason, 1);
+      assertOut(resMinorNoReason, 'BLOCKED');
+      assertOut(resMinorNoReason, 'm-5 · 缺判据的小项');
+      assertOut(resMinorNoReason, '判 Minor：');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-5 · 缺判据的小项**：某处小问题 [升级] [转待办]\n  判 Minor：只影响内部诊断输出\n\n- 用户裁决：接受延期 —— 发现 m-5：下一 change 首修。\n\n## 结论\n\n通过\n');
+      const resMinorReasonOk = runGuard(['exit', 'review'], dir);
+      assertExit(resMinorReasonOk, 0);
+      assertOut(resMinorReasonOk, 'ALL CHECKS PASSED');
       // 子断言:文末用户裁决 + 指向该条目 + [升级] 承接 → 放行
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **F3 · 文末裁决的延期**：某处问题 [升级] [转待办]\n\n## 用户裁决\n\n- 用户裁决：接受延期 —— 发现 F3（文末裁决的延期）：下一 change 首修。\n\n## 结论\n\n通过\n');
       const resTail = runGuard(['exit', 'review'], dir);
@@ -1133,13 +1156,19 @@ export const ENTRIES = [
       assertOut(resNoEscalation, 'BLOCKED');
       assertOut(resNoEscalation, 'Major');
       assertOut(resNoEscalation, '用户裁决');
-      // 子断言:Minor 条目正文引用 [Major] 标签字样（自身 [转待办]）→ 放行——严重度/处置
-      // 以条目自身标题/行首为准，不做整块标签扫描（修复前误判 Major 并触发延期门禁 = RED）
+      // 子断言:条目正文引用 [Major] 标签字样（自身 [转待办]）→ 严重度以条目自身标题/行首为准，
+      // 正文标签不改变本条判定（报文按「未标严重度」点名，不因正文出现 [Major] 就升格为 Major）；
+      // 补上裁决记录后放行——延期门禁对任何严重度生效，处置由裁决记录承接
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n- **m-2 · 引用 Major 的小项**：本条与 [Major] F1 项不同，是独立问题 [转待办]\n\n## 结论\n\n通过\n');
       const resCited = runGuard(['exit', 'review'], dir);
-      assertExit(resCited, 0);
-      assertOut(resCited, 'ALL CHECKS PASSED');
-      assertNotOut(resCited, 'BLOCKED');
+      assertExit(resCited, 1);
+      assertOut(resCited, '未标严重度');
+      assertNotOut(resCited, '（Major）');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n- **m-2 · 引用 Major 的小项**：本条与 [Major] F1 项不同，是独立问题 [升级] [转待办]\n\n- 用户裁决：接受延期 —— 发现 m-2：下一 change 首修。\n\n## 结论\n\n通过\n');
+      const resCitedOk = runGuard(['exit', 'review'], dir);
+      assertExit(resCitedOk, 0);
+      assertOut(resCitedOk, 'ALL CHECKS PASSED');
+      assertNotOut(resCitedOk, 'BLOCKED');
       // 子断言:Major 条目自身处置为 [已修]，续行正文引用他条 [转待办] → 放行——
       // 延期门禁只看该条目自身标题/行首的处置标记，不做整块扫描
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **[Major] F9 · 已修项引用他条**：某处问题 [已修]\n  （续行仅引用他条的处置去向 [转待办]，非本条处置）\n\n## 结论\n\n通过\n');
@@ -1402,10 +1431,11 @@ export const ENTRIES = [
     },
   },
 
-  // 131: R1 旧兼容——旧 change(无 newChange)处置标记缺失仍 WARN；并内扩 Major 延期待裁决
-  // 门禁旧 change 渐进面：无用户裁决 → WARN 不 BLOCK（不卡死旧 REVIEW）；有裁决+[升级] → 放行。
+  // 131: R1 旧兼容——旧 change(无 newChange)处置标记缺失仍 WARN；并内扩延期裁决门禁（含 Minor）
+  // 的旧 change 渐进面：无用户裁决 / Minor 缺判据 → 只 WARN 不 BLOCK（不卡死旧 REVIEW）；有裁决
+  // +[升级] → 放行。
   {
-    name: '131 review exit 兼容：旧 change 处置标记缺失仍 WARN + Major 延期渐进（R1 旧兼容）',
+    name: '131 review exit 兼容：旧 change 处置标记缺失仍 WARN + 延期渐进（R1 旧兼容）',
     run: (dir) => {
       const st = baseState('review');
       st.evidence.review = { summary: 'reviewed' };
@@ -1435,6 +1465,22 @@ export const ENTRIES = [
       assertOut(resOrderedMajor, 'REVIEW WARN');
       assertOut(resOrderedMajor, '用户裁决');
       assertNotOut(resOrderedMajor, 'BLOCKED');
+      // 子断言:Minor [转待办] 无用户裁决 → 旧 change 同样只 WARN 不 BLOCK（延期门禁覆盖任何
+      // 严重度，旧 REVIEW 渐进提示、不卡死既有 change）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-6 · 旧 change 未裁决的小项**：某处小问题 [转待办]\n\n## 结论\n\n通过\n');
+      const resMinorDeferred = runGuard(['exit', 'review'], dir);
+      assertExit(resMinorDeferred, 0);
+      assertOut(resMinorDeferred, 'REVIEW WARN');
+      assertOut(resMinorDeferred, 'm-6 · 旧 change 未裁决的小项');
+      assertOut(resMinorDeferred, '用户裁决');
+      assertNotOut(resMinorDeferred, 'BLOCKED');
+      // 子断言:Minor [转待办] + 裁决记录但缺「判 Minor：」判据 → 旧 change 只 WARN 不 BLOCK
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-7 · 旧 change 缺判据的小项**：某处小问题 [升级] [转待办]\n\n- 用户裁决：接受延期 —— 发现 m-7：下一 change 首修。\n\n## 结论\n\n通过\n');
+      const resMinorNoReason = runGuard(['exit', 'review'], dir);
+      assertExit(resMinorNoReason, 0);
+      assertOut(resMinorNoReason, 'REVIEW WARN');
+      assertOut(resMinorNoReason, '判 Minor：');
+      assertNotOut(resMinorNoReason, 'BLOCKED');
     },
   },
 
