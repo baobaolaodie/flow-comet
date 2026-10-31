@@ -10,6 +10,7 @@ import {
   assertNotOut,
   assertOut,
   baseState,
+  copyTreePortable,
   runGuard,
   runHandoff,
   runHook,
@@ -19,6 +20,7 @@ import {
 } from '../lib/test-helpers.mjs';
 import {
   CHANGE_ID,
+  SCRIPTS_DIR,
   TASK_DONE,
   TASK_P1,
   TASK_P2_PENDING,
@@ -35,6 +37,95 @@ import {
   runStateWithProtocol,
   scenarioProtocolPath,
 } from '../lib/test-assertions.mjs';
+
+// ---------- 打印出来的命令：解析 → 真实执行（本组锚点；命令形态必须可复制、可执行） ----------
+//
+// 背景：运行期消息曾把脚本命令写成未加引号的单一平台字面量，测试只断言字面串、随后改用 harness
+// 的绝对路径执行，于是「打印出来的那条命令」从未被真正执行过（形似全绿）。下面四个助手就是
+// 这条链路的夹具与断言：**从输出解析命令文本 → 按当前运行形态解析路径 → 真实执行**。
+
+// 把本套件自身技能树按安装布局复制进夹具（与 prepare-env 装出的副本同构）：副本自身运行时推导出
+// 的是**运行根相对**的脚本目录，打印的命令因此可在夹具内解析——执行的是打印文本，不是 harness
+// 的绝对脚本路径。installDirRel 是该布局在运行根下的相对目录（夹具构造，不是断言对象）。
+function installSkillTreeCopy(root, installDirRel) {
+  const skillCopy = path.join(root, installDirRel, 'flow-comet');
+  copyTreePortable(path.join(SCRIPTS_DIR, '..'), skillCopy);
+  return skillCopy;
+}
+
+// 跑指定脚本（副本形态）：cwd = 夹具根（与 run* 助手同一运行根口径）。
+function runScriptCopy(scriptPath, args, root, envOverrides = {}) {
+  const res = spawnSync(process.execPath, [scriptPath, ...args], {
+    cwd: root,
+    env: { ...process.env, ...envOverrides },
+    encoding: 'utf8',
+    timeout: 60000,
+  });
+  return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+}
+
+// 打印命令 → argv：按 shell 分词语义处理双引号与单引号（引号内空白不切分，引号本身不进入参数）。
+// 该解析器对「整条路径未加引号」有判别力——缺引号时含空格的路径会被切成多个参数。
+function splitPrintedCommand(command) {
+  const argv = [];
+  let current = '';
+  let quote = null;
+  let started = false;
+  for (const ch of command) {
+    if (quote) {
+      if (ch === quote) { quote = null; continue; }
+      current += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; started = true; continue; }
+    if (/\s/.test(ch)) {
+      if (started) { argv.push(current); current = ''; started = false; }
+      continue;
+    }
+    current += ch;
+    started = true;
+  }
+  if (quote) throw new Error('打印命令的引号未闭合: ' + command);
+  if (started) argv.push(current);
+  return argv;
+}
+
+// 真实执行打印出来的那条命令：解释器名 `node` 换成本进程的 node 可执行文件（PATH 解析不是本锚点
+// 的断言对象，脚本路径与参数才是），其余一律照打印文本解析。
+function runPrintedCommand(command, root, envOverrides = {}) {
+  const argv = splitPrintedCommand(command);
+  const interpreter = /^node(\.exe)?$/i.test(argv[0]) ? process.execPath : argv[0];
+  const res = spawnSync(interpreter, argv.slice(1), {
+    cwd: root,
+    env: { ...process.env, ...envOverrides },
+    encoding: 'utf8',
+    timeout: 60000,
+  });
+  return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+}
+
+// 打印命令的三条形态断言：① 脚本路径整条加双引号；② 分词后脚本参数恰好是那一条路径（引号被剥
+// 离、空格不裂开）；③ 路径按**当前运行形态**解析到真实脚本（与期望副本同一文件——不写死任何
+// 平台根：断言只问「能不能解析到该脚本」，不问它以哪个平台目录开头）。
+function assertPrintedCommandResolves(command, root, expectedScript, label) {
+  const match = command.match(/^node "([^"]+)"(?: .*)?$/);
+  if (!match) {
+    throw new Error(label + ' 的脚本路径未整条加双引号（安装根含空格时会被 shell 分词）: ' + command);
+  }
+  const printedScript = match[1];
+  const argv = splitPrintedCommand(command);
+  if (argv[1] !== printedScript) {
+    throw new Error(label + ' 的脚本路径被分词拆开: ' + JSON.stringify(argv));
+  }
+  const resolved = path.resolve(root, printedScript);
+  if (!fs.existsSync(resolved)) {
+    throw new Error(label + ' 的脚本路径按当前运行形态不可解析: ' + printedScript + ' → ' + resolved);
+  }
+  if (fs.realpathSync(resolved) !== fs.realpathSync(expectedScript)) {
+    throw new Error(label + ' 解析到了别的脚本: ' + resolved + '（期望 ' + expectedScript + '）');
+  }
+  return printedScript;
+}
 
 export const ENTRIES = [
 
@@ -65,11 +156,30 @@ export const ENTRIES = [
       const resNoEvidence = runGuard(['exit', 'subagent-execute'], dir);
       assertExit(resNoEvidence, 1);
       assertOut(resNoEvidence, 'BLOCKED: missing Output Schema evidence');
-      assertOut(resNoEvidence, 'node .claude/skills/flow-comet/scripts/workflow-state.mjs record subagent-execute');
       assertOut(resNoEvidence, '{"summary":"<本节点完成摘要>"}');
       assertOut(resNoEvidence, '后重试 exit');
-      // 照抄恢复命令（同一 CLI 形态）→ 同一 exit 通过（恢复路径可执行，不只是「知道缺什么」）
-      assertExit(runStateWithProtocol(dir, ['record', 'subagent-execute', '{"summary":"补记本节点完成摘要"}']), 0);
+      // ② 恢复命令**从输出解析**（不再与字面串比对——字面量断言正是此前漏检的成因）：随后对解析出
+      // 的命令断言「整条路径加引号 + 按当前运行形态解析到真实脚本」并在夹具里真实执行。
+      const recordCommand = (resNoEvidence.output.match(/恢复: (node .+?) 后重试 exit/) || [])[1];
+      if (!recordCommand) {
+        throw new Error('BLOCKED 输出的恢复行缺可解析的 record 命令:\n' + resNoEvidence.output);
+      }
+      // 安装布局：权威源 = 设计形态（安装器把它装到平台根下）；把本套件技能树按该布局复制进夹具，
+      // 打印的相对路径才可解析。目标目录是夹具构造，不是断言对象——断言只问「解析到哪个脚本」。
+      const skillCopy = installSkillTreeCopy(dir, path.join('.claude', 'skills'));
+      assertPrintedCommandResolves(recordCommand, dir,
+        path.join(skillCopy, 'scripts', 'workflow-state.mjs'), '恢复命令');
+      // ③ 照抄打印出来的那条命令执行（不是 harness 的绝对脚本路径）→ 退出 0，且载荷按打印值写入
+      const resRecoveredByCommand = runPrintedCommand(recordCommand, dir, {
+        FLOW_COMET_RUN_ROOT: dir,
+        FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir),
+      });
+      assertExit(resRecoveredByCommand, 0);
+      const stRecovered = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+      if (stRecovered.evidence['subagent-execute'].summary !== '<本节点完成摘要>') {
+        throw new Error('照抄恢复命令后 evidence.summary 未按打印载荷写入，实际: '
+          + JSON.stringify(stRecovered.evidence['subagent-execute']));
+      }
       const resEvidenceRecovered = runGuard(['exit', 'subagent-execute'], dir);
       assertExit(resEvidenceRecovered, 0);
       assertOut(resEvidenceRecovered, 'ALL CHECKS PASSED');
@@ -153,9 +263,16 @@ export const ENTRIES = [
       // result 成功路径在 HANDOFF RESULT 之后追加 PREFLIGHT（SUMMARY 结构预检提示）——当前节点
       // 取自 state.currentNode；该行不得改写既有 HANDOFF RESULT 前缀，也不得出现在失败路径。
       assertOut(res2, 'PREFLIGHT: SUMMARY 结构尚未校验');
-      assertOut(res2, 'node .claude/skills/flow-comet/scripts/workflow-guard.mjs exit subagent-execute');
       assertOut(res2, '但不带 --apply');
       assertOut(res2, '跑完整门禁、不推进状态');
+      // PREFLIGHT 命令同样从输出解析（不再与字面串比对）：加引号的脚本路径 + exit <当前节点>。
+      const preflightCommand = (res2.output.match(/可运行 (node .+?) 但不带 --apply/) || [])[1];
+      if (!preflightCommand) {
+        throw new Error('PREFLIGHT 行缺可解析的 exit 命令:\n' + res2.output);
+      }
+      if (!/^node "[^"]+" exit subagent-execute$/.test(preflightCommand)) {
+        throw new Error('PREFLIGHT 命令形态应为「整条加引号的脚本路径 + exit <当前节点>」，实际: ' + preflightCommand);
+      }
       const resultLineAt = res2.output.indexOf('HANDOFF RESULT: P01');
       const preflightLineAt = res2.output.indexOf('PREFLIGHT:');
       if (!(resultLineAt >= 0 && preflightLineAt > resultLineAt)) {
@@ -168,6 +285,43 @@ export const ENTRIES = [
       }
       if (!rec.greenEvidence.recordedAt || typeof rec.greenEvidence.recordedAt !== 'string') {
         throw new Error('greenEvidence 未附带 recordedAt: ' + JSON.stringify(rec.greenEvidence));
+      }
+
+      // ---------- PREFLIGHT 命令的真实执行（安装副本 + 含空格的路径；in-place 扩展） ----------
+      // ④ 平台化推导必须是**运行形态**的结果，而不是写死的平台字面量：把技能树复制到运行根下
+      // 含空格的相对目录，用副本自身跑 workflow-handoff —— 打印出的路径须带那个空格、整条加引号、
+      // 分词后仍是单一脚本参数，并在夹具里真实跑起来（缺引号时这条命令当场作废）。
+      const spaceSkillCopy = installSkillTreeCopy(dir, 'user install');
+      const resCopy = runScriptCopy(path.join(spaceSkillCopy, 'scripts', 'workflow-handoff.mjs'),
+        ['result', 'P01', both], dir, {
+          FLOW_COMET_RUN_ROOT: dir,
+          FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir),
+        });
+      assertExit(resCopy, 0);
+      assertOut(resCopy, 'HANDOFF RESULT: P01');
+      const copyPreflightCommand = (resCopy.output.match(/可运行 (node .+?) 但不带 --apply/) || [])[1];
+      if (!copyPreflightCommand) {
+        throw new Error('副本形态的 PREFLIGHT 行缺可解析的 exit 命令:\n' + resCopy.output);
+      }
+      const stateFile = path.join(dir, '.flow-comet', 'flow-comet-state.json');
+      const printedGuardScript = assertPrintedCommandResolves(copyPreflightCommand, dir,
+        path.join(spaceSkillCopy, 'scripts', 'workflow-guard.mjs'), 'PREFLIGHT 命令（安装副本形态）');
+      if (!printedGuardScript.includes(' ')) {
+        throw new Error('该形态的脚本路径应含空格（引号契约的判别场景），实际: ' + printedGuardScript);
+      }
+      const stateBytesBeforePreflight = fs.readFileSync(stateFile, 'utf8');
+      const resPreflight = runPrintedCommand(copyPreflightCommand, dir, {
+        FLOW_COMET_RUN_ROOT: dir,
+        FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir),
+      });
+      // 预检 = 跑完整出口门禁但不推进状态：须有真实门禁判决（该夹具本身不完整，通过/阻塞都算真跑），
+      // 且 state 字节零改写。
+      if (!/(ALL CHECKS PASSED|BLOCKED:)/.test(resPreflight.output)) {
+        throw new Error('PREFLIGHT 命令未真正跑到出口门禁（无门禁判决）: exit ' + resPreflight.status
+          + '\n' + resPreflight.output);
+      }
+      if (fs.readFileSync(stateFile, 'utf8') !== stateBytesBeforePreflight) {
+        throw new Error('PREFLIGHT（不带 --apply）不得改写 state');
       }
     },
   },

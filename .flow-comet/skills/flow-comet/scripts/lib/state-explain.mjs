@@ -12,14 +12,26 @@ import { runRootDir } from './state-io.mjs';
 // .agents / .dsh 乃至将来新增的平台根同一推导覆盖，无需在此登记平台清单；落在运行根之外
 // （用户级安装）时输出脚本自身的绝对路径。不得硬编码单一形态：pathReplacements 只处理 .md
 // （prepare-env 的 applyPathReplacements 按扩展名过滤），脚本内的字面量在安装副本上不会被
-// 替换——硬编码 .claude 会让 Codex / dsh 单平台安装的 explain 输出不存在的命令路径。
-// scriptsDir 由入口以自定位绝对路径传入（入口所在目录即脚本目录）。
-function platformScriptsDir(scriptsDir) {
+// 替换——硬编码 .claude 会让 Codex / dsh 单平台安装的消息输出不存在的命令路径。
+// scriptsDir 由调用方以自定位绝对路径传入（调用方所在脚本目录）；runRoot 缺省取状态上下文的运行根
+// （state CLI 已初始化）——其它入口（守卫 / 委托脚本）没有该上下文，须显式传入自己的运行根。
+// 本函数是这条推导的唯一实现：运行期消息与 explain 的 COMMAND 行都从这里取（L-067：同一推导
+// 两处表达必然分叉）。
+export function platformScriptsDir(scriptsDir, runRoot = runRootDir()) {
   const posixDir = scriptsDir.replace(/\\/g, '/');
   if (posixDir.includes('/.flow-comet/skills/')) return '.claude/skills/flow-comet/scripts';
-  const relative = path.relative(runRootDir(), scriptsDir).split(path.sep).join('/');
+  const relative = path.relative(runRoot, scriptsDir).split(path.sep).join('/');
   if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return posixDir;
   return relative;
+}
+
+// 可复制命令形态（同一处实现：运行期消息与 explain 的 COMMAND 行共用）：脚本根（平台化）+ 脚本名
+// + 参数，整条脚本路径加双引号——安装根含空格时未加引号的路径会被 shell 按空格切分（只剩首段被当作
+// 脚本），加引号后三种平台语义下都是单一参数（引号对无空格路径无害）。调用方只提供事实（脚本目录、
+// 运行根、脚本名、参数），不得自行拼一份。
+export function scriptCommand({ scriptsDir, runRoot, script, args = [] }) {
+  return 'node "' + platformScriptsDir(scriptsDir, runRoot) + '/' + script + '"'
+    + (args.length > 0 ? ' ' + args.join(' ') : '');
 }
 
 // ① 产出物模板现问（加载链的第三环）：与 entry 的 READ TEMPLATE 行同源同实现（protocol-utils
@@ -87,15 +99,18 @@ function printNodeSkillCalls(node) {
   }
 }
 
-// ④ 三条命令（entry / exit / record，按节点 id 与平台化路径形态生成）。脚本路径整体加双引号：
-// 安装根含空格时未加引号的路径会被 shell 按空格切分（只剩路径首段被当作脚本），打印出来的命令
-// 便跑不了——加引号后三种平台语义下都是**单一参数**（引号本身对无空格路径无害）。
+// ④ 三条命令（entry / exit / record，按节点 id 与平台化路径形态生成）。命令文本一律由
+// scriptCommand 产出（唯一实现，与运行期恢复 / 预检消息同形）：脚本路径整条加双引号。
 function printNodeCommands(node, scriptsDir) {
-  const platformDir = platformScriptsDir(scriptsDir);
-  console.log('COMMAND entry: node "' + platformDir + '/workflow-guard.mjs" entry ' + node.id);
-  console.log('COMMAND exit: node "' + platformDir + '/workflow-guard.mjs" exit ' + node.id + ' --apply');
-  console.log('COMMAND record: node "' + platformDir + '/workflow-state.mjs" record ' + node.id
-    + " '{\"summary\":\"<完成摘要>\"}'");
+  console.log('COMMAND entry: ' + scriptCommand({
+    scriptsDir, script: 'workflow-guard.mjs', args: ['entry', node.id],
+  }));
+  console.log('COMMAND exit: ' + scriptCommand({
+    scriptsDir, script: 'workflow-guard.mjs', args: ['exit', node.id, '--apply'],
+  }));
+  console.log('COMMAND record: ' + scriptCommand({
+    scriptsDir, script: 'workflow-state.mjs', args: ['record', node.id, `'{"summary":"<完成摘要>"}'`],
+  }));
 }
 
 // explain <node>：缺参 / 纯空白 / 拿选项当节点名（如 --help）→ 用法错误（fail-closed，不猜）

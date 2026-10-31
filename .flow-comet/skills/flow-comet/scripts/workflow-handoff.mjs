@@ -14,6 +14,9 @@ import { taskAttrsById, taskBlocks, taskOpeningAttrs } from './task-parsing.mjs'
 // 时间形态单一权威（新增写入路径一律走本模块，禁自行拼接）：撤回留痕的时刻生成走 nowTimestamp，
 // 人可见回显走 formatLocalTimestamp（本地时间 + 显式偏移），解析走 parseTimestamp。
 import { nowTimestamp, formatLocalTimestamp, parseTimestamp } from './time-utils.mjs';
+// 命令文本的唯一实现（平台化脚本根 + 整条路径加引号）：与 workflow-guard / explain 的 COMMAND 行
+// 同源，本文件不再自拼路径（L-067）。
+import { scriptCommand } from './lib/state-explain.mjs';
 
 // workflow-handoff.mjs: Record subagent handoff evidence
 // evidence 统一记录在 subagent-execute 名下作为委托证据库——execute（串行委托）与 subagent-execute（并行委托）共用。不改成节点参数，保持最小改动。
@@ -727,8 +730,12 @@ async function main() {
     // 结果已记录 → 追加一行预检提示（仅成功路径；失败/拦截路径在上方已 exit，不会走到这里）：
     // exit 不带 --apply 会跑完整出口门禁但不写 state，用于把"攒到节点收尾才发现"的反馈前移。
     // 当前节点取 state.currentNode（state 原值，不取任何派生节点），与 --apply 的目标同一口径。
-    console.log('PREFLIGHT: SUMMARY 结构尚未校验——可运行 node .claude/skills/flow-comet/scripts/workflow-guard.mjs exit '
-      + String(state.currentNode ?? '<节点>') + ' 但不带 --apply 预检（跑完整门禁、不推进状态）');
+    console.log('PREFLIGHT: SUMMARY 结构尚未校验——可运行 ' + scriptCommand({
+      scriptsDir: __dirname,
+      runRoot,
+      script: 'workflow-guard.mjs',
+      args: ['exit', String(state.currentNode ?? '<节点>')],
+    }) + ' 但不带 --apply 预检（跑完整门禁、不推进状态）');
     return;
   }
 

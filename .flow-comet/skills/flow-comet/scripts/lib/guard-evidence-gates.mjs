@@ -7,6 +7,7 @@
 
 import { promises as fs } from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor } from '../state-schema.mjs';
 import { EXECUTE_FAMILY_NODE_IDS, analyzeDependencyGraph, normalizeHeading } from '../route-node.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from '../task-parsing.mjs';
@@ -25,6 +26,13 @@ import {
 } from './guard-routing.mjs';
 import { applicabilityGatedBinding, frontendCriterion } from './guard-uidesign.mjs';
 import { buildSkeleton, headingPattern, LESSONS_SCAN_SECTION } from './guard-artifact-skeleton.mjs';
+// 命令文本的唯一实现（平台化脚本根 + 整条路径加引号）：运行期恢复指引与 explain 的 COMMAND 行
+// 同源；本模块不再自拼路径（L-067：同一推导两处表达必然分叉）。
+import { scriptCommand } from './state-explain.mjs';
+
+// 本模块位于 <技能包>/scripts/lib：脚本目录由自身位置推导一次——「自己在哪」与运行根是本模块提供
+// 的两个事实，平台化与引号形态本身在 state-explain。
+const scriptsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // directOverride 授权约束（direct 是用户决策点，不可自决——机制约束）——execute / subagent-execute
 // 出口校验：executionMode=direct 且 directOverride=true（显式直显授权态）须存在授权审计记录
@@ -714,8 +722,12 @@ export async function runEvidenceCompletionGate({ protocol, node, state, evidenc
     console.error('BLOCKED: missing Output Schema evidence: ' + missingSchemaEvidence.join(', '));
     // 阻塞消息给可照抄的下一步：record 只写 summary 即视为产出证据（与判据同一口径），
     // 照抄执行后同一 exit 即可通过——不再让执行者从字段清单反推该跑什么命令。
-    console.error('恢复: node .claude/skills/flow-comet/scripts/workflow-state.mjs record ' + node.id
-      + ` '{"summary":"<本节点完成摘要>"}' 后重试 exit`);
+    console.error('恢复: ' + scriptCommand({
+      scriptsDir,
+      runRoot,
+      script: 'workflow-state.mjs',
+      args: ['record', node.id, `'{"summary":"<本节点完成摘要>"}'`],
+    }) + ' 后重试 exit（bash / PowerShell 可直接执行；cmd.exe 请把单引号换成双引号，并转义载荷里原有的双引号）');
     process.exit(1);
   }
 }
