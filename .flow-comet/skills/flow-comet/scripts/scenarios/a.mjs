@@ -418,6 +418,29 @@ export const ENTRIES = [
           + '\nnext  : ' + nextCoordinatorLine + '\nrecord: ' + recordCoordinatorLine);
       }
 
+      // ---------- record 载荷必须是对象（in-place 扩展） ----------
+      // 形状校验只判「对象各字段的类型」（state-schema 的 evidencePayloadProblems 对非对象载荷
+      // 直接放行），于是载荷本身不是对象时旧实现两条路都错：null 一路走到读 `parsed.completedChecks`
+      // 时抛 TypeError——报文是堆栈，既不说哪一步错了、也不说载荷该长什么样；数组/字符串/数字则被
+      // 静默改写成 { summary: String(...) }，替调用方编了一份它没说过的载荷。两类都在入口拦下：
+      // 非零退出、报文点名当前类型、state 字节零改写。判定放在 runRecord 入口而不是共享形状表——
+      // 它判的是「载荷本身是不是对象」，与「对象各字段的类型」是两件事，各自守自己边界内的事实。
+      const payloadBytes = readStateBytes(dir);
+      for (const [label, payload, typeName] of [
+        ['null', 'null', 'null'],
+        ['数组', '[1,2]', 'array'],
+        ['字符串', '"just a summary string"', 'string'],
+        ['数字', '42', 'number'],
+      ]) {
+        const badPayload = runState(['record', 'execute', payload], dir);
+        assertExit(badPayload, 1);
+        assertOut(badPayload, 'record 载荷必须是对象（当前是 ' + typeName + '）');
+        if (badPayload.output.includes('TypeError')) {
+          throw new Error(label + ' 载荷应被可读报文拒绝，不得抛 TypeError：\n' + badPayload.output);
+        }
+        assertStateBytesUnchanged(dir, payloadBytes, label + ' 载荷在写入前被拒绝（state 字节零改写）');
+      }
+
       // ---------- Fix 归位态的节点视图（in-place 扩展） ----------
       // 缺陷复现：currentNode=review、REVIEW.md 在场、TASK 有 pending 修复任务时，next 的
       // FIX-BATCH 分支先于共享视图返回并打印 NODE: execute，status 只走共享视图——它按「进行中

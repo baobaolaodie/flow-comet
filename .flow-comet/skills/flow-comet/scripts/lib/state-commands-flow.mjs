@@ -765,7 +765,6 @@ export async function runRecord(protocol, argv) {
   // trim 后以 {/[ 开头 → 视作"形似对象字面量"；若 JSON.parse 失败 → fail-closed。
   try {
     parsed = raw ? JSON.parse(raw) : {};
-    if (typeof parsed !== 'object' || Array.isArray(parsed)) parsed = { summary: String(parsed) };
   } catch {
     // 契约解析失败 fail-closed:payload 形似对象但 JSON.parse 失败 → 报错并
     // process.exit(1),不写 evidence——防状态污染（旧语义把不可解析 raw 静默作
@@ -782,6 +781,24 @@ export async function runRecord(protocol, argv) {
       process.exit(1);
     }
     parsed = { summary: raw || 'recorded' };
+  }
+  // 载荷本身必须是对象（入口判据，先于形状校验与任何写盘）：JSON 可解析的非对象取值
+  // （null / 数组 / 字符串 / 数字）旧实现两条路都错——null 一路放行到读 parsed.completedChecks 时
+  // 抛 TypeError（报文是堆栈，既不说哪一步错了、也不说载荷该长什么样），数组/字符串/数字则被静默
+  // 改写成 { summary: String(...) }（替调用方编了一份它没说过的载荷，证据从此不可按字段消费）。
+  // 本判据只在本入口：形状表（state-schema.evidencePayloadProblems）判的是「对象各字段的类型」，
+  // 载荷不是对象时它按设计放行——两件事各守自己边界内的事实，不互相越界。
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    const payloadTypeName = parsed === null ? 'null' : (Array.isArray(parsed) ? 'array' : typeof parsed);
+    console.error('ERROR: record 载荷必须是对象（当前是 ' + payloadTypeName + '）—— state 未改写');
+    console.error('恢复: ' + scriptCommand({
+      scriptsDir,
+      runRoot: runRootDir(),
+      script: 'workflow-state.mjs',
+      args: ['record', nodeId, `'{"summary":"<本节点完成摘要>"}'`],
+    }) + ' 用对象载荷重试；载荷里的引号被 shell 吞掉时改用 --json-file <path> 传入 JSON 文件'
+      + '（cmd.exe 请把单引号换成双引号，并转义载荷里原有的双引号）');
+    process.exit(1);
   }
   // 载荷形状校验（写入前 fail-closed；判定单一来源 = state-schema.evidencePayloadProblems）：
   // 类型错误的载荷不得落库——否则下游出口门禁只会报「缺 evidence: <schema>」，出错的是 record、
