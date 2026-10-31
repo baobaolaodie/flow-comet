@@ -1263,8 +1263,9 @@ export async function runSkillLoadMarkerGate({ node, state }) {
 // 同轮报告（顺序即反馈优先级）：缺件与结构问题在**同一轮**里报出——先逐项列缺失工件（路径 + 模板
 // 指针），再列结构问题，互不因对方而跳过。
 // 只读：不写 state，也不写模板提示账本（.template-hints.json）⇒ 骨架报告停在两阶段报文的**首段
-// 形态**（模板路径 + 类别计数，缺段只报数量不列段名），段名要等节点收尾的完整 exit；判据本身来自
-// evaluateArtifact（骨架 + 模板派生的同一实现），不在此另写段形判定。
+// 形态**（模板路径 + 类别计数）：**H2 缺段**只报数量（段名等节点收尾的完整 exit），结构子段与父段
+// 写法建议照常点名——它们本身就带定位信息，预检与收尾两种模式一致；判据本身来自 evaluateArtifact
+// （骨架 + 模板派生的同一实现），不在此另写段形判定。
 // 边界：预检通过 = **结构面**通过，不代表进展门禁会通过——推进仍由完整 exit / --apply 决定。
 
 // 声明工件的路径显示口径（与 explain 的产物行同源语义）：specs-root 加 `.specs/` 前缀，
@@ -1378,9 +1379,9 @@ async function runPreflightSkeletonChecks({ node, state }) {
         + '（修复: 按安装指引获取 flow-kit 模板后重试）');
       continue;
     }
-    // 首段形态 = 同一格式器在 escalate=false 下的输出：缺段只报类别计数（预检不读提示账本，
-    // 不列段名），其余类别本身即定位信息。账本由报告函数写，格式器是纯函数——复用不会写盘，
-    // 结构子段缺口的「该怎么写」建议因此在预检与收尾两种模式下一致。
+    // 首段形态 = 同一格式器在 escalate=false 下的输出：**H2 缺段**只报类别计数（预检不读提示账本，
+    // 段名留到再犯），结构子段与父段写法建议照常点名；其余类别本身即定位信息。账本由报告函数写，
+    // 格式器是纯函数——复用不会写盘，结构子段缺口的「该怎么写」建议因此在预检与收尾两种模式下一致。
     const parts = formatIssueParts(evaluated.issues, { escalate: false });
     if (parts.length === 0) continue;
     failures.push({ file: target.file, parts, template: evaluated.skeleton.file });
@@ -1394,7 +1395,8 @@ async function runPreflightSkeletonChecks({ node, state }) {
     console.error('恢复: 对照 ' + [...templatePaths].join(' / ')
       + ' 修正标题 / 首部字段 / 段序，并按模板补齐缺失的 H2 与结构型 H3 标题'
       + '（条件段与无内容段正文可写 N/A；可选段按模板自述可整段删除）后重试 exit ' + node.id + ' --preflight'
-      + '（预检只读、不写提示账本，故缺段只报类别计数、不列段名；要看段名请等节点收尾的完整 exit（它维护提示账本），或直接按模板逐段对照）');
+      + '（预检只读、不写提示账本，故 H2 缺段只报类别计数；结构子段与父段写法建议会点名到具体段。'
+      + '要知道被计数的那些段名，请等节点收尾的完整 exit（它维护提示账本），或直接按模板逐段对照）');
     process.exit(1);
   }
   for (const line of lines) {
