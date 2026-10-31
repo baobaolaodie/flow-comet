@@ -33,6 +33,7 @@ import {
   writeCustomProtocol,
 } from '../lib/test-fixtures.mjs';
 import {
+  assertStateBytesUnchanged,
   readStateBytes,
   requireRouteNodeExport,
   runGuardWithProtocol,
@@ -1004,6 +1005,54 @@ export const ENTRIES = [
       }
       if (ev.completedChecks === undefined) {
         throw new Error('completedChecks 丢失（payload 未解析为对象）: ' + JSON.stringify(ev));
+      }
+
+      // ---------- 载荷形状校验（in-place 扩展；不新增场景条目） ----------
+      // 缺陷形态：summary 写成对象/数组/数字或空串时，record 照样把它写进 evidence。下游 exit 只看到
+      // 「没有非空字符串 summary」，于是报 requires evidence: <schema>——出错的是 record、报错的却是
+      // exit，执行者要自己反推「载荷该是什么形状」。以下断言把报错锁在坏载荷落库之前：点名字段路径
+      // 与当前类型、给出可照抄的正确形态，且 state 字节零改写。
+      const beforeBytes = readStateBytes(dir);
+      const malformed = [
+        { payload: '{"summary":{"nested":"object"}}', expect: 'summary: 必须是字符串（当前是 object）' },
+        { payload: '{"summary":["lane"]}', expect: 'summary: 必须是字符串（当前是 array）' },
+        { payload: '{"summary":42}', expect: 'summary: 必须是字符串（当前是 number）' },
+        { payload: '{"summary":""}', expect: 'summary: 必须是非空字符串（当前是空串）' },
+        { payload: '{"summary":"x","completedChecks":[{"id":"a"}]}', expect: 'completedChecks[0]: 必须是字符串（当前是 object）' },
+        {
+          payload: '{"summary":"x","lessonsNomination":{"nominated":[{"id":"a"}],"reasonIfNone":""}}',
+          expect: 'lessonsNomination.nominated[0]: 必须是字符串（当前是 object）',
+        },
+      ];
+      let lastMalformed = null;
+      for (const item of malformed) {
+        const res = runState(['record', 'open', item.payload, '--protocol', custom], dir);
+        assertExit(res, 1);
+        assertOut(res, item.expect);
+        assertStateBytesUnchanged(
+          dir,
+          beforeBytes,
+          '形状非法的载荷必须在写入前被拒（' + item.payload + '）',
+        );
+        lastMalformed = res;
+      }
+      // 报文还得给「该写成什么」：只有一句「不合法」等于让执行者再猜一次。
+      assertOut(lastMalformed, '\'{"summary":"<本节点完成摘要>"}\'');
+      assertOut(lastMalformed, '--json-file');
+      assertOut(lastMalformed, 'cmd.exe');
+      // 正锚：类型合法的载荷逐字通过（校验只判类型，不新增业务规则）
+      const okPayload = JSON.stringify({
+        summary: '形状合法',
+        completedChecks: ['unit-tests'],
+        lessonsNomination: { scanned: 0, nominated: [], reasonIfNone: '无新增条目' },
+      });
+      const okRes = runState(['record', 'open', okPayload, '--protocol', custom], dir);
+      assertExit(okRes, 0);
+      const okEvidence = JSON.parse(readStateBytes(dir)).evidence.open;
+      if (okEvidence.summary !== '形状合法'
+        || okEvidence.lessonsNomination.reasonIfNone !== '无新增条目'
+        || !Array.isArray(okEvidence.completedChecks)) {
+        throw new Error('类型合法的载荷未被原样写入: ' + JSON.stringify(okEvidence));
       }
     },
   },

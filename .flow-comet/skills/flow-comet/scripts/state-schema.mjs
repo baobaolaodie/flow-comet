@@ -170,6 +170,81 @@ export function validateStateFields(state) {
   return bad;
 }
 
+// ---------- record 的 evidence payload 形状校验(单一来源) ----------
+// record 把解析后的 payload 原样展开进 evidence.<node>。字段类型错误此前一律静默落库:summary 写成
+// 对象/数组/数字时,下游出口门禁只看到「没有非空字符串 summary」,于是报 requires evidence:
+// <schema-id>——出错的是 record、报错的却是 exit,执行者得自己反推「载荷该写什么形状」。校验因此放在
+// **写入前**:点名字段路径与当前类型,不落库、也不先做其它副作用(声明标记补写等)。
+// 只做**类型**判定:取值是否合法(如 lessonsNomination.scanned 是否等于 SUMMARY 份数、提名编号是否
+// 真实登记)仍归出口门禁——本表不复制、不新增业务规则;未知字段继续放行(前向兼容)。
+// 字段集合 = evidence.<node> 上**被下游消费且类型为字符串**的字段(summary、completedChecks 元素、
+// lessonsNomination.nominated 元素与 reasonIfNone)。
+const EVIDENCE_PAYLOAD_SHAPES = [
+  { field: 'summary', kind: 'non-empty-string' },
+  { field: 'completedChecks', kind: 'string-array' },
+  {
+    field: 'lessonsNomination',
+    kind: 'object',
+    fields: [
+      { field: 'nominated', kind: 'string-array' },
+      { field: 'reasonIfNone', kind: 'string' },
+    ],
+  },
+];
+
+// 报错文案的两个零件(同一句话只在这里拼):类型名沿用 JS/JSON 习惯(object / array / number…),
+// 空值单独命名——「必须是字符串」对空串不成立,执行者需要看到的判据是「非空」。
+function evidenceValueTypeName(value) {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  return typeof value;
+}
+
+function evidenceTypeProblems(value, shape, fieldPath) {
+  const problems = [];
+  if (shape.kind === 'string' || shape.kind === 'non-empty-string') {
+    if (typeof value !== 'string') {
+      problems.push({ field: fieldPath, message: '必须是字符串（当前是 ' + evidenceValueTypeName(value) + '）' });
+    } else if (shape.kind === 'non-empty-string' && value.trim() === '') {
+      problems.push({ field: fieldPath, message: '必须是非空字符串（当前是' + (value === '' ? '空串' : '空白字符串') + '）' });
+    }
+    return problems;
+  }
+  if (shape.kind === 'string-array') {
+    if (!Array.isArray(value)) {
+      problems.push({ field: fieldPath, message: '必须是字符串数组（当前是 ' + evidenceValueTypeName(value) + '）' });
+      return problems;
+    }
+    value.forEach((item, index) => {
+      if (typeof item !== 'string') {
+        problems.push({ field: fieldPath + '[' + index + ']', message: '必须是字符串（当前是 ' + evidenceValueTypeName(item) + '）' });
+      }
+    });
+    return problems;
+  }
+  // object:容器本身先判类型,再逐个子字段判——嵌套字段的路径带上前缀(lessonsNomination.nominated[0])
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    problems.push({ field: fieldPath, message: '必须是对象（当前是 ' + evidenceValueTypeName(value) + '）' });
+    return problems;
+  }
+  for (const child of shape.fields ?? []) {
+    if (!Object.prototype.hasOwnProperty.call(value, child.field)) continue;
+    problems.push(...evidenceTypeProblems(value[child.field], child, fieldPath + '.' + child.field));
+  }
+  return problems;
+}
+
+// 返回形状问题数组(空 = 合法):调用方(record)负责报文与退出码,本函数只描述事实。
+export function evidencePayloadProblems(payload) {
+  const problems = [];
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return problems;
+  for (const shape of EVIDENCE_PAYLOAD_SHAPES) {
+    if (!Object.prototype.hasOwnProperty.call(payload, shape.field)) continue;
+    problems.push(...evidenceTypeProblems(payload[shape.field], shape, shape.field));
+  }
+  return problems;
+}
+
 // ---------- verifyFailures 按 change 读写(单一来源——workflow-state verify-fail 与
 // workflow-guard exit verify 共用) ----------
 

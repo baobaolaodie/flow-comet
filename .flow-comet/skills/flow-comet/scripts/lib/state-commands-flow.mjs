@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, isSingleSegmentChangeName, EXECUTE_FAMILY_NODE_IDS } from '../route-node.mjs';
 import { taskOpeningAttrs, taskBlocks } from '../task-parsing.mjs';
 import { NODE_PROTOCOL_FILES, SKILL_PROTOCOL_FILES, inspectWorkflowPathSegments } from '../protocol-utils.mjs';
-import { looksLikeObjectLiteral, toPersistedProtocolPath, writeJsonAtomic } from '../state-schema.mjs';
+import { evidencePayloadProblems, looksLikeObjectLiteral, toPersistedProtocolPath, writeJsonAtomic } from '../state-schema.mjs';
 import { nowTimestamp } from '../time-utils.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide } from '../context-init.mjs';
 import { fileExists, findActiveChange, readState, writeState, specsDir, runRootDir, hasExactSpecsEntry } from './state-io.mjs';
@@ -712,6 +712,27 @@ export async function runRecord(protocol, argv) {
       process.exit(1);
     }
     parsed = { summary: raw || 'recorded' };
+  }
+  // 载荷形状校验（写入前 fail-closed；判定单一来源 = state-schema.evidencePayloadProblems）：
+  // 类型错误的载荷不得落库——否则下游出口门禁只会报「缺 evidence: <schema>」，出错的是 record、
+  // 报错的却是 exit，执行者得自己反推载荷该写什么形状。故在此拦下：点名字段路径与当前类型，
+  // 给出可照抄的正确形态；只判类型/非空，取值是否合法（扫描份数、提名编号是否登记）仍归出口门禁。
+  const shapeProblems = evidencePayloadProblems(parsed);
+  if (shapeProblems.length > 0) {
+    console.error('ERROR: record 载荷形状不合法（写入前拒绝，state 未改写）:');
+    for (const problem of shapeProblems) {
+      console.error('  ' + problem.field + ': ' + problem.message);
+    }
+    console.error('恢复: ' + scriptCommand({
+      scriptsDir,
+      runRoot: runRootDir(),
+      script: 'workflow-state.mjs',
+      args: ['record', nodeId, `'{"summary":"<本节点完成摘要>"}'`],
+    }) + ' 用类型合法的载荷重试（summary 为非空字符串；completedChecks 为字符串数组；'
+      + 'lessonsNomination 为 { scanned, nominated[], reasonIfNone }，nominated 元素是条目编号字符串）'
+      + '；载荷里的引号被 shell 吞掉时改用 --json-file <path> 传入 JSON 文件'
+      + '（cmd.exe 请把单引号换成双引号，并转义载荷里原有的双引号）');
+    process.exit(1);
   }
   // completedChecks 真实性校验（skill-load 声明标记）——解析本次 record 写入的
   // completedChecks 的 required-skill:<node>.<skill> 条目 → 对应声明标记必须存在，
