@@ -136,11 +136,39 @@ export const ENTRIES = [
   },
 
   // 6: plan exit 通过（task 块 + verify 字段）
+  // 结构预检在 plan 节点的覆盖：七字段分支只在 plan 生效，缺字段时预检即拦且只读，字段齐时通过。
+  // 七字段门禁的阻断分支只对新 change 生效（旧 change 渐进 WARN），故预检这一段用新 change 夹具。
   {
     name: '06 plan exit 通过（task 块 + verify）',
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
+      writeState(dir, st);
+      const newChangeState = { ...baseState('plan'), newChange: true, enteredNodes: ['plan'] };
+      newChangeState.evidence.plan = { summary: 'plan done' };
+      writeState(dir, newChangeState);
+      // ① 缺 write_files → 预检 BLOCKED，且 state 字节零改写
+      const missingFieldTask =
+        '<task id="T01" status="pending"><name>任务一</name><read_files>src/*</read_files>'
+        + '<action>实现 T01</action><verify>node --check src/t1.mjs</verify><done>AC-1</done>'
+        + '<depends_on></depends_on></task>\n';
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + missingFieldTask);
+      const missingBytes = readStateBytes(dir);
+      const missingPre = runGuard(['exit', 'plan', '--preflight'], dir);
+      assertExit(missingPre, 1);
+      assertOut(missingPre, 'BLOCKED');
+      assertOut(missingPre, '缺 7 字段');
+      assertOut(missingPre, '缺 write_files');
+      assertStateBytesUnchanged(dir, missingBytes, '预检的七字段门禁同样只读：不得写 state');
+      // ② 七字段齐 → 预检通过（只读面不越权放行推进，完整 exit 仍由原夹具证明）
+      const completeTask =
+        '<task id="T01" status="pending"><name>任务一</name><read_files>src/*</read_files>'
+        + '<write_files>src/t1.mjs</write_files><action>实现 T01</action>'
+        + '<verify>node --check src/t1.mjs</verify><done>AC-1</done><depends_on></depends_on></task>\n';
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + completeTask);
+      const completePre = runGuard(['exit', 'plan', '--preflight'], dir);
+      assertExit(completePre, 0);
+      assertOut(completePre, 'ALL CHECKS PASSED');
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
       const res = runGuard(['exit', 'plan'], dir);
