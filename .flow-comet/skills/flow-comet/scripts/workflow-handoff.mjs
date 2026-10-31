@@ -20,6 +20,8 @@ import { initStateContext, findActiveChange } from './lib/state-io.mjs';
 // 节点视图与预检命令段的单一实现（status / next / handoff result 同源）：本文件不自拼命令、不复制
 // 「先跑哪个出口」的判定（L-058 路由单一权威 / L-067 同一推导两处表达）。
 import { resolveNodeView, structuralPreflightHint } from './lib/state-commands-flow.mjs';
+// 开工前的 LESSONS 命中集：与出口门禁同一份命中算法（路径词元 × 条目关键词），本文件不复制一份。
+import { LESSONS_HIT_LIMIT, lessonsEntries, lessonsHits, lessonsPathTokens, taskWriteFilesById } from './lib/lessons-hits.mjs';
 
 // workflow-handoff.mjs: Record subagent handoff evidence
 // evidence 统一记录在 subagent-execute 名下作为委托证据库——execute（串行委托）与 subagent-execute（并行委托）共用。不改成节点参数，保持最小改动。
@@ -461,6 +463,52 @@ function reportRequestOwnership(state, taskId, taskAttrs, ownership) {
       + ownership.targetNode + ' 记录进入');
   }
 }
+
+// ---------- 开工前的 LESSONS 命中集（只读） ----------
+// 出口按「任务 write_files 的路径段（过停用词）× .specs/LESSONS.md 条目的关键词行」重算命中集（前
+// LESSONS_HIT_LIMIT 条），并要求 SUMMARY 的 ## LESSONS 扫描 段逐条回应这些编号；执行者开工时看不到
+// 这个集合，只能按自己对任务主题的理解扫，两套口径只在出口对齐——缺项到出口才暴露、只能补写。
+// 本函数把**同一份命中算法**（lib/lessons-hits.mjs，与出口共用）的结果打印在 request 里：编号 +
+// 标题 + 命中的关键词，执行者据此逐条写「仍适用 / 差异是…」。
+// 只读：不写 state、不写任何账本。输入与出口同源：TASK.md 的 <write_files> 元素——不是命令行参数
+// --write-files（出口只认 TASK.md，拿命令行参数算出来的集合会与出口分叉）。
+async function reportLessonHits(taskContent, taskId) {
+  const scanHint = 'SUMMARY 的 ## LESSONS 扫描 段写「无 active 条目命中」即可';
+  let lessonsText = null;
+  try {
+    lessonsText = await fs.readFile(path.join(runRoot, '.specs', 'LESSONS.md'), 'utf8');
+  } catch (error) {
+    // 不可读 = 无法计算（不是「0 条」）：一行降级，不编造条目、不阻断本次 request
+    const reason = error && error.code === 'ENOENT'
+      ? '文件不存在'
+      : String(error && error.message ? error.message : error);
+    console.log('LESSONS-HITS: 无法计算（.specs/LESSONS.md 不可读：' + reason
+      + '）——本任务无从预知命中集，本次 request 照常记录；SUMMARY 的 ## LESSONS 扫描 段按实情声明未扫描到条目');
+    return;
+  }
+  if (taskContent === null || taskAttrsById(taskContent, taskId) === null) {
+    console.log('LESSONS-HITS: 无可回应条目（TASK.md ' + (taskContent === null ? '缺失' : '无匹配任务 ' + taskId)
+      + '）——出口按同一算法也算不出命中集；' + scanHint);
+    return;
+  }
+  const writeFilesById = taskWriteFilesById(taskContent);
+  if (!writeFilesById.has(taskId)) {
+    console.log('LESSONS-HITS: 无可回应条目（任务 ' + taskId + ' 未声明 write_files）——出口按同一算法也算不出命中集；' + scanHint);
+    return;
+  }
+  const hits = lessonsHits(lessonsPathTokens(writeFilesById.get(taskId)), lessonsEntries(lessonsText));
+  const summary = 'LESSONS-HITS: ' + hits.length + ' 条（本任务 write_files 路径段 × 教训册关键词，前 ' + LESSONS_HIT_LIMIT + '）';
+  if (hits.length === 0) {
+    console.log(summary + '——' + scanHint);
+    return;
+  }
+  console.log(summary);
+  for (const hit of hits) {
+    console.log('  - ' + hit.id + (hit.title ? ' · ' + hit.title : '') + '（命中词: ' + hit.shared.join('、') + '）');
+  }
+  console.log('  —— 这些条目须在 SUMMARY 的 `## LESSONS 扫描` 段逐条回应（仍适用 / 差异是…）');
+}
+
 async function main() {
   const action = process.argv[2] ?? 'status';
   const state = await readState();
@@ -536,6 +584,9 @@ async function main() {
       }
       console.error('WARN: ' + msg + '（旧 change 渐进，不阻断，不记录 noCommit）');
     }
+    // 开工前的 LESSONS 命中集（只读；与出口同一份命中算法）——放在归属门禁之前：被归属门禁拦下的
+    // request 不写 state，但执行者仍要看得到「本任务要回应哪几条」（state 字节零改写由同一路径保证）。
+    await reportLessonHits(taskContent, taskId);
     // request 归属门禁：技能声明门之后、任务解析之后、首个 state.evidence 写入之前。
     // 只读判定；新 change 不匹配 → BLOCK（state 字节零改写、不落 handoffRequests）；旧 change → 可见 WARN 后照常记录。
     const parsedTask = taskAttrsById(taskContent, taskId);

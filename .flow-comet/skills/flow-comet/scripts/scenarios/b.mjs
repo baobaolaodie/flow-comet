@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 import {
+  assertEqual,
   assertExit,
   assertNotOut,
   assertOut,
@@ -213,6 +214,81 @@ export const ENTRIES = [
       const resEvidenceRecovered = runGuard(['exit', 'subagent-execute'], dir);
       assertExit(resEvidenceRecovered, 0);
       assertOut(resEvidenceRecovered, 'ALL CHECKS PASSED');
+
+      // ---------- 开工前可见的 LESSONS 命中集（原位扩展；不新增场景条目） ----------
+      // 出口按「任务 write_files 的路径段（过停用词）× .specs/LESSONS.md 条目的关键词行」重算命中集
+      // （前 5 条），并要求 SUMMARY 的 ## LESSONS 扫描 段逐条回应这些编号；执行者开工时看不到这个
+      // 集合，只能按自己对任务主题的理解扫，两套口径只在出口对齐 —— 本段做对账：request 打印的
+      // 命中集必须与出口重算的逐条一致（同一份命中算法驱动两处，各算一套必在此红）。
+      const lessonsLedger = [
+        '# LESSONS — 跨任务失败知识库（夹具）',
+        '',
+        '## 条目区（夹具）',
+        '',
+        '### L-501 · [proc] 门禁按结构级校验',
+        '',
+        '- **关键词**: guard, template',
+        '',
+        '夹具条目正文：判据按结构级校验，不做语义判断。',
+        '',
+        '### L-502 · [test] 归档提名须留痕',
+        '',
+        '- **关键词**: template, archive',
+        '',
+        '夹具条目正文：归档提名须留痕。',
+        '',
+        '### L-503 · [doc] 与任务写路径无交集的条目',
+        '',
+        '- **关键词**: nomination, release',
+        '',
+        '夹具条目正文：本条与任务写路径无交集，不得出现在命中集里（反向构造）。',
+        '',
+      ].join('\n');
+      writeFile(dir, '.specs/LESSONS.md', lessonsLedger);
+      // 任务的写面换成与教训册关键词有交集的路径：夹具路径 src/p1.mjs 的词元是 p1，长度不足被过滤
+      // —— 命中集恒空，锚不出差异。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n'
+        + '<task id="P01" status="done" parallel="true"><action>改模板保真门禁</action>'
+        + '<write_files>scripts/lib/guard-template-fidelity.mjs</write_files>'
+        + '<verify>node --check src/p1.mjs</verify></task>\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent());
+      // ① 出口重算：扫描段没回应命中条目 → 逐条列出编号（旧 change 渐进不阻断）
+      const exitLessons = runGuard(['exit', 'subagent-execute'], dir);
+      assertOut(exitLessons, '未回应命中条目 L-501');
+      const exitHitIds = ((exitLessons.output.match(/未回应命中条目 ([^\n]*)/) || [])[1] || '').match(/L-\d+/g) || [];
+      assertEqual(exitHitIds.length, 2, '出口重算的命中条目数');
+      // ② request 开工前打印同一集合，顺序也一致（共享词多者在前）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/subagent-execute-flow-comet-dev.json',
+        JSON.stringify({ node: 'subagent-execute', skill: 'flow-comet-dev', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+      const reqLessons = runHandoff(['request', 'P01', 'lesson hits preview'], dir);
+      assertExit(reqLessons, 0);
+      assertOut(reqLessons, 'LESSONS-HITS: 2 条');
+      assertOut(reqLessons, '这些条目须在 SUMMARY 的 `## LESSONS 扫描` 段逐条回应');
+      const requestHitIds = reqLessons.output.split('\n')
+        .filter((line) => /^ {2}- L-\d+ · /.test(line))
+        .map((line) => (line.match(/L-\d+/) || [])[0]);
+      assertEqual(JSON.stringify(requestHitIds), JSON.stringify(exitHitIds),
+        'request 的命中集必须与出口重算逐条一致（同一函数驱动）');
+      assertNotOut(reqLessons, 'L-503');
+      // ③ 教训册不可读 → 一行降级提示：request 不失败、不编造条目
+      fs.rmSync(path.join(dir, '.specs', 'LESSONS.md'));
+      const reqNoLedger = runHandoff(['request', 'P01', 'ledger missing'], dir);
+      assertExit(reqNoLedger, 0);
+      assertOut(reqNoLedger, 'LESSONS-HITS: 无法计算');
+      assertNotOut(reqNoLedger, 'L-501');
+      // ④ 边界：任务本身不声明写面 → 明确「无可回应条目」，不静默跳过（教训册先复位，命中的判据
+      // 才只剩「任务没有写面」这一条）
+      writeFile(dir, '.specs/LESSONS.md', lessonsLedger);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n'
+        + '<task id="P03" status="done" parallel="true"><action>无写文件任务</action>'
+        + '<verify>node --check src/p3.mjs</verify></task>\n');
+      const reqNoWriteFiles = runHandoff(['request', 'P03', 'no write files'], dir);
+      assertExit(reqNoWriteFiles, 0);
+      assertOut(reqNoWriteFiles, '无可回应条目（任务 P03 未声明 write_files）');
+      // ⑤ 边界：TASK.md 里没有该任务（写面由显式参数给出）→ 同样给出明确说明
+      const reqNoTask = runHandoff(['request', 'P99', 'no such task', '--write-files', 'src/p99.mjs'], dir);
+      assertExit(reqNoTask, 0);
+      assertOut(reqNoTask, '无可回应条目（TASK.md 无匹配任务 P99）');
     },
   },
 
@@ -733,6 +809,11 @@ export const ENTRIES = [
       writeState(dir, reqState);
       // 真实 entry（记录 enteredNodes + 任务集签名；request 前置门要求本节点声明标记，已写）
       assertExit(runGuardWithProtocol(dir, ['entry', 'subagent-execute']), 0);
+      // 开工前的 LESSONS 命中集是只读信息：教训册在场时 request 打印本任务的命中集（本夹具任务的写面
+      // 词元 s01 命中条目 L-601）；下面同时锚定它不改写 state、不改写教训册。
+      const lessonsFile = path.join(dir, '.specs', 'LESSONS.md');
+      writeFile(dir, '.specs/LESSONS.md', '# LESSONS\n\n## 条目区（夹具）\n\n### L-601 · [proc] 委托边界须留痕\n\n- **关键词**: s01 委托边界\n');
+      const lessonsBytesBefore = fs.readFileSync(lessonsFile, 'utf8');
       const bytesBeforeRequest = fs.readFileSync(stateFile, 'utf8');
       const resOwnership = runHandoff(['request', 'S01', 'serial slice'], dir,
         { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) });
@@ -755,8 +836,14 @@ export const ENTRIES = [
       }
       assertNotOut(resOwnership, '查看当前路由，按 NODE 输出进入');
       assertNotOut(resOwnership, 'HANDOFF REQUEST');
+      // 命中集在归属门禁之前打印（BLOCK 路径不落 state）：打印面只读——state 字节零改写、教训册字节零改写
+      assertOut(resOwnership, 'LESSONS-HITS: 1 条');
+      assertOut(resOwnership, 'L-601');
+      if (fs.readFileSync(lessonsFile, 'utf8') !== lessonsBytesBefore) {
+        throw new Error('开工前的命中集打印不得改写教训册');
+      }
       if (fs.readFileSync(stateFile, 'utf8') !== bytesBeforeRequest) {
-        throw new Error('归属受阻 BLOCK 必须 state 字节零改写');
+        throw new Error('归属受阻 BLOCK 必须 state 字节零改写（含开工前打印的命中集）');
       }
       // 照报文操作：record 当前节点 + exit --apply（退出后路由自动前进到目标节点）
       assertExit(runStateWithProtocol(dir, ['record', 'subagent-execute', '{"summary":"串行任务需回 execute 节点执行"}']), 0);
