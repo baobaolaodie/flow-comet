@@ -26,7 +26,7 @@ protocol valid
 
 | 行为 | 验证 |
 |------|------|
-| init 后 currentNode = 协议首节点 brainstorm（非硬编码 open） | ✅ |
+| init 后当前节点 = 协议首节点 brainstorm（非硬编码 open） | ✅ |
 | 未声明/声明 writeWhitelist 的自定义节点白名单判定 | ✅ |
 | writeWhitelist `<change-id>` 占位符替换（协议跨 change 复用） | ✅ |
 | 无 statePath 声明时 hook 回退默认路径（最小 schema 协议不崩溃） | ✅ |

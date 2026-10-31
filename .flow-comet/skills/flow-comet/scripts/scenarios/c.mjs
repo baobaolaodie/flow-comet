@@ -42,45 +42,145 @@ import {
   countSyncProblems,
 } from '../lib/text-anchor-checks.mjs';
 
-// ---------- 公开机制册的字段名口径（m11 机检；判据与反向构造共用本实现） ----------
-// 规则：公开面不直写机器状态字段名——状态字段/其同位输出键一律改述为行为描述，中英两侧各出现
-// 一次、结构一一对应。routeNode 属新增的公开输出契约名（本次保留），不在「机器状态字段名」内。
-const MECHANISM_FIELD_NAME_RULES = [
-  {
-    rel: 'docs/MECHANISM.md',
-    descriptors: [
-      'the current-node field that the status output derives',
-      'the current-node field that the state file holds',
-    ],
-  },
-  {
-    rel: 'docs/MECHANISM-zh.md',
-    descriptors: [
-      '状态输出里由产物推导出的当前节点字段',
-      '状态文件里记的当前节点字段',
-    ],
-  },
+// ---------- 公开面的机器状态字段名口径 + 命令锚（m11 机检；判据与反向构造共用本实现） ----------
+// 规则：公开说明面不直写机器状态字段名——引擎在状态文件里拥有的键要么改述为行为描述，要么放进
+// **明确标注**的状态输出示例围栏块（白名单）。判据是「键名黑名单 + 示例块白名单」而非精确句锁：
+// 改述措辞可以自由演化，键名不能重新走私进正文。routeNode 属公开输出契约名，不在黑名单内。
+// 受检面 = 用户阅读面（入口 / 贡献 / 安装 / 机制 / 用法 / 排障 / 版本，外加 docs/examples 的全部
+// 示例）；变更日志刻意不在内：它是按时间的历史记录（条目引用当时发布的措辞），不是行为描述面。
+// 受检面按「中英成对」登记一次：字段名扫描面 = 全部成对文档，命令锚面 = 机制 / 用法 / 排障
+// 三对。路径只写一遍——新增一份公开文档只需在这里登记，两处判据同时覆盖（不会出现「加进了
+// 一个清单、漏掉了另一个」的静默窄化）。
+const PUBLIC_FACE_DOC_PAIRS = {
+  entry: ['README.md', 'README-zh.md'],
+  contributing: ['CONTRIBUTING.md', 'CONTRIBUTING-zh.md'],
+  installation: ['docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md'],
+  mechanism: ['docs/MECHANISM.md', 'docs/MECHANISM-zh.md'],
+  usage: ['docs/USAGE.md', 'docs/USAGE-zh.md'],
+  troubleshooting: ['docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md'],
+  versions: ['docs/VERSIONS.md', 'docs/VERSIONS-zh.md'],
+};
+const PUBLIC_FACE_FIELD_DOCS = Object.values(PUBLIC_FACE_DOC_PAIRS).flat();
+const PUBLIC_FACE_EXAMPLES_DIR = 'docs/examples';
+// 示例块白名单的标记词：围栏 info string，或围栏之上紧邻的最后一行非空正文（标题 / 说明）写明
+// 这是状态输出示例——只有明说「这是示例数据」才放行，普通代码块不因此获得豁免。
+const PUBLIC_FACE_EXAMPLE_MARKERS = ['状态输出示例', 'state output example', 'status output example'];
+// 纯标识符形态的键名（英文散文里不会自然出现）→ 任何位置命中都算直写。evidence 同时是普通英文
+// 名词、也是协议 schema 的键，只有**独立成键名**（单独一段反引号的 `evidence`，或 state.evidence
+// 这样的属性访问）才算直写状态字段——避免误伤 "the evidence recorded for the node" 与
+// `evidence: [{ id, required }]` 这类协议字段说明。
+const PUBLIC_FACE_STATE_FIELDS = ['currentNode', 'stateCurrentNode', 'completedNodes', 'verifyFailures'];
+// 结构预检命令的公开面锚：三份文档 × 中英都必须在案。新增公开命令不得没有锚——否则删掉或漏写
+// 其中任何一份，套件仍然全绿，公开面就真的丢了这条命令。
+const PUBLIC_FACE_PREFLIGHT_PAIRS = [
+  PUBLIC_FACE_DOC_PAIRS.mechanism,
+  PUBLIC_FACE_DOC_PAIRS.usage,
+  PUBLIC_FACE_DOC_PAIRS.troubleshooting,
 ];
-// 裸英文散文里的 evidence 是普通词，只有反引号形态才代表「被当作字段名写进正文」——故按反引号
-// 形态识别，避免误伤。清单取审阅点名的两个状态字段键（currentNode / stateCurrentNode）。
-const MECHANISM_FORBIDDEN_FIELD_NAMES = ['`currentNode`', '`stateCurrentNode`'];
+const PREFLIGHT_FLAG = '--preflight';
 
-function mechanismFieldNameProblems(texts) {
+function listMarkdownFiles(absDir, relDir) {
   const out = [];
-  for (const rule of MECHANISM_FIELD_NAME_RULES) {
-    const text = texts[rule.rel];
-    if (typeof text !== 'string') {
-      out.push(rule.rel + ' 缺失（公开机制册不在本检出）');
+  for (const entry of fs.readdirSync(absDir, { withFileTypes: true })) {
+    const rel = relDir + '/' + entry.name;
+    if (entry.isDirectory()) out.push(...listMarkdownFiles(path.join(absDir, entry.name), rel));
+    else if (entry.name.endsWith('.md')) out.push(rel);
+  }
+  return out;
+}
+
+// 受检文本按 Map 组织（rel → 文本或 null）：判据只读这一份快照，反向构造在副本上作业。
+function readPublicFaceTexts() {
+  const texts = new Map();
+  for (const rel of PUBLIC_FACE_FIELD_DOCS) {
+    const abs = path.join(REPO_ROOT, ...rel.split('/'));
+    texts.set(rel, fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : null);
+  }
+  const examplesRoot = path.join(REPO_ROOT, ...PUBLIC_FACE_EXAMPLES_DIR.split('/'));
+  if (!fs.existsSync(examplesRoot)) {
+    // 整面缺席显式报告：静默等于把「本检出没有示例面」当成「示例面已校验」。
+    texts.set(PUBLIC_FACE_EXAMPLES_DIR + '/**/*.md', null);
+  } else {
+    for (const rel of listMarkdownFiles(examplesRoot, PUBLIC_FACE_EXAMPLES_DIR)) {
+      texts.set(rel, fs.readFileSync(path.join(REPO_ROOT, ...rel.split('/')), 'utf8'));
+    }
+  }
+  return texts;
+}
+
+function isStatusExampleMarker(line) {
+  const lowered = line.toLowerCase();
+  return PUBLIC_FACE_EXAMPLE_MARKERS.some((marker) => lowered.includes(marker.toLowerCase()));
+}
+
+// 报错要能直接照做：先点名键名与改述方向，再给出唯一的合法展示出口（标注为状态输出示例的
+// 围栏块）——否则作者只知道「不能写」，不知道「要展示时该怎么写」。
+function fieldNameViolation(where, fieldName) {
+  return where + ' 直写了机器状态字段名 ' + fieldName
+    + '（改述为行为描述；确需展示状态输出时，放进标注为「状态输出示例」的围栏块）';
+}
+
+function fieldNameHitsOnLine(where, line) {
+  const out = [];
+  for (const name of PUBLIC_FACE_STATE_FIELDS) {
+    // verifyFailures 用前缀匹配：verifyFailuresByChange 是同一族的键，漏掉它等于留后门。
+    const matcher = name === 'verifyFailures'
+      ? /(?<![A-Za-z0-9_$])verifyFailures[A-Za-z0-9_]*/g
+      : new RegExp('(?<![A-Za-z0-9_$])' + name + '(?![A-Za-z0-9_$])', 'g');
+    for (const hit of line.matchAll(matcher)) out.push(fieldNameViolation(where, hit[0]));
+  }
+  for (const span of line.matchAll(/`([^`]*)`/g)) {
+    if (span[1].trim() === 'evidence') out.push(fieldNameViolation(where, 'evidence'));
+  }
+  if (/(?<![A-Za-z0-9_$])\.evidence(?![A-Za-z0-9_$])/.test(line)) {
+    out.push(fieldNameViolation(where, 'evidence'));
+  }
+  return out;
+}
+
+// 逐行扫描：未标注的围栏块同样是正文（把状态输出贴进普通代码块不等于获得白名单）；标注为
+// 状态输出示例的围栏块整块放行。行内反引号段里的 evidence 是被当作键名书写，散文里的不是。
+function publicFaceFieldProblems(rel, text) {
+  const out = [];
+  const lines = text.split(/\r?\n/);
+  let fence = null;
+  let fenceIsExample = false;
+  let lastContentLine = '';
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const opening = /^\s{0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence === null && opening) {
+      fence = opening[1][0];
+      fenceIsExample = isStatusExampleMarker(opening[2]) || isStatusExampleMarker(lastContentLine);
       continue;
     }
-    for (const fieldName of MECHANISM_FORBIDDEN_FIELD_NAMES) {
-      if (text.includes(fieldName)) out.push(rule.rel + ' 直写了机器状态字段名 ' + fieldName);
-    }
-    for (const descriptor of rule.descriptors) {
-      const hits = text.split(descriptor).length - 1;
-      if (hits !== 1) {
-        out.push(rule.rel + ' 字段改述「' + descriptor + '」应恰好出现 1 次（中英结构 token 一一对应），实际 ' + hits);
+    if (fence !== null) {
+      if (new RegExp('^\\s{0,3}' + fence + '{3,}\\s*$').test(line)) {
+        fence = null;
+        fenceIsExample = false;
+      } else if (!fenceIsExample) {
+        out.push(...fieldNameHitsOnLine(rel + ':' + (i + 1), line));
       }
+      continue;
+    }
+    if (line.trim() !== '') lastContentLine = line.trim();
+    out.push(...fieldNameHitsOnLine(rel + ':' + (i + 1), line));
+  }
+  return out;
+}
+
+function publicFaceMachineProblems(texts) {
+  const out = [];
+  for (const [rel, text] of texts) {
+    if (typeof text !== 'string') out.push(rel + ' 缺失（公开面不在本检出）');
+  }
+  for (const [rel, text] of texts) {
+    if (typeof text === 'string') out.push(...publicFaceFieldProblems(rel, text));
+  }
+  for (const rel of PUBLIC_FACE_PREFLIGHT_PAIRS.flat()) {
+    const text = texts.get(rel);
+    if (typeof text === 'string' && !text.includes(PREFLIGHT_FLAG)) {
+      out.push(rel + ' 缺「' + PREFLIGHT_FLAG + '」锚（结构预检命令须在三份公开面 × 中英在案）');
     }
   }
   return out;
@@ -315,39 +415,50 @@ export const ENTRIES = [
     },
   },
 
-  // 105: 计数一致性自检同步（AC-8 / AC-14）+ 公开机制册不直写机器状态字段名（in-place 扩展，
-  // 不新增场景）——组文件里的场景数或系统测试集项数变更时，受检文件须同步（场景数：
+  // 105: 计数一致性自检同步（AC-8 / AC-14）+ 公开面机器字段名黑名单 + 结构预检命令锚（in-place
+  // 扩展，不新增场景）——组文件里的场景数或系统测试集项数变更时，受检文件须同步（场景数：
   // ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n 变体；项数：n/n / n items / n 项 变体）。
   // 本场景读取权威源仓库的受检文件断言含当前计数变体——文档漏同步或条目缺失（幽灵条目）即 RED；
   // 与底部自检共用同一实现（countSyncProblems），两处判据不会漂移。
-  // m11：公开机制册把状态字段改述成行为描述（不直写键名），中英描述一一对应；配三条反向构造
-  // （注入键名 / 逐侧抽掉改述）证明判据不是恒真。安装副本无文档面，整面跳过。
+  // 公开面口径：用户阅读面不得直写机器状态字段名（黑名单），被明确标注为状态输出示例的围栏块
+  // 放行；机制 / 用法 / 排障三份文档 × 中英都必须出现 `--preflight`（新增公开命令不得无锚）。
+  // 判别力由反向构造证明：注入键名、抽掉命令锚 ⇒ 必报；标注示例块放行、撤掉标注 ⇒ 再报。
+  // 安装副本无文档面，整面跳过。
   {
-    name: '105 计数一致性自检同步 + 公开机制册不直写机器状态字段名（AC-8 / AC-14）',
+    name: '105 计数一致性自检同步 + 公开面机器字段名黑名单 + 三对文档的 --preflight 锚（AC-8 / AC-14）',
     run: async () => {
       if (!isAuthoritativeSourceRepo()) return; // 安装副本无 flow-comet 文档
       const problems = [...await countSyncProblems()];
-      const docTexts = {
-        'docs/MECHANISM.md': fs.readFileSync(path.join(REPO_ROOT, 'docs/MECHANISM.md'), 'utf8'),
-        'docs/MECHANISM-zh.md': fs.readFileSync(path.join(REPO_ROOT, 'docs/MECHANISM-zh.md'), 'utf8'),
-      };
-      problems.push(...mechanismFieldNameProblems(docTexts));
-      // 反向构造（同一判据驱动）：注入一个机器字段名 / 逐侧抽掉改述句 ⇒ 必报。
-      const patched = (rel, from, to) => {
-        const text = docTexts[rel];
-        if (!text.includes(from)) return null; // 缺失已由真实判据报告，避免探针掩盖真实原因
-        return { ...docTexts, [rel]: text.split(from).join(to) };
+      const publicFace = readPublicFaceTexts();
+      problems.push(...publicFaceMachineProblems(publicFace));
+      // 反向构造（同一判据驱动）：探针在快照副本上作业，真实断言与探针调用同一个函数。
+      const mutated = (rel, mutate) => {
+        const text = publicFace.get(rel);
+        if (typeof text !== 'string') return null; // 缺失已由真实判据报告，避免探针掩盖真实原因
+        const next = mutate(text);
+        return next === text ? null : new Map(publicFace).set(rel, next);
       };
       const probes = [
-        ['注入机器字段名', { ...docTexts, 'docs/MECHANISM.md': docTexts['docs/MECHANISM.md'] + '\n`currentNode`\n' }, '直写了机器状态字段名'],
-        ['抽掉英文改述', patched('docs/MECHANISM.md', 'the current-node field that the state file holds', 'the state file'), '字段改述'],
-        ['抽掉中文改述', patched('docs/MECHANISM-zh.md', '状态文件里记的当前节点字段', '状态文件'), '字段改述'],
+        ['注入机器字段名（用法册）', mutated('docs/USAGE.md', (text) => text + '\n`currentNode`\n'), '直写了机器状态字段名'],
+        ['注入 evidence 键名（机制册）', mutated('docs/MECHANISM.md', (text) => text + '\n`evidence`\n'), '直写了机器状态字段名 evidence'],
+        ['注入字段族键名（机制册）', mutated('docs/MECHANISM.md', (text) => text + '\n`verifyFailuresByChange`\n'), '直写了机器状态字段名 verifyFailuresByChange'],
+        ['抽掉命令锚（排障册中文）', mutated('docs/TROUBLESHOOTING-zh.md', (text) => text.split('--preflight').join('')), '缺「--preflight」'],
       ];
       for (const [label, texts, expected] of probes) {
         if (texts === null) continue;
-        if (!mechanismFieldNameProblems(texts).some((p) => p.includes(expected))) {
+        if (!publicFaceMachineProblems(texts).some((p) => p.includes(expected))) {
           throw new Error('反向构造判别力缺失（' + label + ' 未被判违规）');
         }
+      }
+      // 允许段白名单双向判别：同一段键名，标注为状态输出示例时放行，撤掉标注后必须报。
+      const exampleBlock = (heading) => '\n' + heading + '\n\n```json\n{ "currentNode": "review" }\n```\n';
+      const allowed = mutated('docs/MECHANISM.md', (text) => text + exampleBlock('### 状态输出示例'));
+      if (allowed && publicFaceMachineProblems(allowed).some((p) => p.includes('docs/MECHANISM.md') && p.includes('直写了机器状态字段名'))) {
+        throw new Error('允许段白名单失效（标注为状态输出示例的围栏块内键名被误判违规）');
+      }
+      const unmarked = mutated('docs/MECHANISM.md', (text) => text + exampleBlock('### 输出草稿'));
+      if (unmarked && !publicFaceMachineProblems(unmarked).some((p) => p.includes('docs/MECHANISM.md') && p.includes('直写了机器状态字段名'))) {
+        throw new Error('允许段白名单判别力缺失（未标注为状态输出示例的围栏块内键名未被判违规）');
       }
       if (problems.length > 0) {
         throw new Error(problems.join('; '));
