@@ -43,7 +43,7 @@ That rule replaced an earlier one that required the same text to appear in sever
 | Layer | What it does | Where it is enforced |
 |---|---|---|
 | ① Physical write interception | Before a tool writes, the platform hook checks the target against the current node's write whitelist; out-of-scope writes are refused in the platform itself | the platform's `PreToolUse` hook, installed by the installer |
-| ② Guard validation | Node entry and exit are validated against evidence: required artifacts and sections, recorded node evidence, the skill-load declaration, the task-set signature, summaries for completed tasks, review dispositions, and the test commands that `verify` actually runs | the guard's `entry` / `exit` |
+| ② Guard validation | Node entry and exit are validated against evidence: required artifacts and sections, recorded node evidence, the skill-load declaration, the task-set signature, summaries for completed tasks, review dispositions, and the test commands that `verify` actually runs — a deferred finding counts only behind a recorded human ruling | the guard's `entry` / `exit` |
 | ③ State and schema validation | Every state write is validated against the schema (field types, nested records), and unwritable shapes are rejected rather than silently normalized | the state machine's write path |
 
 The same discipline gives the coordinator an enforced boundary: in the default execution mode the coordinating session may not carry out implementation tasks itself (the engine reports the takeover). Implementation is delegated to subagents that must return a verifiable contract — a commit, the real output of their verification, and the checks they declared. What makes parallel delegation safe is a contract of four attributes — write permission, commit isolation, verification isolation and integration discipline; an isolated worktree implements the first of them, but it is one option rather than the contract itself, and a shared workspace is a supported shape.
@@ -66,7 +66,7 @@ At each node the guard answers a fixed set of questions; a "no" is a refusal wit
 | Are all tasks complete, with a summary per completed task and an unchanged task set? | `execute`, `subagent-execute` |
 | Is the self-check declared, and does a degraded one carry its evidence? | `execute`, `subagent-execute` (the SUMMARY's self-check section) |
 | Did the verification actually run, and did it pass? | `verify` (runs the command block in `TEST.md`) |
-| Does every review finding carry a disposition, and does a deferred major finding have a user ruling? | `review` |
+| Does every review finding carry a disposition, does a deferred finding of any severity have a user ruling, and does a minor one state why it is minor (the default is major)? | `review` |
 | Are the archive directory and its leftover list in place? | `archive` |
 
 Template shape is answered per document rather than per node, because two nodes can write one document between them and one node writes two:

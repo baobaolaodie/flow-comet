@@ -23,6 +23,7 @@
 - **`exit` 不再接受不认识的参数**：参数面收成白名单（`--apply`、`--preflight`，外加全局的 `--protocol <path>`），拼错的旗标一律用法错误、非零退出，不再被静默忽略——笔误不再能「看起来像预检，实际跑的是完整出口链」。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 - **协调者提示改按平台的身份通道表述，委托写明硬顺序**：`entry` 与 `next` 共用的那一句改为「按平台的身份通道委托子代理，独立 worktree 只是写权限的一种实现」；两册执行技能把「先让 request 成功，再启动子代理」写成硬顺序；`replan` 成功行之后新增一行重签事实说明。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 - **`record` 拒绝畸形的证据载荷**而不是照存：`summary` 不是字符串或为空串、`completedChecks` 的元素不是字符串、`lessonsNomination` 类型不对，都会在任何写入之前立刻失败，并点名字段路径与当前类型；此前这类值会被存下来，问题要到节点出口才以「缺证据」的形态出现。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **任何严重度的延期都要经人裁决；Minor 的判定收窄并要求给出理由**：reviewer 不能再自行把一条发现记为延期——出口会核对用户裁决记录与承接该裁决的升级标记，Minor 与 Major 同一标准；一条发现只有在同时满足「不改变行为与输出、不影响用户可读的文档或报文、不新增第二份等价实现、不削弱断言与测试判别力、不涉及跨平台或分发形态」时才可判 Minor，否则按 Major 处理，且每条 Minor 都须以固定形态写明判定理由。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 
 ### 修复
 
