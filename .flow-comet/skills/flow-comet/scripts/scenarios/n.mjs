@@ -1753,6 +1753,30 @@ export const ENTRIES = [
       const ok = exitNode(dir, 'archive');
       assertExit(ok, 0);
       assertOut(ok, 'ALL CHECKS PASSED');
+      // ⑤ 扫描份数的**类型**在写入前就拦（in-place 扩展）：scanned 是出口按**数值**比对的字段
+      // （份数相等才算留痕成立），故字符串 "2" 必须被 record 拒。修复前它能落库成功、要等到 archive
+      // 出口才因 "2" !== 2 炸——正是 record 形状校验要消灭的「错误延后暴露」（出错的是 record，
+      // 报错的却是 exit）。判据仍只判类型：取值是否等于 SUMMARY 份数归出口（③），不在这里重复业务规则。
+      writeFile(dir, '.specs/LESSONS.md', LESSONS_FIXTURE);
+      const recordState = baseState('archive');
+      recordState.evidence.archive = { summary: 'archived' };
+      writeState(dir, recordState);
+      const stringScanned = runState(['record', 'archive',
+        '{"summary":"archived","lessonsNomination":{"scanned":"2","nominated":[],"reasonIfNone":"无新增条目"}}'], dir);
+      assertExit(stringScanned, 1);
+      assertOut(stringScanned, 'lessonsNomination.scanned');
+      assertOut(stringScanned, '必须是数字（当前是 string）');
+      const afterReject = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      assertTrue(afterReject.evidence.archive.lessonsNomination === undefined,
+        '类型非法的载荷不得落库: ' + JSON.stringify(afterReject.evidence.archive));
+      // 反向构造（单变量：只把 "2" 改成 2）：同一载荷 record 通过并原样写入——判据只判类型，
+      // 不新增业务规则，合法载荷不因这条形状校验变得不可写。
+      const numericScanned = runState(['record', 'archive',
+        '{"summary":"archived","lessonsNomination":{"scanned":2,"nominated":[],"reasonIfNone":"无新增条目"}}'], dir);
+      assertExit(numericScanned, 0);
+      const afterAccept = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      assertTrue(afterAccept.evidence.archive.lessonsNomination?.scanned === 2,
+        '类型合法的载荷应原样写入 scanned: ' + JSON.stringify(afterAccept.evidence.archive));
     },
   },
 

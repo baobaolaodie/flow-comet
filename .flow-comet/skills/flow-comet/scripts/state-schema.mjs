@@ -177,8 +177,9 @@ export function validateStateFields(state) {
 // **写入前**:点名字段路径与当前类型,不落库、也不先做其它副作用(声明标记补写等)。
 // 只做**类型**判定:取值是否合法(如 lessonsNomination.scanned 是否等于 SUMMARY 份数、提名编号是否
 // 真实登记)仍归出口门禁——本表不复制、不新增业务规则;未知字段继续放行(前向兼容)。
-// 字段集合 = evidence.<node> 上**被下游消费且类型为字符串**的字段(summary、completedChecks 元素、
-// lessonsNomination.nominated 元素与 reasonIfNone)。
+// 字段集合 = evidence.<node> 上**被下游按特定类型消费**的字段(summary、completedChecks 元素、
+// lessonsNomination.nominated 元素与 reasonIfNone,以及 lessonsNomination.scanned——出口按**数值**
+// 与 SUMMARY 份数比对,字符串 "2" 落库后只会在 archive 出口才炸)。
 const RECORD_PAYLOAD_SHAPES = [
   { field: 'summary', kind: 'non-empty-string' },
   { field: 'completedChecks', kind: 'string-array' },
@@ -186,6 +187,9 @@ const RECORD_PAYLOAD_SHAPES = [
     field: 'lessonsNomination',
     kind: 'object',
     fields: [
+      // 扫描份数在出口按数值比对(份数相等才算留痕成立):数字以外的类型必须写入前就拒,否则
+      // "2" 能 record 成功、要等 archive 出口才因 "2" !== 2 拦下——错误延后暴露,正是本表要消灭的。
+      { field: 'scanned', kind: 'number' },
       { field: 'nominated', kind: 'string-array' },
       { field: 'reasonIfNone', kind: 'string' },
     ],
@@ -232,6 +236,14 @@ function evidenceTypeProblems(value, shape, fieldPath) {
       problems.push({ field: fieldPath, message: '必须是字符串（当前是 ' + evidenceValueTypeName(value) + '）' });
     } else if (shape.kind === 'non-empty-string' && value.trim() === '') {
       problems.push({ field: fieldPath, message: '必须是非空字符串（当前是' + (value === '' ? '空串' : '空白字符串') + '）' });
+    }
+    return problems;
+  }
+  if (shape.kind === 'number') {
+    // 数值字段:JSON 载荷不可能产出 NaN/Infinity,故 typeof 判定即是完整判据;取值是否等于
+    // SUMMARY 份数仍归出口门禁(本表不复制业务规则)。
+    if (typeof value !== 'number') {
+      problems.push({ field: fieldPath, message: '必须是数字（当前是 ' + evidenceValueTypeName(value) + '）' });
     }
     return problems;
   }
