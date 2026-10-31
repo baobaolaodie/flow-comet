@@ -58,11 +58,17 @@ const PUBLIC_FACE_AGENT_DOCS = ['AGENTS.md', 'CLAUDE.md'];
 // 示例块白名单的标记词：围栏 info string，或围栏之上紧邻的最后一行非空正文（标题 / 说明）写明
 // 这是状态输出示例——只有明说「这是示例数据」才放行，普通代码块不因此获得豁免。
 const PUBLIC_FACE_EXAMPLE_MARKERS = ['状态输出示例', 'state output example', 'status output example'];
-// 纯标识符形态的键名（英文散文里不会自然出现）→ 任何位置命中都算直写。evidence 同时是普通英文
-// 名词、也是协议 schema 的键，只有**独立成键名**（单独一段反引号的 `evidence`，或 state.evidence
-// 这样的属性访问）才算直写状态字段——避免误伤 "the evidence recorded for the node" 与
-// `evidence: [{ id, required }]` 这类协议字段说明。
-const PUBLIC_FACE_STATE_FIELDS = ['currentNode', 'stateCurrentNode', 'completedNodes', 'verifyFailures'];
+// 机器状态字段黑名单 = 引擎在状态文件里拥有、**绝不由人写**的键（state-schema 的机器自有字段）。
+// 名单不按「今天文档里写了什么」取，而按「状态文件里真的有什么」取：这些键一旦被公开面当成用户
+// 面契约直写，读者就会以为可以手改它们。新增机器字段时在这里登记，判据才跟着扩展。
+// 驼峰键名在英文 / 中文散文里都不会自然出现，故任何位置命中都算直写（不必依赖反引号）。
+const PUBLIC_FACE_STATE_FIELDS = [
+  'currentNode', 'stateCurrentNode',
+  'completedNodes', 'enteredNodes', 'directOverride', 'newChange',
+  // verifyFailures 用前缀匹配覆盖同族的 verifyFailuresByChange（见 fieldNameHitsOnLine）
+  'verifyFailures',
+];
+// evidence 另有散文形态（见 EVIDENCE_FIELD_FRAME_RE 与 fieldNameHitsOnLine 的放行规则）。
 // 结构预检命令的公开面锚：三份文档 × 中英都必须在案。新增公开命令不得没有锚——否则删掉或漏写
 // 其中任何一份，套件仍然全绿，公开面就真的丢了这条命令。这里只选主题名，路径仍从映射取——「哪份
 // 文档承载命令说明」因此也只在映射里声明一次。
@@ -192,6 +198,23 @@ function fieldNameViolation(where, fieldName) {
     + '（改述为行为描述；确需展示状态输出时，放进标注为「状态输出示例」的围栏块）';
 }
 
+// 「指名某个字段」的散文框：the `evidence` field / the evidence field / evidence 字段。**单数**才
+// 构成指名——复数的 "the evidence fields" 是集合描述（公开面本就有这类句子：the output schemas,
+// the gates, the commands, the evidence fields），不指名任何键。
+const EVIDENCE_FIELD_FRAME_RE = /(?<![A-Za-z0-9_$])`?evidence`?\s+(?:field|字段)(?![A-Za-z0-9_$])/;
+
+// 键名判据：驼峰键名任何位置命中都算直写（散文里不会自然出现，不必依赖反引号）；evidence 是普通
+// 英文名词与状态键同形，只在**被当成字段名写**时算违规：
+//   ① 独立成键名的反引号段 `evidence`；
+//   ② 指名它的散文框（EVIDENCE_FIELD_FRAME_RE，带不带反引号都命中）；
+//   ③ 裸属性后缀 `.evidence`（单独写成字段路径）。
+// 放行规则（两类都不是「行为描述面」，故不构成字段名直写）：
+//   ① **代码位置引用**：state.evidence 这类带宿主标识符的属性访问说的是「去哪看」，不是把键名写成
+//      文档契约——「裸 .evidence」与「X.evidence」由同一个连接式前后界区分，不另写键表；
+//   ② **围栏里的示例**：标注为状态输出示例的围栏块整块放行（既有白名单，双向探针在场景 105）。
+//      未标注的围栏块不因「它是代码」而豁免：把状态输出贴进普通代码块同样是直写。
+// 其余自然语言用法（"the evidence recorded for the node"、`evidence: [{ id, required }]` 这类
+// 协议字段说明）不命中任何一条。
 function fieldNameHitsOnLine(where, line) {
   const out = [];
   for (const name of PUBLIC_FACE_STATE_FIELDS) {
@@ -204,6 +227,7 @@ function fieldNameHitsOnLine(where, line) {
   for (const span of line.matchAll(/`([^`]*)`/g)) {
     if (span[1].trim() === 'evidence') out.push(fieldNameViolation(where, 'evidence'));
   }
+  if (EVIDENCE_FIELD_FRAME_RE.test(line)) out.push(fieldNameViolation(where, 'evidence'));
   if (/(?<![A-Za-z0-9_$])\.evidence(?![A-Za-z0-9_$])/.test(line)) {
     out.push(fieldNameViolation(where, 'evidence'));
   }
@@ -578,6 +602,13 @@ export const ENTRIES = [
       const probes = [
         ['注入机器字段名（用法册）', mutated('docs/USAGE.md', (text) => text + '\n`currentNode`\n'), '直写了机器状态字段名'],
         ['注入 evidence 键名（机制册）', mutated('docs/MECHANISM.md', (text) => text + '\n`evidence`\n'), '直写了机器状态字段名 evidence'],
+        // 散文形态（不带反引号）：字段名不写反引号同样是把它当成用户面契约——这是黑名单原先的盲区
+        ['注入 evidence 散文名（机制册，不带反引号）',
+          mutated('docs/MECHANISM.md', (text) => text + '\nthe evidence field is written by record\n'),
+          '直写了机器状态字段名 evidence'],
+        ['注入 evidence 散文名（机制册，带反引号）',
+          mutated('docs/MECHANISM.md', (text) => text + '\nthe `evidence` field is written by record\n'),
+          '直写了机器状态字段名 evidence'],
         ['注入字段族键名（机制册）', mutated('docs/MECHANISM.md', (text) => text + '\n`verifyFailuresByChange`\n'), '直写了机器状态字段名 verifyFailuresByChange'],
         ['抽掉命令锚（排障册中文）', mutated('docs/TROUBLESHOOTING-zh.md', (text) => text.split('--preflight').join('')), '缺「--preflight」'],
         ['注入机器字段名（根目录公开文档）', mutated(ROOT_FACE_PROBE, (text) => text + '\n`currentNode`\n'), '直写了机器状态字段名'],
@@ -597,6 +628,25 @@ export const ENTRIES = [
       const unmarked = mutated('docs/MECHANISM.md', (text) => text + exampleBlock('### 输出草稿'));
       if (unmarked && !publicFaceMachineProblems(unmarked).some((p) => p.includes('docs/MECHANISM.md') && p.includes('直写了机器状态字段名'))) {
         throw new Error('允许段白名单判别力缺失（未标注为状态输出示例的围栏块内键名未被判违规）');
+      }
+      // 黑名单扩容的判别力逐名验：加进数组不算数，每个名字都要真的命中——漏登记的键照样能走私进来。
+      const WIDENED_KEYS = ['completedNodes', 'enteredNodes', 'directOverride', 'newChange'];
+      const widened = mutated('docs/MECHANISM.md',
+        (text) => text + '\n' + WIDENED_KEYS.map((name) => '`' + name + '`').join(' ') + '\n');
+      for (const name of WIDENED_KEYS) {
+        if (widened && !publicFaceMachineProblems(widened)
+          .some((p) => p.includes('直写了机器状态字段名 ' + name))) {
+          throw new Error('机器字段黑名单漏了 ' + name + '（注入后未被判违规）');
+        }
+      }
+      // 放行规则的反向判别：黑名单扩容最容易砸到的既有句子——代码位置引用（state.evidence）与普通
+      // 英文名词用法（the evidence recorded for the node）都必须放行，否则判据只能靠改文档来变绿。
+      const released = mutated('docs/MECHANISM.md', (text) => text
+        + '\n位置引用：恢复记录写在 state.evidence 下。\n'
+        + '\nThe evidence recorded for the node is what the exit reads.\n');
+      if (released && publicFaceMachineProblems(released)
+        .some((p) => p.includes('docs/MECHANISM.md') && p.includes('直写了机器状态字段名'))) {
+        throw new Error('放行规则失效（state.evidence 位置引用 / 普通英文 evidence 被误判为字段名直写）');
       }
       if (problems.length > 0) {
         throw new Error(problems.join('; '));
