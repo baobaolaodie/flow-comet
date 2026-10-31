@@ -38,6 +38,24 @@ guard 校验见 workflow-guard.mjs 的 execute 出口门禁（必填段 + 6 维�
 
 执行模式由 `node .claude/skills/flow-comet/scripts/workflow-state.mjs status` 输出（`executionMode` / `directOverride`）决定，切换用 `node .claude/skills/flow-comet/scripts/workflow-state.mjs execution-mode <subagent|direct>`。direct 是逃生口，必须用户显式调用才生效。
 
+### 节点视图三字段（currentNode / stateCurrentNode / routeNode）
+
+`status` 与 `next` 读的是同一份节点视图，但三个字段各说一件事，不能互相替代：
+
+- **currentNode** = **产物推导**的节点（按 `.specs/<change-id>/` 的工件推导出「按文件看现在在哪」；语义逐字未变）；
+- **stateCurrentNode** = **state 文件原值**（`.flow-comet/flow-comet-state.json` 里 `currentNode` 的原样读数，由 entry / exit / advance / reenter 写入；语义逐字未变）；
+- **routeNode** = **路由视图**（经「进行中保护」/ Fix 受控归位后的节点；常规路径下等于 `next` 的 `NODE:` 行，决定你现在该推进哪个节点）。
+
+三者不一致不是 bug，而是同一事实的三个视角：`ROUTE:` 行给出 `derived=… state=… route=…` 的对账（derived = 产物推导、state = state 原值、route = 路由视图）与下一步动作。**Fix 批次以 `FIX-BATCH` 行与 `next` 的 `NODE` 为准**——归位目标就是你要先跑出口的节点；预检与出口都跑在那个节点上，不要按 `stateCurrentNode` 或 `currentNode` 自行改道。
+
+**Node view: the three fields (currentNode / stateCurrentNode / routeNode)** — `status` and `next` read the same node view, but the three fields say three different things and cannot substitute for each other:
+
+- **currentNode** = artifact-derived (the node derived from the artifacts under `.specs/<change-id>/`, i.e. "where the files say we are"; semantics unchanged);
+- **stateCurrentNode** = the raw state-file value (the `currentNode` read verbatim from `.flow-comet/flow-comet-state.json`, written by entry / exit / advance / reenter; semantics unchanged);
+- **routeNode** = the routing view (after in-progress protection / controlled Fix-batch rollback; on the regular path it equals the `NODE:` line printed by `next` and decides which node you should advance now).
+
+A mismatch is not a bug but the same fact seen from three angles: the `ROUTE:` line gives the `derived=… state=… route=…` reconciliation (derived = artifact derivation, state = raw state value, route = routing view) plus the next action. **For a Fix batch, trust the `FIX-BATCH` line and the `NODE` printed by `next`** — the rollback target is the node whose exit you must run first; run preflight and exit on that node instead of rerouting by `stateCurrentNode` or `currentNode`.
+
 ### 任务范围
 
 execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pending 任务**。
@@ -121,8 +139,8 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
    **提交面 pathspec 纪律（五要素，见 Guidance 同名小节）**：handoff prompt 必须要求子代理用 `git add -- <自己字面路径>` + `git commit -- <同一路径>` 提交、锁失败重试、禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`（适用条件：**多个写者共享同一工作区**；各自独立工作区内的局部 `reset` / `clean` 不在禁令内）。**集成纪律（四要素，见 Guidance 同名小节）**：协调者集成时优先 `git merge --no-ff`、降级 `cherry-pick` 记因、顺序按 `depends_on` 拓扑序 + 同层 task id 升序、冲突按机械 / 语义两类分别处置。
    **写前读模板（handoff prompt 固定句式）**：prompt 必须写明「开工前先读 <本任务产出物的模板路径>，按其标题 / 首部 / 段序填写，并按本仓登记补写增量段」——模板路径逐任务给出（本节点默认 `flow-kit/templates/SUMMARY.md`）；只写「按模板填写」视为委托前检查未完成，不得发出委托。
 3. **记录 handoff result**：子代理回传后，运行 `node .claude/skills/flow-comet/scripts/workflow-handoff.mjs result <task-id> '<JSON>'` 记录（Return Contract 含 commitHash + greenEvidence + completedChecks + selfReview）。
-4. **每任务预检（不带 `--apply`）**：子代理回传并记下 `workflow-handoff.mjs result` 之后（direct 模式则在执行者交出 SUMMARY 之后），运行 `node .claude/skills/flow-comet/scripts/workflow-guard.mjs exit execute` —— 它跑完整出口门禁并报告问题，不推进状态、不写 state；`--apply` 仍只在节点收尾时用。价值：当场看到该任务 SUMMARY 的结构问题（缺段 / 段序 / 首部字段），而不是攒到节点出口一起爆——出口链按序报出挡路的第一个问题，问题多时逐次预检逐个收口；边界：它只是**提前看到**——判定标准与节点收尾那次完全一样，不跑也能过 exit，只是晚知道。
-   **Per-task preflight (no `--apply`)**: after the subagent returns and its result is recorded (in direct mode, after the executor hands over the SUMMARY), run `node .claude/skills/flow-comet/scripts/workflow-guard.mjs exit execute` — it runs the full exit gate and reports problems, without advancing or writing workflow state; `--apply` stays reserved for the node's own exit. Value: the task's SUMMARY structure problems (missing section / section order / header fields) surface right away instead of piling up at the node exit — the exit chain reports the first blocking problem in order, so repeated preflights close them one at a time. Boundary: this only makes them visible earlier — the acceptance criteria are identical to the node exit, so a skipped preflight still passes, just later.
+4. **每任务预检（`--preflight` · 只报结构问题）**：子代理回传并记下 `workflow-handoff.mjs result` 之后（direct 模式则在执行者交出 SUMMARY 之后），运行 `node .claude/skills/flow-comet/scripts/workflow-guard.mjs exit execute --preflight` —— 它只跑**结构性门禁**（SUMMARY 关键段 / 模板保真骨架 / 入口工件骨架 / TASK 7 字段），**不跑**进展类门禁（证据、任务集签名、串行 pending、可委托并行、在飞委托、verify 命令执行、产物存在性），不推进状态、不写 state、也不写模板提示账本。价值：在「result 已记、尚未标 done」这个时点就能当场看到该任务 SUMMARY 的缺段 / 结构子段 / 条件段 / 首部字段问题——这正是本步骤存在的通道；不跑预检，这些问题会被更早的进展门禁挡下、攒到节点收尾一起爆。边界：它只报结构问题；**完整 `exit`（不带 `--apply`）仍是节点收尾的全链预演**——会先报进展类问题（串行 pending / 可委托并行 / 证据），预检不替代它。它只读、不写提示账本，因此**缺段只报数量**（不列段名）；段名升级由完整 exit 的提示账本在再犯时给出。
+   **Per-task preflight (`--preflight`, structural only)**: after the subagent returns and its result is recorded (in direct mode, after the executor hands over the SUMMARY), run `node .claude/skills/flow-comet/scripts/workflow-guard.mjs exit execute --preflight` — it runs only the structural gates (SUMMARY key sections / template-fidelity skeleton / intake-artifact skeleton / TASK seven fields) and skips the progress gates (evidence, task-set signature, serial pending, delegable parallel tasks, in-flight handoffs, real verify execution, artifact existence); it does not advance, does not write workflow state, and does not write the template hint ledger. Value: the task's SUMMARY defects (missing section / structure subsection / conditional section / header field) surface right away at the point where the result is recorded and the task is not yet marked done — that is exactly the channel this step exists for; without it those defects are blocked by earlier progress gates and pile up at the node exit. Boundary: it reports structural problems only; the **full `exit` without `--apply` remains the node's whole-chain rehearsal** and reports progress-class problems first (serial pending / delegable parallel tasks / evidence) — preflight does not replace it. Because it is read-only and writes no hint ledger, **missing sections are reported as counts only** (no section names); the full exit's hint ledger lists names on a repeat failure.
 5. **验收 SUMMARY，TASK.md 标 done**：确认 SUMMARY 按 `flow-kit/templates/SUMMARY.md` 填写且**模板保真**（标题 `# SUMMARY:` / 首部 4 字段 / 段序一致）、含 `## 自检方法` 与 `## LESSONS 扫描` 两个增量段（前者声明 brooks-review / cache-brooks / builtin-quickcheck 三值之一）、verify 输出真实、6 维自查与越界检查有实质内容；通过后在 TASK.md 将任务标 `status="done"` 并加时间戳。
 6. **下一个 pending 任务**：重复步骤 1-5。
 

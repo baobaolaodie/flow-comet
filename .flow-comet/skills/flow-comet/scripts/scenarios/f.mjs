@@ -1191,18 +1191,22 @@ export const ENTRIES = [
             problems.push('反向构造判别力缺失（' + probeLabel + ' 未被判不一致）');
           }
         }
-        // —— 每任务预检步骤 + 委托顺序纪律（反馈面纪律文本锁 · 两册中英双语）——
-        // 判据 = 两组关键句在**两册各自**的正文里逐条在案：预检（不带 --apply / 不推进状态 / 判定标准不变）
-        // 与委托顺序（先 request 成功再启动子代理 / 禁放进同一个并发调用 / 纪律不是机制拦截），中英各一份。
+        // —— 每任务预检（--preflight）+ 委托顺序纪律 + 节点视图三字段（文本锁 · 两册中英双语）——
+        // 判据 = 三组关键句在**两册各自**的正文里逐条在案：预检（--preflight 只跑结构门禁 / 只读不写
+        // state 与账本 / 完整 exit 仍是全链预演）、委托顺序（先 request 成功再启动子代理 / 禁放进同一个
+        // 并发调用 / 纪律不是机制拦截）、节点视图三字段（currentNode 产物推导 / stateCurrentNode 原值 /
+        // routeNode 路由视图 / Fix 批次以 FIX-BATCH 行与 next 的 NODE 为准），中英各一份。
         // 反向构造：逐册逐句抽掉 ⇒ 必报该册缺该句（抽掉用全量 split/join，不是只替换首处）。
         {
           const preflightOrderAnchors = [
-            ['每任务预检 · 不带 --apply（中文）', '每任务预检（不带 `--apply`）'],
-            ['每任务预检 · 不推进状态（中文）', '它跑完整出口门禁并报告问题，不推进状态、不写 state；`--apply` 仍只在节点收尾时用'],
-            ['每任务预检 · 判定标准不变（中文）', '判定标准与节点收尾那次完全一样'],
-            ['每任务预检（英文）', '**Per-task preflight (no `--apply`)**'],
-            ['每任务预检 · 不写 state（英文）', 'without advancing or writing workflow state'],
-            ['每任务预检 · 判定标准不变（英文）', 'the acceptance criteria are identical'],
+            ['每任务预检 · 用 --preflight（中文）', '每任务预检（`--preflight` · 只报结构问题）'],
+            ['每任务预检 · 只跑结构门禁（中文）', '它只跑**结构性门禁**'],
+            ['每任务预检 · 不写 state 与账本（中文）', '不推进状态、不写 state、也不写模板提示账本'],
+            ['每任务预检 · 完整 exit 仍是全链预演（中文）', '**完整 `exit`（不带 `--apply`）仍是节点收尾的全链预演**'],
+            ['每任务预检（英文）', '**Per-task preflight (`--preflight`, structural only)**'],
+            ['每任务预检 · 只跑结构门禁（英文）', 'it runs only the structural gates'],
+            ['每任务预检 · 不写 state 与账本（英文）', 'does not write workflow state, and does not write the template hint ledger'],
+            ['每任务预检 · 完整 exit 仍是全链预演（英文）', "the **full `exit` without `--apply` remains the node's whole-chain rehearsal**"],
             ['委托顺序 · 先 request 后委托（中文）', '先让 request 成功，再启动子代理'],
             ['委托顺序 · 禁同一并发调用（中文）', '禁止把 request 与子代理启动放进同一个并发调用'],
             ['委托顺序 · 纪律不是拦截（中文）', '这是执行纪律，不是机制拦截'],
@@ -1210,10 +1214,20 @@ export const ENTRIES = [
             ['委托顺序 · 禁同一并发调用（英文）', 'never inside one concurrent call'],
             ['委托顺序 · 纪律不是拦截（英文）', 'execution discipline, not a mechanism interception'],
           ];
-          const preflightOrderProblems = (books) => {
+          const nodeFieldAnchors = [
+            ['节点视图 · currentNode 产物推导（中文）', '**currentNode** = **产物推导**'],
+            ['节点视图 · stateCurrentNode 原值（中文）', '**stateCurrentNode** = **state 文件原值**'],
+            ['节点视图 · routeNode 路由视图（中文）', '**routeNode** = **路由视图**'],
+            ['节点视图 · Fix 批次以 FIX-BATCH 与 next 为准（中文）', '**Fix 批次以 `FIX-BATCH` 行与 `next` 的 `NODE` 为准**'],
+            ['节点视图 · currentNode 产物推导（英文）', '**currentNode** = artifact-derived'],
+            ['节点视图 · stateCurrentNode 原值（英文）', '**stateCurrentNode** = the raw state-file value'],
+            ['节点视图 · routeNode 路由视图（英文）', '**routeNode** = the routing view'],
+            ['节点视图 · Fix batch（英文）', '**For a Fix batch, trust the `FIX-BATCH` line and the `NODE` printed by `next`**'],
+          ];
+          const bookAnchorProblems = (books, anchors) => {
             const out = [];
             for (const [rel, text] of books) {
-              for (const [label, anchor] of preflightOrderAnchors) {
+              for (const [label, anchor] of anchors) {
                 if (!text.includes(anchor)) {
                   out.push(rel + ' 缺「' + label + '」（关键句不在场：' + anchor.slice(0, 28) + '…）');
                 }
@@ -1221,12 +1235,14 @@ export const ENTRIES = [
             }
             return out;
           };
-          problems.push(...preflightOrderProblems(bookTexts));
-          for (const [rel, text] of bookTexts) {
-            for (const [label, anchor] of preflightOrderAnchors) {
-              const probed = new Map(bookTexts).set(rel, text.split(anchor).join('（反向构造：抽掉）'));
-              if (!preflightOrderProblems(probed).some((p) => p.startsWith(rel) && p.includes(label))) {
-                problems.push('反向构造判别力缺失（' + rel + ' 抽掉「' + label + '」未被判缺）');
+          for (const [groupLabel, anchors] of [['预检与委托顺序', preflightOrderAnchors], ['节点视图三字段', nodeFieldAnchors]]) {
+            problems.push(...bookAnchorProblems(bookTexts, anchors));
+            for (const [rel, text] of bookTexts) {
+              for (const [label, anchor] of anchors) {
+                const probed = new Map(bookTexts).set(rel, text.split(anchor).join('（反向构造：抽掉）'));
+                if (!bookAnchorProblems(probed, anchors).some((p) => p.startsWith(rel) && p.includes(label))) {
+                  problems.push('反向构造判别力缺失（' + groupLabel + '：' + rel + ' 抽掉「' + label + '」未被判缺）');
+                }
               }
             }
           }

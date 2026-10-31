@@ -72,6 +72,7 @@ import {
   runRequirementAcGate,
   runReviewExitGate,
   runSkillLoadMarkerGate,
+  runStructuralPreflight,
   runTaskSetSignatureExitGate,
   runTransitionEvidenceGate,
 } from './lib/guard-gates.mjs';
@@ -92,6 +93,8 @@ import {
 const command = process.argv[2] ?? 'verify';
 const nodeId = process.argv[3] ?? null;
 const apply = process.argv.includes('--apply');
+// 结构化预检（只读）：只跑结构性门禁子集（清单在 guard-gates 的 runStructuralPreflight）。
+const preflight = process.argv.includes('--preflight');
 
 // WARN 计数——entry/exit 成功路径末尾输出汇总行（可观测性；追加不改变既有输出）
 let __warnCount = 0;
@@ -159,6 +162,17 @@ async function checkPromptDeclarations({ node, state }) {
 }
 
 async function main() {
+  // 结构化预检的参数防护（fail-closed）：--preflight 只读、只与 `exit <node>` 搭配。
+  // 与 --apply 同时给没有任何合法语义（一个只读、一个落盘）→ 用法错误非零退出，不猜意图；
+  // 其它命令（entry / verify / 未知命令）同样拒绝——预检不是第二套入口门禁。
+  if (preflight && apply) {
+    throw new Error('用法错误: --preflight 只读，不能与 --apply 同时使用（一个只读、一个写盘，组合无合法语义）'
+      + '——用法: workflow-guard.mjs exit <node> --preflight（结构预检）或 workflow-guard.mjs exit <node> [--apply]（完整出口）');
+  }
+  if (preflight && command !== 'exit') {
+    throw new Error('用法错误: --preflight 只能与 exit <node> 搭配（当前命令: ' + command + '）'
+      + '——用法: workflow-guard.mjs exit <node> --preflight');
+  }
   // 包装 console.error 统计 WARN 输出（转发原实现，行为不变）
   console.error = (...args) => {
     if (/WARN/.test(args.join(' '))) __warnCount += 1;
@@ -224,6 +238,16 @@ async function main() {
     // 入口可核对的判据；未声明 / 自动标记不在此判，缺失仍由出口声明门负责。
     await checkPromptDeclarations({ node, state });
     await runEntryGates({ protocol, node, state, file });
+    return;
+  }
+  if (preflight) {
+    // 结构化预检：只跑结构门禁子集（单一清单在 guard-gates 的 runStructuralPreflight），不写 state、
+    // 不写模板提示账本——因此也**不打印 --apply 引导**（预检不推进状态，那行会误导：它只说明
+    // 「再跑一次就能落盘」，而预检的价值恰恰是在不落盘的前提下反复跑到结构干净）。
+    console.log('PREFLIGHT: 结构预检——只跑结构性门禁（不写 state、不写提示账本；完整 exit 不带 --apply 才是全链预演）');
+    await runStructuralPreflight({ node, state });
+    console.log('ALL CHECKS PASSED');
+    console.log('PREFLIGHT: structural checks only（结构预检通过；推进仍由 exit ' + node.id + ' --apply 负责）');
     return;
   }
   // —— 出口校验链（顺序即语义：每条门禁命中即按既有分级 BLOCKED / WARN）——

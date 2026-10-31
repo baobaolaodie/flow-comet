@@ -9,6 +9,7 @@ import {
   assertExit,
   assertNotOut,
   assertOut,
+  assertTrue,
   baseState,
   runGuard,
   runHandoff,
@@ -465,20 +466,107 @@ export const ENTRIES = [
     },
   },
 
-  // 14: 串行 pending 未完成 → BLOCKED
+  // 14: 串行 pending 未完成 → BLOCKED；in-place 扩展：结构化预检（exit --preflight）
+  // 缺陷形态：每任务预检被设想的时点（result 已记、尚未标 done）在完整出口链里必先撞更早的
+  // 进展类门禁——串行 pending 排在模板保真门之前，结构问题根本报不出来。本例用同一夹具证明：
+  // ① 完整 exit（不带 --apply）仍报进展类问题（对照锚），且此刻还没到结构门；
+  // ② --preflight 首报结构问题、不报串行 pending，且只读（state 字节零改写 + 不写提示账本）；
+  // ③ 旧 change 只 WARN 不阻断；④ 参数防护 fail-closed（--preflight+--apply / 非 exit 命令 /
+  // 未知节点）；⑤ 通过时提示不误导（不打印 --apply 引导），结构干净也不放行推进（完整 exit 照旧拦）。
+  // 反向构造：把预检实现改回「跑全链」⇒ ② 的旧 change 分支落进完整出口链、被串行 pending 拦下
+  // （期望 exit 0 实际 1，断言红）；让预检写 state ⇒ ② 的字节断言红；写提示账本 ⇒ ① 的账本断言红。
   {
-    name: '14 execute exit BLOCKED：串行 pending 未完成',
+    name: '14 execute exit BLOCKED：串行 pending 未完成 + --preflight 结构化预检（结构先报/只读/参数防护）',
     run: (dir) => {
+      // SUMMARY 模板（夹具自带：两种检出形态下都确定，不依赖 vendored 模板在场）。H2 段集 = 登记表
+      // 登记的全部 SUMMARY 段（含条件段）——坏 SUMMARY 的缺陷因此只暴露在「段形」这一层。
+      writeFile(dir, 'flow-kit/templates/SUMMARY.md', [
+        '# SUMMARY 模板',
+        '',
+        '## 做了什么（一段话）',
+        '## 改动文件',
+        '## verify 输出（必填）',
+        '## 6 维自查（生产代码改动必填 · 来自 4-dev 步骤 4）',
+        '## 数据库迁移（涉及 schema 变更必填 · 来自 4-dev 步骤 1.7 / R4.5）',
+        '## 越界检查（必填 · 来自 4-dev 步骤 5 / R6.5 / B3 老项目护栏）',
+        '## 破坏性变更（涉及破坏性改动必填 · 来自 4-dev 步骤 1.8 / R4.6 / B4 老项目护栏）',
+        '## 决策与偏离（如有）',
+        '## 是否触发新工作',
+        '## 完成判定',
+        '',
+      ].join('\n'));
       const st = baseState('execute');
+      st.newChange = true;
+      st.enteredNodes = ['execute'];
       st.evidence.execute = { summary: 'executed' };
       st.evidence['subagent-execute'] = { handoffResult: handoffFor(['P02']) };
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
         '<task id="T01" parallel="false" status="pending"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n' + TASK_P2);
+      // 坏 SUMMARY：关键段齐（关键段门能过），但段形不合模板——标题缺 `# SUMMARY:`
+      // 前缀、首部四字段缺席、段序偏离、缺「是否触发新工作」「完成判定」。这正是只有模板保真门
+      // 才判、因而被更早的进展门挡住的结构问题。
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
-      const res = runGuard(['exit', 'execute'], dir);
-      assertExit(res, 1);
-      assertOut(res, '串行 pending');
+      const serialExit = runGuard(['exit', 'execute'], dir);
+      assertExit(serialExit, 1);
+      assertOut(serialExit, '串行 pending');
+      assertNotOut(serialExit, '模板结构校验失败');
+
+      // ① 结构化预检：同一夹具下首报结构问题（不得报进展类）；且只读（state 字节与账本零改写）
+      const preflightBytes = readStateBytes(dir);
+      const pre = runGuard(['exit', 'execute', '--preflight'], dir);
+      assertExit(pre, 1);
+      assertOut(pre, 'PREFLIGHT: ');
+      assertOut(pre, 'T01-SUMMARY.md 模板结构校验失败');
+      assertOut(pre, '（模板: flow-kit/templates/SUMMARY.md）');
+      assertOut(pre, '缺段 2 项'); // 首段形态：类别计数（缺段不列段名）
+      assertNotOut(pre, '缺段 2 项:');
+      assertNotOut(pre, '串行 pending');
+      assertNotOut(pre, 'ALL CHECKS PASSED');
+      assertStateBytesUnchanged(dir, preflightBytes, '--preflight 只读：不得写 state');
+      assertTrue(!fs.existsSync(path.join(dir, '.specs', CHANGE_ID, '.template-hints.json')),
+        '--preflight 不得写模板提示账本（.template-hints.json）');
+
+      // ② 分级不变：同一坏 SUMMARY 在旧 change 只 WARN 不阻断（预检不得把旧 change 升级成 BLOCK）
+      writeState(dir, { ...st, newChange: false });
+      const oldChangeBytes = readStateBytes(dir);
+      const oldChangePre = runGuard(['exit', 'execute', '--preflight'], dir);
+      assertExit(oldChangePre, 0);
+      assertOut(oldChangePre, 'TEMPLATE-STRUCTURE WARN');
+      assertNotOut(oldChangePre, 'BLOCKED');
+      assertStateBytesUnchanged(dir, oldChangeBytes, '旧 change 预检同样只读');
+      writeState(dir, st);
+      const restoredBytes = readStateBytes(dir);
+
+      // ③ 参数防护 fail-closed：--preflight 与 --apply 同时给 ⇒ 用法错误（只读/写盘无合法语义）
+      const conflict = runGuard(['exit', 'execute', '--preflight', '--apply'], dir);
+      assertExit(conflict, 1);
+      assertOut(conflict, '用法错误');
+      assertOut(conflict, '--apply');
+      assertStateBytesUnchanged(dir, restoredBytes, '用法错误路径不得写 state');
+      const wrongCommand = runGuard(['entry', 'execute', '--preflight'], dir);
+      assertExit(wrongCommand, 1);
+      assertOut(wrongCommand, '用法错误');
+      assertOut(wrongCommand, '只能与 exit');
+
+      // ④ 结构干净 ⇒ 预检通过，且不打印 --apply 引导（预检不落盘，那行会误导）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
+      const okBytes = readStateBytes(dir);
+      const ok = runGuard(['exit', 'execute', '--preflight'], dir);
+      assertExit(ok, 0);
+      assertOut(ok, 'ALL CHECKS PASSED');
+      assertOut(ok, 'PREFLIGHT: structural checks only');
+      assertNotOut(ok, 'APPLY: rerun with --apply');
+      assertStateBytesUnchanged(dir, okBytes, '预检通过路径不得写 state');
+      // 结构干净 ≠ 进展完成：串行 pending 仍在，完整 exit 照旧拦（预检不越权放行推进）
+      const stillBlocked = runGuard(['exit', 'execute'], dir);
+      assertExit(stillBlocked, 1);
+      assertOut(stillBlocked, '串行 pending');
+
+      // ⑤ 未知节点照既有报错（--preflight 不得把未知节点变成静默通过）
+      const unknown = runGuard(['exit', 'no-such-node', '--preflight'], dir);
+      assertExit(unknown, 1);
+      assertOut(unknown, 'Unknown workflow Node: no-such-node');
     },
   },
 

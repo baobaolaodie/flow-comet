@@ -40,6 +40,10 @@ import {
   nextNode,
   templateSectionPatterns,
 } from './guard-routing.mjs';
+// 结构化预检（exit --preflight）的子集**只组合既有门禁**：SUMMARY 关键段来自证据/产物门禁族，
+// 骨架判据与 TASK 7 字段来自模板保真门禁族——预检自身不新写判据，也不复制段形实现。
+import { runSummarySectionsGate } from './guard-evidence-gates.mjs';
+import { evaluateArtifact, runTaskSevenFieldGate } from './guard-template-fidelity.mjs';
 
 // 节点 → 合法 exit 的前置条件（对齐 flow-kit 阶段门 + flowkit.*.v1 evidence）
 const NODE_TRANSITION_GATES = {
@@ -1230,6 +1234,125 @@ export async function runSkillLoadMarkerGate({ node, state }) {
       (malformed.length > 0 ? '；不可解析标记: ' + malformed.join(', ') : ''));
     process.exit(1);
   }
+}
+
+// ---------- 结构化预检（exit <node> --preflight）----------
+//
+// 缺陷形态：每任务预检被设想的时点（result 已记、尚未标 done）在完整出口链里必然先撞更早的进展类
+// 门禁——关键段之后是串行 pending、可委托并行、模板保真……结构问题根本报不出来，只有全部 done 后
+// 才一次爆。本段是**结构性门禁子集**的唯一表达处：入口（workflow-guard）只调用 runStructuralPreflight，
+// 不再另写「哪些门跑 / 哪些不跑」；每条判据仍复用既有门禁函数，不在此复制实现。
+//
+// 进（结构 = 写得对不对）：SUMMARY 关键段（段在场 / 6 维实质 / 自检方法 / LESSONS 扫描回应）、
+// 模板保真骨架（SUMMARY 与入口三件）、TASK 7 字段（plan 出口既有判据）。
+// 不进（进展 = 做到哪了）：证据在场 / 转移前置 / 任务集签名 / Fix 批次越界 / 串行 pending /
+// 可委托并行 / 在飞委托 / verify 命令真实执行 / 产物存在性 / skill-load 声明 / UA 门控——它们
+// 判的是执行进展，在预检时点必然先命中，正是本模式要绕开的噪声。其余节点自有工件（REVIEW / TEST /
+// UAT / TASK 段形）的骨架由各自节点出口的模板保真门禁负责：预检的目标时点是执行期逐任务产物
+// （SUMMARY），跨节点重复承担别的节点出口判据会把「子集」变成「超集」。
+//
+// 只读：不写 state，也不写模板提示账本（.template-hints.json）。因此骨架报告停在两阶段报文的
+// **首段形态**（模板路径 + 类别计数；缺段只报数量不列段名）——「再犯列段名」的升级键仍只由完整
+// exit 的账本承载，预检不读也不写它。报告措辞与模板保真门禁的首段一致；判据本身来自
+// evaluateArtifact（骨架 + 模板派生的同一实现），不在此另写段形判定。
+
+// 首段形态：把骨架问题压成「类别 + 计数」（缺段不列段名，其余类别本身即定位信息）。
+// 这是模板保真门禁 planFailureLines 在 escalate=false 时的同一口径——该格式器是模块私有且其
+// 报告路径会写提示账本，预检要在**不写账本**的前提下给出同形报文，故在此做只读投影。
+function preflightStructureParts(issues) {
+  const parts = [];
+  if (issues.title !== null) parts.push('标题形态不符（模板首行: `' + issues.title.expected + '`）');
+  if (issues.headerMissing.length > 0) parts.push('首部缺字段: ' + issues.headerMissing.join('、'));
+  if (issues.headerEmpty.length > 0) parts.push('首部字段有键无值: ' + issues.headerEmpty.join('、'));
+  if (issues.frontmatter.length > 0) parts.push('frontmatter 缺键或值为空: ' + issues.frontmatter.join('、'));
+  if (issues.missing.length > 0) parts.push('缺段 ' + issues.missing.length + ' 项');
+  if (issues.conditional.length > 0) {
+    parts.push('条件段标题缺席 ' + issues.conditional.length + ' 项: ' + issues.conditional.join('、'));
+  }
+  if (issues.order !== null) {
+    parts.push('段序偏离模板（「' + issues.order.heading + '」排在模板中更早的段之后）');
+  }
+  if (issues.empty.length > 0) parts.push('正文为空 ' + issues.empty.length + ' 项: ' + issues.empty.join('、'));
+  if (issues.verbatim.length > 0) {
+    parts.push('与模板该段正文逐字相同（判未填）' + issues.verbatim.length + ' 项: ' + issues.verbatim.join('、'));
+  }
+  if (issues.structure.length > 0) {
+    parts.push('缺结构子段 ' + issues.structure.length + ' 项: ' + issues.structure.map((entry) => entry.name).join('、'));
+  }
+  if (issues.increments.length > 0) parts.push('增量段位置非法: ' + issues.increments.join('、'));
+  return parts;
+}
+
+// 预检的骨架目标（只装**在场者**）：① SUMMARY（execute 家族，与 runSummaryTemplateFidelityGate
+// 同一作用面：目录下全部 *-SUMMARY.md）；② 入口三件（CHANGE / REQUIREMENT / DESIGN）——变更的结构
+// 输入，任何节点的预检都查在场者。缺文件的项直接跳过：产物存在性是进展类判据，不属于本子集
+// （归 runArtifactGate）。DESIGN-lite 未登记骨架，其标题形态仍由 design 出口的既有判据负责。
+async function preflightSkeletonTargets({ node, state }) {
+  const changeDir = path.join(runRoot, '.specs', state.activeChange ?? '');
+  const targets = [];
+  if (EXECUTE_FAMILY_NODE_IDS.has(node.id)) {
+    const summaries = (await fs.readdir(changeDir).catch(() => [])).filter((file) => file.endsWith('-SUMMARY.md'));
+    for (const file of summaries) targets.push({ key: 'SUMMARY', file });
+  }
+  for (const [key, file] of [['CHANGE', 'CHANGE.md'], ['REQUIREMENT', 'REQUIREMENT.md'], ['DESIGN', 'DESIGN.md']]) {
+    if (await fileExists(path.join(changeDir, file))) targets.push({ key, file });
+  }
+  return targets;
+}
+
+// 骨架子集：判据 = evaluateArtifact（与模板保真门禁同一实现）；报告 = 首段形态（只读投影）。
+// 分级沿用既有语义：新 change BLOCKED（含恢复指引）/ 旧 change WARN 渐进不阻断。
+async function runPreflightSkeletonChecks({ node, state }) {
+  if (!state.activeChange) return;
+  const changeDir = path.join(runRoot, '.specs', state.activeChange);
+  const failures = [];
+  const templatePaths = new Set();
+  for (const target of await preflightSkeletonTargets({ node, state })) {
+    let text;
+    try {
+      text = await fs.readFile(path.join(changeDir, target.file), 'utf8');
+    } catch {
+      continue; // 读失败与产物在场同属产物面，不在结构子集里重复报（未验证的可见性由产物门禁负责）
+    }
+    // SUMMARY 的首部四字段与模板保真门禁同口径（键集来自骨架、值非空才算填）；入口三件只查骨架
+    // 本身——「Change ID 必填」是入口文档门的硬要求，不是骨架派生判据，这里不扩张。
+    const skeleton = await buildSkeleton(target.key);
+    const evaluated = await evaluateArtifact(target.key, text, {
+      requiredHeaderFields: target.key === 'SUMMARY' ? skeleton.headerFields : [],
+    });
+    if (!evaluated.derived) {
+      // 模板缺席不静默通过：显式声明未校验（与模板权威门禁同一口径），不臆造段名兜底。
+      console.error('未校验（模板缺失）: ' + target.file + ' —— 模板或结构登记表不可读，段形校验跳过'
+        + '（修复: 按安装指引获取 flow-kit 模板后重试）');
+      continue;
+    }
+    const parts = preflightStructureParts(evaluated.issues);
+    if (parts.length === 0) continue;
+    failures.push({ file: target.file, parts, template: evaluated.skeleton.file });
+    if (evaluated.skeleton.file) templatePaths.add(evaluated.skeleton.file);
+  }
+  if (failures.length === 0) return;
+  const lines = failures.map((failure) => failure.file + ' 模板结构校验失败: '
+    + failure.parts.join('; ') + '（模板: ' + (failure.template ?? '（登记表未登记模板路径）') + '）');
+  if (isNewChange(state)) {
+    for (const line of lines) console.error('BLOCKED: ' + line);
+    console.error('恢复: 对照 ' + [...templatePaths].join(' / ')
+      + ' 修正标题 / 首部字段 / 段序，并按模板补齐缺失的 H2 与结构型 H3 标题'
+      + '（条件段与无内容段正文可写 N/A；可选段按模板自述可整段删除）后重试 exit ' + node.id + ' --preflight'
+      + '（预检只读、不写提示账本，故缺段只报数量；完整 exit 不带 --apply 在再犯时会列出段名）');
+    process.exit(1);
+  }
+  for (const line of lines) {
+    console.error('TEMPLATE-STRUCTURE WARN: ' + line + '（旧 change 渐进，不阻断；新 change 将强制）');
+  }
+}
+
+// 结构化预检子集（显式清单，单一表达处）：workflow-guard 的 --preflight 分支只调用本函数。
+// 顺序即反馈优先级：先段（缺整段最致命），再骨架（段形 / 结构子段），最后 TASK 字段。
+export async function runStructuralPreflight({ node, state }) {
+  await runSummarySectionsGate({ node, state });
+  await runPreflightSkeletonChecks({ node, state });
+  await runTaskSevenFieldGate({ node, state });
 }
 
 // 受保护状态落盘（沿用 state-io 的受保护写入通道）
