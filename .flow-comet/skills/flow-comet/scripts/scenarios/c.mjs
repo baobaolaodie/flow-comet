@@ -79,9 +79,26 @@ function listMarkdownFiles(absDir, relDir) {
   return out;
 }
 
+// 形态判据（公开面能不能派生）：先问「这份检出有没有公开文档面」，再谈派生——npm 包按 package.json
+// 的 files 白名单只分发 .flow-comet/skills 与 rules，不含 docs/；安装副本同理。这种形态下「受检面
+// 无法派生」不是缺文件事故，而是载体的**正常形态**，说成「仓库缺文件」会把读者引到修复一个不存在的
+// 缺陷上。判据落点选 docs/ 整份在不在，而不是权威映射文件在不在：docs/ 在、映射缺 = 检出被裁坏，
+// 仍要在读取处显式失败（判据强度不降——跳过通道只对「整份文档面不存在」开放）。
+const PUBLIC_FACE_DOCS_DIR = 'docs';
+// 跳过提示的措辞是判据的一部分：SKIP = 未校验，不是通过。读者不该把「这形态没有公开文档」读成
+// 「公开面已检查且通过」。
+const PUBLIC_FACE_SKIP_NOTICE = 'SKIP: 此形态不含公开文档（' + PUBLIC_FACE_DOCS_DIR
+  + '/ 整份不在本检出——分发包 / 安装副本按 files 白名单只带技能树），跳过公开面键名检查'
+  + '（SKIP = 未校验，不是通过；请改在权威源检出重跑本套件）';
+function publicFaceDocsAbsent(root = REPO_ROOT) {
+  return !fs.existsSync(path.join(root, ...PUBLIC_FACE_DOCS_DIR.split('/')));
+}
+
 // 权威映射缺席或不可解析 = 受检面无从派生（不是「没有东西要查」）：显式失败，不静默退化。
-function readPublicFaceAuthorityMap() {
-  const abs = path.join(REPO_ROOT, ...PUBLIC_FACE_AUTHORITY_MAP.split('/'));
+// root 可覆盖读取根（默认仓库根）——仅为可测性接缝：形态判据的探针要在夹具目录上验证「docs/ 在、
+// 映射缺仍显式失败」，生产调用不传。
+function readPublicFaceAuthorityMap(root = REPO_ROOT) {
+  const abs = path.join(root, ...PUBLIC_FACE_AUTHORITY_MAP.split('/'));
   if (!fs.existsSync(abs)) {
     throw new Error('受检面无法派生：' + PUBLIC_FACE_AUTHORITY_MAP
       + ' 不在本检出（公开文档权威映射是受检面的唯一来源）');
@@ -239,6 +256,42 @@ function publicFaceMachineProblems({ texts, preflightDocs }) {
     }
   }
   return out;
+}
+
+// ---------- 形态判据的判别力探针（同一实现驱动，在夹具目录上作业） ----------
+// 两条边界都要有：① 分发包 / 安装副本形态（有技能树、无 docs/）跳过且**可见**，不判红；② docs/ 在
+// 场而权威映射缺失仍显式失败——跳过通道只对「整份文档面不存在」开放，不能顺手把真事故一起吞掉。
+function assertPublicFaceShapeProbes(dir) {
+  if (!publicFaceDocsAbsent(dir)) {
+    throw new Error('形态探针前提失效：夹具目录不应预先含 ' + PUBLIC_FACE_DOCS_DIR + '/');
+  }
+  for (const phrase of ['此形态不含公开文档', '跳过公开面键名检查', '未校验']) {
+    if (!PUBLIC_FACE_SKIP_NOTICE.includes(phrase)) {
+      throw new Error('跳过提示缺「' + phrase + '」——跳过必须说明这是未校验而不是通过: ' + PUBLIC_FACE_SKIP_NOTICE);
+    }
+  }
+  // docs/ 在场 ⇒ 不属「不含公开文档」形态，判据不得据此跳过（否则真检出会被整面跳过）
+  fs.mkdirSync(path.join(dir, ...PUBLIC_FACE_DOCS_DIR.split('/')), { recursive: true });
+  if (publicFaceDocsAbsent(dir)) {
+    throw new Error('形态判据把含 ' + PUBLIC_FACE_DOCS_DIR + '/ 的检出也判成不含公开文档（真检出会被整面跳过）');
+  }
+  // docs/ 在场、权威映射缺 = 检出被裁坏 → 仍是读取处的显式失败（判据强度不因跳过通道下降）
+  let threw = null;
+  try {
+    readPublicFaceAuthorityMap(dir);
+  } catch (e) {
+    threw = e;
+  }
+  if (!threw || !String(threw.message).includes('受检面无法派生')) {
+    throw new Error('docs/ 在场但权威映射缺失时应显式失败，实际: ' + (threw ? threw.message : '未抛错'));
+  }
+  // 补上映射 ⇒ 读取处正常返回（证明上一条的失败来自「缺映射」而不是「读不到」）
+  writeFile(dir, PUBLIC_FACE_AUTHORITY_MAP,
+    JSON.stringify({ topics: { workflow: { authority: PUBLIC_FACE_EXAMPLES_DIR + '/README.md' } } }, null, 2) + '\n');
+  const parsed = readPublicFaceAuthorityMap(dir);
+  if (!parsed.topics || !parsed.topics.workflow) {
+    throw new Error('权威映射在场时读取处应返回 topics（探针前提失效）: ' + JSON.stringify(parsed));
+  }
 }
 
 export const ENTRIES = [
@@ -471,18 +524,34 @@ export const ENTRIES = [
   },
 
   // 105: 计数一致性自检同步（AC-8 / AC-14）+ 公开面机器字段名黑名单 + 结构预检命令锚（in-place
-  // 扩展，不新增场景）——组文件里的场景数或系统测试集项数变更时，受检文件须同步（场景数：
-  // ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n 变体；项数：n/n / n items / n 项 变体）。
-  // 本场景读取权威源仓库的受检文件断言含当前计数变体——文档漏同步或条目缺失（幽灵条目）即 RED；
-  // 与底部自检共用同一实现（countSyncProblems），两处判据不会漂移。
+  // 扩展，不新增场景）——组文件里的场景数或系统测试集项数变更时，受检文件须同步
+  // （场景数：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n 变体；项数：n/n / n items / n 项
+  // 变体）。本场景读取权威源仓库的受检文件断言含当前计数变体——文档漏同步或条目缺失（幽灵条目）即
+  // RED；与底部自检共用同一实现（countSyncProblems），两处判据不会漂移。
   // 公开面口径：用户阅读面不得直写机器状态字段名（黑名单），被明确标注为状态输出示例的围栏块
   // 放行；机制 / 用法 / 排障三份文档 × 中英都必须出现 `--preflight`（新增公开命令不得无锚）。
   // 判别力由反向构造证明：注入键名、抽掉命令锚 ⇒ 必报；标注示例块放行、撤掉标注 ⇒ 再报。
-  // 安装副本无文档面，整面跳过。
+  // 形态分派（只按载体形态判，不猜）：安装副本（无 .flow-comet/ 技能树）与分发包（技能树在、docs/
+  // 整份不在）都没有公开文档面——跳过且**可见**（SKIP = 未校验，不是通过）；只有权威源检出才跑
+  // 公开面判据。两种形态的边界由 assertPublicFaceShapeProbes 自己钉住。
   {
     name: '105 计数一致性自检同步 + 公开面机器字段名黑名单 + 三对文档的 --preflight 锚（AC-8 / AC-14）',
-    run: async () => {
-      if (!isAuthoritativeSourceRepo()) return; // 安装副本无 flow-comet 文档
+    run: async (dir) => {
+      if (!isAuthoritativeSourceRepo()) {
+        // 安装副本：无公开文档面——跳过必须可见。
+        console.log('SKIP: 公开面判据（安装副本检出：本检出无 .flow-comet/skills/flow-comet/SKILL.md）'
+          + '——本次未校验公开面键名黑名单 / 命令锚（SKIP = 未校验，不是通过）');
+        return;
+      }
+      // 形态判据自己的判别力（纯夹具，先于任何派生）
+      assertPublicFaceShapeProbes(dir);
+      // 分发包形态（npm 包 / 安装副本）：docs/ 整份不在本检出 ⇒ 公开面无从派生，也就无从检查。
+      // 跳过的就是**公开面这一整块**（含计数同步——它数的文件同样不随包分发）；计数面在底部自检里
+      // 另有一次独立执行，不会因这条跳过而整体失踪。
+      if (publicFaceDocsAbsent(REPO_ROOT)) {
+        console.log(PUBLIC_FACE_SKIP_NOTICE);
+        return;
+      }
       const problems = [...await countSyncProblems()];
       const publicFace = readPublicFaceTexts();
       problems.push(...publicFaceMachineProblems(publicFace));
