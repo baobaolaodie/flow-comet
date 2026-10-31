@@ -637,8 +637,13 @@ export const ENTRIES = [
   // ② --preflight 首报结构问题、不报串行 pending，且只读（state 字节零改写 + 不写提示账本）；
   // ③ 旧 change 只 WARN 不阻断；④ 参数防护 fail-closed（--preflight+--apply / 非 exit 命令 /
   // 未知节点）；⑤ 通过时提示不误导（不打印 --apply 引导），结构干净也不放行推进（完整 exit 照旧拦）。
+  // 同缺陷的第二形态（⑥⑦⑧，in-place 追加）：空 open 节点曾因「入口三件只查在场者」一件都没查、
+  // 直接打印 ALL CHECKS PASSED——⑥ 要求缺件必须 BLOCK 且逐项给路径 + 模板指针；⑦ 要求缺件与结构
+  // 问题同轮报告（先列缺失件、再列结构问题）；⑧ 要求工件齐但缺段时仍回到既有两阶段结构报文
+  // （首段只报类别计数）。三者都断言 state 字节零改写（预检仍只读）。
   // 反向构造：把预检实现改回「跑全链」⇒ ② 的旧 change 分支落进完整出口链、被串行 pending 拦下
-  // （期望 exit 0 实际 1，断言红）；让预检写 state ⇒ ② 的字节断言红；写提示账本 ⇒ ① 的账本断言红。
+  // （期望 exit 0 实际 1，断言红）；让预检写 state ⇒ ②/⑥⑦⑧ 的字节断言红；写提示账本 ⇒ ① 的账本
+  // 断言红；去掉声明工件存在性判据 ⇒ ⑥ 的 BLOCK 断言红（回到打印 ALL CHECKS PASSED 的假绿）。
   {
     name: '14 execute exit BLOCKED：串行 pending 未完成 + --preflight 结构化预检（结构先报/只读/分级/参数防护）',
     run: (dir) => {
@@ -751,6 +756,85 @@ export const ENTRIES = [
       const unknown = runGuard(['exit', 'no-such-node', '--preflight'], dir);
       assertExit(unknown, 1);
       assertOut(unknown, 'Unknown workflow Node: no-such-node');
+
+      // ⑥ 空 open 节点（本缺陷的原始形态）：全新 change 的 `.specs/<id>/` 空目录、无 CHANGE.md /
+      // REQUIREMENT.md。改前结构子集只查「在场者」⇒ 一件都没查、打印 ALL CHECKS PASSED（假绿）。
+      // 本节点声明的 file 类工件（open: CHANGE.md + REQUIREMENT.md）是否在场是**结构事实**，不是
+      // 进展判定：缺失必须 BLOCK，逐项给路径，并给一句「先创建该工件（按模板路径）」的指引。
+      const openState = { ...baseState('open'), newChange: true, enteredNodes: ['open'] };
+      fs.rmSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true, force: true });
+      writeState(dir, openState);
+      const emptyOpenBytes = readStateBytes(dir);
+      const emptyOpen = runGuard(['exit', 'open', '--preflight'], dir);
+      assertExit(emptyOpen, 1);
+      assertOut(emptyOpen, 'BLOCKED');
+      assertOut(emptyOpen, '.specs/' + CHANGE_ID + '/CHANGE.md');
+      assertOut(emptyOpen, '.specs/' + CHANGE_ID + '/REQUIREMENT.md');
+      assertOut(emptyOpen, '模板: flow-kit/templates/CHANGE.md');
+      assertNotOut(emptyOpen, 'ALL CHECKS PASSED');
+      assertStateBytesUnchanged(dir, emptyOpenBytes, '缺件预检同样只读：不得写 state');
+      assertTrue(!fs.existsSync(path.join(dir, '.specs', CHANGE_ID, '.template-hints.json')),
+        '缺件预检不得写模板提示账本（.template-hints.json）');
+
+      // ⑦ 缺件与结构问题同轮报告（先列缺失件，再列结构问题）：CHANGE.md 在场但缺模板段、
+      // REQUIREMENT.md 仍缺席 ⇒ 两类都要报——存在性不再被「在场才查」吞掉结构报告的时机。
+      writeFile(dir, 'flow-kit/templates/CHANGE.md',
+        '# CHANGE 模板\n\n## Why（为什么做）\n## What（做什么）\n## 影响面\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md',
+        '# CHANGE: 夹具\n\n## Why（为什么做）\n\n理由。\n\n## 影响面\n\n夹具。\n');
+      const mixedBytes = readStateBytes(dir);
+      const mixed = runGuard(['exit', 'open', '--preflight'], dir);
+      assertExit(mixed, 1);
+      assertOut(mixed, 'BLOCKED');
+      assertOut(mixed, '.specs/' + CHANGE_ID + '/REQUIREMENT.md');
+      assertOut(mixed, 'CHANGE.md 模板结构校验失败');
+      assertOut(mixed, '缺段 1 项'); // 首段形态：类别计数（缺段不列段名）
+      assertNotOut(mixed, '缺段 1 项:');
+      assertNotOut(mixed, 'ALL CHECKS PASSED');
+      assertTrue(mixed.output.indexOf('.specs/' + CHANGE_ID + '/REQUIREMENT.md')
+        < mixed.output.indexOf('CHANGE.md 模板结构校验失败'),
+      '同轮报告应先列缺失工件、再列结构问题\n实际输出:\n' + mixed.output);
+      assertStateBytesUnchanged(dir, mixedBytes, '缺件 + 结构问题同轮的预检只读');
+
+      // ⑧ 工件齐但缺段（本缺陷修复后不得倒退的既有语义）：补上结构完整的 REQUIREMENT.md，
+      // CHANGE.md 仍缺一段 ⇒ 只剩两阶段结构报文，且首段只报类别计数、不列段名。
+      writeFile(dir, 'flow-kit/templates/REQUIREMENT.md',
+        '# REQUIREMENT 模板\n\n## 用户故事（User Story）\n## 验收准则（AC）\n## 范围切分\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', [
+        '# REQUIREMENT: 夹具',
+        '',
+        '## 用户故事（User Story）',
+        '',
+        '夹具故事。',
+        '',
+        '## 验收准则（AC）',
+        '',
+        '- AC-1: 夹具。',
+        '',
+        '## 范围切分',
+        '',
+        '### v1（本次必做）',
+        '',
+        '- 夹具。',
+        '',
+        '### v2（下一轮考虑，不本次）',
+        '',
+        '- 无。',
+        '',
+        '### out（永远不做）',
+        '',
+        '- 无。',
+        '',
+      ].join('\n'));
+      const structureOnlyBytes = readStateBytes(dir);
+      const structureOnly = runGuard(['exit', 'open', '--preflight'], dir);
+      assertExit(structureOnly, 1);
+      assertOut(structureOnly, 'BLOCKED: CHANGE.md 模板结构校验失败');
+      assertOut(structureOnly, '缺段 1 项');
+      assertNotOut(structureOnly, '缺段 1 项:');
+      assertNotOut(structureOnly, '声明工件缺失');
+      assertNotOut(structureOnly, 'ALL CHECKS PASSED');
+      assertStateBytesUnchanged(dir, structureOnlyBytes, '两阶段结构报文路径同样只读');
     },
   },
 

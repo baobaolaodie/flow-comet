@@ -93,7 +93,8 @@ import {
 const command = process.argv[2] ?? 'verify';
 const nodeId = process.argv[3] ?? null;
 const apply = process.argv.includes('--apply');
-// 结构化预检（只读）：只跑结构性门禁子集（清单在 guard-gates 的 runStructuralPreflight）。
+// 结构化预检（只读）：只跑结构性门禁子集（清单在 guard-gates 的 runStructuralPreflight），
+// 含本节点声明工件的存在性（缺件即 BLOCK，不再是「不在场就跳过」的静默通过）。
 const preflight = process.argv.includes('--preflight');
 
 // exit 的已知参数（白名单）：--apply（落盘推进）/ --preflight（结构预检）/ --protocol [<path>]
@@ -274,8 +275,8 @@ async function main() {
     // 结构化预检：只跑结构门禁子集（单一清单在 guard-gates 的 runStructuralPreflight），不写 state、
     // 不写模板提示账本——因此也**不打印 --apply 引导**（预检不推进状态，那行会误导：它只说明
     // 「再跑一次就能落盘」，而预检的价值恰恰是在不落盘的前提下反复跑到结构干净）。
-    console.log('PREFLIGHT: 结构预检——只跑结构性门禁（不写 state、不写提示账本；完整 exit 不带 --apply 才是全链预演）');
-    await runStructuralPreflight({ node, state });
+    console.log('PREFLIGHT: 结构预检——只跑结构性门禁（含本节点声明工件存在性；不写 state、不写提示账本；完整 exit 不带 --apply 才是全链预演）');
+    await runStructuralPreflight({ protocol, node, state });
     console.log('ALL CHECKS PASSED');
     console.log('PREFLIGHT: structural checks only（结构预检通过；推进仍由 exit ' + node.id + ' --apply 负责）');
     return;

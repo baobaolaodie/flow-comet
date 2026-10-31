@@ -7,7 +7,12 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { validateStateFields } from '../state-schema.mjs';
-import { NODE_PROTOCOL_FILES } from '../protocol-utils.mjs';
+import {
+  NODE_PROTOCOL_FILES,
+  nodeTemplateDeclaration,
+  templateKeyOf,
+  templatePointerPath,
+} from '../protocol-utils.mjs';
 import {
   EXECUTE_FAMILY_NODE_IDS,
   TASK_SET_SIGNATURE_ALGO,
@@ -38,10 +43,15 @@ import {
   missingRequiredArtifacts,
   missingRequiredSchemaEvidence,
   nextNode,
+  pathPatternExists,
+  schemaMap,
   templateSectionPatterns,
+  workflowArtifactRoot,
 } from './guard-routing.mjs';
-// 结构化预检（exit --preflight）的子集**只组合既有门禁**：SUMMARY 关键段来自证据/产物门禁族，
-// 骨架判据与 TASK 7 字段来自模板保真门禁族——预检自身不新写判据，也不复制段形实现。
+// 结构化预检（exit --preflight）的子集由既有门禁与既有的产物路径判据组成：本节点声明工件的
+// 存在性复用产物门禁的路径判据（pathPatternExists / workflowArtifactRoot，不另写路径派生），
+// SUMMARY 关键段来自证据/产物门禁族，骨架判据与 TASK 7 字段来自模板保真门禁族——预检自身不
+// 复制段形实现，也不新造一份节点→产物映射。
 import { runSummarySectionsGate } from './guard-evidence-gates.mjs';
 import { evaluateArtifact, runTaskSevenFieldGate } from './guard-template-fidelity.mjs';
 // 协调者禁令的常量落在中立模块（跨族共用的措辞不进任何一族）：本模块只是取用方，状态命令族同理。
@@ -1244,15 +1254,21 @@ export async function runSkillLoadMarkerGate({ node, state }) {
 // 缺陷形态：每任务预检被设想的时点（result 已记、尚未标 done）在完整出口链里必然先撞更早的进展类
 // 门禁——关键段之后是串行 pending、可委托并行、模板保真……结构问题根本报不出来，只有全部 done 后
 // 才一次爆。本段是**结构性门禁子集**的唯一表达处：入口（workflow-guard）只调用 runStructuralPreflight，
-// 不再另写「哪些门跑 / 哪些不跑」；每条判据仍复用既有门禁函数，不在此复制实现。
+// 不再另写「哪些门跑 / 哪些不跑」；每条判据仍复用既有门禁函数/既有路径判据，不在此复制实现。
 //
-// 进（结构 = 写得对不对）：SUMMARY 关键段（段在场 / 6 维实质 / 自检方法 / LESSONS 扫描回应）、
-// 模板保真骨架（SUMMARY 与入口三件）、TASK 7 字段（仅 plan 节点生效；execute 家族该门是 no-op）。
+// 进（结构 = 写得对不对）：① 本节点声明工件的存在性（协议 outputSchemas 的 file 类产物）——工件
+// 不在场时没有任何结构可判，缺件本身就是结论，**不是**进展判定（这正是「入口三件只查在场者」造成
+// 假绿的补口：全新 change 的空 open 节点曾因此什么都不查、打印通过）；② SUMMARY 关键段（段在场 /
+// 6 维实质 / 自检方法 / LESSONS 扫描回应）；③ 模板保真骨架（SUMMARY 与入口三件）；④ TASK 7 字段
+// （仅 plan 节点生效；execute 家族该门是 no-op）。
 // 不进（进展 = 做到哪了）：证据在场 / 转移前置 / 任务集签名 / Fix 批次越界 / 串行 pending /
-// 可委托并行 / 在飞委托 / verify 命令真实执行 / 产物存在性 / skill-load 声明 / UA 门控——它们
-// 判的是执行进展，在预检时点必然先命中，正是本模式要绕开的噪声。其余节点自有工件（REVIEW / TEST /
-// UAT / TASK 段形）的骨架由各自节点出口的模板保真门禁负责：预检的目标时点是执行期逐任务产物
-// （SUMMARY），跨节点重复承担别的节点出口判据会把「子集」变成「超集」。
+// 可委托并行 / 在飞委托 / verify 命令真实执行 / skill-load 声明 / UA 门控——它们判的是执行进展，
+// 在预检时点必然先命中，正是本模式要绕开的噪声。其余节点自有工件（REVIEW / TEST / UAT / TASK
+// 段形）的骨架由各自节点出口的模板保真门禁负责：预检的目标时点是执行期逐任务产物（SUMMARY），
+// 跨节点重复承担别的节点出口判据会把「子集」变成「超集」。
+//
+// 同轮报告（顺序即反馈优先级）：缺件与结构问题在**同一轮**里报出——先逐项列缺失工件（路径 + 模板
+// 指针），再列结构问题。缺件不会因为「还有结构问题要报」而被跳过，反之亦然。
 //
 // 只读：不写 state，也不写模板提示账本（.template-hints.json）。因此骨架报告停在两阶段报文的
 // **首段形态**（模板路径 + 类别计数；缺段只报数量不列段名）。升级到段名要**等节点收尾**：那一步的
@@ -1260,6 +1276,9 @@ export async function runSkillLoadMarkerGate({ node, state }) {
 // 未标 done）里，完整链条会先被进展类门禁拦下，账本在这里既不会被读也不会被写——所以预检自己的
 // 报告永远只到类别计数，想要段名也可以直接按模板逐段对照。报告措辞与模板保真门禁的首段一致；
 // 判据本身来自 evaluateArtifact（骨架 + 模板派生的同一实现），不在此另写段形判定。
+//
+// 边界（口径必须与输出一致）：预检通过 = **结构面**通过，不代表进展门禁会通过——推进仍由完整
+// exit / --apply 决定。
 
 // 首段形态：把骨架问题压成「类别 + 计数」（缺段不列段名，其余类别本身即定位信息）。
 // 这是模板保真门禁 planFailureLines 在 escalate=false 时的同一口径——该格式器是模块私有且其
@@ -1288,10 +1307,78 @@ function preflightStructureParts(issues) {
   return parts;
 }
 
+// 声明工件的路径显示口径（与 explain 的产物行同源语义）：specs-root 加 `.specs/` 前缀，
+// project / 缺省原样——缺件报文里的路径因此可直接对着项目根去创建，而不是抽象的 schema 名。
+function declaredArtifactDisplayPath(pathBase, declaredPath) {
+  return (pathBase === 'specs-root' ? '.specs/' : '') + String(declaredPath);
+}
+
+// 声明工件 → 模板指针：仅当该工件的模板键落在**本节点声明**的模板集合内才给模板路径（自定义节点
+// 未声明模板时不编造路径）。模板键派生与模板保真门禁同口径（产物名去通配前缀后的基名 →
+// templateKeyOf），不在此另写节点→模板映射表。
+function declaredArtifactTemplatePointer(declaration, declaredPath) {
+  const base = String(declaredPath ?? '').split('/').pop();
+  const tail = base.includes('*') ? base.split('*').pop() : base;
+  const key = templateKeyOf(tail.replace(/^[^A-Za-z0-9]+/u, ''));
+  const name = [...declaration.required, ...declaration.optional]
+    .find((item) => templateKeyOf(item) === key);
+  return name ? templatePointerPath(name) : null;
+}
+
+// 本节点声明的 file 类产物是否在场：逐项取协议 outputSchemas 的 artifacts（kind 为 file、required），
+// 同一 artifact 的 paths 是互斥备选（任一路径在场即算在场，与节点完成判定同语义）。只读——不写
+// state、不写提示账本。返回缺失项（显示路径逐项给出 + 可推导时的模板指针）。
+async function missingDeclaredFileArtifacts({ protocol, node, state }) {
+  if (!state.activeChange) return [];
+  const schemas = schemaMap(protocol);
+  const declaration = nodeTemplateDeclaration(node);
+  const missing = [];
+  for (const schemaId of node.outputSchemas ?? []) {
+    const schema = schemas.get(schemaId);
+    for (const artifact of schema?.artifacts ?? []) {
+      if (!artifact.required) continue;
+      // 只查 file 类产物（未声明 kind 的产物按文件处置——路径判据本就是文件存在性）：其它 kind 的
+      // 「在场」语义不是文件存在性，不在本判据里冒充（不静默扩面）。
+      if (artifact.kind !== undefined && artifact.kind !== 'file') continue;
+      const declaredPaths = (artifact.paths ?? [])
+        .map((declaredPath) => String(declaredPath).replaceAll('<change-id>', state.activeChange));
+      if (declaredPaths.length === 0) continue;
+      const artifactRoot = await workflowArtifactRoot(artifact.pathBase);
+      const present = (await Promise.all(
+        declaredPaths.map((declaredPath) => pathPatternExists(artifactRoot, declaredPath)),
+      )).some(Boolean);
+      if (present) continue;
+      const displayPaths = declaredPaths.map((declaredPath) => declaredArtifactDisplayPath(artifact.pathBase, declaredPath));
+      const template = declaredPaths
+        .map((declaredPath) => declaredArtifactTemplatePointer(declaration, declaredPath))
+        .find(Boolean) ?? null;
+      missing.push({ label: displayPaths[0].split('/').pop(), displayPaths, template });
+    }
+  }
+  return missing;
+}
+
+// 存在性判据的报错编排（BLOCKED，不分新老 change——与出口的产物门禁同判级：工件是否存在是结构事实，
+// 不是「旧 change 的进展宽容」能改写的东西）。返回是否命中，收口退出由 runStructuralPreflight 负责
+// （先让同轮的结构门禁也能报完，缺件不被别的报错抢先吞掉顺序）。
+async function runDeclaredArtifactExistenceCheck({ protocol, node, state }) {
+  const missing = await missingDeclaredFileArtifacts({ protocol, node, state });
+  if (missing.length === 0) return false;
+  const items = missing.map((item) => item.label + ' → ' + item.displayPaths.join(' | ')
+    + (item.template ? '（模板: ' + item.template + '）' : ''));
+  console.error('BLOCKED: 节点 ' + node.id + ' 的声明工件缺失 ' + missing.length + ' 项'
+    + '（本节点声明的 file 类产物不在场）: ' + items.join('、'));
+  console.error('恢复: 先按上述路径创建缺失工件（段形照模板），再重试 exit ' + node.id + ' --preflight'
+    + '——预检只读；缺件是结构性事实，工件不在场就没有可判的结构，也不会给出通过结论');
+  return true;
+}
+
 // 预检的骨架目标（只装**在场者**）：① SUMMARY（execute 家族，与 runSummaryTemplateFidelityGate
 // 同一作用面：目录下全部 *-SUMMARY.md）；② 入口三件（CHANGE / REQUIREMENT / DESIGN）——变更的结构
-// 输入，任何节点的预检都查在场者。缺文件的项直接跳过：产物存在性是进展类判据，不属于本子集
-// （归 runArtifactGate）。DESIGN-lite 未登记骨架，其标题形态仍由 design 出口的既有判据负责。
+// 输入，任何节点的预检都查在场者。这里的「在场才查」只决定**段形**目标：工件缺失不在这里报，
+// 由上面的声明工件存在性判据统一报（缺件是结构事实，不是本子集的静默跳过项）；跨节点声明的入口
+// 三件不属于本节点的声明产物，其缺失由各自节点出口的产物门禁负责。DESIGN-lite 未登记骨架，其
+// 标题形态仍由 design 出口的既有判据负责。
 async function preflightSkeletonTargets({ node, state }) {
   const changeDir = path.join(runRoot, '.specs', state.activeChange ?? '');
   const targets = [];
@@ -1353,11 +1440,15 @@ async function runPreflightSkeletonChecks({ node, state }) {
 }
 
 // 结构化预检子集（显式清单，单一表达处）：workflow-guard 的 --preflight 分支只调用本函数。
-// 顺序即反馈优先级：先段（缺整段最致命），再骨架（段形 / 结构子段），最后 TASK 字段。
-export async function runStructuralPreflight({ node, state }) {
+// 顺序即反馈优先级：先声明工件的存在性（缺件时没有可判的结构，且缺件最致命），再段（SUMMARY 关键段），
+// 再骨架（段形 / 结构子段），最后 TASK 字段。存在性命中不提前退出——它先把缺件报出来，同轮的结构
+// 门禁照常跑完，最后统一以非零退出收口（同轮报告；结构门禁自己命中时也会非零退出，两者不互相吞掉）。
+export async function runStructuralPreflight({ protocol, node, state }) {
+  const missingArtifacts = await runDeclaredArtifactExistenceCheck({ protocol, node, state });
   await runSummarySectionsGate({ node, state });
   await runPreflightSkeletonChecks({ node, state });
   await runTaskSevenFieldGate({ node, state });
+  if (missingArtifacts) process.exit(1);
 }
 
 // 受保护状态落盘（沿用 state-io 的受保护写入通道）
