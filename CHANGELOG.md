@@ -20,11 +20,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 - **`status`, `next` and `record` name the same node**: `status` reports `routeNode` plus a `ROUTE:` line (derived / state / route), `next` prints `WHY:`, and `record` uses the same view — in a fix batch the three agree instead of pointing at a node the guard would reject. ([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 - **`status.coordinatorMode` follows the routing view** instead of a second derivation, so one response no longer carries two answers for "current node" (observable change in the in-progress state). ([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **`exit` refuses arguments it does not know**: the argument surface is a whitelist (`--apply`, `--preflight`), so a mistyped flag is a usage error with a non-zero exit instead of being ignored — a typo can no longer look like a preview while the full exit chain runs. ([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **The coordinator hint speaks in platform identity channels, and delegation names its order**: the line shared by `entry` and `next` says delegation goes through each platform's identity channel (an isolated worktree is one implementation of the write permission), both executor skill documents state as a hard order that the handoff request must succeed before a subagent is launched, and a successful `replan` prints a line stating that the task-set signature was re-signed. ([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 
 ### Fixed
 
 - **A summary that marks a section "not applicable" in bold, or adds a reason, is accepted**: the wrapper forms (bold, quote, list, parentheses, backticks) are stripped before the check, `**N/A**（reason）` included, while `**see N/A**` still counts as filled in and is reported. ([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 - **Recovery hints print commands you can actually run**: the `record` command is derived per platform, quoted as a whole, and names the shell it works in; its test executes the printed command instead of substituting the harness path. ([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+
 ## [1.6.5] - 2026-10-24
 
 ### Added

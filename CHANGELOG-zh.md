@@ -20,11 +20,14 @@
 
 - **`status`、`next`、`record` 现在给出同一个节点**：`status` 输出 `routeNode` 与 `ROUTE:` 对账行（产物推导 / state 原值 / 路由视图），`next` 打印 `WHY:`，`record` 走同一判定——在修复回路里三者一致，不再指向会被门禁拦下的节点。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 - **`status.coordinatorMode` 改为跟随路由视图**，不再保留第二套推导，一个响应里不会出现两个"当前节点"（进行中态的取值变化可观察）。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **`exit` 不再接受不认识的参数**：参数面收成白名单（只认 `--apply`、`--preflight`），拼错的旗标一律用法错误、非零退出，不再被静默忽略——笔误不再能「看起来像预检，实际跑的是完整出口链」。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **协调者提示改按平台的身份通道表述，委托写明硬顺序**：`entry` 与 `next` 共用的那一句改为「按平台的身份通道委托子代理，独立 worktree 只是写权限的一种实现」；两册执行技能把「先让 request 成功，再启动子代理」写成硬顺序；`replan` 成功行之后新增一行重签事实说明。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 
 ### 修复
 
 - **写成粗体或带理由的"不适用"现在被接受**：校验前剥掉包裹符号（粗体、引用、列表、括号、反引号），含 `**N/A**（理由）`；而 `**见 N/A**` 仍算已填并照常报错。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 - **恢复提示给出的是能照着跑的命令**：`record` 命令按平台推导、整条加引号、并注明适用哪些 shell；对应测试直接执行打印出来的命令，而不是替换成夹具路径。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+
 ## [1.6.5] - 2026-10-24
 
 ### 新增
