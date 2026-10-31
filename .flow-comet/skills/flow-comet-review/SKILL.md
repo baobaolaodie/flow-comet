@@ -21,7 +21,7 @@ This node performs a structured multi-round review of the implemented change, ch
 |------|------|------|
 | `REVIEW.md` | `## 第一轮 · Spec 合规审查` / `## 第二轮 · 代码质量审查（6 维衰退风险）` / `## 总结`；结构子段 `### 2.0 TEST.md 5 轮金字塔完整性` / `### 2.1` / `### 2.2` / `### 2.3` 在父段在场时必在场；文件 ≥ 100 字节；首部字段 `Change ID` / `审查时间` / `审查者` / `总体结论` 已在场时值不得为空（键集不强制） | **条件段**：`## 第三轮 · UI 视觉审查（仅前端）` / `## 第四轮 · 补充审查（按触发条件）`——标题必须在场，不适用写 `N/A`（其结构子段 `### 4.1` / `### 4.2` 在父段适用时必在场）；**增量段**：发现条目的**处置标记**（`[已修]` / `[升级]` / `[转待办]`，必填，写在 `### 2.2 6 维诊断 · 详细发现` 段内） |
 
-发现写在模板外的 `## 发现` 而 `### 2.2` 无条目 → 新 change BLOCKED（条目记录在非模板位置等于静默丢弃）；**任何严重度的 `[转待办]` 都须有用户裁决记录**（同段、文末或单独段落「用户裁决：接受延期」+ 指向该条目 + `[升级]` 承接——单独段落与条目以空行分隔、位置不限），缺失新 change BLOCKED / 旧 change WARN 渐进；**判为 Minor 的条目须带 `判 Minor：<一句话理由>` 判定行**（判据见下方「处置标记」条）——按 Minor 延期的条目缺这行同样新 change BLOCKED / 旧 change WARN 渐进。
+发现写在模板外的 `## 发现` 而 `### 2.2` 无条目 → 新 change BLOCKED（条目记录在非模板位置等于静默丢弃）；**任何严重度的 `[转待办]` 都须有用户裁决记录**（同段、文末或单独段落「用户裁决：接受延期」+ 指向该条目 + `[升级]` 承接——单独段落与条目以空行分隔、位置不限），缺失新 change BLOCKED / 旧 change WARN 渐进；**每条判为 Minor 的发现都要在条目块内写 `判 Minor：<一句话理由>`**（判据见下方「处置标记」条），与处置标记无关——缺这行同样新 change BLOCKED / 旧 change WARN 渐进。
 
 本出口**声明加载** `TEST.md` 并做 **5 轮完整性过程检查**（细目见 `flow-comet-test` 册）；`TEST.md` 的**结构骨架校验在 verify 出口**（`flowkit.verify.v1`），不在本出口——`## 验证命令` 增量段的执行与校验同样在 verify 出口。
 
@@ -106,7 +106,7 @@ guard 校验见 workflow-guard.mjs 的 review 出口门禁（发现区处置标�
    - `[升级]` — escalated to the user for a decision (accept + reason recorded)
    - `[转待办]` — deferred to `.specs/<change-id>/KNOWN-ISSUES.md` at archive time；**延期在任何严重度上都是用户决策点**
    - **`[转待办]` 一律需用户裁决（Major 与 Minor 同一标准）**：延期不是 reviewer 能自行给出的处置。reviewer 须先标 `[升级]` 等用户裁决；用户接受延期后，在同段、文末或单独段落记录「用户裁决：接受延期」并指向该条目（由 `[升级]` 承接），方可标 `[转待办]`——单独段落与发现条目以空行分隔、可位于发现区中间，位置不限（guard 按独立段落匹配，不要求位于文末）。review exit 结构校验：条目标 `[转待办]` 而缺上述记录 → 新 change BLOCKED / 旧 change WARN 渐进；`[升级]` / `[已修]` 的条目直接放行。
-   - **Minor 的判据（五条全中才算 Minor，否则按 Major 处理）**：① 不改变任何行为与输出；② 不影响任何对外 / 对用户的表述（文档、报文、CHANGELOG）；③ 不新增或保留第二份等价实现；④ 不削弱任何断言或测试判别力；⑤ 不涉及跨平台 / 分发形态。**不满足任一条即按 Major 处理**——举证责任在「判 Minor」的一侧，不在「判 Major」的一侧。每条判为 Minor 的发现都必须带一行判定理由，形态固定为 `判 Minor：<一句话理由，对应①~⑤>`，写在条目块内、与条目标题之间不留空行；按 Minor 延期的条目缺该行 → 新 change BLOCKED / 旧 change WARN 渐进。
+   - **Minor 的判据（五条全中才算 Minor，否则按 Major 处理）**：① 不改变任何行为与输出；② 不影响任何对外 / 对用户的表述（文档、报文、CHANGELOG）；③ 不新增或保留第二份等价实现；④ 不削弱任何断言或测试判别力；⑤ 不涉及跨平台 / 分发形态。**不满足任一条即按 Major 处理**——举证责任在「判 Minor」的一侧，不在「判 Major」的一侧。每条判为 Minor 的发现都必须带一行判定理由，形态固定为 `判 Minor：<一句话理由，对应①~⑤>`，写在条目块内、与条目标题之间不留空行，**与处置标记无关**（`[已修]` / `[升级]` / `[转待办]` 一律要：理由落在判定当时，而不是延期时再补）；缺该行 → 新 change BLOCKED / 旧 change WARN 渐进。
    - **修复回路内不得延期**：在一次修复回路里新发现的条目，只能是 `[已修]` 或 `[升级]`（交用户裁决）——即使该条目已有用户裁决的延期记录在场，也不得把修复回路新增的发现标 `[转待办]`。回路是「把本轮引入的问题收干净」的窗口，不是继续开新账的入口。
    The exit guard structurally checks these markers on the findings area: a missing marker **blocks** the exit for a new change, and is a non-blocking warning for a legacy change (to avoid deadlocking legacy reviews). Add markers to clear it.
 

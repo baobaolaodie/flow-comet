@@ -299,16 +299,17 @@ function reviewDeferredFindingProblems(text, scope = { primary: null, siblings: 
   return problems;
 }
 
-// Minor 判定理由门禁：判为 Minor 的条目按 Minor 处置（延期）时，须在条目块内自证判据——一行以
-// 「判 Minor：」开头的一句话理由。结构级判定（行首标签存在即已自证），不做语义判断：理由写得好不好
-// 不是脚本能判的，脚本只保证"判 Minor"这个动作留下可复核的依据。只覆盖 [转待办] 的 Minor 条目——
-// [已修]/[升级] 的条目没有"按 Minor 放行"这回事，不受约束；未标严重度的条目也不在此门禁内（先由
-// 延期裁决门禁要求裁决记录）。
+// Minor 判定理由门禁：**每条**判为 Minor 的发现都须在条目块内自证判据——一行以「判 Minor：」开头的
+// 一句话理由，**与处置标记无关**（[已修] / [升级] / [转待办] 一律要）。理由必须落在判定发生的那一刻：
+// 只对延期条目查，等于允许"先宽判 Minor、要延期时再补票"——Minor 判定过宽正是这条门禁要挡的失效模式
+// （举证责任在判 Minor 的一侧，拿不准时默认 Major）。结构级判定（行首标签存在即已自证），不做语义
+// 判断：理由写得好不好不是脚本能判的，脚本只保证"判 Minor"这个动作留下可复核的依据。未标严重度的
+// 条目不在本门禁内（它的缺口由处置标记门禁与延期裁决门禁负责）。
 function reviewMinorJustificationProblems(text, scope = { primary: null, siblings: [] }) {
   return reviewRealFindings(reviewFindingsItems(text, scope))
-    .filter((item) => item.isMinor && /\[转待办\]/.test(item.lines[0]))
+    .filter((item) => item.isMinor)
     .filter((item) => !item.lines.some((line) => REVIEW_MINOR_JUSTIFICATION_RE.test(line)))
-    .map((item) => item.title);
+    .map((item) => ({ title: item.title, severity: reviewItemSeverityLabel(item) }));
 }
 
 // 节点 entry 链：受控归位 → 归档分支校验 → 委托前并行写冲突 → 委托前工件 commit 提示 →
@@ -1228,8 +1229,10 @@ export async function runReviewExitGate({ node, state }) {
     // 条目直接放行（不是延期，没有决策点）。Minor 并入同一门禁：此前只有 Major 受约束，Minor 可自行
     // 延期，延期因此长期无门槛积压。
     //
-    // Minor 判定理由门禁：按 Minor 延期的条目须在条目块内自证判据——一行「判 Minor：<理由>」。结构级
-    // 校验（理由内容不做语义判断）；缺失 → 新 change BLOCKED / 旧 change WARN 渐进。
+    // Minor 判定理由门禁：**每条**判为 Minor 的发现都须在条目块内自证判据——一行「判 Minor：<理由>」，
+    // 与处置标记无关（[已修]/[升级]/[转待办] 一律要：判据落在判定当时，而不是延期时补票）。结构级校验
+    // （理由内容不做语义判断）；缺失 → 新 change BLOCKED / 旧 change WARN 渐进。报文把「改判 Major」
+    // 作为默认出口——写不出理由通常说明这根本够不上 Minor。
     const deferredFindings = reviewDeferredFindingProblems(reviewText, scope);
     const minorUnjustified = reviewMinorJustificationProblems(reviewText, scope);
     if (deferredFindings.length > 0) {
@@ -1246,13 +1249,16 @@ export async function runReviewExitGate({ node, state }) {
       }
     }
     if (minorUnjustified.length > 0) {
+      const named = minorUnjustified.map((p) => p.title + '（' + p.severity + '）').join('、');
       const guide = '；恢复: 在该条目块内（与条目标题之间不留空行）补一行「判 Minor：<一句话理由>」，'
-        + '示例: 「判 Minor：仅影响日志措辞，不改变行为与接口」；若实际达到 Major 级，改标 Major 并把延期交用户裁决';
+        + '示例: 条目行「- **F2 · 标题**：[已修]」的下一行写「  判 Minor：仅影响日志措辞，不改变行为与接口」；'
+        + '若判断其实够不上 Minor，请改判 Major（拿不准时默认 Major）';
       if (isNewChange(state)) {
-        console.error('BLOCKED: REVIEW.md 发现区 ' + minorUnjustified.length + ' 项 Minor 条目缺判定理由——判为 Minor 须自证判据，否则不得按 Minor 延期: ' + minorUnjustified.join('、') + guide);
+        console.error('BLOCKED: REVIEW.md 发现区 ' + minorUnjustified.length + ' 项条目被判为 Minor 但缺 `判 Minor：` 行'
+          + '——判为 Minor 须在判定当时自证判据，与处置标记（[已修]/[升级]/[转待办]）无关: ' + named + guide);
       } else {
         console.error('REVIEW WARN: REVIEW.md 发现区 ' + minorUnjustified.length
-          + ' 项 Minor 条目缺判定理由: ' + minorUnjustified.join('、') + guide + '（渐进不阻断）');
+          + ' 项条目被判为 Minor 但缺 `判 Minor：` 行: ' + named + guide + '（渐进不阻断）');
       }
     }
     if (isNewChange(state) && (deferredFindings.length > 0 || minorUnjustified.length > 0)) process.exit(1);
