@@ -42,26 +42,19 @@ import {
   countSyncProblems,
 } from '../lib/text-anchor-checks.mjs';
 
-// ---------- 公开面的机器状态字段名口径 + 命令锚（m11 机检；判据与反向构造共用本实现） ----------
+// ---------- 公开面的机器状态字段名口径 + 命令锚（机检；判据与反向构造共用本实现） ----------
 // 规则：公开说明面不直写机器状态字段名——引擎在状态文件里拥有的键要么改述为行为描述，要么放进
 // **明确标注**的状态输出示例围栏块（白名单）。判据是「键名黑名单 + 示例块白名单」而非精确句锁：
 // 改述措辞可以自由演化，键名不能重新走私进正文。routeNode 属公开输出契约名，不在黑名单内。
-// 受检面 = 用户阅读面（入口 / 贡献 / 安装 / 机制 / 用法 / 排障 / 版本，外加 docs/examples 的全部
-// 示例）；变更日志刻意不在内：它是按时间的历史记录（条目引用当时发布的措辞），不是行为描述面。
-// 受检面按「中英成对」登记一次：字段名扫描面 = 全部成对文档，命令锚面 = 机制 / 用法 / 排障
-// 三对。路径只写一遍——新增一份公开文档只需在这里登记，两处判据同时覆盖（不会出现「加进了
-// 一个清单、漏掉了另一个」的静默窄化）。
-const PUBLIC_FACE_DOC_PAIRS = {
-  entry: ['README.md', 'README-zh.md'],
-  contributing: ['CONTRIBUTING.md', 'CONTRIBUTING-zh.md'],
-  installation: ['docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md'],
-  mechanism: ['docs/MECHANISM.md', 'docs/MECHANISM-zh.md'],
-  usage: ['docs/USAGE.md', 'docs/USAGE-zh.md'],
-  troubleshooting: ['docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md'],
-  versions: ['docs/VERSIONS.md', 'docs/VERSIONS-zh.md'],
-};
-const PUBLIC_FACE_FIELD_DOCS = Object.values(PUBLIC_FACE_DOC_PAIRS).flat();
+// 受检面不手抄：从 docs/authority-map.json（公开文档权威与姊妹文档的唯一声明处）取 authority/twin
+// 两侧，再并上根目录文档与 docs/examples 的目录扫描——新增公开文档只要登记进映射、或按惯例落在
+// 根目录，字段名扫描与命令锚两处判据同时覆盖，不会出现「加进一个清单、漏掉另一个」的静默窄化。
+// 两类结构性排除（都不是行为描述面）：① 变更日志——按时间的历史记录，条目引用当时发布的措辞与
+// 当时的机器字段名；② 根目录的代理指令文件——本地工作说明，不面向用户、不随包分发。
+const PUBLIC_FACE_AUTHORITY_MAP = 'docs/authority-map.json';
 const PUBLIC_FACE_EXAMPLES_DIR = 'docs/examples';
+const PUBLIC_FACE_HISTORY_DOCS = ['CHANGELOG.md', 'CHANGELOG-zh.md'];
+const PUBLIC_FACE_AGENT_DOCS = ['AGENTS.md', 'CLAUDE.md'];
 // 示例块白名单的标记词：围栏 info string，或围栏之上紧邻的最后一行非空正文（标题 / 说明）写明
 // 这是状态输出示例——只有明说「这是示例数据」才放行，普通代码块不因此获得豁免。
 const PUBLIC_FACE_EXAMPLE_MARKERS = ['状态输出示例', 'state output example', 'status output example'];
@@ -71,12 +64,9 @@ const PUBLIC_FACE_EXAMPLE_MARKERS = ['状态输出示例', 'state output example
 // `evidence: [{ id, required }]` 这类协议字段说明。
 const PUBLIC_FACE_STATE_FIELDS = ['currentNode', 'stateCurrentNode', 'completedNodes', 'verifyFailures'];
 // 结构预检命令的公开面锚：三份文档 × 中英都必须在案。新增公开命令不得没有锚——否则删掉或漏写
-// 其中任何一份，套件仍然全绿，公开面就真的丢了这条命令。
-const PUBLIC_FACE_PREFLIGHT_PAIRS = [
-  PUBLIC_FACE_DOC_PAIRS.mechanism,
-  PUBLIC_FACE_DOC_PAIRS.usage,
-  PUBLIC_FACE_DOC_PAIRS.troubleshooting,
-];
+// 其中任何一份，套件仍然全绿，公开面就真的丢了这条命令。这里只选主题名，路径仍从映射取——「哪份
+// 文档承载命令说明」因此也只在映射里声明一次。
+const PUBLIC_FACE_PREFLIGHT_TOPICS = ['behaviour', 'workflow', 'troubleshooting'];
 const PREFLIGHT_FLAG = '--preflight';
 
 function listMarkdownFiles(absDir, relDir) {
@@ -89,10 +79,56 @@ function listMarkdownFiles(absDir, relDir) {
   return out;
 }
 
-// 受检文本按 Map 组织（rel → 文本或 null）：判据只读这一份快照，反向构造在副本上作业。
+// 权威映射缺席或不可解析 = 受检面无从派生（不是「没有东西要查」）：显式失败，不静默退化。
+function readPublicFaceAuthorityMap() {
+  const abs = path.join(REPO_ROOT, ...PUBLIC_FACE_AUTHORITY_MAP.split('/'));
+  if (!fs.existsSync(abs)) {
+    throw new Error('受检面无法派生：' + PUBLIC_FACE_AUTHORITY_MAP
+      + ' 不在本检出（公开文档权威映射是受检面的唯一来源）');
+  }
+  const parsed = JSON.parse(fs.readFileSync(abs, 'utf8'));
+  if (!parsed || typeof parsed !== 'object' || !parsed.topics || typeof parsed.topics !== 'object') {
+    throw new Error('受检面无法派生：' + PUBLIC_FACE_AUTHORITY_MAP + ' 缺 topics 对象');
+  }
+  return parsed;
+}
+
+// 映射的每个主题 → [authority, twin]（twin 为 null 的主题只登记权威侧）。
+function publicFaceTopicPairs(map) {
+  const pairs = new Map();
+  for (const [topic, spec] of Object.entries(map.topics)) {
+    if (!spec || typeof spec !== 'object') continue;
+    const pair = [spec.authority, spec.twin].filter((rel) => typeof rel === 'string' && rel.trim() !== '');
+    if (pair.length > 0) pairs.set(topic, pair);
+  }
+  return pairs;
+}
+
+// 受检文档集合 = 映射两侧 ∪ 根目录文档，再减去上面两类排除面。根目录扫描是必要的：按 GitHub 惯例
+// 放在根目录、不属于任何「文档权威」主题的公开文件（SECURITY / CODE_OF_CONDUCT 及其双语版）不在
+// 映射里，只靠映射会静默漏掉它们。
+function publicFaceDocPaths(map) {
+  const paths = new Set();
+  for (const pair of publicFaceTopicPairs(map).values()) for (const rel of pair) paths.add(rel);
+  for (const entry of fs.readdirSync(REPO_ROOT, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith('.md')) paths.add(entry.name);
+  }
+  for (const rel of [...PUBLIC_FACE_HISTORY_DOCS, ...PUBLIC_FACE_AGENT_DOCS]) paths.delete(rel);
+  return [...paths].sort();
+}
+
+// 命令锚所在的文档：按主题名从映射取（路径不在此手抄）。
+function publicFacePreflightDocs(map) {
+  const pairs = publicFaceTopicPairs(map);
+  return PUBLIC_FACE_PREFLIGHT_TOPICS.flatMap((topic) => pairs.get(topic) ?? []);
+}
+
+// 受检快照 { texts, preflightDocs }，文本按 Map 组织（rel → 文本或 null）：判据只读这一份快照，
+// 反向构造在副本上作业。
 function readPublicFaceTexts() {
+  const map = readPublicFaceAuthorityMap();
   const texts = new Map();
-  for (const rel of PUBLIC_FACE_FIELD_DOCS) {
+  for (const rel of publicFaceDocPaths(map)) {
     const abs = path.join(REPO_ROOT, ...rel.split('/'));
     texts.set(rel, fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : null);
   }
@@ -105,7 +141,7 @@ function readPublicFaceTexts() {
       texts.set(rel, fs.readFileSync(path.join(REPO_ROOT, ...rel.split('/')), 'utf8'));
     }
   }
-  return texts;
+  return { texts, preflightDocs: publicFacePreflightDocs(map) };
 }
 
 function isStatusExampleMarker(line) {
@@ -169,7 +205,7 @@ function publicFaceFieldProblems(rel, text) {
   return out;
 }
 
-function publicFaceMachineProblems(texts) {
+function publicFaceMachineProblems({ texts, preflightDocs }) {
   const out = [];
   for (const [rel, text] of texts) {
     if (typeof text !== 'string') out.push(rel + ' 缺失（公开面不在本检出）');
@@ -177,7 +213,7 @@ function publicFaceMachineProblems(texts) {
   for (const [rel, text] of texts) {
     if (typeof text === 'string') out.push(...publicFaceFieldProblems(rel, text));
   }
-  for (const rel of PUBLIC_FACE_PREFLIGHT_PAIRS.flat()) {
+  for (const rel of preflightDocs) {
     const text = texts.get(rel);
     if (typeof text === 'string' && !text.includes(PREFLIGHT_FLAG)) {
       out.push(rel + ' 缺「' + PREFLIGHT_FLAG + '」锚（结构预检命令须在三份公开面 × 中英在案）');
@@ -433,16 +469,23 @@ export const ENTRIES = [
       problems.push(...publicFaceMachineProblems(publicFace));
       // 反向构造（同一判据驱动）：探针在快照副本上作业，真实断言与探针调用同一个函数。
       const mutated = (rel, mutate) => {
-        const text = publicFace.get(rel);
+        const text = publicFace.texts.get(rel);
         if (typeof text !== 'string') return null; // 缺失已由真实判据报告，避免探针掩盖真实原因
         const next = mutate(text);
-        return next === text ? null : new Map(publicFace).set(rel, next);
+        return next === text ? null : { ...publicFace, texts: new Map(publicFace.texts).set(rel, next) };
       };
+      // 受检面来自派生（映射 + 根目录扫描）：按 GitHub 惯例放在根目录的公开文件若被漏在受检面之外，
+      // 就没有注入点——这里直接判红，不让探针静默跳过（手抄清单漏掉 SECURITY 时正是这种形态）。
+      const ROOT_FACE_PROBE = 'SECURITY.md';
+      if (!publicFace.texts.has(ROOT_FACE_PROBE)) {
+        throw new Error('受检面漏了根目录公开文档（' + ROOT_FACE_PROBE + ' 未纳入派生的受检面）');
+      }
       const probes = [
         ['注入机器字段名（用法册）', mutated('docs/USAGE.md', (text) => text + '\n`currentNode`\n'), '直写了机器状态字段名'],
         ['注入 evidence 键名（机制册）', mutated('docs/MECHANISM.md', (text) => text + '\n`evidence`\n'), '直写了机器状态字段名 evidence'],
         ['注入字段族键名（机制册）', mutated('docs/MECHANISM.md', (text) => text + '\n`verifyFailuresByChange`\n'), '直写了机器状态字段名 verifyFailuresByChange'],
         ['抽掉命令锚（排障册中文）', mutated('docs/TROUBLESHOOTING-zh.md', (text) => text.split('--preflight').join('')), '缺「--preflight」'],
+        ['注入机器字段名（根目录公开文档）', mutated(ROOT_FACE_PROBE, (text) => text + '\n`currentNode`\n'), '直写了机器状态字段名'],
       ];
       for (const [label, texts, expected] of probes) {
         if (texts === null) continue;
