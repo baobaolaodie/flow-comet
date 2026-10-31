@@ -762,7 +762,7 @@ async function main() {
     // 指向 exit <路由视图节点> --preflight（只跑结构性门禁、不写 state、不推进状态），另起一句说明
     // 完整 exit（不带 --apply）才是节点收尾的全链预演。节点必须取与 next 的 NODE 同源的**路由视图**：
     // Fix 归位态下 state.currentNode 正是被 Fix 批次门禁拦下的源节点，取原值等于把执行者引到一条
-    // 必被拦的命令上（复审实跑）。提示面不得让已落盘的成功路径失败——视图解析不可用时降级为无命令
+    // 必被拦的命令上。提示面不得让已落盘的成功路径失败——视图解析不可用时降级为无命令
     // 的指引（见 resultPreflightHint）。
     console.log('PREFLIGHT: SUMMARY 结构尚未校验——' + await resultPreflightHint(state));
     return;

@@ -23,7 +23,7 @@ import { reportIntelScanDrift } from './state-intelscan.mjs';
 import { scriptCommand } from './state-explain.mjs';
 // 协调者提示的单一来源：entry（门禁族）与 next / record（本模块）共用同一常量，各输出面逐字
 // 一致。常量落在中立模块（state-explain）而不是门禁族——本模块只为一句措辞去依赖整个上游门禁面
-// 是一条反向边（复审 #9），迁位后状态命令族不再 import 门禁族。
+// 是一条反向边——为此状态命令族不再 import 门禁族。
 import { COORDINATOR_NOTICE } from './state-explain.mjs';
 
 // 本模块位于 <技能包>/scripts/lib：脚本目录由自身位置推导一次（与 guard-evidence-gates 同形态）。
@@ -218,7 +218,7 @@ function printWhyLine(view) {
 
 // 结构预检提示的命令段（单一实现，两个运行期输出面共用：next 与 handoff result）：--preflight 只跑
 // 结构性门禁（不写 state、不写提示账本、不推进状态），它**不是**节点收尾的预演——完整 exit（不带
-// --apply）才是全链预演。两句必须同行，否则同一个 PREFLIGHT 会被读成两条命令（复审实证）。节点由
+// --apply）才是全链预演。两句必须同行，否则同一个 PREFLIGHT 会被读成两条命令。节点由
 // 调用方按**路由视图**传入（与 NODE 行同源），不得取 state 原值：Fix 归位态下源节点的 exit 会被
 // Fix 批次门禁拦下。
 export function structuralPreflightHint(nodeId) {
@@ -813,12 +813,10 @@ export async function runRecord(protocol, argv) {
   };
   await writeState(state);
   console.log('EVIDENCE: ' + nodeId);
-  // 节点视图与 next / status 同源（L-067 族）：record 也是「我现在该在哪个节点」的输出面。此前
-  // 直接取 determineNode（产物推导），于是**进行中保护**生效时三面分叉——currentNode=execute
-  // 已 entry 未 exit、产物推导已指向 review 时，record 报 review 而 next 报 execute、
-  // status.routeNode 报 execute：每完成一个节点都会看到与两条命令相反的「下一节点」。
-  // 改为复用 resolveNodeView 的 routeNode（共享视图的唯一实现）——本命令不自持第二份判定，也
-  // 不改变自己的写面：record 只写证据，不写 currentNode，视图是纯读。
+  // 节点视图与 next / status 同源（L-067 族）：record 也是「我现在该在哪个节点」的输出面。直接取
+  // 产物推导会让三面在**进行中保护**生效时分叉（record 报 review，而 next / status.routeNode 报
+  // execute）——故复用 resolveNodeView 的 routeNode：本命令不自持第二份判定，也不改变自己的写面
+  // （record 只写证据，不写 currentNode，视图是纯读）。
   const changeName = state.activeChange || await findActiveChange();
   const nodeView = changeName ? await resolveNodeView({ changeName, protocol, state }) : null;
   printNext(protocol, nodeView?.routeNode ?? null, state.executionMode ?? 'subagent');

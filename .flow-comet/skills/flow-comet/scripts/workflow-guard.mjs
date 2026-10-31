@@ -191,7 +191,7 @@ async function checkPromptDeclarations({ node, state }) {
 async function main() {
   // 参数解析 fail-closed（先于任何语义校验）：未知 `--*` 不是「忽略即可」的噪音，而是「这条命令
   // 实际跑的不是你以为的那条」。只在 exit 上启用——entry / verify 的参数面由既有校验覆盖，本条
-  // 针对的正是预检分支所在的命令（复审 #8）。
+  // 针对的正是预检分支所在的命令。
   if (command === 'exit') assertKnownExitArgs(process.argv);
   // 结构化预检的参数防护（fail-closed）：--preflight 只读、只与 `exit <node>` 搭配。
   // 与 --apply 同时给没有任何合法语义（一个只读、一个落盘）→ 用法错误非零退出，不猜意图；

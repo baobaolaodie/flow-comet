@@ -766,7 +766,7 @@ export const ENTRIES = [
       const resSerial = runHandoff(['request', 'S01', 'serial slice'], dir, env);
       assertExit(resSerial, 1);
       assertOut(resSerial, 'BLOCKED: 任务 S01（串行 pending）应归属节点 execute');
-      // m5：断言恢复指引的顺序句本身——「先对当前节点 record + exit」在前，entry 只在 exit
+      // 断言恢复指引的顺序句本身——「先对当前节点 record + exit」在前，entry 只在 exit
       // 之后才允许。裸 'entry execute' 子串会被禁止句（不要在未 exit 前 entry 目标节点）满足，
       // 等于分不清「让你 entry」与「禁止现在 entry」。
       assertOut(resSerial, '先对当前节点 subagent-execute record + exit');

@@ -40,7 +40,7 @@ import {
   readStateBytes,
   scenarioProtocolPath,
 } from '../lib/test-assertions.mjs';
-// 命令文本的唯一实现（平台化脚本根 + 整条路径加引号）：m2 直接以它作为期望值，断言运行期
+// 命令文本的唯一实现（平台化脚本根 + 整条路径加引号）：期望值只能从这里取，断言运行期
 // 输出与 handoff 的 PREFLIGHT 同源同形——不是「看起来都像命令」。
 import { scriptCommand } from '../lib/state-explain.mjs';
 // 单一来源静态锁（COORDINATOR 常量的落点与取用面）：与套件其它单源锚共用同一判据实现。
@@ -203,7 +203,7 @@ export const ENTRIES = [
       // enter 时脚本自动记录 taskHash（写回 state）
       const entryView = runGuard(['entry', 'execute'], dir);
       assertExit(entryView, 0);
-      // m10 跨输出面锚：entry 与 next 打印的是**同一句**协调者纪律（单一来源）。入口侧先独立断言
+      // 跨输出面锚：entry 与 next 打印的是**同一句**协调者纪律（单一来源）。入口侧先独立断言
       // 口径 token 与旧句零残留；与 next 的逐字相等在下方 nextView 之后比对。
       const entryCoordinatorLine = entryView.output.split('\n').find((line) => line.startsWith('COORDINATOR: '));
       if (!entryCoordinatorLine) {
@@ -278,7 +278,7 @@ export const ENTRIES = [
       }
       assertOut(statusView, '"currentNode": "review"'); // 产物推导语义不变（SUMMARY 已齐 → review）
       assertOut(statusView, '"stateCurrentNode": "execute"'); // state 原值语义不变
-      // m3：coordinatorMode 与 routeNode 同源（One predicate）——进行中态下 routeNode=execute 而
+      // coordinatorMode 与 routeNode 同源（One predicate）——进行中态下 routeNode=execute 而
       // 产物推导是 review；旧口径（按 detectedNode 计算）会在同一响应里给出 false，即两个「当前
       // 节点」口径并存。断言取其在 route 视图上的取值，锁住二者不再分叉。
       assertOut(statusView, '"coordinatorMode": true');
@@ -302,7 +302,7 @@ export const ENTRIES = [
       }
       assertOut(nextView, 'PREFLIGHT: ');
       // 平台化形态：脚本路径整条加引号，命令在引号之后接 exit <节点> --preflight（裸脚本名的旧
-      // 形态由 m2 的解析断言与反向锚共同排除）。预检节点取路由视图（= NODE 行），且必须与
+      // 形态由下文的解析断言与反向锚共同排除）。预检节点取路由视图（= NODE 行），且必须与
       // 「完整 exit（不带 --apply）才是全链预演」的说明句同行——同一个 PREFLIGHT 不再指两条命令。
       assertOut(nextView, 'workflow-guard.mjs" exit execute --preflight');
       assertOut(nextView, '做结构预检（只跑结构性门禁，不写 state、不推进状态）');
@@ -310,7 +310,7 @@ export const ENTRIES = [
       assertNotOut(nextView, '（不带 --apply）预检——跑完整出口门禁');
       assertStateBytesUnchanged(dir, viewBytes, 'next 进行中保护不得写 state（routeNode 与 NODE 同源）');
 
-      // m2：next 的 PREFLIGHT 行必须与 handoff result 的平台化形态同源——命令从输出解析后，
+      // next 的 PREFLIGHT 行必须与 handoff result 的平台化形态同源——命令从输出解析后，
       // 逐字等于脚本命令单一实现的产物（同一 scriptsDir / runRoot），而不是裸脚本名。
       const preflightCommand = (nextView.output.match(/PREFLIGHT: 可运行 (node .+?) 做结构预检/) ?? [])[1];
       if (!preflightCommand) {
@@ -342,7 +342,7 @@ export const ENTRIES = [
           + JSON.stringify(preflightCommand) + ' vs ' + JSON.stringify(handoffPreflightCommand));
       }
 
-      // m10：COORDINATOR 行按现行架构口径——三平台按身份通道委托、worktree 只是「写权限」的
+      // COORDINATOR 行按现行架构口径——三平台按身份通道委托、worktree 只是「写权限」的
       // 一种实现、不要求隔离区。旧句（只能 worktree isolation）写回即红。
       assertOut(nextView, 'COORDINATOR: ');
       assertOut(nextView, '按平台的身份通道委托子代理');
@@ -362,7 +362,7 @@ export const ENTRIES = [
           + '\nentry: ' + entryCoordinatorLine + '\nnext : ' + nextCoordinatorLine);
       }
       // 常量落点与取用面（单一来源的静态锁）：协调者禁令是**一个知识**，实现只许一处、取用面只许
-      // 具名 import。两处各写一份在措辞演进时必然分叉（本 change 初版即因此留下两种口径），而
+      // 具名 import。两处各写一份在措辞演进时必然分叉，而
       // 上面的运行期相等锚只在两处恰好同值时成立——**落点错了它看不见**（两份副本可以逐字相同）。
       // 故另锚这一层：① 定义面唯一且落在中立模块（状态命令族与门禁族都只是取用方）；② 消费方不得
       // 自带第二份定义、不得绕过单源取用。反向边（状态命令族 → 门禁族）随迁位消失——套件里直接
@@ -533,7 +533,7 @@ export const ENTRIES = [
         throw new Error('derived 不在 currentNode 之后时不得套用进行中保护（routeNode 应为产物推导的 review），实际: '
           + JSON.stringify(driftRouteNode) + '\nstatus 输出:\n' + driftStatus.output);
       }
-      // m3 的另一侧取值：非进行中态 routeNode 不是 execute 家族 → coordinatorMode=false
+      // 另一侧取值：非进行中态 routeNode 不是 execute 家族 → coordinatorMode=false
       // （与「同源」一起锁住取值域，不能只在一个方向上成立）。
       assertOut(driftStatus, '"coordinatorMode": false');
       const driftNext = runState(['next'], dir);
@@ -746,8 +746,8 @@ export const ENTRIES = [
       assertOut(wrongCommand, '用法错误');
       assertOut(wrongCommand, '只能与 exit');
 
-      // ③b 未知参数 fail-closed（复审）：exit 的参数解析此前只认 --apply / --preflight 两个**已知**
-      // token，其余一律忽略——于是「参数说错了但仍然跑」。两种真实形态都被这套语义接住：
+      // ③b 未知参数 fail-closed：exit 的参数解析只认 --apply / --preflight 两个**已知** token——
+      // 其余若静默忽略，「参数说错了但仍然跑」的两种形态就会漏过：
       //   · `--bogus` 被静默忽略 ⇒ 一次看起来成功的预演（只读面被误当成通过）；
       //   · `--prefligh`（笔误）既不是预检、也不报错 ⇒ 静默走**完整出口链**，预检被当成全链预演。
       // 判据：未知 `--*` 一律用法错误（非零退出），且**不得**进入任何门禁链（不打印进展类报错）。

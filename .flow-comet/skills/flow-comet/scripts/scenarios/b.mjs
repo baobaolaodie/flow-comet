@@ -464,7 +464,7 @@ export const ENTRIES = [
       assertOut(resReplan, '已重签 state.taskHash（值前缀 ');
       assertOut(resReplan, 'TASK.md 内容未改写');
       assertOut(resReplan, 'plan 节点证据未重记');
-      // m4：版本前缀从**实际签名**派生，不写死 v1:——算法升版时这里不再假红。
+      // 版本前缀从**实际签名**派生，不写死 v1:——算法升版时这里不会假红。
       // 判据三点：① 行在场且带前缀；② 打印前缀 == 当前 TASK.md 签名的版本前缀；③ 落盘值等于签名。
       const taskHashLine = resReplan.output.split(/\r?\n/).find((line) => line.startsWith('TASKHASH: '));
       if (!taskHashLine) {
@@ -741,7 +741,7 @@ export const ENTRIES = [
       assertOut(resOwnership, '先对当前节点 subagent-execute record + exit');
       assertOut(resOwnership, '不要在未 exit 前 entry 目标节点');
       assertOut(resOwnership, 'workflow-state next');
-      // m5 同口径：entry 只在当前节点 exit 之后才允许——断言顺序句里的条件分句与前后次序，
+      // 同口径：entry 只在当前节点 exit 之后才允许——断言顺序句里的条件分句与前后次序，
       // 不再裸断 'entry execute'（禁止句也会命中它，断言不出「让你 entry」与「禁止现在 entry」）。
       const ownershipGuide = resOwnership.output.split('\n').find((line) => line.includes('恢复指引:'));
       if (!ownershipGuide) {

@@ -605,7 +605,7 @@ export const ENTRIES = [
 
   // 110: execute 出口越权委托检测——TASK 有 parallel done 任务 + completedNodes
   // 无 subagent-execute + 非 direct 模式 → WARN 渐进（[P] 任务应由 subagent-execute 节点委托,
-  // execute 阶段完成 [P] 是越权委托痕迹——上轮真实流程实证的越权委托）;completedNodes 含
+  // execute 阶段完成 [P] 是越权委托痕迹）;completedNodes 含
   // subagent-execute 或 direct 模式 → 无越权 WARN
   {
     name: '110 execute exit：parallel done 无 subagent-execute → WARN 越权委托',
@@ -665,7 +665,7 @@ export const ENTRIES = [
 
   // 112: 节点顺序 BLOCK 消息含恢复指引——next 的「疑似未 exit」BLOCK 与
   // exit 的「currentNode 不匹配」BLOCK 均提示恢复通道（advance 强制推进/select 切换/
-  // exit --apply）——防 resume 自锁（上轮真实项目端到端验证观察：机器推导节点无脚本恢复通道）
+  // exit --apply）——防 resume 自锁（机器推导出的节点没有脚本恢复通道）
   {
     name: '112 节点顺序 BLOCK 消息含恢复指引',
     run: (dir) => {
@@ -958,8 +958,8 @@ export const ENTRIES = [
     },
   },
 
-  // 123: M8——init 在无提交(空)仓库时输出提示且跳过分支创建(行为一致:
-  // 修复前 WARN"无法创建分支"后仍 checkout -b 实际创建——声称与行为矛盾)
+  // 123: init 在无提交(空)仓库时输出提示且跳过分支创建——提示与行为必须一致：
+  // 警告之后仍 checkout -b 实际创建分支，就是声称与行为矛盾
   {
     name: '123 init 空仓库提示：无提交仓库的分支创建边界（M8）',
     run: (dir) => {
@@ -1224,7 +1224,7 @@ export const ENTRIES = [
       assertExit(resWrongNode, 1);
       assertOut(resWrongNode, 'BLOCKED: 任务 P-M02（并行 pending）应归属节点 subagent-execute');
       assertOut(resWrongNode, 'workflow-state next');
-      // m5：同样改为断言顺序句本身——「先对当前节点 record + exit」+「未 exit 前不得 entry」。
+      // 同样改为断言顺序句本身——「先对当前节点 record + exit」+「未 exit 前不得 entry」。
       // 旧的裸 'entry subagent-execute' 会同时命中禁止句里的目标节点名，无法区分两种语义。
       assertOut(resWrongNode, '先对当前节点 execute record + exit');
       assertOut(resWrongNode, '不要在未 exit 前 entry 目标节点');
