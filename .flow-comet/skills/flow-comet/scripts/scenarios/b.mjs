@@ -33,6 +33,7 @@ import {
   writeCustomProtocol,
 } from '../lib/test-fixtures.mjs';
 import {
+  requireRouteNodeExport,
   runGuardWithProtocol,
   runStateWithProtocol,
   scenarioProtocolPath,
@@ -133,7 +134,7 @@ export const ENTRIES = [
 
   // 34: subagent-execute exit 通过——handoff result 的 completedChecks 含 required-skill 条目 → exit 0
   {
-    name: '34 subagent-execute exit 通过：handoff 含 completedChecks',
+    name: '34 subagent-execute exit 通过：handoff 含 completedChecks + 缺证据恢复命令可照抄执行',
     run: (dir) => {
       const st = baseState('subagent-execute');
       st.evidence['subagent-execute'] = {
@@ -244,7 +245,7 @@ export const ENTRIES = [
   // → 两次均通过；且 evidence 中 redEvidence/greenEvidence 附带 recordedAt 时间戳
   // （重录保留 red 首次记录时间，green 为补录时间——时序可审计）
   {
-    name: '38 handoff red 先于 green 通过（redEvidence/greenEvidence 附带 recordedAt）',
+    name: '38 handoff red 先于 green 通过（recordedAt）+ result PREFLIGHT 命令平台化并被真实执行',
     run: (dir) => {
       writeState(dir, baseState('subagent-execute'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
@@ -374,7 +375,7 @@ export const ENTRIES = [
 
   // 41: execute exit BLOCKED——TASK.md 任务内容实际变化（改 action 文本）→ 签名不同 → 严格拦截
   {
-    name: '41 execute exit BLOCKED：任务内容变化签名不同',
+    name: '41 execute exit BLOCKED：任务内容变化签名不同 + replan 重签事实说明',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
@@ -400,9 +401,29 @@ export const ENTRIES = [
       const resReplan = runStateWithProtocol(dir, ['replan', '任务集按实测修订', '--authorized-by', 'user-approval']);
       assertExit(resReplan, 0);
       assertOut(resReplan, 'REPLAN: execute');
-      assertOut(resReplan, '已重签 state.taskHash（值前缀 v1:');
+      assertOut(resReplan, '已重签 state.taskHash（值前缀 ');
       assertOut(resReplan, 'TASK.md 内容未改写');
       assertOut(resReplan, 'plan 节点证据未重记');
+      // m4：版本前缀从**实际签名**派生，不写死 v1:——算法升版时这里不再假红。
+      // 判据三点：① 行在场且带前缀；② 打印前缀 == 当前 TASK.md 签名的版本前缀；③ 落盘值等于签名。
+      const taskHashLine = resReplan.output.split(/\r?\n/).find((line) => line.startsWith('TASKHASH: '));
+      if (!taskHashLine) {
+        throw new Error('replan 成功行后缺 TASKHASH 事实说明:\n' + resReplan.output);
+      }
+      const printedSignaturePrefix = (taskHashLine.match(/值前缀 (v\d+:)/) ?? [])[1];
+      const replanTaskText = fs.readFileSync(path.join(dir, '.specs', CHANGE_ID, 'TASK.md'), 'utf8');
+      const actualSignature = String(requireRouteNodeExport('taskSetSignature')(replanTaskText));
+      const actualSignaturePrefix = actualSignature.split(':')[0] + ':';
+      if (printedSignaturePrefix !== actualSignaturePrefix) {
+        throw new Error('TASKHASH 行打印的版本前缀应与实际签名一致（算法升版不得假红）：'
+          + JSON.stringify(printedSignaturePrefix) + ' vs ' + JSON.stringify(actualSignaturePrefix)
+          + '（实际签名 ' + actualSignature + '）');
+      }
+      const replanPersisted = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      if (replanPersisted.taskHash !== actualSignature) {
+        throw new Error('replan 重签的 state.taskHash 应等于当前 TASK.md 的实际签名：'
+          + JSON.stringify(replanPersisted.taskHash) + ' vs ' + JSON.stringify(actualSignature));
+      }
       const replanLineAt = resReplan.output.indexOf('REPLAN: execute');
       const replanDetailAt = resReplan.output.indexOf('已重签 state.taskHash');
       if (!(replanLineAt >= 0 && replanDetailAt > replanLineAt)) {
@@ -593,7 +614,7 @@ export const ENTRIES = [
   // next 重新路由回 subagent-execute（多趟循环路由——委托进入谓词每趟重新求值，单趟限制已移除）；
   // entry subagent-execute 仍放行（completedNodes 含该节点允许重入——每趟完整 entry 检查不绕过）
   {
-    name: '49 next 二次路由回 subagent-execute + entry 重入（多趟语义）',
+    name: '49 next 二次路由回 subagent-execute + entry 重入（多趟语义）+ 归属受阻后 record+exit 恢复',
     run: (dir) => {
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n');
@@ -660,7 +681,17 @@ export const ENTRIES = [
       assertOut(resOwnership, '先对当前节点 subagent-execute record + exit');
       assertOut(resOwnership, '不要在未 exit 前 entry 目标节点');
       assertOut(resOwnership, 'workflow-state next');
-      assertOut(resOwnership, 'entry execute');
+      // m5 同口径：entry 只在当前节点 exit 之后才允许——断言顺序句里的条件分句与前后次序，
+      // 不再裸断 'entry execute'（禁止句也会命中它，断言不出「让你 entry」与「禁止现在 entry」）。
+      const ownershipGuide = resOwnership.output.split('\n').find((line) => line.includes('恢复指引:'));
+      if (!ownershipGuide) {
+        throw new Error('归属受阻输出缺恢复指引行:\n' + resOwnership.output);
+      }
+      assertOut(resOwnership, '等当前节点 exit 后，再用 workflow-state entry execute');
+      if (!(ownershipGuide.indexOf('record + exit') >= 0
+        && ownershipGuide.indexOf('record + exit') < ownershipGuide.indexOf('entry execute'))) {
+        throw new Error('恢复指引顺序错误：entry 目标节点必须排在 record + exit 之后：' + ownershipGuide);
+      }
       assertNotOut(resOwnership, '查看当前路由，按 NODE 输出进入');
       assertNotOut(resOwnership, 'HANDOFF REQUEST');
       if (fs.readFileSync(stateFile, 'utf8') !== bytesBeforeRequest) {

@@ -255,6 +255,12 @@ function reviewDeferredMajorProblems(text, scope = { primary: null, siblings: []
   return problems;
 }
 
+// 协调者禁令的**同一句**（单一来源）：entry（本模块）与 next（state-commands-flow 的 printNext）
+// 都引用本常量——同一纪律两个输出面逐字一致，两处各写一份必然在措辞演进时分叉（本次即因此
+// 在 entry/next 留下过两种口径）。现行架构口径（ADR-014 / 并行委派四属性契约）：委托按平台的
+// 身份通道判定，独立 worktree 只是「① 写权限」的一种实现，共享工作区同样受支持。
+export const COORDINATOR_NOTICE = '你是协调者，不是执行者。禁止在主会话直接修改源码；按平台的身份通道委托子代理（同一身份判据，不要求隔离区）；独立 worktree 只是四属性契约里「写权限」的一种实现，共享工作区同样受支持；子代理回传后仅更新 TASK.md / SUMMARY / handoff evidence。';
+
 // 节点 entry 链：受控归位 → 归档分支校验 → 委托前并行写冲突 → 委托前工件 commit 提示 →
 // 清窗恢复产物提示 → 任务集签名记录 → 协调者禁令 → 进入标记落盘 → 点名节点实现技能。
 export async function runEntryGates({ protocol, node, state, file }) {
@@ -361,7 +367,8 @@ export async function runEntryGates({ protocol, node, state, file }) {
   const entryExecutionMode = state.executionMode ?? 'subagent';
   if (EXECUTE_FAMILY_NODE_IDS.has(node.id)) {
     if (!(entryExecutionMode === 'direct' && node.id === 'execute')) {
-      console.log('COORDINATOR: 你是协调者，不是执行者。禁止在主会话直接修改源码；只能通过 Agent 工具 worktree isolation 委托子代理；子代理回传后仅更新 TASK.md / SUMMARY / handoff evidence。');
+      // 与 next 的 COORDINATOR 行同源（COORDINATOR_NOTICE）：两处输出逐字相同。
+      console.log('COORDINATOR: ' + COORDINATOR_NOTICE);
     }
   }
   // enter 证据——entry 记录节点进入标记（enteredNodes），exit 检测未 entry（防跳过 entry 无痕）

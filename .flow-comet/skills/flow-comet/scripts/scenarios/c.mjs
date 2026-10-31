@@ -19,6 +19,7 @@ import {
 } from '../lib/test-helpers.mjs';
 import {
   CHANGE_ID,
+  REPO_ROOT,
   SCRIPTS_DIR,
   TASK_DONE,
   TASK_DONE_TWO,
@@ -40,6 +41,50 @@ import {
 import {
   countSyncProblems,
 } from '../lib/text-anchor-checks.mjs';
+
+// ---------- 公开机制册的字段名口径（m11 机检；判据与反向构造共用本实现） ----------
+// 规则：公开面不直写机器状态字段名——状态字段/其同位输出键一律改述为行为描述，中英两侧各出现
+// 一次、结构一一对应。routeNode 属新增的公开输出契约名（本次保留），不在「机器状态字段名」内。
+const MECHANISM_FIELD_NAME_RULES = [
+  {
+    rel: 'docs/MECHANISM.md',
+    descriptors: [
+      'the current-node field that the status output derives',
+      'the current-node field that the state file holds',
+    ],
+  },
+  {
+    rel: 'docs/MECHANISM-zh.md',
+    descriptors: [
+      '状态输出里由产物推导出的当前节点字段',
+      '状态文件里记的当前节点字段',
+    ],
+  },
+];
+// 裸英文散文里的 evidence 是普通词，只有反引号形态才代表「被当作字段名写进正文」——故按反引号
+// 形态识别，避免误伤。清单取审阅点名的两个状态字段键（currentNode / stateCurrentNode）。
+const MECHANISM_FORBIDDEN_FIELD_NAMES = ['`currentNode`', '`stateCurrentNode`'];
+
+function mechanismFieldNameProblems(texts) {
+  const out = [];
+  for (const rule of MECHANISM_FIELD_NAME_RULES) {
+    const text = texts[rule.rel];
+    if (typeof text !== 'string') {
+      out.push(rule.rel + ' 缺失（公开机制册不在本检出）');
+      continue;
+    }
+    for (const fieldName of MECHANISM_FORBIDDEN_FIELD_NAMES) {
+      if (text.includes(fieldName)) out.push(rule.rel + ' 直写了机器状态字段名 ' + fieldName);
+    }
+    for (const descriptor of rule.descriptors) {
+      const hits = text.split(descriptor).length - 1;
+      if (hits !== 1) {
+        out.push(rule.rel + ' 字段改述「' + descriptor + '」应恰好出现 1 次（中英结构 token 一一对应），实际 ' + hits);
+      }
+    }
+  }
+  return out;
+}
 
 export const ENTRIES = [
 
@@ -270,16 +315,40 @@ export const ENTRIES = [
     },
   },
 
-  // 105: 计数一致性自检同步（AC-8 / AC-14）——组文件里的场景数或系统测试集项数变更时，
-  // 受检文件须同步（场景数：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n 变体；
-  // 项数：n/n / n items / n 项 变体）。本场景读取权威源仓库的受检文件断言含当前计数变体——
-  // 文档漏同步或条目缺失（幽灵条目）即 RED；与底部自检共用同一实现（countSyncProblems），
-  // 两处判据不会漂移。安装副本无文档面，跳过。
+  // 105: 计数一致性自检同步（AC-8 / AC-14）+ 公开机制册不直写机器状态字段名（in-place 扩展，
+  // 不新增场景）——组文件里的场景数或系统测试集项数变更时，受检文件须同步（场景数：
+  // ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n 变体；项数：n/n / n items / n 项 变体）。
+  // 本场景读取权威源仓库的受检文件断言含当前计数变体——文档漏同步或条目缺失（幽灵条目）即 RED；
+  // 与底部自检共用同一实现（countSyncProblems），两处判据不会漂移。
+  // m11：公开机制册把状态字段改述成行为描述（不直写键名），中英描述一一对应；配三条反向构造
+  // （注入键名 / 逐侧抽掉改述）证明判据不是恒真。安装副本无文档面，整面跳过。
   {
-    name: '105 计数一致性自检同步：受检文件含当前场景数与系统测试集项数变体（AC-8 / AC-14）',
+    name: '105 计数一致性自检同步 + 公开机制册不直写机器状态字段名（AC-8 / AC-14）',
     run: async () => {
       if (!isAuthoritativeSourceRepo()) return; // 安装副本无 flow-comet 文档
-      const problems = await countSyncProblems();
+      const problems = [...await countSyncProblems()];
+      const docTexts = {
+        'docs/MECHANISM.md': fs.readFileSync(path.join(REPO_ROOT, 'docs/MECHANISM.md'), 'utf8'),
+        'docs/MECHANISM-zh.md': fs.readFileSync(path.join(REPO_ROOT, 'docs/MECHANISM-zh.md'), 'utf8'),
+      };
+      problems.push(...mechanismFieldNameProblems(docTexts));
+      // 反向构造（同一判据驱动）：注入一个机器字段名 / 逐侧抽掉改述句 ⇒ 必报。
+      const patched = (rel, from, to) => {
+        const text = docTexts[rel];
+        if (!text.includes(from)) return null; // 缺失已由真实判据报告，避免探针掩盖真实原因
+        return { ...docTexts, [rel]: text.split(from).join(to) };
+      };
+      const probes = [
+        ['注入机器字段名', { ...docTexts, 'docs/MECHANISM.md': docTexts['docs/MECHANISM.md'] + '\n`currentNode`\n' }, '直写了机器状态字段名'],
+        ['抽掉英文改述', patched('docs/MECHANISM.md', 'the current-node field that the state file holds', 'the state file'), '字段改述'],
+        ['抽掉中文改述', patched('docs/MECHANISM-zh.md', '状态文件里记的当前节点字段', '状态文件'), '字段改述'],
+      ];
+      for (const [label, texts, expected] of probes) {
+        if (texts === null) continue;
+        if (!mechanismFieldNameProblems(texts).some((p) => p.includes(expected))) {
+          throw new Error('反向构造判别力缺失（' + label + ' 未被判违规）');
+        }
+      }
       if (problems.length > 0) {
         throw new Error(problems.join('; '));
       }
@@ -1044,7 +1113,10 @@ export const ENTRIES = [
       assertExit(resWrongNode, 1);
       assertOut(resWrongNode, 'BLOCKED: 任务 P-M02（并行 pending）应归属节点 subagent-execute');
       assertOut(resWrongNode, 'workflow-state next');
-      assertOut(resWrongNode, 'entry subagent-execute');
+      // m5：同样改为断言顺序句本身——「先对当前节点 record + exit」+「未 exit 前不得 entry」。
+      // 旧的裸 'entry subagent-execute' 会同时命中禁止句里的目标节点名，无法区分两种语义。
+      assertOut(resWrongNode, '先对当前节点 execute record + exit');
+      assertOut(resWrongNode, '不要在未 exit 前 entry 目标节点');
       assertOut(resWrongNode, '本次请求未写入 state');
       if (fs.readFileSync(reqStatePath, 'utf8') !== beforeReqBytes) {
         throw new Error('M-02 BLOCK 必须 state 字节零改写');

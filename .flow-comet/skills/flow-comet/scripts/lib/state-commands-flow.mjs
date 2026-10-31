@@ -5,6 +5,7 @@
 import { execFileSync } from 'child_process';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, isSingleSegmentChangeName, EXECUTE_FAMILY_NODE_IDS } from '../route-node.mjs';
 import { taskOpeningAttrs, taskBlocks } from '../task-parsing.mjs';
 import { NODE_PROTOCOL_FILES, SKILL_PROTOCOL_FILES, inspectWorkflowPathSegments } from '../protocol-utils.mjs';
@@ -17,6 +18,15 @@ import { determineNode, normalAdvanceExempt } from './state-determine.mjs';
 import { isInsideWorkTree, gitBranchName, branchExists, printBranchLine } from './state-branch.mjs';
 import { printEvolveDueHint } from './state-evolve-hint.mjs';
 import { reportIntelScanDrift } from './state-intelscan.mjs';
+// 命令文本的唯一实现（平台化脚本根 + 整条路径加引号）：运行期 PREFLIGHT 与 handoff result /
+// guard 恢复指引 / explain 的 COMMAND 行同源（L-067：同一推导两处表达必然分叉）。
+import { scriptCommand } from './state-explain.mjs';
+// 协调者提示的单一来源：entry（guard-gates）与 next（本模块）共用同一常量，两个输出面逐字一致。
+import { COORDINATOR_NOTICE } from './guard-gates.mjs';
+
+// 本模块位于 <技能包>/scripts/lib：脚本目录由自身位置推导一次（与 guard-evidence-gates 同形态）。
+// 「自己在哪」是本模块可提供的事实，平台化与引号形态本身留在 state-explain。
+const scriptsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // --json-file 路径校验:解析后必须位于项目根内(拒绝相对/绝对形式的越界路径,
 // 如 ../..、其他盘符——防读取任意文件内容进 evidence)。runRoot 内的绝对路径合法
@@ -70,7 +80,12 @@ function printNext(protocol, nodeId, executionMode = 'subagent') {
     if (executionMode === 'direct' && nodeId === 'execute') {
       console.log('EXECUTION-MODE: direct（主代理直接执行串行任务，必须加载 flow-comet-dev 完整协议；parallel 任务仍由 subagent-execute 委托）');
     } else {
-      console.log('COORDINATOR: 你是协调者，不是执行者。禁止在主会话直接修改源码；只能通过 Agent 工具 worktree isolation 委托子代理；子代理回传后仅更新 TASK.md / SUMMARY / handoff evidence。');
+      // 现行架构口径（ADR-014 / 并行委派四属性契约）：委托按**平台的身份通道**判定，不是按
+      // 建树方式；独立 worktree 只是「① 写权限」的一种实现，共享工作区同样受支持（边界来自
+      // 互不重叠的任务写集、提交时点纪律与最小保护集）。文案取 guard-gates 的单一常量——
+      // entry 与 next 逐字相同；旧句「只能通过 Agent 工具 worktree isolation 委托子代理」不得
+      // 在任何一处复活。
+      console.log('COORDINATOR: ' + COORDINATOR_NOTICE);
       console.log('EXECUTION-MODE: ' + (executionMode === 'direct' ? 'direct' : 'subagent'));
     }
   }
@@ -201,8 +216,11 @@ function printWhyLine(view) {
 // 门禁的预检（写盘只在 --apply 分支），让反馈前移到任务收尾而不是节点收尾。
 function printPreflightLine(nodeId) {
   if (!nodeId || !EXECUTE_FAMILY_NODE_IDS.has(nodeId)) return;
-  console.log('PREFLIGHT: 可运行 workflow-guard.mjs exit ' + nodeId
-    + '（不带 --apply）预检——跑完整出口门禁，但不推进状态');
+  // 命令文本与 handoff result 的 PREFLIGHT 走同一实现（scriptCommand）：平台化脚本根 + 整条
+  // 路径加引号——裸脚本名在 codex / dsh 单平台安装上照抄会落空（pathReplacements 只处理 .md）。
+  console.log('PREFLIGHT: 可运行 ' + scriptCommand({
+    scriptsDir, runRoot: runRootDir(), script: 'workflow-guard.mjs', args: ['exit', nodeId],
+  }) + '（不带 --apply）预检——跑完整出口门禁，但不推进状态');
 }
 
 // init <change-id> [--branch-prefix <prefix>] [--init-context|--init-skip]
@@ -427,7 +445,10 @@ export async function runStatus(protocol) {
     branchMode: isInsideWorkTree(),
     enablePrReview: state.enablePrReview ?? false,
     artifactRoot: '.specs/' + changeName,
-    coordinatorMode: EXECUTE_FAMILY_NODE_IDS.has(detectedNode),
+    // 与 routeNode 同一判定（One predicate）：本键回答「协调者模式是否生效」，必须指向路由视图
+    // 那个节点——若另取产物推导，进行中态会在同一响应里给出两个「当前节点」口径（routeNode=
+    // execute 而 coordinatorMode=false）。既有键名/类型/位置不变，只换判定来源。
+    coordinatorMode: EXECUTE_FAMILY_NODE_IDS.has(nodeView.routeNode),
     // 新旧 change 标记——newChange true = 新 change(严格模式);false/缺失 = 旧 change(渐进)
     newChange: state.newChange === true
   }, null, 2));

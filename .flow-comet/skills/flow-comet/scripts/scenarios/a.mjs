@@ -37,6 +37,9 @@ import {
   fixBatchTaskText,
   readStateBytes,
 } from '../lib/test-assertions.mjs';
+// 命令文本的唯一实现（平台化脚本根 + 整条路径加引号）：m2 直接以它作为期望值，断言运行期
+// 输出与 handoff 的 PREFLIGHT 同源同形——不是「看起来都像命令」。
+import { scriptCommand } from '../lib/state-explain.mjs';
 
 export const ENTRIES = [
   // 1: open exit 通过（模板段名 CHANGE "## Why（为什么做）" + REQUIREMENT "## 用户故事（User Story）" + 验收段）——带模板验证 C2 派生
@@ -158,14 +161,27 @@ export const ENTRIES = [
 
   // 8: execute exit 通过（enter 记录 taskHash + SUMMARY 六段 + 6 维实质 + 自检方法 + handoff 齐 + TASK 全 done）
   {
-    name: '08 execute exit 通过（enter 后未改 TASK，签名匹配）+ 未 exit 时 status/next 共用节点视图',
+    name: '08 execute exit 通过（enter 后未改 TASK，签名匹配）+ 未 exit 时 status/next 共用节点视图（含 coordinatorMode 同源与协调者行）',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
       // enter 时脚本自动记录 taskHash（写回 state）
-      assertExit(runGuard(['entry', 'execute'], dir), 0);
+      const entryView = runGuard(['entry', 'execute'], dir);
+      assertExit(entryView, 0);
+      // m10 跨输出面锚：entry 与 next 打印的是**同一句**协调者纪律（单一来源）。入口侧先独立断言
+      // 口径 token 与旧句零残留；与 next 的逐字相等在下方 nextView 之后比对。
+      const entryCoordinatorLine = entryView.output.split('\n').find((line) => line.startsWith('COORDINATOR: '));
+      if (!entryCoordinatorLine) {
+        throw new Error('entry execute 缺 COORDINATOR 行\n实际输出:\n' + entryView.output);
+      }
+      for (const token of ['按平台的身份通道委托子代理', '同一身份判据', '不要求隔离区', '「写权限」的一种实现', '共享工作区同样受支持']) {
+        if (!entryCoordinatorLine.includes(token)) {
+          throw new Error('entry execute 的 COORDINATOR 行缺现行口径 ' + token + '：' + entryCoordinatorLine);
+        }
+      }
+      assertNotOut(entryView, '只能通过 Agent 工具 worktree isolation 委托子代理');
       // exit 前补 SUMMARY + handoff（不碰 TASK.md）
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -223,6 +239,10 @@ export const ENTRIES = [
       }
       assertOut(statusView, '"currentNode": "review"'); // 产物推导语义不变（SUMMARY 已齐 → review）
       assertOut(statusView, '"stateCurrentNode": "execute"'); // state 原值语义不变
+      // m3：coordinatorMode 与 routeNode 同源（One predicate）——进行中态下 routeNode=execute 而
+      // 产物推导是 review；旧口径（按 detectedNode 计算）会在同一响应里给出 false，即两个「当前
+      // 节点」口径并存。断言取其在 route 视图上的取值，锁住二者不再分叉。
+      assertOut(statusView, '"coordinatorMode": true');
       const routeLine = statusView.output.split('\n').find((line) => line.startsWith('ROUTE: '));
       if (!routeLine) throw new Error('status 缺少 ROUTE: 诊断行\n实际输出:\n' + statusView.output);
       for (const token of ['derived=review', 'state=execute', 'route=execute', '先 exit execute']) {
@@ -242,10 +262,60 @@ export const ENTRIES = [
         throw new Error('WHY: 行应说明进行中原因（已 entry 未 exit）：' + whyLine);
       }
       assertOut(nextView, 'PREFLIGHT: ');
-      assertOut(nextView, 'workflow-guard.mjs exit execute');
+      // 平台化形态：脚本路径整条加引号，命令在引号之后接 exit <节点>（裸脚本名的旧形态由 m2 的
+      // 解析断言与反向锚共同排除）。
+      assertOut(nextView, 'workflow-guard.mjs" exit execute');
       assertOut(nextView, '不带 --apply');
       assertOut(nextView, '不推进状态');
       assertStateBytesUnchanged(dir, viewBytes, 'next 进行中保护不得写 state（routeNode 与 NODE 同源）');
+
+      // m2：next 的 PREFLIGHT 行必须与 handoff result 的平台化形态同源——命令从输出解析后，
+      // 逐字等于脚本命令单一实现的产物（同一 scriptsDir / runRoot），而不是裸脚本名。
+      const preflightCommand = (nextView.output.match(/PREFLIGHT: 可运行 (node .+?)（不带 --apply）/) ?? [])[1];
+      if (!preflightCommand) {
+        throw new Error('next 的 PREFLIGHT 行缺可解析的平台化命令（应为 node "<脚本路径>" exit <节点>）：\n'
+          + nextView.output);
+      }
+      const expectedPreflightCommand = scriptCommand({
+        scriptsDir: SCRIPTS_DIR, runRoot: dir, script: 'workflow-guard.mjs', args: ['exit', 'execute'],
+      });
+      if (preflightCommand !== expectedPreflightCommand) {
+        throw new Error('next 的 PREFLIGHT 命令未走平台化单一实现：'
+          + JSON.stringify(preflightCommand) + '（期望 ' + JSON.stringify(expectedPreflightCommand) + '）');
+      }
+      // 反向锚：裸脚本名形态（旧输出）不得残留——它正是「照抄到非 .claude 安装会落空」的形态。
+      assertNotOut(nextView, 'PREFLIGHT: 可运行 workflow-guard.mjs');
+      // 两个输出面同形：同一节点下 handoff result 打印的同一条命令必须逐字相同（不是各写一份）。
+      const handoffPre = runHandoff(['result', 'T01', '{"greenEvidence":{"command":"node --check src/t1.mjs"},"redEvidence":{"command":"node --check src/t1.mjs"}}'], dir);
+      assertExit(handoffPre, 0);
+      const handoffPreflightCommand = (handoffPre.output.match(/PREFLIGHT: SUMMARY 结构尚未校验——可运行 (node .+?) 但不带 --apply/) ?? [])[1];
+      if (!handoffPreflightCommand) {
+        throw new Error('handoff result 的 PREFLIGHT 行缺可解析的平台化命令：\n' + handoffPre.output);
+      }
+      if (handoffPreflightCommand !== preflightCommand) {
+        throw new Error('两处 PREFLIGHT 命令形态不一致（next vs handoff result）：'
+          + JSON.stringify(preflightCommand) + ' vs ' + JSON.stringify(handoffPreflightCommand));
+      }
+
+      // m10：COORDINATOR 行按现行架构口径——三平台按身份通道委托、worktree 只是「写权限」的
+      // 一种实现、不要求隔离区。旧句（只能 worktree isolation）写回即红。
+      assertOut(nextView, 'COORDINATOR: ');
+      assertOut(nextView, '按平台的身份通道委托子代理');
+      assertOut(nextView, '同一身份判据');
+      assertOut(nextView, '不要求隔离区');
+      assertOut(nextView, '「写权限」的一种实现');
+      assertOut(nextView, '共享工作区同样受支持');
+      assertNotOut(nextView, '只能通过 Agent 工具 worktree isolation 委托子代理');
+      // 跨输出面：entry 与 next 的 COORDINATOR 行必须逐字相同（同一常量/同一措辞）——写回任一处
+      // 的旧句都会同时破坏 token 断言与这条逐字相等锚。
+      const nextCoordinatorLine = nextView.output.split('\n').find((line) => line.startsWith('COORDINATOR: '));
+      if (!nextCoordinatorLine) {
+        throw new Error('next 缺 COORDINATOR 行\n实际输出:\n' + nextView.output);
+      }
+      if (entryCoordinatorLine !== nextCoordinatorLine) {
+        throw new Error('entry 与 next 的 COORDINATOR 行不一致（同一纪律两个输出面必须逐字相同）：'
+          + '\nentry: ' + entryCoordinatorLine + '\nnext : ' + nextCoordinatorLine);
+      }
 
       // ---------- Fix 归位态的节点视图（in-place 扩展） ----------
       // 缺陷复现：currentNode=review、REVIEW.md 在场、TASK 有 pending 修复任务时，next 的
@@ -344,6 +414,9 @@ export const ENTRIES = [
         throw new Error('derived 不在 currentNode 之后时不得套用进行中保护（routeNode 应为产物推导的 review），实际: '
           + JSON.stringify(driftRouteNode) + '\nstatus 输出:\n' + driftStatus.output);
       }
+      // m3 的另一侧取值：非进行中态 routeNode 不是 execute 家族 → coordinatorMode=false
+      // （与「同源」一起锁住取值域，不能只在一个方向上成立）。
+      assertOut(driftStatus, '"coordinatorMode": false');
       const driftNext = runState(['next'], dir);
       assertExit(driftNext, 0);
       assertOut(driftNext, 'NODE: review');
@@ -476,7 +549,7 @@ export const ENTRIES = [
   // 反向构造：把预检实现改回「跑全链」⇒ ② 的旧 change 分支落进完整出口链、被串行 pending 拦下
   // （期望 exit 0 实际 1，断言红）；让预检写 state ⇒ ② 的字节断言红；写提示账本 ⇒ ① 的账本断言红。
   {
-    name: '14 execute exit BLOCKED：串行 pending 未完成 + --preflight 结构化预检（结构先报/只读/参数防护）',
+    name: '14 execute exit BLOCKED：串行 pending 未完成 + --preflight 结构化预检（结构先报/只读/分级/参数防护）',
     run: (dir) => {
       // SUMMARY 模板（夹具自带：两种检出形态下都确定，不依赖 vendored 模板在场）。H2 段集 = 登记表
       // 登记的全部 SUMMARY 段（含条件段）——坏 SUMMARY 的缺陷因此只暴露在「段形」这一层。
