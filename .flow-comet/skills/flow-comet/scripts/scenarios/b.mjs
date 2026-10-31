@@ -106,10 +106,11 @@ function runPrintedCommand(command, root, envOverrides = {}) {
   return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
 }
 
-// 打印命令的三条形态断言：① 脚本路径整条加双引号；② 分词后脚本参数恰好是那一条路径（引号被剥
-// 离、空格不裂开）；③ 路径按**当前运行形态**解析到真实脚本（与期望副本同一文件——不写死任何
-// 平台根：断言只问「能不能解析到该脚本」，不问它以哪个平台目录开头）。
-function assertPrintedCommandResolves(command, root, expectedScript, label) {
+// 打印命令的形态解析（下面两条断言的共用前半段）：① 脚本路径整条加双引号；② 分词后脚本参数恰
+// 好是那一条路径（引号被剥离、空格不裂开）；③ 路径按**当前运行形态**解析后真实存在。不写死任
+// 何平台根：只问「能不能解析到脚本」，不问它以哪个平台目录开头。hint 是形态说明，只拼进不可解
+// 析报文——两种形态都可接受时，让失败消息说清放宽的是哪两种。
+function parsePrintedCommandScript(command, root, label, hint = '') {
   const match = command.match(/^node "([^"]+)"(?: .*)?$/);
   if (!match) {
     throw new Error(label + ' 的脚本路径未整条加双引号（安装根含空格时会被 shell 分词）: ' + command);
@@ -121,10 +122,33 @@ function assertPrintedCommandResolves(command, root, expectedScript, label) {
   }
   const resolved = path.resolve(root, printedScript);
   if (!fs.existsSync(resolved)) {
-    throw new Error(label + ' 的脚本路径按当前运行形态不可解析: ' + printedScript + ' → ' + resolved);
+    throw new Error(label + ' 的脚本路径按当前运行形态不可解析' + hint + ': ' + printedScript + ' → ' + resolved);
   }
+  return { printedScript, resolved };
+}
+
+// 期望脚本同一性断言（夹具内的运行形态已知时使用）：④ 解析结果与期望副本是同一文件。
+function assertPrintedCommandResolves(command, root, expectedScript, label) {
+  const { printedScript, resolved } = parsePrintedCommandScript(command, root, label);
   if (fs.realpathSync(resolved) !== fs.realpathSync(expectedScript)) {
     throw new Error(label + ' 解析到了别的脚本: ' + resolved + '（期望 ' + expectedScript + '）');
+  }
+  return printedScript;
+}
+
+// 安装根形态断言（运行形态由脚本自定位决定、夹具无从预知时使用）：④ 解析出的命令脚本必须是真实
+// 存在的 <scriptName>，且落在 flow-comet 技能树内。两种正确形态都放行——安装副本按**运行中脚本
+// 所在的安装根**推出的路径（.claude / .agents / .dsh 乃至用户级安装），以及权威源写出的设计形态
+// .claude/skills/…（在夹具里解析到技能树副本）。命令是否真的能在当前安装里照抄执行，由调用方随后
+// 执行**打印出来的那条文本**证明——本断言不拿 harness 的脚本路径替代它。
+function assertPrintedCommandTargetsInstalledScript(command, root, scriptName, label) {
+  const { printedScript, resolved } = parsePrintedCommandScript(command, root, label,
+    '（允许安装根形态或 fixture 设计形态）');
+  if (path.basename(resolved) !== scriptName) {
+    throw new Error(label + ' 解析到的不是 ' + scriptName + '（允许安装根形态或 fixture 设计形态）: ' + resolved);
+  }
+  if (!resolved.split(/[\\/]+/).includes('flow-comet')) {
+    throw new Error(label + ' 解析到的脚本不在 flow-comet 技能树内（允许安装根形态或 fixture 设计形态）: ' + resolved);
   }
   return printedScript;
 }
@@ -167,10 +191,13 @@ export const ENTRIES = [
         throw new Error('BLOCKED 输出的恢复行缺可解析的 record 命令:\n' + resNoEvidence.output);
       }
       // 安装布局：权威源 = 设计形态（安装器把它装到平台根下）；把本套件技能树按该布局复制进夹具，
-      // 打印的相对路径才可解析。目标目录是夹具构造，不是断言对象——断言只问「解析到哪个脚本」。
-      const skillCopy = installSkillTreeCopy(dir, path.join('.claude', 'skills'));
-      assertPrintedCommandResolves(recordCommand, dir,
-        path.join(skillCopy, 'scripts', 'workflow-state.mjs'), '恢复命令');
+      // 权威源形态打印的相对路径才可解析。两种正确形态都放行——① 安装副本：命令路径按**运行中脚本
+      // 所在的安装根**推导（<安装根>/.claude/skills/… 的绝对路径——副本里照抄可执行的就是这条）；
+      // ② 权威源：设计形态 .claude/skills/…（在夹具里解析到上面这份副本）。断言只问「解析到的是不
+      // 是真实存在的 workflow-state.mjs」——存在性 + 脚本名 + 随后真执行打印文本（不拿 harness 的
+      // 路径替代），不把路径钉成 fixture 路径（L-072：布局感知缺失会让安装副本套件变红）。
+      installSkillTreeCopy(dir, path.join('.claude', 'skills'));
+      assertPrintedCommandTargetsInstalledScript(recordCommand, dir, 'workflow-state.mjs', '恢复命令');
       // ③ 照抄打印出来的那条命令执行（不是 harness 的绝对脚本路径）→ 退出 0，且载荷按打印值写入
       const resRecoveredByCommand = runPrintedCommand(recordCommand, dir, {
         FLOW_COMET_RUN_ROOT: dir,
