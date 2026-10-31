@@ -32,6 +32,8 @@
 
 **`BLOCKED: … 的模板声明与节点映射不一致`** —— `--templates` 清单与该节点的模板不一致。报文会点名漏写或多写/错名的项，并给出可直接照抄的重新声明命令：`open` 写 `CHANGE.md,REQUIREMENT.md`，`design` 写 `DESIGN.md`（前端 change 再加 `UI-DESIGN.md`），`plan` 写 `TASK.md`，`execute` / `subagent-execute` 写 `SUMMARY.md`，`review` 写 `REVIEW.md,TEST.md`；`verify` 与 `archive` 没有模板，省略该参数。在本规则之前创建的 change 只告警不拒绝。
 
+**`record` 拒绝证据载荷并点名字段与类型** —— 载荷在写入前先校验形状：`summary` 必须是非空字符串，`completedChecks` 必须是字符串数组，`lessonsNomination` 必须是对象且其 `nominated` 是字符串数组、`reasonIfNone` 是字符串。报文的每一行形如 `字段路径: 必须是什么（当前是什么类型）`，例如 `completedChecks[0]: 必须是字符串（当前是 object）`；状态保持原样不被改写，把载荷改对即可重试。引号被 shell 吞掉时，把同一份 JSON 写进文件用 `--json-file <路径>` 传入；在 `cmd.exe` 里用双引号包住载荷，并转义载荷内原有的双引号。
+
 **`BLOCKED: … 模板结构校验失败`** —— 工件的标题形态、首部字段、段集合或段序、空正文、照抄模板占位符里有一项不合模板。报文分两阶段：**首次只给模板路径与类别计数**（例如「缺段 3 项」），对照 `flow-kit/templates/<DOC>.md` 补齐；**同一工件再次失败时才列段名**——这份记账在 `.specs/<change>/.template-hints.json`，工件通过后自动清除。条件段保留标题、正文写 `N/A` 即可；父段整段 `N/A` 时其结构子段不要求；模板之外自加的段不参与校验。
 
 **出口打印「未校验（模板缺失）」** —— 项目根没有 `flow-kit/templates/<DOC>.md`，这份工件的模板派生段形判据整体跳过——**未校验不等于通过**。按安装页的指引取回 flow-kit 模板后重试；若同一行说的是登记表缺失，那是技能包缺 `reference/artifact-templates.json`，重装技能包即可。`UAT.md` 与归档的遗留清单没有上游模板，永远不进这条校验：只要求存在性。

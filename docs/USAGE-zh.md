@@ -46,6 +46,13 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 
 `skill-load` 要带上入口打印的那两条指针。`--prompt <flow-kit/prompts/…>` 指向该节点的协议文件——只能是它自己的那几份，否则入口拒绝这条声明；`--templates <DOC.md,...>` 以逗号分隔的完整清单声明该节点的模板，每次声明各写一遍。清单必须与该节点完全一致：缺失、多写或错名在新的 change 上被拒绝、旧 change 只告警。`verify` 与 `archive` 没有模板，不传 `--templates`；自定义协议按协议自己声明的 `templates` 走。
 
+**证据载荷在写入前校验。** `record` 接受 `summary` 为非空字符串、`completedChecks` 为字符串数组、`lessonsNomination` 为对象且其 `nominated` 是字符串数组、`reasonIfNone` 是字符串。类型不对会立刻非零退出，逐条点名出错的字段路径与它当前的类型，并且什么都不写——状态保持原样，引擎不认识的字段则放行。
+
+```bash
+node <skills>/flow-comet/scripts/workflow-state.mjs record execute '{"summary":"T01 done","completedChecks":["unit-tests"]}'   # 合法形态
+"completedChecks":[{"id":"unit-tests"}]   # 被拒——成员是 object 而不是字符串
+```
+
 节点的出口会在以下情况拒绝通过：工件不完整或形态不合规、缺少技能加载声明、或从未记录进入；每次拒绝都会打印原因与修复命令。状态不存放在对话里：随时用 `status` / `next` 重新推导；单个节点的产物、门禁、命令与它把关的 `TEMPLATE:` 路径用 `explain <node>` 现问，不必从节点技能册里手抄。
 
 ## 工件
