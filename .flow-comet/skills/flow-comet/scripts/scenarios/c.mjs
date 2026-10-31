@@ -105,8 +105,8 @@ function publicFaceTopicPairs(map) {
 }
 
 // 受检文档集合 = 映射两侧 ∪ 根目录文档，再减去上面两类排除面。根目录扫描是必要的：按 GitHub 惯例
-// 放在根目录、不属于任何「文档权威」主题的公开文件（SECURITY / CODE_OF_CONDUCT 及其双语版）不在
-// 映射里，只靠映射会静默漏掉它们。
+// 放在根目录的公开文件里有整份未登记进映射的（CODE_OF_CONDUCT 及其双语版、SECURITY-zh.md），
+// 只靠映射会静默漏掉它们。
 function publicFaceDocPaths(map) {
   const paths = new Set();
   for (const pair of publicFaceTopicPairs(map).values()) for (const rel of pair) paths.add(rel);
@@ -475,8 +475,15 @@ export const ENTRIES = [
         return next === text ? null : { ...publicFace, texts: new Map(publicFace.texts).set(rel, next) };
       };
       // 受检面来自派生（映射 + 根目录扫描）：按 GitHub 惯例放在根目录的公开文件若被漏在受检面之外，
-      // 就没有注入点——这里直接判红，不让探针静默跳过（手抄清单漏掉 SECURITY 时正是这种形态）。
-      const ROOT_FACE_PROBE = 'SECURITY.md';
+      // 就没有注入点——这里直接判红，不让探针静默跳过。探针必须是**只有根目录扫描能贡献**的文件：
+      // 映射已登记的路径（SECURITY.md 就由 security 主题提供）在根目录扫描缺席时仍在面内，取它做
+      // 探针等于空断言，所以在选型处就对这条前提本身设防。
+      const ROOT_FACE_PROBE = 'CODE_OF_CONDUCT.md';
+      const mappedFacePaths = new Set([...publicFaceTopicPairs(readPublicFaceAuthorityMap()).values()].flat());
+      if (mappedFacePaths.has(ROOT_FACE_PROBE)) {
+        throw new Error('根目录探针失去判别力（' + ROOT_FACE_PROBE + ' 已由权威映射提供，'
+          + '根目录扫描缺席时它仍在受检面内）');
+      }
       if (!publicFace.texts.has(ROOT_FACE_PROBE)) {
         throw new Error('受检面漏了根目录公开文档（' + ROOT_FACE_PROBE + ' 未纳入派生的受检面）');
       }
