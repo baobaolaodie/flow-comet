@@ -628,6 +628,123 @@ export const ENTRIES = [
         throw new Error('derived 早于 currentNode 时应被产物权威校正回 execute，实际 state.currentNode: '
           + JSON.stringify(JSON.parse(readStateBytes(dir)).currentNode) + '\nnext 输出:\n' + behindNext.output);
       }
+
+      // ---------- 边界态：next 会 BLOCKED 时 status 不得给节点（in-place 扩展） ----------
+      // 缺陷复现：next 有两条**不打印 NODE**、直接 BLOCKED 的分支（Fix 受控归位第 4 轮无授权 /
+      // 单趟零进展），status 却照常经 resolveNodeView 给一个 routeNode——执行者按 status 行动必然
+      // 撞 BLOCKED，「同一状态同一答案」在这两种态上不成立。修复后 status 输出 routeNode=null 且
+      // ROUTE: 行写明「next 将 BLOCKED：<原因>」，与 next 的实际行为一致；判定是 state 副本上的
+      // 只读预演（真实字节零改写、不计轮次）。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, fixTaskPath, fixBatchTaskText('pending'));
+      writeState(dir, { ...fixState, fixRoundsByChange: { [CHANGE_ID]: 3 } });
+      const blockedFixBytes = readStateBytes(dir);
+      const blockedFixStatus = runState(['status'], dir);
+      assertExit(blockedFixStatus, 0);
+      if (!/"routeNode":\s*null/.test(blockedFixStatus.output)) {
+        throw new Error('Fix 归位第 4 轮无授权态：next 会 BLOCKED 且不打印 NODE，status.routeNode 必须是 null，实际输出:\n'
+          + blockedFixStatus.output);
+      }
+      const blockedFixRouteLine = blockedFixStatus.output.split('\n').find((line) => line.startsWith('ROUTE: '));
+      if (!blockedFixRouteLine) throw new Error('status 缺少 ROUTE: 诊断行\n实际输出:\n' + blockedFixStatus.output);
+      for (const token of ['route=null', 'next 将 BLOCKED', 'Fix 批次受控归位已达 3 轮上限', '先按恢复指引处理']) {
+        if (!blockedFixRouteLine.includes(token)) {
+          throw new Error('边界态 ROUTE: 行缺少 ' + token + '：' + blockedFixRouteLine);
+        }
+      }
+      assertStateBytesUnchanged(dir, blockedFixBytes, 'status 的「next 将 BLOCKED」判定是只读预演（不得写 state）');
+      const blockedFixRounds = JSON.parse(readStateBytes(dir)).fixRoundsByChange?.[CHANGE_ID];
+      if (blockedFixRounds !== 3) {
+        throw new Error('status 不得计轮次（Fix 计数应保持 3），实际 ' + JSON.stringify(blockedFixRounds));
+      }
+      const blockedFixNext = runState(['next'], dir);
+      assertExit(blockedFixNext, 1);
+      assertOut(blockedFixNext, 'BLOCKED: Fix 批次受控归位已达 3 轮上限');
+      if (/^NODE: /m.test(blockedFixNext.output)) {
+        throw new Error('Fix 归位第 4 轮无授权态：next 必须 BLOCKED、不得打印 NODE\n实际输出:\n' + blockedFixNext.output);
+      }
+      assertStateBytesUnchanged(dir, blockedFixBytes, 'next 的 BLOCK 分支在任何写盘之前（state 字节零改写）');
+
+      // 零进展态（孤儿并行任务：depends_on 指向不存在的任务 id）——同样「next BLOCKED / status 无节点」
+      writeFile(dir, fixTaskPath, '# TASK\n\n'
+        + '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/p01.mjs</write_files><verify>node --check src/p01.mjs</verify><depends_on>NOPE</depends_on></task>\n');
+      writeState(dir, {
+        ...fixState,
+        currentNode: 'execute',
+        completedNodes: ['open', 'design', 'plan'],
+        enteredNodes: ['open', 'design', 'plan', 'execute'],
+        evidence: {
+          open: { summary: 'open complete' },
+          design: { summary: 'design complete' },
+          plan: { summary: 'plan complete' },
+          execute: { summary: 'execute in progress' },
+        },
+      });
+      const zeroProgressBytes = readStateBytes(dir);
+      const zeroProgressStatus = runState(['status'], dir);
+      assertExit(zeroProgressStatus, 0);
+      if (!/"routeNode":\s*null/.test(zeroProgressStatus.output)) {
+        throw new Error('零进展态：next 会 BLOCKED 且不打印 NODE，status.routeNode 必须是 null，实际输出:\n'
+          + zeroProgressStatus.output);
+      }
+      const zeroProgressRouteLine = zeroProgressStatus.output.split('\n').find((line) => line.startsWith('ROUTE: '));
+      if (!zeroProgressRouteLine) throw new Error('status 缺少 ROUTE: 诊断行\n实际输出:\n' + zeroProgressStatus.output);
+      for (const token of ['route=null', 'next 将 BLOCKED', '路由零进展', '先按恢复指引处理']) {
+        if (!zeroProgressRouteLine.includes(token)) {
+          throw new Error('零进展态 ROUTE: 行缺少 ' + token + '：' + zeroProgressRouteLine);
+        }
+      }
+      assertStateBytesUnchanged(dir, zeroProgressBytes, '零进展态下 status 仍是只读视图（不得写 state）');
+      const zeroProgressNext = runState(['next'], dir);
+      assertExit(zeroProgressNext, 1);
+      assertOut(zeroProgressNext, 'BLOCKED: 路由零进展');
+      if (/^NODE: /m.test(zeroProgressNext.output)) {
+        throw new Error('零进展态：next 必须 BLOCKED、不得打印 NODE\n实际输出:\n' + zeroProgressNext.output);
+      }
+      assertStateBytesUnchanged(dir, zeroProgressBytes, '零进展态下 next 的 BLOCK 分支不得写 state');
+
+      // RETURN 回程构造态（源节点未 entry、无 evidence）：产物已把路由推到源节点之后 → next 保留
+      // 源节点跑出口。NODE 必须与 status.routeNode 同一值（旧实现直接打印 state.currentNode，status
+      // 报产物后继 verify——同一 state 两个答案），并给出 WHY: 说明回程原因。
+      writeFile(dir, fixTaskPath, fixBatchTaskText('done'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
+        '# REVIEW\n\n## 结论\n\n回程态构造：execute 已完成，等待 review 出口。\n');
+      writeState(dir, {
+        ...fixState,
+        enteredNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
+        evidence: {
+          open: { summary: 'open complete' },
+          design: { summary: 'design complete' },
+          plan: { summary: 'plan complete' },
+          execute: { summary: 'fix batch executed' },
+          'subagent-execute': { summary: 'delegated' },
+        },
+      });
+      const returnBytes = readStateBytes(dir);
+      const returnStatus = runState(['status'], dir);
+      assertExit(returnStatus, 0);
+      const returnRouteNode = (returnStatus.output.match(/"routeNode":\s*"([^"]+)"/) ?? [])[1];
+      const returnNext = runState(['next'], dir);
+      assertExit(returnNext, 0);
+      assertOut(returnNext, 'RETURN: 回程源节点 review');
+      const returnNextNode = (returnNext.output.match(/^NODE: (.+)$/m) ?? [])[1];
+      if (returnRouteNode !== returnNextNode) {
+        throw new Error('RETURN 回程态下 status.routeNode 与 next 的 NODE 不一致（同一事实两处说法）：'
+          + JSON.stringify(returnRouteNode) + ' vs ' + JSON.stringify(returnNextNode)
+          + '\nstatus 输出:\n' + returnStatus.output + '\nnext 输出:\n' + returnNext.output);
+      }
+      if (returnNextNode !== 'review') {
+        throw new Error('RETURN 回程态：源节点未出口时 next 应保留源节点 review 跑出口，实际: '
+          + JSON.stringify(returnNextNode) + '\nnext 输出:\n' + returnNext.output);
+      }
+      const returnWhyLine = returnNext.output.split('\n').find((line) => line.startsWith('WHY: '));
+      if (!returnWhyLine) throw new Error('RETURN 回程态下 next 缺少 WHY: 解释行\n实际输出:\n' + returnNext.output);
+      for (const token of ['回程源节点 review', '产物在场且未出口', '保留源节点跑出口']) {
+        if (!returnWhyLine.includes(token)) {
+          throw new Error('RETURN 的 WHY: 行缺少 ' + token + '：' + returnWhyLine);
+        }
+      }
+      assertStateBytesUnchanged(dir, returnBytes, 'RETURN 回程分支是只读放行（不得改写 state）');
     },
   },
 

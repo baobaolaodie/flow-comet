@@ -6,7 +6,7 @@ import { execFileSync } from 'child_process';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, isSingleSegmentChangeName, EXECUTE_FAMILY_NODE_IDS } from '../route-node.mjs';
+import { route, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, isSingleSegmentChangeName, EXECUTE_FAMILY_NODE_IDS } from '../route-node.mjs';
 import { taskOpeningAttrs, taskBlocks } from '../task-parsing.mjs';
 import { NODE_PROTOCOL_FILES, SKILL_PROTOCOL_FILES, inspectWorkflowPathSegments } from '../protocol-utils.mjs';
 import { evidencePayloadProblems, looksLikeObjectLiteral, toPersistedProtocolPath, writeJsonAtomic } from '../state-schema.mjs';
@@ -103,6 +103,67 @@ function printNext(protocol, nodeId, executionMode = 'subagent') {
 // 纯判定：只读 state 与产物，不写 state、不打印（展示由各命令渲染）。
 // 消费方：status / next（本模块）与 workflow-handoff 的 result 提示（import 本函数，不复制第二份
 // 判定——Fix 归位态若在 handoff 侧另取 state.currentNode，会指到被 Fix 批次门禁拦下的源节点）。
+//
+// routeNode 为 null 是**合法取值**：此态 next 会 BLOCKED 且不打印 NODE（Fix 归位第 4 轮无授权 /
+// 单趟零进展），视图不得编一个节点出来——编出来的那个就是「status 叫人去一个 next 不会去的地方」。
+
+// ---------- 「此态 next 会 BLOCKED」的只读判定（status 用） ----------
+// next 有两条**不打印 NODE**、直接 BLOCKED 的分支：① Fix 受控归位第 4 轮无授权；② 单趟零进展。
+// 只读视图若照常给节点，同一 state 下两条命令就是两个答案（执行者按 status 动手必然撞 BLOCKED），
+// 故两个判定都在视图里求值、由 resolveNodeView 回报，next 消费同一字段而不另判一份。
+// BLOCKED 报文 → 单行原因（ROUTE: 行只放一句原因，完整报文与恢复指引仍由 next 打印）。
+function blockedReason(message) {
+  return String(message ?? '').split('\n')[0].replace(/^BLOCKED:\s*/, '');
+}
+
+// 单趟零进展防呆（三重防呆决策之二·状态机侧）：路由落在 execute/subagent-execute，但既无可委托的
+// 并行任务（依赖已满足集合为空）又无串行 pending，且 TASK 尚未全 done——剩余 pending 全部是依赖
+// 无法满足的孤儿并行任务（数据异常：depends_on 引用不存在的任务 id 或执行期出现依赖环）。命中即
+// 返回 BLOCKED 报文（判定行 + 恢复指引行），否则 null。协议无 subagent-execute 节点时不适用
+// （parallel 任务由 execute 直接消化，无孤儿语义）。依赖环的常规拦截点在 plan 出口（guard 前置），
+// 此处兜底执行期数据异常（如手改 TASK 绕过签名校验的极端态）。
+async function resolveZeroProgressBlock({ changeName, protocol, nodeId }) {
+  if (!EXECUTE_FAMILY_NODE_IDS.has(nodeId)) return null;
+  if (!hasSubagentNode(protocol)) return null;
+  try {
+    const zpBlocks = taskBlocks(await fs.readFile(protocolTaskFilePath(protocol, changeName, specsDir()), 'utf8'));
+    const zpAttrs = zpBlocks.map(taskOpeningAttrs).filter(Boolean);
+    const zpPending = zpAttrs.filter((a) => a.status === 'pending');
+    if (zpPending.length === 0) return null;
+    const zpDoneIds = new Set(zpAttrs.filter((a) => a.status === 'done' && a.id).map((a) => a.id));
+    const zpEligible = zpBlocks.filter((block) => {
+      const a = taskOpeningAttrs(block);
+      if (!a || !a.parallel || a.status !== 'pending') return false;
+      const depsMatch = block.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
+      if (!depsMatch || !depsMatch[1].trim()) return true;
+      return depsMatch[1].trim().split(/[,\s]+/).filter(Boolean).every((d) => zpDoneIds.has(d));
+    });
+    const zpSerial = zpPending.filter((a) => !a.parallel);
+    if (zpEligible.length === 0 && zpSerial.length === 0) {
+      return [
+        'BLOCKED: 路由零进展——既无可委托的并行任务（依赖已满足集合为空）也无串行 pending，但 TASK 尚有 ' + zpPending.length + ' 个未完成任务',
+        '疑似孤儿并行任务依赖无法满足（检查 depends_on）：' + zpPending.map((a) => a.id).join(', ') + '——修正 depends_on 为真实存在且无环的任务 id 后重试；执行期出现此异常请核对 TASK.md 是否被手改',
+      ].join('\n');
+    }
+  } catch {}
+  return null;
+}
+
+// 回程态判定（与 next 的 RETURN 分支同一谓词）：resolveFixReturnNode 给出回程源节点、它就是
+// state.currentNode，且产物推导确实把路由推到了它**之后**（跳过）⇒ next 保留源节点跑出口，路由视图
+// 也只能是源节点。artifactNext 落在源节点之前（如 execute 产物缺失时回退）不是合法回程态——
+// 回落既有门禁，不越界放宽。
+async function resolveFixReturnTarget({ changeName, protocol, completedArr, state, derivedNode, currentNodeIdx, derivedIdx }) {
+  if (!state.activeChange) return null;
+  const sourceNode = await resolveFixReturnNode({
+    runRoot: runRootDir(), changeName, protocol, completedNodes: completedArr,
+  });
+  if (sourceNode === null || sourceNode !== state.currentNode) return null;
+  if (derivedNode === state.currentNode) return null;
+  if (currentNodeIdx < 0 || derivedIdx <= currentNodeIdx) return null;
+  return sourceNode;
+}
+
 export async function resolveNodeView({ changeName, protocol, state }) {
   const completedArr = Array.isArray(state.completedNodes) ? state.completedNodes : [];
   const derivedNode = await determineNode(changeName, protocol, completedArr);
@@ -169,13 +230,41 @@ export async function resolveNodeView({ changeName, protocol, state }) {
     history: state.history,
   });
   const fixRollbackTarget = fixRollback === null ? null : fixRollback.target;
+  // 归位**只读预演**：next 在归位分支命中后会调 applyFixRollbackRound（唯一写点）计数，第 4 轮
+  // 无授权时在任何写盘之前 BLOCK——status 若照常给节点，给的就是 next 根本不会打印的那个答案。
+  // 预演在 state 的**副本**上跑同一 helper：阈值/授权/渐进放行的判据与 next 逐字同源（不是第二份
+  // 实现），而真 state 的字段（含 fixRoundsByChange）不可能被改动，也不写盘（字节零改写）。
+  const fixRollbackPreview = fixRollback === null
+    ? null
+    : applyFixRollbackRound({
+      state: structuredClone(state),
+      sourceNode: state.currentNode,
+      decision: fixRollback,
+    });
+  const zeroProgressMessage = fixRollbackPreview?.blocked
+    ? null
+    : await resolveZeroProgressBlock({ changeName, protocol, nodeId: derivedNode });
+  const blockedMessage = fixRollbackPreview?.blocked ? fixRollbackPreview.blockedMessage : zeroProgressMessage;
+  const blocked = blockedMessage === null
+    ? null
+    : { message: blockedMessage, reason: blockedReason(blockedMessage) };
+  const fixReturnTarget = blocked === null
+    ? await resolveFixReturnTarget({
+      changeName, protocol, completedArr, state, derivedNode, currentNodeIdx, derivedIdx,
+    })
+    : null;
   return {
     derivedNode,
     stateNode: state.currentNode ?? null,
+    // 优先级与 next 的分支顺序一致：BLOCKED（不打印节点）→ Fix 归位 → 回程 → 进行中保护 → 产物推导。
     // Fix 归位优先于进行中保护：保护输出的是源节点，而归位态下源节点的动作（exit）会被拦下。
-    routeNode: fixRollbackTarget ?? (inProgress ? state.currentNode : derivedNode),
+    routeNode: blocked !== null
+      ? null
+      : (fixRollbackTarget ?? fixReturnTarget ?? (inProgress ? state.currentNode : derivedNode)),
     inProgress,
     fixRollbackTarget,
+    fixReturnTarget,
+    blocked,
   };
 }
 
@@ -183,24 +272,28 @@ export async function resolveNodeView({ changeName, protocol, state }) {
 // route = 路由视图（= next 的 NODE）；进行中时点名「先 exit」的恢复动作；Fix 归位态点名「先按
 // next 的 FIX-BATCH 归位」——此时源节点的 exit 会被 Fix 批次门禁拦下，指引不得指向它。
 // 前缀严格为 `ROUTE: `。
+// BLOCKED 态（route=null）与 next 的实际行为一致：next 此刻不打印 NODE 而是直接 BLOCKED，ROUTE: 行
+// 因此明确写「next 将 BLOCKED：<原因>」并把人推回恢复指引，而不是编一个节点让人去跑。
 function formatRouteLine(view) {
+  const head = 'derived=' + (view.derivedNode ?? 'null') + '（产物推导）'
+    + ' state=' + (view.stateNode ?? 'null') + '（state 原值）';
+  if (view.blocked !== null) {
+    return head + ' route=null（路由视图）；next 将 BLOCKED：' + view.blocked.reason + '（先按恢复指引处理）';
+  }
   const tail = view.fixRollbackTarget
     ? '；Fix 批次：先按 next 的 FIX-BATCH 归位 ' + view.fixRollbackTarget + ' 并跑完其出口'
     : (view.inProgress
       ? '；进行中：' + view.stateNode + ' 已 entry 未 exit——先 exit ' + view.stateNode + ' 再推进'
       : '');
-  return 'derived=' + (view.derivedNode ?? 'null') + '（产物推导）'
-    + ' state=' + (view.stateNode ?? 'null') + '（state 原值）'
-    + ' route=' + (view.routeNode ?? 'null') + '（路由视图）'
-    + tail;
+  return head + ' route=' + (view.routeNode ?? 'null') + '（路由视图）' + tail;
 }
 
-// 人读诊断（next）：为什么停在这个节点。三种停留原因在同一实现里各有一段文案：
+// 人读诊断（next）：为什么停在这个节点。四种停留原因在同一实现里各有一段文案：
 //   · Fix 受控归位——归位目标待跑出口（源节点此时 exit 会被 Fix 批次门禁拦下，指引不得指向 exit）；
+//   · 回程——产物已在场把路由推后，但源节点未出口（保留源节点跑出口，不是「产物推导指向源节点」）；
 //   · 进行中——已 entry 未 exit（保护生效），动作是 exit 本节点；
 //   · 其余——产物推导。
-// 共享节点视图路径与 Fix 归位分支都经本函数：同源不只在 NODE 行，解释行也是同一段文案
-// （回程分支仍不打印——它的 RETURN 行就是解释，且源节点的 exit 合法）。
+// 共享节点视图路径、Fix 归位分支与回程分支都经本函数：同源不只在 NODE 行，解释行也是同一段文案。
 function printWhyLine(view) {
   if (view.routeNode === null) return;
   let reason;
@@ -208,6 +301,10 @@ function printWhyLine(view) {
     reason = 'Fix 批次归位 ' + view.fixRollbackTarget
       + (view.stateNode ? '（源节点 ' + view.stateNode + '）' : '')
       + '——先跑 ' + view.fixRollbackTarget + ' 四类出口，再回源节点 exit';
+  } else if (view.fixReturnTarget) {
+    // 回程态：节点停在源节点不是产物推导的结果（产物已把它推后），解释必须说清「为什么保留源节点」——
+    // 否则 WHY: 行会把它读成「产物推导指向源节点（无进行中节点）」这类错因。
+    reason = '回程源节点 ' + view.routeNode + '：产物在场且未出口，保留源节点跑出口';
   } else if (view.inProgress) {
     reason = '停在 ' + view.routeNode + '——已 entry 未 exit（进行中保护），先 exit ' + view.routeNode + ' 再推进';
   } else {
@@ -519,22 +616,18 @@ export async function runNext(protocol) {
   // 源节点；仅当源节点未完成、任务全 done、firstIncompletePostExecNode === currentNode
   // 且 resolveNextNode 确实会跳过该节点时显式放行（只读不改写 state）。artifactNext ===
   // currentNode 的形态落回既有正常逻辑（normalAdvanceExempt 覆盖），不放宽豁免面。
+  // 本块只做「可能是回程态」的廉价前置筛选（源节点未完成 = 回程谓词的必要条件），真正的判定取共享
+  // 视图的 fixReturnTarget——回程分支的 NODE 与 status.routeNode 是同一个值，源节点未 entry /
+  // 无 evidence 的构造态里两者不再分叉（旧实现直接打印 state.currentNode，status 报产物后继）。
   const fixReturnNode = state.activeChange
     ? await resolveFixReturnNode({ runRoot: runRootDir(), changeName, protocol, completedNodes: completedArr })
     : null;
   if (fixReturnNode !== null && fixReturnNode === state.currentNode) {
-    const artifactNext = await resolveNextNode({ runRoot: runRootDir(), changeName, protocol, completedNodes: completedArr });
-    const routeIds = route(protocol).map((node) => node.id);
-    const artifactNextIdx = routeIds.indexOf(artifactNext);
-    const currentIdx = routeIds.indexOf(state.currentNode);
-    // 「跳过」必须是产物存在性把路由推到源节点之后；artifactNext 落在源节点之前（如 execute
-    // 产物缺失时回退到 execute）不是合法回程态，落回既有门禁，防止越界放宽（既有门禁反例锚）。
-    const skipsForward = artifactNext !== state.currentNode
-      && currentIdx >= 0
-      && artifactNextIdx > currentIdx;
-    if (skipsForward) {
-      console.log('RETURN: 回程源节点 ' + fixReturnNode + '（源节点产物在场且未出口；保留源节点跑出口）');
-      printNext(protocol, state.currentNode, state.executionMode ?? 'subagent');
+    const returnView = await resolveNodeView({ changeName, protocol, state });
+    if (returnView.fixReturnTarget !== null) {
+      console.log('RETURN: 回程源节点 ' + returnView.fixReturnTarget + '（源节点产物在场且未出口；保留源节点跑出口）');
+      printNext(protocol, returnView.routeNode, state.executionMode ?? 'subagent');
+      printWhyLine(returnView);
       printBranchLine(changeName, state.branchPrefix ?? 'change/');
       return;
     }
@@ -573,36 +666,13 @@ export async function runNext(protocol) {
   // 防呆与漂移校正使用，routeNode 才是输出节点（next 的 NODE 行）。
   const nodeView = await resolveNodeView({ changeName, protocol, state });
   const detectedNode = nodeView.derivedNode;
-  // 单趟零进展防呆（三重防呆决策之二·状态机侧）：路由落在 execute/subagent-execute，但既无可委托的并行任务
-  // （依赖已满足集合为空）又无串行 pending，且 TASK 未全 done——剩余 pending 全部是依赖无法满足的
-  // 孤儿并行任务（数据异常：depends_on 引用不存在的任务 id 或执行期出现依赖环）→ BLOCKED，
-  // 防止静默路由到无法推进的节点造成死循环/死等。协议无 subagent-execute 节点时不适用
-  // （parallel 任务由 execute 直接消化，无孤儿语义）。依赖环的常规拦截点在 plan 出口（guard 前置），
-  // 此处兜底执行期数据异常（如手改 TASK 绕过签名校验的极端态）。
-  if (EXECUTE_FAMILY_NODE_IDS.has(detectedNode)) {
-    if (hasSubagentNode(protocol)) {
-      try {
-        const zpBlocks = taskBlocks(await fs.readFile(protocolTaskFilePath(protocol, changeName, specsDir()), 'utf8'));
-        const zpAttrs = zpBlocks.map(taskOpeningAttrs).filter(Boolean);
-        const zpPending = zpAttrs.filter((a) => a.status === 'pending');
-        if (zpPending.length > 0) {
-          const zpDoneIds = new Set(zpAttrs.filter((a) => a.status === 'done' && a.id).map((a) => a.id));
-          const zpEligible = zpBlocks.filter((block) => {
-            const a = taskOpeningAttrs(block);
-            if (!a || !a.parallel || a.status !== 'pending') return false;
-            const depsMatch = block.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
-            if (!depsMatch || !depsMatch[1].trim()) return true;
-            return depsMatch[1].trim().split(/[,\s]+/).filter(Boolean).every((d) => zpDoneIds.has(d));
-          });
-          const zpSerial = zpPending.filter((a) => !a.parallel);
-          if (zpEligible.length === 0 && zpSerial.length === 0) {
-            console.error('BLOCKED: 路由零进展——既无可委托的并行任务（依赖已满足集合为空）也无串行 pending，但 TASK 尚有 ' + zpPending.length + ' 个未完成任务');
-            console.error('疑似孤儿并行任务依赖无法满足（检查 depends_on）：' + zpPending.map((a) => a.id).join(', ') + '——修正 depends_on 为真实存在且无环的任务 id 后重试；执行期出现此异常请核对 TASK.md 是否被手改');
-            process.exit(1);
-          }
-        }
-      } catch {}
-    }
+  // 此态 next 不打印 NODE、直接 BLOCKED（单趟零进展 / Fix 归位第 4 轮无授权）：判定与报文都在共享
+  // 视图里（resolveZeroProgressBlock / applyFixRollbackRound 的只读预演），本命令只消费而不另判一份
+  // ——status 的「route=null + next 将 BLOCKED」来自同一字段，两边答案因此一致。Fix 第 4 轮在
+  // FIX-BATCH 分支已先行 BLOCK，此处的 blocked 只会是零进展。
+  if (nodeView.blocked !== null) {
+    console.error(nodeView.blocked.message);
+    process.exit(1);
   }
   // 状态漂移自动校正——以文件产物为准（determineNode）校正 state.currentNode。进行中节点不校正
   // （已 entry / 已 record 且未 exit、路由仍在其后继）：判定统一在 resolveNodeView 内，本命令不再
