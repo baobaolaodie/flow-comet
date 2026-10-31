@@ -793,8 +793,9 @@ export const ENTRIES = [
   // `### Button (Primary)` → BLOCKED（注意 Primary / Secondary 归一后同键：只写 Secondary 不得算
   // Primary 在场）；② 非前端 change 的 TEST 第 4 轮整段 N/A 且缺 4.1~4.4 子段 → 通过（父段 N/A →
   // 子段不要求）；⑤⑥ UI-DESIGN §0（optional）整段删除合法，但保留标题就得填；⑦ 四种包裹
-  // 符号（**N/A** / > N/A / - N/A / （N/A））都算整段不适用、⑧ 「**见 N/A**」不算（不吞真句子）
-  // 且报文给出规范写法；⑨⑩ 缺子段时点名「实际挂在 X 段下」/「实际在文末」；⑪ 补充提示只对
+  // 符号（**N/A** / > N/A / - N/A / （N/A））都算整段不适用、⑦b `**N/A**（理由）`（闭合标记后紧跟
+  // 说明）同样算整段不适用、⑧ 「**见 N/A**」不算（不吞真句子；它是 ⑦b 的过度接受反锚）且报文
+  // 给出与判据一致的规范写法；⑨⑩ 缺子段时点名「实际挂在 X 段下」/「实际在文末」；⑪ 补充提示只对
   // 父段正文的 N/A 意图痕迹发声（④ 是它的负锚：普通正文不弹），且父段名取模板里的真实段名。
   {
     name: 'TA-08 条件子段与父段豁免：UI-DESIGN 缺 Button (Primary) 拦；TEST 第 4 轮 N/A 放行',
@@ -860,14 +861,29 @@ export const ENTRIES = [
           + resWrapped.status + '\n' + resWrapped.output);
         assertOut(resWrapped, 'ALL CHECKS PASSED');
       }
-      // ⑧ 反例（AC-9）：包装里是「见 N/A」这类真句子（剥掉包装后开头不是白名单词）→ 仍报缺子段；
-      // 父段有正文却不落白名单，报文同时给出规范写法（AC-10）。
+      // ⑦b 闭合标记后紧跟说明（正例锚）：`**N/A**（本轮无变更）` 是「整段不适用 + 为什么」的合法
+      // 书写形态。旧实现只剥尾部的**裸**闭合标记，标记之后一有文字裸文本就变成 `N/A**（…）`、
+      // 白名单词后不再紧邻边界 ⇒ 判已填、子段照旧要求（报文还写着「不要加粗或引用」，与判据相反）。
+      setupVerify(dir, { body: [['兼容性测试', '**N/A**（本轮无变更）']], subsectionOmit: ['4.1', '4.2', '4.3', '4.4'] });
+      const resClosedNote = exitNode(dir, 'verify');
+      assertTrue(resClosedNote.status === 0,
+        '第 4 轮正文「**N/A**（本轮无变更）」应视为整段不适用、豁免结构子段，实际 exit '
+          + resClosedNote.status + '\n' + resClosedNote.output);
+      assertOut(resClosedNote, 'ALL CHECKS PASSED');
+      // ⑧ 反例（AC-9）：包装里是「见 N/A」这类真句子（剥掉包装后开头不是白名单词）→ 仍报缺子段。
+      // 它是 ⑦b 的**过度接受**反锚：容忍「闭合标记后紧跟说明」不得顺手把「包装里包着真句子」也
+      // 放行——区别在开头是不是白名单词，不在有没有包裹符号。
+      // 父段有正文却不落白名单，报文同时给出**与判据一致**的规范写法（AC-10）：包裹符号本身就被
+      // 接受（旧报文写「不要加粗或引用」，与判据相反）；要跟说明就写在闭合标记之后（⑦b 的形态）。
       setupVerify(dir, { body: [['兼容性测试', '**见 N/A**']], subsectionOmit: ['4.1', '4.2', '4.3', '4.4'] });
       const resSentence = exitNode(dir, 'verify');
       assertExit(resSentence, 1);
       assertOut(resSentence, '缺结构子段');
       assertOut(resSentence, '4.1');
-      assertOut(resSentence, '若要整段不适用，请以 N/A 开头（不要加粗或引用）');
+      assertOut(resSentence, '若要整段不适用，请让整段以 N/A 开头');
+      assertOut(resSentence, '包裹符号本身就被接受');
+      assertOut(resSentence, '`**N/A**（理由）`');
+      assertNotOut(resSentence, '不要加粗或引用');
       assertNotOut(resSentence, '父段「」');
       // ⑨ 诊断一（挂错父段）：4.3 实际写在「第 5 轮 · 可观测性验证」下 → 报文点名实际归属
       // （只加定位说明，不改归属算法）。
@@ -897,7 +913,8 @@ export const ENTRIES = [
       setupVerify(dir, { body: [['兼容性测试', '（说明：N/A）']], subsectionOmit: ['4.1', '4.2', '4.3', '4.4'] });
       const resIntent = exitNode(dir, 'verify');
       assertExit(resIntent, 1);
-      assertOut(resIntent, '若要整段不适用，请以 N/A 开头（不要加粗或引用）');
+      assertOut(resIntent, '若要整段不适用，请让整段以 N/A 开头');
+      assertOut(resIntent, '包裹符号本身就被接受');
       assertOut(resIntent, '父段「第 4 轮 · 兼容性测试」');
       assertNotOut(resIntent, '父段「」');
     },

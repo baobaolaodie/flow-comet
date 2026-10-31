@@ -21,8 +21,10 @@ import { reportIntelScanDrift } from './state-intelscan.mjs';
 // 命令文本的唯一实现（平台化脚本根 + 整条路径加引号）：运行期 PREFLIGHT 与 handoff result /
 // guard 恢复指引 / explain 的 COMMAND 行同源（L-067：同一推导两处表达必然分叉）。
 import { scriptCommand } from './state-explain.mjs';
-// 协调者提示的单一来源：entry（guard-gates）与 next（本模块）共用同一常量，两个输出面逐字一致。
-import { COORDINATOR_NOTICE } from './guard-gates.mjs';
+// 协调者提示的单一来源：entry（门禁族）与 next / record（本模块）共用同一常量，各输出面逐字
+// 一致。常量落在中立模块（state-explain）而不是门禁族——本模块只为一句措辞去依赖整个上游门禁面
+// 是一条反向边（复审 #9），迁位后状态命令族不再 import 门禁族。
+import { COORDINATOR_NOTICE } from './state-explain.mjs';
 
 // 本模块位于 <技能包>/scripts/lib：脚本目录由自身位置推导一次（与 guard-evidence-gates 同形态）。
 // 「自己在哪」是本模块可提供的事实，平台化与引号形态本身留在 state-explain。
@@ -811,9 +813,15 @@ export async function runRecord(protocol, argv) {
   };
   await writeState(state);
   console.log('EVIDENCE: ' + nodeId);
+  // 节点视图与 next / status 同源（L-067 族）：record 也是「我现在该在哪个节点」的输出面。此前
+  // 直接取 determineNode（产物推导），于是**进行中保护**生效时三面分叉——currentNode=execute
+  // 已 entry 未 exit、产物推导已指向 review 时，record 报 review 而 next 报 execute、
+  // status.routeNode 报 execute：每完成一个节点都会看到与两条命令相反的「下一节点」。
+  // 改为复用 resolveNodeView 的 routeNode（共享视图的唯一实现）——本命令不自持第二份判定，也
+  // 不改变自己的写面：record 只写证据，不写 currentNode，视图是纯读。
   const changeName = state.activeChange || await findActiveChange();
-  const nextNode = changeName ? await determineNode(changeName, protocol, state.completedNodes) : null;
-  printNext(protocol, nextNode ?? null, state.executionMode ?? 'subagent');
+  const nodeView = changeName ? await resolveNodeView({ changeName, protocol, state }) : null;
+  printNext(protocol, nodeView?.routeNode ?? null, state.executionMode ?? 'subagent');
   return;
 }
 

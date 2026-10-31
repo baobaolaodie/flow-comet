@@ -44,6 +44,8 @@ import {
 // 骨架判据与 TASK 7 字段来自模板保真门禁族——预检自身不新写判据，也不复制段形实现。
 import { runSummarySectionsGate } from './guard-evidence-gates.mjs';
 import { evaluateArtifact, runTaskSevenFieldGate } from './guard-template-fidelity.mjs';
+// 协调者禁令的常量落在中立模块（跨族共用的措辞不进任何一族）：本模块只是取用方，状态命令族同理。
+import { COORDINATOR_NOTICE } from './state-explain.mjs';
 
 // 节点 → 合法 exit 的前置条件（对齐 flow-kit 阶段门 + flowkit.*.v1 evidence）
 const NODE_TRANSITION_GATES = {
@@ -254,12 +256,6 @@ function reviewDeferredMajorProblems(text, scope = { primary: null, siblings: []
   }
   return problems;
 }
-
-// 协调者禁令的**同一句**（单一来源）：entry（本模块）与 next（state-commands-flow 的 printNext）
-// 都引用本常量——同一纪律两个输出面逐字一致，两处各写一份必然在措辞演进时分叉（本次即因此
-// 在 entry/next 留下过两种口径）。现行架构口径（ADR-014 / 并行委派四属性契约）：委托按平台的
-// 身份通道判定，独立 worktree 只是「① 写权限」的一种实现，共享工作区同样受支持。
-export const COORDINATOR_NOTICE = '你是协调者，不是执行者。禁止在主会话直接修改源码；按平台的身份通道委托子代理（同一身份判据，不要求隔离区）；独立 worktree 只是四属性契约里「写权限」的一种实现，共享工作区同样受支持；子代理回传后仅更新 TASK.md / SUMMARY / handoff evidence。';
 
 // 节点 entry 链：受控归位 → 归档分支校验 → 委托前并行写冲突 → 委托前工件 commit 提示 →
 // 清窗恢复产物提示 → 任务集签名记录 → 协调者禁令 → 进入标记落盘 → 点名节点实现技能。

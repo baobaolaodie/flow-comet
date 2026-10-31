@@ -96,6 +96,32 @@ const apply = process.argv.includes('--apply');
 // 结构化预检（只读）：只跑结构性门禁子集（清单在 guard-gates 的 runStructuralPreflight）。
 const preflight = process.argv.includes('--preflight');
 
+// exit 的已知参数（白名单）：--apply（落盘推进）/ --preflight（结构预检）/ --protocol [<path>]
+// （全局协议选择，取值由 resolveProtocol 校验）。其余 `--*` 一律用法错误——静默忽略会把「参数
+// 写错」变成「命令照跑」：`--bogus` 让一次只读预检被当成通过，`--prefligh`（笔误）既不做预检、
+// 也不报错，静默改跑完整出口链。判据取白名单而非黑名单：新增参数必须先在此登记，参数面才不会
+// 随实现漂移。
+const EXIT_KNOWN_FLAGS = new Set(['--apply', '--preflight']);
+function assertKnownExitArgs(argv) {
+  const args = argv.slice(3); // 跳过 node 可执行文件、本脚本、command
+  const unknown = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (typeof arg !== 'string' || !arg.startsWith('--')) continue;
+    if (arg.startsWith('--protocol=')) continue;
+    if (arg === '--protocol') {
+      index += 1; // 取值：缺失时由 resolveProtocol 报「requires a path argument」，不在解析层抢报
+      continue;
+    }
+    if (!EXIT_KNOWN_FLAGS.has(arg)) unknown.push(arg);
+  }
+  if (unknown.length > 0) {
+    throw new Error('用法错误: exit 收到未知参数 ' + unknown.join(' ')
+      + '——exit 只接受 <node> 与 --apply / --preflight / --protocol <path>'
+      + '（用法: workflow-guard.mjs exit <node> [--apply] [--preflight]）');
+  }
+}
+
 // WARN 计数——entry/exit 成功路径末尾输出汇总行（可观测性；追加不改变既有输出）
 let __warnCount = 0;
 const __origError = console.error;
@@ -162,6 +188,10 @@ async function checkPromptDeclarations({ node, state }) {
 }
 
 async function main() {
+  // 参数解析 fail-closed（先于任何语义校验）：未知 `--*` 不是「忽略即可」的噪音，而是「这条命令
+  // 实际跑的不是你以为的那条」。只在 exit 上启用——entry / verify 的参数面由既有校验覆盖，本条
+  // 针对的正是预检分支所在的命令（复审 #8）。
+  if (command === 'exit') assertKnownExitArgs(process.argv);
   // 结构化预检的参数防护（fail-closed）：--preflight 只读、只与 `exit <node>` 搭配。
   // 与 --apply 同时给没有任何合法语义（一个只读、一个落盘）→ 用法错误非零退出，不猜意图；
   // 其它命令（entry / verify / 未知命令）同样拒绝——预检不是第二套入口门禁。

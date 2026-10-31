@@ -25,7 +25,9 @@ import {
   TASK_P1,
   TASK_P2,
   composeState,
+  engineCodeText,
   engineScriptFiles,
+  engineScriptTexts,
   handoffFor,
   strictSummary,
   summaryContent,
@@ -41,6 +43,8 @@ import {
 // 命令文本的唯一实现（平台化脚本根 + 整条路径加引号）：m2 直接以它作为期望值，断言运行期
 // 输出与 handoff 的 PREFLIGHT 同源同形——不是「看起来都像命令」。
 import { scriptCommand } from '../lib/state-explain.mjs';
+// 单一来源静态锁（COORDINATOR 常量的落点与取用面）：与套件其它单源锚共用同一判据实现。
+import { singleSourceImportProblems } from '../lib/text-anchor-checks.mjs';
 
 export const ENTRIES = [
   // 1: open exit 通过（模板段名 CHANGE "## Why（为什么做）" + REQUIREMENT "## 用户故事（User Story）" + 验收段）——带模板验证 C2 派生
@@ -328,6 +332,59 @@ export const ENTRIES = [
       if (entryCoordinatorLine !== nextCoordinatorLine) {
         throw new Error('entry 与 next 的 COORDINATOR 行不一致（同一纪律两个输出面必须逐字相同）：'
           + '\nentry: ' + entryCoordinatorLine + '\nnext : ' + nextCoordinatorLine);
+      }
+      // 常量落点与取用面（单一来源的静态锁）：协调者禁令是**一个知识**，实现只许一处、取用面只许
+      // 具名 import。两处各写一份在措辞演进时必然分叉（本 change 初版即因此留下两种口径），而
+      // 上面的运行期相等锚只在两处恰好同值时成立——**落点错了它看不见**（两份副本可以逐字相同）。
+      // 故另锚这一层：① 定义面唯一且落在中立模块（状态命令族与门禁族都只是取用方）；② 消费方不得
+      // 自带第二份定义、不得绕过单源取用。反向边（状态命令族 → 门禁族）随迁位消失——套件里直接
+      // 断言它没有回来：状态命令族的**代码层**不得再出现门禁模块的名字。
+      const engineTexts = engineScriptTexts();
+      const singleSourceProblems = singleSourceImportProblems({
+        symbol: 'COORDINATOR_NOTICE',
+        sourceRel: 'lib/state-explain.mjs',
+        texts: engineTexts,
+      });
+      if (singleSourceProblems.length > 0) {
+        throw new Error('协调者禁令的单一来源被破坏（' + singleSourceProblems.join('; ') + '）');
+      }
+      const flowCode = engineCodeText(engineTexts.get('lib/state-commands-flow.mjs') ?? '');
+      if (flowCode.includes('guard-gates')) {
+        throw new Error('状态命令族不得依赖门禁族（反向边）：lib/state-commands-flow.mjs 的代码层仍引用 guard-gates');
+      }
+
+      // ---------- record 的节点视图同源（in-place 扩展） ----------
+      // 缺陷形态：runRecord 写证据后用 determineNode（产物推导）打印 NEXT/NODE，未走共享视图——
+      // 就在上面这个「currentNode=execute 已 entry 未 exit、产物推导已指向 review」的态里，
+      // record execute 报 review，而 next 报 execute、status.routeNode 报 execute：每完成一个节点
+      // 都会看到与两条命令相反的「下一节点」，正是本 change 要消灭的同一事实两处说法（L-067）。
+      // record 是**第三个**节点视图输出面，故判据取「三面同一节点」而不是各自断言节点名。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/execute-flow-comet-execute.json',
+        JSON.stringify({
+          node: 'execute',
+          skill: 'flow-comet-execute',
+          protocol: '3-execute.md',
+          templates: ['SUMMARY'],
+          at: '2026-08-01T00:00:00.000Z',
+        }, null, 2) + '\n');
+      const recordView = runState(['record', 'execute', '{"summary":"execute recorded while in progress"}'], dir);
+      assertExit(recordView, 0);
+      const recordNode = (recordView.output.match(/^NODE: (.+)$/m) ?? [])[1];
+      if (recordNode !== 'execute') {
+        throw new Error('record 处于进行中态：NODE 应为路由视图 execute（不是产物推导的 review），实际: '
+          + JSON.stringify(recordNode) + '\nrecord 输出:\n' + recordView.output);
+      }
+      if (recordNode !== nextNode || recordNode !== statusRouteNode) {
+        throw new Error('record 的 NODE 与 next / status.routeNode 不同源（同一事实三处说法）：'
+          + JSON.stringify({ record: recordNode, next: nextNode, statusRouteNode })
+          + '\nrecord 输出:\n' + recordView.output + '\nnext 输出:\n' + nextView.output);
+      }
+      // record 也会经 printNext 打出 COORDINATOR 行（execute 家族）——它是同一常量的第三个输出面，
+      // 一并锁进「逐字相等」：任一处另写一份措辞都会在这里红。
+      const recordCoordinatorLine = recordView.output.split('\n').find((line) => line.startsWith('COORDINATOR: '));
+      if (recordCoordinatorLine !== nextCoordinatorLine) {
+        throw new Error('record 的 COORDINATOR 行与 entry / next 不一致（同一常量、同一 printNext 实现）：'
+          + '\nnext  : ' + nextCoordinatorLine + '\nrecord: ' + recordCoordinatorLine);
       }
 
       // ---------- Fix 归位态的节点视图（in-place 扩展） ----------
@@ -655,6 +712,26 @@ export const ENTRIES = [
       assertExit(wrongCommand, 1);
       assertOut(wrongCommand, '用法错误');
       assertOut(wrongCommand, '只能与 exit');
+
+      // ③b 未知参数 fail-closed（复审）：exit 的参数解析此前只认 --apply / --preflight 两个**已知**
+      // token，其余一律忽略——于是「参数说错了但仍然跑」。两种真实形态都被这套语义接住：
+      //   · `--bogus` 被静默忽略 ⇒ 一次看起来成功的预演（只读面被误当成通过）；
+      //   · `--prefligh`（笔误）既不是预检、也不报错 ⇒ 静默走**完整出口链**，预检被当成全链预演。
+      // 判据：未知 `--*` 一律用法错误（非零退出），且**不得**进入任何门禁链（不打印进展类报错）。
+      // 正对照紧随其后（④：合法 `--preflight` 仍 exit 0 + ALL CHECKS PASSED）——同一夹具、单变量。
+      const typo = runGuard(['exit', 'execute', '--prefligh'], dir);
+      assertExit(typo, 1);
+      assertOut(typo, '用法错误');
+      assertOut(typo, '--prefligh');
+      assertNotOut(typo, '串行 pending');
+      assertStateBytesUnchanged(dir, restoredBytes, '笔误参数的用法错误路径不得写 state');
+      const unknownPair = runGuard(['exit', 'execute', '--prefilter', '--bogus'], dir);
+      assertExit(unknownPair, 1);
+      assertOut(unknownPair, '用法错误');
+      assertOut(unknownPair, '--prefilter');
+      assertOut(unknownPair, '--bogus');
+      assertNotOut(unknownPair, '串行 pending');
+      assertStateBytesUnchanged(dir, restoredBytes, '未知参数的用法错误路径不得写 state');
 
       // ④ 结构干净 ⇒ 预检通过，且不打印 --apply 引导（预检不落盘，那行会误导）
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));

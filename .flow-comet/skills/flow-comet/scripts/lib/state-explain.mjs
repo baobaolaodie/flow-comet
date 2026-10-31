@@ -7,6 +7,14 @@ import path from 'path';
 import { nodeTemplateDeclaration, templatePointerLines } from '../protocol-utils.mjs';
 import { runRootDir } from './state-io.mjs';
 
+// 协调者禁令的**同一句**（单一来源）：entry（门禁族）与 next / record（状态命令族）都引用本常量——
+// 同一纪律多个输出面逐字一致；两处各写一份必然在措辞演进时分叉（本 change 初版即因此留下过两种
+// 口径）。落点选在本模块是因为它**不属于任何一族**：门禁族与状态命令族都只是取用方，常量因此不会
+// 再把两族绑成一条反向依赖（此前状态命令族 import 门禁族，只为取这一个字符串——一个措辞让下游
+// 模块依赖整个上游门禁面）。现行架构口径（ADR-014 / 并行委派四属性契约）：委托按平台的身份通道
+// 判定，独立 worktree 只是「① 写权限」的一种实现，共享工作区同样受支持。
+export const COORDINATOR_NOTICE = '你是协调者，不是执行者。禁止在主会话直接修改源码；按平台的身份通道委托子代理（同一身份判据，不要求隔离区）；独立 worktree 只是四属性契约里「写权限」的一种实现，共享工作区同样受支持；子代理回传后仅更新 TASK.md / SUMMARY / handoff evidence。';
+
 // 命令路径形态（平台化）：权威源保持设计形态 .claude/skills/（与册子命令形态一致，安装时由
 // prepare-env 的 pathReplacements 平台化）；安装副本按脚本自定位输出运行根相对形态——.claude /
 // .agents / .dsh 乃至将来新增的平台根同一推导覆盖，无需在此登记平台清单；落在运行根之外

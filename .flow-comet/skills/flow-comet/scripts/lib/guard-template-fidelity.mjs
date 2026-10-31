@@ -36,6 +36,8 @@ const NOT_APPLICABLE_BODY =
 // 包裹符号（AC-8）：粗体 / 下划线 / 引用 / 列表 / 有序列表 / 括号 / 反引号只是同一个词的写法，
 // 不改变「整段只有一个白名单词」这一事实。剥离只用于本判据，**剥离后仍须以白名单词开头**
 // （AC-9：「**见 N/A**」「（说明：N/A）」剥掉包装后开头是实词，仍是已填）；只剥包装、不扩词表。
+// 同族的另一种合法写法是「词 + 闭合标记 + 为什么」（`**N/A**（理由）`）：说明紧跟闭合标记时
+// 剥离只剥得掉尾部裸标记，词后不再紧邻边界——由 isNotApplicableBody 的第二条判据接住。
 const NOT_APPLICABLE_WRAPPER_LEAD = /^(?:\*\*|__|>|[-*+]|\d+[.)、．]|[（(]|`)\s*/u;
 const NOT_APPLICABLE_WRAPPER_TAIL = /\s*(?:\*\*|__|`)$/u;
 
@@ -53,6 +55,19 @@ function bareNotApplicableBody(text) {
     if (next === stripped) return stripped;
     stripped = next;
   }
+}
+
+// 整段「不适用」判定（唯一消费点）：裸文本以白名单词开头即成立；另接受**闭合标记之后紧跟说明**的
+// 形态——`**N/A**（本轮无变更）` 剥完是 `N/A**（本轮无变更）`，词后紧跟的是闭合标记而不是边界。
+// 说明文字是「为什么不适用」，不改变「整段不适用」这一事实（旧实现据此判已填，于是同一份工件
+// 既被判「写了 N/A」又被要求补子段）。前提仍是白名单词开头：`**见 N/A**` 剥完是 `见 N/A`，
+// 开头是实词 ⇒ 仍是已填（否定式 / 指向式的句子不得吞成整段豁免）。
+const NOT_APPLICABLE_CLOSE_THEN_NOTE = /\s*(?:\*\*|__|`)[\s\S]*$/u;
+function isNotApplicableBody(text) {
+  const bare = bareNotApplicableBody(text);
+  if (NOT_APPLICABLE_BODY.test(bare)) return true;
+  const closed = bare.replace(NOT_APPLICABLE_CLOSE_THEN_NOTE, '');
+  return closed !== bare && NOT_APPLICABLE_BODY.test(closed);
 }
 
 function literalRegExp(text) {
@@ -342,12 +357,12 @@ function collectSectionIssues({ text, skeleton, template, issues }) {
     }
   }
   // 结构子段：父段在场才要求；父段整段 N/A → 子段不要求（AC-8 ②）。父段的「整段不适用」接受
-  // 包裹符号，但剥掉包装后仍要以白名单词开头（AC-8 / AC-9）。
+  // 包裹符号（含「闭合标记 + 说明」形态），但剥掉包装后仍要以白名单词开头（AC-8 / AC-9）。
   for (const sub of skeleton.structureSubsections) {
     const parent = sub.parentNorm === null ? null : matched.get(sub.parentNorm);
     if (!parent) continue;
     const parentBody = bodyText(parent.bodyLines);
-    if (NOT_APPLICABLE_BODY.test(bareNotApplicableBody(parentBody))) continue;
+    if (isNotApplicableBody(parentBody)) continue;
     const candidates = subsectionsByParent.get(sub.parentNorm) ?? parent.subsections;
     const found = candidates.some((docSub) => structureSubsectionMatches(docSub, sub));
     if (found) continue;
@@ -484,8 +499,12 @@ function formatIssueParts(issues, { escalate }) {
     parts.push('缺结构子段 ' + issues.structure.length + ' 项: ' + entries.join('、'));
   }
   if (issues.structureAdvice.length > 0) {
+    // 报文必须与判据一致：包裹符号（粗体 / 引用 / 括号）**本身就被接受**，旧措辞「不要加粗或引用」
+    // 与判据相反，会把人推去改一个本来能通过的写法；真正要的是「白名单词开头」，以及带说明时的
+    // 正确位置（闭合标记之后，见 isNotApplicableBody）。
     parts.push('父段「' + issues.structureAdvice.join('」「') + '」正文不在「整段不适用」白名单——'
-      + '若要整段不适用，请以 N/A 开头（不要加粗或引用）');
+      + '若要整段不适用，请让整段以 N/A 开头（包裹符号本身就被接受：粗体 / 引用 / 括号都算）；'
+      + '闭合标记之后要跟说明，写成 `**N/A**（理由）` 这种形态');
   }
   if (issues.increments.length > 0) parts.push('增量段位置非法: ' + issues.increments.join('、'));
   return parts;
