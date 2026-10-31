@@ -41,6 +41,7 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 | 命令 | 负责什么 |
 |---|---|
 | `workflow-guard.mjs` | `entry` / `exit` —— 门禁。出口校验该节点的工件、段、声明，并在 `verify` 时**真跑**测试命令 |
+| `workflow-guard.mjs exit <节点> --preflight` | 结构预检：该节点出口里只读的结构性部分——文档的段与模板骨架，外加仅 `plan` 生效的任务字段——只报结构问题、不推进任何状态；完整 `exit`（不带 `--apply`）仍是全链预演 |
 | `workflow-state.mjs` | `init`、`status`、`next`、`select`、`record`、`verify-fail`、`advance`、`execution-mode`、`config`、`skill-load`、`bridge-check`、`reenter`、`replan`、`explain` —— 状态机与记账 |
 
 `skill-load` 要带上入口打印的那两条指针。`--prompt <flow-kit/prompts/…>` 指向该节点的协议文件——只能是它自己的那几份，否则入口拒绝这条声明；`--templates <DOC.md,...>` 以逗号分隔的完整清单声明该节点的模板，每次声明各写一遍。清单必须与该节点完全一致：缺失、多写或错名在新的 change 上被拒绝、旧 change 只告警。`verify` 与 `archive` 没有模板，不传 `--templates`；自定义协议按协议自己声明的 `templates` 走。

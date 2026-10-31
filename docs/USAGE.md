@@ -41,6 +41,7 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 | Command | What it owns |
 |---|---|
 | `workflow-guard.mjs` | `entry` / `exit` — the gates. Exits validate the node's artifacts, sections, declarations and (for `verify`) run the test commands |
+| `workflow-guard.mjs exit <node> --preflight` | The structural preflight: the read-only structural half of that node's exit — the documents' sections and template skeleton, plus the task fields at `plan` — which reports what is malformed and advances nothing; the full `exit` without `--apply` stays the whole-chain rehearsal |
 | `workflow-state.mjs` | `init`, `status`, `next`, `select`, `record`, `verify-fail`, `advance`, `execution-mode`, `config`, `skill-load`, `bridge-check`, `reenter`, `replan`, `explain` — the state machine and its bookkeeping |
 
 `skill-load` carries the two pointers the entry printed. `--prompt <flow-kit/prompts/…>` names the node's protocol file — one of the node's own, or the entry refuses the declaration — and `--templates <DOC.md,...>` names its templates as one comma-separated list, written out on every declaration. The list must match the node exactly: a missing, extra or misspelled name is refused on a new change and only warned on an older one. `verify` and `archive` have no templates and take no `--templates`; a custom protocol follows the `templates` that protocol declares.
