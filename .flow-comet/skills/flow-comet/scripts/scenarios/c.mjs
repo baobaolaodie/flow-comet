@@ -282,6 +282,40 @@ function publicFaceMachineProblems({ texts, preflightDocs }) {
   return out;
 }
 
+// ---------- 权威源设计形态锚（形态探测与上面同源：.flow-comet/ 技能树在场 = 权威源检出） ----------
+// 设计形态 = 权威源册子里写出的命令形态（.claude/skills/flow-comet/scripts/…，相对路径），安装时由
+// prepare-env 的 pathReplacements 按平台替换。锚的就是这个形态：安装副本按运行根推导同样是对的，但
+// 那是另一种载体下的正确形态——两种形态混进一条判据，就谁也锁不住（谁都能满足它）。
+const DESIGN_FORM_SCRIPTS_DIR = '.claude/skills/flow-comet/scripts';
+
+// 恢复命令的脚本路径锚（只在权威源检出运行）。场景 34 的恢复命令断言已改成行为判据（存在 + basename
+// + 真执行），三种形态的路径都能满足——于是「权威源打印设计形态」失去锁：把 scriptCommand 改成恒打印
+// 绝对安装根，行为判据全绿，而权威源册子里的命令会开始写本机路径。本锚只读打印出来的那条命令（不拿
+// harness 的脚本路径替代），要求脚本路径逐字等于设计形态。
+function assertDesignFormRecoveryPath(dir) {
+  // 触发一条走 scriptCommand 的恢复指引：subagent-execute 有 handoff 结果、缺 summary → 出口按
+  // Output Schema evidence 阻塞，并给出可照抄的 record 命令（「恢复: node "<脚本路径>" record … 后
+  // 重试 exit」）。判据只认这一行。
+  const st = baseState('subagent-execute');
+  st.evidence['subagent-execute'] = { handoffResult: handoffFor(['P01']) };
+  writeState(dir, st);
+  writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1);
+  const res = runGuardWithProtocol(dir, ['exit', 'subagent-execute']);
+  assertExit(res, 1);
+  assertOut(res, 'BLOCKED: missing Output Schema evidence');
+  const recordCommand = (res.output.match(/恢复: (node "[^"]+" record [^\n]*?) 后重试 exit/) || [])[1];
+  if (!recordCommand) {
+    throw new Error('缺 Output Schema evidence 的阻塞没给可照抄的恢复命令（设计形态锚无从判定）:\n' + res.output);
+  }
+  const printedPath = (recordCommand.match(/^node "([^"]+)"/) || [])[1];
+  const expected = DESIGN_FORM_SCRIPTS_DIR + '/workflow-state.mjs';
+  if (printedPath !== expected) {
+    throw new Error('权威源检出打印的恢复命令脚本路径应为设计形态 ' + expected + '（相对路径）——实际: '
+      + JSON.stringify(printedPath) + '；安装副本按运行根推导属另一种载体的正确形态，不在本锚范围'
+      + '（本锚只在权威源检出运行）');
+  }
+}
+
 // ---------- 形态判据的判别力探针（同一实现驱动，在夹具目录上作业） ----------
 // 两条边界都要有：① 分发包 / 安装副本形态（有技能树、无 docs/）跳过且**可见**，不判红；② docs/ 在
 // 场而权威映射缺失仍显式失败——跳过通道只对「整份文档面不存在」开放，不能顺手把真事故一起吞掉。
@@ -547,8 +581,8 @@ export const ENTRIES = [
     },
   },
 
-  // 105: 计数一致性自检同步（AC-8 / AC-14）+ 公开面机器字段名黑名单 + 结构预检命令锚（in-place
-  // 扩展，不新增场景）——组文件里的场景数或系统测试集项数变更时，受检文件须同步
+  // 105: 计数一致性自检同步（AC-8 / AC-14）+ 公开面机器字段名黑名单 + 结构预检命令锚 + 权威源设计
+  // 形态锚（in-place 扩展，不新增场景）——组文件里的场景数或系统测试集项数变更时，受检文件须同步
   // （场景数：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n 变体；项数：n/n / n items / n 项
   // 变体）。本场景读取权威源仓库的受检文件断言含当前计数变体——文档漏同步或条目缺失（幽灵条目）即
   // RED；与底部自检共用同一实现（countSyncProblems），两处判据不会漂移。
@@ -557,18 +591,21 @@ export const ENTRIES = [
   // 判别力由反向构造证明：注入键名、抽掉命令锚 ⇒ 必报；标注示例块放行、撤掉标注 ⇒ 再报。
   // 形态分派（只按载体形态判，不猜）：安装副本（无 .flow-comet/ 技能树）与分发包（技能树在、docs/
   // 整份不在）都没有公开文档面——跳过且**可见**（SKIP = 未校验，不是通过）；只有权威源检出才跑
-  // 公开面判据。两种形态的边界由 assertPublicFaceShapeProbes 自己钉住。
+  // 公开面判据与设计形态锚。两种形态的边界由 assertPublicFaceShapeProbes 自己钉住。
   {
-    name: '105 计数一致性自检同步 + 公开面机器字段名黑名单 + 三对文档的 --preflight 锚（AC-8 / AC-14）',
+    name: '105 计数一致性自检同步 + 公开面机器字段名黑名单 + --preflight 锚 + 权威源设计形态锚（AC-8 / AC-14）',
     run: async (dir) => {
       if (!isAuthoritativeSourceRepo()) {
-        // 安装副本：无公开文档面——跳过必须可见。
-        console.log('SKIP: 公开面判据（安装副本检出：本检出无 .flow-comet/skills/flow-comet/SKILL.md）'
-          + '——本次未校验公开面键名黑名单 / 命令锚（SKIP = 未校验，不是通过）');
+        // 安装副本：无公开文档面，也无「权威源打印设计形态」这回事——跳过必须可见。
+        console.log('SKIP: 公开面与设计形态判据（安装副本检出：本检出无 .flow-comet/skills/flow-comet/SKILL.md）'
+          + '——本次未校验公开面键名黑名单 / 命令锚，也未校验恢复命令的脚本路径是否为权威源设计形态'
+          + '（SKIP = 未校验，不是通过）');
         return;
       }
       // 形态判据自己的判别力（纯夹具，先于任何派生）
       assertPublicFaceShapeProbes(dir);
+      // 设计形态锚：只读打印出来的恢复命令，要求脚本路径逐字为设计形态
+      assertDesignFormRecoveryPath(dir);
       // 分发包形态（npm 包 / 安装副本）：docs/ 整份不在本检出 ⇒ 公开面无从派生，也就无从检查。
       // 跳过的就是**公开面这一整块**（含计数同步——它数的文件同样不随包分发）；计数面在底部自检里
       // 另有一次独立执行，不会因这条跳过而整体失踪。
