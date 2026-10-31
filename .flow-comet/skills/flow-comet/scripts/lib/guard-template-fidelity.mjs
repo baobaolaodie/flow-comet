@@ -39,6 +39,13 @@ const NOT_APPLICABLE_BODY =
 const NOT_APPLICABLE_WRAPPER_LEAD = /^(?:\*\*|__|>|[-*+]|\d+[.)、．]|[（(]|`)\s*/u;
 const NOT_APPLICABLE_WRAPPER_TAIL = /\s*(?:\*\*|__|`)$/u;
 
+// 「N/A 意图痕迹」只喂补充提示，不参与缺子段判定：父段正文去掉子段标题行后，第一条非空内容行的
+// **开头若干字符**内出现白名单词，才算当事人真想写「整段不适用」。「（说明：N/A）」「见 N/A」这类
+// 带前置说明词 / 包裹的形态落在这个窗口里；普通正文（无白名单词）不落入——把提示挂在与 N/A 无关的
+// 工件上，只会让当事人去改一个它本来没打算写的段落。
+const NOT_APPLICABLE_INTENT = /(?:N\/A|不适用|无变更)/iu;
+const NOT_APPLICABLE_INTENT_WINDOW = 24;
+
 function bareNotApplicableBody(text) {
   let stripped = text;
   for (;;) {
@@ -130,6 +137,33 @@ function bodyText(lines) {
   while (start < end && trimmed[start].trim() === '') start += 1;
   while (end > start && trimmed[end - 1].trim() === '') end -= 1;
   return trimmed.slice(start, end).join('\n');
+}
+
+// 父段的**直系正文**：parseOutline 把 H3 标题行也压进 bodyLines（子段归属要靠这份行序），不剥掉
+// 的话「父段只要写了任一子段」就等同于「父段有正文」——补充提示随即对从未想写 N/A 的工件发声。
+// 只剥标题行，子段的正文内容原样保留（它仍是父段正文的一部分）。
+function directBodyLines(section) {
+  return (section?.bodyLines ?? []).filter((line) => !H3_LINE.test(line));
+}
+
+// 父段正文是否留下 N/A 意图痕迹：第一条非空内容行的开头若干字符里找白名单词——包裹符号
+// （**N/A** / > N/A / （N/A））与前置说明词（（说明：N/A）、见 N/A）都落在这个窗口内。
+function hasNotApplicableIntent(lines) {
+  const first = (lines ?? []).map((line) => String(line)).find((line) => line.trim() !== '');
+  if (first === undefined) return false;
+  return NOT_APPLICABLE_INTENT.test(first.trim().slice(0, NOT_APPLICABLE_INTENT_WINDOW));
+}
+
+// 父段名：报文里必须是**真实段名**。骨架里的段名（模板标题，同一份工件不管怎么改写都显示同一个
+// 名字）优先；骨架未派生该段时退到文档段自己的标题行（parseOutline 的 raw 已剥离开栏井号，这里再
+// 去编号）。两条都取不到才用兜底常量——「父段「」」既没有定位价值，也掩盖了「父段没被识别」。
+const PARENT_NAME_FALLBACK = '（该父段名未派生）';
+
+function parentSectionName(skeleton, parentNorm, docSection) {
+  const fromSkeleton = String(skeleton.sections.find((section) => section.norm === parentNorm)?.name ?? '').trim();
+  if (fromSkeleton !== '') return fromSkeleton;
+  const fromHeading = String(docSection?.raw ?? '').replace(/^\d+(?:\.\d+)*\.?\s*/u, '').trim();
+  return fromHeading === '' ? PARENT_NAME_FALLBACK : fromHeading;
 }
 
 // 模板轮廓缓存（键 = 模板绝对路径）：逐字比对要模板该段正文，路径来自骨架（不在此推导模板位置）。
@@ -321,11 +355,13 @@ function collectSectionIssues({ text, skeleton, template, issues }) {
       name: sub.name,
       placement: locateStructureSubsection(subsectionOccurrences, lastSkeletonIndex, sub),
     });
-    // 父段有正文却没落白名单（如写成「整段不适用」/「见 N/A」）：子段仍要求，并给出可照抄的
-    // 写法（AC-10）；空正文不提示——父段正文由子段承载时它本就是空的。
-    if (parentBody !== '' && !issues.structureAdvice.includes(parent.name)) {
-      issues.structureAdvice.push(parent.name);
-    }
+    // 父段正文留下 N/A 意图痕迹（如「（说明：N/A）」/「见 N/A」）却写不进白名单：子段仍要求，并
+    // 给出可照抄的写法（AC-10）。触发条件是**意图痕迹**而不是「正文非空」——普通正文漏写子段时当事人
+    // 根本没想写整段不适用，这条提示只会把注意力引到无关段落上；空正文同理（父段正文由子段承载时
+    // 它本就是空的）。父段名用真实名，文案里的「父段「」」没有定位价值。
+    if (!hasNotApplicableIntent(directBodyLines(parent))) continue;
+    const parentName = parentSectionName(skeleton, sub.parentNorm, parent);
+    if (!issues.structureAdvice.includes(parentName)) issues.structureAdvice.push(parentName);
   }
   // 增量段：只校验在场者的位置（必填与否由登记表 required + 各自门禁决定，本模块不做存在性兜底）
   for (const increment of skeleton.increments) {

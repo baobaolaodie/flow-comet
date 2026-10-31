@@ -794,7 +794,8 @@ export const ENTRIES = [
   // Primary 在场）；② 非前端 change 的 TEST 第 4 轮整段 N/A 且缺 4.1~4.4 子段 → 通过（父段 N/A →
   // 子段不要求）；⑤⑥ UI-DESIGN §0（optional）整段删除合法，但保留标题就得填；⑦ 四种包裹
   // 符号（**N/A** / > N/A / - N/A / （N/A））都算整段不适用、⑧ 「**见 N/A**」不算（不吞真句子）
-  // 且报文给出规范写法；⑨⑩ 缺子段时点名「实际挂在 X 段下」/「实际在文末」。
+  // 且报文给出规范写法；⑨⑩ 缺子段时点名「实际挂在 X 段下」/「实际在文末」；⑪ 补充提示只对
+  // 父段正文的 N/A 意图痕迹发声（④ 是它的负锚：普通正文不弹），且父段名取模板里的真实段名。
   {
     name: 'TA-08 条件子段与父段豁免：UI-DESIGN 缺 Button (Primary) 拦；TEST 第 4 轮 N/A 放行',
     run: async (dir) => {
@@ -819,11 +820,15 @@ export const ENTRIES = [
       const okTest = exitNode(dir, 'verify');
       assertExit(okTest, 0);
       assertOut(okTest, 'ALL CHECKS PASSED');
-      // ④ 反向构造（判别力）：把第 4 轮改成有实质内容 → 其结构子段重新变为必填 → 缺子段必拦
+      // ④ 反向构造（判别力）：把第 4 轮改成有实质内容 → 其结构子段重新变为必填 → 缺子段必拦；
+      // 同时是「若要整段不适用」补充提示的负锚——正文是普通说明、没有 N/A 意图痕迹，漏写子段时
+      // 报文不得带这条提示（提示只对当事人想写 N/A 却写不规范的情形发声）。
       setupVerify(dir, { body: [['兼容性测试', '实测了三种视口组合的兼容性结论。']], subsectionOmit: ['跨浏览器'] });
       const resRound4 = exitNode(dir, 'verify');
       assertExit(resRound4, 1);
       assertOut(resRound4, '跨浏览器');
+      assertNotOut(resRound4, '若要整段不适用');
+      assertNotOut(resRound4, '父段「」');
       // ⑤ 可选段（optional）语义：UI-DESIGN §0 是模板自述「greenfield 删掉此段」的可选段——
       // 整段缺席合法，不得报「条件段标题缺席」（与 conditional 分流；conditional 仍要求标题在场，见 TA-07）。
       setupDesign(dir, {
@@ -863,6 +868,7 @@ export const ENTRIES = [
       assertOut(resSentence, '缺结构子段');
       assertOut(resSentence, '4.1');
       assertOut(resSentence, '若要整段不适用，请以 N/A 开头（不要加粗或引用）');
+      assertNotOut(resSentence, '父段「」');
       // ⑨ 诊断一（挂错父段）：4.3 实际写在「第 5 轮 · 可观测性验证」下 → 报文点名实际归属
       // （只加定位说明，不改归属算法）。
       setupVerify(dir, {
@@ -885,6 +891,15 @@ export const ENTRIES = [
       assertExit(resTail, 1);
       assertOut(resTail, '缺结构子段');
       assertOut(resTail, '实际在文末');
+      // ⑪ 正锚（④ 的对称面）：父段正文留下 N/A 意图痕迹（「（说明：N/A）」这类带前置说明词、
+      // 不在整段白名单里的写法）→ 子段仍要求，报文给出规范写法；父段名取模板里的真实段名，
+      // 空父段名「父段「」」对定位毫无价值，两处都不许出现。
+      setupVerify(dir, { body: [['兼容性测试', '（说明：N/A）']], subsectionOmit: ['4.1', '4.2', '4.3', '4.4'] });
+      const resIntent = exitNode(dir, 'verify');
+      assertExit(resIntent, 1);
+      assertOut(resIntent, '若要整段不适用，请以 N/A 开头（不要加粗或引用）');
+      assertOut(resIntent, '父段「第 4 轮 · 兼容性测试」');
+      assertNotOut(resIntent, '父段「」');
     },
   },
 
