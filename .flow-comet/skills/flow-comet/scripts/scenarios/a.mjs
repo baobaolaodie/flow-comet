@@ -757,6 +757,24 @@ export const ENTRIES = [
       assertExit(unknown, 1);
       assertOut(unknown, 'Unknown workflow Node: no-such-node');
 
+      // 预检与完整出口共用同一结构报告器：父段正文留下 N/A 意图痕迹、却写不进白名单时，
+      // 「该怎么写」属结构面反馈，预检必须一并带出——自持一份只读副本的实现会丢掉这一段，
+      // 于是同一条结构问题在预检里只说「缺子段」、在收尾时却还给写法，两种模式的反馈不一致。
+      // 夹具：6 维自查段写成「见 N/A …」（剥掉包裹后开头是实词，不算整段不适用），两条结构子段
+      // 因此仍要求；该段保留 brooks-review 字样，关键段门照常通过。
+      const adviceSummary = strictSummary('T01')
+        .replace('- 功能: 通过（brooks-review 已跑）\n- 性能: 无影响\n- 安全: 无影响\n- 兼容: 通过\n- 可观测: 通过\n- 可维护: 通过',
+          '见 N/A（六维由 brooks-review 覆盖）')
+        .replace('### 已知接受 + 理由\n\n- 无（夹具）。\n\n### 已知小问题\n\n- 无（夹具）。\n\n', '');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', adviceSummary);
+      const adviceBytes = readStateBytes(dir);
+      const advice = runGuard(['exit', 'execute', '--preflight'], dir);
+      assertExit(advice, 1);
+      assertOut(advice, '缺结构子段 2 项');
+      assertOut(advice, '若要整段不适用');
+      assertOut(advice, '包裹符号本身就被接受');
+      assertStateBytesUnchanged(dir, adviceBytes, '预检的写法建议路径同样只读');
+
       // ⑥ 空 open 节点（本缺陷的原始形态）：全新 change 的 `.specs/<id>/` 空目录、无 CHANGE.md /
       // REQUIREMENT.md。改前结构子集只查「在场者」⇒ 一件都没查、打印 ALL CHECKS PASSED（假绿）。
       // 本节点声明的 file 类工件（open: CHANGE.md + REQUIREMENT.md）是否在场是**结构事实**，不是

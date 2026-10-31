@@ -473,7 +473,11 @@ function placementText(placement) {
   return placement.kind === 'tail' ? '实际在文末' : '实际挂在 ' + placement.heading + ' 段下';
 }
 
-function formatIssueParts(issues, { escalate }) {
+// 结构问题清单 → 人读片段（唯一实现）：末尾的完整出口报告行与只读的结构预检共用这一个格式器，
+// 两种模式的措辞因此不会各自漂移。escalate 只控制「缺段是否列出段名」（该工件上一轮也失败过才列）；
+// 预检不读提示账本，一律以 false 调用。本函数只拼文本——账本由 reportArtifactStructure 写，所以
+// 调用方拿到同形报文不需要复制一份实现。
+export function formatIssueParts(issues, { escalate }) {
   const parts = [];
   if (issues.title !== null) parts.push('标题形态不符（模板首行: `' + issues.title.expected + '`）');
   if (issues.headerMissing.length > 0) parts.push('首部缺字段: ' + issues.headerMissing.join('、'));

@@ -53,7 +53,7 @@ import {
 // SUMMARY 关键段来自证据/产物门禁族，骨架判据与 TASK 7 字段来自模板保真门禁族——预检自身不
 // 复制段形实现，也不新造一份节点→产物映射。
 import { runSummarySectionsGate } from './guard-evidence-gates.mjs';
-import { evaluateArtifact, runTaskSevenFieldGate } from './guard-template-fidelity.mjs';
+import { evaluateArtifact, formatIssueParts, runTaskSevenFieldGate } from './guard-template-fidelity.mjs';
 // 协调者禁令的常量落在中立模块（跨族共用的措辞不进任何一族）：本模块只是取用方，状态命令族同理。
 import { COORDINATOR_NOTICE } from './state-explain.mjs';
 
@@ -1280,33 +1280,6 @@ export async function runSkillLoadMarkerGate({ node, state }) {
 // 边界（口径必须与输出一致）：预检通过 = **结构面**通过，不代表进展门禁会通过——推进仍由完整
 // exit / --apply 决定。
 
-// 首段形态：把骨架问题压成「类别 + 计数」（缺段不列段名，其余类别本身即定位信息）。
-// 这是模板保真门禁 planFailureLines 在 escalate=false 时的同一口径——该格式器是模块私有且其
-// 报告路径会写提示账本，预检要在**不写账本**的前提下给出同形报文，故在此做只读投影。
-function preflightStructureParts(issues) {
-  const parts = [];
-  if (issues.title !== null) parts.push('标题形态不符（模板首行: `' + issues.title.expected + '`）');
-  if (issues.headerMissing.length > 0) parts.push('首部缺字段: ' + issues.headerMissing.join('、'));
-  if (issues.headerEmpty.length > 0) parts.push('首部字段有键无值: ' + issues.headerEmpty.join('、'));
-  if (issues.frontmatter.length > 0) parts.push('frontmatter 缺键或值为空: ' + issues.frontmatter.join('、'));
-  if (issues.missing.length > 0) parts.push('缺段 ' + issues.missing.length + ' 项');
-  if (issues.conditional.length > 0) {
-    parts.push('条件段标题缺席 ' + issues.conditional.length + ' 项: ' + issues.conditional.join('、'));
-  }
-  if (issues.order !== null) {
-    parts.push('段序偏离模板（「' + issues.order.heading + '」排在模板中更早的段之后）');
-  }
-  if (issues.empty.length > 0) parts.push('正文为空 ' + issues.empty.length + ' 项: ' + issues.empty.join('、'));
-  if (issues.verbatim.length > 0) {
-    parts.push('与模板该段正文逐字相同（判未填）' + issues.verbatim.length + ' 项: ' + issues.verbatim.join('、'));
-  }
-  if (issues.structure.length > 0) {
-    parts.push('缺结构子段 ' + issues.structure.length + ' 项: ' + issues.structure.map((entry) => entry.name).join('、'));
-  }
-  if (issues.increments.length > 0) parts.push('增量段位置非法: ' + issues.increments.join('、'));
-  return parts;
-}
-
 // 声明工件的路径显示口径（与 explain 的产物行同源语义）：specs-root 加 `.specs/` 前缀，
 // project / 缺省原样——缺件报文里的路径因此可直接对着项目根去创建，而不是抽象的 schema 名。
 function declaredArtifactDisplayPath(pathBase, declaredPath) {
@@ -1418,7 +1391,10 @@ async function runPreflightSkeletonChecks({ node, state }) {
         + '（修复: 按安装指引获取 flow-kit 模板后重试）');
       continue;
     }
-    const parts = preflightStructureParts(evaluated.issues);
+    // 首段形态 = 同一格式器在 escalate=false 下的输出：缺段只报类别计数（预检不读提示账本，
+    // 不列段名），其余类别本身即定位信息。账本由报告函数写，格式器是纯函数——复用不会写盘，
+    // 结构子段缺口的「该怎么写」建议因此在预检与收尾两种模式下一致。
+    const parts = formatIssueParts(evaluated.issues, { escalate: false });
     if (parts.length === 0) continue;
     failures.push({ file: target.file, parts, template: evaluated.skeleton.file });
     if (evaluated.skeleton.file) templatePaths.add(evaluated.skeleton.file);
