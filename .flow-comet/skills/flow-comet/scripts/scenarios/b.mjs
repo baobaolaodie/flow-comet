@@ -1326,9 +1326,12 @@ export const ENTRIES = [
     },
   },
 
-  // 80: handoff result commitHash 存在性校验——不存在 → HANDOFF ERROR（固化：校验已存在（W2-D），经确认）
+  // 80: handoff result 的 Return Contract 校验——① 无效 commitHash → HANDOFF ERROR（固化：校验已存在（W2-D），经确认）；
+  // ② 形状校验：与 record 共用 state-schema.evidencePayloadProblems，畸形契约在写盘**之前**被拒（exit 1 +
+  //    点名字段路径与当前类型 + 可照抄形态），state 字节零改写——问题不再延后到出口门禁才暴露；
+  // ③ 零提交语义（request 记 noCommit）与合法契约不受形状校验影响。
   {
-    name: '80 handoff result 无效 commitHash → ERROR（batch-H 固化）',
+    name: '80 handoff result 契约校验：无效 commitHash → ERROR；畸形形状写入前拒绝',
     run: (dir) => {
       writeState(dir, baseState('subagent-execute'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
@@ -1345,6 +1348,50 @@ export const ENTRIES = [
       const res = runHandoff(['result', 'T01', payload], dir);
       assertExit(res, 0);
       assertOut(res, 'HANDOFF ERROR: commitHash 无效或 git show 失败');
+      // 形状校验的「字节零改写」基线：① 已落 T01 的 result（HANDOFF ERROR 不阻断记录），
+      // 此后每次形状拒绝都不得改动这几行。
+      const before = readStateBytes(dir);
+      // ② 形状非法 → 写入前拒绝（每条都点名「字段路径 + 当前类型」，且 state 字节零改写）：
+      //    completedChecks 的对象元素（既有踩坑形态）、redEvidence 传字符串（应为对象容器）、
+      //    commitHash 传数字（零提交只豁免「字段缺席」，不豁免「类型错误」）、status 非字符串与
+      //    字符串但不在契约既有取值集合（DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT）。
+      const malformed = [
+        { payload: '{"status":"DONE","completedChecks":[{"id":"required-skill:subagent-execute.flow-comet-dev"}]}', expect: 'completedChecks[0]: 必须是字符串（当前是 object）' },
+        { payload: '{"status":"DONE","redEvidence":"node --check src/t2.mjs"}', expect: 'redEvidence: 必须是对象（当前是 string）' },
+        { payload: '{"status":"DONE","commitHash":1234567}', expect: 'commitHash: 必须是字符串（当前是 number）' },
+        { payload: '{"status":42}', expect: 'status: 必须是字符串（当前是 number）' },
+        { payload: '{"status":"OK"}', expect: 'status: 不属于允许取值（当前是 OK）' },
+      ];
+      let lastMalformed = null;
+      for (const item of malformed) {
+        const res = runHandoff(['result', 'T02', item.payload], dir);
+        assertExit(res, 1);
+        assertOut(res, item.expect);
+        assertStateBytesUnchanged(dir, before, 'handoff result 形状校验拒绝（' + item.payload + '）');
+        lastMalformed = res;
+      }
+      // 报文还得给「该写成什么」：只有一句「不合法」等于让执行者再猜一次。
+      assertOut(lastMalformed, '"completedChecks":["required-skill:subagent-execute.flow-comet-dev"]');
+      assertOut(lastMalformed, 'DONE_WITH_CONCERNS');
+      assertOut(lastMalformed, '--json-file');
+      // ③ 零提交语义保持可用：request 记 noCommit:true → 契约无 commitHash 照常记录（形状校验不误伤）
+      const zeroState = JSON.parse(before);
+      zeroState.evidence['subagent-execute'].handoffRequests = { T03: { description: 'zero commit', noCommit: true } };
+      writeState(dir, zeroState);
+      const zero = runHandoff(['result', 'T03', '{"status":"DONE","completedChecks":["required-skill:subagent-execute.flow-comet-dev"]}'], dir);
+      assertExit(zero, 0);
+      assertOut(zero, 'HANDOFF RESULT: T03');
+      // ④ 合法完整契约照常通过（commitHash 取夹具仓库的真实提交）
+      const headHash = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+      const good = runHandoff(['result', 'T04', JSON.stringify({
+        status: 'DONE_WITH_CONCERNS',
+        commitHash: headHash,
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        redEvidence: { command: 'echo red', output: 'red' },
+        greenEvidence: { command: 'echo green', output: 'green' },
+      })], dir);
+      assertExit(good, 0);
+      assertOut(good, 'HANDOFF RESULT: T04');
     },
   },
 

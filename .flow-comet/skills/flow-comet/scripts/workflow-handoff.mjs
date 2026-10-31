@@ -3,7 +3,7 @@ import { execFileSync } from 'child_process';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { validateStateFields, looksLikeObjectLiteral, writeJsonAtomic, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, resolveProtocolPathWithState, handoffRequestWithdrawn } from './state-schema.mjs';
+import { validateStateFields, looksLikeObjectLiteral, writeJsonAtomic, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, resolveProtocolPathWithState, handoffRequestWithdrawn, evidencePayloadProblems } from './state-schema.mjs';
 import { EXECUTE_FAMILY_NODE_IDS, protocolNodeEnabled, resolveDelegationTarget, taskDependencyEligibility } from './route-node.mjs';
 import {
   readProtocolFile,
@@ -617,6 +617,28 @@ async function main() {
         }
         process.exit(1);
       }
+    }
+    // 形状校验（写入前 fail-closed；判定单一来源 = state-schema.evidencePayloadProblems，与 record
+    // 共用同一函数）：类型错误的 Return Contract 若落库，问题会延后到出口门禁——那里只会报
+    // 「缺 commitHash / 缺 greenEvidence」，或把对象元素判成「缺 completedChecks」，出错的是 result、
+    // 报错的却是 exit。故在**任何写盘之前**拦下（此后的零提交复验与提交子集校验都可能改写 state）：
+    // 点名字段路径与当前类型，并给出可照抄的契约形态；本路径 state 字节零改写。
+    // 只判类型与取值域（status 的既有取值集合），不做业务判定——提交子集、RED/GREEN 时序、
+    // 零提交资格重验仍归各自既有门禁。
+    const contractProblems = evidencePayloadProblems(parsed, 'return-contract');
+    if (contractProblems.length > 0) {
+      console.error('HANDOFF ERROR: result 的 Return Contract 形状不合法（写入前拒绝，state 未改写）:');
+      for (const problem of contractProblems) {
+        console.error('  ' + problem.field + ': ' + problem.message);
+      }
+      console.error('恢复: 用类型合法的 Return Contract 重试（可照抄形态）: '
+        + '{"status":"DONE","taskId":"' + taskId + '","commitHash":"<git commit sha>",'
+        + '"completedChecks":["required-skill:subagent-execute.flow-comet-dev"],'
+        + '"redEvidence":{"command":"<RED 失败测试命令>","output":"<真实失败输出片段>"},'
+        + '"greenEvidence":{"command":"<GREEN 通过测试命令>","output":"<真实通过输出片段>"}}'
+        + '；零提交任务可省略 commitHash（request 记 noCommit 时不必回传该字段）；'
+        + '载荷里的引号被 shell 吞掉时改用 --json-file <path> 传入 JSON 文件');
+      process.exit(1);
     }
     state.evidence = state.evidence || {};
     state.evidence['subagent-execute'] = state.evidence['subagent-execute'] || {};
