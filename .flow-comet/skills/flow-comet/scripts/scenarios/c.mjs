@@ -94,12 +94,20 @@ function readPublicFaceAuthorityMap() {
 }
 
 // 映射的每个主题 → [authority, twin]（twin 为 null 的主题只登记权威侧）。
+// 畸形或空主题一律抛错而不是跳过：跳过等于把该主题的文档静默移出受检面——字段名黑名单与命令锚
+// 都不再落到它们身上，而套件依然全绿。主题写坏是可判定的失配，就该是一次显式失败。
 function publicFaceTopicPairs(map) {
   const pairs = new Map();
   for (const [topic, spec] of Object.entries(map.topics)) {
-    if (!spec || typeof spec !== 'object') continue;
+    if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {
+      throw new Error('受检面无法派生：' + PUBLIC_FACE_AUTHORITY_MAP + ' 的主题 ' + topic + ' 不是对象');
+    }
     const pair = [spec.authority, spec.twin].filter((rel) => typeof rel === 'string' && rel.trim() !== '');
-    if (pair.length > 0) pairs.set(topic, pair);
+    if (pair.length === 0) {
+      throw new Error('受检面无法派生：' + PUBLIC_FACE_AUTHORITY_MAP + ' 的主题 ' + topic
+        + ' 未登记任何文档路径（authority 与 twin 都为空）');
+    }
+    pairs.set(topic, pair);
   }
   return pairs;
 }
@@ -118,9 +126,20 @@ function publicFaceDocPaths(map) {
 }
 
 // 命令锚所在的文档：按主题名从映射取（路径不在此手抄）。
+// 主题名取不到即抛错：空集会把锚的受检文档集清空，于是命令锚被整段删掉也不红——「新增公开命令
+// 不得无锚」这条判据要防的正是这种静默窄化，主题改名或写错必须显式失败。
 function publicFacePreflightDocs(map) {
   const pairs = publicFaceTopicPairs(map);
-  return PUBLIC_FACE_PREFLIGHT_TOPICS.flatMap((topic) => pairs.get(topic) ?? []);
+  const docs = [];
+  for (const topic of PUBLIC_FACE_PREFLIGHT_TOPICS) {
+    const pair = pairs.get(topic);
+    if (!pair) {
+      throw new Error('受检面无法派生：' + PUBLIC_FACE_AUTHORITY_MAP + ' 未登记主题 ' + topic
+        + '（命令锚文档按主题名派生；主题改名时须同步本判据，不得让锚随主题一起消失）');
+    }
+    docs.push(...pair);
+  }
+  return docs;
 }
 
 // 受检快照 { texts, preflightDocs }，文本按 Map 组织（rel → 文本或 null）：判据只读这一份快照，
