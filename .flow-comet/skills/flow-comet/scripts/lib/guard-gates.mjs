@@ -97,8 +97,8 @@ const REVIEW_MAJOR_LABEL_RE = /\[\s*Major\s*\]/i;
 const REVIEW_MINOR_LABEL_RE = /\[\s*Minor\s*\]/i;
 const REVIEW_ADJUDICATION_RE = /用户裁决\s*[:：]\s*接受延期/;
 // Minor 判定理由的固定形态：条目块内以「判 Minor：」开头的一行（后接一句话理由）。只做结构级
-// 判定（行首标签存在即视为已自证），行号前缀的列表记号 / 引用记号是 Markdown 行级噪音、不改变
-// 该行的标签身份，故允许出现在标签之前。
+// 判定（行首标签存在即视为已自证）——行首的列表记号 / 引用记号是 Markdown 行级噪音，不改变该行
+// 的标签身份，故允许出现在标签之前。
 const REVIEW_MINOR_JUSTIFICATION_RE = /^\s*(?:(?:[-*+]|\d+[.)])\s+|>\s*)*判\s*Minor\s*[:：]/;
 // 旧形态段的「空段」形态：占位词与「无」条目不构成内容（迁移提示只在旧段真有内容时给）。
 const REVIEW_FINDINGS_PLACEHOLDER_RE =
