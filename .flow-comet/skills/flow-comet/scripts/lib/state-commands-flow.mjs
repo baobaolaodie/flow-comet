@@ -82,7 +82,7 @@ function printNext(protocol, nodeId, executionMode = 'subagent') {
 // 行动都可能撞上节点顺序门禁。收敛后三视图各归其位：
 //   derivedNode = 产物推导（既有键 currentNode 的语义，逐字不变）；
 //   stateNode   = state.currentNode 原值（既有键 stateCurrentNode 的语义，逐字不变）；
-//   routeNode   = 经「进行中保护」后的路由视图（next 的 NODE 行的唯一来源）。
+//   routeNode   = 经「进行中保护」/「Fix 受控归位」后的路由视图（next 的 NODE 行的唯一来源）。
 // 纯判定：只读 state 与产物，不写 state、不打印（展示由各命令渲染）。
 async function resolveNodeView({ changeName, protocol, state }) {
   const completedArr = Array.isArray(state.completedNodes) ? state.completedNodes : [];
@@ -108,9 +108,24 @@ async function resolveNodeView({ changeName, protocol, state }) {
   const routingSuccessorOfCurrent = state.currentNode
     ? await determineNode(changeName, protocol, [...completedArr, state.currentNode])
     : null;
+  // 「相等」还不是后继：等号只在两处推导同值时成立，派生的节点仍可能在 currentNode **之前**
+  // （currentNode 之后的节点产物缺失 → 派生回退；或 Fix 归位把任务推回 execute）——此时按等号
+  // 保护会把路由钉在 currentNode、吞掉产物权威校正（实测：verify 驻留 + REVIEW.md 缺失仍报
+  // verify）。故补协议 route 顺序条件：derived 的下标必须严格大于 currentNode 的下标。
+  // 两个例外都维持既有语义：① execute 家族之内——execute ⇄ subagent-execute 是同一个多趟
+  // **循环**，route 里的一前一后不是先后关系（趟间回边本就是文档化转换）；波次收齐后只剩串行
+  // pending 时若按序号判「之前」，next 会把 currentNode 推回 execute，波次出口再也无法重跑
+  // （L-060 型死结）。② currentNode 不在协议 route 内（无先后可比）。
+  const derivedIdx = routeIds.indexOf(derivedNode);
+  const insideExecuteFamily = EXECUTE_FAMILY_NODE_IDS.has(derivedNode)
+    && EXECUTE_FAMILY_NODE_IDS.has(state.currentNode);
+  const derivedIsAfterCurrent = currentNodeIdx < 0
+    || insideExecuteFamily
+    || (derivedIdx >= 0 && derivedIdx > currentNodeIdx);
   const routingSuccessorProtects = !!(completedArr.length > 0
     && routingSuccessorOfCurrent !== null
-    && routingSuccessorOfCurrent === derivedNode);
+    && routingSuccessorOfCurrent === derivedNode
+    && derivedIsAfterCurrent);
   const derivedIsDirectSuccessor = currentNodeIdx >= 0
     && currentNodeIdx + 1 < routeIds.length
     && routeIds[currentNodeIdx + 1] === derivedNode;
@@ -122,32 +137,63 @@ async function resolveNodeView({ changeName, protocol, state }) {
       || (currentNodeEvidence && typeof currentNodeEvidence === 'object' && !Array.isArray(currentNodeEvidence)))
     && derivedIsSuccessor
   );
+  // Fix 受控归位（同一事实同一说法）：next 的 FIX-BATCH 分支在共享视图之前返回并打印归位目标，
+  // status 只走共享视图 ⇒ 同一 state 下两条命令报不同节点，且 status 会叫人 exit 一个正在被
+  // Fix 批次门禁拦下的源节点（C1）。此处只读消费同一决策（纯读：不写盘、不计轮次），命中即把
+  // 归位目标作为路由视图——它是 next 的 NODE 行会打印的节点。
+  const fixRollback = await resolveFixRollbackDecision({
+    runRoot: runRootDir(),
+    changeName,
+    protocol,
+    completedNodes: completedArr,
+    currentNode: state.currentNode,
+    history: state.history,
+  });
+  const fixRollbackTarget = fixRollback === null ? null : fixRollback.target;
   return {
     derivedNode,
     stateNode: state.currentNode ?? null,
-    routeNode: inProgress ? state.currentNode : derivedNode,
+    // Fix 归位优先于进行中保护：保护输出的是源节点，而归位态下源节点的动作（exit）会被拦下。
+    routeNode: fixRollbackTarget ?? (inProgress ? state.currentNode : derivedNode),
     inProgress,
+    fixRollbackTarget,
   };
 }
 
 // 人读诊断（status）：JSON 块之后的一行三视图对账——derived = 产物推导、state = state 原值、
-// route = 路由视图（= next 的 NODE）；进行中时点名「先 exit」的恢复动作。前缀严格为 `ROUTE: `。
+// route = 路由视图（= next 的 NODE）；进行中时点名「先 exit」的恢复动作；Fix 归位态点名「先按
+// next 的 FIX-BATCH 归位」——此时源节点的 exit 会被 Fix 批次门禁拦下，指引不得指向它。
+// 前缀严格为 `ROUTE: `。
 function formatRouteLine(view) {
+  const tail = view.fixRollbackTarget
+    ? '；Fix 批次：先按 next 的 FIX-BATCH 归位 ' + view.fixRollbackTarget + ' 并跑完其出口'
+    : (view.inProgress
+      ? '；进行中：' + view.stateNode + ' 已 entry 未 exit——先 exit ' + view.stateNode + ' 再推进'
+      : '');
   return 'derived=' + (view.derivedNode ?? 'null') + '（产物推导）'
     + ' state=' + (view.stateNode ?? 'null') + '（state 原值）'
     + ' route=' + (view.routeNode ?? 'null') + '（路由视图）'
-    + (view.inProgress
-      ? '；进行中：' + view.stateNode + ' 已 entry 未 exit——先 exit ' + view.stateNode + ' 再推进'
-      : '');
+    + tail;
 }
 
-// 人读诊断（next）：为什么停在这个节点。进行中 = 已 entry 未 exit（保护生效）；否则为产物推导。
-// 只属于共享节点视图路径：Fix 归位 / 回程分支已有 FIX-BATCH / RETURN 行说明停留原因，不重复。
+// 人读诊断（next）：为什么停在这个节点。三种停留原因在同一实现里各有一段文案：
+//   · Fix 受控归位——归位目标待跑出口（源节点此时 exit 会被 Fix 批次门禁拦下，指引不得指向 exit）；
+//   · 进行中——已 entry 未 exit（保护生效），动作是 exit 本节点；
+//   · 其余——产物推导。
+// 共享节点视图路径与 Fix 归位分支都经本函数：同源不只在 NODE 行，解释行也是同一段文案
+// （回程分支仍不打印——它的 RETURN 行就是解释，且源节点的 exit 合法）。
 function printWhyLine(view) {
   if (view.routeNode === null) return;
-  const reason = view.inProgress
-    ? '停在 ' + view.routeNode + '——已 entry 未 exit（进行中保护），先 exit ' + view.routeNode + ' 再推进'
-    : '产物推导指向 ' + view.routeNode + '（无进行中节点）';
+  let reason;
+  if (view.fixRollbackTarget) {
+    reason = 'Fix 批次归位 ' + view.fixRollbackTarget
+      + (view.stateNode ? '（源节点 ' + view.stateNode + '）' : '')
+      + '——先跑 ' + view.fixRollbackTarget + ' 四类出口，再回源节点 exit';
+  } else if (view.inProgress) {
+    reason = '停在 ' + view.routeNode + '——已 entry 未 exit（进行中保护），先 exit ' + view.routeNode + ' 再推进';
+  } else {
+    reason = '产物推导指向 ' + view.routeNode + '（无进行中节点）';
+  }
   console.log('WHY: ' + reason);
 }
 
@@ -423,6 +469,13 @@ export async function runNext(protocol) {
     await writeState(state);
     console.log('FIX-BATCH: 归位 ' + fixRollbackDecision.target + '（源节点 ' + sourceNode + '）' + rollbackRound.auditSuffix);
     printNext(protocol, fixRollbackDecision.target, state.executionMode ?? 'subagent');
+    // 解释行与共享视图同一实现（printWhyLine）：status 的 routeNode 与这行点名的节点是同一事实。
+    printWhyLine({
+      routeNode: fixRollbackDecision.target,
+      stateNode: sourceNode,
+      inProgress: false,
+      fixRollbackTarget: fixRollbackDecision.target,
+    });
     printPreflightLine(fixRollbackDecision.target);
     printBranchLine(changeName, state.branchPrefix ?? 'change/');
     return;

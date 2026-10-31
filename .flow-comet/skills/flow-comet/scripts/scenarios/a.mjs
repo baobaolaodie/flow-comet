@@ -33,6 +33,7 @@ import {
 } from '../lib/test-fixtures.mjs';
 import {
   assertStateBytesUnchanged,
+  fixBatchTaskText,
   readStateBytes,
 } from '../lib/test-assertions.mjs';
 
@@ -244,6 +245,136 @@ export const ENTRIES = [
       assertOut(nextView, '不带 --apply');
       assertOut(nextView, '不推进状态');
       assertStateBytesUnchanged(dir, viewBytes, 'next 进行中保护不得写 state（routeNode 与 NODE 同源）');
+
+      // ---------- Fix 归位态的节点视图（in-place 扩展） ----------
+      // 缺陷复现：currentNode=review、REVIEW.md 在场、TASK 有 pending 修复任务时，next 的
+      // FIX-BATCH 分支先于共享视图返回并打印 NODE: execute，status 只走共享视图——它按「进行中
+      // 保护」报 routeNode=review，ROUTE: 行还叫人「先 exit review」，真去 exit 会被
+      // 「存在未归位/未跑出口的 Fix 批次」拦下。修复后 status 只读消费同一归位决策
+      // （resolveFixRollbackDecision 是纯读：不写盘、不计轮次），routeNode 与指引都指向归位目标。
+      const fixTaskPath = '.specs/' + CHANGE_ID + '/TASK.md';
+      const fixState = {
+        activeChange: CHANGE_ID,
+        currentNode: 'review',
+        completedNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
+        enteredNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review'],
+        evidence: {
+          open: { summary: 'open complete' },
+          design: { summary: 'design complete' },
+          plan: { summary: 'plan complete' },
+          execute: { summary: 'first pass executed' },
+          review: { summary: 'review in progress' },
+        },
+        verifyFailures: 0,
+        executionMode: 'subagent',
+        directOverride: false,
+        newChange: true,
+      };
+      writeFile(dir, fixTaskPath, fixBatchTaskText('pending'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 结论\n\n修复任务已追加，待归位 execute 跑完其出口。\n');
+      writeState(dir, fixState);
+      const fixBytes = readStateBytes(dir);
+      const fixStatus = runState(['status'], dir);
+      assertExit(fixStatus, 0);
+      assertStateBytesUnchanged(dir, fixBytes, 'Fix 归位态下 status 是只读视图（归位决策只读消费，不写盘）');
+      const fixRouteNode = (fixStatus.output.match(/"routeNode":\s*"([^"]+)"/) ?? [])[1];
+      const fixRouteLine = fixStatus.output.split('\n').find((line) => line.startsWith('ROUTE: '));
+      if (!fixRouteLine) throw new Error('status 缺少 ROUTE: 诊断行\n实际输出:\n' + fixStatus.output);
+      const fixNext = runState(['next'], dir);
+      assertExit(fixNext, 0);
+      assertOut(fixNext, 'FIX-BATCH: 归位 execute（源节点 review）');
+      const fixNextNode = (fixNext.output.match(/^NODE: (.+)$/m) ?? [])[1];
+      if (fixNextNode !== 'execute') {
+        throw new Error('Fix 归位态下 next 应打印 NODE: execute，实际: ' + JSON.stringify(fixNextNode)
+          + '\n实际输出:\n' + fixNext.output);
+      }
+      if (fixRouteNode !== fixNextNode) {
+        throw new Error('Fix 归位态下 status.routeNode 与 next 的 NODE 不一致（status 把执行者指向了会被 FIX-BATCH 拦下的节点）：'
+          + JSON.stringify(fixRouteNode) + ' vs ' + JSON.stringify(fixNextNode)
+          + '\nstatus 输出:\n' + fixStatus.output + '\nnext 输出:\n' + fixNext.output);
+      }
+      if (fixRouteLine.includes('先 exit review')) {
+        throw new Error('Fix 归位态下 ROUTE: 不得让用户先去 exit 会被 FIX-BATCH 拦下的源节点：' + fixRouteLine);
+      }
+      for (const token of ['Fix 批次', '归位 execute']) {
+        if (!fixRouteLine.includes(token)) throw new Error('ROUTE: 行缺少归位指引 ' + token + '：' + fixRouteLine);
+      }
+      // 同源不只在 NODE 上：next 的 FIX-BATCH 分支也要有一行 WHY（与共享视图同一段文案实现），
+      // 且该行点名的节点与 status.routeNode 相同——否则两边节点相同、解释却各自一份。
+      const fixWhyLine = fixNext.output.split('\n').find((line) => line.startsWith('WHY: '));
+      if (!fixWhyLine) {
+        throw new Error('Fix 归位态下 next 缺少 WHY: 解释行（应与共享视图同源）\n实际输出:\n' + fixNext.output);
+      }
+      if (!fixWhyLine.includes(fixRouteNode)) {
+        throw new Error('WHY: 行点名的节点应与 status.routeNode 一致（' + JSON.stringify(fixRouteNode) + '）：' + fixWhyLine);
+      }
+      if (!fixWhyLine.includes('Fix 批次')) {
+        throw new Error('WHY: 行应说明这是 Fix 批次归位（而不是产物推导/进行中保护）：' + fixWhyLine);
+      }
+      // 归位写盘仍只属于 next 的 FIX-BATCH 分支（既有契约：受控归位改写 currentNode，见场景 253a）；
+      // 视图路径本身不得写 state——归位后重跑 next 走共享视图，字节零变化。
+      const stateAfterRollback = JSON.parse(readStateBytes(dir));
+      if (stateAfterRollback.currentNode !== 'execute') {
+        throw new Error('Fix 归位态下 next 应把 currentNode 归位 execute，实际 '
+          + JSON.stringify(stateAfterRollback.currentNode));
+      }
+      const bytesAfterRollback = readStateBytes(dir);
+      const nextAfterRollback = runState(['next'], dir);
+      assertExit(nextAfterRollback, 0);
+      assertOut(nextAfterRollback, 'NODE: execute');
+      assertStateBytesUnchanged(dir, bytesAfterRollback, '归位后的共享视图路径不得改写 state');
+
+      // 保护谓词的路由序号条件（反过度保护）：verify 驻留但 REVIEW.md 缺失 → 产物推导回退
+      // review（derived 在 currentNode 之前，不是路由后继），进行中保护不得把路由钉在 verify 上；
+      // status 与 next 都必须报产物推导的 review，next 的漂移校正随之落盘。
+      writeFile(dir, fixTaskPath, fixBatchTaskText('done'));
+      fs.rmSync(path.join(dir, '.specs/' + CHANGE_ID, 'REVIEW.md'));
+      writeState(dir, {
+        ...fixState,
+        currentNode: 'verify',
+        completedNodes: [...fixState.completedNodes, 'review'],
+        enteredNodes: [...fixState.enteredNodes, 'verify'],
+        evidence: { ...fixState.evidence, verify: { summary: 'verify in progress' } },
+      });
+      const driftStatus = runState(['status'], dir);
+      assertExit(driftStatus, 0);
+      const driftRouteNode = (driftStatus.output.match(/"routeNode":\s*"([^"]+)"/) ?? [])[1];
+      if (driftRouteNode !== 'review') {
+        throw new Error('derived 不在 currentNode 之后时不得套用进行中保护（routeNode 应为产物推导的 review），实际: '
+          + JSON.stringify(driftRouteNode) + '\nstatus 输出:\n' + driftStatus.output);
+      }
+      const driftNext = runState(['next'], dir);
+      assertExit(driftNext, 0);
+      assertOut(driftNext, 'NODE: review');
+      if (JSON.parse(readStateBytes(dir)).currentNode !== 'review') {
+        throw new Error('非后继形态应被产物权威校正回 review，实际 state.currentNode: '
+          + JSON.stringify(JSON.parse(readStateBytes(dir)).currentNode) + '\nnext 输出:\n' + driftNext.output);
+      }
+
+      // 序号条件的边界（反过度收窄）：execute 家族是同一个多趟**循环**，execute ⇄ subagent-execute
+      // 在 route 里的一前一后不是先后关系。波次收齐后只剩串行 pending 时（派生回到 execute 的
+      // 趟间回边），保护必须继续生效——否则 next 会把 currentNode 推回 execute，波次的出口再也
+      // 无法重跑（L-060 型死结）。
+      writeFile(dir, fixTaskPath, fixBatchTaskText('pending'));
+      writeState(dir, {
+        ...fixState,
+        currentNode: 'subagent-execute',
+        completedNodes: ['open', 'design', 'plan', 'execute'],
+        enteredNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
+        evidence: { ...fixState.evidence, 'subagent-execute': { summary: 'wave delegated' } },
+      });
+      const waveBytes = readStateBytes(dir);
+      const waveStatus = runState(['status'], dir);
+      assertExit(waveStatus, 0);
+      const waveRouteNode = (waveStatus.output.match(/"routeNode":\s*"([^"]+)"/) ?? [])[1];
+      if (waveRouteNode !== 'subagent-execute') {
+        throw new Error('执行家族内的趟间回边不得套用路由序号条件（routeNode 应为进行中的 subagent-execute），实际: '
+          + JSON.stringify(waveRouteNode) + '\nstatus 输出:\n' + waveStatus.output);
+      }
+      const waveNext = runState(['next'], dir);
+      assertExit(waveNext, 0);
+      assertOut(waveNext, 'NODE: subagent-execute');
+      assertStateBytesUnchanged(dir, waveBytes, '执行家族回边仍属进行中保护：next 不得把 currentNode 推回 execute');
     },
   },
 
