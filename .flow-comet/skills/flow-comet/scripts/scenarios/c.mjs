@@ -285,6 +285,10 @@ function publicFaceMachineProblems({ texts, preflightDocs }) {
 // prepare-env 的 pathReplacements 按平台替换。锚的就是这个形态：安装副本按运行根推导同样是对的，但
 // 那是另一种载体下的正确形态——两种形态混进一条判据，就谁也锁不住（谁都能满足它）。
 const DESIGN_FORM_SCRIPTS_DIR = '.claude/skills/flow-comet/scripts';
+// 「本锚只在权威源检出运行」的判据必须看**正在跑的是哪套脚本**，而不是「仓库里有没有 .flow-comet/」——
+// 仓库里同时存在 .claude|.agents|.dsh 三份副本，跑副本套件时仓库根锚照样在场；只用根锚会把副本误判成权威源，
+// 让安装副本按运行根打印的（对副本而言正确的）路径被判成违规。
+const RUNS_FROM_AUTHORITATIVE_SCRIPTS = path.relative(REPO_ROOT, SCRIPTS_DIR).split(path.sep).join('/') === '.flow-comet/skills/flow-comet/scripts';
 
 // 恢复命令的脚本路径锚（只在权威源检出运行）。场景 34 的恢复命令断言已改成行为判据（存在 + basename
 // + 真执行），三种形态的路径都能满足——于是「权威源打印设计形态」失去锁：把 scriptCommand 改成恒打印
@@ -605,8 +609,14 @@ export const ENTRIES = [
       }
       // 形态判据自己的判别力（纯夹具，先于任何派生）
       assertPublicFaceShapeProbes(dir);
-      // 设计形态锚：只读打印出来的恢复命令，要求脚本路径逐字为设计形态
-      assertDesignFormRecoveryPath(dir);
+      // 设计形态锚：只读打印出来的恢复命令，要求脚本路径逐字为设计形态。仅在**正在跑权威源脚本**时适用；
+      // 跑安装副本套件时，副本按运行根推导出的路径才是那种载体的正确形态，不属于本锚范围——跳过必须可见。
+      if (RUNS_FROM_AUTHORITATIVE_SCRIPTS) {
+        assertDesignFormRecoveryPath(dir);
+      } else {
+        console.log('SKIP: 权威源设计形态锚（当前运行的是安装副本脚本：' + path.relative(REPO_ROOT, SCRIPTS_DIR)
+          + '）——安装副本按运行根推导路径属另一种载体的正确形态，本锚只在权威源脚本下适用（SKIP = 未校验，不是通过）');
+      }
       // 分发包形态（npm 包 / 安装副本）：docs/ 整份不在本检出 ⇒ 公开面无从派生，也就无从检查。
       // 跳过的就是**公开面这一整块**（含计数同步——它数的文件同样不随包分发）；计数面在底部自检里
       // 另有一次独立执行，不会因这条跳过而整体失踪。
