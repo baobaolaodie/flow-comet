@@ -41,6 +41,8 @@ import {
   runStateWithProtocol,
   scenarioProtocolPath,
 } from '../lib/test-assertions.mjs';
+// 恢复指引的路径形态参照物：打印出来的命令必须与 scriptCommand 的产物逐字一致（同一推导，不另写一份）。
+import { scriptCommand } from '../lib/state-explain.mjs';
 
 // ---------- 打印出来的命令：解析 → 真实执行（本组锚点；命令形态必须可复制、可执行） ----------
 //
@@ -176,21 +178,46 @@ export const ENTRIES = [
 
       // ---------- 缺证据阻塞给出可复制恢复命令（in-place 扩展；不新增场景条目） ----------
       // ① 移除 evidence.summary（record 只写 summary 的合法路径）→ exit 命中 missing Output
-      // Schema evidence；BLOCKED 行之后必须给出可照抄的 record 命令，照抄执行后同一 exit 通过。
+      // Schema evidence；BLOCKED 行之后必须给出可照抄的恢复命令，照抄执行后同一 exit 通过。
       const stateFile = path.join(dir, '.flow-comet', 'flow-comet-state.json');
       const stNoEvidence = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
       delete stNoEvidence.evidence['subagent-execute'].summary;
       writeState(dir, stNoEvidence);
+      // 前提：本节点还没有技能加载声明标记（record 的前置门）——报文必须把这道前置条件一并给全。
+      const loadsDir = path.join(dir, '.specs', CHANGE_ID, '.skill-loads');
+      if (fs.existsSync(loadsDir)) {
+        throw new Error('夹具前提不成立：缺声明分支要求 .skill-loads/ 不存在（实际: ' + loadsDir + '）');
+      }
       const resNoEvidence = runGuard(['exit', 'subagent-execute'], dir);
       assertExit(resNoEvidence, 1);
       assertOut(resNoEvidence, 'BLOCKED: missing Output Schema evidence');
       assertOut(resNoEvidence, '{"summary":"<本节点完成摘要>"}');
       assertOut(resNoEvidence, '后重试 exit');
-      // ② 恢复命令**从输出解析**（不再与字面串比对——字面量断言正是此前漏检的成因）：随后对解析出
-      // 的命令断言「整条路径加引号 + 按当前运行形态解析到真实脚本」并在夹具里真实执行。
-      const recordCommand = (resNoEvidence.output.match(/恢复: (node .+?) 后重试 exit/) || [])[1];
+      // ② 恢复命令**从输出解析**（不再与字面串比对——字面量断言正是此前漏检的成因）。缺技能加载声明
+      // 时照抄 record 会被它自己的前置门拦下（「节点缺少技能加载声明标记」），半步恢复 = 还得去另一条
+      // 报文里找 skill-load 命令；故两条命令必须落在**同一段「恢复:」**里（本段 = 输出里最后一条恢复段，
+      // 该段之后引擎直接退出）。
+      const recoveryStart = resNoEvidence.output.lastIndexOf('恢复:');
+      const recoveryBlock = recoveryStart < 0 ? '' : resNoEvidence.output.slice(recoveryStart);
+      if (recoveryBlock === '') {
+        throw new Error('BLOCKED 输出缺恢复段:\n' + resNoEvidence.output);
+      }
+      const recordCommand = (recoveryBlock.match(/(node "[^"]+" record [^\n]*) 后重试 exit/) || [])[1];
+      const skillLoadCommand = (recoveryBlock.match(/^\s*(node "[^"]+" skill-load [^\n]+)$/m) || [])[1];
       if (!recordCommand) {
-        throw new Error('BLOCKED 输出的恢复行缺可解析的 record 命令:\n' + resNoEvidence.output);
+        throw new Error('BLOCKED 输出的恢复段缺可解析的 record 命令:\n' + resNoEvidence.output);
+      }
+      if (!skillLoadCommand) {
+        throw new Error('缺技能加载声明时恢复段必须同时给出 skill-load 命令'
+          + '（否则照抄 record 会被它的前置门拦下，第二步的命令又落在另一条报文里）:\n' + resNoEvidence.output);
+      }
+      // ③ 两条命令的脚本路径逐字等于 scriptCommand 的产物（路径与引号只有一处实现——换一种拼法在此判红）。
+      const printedPathPrefix = scriptCommand({ scriptsDir: SCRIPTS_DIR, runRoot: dir, script: 'workflow-state.mjs' });
+      for (const [label, recoveredCommand] of [['record', recordCommand], ['skill-load', skillLoadCommand]]) {
+        if (!recoveredCommand.startsWith(printedPathPrefix + ' ')) {
+          throw new Error('恢复段的 ' + label + ' 命令脚本路径应逐字等于 scriptCommand 产物 '
+            + printedPathPrefix + '，实际: ' + recoveredCommand);
+        }
       }
       // 安装布局：权威源 = 设计形态（安装器把它装到平台根下）；把本套件技能树按该布局复制进夹具，
       // 权威源形态打印的相对路径才可解析。两种正确形态都放行——① 安装副本：命令路径按**运行中脚本
@@ -200,7 +227,21 @@ export const ENTRIES = [
       // 路径替代），不把路径钉成 fixture 路径（L-072：布局感知缺失会让安装副本套件变红）。
       installSkillTreeCopy(dir, path.join('.claude', 'skills'));
       assertPrintedCommandTargetsInstalledScript(recordCommand, dir, 'workflow-state.mjs', '恢复命令');
-      // ③ 照抄打印出来的那条命令执行（不是 harness 的绝对脚本路径）→ 退出 0，且载荷按打印值写入
+      assertPrintedCommandTargetsInstalledScript(skillLoadCommand, dir, 'workflow-state.mjs', '前置声明命令');
+      // ④ 照抄打印出来的两条命令并真实执行（不是 harness 的绝对脚本路径）：先声明（报文在 record 行
+      // 之下给出的那条）、再 record。走通这两步才说明「一条报文 = 一条恢复路径」。
+      const resDeclared = runPrintedCommand(skillLoadCommand, dir, {
+        FLOW_COMET_RUN_ROOT: dir,
+        FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir),
+      });
+      assertExit(resDeclared, 0);
+      assertOut(resDeclared, 'SKILL-LOAD: subagent-execute');
+      const declaredMarkers = fs.readdirSync(loadsDir)
+        .filter((name) => name.startsWith('subagent-execute-') && name.endsWith('.json'));
+      if (declaredMarkers.length === 0) {
+        throw new Error('照抄前置声明命令后应有 .skill-loads/subagent-execute-*.json'
+          + '（record 前置门按该前缀判定）: ' + JSON.stringify(fs.readdirSync(loadsDir)));
+      }
       const resRecoveredByCommand = runPrintedCommand(recordCommand, dir, {
         FLOW_COMET_RUN_ROOT: dir,
         FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir),
@@ -214,6 +255,31 @@ export const ENTRIES = [
       const resEvidenceRecovered = runGuard(['exit', 'subagent-execute'], dir);
       assertExit(resEvidenceRecovered, 0);
       assertOut(resEvidenceRecovered, 'ALL CHECKS PASSED');
+      // ⑤ 声明已在场 → 恢复段收敛回一条 record（不多给一步）：同样的缺证据阻塞，恢复段里不得再出现
+      // skill-load 步骤。断言只看恢复段，别的门的提示不在本断言范围。
+      const stAgain = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+      delete stAgain.evidence['subagent-execute'].summary;
+      writeState(dir, stAgain);
+      const resDeclaredMissing = runGuard(['exit', 'subagent-execute'], dir);
+      assertExit(resDeclaredMissing, 1);
+      assertOut(resDeclaredMissing, 'BLOCKED: missing Output Schema evidence');
+      const declaredRecoveryStart = resDeclaredMissing.output.lastIndexOf('恢复:');
+      const declaredRecovery = declaredRecoveryStart < 0 ? '' : resDeclaredMissing.output.slice(declaredRecoveryStart);
+      const singleRecordCommand = (declaredRecovery.match(/(node "[^"]+" record [^\n]*) 后重试 exit/) || [])[1];
+      if (!singleRecordCommand) {
+        throw new Error('已有声明时恢复段缺 record 命令:\n' + resDeclaredMissing.output);
+      }
+      if (!declaredRecovery.startsWith('恢复: ' + singleRecordCommand + ' 后重试 exit')) {
+        throw new Error('已有声明时恢复段应直接给出 record（不给多余步骤）:\n' + declaredRecovery);
+      }
+      if (/skill-load\s/.test(declaredRecovery)) {
+        throw new Error('已有声明时恢复段不得再给 skill-load 步骤:\n' + declaredRecovery);
+      }
+      // 复位：照抄该 record 把证据补回去，后续段从「证据齐 + 有声明」的形态继续
+      assertExit(runPrintedCommand(singleRecordCommand, dir, {
+        FLOW_COMET_RUN_ROOT: dir,
+        FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir),
+      }), 0);
 
       // ---------- 开工前可见的 LESSONS 命中集（原位扩展；不新增场景条目） ----------
       // 出口按「任务 write_files 的路径段（过停用词）× .specs/LESSONS.md 条目的关键词行」重算命中集
