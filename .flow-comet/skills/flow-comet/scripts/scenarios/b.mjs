@@ -212,13 +212,14 @@ export const ENTRIES = [
         throw new Error('缺技能加载声明时恢复段必须同时给出 skill-load 命令'
           + '（否则照抄 record 会被它的前置门拦下，第二步的命令又落在另一条报文里）:\n' + resNoEvidence.output);
       }
-      // 协议上下文只补它缺失的那一半：本段的协议由调用方环境携带（runGuard 注入
-      // FLOW_COMET_PROTOCOL），照抄时环境已经决定解析结果——命令里再印一遍只是噪音。判据与
-      // 「协议来自 state」那条同源（见本场景末尾）：来源不同，打印形态不同。
+      // 协议上下文跟「本次实际用到的协议」走，不跟来源走：本段的协议来自调用方环境（runGuard 注入
+      // FLOW_COMET_PROTOCOL = 夹具内的协议副本），它不是内置默认那一份——副本路径与内置默认不同，
+      // 照抄时不带 --protocol 就会按同一套优先级重新解析。故命令必须自带协议路径（与「协议来自
+      // state」那条同一判据，见本场景末尾；来源是 env 时此前只印命令，照抄即落到默认协议）。
       for (const [label, recoveredCommand] of [['record', recordCommand], ['skill-load', skillLoadCommand]]) {
-        if (recoveredCommand.includes('--protocol')) {
-          throw new Error('协议来自环境变量时，恢复段的 ' + label + ' 命令不应再加 --protocol（避免噪音）: '
-            + recoveredCommand);
+        if (!recoveredCommand.includes(' --protocol "reference/workflow-protocol.json"')) {
+          throw new Error('协议来自环境变量且不是内置默认时，恢复段的 ' + label + ' 命令必须自带 '
+            + '--protocol "reference/workflow-protocol.json"（否则照抄时协议上下文丢失）: ' + recoveredCommand);
         }
       }
       // ③ 两条命令的脚本路径逐字等于 scriptCommand 的产物（路径与引号只有一处实现——换一种拼法在此判红）。
@@ -240,9 +241,11 @@ export const ENTRIES = [
       assertPrintedCommandTargetsInstalledScript(skillLoadCommand, dir, 'workflow-state.mjs', '前置声明命令');
       // ④ 照抄打印出来的两条命令并真实执行（不是 harness 的绝对脚本路径）：按报文给出的执行顺序
       // 先声明、再 record。走通这两步才说明「一条报文 = 一条恢复路径」。
+      // 环境变量清空：协议上下文只能来自命令本身——命令没带 --protocol 时这一步会落到内置默认协议
+      // （项目根之外）而不是夹具里的那份，照抄即失败。
       const resDeclared = runPrintedCommand(skillLoadCommand, dir, {
         FLOW_COMET_RUN_ROOT: dir,
-        FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir),
+        FLOW_COMET_PROTOCOL: '',
       });
       assertExit(resDeclared, 0);
       assertOut(resDeclared, 'SKILL-LOAD: subagent-execute');
@@ -254,7 +257,7 @@ export const ENTRIES = [
       }
       const resRecoveredByCommand = runPrintedCommand(recordCommand, dir, {
         FLOW_COMET_RUN_ROOT: dir,
-        FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir),
+        FLOW_COMET_PROTOCOL: '',
       });
       assertExit(resRecoveredByCommand, 0);
       const stRecovered = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
@@ -451,7 +454,32 @@ export const ENTRIES = [
       assertExit(boundPassed, 0);
       assertOut(boundPassed, 'ALL CHECKS PASSED');
 
-      // ④ 负例：协议来自内置默认（无 CLI、无 state 绑定、无环境变量）→ 命令不加 --protocol。
+      // ④ 第三种来源：--protocol CLI（state 无绑定、环境变量为空）——判据不看来源，命令同样自带该
+      // 协议路径。这正是缺陷形态的原点：用 --protocol 调 guard 时，恢复命令曾不带协议上下文，照抄
+      // 一步就落到 env/默认协议（自定义协议里才有的节点名在那份协议里不存在）。
+      writeState(dir, composeState({ currentNode: 'brainstorm', evidence: { brainstorm: {} } }));
+      const cliBlocked = runGuard(['exit', 'brainstorm', '--protocol', boundProtocolRel], dir, { FLOW_COMET_PROTOCOL: '' });
+      assertExit(cliBlocked, 1);
+      assertOut(cliBlocked, 'BLOCKED: missing Output Schema evidence: compose.notes.v1.notes-summary');
+      const cliRecoveryStart = cliBlocked.output.lastIndexOf('恢复:');
+      const cliRecovery = cliRecoveryStart < 0 ? '' : cliBlocked.output.slice(cliRecoveryStart);
+      const cliRecordCommand = (cliRecovery.match(/(node "[^"]+" record [^\n]*) 后重试 exit/) || [])[1];
+      if (!cliRecordCommand) {
+        throw new Error('协议来自 --protocol CLI 时，恢复段必须给出可照抄的 record 命令:\n' + cliBlocked.output);
+      }
+      if (!cliRecordCommand.includes(' --protocol "' + boundProtocolRel + '"')) {
+        throw new Error('协议来自 --protocol CLI 时，恢复段的 record 命令必须自带 --protocol "'
+          + boundProtocolRel + '"（照抄时协议上下文只能来自命令本身）: ' + cliRecordCommand);
+      }
+      const cliRecorded = runPrintedCommand(cliRecordCommand, dir, {
+        FLOW_COMET_RUN_ROOT: dir,
+        FLOW_COMET_PROTOCOL: '',
+      });
+      assertExit(cliRecorded, 0);
+      assertEqual(JSON.parse(readStateBytes(dir)).evidence?.brainstorm?.summary, '<本节点完成摘要>',
+        '照抄 CLI 来源下打印的 record 命令写入的 evidence');
+
+      // ⑤ 负例：协议来自内置默认（无 CLI、无 state 绑定、无环境变量）→ 命令不加 --protocol。
       // 用安装副本自身的脚本跑：权威源检出的内置协议落在夹具根之外（协议读取要求协议在项目根内），
       // 副本形态才等价于真实安装——默认解析落到的正是包内协议。
       const defaultState = baseState('subagent-execute');

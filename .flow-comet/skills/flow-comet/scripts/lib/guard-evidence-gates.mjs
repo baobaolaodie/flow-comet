@@ -8,13 +8,18 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor } from '../state-schema.mjs';
+import {
+  toPersistedProtocolPath,
+  validateStateFields,
+  verifyFailuresFor,
+  setVerifyFailuresFor,
+} from '../state-schema.mjs';
 import { EXECUTE_FAMILY_NODE_IDS, analyzeDependencyGraph, normalizeHeading } from '../route-node.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from '../task-parsing.mjs';
 // 「怎么重新声明技能加载」的唯一实现（节点模板 + 协议提示词两面）：skill-load 校验、record 的声明
 // 核对与这里的恢复指引共用同一份参数段——各拼一份必然分叉。
 import { nodeTemplateDeclaration, templateDeclareCommand } from '../protocol-utils.mjs';
-import { runRoot, fileExists, statePath, writeJson, protocolPath } from './guard-state-io.mjs';
+import { runRoot, packageRoot, fileExists, statePath, writeJson, protocolPath } from './guard-state-io.mjs';
 import {
   eligibleParallelBlocks,
   findSkillLoadsDir,
@@ -658,19 +663,20 @@ function declaredNodeSkill(node) {
   return mainScoped ? mainScoped.skill : null;
 }
 
-// 可照抄命令的协议上下文：本次运行的协议若来自 state.protocolPath（init 持久化绑定），打印的命令
-// 必须自带 --protocol——状态命令族只走 --protocol CLI → FLOW_COMET_PROTOCOL → 内置默认，不读
-// state 绑定。命令不携带协议上下文时，照抄执行会按 env/默认解析，自定义协议的节点在那份协议里
-// 不存在，恢复路径断在第一步（报文给了命令，命令却跑不进同一个协议）。
-// 判据是运行上下文里**本次实际解析到的**协议路径（guard-state-io 的单一来源）与 state 绑定是否
-// 同一份：来源为 CLI / env / 内置默认时两者不同，不重复印（协议上下文已由调用方的命令或环境携带，
-// 再印一遍只是噪音）。参数值取持久化形态（项目内相对路径随项目迁移），引号随参数词给出——脚本
-// 路径与整条命令仍只由 scriptCommand 产出。
-function protocolContextArgs(state) {
-  const persisted = typeof state?.protocolPath === 'string' ? state.protocolPath.trim() : '';
-  if (persisted === '' || protocolPath === null) return [];
-  if (path.resolve(runRoot, persisted) !== path.resolve(protocolPath)) return [];
-  return ['--protocol', '"' + persisted + '"'];
+// 可照抄命令的协议上下文（单一实现）：本次运行的协议**不是内置默认**时，打印的命令必须自带
+// --protocol——状态命令族只走 --protocol CLI → FLOW_COMET_PROTOCOL → 内置默认，三种来源里没有
+// state 绑定这一项。命令不携带协议上下文时，照抄执行会按同一套优先级重新解析，自定义协议的节点在
+// 那份协议里不存在，恢复路径断在第一步（报文给了命令，命令却跑不进同一个协议）。
+// 判据只看「本次实际解析到的协议是不是内置默认」（guard-state-io 的单一来源）：来源是 CLI / env /
+// state 一视同仁——三种来源都可能指向自定义协议，缺的正是命令自己的上下文；内置默认时照抄不加
+// 参数也解析到同一份，加它只是噪音。参数值取持久化形态（state-schema 的 toPersistedProtocolPath：
+// 项目内 → 根相对 POSIX，随项目迁移；根外 → 绝对），与 init 写进 state.protocolPath 的形态同源；
+// 引号随参数词给出——脚本路径与整条命令仍只由 scriptCommand 产出。
+function protocolContextArgs() {
+  if (protocolPath === null) return [];
+  const builtin = path.resolve(packageRoot, 'reference', 'workflow-protocol.json');
+  if (path.resolve(protocolPath) === builtin) return [];
+  return ['--protocol', '"' + toPersistedProtocolPath(runRoot, protocolPath) + '"'];
 }
 
 // 前置声明命令：参数段取 templateDeclareCommand（模板与协议提示词是同一次声明的两面——漏任一面，
@@ -710,7 +716,7 @@ export async function runEvidenceCompletionGate({ protocol, node, state, evidenc
     // 照抄执行后同一 exit 即可通过——不再让执行者从字段清单反推该跑什么命令。
     // 协议上下文随命令走：同段的两条命令（本条的 record 与缺声明时的 skill-load）用同一份参数段，
     // 免得一条带协议、一条不带（照抄第一步就落到另一份协议）。
-    const protocolArgs = protocolContextArgs(state);
+    const protocolArgs = protocolContextArgs();
     const recordCommand = scriptCommand({
       scriptsDir,
       runRoot,
