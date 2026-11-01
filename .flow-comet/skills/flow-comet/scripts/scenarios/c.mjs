@@ -39,7 +39,10 @@ import {
   scenarioProtocolPath,
 } from '../lib/test-assertions.mjs';
 import {
+  PUBLIC_FACE_DOCS_DIR,
+  PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE,
   countSyncProblems,
+  publicFaceDocsAbsent,
 } from '../lib/text-anchor-checks.mjs';
 
 // ---------- 公开面的机器状态字段名口径 + 命令锚（机检；判据与反向构造共用本实现） ----------
@@ -90,15 +93,10 @@ function listMarkdownFiles(absDir, relDir) {
 // 无法派生」不是缺文件事故，而是载体的**正常形态**，说成「仓库缺文件」会把读者引到修复一个不存在的
 // 缺陷上。判据落点选 docs/ 整份在不在，而不是权威映射文件在不在：docs/ 在、映射缺 = 检出被裁坏，
 // 仍要在读取处显式失败（判据强度不降——跳过通道只对「整份文档面不存在」开放）。
-const PUBLIC_FACE_DOCS_DIR = 'docs';
-// 跳过提示的措辞是判据的一部分：SKIP = 未校验，不是通过。读者不该把「这形态没有公开文档」读成
-// 「公开面已检查且通过」。
-const PUBLIC_FACE_SKIP_NOTICE = 'SKIP: 此形态不含公开文档（' + PUBLIC_FACE_DOCS_DIR
-  + '/ 整份不在本检出——分发包 / 安装副本按 files 白名单只带技能树），跳过公开面键名检查'
-  + '（SKIP = 未校验，不是通过；请改在权威源检出重跑本套件）';
-function publicFaceDocsAbsent(root = REPO_ROOT) {
-  return !fs.existsSync(path.join(root, ...PUBLIC_FACE_DOCS_DIR.split('/')));
-}
+// 形态判据与其跳过提示**从 lib 共用**（底部自检的公开面自检用同一对）：同一种形态在两处各判一次，
+// 两份实现迟早各说各话——一处把包形态说成「缺文件」、另一处说成「跳过」，正是本批修掉的误诊。
+// 判据落点与措辞只在 lib/text-anchor-checks.mjs 维护（PUBLIC_FACE_DOCS_DIR / publicFaceDocsAbsent /
+// PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE）。
 
 // 权威映射缺席或不可解析 = 受检面无从派生（不是「没有东西要查」）：显式失败，不静默退化。
 // root 可覆盖读取根（默认仓库根）——仅为可测性接缝：形态判据的探针要在夹具目录上验证「docs/ 在、
@@ -323,9 +321,10 @@ function assertPublicFaceShapeProbes(dir) {
   if (!publicFaceDocsAbsent(dir)) {
     throw new Error('形态探针前提失效：夹具目录不应预先含 ' + PUBLIC_FACE_DOCS_DIR + '/');
   }
-  for (const phrase of ['此形态不含公开文档', '跳过公开面键名检查', '未校验']) {
-    if (!PUBLIC_FACE_SKIP_NOTICE.includes(phrase)) {
-      throw new Error('跳过提示缺「' + phrase + '」——跳过必须说明这是未校验而不是通过: ' + PUBLIC_FACE_SKIP_NOTICE);
+  for (const phrase of ['此形态不含公开面', '不是仓库缺文件', '未校验']) {
+    if (!PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE.includes(phrase)) {
+      throw new Error('跳过提示缺「' + phrase + '」——跳过必须说明这是未校验、不是通过、也不是缺文件: '
+        + PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE);
     }
   }
   // docs/ 在场 ⇒ 不属「不含公开文档」形态，判据不得据此跳过（否则真检出会被整面跳过）
@@ -610,7 +609,7 @@ export const ENTRIES = [
       // 跳过的就是**公开面这一整块**（含计数同步——它数的文件同样不随包分发）；计数面在底部自检里
       // 另有一次独立执行，不会因这条跳过而整体失踪。
       if (publicFaceDocsAbsent(REPO_ROOT)) {
-        console.log(PUBLIC_FACE_SKIP_NOTICE);
+        console.log(PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE);
         return;
       }
       const problems = [...await countSyncProblems()];
