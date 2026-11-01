@@ -29,6 +29,7 @@ import {
   TASK_TFIX,
   composeState,
   customProtocol,
+  customProtocolWithSkillCall,
   handoffFor,
   summaryContent,
   writeCustomProtocol,
@@ -211,6 +212,15 @@ export const ENTRIES = [
         throw new Error('缺技能加载声明时恢复段必须同时给出 skill-load 命令'
           + '（否则照抄 record 会被它的前置门拦下，第二步的命令又落在另一条报文里）:\n' + resNoEvidence.output);
       }
+      // 协议上下文只补它缺失的那一半：本段的协议由调用方环境携带（runGuard 注入
+      // FLOW_COMET_PROTOCOL），照抄时环境已经决定解析结果——命令里再印一遍只是噪音。判据与
+      // 「协议来自 state」那条同源（见本场景末尾）：来源不同，打印形态不同。
+      for (const [label, recoveredCommand] of [['record', recordCommand], ['skill-load', skillLoadCommand]]) {
+        if (recoveredCommand.includes('--protocol')) {
+          throw new Error('协议来自环境变量时，恢复段的 ' + label + ' 命令不应再加 --protocol（避免噪音）: '
+            + recoveredCommand);
+        }
+      }
       // ③ 两条命令的脚本路径逐字等于 scriptCommand 的产物（路径与引号只有一处实现——换一种拼法在此判红）。
       const printedPathPrefix = scriptCommand({ scriptsDir: SCRIPTS_DIR, runRoot: dir, script: 'workflow-state.mjs' });
       for (const [label, recoveredCommand] of [['record', recordCommand], ['skill-load', skillLoadCommand]]) {
@@ -385,6 +395,90 @@ export const ENTRIES = [
       const reqNoTask = runHandoff(['request', 'P99', 'no such task', '--write-files', 'src/p99.mjs'], dir);
       assertExit(reqNoTask, 0);
       assertOut(reqNoTask, '无可回应条目（TASK.md 无匹配任务 P99）');
+
+      // ---------- 协议上下文随恢复命令传播（原位扩展；不新增场景条目） ----------
+      // guard 解析协议的顺序包含 state.protocolPath（init 持久化绑定），而 workflow-state /
+      // workflow-handoff 只走 --protocol CLI → FLOW_COMET_PROTOCOL → 内置默认，不读 state 绑定。
+      // 于是照抄 guard 打印的恢复命令时协议上下文丢失：自定义协议的节点名在 env/默认协议里不存在，
+      // 第一步就撞「skill-load node 非法」——报文给了命令，命令却跑不进同一个协议。
+      // 判据：协议来自 state → 命令自带 --protocol 且照抄可执行；来自 env / 内置默认 → 不加
+      // （协议上下文已由调用方的命令或环境携带，重复印一遍只是噪音）。
+      const boundProtocolRel = 'custom-protocol.json';
+      writeFile(dir, boundProtocolRel, JSON.stringify(customProtocolWithSkillCall(), null, 2) + '\n');
+      writeFile(dir, '.specs/compose-demo/notes.md', '# notes\n');
+      // evidence 在场才走得出前置的「无证据」门（那条报文不打印可照抄命令）：本段要考的是
+      // Output Schema evidence 缺失时的两步恢复，故放一个空证据对象，缺的正是 schema 要求的字段。
+      writeState(dir, composeState({ currentNode: 'brainstorm', protocolPath: boundProtocolRel, evidence: { brainstorm: {} } }));
+      const boundLoadsDir = path.join(dir, '.specs', 'compose-demo', '.skill-loads');
+      if (fs.existsSync(boundLoadsDir)) {
+        throw new Error('夹具前提不成立：缺声明分支要求 .skill-loads/ 不存在（实际: ' + boundLoadsDir + '）');
+      }
+      const boundBlocked = runGuard(['exit', 'brainstorm'], dir, { FLOW_COMET_PROTOCOL: '' });
+      assertExit(boundBlocked, 1);
+      assertOut(boundBlocked, 'BLOCKED: missing Output Schema evidence: compose.notes.v1.notes-summary');
+      const boundRecoveryStart = boundBlocked.output.lastIndexOf('恢复:');
+      const boundRecovery = boundRecoveryStart < 0 ? '' : boundBlocked.output.slice(boundRecoveryStart);
+      const boundRecordCommand = (boundRecovery.match(/(node "[^"]+" record [^\n]*) 后重试 exit/) || [])[1];
+      const boundSkillLoadCommand = (boundRecovery.match(/^\s*(node "[^"]+" skill-load [^\n]+)$/m) || [])[1];
+      if (!boundRecordCommand || !boundSkillLoadCommand) {
+        throw new Error('state 绑定自定义协议的恢复段必须同时给出 skill-load 与 record 命令:\n' + boundBlocked.output);
+      }
+      // ① 正例：两条命令都带 --protocol（state 绑定的路径）。不带时照抄执行会落到 env/默认协议，
+      // brainstorm 在默认 8 节点协议里不存在——恢复路径断在第一句话。
+      for (const [label, boundCommand] of [['record', boundRecordCommand], ['skill-load', boundSkillLoadCommand]]) {
+        if (!boundCommand.includes(' --protocol "' + boundProtocolRel + '"')) {
+          throw new Error('协议来自 state.protocolPath 时，恢复段的 ' + label + ' 命令必须自带 --protocol "'
+            + boundProtocolRel + '"（否则照抄时协议上下文丢失）: ' + boundCommand);
+        }
+      }
+      // ② 照抄执行（无环境变量——协议上下文只能来自命令本身）：两步都要真实走通。
+      const boundDeclared = runPrintedCommand(boundSkillLoadCommand, dir, {
+        FLOW_COMET_RUN_ROOT: dir,
+        FLOW_COMET_PROTOCOL: '',
+      });
+      assertExit(boundDeclared, 0);
+      assertOut(boundDeclared, 'SKILL-LOAD: brainstorm');
+      const boundRecorded = runPrintedCommand(boundRecordCommand, dir, {
+        FLOW_COMET_RUN_ROOT: dir,
+        FLOW_COMET_PROTOCOL: '',
+      });
+      assertExit(boundRecorded, 0);
+      const boundStateAfter = JSON.parse(readStateBytes(dir));
+      assertEqual(boundStateAfter.evidence?.brainstorm?.summary, '<本节点完成摘要>',
+        '照抄的 record 命令写入的 evidence（协议上下文须随命令到达）');
+      // ③ 一条报文走完即闭合：同一 exit 不再报缺证据
+      const boundPassed = runGuard(['exit', 'brainstorm'], dir, { FLOW_COMET_PROTOCOL: '' });
+      assertExit(boundPassed, 0);
+      assertOut(boundPassed, 'ALL CHECKS PASSED');
+
+      // ④ 负例：协议来自内置默认（无 CLI、无 state 绑定、无环境变量）→ 命令不加 --protocol。
+      // 用安装副本自身的脚本跑：权威源检出的内置协议落在夹具根之外（协议读取要求协议在项目根内），
+      // 副本形态才等价于真实安装——默认解析落到的正是包内协议。
+      const defaultState = baseState('subagent-execute');
+      defaultState.evidence['subagent-execute'] = { handoffResult: handoffFor(['P01']) };
+      writeState(dir, defaultState);
+      fs.rmSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true, force: true });
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1);
+      const defaultBlocked = runScriptCopy(
+        path.join(dir, '.claude', 'skills', 'flow-comet', 'scripts', 'workflow-guard.mjs'),
+        ['exit', 'subagent-execute'],
+        dir,
+        { FLOW_COMET_RUN_ROOT: dir, FLOW_COMET_PROTOCOL: '' },
+      );
+      assertExit(defaultBlocked, 1);
+      assertOut(defaultBlocked, 'BLOCKED: missing Output Schema evidence');
+      const defaultRecoveryStart = defaultBlocked.output.lastIndexOf('恢复:');
+      const defaultRecovery = defaultRecoveryStart < 0 ? '' : defaultBlocked.output.slice(defaultRecoveryStart);
+      const defaultRecordCommand = (defaultRecovery.match(/(node "[^"]+" record [^\n]*) 后重试 exit/) || [])[1];
+      const defaultSkillLoadCommand = (defaultRecovery.match(/^\s*(node "[^"]+" skill-load [^\n]+)$/m) || [])[1];
+      if (!defaultRecordCommand || !defaultSkillLoadCommand) {
+        throw new Error('内置默认协议下 BLOCKED 输出的恢复段缺可解析命令:\n' + defaultBlocked.output);
+      }
+      for (const [label, defaultCommand] of [['record', defaultRecordCommand], ['skill-load', defaultSkillLoadCommand]]) {
+        if (defaultCommand.includes('--protocol')) {
+          throw new Error('协议来自内置默认时，恢复段的 ' + label + ' 命令不应加 --protocol: ' + defaultCommand);
+        }
+      }
     },
   },
 

@@ -14,7 +14,7 @@ import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from '../task-parsi
 // 「怎么重新声明技能加载」的唯一实现（节点模板 + 协议提示词两面）：skill-load 校验、record 的声明
 // 核对与这里的恢复指引共用同一份参数段——各拼一份必然分叉。
 import { nodeTemplateDeclaration, templateDeclareCommand } from '../protocol-utils.mjs';
-import { runRoot, fileExists, statePath, writeJson } from './guard-state-io.mjs';
+import { runRoot, fileExists, statePath, writeJson, protocolPath } from './guard-state-io.mjs';
 import {
   eligibleParallelBlocks,
   findSkillLoadsDir,
@@ -658,13 +658,33 @@ function declaredNodeSkill(node) {
   return mainScoped ? mainScoped.skill : null;
 }
 
+// 可照抄命令的协议上下文：本次运行的协议若来自 state.protocolPath（init 持久化绑定），打印的命令
+// 必须自带 --protocol——状态命令族只走 --protocol CLI → FLOW_COMET_PROTOCOL → 内置默认，不读
+// state 绑定。命令不携带协议上下文时，照抄执行会按 env/默认解析，自定义协议的节点在那份协议里
+// 不存在，恢复路径断在第一步（报文给了命令，命令却跑不进同一个协议）。
+// 判据是运行上下文里**本次实际解析到的**协议路径（guard-state-io 的单一来源）与 state 绑定是否
+// 同一份：来源为 CLI / env / 内置默认时两者不同，不重复印（协议上下文已由调用方的命令或环境携带，
+// 再印一遍只是噪音）。参数值取持久化形态（项目内相对路径随项目迁移），引号随参数词给出——脚本
+// 路径与整条命令仍只由 scriptCommand 产出。
+function protocolContextArgs(state) {
+  const persisted = typeof state?.protocolPath === 'string' ? state.protocolPath.trim() : '';
+  if (persisted === '' || protocolPath === null) return [];
+  if (path.resolve(runRoot, persisted) !== path.resolve(protocolPath)) return [];
+  return ['--protocol', '"' + persisted + '"'];
+}
+
 // 前置声明命令：参数段取 templateDeclareCommand（模板与协议提示词是同一次声明的两面——漏任一面，
 // record 的模板声明核对或 exit 的协议声明校验会把执行者再拦一次；重跑 skill-load 会覆写同一标记），
 // 只把它的脚本名换成 scriptCommand 的路径形态：路径与引号仍只有这一处实现，本模块不拼第二份命令。
-function skillLoadCommand(node, skillName) {
+function skillLoadCommand(node, skillName, protocolArgs = []) {
   const declareWords = templateDeclareCommand(nodeTemplateDeclaration(node), { nodeId: node.id, skillName })
     .split(' ').filter((word) => word !== '');
-  return scriptCommand({ scriptsDir, runRoot, script: 'workflow-state.mjs', args: declareWords.slice(1) });
+  return scriptCommand({
+    scriptsDir,
+    runRoot,
+    script: 'workflow-state.mjs',
+    args: [...declareWords.slice(1), ...protocolArgs],
+  });
 }
 
 // 自动补 required-skill completedChecks——节点被完成即视为其实现 skill 已加载。分派（ui-design 门）：
@@ -688,11 +708,14 @@ export async function runEvidenceCompletionGate({ protocol, node, state, evidenc
     console.error('BLOCKED: missing Output Schema evidence: ' + missingSchemaEvidence.join(', '));
     // 阻塞消息给可照抄的下一步：record 只写 summary 即视为产出证据（与判据同一口径），
     // 照抄执行后同一 exit 即可通过——不再让执行者从字段清单反推该跑什么命令。
+    // 协议上下文随命令走：同段的两条命令（本条的 record 与缺声明时的 skill-load）用同一份参数段，
+    // 免得一条带协议、一条不带（照抄第一步就落到另一份协议）。
+    const protocolArgs = protocolContextArgs(state);
     const recordCommand = scriptCommand({
       scriptsDir,
       runRoot,
       script: 'workflow-state.mjs',
-      args: ['record', node.id, `'{"summary":"<本节点完成摘要>"}'`],
+      args: ['record', node.id, `'{"summary":"<本节点完成摘要>"}'`, ...protocolArgs],
     });
     const recoverTail = ' 后重试 exit（bash / PowerShell 可直接执行；cmd.exe 请把单引号换成双引号，'
       + '并转义载荷里原有的双引号）';
@@ -710,7 +733,7 @@ export async function runEvidenceCompletionGate({ protocol, node, state, evidenc
           + '——按下面的顺序走完两步后重试 exit：',
         '      第一步 声明本节点技能加载'
           + (skillName === null ? '（技能名按 entry 的 LOAD SKILL 行填，下面用 <skill> 占位）：' : '：'),
-        '      ' + skillLoadCommand(node, skillName),
+        '      ' + skillLoadCommand(node, skillName, protocolArgs),
         '      第二步 补证据并重试 exit：',
         '      ' + recordCommand + recoverTail,
       ].join('\n'));
