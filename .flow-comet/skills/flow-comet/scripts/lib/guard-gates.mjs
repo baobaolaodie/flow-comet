@@ -53,7 +53,7 @@ import {
 // 存在性复用产物门禁的路径判据（pathPatternExists / workflowArtifactRoot，不另写路径派生），
 // SUMMARY 关键段来自证据/产物门禁族，骨架判据与 TASK 7 字段来自模板保真门禁族——预检自身不
 // 复制段形实现，也不新造一份节点→产物映射。
-import { runSummarySectionsGate } from './guard-evidence-gates.mjs';
+import { evidenceRecoveryBlock, runSummarySectionsGate } from './guard-evidence-gates.mjs';
 import { evaluateArtifact, formatIssueParts, runTaskSevenFieldGate } from './guard-template-fidelity.mjs';
 // 协调者禁令的常量落在中立模块（跨族共用的措辞不进任何一族）：本模块只是取用方，状态命令族同理。
 import { COORDINATOR_NOTICE } from './state-explain.mjs';
@@ -449,7 +449,16 @@ export function requireNodeEvidence({ node, state }) {
   const evidence = evidenceFor(state, node.id);
   if (!evidence) {
     console.error('BLOCKED: missing evidence for Node ' + node.id + '.');
-    console.error('恢复: 该节点已完成但缺证据记录 → 用 workflow-state.mjs record ' + node.id + ' \'{"summary":"<完成摘要>"}\' 补证据后重试；状态漂移 → advance/select；禁止手改 state 机器字段');
+    // 恢复段给**可照抄的命令**（与缺 Output Schema 字段那条同一构造函数 evidenceRecoveryBlock）：
+    // 散文式的「用 workflow-state.mjs record …」没有可复制的路径形态、也不带协议上下文，照抄的人
+    // 得自己从散文里反推命令、再自己补协议。先说清缺的是这个节点的证据对象，再给命令；状态漂移的
+    // 两条出路与禁令照旧保留。
+    const recovery = evidenceRecoveryBlock(node);
+    console.error([
+      '恢复: 该节点已完成但缺证据记录（evidence.' + node.id + ' 不在场）——照抄下面的命令补齐它后重试 exit：',
+      '      ' + recovery.recordCommand + recovery.retryTail,
+      '      状态漂移 → workflow-state.mjs advance（强制推进）或 select（切换 change）；禁止手改 state 机器字段',
+    ].join('\n'));
     process.exit(1);
   }
   return evidence;

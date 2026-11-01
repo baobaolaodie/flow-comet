@@ -693,6 +693,26 @@ function skillLoadCommand(node, skillName, protocolArgs = []) {
   });
 }
 
+// 「补证据」恢复命令块（单一实现）：两个门禁点打印同一块——缺 Output Schema 字段
+// （runEvidenceCompletionGate）与完全没有证据对象（guard-gates 的 requireNodeEvidence）。两处说的
+// 是同一件事（节点已完成、证据不在），各自拼一份必然分叉：一条带协议上下文、另一条只剩一句
+// 「用 workflow-state.mjs record <node> …」的散文，照抄时连协议都跑不进同一份。命令文本、参数段
+// 与尾注只在这里产出。
+export function evidenceRecoveryBlock(node) {
+  const protocolArgs = protocolContextArgs();
+  return {
+    protocolArgs,
+    recordCommand: scriptCommand({
+      scriptsDir,
+      runRoot,
+      script: 'workflow-state.mjs',
+      args: ['record', node.id, `'{"summary":"<本节点完成摘要>"}'`, ...protocolArgs],
+    }),
+    retryTail: ' 后重试 exit（bash / PowerShell 可直接执行；cmd.exe 请把单引号换成双引号，'
+      + '并转义载荷里原有的双引号）',
+  };
+}
+
 // 自动补 required-skill completedChecks——节点被完成即视为其实现 skill 已加载。分派（ui-design 门）：
 // 仅「guarded 且适用性判据成立（判前端）」的登记绑定在**新 change** 上停止自动补——该绑定须真实
 // skill-load 声明，由后续 missingRequiredSkillChecks 拦截；判据不成立（非前端）、旧 change（渐进
@@ -714,17 +734,11 @@ export async function runEvidenceCompletionGate({ protocol, node, state, evidenc
     console.error('BLOCKED: missing Output Schema evidence: ' + missingSchemaEvidence.join(', '));
     // 阻塞消息给可照抄的下一步：record 只写 summary 即视为产出证据（与判据同一口径），
     // 照抄执行后同一 exit 即可通过——不再让执行者从字段清单反推该跑什么命令。
-    // 协议上下文随命令走：同段的两条命令（本条的 record 与缺声明时的 skill-load）用同一份参数段，
-    // 免得一条带协议、一条不带（照抄第一步就落到另一份协议）。
-    const protocolArgs = protocolContextArgs();
-    const recordCommand = scriptCommand({
-      scriptsDir,
-      runRoot,
-      script: 'workflow-state.mjs',
-      args: ['record', node.id, `'{"summary":"<本节点完成摘要>"}'`, ...protocolArgs],
-    });
-    const recoverTail = ' 后重试 exit（bash / PowerShell 可直接执行；cmd.exe 请把单引号换成双引号，'
-      + '并转义载荷里原有的双引号）';
+    // 恢复命令块取单一实现（guard-gates 的前置门打印同一块）：同段的两条命令（本条的 record 与缺
+    // 声明时的 skill-load）用同一份协议参数段，免得一条带协议、一条不带（照抄第一步就落到另一份协议）。
+    const recovery = evidenceRecoveryBlock(node);
+    const recordCommand = recovery.recordCommand;
+    const recoverTail = recovery.retryTail;
     // 无 active change 时 record 的声明门不适用（它按 change 定位标记），不臆造一个前置步骤。
     const missingDeclaration = !!state.activeChange
       && !(await nodeSkillDeclared(node.id, state.activeChange));
@@ -739,7 +753,7 @@ export async function runEvidenceCompletionGate({ protocol, node, state, evidenc
           + '——按下面的顺序走完两步后重试 exit：',
         '      第一步 声明本节点技能加载'
           + (skillName === null ? '（技能名按 entry 的 LOAD SKILL 行填，下面用 <skill> 占位）：' : '：'),
-        '      ' + skillLoadCommand(node, skillName, protocolArgs),
+        '      ' + skillLoadCommand(node, skillName, recovery.protocolArgs),
         '      第二步 补证据并重试 exit：',
         '      ' + recordCommand + recoverTail,
       ].join('\n'));

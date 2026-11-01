@@ -507,6 +507,67 @@ export const ENTRIES = [
           throw new Error('协议来自内置默认时，恢复段的 ' + label + ' 命令不应加 --protocol: ' + defaultCommand);
         }
       }
+
+      // ---------- 完全没有证据对象：恢复段同样要是可照抄命令（原位扩展；不新增场景条目） ----------
+      // 另一个门禁点：节点连 evidence 对象都没有时，前置的「缺证据」门先命中（早于 Output Schema
+      // 证据门）。两处说的是同一件事（节点已完成、证据不在），命令形态必须一致——各写一份时，一处
+      // 有可照抄命令、另一处只剩一句「用 workflow-state.mjs record <node> …」的散文：照抄无从下手，
+      // 协议上下文更无从谈起。
+      writeState(dir, baseState('subagent-execute'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1);
+      const noEvidenceBlocked = runGuard(['exit', 'subagent-execute'], dir);
+      assertExit(noEvidenceBlocked, 1);
+      assertOut(noEvidenceBlocked, 'BLOCKED: missing evidence for Node subagent-execute.');
+      // ① 命令不是孤立的一句：先点名缺的是这个节点的证据对象
+      assertOut(noEvidenceBlocked, '该节点已完成但缺证据记录');
+      const noEvidenceRecoveryStart = noEvidenceBlocked.output.lastIndexOf('恢复:');
+      const noEvidenceRecovery = noEvidenceRecoveryStart < 0
+        ? ''
+        : noEvidenceBlocked.output.slice(noEvidenceRecoveryStart);
+      const noEvidenceRecordCommand = (noEvidenceRecovery.match(/(node "[^"]+" record [^\n]*) 后重试 exit/) || [])[1];
+      if (!noEvidenceRecordCommand) {
+        throw new Error('完全没有证据对象时，恢复段必须给出可照抄的 record 命令:\n' + noEvidenceBlocked.output);
+      }
+      // ② 与缺 Output Schema 字段那条同一构造：脚本路径逐字等于 scriptCommand 的产物、协议上下文随命令走
+      const noEvidencePathPrefix = scriptCommand({ scriptsDir: SCRIPTS_DIR, runRoot: dir, script: 'workflow-state.mjs' });
+      if (!noEvidenceRecordCommand.startsWith(noEvidencePathPrefix + ' ')) {
+        throw new Error('恢复段的 record 命令脚本路径应逐字等于 scriptCommand 产物 ' + noEvidencePathPrefix
+          + '，实际: ' + noEvidenceRecordCommand);
+      }
+      if (!noEvidenceRecordCommand.includes(' --protocol "reference/workflow-protocol.json"')) {
+        throw new Error('协议不是内置默认时，恢复段的 record 命令必须自带 --protocol: ' + noEvidenceRecordCommand);
+      }
+      // ③ 照抄执行（环境变量清空——协议上下文只能来自命令本身）：证据真的写进去了
+      const noEvidenceRecovered = runPrintedCommand(noEvidenceRecordCommand, dir, {
+        FLOW_COMET_RUN_ROOT: dir,
+        FLOW_COMET_PROTOCOL: '',
+      });
+      assertExit(noEvidenceRecovered, 0);
+      assertEqual(JSON.parse(readStateBytes(dir)).evidence?.['subagent-execute']?.summary, '<本节点完成摘要>',
+        '照抄前置门的 record 命令写入的 evidence（协议上下文须随命令到达）');
+      // ④ 反例：内置默认协议下同一门禁点的命令不加 --protocol（照抄时默认解析落到的就是同一份）
+      writeState(dir, baseState('subagent-execute'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1);
+      const defaultNoEvidenceBlocked = runScriptCopy(
+        path.join(dir, '.claude', 'skills', 'flow-comet', 'scripts', 'workflow-guard.mjs'),
+        ['exit', 'subagent-execute'],
+        dir,
+        { FLOW_COMET_RUN_ROOT: dir, FLOW_COMET_PROTOCOL: '' },
+      );
+      assertExit(defaultNoEvidenceBlocked, 1);
+      assertOut(defaultNoEvidenceBlocked, 'BLOCKED: missing evidence for Node subagent-execute.');
+      const defaultNoEvidenceStart = defaultNoEvidenceBlocked.output.lastIndexOf('恢复:');
+      const defaultNoEvidenceRecovery = defaultNoEvidenceStart < 0
+        ? ''
+        : defaultNoEvidenceBlocked.output.slice(defaultNoEvidenceStart);
+      const defaultNoEvidenceCommand =
+        (defaultNoEvidenceRecovery.match(/(node "[^"]+" record [^\n]*) 后重试 exit/) || [])[1];
+      if (!defaultNoEvidenceCommand) {
+        throw new Error('完全没有证据对象时恢复段缺可解析的 record 命令:\n' + defaultNoEvidenceBlocked.output);
+      }
+      if (defaultNoEvidenceCommand.includes('--protocol')) {
+        throw new Error('协议来自内置默认时，没有证据对象那条恢复命令不应加 --protocol: ' + defaultNoEvidenceCommand);
+      }
     },
   },
 
