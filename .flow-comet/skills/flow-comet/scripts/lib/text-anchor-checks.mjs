@@ -165,6 +165,24 @@ export function maintainerFacePresent(root = REPO_ROOT) {
   return fs.existsSync(path.join(root, MAINTAINER_DOC_DIR));
 }
 
+// 公开面形态判据（与场景 105 共用同一口径：落点 docs/ 整份在不在，判定同一个 existsSync）：
+// package.json 的 files 白名单只带 .flow-comet/skills、.flow-comet/rules 与 scripts/——npm 包
+// （以及安装副本）**本来就不含公开面**。这种形态下「受检条目不在场」是载体的正常形态，不是仓库
+// 缺文件：报成「幽灵条目」会把读者送去修一个不存在的缺陷（与维护者组整组缺席同一类判断）。
+// 判据强度不降：跳过通道只对「整份公开面不存在」开放——docs/ 在而某份文档被删 = 检出被裁坏，
+// 仍走逐条严检并判红（反向构造：权威源检出里移走一份受检文档，缺失照样被点名）。
+export const PUBLIC_FACE_DOCS_DIR = 'docs';
+export function publicFaceDocsAbsent(root = REPO_ROOT) {
+  return !fs.existsSync(path.join(root, PUBLIC_FACE_DOCS_DIR));
+}
+// 跳过提示的措辞是判据的一部分（SKIP = 未校验，不是通过）：读者既不该把「此形态不含公开面」读成
+// 「公开面已检查且通过」，也不该读成「仓库缺文件」——那是两个方向相反的误读。
+export const PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE = 'SKIP: 公开面自检（计数一致性 / 公开产物零代号 / 词表镜像）'
+  + '——此形态不含公开面：' + PUBLIC_FACE_DOCS_DIR + '/ 整份不在本检出（npm 包按 package.json 的'
+  + ' files 白名单、安装副本按安装面，携带的都只是技能树与 scripts/，公开文档不随分发包走）——'
+  + '「受检条目不在场」是这种载体的正常形态，不是仓库缺文件；本次未校验条目在场与同步、'
+  + '公开产物零代号、词表镜像等价性（SKIP = 未校验，不是通过；请在权威源检出重跑本套件）';
+
 // ---------- 计数 stale 检测（presence 之外的判别力补足） ----------
 // presence 只能证明"当前值在场"，证不了"旧值不在场"：维护面曾长期带着无标记旧值仍全绿。
 // 判据：受检面里出现**计数形态 token**、数值落在合理量程、且不等于当前值、且行内没有历史

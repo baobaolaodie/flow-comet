@@ -30,6 +30,7 @@ import {
 } from './lib/test-assertions.mjs';
 import {
   PUBLIC_CODE_RE,
+  PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE,
   SCENARIO_COUNT_FILES,
   SCENARIO_COUNT_FILES_MAINTAINER,
   SYSTEM_TEST_COUNT_FILES,
@@ -38,6 +39,7 @@ import {
   internalDocsProblems,
   maintainerFacePresent,
   maintainerFaceSkips,
+  publicFaceDocsAbsent,
   vocabularyMirrorProblems,
 } from './lib/text-anchor-checks.mjs';
 
@@ -107,8 +109,13 @@ console.log('RESULT: ' + passed + '/' + SCENARIOS.length + ' scenarios passed');
 // ① 场景数：受检清单文档须与 SCENARIOS.length 一致（全变体检查），且清单条目必须真实存在
 //    （AC-14：缺失显式报告，不静默跳过）；
 // ② 公开产物零代号：公开文档不得含过程代号（场景编号/修复编号/批次/缺陷编号/问题级/验证代号/验证轮次/未公开概念——历史 CHANGELOG 回归实证）。
-// 仅权威源检出执行；安装副本（目标项目）无 flow-comet 文档面，跳过。
-if (isAuthoritativeSourceRepo()) {
+// 形态分派（判据与场景 105 同一口径，见 publicFaceDocsAbsent）：只有「权威源检出 + 公开面在场」
+// 才跑本块。npm 包按 files 白名单只带技能树与 scripts/，公开面结构性缺席——那是载体的正常形态，
+// 不是「仓库缺文件」：受检条目不在场≠被删除，报成幽灵条目会把读者送去修一个不存在的缺陷。
+// 故整块跳过且**可见**（SKIP = 未校验，不是通过），两种无公开面的形态各留一句说明：包形态走下方
+// 分支一的公开面跳过提示，安装副本走词表镜像不适用说明。判据强度不降：权威源检出里 docs/ 在场而
+// 某份文档被删，仍走下方逐条严检并判红（跳过通道只对「整份公开面不存在」开放）。
+if (isAuthoritativeSourceRepo() && !publicFaceDocsAbsent(REPO_ROOT)) {
   // ①a 受检面可见化（F2 防漂移）：实际受检文件数由模块级常量**推导**、不硬编码——分发组 =
   // SCENARIO_COUNT_FILES ∪ SYSTEM_TEST_COUNT_FILES（后者为前者子集），维护者组 =
   // SCENARIO_COUNT_FILES_MAINTAINER ∪ SYSTEM_TEST_COUNT_FILES_MAINTAINER（后者为前者子集）；
@@ -180,9 +187,13 @@ if (isAuthoritativeSourceRepo()) {
     failures.push({ name: '词表镜像漂移', error: problem });
     console.error('FAIL: 词表镜像漂移\n' + problem);
   }
+} else if (isAuthoritativeSourceRepo()) {
+  // 包形态（有技能树锚、docs/ 整份不在）：公开面结构性缺席，整块跳过。结构性缺席不判失败
+  // （退出码不变、不误红），但必须显式可见——未验证 ≠ 通过。
+  console.log(PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE);
 } else {
-  // 安装副本形态：.githooks 是主仓私有面（随 clone 不分发）→ 该判据**不适用**。结构性缺席
-  // 不判失败（退出码不变、不误红），但必须显式可见——未验证 ≠ 通过，不得静默跳过。
+  // 安装副本形态（无技能树锚）：.githooks 是主仓私有面（随 clone 不分发）→ 该判据**不适用**。
+  // 结构性缺席不判失败（退出码不变、不误红），但必须显式可见——未验证 ≠ 通过。
   console.log('SKIP/NOT-APPLICABLE: 词表镜像漂移判据（.githooks 为主仓私有面）'
     + '；本次检出无该私有面，未执行「词表单一来源 ↔ 套件同义镜像」的逐字符等价性比对'
     + '——请在主仓私有面在场处重跑本套件（主树 L1），勿把不适用当成已校验。');
