@@ -1592,6 +1592,27 @@ export const ENTRIES = [
       const resMissing = runGuard(['exit', 'archive'], dir);
       assertExit(resMissing, 1);
       assertOut(resMissing, 'missing Output Schema artifacts');
+
+      // 子断言:结构化预检的**时点分界**。归档产出（.specs/archive/<日期>-<change-id>/）是归档动作
+      // 自己的产出位置——归档前连 .specs/archive/ 都不存在，把它报成缺件、还让人「先按上述路径创建」，
+      // 给的是归档前不可能执行的指令（完整出口照旧要求它：那是归档动作做完后的判据，由上面的
+      // resMissing 守住）。预检只报「归档执行后才会生成」，且报文里的通配符（路径判据语法）必须换成
+      // 占位说明——照字面去建带 `*` 的目录同样不可执行。
+      fs.rmSync(path.join(dir, '.specs/archive'), { recursive: true, force: true });
+      const preflightArchive = runGuard(['exit', 'archive', '--preflight'], dir);
+      assertExit(preflightArchive, 0);
+      assertOut(preflightArchive, '归档执行后才会生成');
+      assertOut(preflightArchive, '.specs/archive/<日期>-' + CHANGE_ID + '/KNOWN-ISSUES.md');
+      assertNotOut(preflightArchive, 'BLOCKED');
+      assertNotOut(preflightArchive, '先按上述路径创建缺失工件');
+      const wildcardLines = preflightArchive.output.split('\n').filter((line) => line.includes('*'));
+      assertTrue(wildcardLines.length === 0,
+        '预检报文不得打印含通配符的路径（判据语法漏进了给人读的路径）:\n' + wildcardLines.join('\n'));
+      // 反过度修复锚:同一夹具下空 change 的 open 预检照旧 BLOCK——放宽只落在「归档产出」这一类路径上，
+      // 其他节点声明的缺件判据一字不动。
+      const preflightOpen = runGuard(['exit', 'open', '--preflight'], dir);
+      assertExit(preflightOpen, 1);
+      assertOut(preflightOpen, 'BLOCKED: 节点 open 的声明工件缺失');
     },
   },
 
