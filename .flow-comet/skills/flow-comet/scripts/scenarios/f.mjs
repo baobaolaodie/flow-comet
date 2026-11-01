@@ -43,8 +43,10 @@ import {
   COMMIT_DISCIPLINE_AUTHORITY_PHRASES,
   COMMIT_DISCIPLINE_ELEMENT_GROUPS,
   COMMIT_DISCIPLINE_REL,
+  COMMIT_FORM_TOKEN,
   CONTRACT_EVIDENCE_AUTHORITY_PHRASES,
   DELEGATION_POINTER_RELS,
+  ENTRY_COMMIT_FORM_REL,
   IDENTITY_UPGRADE_AUTHORITY_PHRASES,
   IDENTITY_UPGRADE_ENTRY_PHRASES,
   IDENTITY_UPGRADE_STALE_PHRASES,
@@ -59,6 +61,7 @@ import {
   SKILL_TREE_REFERENCE_RE,
   TEMPLATE_AUTHORITY_SKILLS,
   delegationDisciplineProblems,
+  entryCommitFormProblems,
   identityUpgradeProblems,
   pairedGuidancePointerProblems,
   platformFactsAuthorityProblems,
@@ -920,6 +923,24 @@ export const ENTRIES = [
         ]);
         const disciplineSources = { books: bookTexts, elementDocs, authorityTexts };
         problems.push(...delegationDisciplineProblems(disciplineSources));
+        // 入口册的提交形态（存在性 + 反否定）：两册与权威处的要素 token 都被锁，入口册那一行却没有
+        // ——退回「`git commit -- <路径>`」（不给 -m）时套件不会红。反向构造常驻：抽掉要点句、把
+        // 那一行换回旧形态，两种改动都必须被判红（后者就是本次实测的反向构造形态）。
+        const entryCommitText = authorityTexts.get(ENTRY_COMMIT_FORM_REL);
+        problems.push(...entryCommitFormProblems(ENTRY_COMMIT_FORM_REL, entryCommitText));
+        // 反向构造以要点句在场为前提（缺失已由真实判据报告——同一处不叠两条，与上方各组同一写法）。
+        if (entryCommitText.includes(COMMIT_FORM_TOKEN)) {
+          const withoutCommitForm = entryCommitText.split(COMMIT_FORM_TOKEN).join('');
+          if (!entryCommitFormProblems(ENTRY_COMMIT_FORM_REL, withoutCommitForm)
+            .some((p) => p.includes('缺带消息的提交形态要点句'))) {
+            problems.push('反向构造判别力缺失（抽掉入口册提交形态要点句未被判缺）');
+          }
+          const revertedCommitForm = entryCommitText.split(COMMIT_FORM_TOKEN).join('`git commit -- <同一路径>`');
+          if (!entryCommitFormProblems(ENTRY_COMMIT_FORM_REL, revertedCommitForm)
+            .some((p) => p.includes('缺 `-m` 的旧提交形态'))) {
+            problems.push('反向构造判别力缺失（把入口册那一行换回缺 -m 的旧形态未被判违规）');
+          }
+        }
         // 反向构造（同一判据驱动）：逐条抽掉 ⇒ 必报；逐条回流 ⇒ 必报。判别力不依赖人工实验：
         // 要素级 token / 权威处判别句 / 能力契约判别句 / 条件句指针 / 证据与判级判别句五组各取全量。
         const subRel = 'flow-comet-subagent-execute/SKILL.md';

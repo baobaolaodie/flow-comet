@@ -996,10 +996,13 @@ export function skillLoadingWordingProblems(rel, text) {
 //   ⑤ 条件句指针：两册各自须指向 commit-discipline / platform-facts / fix-loop 三个权威文件。
 export const COMMIT_DISCIPLINE_REL = 'flow-comet/reference/commit-discipline.md';
 export const PLATFORM_FACTS_REL = 'flow-comet/reference/platform-facts.md';
+// 提交形态的字面（消息在 `--` 之前）：两册的要素 token 与入口册的存在性判据**取同一字面**——
+// 三处各写一份就会各自漂移（改一处漏一处正是这行此前没有锁的成因）。
+export const COMMIT_FORM_TOKEN = '`git commit -m "<消息>" -- <同一路径>`';
 export const COMMIT_DISCIPLINE_ELEMENT_GROUPS = [
   ['提交面 pathspec 纪律 · 适用条件', ['**各自独立工作区（worktree 等）内的局部 `reset` / `clean` 不在禁令内**']],
   ['提交面 pathspec 纪律 · 要素 1（字面路径集）',
-    ['`git add -- <自己字面路径>`', '`git commit -m "<消息>" -- <同一路径>`', 'write_files']],
+    ['`git add -- <自己字面路径>`', COMMIT_FORM_TOKEN, 'write_files']],
   ['提交面 pathspec 纪律 · 要素 2（锁失败重试）', ['锁失败重试', 'index.lock', '失败即重试']],
   ['提交面 pathspec 纪律 · 要素 3（禁裸命令）',
     ['禁裸', '`commit -a`', '`stash`', '`clean`', '`reset`']],
@@ -1104,6 +1107,26 @@ export function delegationDisciplineProblems({ books, elementDocs, authorityText
         problems.push(rel + ' 回流了证据与判级判别句：' + phrase.slice(0, 40) + '…（权威处唯一）');
       }
     }
+  }
+  return problems;
+}
+
+// 入口册的提交形态（场景 184d 使用；纯函数 + 合成文本可驱动）：入口册「② 提交隔离」那一行是
+// 执行者最早读到的提交命令形态——两册与权威处都有要素 token 锁，**唯独这一行没有**：把它退回
+// 「`git commit -- <路径>`」（不给消息选项）时套件不会红（该形态照抄下行即 `-m` 被当成 pathspec、
+// exit 1）。判据两条：① 存在性——要点句在场且取与两册**同一字面**（含 `-m`）；② 反否定——不得
+// 出现缺 `-m` 的旧形态字面。反否定的正则只认**相邻**形态（`git commit -- <`）：把「`git commit`
+// 与 `--` 分开匹配会连「`-m` 在前、`--` 在后」的正确写法一并判红，那是恒红而非锁。
+export const ENTRY_COMMIT_FORM_REL = 'flow-comet/SKILL.md';
+export const ENTRY_COMMIT_FORM_OLD_RE = /git commit\s+--\s*</;
+export function entryCommitFormProblems(rel, text) {
+  const problems = [];
+  if (!text.includes(COMMIT_FORM_TOKEN)) {
+    problems.push(rel + ' 缺带消息的提交形态要点句: ' + COMMIT_FORM_TOKEN);
+  }
+  const old = ENTRY_COMMIT_FORM_OLD_RE.exec(text);
+  if (old) {
+    problems.push(rel + ' 出现缺 `-m` 的旧提交形态「' + old[0].trim() + '」——消息必须写在 `--` 之前');
   }
   return problems;
 }
