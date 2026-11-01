@@ -1070,6 +1070,20 @@ export const ENTRIES = [
       assertTrue(!fs.existsSync(path.join(dir, '.specs', CHANGE_ID, '.template-hints.json')),
         '缺件预检不得写模板提示账本（.template-hints.json）');
 
+      // 上面那条模板指针（`模板: flow-kit/templates/CHANGE.md`）由「声明工件名 → 模板键」的派生得来。
+      // 同一份派生只许有一个实现：结构预检（缺件报文的模板指针）与模板保真门禁（该工件用哪份骨架
+      // 校验）是两个消费面，各自持有一份等价副本在口径演进时必然分叉，同一份工件就会得到两套说法。
+      // 取用面由真实引用派生（不写文件名清单），静态锁因此对新增消费方同样生效——把副本写回任一
+      // 消费方，本断言即红。
+      const templateKeyProblems = singleSourceImportProblems({
+        symbol: 'templateKeyFromArtifactName',
+        sourceRel: 'protocol-utils.mjs',
+        texts: engineScriptTexts(),
+      });
+      if (templateKeyProblems.length > 0) {
+        throw new Error('模板键派生的单一来源被破坏（' + templateKeyProblems.join('; ') + '）');
+      }
+
       // ⑦ 缺件与结构问题同轮报告（先列缺失件，再列结构问题）：CHANGE.md 在场但缺模板段、
       // REQUIREMENT.md 仍缺席 ⇒ 两类都要报——存在性不再被「在场才查」吞掉结构报告的时机。
       writeFile(dir, 'flow-kit/templates/CHANGE.md',
