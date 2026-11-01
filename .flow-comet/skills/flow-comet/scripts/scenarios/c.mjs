@@ -292,14 +292,16 @@ const DESIGN_FORM_SCRIPTS_DIR = '.claude/skills/flow-comet/scripts';
 // 让安装副本按运行根打印的（对副本而言正确的）路径被判成违规。
 const RUNS_FROM_AUTHORITATIVE_SCRIPTS = path.relative(REPO_ROOT, SCRIPTS_DIR).split(path.sep).join('/') === '.flow-comet/skills/flow-comet/scripts';
 
-// 恢复命令的脚本路径锚（只在权威源检出运行）。场景 34 的恢复命令断言已改成行为判据（存在 + basename
+// 恢复段的形态锚（只在权威源检出运行）。场景 34 的恢复命令断言已改成行为判据（存在 + basename
 // + 真执行），三种形态的路径都能满足——于是「权威源打印设计形态」失去锁：把 scriptCommand 改成恒打印
-// 绝对安装根，行为判据全绿，而权威源册子里的命令会开始写本机路径。本锚只读打印出来的那条命令（不拿
-// harness 的脚本路径替代），要求脚本路径逐字等于设计形态。
+// 绝对安装根，行为判据全绿，而权威源册子里的命令会开始写本机路径。本锚只读打印出来的那段恢复报文
+// （不拿 harness 的脚本路径替代），要求命令的脚本路径逐字等于设计形态。
+// 锁的是「段内有一条 record 命令 + 路径是设计形态 + 步骤按执行顺序」，不锁「record 紧贴『恢复:』」
+// 这种书写形态：措辞可以演化，能按顺序照抄走通才是判据——顺序反了，执行者从上往下第一步就撞门。
 function assertDesignFormRecoveryPath(dir) {
   // 触发一条走 scriptCommand 的恢复指引：subagent-execute 有 handoff 结果、缺 summary → 出口按
-  // Output Schema evidence 阻塞，并给出可照抄的 record 命令（「恢复: node "<脚本路径>" record … 后
-  // 重试 exit」）。判据只认这一行。
+  // Output Schema evidence 阻塞。夹具是全新临时目录 ⇒ 本节点还没有技能加载声明标记 ⇒ 走「先声明、
+  // 再 record」的两步形态（声明已在场时的收敛形态由场景 34 覆盖）。
   const st = baseState('subagent-execute');
   st.evidence['subagent-execute'] = { handoffResult: handoffFor(['P01']) };
   writeState(dir, st);
@@ -307,16 +309,41 @@ function assertDesignFormRecoveryPath(dir) {
   const res = runGuardWithProtocol(dir, ['exit', 'subagent-execute']);
   assertExit(res, 1);
   assertOut(res, 'BLOCKED: missing Output Schema evidence');
-  const recordCommand = (res.output.match(/恢复: (node "[^"]+" record [^\n]*?) 后重试 exit/) || [])[1];
-  if (!recordCommand) {
-    throw new Error('缺 Output Schema evidence 的阻塞没给可照抄的恢复命令（设计形态锚无从判定）:\n' + res.output);
+  // 本段 = 输出里最后一条恢复段（该段之后引擎直接退出）。
+  const start = res.output.lastIndexOf('恢复:');
+  const block = start < 0 ? '' : res.output.slice(start);
+  if (block === '') {
+    throw new Error('缺 Output Schema evidence 的阻塞没给恢复段（设计形态锚无从判定）:\n' + res.output);
   }
-  const printedPath = (recordCommand.match(/^node "([^"]+)"/) || [])[1];
+  // 两条命令（skill-load 自成一行可整行照抄；record 以「后重试 exit」收尾）：先声明技能加载，再 record。
+  const skillLoadLine = (block.match(/^\s*(node "[^"]+" skill-load [^\n]*)$/m) || [])[1];
+  const recordLine = (block.match(/(node "[^"]+" record [^\n]*) 后重试 exit/) || [])[1];
+  if (!skillLoadLine || !recordLine) {
+    throw new Error('恢复段应同时给出可照抄的 skill-load 与 record 命令'
+      + '（缺声明时照抄 record 会先被它自己的前置门拦下）:\n' + block);
+  }
+  // 顺序 = 执行顺序，且步骤标注跟着各自的命令走（不是只在段首提一句）。
+  const skillAt = block.indexOf(skillLoadLine);
+  const recordAt = block.indexOf(recordLine);
+  if (!(skillAt >= 0 && recordAt > skillAt)) {
+    throw new Error('恢复段应按执行顺序排列：skill-load（声明技能加载）在前、record（补证据）在后——'
+      + '顺序反了执行者照抄会先撞前置门:\n' + block);
+  }
+  if (!block.slice(0, skillAt).includes('第一步')) {
+    throw new Error('恢复段未把技能加载声明标为第一步:\n' + block);
+  }
+  if (!block.slice(skillAt + skillLoadLine.length, recordAt).includes('第二步')) {
+    throw new Error('恢复段未把 record 标为第二步:\n' + block);
+  }
+  // 路径逐字等于设计形态（两条命令都经 scriptCommand，路径与引号只有这一处实现）。
   const expected = DESIGN_FORM_SCRIPTS_DIR + '/workflow-state.mjs';
-  if (printedPath !== expected) {
-    throw new Error('权威源检出打印的恢复命令脚本路径应为设计形态 ' + expected + '（相对路径）——实际: '
-      + JSON.stringify(printedPath) + '；安装副本按运行根推导属另一种载体的正确形态，不在本锚范围'
-      + '（本锚只在权威源检出运行）');
+  for (const [label, printed] of [['skill-load', skillLoadLine], ['record', recordLine]]) {
+    const printedPath = (printed.match(/^node "([^"]+)"/) || [])[1];
+    if (printedPath !== expected) {
+      throw new Error('权威源检出打印的恢复段 ' + label + ' 命令脚本路径应为设计形态 ' + expected
+        + '（相对路径）——实际: ' + JSON.stringify(printedPath)
+        + '；安装副本按运行根推导属另一种载体的正确形态，不在本锚范围（本锚只在权威源检出运行）');
+    }
   }
 }
 
@@ -628,7 +655,8 @@ export const ENTRIES = [
       }
       // 形态判据自己的判别力（纯夹具，先于任何派生）
       assertPublicFaceShapeProbes(dir);
-      // 设计形态锚：只读打印出来的恢复命令，要求脚本路径逐字为设计形态。仅在**正在跑权威源脚本**时适用；
+      // 设计形态锚：只读打印出来的恢复段，要求命令的脚本路径逐字为设计形态、步骤按执行顺序。仅在
+      // **正在跑权威源脚本**时适用；
       // 跑安装副本套件时，副本按运行根推导出的路径才是那种载体的正确形态，不属于本锚范围——跳过必须可见。
       if (RUNS_FROM_AUTHORITATIVE_SCRIPTS) {
         assertDesignFormRecoveryPath(dir);

@@ -702,14 +702,17 @@ export async function runEvidenceCompletionGate({ protocol, node, state, evidenc
     if (!missingDeclaration) {
       console.error('恢复: ' + recordCommand + recoverTail);
     } else {
+      // 两步按**执行顺序**写：缺声明时照抄 record 会先撞它自己的前置门，所以第一步只能是声明，第二步
+      // 才是 record。步骤标注跟着各自的命令走（读的人从上往下照抄一遍就走通，不必回头找「哪条先」）。
       const skillName = declaredNodeSkill(node);
       console.error([
-        '恢复: ' + recordCommand + recoverTail,
-        '      前置门：本节点还缺技能加载声明（.skill-loads/' + node.id + '-*.json，新 change 下 record 会先被它拦下）'
-          + (skillName === null
-            ? '——先按 entry 的 LOAD SKILL 行的技能名填下面这条声明命令，再回到上面那条 record：'
-            : '——先跑下面这条声明命令，再回到上面那条 record：'),
+        '恢复: 本节点还缺技能加载声明（.skill-loads/' + node.id + '-*.json，新 change 下 record 会先被它拦下）'
+          + '——按下面的顺序走完两步后重试 exit：',
+        '      第一步 声明本节点技能加载'
+          + (skillName === null ? '（技能名按 entry 的 LOAD SKILL 行填，下面用 <skill> 占位）：' : '：'),
         '      ' + skillLoadCommand(node, skillName),
+        '      第二步 补证据并重试 exit：',
+        '      ' + recordCommand + recoverTail,
       ].join('\n'));
     }
     process.exit(1);
