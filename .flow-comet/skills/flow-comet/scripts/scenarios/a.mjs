@@ -1621,12 +1621,28 @@ export const ENTRIES = [
       writeFile(dir, '.specs/compose-demo/notes.md', '# notes\n');
       writeFile(dir, '.specs/compose-demo/T01-SUMMARY.md', '# T01-SUMMARY\n');
       writeFile(dir, '.specs/compose-demo/verdict.md', '# verdict\n');
+      const viewBytes = readStateBytes(dir);
       const res = runState(['status', '--protocol', custom], dir);
       assertExit(res, 0);
       assertOut(res, '"currentNode": "codereview"');
-      // 无 exit 推进史（completedNodes 空）→ 进行中保护不触发，routeNode 与产物推导同一节点
-      // （反过度修复锚：若把「导入后继保护」放宽到无推进史形态，本断言即红）
-      assertOut(res, '"routeNode": "codereview"');
+      // 当前节点 brainstorm 从未 exit（completedNodes 空、evidence 空，只是产物齐全）→ next 的节点
+      // 顺序门禁会 BLOCKED 且不打印 NODE。共享视图必须报同一事实：routeNode=null，并在 ROUTE: 行
+      // 写明原因——修复前这里报产物推导的 codereview，正是「status 叫人去一个 next 不会去的地方」。
+      assertOut(res, '"routeNode": null');
+      const routeLine = res.output.split('\n').find((line) => line.startsWith('ROUTE: '));
+      if (!routeLine) throw new Error('status 缺少 ROUTE: 诊断行\n实际输出:\n' + res.output);
+      for (const token of ['route=null', 'next 将 BLOCKED', '疑似未 exit 节点 brainstorm']) {
+        if (!routeLine.includes(token)) {
+          throw new Error('节点顺序门禁态 ROUTE: 行缺少 ' + token + '：' + routeLine);
+        }
+      }
+      assertStateBytesUnchanged(dir, viewBytes, 'status 的「next 将 BLOCKED」判定是只读视图（不得写 state）');
+      // 同一 state 下 next 的实际行为——视图给出的节点必须是 next 会打印的那个：BLOCKED、不打印 NODE。
+      const nextView = runState(['next', '--protocol', custom], dir);
+      assertExit(nextView, 1);
+      assertOut(nextView, 'BLOCKED: 疑似未 exit 节点 brainstorm');
+      assertNotOut(nextView, 'NODE: ');
+      assertStateBytesUnchanged(dir, viewBytes, 'next 的顺序门禁 BLOCK 在任何写盘之前');
     },
   },
 

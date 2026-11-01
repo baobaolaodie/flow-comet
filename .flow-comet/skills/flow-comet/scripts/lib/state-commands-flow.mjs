@@ -104,13 +104,15 @@ function printNext(protocol, nodeId, executionMode = 'subagent') {
 // 消费方：status / next（本模块）与 workflow-handoff 的 result 提示（import 本函数，不复制第二份
 // 判定——Fix 归位态若在 handoff 侧另取 state.currentNode，会指到被 Fix 批次门禁拦下的源节点）。
 //
-// routeNode 为 null 是**合法取值**：此态 next 会 BLOCKED 且不打印 NODE（Fix 归位第 4 轮无授权 /
-// 单趟零进展），视图不得编一个节点出来——编出来的那个就是「status 叫人去一个 next 不会去的地方」。
+// routeNode 为 null 是**合法取值**：此态 next 会 BLOCKED 且不打印 NODE（节点顺序门禁 / Fix 归位第 4
+// 轮无授权 / 单趟零进展），视图不得编一个节点出来——编出来的那个就是「status 叫人去一个 next 不会去
+// 的地方」。
 
 // ---------- 「此态 next 会 BLOCKED」的只读判定（status 用） ----------
-// next 有两条**不打印 NODE**、直接 BLOCKED 的分支：① Fix 受控归位第 4 轮无授权；② 单趟零进展。
-// 只读视图若照常给节点，同一 state 下两条命令就是两个答案（执行者按 status 动手必然撞 BLOCKED），
-// 故两个判定都在视图里求值、由 resolveNodeView 回报，next 消费同一字段而不另判一份。
+// next 有三条**不打印 NODE**、直接 BLOCKED 的分支：① Fix 受控归位第 4 轮无授权；② 节点顺序门禁
+// （「疑似未 exit」）；③ 单趟零进展。只读视图若照常给节点，同一 state 下两条命令就是两个答案（执行者
+// 按 status 动手必然撞 BLOCKED），故三个判定都在视图里求值、由 resolveNodeView 回报，next 消费同一
+// 字段而不另判一份。
 // BLOCKED 报文 → 单行原因（ROUTE: 行只放一句原因，完整报文与恢复指引仍由 next 打印）。
 function blockedReason(message) {
   return String(message ?? '').split('\n')[0].replace(/^BLOCKED:\s*/, '');
@@ -147,6 +149,34 @@ async function resolveZeroProgressBlock({ changeName, protocol, nodeId }) {
     }
   } catch {}
   return null;
+}
+
+// 节点顺序门禁（严格模式）→ BLOCKED 报文；判定与 next 的反例语义逐字不变（本函数自 next 内联判定
+// 原样搬入，搬的是**同一份**判据与报文，不是第二份）：
+// state.currentNode 非 null、不在 completedNodes、且 evidence 无该节点记录 → 上一节点从未 exit 就
+// 推进。状态漂移校正保留：已完成节点（currentNode ∈ completedNodes，或 evidence 已记录——节点已被
+// record/exit 处理过）正常推进不受影响；本判定只拦「证据完全缺失的疑似跳阶段」。
+// 豁免两条（独立判断，任一成立即放行）：① 回退豁免（TASK.md 有 pending 回退修复任务 → execute 家族，
+// 与 FIX-BATCH 决策同一谓词）；② 正常推进豁免（exit --apply 推进后的下一节点，见 normalAdvanceExempt）
+// ——真乱序（跳节点）仍严格 BLOCK。
+// 归属：next 曾内联这一份，而 status 照常给节点——同一 state 下「status 叫人 exit 一个 next 根本不会
+// 打印的节点」。搬进共享视图后 next 只消费 view.blocked，两份判定不再可能分叉。
+async function resolveNodeOrderBlock({ changeName, protocol, completedArr, state }) {
+  if (!state.currentNode || completedArr.includes(state.currentNode)) return null;
+  const nodeEvidence = state.evidence && typeof state.evidence === 'object'
+    ? state.evidence[state.currentNode]
+    : null;
+  if (nodeEvidence && typeof nodeEvidence === 'object' && !Array.isArray(nodeEvidence)) return null;
+  const rollbackExempt = await resolveFixRollbackState({
+    runRoot: runRootDir(), changeName, protocol, completedNodes: completedArr, currentNode: state.currentNode,
+    history: state.history,
+  });
+  const advanceExempt = await normalAdvanceExempt(state, protocol, completedArr, state.currentNode, changeName);
+  if (rollbackExempt || advanceExempt) return null;
+  return [
+    'BLOCKED: 疑似未 exit 节点 ' + state.currentNode + '，先 workflow-guard.mjs exit ' + state.currentNode + ' --apply',
+    '恢复: 确认当前节点实际已完成 → 用 exit <节点> --apply 正常推进；节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进）或 select（切换 change）；禁止手改 state 机器字段',
+  ].join('\n');
 }
 
 // 回程态判定（与 next 的 RETURN 分支同一谓词）：resolveFixReturnNode 给出回程源节点、它就是
@@ -241,18 +271,30 @@ export async function resolveNodeView({ changeName, protocol, state }) {
       sourceNode: state.currentNode,
       decision: fixRollback,
     });
-  const zeroProgressMessage = fixRollbackPreview?.blocked
-    ? null
-    : await resolveZeroProgressBlock({ changeName, protocol, nodeId: derivedNode });
-  const blockedMessage = fixRollbackPreview?.blocked ? fixRollbackPreview.blockedMessage : zeroProgressMessage;
-  const blocked = blockedMessage === null
-    ? null
-    : { message: blockedMessage, reason: blockedReason(blockedMessage) };
-  const fixReturnTarget = blocked === null
+  // 三个 blocked 来源按 next 的分支顺序求值（同一先后，不是另一套优先级）：
+  //   ① Fix 受控归位第 4 轮无授权（next 的 FIX-BATCH 分支最先 BLOCK）；
+  //   ② 节点顺序门禁（next 的「疑似未 exit」）；
+  //   ③ 单趟零进展。
+  // 回程（fixReturnTarget）夹在 ② 之前：回程态下「源节点未出口」正是回程语义本身，顺序门禁不得推翻
+  // next 的回程分支（next 的回程分支先于顺序门禁返回）；顺序门禁又先于零进展（零进展是路由落到
+  // execute 家族后的形态，执行者先要处理当前节点）。零进展成立时不再求回程——与 next 的既有先后一致
+  // （零进展态下回程分支不会被走到）。
+  const fixRoundBlockedMessage = fixRollbackPreview?.blocked ? fixRollbackPreview.blockedMessage : null;
+  const zeroProgressMessage = fixRoundBlockedMessage === null
+    ? await resolveZeroProgressBlock({ changeName, protocol, nodeId: derivedNode })
+    : null;
+  const fixReturnTarget = fixRoundBlockedMessage === null && zeroProgressMessage === null
     ? await resolveFixReturnTarget({
       changeName, protocol, completedArr, state, derivedNode, currentNodeIdx, derivedIdx,
     })
     : null;
+  const orderBlockedMessage = fixRoundBlockedMessage === null && fixReturnTarget === null
+    ? await resolveNodeOrderBlock({ changeName, protocol, completedArr, state })
+    : null;
+  const blockedMessage = fixRoundBlockedMessage ?? orderBlockedMessage ?? zeroProgressMessage;
+  const blocked = blockedMessage === null
+    ? null
+    : { message: blockedMessage, reason: blockedReason(blockedMessage) };
   return {
     derivedNode,
     stateNode: state.currentNode ?? null,
@@ -632,44 +674,14 @@ export async function runNext(protocol) {
       return;
     }
   }
-  // 节点顺序校验（严格模式）——state.currentNode 非 null、不在 completedNodes、
-  // 且 evidence 无该节点记录 → 上一节点从未 exit 就推进 → BLOCKED（exit 1）。
-  // 状态漂移校正保留：已完成节点（currentNode ∈ completedNodes，或 evidence 已记录——
-  // 节点已被 record/exit 处理过）正常推进不受影响；本校验只拦"证据完全缺失的疑似跳阶段"。
-  // 豁免（两种独立判断，任一成立即放行）：回退豁免（TASK.md 有 pending 回退修复任务 → execute）；
-  // 正常推进豁免（currentNode 是 completedNodes 最后节点 exit 推进的正常下一节点，
-  // 见 normalAdvanceExempt）——真乱序（跳节点）仍严格 BLOCK
-  if (state.currentNode && !completedArr.includes(state.currentNode)) {
-    const nodeEvidence = state.evidence && typeof state.evidence === 'object'
-      ? state.evidence[state.currentNode]
-      : null;
-    const hasEvidence = !!(nodeEvidence && typeof nodeEvidence === 'object' && !Array.isArray(nodeEvidence));
-    if (!hasEvidence) {
-      // 回退豁免（显式分支已先行；此处按共享谓词保留门禁层语义，不再内联第二份判定）——
-      // review/verify 发现缺陷追加 pending 修复任务后回 execute 的修复任务标准回退路径放行
-      // （否则被严格模式误拦为"未 exit 跳阶段"）；豁免条件不满足时维持严格 BLOCK
-      const rollbackExempt = await resolveFixRollbackState({
-        runRoot: runRootDir(), changeName, protocol, completedNodes: completedArr, currentNode: state.currentNode,
-        history: state.history,
-      });
-      // 正常推进豁免——exit --apply 推进 currentNode 到下一节点后按 SKILL 协议调 next
-      // （正常路径）不拦截；与回退豁免独立判断（详见 normalAdvanceExempt 注释）
-      const advanceExempt = await normalAdvanceExempt(state, protocol, completedArr, state.currentNode, changeName);
-      if (!rollbackExempt && !advanceExempt) {
-        console.error('BLOCKED: 疑似未 exit 节点 ' + state.currentNode + '，先 workflow-guard.mjs exit ' + state.currentNode + ' --apply');
-        console.error('恢复: 确认当前节点实际已完成 → 用 exit <节点> --apply 正常推进；节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进）或 select（切换 change）；禁止手改 state 机器字段');
-        process.exit(1);
-      }
-    }
-  }
-  // 节点视图（与 status 共用同一「进行中保护」判定，见 resolveNodeView）：derivedNode 供零进展
-  // 防呆与漂移校正使用，routeNode 才是输出节点（next 的 NODE 行）。
+  // 节点视图（与 status 共用同一判定，见 resolveNodeView——节点顺序门禁也在其中，本命令不再内联
+  // 第二份）：derivedNode 供零进展防呆与漂移校正使用，routeNode 才是输出节点（next 的 NODE 行）。
   const nodeView = await resolveNodeView({ changeName, protocol, state });
   const detectedNode = nodeView.derivedNode;
-  // 此态 next 不打印 NODE、直接 BLOCKED（单趟零进展 / Fix 归位第 4 轮无授权）：判定与报文都在共享
-  // 视图里（resolveZeroProgressBlock / applyFixRollbackRound 的只读预演），本命令只消费而不另判一份
-  // ——status 的「route=null + next 将 BLOCKED」来自同一字段，两边答案因此一致。Fix 第 4 轮在
-  // FIX-BATCH 分支已先行 BLOCK，此处的 blocked 只会是零进展。
+  // 此态 next 不打印 NODE、直接 BLOCKED（节点顺序门禁 / 单趟零进展 / Fix 归位第 4 轮无授权）：三个
+  // 判定与报文都在共享视图里（resolveNodeOrderBlock / resolveZeroProgressBlock / applyFixRollbackRound
+  // 的只读预演），本命令只消费而不另判一份——status 的「route=null + next 将 BLOCKED」来自同一字段，
+  // 两边答案因此一致。Fix 第 4 轮在 FIX-BATCH 分支已先行 BLOCK，此处的 blocked 只会是顺序门禁或零进展。
   if (nodeView.blocked !== null) {
     console.error(nodeView.blocked.message);
     process.exit(1);
