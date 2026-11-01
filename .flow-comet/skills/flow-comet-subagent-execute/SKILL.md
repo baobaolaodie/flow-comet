@@ -74,7 +74,7 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
 五要素（缺一不可）：
 
 1. **`git add -- <自己字面路径>`**：逐条字面路径（取自本任务 `write_files`），禁用 `.` / `-A` / `-u` 等宽泛形态。
-2. **`git commit -- <同一路径>`**：路径集与上一步**逐字一致**——提交只含自己的文件。
+2. **`git commit -m "<消息>" -- <同一路径>`**：路径集与上一步**逐字一致**——提交只含自己的文件；消息写在 `--` **之前**（落到 `--` 之后会被当成 pathspec）。
 3. **锁失败重试**：并发提交会撞 `index.lock` / `cannot lock ref`，**失败即重试**，不得因此改用宽泛命令。
 4. **禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`**：它们作用于整个共享工作区。
 5. **为什么**：并发写者共享**同一索引与工作树**，宽泛命令有**并发索引竞态**（把同伴半成品纳入自己的提交），`stash` / `clean` / `reset` 还会直接破坏同伴的未提交工作。
@@ -152,7 +152,7 @@ A mismatch is not a bug but the same fact seen from three angles: the `ROUTE:` l
    - **写前读模板（固定句式）**：「开工前先读 <本任务产出物的模板路径>，按其标题 / 首部 / 段序填写，并按本仓登记补写增量段」——模板路径逐任务给出（本节点默认 `flow-kit/templates/SUMMARY.md`）；只写「按模板填写」视为委托前检查未完成。
    - **提交边界警告**:提交**只含该任务 write_files 范围内的文件**(含测试文件)——不得包含 TASK.md 与其他协调者维护的 .specs 工件(新 change 提交越界 BLOCKED;实测子代理提交含 TASK.md 被 W2-D 拦截)。**提交从属规则**:任务专属的 `<task-id>-SUMMARY.md`(位于 `.specs/<change-id>/`,是 flow-comet 强制产物)允许随任务提交属流程默认豁免——目标仓库的既有规定优先,若目标仓库忽略清单等既有规定拒绝其入库,被拒即为正确行为,严禁 force-add 强加越库提交;委托校验对任务摘要的豁免属于校验宽容度,不是入库指令。
 
-   - **提交面 pathspec 纪律（五要素，见 Guidance 同名小节）**：子代理必须用 `git add -- <自己字面路径>` + `git commit -- <同一路径>`，锁失败重试，禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`（适用条件：**多个写者共享同一工作区**；各自独立工作区内的局部 `reset` / `clean` 不在禁令内）。
+   - **提交面 pathspec 纪律（五要素，见 Guidance 同名小节）**：子代理必须用 `git add -- <自己字面路径>` + `git commit -m "<消息>" -- <同一路径>`（消息在 `--` 之前），锁失败重试，禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`（适用条件：**多个写者共享同一工作区**；各自独立工作区内的局部 `reset` / `clean` 不在禁令内）。
    - **集成纪律（四要素，见 Guidance 同名小节）**：协调者集成时优先 `git merge --no-ff`；降级 `cherry-pick` 必须记因；集成顺序按 `depends_on` 拓扑序 + 同层 task id 升序；冲突按**机械冲突 / 语义冲突**两类分别处置（后者必须中止并上抛）。
 
 3. **Delegate to subagents**（三平台同一判据，差异只在谁建树）:

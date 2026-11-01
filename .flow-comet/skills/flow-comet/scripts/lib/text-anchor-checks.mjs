@@ -999,7 +999,7 @@ export const PLATFORM_FACTS_REL = 'flow-comet/reference/platform-facts.md';
 export const COMMIT_DISCIPLINE_ELEMENT_GROUPS = [
   ['提交面 pathspec 纪律 · 适用条件', ['**各自独立工作区（worktree 等）内的局部 `reset` / `clean` 不在禁令内**']],
   ['提交面 pathspec 纪律 · 要素 1（字面路径集）',
-    ['`git add -- <自己字面路径>`', '`git commit -- <同一路径>`', 'write_files']],
+    ['`git add -- <自己字面路径>`', '`git commit -m "<消息>" -- <同一路径>`', 'write_files']],
   ['提交面 pathspec 纪律 · 要素 2（锁失败重试）', ['锁失败重试', 'index.lock', '失败即重试']],
   ['提交面 pathspec 纪律 · 要素 3（禁裸命令）',
     ['禁裸', '`commit -a`', '`stash`', '`clean`', '`reset`']],
@@ -1012,7 +1012,7 @@ export const COMMIT_DISCIPLINE_ELEMENT_GROUPS = [
 ];
 // 权威处**正文**（逐字搬运进 `commit-discipline.md` 的原句；实测两册均无这些整句——回流即红）。
 export const COMMIT_DISCIPLINE_AUTHORITY_PHRASES = [
-  '2. **`git commit -- <同一路径>`**：提交以 pathspec 限定范围，保证提交只含自己的文件；路径集与上一步**逐字一致**。',
+  '2. **`git commit -m "<消息>" -- <同一路径>`**：消息（含正文尾注 `-m "Task: <id>"`）写在 `--` **之前**，pathspec 写在 `--` 之后——提交以 pathspec 限定范围，保证提交只含自己的文件；路径集与上一步**逐字一致**。消息若落到 `--` 之后（`git commit -- <路径> -m "<消息>"`），`-m` 会被当成 pathspec、提交直接失败（退出码 1）。',
   '3. **锁失败重试**：并发提交会撞 `index.lock` / `cannot lock ref`——**失败即重试**（临时仓真并发实测：20 提交 / 25 次锁失败全部重试成功）；不得因锁失败改用宽泛命令。',
   '5. **为什么**：并发写者共享**同一个索引与工作树**——宽泛命令存在**并发索引竞态**：一方 `add -A` 会把另一方的半成品纳入自己的提交（串味 / 多文件提交）；`stash` / `clean` / `reset` 更会直接破坏同伴的未提交工作。',
   '**并行波次附加两条（与上列五要素并列适用 · 不改其语义与适用条件）**：',
