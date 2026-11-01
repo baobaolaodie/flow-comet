@@ -19,9 +19,7 @@ import {
 } from './lib/test-helpers.mjs';
 import {
   BUILTIN_PROTOCOL_SOURCE,
-  REPO_ROOT,
   createdDirs,
-  isAuthoritativeSourceRepo,
   makeTmp,
   sleepSync,
 } from './lib/test-fixtures.mjs';
@@ -29,18 +27,7 @@ import {
   scenarioProtocolPath,
 } from './lib/test-assertions.mjs';
 import {
-  PUBLIC_CODE_RE,
-  PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE,
-  SCENARIO_COUNT_FILES,
-  SCENARIO_COUNT_FILES_MAINTAINER,
-  SYSTEM_TEST_COUNT_FILES,
-  SYSTEM_TEST_COUNT_FILES_MAINTAINER,
-  countSyncProblems,
-  internalDocsProblems,
-  maintainerFacePresent,
-  maintainerFaceSkips,
-  publicFaceDocsAbsent,
-  vocabularyMirrorProblems,
+  publicFaceSelfCheck,
 } from './lib/text-anchor-checks.mjs';
 
 import { ENTRIES as SCENARIOS_A } from './scenarios/a.mjs';
@@ -105,98 +92,20 @@ for (const sc of SCENARIOS) {
 
 console.log('RESULT: ' + passed + '/' + SCENARIOS.length + ' scenarios passed');
 
-// 文档一致性自检（场景数纪律 + 公开产物零代号纪律工具化）：
-// ① 场景数：受检清单文档须与 SCENARIOS.length 一致（全变体检查），且清单条目必须真实存在
-//    （AC-14：缺失显式报告，不静默跳过）；
-// ② 公开产物零代号：公开文档不得含过程代号（场景编号/修复编号/批次/缺陷编号/问题级/验证代号/验证轮次/未公开概念——历史 CHANGELOG 回归实证）。
-// 形态分派（判据与场景 105 同一口径，见 publicFaceDocsAbsent）：只有「权威源检出 + 公开面在场」
-// 才跑本块。npm 包按 files 白名单只带技能树与 scripts/，公开面结构性缺席——那是载体的正常形态，
-// 不是「仓库缺文件」：受检条目不在场≠被删除，报成幽灵条目会把读者送去修一个不存在的缺陷。
-// 故整块跳过且**可见**（SKIP = 未校验，不是通过），两种无公开面的形态各留一句说明：包形态走下方
-// 分支一的公开面跳过提示，安装副本走词表镜像不适用说明。判据强度不降：权威源检出里 docs/ 在场而
-// 某份文档被删，仍走下方逐条严检并判红（跳过通道只对「整份公开面不存在」开放）。
-if (isAuthoritativeSourceRepo() && !publicFaceDocsAbsent(REPO_ROOT)) {
-  // ①a 受检面可见化（F2 防漂移）：实际受检文件数由模块级常量**推导**、不硬编码——分发组 =
-  // SCENARIO_COUNT_FILES ∪ SYSTEM_TEST_COUNT_FILES（后者为前者子集），维护者组 =
-  // SCENARIO_COUNT_FILES_MAINTAINER ∪ SYSTEM_TEST_COUNT_FILES_MAINTAINER（后者为前者子集）；
-  // 维护者面缺席（CI 全新检出 / worktree）时按组跳过语义只计分发面。本行是对外可复核的
-  // 「覆盖面事实」——清单增删/口径漂移在此直接可见，不再依赖人工核对注释（F2 根因）。
-  const distFaceCount = new Set([...SCENARIO_COUNT_FILES, ...SYSTEM_TEST_COUNT_FILES]).size;
-  const maintainerFaceCount = maintainerFacePresent()
-    ? new Set([...SCENARIO_COUNT_FILES_MAINTAINER, ...SYSTEM_TEST_COUNT_FILES_MAINTAINER]).size
-    : 0;
-  console.log('受检面: ' + (distFaceCount + maintainerFaceCount) + ' 文件（分发 ' + distFaceCount
-    + ' + 维护者 ' + maintainerFaceCount + '）');
-  // ① 计数一致性受检清单（分发组恒检 + 维护者组整组在场时检；判据与场景 105 共用同一实现）
-  // SCENARIO_COUNT_FILES(_MAINTAINER) / SYSTEM_TEST_COUNT_FILES(_MAINTAINER) 为模块级常量
-  // （见文件头定义）——场景数与系统测试集项数两套计数合并检查
-  for (const problem of await countSyncProblems()) {
-    failures.push({ name: '计数一致性', error: problem });
-    console.error('FAIL: 计数一致性\n' + problem);
-  }
-
-  // ①b 维护文档机检（docs/internal 死引用 + ROADMAP 最低结构；整组缺席即跳过）
-  for (const problem of internalDocsProblems()) {
-    failures.push({ name: '维护文档机检', error: problem });
-    console.error('FAIL: 维护文档机检\n' + problem);
-  }
-
-  // ①c 维护者面缺席可见化：结构性缺席（worktree / CI 全新检出）不判失败（退出码不变、不误红），
-  // 但必须可见——逐面输出 SKIP 行（面名 + 原因 + 本检出未执行什么校验 + 回维护者主树重跑的指引）。
-  for (const skip of maintainerFaceSkips()) {
-    console.log('SKIP: ' + skip.face + ' — ' + skip.reason
-      + '；本次检出未执行该面校验，请在维护者主树重跑本套件（主树 L1），勿把跳过当成已校验。');
-  }
-
-  // ② 公开文档零代号（公开产物纪律——变更日志历史编号回归的教训）
-  const PUBLIC_DOCS = [
-    'README.md', 'README-zh.md', 'CONTRIBUTING.md', 'CONTRIBUTING-zh.md',
-    'SECURITY.md', 'SECURITY-zh.md', 'CODE_OF_CONDUCT.md', 'CODE_OF_CONDUCT-zh.md',
-    'CHANGELOG.md', 'CHANGELOG-zh.md',
-    'docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
-    'docs/USAGE.md', 'docs/USAGE-zh.md',
-    'docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md', 'docs/VERSIONS.md', 'docs/VERSIONS-zh.md',
-    '.github/PULL_REQUEST_TEMPLATE.md',
-    '.github/ISSUE_TEMPLATE/1-bug_report.yml', '.github/ISSUE_TEMPLATE/2-feature_request.yml',
-    '.github/ISSUE_TEMPLATE/3-question.md', '.github/ISSUE_TEMPLATE/4-task.md',
-  ];
-  // 词表判据 = 模块级 PUBLIC_CODE_RE（与 .githooks/internal-codes.mjs 的 BANNED 同判据，
-  // 见其定义处的同步约定；维护文档机检场景族另有该判据的判别力/边界锚）。
-  for (const rel of PUBLIC_DOCS) {
-    let text;
-    try {
-      text = fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
-    } catch (e) {
-      // ENOENT 同样显式报告：本清单全部为随仓库分发的文件，任何权威源检出都应存在——
-      // 静默跳过会让"永不生效的条目"藏身（同类 AC-14 缺陷）。
-      failures.push({ name: '公开产物零代号(' + rel + ')', error: '文件缺失: ' + e.message });
-      console.error('FAIL: 公开产物零代号(' + rel + ')\n文件缺失: ' + e.message);
-      continue;
-    }
-    const m = text.match(PUBLIC_CODE_RE);
-    if (m) {
-      failures.push({ name: '公开产物零代号(' + rel + ')', error: rel + ' 含过程代号: "' + m[0] + '"' });
-      console.error('FAIL: 公开产物零代号(' + rel + ')\n' + rel + ' 含过程代号: "' + m[0] + '"');
-    }
-  }
-
-  // ③ 词表镜像漂移：主仓私有的词表单一来源与套件内的同义镜像必须**逐字符
-  // 等价**——两侧此前只有注释互指"同步"、零一致性判据：主仓增补模式时分发侧扫描静默落后
-  // （新词可在公开面长期存活而套件全绿），反向则分发面误红。判据只读文件、不改任何判定语义。
-  for (const problem of vocabularyMirrorProblems()) {
-    failures.push({ name: '词表镜像漂移', error: problem });
-    console.error('FAIL: 词表镜像漂移\n' + problem);
-  }
-} else if (isAuthoritativeSourceRepo()) {
-  // 包形态（有技能树锚、docs/ 整份不在）：公开面结构性缺席，整块跳过。结构性缺席不判失败
-  // （退出码不变、不误红），但必须显式可见——未验证 ≠ 通过。
-  console.log(PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE);
+// 文档一致性自检（场景数纪律 + 公开产物零代号纪律工具化）：形态分派（权威源检出 / 包形态 / 安装
+// 副本）与四条判据（计数一致性 / 维护文档机检 / 公开产物零代号 / 词表镜像）的唯一实现在
+// lib/text-anchor-checks.mjs 的 publicFaceSelfCheck——本处只负责调用与打印。该判定接受任意根，
+// 故它另有常驻场景锚（公开面形态分派探针），不必等到在包形态里整跑一次才知道分派对不对。
+const selfCheck = await publicFaceSelfCheck();
+if (selfCheck.skip !== null) {
+  // 该形态不含这一面：仍然显式可见——SKIP = 未校验，不是通过。
+  console.log(selfCheck.skip.notice);
 } else {
-  // 安装副本形态（无技能树锚）：.githooks 是主仓私有面（随 clone 不分发）→ 该判据**不适用**。
-  // 结构性缺席不判失败（退出码不变、不误红），但必须显式可见——未验证 ≠ 通过。
-  console.log('SKIP/NOT-APPLICABLE: 词表镜像漂移判据（.githooks 为主仓私有面）'
-    + '；本次检出无该私有面，未执行「词表单一来源 ↔ 套件同义镜像」的逐字符等价性比对'
-    + '——请在主仓私有面在场处重跑本套件（主树 L1），勿把不适用当成已校验。');
+  for (const notice of selfCheck.notices) console.log(notice);
+  for (const problem of selfCheck.problems) {
+    failures.push(problem);
+    console.error('FAIL: ' + problem.name + '\n' + problem.error);
+  }
 }
 
 // 清理验证：自测套件自身创建的临时目录不留残留

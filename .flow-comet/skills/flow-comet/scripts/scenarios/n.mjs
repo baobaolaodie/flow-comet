@@ -39,7 +39,16 @@ import {
   handoffFor,
 } from '../lib/test-fixtures.mjs';
 import { scenarioProtocolPath } from '../lib/test-assertions.mjs';
-import { maintainerFacePresent, singleSourceImportProblems } from '../lib/text-anchor-checks.mjs';
+import {
+  AUTHORITATIVE_SOURCE_ANCHOR_REL,
+  GITHOOKS_CODES_REL,
+  PUBLIC_FACE_CODE_DOCS,
+  SCENARIO_COUNT_FILES,
+  SYSTEM_TEST_COUNT_FILES,
+  maintainerFacePresent,
+  publicFaceSelfCheck,
+  singleSourceImportProblems,
+} from '../lib/text-anchor-checks.mjs';
 
 // ---------- 登记表与模板夹具（夹具输入面，不是判据） ----------
 
@@ -596,6 +605,81 @@ function assertProbesDiscriminate(problems, docs, rules, probes) {
     if (reported !== expectReported) {
       problems.push('反向构造判别力缺失（' + label + '：' + (expectReported ? '未被判违规' : '被误判违规') + '）');
     }
+  }
+}
+
+// 公开面自检的**形态分派**（判定本体在 lib：publicFaceSelfCheck）——三种载体形态各造一个临时根、驱动
+// 同一判定，分派对错因此成为常驻断言，不必等到在包形态里整跑一次套件才知道：
+//   ① 包形态（技能树锚在场、docs/ 整份不在）→ SKIP 通知 + 零问题：这种载体本来就不带公开面，
+//      「受检条目不在场」是它的正常形态；报成幽灵条目会把读者送去修一个不存在的缺陷；
+//   ② 权威源形态完整（受检面文件照真迹复制，计数自然同步）→ 零问题（判据不是恒红的摆设）；
+//   ③ 同一根上移走一份受检文档（docs/VERSIONS.md）→ 必须报问题并点名该文件——跳过通道只对
+//      「整份公开面不存在」开放，判据没有顺手放宽；
+//   ④ 安装副本形态（无技能树锚）→ 词表镜像判据的「不适用」说明 + 零问题。
+// 形态本身同样由既有判据派生（技能树锚 + docs/），夹具不另写一套形态判据。
+
+// 受检面文件清单（照真迹复制的范围）= 公开产物零代号清单 ∪ 计数受检清单 ∪ 词表私有面：
+// 三面齐了同一次判定才可能零问题——少一面就会以问题形态暴露，夹具不会悄悄缩小判据面。
+function countFaceFiles() {
+  return [...new Set([
+    ...PUBLIC_FACE_CODE_DOCS, ...SCENARIO_COUNT_FILES, ...SYSTEM_TEST_COUNT_FILES, GITHOOKS_CODES_REL,
+  ])];
+}
+
+function copyRepoFileInto(root, rel) {
+  const parts = rel.split('/');
+  const dest = path.join(root, ...parts);
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.copyFileSync(path.join(REPO_ROOT, ...parts), dest);
+}
+
+async function assertPublicFaceSelfCheckShapes(dir) {
+  const shapeRoot = (name, { authoritative = true } = {}) => {
+    const root = path.join(dir, 'shape-' + name);
+    fs.mkdirSync(root, { recursive: true });
+    // 技能树锚点：与真实检出同一相对位置（路径字面量由 lib 单点拥有，不在此重写）
+    if (authoritative) writeFile(root, AUTHORITATIVE_SOURCE_ANCHOR_REL, '---\nname: flow-comet\n---\n');
+    return root;
+  };
+  const describe = (result) => result.problems.map((problem) => problem.name + ': ' + problem.error).join('; ')
+    || '（零问题）';
+  // ① 包形态：分派若改成「照跑全套」，这里会报一串「受检条目文件缺失（幽灵条目）」——正是要拦的形态
+  const packaged = await publicFaceSelfCheck({ root: shapeRoot('package') });
+  if (packaged.problems.length > 0) {
+    throw new Error('包形态（技能树锚在、docs/ 整份不在）不得报问题——受检条目不在场是这种载体的正常形态，'
+      + '报出来就是幽灵条目: ' + describe(packaged));
+  }
+  if (packaged.skip === null || packaged.skip.reason !== 'package-without-public-face') {
+    throw new Error('包形态应命中显式跳过分支（skip.reason=package-without-public-face）: '
+      + JSON.stringify(packaged.skip));
+  }
+  if (!packaged.skip.notice.includes('未校验')) {
+    throw new Error('包形态的跳过提示必须写明「未校验」（跳过 ≠ 通过）: ' + packaged.skip.notice);
+  }
+  // ② 权威源形态完整：受检面文件照真迹复制，计数自然同步（不硬编码数字）
+  const full = shapeRoot('authoritative');
+  for (const rel of countFaceFiles()) copyRepoFileInto(full, rel);
+  const complete = await publicFaceSelfCheck({ root: full });
+  if (complete.problems.length > 0) {
+    throw new Error('权威源形态完整（受检面文件照真迹复制）不应报问题: ' + describe(complete));
+  }
+  // ③ 同一根上移走一份受检文档：跳过通道只对「整份公开面不存在」开放，缺一份必须判红并点名
+  const removedDoc = 'docs/VERSIONS.md';
+  fs.rmSync(path.join(full, ...removedDoc.split('/')));
+  const truncated = await publicFaceSelfCheck({ root: full });
+  if (!truncated.problems.some((problem) => problem.error.includes(removedDoc))) {
+    throw new Error('权威源形态里移走一份受检文档必须报问题并点名该文件（判据不得因形态分派而放宽）: '
+      + describe(truncated));
+  }
+  // ④ 安装副本形态：无技能树锚 = 主仓私有面结构性缺席 → 「不适用」说明，不误红
+  const installed = await publicFaceSelfCheck({ root: shapeRoot('installed', { authoritative: false }) });
+  if (installed.problems.length > 0 || installed.skip === null
+    || installed.skip.reason !== 'installed-copy-without-skill-tree') {
+    throw new Error('安装副本形态（无技能树锚）应命中「不适用」分支且零问题: '
+      + JSON.stringify(installed.skip) + ' / ' + describe(installed));
+  }
+  if (!installed.skip.notice.includes('不适用')) {
+    throw new Error('安装副本形态的跳过提示必须写明「不适用」（不适用 ≠ 已校验）: ' + installed.skip.notice);
   }
 }
 
@@ -2240,7 +2324,7 @@ export const ENTRIES = [
   // 才是合法的「本检出没有这一面」，此时输出可见 SKIP 并明确写「本次未校验」，仍不算通过。
   {
     name: 'TA-24 公开面口径：5 对双语去除 overclaim，机制表覆盖全出口，缺席即红（整面缺席才 SKIP）',
-    run: () => {
+    run: async (dir) => {
       const pairs = [
         ['README.md', 'README-zh.md'],
         ['CONTRIBUTING.md', 'CONTRIBUTING-zh.md'],
@@ -2255,6 +2339,9 @@ export const ENTRIES = [
           + '本次检出未校验 5 对双语公开文档的 overclaim / 机制表 / 排查指引口径，请在权威源检出重跑本套件（未验证 ≠ 通过）');
         return;
       }
+      // 形态分派自身的常驻判别力锚：临时根上驱动同一判定，分派对错不再只能靠「在包形态里整跑一次
+      // 套件」才知道。夹具的「完整形态」从本检出的公开面真迹复制，故只在声明了公开面的检出上跑。
+      await assertPublicFaceSelfCheckShapes(dir);
       // 判据面完整在册（缺席用 null 占位而不是从集合里删掉）：缺席由下面的缺席判据逐份点名，
       // 「少了哪份文件」因此是**判据事实**，不是可以静默缩小的受检面。
       const docs = new Map();

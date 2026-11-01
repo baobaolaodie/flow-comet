@@ -16,6 +16,7 @@ import {
   writeState,
 } from './test-helpers.mjs';
 import {
+  AUTHORITATIVE_SOURCE_ANCHOR,
   CHANGE_ID,
   HOOK,
   REPO_ROOT,
@@ -182,6 +183,108 @@ export const PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE = 'SKIP: 公开面自检（计�
   + ' files 白名单、安装副本按安装面，携带的都只是技能树与 scripts/，公开文档不随分发包走）——'
   + '「受检条目不在场」是这种载体的正常形态，不是仓库缺文件；本次未校验条目在场与同步、'
   + '公开产物零代号、词表镜像等价性（SKIP = 未校验，不是通过；请在权威源检出重跑本套件）';
+
+// ---------- 公开面自检：形态分派 + 各面判据的唯一调用点 ----------
+// 底部自检与场景共用本函数（判定本体只此一份）：底部只负责调用与打印；场景在临时根上驱动它，
+// 于是「形态分派对不对」成了常驻断言，不必等到在包形态里整跑一次套件才知道。
+// 形态三向（分派先于任何内容判据）：
+//   ① 权威源检出 + 公开面在场 → 全套判据（计数一致性 / 维护文档机检 / 公开产物零代号 / 词表镜像）；
+//   ② 权威源检出 + docs/ 整份不在（npm 包形态）→ 整块显式 SKIP：受检条目不在场是这种载体的正常
+//      形态，报成「幽灵条目」会把读者送去修一个不存在的缺陷；
+//   ③ 安装副本（无技能树锚）→ 词表镜像判据「不适用」说明（主仓私有面结构性缺席）。
+// 跳过一律**可见但不算通过**（SKIP = 未校验），且跳过的粒度只有「整份面缺席」——docs/ 在场而某份
+// 受检文档被删仍逐条判红（判据强度不降；计数本体仍是 countSyncProblems，与场景共用同一实现）。
+// 技能树锚点的相对形态（字面量仍由 test-fixtures 的 AUTHORITATIVE_SOURCE_ANCHOR 单点拥有，这里只做
+// 相对化）：任意受检根上的「本检出是不是权威源」与真实检出同判据，不另写第二份。
+export const AUTHORITATIVE_SOURCE_ANCHOR_REL = path
+  .relative(REPO_ROOT, AUTHORITATIVE_SOURCE_ANCHOR)
+  .split(path.sep)
+  .join('/');
+export function authoritativeSourceAt(root = REPO_ROOT) {
+  return fs.existsSync(path.join(root, AUTHORITATIVE_SOURCE_ANCHOR_REL));
+}
+// 安装副本形态的「不适用」说明：措辞与形态判据同处维护——一处说「不适用」、另一处说「缺文件」，
+// 正是本批修掉的误诊形态。
+export const INSTALLED_COPY_SELF_CHECK_NOTICE = 'SKIP/NOT-APPLICABLE: 词表镜像漂移判据（.githooks 为主仓私有面）'
+  + '；本次检出无该私有面，未执行「词表单一来源 ↔ 套件同义镜像」的逐字符等价性比对'
+  + '——请在主仓私有面在场处重跑本套件（主树 L1），勿把不适用当成已校验。';
+// 公开产物零代号受检清单（公开面在场时逐份扫描；条目缺失显式报告，不静默跳过）。
+export const PUBLIC_FACE_CODE_DOCS = [
+  'README.md', 'README-zh.md', 'CONTRIBUTING.md', 'CONTRIBUTING-zh.md',
+  'SECURITY.md', 'SECURITY-zh.md', 'CODE_OF_CONDUCT.md', 'CODE_OF_CONDUCT-zh.md',
+  'CHANGELOG.md', 'CHANGELOG-zh.md',
+  'docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
+  'docs/USAGE.md', 'docs/USAGE-zh.md',
+  'docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md', 'docs/VERSIONS.md', 'docs/VERSIONS-zh.md',
+  '.github/PULL_REQUEST_TEMPLATE.md',
+  '.github/ISSUE_TEMPLATE/1-bug_report.yml', '.github/ISSUE_TEMPLATE/2-feature_request.yml',
+  '.github/ISSUE_TEMPLATE/3-question.md', '.github/ISSUE_TEMPLATE/4-task.md',
+];
+// 受检面的可见事实（防漂移）：文件数由受检清单推导、不硬编码——分发组 / 维护者组规模变化在此
+// 直接可见（维护者面整组缺席时只计分发面）。
+export function countFaceNotice(root = REPO_ROOT) {
+  const distFaceCount = new Set([...SCENARIO_COUNT_FILES, ...SYSTEM_TEST_COUNT_FILES]).size;
+  const maintainerFaceCount = maintainerFacePresent(root)
+    ? new Set([...SCENARIO_COUNT_FILES_MAINTAINER, ...SYSTEM_TEST_COUNT_FILES_MAINTAINER]).size
+    : 0;
+  return '受检面: ' + (distFaceCount + maintainerFaceCount) + ' 文件（分发 ' + distFaceCount
+    + ' + 维护者 ' + maintainerFaceCount + '）';
+}
+
+// 输入：受检根（判定所需的全部读取都相对它进行）+ 计数派生目录；输出：
+//   { skip, problems, notices } —— skip 非 null 即该形态不含这一面（problems 恒为空）；
+//   否则 problems 是问题清单（[{ name, error }]，空数组 = 通过），notices 是必须可见的覆盖面事实。
+export async function publicFaceSelfCheck({ root = REPO_ROOT, scriptsDir = SCRIPTS_DIR } = {}) {
+  // ③ 安装副本（无技能树锚）：主仓私有面结构性缺席 → 词表镜像判据不适用（可见，仍不算通过）。
+  if (!authoritativeSourceAt(root)) {
+    return {
+      skip: { reason: 'installed-copy-without-skill-tree', notice: INSTALLED_COPY_SELF_CHECK_NOTICE },
+      problems: [],
+      notices: [],
+    };
+  }
+  // ② 包形态（技能树锚在、docs/ 整份不在）：受检条目不在场是这种载体的正常形态，不是仓库缺文件——
+  // 报成幽灵条目会把读者送去修一个不存在的缺陷。跳过 ≠ 通过，提示必须带「未校验」。
+  if (publicFaceDocsAbsent(root)) {
+    return {
+      skip: { reason: 'package-without-public-face', notice: PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE },
+      problems: [],
+      notices: [],
+    };
+  }
+  // ① 权威源检出 + 公开面在场：全套判据（跳过通道到此为止，缺一份文档照样逐条判红）
+  const problems = [];
+  for (const problem of await countSyncProblems(root, scriptsDir)) {
+    problems.push({ name: '计数一致性', error: problem });
+  }
+  for (const problem of internalDocsProblems(root)) {
+    problems.push({ name: '维护文档机检', error: problem });
+  }
+  for (const rel of PUBLIC_FACE_CODE_DOCS) {
+    let text;
+    try {
+      text = fs.readFileSync(path.join(root, rel), 'utf8');
+    } catch (e) {
+      // ENOENT 同样显式报告：本清单全部为随仓库分发的文件，任何权威源检出都应存在——静默跳过会让
+      // 「永不生效的条目」藏身。
+      problems.push({ name: '公开产物零代号(' + rel + ')', error: '文件缺失: ' + e.message });
+      continue;
+    }
+    const hit = text.match(PUBLIC_CODE_RE);
+    if (hit) {
+      problems.push({ name: '公开产物零代号(' + rel + ')', error: rel + ' 含过程代号: "' + hit[0] + '"' });
+    }
+  }
+  for (const problem of vocabularyMirrorProblems(root)) {
+    problems.push({ name: '词表镜像漂移', error: problem });
+  }
+  const notices = [countFaceNotice(root)];
+  for (const skip of maintainerFaceSkips(root)) {
+    notices.push('SKIP: ' + skip.face + ' — ' + skip.reason
+      + '；本次检出未执行该面校验，请在维护者主树重跑本套件（主树 L1），勿把跳过当成已校验。');
+  }
+  return { skip: null, problems, notices };
+}
 
 // ---------- 计数 stale 检测（presence 之外的判别力补足） ----------
 // presence 只能证明"当前值在场"，证不了"旧值不在场"：维护面曾长期带着无标记旧值仍全绿。
