@@ -89,10 +89,12 @@ function listMarkdownFiles(absDir, relDir) {
 }
 
 // 形态判据（公开面能不能派生）：先问「这份检出有没有公开文档面」，再谈派生——npm 包按 package.json
-// 的 files 白名单只分发 .flow-comet/skills 与 rules，不含 docs/；安装副本同理。这种形态下「受检面
-// 无法派生」不是缺文件事故，而是载体的**正常形态**，说成「仓库缺文件」会把读者引到修复一个不存在的
-// 缺陷上。判据落点选 docs/ 整份在不在，而不是权威映射文件在不在：docs/ 在、映射缺 = 检出被裁坏，
-// 仍要在读取处显式失败（判据强度不降——跳过通道只对「整份文档面不存在」开放）。
+// 的 files 白名单只分发 .flow-comet/skills 与 rules，不含 docs/、CONTRIBUTING.md 与 .github/；安装
+// 副本同理。这种形态下「受检面无法派生」不是缺文件事故，而是载体的**正常形态**，说成「仓库缺文件」
+// 会把读者引到修复一个不存在的缺陷上。判据落点选**这三份公开面载体是否俱缺**，而不是权威映射文件
+// 在不在：只看 docs/ 不够——分支 / 稀疏检出 / 误删把 docs/ 整份拿掉时，「本载体不含公开面」变成假话，
+// 计数一致性 / 零代号 / 词表镜像会整块跳过；docs/ 在、映射缺 = 检出被裁坏，仍要在读取处显式失败
+// （判据强度不降——跳过通道只对「整份公开面不存在」开放）。
 // 形态判据与其跳过提示**从 lib 共用**（底部自检的公开面自检用同一对）：同一种形态在两处各判一次，
 // 两份实现迟早各说各话——一处把包形态说成「缺文件」、另一处说成「跳过」，正是本批修掉的误诊。
 // 判据落点与措辞只在 lib/text-anchor-checks.mjs 维护（PUBLIC_FACE_DOCS_DIR / publicFaceDocsAbsent /
@@ -319,11 +321,15 @@ function assertDesignFormRecoveryPath(dir) {
 }
 
 // ---------- 形态判据的判别力探针（同一实现驱动，在夹具目录上作业） ----------
-// 两条边界都要有：① 分发包 / 安装副本形态（有技能树、无 docs/）跳过且**可见**，不判红；② docs/ 在
-// 场而权威映射缺失仍显式失败——跳过通道只对「整份文档面不存在」开放，不能顺手把真事故一起吞掉。
+// 三条边界都要有：① 真包形态 / 安装副本形态（有技能树、公开面载体**三者俱缺**）跳过且**可见**，
+// 不判红；② docs/ 在场而权威映射缺失仍显式失败——跳过通道只对「整份公开面不存在」开放，不能顺手
+// 把真事故一起吞掉；③ docs/ 不在、但 CONTRIBUTING.md 或 .github/ 在场必须判红——它们同样不进 npm
+// tarball，任一在场就说明这是**被裁坏的仓库**，不是「本来不含公开面」的载体。
 function assertPublicFaceShapeProbes(dir) {
+  // 真包形态 = docs/、CONTRIBUTING.md、.github/ 三者都不在本检出（npm tarball 三者都不带）
   if (!publicFaceDocsAbsent(dir)) {
-    throw new Error('形态探针前提失效：夹具目录不应预先含 ' + PUBLIC_FACE_DOCS_DIR + '/');
+    throw new Error('形态探针前提失效：夹具目录不应预先含 ' + PUBLIC_FACE_DOCS_DIR
+      + '/、CONTRIBUTING.md 或 .github/（三者俱缺才是「不含公开面」的包形态）');
   }
   for (const phrase of ['此形态不含公开面', '不是仓库缺文件', '未校验']) {
     if (!PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE.includes(phrase)) {
@@ -335,6 +341,19 @@ function assertPublicFaceShapeProbes(dir) {
   fs.mkdirSync(path.join(dir, ...PUBLIC_FACE_DOCS_DIR.split('/')), { recursive: true });
   if (publicFaceDocsAbsent(dir)) {
     throw new Error('形态判据把含 ' + PUBLIC_FACE_DOCS_DIR + '/ 的检出也判成不含公开文档（真检出会被整面跳过）');
+  }
+  // docs/ 不在、其余公开面载体在场 ⇒ 仍不属包形态：分支 / 稀疏检出 / 误删会把 docs/ 整份拿掉，那时
+  // 「本载体不含公开面」是假话——计数一致性 / 公开产物零代号 / 词表镜像会整块变成可见 SKIP 并 exit 0。
+  // 两份载体分开造根：CONTRIBUTING.md 与 .github/ 各自单独在场都足以证明本检出是仓库（两者都不进
+  // npm tarball；README 不作判据——npm 会强制包含它，用它判断等于把包形态误判成「有公开面」的仓库）。
+  for (const carrier of ['CONTRIBUTING.md', '.github/workflows/ci.yml']) {
+    const partial = path.join(dir, 'partial-face-' + carrier.split('/')[0].replace(/\./g, ''));
+    fs.mkdirSync(partial, { recursive: true });
+    writeFile(partial, carrier, '');
+    if (publicFaceDocsAbsent(partial)) {
+      throw new Error('docs/ 不在但 ' + carrier + ' 在场仍被判成「不含公开面」的包形态——'
+        + '该形态下计数一致性 / 公开产物零代号 / 词表镜像会整块变成 SKIP 并 exit 0');
+    }
   }
   // docs/ 在场、权威映射缺 = 检出被裁坏 → 仍是读取处的显式失败（判据强度不因跳过通道下降）
   let threw = null;
@@ -592,9 +611,9 @@ export const ENTRIES = [
   // 公开面口径：用户阅读面不得直写机器状态字段名（黑名单），被明确标注为状态输出示例的围栏块
   // 放行；机制 / 用法 / 排障三份文档 × 中英都必须出现 `--preflight`（新增公开命令不得无锚）。
   // 判别力由反向构造证明：注入键名、抽掉命令锚 ⇒ 必报；标注示例块放行、撤掉标注 ⇒ 再报。
-  // 形态分派（只按载体形态判，不猜）：安装副本（无 .flow-comet/ 技能树）与分发包（技能树在、docs/
-  // 整份不在）都没有公开文档面——跳过且**可见**（SKIP = 未校验，不是通过）；只有权威源检出才跑
-  // 公开面判据与设计形态锚。两种形态的边界由 assertPublicFaceShapeProbes 自己钉住。
+  // 形态分派（只按载体形态判，不猜）：安装副本（无 .flow-comet/ 技能树）与分发包（技能树在、docs/ +
+  // CONTRIBUTING.md + .github/ 三者俱缺）都没有公开文档面——跳过且**可见**（SKIP = 未校验，不是通过）；
+  // 只有权威源检出才跑公开面判据与设计形态锚。形态边界由 assertPublicFaceShapeProbes 自己钉住。
   {
     name: '105 计数一致性自检同步 + 公开面机器字段名黑名单 + --preflight 锚 + 权威源设计形态锚（AC-8 / AC-14）',
     run: async (dir) => {
@@ -617,9 +636,11 @@ export const ENTRIES = [
         console.log('SKIP: 权威源设计形态锚（当前运行的是安装副本脚本：' + path.relative(REPO_ROOT, SCRIPTS_DIR)
           + '）——安装副本按运行根推导路径属另一种载体的正确形态，本锚只在权威源脚本下适用（SKIP = 未校验，不是通过）');
       }
-      // 分发包形态（npm 包 / 安装副本）：docs/ 整份不在本检出 ⇒ 公开面无从派生，也就无从检查。
-      // 跳过的就是**公开面这一整块**（含计数同步——它数的文件同样不随包分发）；计数面在底部自检里
-      // 另有一次独立执行，不会因这条跳过而整体失踪。
+      // 分发包形态（npm 包 / 安装副本）：公开面载体三者俱缺（docs/ + CONTRIBUTING.md + .github/）⇒
+      // 公开面无从派生，也就无从检查。跳过的就是**公开面这一整块**（含计数同步——它数的文件同样不随
+      // 包分发）；计数面在底部自检里另有一次独立执行，不会因这条跳过而整体失踪。判据本体在 lib
+      // （publicFaceDocsAbsent）：只按 docs/ 在不在分流，会把「docs/ 被裁掉、其余公开面还在」的检出
+      // 一并放过——那正是整块判据静默失效的形态。
       if (publicFaceDocsAbsent(REPO_ROOT)) {
         console.log(PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE);
         return;

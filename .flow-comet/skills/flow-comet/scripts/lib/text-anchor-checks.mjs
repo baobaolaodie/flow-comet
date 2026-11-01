@@ -166,21 +166,29 @@ export function maintainerFacePresent(root = REPO_ROOT) {
   return fs.existsSync(path.join(root, MAINTAINER_DOC_DIR));
 }
 
-// 公开面形态判据（与场景 105 共用同一口径：落点 docs/ 整份在不在，判定同一个 existsSync）：
+// 公开面形态判据（与场景 105 / TA-24 共用同一口径：三份公开面载体是否**俱缺**，判定同一个 existsSync）：
 // package.json 的 files 白名单只带 .flow-comet/skills、.flow-comet/rules 与 scripts/——npm 包
 // （以及安装副本）**本来就不含公开面**。这种形态下「受检条目不在场」是载体的正常形态，不是仓库
 // 缺文件：报成「幽灵条目」会把读者送去修一个不存在的缺陷（与维护者组整组缺席同一类判断）。
 // 判据强度不降：跳过通道只对「整份公开面不存在」开放——docs/ 在而某份文档被删 = 检出被裁坏，
 // 仍走逐条严检并判红（反向构造：权威源检出里移走一份受检文档，缺失照样被点名）。
+// **只看 docs/ 不够（实测缺陷）**：分支 / 稀疏检出 / 误删把 docs/ 整份拿掉时，「本载体不含公开面」
+// 是假话，计数一致性（场景数 / 系统测试集项数锁）、公开产物零代号与词表镜像会整块变成可见 SKIP 并
+// exit 0。故还要求其余公开面载体一并缺席：CONTRIBUTING.md 与 .github/ 都进版本控制、都不进 npm
+// tarball，任一在场即证明本检出是仓库（只是被裁坏了），必须逐条严检并判红。README 刻意不作判据：
+// npm 发布时会强制包含它，用它判断等于把包形态整块误判成「有公开面」，跳过通道反而失效。
 export const PUBLIC_FACE_DOCS_DIR = 'docs';
+export const PUBLIC_FACE_CARRIER_PATHS = ['CONTRIBUTING.md', '.github'];
 export function publicFaceDocsAbsent(root = REPO_ROOT) {
-  return !fs.existsSync(path.join(root, PUBLIC_FACE_DOCS_DIR));
+  return !fs.existsSync(path.join(root, PUBLIC_FACE_DOCS_DIR))
+    && PUBLIC_FACE_CARRIER_PATHS.every((rel) => !fs.existsSync(path.join(root, rel)));
 }
 // 跳过提示的措辞是判据的一部分（SKIP = 未校验，不是通过）：读者既不该把「此形态不含公开面」读成
 // 「公开面已检查且通过」，也不该读成「仓库缺文件」——那是两个方向相反的误读。
 export const PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE = 'SKIP: 公开面自检（计数一致性 / 公开产物零代号 / 词表镜像）'
-  + '——此形态不含公开面：' + PUBLIC_FACE_DOCS_DIR + '/ 整份不在本检出（npm 包按 package.json 的'
-  + ' files 白名单、安装副本按安装面，携带的都只是技能树与 scripts/，公开文档不随分发包走）——'
+  + '——此形态不含公开面：' + [PUBLIC_FACE_DOCS_DIR + '/', ...PUBLIC_FACE_CARRIER_PATHS].join('、')
+  + ' 都不在本检出（npm 包按 package.json 的 files 白名单、安装副本按安装面，携带的都只是技能树与'
+  + ' scripts/，公开文档不随分发包走）——'
   + '「受检条目不在场」是这种载体的正常形态，不是仓库缺文件；本次未校验条目在场与同步、'
   + '公开产物零代号、词表镜像等价性（SKIP = 未校验，不是通过；请在权威源检出重跑本套件）';
 
@@ -189,11 +197,12 @@ export const PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE = 'SKIP: 公开面自检（计�
 // 于是「形态分派对不对」成了常驻断言，不必等到在包形态里整跑一次套件才知道。
 // 形态三向（分派先于任何内容判据）：
 //   ① 权威源检出 + 公开面在场 → 全套判据（计数一致性 / 维护文档机检 / 公开产物零代号 / 词表镜像）；
-//   ② 权威源检出 + docs/ 整份不在（npm 包形态）→ 整块显式 SKIP：受检条目不在场是这种载体的正常
-//      形态，报成「幽灵条目」会把读者送去修一个不存在的缺陷；
+//   ② 权威源检出 + 公开面载体俱缺（docs/、CONTRIBUTING.md、.github/ 都不在 = npm 包形态）→ 整块
+//      显式 SKIP：受检条目不在场是这种载体的正常形态，报成「幽灵条目」会把读者送去修一个不存在的缺陷；
 //   ③ 安装副本（无技能树锚）→ 词表镜像判据「不适用」说明（主仓私有面结构性缺席）。
 // 跳过一律**可见但不算通过**（SKIP = 未校验），且跳过的粒度只有「整份面缺席」——docs/ 在场而某份
-// 受检文档被删仍逐条判红（判据强度不降；计数本体仍是 countSyncProblems，与场景共用同一实现）。
+// 受检文档被删仍逐条判红；docs/ 不在而 CONTRIBUTING.md / .github/ 在场同样判红（那是被裁坏的仓库，
+// 不是「不含公开面」的载体）。判据强度不降；计数本体仍是 countSyncProblems，与场景共用同一实现。
 // 技能树锚点的相对形态（字面量仍由 test-fixtures 的 AUTHORITATIVE_SOURCE_ANCHOR 单点拥有，这里只做
 // 相对化）：任意受检根上的「本检出是不是权威源」与真实检出同判据，不另写第二份。
 export const AUTHORITATIVE_SOURCE_ANCHOR_REL = path
@@ -243,8 +252,10 @@ export async function publicFaceSelfCheck({ root = REPO_ROOT, scriptsDir = SCRIP
       notices: [],
     };
   }
-  // ② 包形态（技能树锚在、docs/ 整份不在）：受检条目不在场是这种载体的正常形态，不是仓库缺文件——
-  // 报成幽灵条目会把读者送去修一个不存在的缺陷。跳过 ≠ 通过，提示必须带「未校验」。
+  // ② 包形态（技能树锚在、docs/ + CONTRIBUTING.md + .github/ 三者俱缺）：受检条目不在场是这种载体
+  // 的正常形态，不是仓库缺文件——报成幽灵条目会把读者送去修一个不存在的缺陷。跳过 ≠ 通过，提示必须
+  // 带「未校验」。判据只在三者俱缺时成立：docs/ 被裁掉而其余载体还在时，走下一条逐条严检（那是被裁坏
+  // 的仓库，不是不含公开面的载体）。
   if (publicFaceDocsAbsent(root)) {
     return {
       skip: { reason: 'package-without-public-face', notice: PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE },

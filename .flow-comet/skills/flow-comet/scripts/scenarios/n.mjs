@@ -46,6 +46,7 @@ import {
   SCENARIO_COUNT_FILES,
   SYSTEM_TEST_COUNT_FILES,
   maintainerFacePresent,
+  publicFaceDocsAbsent,
   publicFaceSelfCheck,
   singleSourceImportProblems,
 } from '../lib/text-anchor-checks.mjs';
@@ -55,9 +56,9 @@ import {
 const REGISTRY_FILE = path.join(SCRIPTS_DIR, '..', 'reference', 'artifact-templates.json');
 const CHANGE_DIR = '.specs/' + CHANGE_ID;
 const SKILLS_ROOT = path.join(SCRIPTS_DIR, '..', '..');
-// 公开文档面的形态判据：权威映射（公开文档面的唯一声明处）。它在场 = 本检出声明了公开文档面；
-// 它整份缺席 = 合法的不含公开文档形态（安装副本只带技能树；npm 包按 files 白名单不含 docs/）。
-const PUBLIC_FACE_MAP = 'docs/authority-map.json';
+// 公开文档面的形态判据来自 lib 的 publicFaceDocsAbsent（与底部自检、场景 105 同一实现）：本组不再
+// 自持第二套（曾按 docs/authority-map.json 是否在场分流，与 lib 的 docs/ 判据各说各话）。
+// 只按 docs/ 在不在也不够——分支 / 稀疏检出 / 误删把 docs/ 拿掉时，整块判据会变成可见 SKIP。
 
 let registryMemo;
 function artifactRegistry() {
@@ -561,15 +562,16 @@ function repoFileExists(rel) {
   return fs.existsSync(path.join(REPO_ROOT, ...rel.split('/')));
 }
 
-// 公开面缺席判据（同一实现驱动真实断言与变异探针）：本检出声明了公开文档面时（权威映射在场），
-// 该面任何一份文档缺席都是判据失效——「两份机制册都被删」若只落一条 SKIP，公开面机制文档整份
-// 消失而套件仍绿。缺席的读法不能由「少了哪份文件」自行决定：只有整面不声明（权威映射缺席）才是
-// 合法的「不在本检出」，由调用方输出可见 SKIP 并声明未校验。
+// 公开面缺席判据（同一实现驱动真实断言与变异探针）：形态判据认定本检出带公开面时（docs/、
+// CONTRIBUTING.md 或 .github/ 任一在场，见 lib 的 publicFaceDocsAbsent），该面任何一份文档缺席都是
+// 判据失效——「两份机制册都被删」若只落一条 SKIP，公开面机制文档整份消失而套件仍绿。缺席的读法
+// 不能由「少了哪份文件」自行决定：只有整份载体俱缺才是合法的「不在本检出」，由调用方输出可见 SKIP
+// 并声明未校验。
 function publicFaceAbsenceProblems(docs) {
   const missing = [...docs].filter(([, text]) => typeof text !== 'string').map(([rel]) => rel);
   if (missing.length === 0) return [];
   return ['公开面文档不在检出面: ' + missing.join('、')
-    + '（本检出已声明公开文档面 ' + PUBLIC_FACE_MAP + '；文档缺席即判据失效，不是「本次未校验」）'];
+    + '（形态判据认定本检出带公开面，未走跳过通道；文档缺席即判据失效，不是「本次未校验」）'];
 }
 
 // 文本判据（同一函数驱动真实断言与变异探针）：rules = [{ rel, label, include[], exclude[] }]。
@@ -608,15 +610,19 @@ function assertProbesDiscriminate(problems, docs, rules, probes) {
   }
 }
 
-// 公开面自检的**形态分派**（判定本体在 lib：publicFaceSelfCheck）——三种载体形态各造一个临时根、驱动
+// 公开面自检的**形态分派**（判定本体在 lib：publicFaceSelfCheck）——各载体形态各造一个临时根、驱动
 // 同一判定，分派对错因此成为常驻断言，不必等到在包形态里整跑一次套件才知道：
-//   ① 包形态（技能树锚在场、docs/ 整份不在）→ SKIP 通知 + 零问题：这种载体本来就不带公开面，
-//      「受检条目不在场」是它的正常形态；报成幽灵条目会把读者送去修一个不存在的缺陷；
+//   ① 包形态（技能树锚在场、docs/ + CONTRIBUTING.md + .github/ 三者俱缺）→ SKIP 通知 + 零问题：
+//      这种载体本来就不带公开面，「受检条目不在场」是它的正常形态；报成幽灵条目会把读者送去修一个
+//      不存在的缺陷；
 //   ② 权威源形态完整（受检面文件照真迹复制，计数自然同步）→ 零问题（判据不是恒红的摆设）；
 //   ③ 同一根上移走一份受检文档（docs/VERSIONS.md）→ 必须报问题并点名该文件——跳过通道只对
 //      「整份公开面不存在」开放，判据没有顺手放宽；
-//   ④ 安装副本形态（无技能树锚）→ 词表镜像判据的「不适用」说明 + 零问题。
-// 形态本身同样由既有判据派生（技能树锚 + docs/），夹具不另写一套形态判据。
+//   ④ 安装副本形态（无技能树锚）→ 词表镜像判据的「不适用」说明 + 零问题；
+//   ⑤ 半包形态（docs/ 整份不在，但 CONTRIBUTING.md 或 .github/ 在场）→ 必须照跑全判据并判红：
+//      这两份同样不进 npm tarball，任一在场即证明本检出是仓库（只是被裁坏了）；只按 docs/ 分流会让
+//      分支 / 稀疏检出 / 误删把整块判据变成 SKIP 并 exit 0。
+// 形态本身同样由既有判据派生（技能树锚 + publicFaceDocsAbsent），夹具不另写一套形态判据。
 
 // 受检面文件清单（照真迹复制的范围）= 公开产物零代号清单 ∪ 计数受检清单 ∪ 词表私有面：
 // 三面齐了同一次判定才可能零问题——少一面就会以问题形态暴露，夹具不会悄悄缩小判据面。
@@ -643,11 +649,12 @@ async function assertPublicFaceSelfCheckShapes(dir) {
   };
   const describe = (result) => result.problems.map((problem) => problem.name + ': ' + problem.error).join('; ')
     || '（零问题）';
-  // ① 包形态：分派若改成「照跑全套」，这里会报一串「受检条目文件缺失（幽灵条目）」——正是要拦的形态
+  // ① 包形态（docs/ + CONTRIBUTING.md + .github/ 三者俱缺）：分派若改成「照跑全套」，这里会报一串
+  // 「受检条目文件缺失（幽灵条目）」——正是要拦的形态
   const packaged = await publicFaceSelfCheck({ root: shapeRoot('package') });
   if (packaged.problems.length > 0) {
-    throw new Error('包形态（技能树锚在、docs/ 整份不在）不得报问题——受检条目不在场是这种载体的正常形态，'
-      + '报出来就是幽灵条目: ' + describe(packaged));
+    throw new Error('包形态（技能树锚在、docs/ 与 CONTRIBUTING.md / .github/ 俱缺）不得报问题——'
+      + '受检条目不在场是这种载体的正常形态，报出来就是幽灵条目: ' + describe(packaged));
   }
   if (packaged.skip === null || packaged.skip.reason !== 'package-without-public-face') {
     throw new Error('包形态应命中显式跳过分支（skip.reason=package-without-public-face）: '
@@ -680,6 +687,23 @@ async function assertPublicFaceSelfCheckShapes(dir) {
   }
   if (!installed.skip.notice.includes('不适用')) {
     throw new Error('安装副本形态的跳过提示必须写明「不适用」（不适用 ≠ 已校验）: ' + installed.skip.notice);
+  }
+  // ⑤ 半包形态（docs/ 整份不在，但 CONTRIBUTING.md 或 .github/ 在场）：必须是判红，不得复用包形态的
+  // 跳过通道——否则分支 / 稀疏检出 / 误删把 docs/ 拿掉时，计数一致性、公开产物零代号与词表镜像会整块
+  // 变成可见 SKIP 并 exit 0。两份载体分开造根：任一单独在场都足以证明本检出是仓库而不是「本来不带
+  // 公开面」的 npm 包 / 安装副本（两者都不进 npm tarball；README 会被 npm 强制包含，不作判据）。
+  for (const carrier of ['CONTRIBUTING.md', '.github/workflows/ci.yml']) {
+    const partial = shapeRoot('docs-less-' + carrier.split('/')[0].replace(/\./g, ''));
+    writeFile(partial, carrier, '');
+    const partialResult = await publicFaceSelfCheck({ root: partial });
+    if (partialResult.skip !== null) {
+      throw new Error('docs/ 不在但 ' + carrier + ' 在场不得命中跳过分支（skip.reason='
+        + partialResult.skip.reason + '）——该形态下公开面判据会整块变成 SKIP 并 exit 0');
+    }
+    if (!partialResult.problems.some((problem) => problem.name === '计数一致性')) {
+      throw new Error('docs/ 不在但 ' + carrier + ' 在场时必须照跑计数一致性并判红，实际: '
+        + describe(partialResult));
+    }
   }
 }
 
@@ -2318,10 +2342,11 @@ export const ENTRIES = [
   // 「完全继承 / 段名在运行时派生」这类 overclaim；机制册的「哪些节点查段名」表覆盖全部出口；
   // 故障排查给出两阶段报错指引；工件保真条点明本仓增量段。
   //
-  // 缺席的**两种读法**（判据面形态先判，再判内容）：本检出声明了公开文档面（权威映射在场）时，
-  // 该面任何一份文档缺席都是判据失效——「两份机制册都被删」= 公开面机制文档不在检出面，判红，
-  // 不能只落一条 SKIP；只有整面不声明（安装副本只带技能树、npm 包按 files 白名单不含 docs/）
-  // 才是合法的「本检出没有这一面」，此时输出可见 SKIP 并明确写「本次未校验」，仍不算通过。
+  // 缺席的**两种读法**（判据面形态先判，再判内容）：本检出带公开面（docs/、CONTRIBUTING.md 或
+  // .github/ 任一在场）时，该面任何一份文档缺席都是判据失效——「两份机制册都被删」= 公开面机制
+  // 文档不在检出面，判红，不能只落一条 SKIP；只有整份载体俱缺（安装副本只带技能树、npm 包按 files
+  // 白名单不含 docs/ 与 CONTRIBUTING / .github）才是合法的「本检出没有这一面」，此时输出可见 SKIP
+  // 并明确写「本次未校验」，仍不算通过。
   {
     name: 'TA-24 公开面口径：5 对双语去除 overclaim，机制表覆盖全出口，缺席即红（整面缺席才 SKIP）',
     run: async (dir) => {
@@ -2332,11 +2357,15 @@ export const ENTRIES = [
         ['docs/MECHANISM.md', 'docs/MECHANISM-zh.md'],
         ['docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md'],
       ];
-      // 形态判据先于内容判据：权威映射缺席 = 本检出不含公开文档（安装副本 / npm 包形态），
-      // 整面输出一条可见 SKIP——不是「已校验」，也不把合法形态判红。
-      if (!repoFileExists(PUBLIC_FACE_MAP)) {
-        console.log('SKIP: TA-24 的公开面口径判据（此形态不含公开文档：' + PUBLIC_FACE_MAP + ' 不在本检出）——'
-          + '本次检出未校验 5 对双语公开文档的 overclaim / 机制表 / 排查指引口径，请在权威源检出重跑本套件（未验证 ≠ 通过）');
+      // 形态判据先于内容判据：公开面载体整份缺席 = 本检出不含公开文档（安装副本 / npm 包形态），
+      // 整面输出一条可见 SKIP——不是「已校验」，也不把合法形态判红。判据本体走 lib 的
+      // publicFaceDocsAbsent（与底部自检、场景 105 同一实现）：本场景不再自持第二套（曾按
+      // docs/authority-map.json 在不在分流）；单看 docs/ 也不够——它被裁掉而 CONTRIBUTING.md /
+      // .github/ 还在时，这五对文档的判据会整块变成 SKIP。
+      if (publicFaceDocsAbsent(REPO_ROOT)) {
+        console.log('SKIP: TA-24 的公开面口径判据（此形态不含公开文档：docs/、CONTRIBUTING.md 与 .github/'
+          + ' 都不在本检出）——本次检出未校验 5 对双语公开文档的 overclaim / 机制表 / 排查指引口径，'
+          + '请在权威源检出重跑本套件（未验证 ≠ 通过）');
         return;
       }
       // 形态分派自身的常驻判别力锚：临时根上驱动同一判定，分派对错不再只能靠「在包形态里整跑一次
