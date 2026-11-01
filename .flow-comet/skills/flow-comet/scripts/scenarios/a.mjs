@@ -785,6 +785,16 @@ export const ENTRIES = [
       const returnStatus = runState(['status'], dir);
       assertExit(returnStatus, 0);
       const returnRouteNode = (returnStatus.output.match(/"routeNode":\s*"([^"]+)"/) ?? [])[1];
+      // 回程态的解释面同源：next 的 WHY: 说「回程源节点 review…」，ROUTE: 行也必须给出同一原因——
+      // 否则 derived=verify 与 route=review 并排却不说明为什么，读起来就像产物推导指向 review
+      // （缺这条分支时正好如此）。同一停留原因有四个输出面，少一个就分叉一个。
+      const returnRouteLine = returnStatus.output.split('\n').find((line) => line.startsWith('ROUTE: '));
+      if (!returnRouteLine) throw new Error('status 缺少 ROUTE: 诊断行\n实际输出:\n' + returnStatus.output);
+      for (const token of ['route=review', '回程', '产物在场且未出口', '保留源节点 review 跑出口']) {
+        if (!returnRouteLine.includes(token)) {
+          throw new Error('回程态 ROUTE: 行缺少 ' + token + '：' + returnRouteLine);
+        }
+      }
       const returnNext = runState(['next'], dir);
       assertExit(returnNext, 0);
       assertOut(returnNext, 'RETURN: 回程源节点 review');

@@ -311,8 +311,10 @@ export async function resolveNodeView({ changeName, protocol, state }) {
 }
 
 // 人读诊断（status）：JSON 块之后的一行三视图对账——derived = 产物推导、state = state 原值、
-// route = 路由视图（= next 的 NODE）；进行中时点名「先 exit」的恢复动作；Fix 归位态点名「先按
-// next 的 FIX-BATCH 归位」——此时源节点的 exit 会被 Fix 批次门禁拦下，指引不得指向它。
+// route = 路由视图（= next 的 NODE）；尾部原因与 printWhyLine 的分支一一对应（同一停留原因在四个
+// 输出面上说同一句话）：Fix 归位态点名「先按 next 的 FIX-BATCH 归位」——此时源节点的 exit 会被 Fix
+// 批次门禁拦下，指引不得指向它；回程态说明「产物在场且未出口、保留源节点跑出口」——否则两列并排
+// 却不给原因，读起来就是「产物推导指向源节点」；进行中点名「先 exit 该节点」。
 // 前缀严格为 `ROUTE: `。
 // BLOCKED 态（route=null）与 next 的实际行为一致：next 此刻不打印 NODE 而是直接 BLOCKED，ROUTE: 行
 // 因此明确写「next 将 BLOCKED：<原因>」并把人推回恢复指引，而不是编一个节点让人去跑。
@@ -324,9 +326,11 @@ function formatRouteLine(view) {
   }
   const tail = view.fixRollbackTarget
     ? '；Fix 批次：先按 next 的 FIX-BATCH 归位 ' + view.fixRollbackTarget + ' 并跑完其出口'
-    : (view.inProgress
-      ? '；进行中：' + view.stateNode + ' 已 entry 未 exit——先 exit ' + view.stateNode + ' 再推进'
-      : '');
+    : (view.fixReturnTarget
+      ? '；回程：产物在场且未出口——保留源节点 ' + view.routeNode + ' 跑出口'
+      : (view.inProgress
+        ? '；进行中：' + view.stateNode + ' 已 entry 未 exit——先 exit ' + view.stateNode + ' 再推进'
+        : ''));
   return head + ' route=' + (view.routeNode ?? 'null') + '（路由视图）' + tail;
 }
 
