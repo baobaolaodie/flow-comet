@@ -1482,9 +1482,10 @@ export const ENTRIES = [
   // 80: handoff result 的 Return Contract 校验——① 无效 commitHash → HANDOFF ERROR（固化：校验已存在（W2-D），经确认）；
   // ② 形状校验：与 record 共用 state-schema.evidencePayloadProblems，畸形契约在写盘**之前**被拒（exit 1 +
   //    点名字段路径与当前类型 + 可照抄形态），state 字节零改写——问题不再延后到出口门禁才暴露；
+  //    非对象载荷（字符串 / 数组 / null / 数字）在入口即拒（与 record 入口同一判据，形状表对非对象按设计放行）；
   // ③ 零提交语义（request 记 noCommit）与合法契约不受形状校验影响。
   {
-    name: '80 handoff result 契约校验：无效 commitHash → ERROR；畸形形状写入前拒绝',
+    name: '80 handoff result 契约校验：无效 commitHash → ERROR；非对象与畸形形状写入前拒绝',
     run: (dir) => {
       writeState(dir, baseState('subagent-execute'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
@@ -1527,6 +1528,29 @@ export const ENTRIES = [
       assertOut(lastMalformed, '"completedChecks":["required-skill:subagent-execute.flow-comet-dev"]');
       assertOut(lastMalformed, 'DONE_WITH_CONCERNS');
       assertOut(lastMalformed, '--json-file');
+      // ②b 非对象契约（字符串 / 数组 / null / 数字）在入口即拒——与 record 入口同一判据。形状表只判
+      // 「对象各字段的类型」，载荷不是对象时它按设计返回空表；旧实现在这里放行，于是字符串或数组被
+      // 原样存进 handoffResult，问题延后到出口门禁（那里只会说「缺 greenEvidence」「缺 completedChecks」
+      // ——出错的是 result、报错的却是 exit）。JSON 解析失败且不形似对象字面量的纯文本走同一条拒路：
+      // 旧语义「解析失败则存原始字符串」正是同一形态的延后。判据在任何写盘之前 → 逐条断言报文与字节零改写。
+      const nonObjectContracts = [
+        { payload: '"just a string result"', type: 'string' },
+        { payload: 'just a plain text result', type: 'string' },
+        { payload: '[{"status":"DONE"}]', type: 'array' },
+        { payload: 'null', type: 'null' },
+        { payload: '42', type: 'number' },
+      ];
+      let lastNonObject = null;
+      for (const item of nonObjectContracts) {
+        const res = runHandoff(['result', 'T05', item.payload], dir);
+        assertExit(res, 1);
+        assertOut(res, 'result 契约必须是对象（当前是 ' + item.type + '）');
+        assertStateBytesUnchanged(dir, before, 'handoff result 非对象契约（' + item.payload + '）');
+        lastNonObject = res;
+      }
+      // 非对象的拒绝同样要给「该写成什么」：可照抄的对象形态，以及引号被 shell 吞掉时的旁路
+      assertOut(lastNonObject, '"completedChecks":["required-skill:subagent-execute.flow-comet-dev"]');
+      assertOut(lastNonObject, '--json-file');
       // ③ 零提交语义保持可用：request 记 noCommit:true → 契约无 commitHash 照常记录（形状校验不误伤）
       const zeroState = JSON.parse(before);
       zeroState.evidence['subagent-execute'].handoffRequests = { T03: { description: 'zero commit', noCommit: true } };

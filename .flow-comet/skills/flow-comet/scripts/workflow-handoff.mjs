@@ -97,6 +97,17 @@ async function resolveJsonFileWithinRunRoot(jsonFile) {
   return abs;
 }
 
+// Return Contract 的拒绝报文恢复段（单一表达处）：非对象载荷与形状不合法这两条拒绝都引用它——
+// 「该写成什么」与「哪里不合法」是同一份契约的两个面，各写一份字面量必然漂移。
+function returnContractRecovery(taskId) {
+  return '{"status":"DONE","taskId":"' + taskId + '","commitHash":"<git commit sha>",'
+    + '"completedChecks":["required-skill:subagent-execute.flow-comet-dev"],'
+    + '"redEvidence":{"command":"<RED 失败测试命令>","output":"<真实失败输出片段>"},'
+    + '"greenEvidence":{"command":"<GREEN 通过测试命令>","output":"<真实通过输出片段>"}}'
+    + '；零提交任务可省略 commitHash（request 记 noCommit 时不必回传该字段）；'
+    + '载荷里的引号被 shell 吞掉时改用 --json-file <path> 传入 JSON 文件';
+}
+
 // writeFiles 段感知 glob 匹配:按 / 分段,`*` 只匹配段内任意字符(不跨段);
 // 精确条目要求完全相等(不用前缀匹配——src/foo 不得匹配 src/foobar);
 // 段内含 * 的部分通配(如 src/*.test.js、src/*.mjs)转锚定正则匹配
@@ -649,7 +660,8 @@ async function main() {
       raw = await fs.readFile(await resolveJsonFileWithinRunRoot(jsonFile), 'utf8');
     }
     if (!taskId) { console.error('Usage: workflow-handoff.mjs result <task-id> <result>'); process.exit(1); }
-    // W1-D: 尝试解析 JSON（Return Contract）——解析失败则存原始字符串
+    // 尝试解析 JSON（Return Contract）：解析失败时，形似对象字面量的在下方 fail-closed（不写 handoffResult），
+    // 其余纯文本由紧随其后的「必须是对象」入口判据拒绝——旧语义「解析失败则存原始字符串」已移除
     let parsed = raw;
     try { parsed = JSON.parse(raw); } catch {
       // 契约解析失败 fail-closed:payload 形似对象但 JSON.parse 失败 → 报错并
@@ -669,6 +681,18 @@ async function main() {
         process.exit(1);
       }
     }
+    // 载荷本身必须是对象（入口判据，先于形状校验与任何写盘；与 workflow-state record 入口同一判据）：
+    // JSON 可解析但**不是对象**的契约（null / 数组 / 字符串 / 数字）旧实现一路放行——判定单一来源
+    // evidencePayloadProblems 按设计只判「对象各字段的类型」，载荷不是对象时它返回空表，于是字符串
+    // 或数组被原样存进 handoffResult：出错的是 result，报错的却是出口（那里只会说「缺 greenEvidence」
+    // 「缺 completedChecks」）。JSON 解析失败且不形似对象字面量的纯文本同走这条拒路（旧语义「解析
+    // 失败则存原始字符串」是同一形态的延后）。本判据在**任何写盘之前**拦下，state 字节零改写。
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      const payloadTypeName = parsed === null ? 'null' : (Array.isArray(parsed) ? 'array' : typeof parsed);
+      console.error('HANDOFF ERROR: result 契约必须是对象（当前是 ' + payloadTypeName + '）——写入前拒绝，state 未改写');
+      console.error('恢复: 用对象形态的 Return Contract 重试（可照抄形态）: ' + returnContractRecovery(taskId));
+      process.exit(1);
+    }
     // 形状校验（写入前 fail-closed；判定单一来源 = state-schema.evidencePayloadProblems，与 record
     // 共用同一函数）：类型错误的 Return Contract 若落库，问题会延后到出口门禁——那里只会报
     // 「缺 commitHash / 缺 greenEvidence」，或把对象元素判成「缺 completedChecks」，出错的是 result、
@@ -682,13 +706,7 @@ async function main() {
       for (const problem of contractProblems) {
         console.error('  ' + problem.field + ': ' + problem.message);
       }
-      console.error('恢复: 用类型合法的 Return Contract 重试（可照抄形态）: '
-        + '{"status":"DONE","taskId":"' + taskId + '","commitHash":"<git commit sha>",'
-        + '"completedChecks":["required-skill:subagent-execute.flow-comet-dev"],'
-        + '"redEvidence":{"command":"<RED 失败测试命令>","output":"<真实失败输出片段>"},'
-        + '"greenEvidence":{"command":"<GREEN 通过测试命令>","output":"<真实通过输出片段>"}}'
-        + '；零提交任务可省略 commitHash（request 记 noCommit 时不必回传该字段）；'
-        + '载荷里的引号被 shell 吞掉时改用 --json-file <path> 传入 JSON 文件');
+      console.error('恢复: 用类型合法的 Return Contract 重试（可照抄形态）: ' + returnContractRecovery(taskId));
       process.exit(1);
     }
     state.evidence = state.evidence || {};
