@@ -559,7 +559,9 @@ async function main() {
     // ② 任务块缺失或块内无 <write_files> 元素 → 任务不可解析，新 change BLOCK，旧 change
     // WARN 且不设 noCommit（防未解析任务静默变零提交逃逸口）；③ TASK.md 读不到同 ②。
     // TASK.md 只读一次：任务开标签属性解析（归属门禁）复用 task-parsing.mjs；
-    // 下方 write_files 元素提取沿用既有实现（该路径的解析策略不在本任务改动面内）。
+    // 写面提取的唯一实现是 lib/lessons-hits.mjs 的 taskWriteFilesById（按 <task …> 逐块取块内元素，
+    // 与出口门禁、开工前命中集打印同源）——本文件不再自带第二份提取正则：旧的「开标签到全文下一个
+    // <write_files>」非贪婪匹配会越过 </task> 取到下一个任务的写面，缺失被别人的白名单顶替。
     const taskFile = state.activeChange
       ? path.join(runRoot, '.specs', state.activeChange, 'TASK.md')
       : null;
@@ -570,18 +572,16 @@ async function main() {
     let taskResolved = false;
     let emptyWriteFilesElement = false;
     if (!writeFiles || writeFiles.length === 0) {
-      if (taskContent !== null) {
-        const taskRegex = new RegExp(`<task[^>]*id="${taskId.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}"[\\s\\S]*?<write_files>([\\s\\S]*?)</write_files>`, 'i');
-        const match = taskContent.match(taskRegex);
-        if (match) {
-          taskResolved = true;
-          // 分号容错：与 workflow-guard.mjs 伪并行启发式同源实现（分号容错双点内联，与 workflow-guard.mjs 同源互锚）
-          // 先剥整块 HTML 注释再拆分——多行注释内容不得混入路径条目（与 workflow-guard 同口径）
-          const files = match[1].replace(/<!--[\s\S]*?-->/g, '').trim().split(/\s*\n\s*/).map(f => f.trim()).filter(Boolean)
-            .flatMap(f => f.split(';')).map(f => f.trim()).filter(Boolean);
-          if (files.length > 0) { writeFiles = files; }
-          else { emptyWriteFilesElement = true; }
-        }
+      // 写面元素原文（键 = 任务 id）：提取只有一处实现（见上方注释），块内没有该元素就是没有。
+      const writeFilesElementText = taskWriteFilesById(taskContent).get(taskId);
+      if (writeFilesElementText !== undefined) {
+        taskResolved = true;
+        // 分号容错：与 workflow-guard.mjs 伪并行启发式同源实现（分号容错双点内联，与 workflow-guard.mjs 同源互锚）
+        // 先剥整块 HTML 注释再拆分——多行注释内容不得混入路径条目（与 workflow-guard 同口径）
+        const files = writeFilesElementText.replace(/<!--[\s\S]*?-->/g, '').trim().split(/\s*\n\s*/).map(f => f.trim()).filter(Boolean)
+          .flatMap(f => f.split(';')).map(f => f.trim()).filter(Boolean);
+        if (files.length > 0) { writeFiles = files; }
+        else { emptyWriteFilesElement = true; }
       }
       if (wfIdx >= 0) { taskResolved = true; emptyWriteFilesElement = false; }
     } else {

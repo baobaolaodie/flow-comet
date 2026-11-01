@@ -345,12 +345,42 @@ export const ENTRIES = [
       // ④ 边界：任务本身不声明写面 → 明确「无可回应条目」，不静默跳过（教训册先复位，命中的判据
       // 才只剩「任务没有写面」这一条）
       writeFile(dir, '.specs/LESSONS.md', lessonsLedger);
+      // 原位扩展（写面提取单一来源 / 不跨任务）：把**未声明写面**的任务放在声明了写面的任务之前——
+      // 按块取的提取不越过 </task>，缺失就是缺失；旧实现用「<task id=…> 到全文下一个 <write_files>」
+      // 的单条非贪婪正则，会取到下一个任务的写面：同一次 request 一边打印「未声明 write_files」，
+      // 一边把下一个任务的路径记成本任务的提交边界（提交子集校验随后按别人的白名单放行）。
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n'
         + '<task id="P03" status="done" parallel="true"><action>无写文件任务</action>'
-        + '<verify>node --check src/p3.mjs</verify></task>\n');
+        + '<verify>node --check src/p3.mjs</verify></task>\n'
+        + '<task id="P04" status="pending" parallel="true"><action>相邻任务</action>'
+        + '<write_files>src/p04.mjs</write_files><verify>node --check src/p04.mjs</verify></task>\n');
       const reqNoWriteFiles = runHandoff(['request', 'P03', 'no write files'], dir);
       assertExit(reqNoWriteFiles, 0);
       assertOut(reqNoWriteFiles, '无可回应条目（任务 P03 未声明 write_files）');
+      // 同一次 request 的另一半：写面不可解析 → 渐进提示（旧 change 不阻断），且不记录写面
+      assertOut(reqNoWriteFiles, '委托任务不可解析');
+      const stNoWrite = JSON.parse(readStateBytes(dir));
+      const reqNoWrite = stNoWrite.evidence?.['subagent-execute']?.handoffRequests?.P03;
+      if (!reqNoWrite) {
+        throw new Error('写面不可解析的 request 仍应照常记录（旧 change 渐进），实际 evidence: '
+          + JSON.stringify(stNoWrite.evidence));
+      }
+      if (Array.isArray(reqNoWrite.writeFiles) && reqNoWrite.writeFiles.length > 0) {
+        throw new Error('未声明写面的任务不得记录写面，实际: ' + JSON.stringify(reqNoWrite.writeFiles));
+      }
+      if (JSON.stringify(stNoWrite).includes('src/p04.mjs')) {
+        throw new Error('未声明写面的任务把相邻任务的路径记进了 state（跨任务取值）: ' + JSON.stringify(reqNoWrite));
+      }
+      // 同一份 TASK 在**新 change** 下：写面缺失必须在入口 BLOCK——旧实现借来相邻任务的写面，request
+      // 因而放行，越界要等到提交子集校验才炸。BLOCK 路径 state 字节零改写。
+      const newChangeState = baseState('subagent-execute');
+      newChangeState.newChange = true;
+      writeState(dir, newChangeState);
+      const bytesBeforeBlock = readStateBytes(dir);
+      const reqNoWriteNew = runHandoff(['request', 'P03', 'no write files new change'], dir);
+      assertExit(reqNoWriteNew, 1);
+      assertOut(reqNoWriteNew, 'BLOCKED: 委托任务不可解析');
+      assertStateBytesUnchanged(dir, bytesBeforeBlock, '写面缺失的新 change request');
       // ⑤ 边界：TASK.md 里没有该任务（写面由显式参数给出）→ 同样给出明确说明
       const reqNoTask = runHandoff(['request', 'P99', 'no such task', '--write-files', 'src/p99.mjs'], dir);
       assertExit(reqNoTask, 0);
