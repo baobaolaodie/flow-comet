@@ -26,7 +26,6 @@ import {
   TASK_P1,
   customProtocolWithSkillCall,
   handoffFor,
-  isAuthoritativeSourceRepo,
   summaryContent,
   writeCustomProtocol,
   writeIntakeArtifacts,
@@ -41,6 +40,7 @@ import {
 import {
   PUBLIC_FACE_DOCS_DIR,
   PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE,
+  authoritativeSourceAt,
   countSyncProblems,
   publicFaceDocsAbsent,
 } from '../lib/text-anchor-checks.mjs';
@@ -594,7 +594,9 @@ export const ENTRIES = [
   {
     name: '105 计数一致性自检同步 + 公开面机器字段名黑名单 + --preflight 锚 + 权威源设计形态锚（AC-8 / AC-14）',
     run: async (dir) => {
-      if (!isAuthoritativeSourceRepo()) {
+      // 权威源判定走 lib 的同一份探针（authoritativeSourceAt：与真实检出同一技能树锚，可带受检根）——
+      // 本场景不再自持一份前置判定，形态问题只有一处说了算。
+      if (!authoritativeSourceAt()) {
         // 安装副本：无公开文档面，也无「权威源打印设计形态」这回事——跳过必须可见。
         console.log('SKIP: 公开面与设计形态判据（安装副本检出：本检出无 .flow-comet/skills/flow-comet/SKILL.md）'
           + '——本次未校验公开面键名黑名单 / 命令锚，也未校验恢复命令的脚本路径是否为权威源设计形态'
