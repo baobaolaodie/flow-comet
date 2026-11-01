@@ -228,8 +228,8 @@ export const ENTRIES = [
       installSkillTreeCopy(dir, path.join('.claude', 'skills'));
       assertPrintedCommandTargetsInstalledScript(recordCommand, dir, 'workflow-state.mjs', '恢复命令');
       assertPrintedCommandTargetsInstalledScript(skillLoadCommand, dir, 'workflow-state.mjs', '前置声明命令');
-      // ④ 照抄打印出来的两条命令并真实执行（不是 harness 的绝对脚本路径）：先声明（报文在 record 行
-      // 之下给出的那条）、再 record。走通这两步才说明「一条报文 = 一条恢复路径」。
+      // ④ 照抄打印出来的两条命令并真实执行（不是 harness 的绝对脚本路径）：按报文给出的执行顺序
+      // 先声明、再 record。走通这两步才说明「一条报文 = 一条恢复路径」。
       const resDeclared = runPrintedCommand(skillLoadCommand, dir, {
         FLOW_COMET_RUN_ROOT: dir,
         FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir),
