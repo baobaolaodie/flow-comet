@@ -14,7 +14,7 @@
 
 ### 新增
 
-- **引擎能在节点收尾之前告诉你某份任务摘要还缺什么**：`workflow-guard.mjs exit <节点> --preflight` 只跑结构性门禁——声明工件在场、摘要关键段、模板骨架、入口骨架——不写 state、不写提示账本，且不允许与 `--apply` 同时使用。两册执行技能与两处运行期提示都改为指向它，完整 `exit`（不带 `--apply`）仍是节点收尾的全链预演。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **引擎能在节点收尾之前告诉你某份任务摘要还缺什么**：`workflow-guard.mjs exit <节点> --preflight` 只跑结构性门禁——声明工件在场、摘要关键段、模板骨架、入口骨架——不写 state、不写提示账本，且不允许与 `--apply` 同时使用。只有归档步骤才会产出的工件，在预检时点只报告「归档执行后才会生成」，不要求在场。两册执行技能与两处运行期提示都改为指向它，完整 `exit`（不带 `--apply`）仍是节点收尾的全链预演。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 
 ### 变更
 
@@ -27,13 +27,13 @@
 - **`handoff result` 在写入前校验回传契约**：证据块不是对象、`completedChecks` 的元素不是字符串、commit hash 不是字符串，都会立刻失败并点名字段路径与当前类型；零提交的任务仍可省略 hash。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 - **`handoff request` 直接列出本任务要回应的教训**：它打印的 `LESSONS-HITS` 与出口重算用的是同一实现，回应可以一次写对，而不必等到出口才发现缺项。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 - **`handoff` 拒绝非对象契约，也不再借用写面**：不是对象的结果载荷（裸字符串、数组、`null`、数字）在入口即拒绝，不再原样存下；没有 `<write_files>` 的任务也不再继承下一个任务的写面——新 change 下请求会直接被拦，而不是放行到提交子集校验才炸。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
-- **路由被拦时 `status` 不再给出节点**：在 `next` 拒绝推进的两种状态下，它不报路由节点并在 `ROUTE` 行说明原因；`record` 也不再声称下一个节点；回程路径会给出 `WHY` 行。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **路由被拦时 `status` 不再给出节点**：凡是 `next` 拒绝推进的状态（修复批次轮次用完、修复批次停滞、节点看起来还没 exit），它都不报路由节点并在 `ROUTE` 行说明原因；`record` 也不再声称下一个节点；回程路径会给出 `WHY` 行。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 - **不含公开文档的载体如实说明**：包形态或安装副本现在打印明确的「未校验」提示，而不是把它自己的缺文件报成仓库缺文件。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 
 ### 修复
 
 - **写成粗体或带理由的"不适用"现在被接受**：校验前剥掉包裹符号（粗体、引用、列表、括号、反引号），含 `**N/A**（理由）`；而 `**见 N/A**` 仍算已填并照常报错。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
-- **恢复提示给出的是能照着跑的命令**：`record` 命令按平台推导、整条加引号、并注明适用哪些 shell；对应测试直接执行打印出来的命令，而不是替换成夹具路径。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **恢复提示给出的是能照着跑的命令**：恢复步骤按必须执行的顺序排列（先声明本节点技能、再补证据），当本次运行用的不是内置协议时会带上 `--protocol`，并且测试执行的就是打印出来的那条命令，而不是替换成夹具路径。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 - **公开机制文档被删除现在会判失败**：文档检查先判形态——携带公开文档权威映射的检出必须携带该面上的每一份公开文档，删掉一份即判失败并点名该文件；只有根本不含公开文档的检出（安装副本的技能树、npm 包）才输出可见的跳过行，且该跳过行仍写明「本次未校验」。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 - **声明为必需却没给路径的工件，两侧现在说同一句**：预检原先跳过这种声明，节点出口则把它算成永远缺失——同一份声明两种说法，其中一种还是没人做得成的指令。现在两侧都阻断，并打印同一句点名该声明要修的话（补一条路径，或把该产物改成可选）。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 - **委托前置门与 `record` 共用一条技能加载声明判据**：`handoff request` 不再把「归档目录后缀恰好也是这个 change id」的别的 change 标记当作本节点声明——两侧都先读活动 `.skill-loads/`，只在它缺席时才回到唯一的归档声明目录，新 change 在自己声明本节点技能之前一律拦住。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
