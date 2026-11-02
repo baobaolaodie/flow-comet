@@ -1532,6 +1532,14 @@ async function runPreflightSkeletonChecks({ node, state }) {
 // 再骨架（段形 / 结构子段），最后 TASK 字段。存在性命中不提前退出——它先把缺件报出来，同轮的结构
 // 门禁照常跑完，最后统一以非零退出收口（同轮报告；结构门禁自己命中时也会非零退出，两者不互相吞掉）。
 export async function runStructuralPreflight({ protocol, node, state }) {
+  // 无活跃 change = 没有可判的结构面：声明工件 / 骨架 / 段 / TASK 字段全按 change 定位，子判据因此
+  // 各自早退，预检会零判据跑完并打印 ALL CHECKS PASSED——「没看」被报成「看过且通过」，与同一 state
+  // 的完整 exit（缺证据 BLOCKED）直接矛盾。只读不等于可以给结论：结论必须与「真的判过」等价，
+  // 所以此处显式声明未校验并非零退出（不打印通过结论）。
+  if (!state.activeChange) {
+    console.error('PREFLIGHT: 未校验（无活跃 change，没有可判的结构面）——先 init / select');
+    process.exit(1);
+  }
   const missingArtifacts = await runDeclaredArtifactExistenceCheck({ protocol, node, state });
   await runSummarySectionsGate({ node, state });
   await runPreflightSkeletonChecks({ node, state });

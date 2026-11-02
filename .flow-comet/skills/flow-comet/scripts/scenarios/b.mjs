@@ -785,6 +785,19 @@ export const ENTRIES = [
       if (fs.readFileSync(stateFile, 'utf8') !== stateBytesBeforePreflight) {
         throw new Error('PREFLIGHT（--preflight）不得改写 state');
       }
+
+      // ---------- 无活跃 change 的预检不得报「通过」（in-place 扩展；不新增场景条目） ----------
+      // 预检的子判据都按 change 定位（声明工件 / 骨架 / 段 / TASK 字段），没有 activeChange 时它们各自
+      // 早退——于是零判据跑完还打印 ALL CHECKS PASSED：这是「没看」被报成「看过且通过」，与只读命令
+      // 应有的结论（同 state 的完整 exit 是 BLOCKED）相互矛盾。判据：无可判结构面 → 非零退出且不得
+      // 出现通过结论；上面那段（有 activeChange 的真实预检）即「正常 change 不受影响」的对照。
+      const noChangeState = baseState('open');
+      delete noChangeState.activeChange;
+      writeState(dir, noChangeState);
+      const noChangePreflight = runGuard(['exit', 'open', '--preflight'], dir);
+      assertExit(noChangePreflight, 1);
+      assertOut(noChangePreflight, 'PREFLIGHT: 未校验（无活跃 change，没有可判的结构面）');
+      assertNotOut(noChangePreflight, 'ALL CHECKS PASSED');
     },
   },
 
