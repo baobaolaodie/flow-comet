@@ -36,6 +36,7 @@ import {
 } from './guard-artifact-skeleton.mjs';
 import { frontendCriterion } from './guard-uidesign.mjs';
 import {
+  declaredRequiredArtifacts,
   evidenceFor,
   findSkillLoadsDir,
   hasEvidenceField,
@@ -44,15 +45,13 @@ import {
   missingRequiredArtifacts,
   missingRequiredSchemaEvidence,
   nextNode,
-  pathPatternExists,
-  schemaMap,
   templateSectionPatterns,
-  workflowArtifactRoot,
+  unspecifiedPathsNotice,
 } from './guard-routing.mjs';
 // 结构化预检（exit --preflight）的子集由既有门禁与既有的产物路径判据组成：本节点声明工件的
-// 存在性复用产物门禁的路径判据（pathPatternExists / workflowArtifactRoot，不另写路径派生），
-// SUMMARY 关键段来自证据/产物门禁族，骨架判据与 TASK 7 字段来自模板保真门禁族——预检自身不
-// 复制段形实现，也不新造一份节点→产物映射。
+// 存在性消费出口产物门禁的**同一条判据**（guard-routing 的 declaredRequiredArtifacts——枚举 +
+// 路径解析 + 在场判定，预检不另写一份），SUMMARY 关键段来自证据/产物门禁族，骨架判据与 TASK 7
+// 字段来自模板保真门禁族——预检自身不复制段形实现，也不新造一份节点→产物映射。
 import { evidenceRecoveryBlock, runSummarySectionsGate } from './guard-evidence-gates.mjs';
 import { evaluateArtifact, formatIssueParts, runTaskSevenFieldGate } from './guard-template-fidelity.mjs';
 // 协调者禁令的常量落在中立模块（跨族共用的措辞不进任何一族）：本模块只是取用方，状态命令族同理。
@@ -1395,65 +1394,81 @@ function declaredArtifactTemplatePointer(declaration, declaredPath) {
   return name ? templatePointerPath(name) : null;
 }
 
-// 本节点声明的 file 类产物是否在场：逐项取协议 outputSchemas 的 artifacts（kind 为 file、required），
-// 同一 artifact 的 paths 是互斥备选（任一路径在场即算在场，与节点完成判定同语义）。只读——不写
-// state、不写提示账本。返回两组（显示路径逐项给出 + 可推导时的模板指针）：
-// missing = 此刻该在场却不在场（缺件，阻断）；deferred = 归档产出（归档执行后才会生成，只报告）。
+// 本节点声明的 file 类产物是否在场：判据由 guard-routing 的 declaredRequiredArtifacts **一处产出**
+// （枚举 outputSchemas → artifacts + <change-id> 替换 + 在场判定），本函数不再自行遍历协议——
+// 只做预检侧的一处**显式过滤**、一处**显式分桶**与归档延后报告：
+//   ① kind：只判 file 类产物（未声明 kind 按文件处置——路径判据本就是文件存在性）。其它 kind 的
+//      「在场」语义不是文件存在性，不在本判据里冒充（不静默扩面）。出口侧刻意不设这条过滤。
+//   ② 未声明 paths（声明不完整）：**仍然阻断**，但走独立的报告桶——报文给的是「修协议」这一条可
+//      执行的下一步，不是「按上述路径创建」那种做不到的指令（没有路径可建）。措辞与出口侧同一句
+//      （unspecifiedPathsNotice），两侧因此不会再对同一份协议给出两种说法。
+//   ③ 归档产出（见 isArchiveProducedPath）：延后报告，归档执行前不可能在场。
+// 只读——不写 state、不写提示账本。返回三组（显示路径逐项给出 + 可推导时的模板指针）：
+// missing = 此刻该在场却不在场（缺件，阻断）；deferred = 归档产出（归档执行后才会生成，只报告）；
+// incomplete = 声明不完整（required 但未声明 paths，阻断，报文指向协议）。
 async function missingDeclaredFileArtifacts({ protocol, node, state }) {
-  if (!state.activeChange) return { missing: [], deferred: [] };
-  const schemas = schemaMap(protocol);
+  if (!state.activeChange) return { missing: [], deferred: [], incomplete: [] };
   const declaration = nodeTemplateDeclaration(node);
   const missing = [];
   const deferred = [];
-  for (const schemaId of node.outputSchemas ?? []) {
-    const schema = schemas.get(schemaId);
-    for (const artifact of schema?.artifacts ?? []) {
-      if (!artifact.required) continue;
-      // 只查 file 类产物（未声明 kind 的产物按文件处置——路径判据本就是文件存在性）：其它 kind 的
-      // 「在场」语义不是文件存在性，不在本判据里冒充（不静默扩面）。
-      if (artifact.kind !== undefined && artifact.kind !== 'file') continue;
-      const declaredPaths = (artifact.paths ?? [])
-        .map((declaredPath) => String(declaredPath).replaceAll('<change-id>', state.activeChange));
-      if (declaredPaths.length === 0) continue;
-      const artifactRoot = await workflowArtifactRoot(artifact.pathBase);
-      const present = (await Promise.all(
-        declaredPaths.map((declaredPath) => pathPatternExists(artifactRoot, declaredPath)),
-      )).some(Boolean);
-      if (present) continue;
-      const displayPaths = declaredPaths.map((declaredPath) => declaredArtifactDisplayPath(artifact.pathBase, declaredPath));
-      const template = declaredPaths
-        .map((declaredPath) => declaredArtifactTemplatePointer(declaration, declaredPath))
-        .find(Boolean) ?? null;
-      const item = { label: displayPaths[0].split('/').pop(), displayPaths, template };
-      // 归档产出延后报告（见 isArchiveProducedPath）：判据要求**全部**备选路径都落在归档根下——
-      // 只要有一条此刻该在场的路径，它仍是真正的前置件，不因同组有归档路径而被放过。
-      if (declaredPaths.every((declaredPath) => isArchiveProducedPath(artifact.pathBase, declaredPath))) {
-        deferred.push(item);
-        continue;
-      }
-      missing.push(item);
+  const incomplete = [];
+  for (const declared of await declaredRequiredArtifacts(protocol, node, state.activeChange)) {
+    if (declared.kind !== undefined && declared.kind !== 'file') continue; // 差异①
+    if (declared.unspecifiedPaths) { // 差异②
+      incomplete.push(unspecifiedPathsNotice(declared.schemaId, declared.artifact.id));
+      continue;
     }
+    if (declared.present) continue;
+    const displayPaths = declared.resolvedPaths
+      .map((declaredPath) => declaredArtifactDisplayPath(declared.artifact.pathBase, declaredPath));
+    const template = declared.resolvedPaths
+      .map((declaredPath) => declaredArtifactTemplatePointer(declaration, declaredPath))
+      .find(Boolean) ?? null;
+    const item = { label: displayPaths[0].split('/').pop(), displayPaths, template };
+    // 归档产出延后报告（见 isArchiveProducedPath，差异③）：判据要求**全部**备选路径都落在归档根下
+    // ——只要有一条此刻该在场的路径，它仍是真正的前置件，不因同组有归档路径而被放过。
+    if (declared.resolvedPaths.every(
+      (declaredPath) => isArchiveProducedPath(declared.artifact.pathBase, declaredPath),
+    )) {
+      deferred.push(item);
+      continue;
+    }
+    missing.push(item);
   }
-  return { missing, deferred };
+  return { missing, deferred, incomplete };
+}
+
+// 声明不完整的报告面：**仍然阻断**（协议本身不完整，放行就等于把 fail-closed 换成静默通过），但
+// 报文指向协议要修——与出口侧同一句（措辞的唯一出处是 guard-routing 的 unspecifiedPathsNotice，
+// 两侧不各写一份）。恢复指引因此也不给「按上述路径创建」：没有路径可建。
+function reportIncompleteDeclarations(node, incomplete) {
+  if (incomplete.length === 0) return;
+  for (const notice of incomplete) console.error('BLOCKED: ' + notice);
+  console.error('恢复: 上面列的是协议声明本身不完整（不是让你去创建某个文件）——给该项补一条 paths，'
+    + '或把 required 改成 false，再重试 exit ' + node.id + ' --preflight');
 }
 
 // 存在性判据的报错编排（BLOCKED，不分新老 change——与出口的产物门禁同判级：工件是否存在是结构事实，
 // 不是「旧 change 的进展宽容」能改写的东西）。返回是否命中，收口退出由 runStructuralPreflight 负责
 // （先让同轮的结构门禁也能报完，缺件不被别的报错抢先吞掉顺序）。
 async function runDeclaredArtifactExistenceCheck({ protocol, node, state }) {
-  const { missing, deferred } = await missingDeclaredFileArtifacts({ protocol, node, state });
+  const { missing, deferred, incomplete } = await missingDeclaredFileArtifacts({ protocol, node, state });
   // 归档产出：只报「归档执行后才会生成」这一事实与它的落点，不报缺件、不给「去创建」的指令——
   // 归档前那条指令不可执行（连 .specs/archive/ 都还不存在），预检也不该把归档的输出当它的前提。
   for (const item of deferred) {
     console.error('归档执行后才会生成（预检不要求在场）: ' + item.label + ' → ' + item.displayPaths.join(' | '));
   }
-  if (missing.length === 0) return false;
+  if (missing.length === 0) {
+    reportIncompleteDeclarations(node, incomplete);
+    return incomplete.length > 0;
+  }
   const items = missing.map((item) => item.label + ' → ' + item.displayPaths.join(' | ')
     + (item.template ? '（模板: ' + item.template + '）' : ''));
   console.error('BLOCKED: 节点 ' + node.id + ' 的声明工件缺失 ' + missing.length + ' 项'
     + '（本节点声明的 file 类产物不在场）: ' + items.join('、'));
   console.error('恢复: 先按上述路径创建缺失工件（段形照模板），再重试 exit ' + node.id + ' --preflight'
     + '——预检只读；缺件是结构性事实，工件不在场就没有可判的结构，也不会给出通过结论');
+  reportIncompleteDeclarations(node, incomplete);
   return true;
 }
 

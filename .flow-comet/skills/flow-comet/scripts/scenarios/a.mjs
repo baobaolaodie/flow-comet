@@ -46,6 +46,18 @@ import { scriptCommand } from '../lib/state-explain.mjs';
 // 单一来源静态锁（COORDINATOR 常量的落点与取用面）：与套件其它单源锚共用同一判据实现。
 import { singleSourceImportProblems } from '../lib/text-anchor-checks.mjs';
 
+// 声明工件枚举面的静态锁数据（判据见场景 08）：outputSchemas → artifacts 的枚举只许在**唯一权威**
+// 处（表内第一项）出现——出口的产物门禁与结构预检都只消费它，任一侧再自行遍历就是第二份实现，
+// 两份副本可以逐字相同地并存、下一次演进才分叉。其余落点逐一登记并写明它为什么不是**同一条判据**；
+// 登记面与实际枚举面双向对账（新增落点必须显式登记，被收编的落点必须从表里移除），第二份副本
+// 因此既无法静默长出来，也不会在判据失去判别力时（连权威处都看不见）悄无声息。
+const DECLARED_ARTIFACT_ENUMERATION_SITES = [
+  { file: 'lib/guard-routing.mjs', why: '唯一权威 declaredRequiredArtifacts（枚举 + <change-id> 替换 + 在场判定）' },
+  { file: 'route-node.mjs', why: '节点完成判定（状态机的完成标志集），另一条机制，不属于本判据的消费面' },
+  { file: 'lib/guard-template-fidelity.mjs', why: '工件 → 模板键映射：决定校验哪份工件，不做在场判定' },
+  { file: 'lib/state-explain.mjs', why: 'explain 的展示面：打印声明的产物路径，不做在场判定' },
+];
+
 export const ENTRIES = [
   // 1: open exit 通过（模板段名 CHANGE "## Why（为什么做）" + REQUIREMENT "## 用户故事（User Story）" + 验收段）——带模板验证 C2 派生
   {
@@ -379,6 +391,37 @@ export const ENTRIES = [
       const flowCode = engineCodeText(engineTexts.get('lib/state-commands-flow.mjs') ?? '');
       if (flowCode.includes('guard-gates')) {
         throw new Error('状态命令族不得依赖门禁族（反向边）：lib/state-commands-flow.mjs 的代码层仍引用 guard-gates');
+      }
+      // 声明工件的**枚举**单一来源锁（与上一条同族：守的事都落在「落点」这一层，不靠运行期相等）：
+      // 枚举只许在 lib/guard-routing.mjs 的 declaredRequiredArtifacts 一处，出口产物门禁与结构预检
+      // 都只消费它。运行期断言守不住这件事——两份枚举可以逐字相同地并存，下次演进才分叉；故按
+      // 代码层形态对账（注释里提到 outputSchemas / artifacts 是说明，不是实现）。判据形态 = 同一
+      // 模块的代码层既遍历 outputSchemas、又迭代 .artifacts（两侧各自遍历正是被收掉的第二份实现）。
+      const declaredArtifactEnumerationSites = [...engineTexts.entries()]
+        .filter(([, text]) => {
+          const code = engineCodeText(text);
+          return /\boutputSchemas\b/u.test(code) && /\bof\s+[\w$.?]+\.artifacts\b/u.test(code);
+        })
+        .map(([rel]) => rel)
+        .sort();
+      const registeredEnumerationSites = DECLARED_ARTIFACT_ENUMERATION_SITES.map((site) => site.file).sort();
+      const unregisteredEnumerationSites = declaredArtifactEnumerationSites
+        .filter((rel) => !registeredEnumerationSites.includes(rel));
+      const vanishedEnumerationSites = registeredEnumerationSites
+        .filter((rel) => !declaredArtifactEnumerationSites.includes(rel));
+      if (unregisteredEnumerationSites.length > 0 || vanishedEnumerationSites.length > 0) {
+        throw new Error('声明工件的枚举面不再是单一来源（枚举只许在 lib/guard-routing.mjs 的 '
+          + 'declaredRequiredArtifacts 一处，出口与预检都只消费它）：'
+          + (unregisteredEnumerationSites.length > 0
+            ? '\n未登记的枚举落点: ' + unregisteredEnumerationSites.join('、')
+              + '——若它确实是另一条机制（不是「声明工件的存在性」判据），在套件的 '
+              + 'DECLARED_ARTIFACT_ENUMERATION_SITES 里登记并写明理由；否则改从单一来源取用'
+            : '')
+          + (vanishedEnumerationSites.length > 0
+            ? '\n登记了却已不再枚举: ' + vanishedEnumerationSites.join('、')
+              + '——登记面与实际枚举面对不上：该文件的枚举已消失或改了形态，'
+              + '要么同步登记面，要么这条锁已失去判别力'
+            : ''));
       }
 
       // ---------- record 的节点视图同源（in-place 扩展） ----------
@@ -1569,7 +1612,7 @@ export const ENTRIES = [
   // 子断言:归档缺 KNOWN-ISSUES.md(遗留清单,协议 required 产物)→ BLOCKED
   {
     name: '22 exit archive WARN：CHANGELOG.md 表格日期非倒序',
-    run: (dir) => {
+    run: async (dir) => {
       const st = baseState('archive');
       st.evidence.archive = { summary: 'archived' };
       writeState(dir, st);
@@ -1613,6 +1656,51 @@ export const ENTRIES = [
       const preflightOpen = runGuard(['exit', 'open', '--preflight'], dir);
       assertExit(preflightOpen, 1);
       assertOut(preflightOpen, 'BLOCKED: 节点 open 的声明工件缺失');
+
+      // 子断言:声明不完整（required 但未声明 paths）——同一份协议，**两侧都阻断且说同一句**。
+      // 这种声明的特殊处：没有路径可判存在性，也没有可创建的落点，所以报文只能是「修协议」这一条
+      // 可执行的下一步；修复前两侧对同一份协议给出两种说法（预检跳过、出口永久算缺件），正是这里
+      // 要钉死的东西。期望措辞从唯一出处取（guard-routing 的 unspecifiedPathsNotice），不在测试里
+      // 另写一份。
+      const { unspecifiedPathsNotice } = await import('../lib/guard-routing.mjs');
+      const incompleteSchema = 'fixture.unspecified-paths.v1';
+      const incompleteArtifact = 'no-paths';
+      const builtinForIncomplete = JSON.parse(
+        fs.readFileSync(path.join(SCRIPTS_DIR, '..', 'reference', 'workflow-protocol.json'), 'utf8'));
+      writeFile(dir, 'reference/custom-unspecified-paths.json', JSON.stringify({
+        ...builtinForIncomplete,
+        nodes: builtinForIncomplete.nodes.map((node) => (node.id === 'archive'
+          ? { ...node, outputSchemas: [...node.outputSchemas, incompleteSchema] }
+          : node)),
+        outputSchemas: [...builtinForIncomplete.outputSchemas, {
+          id: incompleteSchema,
+          description: '声明不完整的必需产物（required 但未声明 paths）',
+          artifacts: [{ id: incompleteArtifact, kind: 'file', required: true, pathBase: 'specs-root' }],
+          evidence: [],
+        }],
+      }, null, 2) + '\n');
+      const incompleteProtocolPath = path.join(dir, 'reference', 'custom-unspecified-paths.json');
+      // 归档自身的两件必需产物先补齐：单变量 = 唯一缺陷就是那件「声明不完整」的产物。
+      writeFile(dir, '.specs/archive/foo-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# KNOWN-ISSUES\n\n无遗留问题\n');
+      const exitIncomplete = runGuard(['exit', 'archive', '--protocol', incompleteProtocolPath], dir);
+      assertExit(exitIncomplete, 1);
+      const preflightIncomplete = runGuard(
+        ['exit', 'archive', '--preflight', '--protocol', incompleteProtocolPath], dir);
+      assertExit(preflightIncomplete, 1);
+      const expectedNotice = unspecifiedPathsNotice(incompleteSchema, incompleteArtifact);
+      const noticeLineOf = (view) => view.output.split('\n')
+        .find((line) => line.includes('协议声明不完整：')) ?? null;
+      const exitNotice = noticeLineOf(exitIncomplete);
+      const preflightNotice = noticeLineOf(preflightIncomplete);
+      assertTrue(exitNotice !== null && exitNotice.endsWith(expectedNotice),
+        '出口侧应给「声明不完整」那一句（指向修协议，而不是让人去创建一个没有路径的文件）:\n'
+        + String(exitNotice) + '\n期望以: ' + expectedNotice + ' 结尾');
+      assertTrue(preflightNotice !== null && preflightNotice.endsWith(expectedNotice),
+        '预检侧应与出口侧同一句（两侧各写一份措辞正是本次要消灭的分叉）:\n'
+        + String(preflightNotice) + '\n期望以: ' + expectedNotice + ' 结尾');
+      // 两侧都不给做不到的指令：没有路径可建，就不许出现「按上述路径创建」。
+      assertNotOut(preflightIncomplete, '先按上述路径创建缺失工件');
+      assertNotOut(exitIncomplete, '按上述路径创建');
     },
   },
 
