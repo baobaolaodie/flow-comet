@@ -1549,9 +1549,11 @@ export const ENTRIES = [
 
   // 21: exit verify——LESSONS.md 条目编号乱序 → WARN 不 BLOCK；verify 命令 timeout 可配置：
   // ① 缺省 timeout（无 env）下耗时命令通过（缺省保持大值）；② env
-  // FLOW_COMET_VERIFY_TIMEOUT_MS 覆盖生效——设小值后同耗时命令超时 BLOCK
+  // FLOW_COMET_VERIFY_TIMEOUT_MS 覆盖生效——设小值后同耗时命令超时 BLOCK。同场景 in-place 扩展
+  // AC 覆盖判据（verify 出口）：全覆盖通过 / 漏一条点名 BLOCK / 多条全点名 / 无 AC 编号与缺 TEST.md
+  // 显式「未校验」（不改退出码）/ 旧 change 只 WARN / 两种书写形态与编号后缀归并。
   {
-    name: '21 exit verify WARN：LESSONS.md 编号乱序 + verify timeout env 覆盖',
+    name: '21 exit verify WARN：LESSONS.md 编号乱序 + verify timeout env 覆盖 + AC 覆盖六形态（新 change BLOCK / 旧 change WARN / 判不了显式未校验）',
     run: (dir) => {
       const st = baseState('verify');
       st.evidence.verify = { summary: 'verified' };
@@ -1642,6 +1644,177 @@ export const ENTRIES = [
         throw new Error('exit verify 成功不得清 Fix 归位轮次（计数隔离）: '
           + JSON.stringify(stPass.fixRoundsByChange));
       }
+      // ===== AC 覆盖（verify 出口）：判据在 lib/ac-coverage.mjs（纯判定），此处只验分级与报文 =====
+      // 夹具自带 REQUIREMENT / TEST 模板（段名由骨架派生）；新 change BLOCKED / 旧 change WARN。
+      // 反向构造：把该判据从 verify 出口链里摘掉 ⇒ ②③ 回到 exit 0（缺覆盖被静默放过），① 的
+      // 「无缺覆盖输出」也失去判别力（它只证明「不误报」，负例才证明「报得出」）。
+      writeFile(dir, 'flow-kit/templates/REQUIREMENT.md',
+        '# REQUIREMENT 模板\n\n## 用户故事（User Story）\n## 验收准则（AC）\n## 非功能性需求\n');
+      writeFile(dir, 'flow-kit/templates/TEST.md', '# TEST 模板\n\n## 第 1 轮 · 功能测试\n');
+      // 本块用 newChange 夹具（AC-6 要求新 change 必拦），故 LESSONS 必须回到有序形态——编号乱序的
+      // 新 change 会被 LESSONS 区门禁先拦（该判据由本场景前半段覆盖，不是本块被测面）。
+      writeFile(dir, '.specs/LESSONS.md', '# LESSONS\n\n## 条目区\n\n### L-001: a\n### L-002: b\n');
+      const acCriteria = (ids) => ids
+        .map((id) => '### ' + id + ' · 夹具准则\n\n- **Given** 夹具前置\n- **When** 夹具动作\n- **Then** 夹具结果')
+        .join('\n\n');
+      // acceptanceBody = 「验收准则（AC）」段的正文（两种书写形态与同行多编号都由它构造）
+      const acRequirement = (acceptanceBody) => [
+        '# REQUIREMENT: AC 覆盖夹具',
+        '',
+        '- **Change ID**: ' + CHANGE_ID,
+        '- **关联**: `@.specs/' + CHANGE_ID + '/REQUIREMENT.md`',
+        '',
+        '## 用户故事',
+        '',
+        '- **US-1**：作为执行者，我想让 AC 覆盖判据有夹具。',
+        '',
+        '## 验收准则（AC）',
+        '',
+        acceptanceBody,
+        '',
+        '## 非功能性需求',
+        '',
+        '- **性能**: 无',
+        '',
+      ].join('\n');
+      const acTest = (coveredIds) => [
+        '# TEST: AC 覆盖夹具',
+        '',
+        '- **Change ID**: ' + CHANGE_ID,
+        '- **关联**: `@.specs/' + CHANGE_ID + '/REQUIREMENT.md`',
+        '- **项目类型**: CLI',
+        '',
+        '## 第 1 轮 · 功能测试',
+        '',
+        '### 1.1 测试矩阵（AC → 用例）',
+        '',
+        '| AC | 类型 | 用例文件 / UAT | 状态 |',
+        '|---|---|---|---|',
+        coveredIds.length > 0
+          ? coveredIds.map((id) => '| ' + id + ' | unit | guard-self-test.mjs | ✅ |').join('\n')
+          : '| — | — | 夹具无覆盖行 | — |',
+        '',
+        // 「第 1 轮」段的其余结构子段按登记表登记名在场（父段在场时子段必须在场——本判据不是被测面，
+        // 故夹具按段形补齐，只让 1.1 的行数变化。）
+        '### 1.2 UAT 脚本',
+        '',
+        '- 夹具：见 UAT.md。',
+        '',
+        '### 1.3 覆盖率',
+        '',
+        '- 夹具：不适用。',
+        '',
+        '### 1.4 边界 / 错误路径用例',
+        '',
+        '- 夹具：不适用。',
+        '',
+        '### 1.5 测试质量自检（6 维测试衰退风险）',
+        '',
+        '- 夹具：不适用。',
+        '',
+        '### 1.6 测试质量记事（backlog）',
+        '',
+        '- 夹具：无。',
+        '',
+        '## 验证命令',
+        '',
+        '```bash',
+        'node -e "1"',
+        '```',
+        '',
+      ].join('\n');
+      const acState = (isNew) => {
+        const st = { ...baseState('verify'), evidence: { verify: { summary: 'verified' } } };
+        if (isNew) {
+          st.newChange = true;
+          st.enteredNodes = ['verify'];
+        }
+        return st;
+      };
+      const acWrite = (acceptanceBody, coveredIds, isNew) => {
+        writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', acRequirement(acceptanceBody));
+        writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', acTest(coveredIds));
+        writeState(dir, acState(isNew));
+      };
+      // 缺覆盖报文的首行（明细只在这一行，断言按它取编号清单——正文别处的编号不算点名）
+      const acMissingLine = (res) => (res.output.match(/缺 AC 覆盖[^\n]*/u) ?? [''])[0];
+      // ① 全量覆盖 → 通过（判据不产生输出：缺覆盖报文与「未校验」都不出现）
+      acWrite(acCriteria(['AC-1', 'AC-2']), ['AC-1', 'AC-2'], true);
+      const acCovered = runGuard(['exit', 'verify'], dir);
+      assertExit(acCovered, 0);
+      assertOut(acCovered, 'ALL CHECKS PASSED');
+      assertNotOut(acCovered, '缺 AC 覆盖');
+      assertNotOut(acCovered, '未校验（REQUIREMENT 无 AC 编号）');
+      // ② 漏一条 → verify 出口 BLOCKED：报文点名该编号 + 「在 1.1 矩阵补行」的恢复指引
+      acWrite(acCriteria(['AC-1', 'AC-2', 'AC-3']), ['AC-1', 'AC-2'], true);
+      const acBlocked = runGuard(['exit', 'verify'], dir);
+      assertExit(acBlocked, 1);
+      assertOut(acBlocked, 'BLOCKED');
+      assertOut(acBlocked, '缺 AC 覆盖');
+      assertTrue(acMissingLine(acBlocked).includes('AC-3'),
+        '缺失清单应点名 AC-3，实际: ' + acMissingLine(acBlocked));
+      assertTrue(!/AC-1|AC-2/u.test(acMissingLine(acBlocked)),
+        '缺失清单不得点名已覆盖的 AC-1 / AC-2，实际: ' + acMissingLine(acBlocked));
+      assertOut(acBlocked, '在 TEST.md 的 1.1 测试矩阵为这些 AC 补行');
+      // ②b 补齐后通过（单变量反向构造：只有矩阵行变了）
+      acWrite(acCriteria(['AC-1', 'AC-2', 'AC-3']), ['AC-1', 'AC-2', 'AC-3'], true);
+      const acFixed = runGuard(['exit', 'verify'], dir);
+      assertExit(acFixed, 0);
+      assertNotOut(acFixed, '缺 AC 覆盖');
+      // ③ 多条缺失 → 全部点名（按 REQUIREMENT 出现顺序，报告稳定可对照）
+      acWrite(acCriteria(['AC-1', 'AC-2', 'AC-3', 'AC-4']), ['AC-1'], true);
+      const acMulti = runGuard(['exit', 'verify'], dir);
+      assertExit(acMulti, 1);
+      assertTrue(acMissingLine(acMulti).includes('AC-2、AC-3、AC-4'),
+        '多条缺失应全部点名（按 REQUIREMENT 顺序），实际: ' + acMissingLine(acMulti));
+      // ④ REQUIREMENT 无 AC 编号 → 显式「未校验」，退出码不因该判据改变
+      acWrite('- 本段只写散文、不含任何编号（构造「无 AC 编号」形态）。', ['AC-1'], true);
+      const acNoIds = runGuard(['exit', 'verify'], dir);
+      assertExit(acNoIds, 0);
+      assertOut(acNoIds, '未校验（REQUIREMENT 无 AC 编号）');
+      assertNotOut(acNoIds, '缺 AC 覆盖');
+      // ⑤ TEST.md 缺席 → 同样显式「未校验」；该判据自身不判红（不出现缺覆盖报文），退出码由既有
+      // 判据决定（此处先撞「## 验证命令」门）——「未校验」不等于「通过」，也不冒充失败
+      acWrite(acCriteria(['AC-1']), ['AC-1'], true);
+      fs.rmSync(path.join(dir, '.specs', CHANGE_ID, 'TEST.md'), { force: true });
+      const acNoTest = runGuard(['exit', 'verify'], dir);
+      assertExit(acNoTest, 1);
+      assertOut(acNoTest, '未校验（TEST.md 缺席）');
+      assertNotOut(acNoTest, '缺 AC 覆盖');
+      assertOut(acNoTest, 'BLOCKED: TEST.md 需声明 ## 验证命令 段');
+      // ⑥ 旧 change 同输入只 WARN（渐进不阻断，退出码不变）
+      acWrite(acCriteria(['AC-1', 'AC-2']), ['AC-1'], false);
+      const acOldChange = runGuard(['exit', 'verify'], dir);
+      assertExit(acOldChange, 0);
+      assertOut(acOldChange, 'WARN: TEST.md 的 1.1 测试矩阵缺 AC 覆盖');
+      assertTrue(acMissingLine(acOldChange).includes('AC-2'),
+        '旧 change 的 WARN 同样点名缺失编号，实际: ' + acMissingLine(acOldChange));
+      assertNotOut(acOldChange, 'BLOCKED');
+      assertOut(acOldChange, 'ALL CHECKS PASSED');
+      // ⑦ 书写形态与编号词法：'### AC-N · 标题' 与 '- AC-N: 说明' 两种写法同样解析，同一行的多个编号
+      // 全部收集；'AC-2a' 这类后缀没有自己的编号，归并到 AC-2（不因后缀漏判）。夹具里 AC-4 只在
+      // REQUIREMENT 出现、矩阵无对应行 → 只有它缺。段内围栏里的 '## …' 示例不结束本段（围栏内标题
+      // 若被当成段边界，段被截断 → AC-2..AC-4 读不到 → 判据静默变绿）。
+      acWrite([
+        '### AC-1 · 标题形态',
+        '',
+        '- **Given** 前置',
+        '- **When** 动作',
+        '- **Then** 结果',
+        '',
+        '```markdown',
+        '## 示例：围栏内的二级标题不结束本段',
+        '```',
+        '',
+        '- AC-2: 列表形态（与标题形态同段混排）',
+        '- AC-3、AC-4: 同一行两个编号',
+      ].join('\n'), ['AC-1', 'AC-2a'], true);
+      const acMixed = runGuard(['exit', 'verify'], dir);
+      assertExit(acMixed, 1);
+      assertTrue(acMissingLine(acMixed).includes('AC-3、AC-4'),
+        '混排写法 + 同行多编号应被解析（后缀归并后只剩 AC-3 / AC-4 缺），实际: ' + acMissingLine(acMixed));
+      assertTrue(!/AC-1|AC-2/u.test(acMissingLine(acMixed)),
+        'AC-1（标题写法）与 AC-2a（后缀归并到 AC-2）都算已覆盖，实际: ' + acMissingLine(acMixed));
     },
   },
 

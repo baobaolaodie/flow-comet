@@ -1,6 +1,7 @@
 // 证据与产物门禁（守卫模块）：直显授权约束、在飞委托、SUMMARY 必填段与自检方法、LESSONS 扫描段
 // 与命中核对、execute 出口、
-// verify 出口（真实执行验证命令并记录失败计数）、Return Contract、subagent-execute 摘要与多趟完成
+// verify 出口（真实执行验证命令并记录失败计数）、AC 覆盖（verify 出口 BLOCK / review 出口汇总 WARN）、
+// Return Contract、subagent-execute 摘要与多趟完成
 // 判定、required-skill / schema / 产物 存在性门禁——即「完成声明必须有证据与产物」这一族判据。
 //
 // 分级沿用既有语义：新 change（init 标记）强制 BLOCKED + 恢复指引，旧 change 渐进 WARN 不阻断。
@@ -34,6 +35,9 @@ import {
 } from './guard-routing.mjs';
 import { applicabilityGatedBinding, frontendCriterion } from './guard-uidesign.mjs';
 import { buildSkeleton, headingPattern, LESSONS_SCAN_SECTION } from './guard-artifact-skeleton.mjs';
+// AC 覆盖判定（纯判定模块）：verify 出口的 BLOCK / review 出口的汇总 WARN 共用同一份判定与报文，
+// 分级只在下方门禁函数一处表达。
+import { acCoverageReportLines, acCoverageReview, acCoverageSummaryLine } from './ac-coverage.mjs';
 // LESSONS 命中集（路径词元 × 条目关键词）的单一实现：与 handoff request 的开工前打印共用，执行者
 // 看到的集合必须就是出口验收的集合。
 import { lessonsEntries, lessonsHits, lessonsPathTokens, taskWriteFilesById } from './lessons-hits.mjs';
@@ -399,6 +403,36 @@ export async function runExecuteExitGate({ protocol, node, state, emptyExitAppro
   return { exempt };
 }
 
+// AC 覆盖出口校验（verify 出口 BLOCKED / review 出口只汇总 WARN）——判据（纯判定）在
+// lib/ac-coverage.mjs，本处只负责分级与打印：同一份判定两处消费，分支纪律因此只有一处表达。
+//   · verify 出口：REQUIREMENT.md 的验收准则与 TEST.md 的 1.1 测试矩阵对不上 → 新 change BLOCKED
+//     （点名缺失编号 + 「在 1.1 矩阵补行」的恢复指引）/ 旧 change WARN 渐进；判不了（无 AC 编号 /
+//     TEST.md 缺席 / 无 1.1 段 / 模板不可派生）→ 打印「未校验（…）」且**不改变退出码**（其余判据照常，
+//     未验证既不冒充通过也不冒充失败）。
+//   · review 出口：TEST.md 在场且缺覆盖 → 一条汇总 WARN（列缺失编号），不阻断、不影响退出码——review
+//     出口今天不要求 TEST.md，权威判定在 verify 出口；判不了时不打印（不制造噪音）。
+// 归档 change 与 verify 出口的既有豁免同源（历史归档不重判）。
+export async function runAcCoverageGate({ node, state }) {
+  if (node.id !== 'verify' && node.id !== 'review') return;
+  if (!state.activeChange) return;
+  if (await isArchivedChange(state.activeChange)) return;
+  const coverage = await acCoverageReview(path.join(runRoot, '.specs', state.activeChange));
+  if (coverage.unverified !== null) {
+    if (node.id === 'verify') console.error(coverage.unverified.notice);
+    return;
+  }
+  if (coverage.missing.length === 0) return;
+  if (node.id === 'review') {
+    console.error(acCoverageSummaryLine({ coverage }));
+    return;
+  }
+  const blocking = isNewChange(state);
+  for (const line of acCoverageReportLines({ coverage, level: blocking ? 'BLOCKED' : 'WARN' })) {
+    console.error(line);
+  }
+  if (blocking) process.exit(1);
+}
+
 // verify 出口必须真实跑命令（严格版）——历史归档 change 豁免（过渡规则）。命令来源三级：TEST.md 的
 // ## 验证命令 段 → state 的 verifyCommand → 项目探测回退。失败按 change 隔离计数（≥4 次要求用户
 // 决策）。二段式执行（受限沙箱兼容）：首选管道式捕获，仅当 spawn 层被拒（EPERM）时以继承 stdio
@@ -406,6 +440,9 @@ export async function runExecuteExitGate({ protocol, node, state, emptyExitAppro
 export async function runVerifyExitGate({ protocol, node, state }) {
   if (node.id !== 'verify') return;
   if (await isArchivedChange(state.activeChange)) return;
+  // AC 覆盖：结构判据先于命令执行——缺覆盖时不白跑一遍验证命令；判不了（未校验）只打印不判红，
+  // 下面的「## 验证命令 / 产物」判据照常（退出码由它们决定）。
+  await runAcCoverageGate({ node, state });
   // 越权委托兜底检测（verify 出口）——同 execute 出口的判定（TASK parallel done + completedNodes
   // 无 subagent-execute + 非 direct + 协议含 subagent-execute 节点），verify 时仍未 exit → WARN
   // 兜底（execute 出口未拦截的提示）

@@ -809,7 +809,7 @@ export const ENTRIES = [
   // ② SUMMARY 缺「已知接受 + 理由」→ BLOCKED；③ 示例条目（🔴 / ADR- / AC- / L- 形态）未出现
   // **不算缺段**（正例即「无任何示例条目的工件必须放行」）。
   {
-    name: 'TA-02 H3 结构子段缺则拦（TEST 1.5 / SUMMARY 已知接受 + 理由），示例条目不参与骨架',
+    name: 'TA-02 H3 结构子段缺则拦（TEST 1.5 / SUMMARY 已知接受 + 理由），示例条目不参与骨架 + review 出口的 AC 覆盖汇总 WARN（段名走骨架）',
     run: async (dir) => {
       // ① TEST 缺结构子段
       setupVerify(dir, { subsectionOmit: ['测试质量自检'] });
@@ -831,6 +831,62 @@ export const ENTRIES = [
       // ④ 反向构造（判别力）：被抽掉的 TEST 子段确实来自登记表骨架，而不是标题巧合
       const registered = (docEntry('TEST').structureSubsections ?? []).map((s) => s.name).join('\n');
       assertTrue(registered.includes('测试质量自检'), '登记表未登记 TEST 的 1.5 结构子段——判据无处生根');
+
+      // ⑤~⑧ AC 覆盖与 1.1 矩阵段（review 出口只汇总、不阻断）：
+      //   · 验收段与 1.1 矩阵段的段名都从骨架派生（模板权威单链，判据不自写标题正则）——省编号 /
+      //     省括号的宽容写法同样命中（⑥），矩阵段换成无关标题即「不可判」而不是「全覆盖」（⑦）；
+      //   · review 出口对缺覆盖只给**一条**汇总 WARN（列缺失编号），退出码不变（AC-8）；
+      //   · 无 TEST.md 时不打该 WARN（review 出口今天不要求 TEST.md，判据无从求值就不制造噪音）。
+      const acBody = (ids) => (ids.length > 0
+        ? ids.map((id) => '### ' + id + ' · 夹具准则\n\n- **Given** 夹具前置\n- **When** 夹具动作\n- **Then** 夹具结果').join('\n\n')
+        : '- 本段只写散文、不含任何编号。');
+      const acMatrix = (ids) => ['| AC | 类型 | 用例文件 / UAT | 状态 |', '|---|---|---|---|',
+        ...ids.map((id) => '| ' + id + ' | unit | guard-self-test.mjs | ✅ |')].join('\n');
+      const matrixHeading = '### 1.1 测试矩阵（AC → 用例）';
+      // 夹具：review 节点 + REQUIREMENT（验收段列 acIds）+ TEST（1.1 矩阵只列 coveredIds）；
+      // heading 可换掉 1.1 段标题，用于段名宽容与「段缺席」两侧构造。
+      const setupAcReview = (acIds, coveredIds, heading = matrixHeading) => {
+        setupReview(dir);
+        writeTemplateFixture(dir, 'REQUIREMENT');
+        writeTemplateFixture(dir, 'TEST');
+        writeFile(dir, CHANGE_DIR + '/REQUIREMENT.md',
+          renderDoc('REQUIREMENT', { body: [['验收准则', acBody(acIds)]] }));
+        const testDoc = renderDoc('TEST', { body: [['1.1', acMatrix(coveredIds)]] });
+        writeFile(dir, CHANGE_DIR + '/TEST.md',
+          heading === matrixHeading ? testDoc : testDoc.replace(matrixHeading, heading));
+      };
+      const acSummaryLine = (res) => (res.output.match(/缺 AC 覆盖[^\n]*/u) ?? [''])[0];
+      // ⑤ 汇总 WARN：一条（不逐条刷屏）、列缺失编号、不阻断
+      setupAcReview(['AC-1', 'AC-2', 'AC-3'], ['AC-1']);
+      const reviewMissing = runGuard(['exit', 'review'], dir);
+      assertExit(reviewMissing, 0);
+      assertOut(reviewMissing, 'REVIEW WARN: TEST.md 的 1.1 测试矩阵缺 AC 覆盖');
+      assertTrue((reviewMissing.output.match(/缺 AC 覆盖/gu) ?? []).length === 1,
+        'review 出口只给一条汇总 WARN（不逐条刷屏），实际出现 '
+          + (reviewMissing.output.match(/缺 AC 覆盖/gu) ?? []).length + ' 次');
+      assertTrue(acSummaryLine(reviewMissing).includes('AC-2') && acSummaryLine(reviewMissing).includes('AC-3'),
+        '汇总 WARN 应列出全部缺失编号，实际: ' + acSummaryLine(reviewMissing));
+      assertNotOut(reviewMissing, 'BLOCKED');
+      // ⑥ 段名宽容：省编号、省括号的写法同样命中（定位走骨架 headingPattern，不是写死标题）
+      setupAcReview(['AC-1', 'AC-2'], ['AC-1'], '### 测试矩阵');
+      const reviewLoose = runGuard(['exit', 'review'], dir);
+      assertExit(reviewLoose, 0);
+      assertOut(reviewLoose, 'REVIEW WARN: TEST.md 的 1.1 测试矩阵缺 AC 覆盖');
+      // ⑦ 反向构造（判别力）：矩阵段缺席 ⇒ 不可判（打不出缺覆盖），不是「全覆盖」；全量覆盖同理不打 WARN
+      setupAcReview(['AC-1', 'AC-2'], ['AC-1'], '### 覆盖说明');
+      const reviewNoMatrix = runGuard(['exit', 'review'], dir);
+      assertExit(reviewNoMatrix, 0);
+      assertNotOut(reviewNoMatrix, '缺 AC 覆盖');
+      setupAcReview(['AC-1', 'AC-2'], ['AC-1', 'AC-2']);
+      const reviewCovered = runGuard(['exit', 'review'], dir);
+      assertExit(reviewCovered, 0);
+      assertNotOut(reviewCovered, '缺 AC 覆盖');
+      // ⑧ TEST.md 缺席（review 出口不要求它）→ 判据无从求值，不打 WARN、不改变退出码
+      setupReview(dir);
+      const reviewNoTest = runGuard(['exit', 'review'], dir);
+      assertExit(reviewNoTest, 0);
+      assertNotOut(reviewNoTest, '缺 AC 覆盖');
+      assertOut(reviewNoTest, 'ALL CHECKS PASSED');
     },
   },
 

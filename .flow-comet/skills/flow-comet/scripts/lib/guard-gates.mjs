@@ -59,7 +59,7 @@ import {
 // 存在性消费出口产物门禁的**同一条判据**（guard-routing 的 declaredRequiredArtifacts——枚举 +
 // 路径解析 + 在场判定，预检不另写一份），SUMMARY 关键段来自证据/产物门禁族，骨架判据与 TASK 7
 // 字段来自模板保真门禁族——预检自身不复制段形实现，也不新造一份节点→产物映射。
-import { evidenceRecoveryBlock, runSummarySectionsGate } from './guard-evidence-gates.mjs';
+import { evidenceRecoveryBlock, runAcCoverageGate, runSummarySectionsGate } from './guard-evidence-gates.mjs';
 import { evaluateArtifact, formatIssueParts, runTaskSevenFieldGate } from './guard-template-fidelity.mjs';
 // 协调者禁令的常量落在中立模块（跨族共用的措辞不进任何一族）：本模块只是取用方，状态命令族同理。
 import { COORDINATOR_NOTICE } from './state-explain.mjs';
@@ -1308,6 +1308,10 @@ export async function runReviewExitGate({ node, state }) {
       }
     }
     if (isNewChange(state) && (deferredFindings.length > 0 || minorUnjustified.length > 0)) process.exit(1);
+    // AC 覆盖汇总（只提示、不阻断）：TEST.md 在场且其 1.1 测试矩阵漏了 AC → 一条汇总 WARN，退出码不变。
+    // 同一判定的强制面在 verify 出口（新 change BLOCKED），两处共用证据/产物门禁族的同一实现——
+    // 本出口今天不要求 TEST.md，故只在判得了且真缺时报，不让「判不了」变成噪音。
+    await runAcCoverageGate({ node, state });
   } catch {}
 }
 
