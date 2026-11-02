@@ -1561,6 +1561,34 @@ export const ENTRIES = [
       const resBracket = runGuard(['exit', 'verify'], dir);
       assertExit(resBracket, 0);
       assertOut(resBracket, 'ALL CHECKS PASSED');
+      // 子断言:归档判定按 <日期>-<本 change> 精确形态。诱饵 = 名字以 -<本 change> 结尾的别的 change
+      // 归档目录：本 change 并未归档，复核命令必须真实执行（副作用文件即执行证据）。修复前后缀匹配
+      // 把本 change 判成「已归档」，整个验证命令被跳过——那是放行口，不是显示问题。
+      const ranByDecoy = path.join(dir, 'archive-decoy-ran.txt');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n' +
+        '```bash\nnode -e "require(\'fs\').writeFileSync(\'archive-decoy-ran.txt\',\'RAN\')"\n```\n');
+      writeFile(dir, '.specs/archive/2026-10-20-other-' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n\n诱饵。\n');
+      fs.rmSync(ranByDecoy, { force: true });
+      const resDecoyArchive = runGuard(['exit', 'verify'], dir);
+      assertExit(resDecoyArchive, 0);
+      if (!fs.existsSync(ranByDecoy)) {
+        throw new Error('同后缀诱饵归档不得把本 change 判成已归档：验证命令必须真实执行（副作用文件缺失）');
+      }
+      // 反向构造（同一判据 + 单变量）：真正的归档目录（<日期>-<本 change>）在场时豁免仍生效——命令
+      // 一旦被执行就会以 3 退出。精确化不得把「归档 change 免跑验证命令」一并收紧掉。
+      const ranByArchive = path.join(dir, 'archive-real-ran.txt');
+      fs.rmSync(path.join(dir, '.specs', 'archive', '2026-10-20-other-' + CHANGE_ID), { recursive: true, force: true });
+      writeFile(dir, '.specs/archive/2026-10-20-' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n\n已归档。\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n' +
+        '```bash\nnode -e "require(\'fs\').writeFileSync(\'archive-real-ran.txt\',\'RAN\'); process.exit(3)"\n```\n');
+      fs.rmSync(ranByArchive, { force: true });
+      const resRealArchive = runGuard(['exit', 'verify'], dir);
+      assertExit(resRealArchive, 0);
+      if (fs.existsSync(ranByArchive)) {
+        throw new Error('真正的归档 change 仍须豁免真实跑验证命令（反向构造：豁免被误收紧）');
+      }
+      // 复位：归档目录撤掉、TEST.md 回到快速通过的形态，后续 timeout 断言按原样执行
+      fs.rmSync(path.join(dir, '.specs', 'archive'), { recursive: true, force: true });
       // ① 缺省 timeout（未设 env）保持大值：1.5s 耗时命令通过（若缺省被误改小 → 超时 RED）
       writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```bash\nnode -e "setTimeout(()=>{}, 1500)"\n```\n');
       const resDefault = runGuard(['exit', 'verify'], dir);

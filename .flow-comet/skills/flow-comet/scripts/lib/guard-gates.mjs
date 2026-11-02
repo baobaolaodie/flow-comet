@@ -57,7 +57,7 @@ import { evaluateArtifact, formatIssueParts, runTaskSevenFieldGate } from './gua
 import { COORDINATOR_NOTICE } from './state-explain.mjs';
 // 声明标记目录的路径规则（活动路径优先、归档兜底）归状态族的路径上下文模块，与 record 前置门同一份
 // 实现——guard → state-* 是允许的单向边；规则若留在守卫族，状态 CLI 会为它加载整个守卫图。
-import { findSkillLoadsDir } from './state-io.mjs';
+import { findSkillLoadsDir, isArchivedChangeDirName } from './state-io.mjs';
 
 // 节点 → 合法 exit 的前置条件（对齐 flow-kit 阶段门 + flowkit.*.v1 evidence）
 const NODE_TRANSITION_GATES = {
@@ -648,8 +648,10 @@ function lessonsLegacyEntries(content) {
   return hits;
 }
 
-// 该 change 的 SUMMARY 份数（C6：先看活动目录，目录已移入归档时看 `.specs/archive/*-<change>/`；
-// 两处都不存在 → null = 归档产物缺失——不可核对的份数不当作 0）。
+// 该 change 的 SUMMARY 份数（C6：先看活动目录，目录已移入归档时看
+// `.specs/archive/<日期>-<change>/`；两处都不存在 → null = 归档产物缺失——不可核对的份数不当作 0）。
+// 归档目录按精确形态定位（判据单源在 state-io）：同后缀的别的 change 归档目录被算进来，份数对账就
+// 拿别人的归档作证；按后缀「先命中先用」还会因 readdir 顺序把本 change 的归档目录挤掉。
 async function changeSummaryCount(changeName) {
   const activeDir = path.join(runRoot, '.specs', changeName);
   let dir = null;
@@ -658,7 +660,7 @@ async function changeSummaryCount(changeName) {
   } else {
     const archiveRoot = path.join(runRoot, '.specs', 'archive');
     const entries = await fs.readdir(archiveRoot).catch(() => []);
-    const archived = entries.find((entry) => entry.endsWith('-' + changeName));
+    const archived = entries.find((entry) => isArchivedChangeDirName(entry, changeName));
     if (archived) dir = path.join(archiveRoot, archived);
   }
   if (dir === null) return null;

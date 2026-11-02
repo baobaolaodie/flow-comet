@@ -12,6 +12,9 @@ import { taskOpeningAttrs } from '../task-parsing.mjs';
 import { resolveNextNode, normalizeHeading, FIX_SECTION_TITLE_FALLBACK } from '../route-node.mjs';
 import { runRoot, fileExists, workflowRelativeSegments } from './guard-state-io.mjs';
 import { SUMMARY_REQUIRED_SECTIONS, buildSkeleton } from './guard-artifact-skeleton.mjs';
+// 归档目录名「是不是本 change 的」判据单源在状态族的路径上下文模块（guard → state-* 是允许的
+// 单向边）：本模块只消费，不在这里另写一份后缀/日期匹配。
+import { isArchivedChangeDirName } from './state-io.mjs';
 
 // 新旧 change 区分——init 写入的 newChange: true = 新 change（严格，不依赖 entry——防系统性
 // 跳 entry 绕过）；缺失/非 true（旧 change）= 渐进 WARN 兼容。
@@ -317,13 +320,16 @@ export async function missingRequiredArtifacts(protocol, node, change) {
       : declared.schemaId + '.' + declared.artifact.id));
 }
 
-// 历史归档 change 不强制真实跑验证命令（判断 .specs/archive/ 目录）
+// 历史归档 change 不强制真实跑验证命令（判断 .specs/archive/ 目录）。归档目录名按
+// <日期>-<change-id> 精确形态比对（判据单源在 state-io）：后缀匹配会把「名字恰好以本 change id
+// 结尾」的别的 change 认作本 change 已归档，守卫于是**跳过真实跑验证命令的要求**——这是放行口，
+// 不是显示问题。无日期前缀、名字逐字等于 change-id 的旧布局仍认（两处精确比对，都不做后缀）。
 export async function isArchivedChange(changeName) {
   if (!changeName) return false;
   const archiveRoot = path.join(runRoot, '.specs', 'archive');
   if (await fileExists(path.join(archiveRoot, changeName))) return true;
   const entries = await fs.readdir(archiveRoot).catch(() => []);
-  return entries.some(e => e === changeName || e.endsWith('-' + changeName));
+  return entries.some((entry) => entry === changeName || isArchivedChangeDirName(entry, changeName));
 }
 
 // 段名校验基准从模板自动派生——骨架计算统一委托 lib/guard-artifact-skeleton.mjs（单一实现：读

@@ -32,6 +32,9 @@ import {
   taskSetSignature,
 } from './route-node.mjs';
 import { taskBlocks as extractTaskBlocks, taskOpeningAttrs } from './task-parsing.mjs';
+// 声明标记目录的路径规则（活动路径 + 归档兜底）归状态族的路径上下文模块——入口只取它的活动形态
+// （includeArchive: false，理由见 checkPromptDeclarations），不在这里另拼一份 .skill-loads 路径。
+import { findSkillLoadsDir } from './lib/state-io.mjs';
 import {
   fileExists,
   packageRoot,
@@ -194,19 +197,18 @@ async function resolveGuardProtocolPath() {
 // guard-gates——两处同源不同层（入口判「每条声明都对」，出口判「本节点确有可用声明」）。
 async function checkPromptDeclarations({ node, state }) {
   if (!state.activeChange) return;
-  const loadsDir = path.join(runRoot, '.specs', state.activeChange, '.skill-loads');
-  let names;
-  try {
-    names = await fs.readdir(loadsDir);
-  } catch {
-    return; // 声明机制未激活（本节点还没写过声明）：入口不追溯，缺失由出口声明门报
-  }
+  // 只认活动路径（includeArchive: false）：入口核对的是**这一轮**写下的声明，而归档里的声明属于
+  // 归档前的执行者——拿它来判当前节点，会把「这一轮没声明」判成「声明过」并放过错路径。入口本就不
+  // 追溯归档（声明机制未激活时直接返回，缺失由出口声明门报），故这里不改判据、只把差异写进参数。
+  const loadsDir = await findSkillLoadsDir(runRoot, state.activeChange, { includeArchive: false });
+  if (loadsDir === null) return; // 声明机制未激活（本节点还没写过声明）：缺失由出口声明门报
+  const names = await fs.readdir(loadsDir.dir).catch(() => []);
   const prefix = node.id + '-';
   const conflicts = [];
   for (const name of names.filter((entry) => entry.startsWith(prefix) && entry.endsWith('.json'))) {
     let marker;
     try {
-      marker = JSON.parse(await fs.readFile(path.join(loadsDir, name), 'utf8'));
+      marker = JSON.parse(await fs.readFile(path.join(loadsDir.dir, name), 'utf8'));
     } catch {
       continue; // 损坏标记由出口声明门报，不在这里抢报（同一缺陷不写两处措辞）
     }

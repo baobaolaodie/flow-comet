@@ -1324,6 +1324,24 @@ export const ENTRIES = [
       const correctedPrompt = runGuard(['entry', 'open'], dir);
       assertExit(correctedPrompt, 0);
       assertNotOut(correctedPrompt, '与节点协议文件不符');
+      // ②b 入口只认活动路径（in-place 扩展）：同样的错路径声明只存在于归档目录（真实的归档形态
+      // <日期>-<本 change>）时，入口不追溯归档——那一轮没在活动目录里声明，就没有可核对的声明；
+      // 归档里的声明属于归档前的执行者，拿它判当前节点会把「没声明」判成「声明过」。判据可证伪：
+      // 一旦入口改去读归档，这条错路径声明会当场 BLOCK。
+      const loadsDir = path.join(dir, CHANGE_DIR, '.skill-loads');
+      const loadsAside = path.join(dir, '.specs', 'loads-aside');
+      fs.renameSync(loadsDir, loadsAside);
+      writeFile(dir, '.specs/archive/2026-10-01-' + CHANGE_ID + '/.skill-loads/open-flow-comet-change.json',
+        JSON.stringify({
+          node: 'open', skill: 'flow-comet-change', protocol: '4-dev.md',
+          templates: ['CHANGE', 'REQUIREMENT'], at: '2026-08-01T00:00:00.000Z',
+        }, null, 2) + '\n');
+      const archivedDeclaration = runGuard(['entry', 'open'], dir);
+      assertExit(archivedDeclaration, 0);
+      assertNotOut(archivedDeclaration, '与节点协议文件不符');
+      // 复位：归档诱饵撤掉、活动声明标记归位——③ 起按「已声明」继续
+      fs.rmSync(path.join(dir, '.specs', 'archive'), { recursive: true, force: true });
+      fs.renameSync(loadsAside, loadsDir);
 
       // ③ 条件提示词不误拦 + 按前端判定打印：design 声明 2a-ui-design.md（条件提示词，属该节点协议面）
       // → 放行；前端 change 的入口追出条件行（与条件模板行对称），非前端 change 不打印。
@@ -1901,6 +1919,42 @@ export const ENTRIES = [
       const ok = exitNode(dir, 'archive');
       assertExit(ok, 0);
       assertOut(ok, 'ALL CHECKS PASSED');
+      // ④b 份数只数本 change 的归档目录（in-place 扩展）：归档移动已发生（活动目录不在原位）时，
+      // 同后缀诱饵——名字以 -<本 change> 结尾的别的 change 归档目录——既有份数不得被数进来，也不得
+      // 在本 change 归档目录缺席时充当「有目录可数」。归档目录按 <日期>-<本 change> 精确形态定位。
+      setupArchive(dir, {
+        evidence: { lessonsNomination: { scanned: 2, nominated: ['L-501'], reasonIfNone: '' } },
+      });
+      const archiveRoot = path.join(dir, '.specs', 'archive');
+      // 归档移动：活动目录整体搬成 .specs/archive/2026-10-21-<本 change>/（2 份 SUMMARY 随目录走），
+      // 归档产物 KNOWN-ISSUES.md 也归位到这一份目录，诱饵目录只放 3 份别人的 SUMMARY。
+      fs.renameSync(path.join(dir, CHANGE_DIR), path.join(archiveRoot, '2026-10-21-' + CHANGE_ID));
+      fs.renameSync(path.join(archiveRoot, '2026-10-20-' + CHANGE_ID, 'KNOWN-ISSUES.md'),
+        path.join(archiveRoot, '2026-10-21-' + CHANGE_ID, 'KNOWN-ISSUES.md'));
+      fs.rmSync(path.join(archiveRoot, '2026-10-20-' + CHANGE_ID), { recursive: true, force: true });
+      for (let i = 1; i <= 3; i += 1) {
+        writeFile(dir, '.specs/archive/2026-10-20-other-' + CHANGE_ID + '/T0' + i + '-SUMMARY.md',
+          '# SUMMARY\n\n## 做了什么\n\n诱饵归档的份数。\n');
+      }
+      const ownArchiveCount = runGuard(['exit', 'archive'], dir);
+      assertExit(ownArchiveCount, 0);
+      assertOut(ownArchiveCount, 'ALL CHECKS PASSED');
+      // 反向构造（同一判据 + 单变量）：本 change 的归档目录缺席、同后缀诱饵仍在场——份数不可核对
+      // （null），不得退回数诱饵的 3 份。修复前 .find 命中诱饵，3 份与声明一致就整体放行：份数对账
+      // 拿别人的归档作证。这里声明正好写 3，放行即证明数的是诱饵。
+      fs.renameSync(path.join(archiveRoot, '2026-10-21-' + CHANGE_ID, 'KNOWN-ISSUES.md'),
+        path.join(archiveRoot, '2026-10-20-other-' + CHANGE_ID, 'KNOWN-ISSUES.md'));
+      fs.rmSync(path.join(archiveRoot, '2026-10-21-' + CHANGE_ID), { recursive: true, force: true });
+      const decoyOnlyState = newChangeState('archive');
+      decoyOnlyState.evidence.archive = {
+        summary: 'archived',
+        lessonsNomination: { scanned: 3, nominated: [], reasonIfNone: '无新增条目' },
+      };
+      writeState(dir, decoyOnlyState);
+      const decoyOnly = runGuard(['exit', 'archive'], dir);
+      assertExit(decoyOnly, 1);
+      assertOut(decoyOnly, '工件目录缺失');
+      assertNotOut(decoyOnly, 'ALL CHECKS PASSED');
       // ⑤ 扫描份数的**类型**在写入前就拦（in-place 扩展）：scanned 是出口按**数值**比对的字段
       // （份数相等才算留痕成立），故字符串 "2" 必须被 record 拒。修复前它能落库成功、要等到 archive
       // 出口才因 "2" !== 2 炸——正是 record 形状校验要消灭的「错误延后暴露」（出错的是 record，

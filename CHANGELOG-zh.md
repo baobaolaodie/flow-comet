@@ -38,6 +38,8 @@
 - **声明为必需却没给路径的工件，两侧现在说同一句**：预检原先跳过这种声明，节点出口则把它算成永远缺失——同一份声明两种说法，其中一种还是没人做得成的指令。现在两侧都阻断，并打印同一句点名该声明要修的话（补一条路径，或把该产物改成可选）。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 - **委托前置门与 `record` 共用一条技能加载声明判据**：`handoff request` 不再把「归档目录后缀恰好也是这个 change id」的别的 change 标记当作本节点声明——两侧都先读活动 `.skill-loads/`，只在它缺席时才回到唯一的归档声明目录，新 change 在自己声明本节点技能之前一律拦住。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 - **归档兜底只认本 change 自己的归档目录**：归档目录按完整 `<日期>-<change-id>` 名精确比对，不再按后缀匹配——名字恰好以本 change id 结尾的别的 change，其声明标记不再被读作本 change 的声明；本 change 还没有自己的 `.skill-loads/` 时，在声明本节点技能之前一律拦住。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **"是否已归档"同样只认本 change 自己的归档目录**：判断一个 change 是否已归档（已归档的历史 change 不要求真实跑完验证命令）时，归档目录按完整 `<日期>-<change-id>` 名精确比对——同后缀的诱饵目录不再让本 change 被判成已归档，从而不再跳过验证命令的真实执行。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **归档提名的扫描份数只数本 change 自己的归档目录**：归档目录按完整 `<日期>-<change-id>` 名精确定位——同后缀的别的 change 归档目录不再被数进份数，也不再在本 change 归档目录缺席时充当可核对的对象（此时如实报告无目录可数，而不是拿别人的份数对账）。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 
 ## [1.6.5] - 2026-10-24
 
