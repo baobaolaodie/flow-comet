@@ -1,5 +1,5 @@
 // skill-load 声明标记族（单一归属）：--prompt 参数提取与归属校验、协议 scope 绑定查询、
-// 标记目录解析、节点声明存在性，以及 completedChecks 的真实性校验。
+// 标记目录解析（路径规则取自 state-io）、节点声明存在性，以及 completedChecks 的真实性校验。
 // 诚实边界：标记是「声明」而非物理证明——运行时没有 Skill 调用观察点，脚本无法确认执行者
 // 真实加载过该 skill；标记仅证明「执行者主动声明已加载」，由流程纪律兜底。handoff 条目的证据
 // 同样不是物理证明——它是子代理回传的 Return Contract 委托声明（子代理自称已加载并执行），
@@ -14,7 +14,16 @@ import {
   templateDeclareCommand,
   templateKeyOf,
 } from '../protocol-utils.mjs';
-import { fileExists, readJson, specsDir } from './state-io.mjs';
+// 声明标记目录的路径规则（活动路径优先、归档路径兜底）由本族的路径上下文模块持有：同一条规则被
+// 状态命令族与守卫族消费，本模块只把状态命令族的运行上下文作为根注入（守卫侧按自己的运行根取用
+// 同一份实现）——两族各写一份扫描，会在「活动目录在不在场」「多归档目录取哪个」上给出不同答案。
+import {
+  fileExists,
+  findSkillLoadsDir as findSkillLoadsDirAtRoot,
+  readJson,
+  runRootDir,
+  specsDir,
+} from './state-io.mjs';
 
 // --prompt 原始参数提取（skill-load 专用参数）：--protocol 由 resolveProtocol 全局解析
 // （CLI > env > 默认）为工作流协议 JSON——skill-load 曾用 --protocol 传 prompt 路径，主仓真实链路
@@ -62,25 +71,15 @@ export function findRequiredSkillBinding(protocol, nodeId, skillName) {
   return (node.requiredSkillCalls ?? []).find((binding) => binding.skill === skillName) ?? null;
 }
 
-// 标记目录解析——活动路径 .specs/<change-id>/.skill-loads/ 优先；归档路径兜底
-// （archive 节点「先移目录后 record/exit」顺序下 change 目录已在 .specs/archive/<前缀>-<change-id>/，
-// 标记只随目录移动——只查活动路径会误报缺失）。归档扫描匹配后缀 -<change-id>（前缀可含日期等，
-// 与协议 flowkit.archive.v1 的 archive/*-<change-id> artifact 路径同构）。两者皆无 → null。
-export async function findSkillLoadsDir(changeName) {
-  const activeDir = path.join(specsDir(), changeName, '.skill-loads');
-  if (await fileExists(activeDir)) {
-    return { dir: activeDir, display: '.specs/' + changeName + '/.skill-loads/' };
-  }
-  const archiveRoot = path.join(specsDir(), 'archive');
-  const entries = await fs.readdir(archiveRoot).catch(() => []);
-  for (const entry of entries) {
-    if (!entry.endsWith('-' + changeName)) continue;
-    const candidate = path.join(archiveRoot, entry, '.skill-loads');
-    if (await fileExists(candidate)) {
-      return { dir: candidate, display: '.specs/archive/' + entry + '/.skill-loads/' };
-    }
-  }
-  return null;
+// 标记目录解析（活动路径 .specs/<change-id>/.skill-loads/ 优先，归档路径兜底——archive 节点
+// 「先移目录后 record/exit」顺序下 change 目录已在 .specs/archive/<日期>-<change-id>/，标记只随
+// 目录移动）：路径规则与守卫族同一份实现，实现在本族的路径上下文模块（state-io），本处只注入状态
+// 命令族的运行根。规则落状态族而不是守卫族是依赖方向决定的：状态命令族不得 import 守卫族（否则
+// 一条路径规则就让状态 CLI 加载整个守卫图），守卫侧按允许的 guard → state-* 方向取用同一份实现。
+// 两族各持一份扫描时，同一个标记会因「活动目录在场是否回溯归档」「多归档目录取哪个」各自得出答案。
+// 两者皆无 → null。
+export function findSkillLoadsDir(changeName) {
+  return findSkillLoadsDirAtRoot(runRootDir(), changeName);
 }
 
 // 节点技能加载声明标记存在性（技能加载前置门·方案 A）：校验 .skill-loads/ 下
@@ -206,7 +205,7 @@ export async function verifySkillLoadMarkers(completedChecks, changeName, record
       continue;
     }
     // 标记路径解析——活动路径优先，归档路径兜底（archive 节点「先移目录后 record」
-    // 顺序下标记只在 .specs/archive/*-<change-id>/.skill-loads/）；两处都找不到 → BLOCK + 指引
+    // 顺序下标记只在 .specs/archive/<日期>-<change-id>/.skill-loads/）；两处都找不到 → BLOCK + 指引
     // （不静默放行）。展示路径补 .specs/ 前缀便于用户定位。
     const markerName = item.node + '-' + item.skill + '.json';
     const activeDisplay = '.specs/' + path.posix.join(changeName, '.skill-loads', markerName);

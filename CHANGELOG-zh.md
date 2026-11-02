@@ -10,6 +10,37 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本记录在哪些位置见 [docs/VERSIONS-zh.md](docs/VERSIONS-zh.md)，由 CI 在发布面对账保持一致。
 
+## [Unreleased]
+
+### 新增
+
+- **引擎能在节点收尾之前告诉你某份任务摘要还缺什么**：`workflow-guard.mjs exit <节点> --preflight` 只跑结构性门禁——声明工件在场、摘要关键段、模板骨架、入口骨架——不写 state、不写提示账本，且不允许与 `--apply` 同时使用。只有归档步骤才会产出的工件，在预检时点只报告「归档执行后才会生成」，不要求在场。两册执行技能与两处运行期提示都改为指向它，完整 `exit`（不带 `--apply`）仍是节点收尾的全链预演。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+
+### 变更
+
+- **`status`、`next`、`record` 现在给出同一个节点**：`status` 输出 `routeNode` 与 `ROUTE:` 对账行（产物推导 / state 原值 / 路由视图），`next` 打印 `WHY:`，`record` 走同一判定——在修复回路里三者一致，不再指向会被门禁拦下的节点。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **`status.coordinatorMode` 改为跟随路由视图**，不再保留第二套推导，一个响应里不会出现两个"当前节点"（进行中态的取值变化可观察）。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **`exit` 不再接受不认识的参数**：参数面收成一个节点名 + 已知旗标（`--apply`、`--preflight`，外加全局的 `--protocol <path>`），未知的 `--*`、单横线的疑似旗标（`-apply`、`-h`）与多余的位置参数一律用法错误、非零退出，不再被静默忽略——笔误不再能「看起来像预检，实际跑的是完整出口链」，多出来的裸词也不会被悄悄丢掉。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **协调者提示改按平台的身份通道表述，委托写明硬顺序**：`entry` 与 `next` 共用的那一句改为「按平台的身份通道委托子代理，独立 worktree 只是写权限的一种实现」；两册执行技能把「先让 request 成功，再启动子代理」写成硬顺序；`replan` 成功行之后新增一行重签事实说明。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **`record` 拒绝畸形的证据载荷**而不是照存：`summary` 不是字符串或为空串、`completedChecks` 的元素不是字符串、`lessonsNomination` 类型不对（含扫描份数——archive 出口按数值比对它），都会在任何写入之前立刻失败，并点名字段路径与当前类型；整个载荷不是对象（裸字符串、数组、`null`、数字）时同样直接拒绝，不再被静默改写成摘要；此前这类值会被存下来，问题要到节点出口才以「缺证据」的形态出现，或到归档收口才以「份数不符」的形态出现。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **任何严重度的延期都要经人裁决；Minor 的判定收窄并要求给出理由**：reviewer 不能再自行把一条发现记为延期——出口会核对用户裁决记录与承接该裁决的升级标记，Minor 与 Major 同一标准；一条发现只有在同时满足「不改变行为与输出、不影响用户可读的文档或报文、不新增第二份等价实现、不削弱断言与测试判别力、不涉及跨平台或分发形态」时才可判 Minor，否则按 Major 处理，且每条 Minor 都须以固定形态写明判定理由。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **`handoff result` 在写入前校验回传契约**：证据块不是对象、`completedChecks` 的元素不是字符串、commit hash 不是字符串，都会立刻失败并点名字段路径与当前类型；零提交的任务仍可省略 hash。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **`handoff request` 直接列出本任务要回应的教训**：它打印的 `LESSONS-HITS` 与出口重算用的是同一实现，回应可以一次写对，而不必等到出口才发现缺项。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **`handoff` 拒绝非对象契约，也不再借用写面**：不是对象的结果载荷（裸字符串、数组、`null`、数字）在入口即拒绝，不再原样存下；没有 `<write_files>` 的任务也不再继承下一个任务的写面——新 change 下请求会直接被拦，而不是放行到提交子集校验才炸。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **路由被拦时 `status` 不再给出节点**：凡是 `next` 拒绝推进的状态（修复批次轮次用完、修复批次停滞、节点看起来还没 exit），它都不报路由节点并在 `ROUTE` 行说明原因；`record` 也不再声称下一个节点；回程路径会给出 `WHY` 行。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **不含公开文档的载体如实说明**：包形态或安装副本现在打印明确的「未校验」提示，而不是把它自己的缺文件报成仓库缺文件。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+
+### 修复
+
+- **写成粗体或带理由的"不适用"现在被接受**：校验前剥掉包裹符号（粗体、引用、列表、括号、反引号），含 `**N/A**（理由）`；而 `**见 N/A**` 仍算已填并照常报错。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **恢复提示给出的是能照着跑的命令**：恢复步骤按必须执行的顺序排列（先声明本节点技能、再补证据），当本次运行用的不是内置协议时会带上 `--protocol`，并且测试执行的就是打印出来的那条命令，而不是替换成夹具路径。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **公开机制文档被删除现在会判失败**：文档检查先判形态——携带公开文档权威映射的检出必须携带该面上的每一份公开文档，删掉一份即判失败并点名该文件；只有根本不含公开文档的检出（安装副本的技能树、npm 包）才输出可见的跳过行，且该跳过行仍写明「本次未校验」。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **声明为必需却没给路径的工件，两侧现在说同一句**：预检原先跳过这种声明，节点出口则把它算成永远缺失——同一份声明两种说法，其中一种还是没人做得成的指令。现在两侧都阻断，并打印同一句点名该声明要修的话（补一条路径，或把该产物改成可选）。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **委托前置门与 `record` 共用一条技能加载声明判据**：`handoff request` 不再把「归档目录后缀恰好也是这个 change id」的别的 change 标记当作本节点声明——两侧都先读活动 `.skill-loads/`，只在它缺席时才回到唯一的归档声明目录，新 change 在自己声明本节点技能之前一律拦住。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **归档兜底只认本 change 自己的归档目录**：归档目录按完整 `<日期>-<change-id>` 名精确比对，不再按后缀匹配——名字恰好以本 change id 结尾的别的 change，其声明标记不再被读作本 change 的声明；本 change 还没有自己的 `.skill-loads/` 时，在声明本节点技能之前一律拦住。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **"是否已归档"同样只认本 change 自己的归档目录**：判断一个 change 是否已归档（已归档的历史 change 不要求真实跑完验证命令）时，归档目录按完整 `<日期>-<change-id>` 名精确比对——同后缀的诱饵目录不再让本 change 被判成已归档，从而不再跳过验证命令的真实执行。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **归档提名的扫描份数只数本 change 自己的归档目录**：归档目录按完整 `<日期>-<change-id>` 名精确定位——同后缀的别的 change 归档目录不再被数进份数，也不再在本 change 归档目录缺席时充当可核对的对象（此时如实报告无目录可数，而不是拿别人的份数对账）。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+
 ## [1.6.5] - 2026-10-24
 
 ### 新增

@@ -43,8 +43,10 @@ import {
   COMMIT_DISCIPLINE_AUTHORITY_PHRASES,
   COMMIT_DISCIPLINE_ELEMENT_GROUPS,
   COMMIT_DISCIPLINE_REL,
+  COMMIT_FORM_TOKEN,
   CONTRACT_EVIDENCE_AUTHORITY_PHRASES,
   DELEGATION_POINTER_RELS,
+  ENTRY_COMMIT_FORM_REL,
   IDENTITY_UPGRADE_AUTHORITY_PHRASES,
   IDENTITY_UPGRADE_ENTRY_PHRASES,
   IDENTITY_UPGRADE_STALE_PHRASES,
@@ -59,6 +61,7 @@ import {
   SKILL_TREE_REFERENCE_RE,
   TEMPLATE_AUTHORITY_SKILLS,
   delegationDisciplineProblems,
+  entryCommitFormProblems,
   identityUpgradeProblems,
   pairedGuidancePointerProblems,
   platformFactsAuthorityProblems,
@@ -893,8 +896,11 @@ export const ENTRIES = [
 
   // 184d: 三块归一处（ADR-016）——pathspec / 集成纪律归 `reference/commit-discipline.md`、四属性
   // 契约归入口册与平台事实册；「要点句在场 + 权威处唯一 + 判别句不再要求两册逐字一致」。
+  // 原位扩展（反馈面纪律）：两册各自的流程步骤须含「每任务预检」（跑完整出口门禁但不带 --apply、
+  // 不推进状态）与「先 request 成功再启动子代理」的硬顺序句（禁放进同一个并发调用；如实注明是
+  // 执行纪律而非机制拦截），中英双语同册一致；每条锚自带反向构造（抽掉即红）。
   {
-    name: '184d 技能文本锁：三块归一处与委托契约纪律要点句',
+    name: '184d 技能文本锁：三块归一处、委托契约纪律要点句与每任务预检顺序',
     run: () => {
       const problems = [];
       // —— ⑥ 三块归一处（ADR-016）：原「两册三块逐字一致（切片 ≥400 字符）+ 两册各持 41 条判别句」
@@ -917,6 +923,24 @@ export const ENTRIES = [
         ]);
         const disciplineSources = { books: bookTexts, elementDocs, authorityTexts };
         problems.push(...delegationDisciplineProblems(disciplineSources));
+        // 入口册的提交形态（存在性 + 反否定）：两册与权威处的要素 token 都被锁，入口册那一行却没有
+        // ——退回「`git commit -- <路径>`」（不给 -m）时套件不会红。反向构造常驻：抽掉要点句、把
+        // 那一行换回旧形态，两种改动都必须被判红（后者就是本次实测的反向构造形态）。
+        const entryCommitText = authorityTexts.get(ENTRY_COMMIT_FORM_REL);
+        problems.push(...entryCommitFormProblems(ENTRY_COMMIT_FORM_REL, entryCommitText));
+        // 反向构造以要点句在场为前提（缺失已由真实判据报告——同一处不叠两条，与上方各组同一写法）。
+        if (entryCommitText.includes(COMMIT_FORM_TOKEN)) {
+          const withoutCommitForm = entryCommitText.split(COMMIT_FORM_TOKEN).join('');
+          if (!entryCommitFormProblems(ENTRY_COMMIT_FORM_REL, withoutCommitForm)
+            .some((p) => p.includes('缺带消息的提交形态要点句'))) {
+            problems.push('反向构造判别力缺失（抽掉入口册提交形态要点句未被判缺）');
+          }
+          const revertedCommitForm = entryCommitText.split(COMMIT_FORM_TOKEN).join('`git commit -- <同一路径>`');
+          if (!entryCommitFormProblems(ENTRY_COMMIT_FORM_REL, revertedCommitForm)
+            .some((p) => p.includes('缺 `-m` 的旧提交形态'))) {
+            problems.push('反向构造判别力缺失（把入口册那一行换回缺 -m 的旧形态未被判违规）');
+          }
+        }
         // 反向构造（同一判据驱动）：逐条抽掉 ⇒ 必报；逐条回流 ⇒ 必报。判别力不依赖人工实验：
         // 要素级 token / 权威处判别句 / 能力契约判别句 / 条件句指针 / 证据与判级判别句五组各取全量。
         const subRel = 'flow-comet-subagent-execute/SKILL.md';
@@ -1186,6 +1210,62 @@ export const ENTRIES = [
           const probed = { ...consistencySources, ...override };
           if (!consistencyProblems(probed).some((p) => p.includes(expected))) {
             problems.push('反向构造判别力缺失（' + probeLabel + ' 未被判不一致）');
+          }
+        }
+        // —— 每任务预检（--preflight）+ 委托顺序纪律 + 节点视图三字段（文本锁 · 两册中英双语）——
+        // 判据 = 三组关键句在**两册各自**的正文里逐条在案：预检（--preflight 只跑结构门禁 / 只读不写
+        // state 与账本 / 完整 exit 仍是全链预演）、委托顺序（先 request 成功再启动子代理 / 禁放进同一个
+        // 并发调用 / 纪律不是机制拦截）、节点视图三字段（currentNode 产物推导 / stateCurrentNode 原值 /
+        // routeNode 路由视图 / Fix 批次以 FIX-BATCH 行与 next 的 NODE 为准），中英各一份。
+        // 反向构造：逐册逐句抽掉 ⇒ 必报该册缺该句（抽掉用全量 split/join，不是只替换首处）。
+        {
+          const preflightOrderAnchors = [
+            ['每任务预检 · 用 --preflight（中文）', '每任务预检（`--preflight` · 只报结构问题）'],
+            ['每任务预检 · 只跑结构门禁（中文）', '它只跑**结构性门禁**'],
+            ['每任务预检 · 不写 state 与账本（中文）', '不推进状态、不写 state、也不写模板提示账本'],
+            ['每任务预检 · 完整 exit 仍是全链预演（中文）', '**完整 `exit`（不带 `--apply`）仍是节点收尾的全链预演**'],
+            ['每任务预检（英文）', '**Per-task preflight (`--preflight`, structural only)**'],
+            ['每任务预检 · 只跑结构门禁（英文）', 'it runs only the structural gates'],
+            ['每任务预检 · 不写 state 与账本（英文）', 'does not write workflow state, and does not write the template hint ledger'],
+            ['每任务预检 · 完整 exit 仍是全链预演（英文）', "the **full `exit` without `--apply` remains the node's whole-chain rehearsal**"],
+            ['委托顺序 · 先 request 后委托（中文）', '先让 request 成功，再启动子代理'],
+            ['委托顺序 · 禁同一并发调用（中文）', '禁止把 request 与子代理启动放进同一个并发调用'],
+            ['委托顺序 · 纪律不是拦截（中文）', '这是执行纪律，不是机制拦截'],
+            ['委托顺序（英文）', 'a successful request first, then launch the subagent'],
+            ['委托顺序 · 禁同一并发调用（英文）', 'never inside one concurrent call'],
+            ['委托顺序 · 纪律不是拦截（英文）', 'execution discipline, not a mechanism interception'],
+          ];
+          const nodeFieldAnchors = [
+            ['节点视图 · currentNode 产物推导（中文）', '**currentNode** = **产物推导**'],
+            ['节点视图 · stateCurrentNode 原值（中文）', '**stateCurrentNode** = **state 文件原值**'],
+            ['节点视图 · routeNode 路由视图（中文）', '**routeNode** = **路由视图**'],
+            ['节点视图 · Fix 批次以 FIX-BATCH 与 next 为准（中文）', '**Fix 批次以 `FIX-BATCH` 行与 `next` 的 `NODE` 为准**'],
+            ['节点视图 · currentNode 产物推导（英文）', '**currentNode** = artifact-derived'],
+            ['节点视图 · stateCurrentNode 原值（英文）', '**stateCurrentNode** = the raw state-file value'],
+            ['节点视图 · routeNode 路由视图（英文）', '**routeNode** = the routing view'],
+            ['节点视图 · Fix batch（英文）', '**For a Fix batch, trust the `FIX-BATCH` line and the `NODE` printed by `next`**'],
+          ];
+          const bookAnchorProblems = (books, anchors) => {
+            const out = [];
+            for (const [rel, text] of books) {
+              for (const [label, anchor] of anchors) {
+                if (!text.includes(anchor)) {
+                  out.push(rel + ' 缺「' + label + '」（关键句不在场：' + anchor.slice(0, 28) + '…）');
+                }
+              }
+            }
+            return out;
+          };
+          for (const [groupLabel, anchors] of [['预检与委托顺序', preflightOrderAnchors], ['节点视图三字段', nodeFieldAnchors]]) {
+            problems.push(...bookAnchorProblems(bookTexts, anchors));
+            for (const [rel, text] of bookTexts) {
+              for (const [label, anchor] of anchors) {
+                const probed = new Map(bookTexts).set(rel, text.split(anchor).join('（反向构造：抽掉）'));
+                if (!bookAnchorProblems(probed, anchors).some((p) => p.startsWith(rel) && p.includes(label))) {
+                  problems.push('反向构造判别力缺失（' + groupLabel + '：' + rel + ' 抽掉「' + label + '」未被判缺）');
+                }
+              }
+            }
           }
         }
       }

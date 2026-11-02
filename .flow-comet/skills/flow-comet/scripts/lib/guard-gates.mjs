@@ -7,7 +7,13 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { validateStateFields } from '../state-schema.mjs';
-import { NODE_PROTOCOL_FILES } from '../protocol-utils.mjs';
+import {
+  NODE_PROTOCOL_FILES,
+  nodeTemplateDeclaration,
+  templateKeyFromArtifactName,
+  templateKeyOf,
+  templatePointerPath,
+} from '../protocol-utils.mjs';
 import {
   EXECUTE_FAMILY_NODE_IDS,
   TASK_SET_SIGNATURE_ALGO,
@@ -30,8 +36,8 @@ import {
 } from './guard-artifact-skeleton.mjs';
 import { frontendCriterion } from './guard-uidesign.mjs';
 import {
+  declaredRequiredArtifacts,
   evidenceFor,
-  findSkillLoadsDir,
   hasEvidenceField,
   hasNonEmptyHandoffResult,
   isNewChange,
@@ -39,7 +45,19 @@ import {
   missingRequiredSchemaEvidence,
   nextNode,
   templateSectionPatterns,
+  unspecifiedPathsNotice,
 } from './guard-routing.mjs';
+// 结构化预检（exit --preflight）的子集由既有门禁与既有的产物路径判据组成：本节点声明工件的
+// 存在性消费出口产物门禁的**同一条判据**（guard-routing 的 declaredRequiredArtifacts——枚举 +
+// 路径解析 + 在场判定，预检不另写一份），SUMMARY 关键段来自证据/产物门禁族，骨架判据与 TASK 7
+// 字段来自模板保真门禁族——预检自身不复制段形实现，也不新造一份节点→产物映射。
+import { evidenceRecoveryBlock, runSummarySectionsGate } from './guard-evidence-gates.mjs';
+import { evaluateArtifact, formatIssueParts, runTaskSevenFieldGate } from './guard-template-fidelity.mjs';
+// 协调者禁令的常量落在中立模块（跨族共用的措辞不进任何一族）：本模块只是取用方，状态命令族同理。
+import { COORDINATOR_NOTICE } from './state-explain.mjs';
+// 声明标记目录的路径规则（活动路径优先、归档兜底）归状态族的路径上下文模块，与 record 前置门同一份
+// 实现——guard → state-* 是允许的单向边；规则若留在守卫族，状态 CLI 会为它加载整个守卫图。
+import { findSkillLoadsDir, isArchivedChangeDirName } from './state-io.mjs';
 
 // 节点 → 合法 exit 的前置条件（对齐 flow-kit 阶段门 + flowkit.*.v1 evidence）
 const NODE_TRANSITION_GATES = {
@@ -71,12 +89,19 @@ function markerProtocolBasename(value) {
 // 保持列表项口径（历史写法，避免把分区标题误判成发现）。"无"条目（"- 无" / "无（...）"）表示该
 // 级别无发现，豁免。条目块包含其后的非空续行，直到空行 / 下一条目 / 下一个标题。严重度只取该条目
 // 自身的标题/行首——所属 "### Major" 分区，或标题（加粗部分 / H3 严重度 token）内带级别信息；
-// 条目正文引用他条的 [Major] 字样不改变本条严重度。返回 { title, scope, lines, isMajor, ordinal }。
+// 条目正文引用他条的 [Major] 字样不改变本条严重度。返回
+// { title, scope, lines, isMajor, isMinor, ordinal }——isMinor 只认显式判为 Minor 的形态（### Minor
+// 分区 / [Minor] 标签 / 🟢 前缀），未标严重度的条目不假装是 Minor（Minor 判定理由门禁据此不误判）。
 const REVIEW_FINDING_ITEM_RE = /^\s*(?:[-*+]|\d+[.)])\s*\*\*(.+?)\*\*/;
 const REVIEW_SEVERITY_TOKEN_RE = /^(?:🔴|🟡|🟢|\[\s*(?:critical|major|minor)\s*\])\s*/iu;
 const REVIEW_DISPOSITION_RE = /\[已修\]|\[升级\]|\[转待办\]/;
 const REVIEW_MAJOR_LABEL_RE = /\[\s*Major\s*\]/i;
+const REVIEW_MINOR_LABEL_RE = /\[\s*Minor\s*\]/i;
 const REVIEW_ADJUDICATION_RE = /用户裁决\s*[:：]\s*接受延期/;
+// Minor 判定理由的固定形态：条目块内以「判 Minor：」开头的一行（后接一句话理由）。只做结构级
+// 判定（行首标签存在即视为已自证）——行首的列表记号 / 引用记号是 Markdown 行级噪音，不改变该行
+// 的标签身份，故允许出现在标签之前。
+const REVIEW_MINOR_JUSTIFICATION_RE = /^\s*(?:(?:[-*+]|\d+[.)])\s+|>\s*)*判\s*Minor\s*[:：]/;
 // 旧形态段的「空段」形态：占位词与「无」条目不构成内容（迁移提示只在旧段真有内容时给）。
 const REVIEW_FINDINGS_PLACEHOLDER_RE =
   /^(?:[-*+]\s*)?(?:\*\*)?(?:无|不适用|未涉及|无变更|N\/A|—|（无）|\(无\))(?:\*\*)?[。.；;，,]?$/iu;
@@ -101,11 +126,18 @@ async function reviewFindingScope() {
 }
 
 // H3 条目形态的严重度从标题前缀的严重度 token 派生（模板范例的 🔴/🟡/🟢；另接受文字标签形态的
-// [Critical]/[Major]/[Minor]）——Major 延期裁决门禁对 H3 条目与列表项同口径。
+// [Critical]/[Major]/[Minor]）——延期裁决门禁对 H3 条目与列表项同口径。
 function reviewSubheadingIsMajor(heading) {
   const token = (String(heading).match(REVIEW_SEVERITY_TOKEN_RE) ?? [])[0] ?? '';
   if (/🔴|🟡/u.test(token) || /critical|major/iu.test(token)) return true;
   return REVIEW_MAJOR_LABEL_RE.test(heading);
+}
+
+// H3 条目的 Minor 形态（模板范例的 🟢 / 文字标签 [Minor]）——与 reviewSubheadingIsMajor 同一派生面。
+function reviewSubheadingIsMinor(heading) {
+  const token = (String(heading).match(REVIEW_SEVERITY_TOKEN_RE) ?? [])[0] ?? '';
+  if (/🟢/u.test(token) || /minor/iu.test(token)) return true;
+  return REVIEW_MINOR_LABEL_RE.test(heading);
 }
 
 function reviewFindingsItems(text, scope = { primary: null, siblings: [] }) {
@@ -141,6 +173,7 @@ function reviewFindingsItems(text, scope = { primary: null, siblings: [] }) {
             scope: 'primary',
             lines: [line],
             isMajor: reviewSubheadingIsMajor(heading),
+            isMinor: reviewSubheadingIsMinor(heading),
           };
           continue;
         }
@@ -165,6 +198,7 @@ function reviewFindingsItems(text, scope = { primary: null, siblings: [] }) {
         scope: mode,
         lines: [line],
         isMajor: /^major\b/i.test(severity) || REVIEW_MAJOR_LABEL_RE.test(title),
+        isMinor: /^minor\b/i.test(severity) || REVIEW_MINOR_LABEL_RE.test(title),
       };
       continue;
     }
@@ -197,17 +231,24 @@ function reviewLegacyFindingsHasContent(text) {
   return false;
 }
 
+// 发现条目本身（排除不是发现的条目）：
+// · "无" 条目（"- 无" / "无（...）"）表示该级别无发现；
+// · 四要素字段行：REVIEW 发现条目的 Symptom/Source/Consequence/Remedy 是 brooks 审查输出的字段行
+//   （带 ** 加粗），不是与条目并列的发现——不排除会把字段行当成"缺处置的发现"。精确匹配完整
+//   标签（允许尾冒号）——"Source maps expose paths" 这类以 Source 开头的真实发现标题不得被前缀
+//   匹配误豁免。
+// 处置标记 / 延期裁决 / Minor 判定理由三处门禁共用这一口径：同一豁免清单三处各写一份必然分叉。
+function reviewRealFindings(items) {
+  return items
+    .filter((item) => !/^无/.test(item.title))
+    .filter((item) => !/^(?:Symptom|Source|Consequence|Remedy)\s*:?\s*$/i.test(item.title));
+}
+
 // 发现区条目处置标记存在性：返回缺处置状态标记（[已修]/[升级]/[转待办]）的条目标题列表——结构级
 // 校验（不做语义判断：标记存在即视为已处置）。发现项（含 Minor；无序与有序条目同口径，均不得
 // "记录后无声消失"）的处置标记以该条目自身标题/行首为准——正文引用他条标记不参与判定。
 function reviewFindingsMissingDisposition(text, scope = { primary: null, siblings: [] }) {
-  return reviewFindingsItems(text, scope)
-    .filter((item) => !/^无/.test(item.title)) // "无" 条目豁免
-    // 四要素字段行豁免：REVIEW 发现条目的 Symptom/Source/Consequence/Remedy 是 brooks 审查输出
-    // 格式的字段行（带 ** 加粗），不是发现条目本身——不豁免会误判为"发现项缺处置标记"（执行者按
-    // 4 要素格式书写时被误 BLOCKED）。精确匹配完整标签（允许尾冒号）——"Source maps expose paths"
-    // 这类以 Source 开头的真实发现标题不得被前缀匹配误豁免（其处置校验必须照常进行）
-    .filter((item) => !/^(?:Symptom|Source|Consequence|Remedy)\s*:?\s*$/i.test(item.title))
+  return reviewRealFindings(reviewFindingsItems(text, scope))
     .filter((item) => !REVIEW_DISPOSITION_RE.test(item.lines[0]))
     .map((item) => item.title);
 }
@@ -223,20 +264,29 @@ function reviewAdjudicationPointsTo(record, item) {
   return core.length >= 6 && record.includes(core);
 }
 
-// Major 延期裁决门禁：发现区任何 Major 条目处置为 [转待办] 时，必须同时存在用户裁决记录——同段
-// （条目自身段落）或文末其余段落含「用户裁决：接受延期」且指向该条目，并由 [升级] 承接（条目自身
-// 块或裁决记录含 [升级]）。任一缺失 → 返回条目标题（调用方按新 change BLOCK / 旧 change WARN 渐进
-// 处置）。Minor 不参与；Major [升级]/[已修] 直接放行。条目自身的处置标记（[转待办]）只认该条目标题
-// /行首（无序与有序同口径），正文续行引用他条标记不触发本门禁；[升级] 承接可出现在条目自身块或
-// 用户裁决记录中（承接非本条处置）。
-function reviewDeferredMajorProblems(text, scope = { primary: null, siblings: [] }) {
+// 条目自身的严重度标签（报文里点名用）：Major / Minor 之外是"未标严重度"——延期门禁对任何严重度
+// 生效，未标严重度同样要裁决记录，报文得让执行者看清是哪一类。
+function reviewItemSeverityLabel(item) {
+  if (item.isMajor) return 'Major';
+  if (item.isMinor) return 'Minor';
+  return '未标严重度';
+}
+
+// 延期裁决门禁：发现区任何条目（**任何严重度**，含 Minor）处置为 [转待办] 时，必须同时存在用户裁决
+// 记录——同段（条目自身段落）或其它段落（位置不限，须与条目以空行分隔）含「用户裁决：接受延期」且
+// 指向该条目，并由 [升级] 承接（条目自身块或裁决记录含 [升级]）。任一缺失 → 返回该条目（调用方按
+// 新 change BLOCK / 旧 change WARN 渐进处置）。只认 [已修]/[升级] 的条目直接放行：它们的处置不是
+// 延期，没有用户决策点。条目自身的处置标记（[转待办]）只认该条目标题/行首（无序与有序同口径），
+// 正文续行引用他条标记不触发本门禁；[升级] 承接可出现在条目自身块或用户裁决记录中（承接非本条处置）。
+// 历史语义：本门禁曾只覆盖 Major——Minor 的自行延期因此长期无门槛，成为延期积压的制度口子。
+function reviewDeferredFindingProblems(text, scope = { primary: null, siblings: [] }) {
   const textValue = String(text);
-  const items = reviewFindingsItems(textValue, scope);
+  const items = reviewRealFindings(reviewFindingsItems(textValue, scope));
   const paragraphs = textValue.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
   const problems = [];
   for (const item of items) {
     const ownLine = item.lines[0];
-    if (!item.isMajor || !/\[转待办\]/.test(ownLine)) continue;
+    if (!/\[转待办\]/.test(ownLine)) continue;
     const block = item.lines.join('\n');
     const escalatedInBlock = /\[升级\]/.test(block);
     const blockTrimmed = block.trim();
@@ -246,9 +296,22 @@ function reviewDeferredMajorProblems(text, scope = { primary: null, siblings: []
       if (paragraph === blockTrimmed) return false; // 跳过条目自身段落
       return (escalatedInBlock || /\[升级\]/.test(paragraph)) && reviewAdjudicationPointsTo(paragraph, item);
     });
-    if (!matched) problems.push(item.title);
+    if (!matched) problems.push({ title: item.title, severity: reviewItemSeverityLabel(item) });
   }
   return problems;
+}
+
+// Minor 判定理由门禁：**每条**判为 Minor 的发现都须在条目块内自证判据——一行以「判 Minor：」开头的
+// 一句话理由，**与处置标记无关**（[已修] / [升级] / [转待办] 一律要）。理由必须落在判定发生的那一刻：
+// 只对延期条目查，等于允许"先宽判 Minor、要延期时再补票"——Minor 判定过宽正是这条门禁要挡的失效模式
+// （举证责任在判 Minor 的一侧，拿不准时默认 Major）。结构级判定（行首标签存在即已自证），不做语义
+// 判断：理由写得好不好不是脚本能判的，脚本只保证"判 Minor"这个动作留下可复核的依据。未标严重度的
+// 条目不在本门禁内（它的缺口由处置标记门禁与延期裁决门禁负责）。
+function reviewMinorJustificationProblems(text, scope = { primary: null, siblings: [] }) {
+  return reviewRealFindings(reviewFindingsItems(text, scope))
+    .filter((item) => item.isMinor)
+    .filter((item) => !item.lines.some((line) => REVIEW_MINOR_JUSTIFICATION_RE.test(line)))
+    .map((item) => ({ title: item.title, severity: reviewItemSeverityLabel(item) }));
 }
 
 // 节点 entry 链：受控归位 → 归档分支校验 → 委托前并行写冲突 → 委托前工件 commit 提示 →
@@ -357,7 +420,8 @@ export async function runEntryGates({ protocol, node, state, file }) {
   const entryExecutionMode = state.executionMode ?? 'subagent';
   if (EXECUTE_FAMILY_NODE_IDS.has(node.id)) {
     if (!(entryExecutionMode === 'direct' && node.id === 'execute')) {
-      console.log('COORDINATOR: 你是协调者，不是执行者。禁止在主会话直接修改源码；只能通过 Agent 工具 worktree isolation 委托子代理；子代理回传后仅更新 TASK.md / SUMMARY / handoff evidence。');
+      // 与 next 的 COORDINATOR 行同源（COORDINATOR_NOTICE）：两处输出逐字相同。
+      console.log('COORDINATOR: ' + COORDINATOR_NOTICE);
     }
   }
   // enter 证据——entry 记录节点进入标记（enteredNodes），exit 检测未 entry（防跳过 entry 无痕）
@@ -382,11 +446,27 @@ export async function runEntryGates({ protocol, node, state, file }) {
 }
 
 // 出口前置：本节点 evidence 必须在场（缺失时给出补证据指引）。返回该 evidence。
-export function requireNodeEvidence({ node, state }) {
+// 异步是为把「缺了什么、下一步跑什么」交给**同一构造函数** evidenceRecoveryBlock（它要读技能加载
+// 声明标记）——同一条缺证据的恢复路径只允许有一份编排，两处各拼一份必然分叉。
+export async function requireNodeEvidence({ node, state }) {
   const evidence = evidenceFor(state, node.id);
   if (!evidence) {
     console.error('BLOCKED: missing evidence for Node ' + node.id + '.');
-    console.error('恢复: 该节点已完成但缺证据记录 → 用 workflow-state.mjs record ' + node.id + ' \'{"summary":"<完成摘要>"}\' 补证据后重试；状态漂移 → advance/select；禁止手改 state 机器字段');
+    // 恢复段给**可照抄的命令**，且与缺 Output Schema 字段那条**同一构造函数** evidenceRecoveryBlock：
+    // 散文式的「用 workflow-state.mjs record …」没有可复制的路径形态、也不带协议上下文，照抄的人得
+    // 自己从散文里反推命令、再自己补协议。同一件事拼两份的实证：这条路径曾只给 record，而 record 有
+    // 自己的技能加载声明门——照抄第一步就被拦下，第二步的命令还落在另一条报文里（两次往返）。
+    // 先点名缺的是这个节点的证据对象（lead），命令与步骤编排归构造函数；状态漂移的两条出路与禁令
+    // 照旧保留。
+    const recovery = await evidenceRecoveryBlock({
+      node,
+      state,
+      lead: '该节点已完成但缺证据记录（evidence.' + node.id + ' 不在场）',
+    });
+    console.error([
+      ...recovery,
+      '      状态漂移 → workflow-state.mjs advance（强制推进）或 select（切换 change）；禁止手改 state 机器字段',
+    ].join('\n'));
     process.exit(1);
   }
   return evidence;
@@ -568,8 +648,10 @@ function lessonsLegacyEntries(content) {
   return hits;
 }
 
-// 该 change 的 SUMMARY 份数（C6：先看活动目录，目录已移入归档时看 `.specs/archive/*-<change>/`；
-// 两处都不存在 → null = 归档产物缺失——不可核对的份数不当作 0）。
+// 该 change 的 SUMMARY 份数（C6：先看活动目录，目录已移入归档时看
+// `.specs/archive/<日期>-<change>/`；两处都不存在 → null = 归档产物缺失——不可核对的份数不当作 0）。
+// 归档目录按精确形态定位（判据单源在 state-io）：同后缀的别的 change 归档目录被算进来，份数对账就
+// 拿别人的归档作证；按后缀「先命中先用」还会因 readdir 顺序把本 change 的归档目录挤掉。
 async function changeSummaryCount(changeName) {
   const activeDir = path.join(runRoot, '.specs', changeName);
   let dir = null;
@@ -578,7 +660,7 @@ async function changeSummaryCount(changeName) {
   } else {
     const archiveRoot = path.join(runRoot, '.specs', 'archive');
     const entries = await fs.readdir(archiveRoot).catch(() => []);
-    const archived = entries.find((entry) => entry.endsWith('-' + changeName));
+    const archived = entries.find((entry) => isArchivedChangeDirName(entry, changeName));
     if (archived) dir = path.join(archiveRoot, archived);
   }
   if (dir === null) return null;
@@ -1161,21 +1243,45 @@ export async function runReviewExitGate({ node, state }) {
         ' 项条目缺处置状态标记（[已修]/[升级]/[转待办]）: ' + missingDisposition.join('、') +
         '——未处置的发现（含 Minor）不应无声消失，补标记后本警告消除（渐进不阻断）');
     }
-    // Major 延期裁决门禁：Major 的处置是用户决策点——reviewer 不得自行 [转待办]。结构校验：Major
-    // 条目标 [转待办] 时须同时存在用户裁决记录（同段或文末含「用户裁决：接受延期」且指向该条目，
-    // 并由 [升级] 承接）；缺失 → 新 change BLOCKED / 旧 change WARN 渐进。Minor 不受影响；
-    // Major [升级]/[已修] 直接放行。
-    const deferredMajor = reviewDeferredMajorProblems(reviewText, scope);
-    if (deferredMajor.length > 0) {
-      const guide = '；恢复: 先把 Major 改为 [升级] 交用户裁决；用户接受延期后在同段或文末记录「用户裁决：接受延期」并指向该条目（由 [升级] 承接）';
+    // 延期裁决门禁：延期是用户决策点——reviewer 不得自行把任何严重度的发现标 [转待办]。结构校验：
+    // 条目标 [转待办] 时须同时存在用户裁决记录（同段或其它段落含「用户裁决：接受延期」且指向该条目，
+    // 并由 [升级] 承接）；缺失 → 新 change BLOCKED / 旧 change WARN 渐进。只以 [已修]/[升级] 处置的
+    // 条目直接放行（不是延期，没有决策点）。Minor 并入同一门禁：此前只有 Major 受约束，Minor 可自行
+    // 延期，延期因此长期无门槛积压。
+    //
+    // Minor 判定理由门禁：**每条**判为 Minor 的发现都须在条目块内自证判据——一行「判 Minor：<理由>」，
+    // 与处置标记无关（[已修]/[升级]/[转待办] 一律要：判据落在判定当时，而不是延期时补票）。结构级校验
+    // （理由内容不做语义判断）；缺失 → 新 change BLOCKED / 旧 change WARN 渐进。报文把「改判 Major」
+    // 作为默认出口——写不出理由通常说明这根本够不上 Minor。
+    const deferredFindings = reviewDeferredFindingProblems(reviewText, scope);
+    const minorUnjustified = reviewMinorJustificationProblems(reviewText, scope);
+    if (deferredFindings.length > 0) {
+      const named = deferredFindings.map((p) => p.title + '（' + p.severity + '）').join('、');
+      const guide = '；恢复: 把该条目补 [升级] 交用户裁决；用户接受延期后，在与该条目以空行分隔的段落写'
+        + '「用户裁决：接受延期 —— 发现 <条目标识>：<理由>」，并由 [升级] 承接（条目内或该段落带 [升级]）。'
+        + '示例: 「- **F1 · 标题**：[升级] [转待办]」+ 空行 +「用户裁决：接受延期 —— 发现 F1：下一 change 首修」';
       if (isNewChange(state)) {
-        console.error('BLOCKED: REVIEW.md 发现区 ' + deferredMajor.length + ' 项 Major 条目为 [转待办] 但缺少用户裁决记录（Major 不得由 reviewer 自行转待办）: ' + deferredMajor.join('、') + guide);
-        process.exit(1);
+        console.error('BLOCKED: REVIEW.md 发现区 ' + deferredFindings.length + ' 项条目为 [转待办] 但缺少用户裁决记录——任何严重度（含 Minor）的延期都不得由 reviewer 自行决定: ' + named + guide);
+      } else {
+        console.error('REVIEW WARN: REVIEW.md 发现区 ' + deferredFindings.length
+          + ' 项条目为 [转待办] 但缺少用户裁决记录: ' + named
+          + '——任何严重度（含 Minor）的延期都不得由 reviewer 自行决定' + guide + '（渐进不阻断）');
       }
-      console.error('REVIEW WARN: REVIEW.md 发现区 ' + deferredMajor.length +
-        ' 项 Major 条目为 [转待办] 但缺少用户裁决记录: ' + deferredMajor.join('、') +
-        '——Major 不得由 reviewer 自行转待办' + guide + '（渐进不阻断）');
     }
+    if (minorUnjustified.length > 0) {
+      const named = minorUnjustified.map((p) => p.title + '（' + p.severity + '）').join('、');
+      const guide = '；恢复: 在该条目块内（与条目标题之间不留空行）补一行「判 Minor：<一句话理由>」，'
+        + '示例: 条目行「- **F2 · 标题**：[已修]」的下一行写「  判 Minor：仅影响日志措辞，不改变行为与接口」；'
+        + '若判断其实够不上 Minor，请改判 Major（拿不准时默认 Major）';
+      if (isNewChange(state)) {
+        console.error('BLOCKED: REVIEW.md 发现区 ' + minorUnjustified.length + ' 项条目被判为 Minor 但缺 `判 Minor：` 行'
+          + '——判为 Minor 须在判定当时自证判据，与处置标记（[已修]/[升级]/[转待办]）无关: ' + named + guide);
+      } else {
+        console.error('REVIEW WARN: REVIEW.md 发现区 ' + minorUnjustified.length
+          + ' 项条目被判为 Minor 但缺 `判 Minor：` 行: ' + named + guide + '（渐进不阻断）');
+      }
+    }
+    if (isNewChange(state) && (deferredFindings.length > 0 || minorUnjustified.length > 0)) process.exit(1);
   } catch {}
 }
 
@@ -1230,6 +1336,234 @@ export async function runSkillLoadMarkerGate({ node, state }) {
       (malformed.length > 0 ? '；不可解析标记: ' + malformed.join(', ') : ''));
     process.exit(1);
   }
+}
+
+// ---------- 结构化预检（exit <node> --preflight）----------
+//
+// **结构性门禁子集**的唯一表达处：入口（workflow-guard）只调用 runStructuralPreflight，不另写「哪些
+// 门跑 / 哪些不跑」；每条判据复用既有门禁函数与既有路径判据，不在此复制实现。
+// 进 = 结构面（写得对不对）：声明工件的存在性（协议 outputSchemas 的 file 类产物——缺件本身就是
+// 结论，**不是**进展判定）、SUMMARY 关键段（段在场 / 6 维实质 / 自检方法 / LESSONS 扫描回应）、
+// 模板保真骨架、TASK 7 字段（仅 plan 节点生效；execute 家族该门是 no-op）。
+// 存在性的时点分界（归档产出）：判据只问「此刻该在场却不在场」的工件。归档动作自己的产出位置
+// （.specs/archive/）在归档前连上级目录都不存在，落在其中的声明产物属「归档执行后才会生成」——
+// 报成缺件并让人照着路径去创建，给的是归档前不可能执行的指令。它们走延后报告面，不阻断预检。
+// 不进 = 进展面（做到哪了）：证据在场 / 转移前置 / 任务集签名 / Fix 批次越界 / 串行 pending /
+// 可委托并行 / 在飞委托 / verify 命令真实执行 / skill-load 声明 / UA 门控——它们在预检时点必然先
+// 命中，正是本模式要绕开的噪声；其余节点自有工件（REVIEW / TEST / UAT / TASK 段形）的骨架归各自
+// 出口的模板保真门禁，跨节点代为判定会把「子集」变成「超集」。
+// 同轮报告（顺序即反馈优先级）：缺件与结构问题在**同一轮**里报出——先逐项列缺失工件（路径 + 模板
+// 指针），再列结构问题，互不因对方而跳过。
+// 只读：不写 state，也不写模板提示账本（.template-hints.json）⇒ 骨架报告停在两阶段报文的**首段
+// 形态**（模板路径 + 类别计数）：**H2 缺段**只报数量（段名等节点收尾的完整 exit），结构子段与父段
+// 写法建议照常点名——它们本身就带定位信息，预检与收尾两种模式一致；判据本身来自 evaluateArtifact
+// （骨架 + 模板派生的同一实现），不在此另写段形判定。
+// 边界：预检通过 = **结构面**通过，不代表进展门禁会通过——推进仍由完整 exit / --apply 决定。
+
+// 归档产出路径（「归档执行后才会生成」）：`.specs/archive/` 是归档动作自己的产出位置——归档 =
+// 把 change 目录移入 `archive/<日期>-<change-id>/`。判据按**路径位置**而非节点身份：任何节点
+// 声明归档根下的产物，它的缺席都只能由归档动作解释，而不能是「该节点还没做完」。
+const ARCHIVE_ROOT_DIR = 'archive';
+function isArchiveProducedPath(pathBase, declaredPath) {
+  if (pathBase !== 'specs-root') return false;
+  return String(declaredPath).split('/')[0] === ARCHIVE_ROOT_DIR;
+}
+
+// 声明工件的路径显示口径（与 explain 的产物行同源语义）：specs-root 加 `.specs/` 前缀，
+// project / 缺省原样——缺件报文里的路径因此可直接对着项目根去创建，而不是抽象的 schema 名。
+// 通配段（`*`）在报文里换成占位说明：`*` 是**判据语法**（pathPatternExists 逐段按通配匹配），
+// 照原样印进「按上述路径创建」的指令里，读起来就是让人去建一个字面 `*` 目录——一条不可执行的
+// 指令。占位说明取哪个词由位置决定：归档目录名是「日期前缀 + change-id」（reference 的归档命名
+// 约定），这一段的通配就是那个日期，写 `<日期>`；其余通配不臆造语义，只声明这一段由运行期决定。
+function declaredArtifactDisplayPath(pathBase, declaredPath) {
+  const pathText = String(declaredPath);
+  const segments = pathText.split('/');
+  const archiveChangeDirWildcard = pathBase === 'specs-root'
+    && segments[0] === ARCHIVE_ROOT_DIR
+    && (segments[1] ?? '').includes('*');
+  return ((pathBase === 'specs-root' ? '.specs/' : '') + pathText)
+    .replaceAll('*', archiveChangeDirWildcard ? '<日期>' : '<通配>');
+}
+
+// 声明工件 → 模板指针：仅当该工件的模板键落在**本节点声明**的模板集合内才给模板路径（自定义节点
+// 未声明模板时不编造路径）。模板键派生与模板保真门禁**同一实现**（protocol-utils 的
+// templateKeyFromArtifactName）——本函数只保留「在声明集合里找回该键的名字 + 拼指针」，不再自持
+// 一份派生副本（两处副本漂移正是本 change 要收掉的东西）。键为 null（工件名里没有可派生的名字）
+// 时不给指针：降级为不打印模板路径，绝不拼一个空名字。
+function declaredArtifactTemplatePointer(declaration, declaredPath) {
+  const key = templateKeyFromArtifactName(declaredPath);
+  if (key === null) return null;
+  const name = [...declaration.required, ...declaration.optional]
+    .find((item) => templateKeyOf(item) === key);
+  return name ? templatePointerPath(name) : null;
+}
+
+// 本节点声明的 file 类产物是否在场：判据由 guard-routing 的 declaredRequiredArtifacts **一处产出**
+// （枚举 outputSchemas → artifacts + <change-id> 替换 + 在场判定），本函数不再自行遍历协议——
+// 只做预检侧的一处**显式过滤**、一处**显式分桶**与归档延后报告：
+//   ① kind：只判 file 类产物（未声明 kind 按文件处置——路径判据本就是文件存在性）。其它 kind 的
+//      「在场」语义不是文件存在性，不在本判据里冒充（不静默扩面）。出口侧刻意不设这条过滤。
+//   ② 未声明 paths（声明不完整）：**仍然阻断**，但走独立的报告桶——报文给的是「修协议」这一条可
+//      执行的下一步，不是「按上述路径创建」那种做不到的指令（没有路径可建）。措辞与出口侧同一句
+//      （unspecifiedPathsNotice），两侧因此不会再对同一份协议给出两种说法。
+//   ③ 归档产出（见 isArchiveProducedPath）：延后报告，归档执行前不可能在场。
+// 只读——不写 state、不写提示账本。返回三组（显示路径逐项给出 + 可推导时的模板指针）：
+// missing = 此刻该在场却不在场（缺件，阻断）；deferred = 归档产出（归档执行后才会生成，只报告）；
+// incomplete = 声明不完整（required 但未声明 paths，阻断，报文指向协议）。
+async function missingDeclaredFileArtifacts({ protocol, node, state }) {
+  if (!state.activeChange) return { missing: [], deferred: [], incomplete: [] };
+  const declaration = nodeTemplateDeclaration(node);
+  const missing = [];
+  const deferred = [];
+  const incomplete = [];
+  for (const declared of await declaredRequiredArtifacts(protocol, node, state.activeChange)) {
+    if (declared.kind !== undefined && declared.kind !== 'file') continue; // 差异①
+    if (declared.unspecifiedPaths) { // 差异②
+      incomplete.push(unspecifiedPathsNotice(declared.schemaId, declared.artifact.id));
+      continue;
+    }
+    if (declared.present) continue;
+    const displayPaths = declared.resolvedPaths
+      .map((declaredPath) => declaredArtifactDisplayPath(declared.artifact.pathBase, declaredPath));
+    const template = declared.resolvedPaths
+      .map((declaredPath) => declaredArtifactTemplatePointer(declaration, declaredPath))
+      .find(Boolean) ?? null;
+    const item = { label: displayPaths[0].split('/').pop(), displayPaths, template };
+    // 归档产出延后报告（见 isArchiveProducedPath，差异③）：判据要求**全部**备选路径都落在归档根下
+    // ——只要有一条此刻该在场的路径，它仍是真正的前置件，不因同组有归档路径而被放过。
+    if (declared.resolvedPaths.every(
+      (declaredPath) => isArchiveProducedPath(declared.artifact.pathBase, declaredPath),
+    )) {
+      deferred.push(item);
+      continue;
+    }
+    missing.push(item);
+  }
+  return { missing, deferred, incomplete };
+}
+
+// 声明不完整的报告面：**仍然阻断**（协议本身不完整，放行就等于把 fail-closed 换成静默通过），但
+// 报文指向协议要修——与出口侧同一句（措辞的唯一出处是 guard-routing 的 unspecifiedPathsNotice，
+// 两侧不各写一份）。恢复指引因此也不给「按上述路径创建」：没有路径可建。
+function reportIncompleteDeclarations(node, incomplete) {
+  if (incomplete.length === 0) return;
+  for (const notice of incomplete) console.error('BLOCKED: ' + notice);
+  console.error('恢复: 上面列的是协议声明本身不完整（不是让你去创建某个文件）——给该项补一条 paths，'
+    + '或把 required 改成 false，再重试 exit ' + node.id + ' --preflight');
+}
+
+// 存在性判据的报错编排（BLOCKED，不分新老 change——与出口的产物门禁同判级：工件是否存在是结构事实，
+// 不是「旧 change 的进展宽容」能改写的东西）。返回是否命中，收口退出由 runStructuralPreflight 负责
+// （先让同轮的结构门禁也能报完，缺件不被别的报错抢先吞掉顺序）。
+async function runDeclaredArtifactExistenceCheck({ protocol, node, state }) {
+  const { missing, deferred, incomplete } = await missingDeclaredFileArtifacts({ protocol, node, state });
+  // 归档产出：只报「归档执行后才会生成」这一事实与它的落点，不报缺件、不给「去创建」的指令——
+  // 归档前那条指令不可执行（连 .specs/archive/ 都还不存在），预检也不该把归档的输出当它的前提。
+  for (const item of deferred) {
+    console.error('归档执行后才会生成（预检不要求在场）: ' + item.label + ' → ' + item.displayPaths.join(' | '));
+  }
+  if (missing.length === 0) {
+    reportIncompleteDeclarations(node, incomplete);
+    return incomplete.length > 0;
+  }
+  const items = missing.map((item) => item.label + ' → ' + item.displayPaths.join(' | ')
+    + (item.template ? '（模板: ' + item.template + '）' : ''));
+  console.error('BLOCKED: 节点 ' + node.id + ' 的声明工件缺失 ' + missing.length + ' 项'
+    + '（本节点声明的 file 类产物不在场）: ' + items.join('、'));
+  console.error('恢复: 先按上述路径创建缺失工件（段形照模板），再重试 exit ' + node.id + ' --preflight'
+    + '——预检只读；缺件是结构性事实，工件不在场就没有可判的结构，也不会给出通过结论');
+  reportIncompleteDeclarations(node, incomplete);
+  return true;
+}
+
+// 预检的骨架目标（只装**在场者**）：① SUMMARY（execute 家族，与 runSummaryTemplateFidelityGate
+// 同一作用面：目录下全部 *-SUMMARY.md）；② 入口三件（CHANGE / REQUIREMENT / DESIGN）——变更的结构
+// 输入，任何节点的预检都查在场者。这里的「在场才查」只决定**段形**目标：工件缺失不在这里报，
+// 由上面的声明工件存在性判据统一报（缺件是结构事实，不是本子集的静默跳过项）；跨节点声明的入口
+// 三件不属于本节点的声明产物，其缺失由各自节点出口的产物门禁负责。DESIGN-lite 未登记骨架，其
+// 标题形态仍由 design 出口的既有判据负责。
+async function preflightSkeletonTargets({ node, state }) {
+  const changeDir = path.join(runRoot, '.specs', state.activeChange ?? '');
+  const targets = [];
+  if (EXECUTE_FAMILY_NODE_IDS.has(node.id)) {
+    const summaries = (await fs.readdir(changeDir).catch(() => [])).filter((file) => file.endsWith('-SUMMARY.md'));
+    for (const file of summaries) targets.push({ key: 'SUMMARY', file });
+  }
+  for (const [key, file] of [['CHANGE', 'CHANGE.md'], ['REQUIREMENT', 'REQUIREMENT.md'], ['DESIGN', 'DESIGN.md']]) {
+    if (await fileExists(path.join(changeDir, file))) targets.push({ key, file });
+  }
+  return targets;
+}
+
+// 骨架子集：判据 = evaluateArtifact（与模板保真门禁同一实现）；报告 = 首段形态（只读投影）。
+// 分级沿用既有语义：新 change BLOCKED（含恢复指引）/ 旧 change WARN 渐进不阻断。
+async function runPreflightSkeletonChecks({ node, state }) {
+  if (!state.activeChange) return;
+  const changeDir = path.join(runRoot, '.specs', state.activeChange);
+  const failures = [];
+  const templatePaths = new Set();
+  for (const target of await preflightSkeletonTargets({ node, state })) {
+    let text;
+    try {
+      text = await fs.readFile(path.join(changeDir, target.file), 'utf8');
+    } catch {
+      continue; // 读失败与产物在场同属产物面，不在结构子集里重复报（未验证的可见性由产物门禁负责）
+    }
+    // SUMMARY 的首部四字段与模板保真门禁同口径（键集来自骨架、值非空才算填）；入口三件只查骨架
+    // 本身——「Change ID 必填」是入口文档门的硬要求，不是骨架派生判据，这里不扩张。
+    const skeleton = await buildSkeleton(target.key);
+    const evaluated = await evaluateArtifact(target.key, text, {
+      requiredHeaderFields: target.key === 'SUMMARY' ? skeleton.headerFields : [],
+    });
+    if (!evaluated.derived) {
+      // 模板缺席不静默通过：显式声明未校验（与模板权威门禁同一口径），不臆造段名兜底。
+      console.error('未校验（模板缺失）: ' + target.file + ' —— 模板或结构登记表不可读，段形校验跳过'
+        + '（修复: 按安装指引获取 flow-kit 模板后重试）');
+      continue;
+    }
+    // 首段形态 = 同一格式器在 escalate=false 下的输出：**H2 缺段**只报类别计数（预检不读提示账本，
+    // 段名留到再犯），结构子段与父段写法建议照常点名；其余类别本身即定位信息。账本由报告函数写，
+    // 格式器是纯函数——复用不会写盘，结构子段缺口的「该怎么写」建议因此在预检与收尾两种模式下一致。
+    const parts = formatIssueParts(evaluated.issues, { escalate: false });
+    if (parts.length === 0) continue;
+    failures.push({ file: target.file, parts, template: evaluated.skeleton.file });
+    if (evaluated.skeleton.file) templatePaths.add(evaluated.skeleton.file);
+  }
+  if (failures.length === 0) return;
+  const lines = failures.map((failure) => failure.file + ' 模板结构校验失败: '
+    + failure.parts.join('; ') + '（模板: ' + (failure.template ?? '（登记表未登记模板路径）') + '）');
+  if (isNewChange(state)) {
+    for (const line of lines) console.error('BLOCKED: ' + line);
+    console.error('恢复: 对照 ' + [...templatePaths].join(' / ')
+      + ' 修正标题 / 首部字段 / 段序，并按模板补齐缺失的 H2 与结构型 H3 标题'
+      + '（条件段与无内容段正文可写 N/A；可选段按模板自述可整段删除）后重试 exit ' + node.id + ' --preflight'
+      + '（预检只读、不写提示账本，故 H2 缺段只报类别计数；结构子段与父段写法建议会点名到具体段。'
+      + '要知道被计数的那些段名，请等节点收尾的完整 exit（它维护提示账本），或直接按模板逐段对照）');
+    process.exit(1);
+  }
+  for (const line of lines) {
+    console.error('TEMPLATE-STRUCTURE WARN: ' + line + '（旧 change 渐进，不阻断；新 change 将强制）');
+  }
+}
+
+// 结构化预检子集（显式清单，单一表达处）：workflow-guard 的 --preflight 分支只调用本函数。
+// 顺序即反馈优先级：先声明工件的存在性（缺件时没有可判的结构，且缺件最致命），再段（SUMMARY 关键段），
+// 再骨架（段形 / 结构子段），最后 TASK 字段。存在性命中不提前退出——它先把缺件报出来，同轮的结构
+// 门禁照常跑完，最后统一以非零退出收口（同轮报告；结构门禁自己命中时也会非零退出，两者不互相吞掉）。
+export async function runStructuralPreflight({ protocol, node, state }) {
+  // 无活跃 change = 没有可判的结构面：声明工件 / 骨架 / 段 / TASK 字段全按 change 定位，子判据因此
+  // 各自早退，预检会零判据跑完并打印 ALL CHECKS PASSED——「没看」被报成「看过且通过」，与同一 state
+  // 的完整 exit（缺证据 BLOCKED）直接矛盾。只读不等于可以给结论：结论必须与「真的判过」等价，
+  // 所以此处显式声明未校验并非零退出（不打印通过结论）。
+  if (!state.activeChange) {
+    console.error('PREFLIGHT: 未校验（无活跃 change，没有可判的结构面）——先 init / select');
+    process.exit(1);
+  }
+  const missingArtifacts = await runDeclaredArtifactExistenceCheck({ protocol, node, state });
+  await runSummarySectionsGate({ node, state });
+  await runPreflightSkeletonChecks({ node, state });
+  await runTaskSevenFieldGate({ node, state });
+  if (missingArtifacts) process.exit(1);
 }
 
 // 受保护状态落盘（沿用 state-io 的受保护写入通道）

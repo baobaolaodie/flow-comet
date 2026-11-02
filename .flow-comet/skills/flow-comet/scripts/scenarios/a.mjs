@@ -9,6 +9,7 @@ import {
   assertExit,
   assertNotOut,
   assertOut,
+  assertTrue,
   baseState,
   runGuard,
   runHandoff,
@@ -24,7 +25,9 @@ import {
   TASK_P1,
   TASK_P2,
   composeState,
+  engineCodeText,
   engineScriptFiles,
+  engineScriptTexts,
   handoffFor,
   strictSummary,
   summaryContent,
@@ -33,8 +36,27 @@ import {
 } from '../lib/test-fixtures.mjs';
 import {
   assertStateBytesUnchanged,
+  fixBatchTaskText,
   readStateBytes,
+  scenarioProtocolPath,
 } from '../lib/test-assertions.mjs';
+// 命令文本的唯一实现（平台化脚本根 + 整条路径加引号）：期望值只能从这里取，断言运行期
+// 输出与 handoff 的 PREFLIGHT 同源同形——不是「看起来都像命令」。
+import { scriptCommand } from '../lib/state-explain.mjs';
+// 单一来源静态锁（COORDINATOR 常量的落点与取用面）：与套件其它单源锚共用同一判据实现。
+import { singleSourceImportProblems } from '../lib/text-anchor-checks.mjs';
+
+// 声明工件枚举面的静态锁数据（判据见场景 08）：outputSchemas → artifacts 的枚举只许在**唯一权威**
+// 处（表内第一项）出现——出口的产物门禁与结构预检都只消费它，任一侧再自行遍历就是第二份实现，
+// 两份副本可以逐字相同地并存、下一次演进才分叉。其余落点逐一登记并写明它为什么不是**同一条判据**；
+// 登记面与实际枚举面双向对账（新增落点必须显式登记，被收编的落点必须从表里移除），第二份副本
+// 因此既无法静默长出来，也不会在判据失去判别力时（连权威处都看不见）悄无声息。
+const DECLARED_ARTIFACT_ENUMERATION_SITES = [
+  { file: 'lib/guard-routing.mjs', why: '唯一权威 declaredRequiredArtifacts（枚举 + <change-id> 替换 + 在场判定）' },
+  { file: 'route-node.mjs', why: '节点完成判定（状态机的完成标志集），另一条机制，不属于本判据的消费面' },
+  { file: 'lib/guard-template-fidelity.mjs', why: '工件 → 模板键映射：决定校验哪份工件，不做在场判定' },
+  { file: 'lib/state-explain.mjs', why: 'explain 的展示面：打印声明的产物路径，不做在场判定' },
+];
 
 export const ENTRIES = [
   // 1: open exit 通过（模板段名 CHANGE "## Why（为什么做）" + REQUIREMENT "## 用户故事（User Story）" + 验收段）——带模板验证 C2 派生
@@ -126,11 +148,39 @@ export const ENTRIES = [
   },
 
   // 6: plan exit 通过（task 块 + verify 字段）
+  // 结构预检在 plan 节点的覆盖：七字段分支只在 plan 生效，缺字段时预检即拦且只读，字段齐时通过。
+  // 七字段门禁的阻断分支只对新 change 生效（旧 change 渐进 WARN），故预检这一段用新 change 夹具。
   {
     name: '06 plan exit 通过（task 块 + verify）',
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
+      writeState(dir, st);
+      const newChangeState = { ...baseState('plan'), newChange: true, enteredNodes: ['plan'] };
+      newChangeState.evidence.plan = { summary: 'plan done' };
+      writeState(dir, newChangeState);
+      // ① 缺 write_files → 预检 BLOCKED，且 state 字节零改写
+      const missingFieldTask =
+        '<task id="T01" status="pending"><name>任务一</name><read_files>src/*</read_files>'
+        + '<action>实现 T01</action><verify>node --check src/t1.mjs</verify><done>AC-1</done>'
+        + '<depends_on></depends_on></task>\n';
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + missingFieldTask);
+      const missingBytes = readStateBytes(dir);
+      const missingPre = runGuard(['exit', 'plan', '--preflight'], dir);
+      assertExit(missingPre, 1);
+      assertOut(missingPre, 'BLOCKED');
+      assertOut(missingPre, '缺 7 字段');
+      assertOut(missingPre, '缺 write_files');
+      assertStateBytesUnchanged(dir, missingBytes, '预检的七字段门禁同样只读：不得写 state');
+      // ② 七字段齐 → 预检通过（只读面不越权放行推进，完整 exit 仍由原夹具证明）
+      const completeTask =
+        '<task id="T01" status="pending"><name>任务一</name><read_files>src/*</read_files>'
+        + '<write_files>src/t1.mjs</write_files><action>实现 T01</action>'
+        + '<verify>node --check src/t1.mjs</verify><done>AC-1</done><depends_on></depends_on></task>\n';
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + completeTask);
+      const completePre = runGuard(['exit', 'plan', '--preflight'], dir);
+      assertExit(completePre, 0);
+      assertOut(completePre, 'ALL CHECKS PASSED');
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
       const res = runGuard(['exit', 'plan'], dir);
@@ -156,22 +206,41 @@ export const ENTRIES = [
 
   // 8: execute exit 通过（enter 记录 taskHash + SUMMARY 六段 + 6 维实质 + 自检方法 + handoff 齐 + TASK 全 done）
   {
-    name: '08 execute exit 通过（enter 后未改 TASK，签名匹配）',
+    name: '08 execute exit 通过（enter 后未改 TASK，签名匹配）+ 未 exit 时 status/next 共用节点视图（含 coordinatorMode 同源与协调者行）',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
       // enter 时脚本自动记录 taskHash（写回 state）
-      assertExit(runGuard(['entry', 'execute'], dir), 0);
+      const entryView = runGuard(['entry', 'execute'], dir);
+      assertExit(entryView, 0);
+      // 跨输出面锚：entry 与 next 打印的是**同一句**协调者纪律（单一来源）。入口侧先独立断言
+      // 口径 token 与旧句零残留；与 next 的逐字相等在下方 nextView 之后比对。
+      const entryCoordinatorLine = entryView.output.split('\n').find((line) => line.startsWith('COORDINATOR: '));
+      if (!entryCoordinatorLine) {
+        throw new Error('entry execute 缺 COORDINATOR 行\n实际输出:\n' + entryView.output);
+      }
+      for (const token of ['按平台的身份通道委托子代理', '同一身份判据', '不要求隔离区', '「写权限」的一种实现', '共享工作区同样受支持']) {
+        if (!entryCoordinatorLine.includes(token)) {
+          throw new Error('entry execute 的 COORDINATOR 行缺现行口径 ' + token + '：' + entryCoordinatorLine);
+        }
+      }
+      assertNotOut(entryView, '只能通过 Agent 工具 worktree isolation 委托子代理');
       // exit 前补 SUMMARY + handoff（不碰 TASK.md）
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
       writeState(dir, st2);
+      // AC-2 正向锚：裸 exit（不带 --apply）是节点收尾的全链预演——跑完整门禁但不落盘，并显式
+      // 提示 --apply 才推进。反向对照在场景 14（--preflight 通过路径不得打印 --apply 引导）：
+      // 两个只读面各守一侧，preflight 只跑结构子集、裸 exit 必须真跑到「可落盘」这一步。
+      const bareExitBytes = readStateBytes(dir);
       const res = runGuard(['exit', 'execute'], dir);
       assertExit(res, 0);
       assertOut(res, 'ALL CHECKS PASSED');
+      assertOut(res, 'APPLY: rerun with --apply');
+      assertStateBytesUnchanged(dir, bareExitBytes, '裸 exit（不带 --apply）是全链预演：门禁全过后也不得改写 state');
       // 变体:自检方法段名带括号后缀(执行者按模板标题原样书写,如 "## 自检方法（声明 brooks-review 或 builtin-quickcheck）")
       // → 段名识别放宽后通过,无"旧格式"兼容 WARN
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent({
@@ -190,6 +259,606 @@ export const ENTRIES = [
       const resVariantNeg = runGuard(['exit', 'execute'], dir);
       assertExit(resVariantNeg, 1);
       assertOut(resVariantNeg, '自检方法');
+
+      // ---------- 节点视图收敛（in-place 扩展） ----------
+      // 构造「execute 已 entry 未 exit、产物推导已指向其后继 review」的态：此前 status 只报
+      // 推导节点 review、next 的进行中保护报 execute——同一事实两处说法。收敛后 status 增
+      // routeNode（= next 的 NODE）与 ROUTE: 三视图对账行；next 增 WHY: 停留原因与 execute
+      // 家族的 PREFLIGHT: 预检提示；既有 currentNode（产物推导）/ stateCurrentNode（state
+      // 原值）语义逐字不变，且两条命令都不写 state。
+      // 说明：不新增场景条目是本仓「场景数 = 受检面计数」约束下的 in-place 扩展形态（同场景 15）。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n');
+      const viewState = JSON.parse(readStateBytes(dir));
+      viewState.completedNodes = ['open', 'design', 'plan'];
+      viewState.enteredNodes = ['open', 'design', 'plan', 'execute'];
+      viewState.evidence = {
+        ...viewState.evidence,
+        open: { summary: 'open complete' },
+        design: { summary: 'design complete' },
+        plan: { summary: 'plan complete' },
+      };
+      writeState(dir, viewState);
+      const viewBytes = readStateBytes(dir);
+      const statusView = runState(['status'], dir);
+      assertExit(statusView, 0);
+      const statusRouteNode = (statusView.output.match(/"routeNode":\s*"([^"]+)"/) ?? [])[1];
+      if (statusRouteNode !== 'execute') {
+        throw new Error('status.routeNode 应为进行中节点 execute（= next 的 NODE），实际: '
+          + JSON.stringify(statusRouteNode) + '\n实际输出:\n' + statusView.output);
+      }
+      assertOut(statusView, '"currentNode": "review"'); // 产物推导语义不变（SUMMARY 已齐 → review）
+      assertOut(statusView, '"stateCurrentNode": "execute"'); // state 原值语义不变
+      // coordinatorMode 与 routeNode 同源（One predicate）——进行中态下 routeNode=execute 而
+      // 产物推导是 review；旧口径（按 detectedNode 计算）会在同一响应里给出 false，即两个「当前
+      // 节点」口径并存。断言取其在 route 视图上的取值，锁住二者不再分叉。
+      assertOut(statusView, '"coordinatorMode": true');
+      const routeLine = statusView.output.split('\n').find((line) => line.startsWith('ROUTE: '));
+      if (!routeLine) throw new Error('status 缺少 ROUTE: 诊断行\n实际输出:\n' + statusView.output);
+      for (const token of ['derived=review', 'state=execute', 'route=execute', '先 exit execute']) {
+        if (!routeLine.includes(token)) throw new Error('ROUTE: 行缺少 ' + token + '：' + routeLine);
+      }
+      assertStateBytesUnchanged(dir, viewBytes, 'status 是只读视图（ROUTE 诊断不得写 state）');
+      const nextView = runState(['next'], dir);
+      assertExit(nextView, 0);
+      const nextNode = (nextView.output.match(/^NODE: (.+)$/m) ?? [])[1];
+      if (nextNode !== statusRouteNode) {
+        throw new Error('status.routeNode 与 next 的 NODE 不一致（同一事实两处说法）：'
+          + JSON.stringify(statusRouteNode) + ' vs ' + JSON.stringify(nextNode));
+      }
+      const whyLine = nextView.output.split('\n').find((line) => line.startsWith('WHY: '));
+      if (!whyLine) throw new Error('next 缺少 WHY: 停留原因行\n实际输出:\n' + nextView.output);
+      if (!whyLine.includes('已 entry 未 exit')) {
+        throw new Error('WHY: 行应说明进行中原因（已 entry 未 exit）：' + whyLine);
+      }
+      assertOut(nextView, 'PREFLIGHT: ');
+      // 平台化形态：脚本路径整条加引号，命令在引号之后接 exit <节点> --preflight（裸脚本名的旧
+      // 形态由下文的解析断言与反向锚共同排除）。预检节点取路由视图（= NODE 行），且必须与
+      // 「完整 exit（不带 --apply）才是全链预演」的说明句同行——同一个 PREFLIGHT 不再指两条命令。
+      assertOut(nextView, 'workflow-guard.mjs" exit execute --preflight');
+      assertOut(nextView, '做结构预检（只跑结构性门禁，不写 state、不推进状态）');
+      assertOut(nextView, '完整 exit（不带 --apply）是节点收尾的全链预演');
+      assertNotOut(nextView, '（不带 --apply）预检——跑完整出口门禁');
+      assertStateBytesUnchanged(dir, viewBytes, 'next 进行中保护不得写 state（routeNode 与 NODE 同源）');
+
+      // next 的 PREFLIGHT 行必须与 handoff result 的平台化形态同源——命令从输出解析后，
+      // 逐字等于脚本命令单一实现的产物（同一 scriptsDir / runRoot），而不是裸脚本名。
+      const preflightCommand = (nextView.output.match(/PREFLIGHT: 可运行 (node .+?) 做结构预检/) ?? [])[1];
+      if (!preflightCommand) {
+        throw new Error('next 的 PREFLIGHT 行缺可解析的平台化命令（应为 node "<脚本路径>" exit <节点> --preflight）：\n'
+          + nextView.output);
+      }
+      const expectedPreflightCommand = scriptCommand({
+        scriptsDir: SCRIPTS_DIR, runRoot: dir, script: 'workflow-guard.mjs', args: ['exit', 'execute', '--preflight'],
+      });
+      if (preflightCommand !== expectedPreflightCommand) {
+        throw new Error('next 的 PREFLIGHT 命令未走平台化单一实现：'
+          + JSON.stringify(preflightCommand) + '（期望 ' + JSON.stringify(expectedPreflightCommand) + '）');
+      }
+      // 反向锚：裸脚本名形态（旧输出）不得残留——它正是「照抄到非 .claude 安装会落空」的形态。
+      assertNotOut(nextView, 'PREFLIGHT: 可运行 workflow-guard.mjs');
+      // 两个输出面同形：同一节点下 handoff result 打印的同一条命令必须逐字相同（不是各写一份）。
+      // handoff 侧的路由视图要解析协议（与 next 同一判定），而 runHandoff 默认不注入协议副本——
+      // 显式传入场景协议路径（与 runState 的默认注入同源）。
+      const handoffPre = runHandoff(['result', 'T01', '{"greenEvidence":{"command":"node --check src/t1.mjs"},"redEvidence":{"command":"node --check src/t1.mjs"}}'], dir, {
+        FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir),
+      });
+      assertExit(handoffPre, 0);
+      const handoffPreflightCommand = (handoffPre.output.match(/PREFLIGHT: SUMMARY 结构尚未校验——可运行 (node .+?) 做结构预检/) ?? [])[1];
+      if (!handoffPreflightCommand) {
+        throw new Error('handoff result 的 PREFLIGHT 行缺可解析的平台化命令：\n' + handoffPre.output);
+      }
+      if (handoffPreflightCommand !== preflightCommand) {
+        throw new Error('两处 PREFLIGHT 命令形态不一致（next vs handoff result）：'
+          + JSON.stringify(preflightCommand) + ' vs ' + JSON.stringify(handoffPreflightCommand));
+      }
+
+      // COORDINATOR 行按现行架构口径——三平台按身份通道委托、worktree 只是「写权限」的
+      // 一种实现、不要求隔离区。旧句（只能 worktree isolation）写回即红。
+      assertOut(nextView, 'COORDINATOR: ');
+      assertOut(nextView, '按平台的身份通道委托子代理');
+      assertOut(nextView, '同一身份判据');
+      assertOut(nextView, '不要求隔离区');
+      assertOut(nextView, '「写权限」的一种实现');
+      assertOut(nextView, '共享工作区同样受支持');
+      assertNotOut(nextView, '只能通过 Agent 工具 worktree isolation 委托子代理');
+      // 跨输出面：entry 与 next 的 COORDINATOR 行必须逐字相同（同一常量/同一措辞）——写回任一处
+      // 的旧句都会同时破坏 token 断言与这条逐字相等锚。
+      const nextCoordinatorLine = nextView.output.split('\n').find((line) => line.startsWith('COORDINATOR: '));
+      if (!nextCoordinatorLine) {
+        throw new Error('next 缺 COORDINATOR 行\n实际输出:\n' + nextView.output);
+      }
+      if (entryCoordinatorLine !== nextCoordinatorLine) {
+        throw new Error('entry 与 next 的 COORDINATOR 行不一致（同一纪律两个输出面必须逐字相同）：'
+          + '\nentry: ' + entryCoordinatorLine + '\nnext : ' + nextCoordinatorLine);
+      }
+      // 常量落点与取用面（单一来源的静态锁）：协调者禁令是**一个知识**，实现只许一处、取用面只许
+      // 具名 import。两处各写一份在措辞演进时必然分叉，而
+      // 上面的运行期相等锚只在两处恰好同值时成立——**落点错了它看不见**（两份副本可以逐字相同）。
+      // 故另锚这一层：① 定义面唯一且落在中立模块（状态命令族与门禁族都只是取用方）；② 消费方不得
+      // 自带第二份定义、不得绕过单源取用。反向边（状态命令族 → 门禁族）随迁位消失——套件里直接
+      // 断言它没有回来：状态命令族的**代码层**不得再出现门禁模块的名字。
+      const engineTexts = engineScriptTexts();
+      const singleSourceProblems = singleSourceImportProblems({
+        symbol: 'COORDINATOR_NOTICE',
+        sourceRel: 'lib/state-explain.mjs',
+        texts: engineTexts,
+      });
+      if (singleSourceProblems.length > 0) {
+        throw new Error('协调者禁令的单一来源被破坏（' + singleSourceProblems.join('; ') + '）');
+      }
+      const flowCode = engineCodeText(engineTexts.get('lib/state-commands-flow.mjs') ?? '');
+      if (flowCode.includes('guard-gates')) {
+        throw new Error('状态命令族不得依赖门禁族（反向边）：lib/state-commands-flow.mjs 的代码层仍引用 guard-gates');
+      }
+      // 声明工件的**枚举**单一来源锁（与上一条同族：守的事都落在「落点」这一层，不靠运行期相等）：
+      // 枚举只许在 lib/guard-routing.mjs 的 declaredRequiredArtifacts 一处，出口产物门禁与结构预检
+      // 都只消费它。运行期断言守不住这件事——两份枚举可以逐字相同地并存，下次演进才分叉；故按
+      // 代码层形态对账（注释里提到 outputSchemas / artifacts 是说明，不是实现）。判据形态 = 同一
+      // 模块的代码层既遍历 outputSchemas、又迭代 .artifacts（两侧各自遍历正是被收掉的第二份实现）。
+      const declaredArtifactEnumerationSites = [...engineTexts.entries()]
+        .filter(([, text]) => {
+          const code = engineCodeText(text);
+          return /\boutputSchemas\b/u.test(code) && /\bof\s+[\w$.?]+\.artifacts\b/u.test(code);
+        })
+        .map(([rel]) => rel)
+        .sort();
+      const registeredEnumerationSites = DECLARED_ARTIFACT_ENUMERATION_SITES.map((site) => site.file).sort();
+      const unregisteredEnumerationSites = declaredArtifactEnumerationSites
+        .filter((rel) => !registeredEnumerationSites.includes(rel));
+      const vanishedEnumerationSites = registeredEnumerationSites
+        .filter((rel) => !declaredArtifactEnumerationSites.includes(rel));
+      if (unregisteredEnumerationSites.length > 0 || vanishedEnumerationSites.length > 0) {
+        throw new Error('声明工件的枚举面不再是单一来源（枚举只许在 lib/guard-routing.mjs 的 '
+          + 'declaredRequiredArtifacts 一处，出口与预检都只消费它）：'
+          + (unregisteredEnumerationSites.length > 0
+            ? '\n未登记的枚举落点: ' + unregisteredEnumerationSites.join('、')
+              + '——若它确实是另一条机制（不是「声明工件的存在性」判据），在套件的 '
+              + 'DECLARED_ARTIFACT_ENUMERATION_SITES 里登记并写明理由；否则改从单一来源取用'
+            : '')
+          + (vanishedEnumerationSites.length > 0
+            ? '\n登记了却已不再枚举: ' + vanishedEnumerationSites.join('、')
+              + '——登记面与实际枚举面对不上：该文件的枚举已消失或改了形态，'
+              + '要么同步登记面，要么这条锁已失去判别力'
+            : ''));
+      }
+
+      // ---------- record 的节点视图同源（in-place 扩展） ----------
+      // 缺陷形态：runRecord 写证据后用 determineNode（产物推导）打印 NEXT/NODE，未走共享视图——
+      // 就在上面这个「currentNode=execute 已 entry 未 exit、产物推导已指向 review」的态里，
+      // record execute 报 review，而 next 报 execute、status.routeNode 报 execute：每完成一个节点
+      // 都会看到与两条命令相反的「下一节点」，正是本 change 要消灭的同一事实两处说法（L-067）。
+      // record 是**第三个**节点视图输出面，故判据取「三面同一节点」而不是各自断言节点名。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/execute-flow-comet-execute.json',
+        JSON.stringify({
+          node: 'execute',
+          skill: 'flow-comet-execute',
+          protocol: '3-execute.md',
+          templates: ['SUMMARY'],
+          at: '2026-08-01T00:00:00.000Z',
+        }, null, 2) + '\n');
+      const recordView = runState(['record', 'execute', '{"summary":"execute recorded while in progress"}'], dir);
+      assertExit(recordView, 0);
+      const recordNode = (recordView.output.match(/^NODE: (.+)$/m) ?? [])[1];
+      if (recordNode !== 'execute') {
+        throw new Error('record 处于进行中态：NODE 应为路由视图 execute（不是产物推导的 review），实际: '
+          + JSON.stringify(recordNode) + '\nrecord 输出:\n' + recordView.output);
+      }
+      // 正常态不受影响：非边界态的 record 照常给出节点与 NEXT: auto，边界态那句不得漏到这里。
+      assertOut(recordView, 'NEXT: auto');
+      assertNotOut(recordView, 'NEXT: blocked');
+      if (recordNode !== nextNode || recordNode !== statusRouteNode) {
+        throw new Error('record 的 NODE 与 next / status.routeNode 不同源（同一事实三处说法）：'
+          + JSON.stringify({ record: recordNode, next: nextNode, statusRouteNode })
+          + '\nrecord 输出:\n' + recordView.output + '\nnext 输出:\n' + nextView.output);
+      }
+      // record 也会经 printNext 打出 COORDINATOR 行（execute 家族）——它是同一常量的第三个输出面，
+      // 一并锁进「逐字相等」：任一处另写一份措辞都会在这里红。
+      const recordCoordinatorLine = recordView.output.split('\n').find((line) => line.startsWith('COORDINATOR: '));
+      if (recordCoordinatorLine !== nextCoordinatorLine) {
+        throw new Error('record 的 COORDINATOR 行与 entry / next 不一致（同一常量、同一 printNext 实现）：'
+          + '\nnext  : ' + nextCoordinatorLine + '\nrecord: ' + recordCoordinatorLine);
+      }
+
+      // ---------- record 载荷必须是对象（in-place 扩展） ----------
+      // 形状校验只判「对象各字段的类型」（state-schema 的 evidencePayloadProblems 对非对象载荷
+      // 直接放行），于是载荷本身不是对象时旧实现两条路都错：null 一路走到读 `parsed.completedChecks`
+      // 时抛 TypeError——报文是堆栈，既不说哪一步错了、也不说载荷该长什么样；数组/字符串/数字则被
+      // 静默改写成 { summary: String(...) }，替调用方编了一份它没说过的载荷。两类都在入口拦下：
+      // 非零退出、报文点名当前类型、state 字节零改写。判定放在 runRecord 入口而不是共享形状表——
+      // 它判的是「载荷本身是不是对象」，与「对象各字段的类型」是两件事，各自守自己边界内的事实。
+      const payloadBytes = readStateBytes(dir);
+      for (const [label, payload, typeName] of [
+        ['null', 'null', 'null'],
+        ['数组', '[1,2]', 'array'],
+        ['字符串', '"just a summary string"', 'string'],
+        ['数字', '42', 'number'],
+      ]) {
+        const badPayload = runState(['record', 'execute', payload], dir);
+        assertExit(badPayload, 1);
+        assertOut(badPayload, 'record 载荷必须是对象（当前是 ' + typeName + '）');
+        if (badPayload.output.includes('TypeError')) {
+          throw new Error(label + ' 载荷应被可读报文拒绝，不得抛 TypeError：\n' + badPayload.output);
+        }
+        assertStateBytesUnchanged(dir, payloadBytes, label + ' 载荷在写入前被拒绝（state 字节零改写）');
+      }
+
+      // ---------- Fix 归位态的节点视图（in-place 扩展） ----------
+      // 缺陷复现：currentNode=review、REVIEW.md 在场、TASK 有 pending 修复任务时，next 的
+      // FIX-BATCH 分支先于共享视图返回并打印 NODE: execute，status 只走共享视图——它按「进行中
+      // 保护」报 routeNode=review，ROUTE: 行还叫人「先 exit review」，真去 exit 会被
+      // 「存在未归位/未跑出口的 Fix 批次」拦下。修复后 status 只读消费同一归位决策
+      // （resolveFixRollbackDecision 是纯读：不写盘、不计轮次），routeNode 与指引都指向归位目标。
+      const fixTaskPath = '.specs/' + CHANGE_ID + '/TASK.md';
+      const fixState = {
+        activeChange: CHANGE_ID,
+        currentNode: 'review',
+        completedNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
+        enteredNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review'],
+        evidence: {
+          open: { summary: 'open complete' },
+          design: { summary: 'design complete' },
+          plan: { summary: 'plan complete' },
+          execute: { summary: 'first pass executed' },
+          review: { summary: 'review in progress' },
+        },
+        verifyFailures: 0,
+        executionMode: 'subagent',
+        directOverride: false,
+        newChange: true,
+      };
+      writeFile(dir, fixTaskPath, fixBatchTaskText('pending'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 结论\n\n修复任务已追加，待归位 execute 跑完其出口。\n');
+      writeState(dir, fixState);
+      const fixBytes = readStateBytes(dir);
+      const fixStatus = runState(['status'], dir);
+      assertExit(fixStatus, 0);
+      assertStateBytesUnchanged(dir, fixBytes, 'Fix 归位态下 status 是只读视图（归位决策只读消费，不写盘）');
+      const fixRouteNode = (fixStatus.output.match(/"routeNode":\s*"([^"]+)"/) ?? [])[1];
+      const fixRouteLine = fixStatus.output.split('\n').find((line) => line.startsWith('ROUTE: '));
+      if (!fixRouteLine) throw new Error('status 缺少 ROUTE: 诊断行\n实际输出:\n' + fixStatus.output);
+      const fixNext = runState(['next'], dir);
+      assertExit(fixNext, 0);
+      assertOut(fixNext, 'FIX-BATCH: 归位 execute（源节点 review）');
+      const fixNextNode = (fixNext.output.match(/^NODE: (.+)$/m) ?? [])[1];
+      if (fixNextNode !== 'execute') {
+        throw new Error('Fix 归位态下 next 应打印 NODE: execute，实际: ' + JSON.stringify(fixNextNode)
+          + '\n实际输出:\n' + fixNext.output);
+      }
+      if (fixRouteNode !== fixNextNode) {
+        throw new Error('Fix 归位态下 status.routeNode 与 next 的 NODE 不一致（status 把执行者指向了会被 FIX-BATCH 拦下的节点）：'
+          + JSON.stringify(fixRouteNode) + ' vs ' + JSON.stringify(fixNextNode)
+          + '\nstatus 输出:\n' + fixStatus.output + '\nnext 输出:\n' + fixNext.output);
+      }
+      if (fixRouteLine.includes('先 exit review')) {
+        throw new Error('Fix 归位态下 ROUTE: 不得让用户先去 exit 会被 FIX-BATCH 拦下的源节点：' + fixRouteLine);
+      }
+      for (const token of ['Fix 批次', '归位 execute']) {
+        if (!fixRouteLine.includes(token)) throw new Error('ROUTE: 行缺少归位指引 ' + token + '：' + fixRouteLine);
+      }
+      // 同源不只在 NODE 上：next 的 FIX-BATCH 分支也要有一行 WHY（与共享视图同一段文案实现），
+      // 且该行点名的节点与 status.routeNode 相同——否则两边节点相同、解释却各自一份。
+      const fixWhyLine = fixNext.output.split('\n').find((line) => line.startsWith('WHY: '));
+      if (!fixWhyLine) {
+        throw new Error('Fix 归位态下 next 缺少 WHY: 解释行（应与共享视图同源）\n实际输出:\n' + fixNext.output);
+      }
+      if (!fixWhyLine.includes(fixRouteNode)) {
+        throw new Error('WHY: 行点名的节点应与 status.routeNode 一致（' + JSON.stringify(fixRouteNode) + '）：' + fixWhyLine);
+      }
+      if (!fixWhyLine.includes('Fix 批次')) {
+        throw new Error('WHY: 行应说明这是 Fix 批次归位（而不是产物推导/进行中保护）：' + fixWhyLine);
+      }
+      // 归位写盘仍只属于 next 的 FIX-BATCH 分支（既有契约：受控归位改写 currentNode，见场景 253a）；
+      // 视图路径本身不得写 state——归位后重跑 next 走共享视图，字节零变化。
+      const stateAfterRollback = JSON.parse(readStateBytes(dir));
+      if (stateAfterRollback.currentNode !== 'execute') {
+        throw new Error('Fix 归位态下 next 应把 currentNode 归位 execute，实际 '
+          + JSON.stringify(stateAfterRollback.currentNode));
+      }
+      const bytesAfterRollback = readStateBytes(dir);
+      const nextAfterRollback = runState(['next'], dir);
+      assertExit(nextAfterRollback, 0);
+      assertOut(nextAfterRollback, 'NODE: execute');
+      assertStateBytesUnchanged(dir, bytesAfterRollback, '归位后的共享视图路径不得改写 state');
+
+      // handoff result 侧同源（缺陷复现）：Fix 归位态下 state.currentNode=review，取原值会打印
+      // exit review——该节点此刻正被 Fix 批次门禁拦着；路由视图是 execute。两处提示（next /
+      // handoff result）必须同一节点，且都带结构预检与全链预演两句。
+      writeState(dir, fixState);
+      const fixHandoff = runHandoff(['result', 'T02',
+        '{"greenEvidence":{"command":"node --check src/t2.mjs"},"redEvidence":{"command":"node --check src/t2.mjs"}}'], dir, {
+        FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir),
+      });
+      assertExit(fixHandoff, 0);
+      const fixHandoffCommand = (fixHandoff.output.match(/PREFLIGHT: SUMMARY 结构尚未校验——可运行 (node .+?) 做结构预检/) ?? [])[1];
+      if (!fixHandoffCommand) {
+        throw new Error('Fix 归位态下 handoff result 的 PREFLIGHT 行缺可解析命令：\n' + fixHandoff.output);
+      }
+      const expectedFixHandoffCommand = scriptCommand({
+        scriptsDir: SCRIPTS_DIR, runRoot: dir, script: 'workflow-guard.mjs', args: ['exit', 'execute', '--preflight'],
+      });
+      if (fixHandoffCommand !== expectedFixHandoffCommand) {
+        throw new Error('Fix 归位态下 handoff result 的预检节点应取路由视图 execute（不是 state.currentNode 原值 review）：'
+          + JSON.stringify(fixHandoffCommand) + '（期望 ' + JSON.stringify(expectedFixHandoffCommand) + '）');
+      }
+
+      // 保护谓词的路由序号条件（反过度保护）：verify 驻留但 REVIEW.md 缺失 → 产物推导回退
+      // review（derived 在 currentNode 之前，不是路由后继），进行中保护不得把路由钉在 verify 上；
+      // status 与 next 都必须报产物推导的 review，next 的漂移校正随之落盘。
+      writeFile(dir, fixTaskPath, fixBatchTaskText('done'));
+      fs.rmSync(path.join(dir, '.specs/' + CHANGE_ID, 'REVIEW.md'));
+      writeState(dir, {
+        ...fixState,
+        currentNode: 'verify',
+        completedNodes: [...fixState.completedNodes, 'review'],
+        enteredNodes: [...fixState.enteredNodes, 'verify'],
+        evidence: { ...fixState.evidence, verify: { summary: 'verify in progress' } },
+      });
+      const driftStatus = runState(['status'], dir);
+      assertExit(driftStatus, 0);
+      const driftRouteNode = (driftStatus.output.match(/"routeNode":\s*"([^"]+)"/) ?? [])[1];
+      if (driftRouteNode !== 'review') {
+        throw new Error('derived 不在 currentNode 之后时不得套用进行中保护（routeNode 应为产物推导的 review），实际: '
+          + JSON.stringify(driftRouteNode) + '\nstatus 输出:\n' + driftStatus.output);
+      }
+      // 另一侧取值：非进行中态 routeNode 不是 execute 家族 → coordinatorMode=false
+      // （与「同源」一起锁住取值域，不能只在一个方向上成立）。
+      assertOut(driftStatus, '"coordinatorMode": false');
+      const driftNext = runState(['next'], dir);
+      assertExit(driftNext, 0);
+      assertOut(driftNext, 'NODE: review');
+      if (JSON.parse(readStateBytes(dir)).currentNode !== 'review') {
+        throw new Error('非后继形态应被产物权威校正回 review，实际 state.currentNode: '
+          + JSON.stringify(JSON.parse(readStateBytes(dir)).currentNode) + '\nnext 输出:\n' + driftNext.output);
+      }
+
+      // 序号条件的边界（反过度收窄）：execute 家族是同一个多趟**循环**，execute ⇄ subagent-execute
+      // 在 route 里的一前一后不是先后关系。波次收齐后只剩串行 pending 时（派生回到 execute 的
+      // 趟间回边），保护必须继续生效——否则 next 会把 currentNode 推回 execute，波次的出口再也
+      // 无法重跑（L-060 型死结）。
+      writeFile(dir, fixTaskPath, fixBatchTaskText('pending'));
+      writeState(dir, {
+        ...fixState,
+        currentNode: 'subagent-execute',
+        completedNodes: ['open', 'design', 'plan', 'execute'],
+        enteredNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
+        evidence: { ...fixState.evidence, 'subagent-execute': { summary: 'wave delegated' } },
+      });
+      const waveBytes = readStateBytes(dir);
+      const waveStatus = runState(['status'], dir);
+      assertExit(waveStatus, 0);
+      const waveRouteNode = (waveStatus.output.match(/"routeNode":\s*"([^"]+)"/) ?? [])[1];
+      if (waveRouteNode !== 'subagent-execute') {
+        throw new Error('执行家族内的趟间回边不得套用路由序号条件（routeNode 应为进行中的 subagent-execute），实际: '
+          + JSON.stringify(waveRouteNode) + '\nstatus 输出:\n' + waveStatus.output);
+      }
+      const waveNext = runState(['next'], dir);
+      assertExit(waveNext, 0);
+      assertOut(waveNext, 'NODE: subagent-execute');
+      assertStateBytesUnchanged(dir, waveBytes, '执行家族回边仍属进行中保护：next 不得把 currentNode 推回 execute');
+
+      // 序号条件的第三枚构造（正向守护，in-place 扩展）：derived 落在 currentNode **之前不止一步**。
+      // 既有两枚反向构造里 derived 都是 currentNode 的直接前驱（verify→review 回退 / 执行家族的趟间
+      // 回边），故「只豁免直接前驱、更早的一律按进行中保护」这种收窄它们照样全绿。此处让派生的
+      // execute 与驻留的 review 隔着一整个执行家族，且保护链条上的其余前提**全部成立**——currentNode
+      // 已 entry 未 exit、路由后继推导（把 currentNode 视为已完成再求值）恰等于 derivedNode——只有
+      // 序号条件为假：路由必须跟随产物推导回到 execute，不得被保护钉在更晚的 review 上。
+      writeFile(dir, fixTaskPath, fixBatchTaskText('done'));
+      fs.rmSync(path.join(dir, '.specs/' + CHANGE_ID, 'T01-SUMMARY.md'), { force: true });
+      writeState(dir, {
+        activeChange: CHANGE_ID,
+        currentNode: 'review',
+        completedNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
+        enteredNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review'],
+        evidence: {
+          open: { summary: 'open complete' },
+          design: { summary: 'design complete' },
+          plan: { summary: 'plan complete' },
+          execute: { summary: 'executed' },
+          review: { summary: 'review in progress — SUMMARY 在此后被移除' },
+        },
+        verifyFailures: 0,
+        executionMode: 'subagent',
+        directOverride: false,
+        newChange: true,
+      });
+      const behindBytes = readStateBytes(dir);
+      const behindStatus = runState(['status'], dir);
+      assertExit(behindStatus, 0);
+      assertOut(behindStatus, '"currentNode": "execute"');      // 产物推导：SUMMARY 缺席 → 回到 execute
+      assertOut(behindStatus, '"stateCurrentNode": "review"');  // state 原值语义不变
+      assertOut(behindStatus, '"routeNode": "execute"');        // 路由视图跟随产物推导
+      assertNotOut(behindStatus, '"routeNode": "review"');      // 不得被进行中保护钉在更晚的 currentNode
+      const behindRouteLine = behindStatus.output.split('\n').find((line) => line.startsWith('ROUTE: '));
+      if (!behindRouteLine) throw new Error('status 缺少 ROUTE: 诊断行\n实际输出:\n' + behindStatus.output);
+      for (const token of ['derived=execute', 'state=review', 'route=execute']) {
+        if (!behindRouteLine.includes(token)) {
+          throw new Error('derived 早于 currentNode 时 ROUTE: 行缺少 ' + token + '：' + behindRouteLine);
+        }
+      }
+      if (behindRouteLine.includes('进行中')) {
+        throw new Error('derived 早于 currentNode 时 ROUTE: 行不得声明进行中（保护不成立）：' + behindRouteLine);
+      }
+      assertStateBytesUnchanged(dir, behindBytes, 'status 是只读视图（早于 currentNode 的 derived 不改写 state）');
+      const behindNext = runState(['next'], dir);
+      assertExit(behindNext, 0);
+      assertOut(behindNext, 'NODE: execute');
+      const behindWhy = behindNext.output.split('\n').find((line) => line.startsWith('WHY: '));
+      if (!behindWhy) throw new Error('next 缺少 WHY: 解释行\n实际输出:\n' + behindNext.output);
+      if (!behindWhy.includes('产物推导')) {
+        throw new Error('早于 currentNode 的 derived 应报产物推导（不是进行中保护）：' + behindWhy);
+      }
+      if (behindWhy.includes('进行中保护')) {
+        throw new Error('早于 currentNode 的 derived 不得套用进行中保护：' + behindWhy);
+      }
+      // 非进行中 → 漂移校正照常落盘：state.currentNode 回到产物推导的 execute
+      if (JSON.parse(readStateBytes(dir)).currentNode !== 'execute') {
+        throw new Error('derived 早于 currentNode 时应被产物权威校正回 execute，实际 state.currentNode: '
+          + JSON.stringify(JSON.parse(readStateBytes(dir)).currentNode) + '\nnext 输出:\n' + behindNext.output);
+      }
+
+      // ---------- 边界态：next 会 BLOCKED 时 status 不得给节点（in-place 扩展） ----------
+      // 缺陷复现：next 有两条**不打印 NODE**、直接 BLOCKED 的分支（Fix 受控归位第 4 轮无授权 /
+      // 单趟零进展），status 却照常经 resolveNodeView 给一个 routeNode——执行者按 status 行动必然
+      // 撞 BLOCKED，「同一状态同一答案」在这两种态上不成立。修复后 status 输出 routeNode=null 且
+      // ROUTE: 行写明「next 将 BLOCKED：<原因>」，与 next 的实际行为一致；判定是 state 副本上的
+      // 只读预演（真实字节零改写、不计轮次）。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, fixTaskPath, fixBatchTaskText('pending'));
+      writeState(dir, { ...fixState, fixRoundsByChange: { [CHANGE_ID]: 3 } });
+      const blockedFixBytes = readStateBytes(dir);
+      const blockedFixStatus = runState(['status'], dir);
+      assertExit(blockedFixStatus, 0);
+      if (!/"routeNode":\s*null/.test(blockedFixStatus.output)) {
+        throw new Error('Fix 归位第 4 轮无授权态：next 会 BLOCKED 且不打印 NODE，status.routeNode 必须是 null，实际输出:\n'
+          + blockedFixStatus.output);
+      }
+      const blockedFixRouteLine = blockedFixStatus.output.split('\n').find((line) => line.startsWith('ROUTE: '));
+      if (!blockedFixRouteLine) throw new Error('status 缺少 ROUTE: 诊断行\n实际输出:\n' + blockedFixStatus.output);
+      for (const token of ['route=null', 'next 将 BLOCKED', 'Fix 批次受控归位已达 3 轮上限', '先按恢复指引处理']) {
+        if (!blockedFixRouteLine.includes(token)) {
+          throw new Error('边界态 ROUTE: 行缺少 ' + token + '：' + blockedFixRouteLine);
+        }
+      }
+      assertStateBytesUnchanged(dir, blockedFixBytes, 'status 的「next 将 BLOCKED」判定是只读预演（不得写 state）');
+      const blockedFixRounds = JSON.parse(readStateBytes(dir)).fixRoundsByChange?.[CHANGE_ID];
+      if (blockedFixRounds !== 3) {
+        throw new Error('status 不得计轮次（Fix 计数应保持 3），实际 ' + JSON.stringify(blockedFixRounds));
+      }
+      const blockedFixNext = runState(['next'], dir);
+      assertExit(blockedFixNext, 1);
+      assertOut(blockedFixNext, 'BLOCKED: Fix 批次受控归位已达 3 轮上限');
+      if (/^NODE: /m.test(blockedFixNext.output)) {
+        throw new Error('Fix 归位第 4 轮无授权态：next 必须 BLOCKED、不得打印 NODE\n实际输出:\n' + blockedFixNext.output);
+      }
+      assertStateBytesUnchanged(dir, blockedFixBytes, 'next 的 BLOCK 分支在任何写盘之前（state 字节零改写）');
+
+      // record 是这条事实的**第四个说法**（in-place 扩展）：边界态下它的尾巴仍按旧路径打印
+      // NEXT: done——同一 state 上 next 已 BLOCKED、status.routeNode 已是 null，record 却说
+      // 「没有下一节点了」。record 走共享节点视图，边界态命中时同样不得给出下一节点（next 此刻
+      // 不打印 NODE），改用与 ROUTE: 行同源的一句；判定本身零写盘——轮次与 currentNode 不动，
+      // record 的写面仍只是它自己的证据（录证据是它的职责，不是判定副作用）。
+      const recordBlockedFix = runState(['record', 'execute', '{"summary":"execute recorded while the fix batch is blocked"}'], dir);
+      assertExit(recordBlockedFix, 0);
+      assertOut(recordBlockedFix, 'EVIDENCE: execute');
+      assertNotOut(recordBlockedFix, 'NEXT: done');
+      if (/^NODE: /m.test(recordBlockedFix.output)) {
+        throw new Error('边界态下 record 不得给出下一节点（next 此刻不打印 NODE）\n实际输出:\n' + recordBlockedFix.output);
+      }
+      assertOut(recordBlockedFix, 'NEXT: blocked（Fix 批次受控归位已达 3 轮上限');
+      assertOut(recordBlockedFix, '先按恢复指引处理');
+      const recordBlockedFixState = JSON.parse(readStateBytes(dir));
+      if (recordBlockedFixState.fixRoundsByChange?.[CHANGE_ID] !== 3) {
+        throw new Error('record 的边界态判定不得计轮次（Fix 计数应保持 3），实际: '
+          + JSON.stringify(recordBlockedFixState.fixRoundsByChange) + '\nrecord 输出:\n' + recordBlockedFix.output);
+      }
+      if (recordBlockedFixState.currentNode !== 'review') {
+        throw new Error('record 的边界态判定不得改写 currentNode（应保持 review），实际: '
+          + JSON.stringify(recordBlockedFixState.currentNode));
+      }
+
+      // 零进展态（孤儿并行任务：depends_on 指向不存在的任务 id）——同样「next BLOCKED / status 无节点」
+      writeFile(dir, fixTaskPath, '# TASK\n\n'
+        + '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/p01.mjs</write_files><verify>node --check src/p01.mjs</verify><depends_on>NOPE</depends_on></task>\n');
+      writeState(dir, {
+        ...fixState,
+        currentNode: 'execute',
+        completedNodes: ['open', 'design', 'plan'],
+        enteredNodes: ['open', 'design', 'plan', 'execute'],
+        evidence: {
+          open: { summary: 'open complete' },
+          design: { summary: 'design complete' },
+          plan: { summary: 'plan complete' },
+          execute: { summary: 'execute in progress' },
+        },
+      });
+      const zeroProgressBytes = readStateBytes(dir);
+      const zeroProgressStatus = runState(['status'], dir);
+      assertExit(zeroProgressStatus, 0);
+      if (!/"routeNode":\s*null/.test(zeroProgressStatus.output)) {
+        throw new Error('零进展态：next 会 BLOCKED 且不打印 NODE，status.routeNode 必须是 null，实际输出:\n'
+          + zeroProgressStatus.output);
+      }
+      const zeroProgressRouteLine = zeroProgressStatus.output.split('\n').find((line) => line.startsWith('ROUTE: '));
+      if (!zeroProgressRouteLine) throw new Error('status 缺少 ROUTE: 诊断行\n实际输出:\n' + zeroProgressStatus.output);
+      for (const token of ['route=null', 'next 将 BLOCKED', '路由零进展', '先按恢复指引处理']) {
+        if (!zeroProgressRouteLine.includes(token)) {
+          throw new Error('零进展态 ROUTE: 行缺少 ' + token + '：' + zeroProgressRouteLine);
+        }
+      }
+      assertStateBytesUnchanged(dir, zeroProgressBytes, '零进展态下 status 仍是只读视图（不得写 state）');
+      const zeroProgressNext = runState(['next'], dir);
+      assertExit(zeroProgressNext, 1);
+      assertOut(zeroProgressNext, 'BLOCKED: 路由零进展');
+      if (/^NODE: /m.test(zeroProgressNext.output)) {
+        throw new Error('零进展态：next 必须 BLOCKED、不得打印 NODE\n实际输出:\n' + zeroProgressNext.output);
+      }
+      assertStateBytesUnchanged(dir, zeroProgressBytes, '零进展态下 next 的 BLOCK 分支不得写 state');
+
+      // 零进展态同样：record 不得把「没有下一节点」说成 NEXT: done，原因与 ROUTE: 行同源。
+      const recordZeroProgress = runState(['record', 'execute', '{"summary":"execute recorded while routing is stuck"}'], dir);
+      assertExit(recordZeroProgress, 0);
+      assertOut(recordZeroProgress, 'EVIDENCE: execute');
+      assertNotOut(recordZeroProgress, 'NEXT: done');
+      if (/^NODE: /m.test(recordZeroProgress.output)) {
+        throw new Error('零进展态下 record 不得给出下一节点（next 此刻不打印 NODE）\n实际输出:\n' + recordZeroProgress.output);
+      }
+      assertOut(recordZeroProgress, 'NEXT: blocked（路由零进展');
+      assertOut(recordZeroProgress, '先按恢复指引处理');
+
+      // RETURN 回程构造态（源节点未 entry、无 evidence）：产物已把路由推到源节点之后 → next 保留
+      // 源节点跑出口。NODE 必须与 status.routeNode 同一值（旧实现直接打印 state.currentNode，status
+      // 报产物后继 verify——同一 state 两个答案），并给出 WHY: 说明回程原因。
+      writeFile(dir, fixTaskPath, fixBatchTaskText('done'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
+        '# REVIEW\n\n## 结论\n\n回程态构造：execute 已完成，等待 review 出口。\n');
+      writeState(dir, {
+        ...fixState,
+        enteredNodes: ['open', 'design', 'plan', 'execute', 'subagent-execute'],
+        evidence: {
+          open: { summary: 'open complete' },
+          design: { summary: 'design complete' },
+          plan: { summary: 'plan complete' },
+          execute: { summary: 'fix batch executed' },
+          'subagent-execute': { summary: 'delegated' },
+        },
+      });
+      const returnBytes = readStateBytes(dir);
+      const returnStatus = runState(['status'], dir);
+      assertExit(returnStatus, 0);
+      const returnRouteNode = (returnStatus.output.match(/"routeNode":\s*"([^"]+)"/) ?? [])[1];
+      // 回程态的解释面同源：next 的 WHY: 说「回程源节点 review…」，ROUTE: 行也必须给出同一原因——
+      // 否则 derived=verify 与 route=review 并排却不说明为什么，读起来就像产物推导指向 review
+      // （缺这条分支时正好如此）。同一停留原因有四个输出面，少一个就分叉一个。
+      const returnRouteLine = returnStatus.output.split('\n').find((line) => line.startsWith('ROUTE: '));
+      if (!returnRouteLine) throw new Error('status 缺少 ROUTE: 诊断行\n实际输出:\n' + returnStatus.output);
+      for (const token of ['route=review', '回程', '产物在场且未出口', '保留源节点 review 跑出口']) {
+        if (!returnRouteLine.includes(token)) {
+          throw new Error('回程态 ROUTE: 行缺少 ' + token + '：' + returnRouteLine);
+        }
+      }
+      const returnNext = runState(['next'], dir);
+      assertExit(returnNext, 0);
+      assertOut(returnNext, 'RETURN: 回程源节点 review');
+      const returnNextNode = (returnNext.output.match(/^NODE: (.+)$/m) ?? [])[1];
+      if (returnRouteNode !== returnNextNode) {
+        throw new Error('RETURN 回程态下 status.routeNode 与 next 的 NODE 不一致（同一事实两处说法）：'
+          + JSON.stringify(returnRouteNode) + ' vs ' + JSON.stringify(returnNextNode)
+          + '\nstatus 输出:\n' + returnStatus.output + '\nnext 输出:\n' + returnNext.output);
+      }
+      if (returnNextNode !== 'review') {
+        throw new Error('RETURN 回程态：源节点未出口时 next 应保留源节点 review 跑出口，实际: '
+          + JSON.stringify(returnNextNode) + '\nnext 输出:\n' + returnNext.output);
+      }
+      const returnWhyLine = returnNext.output.split('\n').find((line) => line.startsWith('WHY: '));
+      if (!returnWhyLine) throw new Error('RETURN 回程态下 next 缺少 WHY: 解释行\n实际输出:\n' + returnNext.output);
+      for (const token of ['回程源节点 review', '产物在场且未出口', '保留源节点跑出口']) {
+        if (!returnWhyLine.includes(token)) {
+          throw new Error('RETURN 的 WHY: 行缺少 ' + token + '：' + returnWhyLine);
+        }
+      }
+      assertStateBytesUnchanged(dir, returnBytes, 'RETURN 回程分支是只读放行（不得改写 state）');
     },
   },
 
@@ -280,20 +949,243 @@ export const ENTRIES = [
     },
   },
 
-  // 14: 串行 pending 未完成 → BLOCKED
+  // 14: 串行 pending 未完成 → BLOCKED；in-place 扩展：结构化预检（exit --preflight）
+  // 缺陷形态：每任务预检被设想的时点（result 已记、尚未标 done）在完整出口链里必先撞更早的
+  // 进展类门禁——串行 pending 排在模板保真门之前，结构问题根本报不出来。本例用同一夹具证明：
+  // ① 完整 exit（不带 --apply）仍报进展类问题（对照锚），且此刻还没到结构门；
+  // ② --preflight 首报结构问题、不报串行 pending，且只读（state 字节零改写 + 不写提示账本）；
+  // ③ 旧 change 只 WARN 不阻断；④ 参数防护 fail-closed（--preflight+--apply / 非 exit 命令 /
+  // 未知节点）；⑤ 通过时提示不误导（不打印 --apply 引导），结构干净也不放行推进（完整 exit 照旧拦）。
+  // 同缺陷的第二形态（⑥⑦⑧，in-place 追加）：空 open 节点曾因「入口三件只查在场者」一件都没查、
+  // 直接打印 ALL CHECKS PASSED——⑥ 要求缺件必须 BLOCK 且逐项给路径 + 模板指针；⑦ 要求缺件与结构
+  // 问题同轮报告（先列缺失件、再列结构问题）；⑧ 要求工件齐但缺段时仍回到既有两阶段结构报文
+  // （首段只报类别计数）。三者都断言 state 字节零改写（预检仍只读）。
+  // 反向构造：把预检实现改回「跑全链」⇒ ② 的旧 change 分支落进完整出口链、被串行 pending 拦下
+  // （期望 exit 0 实际 1，断言红）；让预检写 state ⇒ ②/⑥⑦⑧ 的字节断言红；写提示账本 ⇒ ① 的账本
+  // 断言红；去掉声明工件存在性判据 ⇒ ⑥ 的 BLOCK 断言红（回到打印 ALL CHECKS PASSED 的假绿）。
   {
-    name: '14 execute exit BLOCKED：串行 pending 未完成',
+    name: '14 execute exit BLOCKED：串行 pending 未完成 + --preflight 结构化预检（结构先报/只读/分级/参数防护）',
     run: (dir) => {
+      // SUMMARY 模板（夹具自带：两种检出形态下都确定，不依赖 vendored 模板在场）。H2 段集 = 登记表
+      // 登记的全部 SUMMARY 段（含条件段）——坏 SUMMARY 的缺陷因此只暴露在「段形」这一层。
+      writeFile(dir, 'flow-kit/templates/SUMMARY.md', [
+        '# SUMMARY 模板',
+        '',
+        '## 做了什么（一段话）',
+        '## 改动文件',
+        '## verify 输出（必填）',
+        '## 6 维自查（生产代码改动必填 · 来自 4-dev 步骤 4）',
+        '## 数据库迁移（涉及 schema 变更必填 · 来自 4-dev 步骤 1.7 / R4.5）',
+        '## 越界检查（必填 · 来自 4-dev 步骤 5 / R6.5 / B3 老项目护栏）',
+        '## 破坏性变更（涉及破坏性改动必填 · 来自 4-dev 步骤 1.8 / R4.6 / B4 老项目护栏）',
+        '## 决策与偏离（如有）',
+        '## 是否触发新工作',
+        '## 完成判定',
+        '',
+      ].join('\n'));
       const st = baseState('execute');
+      st.newChange = true;
+      st.enteredNodes = ['execute'];
       st.evidence.execute = { summary: 'executed' };
       st.evidence['subagent-execute'] = { handoffResult: handoffFor(['P02']) };
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
         '<task id="T01" parallel="false" status="pending"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n' + TASK_P2);
+      // 坏 SUMMARY：关键段齐（关键段门能过），但段形不合模板——标题缺 `# SUMMARY:`
+      // 前缀、首部四字段缺席、段序偏离、缺「是否触发新工作」「完成判定」。这正是只有模板保真门
+      // 才判、因而被更早的进展门挡住的结构问题。
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
-      const res = runGuard(['exit', 'execute'], dir);
-      assertExit(res, 1);
-      assertOut(res, '串行 pending');
+      const serialExit = runGuard(['exit', 'execute'], dir);
+      assertExit(serialExit, 1);
+      assertOut(serialExit, '串行 pending');
+      assertNotOut(serialExit, '模板结构校验失败');
+
+      // ① 结构化预检：同一夹具下首报结构问题（不得报进展类）；且只读（state 字节与账本零改写）
+      const preflightBytes = readStateBytes(dir);
+      const pre = runGuard(['exit', 'execute', '--preflight'], dir);
+      assertExit(pre, 1);
+      assertOut(pre, 'PREFLIGHT: ');
+      assertOut(pre, 'T01-SUMMARY.md 模板结构校验失败');
+      assertOut(pre, '（模板: flow-kit/templates/SUMMARY.md）');
+      assertOut(pre, '缺段 2 项'); // 首段形态：类别计数（缺段不列段名）
+      assertNotOut(pre, '缺段 2 项:');
+      assertNotOut(pre, '串行 pending');
+      assertNotOut(pre, 'ALL CHECKS PASSED');
+      assertStateBytesUnchanged(dir, preflightBytes, '--preflight 只读：不得写 state');
+      assertTrue(!fs.existsSync(path.join(dir, '.specs', CHANGE_ID, '.template-hints.json')),
+        '--preflight 不得写模板提示账本（.template-hints.json）');
+
+      // ② 分级不变：同一坏 SUMMARY 在旧 change 只 WARN 不阻断（预检不得把旧 change 升级成 BLOCK）
+      writeState(dir, { ...st, newChange: false });
+      const oldChangeBytes = readStateBytes(dir);
+      const oldChangePre = runGuard(['exit', 'execute', '--preflight'], dir);
+      assertExit(oldChangePre, 0);
+      assertOut(oldChangePre, 'TEMPLATE-STRUCTURE WARN');
+      assertNotOut(oldChangePre, 'BLOCKED');
+      assertStateBytesUnchanged(dir, oldChangeBytes, '旧 change 预检同样只读');
+      writeState(dir, st);
+      const restoredBytes = readStateBytes(dir);
+
+      // ③ 参数防护 fail-closed：--preflight 与 --apply 同时给 ⇒ 用法错误（只读/写盘无合法语义）
+      const conflict = runGuard(['exit', 'execute', '--preflight', '--apply'], dir);
+      assertExit(conflict, 1);
+      assertOut(conflict, '用法错误');
+      assertOut(conflict, '--apply');
+      assertStateBytesUnchanged(dir, restoredBytes, '用法错误路径不得写 state');
+      const wrongCommand = runGuard(['entry', 'execute', '--preflight'], dir);
+      assertExit(wrongCommand, 1);
+      assertOut(wrongCommand, '用法错误');
+      assertOut(wrongCommand, '只能与 exit');
+
+      // ③b 未知参数 fail-closed：exit 的参数解析只认 --apply / --preflight 两个**已知** token——
+      // 其余若静默忽略，「参数说错了但仍然跑」的两种形态就会漏过：
+      //   · `--bogus` 被静默忽略 ⇒ 一次看起来成功的预演（只读面被误当成通过）；
+      //   · `--prefligh`（笔误）既不是预检、也不报错 ⇒ 静默走**完整出口链**，预检被当成全链预演。
+      // 判据：未知 `--*` 一律用法错误（非零退出），且**不得**进入任何门禁链（不打印进展类报错）。
+      // 正对照紧随其后（④：合法 `--preflight` 仍 exit 0 + ALL CHECKS PASSED）——同一夹具、单变量。
+      const typo = runGuard(['exit', 'execute', '--prefligh'], dir);
+      assertExit(typo, 1);
+      assertOut(typo, '用法错误');
+      assertOut(typo, '--prefligh');
+      assertNotOut(typo, '串行 pending');
+      assertStateBytesUnchanged(dir, restoredBytes, '笔误参数的用法错误路径不得写 state');
+      const unknownPair = runGuard(['exit', 'execute', '--prefilter', '--bogus'], dir);
+      assertExit(unknownPair, 1);
+      assertOut(unknownPair, '用法错误');
+      assertOut(unknownPair, '--prefilter');
+      assertOut(unknownPair, '--bogus');
+      assertNotOut(unknownPair, '串行 pending');
+      assertStateBytesUnchanged(dir, restoredBytes, '未知参数的用法错误路径不得写 state');
+
+      // ④ 结构干净 ⇒ 预检通过，且不打印 --apply 引导（预检不落盘，那行会误导）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
+      const okBytes = readStateBytes(dir);
+      const ok = runGuard(['exit', 'execute', '--preflight'], dir);
+      assertExit(ok, 0);
+      assertOut(ok, 'ALL CHECKS PASSED');
+      assertOut(ok, 'PREFLIGHT: structural checks only');
+      assertNotOut(ok, 'APPLY: rerun with --apply');
+      assertStateBytesUnchanged(dir, okBytes, '预检通过路径不得写 state');
+      // 结构干净 ≠ 进展完成：串行 pending 仍在，完整 exit 照旧拦（预检不越权放行推进）
+      const stillBlocked = runGuard(['exit', 'execute'], dir);
+      assertExit(stillBlocked, 1);
+      assertOut(stillBlocked, '串行 pending');
+
+      // ⑤ 未知节点照既有报错（--preflight 不得把未知节点变成静默通过）
+      const unknown = runGuard(['exit', 'no-such-node', '--preflight'], dir);
+      assertExit(unknown, 1);
+      assertOut(unknown, 'Unknown workflow Node: no-such-node');
+
+      // 预检与完整出口共用同一结构报告器：父段正文留下 N/A 意图痕迹、却写不进白名单时，
+      // 「该怎么写」属结构面反馈，预检必须一并带出——自持一份只读副本的实现会丢掉这一段，
+      // 于是同一条结构问题在预检里只说「缺子段」、在收尾时却还给写法，两种模式的反馈不一致。
+      // 夹具：6 维自查段写成「见 N/A …」（剥掉包裹后开头是实词，不算整段不适用），两条结构子段
+      // 因此仍要求；该段保留 brooks-review 字样，关键段门照常通过。
+      const adviceSummary = strictSummary('T01')
+        .replace('- 功能: 通过（brooks-review 已跑）\n- 性能: 无影响\n- 安全: 无影响\n- 兼容: 通过\n- 可观测: 通过\n- 可维护: 通过',
+          '见 N/A（六维由 brooks-review 覆盖）')
+        .replace('### 已知接受 + 理由\n\n- 无（夹具）。\n\n### 已知小问题\n\n- 无（夹具）。\n\n', '');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', adviceSummary);
+      const adviceBytes = readStateBytes(dir);
+      const advice = runGuard(['exit', 'execute', '--preflight'], dir);
+      assertExit(advice, 1);
+      assertOut(advice, '缺结构子段 2 项');
+      assertOut(advice, '若要整段不适用');
+      assertOut(advice, '包裹符号本身就被接受');
+      assertStateBytesUnchanged(dir, adviceBytes, '预检的写法建议路径同样只读');
+
+      // ⑥ 空 open 节点（本缺陷的原始形态）：全新 change 的 `.specs/<id>/` 空目录、无 CHANGE.md /
+      // REQUIREMENT.md。改前结构子集只查「在场者」⇒ 一件都没查、打印 ALL CHECKS PASSED（假绿）。
+      // 本节点声明的 file 类工件（open: CHANGE.md + REQUIREMENT.md）是否在场是**结构事实**，不是
+      // 进展判定：缺失必须 BLOCK，逐项给路径，并给一句「先创建该工件（按模板路径）」的指引。
+      const openState = { ...baseState('open'), newChange: true, enteredNodes: ['open'] };
+      fs.rmSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true, force: true });
+      writeState(dir, openState);
+      const emptyOpenBytes = readStateBytes(dir);
+      const emptyOpen = runGuard(['exit', 'open', '--preflight'], dir);
+      assertExit(emptyOpen, 1);
+      assertOut(emptyOpen, 'BLOCKED');
+      assertOut(emptyOpen, '.specs/' + CHANGE_ID + '/CHANGE.md');
+      assertOut(emptyOpen, '.specs/' + CHANGE_ID + '/REQUIREMENT.md');
+      assertOut(emptyOpen, '模板: flow-kit/templates/CHANGE.md');
+      assertNotOut(emptyOpen, 'ALL CHECKS PASSED');
+      assertStateBytesUnchanged(dir, emptyOpenBytes, '缺件预检同样只读：不得写 state');
+      assertTrue(!fs.existsSync(path.join(dir, '.specs', CHANGE_ID, '.template-hints.json')),
+        '缺件预检不得写模板提示账本（.template-hints.json）');
+
+      // 上面那条模板指针（`模板: flow-kit/templates/CHANGE.md`）由「声明工件名 → 模板键」的派生得来。
+      // 同一份派生只许有一个实现：结构预检（缺件报文的模板指针）与模板保真门禁（该工件用哪份骨架
+      // 校验）是两个消费面，各自持有一份等价副本在口径演进时必然分叉，同一份工件就会得到两套说法。
+      // 取用面由真实引用派生（不写文件名清单），静态锁因此对新增消费方同样生效——把副本写回任一
+      // 消费方，本断言即红。
+      const templateKeyProblems = singleSourceImportProblems({
+        symbol: 'templateKeyFromArtifactName',
+        sourceRel: 'protocol-utils.mjs',
+        texts: engineScriptTexts(),
+      });
+      if (templateKeyProblems.length > 0) {
+        throw new Error('模板键派生的单一来源被破坏（' + templateKeyProblems.join('; ') + '）');
+      }
+
+      // ⑦ 缺件与结构问题同轮报告（先列缺失件，再列结构问题）：CHANGE.md 在场但缺模板段、
+      // REQUIREMENT.md 仍缺席 ⇒ 两类都要报——存在性不再被「在场才查」吞掉结构报告的时机。
+      writeFile(dir, 'flow-kit/templates/CHANGE.md',
+        '# CHANGE 模板\n\n## Why（为什么做）\n## What（做什么）\n## 影响面\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md',
+        '# CHANGE: 夹具\n\n## Why（为什么做）\n\n理由。\n\n## 影响面\n\n夹具。\n');
+      const mixedBytes = readStateBytes(dir);
+      const mixed = runGuard(['exit', 'open', '--preflight'], dir);
+      assertExit(mixed, 1);
+      assertOut(mixed, 'BLOCKED');
+      assertOut(mixed, '.specs/' + CHANGE_ID + '/REQUIREMENT.md');
+      assertOut(mixed, 'CHANGE.md 模板结构校验失败');
+      assertOut(mixed, '缺段 1 项'); // 首段形态：类别计数（缺段不列段名）
+      assertNotOut(mixed, '缺段 1 项:');
+      assertNotOut(mixed, 'ALL CHECKS PASSED');
+      assertTrue(mixed.output.indexOf('.specs/' + CHANGE_ID + '/REQUIREMENT.md')
+        < mixed.output.indexOf('CHANGE.md 模板结构校验失败'),
+      '同轮报告应先列缺失工件、再列结构问题\n实际输出:\n' + mixed.output);
+      assertStateBytesUnchanged(dir, mixedBytes, '缺件 + 结构问题同轮的预检只读');
+
+      // ⑧ 工件齐但缺段（本缺陷修复后不得倒退的既有语义）：补上结构完整的 REQUIREMENT.md，
+      // CHANGE.md 仍缺一段 ⇒ 只剩两阶段结构报文，且首段只报类别计数、不列段名。
+      writeFile(dir, 'flow-kit/templates/REQUIREMENT.md',
+        '# REQUIREMENT 模板\n\n## 用户故事（User Story）\n## 验收准则（AC）\n## 范围切分\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', [
+        '# REQUIREMENT: 夹具',
+        '',
+        '## 用户故事（User Story）',
+        '',
+        '夹具故事。',
+        '',
+        '## 验收准则（AC）',
+        '',
+        '- AC-1: 夹具。',
+        '',
+        '## 范围切分',
+        '',
+        '### v1（本次必做）',
+        '',
+        '- 夹具。',
+        '',
+        '### v2（下一轮考虑，不本次）',
+        '',
+        '- 无。',
+        '',
+        '### out（永远不做）',
+        '',
+        '- 无。',
+        '',
+      ].join('\n'));
+      const structureOnlyBytes = readStateBytes(dir);
+      const structureOnly = runGuard(['exit', 'open', '--preflight'], dir);
+      assertExit(structureOnly, 1);
+      assertOut(structureOnly, 'BLOCKED: CHANGE.md 模板结构校验失败');
+      assertOut(structureOnly, '缺段 1 项');
+      assertNotOut(structureOnly, '缺段 1 项:');
+      assertNotOut(structureOnly, '声明工件缺失');
+      assertNotOut(structureOnly, 'ALL CHECKS PASSED');
+      assertStateBytesUnchanged(dir, structureOnlyBytes, '两阶段结构报文路径同样只读');
     },
   },
 
@@ -669,6 +1561,34 @@ export const ENTRIES = [
       const resBracket = runGuard(['exit', 'verify'], dir);
       assertExit(resBracket, 0);
       assertOut(resBracket, 'ALL CHECKS PASSED');
+      // 子断言:归档判定按 <日期>-<本 change> 精确形态。诱饵 = 名字以 -<本 change> 结尾的别的 change
+      // 归档目录：本 change 并未归档，复核命令必须真实执行（副作用文件即执行证据）。修复前后缀匹配
+      // 把本 change 判成「已归档」，整个验证命令被跳过——那是放行口，不是显示问题。
+      const ranByDecoy = path.join(dir, 'archive-decoy-ran.txt');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n' +
+        '```bash\nnode -e "require(\'fs\').writeFileSync(\'archive-decoy-ran.txt\',\'RAN\')"\n```\n');
+      writeFile(dir, '.specs/archive/2026-10-20-other-' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n\n诱饵。\n');
+      fs.rmSync(ranByDecoy, { force: true });
+      const resDecoyArchive = runGuard(['exit', 'verify'], dir);
+      assertExit(resDecoyArchive, 0);
+      if (!fs.existsSync(ranByDecoy)) {
+        throw new Error('同后缀诱饵归档不得把本 change 判成已归档：验证命令必须真实执行（副作用文件缺失）');
+      }
+      // 反向构造（同一判据 + 单变量）：真正的归档目录（<日期>-<本 change>）在场时豁免仍生效——命令
+      // 一旦被执行就会以 3 退出。精确化不得把「归档 change 免跑验证命令」一并收紧掉。
+      const ranByArchive = path.join(dir, 'archive-real-ran.txt');
+      fs.rmSync(path.join(dir, '.specs', 'archive', '2026-10-20-other-' + CHANGE_ID), { recursive: true, force: true });
+      writeFile(dir, '.specs/archive/2026-10-20-' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n\n已归档。\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n' +
+        '```bash\nnode -e "require(\'fs\').writeFileSync(\'archive-real-ran.txt\',\'RAN\'); process.exit(3)"\n```\n');
+      fs.rmSync(ranByArchive, { force: true });
+      const resRealArchive = runGuard(['exit', 'verify'], dir);
+      assertExit(resRealArchive, 0);
+      if (fs.existsSync(ranByArchive)) {
+        throw new Error('真正的归档 change 仍须豁免真实跑验证命令（反向构造：豁免被误收紧）');
+      }
+      // 复位：归档目录撤掉、TEST.md 回到快速通过的形态，后续 timeout 断言按原样执行
+      fs.rmSync(path.join(dir, '.specs', 'archive'), { recursive: true, force: true });
       // ① 缺省 timeout（未设 env）保持大值：1.5s 耗时命令通过（若缺省被误改小 → 超时 RED）
       writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```bash\nnode -e "setTimeout(()=>{}, 1500)"\n```\n');
       const resDefault = runGuard(['exit', 'verify'], dir);
@@ -720,7 +1640,7 @@ export const ENTRIES = [
   // 子断言:归档缺 KNOWN-ISSUES.md(遗留清单,协议 required 产物)→ BLOCKED
   {
     name: '22 exit archive WARN：CHANGELOG.md 表格日期非倒序',
-    run: (dir) => {
+    run: async (dir) => {
       const st = baseState('archive');
       st.evidence.archive = { summary: 'archived' };
       writeState(dir, st);
@@ -743,6 +1663,72 @@ export const ENTRIES = [
       const resMissing = runGuard(['exit', 'archive'], dir);
       assertExit(resMissing, 1);
       assertOut(resMissing, 'missing Output Schema artifacts');
+
+      // 子断言:结构化预检的**时点分界**。归档产出（.specs/archive/<日期>-<change-id>/）是归档动作
+      // 自己的产出位置——归档前连 .specs/archive/ 都不存在，把它报成缺件、还让人「先按上述路径创建」，
+      // 给的是归档前不可能执行的指令（完整出口照旧要求它：那是归档动作做完后的判据，由上面的
+      // resMissing 守住）。预检只报「归档执行后才会生成」，且报文里的通配符（路径判据语法）必须换成
+      // 占位说明——照字面去建带 `*` 的目录同样不可执行。
+      fs.rmSync(path.join(dir, '.specs/archive'), { recursive: true, force: true });
+      const preflightArchive = runGuard(['exit', 'archive', '--preflight'], dir);
+      assertExit(preflightArchive, 0);
+      assertOut(preflightArchive, '归档执行后才会生成');
+      assertOut(preflightArchive, '.specs/archive/<日期>-' + CHANGE_ID + '/KNOWN-ISSUES.md');
+      assertNotOut(preflightArchive, 'BLOCKED');
+      assertNotOut(preflightArchive, '先按上述路径创建缺失工件');
+      const wildcardLines = preflightArchive.output.split('\n').filter((line) => line.includes('*'));
+      assertTrue(wildcardLines.length === 0,
+        '预检报文不得打印含通配符的路径（判据语法漏进了给人读的路径）:\n' + wildcardLines.join('\n'));
+      // 反过度修复锚:同一夹具下空 change 的 open 预检照旧 BLOCK——放宽只落在「归档产出」这一类路径上，
+      // 其他节点声明的缺件判据一字不动。
+      const preflightOpen = runGuard(['exit', 'open', '--preflight'], dir);
+      assertExit(preflightOpen, 1);
+      assertOut(preflightOpen, 'BLOCKED: 节点 open 的声明工件缺失');
+
+      // 子断言:声明不完整（required 但未声明 paths）——同一份协议，**两侧都阻断且说同一句**。
+      // 这种声明的特殊处：没有路径可判存在性，也没有可创建的落点，所以报文只能是「修协议」这一条
+      // 可执行的下一步；修复前两侧对同一份协议给出两种说法（预检跳过、出口永久算缺件），正是这里
+      // 要钉死的东西。期望措辞从唯一出处取（guard-routing 的 unspecifiedPathsNotice），不在测试里
+      // 另写一份。
+      const { unspecifiedPathsNotice } = await import('../lib/guard-routing.mjs');
+      const incompleteSchema = 'fixture.unspecified-paths.v1';
+      const incompleteArtifact = 'no-paths';
+      const builtinForIncomplete = JSON.parse(
+        fs.readFileSync(path.join(SCRIPTS_DIR, '..', 'reference', 'workflow-protocol.json'), 'utf8'));
+      writeFile(dir, 'reference/custom-unspecified-paths.json', JSON.stringify({
+        ...builtinForIncomplete,
+        nodes: builtinForIncomplete.nodes.map((node) => (node.id === 'archive'
+          ? { ...node, outputSchemas: [...node.outputSchemas, incompleteSchema] }
+          : node)),
+        outputSchemas: [...builtinForIncomplete.outputSchemas, {
+          id: incompleteSchema,
+          description: '声明不完整的必需产物（required 但未声明 paths）',
+          artifacts: [{ id: incompleteArtifact, kind: 'file', required: true, pathBase: 'specs-root' }],
+          evidence: [],
+        }],
+      }, null, 2) + '\n');
+      const incompleteProtocolPath = path.join(dir, 'reference', 'custom-unspecified-paths.json');
+      // 归档自身的两件必需产物先补齐：单变量 = 唯一缺陷就是那件「声明不完整」的产物。
+      writeFile(dir, '.specs/archive/foo-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# KNOWN-ISSUES\n\n无遗留问题\n');
+      const exitIncomplete = runGuard(['exit', 'archive', '--protocol', incompleteProtocolPath], dir);
+      assertExit(exitIncomplete, 1);
+      const preflightIncomplete = runGuard(
+        ['exit', 'archive', '--preflight', '--protocol', incompleteProtocolPath], dir);
+      assertExit(preflightIncomplete, 1);
+      const expectedNotice = unspecifiedPathsNotice(incompleteSchema, incompleteArtifact);
+      const noticeLineOf = (view) => view.output.split('\n')
+        .find((line) => line.includes('协议声明不完整：')) ?? null;
+      const exitNotice = noticeLineOf(exitIncomplete);
+      const preflightNotice = noticeLineOf(preflightIncomplete);
+      assertTrue(exitNotice !== null && exitNotice.endsWith(expectedNotice),
+        '出口侧应给「声明不完整」那一句（指向修协议，而不是让人去创建一个没有路径的文件）:\n'
+        + String(exitNotice) + '\n期望以: ' + expectedNotice + ' 结尾');
+      assertTrue(preflightNotice !== null && preflightNotice.endsWith(expectedNotice),
+        '预检侧应与出口侧同一句（两侧各写一份措辞正是本次要消灭的分叉）:\n'
+        + String(preflightNotice) + '\n期望以: ' + expectedNotice + ' 结尾');
+      // 两侧都不给做不到的指令：没有路径可建，就不许出现「按上述路径创建」。
+      assertNotOut(preflightIncomplete, '先按上述路径创建缺失工件');
+      assertNotOut(exitIncomplete, '按上述路径创建');
     },
   },
 
@@ -796,9 +1782,28 @@ export const ENTRIES = [
       writeFile(dir, '.specs/compose-demo/notes.md', '# notes\n');
       writeFile(dir, '.specs/compose-demo/T01-SUMMARY.md', '# T01-SUMMARY\n');
       writeFile(dir, '.specs/compose-demo/verdict.md', '# verdict\n');
+      const viewBytes = readStateBytes(dir);
       const res = runState(['status', '--protocol', custom], dir);
       assertExit(res, 0);
       assertOut(res, '"currentNode": "codereview"');
+      // 当前节点 brainstorm 从未 exit（completedNodes 空、evidence 空，只是产物齐全）→ next 的节点
+      // 顺序门禁会 BLOCKED 且不打印 NODE。共享视图必须报同一事实：routeNode=null，并在 ROUTE: 行
+      // 写明原因——修复前这里报产物推导的 codereview，正是「status 叫人去一个 next 不会去的地方」。
+      assertOut(res, '"routeNode": null');
+      const routeLine = res.output.split('\n').find((line) => line.startsWith('ROUTE: '));
+      if (!routeLine) throw new Error('status 缺少 ROUTE: 诊断行\n实际输出:\n' + res.output);
+      for (const token of ['route=null', 'next 将 BLOCKED', '疑似未 exit 节点 brainstorm']) {
+        if (!routeLine.includes(token)) {
+          throw new Error('节点顺序门禁态 ROUTE: 行缺少 ' + token + '：' + routeLine);
+        }
+      }
+      assertStateBytesUnchanged(dir, viewBytes, 'status 的「next 将 BLOCKED」判定是只读视图（不得写 state）');
+      // 同一 state 下 next 的实际行为——视图给出的节点必须是 next 会打印的那个：BLOCKED、不打印 NODE。
+      const nextView = runState(['next', '--protocol', custom], dir);
+      assertExit(nextView, 1);
+      assertOut(nextView, 'BLOCKED: 疑似未 exit 节点 brainstorm');
+      assertNotOut(nextView, 'NODE: ');
+      assertStateBytesUnchanged(dir, viewBytes, 'next 的顺序门禁 BLOCK 在任何写盘之前');
     },
   },
 

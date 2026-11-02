@@ -766,7 +766,11 @@ export const ENTRIES = [
       const resSerial = runHandoff(['request', 'S01', 'serial slice'], dir, env);
       assertExit(resSerial, 1);
       assertOut(resSerial, 'BLOCKED: 任务 S01（串行 pending）应归属节点 execute');
-      assertOut(resSerial, 'entry execute');
+      // 断言恢复指引的顺序句本身——「先对当前节点 record + exit」在前，entry 只在 exit
+      // 之后才允许。裸 'entry execute' 子串会被禁止句（不要在未 exit 前 entry 目标节点）满足，
+      // 等于分不清「让你 entry」与「禁止现在 entry」。
+      assertOut(resSerial, '先对当前节点 subagent-execute record + exit');
+      assertOut(resSerial, '不要在未 exit 前 entry 目标节点');
       if (fs.readFileSync(statePath, 'utf8') !== beforeSerial) {
         throw new Error('串行错配 BLOCK 必须 state 字节零改写');
       }
@@ -779,6 +783,17 @@ export const ENTRIES = [
       assertExit(resNotEntered, 0);
       assertOut(resNotEntered, 'WARN: 任务 S02 的归属节点 execute 与原始 currentNode 一致');
       assertOut(resNotEntered, '尚未 entry');
+      // 报文须点明缺的是哪个节点的 entry（只说「尚未 entry」等于让人自己猜），并给出可照抄的恢复
+      // 动作：两条 entry 命令（状态命令族与门禁族）按节点名给全；且这是 WARN 不是 BLOCK——
+      // 请求照常落库（与⑤的 BLOCK 分支成对：同一门禁的两种判级各自的可观测结果都要在场）。
+      assertOut(resNotEntered, 'enteredNodes 缺 execute');
+      assertOut(resNotEntered, 'workflow-state entry execute');
+      assertOut(resNotEntered, 'workflow-guard entry execute');
+      assertNotOut(resNotEntered, 'BLOCKED');
+      const recNotEntered = readScenarioState(dir).evidence?.['subagent-execute']?.handoffRequests?.S02;
+      if (!recNotEntered) {
+        throw new Error('未 entry 的 WARN 不应阻断落库，实际 handoffRequests.S02: ' + JSON.stringify(recNotEntered));
+      }
       assertOut(resNotEntered, 'HANDOFF REQUEST: S02');
       // ⑦ done 任务补录（非 pending）→ 归属门禁跳过，不误伤
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskXml('D01', 'parallel="true" status="done"', 'src/d01.mjs'));

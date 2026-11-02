@@ -7,10 +7,19 @@
 
 import { promises as fs } from 'fs';
 import path from 'path';
-import { validateStateFields, verifyFailuresFor, setVerifyFailuresFor } from '../state-schema.mjs';
+import { fileURLToPath } from 'url';
+import {
+  toPersistedProtocolPath,
+  validateStateFields,
+  verifyFailuresFor,
+  setVerifyFailuresFor,
+} from '../state-schema.mjs';
 import { EXECUTE_FAMILY_NODE_IDS, analyzeDependencyGraph, normalizeHeading } from '../route-node.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from '../task-parsing.mjs';
-import { runRoot, fileExists, statePath, writeJson } from './guard-state-io.mjs';
+// 「怎么重新声明技能加载」的唯一实现（节点模板 + 协议提示词两面）：skill-load 校验、record 的声明
+// 核对与这里的恢复指引共用同一份参数段——各拼一份必然分叉。
+import { nodeTemplateDeclaration, templateDeclareCommand } from '../protocol-utils.mjs';
+import { runRoot, packageRoot, fileExists, statePath, writeJson, protocolPath } from './guard-state-io.mjs';
 import {
   eligibleParallelBlocks,
   inFlightHandoffRequests,
@@ -25,6 +34,19 @@ import {
 } from './guard-routing.mjs';
 import { applicabilityGatedBinding, frontendCriterion } from './guard-uidesign.mjs';
 import { buildSkeleton, headingPattern, LESSONS_SCAN_SECTION } from './guard-artifact-skeleton.mjs';
+// LESSONS 命中集（路径词元 × 条目关键词）的单一实现：与 handoff request 的开工前打印共用，执行者
+// 看到的集合必须就是出口验收的集合。
+import { lessonsEntries, lessonsHits, lessonsPathTokens, taskWriteFilesById } from './lessons-hits.mjs';
+// 命令文本的唯一实现（平台化脚本根 + 整条路径加引号）：运行期恢复指引与 explain 的 COMMAND 行
+// 同源；本模块不再自拼路径（L-067：同一推导两处表达必然分叉）。
+import { scriptCommand } from './state-explain.mjs';
+// 声明标记目录的路径规则（活动路径优先、归档兜底）归状态族的路径上下文模块：本模块只按守卫运行根
+// 取用（guard → state-* 是允许的单向边），不在此另写一份扫描。
+import { findSkillLoadsDir } from './state-io.mjs';
+
+// 本模块位于 <技能包>/scripts/lib：脚本目录由自身位置推导一次——「自己在哪」与运行根是本模块提供
+// 的两个事实，平台化与引号形态本身在 state-explain。
+const scriptsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // directOverride 授权约束（direct 是用户决策点，不可自决——机制约束）——execute / subagent-execute
 // 出口校验：executionMode=direct 且 directOverride=true（显式直显授权态）须存在授权审计记录
@@ -74,23 +96,8 @@ export function runInFlightHandoffGate({ node, state }) {
 // 登记表（reference/artifact-templates.json 的 SUMMARY.increments）——位置语义由模板保真门禁按同一
 // 条目执行，本门禁只判「在场 + 命中回应」，不写第二份位置判据（L-067）。
 //
-// 停用词表与命中上限单处定义（段名从骨架模块取用，不在本模块自持第二份清单）。关键词行
-// （`- **关键词**:`）是唯一参与命中计算的字段——无关键词行的旧条目不参与（给旧条目一个不被
-// 误命中的通道）。
-const LESSONS_HIT_LIMIT = 5;
-const LESSONS_PATH_STOPWORDS = new Set([
-  // 目录布局噪音
-  'src', 'lib', 'libs', 'app', 'apps', 'core', 'pkg', 'packages', 'bin', 'dist', 'build', 'out',
-  'tmp', 'temp', 'test', 'tests', 'spec', 'specs', 'unit', 'e2e', 'fixture', 'fixtures',
-  'mock', 'mocks', 'docs', 'doc', 'scripts', 'script', 'assets', 'static', 'public',
-  'config', 'configs', 'utils', 'util', 'helpers', 'helper', 'common', 'shared', 'internal',
-  'modules', 'module', 'components', 'pages', 'views', 'styles', 'data', 'types', 'index',
-  // 扩展名 / 备份后缀残片
-  'mjs', 'cjs', 'jsx', 'tsx', 'json', 'yaml', 'yml', 'toml', 'lock', 'bak', 'log', 'txt', 'css',
-]);
-
-const LESSONS_ENTRY_HEADING = /^###\s*L-(\d+)\b/u;
-const LESSONS_KEYWORD_LINE = /^[-*\s]*\*\*关键词\*\*\s*[:：]\s*(.+)$/u;
+// 命中集算法（路径词元 → 条目关键词求交、取前 5）与 handoff request 的开工前打印**共用同一实现**
+// （lib/lessons-hits.mjs）：执行者看到的集合必须就是出口验收的集合，两处各算一套必然分叉。
 
 // 段名 / 必填来自登记表；登记表或模板缺席时退回段名常量并保持必填——扫描段由 AC-18 要求，不因模板
 // 派生失败而免检（「模板缺失」只让模板派生判据跳过，不让扫描声明消失）。
@@ -109,84 +116,16 @@ async function lessonsScanRule() {
   return { name: LESSONS_SCAN_SECTION, required: true, pattern: headingPattern(LESSONS_SCAN_SECTION, 2), registered: false };
 }
 
-// write_files 原文（键 = 任务 id）。块提取与开标签解析复用 task-parsing 的既有实现，只读元素文本。
+// write_files 原文（键 = 任务 id）：块提取与开标签解析在 lib/lessons-hits.mjs 的同一实现里，本处
+// 只负责读 TASK.md——出口与开工前打印共用同一个提取，两侧的写面输入不会分叉。
 async function taskWriteFiles(changeDir) {
-  const out = new Map();
   let text = '';
   try {
     text = await fs.readFile(path.join(changeDir, 'TASK.md'), 'utf8');
   } catch {
-    return out;
+    return new Map();
   }
-  for (const block of extractTaskBlocks(text)) {
-    const attrs = taskOpeningAttrs(block);
-    if (!attrs || !attrs.id) continue;
-    const writeFiles = block.match(/<write_files>([\s\S]*?)<\/write_files>/i);
-    if (writeFiles) out.set(attrs.id, writeFiles[1]);
-  }
-  return out;
-}
-
-// 路径段 → 词元：目录名与文件主干（去最后一层扩展名）按非字母数字切分，长度 ≥3、去停用词、去纯数字。
-// 只在「命中计算」这一侧做长度与停用词过滤——条目关键词侧原样保留，过滤口径不扩散成第二份规则。
-function lessonsPathTokens(writeFilesText) {
-  const tokens = new Set();
-  for (const raw of String(writeFilesText ?? '').split(/[\n;]+/u)) {
-    const segments = raw.trim().replace(/\\/gu, '/').split('/').filter((s) => s !== '' && s !== '.' && s !== '..');
-    segments.forEach((segment, index) => {
-      const body = index === segments.length - 1 ? segment.replace(/\.[^.]*$/u, '') : segment;
-      for (const piece of body.split(/[^0-9A-Za-z\u4e00-\u9fff]+/u)) {
-        const token = piece.toLowerCase();
-        if ([...token].length < 3) continue;
-        if (/^\d+$/u.test(token)) continue;
-        if (LESSONS_PATH_STOPWORDS.has(token)) continue;
-        tokens.add(token);
-      }
-    });
-  }
-  return tokens;
-}
-
-// LESSONS 条目：`### L-NNN` 标题开启一个条目，块内 `- **关键词**:` 行的词元即命中输入；下一个 H2
-// 结束条目区（区外的 `###` 不参与）。围栏代码块内是书写样例（模板里的「条目格式」示例即此形态），
-// 按行扫描会被误当成真条目——围栏内一律跳过。无关键词行的条目不进结果集（旧条目跳过）。
-function lessonsEntries(lessonsText) {
-  const entries = [];
-  let current = null;
-  let inFence = false;
-  for (const line of String(lessonsText ?? '').replace(/\r\n?/gu, '\n').split('\n')) {
-    if (/^\s*```/u.test(line)) { inFence = !inFence; continue; }
-    if (inFence) continue;
-    if (/^##\s/u.test(line)) { current = null; continue; }
-    const heading = line.match(LESSONS_ENTRY_HEADING);
-    if (heading) {
-      current = { id: 'L-' + String(Number(heading[1])).padStart(3, '0'), tokens: [], order: entries.length };
-      entries.push(current);
-      continue;
-    }
-    if (current === null) continue;
-    const keyword = line.match(LESSONS_KEYWORD_LINE);
-    if (!keyword) continue;
-    for (const piece of keyword[1].split(/[\s,，、;；/|]+/u)) {
-      const token = piece.trim().toLowerCase();
-      if (token !== '') current.tokens.push(token);
-    }
-  }
-  return entries.filter((entry) => entry.tokens.length > 0);
-}
-
-// 命中计算：路径词元 × 条目关键词词元求交，共享词元多的条目优先（相关度），同分按条目出现顺序
-// （结果确定、可复核），取前 LESSONS_HIT_LIMIT 条。
-function lessonsHits(pathTokens, entries) {
-  if (pathTokens.size === 0) return [];
-  const scored = [];
-  for (const entry of entries) {
-    const shared = [...new Set(entry.tokens.filter((token) => pathTokens.has(token)))];
-    if (shared.length === 0) continue;
-    scored.push({ id: entry.id, shared, order: entry.order });
-  }
-  scored.sort((a, b) => b.shared.length - a.shared.length || a.order - b.order);
-  return scored.slice(0, LESSONS_HIT_LIMIT);
+  return taskWriteFilesById(text);
 }
 
 // 段正文：命中段标题行之后、到下一个 H2 / 分隔线 / 文件尾（行锚定——正文里「引用段名」不劫持匹配）。
@@ -693,6 +632,114 @@ export async function runMultiPassCompletionGate({ node, state }) {
   } catch {}
 }
 
+// ---------- 缺证据恢复指引的前置条件（record 自己的技能加载声明门） ----------
+//
+// record 除了写证据，还有一道前置门：节点技能加载声明标记（.specs/<change>/.skill-loads/<node>-*.json）
+// 不在场时 BLOCKED。于是「照抄 record」在缺声明时走不通，而那道门的报文又把执行者推回 exit——恢复
+// 路径被拆成两条报文里的两步。故缺声明时把前置条件与它的命令写进**同一段「恢复:」**（编排在
+// evidenceRecoveryBlock），执行者按一条报文即可走完；已有声明时不加步骤。
+//
+// 判据与 record 前置门同形（<node>-*.json 任一在场即算已声明），但落点不同：state 命令族按状态入口
+// 初始化的运行上下文解析 .specs/，守卫进程没有该上下文，只能按 runRoot 解析——目录解析（活动路径优先、
+// 归档路径兜底）取状态族路径上下文模块（state-io）的同一实现 findSkillLoadsDir，不在此另写一份：本函数
+// 只提供「声明在不在场」这一个判据，路径规则归它。
+async function nodeSkillDeclared(nodeId, changeName) {
+  if (!nodeId || !changeName) return false;
+  const loadsDir = await findSkillLoadsDir(runRoot, changeName);
+  if (loadsDir === null) return false;
+  const prefix = nodeId + '-';
+  return (await fs.readdir(loadsDir.dir).catch(() => []))
+    .some((name) => name.startsWith(prefix) && name.endsWith('.json'));
+}
+
+// 声明时该填的技能名（不猜）：取协议为该节点声明的实现技能——与 entry 的 LOAD SKILL 行、next 的
+// SKILL 行同源；协议未声明实现技能时退到 requiredSkillCalls 的 main scope 条目（handoff scope 是
+// 子代理加载的技能，不是协调者该声明的那个）；两者皆无 → null，报文改为让执行者按 LOAD SKILL 行的
+// 技能名填写，不臆造一个名字。
+function declaredNodeSkill(node) {
+  const implementation = node.implementation;
+  const implementationSkill = implementation && typeof implementation === 'object' ? implementation.skill : null;
+  if (typeof implementationSkill === 'string' && implementationSkill.trim() !== '') return implementationSkill.trim();
+  const mainScoped = (node.requiredSkillCalls ?? [])
+    .find((binding) => binding && binding.scope !== 'handoff'
+      && typeof binding.skill === 'string' && binding.skill !== '');
+  return mainScoped ? mainScoped.skill : null;
+}
+
+// 可照抄命令的协议上下文（单一实现）：本次运行的协议**不是内置默认**时，打印的命令必须自带
+// --protocol——状态命令族只走 --protocol CLI → FLOW_COMET_PROTOCOL → 内置默认，三种来源里没有
+// state 绑定这一项。命令不携带协议上下文时，照抄执行会按同一套优先级重新解析，自定义协议的节点在
+// 那份协议里不存在，恢复路径断在第一步（报文给了命令，命令却跑不进同一个协议）。
+// 判据只看「本次实际解析到的协议是不是内置默认」（guard-state-io 的单一来源）：来源是 CLI / env /
+// state 一视同仁——三种来源都可能指向自定义协议，缺的正是命令自己的上下文；内置默认时照抄不加
+// 参数也解析到同一份，加它只是噪音。参数值取持久化形态（state-schema 的 toPersistedProtocolPath：
+// 项目内 → 根相对 POSIX，随项目迁移；根外 → 绝对），与 init 写进 state.protocolPath 的形态同源；
+// 引号随参数词给出——脚本路径与整条命令仍只由 scriptCommand 产出。
+function protocolContextArgs() {
+  if (protocolPath === null) return [];
+  const builtin = path.resolve(packageRoot, 'reference', 'workflow-protocol.json');
+  if (path.resolve(protocolPath) === builtin) return [];
+  return ['--protocol', '"' + toPersistedProtocolPath(runRoot, protocolPath) + '"'];
+}
+
+// 前置声明命令：参数段取 templateDeclareCommand（模板与协议提示词是同一次声明的两面——漏任一面，
+// record 的模板声明核对或 exit 的协议声明校验会把执行者再拦一次；重跑 skill-load 会覆写同一标记），
+// 只把它的脚本名换成 scriptCommand 的路径形态：路径与引号仍只有这一处实现，本模块不拼第二份命令。
+function skillLoadCommand(node, skillName, protocolArgs = []) {
+  const declareWords = templateDeclareCommand(nodeTemplateDeclaration(node), { nodeId: node.id, skillName })
+    .split(' ').filter((word) => word !== '');
+  return scriptCommand({
+    scriptsDir,
+    runRoot,
+    script: 'workflow-state.mjs',
+    args: [...declareWords.slice(1), ...protocolArgs],
+  });
+}
+
+// 「补证据」恢复段（单一实现）：两个门禁点打印同一段——缺 Output Schema 字段
+// （runEvidenceCompletionGate）与完全没有证据对象（guard-gates 的 requireNodeEvidence）。两处说的
+// 是同一件事（节点已完成、证据不在），各自拼一份必然分叉：一条带协议上下文与前置声明步骤、另一条
+// 只剩 record，照抄的人在半路撞上 record 自己的声明门，还要回头去另一条报文里找第二步的命令。
+//
+// 形态只由「本节点技能声明在不在场」决定，与哪道门命中无关：
+//   · 声明已在场 → 一步：record 补证据；
+//   · 缺声明     → 两步，按**执行顺序**（第一步声明技能加载、第二步 record）——record 有自己的前置
+//                  门，照抄它之前必须先声明；步骤标注跟着各自的命令走（从上往下抄一遍就通）。
+// lead 是**本门禁**对「它看到缺了什么」的点名（不同的门看到的缺项不同，恢复段的其余部分不随之分叉）；
+// 命令文本、参数段、尾部重试提示与步骤编排都只在这里产出（返回值 = 该段按序打印的各行）。
+// 异步只为读声明标记：两个调用点都在可 await 的位置（缺证据门在出口链上，调用位随之声明 async）。
+export async function evidenceRecoveryBlock({ node, state, lead = null }) {
+  const protocolArgs = protocolContextArgs();
+  const recordCommand = scriptCommand({
+    scriptsDir,
+    runRoot,
+    script: 'workflow-state.mjs',
+    args: ['record', node.id, `'{"summary":"<本节点完成摘要>"}'`, ...protocolArgs],
+  });
+  const retryTail = ' 后重试 exit（bash / PowerShell 可直接执行；cmd.exe 请把单引号换成双引号，'
+    + '并转义载荷里原有的双引号）';
+  const leadPrefix = lead === null ? '' : lead + '——';
+  if (!state.activeChange || (await nodeSkillDeclared(node.id, state.activeChange))) {
+    return lead === null
+      ? ['恢复: ' + recordCommand + retryTail]
+      : ['恢复: ' + leadPrefix + '照抄下面的命令补齐它后重试 exit：', '      ' + recordCommand + retryTail];
+  }
+  // 声明时该填的技能名不猜（取协议为该节点声明的实现技能，与 LOAD SKILL 行同源）；取不到就让人按
+  // LOAD SKILL 行填写，不臆造一个名字。前置声明命令本身取 skillLoadCommand（同一次声明的模板 +
+  // 提示词两面），与 record 同一份协议参数段。
+  const skillName = declaredNodeSkill(node);
+  return [
+    '恢复: ' + leadPrefix + '本节点还缺技能加载声明（.skill-loads/' + node.id + '-*.json，'
+      + '新 change 下 record 会先被它拦下）'
+      + (lead === null ? '——按下面的顺序走完两步后重试 exit：' : '；按下面的顺序走完两步后重试 exit：'),
+    '      第一步 声明本节点技能加载'
+      + (skillName === null ? '（技能名按 entry 的 LOAD SKILL 行填，下面用 <skill> 占位）：' : '：'),
+    '      ' + skillLoadCommand(node, skillName, protocolArgs),
+    '      第二步 补证据并重试 exit：',
+    '      ' + recordCommand + retryTail,
+  ];
+}
+
 // 自动补 required-skill completedChecks——节点被完成即视为其实现 skill 已加载。分派（ui-design 门）：
 // 仅「guarded 且适用性判据成立（判前端）」的登记绑定在**新 change** 上停止自动补——该绑定须真实
 // skill-load 声明，由后续 missingRequiredSkillChecks 拦截；判据不成立（非前端）、旧 change（渐进
@@ -712,6 +759,10 @@ export async function runEvidenceCompletionGate({ protocol, node, state, evidenc
   const missingSchemaEvidence = missingRequiredSchemaEvidence(protocol, node, evidence);
   if (missingSchemaEvidence.length > 0) {
     console.error('BLOCKED: missing Output Schema evidence: ' + missingSchemaEvidence.join(', '));
+    // 阻塞消息给可照抄的下一步：record 只写 summary 即视为产出证据（与判据同一口径），照抄执行后同一
+    // exit 即可通过——不再让执行者从字段清单反推该跑什么命令。恢复段取单一实现（guard-gates 的前置
+    // 门打印同一段）：缺声明时两步、声明在场时一步，两处同形（顺序、命令、协议上下文都同源）。
+    console.error((await evidenceRecoveryBlock({ node, state })).join('\n'));
     process.exit(1);
   }
 }

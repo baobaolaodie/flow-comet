@@ -7,6 +7,9 @@ import path from 'path';
 import { validateStateFields, writeJsonAtomic, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME } from '../state-schema.mjs';
 import { inspectWorkflowPathSegments } from '../protocol-utils.mjs';
 import { isSingleSegmentChangeName } from '../route-node.mjs';
+// 归档目录名的日期前缀判据（<YYYY-MM-DD>-<change-id>）由 time-utils 单源表达：本模块只取「日期
+// 前缀」这一事实再精确比对整名，不在路径规则里内联第二份日期正则。
+import { archiveDateFromName } from '../time-utils.mjs';
 
 let runtimeContext = null;
 
@@ -144,4 +147,53 @@ export async function inspectReentryChangeDir(changeName) {
   if (!inspection.exists) return { ok: false, reason: 'change-dir-missing' };
   if (!(await hasExactSpecsEntry(changeName))) return { ok: false, reason: 'change-name-invalid' };
   return { ok: true, changeDir };
+}
+
+// 归档目录名是否本 change 的归档目录：`<YYYY-MM-DD>-<change-id>` 精确形态，不做后缀匹配。
+// 别的 change 的归档目录也可能以 `-<本 change>` 结尾（如 other-<本 change>），后缀匹配会把**别的
+// change 的目录**认作本 change 的：声明标记门据此拿别人的声明替本 change 作证、归档提名据此数别人的
+// SUMMARY 份数、守卫据此把本 change 判成「已归档」而跳过真实跑验证命令。日期形态取 time-utils 的单源
+// 判定，本处只把整名与日期前缀拼回去做精确比对。
+//
+// 三个消费面（声明标记目录解析、守卫的「是否已归档」、归档提名的 SUMMARY 份数）都走这一条判据：
+// 归档目录名是「哪个 change 的」这一事实只有一种说法，各写一份必然在「后缀算不算数」上分叉。
+export function isArchivedChangeDirName(entry, changeName) {
+  if (typeof entry !== 'string' || typeof changeName !== 'string' || changeName === '') return false;
+  const archiveDate = archiveDateFromName(entry);
+  return archiveDate !== null && entry === archiveDate + '-' + changeName;
+}
+
+// 声明标记目录解析（活动路径 .specs/<change-id>/.skill-loads/ 优先；归档路径兜底——archive 节点
+// 「先移目录后 record/exit」顺序下 change 目录已在 .specs/archive/<日期>-<change-id>/，标记只随目录
+// 移动：只查活动路径会把「标记存在」误判成「机制未激活」）。归档目录按整名精确比对——协议声明的
+// archive/*-<change-id> 是产物 glob，目录名约定才是 <日期>-<change-id>（判据见
+// isArchivedChangeDirName）。两者皆无 → null，调用方按旧 change 兼容跳过。
+//
+// includeArchive 是这条规则唯一的形态开关，缺省 true（兜底归档）。入口侧（workflow-guard 的
+// checkPromptDeclarations）传 false：入口核对的是**这一轮**写下的声明，归档里的声明属于归档前的
+// 执行者——拿它替当前节点作证会把「这一轮没声明」判成「声明过」，错路径的声明因此漏过。这个差异
+// 是有意的，所以给它一个名字，而不是让调用方另拼一份路径。
+//
+// 落点在本模块（.specs 路径上下文）：它是一条 change 目录的定位规则，不是某一族的判定——状态命令族与
+// 守卫族消费的是同一条规则，各写一份必然在「活动目录是否回溯归档」「多归档目录取哪个」上分叉。
+// 运行根是显式参数：两族各注入自己的根（状态族 runRootDir()、守卫族 runRoot），规则因此不绑定任何
+// 一族的运行上下文（守卫进程没有 initStateContext 建立的上下文）。依赖方向也由此确定：守卫侧取用本
+// 模块是允许的 guard → state-* 单向边；反向（状态族 import 守卫族）会让状态 CLI 为一条路径规则加载
+// 整个守卫图。
+export async function findSkillLoadsDir(root, changeName, { includeArchive = true } = {}) {
+  const activeDir = path.join(root, '.specs', changeName, '.skill-loads');
+  if (await fileExists(activeDir)) {
+    return { dir: activeDir, display: '.specs/' + changeName + '/.skill-loads/' };
+  }
+  if (!includeArchive) return null;
+  const archiveRoot = path.join(root, '.specs', 'archive');
+  const entries = await fs.readdir(archiveRoot).catch(() => []);
+  for (const entry of entries) {
+    if (!isArchivedChangeDirName(entry, changeName)) continue;
+    const candidate = path.join(archiveRoot, entry, '.skill-loads');
+    if (await fileExists(candidate)) {
+      return { dir: candidate, display: '.specs/archive/' + entry + '/.skill-loads/' };
+    }
+  }
+  return null;
 }

@@ -19,13 +19,13 @@ import {
 } from '../lib/test-helpers.mjs';
 import {
   CHANGE_ID,
+  REPO_ROOT,
   SCRIPTS_DIR,
   TASK_DONE,
   TASK_DONE_TWO,
   TASK_P1,
   customProtocolWithSkillCall,
   handoffFor,
-  isAuthoritativeSourceRepo,
   summaryContent,
   writeCustomProtocol,
   writeIntakeArtifacts,
@@ -38,8 +38,368 @@ import {
   scenarioProtocolPath,
 } from '../lib/test-assertions.mjs';
 import {
+  PUBLIC_FACE_DOCS_DIR,
+  PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE,
+  authoritativeSourceAt,
   countSyncProblems,
+  publicFaceDocsAbsent,
 } from '../lib/text-anchor-checks.mjs';
+
+// ---------- 公开面的机器状态字段名口径 + 命令锚（机检；判据与反向构造共用本实现） ----------
+// 规则：公开说明面不直写机器状态字段名——引擎在状态文件里拥有的键要么改述为行为描述，要么放进
+// **明确标注**的状态输出示例围栏块（白名单）。判据是「键名黑名单 + 示例块白名单」而非精确句锁：
+// 改述措辞可以自由演化，键名不能重新走私进正文。routeNode 属公开输出契约名，不在黑名单内。
+// 受检面不手抄：从 docs/authority-map.json（公开文档权威与姊妹文档的唯一声明处）取 authority/twin
+// 两侧，再并上根目录文档与 docs/examples 的目录扫描——新增公开文档只要登记进映射、或按惯例落在
+// 根目录，字段名扫描与命令锚两处判据同时覆盖，不会出现「加进一个清单、漏掉另一个」的静默窄化。
+// 两类结构性排除（都不是行为描述面）：① 变更日志——按时间的历史记录，条目引用当时发布的措辞与
+// 当时的机器字段名；② 根目录的代理指令文件——本地工作说明，不面向用户、不随包分发。
+const PUBLIC_FACE_AUTHORITY_MAP = 'docs/authority-map.json';
+const PUBLIC_FACE_EXAMPLES_DIR = 'docs/examples';
+const PUBLIC_FACE_HISTORY_DOCS = ['CHANGELOG.md', 'CHANGELOG-zh.md'];
+const PUBLIC_FACE_AGENT_DOCS = ['AGENTS.md', 'CLAUDE.md'];
+// 示例块白名单的标记词：围栏 info string，或围栏之上紧邻的最后一行非空正文（标题 / 说明）写明
+// 这是状态输出示例——只有明说「这是示例数据」才放行，普通代码块不因此获得豁免。
+const PUBLIC_FACE_EXAMPLE_MARKERS = ['状态输出示例', 'state output example', 'status output example'];
+// 机器状态字段黑名单 = 引擎在状态文件里拥有、**绝不由人写**的键（state-schema 的机器自有字段）。
+// 名单不按「今天文档里写了什么」取，而按「状态文件里真的有什么」取：这些键一旦被公开面当成用户
+// 面契约直写，读者就会以为可以手改它们。新增机器字段时在这里登记，判据才跟着扩展。
+// 驼峰键名在英文 / 中文散文里都不会自然出现，故任何位置命中都算直写（不必依赖反引号）。
+const PUBLIC_FACE_STATE_FIELDS = [
+  'currentNode', 'stateCurrentNode',
+  'completedNodes', 'enteredNodes', 'directOverride', 'newChange',
+  // verifyFailures 用前缀匹配覆盖同族的 verifyFailuresByChange（见 fieldNameHitsOnLine）
+  'verifyFailures',
+];
+// evidence 另有散文形态（见 EVIDENCE_FIELD_FRAME_RE 与 fieldNameHitsOnLine 的放行规则）。
+// 结构预检命令的公开面锚：三份文档 × 中英都必须在案。新增公开命令不得没有锚——否则删掉或漏写
+// 其中任何一份，套件仍然全绿，公开面就真的丢了这条命令。这里只选主题名，路径仍从映射取——「哪份
+// 文档承载命令说明」因此也只在映射里声明一次。
+const PUBLIC_FACE_PREFLIGHT_TOPICS = ['behaviour', 'workflow', 'troubleshooting'];
+const PREFLIGHT_FLAG = '--preflight';
+
+function listMarkdownFiles(absDir, relDir) {
+  const out = [];
+  for (const entry of fs.readdirSync(absDir, { withFileTypes: true })) {
+    const rel = relDir + '/' + entry.name;
+    if (entry.isDirectory()) out.push(...listMarkdownFiles(path.join(absDir, entry.name), rel));
+    else if (entry.name.endsWith('.md')) out.push(rel);
+  }
+  return out;
+}
+
+// 形态判据（公开面能不能派生）：先问「这份检出有没有公开文档面」，再谈派生——npm 包按 package.json
+// 的 files 白名单只分发 .flow-comet/skills 与 rules，不含 docs/、CONTRIBUTING.md 与 .github/；安装
+// 副本同理。这种形态下「受检面无法派生」不是缺文件事故，而是载体的**正常形态**，说成「仓库缺文件」
+// 会把读者引到修复一个不存在的缺陷上。判据落点选**这三份公开面载体是否俱缺**，而不是权威映射文件
+// 在不在：只看 docs/ 不够——分支 / 稀疏检出 / 误删把 docs/ 整份拿掉时，「本载体不含公开面」变成假话，
+// 计数一致性 / 零代号 / 词表镜像会整块跳过；docs/ 在、映射缺 = 检出被裁坏，仍要在读取处显式失败
+// （判据强度不降——跳过通道只对「整份公开面不存在」开放）。
+// 形态判据与其跳过提示**从 lib 共用**（底部自检的公开面自检用同一对）：同一种形态在两处各判一次，
+// 两份实现迟早各说各话——一处把包形态说成「缺文件」、另一处说成「跳过」，正是本批修掉的误诊。
+// 判据落点与措辞只在 lib/text-anchor-checks.mjs 维护（PUBLIC_FACE_DOCS_DIR / publicFaceDocsAbsent /
+// PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE）。
+
+// 权威映射缺席或不可解析 = 受检面无从派生（不是「没有东西要查」）：显式失败，不静默退化。
+// root 可覆盖读取根（默认仓库根）——仅为可测性接缝：形态判据的探针要在夹具目录上验证「docs/ 在、
+// 映射缺仍显式失败」，生产调用不传。
+function readPublicFaceAuthorityMap(root = REPO_ROOT) {
+  const abs = path.join(root, ...PUBLIC_FACE_AUTHORITY_MAP.split('/'));
+  if (!fs.existsSync(abs)) {
+    throw new Error('受检面无法派生：' + PUBLIC_FACE_AUTHORITY_MAP
+      + ' 不在本检出（公开文档权威映射是受检面的唯一来源）');
+  }
+  const parsed = JSON.parse(fs.readFileSync(abs, 'utf8'));
+  if (!parsed || typeof parsed !== 'object' || !parsed.topics || typeof parsed.topics !== 'object') {
+    throw new Error('受检面无法派生：' + PUBLIC_FACE_AUTHORITY_MAP + ' 缺 topics 对象');
+  }
+  return parsed;
+}
+
+// 映射的每个主题 → [authority, twin]（twin 为 null 的主题只登记权威侧）。
+// 畸形或空主题一律抛错而不是跳过：跳过等于把该主题的文档静默移出受检面——字段名黑名单与命令锚
+// 都不再落到它们身上，而套件依然全绿。主题写坏是可判定的失配，就该是一次显式失败。
+function publicFaceTopicPairs(map) {
+  const pairs = new Map();
+  for (const [topic, spec] of Object.entries(map.topics)) {
+    if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {
+      throw new Error('受检面无法派生：' + PUBLIC_FACE_AUTHORITY_MAP + ' 的主题 ' + topic + ' 不是对象');
+    }
+    const pair = [spec.authority, spec.twin].filter((rel) => typeof rel === 'string' && rel.trim() !== '');
+    if (pair.length === 0) {
+      throw new Error('受检面无法派生：' + PUBLIC_FACE_AUTHORITY_MAP + ' 的主题 ' + topic
+        + ' 未登记任何文档路径（authority 与 twin 都为空）');
+    }
+    pairs.set(topic, pair);
+  }
+  return pairs;
+}
+
+// 受检文档集合 = 映射两侧 ∪ 根目录文档，再减去上面两类排除面。根目录扫描是必要的：按 GitHub 惯例
+// 放在根目录的公开文件里有整份未登记进映射的（CODE_OF_CONDUCT 及其双语版、SECURITY-zh.md），
+// 只靠映射会静默漏掉它们。
+function publicFaceDocPaths(map) {
+  const paths = new Set();
+  for (const pair of publicFaceTopicPairs(map).values()) for (const rel of pair) paths.add(rel);
+  for (const entry of fs.readdirSync(REPO_ROOT, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith('.md')) paths.add(entry.name);
+  }
+  for (const rel of [...PUBLIC_FACE_HISTORY_DOCS, ...PUBLIC_FACE_AGENT_DOCS]) paths.delete(rel);
+  return [...paths].sort();
+}
+
+// 命令锚所在的文档：按主题名从映射取（路径不在此手抄）。
+// 主题名取不到即抛错：空集会把锚的受检文档集清空，于是命令锚被整段删掉也不红——「新增公开命令
+// 不得无锚」这条判据要防的正是这种静默窄化，主题改名或写错必须显式失败。
+function publicFacePreflightDocs(map) {
+  const pairs = publicFaceTopicPairs(map);
+  const docs = [];
+  for (const topic of PUBLIC_FACE_PREFLIGHT_TOPICS) {
+    const pair = pairs.get(topic);
+    if (!pair) {
+      throw new Error('受检面无法派生：' + PUBLIC_FACE_AUTHORITY_MAP + ' 未登记主题 ' + topic
+        + '（命令锚文档按主题名派生；主题改名时须同步本判据，不得让锚随主题一起消失）');
+    }
+    docs.push(...pair);
+  }
+  return docs;
+}
+
+// 受检快照 { texts, preflightDocs }，文本按 Map 组织（rel → 文本或 null）：判据只读这一份快照，
+// 反向构造在副本上作业。
+function readPublicFaceTexts() {
+  const map = readPublicFaceAuthorityMap();
+  const texts = new Map();
+  for (const rel of publicFaceDocPaths(map)) {
+    const abs = path.join(REPO_ROOT, ...rel.split('/'));
+    texts.set(rel, fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : null);
+  }
+  const examplesRoot = path.join(REPO_ROOT, ...PUBLIC_FACE_EXAMPLES_DIR.split('/'));
+  if (!fs.existsSync(examplesRoot)) {
+    // 整面缺席显式报告：静默等于把「本检出没有示例面」当成「示例面已校验」。
+    texts.set(PUBLIC_FACE_EXAMPLES_DIR + '/**/*.md', null);
+  } else {
+    for (const rel of listMarkdownFiles(examplesRoot, PUBLIC_FACE_EXAMPLES_DIR)) {
+      texts.set(rel, fs.readFileSync(path.join(REPO_ROOT, ...rel.split('/')), 'utf8'));
+    }
+  }
+  return { texts, preflightDocs: publicFacePreflightDocs(map) };
+}
+
+function isStatusExampleMarker(line) {
+  const lowered = line.toLowerCase();
+  return PUBLIC_FACE_EXAMPLE_MARKERS.some((marker) => lowered.includes(marker.toLowerCase()));
+}
+
+// 报错要能直接照做：先点名键名与改述方向，再给出唯一的合法展示出口（标注为状态输出示例的
+// 围栏块）——否则作者只知道「不能写」，不知道「要展示时该怎么写」。
+function fieldNameViolation(where, fieldName) {
+  return where + ' 直写了机器状态字段名 ' + fieldName
+    + '（改述为行为描述；确需展示状态输出时，放进标注为「状态输出示例」的围栏块）';
+}
+
+// 「指名某个字段」的散文框：the `evidence` field / the evidence field / evidence 字段。**单数**才
+// 构成指名——复数的 "the evidence fields" 是集合描述（公开面本就有这类句子：the output schemas,
+// the gates, the commands, the evidence fields），不指名任何键。
+const EVIDENCE_FIELD_FRAME_RE = /(?<![A-Za-z0-9_$])`?evidence`?\s+(?:field|字段)(?![A-Za-z0-9_$])/;
+
+// 键名判据：驼峰键名任何位置命中都算直写（散文里不会自然出现，不必依赖反引号）；evidence 是普通
+// 英文名词与状态键同形，只在**被当成字段名写**时算违规：
+//   ① 独立成键名的反引号段 `evidence`；
+//   ② 指名它的散文框（EVIDENCE_FIELD_FRAME_RE，带不带反引号都命中）；
+//   ③ 裸属性后缀 `.evidence`（单独写成字段路径）。
+// 放行规则（两类都不是「行为描述面」，故不构成字段名直写）：
+//   ① **代码位置引用**：state.evidence 这类带宿主标识符的属性访问说的是「去哪看」，不是把键名写成
+//      文档契约——「裸 .evidence」与「X.evidence」由同一个连接式前后界区分，不另写键表；
+//   ② **围栏里的示例**：标注为状态输出示例的围栏块整块放行（既有白名单，双向探针在场景 105）。
+//      未标注的围栏块不因「它是代码」而豁免：把状态输出贴进普通代码块同样是直写。
+// 其余自然语言用法（"the evidence recorded for the node"、`evidence: [{ id, required }]` 这类
+// 协议字段说明）不命中任何一条。
+function fieldNameHitsOnLine(where, line) {
+  const out = [];
+  for (const name of PUBLIC_FACE_STATE_FIELDS) {
+    // verifyFailures 用前缀匹配：verifyFailuresByChange 是同一族的键，漏掉它等于留后门。
+    const matcher = name === 'verifyFailures'
+      ? /(?<![A-Za-z0-9_$])verifyFailures[A-Za-z0-9_]*/g
+      : new RegExp('(?<![A-Za-z0-9_$])' + name + '(?![A-Za-z0-9_$])', 'g');
+    for (const hit of line.matchAll(matcher)) out.push(fieldNameViolation(where, hit[0]));
+  }
+  for (const span of line.matchAll(/`([^`]*)`/g)) {
+    if (span[1].trim() === 'evidence') out.push(fieldNameViolation(where, 'evidence'));
+  }
+  if (EVIDENCE_FIELD_FRAME_RE.test(line)) out.push(fieldNameViolation(where, 'evidence'));
+  if (/(?<![A-Za-z0-9_$])\.evidence(?![A-Za-z0-9_$])/.test(line)) {
+    out.push(fieldNameViolation(where, 'evidence'));
+  }
+  return out;
+}
+
+// 逐行扫描：未标注的围栏块同样是正文（把状态输出贴进普通代码块不等于获得白名单）；标注为
+// 状态输出示例的围栏块整块放行。行内反引号段里的 evidence 是被当作键名书写，散文里的不是。
+function publicFaceFieldProblems(rel, text) {
+  const out = [];
+  const lines = text.split(/\r?\n/);
+  let fence = null;
+  let fenceIsExample = false;
+  let lastContentLine = '';
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const opening = /^\s{0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence === null && opening) {
+      fence = opening[1][0];
+      fenceIsExample = isStatusExampleMarker(opening[2]) || isStatusExampleMarker(lastContentLine);
+      continue;
+    }
+    if (fence !== null) {
+      if (new RegExp('^\\s{0,3}' + fence + '{3,}\\s*$').test(line)) {
+        fence = null;
+        fenceIsExample = false;
+      } else if (!fenceIsExample) {
+        out.push(...fieldNameHitsOnLine(rel + ':' + (i + 1), line));
+      }
+      continue;
+    }
+    if (line.trim() !== '') lastContentLine = line.trim();
+    out.push(...fieldNameHitsOnLine(rel + ':' + (i + 1), line));
+  }
+  return out;
+}
+
+function publicFaceMachineProblems({ texts, preflightDocs }) {
+  const out = [];
+  for (const [rel, text] of texts) {
+    if (typeof text !== 'string') out.push(rel + ' 缺失（公开面不在本检出）');
+  }
+  for (const [rel, text] of texts) {
+    if (typeof text === 'string') out.push(...publicFaceFieldProblems(rel, text));
+  }
+  for (const rel of preflightDocs) {
+    const text = texts.get(rel);
+    if (typeof text === 'string' && !text.includes(PREFLIGHT_FLAG)) {
+      out.push(rel + ' 缺「' + PREFLIGHT_FLAG + '」锚（结构预检命令须在三份公开面 × 中英在案）');
+    }
+  }
+  return out;
+}
+
+// ---------- 权威源设计形态锚（形态探测与上面同源：.flow-comet/ 技能树在场 = 权威源检出） ----------
+// 设计形态 = 权威源册子里写出的命令形态（.claude/skills/flow-comet/scripts/…，相对路径），安装时由
+// prepare-env 的 pathReplacements 按平台替换。锚的就是这个形态：安装副本按运行根推导同样是对的，但
+// 那是另一种载体下的正确形态——两种形态混进一条判据，就谁也锁不住（谁都能满足它）。
+const DESIGN_FORM_SCRIPTS_DIR = '.claude/skills/flow-comet/scripts';
+// 「本锚只在权威源检出运行」的判据必须看**正在跑的是哪套脚本**，而不是「仓库里有没有 .flow-comet/」——
+// 仓库里同时存在 .claude|.agents|.dsh 三份副本，跑副本套件时仓库根锚照样在场；只用根锚会把副本误判成权威源，
+// 让安装副本按运行根打印的（对副本而言正确的）路径被判成违规。
+const RUNS_FROM_AUTHORITATIVE_SCRIPTS = path.relative(REPO_ROOT, SCRIPTS_DIR).split(path.sep).join('/') === '.flow-comet/skills/flow-comet/scripts';
+
+// 恢复段的形态锚（只在权威源检出运行）。场景 34 的恢复命令断言已改成行为判据（存在 + basename
+// + 真执行），三种形态的路径都能满足——于是「权威源打印设计形态」失去锁：把 scriptCommand 改成恒打印
+// 绝对安装根，行为判据全绿，而权威源册子里的命令会开始写本机路径。本锚只读打印出来的那段恢复报文
+// （不拿 harness 的脚本路径替代），要求命令的脚本路径逐字等于设计形态。
+// 锁的是「段内有一条 record 命令 + 路径是设计形态 + 步骤按执行顺序」，不锁「record 紧贴『恢复:』」
+// 这种书写形态：措辞可以演化，能按顺序照抄走通才是判据——顺序反了，执行者从上往下第一步就撞门。
+function assertDesignFormRecoveryPath(dir) {
+  // 触发一条走 scriptCommand 的恢复指引：subagent-execute 有 handoff 结果、缺 summary → 出口按
+  // Output Schema evidence 阻塞。夹具是全新临时目录 ⇒ 本节点还没有技能加载声明标记 ⇒ 走「先声明、
+  // 再 record」的两步形态（声明已在场时的收敛形态由场景 34 覆盖）。
+  const st = baseState('subagent-execute');
+  st.evidence['subagent-execute'] = { handoffResult: handoffFor(['P01']) };
+  writeState(dir, st);
+  writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1);
+  const res = runGuardWithProtocol(dir, ['exit', 'subagent-execute']);
+  assertExit(res, 1);
+  assertOut(res, 'BLOCKED: missing Output Schema evidence');
+  // 本段 = 输出里最后一条恢复段（该段之后引擎直接退出）。
+  const start = res.output.lastIndexOf('恢复:');
+  const block = start < 0 ? '' : res.output.slice(start);
+  if (block === '') {
+    throw new Error('缺 Output Schema evidence 的阻塞没给恢复段（设计形态锚无从判定）:\n' + res.output);
+  }
+  // 两条命令（skill-load 自成一行可整行照抄；record 以「后重试 exit」收尾）：先声明技能加载，再 record。
+  const skillLoadLine = (block.match(/^\s*(node "[^"]+" skill-load [^\n]*)$/m) || [])[1];
+  const recordLine = (block.match(/(node "[^"]+" record [^\n]*) 后重试 exit/) || [])[1];
+  if (!skillLoadLine || !recordLine) {
+    throw new Error('恢复段应同时给出可照抄的 skill-load 与 record 命令'
+      + '（缺声明时照抄 record 会先被它自己的前置门拦下）:\n' + block);
+  }
+  // 顺序 = 执行顺序，且步骤标注跟着各自的命令走（不是只在段首提一句）。
+  const skillAt = block.indexOf(skillLoadLine);
+  const recordAt = block.indexOf(recordLine);
+  if (!(skillAt >= 0 && recordAt > skillAt)) {
+    throw new Error('恢复段应按执行顺序排列：skill-load（声明技能加载）在前、record（补证据）在后——'
+      + '顺序反了执行者照抄会先撞前置门:\n' + block);
+  }
+  if (!block.slice(0, skillAt).includes('第一步')) {
+    throw new Error('恢复段未把技能加载声明标为第一步:\n' + block);
+  }
+  if (!block.slice(skillAt + skillLoadLine.length, recordAt).includes('第二步')) {
+    throw new Error('恢复段未把 record 标为第二步:\n' + block);
+  }
+  // 路径逐字等于设计形态（两条命令都经 scriptCommand，路径与引号只有这一处实现）。
+  const expected = DESIGN_FORM_SCRIPTS_DIR + '/workflow-state.mjs';
+  for (const [label, printed] of [['skill-load', skillLoadLine], ['record', recordLine]]) {
+    const printedPath = (printed.match(/^node "([^"]+)"/) || [])[1];
+    if (printedPath !== expected) {
+      throw new Error('权威源检出打印的恢复段 ' + label + ' 命令脚本路径应为设计形态 ' + expected
+        + '（相对路径）——实际: ' + JSON.stringify(printedPath)
+        + '；安装副本按运行根推导属另一种载体的正确形态，不在本锚范围（本锚只在权威源检出运行）');
+    }
+  }
+}
+
+// ---------- 形态判据的判别力探针（同一实现驱动，在夹具目录上作业） ----------
+// 三条边界都要有：① 真包形态 / 安装副本形态（有技能树、公开面载体**三者俱缺**）跳过且**可见**，
+// 不判红；② docs/ 在场而权威映射缺失仍显式失败——跳过通道只对「整份公开面不存在」开放，不能顺手
+// 把真事故一起吞掉；③ docs/ 不在、但 CONTRIBUTING.md 或 .github/ 在场必须判红——它们同样不进 npm
+// tarball，任一在场就说明这是**被裁坏的仓库**，不是「本来不含公开面」的载体。
+function assertPublicFaceShapeProbes(dir) {
+  // 真包形态 = docs/、CONTRIBUTING.md、.github/ 三者都不在本检出（npm tarball 三者都不带）
+  if (!publicFaceDocsAbsent(dir)) {
+    throw new Error('形态探针前提失效：夹具目录不应预先含 ' + PUBLIC_FACE_DOCS_DIR
+      + '/、CONTRIBUTING.md 或 .github/（三者俱缺才是「不含公开面」的包形态）');
+  }
+  for (const phrase of ['此形态不含公开面', '不是仓库缺文件', '未校验']) {
+    if (!PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE.includes(phrase)) {
+      throw new Error('跳过提示缺「' + phrase + '」——跳过必须说明这是未校验、不是通过、也不是缺文件: '
+        + PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE);
+    }
+  }
+  // docs/ 在场 ⇒ 不属「不含公开文档」形态，判据不得据此跳过（否则真检出会被整面跳过）
+  fs.mkdirSync(path.join(dir, ...PUBLIC_FACE_DOCS_DIR.split('/')), { recursive: true });
+  if (publicFaceDocsAbsent(dir)) {
+    throw new Error('形态判据把含 ' + PUBLIC_FACE_DOCS_DIR + '/ 的检出也判成不含公开文档（真检出会被整面跳过）');
+  }
+  // docs/ 不在、其余公开面载体在场 ⇒ 仍不属包形态：分支 / 稀疏检出 / 误删会把 docs/ 整份拿掉，那时
+  // 「本载体不含公开面」是假话——计数一致性 / 公开产物零代号 / 词表镜像会整块变成可见 SKIP 并 exit 0。
+  // 两份载体分开造根：CONTRIBUTING.md 与 .github/ 各自单独在场都足以证明本检出是仓库（两者都不进
+  // npm tarball；README 不作判据——npm 会强制包含它，用它判断等于把包形态误判成「有公开面」的仓库）。
+  for (const carrier of ['CONTRIBUTING.md', '.github/workflows/ci.yml']) {
+    const partial = path.join(dir, 'partial-face-' + carrier.split('/')[0].replace(/\./g, ''));
+    fs.mkdirSync(partial, { recursive: true });
+    writeFile(partial, carrier, '');
+    if (publicFaceDocsAbsent(partial)) {
+      throw new Error('docs/ 不在但 ' + carrier + ' 在场仍被判成「不含公开面」的包形态——'
+        + '该形态下计数一致性 / 公开产物零代号 / 词表镜像会整块变成 SKIP 并 exit 0');
+    }
+  }
+  // docs/ 在场、权威映射缺 = 检出被裁坏 → 仍是读取处的显式失败（判据强度不因跳过通道下降）
+  let threw = null;
+  try {
+    readPublicFaceAuthorityMap(dir);
+  } catch (e) {
+    threw = e;
+  }
+  if (!threw || !String(threw.message).includes('受检面无法派生')) {
+    throw new Error('docs/ 在场但权威映射缺失时应显式失败，实际: ' + (threw ? threw.message : '未抛错'));
+  }
+  // 补上映射 ⇒ 读取处正常返回（证明上一条的失败来自「缺映射」而不是「读不到」）
+  writeFile(dir, PUBLIC_FACE_AUTHORITY_MAP,
+    JSON.stringify({ topics: { workflow: { authority: PUBLIC_FACE_EXAMPLES_DIR + '/README.md' } } }, null, 2) + '\n');
+  const parsed = readPublicFaceAuthorityMap(dir);
+  if (!parsed.topics || !parsed.topics.workflow) {
+    throw new Error('权威映射在场时读取处应返回 topics（探针前提失效）: ' + JSON.stringify(parsed));
+  }
+}
 
 export const ENTRIES = [
 
@@ -270,16 +630,121 @@ export const ENTRIES = [
     },
   },
 
-  // 105: 计数一致性自检同步（AC-8 / AC-14）——组文件里的场景数或系统测试集项数变更时，
-  // 受检文件须同步（场景数：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n 变体；
-  // 项数：n/n / n items / n 项 变体）。本场景读取权威源仓库的受检文件断言含当前计数变体——
-  // 文档漏同步或条目缺失（幽灵条目）即 RED；与底部自检共用同一实现（countSyncProblems），
-  // 两处判据不会漂移。安装副本无文档面，跳过。
+  // 105: 计数一致性自检同步（AC-8 / AC-14）+ 公开面机器字段名黑名单 + 结构预检命令锚 + 权威源设计
+  // 形态锚（in-place 扩展，不新增场景）——组文件里的场景数或系统测试集项数变更时，受检文件须同步
+  // （场景数：ALL n SCENARIOS PASSED / n scenarios / n 场景 / n/n 变体；项数：n/n / n items / n 项
+  // 变体）。本场景读取权威源仓库的受检文件断言含当前计数变体——文档漏同步或条目缺失（幽灵条目）即
+  // RED；与底部自检共用同一实现（countSyncProblems），两处判据不会漂移。
+  // 公开面口径：用户阅读面不得直写机器状态字段名（黑名单），被明确标注为状态输出示例的围栏块
+  // 放行；机制 / 用法 / 排障三份文档 × 中英都必须出现 `--preflight`（新增公开命令不得无锚）。
+  // 判别力由反向构造证明：注入键名、抽掉命令锚 ⇒ 必报；标注示例块放行、撤掉标注 ⇒ 再报。
+  // 形态分派（只按载体形态判，不猜）：安装副本（无 .flow-comet/ 技能树）与分发包（技能树在、docs/ +
+  // CONTRIBUTING.md + .github/ 三者俱缺）都没有公开文档面——跳过且**可见**（SKIP = 未校验，不是通过）；
+  // 只有权威源检出才跑公开面判据与设计形态锚。形态边界由 assertPublicFaceShapeProbes 自己钉住。
   {
-    name: '105 计数一致性自检同步：受检文件含当前场景数与系统测试集项数变体（AC-8 / AC-14）',
-    run: async () => {
-      if (!isAuthoritativeSourceRepo()) return; // 安装副本无 flow-comet 文档
-      const problems = await countSyncProblems();
+    name: '105 计数一致性自检同步 + 公开面机器字段名黑名单 + --preflight 锚 + 权威源设计形态锚（AC-8 / AC-14）',
+    run: async (dir) => {
+      // 权威源判定走 lib 的同一份探针（authoritativeSourceAt：与真实检出同一技能树锚，可带受检根）——
+      // 本场景不再自持一份前置判定，形态问题只有一处说了算。
+      if (!authoritativeSourceAt()) {
+        // 安装副本：无公开文档面，也无「权威源打印设计形态」这回事——跳过必须可见。
+        console.log('SKIP: 公开面与设计形态判据（安装副本检出：本检出无 .flow-comet/skills/flow-comet/SKILL.md）'
+          + '——本次未校验公开面键名黑名单 / 命令锚，也未校验恢复命令的脚本路径是否为权威源设计形态'
+          + '（SKIP = 未校验，不是通过）');
+        return;
+      }
+      // 形态判据自己的判别力（纯夹具，先于任何派生）
+      assertPublicFaceShapeProbes(dir);
+      // 设计形态锚：只读打印出来的恢复段，要求命令的脚本路径逐字为设计形态、步骤按执行顺序。仅在
+      // **正在跑权威源脚本**时适用；
+      // 跑安装副本套件时，副本按运行根推导出的路径才是那种载体的正确形态，不属于本锚范围——跳过必须可见。
+      if (RUNS_FROM_AUTHORITATIVE_SCRIPTS) {
+        assertDesignFormRecoveryPath(dir);
+      } else {
+        console.log('SKIP: 权威源设计形态锚（当前运行的是安装副本脚本：' + path.relative(REPO_ROOT, SCRIPTS_DIR)
+          + '）——安装副本按运行根推导路径属另一种载体的正确形态，本锚只在权威源脚本下适用（SKIP = 未校验，不是通过）');
+      }
+      // 分发包形态（npm 包 / 安装副本）：公开面载体三者俱缺（docs/ + CONTRIBUTING.md + .github/）⇒
+      // 公开面无从派生，也就无从检查。跳过的就是**公开面这一整块**（含计数同步——它数的文件同样不随
+      // 包分发）；计数面在底部自检里另有一次独立执行，不会因这条跳过而整体失踪。判据本体在 lib
+      // （publicFaceDocsAbsent）：只按 docs/ 在不在分流，会把「docs/ 被裁掉、其余公开面还在」的检出
+      // 一并放过——那正是整块判据静默失效的形态。
+      if (publicFaceDocsAbsent(REPO_ROOT)) {
+        console.log(PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE);
+        return;
+      }
+      const problems = [...await countSyncProblems()];
+      const publicFace = readPublicFaceTexts();
+      problems.push(...publicFaceMachineProblems(publicFace));
+      // 反向构造（同一判据驱动）：探针在快照副本上作业，真实断言与探针调用同一个函数。
+      const mutated = (rel, mutate) => {
+        const text = publicFace.texts.get(rel);
+        if (typeof text !== 'string') return null; // 缺失已由真实判据报告，避免探针掩盖真实原因
+        const next = mutate(text);
+        return next === text ? null : { ...publicFace, texts: new Map(publicFace.texts).set(rel, next) };
+      };
+      // 受检面来自派生（映射 + 根目录扫描）：按 GitHub 惯例放在根目录的公开文件若被漏在受检面之外，
+      // 就没有注入点——这里直接判红，不让探针静默跳过。探针必须是**只有根目录扫描能贡献**的文件：
+      // 映射已登记的路径（SECURITY.md 就由 security 主题提供）在根目录扫描缺席时仍在面内，取它做
+      // 探针等于空断言，所以在选型处就对这条前提本身设防。
+      const ROOT_FACE_PROBE = 'CODE_OF_CONDUCT.md';
+      const mappedFacePaths = new Set([...publicFaceTopicPairs(readPublicFaceAuthorityMap()).values()].flat());
+      if (mappedFacePaths.has(ROOT_FACE_PROBE)) {
+        throw new Error('根目录探针失去判别力（' + ROOT_FACE_PROBE + ' 已由权威映射提供，'
+          + '根目录扫描缺席时它仍在受检面内）');
+      }
+      if (!publicFace.texts.has(ROOT_FACE_PROBE)) {
+        throw new Error('受检面漏了根目录公开文档（' + ROOT_FACE_PROBE + ' 未纳入派生的受检面）');
+      }
+      const probes = [
+        ['注入机器字段名（用法册）', mutated('docs/USAGE.md', (text) => text + '\n`currentNode`\n'), '直写了机器状态字段名'],
+        ['注入 evidence 键名（机制册）', mutated('docs/MECHANISM.md', (text) => text + '\n`evidence`\n'), '直写了机器状态字段名 evidence'],
+        // 散文形态（不带反引号）：字段名不写反引号同样是把它当成用户面契约——这是黑名单原先的盲区
+        ['注入 evidence 散文名（机制册，不带反引号）',
+          mutated('docs/MECHANISM.md', (text) => text + '\nthe evidence field is written by record\n'),
+          '直写了机器状态字段名 evidence'],
+        ['注入 evidence 散文名（机制册，带反引号）',
+          mutated('docs/MECHANISM.md', (text) => text + '\nthe `evidence` field is written by record\n'),
+          '直写了机器状态字段名 evidence'],
+        ['注入字段族键名（机制册）', mutated('docs/MECHANISM.md', (text) => text + '\n`verifyFailuresByChange`\n'), '直写了机器状态字段名 verifyFailuresByChange'],
+        ['抽掉命令锚（排障册中文）', mutated('docs/TROUBLESHOOTING-zh.md', (text) => text.split('--preflight').join('')), '缺「--preflight」'],
+        ['注入机器字段名（根目录公开文档）', mutated(ROOT_FACE_PROBE, (text) => text + '\n`currentNode`\n'), '直写了机器状态字段名'],
+      ];
+      for (const [label, texts, expected] of probes) {
+        if (texts === null) continue;
+        if (!publicFaceMachineProblems(texts).some((p) => p.includes(expected))) {
+          throw new Error('反向构造判别力缺失（' + label + ' 未被判违规）');
+        }
+      }
+      // 允许段白名单双向判别：同一段键名，标注为状态输出示例时放行，撤掉标注后必须报。
+      const exampleBlock = (heading) => '\n' + heading + '\n\n```json\n{ "currentNode": "review" }\n```\n';
+      const allowed = mutated('docs/MECHANISM.md', (text) => text + exampleBlock('### 状态输出示例'));
+      if (allowed && publicFaceMachineProblems(allowed).some((p) => p.includes('docs/MECHANISM.md') && p.includes('直写了机器状态字段名'))) {
+        throw new Error('允许段白名单失效（标注为状态输出示例的围栏块内键名被误判违规）');
+      }
+      const unmarked = mutated('docs/MECHANISM.md', (text) => text + exampleBlock('### 输出草稿'));
+      if (unmarked && !publicFaceMachineProblems(unmarked).some((p) => p.includes('docs/MECHANISM.md') && p.includes('直写了机器状态字段名'))) {
+        throw new Error('允许段白名单判别力缺失（未标注为状态输出示例的围栏块内键名未被判违规）');
+      }
+      // 黑名单扩容的判别力逐名验：加进数组不算数，每个名字都要真的命中——漏登记的键照样能走私进来。
+      const WIDENED_KEYS = ['completedNodes', 'enteredNodes', 'directOverride', 'newChange'];
+      const widened = mutated('docs/MECHANISM.md',
+        (text) => text + '\n' + WIDENED_KEYS.map((name) => '`' + name + '`').join(' ') + '\n');
+      for (const name of WIDENED_KEYS) {
+        if (widened && !publicFaceMachineProblems(widened)
+          .some((p) => p.includes('直写了机器状态字段名 ' + name))) {
+          throw new Error('机器字段黑名单漏了 ' + name + '（注入后未被判违规）');
+        }
+      }
+      // 放行规则的反向判别：黑名单扩容最容易砸到的既有句子——代码位置引用（state.evidence）与普通
+      // 英文名词用法（the evidence recorded for the node）都必须放行，否则判据只能靠改文档来变绿。
+      const released = mutated('docs/MECHANISM.md', (text) => text
+        + '\n位置引用：恢复记录写在 state.evidence 下。\n'
+        + '\nThe evidence recorded for the node is what the exit reads.\n');
+      if (released && publicFaceMachineProblems(released)
+        .some((p) => p.includes('docs/MECHANISM.md') && p.includes('直写了机器状态字段名'))) {
+        throw new Error('放行规则失效（state.evidence 位置引用 / 普通英文 evidence 被误判为字段名直写）');
+      }
       if (problems.length > 0) {
         throw new Error(problems.join('; '));
       }
@@ -296,6 +761,10 @@ export const ENTRIES = [
       const st = baseState('review');
       st.evidence.review = { summary: 'review done' };
       writeState(dir, st);
+      // ②④ 共用：本夹具下允许出现的 REVIEW WARN 类别由调用方逐条枚举，**枚举外的行一律算失败**——
+      // 逐条 assertNotOut 只挡得住被点名的那一类，夹具上再冒出一类无关告警时不会红（判别力退化）。
+      const reviewWarnsOutside = (res, allowed) => String(res.output || '').split(/\r?\n/)
+        .filter((line) => line.includes('REVIEW WARN') && !allowed.some((marker) => line.includes(marker)));
       // ① 发现区 Minor 条目无处置标记 → REVIEW WARN + 通过（渐进不阻断）
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
         '# REVIEW\n\n## 发现\n\n### Critical\n\n无\n\n### Major\n\n无\n\n### Minor\n\n- **m-1 · 示例发现**：描述（未处置）\n\n## 结论\n\n通过\n');
@@ -303,12 +772,16 @@ export const ENTRIES = [
       assertExit(res, 0);
       assertOut(res, 'REVIEW WARN');
       assertOut(res, 'ALL CHECKS PASSED');
-      // ② 同一条目带 [转待办] 处置标记 → 无 REVIEW WARN
+      // ② 同一条目带 [转待办] 处置标记 → 不再报「缺处置状态标记」（该条已有处置去向；Minor 延期
+      // 另受裁决/判据门槛约束，旧 change 只 WARN 不阻断）
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
         '# REVIEW\n\n## 发现\n\n### Critical\n\n无\n\n### Major\n\n无\n\n### Minor\n\n- **m-1 · 示例发现**：描述 [转待办]\n\n## 结论\n\n通过\n');
       const res2 = runGuard(['exit', 'review'], dir);
       assertExit(res2, 0);
-      assertNotOut(res2, 'REVIEW WARN');
+      // [转待办] 另触发延期裁决与 Minor 判据两道门——这两类之外不得出现任何 REVIEW WARN
+      // （含「缺处置状态标记」：该条已有处置去向，误报即本场景的回归）。
+      const outside2 = reviewWarnsOutside(res2, ['缺少用户裁决记录', '缺 `判 Minor：` 行']);
+      assertTrue(outside2.length === 0, '② 出现枚举外的 REVIEW WARN（未知告警类别）:\n' + outside2.join('\n'));
       assertOut(res2, 'ALL CHECKS PASSED');
       // ③ 有序条目（1. **...**）与无序同口径——缺处置标记 → 旧 change 仍渐进 REVIEW WARN
       // （修复前 .filter((item) => !item.ordered) 使有序条目静默通过 = RED）
@@ -318,12 +791,14 @@ export const ENTRIES = [
       assertExit(resOrdered, 0);
       assertOut(resOrdered, 'REVIEW WARN');
       assertNotOut(resOrdered, 'BLOCKED');
-      // ④ 有序 Minor 带 [转待办] → 无该渐进告警（有序条目接入校验不误报已处置项）
+      // ④ 有序 Minor 带 [转待办] → 无「缺处置状态标记」告警（有序条目接入校验不误报已处置项）
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
         '# REVIEW\n\n## 发现\n\n1. **m-3 · 有序小项**：某处小问题，已登记下一 change 跟踪处置 [转待办]\n\n## 结论\n\n通过\n');
       const resOrderedOk = runGuard(['exit', 'review'], dir);
       assertExit(resOrderedOk, 0);
-      assertNotOut(resOrderedOk, 'REVIEW WARN');
+      // 有序条目未标严重度 → 只允许延期待裁决一类告警（Minor 判据门对未标严重度的条目不适用）。
+      const outsideOrdered = reviewWarnsOutside(resOrderedOk, ['缺少用户裁决记录']);
+      assertTrue(outsideOrdered.length === 0, '④ 出现枚举外的 REVIEW WARN（未知告警类别）:\n' + outsideOrdered.join('\n'));
       assertOut(resOrderedOk, 'ALL CHECKS PASSED');
     },
   },
@@ -425,7 +900,7 @@ export const ENTRIES = [
 
   // 110: execute 出口越权委托检测——TASK 有 parallel done 任务 + completedNodes
   // 无 subagent-execute + 非 direct 模式 → WARN 渐进（[P] 任务应由 subagent-execute 节点委托,
-  // execute 阶段完成 [P] 是越权委托痕迹——上轮真实流程实证的越权委托）;completedNodes 含
+  // execute 阶段完成 [P] 是越权委托痕迹）;completedNodes 含
   // subagent-execute 或 direct 模式 → 无越权 WARN
   {
     name: '110 execute exit：parallel done 无 subagent-execute → WARN 越权委托',
@@ -485,7 +960,7 @@ export const ENTRIES = [
 
   // 112: 节点顺序 BLOCK 消息含恢复指引——next 的「疑似未 exit」BLOCK 与
   // exit 的「currentNode 不匹配」BLOCK 均提示恢复通道（advance 强制推进/select 切换/
-  // exit --apply）——防 resume 自锁（上轮真实项目端到端验证观察：机器推导节点无脚本恢复通道）
+  // exit --apply）——防 resume 自锁（机器推导出的节点没有脚本恢复通道）
   {
     name: '112 节点顺序 BLOCK 消息含恢复指引',
     run: (dir) => {
@@ -778,8 +1253,8 @@ export const ENTRIES = [
     },
   },
 
-  // 123: M8——init 在无提交(空)仓库时输出提示且跳过分支创建(行为一致:
-  // 修复前 WARN"无法创建分支"后仍 checkout -b 实际创建——声称与行为矛盾)
+  // 123: init 在无提交(空)仓库时输出提示且跳过分支创建——提示与行为必须一致：
+  // 警告之后仍 checkout -b 实际创建分支，就是声称与行为矛盾
   {
     name: '123 init 空仓库提示：无提交仓库的分支创建边界（M8）',
     run: (dir) => {
@@ -818,10 +1293,12 @@ export const ENTRIES = [
   },
 
   // 125: R1——新 change(newChange:true)review 处置标记缺失 → BLOCKED(旧 change WARN 保留)；
-  // 并内扩 Major 延期待裁决门禁三态+一反例：无用户裁决 BLOCK / 同段或文末裁决（由 [升级]
-  // 承接）放行 / Minor [转待办] 不受影响 / 有裁决但缺 [升级] 承接仍 BLOCK。
+  // 并内扩延期裁决门禁（覆盖任何严重度，含 Minor）：无用户裁决 BLOCK / 同段或其它段落裁决（由
+  // [升级] 承接）放行 / 有裁决但缺 [升级] 承接仍 BLOCK；Minor 另须在条目块内自证判据
+  // 「判 Minor：<一句话理由>」——判据落在**判定当时**，与处置标记无关（[已修]/[升级]/[转待办]
+  // 一律要；缺则改判 Major，默认 Major）。
   {
-    name: '125 review exit BLOCKED：新 change 处置标记缺失 + Major 延期待裁决（R1）',
+    name: '125 review exit BLOCKED：新 change 处置标记缺失 + 延期待裁决（R1）',
     run: (dir) => {
       const st = baseState('review');
       st.evidence.review = { summary: 'reviewed' };
@@ -862,11 +1339,81 @@ export const ENTRIES = [
       assertExit(resAdjudicated, 0);
       assertOut(resAdjudicated, 'ALL CHECKS PASSED');
       assertNotOut(resAdjudicated, '用户裁决');
-      // 子断言:Minor [转待办] 不受影响 → 放行
-      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-1 · 小项**：某处小问题 [转待办]\n\n## 结论\n\n通过\n');
+      // 子断言:Minor [转待办] 与 Major 同口径——无用户裁决记录 → BLOCKED(报文点名条目 + 给出
+      // 裁决记录形态；修复前 Minor 可自行延期直接放行 = RED)
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-1 · 小项**：某处小问题 [转待办]\n  判 Minor：仅影响日志措辞，不改变行为与接口\n\n## 结论\n\n通过\n');
       const resMinor = runGuard(['exit', 'review'], dir);
-      assertExit(resMinor, 0);
-      assertOut(resMinor, 'ALL CHECKS PASSED');
+      assertExit(resMinor, 1);
+      assertOut(resMinor, 'BLOCKED');
+      assertOut(resMinor, 'm-1 · 小项');
+      assertOut(resMinor, '用户裁决：接受延期');
+      // 子断言:同一条目补上裁决记录（指向该条目 + [升级] 承接）→ 放行
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-1 · 小项**：某处小问题 [升级] [转待办]\n  判 Minor：仅影响日志措辞，不改变行为与接口\n\n- 用户裁决：接受延期 —— 发现 m-1：下一 change 首修。\n\n## 结论\n\n通过\n');
+      const resMinorAdjudicated = runGuard(['exit', 'review'], dir);
+      assertExit(resMinorAdjudicated, 0);
+      assertOut(resMinorAdjudicated, 'ALL CHECKS PASSED');
+      assertNotOut(resMinorAdjudicated, 'BLOCKED');
+      // 子断言:Minor 条目缺判定理由「判 Minor：<理由>」→ BLOCKED(报文点名条目 + 给出形态)；
+      // 补上判据后放行(裁决记录仍在，缺的只是 Minor 判据本身)
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-5 · 缺判据的小项**：某处小问题 [升级] [转待办]\n\n- 用户裁决：接受延期 —— 发现 m-5：下一 change 首修。\n\n## 结论\n\n通过\n');
+      const resMinorNoReason = runGuard(['exit', 'review'], dir);
+      assertExit(resMinorNoReason, 1);
+      assertOut(resMinorNoReason, 'BLOCKED');
+      assertOut(resMinorNoReason, 'm-5 · 缺判据的小项');
+      assertOut(resMinorNoReason, '判 Minor：');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-5 · 缺判据的小项**：某处小问题 [升级] [转待办]\n  判 Minor：只影响内部诊断输出\n\n- 用户裁决：接受延期 —— 发现 m-5：下一 change 首修。\n\n## 结论\n\n通过\n');
+      const resMinorReasonOk = runGuard(['exit', 'review'], dir);
+      assertExit(resMinorReasonOk, 0);
+      assertOut(resMinorReasonOk, 'ALL CHECKS PASSED');
+      // 子断言(R2 判定时门禁)：判为 Minor 就要在**判定当时**自证判据，与处置标记无关——[已修]
+      // 的 Minor 缺「判 Minor：」行 → BLOCKED（修复前只查 [转待办]，[已修]/[升级] 的 Minor 直接
+      // 放行 = RED）；报文点名条目 + 严重度 + 缺行 + 正确形态 + 「改判 Major」兜底。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-9 · 已修但缺判据的小项**：某处小问题 [已修]\n\n## 结论\n\n通过\n');
+      const resMinorFixed = runGuard(['exit', 'review'], dir);
+      assertExit(resMinorFixed, 1);
+      assertOut(resMinorFixed, 'BLOCKED');
+      assertOut(resMinorFixed, 'm-9 · 已修但缺判据的小项');
+      assertOut(resMinorFixed, '（Minor）');
+      assertOut(resMinorFixed, '缺 `判 Minor：` 行');
+      assertOut(resMinorFixed, '改判 Major');
+      // 补上判据行 → 放行（[已修] 不是「没有 Minor 判定」的理由）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-9 · 已修但缺判据的小项**：某处小问题 [已修]\n  判 Minor：仅影响日志措辞，不改变行为与接口\n\n## 结论\n\n通过\n');
+      const resMinorFixedOk = runGuard(['exit', 'review'], dir);
+      assertExit(resMinorFixedOk, 0);
+      assertOut(resMinorFixedOk, 'ALL CHECKS PASSED');
+      // [升级] 的 Minor 同形态：缺判据 → BLOCKED；补上 → 放行
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-10 · 升级但缺判据的小项**：某处小问题 [升级]\n\n## 结论\n\n通过\n');
+      const resMinorEscalated = runGuard(['exit', 'review'], dir);
+      assertExit(resMinorEscalated, 1);
+      assertOut(resMinorEscalated, 'BLOCKED');
+      assertOut(resMinorEscalated, 'm-10 · 升级但缺判据的小项');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-10 · 升级但缺判据的小项**：某处小问题 [升级]\n  判 Minor：只涉及命名一致性\n\n## 结论\n\n通过\n');
+      const resMinorEscalatedOk = runGuard(['exit', 'review'], dir);
+      assertExit(resMinorEscalatedOk, 0);
+      assertOut(resMinorEscalatedOk, 'ALL CHECKS PASSED');
+      // 既有 [转待办] 不回归：R2 扩面不取代 R1——只补判据、无裁决 → 仍 BLOCKED（裁决门独立，
+      // 判据门不再报）；补裁决 + [升级] 承接后才放行（双重约束各自在场）。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-11 · 延期缺判据的小项**：某处小问题 [转待办]\n\n## 结论\n\n通过\n');
+      const resMinorDeferredNoReason = runGuard(['exit', 'review'], dir);
+      assertExit(resMinorDeferredNoReason, 1);
+      assertOut(resMinorDeferredNoReason, '用户裁决');
+      assertOut(resMinorDeferredNoReason, '判 Minor：');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-11 · 延期缺判据的小项**：某处小问题 [转待办]\n  判 Minor：仅影响内部日志\n\n## 结论\n\n通过\n');
+      const resMinorDeferredReasonOnly = runGuard(['exit', 'review'], dir);
+      assertExit(resMinorDeferredReasonOnly, 1);
+      assertOut(resMinorDeferredReasonOnly, '用户裁决');
+      assertNotOut(resMinorDeferredReasonOnly, '判 Minor：');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-11 · 延期缺判据的小项**：某处小问题 [升级] [转待办]\n  判 Minor：仅影响内部日志\n\n- 用户裁决：接受延期 —— 发现 m-11：下一 change 首修。\n\n## 结论\n\n通过\n');
+      const resMinorDeferredOk = runGuard(['exit', 'review'], dir);
+      assertExit(resMinorDeferredOk, 0);
+      assertOut(resMinorDeferredOk, 'ALL CHECKS PASSED');
+      // 子断言(R2 覆盖边界)：Major 的任何处置都不受判据门影响——[已修] / [升级] 均不要求
+      // 「判 Minor：」行（[转待办] + 用户裁决的 Major 由上面的 F2 覆盖）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **F11 · 已修的大项**：某处问题 [已修]\n- **F12 · 升级的大项**：另一处问题 [升级]\n\n## 结论\n\n通过\n');
+      const resMajorDisposed = runGuard(['exit', 'review'], dir);
+      assertExit(resMajorDisposed, 0);
+      assertOut(resMajorDisposed, 'ALL CHECKS PASSED');
+      assertNotOut(resMajorDisposed, '判 Minor：');
       // 子断言:文末用户裁决 + 指向该条目 + [升级] 承接 → 放行
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **F3 · 文末裁决的延期**：某处问题 [升级] [转待办]\n\n## 用户裁决\n\n- 用户裁决：接受延期 —— 发现 F3（文末裁决的延期）：下一 change 首修。\n\n## 结论\n\n通过\n');
       const resTail = runGuard(['exit', 'review'], dir);
@@ -884,13 +1431,19 @@ export const ENTRIES = [
       assertOut(resNoEscalation, 'BLOCKED');
       assertOut(resNoEscalation, 'Major');
       assertOut(resNoEscalation, '用户裁决');
-      // 子断言:Minor 条目正文引用 [Major] 标签字样（自身 [转待办]）→ 放行——严重度/处置
-      // 以条目自身标题/行首为准，不做整块标签扫描（修复前误判 Major 并触发延期门禁 = RED）
+      // 子断言:条目正文引用 [Major] 标签字样（自身 [转待办]）→ 严重度以条目自身标题/行首为准，
+      // 正文标签不改变本条判定（报文按「未标严重度」点名，不因正文出现 [Major] 就升格为 Major）；
+      // 补上裁决记录后放行——延期门禁对任何严重度生效，处置由裁决记录承接
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n- **m-2 · 引用 Major 的小项**：本条与 [Major] F1 项不同，是独立问题 [转待办]\n\n## 结论\n\n通过\n');
       const resCited = runGuard(['exit', 'review'], dir);
-      assertExit(resCited, 0);
-      assertOut(resCited, 'ALL CHECKS PASSED');
-      assertNotOut(resCited, 'BLOCKED');
+      assertExit(resCited, 1);
+      assertOut(resCited, '未标严重度');
+      assertNotOut(resCited, '（Major）');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n- **m-2 · 引用 Major 的小项**：本条与 [Major] F1 项不同，是独立问题 [升级] [转待办]\n\n- 用户裁决：接受延期 —— 发现 m-2：下一 change 首修。\n\n## 结论\n\n通过\n');
+      const resCitedOk = runGuard(['exit', 'review'], dir);
+      assertExit(resCitedOk, 0);
+      assertOut(resCitedOk, 'ALL CHECKS PASSED');
+      assertNotOut(resCitedOk, 'BLOCKED');
       // 子断言:Major 条目自身处置为 [已修]，续行正文引用他条 [转待办] → 放行——
       // 延期门禁只看该条目自身标题/行首的处置标记，不做整块扫描
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **[Major] F9 · 已修项引用他条**：某处问题 [已修]\n  （续行仅引用他条的处置去向 [转待办]，非本条处置）\n\n## 结论\n\n通过\n');
@@ -921,7 +1474,7 @@ export const ENTRIES = [
         '# REVIEW\n\n## 发现\n\n### Major\n\n'
         + '- **F10 · 中段裁决的延期**：某处问题 [升级] [转待办]\n\n'
         + '- 用户裁决：接受延期 —— 发现 F10（中段裁决的延期）：下一 change 首修。\n\n'
-        + '### Minor\n\n- **m-4 · 小项**：另一个独立问题 [已修]\n\n## 结论\n\n通过\n');
+        + '### Minor\n\n- **m-4 · 小项**：另一个独立问题 [已修]\n  判 Minor：仅措辞问题\n\n## 结论\n\n通过\n');
       const resMidParagraph = runGuard(['exit', 'review'], dir);
       assertExit(resMidParagraph, 0);
       assertOut(resMidParagraph, 'ALL CHECKS PASSED');
@@ -1044,7 +1597,10 @@ export const ENTRIES = [
       assertExit(resWrongNode, 1);
       assertOut(resWrongNode, 'BLOCKED: 任务 P-M02（并行 pending）应归属节点 subagent-execute');
       assertOut(resWrongNode, 'workflow-state next');
-      assertOut(resWrongNode, 'entry subagent-execute');
+      // 同样改为断言顺序句本身——「先对当前节点 record + exit」+「未 exit 前不得 entry」。
+      // 旧的裸 'entry subagent-execute' 会同时命中禁止句里的目标节点名，无法区分两种语义。
+      assertOut(resWrongNode, '先对当前节点 execute record + exit');
+      assertOut(resWrongNode, '不要在未 exit 前 entry 目标节点');
       assertOut(resWrongNode, '本次请求未写入 state');
       if (fs.readFileSync(reqStatePath, 'utf8') !== beforeReqBytes) {
         throw new Error('M-02 BLOCK 必须 state 字节零改写');
@@ -1150,10 +1706,11 @@ export const ENTRIES = [
     },
   },
 
-  // 131: R1 旧兼容——旧 change(无 newChange)处置标记缺失仍 WARN；并内扩 Major 延期待裁决
-  // 门禁旧 change 渐进面：无用户裁决 → WARN 不 BLOCK（不卡死旧 REVIEW）；有裁决+[升级] → 放行。
+  // 131: R1 旧兼容——旧 change(无 newChange)处置标记缺失仍 WARN；并内扩延期裁决门禁（含 Minor）
+  // 的旧 change 渐进面：无用户裁决 / Minor 缺判据 → 只 WARN 不 BLOCK（不卡死旧 REVIEW）；有裁决
+  // +[升级] → 放行。Minor 判据门（R2）扩到 [已修]/[升级] 后旧 change 同一渐进口径。
   {
-    name: '131 review exit 兼容：旧 change 处置标记缺失仍 WARN + Major 延期渐进（R1 旧兼容）',
+    name: '131 review exit 兼容：旧 change 处置标记缺失仍 WARN + 延期渐进（R1 旧兼容）',
     run: (dir) => {
       const st = baseState('review');
       st.evidence.review = { summary: 'reviewed' };
@@ -1183,6 +1740,31 @@ export const ENTRIES = [
       assertOut(resOrderedMajor, 'REVIEW WARN');
       assertOut(resOrderedMajor, '用户裁决');
       assertNotOut(resOrderedMajor, 'BLOCKED');
+      // 子断言:Minor [转待办] 无用户裁决 → 旧 change 同样只 WARN 不 BLOCK（延期门禁覆盖任何
+      // 严重度，旧 REVIEW 渐进提示、不卡死既有 change）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-6 · 旧 change 未裁决的小项**：某处小问题 [转待办]\n\n## 结论\n\n通过\n');
+      const resMinorDeferred = runGuard(['exit', 'review'], dir);
+      assertExit(resMinorDeferred, 0);
+      assertOut(resMinorDeferred, 'REVIEW WARN');
+      assertOut(resMinorDeferred, 'm-6 · 旧 change 未裁决的小项');
+      assertOut(resMinorDeferred, '用户裁决');
+      assertNotOut(resMinorDeferred, 'BLOCKED');
+      // 子断言:Minor [转待办] + 裁决记录但缺「判 Minor：」判据 → 旧 change 只 WARN 不 BLOCK
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-7 · 旧 change 缺判据的小项**：某处小问题 [升级] [转待办]\n\n- 用户裁决：接受延期 —— 发现 m-7：下一 change 首修。\n\n## 结论\n\n通过\n');
+      const resMinorNoReason = runGuard(['exit', 'review'], dir);
+      assertExit(resMinorNoReason, 0);
+      assertOut(resMinorNoReason, 'REVIEW WARN');
+      assertOut(resMinorNoReason, '判 Minor：');
+      assertNotOut(resMinorNoReason, 'BLOCKED');
+      // 子断言(R2 判定时门禁的旧 change 渐进面)：[已修] 的 Minor 缺判据同样只 WARN 不 BLOCK
+      // ——不卡死既有 REVIEW，与 [转待办] 形态同一渐进口径（新 change 见 125）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-8 · 旧 change 已修缺判据的小项**：某处小问题 [已修]\n\n## 结论\n\n通过\n');
+      const resMinorFixedNoReason = runGuard(['exit', 'review'], dir);
+      assertExit(resMinorFixedNoReason, 0);
+      assertOut(resMinorFixedNoReason, 'REVIEW WARN');
+      assertOut(resMinorFixedNoReason, 'm-8 · 旧 change 已修缺判据的小项');
+      assertOut(resMinorFixedNoReason, '判 Minor：');
+      assertNotOut(resMinorFixedNoReason, 'BLOCKED');
     },
   },
 

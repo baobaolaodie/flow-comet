@@ -32,6 +32,8 @@
 
 **`BLOCKED: … 的模板声明与节点映射不一致`** —— `--templates` 清单与该节点的模板不一致。报文会点名漏写或多写/错名的项，并给出可直接照抄的重新声明命令：`open` 写 `CHANGE.md,REQUIREMENT.md`，`design` 写 `DESIGN.md`（前端 change 再加 `UI-DESIGN.md`），`plan` 写 `TASK.md`，`execute` / `subagent-execute` 写 `SUMMARY.md`，`review` 写 `REVIEW.md,TEST.md`；`verify` 与 `archive` 没有模板，省略该参数。在本规则之前创建的 change 只告警不拒绝。
 
+**`record` 拒绝证据载荷并点名字段与类型** —— 载荷在写入前先校验形状：`summary` 必须是非空字符串，`completedChecks` 必须是字符串数组，`lessonsNomination` 必须是对象且其 `nominated` 是字符串数组、`reasonIfNone` 是字符串。报文的每一行形如 `字段路径: 必须是什么（当前是什么类型）`，例如 `completedChecks[0]: 必须是字符串（当前是 object）`；状态保持原样不被改写，把载荷改对即可重试。引号被 shell 吞掉时，把同一份 JSON 写进文件用 `--json-file <路径>` 传入；在 `cmd.exe` 里用双引号包住载荷，并转义载荷内原有的双引号。
+
 **`BLOCKED: … 模板结构校验失败`** —— 工件的标题形态、首部字段、段集合或段序、空正文、照抄模板占位符里有一项不合模板。报文分两阶段：**首次只给模板路径与类别计数**（例如「缺段 3 项」），对照 `flow-kit/templates/<DOC>.md` 补齐；**同一工件再次失败时才列段名**——这份记账在 `.specs/<change>/.template-hints.json`，工件通过后自动清除。条件段保留标题、正文写 `N/A` 即可；父段整段 `N/A` 时其结构子段不要求；模板之外自加的段不参与校验。
 
 **出口打印「未校验（模板缺失）」** —— 项目根没有 `flow-kit/templates/<DOC>.md`，这份工件的模板派生段形判据整体跳过——**未校验不等于通过**。按安装页的指引取回 flow-kit 模板后重试；若同一行说的是登记表缺失，那是技能包缺 `reference/artifact-templates.json`，重装技能包即可。`UAT.md` 与归档的遗留清单没有上游模板，永远不进这条校验：只要求存在性。
@@ -53,6 +55,10 @@
 **`BLOCKED: SUMMARY 使用 builtin-quickcheck 未声明…（新 change 强制）`** —— 新 change 声明走内置快查时，必须同时写明审查引擎为什么不可用、以及替读了什么——点名插件缓存、缓存协议文件或它们的路径。缺任一半都会拒绝出口；规则生效前创建的 change 只告警。
 
 **`BLOCKED: SUMMARY 的 6 维自查未声明使用 /brooks-review`** —— 该声明在**自查段内**按字面匹配：写成 `# Brooks-Lint Review` 这样的标题不会被读成方法名，且只在自检方法段写理由不满足这项校验。请在自查段本身写出 `brooks-review`（或 `cache-brooks`）。
+
+**出口说 SUMMARY 缺结构子段，可该段正文明明写了 N/A** —— 不适用标记必须出现在正文开头。把正文改成以 `N/A` 开头（后面可以跟一句理由），不要在前面加说明文字，也不要把标记包在句子里；粗体、引用、列表、括号与反引号包裹的标记都认可。报文还会指出误挂的子段实际挂在哪个父段下，并说明真正不适用时该怎么写。
+
+**`next` 一直指着我刚干完活的那个节点** —— 已进入、但还没退出的节点仍占着路由。先 `record` 再 `exit <节点>`；`status` 的 `ROUTE` 行与 `next` 的 `WHY` 行会说明它为什么停在那里。想知道某个任务的 SUMMARY 还差什么，就运行结构预检 `exit <节点> --preflight`：它只读、只查文档结构，既不写状态也不写提示账本，所以缺 H2 段只报计数；结构子段与「该挂在哪个父段下」的写法建议会点名到具体段。要看被计数的那些段名，请等节点收尾的完整 `exit`（它维护那份账本），或直接按模板逐段对照。
 
 ### 平台
 

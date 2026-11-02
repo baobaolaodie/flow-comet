@@ -12,6 +12,9 @@ import { taskOpeningAttrs } from '../task-parsing.mjs';
 import { resolveNextNode, normalizeHeading, FIX_SECTION_TITLE_FALLBACK } from '../route-node.mjs';
 import { runRoot, fileExists, workflowRelativeSegments } from './guard-state-io.mjs';
 import { SUMMARY_REQUIRED_SECTIONS, buildSkeleton } from './guard-artifact-skeleton.mjs';
+// 归档目录名「是不是本 change 的」判据单源在状态族的路径上下文模块（guard → state-* 是允许的
+// 单向边）：本模块只消费，不在这里另写一份后缀/日期匹配。
+import { isArchivedChangeDirName } from './state-io.mjs';
 
 // 新旧 change 区分——init 写入的 newChange: true = 新 change（严格，不依赖 entry——防系统性
 // 跳 entry 绕过）；缺失/非 true（旧 change）= 渐进 WARN 兼容。
@@ -247,57 +250,86 @@ export async function workflowArtifactRoot(pathBase) {
   throw new Error('产物根 pathBase "' + pathBase + '" 不再支持——请改用 specs-root/project + 完整路径（如 project + openspec/changes/xxx.md）');
 }
 
-export async function missingRequiredArtifacts(protocol, node, change) {
+// 声明工件的存在性判据——**唯一的枚举处**：本节点 outputSchemas 引用的 schema → artifacts 中
+// required 的那些，逐条解析路径并判定在场。出口的产物门禁（missingRequiredArtifacts）与结构预检
+// （guard-gates 的缺件报告）都只消费本函数；任何一处再自行遍历 outputSchemas 就是第二份实现，
+// 判据演进时必然分叉（重构前就已分叉：预检只判 file 类、未声明 paths 直接跳过，出口侧两项都不是）。
+//
+// 返回结构数组（每条 = 一份声明的必需产物）：
+//   { schemaId, artifact, resolvedPaths, present, kind, unspecifiedPaths }
+//   resolvedPaths    —— 已替换 <change-id> 的声明路径；同一 artifact 的 paths 是互斥备选（任一路径
+//                       在场即在场，与节点完成判定同语义）；
+//   present          —— 在场判定结果（pathPatternExists 任一命中）；
+//   kind             —— 声明的产物类别（未声明为 undefined）；
+//   unspecifiedPaths —— 声明不完整（required 但未声明 paths）：没有路径可查，present 恒为 false。
+//
+// 两侧的差异不抹平、也不在这里偷偷归一，而是留给**调用点显式**决定（调用点各写一行并注明理由）：
+//   ① kind：预检只判 kind 为 file（未声明按文件处置）的产物——其它 kind 的「在场」语义不是文件
+//      存在性；出口不判 kind（目录类产物同样按路径存在性校验）。
+//   ② 未声明 paths：报成**声明不完整**而不是「缺件」的普通一例——没有路径就没有可判的存在性，也没有
+//      可创建的落点，报文必须指向协议本身要修，而不是让人去做一件做不到的事。两侧都阻断、且渲染
+//      **同一句**（unspecifiedPathsNotice）；区别只在编排：出口把它列进缺件清单，预检给它单列一段
+//      （不给「按上述路径创建」的指令）。
+//   ③ 归档产出（.specs/archive/ 下）：只在预检侧延后报告，出口照常校验——那是归档做完后的判据。
+// 本函数只做 ①②③ 都不涉及的那部分：枚举 + <change-id> 替换 + 在场判定。
+
+// 「声明不完整」的同一句报文：两侧消费方都渲染这一句，措辞只此一处（不各写一份）。
+export function unspecifiedPathsNotice(schemaId, artifactId) {
+  return '协议声明不完整：' + schemaId + '.' + artifactId
+    + ' 标记为 required 但未声明 paths —— 修协议（给它加一条路径），或在模板里改 required=false';
+}
+
+export async function declaredRequiredArtifacts(protocol, node, change) {
   const schemas = schemaMap(protocol);
-  const missing = [];
+  const declared = [];
   for (const schemaId of node.outputSchemas ?? []) {
     const schema = schemas.get(schemaId);
     for (const artifact of schema?.artifacts ?? []) {
       if (!artifact.required) continue;
-      const exists = (
-        await Promise.all(
-          (artifact.paths ?? []).map(async (artifactPath) => {
-            // 替换 <change-id> 占位符为实际 change（如 name-format-unify）
-            const resolvedPath = change ? artifactPath.replaceAll('<change-id>', change) : artifactPath;
-            return pathPatternExists(await workflowArtifactRoot(artifact.pathBase), resolvedPath);
-          }),
-        )
-      ).some(Boolean);
-      if (!exists) missing.push(schemaId + '.' + artifact.id);
+      const declaredPaths = artifact.paths ?? [];
+      const unspecifiedPaths = declaredPaths.length === 0;
+      // <change-id> 替换：无活跃 change 时保留占位符原文（出口侧既有语义；预检侧在无 change 时更早
+      // 已退出，两侧因此共用这一条替换口径，不再各自写一份 replaceAll）。
+      const resolvedPaths = declaredPaths.map((declaredPath) => (change
+        ? String(declaredPath).replaceAll('<change-id>', change)
+        : String(declaredPath)));
+      // 未声明路径时不解析产物根：没有路径就没有可查的存在性，「pathBase 非法」也不该由一件无路径的
+      // 产物引爆。present 保持 false——声明不完整不是「在场」，两侧据此阻断（差异②）。
+      let present = false;
+      if (!unspecifiedPaths) {
+        const artifactRoot = await workflowArtifactRoot(artifact.pathBase);
+        present = (await Promise.all(
+          resolvedPaths.map((declaredPath) => pathPatternExists(artifactRoot, declaredPath)),
+        )).some(Boolean);
+      }
+      declared.push({ schemaId, artifact, resolvedPaths, present, kind: artifact.kind, unspecifiedPaths });
     }
   }
-  return missing;
+  return declared;
 }
 
-// 历史归档 change 不强制真实跑验证命令（判断 .specs/archive/ 目录）
+// 出口侧的必需产物缺件清单（产物门禁与漂移容错的容错判据共用）：取 declaredRequiredArtifacts 里
+// 不在场者。本侧**不做**预检的 kind 过滤（①，见上式注释）——出口是完成判据：声明了却不在场就是
+// 缺件，无论 kind 是不是 file。声明不完整者（②）同样进这份清单、同样阻断，但报的是可执行的那一句
+// （指向协议），而不是一个空路径——与预检侧同一句、同一处措辞。
+export async function missingRequiredArtifacts(protocol, node, change) {
+  return (await declaredRequiredArtifacts(protocol, node, change))
+    .filter((declared) => !declared.present)
+    .map((declared) => (declared.unspecifiedPaths
+      ? unspecifiedPathsNotice(declared.schemaId, declared.artifact.id)
+      : declared.schemaId + '.' + declared.artifact.id));
+}
+
+// 历史归档 change 不强制真实跑验证命令（判断 .specs/archive/ 目录）。归档目录名按
+// <日期>-<change-id> 精确形态比对（判据单源在 state-io）：后缀匹配会把「名字恰好以本 change id
+// 结尾」的别的 change 认作本 change 已归档，守卫于是**跳过真实跑验证命令的要求**——这是放行口，
+// 不是显示问题。无日期前缀、名字逐字等于 change-id 的旧布局仍认（两处精确比对，都不做后缀）。
 export async function isArchivedChange(changeName) {
   if (!changeName) return false;
   const archiveRoot = path.join(runRoot, '.specs', 'archive');
   if (await fileExists(path.join(archiveRoot, changeName))) return true;
   const entries = await fs.readdir(archiveRoot).catch(() => []);
-  return entries.some(e => e === changeName || e.endsWith('-' + changeName));
-}
-
-// 声明标记目录解析——活动路径 .specs/<change-id>/.skill-loads/ 优先；归档路径兜底（archive 节点
-// 「先移目录后 record/exit」顺序下 change 目录已在 .specs/archive/<前缀>-<change-id>/，标记只随
-// 目录移动——只查活动路径会把「标记存在」误判成「机制未激活」）。归档扫描匹配后缀 -<change-id>
-// （前缀可含日期等，与协议 flowkit.archive.v1 的 archive/*-<change-id> 同构）。两者皆无 → null
-// （声明机制从未激活，调用方按旧 change 兼容跳过）。
-export async function findSkillLoadsDir(root, changeName) {
-  const activeDir = path.join(root, '.specs', changeName, '.skill-loads');
-  if (await fileExists(activeDir)) {
-    return { dir: activeDir, display: '.specs/' + changeName + '/.skill-loads/' };
-  }
-  const archiveRoot = path.join(root, '.specs', 'archive');
-  const entries = await fs.readdir(archiveRoot).catch(() => []);
-  for (const entry of entries) {
-    if (!entry.endsWith('-' + changeName)) continue;
-    const candidate = path.join(archiveRoot, entry, '.skill-loads');
-    if (await fileExists(candidate)) {
-      return { dir: candidate, display: '.specs/archive/' + entry + '/.skill-loads/' };
-    }
-  }
-  return null;
+  return entries.some((entry) => entry === changeName || isArchivedChangeDirName(entry, changeName));
 }
 
 // 段名校验基准从模板自动派生——骨架计算统一委托 lib/guard-artifact-skeleton.mjs（单一实现：读

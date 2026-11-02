@@ -45,9 +45,6 @@ export const REPO_ROOT = path.resolve(SCRIPTS_DIR, '..', '..', '..', '..');
 // 其 .flow-comet/ 只是运行时目录，无 skills/flow-comet/SKILL.md）——与安装器自身判定同判据
 // （prepare-env.mjs 的 gitignore 纳管跳过分支）。
 export const AUTHORITATIVE_SOURCE_ANCHOR = path.join(REPO_ROOT, '.flow-comet', 'skills', 'flow-comet', 'SKILL.md');
-export function isAuthoritativeSourceRepo() {
-  return fs.existsSync(AUTHORITATIVE_SOURCE_ANCHOR);
-}
 // 权威源仓库脚本位于仓库根 scripts/prepare-env.mjs；安装副本无此脚本,场景跳过
 export const PREPARE_ENV = path.join(REPO_ROOT, 'scripts', 'prepare-env.mjs');
 // 内置协议源文件（packageRoot/reference/）：场景复制到 <tmpdir>/reference/ 内（protected-path 要求 runRoot 内）

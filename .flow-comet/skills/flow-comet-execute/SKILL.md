@@ -38,6 +38,24 @@ guard 校验见 workflow-guard.mjs 的 execute 出口门禁（必填段 + 6 维�
 
 执行模式由 `node .claude/skills/flow-comet/scripts/workflow-state.mjs status` 输出（`executionMode` / `directOverride`）决定，切换用 `node .claude/skills/flow-comet/scripts/workflow-state.mjs execution-mode <subagent|direct>`。direct 是逃生口，必须用户显式调用才生效。
 
+### 节点视图三字段（currentNode / stateCurrentNode / routeNode）
+
+`status` 与 `next` 读的是同一份节点视图，但三个字段各说一件事，不能互相替代：
+
+- **currentNode** = **产物推导**的节点（按 `.specs/<change-id>/` 的工件推导出「按文件看现在在哪」；语义逐字未变）；
+- **stateCurrentNode** = **state 文件原值**（`.flow-comet/flow-comet-state.json` 里 `currentNode` 的原样读数，由 entry / exit / advance / reenter 写入；语义逐字未变）；
+- **routeNode** = **路由视图**（经「进行中保护」/ Fix 受控归位后的节点；常规路径下等于 `next` 的 `NODE:` 行，决定你现在该推进哪个节点）。
+
+三者不一致不是 bug，而是同一事实的三个视角：`ROUTE:` 行给出 `derived=… state=… route=…` 的对账（derived = 产物推导、state = state 原值、route = 路由视图）与下一步动作。**Fix 批次以 `FIX-BATCH` 行与 `next` 的 `NODE` 为准**——归位目标就是你要先跑出口的节点；预检与出口都跑在那个节点上，不要按 `stateCurrentNode` 或 `currentNode` 自行改道。
+
+**Node view: the three fields (currentNode / stateCurrentNode / routeNode)** — `status` and `next` read the same node view, but the three fields say three different things and cannot substitute for each other:
+
+- **currentNode** = artifact-derived (the node derived from the artifacts under `.specs/<change-id>/`, i.e. "where the files say we are"; semantics unchanged);
+- **stateCurrentNode** = the raw state-file value (the `currentNode` read verbatim from `.flow-comet/flow-comet-state.json`, written by entry / exit / advance / reenter; semantics unchanged);
+- **routeNode** = the routing view (after in-progress protection / controlled Fix-batch rollback; on the regular path it equals the `NODE:` line printed by `next` and decides which node you should advance now).
+
+A mismatch is not a bug but the same fact seen from three angles: the `ROUTE:` line gives the `derived=… state=… route=…` reconciliation (derived = artifact derivation, state = raw state value, route = routing view) plus the next action. **For a Fix batch, trust the `FIX-BATCH` line and the `NODE` printed by `next`** — the rollback target is the node whose exit you must run first; run preflight and exit on that node instead of rerouting by `stateCurrentNode` or `currentNode`.
+
 ### 任务范围
 
 execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pending 任务**。
@@ -80,7 +98,7 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 
 要点（五要素 + 并行波次附加两条）：
 
-1. **`git add -- <自己字面路径>`** + **`git commit -- <同一路径>`**：逐条字面路径（取自本任务 `write_files`），两步路径集逐字一致——提交只含自己的文件；禁用 `.` / `-A` / `-u` 等宽泛形态。
+1. **`git add -- <自己字面路径>`** + **`git commit -m "<消息>" -- <同一路径>`**：逐条字面路径（取自本任务 `write_files`），两步路径集逐字一致——提交只含自己的文件；消息（含尾注）写在 `--` **之前**，写成 `-m` 在 `--` 之后会被当成 pathspec；禁用 `.` / `-A` / `-u` 等宽泛形态。
 2. **锁失败重试**：并发提交撞 `index.lock` / `cannot lock ref` ⇒ **失败即重试**，不得因锁失败改用宽泛命令。
 3. **禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`**：并发写者共享**同一个索引与工作树**——宽泛命令有**并发索引竞态**（把同伴半成品纳入自己的提交），`stash` / `clean` / `reset` 更会破坏同伴的未提交工作。
 4. **并行波次禁用 `git commit --amend`**：共享工作区下 HEAD 会被并行写者推进；确需修正必须**先断言 `git rev-parse HEAD` 等于自己刚提交的哈希**，否则一律改用**新提交追加**。
@@ -113,13 +131,18 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 对 TASK.md 每个 pending 串行任务，协调者执行：
 
 1. **读 task 块，构造 handoff request**：读 `<task>` XML 块（`action` / `read_files` / `write_files` / `verify` / `done`）。若内容有歧义，停下询问——不要猜。构造 handoff request 内容：task 全文 + DESIGN §0/§0.5 + AC + read/write_files 边界。运行 `node .claude/skills/flow-comet/scripts/workflow-handoff.mjs request <task-id>` 记录。**委托即记 request**——直接记录 result 而无对应 request 时,write_files 允许列表为空会被 BLOCKED(新 change 强制委托边界),补 request 后再重录 result 即可(执行者实证)。
-2. **委托子代理**：按平台通道委托 fresh-context 子代理（三平台同一身份判据，差异只在谁建树；`isolation: "worktree"` 是属性①的可选实现，非强制——见「并行安全四属性契约」）。handoff prompt 强制协议：子代理用 **Skill 工具**加载 flow-comet-dev 并按 `flow-kit/prompts/4-dev.md` 协议执行（TDD RED/GREEN/REFACTOR、LESSONS 扫描、既有抽象 grep、verify、6 维自查、越界检查、原子 commit `<type>(<scope>): <subject>`（scope 推荐可选：子系统短词；禁 change-id/日期作 scope；任务号放提交正文尾注 Task: <task-id>，change-id 不入标题）），按 `flow-kit/templates/SUMMARY.md` 模板写 `.specs/<change-id>/<task-id>-SUMMARY.md`（标题/首部/段序保真，另补 flow-comet 增量 `## 自检方法` 段），回传 Return Contract（含 commitHash + greenEvidence + completedChecks + selfReview）。**SUMMARY 自引用 hash 注**：提交内容无法包含自身 hash——若子代理 amend 提交,SUMMARY 内记录的 commitHash 为 amend 前值属预期(文件集一致即可,以实际提交对象为准)。
+2. **委托子代理**：
+   **委托顺序（硬顺序）**：先让 request 成功，再启动子代理——同一任务的 `workflow-handoff.mjs request`（步骤 1）与子代理启动是串行两步，禁止把 request 与子代理启动放进同一个并发调用（例如 `Promise.all` 里同时发 request 与 Agent / spawn_agent）。这是执行纪律，不是机制拦截：平台工具层没有可挂的判定点，引擎不会替你排队；未 request 的委托无法记录 result（write_files 允许列表为空会被 BLOCKED）。
+   **Delegation order (mandatory)**: a successful request first, then launch the subagent — the `workflow-handoff.mjs request` call and the subagent launch are two sequential steps; never inside one concurrent call (e.g. request plus Agent / spawn_agent in the same `Promise.all`). This is execution discipline, not a mechanism interception: the platform tool layer offers no hook point, so the engine will not queue it for you; a delegation without a request cannot record its result (the write_files allow-list is empty → BLOCKED).
+   按平台通道委托 fresh-context 子代理（三平台同一身份判据，差异只在谁建树；`isolation: "worktree"` 是属性①的可选实现，非强制——见「并行安全四属性契约」）。handoff prompt 强制协议：子代理用 **Skill 工具**加载 flow-comet-dev 并按 `flow-kit/prompts/4-dev.md` 协议执行（TDD RED/GREEN/REFACTOR、LESSONS 扫描、既有抽象 grep、verify、6 维自查、越界检查、原子 commit `<type>(<scope>): <subject>`（scope 推荐可选：子系统短词；禁 change-id/日期作 scope；任务号放提交正文尾注 Task: <task-id>，change-id 不入标题）），按 `flow-kit/templates/SUMMARY.md` 模板写 `.specs/<change-id>/<task-id>-SUMMARY.md`（标题/首部/段序保真，另补 flow-comet 增量 `## 自检方法` 段），回传 Return Contract（含 commitHash + greenEvidence + completedChecks + selfReview）。**SUMMARY 自引用 hash 注**：提交内容无法包含自身 hash——若子代理 amend 提交,SUMMARY 内记录的 commitHash 为 amend 前值属预期(文件集一致即可,以实际提交对象为准)。
    **提交从属规则**:任务专属的 `<task-id>-SUMMARY.md`(位于 `.specs/<change-id>/`,是 flow-comet 强制产物)允许随任务提交属流程默认豁免——目标仓库的既有规定优先,若目标仓库忽略清单等既有规定拒绝其入库,被拒即为正确行为,严禁 force-add 强加越库提交;委托校验对任务摘要的豁免属于校验宽容度,不是入库指令。
-   **提交面 pathspec 纪律（五要素，见 Guidance 同名小节）**：handoff prompt 必须要求子代理用 `git add -- <自己字面路径>` + `git commit -- <同一路径>` 提交、锁失败重试、禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`（适用条件：**多个写者共享同一工作区**；各自独立工作区内的局部 `reset` / `clean` 不在禁令内）。**集成纪律（四要素，见 Guidance 同名小节）**：协调者集成时优先 `git merge --no-ff`、降级 `cherry-pick` 记因、顺序按 `depends_on` 拓扑序 + 同层 task id 升序、冲突按机械 / 语义两类分别处置。
+   **提交面 pathspec 纪律（五要素，见 Guidance 同名小节）**：handoff prompt 必须要求子代理用 `git add -- <自己字面路径>` + `git commit -m "<消息>" -- <同一路径>`（消息在 `--` 之前）提交、锁失败重试、禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`（适用条件：**多个写者共享同一工作区**；各自独立工作区内的局部 `reset` / `clean` 不在禁令内）。**集成纪律（四要素，见 Guidance 同名小节）**：协调者集成时优先 `git merge --no-ff`、降级 `cherry-pick` 记因、顺序按 `depends_on` 拓扑序 + 同层 task id 升序、冲突按机械 / 语义两类分别处置。
    **写前读模板（handoff prompt 固定句式）**：prompt 必须写明「开工前先读 <本任务产出物的模板路径>，按其标题 / 首部 / 段序填写，并按本仓登记补写增量段」——模板路径逐任务给出（本节点默认 `flow-kit/templates/SUMMARY.md`）；只写「按模板填写」视为委托前检查未完成，不得发出委托。
 3. **记录 handoff result**：子代理回传后，运行 `node .claude/skills/flow-comet/scripts/workflow-handoff.mjs result <task-id> '<JSON>'` 记录（Return Contract 含 commitHash + greenEvidence + completedChecks + selfReview）。
-4. **验收 SUMMARY，TASK.md 标 done**：确认 SUMMARY 按 `flow-kit/templates/SUMMARY.md` 填写且**模板保真**（标题 `# SUMMARY:` / 首部 4 字段 / 段序一致）、含 `## 自检方法` 与 `## LESSONS 扫描` 两个增量段（前者声明 brooks-review / cache-brooks / builtin-quickcheck 三值之一）、verify 输出真实、6 维自查与越界检查有实质内容；通过后在 TASK.md 将任务标 `status="done"` 并加时间戳。
-5. **下一个 pending 任务**：重复步骤 1-4。
+4. **每任务预检（`--preflight` · 只报结构问题）**：子代理回传并记下 `workflow-handoff.mjs result` 之后（direct 模式则在执行者交出 SUMMARY 之后），运行 `node .claude/skills/flow-comet/scripts/workflow-guard.mjs exit execute --preflight` —— 它只跑**结构性门禁**（本节点声明工件的存在性 / SUMMARY 关键段 / 模板保真骨架 / 入口工件骨架〔在场才查〕/ TASK 7 字段〔仅 `plan` 节点生效〕），**不跑**进展类门禁（证据、任务集签名、串行 pending、可委托并行、在飞委托、verify 命令执行），不推进状态、不写 state、也不写模板提示账本。**本家族的预检作用域** = 本节点声明工件的存在性（协议声明的 file 类产物，缺件即 BLOCK，逐项给出路径与模板指针）+ SUMMARY 关键段 + 模板保真骨架 + 入口三件（`CHANGE` / `REQUIREMENT` / `DESIGN`，存在才查）；TASK 7 字段是 plan 出口的判据，对 execute 家族是 no-op，不在本步骤的范围内。**预检通过 = 结构面通过，不代表进展门禁会通过**（推进仍由完整 exit / `--apply` 决定）。价值：在「result 已记、尚未标 done」这个时点就能当场看到该任务 SUMMARY 的缺段 / 结构子段 / 条件段 / 首部字段问题——这正是本步骤存在的通道；不跑预检，这些问题会被更早的进展门禁挡下、攒到节点收尾一起爆。边界：它只报结构问题；**完整 `exit`（不带 `--apply`）仍是节点收尾的全链预演**——会先报进展类问题（串行 pending / 可委托并行 / 证据），预检不替代它。它只读、不写提示账本，因此**缺 H2 段只报类别计数**；结构子段与父段写法建议照常点名。要看被计数的那些段名，请等节点收尾的完整 `exit`（它维护提示账本），或直接按模板逐段对照。
+   **Per-task preflight (`--preflight`, structural only)**: after the subagent returns and its result is recorded (in direct mode, after the executor hands over the SUMMARY), run `node .claude/skills/flow-comet/scripts/workflow-guard.mjs exit execute --preflight` — it runs only the structural gates (existence of the node's declared artifacts / SUMMARY key sections / template-fidelity skeleton / intake-artifact skeleton, checked only when present / TASK seven fields, which apply at `plan` alone) and skips the progress gates (evidence, task-set signature, serial pending, delegable parallel tasks, in-flight handoffs, real verify execution); it does not advance, does not write workflow state, and does not write the template hint ledger. **The preflight scope of this family** = the existence of the node's declared file artifacts (a missing one blocks and names each path with its template) + the SUMMARY key sections + the template-fidelity skeleton + the three intake documents (`CHANGE` / `REQUIREMENT` / `DESIGN`, checked only when present); the TASK seven fields belong to the `plan` exit and are a no-op for the execute family, so they are not part of this step. **Passing the preflight means the structural face passes; it does not mean the progress gates will pass** (advancing is still decided by the full exit / `--apply`). Value: the task's SUMMARY defects (missing section / structure subsection / conditional section / header field) surface right away at the point where the result is recorded and the task is not yet marked done — that is exactly the channel this step exists for; without it those defects are blocked by earlier progress gates and pile up at the node exit. Boundary: it reports structural problems only; the **full `exit` without `--apply` remains the node's whole-chain rehearsal** and reports progress-class problems first (serial pending / delegable parallel tasks / evidence) — preflight does not replace it. Because it is read-only and writes no hint ledger, **a missing H2 section is reported as a category count only**; a missing structural subsection, and the advice naming the parent section that should hold it, are still named. For the counted headings, wait for the node's closing full `exit` (which keeps that hint ledger) or compare the document against the template section by section.
+5. **验收 SUMMARY，TASK.md 标 done**：确认 SUMMARY 按 `flow-kit/templates/SUMMARY.md` 填写且**模板保真**（标题 `# SUMMARY:` / 首部 4 字段 / 段序一致）、含 `## 自检方法` 与 `## LESSONS 扫描` 两个增量段（前者声明 brooks-review / cache-brooks / builtin-quickcheck 三值之一）、verify 输出真实、6 维自查与越界检查有实质内容；通过后在 TASK.md 将任务标 `status="done"` 并加时间戳。
+6. **下一个 pending 任务**：重复步骤 1-5。
 
 > 原 Steps 的 TDD / LESSONS / verify / 6 维自查 / 越界检查 / commit 协议**移入 handoff prompt 作为子代理的强制协议**，协调者不亲自执行。
 > **Return Contract 非代码任务**：纯文档 / 纯配置任务子代理回传时，`greenEvidence` 与 `redEvidence` 均允许 `{"command":"N/A (non-code task)","output":"..."}` 形态（command 字段存在即可通过 W1-D 校验；redEvidence 缺失在新 change 下仍会被 W1-D 拦截，因此必须显式提供此形态而非省略字段）。
@@ -151,6 +174,7 @@ This node is truly done when:
 - **Agent thought**: "I see a bug in an adjacent file, let me fix it along the way." **Actual risk**: "Fixing along the way" without a new task or CHANGE violates R7.1 (scope control). Must stop and create a new task or CHANGE.
 - **Agent thought**: "This task is taking long, let me skip the self-review." **Actual risk**: Skipping self-review defers quality issues to the review node, where they become Critical items requiring fix tasks. Better to catch early.
 - **Agent thought**: "这个 parallel 任务小，我顺手在主会话做了。" **Actual risk**: 违反并行委托设计——subagent-execute 节点被静默跳过，丢失并行隔离与 write_files 冲突防护；且 execute 出口的 all-tasks-done 校验会 BLOCKED（parallel 无 handoffResult）。parallel="true" 任务只能由 subagent-execute 委托。
+- **Agent thought**: "同时发 request 和启动子代理，省一个来回。" **Actual risk**: 先让 request 成功，再启动子代理——禁止把 request 与子代理启动放进同一个并发调用（例如 `Promise.all`）；这是执行纪律，不是机制拦截，未 request 的委托无法记录 result（write_files 允许列表为空会被 BLOCKED）。The order is mandatory: **a successful request first, then launch the subagent**, **never inside one concurrent call**; this is **execution discipline, not a mechanism interception** — the platform tool layer has no hook point to enforce it.
 
 ## 修复回路状态机路径
 

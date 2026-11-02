@@ -573,6 +573,12 @@ export async function runReplan(protocol, argv) {
     : '第 ' + round + '/' + REPLAN_ROUND_LIMIT + ' 轮';
   console.log('REPLAN: ' + decision.node + ' 重新校验通过（授权源 ' + source + '；' + roundLabel
     + '；备份 ' + backupRecord + '）');
+  // 成功行的事实说明（只加一行可观察事实，REPLAN 行前缀与语义不变）：重签的是 state.taskHash，
+  // 只写重校审计；TASK.md 保持执行者修订后的原文，plan 节点证据不会重记（防误以为 replan 会
+  // 重写计划工件或重跑计划阶段）。值前缀从实际签名派生，不在这里手写版本字面量。
+  const signaturePrefix = String(taskSetSignatureValue).split(':')[0] + ':';
+  console.log('TASKHASH: 已重签 state.taskHash（值前缀 ' + signaturePrefix
+    + '）——TASK.md 内容未改写、plan 节点证据未重记（重签只覆盖任务集签名与重校审计）');
   console.log('REASON: ' + reason);
   return;
 }

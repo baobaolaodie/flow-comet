@@ -16,6 +16,7 @@ import {
   writeState,
 } from './test-helpers.mjs';
 import {
+  AUTHORITATIVE_SOURCE_ANCHOR,
   CHANGE_ID,
   HOOK,
   REPO_ROOT,
@@ -163,6 +164,137 @@ export function scanCountFiles(files, variants, root = REPO_ROOT) {
 // 维护者组与 maintainerFaceSkips 的计数面描述符共用本判据（单一决策，避免多处各写一份而漂移）。
 export function maintainerFacePresent(root = REPO_ROOT) {
   return fs.existsSync(path.join(root, MAINTAINER_DOC_DIR));
+}
+
+// 公开面形态判据（与场景 105 / TA-24 共用同一口径：三份公开面载体是否**俱缺**，判定同一个 existsSync）：
+// package.json 的 files 白名单只带 .flow-comet/skills、.flow-comet/rules 与 scripts/——npm 包
+// （以及安装副本）**本来就不含公开面**。这种形态下「受检条目不在场」是载体的正常形态，不是仓库
+// 缺文件：报成「幽灵条目」会把读者送去修一个不存在的缺陷（与维护者组整组缺席同一类判断）。
+// 判据强度不降：跳过通道只对「整份公开面不存在」开放——docs/ 在而某份文档被删 = 检出被裁坏，
+// 仍走逐条严检并判红（反向构造：权威源检出里移走一份受检文档，缺失照样被点名）。
+// **只看 docs/ 不够**：分支 / 稀疏检出 / 误删把 docs/ 整份拿掉时，「本载体不含公开面」
+// 是假话，计数一致性（场景数 / 系统测试集项数锁）、公开产物零代号与词表镜像会整块变成可见 SKIP 并
+// exit 0。故还要求其余公开面载体一并缺席：CONTRIBUTING.md 与 .github/ 都进版本控制、都不进 npm
+// tarball，任一在场即证明本检出是仓库（只是被裁坏了），必须逐条严检并判红。README 刻意不作判据：
+// npm 发布时会强制包含它，用它判断等于把包形态整块误判成「有公开面」，跳过通道反而失效。
+export const PUBLIC_FACE_DOCS_DIR = 'docs';
+export const PUBLIC_FACE_CARRIER_PATHS = ['CONTRIBUTING.md', '.github'];
+export function publicFaceDocsAbsent(root = REPO_ROOT) {
+  return !fs.existsSync(path.join(root, PUBLIC_FACE_DOCS_DIR))
+    && PUBLIC_FACE_CARRIER_PATHS.every((rel) => !fs.existsSync(path.join(root, rel)));
+}
+// 跳过提示的措辞是判据的一部分（SKIP = 未校验，不是通过）：读者既不该把「此形态不含公开面」读成
+// 「公开面已检查且通过」，也不该读成「仓库缺文件」——那是两个方向相反的误读。
+export const PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE = 'SKIP: 公开面自检（计数一致性 / 公开产物零代号 / 词表镜像）'
+  + '——此形态不含公开面：' + [PUBLIC_FACE_DOCS_DIR + '/', ...PUBLIC_FACE_CARRIER_PATHS].join('、')
+  + ' 都不在本检出（npm 包按 package.json 的 files 白名单、安装副本按安装面，携带的都只是技能树与'
+  + ' scripts/，公开文档不随分发包走）——'
+  + '「受检条目不在场」是这种载体的正常形态，不是仓库缺文件；本次未校验条目在场与同步、'
+  + '公开产物零代号、词表镜像等价性（SKIP = 未校验，不是通过；请在权威源检出重跑本套件）';
+
+// ---------- 公开面自检：形态分派 + 各面判据的唯一调用点 ----------
+// 底部自检与场景共用本函数（判定本体只此一份）：底部只负责调用与打印；场景在临时根上驱动它，
+// 于是「形态分派对不对」成了常驻断言，不必等到在包形态里整跑一次套件才知道。
+// 形态三向（分派先于任何内容判据）：
+//   ① 权威源检出 + 公开面在场 → 全套判据（计数一致性 / 维护文档机检 / 公开产物零代号 / 词表镜像）；
+//   ② 权威源检出 + 公开面载体俱缺（docs/、CONTRIBUTING.md、.github/ 都不在 = npm 包形态）→ 整块
+//      显式 SKIP：受检条目不在场是这种载体的正常形态，报成「幽灵条目」会把读者送去修一个不存在的缺陷；
+//   ③ 安装副本（无技能树锚）→ 词表镜像判据「不适用」说明（主仓私有面结构性缺席）。
+// 跳过一律**可见但不算通过**（SKIP = 未校验），且跳过的粒度只有「整份面缺席」——docs/ 在场而某份
+// 受检文档被删仍逐条判红；docs/ 不在而 CONTRIBUTING.md / .github/ 在场同样判红（那是被裁坏的仓库，
+// 不是「不含公开面」的载体）。判据强度不降；计数本体仍是 countSyncProblems，与场景共用同一实现。
+// 技能树锚点的相对形态（字面量仍由 test-fixtures 的 AUTHORITATIVE_SOURCE_ANCHOR 单点拥有，这里只做
+// 相对化）：任意受检根上的「本检出是不是权威源」与真实检出同判据，不另写第二份。
+export const AUTHORITATIVE_SOURCE_ANCHOR_REL = path
+  .relative(REPO_ROOT, AUTHORITATIVE_SOURCE_ANCHOR)
+  .split(path.sep)
+  .join('/');
+export function authoritativeSourceAt(root = REPO_ROOT) {
+  return fs.existsSync(path.join(root, AUTHORITATIVE_SOURCE_ANCHOR_REL));
+}
+// 安装副本形态的「不适用」说明：措辞与形态判据同处维护——一处说「不适用」、另一处说「缺文件」，
+// 正是本批修掉的误诊形态。
+export const INSTALLED_COPY_SELF_CHECK_NOTICE = 'SKIP/NOT-APPLICABLE: 词表镜像漂移判据（.githooks 为主仓私有面）'
+  + '；本次检出无该私有面，未执行「词表单一来源 ↔ 套件同义镜像」的逐字符等价性比对'
+  + '——请在主仓私有面在场处重跑本套件（主树 L1），勿把不适用当成已校验。';
+// 公开产物零代号受检清单（公开面在场时逐份扫描；条目缺失显式报告，不静默跳过）。
+export const PUBLIC_FACE_CODE_DOCS = [
+  'README.md', 'README-zh.md', 'CONTRIBUTING.md', 'CONTRIBUTING-zh.md',
+  'SECURITY.md', 'SECURITY-zh.md', 'CODE_OF_CONDUCT.md', 'CODE_OF_CONDUCT-zh.md',
+  'CHANGELOG.md', 'CHANGELOG-zh.md',
+  'docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
+  'docs/USAGE.md', 'docs/USAGE-zh.md',
+  'docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md', 'docs/VERSIONS.md', 'docs/VERSIONS-zh.md',
+  '.github/PULL_REQUEST_TEMPLATE.md',
+  '.github/ISSUE_TEMPLATE/1-bug_report.yml', '.github/ISSUE_TEMPLATE/2-feature_request.yml',
+  '.github/ISSUE_TEMPLATE/3-question.md', '.github/ISSUE_TEMPLATE/4-task.md',
+];
+// 受检面的可见事实（防漂移）：文件数由受检清单推导、不硬编码——分发组 / 维护者组规模变化在此
+// 直接可见（维护者面整组缺席时只计分发面）。
+export function countFaceNotice(root = REPO_ROOT) {
+  const distFaceCount = new Set([...SCENARIO_COUNT_FILES, ...SYSTEM_TEST_COUNT_FILES]).size;
+  const maintainerFaceCount = maintainerFacePresent(root)
+    ? new Set([...SCENARIO_COUNT_FILES_MAINTAINER, ...SYSTEM_TEST_COUNT_FILES_MAINTAINER]).size
+    : 0;
+  return '受检面: ' + (distFaceCount + maintainerFaceCount) + ' 文件（分发 ' + distFaceCount
+    + ' + 维护者 ' + maintainerFaceCount + '）';
+}
+
+// 输入：受检根（判定所需的全部读取都相对它进行）+ 计数派生目录；输出：
+//   { skip, problems, notices } —— skip 非 null 即该形态不含这一面（problems 恒为空）；
+//   否则 problems 是问题清单（[{ name, error }]，空数组 = 通过），notices 是必须可见的覆盖面事实。
+export async function publicFaceSelfCheck({ root = REPO_ROOT, scriptsDir = SCRIPTS_DIR } = {}) {
+  // ③ 安装副本（无技能树锚）：主仓私有面结构性缺席 → 词表镜像判据不适用（可见，仍不算通过）。
+  if (!authoritativeSourceAt(root)) {
+    return {
+      skip: { reason: 'installed-copy-without-skill-tree', notice: INSTALLED_COPY_SELF_CHECK_NOTICE },
+      problems: [],
+      notices: [],
+    };
+  }
+  // ② 包形态（技能树锚在、docs/ + CONTRIBUTING.md + .github/ 三者俱缺）：受检条目不在场是这种载体
+  // 的正常形态，不是仓库缺文件——报成幽灵条目会把读者送去修一个不存在的缺陷。跳过 ≠ 通过，提示必须
+  // 带「未校验」。判据只在三者俱缺时成立：docs/ 被裁掉而其余载体还在时，走下一条逐条严检（那是被裁坏
+  // 的仓库，不是不含公开面的载体）。
+  if (publicFaceDocsAbsent(root)) {
+    return {
+      skip: { reason: 'package-without-public-face', notice: PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE },
+      problems: [],
+      notices: [],
+    };
+  }
+  // ① 权威源检出 + 公开面在场：全套判据（跳过通道到此为止，缺一份文档照样逐条判红）
+  const problems = [];
+  for (const problem of await countSyncProblems(root, scriptsDir)) {
+    problems.push({ name: '计数一致性', error: problem });
+  }
+  for (const problem of internalDocsProblems(root)) {
+    problems.push({ name: '维护文档机检', error: problem });
+  }
+  for (const rel of PUBLIC_FACE_CODE_DOCS) {
+    let text;
+    try {
+      text = fs.readFileSync(path.join(root, rel), 'utf8');
+    } catch (e) {
+      // ENOENT 同样显式报告：本清单全部为随仓库分发的文件，任何权威源检出都应存在——静默跳过会让
+      // 「永不生效的条目」藏身。
+      problems.push({ name: '公开产物零代号(' + rel + ')', error: '文件缺失: ' + e.message });
+      continue;
+    }
+    const hit = text.match(PUBLIC_CODE_RE);
+    if (hit) {
+      problems.push({ name: '公开产物零代号(' + rel + ')', error: rel + ' 含过程代号: "' + hit[0] + '"' });
+    }
+  }
+  for (const problem of vocabularyMirrorProblems(root)) {
+    problems.push({ name: '词表镜像漂移', error: problem });
+  }
+  const notices = [countFaceNotice(root)];
+  for (const skip of maintainerFaceSkips(root)) {
+    notices.push('SKIP: ' + skip.face + ' — ' + skip.reason
+      + '；本次检出未执行该面校验，请在维护者主树重跑本套件（主树 L1），勿把跳过当成已校验。');
+  }
+  return { skip: null, problems, notices };
 }
 
 // ---------- 计数 stale 检测（presence 之外的判别力补足） ----------
@@ -864,10 +996,13 @@ export function skillLoadingWordingProblems(rel, text) {
 //   ⑤ 条件句指针：两册各自须指向 commit-discipline / platform-facts / fix-loop 三个权威文件。
 export const COMMIT_DISCIPLINE_REL = 'flow-comet/reference/commit-discipline.md';
 export const PLATFORM_FACTS_REL = 'flow-comet/reference/platform-facts.md';
+// 提交形态的字面（消息在 `--` 之前）：两册的要素 token 与入口册的存在性判据**取同一字面**——
+// 三处各写一份就会各自漂移（改一处漏一处正是这行此前没有锁的成因）。
+export const COMMIT_FORM_TOKEN = '`git commit -m "<消息>" -- <同一路径>`';
 export const COMMIT_DISCIPLINE_ELEMENT_GROUPS = [
   ['提交面 pathspec 纪律 · 适用条件', ['**各自独立工作区（worktree 等）内的局部 `reset` / `clean` 不在禁令内**']],
   ['提交面 pathspec 纪律 · 要素 1（字面路径集）',
-    ['`git add -- <自己字面路径>`', '`git commit -- <同一路径>`', 'write_files']],
+    ['`git add -- <自己字面路径>`', COMMIT_FORM_TOKEN, 'write_files']],
   ['提交面 pathspec 纪律 · 要素 2（锁失败重试）', ['锁失败重试', 'index.lock', '失败即重试']],
   ['提交面 pathspec 纪律 · 要素 3（禁裸命令）',
     ['禁裸', '`commit -a`', '`stash`', '`clean`', '`reset`']],
@@ -880,7 +1015,7 @@ export const COMMIT_DISCIPLINE_ELEMENT_GROUPS = [
 ];
 // 权威处**正文**（逐字搬运进 `commit-discipline.md` 的原句；实测两册均无这些整句——回流即红）。
 export const COMMIT_DISCIPLINE_AUTHORITY_PHRASES = [
-  '2. **`git commit -- <同一路径>`**：提交以 pathspec 限定范围，保证提交只含自己的文件；路径集与上一步**逐字一致**。',
+  '2. **`git commit -m "<消息>" -- <同一路径>`**：消息（含正文尾注 `-m "Task: <id>"`）写在 `--` **之前**，pathspec 写在 `--` 之后——提交以 pathspec 限定范围，保证提交只含自己的文件；路径集与上一步**逐字一致**。消息若落到 `--` 之后（`git commit -- <路径> -m "<消息>"`），`-m` 会被当成 pathspec、提交直接失败（退出码 1）。',
   '3. **锁失败重试**：并发提交会撞 `index.lock` / `cannot lock ref`——**失败即重试**（临时仓真并发实测：20 提交 / 25 次锁失败全部重试成功）；不得因锁失败改用宽泛命令。',
   '5. **为什么**：并发写者共享**同一个索引与工作树**——宽泛命令存在**并发索引竞态**：一方 `add -A` 会把另一方的半成品纳入自己的提交（串味 / 多文件提交）；`stash` / `clean` / `reset` 更会直接破坏同伴的未提交工作。',
   '**并行波次附加两条（与上列五要素并列适用 · 不改其语义与适用条件）**：',
@@ -972,6 +1107,26 @@ export function delegationDisciplineProblems({ books, elementDocs, authorityText
         problems.push(rel + ' 回流了证据与判级判别句：' + phrase.slice(0, 40) + '…（权威处唯一）');
       }
     }
+  }
+  return problems;
+}
+
+// 入口册的提交形态（场景 184d 使用；纯函数 + 合成文本可驱动）：入口册「② 提交隔离」那一行是
+// 执行者最早读到的提交命令形态——两册与权威处都有要素 token 锁，**唯独这一行没有**：把它退回
+// 「`git commit -- <路径>`」（不给消息选项）时套件不会红（该形态照抄下行即 `-m` 被当成 pathspec、
+// exit 1）。判据两条：① 存在性——要点句在场且取与两册**同一字面**（含 `-m`）；② 反否定——不得
+// 出现缺 `-m` 的旧形态字面。反否定的正则只认**相邻**形态（`git commit -- <`）：把「`git commit`
+// 与 `--` 分开匹配会连「`-m` 在前、`--` 在后」的正确写法一并判红，那是恒红而非锁。
+export const ENTRY_COMMIT_FORM_REL = 'flow-comet/SKILL.md';
+export const ENTRY_COMMIT_FORM_OLD_RE = /git commit\s+--\s*</;
+export function entryCommitFormProblems(rel, text) {
+  const problems = [];
+  if (!text.includes(COMMIT_FORM_TOKEN)) {
+    problems.push(rel + ' 缺带消息的提交形态要点句: ' + COMMIT_FORM_TOKEN);
+  }
+  const old = ENTRY_COMMIT_FORM_OLD_RE.exec(text);
+  if (old) {
+    problems.push(rel + ' 出现缺 `-m` 的旧提交形态「' + old[0].trim() + '」——消息必须写在 `--` 之前');
   }
   return problems;
 }

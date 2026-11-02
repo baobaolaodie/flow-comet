@@ -39,13 +39,26 @@ import {
   handoffFor,
 } from '../lib/test-fixtures.mjs';
 import { scenarioProtocolPath } from '../lib/test-assertions.mjs';
-import { maintainerFacePresent, singleSourceImportProblems } from '../lib/text-anchor-checks.mjs';
+import {
+  AUTHORITATIVE_SOURCE_ANCHOR_REL,
+  GITHOOKS_CODES_REL,
+  PUBLIC_FACE_CODE_DOCS,
+  SCENARIO_COUNT_FILES,
+  SYSTEM_TEST_COUNT_FILES,
+  maintainerFacePresent,
+  publicFaceDocsAbsent,
+  publicFaceSelfCheck,
+  singleSourceImportProblems,
+} from '../lib/text-anchor-checks.mjs';
 
 // ---------- 登记表与模板夹具（夹具输入面，不是判据） ----------
 
 const REGISTRY_FILE = path.join(SCRIPTS_DIR, '..', 'reference', 'artifact-templates.json');
 const CHANGE_DIR = '.specs/' + CHANGE_ID;
 const SKILLS_ROOT = path.join(SCRIPTS_DIR, '..', '..');
+// 公开文档面的形态判据来自 lib 的 publicFaceDocsAbsent（与底部自检、场景 105 同一实现）：本组不再
+// 自持第二套（曾按 docs/authority-map.json 是否在场分流，与 lib 的 docs/ 判据各说各话）。
+// 只按 docs/ 在不在也不够——分支 / 稀疏检出 / 误删把 docs/ 拿掉时，整块判据会变成可见 SKIP。
 
 let registryMemo;
 function artifactRegistry() {
@@ -549,6 +562,18 @@ function repoFileExists(rel) {
   return fs.existsSync(path.join(REPO_ROOT, ...rel.split('/')));
 }
 
+// 公开面缺席判据（同一实现驱动真实断言与变异探针）：形态判据认定本检出带公开面时（docs/、
+// CONTRIBUTING.md 或 .github/ 任一在场，见 lib 的 publicFaceDocsAbsent），该面任何一份文档缺席都是
+// 判据失效——「两份机制册都被删」若只落一条 SKIP，公开面机制文档整份消失而套件仍绿。缺席的读法
+// 不能由「少了哪份文件」自行决定：只有整份载体俱缺才是合法的「不在本检出」，由调用方输出可见 SKIP
+// 并声明未校验。
+function publicFaceAbsenceProblems(docs) {
+  const missing = [...docs].filter(([, text]) => typeof text !== 'string').map(([rel]) => rel);
+  if (missing.length === 0) return [];
+  return ['公开面文档不在检出面: ' + missing.join('、')
+    + '（形态判据认定本检出带公开面，未走跳过通道；文档缺席即判据失效，不是「本次未校验」）'];
+}
+
 // 文本判据（同一函数驱动真实断言与变异探针）：rules = [{ rel, label, include[], exclude[] }]。
 function textRuleProblems(docs, rules) {
   const problems = [];
@@ -583,6 +608,160 @@ function assertProbesDiscriminate(problems, docs, rules, probes) {
       problems.push('反向构造判别力缺失（' + label + '：' + (expectReported ? '未被判违规' : '被误判违规') + '）');
     }
   }
+}
+
+// 公开面自检的**形态分派**（判定本体在 lib：publicFaceSelfCheck）——各载体形态各造一个临时根、驱动
+// 同一判定，分派对错因此成为常驻断言，不必等到在包形态里整跑一次套件才知道：
+//   ① 包形态（技能树锚在场、docs/ + CONTRIBUTING.md + .github/ 三者俱缺）→ SKIP 通知 + 零问题：
+//      这种载体本来就不带公开面，「受检条目不在场」是它的正常形态；报成幽灵条目会把读者送去修一个
+//      不存在的缺陷；
+//   ② 权威源形态完整（受检面文件照真迹复制，计数自然同步）→ 零问题（判据不是恒红的摆设）；
+//   ③ 同一根上移走一份受检文档（docs/VERSIONS.md）→ 必须报问题并点名该文件——跳过通道只对
+//      「整份公开面不存在」开放，判据没有顺手放宽；
+//   ④ 安装副本形态（无技能树锚）→ 词表镜像判据的「不适用」说明 + 零问题；
+//   ⑤ 半包形态（docs/ 整份不在，但 CONTRIBUTING.md 或 .github/ 在场）→ 必须照跑全判据并判红：
+//      这两份同样不进 npm tarball，任一在场即证明本检出是仓库（只是被裁坏了）；只按 docs/ 分流会让
+//      分支 / 稀疏检出 / 误删把整块判据变成 SKIP 并 exit 0。
+// 形态本身同样由既有判据派生（技能树锚 + publicFaceDocsAbsent），夹具不另写一套形态判据。
+
+// 受检面文件清单（照真迹复制的范围）= 公开产物零代号清单 ∪ 计数受检清单 ∪ 词表私有面：
+// 三面齐了同一次判定才可能零问题——少一面就会以问题形态暴露，夹具不会悄悄缩小判据面。
+function countFaceFiles() {
+  return [...new Set([
+    ...PUBLIC_FACE_CODE_DOCS, ...SCENARIO_COUNT_FILES, ...SYSTEM_TEST_COUNT_FILES, GITHOOKS_CODES_REL,
+  ])];
+}
+
+function copyRepoFileInto(root, rel) {
+  const parts = rel.split('/');
+  const dest = path.join(root, ...parts);
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.copyFileSync(path.join(REPO_ROOT, ...parts), dest);
+}
+
+async function assertPublicFaceSelfCheckShapes(dir) {
+  const shapeRoot = (name, { authoritative = true } = {}) => {
+    const root = path.join(dir, 'shape-' + name);
+    fs.mkdirSync(root, { recursive: true });
+    // 技能树锚点：与真实检出同一相对位置（路径字面量由 lib 单点拥有，不在此重写）
+    if (authoritative) writeFile(root, AUTHORITATIVE_SOURCE_ANCHOR_REL, '---\nname: flow-comet\n---\n');
+    return root;
+  };
+  const describe = (result) => result.problems.map((problem) => problem.name + ': ' + problem.error).join('; ')
+    || '（零问题）';
+  // ① 包形态（docs/ + CONTRIBUTING.md + .github/ 三者俱缺）：分派若改成「照跑全套」，这里会报一串
+  // 「受检条目文件缺失（幽灵条目）」——正是要拦的形态
+  const packaged = await publicFaceSelfCheck({ root: shapeRoot('package') });
+  if (packaged.problems.length > 0) {
+    throw new Error('包形态（技能树锚在、docs/ 与 CONTRIBUTING.md / .github/ 俱缺）不得报问题——'
+      + '受检条目不在场是这种载体的正常形态，报出来就是幽灵条目: ' + describe(packaged));
+  }
+  if (packaged.skip === null || packaged.skip.reason !== 'package-without-public-face') {
+    throw new Error('包形态应命中显式跳过分支（skip.reason=package-without-public-face）: '
+      + JSON.stringify(packaged.skip));
+  }
+  if (!packaged.skip.notice.includes('未校验')) {
+    throw new Error('包形态的跳过提示必须写明「未校验」（跳过 ≠ 通过）: ' + packaged.skip.notice);
+  }
+  // ② 权威源形态完整：受检面文件照真迹复制，计数自然同步（不硬编码数字）
+  const full = shapeRoot('authoritative');
+  for (const rel of countFaceFiles()) copyRepoFileInto(full, rel);
+  const complete = await publicFaceSelfCheck({ root: full });
+  if (complete.problems.length > 0) {
+    throw new Error('权威源形态完整（受检面文件照真迹复制）不应报问题: ' + describe(complete));
+  }
+  // ③ 同一根上移走一份受检文档：跳过通道只对「整份公开面不存在」开放，缺一份必须判红并点名
+  const removedDoc = 'docs/VERSIONS.md';
+  fs.rmSync(path.join(full, ...removedDoc.split('/')));
+  const truncated = await publicFaceSelfCheck({ root: full });
+  if (!truncated.problems.some((problem) => problem.error.includes(removedDoc))) {
+    throw new Error('权威源形态里移走一份受检文档必须报问题并点名该文件（判据不得因形态分派而放宽）: '
+      + describe(truncated));
+  }
+  // ④ 安装副本形态：无技能树锚 = 主仓私有面结构性缺席 → 「不适用」说明，不误红
+  const installed = await publicFaceSelfCheck({ root: shapeRoot('installed', { authoritative: false }) });
+  if (installed.problems.length > 0 || installed.skip === null
+    || installed.skip.reason !== 'installed-copy-without-skill-tree') {
+    throw new Error('安装副本形态（无技能树锚）应命中「不适用」分支且零问题: '
+      + JSON.stringify(installed.skip) + ' / ' + describe(installed));
+  }
+  if (!installed.skip.notice.includes('不适用')) {
+    throw new Error('安装副本形态的跳过提示必须写明「不适用」（不适用 ≠ 已校验）: ' + installed.skip.notice);
+  }
+  // ⑤ 半包形态（docs/ 整份不在，但 CONTRIBUTING.md 或 .github/ 在场）：必须是判红，不得复用包形态的
+  // 跳过通道——否则分支 / 稀疏检出 / 误删把 docs/ 拿掉时，计数一致性、公开产物零代号与词表镜像会整块
+  // 变成可见 SKIP 并 exit 0。两份载体分开造根：任一单独在场都足以证明本检出是仓库而不是「本来不带
+  // 公开面」的 npm 包 / 安装副本（两者都不进 npm tarball；README 会被 npm 强制包含，不作判据）。
+  for (const carrier of ['CONTRIBUTING.md', '.github/workflows/ci.yml']) {
+    const partial = shapeRoot('docs-less-' + carrier.split('/')[0].replace(/\./g, ''));
+    writeFile(partial, carrier, '');
+    const partialResult = await publicFaceSelfCheck({ root: partial });
+    if (partialResult.skip !== null) {
+      throw new Error('docs/ 不在但 ' + carrier + ' 在场不得命中跳过分支（skip.reason='
+        + partialResult.skip.reason + '）——该形态下公开面判据会整块变成 SKIP 并 exit 0');
+    }
+    if (!partialResult.problems.some((problem) => problem.name === '计数一致性')) {
+      throw new Error('docs/ 不在但 ' + carrier + ' 在场时必须照跑计数一致性并判红，实际: '
+        + describe(partialResult));
+    }
+  }
+}
+
+// 机制表行判据（同一函数驱动真实断言与变异探针）。机制行按**结构**定位，不按「首个含某组词的行」：
+// 文档正文随时可能为另一条修正补进既含「段名」又有 plan 的段落，词形判据会被它抢位（已实证的失效形态）。
+// 结构 = markdown 表格的数据行（表头 + 分隔行 + 连续 | 行）；机制行取其中末列（适用面列）点名出口名
+// 最多的那一行——那正是「这套形状校验适用于哪些出口」的口径声明。
+const EXIT_NODES = ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review', 'verify', 'archive'];
+
+function markdownTableRows(text) {
+  const lines = text.split(/\r?\n/);
+  const rows = [];
+  for (let i = 0; i + 1 < lines.length; i++) {
+    if (!/^\s*\|/.test(lines[i]) || !/^\s*\|[\s:|-]*-[\s:|-]*\|?\s*$/.test(lines[i + 1])) continue;
+    let j = i + 2;
+    for (; j < lines.length && /^\s*\|/.test(lines[j]); j++) rows.push({ index: j, raw: lines[j] });
+    i = j - 1;
+  }
+  return rows;
+}
+
+function markdownCells(raw) {
+  // 本仓公开文档的表格单元格不含转义竖线，故按 | 直接切分。
+  return raw.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim());
+}
+
+function findMechanismRow(text) {
+  let best = null;
+  for (const row of markdownTableRows(text)) {
+    const appliesTo = markdownCells(row.raw).pop() ?? '';
+    const exits = EXIT_NODES.filter((node) => appliesTo.includes('`' + node + '`'));
+    if (best === null || exits.length > best.exits.length) best = { ...row, appliesTo, exits };
+  }
+  return best !== null && best.exits.length > 0 ? best : null;
+}
+
+// 机制行必须覆盖全部 8 个出口（旧表只列 5 个）：抽掉任一出口即判违规，判据不放宽。
+function mechanismRowProblems(docs) {
+  const problems = [];
+  for (const rel of ['docs/MECHANISM-zh.md', 'docs/MECHANISM.md']) {
+    const text = docs.get(rel);
+    if (typeof text !== 'string') continue; // 缺席面由调用方的缺席判据逐份点名（本函数只判在场的机制行）
+    const row = findMechanismRow(text);
+    if (row === null) {
+      problems.push(rel + ' 缺「节点文档是否符合模板」机制行（无法核对出口面）');
+      continue;
+    }
+    for (const node of EXIT_NODES) {
+      if (!row.exits.includes(node)) problems.push(rel + ' 机制行未覆盖出口 ' + node + '（口径落后于门禁范围）');
+    }
+  }
+  return problems;
+}
+
+// 失效形态复现用：旧判据「首个同时含『段名』且匹配 open|design|plan 的行」。只被正锚探针用来确认
+// 「插入的段落确实会被旧判据抢位」——证明正锚构造有效，不参与真实断言。
+function legacyMechanismLine(text) {
+  return text.split(/\r?\n/).find((line) => line.includes('段名') && /open|design|plan/.test(line)) ?? '';
 }
 
 export const ENTRIES = [
@@ -792,7 +971,11 @@ export const ENTRIES = [
   // TA-08 · 条件子段与父段豁免（AC-8）+ 可选段语义（C-1）——① 前端 change 的 UI-DESIGN 缺
   // `### Button (Primary)` → BLOCKED（注意 Primary / Secondary 归一后同键：只写 Secondary 不得算
   // Primary 在场）；② 非前端 change 的 TEST 第 4 轮整段 N/A 且缺 4.1~4.4 子段 → 通过（父段 N/A →
-  // 子段不要求）；⑤⑥ UI-DESIGN §0（optional）整段删除合法，但保留标题就得填。
+  // 子段不要求）；⑤⑥ UI-DESIGN §0（optional）整段删除合法，但保留标题就得填；⑦ 四种包裹
+  // 符号（**N/A** / > N/A / - N/A / （N/A））都算整段不适用、⑦b `**N/A**（理由）`（闭合标记后紧跟
+  // 说明）同样算整段不适用、⑧ 「**见 N/A**」不算（不吞真句子；它是 ⑦b 的过度接受反锚）且报文
+  // 给出与判据一致的规范写法；⑨⑩ 缺子段时点名「实际挂在 X 段下」/「实际在文末」；⑪ 补充提示只对
+  // 父段正文的 N/A 意图痕迹发声（④ 是它的负锚：普通正文不弹），且父段名取模板里的真实段名。
   {
     name: 'TA-08 条件子段与父段豁免：UI-DESIGN 缺 Button (Primary) 拦；TEST 第 4 轮 N/A 放行',
     run: async (dir) => {
@@ -817,11 +1000,15 @@ export const ENTRIES = [
       const okTest = exitNode(dir, 'verify');
       assertExit(okTest, 0);
       assertOut(okTest, 'ALL CHECKS PASSED');
-      // ④ 反向构造（判别力）：把第 4 轮改成有实质内容 → 其结构子段重新变为必填 → 缺子段必拦
+      // ④ 反向构造（判别力）：把第 4 轮改成有实质内容 → 其结构子段重新变为必填 → 缺子段必拦；
+      // 同时是「若要整段不适用」补充提示的负锚——正文是普通说明、没有 N/A 意图痕迹，漏写子段时
+      // 报文不得带这条提示（提示只对当事人想写 N/A 却写不规范的情形发声）。
       setupVerify(dir, { body: [['兼容性测试', '实测了三种视口组合的兼容性结论。']], subsectionOmit: ['跨浏览器'] });
       const resRound4 = exitNode(dir, 'verify');
       assertExit(resRound4, 1);
       assertOut(resRound4, '跨浏览器');
+      assertNotOut(resRound4, '若要整段不适用');
+      assertNotOut(resRound4, '父段「」');
       // ⑤ 可选段（optional）语义：UI-DESIGN §0 是模板自述「greenfield 删掉此段」的可选段——
       // 整段缺席合法，不得报「条件段标题缺席」（与 conditional 分流；conditional 仍要求标题在场，见 TA-07）。
       setupDesign(dir, {
@@ -844,6 +1031,71 @@ export const ENTRIES = [
       const resEmptyOptional = exitNode(dir, 'design');
       assertExit(resEmptyOptional, 1);
       assertOut(resEmptyOptional, '0.1');
+      // ⑦ 整段不适用的包裹符号（AC-8）：粗体 / 引用 / 列表 / 括号四种写法都是同一个词的包装——
+      // 第 4 轮正文写成这些形态、其结构子段 4.1~4.4 全缺席 → 不报缺子段（父段豁免生效）。
+      for (const wrapped of ['**N/A**', '> N/A', '- N/A', '（N/A）']) {
+        setupVerify(dir, { body: [['兼容性测试', wrapped]], subsectionOmit: ['4.1', '4.2', '4.3', '4.4'] });
+        const resWrapped = exitNode(dir, 'verify');
+        assertTrue(resWrapped.status === 0, '第 4 轮正文「' + wrapped + '」应视为整段不适用、豁免结构子段，实际 exit '
+          + resWrapped.status + '\n' + resWrapped.output);
+        assertOut(resWrapped, 'ALL CHECKS PASSED');
+      }
+      // ⑦b 闭合标记后紧跟说明（正例锚）：`**N/A**（本轮无变更）` 是「整段不适用 + 为什么」的合法
+      // 书写形态。旧实现只剥尾部的**裸**闭合标记，标记之后一有文字裸文本就变成 `N/A**（…）`、
+      // 白名单词后不再紧邻边界 ⇒ 判已填、子段照旧要求（报文还写着「不要加粗或引用」，与判据相反）。
+      setupVerify(dir, { body: [['兼容性测试', '**N/A**（本轮无变更）']], subsectionOmit: ['4.1', '4.2', '4.3', '4.4'] });
+      const resClosedNote = exitNode(dir, 'verify');
+      assertTrue(resClosedNote.status === 0,
+        '第 4 轮正文「**N/A**（本轮无变更）」应视为整段不适用、豁免结构子段，实际 exit '
+          + resClosedNote.status + '\n' + resClosedNote.output);
+      assertOut(resClosedNote, 'ALL CHECKS PASSED');
+      // ⑧ 反例（AC-9）：包装里是「见 N/A」这类真句子（剥掉包装后开头不是白名单词）→ 仍报缺子段。
+      // 它是 ⑦b 的**过度接受**反锚：容忍「闭合标记后紧跟说明」不得顺手把「包装里包着真句子」也
+      // 放行——区别在开头是不是白名单词，不在有没有包裹符号。
+      // 父段有正文却不落白名单，报文同时给出**与判据一致**的规范写法（AC-10）：包裹符号本身就被
+      // 接受（旧报文写「不要加粗或引用」，与判据相反）；要跟说明就写在闭合标记之后（⑦b 的形态）。
+      setupVerify(dir, { body: [['兼容性测试', '**见 N/A**']], subsectionOmit: ['4.1', '4.2', '4.3', '4.4'] });
+      const resSentence = exitNode(dir, 'verify');
+      assertExit(resSentence, 1);
+      assertOut(resSentence, '缺结构子段');
+      assertOut(resSentence, '4.1');
+      assertOut(resSentence, '若要整段不适用，请让整段以 N/A 开头');
+      assertOut(resSentence, '包裹符号本身就被接受');
+      assertOut(resSentence, '`**N/A**（理由）`');
+      assertNotOut(resSentence, '不要加粗或引用');
+      assertNotOut(resSentence, '父段「」');
+      // ⑨ 诊断一（挂错父段）：4.3 实际写在「第 5 轮 · 可观测性验证」下 → 报文点名实际归属
+      // （只加定位说明，不改归属算法）。
+      setupVerify(dir, {
+        body: [['兼容性测试', '实测了三种视口组合的兼容性结论。']],
+        subsectionOmit: ['4.3'],
+        insertAfter: [['可观测性验证', '### 4.3 数据迁移（涉及 schema 变更必填）\n\n夹具：误挂在第 5 轮下的子段。\n']],
+      });
+      const resMisplaced = exitNode(dir, 'verify');
+      assertExit(resMisplaced, 1);
+      assertOut(resMisplaced, '缺结构子段');
+      assertOut(resMisplaced, '实际挂在');
+      assertOut(resMisplaced, '第 5 轮 · 可观测性验证 段下');
+      // ⑩ 诊断一（文末）：4.4 被贴到模板骨架之外（文末「附录」段之下）→ 报文写「实际在文末」。
+      setupVerify(dir, {
+        body: [['兼容性测试', '实测了三种视口组合的兼容性结论。']],
+        subsectionOmit: ['4.4'],
+        extra: ['## 附录\n\n### 4.4 跨版本\n\n夹具：误贴在文末的子段。'],
+      });
+      const resTail = exitNode(dir, 'verify');
+      assertExit(resTail, 1);
+      assertOut(resTail, '缺结构子段');
+      assertOut(resTail, '实际在文末');
+      // ⑪ 正锚（④ 的对称面）：父段正文留下 N/A 意图痕迹（「（说明：N/A）」这类带前置说明词、
+      // 不在整段白名单里的写法）→ 子段仍要求，报文给出规范写法；父段名取模板里的真实段名，
+      // 空父段名「父段「」」对定位毫无价值，两处都不许出现。
+      setupVerify(dir, { body: [['兼容性测试', '（说明：N/A）']], subsectionOmit: ['4.1', '4.2', '4.3', '4.4'] });
+      const resIntent = exitNode(dir, 'verify');
+      assertExit(resIntent, 1);
+      assertOut(resIntent, '若要整段不适用，请让整段以 N/A 开头');
+      assertOut(resIntent, '包裹符号本身就被接受');
+      assertOut(resIntent, '父段「第 4 轮 · 兼容性测试」');
+      assertNotOut(resIntent, '父段「」');
     },
   },
 
@@ -1072,6 +1324,24 @@ export const ENTRIES = [
       const correctedPrompt = runGuard(['entry', 'open'], dir);
       assertExit(correctedPrompt, 0);
       assertNotOut(correctedPrompt, '与节点协议文件不符');
+      // ②b 入口只认活动路径（in-place 扩展）：同样的错路径声明只存在于归档目录（真实的归档形态
+      // <日期>-<本 change>）时，入口不追溯归档——那一轮没在活动目录里声明，就没有可核对的声明；
+      // 归档里的声明属于归档前的执行者，拿它判当前节点会把「没声明」判成「声明过」。判据可证伪：
+      // 一旦入口改去读归档，这条错路径声明会当场 BLOCK。
+      const loadsDir = path.join(dir, CHANGE_DIR, '.skill-loads');
+      const loadsAside = path.join(dir, '.specs', 'loads-aside');
+      fs.renameSync(loadsDir, loadsAside);
+      writeFile(dir, '.specs/archive/2026-10-01-' + CHANGE_ID + '/.skill-loads/open-flow-comet-change.json',
+        JSON.stringify({
+          node: 'open', skill: 'flow-comet-change', protocol: '4-dev.md',
+          templates: ['CHANGE', 'REQUIREMENT'], at: '2026-08-01T00:00:00.000Z',
+        }, null, 2) + '\n');
+      const archivedDeclaration = runGuard(['entry', 'open'], dir);
+      assertExit(archivedDeclaration, 0);
+      assertNotOut(archivedDeclaration, '与节点协议文件不符');
+      // 复位：归档诱饵撤掉、活动声明标记归位——③ 起按「已声明」继续
+      fs.rmSync(path.join(dir, '.specs', 'archive'), { recursive: true, force: true });
+      fs.renameSync(loadsAside, loadsDir);
 
       // ③ 条件提示词不误拦 + 按前端判定打印：design 声明 2a-ui-design.md（条件提示词，属该节点协议面）
       // → 放行；前端 change 的入口追出条件行（与条件模板行对称），非前端 change 不打印。
@@ -1198,6 +1468,76 @@ export const ENTRIES = [
         nodeTemplateDeclaration({ id: 'brainstorm', templates: ['CHANGE'] }), { nodeId: 'brainstorm', skillName: 'fixture-skill' });
       assertTrue(customCommand === 'workflow-state.mjs skill-load brainstorm fixture-skill --templates CHANGE.md',
         '自定义节点无内置提示词映射时不应拼 --prompt，实际: ' + customCommand);
+
+      // ⑤ --preflight 与自定义协议的组合（in-place 扩展）：结构预检的**声明工件**判据必须来自命令行
+      // 指定的那份协议。造法 = 内置协议副本 + 给 open 节点追加一件只在这份协议里声明的 file 类产物，
+      // 同一夹具跑两次、唯一变量是 --protocol：不指这份协议时没人会去查那件产物，指了就按它拦。
+      // 环境变量（= 上面的对照侧）先复位成**未经改写的**内置副本——本场景 ③ 曾把该副本的模板声明
+      // 改过，带着它做对照就不是单变量了。故「忽略 CLI 参数」与「内置判据写死」两种退化都会让第一次
+      // 调用变成通过（或缺件不被点名）。
+      const builtinProtocolCopy = JSON.parse(
+        fs.readFileSync(path.join(SCRIPTS_DIR, '..', 'reference', 'workflow-protocol.json'), 'utf8'));
+      writeFile(dir, 'reference/workflow-protocol.json', JSON.stringify(builtinProtocolCopy, null, 2) + '\n');
+      const protocolWithExtraArtifact = {
+        ...builtinProtocolCopy,
+        nodes: builtinProtocolCopy.nodes.map((node) => (node.id === 'open'
+          ? { ...node, outputSchemas: [...node.outputSchemas, 'fixture.extra-artifact.v1'] }
+          : node)),
+        outputSchemas: [...builtinProtocolCopy.outputSchemas, {
+          id: 'fixture.extra-artifact.v1',
+          description: '协议追加的 open 产物（只在本自定义协议里声明）',
+          artifacts: [{
+            id: 'custom-evidence', kind: 'file', required: true,
+            paths: ['<change-id>/custom-evidence.md'], pathBase: 'specs-root',
+          }],
+          evidence: [],
+        }],
+      };
+      const customProtocolFile = path.join(dir, 'reference', 'custom-preflight-protocol.json');
+      writeFile(dir, 'reference/custom-preflight-protocol.json', JSON.stringify(protocolWithExtraArtifact, null, 2) + '\n');
+      setupOpen(dir);
+      const customPreflight = runGuard(['exit', 'open', '--preflight', '--protocol', customProtocolFile], dir);
+      assertExit(customPreflight, 1);
+      assertOut(customPreflight, '声明工件缺失');
+      assertOut(customPreflight, '.specs/' + CHANGE_ID + '/custom-evidence.md');
+      assertTrue(!fs.existsSync(path.join(dir, CHANGE_DIR, '.template-hints.json')),
+        '--preflight 不得写提示账本（自定义协议下同样是只读）');
+      // 反向对照（单变量 = 少一个 --protocol）：同一夹具、同一节点、同一命令形态 → 内置副本里没有
+      // 这件产物，故不报缺件（同时排除「预检本来就一律报缺件」这一读法）。
+      const builtinPreflight = runGuard(['exit', 'open', '--preflight'], dir);
+      assertExit(builtinPreflight, 0);
+      assertNotOut(builtinPreflight, 'custom-evidence.md');
+      // 正例：按自定义协议声明的路径补上该产物 → 同一命令转为通过（判据跟着协议走，不是恒拦）
+      writeFile(dir, CHANGE_DIR + '/custom-evidence.md', '# 追加产物\n\n自定义协议声明的结构输入。\n');
+      const satisfiedPreflight = runGuard(['exit', 'open', '--preflight', '--protocol', customProtocolFile], dir);
+      assertExit(satisfiedPreflight, 0);
+      assertOut(satisfiedPreflight, 'ALL CHECKS PASSED');
+
+      // ⑥ 参数面收紧（in-place 扩展）：同一命令形态、同一夹具，只改参数的拼写——单横线疑似旗标
+      // （`-apply` 单横线笔误 / `-h`）与节点之后的多余位置参数，修复前都被静默忽略（`-apply` 既不
+      // 落盘也不报错，看起来像一次成功的预演；多余的裸词同样无人认领）。现在两者一律是用法错误、
+      // 非零退出，且不得进入任何门禁链——参数面因此与「已知旗标 + 一个节点名」逐字对得上。
+      const singleDashFlag = runGuard(['exit', 'open', '--preflight', '-apply'], dir);
+      assertExit(singleDashFlag, 1);
+      assertOut(singleDashFlag, '用法错误');
+      assertOut(singleDashFlag, '-apply');
+      assertNotOut(singleDashFlag, 'ALL CHECKS PASSED');
+      const shortFlag = runGuard(['exit', 'open', '-h'], dir);
+      assertExit(shortFlag, 1);
+      assertOut(shortFlag, '用法错误');
+      assertOut(shortFlag, '-h');
+      // 多余位置参数：--protocol 的取值不算位置参数（两者在同一命令里并存，判据不得把取值当多余项）。
+      const extraOperand = runGuard(
+        ['exit', 'open', '--preflight', '--protocol', customProtocolFile, 'extra-operand'], dir);
+      assertExit(extraOperand, 1);
+      assertOut(extraOperand, '用法错误');
+      assertOut(extraOperand, 'extra-operand');
+      assertNotOut(extraOperand, 'ALL CHECKS PASSED');
+      // 正对照：同一夹具的合法形态（--protocol 取值 + 无多余操作数）仍然通过——上面三条不是
+      // 「预检一律失败」的同义反复。
+      const legalAgain = runGuard(['exit', 'open', '--preflight', '--protocol', customProtocolFile], dir);
+      assertExit(legalAgain, 0);
+      assertOut(legalAgain, 'ALL CHECKS PASSED');
     },
   },
 
@@ -1269,6 +1609,32 @@ export const ENTRIES = [
       assertExit(brokeAgain, 1);
       assertTrue(!omitSection(brokeAgain, 'T01-SUMMARY.md'),
         '释放后再次坏掉应按首败处理（不列段名）: ' + failureLine(brokeAgain, 'T01-SUMMARY.md'));
+
+      // ⑧ --preflight 与完整 exit 的两阶段差异（in-place 扩展）：预检只读、不维护提示账本，故同一
+      // 节点连跑两次预检都停在报文的**首段**（只报类别计数）；写账本的是完整 exit，它才在第二次
+      // 点名段名。两侧都得锁住——预检若改成写账本，第二次预检会提前把段名用掉（「先读模板」的
+      // 引导被绕开）；完整 exit 若不写账本，第二次仍只报计数（两阶段报错退化成单阶段）。
+      setupExecute(dir, { omit: ['是否触发新工作'] });
+      assertTrue(!fs.existsSync(hintFile), '夹具起点不应有提示账本');
+      const preFirst = runGuard(['exit', 'execute', '--preflight'], dir);
+      assertExit(preFirst, 1);
+      assertOut(preFirst, '缺段 1 项');
+      assertNotOut(preFirst, '是否触发新工作');
+      assertTrue(!fs.existsSync(hintFile), '--preflight 不得写提示账本（首段形态的前提）');
+      const preSecond = runGuard(['exit', 'execute', '--preflight'], dir);
+      assertExit(preSecond, 1);
+      assertOut(preSecond, '缺段 1 项');
+      assertNotOut(preSecond, '是否触发新工作');
+      assertTrue(!fs.existsSync(hintFile), '第二次 --preflight 仍不得写提示账本（不升级成列段名）');
+      // 同一节点、同一工件、同一缺损：完整 exit 首次只报计数并开账本，第二次点名段名。
+      const fullFirst = exitNode(dir, 'execute');
+      assertExit(fullFirst, 1);
+      assertOut(fullFirst, '缺段 1 项');
+      assertNotOut(fullFirst, '是否触发新工作');
+      assertTrue(fs.existsSync(hintFile), '完整 exit 首次失败应写提示账本（再犯才有「再犯」可言）');
+      const fullSecond = exitNode(dir, 'execute');
+      assertExit(fullSecond, 1);
+      assertOut(fullSecond, '缺段 1 项: 是否触发新工作');
     },
   },
 
@@ -1553,6 +1919,66 @@ export const ENTRIES = [
       const ok = exitNode(dir, 'archive');
       assertExit(ok, 0);
       assertOut(ok, 'ALL CHECKS PASSED');
+      // ④b 份数只数本 change 的归档目录（in-place 扩展）：归档移动已发生（活动目录不在原位）时，
+      // 同后缀诱饵——名字以 -<本 change> 结尾的别的 change 归档目录——既有份数不得被数进来，也不得
+      // 在本 change 归档目录缺席时充当「有目录可数」。归档目录按 <日期>-<本 change> 精确形态定位。
+      setupArchive(dir, {
+        evidence: { lessonsNomination: { scanned: 2, nominated: ['L-501'], reasonIfNone: '' } },
+      });
+      const archiveRoot = path.join(dir, '.specs', 'archive');
+      // 归档移动：活动目录整体搬成 .specs/archive/2026-10-21-<本 change>/（2 份 SUMMARY 随目录走），
+      // 归档产物 KNOWN-ISSUES.md 也归位到这一份目录，诱饵目录只放 3 份别人的 SUMMARY。
+      fs.renameSync(path.join(dir, CHANGE_DIR), path.join(archiveRoot, '2026-10-21-' + CHANGE_ID));
+      fs.renameSync(path.join(archiveRoot, '2026-10-20-' + CHANGE_ID, 'KNOWN-ISSUES.md'),
+        path.join(archiveRoot, '2026-10-21-' + CHANGE_ID, 'KNOWN-ISSUES.md'));
+      fs.rmSync(path.join(archiveRoot, '2026-10-20-' + CHANGE_ID), { recursive: true, force: true });
+      for (let i = 1; i <= 3; i += 1) {
+        writeFile(dir, '.specs/archive/2026-10-20-other-' + CHANGE_ID + '/T0' + i + '-SUMMARY.md',
+          '# SUMMARY\n\n## 做了什么\n\n诱饵归档的份数。\n');
+      }
+      const ownArchiveCount = runGuard(['exit', 'archive'], dir);
+      assertExit(ownArchiveCount, 0);
+      assertOut(ownArchiveCount, 'ALL CHECKS PASSED');
+      // 反向构造（同一判据 + 单变量）：本 change 的归档目录缺席、同后缀诱饵仍在场——份数不可核对
+      // （null），不得退回数诱饵的 3 份。修复前 .find 命中诱饵，3 份与声明一致就整体放行：份数对账
+      // 拿别人的归档作证。这里声明正好写 3，放行即证明数的是诱饵。
+      fs.renameSync(path.join(archiveRoot, '2026-10-21-' + CHANGE_ID, 'KNOWN-ISSUES.md'),
+        path.join(archiveRoot, '2026-10-20-other-' + CHANGE_ID, 'KNOWN-ISSUES.md'));
+      fs.rmSync(path.join(archiveRoot, '2026-10-21-' + CHANGE_ID), { recursive: true, force: true });
+      const decoyOnlyState = newChangeState('archive');
+      decoyOnlyState.evidence.archive = {
+        summary: 'archived',
+        lessonsNomination: { scanned: 3, nominated: [], reasonIfNone: '无新增条目' },
+      };
+      writeState(dir, decoyOnlyState);
+      const decoyOnly = runGuard(['exit', 'archive'], dir);
+      assertExit(decoyOnly, 1);
+      assertOut(decoyOnly, '工件目录缺失');
+      assertNotOut(decoyOnly, 'ALL CHECKS PASSED');
+      // ⑤ 扫描份数的**类型**在写入前就拦（in-place 扩展）：scanned 是出口按**数值**比对的字段
+      // （份数相等才算留痕成立），故字符串 "2" 必须被 record 拒。修复前它能落库成功、要等到 archive
+      // 出口才因 "2" !== 2 炸——正是 record 形状校验要消灭的「错误延后暴露」（出错的是 record，
+      // 报错的却是 exit）。判据仍只判类型：取值是否等于 SUMMARY 份数归出口（③），不在这里重复业务规则。
+      writeFile(dir, '.specs/LESSONS.md', LESSONS_FIXTURE);
+      const recordState = baseState('archive');
+      recordState.evidence.archive = { summary: 'archived' };
+      writeState(dir, recordState);
+      const stringScanned = runState(['record', 'archive',
+        '{"summary":"archived","lessonsNomination":{"scanned":"2","nominated":[],"reasonIfNone":"无新增条目"}}'], dir);
+      assertExit(stringScanned, 1);
+      assertOut(stringScanned, 'lessonsNomination.scanned');
+      assertOut(stringScanned, '必须是数字（当前是 string）');
+      const afterReject = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      assertTrue(afterReject.evidence.archive.lessonsNomination === undefined,
+        '类型非法的载荷不得落库: ' + JSON.stringify(afterReject.evidence.archive));
+      // 反向构造（单变量：只把 "2" 改成 2）：同一载荷 record 通过并原样写入——判据只判类型，
+      // 不新增业务规则，合法载荷不因这条形状校验变得不可写。
+      const numericScanned = runState(['record', 'archive',
+        '{"summary":"archived","lessonsNomination":{"scanned":2,"nominated":[],"reasonIfNone":"无新增条目"}}'], dir);
+      assertExit(numericScanned, 0);
+      const afterAccept = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      assertTrue(afterAccept.evidence.archive.lessonsNomination?.scanned === 2,
+        '类型合法的载荷应原样写入 scanned: ' + JSON.stringify(afterAccept.evidence.archive));
     },
   },
 
@@ -1969,11 +2395,15 @@ export const ENTRIES = [
   // TA-24 · 公开面不再说假话（AC-24）——5 对双语公开文本的覆盖表述与实际门禁范围一致：不再有
   // 「完全继承 / 段名在运行时派生」这类 overclaim；机制册的「哪些节点查段名」表覆盖全部出口；
   // 故障排查给出两阶段报错指引；工件保真条点明本仓增量段。
+  //
+  // 缺席的**两种读法**（判据面形态先判，再判内容）：本检出带公开面（docs/、CONTRIBUTING.md 或
+  // .github/ 任一在场）时，该面任何一份文档缺席都是判据失效——「两份机制册都被删」= 公开面机制
+  // 文档不在检出面，判红，不能只落一条 SKIP；只有整份载体俱缺（安装副本只带技能树、npm 包按 files
+  // 白名单不含 docs/ 与 CONTRIBUTING / .github）才是合法的「本检出没有这一面」，此时输出可见 SKIP
+  // 并明确写「本次未校验」，仍不算通过。
   {
-    name: 'TA-24 公开面口径：5 对双语去除 overclaim，机制表覆盖全出口，排查给两阶段指引',
-    run: () => {
-      const docs = new Map();
-      const missingFaces = [];
+    name: 'TA-24 公开面口径：5 对双语去除 overclaim，机制表覆盖全出口，缺席即红（整面缺席才 SKIP）',
+    run: async (dir) => {
       const pairs = [
         ['README.md', 'README-zh.md'],
         ['CONTRIBUTING.md', 'CONTRIBUTING-zh.md'],
@@ -1981,20 +2411,35 @@ export const ENTRIES = [
         ['docs/MECHANISM.md', 'docs/MECHANISM-zh.md'],
         ['docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md'],
       ];
-      for (const [en, zh] of pairs) {
-        const missing = [en, zh].filter((rel) => !repoFileExists(rel));
-        if (missing.length > 0) {
-          missingFaces.push(...missing);
-          continue;
-        }
-        docs.set(en, repoFileText(en));
-        docs.set(zh, repoFileText(zh));
+      // 形态判据先于内容判据：公开面载体整份缺席 = 本检出不含公开文档（安装副本 / npm 包形态），
+      // 整面输出一条可见 SKIP——不是「已校验」，也不把合法形态判红。判据本体走 lib 的
+      // publicFaceDocsAbsent（与底部自检、场景 105 同一实现）：本场景不再自持第二套（曾按
+      // docs/authority-map.json 在不在分流）；单看 docs/ 也不够——它被裁掉而 CONTRIBUTING.md /
+      // .github/ 还在时，这五对文档的判据会整块变成 SKIP。
+      if (publicFaceDocsAbsent(REPO_ROOT)) {
+        console.log('SKIP: TA-24 的公开面口径判据（此形态不含公开文档：docs/、CONTRIBUTING.md 与 .github/'
+          + ' 都不在本检出）——本次检出未校验 5 对双语公开文档的 overclaim / 机制表 / 排查指引口径，'
+          + '请在权威源检出重跑本套件（未验证 ≠ 通过）');
+        return;
       }
-      // 公开面在安装副本形态结构性缺席（目标项目只有技能包，无本仓公开文档）：整面输出一条可见
-      // SKIP（未验证 ≠ 通过）——缺席既不算「判据违规」，也不静默当成已校验。
-      if (missingFaces.length > 0) {
-        console.log('SKIP: TA-24 的公开面口径判据（' + [...new Set(missingFaces)].join('、') + ' 不在本检出）——'
-          + '本次检出未校验 5 对双语公开文档的 overclaim / 机制表 / 排查指引口径，请在权威源检出重跑本套件（未验证 ≠ 通过）');
+      // 形态分派自身的常驻判别力锚：临时根上驱动同一判定，分派对错不再只能靠「在包形态里整跑一次
+      // 套件」才知道。夹具的「完整形态」从本检出的公开面真迹复制，故只在声明了公开面的检出上跑。
+      await assertPublicFaceSelfCheckShapes(dir);
+      // 判据面完整在册（缺席用 null 占位而不是从集合里删掉）：缺席由下面的缺席判据逐份点名，
+      // 「少了哪份文件」因此是**判据事实**，不是可以静默缩小的受检面。
+      const docs = new Map();
+      for (const [en, zh] of pairs) {
+        for (const rel of [en, zh]) docs.set(rel, repoFileExists(rel) ? repoFileText(rel) : null);
+      }
+      const problems = publicFaceAbsenceProblems(docs);
+      // 缺席判据的变异探针（同一实现、纯内存）：抽掉两份机制册 ⇒ 必须报「不在检出面」。修复前
+      // 「两份机制册都被删」只落一条 SKIP（缺席被读成未校验），公开面机制文档整份消失而套件仍绿。
+      // 缺失在判据面里表现为「键在场、文本为 null」（与真实路径同一形态：文件不在 ≠ 键被删）。
+      const shrunk = new Map(docs);
+      for (const rel of ['docs/MECHANISM.md', 'docs/MECHANISM-zh.md']) shrunk.set(rel, null);
+      const absenceProbe = publicFaceAbsenceProblems(shrunk);
+      if (absenceProbe.length === 0 || !absenceProbe[0].includes('docs/MECHANISM.md')) {
+        problems.push('反向构造判别力缺失（抽掉两份机制册未被判「不在检出面」）');
       }
       const rules = [
         { rel: 'README-zh.md', label: '去 overclaim（继承表述）', exclude: ['完全继承'] },
@@ -2004,27 +2449,43 @@ export const ENTRIES = [
         { rel: 'docs/TROUBLESHOOTING-zh.md', label: '两阶段报错指引', include: ['两阶段'] },
         { rel: 'docs/MECHANISM-zh.md', label: '机制表覆盖全出口', include: ['段名是否符合模板'] },
       ];
-      // 判据只落在本检出真实存在的文档上：缺席面已由上方 SKIP 行显式声明未验证。
-      const activeRules = rules.filter((rule) => docs.has(rule.rel));
-      const problems = textRuleProblems(docs, activeRules);
-      // 机制表一行的出口清单覆盖：execute / verify 必须在列（旧表只列 5 个出口）
-      for (const [rel, needNodes] of [
-        ['docs/MECHANISM-zh.md', ['execute', 'verify']],
-        ['docs/MECHANISM.md', ['execute', 'verify']],
-      ]) {
-        const text = docs.get(rel);
-        if (typeof text !== 'string') continue;
-        const row = text.split(/\r?\n/).find((line) => line.includes('段名') && /open|design|plan/.test(line)) ?? '';
-        if (row === '') {
-          problems.push(rel + ' 缺「节点文档是否符合模板」机制行（无法核对出口面）');
-          continue;
+      // 内容判据跑全表（不再按「本检出有没有这份文件」缩小）：缺席的文档在规则面里报「不在判据面内」，
+      // 缺席本身已由上方缺席判据逐份点名——受检面不因文件消失而静默变窄。
+      problems.push(...textRuleProblems(docs, rules));
+      // 机制行的出口清单覆盖：行按结构定位（机制表里适用面最宽的那行），8 个出口一个都不能少。
+      problems.push(...mechanismRowProblems(docs));
+      // 机制行判据自己的变异探针（同一函数驱动）——词形定位的失效形态与「判据恒真」各配一条：
+      //  正锚：把「含『段名』且提到 plan」的段落插到机制表之前，结构定位不得被抢位；
+      //  反向：从机制行抽掉一个出口 ⇒ 必须报「未覆盖出口」。
+      const zhMechanism = docs.get('docs/MECHANISM-zh.md');
+      if (typeof zhMechanism === 'string') {
+        const hijack = '结构预检只跑结构那一半：缺 H2 段只按类别报计数，具体段名留到节点收尾的完整 `exit`；'
+          + '`plan` 节点的任务块另查七字段。';
+        const hijacked = hijack + '\n' + zhMechanism;
+        // 正锚比对「定位到哪一行」，不比对报文——否则真实断言先红时探针会被遮蔽，看不出判别力。
+        const beforeRow = findMechanismRow(zhMechanism);
+        const afterRow = findMechanismRow(hijacked);
+        if (legacyMechanismLine(hijacked) === legacyMechanismLine(zhMechanism)) {
+          problems.push('正锚构造前提失效（段名段落未被词形判据抢位）');
+        } else if (beforeRow === null || afterRow === null || afterRow.index !== beforeRow.index + 1) {
+          problems.push('机制行定位被抢位：插入的「段名 + plan」段落改写了定位结果');
         }
-        for (const node of needNodes) {
-          if (!row.includes(node)) problems.push(rel + ' 机制行未覆盖出口 ' + node + '（口径落后于门禁范围）');
+        if (beforeRow === null) {
+          problems.push('反向构造前提失效（未定位到机制行）');
+        } else {
+          const lines = zhMechanism.split(/\r?\n/);
+          lines[beforeRow.index] = lines[beforeRow.index].replace('`execute`', '');
+          const gutted = lines.join('\n');
+          if (gutted === zhMechanism) {
+            problems.push('反向构造前提失效（机制行未发生变化）');
+          } else if (!mechanismRowProblems(new Map(docs).set('docs/MECHANISM-zh.md', gutted))
+            .some((problem) => problem.includes('未覆盖出口 execute'))) {
+            problems.push('反向构造判别力缺失（抽掉出口 execute 未被判违规）');
+          }
         }
       }
       // 变异探针：正向（overclaim 写回 / 口径改回旧形态）与反向（补上缺失口径 ⇒ 不再报）。
-      // 含缺席面的探针不执行——上方 SKIP 行已显式声明该面未验证。
+      // 文本探针只在该文档真实在场时执行：缺席的文档无法被「改写」，其缺席已由缺席判据判红。
       const activeProbes = [
         ['overclaim 写回', 'README-zh.md', (text) => text + '\n工件与规则完全继承。\n', '仍含旧表述「完全继承」'],
         ['段名来源改回运行时派生', 'CONTRIBUTING-zh.md',
@@ -2033,8 +2494,8 @@ export const ENTRIES = [
           (text) => text + '\n## 缺段报错（两阶段）\n\n首次只给模板路径与类别计数，再犯才列段名。\n', '缺「两阶段」', false],
         ['补上增量段口径', 'docs/USAGE-zh.md',
           (text) => text + '\n工件保真 = 上游模板段 + 本仓增量段。\n', '缺「增量段」', false],
-      ].filter(([, rel]) => docs.has(rel));
-      assertProbesDiscriminate(problems, docs, activeRules, activeProbes);
+      ].filter(([, rel]) => typeof docs.get(rel) === 'string');
+      assertProbesDiscriminate(problems, docs, rules, activeProbes);
       if (problems.length > 0) throw new Error('公开面口径不符: ' + problems.join('; '));
     },
   },
