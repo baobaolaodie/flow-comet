@@ -761,6 +761,10 @@ export const ENTRIES = [
       const st = baseState('review');
       st.evidence.review = { summary: 'review done' };
       writeState(dir, st);
+      // ②④ 共用：本夹具下允许出现的 REVIEW WARN 类别由调用方逐条枚举，**枚举外的行一律算失败**——
+      // 逐条 assertNotOut 只挡得住被点名的那一类，夹具上再冒出一类无关告警时不会红（判别力退化）。
+      const reviewWarnsOutside = (res, allowed) => String(res.output || '').split(/\r?\n/)
+        .filter((line) => line.includes('REVIEW WARN') && !allowed.some((marker) => line.includes(marker)));
       // ① 发现区 Minor 条目无处置标记 → REVIEW WARN + 通过（渐进不阻断）
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
         '# REVIEW\n\n## 发现\n\n### Critical\n\n无\n\n### Major\n\n无\n\n### Minor\n\n- **m-1 · 示例发现**：描述（未处置）\n\n## 结论\n\n通过\n');
@@ -774,7 +778,10 @@ export const ENTRIES = [
         '# REVIEW\n\n## 发现\n\n### Critical\n\n无\n\n### Major\n\n无\n\n### Minor\n\n- **m-1 · 示例发现**：描述 [转待办]\n\n## 结论\n\n通过\n');
       const res2 = runGuard(['exit', 'review'], dir);
       assertExit(res2, 0);
-      assertNotOut(res2, '缺处置状态标记');
+      // [转待办] 另触发延期裁决与 Minor 判据两道门——这两类之外不得出现任何 REVIEW WARN
+      // （含「缺处置状态标记」：该条已有处置去向，误报即本场景的回归）。
+      const outside2 = reviewWarnsOutside(res2, ['缺少用户裁决记录', '缺 `判 Minor：` 行']);
+      assertTrue(outside2.length === 0, '② 出现枚举外的 REVIEW WARN（未知告警类别）:\n' + outside2.join('\n'));
       assertOut(res2, 'ALL CHECKS PASSED');
       // ③ 有序条目（1. **...**）与无序同口径——缺处置标记 → 旧 change 仍渐进 REVIEW WARN
       // （修复前 .filter((item) => !item.ordered) 使有序条目静默通过 = RED）
@@ -789,7 +796,9 @@ export const ENTRIES = [
         '# REVIEW\n\n## 发现\n\n1. **m-3 · 有序小项**：某处小问题，已登记下一 change 跟踪处置 [转待办]\n\n## 结论\n\n通过\n');
       const resOrderedOk = runGuard(['exit', 'review'], dir);
       assertExit(resOrderedOk, 0);
-      assertNotOut(resOrderedOk, '缺处置状态标记');
+      // 有序条目未标严重度 → 只允许延期待裁决一类告警（Minor 判据门对未标严重度的条目不适用）。
+      const outsideOrdered = reviewWarnsOutside(resOrderedOk, ['缺少用户裁决记录']);
+      assertTrue(outsideOrdered.length === 0, '④ 出现枚举外的 REVIEW WARN（未知告警类别）:\n' + outsideOrdered.join('\n'));
       assertOut(resOrderedOk, 'ALL CHECKS PASSED');
     },
   },
