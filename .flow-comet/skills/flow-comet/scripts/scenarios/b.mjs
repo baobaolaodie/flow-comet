@@ -510,9 +510,9 @@ export const ENTRIES = [
 
       // ---------- 完全没有证据对象：恢复段同样要是可照抄命令（原位扩展；不新增场景条目） ----------
       // 另一个门禁点：节点连 evidence 对象都没有时，前置的「缺证据」门先命中（早于 Output Schema
-      // 证据门）。两处说的是同一件事（节点已完成、证据不在），命令形态必须一致——各写一份时，一处
-      // 有可照抄命令、另一处只剩一句「用 workflow-state.mjs record <node> …」的散文：照抄无从下手，
-      // 协议上下文更无从谈起。
+      // 证据门）。两处说的是同一件事（节点已完成、证据不在），恢复段必须同形——命令形态一致，缺
+      // 声明时**同样按执行顺序给两步**。各写一份时，一处两步、另一处只剩 record：照抄第一条就撞
+      // record 自己的声明门，第二步的命令还落在另一条报文里（要两次往返还走不通一条路）。
       writeState(dir, baseState('subagent-execute'));
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1);
       const noEvidenceBlocked = runGuard(['exit', 'subagent-execute'], dir);
@@ -528,16 +528,42 @@ export const ENTRIES = [
       if (!noEvidenceRecordCommand) {
         throw new Error('完全没有证据对象时，恢复段必须给出可照抄的 record 命令:\n' + noEvidenceBlocked.output);
       }
-      // ② 与缺 Output Schema 字段那条同一构造：脚本路径逐字等于 scriptCommand 的产物、协议上下文随命令走
+      // ② 证据整体缺席 + 缺声明 ⇒ 恢复段必须是**两步**（本格核心）：先声明技能加载、再补证据。
+      // 只给 record 时，照抄第一步就撞 record 自己的前置门（「节点缺少技能加载声明标记」），第二步
+      // 的命令还落在另一条报文里——要两次往返才走通。
+      const noEvidenceSkillLoadCommand =
+        (noEvidenceRecovery.match(/^\s*(node "[^"]+" skill-load [^\n]+)$/m) || [])[1];
+      if (!noEvidenceSkillLoadCommand) {
+        throw new Error('证据整体缺席且缺技能加载声明时，恢复段必须同时给出 skill-load 命令'
+          + '（否则照抄 record 会被它的前置门拦下，第二步的命令又落在另一条报文里）:\n'
+          + noEvidenceBlocked.output);
+      }
+      const noEvidenceSkillAt = noEvidenceRecovery.indexOf(noEvidenceSkillLoadCommand);
+      const noEvidenceRecordAt = noEvidenceRecovery.indexOf(noEvidenceRecordCommand);
+      if (!(noEvidenceSkillAt >= 0 && noEvidenceRecordAt > noEvidenceSkillAt)) {
+        throw new Error('证据缺席的恢复段应按执行顺序排列：skill-load（声明技能加载）在前、'
+          + 'record（补证据）在后——顺序反了执行者照抄会先撞前置门:\n' + noEvidenceRecovery);
+      }
+      // ③ 与缺 Output Schema 字段那条同一构造：两条命令的脚本路径逐字等于 scriptCommand 的产物、
+      // 协议上下文随命令走（照抄时不带 --protocol 就落到另一份协议）
       const noEvidencePathPrefix = scriptCommand({ scriptsDir: SCRIPTS_DIR, runRoot: dir, script: 'workflow-state.mjs' });
-      if (!noEvidenceRecordCommand.startsWith(noEvidencePathPrefix + ' ')) {
-        throw new Error('恢复段的 record 命令脚本路径应逐字等于 scriptCommand 产物 ' + noEvidencePathPrefix
-          + '，实际: ' + noEvidenceRecordCommand);
+      for (const [label, noEvidenceCommand] of [['record', noEvidenceRecordCommand], ['skill-load', noEvidenceSkillLoadCommand]]) {
+        if (!noEvidenceCommand.startsWith(noEvidencePathPrefix + ' ')) {
+          throw new Error('恢复段的 ' + label + ' 命令脚本路径应逐字等于 scriptCommand 产物 '
+            + noEvidencePathPrefix + '，实际: ' + noEvidenceCommand);
+        }
+        if (!noEvidenceCommand.includes(' --protocol "reference/workflow-protocol.json"')) {
+          throw new Error('协议不是内置默认时，恢复段的 ' + label + ' 命令必须自带 --protocol: ' + noEvidenceCommand);
+        }
       }
-      if (!noEvidenceRecordCommand.includes(' --protocol "reference/workflow-protocol.json"')) {
-        throw new Error('协议不是内置默认时，恢复段的 record 命令必须自带 --protocol: ' + noEvidenceRecordCommand);
-      }
-      // ③ 照抄执行（环境变量清空——协议上下文只能来自命令本身）：证据真的写进去了
+      // ④ 照抄打印出来的两条命令并真实执行（环境变量清空——协议上下文只能来自命令本身）：按报文给的
+      // 顺序走完两步，同一 exit 通过，这条报文才是一条完整的恢复路径。
+      const noEvidenceDeclared = runPrintedCommand(noEvidenceSkillLoadCommand, dir, {
+        FLOW_COMET_RUN_ROOT: dir,
+        FLOW_COMET_PROTOCOL: '',
+      });
+      assertExit(noEvidenceDeclared, 0);
+      assertOut(noEvidenceDeclared, 'SKILL-LOAD: subagent-execute');
       const noEvidenceRecovered = runPrintedCommand(noEvidenceRecordCommand, dir, {
         FLOW_COMET_RUN_ROOT: dir,
         FLOW_COMET_PROTOCOL: '',
@@ -545,7 +571,26 @@ export const ENTRIES = [
       assertExit(noEvidenceRecovered, 0);
       assertEqual(JSON.parse(readStateBytes(dir)).evidence?.['subagent-execute']?.summary, '<本节点完成摘要>',
         '照抄前置门的 record 命令写入的 evidence（协议上下文须随命令到达）');
-      // ④ 反例：内置默认协议下同一门禁点的命令不加 --protocol（照抄时默认解析落到的就是同一份）
+      const noEvidencePassed = runGuard(['exit', 'subagent-execute'], dir);
+      assertExit(noEvidencePassed, 0);
+      assertOut(noEvidencePassed, 'ALL CHECKS PASSED');
+      // ⑤ 声明已在场（上一步刚声明）⇒ 同一门禁点收敛回一条 record：不多给一步（否则把「已经做过
+      // 的事」再让人做一遍）。断言只看恢复段。
+      writeState(dir, baseState('subagent-execute'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1);
+      const declaredNoEvidence = runGuard(['exit', 'subagent-execute'], dir);
+      assertExit(declaredNoEvidence, 1);
+      const declaredNoEvidenceStart = declaredNoEvidence.output.lastIndexOf('恢复:');
+      const declaredNoEvidenceBlock = declaredNoEvidenceStart < 0
+        ? ''
+        : declaredNoEvidence.output.slice(declaredNoEvidenceStart);
+      if (!declaredNoEvidenceBlock.includes(noEvidenceRecordCommand)) {
+        throw new Error('已有声明时，缺证据的恢复段应仍给出同一条 record 命令:\n' + declaredNoEvidence.output);
+      }
+      if (/skill-load\s/.test(declaredNoEvidenceBlock) || /第一步|第二步/.test(declaredNoEvidenceBlock)) {
+        throw new Error('已有技能声明时恢复段不得再给 skill-load 步骤:\n' + declaredNoEvidenceBlock);
+      }
+      // ⑥ 反例：内置默认协议下同一门禁点的命令不加 --protocol（照抄时默认解析落到的就是同一份）
       writeState(dir, baseState('subagent-execute'));
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1);
       const defaultNoEvidenceBlocked = runScriptCopy(

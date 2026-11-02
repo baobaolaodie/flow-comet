@@ -320,7 +320,7 @@ async function main() {
     return;
   }
   // —— 出口校验链（顺序即语义：每条门禁命中即按既有分级 BLOCKED / WARN）——
-  const evidence = requireNodeEvidence({ node, state });
+  const evidence = await requireNodeEvidence({ node, state });
   await runExitDriftGate({ protocol, node, state, evidence });
   await runFixBatchExitGate({ protocol, node, state });
   runEntryRecordGate({ node, state });

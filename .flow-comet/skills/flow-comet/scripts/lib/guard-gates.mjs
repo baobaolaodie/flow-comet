@@ -445,18 +445,25 @@ export async function runEntryGates({ protocol, node, state, file }) {
 }
 
 // 出口前置：本节点 evidence 必须在场（缺失时给出补证据指引）。返回该 evidence。
-export function requireNodeEvidence({ node, state }) {
+// 异步是为把「缺了什么、下一步跑什么」交给**同一构造函数** evidenceRecoveryBlock（它要读技能加载
+// 声明标记）——同一条缺证据的恢复路径只允许有一份编排，两处各拼一份必然分叉。
+export async function requireNodeEvidence({ node, state }) {
   const evidence = evidenceFor(state, node.id);
   if (!evidence) {
     console.error('BLOCKED: missing evidence for Node ' + node.id + '.');
-    // 恢复段给**可照抄的命令**（与缺 Output Schema 字段那条同一构造函数 evidenceRecoveryBlock）：
-    // 散文式的「用 workflow-state.mjs record …」没有可复制的路径形态、也不带协议上下文，照抄的人
-    // 得自己从散文里反推命令、再自己补协议。先说清缺的是这个节点的证据对象，再给命令；状态漂移的
-    // 两条出路与禁令照旧保留。
-    const recovery = evidenceRecoveryBlock(node);
+    // 恢复段给**可照抄的命令**，且与缺 Output Schema 字段那条**同一构造函数** evidenceRecoveryBlock：
+    // 散文式的「用 workflow-state.mjs record …」没有可复制的路径形态、也不带协议上下文，照抄的人得
+    // 自己从散文里反推命令、再自己补协议。同一件事拼两份的实证：这条路径曾只给 record，而 record 有
+    // 自己的技能加载声明门——照抄第一步就被拦下，第二步的命令还落在另一条报文里（两次往返）。
+    // 先点名缺的是这个节点的证据对象（lead），命令与步骤编排归构造函数；状态漂移的两条出路与禁令
+    // 照旧保留。
+    const recovery = await evidenceRecoveryBlock({
+      node,
+      state,
+      lead: '该节点已完成但缺证据记录（evidence.' + node.id + ' 不在场）',
+    });
     console.error([
-      '恢复: 该节点已完成但缺证据记录（evidence.' + node.id + ' 不在场）——照抄下面的命令补齐它后重试 exit：',
-      '      ' + recovery.recordCommand + recovery.retryTail,
+      ...recovery,
       '      状态漂移 → workflow-state.mjs advance（强制推进）或 select（切换 change）；禁止手改 state 机器字段',
     ].join('\n'));
     process.exit(1);

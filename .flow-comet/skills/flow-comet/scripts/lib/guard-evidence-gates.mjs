@@ -634,12 +634,13 @@ export async function runMultiPassCompletionGate({ node, state }) {
 //
 // record 除了写证据，还有一道前置门：节点技能加载声明标记（.specs/<change>/.skill-loads/<node>-*.json）
 // 不在场时 BLOCKED。于是「照抄 record」在缺声明时走不通，而那道门的报文又把执行者推回 exit——恢复
-// 路径被拆成两条报文里的两步。故缺声明时把前置条件与它的命令写进**同一段「恢复:」**（打印面见
-// runEvidenceCompletionGate），执行者按一条报文即可走完；已有声明时不加步骤。
+// 路径被拆成两条报文里的两步。故缺声明时把前置条件与它的命令写进**同一段「恢复:」**（编排在
+// evidenceRecoveryBlock），执行者按一条报文即可走完；已有声明时不加步骤。
 //
-// 判据与 record 前置门同形（<node>-*.json 任一在场即算已声明，活动路径优先、归档路径兜底），但落点
-// 不同：state 命令族按状态入口初始化的运行上下文解析 .specs/，守卫进程没有该上下文，只能按 runRoot
-// 解析——findSkillLoadsDir 是守卫族的同一实现（两族的目录解析各有归属，不在此另写一份）。
+// 判据与 record 前置门同形（<node>-*.json 任一在场即算已声明），但落点不同：state 命令族按状态入口
+// 初始化的运行上下文解析 .specs/，守卫进程没有该上下文，只能按 runRoot 解析——目录解析（活动路径优先、
+// 归档路径兜底）取守卫族的同一实现 findSkillLoadsDir，不在此另写一份：本函数只提供「声明在不在场」这
+// 一个判据，路径规则归它。
 async function nodeSkillDeclared(nodeId, changeName) {
   if (!nodeId || !changeName) return false;
   const loadsDir = await findSkillLoadsDir(runRoot, changeName);
@@ -693,24 +694,48 @@ function skillLoadCommand(node, skillName, protocolArgs = []) {
   });
 }
 
-// 「补证据」恢复命令块（单一实现）：两个门禁点打印同一块——缺 Output Schema 字段
+// 「补证据」恢复段（单一实现）：两个门禁点打印同一段——缺 Output Schema 字段
 // （runEvidenceCompletionGate）与完全没有证据对象（guard-gates 的 requireNodeEvidence）。两处说的
-// 是同一件事（节点已完成、证据不在），各自拼一份必然分叉：一条带协议上下文、另一条只剩一句
-// 「用 workflow-state.mjs record <node> …」的散文，照抄时连协议都跑不进同一份。命令文本、参数段
-// 与尾注只在这里产出。
-export function evidenceRecoveryBlock(node) {
+// 是同一件事（节点已完成、证据不在），各自拼一份必然分叉：一条带协议上下文与前置声明步骤、另一条
+// 只剩 record，照抄的人在半路撞上 record 自己的声明门，还要回头去另一条报文里找第二步的命令。
+//
+// 形态只由「本节点技能声明在不在场」决定，与哪道门命中无关：
+//   · 声明已在场 → 一步：record 补证据；
+//   · 缺声明     → 两步，按**执行顺序**（第一步声明技能加载、第二步 record）——record 有自己的前置
+//                  门，照抄它之前必须先声明；步骤标注跟着各自的命令走（从上往下抄一遍就通）。
+// lead 是**本门禁**对「它看到缺了什么」的点名（不同的门看到的缺项不同，恢复段的其余部分不随之分叉）；
+// 命令文本、参数段、尾部重试提示与步骤编排都只在这里产出（返回值 = 该段按序打印的各行）。
+// 异步只为读声明标记：两个调用点都在可 await 的位置（缺证据门在出口链上，调用位随之声明 async）。
+export async function evidenceRecoveryBlock({ node, state, lead = null }) {
   const protocolArgs = protocolContextArgs();
-  return {
-    protocolArgs,
-    recordCommand: scriptCommand({
-      scriptsDir,
-      runRoot,
-      script: 'workflow-state.mjs',
-      args: ['record', node.id, `'{"summary":"<本节点完成摘要>"}'`, ...protocolArgs],
-    }),
-    retryTail: ' 后重试 exit（bash / PowerShell 可直接执行；cmd.exe 请把单引号换成双引号，'
-      + '并转义载荷里原有的双引号）',
-  };
+  const recordCommand = scriptCommand({
+    scriptsDir,
+    runRoot,
+    script: 'workflow-state.mjs',
+    args: ['record', node.id, `'{"summary":"<本节点完成摘要>"}'`, ...protocolArgs],
+  });
+  const retryTail = ' 后重试 exit（bash / PowerShell 可直接执行；cmd.exe 请把单引号换成双引号，'
+    + '并转义载荷里原有的双引号）';
+  const leadPrefix = lead === null ? '' : lead + '——';
+  if (!state.activeChange || (await nodeSkillDeclared(node.id, state.activeChange))) {
+    return lead === null
+      ? ['恢复: ' + recordCommand + retryTail]
+      : ['恢复: ' + leadPrefix + '照抄下面的命令补齐它后重试 exit：', '      ' + recordCommand + retryTail];
+  }
+  // 声明时该填的技能名不猜（取协议为该节点声明的实现技能，与 LOAD SKILL 行同源）；取不到就让人按
+  // LOAD SKILL 行填写，不臆造一个名字。前置声明命令本身取 skillLoadCommand（同一次声明的模板 +
+  // 提示词两面），与 record 同一份协议参数段。
+  const skillName = declaredNodeSkill(node);
+  return [
+    '恢复: ' + leadPrefix + '本节点还缺技能加载声明（.skill-loads/' + node.id + '-*.json，'
+      + '新 change 下 record 会先被它拦下）'
+      + (lead === null ? '——按下面的顺序走完两步后重试 exit：' : '；按下面的顺序走完两步后重试 exit：'),
+    '      第一步 声明本节点技能加载'
+      + (skillName === null ? '（技能名按 entry 的 LOAD SKILL 行填，下面用 <skill> 占位）：' : '：'),
+    '      ' + skillLoadCommand(node, skillName, protocolArgs),
+    '      第二步 补证据并重试 exit：',
+    '      ' + recordCommand + retryTail,
+  ];
 }
 
 // 自动补 required-skill completedChecks——节点被完成即视为其实现 skill 已加载。分派（ui-design 门）：
@@ -732,32 +757,10 @@ export async function runEvidenceCompletionGate({ protocol, node, state, evidenc
   const missingSchemaEvidence = missingRequiredSchemaEvidence(protocol, node, evidence);
   if (missingSchemaEvidence.length > 0) {
     console.error('BLOCKED: missing Output Schema evidence: ' + missingSchemaEvidence.join(', '));
-    // 阻塞消息给可照抄的下一步：record 只写 summary 即视为产出证据（与判据同一口径），
-    // 照抄执行后同一 exit 即可通过——不再让执行者从字段清单反推该跑什么命令。
-    // 恢复命令块取单一实现（guard-gates 的前置门打印同一块）：同段的两条命令（本条的 record 与缺
-    // 声明时的 skill-load）用同一份协议参数段，免得一条带协议、一条不带（照抄第一步就落到另一份协议）。
-    const recovery = evidenceRecoveryBlock(node);
-    const recordCommand = recovery.recordCommand;
-    const recoverTail = recovery.retryTail;
-    // 无 active change 时 record 的声明门不适用（它按 change 定位标记），不臆造一个前置步骤。
-    const missingDeclaration = !!state.activeChange
-      && !(await nodeSkillDeclared(node.id, state.activeChange));
-    if (!missingDeclaration) {
-      console.error('恢复: ' + recordCommand + recoverTail);
-    } else {
-      // 两步按**执行顺序**写：缺声明时照抄 record 会先撞它自己的前置门，所以第一步只能是声明，第二步
-      // 才是 record。步骤标注跟着各自的命令走（读的人从上往下照抄一遍就走通，不必回头找「哪条先」）。
-      const skillName = declaredNodeSkill(node);
-      console.error([
-        '恢复: 本节点还缺技能加载声明（.skill-loads/' + node.id + '-*.json，新 change 下 record 会先被它拦下）'
-          + '——按下面的顺序走完两步后重试 exit：',
-        '      第一步 声明本节点技能加载'
-          + (skillName === null ? '（技能名按 entry 的 LOAD SKILL 行填，下面用 <skill> 占位）：' : '：'),
-        '      ' + skillLoadCommand(node, skillName, recovery.protocolArgs),
-        '      第二步 补证据并重试 exit：',
-        '      ' + recordCommand + recoverTail,
-      ].join('\n'));
-    }
+    // 阻塞消息给可照抄的下一步：record 只写 summary 即视为产出证据（与判据同一口径），照抄执行后同一
+    // exit 即可通过——不再让执行者从字段清单反推该跑什么命令。恢复段取单一实现（guard-gates 的前置
+    // 门打印同一段）：缺声明时两步、声明在场时一步，两处同形（顺序、命令、协议上下文都同源）。
+    console.error((await evidenceRecoveryBlock({ node, state })).join('\n'));
     process.exit(1);
   }
 }
