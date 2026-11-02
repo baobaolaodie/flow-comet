@@ -326,28 +326,6 @@ export async function isArchivedChange(changeName) {
   return entries.some(e => e === changeName || e.endsWith('-' + changeName));
 }
 
-// 声明标记目录解析——活动路径 .specs/<change-id>/.skill-loads/ 优先；归档路径兜底（archive 节点
-// 「先移目录后 record/exit」顺序下 change 目录已在 .specs/archive/<前缀>-<change-id>/，标记只随
-// 目录移动——只查活动路径会把「标记存在」误判成「机制未激活」）。归档扫描匹配后缀 -<change-id>
-// （前缀可含日期等，与协议 flowkit.archive.v1 的 archive/*-<change-id> 同构）。两者皆无 → null
-// （声明机制从未激活，调用方按旧 change 兼容跳过）。
-export async function findSkillLoadsDir(root, changeName) {
-  const activeDir = path.join(root, '.specs', changeName, '.skill-loads');
-  if (await fileExists(activeDir)) {
-    return { dir: activeDir, display: '.specs/' + changeName + '/.skill-loads/' };
-  }
-  const archiveRoot = path.join(root, '.specs', 'archive');
-  const entries = await fs.readdir(archiveRoot).catch(() => []);
-  for (const entry of entries) {
-    if (!entry.endsWith('-' + changeName)) continue;
-    const candidate = path.join(archiveRoot, entry, '.skill-loads');
-    if (await fileExists(candidate)) {
-      return { dir: candidate, display: '.specs/archive/' + entry + '/.skill-loads/' };
-    }
-  }
-  return null;
-}
-
 // 段名校验基准从模板自动派生——骨架计算统一委托 lib/guard-artifact-skeleton.mjs（单一实现：读
 // <runRoot>/flow-kit/templates/<DOC>.md + reference/artifact-templates.json，按 runRoot 缓存；段名
 // 归一复用 route-node 的 normalizeHeading）。本模块只把骨架投影成既有消费方要的 { name, regex } 形态

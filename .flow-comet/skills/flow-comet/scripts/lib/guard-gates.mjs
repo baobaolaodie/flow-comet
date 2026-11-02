@@ -38,7 +38,6 @@ import { frontendCriterion } from './guard-uidesign.mjs';
 import {
   declaredRequiredArtifacts,
   evidenceFor,
-  findSkillLoadsDir,
   hasEvidenceField,
   hasNonEmptyHandoffResult,
   isNewChange,
@@ -56,6 +55,9 @@ import { evidenceRecoveryBlock, runSummarySectionsGate } from './guard-evidence-
 import { evaluateArtifact, formatIssueParts, runTaskSevenFieldGate } from './guard-template-fidelity.mjs';
 // 协调者禁令的常量落在中立模块（跨族共用的措辞不进任何一族）：本模块只是取用方，状态命令族同理。
 import { COORDINATOR_NOTICE } from './state-explain.mjs';
+// 声明标记目录的路径规则（活动路径优先、归档兜底）归状态族的路径上下文模块，与 record 前置门同一份
+// 实现——guard → state-* 是允许的单向边；规则若留在守卫族，状态 CLI 会为它加载整个守卫图。
+import { findSkillLoadsDir } from './state-io.mjs';
 
 // 节点 → 合法 exit 的前置条件（对齐 flow-kit 阶段门 + flowkit.*.v1 evidence）
 const NODE_TRANSITION_GATES = {

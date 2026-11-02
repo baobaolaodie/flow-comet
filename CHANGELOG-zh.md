@@ -37,6 +37,7 @@
 - **公开机制文档被删除现在会判失败**：文档检查先判形态——携带公开文档权威映射的检出必须携带该面上的每一份公开文档，删掉一份即判失败并点名该文件；只有根本不含公开文档的检出（安装副本的技能树、npm 包）才输出可见的跳过行，且该跳过行仍写明「本次未校验」。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 - **声明为必需却没给路径的工件，两侧现在说同一句**：预检原先跳过这种声明，节点出口则把它算成永远缺失——同一份声明两种说法，其中一种还是没人做得成的指令。现在两侧都阻断，并打印同一句点名该声明要修的话（补一条路径，或把该产物改成可选）。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 - **委托前置门与 `record` 共用一条技能加载声明判据**：`handoff request` 不再把「归档目录后缀恰好也是这个 change id」的别的 change 标记当作本节点声明——两侧都先读活动 `.skill-loads/`，只在它缺席时才回到唯一的归档声明目录，新 change 在自己声明本节点技能之前一律拦住。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **归档兜底只认本 change 自己的归档目录**：归档目录按完整 `<日期>-<change-id>` 名精确比对，不再按后缀匹配——名字恰好以本 change id 结尾的别的 change，其声明标记不再被读作本 change 的声明；本 change 还没有自己的 `.skill-loads/` 时，在声明本节点技能之前一律拦住。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 
 ## [1.6.5] - 2026-10-24
 

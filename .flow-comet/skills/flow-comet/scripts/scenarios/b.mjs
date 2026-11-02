@@ -1171,6 +1171,23 @@ export const ENTRIES = [
       if (fs.readFileSync(stateFile, 'utf8') !== bytesBeforeDecoy) {
         throw new Error('缺声明 BLOCK 必须 state 字节零改写（别的 change 归档标记不得替本节点作证）');
       }
+      // 活动 .skill-loads/ 不存在（新 change 尚未声明的真实初始态）时，归档兜底同样不得把「同后缀
+      // 但不同 change」的归档目录认作本 change：上面那条诱饵只在活动目录在场时被「活动优先」挡住，
+      // 活动目录一撤，后缀匹配仍会命中 2026-01-01-other-<change-id>——别的 change 的声明替本节点作证，
+      // 委托前置门于是放行（实测该形态打印出 HANDOFF REQUEST）。归档目录必须是 <YYYY-MM-DD>-<本
+      // change> 的精确形态才作数。
+      const loadsAside = path.join(dir, '.specs', 'loads-aside');
+      fs.renameSync(loadsDir, loadsAside);
+      const bytesBeforeSuffixDecoy = fs.readFileSync(stateFile, 'utf8');
+      const resSuffixDecoy = runHandoff(['request', 'S01', 'serial slice'], dir,
+        { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) });
+      assertExit(resSuffixDecoy, 1);
+      assertOut(resSuffixDecoy, 'BLOCKED: 节点 subagent-execute 缺少技能加载声明标记');
+      assertNotOut(resSuffixDecoy, 'HANDOFF REQUEST');
+      if (fs.readFileSync(stateFile, 'utf8') !== bytesBeforeSuffixDecoy) {
+        throw new Error('同后缀异 change 的归档目录不得替本节点作证：BLOCK 必须 state 字节零改写');
+      }
+      fs.renameSync(loadsAside, loadsDir);
       // 复位：本节点标记归位、归档诱饵撤掉——后续段按「已声明」继续
       fs.renameSync(otherNodeMarker, activeMarker);
       fs.rmSync(path.join(dir, '.specs', 'archive'), { recursive: true, force: true });

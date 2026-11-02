@@ -22,7 +22,6 @@ import { nodeTemplateDeclaration, templateDeclareCommand } from '../protocol-uti
 import { runRoot, packageRoot, fileExists, statePath, writeJson, protocolPath } from './guard-state-io.mjs';
 import {
   eligibleParallelBlocks,
-  findSkillLoadsDir,
   inFlightHandoffRequests,
   isArchivedChange,
   isNewChange,
@@ -41,6 +40,9 @@ import { lessonsEntries, lessonsHits, lessonsPathTokens, taskWriteFilesById } fr
 // 命令文本的唯一实现（平台化脚本根 + 整条路径加引号）：运行期恢复指引与 explain 的 COMMAND 行
 // 同源；本模块不再自拼路径（L-067：同一推导两处表达必然分叉）。
 import { scriptCommand } from './state-explain.mjs';
+// 声明标记目录的路径规则（活动路径优先、归档兜底）归状态族的路径上下文模块：本模块只按守卫运行根
+// 取用（guard → state-* 是允许的单向边），不在此另写一份扫描。
+import { findSkillLoadsDir } from './state-io.mjs';
 
 // 本模块位于 <技能包>/scripts/lib：脚本目录由自身位置推导一次——「自己在哪」与运行根是本模块提供
 // 的两个事实，平台化与引号形态本身在 state-explain。
@@ -639,8 +641,8 @@ export async function runMultiPassCompletionGate({ node, state }) {
 //
 // 判据与 record 前置门同形（<node>-*.json 任一在场即算已声明），但落点不同：state 命令族按状态入口
 // 初始化的运行上下文解析 .specs/，守卫进程没有该上下文，只能按 runRoot 解析——目录解析（活动路径优先、
-// 归档路径兜底）取守卫族的同一实现 findSkillLoadsDir，不在此另写一份：本函数只提供「声明在不在场」这
-// 一个判据，路径规则归它。
+// 归档路径兜底）取状态族路径上下文模块（state-io）的同一实现 findSkillLoadsDir，不在此另写一份：本函数
+// 只提供「声明在不在场」这一个判据，路径规则归它。
 async function nodeSkillDeclared(nodeId, changeName) {
   if (!nodeId || !changeName) return false;
   const loadsDir = await findSkillLoadsDir(runRoot, changeName);
