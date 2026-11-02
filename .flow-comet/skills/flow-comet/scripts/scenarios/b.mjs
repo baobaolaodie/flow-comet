@@ -1151,6 +1151,29 @@ export const ENTRIES = [
       const lessonsFile = path.join(dir, '.specs', 'LESSONS.md');
       writeFile(dir, '.specs/LESSONS.md', '# LESSONS\n\n## 条目区（夹具）\n\n### L-601 · [proc] 委托边界须留痕\n\n- **关键词**: s01 委托边界\n');
       const lessonsBytesBefore = fs.readFileSync(lessonsFile, 'utf8');
+      // ---------- 声明标记必须属于本 change（原位扩展；不新增场景条目） ----------
+      // 归档兜底只认本 change 自己的声明目录：活动 .skill-loads 在场时不再回溯归档（record 前置门
+      // 与委托前置门同一份判据）。委托前置门曾经自持一份扫描，会扫遍所有后缀匹配 -<change-id> 的
+      // 归档目录——别的 change 归档里的同名标记也能替本节点作证，等于在门禁上留了一个放行口。
+      const decoyEntry = '2026-01-01-other-' + CHANGE_ID;
+      writeFile(dir, '.specs/archive/' + decoyEntry + '/.skill-loads/subagent-execute-flow-comet-dev.json',
+        JSON.stringify({ node: 'subagent-execute', skill: 'flow-comet-dev', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+      // 本 change 只声明了别的节点：把本节点标记临时改名，活动目录仍在场
+      const activeMarker = path.join(loadsDir, 'subagent-execute-flow-comet-dev.json');
+      const otherNodeMarker = path.join(loadsDir, 'plan-flow-comet-plan.json');
+      fs.renameSync(activeMarker, otherNodeMarker);
+      const bytesBeforeDecoy = fs.readFileSync(stateFile, 'utf8');
+      const resDecoy = runHandoff(['request', 'S01', 'serial slice'], dir,
+        { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) });
+      assertExit(resDecoy, 1);
+      assertOut(resDecoy, 'BLOCKED: 节点 subagent-execute 缺少技能加载声明标记');
+      assertNotOut(resDecoy, 'HANDOFF REQUEST');
+      if (fs.readFileSync(stateFile, 'utf8') !== bytesBeforeDecoy) {
+        throw new Error('缺声明 BLOCK 必须 state 字节零改写（别的 change 归档标记不得替本节点作证）');
+      }
+      // 复位：本节点标记归位、归档诱饵撤掉——后续段按「已声明」继续
+      fs.renameSync(otherNodeMarker, activeMarker);
+      fs.rmSync(path.join(dir, '.specs', 'archive'), { recursive: true, force: true });
       const bytesBeforeRequest = fs.readFileSync(stateFile, 'utf8');
       const resOwnership = runHandoff(['request', 'S01', 'serial slice'], dir,
         { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) });

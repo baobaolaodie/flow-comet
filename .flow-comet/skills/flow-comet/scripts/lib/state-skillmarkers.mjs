@@ -14,7 +14,11 @@ import {
   templateDeclareCommand,
   templateKeyOf,
 } from '../protocol-utils.mjs';
-import { fileExists, readJson, specsDir } from './state-io.mjs';
+import { fileExists, readJson, runRootDir, specsDir } from './state-io.mjs';
+// 声明标记目录解析（活动路径优先、归档路径兜底）的唯一实现落在守卫族共享枢纽：同一条路径规则被
+// 守卫与状态命令两族消费，本模块只把状态命令族的运行上下文作为根注入——若在这里再写一份扫描，
+// 两族会在「活动目录在不在场」「多归档目录取哪个」上各自给出答案（同一判据两个目录）。
+import { findSkillLoadsDir as findSkillLoadsDirAtRoot } from './guard-routing.mjs';
 
 // --prompt 原始参数提取（skill-load 专用参数）：--protocol 由 resolveProtocol 全局解析
 // （CLI > env > 默认）为工作流协议 JSON——skill-load 曾用 --protocol 传 prompt 路径，主仓真实链路
@@ -62,25 +66,13 @@ export function findRequiredSkillBinding(protocol, nodeId, skillName) {
   return (node.requiredSkillCalls ?? []).find((binding) => binding.skill === skillName) ?? null;
 }
 
-// 标记目录解析——活动路径 .specs/<change-id>/.skill-loads/ 优先；归档路径兜底
-// （archive 节点「先移目录后 record/exit」顺序下 change 目录已在 .specs/archive/<前缀>-<change-id>/，
-// 标记只随目录移动——只查活动路径会误报缺失）。归档扫描匹配后缀 -<change-id>（前缀可含日期等，
-// 与协议 flowkit.archive.v1 的 archive/*-<change-id> artifact 路径同构）。两者皆无 → null。
-export async function findSkillLoadsDir(changeName) {
-  const activeDir = path.join(specsDir(), changeName, '.skill-loads');
-  if (await fileExists(activeDir)) {
-    return { dir: activeDir, display: '.specs/' + changeName + '/.skill-loads/' };
-  }
-  const archiveRoot = path.join(specsDir(), 'archive');
-  const entries = await fs.readdir(archiveRoot).catch(() => []);
-  for (const entry of entries) {
-    if (!entry.endsWith('-' + changeName)) continue;
-    const candidate = path.join(archiveRoot, entry, '.skill-loads');
-    if (await fileExists(candidate)) {
-      return { dir: candidate, display: '.specs/archive/' + entry + '/.skill-loads/' };
-    }
-  }
-  return null;
+// 标记目录解析（活动路径 .specs/<change-id>/.skill-loads/ 优先，归档路径兜底——archive 节点
+// 「先移目录后 record/exit」顺序下 change 目录已在 .specs/archive/<前缀>-<change-id>/，标记只随
+// 目录移动）：路径规则与守卫族同一份实现（guard-routing 的 findSkillLoadsDir），本处只注入状态
+// 命令族的运行根。两族各持一份扫描时，同一个标记会因「活动目录在场是否回溯归档」「多归档目录
+// 取哪个」各自得出答案。两者皆无 → null。
+export function findSkillLoadsDir(changeName) {
+  return findSkillLoadsDirAtRoot(runRootDir(), changeName);
 }
 
 // 节点技能加载声明标记存在性（技能加载前置门·方案 A）：校验 .skill-loads/ 下
