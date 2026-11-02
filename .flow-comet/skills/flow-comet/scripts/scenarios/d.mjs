@@ -10,11 +10,13 @@ import {
   assertNotOut,
   assertOut,
   baseState,
+  runGuard,
   runHandoff,
   writeFile,
   writeState,
 } from '../lib/test-helpers.mjs';
 import {
+  CHANGE_ID,
   PREPARE_ENV,
   SCRIPTS_DIR,
   TASK_DEP_CYCLE,
@@ -31,8 +33,53 @@ import {
   runPlanExit,
   runPrepareEnv,
 } from '../lib/test-fixtures.mjs';
-import { runStateWithProtocol } from '../lib/test-assertions.mjs';
+import {
+  REPLAN_STALE_SIGNATURE,
+  assertStateBytesUnchanged,
+  readStateBytes,
+  replanBackupFiles,
+  replanExecuteState,
+  runStateWithProtocol,
+} from '../lib/test-assertions.mjs';
 import { singleSourceImportProblems } from '../lib/text-anchor-checks.mjs';
+
+// ---------- 波次投影族夹具（plan 出口：波次 = 依赖层级的投影） ----------
+// 匿名化同形夹具（中性任务 id / 中性路径），与真实计划同形不同内容：真实计划只作一次性验收载体，
+// 不进套件夹具、也不随包分发。任务块的 parallel="true" 与散文的 [P] 标记保持一致——否则先被既有的
+// 「波次散文一致性」判据拦下，测不到波次投影本身。
+const waveTask = (id, deps = '') => '<task id="' + id + '" parallel="true" status="pending"><action>实现 ' + id
+  + '</action><write_files>src/' + id.toLowerCase() + '.mjs</write_files><verify>node --check src/'
+  + id.toLowerCase() + '.mjs</verify><depends_on>' + deps + '</depends_on></task>\n';
+
+// 波次段 + 任务清单的最小 TASK.md。Wave 行的注解形态刻意取真实工件的写法（(parallel) 标注、
+// 括号依赖注解、行尾 # 注释、[P] 标记）——解析面必须容忍它们，且不把注解里的 id 算成本波成员。
+const waveMarkdown = (waveLines, tasks) => '# TASK\n\n## 波次划分\n\n```\n' + waveLines
+  + '\n```\n\n## 任务清单\n\n' + tasks;
+
+// 写 TASK.md → entry plan（走完整入口记录）→ exit plan；返回 exit 结果。
+const runPlanWithTask = (dir, markdown) => {
+  writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', markdown);
+  assertExit(runGuard(['entry', 'plan'], dir), 0);
+  return runGuard(['exit', 'plan'], dir);
+};
+
+// 同一判据的三种形态（单变量构造：只有波次声明 / 依赖变化）：
+//   ① 诚实——同波任务彼此无依赖，每波 = 依赖层级（无依赖第 1 波，其余 = 1 + 依赖中最晚波次）；
+//   ② 同波依赖——T02 依赖 T01 却与它同写第 2 波（被依赖的 T01 层级为 1，无法与依赖方同波）；
+//   ③ 排得保守——T02 无依赖（层级为 1）却排到第 3 波（排得比依赖允许的更靠后，浪费并行效率）。
+const honestWavePlan = () => waveMarkdown(
+  'Wave 1 (parallel): T01[P], T02[P]\nWave 2 (parallel): T03[P]   (depends on T01, T02)\nWave 3: T04   (depends on T03)   # 收尾',
+  waveTask('T01') + waveTask('T02') + waveTask('T03', 'T01,T02') + waveTask('T04', 'T03'));
+const sameWavePlan = () => waveMarkdown(
+  'Wave 2 (parallel): T01[P], T02   (T02 on T01)',
+  waveTask('T01') + waveTask('T02', 'T01'));
+const conservativeWavePlan = () => waveMarkdown(
+  'Wave 1: T01\nWave 3: T02   # 无依赖却排到第三波',
+  waveTask('T01') + waveTask('T02'));
+// 修正后：T01 回到第 1 波、T02 排到第 2 波并显式依赖 T01（恢复指引的两条出路都落到这份夹具上）。
+const fixedWavePlan = () => waveMarkdown(
+  'Wave 1 (parallel): T01[P]\nWave 2: T02   (depends on T01)',
+  waveTask('T01') + waveTask('T02', 'T01'));
 
 export const ENTRIES = [
 
@@ -204,7 +251,7 @@ export const ENTRIES = [
   // 145（多趟语义重写）：新 change + 依赖环（P01↔P02 互为 depends_on）→ exit plan 应 BLOCKED，
   // 输出含「依赖环」（拓扑排序判环）与「depends_on」恢复指引。旧引擎无波次校验静默放行 = 预期 RED。
   {
-    name: '145 plan exit BLOCKED：新 change 依赖环（P01↔P02 互为依赖）',
+    name: '145 plan exit BLOCKED：新 change 依赖环（P01↔P02 互为依赖）+ 波次投影三形态（同波依赖 / 排得保守 / 修正后通过）+ replan 同源拒绝重签',
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
@@ -215,6 +262,55 @@ export const ENTRIES = [
       assertOut(res, 'BLOCKED');
       assertOut(res, '依赖环');
       assertOut(res, 'depends_on');
+      // ===== 波次投影（波次 = 依赖层级的投影）三形态：既有 plan 出口族原位扩展，不新增顶层场景 =====
+      // ② 同波依赖（Wave 2: T01[P], T02 且 T02 依赖 T01）⇒ 新 change BLOCK，明细逐条点名
+      //    （被依赖的 T01 层级为 1，无法与依赖它的 T02 同波）。
+      const sameWaveBlocked = runPlanWithTask(dir, sameWavePlan());
+      assertExit(sameWaveBlocked, 1);
+      assertOut(sameWaveBlocked, '波次划分与依赖层级不一致');
+      assertOut(sameWaveBlocked, 'T01');
+      assertOut(sameWaveBlocked, '当前波 2');
+      assertOut(sameWaveBlocked, '应到波 1');
+      // 恢复指引的两条出路都必须可照抄（移到应到波 / 补 depends_on）
+      assertOut(sameWaveBlocked, '移到第 1 波');
+      assertOut(sameWaveBlocked, 'depends_on');
+      assertNotOut(sameWaveBlocked, '未校验（无波次段）');
+      // ③ 排得保守（T02 无依赖、只需第 1 波却排到第 3 波）⇒ 同样 BLOCK 且点名 T02——
+      //    只判「依赖不得倒挂」会放过这种浪费（作者要的是「不浪费效率」，两者都要判）。
+      const conservativeBlocked = runPlanWithTask(dir, conservativeWavePlan());
+      assertExit(conservativeBlocked, 1);
+      assertOut(conservativeBlocked, '波次划分与依赖层级不一致');
+      assertOut(conservativeBlocked, 'T02');
+      assertOut(conservativeBlocked, '当前波 3');
+      assertOut(conservativeBlocked, '应到波 1');
+      // ④ 修正后通过（T01 回第 1 波、T02 排第 2 波并显式依赖 T01）：判据在场（不是跳过）且沉默。
+      const waveFixed = runPlanWithTask(dir, fixedWavePlan());
+      assertExit(waveFixed, 0);
+      assertOut(waveFixed, 'ALL CHECKS PASSED');
+      assertNotOut(waveFixed, '波次划分与依赖层级不一致');
+      assertNotOut(waveFixed, '未校验（无波次段）');
+      // ===== replan 同源（AC-3 · ADR-013 不豁免）：重校段调用同一判定、同一报文 =====
+      // 相位夹具 = execute 已 entry、前序完成、taskHash 过期（避开幂等空操作）。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', sameWavePlan());
+      writeState(dir, replanExecuteState({ taskHash: REPLAN_STALE_SIGNATURE }));
+      const replanBytes = readStateBytes(dir);
+      const replanBlocked = runStateWithProtocol(dir, ['replan', '计划缺陷重校', '--authorized-by', 'user-approval']);
+      assertExit(replanBlocked, 1);
+      // 与 plan 出口同一判据同一措辞（同一个报文构造函数）
+      assertOut(replanBlocked, '波次划分与依赖层级不一致');
+      assertOut(replanBlocked, 'T01');
+      assertOut(replanBlocked, '当前波 2');
+      assertOut(replanBlocked, '应到波 1');
+      // 拒绝重签：状态零改写，且重签前备份尚未产生（重校全部先于写盘）
+      assertStateBytesUnchanged(dir, replanBytes, 'replan 波次投影 BLOCK');
+      if (replanBackupFiles(dir).length !== 0) {
+        throw new Error('replan 波次投影 BLOCK 路径不得产生重签前备份，实际 ' + replanBackupFiles(dir).length + ' 份');
+      }
+      // 改到一致后重签成功（判据不阻断合规计划）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', fixedWavePlan());
+      const replanFixed = runStateWithProtocol(dir, ['replan', '按波次投影修正后重校', '--authorized-by', 'user-approval']);
+      assertExit(replanFixed, 0);
+      assertOut(replanFixed, 'REPLAN: execute');
     },
   },
 
@@ -265,7 +361,7 @@ export const ENTRIES = [
 
   // 149（混排合法锚）：新 change + 多波混合（≥2 个并行块被串行分隔）→ 放行
   {
-    name: '149 plan exit 通过：混排合法锚——多波混合（两并行块被串行分隔）',
+    name: '149 plan exit 通过：混排合法锚——多波混合（两并行块被串行分隔）+ 波次投影诚实计划通过 / 无波次段显式未校验',
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
@@ -274,6 +370,16 @@ export const ENTRIES = [
       const res = runPlanExit(dir, renderMultiWaveTasks());
       assertExit(res, 0);
       assertOut(res, 'ALL CHECKS PASSED');
+      // ⑥ 无波次段：判据不可判 ⇒ 显式「未校验」且其余判据照常（不是静默通过）——本夹具的
+      //    TASK.md 就没有波次段，故这一行必须出现，且出口仍然通过。
+      assertOut(res, '未校验（无波次段）');
+      // ① 诚实计划（同波任务彼此无依赖、每波 = 依赖层级）⇒ 判据在场但不产生任何输出
+      //    （「未校验」缺席证明它真的判过，而不是又跳过了）。
+      const honestPlan = runPlanWithTask(dir, honestWavePlan());
+      assertExit(honestPlan, 0);
+      assertOut(honestPlan, 'ALL CHECKS PASSED');
+      assertNotOut(honestPlan, '未校验（无波次段）');
+      assertNotOut(honestPlan, '波次划分与依赖层级不一致');
     },
   },
 
@@ -294,7 +400,7 @@ export const ENTRIES = [
   // 151（渐进语义适配）：旧 change（无 newChange）+ 依赖环 → 不 BLOCK（渐进 WARN——断言锁「不阻断」，
   // 检测须真实发生：输出 WARN 且含「依赖环」明细）。混排本身已合法化，渐进路径改由依赖图违规承载。
   {
-    name: '151 plan exit 兼容：旧 change 依赖环不 BLOCK（渐进 WARN）',
+    name: '151 plan exit 兼容：旧 change 依赖环不 BLOCK（渐进 WARN）+ 波次投影旧 change 只 WARN',
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
@@ -305,6 +411,14 @@ export const ENTRIES = [
       assertNotOut(res, 'BLOCKED');
       assertOut(res, 'WARN');
       assertOut(res, '依赖环');
+      // ⑤ 旧 change 走同一输入（② 的同波依赖夹具）：判据同源、明细同一措辞，但只 WARN 不阻断——
+      //    退出码不因该判据改变（既有归档流程不被阻断），明细仍点名任务与应到波。
+      const oldWaveWarn = runPlanWithTask(dir, sameWavePlan());
+      assertExit(oldWaveWarn, 0);
+      assertNotOut(oldWaveWarn, 'BLOCKED');
+      assertOut(oldWaveWarn, '波次划分与依赖层级不一致');
+      assertOut(oldWaveWarn, 'T01');
+      assertOut(oldWaveWarn, '应到波 1');
     },
   },
 

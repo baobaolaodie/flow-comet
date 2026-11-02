@@ -13,6 +13,13 @@ import { validateStateFields } from '../state-schema.mjs';
 import { inspectWorkflowPathSegments } from '../protocol-utils.mjs';
 import { fileExists, inspectReentryChangeDir, readJson, readState, runRootDir, specsDir, stateFile, writeState } from './state-io.mjs';
 import { TASK7_REQUIRED } from './task-graph.mjs';
+// 波次投影（波次 = 依赖层级的投影）：与 plan 出口同一实现、同一报文——replan 的重校段消费它，
+// 不另写一份判定（两处各写一份，改散文即可绕过其中一处）。
+import {
+  WAVE_UNCHECKED_NOTICE,
+  waveProjectionReportLines,
+  waveProjectionReview,
+} from './wave-projection.mjs';
 
 // reenter <target> --authorized-by <source> --reason <text> [--continue-round <n>]
 // 受控重入（archive 源回边）：archive 已 entry 且归档移动尚未发生时，用户显式授权把工作归属
@@ -420,6 +427,21 @@ export async function runReplan(protocol, argv) {
       + '——依赖图不可满足（任务的依赖链必须存在且无环）；replan 不做校验豁免，拒绝重签（状态零改写）'
       + '；恢复: 调整任务 depends_on——移除成环引用或改为真实存在的任务 id 后重试');
     process.exit(1);
+  }
+  // 波次投影（波次 = 依赖层级的投影）：与 plan 出口**同源**调用同一判定与同一报文构造（ADR-013：
+  // replan 绝不豁免——此处不判，改一改波次散文就能绕过 plan 出口的同一判据）。新 change 不一致
+  // → BLOCK（明细逐条点名 + 恢复指引；本段全部先于备份与写盘，故状态零改写），旧 change WARN
+  // 渐进；解析不到（无段 / 无可用 Wave 行）显式「未校验」并跳过。措辞与 plan 出口逐字相同
+  // （同一构造函数），两处不会各说一套。
+  const waveReview = waveProjectionReview({ taskContent, blocks: taskList });
+  if (!waveReview.judgeable) {
+    console.error(WAVE_UNCHECKED_NOTICE);
+  } else if (waveReview.mismatches.length > 0) {
+    const waveBlocking = state.newChange === true;
+    for (const line of waveProjectionReportLines(waveReview.mismatches, waveBlocking ? 'BLOCKED' : 'WARN')) {
+      console.error(line);
+    }
+    if (waveBlocking) process.exit(1);
   }
   // 任务字段完整性（与 plan 出口同一判据）：字段集从 `task-graph.mjs` 的单一权威常量取用——本模块
   // 是执行期唯一允许修订任务集的通道，若在此另写一份字面集合，plan 出口会拒的任务集将被 replan

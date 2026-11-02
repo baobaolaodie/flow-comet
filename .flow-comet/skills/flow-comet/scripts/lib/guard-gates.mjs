@@ -35,6 +35,14 @@ import {
   headingPattern,
 } from './guard-artifact-skeleton.mjs';
 import { frontendCriterion } from './guard-uidesign.mjs';
+// 波次段解析与「波次 = 依赖层级的投影」判定（纯判定模块）：plan 出口与 replan 重校段共用同一
+// 实现与同一报文——段界（waveSectionBody）也是既有波次散文检测的唯一表达处。
+import {
+  WAVE_UNCHECKED_NOTICE,
+  waveProjectionReportLines,
+  waveProjectionReview,
+  waveSectionBody,
+} from './wave-projection.mjs';
 import {
   declaredRequiredArtifacts,
   evidenceFor,
@@ -1089,15 +1097,13 @@ export async function runPlanExitGate({ node, state }) {
     }
     // 波次散文一致性检测（WARN 渐进）——## 波次划分 的 Wave 行任务带 [P] 标记（并行语义）但 XML
     // 任务无 parallel="true" → WARN（散文与机器路由依据不一致，以任务标记为准）。容错：无并行语义
-    // 的 Wave 行不参与比对；解析不到波次段跳过（不误报）。段尾判定 = 下一个段标题（\n## ）或分隔线
-    // （\n---）或**输入末尾**。JS 正则没有 \Z：\Z 是「未知转义 ⇒ 字面字符 Z」，惰性匹配一遇段内
-    // 大写 Z 就提前收尾，段被静默截断（含 ZERO- 一类机检标记的 TASK 会整段漏检）。串尾一律用
-    // (?![\s\S]) 真断言——它只是「此处之后已无任何字符」，不受行首/行尾标志影响，与「多行模式下的
-    // $」语义无歧义。
-    const waveSection = content.match(/##\s*波次划分\s*\n([\s\S]*?)(?=\n##\s|\n---|(?![\s\S]))/);
-    if (waveSection) {
+    // 的 Wave 行不参与比对；解析不到波次段跳过（不误报）。段界（含「段即文末」分支与段内大写 Z
+    // 的截断陷阱）由 wave-projection 的 waveSectionBody **单点**实现——本判据消费同一份段体，
+    // 不另持第二份正则（两处各写一份段界，演进时必然静默分叉）。
+    const waveBody = waveSectionBody(content);
+    if (waveBody !== null) {
       const proseParallelIds = [];
-      for (const line of waveSection[1].split('\n')) {
+      for (const line of waveBody.split('\n')) {
         if (!/(Wave|\d+\s*波|parallel|并行)/i.test(line)) continue; // 无并行语义行跳过
         for (const m of line.matchAll(/([A-Z][A-Z0-9-]*)\[P\]/g)) proseParallelIds.push(m[1]);
       }
@@ -1134,6 +1140,26 @@ export async function runPlanExitGate({ node, state }) {
         process.exit(1);
       }
       console.error('WARN: TASK.md ' + detail + '——依赖图不可满足（旧 change 渐进不阻断）' + guide);
+    }
+    // 波次投影判定（波次 = 依赖层级的投影）：`## 波次划分` 声明的波次必须等于任务的依赖层级
+    // （无依赖 = 第 1 波，其余 = 1 + 依赖中最晚波次）。这是「图必须等于依赖」的判据——同波依赖、
+    // 排在依赖之前、以及明明只需更早波次却排到更后面的保守排法都会被逐条点名（任务 / 依赖 /
+    // 当前波 / 应到波）。分级沿用既有先例：新 change BLOCKED（明细 + 恢复指引：移到应到波，或把
+    // 「为何排在后面」的依赖写成显式 depends_on），旧 change WARN 渐进；解析不到（无段 / 无可用
+    // Wave 行 / 无可对应任务）显式打印「未校验」并跳过——不静默、也不冒充通过。位置在依赖图判据
+    // 之后：环与缺失依赖是更根本的规划错误，先报它们；replan 重校段（ADR-013 不豁免）调用同一
+    // 判定与同一报文构造，措辞与分级因此不会分叉。
+    {
+      const waveReview = waveProjectionReview({ taskContent: content, blocks: taskList });
+      if (!waveReview.judgeable) {
+        console.error(WAVE_UNCHECKED_NOTICE);
+      } else if (waveReview.mismatches.length > 0) {
+        const waveBlocking = isNewChange(state);
+        for (const line of waveProjectionReportLines(waveReview.mismatches, waveBlocking ? 'BLOCKED' : 'WARN')) {
+          console.error(line);
+        }
+        if (waveBlocking) process.exit(1);
+      }
     }
     // 伪并行检测（真实载体验证暴露的设计盲区兜底）：如果一个标记为并行的任务只写测试文件而无任何
     // 生产代码文件，它很可能隐式依赖某个实现类并行任务的产出（如测试 import 尚未存在的函数）。这种

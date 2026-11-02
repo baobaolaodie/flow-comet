@@ -1,6 +1,7 @@
 // task-graph.mjs — 任务与协议图的底层共享判定（单一权威实现）
 // 承载：① 协议节点顺序 / 启用 / 任务文件路径（route · protocolNodeEnabled · protocolTaskFilePath ·
-// EXECUTE_FAMILY_NODE_IDS）；② 任务依赖解析与依赖图（taskDependencyEligibility · analyzeDependencyGraph）；
+// EXECUTE_FAMILY_NODE_IDS）；② 任务依赖解析与依赖图（taskDependencyEligibility · analyzeDependencyGraph ·
+// taskWaveLevels 依赖层级）；
 // ③ 并行写冲突检测三族（findParallelWriteConflicts 及其构件）；④ 任务集签名与版本语义 ·
 // history 事件归属 · change 名形态 · 修复任务族文本谓词；⑤ 任务块 7 字段集合（TASK7_REQUIRED）。
 // 纯判定：只读 TASK.md 文本、协议对象与 state.history，无 console 输出、无 process.exit、无 state 写入。
@@ -258,6 +259,40 @@ export function analyzeDependencyGraph(blocks) {
   const cyclic = sorted.length < ids.size;
   const cycleIds = cyclic ? [...ids].filter((id) => !sorted.includes(id)) : [];
   return { ids, depsById, missing, cyclic, cycleIds };
+}
+
+// ---------- 依赖层级（波次投影的层级求值 · 单一权威） ----------
+// 层级定义：level(task) = 1 + max(level(dep))，无依赖 = 1（依赖链的最大深度）。「波次 = 依赖层级
+// 的投影」这一判据（plan 出口 / replan 重校，两处同源调用）消费本函数，不在判据侧自算——层级是
+// 同一份依赖数据的第二次求值，两处各算一遍必然分叉。
+// 输入 = <task> 块数组（与 analyzeDependencyGraph 同源解析），输出 Map<id, level>。
+// 依赖解析复用 analyzeDependencyGraph 的 depsById（依赖文本解析单一权威，不另起第二份正则）；
+// 引用不存在的依赖不计入层级（其合法性由依赖图判据负责），环上的任务不产出层级（本函数只求层级，
+// 不承担合法性判定——依赖环 / 缺失依赖由 analyzeDependencyGraph 的消费方先行拦截）。
+export function taskWaveLevels(blocks) {
+  const { ids, depsById } = analyzeDependencyGraph(blocks);
+  const levels = new Map();
+  const resolving = new Set();
+  const resolveLevel = (id) => {
+    const known = levels.get(id);
+    if (known !== undefined) return known;
+    if (resolving.has(id)) return null; // 环：该链无解，本 id 不产出层级
+    resolving.add(id);
+    let deepest = 0;
+    let solvable = true;
+    for (const dep of depsById.get(id) ?? []) {
+      if (!ids.has(dep)) continue;
+      const depLevel = resolveLevel(dep);
+      if (depLevel === null) { solvable = false; break; }
+      if (depLevel > deepest) deepest = depLevel;
+    }
+    resolving.delete(id);
+    if (!solvable) return null;
+    levels.set(id, deepest + 1);
+    return deepest + 1;
+  };
+  for (const id of ids) resolveLevel(id);
+  return levels;
 }
 
 // ---------- 并行文件依赖检测（单源：plan 出口门禁与 replan 重校共用） ----------
