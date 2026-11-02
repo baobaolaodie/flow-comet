@@ -15,6 +15,8 @@
 ### 新增
 
 - **引擎能在节点收尾之前告诉你某份任务摘要还缺什么**：`workflow-guard.mjs exit <节点> --preflight` 只跑结构性门禁——声明工件在场、摘要关键段、模板骨架、入口骨架——不写 state、不写提示账本，且不允许与 `--apply` 同时使用。只有归档步骤才会产出的工件，在预检时点只报告「归档执行后才会生成」，不要求在场。两册执行技能与两处运行期提示都改为指向它，完整 `exit`（不带 `--apply`）仍是节点收尾的全链预演。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **波次声明现在按依赖层级读取**：每个任务的波次必须等于「依赖中最晚波次的下一波」（无依赖 = 第 1 波），同波任务必须彼此没有依赖——声明与层级不一致时新 change 在 plan 出口被拦下，逐条点名该任务、它的依赖、当前波与应到波，并给出两条出路（把它移到那一波，或把说明顺序的依赖声明出来）；旧 change 只告警，读不到波次段时明说该判据未校验，受控重校走同一判据。([#163](https://github.com/baobaolaodie/flow-comet/pull/163))
+- **验收准则现在与测试矩阵对账**：需求文档里的每条验收准则都要在 TEST.md 的 1.1 测试矩阵里有对应行——缺的会在 verify 出口拦下新 change（附上该补的那一行），旧 change 只告警；review 出口只打一行汇总、不改退出码，判不了时（没有编号化的准则、缺 TEST.md、缺模板、没有 1.1 段）出口明说未校验，而不是替你做判断。([#163](https://github.com/baobaolaodie/flow-comet/pull/163))
 
 ### 变更
 
@@ -29,6 +31,7 @@
 - **`handoff` 拒绝非对象契约，也不再借用写面**：不是对象的结果载荷（裸字符串、数组、`null`、数字）在入口即拒绝，不再原样存下；没有 `<write_files>` 的任务也不再继承下一个任务的写面——新 change 下请求会直接被拦，而不是放行到提交子集校验才炸。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 - **路由被拦时 `status` 不再给出节点**：凡是 `next` 拒绝推进的状态（修复批次轮次用完、修复批次停滞、节点看起来还没 exit），它都不报路由节点并在 `ROUTE` 行说明原因；`record` 也不再声称下一个节点；回程路径会给出 `WHY` 行。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 - **不含公开文档的载体如实说明**：包形态或安装副本现在打印明确的「未校验」提示，而不是把它自己的缺文件报成仓库缺文件。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **`handoff result` 现在必须有对应的 request**：记录结果之前会先核对已记录的委托——缺 request 时新 change 被拦下（state 字节不变）并给出该先跑的 request 命令，旧 change 只告警；零提交的结果与只交自身摘要的结果同样被拒，结果不能再先于它所报告的委托被记录下来。([#163](https://github.com/baobaolaodie/flow-comet/pull/163))
 
 ### 修复
 

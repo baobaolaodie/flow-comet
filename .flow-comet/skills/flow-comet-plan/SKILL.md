@@ -29,13 +29,15 @@ guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B：任务块结�
 
 加载顺序：先读 `READ PROMPT:`（`3-task`），再读 `READ TEMPLATE:`（`TASK`）。
 
-波次散文一致性：`## 波次划分` 中标记为并行（[P]）的任务必须与 XML 任务 `parallel="true"` 一致——新 change 不一致 BLOCKED（旧 change WARN 渐进）。
+波次散文一致性：`## 波次划分` 中标记为并行（[P]）的任务必须与 XML 任务 `parallel="true"` 一致——新 change 不一致 BLOCKED（旧 change WARN 渐进）。波次投影一致性：`## 波次划分` 声明的波次必须等于任务的依赖层级（判据与恢复指引见下方「波次形态约束」）——新 change 不一致 BLOCKED（旧 change WARN 渐进），解析不到波次段则打印「未校验（无波次段）」并跳过该判据。
 
 ### 波次形态约束（依赖驱动多趟 · 规划期必守）
 
 **约束本体**：并行任务按依赖关系组织——每个并行任务显式声明 `depends_on`，合法性只取决于依赖图本身：`depends_on` 无环且引用的任务都存在，规划即合法。全并行、全串行、串→并、并→串四种基本形态与任意混排序列（如 `S→P→S`、`P→S→P`）一律放行——引擎按依赖拓扑自动分趟（每趟委托全部依赖已满足的并行任务，趟间回串行消化），混排序列由多趟路由按依赖拓扑自动分趟消化，并行任务的先后位置不受任何限制。
 
-**硬性拦截（规划出口 BLOCKED，附恢复指引）**：任务块结构（至少一个 `<task>` 块）/ 每任务 `<verify>` 字段 / 新格式任务的 7 字段在场（集合见上表；新 change 缺任一即 BLOCKED，旧格式模板 / 旧 change 渐进 WARN）/ 任务图依赖环 / 缺失依赖（`depends_on` 引用不存在的任务 id）/ 并行写写冲突（并行任务 `write_files` 重叠）——任一项不成立即在规划出口被 BLOCKED（读写重叠仅 WARN），按提示修正后重新 exit 即可通过。任务间依赖不得成环（如 A→B→A），也不得构成不可满足的依赖链。
+**波次 = 依赖层级的投影（波次编号的判据）**：`## 波次划分` 里的波次编号不是自由排版，而是任务依赖层级的投影——① 每个任务的波次 = 其依赖中最晚波次的下一波（无依赖 = 第 1 波）；② 同波任务必须彼此没有依赖；③ 想让某任务晚一点跑，就写 `depends_on` 把顺序声明出来，而不是把它挪到后面的波却不声明。声明波次与依赖层级不一致（同波依赖 / 排在依赖之前 / 明明只需更早波次却排得更靠后）→ 新 change 出口 **BLOCKED**：明细逐条点名「任务 / 依赖 / 当前波 / 应到波」，并给两条恢复出路——把该任务移到第 N 波，或补 `depends_on` 把顺序声明出来（要保留当前波次，就把「它为何排在后面」的依赖写成显式 `depends_on`）；旧 change 只 WARN 渐进；解析不到波次段（无 `## 波次划分` 段，或段内没有可与任务 id 对应的 Wave 行）→ 打印「未校验（无波次段）」并跳过该判据（未验证 ≠ 通过）。`replan` 重校走同一判据、同一报文，不豁免。**与混排合法化并存**：本条只要求「波次编号与依赖层级一致」，不恢复旧的「并行块必须连续成组」形态约束——上面的串→并→串混排照旧合法，并行任务的先后位置照旧不受限制。
+
+**硬性拦截（规划出口 BLOCKED，附恢复指引）**：任务块结构（至少一个 `<task>` 块）/ 每任务 `<verify>` 字段 / 新格式任务的 7 字段在场（集合见上表；新 change 缺任一即 BLOCKED，旧格式模板 / 旧 change 渐进 WARN）/ 任务图依赖环 / 缺失依赖（`depends_on` 引用不存在的任务 id）/ 并行写写冲突（并行任务 `write_files` 重叠）/ 波次声明与依赖层级不一致（明细与两条恢复出路见上一条）——任一项不成立即在规划出口被 BLOCKED（读写重叠仅 WARN），按提示修正后重新 exit 即可通过。任务间依赖不得成环（如 A→B→A），也不得构成不可满足的依赖链。
 
 **警示**：落笔时先画依赖方向再标 [P]，避免出口返工。
 
@@ -87,10 +89,13 @@ This node decomposes the technical design into atomic, executable tasks with cle
    - `done`: One sentence completion criteria, corresponding to an AC sub-item.
 
 7. **Wave division**: Group tasks by dependency graph:
+   - **Waves are a projection of dependency levels**: each task's wave is one past the latest wave among its dependencies (no dependency = wave 1), and tasks in the same wave must not depend on one another; to make a task run later, declare the order with `depends_on` instead of moving it to a later wave without declaring it.
    - Cross layer = sequential execution.
    - Same-layer tasks may carry `parallel="true"` only when the wave genuinely contains a concurrent companion and their `write_files` do not overlap; an isolated task stays serial.
    - Flow-comet override: the permissive flow-kit upstream semantics — "no conflict ⇒ [P]" and "same layer = same wave, parallel" — are superseded by this node's rule; the vendored upstream files stay read-only and are not modified.
    - Output wave diagram: `Wave 1: T01[P], T02[P]` etc.; isolated tasks appear as serial steps.
+
+   A declared wave that disagrees with the dependency level — a same-wave dependency, a task placed before its dependency, or a conservative placement later than needed — blocks a new change at the plan exit: every mismatch is named as task / dependencies / declared wave / expected wave, together with the two ways out (move it to wave N, or add the `depends_on` that explains the order), while an older change only warns. When the wave section cannot be read (no `## 波次划分` section, or no Wave line naming a known task), the exit prints "not checked (no wave section)" and skips the rule — unverified is not a pass. `replan` runs the same judgement with the same wording. This rule constrains the agreement between wave numbers and dependency levels only: it does not bring back the old "parallel blocks must be contiguous" shape constraint, so the mixed-sequence freedom above stands (serial → parallel → serial stays legal).
 
 8. **LESSONS scan**: Grep `.specs/LESSONS.md` for keywords related to planned file paths or actions. If active lessons hit, declare difference or confirm still applies.
 
@@ -106,6 +111,7 @@ This node is truly done when:
 - Every `write_files` is strictly within DESIGN.md touched + new modules range (not in forbidden list).
 - Every `[P]` mark has a genuine concurrent companion in its wave with non-overlapping `write_files`; isolated tasks are serial (a fully serial plan is valid when no genuine companion exists).
 - Wave division diagram is clear and has no circular dependencies.
+- Wave numbers agree with dependency levels: each wave is one past the latest dependency wave, and tasks sharing a wave have no dependencies between them (an unreadable wave section is reported as "not checked", never as a pass).
 - Task numbering is continuous.
 
 ### Red flags
@@ -114,6 +120,7 @@ This node is truly done when:
 - **Agent thought**: "verify: tests should pass" is good enough. **Actual risk**: Vague verify commands cannot be executed. Must be specific: `pytest tests/test_x.py -v` not "tests should pass".
 - **Agent thought**: "write_files can include any file the task might touch." **Actual risk**: Including DESIGN forbidden list modules in write_files bypasses R7.3 + R6.5 boundary enforcement. Strict control is mandatory.
 - **Agent thought**: "Same layer means these tasks can all be marked [P]." **Actual risk**: A same-layer task with no concurrent companion, or with overlapping `write_files`, would be delegated as parallel in violation of this node's rule. Mark `[P]` by companion and write boundaries, never by layer alone.
+- **Agent thought**: "This task just feels like it should run later, so I'll put it in a later wave." **Actual risk**: A wave number is the dependency level projected onto the plan — moving a task to a later wave without declaring the dependency is exactly the mismatch the exit blocks. Declare `depends_on` instead of moving the wave.
 - **Agent thought**: "read_files and write_files are the same thing." **Actual risk**: read_files includes reuse targets and reference modules; write_files is strictly the modification boundary. They serve different purposes (B3 old-project guardrail).
 
 ## Entry Check

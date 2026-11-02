@@ -25,6 +25,8 @@ This node performs a structured multi-round review of the implemented change, ch
 
 本出口**声明加载** `TEST.md` 并做 **5 轮完整性过程检查**（细目见 `flow-comet-test` 册）；`TEST.md` 的**结构骨架校验在 verify 出口**（`flowkit.verify.v1`），不在本出口——`## 验证命令` 增量段的执行与校验同样在 verify 出口。
 
+**AC 覆盖**在这里只做汇总提示：`REQUIREMENT.md` 的验收准则每条都应在 `TEST.md` 的 1.1 测试矩阵里有对应行；真缺时出口打印一行 `REVIEW WARN: TEST.md 的 1.1 测试矩阵缺 AC 覆盖: AC-…`——一条汇总、不逐条刷屏、**不改变退出码**。权威判定在 verify 出口：新 change 缺覆盖 **BLOCKED**（点名编号 + 恢复句「在 TEST.md 的 1.1 测试矩阵为这些 AC 补行」），旧 change WARN 渐进。判不了（`REQUIREMENT.md` 无 AC 编号 / `TEST.md` 缺席 / 模板缺席 / 无 1.1 段）→ 打印「未校验（<原因>）」且不改退出码（未验证 ≠ 通过，也不冒充通过）。
+
 guard 校验见 workflow-guard.mjs 的 review 出口门禁（发现区处置标记 / 发现位置 / 延期裁决（任何严重度）/ Minor 判定理由行 / 模板骨架）与模板骨架派生（段标题 / 段序 / 首部字段 / 增量段位置）；「填得好不好」由 review 自身把关。
 
 > **模板权威**：本节点产出工件的段形 = **上游模板 + 本仓登记的增量段**——唯一权威 = `flow-kit/templates/**`（段与正文），条件段 / 结构子段 / 增量段与指纹由 `../flow-comet/reference/artifact-templates.json` 登记；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
@@ -35,6 +37,7 @@ guard 校验见 workflow-guard.mjs 的 review 出口门禁（发现区处置标�
 
 - [ ] **工件模板保真**：每份交付工件（`*-SUMMARY.md` / TASK / CHANGE / REQUIREMENT / DESIGN）的**标题 / 首部字段 / 段序**与对应模板一致——SUMMARY 按 `flow-kit/templates/SUMMARY.md` 填写并含 `## 自检方法` 段；执行者按 `flow-kit/prompts/4-dev.md` 协议交付。
 - [ ] **Skill 工具触发可见**：检查执行者交付的 transcript，**逐节点可见本节点 skill 用 Skill 工具加载**的触发记录——声明标记在 ≠ 已加载；只看到 `skill-load` 声明命令、看不到 Skill 工具触发 → 反馈并要求补证/重做。
+- [ ] **AC 覆盖**：看到出口打印的 `REVIEW WARN: TEST.md 的 1.1 测试矩阵缺 AC 覆盖` 时逐条核对缺失编号——要么在 1.1 矩阵补行（verify 出口会据此 BLOCK），要么在 REVIEW 里说明该 AC 为何无用例并按发现条目处理（处置标记 + 严重度）；**不得因为 review 出口只汇总、不阻断，就把缺口留给 verify 出口**。
 - [ ] **Skill 工具不可用降级核验**：执行者会话具备 Skill 工具时，须见 Skill 工具加载节点 SKILL 的触发记录；不具备时（委托会话工具集无 Skill 工具），须按 Read 加载节点 SKILL + 协议，并在 Return Contract（`skillToolFallback: "<降级替代形态，如 file-read>"`）与 SUMMARY「自检方法」段显式声明——**Read 不得被声称为已注入（即未执行 Skill 工具注入，字段值必须写替代形态而非本说明）**。只回传 required-skill 标记而无降级声明 → 证据不完整，要求补声明；声明齐全的环境限制不判为代码缺陷。
 
 ### Prerequisites
@@ -75,7 +78,7 @@ guard 校验见 workflow-guard.mjs 的 review 出口门禁（发现区处置标�
 3.5. **Round 2.0 — TEST.md 5-round pyramid completeness**: Before code quality, verify TEST.md:
    - All 5 rounds have clear status (no unfilled).
    - Skipped rounds have reasons.
-   - Round 1 (functional): every AC has coverage.
+   - Round 1 (functional): every AC has coverage — every acceptance criterion in `REQUIREMENT.md` reads a row in the 1.1 test matrix. When any is missing the review exit prints one summary line (`REVIEW WARN: TEST.md 的 1.1 测试矩阵缺 AC 覆盖: AC-…`) and keeps its exit code, while the verify exit is the authoritative gate: a new change blocks on the gap with the recovery line "add the rows to TEST.md's 1.1 test matrix", an older change warns. When the criterion cannot be judged (no AC ids in `REQUIREMENT.md` / `TEST.md` absent / template absent / no 1.1 section) the exit prints "not checked (<reason>)" and keeps its exit code.
    - Round 2 (performance): if required, has actual/budget/baseline columns.
    - Round 3 (security): if required, has dependency/secret/SAST/OWASP records.
    - Round 4 (compatibility): if required, has browser matrix/migration/cross-version.
@@ -128,6 +131,7 @@ This node is truly done when:
 
 - **Agent thought**: "Code looks good, no issues found." **Actual risk**: Concluding without file:line references means the review was superficial. Every finding must point to specific code.
 - **Agent thought**: "TEST.md exists, that's enough." **Actual risk**: Not checking test pyramid completeness means gaps in test coverage go undetected. Must verify all 5 rounds have clear status.
+- **Agent thought**: "The exit only warned about the missing AC coverage, so it is not my problem." **Actual risk**: 汇总不阻断是分工，不是豁免——verify 出口会就同一份缺口 BLOCKED（新 change）。缺口只有两条出路：在 1.1 矩阵补行，或把它作为发现条目按处置标记处理；把缺口留到 verify 等于把可修的问题变成一次节点返工。
 - **Agent thought**: "I'll fix this small issue directly." **Actual risk**: Reviewer modifying code violates R3.3. Must generate fix tasks instead.
 - **Agent thought**: "Round 3 (UI) is optional." **Actual risk**: For frontend projects with UI changes, Round 3 is mandatory. Only non-frontend projects skip it.
 - **Agent thought**: "6-dimension review is just a checklist." **Actual risk**: Without file:line references and book citations (when using built-in path), the review lacks rigor and fixability.

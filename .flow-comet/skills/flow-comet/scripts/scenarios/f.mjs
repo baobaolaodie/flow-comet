@@ -833,6 +833,61 @@ export const ENTRIES = [
           problems.push(guidanceRel + ' 缺「仍必须由 subagent-execute 委托消化」（direct 委托消化判别句）');
         }
       }
+      // —— 波次投影与 AC 覆盖判据句（本批新增判据的文本锁）——
+      // 判据 = 关键句在**该在场的册**里逐条在案：plan / task 两册锁「波次 = 依赖层级的投影」的规则
+      // 三句与出口行为（恢复出路两条 / 解析不到即未校验 / replan 同源 / 不恢复旧形态约束），
+      // review 册锁 AC 覆盖的两条出口口径（verify 判红 + review 一条汇总、不改退出码）。
+      // 反向构造：逐册逐句抽掉 ⇒ 必报该册缺该句（抽掉用全量 split/join，不是只替换首处）——
+      // 抽掉仍绿即锚失效，本条与真实判据同一次运行里互为判别力。
+      {
+        const waveAnchorsZh = [
+          ['波次投影 · 规则本体（中文）', '波次 = 依赖层级的投影'],
+          ['波次投影 · 无依赖 = 第 1 波（中文）', '无依赖 = 第 1 波'],
+          ['波次投影 · 同波任务彼此无依赖（中文）', '同波任务必须彼此没有依赖'],
+          ['波次投影 · 用 depends_on 表达先后（中文）', '就写 `depends_on` 把顺序声明出来'],
+          ['波次投影 · 恢复出路两条（中文）', '把该任务移到第 N 波，或补 `depends_on` 把顺序声明出来'],
+          ['波次投影 · 解析不到即未校验（中文）', '未校验（无波次段）'],
+          ['波次投影 · replan 同源（中文）', '`replan` 重校走同一判据、同一报文'],
+          ['波次投影 · 不恢复旧形态约束（中文）', '不恢复旧的「并行块必须连续成组」形态约束'],
+        ];
+        const waveAnchorsEn = [
+          ['波次投影 · 规则本体（英文）', 'Waves are a projection of dependency levels'],
+          ['波次投影 · 同波任务彼此无依赖（英文）', 'tasks in the same wave must not depend on one another'],
+          ['波次投影 · 解析不到即未校验（英文）', 'not checked (no wave section)'],
+          ['波次投影 · 不恢复旧形态约束（英文）', 'does not bring back the old "parallel blocks must be contiguous" shape constraint'],
+        ];
+        const acAnchorsZh = [
+          ['AC 覆盖 · review 汇总行（中文）', 'REVIEW WARN: TEST.md 的 1.1 测试矩阵缺 AC 覆盖: AC-…'],
+          ['AC 覆盖 · 恢复句（中文）', '在 TEST.md 的 1.1 测试矩阵为这些 AC 补行'],
+          ['AC 覆盖 · 判不了即未校验（中文）', '未校验（<原因>）'],
+          ['AC 覆盖 · 不改退出码（中文）', '不改变退出码'],
+        ];
+        const acAnchorsEn = [
+          ['AC 覆盖 · 判不了即未校验（英文）', 'not checked (<reason>)'],
+          ['AC 覆盖 · 恢复句（英文）', "add the rows to TEST.md's 1.1 test matrix"],
+        ];
+        const projectionBooks = [
+          ['flow-comet-plan/SKILL.md', [...waveAnchorsZh, ...waveAnchorsEn]],
+          ['flow-comet-task/SKILL.md', waveAnchorsZh],
+          ['flow-comet-review/SKILL.md', [...acAnchorsZh, ...acAnchorsEn]],
+        ];
+        const missingAnchors = (text, anchors) => anchors
+          .filter(([, target]) => !text.includes(target))
+          .map(([label]) => label);
+        for (const [rel, anchors] of projectionBooks) {
+          const text = fs.readFileSync(path.join(SCRIPTS_DIR, '..', '..', rel.split('/')[0], 'SKILL.md'), 'utf8');
+          for (const label of missingAnchors(text, anchors)) {
+            problems.push(rel + ' 缺「' + label + '」（本批判据的判别句式）');
+          }
+          for (const [label, target] of anchors) {
+            if (!text.includes(target)) continue; // 缺失已由真实判据报告，不叠第二条
+            const probed = text.split(target).join('（反向构造：抽掉）');
+            if (!missingAnchors(probed, anchors).includes(label)) {
+              problems.push('反向构造判别力缺失（' + rel + ' 抽掉「' + label + '」未被判缺）');
+            }
+          }
+        }
+      }
       // —— ⑤ Codex 平台事实与支持面（**判别句随 `worktree-notes.md` 移出技能树而迁入
       // `reference/platform-facts.md`**，ADR-016）：判据 = 权威文件在场 + 判别句在权威处
       //（含被反驳引用形态、适用范围限定、fail-open / 未闭合的现判据）+ 各引用册指针在场 +
@@ -1245,6 +1300,19 @@ export const ENTRIES = [
             ['节点视图 · routeNode 路由视图（英文）', '**routeNode** = the routing view'],
             ['节点视图 · Fix batch（英文）', '**For a Fix batch, trust the `FIX-BATCH` line and the `NODE` printed by `next`**'],
           ];
+          // 委托记账与委托顺序分工（本批）：两册各自须写清「`result` 需要 request 是机制保证」与
+          // 「request 与子代理启动的先后仍是执行纪律」两件事——旧表述把前者写成「经验/事实陈述」，
+          // 读者会以为补 request 只是顺序纪律；后者那句（平台层无挂点）保持原文。
+          const delegationLedgerAnchors = [
+            ['委托记账 · result 写盘前校验 request（中文）', '`result` 在写盘前校验该任务存在 request 记录'],
+            ['委托记账 · 恢复句（中文）', '先运行 workflow-handoff.mjs request <task-id> 记录委托，再重录 result'],
+            ['委托记账 · 零提交与只交 SUMMARY 同拦（中文）', '两种形态同样被拦'],
+            ['委托记账 · 判定先于零提交与子集校验（中文）', '该校验先于零提交语义与提交子集校验'],
+            ['委托顺序 · 两件事别混（中文）', '本条管的是「request 与子代理启动的先后」'],
+            ['result 需 request · 机制保证（英文）', 'is a mechanism guarantee'],
+            ['委托记账 · 写盘前拒绝（英文）', 'refused before anything is written (a new change blocks'],
+            ['委托顺序 · 两件事别混（英文）', 'this rule is about the order of the request and the subagent launch'],
+          ];
           const bookAnchorProblems = (books, anchors) => {
             const out = [];
             for (const [rel, text] of books) {
@@ -1256,7 +1324,7 @@ export const ENTRIES = [
             }
             return out;
           };
-          for (const [groupLabel, anchors] of [['预检与委托顺序', preflightOrderAnchors], ['节点视图三字段', nodeFieldAnchors]]) {
+          for (const [groupLabel, anchors] of [['预检与委托顺序', preflightOrderAnchors], ['节点视图三字段', nodeFieldAnchors], ['委托记账与委托顺序分工', delegationLedgerAnchors]]) {
             problems.push(...bookAnchorProblems(bookTexts, anchors));
             for (const [rel, text] of bookTexts) {
               for (const [label, anchor] of anchors) {
