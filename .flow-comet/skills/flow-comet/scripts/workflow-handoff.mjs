@@ -114,6 +114,14 @@ function matchWriteFilePattern(file, pattern) {
   return true;
 }
 
+// write_files 元素原文 → 条目列表（剥块内注释 → 按行切 → 分号容错 → 去空）：request 侧解析写面与
+// result 侧的重合诊断共用这一份切分——两处各写一份的话，同一份写面会被切成不同条目集，诊断随之
+// 在写面其实没变时误报（或被漏报）。
+function writeFilesEntries(elementText) {
+  return String(elementText ?? '').replace(/<!--[\s\S]*?-->/g, '').trim().split(/\s*\n\s*/).map((f) => f.trim()).filter(Boolean)
+    .flatMap((f) => f.split(';')).map((f) => f.trim()).filter(Boolean);
+}
+
 // ---------- F-6 零提交资格（DESIGN 决策 7 · fail-closed） ----------
 // 字面路径 → repo 相对 POSIX 路径归一：仅接受不含 glob 魔法（* ? [）的字面路径；拒绝绝对
 // 路径（POSIX 前导 /、盘符前缀、UNC）与 .. 逃逸、空段。返回归一后相对路径，或 null（无资格）。
@@ -496,6 +504,26 @@ async function reportLessonHits(taskContent, taskId) {
   console.log('  —— 这些条目须在 SUMMARY 的 `## LESSONS 扫描` 段逐条回应（仍适用 / 差异是…）');
 }
 
+// ---------- 越界报文的成因诊断（委托记录早于最近一次 replan） ----------
+// 提交子集校验的允许列表是**发起委托那一刻的写面快照**（request.writeFiles）。计划经 replan 改写面后，
+// 快照仍按原样比对，于是「计划已变更」在报文里显示成「执行者写错了文件」——而报文自带的恢复指引
+// （回退越界文件）会把 replan 之后已经合法的改动退掉。本函数只回答「这份快照与当前 TASK.md 里该任务
+// 的写面是否已经分叉」，越界清单与 BLOCK/WARN 分级仍由调用处按原样给出（不改判定）。
+// 判不出时返回 false：TASK.md 缺失、无该任务块、或块内无 <write_files> 元素都属「无据可判」——把
+// 无据可判当成「已变更」会凭空给出一句错误成因。请求侧显式 --write-files 与 TASK.md 分叉同样命中本
+// 诊断：两者都意味着「快照与当前计划不一致」，而 replan 是这一形态的常见成因（本判据不为它另造分支）。
+async function writeFilesSnapshotStale(state, taskId, requestWriteFiles) {
+  if (!state.activeChange) return false;
+  const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
+  const taskContent = await fs.readFile(taskFile, 'utf8').catch(() => null);
+  const elementText = taskWriteFilesById(taskContent).get(taskId);
+  if (elementText === undefined) return false;
+  // 条目切分与 request 侧同一实现（writeFilesEntries），否则同一份写面会被切成不同集合
+  const currentFiles = writeFilesEntries(elementText);
+  const normalize = (files) => [...new Set(files.map(toPosixPath))].sort().join('\n');
+  return normalize(currentFiles) !== normalize(requestWriteFiles);
+}
+
 async function main() {
   const action = process.argv[2] ?? 'status';
   const state = await readState();
@@ -554,10 +582,9 @@ async function main() {
       const writeFilesElementText = taskWriteFilesById(taskContent).get(taskId);
       if (writeFilesElementText !== undefined) {
         taskResolved = true;
-        // 分号容错：与 workflow-guard.mjs 伪并行启发式同源实现（分号容错双点内联，与 workflow-guard.mjs 同源互锚）
-        // 先剥整块 HTML 注释再拆分——多行注释内容不得混入路径条目（与 workflow-guard 同口径）
-        const files = writeFilesElementText.replace(/<!--[\s\S]*?-->/g, '').trim().split(/\s*\n\s*/).map(f => f.trim()).filter(Boolean)
-          .flatMap(f => f.split(';')).map(f => f.trim()).filter(Boolean);
+        // 切分口径 = writeFilesEntries：与 workflow-guard.mjs 伪并行启发式同源（先剥整块 HTML 注释再拆分，
+        // 多行注释内容不得混入路径条目；行内再按分号容错）
+        const files = writeFilesEntries(writeFilesElementText);
         if (files.length > 0) { writeFiles = files; }
         else { emptyWriteFilesElement = true; }
       }
@@ -780,11 +807,19 @@ async function main() {
           const violations = committedFiles.filter(f => f !== summaryExact && !reqWriteFiles.some(a => matchWriteFilePattern(f, a)));
           if (violations.length > 0) {
             const currentState = await readState();
+            // 只补成因，不改判定：快照早于最近一次 replan 时多给一行解释「范围为什么变了」，
+            // 越界清单与 BLOCK/WARN 分级保持原样——报文自带的「回退越界文件」不然会把人引向
+            // 回退 replan 之后已经合法的改动。
+            const staleSnapshotHint = (hasRequest && await writeFilesSnapshotStale(state, taskId, reqWriteFiles))
+              ? '诊断: 该任务的委托记录早于最近一次 replan（计划写面已变更）——重新运行 workflow-handoff.mjs request ' + taskId + ' 后再记录 result'
+              : null;
             if (currentState?.newChange === true) {
               console.error('BLOCKED: 提交文件超出 writeFiles 范围: ' + violations.join(', ') + '——新 change 强制委托边界;恢复: 回退越界文件或扩展 write_files');
+              if (staleSnapshotHint) console.error(staleSnapshotHint);
               process.exit(1);
             }
             console.error('HANDOFF WARN: 提交文件超出 writeFiles 范围: ' + violations.join(', '));
+            if (staleSnapshotHint) console.error(staleSnapshotHint);
           }
         } catch {
           console.error('HANDOFF ERROR: commitHash 无效或 git show 失败: ' + commitHash + '——协调者需确认原因(跨仓库 worktree 提交校验降级属预期,确认后继续)');

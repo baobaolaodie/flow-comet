@@ -1948,6 +1948,67 @@ export const ENTRIES = [
       assertExit(recorded, 0);
       assertOut(recorded, 'HANDOFF RESULT: T08');
       assertNotOut(recorded, '没有对应的委托 request');
+      // ⑥ 越界报文的成因诊断（只补成因、不改判定）：request 记的是**发起委托那一刻的写面快照**，
+      //    计划经 replan 扩/改写面后，旧快照会让越界报文看起来像「执行者写错了文件」——按报文里
+      //    「回退越界文件」的指引会把 replan 之后已合法的文件退掉。故 request.writeFiles 与当前
+      //    TASK.md 该任务的写面不一致时，越界报文追加一行「记录早于 replan」的成因；两者一致（普通
+      //    真越界）不打印，判定仍是原来的新 change BLOCK / 旧 change WARN。
+      //    夹具判别力：TASK.md 里 T09 的写面是 replan 后扩过的（含 rogue.js），T10 的写面与 request
+      //    逐字一致；若诊断按「全文第一个写面」而非「该任务的写面」比对，T10 会误报。
+      const repo = (args) => spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd: dir, encoding: 'utf8' });
+      writeFile(dir, 'allowed.js', 'export const allowed = 1;\n');
+      writeFile(dir, 'rogue.js', 'export const rogue = 1;\n');
+      repo(['add', 'allowed.js', 'rogue.js']);
+      repo(['commit', '-qm', 'replan 之后才进写面']);
+      const replannedHash = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+      writeFile(dir, 'stray.js', 'export const stray = 1;\n');
+      repo(['add', 'stray.js']);
+      repo(['commit', '-qm', 'stray']);
+      const strayHash = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+      const taskWithWriteFiles = (id, files) => '<task id="' + id + '" status="pending"><action>写面边界</action>'
+        + '<write_files>\n' + files.join('\n') + '\n</write_files>'
+        + '<verify>node --check allowed.js</verify></task>\n';
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n'
+        + taskWithWriteFiles('T09', ['allowed.js', 'rogue.js'])
+        + taskWithWriteFiles('T10', ['allowed.js']));
+      const replanState = baseState('subagent-execute');
+      replanState.newChange = true;
+      replanState.evidence['subagent-execute'] = {
+        handoffRequests: {
+          T09: { description: 'replan 扩写面前的快照', writeFiles: ['allowed.js'] },
+          T10: { description: '写面未变更', writeFiles: ['allowed.js'] },
+        },
+        handoffResult: {},
+      };
+      writeState(dir, replanState);
+      const boundaryPayload = (id, hash) => JSON.stringify({
+        status: 'DONE',
+        taskId: id,
+        commitHash: hash,
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        redEvidence: { command: 'node --check allowed.js', output: 'no output（RED 锚点）' },
+        greenEvidence: { command: 'node --check allowed.js', output: 'ok' },
+      });
+      const replanDiagnostic = '诊断: 该任务的委托记录早于最近一次 replan（计划写面已变更）——重新运行 workflow-handoff.mjs request ';
+      // ① 旧快照（request 只允许 allowed.js，TASK.md 已扩到 rogue.js）→ 仍 BLOCK，且要点明成因
+      const staleSnapshot = runHandoff(['result', 'T09', boundaryPayload('T09', replannedHash)], dir);
+      assertExit(staleSnapshot, 1);
+      assertOut(staleSnapshot, 'BLOCKED: 提交文件超出 writeFiles 范围: rogue.js');
+      assertOut(staleSnapshot, replanDiagnostic + 'T09 后再记录 result');
+      // ② 写面一致的真越界 → 仍是原报文，不得混入成因诊断（否则「成因」不再有判别力）
+      const genuineOverrun = runHandoff(['result', 'T10', boundaryPayload('T10', strayHash)], dir);
+      assertExit(genuineOverrun, 1);
+      assertOut(genuineOverrun, 'BLOCKED: 提交文件超出 writeFiles 范围: stray.js');
+      assertNotOut(genuineOverrun, '早于最近一次 replan');
+      // ③ 判定语义不变：同一份旧快照在旧 change 上只 WARN（诊断行随报文出现，结果照常落库）
+      const legacySnapshot = JSON.parse(readStateBytes(dir));
+      delete legacySnapshot.newChange;
+      writeState(dir, legacySnapshot);
+      const legacyWarn = runHandoff(['result', 'T09', boundaryPayload('T09', replannedHash)], dir);
+      assertExit(legacyWarn, 0);
+      assertOut(legacyWarn, 'HANDOFF WARN: 提交文件超出 writeFiles 范围: rogue.js');
+      assertOut(legacyWarn, replanDiagnostic + 'T09 后再记录 result');
+      assertOut(legacyWarn, 'HANDOFF RESULT: T09');
     },
   },
 
