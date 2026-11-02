@@ -565,7 +565,16 @@ export const ENTRIES = [
       // handoff result 侧同源（缺陷复现）：Fix 归位态下 state.currentNode=review，取原值会打印
       // exit review——该节点此刻正被 Fix 批次门禁拦着；路由视图是 execute。两处提示（next /
       // handoff result）必须同一节点，且都带结构预检与全链预演两句。
-      writeState(dir, fixState);
+      // T02 的 result 必须对上一条 request（缺 request 的 result 在写盘前被拦）——本段只验证
+      // PREFLIGHT 节点同源，故补一条最小 request（noCommit：零提交请求，不引入提交子集校验噪声），
+      // 归位态其余字段原样保留。
+      writeState(dir, {
+        ...fixState,
+        evidence: {
+          ...fixState.evidence,
+          'subagent-execute': { handoffRequests: { T02: { description: 'fix handoff', noCommit: true } } },
+        },
+      });
       const fixHandoff = runHandoff(['result', 'T02',
         '{"greenEvidence":{"command":"node --check src/t2.mjs"},"redEvidence":{"command":"node --check src/t2.mjs"}}'], dir, {
         FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir),

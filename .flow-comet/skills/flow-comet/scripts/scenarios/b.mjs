@@ -1864,7 +1864,12 @@ export const ENTRIES = [
       assertOut(lastNonObject, '--json-file');
       // ③ 零提交语义保持可用：request 记 noCommit:true → 契约无 commitHash 照常记录（形状校验不误伤）
       const zeroState = JSON.parse(before);
-      zeroState.evidence['subagent-execute'].handoffRequests = { T03: { description: 'zero commit', noCommit: true } };
+      // T04 的请求同样要在场：result 缺 request 现已先于提交子集校验被拦，而本段断言的是
+      // 「合法完整契约 + 提交子集校验」这条既有路径——故其 request 带真实 write_files（非零提交）。
+      zeroState.evidence['subagent-execute'].handoffRequests = {
+        T03: { description: 'zero commit', noCommit: true },
+        T04: { description: 'valid contract', writeFiles: ['src/x.mjs'] },
+      };
       writeState(dir, zeroState);
       const zero = runHandoff(['result', 'T03', '{"status":"DONE","completedChecks":["required-skill:subagent-execute.flow-comet-dev"]}'], dir);
       assertExit(zero, 0);
@@ -1880,6 +1885,69 @@ export const ENTRIES = [
       })], dir);
       assertExit(good, 0);
       assertOut(good, 'HANDOFF RESULT: T04');
+      // ⑤ 委托记账：result 必须有对应的 request（新 change BLOCK / 旧 change WARN）——判定在**任何
+      //    写盘之前**，且先于零提交语义与提交子集校验，两个旁路因此由同一处拦下：
+      //    · 零提交形态（契约无 commitHash）：无 request 时 isZeroCommit 恒为 false，旧实现静默落库；
+      //    · 只提交自身 <task>-SUMMARY.md：无 request 时 writeFiles 允许列表为空，只剩 summaryExact
+      //      一条豁免，旧实现的子集校验因此零越界放行。
+      const ledgerPayload = (taskId, hash) => JSON.stringify({
+        status: 'DONE',
+        taskId,
+        ...(hash ? { commitHash: hash } : {}),
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        redEvidence: { command: 'echo red', output: 'red' },
+        greenEvidence: { command: 'echo green', output: 'green' },
+      });
+      // 只含自身 SUMMARY 的提交：旧实现正是靠 summaryExact 豁免放行的那条路径
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T06-SUMMARY.md', '# SUMMARY: T06\n');
+      execFileSync('git', ['add', '.specs/' + CHANGE_ID + '/T06-SUMMARY.md'], { cwd: dir });
+      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'summary only'], { cwd: dir });
+      const summaryHash = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+      const ledgerState = JSON.parse(readStateBytes(dir));
+      ledgerState.newChange = true;
+      const ledgerRequests = ledgerState.evidence['subagent-execute'].handoffRequests || {};
+      if (Object.prototype.hasOwnProperty.call(ledgerRequests, 'T06')) {
+        throw new Error('夹具前提不成立：T06 不应已有 request（本段构造的是缺 request 的 result）');
+      }
+      writeState(dir, ledgerState);
+      const ledgerBytes = readStateBytes(dir);
+      const missingRequest = [
+        { label: '零提交形态（契约无 commitHash）', payload: ledgerPayload('T06') },
+        { label: '只提交自身 SUMMARY', payload: ledgerPayload('T06', summaryHash) },
+      ];
+      for (const item of missingRequest) {
+        const res = runHandoff(['result', 'T06', item.payload], dir);
+        assertExit(res, 1);
+        // 报文点名任务 + 恢复句；且拦下它的不是零提交分支、也不是提交子集校验（判据必须靠前）。
+        assertOut(res, 'BLOCKED: 任务 T06 的 result 没有对应的委托 request');
+        assertOut(res, 'workflow-handoff.mjs request T06');
+        assertOut(res, '再重录 result');
+        assertNotOut(res, 'HANDOFF RESULT');
+        assertNotOut(res, 'HANDOFF 零提交');
+        assertNotOut(res, '提交文件超出 writeFiles 范围');
+        assertStateBytesUnchanged(dir, ledgerBytes, '缺 request 的 result 被拦（' + item.label + '）');
+      }
+      // 旧 change 同样的输入只 WARN（渐进，不阻断既有流程）
+      const legacyLedger = JSON.parse(ledgerBytes);
+      delete legacyLedger.newChange;
+      writeState(dir, legacyLedger);
+      const legacy = runHandoff(['result', 'T06', ledgerPayload('T06', summaryHash)], dir);
+      assertExit(legacy, 0);
+      assertOut(legacy, 'HANDOFF WARN: T06');
+      assertOut(legacy, '没有对应的委托 request');
+      assertOut(legacy, 'HANDOFF RESULT: T06');
+      // 有 request 的 result 照常通过（零提交语义不变：noCommit 请求 + 无 commitHash 契约）
+      const withRequest = JSON.parse(readStateBytes(dir));
+      withRequest.newChange = true;
+      withRequest.evidence['subagent-execute'].handoffRequests = {
+        ...withRequest.evidence['subagent-execute'].handoffRequests,
+        T08: { description: 'delegated', noCommit: true },
+      };
+      writeState(dir, withRequest);
+      const recorded = runHandoff(['result', 'T08', ledgerPayload('T08')], dir);
+      assertExit(recorded, 0);
+      assertOut(recorded, 'HANDOFF RESULT: T08');
+      assertNotOut(recorded, '没有对应的委托 request');
     },
   },
 

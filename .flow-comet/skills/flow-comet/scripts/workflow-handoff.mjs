@@ -691,6 +691,22 @@ async function main() {
     state.evidence['subagent-execute'] = state.evidence['subagent-execute'] || {};
     const handoffReq = state.evidence['subagent-execute'].handoffRequests?.[taskId];
     const hasRequest = !!handoffReq && typeof handoffReq === 'object';
+    // 委托记账：result 必须对上一条 request（复用上面的 hasRequest 读数，不另算一次）。
+    // 位置在任何写盘之前、且先于零提交语义与提交子集校验——那两处都从 request 取范围
+    // （request.writeFiles），缺 request 时它们分别退化成「判不出零提交」与「允许列表为空、
+    // 只剩自身 SUMMARY 一条豁免」，于是零提交契约与「只提交自身 <task>-SUMMARY.md」两种 result
+    // 都会被静默放行。把判定提到这里，两个旁路由同一处拦下，不必在下游两条分支各补一次。
+    // 新 change BLOCK / 旧 change WARN（渐进）；两侧都在写盘之前，state 字节零改写。
+    if (!hasRequest) {
+      const missingRequest = 'result 没有对应的委托 request（handoffRequests 无该任务记录）——未记录的委托不能回传结果';
+      const requestRecovery = '先运行 workflow-handoff.mjs request ' + taskId + ' <description> 记录委托，再重录 result';
+      if (state.newChange === true) {
+        console.error('BLOCKED: 任务 ' + taskId + ' 的 ' + missingRequest + '；本次 result 未写入 state');
+        console.error('恢复: ' + requestRecovery);
+        process.exit(1);
+      }
+      console.error('HANDOFF WARN: ' + taskId + ' 的 ' + missingRequest + '（旧 change 渐进，不阻断）；恢复: ' + requestRecovery);
+    }
     // 已撤回 = 终态（撤回通道的闭合半边）：撤回后的 request 不再接受 result——否则被撤回的委托
     // 可被事后「复活」，撤回语义与守卫的放行判据（同一判据）分叉。要重新委托该任务须重新 request
     // （新 request 记录会覆盖该 taskId 的当前态，撤回留痕以「撤回后重新委托」的顺序可审计）。

@@ -376,8 +376,16 @@ export const ENTRIES = [
         fs.rmSync(outsideDir, { recursive: true, force: true });
       }
       // ③ 请求无资格（glob）+ 契约声称 noCommit → 仍完整提交文件子集校验（越界新 change BLOCK）
+      // 夹具前提：result 必须有对应 request（缺 request 在写盘前就被拦，走不到子集校验）。② 段多次
+      // 重置 state（e.mjs 上方 ② 的 baseState 写入）后 T02 的 request 已丢失，这里补回 ②a 那条 T02
+      // request 的结论形态——write_files 非空（glob，无零提交资格）——本段要验证的仍是
+      // 「零提交声明不能绕过真实提交检查」，不是缺 request 的拦截。
       const stIneligible = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       stIneligible.newChange = true;
+      stIneligible.evidence['subagent-execute'].handoffRequests = {
+        ...stIneligible.evidence['subagent-execute'].handoffRequests,
+        T02: { description: 'glob boundary slice', writeFiles: ['src/gen/*.mjs'] },
+      };
       writeState(dir, stIneligible);
       writeFile(dir, 'src/deep/rogue.js', 'export const deepRogue = 1;\n');
       g(['add', 'src/deep/rogue.js']);
