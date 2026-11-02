@@ -137,7 +137,7 @@ A mismatch is not a bug but the same fact seen from three angles: the `ROUTE:` l
 
 1. **Identify parallel tasks**: Read TASK.md and find all tasks with `parallel="true"` and `status="pending"`. Verify they are genuinely independent (no file conflicts between them — check `write_files` do not overlap).
 
-2. **For each parallel task, create handoff request**: Use `workflow-handoff.mjs request <task-id>` to register the handoff. **委托即记 request（机制保证，不是经验之谈）**——`result` 在写盘前校验该任务存在 request 记录：缺失时新 change **BLOCKED**（state 字节零改写），并给出恢复句「先运行 workflow-handoff.mjs request <task-id> 记录委托，再重录 result」；旧 change 只 WARN。零提交的 result 与只交自身 `<task-id>-SUMMARY.md` 的 result 两种形态同样被拦——该校验先于零提交语义与提交子集校验，那两者都从 request 取范围，因此不存在「先记 result 再补 request」的可行顺序。
+2. **For each parallel task, create handoff request**: Use `workflow-handoff.mjs request <task-id>` to register the handoff. **委托即记 request（机制保证，不是经验之谈）**——`result` 在写盘前校验该任务存在 request 记录：缺失时新 change **BLOCKED**（state 字节零改写），并给出恢复句「先运行 workflow-handoff.mjs request <task-id> 记录委托，再重录 result」（尖括号处填真实任务编号，例如 `request T02`）；旧 change 只 WARN。零提交的 result 与只交自身 `<task-id>-SUMMARY.md` 的 result 两种形态同样被拦——该校验先于零提交语义与提交子集校验，那两者都从 request 取范围，因此不存在「先记 result 再补 request」的可行顺序。
    > 若不传 `--write-files`，脚本会自动从 TASK.md 对应 task 的 `<write_files>` 块解析（orchestrator 无需手动从 TASK.md 提取文件列表）。
    **归属纪律**：request 会校验任务的并行属性与原始 `currentNode`——并行 pending 任务只归属本节点，串行 pending 任务归属 `execute`；错误节点的新 change 请求会被 BLOCK，并按输出运行 `workflow-state next` 与 `entry <目标节点>` 恢复后再重试。
    The handoff prompt must include:
