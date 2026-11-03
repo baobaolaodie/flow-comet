@@ -177,15 +177,22 @@ async function contextSections(runRoot) {
 // 无任何生产者，故已从通过判据移除（取值单形 = state-schema 的 EVOLVE_METADATA_FIELDS）。本常量
 // 只用于**提示**：既有文档带该别名时，报错文案点名它并给出应写字段，让格式问题可见且可改写。
 const EVOLVE_DEPRECATED_SUGGESTION_FIELD = '下次同步建议';
+// 「已锁决策」段名：在场判定与段内判定共用本常量（两处各写一份字面量，改名时必然分叉）。
+const LOCKED_DECISIONS_SECTION = '已锁决策';
+
 // 模板关键格式检查（flow-kit/templates/CONTEXT.md 基准——段存在时校验其内格式，确定性检查）
 const CONTEXT_FORMAT_CHECKS = [
   {
     name: '已锁决策条目日期前缀',
-    applies: (t) => t.includes('## 已锁决策'),
+    applies: (t) => t.includes('## ' + LOCKED_DECISIONS_SECTION),
     // 段内列表条目须带日期 `- [20xx-xx-xx]`；占位条目（[xxx] 形态/待沉淀类/模板尖括号）放行——
-    // 新项目骨架（无历史决策）不应被格式校验拒绝（DF-5）。
+    // 新项目骨架（无历史决策）不应被格式校验拒绝（DF-5）。段体经 contextSectionBody 切片：段界只由
+    // lib/section-body.mjs 决定（围栏内的标题不结束段体），本文件不再自带第二份「按标题切段」——
+    // 此前这里用字符串字面量切分（`.split('## 已锁决策')` 后再 `.split('\n##')`），是一份只在本文件
+    // 存在、且静态锁看不见的段体切片：同一个「这一段到哪里结束」由两处决定时，围栏 / 分隔线 / 段名
+    // 归一的差异迟早让两处给出不同答案。
     passes: (t) => {
-      const seg = (t.split('## 已锁决策')[1] ?? '').split('\n##')[0];
+      const seg = contextSectionBody(t, LOCKED_DECISIONS_SECTION) ?? '';
       const items = seg.split('\n').filter((l) => /^\s*-\s+/.test(l));
       if (items.length === 0) return true; // 空段放行
       const bare = items.filter((l) => {

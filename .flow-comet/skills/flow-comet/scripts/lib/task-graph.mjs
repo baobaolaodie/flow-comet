@@ -413,7 +413,11 @@ export function collectPathOverlaps(leftPaths, rightPaths) {
 }
 
 // 第三族（同文件跨任务且无依赖路径）计算——本模块具名纯函数：输入任务块 / 依赖图 / 既有族去重键，
-// 输出冲突对数组（{ a, b, files }）；无 fs / console / process.exit，不改任何入参。
+// 输出 { conflicts, isOverlappingPair }——conflicts 是冲突对明细（{ a, b, files }，报告面用），
+// isOverlappingPair 是**任务对键集合上的成员判定**（谓词）。任务对键的形态只在 taskPairKey 表达一次：
+// 消费方（wave-projection 的 [P] 判据）要的是「这一对是否写面重叠」，拿到的因此是判定而不是键形态——
+// 两端各算一次键时，形态一旦漂移（换分隔符 / 换定序）键就不相等，补集会静默失效（写面重叠的一对被
+// 当成「本可并行」）。无 fs / console / process.exit，不改任何入参。
 // taskContent 与 allBlocks 须同源（taskContent = 产出 allBlocks 的 TASK.md 文本）——修复任务族
 // 谓词需要全文以定位修复段（段标题取该谓词的缺省回退常量，与 fixTaskClassifier 的缺省一致）。
 export function collectCrossTaskConflicts({ taskContent = '', allBlocks = [], depsById = new Map(), excludedPairKeys = new Set() } = {}) {
@@ -444,7 +448,8 @@ export function collectCrossTaskConflicts({ taskContent = '', allBlocks = [], de
       conflicts.push({ a: participants[i].id, b: participants[j].id, files: overlap });
     }
   }
-  return conflicts;
+  const pairKeys = new Set(conflicts.map((conflict) => taskPairKey(conflict.a, conflict.b)));
+  return { conflicts, isOverlappingPair: (a, b) => pairKeys.has(taskPairKey(a, b)) };
 }
 
 export async function findParallelWriteConflicts(changeDir) {
@@ -500,11 +505,12 @@ export async function findParallelWriteConflicts(changeDir) {
   // 全在该纯函数内，此处不内联第二份。
   const writePairKeys = new Set(writeConflicts.map((c) => taskPairKey(c.a, c.b)));
   const { depsById } = analyzeDependencyGraph(allBlocks);
+  // 只取说明面（明细）：键集合与判定留在纯函数里，本函数不另算一份键。
   const crossTaskConflicts = collectCrossTaskConflicts({
     taskContent: text,
     allBlocks,
     depsById,
     excludedPairKeys: writePairKeys,
-  });
+  }).conflicts;
   return { writeConflicts, readWarnings, crossTaskConflicts };
 }

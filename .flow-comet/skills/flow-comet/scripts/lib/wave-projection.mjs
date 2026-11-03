@@ -251,12 +251,11 @@ export function waveReviewOutcome(review, { blocking = false } = {}) {
 //     「同波无关 ∧ 写面重叠」（参与者已按未完成 / 非修复族过滤），本判据要的是它的**补集**——同层任务
 //     之间无依赖路径（层级不变量），故「不在其返回集合」⟺「写面不重叠」，不重叠才有资格叫「可并行」。
 //     本判据不自己比较路径：第二份重叠判定（含路径归一与 glob）必然与第一份分叉。
+//     补集判定同样不自己算键：task-graph 返回的 isOverlappingPair 就是「键集合上的成员判定」，任务对键
+//     的形态（无序、NUL 分隔）只在那里表达一次。此处自建第二份键（换个分隔符或换个定序）时两端键不再
+//     相等，补集会静默失效——写面重叠的一对被当成「本可并行」，而本判据照常报出来。
 //   · 修复族：族判定经 task-graph 的唯一谓词 fixTaskClassifier，判据侧不自写前缀匹配。
 // 已 done 的任务不参与（规划面上的 [P] 只约束未开始的任务）。
-function gapPairKey(left, right) {
-  return left < right ? left + '\u0000' + right : right + '\u0000' + left;
-}
-
 // 判定：返回 { gaps }，逐条 { a, b, wave, unmarked }（unmarked = 该对里没标 parallel 的任务 id）。
 // 无波次段 / 内容不可判（waves 为 null）→ 空（波次侧已有判别不了，本判据没有分组可用）。
 export function parallelGapReview({ taskContent = '', blocks = [], waves = null } = {}) {
@@ -275,8 +274,9 @@ export function parallelGapReview({ taskContent = '', blocks = [], waves = null 
   }
   if (candidates.length < 2) return { gaps: [] };
   const { depsById } = analyzeDependencyGraph(blocks);
-  const overlappingPairs = new Set(collectCrossTaskConflicts({ taskContent, allBlocks: blocks, depsById })
-    .map((conflict) => gapPairKey(conflict.a, conflict.b)));
+  const { isOverlappingPair } = collectCrossTaskConflicts({
+    taskContent, allBlocks: blocks, depsById,
+  });
   const gaps = [];
   for (let i = 0; i < candidates.length; i += 1) {
     for (let j = i + 1; j < candidates.length; j += 1) {
@@ -284,7 +284,7 @@ export function parallelGapReview({ taskContent = '', blocks = [], waves = null 
       const right = candidates[j];
       if (left.wave !== right.wave || left.level !== right.level) continue;
       if (left.parallel && right.parallel) continue;
-      if (overlappingPairs.has(gapPairKey(left.id, right.id))) continue;
+      if (isOverlappingPair(left.id, right.id)) continue;
       gaps.push({
         a: left.id,
         b: right.id,

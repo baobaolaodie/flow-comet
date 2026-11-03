@@ -15,6 +15,7 @@
 import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
+import { pathToFileURL } from 'url';
 import {
   assertExit,
   assertNotOut,
@@ -42,6 +43,7 @@ import {
   handoffFor,
 } from '../lib/test-fixtures.mjs';
 import { scenarioProtocolPath } from '../lib/test-assertions.mjs';
+import { taskBlocks } from '../task-parsing.mjs';
 import {
   AUTHORITATIVE_SOURCE_ANCHOR_REL,
   GITHOOKS_CODES_REL,
@@ -775,12 +777,17 @@ function legacyMechanismLine(text) {
 
 // ---------- 段体切片形态探针（段体单源锁的判据面） ----------
 
-// 一份「按标题切段体」的实现 = 两种形态之一（判定粒度都是**函数**：`functionBodies` 切出的顶层
-// 函数体，形态命中按「文件 + 函数名」登记，与取用面的「文件 + 符号」同一粒度）：
-//   A 行扫描：同一函数里三件事齐备——① 段头判定（行首 ATX 标题正则，或以其为模式串的 RegExp
+// 一份「按标题切段体」的实现 = 三种写法之一（A/B/C）写在两种位置之一（D = 对象属性箭头）；判定粒度是
+// **具名代码单元**（`functionBodies` 切出的顶层函数体、`objectLiteralArrowBodies` 切出的对象属性箭头体），
+// 形态命中按「文件 + 名称」登记，与取用面的「文件 + 符号」同一粒度：
+//   A 行扫描：同一单元里三件事齐备——① 段头判定（行首 ATX 标题正则，或以其为模式串的 RegExp
 //     构造）② 在判定处收尾（break）③ 把原始行拼成段体（+= line / push(line…) / slice(…).join(…)）；
-//   B 正则切片：同一函数里出现「从段头截到下一个段头」的正则 idiom——惰性 `[\s\S]` 片段配
-//     `(?=…\n## …)` 前瞻，或 `.split(/\n## …/)` 按标题行切。
+//   B 正则切片：同一单元里出现「从段头截到下一个段头」的正则 idiom——惰性 `[\s\S]` 片段配
+//     `(?=…\n## …)` 前瞻，或 `.split(/\n## …/)` 按标题行切；
+//   C 字符串字面量切分：段界写成字符串而不是正则——`.split('\n## …')` / `.indexOf('## …')`
+//     （B 的判据要求正则字面量，同一件事换个写法就整份躲在锁外）；
+//   D 位置：以上任一写法写进**对象字面量的内联箭头**（`passes: (t) => { … }`）——顶层函数切分只看
+//     `function NAME` / `const NAME = () => {`，属性值的箭头体它看不见。
 // 缺任一件都不算：围栏状态过滤器没有段头判定，条目块收集器不在标题处收尾，键解析器把行拆成字段。
 // 段头判定的正则形态覆盖三种写法：`/^#…`、`/^(#{1,6})…`（标题等级写成捕获组）与 `.startsWith('#')`。
 // 旧判定只认「`/^#` 紧邻」一种形态，`^(#{1,6})` 这种带捕获组的写法整份躲在锁外——context-init 的
@@ -791,6 +798,22 @@ const SECTION_BODY_ACCUMULATION_RE = /\+=\s*line\b|\.push\(\s*line\b|\.push\(\s*
 
 // 顶层函数体（function 声明 / const NAME = (…) => {…}）按花括号配对切。注释与字符串里的花括号会让配对
 // 偏一档，只影响检出精度、不影响判据方向：误报会显式红，漏报由行为断言兜住。
+// 花括号配对切体（唯一一处）：从起始行切到配对闭合的那一行（含首末行）。顶层函数体与对象属性箭头体
+// 共用它——两处各写一份配对循环时，其中一处改了口径（例如只认 `}` 起头的行）另一处不会跟上。
+function bracedBodyFrom(lines, startIndex) {
+  let depth = 0;
+  let started = false;
+  const body = [];
+  for (let line = startIndex; line < lines.length; line += 1) {
+    for (const ch of lines[line]) {
+      if (ch === '{') { depth += 1; started = true; } else if (ch === '}') depth -= 1;
+    }
+    body.push(lines[line]);
+    if (started && depth <= 0) break;
+  }
+  return body.join('\n');
+}
+
 function functionBodies(code) {
   const lines = String(code).split('\n');
   const out = [];
@@ -798,28 +821,16 @@ function functionBodies(code) {
     const matched = lines[index].match(/^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_$]+)/u)
       ?? lines[index].match(/^(?:export\s+)?const\s+([A-Za-z0-9_$]+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z0-9_$]+)\s*=>\s*\{/u);
     if (matched === null) continue;
-    let depth = 0;
-    let started = false;
-    const body = [];
-    for (let line = index; line < lines.length; line += 1) {
-      for (const ch of lines[line]) {
-        if (ch === '{') { depth += 1; started = true; } else if (ch === '}') depth -= 1;
-      }
-      body.push(lines[line]);
-      if (started && depth <= 0) break;
-    }
-    out.push({ name: matched[1], text: body.join('\n') });
+    out.push({ name: matched[1], text: bracedBodyFrom(lines, index) });
   }
   return out;
 }
 
 // A 形态（行扫描）：在段头判定处 break，再把原始行拼成段体。
-function sectionSlicerHits(code) {
-  return functionBodies(code)
-    .filter((fn) => SECTION_HEADING_TEST_RE.test(fn.text)
-      && SECTION_BREAK_RE.test(fn.text)
-      && SECTION_BODY_ACCUMULATION_RE.test(fn.text))
-    .map((fn) => fn.name);
+function isLineScanSlicer(text) {
+  return SECTION_HEADING_TEST_RE.test(text)
+    && SECTION_BREAK_RE.test(text)
+    && SECTION_BODY_ACCUMULATION_RE.test(text);
 }
 
 // B 形态（正则切片）：段界写在一对正则里——截取式（`[\s\S]` 片段 + 前瞻 `(?=` + 前瞻里出现 `\n##`）
@@ -830,13 +841,49 @@ const SECTION_SLICE_FORWARD_LOOK_RE = /\(\?=/u;
 const SECTION_SLICE_HEADING_BOUNDARY_RE = /\\n#{1,6}/u;
 const SECTION_SLICE_SPLIT_RE = /\.split\(\s*\/[^/\n]*\\n#{1,6}/u;
 
-function regexSectionSlicerHits(code) {
-  return functionBodies(code)
-    .filter((fn) => fn.text.split('\n').some((line) => SECTION_SLICE_EXCERPT_RE.test(line)
-        && SECTION_SLICE_FORWARD_LOOK_RE.test(line)
-        && SECTION_SLICE_HEADING_BOUNDARY_RE.test(line))
-      || SECTION_SLICE_SPLIT_RE.test(fn.text))
-    .map((fn) => fn.name);
+function isRegexSlicer(text) {
+  return text.split('\n').some((line) => SECTION_SLICE_EXCERPT_RE.test(line)
+      && SECTION_SLICE_FORWARD_LOOK_RE.test(line)
+      && SECTION_SLICE_HEADING_BOUNDARY_RE.test(line))
+    || SECTION_SLICE_SPLIT_RE.test(text);
+}
+
+// C 形态（字符串字面量切分）：段界写成字符串字面量——`.split('\n## …')` / `.indexOf('## …')`。
+// 与 B 同义（按标题行切段）而写法不同：B 的两条判据都要求正则字面量，同一件事换个写法就整份在锁外
+// （context-init 的「已锁决策」格式检查正是这一形态，静态锁因此判它绿）。
+const SECTION_SLICE_STRING_BOUNDARY_RES = [
+  /\.split\(\s*['"]\\n#{1,6}/u,
+  /\.indexOf\(\s*['"]#{1,6}[\s'"]/u,
+];
+
+function isStringLiteralSlicer(text) {
+  return SECTION_SLICE_STRING_BOUNDARY_RES.some((boundary) => boundary.test(text));
+}
+
+// 对象字面量内联箭头（`passes: (t) => { … }`）：属性值的箭头体。顶层函数切分（functionBodies）只看
+// `function NAME` / `const NAME = () => {`，写进对象属性就躲开了形态面。符号名取属性键——登记粒度与
+// 「文件 + 符号」一致，属性名在同一文件内重名时按「文件 + 属性名」合并（与第二份定义同名的处置相同）。
+function objectLiteralArrowBodies(code) {
+  const lines = String(code).split('\n');
+  const out = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const matched = lines[index].match(/^\s*([A-Za-z0-9_$]+)\s*:\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z0-9_$]+)\s*=>\s*\{/u);
+    if (matched === null) continue;
+    out.push({ name: matched[1], text: bracedBodyFrom(lines, index) });
+  }
+  return out;
+}
+
+// 形态面 = 两种位置 × 三种写法的全部命中：写法判定各是一份谓词，位置只决定在哪一堆具名单元上套用。
+// 位置面的盲区（D：对象字面量内联箭头）因此不与写法面各写一套——旧的锁只看顶层函数，把同一件事写进
+// 对象属性就整份躲开了。
+const SECTION_SLICE_FORM_PREDICATES = [isLineScanSlicer, isRegexSlicer, isStringLiteralSlicer];
+
+function sectionSliceHits(code) {
+  const hitsIn = (units) => units
+    .filter((unit) => SECTION_SLICE_FORM_PREDICATES.some((matches) => matches(unit.text)))
+    .map((unit) => unit.name);
+  return [...new Set([...hitsIn(functionBodies(code)), ...hitsIn(objectLiteralArrowBodies(code))])];
 }
 
 // 单源的导出符号集：只有它们受「导出实现恰一处 / 不得自带第二份定义 / 必须具名取用」约束。
@@ -854,8 +901,16 @@ const SECTION_SLICE_REGISTRY = [
   {
     file: 'health.mjs',
     symbol: 'collectDebt',
-    reason: '技术债段体（表格读数）按段标题层级切：段界 = 下一个同级或更高级标题 / 分隔线，'
-      + '还要把段标题自身的层级回传给「复现命令」；本任务写面不含 health.mjs，登记使缺口可见。',
+    // 这一条是**能力差异**，不是同一件事的第二份实现：技术债段体的段界要与**段标题自身的层级**比较
+    // （`## 技术债` + `### 明细` 里的子标题属于段内，不是段边界——按固定级别截断会把子标题之后的
+    // 表格整段丢掉），而这个层级还要随读数回传给「复现命令」（命令里的段级必须取自同一处，否则
+    // `## 技术债` 的项目照抄命令就复现不出本报告的读数）。单源的 sectionBody 两项能力都给不了：
+    // 它只接受一个固定的结束级别，且只返回段体正文、不返回命中的标题。
+    // **合并条件**：section-body.mjs 增加「段体 + 命中标题（含层级）」的返回形态后，health.mjs 改用它，
+    // 本条登记即可删除——届时锁会以「登记已陈旧」提醒（陈旧登记判红，不是静默留着）。
+    reason: '能力差异：段界要与段标题自身的层级比较，且该层级需回传给「复现命令」——'
+      + 'sectionBody 只接受固定结束级别、只返回段体正文，两项都给不了；'
+      + '合并条件 = section-body 增加「段体 + 命中标题层级」的返回形态后改用单源并删除本条。',
   },
 ];
 
@@ -863,8 +918,10 @@ const SECTION_SLICE_REGISTRY = [
 //   ① 单源模块由**导出面**派生（不写文件名）：导出实现恰一处，且 {sectionBody, scanHeadings} 都定义
 //      在那里；
 //   ② **取用面** = 面内提到单源符号的模块：必须具名取用，不得自带第二份定义、不得改从别处取用；
-//   ③ **形态面** = 面内**全部**模块的全部顶层函数——受检面不再只是取用面：把一份私有实现搬进一个
-//      不引用该符号的模块就躲不开了。形如切段体者只许是单源本身，其余必须登记。
+//   ③ **形态面** = 面内**全部**模块的全部具名代码单元（顶层函数 ∪ 对象字面量内联箭头）——受检面不再
+//      只是取用面：把一份私有实现搬进一个不引用该符号的模块就躲不开了；形如切段体者只许是单源本身，
+//      其余必须登记。写法面 = A 行扫描 / B 正则切片 / C 字符串字面量切分（B 的判据要求正则字面量，
+//      C 是同一件事的另一种写法）；位置面 = 顶层函数 / 对象字面量内联箭头（后者是 functionBodies 的盲区）。
 // 返回问题描述数组（空 = 收口）。
 function sectionSingleSourceProblems({ texts: given, registry = SECTION_SLICE_REGISTRY }) {
   const problems = [];
@@ -906,7 +963,7 @@ function sectionSingleSourceProblems({ texts: given, registry = SECTION_SLICE_RE
   for (const [rel, text] of given) {
     if (rel === sourceRel) continue;
     const code = engineCodeText(text);
-    for (const symbol of [...sectionSlicerHits(code), ...regexSectionSlicerHits(code)]) {
+    for (const symbol of sectionSliceHits(code)) {
       if (hits.some((hit) => hit.rel === rel && hit.symbol === symbol)) continue;
       hits.push({ rel, symbol });
     }
@@ -1018,6 +1075,60 @@ const REVERTED_PRIVATE_SLICERS = [
     ],
   },
 ];
+
+// ---------- 任务对键形态探针（配对键单源锁的判据面） ----------
+
+// 「任务对键」= 无序任务对的键：两个 id 先比较定序，再用一个**字符串字面量**当分隔符拼起来
+// （`a < b ? a + '\u0000' + b : b + '\u0000' + a`）。判据按**形态**判定，不看名字也不看分隔符取值：
+// 历史上的第二份实现叫 `gapPairKey`（与第一份不同名），换 `|` 一类分隔符的漂移也同样是第二份实现——
+// 按标识符名计数的锚对这两种形态都判绿（这正是本判据要补的盲区）。
+const PAIR_KEY_ORDER_RE = /\b([A-Za-z0-9_$]+)\s*<\s*([A-Za-z0-9_$]+)\s*\?/u;
+
+function pairKeyForm(text) {
+  const order = PAIR_KEY_ORDER_RE.exec(String(text ?? ''));
+  if (order === null) return false;
+  const [, left, right] = order;
+  if (left === right) return false;
+  // 分隔符只认「字符串字面量夹在两个标识符之间」：`left + '<任意字面量>' + right`（两种定序各判一次）。
+  // 标识符里的 `$` 是正则元字符：直接拼进模式会被当作串尾锚，含它的键因此被静默漏检（探针的假绿形态）。
+  const escaped = (identifier) => identifier.replace(/\$/gu, '\\$');
+  const joined = (first, second) => new RegExp(
+    '\\b' + escaped(first) + '\\s*\\+\\s*[\'"`][^\'"`]*[\'"`]\\s*\\+\\s*\\b' + escaped(second) + '\\b', 'u');
+  return joined(left, right).test(text) || joined(right, left).test(text);
+}
+
+// 配对键单源判据（纯函数 + 合成输入可驱动）：返回问题数组（空 = 收口）。
+//   ① 形态面：「任务对键」形态在引擎面内只许出现一处（键只有一份实现）；
+//   ② 落点：那一处必须就在产出第三族的模块里（键与它的生产者同源；落点由定义面反查，不写文件名）；
+//   ③ 消费方：补集判据所在的模块不得持有任何键形态——它消费 task-graph 返回的判定（谓词），
+//      不自己比 id（第二份键的形态一旦漂移，两端键就不再相等，补集判据会静默失效）。
+function pairKeySingleSourceProblems({ texts }) {
+  const problems = [];
+  const hits = [];
+  for (const [rel, text] of texts) {
+    for (const unit of [...functionBodies(text), ...objectLiteralArrowBodies(text)]) {
+      if (pairKeyForm(unit.text)) hits.push({ rel, symbol: unit.name });
+    }
+  }
+  if (hits.length !== 1) {
+    problems.push('任务对键应恰一处实现，实际: ' + JSON.stringify(hits));
+    return problems;
+  }
+  const producer = engineDefinitionModule('collectCrossTaskConflicts');
+  if (producer === null) {
+    problems.push('第三族产出的定义面不唯一（反查失败）: '
+      + JSON.stringify(engineDefinitionHits('collectCrossTaskConflicts')));
+    return problems;
+  }
+  if (hits[0].rel !== producer.file) {
+    problems.push('任务对键落在 ' + hits[0].rel + '（应与第三族产出同源: ' + producer.file + '）');
+  }
+  const consumer = engineDefinitionModule('parallelGapReview');
+  if (consumer !== null && hits.some((hit) => hit.rel === consumer.file)) {
+    problems.push(consumer.file + ' 自建任务对键（补集判据应消费 ' + producer.file + ' 返回的判定）');
+  }
+  return problems;
+}
 
 export const ENTRIES = [
 
@@ -1600,6 +1711,8 @@ export const ENTRIES = [
   //   ① `entry <内置节点>` 先打 `READ PROMPT:` 再打 `READ TEMPLATE:`，顺序按输出行索引判
   //      （不是只查两行在不在——行序是语义的一部分）；
   //   ② 声明别的节点的协议文件（open 声明 execute 的 4-dev.md）→ 入口 BLOCK，报文点名「与节点协议文件不符」；
+  //   ②c 一个标记声明**多份**协议（0-change.md + 4-dev.md）→ 入口逐份核对，第二份越界同样 BLOCK 并
+  //      点名 4-dev.md（只读 protocol 单值的实现只看第一份，这条会绿）；两份都在面内 ⇒ 放行；
   //   ③ design 的 2a-ui-design.md 是条件提示词（属该节点协议面）→ 不拦；入口按前端判据追出条件行
   //      （非前端不打印，反向构造即同一夹具只改「视觉调性」）；换成无关文件 → 拦；
   //   ④ record 缺 `--templates` 声明 → BLOCK，补上 → 放行；⑤ explain 现问输出 `TEMPLATE:` 行。
@@ -1696,6 +1809,27 @@ export const ENTRIES = [
       // 复位：归档诱饵撤掉、活动声明标记归位——③ 起按「已声明」继续
       fs.rmSync(path.join(dir, '.specs', 'archive'), { recursive: true, force: true });
       fs.renameSync(loadsAside, loadsDir);
+
+      // ②c 多 --prompt：一个标记可声明多份协议，入口必须**逐份**核对。只读 protocol 单值的实现只看
+      // 第一份 ⇒ 第二份落在节点协议面外也照样放行（记下的是「声明过」，不是「声明对」）。第一份是
+      // open 的协议文件、第二份是 execute 的 4-dev.md → BLOCKED 且点名 4-dev.md。
+      const multiPrompt = (prompts) => runState([
+        'skill-load', 'open', 'flow-comet-change',
+        ...prompts.flatMap((prompt) => ['--prompt', 'flow-kit/prompts/' + prompt]),
+        '--templates', 'CHANGE.md,REQUIREMENT.md',
+      ], dir);
+      assertExit(multiPrompt(['0-change.md', '4-dev.md']), 0);
+      const multiPromptEntry = runGuard(['entry', 'open'], dir);
+      assertExit(multiPromptEntry, 1);
+      assertOut(multiPromptEntry, 'BLOCKED');
+      assertOut(multiPromptEntry, '与节点协议文件不符');
+      assertOut(multiPromptEntry, '4-dev.md');
+      // 反向构造（单变量 = 被声明的路径）：两条 --prompt 都落在 open 的协议面内 ⇒ 放行。拦点因此是
+      // 「哪一份被声明」，不是「声明了几份」。
+      assertExit(multiPrompt(['0-change.md', '1-requirement.md']), 0);
+      const multiPromptOk = runGuard(['entry', 'open'], dir);
+      assertExit(multiPromptOk, 0);
+      assertNotOut(multiPromptOk, '与节点协议文件不符');
 
       // ③ 条件提示词不误拦 + 按前端判定打印：design 声明 2a-ui-design.md（条件提示词，属该节点协议面）
       // → 放行；前端 change 的入口追出条件行（与条件模板行对称），非前端 change 不打印。
@@ -2491,9 +2625,13 @@ export const ENTRIES = [
   // ③④ 追加「段名清单单一来源」：模板缺席时仍要生效的四份段名清单（SUMMARY 段序兜底 / open·design 段名回退 /
   // LESSONS 扫描段名 / SUMMARY 必填三段）只许骨架模块登记一份——静态单源锁 + 行为侧反向构造。
   // ⑤ 追加「段体切片单源锁」的静态面：受检面 = 引擎实现面（不再只是取用面），形态面含行扫描与正则
-  // 切片两种；仍存在的同类实现逐条登记（文件 + 符号 + 理由），并配三处回退探针证明锁看得见它们。
+  // 切片两种；仍存在的同类实现逐条登记（文件 + 符号 + 理由），并配回退探针证明锁看得见它们。
+  //    写法面追加字符串字面量切分、位置面追加对象字面量内联箭头（各有合成切片探针）：字面量切分写在
+  //    属性箭头里正是静态锁此前的盲区——引擎里因此留着第二份段体切片而判据全绿。
+  // ⑦ 追加「配对键单源」：第三族的任务对键只在 task-graph 表达一次，[P] 判据的补集消费它返回的判定；
+  //    反向构造三层（换名字 / 换分隔符的第二份键 + 形态漂移的行为变异体）证明补集断言真的敏感。
   {
-    name: 'TA-21 模板缺席降级：不阻断且显式输出「未校验（模板缺失）」；模板在场时同夹具被拦；段名清单与段体切片单源锁（受检面 = 引擎实现面）',
+    name: 'TA-21 模板缺席降级：不阻断且显式输出「未校验（模板缺失）」；模板在场时同夹具被拦；段名清单 / 段体切片 / 任务对键单源锁（受检面 = 引擎实现面）',
     run: async (dir) => {
       // ① 模板缺席：只写工件，不写 flow-kit/templates/
       writeFile(dir, CHANGE_DIR + '/CHANGE.md', renderDoc('CHANGE', { omit: ['影响面'] }));
@@ -2685,7 +2823,7 @@ export const ENTRIES = [
           '}',
         ].join('\n');
         // 受检面必须比取用面宽（否则「形态面」只是换名字的取用面）：把同一份合成切片放进一个从不引用
-        // 单源符号的模块，判据仍须点名它。这条同时钉住了 SECTION_SLICE_REGISTRY 的登记面——那三条
+        // 单源符号的模块，判据仍须点名它。这条同时钉住了 SECTION_SLICE_REGISTRY 的登记面——那几条
         // 命中都不 import sectionBody，一旦受检面退回取用面，它们会立刻变成陈旧登记（也是红的）。
         const shadowRel = SECTION_SLICE_REGISTRY[0].file;
         assertTrue(!/\b(?:sectionBody|scanHeadings)\b/u.test(engineCodeText(texts.get(shadowRel) ?? '')),
@@ -2714,6 +2852,35 @@ export const ENTRIES = [
           const reported = sectionSingleSourceProblems({ texts: new Map(texts).set(probeRel, mutatedText) });
           if (!reported.some((problem) => problem.includes(probeRel) && problem.includes(expected))) {
             probeIssues.push(label + '：未被判违规（' + JSON.stringify(reported) + '）');
+          }
+        }
+        // 写法面两格（C 字符串字面量切分 / D 对象字面量内联箭头）各一份**合成实现**放进取用面之外的
+        // 模块 ⇒ 判据必须点名它们：旧锁对这两种写法都判绿（B 的判据只认正则字面量，functionBodies 只看
+        // 顶层声明），「锁看不见」于是无从发现——这一格是这两种写法的常驻判别力锚。
+        const syntheticSlicers = [
+          ['C 字符串字面量切分', 'probeStringSlicer', [
+            'function probeStringSlicer(content) {',
+            '  return (String(content).split("## S")[1] ?? "").split("\\n##")[0];',
+            '}',
+          ].join('\n')],
+          ['D 对象字面量内联箭头', 'probeInlineSlicer', [
+            'const probeChecks = [',
+            '  {',
+            '    probeInlineSlicer: (text) => {',
+            '      const seg = (text.split("## 已锁决策")[1] ?? "").split("\\n##")[0];',
+            '      return seg.length >= 0;',
+            '    },',
+            '  },',
+            '];',
+          ].join('\n')],
+        ];
+        for (const [label, symbol, synthetic] of syntheticSlicers) {
+          const reported = sectionSingleSourceProblems({
+            texts: new Map(texts).set(shadowRel, (texts.get(shadowRel) ?? '') + '\n' + synthetic),
+          });
+          if (!reported.some((problem) => problem.includes(shadowRel) && problem.includes(symbol))) {
+            probeIssues.push('形态面未覆盖「' + label + '」：' + shadowRel + ' 里的合成切片 ' + symbol
+              + ' 未被判红（' + JSON.stringify(reported) + '）');
           }
         }
         // 形态面：本任务收口的三处各自改回私有实现 ⇒ 锁必红（变异体 = 删掉的旧实现原文）。
@@ -2805,6 +2972,84 @@ export const ENTRIES = [
           assertTrue(actual === expected,
             '段体契约（' + label + '）: 期望 ' + JSON.stringify(expected) + '，实际 ' + JSON.stringify(actual));
         }
+      }
+
+      // ⑦ 配对键单源（P8）：第三族（同文件跨任务）的「任务对键」只在 task-graph 表达一次；[P] 判据的
+      //    补集（写面重叠 ⇒ 不该被要求标 [P]）消费 task-graph 返回的判定，不自己再建一份键——第二份键
+      //    的形态一旦漂移（换分隔符 / 换定序），两端键不再相等，补集静默失效（重叠的一对被当成「本可
+      //    并行」）。反向构造三层：静态两格（换名字的第二份键 / 换分隔符的漂移形态都必红）+ 行为一格
+      //    （把补集判据改回自建键且形态漂移 ⇒ 重叠对被误报，补集断言必红）。
+      {
+        const texts = engineScriptTexts();
+        const baseProblems = pairKeySingleSourceProblems({ texts });
+        assertTrue(baseProblems.length === 0, '任务对键单源违规: ' + baseProblems.join(' | '));
+        const waveRel = (engineDefinitionModule('parallelGapReview') ?? {}).file;
+        assertTrue(typeof waveRel === 'string', '补集判据的定义面不唯一（反查失败）: '
+          + JSON.stringify(engineDefinitionHits('parallelGapReview')));
+        const waveText = texts.get(waveRel) ?? '';
+        const secondKeyMutants = [
+          ['换名字的第二份键（历史上删掉的 gapPairKey 原形）',
+            '\nfunction gapPairKey(left, right) {\n'
+            + '  return left < right ? left + "\\u0000" + right : right + "\\u0000" + left;\n}\n'],
+          ['换分隔符的漂移形态（判据不看分隔符取值）',
+            '\nfunction probePairKey(a, b) {\n  return a < b ? a + "|" + b : b + "|" + a;\n}\n'],
+        ];
+        for (const [label, injected] of secondKeyMutants) {
+          const reported = pairKeySingleSourceProblems({ texts: new Map(texts).set(waveRel, waveText + injected) });
+          assertTrue(reported.some((problem) => problem.includes(waveRel)),
+            '配对键单源锁看不见「' + label + '」: ' + JSON.stringify(reported));
+        }
+        // 行为面：同一对任务（同波同层、写同一个文件、都没标 parallel）在两支下对照——真实模块里补集
+        // 判据把这对排除（写面重叠的一对不是「可并行」）；变异体（补集判据改回自建键 + 分隔符漂移）
+        // 里两端键对不上 ⇒ 同一对被误报成「可并行却未标 [P]」⇒ 补集断言变红。
+        const overlapTask = (id) => '<task id="' + id + '" status="pending"><action>实现 ' + id
+          + '</action><write_files>src/shared.mjs</write_files><verify>node --check src/shared.mjs</verify>'
+          + '<depends_on></depends_on></task>\n';
+        const overlapTaskContent = '# TASK\n\n## 波次划分\n\nWave 1: T01, T02\n\n## 任务清单\n\n'
+          + overlapTask('T01') + overlapTask('T02');
+        const overlapBlocks = taskBlocks(overlapTaskContent);
+        const waveModule = await import('../lib/wave-projection.mjs');
+        const overlapWaves = waveModule.waveProjectionReview({
+          taskContent: overlapTaskContent, blocks: overlapBlocks,
+        });
+        assertTrue(overlapWaves.waves instanceof Map && overlapWaves.waves.size === 2,
+          '夹具前提失效：波次分组应可判（' + JSON.stringify([...((overlapWaves.waves) ?? [])]) + '）');
+        const realGaps = waveModule.parallelGapReview({
+          taskContent: overlapTaskContent, blocks: overlapBlocks, waves: overlapWaves.waves,
+        });
+        assertTrue(realGaps.gaps.length === 0,
+          '补集判据失效：写面重叠（同一文件）的一对被要求标 [P]（' + JSON.stringify(realGaps.gaps) + '）');
+        // 变异体只在内存里编译（data: URL，相对 import 重写为绝对 file: URL）：不落盘、不留残留。
+        const inlineModuleUrl = (source, rel) => {
+          const rewritten = source.replace(/(from\s*')(\.[^']*)(')/gu, (whole, head, specifier, tail) =>
+            head + pathToFileURL(path.resolve(SCRIPTS_DIR, path.dirname(rel), specifier)).href + tail);
+          return 'data:text/javascript;charset=utf-8,' + encodeURIComponent(rewritten);
+        };
+        // 变异 = 把「取单源判定」换回「两端各算一次键」，并只让**消费方**那一端漂移（生产方仍用
+        // task-graph 的 NUL 形态）：这正是第二份键实现存在的真实风险——改一端、漏一端，键就不再相等。
+        // 两处锚各自只改一处代码位置（不搬动实参行），变异体因此语法完整、只把键的两份形态造出来。
+        const decisionAnchor = '  const { isOverlappingPair } = collectCrossTaskConflicts({';
+        const gapsAnchor = '  const gaps = [];';
+        assertTrue(waveText.includes(decisionAnchor) && waveText.includes(gapsAnchor),
+          '反向构造前提失效：' + waveRel + ' 未按单源形态取用第三族判定（锚已漂移）');
+        const driftedText = waveText
+          .replace(decisionAnchor, '  const probeResult = collectCrossTaskConflicts({')
+          .replace(gapsAnchor, [
+            "  const producerPairKey = (a, b) => (a < b ? a + '\\u0000' + b : b + '\\u0000' + a);",
+            "  const consumerPairKey = (a, b) => (a < b ? a + '|' + b : b + '|' + a);",
+            '  const overlappingPairs = new Set(probeResult.conflicts.map((conflict)'
+              + ' => producerPairKey(conflict.a, conflict.b)));',
+            '  const isOverlappingPair = (a, b) => overlappingPairs.has(consumerPairKey(a, b));',
+            '  const gaps = [];',
+          ].join('\n'));
+        assertTrue(driftedText !== waveText, '反向构造前提失效：变异未改变 ' + waveRel);
+        const driftedModule = await import(inlineModuleUrl(driftedText, waveRel));
+        const driftedGaps = driftedModule.parallelGapReview({
+          taskContent: overlapTaskContent, blocks: overlapBlocks, waves: overlapWaves.waves,
+        });
+        assertTrue(driftedGaps.gaps.length > 0,
+          '反向构造失效：补集判据改回「自建键 + 分隔符漂移」后，写面重叠的一对没有被误报——'
+          + '说明该断言对任务对键的形态不敏感（' + JSON.stringify(driftedGaps.gaps) + '）');
       }
     },
   },
