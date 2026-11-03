@@ -835,8 +835,9 @@ export const ENTRIES = [
       }
       // —— 波次投影与 AC 覆盖判据句（本批新增判据的文本锁）——
       // 判据 = 关键句在**该在场的册**里逐条在案：plan / task 两册锁「波次 = 依赖层级的投影」的规则
-      // 三句与出口行为（恢复出路两条 / 解析不到即未校验 / replan 同源 / 不恢复旧形态约束），
-      // review 册锁 AC 覆盖的两条出口口径（verify 判红 + review 一条汇总、不改退出码）。
+      // 三句与出口行为（依赖面与波次编号是两套判据 / 恢复出路两条 / 判不了按成因二分 / 未声明任务
+      // 必须被 Wave 行覆盖 / replan 同源 / 不恢复旧形态约束），review 册锁 AC 覆盖的出口口径
+      //（verify 判红 + 判不了按成因二分 + review 一条汇总、不改退出码）。
       // 反向构造：逐册逐句抽掉 ⇒ 必报该册缺该句（抽掉用全量 split/join，不是只替换首处）——
       // 抽掉仍绿即锚失效，本条与真实判据同一次运行里互为判别力。
       {
@@ -849,25 +850,38 @@ export const ENTRIES = [
           ['波次投影 · 解析不到即未校验（中文）', '未校验（无波次段）'],
           ['波次投影 · replan 同源（中文）', '`replan` 重校走同一判据、同一报文'],
           ['波次投影 · 不恢复旧形态约束（中文）', '不恢复旧的「并行块必须连续成组」形态约束'],
+          ['波次投影 · 段在场而内容不可判按分级（中文）', '波次划分段内容不可判'],
+          ['波次投影 · 未声明任务必须被 Wave 行覆盖（中文）', 'TASK 里的每个非修复族任务都必须被某个 Wave 行覆盖'],
+        ];
+        // plan 册专属：约束本体那一段只写在规划册（task 册讲同一判据的形态与出口，不复述「依赖面」的
+        // 限定）——放共享列表会让 task 册被要求出现它本来不该有的句子。
+        const planOnlyWaveAnchorsZh = [
+          ['波次投影 · 依赖面的合法性（中文）', '依赖面的合法性只取决于依赖图本身'],
+          ['波次投影 · 依赖面合法不等于波次合法（中文）', '依赖面合法不等于波次声明合法'],
         ];
         const waveAnchorsEn = [
           ['波次投影 · 规则本体（英文）', 'Waves are a projection of dependency levels'],
           ['波次投影 · 同波任务彼此无依赖（英文）', 'tasks in the same wave must not depend on one another'],
           ['波次投影 · 解析不到即未校验（英文）', 'not checked (no wave section)'],
           ['波次投影 · 不恢复旧形态约束（英文）', 'does not bring back the old "parallel blocks must be contiguous" shape constraint'],
+          ['波次投影 · 段在场而内容不可判按分级（英文）', 'no Wave line resolves to a real task'],
+          ['波次投影 · 未声明任务必须被 Wave 行覆盖（英文）', 'must be covered by some Wave line'],
         ];
         const acAnchorsZh = [
           ['AC 覆盖 · review 汇总行（中文）', 'REVIEW WARN: TEST.md 的 1.1 测试矩阵缺 AC 覆盖: AC-…'],
           ['AC 覆盖 · 恢复句（中文）', '在 TEST.md 的 1.1 测试矩阵为这些 AC 补行'],
           ['AC 覆盖 · 判不了即未校验（中文）', '未校验（<原因>）'],
           ['AC 覆盖 · 不改退出码（中文）', '不改变退出码'],
+          ['AC 覆盖 · 内容不可判按分级（中文）', 'AC 覆盖判据无法执行'],
+          ['AC 覆盖 · 内容不可判进 WARN 计数（中文）', '该行进入 WARN 计数'],
         ];
         const acAnchorsEn = [
           ['AC 覆盖 · 判不了即未校验（英文）', 'not checked (<reason>)'],
           ['AC 覆盖 · 恢复句（英文）', "add the rows to TEST.md's 1.1 test matrix"],
+          ['AC 覆盖 · 内容不可判按分级（英文）', 'the AC coverage rule cannot run'],
         ];
         const projectionBooks = [
-          ['flow-comet-plan/SKILL.md', [...waveAnchorsZh, ...waveAnchorsEn]],
+          ['flow-comet-plan/SKILL.md', [...planOnlyWaveAnchorsZh, ...waveAnchorsZh, ...waveAnchorsEn]],
           ['flow-comet-task/SKILL.md', waveAnchorsZh],
           ['flow-comet-review/SKILL.md', [...acAnchorsZh, ...acAnchorsEn]],
         ];

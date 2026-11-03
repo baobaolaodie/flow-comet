@@ -25,7 +25,7 @@ This node performs a structured multi-round review of the implemented change, ch
 
 本出口**声明加载** `TEST.md` 并做 **5 轮完整性过程检查**（细目见 `flow-comet-test` 册）；`TEST.md` 的**结构骨架校验在 verify 出口**（`flowkit.verify.v1`），不在本出口——`## 验证命令` 增量段的执行与校验同样在 verify 出口。
 
-**AC 覆盖**在这里只做汇总提示：`REQUIREMENT.md` 的验收准则每条都应在 `TEST.md` 的 1.1 测试矩阵里有对应行；真缺时出口打印一行 `REVIEW WARN: TEST.md 的 1.1 测试矩阵缺 AC 覆盖: AC-…`——一条汇总、不逐条刷屏、**不改变退出码**。权威判定在 verify 出口：新 change 缺覆盖 **BLOCKED**（点名编号 + 恢复句「在 TEST.md 的 1.1 测试矩阵为这些 AC 补行」），旧 change WARN 渐进。判不了（`REQUIREMENT.md` 无 AC 编号 / `TEST.md` 缺席 / 模板缺席 / 无 1.1 段）→ 打印「未校验（<原因>）」且不改退出码（未验证 ≠ 通过，也不冒充通过）。
+**AC 覆盖**在这里只做汇总提示：`REQUIREMENT.md` 的验收准则每条都应在 `TEST.md` 的 1.1 测试矩阵里有对应行；真缺时出口打印一行 `REVIEW WARN: TEST.md 的 1.1 测试矩阵缺 AC 覆盖: AC-…`——一条汇总、不逐条刷屏、**不改变退出码**。权威判定在 verify 出口：新 change 缺覆盖 **BLOCKED**（点名编号 + 恢复句「在 TEST.md 的 1.1 测试矩阵为这些 AC 补行」），旧 change WARN 渐进。判不了按成因二分（与波次判据同口径）：**载体缺席**（`REQUIREMENT.md` 缺席 / 无验收准则段 / `TEST.md` 缺席 / 无第 1 轮承载段 / 模板缺席）→ 打印「未校验（<原因>）」且不改退出码（未验证 ≠ 通过，也不冒充通过）；**内容不可判**（承载段在场而清单读不出来：`REQUIREMENT.md` 无 AC 编号 / 第 1 轮内无 1.1 测试矩阵段）→ verify 出口打印 `AC 覆盖判据无法执行`，新 change BLOCKED / 旧 change WARN 渐进（该行进入 WARN 计数）。本出口对两支判不了都不打印（不制造噪音），只汇总真缺的编号。
 
 guard 校验见 workflow-guard.mjs 的 review 出口门禁（发现区处置标记 / 发现位置 / 延期裁决（任何严重度）/ Minor 判定理由行 / 模板骨架）与模板骨架派生（段标题 / 段序 / 首部字段 / 增量段位置）；「填得好不好」由 review 自身把关。
 
@@ -78,7 +78,7 @@ guard 校验见 workflow-guard.mjs 的 review 出口门禁（发现区处置标�
 3.5. **Round 2.0 — TEST.md 5-round pyramid completeness**: Before code quality, verify TEST.md:
    - All 5 rounds have clear status (no unfilled).
    - Skipped rounds have reasons.
-   - Round 1 (functional): every AC has coverage — every acceptance criterion in `REQUIREMENT.md` reads a row in the 1.1 test matrix. When any is missing the review exit prints one summary line (`REVIEW WARN: TEST.md 的 1.1 测试矩阵缺 AC 覆盖: AC-…`) and keeps its exit code, while the verify exit is the authoritative gate: a new change blocks on the gap with the recovery line "add the rows to TEST.md's 1.1 test matrix", an older change warns. When the criterion cannot be judged (no AC ids in `REQUIREMENT.md` / `TEST.md` absent / template absent / no 1.1 section) the exit prints "not checked (<reason>)" and keeps its exit code.
+   - Round 1 (functional): every AC has coverage — every acceptance criterion in `REQUIREMENT.md` reads a row in the 1.1 test matrix. When any is missing the review exit prints one summary line (`REVIEW WARN: TEST.md 的 1.1 测试矩阵缺 AC 覆盖: AC-…`) and keeps its exit code, while the verify exit is the authoritative gate: a new change blocks on the gap with the recovery line "add the rows to TEST.md's 1.1 test matrix", an older change warns. When the criterion cannot be judged the causes part ways (the same convention as the wave rule): a missing carrier — `REQUIREMENT.md` or `TEST.md` absent, no acceptance section, no round-1 section, template absent — prints "not checked (<reason>)" and keeps the exit code, while content that cannot be judged (a carrier present but yielding no readable list: no AC ids, no 1.1 test matrix section) is not a pass: the exit reports that the AC coverage rule cannot run, blocks a new change, warns on an older change and counts that warning; this exit prints neither of the two not-judged branches.
    - Round 2 (performance): if required, has actual/budget/baseline columns.
    - Round 3 (security): if required, has dependency/secret/SAST/OWASP records.
    - Round 4 (compatibility): if required, has browser matrix/migration/cross-version.

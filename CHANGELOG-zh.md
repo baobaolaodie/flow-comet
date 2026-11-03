@@ -43,6 +43,7 @@
 - **归档兜底只认本 change 自己的归档目录**：归档目录按完整 `<日期>-<change-id>` 名精确比对，不再按后缀匹配——名字恰好以本 change id 结尾的别的 change，其声明标记不再被读作本 change 的声明；本 change 还没有自己的 `.skill-loads/` 时，在声明本节点技能之前一律拦住。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 - **"是否已归档"同样只认本 change 自己的归档目录**：判断一个 change 是否已归档（已归档的历史 change 不要求真实跑完验证命令）时，归档目录按完整 `<日期>-<change-id>` 名精确比对——同后缀的诱饵目录不再让本 change 被判成已归档，从而不再跳过验证命令的真实执行。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
 - **归档提名的扫描份数只数本 change 自己的归档目录**：归档目录按完整 `<日期>-<change-id>` 名精确定位——同后缀的别的 change 归档目录不再被数进份数，也不再在本 change 归档目录缺席时充当可核对的对象（此时如实报告无目录可数，而不是拿别人的份数对账）。([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
+- **越界报文只陈述事实，成因只在确有其事时才写**：报告仍逐条列出落在任务写面之外的文件，拦住或告警的分级与退出码都不变；当委托记录的写面与任务当前的 `write_files` 已不一致时，它补一行说明并给出去路——若计划经 replan 变更过写面，重新运行 `request` 之后再记录 `result`；若没有 replan，则这些文件确实不在该任务写面内、按上面的回退指引处理——而不是让执行者把「计划已变更」读成自己写错了文件、进而退掉 replan 之后已经合法的改动；两侧写面一致时，报告与从前逐字相同。([#163](https://github.com/baobaolaodie/flow-comet/pull/163))
 
 ## [1.6.5] - 2026-10-24
 
