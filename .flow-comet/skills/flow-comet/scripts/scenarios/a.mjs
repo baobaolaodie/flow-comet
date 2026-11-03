@@ -1553,7 +1553,8 @@ export const ENTRIES = [
   // FLOW_COMET_VERIFY_TIMEOUT_MS 覆盖生效——设小值后同耗时命令超时 BLOCK。同场景 in-place 扩展
   // AC 覆盖判据（verify 出口）：全覆盖通过 / 漏一条点名 BLOCK / 多条全点名 / 旧 change 只 WARN /
   // 两种书写形态与编号后缀归并 / 模板段名不含关键词时回落到与入口同一份基准 / 「判不了」按成因二分
-  // （载体缺席 → 显式未校验且不改退出码；工件内容不可判 → 新 change BLOCKED、旧 change WARN 计数）。
+  // （载体缺席 = 文件 / 模板根本不在 → 显式未校验且不改退出码；工件内容不可判 = 承载段被删掉或清单
+  // 读不出 → 新 change BLOCKED、旧 change WARN 计数）。
   {
     name: '21 exit verify WARN：LESSONS.md 编号乱序 + verify timeout env 覆盖 + AC 覆盖（新 change BLOCK / 旧 change WARN / 判不了按成因二分）',
     run: async (dir) => {
@@ -1866,11 +1867,13 @@ export const ENTRIES = [
       assertOut(acNoTemplate, '未校验（模板缺席（段名无从派生））');
       assertNotOut(acNoTemplate, 'AC 覆盖判据无法执行');
       assertOut(acNoTemplate, 'ALL CHECKS PASSED');
-      // ⑩ 载体缺席之二：REQUIREMENT 在场但定位不到验收准则段 → 同样是「未校验」放行（不是内容不可判）
+      // ⑩ 承载段缺席（**文件与模板都在场**，只有验收准则段被删掉）→ 内容不可判，不是「载体缺席」：
+      //    「未校验」只对文件 / 模板根本不在的形态开放，作者自己能删掉的段不能换到放行口。新 change
+      //    BLOCKED，且恢复指引必须能照做（补回 `## 验收准则（AC）` 段并给每条 AC 编号）。
       writeFile(dir, 'flow-kit/templates/REQUIREMENT.md',
         '# REQUIREMENT 模板\n\n## 用户故事（User Story）\n## 验收准则（AC）\n## 非功能性需求\n');
       writeFile(dir, 'flow-kit/templates/TEST.md', '# TEST 模板\n\n## 第 1 轮 · 功能测试\n');
-      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', [
+      const requirementWithoutAcceptance = () => [
         '# REQUIREMENT: AC 覆盖夹具',
         '',
         '- **Change ID**: ' + CHANGE_ID,
@@ -1883,11 +1886,30 @@ export const ENTRIES = [
         '',
         '- **性能**: 无',
         '',
-      ].join('\n'));
+      ].join('\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', requirementWithoutAcceptance());
       const acNoAcceptanceSection = runGuard(['exit', 'verify'], dir);
-      assertExit(acNoAcceptanceSection, 0);
-      assertOut(acNoAcceptanceSection, '未校验（REQUIREMENT 无验收准则段）');
-      assertNotOut(acNoAcceptanceSection, 'AC 覆盖判据无法执行');
+      assertExit(acNoAcceptanceSection, 1);
+      assertOut(acNoAcceptanceSection, 'BLOCKED: AC 覆盖判据无法执行');
+      assertOut(acNoAcceptanceSection, '定位不到验收准则段');
+      assertOut(acNoAcceptanceSection, '在 REQUIREMENT.md 里补「## 验收准则（AC）」段');
+      assertOut(acNoAcceptanceSection, '形如 AC-1');
+      assertNotOut(acNoAcceptanceSection, '未校验（REQUIREMENT 无验收准则段）');
+      assertNotOut(acNoAcceptanceSection, '缺 AC 覆盖');
+      // ⑩b 旧 change 走同一份夹具只 WARN（渐进不阻断），该行仍进入既有 WARN COUNT——计数差分
+      //    （判别力）：把承载段补回来并覆盖后 WARN 消失，计数恰少 1。
+      writeState(dir, acState(false));
+      const acNoAcceptanceOld = runGuard(['exit', 'verify'], dir);
+      assertExit(acNoAcceptanceOld, 0);
+      assertOut(acNoAcceptanceOld, 'WARN: AC 覆盖判据无法执行');
+      assertOut(acNoAcceptanceOld, '（旧 change 渐进不阻断）');
+      assertOut(acNoAcceptanceOld, 'ALL CHECKS PASSED');
+      acWrite(acCriteria(['AC-1']), ['AC-1'], false);
+      const acNoAcceptanceOldFixed = runGuard(['exit', 'verify'], dir);
+      assertExit(acNoAcceptanceOldFixed, 0);
+      assertTrue(warnCountOf(acNoAcceptanceOld) === warnCountOf(acNoAcceptanceOldFixed) + 1,
+        '承载段缺席的 WARN 未计入 WARN COUNT（删段仍静默）: 缺段=' + warnCountOf(acNoAcceptanceOld)
+        + ' 补段后=' + warnCountOf(acNoAcceptanceOldFixed));
       // ⑪ **与入口同一份选段基准**（AC-4 的判别锚）：把模板的验收段改名成不含关键词的标题，模板仍在场 ——
       //    选段只能回落到与 open 出口**同一份**回退基准（TEMPLATE_FALLBACK_SECTION_PATTERNS
       //    的 requirementAcceptance），于是 verify 出口按入口口径定位到工件的「## 验收准则（AC）」

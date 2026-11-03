@@ -413,10 +413,12 @@ export async function runExecuteExitGate({ protocol, node, state, emptyExitAppro
 // AC 覆盖出口校验（verify 出口 BLOCKED / review 出口只汇总 WARN）——判据（纯判定）在
 // lib/ac-coverage.mjs，本处只负责分级与打印：同一份判定两处消费，分支纪律因此只有一处表达。
 //   · 判不了的两支按成因分开（与波次判据同口径，见 ac-coverage 文件头）：
-//     ① **载体缺席**（REQUIREMENT.md / TEST.md 不在、模板无从派生、承载段不在）→ verify 出口打印
-//        「未校验（…）」且**不改变退出码**（判据没有可判对象；未验证既不冒充通过也不冒充失败）；
-//     ② **工件内容不可判**（有验收准则却没 AC 编号 / 第 1 轮整段 N/A 而没有 1.1 矩阵）→ 不是
-//        「判过且通过」：新 change BLOCKED / 旧 change WARN（WARN 行因此进入既有 WARN COUNT）。
+//     ① **载体缺席**（REQUIREMENT.md / TEST.md 不在、模板无从派生——只有文件 / 模板根本不在）→
+//        verify 出口打印「未校验（…）」且**不改变退出码**（判据没有可判对象；未验证既不冒充通过
+//        也不冒充失败）；
+//     ② **工件内容不可判**（承载段被删掉：REQUIREMENT 定位不到验收准则段 / TEST.md 定位不到第 1 轮段；
+//        或有验收准则却没 AC 编号 / 第 1 轮整段 N/A 而没有 1.1 矩阵）→ 不是「判过且通过」：新 change
+//        BLOCKED / 旧 change WARN（WARN 行因此进入既有 WARN COUNT）——删掉承载段不再能换到放行。
 //   · 真判过且缺覆盖：verify 出口新 change BLOCKED（点名缺失编号 + 「在 1.1 矩阵补行」的恢复指引）/
 //     旧 change WARN 渐进。
 //   · review 出口：一条汇总 WARN（列缺失编号），不阻断、不影响退出码——review 出口今天不要求
@@ -459,8 +461,9 @@ export async function runAcCoverageGate({ node, state }) {
 export async function runVerifyExitGate({ protocol, node, state }) {
   if (node.id !== 'verify') return;
   if (await isArchivedChange(state.activeChange)) return;
-  // AC 覆盖：结构判据先于命令执行——缺覆盖时不白跑一遍验证命令；「载体缺席」只打印不判红（下面的
-  // 「## 验证命令 / 产物」判据照常），「工件内容不可判」按 change 新旧分级（见 runAcCoverageGate）。
+  // AC 覆盖：结构判据先于命令执行——缺覆盖时不白跑一遍验证命令；「载体缺席」（文件 / 模板根本不在）
+  // 只打印不判红（下面的「## 验证命令 / 产物」判据照常），「工件内容不可判」（含承载段被删掉）按
+  // change 新旧分级（见 runAcCoverageGate）。
   await runAcCoverageGate({ node, state });
   // 越权委托兜底检测（verify 出口）——同 execute 出口的判定（TASK parallel done + completedNodes
   // 无 subagent-execute + 非 direct + 协议含 subagent-execute 节点），verify 时仍未 exit → WARN

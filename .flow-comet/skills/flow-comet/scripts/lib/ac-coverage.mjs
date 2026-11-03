@@ -20,12 +20,14 @@
 //   留下的理由：载荷跟着分类走（notice 可直接打印；explanation + recovery 是「解释 + 出路」两半），
 //   调用方按字段出现与否分级、不必按 reason 反查第二张表；与之相对的 { judgeable, reason } 形态把
 //   「能否判定」和「成因」压进一个字符串，调用方只能从取值反推分级。
-//   · **载体缺席**——REQUIREMENT.md / TEST.md 不在、模板整份缺席（段名无从派生）、承载段不在
-//     （REQUIREMENT 无验收准则段 / TEST.md 无第 1 轮段）⇒ 判据没有可判对象，调用方打印「未校验」
-//     并放行，不改退出码；
-//   · **工件内容不可判**——承载段在场而清单读不出（验收段里没有任何 AC-N 编号；第 1 轮段里没有
-//     1.1 矩阵段，即「整段 N/A」）⇒ 不是「判过且通过」，调用方按既有分级：新 change BLOCKED /
-//     旧 change WARN（WARN 行进入既有 WARN COUNT）。
+//   · **载体缺席**——REQUIREMENT.md / TEST.md 不在、模板整份缺席（段名无从派生）⇒ 判据没有可判
+//     对象，调用方打印「未校验」并放行，不改退出码。只有**文件 / 模板根本不在**才算这一支：作者
+//     自己能动的东西（段在不在）不是「无从判断」；
+//   · **工件内容不可判**——文件与模板都在场，缺的是**承载段本身或段内清单**（REQUIREMENT 在场却
+//     定位不到验收准则段；验收段在而无任何 AC-N 编号；TEST.md 在场却定位不到第 1 轮段；第 1 轮段
+//     在而段内没有 1.1 矩阵段，即「整段 N/A」）⇒ 不是「判过且通过」，调用方按既有分级：新 change
+//     BLOCKED / 旧 change WARN（WARN 行进入既有 WARN COUNT）。删段因此不是关掉判据的写法：承载段
+//     缺席与清单读不出同属这一支，出路只有「按模板把段与清单补回来」。
 //
 // 词法：AC-<数字>，大小写不敏感；AC-1a 归并到 AC-1（后缀不参与编号），AC-01 与 AC-1 归一为同一编号；
 // 同一行多个编号全部收集；编号按 REQUIREMENT 里的出现顺序（首见）去重——报告顺序因此与台账顺序
@@ -118,24 +120,37 @@ export function parseAcIds(body) {
   return ids;
 }
 
-// 「载体缺席」这一支的每种成因各有一份解释，notice 由它派生（reason 是机器可读的短句）——两种调用方
-// （verify 出口 / review 出口）打印同一份文本，同一事实两处措辞必然先漂移。
+// 「载体缺席」这一支只收**文件 / 模板根本不在**的成因（判据真的没有可判对象），每种成因各有一份
+// 解释，notice 由它派生（reason 是机器可读的短句）——两种调用方（verify 出口 / review 出口）打印
+// 同一份文本，同一事实两处措辞必然先漂移。
 const UNVERIFIED_EXPLANATIONS = {
   'REQUIREMENT 缺席': '该 change 没有 REQUIREMENT.md，验收准则无从读取',
-  'REQUIREMENT 无验收准则段': 'REQUIREMENT.md 在场，但段名（模板派生 + 回退基准）都定位不到验收准则段',
   '模板缺席（段名无从派生）': '模板不可派生，验收段 / 1.1 矩阵段的段名无从定位',
   'TEST.md 缺席': '该 change 尚无 TEST.md，1.1 测试矩阵无从读取',
-  'TEST.md 无第 1 轮段': 'TEST.md 在场，但段名定位不到 1.1 测试矩阵的承载段（第 1 轮 · 功能测试）',
 };
 
-// 「工件内容不可判」的两种成因：承载段在场、清单读不出。每条成因自带**解释 + 恢复出路**（同一件事的
-// 两半写在一处：只有解释没有出路，人只能猜下一步；只有出路没有解释，人不知道该改哪一环）。恢复指引
-// 必须能照做——第一支的出路是给编号，第二支的出路是在第 1 轮里补矩阵段（「把 N/A 改成通过」不是
-// 出路：没有矩阵就仍无从对账）。
+// 「工件内容不可判」的成因：文件与模板都在场，缺的是**承载段本身或段内清单**。每条成因自带
+// **解释 + 恢复出路**（同一件事的两半写在一处：只有解释没有出路，人只能猜下一步；只有出路没有解释，
+// 人不知道该改哪一环）。恢复指引必须能照做——补承载段 / 补编号 / 补矩阵段都是作者当场能落笔的动作
+// （「把 N/A 改成通过」不是出路：没有矩阵就仍无从对账）。
+// 前两支是**承载段缺席**（段被删掉了）：它们排在清单那两支之前——没有承载段就没有清单可读，报文要说
+// 真正卡住的那一环，而不是让人去补一段不在段内的表格。
 const UNJUDGEABLE_CAUSES = {
+  'REQUIREMENT 无验收准则段': {
+    explanation: 'REQUIREMENT.md 在场、模板也在场，但段名（模板派生 + 回退基准）定位不到验收准则段'
+      + '——承载段不在，判据没有可对账的准则清单（删掉一个段不等于判据无从判断）',
+    recovery: '在 REQUIREMENT.md 里补「## 验收准则（AC）」段，并给每条准则编号（形如 AC-1、AC-2 …，'
+      + '编号写在标题或列表项里均可）；补完重试 exit verify',
+  },
   'REQUIREMENT 无 AC 编号': {
     explanation: 'REQUIREMENT.md 有验收准则段却没有 AC-N 编号——没有编号就没有可对账的清单',
     recovery: '给验收准则的每条准则编号（形如 AC-1、AC-2 …，编号写在标题或列表项里均可），编号后重试 exit verify',
+  },
+  'TEST.md 无第 1 轮段': {
+    explanation: 'TEST.md 在场、模板也在场，但段名定位不到 1.1 测试矩阵的承载段（第 1 轮 · 功能测试）'
+      + '——承载段不在，AC 与用例的映射读不出来',
+    recovery: '在 TEST.md 里补「## 第 1 轮 · 功能测试」段，并在其中补 1.1 测试矩阵'
+      + '（每条 AC 一行：| AC-N | 类型 | 用例文件 / UAT | 状态 |）；补完重试 exit verify',
   },
   'TEST.md 第 1 轮无 1.1 测试矩阵段': {
     explanation: 'TEST.md 的第 1 轮段在场，但段内没有 1.1 测试矩阵段（整段写 N/A 就是这一形态）'
@@ -180,23 +195,26 @@ function unjudgeable(reason) {
 //   · missing  = 这些编号里未出现在 1.1 矩阵段文本中的（同样按 REQUIREMENT 顺序）；
 //   · unverified / unjudgeable = 非 null 表示没判成：前者是载体缺席（放行），后者是工件内容不可判
 //     （按 change 新旧分级）；两者都为 null 才表示判据真的判过。
-// 顺序固定：先判「有没有编号」（没有编号就没有可对账的清单），再判「矩阵能不能读」——两级「判不了」
-// 因此不会互相遮蔽，报文说的是真正卡住的那一环。
+// 顺序固定：承载段在不在一级（段缺席 = 内容不可判，不是「无可判对象」），再判「有没有编号」，最后判
+// 「矩阵能不能读」——三级「判不了」因此不会互相遮蔽，报文说的是真正卡住的那一环。
 export async function acCoverageReview(changeDir) {
   const requirementText = await readText(path.join(changeDir, 'REQUIREMENT.md'));
   if (requirementText === null) return unverifiable('REQUIREMENT 缺席');
   const acceptancePattern = await acceptanceSectionPattern();
   if (acceptancePattern === TEMPLATE_SECTION_SKIP) return unverifiable('模板缺席（段名无从派生）');
   const acceptanceBody = sectionBody(requirementText, acceptancePattern, { level: 2, endOnSeparator: false });
-  if (acceptanceBody === null) return unverifiable('REQUIREMENT 无验收准则段');
+  // 承载段缺席 ≠ 载体缺席：REQUIREMENT.md 与模板都在场，缺的是作者自己删掉的段——按内容不可判
+  // 分级（新 change BLOCKED / 旧 change WARN），删段因此不是关掉 AC 覆盖判据的写法。
+  if (acceptanceBody === null) return unjudgeable('REQUIREMENT 无验收准则段');
   const acIds = parseAcIds(acceptanceBody);
   if (acIds.length === 0) return unjudgeable('REQUIREMENT 无 AC 编号');
   const testText = await readText(path.join(changeDir, 'TEST.md'));
   if (testText === null) return unverifiable('TEST.md 缺席');
   const roundPattern = await testRoundSectionPattern();
   if (roundPattern === TEMPLATE_SECTION_SKIP) return unverifiable('模板缺席（段名无从派生）');
+  // 同一口径：TEST.md 与模板在场而承载段（第 1 轮）缺席 → 内容不可判（删段不得成为跳过口）。
   if (sectionBody(testText, roundPattern, { level: 2, endOnSeparator: false }) === null) {
-    return unverifiable('TEST.md 无第 1 轮段');
+    return unjudgeable('TEST.md 无第 1 轮段');
   }
   const matrixPattern = await testMatrixSectionPattern();
   if (matrixPattern === TEMPLATE_SECTION_SKIP) return unverifiable('模板缺席（段名无从派生）');

@@ -342,7 +342,7 @@ export const ENTRIES = [
   // 145（多趟语义重写）：新 change + 依赖环（P01↔P02 互为 depends_on）→ exit plan 应 BLOCKED，
   // 输出含「依赖环」（拓扑排序判环）与「depends_on」恢复指引。旧引擎无波次校验静默放行 = 预期 RED。
   {
-    name: '145 plan exit BLOCKED：新 change 依赖环（P01↔P02 互为依赖）+ 波次投影三形态（同波依赖 / 排得保守 / 修正后通过）+ 同波漏标 [P] + replan 同源拒绝重签',
+    name: '145 plan exit BLOCKED：新 change 依赖环（P01↔P02 互为依赖）+ 波次投影三形态（同波依赖 / 排得保守 / 修正后通过）+ 同波漏标 [P] + replan 同源拒绝重签（含执行期删段被 TASK 段形门拦、旧 change 只 WARN）',
     run: async (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
@@ -520,6 +520,67 @@ export const ENTRIES = [
       const replanFixed = runStateWithProtocol(dir, ['replan', '按波次投影修正后重校', '--authorized-by', 'user-approval']);
       assertExit(replanFixed, 0);
       assertOut(replanFixed, 'REPLAN: execute');
+      // ⑪b 前置同源（P2b）：执行期**删掉承载段**（## 波次划分）再改任务集 —— 重校段不得走「未校验」
+      //    放行口。TASK.md 的段形由模板权威裁定，plan 出口已经用同一份骨架门拦过缺段，重校段不豁免：
+      //    新 change BLOCKED，state 字节零改写、零新增备份（判据全部先于备份与写盘）。
+      //    模板在场才判段形：模板缺席是「未校验（模板缺失）」的另一支边界（与 plan 出口同一口径），
+      //    故本块显式写出 TASK 模板，让「删段」成为唯一的变量。
+      writeFile(dir, 'flow-kit/templates/TASK.md',
+        '# TASK: <change 标题>\n\n## 波次划分\n\n## 任务清单\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n## 任务清单\n\n' + waveTask('T01'));
+      const noWaveSectionBytes = readStateBytes(dir);
+      const backupsBeforeNoWave = replanBackupFiles(dir).length;
+      const replanNoWaveSection = runStateWithProtocol(dir, ['replan', '删段 + 改任务集的重校', '--authorized-by', 'user-approval']);
+      assertExit(replanNoWaveSection, 1);
+      assertOut(replanNoWaveSection, 'BLOCKED: TASK.md 模板结构校验失败');
+      assertOut(replanNoWaveSection, '波次划分');
+      assertOut(replanNoWaveSection, '（模板: flow-kit/templates/TASK.md）');
+      assertOut(replanNoWaveSection, '重试 replan');
+      assertNotOut(replanNoWaveSection, 'REPLAN:');
+      assertStateBytesUnchanged(dir, noWaveSectionBytes, 'replan 承载段缺席 BLOCK');
+      assertTrue(replanBackupFiles(dir).length === backupsBeforeNoWave,
+        '承载段缺席 BLOCK 不得新增重签前备份: ' + JSON.stringify(replanBackupFiles(dir)));
+      // 分级二分（旧 change）：同一份删段任务集只 WARN 不阻断——判据在场（不是「旧 change 就跳过」），
+      // 只是照常重签并产生备份。与上面那格共用同一夹具，唯一变量 = 有无 newChange 标记。
+      const oldNoWaveState = replanExecuteState({ taskHash: REPLAN_STALE_SIGNATURE });
+      delete oldNoWaveState.newChange;
+      writeState(dir, oldNoWaveState);
+      const backupsBeforeOldWarn = replanBackupFiles(dir).length;
+      const replanNoWaveOld = runStateWithProtocol(dir, ['replan', '删段 + 改任务集的重校（旧 change）', '--authorized-by', 'user-approval']);
+      assertExit(replanNoWaveOld, 0);
+      assertOut(replanNoWaveOld, 'TEMPLATE-STRUCTURE WARN: TASK.md 模板结构校验失败');
+      assertOut(replanNoWaveOld, '波次划分');
+      assertOut(replanNoWaveOld, '（旧 change 渐进，不阻断；新 change 将强制）');
+      assertNotOut(replanNoWaveOld, 'BLOCKED:');
+      assertOut(replanNoWaveOld, 'REPLAN: execute');
+      assertTrue(replanBackupFiles(dir).length === backupsBeforeOldWarn + 1,
+        '旧 change 的段形 WARN 不应阻断重签（应新增 1 份备份）: ' + JSON.stringify(replanBackupFiles(dir)));
+      // 两处措辞同源（plan 出口 / 重校段）：同一份 TASK.md（模板在场、承载段缺席）必须给出**逐字相同**
+      // 的失败行——骨架取模板权威、片段取 guard-template-fidelity 的同一格式器、两阶段口径不变
+      // （escalate=false：首次只给类别计数）。现场适配只落在恢复行：replan 在那里点名缺的段（重校段
+      // 没有提示账本可「再犯升级」）、并把重试目标换成本命令。
+      // 反向构造：任一处自建段名清单或自拼措辞，这两行就不再相等。
+      const taskStructureLine = (res) => (res.output.match(/TASK\.md 模板结构校验失败[^\n]*/u) ?? [''])[0];
+      assertTrue(taskStructureLine(replanNoWaveSection).includes('缺段 1 项'),
+        'replan 的 TASK 段形失败行应报类别计数（与 plan 出口同一两阶段口径）:\n' + replanNoWaveSection.output);
+      const planNoWaveState = baseState('plan');
+      planNoWaveState.evidence.plan = { summary: 'plan done' };
+      planNoWaveState.newChange = true;
+      writeState(dir, planNoWaveState);
+      const planNoWaveSection = runPlanWithTask(dir, '# TASK\n\n## 任务清单\n\n' + waveTask('T01'));
+      assertExit(planNoWaveSection, 1);
+      assertTrue(taskStructureLine(planNoWaveSection) === taskStructureLine(replanNoWaveSection),
+        'plan 出口与 replan 的 TASK 段形失败行不逐字相同:\nplan='
+        + JSON.stringify(taskStructureLine(planNoWaveSection)) + '\nreplan='
+        + JSON.stringify(taskStructureLine(replanNoWaveSection)));
+      assertOut(planNoWaveSection, '（模板: flow-kit/templates/TASK.md）');
+      // 反向构造（唯一变量 = 承载段是否在场）：补回 ## 波次划分 后同一通道照常重签
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', honestWavePlan());
+      writeState(dir, replanExecuteState({ taskHash: REPLAN_STALE_SIGNATURE }));
+      const replanWithWaveSection = runStateWithProtocol(dir, ['replan', '补回承载段后的重校', '--authorized-by', 'user-approval']);
+      assertExit(replanWithWaveSection, 0);
+      assertOut(replanWithWaveSection, 'REPLAN: execute');
+      fs.rmSync(path.join(dir, 'flow-kit', 'templates', 'TASK.md'), { force: true });
 
       // ===== ⑫ 「判不了」形态统一 + 分级→输出单源（两条判据共用一处契约）=====
       // ① 源码契约锁：两条结构判据的「判不了」载荷键同形（载体缺席 { reason, notice } / 内容不可判
