@@ -11,6 +11,7 @@ import {
   assertOut,
   assertTrue,
   baseState,
+  cleanupTmpDir,
   runGuard,
   runHandoff,
   runState,
@@ -18,6 +19,7 @@ import {
   writeState,
 } from '../lib/test-helpers.mjs';
 import {
+  BUILTIN_PROTOCOL_SOURCE,
   CHANGE_ID,
   REPO_ROOT,
   SCRIPTS_DIR,
@@ -26,6 +28,7 @@ import {
   TASK_P1,
   customProtocolWithSkillCall,
   handoffFor,
+  makeTmp,
   summaryContent,
   writeCustomProtocol,
   writeIntakeArtifacts,
@@ -40,9 +43,11 @@ import {
 import {
   PUBLIC_FACE_DOCS_DIR,
   PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE,
+  VISUAL_TONE_APPLICABLE,
   authoritativeSourceAt,
   countSyncProblems,
   publicFaceDocsAbsent,
+  writeDesignExitFixture,
 } from '../lib/text-anchor-checks.mjs';
 
 // ---------- 公开面的机器状态字段名口径 + 命令锚（机检；判据与反向构造共用本实现） ----------
@@ -538,8 +543,10 @@ export const ENTRIES = [
   // 覆盖，协议声明的 requiredSkillCalls（enforcement=guarded）也各自要有标记。新 change 缺任一 →
   // BLOCKED 并逐项点名缺哪个协议文件 / 哪个必需技能；旧 change → WARN 渐进（既有 change 不卡死）。
   // 旧单值标记（只有 protocol、没有 protocols）照样计入覆盖——旧写入形态不被新规则判死。
+  // ⑧ 另补一格出口**链序**（见该格头注）：同一个「缺声明」既表现为证据清单缺 required-skill、也
+  // 表现为标记没覆盖必需项，两段报文的先后是链序的直接读数。
   {
-    name: '102 exit 协议标记校验：全部覆盖通过 / 少声明必红点名 / 旧 change 只 WARN / 旧单值标记可读（AC-4）',
+    name: '102 exit 协议标记校验：全部覆盖通过 / 少声明必红点名 / 旧 change 只 WARN / 旧单值标记可读 / 证据门先于覆盖门（AC-4）',
     run: (dir) => {
       const loadsDir = path.join(dir, '.specs', CHANGE_ID, '.skill-loads');
       const markerFile = (skill) => path.join(loadsDir, 'open-' + skill + '.json');
@@ -648,6 +655,47 @@ export const ENTRIES = [
       assertOut(resCorrupt, 'exit 缺协议声明标记');
       assertOut(resCorrupt, '缺协议文件: 0-change.md');
       assertNotOut(resCorrupt, '缺必需技能声明');
+      // ⑧ 出口链序：同一个「缺声明」既可能是证据清单缺 required-skill（证据门的报文给出该绑定的
+      //    补齐命令），也可能是声明标记没覆盖必需项（覆盖门逐项点名缺哪个技能）。两者都说同一件事
+      //    时，证据门必须先说话、覆盖门收口——颠倒顺序会让执行者只看到「缺协议声明标记」，看不到
+      //    证据门指出的那条绑定。反向构造：把 workflow-guard 出口链上的两处调用对调（覆盖门排到
+      //    证据族之前）→ 本格第一趟先报覆盖门 → 本格 RED。
+      //    两段报文**不可能**同处一趟输出（任一命中即 process.exit），故按两趟真实顺序断言：第一趟
+      //    只有证据门说话，补齐证据后第二趟才轮到覆盖门；「行序」取两趟输出拼接后的位置。
+      //    夹具根独立（design 出口夹具与前七格的 open 夹具互不污染），协议副本按套件同一表达式预置。
+      const chainRoot = makeTmp();
+      try {
+        fs.mkdirSync(path.dirname(scenarioProtocolPath(chainRoot)), { recursive: true });
+        fs.copyFileSync(BUILTIN_PROTOCOL_SOURCE, scenarioProtocolPath(chainRoot));
+        writeDesignExitFixture(chainRoot, {
+          newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: false,
+        });
+        // 先写一条真实声明（design 技能 + 2-design.md）：机制已激活，缺口收敛到 ui-design 这一条绑定
+        assertExit(runState(['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md', '--templates', 'DESIGN.md'], chainRoot), 0);
+        const bothMissing = runGuard(['exit', 'design'], chainRoot);
+        assertExit(bothMissing, 1);
+        assertOut(bothMissing, 'BLOCKED: missing required Skill evidence: required-skill:design.flow-comet-ui-design');
+        assertNotOut(bothMissing, '缺协议声明标记');
+        // 第二趟：证据补齐（同一夹具的 declareUiDesign），声明覆盖仍缺 → 覆盖门收口并点名该技能
+        writeDesignExitFixture(chainRoot, {
+          newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: true,
+        });
+        const markerMissing = runGuard(['exit', 'design'], chainRoot);
+        assertExit(markerMissing, 1);
+        assertOut(markerMissing, '缺协议声明标记');
+        assertOut(markerMissing, '缺必需技能声明: flow-comet-ui-design');
+        // 本格的核心断言：两段报文都在场，且「证据门」那段的行序早于「缺协议声明标记」那行——覆盖门
+        // 的报文出现即证明链条已越过证据门（证据门命中会 process.exit，覆盖门就不会有输出）。
+        const chainText = bothMissing.output + '\n' + markerMissing.output;
+        const evidenceAt = chainText.indexOf('missing required Skill evidence');
+        const markerAt = chainText.indexOf('缺协议声明标记');
+        if (evidenceAt < 0 || markerAt < 0 || evidenceAt > markerAt) {
+          throw new Error('链序：证据门报文应在「缺协议声明标记」之前（两段报文都必须在场）: '
+            + JSON.stringify({ evidenceAt, markerAt }));
+        }
+      } finally {
+        cleanupTmpDir(chainRoot);
+      }
     },
   },
 

@@ -520,8 +520,6 @@ export const ENTRIES = [
         assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
         // 协议 execute.requiredSkillCalls = flow-comet-dev（guarded）：出口覆盖判据要求该技能也有标记
         assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
-      // 协议 execute.requiredSkillCalls = flow-comet-dev（guarded）：出口覆盖判据要求该技能也有标记
-      assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
         // entry 记录 taskHash：签名值必须带算法版本前缀（新链路 vN 前缀形态）
         assertExit(runGuard(['entry', 'execute'], dir, env), 0);
         const stHash = readStateFile(dir);
