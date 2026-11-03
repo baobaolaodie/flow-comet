@@ -572,6 +572,58 @@ export const ENTRIES = [
         === JSON.stringify(['explanation', 'reason', 'recovery']),
         '内容不可判的载荷键应与 AC 覆盖同形（reason / explanation / recovery）: '
         + JSON.stringify(Object.keys(waveContent.unjudgeable)));
+
+      // ===== ⑬ 段体切片的围栏语义（五处消费共用 lib/section-body.mjs 的同一实现）=====
+      // 段体里的围栏代码块是正文示例：围栏内的 `## ` 不结束段体。修复前波次段的段界是一条「遇 `## `
+      // 即收」的惰性正则——段内贴一段 Markdown 示例后，示例之后声明的 Wave 行整段消失，判据把
+      // 「声明了」读成「没声明」（段在场而内容不可判 ⇒ 新 change BLOCKED，且永远补不上）。
+      const waveSectionWith = (body) => '# TASK\n\n## 波次划分\n\n' + body
+        + '\n\n## 任务清单\n\n' + waveTask('T01');
+      // 本块独立于前面的 replan 段：重校成功重签后 currentNode 已在 execute，先归位到 plan 再跑出口
+      // （否则 exit plan 直接报节点漂移，测不到段体判据）。
+      const planWithSection = (markdown) => {
+        const planState = baseState('plan');
+        planState.evidence.plan = { summary: 'plan done' };
+        planState.newChange = true;
+        writeState(dir, planState);
+        return runPlanWithTask(dir, markdown);
+      };
+      // ① 围栏内的二级标题不结束段体：Wave 行在围栏之后，判据仍读到它
+      const fencedWave = planWithSection(waveSectionWith('```md\n## 代码块里的示例段标题\n```\n\nWave 1: T01'));
+      assertExit(fencedWave, 0);
+      assertOut(fencedWave, 'ALL CHECKS PASSED');
+      assertNotOut(fencedWave, '波次划分段内容不可判');
+      assertNotOut(fencedWave, '未校验（无波次段）');   // 判据真在场：不是靠「跳过」变绿
+      // ② 围栏外的同级标题照常结束段体：Wave 行落在段外 ⇒ 段在场而无可判声明
+      const closedByHeading = planWithSection(
+        waveSectionWith('```md\n示例\n```\n\n## 代码块外的段标题\n\nWave 1: T01'));
+      assertExit(closedByHeading, 1);
+      assertOut(closedByHeading, '波次划分段内容不可判');
+      // ③ 分隔线语义保持：围栏外的 `---` 同样结束段体
+      const closedByRule = planWithSection(waveSectionWith('---\n\nWave 1: T01'));
+      assertExit(closedByRule, 1);
+      assertOut(closedByRule, '波次划分段内容不可判');
+      // ④ 修复段的段界同源：修复段里的围栏代码块（块内含 `## `）不结束修复段，段内任务仍判为修复族
+      //    （族判定经 task-graph 的唯一谓词——段定位不再由各消费方各写一份行扫描）。
+      const fixModule = await import(pathToFileURL(path.join(SCRIPTS_DIR, 'lib', 'task-graph.mjs')).href);
+      const fixBlock = '<task id="R02" status="pending"><action>回修段内形态</action>'
+        + '<write_files>src/r02.mjs</write_files><verify>node --check src/r02.mjs</verify>'
+        + '<depends_on></depends_on></task>';
+      const fixSectionWith = (body) => '# TASK\n\n## 任务清单\n\n' + waveTask('T01')
+        + '\n## Fix 任务（来自 REVIEW / INTEGRATION）\n\n' + body;
+      const inFixFenced = fixModule.fixTaskClassifier(
+        fixSectionWith('```md\n## 代码块里的示例段标题\n```\n\n' + fixBlock), 'Fix 任务');
+      assertTrue(inFixFenced(fixBlock) === true,
+        '修复段里的围栏代码块截断了段体：围栏之后的修复任务不再被判为修复族（段界只应由围栏外的标题决定）');
+      // ⑤ 围栏外的同级标题照常结束修复段：任务落到段外 ⇒ 不属修复族
+      const inFixAfterHeading = fixModule.fixTaskClassifier(
+        '# TASK\n\n## Fix 任务\n\n```md\n示例\n```\n\n## 任务清单\n\n' + fixBlock, 'Fix 任务');
+      assertTrue(inFixAfterHeading(fixBlock) === false,
+        '围栏外的同级标题应结束修复段：其后段落里的任务不属修复族');
+      // ⑥ 分隔线语义保持：修复段不以 `---` 结束（既有语义）
+      const inFixAfterRule = fixModule.fixTaskClassifier(
+        '# TASK\n\n## Fix 任务\n\n---\n\n' + fixBlock, 'Fix 任务');
+      assertTrue(inFixAfterRule(fixBlock) === true, '`---` 不应结束修复段（既有语义）');
     },
   },
 

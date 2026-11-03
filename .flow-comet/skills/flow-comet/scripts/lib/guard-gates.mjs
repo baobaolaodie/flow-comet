@@ -37,8 +37,8 @@ import {
 } from './guard-artifact-skeleton.mjs';
 import { applicabilityGatedBinding, frontendCriterion } from './guard-uidesign.mjs';
 // 波次段解析与「波次 = 依赖层级的投影」判定（纯判定模块）：plan 出口与 replan 重校段共用同一
-// 判定、同一分级出口（waveReviewOutcome / parallelGapOutcome）——段界（waveSectionBody）也是既有
-// 波次散文检测的唯一表达处。
+// 判定、同一分级出口（waveReviewOutcome / parallelGapOutcome）——波次散文检测与波次投影判据取用
+// 同一个 waveSectionBody（段体本身由 lib/section-body.mjs 单点切片）。
 import {
   parallelGapOutcome,
   parallelGapReview,
@@ -76,6 +76,10 @@ import { findSkillLoadsDir, isArchivedChangeDirName } from './state-io.mjs';
 // skill-load 写入侧与出口覆盖判据读同一份实现——各写一份时「旧标记里存完整绝对路径」这条口径
 // 会在一边生效、另一边判失配。
 import { markerProtocolBasenames } from './state-skillmarkers.mjs';
+// 段界（同级标题 / 围栏 / 分隔线 / 文末）与围栏行语法取 lib/section-body.mjs 的唯一实现：REVIEW
+// 发现区、旧发现段与 LESSONS 模板样例段此前各写一份按行扫标题的实现，围栏代码块里的 `## ` 会把
+// 段体截断（发现区的后果是「围栏之后的发现整段消失」）。
+import { isFenceLine, scanHeadings, sectionBody } from './section-body.mjs';
 
 // 节点 → 合法 exit 的前置条件（对齐 flow-kit 阶段门 + flowkit.*.v1 evidence）
 const NODE_TRANSITION_GATES = {
@@ -155,16 +159,22 @@ function reviewFindingsItems(text, scope = { primary: null, siblings: [] }) {
   let severity = '';
   let current = null;
   const pushCurrent = () => { if (current) { items.push(current); current = null; } };
-  for (const line of String(text).split(/\r?\n/)) {
-    const h2 = line.match(/^##\s+(.+?)\s*$/);
-    if (h2) {
+  // 段界（哪些标题行真的开 / 闭一段）由 lib/section-body.mjs 的围栏感知扫描给出：围栏代码块里的
+  // `## ` / `### ` 是条目正文里的 Markdown 示例，不是段界——旧实现把它们当结构标题，一段代码块
+  // 之后 `## ` 会重置发现区，其后的发现条目整段消失（处置标记门禁因此对它们形同虚设）。分区语义
+  // 仍在下面：模板位置下的严重度分区是作用域内的分区，兄弟结构子段才结束作用域。
+  const { lines, headings } = scanHeadings(text);
+  const headingAt = new Map(headings.map((heading) => [heading.index, heading]));
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const heading = headingAt.get(index);
+    if (heading !== undefined && heading.level === 2) {
       pushCurrent();
       severity = '';
-      mode = /^发现/.test(h2[1].trim()) ? 'legacy' : 'none';
+      mode = /^发现/.test(heading.text) ? 'legacy' : 'none';
       continue;
     }
-    const h3 = line.match(/^###\s+(.+?)\s*$/);
-    if (h3) {
+    if (heading !== undefined && heading.level === 3) {
       pushCurrent();
       if (mode === 'primary') {
         // 兄弟结构子段结束模板位置作用域；其余三级标题只是严重度分区
@@ -175,18 +185,18 @@ function reviewFindingsItems(text, scope = { primary: null, siblings: [] }) {
         }
         // 模板范例形态：严重度 token 起头的 H3 = 发现条目（标题行即条目自身第一行，处置标记
         // 与列表项同口径按该行判定），续行是粗体字段 / 正文，直到空行或下一个标题。
-        const heading = h3[1].trim();
-        if (REVIEW_SEVERITY_TOKEN_RE.test(heading)) {
+        const headingText = heading.text;
+        if (REVIEW_SEVERITY_TOKEN_RE.test(headingText)) {
           current = {
-            title: heading.replace(REVIEW_SEVERITY_TOKEN_RE, '').trim() || heading,
+            title: headingText.replace(REVIEW_SEVERITY_TOKEN_RE, '').trim() || headingText,
             scope: 'primary',
             lines: [line],
-            isMajor: reviewSubheadingIsMajor(heading),
-            isMinor: reviewSubheadingIsMinor(heading),
+            isMajor: reviewSubheadingIsMajor(headingText),
+            isMinor: reviewSubheadingIsMinor(headingText),
           };
           continue;
         }
-        severity = heading;
+        severity = headingText;
         continue;
       }
       if (mode === 'none' && scope.primary !== null && scope.primary.test(line)) {
@@ -194,7 +204,7 @@ function reviewFindingsItems(text, scope = { primary: null, siblings: [] }) {
         severity = '';
         continue;
       }
-      severity = h3[1].trim();
+      severity = heading.text;
       continue;
     }
     if (mode === 'none') continue;
@@ -224,11 +234,15 @@ function reviewFindingsItems(text, scope = { primary: null, siblings: [] }) {
 // 旧形态 `## 发现` 段是否有实质内容（占位词 / 子标题 / 空行不计）：写在旧段而模板位置无条目时
 // 触发迁移提示——只在旧段真有内容时给，避免空段或只写「无」的旧 REVIEW 被误报。
 function reviewLegacyFindingsHasContent(text) {
+  // 段界与发现区解析同一来源（scanHeadings）：围栏代码块里的 `## ` 不结束旧段
+  const { lines, headings } = scanHeadings(text);
+  const legacyAt = new Map(headings.filter((heading) => heading.level === 2)
+    .map((heading) => [heading.index, /^发现/.test(heading.text)]));
   let inLegacy = false;
-  for (const line of String(text).split(/\r?\n/)) {
-    const h2 = line.match(/^##\s+(.+?)\s*$/);
-    if (h2) {
-      inLegacy = /^发现/.test(h2[1].trim());
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (legacyAt.has(index)) {
+      inLegacy = legacyAt.get(index);
       continue;
     }
     if (!inLegacy) continue;
@@ -789,16 +803,18 @@ async function lessonsEntryFieldKeys() {
   // 字段键无从派生 → C20 静默退化为「未校验」。
   let text;
   try { text = await fs.readFile(path.join(runRoot, skeleton.file), 'utf8'); } catch { return null; }
+  // 段界由 lib/section-body.mjs 单点决定（围栏代码块里的 `## ` 不结束段体——旧实现先判标题再同步
+  // 围栏，示例里出现二级标题就会把字段样例截断）。本判据自己的语义是「只取围栏里的书写样例行」，
+  // 故只需围栏行判定（isFenceLine，与单源同一份语法）。
+  const body = sectionBody(text, formatSection.pattern, { level: 2, endOnSeparator: false });
+  if (body === null) return null;
   const keys = [];
-  let inSection = false;
   let inFence = false;
-  for (const line of String(text).replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n').split('\n')) {
-    if (!inSection) {
-      if (formatSection.pattern.test(line)) inSection = true;
+  for (const line of body.split('\n')) {
+    if (isFenceLine(line)) {
+      inFence = !inFence;
       continue;
     }
-    if (/^##\s+/u.test(line)) break;
-    if (/^\s*```/u.test(line)) { inFence = !inFence; continue; }
     if (!inFence) continue;
     const matched = line.match(LESSONS_FIELD_LINE_RE);
     if (matched) keys.push(matched[1].trim());
@@ -813,7 +829,7 @@ function lessonsEntryBlocks(content) {
   let current = null;
   let inFence = false;
   String(content).replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n').split('\n').forEach((line, index) => {
-    if (/^\s*```/u.test(line)) {
+    if (isFenceLine(line)) {
       inFence = !inFence;
       if (current) current.lines.push(line);
       return;
@@ -1098,9 +1114,9 @@ export async function runPlanExitGate({ node, state }) {
     }
     // 波次散文一致性检测（WARN 渐进）——## 波次划分 的 Wave 行任务带 [P] 标记（并行语义）但 XML
     // 任务无 parallel="true" → WARN（散文与机器路由依据不一致，以任务标记为准）。容错：无并行语义
-    // 的 Wave 行不参与比对；解析不到波次段跳过（不误报）。段界（含「段即文末」分支与段内大写 Z
-    // 的截断陷阱）由 wave-projection 的 waveSectionBody **单点**实现——本判据消费同一份段体，
-    // 不另持第二份正则（两处各写一份段界，演进时必然静默分叉）。
+    // 的 Wave 行不参与比对；解析不到波次段跳过（不误报）。段体由 wave-projection 的 waveSectionBody
+    // 取用、段界（同级标题 / 围栏 / 分隔线 / 文末）由 lib/section-body.mjs 单点切片——本判据消费同一
+    // 份段体，不另持第二份正则（两处各写一份段界，演进时必然静默分叉）。
     const waveBody = waveSectionBody(content);
     if (waveBody !== null) {
       const proseParallelIds = [];

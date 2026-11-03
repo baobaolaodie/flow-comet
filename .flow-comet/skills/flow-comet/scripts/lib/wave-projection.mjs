@@ -42,20 +42,20 @@ import {
   taskWaveLevels,
 } from './task-graph.mjs';
 import { taskOpeningAttrs } from '../task-parsing.mjs';
+// 段界单源（围栏 / 同级标题 / 分隔线 / 文末的判定只在这里一份）
+import { sectionBody } from './section-body.mjs';
 
 // 波次段名 = flow-kit/templates/TASK.md 的 H2 `## 波次划分`（登记于 reference/artifact-templates.json
 // 的 TASK sections）——段名对齐模板权威，不在这里另起变体（L-001）。段界与 plan 出口既有的
-// 「波次散文一致性（[P] vs parallel）」检测**同一实现**（waveSectionBody 是唯一表达处）：
-// 段尾 = 下一个二级标题 / 分隔线 / 输入末尾。JS 正则没有 \Z：\Z 是「未知转义 ⇒ 字面字符 Z」，
-// 惰性匹配一遇段内大写 Z 就提前收尾，段被静默截断（含 ZERO- 一类机检标记的 TASK 会整段漏检）。
-// 串尾一律用 (?![\\s\\S]) 真断言——它只是「此处之后已无任何字符」，不受行首 / 行尾标志影响，
-// 与「多行模式下的 $」语义无歧义。
-const WAVE_SECTION_RE = /##\s*波次划分\s*\n([\s\S]*?)(?=\n##\s|\n---|(?![\s\S]))/u;
+// 「波次散文一致性（[P] vs parallel）」检测**同一实现**，而段界本身由 lib/section-body.mjs 单点
+// 决定：围栏代码块里的 `## ` / `---` 是正文示例，不结束段体。此前这里是一条「遇 `## ` 即收」的
+// 惰性正则——段内贴一段 Markdown 示例（块内 `## `）就把其后声明的 Wave 行整段吞掉，判据把
+// 「声明了」读成「没声明」。
+const WAVE_HEADING_PATTERN = /^##\s*波次划分\s*$/u;
 
 // 波次段正文（段标题之后、下一个二级标题 / 分隔线 / 文末之前的文本）；无该段 → null。
 export function waveSectionBody(taskContent) {
-  const match = String(taskContent ?? '').match(WAVE_SECTION_RE);
-  return match === null ? null : match[1];
+  return sectionBody(taskContent, WAVE_HEADING_PATTERN, { level: 2, endOnSeparator: true });
 }
 
 // Wave 行：`Wave N (parallel): T01[P], T02   (depends on T01)   # 说明`。只认「Wave + 数字」开口

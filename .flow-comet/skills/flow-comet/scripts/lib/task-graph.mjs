@@ -5,7 +5,8 @@
 // ③ 并行写冲突检测三族（findParallelWriteConflicts 及其构件）；④ 任务集签名与版本语义 ·
 // history 事件归属 · change 名形态 · 修复任务族文本谓词；⑤ 任务块 7 字段集合（TASK7_REQUIRED）。
 // 纯判定：只读 TASK.md 文本、协议对象与 state.history，无 console 输出、无 process.exit、无 state 写入。
-// 依赖方向：本模块不 import 其他 lib 模块（lib 层最底层）——入口与兄弟模块单向依赖本模块。
+// 依赖方向：只依赖叶子模块（lessons-hits 的条目边界、section-body 的段界）——入口与兄弟模块单向
+// 依赖本模块，不出现反向边。
 import { promises as fs } from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
@@ -13,6 +14,9 @@ import { taskBlocks, taskOpeningAttrs } from '../task-parsing.mjs';
 // 条目边界（剥注释 → 行切 → 分号容错切 → trim → 滤空）取 lib/lessons-hits.mjs 的唯一实现：本模块
 // 只剩「路径归一」这一层自己的语义（见 normalizeTaskPath），不再自带第二份切分。
 import { writeFilesEntries } from './lessons-hits.mjs';
+// 段界（同级标题 / 围栏 / 分隔线 / 文末）取 lib/section-body.mjs 的唯一实现：修复段的段体此前自带一份
+// 「按行找下一个 `## `」的扫描，围栏代码块里的 `## ` 会把段体截断。
+import { sectionBody } from './section-body.mjs';
 
 // 任务块 7 字段集合（单一权威）：plan 出口的 TASK 完整性门禁与执行期 `replan` 的重签判据共用本常量。
 // `replan` 是执行期唯一允许修订任务集的通道，两侧判据必须同源——任何一侧另写一份字面集合，都会在
@@ -166,24 +170,22 @@ export function normalizeHeading(raw) {
 }
 
 // 修复段正文切片：首个同级（##）标题命中 → 返回标题行之后、下一个同级标题（或 EOF）之前的正文；
-// 无命中标题 → null。只认二级标题（### 不闭合本段）；CRLF / LF 归一后按行定位。
+// 无命中标题 → null。只认二级标题（### 不闭合本段）。段界（含围栏同步）由 lib/section-body.mjs
+// 单点决定，这里只表达自己的差异——标题按共享归一后比较（「Fix 任务（来自 REVIEW / INTEGRATION）」
+// 「## Fix 任务 ##」等写法命中同一段），且**不以分隔线结束**（修复段内允许 `---` 分节，历史语义）。
 function fixSectionBody(taskContent, fixSectionTitle) {
-  const lines = String(taskContent ?? '').replace(/\r\n?/g, '\n').split('\n');
   const wanted = normalizeHeading(fixSectionTitle);
   if (wanted === '') return null;
-  let start = -1;
-  for (let i = 0; i < lines.length; i += 1) {
-    const m = lines[i].match(/^##\s+(.+?)\s*$/);
-    if (!m) continue;
-    const heading = normalizeHeading(m[1]);
-    if (heading === wanted || heading.startsWith(wanted)) { start = i; break; }
-  }
-  if (start < 0) return null;
-  let end = lines.length;
-  for (let i = start + 1; i < lines.length; i += 1) {
-    if (/^##\s/.test(lines[i])) { end = i; break; }
-  }
-  return lines.slice(start + 1, end).join('\n');
+  return sectionBody(
+    taskContent,
+    (heading) => {
+      // 只认二级标题起段（### 不闭合本段，也不在这里起段——历史语义）
+      if (heading.level !== 2) return false;
+      const normalized = normalizeHeading(heading.text);
+      return normalized === wanted || normalized.startsWith(wanted);
+    },
+    { level: 2, endOnSeparator: false },
+  );
 }
 
 // 修复任务族 id 前缀（唯一谓词的 id 边界，全模块只此一处定义）：含尾连字符——形似编号（前缀

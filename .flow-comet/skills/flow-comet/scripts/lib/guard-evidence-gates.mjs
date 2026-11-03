@@ -35,6 +35,9 @@ import {
 } from './guard-routing.mjs';
 import { applicabilityGatedBinding, frontendCriterion } from './guard-uidesign.mjs';
 import { buildSkeleton, headingPattern, LESSONS_SCAN_SECTION } from './guard-artifact-skeleton.mjs';
+// 段界（同级标题 / 围栏 / 分隔线 / 文末）取 lib/section-body.mjs 的唯一实现：LESSONS 扫描段此前自带一份
+// 同名语义的按行扫描（只认反引号围栏），波浪号围栏里的 `## ` 会把它截断。
+import { sectionBody } from './section-body.mjs';
 // AC 覆盖判定（纯判定模块）：verify 出口的 BLOCK / review 出口的汇总 WARN 共用同一份判定与报文，
 // 分级只在下方门禁函数一处表达。
 import {
@@ -137,23 +140,6 @@ async function taskWriteFiles(changeDir) {
   return taskWriteFilesById(text);
 }
 
-// 段正文：命中段标题行之后、到下一个 H2 / 分隔线 / 文件尾（行锚定——正文里「引用段名」不劫持匹配）。
-// 围栏代码块内的 `## ` 与 `---` 是正文示例，不当作段边界。段缺席返回 null（与「段在场但正文为空」
-// 区分：前者是缺声明，后者由正文判据另行处理）。
-function lessonsScanBody(content, pattern) {
-  const lines = String(content ?? '').replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n').split('\n');
-  const start = lines.findIndex((line) => pattern.test(line));
-  if (start === -1) return null;
-  const body = [];
-  let inFence = false;
-  for (let i = start + 1; i < lines.length; i += 1) {
-    if (/^\s*```/u.test(lines[i])) inFence = !inFence;
-    if (!inFence && (/^##\s/u.test(lines[i]) || /^---\s*$/u.test(lines[i]))) break;
-    body.push(lines[i]);
-  }
-  return body.join('\n');
-}
-
 // 编号在段内出现的判定：两侧非数字边界（L-501 不算命中 L-5012），大小写不敏感（执行者常写小写
 // `l-501`）。转义集不含 `-`——字符类外的连字符本就是字面量，而在 `u` 标志下 `\-` 是非法转义
 // （会抛 Invalid regular expression）。
@@ -181,7 +167,9 @@ async function lessonsScanProblems(changeDir, summaryFiles) {
       problems.push(file + ' 无法读取（' + String(error?.message ?? error) + '）——LESSONS 扫描判据无法求值');
       continue;
     }
-    const body = lessonsScanBody(content, rule.pattern);
+    // 段界由 lib/section-body.mjs 单点决定（围栏内的 `## ` / `---` 是正文示例，不结束段体）。
+    // 段缺席 → null（缺声明），与「段在场但正文为空」区分（后者由正文判据另行处理）。
+    const body = sectionBody(content, rule.pattern, { level: 2, endOnSeparator: true });
     if (body === null) {
       if (rule.required) {
         problems.push(file + ' 缺 ## ' + rule.name + ' 段（SUMMARY 增量段须声明扫描结果与命中回应'

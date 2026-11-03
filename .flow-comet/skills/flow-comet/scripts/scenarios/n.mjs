@@ -33,8 +33,11 @@ import {
   TASK_DONE,
   customProtocol,
   dropNamedImport,
+  engineCodeText,
   engineDefinitionHits,
   engineDefinitionModule,
+  engineDefinitionPattern,
+  engineImportsSymbolFrom,
   engineScriptTexts,
   handoffFor,
 } from '../lib/test-fixtures.mjs';
@@ -770,6 +773,49 @@ function legacyMechanismLine(text) {
   return text.split(/\r?\n/).find((line) => line.includes('段名') && /open|design|plan/.test(line)) ?? '';
 }
 
+// ---------- 段体切片形态探针（段体单源锁的判据面） ----------
+
+// 一份「按标题切段体」的行扫描实现 = 同一函数里三件事齐备：
+//   ① 段头判定（行首 ATX 标题正则，或以其为模式串的 RegExp 构造）
+//   ② 在判定处收尾（break）
+//   ③ 把原始行拼成段体（+= line / push(line…) / slice(…).join(…)）
+// 缺任一件都不算：围栏状态过滤器没有段头判定，条目块收集器不在标题处收尾，键解析器把行拆成字段。
+const SECTION_HEADING_TEST_RE = /\/\^#|['"]\^#\{/u;
+const SECTION_BREAK_RE = /\bbreak\b/u;
+const SECTION_BODY_ACCUMULATION_RE = /\+=\s*line\b|\.push\(\s*line\b|\.push\(\s*lines\[|\.slice\([^)]*\)\.join\(/u;
+
+// 顶层函数体（function 声明 / const NAME = (…) => {…}）按花括号配对切。注释与字符串里的花括号会让配对
+// 偏一档，只影响检出精度、不影响判据方向：误报会显式红，漏报由行为断言兜住。
+function functionBodies(code) {
+  const lines = String(code).split('\n');
+  const out = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const matched = lines[index].match(/^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_$]+)/u)
+      ?? lines[index].match(/^(?:export\s+)?const\s+([A-Za-z0-9_$]+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z0-9_$]+)\s*=>\s*\{/u);
+    if (matched === null) continue;
+    let depth = 0;
+    let started = false;
+    const body = [];
+    for (let line = index; line < lines.length; line += 1) {
+      for (const ch of lines[line]) {
+        if (ch === '{') { depth += 1; started = true; } else if (ch === '}') depth -= 1;
+      }
+      body.push(lines[line]);
+      if (started && depth <= 0) break;
+    }
+    out.push({ name: matched[1], text: body.join('\n') });
+  }
+  return out;
+}
+
+function sectionSlicerHits(code) {
+  return functionBodies(code)
+    .filter((fn) => SECTION_HEADING_TEST_RE.test(fn.text)
+      && SECTION_BREAK_RE.test(fn.text)
+      && SECTION_BODY_ACCUMULATION_RE.test(fn.text))
+    .map((fn) => fn.name);
+}
+
 export const ENTRIES = [
 
   // ============================================================================================
@@ -851,13 +897,13 @@ export const ENTRIES = [
       const matrixHeading = '### 1.1 测试矩阵（AC → 用例）';
       // 夹具：review 节点 + REQUIREMENT（验收段列 acIds）+ TEST（1.1 矩阵只列 coveredIds）；
       // heading 可换掉 1.1 段标题，用于段名宽容与「段缺席」两侧构造。
-      const setupAcReview = (acIds, coveredIds, heading = matrixHeading) => {
+      const setupAcReview = (acIds, coveredIds, heading = matrixHeading, matrixBodyOverride = null) => {
         setupReview(dir);
         writeTemplateFixture(dir, 'REQUIREMENT');
         writeTemplateFixture(dir, 'TEST');
         writeFile(dir, CHANGE_DIR + '/REQUIREMENT.md',
           renderDoc('REQUIREMENT', { body: [['验收准则', acBody(acIds)]] }));
-        const testDoc = renderDoc('TEST', { body: [['1.1', acMatrix(coveredIds)]] });
+        const testDoc = renderDoc('TEST', { body: [['1.1', matrixBodyOverride ?? acMatrix(coveredIds)]] });
         writeFile(dir, CHANGE_DIR + '/TEST.md',
           heading === matrixHeading ? testDoc : testDoc.replace(matrixHeading, heading));
       };
@@ -893,6 +939,19 @@ export const ENTRIES = [
       assertExit(reviewNoTest, 0);
       assertNotOut(reviewNoTest, '缺 AC 覆盖');
       assertOut(reviewNoTest, 'ALL CHECKS PASSED');
+      // ⑨ 段体切片的围栏语义（1.1 矩阵段的段界由 lib/section-body.mjs 单点决定）：矩阵段里贴了围栏代码块
+      //    （块内含 `## `）时，围栏之后的矩阵行仍参与覆盖判定——段体若在示例处截断，一条 AC 都读不到，
+      //    「全覆盖」会被读成「全缺失」。
+      const fencedMatrix = ['```md', '## 代码块里的示例段标题', '```', '', acMatrix(['AC-1', 'AC-2'])].join('\n');
+      setupAcReview(['AC-1', 'AC-2'], [], matrixHeading, fencedMatrix);
+      const reviewFencedMatrix = runGuard(['exit', 'review'], dir);
+      assertExit(reviewFencedMatrix, 0);
+      assertNotOut(reviewFencedMatrix, '缺 AC 覆盖');
+      // ⑩ 分隔线语义保持：1.1 矩阵段不以 `---` 结束（既有语义）——分隔线之后的矩阵行照常参与判定
+      setupAcReview(['AC-1', 'AC-2'], [], matrixHeading, '---\n\n' + acMatrix(['AC-1', 'AC-2']));
+      const reviewRuleMatrix = runGuard(['exit', 'review'], dir);
+      assertExit(reviewRuleMatrix, 0);
+      assertNotOut(reviewRuleMatrix, '缺 AC 覆盖');
     },
   },
 
@@ -1767,6 +1826,33 @@ export const ENTRIES = [
       const h3Adjudicated = exitNode(dir, 'review');
       assertExit(h3Adjudicated, 0);
       assertOut(h3Adjudicated, 'ALL CHECKS PASSED');
+      // ⑧ 段体切片的围栏语义（发现区的段界由 lib/section-body.mjs 单点决定）：条目正文里贴了 Markdown
+      //    代码块时，围栏内的 `## ` 不是发现区的段界。修复前它是——发现区被重置成「非发现区」，围栏
+      //    之后的发现条目整段消失，「每条发现必须有处置标记」那道门禁因此对它们形同虚设。
+      const fencedFindings = [
+        '### 🔴 C-3 · 夹具发现：条目正文里贴了一段 Markdown 示例',
+        '**Symptom**：示例代码块里出现段标题',
+        '',
+        '```md',
+        '## 代码块里的示例段标题',
+        '```',
+        '',
+        '- **C-4 · 围栏之后的发现：缺处置标记**：修复前这条整段消失',
+      ].join('\n');
+      setupReview(dir, { body: [['2.2', fencedFindings]] });
+      const fencedMissing = exitNode(dir, 'review');
+      assertExit(fencedMissing, 1);
+      assertOut(fencedMissing, '发现区 2 项');   // 两条都在发现区内（修复前只数到围栏之前那条）
+      // ⑨ 围栏外的同级标题照常结束发现区：`## 结论` 之后的列表项不是 2.2 的发现
+      setupReview(dir, { body: [['2.2', h3Finding + '\n\n## 结论\n\n- **C-9 · 段外条目：缺处置标记**']] });
+      const outsideFindings = exitNode(dir, 'review');
+      assertExit(outsideFindings, 1);
+      assertOut(outsideFindings, '发现区 1 项');   // 段外那条不计入（计入则为 2 项）
+      // ⑩ 分隔线语义保持：`---` 不结束发现区（2.2 段内的分隔线是正文，既有语义）
+      setupReview(dir, { body: [['2.2', h3Finding + '\n\n---\n\n- **C-8 · 分隔线之后的发现：缺处置标记**']] });
+      const afterRule = exitNode(dir, 'review');
+      assertExit(afterRule, 1);
+      assertOut(afterRule, '发现区 2 项');   // 分隔线之后的条目仍计入（计入才说明分隔线不结束发现区）
     },
   },
 
@@ -1947,6 +2033,37 @@ export const ENTRIES = [
       const answered = exitNode(dir, 'execute');
       assertExit(answered, 0);
       assertOut(answered, 'ALL CHECKS PASSED');
+
+      // 段体切片的围栏语义（LESSONS 扫描段的段界由 lib/section-body.mjs 单点决定）：回应写在围栏代码块
+      // 之后仍算数（围栏内的 `## ` 不结束段体）；围栏外的分隔线照常结束段体。
+      const lessonsScanTask = () => writeFile(dir, CHANGE_DIR + '/TASK.md', '# TASK\n\n## 任务清单\n\n'
+        + '<task id="T01" status="done"><action>改模板保真门禁</action>'
+        + '<write_files>scripts/lib/guard-template-fidelity.mjs</write_files>'
+        + '<verify>node --check baseline.js</verify></task>\n');
+      // ④ 围栏（反引号）内含二级标题 → 段体不被截断，围栏之后的回应仍被读到
+      setupExecute(dir, { body: [['LESSONS 扫描',
+        '```md\n## 代码块里的示例段标题\n```\n\n- L-501：已读并声明差异（围栏之后的回应）。']] });
+      writeFile(dir, '.specs/LESSONS.md', LESSONS_FIXTURE);
+      lessonsScanTask();
+      const fencedScan = exitNode(dir, 'execute');
+      assertExit(fencedScan, 0);
+      assertOut(fencedScan, 'ALL CHECKS PASSED');
+      // ⑤ 围栏（波浪号）同理：两种围栏记号同口径
+      setupExecute(dir, { body: [['LESSONS 扫描',
+        '~~~md\n## 代码块里的示例段标题\n~~~\n\n- L-501：已读并声明差异（波浪号围栏之后的回应）。']] });
+      writeFile(dir, '.specs/LESSONS.md', LESSONS_FIXTURE);
+      lessonsScanTask();
+      const tildeScan = exitNode(dir, 'execute');
+      assertExit(tildeScan, 0);
+      assertOut(tildeScan, 'ALL CHECKS PASSED');
+      // ⑥ 反向构造：围栏外的分隔线结束段体 —— 回应落在分隔线之后 ⇒ 等于没回应 ⇒ BLOCKED
+      setupExecute(dir, { body: [['LESSONS 扫描',
+        '夹具说明（本段到这里结束）。\n\n---\n\n- L-501：已读并声明差异（分隔线之后的回应）。']] });
+      writeFile(dir, '.specs/LESSONS.md', LESSONS_FIXTURE);
+      lessonsScanTask();
+      const ruleClosedScan = exitNode(dir, 'execute');
+      assertExit(ruleClosedScan, 1);
+      assertOut(ruleClosedScan, 'L-501');
     },
   },
 
@@ -2259,6 +2376,147 @@ export const ENTRIES = [
       const fallbackPick = derivedPatterns.pick('change', ['Why'], routing.TEMPLATE_FALLBACK_SECTION_PATTERNS.changeWhy);
       assertTrue(fallbackPick instanceof RegExp && fallbackPick.test('## Why（为什么做）'),
         '模板在场但缺该段名时 pick 仍回落 fallback 正则（C9 后半句），实际: ' + String(fallbackPick));
+
+      // ⑤ 段体切片单源锁：五处消费（波次段 / 修复段 / REVIEW 发现区 / LESSONS 扫描段 / TEST 1.1 矩阵段）
+      //    只许取用 lib/section-body.mjs 的实现。三条判据：① 导出实现恰一处（导出面派生，不写文件名）；
+      //    ② 消费面（真实引用派生）里的每个符号都从单源具名取用、不自带第二份定义；③ 消费方内不得再
+      //    自带「按标题切段体」的行扫描实现（命中段头就收尾、把原始行拼成段体）。反向构造：三种改坏
+      //    各造一格 ⇒ 必报；还原 ⇒ 复绿。
+      {
+        const texts = engineScriptTexts();
+        const symbols = ['sectionBody', 'scanHeadings'];
+        // 写面外登记（精确到「文件 + 符号」，且每条登记都必须在场——修好后不删登记会被判陈旧）：
+        // context-init.mjs 有一个同名但签名不同的私有实现（(body, headingName) 变体，按段名取段体），
+        // 它是同一件事的第 6 份副本，但落在本任务的写面之外。登记在此使缺口可见，而不是让单源锁
+        // 假装整个引擎面已经收口。
+        const OUT_OF_FACE = [{ file: 'context-init.mjs', symbol: 'sectionBody' }];
+        // 判据（纯函数 + 合成输入可驱动，反向构造才能驱动它）：单源模块由**导出面**派生（不写文件名），
+        // 消费面由**真实引用**派生（模块搬迁 / 新增消费方不必改锚）。
+        const singleSourceProblems = (given) => {
+          const problems = [];
+          const exported = [...given.entries()]
+            .filter(([, text]) => /export\s+(?:async\s+)?function\s+sectionBody\b|export\s+const\s+sectionBody\s*=/u
+              .test(engineCodeText(text)))
+            .map(([rel]) => rel);
+          if (exported.length !== 1) {
+            problems.push('sectionBody 的导出实现应恰一处，实际 ' + JSON.stringify(exported));
+            return problems;
+          }
+          const sourceRel = exported[0];
+          const sourceText = given.get(sourceRel) ?? '';
+          for (const symbol of symbols) {
+            if (!engineDefinitionPattern(symbol).test(sourceText)) {
+              problems.push(sourceRel + ' 未定义段体单源的 ' + symbol);
+            }
+          }
+          const consumers = [...given.keys()].filter((rel) => rel !== sourceRel
+            && /\b(?:sectionBody|scanHeadings)\b/u.test(engineCodeText(given.get(rel))));
+          if (consumers.length < 5) {
+            problems.push('段体消费面不足五处（波次段 / 修复段 / 发现区 / LESSONS 扫描段 / 1.1 矩阵段）: '
+              + JSON.stringify(consumers));
+          }
+          for (const rel of consumers) {
+            const code = engineCodeText(given.get(rel));
+            for (const symbol of symbols) {
+              if (!new RegExp('\\b' + symbol + '\\b', 'u').test(code)) continue;
+              if (OUT_OF_FACE.some((entry) => entry.file === rel && entry.symbol === symbol)) continue;
+              if (engineDefinitionPattern(symbol).test(code)) {
+                problems.push(rel + ' 自带第二份 ' + symbol + ' 定义（应取用单一来源）');
+              }
+              if (!engineImportsSymbolFrom({ text: given.get(rel), consumerRel: rel, symbol, sourceRel, texts: given })) {
+                problems.push(rel + ' 未从 ' + sourceRel + ' 取用 ' + symbol);
+              }
+            }
+            for (const name of sectionSlicerHits(code)) {
+              problems.push(rel + ' 自带段体切片实现 ' + name + '（段界应只由 ' + sourceRel + ' 决定）');
+            }
+          }
+          return problems;
+        };
+        const baseProblems = singleSourceProblems(texts);
+        assertTrue(baseProblems.length === 0, '段体单源违规: ' + baseProblems.join(' | '));
+        // 登记不许陈旧：写面外的那一份若已被收口（或被改名），这条登记必须一并删除——否则它会永久
+        // 遮住同名副本的复发。
+        for (const entry of OUT_OF_FACE) {
+          assertTrue(engineDefinitionPattern(entry.symbol).test(engineCodeText(texts.get(entry.file) ?? '')),
+            '写面外登记已陈旧（' + entry.file + ' 不再自带 ' + entry.symbol + ' 定义）——收口后请删除该登记');
+        }
+        // 反向构造（逐项证明判别力：改坏 → 必红，还原 → 复绿）：探针打在**登记之外**的消费方上，
+        // 否则变异会被登记豁免吃掉，探针退化为恒绿。
+        const consumers = [...texts.keys()].filter((rel) => /\b(?:sectionBody|scanHeadings)\b/u
+          .test(engineCodeText(texts.get(rel))));
+        const probeRel = consumers.find((rel) => !OUT_OF_FACE.some((entry) => entry.file === rel));
+        const probeText = texts.get(probeRel);
+        const probeSlicer = probeText + '\n' + [
+          'function probeSectionBody(content) {',
+          '  const body = [];',
+          '  for (const line of String(content).split(/\\n/)) {',
+          '    if (/^##\\s/u.test(line)) break;',
+          '    body.push(line);',
+          '  }',
+          '  return body.join("\\n");',
+          '}',
+          '',
+        ].join('\n');
+        // 第三格针对该消费方**真正引用**的符号（消费方只取用其中一个时分不清就会退化成恒绿）
+        const referenced = symbols.find((symbol) => new RegExp('\\b' + symbol + '\\b', 'u')
+          .test(engineCodeText(probeText))) ?? 'sectionBody';
+        // 「不再取用」的变异打在 import 的来源上（把单源模块换成一个不存在的模块）：单符号 import
+        // 的列表形态下摘名字靠不住（`import { x } from …` 没有逗号可摘），换来源才是同一件事的可靠
+        // 构造——取用面因此落到一个不是单源的模块上。
+        const retargeted = probeText.replace(/(from\s*'[^']*)section-body\.mjs'/u, "$1section-body-absent.mjs'");
+        const probes = [
+          ['合成段体切片（围栏盲的行扫描）', probeSlicer, 'probeSectionBody'],
+          ['消费方不再从单源取用（import 来源被换掉）', retargeted, '未从'],
+          ['消费方自带第二份定义', probeText + '\nfunction ' + referenced + '() { return null; }\n', '自带第二份'],
+        ];
+        const probeIssues = [];
+        for (const [label, mutatedText, expected] of probes) {
+          if (mutatedText === probeText) {
+            probeIssues.push(label + '：变异未改变 ' + probeRel);
+            continue;
+          }
+          const reported = singleSourceProblems(new Map(texts).set(probeRel, mutatedText));
+          if (!reported.some((problem) => problem.includes(probeRel) && problem.includes(expected))) {
+            probeIssues.push(label + '：未被判违规（' + JSON.stringify(reported) + '）');
+          }
+        }
+        if (singleSourceProblems(texts).length !== 0) probeIssues.push('还原后未复绿（判据受输入顺序影响）');
+        assertTrue(probeIssues.length === 0, '段体单源锁反向构造失败: ' + probeIssues.join(' | '));
+      }
+
+      // ⑥ 段体契约（单源的语义面，八格逐条对照）：围栏内的标题与分隔线不结束段体；围栏外的同级标题
+      //    与分隔线按 options 结束；结束标题的级别按 options；段缺席返回 null（与「段在场正文为空」
+      //    可区分——调用方据此判「未校验」而不是「没写」）。
+      {
+        const sectionModule = await import('../lib/section-body.mjs');
+        const contract = [
+          ['围栏内的二级标题不结束段体',
+            '## S\n\n```md\n## 块内标题\n```\n\n正文\n\n## T\n', /^##\s*S/u, {},
+            '\n```md\n## 块内标题\n```\n\n正文\n'],
+          ['波浪号围栏同口径',
+            '## S\n\n~~~md\n## 块内标题\n~~~\n\n正文\n', /^##\s*S/u, {}, '\n~~~md\n## 块内标题\n~~~\n\n正文\n'],
+          ['围栏外的同级标题结束段体',
+            '## S\n\n正文\n\n## T\n\n别段\n', /^##\s*S/u, {}, '\n正文\n'],
+          ['分隔线结束段体（默认）',
+            '## S\n\n正文\n\n---\n\n尾\n', /^##\s*S/u, {}, '\n正文\n'],
+          ['分隔线不结束段体（endOnSeparator: false）',
+            '## S\n\n正文\n\n---\n\n尾\n', /^##\s*S/u, { endOnSeparator: false },
+            '\n正文\n\n---\n\n尾\n'],
+          ['三级标题不结束二级段体（level: 2）',
+            '## S\n\n正文\n\n### 子\n\n子正文\n', /^##\s*S/u, {},
+            '\n正文\n\n### 子\n\n子正文\n'],
+          ['同级标题结束三级段体（level: 3）',
+            '### S\n\n正文\n\n### T\n\n别段\n', /^###\s*S/u, { level: 3 }, '\n正文\n'],
+          ['段缺席返回 null',
+            '## 其他\n\n正文\n', /^##\s*S/u, {}, null],
+        ];
+        for (const [label, docText, pattern, options, expected] of contract) {
+          const actual = sectionModule.sectionBody(docText, pattern, options);
+          assertTrue(actual === expected,
+            '段体契约（' + label + '）: 期望 ' + JSON.stringify(expected) + '，实际 ' + JSON.stringify(actual));
+        }
+      }
     },
   },
 

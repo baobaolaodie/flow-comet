@@ -42,6 +42,10 @@ import {
   templateSectionPatterns,
   templateSectionPattern,
 } from './guard-routing.mjs';
+// 段界（同级标题 / 围栏 / 分隔线 / 文末）取 lib/section-body.mjs 的唯一实现：矩阵段里贴一段示例
+// （围栏内的 `## …`）时，段被提前截断会**少读后面的 AC 编号**——那正是本判据的输入，静默少读会把
+// 「没覆盖」读成「覆盖了」（假绿）。
+import { sectionBody } from './section-body.mjs';
 
 // 验收段的关键词：与 open 出口的验收段判据**同一个列表**（'验收'）。此处刻意不把 AC / Acceptance
 // 加进来——它们已由回退基准（TEMPLATE_FALLBACK_SECTION_PATTERNS.requirementAcceptance）覆盖，
@@ -72,27 +76,6 @@ async function readText(filePath) {
   } catch {
     return null;
   }
-}
-
-// 段正文切片：首个命中标题行之后、下一个同级或更高级标题（或文末）之前的文本；段缺席 → null。
-// 只认行首 ATX 标题（与骨架模块的标题提取同一锚定口径）——正文里「引用段名」不劫持匹配。
-// level = 2 时下一行 `##` / `#` 收尾；level = 3 时 `###` / `##` / `#` 收尾。
-// 围栏代码块内的标题行不算段边界：段里贴一段示例（围栏内的 `## …`）时，段被提前截断会**少读后面的
-// AC 编号**——那正是本判据的输入，静默少读只会把「没覆盖」读成「覆盖了」（假绿），故按行同步围栏状态
-// （与 LESSONS 扫描段体同一纪律；本处按正则 + 任意层级切段，契约与那处不同，不合并实现）。
-function sectionBody(text, pattern, level) {
-  const lines = normalizeText(text).split('\n');
-  const start = lines.findIndex((line) => pattern.test(line));
-  if (start === -1) return null;
-  const stop = new RegExp('^#{1,' + level + '}\\s', 'u');
-  const body = [];
-  let inFence = false;
-  for (let index = start + 1; index < lines.length; index += 1) {
-    if (/^\s*(?:```|~~~)/u.test(lines[index])) inFence = !inFence;
-    if (!inFence && stop.test(lines[index])) break;
-    body.push(lines[index]);
-  }
-  return body.join('\n');
 }
 
 // 三个段的正则全部经 guard-routing 的选段入口派生（返回值可能是 TEMPLATE_SECTION_SKIP：模板整份
@@ -204,7 +187,7 @@ export async function acCoverageReview(changeDir) {
   if (requirementText === null) return unverifiable('REQUIREMENT 缺席');
   const acceptancePattern = await acceptanceSectionPattern();
   if (acceptancePattern === TEMPLATE_SECTION_SKIP) return unverifiable('模板缺席（段名无从派生）');
-  const acceptanceBody = sectionBody(requirementText, acceptancePattern, 2);
+  const acceptanceBody = sectionBody(requirementText, acceptancePattern, { level: 2, endOnSeparator: false });
   if (acceptanceBody === null) return unverifiable('REQUIREMENT 无验收准则段');
   const acIds = parseAcIds(acceptanceBody);
   if (acIds.length === 0) return unjudgeable('REQUIREMENT 无 AC 编号');
@@ -212,10 +195,12 @@ export async function acCoverageReview(changeDir) {
   if (testText === null) return unverifiable('TEST.md 缺席');
   const roundPattern = await testRoundSectionPattern();
   if (roundPattern === TEMPLATE_SECTION_SKIP) return unverifiable('模板缺席（段名无从派生）');
-  if (sectionBody(testText, roundPattern, 2) === null) return unverifiable('TEST.md 无第 1 轮段');
+  if (sectionBody(testText, roundPattern, { level: 2, endOnSeparator: false }) === null) {
+    return unverifiable('TEST.md 无第 1 轮段');
+  }
   const matrixPattern = await testMatrixSectionPattern();
   if (matrixPattern === TEMPLATE_SECTION_SKIP) return unverifiable('模板缺席（段名无从派生）');
-  const matrixBody = sectionBody(testText, matrixPattern, 3);
+  const matrixBody = sectionBody(testText, matrixPattern, { level: 3, endOnSeparator: false });
   if (matrixBody === null) return unjudgeable('TEST.md 第 1 轮无 1.1 测试矩阵段');
   const covered = new Set(parseAcIds(matrixBody));
   return { acIds, missing: acIds.filter((id) => !covered.has(id)), unverified: null, unjudgeable: null };
