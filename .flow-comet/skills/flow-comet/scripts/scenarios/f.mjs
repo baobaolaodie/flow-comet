@@ -784,9 +784,10 @@ export const ENTRIES = [
   },
 
   // 184c: 纪律判别句式族——入口 archive 读法三要素、plan/task 判别句式 + GUIDANCE 委托消化、
-  // Codex 平台事实与支持面（权威处唯一 + 引用册指针在场 + 判别句不回流）。
+  // 波次与 AC 覆盖判据句、Codex 平台事实与支持面（权威处唯一 + 引用册指针在场 + 判别句不回流）、
+  // 声明门禁的文档口径（多 --prompt 形态 + exit 全部覆盖）。场景名随覆盖族补齐一并点名。
   {
-    name: '184c 技能文本锁：入口 archive 读法 + 规划约束判别句 + Codex 平台事实',
+    name: '184c 技能文本锁：入口 archive 读法 + 规划约束 + 波次与 AC 覆盖 + 声明门禁口径 + Codex 平台事实',
     run: () => {
       const problems = [];
       // —— 入口 archive 读法：三要素关键词在场 ——
@@ -956,6 +957,81 @@ export const ENTRIES = [
             ...pointerBooks.slice(1),
           ]).some((p) => p.includes('引用册指针不在场'))) {
             problems.push('反向构造判别力缺失（平台事实: 抽掉引用册指针未被判违规）');
+          }
+        }
+      }
+      // —— ⑥ 声明门禁的文档口径（入口册 + 入口展开册）——
+      // 判据 = 「多 --prompt 形态」与「exit 全部覆盖」两组判别句逐条在其所属文档在场 + 旧的
+      // 单 --prompt 声明口径零残留。锚取可辨认的整句片段，不取裸词（裸词「全部覆盖」「--prompt」
+      // 在别处也出现，改宽即恒真）；每条锚各配反向构造：抽掉所属文档里的该锚 ⇒ 必报缺该锚，
+      // 把旧句子还原进任一册 ⇒ 必报残留。既有锚（分条等价 / 两层加载 / 模板权威）一条不删。
+      {
+        const declarationBookRels = ['flow-comet/SKILL.md', 'flow-comet/reference/entry-detail.md'];
+        const declarationDocAnchors = [
+          ['入口册 · 一份命令可给多个 --prompt', 'flow-comet/SKILL.md',
+            '一份命令可以给多个 `--prompt`'],
+          ['入口册 · open 多协议示例（同行两个 --prompt）', 'flow-comet/SKILL.md',
+            'skill-load open flow-comet-change --prompt flow-kit/prompts/0-change.md --prompt flow-kit/prompts/1-requirement.md'],
+          ['入口册 · exit 判据是全部覆盖', 'flow-comet/SKILL.md',
+            'exit 的判据是「全部覆盖」而不是「任一命中」'],
+          ['入口册 · handoff-guarded 不在节点标记判据内', 'flow-comet/SKILL.md',
+            '`handoff-guarded` 是子代理侧义务，由 Return Contract 负责，不在节点标记判据内'],
+          ['展开册 · 一份命令可给多个 --prompt', 'flow-comet/reference/entry-detail.md',
+            '一份命令可以给多个 `--prompt`'],
+          ['展开册 · open 多协议示例（同行两个 --prompt）', 'flow-comet/reference/entry-detail.md',
+            'skill-load open flow-comet-change --prompt flow-kit/prompts/0-change.md --prompt flow-kit/prompts/1-requirement.md'],
+          ['展开册 · 协议文件面逐份覆盖', 'flow-comet/reference/entry-detail.md',
+            '该节点该读的**每一份**协议文件都要被声明过'],
+          ['展开册 · 技能面逐份覆盖', 'flow-comet/reference/entry-detail.md',
+            '都要有一个属于它的标记'],
+          ['展开册 · handoff-guarded 不在判据内', 'flow-comet/reference/entry-detail.md',
+            '**`handoff-guarded` 不在判据内**'],
+          ['展开册 · 缺声明的恢复命令形态', 'flow-comet/reference/entry-detail.md',
+            'skill-load <node> <skill> --prompt <缺的那份协议文件>'],
+          ['展开册 · 分级（新 BLOCKED / 旧 WARN）', 'flow-comet/reference/entry-detail.md',
+            '新 change BLOCKED（强制全部覆盖）、旧 change 只 WARN'],
+          ['展开册 · 旧单值标记按 basename 计入覆盖', 'flow-comet/reference/entry-detail.md',
+            '照样按 basename 计入覆盖'],
+        ];
+        // 旧口径的两条判别形态：单 --prompt 的教学句、以及「每个协议文件对应一条声明命令」的
+        // 分条强制句。收紧后两者都不成立（分条与合并等价），回流即红。
+        const staleDeclarationSentences = [
+          '每个协议文件对应一条声明命令',
+          'skill-load <node> <skill> --prompt flow-kit/prompts/<阶段>.md',
+        ];
+        const declarationDocProblems = (docs) => {
+          const out = [];
+          for (const [label, rel, anchor] of declarationDocAnchors) {
+            const text = docs.get(rel);
+            if (typeof text !== 'string') { out.push(rel + ' 不在场（' + label + ' 无法核对）'); continue; }
+            if (!text.includes(anchor)) out.push(rel + ' 缺「' + label + '」');
+          }
+          for (const [rel, text] of docs) {
+            if (typeof text !== 'string') continue;
+            for (const stale of staleDeclarationSentences) {
+              if (text.includes(stale)) out.push(rel + ' 残留旧声明口径「' + stale + '」');
+            }
+          }
+          return out;
+        };
+        const declarationDocs = new Map(declarationBookRels.map((rel) => [rel,
+          fs.readFileSync(path.join(SCRIPTS_DIR, '..', rel.replace('flow-comet/', '')), 'utf8')]));
+        problems.push(...declarationDocProblems(declarationDocs));
+        for (const [label, rel, anchor] of declarationDocAnchors) {
+          const text = declarationDocs.get(rel);
+          if (typeof text !== 'string' || !text.includes(anchor)) continue; // 缺失已由真实判据报告，不叠第二条
+          const probed = new Map(declarationDocs).set(rel, text.split(anchor).join('（反向构造：抽掉）'));
+          if (!declarationDocProblems(probed).some((p) => p.includes('缺「' + label + '」'))) {
+            problems.push('反向构造判别力缺失（声明口径: 抽掉「' + label + '」未被判缺）');
+          }
+        }
+        for (const stale of staleDeclarationSentences) {
+          const probed = new Map(declarationDocs);
+          for (const [rel, text] of declarationDocs) {
+            if (typeof text === 'string') probed.set(rel, text + '\n' + stale + '\n');
+          }
+          if (!declarationDocProblems(probed).some((p) => p.includes('残留旧声明口径'))) {
+            problems.push('反向构造判别力缺失（声明口径: 还原旧句「' + stale + '」未被判残留）');
           }
         }
       }
