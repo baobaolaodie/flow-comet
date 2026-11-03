@@ -17,6 +17,7 @@ import { TASK7_REQUIRED } from './task-graph.mjs';
 // 不另写一份判定（两处各写一份，改散文即可绕过其中一处）。
 import {
   WAVE_UNCHECKED_NOTICE,
+  waveContentUnjudgeableLine,
   waveProjectionReportLines,
   waveProjectionReview,
 } from './wave-projection.mjs';
@@ -430,12 +431,19 @@ export async function runReplan(protocol, argv) {
   }
   // 波次投影（波次 = 依赖层级的投影）：与 plan 出口**同源**调用同一判定与同一报文构造（ADR-013：
   // replan 绝不豁免——此处不判，改一改波次散文就能绕过 plan 出口的同一判据）。新 change 不一致
-  // → BLOCK（明细逐条点名 + 恢复指引；本段全部先于备份与写盘，故状态零改写），旧 change WARN
-  // 渐进；解析不到（无段 / 无可用 Wave 行）显式「未校验」并跳过。措辞与 plan 出口逐字相同
-  // （同一构造函数），两处不会各说一套。
+  // （含未被 Wave 行声明的任务，明细取值「未声明」）→ BLOCK（逐条点名 + 恢复指引；本段全部先于
+  // 备份与写盘，故状态零改写），旧 change WARN 渐进。「判不了」按成因二分——载体缺席（无段 / 段名
+  // 无从派生）打印「未校验」并跳过；内容不可判（段在场却无可对应任务）与 plan 出口同分级。
+  // 措辞与 plan 出口逐字相同（同一构造函数），两处不会各说一套。
   const waveReview = waveProjectionReview({ taskContent, blocks: taskList });
   if (!waveReview.judgeable) {
-    console.error(WAVE_UNCHECKED_NOTICE);
+    if (waveReview.reason === 'content-unjudgeable') {
+      const unjudgeableBlocking = state.newChange === true;
+      console.error(waveContentUnjudgeableLine(unjudgeableBlocking ? 'BLOCKED' : 'WARN'));
+      if (unjudgeableBlocking) process.exit(1);
+    } else {
+      console.error(WAVE_UNCHECKED_NOTICE);
+    }
   } else if (waveReview.mismatches.length > 0) {
     const waveBlocking = state.newChange === true;
     for (const line of waveProjectionReportLines(waveReview.mismatches, waveBlocking ? 'BLOCKED' : 'WARN')) {

@@ -39,6 +39,7 @@ import { frontendCriterion } from './guard-uidesign.mjs';
 // 实现与同一报文——段界（waveSectionBody）也是既有波次散文检测的唯一表达处。
 import {
   WAVE_UNCHECKED_NOTICE,
+  waveContentUnjudgeableLine,
   waveProjectionReportLines,
   waveProjectionReview,
   waveSectionBody,
@@ -1142,17 +1143,25 @@ export async function runPlanExitGate({ node, state }) {
       console.error('WARN: TASK.md ' + detail + '——依赖图不可满足（旧 change 渐进不阻断）' + guide);
     }
     // 波次投影判定（波次 = 依赖层级的投影）：`## 波次划分` 声明的波次必须等于任务的依赖层级
-    // （无依赖 = 第 1 波，其余 = 1 + 依赖中最晚波次）。这是「图必须等于依赖」的判据——同波依赖、
-    // 排在依赖之前、以及明明只需更早波次却排到更后面的保守排法都会被逐条点名（任务 / 依赖 /
-    // 当前波 / 应到波）。分级沿用既有先例：新 change BLOCKED（明细 + 恢复指引：移到应到波，或把
-    // 「为何排在后面」的依赖写成显式 depends_on），旧 change WARN 渐进；解析不到（无段 / 无可用
-    // Wave 行 / 无可对应任务）显式打印「未校验」并跳过——不静默、也不冒充通过。位置在依赖图判据
-    // 之后：环与缺失依赖是更根本的规划错误，先报它们；replan 重校段（ADR-013 不豁免）调用同一
-    // 判定与同一报文构造，措辞与分级因此不会分叉。
+    // （无依赖 = 第 1 波，其余 = 1 + 依赖中最晚波次），且任务集里每个非修复族任务都必须被某个
+    // Wave 行声明过（未声明记入同一明细，取值「未声明」）。这是「图必须等于依赖」的判据——同波
+    // 依赖、排在依赖之前、只需更早波次却排到更后面的保守排法、以及根本没写进波次段的任务都会被
+    // 逐条点名（任务 / 依赖 / 当前波 / 应到波）。分级沿用既有先例：新 change BLOCKED（明细 +
+    // 恢复指引），旧 change WARN 渐进。「判不了」按成因二分：载体缺席（无段 / 段名无从派生）只
+    // 打印「未校验」放行——判据没有可判对象；工件内容不可判（段在场却没有一行 Wave 行能落到真实
+    // 任务上）按同一先例分级，旧 change 的 WARN 行进入既有 WARN COUNT（「该写的没写」不静默）。
+    // 位置在依赖图判据之后：环与缺失依赖是更根本的规划错误，先报它们；replan 重校段（ADR-013
+    // 不豁免）调用同一判定与同一报文构造，措辞与分级因此不会分叉。
     {
       const waveReview = waveProjectionReview({ taskContent: content, blocks: taskList });
       if (!waveReview.judgeable) {
-        console.error(WAVE_UNCHECKED_NOTICE);
+        if (waveReview.reason === 'content-unjudgeable') {
+          const unjudgeableBlocking = isNewChange(state);
+          console.error(waveContentUnjudgeableLine(unjudgeableBlocking ? 'BLOCKED' : 'WARN'));
+          if (unjudgeableBlocking) process.exit(1);
+        } else {
+          console.error(WAVE_UNCHECKED_NOTICE);
+        }
       } else if (waveReview.mismatches.length > 0) {
         const waveBlocking = isNewChange(state);
         for (const line of waveProjectionReportLines(waveReview.mismatches, waveBlocking ? 'BLOCKED' : 'WARN')) {

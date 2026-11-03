@@ -251,12 +251,18 @@ const VERIFY_COMMAND_BODY = ['```', 'node --check baseline.js', '```'].join('\n'
 const TASK_BLOCK_BODY = '<task id="T01" status="done"><action>实现夹具被测项</action>'
   + '<write_files>src/fixture.mjs</write_files><verify>node --check baseline.js</verify></task>';
 
+// 波次段正文：夹具任务 T01 无依赖 ⇒ 第 1 波。段在场却一条 Wave 行都没有时，plan 出口按「波次划分段
+// 内容不可判」拦（未验证 ≠ 通过）——本场景测的是「缺必填 H2」的段形判据，波次段必须写出可判声明，
+// 否则它先被波次判据拦下，被测报文根本不会出现。
+const TASK_WAVE_BODY = ['```', 'Wave 1: T01', '```'].join('\n');
+
 // 段级正文覆盖：[模板键, 段名片段, 正文]——只在夹具需要实质内容的位置使用。
 const BODY_OVERRIDES = [
   ['SUMMARY', '6 维自查', SIX_DIM_BODY],
   ['SUMMARY', 'verify 输出', VERIFY_COMMAND_BODY],
   ['REQUIREMENT', '验收准则', '- Given 夹具前置\n- When 夹具动作\n- Then 夹具结果（AC 夹具）'],
   ['REQUIREMENT', '用户故事', '- US-1 作为执行者，我想让夹具可通过结构校验。'],
+  ['TASK', '波次划分', TASK_WAVE_BODY],
   ['TASK', '任务清单', TASK_BLOCK_BODY],
   ['REVIEW', '2.2', '- **F1 · 夹具发现**：某处存在一个可记录的衰退风险 [已修]\n'
     + '  - **Symptom**: 夹具现象\n  - **Source**: 夹具来源\n'

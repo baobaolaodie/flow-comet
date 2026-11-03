@@ -9,6 +9,7 @@ import {
   assertExit,
   assertNotOut,
   assertOut,
+  assertTrue,
   baseState,
   runGuard,
   runHandoff,
@@ -80,6 +81,42 @@ const conservativeWavePlan = () => waveMarkdown(
 const fixedWavePlan = () => waveMarkdown(
   'Wave 1 (parallel): T01[P]\nWave 2: T02   (depends on T01)',
   waveTask('T01') + waveTask('T02', 'T01'));
+
+// 未声明任务：Wave 行只写 T01，而任务集里还有 T02（依赖 T01）与 T03（依赖 T02）——这是「真任务集
+// 减去 Wave 声明集」的差集，此前完全不进判定（判据只沿「已声明」一侧求差），于是 exit 0 且零输出。
+const undeclaredWavePlan = () => waveMarkdown(
+  'Wave 1 (parallel): T01[P]',
+  waveTask('T01') + waveTask('T02', 'T01') + waveTask('T03', 'T02'));
+
+// 修复族任务不在波次声明的义务面内：带修复族前缀 id 的任务、以及位于「Fix 任务」段内的任务
+// （R01），两者都不写进 Wave 行，判据仍须放行——族判定一律经 task-graph 的唯一谓词，判据侧
+// 不自写前缀匹配。
+const fixFamilyWavePlan = () => waveMarkdown(
+  'Wave 1 (parallel): T01[P]\nWave 2: T02   (depends on T01)',
+  waveTask('T01') + waveTask('T02', 'T01')
+  + '<task id="T-FIX-01" status="pending"><action>回修前缀形态</action>'
+  + '<write_files>src/fix1.mjs</write_files><verify>node --check src/fix1.mjs</verify>'
+  + '<depends_on></depends_on></task>\n'
+  + '\n## Fix 任务（来自 REVIEW / INTEGRATION）\n\n'
+  + '<task id="R01" status="pending"><action>回修段内形态</action>'
+  + '<write_files>src/fix2.mjs</write_files><verify>node --check src/fix2.mjs</verify>'
+  + '<depends_on></depends_on></task>\n');
+
+// 全角与半角是同一份错误计划的两种写法（唯一变量 = 标点）：同一明细、同一分级。漏收全角逗号时，
+// 中文写法解析不出任务 id ⇒ 降级成「未校验」放行（实测 Wave 1：T01，T02 → exit 0 + ALL CHECKS PASSED）。
+const fullWidthSameWavePlan = () => waveMarkdown(
+  'Wave 2（parallel）：T01[P]，T02　（T02 on T01）',
+  waveTask('T01') + waveTask('T02', 'T01'));
+
+// 波次段正文（段在场、正文不可判）：段标题在场而判据拿不到任何可对应任务的 Wave 行——三种真实
+// 糊弄形态是同一成因的三个入口（纯 N/A 声明 / 点到不存在的任务 id / 行首带 Markdown 强调记号）。
+const waveBodyPlan = (body, tasks) => '# TASK\n\n## 波次划分\n\n' + body + '\n\n## 任务清单\n\n' + tasks;
+const naWavePlan = () => waveBodyPlan('N/A（本计划不使用波次划分）', waveTask('T01') + waveTask('T02', 'T01'));
+const phantomWavePlan = () => waveBodyPlan('```\nWave 1: T99\n```', waveTask('T01'));
+const boldWavePlan = () => waveBodyPlan('```\n**Wave 1**: T01\n```', waveTask('T01'));
+
+// 报告明细行（同一报文构造的逐条投影）：只取报文里的「  - 」行，用于比较两种标点写法的判定是否一致。
+const waveDetailLines = (res) => res.output.split(/\r?\n/u).filter((line) => line.startsWith('  - ')).sort();
 
 export const ENTRIES = [
 
@@ -289,6 +326,54 @@ export const ENTRIES = [
       assertOut(waveFixed, 'ALL CHECKS PASSED');
       assertNotOut(waveFixed, '波次划分与依赖层级不一致');
       assertNotOut(waveFixed, '未校验（无波次段）');
+      // ⑤ 未声明任务（Wave 行只写 T01，任务另有 T02←T01、T03←T02）：新 change 必须 BLOCK，并在
+      //    明细里点名「哪些任务没有被波次覆盖」——取值形态沿用同一报文：当前波 = 未声明。
+      const undeclaredBlocked = runPlanWithTask(dir, undeclaredWavePlan());
+      assertExit(undeclaredBlocked, 1);
+      assertOut(undeclaredBlocked, '波次划分与依赖层级不一致');
+      assertOut(undeclaredBlocked, 'T02（依赖: T01）当前波 未声明 → 应到波 2');
+      assertOut(undeclaredBlocked, 'T03（依赖: T02）当前波 未声明 → 应到波 3');
+      assertOut(undeclaredBlocked, '写进第 2 波的 Wave 行');
+      // 已声明的 T01 不得被算成未声明（判据不是把所有任务一网打尽）
+      assertNotOut(undeclaredBlocked, 'T01（依赖: 无）当前波 未声明');
+      // ⑥ 修复族任务不被要求覆盖：族前缀形态的任务与修复段内的 R01 都不写进 Wave 行，判据照常
+      //    放行——族排除经 task-graph 的唯一谓词，判据侧没有第二套前缀匹配。
+      const fixFamilyPassed = runPlanWithTask(dir, fixFamilyWavePlan());
+      assertExit(fixFamilyPassed, 0);
+      assertOut(fixFamilyPassed, 'ALL CHECKS PASSED');
+      assertNotOut(fixFamilyPassed, '未声明');
+      assertNotOut(fixFamilyPassed, '波次划分与依赖层级不一致');
+      // ⑦ 全角 / 半角是同一份错误计划（唯一变量 = 标点）：都 BLOCK 且明细逐条一致。半角侧复用 ② 的
+      //    结果，全角侧此前降级成「未校验」放行（分隔符漏收全角逗号）——这一格专锚该退化。
+      const fullWidthBlocked = runPlanWithTask(dir, fullWidthSameWavePlan());
+      assertExit(fullWidthBlocked, 1);
+      assertOut(fullWidthBlocked, '波次划分与依赖层级不一致');
+      assertNotOut(fullWidthBlocked, '未校验（无波次段）');
+      const halfDetails = waveDetailLines(sameWaveBlocked);
+      const fullDetails = waveDetailLines(fullWidthBlocked);
+      assertTrue(halfDetails.length > 0, '半角写法的波次明细为空（判据未生效）: ' + sameWaveBlocked.output);
+      assertTrue(halfDetails.join('\n') === fullDetails.join('\n'),
+        '全角与半角的波次明细不一致（同一计划应同一判定）: 半角=' + JSON.stringify(halfDetails)
+        + ' 全角=' + JSON.stringify(fullDetails));
+      // ⑧ 段在场而内容不可判（N/A 声明 / 指向不存在的任务 id / 行首强调记号）：新 change BLOCKED——
+      //    「判不了」不再等价于放行（未验证 ≠ 通过），且报文与「载体缺席」那一支明确不同。
+      for (const [label, plan] of [
+        ['N/A 声明', naWavePlan()],
+        ['指向不存在的任务 id', phantomWavePlan()],
+        ['行首强调记号', boldWavePlan()],
+      ]) {
+        const unjudgeable = runPlanWithTask(dir, plan);
+        try {
+          assertExit(unjudgeable, 1);
+          assertOut(unjudgeable, '波次划分段内容不可判');
+          // 恢复指引必须指出「N/A 不构成声明」这条真实可照抄的出路（不是只出现「恢复」二字的空句）
+          assertOut(unjudgeable, '段正文写 N/A 不构成波次声明');
+          assertNotOut(unjudgeable, '未校验（无波次段）');
+          assertNotOut(unjudgeable, '波次划分与依赖层级不一致');
+        } catch (error) {
+          throw new Error(label + '：' + error.message);
+        }
+      }
       // ===== replan 同源（AC-3 · ADR-013 不豁免）：重校段调用同一判定、同一报文 =====
       // 相位夹具 = execute 已 entry、前序完成、taskHash 过期（避开幂等空操作）。
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', sameWavePlan());
@@ -306,6 +391,13 @@ export const ENTRIES = [
       if (replanBackupFiles(dir).length !== 0) {
         throw new Error('replan 波次投影 BLOCK 路径不得产生重签前备份，实际 ' + replanBackupFiles(dir).length + ' 份');
       }
+      // 未声明任务同样不豁免（ADR-013：改散文绕不过判据）：重校段必须点名未被波次覆盖的任务。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', undeclaredWavePlan());
+      const replanUndeclared = runStateWithProtocol(dir, ['replan', '未声明任务的计划重校', '--authorized-by', 'user-approval']);
+      assertExit(replanUndeclared, 1);
+      assertOut(replanUndeclared, '波次划分与依赖层级不一致');
+      assertOut(replanUndeclared, 'T02（依赖: T01）当前波 未声明 → 应到波 2');
+      assertStateBytesUnchanged(dir, replanBytes, 'replan 未声明任务 BLOCK');
       // 改到一致后重签成功（判据不阻断合规计划）
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', fixedWavePlan());
       const replanFixed = runStateWithProtocol(dir, ['replan', '按波次投影修正后重校', '--authorized-by', 'user-approval']);
@@ -419,6 +511,34 @@ export const ENTRIES = [
       assertOut(oldWaveWarn, '波次划分与依赖层级不一致');
       assertOut(oldWaveWarn, 'T01');
       assertOut(oldWaveWarn, '应到波 1');
+      // ⑥ 旧 change + 未声明任务：同一明细、同一措辞（当前波 = 未声明），但只 WARN——退出码不因该
+      //    判据改变，明细仍点名未被波次覆盖的任务与应到波。
+      const oldUndeclared = runPlanWithTask(dir, undeclaredWavePlan());
+      assertExit(oldUndeclared, 0);
+      assertNotOut(oldUndeclared, 'BLOCKED');
+      assertOut(oldUndeclared, '未声明');
+      assertOut(oldUndeclared, 'T02（依赖: T01）当前波 未声明 → 应到波 2');
+      assertOut(oldUndeclared, '应到波 3');
+      // ⑦ 旧 change + 段在场而内容不可判（N/A 正文）：WARN 不阻断，且进入既有 WARN COUNT——
+      //    「未校验」不再静默（此前这一类只打印未校验、不进 WARN 汇总，等于零反馈）。
+      const oldUnjudgeable = runPlanWithTask(dir, naWavePlan());
+      assertExit(oldUnjudgeable, 0);
+      assertNotOut(oldUnjudgeable, 'BLOCKED');
+      assertOut(oldUnjudgeable, '波次划分段内容不可判');
+      // 计数用例别力：同一任务集、唯一变量 = 波次段是否在场——载体缺席只「未校验」（不计 WARN），
+      // 内容不可判那一支必须使 WARN COUNT 恰好比它多 1（「未校验不再静默」的证据是计数差，不是
+      // 「输出里有 WARN 字样」）。
+      const noSectionSameTasks = runPlanWithTask(dir, '# TASK\n\n## 任务清单\n\n'
+        + waveTask('T01') + waveTask('T02', 'T01'));
+      assertExit(noSectionSameTasks, 0);
+      assertOut(noSectionSameTasks, '未校验（无波次段）');
+      const warnCountOf = (res) => {
+        const match = /WARN COUNT: (\d+)/u.exec(res.output);
+        return match === null ? 0 : Number(match[1]);
+      };
+      assertTrue(warnCountOf(oldUnjudgeable) === warnCountOf(noSectionSameTasks) + 1,
+        '段在场而内容不可判未计入 WARN COUNT（未校验仍静默）: N/A=' + warnCountOf(oldUnjudgeable)
+        + ' 无段=' + warnCountOf(noSectionSameTasks));
     },
   },
 
