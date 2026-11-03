@@ -196,7 +196,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-c
 
 > **分条等价**：按协议文件分几条命令声明，与合并成一条等价——出口判据按节点汇总，只问「该读的这几份是否都被声明过」。
 
-> **提示词 = 步骤权威、模板 = 段形权威，两者缺一即未完成加载**：`--prompt` 指向的 `flow-kit/prompts/<阶段>.md` 规定这一步**怎么做**（流程步骤、检查项、交接物），`--templates` 指向的 `flow-kit/templates/<DOC>.md` 规定产出**长什么样**（标题、段序、段形）。节点入口先打印 `READ PROMPT:`；**有模板的节点**再打印 `READ TEMPLATE:`（verify / archive 为零模板节点，只打印一行）；**两条 READ 行都要读**。design 的**前端** change 还会多打印一行 `READ PROMPT（条件提示词）: …2a-ui-design.md…`（按 `frontendCriterion` 判定；非前端不打印）。`--prompt` 必须是该节点的协议文件（以入口打印的 `READ PROMPT:` 行为准）；**错路径与少声明**都由入口（逐份核对已写下的声明）与出口（逐份核对节点协议集）两侧拦下（BLOCKED，缺哪份逐项点名），既不会静默写成一条与节点无关的声明，也不存在「有一份就过」。
+> **提示词 = 步骤权威、模板 = 段形权威，两者缺一即未完成加载**：`--prompt` 指向的 `flow-kit/prompts/<阶段>.md` 规定这一步**怎么做**（流程步骤、检查项、交接物），`--templates` 指向的 `flow-kit/templates/<DOC>.md` 规定产出**长什么样**（标题、段序、段形）。节点入口先打印 `READ PROMPT:`；**有模板的节点**再打印 `READ TEMPLATE:`（verify / archive 为零模板节点，只打印一行）；**两条 READ 行都要读**。design 的**前端** change 还会多打印一行 `READ PROMPT（条件提示词）: …2a-ui-design.md…`（按 `frontendCriterion` 判定；非前端不打印）。`--prompt` 必须是该节点的协议文件（以入口打印的 `READ PROMPT:` 行为准）；**入口只拦错路径**——逐份核对已写下的声明，落在节点协议面外即 BLOCKED 并点名；**缺失由出口拦**——逐份核对节点协议集，缺哪份逐项点名。两处判据分工不同：既不会静默写成一条与节点无关的声明，也不存在「有一份就过」。
 
 > **`--templates` 是内置节点的必填声明**（每个声明标记各写**全清单**，与节点映射一致）：open → `CHANGE.md,REQUIREMENT.md` · design → `DESIGN.md`（前端 change 可再加 `UI-DESIGN.md`）· plan → `TASK.md` · execute / subagent-execute → `SUMMARY.md` · review → `REVIEW.md,TEST.md` · verify / archive → **零模板节点，省略该参数**（省略即空集；多写反而不一致）。声明集合由引擎校验：漏写 / 多写 / 错名在新 change 下即 BLOCK，旧 change 仅 WARN。
 

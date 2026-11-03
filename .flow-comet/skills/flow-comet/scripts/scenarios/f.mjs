@@ -785,9 +785,10 @@ export const ENTRIES = [
 
   // 184c: 纪律判别句式族——入口 archive 读法三要素、plan/task 判别句式 + GUIDANCE 委托消化、
   // 波次与 AC 覆盖判据句、Codex 平台事实与支持面（权威处唯一 + 引用册指针在场 + 判别句不回流）、
-  // 声明门禁的文档口径（多 --prompt 形态 + exit 全部覆盖）。场景名随覆盖族补齐一并点名。
+  // 声明门禁与旧 change 分级的文档口径（多 --prompt 形态 + exit 全部覆盖 + 入口只拦错路径 +
+  // 旧 change 按 `newChange` 标记表述）。场景名随覆盖族补齐一并点名。
   {
-    name: '184c 技能文本锁：入口 archive 读法 + 规划约束 + 波次与 AC 覆盖 + 声明门禁口径 + Codex 平台事实',
+    name: '184c 技能文本锁：入口 archive 读法 + 规划约束 + 波次与 AC 覆盖 + 声明门禁与旧 change 分级口径 + Codex 平台事实',
     run: () => {
       const problems = [];
       // —— 入口 archive 读法：三要素关键词在场 ——
@@ -1032,6 +1033,139 @@ export const ENTRIES = [
           }
           if (!declarationDocProblems(probed).some((p) => p.includes('残留旧声明口径'))) {
             problems.push('反向构造判别力缺失（声明口径: 还原旧句「' + stale + '」未被判残留）');
+          }
+        }
+      }
+      // —— ⑦ 文档口径与实现一致：入口只拦错路径 / 旧 change 按 `newChange` 标记分级 ——
+      // 与实现逐条对账（不在断言里写第二份判据）：
+      //   ① 入口侧的声明核对只判「已写下的每条声明是否落在节点协议面内」——缺失不在入口判；
+      //      「该读的每份是否都声明过」只在出口判。两册必须这样写——旧口径「错路径与少声明都由入口拦」
+      //      把出口的判据说成了入口的，读者会以为少声明也能在入口被挡下。
+      //   ② 旧 change 的分级判据是 `state.newChange === true`（`isNewChange`）——排障册不得再写成
+      //      「本规则之前创建的 change」：那是拿时间猜判据，而判据只有一个输入（初始化标记在不在）。
+      //      公开面不直写机器状态字段名（键名黑名单在场景 105），故文档侧一律写行为描述。
+      // 判据 = 锚句逐条在其所属册在场 + 旧句零残留 + 排障册每处旧 change 分级句都按标记表述；
+      // 反向构造：抽掉任一锚 ⇒ 必报缺该锚；还原旧句 / 摘掉某行的标记 ⇒ 必报残留或该行违规。
+      {
+        const skillRoot = path.join(SCRIPTS_DIR, '..');
+        const wordingDocs = {
+          entry: new Map([
+            ['flow-comet/SKILL.md', fs.readFileSync(path.join(skillRoot, 'SKILL.md'), 'utf8')],
+            ['flow-comet/reference/entry-detail.md',
+              fs.readFileSync(path.join(skillRoot, 'reference', 'entry-detail.md'), 'utf8')],
+          ]),
+          troubleshooting: new Map(['docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md',
+            'docs/MECHANISM.md', 'docs/MECHANISM-zh.md'].map((rel) => {
+            const abs = path.join(REPO_ROOT, rel);
+            return [rel, fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : null];
+          })),
+        };
+        const entrySideAnchors = [
+          ['入口册 · 入口只拦错路径', 'flow-comet/SKILL.md', '入口只拦错路径'],
+          ['入口册 · 缺失由出口拦', 'flow-comet/SKILL.md', '缺失由出口拦'],
+          ['展开册 · 入口只判已写下的每条声明', 'flow-comet/reference/entry-detail.md',
+            '入口只判「写下的每条声明对不对」'],
+        ];
+        const staleWording = {
+          entry: ['错路径与少声明',
+            '以及**该节点该读却没声明的那几份**，都会在下一次入口被拦下'],
+          // 只收「按时间猜判据」的旧句；机制册里「旧 change 只告警」的其它行是行为描述，不在此列
+          // （故机制册只做旧句零残留，不套逐行规则——否则会把正确的行为描述一起判红）。
+          troubleshooting: {
+            'docs/TROUBLESHOOTING.md': ['created before this rule', 'created before the rule'],
+            'docs/TROUBLESHOOTING-zh.md': ['在本规则之前创建', '规则生效前创建'],
+            'docs/MECHANISM.md': ['created before the rule', 'created before this rule'],
+            'docs/MECHANISM-zh.md': ['规则生效之前创建', '在本规则之前创建'],
+          },
+        };
+        // 排障册里每一处「旧 change 只告警」都别写成按时间判——判据只有「标记在不在」这一个输入。
+        // 判别句不是键名而是**行为描述**：公开面不直写机器状态字段名（场景 105 的黑名单），
+        // 所以文档只能写「初始化标记」这类说法——判据锚它，锚键名会与那条纪律直接打架。
+        const markerWordingRules = {
+          'docs/TROUBLESHOOTING.md': { line: /\bchange\b[^.]*\bwarn/i, marker: 'initialization marker' },
+          'docs/TROUBLESHOOTING-zh.md': { line: /change[^。]*只告警/, marker: '初始化标记' },
+        };
+        // 单一判据实现：真实核对与反向构造探针共用（两份实现必然分叉）。
+        const wordingProblems = ({ entry, troubleshooting }) => {
+          const out = [];
+          for (const [label, rel, anchor] of entrySideAnchors) {
+            const text = entry.get(rel);
+            if (typeof text !== 'string') { out.push(rel + ' 不在场（' + label + ' 无法核对）'); continue; }
+            if (!text.includes(anchor)) out.push(rel + ' 缺「' + label + '」');
+          }
+          for (const [rel, text] of entry) {
+            if (typeof text !== 'string') continue;
+            for (const stale of staleWording.entry) {
+              if (text.includes(stale)) out.push(rel + ' 残留旧口径「' + stale + '」');
+            }
+          }
+          for (const [rel, text] of troubleshooting) {
+            if (typeof text !== 'string') continue;
+            for (const stale of (staleWording.troubleshooting[rel] || [])) {
+              if (text.includes(stale)) out.push(rel + ' 残留旧口径「' + stale + '」');
+            }
+            const rule = markerWordingRules[rel];
+            if (!rule) continue; // 该册只做旧句零残留（机制册：其余「告警」句是行为描述）
+            text.split(String.fromCharCode(10)).forEach((line, index) => {
+              if (!rule.line.test(line)) return;
+              if (!line.includes(rule.marker)) {
+                out.push(rel + ' 第 ' + (index + 1) + ' 行把旧 change 分级写成按时间判（缺「' + rule.marker + '」标记）');
+              }
+            });
+          }
+          return out;
+        };
+        const missingTroubleshootingFaces = [...wordingDocs.troubleshooting]
+          .filter(([, text]) => text === null).map(([rel]) => rel);
+        if (missingTroubleshootingFaces.length > 0) {
+          console.log('SKIP: 184 的文档口径锚（' + missingTroubleshootingFaces.join(', ') + '）——本次检出无该公开文档面，'
+            + '未校验「旧 change 分级句按初始化标记表述」，请在权威源检出重跑本套件');
+        }
+        problems.push(...wordingProblems(wordingDocs));
+        // 反向构造 ①：抽掉任一入口侧锚 ⇒ 必报缺该锚
+        for (const [label, rel, anchor] of entrySideAnchors) {
+          const text = wordingDocs.entry.get(rel);
+          if (!text.includes(anchor)) continue; // 缺失已由真实判据报告，不叠第二条
+          const probed = {
+            entry: new Map(wordingDocs.entry).set(rel, text.split(anchor).join('（反向构造：抽掉）')),
+            troubleshooting: wordingDocs.troubleshooting,
+          };
+          if (!wordingProblems(probed).some((p) => p.includes('缺「' + label + '」'))) {
+            problems.push('反向构造判别力缺失（文档口径: 抽掉「' + label + '」未被判缺）');
+          }
+        }
+        // 反向构造 ②：把任一入口侧的旧口径还原进任一册 ⇒ 必报残留
+        for (const stale of staleWording.entry) {
+          const probed = { entry: new Map(), troubleshooting: wordingDocs.troubleshooting };
+          for (const [rel, text] of wordingDocs.entry) probed.entry.set(rel, text + String.fromCharCode(10) + stale);
+          if (!wordingProblems(probed).some((p) => p.includes('残留旧口径'))) {
+            problems.push('反向构造判别力缺失（文档口径: 还原旧句「' + stale + '」未被判残留）');
+          }
+        }
+        // 反向构造 ③：公共文档面——还原按时间判的旧句、摘掉某行的标记 ⇒ 必报残留 / 必报该行
+        for (const [rel, text] of wordingDocs.troubleshooting) {
+          if (typeof text !== 'string') continue;
+          const staleSentence = staleWording.troubleshooting[rel][0];
+          const restored = { entry: wordingDocs.entry,
+            troubleshooting: new Map(wordingDocs.troubleshooting).set(rel, text + String.fromCharCode(10) + staleSentence) };
+          if (!wordingProblems(restored).some((p) => p.includes(rel + ' 残留旧口径'))) {
+            problems.push('反向构造判别力缺失（' + rel + ': 还原旧句「' + staleSentence + '」未被判残留）');
+          }
+          const rule = markerWordingRules[rel];
+          if (!rule) continue; // 只做旧句零残留的册（机制册）不走逐行探针
+          const lines = text.split(String.fromCharCode(10));
+          const hitIndex = lines.findIndex((line) => rule.line.test(line) && line.includes(rule.marker));
+          if (hitIndex < 0) {
+            problems.push('反向构造的前提不成立（' + rel + ': 找不到按标记表述旧 change 分级的行）');
+            continue;
+          }
+          const mutated = lines.slice();
+          mutated[hitIndex] = mutated[hitIndex].split(rule.marker).join('（标记）');
+          const stripped = { entry: wordingDocs.entry,
+            troubleshooting: new Map(wordingDocs.troubleshooting)
+              .set(rel, mutated.join(String.fromCharCode(10))) };
+          if (!wordingProblems(stripped).some((p) => p.includes('第 ' + (hitIndex + 1) + ' 行'))) {
+            problems.push('反向构造判别力缺失（' + rel + ': 摘掉第 ' + (hitIndex + 1) + ' 行的标记未被判违规）');
           }
         }
       }
