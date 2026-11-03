@@ -10,6 +10,9 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { EVOLVE_METADATA_SECTION, EVOLVE_METADATA_FIELDS } from './state-schema.mjs';
+// 二级段体的段界（同级标题 / 分隔线 / 文末）取 lib/section-body.mjs 的唯一实现：本文件不再持有
+// 第二份「按标题切段体」的行扫描（同一件事两份实现必然分叉）。
+import { sectionBody } from './lib/section-body.mjs';
 
 // 既有 AI 上下文文档探测清单（与 flow-kit 入场判定同源：AGENTS/CLAUDE/Cursor/Windsurf/Copilot/Cline）
 const AI_DOC_CANDIDATES = [
@@ -206,14 +209,14 @@ const CONTEXT_FORMAT_CHECKS = [
     // 「跑过一次但字段写残」正是最需要拦的半成品（段在场却少字段，元数据双落点会静默失真）。
     // 段名与三字段名都取自 state-schema.mjs 的单一常量集（写方 evolve.mjs 同源），本处不再写字面量。
     name: EVOLVE_METADATA_SECTION + '三字段',
-    // 三字段判定**限定在段内**（sectionBody 切片）：全文 includes 会被别处的同名字段蒙混过关——
-    // 例如 intel-scan 段有 `**scanner**` 而 evolve 段少这一个字段，全文判定照样放行。
-    applies: (t) => sectionBody(t, '## ' + EVOLVE_METADATA_SECTION) !== null,
+    // 三字段判定**限定在段内**（contextSectionBody 切片，段界来自单源）：全文 includes 会被别处的同名字
+    // 字段蒙混过关——例如 intel-scan 段有 `**scanner**` 而 evolve 段少这一个字段，全文判定照样放行。
+    applies: (t) => contextSectionBody(t, EVOLVE_METADATA_SECTION) !== null,
     // 通过判据是**单形**的：取值只认常量集（写方真实产出的三个字段名）。旧的协作期容差别名
     // （`下次同步建议`）没有任何生产者，已从判据中移除——容纳它就是「校验集合 ⊃ 生产集合」，
     // 写残的段会被静默放行。带旧别名的既有文档由下方 hint 给出可见的改写指引，不是静默失败。
     passes: (t) => {
-      const segment = sectionBody(t, '## ' + EVOLVE_METADATA_SECTION) ?? '';
+      const segment = contextSectionBody(t, EVOLVE_METADATA_SECTION) ?? '';
       return EVOLVE_METADATA_FIELDS.every((field) => segment.includes('**' + field + '**'));
     },
     hint: '字段 ' + EVOLVE_METADATA_FIELDS.join(' / ') + '；与 intel-scan 段同构'
@@ -301,23 +304,16 @@ function headingSet(text) {
 // `## evolve 元数据`）不得算段在场——可选段的「缺席不报」语义完全依赖这一点；字段判定限定段内，
 // 否则别处的同名标签会替缺失字段蒙混过关。必填段的同名检查沿用历史 includes 写法（缺段另有
 // missingSections 兜底，报道面不变），故两条检查的在场判据措辞不同是刻意的，不是漏改。
-function sectionBody(body, headingName) {
+// 段界（同级标题 / 分隔线 / 文末）由 lib/section-body.mjs 单点决定，本文件只表达命中方式：恰好
+// 二级 + 段名归一后相等。调用方给的是**结构文本**（围栏代码块已剥离，见 validateContext），因此围栏
+// 里的书写样例既不结束段体、也不被当成数据。
+function contextSectionBody(structureText, headingName) {
   const wanted = normalizeSectionName(headingName);
-  const kept = [];
-  let inSection = false;
-  for (const line of String(body ?? '').split('\n')) {
-    const heading = /^(#{1,6})[ \t]+(.+?)[ \t]*$/.exec(line);
-    if (heading) {
-      const level = heading[1].length;
-      if (inSection && level <= 2) break; // 到下一个同级或更高级标题即段结束
-      if (!inSection && level === 2 && normalizeSectionName(heading[2]) === wanted) {
-        inSection = true;
-        continue;
-      }
-    }
-    if (inSection) kept.push(line);
-  }
-  return inSection ? kept.join('\n') : null;
+  return sectionBody(
+    structureText,
+    (heading) => heading.level === 2 && normalizeSectionName(heading.text) === wanted,
+    { level: 2, endOnSeparator: false },
+  );
 }
 
 // 校验 .specs/CONTEXT.md 7 段结构 + 模板关键格式；文件缺失 = 全缺。返回

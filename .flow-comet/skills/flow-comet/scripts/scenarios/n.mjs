@@ -775,12 +775,17 @@ function legacyMechanismLine(text) {
 
 // ---------- 段体切片形态探针（段体单源锁的判据面） ----------
 
-// 一份「按标题切段体」的行扫描实现 = 同一函数里三件事齐备：
-//   ① 段头判定（行首 ATX 标题正则，或以其为模式串的 RegExp 构造）
-//   ② 在判定处收尾（break）
-//   ③ 把原始行拼成段体（+= line / push(line…) / slice(…).join(…)）
+// 一份「按标题切段体」的实现 = 两种形态之一（判定粒度都是**函数**：`functionBodies` 切出的顶层
+// 函数体，形态命中按「文件 + 函数名」登记，与取用面的「文件 + 符号」同一粒度）：
+//   A 行扫描：同一函数里三件事齐备——① 段头判定（行首 ATX 标题正则，或以其为模式串的 RegExp
+//     构造）② 在判定处收尾（break）③ 把原始行拼成段体（+= line / push(line…) / slice(…).join(…)）；
+//   B 正则切片：同一函数里出现「从段头截到下一个段头」的正则 idiom——惰性 `[\s\S]` 片段配
+//     `(?=…\n## …)` 前瞻，或 `.split(/\n## …/)` 按标题行切。
 // 缺任一件都不算：围栏状态过滤器没有段头判定，条目块收集器不在标题处收尾，键解析器把行拆成字段。
-const SECTION_HEADING_TEST_RE = /\/\^#|['"]\^#\{/u;
+// 段头判定的正则形态覆盖三种写法：`/^#…`、`/^(#{1,6})…`（标题等级写成捕获组）与 `.startsWith('#')`。
+// 旧判定只认「`/^#` 紧邻」一种形态，`^(#{1,6})` 这种带捕获组的写法整份躲在锁外——context-init 的
+// 私有段体切片正是此形态，受检面扩面时一并修掉。
+const SECTION_HEADING_TEST_RE = /\/\^\(?#{1,6}|['"]\^\(?#{1,6}|\.startsWith\(\s*['"]#/u;
 const SECTION_BREAK_RE = /\bbreak\b/u;
 const SECTION_BODY_ACCUMULATION_RE = /\+=\s*line\b|\.push\(\s*line\b|\.push\(\s*lines\[|\.slice\([^)]*\)\.join\(/u;
 
@@ -808,6 +813,7 @@ function functionBodies(code) {
   return out;
 }
 
+// A 形态（行扫描）：在段头判定处 break，再把原始行拼成段体。
 function sectionSlicerHits(code) {
   return functionBodies(code)
     .filter((fn) => SECTION_HEADING_TEST_RE.test(fn.text)
@@ -815,6 +821,203 @@ function sectionSlicerHits(code) {
       && SECTION_BODY_ACCUMULATION_RE.test(fn.text))
     .map((fn) => fn.name);
 }
+
+// B 形态（正则切片）：段界写在一对正则里——截取式（`[\s\S]` 片段 + 前瞻 `(?=` + 前瞻里出现 `\n##`）
+// 或切分式（`.split(/\n## …/)`）。两条都要求「标题行」在场：没有标题就没有段界，也就不是段体切片——
+// 只按行宽 / 标点切分的实现不在此列。
+const SECTION_SLICE_EXCERPT_RE = /\[\s*\\s\\S\s*\]/u;
+const SECTION_SLICE_FORWARD_LOOK_RE = /\(\?=/u;
+const SECTION_SLICE_HEADING_BOUNDARY_RE = /\\n#{1,6}/u;
+const SECTION_SLICE_SPLIT_RE = /\.split\(\s*\/[^/\n]*\\n#{1,6}/u;
+
+function regexSectionSlicerHits(code) {
+  return functionBodies(code)
+    .filter((fn) => fn.text.split('\n').some((line) => SECTION_SLICE_EXCERPT_RE.test(line)
+        && SECTION_SLICE_FORWARD_LOOK_RE.test(line)
+        && SECTION_SLICE_HEADING_BOUNDARY_RE.test(line))
+      || SECTION_SLICE_SPLIT_RE.test(fn.text))
+    .map((fn) => fn.name);
+}
+
+// 单源的导出符号集：只有它们受「导出实现恰一处 / 不得自带第二份定义 / 必须具名取用」约束。
+const SECTION_SOURCE_SYMBOLS = ['sectionBody', 'scanHeadings'];
+
+// 段体单源锁的**登记表**：把面内仍存在的同类实现逐条登记（文件 + 符号 + 理由三件齐备）。登记是
+// 让缺口可见，不是放行：
+//   · 只覆盖 ③ 形态命中这一条判据；② 的单源符号第二份定义 / 未取用**不接受豁免**——否则登记一个
+//     sectionBody 副本就能让真实副本静默通过（旧锁把 `continue` 放在符号判定之前，正是如此）；
+//   · 条目必须**当场命中**（该文件该函数此刻仍在形态面上）：修好或改名后未删 ⇒ 陈旧，判红。
+// 受检面 = 引擎实现面（与 `engineScriptTexts` 同一派生口径：顶层入口 ∪ 静态可达模块 ∪ 非套件自持的
+// `lib/**`）。套件自持面（`scenarios/**`、`items/**`、只被套件入口可达的 lib 模块）是夹具与其自身
+// 判据，不在引擎面上——把它们算进来会让锁去登记自己用的行扫描辅助（形态探针本身），判据反而失真。
+const SECTION_SLICE_REGISTRY = [
+  {
+    file: 'health.mjs',
+    symbol: 'collectDebt',
+    reason: '技术债段体（表格读数）按段标题层级切：段界 = 下一个同级或更高级标题 / 分隔线，'
+      + '还要把段标题自身的层级回传给「复现命令」；本任务写面不含 health.mjs，登记使缺口可见。',
+  },
+];
+
+// 段体单源判据（纯函数 + 合成输入可驱动）：given = Map(相对路径 → 文本)，registry = 登记表。
+//   ① 单源模块由**导出面**派生（不写文件名）：导出实现恰一处，且 {sectionBody, scanHeadings} 都定义
+//      在那里；
+//   ② **取用面** = 面内提到单源符号的模块：必须具名取用，不得自带第二份定义、不得改从别处取用；
+//   ③ **形态面** = 面内**全部**模块的全部顶层函数——受检面不再只是取用面：把一份私有实现搬进一个
+//      不引用该符号的模块就躲不开了。形如切段体者只许是单源本身，其余必须登记。
+// 返回问题描述数组（空 = 收口）。
+function sectionSingleSourceProblems({ texts: given, registry = SECTION_SLICE_REGISTRY }) {
+  const problems = [];
+  const exported = [...given.entries()]
+    .filter(([, text]) => /export\s+(?:async\s+)?function\s+sectionBody\b|export\s+const\s+sectionBody\s*=/u
+      .test(engineCodeText(text)))
+    .map(([rel]) => rel);
+  if (exported.length !== 1) {
+    problems.push('sectionBody 的导出实现应恰一处，实际 ' + JSON.stringify(exported));
+    return problems;
+  }
+  const sourceRel = exported[0];
+  const sourceText = given.get(sourceRel) ?? '';
+  for (const symbol of SECTION_SOURCE_SYMBOLS) {
+    if (!engineDefinitionPattern(symbol).test(sourceText)) {
+      problems.push(sourceRel + ' 未定义段体单源的 ' + symbol);
+    }
+  }
+  const mentionRe = /\b(?:sectionBody|scanHeadings)\b/u;
+  const consumers = [...given.keys()].filter((rel) => rel !== sourceRel
+    && mentionRe.test(engineCodeText(given.get(rel) ?? '')));
+  if (consumers.length < 5) {
+    problems.push('段体消费面不足五处（由真实引用派生）: ' + JSON.stringify(consumers));
+  }
+  for (const rel of consumers) {
+    const code = engineCodeText(given.get(rel));
+    for (const symbol of SECTION_SOURCE_SYMBOLS) {
+      if (!new RegExp('\\b' + symbol + '\\b', 'u').test(code)) continue;
+      if (engineDefinitionPattern(symbol).test(code)) {
+        problems.push(rel + ' 自带第二份 ' + symbol + ' 定义（应取用单一来源；登记不覆盖单源符号的副本）');
+        continue;
+      }
+      if (!engineImportsSymbolFrom({ text: given.get(rel), consumerRel: rel, symbol, sourceRel, texts: given })) {
+        problems.push(rel + ' 未从 ' + sourceRel + ' 取用 ' + symbol);
+      }
+    }
+  }
+  const hits = [];
+  for (const [rel, text] of given) {
+    if (rel === sourceRel) continue;
+    const code = engineCodeText(text);
+    for (const symbol of [...sectionSlicerHits(code), ...regexSectionSlicerHits(code)]) {
+      if (hits.some((hit) => hit.rel === rel && hit.symbol === symbol)) continue;
+      hits.push({ rel, symbol });
+    }
+  }
+  for (const hit of hits) {
+    const entry = registry.find((item) => item.file === hit.rel && item.symbol === hit.symbol);
+    if (entry === undefined) {
+      problems.push(hit.rel + ' 自带段体切片实现 ' + hit.symbol
+        + '（段界应只由 ' + sourceRel + ' 决定；确属另一件事则在锁里登记文件 + 符号 + 理由）');
+      continue;
+    }
+    if (SECTION_SOURCE_SYMBOLS.includes(hit.symbol)) {
+      problems.push(hit.rel + ' 的 ' + hit.symbol + ' 是单源符号的副本——登记不能放行真实副本');
+      continue;
+    }
+    if (String(entry.reason ?? '').trim() === '') {
+      problems.push(hit.rel + ' 的 ' + hit.symbol + ' 登记缺理由（登记是让缺口可见，不是静默放行）');
+    }
+  }
+  for (const entry of registry) {
+    if (!hits.some((hit) => hit.rel === entry.file && hit.symbol === entry.symbol)) {
+      problems.push('登记已陈旧：' + entry.file + ' 的 ' + entry.symbol
+        + ' 不再是段体切片形态（收口或改名后请删除该登记）');
+    }
+  }
+  return problems;
+}
+
+// 本任务收口的三处私有实现（原样搬回）：静态判据只读文本、不执行变异体——探针证明「改回私有实现 ⇒
+// 锁必红」。每条 edits 的锚文本若漂移，调用方报「锚已漂移」（不静默跳过：否则探针会退化成恒绿）。
+// 旧实现一律用 String.raw 模板保存：里面的 `\uFEFF` / `\r?\n` 是字面量，不该被再次转义。
+const REVERTED_PRIVATE_SLICERS = [
+  {
+    label: 'guard-uidesign 的「视觉调性」段体改回围栏盲的行扫描',
+    rel: 'lib/guard-uidesign.mjs',
+    symbols: ['visualToneSectionState'],
+    edits: [[
+      String.raw`  const body = sectionBody(text, headingPattern, { level: 2, endOnSeparator: false });`,
+      String.raw`  let body = null;
+  for (const line of String(text).replace(/\uFEFF/g, '').split(/\r?\n/)) {
+    if (/^##\s+/.test(line)) {
+      if (body !== null) break; // 到达下一个 H2 → 本段结束
+      if (headingPattern.test(line)) body = '';
+      continue;
+    }
+    if (body !== null) body += line + '\n';
+  }`,
+    ]],
+  },
+  {
+    label: 'guard-evidence-gates 的「6 维自查」/「自检方法」段体改回两条正则切片',
+    rel: 'lib/guard-evidence-gates.mjs',
+    symbols: ['summarySixDimBody', 'summarySelfCheckMethodBody'],
+    edits: [
+      [
+        String.raw`function summarySixDimBody(content) {
+  return sectionBody(content, SIX_DIM_HEADING_PATTERN, { level: 2, endOnSeparator: true });
+}`,
+        String.raw`function summarySixDimBody(content) {
+  const sixDim = content.match(/##\s*6\s*维自查[\s\S]*?(?=\n##\s|\n---|(?![\s\S]))/i);
+  return sixDim === null ? null : sixDim[0];
+}`,
+      ],
+      [
+        String.raw`function summarySelfCheckMethodBody(content) {
+  return sectionBody(content, SELF_CHECK_METHOD_HEADING_PATTERN, { level: 2, endOnSeparator: true });
+}`,
+        String.raw`function summarySelfCheckMethodBody(content) {
+  const methodMatch = content.match(/##\s*自检方法(?:[（(][^）)\n]*[）)])?\s*\n([\s\S]*)/i);
+  return methodMatch ? methodMatch[1].split(/\n##\s|\n---/)[0] : null;
+}`,
+      ],
+    ],
+  },
+  {
+    label: 'context-init 改回同名私有 sectionBody（(body, headingName) 变体）',
+    rel: 'context-init.mjs',
+    symbols: ['sectionBody'],
+    edits: [[
+      String.raw`function contextSectionBody(structureText, headingName) {
+  const wanted = normalizeSectionName(headingName);
+  return sectionBody(
+    structureText,
+    (heading) => heading.level === 2 && normalizeSectionName(heading.text) === wanted,
+    { level: 2, endOnSeparator: false },
+  );
+}`,
+      String.raw`function sectionBody(body, headingName) {
+  const wanted = normalizeSectionName(headingName);
+  const kept = [];
+  let inSection = false;
+  for (const line of String(body ?? '').split('\n')) {
+    const heading = /^(#{1,6})[ \t]+(.+?)[ \t]*$/.exec(line);
+    if (heading) {
+      const level = heading[1].length;
+      if (inSection && level <= 2) break; // 到下一个同级或更高级标题即段结束
+      if (!inSection && level === 2 && normalizeSectionName(heading[2]) === wanted) {
+        inSection = true;
+        continue;
+      }
+    }
+    if (inSection) kept.push(line);
+  }
+  return inSection ? kept.join('\n') : null;
+}`,
+      ],
+      // 调用点也一并改回旧名：变异体因此是一份自洽的「改动之前的文件」，而不是半截替换。
+      ['contextSectionBody(t, EVOLVE_METADATA_SECTION)', 'sectionBody(t, EVOLVE_METADATA_SECTION)'],
+    ],
+  },
+];
 
 export const ENTRIES = [
 
@@ -1291,8 +1494,10 @@ export const ENTRIES = [
 
   // TA-11 · 旧 change 只告警（AC-11）——旧 change（无 newChange 标记）同构缺段 → 不阻断并输出 WARN；
   // 反向构造：同一夹具置 newChange → BLOCKED。
+  // ⑤ 追加「视觉调性」段体的围栏语义：段里贴了含 `## ` 的围栏示例时，示例之后的「不适用」声明
+  // 仍要被读到（段界只由围栏外的标题决定）。
   {
-    name: 'TA-11 旧 change 同构缺段只 WARN 不阻断；同一夹具新 change 必 BLOCKED',
+    name: 'TA-11 旧 change 同构缺段只 WARN 不阻断；同一夹具新 change 必 BLOCKED；视觉调性段内的围栏示例不截断',
     run: async (dir) => {
       const missing = { omit: ['影响面'] };
       // ① 新 change：拦（对照基准——同一份缺损工件）
@@ -1323,13 +1528,27 @@ export const ENTRIES = [
       const designLegacyRes = exitNode(dir, 'design');
       assertExit(designLegacyRes, 0);
       assertOut(designLegacyRes, '旧 change 兼容');
+      // ⑤ 段体围栏语义：「视觉调性」段里贴一段含 `## ` 的围栏示例，「不适用」声明写在围栏**之后**
+      //    ⇒ 段体不被示例里的标题截断，判据仍读到声明（围栏是正文示例，不是段界）。旧的按行扫描
+      //    在这里截断段体 → 标记消失 → 判成前端 → 要求一份本不该存在的 UI-DESIGN.md（BLOCKED）。
+      setupDesign(dir, {
+        changeOpts: {
+          body: [['视觉调性',
+            '- **选定**：6 有机 / Organic\n\n```md\n## 示例段（围栏内，不是段界）\n```\n\n- 适用性：不适用（CLI 工具，无用户可见界面）']],
+        },
+      });
+      writeFrontendDesignMarkers(dir);
+      const fencedTone = exitNode(dir, 'design');
+      assertExit(fencedTone, 0);
+      assertOut(fencedTone, 'UI-DESIGN: skipped（非前端）');
     },
   },
 
   // TA-12 · 增量段合法位置（AC-12）——①②④⑤ 合法位置通过；③ 自检方法夹在中间 → BLOCKED。
   // 合法位置：紧随越界检查 / 文末 / 验证命令标题后紧跟代码块 / LESSONS 扫描位于自检方法之后。
+  // ⑥ 追加 SUMMARY 两条段体切片的围栏语义：6 维自查 / 自检方法段内的围栏示例不截断段体。
   {
-    name: 'TA-12 增量段位置：紧随越界检查/文末/验证命令+代码块/LESSONS 扫描在后均通过，夹中间拦',
+    name: 'TA-12 增量段位置：紧随越界检查/文末/验证命令+代码块/LESSONS 扫描在后均通过，夹中间拦；6 维自查/自检方法段内围栏示例不截断',
     run: async (dir) => {
       // ① 紧随越界检查（默认渲染即此形态）
       setupExecute(dir);
@@ -1356,6 +1575,20 @@ export const ENTRIES = [
       assertExit(inMiddle, 1);
       assertOut(inMiddle, 'BLOCKED');
       assertOut(inMiddle, '自检方法');
+      // ⑥ 段体围栏语义（SUMMARY 的两条切片）：6 维自查 / 自检方法段里各贴一段含 `## ` 的围栏示例，
+      //    方法声明写在围栏**之后** ⇒ 段体不被示例里的标题截断，六维实质内容与声明都仍被读到。
+      //    旧的两条正则在示例处截断段体 → 「6 维自查段无实质内容」/「缺 ## 自检方法 段」（BLOCKED）。
+      const fencedBlock = '```md\n## 示例段（围栏内，不是段界）\n```\n\n';
+      setupExecute(dir, {
+        body: [
+          ['6 维自查', fencedBlock + SIX_DIM_BODY],
+          ['自检方法', fencedBlock + 'brooks-review（夹具声明）'],
+        ],
+      });
+      const fencedExecute = exitNode(dir, 'execute');
+      assertExit(fencedExecute, 0);
+      assertOut(fencedExecute, 'ALL CHECKS PASSED');
+      assertNotOut(fencedExecute, '6 维自查段无实质内容');
     },
   },
 
@@ -2167,9 +2400,10 @@ export const ENTRIES = [
 
   // TA-20 · 项目级工件的触发点（AC-20）——① CONTEXT 存在但缺模板段 → open 出口拦；
   // ② UI-DESIGN 存在但缺 frontmatter 键 → 前端 change 的 design 出口拦；
-  // ③ `.specs/ARCHITECTURE.md` 缺段 → 侧命令报告列出结构问题但**不阻断**（只读）。
+  // ③ `.specs/ARCHITECTURE.md` 缺段 → 侧命令报告列出结构问题但**不阻断**（只读）；
+  // ④ CONTEXT 的「evolve 元数据」段体：段内围栏示例不截断段体，围栏里的样例字段也不算数据。
   {
-    name: 'TA-20 项目级工件：CONTEXT 缺段拦、UI-DESIGN 缺 frontmatter 键拦、ARCHITECTURE 只读报告',
+    name: 'TA-20 项目级工件：CONTEXT 缺段拦、UI-DESIGN 缺 frontmatter 键拦、ARCHITECTURE 只读报告；CONTEXT 元数据段内围栏示例不截断、样例字段不算数据',
     run: async (dir) => {
       // ① CONTEXT 缺段（文件存在才查）——段清单基准来自 CONTEXT 模板，故夹具根必须带模板：
       // 模板缺席时判据按 C9 整体跳过并显式「未校验（模板缺失）」，该形态由 TA-21 覆盖。
@@ -2208,6 +2442,47 @@ export const ENTRIES = [
       const sideOk = runSideCommand(dir, 'evolve.mjs', ['scan', '--root', dir, '--stdout']);
       assertExit(sideOk, 0);
       assertOut(sideOk, '结构问题（.specs/ARCHITECTURE.md）：0 项');
+      // ④ CONTEXT 的「evolve 元数据」段体：段界由 lib/section-body.mjs 单点决定（本任务把
+      //    context-init 的同名私有实现收进单源）。两条腿——
+      //    ① 段里贴了含 `## ` 的围栏示例、三字段写在示例**之后** ⇒ 段体不被示例里的标题截断，
+      //      校验通过（INIT-DONE）；
+      //    ② 三字段只写在围栏**内** ⇒ 仍判缺字段（围栏里的书写样例不是数据——段体切片之前结构文本
+      //      已剥离围栏，这条钉住了「别为了省事直接拿原文切片」这个错法）。
+      const ctxRoot = path.join(dir, 'ctx-init');
+      fs.mkdirSync(path.join(ctxRoot, 'reference'), { recursive: true });
+      fs.copyFileSync(scenarioProtocolPath(dir), scenarioProtocolPath(ctxRoot));
+      const contextDoc = (fieldsInFence) => [
+        '# CONTEXT',
+        '## 项目概要', 'x',
+        '## 技术栈', 'x',
+        '## 域语言', '| 术语 | 定义 |', '|---|---|', '| 例 | 定义 |',
+        '## 已锁决策', '- [2026-08-01] 决策一',
+        '## 默认偏好', 'x',
+        '## 既有抽象索引', 'x',
+        '## evolve 元数据', '',
+        '```md',
+        '## 示例段（围栏内，不是段界）',
+        ...(fieldsInFence
+          ? ['- **last_evolve_at**: 2026-09-01T10:00:00+08:00', '- **scanner**: fixture', '- **下次建议**: 无']
+          : []),
+        '```',
+        ...(fieldsInFence
+          ? []
+          : ['', '- **last_evolve_at**: 2026-09-01T10:00:00+08:00', '- **scanner**: fixture', '- **下次建议**: 无']),
+        '## intel-scan 元数据',
+        '- **last_intel_scan**: x', '- **scanner**: x', '- **下次重扫建议**: x',
+        '',
+      ].join('\n');
+      writeFile(ctxRoot, '.specs/CONTEXT.md', contextDoc(false));
+      const ctxFenced = runState(['init', CHANGE_ID + '-ctx', '--init-context'], ctxRoot);
+      assertExit(ctxFenced, 0);
+      assertOut(ctxFenced, 'INIT-DONE');
+      assertNotOut(ctxFenced, 'INIT-VALIDATE-FAILED');
+      writeFile(ctxRoot, '.specs/CONTEXT.md', contextDoc(true));
+      const ctxFencedOnly = runState(['init', CHANGE_ID + '-ctx2', '--init-context'], ctxRoot);
+      assertExit(ctxFencedOnly, 0);
+      assertOut(ctxFencedOnly, 'INIT-VALIDATE-FAILED');
+      assertOut(ctxFencedOnly, 'evolve 元数据');
     },
   },
 
@@ -2215,8 +2490,10 @@ export const ENTRIES = [
   // 「未校验（模板缺失）」。反向构造：模板在场时同一工件必被拦（证明不是判据空转）。
   // ③④ 追加「段名清单单一来源」：模板缺席时仍要生效的四份段名清单（SUMMARY 段序兜底 / open·design 段名回退 /
   // LESSONS 扫描段名 / SUMMARY 必填三段）只许骨架模块登记一份——静态单源锁 + 行为侧反向构造。
+  // ⑤ 追加「段体切片单源锁」的静态面：受检面 = 引擎实现面（不再只是取用面），形态面含行扫描与正则
+  // 切片两种；仍存在的同类实现逐条登记（文件 + 符号 + 理由），并配三处回退探针证明锁看得见它们。
   {
-    name: 'TA-21 模板缺席降级：不阻断且显式输出「未校验（模板缺失）」；模板在场时同夹具被拦；段名清单单源锁',
+    name: 'TA-21 模板缺席降级：不阻断且显式输出「未校验（模板缺失）」；模板在场时同夹具被拦；段名清单与段体切片单源锁（受检面 = 引擎实现面）',
     run: async (dir) => {
       // ① 模板缺席：只写工件，不写 flow-kit/templates/
       writeFile(dir, CHANGE_DIR + '/CHANGE.md', renderDoc('CHANGE', { omit: ['影响面'] }));
@@ -2377,77 +2654,27 @@ export const ENTRIES = [
       assertTrue(fallbackPick instanceof RegExp && fallbackPick.test('## Why（为什么做）'),
         '模板在场但缺该段名时 pick 仍回落 fallback 正则（C9 后半句），实际: ' + String(fallbackPick));
 
-      // ⑤ 段体切片单源锁：五处消费（波次段 / 修复段 / REVIEW 发现区 / LESSONS 扫描段 / TEST 1.1 矩阵段）
-      //    只许取用 lib/section-body.mjs 的实现。三条判据：① 导出实现恰一处（导出面派生，不写文件名）；
-      //    ② 消费面（真实引用派生）里的每个符号都从单源具名取用、不自带第二份定义；③ 消费方内不得再
-      //    自带「按标题切段体」的行扫描实现（命中段头就收尾、把原始行拼成段体）。反向构造：三种改坏
-      //    各造一格 ⇒ 必报；还原 ⇒ 复绿。
+      // ⑤ 段体切片单源锁：受检面 = **引擎实现面**（`engineScriptTexts`：顶层入口 ∪ 静态可达模块 ∪
+      //    非套件自持的 `lib/**`）——不再是「提到 sectionBody 的取用面」：把一份私有实现搬进面内一个
+      //    不引用该符号的模块（健康巡检、任一 guard 模块）就躲不开了。三条判据：① 单源模块由导出面派生
+      //    （不写文件名），{sectionBody, scanHeadings}
+      //    都定义在那里；② 取用面：提到单源符号的模块必须具名取用、不得自带第二份定义；③ 形态面：
+      //    面内任一函数的任一形态（行扫描 / 正则切片）若在切段体，只许是单源本身，否则必须登记
+      //    （SECTION_SLICE_REGISTRY：文件 + 符号 + 理由；陈旧登记判红）。
+      //    反向构造：合成切片放进「不引用单源符号」的模块（证明受检面比取用面宽）/ 改 import 来源 /
+      //    第二份定义 / 本任务收口的三处各自改回私有实现 / 登记放行真实副本 / 陈旧登记 / 缺理由登记
+      //    ——逐条证明判别力，还原 ⇒ 复绿。
       {
         const texts = engineScriptTexts();
-        const symbols = ['sectionBody', 'scanHeadings'];
-        // 写面外登记（精确到「文件 + 符号」，且每条登记都必须在场——修好后不删登记会被判陈旧）：
-        // context-init.mjs 有一个同名但签名不同的私有实现（(body, headingName) 变体，按段名取段体），
-        // 它是同一件事的第 6 份副本，但落在本任务的写面之外。登记在此使缺口可见，而不是让单源锁
-        // 假装整个引擎面已经收口。
-        const OUT_OF_FACE = [{ file: 'context-init.mjs', symbol: 'sectionBody' }];
-        // 判据（纯函数 + 合成输入可驱动，反向构造才能驱动它）：单源模块由**导出面**派生（不写文件名），
-        // 消费面由**真实引用**派生（模块搬迁 / 新增消费方不必改锚）。
-        const singleSourceProblems = (given) => {
-          const problems = [];
-          const exported = [...given.entries()]
-            .filter(([, text]) => /export\s+(?:async\s+)?function\s+sectionBody\b|export\s+const\s+sectionBody\s*=/u
-              .test(engineCodeText(text)))
-            .map(([rel]) => rel);
-          if (exported.length !== 1) {
-            problems.push('sectionBody 的导出实现应恰一处，实际 ' + JSON.stringify(exported));
-            return problems;
-          }
-          const sourceRel = exported[0];
-          const sourceText = given.get(sourceRel) ?? '';
-          for (const symbol of symbols) {
-            if (!engineDefinitionPattern(symbol).test(sourceText)) {
-              problems.push(sourceRel + ' 未定义段体单源的 ' + symbol);
-            }
-          }
-          const consumers = [...given.keys()].filter((rel) => rel !== sourceRel
-            && /\b(?:sectionBody|scanHeadings)\b/u.test(engineCodeText(given.get(rel))));
-          if (consumers.length < 5) {
-            problems.push('段体消费面不足五处（波次段 / 修复段 / 发现区 / LESSONS 扫描段 / 1.1 矩阵段）: '
-              + JSON.stringify(consumers));
-          }
-          for (const rel of consumers) {
-            const code = engineCodeText(given.get(rel));
-            for (const symbol of symbols) {
-              if (!new RegExp('\\b' + symbol + '\\b', 'u').test(code)) continue;
-              if (OUT_OF_FACE.some((entry) => entry.file === rel && entry.symbol === symbol)) continue;
-              if (engineDefinitionPattern(symbol).test(code)) {
-                problems.push(rel + ' 自带第二份 ' + symbol + ' 定义（应取用单一来源）');
-              }
-              if (!engineImportsSymbolFrom({ text: given.get(rel), consumerRel: rel, symbol, sourceRel, texts: given })) {
-                problems.push(rel + ' 未从 ' + sourceRel + ' 取用 ' + symbol);
-              }
-            }
-            for (const name of sectionSlicerHits(code)) {
-              problems.push(rel + ' 自带段体切片实现 ' + name + '（段界应只由 ' + sourceRel + ' 决定）');
-            }
-          }
-          return problems;
-        };
-        const baseProblems = singleSourceProblems(texts);
+        const baseProblems = sectionSingleSourceProblems({ texts });
         assertTrue(baseProblems.length === 0, '段体单源违规: ' + baseProblems.join(' | '));
-        // 登记不许陈旧：写面外的那一份若已被收口（或被改名），这条登记必须一并删除——否则它会永久
-        // 遮住同名副本的复发。
-        for (const entry of OUT_OF_FACE) {
-          assertTrue(engineDefinitionPattern(entry.symbol).test(engineCodeText(texts.get(entry.file) ?? '')),
-            '写面外登记已陈旧（' + entry.file + ' 不再自带 ' + entry.symbol + ' 定义）——收口后请删除该登记');
-        }
-        // 反向构造（逐项证明判别力：改坏 → 必红，还原 → 复绿）：探针打在**登记之外**的消费方上，
-        // 否则变异会被登记豁免吃掉，探针退化为恒绿。
+        const probeIssues = [];
+        // 探针打在**登记之外**的消费方上，否则变异会被登记豁免吃掉、退化成恒绿。
         const consumers = [...texts.keys()].filter((rel) => /\b(?:sectionBody|scanHeadings)\b/u
-          .test(engineCodeText(texts.get(rel))));
-        const probeRel = consumers.find((rel) => !OUT_OF_FACE.some((entry) => entry.file === rel));
+          .test(engineCodeText(texts.get(rel) ?? '')));
+        const probeRel = consumers.find((rel) => !SECTION_SLICE_REGISTRY.some((entry) => entry.file === rel));
         const probeText = texts.get(probeRel);
-        const probeSlicer = probeText + '\n' + [
+        const probeSlicer = [
           'function probeSectionBody(content) {',
           '  const body = [];',
           '  for (const line of String(content).split(/\\n/)) {',
@@ -2456,32 +2683,94 @@ export const ENTRIES = [
           '  }',
           '  return body.join("\\n");',
           '}',
-          '',
         ].join('\n');
-        // 第三格针对该消费方**真正引用**的符号（消费方只取用其中一个时分不清就会退化成恒绿）
-        const referenced = symbols.find((symbol) => new RegExp('\\b' + symbol + '\\b', 'u')
+        // 受检面必须比取用面宽（否则「形态面」只是换名字的取用面）：把同一份合成切片放进一个从不引用
+        // 单源符号的模块，判据仍须点名它。这条同时钉住了 SECTION_SLICE_REGISTRY 的登记面——那三条
+        // 命中都不 import sectionBody，一旦受检面退回取用面，它们会立刻变成陈旧登记（也是红的）。
+        const shadowRel = SECTION_SLICE_REGISTRY[0].file;
+        assertTrue(!/\b(?:sectionBody|scanHeadings)\b/u.test(engineCodeText(texts.get(shadowRel) ?? '')),
+          '受检面扩面的前提失效：' + shadowRel + ' 引用了单源符号（形态面与取用面不再可区分）');
+        const shadowProblems = sectionSingleSourceProblems({
+          texts: new Map(texts).set(shadowRel, (texts.get(shadowRel) ?? '') + '\n' + probeSlicer),
+        });
+        if (!shadowProblems.some((problem) => problem.includes(shadowRel) && problem.includes('probeSectionBody'))) {
+          probeIssues.push('受检面退回了取用面：' + shadowRel + ' 里的合成切片未被判红（'
+            + JSON.stringify(shadowProblems) + '）');
+        }
+        // 取用面两格：改 import 来源（单符号 import 摘名字靠不住，换来源才是同一件事的可靠构造）/
+        // 自带第二份定义。
+        const referenced = SECTION_SOURCE_SYMBOLS.find((symbol) => new RegExp('\\b' + symbol + '\\b', 'u')
           .test(engineCodeText(probeText))) ?? 'sectionBody';
-        // 「不再取用」的变异打在 import 的来源上（把单源模块换成一个不存在的模块）：单符号 import
-        // 的列表形态下摘名字靠不住（`import { x } from …` 没有逗号可摘），换来源才是同一件事的可靠
-        // 构造——取用面因此落到一个不是单源的模块上。
         const retargeted = probeText.replace(/(from\s*'[^']*)section-body\.mjs'/u, "$1section-body-absent.mjs'");
-        const probes = [
-          ['合成段体切片（围栏盲的行扫描）', probeSlicer, 'probeSectionBody'],
+        const takenProbes = [
           ['消费方不再从单源取用（import 来源被换掉）', retargeted, '未从'],
           ['消费方自带第二份定义', probeText + '\nfunction ' + referenced + '() { return null; }\n', '自带第二份'],
         ];
-        const probeIssues = [];
-        for (const [label, mutatedText, expected] of probes) {
+        for (const [label, mutatedText, expected] of takenProbes) {
           if (mutatedText === probeText) {
             probeIssues.push(label + '：变异未改变 ' + probeRel);
             continue;
           }
-          const reported = singleSourceProblems(new Map(texts).set(probeRel, mutatedText));
+          const reported = sectionSingleSourceProblems({ texts: new Map(texts).set(probeRel, mutatedText) });
           if (!reported.some((problem) => problem.includes(probeRel) && problem.includes(expected))) {
             probeIssues.push(label + '：未被判违规（' + JSON.stringify(reported) + '）');
           }
         }
-        if (singleSourceProblems(texts).length !== 0) probeIssues.push('还原后未复绿（判据受输入顺序影响）');
+        // 形态面：本任务收口的三处各自改回私有实现 ⇒ 锁必红（变异体 = 删掉的旧实现原文）。
+        const revertedTexts = new Map();
+        for (const reverted of REVERTED_PRIVATE_SLICERS) {
+          // 变异体按 LF 归一后再套用（工作树是 CRLF，锚文本写的是 LF）：不归一时整段锚永远找不到，
+          // 探针会以「锚已漂移」红——那红说的是行尾，不是判据。
+          const original = (texts.get(reverted.rel) ?? '').replace(/\r\n/gu, '\n');
+          let mutated = original;
+          for (const [from, to] of reverted.edits) {
+            if (!mutated.includes(from)) {
+              probeIssues.push(reverted.label + '：锚已漂移（' + reverted.rel + ' 里找不到待替换片段）');
+              continue;
+            }
+            mutated = mutated.split(from).join(to);
+          }
+          if (mutated === original) {
+            probeIssues.push(reverted.label + '：变异未改变 ' + reverted.rel);
+            continue;
+          }
+          revertedTexts.set(reverted.rel, mutated);
+          const reported = sectionSingleSourceProblems({ texts: new Map(texts).set(reverted.rel, mutated) });
+          for (const symbol of reverted.symbols) {
+            if (!reported.some((problem) => problem.includes(reverted.rel) && problem.includes(symbol))) {
+              probeIssues.push(reverted.label + '：锁没看见 ' + reverted.rel + ' 的 ' + symbol
+                + '（' + JSON.stringify(reported) + '）');
+            }
+          }
+        }
+        // 登记机制本身的三格：陈旧登记判红 / 缺理由判红 / **登记不能放行真实副本**（给 context-init
+        // 的私有 sectionBody 配一条登记，判据仍须报「自带第二份定义」——登记只覆盖形态命中）。
+        const staleRegistry = [...SECTION_SLICE_REGISTRY, {
+          file: 'lib/guard-uidesign.mjs', symbol: 'visualToneSectionState', reason: '（探针）已收口处仍登记',
+        }];
+        const staleProblems = sectionSingleSourceProblems({ texts, registry: staleRegistry });
+        if (!staleProblems.some((problem) => problem.includes('登记已陈旧') && problem.includes('visualToneSectionState'))) {
+          probeIssues.push('陈旧登记未被判红（已收口的视觉调性段体仍登记）: ' + JSON.stringify(staleProblems));
+        }
+        const noReasonProblems = sectionSingleSourceProblems({
+          texts,
+          registry: [{ ...SECTION_SLICE_REGISTRY[0], reason: '  ' }],
+        });
+        if (!noReasonProblems.some((problem) => problem.includes('登记缺理由'))) {
+          probeIssues.push('缺理由登记未被判红: ' + JSON.stringify(noReasonProblems));
+        }
+        const lenientProblems = sectionSingleSourceProblems({
+          texts: new Map(texts).set('context-init.mjs', revertedTexts.get('context-init.mjs') ?? ''),
+          registry: [...SECTION_SLICE_REGISTRY, {
+            file: 'context-init.mjs', symbol: 'sectionBody', reason: '（探针）给真实副本配一条登记',
+          }],
+        });
+        if (!lenientProblems.some((problem) => problem.includes('context-init.mjs')
+          && problem.includes('第二份 sectionBody'))) {
+          probeIssues.push('登记放行了真实副本（context-init 的私有 sectionBody 配登记后仍须判红）: '
+            + JSON.stringify(lenientProblems));
+        }
+        if (sectionSingleSourceProblems({ texts }).length !== 0) probeIssues.push('还原后未复绿（判据受输入顺序影响）');
         assertTrue(probeIssues.length === 0, '段体单源锁反向构造失败: ' + probeIssues.join(' | '));
       }
 

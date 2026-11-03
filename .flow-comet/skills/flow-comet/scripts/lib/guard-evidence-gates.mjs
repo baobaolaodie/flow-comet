@@ -189,6 +189,22 @@ async function lessonsScanProblems(changeDir, summaryFiles) {
   return problems;
 }
 
+// SUMMARY 两段的**段头识别**（正则只表达「如何识别段」，段界交给 lib/section-body.mjs 单源）：
+//   · 「6 维自查」允许模板标题的括注后缀（`## 6 维自查（生产代码改动必填 …）`）；
+//   · 「自检方法」允许括号后缀——括号是说明不是段名，执行者常按模板标题原样书写。
+// 行锚定（`^`）是必须的：段内正文里引用段名不是段头。
+const SIX_DIM_HEADING_PATTERN = /^##\s*6\s*维自查/u;
+const SELF_CHECK_METHOD_HEADING_PATTERN = /^##\s*自检方法(?:[（(][^）)\n]*[）)])?\s*$/u;
+
+// 段体：围栏代码块里的 `## ` / `---` 是正文示例，不结束段体；围栏外的同级标题与分隔线照常结束。
+function summarySixDimBody(content) {
+  return sectionBody(content, SIX_DIM_HEADING_PATTERN, { level: 2, endOnSeparator: true });
+}
+
+function summarySelfCheckMethodBody(content) {
+  return sectionBody(content, SELF_CHECK_METHOD_HEADING_PATTERN, { level: 2, endOnSeparator: true });
+}
+
 // execute / subagent-execute 出口校验每份 SUMMARY 含三个必填段 + 6 维自查非空 + 自检方法声明
 // （brooks-review / cache-brooks / builtin-quickcheck 三级降级路径）+ LESSONS 扫描段与命中核对
 export async function runSummarySectionsGate({ node, state }) {
@@ -200,14 +216,13 @@ export async function runSummarySectionsGate({ node, state }) {
   for (const f of summaryFiles) {
     try {
       const content = await fs.readFile(path.join(changeDir, f), 'utf8');
-      // 段终止 lookahead 用 \n##\s（而非 \n##）：###/#### 级子标题（如 "### 🟢 R1"）是段内内容，
-      // 不是段结束。段尾同样 = 段标题 / 分隔线 / 输入末尾；末尾一律写 (?![\s\S])，不得写 \Z
-      // （JS 无 \Z——它是「字面字符 Z」，且本正则带 i 标志，连小写 z 都会命中，段被静默截断）
-      const sixDim = content.match(/##\s*6\s*维自查[\s\S]*?(?=\n##\s|\n---|(?![\s\S]))/i);
+      // 段界由 lib/section-body.mjs 单点决定（围栏代码块里的 `## ` 是正文示例，不结束段体；围栏外的
+      // 同级标题与分隔线照常结束；`###` 级子标题如 "### 🟢 R1" 属段内内容——级别由 level 表达）。
+      const sixDimBody = summarySixDimBody(content);
       // 6 维自查段非空——去掉所有标题行后剩余实质内容 ≥ 10 字符。按行过滤标题（/^\s*#/）比正则
       // 替换稳健：任何标题格式（emoji 🟢/中英文/数字）都不计入内容
-      const dimBody = sixDim ? sixDim[0].split('\n').filter(l => !/^\s*#/.test(l)).join('').trim() : '';
-      if (sixDim && dimBody.length < 10) {
+      const dimBody = sixDimBody === null ? '' : sixDimBody.split('\n').filter(l => !/^\s*#/.test(l)).join('').trim();
+      if (sixDimBody !== null && dimBody.length < 10) {
         violations.push(f + ' 的 6 维自查段无实质内容');
       }
       // 生产代码任务必填 ## 自检方法，声明 brooks-review 或 builtin-quickcheck。格式兼容：方法名行
@@ -216,11 +231,10 @@ export async function runSummarySectionsGate({ node, state }) {
       // 段名部分，执行者常按模板标题原样书写导致旧正则不匹配落入"旧格式 WARN"；括号后缀与段名等价）。
       // 分隔符用 .?（任意字符）而非 \.?（字面点）：canonical 名 "brooks-review"/"builtin-quickcheck"
       // 是连字符，与既有 /brooks.?review/ 约定一致。真实项目端到端验证实证：方法名可能在段内后续行
-      // （子代理列表写法）——段内全文搜索而非仅第一行。段内容截取到下一个段标题（\n## ）或分隔线
-      // （\n---）或文件尾（split 处理，避免 JS 无 \Z 的问题）
-      const methodMatch = content.match(/##\s*自检方法(?:[（(][^）)\n]*[）)])?\s*\n([\s\S]*)/i);
-      const methodSection = methodMatch ? methodMatch[1].split(/\n##\s|\n---/)[0] : null;
-      const method = methodSection ? /brooks.?review|cache.?brooks|builtin.?quickcheck/i.exec(methodSection) : null;
+      // （子代理列表写法）——段内全文搜索而非仅第一行。段界同样由单源决定（围栏内的示例标题不截断）
+      const methodSection = summarySelfCheckMethodBody(content);
+      const method = methodSection === null ? null
+        : /brooks.?review|cache.?brooks|builtin.?quickcheck/i.exec(methodSection);
       if (!method) {
         // 过渡规则：旧格式 SUMMARY 无 ## 自检方法 段——若全文已声明 brooks-review/cache-brooks/
         // builtin（旧模板行为），WARN 兼容不 BLOCKED；无任何自检声明才 BLOCKED
@@ -251,7 +265,7 @@ export async function runSummarySectionsGate({ node, state }) {
           console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明缓存尝试证据（应先 Read 插件缓存协议文件手动执行完整 brooks 流程）');
         }
       }
-      if (sixDim && !/brooks.?review|cache.?brooks/i.test(sixDim[0])) {
+      if (sixDimBody !== null && !/brooks.?review|cache.?brooks/i.test(sixDimBody)) {
         if (isNewChange(state)) {
           console.error('BLOCKED: SUMMARY 的 6 维自查未声明使用 /brooks-review（新 change 强制声明自检方法）;恢复: 在 6 维自查段声明 /brooks-review 或理由');
           process.exit(1);
