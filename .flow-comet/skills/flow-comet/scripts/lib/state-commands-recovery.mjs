@@ -15,12 +15,7 @@ import { fileExists, inspectReentryChangeDir, readJson, readState, runRootDir, s
 import { TASK7_REQUIRED } from './task-graph.mjs';
 // 波次投影（波次 = 依赖层级的投影）：与 plan 出口同一实现、同一报文——replan 的重校段消费它，
 // 不另写一份判定（两处各写一份，改散文即可绕过其中一处）。
-import {
-  WAVE_UNCHECKED_NOTICE,
-  waveContentUnjudgeableLine,
-  waveProjectionReportLines,
-  waveProjectionReview,
-} from './wave-projection.mjs';
+import { parallelGapOutcome, parallelGapReview, waveProjectionReview, waveReviewOutcome } from './wave-projection.mjs';
 
 // reenter <target> --authorized-by <source> --reason <text> [--continue-round <n>]
 // 受控重入（archive 源回边）：archive 已 entry 且归档移动尚未发生时，用户显式授权把工作归属
@@ -434,23 +429,20 @@ export async function runReplan(protocol, argv) {
   // （含未被 Wave 行声明的任务，明细取值「未声明」）→ BLOCK（逐条点名 + 恢复指引；本段全部先于
   // 备份与写盘，故状态零改写），旧 change WARN 渐进。「判不了」按成因二分——载体缺席（无段 / 段名
   // 无从派生）打印「未校验」并跳过；内容不可判（段在场却无可对应任务）与 plan 出口同分级。
-  // 措辞与 plan 出口逐字相同（同一构造函数），两处不会各说一套。
+  // 分级与措辞都由 waveReviewOutcome 一处产出（本段只派生 blocking）：两处不可能各说一套，也不会
+  // 因为「分级规则只改了一处」而在另一处静默落后。
   const waveReview = waveProjectionReview({ taskContent, blocks: taskList });
-  if (!waveReview.judgeable) {
-    if (waveReview.reason === 'content-unjudgeable') {
-      const unjudgeableBlocking = state.newChange === true;
-      console.error(waveContentUnjudgeableLine(unjudgeableBlocking ? 'BLOCKED' : 'WARN'));
-      if (unjudgeableBlocking) process.exit(1);
-    } else {
-      console.error(WAVE_UNCHECKED_NOTICE);
-    }
-  } else if (waveReview.mismatches.length > 0) {
-    const waveBlocking = state.newChange === true;
-    for (const line of waveProjectionReportLines(waveReview.mismatches, waveBlocking ? 'BLOCKED' : 'WARN')) {
-      console.error(line);
-    }
-    if (waveBlocking) process.exit(1);
-  }
+  const waveOutcome = waveReviewOutcome(waveReview, { blocking: state.newChange === true });
+  for (const line of waveOutcome.lines) console.error(line);
+  if (waveOutcome.block) process.exit(1);
+  // 同波可并行却漏标 [P]：plan 出口的第二条波次面判据，重校段同样不豁免（ADR-013）——否则执行期
+  // 重签就能把「本可并行却没标」的计划换一份发出去。波次分组复用上面同一次解析（waveReview.waves）。
+  const gapOutcome = parallelGapOutcome(
+    parallelGapReview({ taskContent, blocks: taskList, waves: waveReview.waves }),
+    { blocking: state.newChange === true },
+  );
+  for (const line of gapOutcome.lines) console.error(line);
+  if (gapOutcome.block) process.exit(1);
   // 任务字段完整性（与 plan 出口同一判据）：字段集从 `task-graph.mjs` 的单一权威常量取用——本模块
   // 是执行期唯一允许修订任务集的通道，若在此另写一份字面集合，plan 出口会拒的任务集将被 replan
   // 静默放行。新模板形态（含 <name>）且新 change → BLOCK；旧式一字段形态 / 旧 change 保持渐进

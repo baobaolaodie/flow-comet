@@ -5,9 +5,11 @@
 // level(task) = 1 + max(level(dep))（无依赖 = 第 1 波，见 task-graph.mjs 的 taskWaveLevels）。
 // 声明波次 ≠ 层级即不一致：同波依赖（依赖方与被依赖方写在同一波）、排在依赖之前、以及明明只需
 // 更早波次却排到更后面的保守排法，都会在明细里被逐条点名为「当前波 → 应到波」。
-// 分级与措辞不在这里判：本模块只产出明细与报文行，BLOCK / WARN 由调用方（plan 出口门禁 /
-// replan 重校段）按 isNewChange 决定——两处共用同一报文构造，措辞因此不可能分叉（ADR-013：
-// replan 不豁免，改散文也绕不过同一判据）。
+// 分级不在这里判：本模块产出「判不了」的分类与载荷、明细与报文行；BLOCK / WARN 由调用方按
+// isNewChange 给出 blocking。**分级 → 输出只有一处**（waveReviewOutcome）：plan 出口门禁与 replan
+// 重校段各自只派生 blocking（两处的 isNewChange 取法不同，由调用方传入），不再各写一份
+// 「不可判 → 选级别 → 打印 → exit」的同构分支——双份同构在 T01 里已照形态加过一支，改分级只改一处
+// 就会在另一处静默落后（ADR-013 的前提正是「两处同判」）。
 //
 // 判定面覆盖两侧：① 已声明任务的波次必须等于依赖层级；② 任务集里存在、Wave 行一次都没提到的
 // 任务同样不一致（明细取值 = 「未声明」）——只沿「已声明」一侧求差集，未写进 Wave 行的任务会整个
@@ -20,13 +22,25 @@
 // 半角 / 全角冒号与逗号分号顿号、列表记号均可。只取「Wave N … 任务 id 列表」，注解里的 id 不算
 // 本波成员；不是 TASK.md 任务 id 的一律不计入判定。
 //
-// 「判不了」按成因二分（同一成因同一措辞，分级由调用方给）：
-//   · 载体缺席（无 `## 波次划分` 段 / 段名无从派生）→ reason='section-missing'，调用方打印
-//     「未校验」并放行（判据没有可判对象，不改退出码）；
+// 「判不了」按成因二分，形态与 ac-coverage.mjs **完全一致**（本仓结构判据只此一种形态）：
+//   { unverified: { reason, notice } | null, unjudgeable: { reason, explanation, recovery } | null, ... }
+//   · 载体缺席（无 `## 波次划分` 段 / 段名无从派生）→ unverified 非空：调用方打印 notice
+//     （「未校验」）并放行——判据没有可判对象，不改退出码；
 //   · 工件内容不可判（段在场，但一行 Wave 行都解析不出可对应任务：正文只写 N/A、点的是不存在的
-//     任务 id、行首强调记号让 Wave 行不成立）→ reason='content-unjudgeable'，新 change BLOCKED /
-//     旧 change WARN（WARN 行进入既有 WARN COUNT——「该写的没写」不再静默）。
-import { analyzeDependencyGraph, fixTaskClassifier, taskWaveLevels } from './task-graph.mjs';
+//     任务 id、行首强调记号让 Wave 行不成立）→ unjudgeable 非空：新 change BLOCKED / 旧 change
+//     WARN（WARN 行进入既有 WARN COUNT——「该写的没写」不再静默；恢复出路在载荷里）。
+// 收敛到这一形态（而不是原来的 { judgeable, reason }）的理由：① 载荷跟着分类走——notice /
+// explanation + recovery 直接可用于打印，调用方不必再按 reason 反查第二张表（那张表 T02 已收进
+// 判定模块，正是为了消灭「同一个 key 两张表」）；② 「能否判定」由字段出现与否表达，reason 只留
+// 人读成因，不再逼调用方从字符串取值反推分级；③ 第三个结构判据照抄这一组字段即可，不必再选一次。
+// （另一条路要同时改 verify / review 出口的消费方，而那不在本任务写面；形态本身不因落点而变，故按
+// 「谁带着载荷、谁就是形态」收敛。）
+import {
+  analyzeDependencyGraph,
+  collectCrossTaskConflicts,
+  fixTaskClassifier,
+  taskWaveLevels,
+} from './task-graph.mjs';
 import { taskOpeningAttrs } from '../task-parsing.mjs';
 
 // 波次段名 = flow-kit/templates/TASK.md 的 H2 `## 波次划分`（登记于 reference/artifact-templates.json
@@ -102,20 +116,40 @@ function parseDeclaredWaves(taskContent) {
 // 只有 declared 取值不同——渲染 / 分级 / 恢复指引因此仍走同一处构造，不会分叉。
 const WAVE_UNDECLARED = '未声明';
 
-// 判定：返回 { judgeable, reason, mismatches }——mismatches 逐条 { id, deps, declared, expected }。
-// judgeable=false 的 reason 区分两种「判不了」：'section-missing'（载体缺席）与
-// 'content-unjudgeable'（段在场而内容不可判），分级由调用方按 change 新旧与成因分别处置。
+// 「载体缺席」的 notice（由判定结果携带，调用方只打印）：删段不是通过——判据跳过时执行者必须看见
+// 「未校验」，而 plan 册要求该段在场（模板 H2 必填）。段在场却解析不出可对应任务**不属本支**（那是
+// 「该写的没写」，见 WAVE_CONTENT_UNJUDGEABLE）。
+const WAVE_UNCHECKED_NOTICE = '未校验（无波次段）——TASK.md 缺 ## 波次划分 段（或段名无从派生），波次 = 依赖层级 的投影判据跳过（未验证 ≠ 通过）';
+
+// 「工件内容不可判」的成因载荷（与 ac-coverage 的 UNJUDGEABLE_CAUSES 同形：解释 + 恢复出路各占一半
+// ——只有解释没有出路，人只能猜下一步）。reason 是机器可读短句，explanation / recovery 是人读文本，
+// 判定结果自带这三样，调用方不再按 reason 反查第二张表。
+const WAVE_CONTENT_UNJUDGEABLE = Object.freeze({
+  reason: 'no-resolvable-wave-line',
+  explanation: '## 波次划分 段在场，但段内没有一行 Wave 行能解析出可对应的任务 id'
+    + '（正文只写 N/A / Wave 行点的是不存在的任务 id / 行首强调记号让 Wave 行不成立）',
+  recovery: '按模板把每一波写成可解析的 Wave 行（如 `Wave 1: T01, T02`，中文标点可用），'
+    + '任务 id 必须逐字对应 TASK.md 里的任务；段正文写 N/A 不构成波次声明',
+});
+
+// 判定：返回 { unverified, unjudgeable, mismatches, waves }——「判不了」形态见文件头。
+//   · mismatches 逐条 { id, deps, declared, expected }；
+//   · waves = Map<真实任务 id, 声明波次>（可判时非空；[P] 判据复用这份解析结果分组）。
 // 可判条件 = 段在场且至少一条声明能落到 TASK.md 的真实任务上；到不落就说明正文不是可解析的波次
 // 声明（N/A、点了不存在的 id、行首强调记号），此时不再猜「全部一致」。
 // 已声明一侧要求能求出层级（环上任务无层级，其合法性由依赖图判据负责）；未声明一侧同样要求层级
 // （没有「应到波」就无法给出可照抄的明细）。明细按任务 id 升序（与书写顺序无关——报告稳定可对照）。
 export function waveProjectionReview({ taskContent, blocks = [] } = {}) {
   const declared = parseDeclaredWaves(taskContent);
-  if (declared === null) return { judgeable: false, reason: 'section-missing', mismatches: [] };
+  if (declared === null) {
+    return { unverified: { reason: 'section-missing', notice: WAVE_UNCHECKED_NOTICE }, unjudgeable: null, mismatches: [], waves: null };
+  }
   const graph = analyzeDependencyGraph(blocks);
   const levels = taskWaveLevels(blocks);
   const declaredTaskIds = [...declared.keys()].filter((id) => graph.ids.has(id));
-  if (declaredTaskIds.length === 0) return { judgeable: false, reason: 'content-unjudgeable', mismatches: [] };
+  if (declaredTaskIds.length === 0) {
+    return { unverified: null, unjudgeable: WAVE_CONTENT_UNJUDGEABLE, mismatches: [], waves: null };
+  }
   // 修复族 = 「不要求排进波次」的那一族：族判定经 task-graph 的唯一谓词（前缀形态与「位于修复段内」
   // 两条边界只在那里表达），本模块只取用结果，不自写前缀匹配。
   const isFixTask = fixTaskClassifier(taskContent);
@@ -137,33 +171,32 @@ export function waveProjectionReview({ taskContent, blocks = [] } = {}) {
     mismatches.push({ id, deps: graph.depsById.get(id) ?? [], declared: WAVE_UNDECLARED, expected: levels.get(id) });
   }
   mismatches.sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
-  return { judgeable: true, reason: null, mismatches };
+  // 波次分组（真实任务 id → 声明波次）随判定结果一并返回：[P] 判据（parallelGapReview）用它分组，
+  // 不重解析同一段波次散文——同一段两次解析必然分叉。
+  const waves = new Map(declaredTaskIds.map((id) => [id, declared.get(id)]));
+  return { unverified: null, unjudgeable: null, mismatches, waves };
 }
 
-// 「载体缺席」的显式声明：两处调用共用本常量（同一事实只有一份措辞）。删段不是通过——判据跳过时
-// 执行者必须看见「未校验」，而 plan 册要求该段在场（模板 H2 必填）。段在场却解析不出可对应任务
-// **不属本支**（那是「该写的没写」，见 waveContentUnjudgeableLine）。
-export const WAVE_UNCHECKED_NOTICE = '未校验（无波次段）——TASK.md 缺 ## 波次划分 段（或段名无从派生），波次 = 依赖层级 的投影判据跳过（未验证 ≠ 通过）';
-
-// 「工件内容不可判」的报文（plan 出口与 replan 重校共用同一构造，只换分级前缀）：与载体缺席不同，
-// 这里段是在场的——成因是正文没有写出可解析的波次声明。旧 change 用 WARN 前缀，因此该行进入既有
-// WARN COUNT（未校验不再静默）；新 change 用 BLOCKED 前缀并由调用方拒绝通过。
-export function waveContentUnjudgeableLine(level = 'BLOCKED') {
+// 「工件内容不可判」的报文构造（plan 出口与 replan 重校共用同一份，只换分级前缀）：首行点名哪一环
+// 读不出来并给出分级，第二行给能照做的恢复出路——与 ac-coverage 的 acCoverageUnjudgeableLines 同形
+// （同一件事两处措辞必然先漂移）。旧 change 用 WARN 前缀，因此该行进入既有 WARN COUNT（未校验不再
+// 静默）；新 change 用 BLOCKED 前缀并由调用方拒绝通过。载荷来自判定结果，本函数只做渲染。
+function waveContentUnjudgeableLines(unjudgeable, level) {
   const blocking = level === 'BLOCKED';
-  return (blocking ? 'BLOCKED: ' : 'WARN: ')
-    + 'TASK.md 波次划分段内容不可判——## 波次划分 段在场，但段内没有一行 Wave 行能解析出可对应的任务 id'
-    + '（正文只写 N/A / Wave 行点的是不存在的任务 id / 行首强调记号让 Wave 行不成立）'
-    + (blocking ? '' : '（旧 change 渐进不阻断）')
-    + '：波次 = 依赖层级 的投影判据无法执行（未验证 ≠ 通过）'
-    + '；恢复: 按模板把每一波写成可解析的 Wave 行（如 `Wave 1: T01, T02`，中文标点可用），'
-    + '任务 id 必须逐字对应 TASK.md 里的任务；段正文写 N/A 不构成波次声明';
+  return [
+    (blocking ? 'BLOCKED: ' : 'WARN: ')
+      + 'TASK.md 波次划分段内容不可判——' + unjudgeable.explanation
+      + (blocking ? '' : '（旧 change 渐进不阻断）')
+      + '：波次 = 依赖层级 的投影判据无法执行（未验证 ≠ 通过）',
+    '恢复: ' + unjudgeable.recovery,
+  ];
 }
 
-// 报文构造（plan 出口与 replan 重校共用）：BLOCKED / WARN 同一文本，只换分级前缀。明细逐条点名
-// 「任务 / 依赖 / 当前波 / 应到波」（未声明的任务当前波记为「未声明」）；恢复指引按明细分流——
-// 已声明但波次不对：移到应到波，或把「为什么排在后面」的依赖写成显式 depends_on（作者有意延后的
-// 合法排法靠后者表达）；未声明：把它写进应到波的 Wave 行（没有「当前波」可挪，所以不套用前者）。
-export function waveProjectionReportLines(mismatches, level = 'BLOCKED') {
+// 报文构造（只由 waveReviewOutcome 调用，调用方不直接取用）：BLOCKED / WARN 同一文本，只换分级前缀。
+// 明细逐条点名「任务 / 依赖 / 当前波 / 应到波」（未声明的任务当前波记为「未声明」）；恢复指引按明细
+// 分流——已声明但波次不对：移到应到波，或把「为什么排在后面」的依赖写成显式 depends_on（作者有意
+// 延后的合法排法靠后者表达）；未声明：把它写进应到波的 Wave 行（没有「当前波」可挪，不套用前者）。
+function waveProjectionReportLines(mismatches, level = 'BLOCKED') {
   const blocking = level === 'BLOCKED';
   const lines = [(blocking ? 'BLOCKED: ' : 'WARN: ')
     + 'TASK.md 波次划分与依赖层级不一致——波次 = 依赖层级的投影（无依赖 = 第 1 波，其余 = 1 + 依赖中最晚波次；同波任务必须彼此无依赖；'
@@ -181,4 +214,115 @@ export function waveProjectionReportLines(mismatches, level = 'BLOCKED') {
         + ' 波，或给它补 depends_on: <依赖> 把顺序声明出来（要保留当前波次，就把「它为何排在后面」的依赖写成显式 depends_on）')).join('；')
     + '；改完重试');
   return lines;
+}
+
+// 分级 → 输出的**唯一出口**（plan 出口与 replan 重校各自只派生 blocking）：返回 { lines, block }。
+//   · 载体缺席 → 打印 notice、不阻断（block=false；「未校验 ≠ 通过」由文本表达，不改退出码）；
+//   · 内容不可判 → BLOCKED / WARN 两行（成因 + 恢复出路），block = blocking；
+//   · 判过且不一致 → 明细 + 恢复指引，block = blocking；
+//   · 判过且一致 → 零行、不阻断（不制造噪音）。
+// 调用方一律「逐行 console.error → 按 block 拒绝」，不再自己选级别、也不再自己构造报文。
+export function waveReviewOutcome(review, { blocking = false } = {}) {
+  const blocked = blocking === true;
+  const level = blocked ? 'BLOCKED' : 'WARN';
+  if (review.unverified !== null) return { lines: [review.unverified.notice], block: false };
+  if (review.unjudgeable !== null) {
+    return { lines: waveContentUnjudgeableLines(review.unjudgeable, level), block: blocked };
+  }
+  if (review.mismatches.length === 0) return { lines: [], block: false };
+  return { lines: waveProjectionReportLines(review.mismatches, level), block: blocked };
+}
+
+// ---------- 同波可并行却漏标 [P]（plan 出口的第二条波次面判据） ----------
+// 判据：同一波次内、彼此无依赖路径、且 write_files 不重叠的两个任务——**其中任一**没标
+// parallel="true" 即「可并行却未标 [P]」。只标一个不成立：单边标记既不表达「可并行」，机器路由
+// 又按串行跑（该并行度白丢）。作者的两条出路：两个都标 [P]（真并行），或补一条 depends_on 把它们
+// 排到不同波次（顺序显式）。修复族不参与（回修有独立生命周期）。
+//
+// 三条输入面的复用（本判据不另写第二份）：
+//   · 波次分组 / 层级：分组取 waveProjectionReview 的 waves（同一次解析，见该函数），层级取
+//     task-graph 的 taskWaveLevels。**同层 ⇒ 彼此无依赖路径**（依赖边严格抬高层级：
+//     level(依赖方) ≥ level(被依赖方) + 1），故「同波 ∧ 同层」即「同一波次内且彼此无依赖路径」——
+//     波次投影一致时两者本就等价，投影不一致（旧 change 只 WARN 才走到这里）时取交集使判据保守。
+//   · 写面重叠：**唯一入口是 task-graph 的 collectCrossTaskConflicts**。任务书写的是
+//     collectPathOverlaps（重叠判定的底层唯一实现），落地走它的上层入口——后者才带着「已归一路径」
+//     的解析、glob 语义与参与者规则（未完成、非修复族），且这些都收在 task-graph 一处；为直接调底层
+//     函数而导出 parsePaths / normalizeTaskPath，等于把私有契约放大成公共面。**等价关系**：该入口返回
+//     「同波无关 ∧ 写面重叠」（参与者已按未完成 / 非修复族过滤），本判据要的是它的**补集**——同层任务
+//     之间无依赖路径（层级不变量），故「不在其返回集合」⟺「写面不重叠」，不重叠才有资格叫「可并行」。
+//     本判据不自己比较路径：第二份重叠判定（含路径归一与 glob）必然与第一份分叉。
+//   · 修复族：族判定经 task-graph 的唯一谓词 fixTaskClassifier，判据侧不自写前缀匹配。
+// 已 done 的任务不参与（规划面上的 [P] 只约束未开始的任务）。
+function gapPairKey(left, right) {
+  return left < right ? left + '\u0000' + right : right + '\u0000' + left;
+}
+
+// 判定：返回 { gaps }，逐条 { a, b, wave, unmarked }（unmarked = 该对里没标 parallel 的任务 id）。
+// 无波次段 / 内容不可判（waves 为 null）→ 空（波次侧已有判别不了，本判据没有分组可用）。
+export function parallelGapReview({ taskContent = '', blocks = [], waves = null } = {}) {
+  if (!(waves instanceof Map) || waves.size === 0) return { gaps: [] };
+  const levels = taskWaveLevels(blocks);
+  const isFixTask = fixTaskClassifier(taskContent);
+  const candidates = [];
+  for (const block of blocks) {
+    const attrs = taskOpeningAttrs(block);
+    if (!attrs || typeof attrs.id !== 'string' || attrs.id === '') continue;
+    if (attrs.status === 'done' || isFixTask(block)) continue;
+    const wave = waves.get(attrs.id);
+    const level = levels.get(attrs.id);
+    if (wave === undefined || level === undefined) continue;
+    candidates.push({ id: attrs.id, wave, level, parallel: attrs.parallel === true });
+  }
+  if (candidates.length < 2) return { gaps: [] };
+  const { depsById } = analyzeDependencyGraph(blocks);
+  const overlappingPairs = new Set(collectCrossTaskConflicts({ taskContent, allBlocks: blocks, depsById })
+    .map((conflict) => gapPairKey(conflict.a, conflict.b)));
+  const gaps = [];
+  for (let i = 0; i < candidates.length; i += 1) {
+    for (let j = i + 1; j < candidates.length; j += 1) {
+      const left = candidates[i];
+      const right = candidates[j];
+      if (left.wave !== right.wave || left.level !== right.level) continue;
+      if (left.parallel && right.parallel) continue;
+      if (overlappingPairs.has(gapPairKey(left.id, right.id))) continue;
+      gaps.push({
+        a: left.id,
+        b: right.id,
+        wave: left.wave,
+        unmarked: [left, right].filter((task) => !task.parallel).map((task) => task.id),
+      });
+    }
+  }
+  return { gaps };
+}
+
+// 报文（plan 出口 BLOCKED / 旧 change WARN 同一文本，只换分级前缀）：逐对点名哪两个任务同波、谁没标，
+// 恢复句给两条出路（都标 [P]，或补 depends_on 换波次）——只有一条出路时执行者会以为「标 [P] 是唯一
+// 正确答案」，而真实计划里「这两个任务其实有先后」是同样常见的形态。
+function parallelGapLines(gaps, level = 'BLOCKED') {
+  if (gaps.length === 0) return [];
+  const blocking = level === 'BLOCKED';
+  const sample = gaps[0];
+  const lines = [(blocking ? 'BLOCKED: ' : 'WARN: ')
+    + 'TASK.md 同波任务可并行却未标 [P]——同一波次内彼此无依赖路径、且 write_files 不重叠的任务本可并行；'
+    + '任务开标签的 parallel="true" 才是机器路由依据（Wave 行的 [P] 只是散文标记）'
+    + (blocking ? '' : '（旧 change 渐进不阻断）')
+    + ':'];
+  for (const gap of gaps) {
+    lines.push('  - ' + gap.a + ' × ' + gap.b + '（同在第 ' + gap.wave + ' 波；未标 parallel="true": '
+      + gap.unmarked.join('、') + '）');
+  }
+  lines.push('恢复: 两条出路任选——① 给这一对都标 parallel="true"（Wave 行同步标 [P]），让它们真的同波并行；'
+    + '② 补一条 depends_on（如给 ' + sample.b + ' 加 <depends_on>' + sample.a + '</depends_on>）'
+    + '把它们排到不同波次，顺序因而显式；改完重试');
+  return lines;
+}
+
+// 分级 → 输出的唯一出口（与 waveReviewOutcome 同形：两个调用方各自只派生 blocking）。ADR-013 的
+// 「replan 不豁免」同样适用于本判据：只在 plan 出口判，执行期重签就能把「本可并行却没标」的计划
+// 换一份发出去——那正是两处同判要防的形态。
+export function parallelGapOutcome(review, { blocking = false } = {}) {
+  const blocked = blocking === true;
+  if (review.gaps.length === 0) return { lines: [], block: false };
+  return { lines: parallelGapLines(review.gaps, blocked ? 'BLOCKED' : 'WARN'), block: blocked };
 }

@@ -37,12 +37,13 @@ import {
 } from './guard-artifact-skeleton.mjs';
 import { applicabilityGatedBinding, frontendCriterion } from './guard-uidesign.mjs';
 // 波次段解析与「波次 = 依赖层级的投影」判定（纯判定模块）：plan 出口与 replan 重校段共用同一
-// 实现与同一报文——段界（waveSectionBody）也是既有波次散文检测的唯一表达处。
+// 判定、同一分级出口（waveReviewOutcome / parallelGapOutcome）——段界（waveSectionBody）也是既有
+// 波次散文检测的唯一表达处。
 import {
-  WAVE_UNCHECKED_NOTICE,
-  waveContentUnjudgeableLine,
-  waveProjectionReportLines,
+  parallelGapOutcome,
+  parallelGapReview,
   waveProjectionReview,
+  waveReviewOutcome,
   waveSectionBody,
 } from './wave-projection.mjs';
 import {
@@ -1151,24 +1152,24 @@ export async function runPlanExitGate({ node, state }) {
     // 任务上）按同一先例分级，旧 change 的 WARN 行进入既有 WARN COUNT（「该写的没写」不静默）。
     // 位置在依赖图判据之后：环与缺失依赖是更根本的规划错误，先报它们；replan 重校段（ADR-013
     // 不豁免）调用同一判定与同一报文构造，措辞与分级因此不会分叉。
-    {
-      const waveReview = waveProjectionReview({ taskContent: content, blocks: taskList });
-      if (!waveReview.judgeable) {
-        if (waveReview.reason === 'content-unjudgeable') {
-          const unjudgeableBlocking = isNewChange(state);
-          console.error(waveContentUnjudgeableLine(unjudgeableBlocking ? 'BLOCKED' : 'WARN'));
-          if (unjudgeableBlocking) process.exit(1);
-        } else {
-          console.error(WAVE_UNCHECKED_NOTICE);
-        }
-      } else if (waveReview.mismatches.length > 0) {
-        const waveBlocking = isNewChange(state);
-        for (const line of waveProjectionReportLines(waveReview.mismatches, waveBlocking ? 'BLOCKED' : 'WARN')) {
-          console.error(line);
-        }
-        if (waveBlocking) process.exit(1);
-      }
-    }
+    // 分级 → 输出单源：本出口只派生 blocking（新 change 强制、旧 change 渐进），「哪一支打什么行、
+    // 要不要拒绝」全在 waveReviewOutcome 一处——与 replan 重校段共用同一份，改分级只改一处。
+    const waveReview = waveProjectionReview({ taskContent: content, blocks: taskList });
+    const waveOutcome = waveReviewOutcome(waveReview, { blocking: isNewChange(state) });
+    for (const line of waveOutcome.lines) console.error(line);
+    if (waveOutcome.block) process.exit(1);
+    // 同波可并行却漏标 [P]（波次判据之后的第二条波次面判据）：同一波次内彼此无依赖路径、write_files
+    // 不重叠的两个任务，只标一个 parallel="true" 不成立——单边标记既不表达「可并行」，机器路由又按
+    // 串行跑（白丢一波并行度）。新 change BLOCKED（逐对点名 + 两条出路：都标 [P] / 补 depends_on 换
+    // 波次），旧 change WARN 渐进（WARN 行进既有 WARN COUNT）。判据本身（含「写面重叠」与「无依赖
+    // 路径」两个前提）在 wave-projection 一处实现，本处只分级与打印；波次分组复用同一份解析结果
+    // （waveReview.waves），不重解析波次段。
+    const gapOutcome = parallelGapOutcome(
+      parallelGapReview({ taskContent: content, blocks: taskList, waves: waveReview.waves }),
+      { blocking: isNewChange(state) },
+    );
+    for (const line of gapOutcome.lines) console.error(line);
+    if (gapOutcome.block) process.exit(1);
     // 伪并行检测（真实载体验证暴露的设计盲区兜底）：如果一个标记为并行的任务只写测试文件而无任何
     // 生产代码文件，它很可能隐式依赖某个实现类并行任务的产出（如测试 import 尚未存在的函数）。这种
     // "伪并行"在多趟路由下会导致委托后测试失败。启发式：并行任务的 write_files 全部匹配 tests/ 或

@@ -5,6 +5,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { pathToFileURL } from 'url';
 import {
   assertExit,
   assertNotOut,
@@ -26,6 +27,7 @@ import {
   TASK_MIXED_SPS,
   TASK_VALID_ALL_PARALLEL,
   dropNamedImport,
+  engineCodeText,
   engineConsumersOf,
   engineDefinitionHits,
   engineDefinitionModule,
@@ -48,9 +50,14 @@ import { singleSourceImportProblems } from '../lib/text-anchor-checks.mjs';
 // 匿名化同形夹具（中性任务 id / 中性路径），与真实计划同形不同内容：真实计划只作一次性验收载体，
 // 不进套件夹具、也不随包分发。任务块的 parallel="true" 与散文的 [P] 标记保持一致——否则先被既有的
 // 「波次散文一致性」判据拦下，测不到波次投影本身。
-const waveTask = (id, deps = '') => '<task id="' + id + '" parallel="true" status="pending"><action>实现 ' + id
-  + '</action><write_files>src/' + id.toLowerCase() + '.mjs</write_files><verify>node --check src/'
-  + id.toLowerCase() + '.mjs</verify><depends_on>' + deps + '</depends_on></task>\n';
+// options.parallel=false 时**不写开标签属性**（「未标 parallel」的真实形态——写 parallel="false"
+// 也是同一个判定结果，但夹具要表达的是「没声明」）；options.write 覆盖写面路径（构造「写面重叠」对）。
+const waveTask = (id, deps = '', { parallel = true, write } = {}) => {
+  const writePath = write ?? 'src/' + id.toLowerCase() + '.mjs';
+  return '<task id="' + id + '"' + (parallel ? ' parallel="true"' : '') + ' status="pending"><action>实现 ' + id
+    + '</action><write_files>' + writePath + '</write_files><verify>node --check ' + writePath
+    + '</verify><depends_on>' + deps + '</depends_on></task>\n';
+};
 
 // 波次段 + 任务清单的最小 TASK.md。Wave 行的注解形态刻意取真实工件的写法（(parallel) 标注、
 // 括号依赖注解、行尾 # 注释、[P] 标记）——解析面必须容忍它们，且不把注解里的 id 算成本波成员。
@@ -115,8 +122,55 @@ const naWavePlan = () => waveBodyPlan('N/A（本计划不使用波次划分）',
 const phantomWavePlan = () => waveBodyPlan('```\nWave 1: T99\n```', waveTask('T01'));
 const boldWavePlan = () => waveBodyPlan('```\n**Wave 1**: T01\n```', waveTask('T01'));
 
+// 同波可并行却漏标 [P]（波次判据之后的第二条波次面判据）：Wave 1 里的 T01 与 T02 彼此无依赖、
+// write_files 不重叠（本可并行），而只有 T01 标了 parallel="true"。单变量 = T02 的 parallel 标记
+// （markAll）——判据该报的正是「本可并行却谁都没说」这一形态。「写面不重叠」的判定入口是
+// task-graph 的 collectCrossTaskConflicts（其返回集合的补集，见 wave-projection 的判据注释）。
+const parallelGapPlan = ({ markAll = false } = {}) => waveMarkdown(
+  'Wave 1 (parallel): T01[P], T02',
+  waveTask('T01') + waveTask('T02', '', { parallel: markAll }));
+// 第二条出路：补一条 depends_on 把两者排到不同波次（T02 进第 2 波，标记仍是串行）。
+const parallelGapDependPlan = () => waveMarkdown(
+  'Wave 1 (parallel): T01[P]\nWave 2: T02   (depends on T01)',
+  waveTask('T01') + waveTask('T02', 'T01', { parallel: false }));
+// 修复族不参与：同波四只修复任务（两只族前缀 + 两只修复段内）都没标 parallel、写面互不重叠——
+// 族判定经 task-graph 的唯一谓词，判据不得在这里另立一套边界。
+const fixPairWavePlan = () => waveMarkdown(
+  'Wave 1: T-FIX-01, T-FIX-02, R01, R02',
+  waveTask('T-FIX-01', '', { parallel: false }) + waveTask('T-FIX-02', '', { parallel: false })
+  + '\n## Fix 任务（来自 REVIEW / INTEGRATION）\n\n'
+  + waveTask('R01', '', { parallel: false }) + waveTask('R02', '', { parallel: false }));
+// 写面重叠的一对不是「可并行」：同波同层、都没标 parallel，但写同一个文件——写冲突族另有判据，
+// 本判据不得在同一对上加一条「可并行」的错话（重叠判定退化为「一律不重叠」时这里会多一条报文）。
+const overlapPairWavePlan = () => waveMarkdown(
+  'Wave 1: T01, T02',
+  waveTask('T01', '', { parallel: false, write: 'src/shared.mjs' })
+  + waveTask('T02', '', { parallel: false, write: 'src/shared.mjs' }));
+
 // 报告明细行（同一报文构造的逐条投影）：只取报文里的「  - 」行，用于比较两种标点写法的判定是否一致。
 const waveDetailLines = (res) => res.output.split(/\r?\n/u).filter((line) => line.startsWith('  - ')).sort();
+
+// 波次报文段（plan 出口与 replan 重校的逐字对账用）：明细标题行 → 恢复行。两处共用同一构造函数，
+// 任一处自建报文（或分级规则只改一处）即在此判红。
+const waveReportLines = (res) => {
+  const lines = res.output.split(/\r?\n/u);
+  const start = lines.findIndex((line) => line.includes('波次划分与依赖层级不一致'));
+  const end = lines.findIndex((line) => line.startsWith('恢复: 按明细逐项修正'));
+  return start < 0 || end < start ? [] : lines.slice(start, end + 1);
+};
+const waveGapReportLines = (res) => {
+  const lines = res.output.split(/\r?\n/u);
+  const start = lines.findIndex((line) => line.includes('同波任务可并行却未标 [P]'));
+  const end = lines.findIndex((line) => line.startsWith('恢复: 两条出路任选'));
+  return start < 0 || end < start ? [] : lines.slice(start, end + 1);
+};
+const waveUnjudgeableLines = (res) => {
+  const lines = res.output.split(/\r?\n/u);
+  const start = lines.findIndex((line) => line.includes('波次划分段内容不可判'));
+  if (start < 0) return [];
+  const next = lines[start + 1] ?? '';
+  return next.startsWith('恢复: ') ? [lines[start], next] : [lines[start]];
+};
 
 export const ENTRIES = [
 
@@ -288,8 +342,8 @@ export const ENTRIES = [
   // 145（多趟语义重写）：新 change + 依赖环（P01↔P02 互为 depends_on）→ exit plan 应 BLOCKED，
   // 输出含「依赖环」（拓扑排序判环）与「depends_on」恢复指引。旧引擎无波次校验静默放行 = 预期 RED。
   {
-    name: '145 plan exit BLOCKED：新 change 依赖环（P01↔P02 互为依赖）+ 波次投影三形态（同波依赖 / 排得保守 / 修正后通过）+ replan 同源拒绝重签',
-    run: (dir) => {
+    name: '145 plan exit BLOCKED：新 change 依赖环（P01↔P02 互为依赖）+ 波次投影三形态（同波依赖 / 排得保守 / 修正后通过）+ 同波漏标 [P] + replan 同源拒绝重签',
+    run: async (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
       st.newChange = true;
@@ -357,12 +411,14 @@ export const ENTRIES = [
         + ' 全角=' + JSON.stringify(fullDetails));
       // ⑧ 段在场而内容不可判（N/A 声明 / 指向不存在的任务 id / 行首强调记号）：新 change BLOCKED——
       //    「判不了」不再等价于放行（未验证 ≠ 通过），且报文与「载体缺席」那一支明确不同。
+      const unjudgeablePlanResults = [];
       for (const [label, plan] of [
         ['N/A 声明', naWavePlan()],
         ['指向不存在的任务 id', phantomWavePlan()],
         ['行首强调记号', boldWavePlan()],
       ]) {
         const unjudgeable = runPlanWithTask(dir, plan);
+        unjudgeablePlanResults.push(unjudgeable);
         try {
           assertExit(unjudgeable, 1);
           assertOut(unjudgeable, '波次划分段内容不可判');
@@ -374,6 +430,32 @@ export const ENTRIES = [
           throw new Error(label + '：' + error.message);
         }
       }
+      // ⑨ 同波可并行却漏标 [P]（波次判据之后的第二条波次面判据）：同一波次内彼此无依赖路径、
+      //    write_files 不重叠的两个任务本可并行——只标一个 parallel="true" 不成立（单边标记既不
+      //    表达「可并行」，机器路由也只按串行跑、白丢一波并行度）。新 change BLOCKED 且逐对点名
+      //    「哪个任务没标」，并给两条可照抄的出路。
+      const gapBlocked = runPlanWithTask(dir, parallelGapPlan());
+      assertExit(gapBlocked, 1);
+      assertOut(gapBlocked, '同波任务可并行却未标 [P]');
+      assertOut(gapBlocked, 'T01 × T02');
+      assertOut(gapBlocked, '未标 parallel="true": T02');
+      // 两条出路都必须在报文里：① 两个都标 [P]；② 补一条 depends_on 把它们排到不同波次
+      assertOut(gapBlocked, '都标 parallel="true"');
+      assertOut(gapBlocked, 'depends_on');
+      assertOut(gapBlocked, '不同波次');
+      // 出路①（唯一变量 = T02 的 parallel 标记）→ 判据沉默（不是「同波即报」）
+      const gapAllMarked = runPlanWithTask(dir, parallelGapPlan({ markAll: true }));
+      assertExit(gapAllMarked, 0);
+      assertNotOut(gapAllMarked, '可并行却未标 [P]');
+      // 出路②（补 depends_on 把 T02 排到第 2 波、标记仍是串行）→ 同样通过：两条出路都真能解掉判定
+      const gapDependFixed = runPlanWithTask(dir, parallelGapDependPlan());
+      assertExit(gapDependFixed, 0);
+      assertNotOut(gapDependFixed, '可并行却未标 [P]');
+      // 修复族不参与：同波四只修复任务（族前缀两只 + 修复段内两只）都没标 parallel、写面互不重叠，
+      // 判据不得报——族边界仍只在 task-graph 的唯一谓词里表达。
+      const gapFixFamily = runPlanWithTask(dir, fixPairWavePlan());
+      assertExit(gapFixFamily, 0);
+      assertNotOut(gapFixFamily, '可并行却未标 [P]');
       // ===== replan 同源（AC-3 · ADR-013 不豁免）：重校段调用同一判定、同一报文 =====
       // 相位夹具 = execute 已 entry、前序完成、taskHash 过期（避开幂等空操作）。
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', sameWavePlan());
@@ -386,11 +468,34 @@ export const ENTRIES = [
       assertOut(replanBlocked, 'T01');
       assertOut(replanBlocked, '当前波 2');
       assertOut(replanBlocked, '应到波 1');
+      // ⑩ 分级 → 输出单源：两处只派生 blocking，报文段逐字相同（各写一份同构分支时，改分级只改
+      //    一处就会在另一处静默落后——反向构造：把分级规则只改一处，本节两处对账必红）。
+      const planWaveReport = waveReportLines(sameWaveBlocked);
+      const replanWaveReport = waveReportLines(replanBlocked);
+      assertTrue(planWaveReport.length > 0,
+        'plan 出口的波次报文段未取到（恢复行缺失？）: ' + sameWaveBlocked.output);
+      assertTrue(planWaveReport.join('\n') === replanWaveReport.join('\n'),
+        'plan 出口与 replan 重校的波次报文不逐字相同:\nplan=' + JSON.stringify(planWaveReport)
+        + '\nreplan=' + JSON.stringify(replanWaveReport));
       // 拒绝重签：状态零改写，且重签前备份尚未产生（重校全部先于写盘）
       assertStateBytesUnchanged(dir, replanBytes, 'replan 波次投影 BLOCK');
       if (replanBackupFiles(dir).length !== 0) {
         throw new Error('replan 波次投影 BLOCK 路径不得产生重签前备份，实际 ' + replanBackupFiles(dir).length + ' 份');
       }
+      // ⑪ 同波漏标 [P] 同样不豁免（ADR-013）：执行期重签不得把「本可并行却没标」的计划换一份发
+      //    出去；两处分级与措辞同源（同一构造），故报文段逐字相同。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', parallelGapPlan());
+      const replanGap = runStateWithProtocol(dir, ['replan', '同波漏标的计划重校', '--authorized-by', 'user-approval']);
+      assertExit(replanGap, 1);
+      assertOut(replanGap, '同波任务可并行却未标 [P]');
+      assertOut(replanGap, 'T01 × T02');
+      const planGapReport = waveGapReportLines(gapBlocked);
+      const replanGapReport = waveGapReportLines(replanGap);
+      assertTrue(planGapReport.length > 0, 'plan 出口的同波漏标报文未取到: ' + gapBlocked.output);
+      assertTrue(planGapReport.join('\n') === replanGapReport.join('\n'),
+        '同波漏标两支的措辞不逐字相同:\nplan=' + JSON.stringify(planGapReport)
+        + '\nreplan=' + JSON.stringify(replanGapReport));
+      assertStateBytesUnchanged(dir, replanBytes, 'replan 同波漏标 BLOCK');
       // 未声明任务同样不豁免（ADR-013：改散文绕不过判据）：重校段必须点名未被波次覆盖的任务。
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', undeclaredWavePlan());
       const replanUndeclared = runStateWithProtocol(dir, ['replan', '未声明任务的计划重校', '--authorized-by', 'user-approval']);
@@ -398,11 +503,75 @@ export const ENTRIES = [
       assertOut(replanUndeclared, '波次划分与依赖层级不一致');
       assertOut(replanUndeclared, 'T02（依赖: T01）当前波 未声明 → 应到波 2');
       assertStateBytesUnchanged(dir, replanBytes, 'replan 未声明任务 BLOCK');
+      // ⑪ 内容不可判那一支同样两处逐字相同（同一构造函数的第二条分级路径，只换分级前缀）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', naWavePlan());
+      const replanUnjudgeable = runStateWithProtocol(dir, ['replan', '内容不可判的计划重校', '--authorized-by', 'user-approval']);
+      assertExit(replanUnjudgeable, 1);
+      assertOut(replanUnjudgeable, '波次划分段内容不可判');
+      const planUnjudgeableReport = waveUnjudgeableLines(unjudgeablePlanResults[0]);
+      const replanUnjudgeableReport = waveUnjudgeableLines(replanUnjudgeable);
+      assertTrue(planUnjudgeableReport.length > 0, 'plan 出口的内容不可判报文未取到: ' + unjudgeablePlanResults[0].output);
+      assertTrue(planUnjudgeableReport.join('\n') === replanUnjudgeableReport.join('\n'),
+        '内容不可判两支的措辞不逐字相同:\nplan=' + JSON.stringify(planUnjudgeableReport)
+        + '\nreplan=' + JSON.stringify(replanUnjudgeableReport));
+      assertStateBytesUnchanged(dir, replanBytes, 'replan 内容不可判 BLOCK');
       // 改到一致后重签成功（判据不阻断合规计划）
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', fixedWavePlan());
       const replanFixed = runStateWithProtocol(dir, ['replan', '按波次投影修正后重校', '--authorized-by', 'user-approval']);
       assertExit(replanFixed, 0);
       assertOut(replanFixed, 'REPLAN: execute');
+
+      // ===== ⑫ 「判不了」形态统一 + 分级→输出单源（两条判据共用一处契约）=====
+      // ① 源码契约锁：两条结构判据的「判不了」载荷键同形（载体缺席 { reason, notice } / 内容不可判
+      //    { reason, explanation, recovery }），旧的「judgeable + reason 混装」形态在判据与两个调用方
+      //    身上零残留——形态只在源码里表达，靠注释互指同源不算同步机制。
+      const judgeTexts = engineScriptTexts();
+      const judgeCode = (rel) => engineCodeText(judgeTexts.get(rel) ?? '');
+      for (const rel of ['lib/wave-projection.mjs', 'lib/ac-coverage.mjs']) {
+        const code = judgeCode(rel);
+        const missingKeys = ['unverified:', 'unjudgeable:', 'notice', 'explanation', 'recovery']
+          .filter((token) => !code.includes(token));
+        assertTrue(missingKeys.length === 0,
+          rel + ' 缺「判不了」载荷键（形态应与另一条判据同形）: ' + missingKeys.join('、'));
+      }
+      for (const rel of ['lib/wave-projection.mjs', 'lib/ac-coverage.mjs', 'lib/guard-gates.mjs', 'lib/state-commands-recovery.mjs']) {
+        assertTrue(!/\bjudgeable\b/u.test(judgeCode(rel)),
+          rel + ' 仍在使用旧形态字段 judgeable（「判不了」只许一种形态）');
+      }
+      // ② 分级 → 输出单源：两个波次调用方只派生 blocking 并经 waveReviewOutcome 分派，不再各自
+      //    构造波次报文（两处各写一份同构分支，改分级只改一处就会在另一处静默落后）。
+      for (const rel of ['lib/guard-gates.mjs', 'lib/state-commands-recovery.mjs']) {
+        const code = judgeCode(rel);
+        for (const entry of ['waveReviewOutcome', 'parallelGapOutcome']) {
+          assertTrue(code.includes(entry), rel + ' 未经由 ' + entry + ' 分派（分级→输出应单源）');
+        }
+        for (const retired of ['waveProjectionReportLines', 'waveContentUnjudgeableLine', 'WAVE_UNCHECKED_NOTICE']) {
+          assertTrue(!code.includes(retired),
+            rel + ' 仍直接消费报文构造函数 ' + retired + '（应统一经 waveReviewOutcome）');
+        }
+      }
+      // ③ 运行期形态对账：两条判据各自产出一条「载体缺席」结果，字段与载荷键必须完全同形
+      //    （AC 的内容不可判分支另有场景 21 的运行期夹具；本块补的是「形态同形」这一件事）。
+      const waveModule = await import(pathToFileURL(path.join(SCRIPTS_DIR, 'lib', 'wave-projection.mjs')).href);
+      const acModule = await import(pathToFileURL(path.join(SCRIPTS_DIR, 'lib', 'ac-coverage.mjs')).href);
+      const judgeShape = (outcome) => JSON.stringify({
+        fields: ['unverified', 'unjudgeable'].filter((field) => field in outcome),
+        unverified: outcome.unverified === null ? null : Object.keys(outcome.unverified).sort(),
+        unjudgeable: outcome.unjudgeable === null ? null : Object.keys(outcome.unjudgeable).sort(),
+      });
+      const waveCarrier = waveModule.waveProjectionReview({ taskContent: '# TASK\n\n## 任务清单\n\n' + waveTask('T01') });
+      const waveContent = waveModule.waveProjectionReview({ taskContent: naWavePlan() });
+      const acCarrier = await acModule.acCoverageReview(path.join(dir, '.specs', CHANGE_ID));
+      assertTrue(judgeShape(waveCarrier) === judgeShape(acCarrier),
+        '波次判据与 AC 覆盖的「载体缺席」形态不一致: 波次=' + judgeShape(waveCarrier) + ' AC=' + judgeShape(acCarrier));
+      assertTrue(JSON.stringify(Object.keys(acCarrier.unverified).sort()) === JSON.stringify(['notice', 'reason']),
+        '载体缺席的载荷键应为 { notice, reason }: ' + JSON.stringify(Object.keys(acCarrier.unverified)));
+      assertTrue(waveContent.unverified === null && waveContent.unjudgeable !== null,
+        '内容不可判应只填 unjudgeable（另一支必须为空）: ' + judgeShape(waveContent));
+      assertTrue(JSON.stringify(Object.keys(waveContent.unjudgeable).sort())
+        === JSON.stringify(['explanation', 'reason', 'recovery']),
+        '内容不可判的载荷键应与 AC 覆盖同形（reason / explanation / recovery）: '
+        + JSON.stringify(Object.keys(waveContent.unjudgeable)));
     },
   },
 
@@ -539,6 +708,29 @@ export const ENTRIES = [
       assertTrue(warnCountOf(oldUnjudgeable) === warnCountOf(noSectionSameTasks) + 1,
         '段在场而内容不可判未计入 WARN COUNT（未校验仍静默）: N/A=' + warnCountOf(oldUnjudgeable)
         + ' 无段=' + warnCountOf(noSectionSameTasks));
+      // ⑧ 旧 change + 同波可并行却漏标 [P]：同一输入只 WARN 不阻断，且该行进入既有 WARN COUNT——
+      //    计数差分（判别力）：唯一变量（T02 的 parallel 标记）补上后该 WARN 消失，计数恰少 1。
+      const oldGap = runPlanWithTask(dir, parallelGapPlan());
+      assertExit(oldGap, 0);
+      assertNotOut(oldGap, 'BLOCKED');
+      assertOut(oldGap, '同波任务可并行却未标 [P]');
+      assertOut(oldGap, 'T01 × T02');
+      const oldGapFixed = runPlanWithTask(dir, parallelGapPlan({ markAll: true }));
+      assertExit(oldGapFixed, 0);
+      assertNotOut(oldGapFixed, '可并行却未标 [P]');
+      assertTrue(warnCountOf(oldGap) === warnCountOf(oldGapFixed) + 1,
+        '同波漏标 [P] 的 WARN 未计入 WARN COUNT: 漏标=' + warnCountOf(oldGap)
+        + ' 全标=' + warnCountOf(oldGapFixed));
+      // ⑨ 补集等价：本判据的「写面不重叠」= task-graph 的 collectCrossTaskConflicts（写面重叠的唯一
+      //    入口，其实现就是 collectPathOverlaps + 已归一路径 + glob）返回集合的**补集**。夹具构造反面：
+      //    同波同层、都没标 parallel，但写同一个文件 → 写冲突族照常报，本判据必须沉默（否则同一对上
+      //    两条报文自相矛盾）。反向构造：抽掉该入口（M4）→ 这里同时冒出「可并行却未标 [P]」→ 判红。
+      const oldOverlap = runPlanWithTask(dir, overlapPairWavePlan());
+      assertExit(oldOverlap, 0);
+      assertOut(oldOverlap, '同文件跨任务且无依赖路径');
+      assertTrue(!oldOverlap.output.includes('可并行却未标 [P]'),
+        '补集等价被破坏：写面重叠（collectCrossTaskConflicts 判为冲突）的一对不得被要求标 [P]（'
+        + oldOverlap.output + '）');
     },
   },
 
