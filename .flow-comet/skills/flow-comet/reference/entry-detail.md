@@ -115,6 +115,10 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load plan flow-c
 
 # 多份协议（open）：一条命令两个 --prompt，两份都记进标记
 node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-change --prompt flow-kit/prompts/0-change.md --prompt flow-kit/prompts/1-requirement.md --templates CHANGE.md,REQUIREMENT.md
+
+# 同一节点的第二个 guarded 必需技能（open = change + requirement）：每个必需技能各一条，
+# 每条都带该节点全部 --prompt 与模板全清单——一条命令只写一个技能标记
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-requirement --prompt flow-kit/prompts/0-change.md --prompt flow-kit/prompts/1-requirement.md --templates CHANGE.md,REQUIREMENT.md
 ```
 
 > **分条等价**：按协议文件分几条命令声明，与合并成一条等价——出口判据按节点汇总，只问「该读的这几份是否都被声明过」，不要求与技能一一对应。
@@ -132,7 +136,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-c
 - **协议文件面**：该节点该读的**每一份**协议文件都要被声明过（open 两份、review 两份，其余节点一份）。多份可以在同一个标记的 `protocols` 里（一条命令给多个 `--prompt`），也可以分散在各技能自己的标记上——判据按节点汇总，只看这些文件是否都被声明过。
 - **技能面**：协议 `requiredSkillCalls` 里**每个** `guarded` 必需技能，都要有一个属于它的标记（适用性门控的绑定除外——`flow-comet-ui-design` 只在**前端** change 上要求，见下方该段判据）。**`handoff-guarded` 不在判据内**——那是子代理侧义务，由 Return Contract 的 `required-skill:` 核对负责（让协调者声明一个它没加载的技能，只会造出另一类假声明）。
 
-**缺声明时的恢复命令形态**（BLOCKED / WARN 报文给的就是这个形态）：`node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <skill> --prompt <缺的那份协议文件> ...`——一条命令可传**多个** `--prompt`，报文会逐项点名缺的是哪份协议文件、哪个必需技能；同一 `<node>-<skill>` 重跑会**覆写**该标记，补齐后重试 `exit <node>`。**分级**：新 change BLOCKED（强制全部覆盖）、旧 change 只 WARN（既有 change 不因判据变严卡死）。**兼容**：判据改为全部覆盖之前写下的标记只有一个 `protocol` 单值（历史形态甚至是完整路径），照样按 basename 计入覆盖；不可解析的标记**不计入**，并在报文里列名——不静默当通过。
+**缺声明时的恢复命令形态**（BLOCKED / WARN 报文给的就是这个形态）：报文按**协议派生**给出该节点**每个** `guarded` 必需技能各一条命令（`node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <skill> …`）——每条把该节点该读的**全部**协议文件都带上（多个 `--prompt`）并带 `--templates <该节点模板全清单>`，三个面一次给全，照抄即通。旧口径的 `skill-load <node> <skill> --prompt <缺的那份协议文件>` 只补缺项、漏模板清单，照抄完同一 exit 会再被覆盖门与模板门各拦一次（已废弃；报文仍逐项点名缺哪份协议文件、哪个必需技能，命令本身则给全）。同一 `<node>-<skill>` 重跑会**覆写**该标记，补齐后重试 `exit <node>`。**分级**：新 change BLOCKED（强制全部覆盖）、旧 change 只 WARN（既有 change 不因判据变严卡死）。**兼容**：判据改为全部覆盖之前写下的标记只有一个 `protocol` 单值（历史形态甚至是完整路径），照样按 basename 计入覆盖；不可解析的标记**不计入**，并在报文里列名——不静默当通过。
 
 声明如实记录执行者动作——加载了哪个 skill、按哪份协议工作——**不等于产出证明**；产出是否正确由产物结构校验与门禁把关。**技能加载前置门**：新 change 的 required 条目不再自动补写——handoff request / record 前必须已有本节点声明标记（先加载、再声明、后干活）；声明标记自动补写仅对旧 change 兜底（按协议 requiredSkillCalls 代记，标记带 `auto: true`），手动声明仍推荐（如实记录加载动作与协议文件）。`flow-comet-ui-design` 与协议同等级（`guarded`）且**仅前端适用**：前端 change 须先加载并 `skill-load` 声明、record 载荷带 `required-skill:design.flow-comet-ui-design`（出口不再自动补写）；非前端不加载不声明（出口输出可见的 `UI-DESIGN: skipped（非前端）`）；旧 change 渐进，缺件仅 WARN。前端判据是**结构级**的：`CHANGE.md` 的「视觉调性」段在场，且段内的「不适用」标记成**结构形态**——**独立行**、居**行首**（可带列表符号 / 引用 / 加粗），或写在适用性类标签的**字段值位**；标记之后须成**词形边界**（紧跟空白、标点或行尾），命中即回显**命中片段**。段内其它位置顺带提到「不适用」不算标注，仍判前端。
 

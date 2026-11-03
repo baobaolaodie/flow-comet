@@ -17,9 +17,9 @@ import {
 } from '../state-schema.mjs';
 import { EXECUTE_FAMILY_NODE_IDS, analyzeDependencyGraph, normalizeHeading } from '../route-node.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from '../task-parsing.mjs';
-// 「怎么重新声明技能加载」的唯一实现（节点模板 + 协议提示词两面）：skill-load 校验、record 的声明
-// 核对与这里的恢复指引共用同一份参数段——各拼一份必然分叉。
-import { nodeTemplateDeclaration, templateDeclareCommand } from '../protocol-utils.mjs';
+// 声明命令的派生面（单一来源表，本模块只组合、不另写映射）：节点该读的协议文件（NODE_PROTOCOL_FILES）、
+// 该节点的模板清单（nodeTemplateDeclaration）、提示词指针形态（promptPointerPath）。
+import { NODE_PROTOCOL_FILES, nodeTemplateDeclaration, promptPointerPath } from '../protocol-utils.mjs';
 import { runRoot, packageRoot, fileExists, statePath, writeJson, protocolPath } from './guard-state-io.mjs';
 import {
   eligibleParallelBlocks,
@@ -741,18 +741,56 @@ function protocolContextArgs() {
   return ['--protocol', '"' + toPersistedProtocolPath(runRoot, protocolPath) + '"'];
 }
 
-// 前置声明命令：参数段取 templateDeclareCommand（模板与协议提示词是同一次声明的两面——漏任一面，
-// record 的模板声明核对或 exit 的协议声明校验会把执行者再拦一次；重跑 skill-load 会覆写同一标记），
-// 只把它的脚本名换成 scriptCommand 的路径形态：路径与引号仍只有这一处实现，本模块不拼第二份命令。
-function skillLoadCommand(node, skillName, protocolArgs = []) {
-  const declareWords = templateDeclareCommand(nodeTemplateDeclaration(node), { nodeId: node.id, skillName })
-    .split(' ').filter((word) => word !== '');
-  return scriptCommand({
-    scriptsDir,
-    runRoot,
-    script: 'workflow-state.mjs',
-    args: [...declareWords.slice(1), ...protocolArgs],
-  });
+// 本节点该声明哪些技能（单一实现：出口声明覆盖门的「要求覆盖」与恢复段的「照抄哪几条命令」共用
+// 同一份判据）：协议 requiredSkillCalls 中 enforcement==='guarded' 且**非 handoff scope** 的条目
+// ——handoff scope 的技能由子代理加载，协调者不加载也无法诚实声明（与 record 侧同一口径）；
+// 适用性门控的绑定（design 的 ui-design）在判据不成立时不要求声明（非前端本就不加载它，「没声明」
+// 不是缺陷），判据成立时与其它 guarded 技能同权。两处若各判一套，恢复段给出的命令会在下一次 exit
+// 上被另一套判据点名——那正是「照抄走不通」的成因。
+export async function declarationSkillNames(node, state) {
+  const guarded = (node.requiredSkillCalls ?? []).filter((binding) => binding
+    && binding.enforcement === 'guarded'
+    && binding.scope !== 'handoff'
+    && typeof binding.skill === 'string'
+    && binding.skill !== '');
+  if (guarded.length === 0) return [];
+  if (!guarded.some((binding) => applicabilityGatedBinding(node, binding.skill) !== null)) {
+    return guarded.map((binding) => binding.skill);
+  }
+  const frontend = await frontendCriterion(state?.activeChange);
+  return guarded
+    .filter((binding) => applicabilityGatedBinding(node, binding.skill) === null || frontend.applicable === true)
+    .map((binding) => binding.skill);
+}
+
+// 「怎么重新声明技能加载」的完整形态（命令文本的单一来源：缺证据恢复段的第一步与出口声明覆盖门的
+// 补齐命令两处都从这里取）——三面同时给全，缺一照抄后必被另一道门拦一次：
+//   · 该节点**全部**协议文件 → 多个 --prompt（open / review 各两份：只给首份，覆盖门会点名另一份）；
+//   · 该节点的模板全清单 → --templates（零模板节点省略，省略即空集；漏了会被模板门拦下）；
+//   · 技能按 declarationSkillNames 逐个展开——一条命令只写一个技能标记，故每个必需技能各一条。
+// 没有任何 guarded 必需技能（自定义协议节点 / 只有 handoff 绑定的 subagent-execute）时退回实现
+// 技能：声明要写的是「加载了哪个 skill」，取不到就留占位符，不臆造一个名字。
+export async function nodeSkillLoadCommands({ node, state }) {
+  const flags = [];
+  for (const file of NODE_PROTOCOL_FILES[node.id] ?? []) {
+    flags.push('--prompt', promptPointerPath(file));
+  }
+  const declaration = nodeTemplateDeclaration(node);
+  if (declaration.required.length > 0) {
+    flags.push('--templates', declaration.required.map((name) => name + '.md').join(','));
+  }
+  const protocolArgs = protocolContextArgs();
+  const skills = await declarationSkillNames(node, state);
+  const targets = skills.length > 0 ? skills : [declaredNodeSkill(node) ?? '<skill>'];
+  return targets.map((skill) => ({
+    skill,
+    command: scriptCommand({
+      scriptsDir,
+      runRoot,
+      script: 'workflow-state.mjs',
+      args: ['skill-load', node.id, skill, ...flags, ...protocolArgs],
+    }),
+  }));
 }
 
 // 「补证据」恢复段（单一实现）：两个门禁点打印同一段——缺 Output Schema 字段
@@ -783,17 +821,19 @@ export async function evidenceRecoveryBlock({ node, state, lead = null }) {
       ? ['恢复: ' + recordCommand + retryTail]
       : ['恢复: ' + leadPrefix + '照抄下面的命令补齐它后重试 exit：', '      ' + recordCommand + retryTail];
   }
-  // 声明时该填的技能名不猜（取协议为该节点声明的实现技能，与 LOAD SKILL 行同源）；取不到就让人按
-  // LOAD SKILL 行填写，不臆造一个名字。前置声明命令本身取 skillLoadCommand（同一次声明的模板 +
-  // 提示词两面），与 record 同一份协议参数段。
-  const skillName = declaredNodeSkill(node);
+  // 第一步的命令由协议派生（nodeSkillLoadCommands）：该节点全部协议文件（多个 --prompt）、每个
+  // guarded 必需技能各一条（含该节点的模板全清单）。三面正是出口声明覆盖门与模板门核对的东西
+  // ——旧形态只声明实现技能 + 首份协议、且不带模板清单时，照抄完同一 exit 仍会被拦（恢复步骤自己
+  // 走不通）。单声明节点（只有一个必需技能）因此仍是一条命令，不因派生多出步骤。
+  const declarations = await nodeSkillLoadCommands({ node, state });
+  const placeholder = declarations.some((entry) => entry.skill === '<skill>');
   return [
     '恢复: ' + leadPrefix + '本节点还缺技能加载声明（.skill-loads/' + node.id + '-*.json，'
       + '新 change 下 record 会先被它拦下）'
       + (lead === null ? '——按下面的顺序走完两步后重试 exit：' : '；按下面的顺序走完两步后重试 exit：'),
     '      第一步 声明本节点技能加载'
-      + (skillName === null ? '（技能名按 entry 的 LOAD SKILL 行填，下面用 <skill> 占位）：' : '：'),
-    '      ' + skillLoadCommand(node, skillName, protocolArgs),
+      + (placeholder ? '（技能名按 entry 的 LOAD SKILL 行填，下面用 <skill> 占位）：' : '：'),
+    ...declarations.map((entry) => '      ' + entry.command),
     '      第二步 补证据并重试 exit：',
     '      ' + recordCommand + retryTail,
   ];

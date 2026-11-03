@@ -10,7 +10,6 @@ import { validateStateFields } from '../state-schema.mjs';
 import {
   NODE_PROTOCOL_FILES,
   nodeTemplateDeclaration,
-  promptPointerPath,
   templateKeyFromArtifactName,
   templateKeyOf,
   templatePointerPath,
@@ -35,7 +34,7 @@ import {
   buildSkeleton,
   headingPattern,
 } from './guard-artifact-skeleton.mjs';
-import { applicabilityGatedBinding, frontendCriterion } from './guard-uidesign.mjs';
+import { frontendCriterion } from './guard-uidesign.mjs';
 // 波次段解析与「波次 = 依赖层级的投影」判定（纯判定模块）：plan 出口与 replan 重校段共用同一
 // 判定、同一分级出口（waveReviewOutcome / parallelGapOutcome）——波次散文检测与波次投影判据取用
 // 同一个 waveSectionBody（段体本身由 lib/section-body.mjs 单点切片）。
@@ -62,7 +61,15 @@ import {
 // 存在性消费出口产物门禁的**同一条判据**（guard-routing 的 declaredRequiredArtifacts——枚举 +
 // 路径解析 + 在场判定，预检不另写一份），SUMMARY 关键段来自证据/产物门禁族，骨架判据与 TASK 7
 // 字段来自模板保真门禁族——预检自身不复制段形实现，也不新造一份节点→产物映射。
-import { evidenceRecoveryBlock, runAcCoverageGate, runSummarySectionsGate } from './guard-evidence-gates.mjs';
+// 声明面两道门共用同一份派生（declare 命令 + 该声明哪些技能）：出口覆盖门与缺证据恢复段的命令必须
+// 同集合，否则「照抄报文」会在下一次 exit 上撞上另一套判据。
+import {
+  declarationSkillNames,
+  evidenceRecoveryBlock,
+  nodeSkillLoadCommands,
+  runAcCoverageGate,
+  runSummarySectionsGate,
+} from './guard-evidence-gates.mjs';
 // write_files 条目边界（剥注释 → 行切 → 分号容错切 → trim → 滤空）的唯一实现在 lib/lessons-hits.mjs：
 // 伪并行启发式只是它的一个消费方（另两个是 handoff 的提交子集校验与 task-graph 的路径解析）。
 import { writeFilesEntries } from './lessons-hits.mjs';
@@ -1338,35 +1345,22 @@ export async function runReviewExitGate({ node, state }) {
   } catch {}
 }
 
-// 本节点要求协调者声明的技能（技能名）——requiredSkillCalls 中 enforcement='guarded' 且**非 handoff
-// scope** 的条目：handoff scope（如 subagent-execute 的 flow-comet-dev）由子代理加载，协调者不加载、
-// 也无法诚实声明，与 record 侧「handoff scope 豁免标记」同一口径。
-// 适用性门控绑定（design 的 ui-design）在判据不成立时不要求声明：非前端 change 本就不加载它，
-// 「没声明」不是缺陷（判据成立时的缺声明由证据门与工件门各自点名，本处只补上标记面）。
-async function requiredDeclarationSkills(node, state) {
-  const guarded = (node.requiredSkillCalls ?? []).filter((binding) => binding
-    && binding.enforcement === 'guarded'
-    && binding.scope !== 'handoff'
-    && typeof binding.skill === 'string'
-    && binding.skill !== '');
-  if (guarded.length === 0) return [];
-  if (!guarded.some((binding) => applicabilityGatedBinding(node, binding.skill) !== null)) {
-    return guarded.map((binding) => binding.skill);
-  }
-  const frontend = await frontendCriterion(state.activeChange);
-  return guarded
-    .filter((binding) => applicabilityGatedBinding(node, binding.skill) === null || frontend.applicable === true)
-    .map((binding) => binding.skill);
-}
-
-// 缺声明的恢复句（报文里唯一一处「怎么补」的编排）：补什么由缺项决定，命令形态由
-// promptPointerPath 的单源指针给出——不在这里另写一份 flow-kit/prompts/ 路径。
-function missingDeclarationRecovery({ node, missingFiles }) {
-  const promptFlags = missingFiles.map((file) => '--prompt ' + promptPointerPath(file)).join(' ');
-  return '恢复: 用 workflow-state.mjs skill-load ' + node.id + ' <skill>'
-    + (promptFlags === '' ? '' : ' ' + promptFlags)
-    + ' 补齐上述缺项（一条命令可传多个 --prompt；同一 node-skill 重跑会覆写该标记）后重试 exit '
-    + node.id + '（声明非物理证明，仅证明执行者声明已加载）';
+// 缺声明的恢复句（报文里唯一一处「怎么补」的编排）：补**哪些**由上面的明细决定（逐项点名缺哪份
+// 协议文件、哪个必需技能），而命令本身必须**覆盖本节点的全部必需项**——命令形态与缺证据恢复段的
+// 第一步同源（nodeSkillLoadCommands）：该节点全部协议文件的多个 --prompt、每个 guarded 必需技能
+// 各一条、模板全清单。只补缺项、占位技能名或漏 --templates 的旧形态，照抄后同一 exit 会再被覆盖门
+// 或模板门拦一次（「报文各给一半」的实证形态）。缺技能时只给缺的那几条（已声明的不重复刷），缺的
+// 只是协议文件时把完整命令全给（重跑同一标记 = 覆写，不新增）。
+async function missingDeclarationRecovery({ node, state, missingSkills }) {
+  const derived = await nodeSkillLoadCommands({ node, state });
+  const targeted = missingSkills.length > 0
+    ? derived.filter((entry) => missingSkills.includes(entry.skill))
+    : derived;
+  const commands = (targeted.length > 0 ? targeted : derived).map((entry) => entry.command);
+  return '恢复: 照抄下面的命令补齐上述缺项后重试 exit ' + node.id
+    + '（每个必需技能各一条，每条都带该节点全部 --prompt 与模板全清单；同一 node-skill 重跑会覆写该标记；'
+    + '声明非物理证明，仅证明执行者声明已加载）:\n'
+    + commands.map((command) => '  ' + command).join('\n');
 }
 
 // 节点 exit 协议声明**覆盖**校验——扫描 .specs/<change-id>/.skill-loads/ 下该节点标记（<node>-*.json，
@@ -1385,7 +1379,7 @@ function missingDeclarationRecovery({ node, missingFiles }) {
 export async function runSkillLoadMarkerGate({ node, state }) {
   if (!state.activeChange) return;
   const requiredFiles = NODE_PROTOCOL_FILES[node.id] ?? [];
-  const requiredSkills = await requiredDeclarationSkills(node, state);
+  const requiredSkills = await declarationSkillNames(node, state);
   // 零协议文件且零必需技能：本节点没有声明义务（自定义协议节点没有引擎映射，也没有 guarded 绑定）
   if (requiredFiles.length === 0 && requiredSkills.length === 0) return;
   // 标记目录活动/归档双路径解析（archive 节点「先移目录后 exit」顺序下标记只在归档路径——单查
@@ -1436,7 +1430,7 @@ export async function runSkillLoadMarkerGate({ node, state }) {
     details.push('  - 缺必需技能声明: ' + missingSkills.join('、')
       + '（标记文件 ' + missingSkills.map((skill) => prefix + skill + '.json').join(' / ') + '）');
   }
-  const recovery = missingDeclarationRecovery({ node, missingFiles })
+  const recovery = (await missingDeclarationRecovery({ node, state, missingSkills }))
     + (malformed.length > 0 ? '；不可解析标记: ' + malformed.join(', ') : '');
   const lead = '节点 ' + node.id + ' exit 缺协议声明标记——' + loadsDir.display
     + ' 下的声明未覆盖本节点全部必需项';

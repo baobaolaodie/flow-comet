@@ -187,14 +187,20 @@ node .claude/skills/flow-comet/scripts/context-scan.mjs [--root <项目根>] [--
 2. 随后按该节点 SKILL 的 Required Skill Calls，用 Skill 工具加载协议技能（与 Implementation 同名的条目已随路由加载，无需重复加载），加载完成后**立即**声明「加载了哪个技能、按哪份协议工作」。**一个节点该读的协议常常不止一份**（open 是 `0-change.md` + `1-requirement.md`，review 是 `6-review.md` + `5-test.md`）——**一份命令可以给多个 `--prompt`**，`skill-load` 会把它们**全部**记进同一个标记，不是只留第一个：
 
 ```bash
-# 单份协议（plan）
+# 单份协议（plan）：本节点只有一个必需技能
 node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load plan flow-comet-task --prompt flow-kit/prompts/3-task.md --templates TASK.md
 
 # 多份协议（open）：一条命令两个 --prompt，两份都记进标记
 node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-change --prompt flow-kit/prompts/0-change.md --prompt flow-kit/prompts/1-requirement.md --templates CHANGE.md,REQUIREMENT.md
+
+# 同一节点有两个 guarded 必需技能（open = change + requirement）：**每个必需技能各一条**——
+# 一条命令只写一个技能标记，少一条就少一个技能；每条都带该节点的全部 --prompt 与模板全清单
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-requirement --prompt flow-kit/prompts/0-change.md --prompt flow-kit/prompts/1-requirement.md --templates CHANGE.md,REQUIREMENT.md
 ```
 
 > **分条等价**：按协议文件分几条命令声明，与合并成一条等价——出口判据按节点汇总，只问「该读的这几份是否都被声明过」。
+
+> **一次声明把三个面给全**：该节点该读的**全部**协议文件（多个 `--prompt`）+ 协议要求的**每个** `guarded` 必需技能各一条（一条命令只写一个技能标记）+ 模板**全清单**（`--templates`）。少任一面的命令照抄不过：出口的覆盖判据按节点汇总点名缺哪份协议文件 / 哪个必需技能，模板声明核对再点名漏写的模板。缺声明时报文给出的恢复命令就是这三面齐全的形态——照抄即可，不要自己拆成「只补缺的那一项」。
 
 > **提示词 = 步骤权威、模板 = 段形权威，两者缺一即未完成加载**：`--prompt` 指向的 `flow-kit/prompts/<阶段>.md` 规定这一步**怎么做**（流程步骤、检查项、交接物），`--templates` 指向的 `flow-kit/templates/<DOC>.md` 规定产出**长什么样**（标题、段序、段形）。节点入口先打印 `READ PROMPT:`；**有模板的节点**再打印 `READ TEMPLATE:`（verify / archive 为零模板节点，只打印一行）；**两条 READ 行都要读**。design 的**前端** change 还会多打印一行 `READ PROMPT（条件提示词）: …2a-ui-design.md…`（按 `frontendCriterion` 判定；非前端不打印）。`--prompt` 必须是该节点的协议文件（以入口打印的 `READ PROMPT:` 行为准）；**入口只拦错路径**——逐份核对已写下的声明，落在节点协议面外即 BLOCKED 并点名；**缺失由出口拦**——逐份核对节点协议集，缺哪份逐项点名。两处判据分工不同：既不会静默写成一条与节点无关的声明，也不存在「有一份就过」。
 
