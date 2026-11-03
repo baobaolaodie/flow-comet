@@ -32,7 +32,7 @@
 
 **`BLOCKED: … 的模板声明与节点映射不一致`** —— `--templates` 清单与该节点的模板不一致。报文会点名漏写或多写/错名的项，并给出可直接照抄的重新声明命令：`open` 写 `CHANGE.md,REQUIREMENT.md`，`design` 写 `DESIGN.md`（前端 change 再加 `UI-DESIGN.md`），`plan` 写 `TASK.md`，`execute` / `subagent-execute` 写 `SUMMARY.md`，`review` 写 `REVIEW.md,TEST.md`；`verify` 与 `archive` 没有模板，省略该参数。没有初始化标记的 change（不是本引擎 `init` 新建的）只告警不拒绝。
 
-**`BLOCKED: … exit 缺协议声明标记`** —— 本节点已写下的标记没有覆盖它的全部必需项。报文会逐条列出读不到声明的协议文件、以及缺标记的必需技能（并给出该技能本该写出的标记文件）；缺的技能各自用一条 `skill-load` 补上，协议文件在同一条命令里一起带：`workflow-state.mjs skill-load <节点> <技能> --prompt flow-kit/prompts/<文件> --prompt flow-kit/prompts/<另一个文件>`——一条命令可以带多个 `--prompt`，同名节点与技能重跑会覆写那份标记；然后重试出口。没有初始化标记的 change 只告警不拒绝；根本没有标记目录的 change 会打印 `SKILL-LOAD WARN` 说明该判据已跳过。
+**`BLOCKED: … exit 缺协议声明标记`** —— 本节点已写下的标记没有覆盖它的全部必需项。报文会逐条列出读不到声明的协议文件、以及缺标记的必需技能（并给出该技能本该写出的标记文件），并为每个缺项给出可照抄的声明命令：一条命令带上该节点的**全部**协议文件与该节点的模板清单，例如 `open`：`workflow-state.mjs skill-load open flow-comet-change --prompt flow-kit/prompts/0-change.md --prompt flow-kit/prompts/1-requirement.md --templates CHANGE.md,REQUIREMENT.md`——一条命令可以带多个 `--prompt`，同名节点与技能重跑会覆写那份标记，而 `--templates` 清单正是 `skill-load` 接下来要核对的东西；然后重试出口。没有初始化标记的 change 只告警不拒绝；根本没有标记目录的 change 会打印 `SKILL-LOAD WARN` 说明该判据已跳过。
 
 **`record` 拒绝证据载荷并点名字段与类型** —— 载荷在写入前先校验形状：`summary` 必须是非空字符串，`completedChecks` 必须是字符串数组，`lessonsNomination` 必须是对象且其 `nominated` 是字符串数组、`reasonIfNone` 是字符串。报文的每一行形如 `字段路径: 必须是什么（当前是什么类型）`，例如 `completedChecks[0]: 必须是字符串（当前是 object）`；状态保持原样不被改写，把载荷改对即可重试。引号被 shell 吞掉时，把同一份 JSON 写进文件用 `--json-file <路径>` 传入；在 `cmd.exe` 里用双引号包住载荷，并转义载荷内原有的双引号。
 

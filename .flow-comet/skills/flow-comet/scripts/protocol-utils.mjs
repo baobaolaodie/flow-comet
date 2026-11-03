@@ -538,23 +538,6 @@ export function templatePointerPath(name) {
   return TEMPLATE_ROOT + '/' + normalizeTemplateName(name) + '.md';
 }
 
-// 重新声明的命令指引（skill-load 校验失败与 record 声明核对两处共用）：两处本说的是同一件事
-// 「怎么重新声明」——各拼一份必然分叉（命令形态改一次要改两地方）。零模板节点不拼 --templates
-// （省略即空集，与 C11 的「可省略」一致）；无 skill 名的场景用 <skill> 占位。
-// --prompt 一并拼上：模板与提示词是同一次声明的两面，而 skill-load 重跑会**覆写**同一标记——
-// 只补 --templates 的指引会把 protocol 写成 null，下一次 exit 反被判「缺协议声明标记」（恢复步骤
-// 自己弄坏协议声明）。路径取该节点的首个内置协议文件，与入口的 READ PROMPT 同源；自定义节点没有
-// 内置映射（协议自己也声明提示词路径）→ 不拼，不编造路径也不打占位符。
-export function templateDeclareCommand(declaration, { nodeId, skillName } = {}) {
-  const skill = typeof skillName === 'string' && skillName !== '' ? skillName : '<skill>';
-  const flag = declaration.required.length > 0
-    ? ' --templates ' + declaration.required.map((name) => name + '.md').join(',')
-    : '';
-  const promptFile = (NODE_PROTOCOL_FILES[nodeId] ?? [])[0];
-  const promptFlag = typeof promptFile === 'string' ? ' --prompt ' + promptPointerPath(promptFile) : '';
-  return 'workflow-state.mjs skill-load ' + nodeId + ' ' + skill + flag + promptFlag;
-}
-
 // 指针行（入口与 explain 共用：同一判据一份实现，两处输出措辞一致）。
 // label：内置入口用 `READ TEMPLATE`，现问通道用 `TEMPLATE`；conditional=true 时追出条件模板行。
 export function templatePointerLines(declaration, options = {}) {
@@ -626,4 +609,74 @@ export function promptDeclarationConflict({ node, declaredProtocol } = {}) {
   if (declared === '') return null;
   const expected = [...nodeFiles, ...(NODE_CONDITIONAL_PROMPTS[node?.id] ?? [])];
   return expected.includes(declared) ? null : { declared, expected };
+}
+
+// ---------- 声明命令：参数面的一处装配 ----------
+//
+// 一次 skill-load 声明要携带的东西只有三样：哪个节点的哪个技能、该节点该读的**每一份**协议文件
+// （条件提示词在适用时并入）、以及该节点的模板全清单。这条装配此前散在四处各拼一份——重跑声明的
+// 指引只带首份 --prompt、公开册把占位符写进 --prompt 的值位置（bash 下 `<` 是重定向）、门禁报文
+// 干脆不带 --templates（照抄即撞模板门）。故装配只在这里做，调用方只提供事实（节点、技能），
+// 不再各拼一半。
+//
+// 同步面与异步面的差别只有一处输入：条件提示词（design 的 2a-ui-design.md）是否适用。守卫的
+// nodeSkillLoadCommands 判得了前端，按结论并入；状态命令族与册子拿不到该结论，改为「本次声明的
+// 技能自己承载哪份条件提示词就并入哪份」（ui-design → 2a）——同步面不替一个异步判据下结论。
+// 零模板节点不拼 --templates（省略即空集，与 C11 的「可省略」一致）。
+function declarationPromptFiles({ nodeId, skill, frontend }) {
+  const files = [...(NODE_PROTOCOL_FILES[nodeId] ?? [])];
+  const own = SKILL_PROTOCOL_FILES[skill] ?? [];
+  for (const file of NODE_CONDITIONAL_PROMPTS[nodeId] ?? []) {
+    if (frontend || own.includes(file)) files.push(file);
+  }
+  return files.filter((file, index) => files.indexOf(file) === index);
+}
+
+// 一次声明的参数面（argv 形态，`skill-load` 起头）：脚本路径与协议上下文由调用方追加——它们是
+// 运行面的事实（平台路径 / 本次解析到的协议），不是声明内容。
+export function skillLoadDeclarationArgs({ node, skill, frontend = false } = {}) {
+  const args = ['skill-load', node?.id, skill];
+  for (const file of declarationPromptFiles({ nodeId: node?.id, skill, frontend })) {
+    args.push('--prompt', promptPointerPath(file));
+  }
+  const declaration = nodeTemplateDeclaration(node);
+  if (declaration.required.length > 0) {
+    args.push('--templates', declaration.required.map((name) => name + '.md').join(','));
+  }
+  return args;
+}
+
+// 同一条命令的文本形态（册子与状态命令族的报文用；脚本名不带平台路径——那不属于声明内容）。
+export function skillLoadDeclarationCommand({ node, skill, frontend = false } = {}) {
+  return ['workflow-state.mjs', ...skillLoadDeclarationArgs({ node, skill, frontend })].join(' ');
+}
+
+// 该节点**无条件**要求声明的技能（guarded ∧ 非 handoff）。条件绑定（design 的 ui-design：技能自身
+// 承载的协议文件就是该节点的条件提示词）不在此展开——它是否适用要读 CHANGE.md 判前端，同步面
+// 不替它下结论，缺那一项时由判得了前端的出口指引补。没有 guarded 必需技能时退回实现技能
+// （声明写的是「加载了哪个 skill」，取不到就留占位符，不臆造名字）。
+export function declarationSkillTargets(node) {
+  const skills = (node?.requiredSkillCalls ?? [])
+    .filter((binding) => binding
+      && binding.enforcement === 'guarded'
+      && binding.scope !== 'handoff'
+      && typeof binding.skill === 'string'
+      && binding.skill !== '')
+    .map((binding) => binding.skill)
+    .filter((skill) => !(SKILL_PROTOCOL_FILES[skill] ?? [])
+      .some((file) => (NODE_CONDITIONAL_PROMPTS[node?.id] ?? []).includes(file)));
+  if (skills.length > 0) return skills;
+  const implementation = node?.implementation;
+  const implementationSkill = implementation && typeof implementation === 'object' ? implementation.skill : null;
+  return [typeof implementationSkill === 'string' && implementationSkill.trim() !== ''
+    ? implementationSkill.trim()
+    : '<skill>'];
+}
+
+// 节点的全部声明命令（每个目标技能各一条，命令形态与上面同一装配）——缺声明时的恢复指引取这份。
+export function nodeSkillLoadDeclarations({ node, frontend = false } = {}) {
+  return declarationSkillTargets(node).map((skill) => ({
+    skill,
+    command: skillLoadDeclarationCommand({ node, skill, frontend }),
+  }));
 }

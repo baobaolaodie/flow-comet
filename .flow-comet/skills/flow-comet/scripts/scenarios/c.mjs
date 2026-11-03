@@ -603,6 +603,58 @@ function assertFrontendDesignEvidenceRoundTrip() {
   }
 }
 
+// 入口 --prompt 冲突报文的照抄闭合（同一缺陷的第三面）：某个标记声明了节点协议面之外的路径 → 入口
+// 拦下。旧报文写的是「重跑 skill-load <node> <skill> --prompt <上述协议文件>」——占位符落在 --prompt
+// 的值位置（bash 下 `<` 是重定向，照抄直接语法失败），而且只补首份协议：换成真实路径也只补回一份，
+// 下一次入口仍被同一判据点名另一份。故断言「报文里的命令逐字照抄后，同一条入口的冲突消失」。
+function assertEntryConflictRecoveryRoundTrip() {
+  const root = makeReplayRoot();
+  try {
+    // currentNode = open：入口的归位判据满足；本格只让声明冲突这一道门说话。
+    writeState(root, baseState('open'));
+    writeFile(root, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
+    writeFile(root, 'flow-kit/prompts/1-requirement.md', '# 阶段 1 · REQUIREMENT\n\n## 角色\n\n你是 Requirer。\n');
+    // 声明里混进一份节点协议面之外的路径：入口按逐份核对拦下（第二份协议也被声明过，冲突只在这一份）。
+    writeFile(root, path.posix.join('.specs', CHANGE_ID, '.skill-loads', 'open-flow-comet-change.json'),
+      JSON.stringify({
+        node: 'open',
+        skill: 'flow-comet-change',
+        protocol: '0-change.md',
+        protocols: ['0-change.md', '9-other.md'],
+        templates: ['CHANGE', 'REQUIREMENT'],
+        at: '2026-11-01T00:00:00.000Z',
+      }, null, 2) + '\n');
+    const blocked = runGuard(['entry', 'open'], root);
+    assertExit(blocked, 1);
+    assertOut(blocked, '与节点协议文件不符');
+    // 占位符落在参数值位置 = 照抄不可执行；这是旧报文的形态，必须不再出现。
+    assertNotOut(blocked, '--prompt <');
+    const commands = [...blocked.output.matchAll(/^\s*(node "[^"]+" skill-load [^\n]+)$/gm)].map((match) => match[1]);
+    if (commands.length === 0) {
+      throw new Error('入口冲突报文必须给出可照抄的声明命令（占位词不算命令）:\n' + blocked.output);
+    }
+    const command = commands.find((line) => line.includes(' skill-load open flow-comet-change ')) ?? commands[0];
+    for (const prompt of ['flow-kit/prompts/0-change.md', 'flow-kit/prompts/1-requirement.md']) {
+      if (!command.includes('--prompt ' + prompt)) {
+        throw new Error('入口冲突的重新声明命令缺协议文件 ' + prompt
+          + '（只补首份，下一次入口仍会点名另一份）: ' + command);
+      }
+    }
+    const templateFlag = '--templates CHANGE.md,REQUIREMENT.md';
+    if (!command.includes(templateFlag)) {
+      throw new Error('入口冲突的重新声明命令缺模板全清单 ' + templateFlag
+        + '（漏 --templates 时照抄会先被 skill-load 自己的模板门拦下）: ' + command);
+    }
+    const copyAndRun = printedCommandReplay(root, 'entry');
+    for (const line of commands) copyAndRun(line);
+    const recovered = runGuard(['entry', 'open'], root);
+    assertNotOut(recovered, '与节点协议文件不符');
+    assertOut(recovered, 'ENTRY OK: open');
+  } finally {
+    cleanupTmpDir(root);
+  }
+}
+
 // ---------- 声明命令的册子锚（入口册 + 展开册：open 的两条规范命令） ----------
 //
 // 两册给出 open 的**两条**规范声明命令——每个 guarded 必需技能各一条，每条都带该节点全部 --prompt
@@ -628,6 +680,31 @@ function declarationBookProblems(skillRoot) {
     }
     for (const [label, command] of DECLARATION_BOOK_COMMAND_ANCHORS) {
       if (!text.includes(command)) out.push(rel + ' 缺「' + label + '」的规范命令');
+    }
+  }
+  return out;
+}
+
+// ---------- 排障册的声明命令锚：与入口册同形 ----------
+//
+// 排障册「exit 缺协议声明标记」一条曾给出**手拼的半边命令**：占位符落在 --prompt 的值位置，且不带
+// --templates——新 change 照抄即被 skill-load 自己的模板门拦下（「模板声明缺失」）。判据不在这里再抄
+// 一份命令：排障册必须逐字含入口册的规范声明命令（open 的第一条，本批次的派生形态），两册（中英）
+// 都要有；抽掉即报。命令形态因此只有一个来源，排障册不能自持一份「看起来像命令」的文本。
+const TROUBLESHOOTING_COMMAND_RELS = ['docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md'];
+const TROUBLESHOOTING_DECLARATION_ANCHOR = DECLARATION_BOOK_COMMAND_ANCHORS[0][1];
+
+function troubleshootingDeclarationProblems(texts) {
+  const out = [];
+  for (const rel of TROUBLESHOOTING_COMMAND_RELS) {
+    const text = texts.get(rel);
+    if (typeof text !== 'string') {
+      out.push(rel + ' 不在场（声明命令锚无法核对）');
+      continue;
+    }
+    if (!text.includes(TROUBLESHOOTING_DECLARATION_ANCHOR)) {
+      out.push(rel + ' 缺声明命令「' + TROUBLESHOOTING_DECLARATION_ANCHOR
+        + '」（排障册的声明命令必须与入口册同形：该节点全部 --prompt + 模板全清单）');
     }
   }
   return out;
@@ -1020,6 +1097,8 @@ export const ENTRIES = [
       // ⑩ 前端 design 的证据门照抄闭合（不新增场景条目）：证据缺一条 gated 绑定（ui-design）时，
       //    恢复段必须给全「真实声明 + 带该 required-skill 的 record」两步，照抄后同一 exit 通过。
       assertFrontendDesignEvidenceRoundTrip();
+      // ⑪ 入口 --prompt 冲突报文的照抄闭合（同一缺陷的第三面：报文与门禁判据不是同一份派生）。
+      assertEntryConflictRecoveryRoundTrip();
     },
   },
 
@@ -1128,6 +1207,15 @@ export const ENTRIES = [
         const next = mutate(text);
         return next === text ? null : { ...publicFace, texts: new Map(publicFace.texts).set(rel, next) };
       };
+      // 排障册的声明命令锚：真实断言与反向构造走同一判据实现（抽掉该行 ⇒ 必报）。
+      problems.push(...troubleshootingDeclarationProblems(publicFace.texts));
+      {
+        const stripped = mutated('docs/TROUBLESHOOTING.md',
+          (text) => text.split(TROUBLESHOOTING_DECLARATION_ANCHOR).join('（反向构造：抽掉）'));
+        if (stripped !== null && troubleshootingDeclarationProblems(stripped.texts).length === 0) {
+          throw new Error('反向构造判别力缺失（排障册：抽掉声明命令锚未被判缺）');
+        }
+      }
       // 受检面来自派生（映射 + 根目录扫描）：按 GitHub 惯例放在根目录的公开文件若被漏在受检面之外，
       // 就没有注入点——这里直接判红，不让探针静默跳过。探针必须是**只有根目录扫描能贡献**的文件：
       // 映射已登记的路径（SECURITY.md 就由 security 主题提供）在根目录扫描缺席时仍在面内，取它做

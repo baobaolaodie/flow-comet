@@ -21,6 +21,7 @@ import {
   promptPointerLines,
   promptPointerPath,
   readProtocolFile,
+  skillLoadDeclarationCommand,
   templatePointerLines,
   validateProtocolSchema,
 } from './protocol-utils.mjs';
@@ -84,6 +85,7 @@ import {
   runTransitionEvidenceGate,
 } from './lib/guard-gates.mjs';
 import {
+  nodeSkillLoadCommands,
   runArtifactGate,
   runDirectOverrideGate,
   runEvidenceCompletionGate,
@@ -219,17 +221,35 @@ async function checkPromptDeclarations({ node, state }) {
       continue; // 损坏标记由出口声明门报，不在这里抢报（同一缺陷不写两处措辞）
     }
     if (marker?.auto === true) continue; // 引擎代记的标记不是执行者的声明
+    const skill = typeof marker?.skill === 'string' && marker.skill !== '' ? marker.skill : null;
     // 逐份核对：多 --prompt 的标记里每一份声明都要过同一判据（单值读法会漏掉第二份）
     for (const declaredProtocol of markerProtocolBasenames(marker)) {
       const conflict = promptDeclarationConflict({ node, declaredProtocol });
-      if (conflict) conflicts.push({ name, ...conflict });
+      if (conflict) conflicts.push({ name, skill, ...conflict });
     }
   }
   if (conflicts.length === 0) return;
+  // 重新声明的命令由协议派生（与出口恢复段、状态命令族同一装配）：旧报文写的是
+  // `skill-load <node> <skill> --prompt <上述协议文件>`——占位符落在 --prompt 的值位置（bash 下 `<`
+  // 是重定向，照抄直接语法失败），而且只补首份协议；即便换成真实路径，下一次入口仍会点名另一份。
+  // 技能取该标记自己声明的那个（重跑即覆写同一份标记，不新增）；标记没有技能名时退回该节点的
+  // 必需技能集（一条技能一条命令）。
+  const derived = await nodeSkillLoadCommands({ node, state });
+  const commands = [];
+  for (const conflict of conflicts) {
+    if (conflict.skill === null) {
+      commands.push(...derived.map((entry) => entry.command));
+      continue;
+    }
+    const declared = derived.find((entry) => entry.skill === conflict.skill);
+    commands.push(declared ? declared.command : skillLoadDeclarationCommand({ node, skill: conflict.skill }));
+  }
+  const unique = commands.filter((command, index) => commands.indexOf(command) === index);
   console.error('BLOCKED: 节点 ' + node.id + ' 的 skill-load 声明 --prompt 与节点协议文件不符——'
     + conflicts.map((conflict) => conflict.name + ' 声明 ' + conflict.declared
       + '（应为 ' + conflict.expected.map(promptPointerPath).join(' / ') + '）').join('；')
-    + '；重跑 skill-load ' + node.id + ' <skill> --prompt <上述协议文件> 重新声明后重试');
+    + '；重跑下面的命令重新声明后重试（同一 node-skill 重跑会覆写该标记）：\n'
+    + unique.map((command) => '  ' + command).join('\n'));
   process.exit(1);
 }
 

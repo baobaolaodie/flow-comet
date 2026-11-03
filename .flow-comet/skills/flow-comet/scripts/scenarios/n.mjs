@@ -1944,18 +1944,47 @@ export const ENTRIES = [
       const builtinUndeclared = runGuard(['exit', 'open'], dir);
       assertExit(builtinUndeclared, 1);
       assertOut(builtinUndeclared, 'BLOCKED');
-      // ④ 重新声明指引的提示词面（单一来源的直接判据）：内置节点拼该节点首个协议文件的真实路径
-      // （与入口 READ PROMPT 同源）；自定义节点没有内置映射 → 不拼（不编造路径，也不打占位符）。
-      const { nodeTemplateDeclaration, templateDeclareCommand } = await import('../protocol-utils.mjs');
-      const builtinCommand = templateDeclareCommand(
-        nodeTemplateDeclaration({ id: 'execute' }), { nodeId: 'execute', skillName: 'flow-comet-dev' });
-      assertTrue(builtinCommand === 'workflow-state.mjs skill-load execute flow-comet-dev'
-        + ' --templates SUMMARY.md --prompt flow-kit/prompts/4-dev.md',
-        '内置节点的重新声明命令应带真实提示词路径，实际: ' + builtinCommand);
-      const customCommand = templateDeclareCommand(
-        nodeTemplateDeclaration({ id: 'brainstorm', templates: ['CHANGE'] }), { nodeId: 'brainstorm', skillName: 'fixture-skill' });
+      // ④ 声明命令的形态（单一构造器的直接判据）：内置节点拼该节点**全部**协议文件的真实路径
+      // （与入口 READ PROMPT 同源）与该节点的模板全清单；自定义节点没有内置提示词映射 → 不拼
+      // （不编造路径，也不打占位符）。只带首份协议 / 漏模板清单都是「照抄走不通」的形态，逐条断死。
+      const {
+        declarationSkillTargets,
+        nodeSkillLoadDeclarations,
+        skillLoadDeclarationCommand,
+      } = await import('../protocol-utils.mjs');
+      const executeCommand = skillLoadDeclarationCommand({ node: { id: 'execute' }, skill: 'flow-comet-dev' });
+      assertTrue(executeCommand === 'workflow-state.mjs skill-load execute flow-comet-dev'
+        + ' --prompt flow-kit/prompts/4-dev.md --templates SUMMARY.md',
+        '内置节点的声明命令应带全部协议文件与模板全清单，实际: ' + executeCommand);
+      // open：一条命令带该节点两份协议（旧形态只带首份 0-change.md——照抄后 exit 仍点名 1-requirement.md）
+      const openCommand = skillLoadDeclarationCommand({ node: { id: 'open' }, skill: 'flow-comet-requirement' });
+      assertTrue(openCommand === 'workflow-state.mjs skill-load open flow-comet-requirement'
+        + ' --prompt flow-kit/prompts/0-change.md --prompt flow-kit/prompts/1-requirement.md'
+        + ' --templates CHANGE.md,REQUIREMENT.md',
+        'open 的声明命令应带该节点全部协议文件与模板全清单，实际: ' + openCommand);
+      const customCommand = skillLoadDeclarationCommand({
+        node: { id: 'brainstorm', templates: ['CHANGE'] }, skill: 'fixture-skill' });
       assertTrue(customCommand === 'workflow-state.mjs skill-load brainstorm fixture-skill --templates CHANGE.md',
         '自定义节点无内置提示词映射时不应拼 --prompt，实际: ' + customCommand);
+      // 声明的目标技能：每个 guarded 必需技能各一条（open 两条）；条件绑定（design 的 ui-design）不在
+      // 同步面展开——它是否适用要判前端，展开权归判得了该判据的出口。
+      // 目标集取自协议节点本身（guarded 必需技能是协议面的事实，不是测试里另编的一份）
+      const builtinOpenNode = JSON.parse(fs.readFileSync(
+        path.join(SCRIPTS_DIR, '..', 'reference', 'workflow-protocol.json'), 'utf8')).nodes.find((node) => node.id === 'open');
+      const openDeclarations = nodeSkillLoadDeclarations({ node: builtinOpenNode });
+      assertTrue(openDeclarations.map((entry) => entry.skill).join(',') === 'flow-comet-change,flow-comet-requirement',
+        'open 的声明目标应是两个 guarded 必需技能，实际: ' + openDeclarations.map((entry) => entry.skill).join(','));
+      const designTargets = declarationSkillTargets({
+        id: 'design',
+        implementation: { skill: 'flow-comet-design' },
+        requiredSkillCalls: [
+          { skill: 'flow-comet-design', enforcement: 'guarded', scope: 'main' },
+          { skill: 'flow-comet-ui-design', enforcement: 'guarded', scope: 'main' },
+        ],
+      });
+      assertTrue(designTargets.join(',') === 'flow-comet-design',
+        'design 的同步面声明目标应只含无条件必需技能（ui-design 由判得了前端的出口展开），实际: '
+        + designTargets.join(','));
 
       // ⑤ --preflight 与自定义协议的组合（in-place 扩展）：结构预检的**声明工件**判据必须来自命令行
       // 指定的那份协议。造法 = 内置协议副本 + 给 open 节点追加一件只在这份协议里声明的 file 类产物，

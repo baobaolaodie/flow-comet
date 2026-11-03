@@ -8,8 +8,8 @@ import {
   describeTemplateList,
   findTemplatesArg,
   nodeTemplateDeclaration,
+  skillLoadDeclarationCommand,
   templateDeclarationProblems,
-  templateDeclareCommand,
 } from '../protocol-utils.mjs';
 import { findPromptArgs, protocolUnderFlowKitPrompts } from './state-skillmarkers.mjs';
 
@@ -122,11 +122,14 @@ export async function runSkillLoad(protocol, argv) {
   // WARN（渐进兼容：旧项目不可能一夜补齐声明，缺失由 record 侧统一给提示，不在声明处重复报）。
   // 自定义协议节点：不比对集合（ADR-002 特化层，C12：协议声明什么就记什么）。
   const templateArg = findTemplatesArg(argv.slice(3));
-  const templateDeclaration = nodeTemplateDeclaration((protocol.nodes ?? []).find((item) => item.id === nodeId));
+  const declarationNode = (protocol.nodes ?? []).find((item) => item.id === nodeId);
+  const templateDeclaration = nodeTemplateDeclaration(declarationNode);
   if (templateDeclaration.source === 'builtin') {
     const isNewChange = (await readState()).newChange === true;
     const requiredNames = describeTemplateList(templateDeclaration.required);
-    const declareCommand = templateDeclareCommand(templateDeclaration, { nodeId, skillName });
+    // 重新声明命令由协议派生（protocol-utils 的同一装配）：该节点**全部**协议文件 + 模板全清单。
+    // 此前的形态只带首份 --prompt：照抄后同一 exit 仍被覆盖门点名另一份（报文与判据不是同一份）。
+    const declareCommand = skillLoadDeclarationCommand({ node: declarationNode, skill: skillName });
     const reportUnsoundDeclaration = (reason) => {
       if (isNewChange) {
         console.error('BLOCKED: ' + reason + '——重跑 ' + declareCommand + ' 重新声明后重试');

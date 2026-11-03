@@ -8,7 +8,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { route, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, isSingleSegmentChangeName, EXECUTE_FAMILY_NODE_IDS } from '../route-node.mjs';
 import { taskOpeningAttrs, taskBlocks } from '../task-parsing.mjs';
-import { NODE_PROTOCOL_FILES, SKILL_PROTOCOL_FILES, inspectWorkflowPathSegments } from '../protocol-utils.mjs';
+import {
+  NODE_PROTOCOL_FILES,
+  SKILL_PROTOCOL_FILES,
+  inspectWorkflowPathSegments,
+  nodeSkillLoadDeclarations,
+} from '../protocol-utils.mjs';
 import { evidencePayloadProblems, looksLikeObjectLiteral, toPersistedProtocolPath, writeJsonAtomic } from '../state-schema.mjs';
 import { nowTimestamp } from '../time-utils.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide } from '../context-init.mjs';
@@ -854,16 +859,22 @@ export async function runRecord(protocol, argv) {
   }
   // 技能加载前置门（方案 A）：节点完成记录必须先有本节点
   // skill-load 声明标记——无论 payload 是否含 completedChecks 都校验（堵"先干活后补
-  // 声明"旁路）：缺失 → 新 change BLOCK / 旧 change 渐进 WARN。指引先加载技能并运行
-  // skill-load 再重试。handoff scope 技能（子代理加载）不要求协调者声明（与
-  // verifySkillLoadMarkers 的 scope 豁免一致）——本门按 <node>-*.json 存在性判定，
-  // 与 guard exit 侧协议声明标记校验同构。仅对存在于当前协议的节点生效（协议外节点名
-  // 的记录不适用前置门），无 active change 时无法定位标记而不重复报错（遗留兼容）。
+  // 声明"旁路）：缺失 → 新 change BLOCK / 旧 change 渐进 WARN。指引先加载技能，再照抄派生出的
+  // 声明命令（该节点每个必需技能各一条，全部协议文件 + 模板全清单）后重试。handoff scope 技能
+  // （子代理加载）不要求协调者声明（与 verifySkillLoadMarkers 的 scope 豁免一致）——本门按
+  // <node>-*.json 存在性判定，与 guard exit 侧协议声明标记校验同构。仅对存在于当前协议的节点生效
+  // （协议外节点名的记录不适用前置门），无 active change 时无法定位标记而不重复报错（遗留兼容）。
   const recordNodeDef = (protocol.nodes ?? []).find((n) => n.id === nodeId);
   if (recordNodeDef && markerChange) {
     const declaredForNode = await hasNodeSkillDeclaration(nodeId, markerChange);
     if (!declaredForNode) {
-      const loadGuide = '先加载技能（用 Skill 工具，禁止跳过）并运行 workflow-state.mjs skill-load ' + nodeId + ' <skill> 再重试';
+      // 声明命令由协议派生（该节点每个必需技能各一条，每条都带该节点全部协议文件与模板全清单）：
+      // 旧形态是手拼的 "skill-load <node> <skill>"——位置实参位写占位符在 bash 里是重定向，照抄直接
+      // 语法失败；换成真名也只声明了一个技能、且不带模板清单，record 放行后 exit 还要再拦一次。
+      const loadGuide = '先加载技能（用 Skill 工具，禁止跳过），再照抄下面的命令声明本节点技能加载'
+        + '（同一 node-skill 重跑会覆写该标记）：\n  '
+        + nodeSkillLoadDeclarations({ node: recordNodeDef }).map((entry) => entry.command).join('\n  ')
+        + '\n然后重试 record';
       if (state.newChange === true) {
         console.error('BLOCKED: 节点 ' + nodeId + ' 缺少技能加载声明标记（.skill-loads/' + nodeId + '-*.json）——' + loadGuide);
         process.exit(1);

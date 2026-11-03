@@ -10,8 +10,8 @@ import {
   describeTemplateList,
   nodeTemplateDeclaration,
   normalizeTemplateName,
+  skillLoadDeclarationCommand,
   templateDeclarationProblems,
-  templateDeclareCommand,
   templateKeyOf,
 } from '../protocol-utils.mjs';
 // 声明标记目录的路径规则（活动路径优先、归档路径兜底）由本族的路径上下文模块持有：同一条规则被
@@ -145,7 +145,8 @@ export async function hasNodeSkillDeclaration(nodeId, changeName) {
 //（与 exit 侧协议声明校验的「未激活不追溯」同一口径）。
 // 零模板的内置节点（verify / archive）省略 --templates 即视为空集，通过。
 export async function verifyTemplateDeclaration({ protocol, nodeId, changeName, newChange }) {
-  const declaration = nodeTemplateDeclaration((protocol?.nodes ?? []).find((node) => node.id === nodeId));
+  const declarationNode = (protocol?.nodes ?? []).find((node) => node.id === nodeId);
+  const declaration = nodeTemplateDeclaration(declarationNode);
   if (declaration.source !== 'builtin' || !changeName) return { ok: true };
   const loadsDir = await findSkillLoadsDir(changeName);
   if (loadsDir === null) return { ok: true };
@@ -154,6 +155,9 @@ export async function verifyTemplateDeclaration({ protocol, nodeId, changeName, 
     .filter((name) => name.startsWith(prefix) && name.endsWith('.json'));
   if (markers.length === 0) return { ok: true };
   const declared = [];
+  // 执行者写过声明的技能（按技能去重保序——一个 node-skill 只有一个标记文件）：重新声明命令按
+  // **同一批技能**派发——拿节点级目标集重发会顺手覆写别人没提的那几条，只给一个占位符又等于没给命令。
+  const declaredSkills = [];
   let explicitMarkers = 0;
   for (const markerName of markers) {
     let marker;
@@ -166,6 +170,10 @@ export async function verifyTemplateDeclaration({ protocol, nodeId, changeName, 
     // （exit 侧已有「建议手动 skill-load」提示），不拿它算缺失
     if (marker?.auto === true) continue;
     explicitMarkers += 1;
+    // 技能名取**标记文件名**（<node>-<skill>.json 是这份标记的身份，扫描与覆盖判据也按它认）：
+    // marker.skill 可能被手改成别的值，文件名才是这条命令要覆写的那一份。
+    const markerSkill = markerName.slice(prefix.length, markerName.length - '.json'.length);
+    if (markerSkill !== '' && !declaredSkills.includes(markerSkill)) declaredSkills.push(markerSkill);
     if (!Array.isArray(marker?.templates)) continue; // 旧标记无该字段 = 未声明
     for (const name of marker.templates) {
       if (typeof name !== 'string' || name.trim() === '') continue;
@@ -181,9 +189,14 @@ export async function verifyTemplateDeclaration({ protocol, nodeId, changeName, 
   const detail = [];
   if (problems.missing.length > 0) detail.push('漏写: ' + problems.missing.join('、'));
   if (problems.extra.length > 0) detail.push('多写/错名: ' + problems.extra.join('、'));
-  const declareCommand = templateDeclareCommand(declaration, { nodeId });
+  // 重新声明命令与恢复段同一装配（该节点全部协议文件 + 模板全清单）：只补 --templates 的旧形态会把
+  // protocol 写成 null，下一次 exit 反被判「缺协议声明标记」（恢复步骤自己弄坏协议声明）。
+  const declareCommands = declaredSkills
+    .map((skill) => skillLoadDeclarationCommand({ node: declarationNode, skill }));
   const reason = '节点 ' + nodeId + ' 的模板声明与节点映射不一致（' + detail.join('；')
-    + '；映射要求: ' + describeTemplateList(declaration.required) + '）——重跑 ' + declareCommand + ' 重新声明';
+    + '；映射要求: ' + describeTemplateList(declaration.required) + '）——重跑下面的命令重新声明'
+    + '（同一 node-skill 重跑会覆写该标记）:\n'
+    + declareCommands.map((command) => '  ' + command).join('\n');
   if (newChange === true) return { ok: false, reason };
   return { ok: true, warn: reason };
 }
@@ -255,10 +268,16 @@ export async function verifySkillLoadMarkers(completedChecks, changeName, record
       }
     }
     if (!markerPath) {
+      // 声明命令由协议派生（该条目所指节点的全部协议文件 + 模板全清单）：只给 "skill-load <node> <skill>"
+      // 的旧形态照抄后会被模板声明门 / 出口覆盖门逐个拦下——报文给出的东西必须一次补齐。
+      // 协议外节点（旧证据里出现过、当前协议已删）取不到节点声明：仍按条目里的节点名给命令，
+      // 不拼引擎映射（没有映射就没有 --prompt / --templates 可拼——不编造）。
+      const declaredNode = (protocol?.nodes ?? []).find((node) => node.id === item.node) ?? { id: item.node };
       return {
         ok: false,
         reason: 'completedChecks 条目 ' + item.raw + ' 缺少对应声明标记 ' + activeDisplay +
-          '（归档路径也未找到）——先加载该 skill 并运行 workflow-state.mjs skill-load ' + item.node + ' ' + item.skill,
+          '（归档路径也未找到）——先加载该 skill 并照抄下面的命令声明已加载:\n  '
+          + skillLoadDeclarationCommand({ node: declaredNode, skill: item.skill }),
       };
     }
     let marker;

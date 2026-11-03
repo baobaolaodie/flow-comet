@@ -42,7 +42,8 @@ const RAW_ENTRIES = [
       assertOut(extra, 'BLOCKED');
       assertOut(extra, '多写/错名: TASK');
       assertOut(extra, '映射要求: DESIGN');
-      assertOut(extra, 'workflow-state.mjs skill-load design flow-comet-design --templates DESIGN.md --prompt flow-kit/prompts/2-design.md');
+      // 命令形态与守卫侧的派生同形：先该节点全部 --prompt，再模板全清单（同一装配，两处不得各拼一份顺序）。
+      assertOut(extra, 'workflow-state.mjs skill-load design flow-comet-design --prompt flow-kit/prompts/2-design.md --templates DESIGN.md');
       assertNotOut(extra, '--prompt <');
       const declareLine = extra.output.split(/\r?\n/).find((line) => line.includes('workflow-state.mjs skill-load design')) ?? '';
       assertTrue(declareLine !== '', 'BLOCKED 报文应给出可照抄的重新声明命令');
