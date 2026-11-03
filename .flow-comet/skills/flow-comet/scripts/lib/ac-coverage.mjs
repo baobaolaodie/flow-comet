@@ -4,14 +4,23 @@
 // （AC → 用例）」段是这些准则的用例映射（测试阶段派生用例的唯一来源）。覆盖判定 = 每条 AC 编号都在
 // 1.1 段文本里出现过（存在级：只保证「写了」，不保证「测得对」——后者属内容语义，由 review 的人看）。
 //
-// 段名不在这里写死（模板权威单链，L-067）：两个段的正则都从骨架模块派生——
-//   · 验收段：骨架的 H2 段名表里按关键词选段（与 open 出口的命名段选取同一惯用法），不自写
-//     「## 验收准则」一类正则；
-//   · 1.1 矩阵段：骨架的结构子段（登记名「1.1 测试矩阵（AC → 用例）」）给出的 headingPattern——
+// 段名不在这里写死（模板权威单链，L-067）：三个段的定位全部走 guard-routing 的选段入口
+// （templateSectionPatterns().pick 与同一份选段规则的另一入口 pickTemplateSection）——本模块不再自己遍历
+// 骨架段名表找关键词：
+//   · 验收段：'requirement' 的 H2 段名里选段，与 **open 出口的验收段判据同一调用**（同一关键词、
+//     同一回退基准），因此「入口说缺段 / verify 说未校验」这类两处两判不再可能发生；
+//   · 第 1 轮段：'TEST' 的 H2 段名里按关键词选段——它是 1.1 矩阵的**承载段**（见下方二分）；
+//   · 1.1 矩阵段：'TEST' 的结构子段（登记名「1.1 测试矩阵（AC → 用例）」）给出的 headingPattern——
 //     编号前缀 / 尾部括号可选、大小写不敏感，因此「### 测试矩阵」这类省编号写法同样命中，
 //     而换成无关标题不会命中（不是标题巧合）。
-// 骨架不可派生（模板整份缺席）⇒ 段无从定位 ⇒ 返回不可判：调用方打印「未校验」，既不判红，也不把
-// 「判不了」冒充成「全覆盖」。
+//
+// 「判不了」按成因二分（与波次判据同口径）：
+//   · **载体缺席**——REQUIREMENT.md / TEST.md 不在、模板整份缺席（段名无从派生）、承载段不在
+//     （REQUIREMENT 无验收准则段 / TEST.md 无第 1 轮段）⇒ 判据没有可判对象，调用方打印「未校验」
+//     并放行，不改退出码；
+//   · **工件内容不可判**——承载段在场而清单读不出（验收段里没有任何 AC-N 编号；第 1 轮段里没有
+//     1.1 矩阵段，即「整段 N/A」）⇒ 不是「判过且通过」，调用方按既有分级：新 change BLOCKED /
+//     旧 change WARN（WARN 行进入既有 WARN COUNT）。
 //
 // 词法：AC-<数字>，大小写不敏感；AC-1a 归并到 AC-1（后缀不参与编号），AC-01 与 AC-1 归一为同一编号；
 // 同一行多个编号全部收集；编号按 REQUIREMENT 里的出现顺序（首见）去重——报告顺序因此与台账顺序
@@ -21,13 +30,27 @@
 // 报文文本，console / exit 只在门禁层（与「纯判定 + 门禁编排」的既有分层一致）。
 import { promises as fs } from 'fs';
 import path from 'path';
-import { buildSkeleton } from './guard-artifact-skeleton.mjs';
+import {
+  TEMPLATE_FALLBACK_SECTION_PATTERNS,
+  TEMPLATE_SECTION_SKIP,
+  pickTemplateSection,
+  templateSectionPatterns,
+  templateSectionPattern,
+} from './guard-routing.mjs';
 
-// 验收段的关键词（与骨架模块登记的回退段名同一词汇：验收准则 / 验收标准 / AC / Acceptance Criteria）。
-// 只用于在骨架给出的**模板段名**里选段——选的仍是模板段名与它的派生正则，不是自造段名。
-const ACCEPTANCE_SECTION_KEYWORDS = ['验收', 'AC', 'Acceptance'];
-// 1.1 矩阵段在骨架结构子段里的识别词（登记名归一后仍是「测试矩阵」）。
-const TEST_MATRIX_SECTION_KEYWORD = '测试矩阵';
+// 验收段的关键词：与 open 出口的验收段判据**同一个列表**（'验收'）。此处刻意不把 AC / Acceptance
+// 加进来——它们已由回退基准（TEMPLATE_FALLBACK_SECTION_PATTERNS.requirementAcceptance）覆盖，
+// 而多加一个关键词会让入口与 verify 出口对同一份模板选出不同的段。
+const ACCEPTANCE_SECTION_KEYWORDS = ['验收'];
+// 第 1 轮段与 1.1 矩阵段的关键词（前者是后者的承载段，两者都从模板派生）。
+const TEST_ROUND_SECTION_KEYWORDS = ['第 1 轮'];
+const TEST_MATRIX_SECTION_KEYWORDS = ['测试矩阵'];
+// 关键词全不命中时的回退基准（模板在场却把段名换成了别的说法——上游改标题措辞是常见形态）。
+// 1.1 矩阵的回退取段名派生（headingPattern：编号前缀 / 尾部括号可选），不另写标题正则；第 1 轮段的
+// 落地标题带分隔符与子标题（「第 1 轮 · 功能测试」/「第 1 轮：功能测试」写法不一），故按段名前缀
+// 锚定行首——与 TEMPLATE_FALLBACK_SECTION_PATTERNS 里的同类回退同一形态（部分匹配而非整名匹配）。
+const TEST_ROUND_FALLBACK_PATTERN = /^##\s*第\s*1\s*轮/mu;
+const TEST_MATRIX_FALLBACK_PATTERN = templateSectionPattern('测试矩阵', 3);
 // AC 编号词法：只认 AC-<数字>；后缀（如 AC-1a 的 a）不参与编号，前导零同样归一到数字值。
 const AC_TOKEN_RE = /AC-(\d+)/giu;
 
@@ -67,22 +90,31 @@ function sectionBody(text, pattern, level) {
   return body.join('\n');
 }
 
-// 验收段的正则：模板段名表里按关键词选段；模板不可派生 → null（不可判）。
+// 三个段的正则全部经 guard-routing 的选段入口派生（返回值可能是 TEMPLATE_SECTION_SKIP：模板整份
+// 缺席 ⇒ 该段名无从派生 ⇒ 调用方按「载体缺席」打印未校验，而不是拿一个猜的段名去判）。
+// 验收段走 templateSectionPatterns().pick——与 open 出口的验收段判据同一调用形态；TEST 的两个段走
+// pickTemplateSection（pick 的键只覆盖四个 H2 模板，TEST 与结构子段不在其内，选段规则仍是同一份
+// pickByKeywords）。
 async function acceptanceSectionPattern() {
-  const skeleton = await buildSkeleton('REQUIREMENT');
-  if (!skeleton.derived) return null;
-  const section = skeleton.sections
-    .find((entry) => ACCEPTANCE_SECTION_KEYWORDS.some((keyword) => entry.name.includes(keyword)));
-  return section === undefined ? null : section.pattern;
+  const patterns = await templateSectionPatterns();
+  return patterns.pick(
+    'requirement', ACCEPTANCE_SECTION_KEYWORDS, TEMPLATE_FALLBACK_SECTION_PATTERNS.requirementAcceptance);
 }
 
-// 1.1 矩阵段的正则：骨架结构子段的登记名 → headingPattern（宽窄写法同一实现）；不可判 → null。
-async function testMatrixSectionPattern() {
-  const skeleton = await buildSkeleton('TEST');
-  if (!skeleton.derived) return null;
-  const subsection = (skeleton.structureSubsections ?? [])
-    .find((entry) => entry.norm.includes(TEST_MATRIX_SECTION_KEYWORD));
-  return subsection === undefined ? null : subsection.pattern;
+function testRoundSectionPattern() {
+  return pickTemplateSection('TEST', {
+    keywords: TEST_ROUND_SECTION_KEYWORDS,
+    fallback: TEST_ROUND_FALLBACK_PATTERN,
+    level: 2,
+  });
+}
+
+function testMatrixSectionPattern() {
+  return pickTemplateSection('TEST', {
+    keywords: TEST_MATRIX_SECTION_KEYWORDS,
+    fallback: TEST_MATRIX_FALLBACK_PATTERN,
+    level: 3,
+  });
 }
 
 // 段文本 → AC 编号（规范形态 AC-<n>，按首见顺序去重）。
@@ -98,16 +130,35 @@ export function parseAcIds(body) {
   return ids;
 }
 
-// 「判不了」的唯一形态：reason 是机器可读的短句，notice 是给人读的一行。两种调用方（verify 出口 /
-// review 出口）打印同一份 notice——同一事实两处措辞必然先漂移。
+// 「载体缺席」这一支的每种成因各有一份解释，notice 由它派生（reason 是机器可读的短句）——两种调用方
+// （verify 出口 / review 出口）打印同一份文本，同一事实两处措辞必然先漂移。
 const UNVERIFIED_EXPLANATIONS = {
   'REQUIREMENT 缺席': '该 change 没有 REQUIREMENT.md，验收准则无从读取',
-  'REQUIREMENT 无 AC 编号': '验收准则段内没有任何 AC-N 编号（没有编号就没有可对账的清单）',
+  'REQUIREMENT 无验收准则段': 'REQUIREMENT.md 在场，但段名（模板派生 + 回退基准）都定位不到验收准则段',
   '模板缺席（段名无从派生）': '模板不可派生，验收段 / 1.1 矩阵段的段名无从定位',
   'TEST.md 缺席': '该 change 尚无 TEST.md，1.1 测试矩阵无从读取',
-  'TEST.md 无 1.1 测试矩阵段': 'TEST.md 在场但缺 1.1 测试矩阵段（登记名「1.1 测试矩阵（AC → 用例）」）',
+  'TEST.md 无第 1 轮段': 'TEST.md 在场，但段名定位不到 1.1 测试矩阵的承载段（第 1 轮 · 功能测试）',
 };
 
+// 「工件内容不可判」的两种成因：承载段在场、清单读不出。每条成因自带**解释 + 恢复出路**（同一件事的
+// 两半写在一处：只有解释没有出路，人只能猜下一步；只有出路没有解释，人不知道该改哪一环）。恢复指引
+// 必须能照做——第一支的出路是给编号，第二支的出路是在第 1 轮里补矩阵段（「把 N/A 改成通过」不是
+// 出路：没有矩阵就仍无从对账）。
+const UNJUDGEABLE_CAUSES = {
+  'REQUIREMENT 无 AC 编号': {
+    explanation: 'REQUIREMENT.md 有验收准则段却没有 AC-N 编号——没有编号就没有可对账的清单',
+    recovery: '给验收准则的每条准则编号（形如 AC-1、AC-2 …，编号写在标题或列表项里均可），编号后重试 exit verify',
+  },
+  'TEST.md 第 1 轮无 1.1 测试矩阵段': {
+    explanation: 'TEST.md 的第 1 轮段在场，但段内没有 1.1 测试矩阵段（整段写 N/A 就是这一形态）'
+      + '——AC 与用例的映射读不出来',
+    recovery: '在 TEST.md 的第 1 轮内补 1.1 测试矩阵段（每条 AC 一行：| AC-N | 类型 | 用例文件 / UAT | 状态 |），'
+      + '补完重试 exit verify；整段写 N/A 不构成测试矩阵',
+  },
+};
+
+// 判不了时返回的判定结果形态：两个成因字段互斥，调用方按「载体缺席 → 未校验放行」/「内容不可判 →
+// 按 change 新旧分级」两支处置。
 function unverifiable(reason) {
   const explanation = UNVERIFIED_EXPLANATIONS[reason] ?? reason;
   return {
@@ -117,31 +168,52 @@ function unverifiable(reason) {
       reason,
       notice: '未校验（' + reason + '）——' + explanation + '；AC 覆盖判据跳过（未验证 ≠ 通过）',
     },
+    unjudgeable: null,
   };
 }
 
-// 判定：返回 { acIds, missing, unverified }。
+// 不可判的成因与文本在同一处产出（判定结果自带解释与恢复出路）：调用方只打印，不再按 reason 去查
+// 第二张表——两张按同一个 key 索引的表只要有人漏改一张，报文就会一半新一半旧。
+function unjudgeable(reason) {
+  const cause = UNJUDGEABLE_CAUSES[reason] ?? {
+    explanation: reason,
+    recovery: '按模板补齐该段后重试 exit verify',
+  };
+  return {
+    acIds: [],
+    missing: [],
+    unverified: null,
+    unjudgeable: { reason, explanation: cause.explanation, recovery: cause.recovery },
+  };
+}
+
+// 判定：返回 { acIds, missing, unverified, unjudgeable }。
 //   · acIds    = REQUIREMENT 验收段内的编号（有序去重）；
 //   · missing  = 这些编号里未出现在 1.1 矩阵段文本中的（同样按 REQUIREMENT 顺序）；
-//   · unverified = null 表示判据真的判过；非 null 表示判不了（附人读 notice，调用方按「未校验」打印）。
-// 顺序固定：先判「有没有编号」（没有编号就没有可对账的清单），再判「矩阵能不能读」——两个「未校验」
+//   · unverified / unjudgeable = 非 null 表示没判成：前者是载体缺席（放行），后者是工件内容不可判
+//     （按 change 新旧分级）；两者都为 null 才表示判据真的判过。
+// 顺序固定：先判「有没有编号」（没有编号就没有可对账的清单），再判「矩阵能不能读」——两级「判不了」
 // 因此不会互相遮蔽，报文说的是真正卡住的那一环。
 export async function acCoverageReview(changeDir) {
   const requirementText = await readText(path.join(changeDir, 'REQUIREMENT.md'));
   if (requirementText === null) return unverifiable('REQUIREMENT 缺席');
   const acceptancePattern = await acceptanceSectionPattern();
-  if (acceptancePattern === null) return unverifiable('模板缺席（段名无从派生）');
+  if (acceptancePattern === TEMPLATE_SECTION_SKIP) return unverifiable('模板缺席（段名无从派生）');
   const acceptanceBody = sectionBody(requirementText, acceptancePattern, 2);
-  const acIds = acceptanceBody === null ? [] : parseAcIds(acceptanceBody);
-  if (acIds.length === 0) return unverifiable('REQUIREMENT 无 AC 编号');
+  if (acceptanceBody === null) return unverifiable('REQUIREMENT 无验收准则段');
+  const acIds = parseAcIds(acceptanceBody);
+  if (acIds.length === 0) return unjudgeable('REQUIREMENT 无 AC 编号');
   const testText = await readText(path.join(changeDir, 'TEST.md'));
   if (testText === null) return unverifiable('TEST.md 缺席');
+  const roundPattern = await testRoundSectionPattern();
+  if (roundPattern === TEMPLATE_SECTION_SKIP) return unverifiable('模板缺席（段名无从派生）');
+  if (sectionBody(testText, roundPattern, 2) === null) return unverifiable('TEST.md 无第 1 轮段');
   const matrixPattern = await testMatrixSectionPattern();
-  if (matrixPattern === null) return unverifiable('模板缺席（段名无从派生）');
+  if (matrixPattern === TEMPLATE_SECTION_SKIP) return unverifiable('模板缺席（段名无从派生）');
   const matrixBody = sectionBody(testText, matrixPattern, 3);
-  if (matrixBody === null) return unverifiable('TEST.md 无 1.1 测试矩阵段');
+  if (matrixBody === null) return unjudgeable('TEST.md 第 1 轮无 1.1 测试矩阵段');
   const covered = new Set(parseAcIds(matrixBody));
-  return { acIds, missing: acIds.filter((id) => !covered.has(id)), unverified: null };
+  return { acIds, missing: acIds.filter((id) => !covered.has(id)), unverified: null, unjudgeable: null };
 }
 
 // verify 出口的报文（BLOCKED / WARN 同一文本，只换分级前缀与末尾的分级说明）：首行点名缺失编号，
@@ -156,6 +228,21 @@ export function acCoverageReportLines({ coverage, level = 'BLOCKED' }) {
       + (blocking ? '' : '（旧 change 渐进不阻断）'),
     '恢复: 在 TEST.md 的 1.1 测试矩阵为这些 AC 补行（每条一行：| ' + (coverage.missing[0] ?? 'AC-N')
       + ' | 类型 | 用例文件 / UAT | 状态 |），补完重试 exit verify',
+  ];
+}
+
+// 「工件内容不可判」的报文（verify 出口 BLOCKED / 旧 change WARN 同一文本，只换分级前缀与末尾的
+// 分级说明——与波次判据同形）：首行点名是哪一环读不出来，第二行给能照做的恢复出路。WARN 前缀让该行
+// 进入既有 WARN COUNT（「该写的没写」不再静默为「未校验」）。
+export function acCoverageUnjudgeableLines({ coverage, level = 'BLOCKED' }) {
+  const blocking = level === 'BLOCKED';
+  const { explanation, recovery } = coverage.unjudgeable;
+  return [
+    (blocking ? 'BLOCKED: ' : 'WARN: ')
+      + 'AC 覆盖判据无法执行——' + explanation
+      + (blocking ? '' : '（旧 change 渐进不阻断）')
+      + '：判据没有可对账的清单（未验证 ≠ 通过）',
+    '恢复: ' + recovery,
   ];
 }
 

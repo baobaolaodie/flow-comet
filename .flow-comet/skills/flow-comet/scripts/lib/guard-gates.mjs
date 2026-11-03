@@ -61,6 +61,9 @@ import {
 // 路径解析 + 在场判定，预检不另写一份），SUMMARY 关键段来自证据/产物门禁族，骨架判据与 TASK 7
 // 字段来自模板保真门禁族——预检自身不复制段形实现，也不新造一份节点→产物映射。
 import { evidenceRecoveryBlock, runAcCoverageGate, runSummarySectionsGate } from './guard-evidence-gates.mjs';
+// write_files 条目边界（剥注释 → 行切 → 分号容错切 → trim → 滤空）的唯一实现在 lib/lessons-hits.mjs：
+// 伪并行启发式只是它的一个消费方（另两个是 handoff 的提交子集校验与 task-graph 的路径解析）。
+import { writeFilesEntries } from './lessons-hits.mjs';
 import { evaluateArtifact, formatIssueParts, runTaskSevenFieldGate } from './guard-template-fidelity.mjs';
 // 协调者禁令的常量落在中立模块（跨族共用的措辞不进任何一族）：本模块只是取用方，状态命令族同理。
 import { COORDINATOR_NOTICE } from './state-explain.mjs';
@@ -1181,12 +1184,10 @@ export async function runPlanExitGate({ node, state }) {
       if (!attrs || !attrs.parallel || attrs.status !== 'pending') continue;
       const wfMatch = block.match(/<write_files>([\s\S]*?)<\/write_files>/);
       if (!wfMatch) continue;
-      // 分号容错：与 workflow-handoff.mjs 自动解析同源实现（分号容错双点内联，与 workflow-handoff.mjs
-      // 同源互锚）——换行切分后逐段按 ';' 二次切分、trim、滤空与 HTML 注释行（路径含分号的极端形态
-      // 不支持，须换行书写）
-      const blockContent = wfMatch[1].replace(/<!--[\s\S]*?-->/g, '');
-      const filePaths = blockContent.trim().split(/\s*\n\s*/).map(l => l.trim()).filter(Boolean)
-        .flatMap(l => l.split(';')).map(l => l.trim()).filter(Boolean);
+      // 条目边界取 writeFilesEntries（lib/lessons-hits.mjs 的唯一实现）——与 workflow-handoff 的写面
+      // 解析、task-graph 的路径解析是同一份切分，本处不再内联「剥注释 + 行切 + 分号切」的副本
+      // （三份副本各自自洽时，同一份写面会在不同门禁里被切成不同条目集）。
+      const filePaths = writeFilesEntries(wfMatch[1]);
       if (filePaths.length === 0) continue;
       const prodFiles = filePaths.filter(f => !/(?:^|[\/\\])(?:__tests__\/|test_|tests?\/)|\.(?:test|spec)\.(?:mjs|js|jsx|ts|tsx|cjs)$/.test(f));
       if (prodFiles.length === 0) {

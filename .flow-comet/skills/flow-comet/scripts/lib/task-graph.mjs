@@ -10,6 +10,9 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
 import { taskBlocks, taskOpeningAttrs } from '../task-parsing.mjs';
+// 条目边界（剥注释 → 行切 → 分号容错切 → trim → 滤空）取 lib/lessons-hits.mjs 的唯一实现：本模块
+// 只剩「路径归一」这一层自己的语义（见 normalizeTaskPath），不再自带第二份切分。
+import { writeFilesEntries } from './lessons-hits.mjs';
 
 // 任务块 7 字段集合（单一权威）：plan 出口的 TASK 完整性门禁与执行期 `replan` 的重签判据共用本常量。
 // `replan` 是执行期唯一允许修订任务集的通道，两侧判据必须同源——任何一侧另写一份字面集合，都会在
@@ -352,14 +355,13 @@ function normalizeTaskPath(raw) {
   return out.join('/');
 }
 
-// 路径解析与既有自动解析同源：剥 HTML 注释 → 换行切分 → 分号二次切分 → trim → 滤空 → 归一。
+// 路径解析：条目边界取 writeFilesEntries（lib/lessons-hits.mjs 的唯一实现，与 handoff 的提交子集
+// 校验、plan 出口的伪并行启发式同一份——同一份写面在三处被切成不同条目集时，「谁越界」「哪一对
+// 并行任务重叠」会互相矛盾）；本函数只在条目之上叠加本模块自己的归一（normalizeTaskPath）。
 // 按声明实际内容解析，不做扩展名白名单过滤——txt/log/无扩展名路径同等检出（链式重命名的 .txt
 // 事故面闭合）。族①②③共用本实现，不另起第二份。
 function parsePaths(matchText) {
-  return String(matchText ?? '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .trim().split(/\s*\n\s*/).map((l) => l.trim()).filter(Boolean)
-    .flatMap((l) => l.split(';')).map((l) => l.trim()).filter(Boolean)
+  return writeFilesEntries(matchText)
     .map(normalizeTaskPath)
     .filter((p) => p !== null && p !== '');
 }

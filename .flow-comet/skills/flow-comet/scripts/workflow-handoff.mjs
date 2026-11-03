@@ -24,7 +24,16 @@ import { hasNodeSkillDeclaration } from './lib/state-skillmarkers.mjs';
 // 「先跑哪个出口」的判定（L-058 路由单一权威 / L-067 同一推导两处表达）。
 import { resolveNodeView, structuralPreflightHint } from './lib/state-commands-flow.mjs';
 // 开工前的 LESSONS 命中集：与出口门禁同一份命中算法（路径词元 × 条目关键词），本文件不复制一份。
-import { LESSONS_HIT_LIMIT, lessonsEntries, lessonsHits, lessonsPathTokens, taskWriteFilesById } from './lib/lessons-hits.mjs';
+// writeFilesEntries = write_files 条目边界的唯一实现（request 侧解析写面 / result 侧的写面分叉诊断 /
+// 提交子集校验的允许列表都取它）：本文件不再自带第二份「剥注释 + 行切 + 分号切」的副本。
+import {
+  LESSONS_HIT_LIMIT,
+  lessonsEntries,
+  lessonsHits,
+  lessonsPathTokens,
+  taskWriteFilesById,
+  writeFilesEntries,
+} from './lib/lessons-hits.mjs';
 
 // workflow-handoff.mjs: Record subagent handoff evidence
 // evidence 统一记录在 subagent-execute 名下作为委托证据库——execute（串行委托）与 subagent-execute（并行委托）共用。不改成节点参数，保持最小改动。
@@ -112,14 +121,6 @@ function matchWriteFilePattern(file, pattern) {
     if (!seg.test(fp[i])) return false;
   }
   return true;
-}
-
-// write_files 元素原文 → 条目列表（剥块内注释 → 按行切 → 分号容错 → 去空）：request 侧解析写面与
-// result 侧的重合诊断共用这一份切分——两处各写一份的话，同一份写面会被切成不同条目集，诊断随之
-// 在写面其实没变时误报（或被漏报）。
-function writeFilesEntries(elementText) {
-  return String(elementText ?? '').replace(/<!--[\s\S]*?-->/g, '').trim().split(/\s*\n\s*/).map((f) => f.trim()).filter(Boolean)
-    .flatMap((f) => f.split(';')).map((f) => f.trim()).filter(Boolean);
 }
 
 // ---------- F-6 零提交资格（DESIGN 决策 7 · fail-closed） ----------
@@ -504,21 +505,22 @@ async function reportLessonHits(taskContent, taskId) {
   console.log('  —— 这些条目须在 SUMMARY 的 `## LESSONS 扫描` 段逐条回应（仍适用 / 差异是…）');
 }
 
-// ---------- 越界报文的成因诊断（委托记录早于最近一次 replan） ----------
-// 提交子集校验的允许列表是**发起委托那一刻的写面快照**（request.writeFiles）。计划经 replan 改写面后，
-// 快照仍按原样比对，于是「计划已变更」在报文里显示成「执行者写错了文件」——而报文自带的恢复指引
-// （回退越界文件）会把 replan 之后已经合法的改动退掉。本函数只回答「这份快照与当前 TASK.md 里该任务
-// 的写面是否已经分叉」，越界清单与 BLOCK/WARN 分级仍由调用处按原样给出（不改判定）。
+// ---------- 越界报文的事实陈述（委托快照与当前写面是否一致） ----------
+// 提交子集校验的允许列表是**发起委托那一刻的写面快照**（request.writeFiles），而 TASK.md 的写面
+// 可以被 replan 改写。本函数只回答一个**可观测事实**：这份快照与当前 TASK.md 里该任务的写面是否
+// 已经分叉。它不判断分叉的成因——「记录早于 replan」只是分叉的**可能**成因之一（显式 --write-files
+// 与 TASK.md 分叉、TASK.md 被手工改写都同样命中），把可能写成断言会让人照着一句不成立的前提去动
+// 计划工件。越界清单与 BLOCK/WARN 分级仍由调用处按原样给出（本函数不改判定）。
 // 判不出时返回 false：TASK.md 缺失、无该任务块、或块内无 <write_files> 元素都属「无据可判」——把
-// 无据可判当成「已变更」会凭空给出一句错误成因。请求侧显式 --write-files 与 TASK.md 分叉同样命中本
-// 诊断：两者都意味着「快照与当前计划不一致」，而 replan 是这一形态的常见成因（本判据不为它另造分支）。
+// 无据可判当成「已变更」同样是一句凭空的事实陈述。
 async function writeFilesSnapshotStale(state, taskId, requestWriteFiles) {
   if (!state.activeChange) return false;
   const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
   const taskContent = await fs.readFile(taskFile, 'utf8').catch(() => null);
   const elementText = taskWriteFilesById(taskContent).get(taskId);
   if (elementText === undefined) return false;
-  // 条目切分与 request 侧同一实现（writeFilesEntries），否则同一份写面会被切成不同集合
+  // 条目切分取同一个 writeFilesEntries（request 侧的写面允许列表由它产出），否则同一份写面会被
+  // 切成不同集合——「快照变了吗」这个事实陈述会随之失真
   const currentFiles = writeFilesEntries(elementText);
   const normalize = (files) => [...new Set(files.map(toPosixPath))].sort().join('\n');
   return normalize(currentFiles) !== normalize(requestWriteFiles);
@@ -582,8 +584,8 @@ async function main() {
       const writeFilesElementText = taskWriteFilesById(taskContent).get(taskId);
       if (writeFilesElementText !== undefined) {
         taskResolved = true;
-        // 切分口径 = writeFilesEntries：与 workflow-guard.mjs 伪并行启发式同源（先剥整块 HTML 注释再拆分，
-        // 多行注释内容不得混入路径条目；行内再按分号容错）
+        // 切分口径 = lib/lessons-hits.mjs 的 writeFilesEntries：与 plan 出口的伪并行启发式、task-graph
+        // 的路径解析是**同一个函数**（剥整块 HTML 注释再拆分，注释内容不得混入路径条目；行内按分号容错）
         const files = writeFilesEntries(writeFilesElementText);
         if (files.length > 0) { writeFiles = files; }
         else { emptyWriteFilesElement = true; }
@@ -807,11 +809,14 @@ async function main() {
           const violations = committedFiles.filter(f => f !== summaryExact && !reqWriteFiles.some(a => matchWriteFilePattern(f, a)));
           if (violations.length > 0) {
             const currentState = await readState();
-            // 只补成因，不改判定：快照早于最近一次 replan 时多给一行解释「范围为什么变了」，
-            // 越界清单与 BLOCK/WARN 分级保持原样——报文自带的「回退越界文件」不然会把人引向
-            // 回退 replan 之后已经合法的改动。
+            // 只补事实，不改判定：快照与当前写面分叉时多给一行**可观测事实** + **条件式成因**，
+            // 越界清单与 BLOCK/WARN 分级保持原样。措辞纪律：本判据只能证明两侧不一致，不能证明
+            // 「计划是后来改的」——对真越界，让人去重新 request 会把越界文件写进允许列表，所以
+            // 「回退越界文件」（上一行恢复指引）仍是首选，重新 request 只在成因确实成立时才走。
             const staleSnapshotHint = (hasRequest && await writeFilesSnapshotStale(state, taskId, reqWriteFiles))
-              ? '诊断: 该任务的委托记录早于最近一次 replan（计划写面已变更）——重新运行 workflow-handoff.mjs request ' + taskId + ' 后再记录 result'
+              ? '诊断: 该任务的委托快照与当前 TASK.md 该任务的写面不一致（快照 = 发起委托时刻记录的 writeFiles）'
+                + '——成因未判定；若计划经 replan 变更过写面，出路是重新运行 workflow-handoff.mjs request ' + taskId
+                + ' 后再记录 result；若无 replan，越界文件仍不在该任务写面内，按上面的「回退越界文件」处理'
               : null;
             if (currentState?.newChange === true) {
               console.error('BLOCKED: 提交文件超出 writeFiles 范围: ' + violations.join(', ') + '——新 change 强制委托边界;恢复: 回退越界文件或扩展 write_files');

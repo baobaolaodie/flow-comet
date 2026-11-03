@@ -10,6 +10,7 @@ import {
   assertExit,
   assertNotOut,
   assertOut,
+  assertTrue,
   baseState,
   copyTreePortable,
   runGuard,
@@ -30,10 +31,14 @@ import {
   composeState,
   customProtocol,
   customProtocolWithSkillCall,
+  dropNamedImport,
+  engineScriptTexts,
   handoffFor,
   summaryContent,
   writeCustomProtocol,
 } from '../lib/test-fixtures.mjs';
+// 单一来源静态锁（write_files 条目切分只有一处实现）：与套件其它单源锚共用同一判据实现。
+import { singleSourceImportProblems } from '../lib/text-anchor-checks.mjs';
 import {
   assertStateBytesUnchanged,
   readStateBytes,
@@ -398,6 +403,47 @@ export const ENTRIES = [
       const reqNoTask = runHandoff(['request', 'P99', 'no such task', '--write-files', 'src/p99.mjs'], dir);
       assertExit(reqNoTask, 0);
       assertOut(reqNoTask, '无可回应条目（TASK.md 无匹配任务 P99）');
+
+      // ---------- write_files 条目切分单一来源（原位扩展；不新增场景条目） ----------
+      // 条目边界（剥 HTML 注释 → 行切 → 分号容错切 → trim → 滤空）此前有**三份**：本文件的本地
+      // writeFilesEntries、plan 出口伪并行启发式的内联链、task-graph 的 parsePaths。三处各自自洽时，
+      // 同一份写面会在不同门禁里变成不同条目集（注释里的词被当成路径、分号行只取首项），而两处不会
+      // 同时红——所以「谁越界」「哪一对并行任务重叠」可以互相矛盾却全绿。
+      // ① 行为：request 记录的允许列表 = 共享切分的产物（注释不进入条目、分号行二次切分、空行滤掉）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n'
+        + '<task id="P05" status="pending"><action>写面切分夹具</action>'
+        + '<write_files>\n'
+        + '  <!-- 夹具注释：注释里的 src/ghost.mjs 不得成为条目 -->\n'
+        + '  src/a.mjs; src/b.mjs\n'
+        + '\n'
+        + '  src/c.mjs\n'
+        + '</write_files><verify>node --check src/a.mjs</verify></task>\n');
+      const reqSplit = runHandoff(['request', 'P05', 'write files split'], dir);
+      assertExit(reqSplit, 0);
+      const splitRecorded = JSON.parse(readStateBytes(dir))
+        .evidence?.['subagent-execute']?.handoffRequests?.P05?.writeFiles;
+      assertEqual(JSON.stringify(splitRecorded), JSON.stringify(['src/a.mjs', 'src/b.mjs', 'src/c.mjs']),
+        'request 记录的写面条目（剥注释 / 分号二次切分 / 滤空后的规范形态）');
+      // ② 结构锚：条目切分只有一处定义，且三个消费方都从它取用（新增第四处或退回内联副本即红）
+      const splitTexts = engineScriptTexts();
+      const splitProblems = singleSourceImportProblems({
+        symbol: 'writeFilesEntries',
+        sourceRel: 'lib/lessons-hits.mjs',
+        texts: splitTexts,
+      });
+      assertTrue(splitProblems.length === 0,
+        'write_files 条目切分应只有一处实现且消费方都从它取用:\n' + splitProblems.join('\n'));
+      // ③ 反向构造（判别力）：把某个消费方的具名取用摘掉 → 结构锚必须报出来（否则 ② 只是「看起来有」）
+      const splitMutated = new Map(splitTexts);
+      splitMutated.set('workflow-handoff.mjs',
+        dropNamedImport(splitMutated.get('workflow-handoff.mjs'), 'writeFilesEntries'));
+      const splitMutatedProblems = singleSourceImportProblems({
+        symbol: 'writeFilesEntries',
+        sourceRel: 'lib/lessons-hits.mjs',
+        texts: splitMutated,
+      });
+      assertTrue(splitMutatedProblems.some((problem) => problem.includes('workflow-handoff.mjs')),
+        '摘掉消费方的具名取用后结构锚未报出（判据没有判别力）: ' + JSON.stringify(splitMutatedProblems));
 
       // ---------- 协议上下文随恢复命令传播（原位扩展；不新增场景条目） ----------
       // guard 解析协议的顺序包含 state.protocolPath（init 持久化绑定），而 workflow-state /
@@ -1948,11 +1994,12 @@ export const ENTRIES = [
       assertExit(recorded, 0);
       assertOut(recorded, 'HANDOFF RESULT: T08');
       assertNotOut(recorded, '没有对应的委托 request');
-      // ⑥ 越界报文的成因诊断（只补成因、不改判定）：request 记的是**发起委托那一刻的写面快照**，
-      //    计划经 replan 扩/改写面后，旧快照会让越界报文看起来像「执行者写错了文件」——按报文里
-      //    「回退越界文件」的指引会把 replan 之后已合法的文件退掉。故 request.writeFiles 与当前
-      //    TASK.md 该任务的写面不一致时，越界报文追加一行「记录早于 replan」的成因；两者一致（普通
-      //    真越界）不打印，判定仍是原来的新 change BLOCK / 旧 change WARN。
+      // ⑥ 越界报文的事实陈述（只补事实、不改判定）：request 记的是**发起委托那一刻的写面快照**，
+      //    TASK.md 的写面可以被 replan 改写。两者不一致时，越界报文追加一行**可观测事实**（快照 ≠
+      //    当前该任务写面）+ **条件式成因**（若计划经 replan 变更过写面 → 重新 request 后再记
+      //    result），并保留「回退越界文件」为首选指引。判据只能证明两侧不一致，不能证明成因——对
+      //    真越界，让人先重跑 request 会把越界文件写进允许列表，所以「记录早于 replan」不得写成断言。
+      //    两者一致（普通真越界）不打印诊断行，判定仍是原来的新 change BLOCK / 旧 change WARN。
       //    夹具判别力：TASK.md 里 T09 的写面是 replan 后扩过的（含 rogue.js），T10 的写面与 request
       //    逐字一致；若诊断按「全文第一个写面」而非「该任务的写面」比对，T10 会误报。
       const repo = (args) => spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd: dir, encoding: 'utf8' });
@@ -1989,17 +2036,27 @@ export const ENTRIES = [
         redEvidence: { command: 'node --check allowed.js', output: 'no output（RED 锚点）' },
         greenEvidence: { command: 'node --check allowed.js', output: 'ok' },
       });
-      const replanDiagnostic = '诊断: 该任务的委托记录早于最近一次 replan（计划写面已变更）——重新运行 workflow-handoff.mjs request ';
-      // ① 旧快照（request 只允许 allowed.js，TASK.md 已扩到 rogue.js）→ 仍 BLOCK，且要点明成因
+      const staleSnapshotFact = '诊断: 该任务的委托快照与当前 TASK.md 该任务的写面不一致';
+      const staleSnapshotCause = '成因未判定；若计划经 replan 变更过写面，出路是重新运行 workflow-handoff.mjs request ';
+      // ① 旧快照（request 只允许 allowed.js，TASK.md 已扩到 rogue.js）→ 仍 BLOCK，且要点明可观测事实
       const staleSnapshot = runHandoff(['result', 'T09', boundaryPayload('T09', replannedHash)], dir);
       assertExit(staleSnapshot, 1);
       assertOut(staleSnapshot, 'BLOCKED: 提交文件超出 writeFiles 范围: rogue.js');
-      assertOut(staleSnapshot, replanDiagnostic + 'T09 后再记录 result');
-      // ② 写面一致的真越界 → 仍是原报文，不得混入成因诊断（否则「成因」不再有判别力）
+      assertOut(staleSnapshot, staleSnapshotFact);
+      // 成因是条件式而非断言：「若计划经 replan 变更过写面」才是成因，且再给一条无 replan 时的出路
+      assertOut(staleSnapshot, staleSnapshotCause + 'T09 后再记录 result');
+      assertOut(staleSnapshot, '若无 replan，越界文件仍不在该任务写面内');
+      // 首选指引仍是「回退越界文件」（恢复行在前，诊断行只在其后补事实）
+      assertOut(staleSnapshot, '恢复: 回退越界文件或扩展 write_files');
+      assertOut(staleSnapshot, '按上面的「回退越界文件」处理');
+      // 反向构造：把可能写成事实的旧措辞不得回归（判据只能证明不一致，证明不了「记录早于 replan」）
+      assertNotOut(staleSnapshot, '早于最近一次 replan');
+      // ② 写面一致的真越界 → 仍是原报文，不得混入事实陈述（否则该行不再有判别力）
       const genuineOverrun = runHandoff(['result', 'T10', boundaryPayload('T10', strayHash)], dir);
       assertExit(genuineOverrun, 1);
       assertOut(genuineOverrun, 'BLOCKED: 提交文件超出 writeFiles 范围: stray.js');
-      assertNotOut(genuineOverrun, '早于最近一次 replan');
+      assertOut(genuineOverrun, '恢复: 回退越界文件或扩展 write_files');
+      assertNotOut(genuineOverrun, staleSnapshotFact);
       // ③ 判定语义不变：同一份旧快照在旧 change 上只 WARN（诊断行随报文出现，结果照常落库）
       const legacySnapshot = JSON.parse(readStateBytes(dir));
       delete legacySnapshot.newChange;
@@ -2007,7 +2064,7 @@ export const ENTRIES = [
       const legacyWarn = runHandoff(['result', 'T09', boundaryPayload('T09', replannedHash)], dir);
       assertExit(legacyWarn, 0);
       assertOut(legacyWarn, 'HANDOFF WARN: 提交文件超出 writeFiles 范围: rogue.js');
-      assertOut(legacyWarn, replanDiagnostic + 'T09 后再记录 result');
+      assertOut(legacyWarn, staleSnapshotCause + 'T09 后再记录 result');
       assertOut(legacyWarn, 'HANDOFF RESULT: T09');
     },
   },

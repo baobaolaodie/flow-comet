@@ -37,7 +37,12 @@ import { applicabilityGatedBinding, frontendCriterion } from './guard-uidesign.m
 import { buildSkeleton, headingPattern, LESSONS_SCAN_SECTION } from './guard-artifact-skeleton.mjs';
 // AC 覆盖判定（纯判定模块）：verify 出口的 BLOCK / review 出口的汇总 WARN 共用同一份判定与报文，
 // 分级只在下方门禁函数一处表达。
-import { acCoverageReportLines, acCoverageReview, acCoverageSummaryLine } from './ac-coverage.mjs';
+import {
+  acCoverageReportLines,
+  acCoverageReview,
+  acCoverageSummaryLine,
+  acCoverageUnjudgeableLines,
+} from './ac-coverage.mjs';
 // LESSONS 命中集（路径词元 × 条目关键词）的单一实现：与 handoff request 的开工前打印共用，执行者
 // 看到的集合必须就是出口验收的集合。
 import { lessonsEntries, lessonsHits, lessonsPathTokens, taskWriteFilesById } from './lessons-hits.mjs';
@@ -405,12 +410,15 @@ export async function runExecuteExitGate({ protocol, node, state, emptyExitAppro
 
 // AC 覆盖出口校验（verify 出口 BLOCKED / review 出口只汇总 WARN）——判据（纯判定）在
 // lib/ac-coverage.mjs，本处只负责分级与打印：同一份判定两处消费，分支纪律因此只有一处表达。
-//   · verify 出口：REQUIREMENT.md 的验收准则与 TEST.md 的 1.1 测试矩阵对不上 → 新 change BLOCKED
-//     （点名缺失编号 + 「在 1.1 矩阵补行」的恢复指引）/ 旧 change WARN 渐进；判不了（无 AC 编号 /
-//     TEST.md 缺席 / 无 1.1 段 / 模板不可派生）→ 打印「未校验（…）」且**不改变退出码**（其余判据照常，
-//     未验证既不冒充通过也不冒充失败）。
-//   · review 出口：TEST.md 在场且缺覆盖 → 一条汇总 WARN（列缺失编号），不阻断、不影响退出码——review
-//     出口今天不要求 TEST.md，权威判定在 verify 出口；判不了时不打印（不制造噪音）。
+//   · 判不了的两支按成因分开（与波次判据同口径，见 ac-coverage 文件头）：
+//     ① **载体缺席**（REQUIREMENT.md / TEST.md 不在、模板无从派生、承载段不在）→ verify 出口打印
+//        「未校验（…）」且**不改变退出码**（判据没有可判对象；未验证既不冒充通过也不冒充失败）；
+//     ② **工件内容不可判**（有验收准则却没 AC 编号 / 第 1 轮整段 N/A 而没有 1.1 矩阵）→ 不是
+//        「判过且通过」：新 change BLOCKED / 旧 change WARN（WARN 行因此进入既有 WARN COUNT）。
+//   · 真判过且缺覆盖：verify 出口新 change BLOCKED（点名缺失编号 + 「在 1.1 矩阵补行」的恢复指引）/
+//     旧 change WARN 渐进。
+//   · review 出口：一条汇总 WARN（列缺失编号），不阻断、不影响退出码——review 出口今天不要求
+//     TEST.md，权威判定在 verify 出口；两支「判不了」都不打印（不制造噪音）。
 // 归档 change 与 verify 出口的既有豁免同源（历史归档不重判）。
 export async function runAcCoverageGate({ node, state }) {
   if (node.id !== 'verify' && node.id !== 'review') return;
@@ -419,6 +427,15 @@ export async function runAcCoverageGate({ node, state }) {
   const coverage = await acCoverageReview(path.join(runRoot, '.specs', state.activeChange));
   if (coverage.unverified !== null) {
     if (node.id === 'verify') console.error(coverage.unverified.notice);
+    return;
+  }
+  if (coverage.unjudgeable !== null) {
+    if (node.id === 'review') return;
+    const blocking = isNewChange(state);
+    for (const line of acCoverageUnjudgeableLines({ coverage, level: blocking ? 'BLOCKED' : 'WARN' })) {
+      console.error(line);
+    }
+    if (blocking) process.exit(1);
     return;
   }
   if (coverage.missing.length === 0) return;
@@ -440,8 +457,8 @@ export async function runAcCoverageGate({ node, state }) {
 export async function runVerifyExitGate({ protocol, node, state }) {
   if (node.id !== 'verify') return;
   if (await isArchivedChange(state.activeChange)) return;
-  // AC 覆盖：结构判据先于命令执行——缺覆盖时不白跑一遍验证命令；判不了（未校验）只打印不判红，
-  // 下面的「## 验证命令 / 产物」判据照常（退出码由它们决定）。
+  // AC 覆盖：结构判据先于命令执行——缺覆盖时不白跑一遍验证命令；「载体缺席」只打印不判红（下面的
+  // 「## 验证命令 / 产物」判据照常），「工件内容不可判」按 change 新旧分级（见 runAcCoverageGate）。
   await runAcCoverageGate({ node, state });
   // 越权委托兜底检测（verify 出口）——同 execute 出口的判定（TASK parallel done + completedNodes
   // 无 subagent-execute + 非 direct + 协议含 subagent-execute 节点），verify 时仍未 exit → WARN
