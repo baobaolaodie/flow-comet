@@ -660,10 +660,14 @@ export const ENTRIES = [
   {
     name: '161 open/design 出口三文档模板保真：缺标题新 BLOCK / 旧 WARN',
     run: (dir) => {
+      // open 该读两份协议、声明两个必需技能（flow-comet-change / flow-comet-requirement）：出口覆盖
+      // 判据要求全部声明，两条标记都要写下——否则先被声明门拦下，测不到本场景的被测判据。
       const addOpenMarker = () => {
         fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
         writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-change.json',
           JSON.stringify({ node: 'open', skill: 'flow-comet-change', protocol: '0-change.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+        writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-requirement.json',
+          JSON.stringify({ node: 'open', skill: 'flow-comet-requirement', protocol: '1-requirement.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
       };
       const addDesignMarker = () => {
         fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
@@ -1380,10 +1384,14 @@ export const ENTRIES = [
   {
     name: '171 入口首部 Change ID 新 BLOCK / 旧 WARN',
     run: (dir) => {
+      // open 该读两份协议、声明两个必需技能（flow-comet-change / flow-comet-requirement）：出口覆盖
+      // 判据要求全部声明，两条标记都要写下——否则先被声明门拦下，测不到本场景的被测判据。
       const addOpenMarker = () => {
         fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
         writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-change.json',
           JSON.stringify({ node: 'open', skill: 'flow-comet-change', protocol: '0-change.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+        writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-requirement.json',
+          JSON.stringify({ node: 'open', skill: 'flow-comet-requirement', protocol: '1-requirement.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
       };
       const writeChange = (withId) => {
         const head = withId ? '- **Change ID**: ' + CHANGE_ID + '\n' : '';

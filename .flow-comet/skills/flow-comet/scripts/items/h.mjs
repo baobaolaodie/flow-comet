@@ -108,6 +108,8 @@ function seedExecuteEntryState(dir, taskText) {
   driveThroughDesign(dir);
   writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskText);
   assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir), 0);
+  // 协议 plan.requiredSkillCalls = flow-comet-task（guarded）：出口覆盖判据要求该技能也有标记
+  assertExit(runState(['skill-load', 'plan', 'flow-comet-task', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir), 0);
   assertExit(runState(['record', 'plan', '{"summary":"plan done"}'], dir), 0);
   assertExit(runGuard(['entry', 'plan'], dir), 0);
   const planExit = runGuard(['exit', 'plan', '--apply'], dir);
@@ -592,6 +594,8 @@ export const ENTRIES = [
       }
       // 源节点（verify）出口真实重跑：验证命令落盘副作用 + 推进 archive
       assertExit(runState(['skill-load', 'verify', 'flow-comet-verify', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
+      // 协议 verify.requiredSkillCalls = flow-comet-integration（guarded）：同一份协议文件、另一个技能面
+      assertExit(runState(['skill-load', 'verify', 'flow-comet-integration', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
       assertExit(runState(['record', 'verify', '{"summary":"回源复验完成"}'], dir, env), 0);
       assertExit(runGuard(['entry', 'verify'], dir, env), 0);
       const verifyExit = runGuard(['exit', 'verify', '--apply'], dir, env);

@@ -10,6 +10,7 @@ import { validateStateFields } from '../state-schema.mjs';
 import {
   NODE_PROTOCOL_FILES,
   nodeTemplateDeclaration,
+  promptPointerPath,
   templateKeyFromArtifactName,
   templateKeyOf,
   templatePointerPath,
@@ -34,7 +35,7 @@ import {
   buildSkeleton,
   headingPattern,
 } from './guard-artifact-skeleton.mjs';
-import { frontendCriterion } from './guard-uidesign.mjs';
+import { applicabilityGatedBinding, frontendCriterion } from './guard-uidesign.mjs';
 // 波次段解析与「波次 = 依赖层级的投影」判定（纯判定模块）：plan 出口与 replan 重校段共用同一
 // 实现与同一报文——段界（waveSectionBody）也是既有波次散文检测的唯一表达处。
 import {
@@ -70,6 +71,10 @@ import { COORDINATOR_NOTICE } from './state-explain.mjs';
 // 声明标记目录的路径规则（活动路径优先、归档兜底）归状态族的路径上下文模块，与 record 前置门同一份
 // 实现——guard → state-* 是允许的单向边；规则若留在守卫族，状态 CLI 会为它加载整个守卫图。
 import { findSkillLoadsDir, isArchivedChangeDirName } from './state-io.mjs';
+// 声明标记的协议文件提取（protocols 数组 ∪ protocol 单值的 basename 归一）由状态族单源提供：
+// skill-load 写入侧与出口覆盖判据读同一份实现——各写一份时「旧标记里存完整绝对路径」这条口径
+// 会在一边生效、另一边判失配。
+import { markerProtocolBasenames } from './state-skillmarkers.mjs';
 
 // 节点 → 合法 exit 的前置条件（对齐 flow-kit 阶段门 + flowkit.*.v1 evidence）
 const NODE_TRANSITION_GATES = {
@@ -82,15 +87,6 @@ const NODE_TRANSITION_GATES = {
   verify:           { evidence: ['verification-result'] },
   archive:          { evidence: ['archive-summary'] },
 };
-
-// 声明标记 protocol → basename 提取（exit 校验与节点协议映射表 basename 精确比对）。兼容新旧两种
-// 格式：新格式（skill-load 写入）= 纯 basename（如 0-change.md），原样返回；旧格式 = 完整绝对路径
-// （Windows 反斜杠 / POSIX 斜杠），提取最后一段后可比对。非字符串（null——skill-load 未传
-// --protocol 的新格式缺省）→ null（协议集内无 null，fail-closed 由 includes 比对兜底）。
-function markerProtocolBasename(value) {
-  if (typeof value !== 'string' || value === '') return null;
-  return String(value).replaceAll('\\', '/').split('/').pop() || null;
-}
 
 // REVIEW.md 发现区解析——发现的合法位置是模板位置 `### 2.2 …详细发现`（REVIEW 模板的结构子段）；
 // 旧形态 `## 发现` 段（历史 REVIEW 的写法）继续按同一套条目口径解析，供旧 change 渐进处置与迁移
@@ -1325,16 +1321,56 @@ export async function runReviewExitGate({ node, state }) {
   } catch {}
 }
 
-// 节点 exit 协议声明标记校验——扫描 .specs/<change-id>/.skill-loads/ 下该节点标记（<node>-*.json，
-// 执行者加载节点 skill 后经 skill-load 写入，含 protocol 字段——指向 flow-kit/prompts/ 协议文件，
-// 只读引用），校验至少一个标记的 protocol ∈ 该节点协议集（节点协议映射表）。缺失 → BLOCKED（提示
-// 缺协议声明标记 + 指引 skill-load --prompt）；有 → 通过。诚实边界：标记是执行者的自我声明——校验
-// 只确认「声明存在且 protocol 归属节点」，无法证明执行者真的阅读了协议（声明非物理证明，仅保证
-// 协议阅读声明可追溯）。旧 change 兼容：旧 change/旧 evidence 不追溯——.skill-loads/ 目录不存在
-// （该 change 从未运行过 skill-load，声明机制未激活）→ 跳过校验；节点已 exit 不重验（校验只在当前
-// exit 时执行）；节点重新 exit（重入后再退）时按新规则要求，无豁免。
+// 本节点要求协调者声明的技能（技能名）——requiredSkillCalls 中 enforcement='guarded' 且**非 handoff
+// scope** 的条目：handoff scope（如 subagent-execute 的 flow-comet-dev）由子代理加载，协调者不加载、
+// 也无法诚实声明，与 record 侧「handoff scope 豁免标记」同一口径。
+// 适用性门控绑定（design 的 ui-design）在判据不成立时不要求声明：非前端 change 本就不加载它，
+// 「没声明」不是缺陷（判据成立时的缺声明由证据门与工件门各自点名，本处只补上标记面）。
+async function requiredDeclarationSkills(node, state) {
+  const guarded = (node.requiredSkillCalls ?? []).filter((binding) => binding
+    && binding.enforcement === 'guarded'
+    && binding.scope !== 'handoff'
+    && typeof binding.skill === 'string'
+    && binding.skill !== '');
+  if (guarded.length === 0) return [];
+  if (!guarded.some((binding) => applicabilityGatedBinding(node, binding.skill) !== null)) {
+    return guarded.map((binding) => binding.skill);
+  }
+  const frontend = await frontendCriterion(state.activeChange);
+  return guarded
+    .filter((binding) => applicabilityGatedBinding(node, binding.skill) === null || frontend.applicable === true)
+    .map((binding) => binding.skill);
+}
+
+// 缺声明的恢复句（报文里唯一一处「怎么补」的编排）：补什么由缺项决定，命令形态由
+// promptPointerPath 的单源指针给出——不在这里另写一份 flow-kit/prompts/ 路径。
+function missingDeclarationRecovery({ node, missingFiles }) {
+  const promptFlags = missingFiles.map((file) => '--prompt ' + promptPointerPath(file)).join(' ');
+  return '恢复: 用 workflow-state.mjs skill-load ' + node.id + ' <skill>'
+    + (promptFlags === '' ? '' : ' ' + promptFlags)
+    + ' 补齐上述缺项（一条命令可传多个 --prompt；同一 node-skill 重跑会覆写该标记）后重试 exit '
+    + node.id + '（声明非物理证明，仅证明执行者声明已加载）';
+}
+
+// 节点 exit 协议声明**覆盖**校验——扫描 .specs/<change-id>/.skill-loads/ 下该节点标记（<node>-*.json，
+// 执行者加载节点 skill 后经 skill-load 写入），要求覆盖本节点全部必需声明：
+//   ① 节点该读的每份协议文件（NODE_PROTOCOL_FILES[node.id]——open / review 各两份）都必须被某个标记
+//      声明过：标记的 protocols 数组（多 --prompt）与 protocol 单值（收紧前的写入形态、record 自动补
+//      写的形态）都算，值一律按 basename 比对；
+//   ② 协议声明的必需技能（enforcement='guarded' 且非 handoff scope）各自要有属于该技能的标记。
+// 缺任一 → 新 change BLOCKED 并**逐项点名**缺哪个协议文件、哪个必需技能；旧 change WARN 渐进（既有
+// change 不因收紧卡死）。判定从「任一命中即通过」改为「全部覆盖」：旧口径把节点该读的清单当成允许
+// 集合，声明一份就能过——另一份协议文件、另一个必需技能从来没有判据。
+// 诚实边界：标记是执行者的自我声明——校验只确认「声明覆盖了必需项」，无法证明执行者真的阅读了协议
+// （声明非物理证明，仅保证声明可追溯）。旧 change 兼容：.skill-loads/ 目录不存在（该 change 从未运行
+// 过 skill-load，声明机制未激活）→ 跳过校验；节点已 exit 不重验（校验只在当前 exit 时执行）；节点
+// 重新 exit（重入后再退）时按新规则要求，无豁免。
 export async function runSkillLoadMarkerGate({ node, state }) {
-  if (!state.activeChange || !NODE_PROTOCOL_FILES[node.id]) return;
+  if (!state.activeChange) return;
+  const requiredFiles = NODE_PROTOCOL_FILES[node.id] ?? [];
+  const requiredSkills = await requiredDeclarationSkills(node, state);
+  // 零协议文件且零必需技能：本节点没有声明义务（自定义协议节点没有引擎映射，也没有 guarded 绑定）
+  if (requiredFiles.length === 0 && requiredSkills.length === 0) return;
   // 标记目录活动/归档双路径解析（archive 节点「先移目录后 exit」顺序下标记只在归档路径——单查
   // 活动路径会误报「机制未激活」静默放行）；两处皆无才走旧 change 兼容
   const loadsDir = await findSkillLoadsDir(runRoot, state.activeChange);
@@ -1346,36 +1382,56 @@ export async function runSkillLoadMarkerGate({ node, state }) {
     return;
   }
   const prefix = node.id + '-';
-  const protocolSet = NODE_PROTOCOL_FILES[node.id];
-  const markers = (await fs.readdir(loadsDir.dir).catch(() => []))
+  const names = (await fs.readdir(loadsDir.dir).catch(() => []))
     .filter((f) => f.startsWith(prefix) && f.endsWith('.json'));
+  const declaredFiles = new Set();
+  const declaredSkills = new Set();
   const malformed = [];
-  let declared = false;
-  for (const f of markers) {
+  let autoHinted = false;
+  for (const name of names) {
+    let marker;
     try {
-      const marker = JSON.parse(await fs.readFile(path.join(loadsDir.dir, f), 'utf8'));
-      // 比对 basename——新格式（skill-load 写入 basename）与旧格式（完整绝对路径）经
-      // markerProtocolBasename 提取后统一比对；损坏值（null/非字符串/超集外 basename）提取为 null
-      // 或不匹配 → 不进 declared，fail-closed
-      if (marker && typeof marker === 'object' && protocolSet.includes(markerProtocolBasename(marker.protocol))) {
-        declared = true;
-        // auto 标记提示——record 自动补的标记（auto:true）不证明手动加载，提示建议手动声明
-        if (marker.auto === true) {
-          console.error('SKILL-LOAD HINT: ' + f + ' 为 record 自动补写标记(auto)——建议手动 skill-load 声明(如实记录加载动作与协议文件)');
-        }
-        break;
-      }
+      marker = JSON.parse(await fs.readFile(path.join(loadsDir.dir, name), 'utf8'));
     } catch {
-      malformed.push(f);
+      malformed.push(name);
+      continue;
+    }
+    // 非对象标记（null / 数组 / 标量）没有声明语义：与不可解析标记同样处置（不静默计入覆盖）
+    if (!marker || typeof marker !== 'object' || Array.isArray(marker)) {
+      malformed.push(name);
+      continue;
+    }
+    for (const basename of markerProtocolBasenames(marker)) declaredFiles.add(basename);
+    if (typeof marker.skill === 'string' && marker.skill !== '') declaredSkills.add(marker.skill);
+    // auto 标记提示——record 自动补的标记（auto:true）不证明手动加载，提示建议手动声明
+    if (marker.auto === true && !autoHinted) {
+      autoHinted = true;
+      console.error('SKILL-LOAD HINT: ' + name + ' 为 record 自动补写标记(auto)——建议手动 skill-load 声明(如实记录加载动作与协议文件)');
     }
   }
-  if (!declared) {
-    console.error('BLOCKED: 节点 ' + node.id + ' exit 缺协议声明标记——' + loadsDir.display +
-      ' 下需有 ' + prefix + '*.json 且 protocol ∈ [' + protocolSet.join(', ') +
-      ']；执行 skill-load --prompt <flow-kit/prompts/ 协议文件> 声明已阅读协议（声明非物理证明，仅可追溯）' +
-      (malformed.length > 0 ? '；不可解析标记: ' + malformed.join(', ') : ''));
+  const missingFiles = requiredFiles.filter((file) => !declaredFiles.has(file));
+  const missingSkills = requiredSkills.filter((skill) => !declaredSkills.has(skill));
+  if (missingFiles.length === 0 && missingSkills.length === 0) return;
+  // 缺项明细（逐项点名）：缺哪个协议文件、缺哪个必需技能（后者连标记文件名一起给，可直接对目录核对）
+  const details = [];
+  if (missingFiles.length > 0) details.push('  - 缺协议文件: ' + missingFiles.join('、'));
+  if (missingSkills.length > 0) {
+    details.push('  - 缺必需技能声明: ' + missingSkills.join('、')
+      + '（标记文件 ' + missingSkills.map((skill) => prefix + skill + '.json').join(' / ') + '）');
+  }
+  const recovery = missingDeclarationRecovery({ node, missingFiles })
+    + (malformed.length > 0 ? '；不可解析标记: ' + malformed.join(', ') : '');
+  const lead = '节点 ' + node.id + ' exit 缺协议声明标记——' + loadsDir.display
+    + ' 下的声明未覆盖本节点全部必需项';
+  if (isNewChange(state)) {
+    console.error('BLOCKED: ' + lead + '（新 change 强制全部覆盖）:');
+    for (const line of details) console.error(line);
+    console.error(recovery);
     process.exit(1);
   }
+  console.error('SKILL-LOAD WARN: ' + lead + '（旧 change 渐进不阻断，新 change 强制全部覆盖）:');
+  for (const line of details) console.error(line);
+  console.error(recovery);
 }
 
 // ---------- 结构化预检（exit <node> --preflight）----------

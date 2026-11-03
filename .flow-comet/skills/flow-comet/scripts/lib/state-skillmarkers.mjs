@@ -25,25 +25,57 @@ import {
   specsDir,
 } from './state-io.mjs';
 
-// --prompt 原始参数提取（skill-load 专用参数）：--protocol 由 resolveProtocol 全局解析
+// --prompt 原始参数收集（skill-load 专用参数）：--protocol 由 resolveProtocol 全局解析
 // （CLI > env > 默认）为工作流协议 JSON——skill-load 曾用 --protocol 传 prompt 路径，主仓真实链路
 // 必现撞车（markdown 被当协议 JSON 解析 → 启动报错「workflow protocol file is not valid JSON」）。
-// 改名 --prompt 后与全局协议解析彻底解耦；此处仅取用户显式传入的原始值，供 skill-load
+// 改名 --prompt 后与全局协议解析彻底解耦；此处取用户显式传入的**全部**原始值，供 skill-load
 // 的 flow-kit/prompts/ 归属校验与标记记录。
-export function findPromptArg(cliArgs) {
-  for (let index = 0; index < cliArgs.length; index++) {
+//
+// 支持 `--prompt a --prompt b` 与 `--prompt=a`，可重复出现（累加保序、去重）。一个节点该读的
+// 协议常常不止一份（open 两份、review 两份），而「读了几份协议」正是出口覆盖判据要核对的事实——
+// 只取第一个会让第二个声明被静默丢弃，声明面永远凑不齐（覆盖判据据此报「未声明」，而执行者
+// 明明写下了那条命令）。后随参数是另一个选项（以 -- 开头）时不当成路径；空值忽略。
+export function findPromptArgs(cliArgs) {
+  const values = [];
+  const collect = (raw) => {
+    if (typeof raw !== 'string' || raw === '') return;
+    if (!values.includes(raw)) values.push(raw);
+  };
+  for (let index = 0; index < (cliArgs ?? []).length; index++) {
     const arg = cliArgs[index];
     if (arg === '--prompt') {
-      const value = cliArgs[index + 1];
-      if (typeof value !== 'string' || value === '') return null;
-      return value;
+      const next = cliArgs[index + 1];
+      const hasValue = typeof next === 'string' && !next.startsWith('--');
+      collect(hasValue ? next : '');
+      if (hasValue) index += 1;
+      continue;
     }
     if (typeof arg === 'string' && arg.startsWith('--prompt=')) {
-      const value = arg.slice('--prompt='.length);
-      return value === '' ? null : value;
+      collect(arg.slice('--prompt='.length));
     }
   }
-  return null;
+  return values;
+}
+
+// 声明标记里「已声明的协议文件」提取（唯一实现：出口覆盖判据与任何读标记的消费方共用）：
+//   · protocols 数组（skill-load 多条 --prompt 的写入形态）∪ protocol 单值（收紧前的写入形态，
+//     以及 record 自动补写的标记）；
+//   · 每个值都按 basename 归一——旧标记可能是完整绝对路径（历史缺陷期写入的形态），新标记是
+//     basename；两种形态必须比对同一口径（节点协议映射表只存 basename）。
+// 返回去重保序的 basename 数组；null / 空串 / 非字符串一律忽略（fail-closed：覆盖判据只认
+// 真正声明了的值，损坏值不会冒充任何一份协议文件）。
+export function markerProtocolBasenames(marker) {
+  const raw = [];
+  if (Array.isArray(marker?.protocols)) raw.push(...marker.protocols);
+  raw.push(marker?.protocol);
+  const basenames = [];
+  for (const value of raw) {
+    if (typeof value !== 'string' || value === '') continue;
+    const base = String(value).replaceAll('\\', '/').split('/').pop();
+    if (!base) continue;
+    if (!basenames.includes(base)) basenames.push(base);
+  }
+  return basenames;
 }
 
 // flow-kit/prompts/ 归属校验（相对或绝对路径，前缀校验）——flow-kit 为 vendored 上游，
