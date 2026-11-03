@@ -28,6 +28,7 @@ import {
   TASK_VALID_SP,
   engineDefinitionHits,
   engineDefinitionModule,
+  engineScriptTexts,
   handoffFor,
   renderMultiWaveTasks,
   runPlanExit,
@@ -72,6 +73,56 @@ import {
   templateAuthorityProblems,
   templateAuthorityRegistrationProblems,
 } from '../lib/text-anchor-checks.mjs';
+
+// ---------- 文档口径锚（「文档口径与实现一致」的判据单一实现）----------
+// 判据 = 文档里写的口径必须与实现同形：每条口径给出 required（新口径在场）与 stale（旧口径零残留），
+// 两种静默失配都判——文档丢了新说法、或旧说法回流。真实核对与反向构造探针共用本实现（各写一份必然
+// 分叉：锚与探针各自演化后，判别力会在两次改动后静默归零）。
+function docWordingProblems(cases) {
+  const out = [];
+  for (const item of cases) {
+    for (const phrase of item.required ?? []) {
+      if (!item.text.includes(phrase)) out.push(item.rel + ' 缺新口径「' + phrase + '」');
+    }
+    for (const phrase of item.stale ?? []) {
+      if (item.text.includes(phrase)) out.push(item.rel + ' 残留旧口径「' + phrase + '」');
+    }
+  }
+  return out;
+}
+
+// 反向构造：抽掉任一新口径句 ⇒ 必报缺；注入任一旧口径句 ⇒ 必报残留。探针随真实判据同流——
+// 抽掉后仍绿即锚没有判别力，本条与真实判据因此互为判别。
+function docWordingChecks(cases) {
+  const problems = docWordingProblems(cases);
+  for (const item of cases) {
+    for (const phrase of item.required ?? []) {
+      if (!item.text.includes(phrase)) continue; // 缺失已由真实判据报告，不叠第二条
+      const stripped = [{ ...item, text: item.text.split(phrase).join('（反向构造：抽掉）') }];
+      if (!docWordingProblems(stripped).some((problem) => problem.includes('缺新口径'))) {
+        problems.push('反向构造判别力缺失（' + item.rel + ': 抽掉「' + phrase + '」未被判缺）');
+      }
+    }
+    for (const phrase of item.stale ?? []) {
+      const restored = [{ ...item, text: item.text + String.fromCharCode(10) + phrase }];
+      if (!docWordingProblems(restored).some((problem) => problem.includes('残留旧口径'))) {
+        problems.push('反向构造判别力缺失（' + item.rel + ': 注入「' + phrase + '」未被判残留）');
+      }
+    }
+  }
+  return problems;
+}
+
+// 对象字面量的顶层键（引擎侧成因表的取值口径；解析不出时返回 null——调用方据此显式报前提失效，
+// 不静默当「成因表没变」）。
+function literalObjectKeys(code, name) {
+  const start = String(code).indexOf('const ' + name + ' = {');
+  if (start < 0) return null;
+  const end = String(code).indexOf(String.fromCharCode(10) + '};', start);
+  if (end < 0) return null;
+  const keys = [...String(code).slice(start, end).matchAll(/^\s*'([^']+)':/gmu)].map((matched) => matched[1]);
+  return keys.length > 0 ? keys : null;
+}
 
 export const ENTRIES = [
 
@@ -788,7 +839,7 @@ export const ENTRIES = [
   // 声明门禁与旧 change 分级的文档口径（多 --prompt 形态 + exit 全部覆盖 + 入口只拦错路径 +
   // 旧 change 按 `newChange` 标记表述）。场景名随覆盖族补齐一并点名。
   {
-    name: '184c 技能文本锁：入口 archive 读法 + 规划约束 + 波次与 AC 覆盖 + 声明门禁与旧 change 分级口径 + Codex 平台事实',
+    name: '184c 技能文本锁：入口 archive 读法 + 规划约束 + 波次与 AC 覆盖 + 声明门禁与旧 change 分级口径 + 判不了口径与段形门分写 + Codex 平台事实',
     run: () => {
       const problems = [];
       // —— 入口 archive 读法：三要素关键词在场 ——
@@ -1166,6 +1217,89 @@ export const ENTRIES = [
               .set(rel, mutated.join(String.fromCharCode(10))) };
           if (!wordingProblems(stripped).some((p) => p.includes('第 ' + (hitIndex + 1) + ' 行'))) {
             problems.push('反向构造判别力缺失（' + rel + ': 摘掉第 ' + (hitIndex + 1) + ' 行的标记未被判违规）');
+          }
+        }
+      }
+      // —— ⑧ 文档口径与实现一致：判不了的二分与「波次未校验 / TASK 段形门」分写 ——
+      // 两处口径都曾与实现分叉，且都是「文档比实现旧」而不是实现坏了：
+      //   ① 载体缺席曾被写成五件事（含「没有验收段 / 没有承载矩阵的第 1 轮段」）。承载段被删属
+      //      「内容不可判」——新 change BLOCKED、旧 change WARN 并进 WARN 计数；载体缺席只剩三件事：
+      //      缺 REQUIREMENT、缺 TEST.md、缺模板。作者能动的东西（段在不在）不是「无从判断」。
+      //   ② 「完全没有波次段」曾只留一句「未校验、不改退出码」。那是波次判据自己的结论，不是整个
+      //      出口的结论：模板要求而工件里没有的段由 TASK 段形门判，plan 出口与受控 replan 重签跑
+      //      同一套骨架判据（缺段 ⇒ 新 change BLOCKED / 旧 change WARN）。两条边界分开写，读者才
+      //      不会以为「删段」是绕过波次判据的写法。
+      // 判据 = 每处新口径在其所属文档逐条在场 + 旧口径零残留；实现侧同源核对 = 载体缺席的成因集合
+      // 仍由 ac-coverage 的成因表表达（三条，且两条「承载段被删」属内容不可判）——成因集合一变，
+      // 本节先红，逼着文档与锚同批跟上。反向构造：抽掉任一新句 ⇒ 必报缺；把旧口径还原进任一册 ⇒
+      // 必报残留（探针与真实判据共用同一判据实现，不另写第二份）。
+      {
+        const reviewBook = fs.readFileSync(
+          path.join(SCRIPTS_DIR, '..', '..', 'flow-comet-review', 'SKILL.md'), 'utf8');
+        const publicFaceRels = ['CHANGELOG.md', 'CHANGELOG-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
+          'docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md'];
+        const publicFaces = new Map(publicFaceRels.map((rel) => {
+          const abs = path.join(REPO_ROOT, rel);
+          return [rel, fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : null];
+        }));
+        const absentFaces = [...publicFaces].filter(([, text]) => text === null).map(([rel]) => rel);
+        if (absentFaces.length > 0) {
+          console.log('SKIP: 184 的判不了口径锚（' + absentFaces.join(', ') + '）——本次检出无该公开文档面，'
+            + '未校验「载体缺席三分 / 波次未校验与 TASK 段形门分写」，请在权威源检出重跑本套件');
+        }
+        const wordingCase = (rel, text, required, stale) => ({ rel, text, required, stale });
+        const wordingCases = [
+          wordingCase('flow-comet-review/SKILL.md（中文侧）', reviewBook, [
+            '**载体缺席**（`REQUIREMENT.md` 缺席 / `TEST.md` 缺席 / 模板缺席）',
+            '验收准则段被删掉',
+          ], ['**载体缺席**（`REQUIREMENT.md` 缺席 / 无验收准则段 / `TEST.md` 缺席 / 无第 1 轮承载段 / 模板缺席）']),
+          wordingCase('flow-comet-review/SKILL.md（英文侧）', reviewBook, [
+            'a missing carrier — `REQUIREMENT.md` absent, `TEST.md` absent, or the template absent',
+            'the acceptance section deleted from `REQUIREMENT.md`',
+          ], ['`REQUIREMENT.md` or `TEST.md` absent, no acceptance section, no round-1 section, template absent']),
+          wordingCase('CHANGELOG.md', publicFaces.get('CHANGELOG.md'), [
+            'no requirement document, no test document, no template',
+            'a deleted acceptance section',
+          ], ['no acceptance section, no round-1 section']),
+          wordingCase('CHANGELOG-zh.md', publicFaces.get('CHANGELOG-zh.md'), [
+            '载体缺席只指三件事——缺 REQUIREMENT、缺 TEST.md、缺模板',
+            '验收段被删掉',
+          ], ['缺 REQUIREMENT、缺 TEST.md、缺模板、没有验收段、没有承载矩阵的第 1 轮段']),
+          wordingCase('docs/MECHANISM.md', publicFaces.get('docs/MECHANISM.md'), [
+            'does not block on that ground',
+            'also runs when a plan is re-signed through a controlled `replan`',
+          ], ['is reported as not checked and keeps its exit code']),
+          wordingCase('docs/MECHANISM-zh.md', publicFaces.get('docs/MECHANISM-zh.md'), [
+            '它报「未校验」、也不据此阻断',
+            '这道门在 plan 出口与受控 `replan` 重签时都会跑',
+          ], ['而完全没有波次段时，报「未校验」且不改变退出码']),
+          wordingCase('docs/TROUBLESHOOTING.md', publicFaces.get('docs/TROUBLESHOOTING.md'), [
+            'the TASK section-shape gate judges its absence',
+            'again when the plan is re-signed through `replan`',
+          ], ['and keeps its exit code']),
+          wordingCase('docs/TROUBLESHOOTING-zh.md', publicFaces.get('docs/TROUBLESHOOTING-zh.md'), [
+            '缺段仍由 TASK 段形门判定',
+            '这道门在 plan 出口与 `replan` 重签时都会跑',
+          ], ['完全没有波次段时打印「未校验（无波次段）」、不改变退出码']),
+        ].filter((item) => item.text !== null);
+        problems.push(...docWordingChecks(wordingCases));
+        // 实现侧同源核对：成因集合由 ac-coverage 的两张成因表表达——载体缺席三条，其中两条
+        // 「承载段被删」的成因落在内容不可判一侧。取不到表即报告前提失效（不静默当「没变化」）。
+        const acCoverageText = engineScriptTexts().get('lib/ac-coverage.mjs') ?? '';
+        const carrierCauses = literalObjectKeys(acCoverageText, 'UNVERIFIED_EXPLANATIONS');
+        const contentCauses = literalObjectKeys(acCoverageText, 'UNJUDGEABLE_CAUSES');
+        if (carrierCauses === null || contentCauses === null) {
+          problems.push('实现侧成因表取不到（ac-coverage 的载体缺席 / 内容不可判成因表）——文档的三分口径无从对账');
+        } else {
+          if (carrierCauses.length !== 3) {
+            problems.push('载体缺席的成因不再是三条（实现 ' + carrierCauses.length + ' 条: '
+              + carrierCauses.join('、') + '）——文档「载体缺席只剩三件事」的口径要同批改');
+          }
+          const deletedCarrierCauses = contentCauses.filter((cause) => cause.includes('无验收准则段')
+            || cause.includes('无第 1 轮段'));
+          if (deletedCarrierCauses.length !== 2) {
+            problems.push('承载段被删的成因不再落在「内容不可判」一侧（实现: ' + contentCauses.join('、')
+              + '）——文档把它写成载体缺席或另立一支都要重判');
           }
         }
       }
