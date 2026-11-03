@@ -4,7 +4,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { execFileSync, spawnSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import {
   assertExit,
   assertNotOut,
@@ -12,9 +12,10 @@ import {
   assertTrue,
   baseState,
   cleanupTmpDir,
-  copyTreePortable,
+  installSkillTreeCopy,
   runGuard,
   runHandoff,
+  runPrintedCommand,
   runState,
   writeFile,
   writeState,
@@ -357,53 +358,10 @@ function assertDesignFormRecoveryPath(dir) {
 //
 // 恢复段承诺的是「可照抄的命令」，判据就得**真的照抄**：从报文解析命令文本 → 按当前运行形态解析
 // 脚本路径 → 用同一份参数跑一遍（只把 `node` 换成本进程的可执行文件——PATH 解析不是判据对象）。
-// 夹具按安装布局复制本套件技能树：权威源打印的设计形态相对路径（.claude/skills/…）才在夹具内可
-// 解析，因此执行的是**打印文本**；拿 harness 的绝对脚本路径替代它，「这条命令能不能跑」就等于没判。
-function installSkillTreeCopy(root, installDirRel) {
-  const skillCopy = path.join(root, installDirRel, 'flow-comet');
-  copyTreePortable(path.join(SCRIPTS_DIR, '..'), skillCopy);
-  return skillCopy;
-}
-
-// 打印命令 → argv：按 shell 分词语义处理双引号与单引号（引号内空白不切分，引号本身不进入参数）。
-// 该解析器对「整条路径未加引号」有判别力——缺引号时含空格的路径会被切成多个参数。
-function splitPrintedCommand(command) {
-  const argv = [];
-  let current = '';
-  let quote = null;
-  let started = false;
-  for (const ch of command) {
-    if (quote) {
-      if (ch === quote) { quote = null; continue; }
-      current += ch;
-      continue;
-    }
-    if (ch === '"' || ch === "'") { quote = ch; started = true; continue; }
-    if (/\s/.test(ch)) {
-      if (started) { argv.push(current); current = ''; started = false; }
-      continue;
-    }
-    current += ch;
-    started = true;
-  }
-  if (quote) throw new Error('打印命令的引号未闭合: ' + command);
-  if (started) argv.push(current);
-  return argv;
-}
-
-// 真实执行打印出来的那条命令：解释器名 `node` 换成本进程的 node 可执行文件，其余一律照打印文本
-// 解析（脚本路径与参数是判据对象，PATH 不是）。
-function runPrintedCommand(command, root, envOverrides = {}) {
-  const argv = splitPrintedCommand(command);
-  const interpreter = /^node(\.exe)?$/i.test(argv[0]) ? process.execPath : argv[0];
-  const res = spawnSync(interpreter, argv.slice(1), {
-    cwd: root,
-    env: { ...process.env, ...envOverrides },
-    encoding: 'utf8',
-    timeout: 60000,
-  });
-  return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
-}
+// 这条链路的三个夹具（按安装布局复制技能树 / 打印命令切成 argv / 真实执行打印文本）与委托链路组
+// 共用，单一来源在 lib/test-helpers.mjs；权威源打印的设计形态相对路径（.claude/skills/…）只在
+// 复制进夹具的技能树里可解析，因此执行的是**打印文本**——拿 harness 的绝对脚本路径替代它，
+//「这条命令能不能跑」就等于没判。本段只留声明恢复自己的夹具：重放根与逐条照抄执行。
 
 // 照抄闭环自己的夹具根 + 协议副本：场景运行器给主夹具做的那两步，在闭环的独立根上再走一遍
 // （协议文件必须在运行根内才会被守卫读取）。

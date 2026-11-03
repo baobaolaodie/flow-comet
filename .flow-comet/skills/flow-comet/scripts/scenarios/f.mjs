@@ -1017,6 +1017,9 @@ export const ENTRIES = [
       // 单 --prompt 声明口径零残留。锚取可辨认的整句片段，不取裸词（裸词「全部覆盖」「--prompt」
       // 在别处也出现，改宽即恒真）；每条锚各配反向构造：抽掉所属文档里的该锚 ⇒ 必报缺该锚，
       // 把旧句子还原进任一册 ⇒ 必报残留。既有锚（分条等价 / 两层加载 / 模板权威）一条不删。
+      // 恢复命令的锚落在**规范句**上（报文按协议派生、一次给全、照抄即通）——缺声明时的恢复形态是
+      // 这段最容易被读成操作指引的地方，锚错句等于给已废弃的写法背书；旧的「补缺项、漏模板清单」
+      // 写法只允许以「已废弃」的对照形态留在册子里（抽掉该标记，同一句就读回规范做法）。
       {
         const declarationBookRels = ['flow-comet/SKILL.md', 'flow-comet/reference/entry-detail.md'];
         const declarationDocAnchors = [
@@ -1038,8 +1041,10 @@ export const ENTRIES = [
             '都要有一个属于它的标记'],
           ['展开册 · handoff-guarded 不在判据内', 'flow-comet/reference/entry-detail.md',
             '**`handoff-guarded` 不在判据内**'],
-          ['展开册 · 缺声明的恢复命令形态', 'flow-comet/reference/entry-detail.md',
-            'skill-load <node> <skill> --prompt <缺的那份协议文件>'],
+          ['展开册 · 恢复命令按协议派生（每个必需技能各一条）', 'flow-comet/reference/entry-detail.md',
+            '报文按**协议派生**给出该节点**每个** `guarded` 必需技能各一条命令'],
+          ['展开册 · 恢复命令一次给全、照抄即通', 'flow-comet/reference/entry-detail.md',
+            '三个面一次给全，照抄即通'],
           ['展开册 · 分级（新 BLOCKED / 旧 WARN）', 'flow-comet/reference/entry-detail.md',
             '新 change BLOCKED（强制全部覆盖）、旧 change 只 WARN'],
           ['展开册 · 旧单值标记按 basename 计入覆盖', 'flow-comet/reference/entry-detail.md',
@@ -1051,6 +1056,11 @@ export const ENTRIES = [
           '每个协议文件对应一条声明命令',
           'skill-load <node> <skill> --prompt flow-kit/prompts/<阶段>.md',
         ];
+        // 旧的「只补缺项、漏模板清单」恢复形态**允许作为对照留档**，但只能以「已废弃」的对照形态
+        // 出现：抽掉这个标记，同一句就被读回规范做法——规范句的两条锚判的是「规范句在不在」，判不了
+        // 「旧句有没有被当成规范」，两句因此互为规范 / 对照的分界。
+        const deprecatedRecoveryForm = 'skill-load <node> <skill> --prompt <缺的那份协议文件>';
+        const deprecatedRecoveryMarker = '已废弃';
         const declarationDocProblems = (docs) => {
           const out = [];
           for (const [label, rel, anchor] of declarationDocAnchors) {
@@ -1062,6 +1072,20 @@ export const ENTRIES = [
             if (typeof text !== 'string') continue;
             for (const stale of staleDeclarationSentences) {
               if (text.includes(stale)) out.push(rel + ' 残留旧声明口径「' + stale + '」');
+            }
+            // 旧恢复形态只允许留在对照句里：同句（以句号 / 换行为界）须带「已废弃」标记
+            let from = 0;
+            for (;;) {
+              const at = text.indexOf(deprecatedRecoveryForm, from);
+              if (at < 0) break;
+              from = at + deprecatedRecoveryForm.length;
+              const head = Math.max(text.lastIndexOf('。', at), text.lastIndexOf(String.fromCharCode(10), at));
+              const stops = [text.indexOf('。', from), text.indexOf(String.fromCharCode(10), from)]
+                .filter((index) => index >= 0);
+              const sentence = text.slice(head + 1, stops.length > 0 ? Math.min(...stops) : text.length);
+              if (!sentence.includes(deprecatedRecoveryMarker)) {
+                out.push(rel + ' 把旧恢复形态写成规范做法（只允许作为「' + deprecatedRecoveryMarker + '」的对照保留）');
+              }
             }
           }
           return out;
@@ -1084,6 +1108,21 @@ export const ENTRIES = [
           }
           if (!declarationDocProblems(probed).some((p) => p.includes('残留旧声明口径'))) {
             problems.push('反向构造判别力缺失（声明口径: 还原旧句「' + stale + '」未被判残留）');
+          }
+        }
+        // 反向构造（旧形态的对照标记）：摘掉「已废弃」⇒ 必报「把旧恢复形态写成规范做法」
+        // （只在对照句确实在场时探；对照句被整句删掉是允许的）
+        {
+          const detailRel = 'flow-comet/reference/entry-detail.md';
+          const detailText = declarationDocs.get(detailRel);
+          if (typeof detailText === 'string' && detailText.includes(deprecatedRecoveryForm)
+            && detailText.includes(deprecatedRecoveryMarker)) {
+            const probed = new Map(declarationDocs)
+              .set(detailRel, detailText.split(deprecatedRecoveryMarker).join('（对照）'));
+            if (!declarationDocProblems(probed).some((p) => p.includes('把旧恢复形态写成规范做法'))) {
+              problems.push('反向构造判别力缺失（声明口径: 摘掉旧形态的「'
+                + deprecatedRecoveryMarker + '」对照标记未被判违规）');
+            }
           }
         }
       }

@@ -12,11 +12,13 @@ import {
   assertOut,
   assertTrue,
   baseState,
-  copyTreePortable,
+  installSkillTreeCopy,
   runGuard,
   runHandoff,
   runHook,
+  runPrintedCommand,
   runState,
+  splitPrintedCommand,
   writeFile,
   writeState,
 } from '../lib/test-helpers.mjs';
@@ -32,8 +34,10 @@ import {
   customProtocol,
   customProtocolWithSkillCall,
   dropNamedImport,
+  engineCodeText,
   engineScriptTexts,
   handoffFor,
+  scriptTreeFiles,
   summaryContent,
   writeCustomProtocol,
 } from '../lib/test-fixtures.mjs';
@@ -53,61 +57,14 @@ import { scriptCommand } from '../lib/state-explain.mjs';
 // ---------- 打印出来的命令：解析 → 真实执行（本组锚点；命令形态必须可复制、可执行） ----------
 //
 // 背景：运行期消息曾把脚本命令写成未加引号的单一平台字面量，测试只断言字面串、随后改用 harness
-// 的绝对路径执行，于是「打印出来的那条命令」从未被真正执行过（形似全绿）。下面四个助手就是
-// 这条链路的夹具与断言：**从输出解析命令文本 → 按当前运行形态解析路径 → 真实执行**。
-
-// 把本套件自身技能树按安装布局复制进夹具（与 prepare-env 装出的副本同构）：副本自身运行时推导出
-// 的是**运行根相对**的脚本目录，打印的命令因此可在夹具内解析——执行的是打印文本，不是 harness
-// 的绝对脚本路径。installDirRel 是该布局在运行根下的相对目录（夹具构造，不是断言对象）。
-function installSkillTreeCopy(root, installDirRel) {
-  const skillCopy = path.join(root, installDirRel, 'flow-comet');
-  copyTreePortable(path.join(SCRIPTS_DIR, '..'), skillCopy);
-  return skillCopy;
-}
+// 的绝对路径执行，于是「打印出来的那条命令」从未被真正执行过（形似全绿）。链路的三个夹具——按安装
+// 布局复制技能树、把打印命令切成 argv、真实执行打印文本——由两组场景共用，单一来源在
+// lib/test-helpers.mjs；本段只留本组自有的一件：跑副本脚本，以及命令形态（引号 / 分词 / 路径
+// 可解析）的断言。
 
 // 跑指定脚本（副本形态）：cwd = 夹具根（与 run* 助手同一运行根口径）。
 function runScriptCopy(scriptPath, args, root, envOverrides = {}) {
   const res = spawnSync(process.execPath, [scriptPath, ...args], {
-    cwd: root,
-    env: { ...process.env, ...envOverrides },
-    encoding: 'utf8',
-    timeout: 60000,
-  });
-  return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
-}
-
-// 打印命令 → argv：按 shell 分词语义处理双引号与单引号（引号内空白不切分，引号本身不进入参数）。
-// 该解析器对「整条路径未加引号」有判别力——缺引号时含空格的路径会被切成多个参数。
-function splitPrintedCommand(command) {
-  const argv = [];
-  let current = '';
-  let quote = null;
-  let started = false;
-  for (const ch of command) {
-    if (quote) {
-      if (ch === quote) { quote = null; continue; }
-      current += ch;
-      continue;
-    }
-    if (ch === '"' || ch === "'") { quote = ch; started = true; continue; }
-    if (/\s/.test(ch)) {
-      if (started) { argv.push(current); current = ''; started = false; }
-      continue;
-    }
-    current += ch;
-    started = true;
-  }
-  if (quote) throw new Error('打印命令的引号未闭合: ' + command);
-  if (started) argv.push(current);
-  return argv;
-}
-
-// 真实执行打印出来的那条命令：解释器名 `node` 换成本进程的 node 可执行文件（PATH 解析不是本锚点
-// 的断言对象，脚本路径与参数才是），其余一律照打印文本解析。
-function runPrintedCommand(command, root, envOverrides = {}) {
-  const argv = splitPrintedCommand(command);
-  const interpreter = /^node(\.exe)?$/i.test(argv[0]) ? process.execPath : argv[0];
-  const res = spawnSync(interpreter, argv.slice(1), {
     cwd: root,
     env: { ...process.env, ...envOverrides },
     encoding: 'utf8',
@@ -444,6 +401,33 @@ export const ENTRIES = [
       });
       assertTrue(splitMutatedProblems.some((problem) => problem.includes('workflow-handoff.mjs')),
         '摘掉消费方的具名取用后结构锚未报出（判据没有判别力）: ' + JSON.stringify(splitMutatedProblems));
+
+      // ---------- 打印命令链的夹具单一来源（原位扩展；不新增场景条目） ----------
+      // 「按安装布局复制技能树 → 把打印命令切成 argv → 真实执行打印文本」这三个夹具此前在委托链路组
+      // 与声明恢复组各有一份（逐字复制、含注释）：同一条命令在两组的判据里各自演化，任一侧漂移都不会
+      // 让另一侧变红。判据 = 三个夹具的定义只有一处（lib/test-helpers.mjs），凡在代码里引用它们的模块
+      // 都从那里具名取用——落点与消费方都由真实形态派生，新增第三份复制即红。既有断言只看行为（各组
+      // 自己的照抄闭环），两组行为都自洽时漂移是静默的，故这一层结构锚不能省。
+      const chainFixtures = ['installSkillTreeCopy', 'splitPrintedCommand', 'runPrintedCommand'];
+      const chainSourceRel = 'lib/test-helpers.mjs';
+      const treeTexts = new Map(scriptTreeFiles()
+        .map((rel) => [rel, fs.readFileSync(path.join(SCRIPTS_DIR, rel), 'utf8')]));
+      for (const symbol of chainFixtures) {
+        const chainProblems = singleSourceImportProblems({ symbol, sourceRel: chainSourceRel, texts: treeTexts });
+        assertTrue(chainProblems.length === 0, '打印命令链的夹具 ' + symbol + ' 应只有一处实现、且引用方都从 '
+          + chainSourceRel + ' 取用:\n' + chainProblems.join('\n'));
+        // 反向构造（判别力）：摘掉某个真实消费方的具名取用 → 结构锚必须点名它（否则上一条只是「看起来有」）
+        const symbolRe = new RegExp('\\b' + symbol + '\\b');
+        const consumerRel = [...treeTexts.keys()].find((rel) =>
+          rel !== chainSourceRel && symbolRe.test(engineCodeText(treeTexts.get(rel))));
+        if (!consumerRel) {
+          throw new Error('反向构造的前提不成立：' + symbol + ' 在 ' + chainSourceRel + ' 之外没有代码层消费者');
+        }
+        const mutated = new Map(treeTexts).set(consumerRel, dropNamedImport(treeTexts.get(consumerRel), symbol));
+        const reported = singleSourceImportProblems({ symbol, sourceRel: chainSourceRel, texts: mutated });
+        assertTrue(reported.some((problem) => problem.includes(consumerRel)),
+          '摘掉 ' + consumerRel + ' 的具名取用后结构锚未点名它（判据没有判别力）: ' + JSON.stringify(reported));
+      }
 
       // ---------- 协议上下文随恢复命令传播（原位扩展；不新增场景条目） ----------
       // guard 解析协议的顺序包含 state.protocolPath（init 持久化绑定），而 workflow-state /

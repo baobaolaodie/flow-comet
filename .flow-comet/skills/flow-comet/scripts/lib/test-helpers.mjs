@@ -223,6 +223,63 @@ export function copyTreePortable(src, dst) {
   }
 }
 
+// ---------- 打印出来的命令：解析 → argv → 真实执行 ----------
+//
+// 运行期消息打印的命令是**给执行者照抄的文本**，判据就得真的照着它跑：只断言字面串、再用 harness
+// 的绝对脚本路径去执行，等于从未执行过打印出来的那条文本（形似全绿）。这一组是那条链路的单一
+// 来源：按安装布局复制技能树 → 把打印命令按 shell 语义切成 argv → 真实执行打印文本。两组场景
+//（委托链路 / 声明恢复）都从这里取用——各存一份时，同一条命令会在两组的判据里各自演化，而任一侧
+// 漂移都不会让另一侧变红。
+
+// 把套件自身技能树按安装布局复制进夹具（与安装器装出的副本同构）：副本自身运行时推导出的是
+// **运行根相对**的脚本目录，打印的命令因此可在夹具内解析——执行的是打印文本，不是 harness 的
+// 绝对脚本路径。installDirRel 是该布局在运行根下的相对目录（夹具构造，不是断言对象）。
+export function installSkillTreeCopy(root, installDirRel) {
+  const skillCopy = path.join(root, installDirRel, 'flow-comet');
+  copyTreePortable(path.join(SCRIPTS_DIR, '..'), skillCopy);
+  return skillCopy;
+}
+
+// 打印命令 → argv：按 shell 分词语义处理双引号与单引号（引号内空白不切分，引号本身不进入参数）。
+// 该解析器对「整条路径未加引号」有判别力——缺引号时含空格的路径会被切成多个参数。
+export function splitPrintedCommand(command) {
+  const argv = [];
+  let current = '';
+  let quote = null;
+  let started = false;
+  for (const ch of command) {
+    if (quote) {
+      if (ch === quote) { quote = null; continue; }
+      current += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; started = true; continue; }
+    if (/\s/.test(ch)) {
+      if (started) { argv.push(current); current = ''; started = false; }
+      continue;
+    }
+    current += ch;
+    started = true;
+  }
+  if (quote) throw new Error('打印命令的引号未闭合: ' + command);
+  if (started) argv.push(current);
+  return argv;
+}
+
+// 真实执行打印出来的那条命令：解释器名 `node` 换成本进程的 node 可执行文件（PATH 解析不是本锚点
+// 的断言对象，脚本路径与参数才是），其余一律照打印文本解析。
+export function runPrintedCommand(command, root, envOverrides = {}) {
+  const argv = splitPrintedCommand(command);
+  const interpreter = /^node(\.exe)?$/i.test(argv[0]) ? process.execPath : argv[0];
+  const res = spawnSync(interpreter, argv.slice(1), {
+    cwd: root,
+    env: { ...process.env, ...envOverrides },
+    encoding: 'utf8',
+    timeout: 60000,
+  });
+  return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
+}
+
 // 最小合法 state（夹具起点）：字段与状态校验器的类型要求同形；node 为当前节点。
 export function baseState(node) {
   return {
