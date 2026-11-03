@@ -405,6 +405,29 @@ function runPrintedCommand(command, root, envOverrides = {}) {
   return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
 }
 
+// 照抄闭环自己的夹具根 + 协议副本：场景运行器给主夹具做的那两步，在闭环的独立根上再走一遍
+// （协议文件必须在运行根内才会被守卫读取）。
+function makeReplayRoot() {
+  const root = makeTmp();
+  fs.mkdirSync(path.dirname(scenarioProtocolPath(root)), { recursive: true });
+  fs.copyFileSync(BUILTIN_PROTOCOL_SOURCE, scenarioProtocolPath(root));
+  return root;
+}
+
+// 照抄执行段（两条闭环共用）：按安装布局把本套件技能树复制进夹具（打印出来的设计形态相对路径才可
+// 解析），并清掉环境里的协议注入——命令自带的协议上下文必须够用。返回逐条执行打印文本的函数，
+// 非 0 即失败并回显命令。
+function printedCommandReplay(root, label) {
+  installSkillTreeCopy(root, path.join('.claude', 'skills'));
+  const cleanEnv = { FLOW_COMET_RUN_ROOT: root, FLOW_COMET_PROTOCOL: '' };
+  return (command) => {
+    const res = runPrintedCommand(command, root, cleanEnv);
+    assertTrue(res.status === 0, label + '：照抄的命令跑不通\n  命令: ' + command
+      + '\n  exit ' + res.status + '\n' + res.output);
+    return res;
+  };
+}
+
 // 恢复段 = 输出里最后一条「恢复:」起的整段（该段之后引擎直接退出）。
 function lastRecoveryBlock(output) {
   const text = String(output);
@@ -425,10 +448,8 @@ function printedCommandsOf(block, verb) {
 // 技能 + 首份协议、且不带模板清单，照抄完同一 exit 仍被覆盖门点名（缺另一份协议文件与另一个必需
 // 技能）——「报文各给一半」正是本断言要钉死的东西：照抄不了就是没修好。
 function assertDeclarationRecoveryRoundTrip({ node, fixture, skills, prompts, templates }) {
-  const root = makeTmp();
+  const root = makeReplayRoot();
   try {
-    fs.mkdirSync(path.dirname(scenarioProtocolPath(root)), { recursive: true });
-    fs.copyFileSync(BUILTIN_PROTOCOL_SOURCE, scenarioProtocolPath(root));
     fixture(root);
     const blocked = runGuard(['exit', node], root);
     assertExit(blocked, 1);
@@ -440,14 +461,7 @@ function assertDeclarationRecoveryRoundTrip({ node, fixture, skills, prompts, te
       throw new Error(node + '：缺声明 + 缺证据的阻塞应同时给出 skill-load 与 record 命令:\n' + block);
     }
     // 照抄：声明命令按报文顺序执行，再 record。环境里不注入协议——命令自带的上下文必须够用。
-    installSkillTreeCopy(root, path.join('.claude', 'skills'));
-    const cleanEnv = { FLOW_COMET_RUN_ROOT: root, FLOW_COMET_PROTOCOL: '' };
-    const copyAndRun = (command) => {
-      const res = runPrintedCommand(command, root, cleanEnv);
-      assertTrue(res.status === 0, node + '：照抄的命令跑不通\n  命令: ' + command
-        + '\n  exit ' + res.status + '\n' + res.output);
-      return res;
-    };
+    const copyAndRun = printedCommandReplay(root, node);
     for (const command of declared) copyAndRun(command);
     copyAndRun(recordCommand);
     // 核心：照抄完，同一个 exit 必须通过（不是「再去另一条报文里找第二步」）。
@@ -493,8 +507,9 @@ function assertDerivedDeclarationCommands({ node, block, declared, skills, promp
 // 测不到覆盖门）→ exit 被覆盖门拦下 → **照抄门给出的命令** → 同一 exit 通过。
 function assertDeclarationGateRecovery({ node, root, skills, prompts, templates, copyAndRun }) {
   const loadsDir = path.join(root, '.specs', CHANGE_ID, '.skill-loads');
+  const declaredSkill = skills[0];
   for (const name of fs.readdirSync(loadsDir)) fs.rmSync(path.join(loadsDir, name));
-  assertExit(runState(['skill-load', node, skills[0], '--prompt', prompts[0],
+  assertExit(runState(['skill-load', node, declaredSkill, '--prompt', prompts[0],
     '--templates', templates.join(',')], root), 0);
   const blocked = runGuard(['exit', node], root);
   assertExit(blocked, 1);
@@ -504,10 +519,88 @@ function assertDeclarationGateRecovery({ node, root, skills, prompts, templates,
   if (commands.length === 0) {
     throw new Error(node + '：覆盖门的恢复段没给出可照抄的声明命令:\n' + block);
   }
+  // 形态断言（照抄能过 ≠ 命令形态对）：覆盖门的命令按**缺的必需技能子集**派生——已在场的技能不重
+  // 复刷，缺的每个技能各一条——且每条都把该节点**全部** --prompt 与模板全清单带全。只锁「照抄后
+  // 通过」会放过少一份 --prompt 的拼法：那份协议此刻由既有标记覆盖，缺口要等执行者删掉那条标记
+  // 才现形（报文当场就给不全）。少一条命令 / 多刷已声明的技能 / 少任一份 --prompt / 少模板清单，
+  // 本断言即红。
+  const expectedSkills = skills.filter((skill) => skill !== declaredSkill);
+  if (commands.length !== expectedSkills.length) {
+    throw new Error(node + '：覆盖门的声明命令应按缺的必需技能子集派生（缺 '
+      + expectedSkills.join('、') + ' = ' + expectedSkills.length + ' 条），实际 '
+      + commands.length + ' 条:\n' + block);
+  }
+  const templateFlag = '--templates ' + templates.join(',');
+  for (const skill of expectedSkills) {
+    const command = commands.find((line) => line.includes(' skill-load ' + node + ' ' + skill + ' '));
+    if (!command) {
+      throw new Error(node + '：覆盖门的恢复段缺技能 ' + skill + ' 的声明命令（它是缺的必需技能）:\n' + block);
+    }
+    for (const prompt of prompts) {
+      if (!command.includes('--prompt ' + prompt)) {
+        throw new Error(node + '：' + skill + ' 的声明命令缺协议文件 ' + prompt
+          + '（覆盖门要求该节点全部协议文件都被声明，少给一份，照抄后同一 exit 仍会点名它）: ' + command);
+      }
+    }
+    if (!command.includes(templateFlag)) {
+      throw new Error(node + '：' + skill + ' 的声明命令缺模板全清单 ' + templateFlag + ': ' + command);
+    }
+  }
   for (const command of commands) copyAndRun(command);
   const recovered = runGuard(['exit', node], root);
   assertExit(recovered, 0);
   assertOut(recovered, 'ALL CHECKS PASSED');
+}
+
+// 前端 design 的证据门照抄闭合（gated 绑定的那半）：证据里只缺 required-skill:design.flow-comet-ui-design
+// ——出口对该绑定**不再自动补写**，恢复必须同一段给全两件事：
+//   ① 真实 skill-load 声明（nodeSkillLoadCommands 的同一装配：每个 guarded 必需技能各一条，每条带
+//      该节点全部 --prompt（含条件提示词 2a-ui-design.md）与模板全清单）；
+//   ② 带该 required-skill 的 record——只补声明不补证据，同一个 exit 仍点名同一条。
+// 旧形态（占位提示词、无 --templates、不提 record）照抄后必死循环；本断言逐层钉住这两件，再真的
+// 照抄走一遍。
+function assertFrontendDesignEvidenceRoundTrip() {
+  const root = makeReplayRoot();
+  try {
+    writeDesignExitFixture(root, {
+      newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: false,
+    });
+    const blocked = runGuard(['exit', 'design'], root);
+    assertExit(blocked, 1);
+    assertOut(blocked, 'BLOCKED: missing required Skill evidence: required-skill:design.flow-comet-ui-design');
+    // ① 占位提示词形态：--prompt 的值位置写「<flow-kit/prompts/ 协议文件>」，bash 下 < 是重定向——
+    //    照抄直接语法失败（值位置不接受占位符：路径要么给全，要么别给这个参数）。
+    assertNotOut(blocked, '--prompt <');
+    const block = lastRecoveryBlock(blocked.output);
+    const declared = printedCommandsOf(block, 'skill-load');
+    const recordCommand = printedCommandsOf(block, 'record')[0];
+    if (declared.length === 0 || !recordCommand) {
+      throw new Error('design：gated 绑定的缺口应同时给出 skill-load 与 record 命令'
+        + '（只给声明不给 record，照抄后同一 exit 仍点名同一条）:\n' + block);
+    }
+    // ② record 载荷带上被点名的那条 required-skill——record 是覆盖写，只有把这条写回去才算补齐
+    if (!recordCommand.includes('required-skill:design.flow-comet-ui-design')) {
+      throw new Error('design：record 的恢复载荷没带上 required-skill:design.flow-comet-ui-design'
+        + '（自动补写对该绑定已失效，只补声明不补证据 = 死循环）: ' + recordCommand);
+    }
+    // ③ 派生形态：每个 guarded 必需技能各一条，每条带全部协议文件（含条件提示词）与模板全清单
+    assertDerivedDeclarationCommands({
+      node: 'design',
+      block,
+      declared,
+      skills: ['flow-comet-design', 'flow-comet-ui-design'],
+      prompts: ['flow-kit/prompts/2-design.md', 'flow-kit/prompts/2a-ui-design.md'],
+      templates: ['DESIGN.md'],
+    });
+    // ④ 真的照抄：按报文顺序执行声明命令，再 record；环境里不注入协议（命令自带上下文必须够用）
+    const copyAndRun = printedCommandReplay(root, 'design');
+    for (const command of [...declared, recordCommand]) copyAndRun(command);
+    const recovered = runGuard(['exit', 'design'], root);
+    assertExit(recovered, 0);
+    assertOut(recovered, 'ALL CHECKS PASSED');
+  } finally {
+    cleanupTmpDir(root);
+  }
 }
 
 // ---------- 声明命令的册子锚（入口册 + 展开册：open 的两条规范命令） ----------
@@ -924,6 +1017,9 @@ export const ENTRIES = [
           writeFile(root, 'flow-kit/prompts/5-test.md', '# 阶段 5 · TEST\n\n## 角色\n\n你是 Tester。\n');
         },
       });
+      // ⑩ 前端 design 的证据门照抄闭合（不新增场景条目）：证据缺一条 gated 绑定（ui-design）时，
+      //    恢复段必须给全「真实声明 + 带该 required-skill 的 record」两步，照抄后同一 exit 通过。
+      assertFrontendDesignEvidenceRoundTrip();
     },
   },
 
