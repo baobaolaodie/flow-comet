@@ -469,7 +469,9 @@ export async function runInit(protocol, argv, protocolPath) {
   if (prevState?.activeChange === changeName || specsDirExists) {
     console.error('WARN: change ' + changeName + ' 已存在——重跑 init 将重置节点状态（completedNodes/evidence 清空）。若需继续已有 change，请用 advance/select 而非重跑 init。');
   }
-  // E1: branchMode 自动判定——git 仓库（cwd=runRoot）→ true；非 git 仓库 → false
+  // E1: branchMode 自动判定——git 仓库 → true；非 git 仓库 → false。git 命令一律以运行根为 cwd
+  //（state-branch 族统一取 runRootDir）——分支判定/创建与状态落点因此跟同一个根，不会一个走 cwd、
+  // 一个走变量根。
   const branchMode = isInsideWorkTree();
   const state = {
     activeChange: changeName,

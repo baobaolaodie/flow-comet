@@ -15,6 +15,9 @@ import { taskAttrsById, taskBlocks, taskOpeningAttrs } from './task-parsing.mjs'
 // 时间形态单一权威（新增写入路径一律走本模块，禁自行拼接）：撤回留痕的时刻生成走 nowTimestamp，
 // 人可见回显走 formatLocalTimestamp（本地时间 + 显式偏移），解析走 parseTimestamp。
 import { nowTimestamp, formatLocalTimestamp, parseTimestamp } from './time-utils.mjs';
+// 运行根（本次调用把哪个目录当项目根）由 lib/run-root.mjs 单源解析：与 workflow-state 入口、
+// 守卫族同一份事实——各写一份 env/cwd 推导，同一个调用两侧就会给出不同答案。
+import { resolveRunRoot } from './lib/run-root.mjs';
 // 路径上下文（runRoot / specsRoot / statePath）：节点视图解析要经 state-io 的运行根，与 workflow-state
 // 入口同源；初始化在下方 runRoot 解析之后。
 import { initStateContext, findActiveChange } from './lib/state-io.mjs';
@@ -52,7 +55,7 @@ import {
 // 归属门禁读取协议用：与其它脚本同源（packageRoot 默认协议；env 可覆盖），不消费 request 参数。
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..');
-const runRoot = process.cwd();
+const runRoot = resolveRunRoot();
 // 状态文件路径（单一来源：state-schema.mjs 的运行时路径常量）
 const statePath = path.join(runRoot, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME);
 // 节点视图解析（result 的 PREFLIGHT 提示）复用 state-io 的路径上下文——与 workflow-state 入口同一

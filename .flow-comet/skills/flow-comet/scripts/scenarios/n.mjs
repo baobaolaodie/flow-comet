@@ -41,6 +41,8 @@ import {
   engineImportsSymbolFrom,
   engineScriptTexts,
   handoffFor,
+  HANDOFF,
+  STATE,
   writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import { scenarioProtocolPath } from '../lib/test-assertions.mjs';
@@ -2827,7 +2829,7 @@ export const ENTRIES = [
   // ⑦ 追加「配对键单源」：第三族的任务对键只在 task-graph 表达一次，[P] 判据的补集消费它返回的判定；
   //    反向构造三层（换名字 / 换分隔符的第二份键 + 形态漂移的行为变异体）证明补集断言真的敏感。
   {
-    name: 'TA-21 模板缺席降级：不阻断且显式输出「未校验（模板缺失）」；模板在场时同夹具被拦；段名清单 / 段体切片 / 任务对键 / 写面元素单源锁（受检面 = 引擎实现面）',
+    name: 'TA-21 模板缺席降级：不阻断且显式输出「未校验（模板缺失）」；模板在场时同夹具被拦；段名清单 / 段体切片 / 任务对键 / 写面元素 / 运行根的单源锁（受检面 = 引擎实现面）+ 运行根隔离（真跑 CLI）',
     run: async (dir) => {
       // ① 模板缺席：只写工件，不写 flow-kit/templates/
       writeFile(dir, CHANGE_DIR + '/CHANGE.md', renderDoc('CHANGE', { omit: ['影响面'] }));
@@ -3544,6 +3546,169 @@ export const ENTRIES = [
         assertTrue(driftedUpper.writeConflicts.length === 0,
           '反向构造失效：写面取用改回大小写敏感后，混合大小写夹具仍被检出重叠——'
           + '该断言对取用面不敏感（' + JSON.stringify(driftedUpper.writeConflicts) + '）');
+      }
+      // ⑧ 运行根单源 + 隔离（行为面在前、结构锁在后）：「这次调用把哪个目录当项目根」曾被两处各自
+      //    回答——守卫族读 FLOW_COMET_RUN_ROOT，状态命令族直接用进程 cwd。用变量把实验指向临时目录
+      //    时，状态命令仍在 cwd 仓库里建分支、把正在跑的 change 的 state 覆盖成新 change 的初始状态
+      //    （数据覆盖，靠备份才恢复）。本格先真跑命令证明「设了变量就只作用于那个根」，再用单源锁
+      //    钉住「解析只许有一处实现」。
+      {
+        const rootsDir = path.join(dir, 'run-root-isolation');
+        const cwdRepo = path.join(rootsDir, 'cwd-repo');
+        const envRoot = path.join(rootsDir, 'env-root');
+        const asRes = (res) => ({ status: res.status ?? 1, output: String(res.stdout ?? '') + String(res.stderr ?? '') });
+        const gitOut = (repo, ...args) => {
+          const res = spawnSync('git', args, { cwd: repo, encoding: 'utf8', timeout: 60000 });
+          if ((res.status ?? 1) !== 0) throw new Error('夹具 git ' + args.join(' ') + ' 失败: ' + String(res.stderr ?? ''));
+          return String(res.stdout ?? '').trim();
+        };
+        const stateFileAt = (root) => path.join(root, '.flow-comet', 'flow-comet-state.json');
+        const stateBytesAt = (root) => fs.readFileSync(stateFileAt(root));
+        const stateAt = (root) => JSON.parse(fs.readFileSync(stateFileAt(root), 'utf8'));
+        // 两个真实 git 仓库：cwd 侧带活跃 change（state + 工件 + 声明标记），变量侧是空仓库。协议副本各放
+        // 一份——受保护读取要求协议位于所属运行根内，两侧各有一份才能分别作真实命令的输入。
+        for (const repo of [cwdRepo, envRoot]) {
+          fs.mkdirSync(path.join(repo, 'reference'), { recursive: true });
+          fs.copyFileSync(scenarioProtocolPath(dir), path.join(repo, 'reference', 'workflow-protocol.json'));
+          gitOut(repo, 'init', '-q');
+          gitOut(repo, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.com',
+            'commit', '--allow-empty', '-m', 'init');
+        }
+        writeState(cwdRepo, {
+          ...baseState('open'),
+          activeChange: 'live-change',
+          newChange: true,
+          status: 'running',
+          enteredNodes: ['open'],
+          evidence: {
+            open: { summary: 'live' },
+            'subagent-execute': {
+              handoffRequests: { 'LIVE-01': { description: 'live', requestedAt: '2026-08-01T00:00:00.000Z' } },
+            },
+          },
+        });
+        writeFile(cwdRepo, '.specs/live-change/CHANGE.md', '# CHANGE\n\n## Why（为什么做）\nlive\n');
+        writeNodeDeclarationMarkers(cwdRepo, 'open', { changeId: 'live-change' });
+        const cwdStateBefore = stateBytesAt(cwdRepo);
+        const cwdHeadBefore = gitOut(cwdRepo, 'rev-parse', 'HEAD');
+        const cwdBranchBefore = gitOut(cwdRepo, 'rev-parse', '--abbrev-ref', 'HEAD');
+        // 状态命令一律以 cwd = 仓库、运行根 = 变量指向的那个仓库发起（真实隔离场景的形态）。
+        const inEnvRoot = (script, args) => asRes(spawnSync(process.execPath, [script, ...args], {
+          cwd: cwdRepo,
+          env: {
+            ...process.env,
+            FLOW_COMET_RUN_ROOT: envRoot,
+            // 协议取运行根相对形态：同一个调用里，命令字面不必随根变化——变的是「哪一个是根」。
+            FLOW_COMET_PROTOCOL: 'reference/workflow-protocol.json',
+          },
+          encoding: 'utf8',
+          timeout: 60000,
+        }));
+
+        // ① init：state 落点与分支判定/创建都跟运行根走
+        const initIsolated = inEnvRoot(STATE, ['init', 'fresh-change']);
+        assertExit(initIsolated, 0);
+        assertOut(initIsolated, 'Initialized: fresh-change');
+        assertTrue(fs.existsSync(stateFileAt(envRoot)),
+          '设置 FLOW_COMET_RUN_ROOT 后 init 未把 state 写到该根（写到了进程 cwd）——临时实验会覆盖真实 change 的 state');
+        assertTrue(stateAt(envRoot).activeChange === 'fresh-change',
+          '运行根下的 state 未记录新 change: ' + JSON.stringify(stateAt(envRoot).activeChange));
+        assertTrue(fs.existsSync(path.join(envRoot, '.specs', 'fresh-change')), 'init 未在运行根下建 change 目录');
+        assertTrue(gitOut(envRoot, 'rev-parse', '--abbrev-ref', 'HEAD') === 'change/fresh-change',
+          '分支未按运行根创建/切换（HEAD = ' + gitOut(envRoot, 'rev-parse', '--abbrev-ref', 'HEAD') + '）');
+
+        // ② cwd 侧：state 字节、HEAD、当前分支零改动；也不得在 cwd 仓库新建同名分支
+        assertTrue(stateBytesAt(cwdRepo).equals(cwdStateBefore),
+          'cwd 仓库的 state 字节被改写——设置运行根后状态命令仍写到了进程 cwd');
+        assertTrue(gitOut(cwdRepo, 'rev-parse', 'HEAD') === cwdHeadBefore, 'cwd 仓库的 HEAD 被移动');
+        assertTrue(gitOut(cwdRepo, 'rev-parse', '--abbrev-ref', 'HEAD') === cwdBranchBefore,
+          'cwd 仓库的当前分支被切换: ' + gitOut(cwdRepo, 'rev-parse', '--abbrev-ref', 'HEAD'));
+        assertTrue(gitOut(cwdRepo, 'branch', '--list', 'change/fresh-change') === '',
+          'cwd 仓库里出现了本该建在运行根的分支 change/fresh-change');
+
+        // ③ status / record：读写的都是运行根那一个 state
+        const statusIsolated = inEnvRoot(STATE, ['status']);
+        assertTrue(statusIsolated.status === 0, 'status 应成功: ' + statusIsolated.output);
+        assertOut(statusIsolated, '"change": "fresh-change"');
+        assertNotOut(statusIsolated, 'live-change');
+        assertTrue(stateBytesAt(cwdRepo).equals(cwdStateBefore), 'status 改写了 cwd 仓库的 state');
+        // record 目标取零模板节点：声明门会按节点模板清单核对标记，本格不引入模板面——只要标记在场，
+        // 记录结果就只取决于「读到的是哪一个 state」。
+        writeNodeDeclarationMarkers(envRoot, 'verify', { changeId: 'fresh-change' });
+        const recordIsolated = inEnvRoot(STATE, ['record', 'verify', '{"summary":"run-root record"}']);
+        assertExit(recordIsolated, 0);
+        assertOut(recordIsolated, 'EVIDENCE: verify');
+        assertTrue(stateAt(envRoot).evidence?.verify?.summary === 'run-root record',
+          'record 未写入运行根的 state: ' + JSON.stringify(stateAt(envRoot).evidence));
+        assertTrue(stateBytesAt(cwdRepo).equals(cwdStateBefore), 'record 改写了 cwd 仓库的 state');
+
+        // ④ 委托入口（第三个取用面）：status 只读，用它证明它也认同一处解析——两侧 state 各带一个可
+        //    区分的活跃 change 与委托记录，读错根会立刻显形。
+        const handoffIsolated = inEnvRoot(HANDOFF, ['status']);
+        assertTrue(handoffIsolated.status === 0, 'handoff status 应成功: ' + handoffIsolated.output);
+        assertOut(handoffIsolated, '"activeChange": "fresh-change"');
+        assertNotOut(handoffIsolated, 'LIVE-01');
+
+        // ⑤ 反向构造（同一夹具、去掉变量）：解析退回进程 cwd —— 上面「cwd 零改动」三条断言正是会红的
+        //    那三条；这里直接证明夹具确实能把 cwd 侧改写照出来（不是恒绿）。
+        const envRootStateBefore = stateBytesAt(envRoot);
+        const noRootInit = asRes(spawnSync(process.execPath, [STATE, 'init', 'cwd-change'], {
+          cwd: cwdRepo,
+          env: {
+            ...process.env,
+            FLOW_COMET_RUN_ROOT: '',
+            FLOW_COMET_PROTOCOL: 'reference/workflow-protocol.json',
+          },
+          encoding: 'utf8',
+          timeout: 60000,
+        }));
+        assertExit(noRootInit, 0);
+        assertTrue(stateAt(cwdRepo).activeChange === 'cwd-change',
+          '反向构造前提失效：无变量时 init 未写回 cwd 仓库，上面「cwd 零改动」断言无判别力');
+        assertTrue(gitOut(cwdRepo, 'rev-parse', '--abbrev-ref', 'HEAD') === 'change/cwd-change',
+          '反向构造前提失效：无变量时未在 cwd 仓库建分支');
+        assertTrue(stateBytesAt(envRoot).equals(envRootStateBefore), '无变量的那次 init 改写了运行根的 state');
+
+        // ⑥ 单源结构锁：运行根解析只许一处实现，状态命令族两个入口与守卫族运行根模块一律具名取用。
+        //    反向构造：摘 import ⇒ 「未从」；注入第二份定义 ⇒ 被点名；原样 ⇒ 复绿。
+        const runRootSymbol = 'resolveRunRoot';
+        const runRootModule = engineDefinitionModule(runRootSymbol);
+        assertTrue(runRootModule !== null,
+          '运行根解析的定义面应恰一处: ' + JSON.stringify(engineDefinitionHits(runRootSymbol)));
+        const runRootTexts = engineScriptTexts();
+        const runRootProblems = singleSourceImportProblems({
+          symbol: runRootSymbol, sourceRel: runRootModule.file, texts: runRootTexts,
+        });
+        assertTrue(runRootProblems.length === 0, '运行根单源违规: ' + runRootProblems.join(' | '));
+        const runRootProbes = [];
+        for (const consumerRel of ['workflow-state.mjs', 'workflow-handoff.mjs', 'lib/guard-state-io.mjs']) {
+          const consumerText = runRootTexts.get(consumerRel) ?? '';
+          if (!new RegExp('\\b' + runRootSymbol + '\\b', 'u').test(engineCodeText(consumerText))) {
+            runRootProbes.push(consumerRel + ' 不再取用单一来源的运行根解析');
+            continue;
+          }
+          const droppedText = dropNamedImport(consumerText, runRootSymbol);
+          if (droppedText === consumerText) {
+            runRootProbes.push(consumerRel + ' 的 import 摘不动（反向构造会退化为前提失效）');
+            continue;
+          }
+          const droppedProblems = singleSourceImportProblems({
+            symbol: runRootSymbol, sourceRel: runRootModule.file,
+            texts: new Map(runRootTexts).set(consumerRel, droppedText),
+          });
+          if (!droppedProblems.some((problem) => problem.includes(consumerRel) && problem.includes('未从'))) {
+            runRootProbes.push(consumerRel + ' 摘掉单源取用后未被取用面锁点名');
+          }
+        }
+        const injectedProblems = singleSourceImportProblems({
+          symbol: runRootSymbol, sourceRel: runRootModule.file,
+          texts: new Map(runRootTexts).set('lib/probe-run-root.mjs',
+            'export function ' + runRootSymbol + '() { return process.cwd(); }\n'),
+        });
+        if (!injectedProblems.some((problem) => problem.includes('lib/probe-run-root.mjs') && problem.includes('自带第二份'))) {
+          runRootProbes.push('第二份实现注入后未被单源锁点名（锁对新增实现面没有判别力）');
+        }
+        assertTrue(runRootProbes.length === 0, '运行根单源锁反向构造失败: ' + runRootProbes.join(' | '));
       }
     },
   },
