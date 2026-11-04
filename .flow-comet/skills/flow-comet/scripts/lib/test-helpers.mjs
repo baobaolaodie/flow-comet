@@ -93,9 +93,9 @@ export function writeState(root, state) {
 }
 
 // ---------- 受控命令（runRoot = 夹具根） ----------
-// 约定：spawn 时 cwd = 夹具根（workflow-state / workflow-handoff 的 runRoot 取进程 cwd），
-// 并注入 FLOW_COMET_RUN_ROOT 环境变量；同时捕获 stdout + stderr（WARN/BLOCKED 走 stderr，
-// 成功退出时只取 stdout 会让 WARN 断言误报）与 exit code，统一返回
+// 约定：spawn 时 cwd = 夹具根，并注入 FLOW_COMET_RUN_ROOT 环境变量——状态命令的运行根由唯一
+// 解析模块取该变量优先、否则进程 cwd，故运行根 = 夹具根；同时捕获 stdout + stderr（WARN/BLOCKED
+// 走 stderr，成功退出时只取 stdout 会让 WARN 断言误报）与 exit code，统一返回
 // `{ status, output }`（output 为 stdout+stderr 拼接的字符串）。
 // 统一超时（毫秒）：真实命令在冷启动 / 慢文件系统上耗时波动，60s 是两套件既有取值。
 const COMMAND_TIMEOUT_MS = 60000;
