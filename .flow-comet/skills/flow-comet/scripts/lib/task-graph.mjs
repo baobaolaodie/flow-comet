@@ -11,9 +11,10 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
 import { taskBlocks, taskOpeningAttrs } from '../task-parsing.mjs';
-// 条目边界（剥注释 → 行切 → 分号容错切 → trim → 滤空）取 lib/lessons-hits.mjs 的唯一实现：本模块
-// 只剩「路径归一」这一层自己的语义（见 normalizeTaskPath），不再自带第二份切分。
-import { writeFilesEntries } from './lessons-hits.mjs';
+// 写面元素（`<write_files>`…`</write_files>`，元素名大小写无关）与条目边界（剥注释 → 行切 → 分号
+// 容错切 → trim → 滤空）都取 lib/lessons-hits.mjs 的唯一实现：本模块只剩「路径归一」这一层自己的
+// 语义（见 normalizeTaskPath），不自带第二份元素提取或切分。
+import { taskWriteFilesById, writeFilesEntries } from './lessons-hits.mjs';
 // 段界（同级标题 / 围栏 / 分隔线 / 文末）取 lib/section-body.mjs 的唯一实现：修复段的段体此前自带一份
 // 「按行找下一个 `## `」的扫描，围栏代码块里的 `## ` 会把段体截断。
 import { sectionBody } from './section-body.mjs';
@@ -357,9 +358,10 @@ function normalizeTaskPath(raw) {
   return out.join('/');
 }
 
-// 路径解析：条目边界取 writeFilesEntries（lib/lessons-hits.mjs 的唯一实现，与 handoff 的提交子集
-// 校验、plan 出口的伪并行启发式同一份——同一份写面在三处被切成不同条目集时，「谁越界」「哪一对
-// 并行任务重叠」会互相矛盾）；本函数只在条目之上叠加本模块自己的归一（normalizeTaskPath）。
+// 路径解析：入参是**已提取的**写面元素原文（元素提取与条目边界都取 lib/lessons-hits.mjs 的唯一实现
+// ——taskWriteFilesById + writeFilesEntries；与 handoff 的提交子集校验、plan 出口的伪并行启发式
+// 同一份：同一份写面在三处被切成不同条目集、或在元素名的大小写上分叉时，「谁越界」「哪一对并行
+// 任务重叠」会互相矛盾）。本函数只在条目之上叠加本模块自己的归一（normalizeTaskPath）。
 // 按声明实际内容解析，不做扩展名白名单过滤——txt/log/无扩展名路径同等检出（链式重命名的 .txt
 // 事故面闭合）。族①②③共用本实现，不另起第二份。
 function parsePaths(matchText) {
@@ -422,6 +424,9 @@ export function collectPathOverlaps(leftPaths, rightPaths) {
 // 谓词需要全文以定位修复段（段标题取该谓词的缺省回退常量，与 fixTaskClassifier 的缺省一致）。
 export function collectCrossTaskConflicts({ taskContent = '', allBlocks = [], depsById = new Map(), excludedPairKeys = new Set() } = {}) {
   const isFixTask = fixTaskClassifier(taskContent);
+  // 写面元素（键 = 任务 id）取 lib/lessons-hits.mjs 的唯一提取：元素名大小写无关与 7 字段门的在场
+  // 判定同口径——大小写敏感的副本会让混合写法的任务在这里判「没有写面」，从而整对掉出本族。
+  const writeFaces = taskWriteFilesById(taskContent);
   const reachCache = new Map();
   const reachableFrom = (id) => {
     if (!reachCache.has(id)) reachCache.set(id, reachableTaskIds(depsById, id));
@@ -431,9 +436,9 @@ export function collectCrossTaskConflicts({ taskContent = '', allBlocks = [], de
   for (const block of allBlocks) {
     const attrs = taskOpeningAttrs(block);
     if (!attrs || !attrs.id || attrs.status === 'done' || isFixTask(block)) continue;
-    const wf = block.match(/<write_files>([\s\S]*?)<\/write_files>/);
-    if (!wf) continue;
-    const writes = new Set(parsePaths(wf[1]));
+    const element = writeFaces.get(attrs.id);
+    if (element === undefined) continue;
+    const writes = new Set(parsePaths(element));
     if (writes.size === 0) continue;
     participants.push({ id: attrs.id, writes });
   }
@@ -457,6 +462,9 @@ export async function findParallelWriteConflicts(changeDir) {
   let text;
   try { text = await fs.readFile(taskFile, 'utf8'); } catch { return { writeConflicts: [], readWarnings: [], crossTaskConflicts: [] }; }
   const allBlocks = taskBlocks(text);
+  // 写面元素（键 = 任务 id）取 lib/lessons-hits.mjs 的唯一提取（元素名大小写无关）：大小写敏感的副本
+  // 会让混合写法的任务在这里判「没有写面」，同波并行写同一路径的竞态因此漏拦。
+  const writeFaces = taskWriteFilesById(text);
   // 依赖资格收窄：仅统计「本趟可运行」的并行任务——deps ⊆ doneIds；等待后续趟次的并行任务
   // （依赖未满足）与已交付任务不参与同趟冲突判定，使 A→B 同写路径的跨趟合法计划不再被首趟误拦
   // （与路由谓词同一口径）。依赖文本解析与资格判定一律走 taskDependencyEligibility——本函数不再
@@ -474,13 +482,13 @@ export async function findParallelWriteConflicts(changeDir) {
   for (const b of blocks) {
     const a = taskOpeningAttrs(b);
     if (!a || !a.id) continue;
-    const wf = b.match(/<write_files>([\s\S]*?)<\/write_files>/);
+    const element = writeFaces.get(a.id);
     const rf = b.match(/<read_files>([\s\S]*?)<\/read_files>/);
-    if (!wf && !rf) continue;
+    if (element === undefined && !rf) continue;
     perTask.push({
       id: a.id,
       deps: new Set(taskDependencyEligibility(b).deps),
-      writes: new Set(parsePaths(wf && wf[1])),
+      writes: new Set(parsePaths(element)),
       reads: new Set(parsePaths(rf && rf[1])),
     });
   }

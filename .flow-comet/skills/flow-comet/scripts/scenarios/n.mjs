@@ -1220,6 +1220,51 @@ function pairKeySingleSourceProblems({ texts }) {
   return problems;
 }
 
+// ---------- 写面元素的取用面（写面单源锁的判据面） ----------
+
+// 写面元素标签的字面量（元素名大小写无关）。判据按**形态**判定，不看名字与常量名：元素提取的形态是
+// 同一行里同时出现开标签与闭标签（正则字面量不能跨行），任何消费方自持一份标签正则，代码层就留下这个
+// 形态——元素名少一个 /i 的副本（大小写敏感）同样被它看见。那种副本让 7 字段门判「字段在场」、写面
+// 判定判「未知」：任务静默掉出写面判据面（写写重叠漏拦、同文件族漏判、伪并行启发式漏报），而同波同层
+// 的同文件对反被 [P] 判据当成「可并行」误报，恢复句还把方向指到 depends_on。只提到一次标签的报文 /
+// 恢复指引不是提取形态（「缺 <write_files> 元素」是在说缺什么，不是在解析它）。
+const WRITE_FACE_TAG_MENTION_RE = /write_files>/giu;
+const WRITE_FACE_EXTRACTION_MIN_MENTIONS = 2;
+
+// 一行里的标签提及次数（剥注释后的代码层）：>= 2 即元素提取形态（开 + 闭）。
+function writeFaceExtractionLines(text) {
+  return engineCodeText(text).split('\n')
+    .filter((line) => (line.match(WRITE_FACE_TAG_MENTION_RE) ?? []).length >= WRITE_FACE_EXTRACTION_MIN_MENTIONS);
+}
+
+// 单源面判据（纯函数 + 合成输入可驱动）：元素提取形态只许出现在单源模块的代码层（且恰一处），其余模块
+// 一处都不许有。返回问题数组（空 = 收口）。
+function writeFaceSourceProblems({ texts, sourceRel }) {
+  const problems = [];
+  for (const [rel, text] of texts) {
+    const extractionLines = writeFaceExtractionLines(text);
+    if (rel === sourceRel) {
+      if (extractionLines.length !== 1) {
+        problems.push(rel + '：写面元素提取应恰一处，实际 ' + extractionLines.length + ' 处（单源面被破坏）');
+      }
+      continue;
+    }
+    if (extractionLines.length > 0) {
+      problems.push(rel + ' 自带写面元素标签提取（' + extractionLines.length + ' 处）——元素提取应取用单源，'
+        + '大小写敏感的副本会让同一份写面在一处判在场、另一处判未知');
+    }
+  }
+  return problems;
+}
+
+// 派生面模块的**内存变异体**（data: URL；相对 import 重写为绝对 file: URL）：反向构造只改内存里的源
+// 文本，不落盘、不留残留。变异体因此与真模块共享同一组依赖，行为差异只来自被改动的那处代码。
+function inlineModuleUrl(source, rel) {
+  const rewritten = source.replace(/(from\s*')(\.[^']*)(')/gu, (whole, head, specifier, tail) =>
+    head + pathToFileURL(path.resolve(SCRIPTS_DIR, path.dirname(rel), specifier)).href + tail);
+  return 'data:text/javascript;charset=utf-8,' + encodeURIComponent(rewritten);
+}
+
 export const ENTRIES = [
 
   // ============================================================================================
@@ -2778,7 +2823,7 @@ export const ENTRIES = [
   // ⑦ 追加「配对键单源」：第三族的任务对键只在 task-graph 表达一次，[P] 判据的补集消费它返回的判定；
   //    反向构造三层（换名字 / 换分隔符的第二份键 + 形态漂移的行为变异体）证明补集断言真的敏感。
   {
-    name: 'TA-21 模板缺席降级：不阻断且显式输出「未校验（模板缺失）」；模板在场时同夹具被拦；段名清单 / 段体切片 / 任务对键单源锁（受检面 = 引擎实现面）',
+    name: 'TA-21 模板缺席降级：不阻断且显式输出「未校验（模板缺失）」；模板在场时同夹具被拦；段名清单 / 段体切片 / 任务对键 / 写面元素单源锁（受检面 = 引擎实现面）',
     run: async (dir) => {
       // ① 模板缺席：只写工件，不写 flow-kit/templates/
       writeFile(dir, CHANGE_DIR + '/CHANGE.md', renderDoc('CHANGE', { omit: ['影响面'] }));
@@ -3261,12 +3306,7 @@ export const ENTRIES = [
           '注释叙述判据不具判别力：混入任务号的注释没有被检出');
         assertTrue(commentNarrationHits('// V8 对 `2026-02-30T00:00:00Z` 会静默滚到 3 月 2 日。\n').length === 0,
           '注释叙述判据把注释里的 ISO 时间戳字面量读成了任务号（假阳性）');
-        // 变异体只在内存里编译（data: URL，相对 import 重写为绝对 file: URL）：不落盘、不留残留。
-        const inlineModuleUrl = (source, rel) => {
-          const rewritten = source.replace(/(from\s*')(\.[^']*)(')/gu, (whole, head, specifier, tail) =>
-            head + pathToFileURL(path.resolve(SCRIPTS_DIR, path.dirname(rel), specifier)).href + tail);
-          return 'data:text/javascript;charset=utf-8,' + encodeURIComponent(rewritten);
-        };
+        // 变异体经 inlineModuleUrl 只在内存里编译（不落盘、不留残留）。
         // 变异 = 把「取单源判定」换回「两端各算一次键」，并只让**消费方**那一端漂移（生产方仍用
         // task-graph 的 NUL 形态）：这正是第二份键实现存在的真实风险——改一端、漏一端，键就不再相等。
         // 两处锚各自只改一处代码位置（不搬动实参行），变异体因此语法完整、只把键的两份形态造出来。
@@ -3292,6 +3332,145 @@ export const ENTRIES = [
         assertTrue(driftedGaps.gaps.length > 0,
           '反向构造失效：补集判据改回「自建键 + 分隔符漂移」后，写面重叠的一对没有被误报——'
           + '说明该断言对任务对键的形态不敏感（' + JSON.stringify(driftedGaps.gaps) + '）');
+      }
+
+      // ⑧ 写面元素的取用面（task-graph 的路径解析 / plan 出口的伪并行启发式）：写面判定在
+      //    lib/lessons-hits.mjs 已只有一份实现，两处消费方却各自拿着**大小写敏感**的标签正则——混合
+      //    大小写时 7 字段门判「字段在场」、写面判定判「未知」，任务静默掉出判据面：写写重叠漏拦、
+      //    同文件族漏判、伪并行启发式漏报，而同波同层的同文件对反被 [P] 判据当成「可并行」误报。
+      //    三条面：结构锁（标签字面量只许在单源模块）+ 行为（混合大小写与全小写写法在四条判据上给出
+      //    同一结论）+ 反向构造（把取用改回大小写敏感 ⇒ 锁与行为断言都必红）。
+      {
+        const faceTexts = engineScriptTexts();
+        const faceSource = engineDefinitionModule('taskWriteFilesById');
+        assertTrue(faceSource !== null,
+          '写面元素提取（taskWriteFilesById）的定义面应恰一处（反查失败）: '
+          + JSON.stringify(engineDefinitionHits('taskWriteFilesById')));
+        const faceTagProblems = writeFaceSourceProblems({ texts: faceTexts, sourceRel: faceSource.file });
+        assertTrue(faceTagProblems.length === 0, '写面元素标签单源违规: ' + faceTagProblems.join(' | '));
+        const faceTakenProblems = singleSourceImportProblems({
+          symbol: 'taskWriteFilesById', sourceRel: faceSource.file, texts: faceTexts,
+        });
+        assertTrue(faceTakenProblems.length === 0,
+          '写面元素提取应只有一处实现且消费方都从它取用:\n' + faceTakenProblems.join('\n'));
+        // 反向构造两格（互不覆盖）：① 消费方保留取用、另带一份大小写敏感的标签正则——副本溜回来的
+        // 真实形态，由形态锁点名；② 消费方摘掉单源取用而仍引用该符号，由取用面锁点名。
+        const faceProbes = [];
+        const carriedCopy = '\nconst probeWriteFilesFace = (block) => String(block).match(/<write_files>([\\s\\S]*?)<\\/write_files>/);\n';
+        for (const rel of ['lib/task-graph.mjs', 'lib/guard-gates.mjs']) {
+          const original = faceTexts.get(rel) ?? '';
+          const carriedProblems = writeFaceSourceProblems({
+            texts: new Map(faceTexts).set(rel, original + carriedCopy), sourceRel: faceSource.file,
+          });
+          if (!carriedProblems.some((problem) => problem.includes(rel))) {
+            faceProbes.push(rel + '：副本（保留取用 + 自持标签正则）未被形态锁点名');
+          }
+          const droppedProblems = singleSourceImportProblems({
+            symbol: 'taskWriteFilesById', sourceRel: faceSource.file,
+            texts: new Map(faceTexts).set(rel, dropNamedImport(original, 'taskWriteFilesById')),
+          });
+          if (!droppedProblems.some((problem) => problem.includes(rel))) {
+            faceProbes.push(rel + '：摘掉单源取用后未被取用面锁点名');
+          }
+        }
+        assertTrue(faceProbes.length === 0, '写面单源锁反向构造失败: ' + faceProbes.join(' | '));
+
+        // 行为面：混合大小写写面与全小写写法必须给出同一结论（全小写格是夹具前提，混合格是断言）。
+        // 写写强判（并行对）与同文件族（串行对）各一格——两族都由 task-graph 的路径解析供数。
+        const faceBlock = (id, tag, attrs) => '<task id="' + id + '"' + attrs + ' status="pending">'
+          + '<action>实现 ' + id + '</action><' + tag + '>src/shared.mjs</' + tag + '>'
+          + '<verify>node --check src/shared.mjs</verify></task>\n';
+        const facePlan = (tag, attrs) => '# TASK\n\n## 任务清单\n\n'
+          + faceBlock('W01', tag, attrs) + faceBlock('W02', tag, attrs);
+        const faceRoot = (label) => path.join(dir, 'write-face-' + label);
+        const conflictsIn = async (module, label, planText) => {
+          writeFile(faceRoot(label), '.specs/' + CHANGE_ID + '/TASK.md', planText);
+          return module.findParallelWriteConflicts(path.join(faceRoot(label), '.specs', CHANGE_ID));
+        };
+        const taskGraph = await import('../lib/task-graph.mjs');
+        const lowerParallel = await conflictsIn(taskGraph, 'lower-parallel', facePlan('write_files', ' parallel="true"'));
+        assertTrue(lowerParallel.writeConflicts.length === 1,
+          '夹具前提失效：全小写写面的同文件并行对未被写写强判检出（'
+          + JSON.stringify(lowerParallel.writeConflicts) + '）');
+        const upperParallel = await conflictsIn(taskGraph, 'upper-parallel', facePlan('WRITE_FILES', ' parallel="true"'));
+        assertTrue(upperParallel.writeConflicts.length === 1,
+          '混合大小写写面的同文件并行对逃过写写强判（元素名大小写无关，同一份写面应判重叠）: '
+          + JSON.stringify(upperParallel.writeConflicts));
+        const lowerSerial = await conflictsIn(taskGraph, 'lower-serial', facePlan('write_files', ''));
+        assertTrue(lowerSerial.crossTaskConflicts.length === 1,
+          '夹具前提失效：全小写写面的同文件串行对未被同文件族检出（'
+          + JSON.stringify(lowerSerial.crossTaskConflicts) + '）');
+        const upperSerial = await conflictsIn(taskGraph, 'upper-serial', facePlan('WRITE_FILES', ''));
+        assertTrue(upperSerial.crossTaskConflicts.length === 1,
+          '混合大小写写面的同文件串行对逃过同文件族（同文件且无依赖路径，应判冲突）: '
+          + JSON.stringify(upperSerial.crossTaskConflicts));
+
+        // [P] 判据：写面重叠的一对不该被要求标 [P]（写面未知 ≠ 写面不重叠），写面互不重叠的一对必须
+        // 照常点名——后半格钉住「不是把混合写法整片排除出判据面」。
+        const waveFace = await import('../lib/wave-projection.mjs');
+        const gapsFor = (tag, leftWrite, rightWrite) => {
+          const block = (id, writePath) => '<task id="' + id + '" status="pending"><action>实现 ' + id
+            + '</action><' + tag + '>' + writePath + '</' + tag + '><verify>node --check ' + writePath
+            + '</verify><depends_on></depends_on></task>\n';
+          const content = '# TASK\n\n## 波次划分\n\nWave 1: G01, G02\n\n## 任务清单\n\n'
+            + block('G01', leftWrite) + block('G02', rightWrite);
+          const blocks = taskBlocks(content);
+          const review = waveFace.waveProjectionReview({ taskContent: content, blocks });
+          return waveFace.parallelGapReview({ taskContent: content, blocks, waves: review.waves });
+        };
+        assertTrue(gapsFor('write_files', 'src/shared.mjs', 'src/shared.mjs').gaps.length === 0,
+          '夹具前提失效：全小写写面重叠的一对被 [P] 判据要求标 [P]');
+        const upperOverlapGaps = gapsFor('WRITE_FILES', 'src/shared.mjs', 'src/shared.mjs');
+        assertTrue(upperOverlapGaps.gaps.length === 0,
+          '混合大小写写面重叠的一对被 [P] 判据误报为「可并行却未标 [P]」——写面未知被当成写面不重叠: '
+          + JSON.stringify(upperOverlapGaps.gaps));
+        const upperDistinctGaps = gapsFor('WRITE_FILES', 'src/a.mjs', 'src/b.mjs');
+        assertTrue(upperDistinctGaps.gaps.length === 1,
+          '混合大小写写面互不重叠的一对未被 [P] 判据点名——判据应正常参与，不是把混合写法整片排除: '
+          + JSON.stringify(upperDistinctGaps.gaps));
+
+        // 伪并行启发式：仅写测试产物的并行任务必须照样进集合（掉出去 = 告警静默消失），混有生产文件的
+        // 并行任务不进集合（不是把混合写法整片标成伪并行）。
+        const guardGates = await import('../lib/guard-gates.mjs');
+        const testOnlyFor = (tag) => {
+          const content = '# TASK\n\n## 任务清单\n\n'
+            + '<task id="P-MIX" parallel="true" status="pending"><action>实现 P-MIX</action><' + tag
+            + '>tests/test_mix.mjs</' + tag + '><verify>node --check tests/test_mix.mjs</verify></task>\n'
+            + '<task id="P-PROD" parallel="true" status="pending"><action>实现 P-PROD</action><' + tag
+            + '>src/mix.mjs\ntests/test_mix2.mjs</' + tag + '><verify>node --check src/mix.mjs</verify></task>\n';
+          return guardGates.collectTestOnlyParallelIds({ taskContent: content, blocks: taskBlocks(content) });
+        };
+        assertTrue(JSON.stringify(testOnlyFor('write_files')) === JSON.stringify(['P-MIX']),
+          '夹具前提失效：全小写写面的纯测试面并行任务未进伪并行集合（'
+          + JSON.stringify(testOnlyFor('write_files')) + '）');
+        assertTrue(JSON.stringify(testOnlyFor('WRITE_FILES')) === JSON.stringify(['P-MIX']),
+          '混合大小写写面的纯测试面并行任务掉出伪并行集合（元素名大小写无关，应照样告警）: '
+          + JSON.stringify(testOnlyFor('WRITE_FILES')));
+
+        // 行为面反向构造：把 task-graph 的写面取用改回大小写敏感的自持正则 ⇒ 同一份混合大小写夹具在
+        // 变异体上重新「看不见重叠」，上面那两条行为断言因此确实对取用面敏感（不是恒绿）。
+        const taskGraphRel = engineDefinitionModule('findParallelWriteConflicts')?.file;
+        assertTrue(typeof taskGraphRel === 'string',
+          '写写强判的定义面不唯一（反查失败）: '
+          + JSON.stringify(engineDefinitionHits('findParallelWriteConflicts')));
+        const taskGraphText = faceTexts.get(taskGraphRel) ?? '';
+        const faceAnchor = '  const writeFaces = taskWriteFilesById(text);';
+        assertTrue(taskGraphText.includes(faceAnchor),
+          '反向构造前提失效：' + taskGraphRel + ' 未按单源形态取用写面元素（锚已漂移）');
+        const driftedFaceText = taskGraphText.replace(faceAnchor, [
+          '  const writeFaces = new Map();',
+          '  for (const probeBlock of allBlocks) {',
+          '    const probeAttrs = taskOpeningAttrs(probeBlock);',
+          '    const probeMatch = probeBlock.match(/<write_files>([\\s\\S]*?)<\\/write_files>/);',
+          '    if (probeAttrs && probeAttrs.id && probeMatch) writeFaces.set(probeAttrs.id, probeMatch[1]);',
+          '  }',
+        ].join('\n'));
+        assertTrue(driftedFaceText !== taskGraphText, '反向构造前提失效：变异未改变 ' + taskGraphRel);
+        const driftedFaceModule = await import(inlineModuleUrl(driftedFaceText, taskGraphRel));
+        const driftedUpper = await conflictsIn(driftedFaceModule, 'upper-parallel-drift', facePlan('WRITE_FILES', ' parallel="true"'));
+        assertTrue(driftedUpper.writeConflicts.length === 0,
+          '反向构造失效：写面取用改回大小写敏感后，混合大小写夹具仍被检出重叠——'
+          + '该断言对取用面不敏感（' + JSON.stringify(driftedUpper.writeConflicts) + '）');
       }
     },
   },

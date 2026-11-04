@@ -70,9 +70,11 @@ import {
   runAcCoverageGate,
   runSummarySectionsGate,
 } from './guard-evidence-gates.mjs';
-// write_files 条目边界（剥注释 → 行切 → 分号容错切 → trim → 滤空）的唯一实现在 lib/lessons-hits.mjs：
-// 伪并行启发式只是它的一个消费方（另两个是 handoff 的提交子集校验与 task-graph 的路径解析）。
-import { writeFilesEntries } from './lessons-hits.mjs';
+// 写面元素提取与条目边界（剥注释 → 行切 → 分号容错切 → trim → 滤空）的唯一实现在 lib/lessons-hits.mjs：
+// 伪并行启发式只是它的一个消费方（另两个是 handoff 的提交子集校验与 task-graph 的路径解析）。元素名
+// 大小写无关（`<WRITE_FILES>` 与 `<write_files>` 是同一种元素）——与 7 字段门的在场判定同口径，本处
+// 不另写标签正则（元素名少一个 /i 的副本会让这类任务静默掉出告警面）。
+import { taskWriteFilesById, writeFilesEntries } from './lessons-hits.mjs';
 import { evaluateArtifact, formatIssueParts, runTaskSevenFieldGate } from './guard-template-fidelity.mjs';
 // 协调者禁令的常量落在中立模块（跨族共用的措辞不进任何一族）：本模块只是取用方，状态命令族同理。
 import { COORDINATOR_NOTICE } from './state-explain.mjs';
@@ -1105,6 +1107,28 @@ export async function runDesignDecisionListGate({ node, state }) {
   } catch {}
 }
 
+// 伪并行候选集（纯判定：无 console / 无 process.exit / 无写盘）：标记为并行、尚未开始、且 write_files
+// 全部落在测试面的任务 id。这类任务很可能隐式依赖某个实现类并行任务的产出（测试 import 尚未存在的
+// 符号），多趟路由下委托后测试会失败；而「纯测试基础设施改动」也可能合法全测试面，故调用方只 WARN
+// 不阻断。判据与输出分离：本函数只回答「哪些任务看起来是伪并行」，分级与报文留在调用方。
+export function collectTestOnlyParallelIds({ taskContent = '', blocks = [] } = {}) {
+  // 写面元素（键 = 任务 id）取 lib/lessons-hits.mjs 的唯一提取，条目边界取同一模块的 writeFilesEntries：
+  // 同一份写面在这里与 7 字段门、task-graph 的路径解析被切成同一组条目（元素名大小写在三处同口径）。
+  const writeFaces = taskWriteFilesById(taskContent);
+  const ids = [];
+  for (const block of blocks) {
+    const attrs = taskOpeningAttrs(block);
+    if (!attrs || !attrs.parallel || attrs.status !== 'pending') continue;
+    const element = writeFaces.get(attrs.id);
+    if (element === undefined) continue;
+    const filePaths = writeFilesEntries(element);
+    if (filePaths.length === 0) continue;
+    const prodFiles = filePaths.filter(f => !/(?:^|[\/\\])(?:__tests__\/|test_|tests?\/)|\.(?:test|spec)\.(?:mjs|js|jsx|ts|tsx|cjs)$/.test(f));
+    if (prodFiles.length === 0) ids.push(attrs.id || 'unknown');
+  }
+  return ids;
+}
+
 // plan exit 校验 TASK 含 task 块和 verify 字段 + 依赖图/波次散文/伪并行/写写与读写冲突检测
 export async function runPlanExitGate({ node, state }) {
   if (node.id !== 'plan' || !state.activeChange) return;
@@ -1201,27 +1225,10 @@ export async function runPlanExitGate({ node, state }) {
     );
     for (const line of gapOutcome.lines) console.error(line);
     if (gapOutcome.block) process.exit(1);
-    // 伪并行检测（真实载体验证暴露的设计盲区兜底）：如果一个标记为并行的任务只写测试文件而无任何
-    // 生产代码文件，它很可能隐式依赖某个实现类并行任务的产出（如测试 import 尚未存在的函数）。这种
-    // "伪并行"在多趟路由下会导致委托后测试失败。启发式：并行任务的 write_files 全部匹配 tests/ 或
-    // test_ 前缀 → 视为疑似伪并行。WARN 渐进不阻断——由执行者判断是否真独立（纯测试基础设施改动可
-    // 合法全测试面）。
-    const testOnlyParallelIds = [];
-    for (const block of taskList) {
-      const attrs = taskOpeningAttrs(block);
-      if (!attrs || !attrs.parallel || attrs.status !== 'pending') continue;
-      const wfMatch = block.match(/<write_files>([\s\S]*?)<\/write_files>/);
-      if (!wfMatch) continue;
-      // 条目边界取 writeFilesEntries（lib/lessons-hits.mjs 的唯一实现）——与 workflow-handoff 的写面
-      // 解析、task-graph 的路径解析是同一份切分，本处不再内联「剥注释 + 行切 + 分号切」的副本
-      // （三份副本各自自洽时，同一份写面会在不同门禁里被切成不同条目集）。
-      const filePaths = writeFilesEntries(wfMatch[1]);
-      if (filePaths.length === 0) continue;
-      const prodFiles = filePaths.filter(f => !/(?:^|[\/\\])(?:__tests__\/|test_|tests?\/)|\.(?:test|spec)\.(?:mjs|js|jsx|ts|tsx|cjs)$/.test(f));
-      if (prodFiles.length === 0) {
-        testOnlyParallelIds.push(attrs.id || 'unknown');
-      }
-    }
+    // 伪并行检测（真实载体验证暴露的设计盲区兜底）——判据（哪些并行任务只写测试产物）在
+    // collectTestOnlyParallelIds 一处实现，本处只做分级（WARN 渐进不阻断）与打印：由执行者判断是否
+    // 真独立（纯测试基础设施改动可合法全测试面）。
+    const testOnlyParallelIds = collectTestOnlyParallelIds({ taskContent: content, blocks: taskList });
     if (testOnlyParallelIds.length > 0) {
       console.error('WARN: 伪并行检测——以下并行任务仅写测试文件而无生产代码文件: '
         + testOnlyParallelIds.join(', ')
