@@ -171,7 +171,8 @@ export function runPrepareEnv(args, root, envOverrides = {}) {
 }
 
 // 跑 workflow-state.mjs 的 bridge-check 只读子命令（T05 实现——六判定态健康/文件缺失/
-// 未挂载/版本偏斜/重复注册/不适用）。runRoot = cwd = 项目根；协议副本须在 runRoot 内
+// 未挂载/版本偏斜/重复注册/不适用）。运行根由唯一解析模块（run-root.mjs）给定：
+// FLOW_COMET_RUN_ROOT 优先（夹具把该变量与 cwd 一并设为 root）；协议副本须在 runRoot 内
 // （protected-path）——指向运行器已复制到 <root>/reference/ 的内置协议副本
 // （FLOW_COMET_PROTOCOL env 优先级高于默认，见 protocol-utils resolveProtocol）。
 export function runBridgeCheck(root, dshHome) {
@@ -799,8 +800,8 @@ export function writeMigratedProjectArtifacts(proj, changeId = MIGRATION_CHANGE)
   writeFile(proj, '.specs/' + changeId + '/REQUIREMENT.md', '# REQUIREMENT\n\n- **Change ID**: ' + changeId + '\n\n## 用户故事（User Story）\n\nx\n\n## 验收准则（AC）\n\n- y\n');
 }
 
-// 跑安装副本内的脚本（cwd = 目标项目根——runRoot = process.cwd()）：迁移后链路在
-// 真实安装形态（而非权威源脚本）上验证
+// 跑安装副本内的脚本（cwd = 目标项目根，FLOW_COMET_RUN_ROOT 设为同一个根）：运行根由唯一
+// 解析模块（run-root.mjs）给定（变量优先）——迁移后链路在真实安装形态（而非权威源脚本）上验证
 export function runInstalled(proj, platformRoot, scriptName, args) {
   const script = path.join(proj, platformRoot, 'skills', 'flow-comet', 'scripts', scriptName);
   const res = spawnSync(process.execPath, [script, ...args], {
