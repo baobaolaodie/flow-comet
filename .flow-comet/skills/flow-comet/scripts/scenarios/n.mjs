@@ -2862,6 +2862,48 @@ export const ENTRIES = [
         'WAVE_SECTION_NAME',
       ];
       const issues = [];
+      // ③0 夹具能力自检（反向构造的前提，先于被测面）：摘 import 要覆盖三种位置——名前 / 名后 / 唯一项。
+      //     夹具此前只处理「逗号相邻」：单名单行 import 摘不动，反向构造于是报「前提失效（变异未改变
+      //     文件）」而不是真回归（锁在说谎，L-151）。三份合成 import 逐份验「名字真的没了、语句还在」。
+      const dropProbeSymbol = segmentSymbols[0];
+      for (const dropForm of [
+        'import { ' + dropProbeSymbol + ', otherName } from "./x.mjs";',
+        'import { otherName, ' + dropProbeSymbol + ' } from "./x.mjs";',
+        'import { ' + dropProbeSymbol + ' } from "./x.mjs";',
+      ]) {
+        const dropped = dropNamedImport(dropForm, dropProbeSymbol);
+        assertTrue(!new RegExp('\\b' + dropProbeSymbol + '\\b').test(dropped)
+          && /^import\s*\{[^}]*\}\s*from\s*"\.\/x\.mjs";$/u.test(dropped.trim()),
+          '夹具摘 import 漏了一种位置（原样 ' + JSON.stringify(dropForm) + ' → 摘后 ' + JSON.stringify(dropped)
+            + '）：反向构造会退化成前提失效，锁的判别力无从证明');
+      }
+      // ③0b 共享段标题谓词（「这一行是不是登记的某段」的唯一判定 = normalizeHeading 相等 + 级别）：
+      //     定义面恰一处，波次门与 AC 门都具名取用。反向构造走**唯一项** import——夹具摘不动时这一格
+      //     会一直绿，正是上一轮那条接缝（引擎迁就夹具）的闭合断言：原样零问题、摘掉 import 必报「未从」。
+      const sharedPredicate = engineDefinitionModule('headingPredicate');
+      assertTrue(sharedPredicate !== null,
+        '共享段标题谓词的定义面应恰一处（波次门与 AC 门同一口径）: '
+          + JSON.stringify(engineDefinitionHits('headingPredicate')));
+      const sharedPredicateProblems = singleSourceImportProblems({
+        symbol: 'headingPredicate', sourceRel: sharedPredicate.file, texts,
+      });
+      assertTrue(sharedPredicateProblems.length === 0,
+        '段标题谓词单源违规（两道门必须从同一处取用）: ' + sharedPredicateProblems.join(' | '));
+      const soleItemText = 'import { headingPredicate } from "./guard-artifact-skeleton.mjs";\n'
+        + 'export const probeHeadingJudged = headingPredicate;\n';
+      const soleItemDropped = dropNamedImport(soleItemText, 'headingPredicate');
+      assertTrue(soleItemDropped !== soleItemText,
+        '夹具摘不动唯一项 import（单名、单行）：反向构造会退化成前提失效，锁的判别力无从证明');
+      const soleItemProblems = (consumerText) => singleSourceImportProblems({
+        symbol: 'headingPredicate',
+        sourceRel: sharedPredicate.file,
+        texts: new Map([[sharedPredicate.file, sharedPredicate.text], ['lib/probe-consumer.mjs', consumerText]]),
+      });
+      assertTrue(soleItemProblems(soleItemText).length === 0,
+        '唯一项 import 的原样文本被判违规（探针前提不成立）: ' + JSON.stringify(soleItemProblems(soleItemText)));
+      assertTrue(soleItemProblems(soleItemDropped).some((problem) => problem.includes('未从')),
+        '唯一项 import 摘除后取用面判据未发声（夹具摘不动时反向构造形同虚设）: '
+          + JSON.stringify(soleItemProblems(soleItemDropped)));
       for (const symbol of segmentSymbols) {
         const lookup = engineDefinitionModule(symbol);
         if (lookup === null) {

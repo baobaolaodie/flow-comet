@@ -8,11 +8,14 @@
 // （templateSectionPatterns().pick 与同一份选段规则的另一入口 pickTemplateSection）——本模块不再自己遍历
 // 骨架段名表找关键词：
 //   · 验收段：'requirement' 的 H2 段名里选段，与 **open 出口的验收段判据同一调用**（同一关键词、
-//     同一回退基准），因此「入口说缺段 / verify 说未校验」这类两处两判不再可能发生；
+//     同一回退清单），因此「入口说缺段 / verify 说未校验」这类两处两判不再可能发生；
 //   · 第 1 轮段：'TEST' 的 H2 段名里按关键词选段——它是 1.1 矩阵的**承载段**（见下方二分）；
-//   · 1.1 矩阵段：'TEST' 的结构子段（登记名「1.1 测试矩阵（AC → 用例）」）给出的 headingPattern——
-//     编号前缀 / 尾部括号可选、大小写不敏感，因此「### 测试矩阵」这类省编号写法同样命中，
-//     而换成无关标题不会命中（不是标题巧合）。
+//   · 1.1 矩阵段：'TEST' 的结构子段（登记名「1.1 测试矩阵（AC → 用例）」）。
+// 选出来的段名统一交给**共享段标题谓词**（guard-artifact-skeleton 的 headingPredicate：级别 + 段名
+// 归一后相等）判定「这一行是不是那一段」。本模块不再持行正则：标题正文本身可以以井号开头
+// （`## ## 验收准则（AC）`），段形门认作在场而按整行锚定的正则判缺席——同一份工件的同一段两处两判
+// （假红，恢复句还指向补段）。归一在标题文本层，井号 / 编号前缀 / 尾部括号 / 闭合 ATX / 大小写因此
+// 都不是判定变量。
 //
 // 「判不了」按成因二分——本节是**本仓结构判据的唯一形态**（波次判据 wave-projection.mjs 与它同形，
 // 第三个结构判据照抄这组字段即可，不必再选一次）：
@@ -42,11 +45,16 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import {
+  TEMPLATE_FALLBACK_SECTION_NAMES,
   TEMPLATE_FALLBACK_SECTION_PATTERNS,
+  buildSkeleton,
+  headingPredicate,
+} from './guard-artifact-skeleton.mjs';
+import {
   TEMPLATE_SECTION_SKIP,
   pickTemplateSection,
-  templateSectionPatterns,
   templateSectionPattern,
+  templateSectionPatterns,
 } from './guard-routing.mjs';
 // 段界（同级标题 / 围栏 / 分隔线 / 文末）取 lib/section-body.mjs 的唯一实现：矩阵段里贴一段示例
 // （围栏内的 `## …`）时，段被提前截断会**少读后面的 AC 编号**——那正是本判据的输入，静默少读会把
@@ -60,12 +68,11 @@ const ACCEPTANCE_SECTION_KEYWORDS = ['验收'];
 // 第 1 轮段与 1.1 矩阵段的关键词（前者是后者的承载段，两者都从模板派生）。
 const TEST_ROUND_SECTION_KEYWORDS = ['第 1 轮'];
 const TEST_MATRIX_SECTION_KEYWORDS = ['测试矩阵'];
-// 关键词全不命中时的回退基准（模板在场却把段名换成了别的说法——上游改标题措辞是常见形态）。
-// 1.1 矩阵的回退取段名派生（headingPattern：编号前缀 / 尾部括号可选），不另写标题正则；第 1 轮段的
-// 落地标题带分隔符与子标题（「第 1 轮 · 功能测试」/「第 1 轮：功能测试」写法不一），故按段名前缀
-// 锚定行首——与 TEMPLATE_FALLBACK_SECTION_PATTERNS 里的同类回退同一形态（部分匹配而非整名匹配）。
-const TEST_ROUND_FALLBACK_PATTERN = /^##\s*第\s*1\s*轮/mu;
-const TEST_MATRIX_FALLBACK_PATTERN = templateSectionPattern('测试矩阵', 3);
+// 关键词全不命中时的回退**段名**（模板在场却把段名换成了别的说法——上游改标题措辞是常见形态）。
+// 1.1 矩阵回退到登记词「测试矩阵」（编号前缀 / 尾部括号 / 闭合 ATX 由共享归一吃掉）；第 1 轮段的落地
+// 标题带分隔符与子标题，故把既有写法列全（尾部括号同样由归一吃掉）。
+const TEST_ROUND_FALLBACK_NAMES = ['第 1 轮 · 功能测试', '第 1 轮：功能测试', '第 1 轮 功能测试', '第 1 轮'];
+const TEST_MATRIX_FALLBACK_NAMES = ['测试矩阵'];
 // AC 编号词法：只认 AC-<数字>；后缀（如 AC-1a 的 a）不参与编号，前导零同样归一到数字值。
 const AC_TOKEN_RE = /AC-(\d+)/giu;
 
@@ -84,31 +91,53 @@ async function readText(filePath) {
   }
 }
 
-// 三个段的正则全部经 guard-routing 的选段入口派生（返回值可能是 TEMPLATE_SECTION_SKIP：模板整份
-// 缺席 ⇒ 该段名无从派生 ⇒ 调用方按「载体缺席」打印未校验，而不是拿一个猜的段名去判）。
-// 验收段走 templateSectionPatterns().pick——与 open 出口的验收段判据同一调用形态；TEST 的两个段走
-// pickTemplateSection（pick 的键只覆盖四个 H2 模板，TEST 与结构子段不在其内，选段规则仍是同一份
-// pickByKeywords）。
-async function acceptanceSectionPattern() {
-  const patterns = await templateSectionPatterns();
-  return patterns.pick(
-    'requirement', ACCEPTANCE_SECTION_KEYWORDS, TEMPLATE_FALLBACK_SECTION_PATTERNS.requirementAcceptance);
+// 选中判据 → 段标题谓词。选段规则仍只在 guard-routing 一处（本模块不遍历骨架段名表挑关键词）：
+// 这里只把**选中的判据**还原成它背后的登记名，再交给共享归一比较（headingPredicate：级别 + 段名
+// 归一后相等，与 TASK 段形门、波次门同一套）。选中的是回退判据时没有登记名可比（模板段名已不含
+// 关键词），按调用方登记的回退名清单比较——两种情形都是「标题正文归一后与段名相等」，不再有「拿标题
+// 行跑正则」这一支。选段入口返回 TEMPLATE_SECTION_SKIP（模板整份缺席）时原样上抛。
+async function sectionMatcher(picked, { key, level, fallbackNames }) {
+  if (picked === TEMPLATE_SECTION_SKIP) return TEMPLATE_SECTION_SKIP;
+  const skeleton = await buildSkeleton(key);
+  const entries = level === 3 ? skeleton.structureSubsections ?? [] : skeleton.sections;
+  const selected = entries.find((entry) => entry.pattern.source === picked.source
+    && entry.pattern.flags === picked.flags);
+  return headingPredicate(selected === undefined ? fallbackNames : selected.name, level);
 }
 
-function testRoundSectionPattern() {
-  return pickTemplateSection('TEST', {
+// 三个段的判据全部经 guard-routing 的选段入口派生（返回值可能是 TEMPLATE_SECTION_SKIP：模板整份
+// 缺席 ⇒ 该段名无从派生 ⇒ 调用方按「载体缺席」打印未校验，而不是拿一个猜的段名去判）。验收段走
+// templateSectionPatterns().pick——与 open 出口的验收段判据同一调用形态；TEST 的两个段走
+// pickTemplateSection（pick 的键只覆盖四个 H2 模板，TEST 与结构子段不在其内，选段规则仍是同一份
+// pickByKeywords）。三处的回退判据只是「落到回退」的标记（选段入口的返回契约是「正则或跳过」），
+// 真正逐标题比较的是上面的回退名清单——判据与清单由同一份名字派生，不会各说一套。
+async function acceptanceSectionMatcher() {
+  const patterns = await templateSectionPatterns();
+  const picked = patterns.pick(
+    'requirement', ACCEPTANCE_SECTION_KEYWORDS, TEMPLATE_FALLBACK_SECTION_PATTERNS.requirementAcceptance);
+  return sectionMatcher(picked, {
+    key: 'requirement',
+    level: 2,
+    fallbackNames: TEMPLATE_FALLBACK_SECTION_NAMES.requirementAcceptance,
+  });
+}
+
+async function testRoundSectionMatcher() {
+  const picked = await pickTemplateSection('TEST', {
     keywords: TEST_ROUND_SECTION_KEYWORDS,
-    fallback: TEST_ROUND_FALLBACK_PATTERN,
+    fallback: templateSectionPattern(TEST_ROUND_FALLBACK_NAMES[0], 2),
     level: 2,
   });
+  return sectionMatcher(picked, { key: 'TEST', level: 2, fallbackNames: TEST_ROUND_FALLBACK_NAMES });
 }
 
-function testMatrixSectionPattern() {
-  return pickTemplateSection('TEST', {
+async function testMatrixSectionMatcher() {
+  const picked = await pickTemplateSection('TEST', {
     keywords: TEST_MATRIX_SECTION_KEYWORDS,
-    fallback: TEST_MATRIX_FALLBACK_PATTERN,
+    fallback: templateSectionPattern(TEST_MATRIX_FALLBACK_NAMES[0], 3),
     level: 3,
   });
+  return sectionMatcher(picked, { key: 'TEST', level: 3, fallbackNames: TEST_MATRIX_FALLBACK_NAMES });
 }
 
 // 段文本 → AC 编号（规范形态 AC-<n>，按首见顺序去重）。围栏行与围栏内的行全部跳过（围栏语法取
@@ -225,9 +254,9 @@ export async function acCoverageReview(changeDir) {
   const requirementText = await readText(path.join(changeDir, 'REQUIREMENT.md'));
   // 载体文件缺席不是「没有可判对象」（作者能删掉它）——与承载段被删同属内容不可判。
   if (requirementText === null) return unjudgeable('REQUIREMENT 缺席');
-  const acceptancePattern = await acceptanceSectionPattern();
-  if (acceptancePattern === TEMPLATE_SECTION_SKIP) return unverifiable('模板缺席（段名无从派生）');
-  const acceptanceBody = sectionBody(requirementText, acceptancePattern, { level: 2, endOnSeparator: false });
+  const acceptanceMatcher = await acceptanceSectionMatcher();
+  if (acceptanceMatcher === TEMPLATE_SECTION_SKIP) return unverifiable('模板缺席（段名无从派生）');
+  const acceptanceBody = sectionBody(requirementText, acceptanceMatcher, { level: 2, endOnSeparator: false });
   // 承载段缺席 ≠ 载体缺席：REQUIREMENT.md 与模板都在场，缺的是作者自己删掉的段——按内容不可判
   // 分级（新 change BLOCKED / 旧 change WARN），删段因此不是关掉 AC 覆盖判据的写法。
   if (acceptanceBody === null) return unjudgeable('REQUIREMENT 无验收准则段');
@@ -235,15 +264,15 @@ export async function acCoverageReview(changeDir) {
   if (acIds.length === 0) return unjudgeable('REQUIREMENT 无 AC 编号');
   const testText = await readText(path.join(changeDir, 'TEST.md'));
   if (testText === null) return unjudgeable('TEST.md 缺席');
-  const roundPattern = await testRoundSectionPattern();
-  if (roundPattern === TEMPLATE_SECTION_SKIP) return unverifiable('模板缺席（段名无从派生）');
+  const roundMatcher = await testRoundSectionMatcher();
+  if (roundMatcher === TEMPLATE_SECTION_SKIP) return unverifiable('模板缺席（段名无从派生）');
   // 同一口径：TEST.md 与模板在场而承载段（第 1 轮）缺席 → 内容不可判（删段不得成为跳过口）。
-  if (sectionBody(testText, roundPattern, { level: 2, endOnSeparator: false }) === null) {
+  if (sectionBody(testText, roundMatcher, { level: 2, endOnSeparator: false }) === null) {
     return unjudgeable('TEST.md 无第 1 轮段');
   }
-  const matrixPattern = await testMatrixSectionPattern();
-  if (matrixPattern === TEMPLATE_SECTION_SKIP) return unverifiable('模板缺席（段名无从派生）');
-  const matrixBody = sectionBody(testText, matrixPattern, { level: 3, endOnSeparator: false });
+  const matrixMatcher = await testMatrixSectionMatcher();
+  if (matrixMatcher === TEMPLATE_SECTION_SKIP) return unverifiable('模板缺席（段名无从派生）');
+  const matrixBody = sectionBody(testText, matrixMatcher, { level: 3, endOnSeparator: false });
   if (matrixBody === null) return unjudgeable('TEST.md 第 1 轮无 1.1 测试矩阵段');
   const covered = new Set(parseAcIds(matrixBody));
   return { acIds, missing: acIds.filter((id) => !covered.has(id)), unverified: null, unjudgeable: null };

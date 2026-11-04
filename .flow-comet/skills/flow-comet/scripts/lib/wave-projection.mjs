@@ -38,7 +38,6 @@ import {
   analyzeDependencyGraph,
   collectCrossTaskConflicts,
   fixTaskClassifier,
-  normalizeHeading,
   taskWaveLevels,
 } from './task-graph.mjs';
 import { taskOpeningAttrs } from '../task-parsing.mjs';
@@ -48,24 +47,17 @@ import { sectionBody } from './section-body.mjs';
 // 拿正则去块里找 <write_files>。同一件事写第二份表达式时，元素名大小写少一个 /i 就够——7 字段门
 // 判字段在场、本模块判未知，任务因此从 [P] 判据的参与者里静默消失。
 import { taskHasWriteFace } from './lessons-hits.mjs';
-// 段名登记值取单源：骨架模块是「模板缺席时的段名基准」唯一登记处，消费方只 import，不自持字面名。
-import {
-  WAVE_SECTION_NAME,
-} from './guard-artifact-skeleton.mjs';
+// 段名登记值与段标题谓词都取单源：骨架模块是「模板缺席时的段名基准」唯一登记处，也是「这一行是不是
+// 登记的某段」的唯一判定（headingPredicate：级别 + 段名归一后相等），消费方只 import。
+import { WAVE_SECTION_NAME, headingPredicate } from './guard-artifact-skeleton.mjs';
 
 // 段界与 plan 出口既有的「波次散文一致性（[P] vs parallel）」检测**同一实现**，而段界本身由
 // lib/section-body.mjs 单点决定：围栏代码块里的 `## ` / `---` 是正文示例，不结束段体（段内贴一段
 // Markdown 示例不会把其后声明的 Wave 行整段吞掉）。
-// 标题判定的归一口径与 TASK 段形门**同一套**（normalizeHeading：去 ATX 标记 / 闭合 ATX / 尾部括号 /
-// 编号前缀 / 大小写），因此判定是**谓词**而不是行正则：标题**正文本身**可以以井号开头
-// （`## ## 波次划分`），行正则在那里判缺席、段形门却认作在场——同一份工件的同一段在两处得到相反
-// 答案时，一次排版就够关掉其中一处判据（未校验 ≠ 通过）。谓词只认二级标题（段形门的 H2 扫描同口径）。
-const WAVE_SECTION_NORM = normalizeHeading(WAVE_SECTION_NAME);
-
-function isWaveSectionHeading(heading) {
-  if (heading.level !== 2) return false;
-  return normalizeHeading(heading.text) === WAVE_SECTION_NORM;
-}
+// 段标题判定与 TASK 段形门、AC 覆盖**同一个谓词**（级别 + 归一后的标题正文相等）：标题**正文本身**
+// 以井号开头（`## ## 波次划分`）时，行正则会判缺席、段形门却认作在场——同一份工件的同一段在两处得到
+// 相反答案时，一次排版就够关掉其中一处判据（未校验 ≠ 通过）。比较规则不在本模块另写一份。
+const isWaveSectionHeading = headingPredicate(WAVE_SECTION_NAME, 2);
 
 // 波次段正文（段标题之后、下一个二级标题 / 分隔线 / 文末之前的文本）；无该段 → null。
 export function waveSectionBody(taskContent) {

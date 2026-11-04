@@ -828,6 +828,72 @@ export const ENTRIES = [
       assertTrue(fencedSectionCoverage.unjudgeable !== null
         && fencedSectionCoverage.unjudgeable.reason === 'REQUIREMENT 无验收准则段',
         '围栏代码块里的示例标题被读成了段（示例是正文，不是段）: ' + JSON.stringify(fencedSectionCoverage));
+      // ⑯ 标题**正文本身**以井号开头（`## ## 验收准则（AC）`）：段形门先剥前导井号再归一（认在场），
+      //    段定位若拿原始行做正则，第二个井号被读成段名的一部分 → 判「无验收准则段」——同一份工件的
+      //    同一段在两处得到相反答案（假红，恢复句还指向「补段」）。两侧过同一套归一后，这一形态必须与
+      //    普通写法给出同一判定：编号正常取到、矩阵照常对上。1.1 矩阵是三级标题，同一形态照此推到三级。
+      writeFile(atxRoot, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', [
+        '# REQUIREMENT: 井号开头夹具',
+        '',
+        '## ## 验收准则（AC）',
+        '',
+        '### AC-1 · 夹具准则',
+        '',
+        '- **Given** 夹具前置',
+        '',
+        '### AC-2 · 夹具准则',
+        '',
+        '- **Given** 夹具前置',
+        '',
+      ].join('\n'));
+      writeFile(atxRoot, '.specs/' + CHANGE_ID + '/TEST.md', [
+        '# TEST: 井号开头夹具',
+        '',
+        '## ## 第 1 轮 · 功能测试',
+        '',
+        '### ## 1.1 测试矩阵（AC → 用例）',
+        '',
+        '| AC | 类型 | 用例文件 / UAT | 状态 |',
+        '|---|---|---|---|',
+        '| AC-1 | unit | guard-self-test.mjs | ✅ |',
+        '| AC-2 | unit | guard-self-test.mjs | ✅ |',
+        '',
+      ].join('\n'));
+      const hashedHeadingCoverage = runCoverageIn(atxRoot);
+      assertTrue(hashedHeadingCoverage.unverified === null && hashedHeadingCoverage.unjudgeable === null,
+        '标题正文以井号开头被读成「段缺席」（段形门认在场，判据走同一套归一后不应分叉）: '
+          + JSON.stringify(hashedHeadingCoverage));
+      assertTrue(hashedHeadingCoverage.missing.length === 0,
+        '井号开头写法的 1.1 矩阵未被读成覆盖（缺: ' + JSON.stringify(hashedHeadingCoverage.missing) + '）');
+      // ⑰ 段名仍以模板为准：TEST 模板声明的承载段是「第 1 轮 · 功能测试」，工件标题换成模板没写过的
+      //    「第 1 轮：功能测试」时不得被回退名清单悄悄接住——回退只在**模板段名不含关键词**时生效，
+      //    否则「模板说缺段、判据说在场」会把判定放宽（假绿）。段形门对这一份工件同样报缺段。
+      writeFile(atxRoot, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', [
+        '# REQUIREMENT: 段名漂移夹具',
+        '',
+        '## 验收准则（AC）',
+        '',
+        '### AC-1 · 夹具准则',
+        '',
+        '- **Given** 夹具前置',
+        '',
+      ].join('\n'));
+      writeFile(atxRoot, '.specs/' + CHANGE_ID + '/TEST.md', [
+        '# TEST: 段名漂移夹具',
+        '',
+        '## 第 1 轮：功能测试',
+        '',
+        '### 1.1 测试矩阵（AC → 用例）',
+        '',
+        '| AC | 类型 | 用例文件 / UAT | 状态 |',
+        '|---|---|---|---|',
+        '| AC-1 | unit | guard-self-test.mjs | ✅ |',
+        '',
+      ].join('\n'));
+      const driftedRound = runCoverageIn(atxRoot);
+      assertTrue(driftedRound.unjudgeable !== null
+        && driftedRound.unjudgeable.reason === 'TEST.md 无第 1 轮段',
+        '模板没声明的段标题被回退名清单接住（段名不再由模板派生，判定被放宽）: ' + JSON.stringify(driftedRound));
     },
   },
 

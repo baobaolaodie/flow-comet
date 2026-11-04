@@ -984,9 +984,12 @@ export function engineConsumersOf(name, scriptsDir = SCRIPTS_DIR) {
 
 // 从具名 import 列表里摘掉一个名字（反向构造用；名前 / 名后 / 唯一项三种位置都覆盖）：
 // 摘掉后消费方仍引用该符号 ⇒ 「未从单源取用」必报。位置感知是必须的——只处理「名字后带逗号」
-// 的写法在名字位于列表末位时会静默不改，探针遂退化为恒绿（无判别力）。
+// 的写法在名字位于列表末位时会静默不改；只剩一个名字的列表（`import { NAME } from …`）更没有逗号可
+// 依，整句不动。两种形态下探针都退化为恒绿 / 报「前提失效」，锁的判别力无从证明（L-151）。
 export function dropNamedImport(text, name) {
   return String(text)
+    // 唯一项：列表里只有这一个名字（单行 / 多行同形；摘完保留 `import {}` 这层语句结构，变异只动名字）。
+    .replace(new RegExp('(import\\s*\\{)\\s*\\b' + name + '\\b\\s*(\\})'), '$1$2')
     .replace(new RegExp('(import\\s*\\{[^}]*?)\\b' + name + '\\b\\s*,\\s*'), '$1')
     .replace(new RegExp('(import\\s*\\{[^}]*?)\\s*,\\s*\\b' + name + '\\b'), '$1');
 }

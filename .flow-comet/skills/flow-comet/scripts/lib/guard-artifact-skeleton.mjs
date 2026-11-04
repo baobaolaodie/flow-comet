@@ -112,13 +112,35 @@ function headingLines(text, level) {
 export function headingPattern(rawName, level = 2) {
   const normalized = normalizeHeading(rawName);
   const body = normalized === '' ? String(rawName ?? '').trim() : normalized;
-  const literal = escapeRegExp(body).replace(/\*/gu, '\\*');
   const marker = level === 3 ? '###' : '##';
   return new RegExp(
-    '^' + marker + '\\s*(?:\\d+(?:\\.\\d+)?\\.?\\s*)?' + literal
+    '^' + marker + '\\s*(?:\\d+(?:\\.\\d+)?\\.?\\s*)?' + headingLiteral(body)
       + '\\s*(?:[（(][^\\n）)]*[）)])?(?:\\s+#+)?\\s*$',
     'im',
   );
+}
+
+// 段名字面量 → 正则片段：转义正则元字符（`*` 不在 escapeRegExp 的 glob 契约内，单独闭合）。段名
+// 在正则里是字面文本，缺口在这一行显式闭合，而不是各消费方各写一份转义。
+function headingLiteral(rawName) {
+  return escapeRegExp(String(rawName ?? '')).replace(/\*/gu, '\\*');
+}
+
+// 段标题谓词（同一套归一的谓词形态；lib/section-body.mjs 既接受整行正则，也接受
+// `(heading) => boolean`）：判定 = 级别相等 且 标题正文与段名过同一个 normalizeHeading 后相等。
+// 为什么需要谓词形态：标题**正文本身**可以以井号开头（`## ## 验收准则（AC）`）——Markdown 的合法
+// 写法，段形门先剥前导井号再归一（认作在场），而按整行锚定的正则把第二个井号读成段名的一部分：同一份
+// 工件的同一段在两处得到相反答案，一次排版就够关掉其中一处判据（未校验 ≠ 通过）。归一在标题文本层，
+// 井号因此不是判定变量。段形门（guard-template-fidelity）对同一件事用的是同一套归一（标题正文与段名
+// 各过 normalizeHeading 再比）；波次门与 AC 覆盖取用本谓词，两处不再各写一份比较。
+// names 可给单个段名或段名清单（回退基准常是一组同义写法，见文件末尾的段名清单段）。
+export function headingPredicate(names, level = 2) {
+  const wanted = new Set((Array.isArray(names) ? names : [names])
+    .map((name) => normalizeHeading(name))
+    .filter((name) => name !== ''));
+  return function registeredSectionHeading(heading) {
+    return Boolean(heading) && heading.level === level && wanted.has(normalizeHeading(heading.text));
+  };
 }
 
 // 登记表读取（进程内一次）
@@ -390,12 +412,21 @@ export async function allSkeletons(opts = {}) {
 // SUMMARY 模板缺席时的段序兜底：登记表不可读 / 模板未安装时，SUMMARY 门禁仍判乱序与缺段。
 export const LEGACY_SUMMARY_ORDER = ['做了什么', '改动文件', 'verify 输出', '6 维自查', '越界检查', '自检方法'];
 
+// 验收准则段的回退**段名**（一组同义写法）：同一份字面清单派生两种投影——open 出口对着整篇工件文本
+// test 下面的行正则，AC 覆盖按标题行过共享谓词比较（标题正文以井号开头时行正则判缺席，谓词认在场）。
+// 行正则由名字拼出：回退基准因此只有一份清单，改一处不会让另一处静默落后。
+export const TEMPLATE_FALLBACK_SECTION_NAMES = {
+  requirementAcceptance: ['验收准则', '验收标准', 'AC', 'Acceptance Criteria'],
+};
+
 // 模板缺席时 open / design 出口的段名回退（键形态保持不变，消费方按既有键取用）。
 export const TEMPLATE_FALLBACK_SECTION_PATTERNS = {
   changeWhy: /^##\s*Why\b/im,
   changeVisualTone: /^##\s*视觉调性/im,
   requirementUserStory: /^##\s*用户故事/im,
-  requirementAcceptance: /##\s*(验收准则|验收标准|AC|Acceptance Criteria)/i,
+  requirementAcceptance: new RegExp(
+    '##\\s*(' + TEMPLATE_FALLBACK_SECTION_NAMES.requirementAcceptance.map(headingLiteral).join('|') + ')',
+    'i'),
   designDecisionList: /^##\s*\d*\.?\s*决策清单/m,
 };
 
