@@ -721,8 +721,11 @@ export const ENTRIES = [
 
       // ===== ⑭ 段标题的写法不是判定变量（波次段与 TASK 段形门同一口径）=====
       // 波次段的段名曾是行首精确正则，而 TASK 段形门走标题归一：同一份计划换个标题写法，判据就退化成
-      // 「未校验（无波次段）」放行——一次排版即可绕过「未验证 ≠ 通过」。四类合法写法因此必须给出同一
-      // 判定与同一明细；围栏代码块里的示例标题是正文，不得被读成段。
+      // 「未校验（无波次段）」放行——一次排版即可绕过「未验证 ≠ 通过」。合法写法因此必须给出同一判定与
+      // 同一明细；围栏代码块里的示例标题是正文，不得被读成段。
+      // `## ## 波次划分` 这一格钉住「两处归一必须真的同源」的接缝：它的标题**正文本身**以井号开头——
+      // 段形门先剥前导井号再归一（认作在场），波次门若拿原始行做正则就会判缺席并跳过，于是同一份工件的
+      // 同一段在两处得到相反答案，新 change 仍 exit 0。判定必须过同一 normalizeHeading 再比。
       writeFile(dir, 'flow-kit/templates/TASK.md',
         '# TASK: <change 标题>\n\n## 波次划分\n\n## 任务清单\n');
       const headingFormPlan = (heading) => '# TASK\n\n' + heading
@@ -733,6 +736,7 @@ export const ENTRIES = [
         '## 波次划分（依赖层级）',
         '## 3. 波次划分',
         '## 波次划分 ##',
+        '## ## 波次划分',
       ];
       const headingFormResults = waveHeadingForms.map((heading) => planWithSection(headingFormPlan(heading)));
       const headingFormReports = headingFormResults.map((res) => waveReportLines(res));

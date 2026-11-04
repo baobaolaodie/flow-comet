@@ -1330,6 +1330,13 @@ export const ENTRIES = [
       assertOut(completedWithdraw, 'handoffResult 在场');
       assertOut(completedWithdraw, '撤回只适用于被遗弃的 request');
       assertOut(completedWithdraw, '恢复:');
+      // ②c-0c 恢复句的可照抄性：命令是这条恢复路径唯一的可执行面，没有形态断言时退回裸脚本名 /
+      //       <description> 占位（占位在 bash 里是输入重定向）不会被发现。期望值取命令文本的唯一
+      //       装配，不另写一份字面路径——运行期换了装配，这里随之变红。
+      assertOut(completedWithdraw, scriptCommand({
+        scriptsDir: SCRIPTS_DIR, runRoot: dir, script: 'workflow-handoff.mjs', args: ['request', 'P01'],
+      }));
+      assertNotOut(completedWithdraw, '<description>');
       assertNotOut(completedWithdraw, 'HANDOFF WITHDRAW');
       assertStateBytesUnchanged(dir, bytesBeforeCompletedWithdraw, '撤回已收工的委托被拒');
       // ②c-1 真实 CLI 撤回：缺 --by 先被拒（留痕来源不可缺省）⇒ 补齐后撤回成功
@@ -1382,6 +1389,11 @@ export const ENTRIES = [
       const resultAfterWithdraw = runHandoff(['result', 'P02', '{"commitHash":"deadbee","completedChecks":[]}'], dir);
       assertExit(resultAfterWithdraw, 1);
       assertOut(resultAfterWithdraw, '已撤回（终态）');
+      // ②c-5b 同一恢复句的形态（与 ②c-0c 同一装配）：命令带真实脚本路径与任务号，无占位符。
+      assertOut(resultAfterWithdraw, scriptCommand({
+        scriptsDir: SCRIPTS_DIR, runRoot: dir, script: 'workflow-handoff.mjs', args: ['request', 'P02'],
+      }));
+      assertNotOut(resultAfterWithdraw, '<description>');
       // ②c-6 判据要求留痕两字段齐备：抽掉 withdrawnBy（手改形态）⇒ 重新计为在飞委托 ⇒ 出口回收
       const strippedWithdraw = JSON.parse(readStateBytes(dir));
       delete strippedWithdraw.evidence['subagent-execute'].handoffRequests.P02.withdrawnBy;
