@@ -10,21 +10,19 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
-  toPersistedProtocolPath,
   validateStateFields,
   verifyFailuresFor,
   setVerifyFailuresFor,
 } from '../state-schema.mjs';
 import { EXECUTE_FAMILY_NODE_IDS, analyzeDependencyGraph, normalizeHeading } from '../route-node.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from '../task-parsing.mjs';
-// 声明命令的派生面（单一来源表，本模块只组合、不另写映射）：节点该读的协议文件（NODE_PROTOCOL_FILES）、
-// 该节点的条件提示词（NODE_CONDITIONAL_PROMPTS，判前端时才是必读面）、该节点的模板清单
-// （nodeTemplateDeclaration）、提示词指针形态（promptPointerPath）。
+// 声明面的事实与命令装配各归一处：协议面事实（该节点该声明哪些技能、没有必需技能时退到哪个名字）
+// 取 protocol-utils；条件提示词（判前端时才是必读面）取 NODE_CONDITIONAL_PROMPTS；命令文本与
+// 「全部 --prompt + 模板全清单」的拼装取 state-explain 的 declarationCommands——本模块不再各拼一半。
 import {
   NODE_CONDITIONAL_PROMPTS,
-  NODE_PROTOCOL_FILES,
-  nodeTemplateDeclaration,
-  promptPointerPath,
+  declarationSkillFallback,
+  guardedDeclarationSkills,
 } from '../protocol-utils.mjs';
 import { runRoot, packageRoot, fileExists, statePath, writeJson, protocolPath } from './guard-state-io.mjs';
 import {
@@ -57,7 +55,7 @@ import {
 import { lessonsEntries, lessonsHits, lessonsPathTokens, taskWriteFilesById } from './lessons-hits.mjs';
 // 命令文本的唯一实现（平台化脚本根 + 整条路径加引号）：运行期恢复指引与 explain 的 COMMAND 行
 // 同源；本模块不再自拼路径（L-067：同一推导两处表达必然分叉）。
-import { scriptCommand } from './state-explain.mjs';
+import { declarationCommand, declarationCommands, protocolContextArgs, scriptCommand } from './state-explain.mjs';
 // 声明标记目录的路径规则（活动路径优先、归档兜底）归状态族的路径上下文模块：本模块只按守卫运行根
 // 取用（guard → state-* 是允许的单向边），不在此另写一份扫描。
 import { findSkillLoadsDir } from './state-io.mjs';
@@ -717,52 +715,11 @@ async function nodeSkillDeclared(nodeId, changeName) {
     .some((name) => name.startsWith(prefix) && name.endsWith('.json'));
 }
 
-// 声明时该填的技能名（不猜）：取协议为该节点声明的实现技能——与 entry 的 LOAD SKILL 行、next 的
-// SKILL 行同源；协议未声明实现技能时退到 requiredSkillCalls 的 main scope 条目（handoff scope 是
-// 子代理加载的技能，不是协调者该声明的那个）；两者皆无 → null，报文改为让执行者按 LOAD SKILL 行的
-// 技能名填写，不臆造一个名字。
-function declaredNodeSkill(node) {
-  const implementation = node.implementation;
-  const implementationSkill = implementation && typeof implementation === 'object' ? implementation.skill : null;
-  if (typeof implementationSkill === 'string' && implementationSkill.trim() !== '') return implementationSkill.trim();
-  const mainScoped = (node.requiredSkillCalls ?? [])
-    .find((binding) => binding && binding.scope !== 'handoff'
-      && typeof binding.skill === 'string' && binding.skill !== '');
-  return mainScoped ? mainScoped.skill : null;
-}
-
-// 可照抄命令的协议上下文（单一实现）：本次运行的协议**不是内置默认**时，打印的命令必须自带
-// --protocol——状态命令族只走 --protocol CLI → FLOW_COMET_PROTOCOL → 内置默认，三种来源里没有
-// state 绑定这一项。命令不携带协议上下文时，照抄执行会按同一套优先级重新解析，自定义协议的节点在
-// 那份协议里不存在，恢复路径断在第一步（报文给了命令，命令却跑不进同一个协议）。
-// 判据只看「本次实际解析到的协议是不是内置默认」（guard-state-io 的单一来源）：来源是 CLI / env /
-// state 一视同仁——三种来源都可能指向自定义协议，缺的正是命令自己的上下文；内置默认时照抄不加
-// 参数也解析到同一份，加它只是噪音。参数值取持久化形态（state-schema 的 toPersistedProtocolPath：
-// 项目内 → 根相对 POSIX，随项目迁移；根外 → 绝对），与 init 写进 state.protocolPath 的形态同源；
-// 引号随参数词给出——脚本路径与整条命令仍只由 scriptCommand 产出。
-function protocolContextArgs() {
-  if (protocolPath === null) return [];
-  const builtin = path.resolve(packageRoot, 'reference', 'workflow-protocol.json');
-  if (path.resolve(protocolPath) === builtin) return [];
-  return ['--protocol', '"' + toPersistedProtocolPath(runRoot, protocolPath) + '"'];
-}
-
-// 协议要求声明的技能（同步核心）：guarded ∧ 非 handoff ∧ 有名字。适用性门控的取舍（判不判前端）在
-// declarationSkillNames 里做——那条判据要读 CHANGE.md，是异步的；本函数只回答协议面的事实，供异步
-// 判据与同步的出口门禁共用（两处各写一遍过滤条件就是「两份判据各自演进」的起点）。
-function guardedDeclarationSkills(node) {
-  return (node.requiredSkillCalls ?? [])
-    .filter((binding) => binding
-      && binding.enforcement === 'guarded'
-      && binding.scope !== 'handoff'
-      && typeof binding.skill === 'string'
-      && binding.skill !== '')
-    .map((binding) => binding.skill);
-}
-
-// 声明命令要展开成哪几个技能目标：没有 guarded 必需技能时退回实现技能（取不到才占位）。
-function declarationTargets(node, skills) {
-  return skills.length > 0 ? skills : [declaredNodeSkill(node) ?? '<skill>'];
+// 守卫族的命令运行上下文（形状与状态命令族的 commandContext 相同）：脚本目录由本模块位置推导，
+// 运行根 / 包根 / 协议路径取守卫运行上下文——协议路径是本次 guard 实际解析到的那一份（含 state 绑定），
+// 命令自带的协议上下文因此与本次运行一致。
+function declarationContext() {
+  return { scriptsDir, runRoot, packageRoot, protocolPath };
 }
 
 // 本节点该声明哪些技能（单一实现：出口声明覆盖门的「要求覆盖」与恢复段的「照抄哪几条命令」共用
@@ -770,7 +727,7 @@ function declarationTargets(node, skills) {
 // ——handoff scope 的技能由子代理加载，协调者不加载也无法诚实声明（与 record 侧同一口径）；
 // 适用性门控的绑定（design 的 ui-design）在判据不成立时不要求声明（非前端本就不加载它，「没声明」
 // 不是缺陷），判据成立时与其它 guarded 技能同权。两处若各判一套，恢复段给出的命令会在下一次 exit
-// 上被另一套判据点名——那正是「照抄走不通」的成因。
+// 上被另一套判据点名——那正是「照抄走不通」的成因。过滤条件本身取自 protocol-utils（协议面事实）。
 export async function declarationSkillNames(node, state) {
   const skills = guardedDeclarationSkills(node);
   if (skills.length === 0) return [];
@@ -780,53 +737,34 @@ export async function declarationSkillNames(node, state) {
     .filter((skill) => applicabilityGatedBinding(node, skill) === null || frontend.applicable === true);
 }
 
-// 该节点该读的提示词清单（单一实现）：协议文件 + **条件提示词**（判前端时才算必读面）。
-// 条件提示词此前漏在派生之外——前端 design 的 ui-design 命令因此指向通用阶段提示词 2-design.md，
-// 而入口打印、SKILL 册与 SKILL_PROTOCOL_FILES 给的是它自己的 2a-ui-design.md（技能与它要读的协议
-// 对不上）。判前端与入口打印条件行的判据同源（frontendCriterion），此处只接收结论。
-function declarationPromptFiles(node, frontend) {
-  const files = [...(NODE_PROTOCOL_FILES[node.id] ?? [])];
-  if (frontend === true) files.push(...(NODE_CONDITIONAL_PROMPTS[node.id] ?? []));
-  return files;
-}
-
-// 「怎么声明技能加载」的命令装配（单一实现）：一个技能一条命令，每条都带该节点**全部** --prompt
-// （含条件提示词）与模板全清单。异步与同步两个调用面共用它——只有「前端是否成立」这一个输入不同。
-function skillLoadDeclarationCommands({ node, skills, frontend }) {
-  const flags = [];
-  for (const file of declarationPromptFiles(node, frontend)) {
-    flags.push('--prompt', promptPointerPath(file));
-  }
-  const declaration = nodeTemplateDeclaration(node);
-  if (declaration.required.length > 0) {
-    flags.push('--templates', declaration.required.map((name) => name + '.md').join(','));
-  }
-  const protocolArgs = protocolContextArgs();
-  return skills.map((skill) => ({
-    skill,
-    command: scriptCommand({
-      scriptsDir,
-      runRoot,
-      script: 'workflow-state.mjs',
-      args: ['skill-load', node.id, skill, ...flags, ...protocolArgs],
-    }),
-  }));
-}
-
 // 「怎么重新声明技能加载」的完整形态（命令文本的单一来源：缺证据恢复段的第一步、出口声明覆盖门的补齐
-// 命令、门控绑定缺证据的补证据步骤三处都从这里取）——三面同时给全，缺一照抄后必被另一道门拦一次：
+// 命令、门控绑定缺证据的补证据步骤三处都从这里取，与状态命令族同一装配 state-explain 的
+// declarationCommands）——三面同时给全，缺一照抄后必被另一道门拦一次：
 //   · 该节点**全部**协议文件 → 多个 --prompt（open / review 各两份：只给首份，覆盖门会点名另一份）；
 //     前端 change 上还要并上该节点的条件提示词（design 的 2a-ui-design.md——入口会打印那一行，声明
 //     却漏掉它，ui-design 的命令就与它该读的协议对不上）；
 //   · 该节点的模板全清单 → --templates（零模板节点省略，省略即空集；漏了会被模板门拦下）；
 //   · 技能按 declarationSkillNames 逐个展开——一条命令只写一个技能标记，故每个必需技能各一条。
-// 没有任何 guarded 必需技能（自定义协议节点 / 只有 handoff 绑定的 subagent-execute）时退回实现
-// 技能：声明要写的是「加载了哪个 skill」，取不到就留占位符，不臆造一个名字。
+// 没有任何 guarded 必需技能（自定义协议节点 / 只有 handoff 绑定的 subagent-execute）时退回协议面
+// 已有的技能名（protocol-utils 的 declarationSkillFallback：实现技能 → 非 handoff 既有条目 → 占位符）。
+//
+// 返回命令条目 { skill, command }（命令文本的构造在 state-explain，本函数只决定「哪些技能」）。
+function skillLoadDeclarationCommands({ node, skills, frontend }) {
+  return declarationCommands({ node, skills, frontend, context: declarationContext() });
+}
+
 export async function nodeSkillLoadCommands({ node, state }) {
-  const targets = declarationTargets(node, await declarationSkillNames(node, state));
+  const required = await declarationSkillNames(node, state);
+  const targets = required.length > 0 ? required : [declarationSkillFallback(node)];
   const frontend = (NODE_CONDITIONAL_PROMPTS[node.id] ?? []).length > 0
     && (await frontendCriterion(state?.activeChange)).applicable === true;
   return skillLoadDeclarationCommands({ node, skills: targets, frontend });
+}
+
+// 单个技能的声明命令（入口 --prompt 冲突的兜底：标记声明的技能不在本节点目标集里时，仍要给一条
+// 覆写该标记的命令）。与上面同一装配，不另拼一份文本。
+export function guardDeclarationCommand({ node, skill, frontend = false }) {
+  return declarationCommand({ node, skill, frontend, context: declarationContext() });
 }
 
 // record 命令与其尾部重试提示的单一构造（两处恢复段共用）：载荷里的 completedChecks 按原样带回
@@ -841,7 +779,7 @@ function recordRecoveryCommand(node, completedChecks = []) {
     scriptsDir,
     runRoot,
     script: 'workflow-state.mjs',
-    args: ['record', node.id, "'" + JSON.stringify(payload) + "'", ...protocolContextArgs()],
+    args: ['record', node.id, "'" + JSON.stringify(payload) + "'", ...protocolContextArgs(declarationContext())],
   });
 }
 
@@ -936,9 +874,10 @@ export async function runArtifactGate({ protocol, node, state, emptyExitApproved
 function requiredSkillEvidenceRecovery({ node, evidence, missingChecks }) {
   // 声明目标与覆盖门同一份判据（guarded ∧ 非 handoff）：一次把该技能组全声明掉，下一步的覆盖门
   // 因此不会再点名任何一条。
+  const gated = guardedDeclarationSkills(node);
   const declarations = skillLoadDeclarationCommands({
     node,
-    skills: declarationTargets(node, guardedDeclarationSkills(node)),
+    skills: gated.length > 0 ? gated : [declarationSkillFallback(node)],
     frontend: true,
   });
   // 载荷写回**完整**清单（既有 ∪ 缺的）：只写缺的那条，会把另一条已成立的 gated 声明抹掉——下一次

@@ -614,10 +614,12 @@ export function promptDeclarationConflict({ node, declaredProtocol } = {}) {
 // ---------- 声明命令：参数面的一处装配 ----------
 //
 // 一次 skill-load 声明要携带的东西只有三样：哪个节点的哪个技能、该节点该读的**每一份**协议文件
-// （条件提示词在适用时并入）、以及该节点的模板全清单。这条装配此前散在四处各拼一份——重跑声明的
+// （条件提示词在适用时并入）、以及该节点的模板全清单。这条装配此前散在几处各拼一份——重跑声明的
 // 指引只带首份 --prompt、公开册把占位符写进 --prompt 的值位置（bash 下 `<` 是重定向）、门禁报文
-// 干脆不带 --templates（照抄即撞模板门）。故装配只在这里做，调用方只提供事实（节点、技能），
-// 不再各拼一半。
+// 干脆不带 --templates（照抄即撞模板门）。故参数面只在这里拼，调用方只提供事实（节点、技能）。
+//
+// 命令**文本**（脚本路径 / 引号 / 协议上下文）不在这里：那是运行面的事实（平台布局、本次解析到的
+// 协议），由 lib/state-explain.mjs 的 declarationCommand 一处补齐——状态命令族与守卫族取同一份。
 //
 // 同步面与异步面的差别只有一处输入：条件提示词（design 的 2a-ui-design.md）是否适用。守卫的
 // nodeSkillLoadCommands 判得了前端，按结论并入；状态命令族与册子拿不到该结论，改为「本次声明的
@@ -646,37 +648,39 @@ export function skillLoadDeclarationArgs({ node, skill, frontend = false } = {})
   return args;
 }
 
-// 同一条命令的文本形态（册子与状态命令族的报文用；脚本名不带平台路径——那不属于声明内容）。
-export function skillLoadDeclarationCommand({ node, skill, frontend = false } = {}) {
-  return ['workflow-state.mjs', ...skillLoadDeclarationArgs({ node, skill, frontend })].join(' ');
-}
-
-// 该节点**无条件**要求声明的技能（guarded ∧ 非 handoff）。条件绑定（design 的 ui-design：技能自身
-// 承载的协议文件就是该节点的条件提示词）不在此展开——它是否适用要读 CHANGE.md 判前端，同步面
-// 不替它下结论，缺那一项时由判得了前端的出口指引补。没有 guarded 必需技能时退回实现技能
-// （声明写的是「加载了哪个 skill」，取不到就留占位符，不臆造名字）。
-export function declarationSkillTargets(node) {
-  const skills = (node?.requiredSkillCalls ?? [])
+// 该节点要求声明的技能（guarded ∧ 非 handoff）——协议面的事实，唯一实现：守卫的异步适用性判据、
+// 同步出口的覆盖门与回退取值全从这里取（第二个过滤条件在各处各写一遍，就是「两份判据各自演进」
+// 的起点）。
+export function guardedDeclarationSkills(node) {
+  return (node?.requiredSkillCalls ?? [])
     .filter((binding) => binding
       && binding.enforcement === 'guarded'
       && binding.scope !== 'handoff'
       && typeof binding.skill === 'string'
       && binding.skill !== '')
-    .map((binding) => binding.skill)
-    .filter((skill) => !(SKILL_PROTOCOL_FILES[skill] ?? [])
-      .some((file) => (NODE_CONDITIONAL_PROMPTS[node?.id] ?? []).includes(file)));
-  if (skills.length > 0) return skills;
-  const implementation = node?.implementation;
-  const implementationSkill = implementation && typeof implementation === 'object' ? implementation.skill : null;
-  return [typeof implementationSkill === 'string' && implementationSkill.trim() !== ''
-    ? implementationSkill.trim()
-    : '<skill>'];
+    .map((binding) => binding.skill);
 }
 
-// 节点的全部声明命令（每个目标技能各一条，命令形态与上面同一装配）——缺声明时的恢复指引取这份。
-export function nodeSkillLoadDeclarations({ node, frontend = false } = {}) {
-  return declarationSkillTargets(node).map((skill) => ({
-    skill,
-    command: skillLoadDeclarationCommand({ node, skill, frontend }),
-  }));
+// 没有可展开的必需技能时，声明该写哪个技能名（**不臆造**）：优先节点实现技能（它是这个节点的实现
+// 者），其次该节点 requiredSkillCalls 里非 handoff 的既有条目，两者皆无才留占位符。
+// 占位符是最后的诚实选择——它落在位置实参位，在 bash 下 `<skill>` 是输入重定向、照抄即失败，
+// 故只有当协议面确实没有可用的技能名时才出现，且报文会说明要按 entry 的 LOAD SKILL 行填。
+export function declarationSkillFallback(node) {
+  const implementation = node?.implementation;
+  const implementationSkill = implementation && typeof implementation === 'object' ? implementation.skill : null;
+  if (typeof implementationSkill === 'string' && implementationSkill.trim() !== '') return implementationSkill.trim();
+  const mainScoped = (node?.requiredSkillCalls ?? [])
+    .find((binding) => binding && binding.scope !== 'handoff'
+      && typeof binding.skill === 'string' && binding.skill !== '');
+  return mainScoped ? mainScoped.skill : '<skill>';
+}
+
+// 该节点本次该声明哪些技能（**同步面**的目标集）：guarded 必需技能，但条件绑定（design 的 ui-design：
+// 技能自身承载的协议文件就是该节点的条件提示词）不在此展开——它是否适用要读 CHANGE.md 判前端，
+// 同步面不替它下结论，缺那一项时由判得了前端的出口指引补。一个都不剩时按 declarationSkillFallback 退。
+export function declarationSkillTargets(node) {
+  const skills = guardedDeclarationSkills(node)
+    .filter((skill) => !(SKILL_PROTOCOL_FILES[skill] ?? [])
+      .some((file) => (NODE_CONDITIONAL_PROMPTS[node?.id] ?? []).includes(file)));
+  return skills.length > 0 ? skills : [declarationSkillFallback(node)];
 }

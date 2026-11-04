@@ -9,7 +9,7 @@
 import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
-import { assertExit, assertNotOut, assertOut, assertTrue, runState, writeState } from '../lib/test-helpers.mjs';
+import { assertExit, assertNotOut, assertOut, assertTrue, installSkillTreeCopy, runPrintedCommand, runState, writeState } from '../lib/test-helpers.mjs';
 import { CHANGE_ID, SCRIPTS_DIR, applyDistributionSurface, readStateFile } from '../lib/system-fixtures.mjs';
 
 const DESIGN_SKILL_ARGS = ['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md'];
@@ -42,18 +42,26 @@ const RAW_ENTRIES = [
       assertOut(extra, 'BLOCKED');
       assertOut(extra, '多写/错名: TASK');
       assertOut(extra, '映射要求: DESIGN');
-      // 命令形态与守卫侧的派生同形：先该节点全部 --prompt，再模板全清单（同一装配，两处不得各拼一份顺序）。
-      assertOut(extra, 'workflow-state.mjs skill-load design flow-comet-design --prompt flow-kit/prompts/2-design.md --templates DESIGN.md');
+      // 命令形态与守卫侧的派生同形（同一装配）：脚本路径 + 该节点全部 --prompt + 模板全清单 + 协议
+      // 上下文，四个面一次给全；且**照抄能跑通**——解析打印文本 → 真执行，标记的 protocol 必须仍在，
+      // 否则下一次 exit 会被「缺协议声明标记」拦下（恢复步骤自己弄坏协议声明）。
       assertNotOut(extra, '--prompt <');
-      const declareLine = extra.output.split(/\r?\n/).find((line) => line.includes('workflow-state.mjs skill-load design')) ?? '';
-      assertTrue(declareLine !== '', 'BLOCKED 报文应给出可照抄的重新声明命令');
-      // 照抄报文里的命令重跑（只取命令词元：报文尾部是中文说明，不是参数）——标记的 protocol 必须
-      // 仍在，否则下一次 exit 会被「缺协议声明标记」拦下（恢复步骤自己弄坏协议声明）。
-      const printedArgs = declareLine.slice(declareLine.indexOf('workflow-state.mjs')).split(/\s+/u)
-        .filter((token) => token !== '' && !/[\u4e00-\u9fff]/u.test(token))
-        .slice(1);
-      const redeclared = runState(printedArgs, dir);
-      assertExit(redeclared, 0);
+      const declareLine = (extra.output.match(/^\s*(node "[^"]+" skill-load design [^\n]+)$/m) || [])[1];
+      assertTrue(typeof declareLine === 'string',
+        'BLOCKED 报文应给出可照抄的重新声明命令（node "<脚本路径>" skill-load …）:\n' + extra.output);
+      for (const fragment of [
+        '--prompt flow-kit/prompts/2-design.md',
+        '--templates DESIGN.md',
+        '--protocol "reference/workflow-protocol.json"',
+      ]) {
+        assertTrue(declareLine.includes(fragment),
+          '重新声明命令缺 ' + fragment + '（命令与判据不是同一份形态）: ' + declareLine);
+      }
+      // 真跑一遍：打印的是权威源设计形态（.claude/skills/…），按安装布局把技能树复制进夹具才可解析。
+      installSkillTreeCopy(dir, path.join('.claude', 'skills'));
+      const replayed = runPrintedCommand(declareLine, dir, { FLOW_COMET_RUN_ROOT: dir, FLOW_COMET_PROTOCOL: '' });
+      assertTrue(replayed.status === 0,
+        '照抄的重新声明命令跑不通\n  命令: ' + declareLine + '\n  exit ' + replayed.status + '\n' + replayed.output);
       const redeclaredMarker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
       assertTrue(redeclaredMarker.protocol === '2-design.md',
         '照抄重新声明命令后 protocol 不应变成 null，实际: ' + JSON.stringify(redeclaredMarker.protocol));

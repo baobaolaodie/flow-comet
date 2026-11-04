@@ -10,10 +10,13 @@ import {
   describeTemplateList,
   nodeTemplateDeclaration,
   normalizeTemplateName,
-  skillLoadDeclarationCommand,
   templateDeclarationProblems,
   templateKeyOf,
 } from '../protocol-utils.mjs';
+// 声明命令的唯一装配（脚本路径 + 全部 --prompt + 模板全清单 + 协议上下文）落在中立的命令文本模块：
+// 守卫族取同一份（它有自己的运行上下文），本族按状态命令族的运行上下文取用——两族各拼一份时
+// 只有一种文本能执行。
+import { declarationCommand } from './state-explain.mjs';
 // 声明标记目录的路径规则（活动路径优先、归档路径兜底）由本族的路径上下文模块持有：同一条规则被
 // 状态命令族与守卫族消费，本模块只把状态命令族的运行上下文作为根注入（守卫侧按自己的运行根取用
 // 同一份实现）——两族各写一份扫描，会在「活动目录在不在场」「多归档目录取哪个」上给出不同答案。
@@ -144,7 +147,7 @@ export async function hasNodeSkillDeclaration(nodeId, changeName) {
 //（无 .skill-loads/ 或本节点无标记）——后者由「缺少技能加载声明标记」门负责，不重复报
 //（与 exit 侧协议声明校验的「未激活不追溯」同一口径）。
 // 零模板的内置节点（verify / archive）省略 --templates 即视为空集，通过。
-export async function verifyTemplateDeclaration({ protocol, nodeId, changeName, newChange }) {
+export async function verifyTemplateDeclaration({ protocol, nodeId, changeName, newChange, commandContext: context }) {
   const declarationNode = (protocol?.nodes ?? []).find((node) => node.id === nodeId);
   const declaration = nodeTemplateDeclaration(declarationNode);
   if (declaration.source !== 'builtin' || !changeName) return { ok: true };
@@ -189,10 +192,11 @@ export async function verifyTemplateDeclaration({ protocol, nodeId, changeName, 
   const detail = [];
   if (problems.missing.length > 0) detail.push('漏写: ' + problems.missing.join('、'));
   if (problems.extra.length > 0) detail.push('多写/错名: ' + problems.extra.join('、'));
-  // 重新声明命令与恢复段同一装配（该节点全部协议文件 + 模板全清单）：只补 --templates 的旧形态会把
-  // protocol 写成 null，下一次 exit 反被判「缺协议声明标记」（恢复步骤自己弄坏协议声明）。
+  // 重新声明命令与恢复段同一装配（脚本路径 + 该节点全部协议文件 + 模板全清单 + 协议上下文）：
+  // 只补 --templates 的旧形态会把 protocol 写成 null，下一次 exit 反被判「缺协议声明标记」；
+  // 裸脚本名的旧形态照抄是 command not found（恢复步骤自己走不通）。
   const declareCommands = declaredSkills
-    .map((skill) => skillLoadDeclarationCommand({ node: declarationNode, skill }));
+    .map((skill) => declarationCommand({ node: declarationNode, skill, context }));
   const reason = '节点 ' + nodeId + ' 的模板声明与节点映射不一致（' + detail.join('；')
     + '；映射要求: ' + describeTemplateList(declaration.required) + '）——重跑下面的命令重新声明'
     + '（同一 node-skill 重跑会覆写该标记）:\n'
@@ -210,7 +214,7 @@ export async function verifyTemplateDeclaration({ protocol, nodeId, changeName, 
 // 如 subagent-execute 节点的 flow-comet-dev）豁免标记，以共用证据库 evidence['subagent-execute']
 // 的 handoffResult（有委托记录即满足）为证据；main scope / 协议外条目仍要求标记（fail-closed）。
 // 返回 { ok: true } 或 { ok: false, reason }（fail-closed：无 active change / 标记损坏同样 BLOCK）。
-export async function verifySkillLoadMarkers(completedChecks, changeName, recordTime, protocol, state) {
+export async function verifySkillLoadMarkers(completedChecks, changeName, recordTime, protocol, state, context) {
   if (!Array.isArray(completedChecks)) return { ok: true };
   const required = [];
   for (const check of completedChecks) {
@@ -268,8 +272,9 @@ export async function verifySkillLoadMarkers(completedChecks, changeName, record
       }
     }
     if (!markerPath) {
-      // 声明命令由协议派生（该条目所指节点的全部协议文件 + 模板全清单）：只给 "skill-load <node> <skill>"
-      // 的旧形态照抄后会被模板声明门 / 出口覆盖门逐个拦下——报文给出的东西必须一次补齐。
+      // 声明命令由协议派生（该条目所指节点的全部协议文件 + 模板全清单），脚本路径与协议上下文由
+      // 唯一装配补齐：只给 "skill-load <node> <skill>" 或裸脚本名的旧形态，照抄后会被模板声明门 /
+      // 出口覆盖门逐个拦下，或在 shell 里 command not found——报文给出的东西必须一次补齐。
       // 协议外节点（旧证据里出现过、当前协议已删）取不到节点声明：仍按条目里的节点名给命令，
       // 不拼引擎映射（没有映射就没有 --prompt / --templates 可拼——不编造）。
       const declaredNode = (protocol?.nodes ?? []).find((node) => node.id === item.node) ?? { id: item.node };
@@ -277,7 +282,7 @@ export async function verifySkillLoadMarkers(completedChecks, changeName, record
         ok: false,
         reason: 'completedChecks 条目 ' + item.raw + ' 缺少对应声明标记 ' + activeDisplay +
           '（归档路径也未找到）——先加载该 skill 并照抄下面的命令声明已加载:\n  '
-          + skillLoadDeclarationCommand({ node: declaredNode, skill: item.skill }),
+          + declarationCommand({ node: declaredNode, skill: item.skill, context }),
       };
     }
     let marker;

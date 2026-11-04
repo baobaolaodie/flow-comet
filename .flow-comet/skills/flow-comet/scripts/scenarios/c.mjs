@@ -807,20 +807,38 @@ export const ENTRIES = [
   },
 
   // 100: record 校验 BLOCK（AC-3 反例）——completedChecks 含 required-skill:open.flow-comet-change
-  // 条目但无对应声明标记 → BLOCKED + 指引先加载 skill 并运行 skill-load；evidence 不写入
+  // 条目但无对应声明标记 → BLOCKED + 可照抄的声明命令；evidence 不写入。
+  // 命令形态的判据是**照抄能跑通**：解析打印文本 → 在夹具里真执行 → 同一条 record 通过。旧形态是
+  // 裸脚本名 + 相对提示词 + 无协议上下文（`workflow-state.mjs skill-load …`），照抄在 shell 里
+  // command not found；字符串断言只能钉住那个坏形态本身，钉不出「这条命令能不能用」。
   {
     name: '100 record BLOCKED：completedChecks 缺声明标记（AC-3）',
     run: (dir) => {
       writeState(dir, baseState('open'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
-      const res = runStateWithProtocol(dir, ['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })]);
+      const payload = JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] });
+      const res = runStateWithProtocol(dir, ['record', 'open', payload]);
       assertExit(res, 1);
       assertOut(res, 'BLOCKED');
       assertOut(res, '缺少对应声明标记');
-      assertOut(res, 'workflow-state.mjs skill-load open flow-comet-change');
       // BLOCK 先于记录——校验失败后 evidence 不得写入
       const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (st.evidence && st.evidence.open) throw new Error('BLOCKED 后不应写入 evidence: ' + JSON.stringify(st.evidence.open));
+      // 报文给出的声明命令必须可照抄（与守卫侧恢复段同一装配：脚本路径 + 全部 --prompt + 模板全清单
+      // + 协议上下文）：解析 → 真跑 → 同一条 record 通过。
+      const command = (res.output.match(/^\s*(node "[^"]+" skill-load [^\n]+)$/m) || [])[1];
+      if (!command) {
+        throw new Error('缺声明标记的阻塞必须给出完整可执行命令（node "<脚本路径>" skill-load …）:\n' + res.output);
+      }
+      // 协议上下文随命令走：本夹具的协议来自环境变量（不是内置默认），照抄时不带 --protocol 会
+      // 解析到另一份协议（状态命令族只认 CLI → env → 内置默认，没有第二来源）。
+      if (!command.includes('--protocol "reference/workflow-protocol.json"')) {
+        throw new Error('声明命令缺协议上下文（照抄会解析到内置默认协议，而不是本次运行的那份）: ' + command);
+      }
+      printedCommandReplay(dir, '记录侧声明')(command);
+      const recorded = runStateWithProtocol(dir, ['record', 'open', payload]);
+      assertExit(recorded, 0);
+      assertOut(recorded, 'EVIDENCE: open');
     },
   },
 

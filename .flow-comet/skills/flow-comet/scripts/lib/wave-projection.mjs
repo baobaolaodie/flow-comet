@@ -7,9 +7,9 @@
 // 更早波次却排到更后面的保守排法，都会在明细里被逐条点名为「当前波 → 应到波」。
 // 分级不在这里判：本模块产出「判不了」的分类与载荷、明细与报文行；BLOCK / WARN 由调用方按
 // isNewChange 给出 blocking。**分级 → 输出只有一处**（waveReviewOutcome）：plan 出口门禁与 replan
-// 重校段各自只派生 blocking（两处的 isNewChange 取法不同，由调用方传入），不再各写一份
-// 「不可判 → 选级别 → 打印 → exit」的同构分支——双份同构在 T01 里已照形态加过一支，改分级只改一处
-// 就会在另一处静默落后（ADR-013 的前提正是「两处同判」）。
+// 重校段各自只派生 blocking（两处的 isNewChange 取法不同，由调用方传入）。调用方不得自写
+// 「不可判 → 选级别 → 打印 → exit」的同构分支——同一分级有两份实现时，改一处只会在另一处静默落后
+// （ADR-013 的前提正是「两处同判」：replan 不豁免）。
 //
 // 判定面覆盖两侧：① 已声明任务的波次必须等于依赖层级；② 任务集里存在、Wave 行一次都没提到的
 // 任务同样不一致（明细取值 = 「未声明」）——只沿「已声明」一侧求差集，未写进 Wave 行的任务会整个
@@ -29,12 +29,11 @@
 //   · 工件内容不可判（段在场，但一行 Wave 行都解析不出可对应任务：正文只写 N/A、点的是不存在的
 //     任务 id、行首强调记号让 Wave 行不成立）→ unjudgeable 非空：新 change BLOCKED / 旧 change
 //     WARN（WARN 行进入既有 WARN COUNT——「该写的没写」不再静默；恢复出路在载荷里）。
-// 收敛到这一形态（而不是原来的 { judgeable, reason }）的理由：① 载荷跟着分类走——notice /
-// explanation + recovery 直接可用于打印，调用方不必再按 reason 反查第二张表（那张表 T02 已收进
-// 判定模块，正是为了消灭「同一个 key 两张表」）；② 「能否判定」由字段出现与否表达，reason 只留
-// 人读成因，不再逼调用方从字符串取值反推分级；③ 第三个结构判据照抄这一组字段即可，不必再选一次。
-// （另一条路要同时改 verify / review 出口的消费方，而那不在本任务写面；形态本身不因落点而变，故按
-// 「谁带着载荷、谁就是形态」收敛。）
+// 收敛到这一形态（而不是 { judgeable, reason }）的理由：① 载荷跟着分类走——notice /
+// explanation + recovery 直接可用于打印，调用方不必再按 reason 反查第二张表（同一组取值只许有一张
+// 表：按 key 反查的第二张表与判定表必然分叉）；② 「能否判定」由字段出现与否表达，reason 只留人读
+// 成因，不再逼调用方从字符串取值反推分级；③ 新增的结构判据照抄这一组字段即可，不必再选一次。
+// 形态不随落点变化：谁带着载荷，谁就是形态（换一个出口消费它，判定结论与字段不变）。
 import {
   analyzeDependencyGraph,
   collectCrossTaskConflicts,
@@ -44,6 +43,9 @@ import {
 import { taskOpeningAttrs } from '../task-parsing.mjs';
 // 段界单源（围栏 / 同级标题 / 分隔线 / 文末的判定只在这里一份）
 import { sectionBody } from './section-body.mjs';
+// 写面条目边界（<write_files> 原文 → 条目列表）的单一实现：与 task-graph 的路径解析、
+// handoff 的提交子集校验取同一份（同一份写面被切成不同条目集时，两处会给出互相矛盾的结论）。
+import { writeFilesEntries } from './lessons-hits.mjs';
 
 // 波次段名 = flow-kit/templates/TASK.md 的 H2 `## 波次划分`（登记于 reference/artifact-templates.json
 // 的 TASK sections）——段名对齐模板权威，不在这里另起变体（L-001）。段界与 plan 出口既有的
@@ -256,6 +258,15 @@ export function waveReviewOutcome(review, { blocking = false } = {}) {
 //     相等，补集会静默失效——写面重叠的一对被当成「本可并行」，而本判据照常报出来。
 //   · 修复族：族判定经 task-graph 的唯一谓词 fixTaskClassifier，判据侧不自写前缀匹配。
 // 已 done 的任务不参与（规划面上的 [P] 只约束未开始的任务）。
+// 写面未知的任务同样不参与：没有 <write_files>（或清单为空 / 只有注释）意味着「不能断言写面不重叠」，
+// 而不是「写面不重叠」——把它当成后者，补集会把一对写面未知的任务报成「可并行却未标 [P]」，恢复句
+// 还会让作者补 depends_on（真正缺的是字段）。参与者判据因此与 task-graph 的第三族同口径（该族只把
+// 有写面的任务放进重叠比较），而「这份写面算不算有内容」的条目边界取同一实现（writeFilesEntries）。
+function hasWriteFace(block) {
+  const writeFiles = block.match(/<write_files>([\s\S]*?)<\/write_files>/);
+  return writeFiles !== null && writeFilesEntries(writeFiles[1]).length > 0;
+}
+
 // 判定：返回 { gaps }，逐条 { a, b, wave, unmarked }（unmarked = 该对里没标 parallel 的任务 id）。
 // 无波次段 / 内容不可判（waves 为 null）→ 空（波次侧已有判别不了，本判据没有分组可用）。
 export function parallelGapReview({ taskContent = '', blocks = [], waves = null } = {}) {
@@ -267,6 +278,7 @@ export function parallelGapReview({ taskContent = '', blocks = [], waves = null 
     const attrs = taskOpeningAttrs(block);
     if (!attrs || typeof attrs.id !== 'string' || attrs.id === '') continue;
     if (attrs.status === 'done' || isFixTask(block)) continue;
+    if (!hasWriteFace(block)) continue;
     const wave = waves.get(attrs.id);
     const level = levels.get(attrs.id);
     if (wave === undefined || level === undefined) continue;

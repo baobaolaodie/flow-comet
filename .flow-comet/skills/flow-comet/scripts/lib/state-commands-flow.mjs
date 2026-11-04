@@ -11,8 +11,8 @@ import { taskOpeningAttrs, taskBlocks } from '../task-parsing.mjs';
 import {
   NODE_PROTOCOL_FILES,
   SKILL_PROTOCOL_FILES,
+  declarationSkillTargets,
   inspectWorkflowPathSegments,
-  nodeSkillLoadDeclarations,
 } from '../protocol-utils.mjs';
 import { evidencePayloadProblems, looksLikeObjectLiteral, toPersistedProtocolPath, writeJsonAtomic } from '../state-schema.mjs';
 import { nowTimestamp } from '../time-utils.mjs';
@@ -24,8 +24,9 @@ import { isInsideWorkTree, gitBranchName, branchExists, printBranchLine } from '
 import { printEvolveDueHint } from './state-evolve-hint.mjs';
 import { reportIntelScanDrift } from './state-intelscan.mjs';
 // 命令文本的唯一实现（平台化脚本根 + 整条路径加引号）：运行期 PREFLIGHT 与 handoff result /
-// guard 恢复指引 / explain 的 COMMAND 行同源（L-067：同一推导两处表达必然分叉）。
-import { scriptCommand } from './state-explain.mjs';
+// guard 恢复指引 / explain 的 COMMAND 行同源（L-067：同一推导两处表达必然分叉）。声明命令与守卫族
+// 同一装配（declarationCommands）+ 本族的运行上下文（commandContext）——不再各拼一份文本。
+import { commandContext, declarationCommands, scriptCommand } from './state-explain.mjs';
 // 协调者提示的单一来源：entry（门禁族）与 next / record（本模块）共用同一常量，各输出面逐字
 // 一致。常量落在中立模块（state-explain）而不是门禁族——本模块只为一句措辞去依赖整个上游门禁面
 // 是一条反向边——为此状态命令族不再 import 门禁族。
@@ -752,6 +753,9 @@ export async function runSelect(protocol, argv) {
 export async function runRecord(protocol, argv) {
   const nodeId = argv[3];
   if (!nodeId) throw new Error('record requires a Node id.');
+  // 声明命令的运行上下文（脚本路径 / 运行根 / 包根 / 本次解析到的协议）：本命令的两处恢复指引都要
+  // 打印可照抄的命令，一次取好往下传——各调用点各取一次就是同一事实的多处表达。
+  const declarationContext = commandContext({ argv });
   const state = await readState();
   state.evidence = state.evidence || {};
   // 解析 JSON 参数并展开到 evidence 顶层（summary/completedChecks/output-schema evidence 等）；
@@ -852,7 +856,7 @@ export async function runRecord(protocol, argv) {
   // 传入 protocol + state——按 requiredSkillCalls scope 分类条目（handoff scope 豁免标记，
   // 以共用证据库 handoffResult 为证据）
   const markerChange = state.activeChange || await findActiveChange();
-  const markerCheck = await verifySkillLoadMarkers(parsed.completedChecks, markerChange, recordedAt, protocol, state);
+  const markerCheck = await verifySkillLoadMarkers(parsed.completedChecks, markerChange, recordedAt, protocol, state, declarationContext);
   if (!markerCheck.ok) {
     console.error('BLOCKED: ' + markerCheck.reason);
     process.exit(1);
@@ -868,12 +872,17 @@ export async function runRecord(protocol, argv) {
   if (recordNodeDef && markerChange) {
     const declaredForNode = await hasNodeSkillDeclaration(nodeId, markerChange);
     if (!declaredForNode) {
-      // 声明命令由协议派生（该节点每个必需技能各一条，每条都带该节点全部协议文件与模板全清单）：
-      // 旧形态是手拼的 "skill-load <node> <skill>"——位置实参位写占位符在 bash 里是重定向，照抄直接
-      // 语法失败；换成真名也只声明了一个技能、且不带模板清单，record 放行后 exit 还要再拦一次。
+      // 声明命令由协议派生（该节点每个必需技能各一条，每条都带该节点全部协议文件、模板全清单与
+      // 协议上下文），与守卫侧恢复段同一装配：旧形态是手拼的 "skill-load <node> <skill>"——位置实参位
+      // 写占位符在 bash 里是重定向，照抄直接语法失败；换成真名也只声明了一个技能、不带模板清单，
+      // record 放行后 exit 还要再拦一次。
       const loadGuide = '先加载技能（用 Skill 工具，禁止跳过），再照抄下面的命令声明本节点技能加载'
         + '（同一 node-skill 重跑会覆写该标记）：\n  '
-        + nodeSkillLoadDeclarations({ node: recordNodeDef }).map((entry) => entry.command).join('\n  ')
+        + declarationCommands({
+          node: recordNodeDef,
+          skills: declarationSkillTargets(recordNodeDef),
+          context: declarationContext,
+        }).map((entry) => entry.command).join('\n  ')
         + '\n然后重试 record';
       if (state.newChange === true) {
         console.error('BLOCKED: 节点 ' + nodeId + ' 缺少技能加载声明标记（.skill-loads/' + nodeId + '-*.json）——' + loadGuide);
@@ -889,6 +898,7 @@ export async function runRecord(protocol, argv) {
       nodeId,
       changeName: markerChange,
       newChange: state.newChange === true,
+      commandContext: declarationContext,
     });
     if (templateCheck.warn) console.error('WARN: ' + templateCheck.warn);
     if (!templateCheck.ok) {

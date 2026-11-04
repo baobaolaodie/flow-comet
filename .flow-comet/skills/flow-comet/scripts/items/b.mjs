@@ -5,7 +5,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { assertExit, assertNotOut, assertOut, runGuard, runHandoff, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
+import { assertExit, assertNotOut, assertOut, assertTrue, installSkillTreeCopy, runGuard, runHandoff, runPrintedCommand, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
 import { serialTaskBlock, fixBatchParallelTaskText, fixBatchTwoFixTaskText, fixBatchHistoryWithStaleExecuteExit, writeFixBatchFixture, CHANGE_ID, readStateFile, writeIntakeArtifacts, fullContract, execSummaryFixture, fixBatchReviewDoc, completeFixTaskAndRecord, assertNodeLine, assertNotNodeLine } from '../lib/system-fixtures.mjs';
 
 export const ENTRIES = [
@@ -719,10 +719,20 @@ export const ENTRIES = [
       assertExit(res, 1);
       assertOut(res, 'BLOCKED');
       assertOut(res, '缺少对应声明标记');
-      assertOut(res, 'workflow-state.mjs skill-load open flow-comet-change');
       // 拦截先于写入——evidence 不得落库
       const st = readStateFile(dir);
       if (st.evidence && st.evidence.open) throw new Error('拦截后不应写入 evidence: ' + JSON.stringify(st.evidence.open));
+      // 报文给出的声明命令必须**照抄能跑通**（解析打印文本 → 真执行 → 同一条 record 通过）：裸脚本名
+      // 的旧形态在 shell 里 command not found，字符串断言钉不住「这条命令能不能用」。
+      const command = (res.output.match(/^\s*(node "[^"]+" skill-load [^\n]+)$/m) || [])[1];
+      assertTrue(typeof command === 'string', '缺声明标记的阻塞必须给出完整可执行命令（node "<脚本路径>" skill-load …）:\n' + res.output);
+      installSkillTreeCopy(dir, path.join('.claude', 'skills'));
+      const replayed = runPrintedCommand(command, dir, { FLOW_COMET_RUN_ROOT: dir, FLOW_COMET_PROTOCOL: '' });
+      assertTrue(replayed.status === 0,
+        '照抄的声明命令跑不通\n  命令: ' + command + '\n  exit ' + replayed.status + '\n' + replayed.output);
+      const recorded = runState(['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })], dir);
+      assertExit(recorded, 0);
+      assertOut(recorded, 'EVIDENCE: open');
     },
   },
 

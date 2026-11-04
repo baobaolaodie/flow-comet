@@ -21,7 +21,6 @@ import {
   promptPointerLines,
   promptPointerPath,
   readProtocolFile,
-  skillLoadDeclarationCommand,
   templatePointerLines,
   validateProtocolSchema,
 } from './protocol-utils.mjs';
@@ -85,6 +84,7 @@ import {
   runTransitionEvidenceGate,
 } from './lib/guard-gates.mjs';
 import {
+  guardDeclarationCommand,
   nodeSkillLoadCommands,
   runArtifactGate,
   runDirectOverrideGate,
@@ -242,7 +242,7 @@ async function checkPromptDeclarations({ node, state }) {
       continue;
     }
     const declared = derived.find((entry) => entry.skill === conflict.skill);
-    commands.push(declared ? declared.command : skillLoadDeclarationCommand({ node, skill: conflict.skill }));
+    commands.push(declared ? declared.command : guardDeclarationCommand({ node, skill: conflict.skill }));
   }
   const unique = commands.filter((command, index) => commands.indexOf(command) === index);
   console.error('BLOCKED: 节点 ' + node.id + ' 的 skill-load 声明 --prompt 与节点协议文件不符——'

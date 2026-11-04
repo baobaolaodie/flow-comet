@@ -1097,6 +1097,24 @@ function pairKeyForm(text) {
   return joined(left, right).test(text) || joined(right, left).test(text);
 }
 
+// 引擎注释的「过程叙述」判据（纯函数 + 合成输入可驱动）：注释行里不许出现任务号与
+// 「本任务 / 待收口 / 已收进 / 已照形态」一类改动叙述——注释写的是不变式，不是某一轮改动的日记。
+// Wave 行写法示例是注释里唯一允许出现任务号的地方（它示范的是输入形态，不是改动历史），故带
+// `Wave ` / `depends on` / `[P]` 的行跳过。返回命中数组（空 = 收口），每条 { kind, line }。
+function commentNarrationHits(text) {
+  const narrative = /本任务|待收口|已收进|已照形态/u;
+  const taskNumber = /[^A-Za-z]T\d{2}\b/u;
+  return String(text).split('\n')
+    .filter((line) => /^\s*\/\//u.test(line))
+    .filter((line) => !line.includes('Wave ') && !line.includes('depends on') && !line.includes('[P]'))
+    .flatMap((line) => {
+      const hits = [];
+      if (taskNumber.test(line)) hits.push({ kind: '任务号', line: line.trim() });
+      if (narrative.test(line)) hits.push({ kind: '过程叙述', line: line.trim() });
+      return hits;
+    });
+}
+
 // 配对键单源判据（纯函数 + 合成输入可驱动）：返回问题数组（空 = 收口）。
 //   ① 形态面：「任务对键」形态在引擎面内只许出现一处（键只有一份实现）；
 //   ② 落点：那一处必须就在产出第三族的模块里（键与它的生产者同源；落点由定义面反查，不写文件名）；
@@ -1944,36 +1962,64 @@ export const ENTRIES = [
       const builtinUndeclared = runGuard(['exit', 'open'], dir);
       assertExit(builtinUndeclared, 1);
       assertOut(builtinUndeclared, 'BLOCKED');
-      // ④ 声明命令的形态（单一构造器的直接判据）：内置节点拼该节点**全部**协议文件的真实路径
+      // ④ 声明命令的形态（唯一构造器的直接判据）：内置节点拼该节点**全部**协议文件的真实路径
       // （与入口 READ PROMPT 同源）与该节点的模板全清单；自定义节点没有内置提示词映射 → 不拼
       // （不编造路径，也不打占位符）。只带首份协议 / 漏模板清单都是「照抄走不通」的形态，逐条断死。
-      const {
-        declarationSkillTargets,
-        nodeSkillLoadDeclarations,
-        skillLoadDeclarationCommand,
-      } = await import('../protocol-utils.mjs');
-      const executeCommand = skillLoadDeclarationCommand({ node: { id: 'execute' }, skill: 'flow-comet-dev' });
-      assertTrue(executeCommand === 'workflow-state.mjs skill-load execute flow-comet-dev'
-        + ' --prompt flow-kit/prompts/4-dev.md --templates SUMMARY.md',
-        '内置节点的声明命令应带全部协议文件与模板全清单，实际: ' + executeCommand);
+      // 构造器同时产出**脚本路径**（平台化 + 引号）与**协议上下文**（本次运行解析到的协议不是内置
+      // 默认时才带 --protocol）：状态命令族与守卫族取的是这一处，裸脚本名 / 无协议上下文的形态不再存在
+      // ——「照抄能跑通」的行为证据在场景 100（解析打印文本 → 真执行）。
+      const { declarationSkillTargets } = await import('../protocol-utils.mjs');
+      const { declarationCommand } = await import('../lib/state-explain.mjs');
+      const declarationContext = (protocolPath) => ({
+        scriptsDir: path.join(dir, '.claude', 'skills', 'flow-comet', 'scripts'),
+        runRoot: dir,
+        packageRoot: path.join(dir, '.claude', 'skills', 'flow-comet'),
+        protocolPath,
+      });
+      // 内置默认协议 = **本次运行的那个安装根**自己的 reference/workflow-protocol.json（不是权威源
+      // 那一份）：判据比较的就是这两个路径，故夹具必须按「该安装根的内置默认」构造。
+      const installedSkillRoot = path.join(dir, '.claude', 'skills', 'flow-comet');
+      const builtinContext = declarationContext(path.join(installedSkillRoot, 'reference', 'workflow-protocol.json'));
+      const executeCommand = declarationCommand({
+        node: { id: 'execute' }, skill: 'flow-comet-dev', context: builtinContext });
+      assertTrue(executeCommand.startsWith('node "'),
+        '声明命令应以 node "<脚本路径>" 起头（裸脚本名照抄 command not found），实际: ' + executeCommand);
+      assertTrue(executeCommand.includes('/workflow-state.mjs" skill-load execute flow-comet-dev'
+        + ' --prompt flow-kit/prompts/4-dev.md --templates SUMMARY.md'),
+        '内置节点的声明命令应带脚本路径、全部协议文件与模板全清单，实际: ' + executeCommand);
+      // 协议上下文按「本次运行解析到的是不是内置默认」决定：内置默认加载它只是噪音，自定义协议
+      // 不随命令走则照抄解析到另一份（状态命令族没有 state 绑定这一来源）。
+      assertTrue(!executeCommand.includes('--protocol'),
+        '内置默认协议时声明命令不应带 --protocol，实际: ' + executeCommand);
+      const customProtocolContext = declarationCommand({
+        node: { id: 'execute' }, skill: 'flow-comet-dev', context: declarationContext(path.join(dir, 'custom-protocol.json')) });
+      assertTrue(customProtocolContext.includes('--protocol "custom-protocol.json"'),
+        '自定义协议下声明命令必须自带协议上下文（持久化相对形态），实际: ' + customProtocolContext);
       // open：一条命令带该节点两份协议（旧形态只带首份 0-change.md——照抄后 exit 仍点名 1-requirement.md）
-      const openCommand = skillLoadDeclarationCommand({ node: { id: 'open' }, skill: 'flow-comet-requirement' });
-      assertTrue(openCommand === 'workflow-state.mjs skill-load open flow-comet-requirement'
+      const openCommand = declarationCommand({
+        node: { id: 'open' }, skill: 'flow-comet-requirement', context: builtinContext });
+      assertTrue(openCommand.includes(' skill-load open flow-comet-requirement'
         + ' --prompt flow-kit/prompts/0-change.md --prompt flow-kit/prompts/1-requirement.md'
-        + ' --templates CHANGE.md,REQUIREMENT.md',
+        + ' --templates CHANGE.md,REQUIREMENT.md'),
         'open 的声明命令应带该节点全部协议文件与模板全清单，实际: ' + openCommand);
-      const customCommand = skillLoadDeclarationCommand({
-        node: { id: 'brainstorm', templates: ['CHANGE'] }, skill: 'fixture-skill' });
-      assertTrue(customCommand === 'workflow-state.mjs skill-load brainstorm fixture-skill --templates CHANGE.md',
+      const customCommand = declarationCommand({
+        node: { id: 'brainstorm', templates: ['CHANGE'] }, skill: 'fixture-skill', context: builtinContext });
+      assertTrue(customCommand.includes(' skill-load brainstorm fixture-skill --templates CHANGE.md')
+        && !customCommand.includes('--prompt'),
         '自定义节点无内置提示词映射时不应拼 --prompt，实际: ' + customCommand);
+      // 装配单源：命令构造器在引擎面只此一处定义（第二份装配 = 同一件事的第二种文本形态，
+      // 而两种文本只有一种能执行——这正是本判据要防的形态）。
+      const constructorHits = engineDefinitionHits('declarationCommand');
+      assertTrue(constructorHits.length === 1 && constructorHits[0].count === 1,
+        '声明命令的构造器应恰一处定义，实际: ' + JSON.stringify(constructorHits));
       // 声明的目标技能：每个 guarded 必需技能各一条（open 两条）；条件绑定（design 的 ui-design）不在
       // 同步面展开——它是否适用要判前端，展开权归判得了该判据的出口。
       // 目标集取自协议节点本身（guarded 必需技能是协议面的事实，不是测试里另编的一份）
       const builtinOpenNode = JSON.parse(fs.readFileSync(
         path.join(SCRIPTS_DIR, '..', 'reference', 'workflow-protocol.json'), 'utf8')).nodes.find((node) => node.id === 'open');
-      const openDeclarations = nodeSkillLoadDeclarations({ node: builtinOpenNode });
-      assertTrue(openDeclarations.map((entry) => entry.skill).join(',') === 'flow-comet-change,flow-comet-requirement',
-        'open 的声明目标应是两个 guarded 必需技能，实际: ' + openDeclarations.map((entry) => entry.skill).join(','));
+      const openTargets = declarationSkillTargets(builtinOpenNode);
+      assertTrue(openTargets.join(',') === 'flow-comet-change,flow-comet-requirement',
+        'open 的声明目标应是两个 guarded 必需技能，实际: ' + openTargets.join(','));
       const designTargets = declarationSkillTargets({
         id: 'design',
         implementation: { skill: 'flow-comet-design' },
@@ -3048,6 +3094,38 @@ export const ENTRIES = [
         });
         assertTrue(realGaps.gaps.length === 0,
           '补集判据失效：写面重叠（同一文件）的一对被要求标 [P]（' + JSON.stringify(realGaps.gaps) + '）');
+        // 写面未知 ≠ 写面不重叠：同波同层、其中一方**没有** write_files 的一对不在「可并行却未标 [P]」
+        // 的判据面上——写面未知意味着「不能断言不重叠」，不是「不重叠」。候选判据若只按波次/层级/
+        // status/修复族过滤，就会把「没写写面」读成「写面不重叠」，把这一对报成漏标 [P]，恢复句还让
+        // 作者补 depends_on（真正缺的是 write_files 字段）。判据面因此与 task-graph 的参与者判据对齐：
+        // 没有写面的任务不参与「可并行」的断言。
+        const unknownWriteTask = (id) => '<task id="' + id + '" status="pending"><action>实现 ' + id
+          + '</action><verify>node --check src/a.mjs</verify><depends_on></depends_on></task>\n';
+        const unknownWriteContent = '# TASK\n\n## 波次划分\n\nWave 1: T01, T02\n\n## 任务清单\n\n'
+          + '<task id="T01" status="pending"><action>实现 T01</action><write_files>src/a.mjs</write_files>'
+          + '<verify>node --check src/a.mjs</verify><depends_on></depends_on></task>\n'
+          + unknownWriteTask('T02');
+        const unknownWriteBlocks = taskBlocks(unknownWriteContent);
+        const unknownWaves = waveModule.waveProjectionReview({
+          taskContent: unknownWriteContent, blocks: unknownWriteBlocks,
+        });
+        assertTrue(unknownWaves.waves instanceof Map && unknownWaves.waves.size === 2,
+          '夹具前提失效：写面未知那一格的波次分组应可判（'
+          + JSON.stringify([...((unknownWaves.waves) ?? [])]) + '）');
+        const unknownGaps = waveModule.parallelGapReview({
+          taskContent: unknownWriteContent, blocks: unknownWriteBlocks, waves: unknownWaves.waves,
+        });
+        assertTrue(unknownGaps.gaps.length === 0,
+          '写面未知被当成「写面不重叠」：没有 write_files 的任务被要求标 [P]'
+          + '（写面未知时不能断言可并行，恢复句还会指错方向）: ' + JSON.stringify(unknownGaps.gaps));
+        // 注释写不变式，不写过程：引擎注释里不留任务号与改动叙述——接手的人读到的是约束，不是某一轮
+        // 改动的日记。判据是具名纯函数（见 commentNarrationHits），正向断言之外配一条探针：把一句
+        // 叙述混回去必须被检出，否则本条只是「文件里暂时没有这几个词」的恒真断言。
+        const narrations = commentNarrationHits(waveText);
+        assertTrue(narrations.length === 0,
+          '注释里出现任务号 / 过程叙述（应写不变式）: ' + JSON.stringify(narrations));
+        assertTrue(commentNarrationHits(waveText + '\n// 本任务里已照形态加过一支。\n').length > 0,
+          '注释叙述判据不具判别力：混入「本任务 / 已照形态」的注释没有被检出');
         // 变异体只在内存里编译（data: URL，相对 import 重写为绝对 file: URL）：不落盘、不留残留。
         const inlineModuleUrl = (source, rel) => {
           const rewritten = source.replace(/(from\s*')(\.[^']*)(')/gu, (whole, head, specifier, tail) =>

@@ -8,9 +8,10 @@ import {
   describeTemplateList,
   findTemplatesArg,
   nodeTemplateDeclaration,
-  skillLoadDeclarationCommand,
   templateDeclarationProblems,
 } from '../protocol-utils.mjs';
+// 声明命令的唯一装配与状态命令族的运行上下文（与守卫侧同一份命令文本）。
+import { commandContext, declarationCommand } from './state-explain.mjs';
 import { findPromptArgs, protocolUnderFlowKitPrompts } from './state-skillmarkers.mjs';
 
 // config set <key> <value>——branchMode 只读（init 自动判定），enablePrReview 手动
@@ -127,15 +128,20 @@ export async function runSkillLoad(protocol, argv) {
   if (templateDeclaration.source === 'builtin') {
     const isNewChange = (await readState()).newChange === true;
     const requiredNames = describeTemplateList(templateDeclaration.required);
-    // 重新声明命令由协议派生（protocol-utils 的同一装配）：该节点**全部**协议文件 + 模板全清单。
-    // 此前的形态只带首份 --prompt：照抄后同一 exit 仍被覆盖门点名另一份（报文与判据不是同一份）。
-    const declareCommand = skillLoadDeclarationCommand({ node: declarationNode, skill: skillName });
+    // 重新声明命令由协议派生（state-explain 的唯一装配）：脚本路径 + 该节点**全部**协议文件 +
+    // 模板全清单 + 协议上下文。此前的形态只带首份 --prompt，且是裸脚本名（照抄 command not found，
+    // 或照抄后同一 exit 仍被覆盖门点名另一份——报文与判据不是同一份）。
+    const declareCommand = declarationCommand({
+      node: declarationNode,
+      skill: skillName,
+      context: commandContext({ argv }),
+    });
+    // 命令自成一行（与其他两处声明报文同形）：整行可照抄，不会被前后措辞切碎。
     const reportUnsoundDeclaration = (reason) => {
-      if (isNewChange) {
-        console.error('BLOCKED: ' + reason + '——重跑 ' + declareCommand + ' 重新声明后重试');
-        process.exit(1);
-      }
-      console.error('WARN: ' + reason + '——重跑 ' + declareCommand + ' 重新声明（旧 change 渐进不阻断）');
+      console.error((isNewChange ? 'BLOCKED: ' : 'WARN: ') + reason
+        + '——照抄下面的命令重新声明（同一 node-skill 重跑会覆写该标记）'
+        + (isNewChange ? '后重试' : '；旧 change 渐进不阻断') + ':\n  ' + declareCommand);
+      if (isNewChange) process.exit(1);
     };
     const problems = templateDeclarationProblems(templateDeclaration, templateArg.values);
     if (!templateArg.provided && templateDeclaration.required.length > 0 && isNewChange) {
