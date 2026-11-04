@@ -767,10 +767,11 @@ export function guardDeclarationCommand({ node, skill, frontend = false }) {
   return declarationCommand({ node, skill, frontend, context: declarationContext() });
 }
 
-// record 命令与其尾部重试提示的单一构造（两处恢复段共用）：载荷里的 completedChecks 按原样带回
-// ——record 是覆盖写，只写新增条目会把已经成立的清单抹掉（下一次 exit 反过来点名被抹掉的那条）。
-const RECORD_RETRY_TAIL = ' 后重试 exit（bash / PowerShell 可直接执行；cmd.exe 请把单引号换成双引号，'
-  + '并转义载荷里原有的双引号）';
+// record 命令与「这条命令怎么执行」的说明分行给出（两处恢复段共用）：命令单独成行才是可整行照抄的
+// 片段——说明接在命令行尾时，整行丢给 shell 会把说明当成参数（载荷因此被拼成不合法 JSON：命令看起来
+// 在场，照抄即失败）。说明行以「说明:」开头，与命令行的判别只靠行首（断言据此把两者分开）。
+const RECORD_RETRY_NOTE = '说明: bash / PowerShell 可直接执行；cmd.exe 请把单引号换成双引号，'
+  + '并转义载荷里原有的双引号';
 
 function recordRecoveryCommand(node, completedChecks = []) {
   const payload = { summary: '<本节点完成摘要>' };
@@ -799,9 +800,11 @@ export async function evidenceRecoveryBlock({ node, state, lead = null }) {
   const recordCommand = recordRecoveryCommand(node);
   const leadPrefix = lead === null ? '' : lead + '——';
   if (!state.activeChange || (await nodeSkillDeclared(node.id, state.activeChange))) {
-    return lead === null
-      ? ['恢复: ' + recordCommand + RECORD_RETRY_TAIL]
-      : ['恢复: ' + leadPrefix + '照抄下面的命令补齐它后重试 exit：', '      ' + recordCommand + RECORD_RETRY_TAIL];
+    return [
+      '恢复: ' + leadPrefix + '照抄下面的命令补齐它后重试 exit：',
+      '      ' + recordCommand,
+      '      ' + RECORD_RETRY_NOTE,
+    ];
   }
   // 第一步的命令由协议派生（nodeSkillLoadCommands）：该节点全部协议文件（多个 --prompt）、每个
   // guarded 必需技能各一条（含该节点的模板全清单）。三面正是出口声明覆盖门与模板门核对的东西
@@ -817,7 +820,8 @@ export async function evidenceRecoveryBlock({ node, state, lead = null }) {
       + (placeholder ? '（技能名按 entry 的 LOAD SKILL 行填，下面用 <skill> 占位）：' : '：'),
     ...declarations.map((entry) => '      ' + entry.command),
     '      第二步 补证据并重试 exit：',
-    '      ' + recordCommand + RECORD_RETRY_TAIL,
+    '      ' + recordCommand,
+    '      ' + RECORD_RETRY_NOTE,
   ];
 }
 
@@ -890,7 +894,8 @@ function requiredSkillEvidenceRecovery({ node, evidence, missingChecks }) {
     '      第一步 声明本节点技能加载：',
     ...declarations.map((entry) => '      ' + entry.command),
     '      第二步 补证据（record 载荷带上 ' + missingChecks.join('、') + '）：',
-    '      ' + recordRecoveryCommand(node, checks) + RECORD_RETRY_TAIL,
+    '      ' + recordRecoveryCommand(node, checks),
+    '      ' + RECORD_RETRY_NOTE,
   ].join('\n');
 }
 

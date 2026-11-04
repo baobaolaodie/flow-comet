@@ -47,14 +47,16 @@ import { sectionBody } from './section-body.mjs';
 // 拿正则去块里找 <write_files>。同一件事写第二份表达式时，元素名大小写少一个 /i 就够——7 字段门
 // 判字段在场、本模块判未知，任务因此从 [P] 判据的参与者里静默消失。
 import { taskHasWriteFace } from './lessons-hits.mjs';
+// 段名与宽容匹配都取单源：名字登记在骨架模块（模板缺席时的段名基准唯一登记处），正则由同一处的
+// headingPattern 派生——「标题在场」因此与 TASK 段形门、AC 覆盖用同一套归一（编号前缀 / 尾部括号 /
+// 闭合 ATX / 大小写）。判据自己的宽容小抄不在这里写：同一段在两处各有一套「什么样算在场」时，
+// 换个标题写法就只关掉其中一处（未校验 ≠ 通过，一次排版即可绕过）。
+import { WAVE_SECTION_NAME, headingPattern } from './guard-artifact-skeleton.mjs';
 
-// 波次段名 = flow-kit/templates/TASK.md 的 H2 `## 波次划分`（登记于 reference/artifact-templates.json
-// 的 TASK sections）——段名对齐模板权威，不在这里另起变体（L-001）。段界与 plan 出口既有的
-// 「波次散文一致性（[P] vs parallel）」检测**同一实现**，而段界本身由 lib/section-body.mjs 单点
-// 决定：围栏代码块里的 `## ` / `---` 是正文示例，不结束段体。此前这里是一条「遇 `## ` 即收」的
-// 惰性正则——段内贴一段 Markdown 示例（块内 `## `）就把其后声明的 Wave 行整段吞掉，判据把
-// 「声明了」读成「没声明」。
-const WAVE_HEADING_PATTERN = /^##\s*波次划分\s*$/u;
+// 段界与 plan 出口既有的「波次散文一致性（[P] vs parallel）」检测**同一实现**，而段界本身由
+// lib/section-body.mjs 单点决定：围栏代码块里的 `## ` / `---` 是正文示例，不结束段体（段内贴一段
+// Markdown 示例不会把其后声明的 Wave 行整段吞掉）。
+const WAVE_HEADING_PATTERN = headingPattern(WAVE_SECTION_NAME, 2);
 
 // 波次段正文（段标题之后、下一个二级标题 / 分隔线 / 文末之前的文本）；无该段 → null。
 export function waveSectionBody(taskContent) {

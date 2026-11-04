@@ -101,17 +101,22 @@ function headingLines(text, level) {
   return out;
 }
 
-// 段名宽容匹配（单一实现）：主体取 normalizeHeading 的结果，译为行锚定正则。编号前缀与尾部括号在
-// 正则里同样是可选的——「省编号 / 换括号措辞 / 大小写不同」命中同一段，核心词不同则不命中（AC-9）。
+// 段名宽容匹配（单一实现）：主体取 normalizeHeading 的结果，译为行锚定正则。编号前缀、尾部括号与
+// 闭合 ATX 在正则里同样可选——「省编号 / 换括号措辞 / 大小写不同 / 尾部补 `##`」命中同一段，核心词
+// 不同则不命中（AC-9）。闭合 ATX 的判定与 normalizeHeading 取同一惯例：收尾的 `#` 串前面必须有空白，
+// 否则那是标题文本本身（`## 波次划分##` 的段名以 `#` 结尾，不是同一条标题）。
 // escapeRegExp 的既有契约是 glob 片段（调用方先 split('*')），故不转义 `*`；段名是字面文本，缺口在
 // 这一行显式闭合，而不是另写一份转义实现。
+// 匹配只对**围栏外的标题行**有意义（围栏内的标题是正文示例）：段名判据一律经 lib/section-body.mjs 的
+// 围栏感知扫描取行，本正则不承担围栏语义（对着整篇文本 test 会把示例标题读成段）。
 export function headingPattern(rawName, level = 2) {
   const normalized = normalizeHeading(rawName);
   const body = normalized === '' ? String(rawName ?? '').trim() : normalized;
   const literal = escapeRegExp(body).replace(/\*/gu, '\\*');
   const marker = level === 3 ? '###' : '##';
   return new RegExp(
-    '^' + marker + '\\s*(?:\\d+(?:\\.\\d+)?\\.?\\s*)?' + literal + '\\s*(?:[（(][^\\n）)]*[）)])?\\s*$',
+    '^' + marker + '\\s*(?:\\d+(?:\\.\\d+)?\\.?\\s*)?' + literal
+      + '\\s*(?:[（(][^\\n）)]*[）)])?(?:\\s+#+)?\\s*$',
     'im',
   );
 }
@@ -404,3 +409,9 @@ export const SUMMARY_REQUIRED_SECTIONS = [
   { regex: /##\s*6\s*维自查/i, label: '## 6 维自查' },
   { regex: /##\s*(越界检查|边界检查)/i, label: '## 越界检查' },
 ];
+
+// 波次段名（TASK 模板的 H2）：与上面几份清单同一性质——模板缺席时判据仍要有一份基准名，消费方
+// （lib/wave-projection.mjs）只 import，不自持字面名。宽容匹配由 headingPattern 派生，标题的编号
+// 前缀 / 尾部括号 / 闭合 ATX 因此与 TASK 段形门、AC 覆盖走同一套归一：同一份工件的同一段在两处被
+// 认出同一组写法。「名字与模板一致」由套件在模板在场时对账（不一致即红）——登记值不是自由变量。
+export const WAVE_SECTION_NAME = '波次划分';

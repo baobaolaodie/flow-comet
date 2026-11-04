@@ -1734,7 +1734,9 @@ export const ENTRIES = [
           // 读者会以为补 request 只是顺序纪律；后者那句（平台层无挂点）保持原文。
           const delegationLedgerAnchors = [
             ['委托记账 · result 写盘前校验 request（中文）', '`result` 在写盘前校验该任务存在 request 记录'],
-            ['委托记账 · 恢复句（中文）', '先运行 workflow-handoff.mjs request <task-id> 记录委托，再重录 result'],
+            // 恢复指引描述的是引擎**打印出来的形态**（命令单独成行 + description 可省略）：书册照抄旧句子时，
+            // 读者会照着一个脚本名去敲（bash 下缺路径 = command not found），文字与引擎两套说法。
+            ['委托记账 · 恢复句（中文）', '先照抄下面的命令记录委托（`description` 可省略），再重录 result'],
             ['委托记账 · 零提交与只交 SUMMARY 同拦（中文）', '两种形态同样被拦'],
             ['委托记账 · 判定先于零提交与子集校验（中文）', '该校验先于零提交语义与提交子集校验'],
             ['委托顺序 · 两件事别混（中文）', '本条管的是「request 与子代理启动的先后」'],

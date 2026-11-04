@@ -45,6 +45,10 @@ import {
 } from '../lib/test-fixtures.mjs';
 import { scenarioProtocolPath } from '../lib/test-assertions.mjs';
 import { taskBlocks } from '../task-parsing.mjs';
+// 波次段名的登记点与「登记名 ↔ 模板段名」对账：登记值在骨架模块（模板缺席时的段名基准唯一登记处），
+// 归一化取共享实现——两边同一把尺子，改字的段名不得被判成一致。
+import { WAVE_SECTION_NAME } from '../lib/guard-artifact-skeleton.mjs';
+import { normalizeHeading } from '../route-node.mjs';
 import {
   AUTHORITATIVE_SOURCE_ANCHOR_REL,
   GITHOOKS_CODES_REL,
@@ -2855,6 +2859,7 @@ export const ENTRIES = [
         'TEMPLATE_FALLBACK_SECTION_PATTERNS',
         'LESSONS_SCAN_SECTION',
         'SUMMARY_REQUIRED_SECTIONS',
+        'WAVE_SECTION_NAME',
       ];
       const issues = [];
       for (const symbol of segmentSymbols) {
@@ -2871,6 +2876,32 @@ export const ENTRIES = [
         }
       }
       assertTrue(issues.length === 0, '段名清单单源违规: ' + issues.join(' | '));
+
+      // ③a 登记名与模板实际段名一致（模板在场时对账）：段名登记成常量之后，模板若把该段改名，登记值
+      // 就成了新的静默源——判据仍按一个不存在的段名读，换个标题写法即「未校验」放行。对账用共享归一
+      // 做比较（编号前缀 / 尾部括号 / 闭合 ATX 不算差异），并配反向构造（改一个字不得被判成一致）。
+      // 模板缺席（本检出无 vendored flow-kit）时退到登记表的段名清单，并显式声明降级来源：模板侧
+      // 一致性由发版期指纹作业保证，SKIP = 未校验，不是通过。
+      const waveSectionNorm = normalizeHeading(WAVE_SECTION_NAME);
+      const waveNameMatches = (names) => names.some((name) => normalizeHeading(name) === waveSectionNorm);
+      const registryTaskNames = (docEntry('TASK').sections ?? []).map((section) => section.name);
+      assertTrue(waveNameMatches(registryTaskNames),
+        '波次段名登记值与登记表的 TASK 段名不一致（登记值 ' + JSON.stringify(WAVE_SECTION_NAME)
+          + ' 不在 ' + JSON.stringify(registryTaskNames) + '）——段名只有一处登记，改一处即可');
+      assertTrue(!waveNameMatches(registryTaskNames.map((name) => name.replace('波次划分', '波次分配'))),
+        '段名对账判据不具判别力：改一个字的段名与登记值被判成一致（比较退化成恒真）');
+      const vendoredTaskTemplate = path.join(REPO_ROOT, 'flow-kit', 'templates', 'TASK.md');
+      if (fs.existsSync(vendoredTaskTemplate)) {
+        const templateHeadings = fs.readFileSync(vendoredTaskTemplate, 'utf8').split(/\r?\n/u)
+          .filter((line) => /^##\s+/u.test(line))
+          .map((line) => line.replace(/^##\s+/u, '').trim());
+        assertTrue(waveNameMatches(templateHeadings),
+          '波次段名登记值与 TASK 模板的实际段名不一致（模板段名 ' + JSON.stringify(templateHeadings)
+            + ' 不含登记值 ' + JSON.stringify(WAVE_SECTION_NAME) + '）——模板改名时须同批更新登记值');
+      } else {
+        console.log('SKIP: 波次段名与 TASK 模板对账（本检出无 vendored flow-kit 模板）'
+          + '——已退到登记表段名对账；模板侧一致性由发版期指纹作业保证（SKIP = 未校验，不是通过）');
+      }
 
       // ③b 反向构造（同一判据驱动 · 逐项改坏输入 ⇒ 必报，还原 ⇒ 复绿）：四份清单逐份证明判别力，
       // 不是「只有某一份碰巧被测到」。

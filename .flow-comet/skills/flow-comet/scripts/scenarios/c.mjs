@@ -323,9 +323,10 @@ function assertDesignFormRecoveryPath(dir) {
   if (block === '') {
     throw new Error('缺 Output Schema evidence 的阻塞没给恢复段（设计形态锚无从判定）:\n' + res.output);
   }
-  // 两条命令（skill-load 自成一行可整行照抄；record 以「后重试 exit」收尾）：先声明技能加载，再 record。
-  const skillLoadLine = (block.match(/^\s*(node "[^"]+" skill-load [^\n]*)$/m) || [])[1];
-  const recordLine = (block.match(/(node "[^"]+" record [^\n]*) 后重试 exit/) || [])[1];
+  // 两条命令（各自单独一行，行内只有命令本身）：先声明技能加载，再 record。取法与照抄闭环同一处
+  // （printedCommandsOf）——恢复段的「哪一行是命令」只有一份判据，本锚不另写一条取行正则。
+  const skillLoadLine = printedCommandsOf(block, 'skill-load')[0];
+  const recordLine = printedCommandsOf(block, 'record')[0];
   if (!skillLoadLine || !recordLine) {
     throw new Error('恢复段应同时给出可照抄的 skill-load 与 record 命令'
       + '（缺声明时照抄 record 会先被它自己的前置门拦下）:\n' + block);
@@ -394,11 +395,11 @@ function lastRecoveryBlock(output) {
   return start < 0 ? '' : text.slice(start);
 }
 
-// 段内某一类命令的全部可照抄行：record 行以「后重试 exit」收尾，取到它之前；skill-load 自成一行。
+// 段内某一类命令的全部可照抄行：命令行自成一行（命令与说明分行——说明接在命令行尾时，整行丢给
+// shell 会把说明当成参数）。判据只认「行首 = node + 引号脚本路径」这一形态，说明行因此不可能被读
+// 成命令（同一个判据也用来证明恢复段里没有第二份命令文本）。
 function printedCommandsOf(block, verb) {
-  const pattern = verb === 'record'
-    ? /(node "[^"]+" record [^\n]*) 后重试 exit/g
-    : new RegExp('^\\s*(node "[^"]+" ' + verb + ' [^\\n]+)$', 'gm');
+  const pattern = new RegExp('^\\s*(node "[^"]+" ' + verb + ' [^\\n]+)$', 'gm');
   return [...block.matchAll(pattern)].map((match) => match[1]);
 }
 
@@ -648,10 +649,12 @@ function declarationBookProblems(skillRoot) {
 //
 // 排障册「exit 缺协议声明标记」一条曾给出**手拼的半边命令**：占位符落在 --prompt 的值位置，且不带
 // --templates——新 change 照抄即被 skill-load 自己的模板门拦下（「模板声明缺失」）。判据不在这里再抄
-// 一份命令：排障册必须逐字含入口册的规范声明命令（open 的第一条，本批次的派生形态），两册（中英）
-// 都要有；抽掉即报。命令形态因此只有一个来源，排障册不能自持一份「看起来像命令」的文本。
+// 一份命令：排障册必须逐字含入口册的规范声明命令，两册（中英）都要有；抽掉即报。命令形态因此只有
+// 一个来源，排障册不能自持一份「看起来像命令」的文本。
+// 条数同样取入口册的判据面：该节点有几个 guarded 必需技能就给几条。只列第一条的排障册会让照抄的人
+// 在同一次 exit 上被覆盖门点名缺另一个技能（报文各给一半的文档版）——所以锚是**全部**条目，不是首条。
 const TROUBLESHOOTING_COMMAND_RELS = ['docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md'];
-const TROUBLESHOOTING_DECLARATION_ANCHOR = DECLARATION_BOOK_COMMAND_ANCHORS[0][1];
+const TROUBLESHOOTING_DECLARATION_ANCHORS = DECLARATION_BOOK_COMMAND_ANCHORS.map(([, command]) => command);
 
 function troubleshootingDeclarationProblems(texts) {
   const out = [];
@@ -661,9 +664,12 @@ function troubleshootingDeclarationProblems(texts) {
       out.push(rel + ' 不在场（声明命令锚无法核对）');
       continue;
     }
-    if (!text.includes(TROUBLESHOOTING_DECLARATION_ANCHOR)) {
-      out.push(rel + ' 缺声明命令「' + TROUBLESHOOTING_DECLARATION_ANCHOR
-        + '」（排障册的声明命令必须与入口册同形：该节点全部 --prompt + 模板全清单）');
+    for (const anchor of TROUBLESHOOTING_DECLARATION_ANCHORS) {
+      if (!text.includes(anchor)) {
+        out.push(rel + ' 缺声明命令「' + anchor
+          + '」（排障册的声明命令必须与入口册同形同数：该节点每个 guarded 必需技能一条，'
+          + '每条带该节点全部 --prompt 与模板全清单）');
+      }
     }
   }
   return out;
@@ -1207,13 +1213,14 @@ export const ENTRIES = [
         const next = mutate(text);
         return next === text ? null : { ...publicFace, texts: new Map(publicFace.texts).set(rel, next) };
       };
-      // 排障册的声明命令锚：真实断言与反向构造走同一判据实现（抽掉该行 ⇒ 必报）。
+      // 排障册的声明命令锚：真实断言与反向构造走同一判据实现（逐条抽掉 ⇒ 必报——少任何一条，
+      // 照抄的人都会在同一次 exit 上被覆盖门点名缺那一项）。
       problems.push(...troubleshootingDeclarationProblems(publicFace.texts));
-      {
+      for (const anchor of TROUBLESHOOTING_DECLARATION_ANCHORS) {
         const stripped = mutated('docs/TROUBLESHOOTING.md',
-          (text) => text.split(TROUBLESHOOTING_DECLARATION_ANCHOR).join('（反向构造：抽掉）'));
+          (text) => text.split(anchor).join('（反向构造：抽掉）'));
         if (stripped !== null && troubleshootingDeclarationProblems(stripped.texts).length === 0) {
-          throw new Error('反向构造判别力缺失（排障册：抽掉声明命令锚未被判缺）');
+          throw new Error('反向构造判别力缺失（排障册：抽掉声明命令锚未被判缺）: ' + anchor);
         }
       }
       // 受检面来自派生（映射 + 根目录扫描）：按 GitHub 惯例放在根目录的公开文件若被漏在受检面之外，

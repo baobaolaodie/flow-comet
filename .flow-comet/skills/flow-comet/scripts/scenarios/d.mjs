@@ -718,6 +718,112 @@ export const ENTRIES = [
       const inFixAfterRule = fixModule.fixTaskClassifier(
         '# TASK\n\n## Fix 任务\n\n---\n\n' + fixBlock, 'Fix 任务');
       assertTrue(inFixAfterRule(fixBlock) === true, '`---` 不应结束修复段（既有语义）');
+
+      // ===== ⑭ 段标题的写法不是判定变量（波次段与 TASK 段形门同一口径）=====
+      // 波次段的段名曾是行首精确正则，而 TASK 段形门走标题归一：同一份计划换个标题写法，判据就退化成
+      // 「未校验（无波次段）」放行——一次排版即可绕过「未验证 ≠ 通过」。四类合法写法因此必须给出同一
+      // 判定与同一明细；围栏代码块里的示例标题是正文，不得被读成段。
+      writeFile(dir, 'flow-kit/templates/TASK.md',
+        '# TASK: <change 标题>\n\n## 波次划分\n\n## 任务清单\n');
+      const headingFormPlan = (heading) => '# TASK\n\n' + heading
+        + '\n\nWave 2 (parallel): T01[P], T02   (T02 on T01)\n\n## 任务清单\n\n'
+        + waveTask('T01') + waveTask('T02', 'T01');
+      const waveHeadingForms = [
+        '## 波次划分',
+        '## 波次划分（依赖层级）',
+        '## 3. 波次划分',
+        '## 波次划分 ##',
+      ];
+      const headingFormResults = waveHeadingForms.map((heading) => planWithSection(headingFormPlan(heading)));
+      const headingFormReports = headingFormResults.map((res) => waveReportLines(res));
+      for (const [index, heading] of waveHeadingForms.entries()) {
+        assertExit(headingFormResults[index], 1);
+        assertNotOut(headingFormResults[index], '未校验（无波次段）');
+        assertTrue(headingFormReports[index].length > 0,
+          '段标题写法「' + heading + '」下波次判据没有给出明细（判据被排版关掉，配套的段形门也认这组写法）: '
+            + headingFormResults[index].output);
+      }
+      for (const [index, report] of headingFormReports.entries()) {
+        assertTrue(report.join('\n') === headingFormReports[0].join('\n'),
+          '段标题写法改变了波次判定（' + waveHeadingForms[index] + '）——写法是排版，不是判定变量:\n'
+            + JSON.stringify(report) + '\n基准=' + JSON.stringify(headingFormReports[0]));
+      }
+      fs.rmSync(path.join(dir, 'flow-kit', 'templates', 'TASK.md'), { force: true });
+      // 围栏代码块里的示例标题是正文：唯一一处「波次划分」落在围栏里时，判据没有可判对象（打印未校验、
+      // 不据此阻断），但不得被读成「段在场而内容不可判」——那是另一支判定，会把只有示例的工件判错。
+      const fencedHeadingOnly = planWithSection('# TASK\n\n```md\n## 波次划分\n\nWave 2: T01, T02\n```\n\n'
+        + '## 任务清单\n\n' + waveTask('T01') + waveTask('T02', 'T01'));
+      assertExit(fencedHeadingOnly, 0);
+      assertOut(fencedHeadingOnly, '未校验（无波次段）');
+      assertNotOut(fencedHeadingOnly, '波次划分段内容不可判');
+
+      // ===== ⑮ 闭合 ATX 标题（`## 标题 ##`）不改变「段是否在场」（AC 覆盖与 1.1 矩阵同口径）=====
+      // 闭合 ATX 是合法 Markdown；段名判据若只认开放写法，合法工件会被读成「段缺席」——AC 覆盖因此报
+      // 「判据无法执行」并拦下新 change。围栏代码块里的示例标题仍是正文，不得被读成段。
+      const atxRoot = makeTmp();
+      writeFile(atxRoot, 'flow-kit/templates/REQUIREMENT.md',
+        '# REQUIREMENT 模板\n\n## 用户故事\n## 验收准则（AC）\n');
+      writeFile(atxRoot, 'flow-kit/templates/TEST.md', '# TEST 模板\n\n## 第 1 轮 · 功能测试\n');
+      const runCoverageIn = (root) => {
+        const changeDir = path.join(root, '.specs', CHANGE_ID);
+        const proc = spawnSync(process.execPath, [
+          '--input-type=module', '--eval',
+          'const m = await import(' + JSON.stringify(
+            pathToFileURL(path.join(SCRIPTS_DIR, 'lib', 'ac-coverage.mjs')).href) + ');'
+            + 'process.stdout.write(JSON.stringify(await m.acCoverageReview(process.argv[1])));',
+          '--', changeDir,
+        ], { cwd: root, env: { ...process.env, FLOW_COMET_RUN_ROOT: root }, encoding: 'utf8' });
+        assertTrue(proc.status === 0, 'AC 覆盖夹具子进程异常: '
+          + String(proc.stdout ?? '') + String(proc.stderr ?? ''));
+        return JSON.parse(String(proc.stdout));
+      };
+      writeFile(atxRoot, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', [
+        '# REQUIREMENT: 闭合 ATX 夹具',
+        '',
+        '## 验收准则（AC） ##',
+        '',
+        '### AC-1 · 夹具准则',
+        '',
+        '- **Given** 夹具前置',
+        '',
+        '### AC-2 · 夹具准则',
+        '',
+        '- **Given** 夹具前置',
+        '',
+      ].join('\n'));
+      writeFile(atxRoot, '.specs/' + CHANGE_ID + '/TEST.md', [
+        '# TEST: 闭合 ATX 夹具',
+        '',
+        '## 第 1 轮 · 功能测试 ##',
+        '',
+        '### 1.1 测试矩阵（AC → 用例） ##',
+        '',
+        '| AC | 类型 | 用例文件 / UAT | 状态 |',
+        '|---|---|---|---|',
+        '| AC-1 | unit | guard-self-test.mjs | ✅ |',
+        '| AC-2 | unit | guard-self-test.mjs | ✅ |',
+        '',
+      ].join('\n'));
+      const closedAtxCoverage = runCoverageIn(atxRoot);
+      assertTrue(closedAtxCoverage.unverified === null && closedAtxCoverage.unjudgeable === null,
+        '闭合 ATX 标题被读成「段缺席」（判据无法执行）: ' + JSON.stringify(closedAtxCoverage));
+      assertTrue(closedAtxCoverage.missing.length === 0,
+        '闭合 ATX 写法的 1.1 矩阵未被读成覆盖（缺: ' + JSON.stringify(closedAtxCoverage.missing) + '）');
+      // 围栏里的示例标题仍是正文：只有示例、没有真段时判「承载段不在」，而不是「段在场」。
+      writeFile(atxRoot, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', [
+        '# REQUIREMENT: 围栏示例夹具',
+        '',
+        '```md',
+        '## 验收准则（AC）',
+        '',
+        '### AC-1 · 示例',
+        '```',
+        '',
+      ].join('\n'));
+      const fencedSectionCoverage = runCoverageIn(atxRoot);
+      assertTrue(fencedSectionCoverage.unjudgeable !== null
+        && fencedSectionCoverage.unjudgeable.reason === 'REQUIREMENT 无验收准则段',
+        '围栏代码块里的示例标题被读成了段（示例是正文，不是段）: ' + JSON.stringify(fencedSectionCoverage));
     },
   },
 

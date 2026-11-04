@@ -26,7 +26,9 @@ import { hasNodeSkillDeclaration } from './lib/state-skillmarkers.mjs';
 import { resolveNodeView, structuralPreflightHint } from './lib/state-commands-flow.mjs';
 // 声明命令的文本装配（脚本路径 / 引号 / 该节点全部 --prompt / --templates / 协议上下文）与 record 侧
 // 同一处：本文件只提供运行面事实（哪个节点、哪些技能、本次解析到哪份协议），不在这里拼文本。
-import { commandContext, declarationCommands } from './lib/state-explain.mjs';
+// scriptCommand 是「可照抄命令」的唯一装配：本文件的恢复句给出重新发起委托的命令，与声明命令同形
+// （脚本路径整条加引号），不另拼一份裸脚本文本。
+import { commandContext, declarationCommands, scriptCommand } from './lib/state-explain.mjs';
 // 开工前的 LESSONS 命中集：与出口门禁同一份命中算法（路径词元 × 条目关键词），本文件不复制一份。
 // writeFilesEntries = write_files 条目边界的唯一实现（request 侧解析写面 / result 侧的写面分叉诊断 /
 // 提交子集校验的允许列表都取它）：本文件不再自带第二份「剥注释 + 行切 + 分号切」的副本。
@@ -42,7 +44,7 @@ import {
 // workflow-handoff.mjs: Record subagent handoff evidence
 // evidence 统一记录在 subagent-execute 名下作为委托证据库——execute（串行委托）与 subagent-execute（并行委托）共用。不改成节点参数，保持最小改动。
 // Usage:
-//   node workflow-handoff.mjs request <task-id> <description> [--write-files <files...>]  -- record handoff request (W2-D: optional writeFiles allow-list)
+//   node workflow-handoff.mjs request <task-id> [description] [--write-files <files...>]  -- record handoff request (W2-D: optional writeFiles allow-list)
 //   node workflow-handoff.mjs result <task-id> <result-or-JSON>  -- record handoff result (W1-D: JSON Return Contract; W2-D: commitHash subset check; : completedChecks 规范化; redEvidence 时间顺序校验)
 //   node workflow-handoff.mjs withdraw <task-id> --by <source> [--reason <text>]  -- 撤回被遗弃的 request（前置：目标无 handoffResult——已收工者拒绝撤回；留痕：withdrawnAt + withdrawnBy；已撤回 = 终态）
 //   node workflow-handoff.mjs status                           -- show all handoff evidence
@@ -95,6 +97,19 @@ function returnContractRecovery(taskId) {
     + '"greenEvidence":{"command":"<GREEN 通过测试命令>","output":"<真实通过输出片段>"}}'
     + '；零提交任务可省略 commitHash（request 记 noCommit 时不必回传该字段）；'
     + '载荷里的引号被 shell 吞掉时改用 --json-file <path> 传入 JSON 文件';
+}
+
+// 重新发起委托的命令（恢复句的唯一装配）：恢复句里给的是**命令**，不是脚本名——裸脚本名在 shell 里
+// 是 `command not found`，`<description>` 占位在 bash 里是输入重定向，两者都把「照抄」停在第一句话。
+// 参数只放任务号：description 可省略（CLI 缺省即 pending，见 request 的参数解析），占位符因此没有
+// 存在必要。脚本路径与引号由 scriptCommand 统一给出（安装根含空格时不被分词），本函数不另拼路径。
+function requestRecoveryCommand(taskId) {
+  return scriptCommand({
+    scriptsDir: __dirname,
+    runRoot,
+    script: 'workflow-handoff.mjs',
+    args: ['request', String(taskId)],
+  });
 }
 
 // writeFiles 段感知 glob 匹配:按 / 分段,`*` 只匹配段内任意字符(不跨段);
@@ -571,7 +586,7 @@ async function main() {
   if (action === 'request') {
     const taskId = process.argv[3];
     const args = process.argv.slice(4);
-    if (!taskId) { console.error('Usage: workflow-handoff.mjs request <task-id> <description> [--write-files <files...>]'); process.exit(1); }
+    if (!taskId) { console.error('Usage: workflow-handoff.mjs request <task-id> [description] [--write-files <files...>]'); process.exit(1); }
     // 技能加载前置门（方案 A）：发起委托前校验 execute/subagent-execute
     // 本节点 skill-load 声明标记已存在（.skill-loads/<node>-*.json）——先加载节点技能（Skill 工具）
     // 并 skill-load 声明，再发起委托。缺失 → 新 change BLOCK / 旧 change 渐进 WARN。
@@ -769,13 +784,19 @@ async function main() {
     // 新 change BLOCK / 旧 change WARN（渐进）；两侧都在写盘之前，state 字节零改写。
     if (!hasRequest) {
       const missingRequest = 'result 没有对应的委托 request（handoffRequests 无该任务记录）——未记录的委托不能回传结果';
-      const requestRecovery = '先运行 workflow-handoff.mjs request ' + taskId + ' <description> 记录委托，再重录 result';
+      // 恢复段 = 说明行 + 命令行的两行（命令单独成行才可整行照抄；同一行里命令后跟说明时，整行丢给
+      // shell 会把说明当成参数）。任务的恢复命令与其它「重新发起委托」路径共用同一装配。
+      const requestRecovery = [
+        '恢复: 先照抄下面的命令记录委托（description 可省略，缺省即 pending），再重录 result：',
+        '      ' + requestRecoveryCommand(taskId),
+      ].join('\n');
       if (state.newChange === true) {
         console.error('BLOCKED: 任务 ' + taskId + ' 的 ' + missingRequest + '；本次 result 未写入 state');
-        console.error('恢复: ' + requestRecovery);
+        console.error(requestRecovery);
         process.exit(1);
       }
-      console.error('HANDOFF WARN: ' + taskId + ' 的 ' + missingRequest + '（旧 change 渐进，不阻断）；恢复: ' + requestRecovery);
+      console.error('HANDOFF WARN: ' + taskId + ' 的 ' + missingRequest + '（旧 change 渐进，不阻断）');
+      console.error(requestRecovery);
     }
     // 已撤回 = 终态（撤回通道的闭合半边）：撤回后的 request 不再接受 result——否则被撤回的委托
     // 可被事后「复活」，撤回语义与守卫的放行判据（同一判据）分叉。要重新委托该任务须重新 request
@@ -783,8 +804,8 @@ async function main() {
     if (handoffRequestWithdrawn(handoffReq)) {
       console.error('BLOCKED: 任务 ' + taskId + ' 的委托已撤回（终态）——不再接受 result'
         + '（withdrawnAt=' + handoffReq.withdrawnAt + ', withdrawnBy=' + handoffReq.withdrawnBy + '）'
-        + '；恢复: 若该任务仍需执行，重新发起 workflow-handoff.mjs request ' + taskId
-        + ' <description> 后再回传结果');
+        + '；恢复: 若该任务仍需执行，先照抄下面的命令重新发起委托，再回传结果：');
+      console.error('      ' + requestRecoveryCommand(taskId));
       process.exit(1);
     }
     // m-13：result 重验在默认 handoffResult 之前——新 change 失败路径只落 request.noCommit=false，
@@ -854,10 +875,13 @@ async function main() {
             // 越界清单与 BLOCK/WARN 分级保持原样。措辞纪律：本判据只能证明两侧不一致，不能证明
             // 「计划是后来改的」——对真越界，让人去重新 request 会把越界文件写进允许列表，所以
             // 「回退越界文件」（上一行恢复指引）仍是首选，重新 request 只在成因确实成立时才走。
+            // 出路是**重新发起委托**，命令因此独立成行（与其它「重新发起委托」路径同一装配）：说明行
+            // 只说「这一步是什么」，命令行只放命令——两件事混在一行时整行不可执行。
             const staleSnapshotHint = (hasRequest && await writeFilesSnapshotStale(state, taskId, reqWriteFiles))
               ? '诊断: 该任务的委托快照与当前 TASK.md 该任务的写面不一致（快照 = 发起委托时刻记录的 writeFiles）'
-                + '——成因未判定；若计划经 replan 变更过写面，出路是重新运行 workflow-handoff.mjs request ' + taskId
-                + ' 后再记录 result；若无 replan，越界文件仍不在该任务写面内，按上面的「回退越界文件」处理'
+                + '——成因未判定；若计划经 replan 变更过写面，出路是重新发起委托（命令如下）后再记录 result；'
+                + '若无 replan，越界文件仍不在该任务写面内，按上面的「回退越界文件」处理\n'
+                + '      ' + requestRecoveryCommand(taskId)
               : null;
             if (currentState?.newChange === true) {
               console.error('BLOCKED: 提交文件超出 writeFiles 范围: ' + violations.join(', ') + '——新 change 强制委托边界;恢复: 回退越界文件或扩展 write_files');
@@ -989,8 +1013,9 @@ async function main() {
     if (deliveredResult !== undefined && deliveredResult !== null) {
       console.error('HANDOFF ERROR: 任务 ' + taskId + ' 的委托已收工（handoffResult 在场）——撤回只适用于被遗弃的'
         + ' request（零提交复验失败 / 写边界被拒之后遗弃的在飞 request），已收工的委托无须撤回：其 result 已在册；'
-        + '恢复: 如需更正该任务的结果，走既有通道重新发起 workflow-handoff.mjs request ' + taskId
-        + ' <description> 后回传新的 result（新记录覆盖该任务的当前态，历史记录不删除）');
+        + '恢复: 如需更正该任务的结果，走既有通道重新发起委托（命令如下）后回传新的 result'
+        + '（新记录覆盖该任务的当前态，历史记录不删除）：');
+      console.error('      ' + requestRecoveryCommand(taskId));
       process.exit(1);
     }
     // 新写入路径统一走时间单一权威（本地时间 + 显式偏移）：不在此自行拼接时刻字面。
