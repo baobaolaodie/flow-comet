@@ -3,6 +3,7 @@
 // 组界：场景序列按组文件规模上限连续分区——本文件先承载 D 组场景、后承载 E 组头部两项（154 · 155）；
 // 分区只搬文件，场景名/内容与其在入口 `SCENARIOS` 里的拼接顺序均不变。
 
+import { spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
@@ -32,6 +33,7 @@ import {
   engineDefinitionHits,
   engineDefinitionModule,
   engineScriptTexts,
+  makeTmp,
   renderMultiWaveTasks,
   runPlanExit,
   runPrepareEnv,
@@ -615,8 +617,8 @@ export const ENTRIES = [
         }
       }
       // ③ 运行期形态对账：两条判据各自产出一条「内容不可判」结果，字段与载荷键必须完全同形
-      //    （波次侧 = 段在场而读不出声明；AC 侧 = `REQUIREMENT.md` 缺席——A2 之后它落在内容不可判
-      //    一侧，载体缺席只剩「模板缺席」，进程内造不出；两条支路的载荷键由 ① 的源码契约锁住）。
+      //    （波次侧 = 段在场而读不出声明；AC 侧 = `REQUIREMENT.md` 缺席——「删掉承载文件」按内容
+      //    不可判处置，删除因此不是跳过口，两侧这一支吃的是同一份工件；载荷键由 ① 的源码契约锁住）。
       const waveModule = await import(pathToFileURL(path.join(SCRIPTS_DIR, 'lib', 'wave-projection.mjs')).href);
       const acModule = await import(pathToFileURL(path.join(SCRIPTS_DIR, 'lib', 'ac-coverage.mjs')).href);
       const judgeShape = (outcome) => JSON.stringify({
@@ -629,14 +631,41 @@ export const ENTRIES = [
       const acContent = await acModule.acCoverageReview(path.join(dir, '.specs', CHANGE_ID));
       assertTrue(judgeShape(waveContent) === judgeShape(acContent),
         '波次判据与 AC 覆盖的「内容不可判」形态不一致: 波次=' + judgeShape(waveContent) + ' AC=' + judgeShape(acContent));
-      assertTrue(JSON.stringify(Object.keys(waveCarrier.unverified).sort()) === JSON.stringify(['notice', 'reason']),
-        '载体缺席的载荷键应为 { notice, reason }: ' + JSON.stringify(Object.keys(waveCarrier.unverified)));
       assertTrue(waveContent.unverified === null && waveContent.unjudgeable !== null,
         '内容不可判应只填 unjudgeable（另一支必须为空）: ' + judgeShape(waveContent));
       assertTrue(JSON.stringify(Object.keys(waveContent.unjudgeable).sort())
         === JSON.stringify(['explanation', 'reason', 'recovery']),
         '内容不可判的载荷键应与 AC 覆盖同形（reason / explanation / recovery）: '
         + JSON.stringify(Object.keys(waveContent.unjudgeable)));
+      // ④ 「未校验」那一支的载荷键按 AC 侧判——断言的是键集合本身，不是形状说明。这一支的成因只有
+      //    「模板缺席」，而模板根在进程启动时就绑定到运行上下文（`FLOW_COMET_RUN_ROOT` / cwd）：
+      //    本套件进程的根里模板是在场的，所以进程内造不出「模板缺席」。夹具给一份**没有
+      //    `flow-kit/templates`** 的项目根，子进程以它为运行上下文叫同一个判定，把载荷原样交回来
+      //    （子进程而不是 chdir：运行上下文是模块加载时算出来的常量，改不动也改不干净）。
+      //    载体文件仍在场——AC 侧的「未校验」要求先过「载体在不在」这一关，缺文件是内容不可判。
+      const noTemplateRoot = makeTmp();
+      writeFile(noTemplateRoot, '.specs/' + CHANGE_ID + '/REQUIREMENT.md',
+        '# REQUIREMENT\n\n## 验收准则（AC）\n\n- AC-1 模板缺席时仍在场上的载体\n');
+      const acCarrierRun = spawnSync(process.execPath, [
+        '--input-type=module', '--eval',
+        'const m = await import(' + JSON.stringify(
+          pathToFileURL(path.join(SCRIPTS_DIR, 'lib', 'ac-coverage.mjs')).href) + ');'
+          + 'process.stdout.write(JSON.stringify(await m.acCoverageReview(process.argv[1])));',
+        '--', path.join(noTemplateRoot, '.specs', CHANGE_ID),
+      ], { cwd: noTemplateRoot, env: { ...process.env, FLOW_COMET_RUN_ROOT: noTemplateRoot }, encoding: 'utf8' });
+      assertTrue(acCarrierRun.status === 0,
+        '「无模板的项目根」夹具子进程异常: '
+        + String(acCarrierRun.stdout ?? '') + String(acCarrierRun.stderr ?? ''));
+      const acCarrier = JSON.parse(String(acCarrierRun.stdout));
+      const acCarrierKeys = acCarrier.unverified === null
+        ? 'null'
+        : JSON.stringify(Object.keys(acCarrier.unverified).sort());
+      assertTrue(acCarrierKeys === JSON.stringify(['notice', 'reason']),
+        'AC 覆盖「模板缺席」的载荷键应为 { notice, reason }: ' + acCarrierKeys);
+      // 两侧同形：波次侧由「段缺席」进「未校验」，AC 侧由「模板缺席」进同一支——载荷键任一侧漂移，
+      // verify 出口读 notice 的两个入口就只剩一个能读（只钉一侧等于只守一半）。
+      assertTrue(judgeShape(waveCarrier) === judgeShape(acCarrier),
+        '波次判据与 AC 覆盖的「未校验」形态不一致: 波次=' + judgeShape(waveCarrier) + ' AC=' + judgeShape(acCarrier));
 
       // ===== ⑬ 段体切片的围栏语义（五处消费共用 lib/section-body.mjs 的同一实现）=====
       // 段体里的围栏代码块是正文示例：围栏内的 `## ` 不结束段体。修复前波次段的段界是一条「遇 `## `

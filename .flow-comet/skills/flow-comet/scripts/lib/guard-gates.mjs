@@ -864,8 +864,8 @@ function lessonsEntryBlocks(content) {
   return blocks;
 }
 
-// 旧条目判定（结构级，不做语义判断）：非模板标题形态（迁移冒号形态 / 裸标题等历史写法，含 T11
-// 迁移保留原标题形态的条目）或「首发」键指向别的 change。其余缺字段条目按「新条目」处置——
+// 旧条目判定（结构级，不做语义判断）：非模板标题形态（迁移冒号形态 / 裸标题等历史写法——迁移期
+// 保留原标题的条目同样算旧）或「首发」键指向别的 change。其余缺字段条目按「新条目」处置——
 // 新条目只有标题与正文（无任何字段键）时同样落在 BLOCK 分支（M-5 的失效模式）。
 function lessonsEntryIsOld(block, originKey, state) {
   if (!LESSONS_TEMPLATE_HEADING_RE.test(block.heading)) return true;

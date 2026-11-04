@@ -1166,17 +1166,23 @@ function pairKeyForm(text) {
 // 引擎注释的「过程叙述」判据（纯函数 + 合成输入可驱动）：注释行里不许出现任务号与
 // 「本任务 / 待收口 / 已收进 / 已照形态」一类改动叙述——注释写的是不变式，不是某一轮改动的日记。
 // Wave 行写法示例是注释里唯一允许出现任务号的地方（它示范的是输入形态，不是改动历史），故带
-// `Wave ` / `depends on` / `[P]` 的行跳过。返回命中数组（空 = 收口），每条 { kind, line }。
+// `Wave ` / `depends on` / `[P]` 的行跳过。返回命中数组（空 = 收口），每条 { kind, lineNumber, line }。
+// 受检面是整个引擎实现面（调用方逐文件喂 engineScriptTexts），故命中必须带行号：没有行号的
+// 「某文件里有一处」等于让接手的人自己再 grep 一次。
 function commentNarrationHits(text) {
   const narrative = /本任务|待收口|已收进|已照形态/u;
-  const taskNumber = /[^A-Za-z]T\d{2}\b/u;
+  // 任务号 = `T` + 两位数字。紧跟半角冒号的**不是**任务号，而是 ISO 时间戳的时分量
+  // （`2026-02-30T00:00:00Z` 里的 `T00`）——注释里贴时间戳字面量是常态，判据不得把它读成任务号。
+  const taskNumber = /[^A-Za-z]T\d{2}\b(?!:)/u;
   return String(text).split('\n')
-    .filter((line) => /^\s*\/\//u.test(line))
-    .filter((line) => !line.includes('Wave ') && !line.includes('depends on') && !line.includes('[P]'))
-    .flatMap((line) => {
+    .map((line, index) => ({ line, lineNumber: index + 1 }))
+    .filter((entry) => /^\s*\/\//u.test(entry.line))
+    .filter((entry) => !entry.line.includes('Wave ')
+      && !entry.line.includes('depends on') && !entry.line.includes('[P]'))
+    .flatMap(({ line, lineNumber }) => {
       const hits = [];
-      if (taskNumber.test(line)) hits.push({ kind: '任务号', line: line.trim() });
-      if (narrative.test(line)) hits.push({ kind: '过程叙述', line: line.trim() });
+      if (taskNumber.test(line)) hits.push({ kind: '任务号', lineNumber, line: line.trim() });
+      if (narrative.test(line)) hits.push({ kind: '过程叙述', lineNumber, line: line.trim() });
       return hits;
     });
 }
@@ -3236,13 +3242,25 @@ export const ENTRIES = [
           '写面未知被当成「写面不重叠」：没有 write_files 的任务被要求标 [P]'
           + '（写面未知时不能断言可并行，恢复句还会指错方向）: ' + JSON.stringify(unknownGaps.gaps));
         // 注释写不变式，不写过程：引擎注释里不留任务号与改动叙述——接手的人读到的是约束，不是某一轮
-        // 改动的日记。判据是具名纯函数（见 commentNarrationHits），正向断言之外配一条探针：把一句
-        // 叙述混回去必须被检出，否则本条只是「文件里暂时没有这几个词」的恒真断言。
-        const narrations = commentNarrationHits(waveText);
+        // 改动的日记。受检面 = **引擎实现面**（与本节其余格子同一派生口径：入口 ∪ 静态可达模块 ∪
+        // 非套件自持的 lib/ 模块），逐文件扫：判据只扫一个模块、注释却宣称「引擎注释」时，覆盖面只
+        // 存在于注释里。判据是具名纯函数（见 commentNarrationHits），正向断言之外配三条探针：叙述
+        // 混回去必须被检出、任务号混回去必须被检出（否则「零命中」可能是谓词根本认不出东西），而
+        // 注释里贴 ISO 时间戳字面量（`2026-02-30T00:00:00Z` 的 `T00`）不得被读成任务号。
+        const narrations = [];
+        for (const [rel, text] of texts) {
+          for (const hit of commentNarrationHits(text)) {
+            narrations.push(rel + ':' + hit.lineNumber + ' [' + hit.kind + '] ' + hit.line);
+          }
+        }
         assertTrue(narrations.length === 0,
-          '注释里出现任务号 / 过程叙述（应写不变式）: ' + JSON.stringify(narrations));
-        assertTrue(commentNarrationHits(waveText + '\n// 本任务里已照形态加过一支。\n').length > 0,
+          '引擎注释里出现任务号 / 过程叙述（应写不变式）: ' + JSON.stringify(narrations, null, 1));
+        assertTrue(commentNarrationHits('// 本任务里已照形态加过一支。\n').length > 0,
           '注释叙述判据不具判别力：混入「本任务 / 已照形态」的注释没有被检出');
+        assertTrue(commentNarrationHits('// 旧条目判定含 T11 的迁移保留形态。\n').length > 0,
+          '注释叙述判据不具判别力：混入任务号的注释没有被检出');
+        assertTrue(commentNarrationHits('// V8 对 `2026-02-30T00:00:00Z` 会静默滚到 3 月 2 日。\n').length === 0,
+          '注释叙述判据把注释里的 ISO 时间戳字面量读成了任务号（假阳性）');
         // 变异体只在内存里编译（data: URL，相对 import 重写为绝对 file: URL）：不落盘、不留残留。
         const inlineModuleUrl = (source, rel) => {
           const rewritten = source.replace(/(from\s*')(\.[^']*)(')/gu, (whole, head, specifier, tail) =>
