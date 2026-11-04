@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { validateStateFields, looksLikeObjectLiteral, writeJsonAtomic, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, resolveProtocolPathWithState, handoffRequestWithdrawn, evidencePayloadProblems } from './state-schema.mjs';
 import { EXECUTE_FAMILY_NODE_IDS, protocolNodeEnabled, resolveDelegationTarget, taskDependencyEligibility } from './route-node.mjs';
 import {
+  declarationSkillTargets,
   readProtocolFile,
   validateProtocolSchema,
   inspectWorkflowPathSegments,
@@ -23,6 +24,9 @@ import { hasNodeSkillDeclaration } from './lib/state-skillmarkers.mjs';
 // 节点视图与预检命令段的单一实现（status / next / handoff result 同源）：本文件不自拼命令、不复制
 // 「先跑哪个出口」的判定（L-058 路由单一权威 / L-067 同一推导两处表达）。
 import { resolveNodeView, structuralPreflightHint } from './lib/state-commands-flow.mjs';
+// 声明命令的文本装配（脚本路径 / 引号 / 该节点全部 --prompt / --templates / 协议上下文）与 record 侧
+// 同一处：本文件只提供运行面事实（哪个节点、哪些技能、本次解析到哪份协议），不在这里拼文本。
+import { commandContext, declarationCommands } from './lib/state-explain.mjs';
 // 开工前的 LESSONS 命中集：与出口门禁同一份命中算法（路径词元 × 条目关键词），本文件不复制一份。
 // writeFilesEntries = write_files 条目边界的唯一实现（request 侧解析写面 / result 侧的写面分叉诊断 /
 // 提交子集校验的允许列表都取它）：本文件不再自带第二份「剥注释 + 行切 + 分号切」的副本。
@@ -229,7 +233,7 @@ const ZERO_COMMIT_REVOKE_REASON_TEXT = {
 //   旧 change → HANDOFF WARN 后继续记录 result（出口 W1-D 同样不再豁免）。
 // 返回 'skip'（形态不适用）/ 'pass'（资格仍成立）/ 'warn'（旧 change 已撤销）/ 'block'（新 change 已撤销）。
 // 空 writeFiles、非 noCommit、无 request 记录均不扩大行为；未引用提交 / HEAD 移动 / TOCTOU /
-// worktree 提交不可见等结构性 residual 由 T11/T12 文档登记，本函数不宣称已闭合。
+// worktree 提交不可见等结构性 residual 已在维护文档登记，本函数不宣称已闭合。
 async function revalidateResultZeroCommit(state, taskId, handoffReq) {
   if (!handoffReq || handoffReq.noCommit !== true) return 'skip';
   const entries = Array.isArray(handoffReq.writeFiles) ? handoffReq.writeFiles : [];
@@ -298,9 +302,11 @@ async function readOwnershipProtocol(state) {
     source = selected.source;
     const protocol = await readProtocolFile(runRoot, protocolPath);
     validateProtocolSchema(protocol);
-    return { protocol, failure: null };
+    // protocolPath 随读取结果一并返回：恢复命令要带上**本次运行实际用的那一份**协议上下文
+    // （见 requestSkillDeclarationGuide）——调用方只读这个结果，不再各自重解析一次。
+    return { protocol, protocolPath, failure: null };
   } catch (error) {
-    return { protocol: null, failure: describeProtocolReadFailure(error, protocolPath, source) };
+    return { protocol: null, protocolPath, failure: describeProtocolReadFailure(error, protocolPath, source) };
   }
 }
 
@@ -526,6 +532,38 @@ async function writeFilesSnapshotStale(state, taskId, requestWriteFiles) {
   return normalize(currentFiles) !== normalize(requestWriteFiles);
 }
 
+// ---------- 委托前置门：缺声明时给出「一条能照抄的命令」 ----------
+// 命令文本不在这里拼：与 record 侧 / 出口门同一装配（state-explain 的 declarationCommands——平台化
+// 脚本路径加引号、该节点**全部**协议文件各一个 --prompt、模板全清单、自定义协议的 --protocol）。
+// 本函数只提供三段运行面事实：
+//   · 目标技能集：协议派生（declarationSkillTargets），与 record 前置门同一取法——一次声明只写一个
+//     技能标记，故每个目标技能各一条命令；
+//   · 运行上下文（脚本目录 / 包根 / 运行根）：状态命令族的同一个 commandContext 推导，不另算一份路径；
+//   · 协议路径：本次 request 实际解析到的那一份（readOwnershipProtocol）。命令若按另一份协议解析，
+//     技能名与模板清单就可能不是同一个节点的——照抄跑出来的标记与出口门的判据对不上。
+// 协议不可读 / 协议里没有该节点时不编造命令：技能名与协议文件都无从确定，猜一条只是把错误推给 shell。
+async function requestSkillDeclarationGuide(requestNode, state) {
+  const hint = '先加载技能（用 Skill 工具，禁止跳过），再';
+  const protocolRead = await readOwnershipProtocol(state);
+  const node = protocolRead.protocol === null
+    ? null
+    : (protocolRead.protocol.nodes ?? []).find((candidate) => candidate && candidate.id === requestNode) ?? null;
+  if (node === null) {
+    const why = protocolRead.failure === null
+      ? '当前协议没有节点 ' + requestNode + ' 的定义'
+      : '协议不可读——' + protocolRead.failure;
+    return hint + '按本节点入口打印的 LOAD SKILL 行声明技能加载，然后重试 request（无法派生声明命令：'
+      + why + '）';
+  }
+  const commands = declarationCommands({
+    node,
+    skills: declarationSkillTargets(node),
+    context: { ...commandContext({ runRoot }), protocolPath: protocolRead.protocolPath },
+  }).map((entry) => entry.command);
+  return hint + '照抄下面的命令声明本节点技能加载（同一 node-skill 重跑会覆写该标记）：\n  '
+    + commands.join('\n  ') + '\n然后重试 request';
+}
+
 async function main() {
   const action = process.argv[2] ?? 'status';
   const state = await readState();
@@ -537,6 +575,9 @@ async function main() {
     // 技能加载前置门（方案 A）：发起委托前校验 execute/subagent-execute
     // 本节点 skill-load 声明标记已存在（.skill-loads/<node>-*.json）——先加载节点技能（Skill 工具）
     // 并 skill-load 声明，再发起委托。缺失 → 新 change BLOCK / 旧 change 渐进 WARN。
+    // 恢复行给的是**可照抄的命令**（与 record 侧同一装配，见 requestSkillDeclarationGuide）：
+    // 裸脚本名 + `<skill>` 占位 + 只给首份 --prompt 的旧形态，在 bash 里是 command not found 与输入
+    // 重定向；即便手工补全，声明也缺模板清单与协议上下文，下一步照样被另一道门拦。
     // 判据不自持：与 record 前置门共用 state-skillmarkers 的 hasNodeSkillDeclaration（一处实现，
     // 归档兜底范围也随之同口径——别的 change 归档里的标记不得替本节点作证）。
     // 与零提交语义独立共存：本门只校验节点技能声明，不依赖任务 write_files 内容。
@@ -544,7 +585,7 @@ async function main() {
     if (requestNode && EXECUTE_FAMILY_NODE_IDS.has(requestNode)) {
       const declared = await hasNodeSkillDeclaration(requestNode, state.activeChange);
       if (!declared) {
-        const loadGuide = '先加载技能（用 Skill 工具，禁止跳过）并运行 workflow-state.mjs skill-load ' + requestNode + ' <skill> 再发起委托';
+        const loadGuide = await requestSkillDeclarationGuide(requestNode, state);
         if (state.newChange === true) {
           console.error('BLOCKED: 节点 ' + requestNode + ' 缺少技能加载声明标记（.skill-loads/' + requestNode + '-*.json）——' + loadGuide);
           process.exit(1);
@@ -602,8 +643,8 @@ async function main() {
       }
       console.error('WARN: ' + msg + '（旧 change 渐进，不阻断，不记录 noCommit）');
     }
-    // 开工前的 LESSONS 命中集（只读；与出口同一份命中算法）——放在归属门禁之前：被归属门禁拦下的
-    // request 不写 state，但执行者仍要看得到「本任务要回应哪几条」（state 字节零改写由同一路径保证）。
+    // 开工前的 LESSONS 命中集（只读；与出口同一份命中算法）——放在归属门禁之前：request 不写 state，
+    // 但执行者仍要看得到「当前任务要回应哪几条」（state 字节零改写由同一路径保证）。
     await reportLessonHits(taskContent, taskId);
     // request 归属门禁：技能声明门之后、任务解析之后、首个 state.evidence 写入之前。
     // 只读判定；新 change 不匹配 → BLOCK（state 字节零改写、不落 handoffRequests）；旧 change → 可见 WARN 后照常记录。

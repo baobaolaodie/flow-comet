@@ -9,6 +9,9 @@
 // 计算，读文件由调用方负责（出口读 change 目录，request 读项目级教训册）。
 
 import { taskBlocks, taskOpeningAttrs } from '../task-parsing.mjs';
+// 围栏行判定取段体单源的唯一实现（反引号与波浪号同口径）：本模块自己按行判围栏时只认反引号，
+// 波浪号围栏里的书写样例就被当成真条目（出口与 request 打印面会多出「该回应」的假编号）。
+import { isFenceLine } from './section-body.mjs';
 
 // 命中上限：出口与打印面同取此值（单处定义，消费方不得各写一个数字）。
 export const LESSONS_HIT_LIMIT = 5;
@@ -31,6 +34,18 @@ const LESSONS_KEYWORD_LINE = /^[-*\s]*\*\*关键词\*\*\s*[:：]\s*(.+)$/u;
 // 条目标题（### L-NNN 之后的部分）与编号之间的分隔符：只用于打印面，命中判定仍只看关键词行。
 const LESSONS_TITLE_LEAD = /^[\s·:：\-—]+/u;
 
+// <write_files> 元素提取：正则**唯一一份**，且大小写不敏感——元素名按 HTML 语义与大小写无关
+// （`<WRITE_FILES>` 与 `<write_files>` 是同一种元素；plan 出口的 7 字段门正是按 /i 判在场的）。
+// 写面判定若只认小写，同一份 TASK.md 会在两道门里得到两种结论：任务被判「字段在场」，却在
+// 「算不算有写面」处判未知——判据缺席即放行。
+const WRITE_FILES_ELEMENT_RE = /<write_files>([\s\S]*?)<\/write_files>/iu;
+
+// 块内写面元素原文（块内没有该元素 → null）。
+function writeFilesElement(block) {
+  const matched = String(block ?? '').match(WRITE_FILES_ELEMENT_RE);
+  return matched === null ? null : matched[1];
+}
+
 // write_files 元素原文（键 = 任务 id）：块提取与开标签解析复用 task-parsing 的既有实现——出口按任务
 // 文件逐个任务取写面，打印面按同一提取取同一个任务的写面，两侧输入必须同源。
 export function taskWriteFilesById(taskContent) {
@@ -38,8 +53,8 @@ export function taskWriteFilesById(taskContent) {
   for (const block of taskBlocks(taskContent)) {
     const attrs = taskOpeningAttrs(block);
     if (!attrs || !attrs.id) continue;
-    const writeFiles = block.match(/<write_files>([\s\S]*?)<\/write_files>/i);
-    if (writeFiles) out.set(attrs.id, writeFiles[1]);
+    const element = writeFilesElement(block);
+    if (element !== null) out.set(attrs.id, element);
   }
   return out;
 }
@@ -62,6 +77,15 @@ export function writeFilesEntries(elementText) {
     .flatMap((entry) => entry.split(';'))
     .map((entry) => entry.trim())
     .filter(Boolean);
+}
+
+// 任务块「有写面」判定（本条判定的唯一落点）：元素在场**且**按条目边界切出的条目非空——空元素与
+// 只有注释的元素都是「写面不可判」，不是「写面为空」。元素提取与条目边界都取本模块的唯一实现，
+// 故「7 字段门判字段在场」与「算不算有写面」不会在元素名大小写或注释剥离上分叉：分叉时任务被
+// 静默排除在判定面之外，而判据缺席与判据通过在下游看起来一样（都只是「没有明细」）。
+export function taskHasWriteFace(block) {
+  const element = writeFilesElement(block);
+  return element !== null && writeFilesEntries(element).length > 0;
 }
 
 // 路径段 → 词元：目录名与文件主干（去最后一层扩展名）按非字母数字切分，长度 ≥3、去停用词、去纯数字。
@@ -87,14 +111,16 @@ export function lessonsPathTokens(writeFilesText) {
 
 // LESSONS 条目：`### L-NNN` 标题开启一个条目，块内 `- **关键词**:` 行的词元即命中输入；下一个 H2
 // 结束条目区（区外的 `###` 不参与）。围栏代码块内是书写样例（模板里的「条目格式」示例即此形态），
-// 按行扫描会被误当成真条目——围栏内一律跳过。无关键词行的条目不进结果集（旧条目跳过）。
+// 按行扫描会被误当成真条目——围栏内一律跳过。围栏语法取段体单源的 isFenceLine（反引号与波浪号
+// 同口径）：本模块自写一份只认反引号的判定时，`~~~` 围栏里的示例条目会被当成真条目，出口与
+// request 打印面因此凭空多出「该回应」的编号。无关键词行的条目不进结果集（旧条目跳过）。
 // title 只供打印面识别「是哪条教训」；命中判定与出口验收都只看 id / 关键词词元。
 export function lessonsEntries(lessonsText) {
   const entries = [];
   let current = null;
   let inFence = false;
   for (const line of String(lessonsText ?? '').replace(/\r\n?/gu, '\n').split('\n')) {
-    if (/^\s*```/u.test(line)) { inFence = !inFence; continue; }
+    if (isFenceLine(line)) { inFence = !inFence; continue; }
     if (inFence) continue;
     if (/^##\s/u.test(line)) { current = null; continue; }
     const heading = line.match(LESSONS_ENTRY_HEADING);

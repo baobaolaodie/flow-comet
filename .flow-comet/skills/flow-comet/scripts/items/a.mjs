@@ -10,7 +10,7 @@
 import fs from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
-import { assertEqual, assertExit, assertNotOut, assertOut, assertTrue, baseState, runGuard, runHandoff, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
+import { assertEqual, assertExit, assertNotOut, assertOut, assertTrue, baseState, installSkillTreeCopy, runGuard, runHandoff, runPrintedCommand, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
 import { archiveRecordJson, multiWaveTaskContent, explainContractProblems, assertExplainFailClosed, explainReverseConstructionProblems, CHANGE_ID, readStateFile, gitInit, gitBranch, writeIntakeArtifacts, fullContract, execSummaryFixture, assertNodeLine, driveThroughDesign } from '../lib/system-fixtures.mjs';
 
 // skill-load 的模板声明（节点级，C3/AC-13 加载链）：参数化的委托驱动按节点查表——夹具是真实命令
@@ -414,6 +414,39 @@ export const ENTRIES = [
       assertOut(rPlan, 'ALL CHECKS PASSED');
       // 首趟路由:首波双并行无前置依赖 → 直接进入委托节点
       assertOut(rPlan, 'NODE: subagent-execute');
+      // 委托前置门的声明命令必须照抄可执行：解析打印文本 → 真执行 → 再 request 通过。旧形态是
+      // 「workflow-state.mjs skill-load <node> <skill>」——裸脚本名在 shell 里 command not found，
+      // `<skill>` 占位在 bash 下是重定向，且不带该节点全部 --prompt / --templates / --protocol，
+      // 字面断言钉不住「这条命令能不能用」。同一次 request 还断言开工前 LESSONS 命中集的围栏口径：
+      // 围栏里的书写样例不是真条目（围栏判定与段体单源同口径），围栏外的条目照常命中。
+      writeFile(dir, '.specs/LESSONS.md',
+        '# LESSONS\n\n## 条目区\n\n~~~md\n### L-901 · [proc] 围栏内的书写样例\n- **关键词**: p01 委托边界\n~~~\n\n'
+        + '### L-902 · [proc] 委托边界须留痕\n- **关键词**: p01\n');
+      const gatedRequest = runHandoff(['request', 'P01', 'P01 委托'], dir);
+      assertExit(gatedRequest, 1);
+      assertOut(gatedRequest, 'BLOCKED: 节点 subagent-execute 缺少技能加载声明标记');
+      assertNotOut(gatedRequest, 'HANDOFF REQUEST');
+      const declarationCommand = (gatedRequest.output.match(/^\s*(node "[^"]+" skill-load [^\n]+)$/m) || [])[1];
+      assertTrue(typeof declarationCommand === 'string',
+        '委托前置门的阻塞必须给出完整可执行命令（node "<脚本路径>" skill-load …）：\n' + gatedRequest.output);
+      // 打印命令按安装布局的执行面解析（脚本根是运行根相对形态）：先把技能树复制成安装副本，
+      // 再真跑打印文本——执行的是打印出来的脚本路径与参数，不是 harness 自己的绝对路径。
+      installSkillTreeCopy(dir, path.join('.claude', 'skills'));
+      const replayedDeclaration = runPrintedCommand(declarationCommand, dir,
+        { FLOW_COMET_RUN_ROOT: dir, FLOW_COMET_PROTOCOL: '' });
+      assertTrue(replayedDeclaration.status === 0,
+        '照抄的声明命令跑不通\n  命令: ' + declarationCommand
+        + '\n  exit ' + replayedDeclaration.status + '\n' + replayedDeclaration.output);
+      const declaredRequest = runHandoff(['request', 'P01', 'P01 委托'], dir);
+      assertExit(declaredRequest, 0);
+      assertOut(declaredRequest, 'HANDOFF REQUEST: P01');
+      assertOut(declaredRequest, 'LESSONS-HITS: 1 条');
+      assertOut(declaredRequest, 'L-902');
+      assertNotOut(declaredRequest, 'L-901');
+      // 这一格考的是开工前打印面（命中集 + 围栏判定）。出口侧的「逐条回应」判据按**任务写面**算命中，
+      // 本夹具的 L-902 只会落在 P01 的扫描段上——留着教训册就要把 A13 后续每份 SUMMARY 的措辞一并改写，
+      // 而那条判据另有场景逐格考（含缺回应 / 围栏内回应）。断言完成后撤掉夹具，A13 其余步骤保持原基线。
+      fs.rmSync(path.join(dir, '.specs', 'LESSONS.md'), { force: true });
       // 两层加载模型:执行域两节点的手动声明标记(record 前置门;一次声明后续趟次复用)
       assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir), 0);
       assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir), 0);
@@ -751,6 +784,18 @@ export const ENTRIES = [
       assertExit(globRecovered, 0);
       assertOut(globRecovered, 'ALL CHECKS PASSED');
       assertNotOut(globRecovered, 'BLOCKED');
+      // 写面判定的元素名大小写无关：`<WRITE_FILES>` 与 `<write_files>` 是同一种元素——7 字段门按
+      // 大小写不敏感判定在场，而「这份写面算不算有内容」的判据若只认小写，大写写法的任务就被静默
+      // 排除在 [P] 补集判据之外：同波同层、写面互不重叠的一对永远不被要求标 parallel（判据在场才判，
+      // 判据缺席就是放行）。
+      planTask(
+        '## 波次划分\n\nWave 1: U01, U02\n\n## 任务清单\n\n'
+        + '<task id="U01" status="pending"><action>实现 U01</action><WRITE_FILES>src/u01.mjs</WRITE_FILES><verify>node --check src/u01.mjs</verify></task>\n'
+        + '<task id="U02" status="pending"><action>实现 U02</action><WRITE_FILES>src/u02.mjs</WRITE_FILES><verify>node --check src/u02.mjs</verify></task>\n');
+      const upperCaseWriteFiles = exitPlanNoApply();
+      assertExit(upperCaseWriteFiles, 1);
+      assertOut(upperCaseWriteFiles, '同波任务可并行却未标 [P]');
+      assertOut(upperCaseWriteFiles, 'U01 × U02');
       // 同一文件跨任务族（负例）：两个非修复任务写入同一文件、彼此无依赖路径（串行拆分同样构成
       // 「未显式排序的同文件多任务」）→ 新 change BLOCKED，消息含任务对与重叠文件 + 恢复指引。
       // 同夹具并列一对修复任务（id 带修复前缀）写同一文件且无依赖路径——该族不参与判定，

@@ -43,9 +43,10 @@ import {
 import { taskOpeningAttrs } from '../task-parsing.mjs';
 // 段界单源（围栏 / 同级标题 / 分隔线 / 文末的判定只在这里一份）
 import { sectionBody } from './section-body.mjs';
-// 写面条目边界（<write_files> 原文 → 条目列表）的单一实现：与 task-graph 的路径解析、
-// handoff 的提交子集校验取同一份（同一份写面被切成不同条目集时，两处会给出互相矛盾的结论）。
-import { writeFilesEntries } from './lessons-hits.mjs';
+// 「这个任务有没有写面」的单一实现（元素提取 + 条目边界都在 lib/lessons-hits.mjs）：本模块不自己
+// 拿正则去块里找 <write_files>。同一件事写第二份表达式时，元素名大小写少一个 /i 就够——7 字段门
+// 判字段在场、本模块判未知，任务因此从 [P] 判据的参与者里静默消失。
+import { taskHasWriteFace } from './lessons-hits.mjs';
 
 // 波次段名 = flow-kit/templates/TASK.md 的 H2 `## 波次划分`（登记于 reference/artifact-templates.json
 // 的 TASK sections）——段名对齐模板权威，不在这里另起变体（L-001）。段界与 plan 出口既有的
@@ -261,11 +262,8 @@ export function waveReviewOutcome(review, { blocking = false } = {}) {
 // 写面未知的任务同样不参与：没有 <write_files>（或清单为空 / 只有注释）意味着「不能断言写面不重叠」，
 // 而不是「写面不重叠」——把它当成后者，补集会把一对写面未知的任务报成「可并行却未标 [P]」，恢复句
 // 还会让作者补 depends_on（真正缺的是字段）。参与者判据因此与 task-graph 的第三族同口径（该族只把
-// 有写面的任务放进重叠比较），而「这份写面算不算有内容」的条目边界取同一实现（writeFilesEntries）。
-function hasWriteFace(block) {
-  const writeFiles = block.match(/<write_files>([\s\S]*?)<\/write_files>/);
-  return writeFiles !== null && writeFilesEntries(writeFiles[1]).length > 0;
-}
+// 有写面的任务放进重叠比较），而「这份写面算不算有内容」取 lib/lessons-hits.mjs 的唯一判定
+// （taskHasWriteFace）——本模块不再自持第二份元素提取（元素名大小写与注释剥离都在那里表达一次）。
 
 // 判定：返回 { gaps }，逐条 { a, b, wave, unmarked }（unmarked = 该对里没标 parallel 的任务 id）。
 // 无波次段 / 内容不可判（waves 为 null）→ 空（波次侧已有判别不了，本判据没有分组可用）。
@@ -278,7 +276,7 @@ export function parallelGapReview({ taskContent = '', blocks = [], waves = null 
     const attrs = taskOpeningAttrs(block);
     if (!attrs || typeof attrs.id !== 'string' || attrs.id === '') continue;
     if (attrs.status === 'done' || isFixTask(block)) continue;
-    if (!hasWriteFace(block)) continue;
+    if (!taskHasWriteFace(block)) continue;
     const wave = waves.get(attrs.id);
     const level = levels.get(attrs.id);
     if (wave === undefined || level === undefined) continue;
