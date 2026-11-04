@@ -22,6 +22,7 @@ import {
   scriptTreeFiles,
   strictSummary,
   writeIntakeArtifacts,
+  writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import {
   FIX_RETURN_FAMILY_COMPLETED,
@@ -1281,6 +1282,8 @@ export const ENTRIES = [
         directOverride: false,
         newChange: true,
       });
+      // 声明标记：真实流程里由协调者 / record 写；夹具直接写 state，须补同一份事实（否则先撞覆盖门）
+      writeNodeDeclarationMarkers(dir, 'execute');
       const res = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(res, 0);
       assertOut(res, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
@@ -1343,6 +1346,8 @@ export const ENTRIES = [
           },
         ],
       }));
+      // 声明标记（新 change 的出口覆盖门）：夹具直接写 state，补上真实流程里协调者 / record 写的那份。
+      writeNodeDeclarationMarkers(dir, 'execute');
       const resDivergentPlain = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(resDivergentPlain, 0);
       assertOut(resDivergentPlain, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');

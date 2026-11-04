@@ -41,6 +41,7 @@ import {
   timeSingleSourceConsumerProblems,
   timeUtilsModule,
   treeFingerprint,
+  writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import {
   REPLAN_STALE_SIGNATURE,
@@ -678,6 +679,7 @@ export const ENTRIES = [
   {
     name: '285 ui-design 门四类：前端齐备放行 / 前端缺件 BLOCK / 非前端可见跳过 / 旧 change WARN',
     run: (dir) => {
+      writeNodeDeclarationMarkers(dir, 'design', { frontend: true });
       // 正例：前端（「视觉调性」段在场且未标注不适用）+ 工件齐备 + 真实声明
       writeDesignExitFixture(dir, {
         newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: true,
@@ -888,6 +890,7 @@ export const ENTRIES = [
   {
     name: '288 ui-design 门按协议绑定键控：删绑定门退场（可见行）/ 在场仍拦 / 其它绑定零改动 / 写回即恢复',
     run: (dir) => {
+      writeNodeDeclarationMarkers(dir, 'design', { frontend: true });
       // 负例：协议删掉该绑定 → 前端判据成立且缺件也不再拦（门随绑定退场）
       writeUiDesignBindingVariant(dir, 'absent');
       writeDesignExitFixture(dir, {
@@ -936,6 +939,7 @@ export const ENTRIES = [
   {
     name: '289 ui-design 门按协议等级键控：调回 advisory 不再拦且自动补写原语义 / 写回 guarded 即恢复',
     run: (dir) => {
+      writeNodeDeclarationMarkers(dir, 'design', { frontend: true });
       // 负例：等级调回 advisory → 缺工件 + 零真实声明也放行（自动补写保持原语义）
       writeUiDesignBindingVariant(dir, 'advisory');
       writeDesignExitFixture(dir, {
@@ -984,6 +988,7 @@ export const ENTRIES = [
   {
     name: '290 负向标记结构约束：独立行·行首·字段值位跳过并回显片段 / 自然句子·子维度字段·段外标记不关闸',
     run: (dir) => {
+      writeNodeDeclarationMarkers(dir, 'design', { frontend: true });
       // 负例：自然句子（标记词在行首且后接「于」，句内再出现一次）→ 判据仍是前端 ⇒ 缺件 BLOCKED
       writeDesignExitFixture(dir, {
         newChange: true, visualTone: VISUAL_TONE_NATURAL_SENTENCE, uiDesign: false, declareUiDesign: true,

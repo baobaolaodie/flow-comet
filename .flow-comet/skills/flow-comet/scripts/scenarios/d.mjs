@@ -35,6 +35,7 @@ import {
   renderMultiWaveTasks,
   runPlanExit,
   runPrepareEnv,
+  writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import {
   REPLAN_STALE_SIGNATURE,
@@ -68,6 +69,8 @@ const waveMarkdown = (waveLines, tasks) => '# TASK\n\n## 波次划分\n\n```\n' 
 const runPlanWithTask = (dir, markdown) => {
   writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', markdown);
   assertExit(runGuard(['entry', 'plan'], dir), 0);
+  // 新 change 的声明标记（真实流程里由协调者 / record 写；夹具直接写 state 时补同一份事实）
+  writeNodeDeclarationMarkers(dir, 'plan');
   return runGuard(['exit', 'plan'], dir);
 };
 
@@ -611,8 +614,9 @@ export const ENTRIES = [
             rel + ' 仍直接消费报文构造函数 ' + retired + '（应统一经 waveReviewOutcome）');
         }
       }
-      // ③ 运行期形态对账：两条判据各自产出一条「载体缺席」结果，字段与载荷键必须完全同形
-      //    （AC 的内容不可判分支另有场景 21 的运行期夹具；本块补的是「形态同形」这一件事）。
+      // ③ 运行期形态对账：两条判据各自产出一条「内容不可判」结果，字段与载荷键必须完全同形
+      //    （波次侧 = 段在场而读不出声明；AC 侧 = `REQUIREMENT.md` 缺席——A2 之后它落在内容不可判
+      //    一侧，载体缺席只剩「模板缺席」，进程内造不出；两条支路的载荷键由 ① 的源码契约锁住）。
       const waveModule = await import(pathToFileURL(path.join(SCRIPTS_DIR, 'lib', 'wave-projection.mjs')).href);
       const acModule = await import(pathToFileURL(path.join(SCRIPTS_DIR, 'lib', 'ac-coverage.mjs')).href);
       const judgeShape = (outcome) => JSON.stringify({
@@ -622,11 +626,11 @@ export const ENTRIES = [
       });
       const waveCarrier = waveModule.waveProjectionReview({ taskContent: '# TASK\n\n## 任务清单\n\n' + waveTask('T01') });
       const waveContent = waveModule.waveProjectionReview({ taskContent: naWavePlan() });
-      const acCarrier = await acModule.acCoverageReview(path.join(dir, '.specs', CHANGE_ID));
-      assertTrue(judgeShape(waveCarrier) === judgeShape(acCarrier),
-        '波次判据与 AC 覆盖的「载体缺席」形态不一致: 波次=' + judgeShape(waveCarrier) + ' AC=' + judgeShape(acCarrier));
-      assertTrue(JSON.stringify(Object.keys(acCarrier.unverified).sort()) === JSON.stringify(['notice', 'reason']),
-        '载体缺席的载荷键应为 { notice, reason }: ' + JSON.stringify(Object.keys(acCarrier.unverified)));
+      const acContent = await acModule.acCoverageReview(path.join(dir, '.specs', CHANGE_ID));
+      assertTrue(judgeShape(waveContent) === judgeShape(acContent),
+        '波次判据与 AC 覆盖的「内容不可判」形态不一致: 波次=' + judgeShape(waveContent) + ' AC=' + judgeShape(acContent));
+      assertTrue(JSON.stringify(Object.keys(waveCarrier.unverified).sort()) === JSON.stringify(['notice', 'reason']),
+        '载体缺席的载荷键应为 { notice, reason }: ' + JSON.stringify(Object.keys(waveCarrier.unverified)));
       assertTrue(waveContent.unverified === null && waveContent.unjudgeable !== null,
         '内容不可判应只填 unjudgeable（另一支必须为空）: ' + judgeShape(waveContent));
       assertTrue(JSON.stringify(Object.keys(waveContent.unjudgeable).sort())

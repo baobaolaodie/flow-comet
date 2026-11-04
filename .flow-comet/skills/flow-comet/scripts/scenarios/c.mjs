@@ -34,6 +34,7 @@ import {
   summaryContent,
   writeCustomProtocol,
   writeIntakeArtifacts,
+  writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import {
   assertOutMatches,
@@ -1075,6 +1076,29 @@ export const ENTRIES = [
       assertFrontendDesignEvidenceRoundTrip();
       // ⑪ 入口 --prompt 冲突报文的照抄闭合（同一缺陷的第三面：报文与门禁判据不是同一份派生）。
       assertEntryConflictRecoveryRoundTrip();
+      // ⑫ **标记目录整体被删**：旧口径把它读成「声明机制未激活」→ 跳过校验（对新 change 也印
+      //    「旧 change 兼容」），于是 `rm -rf .skill-loads/` 就是关掉覆盖判据的写法。新 change
+      //    下目录缺席 = 一项声明都没有：按缺声明 BLOCKED 并逐项点名（同一条判据的两半——
+      //    「目录在但没覆盖」与「目录根本不在」不该有两种放行）。旧 change 的过渡规则不变
+      //    （渐进 WARN，且只有那一支才叫「旧 change 兼容」）。
+      writeState(dir, newChangeState());
+      fs.rmSync(loadsDir, { recursive: true, force: true });
+      const resNoLoadsDir = runGuard(['exit', 'open'], dir);
+      assertExit(resNoLoadsDir, 1);
+      assertOut(resNoLoadsDir, 'BLOCKED');
+      assertOut(resNoLoadsDir, 'exit 缺协议声明标记');
+      assertOut(resNoLoadsDir, '缺协议文件: 0-change.md、1-requirement.md');
+      assertOut(resNoLoadsDir, '缺必需技能声明: flow-comet-change、flow-comet-requirement');
+      assertOut(resNoLoadsDir, '恢复: 照抄下面的命令补齐上述缺项');
+      assertNotOut(resNoLoadsDir, '旧 change 兼容');
+      assertNotOut(resNoLoadsDir, 'ALL CHECKS PASSED');
+      // ⑫b 旧 change 同形态：仍按过渡规则渐进 WARN（不计入清单，但报文说清为什么跳过）
+      writeState(dir, legacyState);
+      const resNoLoadsDirOld = runGuard(['exit', 'open'], dir);
+      assertExit(resNoLoadsDirOld, 0);
+      assertOut(resNoLoadsDirOld, 'SKILL-LOAD WARN');
+      assertOut(resNoLoadsDirOld, '旧 change 兼容');
+      assertOut(resNoLoadsDirOld, 'ALL CHECKS PASSED');
     },
   },
 
@@ -1538,6 +1562,7 @@ export const ENTRIES = [
       stEof.evidence.plan = { summary: 'plan done' };
       stEof.newChange = true;
       writeState(dir, stEof);
+      writeNodeDeclarationMarkers(dir, 'plan');
       assertExit(runGuard(['entry', 'plan'], dir), 0);
       const taskT01Eof = '<task id="T01"><action>a</action><write_files>f</write_files><verify>v</verify><done>d</done></task>\n';
       const eofHead = '# TASK\n\n## 波次划分\n\nWave 1 (parallel): ';
@@ -1733,6 +1758,7 @@ export const ENTRIES = [
       st.enteredNodes = ['open', 'design', 'plan', 'execute'];
       st.newChange = true;
       writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'execute');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="T01" parallel="true" status="pending" depends_on="">\n  <name>p</name>\n  <write_files>a</write_files>\n  <action>p</action>\n  <verify>t</verify>\n  <done>d</done>\n</task>');
       const res = runGuard(['exit', 'execute'], dir);
       assertExit(res, 0);
@@ -1813,6 +1839,7 @@ export const ENTRIES = [
       st.evidence.review = { summary: 'reviewed' };
       st.newChange = true;
       writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'review');
       assertExit(runGuard(['entry', 'review'], dir), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## Critical\n\n无。\n\n## 发现\n\n- **问题A**: 某处存在一个需要记录的问题描述,但未给出任何处置结论\n\n## 结论\n\n通过\n');
       const res = runGuard(['exit', 'review'], dir);
@@ -2035,6 +2062,7 @@ export const ENTRIES = [
       st.evidence.plan = { summary: 'planned' };
       st.newChange = true;
       writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'plan');
       assertExit(runGuard(['entry', 'plan'], dir), 0);
       const planTask = (text) => writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', text);
       const taskT01 = '<task id="T01"><action>a</action><write_files>f</write_files><verify>v</verify><done>d</done></task>\n';
@@ -2307,6 +2335,7 @@ export const ENTRIES = [
       st.evidence.execute = { summary: 'empty', emptyExitApproved: true };
       st.newChange = true;
       writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'execute');
       assertExit(runGuard(['entry', 'execute'], dir), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="P01" parallel="true" status="pending"><action>p</action><write_files>a</write_files><verify>t</verify><done>d</done></task>\n');
       const res = runGuard(['exit', 'execute'], dir);
@@ -2446,6 +2475,7 @@ export const ENTRIES = [
       st.evidence.review = { summary: 'reviewed' }; // record 过但 exit 被拦截
       st.newChange = true;
       writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'review');
       // 前序产物(execute 产物门控需 *-SUMMARY.md)
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why（为什么做）\nx');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\nx\n\n## 验收准则（AC）\n- Given x When y Then z');

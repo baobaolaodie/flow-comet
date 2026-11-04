@@ -762,15 +762,22 @@ function checkLessonsEntryForm({ content, node, state }) {
 
 // ② 条目区外条目 + ③ 同段内编号递增：既有结构判据保持原作用面（verify / archive）——open 出口只
 // 新增 ① 的旧形态迁移判据，不顺手把这两条扩张到 open（判据作用面按 AC 逐个交代）。
+// 段界与标题识别都走 lib/section-body.mjs 的围栏感知扫描（scanHeadings）：段标题与条目标题一次
+// 扫描给出**行下标**，条目归属与「同段」比较都在同一套下标上做。旧实现各写一份——条目用字符
+// 偏移的正则 matchAll、段用任意 `^##` 行匹配——围栏示例里的 `## ` 会把一段切成两段（乱序因此
+// 被静默放过），围栏示例里的 `### L-NNN` 又会被当成真条目（误报）。
 function checkLessonsZoneAndOrder({ content, state }) {
+  const { headings: scanned } = scanHeadings(content);
+  const zonePatterns = LESSONS_ENTRY_ZONE_NAMES.map((name) => headingPattern(name, 2));
   // 条目区锚点（段名归一：条目区 / 活跃条目 / 已解决条目，容忍括号后缀）——取最早条目段
-  const zoneIndex = (() => {
-    const hits = LESSONS_ENTRY_ZONE_NAMES
-      .map((name) => content.search(headingPattern(name, 2)))
-      .filter((index) => index !== -1);
-    return hits.length ? Math.min(...hits) : -1;
-  })();
-  const headings = [...content.matchAll(/^###\s*L-(\d+)/gm)];
+  const zoneHeading = scanned.find((heading) => heading.level === 2
+    && zonePatterns.some((pattern) => pattern.test(heading.line)));
+  const zoneIndex = zoneHeading === undefined ? -1 : zoneHeading.index;
+  const entryHeadings = scanned
+    .filter((heading) => heading.level === 3)
+    .map((heading) => ({ index: heading.index, number: (heading.text.match(/^L-(\d+)/u) ?? [])[1] }))
+    .filter((entry) => entry.number !== undefined);
+  const headings = entryHeadings;
   if (zoneIndex !== -1) {
     const outside = headings.some(h => h.index < zoneIndex);
     if (outside) {
@@ -779,12 +786,13 @@ function checkLessonsZoneAndOrder({ content, state }) {
         process.exit(1);
       }
       // 诊断信息附带 zoneIndex/条目位置——偶发 WARN 排查时可直接定位（文件时序/编码差异兜底）
-      console.error('WARN: LESSONS.md 有条目在条目区外(zoneIndex=' + zoneIndex + ', 条目数=' + headings.length + ', 区外条目: ' + headings.filter(h => h.index < zoneIndex).map(h => 'L-' + h[1]).join(',') + ')');
+      console.error('WARN: LESSONS.md 有条目在条目区外(zoneIndex=' + zoneIndex + ', 条目数=' + headings.length + ', 区外条目: ' + headings.filter(h => h.index < zoneIndex).map(h => 'L-' + h.number).join(',') + ')');
     }
   }
-  const nums = headings.map(h => parseInt(h[1], 10));
-  // 分段检测：按 ## 标题分段，仅同段内比较编号递增（多段 LESSONS 如「活跃条目/已解决条目」编号体系可独立）
-  const sectionStarts = [...content.matchAll(/^##\s+.*$/gm)].map(m => m.index);
+  const nums = headings.map(h => parseInt(h.number, 10));
+  // 分段检测：按围栏外的 ## 标题分段，仅同段内比较编号递增（多段 LESSONS 如「活跃条目/已解决条目」
+  // 编号体系可独立）——围栏示例里的 `## ` 不开新段。
+  const sectionStarts = scanned.filter((heading) => heading.level === 2).map((heading) => heading.index);
   for (let i = 1; i < nums.length; i++) {
     const sameSection = !sectionStarts.some(s => s > headings[i - 1].index && s < headings[i].index);
     if (sameSection && nums[i] <= nums[i - 1]) {
@@ -1373,9 +1381,11 @@ async function missingDeclarationRecovery({ node, state, missingSkills }) {
 // change 不因收紧卡死）。判定从「任一命中即通过」改为「全部覆盖」：旧口径把节点该读的清单当成允许
 // 集合，声明一份就能过——另一份协议文件、另一个必需技能从来没有判据。
 // 诚实边界：标记是执行者的自我声明——校验只确认「声明覆盖了必需项」，无法证明执行者真的阅读了协议
-// （声明非物理证明，仅保证声明可追溯）。旧 change 兼容：.skill-loads/ 目录不存在（该 change 从未运行
-// 过 skill-load，声明机制未激活）→ 跳过校验；节点已 exit 不重验（校验只在当前 exit 时执行）；节点
-// 重新 exit（重入后再退）时按新规则要求，无豁免。
+// （声明非物理证明，仅保证声明可追溯）。**目录整体缺席按新/旧 change 分开**：新 change 缺席 = 一项
+// 都没声明（同一道判据的两半——「目录在但没覆盖」与「目录根本不在」不该有两种放行），逐项点名并
+// BLOCKED；只有旧 change 才走「机制未激活」的渐进告警（该 change 从未运行过 skill-load）。删目录因此
+// 不是关掉覆盖判据的写法。节点已 exit 不重验（校验只在当前 exit 时执行）；节点重新 exit（重入后再退）
+// 时按新规则要求，无豁免。
 export async function runSkillLoadMarkerGate({ node, state }) {
   if (!state.activeChange) return;
   const requiredFiles = NODE_PROTOCOL_FILES[node.id] ?? [];
@@ -1384,17 +1394,22 @@ export async function runSkillLoadMarkerGate({ node, state }) {
   if (requiredFiles.length === 0 && requiredSkills.length === 0) return;
   // 标记目录活动/归档双路径解析（archive 节点「先移目录后 exit」顺序下标记只在归档路径——单查
   // 活动路径会误报「机制未激活」静默放行）；两处皆无才走旧 change 兼容
-  const loadsDir = await findSkillLoadsDir(runRoot, state.activeChange);
-  if (!loadsDir) {
-    // 旧 change 兼容过渡规则：活动与归档路径均无声明标记目录（机制未激活）不追溯；首个 skill-load
-    // 写入后新规则生效（该 change 后续节点 exit 均需声明标记）
+  const foundDir = await findSkillLoadsDir(runRoot, state.activeChange);
+  // 目录缺席：新 change 按「一项都没声明」继续走下面那条判据（逐项点名 + BLOCKED）——把目录当成
+  // 空的声明面，而不是「机制未激活」的放行口。只有旧 change 才在这里收口（渐进告警、不追溯）。
+  if (!foundDir && !isNewChange(state)) {
     console.error('SKILL-LOAD WARN: 旧 change 兼容——.specs/' + state.activeChange +
       '/.skill-loads/（活动与归档路径）不存在，协议声明校验跳过（机制未激活；首个 skill-load 后新规则生效）');
     return;
   }
+  // 声明面 = 「找到的目录」或「缺席的空声明面」：一处归一，下面的读目录 / 报文显示 / 缺项判定都只
+  // 依赖这个形状（不再各自 `=== null` 判一遍，三处分支各自演进就是三份判据）。
+  const surface = foundDir ?? { dir: null, display: '.specs/' + state.activeChange + '/.skill-loads/' };
   const prefix = node.id + '-';
-  const names = (await fs.readdir(loadsDir.dir).catch(() => []))
-    .filter((f) => f.startsWith(prefix) && f.endsWith('.json'));
+  const names = surface.dir === null
+    ? []
+    : (await fs.readdir(surface.dir).catch(() => []))
+      .filter((f) => f.startsWith(prefix) && f.endsWith('.json'));
   const declaredFiles = new Set();
   const declaredSkills = new Set();
   const malformed = [];
@@ -1402,7 +1417,7 @@ export async function runSkillLoadMarkerGate({ node, state }) {
   for (const name of names) {
     let marker;
     try {
-      marker = JSON.parse(await fs.readFile(path.join(loadsDir.dir, name), 'utf8'));
+      marker = JSON.parse(await fs.readFile(path.join(surface.dir, name), 'utf8'));
     } catch {
       malformed.push(name);
       continue;
@@ -1432,8 +1447,10 @@ export async function runSkillLoadMarkerGate({ node, state }) {
   }
   const recovery = (await missingDeclarationRecovery({ node, state, missingSkills }))
     + (malformed.length > 0 ? '；不可解析标记: ' + malformed.join(', ') : '');
-  const lead = '节点 ' + node.id + ' exit 缺协议声明标记——' + loadsDir.display
-    + ' 下的声明未覆盖本节点全部必需项';
+  const lead = '节点 ' + node.id + ' exit 缺协议声明标记——' + surface.display
+    + (surface.dir === null
+      ? '（活动与归档路径）不存在，即一项声明都没有'
+      : ' 下的声明未覆盖本节点全部必需项');
   if (isNewChange(state)) {
     console.error('BLOCKED: ' + lead + '（新 change 强制全部覆盖）:');
     for (const line of details) console.error(line);

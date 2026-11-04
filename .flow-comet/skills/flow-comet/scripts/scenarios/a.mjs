@@ -34,6 +34,7 @@ import {
   summaryContent,
   timeUtilsModule,
   writeCustomProtocol,
+  writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import {
   assertStateBytesUnchanged,
@@ -1263,6 +1264,9 @@ export const ENTRIES = [
         handoffResult: handoffFor(['P01']),
       };
       writeState(dir, inFlight);
+      // 新 change 的声明标记：真实流程里协调者声明 / record 自动补写；夹具直接写 state，须补同一份事实
+      // （否则先撞声明覆盖门，被测的「在飞委托」判据根本轮不到说话）。
+      writeNodeDeclarationMarkers(dir, 'subagent-execute');
       const blocked = runGuard(['exit', 'subagent-execute'], dir);
       assertExit(blocked, 1);
       assertOut(blocked, '在飞委托');
@@ -1304,6 +1308,7 @@ export const ENTRIES = [
         handoffResult: handoffFor(['P01']),
       };
       writeState(dir, withdrawCase);
+      writeNodeDeclarationMarkers(dir, 'subagent-execute');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1 + TASK_P2);
       // 严格形态（newChange:true）下 done 任务须有对应 SUMMARY——补两份，使「撤回 ⇒ 出口放行」
       // 的断言落在**唯一**阻塞点（在飞委托）上，而不是被无关门禁干扰。
@@ -1570,6 +1575,16 @@ export const ENTRIES = [
       // 子断言:无区外条目时不得打印"条目在条目区外"WARN(误报修复——修复前
       // console.error 在 if(outside) 之外无条件执行,每次 exit 都刷一条空 WARN)
       assertNotOut(res, '条目在条目区外');
+      // 子断言（围栏分段）：两个乱序条目之间隔着**围栏示例里的** `## ` 标题——围栏里的标题不开
+      // 新段，两个条目因此仍在同一段，乱序必须照样判出。旧实现按任意 `^##` 行分段：示例行把
+      // 一段切成两段，「同段内递增」这条判据的同段条件不成立，乱序被静默放过（假绿）。
+      writeFile(dir, '.specs/LESSONS.md', '# LESSONS\n\n## 条目区\n\n### L-002: b\n\n'
+        + '```md\n## 写法样例（围栏内的标题不结束条目区）\n```\n\n### L-001: a\n');
+      const resFencedOrder = runGuard(['exit', 'verify'], dir);
+      assertExit(resFencedOrder, 0);
+      assertOut(resFencedOrder, 'WARN: LESSONS.md 条目编号乱序');
+      // 复位：后续子断言回到原夹具（两个乱序条目紧邻，判据与上面同形）
+      writeFile(dir, '.specs/LESSONS.md', '# LESSONS\n\n## 条目区\n\n### L-002: b\n### L-001: a\n');
       // 子断言:## 验证命令 段标题带括号后缀(与 ## 自检方法 段括号后缀兼容风格一致)不误 BLOCK
       writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令（必填 · exit verify 真实执行）\n\n```bash\nnode -e "1"\n```\n');
       const resBracket = runGuard(['exit', 'verify'], dir);
@@ -1738,6 +1753,8 @@ export const ENTRIES = [
         writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', acRequirement(acceptanceBody));
         writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', acTest(coveredIds));
         writeState(dir, acState(isNew));
+        // 新 change 夹具补齐 verify 节点的声明标记（真实流程里由协调者 / record 写；夹具直接写 state）
+        if (isNew) writeNodeDeclarationMarkers(dir, 'verify');
       };
       // 缺覆盖报文的首行（明细只在这一行，断言按它取编号清单——正文别处的编号不算点名）
       const acMissingLine = (res) => (res.output.match(/缺 AC 覆盖[^\n]*/u) ?? [''])[0];
@@ -1803,15 +1820,20 @@ export const ENTRIES = [
       assertTrue(warnCountOf(acNoIdsOld) === warnCountOf(acNoIdsOldFixed) + 1,
         '内容不可判的 WARN 未计入 WARN COUNT（未校验仍静默）: 无编号='
         + warnCountOf(acNoIdsOld) + ' 补编号后=' + warnCountOf(acNoIdsOldFixed));
-      // ⑤ TEST.md 缺席 → 同样显式「未校验」；该判据自身不判红（不出现缺覆盖报文），退出码由既有
-      // 判据决定（此处先撞「## 验证命令」门）——「未校验」不等于「通过」，也不冒充失败
+      // ⑤ TEST.md 缺席 → 与 REQUIREMENT 缺席同口径：**内容不可判**（载体文件被删，新 change
+      //    BLOCKED），不是「未校验」放行。链序同源：AC 覆盖判据排在「## 验证命令」门之前，
+      //    它一旦拦下，命令门就不会在本次出口说话——「没有清单」是更靠前的那一环。
       acWrite(acCriteria(['AC-1']), ['AC-1'], true);
       fs.rmSync(path.join(dir, '.specs', CHANGE_ID, 'TEST.md'), { force: true });
       const acNoTest = runGuard(['exit', 'verify'], dir);
       assertExit(acNoTest, 1);
-      assertOut(acNoTest, '未校验（TEST.md 缺席）');
+      assertOut(acNoTest, 'BLOCKED: AC 覆盖判据无法执行');
+      assertOut(acNoTest, '没有 TEST.md');
+      assertOut(acNoTest, '恢复: 补回 TEST.md');
+      assertNotOut(acNoTest, '未校验（TEST.md 缺席）');
       assertNotOut(acNoTest, '缺 AC 覆盖');
-      assertOut(acNoTest, 'BLOCKED: TEST.md 需声明 ## 验证命令 段');
+      // 命令门自身另有断言（系统测试集 H6 的缺段格）；此处钉的是链序：AC 判据在它之前发言。
+      assertNotOut(acNoTest, 'BLOCKED: TEST.md 需声明 ## 验证命令 段');
       // ⑥ 旧 change 同输入只 WARN（渐进不阻断，退出码不变）
       acWrite(acCriteria(['AC-1', 'AC-2']), ['AC-1'], false);
       const acOldChange = runGuard(['exit', 'verify'], dir);
@@ -1961,6 +1983,67 @@ export const ENTRIES = [
       // 复位模板段名，后续若再扩展本块仍按标准夹具
       writeFile(dir, 'flow-kit/templates/REQUIREMENT.md',
         '# REQUIREMENT 模板\n\n## 用户故事（User Story）\n## 验收准则（AC）\n## 非功能性需求\n');
+      // ⑬ **载体文件被删**不是「没有可判对象」：REQUIREMENT.md / TEST.md 是这个 change 自己的
+      //    载体，作者抬手就能删——把它读成「未校验、放行」正是「删文件换到关掉判据」的写法。
+      //    新 change 必须拦（内容不可判那一支），旧 change 只 WARN 且该行进既有 WARN COUNT。
+      //    载体缺席因此只剩模板缺席一支：模板不是这个 change 的文件，删不掉 change 里的东西来造它。
+      acWrite(acCriteria(['AC-1']), ['AC-1'], true);
+      fs.rmSync(path.join(dir, '.specs', CHANGE_ID, 'REQUIREMENT.md'), { force: true });
+      const acNoRequirement = runGuard(['exit', 'verify'], dir);
+      assertExit(acNoRequirement, 1);
+      assertOut(acNoRequirement, 'BLOCKED: AC 覆盖判据无法执行');
+      assertOut(acNoRequirement, '没有 REQUIREMENT.md');
+      assertOut(acNoRequirement, '恢复: 补回 REQUIREMENT.md');
+      assertNotOut(acNoRequirement, '未校验（REQUIREMENT 缺席）');
+      assertNotOut(acNoRequirement, '缺 AC 覆盖');
+      // ⑬b 旧 change 同形态：WARN 渐进 + 计数差分（补回文件后该 WARN 消失，WARN COUNT 恰少 1）
+      //   模板按登记表的段名书写：AC 判据只在文件在场时读模板，模板段名与登记表不一致会**额外**
+      //   产出一条 TEMPLATE-REGISTRY WARN（只在补回文件那一趟出现），差分因此被它抵消——那条 WARN
+      //   不是本格被测对象，夹具把它消掉，差值才只剩 AC 那一条。
+      writeFile(dir, 'flow-kit/templates/REQUIREMENT.md',
+        '# REQUIREMENT 模板\n\n## 用户故事（User Story）\n## 验收准则（AC）\n## 范围切分\n'
+        + '## 非功能性需求\n## 依赖与假设\n');
+      writeState(dir, acState(false));
+      const acNoRequirementOld = runGuard(['exit', 'verify'], dir);
+      assertExit(acNoRequirementOld, 0);
+      assertOut(acNoRequirementOld, 'WARN: AC 覆盖判据无法执行');
+      assertOut(acNoRequirementOld, '（旧 change 渐进不阻断）');
+      assertOut(acNoRequirementOld, 'ALL CHECKS PASSED');
+      acWrite(acCriteria(['AC-1']), ['AC-1'], false);
+      const acNoRequirementOldFixed = runGuard(['exit', 'verify'], dir);
+      assertExit(acNoRequirementOldFixed, 0);
+      assertTrue(warnCountOf(acNoRequirementOld) === warnCountOf(acNoRequirementOldFixed) + 1,
+        '载体文件被删的 WARN 未计入 WARN COUNT（删文件仍静默）: 缺文件=' + warnCountOf(acNoRequirementOld)
+        + ' 补文件后=' + warnCountOf(acNoRequirementOldFixed));
+      // ⑭ **围栏里的示例行不算覆盖**：1.1 矩阵段保留围栏内容（段界要跨围栏），但示例行只是书写
+      //    样例——把 AC-2 / AC-3 写在围栏示例里而真实矩阵只有 AC-1 时，判据必须仍点名缺
+      //    AC-2、AC-3（旧实现全段扫编号，示例行把它读成「覆盖了」= 假绿）。
+      acWrite(acCriteria(['AC-1', 'AC-2', 'AC-3']), ['AC-1'], true);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', acTest(['AC-1']).replace(
+        '| AC-1 | unit | guard-self-test.mjs | ✅ |',
+        '| AC-1 | unit | guard-self-test.mjs | ✅ |\n\n'
+        + '```md\n| AC-2 | unit | 示例行（书写样例，不是覆盖） | ✅ |\n'
+        + '| AC-3 | unit | 示例行（书写样例，不是覆盖） | ✅ |\n```',
+      ));
+      const acFencedExample = runGuard(['exit', 'verify'], dir);
+      assertExit(acFencedExample, 1);
+      assertTrue(acMissingLine(acFencedExample).includes('AC-2、AC-3'),
+        '围栏示例行不得算作覆盖（AC-2 / AC-3 只在示例块里），实际: ' + acMissingLine(acFencedExample));
+      assertOut(acFencedExample, '在 TEST.md 的 1.1 测试矩阵为这些 AC 补行');
+      // ⑭b 声明侧同口径：验收段里只在围栏示例中出现编号 ≠ 声明了准则——围栏里的是示例，
+      //    「有验收准则却没有任何编号」照旧属内容不可判（假绿的另一面）。
+      acWrite([
+        '```md',
+        '### AC-1 · 示例写法（不是本 change 的准则）',
+        '```',
+        '',
+        '- 本段只有书写样例，真实准则一条都没编号。',
+      ].join('\n'), ['AC-1'], true);
+      const acFencedDeclaration = runGuard(['exit', 'verify'], dir);
+      assertExit(acFencedDeclaration, 1);
+      assertOut(acFencedDeclaration, 'BLOCKED: AC 覆盖判据无法执行');
+      assertOut(acFencedDeclaration, '没有 AC-N 编号');
+      assertNotOut(acFencedDeclaration, '缺 AC 覆盖');
     },
   },
 

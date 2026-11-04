@@ -32,7 +32,7 @@
 
 **`BLOCKED: … 的模板声明与节点映射不一致`** —— `--templates` 清单与该节点的模板不一致。报文会点名漏写或多写/错名的项，并给出可直接照抄的重新声明命令：`open` 写 `CHANGE.md,REQUIREMENT.md`，`design` 写 `DESIGN.md`（前端 change 再加 `UI-DESIGN.md`），`plan` 写 `TASK.md`，`execute` / `subagent-execute` 写 `SUMMARY.md`，`review` 写 `REVIEW.md,TEST.md`；`verify` 与 `archive` 没有模板，省略该参数。没有初始化标记的 change（不是本引擎 `init` 新建的）只告警不拒绝。
 
-**`BLOCKED: … exit 缺协议声明标记`** —— 本节点已写下的标记没有覆盖它的全部必需项。报文会逐条列出读不到声明的协议文件、以及缺标记的必需技能（并给出该技能本该写出的标记文件），并为每个缺项给出可照抄的声明命令：一条命令带上该节点的**全部**协议文件与该节点的模板清单，例如 `open`：`workflow-state.mjs skill-load open flow-comet-change --prompt flow-kit/prompts/0-change.md --prompt flow-kit/prompts/1-requirement.md --templates CHANGE.md,REQUIREMENT.md`——一条命令可以带多个 `--prompt`，同名节点与技能重跑会覆写那份标记，而 `--templates` 清单正是 `skill-load` 接下来要核对的东西；然后重试出口。没有初始化标记的 change 只告警不拒绝；根本没有标记目录的 change 会打印 `SKILL-LOAD WARN` 说明该判据已跳过。
+**`BLOCKED: … exit 缺协议声明标记`** —— 本节点已写下的标记没有覆盖它的全部必需项。报文会逐条列出读不到声明的协议文件、以及缺标记的必需技能（并给出该技能本该写出的标记文件），并为每个缺项给出可照抄的声明命令：一条命令带上该节点的**全部**协议文件与该节点的模板清单，例如 `open`：`workflow-state.mjs skill-load open flow-comet-change --prompt flow-kit/prompts/0-change.md --prompt flow-kit/prompts/1-requirement.md --templates CHANGE.md,REQUIREMENT.md`——一条命令可以带多个 `--prompt`，同名节点与技能重跑会覆写那份标记，而 `--templates` 清单正是 `skill-load` 接下来要核对的东西；然后重试出口。没有初始化标记的 change 只告警不拒绝；新 change 若连标记目录都不存在，按「一项都没声明」拦下并逐项点名（与「目录在但没覆盖」同一报文形态），只有没有初始化标记的（旧）change 才打印 `SKILL-LOAD WARN` 说明该判据已跳过。
 
 **`record` 拒绝证据载荷并点名字段与类型** —— 载荷在写入前先校验形状：`summary` 必须是非空字符串，`completedChecks` 必须是字符串数组，`lessonsNomination` 必须是对象且其 `nominated` 是字符串数组、`reasonIfNone` 是字符串。报文的每一行形如 `字段路径: 必须是什么（当前是什么类型）`，例如 `completedChecks[0]: 必须是字符串（当前是 object）`；状态保持原样不被改写，把载荷改对即可重试。引号被 shell 吞掉时，把同一份 JSON 写进文件用 `--json-file <路径>` 传入；在 `cmd.exe` 里用双引号包住载荷，并转义载荷内原有的双引号。
 
@@ -56,7 +56,7 @@
 
 **`verify` 超时或命令非零退出** —— 出口会执行 `TEST.md` 的命令块。先自己跑那条命令看输出；确实需要更长时间的套件，可用文档化的 `FLOW_COMET_VERIFY_TIMEOUT_MS` 环境变量放宽预算。
 
-**`BLOCKED: TEST.md 的 1.1 测试矩阵缺 AC 覆盖`** —— 矩阵里没有报文所列准则的对应行。在 1.1 测试矩阵里每条准则补一行（`| AC-N | 类型 | 用例文件 / UAT | 状态 |`）后重试出口；review 出口会把同一份清单打成一行汇总且不阻断，那里只是预览，不是裁决。若报文说的是判据无法执行（`BLOCKED: AC 覆盖判据无法执行`），那是**文件都在场、缺的是承载段或段内清单**：验收准则段被删掉、准则没有 `AC-N` 编号、第 1 轮段缺席、或第 1 轮段里没有 1.1 矩阵（整段 `N/A` 就是这一形态）——按模板把段与矩阵补回来，删段不是跳过判据的写法。只有载体缺席才会报「未校验」、不改变退出码，而载体缺席只指三件事：缺 REQUIREMENT、缺 TEST.md、缺可派生段名的模板。没有初始化标记的 change 只告警。
+**`BLOCKED: TEST.md 的 1.1 测试矩阵缺 AC 覆盖`** —— 矩阵里没有报文所列准则的对应行。在 1.1 测试矩阵里每条准则补一行（`| AC-N | 类型 | 用例文件 / UAT | 状态 |`）后重试出口；review 出口会把同一份清单打成一行汇总且不阻断，那里只是预览，不是裁决。若报文说的是判据无法执行（`BLOCKED: AC 覆盖判据无法执行`），那是**承载段或段内清单读不出来**：验收准则段被删掉、准则没有 `AC-N` 编号、第 1 轮段缺席、或第 1 轮段里没有 1.1 矩阵（整段 `N/A` 就是这一形态）——按模板把段与矩阵补回来，删段不是跳过判据的写法。只有**模板缺席**（段名无从派生）才报「未校验」、不改退出码；**change 自己的 `REQUIREMENT.md` / `TEST.md` 缺席属内容不可判**——这两个文件是这个 change 自己的东西，删掉它换不到放行，与承载段被删掉同一侧：新 change 被拦下、旧 change 只告警。围栏代码块里的示例行不算覆盖（矩阵段跨过围栏读段界，示例仍是示例），验收段围栏里的编号也只是写法样例、不构成声明。没有初始化标记的 change 只告警。
 
 **`BLOCKED: missing Output Schema artifacts`** —— 归档出口要求归档目录与其遗留清单。把 change 目录移入 `.specs/archive/<日期>-<change-id>/`，并确保其内存在 `KNOWN-ISSUES.md`（无遗留也要显式写明）。
 

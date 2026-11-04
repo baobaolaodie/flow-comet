@@ -41,6 +41,7 @@ import {
   engineImportsSymbolFrom,
   engineScriptTexts,
   handoffFor,
+  writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import { scenarioProtocolPath } from '../lib/test-assertions.mjs';
 import { taskBlocks } from '../task-parsing.mjs';
@@ -428,17 +429,9 @@ function uiDesignDoc(opts = {}, omitKeys = []) {
 
 // 前端 change 的声明标记：节点自身协议标记（design → 2-design.md）与 ui-design 技能标记
 // （guarded 绑定要求真实声明）。两者缺一都会先被证据门 / 标记门拦下，掩盖被测的段形判据。
+// 走统一的声明标记夹具（协议派生，不手抄技能/协议清单）；前端 = 连条件绑定的 ui-design 一起声明。
 function writeFrontendDesignMarkers(dir) {
-  writeFile(dir, CHANGE_DIR + '/.skill-loads/design-flow-comet-design.json',
-    JSON.stringify({
-      node: 'design', skill: 'flow-comet-design', protocol: '2-design.md',
-      templates: ['DESIGN'], at: '2026-08-01T00:00:00.000Z',
-    }, null, 2) + '\n');
-  writeFile(dir, CHANGE_DIR + '/.skill-loads/design-flow-comet-ui-design.json',
-    JSON.stringify({
-      node: 'design', skill: 'flow-comet-ui-design', protocol: '2a-ui-design.md',
-      templates: ['UI-DESIGN'], at: '2026-08-01T00:00:00.000Z',
-    }, null, 2) + '\n');
+  writeNodeDeclarationMarkers(dir, 'design', { frontend: true });
 }
 
 // 每个 setup 先清空 change 目录与归档目录：同一夹具根里连续构造多组用例时，上一组残留的工件
@@ -458,6 +451,7 @@ function setupOpen(dir, changeOpts = {}, requirementOpts = {}) {
   const st = newChangeState('open');
   st.evidence.open = { summary: 'intake complete' };
   writeState(dir, st);
+  writeNodeDeclarationMarkers(dir, 'open');
 }
 
 function setupDesign(dir, { changeOpts = {}, designOpts = {}, uiDesign = undefined, declareUiDesign = false } = {}) {
@@ -476,6 +470,8 @@ function setupDesign(dir, { changeOpts = {}, designOpts = {}, uiDesign = undefin
     ? { summary: 'design done', completedChecks: ['required-skill:design.flow-comet-ui-design'] }
     : { summary: 'design done' };
   writeState(dir, st);
+  // 前端夹具（uiDesign 在场 = 前端）连条件绑定的 ui-design 一起声明；非前端不写它（本就不要求）。
+  writeNodeDeclarationMarkers(dir, 'design', { frontend: uiDesign !== undefined });
 }
 
 function setupPlan(dir, taskOpts = {}) {
@@ -485,6 +481,7 @@ function setupPlan(dir, taskOpts = {}) {
   const st = newChangeState('plan');
   st.evidence.plan = { summary: 'plan done' };
   writeState(dir, st);
+  writeNodeDeclarationMarkers(dir, 'plan');
 }
 
 function setupExecute(dir, summaryOpts = {}) {
@@ -497,6 +494,7 @@ function setupExecute(dir, summaryOpts = {}) {
   st.evidence.execute = { summary: 'executed' };
   st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
   writeState(dir, st);
+  writeNodeDeclarationMarkers(dir, 'execute');
 }
 
 function setupReview(dir, reviewOpts = {}) {
@@ -506,17 +504,33 @@ function setupReview(dir, reviewOpts = {}) {
   const st = newChangeState('review');
   st.evidence.review = { summary: 'review done' };
   writeState(dir, st);
+  writeNodeDeclarationMarkers(dir, 'review');
 }
+
+// verify 夹具自带的 AC 覆盖配对（准则清单 + 1.1 矩阵行）：verify 出口先跑 AC 覆盖判据，新 change 下
+// 缺 `REQUIREMENT.md` 或矩阵行会在被测的段形判据之前拦下——夹具因此给出可判的最小一对，
+// 覆盖之外的形态（缺段 / 缺子段 / 矩阵段改标题）由各用例自己改写。
+const AC_COVERAGE_REQUIREMENT_BODY = '- **AC-1**: Given 夹具前置 When 夹具动作 Then 夹具结果';
+const AC_COVERAGE_MATRIX_BODY = ['| AC | 类型 | 用例文件 / UAT | 状态 |', '|---|---|---|---|',
+  '| AC-1 | unit | baseline.js | ✅ |'].join('\n');
 
 function setupVerify(dir, testOpts = {}) {
   resetFixture(dir);
   writeTemplateFixture(dir, 'TEST');
+  writeTemplateFixture(dir, 'REQUIREMENT');
   writeBaseline(dir);
-  writeFile(dir, CHANGE_DIR + '/TEST.md', renderDoc('TEST', testOpts));
+  writeFile(dir, CHANGE_DIR + '/REQUIREMENT.md', renderDoc('REQUIREMENT', {
+    body: [['验收准则', AC_COVERAGE_REQUIREMENT_BODY]],
+  }));
+  writeFile(dir, CHANGE_DIR + '/TEST.md', renderDoc('TEST', {
+    ...testOpts,
+    body: [...(testOpts.body ?? []), ['1.1', AC_COVERAGE_MATRIX_BODY]],
+  }));
   writeFile(dir, CHANGE_DIR + '/UAT.md', '# UAT\n\n## 验收结果\n\n- 通过（夹具）。\n');
   const st = newChangeState('verify');
   st.evidence.verify = { summary: 'verified' };
   writeState(dir, st);
+  writeNodeDeclarationMarkers(dir, 'verify');
 }
 
 const LESSONS_FIXTURE = [
@@ -549,6 +563,9 @@ function setupArchive(dir, { evidence = {}, lessons = LESSONS_FIXTURE, summaryCo
   const st = newChangeState('archive');
   st.evidence.archive = { summary: 'archived', ...evidence };
   writeState(dir, st);
+  // 标记写在**活动** change 目录里（真实链路里它随归档动作一起搬家——模拟搬家的用例自己 rename
+  // CHANGE_DIR，标记因此天然跟随；找不到活动路径时 findSkillLoadsDir 才回溯归档路径）。
+  writeNodeDeclarationMarkers(dir, 'archive', { changeId: CHANGE_ID });
 }
 
 function runSideCommand(dir, scriptRel, args) {
@@ -827,10 +844,10 @@ function functionBodies(code) {
 }
 
 // A 形态（行扫描）：在段头判定处 break，再把原始行拼成段体。
-function isLineScanSlicer(text) {
-  return SECTION_HEADING_TEST_RE.test(text)
-    && SECTION_BREAK_RE.test(text)
-    && SECTION_BODY_ACCUMULATION_RE.test(text);
+function isLineScanSlicer(unit) {
+  return SECTION_HEADING_TEST_RE.test(unit.text)
+    && SECTION_BREAK_RE.test(unit.text)
+    && SECTION_BODY_ACCUMULATION_RE.test(unit.text);
 }
 
 // B 形态（正则切片）：段界写在一对正则里——截取式（`[\s\S]` 片段 + 前瞻 `(?=` + 前瞻里出现 `\n##`）
@@ -841,11 +858,11 @@ const SECTION_SLICE_FORWARD_LOOK_RE = /\(\?=/u;
 const SECTION_SLICE_HEADING_BOUNDARY_RE = /\\n#{1,6}/u;
 const SECTION_SLICE_SPLIT_RE = /\.split\(\s*\/[^/\n]*\\n#{1,6}/u;
 
-function isRegexSlicer(text) {
-  return text.split('\n').some((line) => SECTION_SLICE_EXCERPT_RE.test(line)
+function isRegexSlicer(unit) {
+  return unit.text.split('\n').some((line) => SECTION_SLICE_EXCERPT_RE.test(line)
       && SECTION_SLICE_FORWARD_LOOK_RE.test(line)
       && SECTION_SLICE_HEADING_BOUNDARY_RE.test(line))
-    || SECTION_SLICE_SPLIT_RE.test(text);
+    || SECTION_SLICE_SPLIT_RE.test(unit.text);
 }
 
 // C 形态（字符串字面量切分）：段界写成字符串字面量——`.split('\n## …')` / `.indexOf('## …')`。
@@ -856,8 +873,8 @@ const SECTION_SLICE_STRING_BOUNDARY_RES = [
   /\.indexOf\(\s*['"]#{1,6}[\s'"]/u,
 ];
 
-function isStringLiteralSlicer(text) {
-  return SECTION_SLICE_STRING_BOUNDARY_RES.some((boundary) => boundary.test(text));
+function isStringLiteralSlicer(unit) {
+  return SECTION_SLICE_STRING_BOUNDARY_RES.some((boundary) => boundary.test(unit.text));
 }
 
 // 对象字面量内联箭头（`passes: (t) => { … }`）：属性值的箭头体。顶层函数切分（functionBodies）只看
@@ -874,14 +891,46 @@ function objectLiteralArrowBodies(code) {
   return out;
 }
 
-// 形态面 = 两种位置 × 三种写法的全部命中：写法判定各是一份谓词，位置只决定在哪一堆具名单元上套用。
+// E 行数组切片：段首用 `findIndex(标题谓词)` 定位、段尾用 `slice(start, …)` 取到——「按标题行切出
+// 一段」的第三种写法。段界判定往往被提成辅助函数（`headingOf` / `sectionEnd` / 导入的 `hasSection9`），
+// 单元里只剩下 `findIndex` + `slice`，于是 A/B/C 三条写法一条也不命中：evolve 的沉淀段切片正是此形态，
+// 旧判据对它整份判绿。判据因此要求三件事同现——`findIndex(`、`slice(`，以及**可达的标题判定**
+// （单元内联的标题正则 / `startsWith('#')`，或单元调用的、同文件内定义的含标题判定的辅助函数）。
+// 边界（如实登记）：谓词若完全来自别的模块且不落在同文件辅助上（例如本文件既没有标题正则、也没有
+// 标题辅助），本形态就够不着——登记条目的「合并条件」正是写这种边界的唯一落点，行为断言另兜一层。
+const SECTION_SLICE_FINDINDEX_RE = /\.findIndex\(/u;
+const SECTION_SLICE_ARRAY_CUT_RE = /\.slice\(/u;
+
+// 同文件内「含标题判定的辅助函数」名：单元调用它们即视为段界判定可达（把判定提成辅助不等于换了
+// 一件事）。只取顶层声明——对象属性箭头里再套一层标题判定的写法由 D 位置面单独覆盖。
+function headingPredicateNames(code) {
+  return functionBodies(code)
+    .filter((unit) => SECTION_HEADING_TEST_RE.test(unit.text))
+    .map((unit) => unit.name);
+}
+
+function mentionsHeadingBoundary(unit, helperNames) {
+  if (SECTION_HEADING_TEST_RE.test(unit.text)) return true;
+  return helperNames.some((name) => name !== unit.name
+    && new RegExp('\\b' + name + '\\b', 'u').test(unit.text));
+}
+
+function isLineArraySlicer(unit, helperNames) {
+  return SECTION_SLICE_FINDINDEX_RE.test(unit.text)
+    && SECTION_SLICE_ARRAY_CUT_RE.test(unit.text)
+    && mentionsHeadingBoundary(unit, helperNames);
+}
+
+// 形态面 = 两种位置 × 四种写法的全部命中：写法判定各是一份谓词，位置只决定在哪一堆具名单元上套用。
 // 位置面的盲区（D：对象字面量内联箭头）因此不与写法面各写一套——旧的锁只看顶层函数，把同一件事写进
-// 对象属性就整份躲开了。
-const SECTION_SLICE_FORM_PREDICATES = [isLineScanSlicer, isRegexSlicer, isStringLiteralSlicer];
+// 对象属性就整份躲开了。谓词签名（unit, helperNames）统一：E 形态要看「调用的辅助是不是标题判定」，
+// A/B/C 忽略第二个参数（它们只看单元文本）。
+const SECTION_SLICE_FORM_PREDICATES = [isLineScanSlicer, isRegexSlicer, isStringLiteralSlicer, isLineArraySlicer];
 
 function sectionSliceHits(code) {
+  const helperNames = headingPredicateNames(code);
   const hitsIn = (units) => units
-    .filter((unit) => SECTION_SLICE_FORM_PREDICATES.some((matches) => matches(unit.text)))
+    .filter((unit) => SECTION_SLICE_FORM_PREDICATES.some((matches) => matches(unit, helperNames)))
     .map((unit) => unit.name);
   return [...new Set([...hitsIn(functionBodies(code)), ...hitsIn(objectLiteralArrowBodies(code))])];
 }
@@ -889,11 +938,13 @@ function sectionSliceHits(code) {
 // 单源的导出符号集：只有它们受「导出实现恰一处 / 不得自带第二份定义 / 必须具名取用」约束。
 const SECTION_SOURCE_SYMBOLS = ['sectionBody', 'scanHeadings'];
 
-// 段体单源锁的**登记表**：把面内仍存在的同类实现逐条登记（文件 + 符号 + 理由三件齐备）。登记是
-// 让缺口可见，不是放行：
+// 段体单源锁的**登记表**：把面内仍存在的同类实现逐条登记（文件 + 符号 + 理由 + **合并条件**四件齐备）。
+// 登记是让缺口可见，不是放行：
 //   · 只覆盖 ③ 形态命中这一条判据；② 的单源符号第二份定义 / 未取用**不接受豁免**——否则登记一个
 //     sectionBody 副本就能让真实副本静默通过（旧锁把 `continue` 放在符号判定之前，正是如此）；
 //   · 条目必须**当场命中**（该文件该函数此刻仍在形态面上）：修好或改名后未删 ⇒ 陈旧，判红。
+//   · **合并条件必填**：一条登记要回答「什么条件下就该删掉它、改用单源」——只写理由的登记是永久
+//     豁免（缺口从此不可收口），而锁本身判不了「这个缺口还会不会收」，只能要求它写下来并被看见。
 // 受检面 = 引擎实现面（与 `engineScriptTexts` 同一派生口径：顶层入口 ∪ 静态可达模块 ∪ 非套件自持的
 // `lib/**`）。套件自持面（`scenarios/**`、`items/**`、只被套件入口可达的 lib 模块）是夹具与其自身
 // 判据，不在引擎面上——把它们算进来会让锁去登记自己用的行扫描辅助（形态探针本身），判据反而失真。
@@ -906,11 +957,22 @@ const SECTION_SLICE_REGISTRY = [
     // 表格整段丢掉），而这个层级还要随读数回传给「复现命令」（命令里的段级必须取自同一处，否则
     // `## 技术债` 的项目照抄命令就复现不出本报告的读数）。单源的 sectionBody 两项能力都给不了：
     // 它只接受一个固定的结束级别，且只返回段体正文、不返回命中的标题。
-    // **合并条件**：section-body.mjs 增加「段体 + 命中标题（含层级）」的返回形态后，health.mjs 改用它，
-    // 本条登记即可删除——届时锁会以「登记已陈旧」提醒（陈旧登记判红，不是静默留着）。
     reason: '能力差异：段界要与段标题自身的层级比较，且该层级需回传给「复现命令」——'
-      + 'sectionBody 只接受固定结束级别、只返回段体正文，两项都给不了；'
-      + '合并条件 = section-body 增加「段体 + 命中标题层级」的返回形态后改用单源并删除本条。',
+      + 'sectionBody 只接受固定结束级别、只返回段体正文，两项都给不了。',
+    mergeCondition: 'section-body.mjs 增加「段体 + 命中标题（含层级）」的返回形态后，health.mjs 改用它'
+      + '并把段级从同一次命中取回；届时删除本条（陈旧登记判红会提醒）。',
+  },
+  {
+    file: 'evolve.mjs',
+    symbol: 'locateSedimentSection',
+    // 能力差异：evolve 要的是**行区间**而不是段体正文——沉淀段的候选解析在行数组上做（表格行 / 列表
+    // 项 / 围栏块整块），插入点也要落回同一个行数组；段首行（含标题）与「同级或更高级标题」的边界
+    // 都由它自己算，层级取自该段标题自身。sectionBody 只给段体字符串、只接受固定结束级别；
+    // scanHeadings 给得出围栏外的标题下标，但区间的「按标题层级收尾」仍要消费方自己推。
+    reason: '能力差异：消费方要行区间（段首行 + 段尾行）而不是段体正文字符串，段界按段标题自身层级收。',
+    mergeCondition: 'section-body.mjs 增加「段体区间（标题行下标 + 段尾下标，按命中标题层级）」的返回形态'
+      + '后，evolve 的 locateSedimentSection / findSection 改用它取区间并删除本条；本条是该文件在写面外'
+      + '期间的登记，不是收口结论。',
   },
 ];
 
@@ -981,6 +1043,10 @@ function sectionSingleSourceProblems({ texts: given, registry = SECTION_SLICE_RE
     }
     if (String(entry.reason ?? '').trim() === '') {
       problems.push(hit.rel + ' 的 ' + hit.symbol + ' 登记缺理由（登记是让缺口可见，不是静默放行）');
+    }
+    if (String(entry.mergeCondition ?? '').trim() === '') {
+      problems.push(hit.rel + ' 的 ' + hit.symbol + ' 登记缺合并条件（登记要写出「什么条件下收口」，'
+        + '否则这条豁免永远没有到期日）');
     }
   }
   for (const entry of registry) {
@@ -2714,6 +2780,7 @@ export const ENTRIES = [
       const st = newChangeState('open');
       st.evidence.open = { summary: 'intake complete' };
       writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'open');
       const degraded = exitNode(dir, 'open');
       assertExit(degraded, 0);
       assertOut(degraded, '未校验');
@@ -2809,6 +2876,7 @@ export const ENTRIES = [
       // 负例：把「做了什么」挪到「越界检查」之后 → 偏离兜底段序 → BLOCKED（模板缺席也判）
       writeFile(dir, CHANGE_DIR + '/T01-SUMMARY.md', renderDoc('SUMMARY', { swap: [['做了什么', '越界检查']] }));
       writeState(dir, executeState());
+      writeNodeDeclarationMarkers(dir, 'execute');
       const outOfOrder = exitNode(dir, 'execute');
       assertExit(outOfOrder, 1);
       assertOut(outOfOrder, '未校验');
@@ -2816,6 +2884,7 @@ export const ENTRIES = [
       // 正例：段序按清单 → 通过
       writeFile(dir, CHANGE_DIR + '/T01-SUMMARY.md', renderDoc('SUMMARY'));
       writeState(dir, executeState());
+      writeNodeDeclarationMarkers(dir, 'execute');
       const ordered = exitNode(dir, 'execute');
       assertExit(ordered, 0);
       assertOut(ordered, 'ALL CHECKS PASSED');
@@ -2834,6 +2903,7 @@ export const ENTRIES = [
         return next;
       };
       writeState(dir, openState());
+      writeNodeDeclarationMarkers(dir, 'open');
       const noFallback = exitNode(dir, 'open');
       assertExit(noFallback, 0);
       assertNotOut(noFallback, '缺必填段');
@@ -2848,6 +2918,7 @@ export const ENTRIES = [
       writeFile(dir, CHANGE_DIR + '/CHANGE.md', renderDoc('CHANGE', { omit: ['Why'] }));
       writeFile(dir, CHANGE_DIR + '/REQUIREMENT.md', renderDoc('REQUIREMENT'));
       writeState(dir, openState());
+      writeNodeDeclarationMarkers(dir, 'open');
       const fallbackStill = exitNode(dir, 'open');
       assertExit(fallbackStill, 1);
       assertOut(fallbackStill, '缺必填段');
@@ -2867,13 +2938,34 @@ export const ENTRIES = [
       assertTrue(fallbackPick instanceof RegExp && fallbackPick.test('## Why（为什么做）'),
         '模板在场但缺该段名时 pick 仍回落 fallback 正则（C9 后半句），实际: ' + String(fallbackPick));
 
+      // ⑥b 轮廓解析跨围栏（段体单源化的**行为面**）：把某段的标题只写在**围栏示例**里、真段删掉
+      //     ——围栏里的标题不开段，缺段必须照样判出。旧 parseOutline 按行扫 `^##`（围栏盲）：
+      //     示例里的标题被读成真实段，缺段被静默放过（假绿）。它是段序 / 空正文 / 增量段位置的
+      //     共同输入，同一份盲区在那三处也会各自变成假绿——所以这里钉的是轮廓解析本身。
+      resetFixture(dir);
+      writeTemplateFixture(dir, 'CHANGE');
+      // 段名取模板里**最后一个**必需段：把它的标题只写进围栏示例（放在它前面那段里）——示例行
+      // 被读成真实段时它落在自己的模板位置上，段序判据不出声，缺段就此静默放过（正是假绿形态）。
+      writeFile(dir, CHANGE_DIR + '/CHANGE.md', renderDoc('CHANGE', {
+        omit: ['风险与未知'],
+        body: [['验收线', ['验收线（夹具）。', '',
+          '```markdown', '## 风险与未知', '示例：围栏内的段标题', '```', ''].join('\n')]],
+      }));
+      writeFile(dir, CHANGE_DIR + '/REQUIREMENT.md', renderDoc('REQUIREMENT'));
+      writeState(dir, openState());
+      writeNodeDeclarationMarkers(dir, 'open');
+      const fencedOutline = exitNode(dir, 'open');
+      assertExit(fencedOutline, 1);
+      assertOut(fencedOutline, '缺段');
+      assertNotOut(fencedOutline, 'BLOCKED: CHANGE.md 模板结构校验失败: 段序');
+
       // ⑤ 段体切片单源锁：受检面 = **引擎实现面**（`engineScriptTexts`：顶层入口 ∪ 静态可达模块 ∪
       //    非套件自持的 `lib/**`）——不再是「提到 sectionBody 的取用面」：把一份私有实现搬进面内一个
       //    不引用该符号的模块（健康巡检、任一 guard 模块）就躲不开了。三条判据：① 单源模块由导出面派生
       //    （不写文件名），{sectionBody, scanHeadings}
       //    都定义在那里；② 取用面：提到单源符号的模块必须具名取用、不得自带第二份定义；③ 形态面：
-      //    面内任一函数的任一形态（行扫描 / 正则切片）若在切段体，只许是单源本身，否则必须登记
-      //    （SECTION_SLICE_REGISTRY：文件 + 符号 + 理由；陈旧登记判红）。
+      //    面内任一函数的任一形态（行扫描 / 正则切片 / 字符串字面量 / 行数组切片）若在切段体，只许是
+      //    单源本身，否则必须登记（SECTION_SLICE_REGISTRY：文件 + 符号 + 理由 + 合并条件；陈旧登记判红）。
       //    反向构造：合成切片放进「不引用单源符号」的模块（证明受检面比取用面宽）/ 改 import 来源 /
       //    第二份定义 / 本任务收口的三处各自改回私有实现 / 登记放行真实副本 / 陈旧登记 / 缺理由登记
       //    ——逐条证明判别力，还原 ⇒ 复绿。
@@ -2985,8 +3077,10 @@ export const ENTRIES = [
             }
           }
         }
-        // 登记机制本身的三格：陈旧登记判红 / 缺理由判红 / **登记不能放行真实副本**（给 context-init
-        // 的私有 sectionBody 配一条登记，判据仍须报「自带第二份定义」——登记只覆盖形态命中）。
+        // 登记机制本身的五格：陈旧登记判红 / 缺理由判红 / 缺合并条件判红（登记要写到期的条件，
+        // 不是永久豁免）/ **登记不能放行真实副本**（给 context-init 的私有 sectionBody 配一条登记，
+        // 判据仍须报「自带第二份定义」——登记只覆盖形态命中）/ 登记条目必须**当场命中**（删掉
+        // evolve.mjs 的那条 ⇒ 判据点名它的 locateSedimentSection，证明 E 形态真的落在形态面上）。
         const staleRegistry = [...SECTION_SLICE_REGISTRY, {
           file: 'lib/guard-uidesign.mjs', symbol: 'visualToneSectionState', reason: '（探针）已收口处仍登记',
         }];
@@ -3000,6 +3094,29 @@ export const ENTRIES = [
         });
         if (!noReasonProblems.some((problem) => problem.includes('登记缺理由'))) {
           probeIssues.push('缺理由登记未被判红: ' + JSON.stringify(noReasonProblems));
+        }
+        const noMergeProblems = sectionSingleSourceProblems({
+          texts,
+          registry: [{ ...SECTION_SLICE_REGISTRY[0], mergeCondition: '  ' }],
+        });
+        if (!noMergeProblems.some((problem) => problem.includes('登记缺合并条件'))) {
+          probeIssues.push('缺合并条件的登记未被判红（永久豁免没到期日）: ' + JSON.stringify(noMergeProblems));
+        }
+        // 登记条目必须当场命中：evolve.mjs 的 E 形态（findIndex + slice + 可达标题判定）是这一条
+        // 的判别锚——删掉登记 ⇒ 判据必须点名它，否则那条登记是装饰、E 形态整份在锁外。
+        const evolveEntry = SECTION_SLICE_REGISTRY.find((entry) => entry.file === 'evolve.mjs');
+        if (evolveEntry === undefined) {
+          probeIssues.push('登记表缺 evolve.mjs 的段体切片登记（E 形态没有登记条目）');
+        } else {
+          const unregistered = sectionSingleSourceProblems({
+            texts,
+            registry: SECTION_SLICE_REGISTRY.filter((entry) => entry !== evolveEntry),
+          });
+          if (!unregistered.some((problem) => problem.includes('evolve.mjs')
+            && problem.includes(evolveEntry.symbol))) {
+            probeIssues.push('E 形态未被形态面看见：删掉 evolve.mjs 的登记后判据仍不点名 '
+              + evolveEntry.symbol + '（' + JSON.stringify(unregistered) + '）');
+          }
         }
         const lenientProblems = sectionSingleSourceProblems({
           texts: new Map(texts).set('context-init.mjs', revertedTexts.get('context-init.mjs') ?? ''),
@@ -3247,6 +3364,7 @@ export const ENTRIES = [
         return next;
       };
       writeState(dir, openState());
+      writeNodeDeclarationMarkers(dir, 'open');
       const warned = exitNode(dir, 'open');
       assertExit(warned, 0);
       assertOut(warned, 'TEMPLATE-REGISTRY WARN');

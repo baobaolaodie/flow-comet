@@ -22,6 +22,7 @@ import {
   routeNodeModule,
   strictSummary,
   writeIntakeArtifacts,
+  writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import {
   FIX_RETURN_FAMILY_COMPLETED,
@@ -87,6 +88,7 @@ export const ENTRIES = [
           at: '2026-09-23T00:00:00.000Z', taskSetSignature: normalSignature,
         }],
       }));
+      writeNodeDeclarationMarkers(dir, 'execute');
       const beforeNormal = readScenarioState(dir);
       const resNormal = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(resNormal, 0);
@@ -199,6 +201,7 @@ export const ENTRIES = [
         directOverride: false,
         newChange: true,
       });
+      writeNodeDeclarationMarkers(dir, 'execute');
       const res = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(res, 0);
       assertOut(res, 'FIX-BATCH: 回源节点 verify（execute 出口已完成）');
@@ -244,6 +247,9 @@ export const ENTRIES = [
       // ① 新 change：review 源直接 exit review --apply → BLOCKED + 恢复指引（不得静默放行）
       writeFile(dir, taskPath, fixBatchTaskText('pending'));
       writeState(dir, reviewState);
+      // 本场景先后 exit review 与 execute 两个节点：两个节点的必需声明各写一份（真实流程同形）。
+      writeNodeDeclarationMarkers(dir, 'review');
+      writeNodeDeclarationMarkers(dir, 'execute');
       const resBlock = runGuard(['exit', 'review', '--apply'], dir);
       assertExit(resBlock, 1);
       assertOut(resBlock, 'BLOCKED: 存在未归位/未跑出口的 Fix 批次');

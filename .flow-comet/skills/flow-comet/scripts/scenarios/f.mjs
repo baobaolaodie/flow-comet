@@ -1289,54 +1289,86 @@ export const ENTRIES = [
         const wordingCase = (rel, text, required, stale) => ({ rel, text, required, stale });
         const wordingCases = [
           wordingCase('flow-comet-review/SKILL.md（中文侧）', reviewBook, [
-            '**载体缺席**（`REQUIREMENT.md` 缺席 / `TEST.md` 缺席 / 模板缺席）',
+            '**模板缺席**（段名无从派生）→ 打印「未校验（<原因>）」且不改退出码',
+            '**change 自己的载体文件本身缺席**（`REQUIREMENT.md` 缺席 / `TEST.md` 缺席）',
             '验收准则段被删掉',
+            '围栏代码块里的示例行也不算覆盖',
           ], ['**载体缺席**（`REQUIREMENT.md` 缺席 / 无验收准则段 / `TEST.md` 缺席 / 无第 1 轮承载段 / 模板缺席）']),
           wordingCase('flow-comet-review/SKILL.md（英文侧）', reviewBook, [
-            'a missing carrier — `REQUIREMENT.md` absent, `TEST.md` absent, or the template absent',
+            'a missing template — the section names cannot be derived — prints "not checked (<reason>)" and keeps the exit code',
+            'a carrier document of the change itself being gone — `REQUIREMENT.md` absent or `TEST.md` absent',
             'the acceptance section deleted from `REQUIREMENT.md`',
-          ], ['`REQUIREMENT.md` or `TEST.md` absent, no acceptance section, no round-1 section, template absent']),
+            'a sample row inside a fenced code block counts as neither coverage nor a declared criterion',
+          ], ['a missing carrier — `REQUIREMENT.md` absent, `TEST.md` absent, or the template absent']),
           wordingCase('CHANGELOG.md', publicFaces.get('CHANGELOG.md'), [
-            'no requirement document, no test document, no template',
+            '**only the template missing** (the section names cannot be derived) is reported as not checked with the exit code untouched',
+            '**a carrier document of the change itself missing (`REQUIREMENT.md` / `TEST.md`)**',
             'a deleted acceptance section',
-          ], ['no acceptance section, no round-1 section']),
+            '**A sample row inside a fenced code block counts as neither coverage nor a declaration**',
+          ], ['no acceptance section, no round-1 section', 'no requirement document, no test document, no template']),
           wordingCase('CHANGELOG-zh.md', publicFaces.get('CHANGELOG-zh.md'), [
-            '载体缺席只指三件事——缺 REQUIREMENT、缺 TEST.md、缺模板',
+            '**模板缺席**（段名无从派生）才明说未校验、不改退出码',
+            '**change 自己的 `REQUIREMENT.md` / `TEST.md` 缺席**',
             '验收段被删掉',
-          ], ['缺 REQUIREMENT、缺 TEST.md、缺模板、没有验收段、没有承载矩阵的第 1 轮段']),
+            '围栏代码块里的示例行既不算覆盖也不构成声明',
+          ], ['载体缺席只指三件事——缺 REQUIREMENT、缺 TEST.md、缺模板', '缺 REQUIREMENT、缺 TEST.md、缺模板、没有验收段、没有承载矩阵的第 1 轮段']),
           wordingCase('docs/MECHANISM.md', publicFaces.get('docs/MECHANISM.md'), [
             'does not block on that ground',
             'also runs when a plan is re-signed through a controlled `replan`',
-          ], ['is reported as not checked and keeps its exit code']),
+            '**Only the template missing** — the section names cannot be derived — is reported as not checked and leaves the exit code alone',
+            '**A carrier document of the change itself missing (`REQUIREMENT.md` / `TEST.md`) is content the check cannot judge**',
+            '**A sample row inside a fenced code block is not coverage**',
+          ], ['is reported as not checked and keeps its exit code',
+            'A missing carrier — no requirement document, no test document, no template to derive the section names from']),
           wordingCase('docs/MECHANISM-zh.md', publicFaces.get('docs/MECHANISM-zh.md'), [
             '它报「未校验」、也不据此阻断',
             '这道门在 plan 出口与受控 `replan` 重签时都会跑',
-          ], ['而完全没有波次段时，报「未校验」且不改变退出码']),
+            '**模板缺席**（段名无从派生）才报「未校验」、不改退出码',
+            '**change 自己的 `REQUIREMENT.md` / `TEST.md` 缺席属内容不可判**',
+            '围栏代码块里的示例行不算覆盖',
+          ], ['而完全没有波次段时，报「未校验」且不改变退出码',
+            '载体缺席——没有需求文档、没有测试文档、没有可派生段名的模板']),
           wordingCase('docs/TROUBLESHOOTING.md', publicFaces.get('docs/TROUBLESHOOTING.md'), [
             'the TASK section-shape gate judges its absence',
             'again when the plan is re-signed through `replan`',
-          ], ['and keeps its exit code']),
+            'Only the **template missing** (the section names cannot be derived) is reported as not checked and leaves the exit code alone',
+            '**a carrier document of the change itself missing (`REQUIREMENT.md` / `TEST.md`) is content the check cannot judge**',
+            '**A sample row inside a fenced code block is not coverage**',
+          ], ['and keeps its exit code',
+            'a carrier is missing only when the requirement document, the test document or the template the section names are derived from is not there at all']),
           wordingCase('docs/TROUBLESHOOTING-zh.md', publicFaces.get('docs/TROUBLESHOOTING-zh.md'), [
             '缺段仍由 TASK 段形门判定',
             '这道门在 plan 出口与 `replan` 重签时都会跑',
-          ], ['完全没有波次段时打印「未校验（无波次段）」、不改变退出码']),
+            '只有**模板缺席**（段名无从派生）才报「未校验」、不改退出码',
+            '**change 自己的 `REQUIREMENT.md` / `TEST.md` 缺席属内容不可判**',
+            '围栏代码块里的示例行不算覆盖',
+          ], ['完全没有波次段时打印「未校验（无波次段）」、不改变退出码',
+            '而载体缺席只指三件事：缺 REQUIREMENT、缺 TEST.md、缺可派生段名的模板']),
         ].filter((item) => item.text !== null);
         problems.push(...docWordingChecks(wordingCases));
-        // 实现侧同源核对：成因集合由 ac-coverage 的两张成因表表达——载体缺席三条，其中两条
-        // 「承载段被删」的成因落在内容不可判一侧。取不到表即报告前提失效（不静默当「没变化」）。
+        // 实现侧同源核对：成因集合由 ac-coverage 的两张成因表表达——**未校验一侧只剩模板缺席**
+        // （模板不是 change 的文件），**内容不可判一侧含 change 自己的两个载体文件缺席**与两条
+        // 「承载段被删」的成因。三件事任一漂移（成因搬家 / 改判 / 少一条），本节先红，逼着六处
+        // 文档口径与锚同批跟上。取不到表即报告前提失效（不静默当「没变化」）。
         const acCoverageText = engineScriptTexts().get('lib/ac-coverage.mjs') ?? '';
         const carrierCauses = literalObjectKeys(acCoverageText, 'UNVERIFIED_EXPLANATIONS');
         const contentCauses = literalObjectKeys(acCoverageText, 'UNJUDGEABLE_CAUSES');
         if (carrierCauses === null || contentCauses === null) {
-          problems.push('实现侧成因表取不到（ac-coverage 的载体缺席 / 内容不可判成因表）——文档的三分口径无从对账');
+          problems.push('实现侧成因表取不到（ac-coverage 的载体缺席 / 内容不可判成因表）——文档的两分口径无从对账');
         } else {
-          if (carrierCauses.length !== 3) {
-            problems.push('载体缺席的成因不再是三条（实现 ' + carrierCauses.length + ' 条: '
-              + carrierCauses.join('、') + '）——文档「载体缺席只剩三件事」的口径要同批改');
+          if (carrierCauses.length !== 1 || carrierCauses[0] !== '模板缺席（段名无从派生）') {
+            problems.push('「未校验」一侧不再只剩模板缺席（实现 ' + carrierCauses.length + ' 条: '
+              + carrierCauses.join('、') + '）——文档「只有模板缺席报未校验」的口径要同批改');
           }
-          const deletedCarrierCauses = contentCauses.filter((cause) => cause.includes('无验收准则段')
+          const documentCauses = contentCauses.filter((cause) => cause === 'REQUIREMENT 缺席'
+            || cause === 'TEST.md 缺席');
+          if (documentCauses.length !== 2) {
+            problems.push('change 自己的载体文件缺席没有落在「内容不可判」一侧（实现: '
+              + contentCauses.join('、') + '）——删文件换到「未校验」放行的口子必须继续关着');
+          }
+          const deletedSectionCauses = contentCauses.filter((cause) => cause.includes('无验收准则段')
             || cause.includes('无第 1 轮段'));
-          if (deletedCarrierCauses.length !== 2) {
+          if (deletedSectionCauses.length !== 2) {
             problems.push('承载段被删的成因不再落在「内容不可判」一侧（实现: ' + contentCauses.join('、')
               + '）——文档把它写成载体缺席或另立一支都要重判');
           }

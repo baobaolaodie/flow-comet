@@ -417,12 +417,12 @@ export async function runExecuteExitGate({ protocol, node, state, emptyExitAppro
 // AC 覆盖出口校验（verify 出口 BLOCKED / review 出口只汇总 WARN）——判据（纯判定）在
 // lib/ac-coverage.mjs，本处只负责分级与打印：同一份判定两处消费，分支纪律因此只有一处表达。
 //   · 判不了的两支按成因分开（与波次判据同口径，见 ac-coverage 文件头）：
-//     ① **载体缺席**（REQUIREMENT.md / TEST.md 不在、模板无从派生——只有文件 / 模板根本不在）→
-//        verify 出口打印「未校验（…）」且**不改变退出码**（判据没有可判对象；未验证既不冒充通过
-//        也不冒充失败）；
-//     ② **工件内容不可判**（承载段被删掉：REQUIREMENT 定位不到验收准则段 / TEST.md 定位不到第 1 轮段；
-//        或有验收准则却没 AC 编号 / 第 1 轮整段 N/A 而没有 1.1 矩阵）→ 不是「判过且通过」：新 change
-//        BLOCKED / 旧 change WARN（WARN 行因此进入既有 WARN COUNT）——删掉承载段不再能换到放行。
+//     ① **模板缺席**（段名无从派生）→ verify 出口打印「未校验（…）」且**不改变退出码**（判据没有
+//        可判对象；未验证既不冒充通过也不冒充失败）。这是本出口唯一还会放行的「判不了」；
+//     ② **工件内容不可判**——**change 自己的载体文件被删**（REQUIREMENT.md / TEST.md 不在）与承载段 /
+//        清单读不出（REQUIREMENT 定位不到验收准则段 / TEST.md 定位不到第 1 轮段 / 没有 AC 编号 /
+//        第 1 轮整段 N/A 而没有 1.1 矩阵）同属这一支 → 不是「判过且通过」：新 change BLOCKED / 旧
+//        change WARN（WARN 行因此进入既有 WARN COUNT）——删文件、删段都不能换到放行。
 //   · 真判过且缺覆盖：verify 出口新 change BLOCKED（点名缺失编号 + 「在 1.1 矩阵补行」的恢复指引）/
 //     旧 change WARN 渐进。
 //   · review 出口：一条汇总 WARN（列缺失编号），不阻断、不影响退出码——review 出口今天不要求
