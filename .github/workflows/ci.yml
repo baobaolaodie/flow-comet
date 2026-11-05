@@ -736,6 +736,11 @@ jobs:
         run: |
           [ -f scripts/dsh-bridge.mjs ] || { echo "dsh 桥接器缺失 / scripts/dsh-bridge.mjs missing"; exit 1; }
           node --check scripts/dsh-bridge.mjs || { echo "dsh 桥接器语法错误 / scripts/dsh-bridge.mjs has syntax errors"; exit 1; }
+          # 发布面第十处取值：桥接 loader 的标记行与导出常量都必须等于安装版本标识
+          # （docs/VERSIONS.md 声明「十处由 CI 在发布面保持一致」——本步让该声明在发布面上可核）。
+          # 取值由 scripts/check-bridge-version.mjs 负责：它先剥块注释再取值，既不让注释掉的
+          # 同名行走绿，也不把双引号等合法写法判成缺失。
+          node scripts/check-bridge-version.mjs
       - name: 'CHANGELOG 每版本段 PR 链接 / CHANGELOG per-version PR links'
         run: |
           for f in CHANGELOG.md CHANGELOG-zh.md; do
