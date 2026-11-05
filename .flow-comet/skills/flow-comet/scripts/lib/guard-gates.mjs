@@ -35,6 +35,16 @@ import {
   headingPattern,
 } from './guard-artifact-skeleton.mjs';
 import { frontendCriterion } from './guard-uidesign.mjs';
+// 波次段解析与「波次 = 依赖层级的投影」判定（纯判定模块）：plan 出口与 replan 重校段共用同一
+// 判定、同一分级出口（waveReviewOutcome / parallelGapOutcome）——波次散文检测与波次投影判据取用
+// 同一个 waveSectionBody（段体本身由 lib/section-body.mjs 单点切片）。
+import {
+  parallelGapOutcome,
+  parallelGapReview,
+  waveProjectionReview,
+  waveReviewOutcome,
+  waveSectionBody,
+} from './wave-projection.mjs';
 import {
   declaredRequiredArtifacts,
   evidenceFor,
@@ -51,13 +61,34 @@ import {
 // 存在性消费出口产物门禁的**同一条判据**（guard-routing 的 declaredRequiredArtifacts——枚举 +
 // 路径解析 + 在场判定，预检不另写一份），SUMMARY 关键段来自证据/产物门禁族，骨架判据与 TASK 7
 // 字段来自模板保真门禁族——预检自身不复制段形实现，也不新造一份节点→产物映射。
-import { evidenceRecoveryBlock, runSummarySectionsGate } from './guard-evidence-gates.mjs';
+// 声明面两道门共用同一份派生（declare 命令 + 该声明哪些技能）：出口覆盖门与缺证据恢复段的命令必须
+// 同集合，否则「照抄报文」会在下一次 exit 上撞上另一套判据。
+import {
+  declarationSkillNames,
+  evidenceRecoveryBlock,
+  nodeSkillLoadCommands,
+  runAcCoverageGate,
+  runSummarySectionsGate,
+} from './guard-evidence-gates.mjs';
+// 写面元素提取与条目边界（剥注释 → 行切 → 分号容错切 → trim → 滤空）的唯一实现在 lib/lessons-hits.mjs：
+// 伪并行启发式只是它的一个消费方（另两个是 handoff 的提交子集校验与 task-graph 的路径解析）。元素名
+// 大小写无关（`<WRITE_FILES>` 与 `<write_files>` 是同一种元素）——与 7 字段门的在场判定同口径，本处
+// 不另写标签正则（元素名少一个 /i 的副本会让这类任务静默掉出告警面）。
+import { taskWriteFilesById, writeFilesEntries } from './lessons-hits.mjs';
 import { evaluateArtifact, formatIssueParts, runTaskSevenFieldGate } from './guard-template-fidelity.mjs';
 // 协调者禁令的常量落在中立模块（跨族共用的措辞不进任何一族）：本模块只是取用方，状态命令族同理。
 import { COORDINATOR_NOTICE } from './state-explain.mjs';
 // 声明标记目录的路径规则（活动路径优先、归档兜底）归状态族的路径上下文模块，与 record 前置门同一份
 // 实现——guard → state-* 是允许的单向边；规则若留在守卫族，状态 CLI 会为它加载整个守卫图。
 import { findSkillLoadsDir, isArchivedChangeDirName } from './state-io.mjs';
+// 声明标记的协议文件提取（protocols 数组 ∪ protocol 单值的 basename 归一）由状态族单源提供：
+// skill-load 写入侧与出口覆盖判据读同一份实现——各写一份时「旧标记里存完整绝对路径」这条口径
+// 会在一边生效、另一边判失配。
+import { markerProtocolBasenames } from './state-skillmarkers.mjs';
+// 段界（同级标题 / 围栏 / 分隔线 / 文末）与围栏行语法取 lib/section-body.mjs 的唯一实现：REVIEW
+// 发现区、旧发现段与 LESSONS 模板样例段此前各写一份按行扫标题的实现，围栏代码块里的 `## ` 会把
+// 段体截断（发现区的后果是「围栏之后的发现整段消失」）。
+import { isFenceLine, scanHeadings, sectionBody } from './section-body.mjs';
 
 // 节点 → 合法 exit 的前置条件（对齐 flow-kit 阶段门 + flowkit.*.v1 evidence）
 const NODE_TRANSITION_GATES = {
@@ -70,15 +101,6 @@ const NODE_TRANSITION_GATES = {
   verify:           { evidence: ['verification-result'] },
   archive:          { evidence: ['archive-summary'] },
 };
-
-// 声明标记 protocol → basename 提取（exit 校验与节点协议映射表 basename 精确比对）。兼容新旧两种
-// 格式：新格式（skill-load 写入）= 纯 basename（如 0-change.md），原样返回；旧格式 = 完整绝对路径
-// （Windows 反斜杠 / POSIX 斜杠），提取最后一段后可比对。非字符串（null——skill-load 未传
-// --protocol 的新格式缺省）→ null（协议集内无 null，fail-closed 由 includes 比对兜底）。
-function markerProtocolBasename(value) {
-  if (typeof value !== 'string' || value === '') return null;
-  return String(value).replaceAll('\\', '/').split('/').pop() || null;
-}
 
 // REVIEW.md 发现区解析——发现的合法位置是模板位置 `### 2.2 …详细发现`（REVIEW 模板的结构子段）；
 // 旧形态 `## 发现` 段（历史 REVIEW 的写法）继续按同一套条目口径解析，供旧 change 渐进处置与迁移
@@ -146,16 +168,22 @@ function reviewFindingsItems(text, scope = { primary: null, siblings: [] }) {
   let severity = '';
   let current = null;
   const pushCurrent = () => { if (current) { items.push(current); current = null; } };
-  for (const line of String(text).split(/\r?\n/)) {
-    const h2 = line.match(/^##\s+(.+?)\s*$/);
-    if (h2) {
+  // 段界（哪些标题行真的开 / 闭一段）由 lib/section-body.mjs 的围栏感知扫描给出：围栏代码块里的
+  // `## ` / `### ` 是条目正文里的 Markdown 示例，不是段界——旧实现把它们当结构标题，一段代码块
+  // 之后 `## ` 会重置发现区，其后的发现条目整段消失（处置标记门禁因此对它们形同虚设）。分区语义
+  // 仍在下面：模板位置下的严重度分区是作用域内的分区，兄弟结构子段才结束作用域。
+  const { lines, headings } = scanHeadings(text);
+  const headingAt = new Map(headings.map((heading) => [heading.index, heading]));
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const heading = headingAt.get(index);
+    if (heading !== undefined && heading.level === 2) {
       pushCurrent();
       severity = '';
-      mode = /^发现/.test(h2[1].trim()) ? 'legacy' : 'none';
+      mode = /^发现/.test(heading.text) ? 'legacy' : 'none';
       continue;
     }
-    const h3 = line.match(/^###\s+(.+?)\s*$/);
-    if (h3) {
+    if (heading !== undefined && heading.level === 3) {
       pushCurrent();
       if (mode === 'primary') {
         // 兄弟结构子段结束模板位置作用域；其余三级标题只是严重度分区
@@ -166,18 +194,18 @@ function reviewFindingsItems(text, scope = { primary: null, siblings: [] }) {
         }
         // 模板范例形态：严重度 token 起头的 H3 = 发现条目（标题行即条目自身第一行，处置标记
         // 与列表项同口径按该行判定），续行是粗体字段 / 正文，直到空行或下一个标题。
-        const heading = h3[1].trim();
-        if (REVIEW_SEVERITY_TOKEN_RE.test(heading)) {
+        const headingText = heading.text;
+        if (REVIEW_SEVERITY_TOKEN_RE.test(headingText)) {
           current = {
-            title: heading.replace(REVIEW_SEVERITY_TOKEN_RE, '').trim() || heading,
+            title: headingText.replace(REVIEW_SEVERITY_TOKEN_RE, '').trim() || headingText,
             scope: 'primary',
             lines: [line],
-            isMajor: reviewSubheadingIsMajor(heading),
-            isMinor: reviewSubheadingIsMinor(heading),
+            isMajor: reviewSubheadingIsMajor(headingText),
+            isMinor: reviewSubheadingIsMinor(headingText),
           };
           continue;
         }
-        severity = heading;
+        severity = headingText;
         continue;
       }
       if (mode === 'none' && scope.primary !== null && scope.primary.test(line)) {
@@ -185,7 +213,7 @@ function reviewFindingsItems(text, scope = { primary: null, siblings: [] }) {
         severity = '';
         continue;
       }
-      severity = h3[1].trim();
+      severity = heading.text;
       continue;
     }
     if (mode === 'none') continue;
@@ -215,11 +243,15 @@ function reviewFindingsItems(text, scope = { primary: null, siblings: [] }) {
 // 旧形态 `## 发现` 段是否有实质内容（占位词 / 子标题 / 空行不计）：写在旧段而模板位置无条目时
 // 触发迁移提示——只在旧段真有内容时给，避免空段或只写「无」的旧 REVIEW 被误报。
 function reviewLegacyFindingsHasContent(text) {
+  // 段界与发现区解析同一来源（scanHeadings）：围栏代码块里的 `## ` 不结束旧段
+  const { lines, headings } = scanHeadings(text);
+  const legacyAt = new Map(headings.filter((heading) => heading.level === 2)
+    .map((heading) => [heading.index, /^发现/.test(heading.text)]));
   let inLegacy = false;
-  for (const line of String(text).split(/\r?\n/)) {
-    const h2 = line.match(/^##\s+(.+?)\s*$/);
-    if (h2) {
-      inLegacy = /^发现/.test(h2[1].trim());
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (legacyAt.has(index)) {
+      inLegacy = legacyAt.get(index);
       continue;
     }
     if (!inLegacy) continue;
@@ -732,15 +764,22 @@ function checkLessonsEntryForm({ content, node, state }) {
 
 // ② 条目区外条目 + ③ 同段内编号递增：既有结构判据保持原作用面（verify / archive）——open 出口只
 // 新增 ① 的旧形态迁移判据，不顺手把这两条扩张到 open（判据作用面按 AC 逐个交代）。
+// 段界与标题识别都走 lib/section-body.mjs 的围栏感知扫描（scanHeadings）：段标题与条目标题一次
+// 扫描给出**行下标**，条目归属与「同段」比较都在同一套下标上做。旧实现各写一份——条目用字符
+// 偏移的正则 matchAll、段用任意 `^##` 行匹配——围栏示例里的 `## ` 会把一段切成两段（乱序因此
+// 被静默放过），围栏示例里的 `### L-NNN` 又会被当成真条目（误报）。
 function checkLessonsZoneAndOrder({ content, state }) {
+  const { headings: scanned } = scanHeadings(content);
+  const zonePatterns = LESSONS_ENTRY_ZONE_NAMES.map((name) => headingPattern(name, 2));
   // 条目区锚点（段名归一：条目区 / 活跃条目 / 已解决条目，容忍括号后缀）——取最早条目段
-  const zoneIndex = (() => {
-    const hits = LESSONS_ENTRY_ZONE_NAMES
-      .map((name) => content.search(headingPattern(name, 2)))
-      .filter((index) => index !== -1);
-    return hits.length ? Math.min(...hits) : -1;
-  })();
-  const headings = [...content.matchAll(/^###\s*L-(\d+)/gm)];
+  const zoneHeading = scanned.find((heading) => heading.level === 2
+    && zonePatterns.some((pattern) => pattern.test(heading.line)));
+  const zoneIndex = zoneHeading === undefined ? -1 : zoneHeading.index;
+  const entryHeadings = scanned
+    .filter((heading) => heading.level === 3)
+    .map((heading) => ({ index: heading.index, number: (heading.text.match(/^L-(\d+)/u) ?? [])[1] }))
+    .filter((entry) => entry.number !== undefined);
+  const headings = entryHeadings;
   if (zoneIndex !== -1) {
     const outside = headings.some(h => h.index < zoneIndex);
     if (outside) {
@@ -749,12 +788,13 @@ function checkLessonsZoneAndOrder({ content, state }) {
         process.exit(1);
       }
       // 诊断信息附带 zoneIndex/条目位置——偶发 WARN 排查时可直接定位（文件时序/编码差异兜底）
-      console.error('WARN: LESSONS.md 有条目在条目区外(zoneIndex=' + zoneIndex + ', 条目数=' + headings.length + ', 区外条目: ' + headings.filter(h => h.index < zoneIndex).map(h => 'L-' + h[1]).join(',') + ')');
+      console.error('WARN: LESSONS.md 有条目在条目区外(zoneIndex=' + zoneIndex + ', 条目数=' + headings.length + ', 区外条目: ' + headings.filter(h => h.index < zoneIndex).map(h => 'L-' + h.number).join(',') + ')');
     }
   }
-  const nums = headings.map(h => parseInt(h[1], 10));
-  // 分段检测：按 ## 标题分段，仅同段内比较编号递增（多段 LESSONS 如「活跃条目/已解决条目」编号体系可独立）
-  const sectionStarts = [...content.matchAll(/^##\s+.*$/gm)].map(m => m.index);
+  const nums = headings.map(h => parseInt(h.number, 10));
+  // 分段检测：按围栏外的 ## 标题分段，仅同段内比较编号递增（多段 LESSONS 如「活跃条目/已解决条目」
+  // 编号体系可独立）——围栏示例里的 `## ` 不开新段。
+  const sectionStarts = scanned.filter((heading) => heading.level === 2).map((heading) => heading.index);
   for (let i = 1; i < nums.length; i++) {
     const sameSection = !sectionStarts.some(s => s > headings[i - 1].index && s < headings[i].index);
     if (sameSection && nums[i] <= nums[i - 1]) {
@@ -780,16 +820,18 @@ async function lessonsEntryFieldKeys() {
   // 字段键无从派生 → C20 静默退化为「未校验」。
   let text;
   try { text = await fs.readFile(path.join(runRoot, skeleton.file), 'utf8'); } catch { return null; }
+  // 段界由 lib/section-body.mjs 单点决定（围栏代码块里的 `## ` 不结束段体——旧实现先判标题再同步
+  // 围栏，示例里出现二级标题就会把字段样例截断）。本判据自己的语义是「只取围栏里的书写样例行」，
+  // 故只需围栏行判定（isFenceLine，与单源同一份语法）。
+  const body = sectionBody(text, formatSection.pattern, { level: 2, endOnSeparator: false });
+  if (body === null) return null;
   const keys = [];
-  let inSection = false;
   let inFence = false;
-  for (const line of String(text).replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n').split('\n')) {
-    if (!inSection) {
-      if (formatSection.pattern.test(line)) inSection = true;
+  for (const line of body.split('\n')) {
+    if (isFenceLine(line)) {
+      inFence = !inFence;
       continue;
     }
-    if (/^##\s+/u.test(line)) break;
-    if (/^\s*```/u.test(line)) { inFence = !inFence; continue; }
     if (!inFence) continue;
     const matched = line.match(LESSONS_FIELD_LINE_RE);
     if (matched) keys.push(matched[1].trim());
@@ -804,7 +846,7 @@ function lessonsEntryBlocks(content) {
   let current = null;
   let inFence = false;
   String(content).replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n').split('\n').forEach((line, index) => {
-    if (/^\s*```/u.test(line)) {
+    if (isFenceLine(line)) {
       inFence = !inFence;
       if (current) current.lines.push(line);
       return;
@@ -824,8 +866,8 @@ function lessonsEntryBlocks(content) {
   return blocks;
 }
 
-// 旧条目判定（结构级，不做语义判断）：非模板标题形态（迁移冒号形态 / 裸标题等历史写法，含 T11
-// 迁移保留原标题形态的条目）或「首发」键指向别的 change。其余缺字段条目按「新条目」处置——
+// 旧条目判定（结构级，不做语义判断）：非模板标题形态（迁移冒号形态 / 裸标题等历史写法——迁移期
+// 保留原标题的条目同样算旧）或「首发」键指向别的 change。其余缺字段条目按「新条目」处置——
 // 新条目只有标题与正文（无任何字段键）时同样落在 BLOCK 分支（M-5 的失效模式）。
 function lessonsEntryIsOld(block, originKey, state) {
   if (!LESSONS_TEMPLATE_HEADING_RE.test(block.heading)) return true;
@@ -1065,6 +1107,28 @@ export async function runDesignDecisionListGate({ node, state }) {
   } catch {}
 }
 
+// 伪并行候选集（纯判定：无 console / 无 process.exit / 无写盘）：标记为并行、尚未开始、且 write_files
+// 全部落在测试面的任务 id。这类任务很可能隐式依赖某个实现类并行任务的产出（测试 import 尚未存在的
+// 符号），多趟路由下委托后测试会失败；而「纯测试基础设施改动」也可能合法全测试面，故调用方只 WARN
+// 不阻断。判据与输出分离：本函数只回答「哪些任务看起来是伪并行」，分级与报文留在调用方。
+export function collectTestOnlyParallelIds({ taskContent = '', blocks = [] } = {}) {
+  // 写面元素（键 = 任务 id）取 lib/lessons-hits.mjs 的唯一提取，条目边界取同一模块的 writeFilesEntries：
+  // 同一份写面在这里与 7 字段门、task-graph 的路径解析被切成同一组条目（元素名大小写在三处同口径）。
+  const writeFaces = taskWriteFilesById(taskContent);
+  const ids = [];
+  for (const block of blocks) {
+    const attrs = taskOpeningAttrs(block);
+    if (!attrs || !attrs.parallel || attrs.status !== 'pending') continue;
+    const element = writeFaces.get(attrs.id);
+    if (element === undefined) continue;
+    const filePaths = writeFilesEntries(element);
+    if (filePaths.length === 0) continue;
+    const prodFiles = filePaths.filter(f => !/(?:^|[\/\\])(?:__tests__\/|test_|tests?\/)|\.(?:test|spec)\.(?:mjs|js|jsx|ts|tsx|cjs)$/.test(f));
+    if (prodFiles.length === 0) ids.push(attrs.id || 'unknown');
+  }
+  return ids;
+}
+
 // plan exit 校验 TASK 含 task 块和 verify 字段 + 依赖图/波次散文/伪并行/写写与读写冲突检测
 export async function runPlanExitGate({ node, state }) {
   if (node.id !== 'plan' || !state.activeChange) return;
@@ -1089,15 +1153,13 @@ export async function runPlanExitGate({ node, state }) {
     }
     // 波次散文一致性检测（WARN 渐进）——## 波次划分 的 Wave 行任务带 [P] 标记（并行语义）但 XML
     // 任务无 parallel="true" → WARN（散文与机器路由依据不一致，以任务标记为准）。容错：无并行语义
-    // 的 Wave 行不参与比对；解析不到波次段跳过（不误报）。段尾判定 = 下一个段标题（\n## ）或分隔线
-    // （\n---）或**输入末尾**。JS 正则没有 \Z：\Z 是「未知转义 ⇒ 字面字符 Z」，惰性匹配一遇段内
-    // 大写 Z 就提前收尾，段被静默截断（含 ZERO- 一类机检标记的 TASK 会整段漏检）。串尾一律用
-    // (?![\s\S]) 真断言——它只是「此处之后已无任何字符」，不受行首/行尾标志影响，与「多行模式下的
-    // $」语义无歧义。
-    const waveSection = content.match(/##\s*波次划分\s*\n([\s\S]*?)(?=\n##\s|\n---|(?![\s\S]))/);
-    if (waveSection) {
+    // 的 Wave 行不参与比对；解析不到波次段跳过（不误报）。段体由 wave-projection 的 waveSectionBody
+    // 取用、段界（同级标题 / 围栏 / 分隔线 / 文末）由 lib/section-body.mjs 单点切片——本判据消费同一
+    // 份段体，不另持第二份正则（两处各写一份段界，演进时必然静默分叉）。
+    const waveBody = waveSectionBody(content);
+    if (waveBody !== null) {
       const proseParallelIds = [];
-      for (const line of waveSection[1].split('\n')) {
+      for (const line of waveBody.split('\n')) {
         if (!/(Wave|\d+\s*波|parallel|并行)/i.test(line)) continue; // 无并行语义行跳过
         for (const m of line.matchAll(/([A-Z][A-Z0-9-]*)\[P\]/g)) proseParallelIds.push(m[1]);
       }
@@ -1135,29 +1197,38 @@ export async function runPlanExitGate({ node, state }) {
       }
       console.error('WARN: TASK.md ' + detail + '——依赖图不可满足（旧 change 渐进不阻断）' + guide);
     }
-    // 伪并行检测（真实载体验证暴露的设计盲区兜底）：如果一个标记为并行的任务只写测试文件而无任何
-    // 生产代码文件，它很可能隐式依赖某个实现类并行任务的产出（如测试 import 尚未存在的函数）。这种
-    // "伪并行"在多趟路由下会导致委托后测试失败。启发式：并行任务的 write_files 全部匹配 tests/ 或
-    // test_ 前缀 → 视为疑似伪并行。WARN 渐进不阻断——由执行者判断是否真独立（纯测试基础设施改动可
-    // 合法全测试面）。
-    const testOnlyParallelIds = [];
-    for (const block of taskList) {
-      const attrs = taskOpeningAttrs(block);
-      if (!attrs || !attrs.parallel || attrs.status !== 'pending') continue;
-      const wfMatch = block.match(/<write_files>([\s\S]*?)<\/write_files>/);
-      if (!wfMatch) continue;
-      // 分号容错：与 workflow-handoff.mjs 自动解析同源实现（分号容错双点内联，与 workflow-handoff.mjs
-      // 同源互锚）——换行切分后逐段按 ';' 二次切分、trim、滤空与 HTML 注释行（路径含分号的极端形态
-      // 不支持，须换行书写）
-      const blockContent = wfMatch[1].replace(/<!--[\s\S]*?-->/g, '');
-      const filePaths = blockContent.trim().split(/\s*\n\s*/).map(l => l.trim()).filter(Boolean)
-        .flatMap(l => l.split(';')).map(l => l.trim()).filter(Boolean);
-      if (filePaths.length === 0) continue;
-      const prodFiles = filePaths.filter(f => !/(?:^|[\/\\])(?:__tests__\/|test_|tests?\/)|\.(?:test|spec)\.(?:mjs|js|jsx|ts|tsx|cjs)$/.test(f));
-      if (prodFiles.length === 0) {
-        testOnlyParallelIds.push(attrs.id || 'unknown');
-      }
-    }
+    // 波次投影判定（波次 = 依赖层级的投影）：`## 波次划分` 声明的波次必须等于任务的依赖层级
+    // （无依赖 = 第 1 波，其余 = 1 + 依赖中最晚波次），且任务集里每个非修复族任务都必须被某个
+    // Wave 行声明过（未声明记入同一明细，取值「未声明」）。这是「图必须等于依赖」的判据——同波
+    // 依赖、排在依赖之前、只需更早波次却排到更后面的保守排法、以及根本没写进波次段的任务都会被
+    // 逐条点名（任务 / 依赖 / 当前波 / 应到波）。分级沿用既有先例：新 change BLOCKED（明细 +
+    // 恢复指引），旧 change WARN 渐进。「判不了」按成因二分：载体缺席（无段 / 段名无从派生）只
+    // 打印「未校验」放行——判据没有可判对象；工件内容不可判（段在场却没有一行 Wave 行能落到真实
+    // 任务上）按同一先例分级，旧 change 的 WARN 行进入既有 WARN COUNT（「该写的没写」不静默）。
+    // 位置在依赖图判据之后：环与缺失依赖是更根本的规划错误，先报它们；replan 重校段（ADR-013
+    // 不豁免）调用同一判定与同一报文构造，措辞与分级因此不会分叉。
+    // 分级 → 输出单源：本出口只派生 blocking（新 change 强制、旧 change 渐进），「哪一支打什么行、
+    // 要不要拒绝」全在 waveReviewOutcome 一处——与 replan 重校段共用同一份，改分级只改一处。
+    const waveReview = waveProjectionReview({ taskContent: content, blocks: taskList });
+    const waveOutcome = waveReviewOutcome(waveReview, { blocking: isNewChange(state) });
+    for (const line of waveOutcome.lines) console.error(line);
+    if (waveOutcome.block) process.exit(1);
+    // 同波可并行却漏标 [P]（波次判据之后的第二条波次面判据）：同一波次内彼此无依赖路径、write_files
+    // 不重叠的两个任务，只标一个 parallel="true" 不成立——单边标记既不表达「可并行」，机器路由又按
+    // 串行跑（白丢一波并行度）。新 change BLOCKED（逐对点名 + 两条出路：都标 [P] / 补 depends_on 换
+    // 波次），旧 change WARN 渐进（WARN 行进既有 WARN COUNT）。判据本身（含「写面重叠」与「无依赖
+    // 路径」两个前提）在 wave-projection 一处实现，本处只分级与打印；波次分组复用同一份解析结果
+    // （waveReview.waves），不重解析波次段。
+    const gapOutcome = parallelGapOutcome(
+      parallelGapReview({ taskContent: content, blocks: taskList, waves: waveReview.waves }),
+      { blocking: isNewChange(state) },
+    );
+    for (const line of gapOutcome.lines) console.error(line);
+    if (gapOutcome.block) process.exit(1);
+    // 伪并行检测（真实载体验证暴露的设计盲区兜底）——判据（哪些并行任务只写测试产物）在
+    // collectTestOnlyParallelIds 一处实现，本处只做分级（WARN 渐进不阻断）与打印：由执行者判断是否
+    // 真独立（纯测试基础设施改动可合法全测试面）。
+    const testOnlyParallelIds = collectTestOnlyParallelIds({ taskContent: content, blocks: taskList });
     if (testOnlyParallelIds.length > 0) {
       console.error('WARN: 伪并行检测——以下并行任务仅写测试文件而无生产代码文件: '
         + testOnlyParallelIds.join(', ')
@@ -1282,60 +1353,120 @@ export async function runReviewExitGate({ node, state }) {
       }
     }
     if (isNewChange(state) && (deferredFindings.length > 0 || minorUnjustified.length > 0)) process.exit(1);
+    // AC 覆盖汇总（只提示、不阻断）：TEST.md 在场且其 1.1 测试矩阵漏了 AC → 一条汇总 WARN，退出码不变。
+    // 同一判定的强制面在 verify 出口（新 change BLOCKED），两处共用证据/产物门禁族的同一实现——
+    // 本出口今天不要求 TEST.md，故只在判得了且真缺时报，不让「判不了」变成噪音。
+    await runAcCoverageGate({ node, state });
   } catch {}
 }
 
-// 节点 exit 协议声明标记校验——扫描 .specs/<change-id>/.skill-loads/ 下该节点标记（<node>-*.json，
-// 执行者加载节点 skill 后经 skill-load 写入，含 protocol 字段——指向 flow-kit/prompts/ 协议文件，
-// 只读引用），校验至少一个标记的 protocol ∈ 该节点协议集（节点协议映射表）。缺失 → BLOCKED（提示
-// 缺协议声明标记 + 指引 skill-load --prompt）；有 → 通过。诚实边界：标记是执行者的自我声明——校验
-// 只确认「声明存在且 protocol 归属节点」，无法证明执行者真的阅读了协议（声明非物理证明，仅保证
-// 协议阅读声明可追溯）。旧 change 兼容：旧 change/旧 evidence 不追溯——.skill-loads/ 目录不存在
-// （该 change 从未运行过 skill-load，声明机制未激活）→ 跳过校验；节点已 exit 不重验（校验只在当前
-// exit 时执行）；节点重新 exit（重入后再退）时按新规则要求，无豁免。
+// 缺声明的恢复句（报文里唯一一处「怎么补」的编排）：补**哪些**由上面的明细决定（逐项点名缺哪份
+// 协议文件、哪个必需技能），而命令本身必须**覆盖本节点的全部必需项**——命令形态与缺证据恢复段的
+// 第一步同源（nodeSkillLoadCommands）：该节点全部协议文件的多个 --prompt、每个 guarded 必需技能
+// 各一条、模板全清单。只补缺项、占位技能名或漏 --templates 的旧形态，照抄后同一 exit 会再被覆盖门
+// 或模板门拦一次（「报文各给一半」的实证形态）。缺技能时只给缺的那几条（已声明的不重复刷），缺的
+// 只是协议文件时把完整命令全给（重跑同一标记 = 覆写，不新增）。
+async function missingDeclarationRecovery({ node, state, missingSkills }) {
+  const derived = await nodeSkillLoadCommands({ node, state });
+  const targeted = missingSkills.length > 0
+    ? derived.filter((entry) => missingSkills.includes(entry.skill))
+    : derived;
+  const commands = (targeted.length > 0 ? targeted : derived).map((entry) => entry.command);
+  return '恢复: 照抄下面的命令补齐上述缺项后重试 exit ' + node.id
+    + '（每个必需技能各一条，每条都带该节点全部 --prompt 与模板全清单；同一 node-skill 重跑会覆写该标记；'
+    + '声明非物理证明，仅证明执行者声明已加载）:\n'
+    + commands.map((command) => '  ' + command).join('\n');
+}
+
+// 节点 exit 协议声明**覆盖**校验——扫描 .specs/<change-id>/.skill-loads/ 下该节点标记（<node>-*.json，
+// 执行者加载节点 skill 后经 skill-load 写入），要求覆盖本节点全部必需声明：
+//   ① 节点该读的每份协议文件（NODE_PROTOCOL_FILES[node.id]——open / review 各两份）都必须被某个标记
+//      声明过：标记的 protocols 数组（多 --prompt）与 protocol 单值（收紧前的写入形态、record 自动补
+//      写的形态）都算，值一律按 basename 比对；
+//   ② 协议声明的必需技能（enforcement='guarded' 且非 handoff scope）各自要有属于该技能的标记。
+// 缺任一 → 新 change BLOCKED 并**逐项点名**缺哪个协议文件、哪个必需技能；旧 change WARN 渐进（既有
+// change 不因收紧卡死）。判定从「任一命中即通过」改为「全部覆盖」：旧口径把节点该读的清单当成允许
+// 集合，声明一份就能过——另一份协议文件、另一个必需技能从来没有判据。
+// 诚实边界：标记是执行者的自我声明——校验只确认「声明覆盖了必需项」，无法证明执行者真的阅读了协议
+// （声明非物理证明，仅保证声明可追溯）。**目录整体缺席按新/旧 change 分开**：新 change 缺席 = 一项
+// 都没声明（同一道判据的两半——「目录在但没覆盖」与「目录根本不在」不该有两种放行），逐项点名并
+// BLOCKED；只有旧 change 才走「机制未激活」的渐进告警（该 change 从未运行过 skill-load）。删目录因此
+// 不是关掉覆盖判据的写法。节点已 exit 不重验（校验只在当前 exit 时执行）；节点重新 exit（重入后再退）
+// 时按新规则要求，无豁免。
 export async function runSkillLoadMarkerGate({ node, state }) {
-  if (!state.activeChange || !NODE_PROTOCOL_FILES[node.id]) return;
+  if (!state.activeChange) return;
+  const requiredFiles = NODE_PROTOCOL_FILES[node.id] ?? [];
+  const requiredSkills = await declarationSkillNames(node, state);
+  // 零协议文件且零必需技能：本节点没有声明义务（自定义协议节点没有引擎映射，也没有 guarded 绑定）
+  if (requiredFiles.length === 0 && requiredSkills.length === 0) return;
   // 标记目录活动/归档双路径解析（archive 节点「先移目录后 exit」顺序下标记只在归档路径——单查
   // 活动路径会误报「机制未激活」静默放行）；两处皆无才走旧 change 兼容
-  const loadsDir = await findSkillLoadsDir(runRoot, state.activeChange);
-  if (!loadsDir) {
-    // 旧 change 兼容过渡规则：活动与归档路径均无声明标记目录（机制未激活）不追溯；首个 skill-load
-    // 写入后新规则生效（该 change 后续节点 exit 均需声明标记）
+  const foundDir = await findSkillLoadsDir(runRoot, state.activeChange);
+  // 目录缺席：新 change 按「一项都没声明」继续走下面那条判据（逐项点名 + BLOCKED）——把目录当成
+  // 空的声明面，而不是「机制未激活」的放行口。只有旧 change 才在这里收口（渐进告警、不追溯）。
+  if (!foundDir && !isNewChange(state)) {
     console.error('SKILL-LOAD WARN: 旧 change 兼容——.specs/' + state.activeChange +
       '/.skill-loads/（活动与归档路径）不存在，协议声明校验跳过（机制未激活；首个 skill-load 后新规则生效）');
     return;
   }
+  // 声明面 = 「找到的目录」或「缺席的空声明面」：一处归一，下面的读目录 / 报文显示 / 缺项判定都只
+  // 依赖这个形状（不再各自 `=== null` 判一遍，三处分支各自演进就是三份判据）。
+  const surface = foundDir ?? { dir: null, display: '.specs/' + state.activeChange + '/.skill-loads/' };
   const prefix = node.id + '-';
-  const protocolSet = NODE_PROTOCOL_FILES[node.id];
-  const markers = (await fs.readdir(loadsDir.dir).catch(() => []))
-    .filter((f) => f.startsWith(prefix) && f.endsWith('.json'));
+  const names = surface.dir === null
+    ? []
+    : (await fs.readdir(surface.dir).catch(() => []))
+      .filter((f) => f.startsWith(prefix) && f.endsWith('.json'));
+  const declaredFiles = new Set();
+  const declaredSkills = new Set();
   const malformed = [];
-  let declared = false;
-  for (const f of markers) {
+  let autoHinted = false;
+  for (const name of names) {
+    let marker;
     try {
-      const marker = JSON.parse(await fs.readFile(path.join(loadsDir.dir, f), 'utf8'));
-      // 比对 basename——新格式（skill-load 写入 basename）与旧格式（完整绝对路径）经
-      // markerProtocolBasename 提取后统一比对；损坏值（null/非字符串/超集外 basename）提取为 null
-      // 或不匹配 → 不进 declared，fail-closed
-      if (marker && typeof marker === 'object' && protocolSet.includes(markerProtocolBasename(marker.protocol))) {
-        declared = true;
-        // auto 标记提示——record 自动补的标记（auto:true）不证明手动加载，提示建议手动声明
-        if (marker.auto === true) {
-          console.error('SKILL-LOAD HINT: ' + f + ' 为 record 自动补写标记(auto)——建议手动 skill-load 声明(如实记录加载动作与协议文件)');
-        }
-        break;
-      }
+      marker = JSON.parse(await fs.readFile(path.join(surface.dir, name), 'utf8'));
     } catch {
-      malformed.push(f);
+      malformed.push(name);
+      continue;
+    }
+    // 非对象标记（null / 数组 / 标量）没有声明语义：与不可解析标记同样处置（不静默计入覆盖）
+    if (!marker || typeof marker !== 'object' || Array.isArray(marker)) {
+      malformed.push(name);
+      continue;
+    }
+    for (const basename of markerProtocolBasenames(marker)) declaredFiles.add(basename);
+    if (typeof marker.skill === 'string' && marker.skill !== '') declaredSkills.add(marker.skill);
+    // auto 标记提示——record 自动补的标记（auto:true）不证明手动加载，提示建议手动声明
+    if (marker.auto === true && !autoHinted) {
+      autoHinted = true;
+      console.error('SKILL-LOAD HINT: ' + name + ' 为 record 自动补写标记(auto)——建议手动 skill-load 声明(如实记录加载动作与协议文件)');
     }
   }
-  if (!declared) {
-    console.error('BLOCKED: 节点 ' + node.id + ' exit 缺协议声明标记——' + loadsDir.display +
-      ' 下需有 ' + prefix + '*.json 且 protocol ∈ [' + protocolSet.join(', ') +
-      ']；执行 skill-load --prompt <flow-kit/prompts/ 协议文件> 声明已阅读协议（声明非物理证明，仅可追溯）' +
-      (malformed.length > 0 ? '；不可解析标记: ' + malformed.join(', ') : ''));
+  const missingFiles = requiredFiles.filter((file) => !declaredFiles.has(file));
+  const missingSkills = requiredSkills.filter((skill) => !declaredSkills.has(skill));
+  if (missingFiles.length === 0 && missingSkills.length === 0) return;
+  // 缺项明细（逐项点名）：缺哪个协议文件、缺哪个必需技能（后者连标记文件名一起给，可直接对目录核对）
+  const details = [];
+  if (missingFiles.length > 0) details.push('  - 缺协议文件: ' + missingFiles.join('、'));
+  if (missingSkills.length > 0) {
+    details.push('  - 缺必需技能声明: ' + missingSkills.join('、')
+      + '（标记文件 ' + missingSkills.map((skill) => prefix + skill + '.json').join(' / ') + '）');
+  }
+  const recovery = (await missingDeclarationRecovery({ node, state, missingSkills }))
+    + (malformed.length > 0 ? '；不可解析标记: ' + malformed.join(', ') : '');
+  const lead = '节点 ' + node.id + ' exit 缺协议声明标记——' + surface.display
+    + (surface.dir === null
+      ? '（活动与归档路径）不存在，即一项声明都没有'
+      : ' 下的声明未覆盖本节点全部必需项');
+  if (isNewChange(state)) {
+    console.error('BLOCKED: ' + lead + '（新 change 强制全部覆盖）:');
+    for (const line of details) console.error(line);
+    console.error(recovery);
     process.exit(1);
   }
+  console.error('SKILL-LOAD WARN: ' + lead + '（旧 change 渐进不阻断，新 change 强制全部覆盖）:');
+  for (const line of details) console.error(line);
+  console.error(recovery);
 }
 
 // ---------- 结构化预检（exit <node> --preflight）----------

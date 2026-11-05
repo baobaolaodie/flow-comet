@@ -344,6 +344,32 @@ export { TEMPLATE_FALLBACK_SECTION_PATTERNS } from './guard-artifact-skeleton.mj
 // 模板段名 → 宽松匹配正则：实现随段名归一移到骨架模块（单一出处），此处转出保持既有导出面。
 export { headingPattern as templateSectionPattern } from './guard-artifact-skeleton.mjs';
 
+// 命名段选取（唯一实现）：候选集为空（模板整份缺席 / 该类段无从派生）⇒ TEMPLATE_SECTION_SKIP；
+// 否则按关键词取首个命中的**模板段名**所派生的正则，关键词全不命中 ⇒ 调用方给的 fallback。
+// H2 顶层段（pick）与登记表列举的结构子段（pickTemplateSection 的 level 3）共用这一条规则——
+// 候选集来源不同，选段语义必须由同一个函数给出：同一份工件的同一段在两处被选出不同判据，就是
+// 第二份实现（两个入口在同一候选集上给出同一判据，由套件场景逐态对账）。
+function pickByKeywords(entries, keywords, fallback) {
+  if (entries.length === 0) return TEMPLATE_SECTION_SKIP;
+  for (const entry of entries) {
+    if (keywords.some((keyword) => entry.name.includes(keyword))) return entry.regex;
+  }
+  return fallback;
+}
+
+// 任意模板键 + 层级的选段入口：pick 只覆盖 change / requirement / design / summary 四个 H2 键，
+// 而判据落在别的模板（TEST 的「第 1 轮」段与 1.1 测试矩阵一类）上时同样需要一个「段名从模板派生、
+// 模板缺席即跳过、关键词不命中即回退」的口子——否则消费方只能自己遍历段名表，那是第二份选段实现。
+//   level 2 = 模板 H2 顶层段（骨架 sections）    level 3 = 登记表列举的结构子段（structureSubsections）
+// 返回正则或 TEMPLATE_SECTION_SKIP（调用方据此打印「未校验」而不是猜测段名）。opts.runRoot 与骨架
+// 同一出入口（场景 / 临时夹具可指向别的项目根）。
+export async function pickTemplateSection(key, { keywords = [], fallback, level = 2, runRoot } = {}) {
+  const skeleton = await buildSkeleton(key, runRoot === undefined ? {} : { runRoot });
+  const entries = (level === 3 ? skeleton.structureSubsections ?? [] : skeleton.sections)
+    .map((entry) => ({ name: entry.name, regex: entry.pattern }));
+  return pickByKeywords(entries, keywords, fallback);
+}
+
 // 读取模板全部段名生成模式列表：键形（change / requirement / design / summary）与 tpl[key] 的
 // { name, regex } 数组形态、pick 的按关键词选段语义一律保持既有——只把数据源换成骨架模块（缓存与
 // 模板读取归它一处负责，本模块不再自持 runRoot 键控的第二份缓存）。opts.runRoot 与骨架同一出入口
@@ -358,14 +384,7 @@ export async function templateSectionPatterns(opts = {}) {
   // 模板派生判据全部跳过，fallback 只在「模板在场但某个具体段名缺失」时生效）。既有消费方里有闭包
   // 外直接 `.test` 的调用点（「视觉调性」段读取），返回 null 会把「跳过」退化成 TypeError 崩溃——
   // 未校验变成失败，同样不是 C9 的「跳过」，故返回可判别的跳过判据（见 TEMPLATE_SECTION_SKIP）。
-  result.pick = (key, keywords, fallback) => {
-    const sections = result[key] ?? [];
-    if (sections.length === 0) return TEMPLATE_SECTION_SKIP;
-    for (const section of sections) {
-      if (keywords.some((keyword) => section.name.includes(keyword))) return section.regex;
-    }
-    return fallback;
-  };
+  result.pick = (key, keywords, fallback) => pickByKeywords(result[key] ?? [], keywords, fallback);
   return result;
 }
 

@@ -4,7 +4,14 @@
 // 读写（不写 state、不改路由、不绕门禁，与 bridge-check 同为纯读通道）。节点 id 非法 →
 // fail-closed 并列出协议内全部合法节点。
 import path from 'path';
-import { nodeTemplateDeclaration, templatePointerLines } from '../protocol-utils.mjs';
+import { fileURLToPath } from 'url';
+import {
+  nodeTemplateDeclaration,
+  resolveProtocol,
+  skillLoadDeclarationArgs,
+  templatePointerLines,
+} from '../protocol-utils.mjs';
+import { toPersistedProtocolPath } from '../state-schema.mjs';
 import { runRootDir } from './state-io.mjs';
 
 // 协调者禁令的**同一句**（单一来源）：entry（门禁族）与 next / record（状态命令族）都引用本常量——
@@ -39,6 +46,56 @@ export function platformScriptsDir(scriptsDir, runRoot = runRootDir()) {
 export function scriptCommand({ scriptsDir, runRoot, script, args = [] }) {
   return 'node "' + platformScriptsDir(scriptsDir, runRoot) + '/' + script + '"'
     + (args.length > 0 ? ' ' + args.join(' ') : '');
+}
+
+// ---------- 声明命令（skill-load）：状态命令族与守卫族共用的唯一装配 ----------
+//
+// 一条可照抄的声明命令由三段事实拼成，三段各有单一来源，本段只做组合：
+//   · 参数面（`skill-load <node> <skill> --prompt … --templates …`）：由协议数据派生，见
+//     protocol-utils 的 skillLoadDeclarationArgs（该节点全部协议文件 + 模板全清单）；
+//   · 脚本路径（平台化 + 整条加引号）：见上面的 scriptCommand（与 record / entry 的恢复指引同源）——
+//     只写裸脚本名的命令在 shell 里是 `command not found`，等于没给命令；
+//   · 协议上下文（`--protocol <持久化路径>`）：本次运行解析到的协议**不是内置默认**时才带——内置
+//     默认时照抄不带它也解析到同一份（加了只是噪音）；自定义协议不带则照抄会解析到另一份协议
+//     （状态命令族只认 CLI → 环境变量 → 内置默认，没有 state 绑定这一来源），恢复路径断在第一步。
+// 这三段此前被拼成两种文本（状态侧裸脚本名 / 守卫侧 scriptCommand 形态），同一件事两种文本时只有
+// 一种能执行，故命令文本只在这里产出。
+export function protocolContextArgs({ protocolPath, packageRoot, runRoot }) {
+  if (!protocolPath || !packageRoot) return [];
+  const builtin = path.resolve(packageRoot, 'reference', 'workflow-protocol.json');
+  if (path.resolve(protocolPath) === builtin) return [];
+  return ['--protocol', '"' + toPersistedProtocolPath(runRoot, protocolPath) + '"'];
+}
+
+// 一条声明命令。context = { scriptsDir, runRoot, packageRoot, protocolPath }——运行面的事实，
+// 由各族的运行上下文提供（状态命令族见 commandContext；守卫族按同一形状取自己的运行上下文）。
+export function declarationCommand({ node, skill, frontend = false, context }) {
+  return scriptCommand({
+    scriptsDir: context.scriptsDir,
+    runRoot: context.runRoot,
+    script: 'workflow-state.mjs',
+    args: [
+      ...skillLoadDeclarationArgs({ node, skill, frontend }),
+      ...protocolContextArgs(context),
+    ],
+  });
+}
+
+// 每个目标技能各一条命令（一次声明只写一个技能标记：同 node-skill 重跑是覆写，不是新增）。
+// skills 必填：**谁决定目标集**由调用方表态——守卫族的异步面（判前端）与状态族的同步面
+// （protocol-utils 的 declarationSkillTargets）取的不是同一套结论，一个缺省值会把两者悄悄换掉。
+export function declarationCommands({ node, skills, frontend = false, context }) {
+  return skills.map((skill) => ({ skill, command: declarationCommand({ node, skill, frontend, context }) }));
+}
+
+// 状态命令族的运行上下文：脚本目录由本模块位置推导（它在 scripts/lib 下），包根是脚本目录的上一级，
+// 运行根取状态上下文（入口在分派前初始化），协议路径用入口同一个解析器按同一批参数解析
+// （CLI > 环境变量 > 内置默认）——命令自带的协议上下文因此就是本次运行的那一份，而不是另取一次。
+// 守卫族有自己的运行上下文（FLOW_COMET_RUN_ROOT + 状态绑定的协议），按同一形状自行提供，不走本函数。
+export function commandContext({ argv = [], runRoot = runRootDir() } = {}) {
+  const scriptsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const packageRoot = path.resolve(scriptsDir, '..');
+  return { scriptsDir, runRoot, packageRoot, protocolPath: resolveProtocol(packageRoot, runRoot, argv.slice(3)) };
 }
 
 // ① 产出物模板现问（加载链的第三环）：与 entry 的 READ TEMPLATE 行同源同实现（protocol-utils

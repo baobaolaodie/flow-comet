@@ -42,6 +42,7 @@ import {
   runPlanExit,
   strictSummary,
   writeIntakeArtifacts,
+  writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import {
   REENTRY_EXPECTED_INTERSECTION,
@@ -1126,6 +1127,7 @@ export const ENTRIES = [
       // 判据 / 计数。
       writeIntakeArtifacts(dir);
       writeState(dir, replanExecuteState());
+      writeNodeDeclarationMarkers(dir, 'execute');
       assertExit(runGuard(['entry', 'execute'], dir), 0);
       // 任务集修订（#119 死锁现场）：新增计划外的并行就绪任务
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', REPLAN_TASK_REVISED);

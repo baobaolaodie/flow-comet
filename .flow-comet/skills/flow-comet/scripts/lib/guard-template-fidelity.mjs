@@ -26,11 +26,10 @@ import {
 import { runRoot, fileExists, protocolPath } from './guard-state-io.mjs';
 import { isNewChange } from './guard-routing.mjs';
 import { buildSkeleton, LEGACY_SUMMARY_ORDER } from './guard-artifact-skeleton.mjs';
+import { scanHeadings } from './section-body.mjs';
 import { TASK7_REQUIRED } from './task-graph.mjs';
 
 const HINT_FILE_NAME = '.template-hints.json';
-const H2_LINE = /^##\s+(.+?)\s*$/u;
-const H3_LINE = /^###\s+(.+?)\s*$/u;
 const FRONTMATTER_KEY_LINE = /^([A-Za-z][\w-]*)\s*:\s*(.*)$/u;
 
 // 空正文白名单（AC-5）：判据是**整段取值**而非子串——词后必须是行尾 / 空白 / 标点 / 括注，
@@ -90,8 +89,12 @@ function qualifiedHeading(raw) {
 // 工件文本 → 行锚定轮廓（L-128：只认行首标题，正文里引用段名不劫持）。frontmatter 仅做顶层键
 // 行级解析（不引入 YAML 库）：一个键的值区 = 行内余下文本 + 到下一个顶层键之前的非空行
 // （嵌套映射是缩进行，而「值另起一行且不缩进」也同样是已填——两种书写形态都不判空）。
+// 段结构（哪些标题行真的开一段、段到哪里结束、哪些 H3 属于本段）一律取 lib/section-body.mjs 的
+// 围栏感知扫描（scanHeadings）：围栏代码块里的 `## ` / `### ` 是正文示例，不开段、也不算子段。
+// 旧实现自带一份按行扫 `^##` 的循环（围栏盲），段序 / 缺段 / 空正文 / 增量段位置四个判据因此共用
+// 同一处盲区：示例里贴一行段标题，那段就被读成「在场」——删段换到放行的写法。
 function parseOutline(text) {
-  const lines = String(text ?? '').replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n').split('\n');
+  const { lines, headings } = scanHeadings(text);
   const outline = { frontmatter: { present: false, keys: [] }, titleLine: '', headerLines: [], sections: [] };
   let cursor = 0;
   if (lines[0] !== undefined && lines[0].trim() === '---') {
@@ -113,38 +116,43 @@ function parseOutline(text) {
       cursor = end + 1;
     }
   }
+  const sectionHeadings = headings.filter((heading) => heading.level === 2);
+  const subsectionHeadings = headings.filter((heading) => heading.level === 3);
   while (cursor < lines.length && lines[cursor].trim() === '') cursor += 1;
   outline.titleLine = lines[cursor] ?? '';
   cursor += 1;
-  while (cursor < lines.length && !H2_LINE.test(lines[cursor])) {
+  const firstSection = sectionHeadings.length > 0 ? sectionHeadings[0].index : lines.length;
+  while (cursor < lines.length && cursor < firstSection) {
     outline.headerLines.push(lines[cursor]);
     cursor += 1;
   }
-  let current = null;
-  for (; cursor < lines.length; cursor += 1) {
-    const line = lines[cursor];
-    const heading = line.match(H2_LINE);
-    if (heading) {
-      current = {
-        raw: heading[1].trim(),
-        norm: normalizeHeading(heading[1]),
-        qualified: qualifiedHeading(heading[1]),
-        bodyLines: [],
-        subsections: [],
-      };
-      outline.sections.push(current);
-      continue;
-    }
-    if (current === null) continue;
-    const sub = line.match(H3_LINE);
-    if (sub) {
-      current.subsections.push({
-        raw: sub[1].trim(),
-        norm: normalizeHeading(sub[1]),
-        qualified: qualifiedHeading(sub[1]),
+  for (let index = 0; index < sectionHeadings.length; index += 1) {
+    const heading = sectionHeadings[index];
+    const end = index + 1 < sectionHeadings.length ? sectionHeadings[index + 1].index : lines.length;
+    const section = {
+      raw: heading.text.trim(),
+      norm: normalizeHeading(heading.text),
+      qualified: qualifiedHeading(heading.text),
+      bodyLines: lines.slice(heading.index + 1, end),
+      // 直系正文（不含子段标题行）由同一次扫描给出：子段标题行的行下标在扫描里就是已知的，
+      // 不必回头对 bodyLines 再做一次文本匹配（那会重新掉进围栏盲区）。
+      directLines: [],
+      subsections: [],
+    };
+    const subsectionIndexes = new Set();
+    for (const sub of subsectionHeadings) {
+      if (sub.index <= heading.index || sub.index >= end) continue;
+      section.subsections.push({
+        raw: sub.text.trim(),
+        norm: normalizeHeading(sub.text),
+        qualified: qualifiedHeading(sub.text),
       });
+      subsectionIndexes.add(sub.index);
     }
-    current.bodyLines.push(line);
+    for (let at = heading.index + 1; at < end; at += 1) {
+      if (!subsectionIndexes.has(at)) section.directLines.push(lines[at]);
+    }
+    outline.sections.push(section);
   }
   return outline;
 }
@@ -159,11 +167,12 @@ function bodyText(lines) {
   return trimmed.slice(start, end).join('\n');
 }
 
-// 父段的**直系正文**：parseOutline 把 H3 标题行也压进 bodyLines（子段归属要靠这份行序），不剥掉
-// 的话「父段只要写了任一子段」就等同于「父段有正文」——补充提示随即对从未想写 N/A 的工件发声。
+// 父段的**直系正文**：parseOutline 在扫描时就把子段标题行记了下标（bodyLines 仍含它们，子段归属与
+// 逐字比对要靠那份行序），directLines 是同一份 bodyLines 减去**围栏外**的子段标题行——不剥掉的话
+// 「父段只要写了任一子段」就等同于「父段有正文」，补充提示随即对从未想写 N/A 的工件发声。
 // 只剥标题行，子段的正文内容原样保留（它仍是父段正文的一部分）。
 function directBodyLines(section) {
-  return (section?.bodyLines ?? []).filter((line) => !H3_LINE.test(line));
+  return section?.directLines ?? [];
 }
 
 // 父段正文是否留下 N/A 意图痕迹：第一条非空内容行的开头若干字符里找白名单词——包裹符号

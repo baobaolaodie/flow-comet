@@ -1,7 +1,8 @@
-// 运行上下文 + 受保护状态 I/O（守卫模块）。
+// 受保护状态 I/O（守卫模块）+ 守卫侧运行上下文。
 //
-// 运行上下文（runRoot / packageRoot / 协议路径绑定）是本模块的**单一来源**：各守卫模块不再各自
-// 从环境变量推导同一事实——两份推导会在形态变化时静默分叉。
+// 运行根（runRoot）的解析由 lib/run-root.mjs 单源提供：状态命令族与守卫族共用同一份事实，本模块
+// 只取用并再导出（守卫入口的导入面因此不变）。packageRoot 与协议路径绑定仍在这里——各守卫模块
+// 不再各自从环境变量推导同一事实，两份推导会在形态变化时静默分叉。
 //
 // 受保护读写通道（路径段判据 → 逐段目录校验 → 快照复核 → 唯一临时名原子落盘）在写入前与落盘前
 // 都复核目标未被替换；任何一步不符即抛错（fail-closed），绝不退化为尽力而为的写。
@@ -12,6 +13,7 @@ import { constants as fsConstants, promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { RUNTIME_STATE_PATH, LEGACY_RUNTIME_STATE_PATH } from '../state-schema.mjs';
+import { resolveRunRoot } from './run-root.mjs';
 import {
   inspectWorkflowProtectedPath,
   readWorkflowProtectedFile,
@@ -24,9 +26,9 @@ import {
 const scriptsRoot = path.dirname(fileURLToPath(import.meta.url));
 // 技能包根：scripts/lib → scripts → skills/flow-comet（协议默认路径与包内资源以此为基准）
 export const packageRoot = path.resolve(scriptsRoot, '..', '..');
-export const runRoot = process.env.FLOW_COMET_RUN_ROOT
-  ? path.resolve(process.env.FLOW_COMET_RUN_ROOT)
-  : process.cwd();
+// 运行根：唯一解析在 lib/run-root.mjs（与状态命令族同一份事实）——本模块只取用并再导出。
+// 行内再写一次 env/cwd 推导，就是本次要消灭的那份分叉（守卫认变量、状态命令认 cwd）。
+export const runRoot = resolveRunRoot();
 
 // 协议路径解析：显式 --protocol 全局参数（command=argv[2] 之后的剩余参数）> state.protocolPath
 // （init 持久化绑定）> FLOW_COMET_PROTOCOL 环境变量 > 内置默认。选择在入口 main() 内执行

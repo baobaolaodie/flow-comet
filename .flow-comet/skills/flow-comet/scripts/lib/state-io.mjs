@@ -1,7 +1,8 @@
 // 状态读写与 .specs 路径上下文（单一归属）：状态文件解析 / 原子写落盘 / 活动 change 解析 /
 // change 目录边界，以及各命令族共用的路径锚（runRoot · specsRoot · statePath）。
-// 路径锚由入口在分派前初始化一次（runRoot = 进程 cwd）——模块内不自行取 cwd：入口与模块
-// 各持一份「运行根」就是同一事实的第二处表达。目录名与状态文件名常量来自 state-schema.mjs。
+// 路径锚由入口在分派前初始化一次；运行根由唯一解析模块（run-root.mjs）给定——FLOW_COMET_RUN_ROOT
+// 优先、否则进程 cwd。模块内不自行取 cwd：入口与模块各持一份「运行根」就是同一事实的第二处表达。
+// 目录名与状态文件名常量来自 state-schema.mjs。
 import { promises as fs } from 'fs';
 import path from 'path';
 import { validateStateFields, writeJsonAtomic, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME } from '../state-schema.mjs';

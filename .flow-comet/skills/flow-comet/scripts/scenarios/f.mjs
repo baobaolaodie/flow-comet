@@ -28,6 +28,7 @@ import {
   TASK_VALID_SP,
   engineDefinitionHits,
   engineDefinitionModule,
+  engineScriptTexts,
   handoffFor,
   renderMultiWaveTasks,
   runPlanExit,
@@ -72,6 +73,56 @@ import {
   templateAuthorityProblems,
   templateAuthorityRegistrationProblems,
 } from '../lib/text-anchor-checks.mjs';
+
+// ---------- 文档口径锚（「文档口径与实现一致」的判据单一实现）----------
+// 判据 = 文档里写的口径必须与实现同形：每条口径给出 required（新口径在场）与 stale（旧口径零残留），
+// 两种静默失配都判——文档丢了新说法、或旧说法回流。真实核对与反向构造探针共用本实现（各写一份必然
+// 分叉：锚与探针各自演化后，判别力会在两次改动后静默归零）。
+function docWordingProblems(cases) {
+  const out = [];
+  for (const item of cases) {
+    for (const phrase of item.required ?? []) {
+      if (!item.text.includes(phrase)) out.push(item.rel + ' 缺新口径「' + phrase + '」');
+    }
+    for (const phrase of item.stale ?? []) {
+      if (item.text.includes(phrase)) out.push(item.rel + ' 残留旧口径「' + phrase + '」');
+    }
+  }
+  return out;
+}
+
+// 反向构造：抽掉任一新口径句 ⇒ 必报缺；注入任一旧口径句 ⇒ 必报残留。探针随真实判据同流——
+// 抽掉后仍绿即锚没有判别力，本条与真实判据因此互为判别。
+function docWordingChecks(cases) {
+  const problems = docWordingProblems(cases);
+  for (const item of cases) {
+    for (const phrase of item.required ?? []) {
+      if (!item.text.includes(phrase)) continue; // 缺失已由真实判据报告，不叠第二条
+      const stripped = [{ ...item, text: item.text.split(phrase).join('（反向构造：抽掉）') }];
+      if (!docWordingProblems(stripped).some((problem) => problem.includes('缺新口径'))) {
+        problems.push('反向构造判别力缺失（' + item.rel + ': 抽掉「' + phrase + '」未被判缺）');
+      }
+    }
+    for (const phrase of item.stale ?? []) {
+      const restored = [{ ...item, text: item.text + String.fromCharCode(10) + phrase }];
+      if (!docWordingProblems(restored).some((problem) => problem.includes('残留旧口径'))) {
+        problems.push('反向构造判别力缺失（' + item.rel + ': 注入「' + phrase + '」未被判残留）');
+      }
+    }
+  }
+  return problems;
+}
+
+// 对象字面量的顶层键（引擎侧成因表的取值口径；解析不出时返回 null——调用方据此显式报前提失效，
+// 不静默当「成因表没变」）。
+function literalObjectKeys(code, name) {
+  const start = String(code).indexOf('const ' + name + ' = {');
+  if (start < 0) return null;
+  const end = String(code).indexOf(String.fromCharCode(10) + '};', start);
+  if (end < 0) return null;
+  const keys = [...String(code).slice(start, end).matchAll(/^\s*'([^']+)':/gmu)].map((matched) => matched[1]);
+  return keys.length > 0 ? keys : null;
+}
 
 export const ENTRIES = [
 
@@ -784,9 +835,11 @@ export const ENTRIES = [
   },
 
   // 184c: 纪律判别句式族——入口 archive 读法三要素、plan/task 判别句式 + GUIDANCE 委托消化、
-  // Codex 平台事实与支持面（权威处唯一 + 引用册指针在场 + 判别句不回流）。
+  // 波次与 AC 覆盖判据句、Codex 平台事实与支持面（权威处唯一 + 引用册指针在场 + 判别句不回流）、
+  // 声明门禁与旧 change 分级的文档口径（多 --prompt 形态 + exit 全部覆盖 + 入口只拦错路径 +
+  // 旧 change 按 `newChange` 标记表述）。场景名随覆盖族补齐一并点名。
   {
-    name: '184c 技能文本锁：入口 archive 读法 + 规划约束判别句 + Codex 平台事实',
+    name: '184c 技能文本锁：入口 archive 读法 + 规划约束 + 波次与 AC 覆盖 + 声明门禁与旧 change 分级口径 + 判不了口径与段形门分写 + Codex 平台事实',
     run: () => {
       const problems = [];
       // —— 入口 archive 读法：三要素关键词在场 ——
@@ -831,6 +884,75 @@ export const ENTRIES = [
         const guidance = fs.readFileSync(path.join(SCRIPTS_DIR, '..', 'reference', 'entry-detail.md'), 'utf8');
         if (!guidance.includes('仍必须由 subagent-execute 委托消化')) {
           problems.push(guidanceRel + ' 缺「仍必须由 subagent-execute 委托消化」（direct 委托消化判别句）');
+        }
+      }
+      // —— 波次投影与 AC 覆盖判据句（本批新增判据的文本锁）——
+      // 判据 = 关键句在**该在场的册**里逐条在案：plan / task 两册锁「波次 = 依赖层级的投影」的规则
+      // 三句与出口行为（依赖面与波次编号是两套判据 / 恢复出路两条 / 判不了按成因二分 / 未声明任务
+      // 必须被 Wave 行覆盖 / replan 同源 / 不恢复旧形态约束），review 册锁 AC 覆盖的出口口径
+      //（verify 判红 + 判不了按成因二分 + review 一条汇总、不改退出码）。
+      // 反向构造：逐册逐句抽掉 ⇒ 必报该册缺该句（抽掉用全量 split/join，不是只替换首处）——
+      // 抽掉仍绿即锚失效，本条与真实判据同一次运行里互为判别力。
+      {
+        const waveAnchorsZh = [
+          ['波次投影 · 规则本体（中文）', '波次 = 依赖层级的投影'],
+          ['波次投影 · 无依赖 = 第 1 波（中文）', '无依赖 = 第 1 波'],
+          ['波次投影 · 同波任务彼此无依赖（中文）', '同波任务必须彼此没有依赖'],
+          ['波次投影 · 用 depends_on 表达先后（中文）', '就写 `depends_on` 把顺序声明出来'],
+          ['波次投影 · 恢复出路两条（中文）', '把该任务移到第 N 波，或补 `depends_on` 把顺序声明出来'],
+          ['波次投影 · 解析不到即未校验（中文）', '未校验（无波次段）'],
+          ['波次投影 · replan 同源（中文）', '`replan` 重校走同一判据、同一报文'],
+          ['波次投影 · 不恢复旧形态约束（中文）', '不恢复旧的「并行块必须连续成组」形态约束'],
+          ['波次投影 · 段在场而内容不可判按分级（中文）', '波次划分段内容不可判'],
+          ['波次投影 · 未声明任务必须被 Wave 行覆盖（中文）', 'TASK 里的每个非修复族任务都必须被某个 Wave 行覆盖'],
+        ];
+        // plan 册专属：约束本体那一段只写在规划册（task 册讲同一判据的形态与出口，不复述「依赖面」的
+        // 限定）——放共享列表会让 task 册被要求出现它本来不该有的句子。
+        const planOnlyWaveAnchorsZh = [
+          ['波次投影 · 依赖面的合法性（中文）', '依赖面的合法性只取决于依赖图本身'],
+          ['波次投影 · 依赖面合法不等于波次合法（中文）', '依赖面合法不等于波次声明合法'],
+        ];
+        const waveAnchorsEn = [
+          ['波次投影 · 规则本体（英文）', 'Waves are a projection of dependency levels'],
+          ['波次投影 · 同波任务彼此无依赖（英文）', 'tasks in the same wave must not depend on one another'],
+          ['波次投影 · 解析不到即未校验（英文）', 'not checked (no wave section)'],
+          ['波次投影 · 不恢复旧形态约束（英文）', 'does not bring back the old "parallel blocks must be contiguous" shape constraint'],
+          ['波次投影 · 段在场而内容不可判按分级（英文）', 'no Wave line resolves to a real task'],
+          ['波次投影 · 未声明任务必须被 Wave 行覆盖（英文）', 'must be covered by some Wave line'],
+        ];
+        const acAnchorsZh = [
+          ['AC 覆盖 · review 汇总行（中文）', 'REVIEW WARN: TEST.md 的 1.1 测试矩阵缺 AC 覆盖: AC-…'],
+          ['AC 覆盖 · 恢复句（中文）', '在 TEST.md 的 1.1 测试矩阵为这些 AC 补行'],
+          ['AC 覆盖 · 判不了即未校验（中文）', '未校验（<原因>）'],
+          ['AC 覆盖 · 不改退出码（中文）', '不改变退出码'],
+          ['AC 覆盖 · 内容不可判按分级（中文）', 'AC 覆盖判据无法执行'],
+          ['AC 覆盖 · 内容不可判进 WARN 计数（中文）', '该行进入 WARN 计数'],
+        ];
+        const acAnchorsEn = [
+          ['AC 覆盖 · 判不了即未校验（英文）', 'not checked (<reason>)'],
+          ['AC 覆盖 · 恢复句（英文）', "add the rows to TEST.md's 1.1 test matrix"],
+          ['AC 覆盖 · 内容不可判按分级（英文）', 'the AC coverage rule cannot run'],
+        ];
+        const projectionBooks = [
+          ['flow-comet-plan/SKILL.md', [...planOnlyWaveAnchorsZh, ...waveAnchorsZh, ...waveAnchorsEn]],
+          ['flow-comet-task/SKILL.md', waveAnchorsZh],
+          ['flow-comet-review/SKILL.md', [...acAnchorsZh, ...acAnchorsEn]],
+        ];
+        const missingAnchors = (text, anchors) => anchors
+          .filter(([, target]) => !text.includes(target))
+          .map(([label]) => label);
+        for (const [rel, anchors] of projectionBooks) {
+          const text = fs.readFileSync(path.join(SCRIPTS_DIR, '..', '..', rel.split('/')[0], 'SKILL.md'), 'utf8');
+          for (const label of missingAnchors(text, anchors)) {
+            problems.push(rel + ' 缺「' + label + '」（本批判据的判别句式）');
+          }
+          for (const [label, target] of anchors) {
+            if (!text.includes(target)) continue; // 缺失已由真实判据报告，不叠第二条
+            const probed = text.split(target).join('（反向构造：抽掉）');
+            if (!missingAnchors(probed, anchors).includes(label)) {
+              problems.push('反向构造判别力缺失（' + rel + ' 抽掉「' + label + '」未被判缺）');
+            }
+          }
         }
       }
       // —— ⑤ Codex 平台事实与支持面（**判别句随 `worktree-notes.md` 移出技能树而迁入
@@ -887,6 +1009,368 @@ export const ENTRIES = [
             ...pointerBooks.slice(1),
           ]).some((p) => p.includes('引用册指针不在场'))) {
             problems.push('反向构造判别力缺失（平台事实: 抽掉引用册指针未被判违规）');
+          }
+        }
+      }
+      // —— ⑥ 声明门禁的文档口径（入口册 + 入口展开册）——
+      // 判据 = 「多 --prompt 形态」与「exit 全部覆盖」两组判别句逐条在其所属文档在场 + 旧的
+      // 单 --prompt 声明口径零残留。锚取可辨认的整句片段，不取裸词（裸词「全部覆盖」「--prompt」
+      // 在别处也出现，改宽即恒真）；每条锚各配反向构造：抽掉所属文档里的该锚 ⇒ 必报缺该锚，
+      // 把旧句子还原进任一册 ⇒ 必报残留。既有锚（分条等价 / 两层加载 / 模板权威）一条不删。
+      // 恢复命令的锚落在**规范句**上（报文按协议派生、一次给全、照抄即通）——缺声明时的恢复形态是
+      // 这段最容易被读成操作指引的地方，锚错句等于给已废弃的写法背书；旧的「补缺项、漏模板清单」
+      // 写法只允许以「已废弃」的对照形态留在册子里（抽掉该标记，同一句就读回规范做法）。
+      {
+        const declarationBookRels = ['flow-comet/SKILL.md', 'flow-comet/reference/entry-detail.md'];
+        const declarationDocAnchors = [
+          ['入口册 · 一份命令可给多个 --prompt', 'flow-comet/SKILL.md',
+            '一份命令可以给多个 `--prompt`'],
+          ['入口册 · open 多协议示例（同行两个 --prompt）', 'flow-comet/SKILL.md',
+            'skill-load open flow-comet-change --prompt flow-kit/prompts/0-change.md --prompt flow-kit/prompts/1-requirement.md'],
+          ['入口册 · exit 判据是全部覆盖', 'flow-comet/SKILL.md',
+            'exit 的判据是「全部覆盖」而不是「任一命中」'],
+          ['入口册 · handoff-guarded 不在节点标记判据内', 'flow-comet/SKILL.md',
+            '`handoff-guarded` 是子代理侧义务，由 Return Contract 负责，不在节点标记判据内'],
+          ['展开册 · 一份命令可给多个 --prompt', 'flow-comet/reference/entry-detail.md',
+            '一份命令可以给多个 `--prompt`'],
+          ['展开册 · open 多协议示例（同行两个 --prompt）', 'flow-comet/reference/entry-detail.md',
+            'skill-load open flow-comet-change --prompt flow-kit/prompts/0-change.md --prompt flow-kit/prompts/1-requirement.md'],
+          ['展开册 · 协议文件面逐份覆盖', 'flow-comet/reference/entry-detail.md',
+            '该节点该读的**每一份**协议文件都要被声明过'],
+          ['展开册 · 技能面逐份覆盖', 'flow-comet/reference/entry-detail.md',
+            '都要有一个属于它的标记'],
+          ['展开册 · handoff-guarded 不在判据内', 'flow-comet/reference/entry-detail.md',
+            '**`handoff-guarded` 不在判据内**'],
+          ['展开册 · 恢复命令按协议派生（每个必需技能各一条）', 'flow-comet/reference/entry-detail.md',
+            '报文按**协议派生**给出该节点**每个** `guarded` 必需技能各一条命令'],
+          ['展开册 · 恢复命令一次给全、照抄即通', 'flow-comet/reference/entry-detail.md',
+            '三个面一次给全，照抄即通'],
+          ['展开册 · 分级（新 BLOCKED / 旧 WARN）', 'flow-comet/reference/entry-detail.md',
+            '新 change BLOCKED（强制全部覆盖）、旧 change 只 WARN'],
+          ['展开册 · 旧单值标记按 basename 计入覆盖', 'flow-comet/reference/entry-detail.md',
+            '照样按 basename 计入覆盖'],
+        ];
+        // 旧口径的两条判别形态：单 --prompt 的教学句、以及「每个协议文件对应一条声明命令」的
+        // 分条强制句。收紧后两者都不成立（分条与合并等价），回流即红。
+        const staleDeclarationSentences = [
+          '每个协议文件对应一条声明命令',
+          'skill-load <node> <skill> --prompt flow-kit/prompts/<阶段>.md',
+        ];
+        // 旧的「只补缺项、漏模板清单」恢复形态**允许作为对照留档**，但只能以「已废弃」的对照形态
+        // 出现：抽掉这个标记，同一句就被读回规范做法——规范句的两条锚判的是「规范句在不在」，判不了
+        // 「旧句有没有被当成规范」，两句因此互为规范 / 对照的分界。
+        const deprecatedRecoveryForm = 'skill-load <node> <skill> --prompt <缺的那份协议文件>';
+        const deprecatedRecoveryMarker = '已废弃';
+        const declarationDocProblems = (docs) => {
+          const out = [];
+          for (const [label, rel, anchor] of declarationDocAnchors) {
+            const text = docs.get(rel);
+            if (typeof text !== 'string') { out.push(rel + ' 不在场（' + label + ' 无法核对）'); continue; }
+            if (!text.includes(anchor)) out.push(rel + ' 缺「' + label + '」');
+          }
+          for (const [rel, text] of docs) {
+            if (typeof text !== 'string') continue;
+            for (const stale of staleDeclarationSentences) {
+              if (text.includes(stale)) out.push(rel + ' 残留旧声明口径「' + stale + '」');
+            }
+            // 旧恢复形态只允许留在对照句里：同句（以句号 / 换行为界）须带「已废弃」标记
+            let from = 0;
+            for (;;) {
+              const at = text.indexOf(deprecatedRecoveryForm, from);
+              if (at < 0) break;
+              from = at + deprecatedRecoveryForm.length;
+              const head = Math.max(text.lastIndexOf('。', at), text.lastIndexOf(String.fromCharCode(10), at));
+              const stops = [text.indexOf('。', from), text.indexOf(String.fromCharCode(10), from)]
+                .filter((index) => index >= 0);
+              const sentence = text.slice(head + 1, stops.length > 0 ? Math.min(...stops) : text.length);
+              if (!sentence.includes(deprecatedRecoveryMarker)) {
+                out.push(rel + ' 把旧恢复形态写成规范做法（只允许作为「' + deprecatedRecoveryMarker + '」的对照保留）');
+              }
+            }
+          }
+          return out;
+        };
+        const declarationDocs = new Map(declarationBookRels.map((rel) => [rel,
+          fs.readFileSync(path.join(SCRIPTS_DIR, '..', rel.replace('flow-comet/', '')), 'utf8')]));
+        problems.push(...declarationDocProblems(declarationDocs));
+        for (const [label, rel, anchor] of declarationDocAnchors) {
+          const text = declarationDocs.get(rel);
+          if (typeof text !== 'string' || !text.includes(anchor)) continue; // 缺失已由真实判据报告，不叠第二条
+          const probed = new Map(declarationDocs).set(rel, text.split(anchor).join('（反向构造：抽掉）'));
+          if (!declarationDocProblems(probed).some((p) => p.includes('缺「' + label + '」'))) {
+            problems.push('反向构造判别力缺失（声明口径: 抽掉「' + label + '」未被判缺）');
+          }
+        }
+        for (const stale of staleDeclarationSentences) {
+          const probed = new Map(declarationDocs);
+          for (const [rel, text] of declarationDocs) {
+            if (typeof text === 'string') probed.set(rel, text + '\n' + stale + '\n');
+          }
+          if (!declarationDocProblems(probed).some((p) => p.includes('残留旧声明口径'))) {
+            problems.push('反向构造判别力缺失（声明口径: 还原旧句「' + stale + '」未被判残留）');
+          }
+        }
+        // 反向构造（旧形态的对照标记）：摘掉「已废弃」⇒ 必报「把旧恢复形态写成规范做法」
+        // （只在对照句确实在场时探；对照句被整句删掉是允许的）
+        {
+          const detailRel = 'flow-comet/reference/entry-detail.md';
+          const detailText = declarationDocs.get(detailRel);
+          if (typeof detailText === 'string' && detailText.includes(deprecatedRecoveryForm)
+            && detailText.includes(deprecatedRecoveryMarker)) {
+            const probed = new Map(declarationDocs)
+              .set(detailRel, detailText.split(deprecatedRecoveryMarker).join('（对照）'));
+            if (!declarationDocProblems(probed).some((p) => p.includes('把旧恢复形态写成规范做法'))) {
+              problems.push('反向构造判别力缺失（声明口径: 摘掉旧形态的「'
+                + deprecatedRecoveryMarker + '」对照标记未被判违规）');
+            }
+          }
+        }
+      }
+      // —— ⑦ 文档口径与实现一致：入口只拦错路径 / 旧 change 按 `newChange` 标记分级 ——
+      // 与实现逐条对账（不在断言里写第二份判据）：
+      //   ① 入口侧的声明核对只判「已写下的每条声明是否落在节点协议面内」——缺失不在入口判；
+      //      「该读的每份是否都声明过」只在出口判。两册必须这样写——旧口径「错路径与少声明都由入口拦」
+      //      把出口的判据说成了入口的，读者会以为少声明也能在入口被挡下。
+      //   ② 旧 change 的分级判据是 `state.newChange === true`（`isNewChange`）——排障册不得再写成
+      //      「本规则之前创建的 change」：那是拿时间猜判据，而判据只有一个输入（初始化标记在不在）。
+      //      公开面不直写机器状态字段名（键名黑名单在场景 105），故文档侧一律写行为描述。
+      // 判据 = 锚句逐条在其所属册在场 + 旧句零残留 + 排障册每处旧 change 分级句都按标记表述；
+      // 反向构造：抽掉任一锚 ⇒ 必报缺该锚；还原旧句 / 摘掉某行的标记 ⇒ 必报残留或该行违规。
+      {
+        const skillRoot = path.join(SCRIPTS_DIR, '..');
+        const wordingDocs = {
+          entry: new Map([
+            ['flow-comet/SKILL.md', fs.readFileSync(path.join(skillRoot, 'SKILL.md'), 'utf8')],
+            ['flow-comet/reference/entry-detail.md',
+              fs.readFileSync(path.join(skillRoot, 'reference', 'entry-detail.md'), 'utf8')],
+          ]),
+          troubleshooting: new Map(['docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md',
+            'docs/MECHANISM.md', 'docs/MECHANISM-zh.md'].map((rel) => {
+            const abs = path.join(REPO_ROOT, rel);
+            return [rel, fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : null];
+          })),
+        };
+        const entrySideAnchors = [
+          ['入口册 · 入口只拦错路径', 'flow-comet/SKILL.md', '入口只拦错路径'],
+          ['入口册 · 缺失由出口拦', 'flow-comet/SKILL.md', '缺失由出口拦'],
+          ['展开册 · 入口只判已写下的每条声明', 'flow-comet/reference/entry-detail.md',
+            '入口只判「写下的每条声明对不对」'],
+        ];
+        const staleWording = {
+          entry: ['错路径与少声明',
+            '以及**该节点该读却没声明的那几份**，都会在下一次入口被拦下'],
+          // 只收「按时间猜判据」的旧句；机制册里「旧 change 只告警」的其它行是行为描述，不在此列
+          // （故机制册只做旧句零残留，不套逐行规则——否则会把正确的行为描述一起判红）。
+          troubleshooting: {
+            'docs/TROUBLESHOOTING.md': ['created before this rule', 'created before the rule'],
+            'docs/TROUBLESHOOTING-zh.md': ['在本规则之前创建', '规则生效前创建'],
+            'docs/MECHANISM.md': ['created before the rule', 'created before this rule'],
+            'docs/MECHANISM-zh.md': ['规则生效之前创建', '在本规则之前创建'],
+          },
+        };
+        // 排障册里每一处「旧 change 只告警」都别写成按时间判——判据只有「标记在不在」这一个输入。
+        // 判别句不是键名而是**行为描述**：公开面不直写机器状态字段名（场景 105 的黑名单），
+        // 所以文档只能写「初始化标记」这类说法——判据锚它，锚键名会与那条纪律直接打架。
+        const markerWordingRules = {
+          'docs/TROUBLESHOOTING.md': { line: /\bchange\b[^.]*\bwarn/i, marker: 'initialization marker' },
+          'docs/TROUBLESHOOTING-zh.md': { line: /change[^。]*只告警/, marker: '初始化标记' },
+        };
+        // 单一判据实现：真实核对与反向构造探针共用（两份实现必然分叉）。
+        const wordingProblems = ({ entry, troubleshooting }) => {
+          const out = [];
+          for (const [label, rel, anchor] of entrySideAnchors) {
+            const text = entry.get(rel);
+            if (typeof text !== 'string') { out.push(rel + ' 不在场（' + label + ' 无法核对）'); continue; }
+            if (!text.includes(anchor)) out.push(rel + ' 缺「' + label + '」');
+          }
+          for (const [rel, text] of entry) {
+            if (typeof text !== 'string') continue;
+            for (const stale of staleWording.entry) {
+              if (text.includes(stale)) out.push(rel + ' 残留旧口径「' + stale + '」');
+            }
+          }
+          for (const [rel, text] of troubleshooting) {
+            if (typeof text !== 'string') continue;
+            for (const stale of (staleWording.troubleshooting[rel] || [])) {
+              if (text.includes(stale)) out.push(rel + ' 残留旧口径「' + stale + '」');
+            }
+            const rule = markerWordingRules[rel];
+            if (!rule) continue; // 该册只做旧句零残留（机制册：其余「告警」句是行为描述）
+            text.split(String.fromCharCode(10)).forEach((line, index) => {
+              if (!rule.line.test(line)) return;
+              if (!line.includes(rule.marker)) {
+                out.push(rel + ' 第 ' + (index + 1) + ' 行把旧 change 分级写成按时间判（缺「' + rule.marker + '」标记）');
+              }
+            });
+          }
+          return out;
+        };
+        const missingTroubleshootingFaces = [...wordingDocs.troubleshooting]
+          .filter(([, text]) => text === null).map(([rel]) => rel);
+        if (missingTroubleshootingFaces.length > 0) {
+          console.log('SKIP: 184 的文档口径锚（' + missingTroubleshootingFaces.join(', ') + '）——本次检出无该公开文档面，'
+            + '未校验「旧 change 分级句按初始化标记表述」，请在权威源检出重跑本套件');
+        }
+        problems.push(...wordingProblems(wordingDocs));
+        // 反向构造 ①：抽掉任一入口侧锚 ⇒ 必报缺该锚
+        for (const [label, rel, anchor] of entrySideAnchors) {
+          const text = wordingDocs.entry.get(rel);
+          if (!text.includes(anchor)) continue; // 缺失已由真实判据报告，不叠第二条
+          const probed = {
+            entry: new Map(wordingDocs.entry).set(rel, text.split(anchor).join('（反向构造：抽掉）')),
+            troubleshooting: wordingDocs.troubleshooting,
+          };
+          if (!wordingProblems(probed).some((p) => p.includes('缺「' + label + '」'))) {
+            problems.push('反向构造判别力缺失（文档口径: 抽掉「' + label + '」未被判缺）');
+          }
+        }
+        // 反向构造 ②：把任一入口侧的旧口径还原进任一册 ⇒ 必报残留
+        for (const stale of staleWording.entry) {
+          const probed = { entry: new Map(), troubleshooting: wordingDocs.troubleshooting };
+          for (const [rel, text] of wordingDocs.entry) probed.entry.set(rel, text + String.fromCharCode(10) + stale);
+          if (!wordingProblems(probed).some((p) => p.includes('残留旧口径'))) {
+            problems.push('反向构造判别力缺失（文档口径: 还原旧句「' + stale + '」未被判残留）');
+          }
+        }
+        // 反向构造 ③：公共文档面——还原按时间判的旧句、摘掉某行的标记 ⇒ 必报残留 / 必报该行
+        for (const [rel, text] of wordingDocs.troubleshooting) {
+          if (typeof text !== 'string') continue;
+          const staleSentence = staleWording.troubleshooting[rel][0];
+          const restored = { entry: wordingDocs.entry,
+            troubleshooting: new Map(wordingDocs.troubleshooting).set(rel, text + String.fromCharCode(10) + staleSentence) };
+          if (!wordingProblems(restored).some((p) => p.includes(rel + ' 残留旧口径'))) {
+            problems.push('反向构造判别力缺失（' + rel + ': 还原旧句「' + staleSentence + '」未被判残留）');
+          }
+          const rule = markerWordingRules[rel];
+          if (!rule) continue; // 只做旧句零残留的册（机制册）不走逐行探针
+          const lines = text.split(String.fromCharCode(10));
+          const hitIndex = lines.findIndex((line) => rule.line.test(line) && line.includes(rule.marker));
+          if (hitIndex < 0) {
+            problems.push('反向构造的前提不成立（' + rel + ': 找不到按标记表述旧 change 分级的行）');
+            continue;
+          }
+          const mutated = lines.slice();
+          mutated[hitIndex] = mutated[hitIndex].split(rule.marker).join('（标记）');
+          const stripped = { entry: wordingDocs.entry,
+            troubleshooting: new Map(wordingDocs.troubleshooting)
+              .set(rel, mutated.join(String.fromCharCode(10))) };
+          if (!wordingProblems(stripped).some((p) => p.includes('第 ' + (hitIndex + 1) + ' 行'))) {
+            problems.push('反向构造判别力缺失（' + rel + ': 摘掉第 ' + (hitIndex + 1) + ' 行的标记未被判违规）');
+          }
+        }
+      }
+      // —— ⑧ 文档口径与实现一致：判不了的二分与「波次未校验 / TASK 段形门」分写 ——
+      // 两处口径都曾与实现分叉，且都是「文档比实现旧」而不是实现坏了：
+      //   ① 载体缺席曾被写成五件事（含「没有验收段 / 没有承载矩阵的第 1 轮段」）。承载段被删属
+      //      「内容不可判」——新 change BLOCKED、旧 change WARN 并进 WARN 计数；载体缺席只剩三件事：
+      //      缺 REQUIREMENT、缺 TEST.md、缺模板。作者能动的东西（段在不在）不是「无从判断」。
+      //   ② 「完全没有波次段」曾只留一句「未校验、不改退出码」。那是波次判据自己的结论，不是整个
+      //      出口的结论：模板要求而工件里没有的段由 TASK 段形门判，plan 出口与受控 replan 重签跑
+      //      同一套骨架判据（缺段 ⇒ 新 change BLOCKED / 旧 change WARN）。两条边界分开写，读者才
+      //      不会以为「删段」是绕过波次判据的写法。
+      // 判据 = 每处新口径在其所属文档逐条在场 + 旧口径零残留；实现侧同源核对 = 载体缺席的成因集合
+      // 仍由 ac-coverage 的成因表表达（三条，且两条「承载段被删」属内容不可判）——成因集合一变，
+      // 本节先红，逼着文档与锚同批跟上。反向构造：抽掉任一新句 ⇒ 必报缺；把旧口径还原进任一册 ⇒
+      // 必报残留（探针与真实判据共用同一判据实现，不另写第二份）。
+      {
+        const reviewBook = fs.readFileSync(
+          path.join(SCRIPTS_DIR, '..', '..', 'flow-comet-review', 'SKILL.md'), 'utf8');
+        const publicFaceRels = ['CHANGELOG.md', 'CHANGELOG-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
+          'docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md'];
+        const publicFaces = new Map(publicFaceRels.map((rel) => {
+          const abs = path.join(REPO_ROOT, rel);
+          return [rel, fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : null];
+        }));
+        const absentFaces = [...publicFaces].filter(([, text]) => text === null).map(([rel]) => rel);
+        if (absentFaces.length > 0) {
+          console.log('SKIP: 184 的判不了口径锚（' + absentFaces.join(', ') + '）——本次检出无该公开文档面，'
+            + '未校验「载体缺席三分 / 波次未校验与 TASK 段形门分写」，请在权威源检出重跑本套件');
+        }
+        const wordingCase = (rel, text, required, stale) => ({ rel, text, required, stale });
+        const wordingCases = [
+          wordingCase('flow-comet-review/SKILL.md（中文侧）', reviewBook, [
+            '**模板缺席**（段名无从派生）→ 打印「未校验（<原因>）」且不改退出码',
+            '**change 自己的载体文件本身缺席**（`REQUIREMENT.md` 缺席 / `TEST.md` 缺席）',
+            '验收准则段被删掉',
+            '围栏代码块里的示例行也不算覆盖',
+          ], ['**载体缺席**（`REQUIREMENT.md` 缺席 / 无验收准则段 / `TEST.md` 缺席 / 无第 1 轮承载段 / 模板缺席）']),
+          wordingCase('flow-comet-review/SKILL.md（英文侧）', reviewBook, [
+            'a missing template — the section names cannot be derived — prints "not checked (<reason>)" and keeps the exit code',
+            'a carrier document of the change itself being gone — `REQUIREMENT.md` absent or `TEST.md` absent',
+            'the acceptance section deleted from `REQUIREMENT.md`',
+            'a sample row inside a fenced code block counts as neither coverage nor a declared criterion',
+          ], ['a missing carrier — `REQUIREMENT.md` absent, `TEST.md` absent, or the template absent']),
+          wordingCase('CHANGELOG.md', publicFaces.get('CHANGELOG.md'), [
+            '**only the template missing** (the section names cannot be derived) is reported as not checked with the exit code untouched',
+            '**a carrier document of the change itself missing (`REQUIREMENT.md` / `TEST.md`)**',
+            'a deleted acceptance section',
+            '**A sample row inside a fenced code block counts as neither coverage nor a declaration**',
+          ], ['no acceptance section, no round-1 section', 'no requirement document, no test document, no template']),
+          wordingCase('CHANGELOG-zh.md', publicFaces.get('CHANGELOG-zh.md'), [
+            '**模板缺席**（段名无从派生）才明说未校验、不改退出码',
+            '**change 自己的 `REQUIREMENT.md` / `TEST.md` 缺席**',
+            '验收段被删掉',
+            '围栏代码块里的示例行既不算覆盖也不构成声明',
+          ], ['载体缺席只指三件事——缺 REQUIREMENT、缺 TEST.md、缺模板', '缺 REQUIREMENT、缺 TEST.md、缺模板、没有验收段、没有承载矩阵的第 1 轮段']),
+          wordingCase('docs/MECHANISM.md', publicFaces.get('docs/MECHANISM.md'), [
+            'does not block on that ground',
+            'also runs when a plan is re-signed through a controlled `replan`',
+            '**Only the template missing** — the section names cannot be derived — is reported as not checked and leaves the exit code alone',
+            '**A carrier document of the change itself missing (`REQUIREMENT.md` / `TEST.md`) is content the check cannot judge**',
+            '**A sample row inside a fenced code block is not coverage**',
+          ], ['is reported as not checked and keeps its exit code',
+            'A missing carrier — no requirement document, no test document, no template to derive the section names from']),
+          wordingCase('docs/MECHANISM-zh.md', publicFaces.get('docs/MECHANISM-zh.md'), [
+            '它报「未校验」、也不据此阻断',
+            '这道门在 plan 出口与受控 `replan` 重签时都会跑',
+            '**模板缺席**（段名无从派生）才报「未校验」、不改退出码',
+            '**change 自己的 `REQUIREMENT.md` / `TEST.md` 缺席属内容不可判**',
+            '围栏代码块里的示例行不算覆盖',
+          ], ['而完全没有波次段时，报「未校验」且不改变退出码',
+            '载体缺席——没有需求文档、没有测试文档、没有可派生段名的模板']),
+          wordingCase('docs/TROUBLESHOOTING.md', publicFaces.get('docs/TROUBLESHOOTING.md'), [
+            'the TASK section-shape gate judges its absence',
+            'again when the plan is re-signed through `replan`',
+            'Only the **template missing** (the section names cannot be derived) is reported as not checked and leaves the exit code alone',
+            '**a carrier document of the change itself missing (`REQUIREMENT.md` / `TEST.md`) is content the check cannot judge**',
+            '**A sample row inside a fenced code block is not coverage**',
+          ], ['and keeps its exit code',
+            'a carrier is missing only when the requirement document, the test document or the template the section names are derived from is not there at all']),
+          wordingCase('docs/TROUBLESHOOTING-zh.md', publicFaces.get('docs/TROUBLESHOOTING-zh.md'), [
+            '缺段仍由 TASK 段形门判定',
+            '这道门在 plan 出口与 `replan` 重签时都会跑',
+            '只有**模板缺席**（段名无从派生）才报「未校验」、不改退出码',
+            '**change 自己的 `REQUIREMENT.md` / `TEST.md` 缺席属内容不可判**',
+            '围栏代码块里的示例行不算覆盖',
+          ], ['完全没有波次段时打印「未校验（无波次段）」、不改变退出码',
+            '而载体缺席只指三件事：缺 REQUIREMENT、缺 TEST.md、缺可派生段名的模板']),
+        ].filter((item) => item.text !== null);
+        problems.push(...docWordingChecks(wordingCases));
+        // 实现侧同源核对：成因集合由 ac-coverage 的两张成因表表达——**未校验一侧只剩模板缺席**
+        // （模板不是 change 的文件），**内容不可判一侧含 change 自己的两个载体文件缺席**与两条
+        // 「承载段被删」的成因。三件事任一漂移（成因搬家 / 改判 / 少一条），本节先红，逼着六处
+        // 文档口径与锚同批跟上。取不到表即报告前提失效（不静默当「没变化」）。
+        const acCoverageText = engineScriptTexts().get('lib/ac-coverage.mjs') ?? '';
+        const carrierCauses = literalObjectKeys(acCoverageText, 'UNVERIFIED_EXPLANATIONS');
+        const contentCauses = literalObjectKeys(acCoverageText, 'UNJUDGEABLE_CAUSES');
+        if (carrierCauses === null || contentCauses === null) {
+          problems.push('实现侧成因表取不到（ac-coverage 的载体缺席 / 内容不可判成因表）——文档的两分口径无从对账');
+        } else {
+          if (carrierCauses.length !== 1 || carrierCauses[0] !== '模板缺席（段名无从派生）') {
+            problems.push('「未校验」一侧不再只剩模板缺席（实现 ' + carrierCauses.length + ' 条: '
+              + carrierCauses.join('、') + '）——文档「只有模板缺席报未校验」的口径要同批改');
+          }
+          const documentCauses = contentCauses.filter((cause) => cause === 'REQUIREMENT 缺席'
+            || cause === 'TEST.md 缺席');
+          if (documentCauses.length !== 2) {
+            problems.push('change 自己的载体文件缺席没有落在「内容不可判」一侧（实现: '
+              + contentCauses.join('、') + '）——删文件换到「未校验」放行的口子必须继续关着');
+          }
+          const deletedSectionCauses = contentCauses.filter((cause) => cause.includes('无验收准则段')
+            || cause.includes('无第 1 轮段'));
+          if (deletedSectionCauses.length !== 2) {
+            problems.push('承载段被删的成因不再落在「内容不可判」一侧（实现: ' + contentCauses.join('、')
+              + '）——文档把它写成载体缺席或另立一支都要重判');
           }
         }
       }
@@ -1245,6 +1729,21 @@ export const ENTRIES = [
             ['节点视图 · routeNode 路由视图（英文）', '**routeNode** = the routing view'],
             ['节点视图 · Fix batch（英文）', '**For a Fix batch, trust the `FIX-BATCH` line and the `NODE` printed by `next`**'],
           ];
+          // 委托记账与委托顺序分工（本批）：两册各自须写清「`result` 需要 request 是机制保证」与
+          // 「request 与子代理启动的先后仍是执行纪律」两件事——旧表述把前者写成「经验/事实陈述」，
+          // 读者会以为补 request 只是顺序纪律；后者那句（平台层无挂点）保持原文。
+          const delegationLedgerAnchors = [
+            ['委托记账 · result 写盘前校验 request（中文）', '`result` 在写盘前校验该任务存在 request 记录'],
+            // 恢复指引描述的是引擎**打印出来的形态**（命令单独成行 + description 可省略）：书册照抄旧句子时，
+            // 读者会照着一个脚本名去敲（bash 下缺路径 = command not found），文字与引擎两套说法。
+            ['委托记账 · 恢复句（中文）', '先照抄下面的命令记录委托（`description` 可省略），再重录 result'],
+            ['委托记账 · 零提交与只交 SUMMARY 同拦（中文）', '两种形态同样被拦'],
+            ['委托记账 · 判定先于零提交与子集校验（中文）', '该校验先于零提交语义与提交子集校验'],
+            ['委托顺序 · 两件事别混（中文）', '本条管的是「request 与子代理启动的先后」'],
+            ['result 需 request · 机制保证（英文）', 'is a mechanism guarantee'],
+            ['委托记账 · 写盘前拒绝（英文）', 'refused before anything is written (a new change blocks'],
+            ['委托顺序 · 两件事别混（英文）', 'this rule is about the order of the request and the subagent launch'],
+          ];
           const bookAnchorProblems = (books, anchors) => {
             const out = [];
             for (const [rel, text] of books) {
@@ -1256,7 +1755,7 @@ export const ENTRIES = [
             }
             return out;
           };
-          for (const [groupLabel, anchors] of [['预检与委托顺序', preflightOrderAnchors], ['节点视图三字段', nodeFieldAnchors]]) {
+          for (const [groupLabel, anchors] of [['预检与委托顺序', preflightOrderAnchors], ['节点视图三字段', nodeFieldAnchors], ['委托记账与委托顺序分工', delegationLedgerAnchors]]) {
             problems.push(...bookAnchorProblems(bookTexts, anchors));
             for (const [rel, text] of bookTexts) {
               for (const [label, anchor] of anchors) {

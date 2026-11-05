@@ -4,6 +4,9 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { resolveProtocol, readProtocolFile, validateProtocolSchema } from './protocol-utils.mjs';
+// 运行根（本次调用把哪个目录当项目根）由 lib/run-root.mjs 单源解析：与守卫族同一份事实——
+// 各写一份 env/cwd 推导，同一个调用两侧就会给出不同答案（详见该模块头注释）。
+import { resolveRunRoot } from './lib/run-root.mjs';
 import { initStateContext } from './lib/state-io.mjs';
 import { runAdvance, runInit, runNext, runRecord, runSelect, runStatus } from './lib/state-commands-flow.mjs';
 import { runConfig, runExecutionMode, runSkillLoad, runVerifyFail } from './lib/state-commands-admin.mjs';
@@ -14,9 +17,9 @@ import { runExplain } from './lib/state-explain.mjs';
 const command = process.argv[2] ?? 'status';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..');
-const runRoot = process.cwd();
+const runRoot = resolveRunRoot();
 // 路径上下文（runRoot / specsRoot / statePath）在分派前初始化一次——状态的读写与 .specs 路径
-// 判定统一由 lib/state-io.mjs 承担
+// 判定统一由 lib/state-io.mjs 承担；运行根本身由 lib/run-root.mjs 单源解析。
 initStateContext(runRoot);
 // 协议解析: 协议路径统一由 resolveProtocol 解析——优先级：--protocol CLI 参数 → FLOW_COMET_PROTOCOL
 // 环境变量 → 内置默认 reference/workflow-protocol.json。--protocol 为全局参数（可放在 command

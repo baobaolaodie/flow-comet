@@ -108,6 +108,8 @@ function seedExecuteEntryState(dir, taskText) {
   driveThroughDesign(dir);
   writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskText);
   assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir), 0);
+  // 协议 plan.requiredSkillCalls = flow-comet-task（guarded）：出口覆盖判据要求该技能也有标记
+  assertExit(runState(['skill-load', 'plan', 'flow-comet-task', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir), 0);
   assertExit(runState(['record', 'plan', '{"summary":"plan done"}'], dir), 0);
   assertExit(runGuard(['entry', 'plan'], dir), 0);
   const planExit = runGuard(['exit', 'plan', '--apply'], dir);
@@ -146,18 +148,27 @@ export const ENTRIES = [
       assertExit(runState(['init', CHANGE_ID], dir), 0);
       assertExit(runState(['skill-load', 'verify', 'flow-comet-integration', '--prompt', 'flow-kit/prompts/7-integration.md'], dir), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/UAT.md', '# UAT\n\n通过\n');
+      // verify 出口先跑 AC 覆盖判据（新 change）：夹具给出可判的最小一对——准则清单 + 1.1 矩阵行
+      // （矩阵行写在围栏外；围栏里的编号只是书写样例，不计覆盖）。本项被测的是验证命令的真实执行，
+      // 不是 AC 覆盖，故这里只补输入面、不动任何断言。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md',
+        '# REQUIREMENT\n\n- **Change ID**: ' + CHANGE_ID
+        + '\n\n## 用户故事\n\n- US-1：作为执行者，我想让验证命令真的被执行。'
+        + '\n\n## 验收准则（AC）\n\n- **AC-1**: Given 夹具前置 When 夹具动作 Then 夹具结果\n');
+      const acCoverageBlock = '## 第 1 轮 · 功能测试\n\n### 1.1 测试矩阵（AC → 用例）\n\n'
+        + '| AC | 类型 | 用例文件 / UAT | 状态 |\n|---|---|---|---|\n| AC-1 | unit | baseline.js | ✅ |\n\n';
       assertExit(runState(['record', 'verify', '{"summary":"verified"}'], dir), 0);
       const st = readStateFile(dir);
       st.currentNode = 'verify';
       writeState(dir, st);
       // ① 快速命令 → 出口通过
-      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```bash\nnode -e "1"\n```\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n' + acCoverageBlock + '## 验证命令\n\n```bash\nnode -e "1"\n```\n');
       assertExit(runGuard(['entry', 'verify'], dir), 0);
       const pass = runGuard(['exit', 'verify'], dir);
       assertExit(pass, 0);
       assertOut(pass, 'ALL CHECKS PASSED');
       // ② 缺省超时（未设 env）保持大值：耗时命令通过
-      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```bash\nnode -e "setTimeout(()=>{}, 1500)"\n```\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n' + acCoverageBlock + '## 验证命令\n\n```bash\nnode -e "setTimeout(()=>{}, 1500)"\n```\n');
       const defaultTimeout = runGuard(['exit', 'verify'], dir);
       assertExit(defaultTimeout, 0);
       assertOut(defaultTimeout, 'ALL CHECKS PASSED');
@@ -175,7 +186,7 @@ export const ENTRIES = [
         throw new Error('exit verify 失败计数未按 change 写入: ' + JSON.stringify(stTimed.verifyFailuresByChange));
       }
       // ④ 无验证命令 → 拦截（严格版要求）
-      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n无验证命令段。\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n' + acCoverageBlock + '无验证命令段。\n');
       const noCmd = runGuard(['exit', 'verify'], dir);
       assertExit(noCmd, 1);
       assertOut(noCmd, 'BLOCKED: TEST.md 需声明 ## 验证命令 段');
@@ -592,6 +603,8 @@ export const ENTRIES = [
       }
       // 源节点（verify）出口真实重跑：验证命令落盘副作用 + 推进 archive
       assertExit(runState(['skill-load', 'verify', 'flow-comet-verify', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
+      // 协议 verify.requiredSkillCalls = flow-comet-integration（guarded）：同一份协议文件、另一个技能面
+      assertExit(runState(['skill-load', 'verify', 'flow-comet-integration', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
       assertExit(runState(['record', 'verify', '{"summary":"回源复验完成"}'], dir, env), 0);
       assertExit(runGuard(['entry', 'verify'], dir, env), 0);
       const verifyExit = runGuard(['exit', 'verify', '--apply'], dir, env);

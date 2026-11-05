@@ -15,6 +15,7 @@
 import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
+import { pathToFileURL } from 'url';
 import {
   assertExit,
   assertNotOut,
@@ -33,12 +34,23 @@ import {
   TASK_DONE,
   customProtocol,
   dropNamedImport,
+  engineCodeText,
   engineDefinitionHits,
   engineDefinitionModule,
+  engineDefinitionPattern,
+  engineImportsSymbolFrom,
   engineScriptTexts,
   handoffFor,
+  HANDOFF,
+  STATE,
+  writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import { scenarioProtocolPath } from '../lib/test-assertions.mjs';
+import { taskBlocks } from '../task-parsing.mjs';
+// 波次段名的登记点与「登记名 ↔ 模板段名」对账：登记值在骨架模块（模板缺席时的段名基准唯一登记处），
+// 归一化取共享实现——两边同一把尺子，改字的段名不得被判成一致。
+import { WAVE_SECTION_NAME } from '../lib/guard-artifact-skeleton.mjs';
+import { normalizeHeading } from '../route-node.mjs';
 import {
   AUTHORITATIVE_SOURCE_ANCHOR_REL,
   GITHOOKS_CODES_REL,
@@ -251,12 +263,18 @@ const VERIFY_COMMAND_BODY = ['```', 'node --check baseline.js', '```'].join('\n'
 const TASK_BLOCK_BODY = '<task id="T01" status="done"><action>实现夹具被测项</action>'
   + '<write_files>src/fixture.mjs</write_files><verify>node --check baseline.js</verify></task>';
 
+// 波次段正文：夹具任务 T01 无依赖 ⇒ 第 1 波。段在场却一条 Wave 行都没有时，plan 出口按「波次划分段
+// 内容不可判」拦（未验证 ≠ 通过）——本场景测的是「缺必填 H2」的段形判据，波次段必须写出可判声明，
+// 否则它先被波次判据拦下，被测报文根本不会出现。
+const TASK_WAVE_BODY = ['```', 'Wave 1: T01', '```'].join('\n');
+
 // 段级正文覆盖：[模板键, 段名片段, 正文]——只在夹具需要实质内容的位置使用。
 const BODY_OVERRIDES = [
   ['SUMMARY', '6 维自查', SIX_DIM_BODY],
   ['SUMMARY', 'verify 输出', VERIFY_COMMAND_BODY],
   ['REQUIREMENT', '验收准则', '- Given 夹具前置\n- When 夹具动作\n- Then 夹具结果（AC 夹具）'],
   ['REQUIREMENT', '用户故事', '- US-1 作为执行者，我想让夹具可通过结构校验。'],
+  ['TASK', '波次划分', TASK_WAVE_BODY],
   ['TASK', '任务清单', TASK_BLOCK_BODY],
   ['REVIEW', '2.2', '- **F1 · 夹具发现**：某处存在一个可记录的衰退风险 [已修]\n'
     + '  - **Symptom**: 夹具现象\n  - **Source**: 夹具来源\n'
@@ -417,17 +435,9 @@ function uiDesignDoc(opts = {}, omitKeys = []) {
 
 // 前端 change 的声明标记：节点自身协议标记（design → 2-design.md）与 ui-design 技能标记
 // （guarded 绑定要求真实声明）。两者缺一都会先被证据门 / 标记门拦下，掩盖被测的段形判据。
+// 走统一的声明标记夹具（协议派生，不手抄技能/协议清单）；前端 = 连条件绑定的 ui-design 一起声明。
 function writeFrontendDesignMarkers(dir) {
-  writeFile(dir, CHANGE_DIR + '/.skill-loads/design-flow-comet-design.json',
-    JSON.stringify({
-      node: 'design', skill: 'flow-comet-design', protocol: '2-design.md',
-      templates: ['DESIGN'], at: '2026-08-01T00:00:00.000Z',
-    }, null, 2) + '\n');
-  writeFile(dir, CHANGE_DIR + '/.skill-loads/design-flow-comet-ui-design.json',
-    JSON.stringify({
-      node: 'design', skill: 'flow-comet-ui-design', protocol: '2a-ui-design.md',
-      templates: ['UI-DESIGN'], at: '2026-08-01T00:00:00.000Z',
-    }, null, 2) + '\n');
+  writeNodeDeclarationMarkers(dir, 'design', { frontend: true });
 }
 
 // 每个 setup 先清空 change 目录与归档目录：同一夹具根里连续构造多组用例时，上一组残留的工件
@@ -447,6 +457,7 @@ function setupOpen(dir, changeOpts = {}, requirementOpts = {}) {
   const st = newChangeState('open');
   st.evidence.open = { summary: 'intake complete' };
   writeState(dir, st);
+  writeNodeDeclarationMarkers(dir, 'open');
 }
 
 function setupDesign(dir, { changeOpts = {}, designOpts = {}, uiDesign = undefined, declareUiDesign = false } = {}) {
@@ -465,6 +476,8 @@ function setupDesign(dir, { changeOpts = {}, designOpts = {}, uiDesign = undefin
     ? { summary: 'design done', completedChecks: ['required-skill:design.flow-comet-ui-design'] }
     : { summary: 'design done' };
   writeState(dir, st);
+  // 前端夹具（uiDesign 在场 = 前端）连条件绑定的 ui-design 一起声明；非前端不写它（本就不要求）。
+  writeNodeDeclarationMarkers(dir, 'design', { frontend: uiDesign !== undefined });
 }
 
 function setupPlan(dir, taskOpts = {}) {
@@ -474,6 +487,7 @@ function setupPlan(dir, taskOpts = {}) {
   const st = newChangeState('plan');
   st.evidence.plan = { summary: 'plan done' };
   writeState(dir, st);
+  writeNodeDeclarationMarkers(dir, 'plan');
 }
 
 function setupExecute(dir, summaryOpts = {}) {
@@ -486,6 +500,7 @@ function setupExecute(dir, summaryOpts = {}) {
   st.evidence.execute = { summary: 'executed' };
   st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
   writeState(dir, st);
+  writeNodeDeclarationMarkers(dir, 'execute');
 }
 
 function setupReview(dir, reviewOpts = {}) {
@@ -495,17 +510,33 @@ function setupReview(dir, reviewOpts = {}) {
   const st = newChangeState('review');
   st.evidence.review = { summary: 'review done' };
   writeState(dir, st);
+  writeNodeDeclarationMarkers(dir, 'review');
 }
+
+// verify 夹具自带的 AC 覆盖配对（准则清单 + 1.1 矩阵行）：verify 出口先跑 AC 覆盖判据，新 change 下
+// 缺 `REQUIREMENT.md` 或矩阵行会在被测的段形判据之前拦下——夹具因此给出可判的最小一对，
+// 覆盖之外的形态（缺段 / 缺子段 / 矩阵段改标题）由各用例自己改写。
+const AC_COVERAGE_REQUIREMENT_BODY = '- **AC-1**: Given 夹具前置 When 夹具动作 Then 夹具结果';
+const AC_COVERAGE_MATRIX_BODY = ['| AC | 类型 | 用例文件 / UAT | 状态 |', '|---|---|---|---|',
+  '| AC-1 | unit | baseline.js | ✅ |'].join('\n');
 
 function setupVerify(dir, testOpts = {}) {
   resetFixture(dir);
   writeTemplateFixture(dir, 'TEST');
+  writeTemplateFixture(dir, 'REQUIREMENT');
   writeBaseline(dir);
-  writeFile(dir, CHANGE_DIR + '/TEST.md', renderDoc('TEST', testOpts));
+  writeFile(dir, CHANGE_DIR + '/REQUIREMENT.md', renderDoc('REQUIREMENT', {
+    body: [['验收准则', AC_COVERAGE_REQUIREMENT_BODY]],
+  }));
+  writeFile(dir, CHANGE_DIR + '/TEST.md', renderDoc('TEST', {
+    ...testOpts,
+    body: [...(testOpts.body ?? []), ['1.1', AC_COVERAGE_MATRIX_BODY]],
+  }));
   writeFile(dir, CHANGE_DIR + '/UAT.md', '# UAT\n\n## 验收结果\n\n- 通过（夹具）。\n');
   const st = newChangeState('verify');
   st.evidence.verify = { summary: 'verified' };
   writeState(dir, st);
+  writeNodeDeclarationMarkers(dir, 'verify');
 }
 
 const LESSONS_FIXTURE = [
@@ -538,6 +569,9 @@ function setupArchive(dir, { evidence = {}, lessons = LESSONS_FIXTURE, summaryCo
   const st = newChangeState('archive');
   st.evidence.archive = { summary: 'archived', ...evidence };
   writeState(dir, st);
+  // 标记写在**活动** change 目录里（真实链路里它随归档动作一起搬家——模拟搬家的用例自己 rename
+  // CHANGE_DIR，标记因此天然跟随；找不到活动路径时 findSkillLoadsDir 才回溯归档路径）。
+  writeNodeDeclarationMarkers(dir, 'archive', { changeId: CHANGE_ID });
 }
 
 function runSideCommand(dir, scriptRel, args) {
@@ -764,6 +798,479 @@ function legacyMechanismLine(text) {
   return text.split(/\r?\n/).find((line) => line.includes('段名') && /open|design|plan/.test(line)) ?? '';
 }
 
+// ---------- 段体切片形态探针（段体单源锁的判据面） ----------
+
+// 一份「按标题切段体」的实现 = 三种写法之一（A/B/C）写在两种位置之一（D = 对象属性箭头）；判定粒度是
+// **具名代码单元**（`functionBodies` 切出的顶层函数体、`objectLiteralArrowBodies` 切出的对象属性箭头体），
+// 形态命中按「文件 + 名称」登记，与取用面的「文件 + 符号」同一粒度：
+//   A 行扫描：同一单元里三件事齐备——① 段头判定（行首 ATX 标题正则，或以其为模式串的 RegExp
+//     构造）② 在判定处收尾（break）③ 把原始行拼成段体（+= line / push(line…) / slice(…).join(…)）；
+//   B 正则切片：同一单元里出现「从段头截到下一个段头」的正则 idiom——惰性 `[\s\S]` 片段配
+//     `(?=…\n## …)` 前瞻，或 `.split(/\n## …/)` 按标题行切；
+//   C 字符串字面量切分：段界写成字符串而不是正则——`.split('\n## …')` / `.indexOf('## …')`
+//     （B 的判据要求正则字面量，同一件事换个写法就整份躲在锁外）；
+//   D 位置：以上任一写法写进**对象字面量的内联箭头**（`passes: (t) => { … }`）——顶层函数切分只看
+//     `function NAME` / `const NAME = () => {`，属性值的箭头体它看不见。
+// 缺任一件都不算：围栏状态过滤器没有段头判定，条目块收集器不在标题处收尾，键解析器把行拆成字段。
+// 段头判定的正则形态覆盖三种写法：`/^#…`、`/^(#{1,6})…`（标题等级写成捕获组）与 `.startsWith('#')`。
+// 旧判定只认「`/^#` 紧邻」一种形态，`^(#{1,6})` 这种带捕获组的写法整份躲在锁外——context-init 的
+// 私有段体切片正是此形态，受检面扩面时一并修掉。
+const SECTION_HEADING_TEST_RE = /\/\^\(?#{1,6}|['"]\^\(?#{1,6}|\.startsWith\(\s*['"]#/u;
+const SECTION_BREAK_RE = /\bbreak\b/u;
+const SECTION_BODY_ACCUMULATION_RE = /\+=\s*line\b|\.push\(\s*line\b|\.push\(\s*lines\[|\.slice\([^)]*\)\.join\(/u;
+
+// 顶层函数体（function 声明 / const NAME = (…) => {…}）按花括号配对切。注释与字符串里的花括号会让配对
+// 偏一档，只影响检出精度、不影响判据方向：误报会显式红，漏报由行为断言兜住。
+// 花括号配对切体（唯一一处）：从起始行切到配对闭合的那一行（含首末行）。顶层函数体与对象属性箭头体
+// 共用它——两处各写一份配对循环时，其中一处改了口径（例如只认 `}` 起头的行）另一处不会跟上。
+function bracedBodyFrom(lines, startIndex) {
+  let depth = 0;
+  let started = false;
+  const body = [];
+  for (let line = startIndex; line < lines.length; line += 1) {
+    for (const ch of lines[line]) {
+      if (ch === '{') { depth += 1; started = true; } else if (ch === '}') depth -= 1;
+    }
+    body.push(lines[line]);
+    if (started && depth <= 0) break;
+  }
+  return body.join('\n');
+}
+
+function functionBodies(code) {
+  const lines = String(code).split('\n');
+  const out = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const matched = lines[index].match(/^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_$]+)/u)
+      ?? lines[index].match(/^(?:export\s+)?const\s+([A-Za-z0-9_$]+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z0-9_$]+)\s*=>\s*\{/u);
+    if (matched === null) continue;
+    out.push({ name: matched[1], text: bracedBodyFrom(lines, index) });
+  }
+  return out;
+}
+
+// A 形态（行扫描）：在段头判定处 break，再把原始行拼成段体。
+function isLineScanSlicer(unit) {
+  return SECTION_HEADING_TEST_RE.test(unit.text)
+    && SECTION_BREAK_RE.test(unit.text)
+    && SECTION_BODY_ACCUMULATION_RE.test(unit.text);
+}
+
+// B 形态（正则切片）：段界写在一对正则里——截取式（`[\s\S]` 片段 + 前瞻 `(?=` + 前瞻里出现 `\n##`）
+// 或切分式（`.split(/\n## …/)`）。两条都要求「标题行」在场：没有标题就没有段界，也就不是段体切片——
+// 只按行宽 / 标点切分的实现不在此列。
+const SECTION_SLICE_EXCERPT_RE = /\[\s*\\s\\S\s*\]/u;
+const SECTION_SLICE_FORWARD_LOOK_RE = /\(\?=/u;
+const SECTION_SLICE_HEADING_BOUNDARY_RE = /\\n#{1,6}/u;
+const SECTION_SLICE_SPLIT_RE = /\.split\(\s*\/[^/\n]*\\n#{1,6}/u;
+
+function isRegexSlicer(unit) {
+  return unit.text.split('\n').some((line) => SECTION_SLICE_EXCERPT_RE.test(line)
+      && SECTION_SLICE_FORWARD_LOOK_RE.test(line)
+      && SECTION_SLICE_HEADING_BOUNDARY_RE.test(line))
+    || SECTION_SLICE_SPLIT_RE.test(unit.text);
+}
+
+// C 形态（字符串字面量切分）：段界写成字符串字面量——`.split('\n## …')` / `.indexOf('## …')`。
+// 与 B 同义（按标题行切段）而写法不同：B 的两条判据都要求正则字面量，同一件事换个写法就整份在锁外
+// （context-init 的「已锁决策」格式检查正是这一形态，静态锁因此判它绿）。
+const SECTION_SLICE_STRING_BOUNDARY_RES = [
+  /\.split\(\s*['"]\\n#{1,6}/u,
+  /\.indexOf\(\s*['"]#{1,6}[\s'"]/u,
+];
+
+function isStringLiteralSlicer(unit) {
+  return SECTION_SLICE_STRING_BOUNDARY_RES.some((boundary) => boundary.test(unit.text));
+}
+
+// 对象字面量内联箭头（`passes: (t) => { … }`）：属性值的箭头体。顶层函数切分（functionBodies）只看
+// `function NAME` / `const NAME = () => {`，写进对象属性就躲开了形态面。符号名取属性键——登记粒度与
+// 「文件 + 符号」一致，属性名在同一文件内重名时按「文件 + 属性名」合并（与第二份定义同名的处置相同）。
+function objectLiteralArrowBodies(code) {
+  const lines = String(code).split('\n');
+  const out = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const matched = lines[index].match(/^\s*([A-Za-z0-9_$]+)\s*:\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z0-9_$]+)\s*=>\s*\{/u);
+    if (matched === null) continue;
+    out.push({ name: matched[1], text: bracedBodyFrom(lines, index) });
+  }
+  return out;
+}
+
+// E 行数组切片：段首用 `findIndex(标题谓词)` 定位、段尾用 `slice(start, …)` 取到——「按标题行切出
+// 一段」的第三种写法。段界判定往往被提成辅助函数（`headingOf` / `sectionEnd` / 导入的 `hasSection9`），
+// 单元里只剩下 `findIndex` + `slice`，于是 A/B/C 三条写法一条也不命中：evolve 的沉淀段切片正是此形态，
+// 旧判据对它整份判绿。判据因此要求三件事同现——`findIndex(`、`slice(`，以及**可达的标题判定**
+// （单元内联的标题正则 / `startsWith('#')`，或单元调用的、同文件内定义的含标题判定的辅助函数）。
+// 边界（如实登记）：谓词若完全来自别的模块且不落在同文件辅助上（例如本文件既没有标题正则、也没有
+// 标题辅助），本形态就够不着——登记条目的「合并条件」正是写这种边界的唯一落点，行为断言另兜一层。
+const SECTION_SLICE_FINDINDEX_RE = /\.findIndex\(/u;
+const SECTION_SLICE_ARRAY_CUT_RE = /\.slice\(/u;
+
+// 同文件内「含标题判定的辅助函数」名：单元调用它们即视为段界判定可达（把判定提成辅助不等于换了
+// 一件事）。只取顶层声明——对象属性箭头里再套一层标题判定的写法由 D 位置面单独覆盖。
+function headingPredicateNames(code) {
+  return functionBodies(code)
+    .filter((unit) => SECTION_HEADING_TEST_RE.test(unit.text))
+    .map((unit) => unit.name);
+}
+
+function mentionsHeadingBoundary(unit, helperNames) {
+  if (SECTION_HEADING_TEST_RE.test(unit.text)) return true;
+  return helperNames.some((name) => name !== unit.name
+    && new RegExp('\\b' + name + '\\b', 'u').test(unit.text));
+}
+
+function isLineArraySlicer(unit, helperNames) {
+  return SECTION_SLICE_FINDINDEX_RE.test(unit.text)
+    && SECTION_SLICE_ARRAY_CUT_RE.test(unit.text)
+    && mentionsHeadingBoundary(unit, helperNames);
+}
+
+// 形态面 = 两种位置 × 四种写法的全部命中：写法判定各是一份谓词，位置只决定在哪一堆具名单元上套用。
+// 位置面的盲区（D：对象字面量内联箭头）因此不与写法面各写一套——旧的锁只看顶层函数，把同一件事写进
+// 对象属性就整份躲开了。谓词签名（unit, helperNames）统一：E 形态要看「调用的辅助是不是标题判定」，
+// A/B/C 忽略第二个参数（它们只看单元文本）。
+const SECTION_SLICE_FORM_PREDICATES = [isLineScanSlicer, isRegexSlicer, isStringLiteralSlicer, isLineArraySlicer];
+
+function sectionSliceHits(code) {
+  const helperNames = headingPredicateNames(code);
+  const hitsIn = (units) => units
+    .filter((unit) => SECTION_SLICE_FORM_PREDICATES.some((matches) => matches(unit, helperNames)))
+    .map((unit) => unit.name);
+  return [...new Set([...hitsIn(functionBodies(code)), ...hitsIn(objectLiteralArrowBodies(code))])];
+}
+
+// 单源的导出符号集：只有它们受「导出实现恰一处 / 不得自带第二份定义 / 必须具名取用」约束。
+const SECTION_SOURCE_SYMBOLS = ['sectionBody', 'scanHeadings'];
+
+// 段体单源锁的**登记表**：把面内仍存在的同类实现逐条登记（文件 + 符号 + 理由 + **合并条件**四件齐备）。
+// 登记是让缺口可见，不是放行：
+//   · 只覆盖 ③ 形态命中这一条判据；② 的单源符号第二份定义 / 未取用**不接受豁免**——否则登记一个
+//     sectionBody 副本就能让真实副本静默通过（旧锁把 `continue` 放在符号判定之前，正是如此）；
+//   · 条目必须**当场命中**（该文件该函数此刻仍在形态面上）：修好或改名后未删 ⇒ 陈旧，判红。
+//   · **合并条件必填**：一条登记要回答「什么条件下就该删掉它、改用单源」——只写理由的登记是永久
+//     豁免（缺口从此不可收口），而锁本身判不了「这个缺口还会不会收」，只能要求它写下来并被看见。
+// 受检面 = 引擎实现面（与 `engineScriptTexts` 同一派生口径：顶层入口 ∪ 静态可达模块 ∪ 非套件自持的
+// `lib/**`）。套件自持面（`scenarios/**`、`items/**`、只被套件入口可达的 lib 模块）是夹具与其自身
+// 判据，不在引擎面上——把它们算进来会让锁去登记自己用的行扫描辅助（形态探针本身），判据反而失真。
+const SECTION_SLICE_REGISTRY = [
+  {
+    file: 'health.mjs',
+    symbol: 'collectDebt',
+    // 这一条是**能力差异**，不是同一件事的第二份实现：技术债段体的段界要与**段标题自身的层级**比较
+    // （`## 技术债` + `### 明细` 里的子标题属于段内，不是段边界——按固定级别截断会把子标题之后的
+    // 表格整段丢掉），而这个层级还要随读数回传给「复现命令」（命令里的段级必须取自同一处，否则
+    // `## 技术债` 的项目照抄命令就复现不出本报告的读数）。单源的 sectionBody 两项能力都给不了：
+    // 它只接受一个固定的结束级别，且只返回段体正文、不返回命中的标题。
+    reason: '能力差异：段界要与段标题自身的层级比较，且该层级需回传给「复现命令」——'
+      + 'sectionBody 只接受固定结束级别、只返回段体正文，两项都给不了。',
+    mergeCondition: 'section-body.mjs 增加「段体 + 命中标题（含层级）」的返回形态后，health.mjs 改用它'
+      + '并把段级从同一次命中取回；届时删除本条（陈旧登记判红会提醒）。',
+  },
+  {
+    file: 'evolve.mjs',
+    symbol: 'locateSedimentSection',
+    // 能力差异：evolve 要的是**行区间**而不是段体正文——沉淀段的候选解析在行数组上做（表格行 / 列表
+    // 项 / 围栏块整块），插入点也要落回同一个行数组；段首行（含标题）与「同级或更高级标题」的边界
+    // 都由它自己算，层级取自该段标题自身。sectionBody 只给段体字符串、只接受固定结束级别；
+    // scanHeadings 给得出围栏外的标题下标，但区间的「按标题层级收尾」仍要消费方自己推。
+    reason: '能力差异：消费方要行区间（段首行 + 段尾行）而不是段体正文字符串，段界按段标题自身层级收。',
+    mergeCondition: 'section-body.mjs 增加「段体区间（标题行下标 + 段尾下标，按命中标题层级）」的返回形态'
+      + '后，evolve 的 locateSedimentSection / findSection 改用它取区间并删除本条；本条是该文件在写面外'
+      + '期间的登记，不是收口结论。',
+  },
+];
+
+// 段体单源判据（纯函数 + 合成输入可驱动）：given = Map(相对路径 → 文本)，registry = 登记表。
+//   ① 单源模块由**导出面**派生（不写文件名）：导出实现恰一处，且 {sectionBody, scanHeadings} 都定义
+//      在那里；
+//   ② **取用面** = 面内提到单源符号的模块：必须具名取用，不得自带第二份定义、不得改从别处取用；
+//   ③ **形态面** = 面内**全部**模块的全部具名代码单元（顶层函数 ∪ 对象字面量内联箭头）——受检面不再
+//      只是取用面：把一份私有实现搬进一个不引用该符号的模块就躲不开了；形如切段体者只许是单源本身，
+//      其余必须登记。写法面 = A 行扫描 / B 正则切片 / C 字符串字面量切分（B 的判据要求正则字面量，
+//      C 是同一件事的另一种写法）；位置面 = 顶层函数 / 对象字面量内联箭头（后者是 functionBodies 的盲区）。
+// 返回问题描述数组（空 = 收口）。
+function sectionSingleSourceProblems({ texts: given, registry = SECTION_SLICE_REGISTRY }) {
+  const problems = [];
+  const exported = [...given.entries()]
+    .filter(([, text]) => /export\s+(?:async\s+)?function\s+sectionBody\b|export\s+const\s+sectionBody\s*=/u
+      .test(engineCodeText(text)))
+    .map(([rel]) => rel);
+  if (exported.length !== 1) {
+    problems.push('sectionBody 的导出实现应恰一处，实际 ' + JSON.stringify(exported));
+    return problems;
+  }
+  const sourceRel = exported[0];
+  const sourceText = given.get(sourceRel) ?? '';
+  for (const symbol of SECTION_SOURCE_SYMBOLS) {
+    if (!engineDefinitionPattern(symbol).test(sourceText)) {
+      problems.push(sourceRel + ' 未定义段体单源的 ' + symbol);
+    }
+  }
+  const mentionRe = /\b(?:sectionBody|scanHeadings)\b/u;
+  const consumers = [...given.keys()].filter((rel) => rel !== sourceRel
+    && mentionRe.test(engineCodeText(given.get(rel) ?? '')));
+  if (consumers.length < 5) {
+    problems.push('段体消费面不足五处（由真实引用派生）: ' + JSON.stringify(consumers));
+  }
+  for (const rel of consumers) {
+    const code = engineCodeText(given.get(rel));
+    for (const symbol of SECTION_SOURCE_SYMBOLS) {
+      if (!new RegExp('\\b' + symbol + '\\b', 'u').test(code)) continue;
+      if (engineDefinitionPattern(symbol).test(code)) {
+        problems.push(rel + ' 自带第二份 ' + symbol + ' 定义（应取用单一来源；登记不覆盖单源符号的副本）');
+        continue;
+      }
+      if (!engineImportsSymbolFrom({ text: given.get(rel), consumerRel: rel, symbol, sourceRel, texts: given })) {
+        problems.push(rel + ' 未从 ' + sourceRel + ' 取用 ' + symbol);
+      }
+    }
+  }
+  const hits = [];
+  for (const [rel, text] of given) {
+    if (rel === sourceRel) continue;
+    const code = engineCodeText(text);
+    for (const symbol of sectionSliceHits(code)) {
+      if (hits.some((hit) => hit.rel === rel && hit.symbol === symbol)) continue;
+      hits.push({ rel, symbol });
+    }
+  }
+  for (const hit of hits) {
+    const entry = registry.find((item) => item.file === hit.rel && item.symbol === hit.symbol);
+    if (entry === undefined) {
+      problems.push(hit.rel + ' 自带段体切片实现 ' + hit.symbol
+        + '（段界应只由 ' + sourceRel + ' 决定；确属另一件事则在锁里登记文件 + 符号 + 理由）');
+      continue;
+    }
+    if (SECTION_SOURCE_SYMBOLS.includes(hit.symbol)) {
+      problems.push(hit.rel + ' 的 ' + hit.symbol + ' 是单源符号的副本——登记不能放行真实副本');
+      continue;
+    }
+    if (String(entry.reason ?? '').trim() === '') {
+      problems.push(hit.rel + ' 的 ' + hit.symbol + ' 登记缺理由（登记是让缺口可见，不是静默放行）');
+    }
+    if (String(entry.mergeCondition ?? '').trim() === '') {
+      problems.push(hit.rel + ' 的 ' + hit.symbol + ' 登记缺合并条件（登记要写出「什么条件下收口」，'
+        + '否则这条豁免永远没有到期日）');
+    }
+  }
+  for (const entry of registry) {
+    if (!hits.some((hit) => hit.rel === entry.file && hit.symbol === entry.symbol)) {
+      problems.push('登记已陈旧：' + entry.file + ' 的 ' + entry.symbol
+        + ' 不再是段体切片形态（收口或改名后请删除该登记）');
+    }
+  }
+  return problems;
+}
+
+// 本任务收口的三处私有实现（原样搬回）：静态判据只读文本、不执行变异体——探针证明「改回私有实现 ⇒
+// 锁必红」。每条 edits 的锚文本若漂移，调用方报「锚已漂移」（不静默跳过：否则探针会退化成恒绿）。
+// 旧实现一律用 String.raw 模板保存：里面的 `\uFEFF` / `\r?\n` 是字面量，不该被再次转义。
+const REVERTED_PRIVATE_SLICERS = [
+  {
+    label: 'guard-uidesign 的「视觉调性」段体改回围栏盲的行扫描',
+    rel: 'lib/guard-uidesign.mjs',
+    symbols: ['visualToneSectionState'],
+    edits: [[
+      String.raw`  const body = sectionBody(text, headingPattern, { level: 2, endOnSeparator: false });`,
+      String.raw`  let body = null;
+  for (const line of String(text).replace(/\uFEFF/g, '').split(/\r?\n/)) {
+    if (/^##\s+/.test(line)) {
+      if (body !== null) break; // 到达下一个 H2 → 本段结束
+      if (headingPattern.test(line)) body = '';
+      continue;
+    }
+    if (body !== null) body += line + '\n';
+  }`,
+    ]],
+  },
+  {
+    label: 'guard-evidence-gates 的「6 维自查」/「自检方法」段体改回两条正则切片',
+    rel: 'lib/guard-evidence-gates.mjs',
+    symbols: ['summarySixDimBody', 'summarySelfCheckMethodBody'],
+    edits: [
+      [
+        String.raw`function summarySixDimBody(content) {
+  return sectionBody(content, SIX_DIM_HEADING_PATTERN, { level: 2, endOnSeparator: true });
+}`,
+        String.raw`function summarySixDimBody(content) {
+  const sixDim = content.match(/##\s*6\s*维自查[\s\S]*?(?=\n##\s|\n---|(?![\s\S]))/i);
+  return sixDim === null ? null : sixDim[0];
+}`,
+      ],
+      [
+        String.raw`function summarySelfCheckMethodBody(content) {
+  return sectionBody(content, SELF_CHECK_METHOD_HEADING_PATTERN, { level: 2, endOnSeparator: true });
+}`,
+        String.raw`function summarySelfCheckMethodBody(content) {
+  const methodMatch = content.match(/##\s*自检方法(?:[（(][^）)\n]*[）)])?\s*\n([\s\S]*)/i);
+  return methodMatch ? methodMatch[1].split(/\n##\s|\n---/)[0] : null;
+}`,
+      ],
+    ],
+  },
+  {
+    label: 'context-init 改回同名私有 sectionBody（(body, headingName) 变体）',
+    rel: 'context-init.mjs',
+    symbols: ['sectionBody'],
+    edits: [[
+      String.raw`function contextSectionBody(structureText, headingName) {
+  const wanted = normalizeSectionName(headingName);
+  return sectionBody(
+    structureText,
+    (heading) => heading.level === 2 && normalizeSectionName(heading.text) === wanted,
+    { level: 2, endOnSeparator: false },
+  );
+}`,
+      String.raw`function sectionBody(body, headingName) {
+  const wanted = normalizeSectionName(headingName);
+  const kept = [];
+  let inSection = false;
+  for (const line of String(body ?? '').split('\n')) {
+    const heading = /^(#{1,6})[ \t]+(.+?)[ \t]*$/.exec(line);
+    if (heading) {
+      const level = heading[1].length;
+      if (inSection && level <= 2) break; // 到下一个同级或更高级标题即段结束
+      if (!inSection && level === 2 && normalizeSectionName(heading[2]) === wanted) {
+        inSection = true;
+        continue;
+      }
+    }
+    if (inSection) kept.push(line);
+  }
+  return inSection ? kept.join('\n') : null;
+}`,
+      ],
+      // 调用点也一并改回旧名：变异体因此是一份自洽的「改动之前的文件」，而不是半截替换。
+      ['contextSectionBody(t, EVOLVE_METADATA_SECTION)', 'sectionBody(t, EVOLVE_METADATA_SECTION)'],
+    ],
+  },
+];
+
+// ---------- 任务对键形态探针（配对键单源锁的判据面） ----------
+
+// 「任务对键」= 无序任务对的键：两个 id 先比较定序，再用一个**字符串字面量**当分隔符拼起来
+// （`a < b ? a + '\u0000' + b : b + '\u0000' + a`）。判据按**形态**判定，不看名字也不看分隔符取值：
+// 历史上的第二份实现叫 `gapPairKey`（与第一份不同名），换 `|` 一类分隔符的漂移也同样是第二份实现——
+// 按标识符名计数的锚对这两种形态都判绿（这正是本判据要补的盲区）。
+const PAIR_KEY_ORDER_RE = /\b([A-Za-z0-9_$]+)\s*<\s*([A-Za-z0-9_$]+)\s*\?/u;
+
+function pairKeyForm(text) {
+  const order = PAIR_KEY_ORDER_RE.exec(String(text ?? ''));
+  if (order === null) return false;
+  const [, left, right] = order;
+  if (left === right) return false;
+  // 分隔符只认「字符串字面量夹在两个标识符之间」：`left + '<任意字面量>' + right`（两种定序各判一次）。
+  // 标识符里的 `$` 是正则元字符：直接拼进模式会被当作串尾锚，含它的键因此被静默漏检（探针的假绿形态）。
+  const escaped = (identifier) => identifier.replace(/\$/gu, '\\$');
+  const joined = (first, second) => new RegExp(
+    '\\b' + escaped(first) + '\\s*\\+\\s*[\'"`][^\'"`]*[\'"`]\\s*\\+\\s*\\b' + escaped(second) + '\\b', 'u');
+  return joined(left, right).test(text) || joined(right, left).test(text);
+}
+
+// 引擎注释的「过程叙述」判据（纯函数 + 合成输入可驱动）：注释行里不许出现任务号与
+// 「本任务 / 待收口 / 已收进 / 已照形态」一类改动叙述——注释写的是不变式，不是某一轮改动的日记。
+// Wave 行写法示例是注释里唯一允许出现任务号的地方（它示范的是输入形态，不是改动历史），故带
+// `Wave ` / `depends on` / `[P]` 的行跳过。返回命中数组（空 = 收口），每条 { kind, lineNumber, line }。
+// 受检面是整个引擎实现面（调用方逐文件喂 engineScriptTexts），故命中必须带行号：没有行号的
+// 「某文件里有一处」等于让接手的人自己再 grep 一次。
+function commentNarrationHits(text) {
+  const narrative = /本任务|待收口|已收进|已照形态/u;
+  // 任务号 = `T` + 两位数字。紧跟半角冒号的**不是**任务号，而是 ISO 时间戳的时分量
+  // （`2026-02-30T00:00:00Z` 里的 `T00`）——注释里贴时间戳字面量是常态，判据不得把它读成任务号。
+  const taskNumber = /[^A-Za-z]T\d{2}\b(?!:)/u;
+  return String(text).split('\n')
+    .map((line, index) => ({ line, lineNumber: index + 1 }))
+    .filter((entry) => /^\s*\/\//u.test(entry.line))
+    .filter((entry) => !entry.line.includes('Wave ')
+      && !entry.line.includes('depends on') && !entry.line.includes('[P]'))
+    .flatMap(({ line, lineNumber }) => {
+      const hits = [];
+      if (taskNumber.test(line)) hits.push({ kind: '任务号', lineNumber, line: line.trim() });
+      if (narrative.test(line)) hits.push({ kind: '过程叙述', lineNumber, line: line.trim() });
+      return hits;
+    });
+}
+
+// 配对键单源判据（纯函数 + 合成输入可驱动）：返回问题数组（空 = 收口）。
+//   ① 形态面：「任务对键」形态在引擎面内只许出现一处（键只有一份实现）；
+//   ② 落点：那一处必须就在产出第三族的模块里（键与它的生产者同源；落点由定义面反查，不写文件名）；
+//   ③ 消费方：补集判据所在的模块不得持有任何键形态——它消费 task-graph 返回的判定（谓词），
+//      不自己比 id（第二份键的形态一旦漂移，两端键就不再相等，补集判据会静默失效）。
+function pairKeySingleSourceProblems({ texts }) {
+  const problems = [];
+  const hits = [];
+  for (const [rel, text] of texts) {
+    for (const unit of [...functionBodies(text), ...objectLiteralArrowBodies(text)]) {
+      if (pairKeyForm(unit.text)) hits.push({ rel, symbol: unit.name });
+    }
+  }
+  if (hits.length !== 1) {
+    problems.push('任务对键应恰一处实现，实际: ' + JSON.stringify(hits));
+    return problems;
+  }
+  const producer = engineDefinitionModule('collectCrossTaskConflicts');
+  if (producer === null) {
+    problems.push('第三族产出的定义面不唯一（反查失败）: '
+      + JSON.stringify(engineDefinitionHits('collectCrossTaskConflicts')));
+    return problems;
+  }
+  if (hits[0].rel !== producer.file) {
+    problems.push('任务对键落在 ' + hits[0].rel + '（应与第三族产出同源: ' + producer.file + '）');
+  }
+  const consumer = engineDefinitionModule('parallelGapReview');
+  if (consumer !== null && hits.some((hit) => hit.rel === consumer.file)) {
+    problems.push(consumer.file + ' 自建任务对键（补集判据应消费 ' + producer.file + ' 返回的判定）');
+  }
+  return problems;
+}
+
+// ---------- 写面元素的取用面（写面单源锁的判据面） ----------
+
+// 写面元素标签的字面量（元素名大小写无关）。判据按**形态**判定，不看名字与常量名：元素提取的形态是
+// 同一行里同时出现开标签与闭标签（正则字面量不能跨行），任何消费方自持一份标签正则，代码层就留下这个
+// 形态——元素名少一个 /i 的副本（大小写敏感）同样被它看见。那种副本让 7 字段门判「字段在场」、写面
+// 判定判「未知」：任务静默掉出写面判据面（写写重叠漏拦、同文件族漏判、伪并行启发式漏报），而同波同层
+// 的同文件对反被 [P] 判据当成「可并行」误报，恢复句还把方向指到 depends_on。只提到一次标签的报文 /
+// 恢复指引不是提取形态（「缺 <write_files> 元素」是在说缺什么，不是在解析它）。
+const WRITE_FACE_TAG_MENTION_RE = /write_files>/giu;
+const WRITE_FACE_EXTRACTION_MIN_MENTIONS = 2;
+
+// 一行里的标签提及次数（剥注释后的代码层）：>= 2 即元素提取形态（开 + 闭）。
+function writeFaceExtractionLines(text) {
+  return engineCodeText(text).split('\n')
+    .filter((line) => (line.match(WRITE_FACE_TAG_MENTION_RE) ?? []).length >= WRITE_FACE_EXTRACTION_MIN_MENTIONS);
+}
+
+// 单源面判据（纯函数 + 合成输入可驱动）：元素提取形态只许出现在单源模块的代码层（且恰一处），其余模块
+// 一处都不许有。返回问题数组（空 = 收口）。
+function writeFaceSourceProblems({ texts, sourceRel }) {
+  const problems = [];
+  for (const [rel, text] of texts) {
+    const extractionLines = writeFaceExtractionLines(text);
+    if (rel === sourceRel) {
+      if (extractionLines.length !== 1) {
+        problems.push(rel + '：写面元素提取应恰一处，实际 ' + extractionLines.length + ' 处（单源面被破坏）');
+      }
+      continue;
+    }
+    if (extractionLines.length > 0) {
+      problems.push(rel + ' 自带写面元素标签提取（' + extractionLines.length + ' 处）——元素提取应取用单源，'
+        + '大小写敏感的副本会让同一份写面在一处判在场、另一处判未知');
+    }
+  }
+  return problems;
+}
+
+// 派生面模块的**内存变异体**（data: URL；相对 import 重写为绝对 file: URL）：反向构造只改内存里的源
+// 文本，不落盘、不留残留。变异体因此与真模块共享同一组依赖，行为差异只来自被改动的那处代码。
+function inlineModuleUrl(source, rel) {
+  const rewritten = source.replace(/(from\s*')(\.[^']*)(')/gu, (whole, head, specifier, tail) =>
+    head + pathToFileURL(path.resolve(SCRIPTS_DIR, path.dirname(rel), specifier)).href + tail);
+  return 'data:text/javascript;charset=utf-8,' + encodeURIComponent(rewritten);
+}
+
 export const ENTRIES = [
 
   // ============================================================================================
@@ -809,7 +1316,7 @@ export const ENTRIES = [
   // ② SUMMARY 缺「已知接受 + 理由」→ BLOCKED；③ 示例条目（🔴 / ADR- / AC- / L- 形态）未出现
   // **不算缺段**（正例即「无任何示例条目的工件必须放行」）。
   {
-    name: 'TA-02 H3 结构子段缺则拦（TEST 1.5 / SUMMARY 已知接受 + 理由），示例条目不参与骨架',
+    name: 'TA-02 H3 结构子段缺则拦（TEST 1.5 / SUMMARY 已知接受 + 理由），示例条目不参与骨架 + review 出口的 AC 覆盖汇总 WARN（段名走骨架）',
     run: async (dir) => {
       // ① TEST 缺结构子段
       setupVerify(dir, { subsectionOmit: ['测试质量自检'] });
@@ -831,6 +1338,75 @@ export const ENTRIES = [
       // ④ 反向构造（判别力）：被抽掉的 TEST 子段确实来自登记表骨架，而不是标题巧合
       const registered = (docEntry('TEST').structureSubsections ?? []).map((s) => s.name).join('\n');
       assertTrue(registered.includes('测试质量自检'), '登记表未登记 TEST 的 1.5 结构子段——判据无处生根');
+
+      // ⑤~⑧ AC 覆盖与 1.1 矩阵段（review 出口只汇总、不阻断）：
+      //   · 验收段与 1.1 矩阵段的段名都从骨架派生（模板权威单链，判据不自写标题正则）——省编号 /
+      //     省括号的宽容写法同样命中（⑥），矩阵段换成无关标题即「不可判」而不是「全覆盖」（⑦）；
+      //   · review 出口对缺覆盖只给**一条**汇总 WARN（列缺失编号），退出码不变（AC-8）；
+      //   · 无 TEST.md 时不打该 WARN（review 出口今天不要求 TEST.md，判据无从求值就不制造噪音）。
+      const acBody = (ids) => (ids.length > 0
+        ? ids.map((id) => '### ' + id + ' · 夹具准则\n\n- **Given** 夹具前置\n- **When** 夹具动作\n- **Then** 夹具结果').join('\n\n')
+        : '- 本段只写散文、不含任何编号。');
+      const acMatrix = (ids) => ['| AC | 类型 | 用例文件 / UAT | 状态 |', '|---|---|---|---|',
+        ...ids.map((id) => '| ' + id + ' | unit | guard-self-test.mjs | ✅ |')].join('\n');
+      const matrixHeading = '### 1.1 测试矩阵（AC → 用例）';
+      // 夹具：review 节点 + REQUIREMENT（验收段列 acIds）+ TEST（1.1 矩阵只列 coveredIds）；
+      // heading 可换掉 1.1 段标题，用于段名宽容与「段缺席」两侧构造。
+      const setupAcReview = (acIds, coveredIds, heading = matrixHeading, matrixBodyOverride = null) => {
+        setupReview(dir);
+        writeTemplateFixture(dir, 'REQUIREMENT');
+        writeTemplateFixture(dir, 'TEST');
+        writeFile(dir, CHANGE_DIR + '/REQUIREMENT.md',
+          renderDoc('REQUIREMENT', { body: [['验收准则', acBody(acIds)]] }));
+        const testDoc = renderDoc('TEST', { body: [['1.1', matrixBodyOverride ?? acMatrix(coveredIds)]] });
+        writeFile(dir, CHANGE_DIR + '/TEST.md',
+          heading === matrixHeading ? testDoc : testDoc.replace(matrixHeading, heading));
+      };
+      const acSummaryLine = (res) => (res.output.match(/缺 AC 覆盖[^\n]*/u) ?? [''])[0];
+      // ⑤ 汇总 WARN：一条（不逐条刷屏）、列缺失编号、不阻断
+      setupAcReview(['AC-1', 'AC-2', 'AC-3'], ['AC-1']);
+      const reviewMissing = runGuard(['exit', 'review'], dir);
+      assertExit(reviewMissing, 0);
+      assertOut(reviewMissing, 'REVIEW WARN: TEST.md 的 1.1 测试矩阵缺 AC 覆盖');
+      assertTrue((reviewMissing.output.match(/缺 AC 覆盖/gu) ?? []).length === 1,
+        'review 出口只给一条汇总 WARN（不逐条刷屏），实际出现 '
+          + (reviewMissing.output.match(/缺 AC 覆盖/gu) ?? []).length + ' 次');
+      assertTrue(acSummaryLine(reviewMissing).includes('AC-2') && acSummaryLine(reviewMissing).includes('AC-3'),
+        '汇总 WARN 应列出全部缺失编号，实际: ' + acSummaryLine(reviewMissing));
+      assertNotOut(reviewMissing, 'BLOCKED');
+      // ⑥ 段名宽容：省编号、省括号的写法同样命中（定位走骨架 headingPattern，不是写死标题）
+      setupAcReview(['AC-1', 'AC-2'], ['AC-1'], '### 测试矩阵');
+      const reviewLoose = runGuard(['exit', 'review'], dir);
+      assertExit(reviewLoose, 0);
+      assertOut(reviewLoose, 'REVIEW WARN: TEST.md 的 1.1 测试矩阵缺 AC 覆盖');
+      // ⑦ 反向构造（判别力）：矩阵段缺席 ⇒ 不可判（打不出缺覆盖），不是「全覆盖」；全量覆盖同理不打 WARN
+      setupAcReview(['AC-1', 'AC-2'], ['AC-1'], '### 覆盖说明');
+      const reviewNoMatrix = runGuard(['exit', 'review'], dir);
+      assertExit(reviewNoMatrix, 0);
+      assertNotOut(reviewNoMatrix, '缺 AC 覆盖');
+      setupAcReview(['AC-1', 'AC-2'], ['AC-1', 'AC-2']);
+      const reviewCovered = runGuard(['exit', 'review'], dir);
+      assertExit(reviewCovered, 0);
+      assertNotOut(reviewCovered, '缺 AC 覆盖');
+      // ⑧ TEST.md 缺席（review 出口不要求它）→ 判据无从求值，不打 WARN、不改变退出码
+      setupReview(dir);
+      const reviewNoTest = runGuard(['exit', 'review'], dir);
+      assertExit(reviewNoTest, 0);
+      assertNotOut(reviewNoTest, '缺 AC 覆盖');
+      assertOut(reviewNoTest, 'ALL CHECKS PASSED');
+      // ⑨ 段体切片的围栏语义（1.1 矩阵段的段界由 lib/section-body.mjs 单点决定）：矩阵段里贴了围栏代码块
+      //    （块内含 `## `）时，围栏之后的矩阵行仍参与覆盖判定——段体若在示例处截断，一条 AC 都读不到，
+      //    「全覆盖」会被读成「全缺失」。
+      const fencedMatrix = ['```md', '## 代码块里的示例段标题', '```', '', acMatrix(['AC-1', 'AC-2'])].join('\n');
+      setupAcReview(['AC-1', 'AC-2'], [], matrixHeading, fencedMatrix);
+      const reviewFencedMatrix = runGuard(['exit', 'review'], dir);
+      assertExit(reviewFencedMatrix, 0);
+      assertNotOut(reviewFencedMatrix, '缺 AC 覆盖');
+      // ⑩ 分隔线语义保持：1.1 矩阵段不以 `---` 结束（既有语义）——分隔线之后的矩阵行照常参与判定
+      setupAcReview(['AC-1', 'AC-2'], [], matrixHeading, '---\n\n' + acMatrix(['AC-1', 'AC-2']));
+      const reviewRuleMatrix = runGuard(['exit', 'review'], dir);
+      assertExit(reviewRuleMatrix, 0);
+      assertNotOut(reviewRuleMatrix, '缺 AC 覆盖');
     },
   },
 
@@ -1170,8 +1746,10 @@ export const ENTRIES = [
 
   // TA-11 · 旧 change 只告警（AC-11）——旧 change（无 newChange 标记）同构缺段 → 不阻断并输出 WARN；
   // 反向构造：同一夹具置 newChange → BLOCKED。
+  // ⑤ 追加「视觉调性」段体的围栏语义：段里贴了含 `## ` 的围栏示例时，示例之后的「不适用」声明
+  // 仍要被读到（段界只由围栏外的标题决定）。
   {
-    name: 'TA-11 旧 change 同构缺段只 WARN 不阻断；同一夹具新 change 必 BLOCKED',
+    name: 'TA-11 旧 change 同构缺段只 WARN 不阻断；同一夹具新 change 必 BLOCKED；视觉调性段内的围栏示例不截断',
     run: async (dir) => {
       const missing = { omit: ['影响面'] };
       // ① 新 change：拦（对照基准——同一份缺损工件）
@@ -1202,13 +1780,27 @@ export const ENTRIES = [
       const designLegacyRes = exitNode(dir, 'design');
       assertExit(designLegacyRes, 0);
       assertOut(designLegacyRes, '旧 change 兼容');
+      // ⑤ 段体围栏语义：「视觉调性」段里贴一段含 `## ` 的围栏示例，「不适用」声明写在围栏**之后**
+      //    ⇒ 段体不被示例里的标题截断，判据仍读到声明（围栏是正文示例，不是段界）。旧的按行扫描
+      //    在这里截断段体 → 标记消失 → 判成前端 → 要求一份本不该存在的 UI-DESIGN.md（BLOCKED）。
+      setupDesign(dir, {
+        changeOpts: {
+          body: [['视觉调性',
+            '- **选定**：6 有机 / Organic\n\n```md\n## 示例段（围栏内，不是段界）\n```\n\n- 适用性：不适用（CLI 工具，无用户可见界面）']],
+        },
+      });
+      writeFrontendDesignMarkers(dir);
+      const fencedTone = exitNode(dir, 'design');
+      assertExit(fencedTone, 0);
+      assertOut(fencedTone, 'UI-DESIGN: skipped（非前端）');
     },
   },
 
   // TA-12 · 增量段合法位置（AC-12）——①②④⑤ 合法位置通过；③ 自检方法夹在中间 → BLOCKED。
   // 合法位置：紧随越界检查 / 文末 / 验证命令标题后紧跟代码块 / LESSONS 扫描位于自检方法之后。
+  // ⑥ 追加 SUMMARY 两条段体切片的围栏语义：6 维自查 / 自检方法段内的围栏示例不截断段体。
   {
-    name: 'TA-12 增量段位置：紧随越界检查/文末/验证命令+代码块/LESSONS 扫描在后均通过，夹中间拦',
+    name: 'TA-12 增量段位置：紧随越界检查/文末/验证命令+代码块/LESSONS 扫描在后均通过，夹中间拦；6 维自查/自检方法段内围栏示例不截断',
     run: async (dir) => {
       // ① 紧随越界检查（默认渲染即此形态）
       setupExecute(dir);
@@ -1235,6 +1827,20 @@ export const ENTRIES = [
       assertExit(inMiddle, 1);
       assertOut(inMiddle, 'BLOCKED');
       assertOut(inMiddle, '自检方法');
+      // ⑥ 段体围栏语义（SUMMARY 的两条切片）：6 维自查 / 自检方法段里各贴一段含 `## ` 的围栏示例，
+      //    方法声明写在围栏**之后** ⇒ 段体不被示例里的标题截断，六维实质内容与声明都仍被读到。
+      //    旧的两条正则在示例处截断段体 → 「6 维自查段无实质内容」/「缺 ## 自检方法 段」（BLOCKED）。
+      const fencedBlock = '```md\n## 示例段（围栏内，不是段界）\n```\n\n';
+      setupExecute(dir, {
+        body: [
+          ['6 维自查', fencedBlock + SIX_DIM_BODY],
+          ['自检方法', fencedBlock + 'brooks-review（夹具声明）'],
+        ],
+      });
+      const fencedExecute = exitNode(dir, 'execute');
+      assertExit(fencedExecute, 0);
+      assertOut(fencedExecute, 'ALL CHECKS PASSED');
+      assertNotOut(fencedExecute, '6 维自查段无实质内容');
     },
   },
 
@@ -1246,6 +1852,8 @@ export const ENTRIES = [
   //   ① `entry <内置节点>` 先打 `READ PROMPT:` 再打 `READ TEMPLATE:`，顺序按输出行索引判
   //      （不是只查两行在不在——行序是语义的一部分）；
   //   ② 声明别的节点的协议文件（open 声明 execute 的 4-dev.md）→ 入口 BLOCK，报文点名「与节点协议文件不符」；
+  //   ②c 一个标记声明**多份**协议（0-change.md + 4-dev.md）→ 入口逐份核对，第二份越界同样 BLOCK 并
+  //      点名 4-dev.md（只读 protocol 单值的实现只看第一份，这条会绿）；两份都在面内 ⇒ 放行；
   //   ③ design 的 2a-ui-design.md 是条件提示词（属该节点协议面）→ 不拦；入口按前端判据追出条件行
   //      （非前端不打印，反向构造即同一夹具只改「视觉调性」）；换成无关文件 → 拦；
   //   ④ record 缺 `--templates` 声明 → BLOCK，补上 → 放行；⑤ explain 现问输出 `TEMPLATE:` 行。
@@ -1342,6 +1950,27 @@ export const ENTRIES = [
       // 复位：归档诱饵撤掉、活动声明标记归位——③ 起按「已声明」继续
       fs.rmSync(path.join(dir, '.specs', 'archive'), { recursive: true, force: true });
       fs.renameSync(loadsAside, loadsDir);
+
+      // ②c 多 --prompt：一个标记可声明多份协议，入口必须**逐份**核对。只读 protocol 单值的实现只看
+      // 第一份 ⇒ 第二份落在节点协议面外也照样放行（记下的是「声明过」，不是「声明对」）。第一份是
+      // open 的协议文件、第二份是 execute 的 4-dev.md → BLOCKED 且点名 4-dev.md。
+      const multiPrompt = (prompts) => runState([
+        'skill-load', 'open', 'flow-comet-change',
+        ...prompts.flatMap((prompt) => ['--prompt', 'flow-kit/prompts/' + prompt]),
+        '--templates', 'CHANGE.md,REQUIREMENT.md',
+      ], dir);
+      assertExit(multiPrompt(['0-change.md', '4-dev.md']), 0);
+      const multiPromptEntry = runGuard(['entry', 'open'], dir);
+      assertExit(multiPromptEntry, 1);
+      assertOut(multiPromptEntry, 'BLOCKED');
+      assertOut(multiPromptEntry, '与节点协议文件不符');
+      assertOut(multiPromptEntry, '4-dev.md');
+      // 反向构造（单变量 = 被声明的路径）：两条 --prompt 都落在 open 的协议面内 ⇒ 放行。拦点因此是
+      // 「哪一份被声明」，不是「声明了几份」。
+      assertExit(multiPrompt(['0-change.md', '1-requirement.md']), 0);
+      const multiPromptOk = runGuard(['entry', 'open'], dir);
+      assertExit(multiPromptOk, 0);
+      assertNotOut(multiPromptOk, '与节点协议文件不符');
 
       // ③ 条件提示词不误拦 + 按前端判定打印：design 声明 2a-ui-design.md（条件提示词，属该节点协议面）
       // → 放行；前端 change 的入口追出条件行（与条件模板行对称），非前端 change 不打印。
@@ -1456,18 +2085,75 @@ export const ENTRIES = [
       const builtinUndeclared = runGuard(['exit', 'open'], dir);
       assertExit(builtinUndeclared, 1);
       assertOut(builtinUndeclared, 'BLOCKED');
-      // ④ 重新声明指引的提示词面（单一来源的直接判据）：内置节点拼该节点首个协议文件的真实路径
-      // （与入口 READ PROMPT 同源）；自定义节点没有内置映射 → 不拼（不编造路径，也不打占位符）。
-      const { nodeTemplateDeclaration, templateDeclareCommand } = await import('../protocol-utils.mjs');
-      const builtinCommand = templateDeclareCommand(
-        nodeTemplateDeclaration({ id: 'execute' }), { nodeId: 'execute', skillName: 'flow-comet-dev' });
-      assertTrue(builtinCommand === 'workflow-state.mjs skill-load execute flow-comet-dev'
-        + ' --templates SUMMARY.md --prompt flow-kit/prompts/4-dev.md',
-        '内置节点的重新声明命令应带真实提示词路径，实际: ' + builtinCommand);
-      const customCommand = templateDeclareCommand(
-        nodeTemplateDeclaration({ id: 'brainstorm', templates: ['CHANGE'] }), { nodeId: 'brainstorm', skillName: 'fixture-skill' });
-      assertTrue(customCommand === 'workflow-state.mjs skill-load brainstorm fixture-skill --templates CHANGE.md',
+      // ④ 声明命令的形态（唯一构造器的直接判据）：内置节点拼该节点**全部**协议文件的真实路径
+      // （与入口 READ PROMPT 同源）与该节点的模板全清单；自定义节点没有内置提示词映射 → 不拼
+      // （不编造路径，也不打占位符）。只带首份协议 / 漏模板清单都是「照抄走不通」的形态，逐条断死。
+      // 构造器同时产出**脚本路径**（平台化 + 引号）与**协议上下文**（本次运行解析到的协议不是内置
+      // 默认时才带 --protocol）：状态命令族与守卫族取的是这一处，裸脚本名 / 无协议上下文的形态不再存在
+      // ——「照抄能跑通」的行为证据在场景 100（解析打印文本 → 真执行）。
+      const { declarationSkillTargets } = await import('../protocol-utils.mjs');
+      const { declarationCommand } = await import('../lib/state-explain.mjs');
+      const declarationContext = (protocolPath) => ({
+        scriptsDir: path.join(dir, '.claude', 'skills', 'flow-comet', 'scripts'),
+        runRoot: dir,
+        packageRoot: path.join(dir, '.claude', 'skills', 'flow-comet'),
+        protocolPath,
+      });
+      // 内置默认协议 = **本次运行的那个安装根**自己的 reference/workflow-protocol.json（不是权威源
+      // 那一份）：判据比较的就是这两个路径，故夹具必须按「该安装根的内置默认」构造。
+      const installedSkillRoot = path.join(dir, '.claude', 'skills', 'flow-comet');
+      const builtinContext = declarationContext(path.join(installedSkillRoot, 'reference', 'workflow-protocol.json'));
+      const executeCommand = declarationCommand({
+        node: { id: 'execute' }, skill: 'flow-comet-dev', context: builtinContext });
+      assertTrue(executeCommand.startsWith('node "'),
+        '声明命令应以 node "<脚本路径>" 起头（裸脚本名照抄 command not found），实际: ' + executeCommand);
+      assertTrue(executeCommand.includes('/workflow-state.mjs" skill-load execute flow-comet-dev'
+        + ' --prompt flow-kit/prompts/4-dev.md --templates SUMMARY.md'),
+        '内置节点的声明命令应带脚本路径、全部协议文件与模板全清单，实际: ' + executeCommand);
+      // 协议上下文按「本次运行解析到的是不是内置默认」决定：内置默认加载它只是噪音，自定义协议
+      // 不随命令走则照抄解析到另一份（状态命令族没有 state 绑定这一来源）。
+      assertTrue(!executeCommand.includes('--protocol'),
+        '内置默认协议时声明命令不应带 --protocol，实际: ' + executeCommand);
+      const customProtocolContext = declarationCommand({
+        node: { id: 'execute' }, skill: 'flow-comet-dev', context: declarationContext(path.join(dir, 'custom-protocol.json')) });
+      assertTrue(customProtocolContext.includes('--protocol "custom-protocol.json"'),
+        '自定义协议下声明命令必须自带协议上下文（持久化相对形态），实际: ' + customProtocolContext);
+      // open：一条命令带该节点两份协议（旧形态只带首份 0-change.md——照抄后 exit 仍点名 1-requirement.md）
+      const openCommand = declarationCommand({
+        node: { id: 'open' }, skill: 'flow-comet-requirement', context: builtinContext });
+      assertTrue(openCommand.includes(' skill-load open flow-comet-requirement'
+        + ' --prompt flow-kit/prompts/0-change.md --prompt flow-kit/prompts/1-requirement.md'
+        + ' --templates CHANGE.md,REQUIREMENT.md'),
+        'open 的声明命令应带该节点全部协议文件与模板全清单，实际: ' + openCommand);
+      const customCommand = declarationCommand({
+        node: { id: 'brainstorm', templates: ['CHANGE'] }, skill: 'fixture-skill', context: builtinContext });
+      assertTrue(customCommand.includes(' skill-load brainstorm fixture-skill --templates CHANGE.md')
+        && !customCommand.includes('--prompt'),
         '自定义节点无内置提示词映射时不应拼 --prompt，实际: ' + customCommand);
+      // 装配单源：命令构造器在引擎面只此一处定义（第二份装配 = 同一件事的第二种文本形态，
+      // 而两种文本只有一种能执行——这正是本判据要防的形态）。
+      const constructorHits = engineDefinitionHits('declarationCommand');
+      assertTrue(constructorHits.length === 1 && constructorHits[0].count === 1,
+        '声明命令的构造器应恰一处定义，实际: ' + JSON.stringify(constructorHits));
+      // 声明的目标技能：每个 guarded 必需技能各一条（open 两条）；条件绑定（design 的 ui-design）不在
+      // 同步面展开——它是否适用要判前端，展开权归判得了该判据的出口。
+      // 目标集取自协议节点本身（guarded 必需技能是协议面的事实，不是测试里另编的一份）
+      const builtinOpenNode = JSON.parse(fs.readFileSync(
+        path.join(SCRIPTS_DIR, '..', 'reference', 'workflow-protocol.json'), 'utf8')).nodes.find((node) => node.id === 'open');
+      const openTargets = declarationSkillTargets(builtinOpenNode);
+      assertTrue(openTargets.join(',') === 'flow-comet-change,flow-comet-requirement',
+        'open 的声明目标应是两个 guarded 必需技能，实际: ' + openTargets.join(','));
+      const designTargets = declarationSkillTargets({
+        id: 'design',
+        implementation: { skill: 'flow-comet-design' },
+        requiredSkillCalls: [
+          { skill: 'flow-comet-design', enforcement: 'guarded', scope: 'main' },
+          { skill: 'flow-comet-ui-design', enforcement: 'guarded', scope: 'main' },
+        ],
+      });
+      assertTrue(designTargets.join(',') === 'flow-comet-design',
+        'design 的同步面声明目标应只含无条件必需技能（ui-design 由判得了前端的出口展开），实际: '
+        + designTargets.join(','));
 
       // ⑤ --preflight 与自定义协议的组合（in-place 扩展）：结构预检的**声明工件**判据必须来自命令行
       // 指定的那份协议。造法 = 内置协议副本 + 给 open 节点追加一件只在这份协议里声明的 file 类产物，
@@ -1705,6 +2391,33 @@ export const ENTRIES = [
       const h3Adjudicated = exitNode(dir, 'review');
       assertExit(h3Adjudicated, 0);
       assertOut(h3Adjudicated, 'ALL CHECKS PASSED');
+      // ⑧ 段体切片的围栏语义（发现区的段界由 lib/section-body.mjs 单点决定）：条目正文里贴了 Markdown
+      //    代码块时，围栏内的 `## ` 不是发现区的段界。修复前它是——发现区被重置成「非发现区」，围栏
+      //    之后的发现条目整段消失，「每条发现必须有处置标记」那道门禁因此对它们形同虚设。
+      const fencedFindings = [
+        '### 🔴 C-3 · 夹具发现：条目正文里贴了一段 Markdown 示例',
+        '**Symptom**：示例代码块里出现段标题',
+        '',
+        '```md',
+        '## 代码块里的示例段标题',
+        '```',
+        '',
+        '- **C-4 · 围栏之后的发现：缺处置标记**：修复前这条整段消失',
+      ].join('\n');
+      setupReview(dir, { body: [['2.2', fencedFindings]] });
+      const fencedMissing = exitNode(dir, 'review');
+      assertExit(fencedMissing, 1);
+      assertOut(fencedMissing, '发现区 2 项');   // 两条都在发现区内（修复前只数到围栏之前那条）
+      // ⑨ 围栏外的同级标题照常结束发现区：`## 结论` 之后的列表项不是 2.2 的发现
+      setupReview(dir, { body: [['2.2', h3Finding + '\n\n## 结论\n\n- **C-9 · 段外条目：缺处置标记**']] });
+      const outsideFindings = exitNode(dir, 'review');
+      assertExit(outsideFindings, 1);
+      assertOut(outsideFindings, '发现区 1 项');   // 段外那条不计入（计入则为 2 项）
+      // ⑩ 分隔线语义保持：`---` 不结束发现区（2.2 段内的分隔线是正文，既有语义）
+      setupReview(dir, { body: [['2.2', h3Finding + '\n\n---\n\n- **C-8 · 分隔线之后的发现：缺处置标记**']] });
+      const afterRule = exitNode(dir, 'review');
+      assertExit(afterRule, 1);
+      assertOut(afterRule, '发现区 2 项');   // 分隔线之后的条目仍计入（计入才说明分隔线不结束发现区）
     },
   },
 
@@ -1885,6 +2598,37 @@ export const ENTRIES = [
       const answered = exitNode(dir, 'execute');
       assertExit(answered, 0);
       assertOut(answered, 'ALL CHECKS PASSED');
+
+      // 段体切片的围栏语义（LESSONS 扫描段的段界由 lib/section-body.mjs 单点决定）：回应写在围栏代码块
+      // 之后仍算数（围栏内的 `## ` 不结束段体）；围栏外的分隔线照常结束段体。
+      const lessonsScanTask = () => writeFile(dir, CHANGE_DIR + '/TASK.md', '# TASK\n\n## 任务清单\n\n'
+        + '<task id="T01" status="done"><action>改模板保真门禁</action>'
+        + '<write_files>scripts/lib/guard-template-fidelity.mjs</write_files>'
+        + '<verify>node --check baseline.js</verify></task>\n');
+      // ④ 围栏（反引号）内含二级标题 → 段体不被截断，围栏之后的回应仍被读到
+      setupExecute(dir, { body: [['LESSONS 扫描',
+        '```md\n## 代码块里的示例段标题\n```\n\n- L-501：已读并声明差异（围栏之后的回应）。']] });
+      writeFile(dir, '.specs/LESSONS.md', LESSONS_FIXTURE);
+      lessonsScanTask();
+      const fencedScan = exitNode(dir, 'execute');
+      assertExit(fencedScan, 0);
+      assertOut(fencedScan, 'ALL CHECKS PASSED');
+      // ⑤ 围栏（波浪号）同理：两种围栏记号同口径
+      setupExecute(dir, { body: [['LESSONS 扫描',
+        '~~~md\n## 代码块里的示例段标题\n~~~\n\n- L-501：已读并声明差异（波浪号围栏之后的回应）。']] });
+      writeFile(dir, '.specs/LESSONS.md', LESSONS_FIXTURE);
+      lessonsScanTask();
+      const tildeScan = exitNode(dir, 'execute');
+      assertExit(tildeScan, 0);
+      assertOut(tildeScan, 'ALL CHECKS PASSED');
+      // ⑥ 反向构造：围栏外的分隔线结束段体 —— 回应落在分隔线之后 ⇒ 等于没回应 ⇒ BLOCKED
+      setupExecute(dir, { body: [['LESSONS 扫描',
+        '夹具说明（本段到这里结束）。\n\n---\n\n- L-501：已读并声明差异（分隔线之后的回应）。']] });
+      writeFile(dir, '.specs/LESSONS.md', LESSONS_FIXTURE);
+      lessonsScanTask();
+      const ruleClosedScan = exitNode(dir, 'execute');
+      assertExit(ruleClosedScan, 1);
+      assertOut(ruleClosedScan, 'L-501');
     },
   },
 
@@ -1988,9 +2732,10 @@ export const ENTRIES = [
 
   // TA-20 · 项目级工件的触发点（AC-20）——① CONTEXT 存在但缺模板段 → open 出口拦；
   // ② UI-DESIGN 存在但缺 frontmatter 键 → 前端 change 的 design 出口拦；
-  // ③ `.specs/ARCHITECTURE.md` 缺段 → 侧命令报告列出结构问题但**不阻断**（只读）。
+  // ③ `.specs/ARCHITECTURE.md` 缺段 → 侧命令报告列出结构问题但**不阻断**（只读）；
+  // ④ CONTEXT 的「evolve 元数据」段体：段内围栏示例不截断段体，围栏里的样例字段也不算数据。
   {
-    name: 'TA-20 项目级工件：CONTEXT 缺段拦、UI-DESIGN 缺 frontmatter 键拦、ARCHITECTURE 只读报告',
+    name: 'TA-20 项目级工件：CONTEXT 缺段拦、UI-DESIGN 缺 frontmatter 键拦、ARCHITECTURE 只读报告；CONTEXT 元数据段内围栏示例不截断、样例字段不算数据',
     run: async (dir) => {
       // ① CONTEXT 缺段（文件存在才查）——段清单基准来自 CONTEXT 模板，故夹具根必须带模板：
       // 模板缺席时判据按 C9 整体跳过并显式「未校验（模板缺失）」，该形态由 TA-21 覆盖。
@@ -2029,6 +2774,47 @@ export const ENTRIES = [
       const sideOk = runSideCommand(dir, 'evolve.mjs', ['scan', '--root', dir, '--stdout']);
       assertExit(sideOk, 0);
       assertOut(sideOk, '结构问题（.specs/ARCHITECTURE.md）：0 项');
+      // ④ CONTEXT 的「evolve 元数据」段体：段界由 lib/section-body.mjs 单点决定（本任务把
+      //    context-init 的同名私有实现收进单源）。两条腿——
+      //    ① 段里贴了含 `## ` 的围栏示例、三字段写在示例**之后** ⇒ 段体不被示例里的标题截断，
+      //      校验通过（INIT-DONE）；
+      //    ② 三字段只写在围栏**内** ⇒ 仍判缺字段（围栏里的书写样例不是数据——段体切片之前结构文本
+      //      已剥离围栏，这条钉住了「别为了省事直接拿原文切片」这个错法）。
+      const ctxRoot = path.join(dir, 'ctx-init');
+      fs.mkdirSync(path.join(ctxRoot, 'reference'), { recursive: true });
+      fs.copyFileSync(scenarioProtocolPath(dir), scenarioProtocolPath(ctxRoot));
+      const contextDoc = (fieldsInFence) => [
+        '# CONTEXT',
+        '## 项目概要', 'x',
+        '## 技术栈', 'x',
+        '## 域语言', '| 术语 | 定义 |', '|---|---|', '| 例 | 定义 |',
+        '## 已锁决策', '- [2026-08-01] 决策一',
+        '## 默认偏好', 'x',
+        '## 既有抽象索引', 'x',
+        '## evolve 元数据', '',
+        '```md',
+        '## 示例段（围栏内，不是段界）',
+        ...(fieldsInFence
+          ? ['- **last_evolve_at**: 2026-09-01T10:00:00+08:00', '- **scanner**: fixture', '- **下次建议**: 无']
+          : []),
+        '```',
+        ...(fieldsInFence
+          ? []
+          : ['', '- **last_evolve_at**: 2026-09-01T10:00:00+08:00', '- **scanner**: fixture', '- **下次建议**: 无']),
+        '## intel-scan 元数据',
+        '- **last_intel_scan**: x', '- **scanner**: x', '- **下次重扫建议**: x',
+        '',
+      ].join('\n');
+      writeFile(ctxRoot, '.specs/CONTEXT.md', contextDoc(false));
+      const ctxFenced = runState(['init', CHANGE_ID + '-ctx', '--init-context'], ctxRoot);
+      assertExit(ctxFenced, 0);
+      assertOut(ctxFenced, 'INIT-DONE');
+      assertNotOut(ctxFenced, 'INIT-VALIDATE-FAILED');
+      writeFile(ctxRoot, '.specs/CONTEXT.md', contextDoc(true));
+      const ctxFencedOnly = runState(['init', CHANGE_ID + '-ctx2', '--init-context'], ctxRoot);
+      assertExit(ctxFencedOnly, 0);
+      assertOut(ctxFencedOnly, 'INIT-VALIDATE-FAILED');
+      assertOut(ctxFencedOnly, 'evolve 元数据');
     },
   },
 
@@ -2036,8 +2822,14 @@ export const ENTRIES = [
   // 「未校验（模板缺失）」。反向构造：模板在场时同一工件必被拦（证明不是判据空转）。
   // ③④ 追加「段名清单单一来源」：模板缺席时仍要生效的四份段名清单（SUMMARY 段序兜底 / open·design 段名回退 /
   // LESSONS 扫描段名 / SUMMARY 必填三段）只许骨架模块登记一份——静态单源锁 + 行为侧反向构造。
+  // ⑤ 追加「段体切片单源锁」的静态面：受检面 = 引擎实现面（不再只是取用面），形态面含行扫描与正则
+  // 切片两种；仍存在的同类实现逐条登记（文件 + 符号 + 理由），并配回退探针证明锁看得见它们。
+  //    写法面追加字符串字面量切分、位置面追加对象字面量内联箭头（各有合成切片探针）：字面量切分写在
+  //    属性箭头里正是静态锁此前的盲区——引擎里因此留着第二份段体切片而判据全绿。
+  // ⑦ 追加「配对键单源」：第三族的任务对键只在 task-graph 表达一次，[P] 判据的补集消费它返回的判定；
+  //    反向构造三层（换名字 / 换分隔符的第二份键 + 形态漂移的行为变异体）证明补集断言真的敏感。
   {
-    name: 'TA-21 模板缺席降级：不阻断且显式输出「未校验（模板缺失）」；模板在场时同夹具被拦；段名清单单源锁',
+    name: 'TA-21 模板缺席降级：不阻断且显式输出「未校验（模板缺失）」；模板在场时同夹具被拦；段名清单 / 段体切片 / 任务对键 / 写面元素 / 运行根的单源锁（受检面 = 引擎实现面）+ 运行根隔离（真跑 CLI）',
     run: async (dir) => {
       // ① 模板缺席：只写工件，不写 flow-kit/templates/
       writeFile(dir, CHANGE_DIR + '/CHANGE.md', renderDoc('CHANGE', { omit: ['影响面'] }));
@@ -2045,6 +2837,7 @@ export const ENTRIES = [
       const st = newChangeState('open');
       st.evidence.open = { summary: 'intake complete' };
       writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'open');
       const degraded = exitNode(dir, 'open');
       assertExit(degraded, 0);
       assertOut(degraded, '未校验');
@@ -2068,8 +2861,51 @@ export const ENTRIES = [
         'TEMPLATE_FALLBACK_SECTION_PATTERNS',
         'LESSONS_SCAN_SECTION',
         'SUMMARY_REQUIRED_SECTIONS',
+        'WAVE_SECTION_NAME',
       ];
       const issues = [];
+      // ③0 夹具能力自检（反向构造的前提，先于被测面）：摘 import 要覆盖三种位置——名前 / 名后 / 唯一项。
+      //     夹具此前只处理「逗号相邻」：单名单行 import 摘不动，反向构造于是报「前提失效（变异未改变
+      //     文件）」而不是真回归（锁在说谎，L-151）。三份合成 import 逐份验「名字真的没了、语句还在」。
+      const dropProbeSymbol = segmentSymbols[0];
+      for (const dropForm of [
+        'import { ' + dropProbeSymbol + ', otherName } from "./x.mjs";',
+        'import { otherName, ' + dropProbeSymbol + ' } from "./x.mjs";',
+        'import { ' + dropProbeSymbol + ' } from "./x.mjs";',
+      ]) {
+        const dropped = dropNamedImport(dropForm, dropProbeSymbol);
+        assertTrue(!new RegExp('\\b' + dropProbeSymbol + '\\b').test(dropped)
+          && /^import\s*\{[^}]*\}\s*from\s*"\.\/x\.mjs";$/u.test(dropped.trim()),
+          '夹具摘 import 漏了一种位置（原样 ' + JSON.stringify(dropForm) + ' → 摘后 ' + JSON.stringify(dropped)
+            + '）：反向构造会退化成前提失效，锁的判别力无从证明');
+      }
+      // ③0b 共享段标题谓词（「这一行是不是登记的某段」的唯一判定 = normalizeHeading 相等 + 级别）：
+      //     定义面恰一处，波次门与 AC 门都具名取用。反向构造走**唯一项** import——夹具摘不动时这一格
+      //     会一直绿，正是上一轮那条接缝（引擎迁就夹具）的闭合断言：原样零问题、摘掉 import 必报「未从」。
+      const sharedPredicate = engineDefinitionModule('headingPredicate');
+      assertTrue(sharedPredicate !== null,
+        '共享段标题谓词的定义面应恰一处（波次门与 AC 门同一口径）: '
+          + JSON.stringify(engineDefinitionHits('headingPredicate')));
+      const sharedPredicateProblems = singleSourceImportProblems({
+        symbol: 'headingPredicate', sourceRel: sharedPredicate.file, texts,
+      });
+      assertTrue(sharedPredicateProblems.length === 0,
+        '段标题谓词单源违规（两道门必须从同一处取用）: ' + sharedPredicateProblems.join(' | '));
+      const soleItemText = 'import { headingPredicate } from "./guard-artifact-skeleton.mjs";\n'
+        + 'export const probeHeadingJudged = headingPredicate;\n';
+      const soleItemDropped = dropNamedImport(soleItemText, 'headingPredicate');
+      assertTrue(soleItemDropped !== soleItemText,
+        '夹具摘不动唯一项 import（单名、单行）：反向构造会退化成前提失效，锁的判别力无从证明');
+      const soleItemProblems = (consumerText) => singleSourceImportProblems({
+        symbol: 'headingPredicate',
+        sourceRel: sharedPredicate.file,
+        texts: new Map([[sharedPredicate.file, sharedPredicate.text], ['lib/probe-consumer.mjs', consumerText]]),
+      });
+      assertTrue(soleItemProblems(soleItemText).length === 0,
+        '唯一项 import 的原样文本被判违规（探针前提不成立）: ' + JSON.stringify(soleItemProblems(soleItemText)));
+      assertTrue(soleItemProblems(soleItemDropped).some((problem) => problem.includes('未从')),
+        '唯一项 import 摘除后取用面判据未发声（夹具摘不动时反向构造形同虚设）: '
+          + JSON.stringify(soleItemProblems(soleItemDropped)));
       for (const symbol of segmentSymbols) {
         const lookup = engineDefinitionModule(symbol);
         if (lookup === null) {
@@ -2084,6 +2920,32 @@ export const ENTRIES = [
         }
       }
       assertTrue(issues.length === 0, '段名清单单源违规: ' + issues.join(' | '));
+
+      // ③a 登记名与模板实际段名一致（模板在场时对账）：段名登记成常量之后，模板若把该段改名，登记值
+      // 就成了新的静默源——判据仍按一个不存在的段名读，换个标题写法即「未校验」放行。对账用共享归一
+      // 做比较（编号前缀 / 尾部括号 / 闭合 ATX 不算差异），并配反向构造（改一个字不得被判成一致）。
+      // 模板缺席（本检出无 vendored flow-kit）时退到登记表的段名清单，并显式声明降级来源：模板侧
+      // 一致性由发版期指纹作业保证，SKIP = 未校验，不是通过。
+      const waveSectionNorm = normalizeHeading(WAVE_SECTION_NAME);
+      const waveNameMatches = (names) => names.some((name) => normalizeHeading(name) === waveSectionNorm);
+      const registryTaskNames = (docEntry('TASK').sections ?? []).map((section) => section.name);
+      assertTrue(waveNameMatches(registryTaskNames),
+        '波次段名登记值与登记表的 TASK 段名不一致（登记值 ' + JSON.stringify(WAVE_SECTION_NAME)
+          + ' 不在 ' + JSON.stringify(registryTaskNames) + '）——段名只有一处登记，改一处即可');
+      assertTrue(!waveNameMatches(registryTaskNames.map((name) => name.replace('波次划分', '波次分配'))),
+        '段名对账判据不具判别力：改一个字的段名与登记值被判成一致（比较退化成恒真）');
+      const vendoredTaskTemplate = path.join(REPO_ROOT, 'flow-kit', 'templates', 'TASK.md');
+      if (fs.existsSync(vendoredTaskTemplate)) {
+        const templateHeadings = fs.readFileSync(vendoredTaskTemplate, 'utf8').split(/\r?\n/u)
+          .filter((line) => /^##\s+/u.test(line))
+          .map((line) => line.replace(/^##\s+/u, '').trim());
+        assertTrue(waveNameMatches(templateHeadings),
+          '波次段名登记值与 TASK 模板的实际段名不一致（模板段名 ' + JSON.stringify(templateHeadings)
+            + ' 不含登记值 ' + JSON.stringify(WAVE_SECTION_NAME) + '）——模板改名时须同批更新登记值');
+      } else {
+        console.log('SKIP: 波次段名与 TASK 模板对账（本检出无 vendored flow-kit 模板）'
+          + '——已退到登记表段名对账；模板侧一致性由发版期指纹作业保证（SKIP = 未校验，不是通过）');
+      }
 
       // ③b 反向构造（同一判据驱动 · 逐项改坏输入 ⇒ 必报，还原 ⇒ 复绿）：四份清单逐份证明判别力，
       // 不是「只有某一份碰巧被测到」。
@@ -2140,6 +3002,7 @@ export const ENTRIES = [
       // 负例：把「做了什么」挪到「越界检查」之后 → 偏离兜底段序 → BLOCKED（模板缺席也判）
       writeFile(dir, CHANGE_DIR + '/T01-SUMMARY.md', renderDoc('SUMMARY', { swap: [['做了什么', '越界检查']] }));
       writeState(dir, executeState());
+      writeNodeDeclarationMarkers(dir, 'execute');
       const outOfOrder = exitNode(dir, 'execute');
       assertExit(outOfOrder, 1);
       assertOut(outOfOrder, '未校验');
@@ -2147,6 +3010,7 @@ export const ENTRIES = [
       // 正例：段序按清单 → 通过
       writeFile(dir, CHANGE_DIR + '/T01-SUMMARY.md', renderDoc('SUMMARY'));
       writeState(dir, executeState());
+      writeNodeDeclarationMarkers(dir, 'execute');
       const ordered = exitNode(dir, 'execute');
       assertExit(ordered, 0);
       assertOut(ordered, 'ALL CHECKS PASSED');
@@ -2165,6 +3029,7 @@ export const ENTRIES = [
         return next;
       };
       writeState(dir, openState());
+      writeNodeDeclarationMarkers(dir, 'open');
       const noFallback = exitNode(dir, 'open');
       assertExit(noFallback, 0);
       assertNotOut(noFallback, '缺必填段');
@@ -2179,6 +3044,7 @@ export const ENTRIES = [
       writeFile(dir, CHANGE_DIR + '/CHANGE.md', renderDoc('CHANGE', { omit: ['Why'] }));
       writeFile(dir, CHANGE_DIR + '/REQUIREMENT.md', renderDoc('REQUIREMENT'));
       writeState(dir, openState());
+      writeNodeDeclarationMarkers(dir, 'open');
       const fallbackStill = exitNode(dir, 'open');
       assertExit(fallbackStill, 1);
       assertOut(fallbackStill, '缺必填段');
@@ -2197,6 +3063,653 @@ export const ENTRIES = [
       const fallbackPick = derivedPatterns.pick('change', ['Why'], routing.TEMPLATE_FALLBACK_SECTION_PATTERNS.changeWhy);
       assertTrue(fallbackPick instanceof RegExp && fallbackPick.test('## Why（为什么做）'),
         '模板在场但缺该段名时 pick 仍回落 fallback 正则（C9 后半句），实际: ' + String(fallbackPick));
+
+      // ⑥b 轮廓解析跨围栏（段体单源化的**行为面**）：把某段的标题只写在**围栏示例**里、真段删掉
+      //     ——围栏里的标题不开段，缺段必须照样判出。旧 parseOutline 按行扫 `^##`（围栏盲）：
+      //     示例里的标题被读成真实段，缺段被静默放过（假绿）。它是段序 / 空正文 / 增量段位置的
+      //     共同输入，同一份盲区在那三处也会各自变成假绿——所以这里钉的是轮廓解析本身。
+      resetFixture(dir);
+      writeTemplateFixture(dir, 'CHANGE');
+      // 段名取模板里**最后一个**必需段：把它的标题只写进围栏示例（放在它前面那段里）——示例行
+      // 被读成真实段时它落在自己的模板位置上，段序判据不出声，缺段就此静默放过（正是假绿形态）。
+      writeFile(dir, CHANGE_DIR + '/CHANGE.md', renderDoc('CHANGE', {
+        omit: ['风险与未知'],
+        body: [['验收线', ['验收线（夹具）。', '',
+          '```markdown', '## 风险与未知', '示例：围栏内的段标题', '```', ''].join('\n')]],
+      }));
+      writeFile(dir, CHANGE_DIR + '/REQUIREMENT.md', renderDoc('REQUIREMENT'));
+      writeState(dir, openState());
+      writeNodeDeclarationMarkers(dir, 'open');
+      const fencedOutline = exitNode(dir, 'open');
+      assertExit(fencedOutline, 1);
+      assertOut(fencedOutline, '缺段');
+      assertNotOut(fencedOutline, 'BLOCKED: CHANGE.md 模板结构校验失败: 段序');
+
+      // ⑤ 段体切片单源锁：受检面 = **引擎实现面**（`engineScriptTexts`：顶层入口 ∪ 静态可达模块 ∪
+      //    非套件自持的 `lib/**`）——不再是「提到 sectionBody 的取用面」：把一份私有实现搬进面内一个
+      //    不引用该符号的模块（健康巡检、任一 guard 模块）就躲不开了。三条判据：① 单源模块由导出面派生
+      //    （不写文件名），{sectionBody, scanHeadings}
+      //    都定义在那里；② 取用面：提到单源符号的模块必须具名取用、不得自带第二份定义；③ 形态面：
+      //    面内任一函数的任一形态（行扫描 / 正则切片 / 字符串字面量 / 行数组切片）若在切段体，只许是
+      //    单源本身，否则必须登记（SECTION_SLICE_REGISTRY：文件 + 符号 + 理由 + 合并条件；陈旧登记判红）。
+      //    反向构造：合成切片放进「不引用单源符号」的模块（证明受检面比取用面宽）/ 改 import 来源 /
+      //    第二份定义 / 本任务收口的三处各自改回私有实现 / 登记放行真实副本 / 陈旧登记 / 缺理由登记
+      //    ——逐条证明判别力，还原 ⇒ 复绿。
+      {
+        const texts = engineScriptTexts();
+        const baseProblems = sectionSingleSourceProblems({ texts });
+        assertTrue(baseProblems.length === 0, '段体单源违规: ' + baseProblems.join(' | '));
+        const probeIssues = [];
+        // 探针打在**登记之外**的消费方上，否则变异会被登记豁免吃掉、退化成恒绿。
+        const consumers = [...texts.keys()].filter((rel) => /\b(?:sectionBody|scanHeadings)\b/u
+          .test(engineCodeText(texts.get(rel) ?? '')));
+        const probeRel = consumers.find((rel) => !SECTION_SLICE_REGISTRY.some((entry) => entry.file === rel));
+        const probeText = texts.get(probeRel);
+        const probeSlicer = [
+          'function probeSectionBody(content) {',
+          '  const body = [];',
+          '  for (const line of String(content).split(/\\n/)) {',
+          '    if (/^##\\s/u.test(line)) break;',
+          '    body.push(line);',
+          '  }',
+          '  return body.join("\\n");',
+          '}',
+        ].join('\n');
+        // 受检面必须比取用面宽（否则「形态面」只是换名字的取用面）：把同一份合成切片放进一个从不引用
+        // 单源符号的模块，判据仍须点名它。这条同时钉住了 SECTION_SLICE_REGISTRY 的登记面——那几条
+        // 命中都不 import sectionBody，一旦受检面退回取用面，它们会立刻变成陈旧登记（也是红的）。
+        const shadowRel = SECTION_SLICE_REGISTRY[0].file;
+        assertTrue(!/\b(?:sectionBody|scanHeadings)\b/u.test(engineCodeText(texts.get(shadowRel) ?? '')),
+          '受检面扩面的前提失效：' + shadowRel + ' 引用了单源符号（形态面与取用面不再可区分）');
+        const shadowProblems = sectionSingleSourceProblems({
+          texts: new Map(texts).set(shadowRel, (texts.get(shadowRel) ?? '') + '\n' + probeSlicer),
+        });
+        if (!shadowProblems.some((problem) => problem.includes(shadowRel) && problem.includes('probeSectionBody'))) {
+          probeIssues.push('受检面退回了取用面：' + shadowRel + ' 里的合成切片未被判红（'
+            + JSON.stringify(shadowProblems) + '）');
+        }
+        // 取用面两格：改 import 来源（单符号 import 摘名字靠不住，换来源才是同一件事的可靠构造）/
+        // 自带第二份定义。
+        const referenced = SECTION_SOURCE_SYMBOLS.find((symbol) => new RegExp('\\b' + symbol + '\\b', 'u')
+          .test(engineCodeText(probeText))) ?? 'sectionBody';
+        const retargeted = probeText.replace(/(from\s*'[^']*)section-body\.mjs'/u, "$1section-body-absent.mjs'");
+        const takenProbes = [
+          ['消费方不再从单源取用（import 来源被换掉）', retargeted, '未从'],
+          ['消费方自带第二份定义', probeText + '\nfunction ' + referenced + '() { return null; }\n', '自带第二份'],
+        ];
+        for (const [label, mutatedText, expected] of takenProbes) {
+          if (mutatedText === probeText) {
+            probeIssues.push(label + '：变异未改变 ' + probeRel);
+            continue;
+          }
+          const reported = sectionSingleSourceProblems({ texts: new Map(texts).set(probeRel, mutatedText) });
+          if (!reported.some((problem) => problem.includes(probeRel) && problem.includes(expected))) {
+            probeIssues.push(label + '：未被判违规（' + JSON.stringify(reported) + '）');
+          }
+        }
+        // 写法面两格（C 字符串字面量切分 / D 对象字面量内联箭头）各一份**合成实现**放进取用面之外的
+        // 模块 ⇒ 判据必须点名它们：旧锁对这两种写法都判绿（B 的判据只认正则字面量，functionBodies 只看
+        // 顶层声明），「锁看不见」于是无从发现——这一格是这两种写法的常驻判别力锚。
+        const syntheticSlicers = [
+          ['C 字符串字面量切分', 'probeStringSlicer', [
+            'function probeStringSlicer(content) {',
+            '  return (String(content).split("## S")[1] ?? "").split("\\n##")[0];',
+            '}',
+          ].join('\n')],
+          ['D 对象字面量内联箭头', 'probeInlineSlicer', [
+            'const probeChecks = [',
+            '  {',
+            '    probeInlineSlicer: (text) => {',
+            '      const seg = (text.split("## 已锁决策")[1] ?? "").split("\\n##")[0];',
+            '      return seg.length >= 0;',
+            '    },',
+            '  },',
+            '];',
+          ].join('\n')],
+        ];
+        for (const [label, symbol, synthetic] of syntheticSlicers) {
+          const reported = sectionSingleSourceProblems({
+            texts: new Map(texts).set(shadowRel, (texts.get(shadowRel) ?? '') + '\n' + synthetic),
+          });
+          if (!reported.some((problem) => problem.includes(shadowRel) && problem.includes(symbol))) {
+            probeIssues.push('形态面未覆盖「' + label + '」：' + shadowRel + ' 里的合成切片 ' + symbol
+              + ' 未被判红（' + JSON.stringify(reported) + '）');
+          }
+        }
+        // 形态面：本任务收口的三处各自改回私有实现 ⇒ 锁必红（变异体 = 删掉的旧实现原文）。
+        const revertedTexts = new Map();
+        for (const reverted of REVERTED_PRIVATE_SLICERS) {
+          // 变异体按 LF 归一后再套用（工作树是 CRLF，锚文本写的是 LF）：不归一时整段锚永远找不到，
+          // 探针会以「锚已漂移」红——那红说的是行尾，不是判据。
+          const original = (texts.get(reverted.rel) ?? '').replace(/\r\n/gu, '\n');
+          let mutated = original;
+          for (const [from, to] of reverted.edits) {
+            if (!mutated.includes(from)) {
+              probeIssues.push(reverted.label + '：锚已漂移（' + reverted.rel + ' 里找不到待替换片段）');
+              continue;
+            }
+            mutated = mutated.split(from).join(to);
+          }
+          if (mutated === original) {
+            probeIssues.push(reverted.label + '：变异未改变 ' + reverted.rel);
+            continue;
+          }
+          revertedTexts.set(reverted.rel, mutated);
+          const reported = sectionSingleSourceProblems({ texts: new Map(texts).set(reverted.rel, mutated) });
+          for (const symbol of reverted.symbols) {
+            if (!reported.some((problem) => problem.includes(reverted.rel) && problem.includes(symbol))) {
+              probeIssues.push(reverted.label + '：锁没看见 ' + reverted.rel + ' 的 ' + symbol
+                + '（' + JSON.stringify(reported) + '）');
+            }
+          }
+        }
+        // 登记机制本身的五格：陈旧登记判红 / 缺理由判红 / 缺合并条件判红（登记要写到期的条件，
+        // 不是永久豁免）/ **登记不能放行真实副本**（给 context-init 的私有 sectionBody 配一条登记，
+        // 判据仍须报「自带第二份定义」——登记只覆盖形态命中）/ 登记条目必须**当场命中**（删掉
+        // evolve.mjs 的那条 ⇒ 判据点名它的 locateSedimentSection，证明 E 形态真的落在形态面上）。
+        const staleRegistry = [...SECTION_SLICE_REGISTRY, {
+          file: 'lib/guard-uidesign.mjs', symbol: 'visualToneSectionState', reason: '（探针）已收口处仍登记',
+        }];
+        const staleProblems = sectionSingleSourceProblems({ texts, registry: staleRegistry });
+        if (!staleProblems.some((problem) => problem.includes('登记已陈旧') && problem.includes('visualToneSectionState'))) {
+          probeIssues.push('陈旧登记未被判红（已收口的视觉调性段体仍登记）: ' + JSON.stringify(staleProblems));
+        }
+        const noReasonProblems = sectionSingleSourceProblems({
+          texts,
+          registry: [{ ...SECTION_SLICE_REGISTRY[0], reason: '  ' }],
+        });
+        if (!noReasonProblems.some((problem) => problem.includes('登记缺理由'))) {
+          probeIssues.push('缺理由登记未被判红: ' + JSON.stringify(noReasonProblems));
+        }
+        const noMergeProblems = sectionSingleSourceProblems({
+          texts,
+          registry: [{ ...SECTION_SLICE_REGISTRY[0], mergeCondition: '  ' }],
+        });
+        if (!noMergeProblems.some((problem) => problem.includes('登记缺合并条件'))) {
+          probeIssues.push('缺合并条件的登记未被判红（永久豁免没到期日）: ' + JSON.stringify(noMergeProblems));
+        }
+        // 登记条目必须当场命中：evolve.mjs 的 E 形态（findIndex + slice + 可达标题判定）是这一条
+        // 的判别锚——删掉登记 ⇒ 判据必须点名它，否则那条登记是装饰、E 形态整份在锁外。
+        const evolveEntry = SECTION_SLICE_REGISTRY.find((entry) => entry.file === 'evolve.mjs');
+        if (evolveEntry === undefined) {
+          probeIssues.push('登记表缺 evolve.mjs 的段体切片登记（E 形态没有登记条目）');
+        } else {
+          const unregistered = sectionSingleSourceProblems({
+            texts,
+            registry: SECTION_SLICE_REGISTRY.filter((entry) => entry !== evolveEntry),
+          });
+          if (!unregistered.some((problem) => problem.includes('evolve.mjs')
+            && problem.includes(evolveEntry.symbol))) {
+            probeIssues.push('E 形态未被形态面看见：删掉 evolve.mjs 的登记后判据仍不点名 '
+              + evolveEntry.symbol + '（' + JSON.stringify(unregistered) + '）');
+          }
+        }
+        const lenientProblems = sectionSingleSourceProblems({
+          texts: new Map(texts).set('context-init.mjs', revertedTexts.get('context-init.mjs') ?? ''),
+          registry: [...SECTION_SLICE_REGISTRY, {
+            file: 'context-init.mjs', symbol: 'sectionBody', reason: '（探针）给真实副本配一条登记',
+          }],
+        });
+        if (!lenientProblems.some((problem) => problem.includes('context-init.mjs')
+          && problem.includes('第二份 sectionBody'))) {
+          probeIssues.push('登记放行了真实副本（context-init 的私有 sectionBody 配登记后仍须判红）: '
+            + JSON.stringify(lenientProblems));
+        }
+        if (sectionSingleSourceProblems({ texts }).length !== 0) probeIssues.push('还原后未复绿（判据受输入顺序影响）');
+        assertTrue(probeIssues.length === 0, '段体单源锁反向构造失败: ' + probeIssues.join(' | '));
+      }
+
+      // ⑥ 段体契约（单源的语义面，八格逐条对照）：围栏内的标题与分隔线不结束段体；围栏外的同级标题
+      //    与分隔线按 options 结束；结束标题的级别按 options；段缺席返回 null（与「段在场正文为空」
+      //    可区分——调用方据此判「未校验」而不是「没写」）。
+      {
+        const sectionModule = await import('../lib/section-body.mjs');
+        const contract = [
+          ['围栏内的二级标题不结束段体',
+            '## S\n\n```md\n## 块内标题\n```\n\n正文\n\n## T\n', /^##\s*S/u, {},
+            '\n```md\n## 块内标题\n```\n\n正文\n'],
+          ['波浪号围栏同口径',
+            '## S\n\n~~~md\n## 块内标题\n~~~\n\n正文\n', /^##\s*S/u, {}, '\n~~~md\n## 块内标题\n~~~\n\n正文\n'],
+          ['围栏外的同级标题结束段体',
+            '## S\n\n正文\n\n## T\n\n别段\n', /^##\s*S/u, {}, '\n正文\n'],
+          ['分隔线结束段体（默认）',
+            '## S\n\n正文\n\n---\n\n尾\n', /^##\s*S/u, {}, '\n正文\n'],
+          ['分隔线不结束段体（endOnSeparator: false）',
+            '## S\n\n正文\n\n---\n\n尾\n', /^##\s*S/u, { endOnSeparator: false },
+            '\n正文\n\n---\n\n尾\n'],
+          ['三级标题不结束二级段体（level: 2）',
+            '## S\n\n正文\n\n### 子\n\n子正文\n', /^##\s*S/u, {},
+            '\n正文\n\n### 子\n\n子正文\n'],
+          ['同级标题结束三级段体（level: 3）',
+            '### S\n\n正文\n\n### T\n\n别段\n', /^###\s*S/u, { level: 3 }, '\n正文\n'],
+          ['段缺席返回 null',
+            '## 其他\n\n正文\n', /^##\s*S/u, {}, null],
+        ];
+        for (const [label, docText, pattern, options, expected] of contract) {
+          const actual = sectionModule.sectionBody(docText, pattern, options);
+          assertTrue(actual === expected,
+            '段体契约（' + label + '）: 期望 ' + JSON.stringify(expected) + '，实际 ' + JSON.stringify(actual));
+        }
+      }
+
+      // ⑦ 配对键单源（P8）：第三族（同文件跨任务）的「任务对键」只在 task-graph 表达一次；[P] 判据的
+      //    补集（写面重叠 ⇒ 不该被要求标 [P]）消费 task-graph 返回的判定，不自己再建一份键——第二份键
+      //    的形态一旦漂移（换分隔符 / 换定序），两端键不再相等，补集静默失效（重叠的一对被当成「本可
+      //    并行」）。反向构造三层：静态两格（换名字的第二份键 / 换分隔符的漂移形态都必红）+ 行为一格
+      //    （把补集判据改回自建键且形态漂移 ⇒ 重叠对被误报，补集断言必红）。
+      {
+        const texts = engineScriptTexts();
+        const baseProblems = pairKeySingleSourceProblems({ texts });
+        assertTrue(baseProblems.length === 0, '任务对键单源违规: ' + baseProblems.join(' | '));
+        const waveRel = (engineDefinitionModule('parallelGapReview') ?? {}).file;
+        assertTrue(typeof waveRel === 'string', '补集判据的定义面不唯一（反查失败）: '
+          + JSON.stringify(engineDefinitionHits('parallelGapReview')));
+        const waveText = texts.get(waveRel) ?? '';
+        const secondKeyMutants = [
+          ['换名字的第二份键（历史上删掉的 gapPairKey 原形）',
+            '\nfunction gapPairKey(left, right) {\n'
+            + '  return left < right ? left + "\\u0000" + right : right + "\\u0000" + left;\n}\n'],
+          ['换分隔符的漂移形态（判据不看分隔符取值）',
+            '\nfunction probePairKey(a, b) {\n  return a < b ? a + "|" + b : b + "|" + a;\n}\n'],
+        ];
+        for (const [label, injected] of secondKeyMutants) {
+          const reported = pairKeySingleSourceProblems({ texts: new Map(texts).set(waveRel, waveText + injected) });
+          assertTrue(reported.some((problem) => problem.includes(waveRel)),
+            '配对键单源锁看不见「' + label + '」: ' + JSON.stringify(reported));
+        }
+        // 行为面：同一对任务（同波同层、写同一个文件、都没标 parallel）在两支下对照——真实模块里补集
+        // 判据把这对排除（写面重叠的一对不是「可并行」）；变异体（补集判据改回自建键 + 分隔符漂移）
+        // 里两端键对不上 ⇒ 同一对被误报成「可并行却未标 [P]」⇒ 补集断言变红。
+        const overlapTask = (id) => '<task id="' + id + '" status="pending"><action>实现 ' + id
+          + '</action><write_files>src/shared.mjs</write_files><verify>node --check src/shared.mjs</verify>'
+          + '<depends_on></depends_on></task>\n';
+        const overlapTaskContent = '# TASK\n\n## 波次划分\n\nWave 1: T01, T02\n\n## 任务清单\n\n'
+          + overlapTask('T01') + overlapTask('T02');
+        const overlapBlocks = taskBlocks(overlapTaskContent);
+        const waveModule = await import('../lib/wave-projection.mjs');
+        const overlapWaves = waveModule.waveProjectionReview({
+          taskContent: overlapTaskContent, blocks: overlapBlocks,
+        });
+        assertTrue(overlapWaves.waves instanceof Map && overlapWaves.waves.size === 2,
+          '夹具前提失效：波次分组应可判（' + JSON.stringify([...((overlapWaves.waves) ?? [])]) + '）');
+        const realGaps = waveModule.parallelGapReview({
+          taskContent: overlapTaskContent, blocks: overlapBlocks, waves: overlapWaves.waves,
+        });
+        assertTrue(realGaps.gaps.length === 0,
+          '补集判据失效：写面重叠（同一文件）的一对被要求标 [P]（' + JSON.stringify(realGaps.gaps) + '）');
+        // 写面未知 ≠ 写面不重叠：同波同层、其中一方**没有** write_files 的一对不在「可并行却未标 [P]」
+        // 的判据面上——写面未知意味着「不能断言不重叠」，不是「不重叠」。候选判据若只按波次/层级/
+        // status/修复族过滤，就会把「没写写面」读成「写面不重叠」，把这一对报成漏标 [P]，恢复句还让
+        // 作者补 depends_on（真正缺的是 write_files 字段）。判据面因此与 task-graph 的参与者判据对齐：
+        // 没有写面的任务不参与「可并行」的断言。
+        const unknownWriteTask = (id) => '<task id="' + id + '" status="pending"><action>实现 ' + id
+          + '</action><verify>node --check src/a.mjs</verify><depends_on></depends_on></task>\n';
+        const unknownWriteContent = '# TASK\n\n## 波次划分\n\nWave 1: T01, T02\n\n## 任务清单\n\n'
+          + '<task id="T01" status="pending"><action>实现 T01</action><write_files>src/a.mjs</write_files>'
+          + '<verify>node --check src/a.mjs</verify><depends_on></depends_on></task>\n'
+          + unknownWriteTask('T02');
+        const unknownWriteBlocks = taskBlocks(unknownWriteContent);
+        const unknownWaves = waveModule.waveProjectionReview({
+          taskContent: unknownWriteContent, blocks: unknownWriteBlocks,
+        });
+        assertTrue(unknownWaves.waves instanceof Map && unknownWaves.waves.size === 2,
+          '夹具前提失效：写面未知那一格的波次分组应可判（'
+          + JSON.stringify([...((unknownWaves.waves) ?? [])]) + '）');
+        const unknownGaps = waveModule.parallelGapReview({
+          taskContent: unknownWriteContent, blocks: unknownWriteBlocks, waves: unknownWaves.waves,
+        });
+        assertTrue(unknownGaps.gaps.length === 0,
+          '写面未知被当成「写面不重叠」：没有 write_files 的任务被要求标 [P]'
+          + '（写面未知时不能断言可并行，恢复句还会指错方向）: ' + JSON.stringify(unknownGaps.gaps));
+        // 注释写不变式，不写过程：引擎注释里不留任务号与改动叙述——接手的人读到的是约束，不是某一轮
+        // 改动的日记。受检面 = **引擎实现面**（与本节其余格子同一派生口径：入口 ∪ 静态可达模块 ∪
+        // 非套件自持的 lib/ 模块），逐文件扫：判据只扫一个模块、注释却宣称「引擎注释」时，覆盖面只
+        // 存在于注释里。判据是具名纯函数（见 commentNarrationHits），正向断言之外配三条探针：叙述
+        // 混回去必须被检出、任务号混回去必须被检出（否则「零命中」可能是谓词根本认不出东西），而
+        // 注释里贴 ISO 时间戳字面量（`2026-02-30T00:00:00Z` 的 `T00`）不得被读成任务号。
+        const narrations = [];
+        for (const [rel, text] of texts) {
+          for (const hit of commentNarrationHits(text)) {
+            narrations.push(rel + ':' + hit.lineNumber + ' [' + hit.kind + '] ' + hit.line);
+          }
+        }
+        assertTrue(narrations.length === 0,
+          '引擎注释里出现任务号 / 过程叙述（应写不变式）: ' + JSON.stringify(narrations, null, 1));
+        assertTrue(commentNarrationHits('// 本任务里已照形态加过一支。\n').length > 0,
+          '注释叙述判据不具判别力：混入「本任务 / 已照形态」的注释没有被检出');
+        assertTrue(commentNarrationHits('// 旧条目判定含 T11 的迁移保留形态。\n').length > 0,
+          '注释叙述判据不具判别力：混入任务号的注释没有被检出');
+        assertTrue(commentNarrationHits('// V8 对 `2026-02-30T00:00:00Z` 会静默滚到 3 月 2 日。\n').length === 0,
+          '注释叙述判据把注释里的 ISO 时间戳字面量读成了任务号（假阳性）');
+        // 变异体经 inlineModuleUrl 只在内存里编译（不落盘、不留残留）。
+        // 变异 = 把「取单源判定」换回「两端各算一次键」，并只让**消费方**那一端漂移（生产方仍用
+        // task-graph 的 NUL 形态）：这正是第二份键实现存在的真实风险——改一端、漏一端，键就不再相等。
+        // 两处锚各自只改一处代码位置（不搬动实参行），变异体因此语法完整、只把键的两份形态造出来。
+        const decisionAnchor = '  const { isOverlappingPair } = collectCrossTaskConflicts({';
+        const gapsAnchor = '  const gaps = [];';
+        assertTrue(waveText.includes(decisionAnchor) && waveText.includes(gapsAnchor),
+          '反向构造前提失效：' + waveRel + ' 未按单源形态取用第三族判定（锚已漂移）');
+        const driftedText = waveText
+          .replace(decisionAnchor, '  const probeResult = collectCrossTaskConflicts({')
+          .replace(gapsAnchor, [
+            "  const producerPairKey = (a, b) => (a < b ? a + '\\u0000' + b : b + '\\u0000' + a);",
+            "  const consumerPairKey = (a, b) => (a < b ? a + '|' + b : b + '|' + a);",
+            '  const overlappingPairs = new Set(probeResult.conflicts.map((conflict)'
+              + ' => producerPairKey(conflict.a, conflict.b)));',
+            '  const isOverlappingPair = (a, b) => overlappingPairs.has(consumerPairKey(a, b));',
+            '  const gaps = [];',
+          ].join('\n'));
+        assertTrue(driftedText !== waveText, '反向构造前提失效：变异未改变 ' + waveRel);
+        const driftedModule = await import(inlineModuleUrl(driftedText, waveRel));
+        const driftedGaps = driftedModule.parallelGapReview({
+          taskContent: overlapTaskContent, blocks: overlapBlocks, waves: overlapWaves.waves,
+        });
+        assertTrue(driftedGaps.gaps.length > 0,
+          '反向构造失效：补集判据改回「自建键 + 分隔符漂移」后，写面重叠的一对没有被误报——'
+          + '说明该断言对任务对键的形态不敏感（' + JSON.stringify(driftedGaps.gaps) + '）');
+      }
+
+      // ⑧ 写面元素的取用面（task-graph 的路径解析 / plan 出口的伪并行启发式）：写面判定在
+      //    lib/lessons-hits.mjs 已只有一份实现，两处消费方却各自拿着**大小写敏感**的标签正则——混合
+      //    大小写时 7 字段门判「字段在场」、写面判定判「未知」，任务静默掉出判据面：写写重叠漏拦、
+      //    同文件族漏判、伪并行启发式漏报，而同波同层的同文件对反被 [P] 判据当成「可并行」误报。
+      //    三条面：结构锁（标签字面量只许在单源模块）+ 行为（混合大小写与全小写写法在四条判据上给出
+      //    同一结论）+ 反向构造（把取用改回大小写敏感 ⇒ 锁与行为断言都必红）。
+      {
+        const faceTexts = engineScriptTexts();
+        const faceSource = engineDefinitionModule('taskWriteFilesById');
+        assertTrue(faceSource !== null,
+          '写面元素提取（taskWriteFilesById）的定义面应恰一处（反查失败）: '
+          + JSON.stringify(engineDefinitionHits('taskWriteFilesById')));
+        const faceTagProblems = writeFaceSourceProblems({ texts: faceTexts, sourceRel: faceSource.file });
+        assertTrue(faceTagProblems.length === 0, '写面元素标签单源违规: ' + faceTagProblems.join(' | '));
+        const faceTakenProblems = singleSourceImportProblems({
+          symbol: 'taskWriteFilesById', sourceRel: faceSource.file, texts: faceTexts,
+        });
+        assertTrue(faceTakenProblems.length === 0,
+          '写面元素提取应只有一处实现且消费方都从它取用:\n' + faceTakenProblems.join('\n'));
+        // 反向构造两格（互不覆盖）：① 消费方保留取用、另带一份大小写敏感的标签正则——副本溜回来的
+        // 真实形态，由形态锁点名；② 消费方摘掉单源取用而仍引用该符号，由取用面锁点名。
+        const faceProbes = [];
+        const carriedCopy = '\nconst probeWriteFilesFace = (block) => String(block).match(/<write_files>([\\s\\S]*?)<\\/write_files>/);\n';
+        for (const rel of ['lib/task-graph.mjs', 'lib/guard-gates.mjs']) {
+          const original = faceTexts.get(rel) ?? '';
+          const carriedProblems = writeFaceSourceProblems({
+            texts: new Map(faceTexts).set(rel, original + carriedCopy), sourceRel: faceSource.file,
+          });
+          if (!carriedProblems.some((problem) => problem.includes(rel))) {
+            faceProbes.push(rel + '：副本（保留取用 + 自持标签正则）未被形态锁点名');
+          }
+          const droppedProblems = singleSourceImportProblems({
+            symbol: 'taskWriteFilesById', sourceRel: faceSource.file,
+            texts: new Map(faceTexts).set(rel, dropNamedImport(original, 'taskWriteFilesById')),
+          });
+          if (!droppedProblems.some((problem) => problem.includes(rel))) {
+            faceProbes.push(rel + '：摘掉单源取用后未被取用面锁点名');
+          }
+        }
+        assertTrue(faceProbes.length === 0, '写面单源锁反向构造失败: ' + faceProbes.join(' | '));
+
+        // 行为面：混合大小写写面与全小写写法必须给出同一结论（全小写格是夹具前提，混合格是断言）。
+        // 写写强判（并行对）与同文件族（串行对）各一格——两族都由 task-graph 的路径解析供数。
+        const faceBlock = (id, tag, attrs) => '<task id="' + id + '"' + attrs + ' status="pending">'
+          + '<action>实现 ' + id + '</action><' + tag + '>src/shared.mjs</' + tag + '>'
+          + '<verify>node --check src/shared.mjs</verify></task>\n';
+        const facePlan = (tag, attrs) => '# TASK\n\n## 任务清单\n\n'
+          + faceBlock('W01', tag, attrs) + faceBlock('W02', tag, attrs);
+        const faceRoot = (label) => path.join(dir, 'write-face-' + label);
+        const conflictsIn = async (module, label, planText) => {
+          writeFile(faceRoot(label), '.specs/' + CHANGE_ID + '/TASK.md', planText);
+          return module.findParallelWriteConflicts(path.join(faceRoot(label), '.specs', CHANGE_ID));
+        };
+        const taskGraph = await import('../lib/task-graph.mjs');
+        const lowerParallel = await conflictsIn(taskGraph, 'lower-parallel', facePlan('write_files', ' parallel="true"'));
+        assertTrue(lowerParallel.writeConflicts.length === 1,
+          '夹具前提失效：全小写写面的同文件并行对未被写写强判检出（'
+          + JSON.stringify(lowerParallel.writeConflicts) + '）');
+        const upperParallel = await conflictsIn(taskGraph, 'upper-parallel', facePlan('WRITE_FILES', ' parallel="true"'));
+        assertTrue(upperParallel.writeConflicts.length === 1,
+          '混合大小写写面的同文件并行对逃过写写强判（元素名大小写无关，同一份写面应判重叠）: '
+          + JSON.stringify(upperParallel.writeConflicts));
+        const lowerSerial = await conflictsIn(taskGraph, 'lower-serial', facePlan('write_files', ''));
+        assertTrue(lowerSerial.crossTaskConflicts.length === 1,
+          '夹具前提失效：全小写写面的同文件串行对未被同文件族检出（'
+          + JSON.stringify(lowerSerial.crossTaskConflicts) + '）');
+        const upperSerial = await conflictsIn(taskGraph, 'upper-serial', facePlan('WRITE_FILES', ''));
+        assertTrue(upperSerial.crossTaskConflicts.length === 1,
+          '混合大小写写面的同文件串行对逃过同文件族（同文件且无依赖路径，应判冲突）: '
+          + JSON.stringify(upperSerial.crossTaskConflicts));
+
+        // [P] 判据：写面重叠的一对不该被要求标 [P]（写面未知 ≠ 写面不重叠），写面互不重叠的一对必须
+        // 照常点名——后半格钉住「不是把混合写法整片排除出判据面」。
+        const waveFace = await import('../lib/wave-projection.mjs');
+        const gapsFor = (tag, leftWrite, rightWrite) => {
+          const block = (id, writePath) => '<task id="' + id + '" status="pending"><action>实现 ' + id
+            + '</action><' + tag + '>' + writePath + '</' + tag + '><verify>node --check ' + writePath
+            + '</verify><depends_on></depends_on></task>\n';
+          const content = '# TASK\n\n## 波次划分\n\nWave 1: G01, G02\n\n## 任务清单\n\n'
+            + block('G01', leftWrite) + block('G02', rightWrite);
+          const blocks = taskBlocks(content);
+          const review = waveFace.waveProjectionReview({ taskContent: content, blocks });
+          return waveFace.parallelGapReview({ taskContent: content, blocks, waves: review.waves });
+        };
+        assertTrue(gapsFor('write_files', 'src/shared.mjs', 'src/shared.mjs').gaps.length === 0,
+          '夹具前提失效：全小写写面重叠的一对被 [P] 判据要求标 [P]');
+        const upperOverlapGaps = gapsFor('WRITE_FILES', 'src/shared.mjs', 'src/shared.mjs');
+        assertTrue(upperOverlapGaps.gaps.length === 0,
+          '混合大小写写面重叠的一对被 [P] 判据误报为「可并行却未标 [P]」——写面未知被当成写面不重叠: '
+          + JSON.stringify(upperOverlapGaps.gaps));
+        const upperDistinctGaps = gapsFor('WRITE_FILES', 'src/a.mjs', 'src/b.mjs');
+        assertTrue(upperDistinctGaps.gaps.length === 1,
+          '混合大小写写面互不重叠的一对未被 [P] 判据点名——判据应正常参与，不是把混合写法整片排除: '
+          + JSON.stringify(upperDistinctGaps.gaps));
+
+        // 伪并行启发式：仅写测试产物的并行任务必须照样进集合（掉出去 = 告警静默消失），混有生产文件的
+        // 并行任务不进集合（不是把混合写法整片标成伪并行）。
+        const guardGates = await import('../lib/guard-gates.mjs');
+        const testOnlyFor = (tag) => {
+          const content = '# TASK\n\n## 任务清单\n\n'
+            + '<task id="P-MIX" parallel="true" status="pending"><action>实现 P-MIX</action><' + tag
+            + '>tests/test_mix.mjs</' + tag + '><verify>node --check tests/test_mix.mjs</verify></task>\n'
+            + '<task id="P-PROD" parallel="true" status="pending"><action>实现 P-PROD</action><' + tag
+            + '>src/mix.mjs\ntests/test_mix2.mjs</' + tag + '><verify>node --check src/mix.mjs</verify></task>\n';
+          return guardGates.collectTestOnlyParallelIds({ taskContent: content, blocks: taskBlocks(content) });
+        };
+        assertTrue(JSON.stringify(testOnlyFor('write_files')) === JSON.stringify(['P-MIX']),
+          '夹具前提失效：全小写写面的纯测试面并行任务未进伪并行集合（'
+          + JSON.stringify(testOnlyFor('write_files')) + '）');
+        assertTrue(JSON.stringify(testOnlyFor('WRITE_FILES')) === JSON.stringify(['P-MIX']),
+          '混合大小写写面的纯测试面并行任务掉出伪并行集合（元素名大小写无关，应照样告警）: '
+          + JSON.stringify(testOnlyFor('WRITE_FILES')));
+
+        // 行为面反向构造：把 task-graph 的写面取用改回大小写敏感的自持正则 ⇒ 同一份混合大小写夹具在
+        // 变异体上重新「看不见重叠」，上面那两条行为断言因此确实对取用面敏感（不是恒绿）。
+        const taskGraphRel = engineDefinitionModule('findParallelWriteConflicts')?.file;
+        assertTrue(typeof taskGraphRel === 'string',
+          '写写强判的定义面不唯一（反查失败）: '
+          + JSON.stringify(engineDefinitionHits('findParallelWriteConflicts')));
+        const taskGraphText = faceTexts.get(taskGraphRel) ?? '';
+        const faceAnchor = '  const writeFaces = taskWriteFilesById(text);';
+        assertTrue(taskGraphText.includes(faceAnchor),
+          '反向构造前提失效：' + taskGraphRel + ' 未按单源形态取用写面元素（锚已漂移）');
+        const driftedFaceText = taskGraphText.replace(faceAnchor, [
+          '  const writeFaces = new Map();',
+          '  for (const probeBlock of allBlocks) {',
+          '    const probeAttrs = taskOpeningAttrs(probeBlock);',
+          '    const probeMatch = probeBlock.match(/<write_files>([\\s\\S]*?)<\\/write_files>/);',
+          '    if (probeAttrs && probeAttrs.id && probeMatch) writeFaces.set(probeAttrs.id, probeMatch[1]);',
+          '  }',
+        ].join('\n'));
+        assertTrue(driftedFaceText !== taskGraphText, '反向构造前提失效：变异未改变 ' + taskGraphRel);
+        const driftedFaceModule = await import(inlineModuleUrl(driftedFaceText, taskGraphRel));
+        const driftedUpper = await conflictsIn(driftedFaceModule, 'upper-parallel-drift', facePlan('WRITE_FILES', ' parallel="true"'));
+        assertTrue(driftedUpper.writeConflicts.length === 0,
+          '反向构造失效：写面取用改回大小写敏感后，混合大小写夹具仍被检出重叠——'
+          + '该断言对取用面不敏感（' + JSON.stringify(driftedUpper.writeConflicts) + '）');
+      }
+      // ⑧ 运行根单源 + 隔离（行为面在前、结构锁在后）：「这次调用把哪个目录当项目根」曾被两处各自
+      //    回答——守卫族读 FLOW_COMET_RUN_ROOT，状态命令族直接用进程 cwd。用变量把实验指向临时目录
+      //    时，状态命令仍在 cwd 仓库里建分支、把正在跑的 change 的 state 覆盖成新 change 的初始状态
+      //    （数据覆盖，靠备份才恢复）。本格先真跑命令证明「设了变量就只作用于那个根」，再用单源锁
+      //    钉住「解析只许有一处实现」。
+      {
+        const rootsDir = path.join(dir, 'run-root-isolation');
+        const cwdRepo = path.join(rootsDir, 'cwd-repo');
+        const envRoot = path.join(rootsDir, 'env-root');
+        const asRes = (res) => ({ status: res.status ?? 1, output: String(res.stdout ?? '') + String(res.stderr ?? '') });
+        const gitOut = (repo, ...args) => {
+          const res = spawnSync('git', args, { cwd: repo, encoding: 'utf8', timeout: 60000 });
+          if ((res.status ?? 1) !== 0) throw new Error('夹具 git ' + args.join(' ') + ' 失败: ' + String(res.stderr ?? ''));
+          return String(res.stdout ?? '').trim();
+        };
+        const stateFileAt = (root) => path.join(root, '.flow-comet', 'flow-comet-state.json');
+        const stateBytesAt = (root) => fs.readFileSync(stateFileAt(root));
+        const stateAt = (root) => JSON.parse(fs.readFileSync(stateFileAt(root), 'utf8'));
+        // 两个真实 git 仓库：cwd 侧带活跃 change（state + 工件 + 声明标记），变量侧是空仓库。协议副本各放
+        // 一份——受保护读取要求协议位于所属运行根内，两侧各有一份才能分别作真实命令的输入。
+        for (const repo of [cwdRepo, envRoot]) {
+          fs.mkdirSync(path.join(repo, 'reference'), { recursive: true });
+          fs.copyFileSync(scenarioProtocolPath(dir), path.join(repo, 'reference', 'workflow-protocol.json'));
+          gitOut(repo, 'init', '-q');
+          gitOut(repo, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.com',
+            'commit', '--allow-empty', '-m', 'init');
+        }
+        writeState(cwdRepo, {
+          ...baseState('open'),
+          activeChange: 'live-change',
+          newChange: true,
+          status: 'running',
+          enteredNodes: ['open'],
+          evidence: {
+            open: { summary: 'live' },
+            'subagent-execute': {
+              handoffRequests: { 'LIVE-01': { description: 'live', requestedAt: '2026-08-01T00:00:00.000Z' } },
+            },
+          },
+        });
+        writeFile(cwdRepo, '.specs/live-change/CHANGE.md', '# CHANGE\n\n## Why（为什么做）\nlive\n');
+        writeNodeDeclarationMarkers(cwdRepo, 'open', { changeId: 'live-change' });
+        const cwdStateBefore = stateBytesAt(cwdRepo);
+        const cwdHeadBefore = gitOut(cwdRepo, 'rev-parse', 'HEAD');
+        const cwdBranchBefore = gitOut(cwdRepo, 'rev-parse', '--abbrev-ref', 'HEAD');
+        // 状态命令一律以 cwd = 仓库、运行根 = 变量指向的那个仓库发起（真实隔离场景的形态）。
+        const inEnvRoot = (script, args) => asRes(spawnSync(process.execPath, [script, ...args], {
+          cwd: cwdRepo,
+          env: {
+            ...process.env,
+            FLOW_COMET_RUN_ROOT: envRoot,
+            // 协议取运行根相对形态：同一个调用里，命令字面不必随根变化——变的是「哪一个是根」。
+            FLOW_COMET_PROTOCOL: 'reference/workflow-protocol.json',
+          },
+          encoding: 'utf8',
+          timeout: 60000,
+        }));
+
+        // ① init：state 落点与分支判定/创建都跟运行根走
+        const initIsolated = inEnvRoot(STATE, ['init', 'fresh-change']);
+        assertExit(initIsolated, 0);
+        assertOut(initIsolated, 'Initialized: fresh-change');
+        assertTrue(fs.existsSync(stateFileAt(envRoot)),
+          '设置 FLOW_COMET_RUN_ROOT 后 init 未把 state 写到该根（写到了进程 cwd）——临时实验会覆盖真实 change 的 state');
+        assertTrue(stateAt(envRoot).activeChange === 'fresh-change',
+          '运行根下的 state 未记录新 change: ' + JSON.stringify(stateAt(envRoot).activeChange));
+        assertTrue(fs.existsSync(path.join(envRoot, '.specs', 'fresh-change')), 'init 未在运行根下建 change 目录');
+        assertTrue(gitOut(envRoot, 'rev-parse', '--abbrev-ref', 'HEAD') === 'change/fresh-change',
+          '分支未按运行根创建/切换（HEAD = ' + gitOut(envRoot, 'rev-parse', '--abbrev-ref', 'HEAD') + '）');
+
+        // ② cwd 侧：state 字节、HEAD、当前分支零改动；也不得在 cwd 仓库新建同名分支
+        assertTrue(stateBytesAt(cwdRepo).equals(cwdStateBefore),
+          'cwd 仓库的 state 字节被改写——设置运行根后状态命令仍写到了进程 cwd');
+        assertTrue(gitOut(cwdRepo, 'rev-parse', 'HEAD') === cwdHeadBefore, 'cwd 仓库的 HEAD 被移动');
+        assertTrue(gitOut(cwdRepo, 'rev-parse', '--abbrev-ref', 'HEAD') === cwdBranchBefore,
+          'cwd 仓库的当前分支被切换: ' + gitOut(cwdRepo, 'rev-parse', '--abbrev-ref', 'HEAD'));
+        assertTrue(gitOut(cwdRepo, 'branch', '--list', 'change/fresh-change') === '',
+          'cwd 仓库里出现了本该建在运行根的分支 change/fresh-change');
+
+        // ③ status / record：读写的都是运行根那一个 state
+        const statusIsolated = inEnvRoot(STATE, ['status']);
+        assertTrue(statusIsolated.status === 0, 'status 应成功: ' + statusIsolated.output);
+        assertOut(statusIsolated, '"change": "fresh-change"');
+        assertNotOut(statusIsolated, 'live-change');
+        assertTrue(stateBytesAt(cwdRepo).equals(cwdStateBefore), 'status 改写了 cwd 仓库的 state');
+        // record 目标取零模板节点：声明门会按节点模板清单核对标记，本格不引入模板面——只要标记在场，
+        // 记录结果就只取决于「读到的是哪一个 state」。
+        writeNodeDeclarationMarkers(envRoot, 'verify', { changeId: 'fresh-change' });
+        const recordIsolated = inEnvRoot(STATE, ['record', 'verify', '{"summary":"run-root record"}']);
+        assertExit(recordIsolated, 0);
+        assertOut(recordIsolated, 'EVIDENCE: verify');
+        assertTrue(stateAt(envRoot).evidence?.verify?.summary === 'run-root record',
+          'record 未写入运行根的 state: ' + JSON.stringify(stateAt(envRoot).evidence));
+        assertTrue(stateBytesAt(cwdRepo).equals(cwdStateBefore), 'record 改写了 cwd 仓库的 state');
+
+        // ④ 委托入口（第三个取用面）：status 只读，用它证明它也认同一处解析——两侧 state 各带一个可
+        //    区分的活跃 change 与委托记录，读错根会立刻显形。
+        const handoffIsolated = inEnvRoot(HANDOFF, ['status']);
+        assertTrue(handoffIsolated.status === 0, 'handoff status 应成功: ' + handoffIsolated.output);
+        assertOut(handoffIsolated, '"activeChange": "fresh-change"');
+        assertNotOut(handoffIsolated, 'LIVE-01');
+
+        // ⑤ 反向构造（同一夹具、去掉变量）：解析退回进程 cwd —— 上面「cwd 零改动」三条断言正是会红的
+        //    那三条；这里直接证明夹具确实能把 cwd 侧改写照出来（不是恒绿）。
+        const envRootStateBefore = stateBytesAt(envRoot);
+        const noRootInit = asRes(spawnSync(process.execPath, [STATE, 'init', 'cwd-change'], {
+          cwd: cwdRepo,
+          env: {
+            ...process.env,
+            FLOW_COMET_RUN_ROOT: '',
+            FLOW_COMET_PROTOCOL: 'reference/workflow-protocol.json',
+          },
+          encoding: 'utf8',
+          timeout: 60000,
+        }));
+        assertExit(noRootInit, 0);
+        assertTrue(stateAt(cwdRepo).activeChange === 'cwd-change',
+          '反向构造前提失效：无变量时 init 未写回 cwd 仓库，上面「cwd 零改动」断言无判别力');
+        assertTrue(gitOut(cwdRepo, 'rev-parse', '--abbrev-ref', 'HEAD') === 'change/cwd-change',
+          '反向构造前提失效：无变量时未在 cwd 仓库建分支');
+        assertTrue(stateBytesAt(envRoot).equals(envRootStateBefore), '无变量的那次 init 改写了运行根的 state');
+
+        // ⑥ 单源结构锁：运行根解析只许一处实现，状态命令族两个入口与守卫族运行根模块一律具名取用。
+        //    反向构造：摘 import ⇒ 「未从」；注入第二份定义 ⇒ 被点名；原样 ⇒ 复绿。
+        const runRootSymbol = 'resolveRunRoot';
+        const runRootModule = engineDefinitionModule(runRootSymbol);
+        assertTrue(runRootModule !== null,
+          '运行根解析的定义面应恰一处: ' + JSON.stringify(engineDefinitionHits(runRootSymbol)));
+        const runRootTexts = engineScriptTexts();
+        const runRootProblems = singleSourceImportProblems({
+          symbol: runRootSymbol, sourceRel: runRootModule.file, texts: runRootTexts,
+        });
+        assertTrue(runRootProblems.length === 0, '运行根单源违规: ' + runRootProblems.join(' | '));
+        const runRootProbes = [];
+        for (const consumerRel of ['workflow-state.mjs', 'workflow-handoff.mjs', 'lib/guard-state-io.mjs']) {
+          const consumerText = runRootTexts.get(consumerRel) ?? '';
+          if (!new RegExp('\\b' + runRootSymbol + '\\b', 'u').test(engineCodeText(consumerText))) {
+            runRootProbes.push(consumerRel + ' 不再取用单一来源的运行根解析');
+            continue;
+          }
+          const droppedText = dropNamedImport(consumerText, runRootSymbol);
+          if (droppedText === consumerText) {
+            runRootProbes.push(consumerRel + ' 的 import 摘不动（反向构造会退化为前提失效）');
+            continue;
+          }
+          const droppedProblems = singleSourceImportProblems({
+            symbol: runRootSymbol, sourceRel: runRootModule.file,
+            texts: new Map(runRootTexts).set(consumerRel, droppedText),
+          });
+          if (!droppedProblems.some((problem) => problem.includes(consumerRel) && problem.includes('未从'))) {
+            runRootProbes.push(consumerRel + ' 摘掉单源取用后未被取用面锁点名');
+          }
+        }
+        const injectedProblems = singleSourceImportProblems({
+          symbol: runRootSymbol, sourceRel: runRootModule.file,
+          texts: new Map(runRootTexts).set('lib/probe-run-root.mjs',
+            'export function ' + runRootSymbol + '() { return process.cwd(); }\n'),
+        });
+        if (!injectedProblems.some((problem) => problem.includes('lib/probe-run-root.mjs') && problem.includes('自带第二份'))) {
+          runRootProbes.push('第二份实现注入后未被单源锁点名（锁对新增实现面没有判别力）');
+        }
+        assertTrue(runRootProbes.length === 0, '运行根单源锁反向构造失败: ' + runRootProbes.join(' | '));
+      }
     },
   },
 
@@ -2286,6 +3799,7 @@ export const ENTRIES = [
         return next;
       };
       writeState(dir, openState());
+      writeNodeDeclarationMarkers(dir, 'open');
       const warned = exitNode(dir, 'open');
       assertExit(warned, 0);
       assertOut(warned, 'TEMPLATE-REGISTRY WARN');

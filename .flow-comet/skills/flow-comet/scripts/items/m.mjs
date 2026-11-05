@@ -361,6 +361,8 @@ export const ENTRIES = [
       writeFile(dir, 'flow-kit/templates/CHANGE.md', '# CHANGE 模板（夹具）\n\n## Why（为什么做）\n\n## 视觉调性（前端项目必填）\n');
       writeFile(dir, 'flow-kit/templates/DESIGN.md', '# DESIGN 模板（夹具）\n\n## 0. 技术栈选定\n\n## 1. 决策清单\n');
       assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
+      // open 该读两份协议、协议声明两个必需技能：出口覆盖判据要求全部声明，夹具两条都写下
+      assertExit(runState(['skill-load', 'open', 'flow-comet-requirement', '--prompt', 'flow-kit/prompts/1-requirement.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
       // 前端判据要的是「视觉调性段在场且未标不适用」：intake 夹具直接写实质调性（不追加同名段）。
       writeIntakeArtifacts(dir, CHANGE_ID, { visualTone: '现代、克制的工具型界面。' });
       assertExit(runState(['record', 'open', '{"summary":"intake complete"}'], dir), 0);
@@ -401,6 +403,8 @@ export const ENTRIES = [
       const nfChange = CHANGE_ID + '-nf';
       assertExit(runState(['init', nfChange, '--init-skip'], dir), 0);
       assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
+      // 第二个 change 的 open 同样要覆盖两份协议与两个必需技能（出口覆盖判据按节点核对）
+      assertExit(runState(['skill-load', 'open', 'flow-comet-requirement', '--prompt', 'flow-kit/prompts/1-requirement.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
       // 段内自然句子（非结构形态）→ 前端判据不认，仍判前端；写在同一段里，不追加同名段。
       writeIntakeArtifacts(dir, nfChange, { visualTone: '不适用于暗色主题，本 change 仅覆盖浅色分支。' });
       assertExit(runState(['record', 'open', '{"summary":"intake complete"}'], dir), 0);

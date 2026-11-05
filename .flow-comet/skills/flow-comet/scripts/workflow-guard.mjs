@@ -35,6 +35,10 @@ import { taskBlocks as extractTaskBlocks, taskOpeningAttrs } from './task-parsin
 // 声明标记目录的路径规则（活动路径 + 归档兜底）归状态族的路径上下文模块——入口只取它的活动形态
 // （includeArchive: false，理由见 checkPromptDeclarations），不在这里另拼一份 .skill-loads 路径。
 import { findSkillLoadsDir } from './lib/state-io.mjs';
+// 一个标记可能声明多份协议（skill-load 的多个 --prompt 记在 protocols 数组，protocol 只留首个）：
+// 逐份取值的单源在状态族（与出口覆盖判据同一实现）——在这里另写一份 basename 提取，入口与出口
+// 就会对「这个标记到底声明了哪几份协议」给出两种答案。
+import { markerProtocolBasenames } from './lib/state-skillmarkers.mjs';
 import {
   fileExists,
   packageRoot,
@@ -80,6 +84,8 @@ import {
   runTransitionEvidenceGate,
 } from './lib/guard-gates.mjs';
 import {
+  guardDeclarationCommand,
+  nodeSkillLoadCommands,
   runArtifactGate,
   runDirectOverrideGate,
   runEvidenceCompletionGate,
@@ -192,9 +198,11 @@ async function resolveGuardProtocolPath() {
 }
 
 // skill-load 声明里的 --prompt 与节点协议文件的一致性（入口侧）：扫描本节点已写下的声明标记，
-// 任何一条显式声明的协议文件落在该节点协议面之外 → BLOCK。判据单实现在 protocol-utils 的
-// promptDeclarationConflict，本函数只负责读标记目录；出口侧的「至少一个标记 ∈ 节点协议集」门落在
-// guard-gates——两处同源不同层（入口判「每条声明都对」，出口判「本节点确有可用声明」）。
+// **逐份**核对每条声明（一个标记可声明多份：protocols 数组 + protocol 单值），任何一份落在该节点
+// 协议面之外 → BLOCK。判据单实现在 protocol-utils 的 promptDeclarationConflict；逐份取值的单源在
+// state-skillmarkers 的 markerProtocolBasenames（出口覆盖判据读同一份）。本函数只负责读标记目录；
+// 出口侧的「该读的每份协议是否都被声明」门落在 guard-gates——两处同源不同层（入口判「每条声明都
+// 对」，出口判「必需项都声明了」）。只读 protocol 单值时，多 --prompt 的第二份声明在入口不被核对。
 async function checkPromptDeclarations({ node, state }) {
   if (!state.activeChange) return;
   // 只认活动路径（includeArchive: false）：入口核对的是**这一轮**写下的声明，而归档里的声明属于
@@ -213,14 +221,35 @@ async function checkPromptDeclarations({ node, state }) {
       continue; // 损坏标记由出口声明门报，不在这里抢报（同一缺陷不写两处措辞）
     }
     if (marker?.auto === true) continue; // 引擎代记的标记不是执行者的声明
-    const conflict = promptDeclarationConflict({ node, declaredProtocol: marker?.protocol });
-    if (conflict) conflicts.push({ name, ...conflict });
+    const skill = typeof marker?.skill === 'string' && marker.skill !== '' ? marker.skill : null;
+    // 逐份核对：多 --prompt 的标记里每一份声明都要过同一判据（单值读法会漏掉第二份）
+    for (const declaredProtocol of markerProtocolBasenames(marker)) {
+      const conflict = promptDeclarationConflict({ node, declaredProtocol });
+      if (conflict) conflicts.push({ name, skill, ...conflict });
+    }
   }
   if (conflicts.length === 0) return;
+  // 重新声明的命令由协议派生（与出口恢复段、状态命令族同一装配）：旧报文写的是
+  // `skill-load <node> <skill> --prompt <上述协议文件>`——占位符落在 --prompt 的值位置（bash 下 `<`
+  // 是重定向，照抄直接语法失败），而且只补首份协议；即便换成真实路径，下一次入口仍会点名另一份。
+  // 技能取该标记自己声明的那个（重跑即覆写同一份标记，不新增）；标记没有技能名时退回该节点的
+  // 必需技能集（一条技能一条命令）。
+  const derived = await nodeSkillLoadCommands({ node, state });
+  const commands = [];
+  for (const conflict of conflicts) {
+    if (conflict.skill === null) {
+      commands.push(...derived.map((entry) => entry.command));
+      continue;
+    }
+    const declared = derived.find((entry) => entry.skill === conflict.skill);
+    commands.push(declared ? declared.command : guardDeclarationCommand({ node, skill: conflict.skill }));
+  }
+  const unique = commands.filter((command, index) => commands.indexOf(command) === index);
   console.error('BLOCKED: 节点 ' + node.id + ' 的 skill-load 声明 --prompt 与节点协议文件不符——'
     + conflicts.map((conflict) => conflict.name + ' 声明 ' + conflict.declared
       + '（应为 ' + conflict.expected.map(promptPointerPath).join(' / ') + '）').join('；')
-    + '；重跑 skill-load ' + node.id + ' <skill> --prompt <上述协议文件> 重新声明后重试');
+    + '；重跑下面的命令重新声明后重试（同一 node-skill 重跑会覆写该标记）：\n'
+    + unique.map((command) => '  ' + command).join('\n'));
   process.exit(1);
 }
 
@@ -357,7 +386,6 @@ async function main() {
   runReturnContractGate({ node, state });
   await runSubagentSummaryGate({ node, state });
   await runMultiPassCompletionGate({ node, state });
-  await runSkillLoadMarkerGate({ node, state });
   await runSummaryTemplateFidelityGate({ node, state });
   await runTaskSevenFieldGate({ node, state });
   await runIntakeDocFidelityGate({ node, state });
@@ -370,6 +398,10 @@ async function main() {
     emptyExitExempt: executeEmptyExitExempt,
   });
   runRequiredEvidenceGate({ node, evidence });
+  // 声明覆盖门排在证据族之后：同一个「缺声明」既可能表现为证据清单缺 required-skill（证据门的报文
+  // 给出该绑定的补齐命令），也可能表现为声明标记没覆盖必需项（本门的报文逐项点名缺哪个协议文件 /
+  // 哪个必需技能）。证据门先说话，本门收口——两者都说同一件事时不会各给一条互相打断的路径。
+  await runSkillLoadMarkerGate({ node, state });
   if (apply) {
     const completed = completedSet(state);
     // Fix 二次完成信号：exit 的 execute 家族节点在本次 exit 之前已在 completedNodes（首轮 exit

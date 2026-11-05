@@ -101,19 +101,46 @@ function headingLines(text, level) {
   return out;
 }
 
-// 段名宽容匹配（单一实现）：主体取 normalizeHeading 的结果，译为行锚定正则。编号前缀与尾部括号在
-// 正则里同样是可选的——「省编号 / 换括号措辞 / 大小写不同」命中同一段，核心词不同则不命中（AC-9）。
+// 段名宽容匹配（单一实现）：主体取 normalizeHeading 的结果，译为行锚定正则。编号前缀、尾部括号与
+// 闭合 ATX 在正则里同样可选——「省编号 / 换括号措辞 / 大小写不同 / 尾部补 `##`」命中同一段，核心词
+// 不同则不命中（AC-9）。闭合 ATX 的判定与 normalizeHeading 取同一惯例：收尾的 `#` 串前面必须有空白，
+// 否则那是标题文本本身（`## 波次划分##` 的段名以 `#` 结尾，不是同一条标题）。
 // escapeRegExp 的既有契约是 glob 片段（调用方先 split('*')），故不转义 `*`；段名是字面文本，缺口在
 // 这一行显式闭合，而不是另写一份转义实现。
+// 匹配只对**围栏外的标题行**有意义（围栏内的标题是正文示例）：段名判据一律经 lib/section-body.mjs 的
+// 围栏感知扫描取行，本正则不承担围栏语义（对着整篇文本 test 会把示例标题读成段）。
 export function headingPattern(rawName, level = 2) {
   const normalized = normalizeHeading(rawName);
   const body = normalized === '' ? String(rawName ?? '').trim() : normalized;
-  const literal = escapeRegExp(body).replace(/\*/gu, '\\*');
   const marker = level === 3 ? '###' : '##';
   return new RegExp(
-    '^' + marker + '\\s*(?:\\d+(?:\\.\\d+)?\\.?\\s*)?' + literal + '\\s*(?:[（(][^\\n）)]*[）)])?\\s*$',
+    '^' + marker + '\\s*(?:\\d+(?:\\.\\d+)?\\.?\\s*)?' + headingLiteral(body)
+      + '\\s*(?:[（(][^\\n）)]*[）)])?(?:\\s+#+)?\\s*$',
     'im',
   );
+}
+
+// 段名字面量 → 正则片段：转义正则元字符（`*` 不在 escapeRegExp 的 glob 契约内，单独闭合）。段名
+// 在正则里是字面文本，缺口在这一行显式闭合，而不是各消费方各写一份转义。
+function headingLiteral(rawName) {
+  return escapeRegExp(String(rawName ?? '')).replace(/\*/gu, '\\*');
+}
+
+// 段标题谓词（同一套归一的谓词形态；lib/section-body.mjs 既接受整行正则，也接受
+// `(heading) => boolean`）：判定 = 级别相等 且 标题正文与段名过同一个 normalizeHeading 后相等。
+// 为什么需要谓词形态：标题**正文本身**可以以井号开头（`## ## 验收准则（AC）`）——Markdown 的合法
+// 写法，段形门先剥前导井号再归一（认作在场），而按整行锚定的正则把第二个井号读成段名的一部分：同一份
+// 工件的同一段在两处得到相反答案，一次排版就够关掉其中一处判据（未校验 ≠ 通过）。归一在标题文本层，
+// 井号因此不是判定变量。段形门（guard-template-fidelity）对同一件事用的是同一套归一（标题正文与段名
+// 各过 normalizeHeading 再比）；波次门与 AC 覆盖取用本谓词，两处不再各写一份比较。
+// names 可给单个段名或段名清单（回退基准常是一组同义写法，见文件末尾的段名清单段）。
+export function headingPredicate(names, level = 2) {
+  const wanted = new Set((Array.isArray(names) ? names : [names])
+    .map((name) => normalizeHeading(name))
+    .filter((name) => name !== ''));
+  return function registeredSectionHeading(heading) {
+    return Boolean(heading) && heading.level === level && wanted.has(normalizeHeading(heading.text));
+  };
 }
 
 // 登记表读取（进程内一次）
@@ -385,12 +412,21 @@ export async function allSkeletons(opts = {}) {
 // SUMMARY 模板缺席时的段序兜底：登记表不可读 / 模板未安装时，SUMMARY 门禁仍判乱序与缺段。
 export const LEGACY_SUMMARY_ORDER = ['做了什么', '改动文件', 'verify 输出', '6 维自查', '越界检查', '自检方法'];
 
+// 验收准则段的回退**段名**（一组同义写法）：同一份字面清单派生两种投影——open 出口对着整篇工件文本
+// test 下面的行正则，AC 覆盖按标题行过共享谓词比较（标题正文以井号开头时行正则判缺席，谓词认在场）。
+// 行正则由名字拼出：回退基准因此只有一份清单，改一处不会让另一处静默落后。
+export const TEMPLATE_FALLBACK_SECTION_NAMES = {
+  requirementAcceptance: ['验收准则', '验收标准', 'AC', 'Acceptance Criteria'],
+};
+
 // 模板缺席时 open / design 出口的段名回退（键形态保持不变，消费方按既有键取用）。
 export const TEMPLATE_FALLBACK_SECTION_PATTERNS = {
   changeWhy: /^##\s*Why\b/im,
   changeVisualTone: /^##\s*视觉调性/im,
   requirementUserStory: /^##\s*用户故事/im,
-  requirementAcceptance: /##\s*(验收准则|验收标准|AC|Acceptance Criteria)/i,
+  requirementAcceptance: new RegExp(
+    '##\\s*(' + TEMPLATE_FALLBACK_SECTION_NAMES.requirementAcceptance.map(headingLiteral).join('|') + ')',
+    'i'),
   designDecisionList: /^##\s*\d*\.?\s*决策清单/m,
 };
 
@@ -404,3 +440,9 @@ export const SUMMARY_REQUIRED_SECTIONS = [
   { regex: /##\s*6\s*维自查/i, label: '## 6 维自查' },
   { regex: /##\s*(越界检查|边界检查)/i, label: '## 越界检查' },
 ];
+
+// 波次段名（TASK 模板的 H2）：与上面几份清单同一性质——模板缺席时判据仍要有一份基准名，消费方
+// （lib/wave-projection.mjs）只 import，不自持字面名。宽容匹配由 headingPattern 派生，标题的编号
+// 前缀 / 尾部括号 / 闭合 ATX 因此与 TASK 段形门、AC 覆盖走同一套归一：同一份工件的同一段在两处被
+// 认出同一组写法。「名字与模板一致」由套件在模板在场时对账（不一致即红）——登记值不是自由变量。
+export const WAVE_SECTION_NAME = '波次划分';

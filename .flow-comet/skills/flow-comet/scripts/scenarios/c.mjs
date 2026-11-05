@@ -11,13 +11,17 @@ import {
   assertOut,
   assertTrue,
   baseState,
+  cleanupTmpDir,
+  installSkillTreeCopy,
   runGuard,
   runHandoff,
+  runPrintedCommand,
   runState,
   writeFile,
   writeState,
 } from '../lib/test-helpers.mjs';
 import {
+  BUILTIN_PROTOCOL_SOURCE,
   CHANGE_ID,
   REPO_ROOT,
   SCRIPTS_DIR,
@@ -26,9 +30,11 @@ import {
   TASK_P1,
   customProtocolWithSkillCall,
   handoffFor,
+  makeTmp,
   summaryContent,
   writeCustomProtocol,
   writeIntakeArtifacts,
+  writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import {
   assertOutMatches,
@@ -40,9 +46,11 @@ import {
 import {
   PUBLIC_FACE_DOCS_DIR,
   PUBLIC_FACE_SELF_CHECK_SKIP_NOTICE,
+  VISUAL_TONE_APPLICABLE,
   authoritativeSourceAt,
   countSyncProblems,
   publicFaceDocsAbsent,
+  writeDesignExitFixture,
 } from '../lib/text-anchor-checks.mjs';
 
 // ---------- 公开面的机器状态字段名口径 + 命令锚（机检；判据与反向构造共用本实现） ----------
@@ -315,9 +323,10 @@ function assertDesignFormRecoveryPath(dir) {
   if (block === '') {
     throw new Error('缺 Output Schema evidence 的阻塞没给恢复段（设计形态锚无从判定）:\n' + res.output);
   }
-  // 两条命令（skill-load 自成一行可整行照抄；record 以「后重试 exit」收尾）：先声明技能加载，再 record。
-  const skillLoadLine = (block.match(/^\s*(node "[^"]+" skill-load [^\n]*)$/m) || [])[1];
-  const recordLine = (block.match(/(node "[^"]+" record [^\n]*) 后重试 exit/) || [])[1];
+  // 两条命令（各自单独一行，行内只有命令本身）：先声明技能加载，再 record。取法与照抄闭环同一处
+  // （printedCommandsOf）——恢复段的「哪一行是命令」只有一份判据，本锚不另写一条取行正则。
+  const skillLoadLine = printedCommandsOf(block, 'skill-load')[0];
+  const recordLine = printedCommandsOf(block, 'record')[0];
   if (!skillLoadLine || !recordLine) {
     throw new Error('恢复段应同时给出可照抄的 skill-load 与 record 命令'
       + '（缺声明时照抄 record 会先被它自己的前置门拦下）:\n' + block);
@@ -345,6 +354,325 @@ function assertDesignFormRecoveryPath(dir) {
         + '；安装副本按运行根推导属另一种载体的正确形态，不在本锚范围（本锚只在权威源检出运行）');
     }
   }
+}
+
+// ---------- 恢复段给出的命令：解析 → 在夹具内逐字执行（照抄闭合） ----------
+//
+// 恢复段承诺的是「可照抄的命令」，判据就得**真的照抄**：从报文解析命令文本 → 按当前运行形态解析
+// 脚本路径 → 用同一份参数跑一遍（只把 `node` 换成本进程的可执行文件——PATH 解析不是判据对象）。
+// 这条链路的三个夹具（按安装布局复制技能树 / 打印命令切成 argv / 真实执行打印文本）与委托链路组
+// 共用，单一来源在 lib/test-helpers.mjs；权威源打印的设计形态相对路径（.claude/skills/…）只在
+// 复制进夹具的技能树里可解析，因此执行的是**打印文本**——拿 harness 的绝对脚本路径替代它，
+//「这条命令能不能跑」就等于没判。本段只留声明恢复自己的夹具：重放根与逐条照抄执行。
+
+// 照抄闭环自己的夹具根 + 协议副本：场景运行器给主夹具做的那两步，在闭环的独立根上再走一遍
+// （协议文件必须在运行根内才会被守卫读取）。
+function makeReplayRoot() {
+  const root = makeTmp();
+  fs.mkdirSync(path.dirname(scenarioProtocolPath(root)), { recursive: true });
+  fs.copyFileSync(BUILTIN_PROTOCOL_SOURCE, scenarioProtocolPath(root));
+  return root;
+}
+
+// 照抄执行段（两条闭环共用）：按安装布局把本套件技能树复制进夹具（打印出来的设计形态相对路径才可
+// 解析），并清掉环境里的协议注入——命令自带的协议上下文必须够用。返回逐条执行打印文本的函数，
+// 非 0 即失败并回显命令。
+function printedCommandReplay(root, label) {
+  installSkillTreeCopy(root, path.join('.claude', 'skills'));
+  const cleanEnv = { FLOW_COMET_RUN_ROOT: root, FLOW_COMET_PROTOCOL: '' };
+  return (command) => {
+    const res = runPrintedCommand(command, root, cleanEnv);
+    assertTrue(res.status === 0, label + '：照抄的命令跑不通\n  命令: ' + command
+      + '\n  exit ' + res.status + '\n' + res.output);
+    return res;
+  };
+}
+
+// 恢复段 = 输出里最后一条「恢复:」起的整段（该段之后引擎直接退出）。
+function lastRecoveryBlock(output) {
+  const text = String(output);
+  const start = text.lastIndexOf('恢复:');
+  return start < 0 ? '' : text.slice(start);
+}
+
+// 段内某一类命令的全部可照抄行：命令行自成一行（命令与说明分行——说明接在命令行尾时，整行丢给
+// shell 会把说明当成参数）。判据只认「行首 = node + 引号脚本路径」这一形态，说明行因此不可能被读
+// 成命令（同一个判据也用来证明恢复段里没有第二份命令文本）。
+function printedCommandsOf(block, verb) {
+  const pattern = new RegExp('^\\s*(node "[^"]+" ' + verb + ' [^\\n]+)$', 'gm');
+  return [...block.matchAll(pattern)].map((match) => match[1]);
+}
+
+// 声明恢复的照抄闭合（open / review 同一条判据）：删声明与证据 → exit 被拦 → **逐字照抄**报文给出的
+// 每条命令（第一步的声明命令按序，再第二步的 record）→ 同一 exit 通过。缺陷形态：第一步只声明实现
+// 技能 + 首份协议、且不带模板清单，照抄完同一 exit 仍被覆盖门点名（缺另一份协议文件与另一个必需
+// 技能）——「报文各给一半」正是本断言要钉死的东西：照抄不了就是没修好。
+function assertDeclarationRecoveryRoundTrip({ node, fixture, skills, prompts, templates }) {
+  const root = makeReplayRoot();
+  try {
+    fixture(root);
+    const blocked = runGuard(['exit', node], root);
+    assertExit(blocked, 1);
+    assertOut(blocked, 'BLOCKED: missing evidence for Node ' + node);
+    const block = lastRecoveryBlock(blocked.output);
+    const declared = printedCommandsOf(block, 'skill-load');
+    const recordCommand = printedCommandsOf(block, 'record')[0];
+    if (declared.length === 0 || !recordCommand) {
+      throw new Error(node + '：缺声明 + 缺证据的阻塞应同时给出 skill-load 与 record 命令:\n' + block);
+    }
+    // 照抄：声明命令按报文顺序执行，再 record。环境里不注入协议——命令自带的上下文必须够用。
+    const copyAndRun = printedCommandReplay(root, node);
+    for (const command of declared) copyAndRun(command);
+    copyAndRun(recordCommand);
+    // 核心：照抄完，同一个 exit 必须通过（不是「再去另一条报文里找第二步」）。
+    const recovered = runGuard(['exit', node], root);
+    assertExit(recovered, 0);
+    assertOut(recovered, 'ALL CHECKS PASSED');
+    assertDerivedDeclarationCommands({ node, block, declared, skills, prompts, templates });
+    assertDeclarationGateRecovery({ node, root, skills, prompts, templates, copyAndRun });
+  } finally {
+    cleanupTmpDir(root);
+  }
+}
+
+// 派生形态的判据：每个 guarded 必需技能各一条，且每条都带该节点**全部**协议文件与该节点的模板
+// 全清单。照抄闭环已经会红掉「跑不通」的拼法；这一层把推导规则本身钉住——把两份协议分到两条命令、
+// 或只给其一，都属于「凑够覆盖但命令不是同一个形态」，下游照抄同样会在模板面 / 协议面漏。
+function assertDerivedDeclarationCommands({ node, block, declared, skills, prompts, templates }) {
+  if (declared.length !== skills.length) {
+    throw new Error(node + '：声明命令应每个 guarded 必需技能各一条（' + skills.length + ' 条），实际 '
+      + declared.length + ' 条:\n' + declared.join('\n'));
+  }
+  const templateFlag = '--templates ' + templates.join(',');
+  for (const skill of skills) {
+    const command = declared.find((line) => line.includes(' skill-load ' + node + ' ' + skill + ' '));
+    if (!command) {
+      throw new Error(node + '：恢复段缺技能 ' + skill + ' 的声明命令（该技能是 guarded 必需技能）:\n' + block);
+    }
+    for (const prompt of prompts) {
+      if (!command.includes('--prompt ' + prompt)) {
+        throw new Error(node + '：' + skill + ' 的声明命令缺协议文件 ' + prompt
+          + '（一条命令要把该节点全部协议文件都带上，照抄才一次到位）: ' + command);
+      }
+    }
+    if (!command.includes(templateFlag)) {
+      throw new Error(node + '：' + skill + ' 的声明命令缺模板全清单 ' + templateFlag
+        + '（漏模板清单，照抄后会被模板门拦下）: ' + command);
+    }
+  }
+}
+
+// 覆盖门补齐命令的照抄闭合（同一缺陷的第二半：门只给缺项、技能名占位、且漏 --templates）。把声明
+// 退回旧口径——只剩一个技能 + 一份协议（模板清单仍写全，否则第一步就撞 skill-load 自己的模板门，
+// 测不到覆盖门）→ exit 被覆盖门拦下 → **照抄门给出的命令** → 同一 exit 通过。
+function assertDeclarationGateRecovery({ node, root, skills, prompts, templates, copyAndRun }) {
+  const loadsDir = path.join(root, '.specs', CHANGE_ID, '.skill-loads');
+  const declaredSkill = skills[0];
+  for (const name of fs.readdirSync(loadsDir)) fs.rmSync(path.join(loadsDir, name));
+  assertExit(runState(['skill-load', node, declaredSkill, '--prompt', prompts[0],
+    '--templates', templates.join(',')], root), 0);
+  const blocked = runGuard(['exit', node], root);
+  assertExit(blocked, 1);
+  assertOut(blocked, '缺协议声明标记');
+  const block = lastRecoveryBlock(blocked.output);
+  const commands = printedCommandsOf(block, 'skill-load');
+  if (commands.length === 0) {
+    throw new Error(node + '：覆盖门的恢复段没给出可照抄的声明命令:\n' + block);
+  }
+  // 形态断言（照抄能过 ≠ 命令形态对）：覆盖门的命令按**缺的必需技能子集**派生——已在场的技能不重
+  // 复刷，缺的每个技能各一条——且每条都把该节点**全部** --prompt 与模板全清单带全。只锁「照抄后
+  // 通过」会放过少一份 --prompt 的拼法：那份协议此刻由既有标记覆盖，缺口要等执行者删掉那条标记
+  // 才现形（报文当场就给不全）。少一条命令 / 多刷已声明的技能 / 少任一份 --prompt / 少模板清单，
+  // 本断言即红。
+  const expectedSkills = skills.filter((skill) => skill !== declaredSkill);
+  if (commands.length !== expectedSkills.length) {
+    throw new Error(node + '：覆盖门的声明命令应按缺的必需技能子集派生（缺 '
+      + expectedSkills.join('、') + ' = ' + expectedSkills.length + ' 条），实际 '
+      + commands.length + ' 条:\n' + block);
+  }
+  const templateFlag = '--templates ' + templates.join(',');
+  for (const skill of expectedSkills) {
+    const command = commands.find((line) => line.includes(' skill-load ' + node + ' ' + skill + ' '));
+    if (!command) {
+      throw new Error(node + '：覆盖门的恢复段缺技能 ' + skill + ' 的声明命令（它是缺的必需技能）:\n' + block);
+    }
+    for (const prompt of prompts) {
+      if (!command.includes('--prompt ' + prompt)) {
+        throw new Error(node + '：' + skill + ' 的声明命令缺协议文件 ' + prompt
+          + '（覆盖门要求该节点全部协议文件都被声明，少给一份，照抄后同一 exit 仍会点名它）: ' + command);
+      }
+    }
+    if (!command.includes(templateFlag)) {
+      throw new Error(node + '：' + skill + ' 的声明命令缺模板全清单 ' + templateFlag + ': ' + command);
+    }
+  }
+  for (const command of commands) copyAndRun(command);
+  const recovered = runGuard(['exit', node], root);
+  assertExit(recovered, 0);
+  assertOut(recovered, 'ALL CHECKS PASSED');
+}
+
+// 前端 design 的证据门照抄闭合（gated 绑定的那半）：证据里只缺 required-skill:design.flow-comet-ui-design
+// ——出口对该绑定**不再自动补写**，恢复必须同一段给全两件事：
+//   ① 真实 skill-load 声明（nodeSkillLoadCommands 的同一装配：每个 guarded 必需技能各一条，每条带
+//      该节点全部 --prompt（含条件提示词 2a-ui-design.md）与模板全清单）；
+//   ② 带该 required-skill 的 record——只补声明不补证据，同一个 exit 仍点名同一条。
+// 旧形态（占位提示词、无 --templates、不提 record）照抄后必死循环；本断言逐层钉住这两件，再真的
+// 照抄走一遍。
+function assertFrontendDesignEvidenceRoundTrip() {
+  const root = makeReplayRoot();
+  try {
+    writeDesignExitFixture(root, {
+      newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: false,
+    });
+    const blocked = runGuard(['exit', 'design'], root);
+    assertExit(blocked, 1);
+    assertOut(blocked, 'BLOCKED: missing required Skill evidence: required-skill:design.flow-comet-ui-design');
+    // ① 占位提示词形态：--prompt 的值位置写「<flow-kit/prompts/ 协议文件>」，bash 下 < 是重定向——
+    //    照抄直接语法失败（值位置不接受占位符：路径要么给全，要么别给这个参数）。
+    assertNotOut(blocked, '--prompt <');
+    const block = lastRecoveryBlock(blocked.output);
+    const declared = printedCommandsOf(block, 'skill-load');
+    const recordCommand = printedCommandsOf(block, 'record')[0];
+    if (declared.length === 0 || !recordCommand) {
+      throw new Error('design：gated 绑定的缺口应同时给出 skill-load 与 record 命令'
+        + '（只给声明不给 record，照抄后同一 exit 仍点名同一条）:\n' + block);
+    }
+    // ② record 载荷带上被点名的那条 required-skill——record 是覆盖写，只有把这条写回去才算补齐
+    if (!recordCommand.includes('required-skill:design.flow-comet-ui-design')) {
+      throw new Error('design：record 的恢复载荷没带上 required-skill:design.flow-comet-ui-design'
+        + '（自动补写对该绑定已失效，只补声明不补证据 = 死循环）: ' + recordCommand);
+    }
+    // ③ 派生形态：每个 guarded 必需技能各一条，每条带全部协议文件（含条件提示词）与模板全清单
+    assertDerivedDeclarationCommands({
+      node: 'design',
+      block,
+      declared,
+      skills: ['flow-comet-design', 'flow-comet-ui-design'],
+      prompts: ['flow-kit/prompts/2-design.md', 'flow-kit/prompts/2a-ui-design.md'],
+      templates: ['DESIGN.md'],
+    });
+    // ④ 真的照抄：按报文顺序执行声明命令，再 record；环境里不注入协议（命令自带上下文必须够用）
+    const copyAndRun = printedCommandReplay(root, 'design');
+    for (const command of [...declared, recordCommand]) copyAndRun(command);
+    const recovered = runGuard(['exit', 'design'], root);
+    assertExit(recovered, 0);
+    assertOut(recovered, 'ALL CHECKS PASSED');
+  } finally {
+    cleanupTmpDir(root);
+  }
+}
+
+// 入口 --prompt 冲突报文的照抄闭合（同一缺陷的第三面）：某个标记声明了节点协议面之外的路径 → 入口
+// 拦下。旧报文写的是「重跑 skill-load <node> <skill> --prompt <上述协议文件>」——占位符落在 --prompt
+// 的值位置（bash 下 `<` 是重定向，照抄直接语法失败），而且只补首份协议：换成真实路径也只补回一份，
+// 下一次入口仍被同一判据点名另一份。故断言「报文里的命令逐字照抄后，同一条入口的冲突消失」。
+function assertEntryConflictRecoveryRoundTrip() {
+  const root = makeReplayRoot();
+  try {
+    // currentNode = open：入口的归位判据满足；本格只让声明冲突这一道门说话。
+    writeState(root, baseState('open'));
+    writeFile(root, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
+    writeFile(root, 'flow-kit/prompts/1-requirement.md', '# 阶段 1 · REQUIREMENT\n\n## 角色\n\n你是 Requirer。\n');
+    // 声明里混进一份节点协议面之外的路径：入口按逐份核对拦下（第二份协议也被声明过，冲突只在这一份）。
+    writeFile(root, path.posix.join('.specs', CHANGE_ID, '.skill-loads', 'open-flow-comet-change.json'),
+      JSON.stringify({
+        node: 'open',
+        skill: 'flow-comet-change',
+        protocol: '0-change.md',
+        protocols: ['0-change.md', '9-other.md'],
+        templates: ['CHANGE', 'REQUIREMENT'],
+        at: '2026-11-01T00:00:00.000Z',
+      }, null, 2) + '\n');
+    const blocked = runGuard(['entry', 'open'], root);
+    assertExit(blocked, 1);
+    assertOut(blocked, '与节点协议文件不符');
+    // 占位符落在参数值位置 = 照抄不可执行；这是旧报文的形态，必须不再出现。
+    assertNotOut(blocked, '--prompt <');
+    const commands = [...blocked.output.matchAll(/^\s*(node "[^"]+" skill-load [^\n]+)$/gm)].map((match) => match[1]);
+    if (commands.length === 0) {
+      throw new Error('入口冲突报文必须给出可照抄的声明命令（占位词不算命令）:\n' + blocked.output);
+    }
+    const command = commands.find((line) => line.includes(' skill-load open flow-comet-change ')) ?? commands[0];
+    for (const prompt of ['flow-kit/prompts/0-change.md', 'flow-kit/prompts/1-requirement.md']) {
+      if (!command.includes('--prompt ' + prompt)) {
+        throw new Error('入口冲突的重新声明命令缺协议文件 ' + prompt
+          + '（只补首份，下一次入口仍会点名另一份）: ' + command);
+      }
+    }
+    const templateFlag = '--templates CHANGE.md,REQUIREMENT.md';
+    if (!command.includes(templateFlag)) {
+      throw new Error('入口冲突的重新声明命令缺模板全清单 ' + templateFlag
+        + '（漏 --templates 时照抄会先被 skill-load 自己的模板门拦下）: ' + command);
+    }
+    const copyAndRun = printedCommandReplay(root, 'entry');
+    for (const line of commands) copyAndRun(line);
+    const recovered = runGuard(['entry', 'open'], root);
+    assertNotOut(recovered, '与节点协议文件不符');
+    assertOut(recovered, 'ENTRY OK: open');
+  } finally {
+    cleanupTmpDir(root);
+  }
+}
+
+// ---------- 声明命令的册子锚（入口册 + 展开册：open 的两条规范命令） ----------
+//
+// 两册给出 open 的**两条**规范声明命令——每个 guarded 必需技能各一条，每条都带该节点全部 --prompt
+// 与模板全清单。只写其中一条时，照抄的人会在同一次 exit 上被覆盖门点名缺另一个技能（报文各给一半
+// 的文档版）。锚取整行命令（可辨认、可 grep），不取裸词；两册都要有，只出现在一册不算。
+const DECLARATION_BOOK_RELS = ['SKILL.md', path.join('reference', 'entry-detail.md')];
+const DECLARATION_BOOK_COMMAND_ANCHORS = [
+  ['open 的第一个必需技能（change）',
+    'skill-load open flow-comet-change --prompt flow-kit/prompts/0-change.md --prompt flow-kit/prompts/1-requirement.md --templates CHANGE.md,REQUIREMENT.md'],
+  ['open 的第二个必需技能（requirement）',
+    'skill-load open flow-comet-requirement --prompt flow-kit/prompts/0-change.md --prompt flow-kit/prompts/1-requirement.md --templates CHANGE.md,REQUIREMENT.md'],
+];
+
+function declarationBookProblems(skillRoot) {
+  const out = [];
+  for (const rel of DECLARATION_BOOK_RELS) {
+    let text;
+    try {
+      text = fs.readFileSync(path.join(skillRoot, rel), 'utf8');
+    } catch {
+      out.push(rel + ' 不在场（声明命令锚无法核对）');
+      continue;
+    }
+    for (const [label, command] of DECLARATION_BOOK_COMMAND_ANCHORS) {
+      if (!text.includes(command)) out.push(rel + ' 缺「' + label + '」的规范命令');
+    }
+  }
+  return out;
+}
+
+// ---------- 排障册的声明命令锚：与入口册同形 ----------
+//
+// 排障册「exit 缺协议声明标记」一条曾给出**手拼的半边命令**：占位符落在 --prompt 的值位置，且不带
+// --templates——新 change 照抄即被 skill-load 自己的模板门拦下（「模板声明缺失」）。判据不在这里再抄
+// 一份命令：排障册必须逐字含入口册的规范声明命令，两册（中英）都要有；抽掉即报。命令形态因此只有
+// 一个来源，排障册不能自持一份「看起来像命令」的文本。
+// 条数同样取入口册的判据面：该节点有几个 guarded 必需技能就给几条。只列第一条的排障册会让照抄的人
+// 在同一次 exit 上被覆盖门点名缺另一个技能（报文各给一半的文档版）——所以锚是**全部**条目，不是首条。
+const TROUBLESHOOTING_COMMAND_RELS = ['docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md'];
+const TROUBLESHOOTING_DECLARATION_ANCHORS = DECLARATION_BOOK_COMMAND_ANCHORS.map(([, command]) => command);
+
+function troubleshootingDeclarationProblems(texts) {
+  const out = [];
+  for (const rel of TROUBLESHOOTING_COMMAND_RELS) {
+    const text = texts.get(rel);
+    if (typeof text !== 'string') {
+      out.push(rel + ' 不在场（声明命令锚无法核对）');
+      continue;
+    }
+    for (const anchor of TROUBLESHOOTING_DECLARATION_ANCHORS) {
+      if (!text.includes(anchor)) {
+        out.push(rel + ' 缺声明命令「' + anchor
+          + '」（排障册的声明命令必须与入口册同形同数：该节点每个 guarded 必需技能一条，'
+          + '每条带该节点全部 --prompt 与模板全清单）');
+      }
+    }
+  }
+  return out;
 }
 
 // ---------- 形态判据的判别力探针（同一实现驱动，在夹具目录上作业） ----------
@@ -407,16 +735,20 @@ export const ENTRIES = [
 
   // 98: skill-load 写入声明标记（AC-1）——完整命令形态（--prompt flow-kit/prompts/<阶段>.md，
   // 归属校验通过）→ 标记 .specs/<change-id>/.skill-loads/<node>-<skill>.json 生成，
-  // 内容含 node/skill/protocol/at（ISO 时间戳）+ 输出确认提示
+  // 内容含 node/skill/protocol/protocols/at（ISO 时间戳）+ 输出确认提示。
+  // 原位扩展（多 --prompt 记录）：open 节点该读两份协议，一条命令可一次声明多份——标记里存
+  // protocols 数组（逐个 basename，按 --prompt 出现顺序），protocol 仍存首个 basename（旧读法兼容：
+  // 入口声明核对与既有读标记的消费方只读 protocol 单值）。
   {
     name: '98 skill-load 写入声明标记（AC-1）',
     run: (dir) => {
       // 场景内 flow-kit/prompts/ 提示文件（skill-load --prompt 指向——改名 --prompt 后归属校验仅查
       // 前缀不读内容；协议加载走 env reference 路径，文件无需为 JSON）
       writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
+      writeFile(dir, 'flow-kit/prompts/1-requirement.md', '# 阶段 1 · REQUIREMENT\n\n## 角色\n\n你是 Requirer。\n');
       writeState(dir, baseState('open'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
-      const res = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md']);
+      const res = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--prompt', 'flow-kit/prompts/1-requirement.md', '--templates', 'CHANGE.md,REQUIREMENT.md']);
       assertExit(res, 0);
       assertOut(res, 'SKILL-LOAD: open flow-comet-change → .skill-loads/open-flow-comet-change.json');
       const markerPath = path.join(dir, '.specs', CHANGE_ID, '.skill-loads', 'open-flow-comet-change.json');
@@ -427,9 +759,15 @@ export const ENTRIES = [
       }
       // 标记 protocol = --prompt 参数的 basename（与 guard exit 的 节点协议映射表比对同值，
       // 真实链路 skill-load → exit 一致；缺陷修复前写 resolveProtocol 解析后的完整绝对路径，
-      // 与 节点协议映射表 basename 精确比对必然失败——机制实际不可用，已修复）
+      // 与 节点协议映射表 basename 精确比对必然失败——机制实际不可用，已修复）。
+      // 多 --prompt 时取首个（旧读法只认单值，保持逐字可读）。
       if (marker.protocol !== '0-change.md') {
         throw new Error('标记 protocol 应为 --prompt 参数的 basename 0-change.md: ' + JSON.stringify(marker));
+      }
+      // 多 --prompt 全部被记录（缺陷修复前只取第一个，第二个声明被静默丢弃——覆盖判据因此永远
+      // 看不到它）。顺序 = 命令行出现顺序，供报文按序点名。
+      if (!Array.isArray(marker.protocols) || marker.protocols.join(',') !== '0-change.md,1-requirement.md') {
+        throw new Error('标记 protocols 应记录全部 --prompt 的 basename（0-change.md,1-requirement.md）: ' + JSON.stringify(marker));
       }
       if (typeof marker.at !== 'string' || Number.isNaN(Date.parse(marker.at))) {
         throw new Error('标记缺 ISO 时间戳 at: ' + JSON.stringify(marker));
@@ -476,20 +814,38 @@ export const ENTRIES = [
   },
 
   // 100: record 校验 BLOCK（AC-3 反例）——completedChecks 含 required-skill:open.flow-comet-change
-  // 条目但无对应声明标记 → BLOCKED + 指引先加载 skill 并运行 skill-load；evidence 不写入
+  // 条目但无对应声明标记 → BLOCKED + 可照抄的声明命令；evidence 不写入。
+  // 命令形态的判据是**照抄能跑通**：解析打印文本 → 在夹具里真执行 → 同一条 record 通过。旧形态是
+  // 裸脚本名 + 相对提示词 + 无协议上下文（`workflow-state.mjs skill-load …`），照抄在 shell 里
+  // command not found；字符串断言只能钉住那个坏形态本身，钉不出「这条命令能不能用」。
   {
     name: '100 record BLOCKED：completedChecks 缺声明标记（AC-3）',
     run: (dir) => {
       writeState(dir, baseState('open'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
-      const res = runStateWithProtocol(dir, ['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })]);
+      const payload = JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] });
+      const res = runStateWithProtocol(dir, ['record', 'open', payload]);
       assertExit(res, 1);
       assertOut(res, 'BLOCKED');
       assertOut(res, '缺少对应声明标记');
-      assertOut(res, 'workflow-state.mjs skill-load open flow-comet-change');
       // BLOCK 先于记录——校验失败后 evidence 不得写入
       const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (st.evidence && st.evidence.open) throw new Error('BLOCKED 后不应写入 evidence: ' + JSON.stringify(st.evidence.open));
+      // 报文给出的声明命令必须可照抄（与守卫侧恢复段同一装配：脚本路径 + 全部 --prompt + 模板全清单
+      // + 协议上下文）：解析 → 真跑 → 同一条 record 通过。
+      const command = (res.output.match(/^\s*(node "[^"]+" skill-load [^\n]+)$/m) || [])[1];
+      if (!command) {
+        throw new Error('缺声明标记的阻塞必须给出完整可执行命令（node "<脚本路径>" skill-load …）:\n' + res.output);
+      }
+      // 协议上下文随命令走：本夹具的协议来自环境变量（不是内置默认），照抄时不带 --protocol 会
+      // 解析到另一份协议（状态命令族只认 CLI → env → 内置默认，没有第二来源）。
+      if (!command.includes('--protocol "reference/workflow-protocol.json"')) {
+        throw new Error('声明命令缺协议上下文（照抄会解析到内置默认协议，而不是本次运行的那份）: ' + command);
+      }
+      printedCommandReplay(dir, '记录侧声明')(command);
+      const recorded = runStateWithProtocol(dir, ['record', 'open', payload]);
+      assertExit(recorded, 0);
+      assertOut(recorded, 'EVIDENCE: open');
     },
   },
 
@@ -523,62 +879,232 @@ export const ENTRIES = [
     },
   },
 
-  // 102: exit 协议声明标记校验（AC-4）+ 真实链路集成——.skill-loads/ 已激活
-  // （目录存在）但无本节点协议标记（<node>-*.json 且 protocol ∈ 该节点协议集，节点协议映射表
-  // basename）→ BLOCKED；真实 skill-load --prompt 写入的标记（protocol = basename）→ exit 通过
-  // （修复后真实链路一致——缺陷修复前 skill-load 写解析后完整路径，exit 必 BLOCKED）；未传
-  // --prompt（标记 protocol = null）→ BLOCKED；损坏标记（protocol 非协议集）→ BLOCKED
+  // 102: exit 协议声明标记校验（AC-4）+ 真实链路集成。判定从「任一命中即通过」改为「全部覆盖」：
+  // 节点该读的每个协议文件（NODE_PROTOCOL_FILES，open = 0-change / 1-requirement）都必须被某个标记
+  // 覆盖，协议声明的 requiredSkillCalls（enforcement=guarded）也各自要有标记。新 change 缺任一 →
+  // BLOCKED 并逐项点名缺哪个协议文件 / 哪个必需技能；旧 change → WARN 渐进（既有 change 不卡死）。
+  // 旧单值标记（只有 protocol、没有 protocols）照样计入覆盖——旧写入形态不被新规则判死。
+  // ⑧ 另补一格出口**链序**（见该格头注）：同一个「缺声明」既表现为证据清单缺 required-skill、也
+  // 表现为标记没覆盖必需项，两段报文的先后是链序的直接读数。
   {
-    name: '102 exit 协议标记校验：真实链路通过 / 无标记·null·损坏 BLOCKED（AC-4）',
+    name: '102 exit 协议标记校验：全部覆盖通过 / 少声明必红点名 / 旧 change 只 WARN / 旧单值标记可读 / 证据门先于覆盖门（AC-4）',
     run: (dir) => {
-      const st = baseState('open');
-      st.evidence.open = { summary: 'intake complete' };
-      writeState(dir, st);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n\n## 范围\n');
-      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\n## 验收准则（AC）\n');
+      const loadsDir = path.join(dir, '.specs', CHANGE_ID, '.skill-loads');
+      const markerFile = (skill) => path.join(loadsDir, 'open-' + skill + '.json');
+      const readMarker = (skill) => JSON.parse(fs.readFileSync(markerFile(skill), 'utf8'));
+      // 新 change 夹具（init 标记 = newChange:true）+ entry 已记录（否则先被 entry 记录门拦下，
+      // 测不到声明门本身）
+      const newChangeState = () => {
+        const st = baseState('open');
+        st.evidence.open = { summary: 'intake complete' };
+        st.newChange = true;
+        st.enteredNodes = ['open'];
+        return st;
+      };
+      writeState(dir, newChangeState());
+      // 新 change 下入口文档另有首部门（Change ID 必在场）——夹具让它在场，才能把断言收敛到声明门上
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md',
+        '# CHANGE: 声明门夹具\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## Why\n\n夹具。\n\n## 范围\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md',
+        '# REQUIREMENT: 声明门夹具\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 用户故事\n\n- US-1\n\n## 验收准则（AC）\n\n- Given a When b Then c\n');
       // 场景内 flow-kit/prompts/ 提示文件（真实 skill-load --prompt 指向——归属校验仅查前缀不读内容）
       writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
-      const loadsDir = path.join(dir, '.specs', CHANGE_ID, '.skill-loads');
-      fs.mkdirSync(loadsDir, { recursive: true });
-      // ① 机制已激活（.skill-loads/ 存在）但无 open-* 标记（仅他节点标记）→ BLOCKED
+      writeFile(dir, 'flow-kit/prompts/1-requirement.md', '# 阶段 1 · REQUIREMENT\n\n## 角色\n\n你是 Requirer。\n');
+      // ① 机制已激活（.skill-loads/ 存在）但无 open-* 标记（仅他节点标记）→ BLOCKED，逐项点名
       writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/design-flow-comet-design.json',
         JSON.stringify({ node: 'design', skill: 'flow-comet-design', protocol: '2-design.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
-      const resBlock = runGuard(['exit', 'open'], dir);
-      assertExit(resBlock, 1);
-      assertOut(resBlock, 'BLOCKED');
-      assertOut(resBlock, 'exit 缺协议声明标记');
-      // ② 真实链路：skill-load --prompt 写入标记（protocol = basename）→ exit 通过
-      const markerPath = path.join(loadsDir, 'open-flow-comet-change.json');
-      const sl = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md']);
-      assertExit(sl, 0);
-      assertOut(sl, 'SKILL-LOAD: open flow-comet-change');
-      const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
-      if (marker.protocol !== '0-change.md') {
-        throw new Error('skill-load 标记 protocol 应为 --prompt 参数的 basename 0-change.md: ' + JSON.stringify(marker));
+      const resNoMarker = runGuard(['exit', 'open'], dir);
+      assertExit(resNoMarker, 1);
+      assertOut(resNoMarker, 'BLOCKED');
+      assertOut(resNoMarker, 'exit 缺协议声明标记');
+      assertOut(resNoMarker, '缺协议文件: 0-change.md、1-requirement.md');
+      assertOut(resNoMarker, '缺必需技能声明: flow-comet-change、flow-comet-requirement');
+      // ② 少声明（新 change，真实链路）——只声明一个协议文件、只覆盖一个必需技能 → BLOCKED 并
+      //    逐项点名缺哪个协议文件、哪个必需技能。缺陷形态：门禁把「该读的协议清单」当允许集合、
+      //    任一命中即通过 → 这条会 exit 0（第二个声明被静默丢弃，覆盖缺口看不见）
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md']), 0);
+      const resPartial = runGuard(['exit', 'open'], dir);
+      assertExit(resPartial, 1);
+      assertOut(resPartial, 'BLOCKED');
+      assertOut(resPartial, 'exit 缺协议声明标记');
+      assertOut(resPartial, '缺协议文件: 1-requirement.md');
+      assertOut(resPartial, '缺必需技能声明: flow-comet-requirement');
+      assertNotOut(resPartial, 'ALL CHECKS PASSED');
+      // ③ 全部声明（新 change，真实链路）→ exit 通过。一条命令多个 --prompt：两份协议都记进同一个
+      //    标记的 protocols 数组（protocol 保留首个 basename 供旧读法）
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--prompt', 'flow-kit/prompts/1-requirement.md', '--templates', 'CHANGE.md,REQUIREMENT.md']), 0);
+      const multiMarker = readMarker('flow-comet-change');
+      if (multiMarker.protocol !== '0-change.md' || !Array.isArray(multiMarker.protocols)
+        || multiMarker.protocols.join(',') !== '0-change.md,1-requirement.md') {
+        throw new Error('多 --prompt 应全部记入 protocols 且 protocol 保留首个: ' + JSON.stringify(multiMarker));
       }
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-requirement', '--prompt', 'flow-kit/prompts/1-requirement.md', '--templates', 'CHANGE.md,REQUIREMENT.md']), 0);
       const resPass = runGuard(['exit', 'open'], dir);
       assertExit(resPass, 0);
       assertOut(resPass, 'ALL CHECKS PASSED');
       assertNotOut(resPass, 'BLOCKED');
-      // ③ skill-load 未传 --prompt → 标记 protocol = null → exit BLOCKED（fail-closed：
-      // 无协议声明不可通过——指引补 skill-load --prompt）
-      const slNull = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change', '--templates', 'CHANGE.md,REQUIREMENT.md']);
-      assertExit(slNull, 0);
-      const markerNull = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
-      if (markerNull.protocol !== null) {
-        throw new Error('skill-load 未传 --prompt 标记 protocol 应为 null: ' + JSON.stringify(markerNull));
+      assertNotOut(resPass, 'SKILL-LOAD WARN');
+      // ④ 旧单值标记仍可读——只有 protocol、没有 protocols 的两条标记（收紧前的写入形态）各覆盖
+      //    一份协议文件：覆盖判据照样把它们算进去 → exit 通过
+      fs.rmSync(loadsDir, { recursive: true, force: true });
+      writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-change.json',
+        JSON.stringify({ node: 'open', skill: 'flow-comet-change', protocol: '0-change.md', templates: ['CHANGE', 'REQUIREMENT'], at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-requirement.json',
+        JSON.stringify({ node: 'open', skill: 'flow-comet-requirement', protocol: '1-requirement.md', templates: ['CHANGE', 'REQUIREMENT'], at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+      const resLegacy = runGuard(['exit', 'open'], dir);
+      assertExit(resLegacy, 0);
+      assertOut(resLegacy, 'ALL CHECKS PASSED');
+      assertNotOut(resLegacy, 'BLOCKED');
+      // ⑤ 旧 change（无 newChange）：同样的「少声明」构造 → 只 WARN 不阻断（不收死既有 change），
+      //    报文与 ② 同样逐项点名
+      const legacyState = baseState('open');
+      legacyState.evidence.open = { summary: 'intake complete' };
+      writeState(dir, legacyState);
+      fs.rmSync(loadsDir, { recursive: true, force: true });
+      writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-change.json',
+        JSON.stringify({ node: 'open', skill: 'flow-comet-change', protocol: '0-change.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+      const resWarn = runGuard(['exit', 'open'], dir);
+      assertExit(resWarn, 0);
+      assertOut(resWarn, 'SKILL-LOAD WARN');
+      assertOut(resWarn, '缺协议文件: 1-requirement.md');
+      assertOut(resWarn, '缺必需技能声明: flow-comet-requirement');
+      assertOut(resWarn, 'ALL CHECKS PASSED');
+      // ⑥ 未传 --prompt（protocol = null / protocols 空）→ 两个必需技能都在场，但没有协议文件被
+      //    覆盖 → BLOCKED（fail-closed：声明了技能不等于读了两份协议）
+      writeState(dir, newChangeState());
+      fs.rmSync(loadsDir, { recursive: true, force: true });
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change', '--templates', 'CHANGE.md,REQUIREMENT.md']), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-requirement', '--templates', 'CHANGE.md,REQUIREMENT.md']), 0);
+      const markerNull = readMarker('flow-comet-change');
+      if (markerNull.protocol !== null || !Array.isArray(markerNull.protocols) || markerNull.protocols.length !== 0) {
+        throw new Error('未传 --prompt 时 protocol 应为 null、protocols 应为空数组: ' + JSON.stringify(markerNull));
       }
       const resNull = runGuard(['exit', 'open'], dir);
       assertExit(resNull, 1);
       assertOut(resNull, 'BLOCKED');
       assertOut(resNull, 'exit 缺协议声明标记');
-      // ④ 损坏标记（protocol 非协议集 basename）→ BLOCKED（fail-closed）
+      assertOut(resNull, '缺协议文件: 0-change.md、1-requirement.md');
+      assertNotOut(resNull, '缺必需技能声明');
+      // ⑦ 损坏标记（protocol / protocols 均非协议集 basename）→ 该文件不算被覆盖 → BLOCKED
       writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-change.json',
-        JSON.stringify({ node: 'open', skill: 'flow-comet-change', protocol: '9-other.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+        JSON.stringify({ node: 'open', skill: 'flow-comet-change', protocol: '9-other.md', protocols: ['9-other.md'], at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-requirement.json',
+        JSON.stringify({ node: 'open', skill: 'flow-comet-requirement', protocol: '1-requirement.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
       const resCorrupt = runGuard(['exit', 'open'], dir);
       assertExit(resCorrupt, 1);
       assertOut(resCorrupt, 'BLOCKED');
       assertOut(resCorrupt, 'exit 缺协议声明标记');
+      assertOut(resCorrupt, '缺协议文件: 0-change.md');
+      assertNotOut(resCorrupt, '缺必需技能声明');
+      // ⑧ 出口链序：同一个「缺声明」既可能是证据清单缺 required-skill（证据门的报文给出该绑定的
+      //    补齐命令），也可能是声明标记没覆盖必需项（覆盖门逐项点名缺哪个技能）。两者都说同一件事
+      //    时，证据门必须先说话、覆盖门收口——颠倒顺序会让执行者只看到「缺协议声明标记」，看不到
+      //    证据门指出的那条绑定。反向构造：把 workflow-guard 出口链上的两处调用对调（覆盖门排到
+      //    证据族之前）→ 本格第一趟先报覆盖门 → 本格 RED。
+      //    两段报文**不可能**同处一趟输出（任一命中即 process.exit），故按两趟真实顺序断言：第一趟
+      //    只有证据门说话，补齐证据后第二趟才轮到覆盖门；「行序」取两趟输出拼接后的位置。
+      //    夹具根独立（design 出口夹具与前七格的 open 夹具互不污染），协议副本按套件同一表达式预置。
+      const chainRoot = makeTmp();
+      try {
+        fs.mkdirSync(path.dirname(scenarioProtocolPath(chainRoot)), { recursive: true });
+        fs.copyFileSync(BUILTIN_PROTOCOL_SOURCE, scenarioProtocolPath(chainRoot));
+        writeDesignExitFixture(chainRoot, {
+          newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: false,
+        });
+        // 先写一条真实声明（design 技能 + 2-design.md）：机制已激活，缺口收敛到 ui-design 这一条绑定
+        assertExit(runState(['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md', '--templates', 'DESIGN.md'], chainRoot), 0);
+        const bothMissing = runGuard(['exit', 'design'], chainRoot);
+        assertExit(bothMissing, 1);
+        assertOut(bothMissing, 'BLOCKED: missing required Skill evidence: required-skill:design.flow-comet-ui-design');
+        assertNotOut(bothMissing, '缺协议声明标记');
+        // 第二趟：证据补齐（同一夹具的 declareUiDesign），声明覆盖仍缺 → 覆盖门收口并点名该技能
+        writeDesignExitFixture(chainRoot, {
+          newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: true,
+        });
+        const markerMissing = runGuard(['exit', 'design'], chainRoot);
+        assertExit(markerMissing, 1);
+        assertOut(markerMissing, '缺协议声明标记');
+        assertOut(markerMissing, '缺必需技能声明: flow-comet-ui-design');
+        // 本格的核心断言：两段报文都在场，且「证据门」那段的行序早于「缺协议声明标记」那行——覆盖门
+        // 的报文出现即证明链条已越过证据门（证据门命中会 process.exit，覆盖门就不会有输出）。
+        const chainText = bothMissing.output + '\n' + markerMissing.output;
+        const evidenceAt = chainText.indexOf('missing required Skill evidence');
+        const markerAt = chainText.indexOf('缺协议声明标记');
+        if (evidenceAt < 0 || markerAt < 0 || evidenceAt > markerAt) {
+          throw new Error('链序：证据门报文应在「缺协议声明标记」之前（两段报文都必须在场）: '
+            + JSON.stringify({ evidenceAt, markerAt }));
+        }
+      } finally {
+        cleanupTmpDir(chainRoot);
+      }
+      // ⑨ 恢复段命令的照抄闭合（本场景的核心扩展；不新增场景条目）：open 与 review 各删声明与证据 →
+      // exit 被拦 → **逐字照抄**报文给出的每条命令 → 同一 exit 通过。缺陷形态：恢复段第一步只声明
+      // 实现技能 + 首份协议、且不带模板清单（声明覆盖门的补齐命令则只给缺项、同样漏模板），照抄完
+      // 同一 exit 仍被覆盖门点名缺另一份协议文件与另一个必需技能——两处各给一半。
+      assertDeclarationRecoveryRoundTrip({
+        node: 'open',
+        skills: ['flow-comet-change', 'flow-comet-requirement'],
+        prompts: ['flow-kit/prompts/0-change.md', 'flow-kit/prompts/1-requirement.md'],
+        templates: ['CHANGE.md', 'REQUIREMENT.md'],
+        fixture: (root) => {
+          const st = newChangeState();
+          delete st.evidence.open; // 证据整体缺席：恢复段必须把「先声明」这一步一并给全
+          writeState(root, st);
+          writeFile(root, '.specs/' + CHANGE_ID + '/CHANGE.md',
+            '# CHANGE: 声明门夹具\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## Why\n\n夹具。\n\n## 范围\n');
+          writeFile(root, '.specs/' + CHANGE_ID + '/REQUIREMENT.md',
+            '# REQUIREMENT: 声明门夹具\n\n- **Change ID**: ' + CHANGE_ID
+            + '\n\n## 用户故事\n\n- US-1\n\n## 验收准则（AC）\n\n- Given a When b Then c\n');
+          writeFile(root, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
+          writeFile(root, 'flow-kit/prompts/1-requirement.md', '# 阶段 1 · REQUIREMENT\n\n## 角色\n\n你是 Requirer。\n');
+        },
+      });
+      assertDeclarationRecoveryRoundTrip({
+        node: 'review',
+        skills: ['flow-comet-review', 'flow-comet-test'],
+        prompts: ['flow-kit/prompts/6-review.md', 'flow-kit/prompts/5-test.md'],
+        templates: ['REVIEW.md', 'TEST.md'],
+        fixture: (root) => {
+          const st = baseState('review');
+          st.newChange = true;
+          st.enteredNodes = ['review'];
+          writeState(root, st);
+          writeFile(root, '.specs/' + CHANGE_ID + '/REVIEW.md',
+            '# REVIEW\n\n## Critical\n\n无。\n\n## 发现\n\n- **问题B**: 某处问题 **[已修]**\n'
+            + '  - **Symptom**: 具体现象\n  - **Source**: 某书某节\n'
+            + '  - **Consequence**: 若不修会怎样\n  - **Remedy**: 怎么改\n\n## 结论\n\n通过\n');
+          writeFile(root, 'flow-kit/prompts/6-review.md', '# 阶段 6 · REVIEW\n\n## 角色\n\n你是 Reviewer。\n');
+          writeFile(root, 'flow-kit/prompts/5-test.md', '# 阶段 5 · TEST\n\n## 角色\n\n你是 Tester。\n');
+        },
+      });
+      // ⑩ 前端 design 的证据门照抄闭合（不新增场景条目）：证据缺一条 gated 绑定（ui-design）时，
+      //    恢复段必须给全「真实声明 + 带该 required-skill 的 record」两步，照抄后同一 exit 通过。
+      assertFrontendDesignEvidenceRoundTrip();
+      // ⑪ 入口 --prompt 冲突报文的照抄闭合（同一缺陷的第三面：报文与门禁判据不是同一份派生）。
+      assertEntryConflictRecoveryRoundTrip();
+      // ⑫ **标记目录整体被删**：旧口径把它读成「声明机制未激活」→ 跳过校验（对新 change 也印
+      //    「旧 change 兼容」），于是 `rm -rf .skill-loads/` 就是关掉覆盖判据的写法。新 change
+      //    下目录缺席 = 一项声明都没有：按缺声明 BLOCKED 并逐项点名（同一条判据的两半——
+      //    「目录在但没覆盖」与「目录根本不在」不该有两种放行）。旧 change 的过渡规则不变
+      //    （渐进 WARN，且只有那一支才叫「旧 change 兼容」）。
+      writeState(dir, newChangeState());
+      fs.rmSync(loadsDir, { recursive: true, force: true });
+      const resNoLoadsDir = runGuard(['exit', 'open'], dir);
+      assertExit(resNoLoadsDir, 1);
+      assertOut(resNoLoadsDir, 'BLOCKED');
+      assertOut(resNoLoadsDir, 'exit 缺协议声明标记');
+      assertOut(resNoLoadsDir, '缺协议文件: 0-change.md、1-requirement.md');
+      assertOut(resNoLoadsDir, '缺必需技能声明: flow-comet-change、flow-comet-requirement');
+      assertOut(resNoLoadsDir, '恢复: 照抄下面的命令补齐上述缺项');
+      assertNotOut(resNoLoadsDir, '旧 change 兼容');
+      assertNotOut(resNoLoadsDir, 'ALL CHECKS PASSED');
+      // ⑫b 旧 change 同形态：仍按过渡规则渐进 WARN（不计入清单，但报文说清为什么跳过）
+      writeState(dir, legacyState);
+      const resNoLoadsDirOld = runGuard(['exit', 'open'], dir);
+      assertExit(resNoLoadsDirOld, 0);
+      assertOut(resNoLoadsDirOld, 'SKILL-LOAD WARN');
+      assertOut(resNoLoadsDirOld, '旧 change 兼容');
+      assertOut(resNoLoadsDirOld, 'ALL CHECKS PASSED');
     },
   },
 
@@ -642,8 +1168,12 @@ export const ENTRIES = [
   // CONTRIBUTING.md + .github/ 三者俱缺）都没有公开文档面——跳过且**可见**（SKIP = 未校验，不是通过）；
   // 只有权威源检出才跑公开面判据与设计形态锚。形态边界由 assertPublicFaceShapeProbes 自己钉住。
   {
-    name: '105 计数一致性自检同步 + 公开面机器字段名黑名单 + --preflight 锚 + 权威源设计形态锚（AC-8 / AC-14）',
+    name: '105 计数一致性自检同步 + 公开面机器字段名黑名单 + --preflight 锚 + 声明命令册子锚 + 权威源设计形态锚（AC-8 / AC-14）',
     run: async (dir) => {
+      // 声明命令的册子锚：不按载体形态分派（两册随技能包一起分发，装到哪都该给出同一组命令）——
+      // 这也是「缺声明时报文给出的命令」与册子口径一致的那条机检（两边各给一半时必有一侧缺锚）。
+      const bookProblems = declarationBookProblems(path.join(SCRIPTS_DIR, '..'));
+      if (bookProblems.length > 0) throw new Error(bookProblems.join('；'));
       // 权威源判定走 lib 的同一份探针（authoritativeSourceAt：与真实检出同一技能树锚，可带受检根）——
       // 本场景不再自持一份前置判定，形态问题只有一处说了算。
       if (!authoritativeSourceAt()) {
@@ -683,6 +1213,16 @@ export const ENTRIES = [
         const next = mutate(text);
         return next === text ? null : { ...publicFace, texts: new Map(publicFace.texts).set(rel, next) };
       };
+      // 排障册的声明命令锚：真实断言与反向构造走同一判据实现（逐条抽掉 ⇒ 必报——少任何一条，
+      // 照抄的人都会在同一次 exit 上被覆盖门点名缺那一项）。
+      problems.push(...troubleshootingDeclarationProblems(publicFace.texts));
+      for (const anchor of TROUBLESHOOTING_DECLARATION_ANCHORS) {
+        const stripped = mutated('docs/TROUBLESHOOTING.md',
+          (text) => text.split(anchor).join('（反向构造：抽掉）'));
+        if (stripped !== null && troubleshootingDeclarationProblems(stripped.texts).length === 0) {
+          throw new Error('反向构造判别力缺失（排障册：抽掉声明命令锚未被判缺）: ' + anchor);
+        }
+      }
       // 受检面来自派生（映射 + 根目录扫描）：按 GitHub 惯例放在根目录的公开文件若被漏在受检面之外，
       // 就没有注入点——这里直接判红，不让探针静默跳过。探针必须是**只有根目录扫描能贡献**的文件：
       // 映射已登记的路径（SECURITY.md 就由 security 主题提供）在根目录扫描缺席时仍在面内，取它做
@@ -1029,6 +1569,7 @@ export const ENTRIES = [
       stEof.evidence.plan = { summary: 'plan done' };
       stEof.newChange = true;
       writeState(dir, stEof);
+      writeNodeDeclarationMarkers(dir, 'plan');
       assertExit(runGuard(['entry', 'plan'], dir), 0);
       const taskT01Eof = '<task id="T01"><action>a</action><write_files>f</write_files><verify>v</verify><done>d</done></task>\n';
       const eofHead = '# TASK\n\n## 波次划分\n\nWave 1 (parallel): ';
@@ -1224,6 +1765,7 @@ export const ENTRIES = [
       st.enteredNodes = ['open', 'design', 'plan', 'execute'];
       st.newChange = true;
       writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'execute');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="T01" parallel="true" status="pending" depends_on="">\n  <name>p</name>\n  <write_files>a</write_files>\n  <action>p</action>\n  <verify>t</verify>\n  <done>d</done>\n</task>');
       const res = runGuard(['exit', 'execute'], dir);
       assertExit(res, 0);
@@ -1304,6 +1846,7 @@ export const ENTRIES = [
       st.evidence.review = { summary: 'reviewed' };
       st.newChange = true;
       writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'review');
       assertExit(runGuard(['entry', 'review'], dir), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## Critical\n\n无。\n\n## 发现\n\n- **问题A**: 某处存在一个需要记录的问题描述,但未给出任何处置结论\n\n## 结论\n\n通过\n');
       const res = runGuard(['exit', 'review'], dir);
@@ -1526,6 +2069,7 @@ export const ENTRIES = [
       st.evidence.plan = { summary: 'planned' };
       st.newChange = true;
       writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'plan');
       assertExit(runGuard(['entry', 'plan'], dir), 0);
       const planTask = (text) => writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', text);
       const taskT01 = '<task id="T01"><action>a</action><write_files>f</write_files><verify>v</verify><done>d</done></task>\n';
@@ -1798,6 +2342,7 @@ export const ENTRIES = [
       st.evidence.execute = { summary: 'empty', emptyExitApproved: true };
       st.newChange = true;
       writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'execute');
       assertExit(runGuard(['entry', 'execute'], dir), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="P01" parallel="true" status="pending"><action>p</action><write_files>a</write_files><verify>t</verify><done>d</done></task>\n');
       const res = runGuard(['exit', 'execute'], dir);
@@ -1937,6 +2482,7 @@ export const ENTRIES = [
       st.evidence.review = { summary: 'reviewed' }; // record 过但 exit 被拦截
       st.newChange = true;
       writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'review');
       // 前序产物(execute 产物门控需 *-SUMMARY.md)
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why（为什么做）\nx');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\nx\n\n## 验收准则（AC）\n- Given x When y Then z');

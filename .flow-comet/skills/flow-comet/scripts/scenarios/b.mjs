@@ -10,12 +10,15 @@ import {
   assertExit,
   assertNotOut,
   assertOut,
+  assertTrue,
   baseState,
-  copyTreePortable,
+  installSkillTreeCopy,
   runGuard,
   runHandoff,
   runHook,
+  runPrintedCommand,
   runState,
+  splitPrintedCommand,
   writeFile,
   writeState,
 } from '../lib/test-helpers.mjs';
@@ -30,10 +33,17 @@ import {
   composeState,
   customProtocol,
   customProtocolWithSkillCall,
+  dropNamedImport,
+  engineCodeText,
+  engineScriptTexts,
   handoffFor,
+  scriptTreeFiles,
   summaryContent,
   writeCustomProtocol,
+  writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
+// 单一来源静态锁（write_files 条目切分只有一处实现）：与套件其它单源锚共用同一判据实现。
+import { singleSourceImportProblems } from '../lib/text-anchor-checks.mjs';
 import {
   assertStateBytesUnchanged,
   readStateBytes,
@@ -48,61 +58,14 @@ import { scriptCommand } from '../lib/state-explain.mjs';
 // ---------- 打印出来的命令：解析 → 真实执行（本组锚点；命令形态必须可复制、可执行） ----------
 //
 // 背景：运行期消息曾把脚本命令写成未加引号的单一平台字面量，测试只断言字面串、随后改用 harness
-// 的绝对路径执行，于是「打印出来的那条命令」从未被真正执行过（形似全绿）。下面四个助手就是
-// 这条链路的夹具与断言：**从输出解析命令文本 → 按当前运行形态解析路径 → 真实执行**。
-
-// 把本套件自身技能树按安装布局复制进夹具（与 prepare-env 装出的副本同构）：副本自身运行时推导出
-// 的是**运行根相对**的脚本目录，打印的命令因此可在夹具内解析——执行的是打印文本，不是 harness
-// 的绝对脚本路径。installDirRel 是该布局在运行根下的相对目录（夹具构造，不是断言对象）。
-function installSkillTreeCopy(root, installDirRel) {
-  const skillCopy = path.join(root, installDirRel, 'flow-comet');
-  copyTreePortable(path.join(SCRIPTS_DIR, '..'), skillCopy);
-  return skillCopy;
-}
+// 的绝对路径执行，于是「打印出来的那条命令」从未被真正执行过（形似全绿）。链路的三个夹具——按安装
+// 布局复制技能树、把打印命令切成 argv、真实执行打印文本——由两组场景共用，单一来源在
+// lib/test-helpers.mjs；本段只留本组自有的一件：跑副本脚本，以及命令形态（引号 / 分词 / 路径
+// 可解析）的断言。
 
 // 跑指定脚本（副本形态）：cwd = 夹具根（与 run* 助手同一运行根口径）。
 function runScriptCopy(scriptPath, args, root, envOverrides = {}) {
   const res = spawnSync(process.execPath, [scriptPath, ...args], {
-    cwd: root,
-    env: { ...process.env, ...envOverrides },
-    encoding: 'utf8',
-    timeout: 60000,
-  });
-  return { status: res.status ?? 1, output: String(res.stdout || '') + String(res.stderr || '') };
-}
-
-// 打印命令 → argv：按 shell 分词语义处理双引号与单引号（引号内空白不切分，引号本身不进入参数）。
-// 该解析器对「整条路径未加引号」有判别力——缺引号时含空格的路径会被切成多个参数。
-function splitPrintedCommand(command) {
-  const argv = [];
-  let current = '';
-  let quote = null;
-  let started = false;
-  for (const ch of command) {
-    if (quote) {
-      if (ch === quote) { quote = null; continue; }
-      current += ch;
-      continue;
-    }
-    if (ch === '"' || ch === "'") { quote = ch; started = true; continue; }
-    if (/\s/.test(ch)) {
-      if (started) { argv.push(current); current = ''; started = false; }
-      continue;
-    }
-    current += ch;
-    started = true;
-  }
-  if (quote) throw new Error('打印命令的引号未闭合: ' + command);
-  if (started) argv.push(current);
-  return argv;
-}
-
-// 真实执行打印出来的那条命令：解释器名 `node` 换成本进程的 node 可执行文件（PATH 解析不是本锚点
-// 的断言对象，脚本路径与参数才是），其余一律照打印文本解析。
-function runPrintedCommand(command, root, envOverrides = {}) {
-  const argv = splitPrintedCommand(command);
-  const interpreter = /^node(\.exe)?$/i.test(argv[0]) ? process.execPath : argv[0];
-  const res = spawnSync(interpreter, argv.slice(1), {
     cwd: root,
     env: { ...process.env, ...envOverrides },
     encoding: 'utf8',
@@ -139,6 +102,29 @@ function assertPrintedCommandResolves(command, root, expectedScript, label) {
     throw new Error(label + ' 解析到了别的脚本: ' + resolved + '（期望 ' + expectedScript + '）');
   }
   return printedScript;
+}
+
+// 恢复段里「哪些行是可执行命令」的判据（两处恢复段共用）：命令行 = 行首即 node + 引号脚本路径，
+// 其余行是步骤标注与说明。判据分两半——① 可执行行集合与期望逐字相等（多一行说明被拼进命令、或少
+// 一行命令，照抄都会断）；② 说明行不得出现命令形态（说明接回命令行尾时，整行丢给 shell 会把说明当
+// 成参数，命令看起来在场、照抄即失败）。返回命令行（调用方随后逐条真实执行——「能解析」不等于「能跑」）。
+function shellCommandLines(block) {
+  return String(block ?? '').split(/\r?\n/u)
+    .filter((line) => /^\s*node\s+"/u.test(line))
+    .map((line) => line.trim());
+}
+
+function assertRecoveryCommandLines(block, expected, label) {
+  const commands = shellCommandLines(block);
+  assertTrue(commands.length === expected.length && commands.every((line, index) => line === expected[index]),
+    label + '：恢复段的可执行行应恰好是期望的命令（顺序一致）:\n命令=' + JSON.stringify(commands)
+      + '\n期望=' + JSON.stringify(expected) + '\n原文:\n' + block);
+  for (const line of String(block ?? '').split(/\r?\n/u)) {
+    if (line.trim() === '' || /^\s*node\s+"/u.test(line)) continue;
+    assertTrue(!/node\s+"[^"]+"/u.test(line),
+      label + '：说明行里出现了命令文本（命令须单独成行，否则整行不可执行）: ' + line);
+  }
+  return commands;
 }
 
 // 安装根形态断言（运行形态由脚本自定位决定、夹具无从预知时使用）：④ 解析出的命令脚本必须是真实
@@ -203,7 +189,7 @@ export const ENTRIES = [
       if (recoveryBlock === '') {
         throw new Error('BLOCKED 输出缺恢复段:\n' + resNoEvidence.output);
       }
-      const recordCommand = (recoveryBlock.match(/(node "[^"]+" record [^\n]*) 后重试 exit/) || [])[1];
+      const recordCommand = (recoveryBlock.match(/^\s*(node "[^"]+" record [^\n]*)$/m) || [])[1];
       const skillLoadCommand = (recoveryBlock.match(/^\s*(node "[^"]+" skill-load [^\n]+)$/m) || [])[1];
       if (!recordCommand) {
         throw new Error('BLOCKED 输出的恢复段缺可解析的 record 命令:\n' + resNoEvidence.output);
@@ -212,6 +198,9 @@ export const ENTRIES = [
         throw new Error('缺技能加载声明时恢复段必须同时给出 skill-load 命令'
           + '（否则照抄 record 会被它的前置门拦下，第二步的命令又落在另一条报文里）:\n' + resNoEvidence.output);
       }
+      // 恢复段的可执行行 = 这两条命令，顺序即执行顺序；其余行都是说明——说明不得带命令形态（同一行里
+      // 「命令 + 说明」整行丢给 shell 会把说明当成参数，正是可照抄性失效的形态）。
+      assertRecoveryCommandLines(recoveryBlock, [skillLoadCommand, recordCommand], '缺声明的缺证据恢复段');
       // 协议上下文跟「本次实际用到的协议」走，不跟来源走：本段的协议来自调用方环境（runGuard 注入
       // FLOW_COMET_PROTOCOL = 夹具内的协议副本），它不是内置默认那一份——副本路径与内置默认不同，
       // 照抄时不带 --protocol 就会按同一套优先级重新解析。故命令必须自带协议路径（与「协议来自
@@ -278,12 +267,18 @@ export const ENTRIES = [
       assertOut(resDeclaredMissing, 'BLOCKED: missing Output Schema evidence');
       const declaredRecoveryStart = resDeclaredMissing.output.lastIndexOf('恢复:');
       const declaredRecovery = declaredRecoveryStart < 0 ? '' : resDeclaredMissing.output.slice(declaredRecoveryStart);
-      const singleRecordCommand = (declaredRecovery.match(/(node "[^"]+" record [^\n]*) 后重试 exit/) || [])[1];
+      const singleRecordCommand = (declaredRecovery.match(/^\s*(node "[^"]+" record [^\n]*)$/m) || [])[1];
       if (!singleRecordCommand) {
         throw new Error('已有声明时恢复段缺 record 命令:\n' + resDeclaredMissing.output);
       }
-      if (!declaredRecovery.startsWith('恢复: ' + singleRecordCommand + ' 后重试 exit')) {
-        throw new Error('已有声明时恢复段应直接给出 record（不给多余步骤）:\n' + declaredRecovery);
+      // 恢复段的两行结构：说明行（「照抄下面的命令…」）+ 命令行 + 说明行（怎么执行）。命令行单独成行，
+      // 整行丢给 shell 才是那条可执行的命令——这是「照抄即通」的形态判据（执行面由下面那行证明）。
+      assertRecoveryCommandLines(declaredRecovery, [singleRecordCommand], '已有声明的缺证据恢复段');
+      if (!declaredRecovery.startsWith('恢复: ')) {
+        throw new Error('已有声明时恢复段应以「恢复:」开口:\n' + declaredRecovery);
+      }
+      if (/第一步|第二步/s.test(declaredRecovery)) {
+        throw new Error('已有声明时恢复段不得再给分步标注（不给多余步骤）:\n' + declaredRecovery);
       }
       if (/skill-load\s/.test(declaredRecovery)) {
         throw new Error('已有声明时恢复段不得再给 skill-load 步骤:\n' + declaredRecovery);
@@ -399,6 +394,74 @@ export const ENTRIES = [
       assertExit(reqNoTask, 0);
       assertOut(reqNoTask, '无可回应条目（TASK.md 无匹配任务 P99）');
 
+      // ---------- write_files 条目切分单一来源（原位扩展；不新增场景条目） ----------
+      // 条目边界（剥 HTML 注释 → 行切 → 分号容错切 → trim → 滤空）此前有**三份**：本文件的本地
+      // writeFilesEntries、plan 出口伪并行启发式的内联链、task-graph 的 parsePaths。三处各自自洽时，
+      // 同一份写面会在不同门禁里变成不同条目集（注释里的词被当成路径、分号行只取首项），而两处不会
+      // 同时红——所以「谁越界」「哪一对并行任务重叠」可以互相矛盾却全绿。
+      // ① 行为：request 记录的允许列表 = 共享切分的产物（注释不进入条目、分号行二次切分、空行滤掉）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n'
+        + '<task id="P05" status="pending"><action>写面切分夹具</action>'
+        + '<write_files>\n'
+        + '  <!-- 夹具注释：注释里的 src/ghost.mjs 不得成为条目 -->\n'
+        + '  src/a.mjs; src/b.mjs\n'
+        + '\n'
+        + '  src/c.mjs\n'
+        + '</write_files><verify>node --check src/a.mjs</verify></task>\n');
+      const reqSplit = runHandoff(['request', 'P05', 'write files split'], dir);
+      assertExit(reqSplit, 0);
+      const splitRecorded = JSON.parse(readStateBytes(dir))
+        .evidence?.['subagent-execute']?.handoffRequests?.P05?.writeFiles;
+      assertEqual(JSON.stringify(splitRecorded), JSON.stringify(['src/a.mjs', 'src/b.mjs', 'src/c.mjs']),
+        'request 记录的写面条目（剥注释 / 分号二次切分 / 滤空后的规范形态）');
+      // ② 结构锚：条目切分只有一处定义，且三个消费方都从它取用（新增第四处或退回内联副本即红）
+      const splitTexts = engineScriptTexts();
+      const splitProblems = singleSourceImportProblems({
+        symbol: 'writeFilesEntries',
+        sourceRel: 'lib/lessons-hits.mjs',
+        texts: splitTexts,
+      });
+      assertTrue(splitProblems.length === 0,
+        'write_files 条目切分应只有一处实现且消费方都从它取用:\n' + splitProblems.join('\n'));
+      // ③ 反向构造（判别力）：把某个消费方的具名取用摘掉 → 结构锚必须报出来（否则 ② 只是「看起来有」）
+      const splitMutated = new Map(splitTexts);
+      splitMutated.set('workflow-handoff.mjs',
+        dropNamedImport(splitMutated.get('workflow-handoff.mjs'), 'writeFilesEntries'));
+      const splitMutatedProblems = singleSourceImportProblems({
+        symbol: 'writeFilesEntries',
+        sourceRel: 'lib/lessons-hits.mjs',
+        texts: splitMutated,
+      });
+      assertTrue(splitMutatedProblems.some((problem) => problem.includes('workflow-handoff.mjs')),
+        '摘掉消费方的具名取用后结构锚未报出（判据没有判别力）: ' + JSON.stringify(splitMutatedProblems));
+
+      // ---------- 打印命令链的夹具单一来源（原位扩展；不新增场景条目） ----------
+      // 「按安装布局复制技能树 → 把打印命令切成 argv → 真实执行打印文本」这三个夹具此前在委托链路组
+      // 与声明恢复组各有一份（逐字复制、含注释）：同一条命令在两组的判据里各自演化，任一侧漂移都不会
+      // 让另一侧变红。判据 = 三个夹具的定义只有一处（lib/test-helpers.mjs），凡在代码里引用它们的模块
+      // 都从那里具名取用——落点与消费方都由真实形态派生，新增第三份复制即红。既有断言只看行为（各组
+      // 自己的照抄闭环），两组行为都自洽时漂移是静默的，故这一层结构锚不能省。
+      const chainFixtures = ['installSkillTreeCopy', 'splitPrintedCommand', 'runPrintedCommand'];
+      const chainSourceRel = 'lib/test-helpers.mjs';
+      const treeTexts = new Map(scriptTreeFiles()
+        .map((rel) => [rel, fs.readFileSync(path.join(SCRIPTS_DIR, rel), 'utf8')]));
+      for (const symbol of chainFixtures) {
+        const chainProblems = singleSourceImportProblems({ symbol, sourceRel: chainSourceRel, texts: treeTexts });
+        assertTrue(chainProblems.length === 0, '打印命令链的夹具 ' + symbol + ' 应只有一处实现、且引用方都从 '
+          + chainSourceRel + ' 取用:\n' + chainProblems.join('\n'));
+        // 反向构造（判别力）：摘掉某个真实消费方的具名取用 → 结构锚必须点名它（否则上一条只是「看起来有」）
+        const symbolRe = new RegExp('\\b' + symbol + '\\b');
+        const consumerRel = [...treeTexts.keys()].find((rel) =>
+          rel !== chainSourceRel && symbolRe.test(engineCodeText(treeTexts.get(rel))));
+        if (!consumerRel) {
+          throw new Error('反向构造的前提不成立：' + symbol + ' 在 ' + chainSourceRel + ' 之外没有代码层消费者');
+        }
+        const mutated = new Map(treeTexts).set(consumerRel, dropNamedImport(treeTexts.get(consumerRel), symbol));
+        const reported = singleSourceImportProblems({ symbol, sourceRel: chainSourceRel, texts: mutated });
+        assertTrue(reported.some((problem) => problem.includes(consumerRel)),
+          '摘掉 ' + consumerRel + ' 的具名取用后结构锚未点名它（判据没有判别力）: ' + JSON.stringify(reported));
+      }
+
       // ---------- 协议上下文随恢复命令传播（原位扩展；不新增场景条目） ----------
       // guard 解析协议的顺序包含 state.protocolPath（init 持久化绑定），而 workflow-state /
       // workflow-handoff 只走 --protocol CLI → FLOW_COMET_PROTOCOL → 内置默认，不读 state 绑定。
@@ -421,7 +484,7 @@ export const ENTRIES = [
       assertOut(boundBlocked, 'BLOCKED: missing Output Schema evidence: compose.notes.v1.notes-summary');
       const boundRecoveryStart = boundBlocked.output.lastIndexOf('恢复:');
       const boundRecovery = boundRecoveryStart < 0 ? '' : boundBlocked.output.slice(boundRecoveryStart);
-      const boundRecordCommand = (boundRecovery.match(/(node "[^"]+" record [^\n]*) 后重试 exit/) || [])[1];
+      const boundRecordCommand = (boundRecovery.match(/^\s*(node "[^"]+" record [^\n]*)$/m) || [])[1];
       const boundSkillLoadCommand = (boundRecovery.match(/^\s*(node "[^"]+" skill-load [^\n]+)$/m) || [])[1];
       if (!boundRecordCommand || !boundSkillLoadCommand) {
         throw new Error('state 绑定自定义协议的恢复段必须同时给出 skill-load 与 record 命令:\n' + boundBlocked.output);
@@ -463,7 +526,7 @@ export const ENTRIES = [
       assertOut(cliBlocked, 'BLOCKED: missing Output Schema evidence: compose.notes.v1.notes-summary');
       const cliRecoveryStart = cliBlocked.output.lastIndexOf('恢复:');
       const cliRecovery = cliRecoveryStart < 0 ? '' : cliBlocked.output.slice(cliRecoveryStart);
-      const cliRecordCommand = (cliRecovery.match(/(node "[^"]+" record [^\n]*) 后重试 exit/) || [])[1];
+      const cliRecordCommand = (cliRecovery.match(/^\s*(node "[^"]+" record [^\n]*)$/m) || [])[1];
       if (!cliRecordCommand) {
         throw new Error('协议来自 --protocol CLI 时，恢复段必须给出可照抄的 record 命令:\n' + cliBlocked.output);
       }
@@ -497,7 +560,7 @@ export const ENTRIES = [
       assertOut(defaultBlocked, 'BLOCKED: missing Output Schema evidence');
       const defaultRecoveryStart = defaultBlocked.output.lastIndexOf('恢复:');
       const defaultRecovery = defaultRecoveryStart < 0 ? '' : defaultBlocked.output.slice(defaultRecoveryStart);
-      const defaultRecordCommand = (defaultRecovery.match(/(node "[^"]+" record [^\n]*) 后重试 exit/) || [])[1];
+      const defaultRecordCommand = (defaultRecovery.match(/^\s*(node "[^"]+" record [^\n]*)$/m) || [])[1];
       const defaultSkillLoadCommand = (defaultRecovery.match(/^\s*(node "[^"]+" skill-load [^\n]+)$/m) || [])[1];
       if (!defaultRecordCommand || !defaultSkillLoadCommand) {
         throw new Error('内置默认协议下 BLOCKED 输出的恢复段缺可解析命令:\n' + defaultBlocked.output);
@@ -524,7 +587,7 @@ export const ENTRIES = [
       const noEvidenceRecovery = noEvidenceRecoveryStart < 0
         ? ''
         : noEvidenceBlocked.output.slice(noEvidenceRecoveryStart);
-      const noEvidenceRecordCommand = (noEvidenceRecovery.match(/(node "[^"]+" record [^\n]*) 后重试 exit/) || [])[1];
+      const noEvidenceRecordCommand = (noEvidenceRecovery.match(/^\s*(node "[^"]+" record [^\n]*)$/m) || [])[1];
       if (!noEvidenceRecordCommand) {
         throw new Error('完全没有证据对象时，恢复段必须给出可照抄的 record 命令:\n' + noEvidenceBlocked.output);
       }
@@ -606,7 +669,7 @@ export const ENTRIES = [
         ? ''
         : defaultNoEvidenceBlocked.output.slice(defaultNoEvidenceStart);
       const defaultNoEvidenceCommand =
-        (defaultNoEvidenceRecovery.match(/(node "[^"]+" record [^\n]*) 后重试 exit/) || [])[1];
+        (defaultNoEvidenceRecovery.match(/^\s*(node "[^"]+" record [^\n]*)$/m) || [])[1];
       if (!defaultNoEvidenceCommand) {
         throw new Error('完全没有证据对象时恢复段缺可解析的 record 命令:\n' + defaultNoEvidenceBlocked.output);
       }
@@ -1864,7 +1927,12 @@ export const ENTRIES = [
       assertOut(lastNonObject, '--json-file');
       // ③ 零提交语义保持可用：request 记 noCommit:true → 契约无 commitHash 照常记录（形状校验不误伤）
       const zeroState = JSON.parse(before);
-      zeroState.evidence['subagent-execute'].handoffRequests = { T03: { description: 'zero commit', noCommit: true } };
+      // T04 的请求同样要在场：result 缺 request 现已先于提交子集校验被拦，而本段断言的是
+      // 「合法完整契约 + 提交子集校验」这条既有路径——故其 request 带真实 write_files（非零提交）。
+      zeroState.evidence['subagent-execute'].handoffRequests = {
+        T03: { description: 'zero commit', noCommit: true },
+        T04: { description: 'valid contract', writeFiles: ['src/x.mjs'] },
+      };
       writeState(dir, zeroState);
       const zero = runHandoff(['result', 'T03', '{"status":"DONE","completedChecks":["required-skill:subagent-execute.flow-comet-dev"]}'], dir);
       assertExit(zero, 0);
@@ -1880,6 +1948,183 @@ export const ENTRIES = [
       })], dir);
       assertExit(good, 0);
       assertOut(good, 'HANDOFF RESULT: T04');
+      // ⑤ 委托记账：result 必须有对应的 request（新 change BLOCK / 旧 change WARN）——判定在**任何
+      //    写盘之前**，且先于零提交语义与提交子集校验，两个旁路因此由同一处拦下：
+      //    · 零提交形态（契约无 commitHash）：无 request 时 isZeroCommit 恒为 false，旧实现静默落库；
+      //    · 只提交自身 <task>-SUMMARY.md：无 request 时 writeFiles 允许列表为空，只剩 summaryExact
+      //      一条豁免，旧实现的子集校验因此零越界放行。
+      const ledgerPayload = (taskId, hash) => JSON.stringify({
+        status: 'DONE',
+        taskId,
+        ...(hash ? { commitHash: hash } : {}),
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        redEvidence: { command: 'echo red', output: 'red' },
+        greenEvidence: { command: 'echo green', output: 'green' },
+      });
+      // 只含自身 SUMMARY 的提交：旧实现正是靠 summaryExact 豁免放行的那条路径
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T06-SUMMARY.md', '# SUMMARY: T06\n');
+      execFileSync('git', ['add', '.specs/' + CHANGE_ID + '/T06-SUMMARY.md'], { cwd: dir });
+      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'summary only'], { cwd: dir });
+      const summaryHash = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+      const ledgerState = JSON.parse(readStateBytes(dir));
+      ledgerState.newChange = true;
+      const ledgerRequests = ledgerState.evidence['subagent-execute'].handoffRequests || {};
+      if (Object.prototype.hasOwnProperty.call(ledgerRequests, 'T06')) {
+        throw new Error('夹具前提不成立：T06 不应已有 request（本段构造的是缺 request 的 result）');
+      }
+      writeState(dir, ledgerState);
+      const ledgerBytes = readStateBytes(dir);
+      const missingRequest = [
+        { label: '零提交形态（契约无 commitHash）', payload: ledgerPayload('T06') },
+        { label: '只提交自身 SUMMARY', payload: ledgerPayload('T06', summaryHash) },
+      ];
+      let missingRequestOutput = '';
+      for (const item of missingRequest) {
+        const res = runHandoff(['result', 'T06', item.payload], dir);
+        assertExit(res, 1);
+        // 报文点名任务 + 恢复段；且拦下它的不是零提交分支、也不是提交子集校验（判据必须靠前）。
+        assertOut(res, 'BLOCKED: 任务 T06 的 result 没有对应的委托 request');
+        assertOut(res, '再重录 result');
+        // 恢复句给的是命令形态：任务号已填、脚本路径由 scriptCommand 装配；占位符 <description> 不得
+        // 出现在命令里（bash 下 `<` 是输入重定向——占位符让「照抄」变成一条必然失败的命令行）。
+        assertOut(res, ' request T06');
+        assertNotOut(res, '<description>');
+        assertNotOut(res, 'HANDOFF RESULT');
+        assertNotOut(res, 'HANDOFF 零提交');
+        assertNotOut(res, '提交文件超出 writeFiles 范围');
+        assertStateBytesUnchanged(dir, ledgerBytes, '缺 request 的 result 被拦（' + item.label + '）');
+        missingRequestOutput = res.output;
+      }
+      const missingRequestStart = missingRequestOutput.lastIndexOf('恢复:');
+      const missingRequestRecovery = missingRequestStart < 0 ? '' : missingRequestOutput.slice(missingRequestStart);
+      const requestRecoveryLine = (missingRequestRecovery.match(/^\s*(node "[^"]+" request T06)$/m) || [])[1];
+      assertTrue(typeof requestRecoveryLine === 'string',
+        '缺 request 的恢复段必须给出可照抄的 request 命令（行首 = node + 引号脚本路径）:\n' + missingRequestOutput);
+      assertRecoveryCommandLines(missingRequestRecovery, [requestRecoveryLine], '缺 request 的 result 恢复段');
+      // 旧 change 同样的输入只 WARN（渐进，不阻断既有流程）
+      const legacyLedger = JSON.parse(ledgerBytes);
+      delete legacyLedger.newChange;
+      writeState(dir, legacyLedger);
+      const legacy = runHandoff(['result', 'T06', ledgerPayload('T06', summaryHash)], dir);
+      assertExit(legacy, 0);
+      assertOut(legacy, 'HANDOFF WARN: T06');
+      assertOut(legacy, '没有对应的委托 request');
+      assertOut(legacy, 'HANDOFF RESULT: T06');
+      // 有 request 的 result 照常通过（零提交语义不变：noCommit 请求 + 无 commitHash 契约）
+      const withRequest = JSON.parse(readStateBytes(dir));
+      withRequest.newChange = true;
+      withRequest.evidence['subagent-execute'].handoffRequests = {
+        ...withRequest.evidence['subagent-execute'].handoffRequests,
+        T08: { description: 'delegated', noCommit: true },
+      };
+      writeState(dir, withRequest);
+      const recorded = runHandoff(['result', 'T08', ledgerPayload('T08')], dir);
+      assertExit(recorded, 0);
+      assertOut(recorded, 'HANDOFF RESULT: T08');
+      assertNotOut(recorded, '没有对应的委托 request');
+      // ⑤b 照抄恢复段的那条命令**真执行**：「能解析」不是判据，能跑通并把 request 落到 state 才是。
+      //     随后同一条 result 不再撞「没有对应的委托 request」（这一格判的不是它之后还有多少门）。
+      //     T06 按并行任务落夹具：归属门把并行任务判给 subagent-execute（串行任务归属 execute），
+      //     节点与 currentNode 不一致会先被归属门拦下，测不到恢复命令本身。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n'
+        + '<task id="T06" parallel="true" status="pending"><action>委托边界</action>'
+        + '<write_files>src/t06.mjs</write_files><verify>node --check src/t06.mjs</verify>'
+        + '<depends_on></depends_on></task>\n');
+      const execState = baseState('subagent-execute');
+      execState.newChange = true;
+      execState.evidence['subagent-execute'] = { summary: 'delegated' };
+      writeState(dir, execState);
+      writeNodeDeclarationMarkers(dir, 'subagent-execute');
+      installSkillTreeCopy(dir, path.join('.claude', 'skills'));
+      assertPrintedCommandTargetsInstalledScript(requestRecoveryLine, dir, 'workflow-handoff.mjs', '缺 request 的恢复命令');
+      const rerunRequest = runPrintedCommand(requestRecoveryLine, dir, {
+        FLOW_COMET_RUN_ROOT: dir,
+        FLOW_COMET_PROTOCOL: '',
+      });
+      assertExit(rerunRequest, 0);
+      assertOut(rerunRequest, 'HANDOFF REQUEST: T06');
+      const afterRequest = JSON.parse(readStateBytes(dir));
+      assertTrue(afterRequest.evidence?.['subagent-execute']?.handoffRequests?.T06 !== undefined,
+        '照抄恢复命令后 handoffRequests 应落下 T06 记录: '
+          + JSON.stringify(afterRequest.evidence?.['subagent-execute']?.handoffRequests));
+      const afterRequestResult = runHandoff(['result', 'T06', ledgerPayload('T06')], dir);
+      assertNotOut(afterRequestResult, '没有对应的委托 request');
+      // ⑥ 越界报文的事实陈述（只补事实、不改判定）：request 记的是**发起委托那一刻的写面快照**，
+      //    TASK.md 的写面可以被 replan 改写。两者不一致时，越界报文追加一行**可观测事实**（快照 ≠
+      //    当前该任务写面）+ **条件式成因**（若计划经 replan 变更过写面 → 重新 request 后再记
+      //    result），并保留「回退越界文件」为首选指引。判据只能证明两侧不一致，不能证明成因——对
+      //    真越界，让人先重跑 request 会把越界文件写进允许列表，所以「记录早于 replan」不得写成断言。
+      //    两者一致（普通真越界）不打印诊断行，判定仍是原来的新 change BLOCK / 旧 change WARN。
+      //    夹具判别力：TASK.md 里 T09 的写面是 replan 后扩过的（含 rogue.js），T10 的写面与 request
+      //    逐字一致；若诊断按「全文第一个写面」而非「该任务的写面」比对，T10 会误报。
+      const repo = (args) => spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd: dir, encoding: 'utf8' });
+      writeFile(dir, 'allowed.js', 'export const allowed = 1;\n');
+      writeFile(dir, 'rogue.js', 'export const rogue = 1;\n');
+      repo(['add', 'allowed.js', 'rogue.js']);
+      repo(['commit', '-qm', 'replan 之后才进写面']);
+      const replannedHash = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+      writeFile(dir, 'stray.js', 'export const stray = 1;\n');
+      repo(['add', 'stray.js']);
+      repo(['commit', '-qm', 'stray']);
+      const strayHash = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+      const taskWithWriteFiles = (id, files) => '<task id="' + id + '" status="pending"><action>写面边界</action>'
+        + '<write_files>\n' + files.join('\n') + '\n</write_files>'
+        + '<verify>node --check allowed.js</verify></task>\n';
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n'
+        + taskWithWriteFiles('T09', ['allowed.js', 'rogue.js'])
+        + taskWithWriteFiles('T10', ['allowed.js']));
+      const replanState = baseState('subagent-execute');
+      replanState.newChange = true;
+      replanState.evidence['subagent-execute'] = {
+        handoffRequests: {
+          T09: { description: 'replan 扩写面前的快照', writeFiles: ['allowed.js'] },
+          T10: { description: '写面未变更', writeFiles: ['allowed.js'] },
+        },
+        handoffResult: {},
+      };
+      writeState(dir, replanState);
+      const boundaryPayload = (id, hash) => JSON.stringify({
+        status: 'DONE',
+        taskId: id,
+        commitHash: hash,
+        completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
+        redEvidence: { command: 'node --check allowed.js', output: 'no output（RED 锚点）' },
+        greenEvidence: { command: 'node --check allowed.js', output: 'ok' },
+      });
+      const staleSnapshotFact = '诊断: 该任务的委托快照与当前 TASK.md 该任务的写面不一致';
+      const staleSnapshotCause = '成因未判定；若计划经 replan 变更过写面，出路是重新发起委托（命令如下）后再记录 result';
+      // ① 旧快照（request 只允许 allowed.js，TASK.md 已扩到 rogue.js）→ 仍 BLOCK，且要点明可观测事实
+      const staleSnapshot = runHandoff(['result', 'T09', boundaryPayload('T09', replannedHash)], dir);
+      assertExit(staleSnapshot, 1);
+      assertOut(staleSnapshot, 'BLOCKED: 提交文件超出 writeFiles 范围: rogue.js');
+      assertOut(staleSnapshot, staleSnapshotFact);
+      // 成因是条件式而非断言：「若计划经 replan 变更过写面」才是成因，且再给一条无 replan 时的出路
+      assertOut(staleSnapshot, staleSnapshotCause);
+      assertOut(staleSnapshot, '若无 replan，越界文件仍不在该任务写面内');
+      // 出路是**可照抄的命令**（不是脚本名）：任务号已填、行首即命令——说明行与命令行分开。
+      const staleRecoveryLine = (staleSnapshot.output.match(/^\s*(node "[^"]+" request T09)$/m) || [])[1];
+      assertTrue(typeof staleRecoveryLine === 'string',
+        '越界诊断给出的「重新发起委托」不是可照抄命令:\n' + staleSnapshot.output);
+      // 首选指引仍是「回退越界文件」（恢复行在前，诊断行只在其后补事实）
+      assertOut(staleSnapshot, '恢复: 回退越界文件或扩展 write_files');
+      assertOut(staleSnapshot, '按上面的「回退越界文件」处理');
+      // 反向构造：把可能写成事实的旧措辞不得回归（判据只能证明不一致，证明不了「记录早于 replan」）
+      assertNotOut(staleSnapshot, '早于最近一次 replan');
+      // ② 写面一致的真越界 → 仍是原报文，不得混入事实陈述（否则该行不再有判别力）
+      const genuineOverrun = runHandoff(['result', 'T10', boundaryPayload('T10', strayHash)], dir);
+      assertExit(genuineOverrun, 1);
+      assertOut(genuineOverrun, 'BLOCKED: 提交文件超出 writeFiles 范围: stray.js');
+      assertOut(genuineOverrun, '恢复: 回退越界文件或扩展 write_files');
+      assertNotOut(genuineOverrun, staleSnapshotFact);
+      // ③ 判定语义不变：同一份旧快照在旧 change 上只 WARN（诊断行随报文出现，结果照常落库）
+      const legacySnapshot = JSON.parse(readStateBytes(dir));
+      delete legacySnapshot.newChange;
+      writeState(dir, legacySnapshot);
+      const legacyWarn = runHandoff(['result', 'T09', boundaryPayload('T09', replannedHash)], dir);
+      assertExit(legacyWarn, 0);
+      assertOut(legacyWarn, 'HANDOFF WARN: 提交文件超出 writeFiles 范围: rogue.js');
+      assertOut(legacyWarn, staleSnapshotCause);
+      assertOut(legacyWarn, 'HANDOFF RESULT: T09');
     },
   },
 

@@ -22,6 +22,7 @@ import {
   routeNodeModule,
   strictSummary,
   writeIntakeArtifacts,
+  writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import {
   FIX_RETURN_FAMILY_COMPLETED,
@@ -87,6 +88,7 @@ export const ENTRIES = [
           at: '2026-09-23T00:00:00.000Z', taskSetSignature: normalSignature,
         }],
       }));
+      writeNodeDeclarationMarkers(dir, 'execute');
       const beforeNormal = readScenarioState(dir);
       const resNormal = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(resNormal, 0);
@@ -199,6 +201,7 @@ export const ENTRIES = [
         directOverride: false,
         newChange: true,
       });
+      writeNodeDeclarationMarkers(dir, 'execute');
       const res = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(res, 0);
       assertOut(res, 'FIX-BATCH: 回源节点 verify（execute 出口已完成）');
@@ -244,6 +247,9 @@ export const ENTRIES = [
       // ① 新 change：review 源直接 exit review --apply → BLOCKED + 恢复指引（不得静默放行）
       writeFile(dir, taskPath, fixBatchTaskText('pending'));
       writeState(dir, reviewState);
+      // 本场景先后 exit review 与 execute 两个节点：两个节点的必需声明各写一份（真实流程同形）。
+      writeNodeDeclarationMarkers(dir, 'review');
+      writeNodeDeclarationMarkers(dir, 'execute');
       const resBlock = runGuard(['exit', 'review', '--apply'], dir);
       assertExit(resBlock, 1);
       assertOut(resBlock, 'BLOCKED: 存在未归位/未跑出口的 Fix 批次');
@@ -339,11 +345,16 @@ export const ENTRIES = [
       };
       writeState(dir, after);
       assertExit(runStateWithProtocol(dir, ['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md']), 0);
+      // 协议 execute.requiredSkillCalls = flow-comet-dev（guarded）：节点实现技能与必需技能是两个声明面，
+      // 出口的覆盖判据要求后者也有标记（只声明实现技能时覆盖缺口会被拦下）。
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md']), 0);
       const recDoneExit = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(recDoneExit, 0);
       assertOut(recDoneExit, 'FIX-BATCH: 回源节点 review（execute 出口已完成）');
       assertOut(recDoneExit, 'NODE: review');
       assertExit(runStateWithProtocol(dir, ['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md', '--templates', 'REVIEW.md,TEST.md']), 0);
+      // review 该读两份协议、协议声明两个 guarded 技能（flow-comet-review / flow-comet-test）
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'review', 'flow-comet-test', '--prompt', 'flow-kit/prompts/5-test.md', '--templates', 'REVIEW.md,TEST.md']), 0);
       assertExit(runGuard(['entry', 'review'], dir), 0);
       const recDoneReview = runGuard(['exit', 'review', '--apply'], dir);
       assertExit(recDoneReview, 0);
@@ -387,11 +398,14 @@ export const ENTRIES = [
       };
       writeState(dir, after);
       assertExit(runStateWithProtocol(dir, ['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md']), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md']), 0);
       const recDoneVerifyExit = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(recDoneVerifyExit, 0);
       assertOut(recDoneVerifyExit, 'FIX-BATCH: 回源节点 verify（execute 出口已完成）');
       assertOut(recDoneVerifyExit, 'NODE: verify');
       assertExit(runStateWithProtocol(dir, ['skill-load', 'verify', 'flow-comet-verify', '--prompt', 'flow-kit/prompts/7-integration.md']), 0);
+      // 协议 verify.requiredSkillCalls = flow-comet-integration（guarded）：同一份协议文件、另一个技能面
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'verify', 'flow-comet-integration', '--prompt', 'flow-kit/prompts/7-integration.md']), 0);
       assertExit(runGuard(['entry', 'verify'], dir), 0);
       const recDoneVerify = runGuard(['exit', 'verify', '--apply'], dir);
       assertExit(recDoneVerify, 0);
@@ -464,6 +478,8 @@ export const ENTRIES = [
         throw new Error('并行修复出口应记录本 change + taskSetSignature 的家族出口事件，实际 ' + JSON.stringify(parFamilyExit));
       }
       assertExit(runStateWithProtocol(dir, ['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md', '--templates', 'REVIEW.md,TEST.md']), 0);
+      // review 该读两份协议、协议声明两个 guarded 技能（flow-comet-review / flow-comet-test）
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'review', 'flow-comet-test', '--prompt', 'flow-kit/prompts/5-test.md', '--templates', 'REVIEW.md,TEST.md']), 0);
       assertExit(runGuard(['entry', 'review'], dir), 0);
       const rParSource = runGuard(['exit', 'review', '--apply'], dir);
       assertExit(rParSource, 0);

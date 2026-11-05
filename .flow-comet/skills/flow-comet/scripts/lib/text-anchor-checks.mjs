@@ -1412,7 +1412,7 @@ export function identityUpgradeProblems({ entry, facts, others }) {
 
 // 平台事实（场景 184 的 ⑤ / ⑦ 使用；纯函数 + 合成输入可驱动）：Codex 平台事实与支持面的判别句
 // 随 `worktree-notes.md` 移出技能树后**唯一权威处** = `flow-comet/reference/platform-facts.md`
-//（T07 已按「逐字搬运，不重写」搬入）。判据三侧：① 权威处在场（判别句 + 旧独断句只允许被反驳
+//（已按「逐字搬运，不重写」搬入）。判据三侧：① 权威处在场（判别句 + 旧独断句只允许被反驳
 // 引用形态 + 适用范围限定 + fail-open / 未闭合的现判据）；② 各引用册**指针在场**；③ **证据正文
 // 不回流册子**（权威处唯一——原逐字锁「多处各持一份」的方向已反转）。
 // `PLATFORM_FACTS_ONLY_PHRASES` 是**证据与过程记录**类判别句（按 ADR-016 的「证据与判级随平台事实

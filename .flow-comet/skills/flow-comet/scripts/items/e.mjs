@@ -103,18 +103,26 @@ function customProtocol() {
   };
 }
 
-// 含 requiredSkillCalls 的变体：brainstorm 带 main scope 绑定（协调者加载 → 需 skill-load 声明标记）
-function customProtocolWithSkillCall() {
+// 协议变体（绑定面三态；`enforcement` 是出口覆盖判据的单一开关）：
+//   · base    —— 无 requiredSkillCalls：节点没有声明义务；
+//   · skill   —— main scope 绑定、未登记等级：声明照旧由出口代记（required-skill 条目自动补写）；
+//   · guarded —— main scope 绑定 + enforcement='guarded'：该技能必须自己有一条声明标记。
+function customProtocolVariant(variant) {
   const p = customProtocol();
-  p.nodes[0].requiredSkillCalls = [{ skill: 'flow-comet-brainstorm', scope: 'main' }];
+  if (variant === 'skill') {
+    p.nodes[0].requiredSkillCalls = [{ skill: 'flow-comet-brainstorm', scope: 'main' }];
+  } else if (variant === 'guarded') {
+    p.nodes[0].requiredSkillCalls = [{ skill: 'flow-comet-brainstorm', scope: 'main', enforcement: 'guarded' }];
+  } else if (variant !== 'base') {
+    throw new Error('未知协议变体: ' + variant);
+  }
   return p;
 }
 
-// 写入自定义协议文件，返回绝对路径
-function writeCustomProtocol(dir, withSkillCall = false) {
-  const proto = withSkillCall ? customProtocolWithSkillCall() : customProtocol();
-  const file = path.join(dir, withSkillCall ? 'custom-protocol-skill.json' : 'custom-protocol.json');
-  fs.writeFileSync(file, JSON.stringify(proto, null, 2) + '\n', 'utf8');
+// 写入自定义协议文件（变体见上），返回绝对路径
+function writeCustomProtocol(dir, variant = 'base') {
+  const file = path.join(dir, variant === 'base' ? 'custom-protocol.json' : 'custom-protocol-' + variant + '.json');
+  fs.writeFileSync(file, JSON.stringify(customProtocolVariant(variant), null, 2) + '\n', 'utf8');
   return file;
 }
 
@@ -148,9 +156,9 @@ export const ENTRIES = [
   },
 
   {
-    name: 'E2 自定义协议：声明机制与出口全链路（含技能绑定）',
+    name: 'E2 自定义协议：声明机制与出口全链路（含技能绑定与 guarded 覆盖）',
     run: (dir) => {
-      const custom = writeCustomProtocol(dir, true);
+      const custom = writeCustomProtocol(dir, 'skill');
       assertExit(runState(['init', 'cp-skill', '--protocol', custom], dir), 0);
       const env = { FLOW_COMET_PROTOCOL: custom };
       // 自定义节点 skill-load 声明（协议节点集合动态校验）
@@ -179,6 +187,40 @@ export const ENTRIES = [
       const envLoad = runGuard(['exit', 'bogus'], dir, env);
       assertExit(envLoad, 1);
       assertOut(envLoad, 'Unknown workflow Node');
+
+      // guarded 变体的出口覆盖判据（自定义协议路径）：协议把绑定登记为 enforcement='guarded' 时，
+      // 出口要求该技能**各自**有声明标记——同节点上已声明的另一个技能不构成覆盖（record 只校验载荷里
+      // 出现的 required-skill 条目，覆盖判据要的是「每个 guarded 绑定各有一条标记」）。
+      // 对照：同一夹具换成未登记等级的绑定（skill 变体）时零该技能声明照样放行——等级是唯一开关。
+      const guardedProtocol = writeCustomProtocol(dir, 'guarded');
+      const guardedEnv = { FLOW_COMET_PROTOCOL: guardedProtocol };
+      assertExit(runState(['init', 'cp-guard', '--protocol', guardedProtocol], dir), 0);
+      assertExit(runState(['skill-load', 'brainstorm', 'flow-comet-tdd'], dir, guardedEnv), 0);
+      assertExit(runState(['record', 'brainstorm', '{"summary":"brainstorm done"}'], dir, guardedEnv), 0);
+      writeFile(dir, '.specs/cp-guard/notes.md', '# notes\n');
+      assertExit(runGuard(['entry', 'brainstorm'], dir, guardedEnv), 0);
+      const uncovered = runGuard(['exit', 'brainstorm'], dir, guardedEnv);
+      assertExit(uncovered, 1);
+      assertOut(uncovered, '缺协议声明标记');
+      assertOut(uncovered, '缺必需技能声明: flow-comet-brainstorm');
+      // 补上该绑定自己的标记 → 同一出口放行
+      assertExit(runState(['skill-load', 'brainstorm', 'flow-comet-brainstorm'], dir, guardedEnv), 0);
+      const covered = runGuard(['exit', 'brainstorm', '--apply'], dir, guardedEnv);
+      assertExit(covered, 0);
+      assertOut(covered, 'ALL CHECKS PASSED');
+      assertNotOut(covered, '缺协议声明标记');
+      // 对照：未登记等级的同一绑定 → 只声明别的技能也放行（覆盖判据不在这条路径上生效）
+      const plainProtocol = writeCustomProtocol(dir, 'skill');
+      const plainEnv = { FLOW_COMET_PROTOCOL: plainProtocol };
+      assertExit(runState(['init', 'cp-plain', '--protocol', plainProtocol], dir), 0);
+      assertExit(runState(['skill-load', 'brainstorm', 'flow-comet-tdd'], dir, plainEnv), 0);
+      assertExit(runState(['record', 'brainstorm', '{"summary":"brainstorm done"}'], dir, plainEnv), 0);
+      writeFile(dir, '.specs/cp-plain/notes.md', '# notes\n');
+      assertExit(runGuard(['entry', 'brainstorm'], dir, plainEnv), 0);
+      const ungated = runGuard(['exit', 'brainstorm'], dir, plainEnv);
+      assertExit(ungated, 0);
+      assertOut(ungated, 'ALL CHECKS PASSED');
+      assertNotOut(ungated, '缺协议声明标记');
     },
   },
 

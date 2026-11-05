@@ -5,7 +5,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { assertExit, assertNotOut, assertOut, runGuard, runHandoff, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
+import { assertExit, assertNotOut, assertOut, assertTrue, installSkillTreeCopy, runGuard, runHandoff, runPrintedCommand, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
 import { serialTaskBlock, fixBatchParallelTaskText, fixBatchTwoFixTaskText, fixBatchHistoryWithStaleExecuteExit, writeFixBatchFixture, CHANGE_ID, readStateFile, writeIntakeArtifacts, fullContract, execSummaryFixture, fixBatchReviewDoc, completeFixTaskAndRecord, assertNodeLine, assertNotNodeLine } from '../lib/system-fixtures.mjs';
 
 export const ENTRIES = [
@@ -87,6 +87,9 @@ export const ENTRIES = [
 
       // ⑤ 回源 review 出口门禁真实执行：缺处置标记 → BLOCKED；补齐后同出口通过并推进 verify
       assertExit(runState(['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md', '--templates', 'REVIEW.md,TEST.md'], dir, env), 0);
+      // review 该读两份协议、协议声明两个 guarded 技能（flow-comet-review / flow-comet-test）：
+      // 出口覆盖判据要求全部声明
+      assertExit(runState(['skill-load', 'review', 'flow-comet-test', '--prompt', 'flow-kit/prompts/5-test.md', '--templates', 'REVIEW.md,TEST.md'], dir, env), 0);
       assertExit(runGuard(['entry', 'review'], dir, env), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', fixBatchReviewDoc(false));
       const gate = runGuard(['exit', 'review', '--apply'], dir, env);
@@ -177,6 +180,8 @@ export const ENTRIES = [
 
       // ⑤ 回源 verify 出口真实执行：验证命令落盘 + 推进 archive
       assertExit(runState(['skill-load', 'verify', 'flow-comet-verify', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
+      // 协议 verify.requiredSkillCalls = flow-comet-integration（guarded）：同一份协议文件、另一个技能面
+      assertExit(runState(['skill-load', 'verify', 'flow-comet-integration', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
       assertExit(runGuard(['entry', 'verify'], dir, env), 0);
       const vf = runGuard(['exit', 'verify', '--apply'], dir, env);
       assertExit(vf, 0);
@@ -248,6 +253,9 @@ export const ENTRIES = [
       assertNotOut(rClosedExit, 'RETURN: 回源节点');
       assertNodeLine(rClosedExit, 'review');
       assertExit(runState(['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md', '--templates', 'REVIEW.md,TEST.md'], dir, env), 0);
+      // review 该读两份协议、协议声明两个 guarded 技能（flow-comet-review / flow-comet-test）：
+      // 出口覆盖判据要求全部声明
+      assertExit(runState(['skill-load', 'review', 'flow-comet-test', '--prompt', 'flow-kit/prompts/5-test.md', '--templates', 'REVIEW.md,TEST.md'], dir, env), 0);
       assertExit(runGuard(['entry', 'review'], dir, env), 0);
       const rReviewPass = runGuard(['exit', 'review', '--apply'], dir, env);
       assertExit(rReviewPass, 0);
@@ -297,6 +305,9 @@ export const ENTRIES = [
         throw new Error('并行修复第二趟出口应回源 review，实际 ' + JSON.stringify(pSt.currentNode));
       }
       assertExit(runState(['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md', '--templates', 'REVIEW.md,TEST.md'], dir, env), 0);
+      // review 该读两份协议、协议声明两个 guarded 技能（flow-comet-review / flow-comet-test）：
+      // 出口覆盖判据要求全部声明
+      assertExit(runState(['skill-load', 'review', 'flow-comet-test', '--prompt', 'flow-kit/prompts/5-test.md', '--templates', 'REVIEW.md,TEST.md'], dir, env), 0);
       assertExit(runGuard(['entry', 'review'], dir, env), 0);
       const pReviewPass = runGuard(['exit', 'review', '--apply'], dir, env);
       assertExit(pReviewPass, 0);
@@ -342,6 +353,8 @@ export const ENTRIES = [
       assertNotOut(vClosedExit, 'RETURN: 回源节点');
       assertNodeLine(vClosedExit, 'verify');
       assertExit(runState(['skill-load', 'verify', 'flow-comet-verify', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
+      // 协议 verify.requiredSkillCalls = flow-comet-integration（guarded）：同一份协议文件、另一个技能面
+      assertExit(runState(['skill-load', 'verify', 'flow-comet-integration', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
       assertExit(runGuard(['entry', 'verify'], dir, env), 0);
       const vPass = runGuard(['exit', 'verify', '--apply'], dir, env);
       assertExit(vPass, 0);
@@ -408,6 +421,8 @@ export const ENTRIES = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-01-SUMMARY.md', execSummaryFixture('T-FIX-01'));
       writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-02-SUMMARY.md', execSummaryFixture('T-FIX-02'));
       assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
+      // 协议 execute.requiredSkillCalls = flow-comet-dev（guarded）：出口覆盖判据要求该技能也有标记
+      assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
       assertExit(runState(['record', 'execute', '{"summary":"fix wave two executed","parallelTakeoverApproved":true}'], dir, env), 0);
       const wave2 = runGuard(['exit', 'execute', '--apply'], dir, env);
       assertExit(wave2, 0);
@@ -467,6 +482,8 @@ export const ENTRIES = [
         directOverride: false,
       });
       assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
+      // 协议 execute.requiredSkillCalls = flow-comet-dev（guarded）：出口覆盖判据要求该技能也有标记
+      assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
       assertExit(runState(['record', 'execute', '{"summary":"legacy state closure","parallelTakeoverApproved":true}'], dir, env), 0);
       const legacyExit = runGuard(['exit', 'execute', '--apply'], dir, env);
       assertExit(legacyExit, 0);
@@ -501,6 +518,8 @@ export const ENTRIES = [
           writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-0' + i + '-SUMMARY.md', execSummaryFixture('T-FIX-0' + i));
         }
         assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
+        // 协议 execute.requiredSkillCalls = flow-comet-dev（guarded）：出口覆盖判据要求该技能也有标记
+        assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
         // entry 记录 taskHash：签名值必须带算法版本前缀（新链路 vN 前缀形态）
         assertExit(runGuard(['entry', 'execute'], dir, env), 0);
         const stHash = readStateFile(dir);
@@ -629,6 +648,9 @@ export const ENTRIES = [
       fs.rmSync(path.join(dir, '.specs', CHANGE_ID, 'TEST.md'), { force: true });
       fs.rmSync(path.join(dir, '.specs', CHANGE_ID, 'UAT.md'), { force: true });
       assertExit(runState(['skill-load', 'review', 'flow-comet-review', '--prompt', 'flow-kit/prompts/6-review.md', '--templates', 'REVIEW.md,TEST.md'], dir, env), 0);
+      // review 该读两份协议、协议声明两个 guarded 技能（flow-comet-review / flow-comet-test）：
+      // 出口覆盖判据要求全部声明
+      assertExit(runState(['skill-load', 'review', 'flow-comet-test', '--prompt', 'flow-kit/prompts/5-test.md', '--templates', 'REVIEW.md,TEST.md'], dir, env), 0);
       assertExit(runGuard(['entry', 'review'], dir, env), 0);
       const skewExit = runGuard(['exit', 'review', '--apply'], dir, env);
       assertExit(skewExit, 0);
@@ -697,10 +719,20 @@ export const ENTRIES = [
       assertExit(res, 1);
       assertOut(res, 'BLOCKED');
       assertOut(res, '缺少对应声明标记');
-      assertOut(res, 'workflow-state.mjs skill-load open flow-comet-change');
       // 拦截先于写入——evidence 不得落库
       const st = readStateFile(dir);
       if (st.evidence && st.evidence.open) throw new Error('拦截后不应写入 evidence: ' + JSON.stringify(st.evidence.open));
+      // 报文给出的声明命令必须**照抄能跑通**（解析打印文本 → 真执行 → 同一条 record 通过）：裸脚本名
+      // 的旧形态在 shell 里 command not found，字符串断言钉不住「这条命令能不能用」。
+      const command = (res.output.match(/^\s*(node "[^"]+" skill-load [^\n]+)$/m) || [])[1];
+      assertTrue(typeof command === 'string', '缺声明标记的阻塞必须给出完整可执行命令（node "<脚本路径>" skill-load …）:\n' + res.output);
+      installSkillTreeCopy(dir, path.join('.claude', 'skills'));
+      const replayed = runPrintedCommand(command, dir, { FLOW_COMET_RUN_ROOT: dir, FLOW_COMET_PROTOCOL: '' });
+      assertTrue(replayed.status === 0,
+        '照抄的声明命令跑不通\n  命令: ' + command + '\n  exit ' + replayed.status + '\n' + replayed.output);
+      const recorded = runState(['record', 'open', JSON.stringify({ summary: 'done', completedChecks: ['required-skill:open.flow-comet-change'] })], dir);
+      assertExit(recorded, 0);
+      assertOut(recorded, 'EVIDENCE: open');
     },
   },
 
@@ -775,6 +807,8 @@ export const ENTRIES = [
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
       assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
+      // open 该读两份协议、两个必需技能：出口覆盖判据要求全部声明，夹具两条都写下
+      assertExit(runState(['skill-load', 'open', 'flow-comet-requirement', '--prompt', 'flow-kit/prompts/1-requirement.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
       writeIntakeArtifacts(dir);
       writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
       // ① M5: record 自动补声明标记 → 出口通过（无需手动 skill-load）
@@ -812,6 +846,8 @@ export const ENTRIES = [
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
       assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
+      // open 该读两份协议、两个必需技能：出口覆盖判据要求全部声明，夹具两条都写下
+      assertExit(runState(['skill-load', 'open', 'flow-comet-requirement', '--prompt', 'flow-kit/prompts/1-requirement.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
       // 旧格式记录：completedChecks 无 required-skill 条目 → 不校验标记,通过
       const rA = runState(['record', 'open', JSON.stringify({ summary: 'legacy', completedChecks: ['unit-tests'] })], dir);
       assertExit(rA, 0);

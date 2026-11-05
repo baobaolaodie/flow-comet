@@ -107,19 +107,38 @@ flow-kit 9 阶段工作流的 workflow-kernel 实现。保留 flow-kit 的全部
 **节点技能两层加载模型（入口层 · 双步硬规则）**：路由到节点后，以下两步**都不可跳过**：
 
 1. **用 Skill 工具加载该节点的 Implementation 技能**（见下方 Skill Bindings 表 Implementation 列，如 execute → flow-comet-execute）。**不得跳过**——只读取 SKILL.md 文件不叫加载；真正让该 skill 的指令生效的是 Skill 工具把它注入本次会话。
-2. 随后按该节点 SKILL 的 Required Skill Calls，用 Skill 工具加载协议技能（与 Implementation 同名的条目已随路由加载，无需重复加载），加载完成后**立即**逐条运行声明命令（open/review 等涉及多个协议文件的节点，每个协议文件对应一条声明命令）：
+2. 随后按该节点 SKILL 的 Required Skill Calls，用 Skill 工具加载协议技能（与 Implementation 同名的条目已随路由加载，无需重复加载），加载完成后**立即**声明「加载了哪个技能、按哪份协议工作」。**一个节点该读的协议常常不止一份**（open 是 `0-change.md` + `1-requirement.md`，review 是 `6-review.md` + `5-test.md`）——**一份命令可以给多个 `--prompt`**，`skill-load` 会把它们**全部**记进同一个标记的 `protocols` 里，不是只留第一个：
 
 ```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <skill> --prompt flow-kit/prompts/<阶段>.md --templates <模板基名,...>
+# 单份协议（plan）
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load plan flow-comet-task --prompt flow-kit/prompts/3-task.md --templates TASK.md
+
+# 多份协议（open）：一条命令两个 --prompt，两份都记进标记
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-change --prompt flow-kit/prompts/0-change.md --prompt flow-kit/prompts/1-requirement.md --templates CHANGE.md,REQUIREMENT.md
+
+# 同一节点的第二个 guarded 必需技能（open = change + requirement）：每个必需技能各一条，
+# 每条都带该节点全部 --prompt 与模板全清单——一条命令只写一个技能标记
+node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-comet-requirement --prompt flow-kit/prompts/0-change.md --prompt flow-kit/prompts/1-requirement.md --templates CHANGE.md,REQUIREMENT.md
 ```
+
+> **分条等价**：按协议文件分几条命令声明，与合并成一条等价——出口判据按节点汇总，只问「该读的这几份是否都被声明过」，不要求与技能一一对应。
 
 > **`--templates` 是内置节点的必填声明**（每个标记各写全清单）：open → `CHANGE.md,REQUIREMENT.md` · design → `DESIGN.md`（前端可加 `UI-DESIGN.md`）· plan → `TASK.md` · execute / subagent-execute → `SUMMARY.md` · review → `REVIEW.md,TEST.md` · verify / archive 为零模板节点，**省略该参数**。逐节点示例命令见各节点册的「加载声明」小节。
 
-> **加载链的两条指针**：节点入口**先**打印 `READ PROMPT:`（指向 `flow-kit/prompts/<阶段>.md`——这一步怎么做），**再**打印 `READ TEMPLATE:`（指向 `flow-kit/templates/<DOC>.md`——产出长什么样），**有模板的节点两行都要读**；零模板节点（verify / archive）只有 `READ PROMPT:`。design 的**前端** change 还会多打印一行 `READ PROMPT（条件提示词）: …2a-ui-design.md…`（按 `frontendCriterion` 判定；非前端不打印）。`--prompt` 必须是该节点的协议文件（以入口打印的 `READ PROMPT:` 行为准）；落在节点协议面外的路径会在下一次入口被拦下（BLOCKED）并给出重声明命令——重跑声明即可，不要手改标记。
+> **加载链的两条指针**：节点入口**先**打印 `READ PROMPT:`（指向 `flow-kit/prompts/<阶段>.md`——这一步怎么做），**再**打印 `READ TEMPLATE:`（指向 `flow-kit/templates/<DOC>.md`——产出长什么样），**有模板的节点两行都要读**；零模板节点（verify / archive）只有 `READ PROMPT:`。design 的**前端** change 还会多打印一行 `READ PROMPT（条件提示词）: …2a-ui-design.md…`（按 `frontendCriterion` 判定；非前端不打印）。`--prompt` 必须是该节点的协议文件（以入口打印的 `READ PROMPT:` 行为准）；落在节点协议面外的路径会在下一次入口被拦下（BLOCKED，逐条点名）并给出重声明命令——**入口只判「写下的每条声明对不对」，不判「该写的都写了没有」**：该节点该读却还没声明的那几份由出口的声明门逐份点名（见下方「exit 核对声明标记」）。重跑声明即可，不要手改标记。
 
 > **跑声明命令 ≠ 加载**：声明只把“哪次会话加载了哪个 skill、按哪份协议工作”写进状态供 exit/record 核对；真正加载只有第 1 步的 Skill 工具能做到。协议的引用示例：execute / subagent-execute 节点加载 flow-comet-dev 时用 `--prompt flow-kit/prompts/4-dev.md`（DEV 阶段协议），交付物按 `flow-kit/templates/SUMMARY.md` 模板填写并补写 `## 自检方法` 段。
 
-节点退出（exit）与证据记录（record）会核对声明标记。声明如实记录执行者动作——加载了哪个 skill、按哪份协议工作——**不等于产出证明**；产出是否正确由产物结构校验与门禁把关。**技能加载前置门**：新 change 的 required 条目不再自动补写——handoff request / record 前必须已有本节点声明标记（先加载、再声明、后干活）；声明标记自动补写仅对旧 change 兜底（按协议 requiredSkillCalls 代记，标记带 `auto: true`），手动声明仍推荐（如实记录加载动作与协议文件）。`flow-comet-ui-design` 与协议同等级（`guarded`）且**仅前端适用**：前端 change 须先加载并 `skill-load` 声明、record 载荷带 `required-skill:design.flow-comet-ui-design`（出口不再自动补写）；非前端不加载不声明（出口输出可见的 `UI-DESIGN: skipped（非前端）`）；旧 change 渐进，缺件仅 WARN。前端判据是**结构级**的：`CHANGE.md` 的「视觉调性」段在场，且段内的「不适用」标记成**结构形态**——**独立行**、居**行首**（可带列表符号 / 引用 / 加粗），或写在适用性类标签的**字段值位**；标记之后须成**词形边界**（紧跟空白、标点或行尾），命中即回显**命中片段**。段内其它位置顺带提到「不适用」不算标注，仍判前端。
+节点退出（exit）与证据记录（record）会核对声明标记。
+
+**exit 核对声明标记（覆盖判据）——判据是「全部覆盖」，不是「任一命中」**。两条同时成立才算声明齐备，缺任一条即判缺声明：
+
+- **协议文件面**：该节点该读的**每一份**协议文件都要被声明过（open 两份、review 两份，其余节点一份）。多份可以在同一个标记的 `protocols` 里（一条命令给多个 `--prompt`），也可以分散在各技能自己的标记上——判据按节点汇总，只看这些文件是否都被声明过。
+- **技能面**：协议 `requiredSkillCalls` 里**每个** `guarded` 必需技能，都要有一个属于它的标记（适用性门控的绑定除外——`flow-comet-ui-design` 只在**前端** change 上要求，见下方该段判据）。**`handoff-guarded` 不在判据内**——那是子代理侧义务，由 Return Contract 的 `required-skill:` 核对负责（让协调者声明一个它没加载的技能，只会造出另一类假声明）。
+
+**缺声明时的恢复命令形态**（BLOCKED / WARN 报文给的就是这个形态）：报文按**协议派生**给出该节点**每个** `guarded` 必需技能各一条命令（`node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <skill> …`）——每条把该节点该读的**全部**协议文件都带上（多个 `--prompt`）并带 `--templates <该节点模板全清单>`，三个面一次给全，照抄即通。旧口径的 `skill-load <node> <skill> --prompt <缺的那份协议文件>` 只补缺项、漏模板清单，照抄完同一 exit 会再被覆盖门与模板门各拦一次（已废弃；报文仍逐项点名缺哪份协议文件、哪个必需技能，命令本身则给全）。同一 `<node>-<skill>` 重跑会**覆写**该标记，补齐后重试 `exit <node>`。**分级**：新 change BLOCKED（强制全部覆盖）、旧 change 只 WARN（既有 change 不因判据变严卡死）。**兼容**：判据改为全部覆盖之前写下的标记只有一个 `protocol` 单值（历史形态甚至是完整路径），照样按 basename 计入覆盖；不可解析的标记**不计入**，并在报文里列名——不静默当通过。
+
+声明如实记录执行者动作——加载了哪个 skill、按哪份协议工作——**不等于产出证明**；产出是否正确由产物结构校验与门禁把关。**技能加载前置门**：新 change 的 required 条目不再自动补写——handoff request / record 前必须已有本节点声明标记（先加载、再声明、后干活）；声明标记自动补写仅对旧 change 兜底（按协议 requiredSkillCalls 代记，标记带 `auto: true`），手动声明仍推荐（如实记录加载动作与协议文件）。`flow-comet-ui-design` 与协议同等级（`guarded`）且**仅前端适用**：前端 change 须先加载并 `skill-load` 声明、record 载荷带 `required-skill:design.flow-comet-ui-design`（出口不再自动补写）；非前端不加载不声明（出口输出可见的 `UI-DESIGN: skipped（非前端）`）；旧 change 渐进，缺件仅 WARN。前端判据是**结构级**的：`CHANGE.md` 的「视觉调性」段在场，且段内的「不适用」标记成**结构形态**——**独立行**、居**行首**（可带列表符号 / 引用 / 加粗），或写在适用性类标签的**字段值位**；标记之后须成**词形边界**（紧跟空白、标点或行尾），命中即回显**命中片段**。段内其它位置顺带提到「不适用」不算标注，仍判前端。
 
 > **侧命令**：`evolve`（架构沉淀同步）/ `health`（健康巡检）/ `context-scan`（上下文重扫）三条横向命令**不进 8 节点流程**——不路由、不 entry/exit、不写节点证据，一律由用户显式调用；触发词、命令面与落盘产物见主 `SKILL.md` 的「侧命令」小节（单一来源，本文不复述其命令表）。
 
