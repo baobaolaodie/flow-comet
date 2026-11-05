@@ -12,6 +12,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-05
+
 ### Added
 
 - **The engine can point at what a task summary is still missing, before the node closes**: `workflow-guard.mjs exit <node> --preflight` runs only the structural gates — declared artifacts present, summary key sections, template skeleton, intake skeleton — never writes state or the hint ledger, and refuses to be combined with `--apply`. Artifacts that only the archive step produces are reported as "generated when archiving runs" rather than required at this point. The per-task checklist in both executor books and the two runtime hints now point at it, while a full `exit` (without `--apply`) stays the end-of-node rehearsal. ([#162](https://github.com/baobaolaodie/flow-comet/pull/162))
