@@ -246,6 +246,9 @@ export function completeFixTaskAndRecord(dir, env) {
   writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', fixBatchTaskText('done'));
   writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-01-SUMMARY.md', execSummaryFixture('T-FIX-01'));
   assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
+  // 协议 execute.requiredSkillCalls = flow-comet-dev（guarded）：出口覆盖判据要求该技能也有标记——
+  // 只声明实现技能 flow-comet-execute 时覆盖缺口会被拦下（节点实现技能与必需技能是两个声明面）。
+  assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
   const rec = runState(['record', 'execute', '{"summary":"fix batch executed","parallelTakeoverApproved":true}'], dir, env);
   assertExit(rec, 0);
   assertOut(rec, 'EVIDENCE: execute');
@@ -635,6 +638,9 @@ export function multiWaveTaskContent(statusMap) {
 export function driveThroughDesign(dir) {
   assertExit(runState(['init', CHANGE_ID], dir), 0);
   assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
+  // open 该读两份协议、协议声明两个必需技能（flow-comet-change / flow-comet-requirement）：出口的
+  // 覆盖判据要求全部声明——只声明一份时连 design 都推进不到（声明门先拦），前奏形同虚设。
+  assertExit(runState(['skill-load', 'open', 'flow-comet-requirement', '--prompt', 'flow-kit/prompts/1-requirement.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
   writeIntakeArtifacts(dir);
   assertExit(runState(['record', 'open', '{"summary":"intake complete"}'], dir), 0);
   assertExit(runGuard(['entry', 'open'], dir), 0);

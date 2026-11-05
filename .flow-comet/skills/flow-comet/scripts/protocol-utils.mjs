@@ -437,6 +437,24 @@ export function templateKeyOf(value) {
   return normalizeTemplateName(value).toLowerCase();
 }
 
+// 声明工件名 → 模板键（单一实现）：「节点声明的哪份工件对应哪份模板」只在此派生，两个消费面共用——
+// 结构预检（缺件报文里的模板指针）与模板保真门禁（该工件用哪份骨架校验）。两处曾各持一份等价实现，
+// 副本一旦漂移，预检与收尾就会对同一份工件给出两套口径——这正是本函数存在的理由。
+// 口径（以模板保真门禁的既有实现为基准，它更新）：
+//   ① 路径归一：`\` 与 `/` 同权（与 workflowRelativeSegments 对声明路径的口径一致），只取末段——
+//      调用方传整条声明路径（`<change-id>/*-SUMMARY.md`）或裸文件名都可以；
+//   ② 通配：取末个 `*` 之后（通配只出现在文件名前缀：`*-SUMMARY.md` → `-SUMMARY.md`）；
+//   ③ 去首部非字母数字（`-SUMMARY` → `SUMMARY`）：通配残渣不是名字的一部分；
+//   ④ 空基名 → null（没有可派生的名字）——调用方据此「不给模板指针 / 不校验」，不臆造键；
+//   ⑤ 键归一（去尾 `.md` + 小写）由 templateKeyOf 承担，不在此另写一份。
+// 只回答「键」，不回答「该节点是否允许这份模板」：声明集合比对（C11）与指针格式化留在调用方——
+// 两侧对未知键的处置本就不同（预检不编造指针、模板保真门禁跳过未登记工件）。
+export function templateKeyFromArtifactName(value) {
+  const base = String(value ?? '').replaceAll('\\', '/').split('/').pop();
+  const tail = base.split('*').pop().replace(/^[^A-Za-z0-9]+/u, '');
+  return tail === '' ? null : templateKeyOf(tail);
+}
+
 // 逗号分隔的模板清单（`--templates CHANGE.md,REQUIREMENT.md`；单模板可省略逗号）→ 去重保序数组。
 export function parseTemplateList(value) {
   const names = [];
@@ -520,23 +538,6 @@ export function templatePointerPath(name) {
   return TEMPLATE_ROOT + '/' + normalizeTemplateName(name) + '.md';
 }
 
-// 重新声明的命令指引（skill-load 校验失败与 record 声明核对两处共用）：两处本说的是同一件事
-// 「怎么重新声明」——各拼一份必然分叉（命令形态改一次要改两地方）。零模板节点不拼 --templates
-// （省略即空集，与 C11 的「可省略」一致）；无 skill 名的场景用 <skill> 占位。
-// --prompt 一并拼上：模板与提示词是同一次声明的两面，而 skill-load 重跑会**覆写**同一标记——
-// 只补 --templates 的指引会把 protocol 写成 null，下一次 exit 反被判「缺协议声明标记」（恢复步骤
-// 自己弄坏协议声明）。路径取该节点的首个内置协议文件，与入口的 READ PROMPT 同源；自定义节点没有
-// 内置映射（协议自己也声明提示词路径）→ 不拼，不编造路径也不打占位符。
-export function templateDeclareCommand(declaration, { nodeId, skillName } = {}) {
-  const skill = typeof skillName === 'string' && skillName !== '' ? skillName : '<skill>';
-  const flag = declaration.required.length > 0
-    ? ' --templates ' + declaration.required.map((name) => name + '.md').join(',')
-    : '';
-  const promptFile = (NODE_PROTOCOL_FILES[nodeId] ?? [])[0];
-  const promptFlag = typeof promptFile === 'string' ? ' --prompt ' + promptPointerPath(promptFile) : '';
-  return 'workflow-state.mjs skill-load ' + nodeId + ' ' + skill + flag + promptFlag;
-}
-
 // 指针行（入口与 explain 共用：同一判据一份实现，两处输出措辞一致）。
 // label：内置入口用 `READ TEMPLATE`，现问通道用 `TEMPLATE`；conditional=true 时追出条件模板行。
 export function templatePointerLines(declaration, options = {}) {
@@ -608,4 +609,78 @@ export function promptDeclarationConflict({ node, declaredProtocol } = {}) {
   if (declared === '') return null;
   const expected = [...nodeFiles, ...(NODE_CONDITIONAL_PROMPTS[node?.id] ?? [])];
   return expected.includes(declared) ? null : { declared, expected };
+}
+
+// ---------- 声明命令：参数面的一处装配 ----------
+//
+// 一次 skill-load 声明要携带的东西只有三样：哪个节点的哪个技能、该节点该读的**每一份**协议文件
+// （条件提示词在适用时并入）、以及该节点的模板全清单。这条装配此前散在几处各拼一份——重跑声明的
+// 指引只带首份 --prompt、公开册把占位符写进 --prompt 的值位置（bash 下 `<` 是重定向）、门禁报文
+// 干脆不带 --templates（照抄即撞模板门）。故参数面只在这里拼，调用方只提供事实（节点、技能）。
+//
+// 命令**文本**（脚本路径 / 引号 / 协议上下文）不在这里：那是运行面的事实（平台布局、本次解析到的
+// 协议），由 lib/state-explain.mjs 的 declarationCommand 一处补齐——状态命令族与守卫族取同一份。
+//
+// 同步面与异步面的差别只有一处输入：条件提示词（design 的 2a-ui-design.md）是否适用。守卫的
+// nodeSkillLoadCommands 判得了前端，按结论并入；状态命令族与册子拿不到该结论，改为「本次声明的
+// 技能自己承载哪份条件提示词就并入哪份」（ui-design → 2a）——同步面不替一个异步判据下结论。
+// 零模板节点不拼 --templates（省略即空集，与 C11 的「可省略」一致）。
+function declarationPromptFiles({ nodeId, skill, frontend }) {
+  const files = [...(NODE_PROTOCOL_FILES[nodeId] ?? [])];
+  const own = SKILL_PROTOCOL_FILES[skill] ?? [];
+  for (const file of NODE_CONDITIONAL_PROMPTS[nodeId] ?? []) {
+    if (frontend || own.includes(file)) files.push(file);
+  }
+  return files.filter((file, index) => files.indexOf(file) === index);
+}
+
+// 一次声明的参数面（argv 形态，`skill-load` 起头）：脚本路径与协议上下文由调用方追加——它们是
+// 运行面的事实（平台路径 / 本次解析到的协议），不是声明内容。
+export function skillLoadDeclarationArgs({ node, skill, frontend = false } = {}) {
+  const args = ['skill-load', node?.id, skill];
+  for (const file of declarationPromptFiles({ nodeId: node?.id, skill, frontend })) {
+    args.push('--prompt', promptPointerPath(file));
+  }
+  const declaration = nodeTemplateDeclaration(node);
+  if (declaration.required.length > 0) {
+    args.push('--templates', declaration.required.map((name) => name + '.md').join(','));
+  }
+  return args;
+}
+
+// 该节点要求声明的技能（guarded ∧ 非 handoff）——协议面的事实，唯一实现：守卫的异步适用性判据、
+// 同步出口的覆盖门与回退取值全从这里取（第二个过滤条件在各处各写一遍，就是「两份判据各自演进」
+// 的起点）。
+export function guardedDeclarationSkills(node) {
+  return (node?.requiredSkillCalls ?? [])
+    .filter((binding) => binding
+      && binding.enforcement === 'guarded'
+      && binding.scope !== 'handoff'
+      && typeof binding.skill === 'string'
+      && binding.skill !== '')
+    .map((binding) => binding.skill);
+}
+
+// 没有可展开的必需技能时，声明该写哪个技能名（**不臆造**）：优先节点实现技能（它是这个节点的实现
+// 者），其次该节点 requiredSkillCalls 里非 handoff 的既有条目，两者皆无才留占位符。
+// 占位符是最后的诚实选择——它落在位置实参位，在 bash 下 `<skill>` 是输入重定向、照抄即失败，
+// 故只有当协议面确实没有可用的技能名时才出现，且报文会说明要按 entry 的 LOAD SKILL 行填。
+export function declarationSkillFallback(node) {
+  const implementation = node?.implementation;
+  const implementationSkill = implementation && typeof implementation === 'object' ? implementation.skill : null;
+  if (typeof implementationSkill === 'string' && implementationSkill.trim() !== '') return implementationSkill.trim();
+  const mainScoped = (node?.requiredSkillCalls ?? [])
+    .find((binding) => binding && binding.scope !== 'handoff'
+      && typeof binding.skill === 'string' && binding.skill !== '');
+  return mainScoped ? mainScoped.skill : '<skill>';
+}
+
+// 该节点本次该声明哪些技能（**同步面**的目标集）：guarded 必需技能，但条件绑定（design 的 ui-design：
+// 技能自身承载的协议文件就是该节点的条件提示词）不在此展开——它是否适用要读 CHANGE.md 判前端，
+// 同步面不替它下结论，缺那一项时由判得了前端的出口指引补。一个都不剩时按 declarationSkillFallback 退。
+export function declarationSkillTargets(node) {
+  const skills = guardedDeclarationSkills(node)
+    .filter((skill) => !(SKILL_PROTOCOL_FILES[skill] ?? [])
+      .some((file) => (NODE_CONDITIONAL_PROMPTS[node?.id] ?? []).includes(file)));
+  return skills.length > 0 ? skills : [declarationSkillFallback(node)];
 }

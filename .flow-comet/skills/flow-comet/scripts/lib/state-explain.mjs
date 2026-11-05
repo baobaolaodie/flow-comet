@@ -4,22 +4,98 @@
 // 读写（不写 state、不改路由、不绕门禁，与 bridge-check 同为纯读通道）。节点 id 非法 →
 // fail-closed 并列出协议内全部合法节点。
 import path from 'path';
-import { nodeTemplateDeclaration, templatePointerLines } from '../protocol-utils.mjs';
+import { fileURLToPath } from 'url';
+import {
+  nodeTemplateDeclaration,
+  resolveProtocol,
+  skillLoadDeclarationArgs,
+  templatePointerLines,
+} from '../protocol-utils.mjs';
+import { toPersistedProtocolPath } from '../state-schema.mjs';
 import { runRootDir } from './state-io.mjs';
+
+// 协调者禁令的**同一句**（单一来源）：entry（门禁族）与 next / record（状态命令族）都引用本常量——
+// 同一纪律多个输出面逐字一致；两处各写一份必然在措辞演进时分叉。落点选在本模块是因为它**不属于
+// 任何一族**：门禁族与状态命令族都只是取用方，常量因此不会把两族绑成一条反向依赖（一个措辞不该
+// 让下游模块依赖整个上游门禁面）。现行架构口径（ADR-014 / 并行委派四属性契约）：委托按平台的身份
+// 通道判定，独立 worktree 只是「① 写权限」的一种实现，共享工作区同样受支持。
+export const COORDINATOR_NOTICE = '你是协调者，不是执行者。禁止在主会话直接修改源码；按平台的身份通道委托子代理（同一身份判据，不要求隔离区）；独立 worktree 只是四属性契约里「写权限」的一种实现，共享工作区同样受支持；子代理回传后仅更新 TASK.md / SUMMARY / handoff evidence。';
 
 // 命令路径形态（平台化）：权威源保持设计形态 .claude/skills/（与册子命令形态一致，安装时由
 // prepare-env 的 pathReplacements 平台化）；安装副本按脚本自定位输出运行根相对形态——.claude /
 // .agents / .dsh 乃至将来新增的平台根同一推导覆盖，无需在此登记平台清单；落在运行根之外
 // （用户级安装）时输出脚本自身的绝对路径。不得硬编码单一形态：pathReplacements 只处理 .md
 // （prepare-env 的 applyPathReplacements 按扩展名过滤），脚本内的字面量在安装副本上不会被
-// 替换——硬编码 .claude 会让 Codex / dsh 单平台安装的 explain 输出不存在的命令路径。
-// scriptsDir 由入口以自定位绝对路径传入（入口所在目录即脚本目录）。
-function platformScriptsDir(scriptsDir) {
+// 替换——硬编码 .claude 会让 Codex / dsh 单平台安装的消息输出不存在的命令路径。
+// scriptsDir 由调用方以自定位绝对路径传入（调用方所在脚本目录）；runRoot 缺省取状态上下文的运行根
+// （state CLI 已初始化）——其它入口（守卫 / 委托脚本）没有该上下文，须显式传入自己的运行根。
+// 本函数是这条推导的唯一实现：运行期消息与 explain 的 COMMAND 行都从这里取（L-067：同一推导
+// 两处表达必然分叉）。
+export function platformScriptsDir(scriptsDir, runRoot = runRootDir()) {
   const posixDir = scriptsDir.replace(/\\/g, '/');
   if (posixDir.includes('/.flow-comet/skills/')) return '.claude/skills/flow-comet/scripts';
-  const relative = path.relative(runRootDir(), scriptsDir).split(path.sep).join('/');
+  const relative = path.relative(runRoot, scriptsDir).split(path.sep).join('/');
   if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return posixDir;
   return relative;
+}
+
+// 可复制命令形态（同一处实现：运行期消息与 explain 的 COMMAND 行共用）：脚本根（平台化）+ 脚本名
+// + 参数，整条脚本路径加双引号——安装根含空格时未加引号的路径会被 shell 按空格切分（只剩首段被当作
+// 脚本），加引号后三种平台语义下都是单一参数（引号对无空格路径无害）。调用方只提供事实（脚本目录、
+// 运行根、脚本名、参数），不得自行拼一份。
+export function scriptCommand({ scriptsDir, runRoot, script, args = [] }) {
+  return 'node "' + platformScriptsDir(scriptsDir, runRoot) + '/' + script + '"'
+    + (args.length > 0 ? ' ' + args.join(' ') : '');
+}
+
+// ---------- 声明命令（skill-load）：状态命令族与守卫族共用的唯一装配 ----------
+//
+// 一条可照抄的声明命令由三段事实拼成，三段各有单一来源，本段只做组合：
+//   · 参数面（`skill-load <node> <skill> --prompt … --templates …`）：由协议数据派生，见
+//     protocol-utils 的 skillLoadDeclarationArgs（该节点全部协议文件 + 模板全清单）；
+//   · 脚本路径（平台化 + 整条加引号）：见上面的 scriptCommand（与 record / entry 的恢复指引同源）——
+//     只写裸脚本名的命令在 shell 里是 `command not found`，等于没给命令；
+//   · 协议上下文（`--protocol <持久化路径>`）：本次运行解析到的协议**不是内置默认**时才带——内置
+//     默认时照抄不带它也解析到同一份（加了只是噪音）；自定义协议不带则照抄会解析到另一份协议
+//     （状态命令族只认 CLI → 环境变量 → 内置默认，没有 state 绑定这一来源），恢复路径断在第一步。
+// 这三段此前被拼成两种文本（状态侧裸脚本名 / 守卫侧 scriptCommand 形态），同一件事两种文本时只有
+// 一种能执行，故命令文本只在这里产出。
+export function protocolContextArgs({ protocolPath, packageRoot, runRoot }) {
+  if (!protocolPath || !packageRoot) return [];
+  const builtin = path.resolve(packageRoot, 'reference', 'workflow-protocol.json');
+  if (path.resolve(protocolPath) === builtin) return [];
+  return ['--protocol', '"' + toPersistedProtocolPath(runRoot, protocolPath) + '"'];
+}
+
+// 一条声明命令。context = { scriptsDir, runRoot, packageRoot, protocolPath }——运行面的事实，
+// 由各族的运行上下文提供（状态命令族见 commandContext；守卫族按同一形状取自己的运行上下文）。
+export function declarationCommand({ node, skill, frontend = false, context }) {
+  return scriptCommand({
+    scriptsDir: context.scriptsDir,
+    runRoot: context.runRoot,
+    script: 'workflow-state.mjs',
+    args: [
+      ...skillLoadDeclarationArgs({ node, skill, frontend }),
+      ...protocolContextArgs(context),
+    ],
+  });
+}
+
+// 每个目标技能各一条命令（一次声明只写一个技能标记：同 node-skill 重跑是覆写，不是新增）。
+// skills 必填：**谁决定目标集**由调用方表态——守卫族的异步面（判前端）与状态族的同步面
+// （protocol-utils 的 declarationSkillTargets）取的不是同一套结论，一个缺省值会把两者悄悄换掉。
+export function declarationCommands({ node, skills, frontend = false, context }) {
+  return skills.map((skill) => ({ skill, command: declarationCommand({ node, skill, frontend, context }) }));
+}
+
+// 状态命令族的运行上下文：脚本目录由本模块位置推导（它在 scripts/lib 下），包根是脚本目录的上一级，
+// 运行根取状态上下文（入口在分派前初始化），协议路径用入口同一个解析器按同一批参数解析
+// （CLI > 环境变量 > 内置默认）——命令自带的协议上下文因此就是本次运行的那一份，而不是另取一次。
+// 守卫族有自己的运行上下文（FLOW_COMET_RUN_ROOT + 状态绑定的协议），按同一形状自行提供，不走本函数。
+export function commandContext({ argv = [], runRoot = runRootDir() } = {}) {
+  const scriptsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const packageRoot = path.resolve(scriptsDir, '..');
+  return { scriptsDir, runRoot, packageRoot, protocolPath: resolveProtocol(packageRoot, runRoot, argv.slice(3)) };
 }
 
 // ① 产出物模板现问（加载链的第三环）：与 entry 的 READ TEMPLATE 行同源同实现（protocol-utils
@@ -87,15 +163,18 @@ function printNodeSkillCalls(node) {
   }
 }
 
-// ④ 三条命令（entry / exit / record，按节点 id 与平台化路径形态生成）。脚本路径整体加双引号：
-// 安装根含空格时未加引号的路径会被 shell 按空格切分（只剩路径首段被当作脚本），打印出来的命令
-// 便跑不了——加引号后三种平台语义下都是**单一参数**（引号本身对无空格路径无害）。
+// ④ 三条命令（entry / exit / record，按节点 id 与平台化路径形态生成）。命令文本一律由
+// scriptCommand 产出（唯一实现，与运行期恢复 / 预检消息同形）：脚本路径整条加双引号。
 function printNodeCommands(node, scriptsDir) {
-  const platformDir = platformScriptsDir(scriptsDir);
-  console.log('COMMAND entry: node "' + platformDir + '/workflow-guard.mjs" entry ' + node.id);
-  console.log('COMMAND exit: node "' + platformDir + '/workflow-guard.mjs" exit ' + node.id + ' --apply');
-  console.log('COMMAND record: node "' + platformDir + '/workflow-state.mjs" record ' + node.id
-    + " '{\"summary\":\"<完成摘要>\"}'");
+  console.log('COMMAND entry: ' + scriptCommand({
+    scriptsDir, script: 'workflow-guard.mjs', args: ['entry', node.id],
+  }));
+  console.log('COMMAND exit: ' + scriptCommand({
+    scriptsDir, script: 'workflow-guard.mjs', args: ['exit', node.id, '--apply'],
+  }));
+  console.log('COMMAND record: ' + scriptCommand({
+    scriptsDir, script: 'workflow-state.mjs', args: ['record', node.id, `'{"summary":"<完成摘要>"}'`],
+  }));
 }
 
 // explain <node>：缺参 / 纯空白 / 拿选项当节点名（如 --help）→ 用法错误（fail-closed，不猜）

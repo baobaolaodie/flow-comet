@@ -3,9 +3,10 @@ import { execFileSync } from 'child_process';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { validateStateFields, looksLikeObjectLiteral, writeJsonAtomic, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, resolveProtocolPathWithState, handoffRequestWithdrawn } from './state-schema.mjs';
+import { validateStateFields, looksLikeObjectLiteral, writeJsonAtomic, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME, resolveProtocolPathWithState, handoffRequestWithdrawn, evidencePayloadProblems } from './state-schema.mjs';
 import { EXECUTE_FAMILY_NODE_IDS, protocolNodeEnabled, resolveDelegationTarget, taskDependencyEligibility } from './route-node.mjs';
 import {
+  declarationSkillTargets,
   readProtocolFile,
   validateProtocolSchema,
   inspectWorkflowPathSegments,
@@ -14,11 +15,39 @@ import { taskAttrsById, taskBlocks, taskOpeningAttrs } from './task-parsing.mjs'
 // 时间形态单一权威（新增写入路径一律走本模块，禁自行拼接）：撤回留痕的时刻生成走 nowTimestamp，
 // 人可见回显走 formatLocalTimestamp（本地时间 + 显式偏移），解析走 parseTimestamp。
 import { nowTimestamp, formatLocalTimestamp, parseTimestamp } from './time-utils.mjs';
+// 运行根（本次调用把哪个目录当项目根）由 lib/run-root.mjs 单源解析：与 workflow-state 入口、
+// 守卫族同一份事实——各写一份 env/cwd 推导，同一个调用两侧就会给出不同答案。
+import { resolveRunRoot } from './lib/run-root.mjs';
+// 路径上下文（runRoot / specsRoot / statePath）：节点视图解析要经 state-io 的运行根，与 workflow-state
+// 入口同源；初始化在下方 runRoot 解析之后。
+import { initStateContext, findActiveChange } from './lib/state-io.mjs';
+// 技能加载声明判定（单一实现）：委托前置门与 record 前置门是同一判据——归档兜底范围也归它，
+// 本文件不自持第二份扫描（两份实现在「活动目录在场是否回溯归档」「多归档目录取哪个」上会分叉）。
+import { hasNodeSkillDeclaration } from './lib/state-skillmarkers.mjs';
+// 节点视图与预检命令段的单一实现（status / next / handoff result 同源）：本文件不自拼命令、不复制
+// 「先跑哪个出口」的判定（L-058 路由单一权威 / L-067 同一推导两处表达）。
+import { resolveNodeView, structuralPreflightHint } from './lib/state-commands-flow.mjs';
+// 声明命令的文本装配（脚本路径 / 引号 / 该节点全部 --prompt / --templates / 协议上下文）与 record 侧
+// 同一处：本文件只提供运行面事实（哪个节点、哪些技能、本次解析到哪份协议），不在这里拼文本。
+// scriptCommand 是「可照抄命令」的唯一装配：本文件的恢复句给出重新发起委托的命令，与声明命令同形
+// （脚本路径整条加引号），不另拼一份裸脚本文本。
+import { commandContext, declarationCommands, scriptCommand } from './lib/state-explain.mjs';
+// 开工前的 LESSONS 命中集：与出口门禁同一份命中算法（路径词元 × 条目关键词），本文件不复制一份。
+// writeFilesEntries = write_files 条目边界的唯一实现（request 侧解析写面 / result 侧的写面分叉诊断 /
+// 提交子集校验的允许列表都取它）：本文件不再自带第二份「剥注释 + 行切 + 分号切」的副本。
+import {
+  LESSONS_HIT_LIMIT,
+  lessonsEntries,
+  lessonsHits,
+  lessonsPathTokens,
+  taskWriteFilesById,
+  writeFilesEntries,
+} from './lib/lessons-hits.mjs';
 
 // workflow-handoff.mjs: Record subagent handoff evidence
 // evidence 统一记录在 subagent-execute 名下作为委托证据库——execute（串行委托）与 subagent-execute（并行委托）共用。不改成节点参数，保持最小改动。
 // Usage:
-//   node workflow-handoff.mjs request <task-id> <description> [--write-files <files...>]  -- record handoff request (W2-D: optional writeFiles allow-list)
+//   node workflow-handoff.mjs request <task-id> [description] [--write-files <files...>]  -- record handoff request (W2-D: optional writeFiles allow-list)
 //   node workflow-handoff.mjs result <task-id> <result-or-JSON>  -- record handoff result (W1-D: JSON Return Contract; W2-D: commitHash subset check; : completedChecks 规范化; redEvidence 时间顺序校验)
 //   node workflow-handoff.mjs withdraw <task-id> --by <source> [--reason <text>]  -- 撤回被遗弃的 request（前置：目标无 handoffResult——已收工者拒绝撤回；留痕：withdrawnAt + withdrawnBy；已撤回 = 终态）
 //   node workflow-handoff.mjs status                           -- show all handoff evidence
@@ -26,38 +55,14 @@ import { nowTimestamp, formatLocalTimestamp, parseTimestamp } from './time-utils
 // 归属门禁读取协议用：与其它脚本同源（packageRoot 默认协议；env 可覆盖），不消费 request 参数。
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..');
-const runRoot = process.cwd();
+const runRoot = resolveRunRoot();
 // 状态文件路径（单一来源：state-schema.mjs 的运行时路径常量）
 const statePath = path.join(runRoot, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME);
+// 节点视图解析（result 的 PREFLIGHT 提示）复用 state-io 的路径上下文——与 workflow-state 入口同一
+// runRoot 口径；本文件自己的读写仍走上方 statePath（同一文件的两种访问面，语义不变）。
+initStateContext(runRoot);
 
 async function fileExists(f) { try { await fs.access(f); return true; } catch { return false; } }
-
-// 技能加载声明标记存在性（技能加载前置门·方案 A）：校验 .skill-loads/ 下
-// 是否有该节点的声明标记 <node>-*.json（任一 skill 标记即算已声明——与 guard exit 侧
-// 的 exit 协议声明标记校验、workflow-state record 前置门同构：按 <node>- 前缀扫描；
-// 活动路径优先，归档路径兜底）。委托前置门在「先加载技能（Skill 工具）并 skill-load
-// 声明」之前拦截"先干活后补声明"。诚实边界：标记是自我声明，非物理证明。
-async function nodeSkillDeclared(nodeId, changeName) {
-  if (!nodeId || !changeName) return false;
-  const prefix = nodeId + '-';
-  const scan = async (dir) => {
-    try {
-      const entries = await fs.readdir(dir);
-      return entries.some((f) => f.startsWith(prefix) && f.endsWith('.json'));
-    } catch {
-      return false;
-    }
-  };
-  const activeDir = path.join(runRoot, '.specs', changeName, '.skill-loads');
-  if (await scan(activeDir)) return true;
-  const archiveRoot = path.join(runRoot, '.specs', 'archive');
-  const archiveEntries = await fs.readdir(archiveRoot).catch(() => []);
-  for (const entry of archiveEntries) {
-    if (!entry.endsWith('-' + changeName)) continue;
-    if (await scan(path.join(archiveRoot, entry, '.skill-loads'))) return true;
-  }
-  return false;
-}
 
 // 契约解析失败判定（单一来源）：looksLikeObjectLiteral 由 state-schema.mjs 导出——
 // trim 后以 {/[ 开头 → 视作"形似对象字面量"；若 JSON.parse 失败 → fail-closed。
@@ -84,6 +89,30 @@ async function resolveJsonFileWithinRunRoot(jsonFile) {
     throw new Error('--json-file 路径经符号链接解析后越出项目根: ' + jsonFile);
   }
   return abs;
+}
+
+// Return Contract 的拒绝报文恢复段（单一表达处）：非对象载荷与形状不合法这两条拒绝都引用它——
+// 「该写成什么」与「哪里不合法」是同一份契约的两个面，各写一份字面量必然漂移。
+function returnContractRecovery(taskId) {
+  return '{"status":"DONE","taskId":"' + taskId + '","commitHash":"<git commit sha>",'
+    + '"completedChecks":["required-skill:subagent-execute.flow-comet-dev"],'
+    + '"redEvidence":{"command":"<RED 失败测试命令>","output":"<真实失败输出片段>"},'
+    + '"greenEvidence":{"command":"<GREEN 通过测试命令>","output":"<真实通过输出片段>"}}'
+    + '；零提交任务可省略 commitHash（request 记 noCommit 时不必回传该字段）；'
+    + '载荷里的引号被 shell 吞掉时改用 --json-file <path> 传入 JSON 文件';
+}
+
+// 重新发起委托的命令（恢复句的唯一装配）：恢复句里给的是**命令**，不是脚本名——裸脚本名在 shell 里
+// 是 `command not found`，`<description>` 占位在 bash 里是输入重定向，两者都把「照抄」停在第一句话。
+// 参数只放任务号：description 可省略（CLI 缺省即 pending，见 request 的参数解析），占位符因此没有
+// 存在必要。脚本路径与引号由 scriptCommand 统一给出（安装根含空格时不被分词），本函数不另拼路径。
+function requestRecoveryCommand(taskId) {
+  return scriptCommand({
+    scriptsDir: __dirname,
+    runRoot,
+    script: 'workflow-handoff.mjs',
+    args: ['request', String(taskId)],
+  });
 }
 
 // writeFiles 段感知 glob 匹配:按 / 分段,`*` 只匹配段内任意字符(不跨段);
@@ -222,7 +251,7 @@ const ZERO_COMMIT_REVOKE_REASON_TEXT = {
 //   旧 change → HANDOFF WARN 后继续记录 result（出口 W1-D 同样不再豁免）。
 // 返回 'skip'（形态不适用）/ 'pass'（资格仍成立）/ 'warn'（旧 change 已撤销）/ 'block'（新 change 已撤销）。
 // 空 writeFiles、非 noCommit、无 request 记录均不扩大行为；未引用提交 / HEAD 移动 / TOCTOU /
-// worktree 提交不可见等结构性 residual 由 T11/T12 文档登记，本函数不宣称已闭合。
+// worktree 提交不可见等结构性 residual 已在维护文档登记，本函数不宣称已闭合。
 async function revalidateResultZeroCommit(state, taskId, handoffReq) {
   if (!handoffReq || handoffReq.noCommit !== true) return 'skip';
   const entries = Array.isArray(handoffReq.writeFiles) ? handoffReq.writeFiles : [];
@@ -291,9 +320,11 @@ async function readOwnershipProtocol(state) {
     source = selected.source;
     const protocol = await readProtocolFile(runRoot, protocolPath);
     validateProtocolSchema(protocol);
-    return { protocol, failure: null };
+    // protocolPath 随读取结果一并返回：恢复命令要带上**本次运行实际用的那一份**协议上下文
+    // （见 requestSkillDeclarationGuide）——调用方只读这个结果，不再各自重解析一次。
+    return { protocol, protocolPath, failure: null };
   } catch (error) {
-    return { protocol: null, failure: describeProtocolReadFailure(error, protocolPath, source) };
+    return { protocol: null, protocolPath, failure: describeProtocolReadFailure(error, protocolPath, source) };
   }
 }
 
@@ -313,6 +344,31 @@ function describeProtocolReadFailure(error, protocolPath, source = null) {
     return '协议内容不合法：' + message + origin;
   }
   return '协议读取失败：' + message + origin;
+}
+
+// result 的预检提示正文（路由视图同源）：与 next 的 NODE / status.routeNode 共用 resolveNodeView，
+// 不复制判定。返回两种形态——① 正常：命令段 + 「完整 exit 才是全链预演」两句（命令段单一实现是
+// state-commands-flow 的 structuralPreflightHint）；② 降级：协议不可读 / 已无待跑节点时不给命令，
+// 只留指引——不拿 state.currentNode 原值凑一条可能指错节点的命令（Fix 归位态下它就是源节点）。
+async function resultPreflightHint(state) {
+  let unavailable = '协议不可读或已无待跑节点';
+  try {
+    const changeName = await findActiveChange();
+    if (changeName !== null) {
+      const protocolRead = await readOwnershipProtocol(state);
+      if (protocolRead.protocol !== null) {
+        const view = await resolveNodeView({ changeName, protocol: protocolRead.protocol, state });
+        if (view.routeNode !== null) return structuralPreflightHint(String(view.routeNode));
+      } else {
+        unavailable = '协议不可读：' + protocolRead.failure;
+      }
+    } else {
+      unavailable = '无活跃 change';
+    }
+  } catch (error) {
+    unavailable = '路由视图解析失败：' + (error && error.message ? error.message : String(error));
+  }
+  return unavailable + '，暂时无法解析路由节点——先确认协议文件可读，再运行 exit <节点> --preflight 做结构预检；完整 exit（不带 --apply）是节点收尾的全链预演';
 }
 
 // 路由事实：从 TASK.md 全文派生 done id 集合与目标任务块。解析走 task-parsing 的开标签
@@ -368,9 +424,11 @@ async function assessRequestOwnership(state, taskAttrs, taskContent) {
 
 // 渲染归属判定结果（只输出与退出，不写 state）：
 // 协议不可读 → 可见 WARN（含原因与「本次未执行归属校验」）后放行，不静默、不阻断。
-// 不可委托 → 新 change BLOCK / 旧 change 可见 WARN 后继续；恢复指引以 workflow-state next 的
-// 实际 NODE 输出为准，不固定指向 next 不会输出的节点（依赖未满足时路由按串行消化走 execute）。
-// 归属目标不匹配 → 同样先按 next 的路由指引进入；正确节点未 entry → 可见 WARN 不阻断。
+// 不可委托 / 归属目标不匹配 → 新 change BLOCK / 旧 change 可见 WARN 后继续；恢复指引统一为
+// 「先对当前节点 record + exit（退出后路由自动前进到目标节点），不要在未 exit 前 entry 目标
+// 节点」，再按 next 的实际 NODE 输出确认——不承诺先 next 再 entry 目标节点（当前节点已 entry
+// 未 exit 时该路径会被节点顺序门拦）。不可委托分支不固定指向 next 不会输出的委托节点。
+// 正确节点未 entry → 可见 WARN 不阻断。
 function reportRequestOwnership(state, taskId, taskAttrs, ownership) {
   const kind = taskAttrs && taskAttrs.parallel === true ? '并行' : '串行';
   const current = String(state.currentNode);
@@ -384,7 +442,13 @@ function reportRequestOwnership(state, taskId, taskAttrs, ownership) {
     const detail = '任务 ' + taskId + '（' + kind + ' pending）当前不可委托：依赖未满足'
       + (unmet.length > 0 ? '（未完成: ' + unmet.join(', ') + '）' : '')
       + '；原始 currentNode=' + current;
-    const guide = '恢复指引: 运行 workflow-state next，按输出的 NODE 进入；若输出 execute 表示依赖未满足'
+    // 与 mismatch 分支同批对齐：当前节点若已 entry 未 exit，直接 entry 目标节点会被节点顺序门
+    // 拦（"按 NODE 进入"隐含了未 exit 就进下一节点）。自然路径是先对当前节点 record + exit——
+    // 退出后路由自动前进，next 的 NODE 输出才有可执行语义；依赖未满足时 next 仍输出 execute
+    //（该任务按串行消化），待可委托后再 request。
+    const guide = '恢复指引: 若当前节点已 entry 未 exit，先对当前节点 ' + current
+      + ' record + exit（退出后路由会自动前进），不要在未 exit 前 entry 目标节点；随后运行 workflow-state next，'
+      + '按输出的 NODE 进入；若输出 execute 表示依赖未满足'
       + '（该任务当前按串行消化），待任务变为可委托（next 输出对应委托节点）后再 request';
     if (state.newChange === true) {
       console.error('BLOCKED: ' + detail + '——' + guide + '；本次请求未写入 state，也未记录 handoffRequests');
@@ -396,9 +460,15 @@ function reportRequestOwnership(state, taskId, taskAttrs, ownership) {
   if (ownership.verdict === 'mismatch') {
     const detail = '任务 ' + taskId + '（' + kind + ' pending）应归属节点 '
       + ownership.targetNode + '，原始 currentNode=' + current;
-    const guide = '恢复指引: 运行 workflow-state next 查看当前路由，按 NODE 输出进入'
-      + '（本任务归属节点 ' + ownership.targetNode + '：workflow-state entry ' + ownership.targetNode
-      + ' 或 workflow-guard entry ' + ownership.targetNode + '）后再发起委托';
+    // 恢复路径不承诺"先 next 再 entry 目标节点"：当前节点已 entry 未 exit 时，节点顺序门会拦
+    // 目标节点的 entry（"当前节点未收尾"正是本分支的常见现场）。自然路径是先对当前节点
+    // record + exit——退出后路由自动前进到目标节点，再按 next 的输出进入；目标节点名保留在
+    // 括号里，但语义改为"当前节点 exit 之后才 entry"。
+    const guide = '恢复指引: 先对当前节点 ' + current + ' record + exit（退出后路由会自动前进到目标节点），'
+      + '不要在未 exit 前 entry 目标节点（本任务归属节点 ' + ownership.targetNode
+      + '：等当前节点 exit 后，再用 workflow-state entry ' + ownership.targetNode
+      + ' 或 workflow-guard entry ' + ownership.targetNode + '）'
+      + '；随后用 workflow-state next 查看当前路由并按 NODE 输出确认';
     if (state.newChange === true) {
       console.error('BLOCKED: ' + detail + '——' + guide + '；本次请求未写入 state，也未记录 handoffRequests');
       process.exit(1);
@@ -413,6 +483,105 @@ function reportRequestOwnership(state, taskId, taskAttrs, ownership) {
       + ownership.targetNode + ' 记录进入');
   }
 }
+
+// ---------- 开工前的 LESSONS 命中集（只读） ----------
+// 出口按「任务 write_files 的路径段（过停用词）× .specs/LESSONS.md 条目的关键词行」重算命中集（前
+// LESSONS_HIT_LIMIT 条），并要求 SUMMARY 的 ## LESSONS 扫描 段逐条回应这些编号；执行者开工时看不到
+// 这个集合，只能按自己对任务主题的理解扫，两套口径只在出口对齐——缺项到出口才暴露、只能补写。
+// 本函数把**同一份命中算法**（lib/lessons-hits.mjs，与出口共用）的结果打印在 request 里：编号 +
+// 标题 + 命中的关键词，执行者据此逐条写「仍适用 / 差异是…」。
+// 只读：不写 state、不写任何账本。输入与出口同源：TASK.md 的 <write_files> 元素——不是命令行参数
+// --write-files（出口只认 TASK.md，拿命令行参数算出来的集合会与出口分叉）。
+async function reportLessonHits(taskContent, taskId) {
+  const scanHint = 'SUMMARY 的 ## LESSONS 扫描 段写「无 active 条目命中」即可';
+  let lessonsText = null;
+  try {
+    lessonsText = await fs.readFile(path.join(runRoot, '.specs', 'LESSONS.md'), 'utf8');
+  } catch (error) {
+    // 不可读 = 无法计算（不是「0 条」）：一行降级，不编造条目、不阻断本次 request
+    const reason = error && error.code === 'ENOENT'
+      ? '文件不存在'
+      : String(error && error.message ? error.message : error);
+    console.log('LESSONS-HITS: 无法计算（.specs/LESSONS.md 不可读：' + reason
+      + '）——本任务无从预知命中集，本次 request 照常记录；SUMMARY 的 ## LESSONS 扫描 段按实情声明未扫描到条目');
+    return;
+  }
+  if (taskContent === null || taskAttrsById(taskContent, taskId) === null) {
+    console.log('LESSONS-HITS: 无可回应条目（TASK.md ' + (taskContent === null ? '缺失' : '无匹配任务 ' + taskId)
+      + '）——出口按同一算法也算不出命中集；' + scanHint);
+    return;
+  }
+  const writeFilesById = taskWriteFilesById(taskContent);
+  if (!writeFilesById.has(taskId)) {
+    console.log('LESSONS-HITS: 无可回应条目（任务 ' + taskId + ' 未声明 write_files）——出口按同一算法也算不出命中集；' + scanHint);
+    return;
+  }
+  const hits = lessonsHits(lessonsPathTokens(writeFilesById.get(taskId)), lessonsEntries(lessonsText));
+  const summary = 'LESSONS-HITS: ' + hits.length + ' 条（本任务 write_files 路径段 × 教训册关键词，前 ' + LESSONS_HIT_LIMIT + '）';
+  if (hits.length === 0) {
+    console.log(summary + '——' + scanHint);
+    return;
+  }
+  console.log(summary);
+  for (const hit of hits) {
+    console.log('  - ' + hit.id + (hit.title ? ' · ' + hit.title : '') + '（命中词: ' + hit.shared.join('、') + '）');
+  }
+  console.log('  —— 这些条目须在 SUMMARY 的 `## LESSONS 扫描` 段逐条回应（仍适用 / 差异是…）');
+}
+
+// ---------- 越界报文的事实陈述（委托快照与当前写面是否一致） ----------
+// 提交子集校验的允许列表是**发起委托那一刻的写面快照**（request.writeFiles），而 TASK.md 的写面
+// 可以被 replan 改写。本函数只回答一个**可观测事实**：这份快照与当前 TASK.md 里该任务的写面是否
+// 已经分叉。它不判断分叉的成因——「记录早于 replan」只是分叉的**可能**成因之一（显式 --write-files
+// 与 TASK.md 分叉、TASK.md 被手工改写都同样命中），把可能写成断言会让人照着一句不成立的前提去动
+// 计划工件。越界清单与 BLOCK/WARN 分级仍由调用处按原样给出（本函数不改判定）。
+// 判不出时返回 false：TASK.md 缺失、无该任务块、或块内无 <write_files> 元素都属「无据可判」——把
+// 无据可判当成「已变更」同样是一句凭空的事实陈述。
+async function writeFilesSnapshotStale(state, taskId, requestWriteFiles) {
+  if (!state.activeChange) return false;
+  const taskFile = path.join(runRoot, '.specs', state.activeChange, 'TASK.md');
+  const taskContent = await fs.readFile(taskFile, 'utf8').catch(() => null);
+  const elementText = taskWriteFilesById(taskContent).get(taskId);
+  if (elementText === undefined) return false;
+  // 条目切分取同一个 writeFilesEntries（request 侧的写面允许列表由它产出），否则同一份写面会被
+  // 切成不同集合——「快照变了吗」这个事实陈述会随之失真
+  const currentFiles = writeFilesEntries(elementText);
+  const normalize = (files) => [...new Set(files.map(toPosixPath))].sort().join('\n');
+  return normalize(currentFiles) !== normalize(requestWriteFiles);
+}
+
+// ---------- 委托前置门：缺声明时给出「一条能照抄的命令」 ----------
+// 命令文本不在这里拼：与 record 侧 / 出口门同一装配（state-explain 的 declarationCommands——平台化
+// 脚本路径加引号、该节点**全部**协议文件各一个 --prompt、模板全清单、自定义协议的 --protocol）。
+// 本函数只提供三段运行面事实：
+//   · 目标技能集：协议派生（declarationSkillTargets），与 record 前置门同一取法——一次声明只写一个
+//     技能标记，故每个目标技能各一条命令；
+//   · 运行上下文（脚本目录 / 包根 / 运行根）：状态命令族的同一个 commandContext 推导，不另算一份路径；
+//   · 协议路径：本次 request 实际解析到的那一份（readOwnershipProtocol）。命令若按另一份协议解析，
+//     技能名与模板清单就可能不是同一个节点的——照抄跑出来的标记与出口门的判据对不上。
+// 协议不可读 / 协议里没有该节点时不编造命令：技能名与协议文件都无从确定，猜一条只是把错误推给 shell。
+async function requestSkillDeclarationGuide(requestNode, state) {
+  const hint = '先加载技能（用 Skill 工具，禁止跳过），再';
+  const protocolRead = await readOwnershipProtocol(state);
+  const node = protocolRead.protocol === null
+    ? null
+    : (protocolRead.protocol.nodes ?? []).find((candidate) => candidate && candidate.id === requestNode) ?? null;
+  if (node === null) {
+    const why = protocolRead.failure === null
+      ? '当前协议没有节点 ' + requestNode + ' 的定义'
+      : '协议不可读——' + protocolRead.failure;
+    return hint + '按本节点入口打印的 LOAD SKILL 行声明技能加载，然后重试 request（无法派生声明命令：'
+      + why + '）';
+  }
+  const commands = declarationCommands({
+    node,
+    skills: declarationSkillTargets(node),
+    context: { ...commandContext({ runRoot }), protocolPath: protocolRead.protocolPath },
+  }).map((entry) => entry.command);
+  return hint + '照抄下面的命令声明本节点技能加载（同一 node-skill 重跑会覆写该标记）：\n  '
+    + commands.join('\n  ') + '\n然后重试 request';
+}
+
 async function main() {
   const action = process.argv[2] ?? 'status';
   const state = await readState();
@@ -420,16 +589,21 @@ async function main() {
   if (action === 'request') {
     const taskId = process.argv[3];
     const args = process.argv.slice(4);
-    if (!taskId) { console.error('Usage: workflow-handoff.mjs request <task-id> <description> [--write-files <files...>]'); process.exit(1); }
+    if (!taskId) { console.error('Usage: workflow-handoff.mjs request <task-id> [description] [--write-files <files...>]'); process.exit(1); }
     // 技能加载前置门（方案 A）：发起委托前校验 execute/subagent-execute
     // 本节点 skill-load 声明标记已存在（.skill-loads/<node>-*.json）——先加载节点技能（Skill 工具）
     // 并 skill-load 声明，再发起委托。缺失 → 新 change BLOCK / 旧 change 渐进 WARN。
+    // 恢复行给的是**可照抄的命令**（与 record 侧同一装配，见 requestSkillDeclarationGuide）：
+    // 裸脚本名 + `<skill>` 占位 + 只给首份 --prompt 的旧形态，在 bash 里是 command not found 与输入
+    // 重定向；即便手工补全，声明也缺模板清单与协议上下文，下一步照样被另一道门拦。
+    // 判据不自持：与 record 前置门共用 state-skillmarkers 的 hasNodeSkillDeclaration（一处实现，
+    // 归档兜底范围也随之同口径——别的 change 归档里的标记不得替本节点作证）。
     // 与零提交语义独立共存：本门只校验节点技能声明，不依赖任务 write_files 内容。
     const requestNode = state.currentNode;
     if (requestNode && EXECUTE_FAMILY_NODE_IDS.has(requestNode)) {
-      const declared = await nodeSkillDeclared(requestNode, state.activeChange);
+      const declared = await hasNodeSkillDeclaration(requestNode, state.activeChange);
       if (!declared) {
-        const loadGuide = '先加载技能（用 Skill 工具，禁止跳过）并运行 workflow-state.mjs skill-load ' + requestNode + ' <skill> 再发起委托';
+        const loadGuide = await requestSkillDeclarationGuide(requestNode, state);
         if (state.newChange === true) {
           console.error('BLOCKED: 节点 ' + requestNode + ' 缺少技能加载声明标记（.skill-loads/' + requestNode + '-*.json）——' + loadGuide);
           process.exit(1);
@@ -452,7 +626,9 @@ async function main() {
     // ② 任务块缺失或块内无 <write_files> 元素 → 任务不可解析，新 change BLOCK，旧 change
     // WARN 且不设 noCommit（防未解析任务静默变零提交逃逸口）；③ TASK.md 读不到同 ②。
     // TASK.md 只读一次：任务开标签属性解析（归属门禁）复用 task-parsing.mjs；
-    // 下方 write_files 元素提取沿用既有实现（该路径的解析策略不在本任务改动面内）。
+    // 写面提取的唯一实现是 lib/lessons-hits.mjs 的 taskWriteFilesById（按 <task …> 逐块取块内元素，
+    // 与出口门禁、开工前命中集打印同源）——本文件不再自带第二份提取正则：旧的「开标签到全文下一个
+    // <write_files>」非贪婪匹配会越过 </task> 取到下一个任务的写面，缺失被别人的白名单顶替。
     const taskFile = state.activeChange
       ? path.join(runRoot, '.specs', state.activeChange, 'TASK.md')
       : null;
@@ -463,18 +639,15 @@ async function main() {
     let taskResolved = false;
     let emptyWriteFilesElement = false;
     if (!writeFiles || writeFiles.length === 0) {
-      if (taskContent !== null) {
-        const taskRegex = new RegExp(`<task[^>]*id="${taskId.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}"[\\s\\S]*?<write_files>([\\s\\S]*?)</write_files>`, 'i');
-        const match = taskContent.match(taskRegex);
-        if (match) {
-          taskResolved = true;
-          // 分号容错：与 workflow-guard.mjs 伪并行启发式同源实现（分号容错双点内联，与 workflow-guard.mjs 同源互锚）
-          // 先剥整块 HTML 注释再拆分——多行注释内容不得混入路径条目（与 workflow-guard 同口径）
-          const files = match[1].replace(/<!--[\s\S]*?-->/g, '').trim().split(/\s*\n\s*/).map(f => f.trim()).filter(Boolean)
-            .flatMap(f => f.split(';')).map(f => f.trim()).filter(Boolean);
-          if (files.length > 0) { writeFiles = files; }
-          else { emptyWriteFilesElement = true; }
-        }
+      // 写面元素原文（键 = 任务 id）：提取只有一处实现（见上方注释），块内没有该元素就是没有。
+      const writeFilesElementText = taskWriteFilesById(taskContent).get(taskId);
+      if (writeFilesElementText !== undefined) {
+        taskResolved = true;
+        // 切分口径 = lib/lessons-hits.mjs 的 writeFilesEntries：与 plan 出口的伪并行启发式、task-graph
+        // 的路径解析是**同一个函数**（剥整块 HTML 注释再拆分，注释内容不得混入路径条目；行内按分号容错）
+        const files = writeFilesEntries(writeFilesElementText);
+        if (files.length > 0) { writeFiles = files; }
+        else { emptyWriteFilesElement = true; }
       }
       if (wfIdx >= 0) { taskResolved = true; emptyWriteFilesElement = false; }
     } else {
@@ -488,6 +661,9 @@ async function main() {
       }
       console.error('WARN: ' + msg + '（旧 change 渐进，不阻断，不记录 noCommit）');
     }
+    // 开工前的 LESSONS 命中集（只读；与出口同一份命中算法）——放在归属门禁之前：request 不写 state，
+    // 但执行者仍要看得到「当前任务要回应哪几条」（state 字节零改写由同一路径保证）。
+    await reportLessonHits(taskContent, taskId);
     // request 归属门禁：技能声明门之后、任务解析之后、首个 state.evidence 写入之前。
     // 只读判定；新 change 不匹配 → BLOCK（state 字节零改写、不落 handoffRequests）；旧 change → 可见 WARN 后照常记录。
     const parsedTask = taskAttrsById(taskContent, taskId);
@@ -550,7 +726,8 @@ async function main() {
       raw = await fs.readFile(await resolveJsonFileWithinRunRoot(jsonFile), 'utf8');
     }
     if (!taskId) { console.error('Usage: workflow-handoff.mjs result <task-id> <result>'); process.exit(1); }
-    // W1-D: 尝试解析 JSON（Return Contract）——解析失败则存原始字符串
+    // 尝试解析 JSON（Return Contract）：解析失败时，形似对象字面量的在下方 fail-closed（不写 handoffResult），
+    // 其余纯文本由紧随其后的「必须是对象」入口判据拒绝——旧语义「解析失败则存原始字符串」已移除
     let parsed = raw;
     try { parsed = JSON.parse(raw); } catch {
       // 契约解析失败 fail-closed:payload 形似对象但 JSON.parse 失败 → 报错并
@@ -570,18 +747,68 @@ async function main() {
         process.exit(1);
       }
     }
+    // 载荷本身必须是对象（入口判据，先于形状校验与任何写盘；与 workflow-state record 入口同一判据）：
+    // JSON 可解析但**不是对象**的契约（null / 数组 / 字符串 / 数字）旧实现一路放行——判定单一来源
+    // evidencePayloadProblems 按设计只判「对象各字段的类型」，载荷不是对象时它返回空表，于是字符串
+    // 或数组被原样存进 handoffResult：出错的是 result，报错的却是出口（那里只会说「缺 greenEvidence」
+    // 「缺 completedChecks」）。JSON 解析失败且不形似对象字面量的纯文本同走这条拒路（旧语义「解析
+    // 失败则存原始字符串」是同一形态的延后）。本判据在**任何写盘之前**拦下，state 字节零改写。
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      const payloadTypeName = parsed === null ? 'null' : (Array.isArray(parsed) ? 'array' : typeof parsed);
+      console.error('HANDOFF ERROR: result 契约必须是对象（当前是 ' + payloadTypeName + '）——写入前拒绝，state 未改写');
+      console.error('恢复: 用对象形态的 Return Contract 重试（可照抄形态）: ' + returnContractRecovery(taskId));
+      process.exit(1);
+    }
+    // 形状校验（写入前 fail-closed；判定单一来源 = state-schema.evidencePayloadProblems，与 record
+    // 共用同一函数）：类型错误的 Return Contract 若落库，问题会延后到出口门禁——那里只会报
+    // 「缺 commitHash / 缺 greenEvidence」，或把对象元素判成「缺 completedChecks」，出错的是 result、
+    // 报错的却是 exit。故在**任何写盘之前**拦下（此后的零提交复验与提交子集校验都可能改写 state）：
+    // 点名字段路径与当前类型，并给出可照抄的契约形态；本路径 state 字节零改写。
+    // 只判类型与取值域（status 的既有取值集合），不做业务判定——提交子集、RED/GREEN 时序、
+    // 零提交资格重验仍归各自既有门禁。
+    const contractProblems = evidencePayloadProblems(parsed, 'return-contract');
+    if (contractProblems.length > 0) {
+      console.error('HANDOFF ERROR: result 的 Return Contract 形状不合法（写入前拒绝，state 未改写）:');
+      for (const problem of contractProblems) {
+        console.error('  ' + problem.field + ': ' + problem.message);
+      }
+      console.error('恢复: 用类型合法的 Return Contract 重试（可照抄形态）: ' + returnContractRecovery(taskId));
+      process.exit(1);
+    }
     state.evidence = state.evidence || {};
     state.evidence['subagent-execute'] = state.evidence['subagent-execute'] || {};
     const handoffReq = state.evidence['subagent-execute'].handoffRequests?.[taskId];
     const hasRequest = !!handoffReq && typeof handoffReq === 'object';
+    // 委托记账：result 必须对上一条 request（复用上面的 hasRequest 读数，不另算一次）。
+    // 位置在任何写盘之前、且先于零提交语义与提交子集校验——那两处都从 request 取范围
+    // （request.writeFiles），缺 request 时它们分别退化成「判不出零提交」与「允许列表为空、
+    // 只剩自身 SUMMARY 一条豁免」，于是零提交契约与「只提交自身 <task>-SUMMARY.md」两种 result
+    // 都会被静默放行。把判定提到这里，两个旁路由同一处拦下，不必在下游两条分支各补一次。
+    // 新 change BLOCK / 旧 change WARN（渐进）；两侧都在写盘之前，state 字节零改写。
+    if (!hasRequest) {
+      const missingRequest = 'result 没有对应的委托 request（handoffRequests 无该任务记录）——未记录的委托不能回传结果';
+      // 恢复段 = 说明行 + 命令行的两行（命令单独成行才可整行照抄；同一行里命令后跟说明时，整行丢给
+      // shell 会把说明当成参数）。任务的恢复命令与其它「重新发起委托」路径共用同一装配。
+      const requestRecovery = [
+        '恢复: 先照抄下面的命令记录委托（description 可省略，缺省即 pending），再重录 result：',
+        '      ' + requestRecoveryCommand(taskId),
+      ].join('\n');
+      if (state.newChange === true) {
+        console.error('BLOCKED: 任务 ' + taskId + ' 的 ' + missingRequest + '；本次 result 未写入 state');
+        console.error(requestRecovery);
+        process.exit(1);
+      }
+      console.error('HANDOFF WARN: ' + taskId + ' 的 ' + missingRequest + '（旧 change 渐进，不阻断）');
+      console.error(requestRecovery);
+    }
     // 已撤回 = 终态（撤回通道的闭合半边）：撤回后的 request 不再接受 result——否则被撤回的委托
     // 可被事后「复活」，撤回语义与守卫的放行判据（同一判据）分叉。要重新委托该任务须重新 request
     // （新 request 记录会覆盖该 taskId 的当前态，撤回留痕以「撤回后重新委托」的顺序可审计）。
     if (handoffRequestWithdrawn(handoffReq)) {
       console.error('BLOCKED: 任务 ' + taskId + ' 的委托已撤回（终态）——不再接受 result'
         + '（withdrawnAt=' + handoffReq.withdrawnAt + ', withdrawnBy=' + handoffReq.withdrawnBy + '）'
-        + '；恢复: 若该任务仍需执行，重新发起 workflow-handoff.mjs request ' + taskId
-        + ' <description> 后再回传结果');
+        + '；恢复: 若该任务仍需执行，先照抄下面的命令重新发起委托，再回传结果：');
+      console.error('      ' + requestRecoveryCommand(taskId));
       process.exit(1);
     }
     // m-13：result 重验在默认 handoffResult 之前——新 change 失败路径只落 request.noCommit=false，
@@ -647,11 +874,25 @@ async function main() {
           const violations = committedFiles.filter(f => f !== summaryExact && !reqWriteFiles.some(a => matchWriteFilePattern(f, a)));
           if (violations.length > 0) {
             const currentState = await readState();
+            // 只补事实，不改判定：快照与当前写面分叉时多给一行**可观测事实** + **条件式成因**，
+            // 越界清单与 BLOCK/WARN 分级保持原样。措辞纪律：本判据只能证明两侧不一致，不能证明
+            // 「计划是后来改的」——对真越界，让人去重新 request 会把越界文件写进允许列表，所以
+            // 「回退越界文件」（上一行恢复指引）仍是首选，重新 request 只在成因确实成立时才走。
+            // 出路是**重新发起委托**，命令因此独立成行（与其它「重新发起委托」路径同一装配）：说明行
+            // 只说「这一步是什么」，命令行只放命令——两件事混在一行时整行不可执行。
+            const staleSnapshotHint = (hasRequest && await writeFilesSnapshotStale(state, taskId, reqWriteFiles))
+              ? '诊断: 该任务的委托快照与当前 TASK.md 该任务的写面不一致（快照 = 发起委托时刻记录的 writeFiles）'
+                + '——成因未判定；若计划经 replan 变更过写面，出路是重新发起委托（命令如下）后再记录 result；'
+                + '若无 replan，越界文件仍不在该任务写面内，按上面的「回退越界文件」处理\n'
+                + '      ' + requestRecoveryCommand(taskId)
+              : null;
             if (currentState?.newChange === true) {
               console.error('BLOCKED: 提交文件超出 writeFiles 范围: ' + violations.join(', ') + '——新 change 强制委托边界;恢复: 回退越界文件或扩展 write_files');
+              if (staleSnapshotHint) console.error(staleSnapshotHint);
               process.exit(1);
             }
             console.error('HANDOFF WARN: 提交文件超出 writeFiles 范围: ' + violations.join(', '));
+            if (staleSnapshotHint) console.error(staleSnapshotHint);
           }
         } catch {
           console.error('HANDOFF ERROR: commitHash 无效或 git show 失败: ' + commitHash + '——协调者需确认原因(跨仓库 worktree 提交校验降级属预期,确认后继续)');
@@ -699,10 +940,10 @@ async function main() {
     // 不 BLOCK 不拒绝（避免卡死流程）；commitHash 非法格式维持上方现有 HANDOFF ERROR 行为不变
     if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
       if (!parsed.greenEvidence || typeof parsed.greenEvidence !== 'object' || typeof parsed.greenEvidence.command !== 'string') {
-        console.error('HANDOFF WARN: ' + taskId + ' 缺 greenEvidence（未执行 TDD GREEN？）');
+        console.error('HANDOFF WARN: ' + taskId + ' 缺 greenEvidence（未执行 TDD GREEN？）——evidence 形状: {command, output}（command 与 output 两个字段，至少给 command）');
       }
       if (!parsed.redEvidence || typeof parsed.redEvidence !== 'object' || typeof parsed.redEvidence.command !== 'string') {
-        console.error('HANDOFF WARN: ' + taskId + ' 缺 redEvidence（未执行 TDD RED？）');
+        console.error('HANDOFF WARN: ' + taskId + ' 缺 redEvidence（未执行 TDD RED？）——evidence 形状: {command, output}（command 与 output 两个字段，至少给 command）');
       }
     }
     state.evidence['subagent-execute'].handoffResult[taskId] = {
@@ -710,6 +951,13 @@ async function main() {
     };
     await writeState(state);
     console.log('HANDOFF RESULT: ' + taskId);
+    // 结果已记录 → 追加一行结构预检提示（仅成功路径；失败/拦截路径在上方已 exit，不会走到这里）：
+    // 指向 exit <路由视图节点> --preflight（只跑结构性门禁、不写 state、不推进状态），另起一句说明
+    // 完整 exit（不带 --apply）才是节点收尾的全链预演。节点必须取与 next 的 NODE 同源的**路由视图**：
+    // Fix 归位态下 state.currentNode 正是被 Fix 批次门禁拦下的源节点，取原值等于把执行者引到一条
+    // 必被拦的命令上。提示面不得让已落盘的成功路径失败——视图解析不可用时降级为无命令
+    // 的指引（见 resultPreflightHint）。
+    console.log('PREFLIGHT: SUMMARY 结构尚未校验——' + await resultPreflightHint(state));
     return;
   }
 
@@ -768,8 +1016,9 @@ async function main() {
     if (deliveredResult !== undefined && deliveredResult !== null) {
       console.error('HANDOFF ERROR: 任务 ' + taskId + ' 的委托已收工（handoffResult 在场）——撤回只适用于被遗弃的'
         + ' request（零提交复验失败 / 写边界被拒之后遗弃的在飞 request），已收工的委托无须撤回：其 result 已在册；'
-        + '恢复: 如需更正该任务的结果，走既有通道重新发起 workflow-handoff.mjs request ' + taskId
-        + ' <description> 后回传新的 result（新记录覆盖该任务的当前态，历史记录不删除）');
+        + '恢复: 如需更正该任务的结果，走既有通道重新发起委托（命令如下）后回传新的 result'
+        + '（新记录覆盖该任务的当前态，历史记录不删除）：');
+      console.error('      ' + requestRecoveryCommand(taskId));
       process.exit(1);
     }
     // 新写入路径统一走时间单一权威（本地时间 + 显式偏移）：不在此自行拼接时刻字面。

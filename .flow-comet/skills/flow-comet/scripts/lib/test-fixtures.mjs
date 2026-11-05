@@ -24,6 +24,11 @@ import {
   writeFile,
   makeTmp as sharedMakeTmp,
 } from './test-helpers.mjs';
+import {
+  declarationSkillTargets,
+  guardedDeclarationSkills,
+  nodePromptFiles,
+} from '../protocol-utils.mjs';
 
 // 本模块位于 `<技能包>/scripts/lib/` ⇒ 脚本目录是它的上一级；技能树内所有兄弟脚本路径
 // （GUARD / STATE / HOOK / HANDOFF / 侧命令 / 内置协议副本）一律由它拼接，调用面不再各拼一遍。
@@ -45,14 +50,51 @@ export const REPO_ROOT = path.resolve(SCRIPTS_DIR, '..', '..', '..', '..');
 // 其 .flow-comet/ 只是运行时目录，无 skills/flow-comet/SKILL.md）——与安装器自身判定同判据
 // （prepare-env.mjs 的 gitignore 纳管跳过分支）。
 export const AUTHORITATIVE_SOURCE_ANCHOR = path.join(REPO_ROOT, '.flow-comet', 'skills', 'flow-comet', 'SKILL.md');
-export function isAuthoritativeSourceRepo() {
-  return fs.existsSync(AUTHORITATIVE_SOURCE_ANCHOR);
-}
 // 权威源仓库脚本位于仓库根 scripts/prepare-env.mjs；安装副本无此脚本,场景跳过
 export const PREPARE_ENV = path.join(REPO_ROOT, 'scripts', 'prepare-env.mjs');
 // 内置协议源文件（packageRoot/reference/）：场景复制到 <tmpdir>/reference/ 内（protected-path 要求 runRoot 内）
 export const BUILTIN_PROTOCOL_SOURCE = path.join(SCRIPTS_DIR, '..', 'reference', 'workflow-protocol.json');
 export const CHANGE_ID = 'ch';
+
+// 节点声明标记夹具（唯一构造处）：按协议派生「该节点该声明哪些技能」「该节点该读哪些协议文件」，
+// 为每个必需技能写一条 `<node>-<skill>.json` 标记——每条的 protocols 都覆盖该节点**全部**协议文件，
+// 等价于一次带多个 `--prompt` 的真实 skill-load（真实流程里协调者声明、record 自动补写，夹具直接
+// 写 state 时这两步都不发生，必须由夹具补上同一份事实）。
+//
+// 与被测判据同源（protocol-utils 的 declarationSkillTargets / guardedDeclarationSkills / nodePromptFiles），
+// 不手抄清单：协议面演进时夹具跟着变，不会退化成「夹具写死一份旧清单」。
+//
+// 适用边界（契约，负例不得走这里）：
+//   · 只写**本节点**的必需标记：其它节点的标记不写——「跨节点标记不算数」仍由显式负例判；
+//   · 条件绑定的技能（design 的 flow-comet-ui-design）默认不写（非前端 change 本就不要求声明它）；
+//     前端夹具传 `frontend: true`，与其它 guarded 技能同权；
+//   · 不写多余标记：不进额外技能、不写额外协议文件清单——「多声明也不顶替缺项」仍由显式负例判；
+//   · 声明门自身的负例（目录整体缺席 / 缺某个技能 / 旧单值标记）一律显式删目录或显式写标记，
+//     不走本 helper——否则负例被 helper 补齐后就测不到那道门了。
+export function writeNodeDeclarationMarkers(dir, nodeId, { changeId = CHANGE_ID, frontend = false, skills = null } = {}) {
+  const protocol = JSON.parse(fs.readFileSync(SKILL_PROTOCOL_FILE, 'utf8'));
+  const node = (protocol.nodes ?? []).find((item) => item && item.id === nodeId);
+  if (node === undefined) throw new Error('夹具构造失败：协议里没有节点 ' + nodeId);
+  // 目标集与出口覆盖门的取用面同源：`declarationSkillTargets` = guarded 必需技能（条件绑定不在
+  // 同步面展开），一个都不剩时退到该节点的实现技能——subagent-execute 这类「技能全划给子代理」
+  // 的节点，出口仍要求声明 4-dev.md，声明就挂在实现技能名下（与恢复段打印的命令同一个技能名）。
+  // 前端夹具（design 的 ui-design 判据成立）把条件绑定的技能一并声明。
+  const targets = skills ?? (frontend
+    ? guardedDeclarationSkills(node)
+    : declarationSkillTargets(node));
+  const files = nodePromptFiles(node);
+  for (const skill of targets) {
+    writeFile(dir, '.specs/' + changeId + '/.skill-loads/' + nodeId + '-' + skill + '.json',
+      JSON.stringify({
+        node: nodeId,
+        skill,
+        protocol: files[0] ?? null,
+        protocols: files,
+        at: '2026-08-01T00:00:00.000Z',
+      }, null, 2) + '\n');
+  }
+  return targets;
+}
 
 // 组件技能树布局感知（单一来源）：本 suite 恒位于 <skillsRoot>/flow-comet/scripts/，
 // 组件技能（flow-comet-execute / flow-comet-review / flow-comet-verify 等）是 <skillsRoot>
@@ -129,7 +171,8 @@ export function runPrepareEnv(args, root, envOverrides = {}) {
 }
 
 // 跑 workflow-state.mjs 的 bridge-check 只读子命令（T05 实现——六判定态健康/文件缺失/
-// 未挂载/版本偏斜/重复注册/不适用）。runRoot = cwd = 项目根；协议副本须在 runRoot 内
+// 未挂载/版本偏斜/重复注册/不适用）。运行根由唯一解析模块（run-root.mjs）给定：
+// FLOW_COMET_RUN_ROOT 优先（夹具把该变量与 cwd 一并设为 root）；协议副本须在 runRoot 内
 // （protected-path）——指向运行器已复制到 <root>/reference/ 的内置协议副本
 // （FLOW_COMET_PROTOCOL env 优先级高于默认，见 protocol-utils resolveProtocol）。
 export function runBridgeCheck(root, dshHome) {
@@ -668,9 +711,13 @@ export const CROSS_TASK_FIX_SECTION_PAIR =
 
 // 波次分组场景公共路径：注入 TASK.md → entry plan（记录 enteredNodes，新 change 强制先 entry；
 // 旧 change 亦先 entry 避免 ENTER WARN 干扰断言）→ exit plan。返回 exit plan 结果。
+// 新 change 的声明标记在这里补齐：真实流程里协调者 entry 时会 skill-load、record 会补写标记，
+// 夹具直接写 state 时这两步都不发生——不补就会被「缺协议声明标记」先拦下，被测的波次判据根本
+// 轮不到说话。声明门自身的负例不走本入口（它们直接 runGuard，且显式删目录/缺标记）。
 export function runPlanExit(dir, taskContent) {
   writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n## 任务清单\n\n' + taskContent);
   assertExit(runGuard(['entry', 'plan'], dir), 0);
+  writeNodeDeclarationMarkers(dir, 'plan');
   return runGuard(['exit', 'plan'], dir);
 }
 
@@ -753,8 +800,8 @@ export function writeMigratedProjectArtifacts(proj, changeId = MIGRATION_CHANGE)
   writeFile(proj, '.specs/' + changeId + '/REQUIREMENT.md', '# REQUIREMENT\n\n- **Change ID**: ' + changeId + '\n\n## 用户故事（User Story）\n\nx\n\n## 验收准则（AC）\n\n- y\n');
 }
 
-// 跑安装副本内的脚本（cwd = 目标项目根——runRoot = process.cwd()）：迁移后链路在
-// 真实安装形态（而非权威源脚本）上验证
+// 跑安装副本内的脚本（cwd = 目标项目根，FLOW_COMET_RUN_ROOT 设为同一个根）：运行根由唯一
+// 解析模块（run-root.mjs）给定（变量优先）——迁移后链路在真实安装形态（而非权威源脚本）上验证
 export function runInstalled(proj, platformRoot, scriptName, args) {
   const script = path.join(proj, platformRoot, 'skills', 'flow-comet', 'scripts', scriptName);
   const res = spawnSync(process.execPath, [script, ...args], {
@@ -938,9 +985,12 @@ export function engineConsumersOf(name, scriptsDir = SCRIPTS_DIR) {
 
 // 从具名 import 列表里摘掉一个名字（反向构造用；名前 / 名后 / 唯一项三种位置都覆盖）：
 // 摘掉后消费方仍引用该符号 ⇒ 「未从单源取用」必报。位置感知是必须的——只处理「名字后带逗号」
-// 的写法在名字位于列表末位时会静默不改，探针遂退化为恒绿（无判别力）。
+// 的写法在名字位于列表末位时会静默不改；只剩一个名字的列表（`import { NAME } from …`）更没有逗号可
+// 依，整句不动。两种形态下探针都退化为恒绿 / 报「前提失效」，锁的判别力无从证明（L-151）。
 export function dropNamedImport(text, name) {
   return String(text)
+    // 唯一项：列表里只有这一个名字（单行 / 多行同形；摘完保留 `import {}` 这层语句结构，变异只动名字）。
+    .replace(new RegExp('(import\\s*\\{)\\s*\\b' + name + '\\b\\s*(\\})'), '$1$2')
     .replace(new RegExp('(import\\s*\\{[^}]*?)\\b' + name + '\\b\\s*,\\s*'), '$1')
     .replace(new RegExp('(import\\s*\\{[^}]*?)\\s*,\\s*\\b' + name + '\\b'), '$1');
 }

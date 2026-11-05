@@ -5,10 +5,16 @@
 import { execFileSync } from 'child_process';
 import { promises as fs } from 'fs';
 import path from 'path';
-import { route, resolveNextNode, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, isSingleSegmentChangeName, EXECUTE_FAMILY_NODE_IDS } from '../route-node.mjs';
+import { fileURLToPath } from 'url';
+import { route, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackDecision, resolveFixRollbackState, applyFixRollbackRound, resolveFixReturnNode, isSingleSegmentChangeName, EXECUTE_FAMILY_NODE_IDS } from '../route-node.mjs';
 import { taskOpeningAttrs, taskBlocks } from '../task-parsing.mjs';
-import { NODE_PROTOCOL_FILES, SKILL_PROTOCOL_FILES, inspectWorkflowPathSegments } from '../protocol-utils.mjs';
-import { looksLikeObjectLiteral, toPersistedProtocolPath, writeJsonAtomic } from '../state-schema.mjs';
+import {
+  NODE_PROTOCOL_FILES,
+  SKILL_PROTOCOL_FILES,
+  declarationSkillTargets,
+  inspectWorkflowPathSegments,
+} from '../protocol-utils.mjs';
+import { evidencePayloadProblems, looksLikeObjectLiteral, toPersistedProtocolPath, writeJsonAtomic } from '../state-schema.mjs';
 import { nowTimestamp } from '../time-utils.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide } from '../context-init.mjs';
 import { fileExists, findActiveChange, readState, writeState, specsDir, runRootDir, hasExactSpecsEntry } from './state-io.mjs';
@@ -17,6 +23,18 @@ import { determineNode, normalAdvanceExempt } from './state-determine.mjs';
 import { isInsideWorkTree, gitBranchName, branchExists, printBranchLine } from './state-branch.mjs';
 import { printEvolveDueHint } from './state-evolve-hint.mjs';
 import { reportIntelScanDrift } from './state-intelscan.mjs';
+// 命令文本的唯一实现（平台化脚本根 + 整条路径加引号）：运行期 PREFLIGHT 与 handoff result /
+// guard 恢复指引 / explain 的 COMMAND 行同源（L-067：同一推导两处表达必然分叉）。声明命令与守卫族
+// 同一装配（declarationCommands）+ 本族的运行上下文（commandContext）——不再各拼一份文本。
+import { commandContext, declarationCommands, scriptCommand } from './state-explain.mjs';
+// 协调者提示的单一来源：entry（门禁族）与 next / record（本模块）共用同一常量，各输出面逐字
+// 一致。常量落在中立模块（state-explain）而不是门禁族——本模块只为一句措辞去依赖整个上游门禁面
+// 是一条反向边——为此状态命令族不再 import 门禁族。
+import { COORDINATOR_NOTICE } from './state-explain.mjs';
+
+// 本模块位于 <技能包>/scripts/lib：脚本目录由自身位置推导一次（与 guard-evidence-gates 同形态）。
+// 「自己在哪」是本模块可提供的事实，平台化与引号形态本身留在 state-explain。
+const scriptsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // --json-file 路径校验:解析后必须位于项目根内(拒绝相对/绝对形式的越界路径,
 // 如 ../..、其他盘符——防读取任意文件内容进 evidence)。runRoot 内的绝对路径合法
@@ -70,10 +88,301 @@ function printNext(protocol, nodeId, executionMode = 'subagent') {
     if (executionMode === 'direct' && nodeId === 'execute') {
       console.log('EXECUTION-MODE: direct（主代理直接执行串行任务，必须加载 flow-comet-dev 完整协议；parallel 任务仍由 subagent-execute 委托）');
     } else {
-      console.log('COORDINATOR: 你是协调者，不是执行者。禁止在主会话直接修改源码；只能通过 Agent 工具 worktree isolation 委托子代理；子代理回传后仅更新 TASK.md / SUMMARY / handoff evidence。');
+      // 现行架构口径（ADR-014 / 并行委派四属性契约）：委托按**平台的身份通道**判定，不是按
+      // 建树方式；独立 worktree 只是「① 写权限」的一种实现，共享工作区同样受支持（边界来自
+      // 互不重叠的任务写集、提交时点纪律与最小保护集）。文案取 guard-gates 的单一常量——
+      // entry 与 next 逐字相同；旧句「只能通过 Agent 工具 worktree isolation 委托子代理」不得
+      // 在任何一处复活。
+      console.log('COORDINATOR: ' + COORDINATOR_NOTICE);
       console.log('EXECUTION-MODE: ' + (executionMode === 'direct' ? 'direct' : 'subagent'));
     }
   }
+}
+
+// ---------- 节点视图（单一实现）：state 原值 / 产物推导 / 进行中保护 → 路由视图 ----------
+// 「我现在该在哪个节点」只有这一份判定（同一事实两处实现必然分叉——LESSONS 的路由单一权威族）。
+// 收敛前 next 内联一份、status 只报产物推导：同一 state 下两条命令报不同节点，执行者按任一输出
+// 行动都可能撞上节点顺序门禁。收敛后三视图各归其位：
+//   derivedNode = 产物推导（既有键 currentNode 的语义，逐字不变）；
+//   stateNode   = state.currentNode 原值（既有键 stateCurrentNode 的语义，逐字不变）；
+//   routeNode   = 经「进行中保护」/「Fix 受控归位」后的路由视图（next 的 NODE 行的唯一来源）。
+// 纯判定：只读 state 与产物，不写 state、不打印（展示由各命令渲染）。
+// 消费方：status / next（本模块）与 workflow-handoff 的 result 提示（import 本函数，不复制第二份
+// 判定——Fix 归位态若在 handoff 侧另取 state.currentNode，会指到被 Fix 批次门禁拦下的源节点）。
+//
+// routeNode 为 null 是**合法取值**：此态 next 会 BLOCKED 且不打印 NODE（节点顺序门禁 / Fix 归位第 4
+// 轮无授权 / 单趟零进展），视图不得编一个节点出来——编出来的那个就是「status 叫人去一个 next 不会去
+// 的地方」。
+
+// ---------- 「此态 next 会 BLOCKED」的只读判定（status 用） ----------
+// next 有三条**不打印 NODE**、直接 BLOCKED 的分支：① Fix 受控归位第 4 轮无授权；② 节点顺序门禁
+// （「疑似未 exit」）；③ 单趟零进展。只读视图若照常给节点，同一 state 下两条命令就是两个答案（执行者
+// 按 status 动手必然撞 BLOCKED），故三个判定都在视图里求值、由 resolveNodeView 回报，next 消费同一
+// 字段而不另判一份。
+// BLOCKED 报文 → 单行原因（ROUTE: 行只放一句原因，完整报文与恢复指引仍由 next 打印）。
+function blockedReason(message) {
+  return String(message ?? '').split('\n')[0].replace(/^BLOCKED:\s*/, '');
+}
+
+// 单趟零进展防呆（三重防呆决策之二·状态机侧）：路由落在 execute/subagent-execute，但既无可委托的
+// 并行任务（依赖已满足集合为空）又无串行 pending，且 TASK 尚未全 done——剩余 pending 全部是依赖
+// 无法满足的孤儿并行任务（数据异常：depends_on 引用不存在的任务 id 或执行期出现依赖环）。命中即
+// 返回 BLOCKED 报文（判定行 + 恢复指引行），否则 null。协议无 subagent-execute 节点时不适用
+// （parallel 任务由 execute 直接消化，无孤儿语义）。依赖环的常规拦截点在 plan 出口（guard 前置），
+// 此处兜底执行期数据异常（如手改 TASK 绕过签名校验的极端态）。
+async function resolveZeroProgressBlock({ changeName, protocol, nodeId }) {
+  if (!EXECUTE_FAMILY_NODE_IDS.has(nodeId)) return null;
+  if (!hasSubagentNode(protocol)) return null;
+  try {
+    const zpBlocks = taskBlocks(await fs.readFile(protocolTaskFilePath(protocol, changeName, specsDir()), 'utf8'));
+    const zpAttrs = zpBlocks.map(taskOpeningAttrs).filter(Boolean);
+    const zpPending = zpAttrs.filter((a) => a.status === 'pending');
+    if (zpPending.length === 0) return null;
+    const zpDoneIds = new Set(zpAttrs.filter((a) => a.status === 'done' && a.id).map((a) => a.id));
+    const zpEligible = zpBlocks.filter((block) => {
+      const a = taskOpeningAttrs(block);
+      if (!a || !a.parallel || a.status !== 'pending') return false;
+      const depsMatch = block.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
+      if (!depsMatch || !depsMatch[1].trim()) return true;
+      return depsMatch[1].trim().split(/[,\s]+/).filter(Boolean).every((d) => zpDoneIds.has(d));
+    });
+    const zpSerial = zpPending.filter((a) => !a.parallel);
+    if (zpEligible.length === 0 && zpSerial.length === 0) {
+      return [
+        'BLOCKED: 路由零进展——既无可委托的并行任务（依赖已满足集合为空）也无串行 pending，但 TASK 尚有 ' + zpPending.length + ' 个未完成任务',
+        '疑似孤儿并行任务依赖无法满足（检查 depends_on）：' + zpPending.map((a) => a.id).join(', ') + '——修正 depends_on 为真实存在且无环的任务 id 后重试；执行期出现此异常请核对 TASK.md 是否被手改',
+      ].join('\n');
+    }
+  } catch {}
+  return null;
+}
+
+// 节点顺序门禁（严格模式）→ BLOCKED 报文；判定与 next 的反例语义逐字不变（本函数自 next 内联判定
+// 原样搬入，搬的是**同一份**判据与报文，不是第二份）：
+// state.currentNode 非 null、不在 completedNodes、且 evidence 无该节点记录 → 上一节点从未 exit 就
+// 推进。状态漂移校正保留：已完成节点（currentNode ∈ completedNodes，或 evidence 已记录——节点已被
+// record/exit 处理过）正常推进不受影响；本判定只拦「证据完全缺失的疑似跳阶段」。
+// 豁免两条（独立判断，任一成立即放行）：① 回退豁免（TASK.md 有 pending 回退修复任务 → execute 家族，
+// 与 FIX-BATCH 决策同一谓词）；② 正常推进豁免（exit --apply 推进后的下一节点，见 normalAdvanceExempt）
+// ——真乱序（跳节点）仍严格 BLOCK。
+// 归属：next 曾内联这一份，而 status 照常给节点——同一 state 下「status 叫人 exit 一个 next 根本不会
+// 打印的节点」。搬进共享视图后 next 只消费 view.blocked，两份判定不再可能分叉。
+async function resolveNodeOrderBlock({ changeName, protocol, completedArr, state }) {
+  if (!state.currentNode || completedArr.includes(state.currentNode)) return null;
+  const nodeEvidence = state.evidence && typeof state.evidence === 'object'
+    ? state.evidence[state.currentNode]
+    : null;
+  if (nodeEvidence && typeof nodeEvidence === 'object' && !Array.isArray(nodeEvidence)) return null;
+  const rollbackExempt = await resolveFixRollbackState({
+    runRoot: runRootDir(), changeName, protocol, completedNodes: completedArr, currentNode: state.currentNode,
+    history: state.history,
+  });
+  const advanceExempt = await normalAdvanceExempt(state, protocol, completedArr, state.currentNode, changeName);
+  if (rollbackExempt || advanceExempt) return null;
+  return [
+    'BLOCKED: 疑似未 exit 节点 ' + state.currentNode + '，先 workflow-guard.mjs exit ' + state.currentNode + ' --apply',
+    '恢复: 确认当前节点实际已完成 → 用 exit <节点> --apply 正常推进；节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进）或 select（切换 change）；禁止手改 state 机器字段',
+  ].join('\n');
+}
+
+// 回程态判定（与 next 的 RETURN 分支同一谓词）：resolveFixReturnNode 给出回程源节点、它就是
+// state.currentNode，且产物推导确实把路由推到了它**之后**（跳过）⇒ next 保留源节点跑出口，路由视图
+// 也只能是源节点。artifactNext 落在源节点之前（如 execute 产物缺失时回退）不是合法回程态——
+// 回落既有门禁，不越界放宽。
+async function resolveFixReturnTarget({ changeName, protocol, completedArr, state, derivedNode, currentNodeIdx, derivedIdx }) {
+  if (!state.activeChange) return null;
+  const sourceNode = await resolveFixReturnNode({
+    runRoot: runRootDir(), changeName, protocol, completedNodes: completedArr,
+  });
+  if (sourceNode === null || sourceNode !== state.currentNode) return null;
+  if (derivedNode === state.currentNode) return null;
+  if (currentNodeIdx < 0 || derivedIdx <= currentNodeIdx) return null;
+  return sourceNode;
+}
+
+export async function resolveNodeView({ changeName, protocol, state }) {
+  const completedArr = Array.isArray(state.completedNodes) ? state.completedNodes : [];
+  const derivedNode = await determineNode(changeName, protocol, completedArr);
+  // 进行中节点保护：currentNode 未 exit（不在 completedNodes）且已 entry（enteredNodes 含该节点）
+  // 或已 record（evidence 记录过）→ 视为进行中（可能 exit 被内容级拦截后重跑），不校正推走——
+  // 否则被拦截节点的 exit 前置校验（currentNode 匹配）无法重跑，advance/select 均不恢复 → 死结
+  // （实测教训）。旧 state 无 enteredNodes 时回退 evidence 判定（既有语义不回归）。
+  const currentNodeEvidence = state.currentNode && state.evidence && typeof state.evidence === 'object'
+    ? state.evidence[state.currentNode]
+    : null;
+  const currentNodeEntered = !!(
+    state.enteredNodes && Array.isArray(state.enteredNodes) && state.enteredNodes.includes(state.currentNode)
+  );
+  const routeIds = route(protocol).map((n) => n.id);
+  const currentNodeIdx = state.currentNode ? routeIds.indexOf(state.currentNode) : -1;
+  // 推导为 currentNode 的**路由后继**（与 guard 出口同源：把 currentNode 视为已完成再加入
+  // completedNodes 求 resolveNextNode）→ 该节点产物已齐待 exit、路由自然推进到 derivedNode
+  // （平行转换 plan→subagent-execute、趟间回流 subagent-execute→execute 均属此形态）→ 保护。
+  // 反过度修复锚（同族：产物全齐但无推进史形态）：completedNodes 为空（无任何 exit 推进史，
+  // currentNode 仅是初始陈旧节点）时不做路由后继保护——产物推导继续生效推进到最终节点。
+  // 推导跳跃/跨节点或回退 → 产物权威校正(漂移,防过度修复)。静态直接后继兜底（串行推进原语义）。
+  const routingSuccessorOfCurrent = state.currentNode
+    ? await determineNode(changeName, protocol, [...completedArr, state.currentNode])
+    : null;
+  // 「相等」还不是后继：等号只在两处推导同值时成立，派生的节点仍可能在 currentNode **之前**
+  // （currentNode 之后的节点产物缺失 → 派生回退；或 Fix 归位把任务推回 execute）——此时按等号
+  // 保护会把路由钉在 currentNode、吞掉产物权威校正（实测：verify 驻留 + REVIEW.md 缺失仍报
+  // verify）。故补协议 route 顺序条件：derived 的下标必须严格大于 currentNode 的下标。
+  // 两个例外都维持既有语义：① execute 家族之内——execute ⇄ subagent-execute 是同一个多趟
+  // **循环**，route 里的一前一后不是先后关系（趟间回边本就是文档化转换）；波次收齐后只剩串行
+  // pending 时若按序号判「之前」，next 会把 currentNode 推回 execute，波次出口再也无法重跑
+  // （L-060 型死结）。② currentNode 不在协议 route 内（无先后可比）。
+  const derivedIdx = routeIds.indexOf(derivedNode);
+  const insideExecuteFamily = EXECUTE_FAMILY_NODE_IDS.has(derivedNode)
+    && EXECUTE_FAMILY_NODE_IDS.has(state.currentNode);
+  const derivedIsAfterCurrent = currentNodeIdx < 0
+    || insideExecuteFamily
+    || (derivedIdx >= 0 && derivedIdx > currentNodeIdx);
+  const routingSuccessorProtects = !!(completedArr.length > 0
+    && routingSuccessorOfCurrent !== null
+    && routingSuccessorOfCurrent === derivedNode
+    && derivedIsAfterCurrent);
+  const derivedIsDirectSuccessor = currentNodeIdx >= 0
+    && currentNodeIdx + 1 < routeIds.length
+    && routeIds[currentNodeIdx + 1] === derivedNode;
+  const derivedIsSuccessor = routingSuccessorProtects || derivedIsDirectSuccessor;
+  const inProgress = !!(
+    state.currentNode
+    && !completedArr.includes(state.currentNode)
+    && (currentNodeEntered
+      || (currentNodeEvidence && typeof currentNodeEvidence === 'object' && !Array.isArray(currentNodeEvidence)))
+    && derivedIsSuccessor
+  );
+  // Fix 受控归位（同一事实同一说法）：next 的 FIX-BATCH 分支在共享视图之前返回并打印归位目标，
+  // status 只走共享视图 ⇒ 同一 state 下两条命令报不同节点，且 status 会叫人 exit 一个正在被
+  // Fix 批次门禁拦下的源节点（C1）。此处只读消费同一决策（纯读：不写盘、不计轮次），命中即把
+  // 归位目标作为路由视图——它是 next 的 NODE 行会打印的节点。
+  const fixRollback = await resolveFixRollbackDecision({
+    runRoot: runRootDir(),
+    changeName,
+    protocol,
+    completedNodes: completedArr,
+    currentNode: state.currentNode,
+    history: state.history,
+  });
+  const fixRollbackTarget = fixRollback === null ? null : fixRollback.target;
+  // 归位**只读预演**：next 在归位分支命中后会调 applyFixRollbackRound（唯一写点）计数，第 4 轮
+  // 无授权时在任何写盘之前 BLOCK——status 若照常给节点，给的就是 next 根本不会打印的那个答案。
+  // 预演在 state 的**副本**上跑同一 helper：阈值/授权/渐进放行的判据与 next 逐字同源（不是第二份
+  // 实现），而真 state 的字段（含 fixRoundsByChange）不可能被改动，也不写盘（字节零改写）。
+  const fixRollbackPreview = fixRollback === null
+    ? null
+    : applyFixRollbackRound({
+      state: structuredClone(state),
+      sourceNode: state.currentNode,
+      decision: fixRollback,
+    });
+  // 三个 blocked 来源按 next 的分支顺序求值（同一先后，不是另一套优先级）：
+  //   ① Fix 受控归位第 4 轮无授权（next 的 FIX-BATCH 分支最先 BLOCK）；
+  //   ② 节点顺序门禁（next 的「疑似未 exit」）；
+  //   ③ 单趟零进展。
+  // 回程（fixReturnTarget）夹在 ② 之前：回程态下「源节点未出口」正是回程语义本身，顺序门禁不得推翻
+  // next 的回程分支（next 的回程分支先于顺序门禁返回）；顺序门禁又先于零进展（零进展是路由落到
+  // execute 家族后的形态，执行者先要处理当前节点）。零进展成立时不再求回程——与 next 的既有先后一致
+  // （零进展态下回程分支不会被走到）。
+  const fixRoundBlockedMessage = fixRollbackPreview?.blocked ? fixRollbackPreview.blockedMessage : null;
+  const zeroProgressMessage = fixRoundBlockedMessage === null
+    ? await resolveZeroProgressBlock({ changeName, protocol, nodeId: derivedNode })
+    : null;
+  const fixReturnTarget = fixRoundBlockedMessage === null && zeroProgressMessage === null
+    ? await resolveFixReturnTarget({
+      changeName, protocol, completedArr, state, derivedNode, currentNodeIdx, derivedIdx,
+    })
+    : null;
+  const orderBlockedMessage = fixRoundBlockedMessage === null && fixReturnTarget === null
+    ? await resolveNodeOrderBlock({ changeName, protocol, completedArr, state })
+    : null;
+  const blockedMessage = fixRoundBlockedMessage ?? orderBlockedMessage ?? zeroProgressMessage;
+  const blocked = blockedMessage === null
+    ? null
+    : { message: blockedMessage, reason: blockedReason(blockedMessage) };
+  return {
+    derivedNode,
+    stateNode: state.currentNode ?? null,
+    // 优先级与 next 的分支顺序一致：BLOCKED（不打印节点）→ Fix 归位 → 回程 → 进行中保护 → 产物推导。
+    // Fix 归位优先于进行中保护：保护输出的是源节点，而归位态下源节点的动作（exit）会被拦下。
+    routeNode: blocked !== null
+      ? null
+      : (fixRollbackTarget ?? fixReturnTarget ?? (inProgress ? state.currentNode : derivedNode)),
+    inProgress,
+    fixRollbackTarget,
+    fixReturnTarget,
+    blocked,
+  };
+}
+
+// 人读诊断（status）：JSON 块之后的一行三视图对账——derived = 产物推导、state = state 原值、
+// route = 路由视图（= next 的 NODE）；尾部原因与 printWhyLine 的分支一一对应（同一停留原因在四个
+// 输出面上说同一句话）：Fix 归位态点名「先按 next 的 FIX-BATCH 归位」——此时源节点的 exit 会被 Fix
+// 批次门禁拦下，指引不得指向它；回程态说明「产物在场且未出口、保留源节点跑出口」——否则两列并排
+// 却不给原因，读起来就是「产物推导指向源节点」；进行中点名「先 exit 该节点」。
+// 前缀严格为 `ROUTE: `。
+// BLOCKED 态（route=null）与 next 的实际行为一致：next 此刻不打印 NODE 而是直接 BLOCKED，ROUTE: 行
+// 因此明确写「next 将 BLOCKED：<原因>」并把人推回恢复指引，而不是编一个节点让人去跑。
+function formatRouteLine(view) {
+  const head = 'derived=' + (view.derivedNode ?? 'null') + '（产物推导）'
+    + ' state=' + (view.stateNode ?? 'null') + '（state 原值）';
+  if (view.blocked !== null) {
+    return head + ' route=null（路由视图）；next 将 BLOCKED：' + view.blocked.reason + '（先按恢复指引处理）';
+  }
+  const tail = view.fixRollbackTarget
+    ? '；Fix 批次：先按 next 的 FIX-BATCH 归位 ' + view.fixRollbackTarget + ' 并跑完其出口'
+    : (view.fixReturnTarget
+      ? '；回程：产物在场且未出口——保留源节点 ' + view.routeNode + ' 跑出口'
+      : (view.inProgress
+        ? '；进行中：' + view.stateNode + ' 已 entry 未 exit——先 exit ' + view.stateNode + ' 再推进'
+        : ''));
+  return head + ' route=' + (view.routeNode ?? 'null') + '（路由视图）' + tail;
+}
+
+// 人读诊断（next）：为什么停在这个节点。四种停留原因在同一实现里各有一段文案：
+//   · Fix 受控归位——归位目标待跑出口（源节点此时 exit 会被 Fix 批次门禁拦下，指引不得指向 exit）；
+//   · 回程——产物已在场把路由推后，但源节点未出口（保留源节点跑出口，不是「产物推导指向源节点」）；
+//   · 进行中——已 entry 未 exit（保护生效），动作是 exit 本节点；
+//   · 其余——产物推导。
+// 共享节点视图路径、Fix 归位分支与回程分支都经本函数：同源不只在 NODE 行，解释行也是同一段文案。
+function printWhyLine(view) {
+  if (view.routeNode === null) return;
+  let reason;
+  if (view.fixRollbackTarget) {
+    reason = 'Fix 批次归位 ' + view.fixRollbackTarget
+      + (view.stateNode ? '（源节点 ' + view.stateNode + '）' : '')
+      + '——先跑 ' + view.fixRollbackTarget + ' 四类出口，再回源节点 exit';
+  } else if (view.fixReturnTarget) {
+    // 回程态：节点停在源节点不是产物推导的结果（产物已把它推后），解释必须说清「为什么保留源节点」——
+    // 否则 WHY: 行会把它读成「产物推导指向源节点（无进行中节点）」这类错因。
+    reason = '回程源节点 ' + view.routeNode + '：产物在场且未出口，保留源节点跑出口';
+  } else if (view.inProgress) {
+    reason = '停在 ' + view.routeNode + '——已 entry 未 exit（进行中保护），先 exit ' + view.routeNode + ' 再推进';
+  } else {
+    reason = '产物推导指向 ' + view.routeNode + '（无进行中节点）';
+  }
+  console.log('WHY: ' + reason);
+}
+
+// 结构预检提示的命令段（单一实现，两个运行期输出面共用：next 与 handoff result）：--preflight 只跑
+// 结构性门禁（不写 state、不写提示账本、不推进状态），它**不是**节点收尾的预演——完整 exit（不带
+// --apply）才是全链预演。两句必须同行，否则同一个 PREFLIGHT 会被读成两条命令。节点由
+// 调用方按**路由视图**传入（与 NODE 行同源），不得取 state 原值：Fix 归位态下源节点的 exit 会被
+// Fix 批次门禁拦下。
+export function structuralPreflightHint(nodeId) {
+  // 命令文本与 handoff result 的 PREFLIGHT 走同一实现（scriptCommand）：平台化脚本根 + 整条
+  // 路径加引号——裸脚本名在 codex / dsh 单平台安装上照抄会落空（pathReplacements 只处理 .md）。
+  return '可运行 ' + scriptCommand({
+    scriptsDir, runRoot: runRootDir(), script: 'workflow-guard.mjs', args: ['exit', nodeId, '--preflight'],
+  }) + ' 做结构预检（只跑结构性门禁，不写 state、不推进状态）；完整 exit（不带 --apply）是节点收尾的全链预演';
+}
+
+// 预检提示（next）：只在 execute / subagent-execute 路由上打印——让每任务的模板结构反馈前移到
+// 任务收尾，而不是攒到节点出口。贴什么命令、两句如何分工见 structuralPreflightHint（单一实现）。
+function printPreflightLine(nodeId) {
+  if (!nodeId || !EXECUTE_FAMILY_NODE_IDS.has(nodeId)) return;
+  console.log('PREFLIGHT: ' + structuralPreflightHint(nodeId));
 }
 
 // init <change-id> [--branch-prefix <prefix>] [--init-context|--init-skip]
@@ -160,7 +469,9 @@ export async function runInit(protocol, argv, protocolPath) {
   if (prevState?.activeChange === changeName || specsDirExists) {
     console.error('WARN: change ' + changeName + ' 已存在——重跑 init 将重置节点状态（completedNodes/evidence 清空）。若需继续已有 change，请用 advance/select 而非重跑 init。');
   }
-  // E1: branchMode 自动判定——git 仓库（cwd=runRoot）→ true；非 git 仓库 → false
+  // E1: branchMode 自动判定——git 仓库 → true；非 git 仓库 → false。git 命令一律以运行根为 cwd
+  //（state-branch 族统一取 runRootDir）——分支判定/创建与状态落点因此跟同一个根，不会一个走 cwd、
+  // 一个走变量根。
   const branchMode = isInsideWorkTree();
   const state = {
     activeChange: changeName,
@@ -254,7 +565,10 @@ export async function runStatus(protocol) {
     return;
   }
   const state = await readState();
-  const detectedNode = await determineNode(changeName, protocol, state.completedNodes);
+  // 节点视图（与 next 共用同一判定）：currentNode 仍取产物推导（既有键语义逐字不变），
+  // routeNode 才是经「进行中保护」后的路由视图（= next 的 NODE 行）。
+  const nodeView = await resolveNodeView({ changeName, protocol, state });
+  const detectedNode = nodeView.derivedNode;
   // 派生视图（ADR-013 决策 11；改为事件为准）：被强制推进的节点以
   // state.history 中本 change 的 advance-forced 事件为唯一判据——按 change 过滤（兼容旧事件
   // 无 change 字段），取 e.node 集合后与 completedNodes 求交。旧「completedNodes 含而 evidence
@@ -286,6 +600,8 @@ export async function runStatus(protocol) {
     change: changeName,
     currentNode: detectedNode,
     stateCurrentNode: state.currentNode,
+    // 增量字段：next 会打印的路由视图（进行中保护后的节点）；不写 state、既有键语义不变
+    routeNode: nodeView.routeNode,
     completedNodes: state.completedNodes,
     forcedNodes,
     executionMode: state.executionMode ?? 'subagent',
@@ -293,10 +609,14 @@ export async function runStatus(protocol) {
     branchMode: isInsideWorkTree(),
     enablePrReview: state.enablePrReview ?? false,
     artifactRoot: '.specs/' + changeName,
-    coordinatorMode: EXECUTE_FAMILY_NODE_IDS.has(detectedNode),
+    // 与 routeNode 同一判定（One predicate）：本键回答「协调者模式是否生效」，必须指向路由视图
+    // 那个节点——若另取产物推导，进行中态会在同一响应里给出两个「当前节点」口径（routeNode=
+    // execute 而 coordinatorMode=false）。既有键名/类型/位置不变，只换判定来源。
+    coordinatorMode: EXECUTE_FAMILY_NODE_IDS.has(nodeView.routeNode),
     // 新旧 change 标记——newChange true = 新 change(严格模式);false/缺失 = 旧 change(渐进)
     newChange: state.newChange === true
   }, null, 2));
+  console.log('ROUTE: ' + formatRouteLine(nodeView));
   printBranchLine(changeName, state.branchPrefix ?? 'change/');
   await printEvolveDueHint(state);
   return;
@@ -334,6 +654,14 @@ export async function runNext(protocol) {
     await writeState(state);
     console.log('FIX-BATCH: 归位 ' + fixRollbackDecision.target + '（源节点 ' + sourceNode + '）' + rollbackRound.auditSuffix);
     printNext(protocol, fixRollbackDecision.target, state.executionMode ?? 'subagent');
+    // 解释行与共享视图同一实现（printWhyLine）：status 的 routeNode 与这行点名的节点是同一事实。
+    printWhyLine({
+      routeNode: fixRollbackDecision.target,
+      stateNode: sourceNode,
+      inProgress: false,
+      fixRollbackTarget: fixRollbackDecision.target,
+    });
+    printPreflightLine(fixRollbackDecision.target);
     printBranchLine(changeName, state.branchPrefix ?? 'change/');
     return;
   }
@@ -342,136 +670,47 @@ export async function runNext(protocol) {
   // 源节点；仅当源节点未完成、任务全 done、firstIncompletePostExecNode === currentNode
   // 且 resolveNextNode 确实会跳过该节点时显式放行（只读不改写 state）。artifactNext ===
   // currentNode 的形态落回既有正常逻辑（normalAdvanceExempt 覆盖），不放宽豁免面。
+  // 本块只做「可能是回程态」的廉价前置筛选（源节点未完成 = 回程谓词的必要条件），真正的判定取共享
+  // 视图的 fixReturnTarget——回程分支的 NODE 与 status.routeNode 是同一个值，源节点未 entry /
+  // 无 evidence 的构造态里两者不再分叉（旧实现直接打印 state.currentNode，status 报产物后继）。
   const fixReturnNode = state.activeChange
     ? await resolveFixReturnNode({ runRoot: runRootDir(), changeName, protocol, completedNodes: completedArr })
     : null;
   if (fixReturnNode !== null && fixReturnNode === state.currentNode) {
-    const artifactNext = await resolveNextNode({ runRoot: runRootDir(), changeName, protocol, completedNodes: completedArr });
-    const routeIds = route(protocol).map((node) => node.id);
-    const artifactNextIdx = routeIds.indexOf(artifactNext);
-    const currentIdx = routeIds.indexOf(state.currentNode);
-    // 「跳过」必须是产物存在性把路由推到源节点之后；artifactNext 落在源节点之前（如 execute
-    // 产物缺失时回退到 execute）不是合法回程态，落回既有门禁，防止越界放宽（既有门禁反例锚）。
-    const skipsForward = artifactNext !== state.currentNode
-      && currentIdx >= 0
-      && artifactNextIdx > currentIdx;
-    if (skipsForward) {
-      console.log('RETURN: 回程源节点 ' + fixReturnNode + '（源节点产物在场且未出口；保留源节点跑出口）');
-      printNext(protocol, state.currentNode, state.executionMode ?? 'subagent');
+    const returnView = await resolveNodeView({ changeName, protocol, state });
+    if (returnView.fixReturnTarget !== null) {
+      console.log('RETURN: 回程源节点 ' + returnView.fixReturnTarget + '（源节点产物在场且未出口；保留源节点跑出口）');
+      printNext(protocol, returnView.routeNode, state.executionMode ?? 'subagent');
+      printWhyLine(returnView);
       printBranchLine(changeName, state.branchPrefix ?? 'change/');
       return;
     }
   }
-  // 节点顺序校验（严格模式）——state.currentNode 非 null、不在 completedNodes、
-  // 且 evidence 无该节点记录 → 上一节点从未 exit 就推进 → BLOCKED（exit 1）。
-  // 状态漂移校正保留：已完成节点（currentNode ∈ completedNodes，或 evidence 已记录——
-  // 节点已被 record/exit 处理过）正常推进不受影响；本校验只拦"证据完全缺失的疑似跳阶段"。
-  // 豁免（两种独立判断，任一成立即放行）：回退豁免（TASK.md 有 pending 回退修复任务 → execute）；
-  // 正常推进豁免（currentNode 是 completedNodes 最后节点 exit 推进的正常下一节点，
-  // 见 normalAdvanceExempt）——真乱序（跳节点）仍严格 BLOCK
-  if (state.currentNode && !completedArr.includes(state.currentNode)) {
-    const nodeEvidence = state.evidence && typeof state.evidence === 'object'
-      ? state.evidence[state.currentNode]
-      : null;
-    const hasEvidence = !!(nodeEvidence && typeof nodeEvidence === 'object' && !Array.isArray(nodeEvidence));
-    if (!hasEvidence) {
-      // 回退豁免（显式分支已先行；此处按共享谓词保留门禁层语义，不再内联第二份判定）——
-      // review/verify 发现缺陷追加 pending 修复任务后回 execute 的修复任务标准回退路径放行
-      // （否则被严格模式误拦为"未 exit 跳阶段"）；豁免条件不满足时维持严格 BLOCK
-      const rollbackExempt = await resolveFixRollbackState({
-        runRoot: runRootDir(), changeName, protocol, completedNodes: completedArr, currentNode: state.currentNode,
-        history: state.history,
-      });
-      // 正常推进豁免——exit --apply 推进 currentNode 到下一节点后按 SKILL 协议调 next
-      // （正常路径）不拦截；与回退豁免独立判断（详见 normalAdvanceExempt 注释）
-      const advanceExempt = await normalAdvanceExempt(state, protocol, completedArr, state.currentNode, changeName);
-      if (!rollbackExempt && !advanceExempt) {
-        console.error('BLOCKED: 疑似未 exit 节点 ' + state.currentNode + '，先 workflow-guard.mjs exit ' + state.currentNode + ' --apply');
-        console.error('恢复: 确认当前节点实际已完成 → 用 exit <节点> --apply 正常推进；节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进）或 select（切换 change）；禁止手改 state 机器字段');
-        process.exit(1);
-      }
-    }
+  // 节点视图（与 status 共用同一判定，见 resolveNodeView——节点顺序门禁也在其中，本命令不再内联
+  // 第二份）：derivedNode 供零进展防呆与漂移校正使用，routeNode 才是输出节点（next 的 NODE 行）。
+  const nodeView = await resolveNodeView({ changeName, protocol, state });
+  const detectedNode = nodeView.derivedNode;
+  // 此态 next 不打印 NODE、直接 BLOCKED（节点顺序门禁 / 单趟零进展 / Fix 归位第 4 轮无授权）：三个
+  // 判定与报文都在共享视图里（resolveNodeOrderBlock / resolveZeroProgressBlock / applyFixRollbackRound
+  // 的只读预演），本命令只消费而不另判一份——status 的「route=null + next 将 BLOCKED」来自同一字段，
+  // 两边答案因此一致。Fix 第 4 轮在 FIX-BATCH 分支已先行 BLOCK，此处的 blocked 只会是顺序门禁或零进展。
+  if (nodeView.blocked !== null) {
+    console.error(nodeView.blocked.message);
+    process.exit(1);
   }
-  const detectedNode = await determineNode(changeName, protocol, state.completedNodes);
-  // 单趟零进展防呆（三重防呆决策之二·状态机侧）：路由落在 execute/subagent-execute，但既无可委托的并行任务
-  // （依赖已满足集合为空）又无串行 pending，且 TASK 未全 done——剩余 pending 全部是依赖无法满足的
-  // 孤儿并行任务（数据异常：depends_on 引用不存在的任务 id 或执行期出现依赖环）→ BLOCKED，
-  // 防止静默路由到无法推进的节点造成死循环/死等。协议无 subagent-execute 节点时不适用
-  // （parallel 任务由 execute 直接消化，无孤儿语义）。依赖环的常规拦截点在 plan 出口（guard 前置），
-  // 此处兜底执行期数据异常（如手改 TASK 绕过签名校验的极端态）。
-  if (EXECUTE_FAMILY_NODE_IDS.has(detectedNode)) {
-    if (hasSubagentNode(protocol)) {
-      try {
-        const zpBlocks = taskBlocks(await fs.readFile(protocolTaskFilePath(protocol, changeName, specsDir()), 'utf8'));
-        const zpAttrs = zpBlocks.map(taskOpeningAttrs).filter(Boolean);
-        const zpPending = zpAttrs.filter((a) => a.status === 'pending');
-        if (zpPending.length > 0) {
-          const zpDoneIds = new Set(zpAttrs.filter((a) => a.status === 'done' && a.id).map((a) => a.id));
-          const zpEligible = zpBlocks.filter((block) => {
-            const a = taskOpeningAttrs(block);
-            if (!a || !a.parallel || a.status !== 'pending') return false;
-            const depsMatch = block.match(/<depends_on>([\s\S]*?)<\/depends_on>/);
-            if (!depsMatch || !depsMatch[1].trim()) return true;
-            return depsMatch[1].trim().split(/[,\s]+/).filter(Boolean).every((d) => zpDoneIds.has(d));
-          });
-          const zpSerial = zpPending.filter((a) => !a.parallel);
-          if (zpEligible.length === 0 && zpSerial.length === 0) {
-            console.error('BLOCKED: 路由零进展——既无可委托的并行任务（依赖已满足集合为空）也无串行 pending，但 TASK 尚有 ' + zpPending.length + ' 个未完成任务');
-            console.error('疑似孤儿并行任务依赖无法满足（检查 depends_on）：' + zpPending.map((a) => a.id).join(', ') + '——修正 depends_on 为真实存在且无环的任务 id 后重试；执行期出现此异常请核对 TASK.md 是否被手改');
-            process.exit(1);
-          }
-        }
-      } catch {}
-    }
-  }
-  // 状态漂移自动校正——以文件产物为准（determineNode）校正 state.currentNode。
-  // 进行中节点保护:currentNode 未 exit(不在 completedNodes)且已记录 evidence(record 过)
-  // → 视为节点进行中(可能 exit 被内容级拦截后重跑),不校正推走——否则被拦截节点
-  // 的 exit 前置校验(currentNode 匹配)无法重跑,advance/select 均不恢复 → 死结(实测教训)
-  const currentNodeEvidence = state.currentNode && state.evidence && typeof state.evidence === 'object'
-    ? state.evidence[state.currentNode]
-    : null;
-  // 进行中节点保护扩展：保护从"已 record"扩展为"已 entry（enteredNodes 含该节点）且未 exit"。
-  // 已 entry 但未 record 的节点（如刚进入、产物已齐、premature next）同样视为进行中——
-  // 不校正推走（否则该节点 exit 前置 currentNode 校验无法重跑 → 死结）。旧 state 无
-  // enteredNodes 时回退到 evidence 判定（既有语义不回归）。
-  const currentNodeEntered = !!(
-    state.enteredNodes && Array.isArray(state.enteredNodes) && state.enteredNodes.includes(state.currentNode)
-  );
-  const routeIds = route(protocol).map((n) => n.id);
-  const currentNodeIdx = state.currentNode ? routeIds.indexOf(state.currentNode) : -1;
-  // 推导为 currentNode 的**路由后继**（与 guard 出口同源：把 currentNode 视为已完成再加入
-  // completedNodes 求 resolveNextNode）→ 该节点产物已齐待 exit、路由自然推进到 detectedNode
-  // （平行转换 plan→subagent-execute、趟间回流 subagent-execute→execute 均属此形态）→ 保护。
-  // 反过度修复锚（同族：产物全齐但无推进史形态）：completedNodes 为空（无任何 exit 推进史，currentNode 仅是初始
-  // 陈旧节点）时不做路由后继保护——产物推导继续生效推进到最终节点（自定义协议产物全齐的
-  // 「部分完成但产物齐」形态仍路由到最后节点）。静态直接后继兜底（串行推进原语义）。
-  // 推导跳跃/跨节点或回退 → 产物权威校正(漂移,防过度修复)。
-  const routingSuccessorOfCurrent = state.currentNode
-    ? await determineNode(changeName, protocol, [...completedArr, state.currentNode])
-    : null;
-  const routingSuccessorProtects = !!(completedArr.length > 0
-    && routingSuccessorOfCurrent !== null
-    && routingSuccessorOfCurrent === detectedNode);
-  const derivedIsDirectSuccessor = currentNodeIdx >= 0
-    && currentNodeIdx + 1 < routeIds.length
-    && routeIds[currentNodeIdx + 1] === detectedNode;
-  const derivedIsSuccessor = routingSuccessorProtects || derivedIsDirectSuccessor;
-  const inProgress = !!(
-    state.currentNode
-    && !completedArr.includes(state.currentNode)
-    && (currentNodeEntered
-      || (currentNodeEvidence && typeof currentNodeEvidence === 'object' && !Array.isArray(currentNodeEvidence)))
-    && derivedIsSuccessor
-  );
-  if (!inProgress && state.currentNode !== detectedNode) {
+  // 状态漂移自动校正——以文件产物为准（determineNode）校正 state.currentNode。进行中节点不校正
+  // （已 entry / 已 record 且未 exit、路由仍在其后继）：判定统一在 resolveNodeView 内，本命令不再
+  // 内联第二份（与 status 共用；被拦截节点若被推走，其 exit 前置 currentNode 校验无法重跑 → 死结）。
+  if (!nodeView.inProgress && state.currentNode !== detectedNode) {
     state.currentNode = detectedNode;
     await writeState(state);
   }
-  // 进行中节点保护:不校正时输出也跟随 currentNode(而非产物推导的 detectedNode——
-  // 否则 state 保持 review 但输出 NODE: verify,执行者按输出 action 仍然死结)
-  const printNode = inProgress ? state.currentNode : detectedNode;
+  // 输出跟随路由视图：进行中时输出 state.currentNode（而非产物推导——否则 state 保持 review 但
+  // 输出 NODE: verify，执行者按输出 action 仍然死结）；非进行中即产物推导节点。
+  const printNode = nodeView.routeNode;
   printNext(protocol, printNode, state.executionMode ?? 'subagent');
+  printWhyLine(nodeView);
+  printPreflightLine(printNode);
   printBranchLine(changeName, state.branchPrefix ?? 'change/');
   return;
 }
@@ -516,6 +755,9 @@ export async function runSelect(protocol, argv) {
 export async function runRecord(protocol, argv) {
   const nodeId = argv[3];
   if (!nodeId) throw new Error('record requires a Node id.');
+  // 声明命令的运行上下文（脚本路径 / 运行根 / 包根 / 本次解析到的协议）：本命令的两处恢复指引都要
+  // 打印可照抄的命令，一次取好往下传——各调用点各取一次就是同一事实的多处表达。
+  const declarationContext = commandContext({ argv });
   const state = await readState();
   state.evidence = state.evidence || {};
   // 解析 JSON 参数并展开到 evidence 顶层（summary/completedChecks/output-schema evidence 等）；
@@ -550,7 +792,6 @@ export async function runRecord(protocol, argv) {
   // trim 后以 {/[ 开头 → 视作"形似对象字面量"；若 JSON.parse 失败 → fail-closed。
   try {
     parsed = raw ? JSON.parse(raw) : {};
-    if (typeof parsed !== 'object' || Array.isArray(parsed)) parsed = { summary: String(parsed) };
   } catch {
     // 契约解析失败 fail-closed:payload 形似对象但 JSON.parse 失败 → 报错并
     // process.exit(1),不写 evidence——防状态污染（旧语义把不可解析 raw 静默作
@@ -568,6 +809,45 @@ export async function runRecord(protocol, argv) {
     }
     parsed = { summary: raw || 'recorded' };
   }
+  // 载荷本身必须是对象（入口判据，先于形状校验与任何写盘）：JSON 可解析的非对象取值
+  // （null / 数组 / 字符串 / 数字）旧实现两条路都错——null 一路放行到读 parsed.completedChecks 时
+  // 抛 TypeError（报文是堆栈，既不说哪一步错了、也不说载荷该长什么样），数组/字符串/数字则被静默
+  // 改写成 { summary: String(...) }（替调用方编了一份它没说过的载荷，证据从此不可按字段消费）。
+  // 本判据只在本入口：形状表（state-schema.evidencePayloadProblems）判的是「对象各字段的类型」，
+  // 载荷不是对象时它按设计放行——两件事各守自己边界内的事实，不互相越界。
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    const payloadTypeName = parsed === null ? 'null' : (Array.isArray(parsed) ? 'array' : typeof parsed);
+    console.error('ERROR: record 载荷必须是对象（当前是 ' + payloadTypeName + '）—— state 未改写');
+    console.error('恢复: ' + scriptCommand({
+      scriptsDir,
+      runRoot: runRootDir(),
+      script: 'workflow-state.mjs',
+      args: ['record', nodeId, `'{"summary":"<本节点完成摘要>"}'`],
+    }) + ' 用对象载荷重试；载荷里的引号被 shell 吞掉时改用 --json-file <path> 传入 JSON 文件'
+      + '（cmd.exe 请把单引号换成双引号，并转义载荷里原有的双引号）');
+    process.exit(1);
+  }
+  // 载荷形状校验（写入前 fail-closed；判定单一来源 = state-schema.evidencePayloadProblems）：
+  // 类型错误的载荷不得落库——否则下游出口门禁只会报「缺 evidence: <schema>」，出错的是 record、
+  // 报错的却是 exit，执行者得自己反推载荷该写什么形状。故在此拦下：点名字段路径与当前类型，
+  // 给出可照抄的正确形态；只判类型/非空，取值是否合法（扫描份数、提名编号是否登记）仍归出口门禁。
+  const shapeProblems = evidencePayloadProblems(parsed);
+  if (shapeProblems.length > 0) {
+    console.error('ERROR: record 载荷形状不合法（写入前拒绝，state 未改写）:');
+    for (const problem of shapeProblems) {
+      console.error('  ' + problem.field + ': ' + problem.message);
+    }
+    console.error('恢复: ' + scriptCommand({
+      scriptsDir,
+      runRoot: runRootDir(),
+      script: 'workflow-state.mjs',
+      args: ['record', nodeId, `'{"summary":"<本节点完成摘要>"}'`],
+    }) + ' 用类型合法的载荷重试（summary 为非空字符串；completedChecks 为字符串数组；'
+      + 'lessonsNomination 为 { scanned, nominated[], reasonIfNone }，nominated 元素是条目编号字符串）'
+      + '；载荷里的引号被 shell 吞掉时改用 --json-file <path> 传入 JSON 文件'
+      + '（cmd.exe 请把单引号换成双引号，并转义载荷里原有的双引号）');
+    process.exit(1);
+  }
   // completedChecks 真实性校验（skill-load 声明标记）——解析本次 record 写入的
   // completedChecks 的 required-skill:<node>.<skill> 条目 → 对应声明标记必须存在，
   // 缺失 → BLOCKED + 指引先加载 skill 并运行 skill-load；标记 at 必须 ≤ 本次记录时间
@@ -578,23 +858,34 @@ export async function runRecord(protocol, argv) {
   // 传入 protocol + state——按 requiredSkillCalls scope 分类条目（handoff scope 豁免标记，
   // 以共用证据库 handoffResult 为证据）
   const markerChange = state.activeChange || await findActiveChange();
-  const markerCheck = await verifySkillLoadMarkers(parsed.completedChecks, markerChange, recordedAt, protocol, state);
+  const markerCheck = await verifySkillLoadMarkers(parsed.completedChecks, markerChange, recordedAt, protocol, state, declarationContext);
   if (!markerCheck.ok) {
     console.error('BLOCKED: ' + markerCheck.reason);
     process.exit(1);
   }
   // 技能加载前置门（方案 A）：节点完成记录必须先有本节点
   // skill-load 声明标记——无论 payload 是否含 completedChecks 都校验（堵"先干活后补
-  // 声明"旁路）：缺失 → 新 change BLOCK / 旧 change 渐进 WARN。指引先加载技能并运行
-  // skill-load 再重试。handoff scope 技能（子代理加载）不要求协调者声明（与
-  // verifySkillLoadMarkers 的 scope 豁免一致）——本门按 <node>-*.json 存在性判定，
-  // 与 guard exit 侧协议声明标记校验同构。仅对存在于当前协议的节点生效（协议外节点名
-  // 的记录不适用前置门），无 active change 时无法定位标记而不重复报错（遗留兼容）。
+  // 声明"旁路）：缺失 → 新 change BLOCK / 旧 change 渐进 WARN。指引先加载技能，再照抄派生出的
+  // 声明命令（该节点每个必需技能各一条，全部协议文件 + 模板全清单）后重试。handoff scope 技能
+  // （子代理加载）不要求协调者声明（与 verifySkillLoadMarkers 的 scope 豁免一致）——本门按
+  // <node>-*.json 存在性判定，与 guard exit 侧协议声明标记校验同构。仅对存在于当前协议的节点生效
+  // （协议外节点名的记录不适用前置门），无 active change 时无法定位标记而不重复报错（遗留兼容）。
   const recordNodeDef = (protocol.nodes ?? []).find((n) => n.id === nodeId);
   if (recordNodeDef && markerChange) {
     const declaredForNode = await hasNodeSkillDeclaration(nodeId, markerChange);
     if (!declaredForNode) {
-      const loadGuide = '先加载技能（用 Skill 工具，禁止跳过）并运行 workflow-state.mjs skill-load ' + nodeId + ' <skill> 再重试';
+      // 声明命令由协议派生（该节点每个必需技能各一条，每条都带该节点全部协议文件、模板全清单与
+      // 协议上下文），与守卫侧恢复段同一装配：旧形态是手拼的 "skill-load <node> <skill>"——位置实参位
+      // 写占位符在 bash 里是重定向，照抄直接语法失败；换成真名也只声明了一个技能、不带模板清单，
+      // record 放行后 exit 还要再拦一次。
+      const loadGuide = '先加载技能（用 Skill 工具，禁止跳过），再照抄下面的命令声明本节点技能加载'
+        + '（同一 node-skill 重跑会覆写该标记）：\n  '
+        + declarationCommands({
+          node: recordNodeDef,
+          skills: declarationSkillTargets(recordNodeDef),
+          context: declarationContext,
+        }).map((entry) => entry.command).join('\n  ')
+        + '\n然后重试 record';
       if (state.newChange === true) {
         console.error('BLOCKED: 节点 ' + nodeId + ' 缺少技能加载声明标记（.skill-loads/' + nodeId + '-*.json）——' + loadGuide);
         process.exit(1);
@@ -609,6 +900,7 @@ export async function runRecord(protocol, argv) {
       nodeId,
       changeName: markerChange,
       newChange: state.newChange === true,
+      commandContext: declarationContext,
     });
     if (templateCheck.warn) console.error('WARN: ' + templateCheck.warn);
     if (!templateCheck.ok) {
@@ -668,9 +960,22 @@ export async function runRecord(protocol, argv) {
   };
   await writeState(state);
   console.log('EVIDENCE: ' + nodeId);
+  // 节点视图与 next / status 同源（L-067 族）：record 也是「我现在该在哪个节点」的输出面。直接取
+  // 产物推导会让三面在**进行中保护**生效时分叉（record 报 review，而 next / status.routeNode 报
+  // execute）——故复用 resolveNodeView 的 routeNode：本命令不自持第二份判定，也不改变自己的写面
+  // （record 只写证据，不写 currentNode，视图是纯读）。
   const changeName = state.activeChange || await findActiveChange();
-  const nextNode = changeName ? await determineNode(changeName, protocol, state.completedNodes) : null;
-  printNext(protocol, nextNode ?? null, state.executionMode ?? 'subagent');
+  const nodeView = changeName ? await resolveNodeView({ changeName, protocol, state }) : null;
+  // 边界态（next 会 BLOCKED、不打印 NODE）：record 是同一事实的第四个输出面，尾巴不得再声称
+  // 「NEXT: done」——那是在说「没有下一节点了」，与 next 的 BLOCKED、status.routeNode=null 相反。
+  // 命中时改打与 ROUTE: 行同源的一句（原因 + 先按恢复指引处理），NODE / SKILL 一律不打（next 此刻
+  // 也不打）。blocked 来自共享视图在 state 副本上的只读预演：轮次与 currentNode 不动，本命令的写面
+  // 仍只有它自己的证据。
+  if (nodeView?.blocked) {
+    console.log('NEXT: blocked（' + nodeView.blocked.reason + '；先按恢复指引处理）');
+    return;
+  }
+  printNext(protocol, nodeView?.routeNode ?? null, state.executionMode ?? 'subagent');
   return;
 }
 

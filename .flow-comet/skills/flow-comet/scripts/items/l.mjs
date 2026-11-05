@@ -210,6 +210,8 @@ const RAW_ENTRIES = [
       gitInit(dir);
       assertExit(runState(['init', CHANGE_ID, '--init-skip'], dir), 0);
       assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
+      // open 该读两份协议、协议声明两个必需技能：出口覆盖判据要求全部声明，夹具两条都写下
+      assertExit(runState(['skill-load', 'open', 'flow-comet-requirement', '--prompt', 'flow-kit/prompts/1-requirement.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
       assertExit(runState(['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md', '--templates', 'DESIGN.md'], dir), 0);
       writeIntakeArtifacts(dir);
       // ① entry open 记录进入标记

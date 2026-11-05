@@ -17,21 +17,62 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { EXECUTE_FAMILY_NODE_IDS, normalizeHeading } from '../route-node.mjs';
 import { taskOpeningAttrs, taskBlocks as extractTaskBlocks } from '../task-parsing.mjs';
-import { nodeTemplateDeclaration, readProtocolFile, templateKeyOf } from '../protocol-utils.mjs';
+import {
+  nodeTemplateDeclaration,
+  readProtocolFile,
+  templateKeyFromArtifactName,
+  templateKeyOf,
+} from '../protocol-utils.mjs';
 import { runRoot, fileExists, protocolPath } from './guard-state-io.mjs';
 import { isNewChange } from './guard-routing.mjs';
 import { buildSkeleton, LEGACY_SUMMARY_ORDER } from './guard-artifact-skeleton.mjs';
+import { scanHeadings } from './section-body.mjs';
 import { TASK7_REQUIRED } from './task-graph.mjs';
 
 const HINT_FILE_NAME = '.template-hints.json';
-const H2_LINE = /^##\s+(.+?)\s*$/u;
-const H3_LINE = /^###\s+(.+?)\s*$/u;
 const FRONTMATTER_KEY_LINE = /^([A-Za-z][\w-]*)\s*:\s*(.*)$/u;
 
 // 空正文白名单（AC-5）：判据是**整段取值**而非子串——词后必须是行尾 / 空白 / 标点 / 括注，
 // 「无变更风险；影响两份工件」这类真实句子仍是已填（判据不得退化为子串命中）。
 const NOT_APPLICABLE_BODY =
   /^(?:无变更|不适用|未涉及|N\/A|无|—)(?=$|[\s，。；、,;.:：!！?？…—()（）【】「」『』“”"'])/iu;
+
+// 包裹符号（AC-8）：粗体 / 下划线 / 引用 / 列表 / 有序列表 / 括号 / 反引号只是同一个词的写法，
+// 不改变「整段只有一个白名单词」这一事实。剥离只用于本判据，**剥离后仍须以白名单词开头**
+// （AC-9：「**见 N/A**」「（说明：N/A）」剥掉包装后开头是实词，仍是已填）；只剥包装、不扩词表。
+// 同族的另一种合法写法是「词 + 闭合标记 + 为什么」（`**N/A**（理由）`）：说明紧跟闭合标记时
+// 剥离只剥得掉尾部裸标记，词后不再紧邻边界——由 isNotApplicableBody 的第二条判据接住。
+const NOT_APPLICABLE_WRAPPER_LEAD = /^(?:\*\*|__|>|[-*+]|\d+[.)、．]|[（(]|`)\s*/u;
+const NOT_APPLICABLE_WRAPPER_TAIL = /\s*(?:\*\*|__|`)$/u;
+
+// 「N/A 意图痕迹」只喂补充提示，不参与缺子段判定：父段正文去掉子段标题行后，第一条非空内容行的
+// **开头若干字符**内出现白名单词，才算当事人真想写「整段不适用」。「（说明：N/A）」「见 N/A」这类
+// 带前置说明词 / 包裹的形态落在这个窗口里；普通正文（无白名单词）不落入——把提示挂在与 N/A 无关的
+// 工件上，只会让当事人去改一个它本来没打算写的段落。
+const NOT_APPLICABLE_INTENT = /(?:N\/A|不适用|无变更)/iu;
+const NOT_APPLICABLE_INTENT_WINDOW = 24;
+
+function bareNotApplicableBody(text) {
+  let stripped = text;
+  for (;;) {
+    const next = stripped.replace(NOT_APPLICABLE_WRAPPER_LEAD, '').replace(NOT_APPLICABLE_WRAPPER_TAIL, '');
+    if (next === stripped) return stripped;
+    stripped = next;
+  }
+}
+
+// 整段「不适用」判定（唯一消费点）：裸文本以白名单词开头即成立；另接受**闭合标记之后紧跟说明**的
+// 形态——`**N/A**（本轮无变更）` 剥完是 `N/A**（本轮无变更）`，词后紧跟的是闭合标记而不是边界。
+// 说明文字是「为什么不适用」，不改变「整段不适用」这一事实（旧实现据此判已填，于是同一份工件
+// 既被判「写了 N/A」又被要求补子段）。前提仍是白名单词开头：`**见 N/A**` 剥完是 `见 N/A`，
+// 开头是实词 ⇒ 仍是已填（否定式 / 指向式的句子不得吞成整段豁免）。
+const NOT_APPLICABLE_CLOSE_THEN_NOTE = /\s*(?:\*\*|__|`)[\s\S]*$/u;
+function isNotApplicableBody(text) {
+  const bare = bareNotApplicableBody(text);
+  if (NOT_APPLICABLE_BODY.test(bare)) return true;
+  const closed = bare.replace(NOT_APPLICABLE_CLOSE_THEN_NOTE, '');
+  return closed !== bare && NOT_APPLICABLE_BODY.test(closed);
+}
 
 function literalRegExp(text) {
   return String(text ?? '').replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
@@ -48,8 +89,12 @@ function qualifiedHeading(raw) {
 // 工件文本 → 行锚定轮廓（L-128：只认行首标题，正文里引用段名不劫持）。frontmatter 仅做顶层键
 // 行级解析（不引入 YAML 库）：一个键的值区 = 行内余下文本 + 到下一个顶层键之前的非空行
 // （嵌套映射是缩进行，而「值另起一行且不缩进」也同样是已填——两种书写形态都不判空）。
+// 段结构（哪些标题行真的开一段、段到哪里结束、哪些 H3 属于本段）一律取 lib/section-body.mjs 的
+// 围栏感知扫描（scanHeadings）：围栏代码块里的 `## ` / `### ` 是正文示例，不开段、也不算子段。
+// 旧实现自带一份按行扫 `^##` 的循环（围栏盲），段序 / 缺段 / 空正文 / 增量段位置四个判据因此共用
+// 同一处盲区：示例里贴一行段标题，那段就被读成「在场」——删段换到放行的写法。
 function parseOutline(text) {
-  const lines = String(text ?? '').replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n').split('\n');
+  const { lines, headings } = scanHeadings(text);
   const outline = { frontmatter: { present: false, keys: [] }, titleLine: '', headerLines: [], sections: [] };
   let cursor = 0;
   if (lines[0] !== undefined && lines[0].trim() === '---') {
@@ -71,38 +116,43 @@ function parseOutline(text) {
       cursor = end + 1;
     }
   }
+  const sectionHeadings = headings.filter((heading) => heading.level === 2);
+  const subsectionHeadings = headings.filter((heading) => heading.level === 3);
   while (cursor < lines.length && lines[cursor].trim() === '') cursor += 1;
   outline.titleLine = lines[cursor] ?? '';
   cursor += 1;
-  while (cursor < lines.length && !H2_LINE.test(lines[cursor])) {
+  const firstSection = sectionHeadings.length > 0 ? sectionHeadings[0].index : lines.length;
+  while (cursor < lines.length && cursor < firstSection) {
     outline.headerLines.push(lines[cursor]);
     cursor += 1;
   }
-  let current = null;
-  for (; cursor < lines.length; cursor += 1) {
-    const line = lines[cursor];
-    const heading = line.match(H2_LINE);
-    if (heading) {
-      current = {
-        raw: heading[1].trim(),
-        norm: normalizeHeading(heading[1]),
-        qualified: qualifiedHeading(heading[1]),
-        bodyLines: [],
-        subsections: [],
-      };
-      outline.sections.push(current);
-      continue;
-    }
-    if (current === null) continue;
-    const sub = line.match(H3_LINE);
-    if (sub) {
-      current.subsections.push({
-        raw: sub[1].trim(),
-        norm: normalizeHeading(sub[1]),
-        qualified: qualifiedHeading(sub[1]),
+  for (let index = 0; index < sectionHeadings.length; index += 1) {
+    const heading = sectionHeadings[index];
+    const end = index + 1 < sectionHeadings.length ? sectionHeadings[index + 1].index : lines.length;
+    const section = {
+      raw: heading.text.trim(),
+      norm: normalizeHeading(heading.text),
+      qualified: qualifiedHeading(heading.text),
+      bodyLines: lines.slice(heading.index + 1, end),
+      // 直系正文（不含子段标题行）由同一次扫描给出：子段标题行的行下标在扫描里就是已知的，
+      // 不必回头对 bodyLines 再做一次文本匹配（那会重新掉进围栏盲区）。
+      directLines: [],
+      subsections: [],
+    };
+    const subsectionIndexes = new Set();
+    for (const sub of subsectionHeadings) {
+      if (sub.index <= heading.index || sub.index >= end) continue;
+      section.subsections.push({
+        raw: sub.text.trim(),
+        norm: normalizeHeading(sub.text),
+        qualified: qualifiedHeading(sub.text),
       });
+      subsectionIndexes.add(sub.index);
     }
-    current.bodyLines.push(line);
+    for (let at = heading.index + 1; at < end; at += 1) {
+      if (!subsectionIndexes.has(at)) section.directLines.push(lines[at]);
+    }
+    outline.sections.push(section);
   }
   return outline;
 }
@@ -115,6 +165,34 @@ function bodyText(lines) {
   while (start < end && trimmed[start].trim() === '') start += 1;
   while (end > start && trimmed[end - 1].trim() === '') end -= 1;
   return trimmed.slice(start, end).join('\n');
+}
+
+// 父段的**直系正文**：parseOutline 在扫描时就把子段标题行记了下标（bodyLines 仍含它们，子段归属与
+// 逐字比对要靠那份行序），directLines 是同一份 bodyLines 减去**围栏外**的子段标题行——不剥掉的话
+// 「父段只要写了任一子段」就等同于「父段有正文」，补充提示随即对从未想写 N/A 的工件发声。
+// 只剥标题行，子段的正文内容原样保留（它仍是父段正文的一部分）。
+function directBodyLines(section) {
+  return section?.directLines ?? [];
+}
+
+// 父段正文是否留下 N/A 意图痕迹：第一条非空内容行的开头若干字符里找白名单词——包裹符号
+// （**N/A** / > N/A / （N/A））与前置说明词（（说明：N/A）、见 N/A）都落在这个窗口内。
+function hasNotApplicableIntent(lines) {
+  const first = (lines ?? []).map((line) => String(line)).find((line) => line.trim() !== '');
+  if (first === undefined) return false;
+  return NOT_APPLICABLE_INTENT.test(first.trim().slice(0, NOT_APPLICABLE_INTENT_WINDOW));
+}
+
+// 父段名：报文里必须是**真实段名**。骨架里的段名（模板标题，同一份工件不管怎么改写都显示同一个
+// 名字）优先；骨架未派生该段时退到文档段自己的标题行（parseOutline 的 raw 已剥离开栏井号，这里再
+// 去编号）。两条都取不到才用兜底常量——「父段「」」既没有定位价值，也掩盖了「父段没被识别」。
+const PARENT_NAME_FALLBACK = '（该父段名未派生）';
+
+function parentSectionName(skeleton, parentNorm, docSection) {
+  const fromSkeleton = String(skeleton.sections.find((section) => section.norm === parentNorm)?.name ?? '').trim();
+  if (fromSkeleton !== '') return fromSkeleton;
+  const fromHeading = String(docSection?.raw ?? '').replace(/^\d+(?:\.\d+)*\.?\s*/u, '').trim();
+  return fromHeading === '' ? PARENT_NAME_FALLBACK : fromHeading;
 }
 
 // 模板轮廓缓存（键 = 模板绝对路径）：逐字比对要模板该段正文，路径来自骨架（不在此推导模板位置）。
@@ -145,6 +223,7 @@ function emptyIssues() {
     empty: [],
     verbatim: [],
     structure: [],
+    structureAdvice: [],
     increments: [],
   };
 }
@@ -186,6 +265,34 @@ function templateBodyIsFinishedForm(body) {
   return templateBodyHasFillInSlot(body) || tableHasExampleRow(body);
 }
 
+// 结构子段的键：unique=false 的（如 Button (Primary)/(Secondary)）按带括号的精确名，其余按
+// 归一名——「在场判定」与「实际挂在哪的诊断」共用这一份键，避免同一口径写两处。
+function structureSubsectionMatches(docSub, sub) {
+  return sub.unique === false
+    ? docSub.qualified === qualifiedHeading(sub.name)
+    : docSub.norm === sub.norm;
+}
+
+// 缺结构子段时的定位诊断：同名 H3 若实际写在别的骨架父段下、或落在模板骨架之外（文末的模板外
+// 段落），报错点名它真正的位置。这里只读地找「同名 H3 出现在哪」——归属判定仍是
+// 上面的 subsectionsByParent 一份，本函数不改归属、也不参与豁免。
+function locateStructureSubsection(occurrences, lastSkeletonIndex, sub) {
+  for (const occurrence of occurrences) {
+    if (!structureSubsectionMatches(occurrence, sub)) continue;
+    if (occurrence.index > lastSkeletonIndex) return { kind: 'tail' };
+    if (occurrence.registered) {
+      // 挂在本父段下的同名 H3 已在候选集里（found 为真）——走到这里只可能是重复骨架段，
+      // 不给指向自己的误导性定位。
+      return occurrence.section.norm === sub.parentNorm
+        ? null
+        : { kind: 'parent', heading: occurrence.section.raw };
+    }
+    // 模板外 H2 下的 H3：按「其上最近的骨架 H2」归因（与归属算法同口径）。
+    return { kind: 'parent', heading: occurrence.enclosing.raw };
+  }
+  return null;
+}
+
 function collectSectionIssues({ text, skeleton, template, issues }) {
   const outline = parseOutline(text);
   const indexByNorm = new Map();
@@ -221,15 +328,33 @@ function collectSectionIssues({ text, skeleton, template, issues }) {
     if (sub.parentNorm !== null) parentNorms.add(sub.parentNorm);
   }
   // 结构子段归属到「其上最近的骨架 H2」：模板外多余段（如工具输出贴入的 `## Findings`）夹在父段与
-  // 子段之间时不切断归属（AC-10：多余段不参与骨架判定）。
+  // 子段之间时不切断归属（AC-10：多余段不参与骨架判定）。occurrences 是同一份归属数据的旁路记录
+  // （H3 所在的 H2 + 最近的骨架 H2），只供「缺子段时它实际挂在哪」的诊断使用，不参与归属判定。
   const subsectionsByParent = new Map();
-  let enclosingNorm = null;
-  for (const section of outline.sections) {
-    if (indexByNorm.has(section.norm)) enclosingNorm = section.norm;
-    if (enclosingNorm === null) continue;
-    if (!subsectionsByParent.has(enclosingNorm)) subsectionsByParent.set(enclosingNorm, []);
-    subsectionsByParent.get(enclosingNorm).push(...section.subsections);
+  const subsectionOccurrences = [];
+  let enclosing = null;
+  for (let index = 0; index < outline.sections.length; index += 1) {
+    const section = outline.sections[index];
+    const registered = indexByNorm.has(section.norm);
+    if (registered) enclosing = section;
+    if (enclosing === null) continue;
+    if (!subsectionsByParent.has(enclosing.norm)) subsectionsByParent.set(enclosing.norm, []);
+    subsectionsByParent.get(enclosing.norm).push(...section.subsections);
+    for (const docSub of section.subsections) {
+      subsectionOccurrences.push({
+        index,
+        registered,
+        section,
+        enclosing,
+        norm: docSub.norm,
+        qualified: docSub.qualified,
+      });
+    }
   }
+  const lastSkeletonIndex = outline.sections.reduce(
+    (last, section, index) => (indexByNorm.has(section.norm) ? index : last),
+    -1,
+  );
   for (const section of skeleton.sections) {
     const docSection = matched.get(section.norm);
     if (!docSection) continue;
@@ -245,16 +370,27 @@ function collectSectionIssues({ text, skeleton, template, issues }) {
       issues.verbatim.push(section.name);
     }
   }
-  // 结构子段：父段在场才要求；父段整段 N/A → 子段不要求（AC-8 ②）
+  // 结构子段：父段在场才要求；父段整段 N/A → 子段不要求（AC-8 ②）。父段的「整段不适用」接受
+  // 包裹符号（含「闭合标记 + 说明」形态），但剥掉包装后仍要以白名单词开头（AC-8 / AC-9）。
   for (const sub of skeleton.structureSubsections) {
     const parent = sub.parentNorm === null ? null : matched.get(sub.parentNorm);
     if (!parent) continue;
-    if (NOT_APPLICABLE_BODY.test(bodyText(parent.bodyLines))) continue;
+    const parentBody = bodyText(parent.bodyLines);
+    if (isNotApplicableBody(parentBody)) continue;
     const candidates = subsectionsByParent.get(sub.parentNorm) ?? parent.subsections;
-    const found = candidates.some((docSub) => (sub.unique === false
-      ? docSub.qualified === qualifiedHeading(sub.name)
-      : docSub.norm === sub.norm));
-    if (!found) issues.structure.push(sub.name);
+    const found = candidates.some((docSub) => structureSubsectionMatches(docSub, sub));
+    if (found) continue;
+    issues.structure.push({
+      name: sub.name,
+      placement: locateStructureSubsection(subsectionOccurrences, lastSkeletonIndex, sub),
+    });
+    // 父段正文留下 N/A 意图痕迹（如「（说明：N/A）」/「见 N/A」）却写不进白名单：子段仍要求，并
+    // 给出可照抄的写法（AC-10）。触发条件是**意图痕迹**而不是「正文非空」——普通正文漏写子段时当事人
+    // 根本没想写整段不适用，这条提示只会把注意力引到无关段落上；空正文同理（父段正文由子段承载时
+    // 它本就是空的）。父段名用真实名，文案里的「父段「」」没有定位价值。
+    if (!hasNotApplicableIntent(directBodyLines(parent))) continue;
+    const parentName = parentSectionName(skeleton, sub.parentNorm, parent);
+    if (!issues.structureAdvice.includes(parentName)) issues.structureAdvice.push(parentName);
   }
   // 增量段：只校验在场者的位置（必填与否由登记表 required + 各自门禁决定，本模块不做存在性兜底）
   for (const increment of skeleton.increments) {
@@ -346,7 +482,16 @@ function hintCategories(issues) {
   return [...categories];
 }
 
-function formatIssueParts(issues, { escalate }) {
+// 缺子段定位的人读文本：挂在另一个骨架父段下 / 落在模板骨架之外（文末）。
+function placementText(placement) {
+  return placement.kind === 'tail' ? '实际在文末' : '实际挂在 ' + placement.heading + ' 段下';
+}
+
+// 结构问题清单 → 人读片段（唯一实现）：末尾的完整出口报告行与只读的结构预检共用这一个格式器，
+// 两种模式的措辞因此不会各自漂移。escalate 只控制「缺段是否列出段名」（该工件上一轮也失败过才列）；
+// 预检不读提示账本，一律以 false 调用。本函数只拼文本——账本由 reportArtifactStructure 写，所以
+// 调用方拿到同形报文不需要复制一份实现。
+export function formatIssueParts(issues, { escalate }) {
   const parts = [];
   if (issues.title !== null) parts.push('标题形态不符（模板首行: `' + issues.title.expected + '`）');
   if (issues.headerMissing.length > 0) parts.push('首部缺字段: ' + issues.headerMissing.join('、'));
@@ -366,7 +511,18 @@ function formatIssueParts(issues, { escalate }) {
     parts.push('与模板该段正文逐字相同（判未填）' + issues.verbatim.length + ' 项: ' + issues.verbatim.join('、'));
   }
   if (issues.structure.length > 0) {
-    parts.push('缺结构子段 ' + issues.structure.length + ' 项: ' + issues.structure.join('、'));
+    const entries = issues.structure.map((entry) => (entry.placement === null
+      ? entry.name
+      : entry.name + '（' + placementText(entry.placement) + '）'));
+    parts.push('缺结构子段 ' + issues.structure.length + ' 项: ' + entries.join('、'));
+  }
+  if (issues.structureAdvice.length > 0) {
+    // 报文必须与判据一致：包裹符号（粗体 / 引用 / 括号）**本身就被接受**，旧措辞「不要加粗或引用」
+    // 与判据相反，会把人推去改一个本来能通过的写法；真正要的是「白名单词开头」，以及带说明时的
+    // 正确位置（闭合标记之后，见 isNotApplicableBody）。
+    parts.push('父段「' + issues.structureAdvice.join('」「') + '」正文不在「整段不适用」白名单——'
+      + '若要整段不适用，请让整段以 N/A 开头（包裹符号本身就被接受：粗体 / 引用 / 括号都算）；'
+      + '闭合标记之后要跟说明，写成 `**N/A**（理由）` 这种形态');
   }
   if (issues.increments.length > 0) parts.push('增量段位置非法: ' + issues.increments.join('、'));
   return parts;
@@ -563,15 +719,10 @@ export async function runSummaryTemplateFidelityGate({ node, state }) {
 // 节点 → 待校验工件：单一来源 = 协议。**该节点是否受模板门禁**由 protocol-utils 的
 // nodeTemplateDeclaration 决定（内置节点取引擎映射、自定义节点取协议 node.templates，未声明 =
 // 零模板 ⇒ 不校验，ADR-002 特化层）；**产出哪份工件**取该节点 outputSchemas 的 artifacts[].paths
-// （`<change-id>/…` 基），模板基名从工件名派生（`TASK.md` → TASK、`*-SUMMARY.md` → SUMMARY；`.md`
-// 的剥离沿用 protocol-utils 的 templateKeyOf 单一实现）——本模块不另写节点→工件映射。
+// （`<change-id>/…` 基），工件名 → 模板键的派生取 protocol-utils 的 templateKeyFromArtifactName
+// （与结构预检的模板指针**同一实现**：口径只有一处，本模块不再持副本）——本模块不另写节点→工件映射。
 // SUMMARY 由 execute 家族的专用门负责（它还要消费无模板时的兜底段序），此处跳过以免同一工件被
 // 两条门重复判定。
-function templateKeyFromArtifactName(namePattern) {
-  const base = String(namePattern ?? '').split('*').pop().replace(/^[^A-Za-z0-9]+/u, '');
-  return base === '' ? null : templateKeyOf(base);
-}
-
 async function nodeArtifactTargets(node) {
   let protocol = null;
   try {
@@ -587,7 +738,9 @@ async function nodeArtifactTargets(node) {
       for (const pattern of artifact.paths ?? []) {
         const segments = String(pattern ?? '').replaceAll('\\', '/').split('/');
         if (segments.length !== 2 || segments[0] !== '<change-id>') continue;
-        const key = templateKeyFromArtifactName(segments[1]);
+        // 传整条声明路径：路径归一（取末段、通配取末个 `*` 之后）由共享派生统一承担，
+        // 两处消费面因此走的是同一段归一逻辑，而不是各自先切一刀再交给共用的键归一。
+        const key = templateKeyFromArtifactName(pattern);
         if (key === null) continue;
         targets.push({ key, namePattern: segments[1] });
       }

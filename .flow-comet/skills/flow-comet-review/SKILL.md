@@ -21,11 +21,13 @@ This node performs a structured multi-round review of the implemented change, ch
 |------|------|------|
 | `REVIEW.md` | `## 第一轮 · Spec 合规审查` / `## 第二轮 · 代码质量审查（6 维衰退风险）` / `## 总结`；结构子段 `### 2.0 TEST.md 5 轮金字塔完整性` / `### 2.1` / `### 2.2` / `### 2.3` 在父段在场时必在场；文件 ≥ 100 字节；首部字段 `Change ID` / `审查时间` / `审查者` / `总体结论` 已在场时值不得为空（键集不强制） | **条件段**：`## 第三轮 · UI 视觉审查（仅前端）` / `## 第四轮 · 补充审查（按触发条件）`——标题必须在场，不适用写 `N/A`（其结构子段 `### 4.1` / `### 4.2` 在父段适用时必在场）；**增量段**：发现条目的**处置标记**（`[已修]` / `[升级]` / `[转待办]`，必填，写在 `### 2.2 6 维诊断 · 详细发现` 段内） |
 
-发现写在模板外的 `## 发现` 而 `### 2.2` 无条目 → 新 change BLOCKED（条目记录在非模板位置等于静默丢弃）；**Major `[转待办]` 须有用户裁决记录**（同段、文末或单独段落「用户裁决：接受延期」+ 指向该条目 + `[升级]` 承接——单独段落与条目以空行分隔、位置不限），缺失新 change BLOCKED / 旧 change WARN 渐进。
+发现写在模板外的 `## 发现` 而 `### 2.2` 无条目 → 新 change BLOCKED（条目记录在非模板位置等于静默丢弃）；**任何严重度的 `[转待办]` 都须有用户裁决记录**（同段、文末或单独段落「用户裁决：接受延期」+ 指向该条目 + `[升级]` 承接——单独段落与条目以空行分隔、位置不限），缺失新 change BLOCKED / 旧 change WARN 渐进；**每条判为 Minor 的发现都要在条目块内写 `判 Minor：<一句话理由>`**（判据见下方「处置标记」条），与处置标记无关——缺这行同样新 change BLOCKED / 旧 change WARN 渐进。
 
 本出口**声明加载** `TEST.md` 并做 **5 轮完整性过程检查**（细目见 `flow-comet-test` 册）；`TEST.md` 的**结构骨架校验在 verify 出口**（`flowkit.verify.v1`），不在本出口——`## 验证命令` 增量段的执行与校验同样在 verify 出口。
 
-guard 校验见 workflow-guard.mjs 的 review 出口门禁（发现区处置标记 / 发现位置 / Major 延期裁决 / 模板骨架）与模板骨架派生（段标题 / 段序 / 首部字段 / 增量段位置）；「填得好不好」由 review 自身把关。
+**AC 覆盖**在这里只做汇总提示：`REQUIREMENT.md` 的验收准则每条都应在 `TEST.md` 的 1.1 测试矩阵里有对应行；真缺时出口打印一行 `REVIEW WARN: TEST.md 的 1.1 测试矩阵缺 AC 覆盖: AC-…`——一条汇总、不逐条刷屏、**不改变退出码**。权威判定在 verify 出口：新 change 缺覆盖 **BLOCKED**（点名编号 + 恢复句「在 TEST.md 的 1.1 测试矩阵为这些 AC 补行」），旧 change WARN 渐进。判不了按成因二分（与波次判据同口径）：**模板缺席**（段名无从派生）→ 打印「未校验（<原因>）」且不改退出码（未验证 ≠ 通过，也不冒充通过）；**内容不可判** → verify 出口打印 `AC 覆盖判据无法执行`，新 change BLOCKED / 旧 change WARN 渐进（该行进入 WARN 计数）。落在内容不可判一侧的有两种形态：承载段或段内清单读不出来（`REQUIREMENT.md` 的验收准则段被删掉 / `TEST.md` 的第 1 轮段被删掉 / `REQUIREMENT.md` 无 AC 编号 / 第 1 轮内无 1.1 测试矩阵段），以及 **change 自己的载体文件本身缺席**（`REQUIREMENT.md` 缺席 / `TEST.md` 缺席）——载体文件是这个 change 自己的东西，删掉它换不到「没有可判对象」。围栏代码块里的示例行也不算覆盖（矩阵段跨过围栏读段界，示例仍只是示例）。本出口对两支判不了都不打印（不制造噪音），只汇总真缺的编号。
+
+guard 校验见 workflow-guard.mjs 的 review 出口门禁（发现区处置标记 / 发现位置 / 延期裁决（任何严重度）/ Minor 判定理由行 / 模板骨架）与模板骨架派生（段标题 / 段序 / 首部字段 / 增量段位置）；「填得好不好」由 review 自身把关。
 
 > **模板权威**：本节点产出工件的段形 = **上游模板 + 本仓登记的增量段**——唯一权威 = `flow-kit/templates/**`（段与正文），条件段 / 结构子段 / 增量段与指纹由 `../flow-comet/reference/artifact-templates.json` 登记；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
 
@@ -35,6 +37,7 @@ guard 校验见 workflow-guard.mjs 的 review 出口门禁（发现区处置标�
 
 - [ ] **工件模板保真**：每份交付工件（`*-SUMMARY.md` / TASK / CHANGE / REQUIREMENT / DESIGN）的**标题 / 首部字段 / 段序**与对应模板一致——SUMMARY 按 `flow-kit/templates/SUMMARY.md` 填写并含 `## 自检方法` 段；执行者按 `flow-kit/prompts/4-dev.md` 协议交付。
 - [ ] **Skill 工具触发可见**：检查执行者交付的 transcript，**逐节点可见本节点 skill 用 Skill 工具加载**的触发记录——声明标记在 ≠ 已加载；只看到 `skill-load` 声明命令、看不到 Skill 工具触发 → 反馈并要求补证/重做。
+- [ ] **AC 覆盖**：看到出口打印的 `REVIEW WARN: TEST.md 的 1.1 测试矩阵缺 AC 覆盖` 时逐条核对缺失编号——要么在 1.1 矩阵补行（verify 出口会据此 BLOCK），要么在 REVIEW 里说明该 AC 为何无用例并按发现条目处理（处置标记 + 严重度）；**不得因为 review 出口只汇总、不阻断，就把缺口留给 verify 出口**。
 - [ ] **Skill 工具不可用降级核验**：执行者会话具备 Skill 工具时，须见 Skill 工具加载节点 SKILL 的触发记录；不具备时（委托会话工具集无 Skill 工具），须按 Read 加载节点 SKILL + 协议，并在 Return Contract（`skillToolFallback: "<降级替代形态，如 file-read>"`）与 SUMMARY「自检方法」段显式声明——**Read 不得被声称为已注入（即未执行 Skill 工具注入，字段值必须写替代形态而非本说明）**。只回传 required-skill 标记而无降级声明 → 证据不完整，要求补声明；声明齐全的环境限制不判为代码缺陷。
 
 ### Prerequisites
@@ -75,7 +78,7 @@ guard 校验见 workflow-guard.mjs 的 review 出口门禁（发现区处置标�
 3.5. **Round 2.0 — TEST.md 5-round pyramid completeness**: Before code quality, verify TEST.md:
    - All 5 rounds have clear status (no unfilled).
    - Skipped rounds have reasons.
-   - Round 1 (functional): every AC has coverage.
+   - Round 1 (functional): every AC has coverage — every acceptance criterion in `REQUIREMENT.md` reads a row in the 1.1 test matrix. When any is missing the review exit prints one summary line (`REVIEW WARN: TEST.md 的 1.1 测试矩阵缺 AC 覆盖: AC-…`) and keeps its exit code, while the verify exit is the authoritative gate: a new change blocks on the gap with the recovery line "add the rows to TEST.md's 1.1 test matrix", an older change warns. When the criterion cannot be judged the causes part ways (the same convention as the wave rule): a missing template — the section names cannot be derived — prints "not checked (<reason>)" and keeps the exit code, while content that cannot be judged is not a pass: the exit reports that the AC coverage rule cannot run, blocks a new change, warns on an older change and counts that warning. Two shapes fall on that side: the carrier section or the list inside it cannot be read (the acceptance section deleted from `REQUIREMENT.md`, the round-1 section deleted from `TEST.md`, no AC ids, or no 1.1 test matrix inside the round-1 section), and a carrier document of the change itself being gone — `REQUIREMENT.md` absent or `TEST.md` absent: the document belongs to this change, so deleting it is not "nothing to judge"; a sample row inside a fenced code block counts as neither coverage nor a declared criterion either, because the matrix section steps over fences while the sample stays a sample. This exit prints neither of the two not-judged branches.
    - Round 2 (performance): if required, has actual/budget/baseline columns.
    - Round 3 (security): if required, has dependency/secret/SAST/OWASP records.
    - Round 4 (compatibility): if required, has browser matrix/migration/cross-version.
@@ -94,18 +97,20 @@ guard 校验见 workflow-guard.mjs 的 review 出口门禁（发现区处置标�
    - **4.1 Tech debt assessment**: If milestone/quarterly release, run `/brooks-debt` (Codex: `$brooks-debt`). Categorize findings into Critical (fix now) / Scheduled (next 1-3 iterations) / Monitored (record only).
    - **4.2 Cross-model spot-check**: If involves security/auth/concurrency/single function >80 lines/coverage drop: run same review with another model, record divergence.
 
-7. **Severity grading**: Each finding gets:
+7. **Severity grading**: Each finding gets one of three grades — **Major 是默认档位**：
    - Critical (must fix: data corruption, security, AC not met)
-   - Major (should fix: design issues, significant regression)
-   - Minor (optional: naming, style, small refactor)
+   - Major (should fix: design issues, significant regression) — **默认**：拿不准就判 Major
+   - Minor (optional: naming, style, small refactor) — **仅当同时满足下方「Minor 的判据」全部五条**才可判；且该条目必须带一行 `判 Minor：<理由>`
 
 8. **Generate fix tasks**: For all Critical and decided-to-fix Major findings, append to `.specs/<change-id>/TASK.md` as numbered fix tasks with full 7 fields — 追加到 TASK.md 的 `## Fix 任务` 段内（**禁止文件尾追加**）, then follow the「修复回路状态机路径」section below: home back to execute and run its four exit gates before review can be closed.
 
 9. **Disposition markers (problem-handling principle)**: Every finding entry in the `## 发现` section of REVIEW.md — including Minor — must carry a **disposition marker** so findings never silently disappear after being recorded:
    - `[已修]` — fixed via a fix task (linked in the entry)
    - `[升级]` — escalated to the user for a decision (accept + reason recorded)
-   - `[转待办]` — deferred to `.specs/<change-id>/KNOWN-ISSUES.md` at archive time
-   - **Major 不得由 reviewer 自行 `[转待办]`**：Major 的延期属用户决策点，reviewer 须先标 `[升级]` 等用户裁决；用户接受延期后，在同段、文末或单独段落记录「用户裁决：接受延期」并指向该条目（由 `[升级]` 承接），方可标 `[转待办]`——单独段落与发现条目以空行分隔、可位于发现区中间，位置不限（guard 按独立段落匹配，不要求位于文末）。review exit 结构校验：Major 条目标 `[转待办]` 而缺上述记录 → 新 change BLOCKED / 旧 change WARN 渐进；Minor `[转待办]` 不受影响，`[升级]` / `[已修]` 的 Major 直接放行。
+   - `[转待办]` — deferred to `.specs/<change-id>/KNOWN-ISSUES.md` at archive time；**延期在任何严重度上都是用户决策点**
+   - **`[转待办]` 一律需用户裁决（Major 与 Minor 同一标准）**：延期不是 reviewer 能自行给出的处置。reviewer 须先标 `[升级]` 等用户裁决；用户接受延期后，在同段、文末或单独段落记录「用户裁决：接受延期」并指向该条目（由 `[升级]` 承接），方可标 `[转待办]`——单独段落与发现条目以空行分隔、可位于发现区中间，位置不限（guard 按独立段落匹配，不要求位于文末）。review exit 结构校验：条目标 `[转待办]` 而缺上述记录 → 新 change BLOCKED / 旧 change WARN 渐进；`[升级]` / `[已修]` 的条目直接放行。
+   - **Minor 的判据（五条全中才算 Minor，否则按 Major 处理）**：① 不改变任何行为与输出；② 不影响任何对外 / 对用户的表述（文档、报文、CHANGELOG）；③ 不新增或保留第二份等价实现；④ 不削弱任何断言或测试判别力；⑤ 不涉及跨平台 / 分发形态。**不满足任一条即按 Major 处理**——举证责任在「判 Minor」的一侧，不在「判 Major」的一侧。每条判为 Minor 的发现都必须带一行判定理由，形态固定为 `判 Minor：<一句话理由，对应①~⑤>`，写在条目块内、与条目标题之间不留空行，**与处置标记无关**（`[已修]` / `[升级]` / `[转待办]` 一律要：理由落在判定当时，而不是延期时再补）；缺该行 → 新 change BLOCKED / 旧 change WARN 渐进。
+   - **修复回路内不得延期**：在一次修复回路里新发现的条目，只能是 `[已修]` 或 `[升级]`（交用户裁决）——即使该条目已有用户裁决的延期记录在场，也不得把修复回路新增的发现标 `[转待办]`。回路是「把本轮引入的问题收干净」的窗口，不是继续开新账的入口。
    The exit guard structurally checks these markers on the findings area: a missing marker **blocks** the exit for a new change, and is a non-blocking warning for a legacy change (to avoid deadlocking legacy reviews). Add markers to clear it.
 
 The full review protocol, templates, and checklists are in:
@@ -116,7 +121,7 @@ The full review protocol, templates, and checklists are in:
 
 This node is truly done when:
 - `.specs/<change-id>/REVIEW.md` exists with all 3 mandatory rounds completed.
-- Every finding has a severity label, file:line reference, and a disposition marker (`[已修]` / `[升级]` / `[转待办]`).
+- Every finding has a severity label, file:line reference, and a disposition marker (`[已修]` / `[升级]` / `[转待办]`); every `[转待办]` has a recorded user ruling, and every Minor carries its `判 Minor：` reason line.
 - All Critical items are either fixed (fix tasks generated) or explicitly accepted with user confirmation.
 - 0 unacknowledged Critical items remain.
 - TEST.md 5-round pyramid completeness has been verified.
@@ -126,11 +131,14 @@ This node is truly done when:
 
 - **Agent thought**: "Code looks good, no issues found." **Actual risk**: Concluding without file:line references means the review was superficial. Every finding must point to specific code.
 - **Agent thought**: "TEST.md exists, that's enough." **Actual risk**: Not checking test pyramid completeness means gaps in test coverage go undetected. Must verify all 5 rounds have clear status.
+- **Agent thought**: "The exit only warned about the missing AC coverage, so it is not my problem." **Actual risk**: 汇总不阻断是分工，不是豁免——verify 出口会就同一份缺口 BLOCKED（新 change）。缺口只有两条出路：在 1.1 矩阵补行，或把它作为发现条目按处置标记处理；把缺口留到 verify 等于把可修的问题变成一次节点返工。
 - **Agent thought**: "I'll fix this small issue directly." **Actual risk**: Reviewer modifying code violates R3.3. Must generate fix tasks instead.
 - **Agent thought**: "Round 3 (UI) is optional." **Actual risk**: For frontend projects with UI changes, Round 3 is mandatory. Only non-frontend projects skip it.
 - **Agent thought**: "6-dimension review is just a checklist." **Actual risk**: Without file:line references and book citations (when using built-in path), the review lacks rigor and fixability.
-- **Agent thought**: "I'll record this Minor and move on." **Actual risk**: Findings (especially Minor) that are recorded without a disposition marker silently disappear — the exit guard warns on missing markers; every finding must be `[已修]`, `[升级]` (user decision), or `[转待办]` (tracked for archive).
-- **Agent thought**: "This Major is not for this batch, I'll defer it to backlog myself." **Actual risk**: Major 延期属用户决策点——reviewer 自行 `[转待办]` 会被退出守卫拦截（新 change BLOCKED / 旧 change WARN）；须先 `[升级]` 等用户裁决，用户接受延期后才可记录裁决并转待办。
+- **Agent thought**: "I'll record this Minor and move on." **Actual risk**: 不带处置标记（或判了 Minor 却写不出 `判 Minor：` 理由）的发现等于静默丢弃——退出守卫按结构拦截；每条发现都必须是 `[已修]`、`[升级]`（交用户裁决）或 `[转待办]`（延期，须先有用户裁决）。
+- **Agent thought**: "This finding is not for this batch, I'll defer it to backlog myself." **Actual risk**: 延期在任何严重度上都是用户决策点——Major 与 Minor 一视同仁；reviewer 自行 `[转待办]` 会被退出守卫拦下（新 change BLOCKED / 旧 change WARN），须先 `[升级]` 等用户裁决，用户接受延期后才可记录裁决并转待办。
+- **Agent thought**: "It's only naming and style, Minor is fine." **Actual risk**: Minor 的判据是五条全中而不是主观轻重——改行为、改对外表述、留第二份等价实现、削弱断言、触及跨平台面，任一条成立即按 Major 处理；宽判 Minor 正是遗留账不断增长的入口，判不准时默认 Major。
+- **Agent thought**: "I'm in a fix loop, I'll defer this new one." **Actual risk**: 修复回路内新发现的条目只能 `[已修]` 或 `[升级]`——不得 `[转待办]`，即使裁决记录在场；这是纪律要求，守卫只看结构、看不出你在回路里第几轮。
 
 ## 修复回路状态机路径
 
@@ -141,6 +149,7 @@ review 发现 Critical / Major 后的修复必须回到 `execute` 节点生命�
 3. **跑完 execute 四类出口**：`record execute` → `exit execute --apply`——全任务 done / 逐任务 SUMMARY 完备 / 6 维自查 + 自检方法声明 / 任务集签名一致，任一缺失即 BLOCKED；通过后引擎把当前节点推回 review。
 4. **回源节点跑出口**：回到源节点后跑该节点出口门禁（`entry <源节点>` → `exit <源节点> --apply`），通过后继续 review → verify 的正常路由，必要时进入下一轮 Fix 闭环。
 5. **禁止绕过**：驻留源节点不归位、顺手改完后直接跑源节点 exit 收场会被 BLOCKED；不得用跳过归位或出口门禁的手段（含手动改写 `.flow-comet/flow-comet-state.json`）替代本路径。
+6. **回路内新发现的条目不得延期**：修复过程中（含回到 review 复检时）新发现的条目只能标 `[已修]` 或 `[升级]`（交用户裁决），**不得**标 `[转待办]`——即使已有用户裁决的延期记录在场。回路是把本轮引入的问题收干净的窗口，不是继续开新账的入口；守卫只做结构判定，这一条靠执行纪律。
 
 **何时读完整规格**：要核对完整判据——Fix 任务与任务集签名的时序、受控归位的完整判定条件、`FIX-BATCH` / `RETURN` 审计行三态语义与回源节点的回程豁免、绕过的失败面与恢复指引——读 `../flow-comet/reference/fix-loop.md`（**当你 review 发现缺陷、要开修复回路把工作退回 execute 生命周期时读它**）。
 

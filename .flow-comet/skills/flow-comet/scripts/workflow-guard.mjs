@@ -32,6 +32,13 @@ import {
   taskSetSignature,
 } from './route-node.mjs';
 import { taskBlocks as extractTaskBlocks, taskOpeningAttrs } from './task-parsing.mjs';
+// 声明标记目录的路径规则（活动路径 + 归档兜底）归状态族的路径上下文模块——入口只取它的活动形态
+// （includeArchive: false，理由见 checkPromptDeclarations），不在这里另拼一份 .skill-loads 路径。
+import { findSkillLoadsDir } from './lib/state-io.mjs';
+// 一个标记可能声明多份协议（skill-load 的多个 --prompt 记在 protocols 数组，protocol 只留首个）：
+// 逐份取值的单源在状态族（与出口覆盖判据同一实现）——在这里另写一份 basename 提取，入口与出口
+// 就会对「这个标记到底声明了哪几份协议」给出两种答案。
+import { markerProtocolBasenames } from './lib/state-skillmarkers.mjs';
 import {
   fileExists,
   packageRoot,
@@ -72,10 +79,13 @@ import {
   runRequirementAcGate,
   runReviewExitGate,
   runSkillLoadMarkerGate,
+  runStructuralPreflight,
   runTaskSetSignatureExitGate,
   runTransitionEvidenceGate,
 } from './lib/guard-gates.mjs';
 import {
+  guardDeclarationCommand,
+  nodeSkillLoadCommands,
   runArtifactGate,
   runDirectOverrideGate,
   runEvidenceCompletionGate,
@@ -92,6 +102,69 @@ import {
 const command = process.argv[2] ?? 'verify';
 const nodeId = process.argv[3] ?? null;
 const apply = process.argv.includes('--apply');
+// 结构化预检（只读）：只跑结构性门禁子集（清单在 guard-gates 的 runStructuralPreflight），
+// 含本节点声明工件的存在性（缺件即 BLOCK，不再是「不在场就跳过」的静默通过）。
+const preflight = process.argv.includes('--preflight');
+
+// exit 的已知参数（白名单）：--apply（落盘推进）/ --preflight（结构预检）/ --protocol [<path>]
+// （全局协议选择，取值由 resolveProtocol 校验）。其余 `--*` 一律用法错误——静默忽略会把「参数
+// 写错」变成「命令照跑」：`--bogus` 让一次只读预检被当成通过，`--prefligh`（笔误）既不做预检、
+// 也不报错，静默改跑完整出口链。判据取白名单而非黑名单：新增参数必须先在此登记，参数面才不会
+// 随实现漂移。
+const EXIT_KNOWN_FLAGS = new Set(['--apply', '--preflight']);
+function assertKnownExitArgs(argv) {
+  const args = argv.slice(3); // 跳过 node 可执行文件、本脚本、command
+  const unknown = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (typeof arg !== 'string' || !arg.startsWith('--')) continue;
+    if (arg.startsWith('--protocol=')) continue;
+    if (arg === '--protocol') {
+      index += 1; // 取值：缺失时由 resolveProtocol 报「requires a path argument」，不在解析层抢报
+      continue;
+    }
+    if (!EXIT_KNOWN_FLAGS.has(arg)) unknown.push(arg);
+  }
+  if (unknown.length > 0) {
+    throw new Error('用法错误: exit 收到未知参数 ' + unknown.join(' ')
+      + '——exit 只接受 <node> 与 --apply / --preflight / --protocol <path>'
+      + '（用法: workflow-guard.mjs exit <node> [--apply] [--preflight]）');
+  }
+}
+
+// exit 的位置参数面（与上面的旗标白名单同属一道 fail-closed 判定）：argv[3] 是唯一的位置参数
+// （节点名），其后不再接受任何裸位置参数；单横线开头的 token（单横线笔误的 -apply、-h、-）不是
+// 本仓任何脚本的旗标形态（全局旗标一律双横线），按「疑似旗标写错」判用法错误。修复前这两种形态
+// 都被静默忽略：exit execute -apply 既不落盘也不报错，看起来像一次成功的预演；多余的裸词同样
+// 无人认领。判据取「节点名 + 已知旗标」的正面形态，不猜意图；--protocol 的取值是旗标的操作数、
+// 不是位置参数（两者在同一命令里并存），故解析时随该旗标一起跳过。
+const EXIT_SUSPECTED_FLAG_RE = /^-(?!--)/u;
+function assertExitOperandSurface(argv) {
+  const args = argv.slice(3); // 索引 0 = 节点名（唯一允许的位置参数）
+  const suspected = [];
+  const extra = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (typeof arg !== 'string' || index === 0) continue;
+    if (arg === '--protocol') {
+      index += 1; // 取值（缺失时由 resolveProtocol 报 requires a path argument，与白名单判定同口径）
+      continue;
+    }
+    if (arg.startsWith('--')) continue; // 已知 / 未知双横线旗标已由 assertKnownExitArgs 判过，不在此抢报
+    if (EXIT_SUSPECTED_FLAG_RE.test(arg)) suspected.push(arg);
+    else extra.push(arg);
+  }
+  if (suspected.length > 0) {
+    throw new Error('用法错误: exit 收到疑似旗标 ' + suspected.join(' ')
+      + '——本仓旗标一律以 -- 开头；exit 只接受 --apply / --preflight / --protocol <path>'
+      + '（用法: workflow-guard.mjs exit <node> [--apply] [--preflight]）');
+  }
+  if (extra.length > 0) {
+    throw new Error('用法错误: exit 只接受一个位置参数（节点名），多余位置参数: ' + extra.join(' ')
+      + '——其余一律用已知旗标（--apply / --preflight / --protocol <path>）'
+      + '（用法: workflow-guard.mjs exit <node> [--apply] [--preflight]）');
+  }
+}
 
 // WARN 计数——entry/exit 成功路径末尾输出汇总行（可观测性；追加不改变既有输出）
 let __warnCount = 0;
@@ -125,40 +198,81 @@ async function resolveGuardProtocolPath() {
 }
 
 // skill-load 声明里的 --prompt 与节点协议文件的一致性（入口侧）：扫描本节点已写下的声明标记，
-// 任何一条显式声明的协议文件落在该节点协议面之外 → BLOCK。判据单实现在 protocol-utils 的
-// promptDeclarationConflict，本函数只负责读标记目录；出口侧的「至少一个标记 ∈ 节点协议集」门落在
-// guard-gates——两处同源不同层（入口判「每条声明都对」，出口判「本节点确有可用声明」）。
+// **逐份**核对每条声明（一个标记可声明多份：protocols 数组 + protocol 单值），任何一份落在该节点
+// 协议面之外 → BLOCK。判据单实现在 protocol-utils 的 promptDeclarationConflict；逐份取值的单源在
+// state-skillmarkers 的 markerProtocolBasenames（出口覆盖判据读同一份）。本函数只负责读标记目录；
+// 出口侧的「该读的每份协议是否都被声明」门落在 guard-gates——两处同源不同层（入口判「每条声明都
+// 对」，出口判「必需项都声明了」）。只读 protocol 单值时，多 --prompt 的第二份声明在入口不被核对。
 async function checkPromptDeclarations({ node, state }) {
   if (!state.activeChange) return;
-  const loadsDir = path.join(runRoot, '.specs', state.activeChange, '.skill-loads');
-  let names;
-  try {
-    names = await fs.readdir(loadsDir);
-  } catch {
-    return; // 声明机制未激活（本节点还没写过声明）：入口不追溯，缺失由出口声明门报
-  }
+  // 只认活动路径（includeArchive: false）：入口核对的是**这一轮**写下的声明，而归档里的声明属于
+  // 归档前的执行者——拿它来判当前节点，会把「这一轮没声明」判成「声明过」并放过错路径。入口本就不
+  // 追溯归档（声明机制未激活时直接返回，缺失由出口声明门报），故这里不改判据、只把差异写进参数。
+  const loadsDir = await findSkillLoadsDir(runRoot, state.activeChange, { includeArchive: false });
+  if (loadsDir === null) return; // 声明机制未激活（本节点还没写过声明）：缺失由出口声明门报
+  const names = await fs.readdir(loadsDir.dir).catch(() => []);
   const prefix = node.id + '-';
   const conflicts = [];
   for (const name of names.filter((entry) => entry.startsWith(prefix) && entry.endsWith('.json'))) {
     let marker;
     try {
-      marker = JSON.parse(await fs.readFile(path.join(loadsDir, name), 'utf8'));
+      marker = JSON.parse(await fs.readFile(path.join(loadsDir.dir, name), 'utf8'));
     } catch {
       continue; // 损坏标记由出口声明门报，不在这里抢报（同一缺陷不写两处措辞）
     }
     if (marker?.auto === true) continue; // 引擎代记的标记不是执行者的声明
-    const conflict = promptDeclarationConflict({ node, declaredProtocol: marker?.protocol });
-    if (conflict) conflicts.push({ name, ...conflict });
+    const skill = typeof marker?.skill === 'string' && marker.skill !== '' ? marker.skill : null;
+    // 逐份核对：多 --prompt 的标记里每一份声明都要过同一判据（单值读法会漏掉第二份）
+    for (const declaredProtocol of markerProtocolBasenames(marker)) {
+      const conflict = promptDeclarationConflict({ node, declaredProtocol });
+      if (conflict) conflicts.push({ name, skill, ...conflict });
+    }
   }
   if (conflicts.length === 0) return;
+  // 重新声明的命令由协议派生（与出口恢复段、状态命令族同一装配）：旧报文写的是
+  // `skill-load <node> <skill> --prompt <上述协议文件>`——占位符落在 --prompt 的值位置（bash 下 `<`
+  // 是重定向，照抄直接语法失败），而且只补首份协议；即便换成真实路径，下一次入口仍会点名另一份。
+  // 技能取该标记自己声明的那个（重跑即覆写同一份标记，不新增）；标记没有技能名时退回该节点的
+  // 必需技能集（一条技能一条命令）。
+  const derived = await nodeSkillLoadCommands({ node, state });
+  const commands = [];
+  for (const conflict of conflicts) {
+    if (conflict.skill === null) {
+      commands.push(...derived.map((entry) => entry.command));
+      continue;
+    }
+    const declared = derived.find((entry) => entry.skill === conflict.skill);
+    commands.push(declared ? declared.command : guardDeclarationCommand({ node, skill: conflict.skill }));
+  }
+  const unique = commands.filter((command, index) => commands.indexOf(command) === index);
   console.error('BLOCKED: 节点 ' + node.id + ' 的 skill-load 声明 --prompt 与节点协议文件不符——'
     + conflicts.map((conflict) => conflict.name + ' 声明 ' + conflict.declared
       + '（应为 ' + conflict.expected.map(promptPointerPath).join(' / ') + '）').join('；')
-    + '；重跑 skill-load ' + node.id + ' <skill> --prompt <上述协议文件> 重新声明后重试');
+    + '；重跑下面的命令重新声明后重试（同一 node-skill 重跑会覆写该标记）：\n'
+    + unique.map((command) => '  ' + command).join('\n'));
   process.exit(1);
 }
 
 async function main() {
+  // 参数解析 fail-closed（先于任何语义校验）：未知 `--*` 不是「忽略即可」的噪音，而是「这条命令
+  // 实际跑的不是你以为的那条」。只在 exit 上启用——entry / verify 的参数面由既有校验覆盖，本条
+  // 针对的正是预检分支所在的命令。旗标白名单之后紧接着判位置参数面（节点名唯一、单横线疑似旗标
+  // 一律用法错误），两者合起来才是「一个节点名 + 已知旗标」的完整参数面。
+  if (command === 'exit') {
+    assertKnownExitArgs(process.argv);
+    assertExitOperandSurface(process.argv);
+  }
+  // 结构化预检的参数防护（fail-closed）：--preflight 只读、只与 `exit <node>` 搭配。
+  // 与 --apply 同时给没有任何合法语义（一个只读、一个落盘）→ 用法错误非零退出，不猜意图；
+  // 其它命令（entry / verify / 未知命令）同样拒绝——预检不是第二套入口门禁。
+  if (preflight && apply) {
+    throw new Error('用法错误: --preflight 只读，不能与 --apply 同时使用（一个只读、一个写盘，组合无合法语义）'
+      + '——用法: workflow-guard.mjs exit <node> --preflight（结构预检）或 workflow-guard.mjs exit <node> [--apply]（完整出口）');
+  }
+  if (preflight && command !== 'exit') {
+    throw new Error('用法错误: --preflight 只能与 exit <node> 搭配（当前命令: ' + command + '）'
+      + '——用法: workflow-guard.mjs exit <node> --preflight');
+  }
   // 包装 console.error 统计 WARN 输出（转发原实现，行为不变）
   console.error = (...args) => {
     if (/WARN/.test(args.join(' '))) __warnCount += 1;
@@ -226,8 +340,18 @@ async function main() {
     await runEntryGates({ protocol, node, state, file });
     return;
   }
+  if (preflight) {
+    // 结构化预检：只跑结构门禁子集（单一清单在 guard-gates 的 runStructuralPreflight），不写 state、
+    // 不写模板提示账本——因此也**不打印 --apply 引导**（预检不推进状态，那行会误导：它只说明
+    // 「再跑一次就能落盘」，而预检的价值恰恰是在不落盘的前提下反复跑到结构干净）。
+    console.log('PREFLIGHT: 结构预检——只跑结构性门禁（含本节点声明工件存在性；不写 state、不写提示账本；完整 exit 不带 --apply 才是全链预演）');
+    await runStructuralPreflight({ protocol, node, state });
+    console.log('ALL CHECKS PASSED');
+    console.log('PREFLIGHT: structural checks only（结构预检通过；推进仍由 exit ' + node.id + ' --apply 负责）');
+    return;
+  }
   // —— 出口校验链（顺序即语义：每条门禁命中即按既有分级 BLOCKED / WARN）——
-  const evidence = requireNodeEvidence({ node, state });
+  const evidence = await requireNodeEvidence({ node, state });
   await runExitDriftGate({ protocol, node, state, evidence });
   await runFixBatchExitGate({ protocol, node, state });
   runEntryRecordGate({ node, state });
@@ -262,7 +386,6 @@ async function main() {
   runReturnContractGate({ node, state });
   await runSubagentSummaryGate({ node, state });
   await runMultiPassCompletionGate({ node, state });
-  await runSkillLoadMarkerGate({ node, state });
   await runSummaryTemplateFidelityGate({ node, state });
   await runTaskSevenFieldGate({ node, state });
   await runIntakeDocFidelityGate({ node, state });
@@ -275,6 +398,10 @@ async function main() {
     emptyExitExempt: executeEmptyExitExempt,
   });
   runRequiredEvidenceGate({ node, evidence });
+  // 声明覆盖门排在证据族之后：同一个「缺声明」既可能表现为证据清单缺 required-skill（证据门的报文
+  // 给出该绑定的补齐命令），也可能表现为声明标记没覆盖必需项（本门的报文逐项点名缺哪个协议文件 /
+  // 哪个必需技能）。证据门先说话，本门收口——两者都说同一件事时不会各给一条互相打断的路径。
+  await runSkillLoadMarkerGate({ node, state });
   if (apply) {
     const completed = completedSet(state);
     // Fix 二次完成信号：exit 的 execute 家族节点在本次 exit 之前已在 completedNodes（首轮 exit

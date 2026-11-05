@@ -35,6 +35,7 @@ import {
   summaryContent,
   writeBridgeFixture,
   writeIntakeArtifacts,
+  writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import {
   assertInstalledCopyBridgeVersionCase,
@@ -1002,6 +1003,7 @@ export const ENTRIES = [
       };
       st.newChange = true;
       writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'plan');
       // ① record 后未 exit 先 next：不把 currentNode 提前校正到 subagent-execute（路由后继）
       const r1 = runStateWithProtocol(dir, ['next']);
       assertExit(r1, 0);
@@ -1060,6 +1062,7 @@ export const ENTRIES = [
       };
       st.newChange = true;
       writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'execute');
       const res = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(res, 0);
       assertNotOut(res, 'BLOCKED: currentNode');
@@ -1165,6 +1168,7 @@ export const ENTRIES = [
       st.directOverrideSource = 'execution-mode';
       st.newChange = true;
       writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'execute');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
         '<task id="S01" status="done"><action>实现 S01</action><write_files>src/s1.mjs</write_files><verify>node --check src/s1.mjs</verify></task>\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/S01-SUMMARY.md', strictSummary('S01'));
@@ -1254,6 +1258,7 @@ export const ENTRIES = [
       st1.executionMode = 'direct';
       st1.directOverride = true;
       writeState(dir, st1);
+      writeNodeDeclarationMarkers(dir, 'execute');
       writeTask();
       const rBlock = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(rBlock, 1);

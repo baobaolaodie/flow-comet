@@ -13,6 +13,12 @@ import { validateStateFields } from '../state-schema.mjs';
 import { inspectWorkflowPathSegments } from '../protocol-utils.mjs';
 import { fileExists, inspectReentryChangeDir, readJson, readState, runRootDir, specsDir, stateFile, writeState } from './state-io.mjs';
 import { TASK7_REQUIRED } from './task-graph.mjs';
+// TASK.md 段形权威（P2b）：replan 复用 plan 出口的同一份骨架门——骨架（模板 + 登记表）与报错片段
+// （formatIssueParts）都从这两个模块取用，重校段不自持第二份段名清单 / 第二套措辞。
+import { evaluateArtifact, formatIssueParts } from './guard-template-fidelity.mjs';
+// 波次投影（波次 = 依赖层级的投影）：与 plan 出口同一实现、同一报文——replan 的重校段消费它，
+// 不另写一份判定（两处各写一份，改散文即可绕过其中一处）。
+import { parallelGapOutcome, parallelGapReview, waveProjectionReview, waveReviewOutcome } from './wave-projection.mjs';
 
 // reenter <target> --authorized-by <source> --reason <text> [--continue-round <n>]
 // 受控重入（archive 源回边）：archive 已 entry 且归档移动尚未发生时，用户显式授权把工作归属
@@ -265,6 +271,39 @@ export async function runReenter(protocol, argv) {
   return;
 }
 
+// TASK 段形前置（P2b）：计划重校是「已签发计划的修订」，TASK.md 的段形由模板权威裁定——plan 出口
+// 已用同一份骨架门（evaluateArtifact + formatIssueParts）拦过缺段，重校段不豁免：执行期把承载段
+// （`## 波次划分` 等模板必需段）删掉再改任务集，不得换到「未校验」放行口（否则「删一个段」就是
+// 关掉波次判据的写法）。模板缺席 ⇒ 段集合无从派生，本判据整段跳过（plan 出口在同一输入下也只打印
+// 「未校验（模板缺失）」；它对标题 / 首部字段的另判属另一层判据面，不在本判据的判据面内——重校段
+// 要堵的是「删段再改任务集」）。同一形态下波次判据自己那行「未校验（无波次段）」照常打印，两条边界
+// 各说各的事实。
+// 报文与分级取用 plan 出口的同一份实现（骨架 = 模板 + 登记表；片段 = formatIssueParts），失败行
+// 因此与 plan 出口**逐字一致**（escalate=false，两阶段口径不变）；重校段的现场适配只落在恢复行：
+// ① 缺的段名在这里点名（重校段没有提示账本可「再犯升级」，等第二次才说段名等于永远不说）；
+// ② 重试目标是本命令（人在 replan 现场，改完要重跑的是它）。分级沿用既有语义：新 change BLOCKED、
+// 旧 change WARN 渐进。
+async function replanTaskStructureGate(state, taskContent) {
+  const taskArtifact = await evaluateArtifact('TASK', taskContent, {});
+  if (!taskArtifact.derived) return; // 模板缺席 ⇒ 段形无从派生（与 plan 出口同一支「未校验（模板缺失）」）
+  // escalate: false = 失败行只报类别计数——与 plan 出口**逐字一致**（两阶段口径是公开行为：
+  // 首次只给模板路径与类别计数）。重校段没有提示账本可「再犯升级」，段名因此放在恢复行点名，
+  // 不靠第二次失败才出现，也不与那条两阶段口径矛盾。
+  const parts = formatIssueParts(taskArtifact.issues, { escalate: false });
+  if (parts.length === 0) return;
+  const templateFile = taskArtifact.skeleton.file ?? '（登记表未登记模板路径）';
+  const failureLine = 'TASK.md 模板结构校验失败: ' + parts.join('; ') + '（模板: ' + templateFile + '）';
+  if (state.newChange === true) {
+    const missingSections = taskArtifact.issues.missing ?? [];
+    console.error('BLOCKED: ' + failureLine);
+    console.error('恢复: 对照 ' + templateFile + ' 修正标题 / 首部字段 / 段序，并按模板补齐缺失的 H2 与结构型 H3 标题'
+      + (missingSections.length > 0 ? '（缺失的段: ' + missingSections.join('、') + '）' : '')
+      + '——承载段被删掉也算缺段，删段不是跳过判据的写法；改完重试 replan（replan 不做校验豁免，状态零改写）');
+    process.exit(1);
+  }
+  console.error('TEMPLATE-STRUCTURE WARN: ' + failureLine + '（旧 change 渐进，不阻断；新 change 将强制）');
+}
+
 // replan <reason> --authorized-by <source> [--continue-round <n>]
 // 受控计划重校重签（ADR-013）：计划在执行中被证明有缺陷时，唯一合规的重签入口——只在
 // execute / subagent-execute 相位可用、停原位（不跳节点、不改 completedNodes），先把任务集
@@ -421,6 +460,27 @@ export async function runReplan(protocol, argv) {
       + '；恢复: 调整任务 depends_on——移除成环引用或改为真实存在的任务 id 后重试');
     process.exit(1);
   }
+  // TASK 段形前置（P2b）：判据与措辞见 replanTaskStructureGate（本函数只负责顺序——结构先于内容）。
+  await replanTaskStructureGate(state, taskContent);
+  // 波次投影（波次 = 依赖层级的投影）：与 plan 出口**同源**调用同一判定与同一报文构造（ADR-013：
+  // replan 绝不豁免——此处不判，改一改波次散文就能绕过 plan 出口的同一判据）。新 change 不一致
+  // （含未被 Wave 行声明的任务，明细取值「未声明」）→ BLOCK（逐条点名 + 恢复指引；本段全部先于
+  // 备份与写盘，故状态零改写），旧 change WARN 渐进。「判不了」按成因二分——载体缺席（无段 / 段名
+  // 无从派生）打印「未校验」并跳过；内容不可判（段在场却无可对应任务）与 plan 出口同分级。
+  // 分级与措辞都由 waveReviewOutcome 一处产出（本段只派生 blocking）：两处不可能各说一套，也不会
+  // 因为「分级规则只改了一处」而在另一处静默落后。
+  const waveReview = waveProjectionReview({ taskContent, blocks: taskList });
+  const waveOutcome = waveReviewOutcome(waveReview, { blocking: state.newChange === true });
+  for (const line of waveOutcome.lines) console.error(line);
+  if (waveOutcome.block) process.exit(1);
+  // 同波可并行却漏标 [P]：plan 出口的第二条波次面判据，重校段同样不豁免（ADR-013）——否则执行期
+  // 重签就能把「本可并行却没标」的计划换一份发出去。波次分组复用上面同一次解析（waveReview.waves）。
+  const gapOutcome = parallelGapOutcome(
+    parallelGapReview({ taskContent, blocks: taskList, waves: waveReview.waves }),
+    { blocking: state.newChange === true },
+  );
+  for (const line of gapOutcome.lines) console.error(line);
+  if (gapOutcome.block) process.exit(1);
   // 任务字段完整性（与 plan 出口同一判据）：字段集从 `task-graph.mjs` 的单一权威常量取用——本模块
   // 是执行期唯一允许修订任务集的通道，若在此另写一份字面集合，plan 出口会拒的任务集将被 replan
   // 静默放行。新模板形态（含 <name>）且新 change → BLOCK；旧式一字段形态 / 旧 change 保持渐进
@@ -573,6 +633,12 @@ export async function runReplan(protocol, argv) {
     : '第 ' + round + '/' + REPLAN_ROUND_LIMIT + ' 轮';
   console.log('REPLAN: ' + decision.node + ' 重新校验通过（授权源 ' + source + '；' + roundLabel
     + '；备份 ' + backupRecord + '）');
+  // 成功行的事实说明（只加一行可观察事实，REPLAN 行前缀与语义不变）：重签的是 state.taskHash，
+  // 只写重校审计；TASK.md 保持执行者修订后的原文，plan 节点证据不会重记（防误以为 replan 会
+  // 重写计划工件或重跑计划阶段）。值前缀从实际签名派生，不在这里手写版本字面量。
+  const signaturePrefix = String(taskSetSignatureValue).split(':')[0] + ':';
+  console.log('TASKHASH: 已重签 state.taskHash（值前缀 ' + signaturePrefix
+    + '）——TASK.md 内容未改写、plan 节点证据未重记（重签只覆盖任务集签名与重校审计）');
   console.log('REASON: ' + reason);
   return;
 }

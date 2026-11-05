@@ -10,7 +10,7 @@
 import fs from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
-import { assertEqual, assertExit, assertNotOut, assertOut, assertTrue, baseState, runGuard, runHandoff, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
+import { assertEqual, assertExit, assertNotOut, assertOut, assertTrue, baseState, installSkillTreeCopy, runGuard, runHandoff, runPrintedCommand, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
 import { archiveRecordJson, multiWaveTaskContent, explainContractProblems, assertExplainFailClosed, explainReverseConstructionProblems, CHANGE_ID, readStateFile, gitInit, gitBranch, writeIntakeArtifacts, fullContract, execSummaryFixture, assertNodeLine, driveThroughDesign } from '../lib/system-fixtures.mjs';
 
 // skill-load 的模板声明（节点级，C3/AC-13 加载链）：参数化的委托驱动按节点查表——夹具是真实命令
@@ -28,6 +28,30 @@ function skillLoadArgs(nodeId, skill, prompt) {
   const args = ['skill-load', nodeId, skill, '--prompt', prompt];
   if (TEMPLATE_DECLARATION[nodeId]) args.push('--templates', TEMPLATE_DECLARATION[nodeId]);
   return args;
+}
+
+// 协议 requiredSkillCalls 中 enforcement='guarded' 的协调者技能（逐节点查表，与
+// reference/workflow-protocol.json 同值）：节点实现技能与必需技能是两个声明面——出口的覆盖判据
+// 要求每份必需技能都有自己的标记，拿实现技能的标记顶替不了。handoff scope 的技能（subagent-execute
+// 的 flow-comet-dev 由子代理加载）不在此表：协调者不加载它，声明它反而是假声明。
+const REQUIRED_SKILL_DECLARATION = {
+  plan: { skill: 'flow-comet-task', prompt: 'flow-kit/prompts/3-task.md' },
+  execute: { skill: 'flow-comet-dev', prompt: 'flow-kit/prompts/4-dev.md' },
+  review: { skill: 'flow-comet-test', prompt: 'flow-kit/prompts/5-test.md' },
+  verify: { skill: 'flow-comet-integration', prompt: 'flow-kit/prompts/7-integration.md' },
+  archive: { skill: 'flow-comet-integration', prompt: 'flow-kit/prompts/7-integration.md' },
+};
+
+// 节点声明的完整形态（两个多趟驱动共用）：实现技能 + 同名的 guarded 必需技能。不共用时两处驱动
+// 各写一遍补声明，下一处需要补的地方又会漏。
+function declareNodeDeclarations(dir, env, nodeId, skill, prompt) {
+  assertExit(runState(skillLoadArgs(nodeId, skill, prompt), dir, env), 0);
+  const required = REQUIRED_SKILL_DECLARATION[nodeId];
+  // 必需技能有自己的协议文件（review 的 flow-comet-test 读 5-test.md）——用实现技能的提示词补声明，
+  // 技能面覆盖了但协议文件面仍缺，出口照样拦
+  if (required && required.skill !== skill) {
+    assertExit(runState(skillLoadArgs(nodeId, required.skill, required.prompt), dir, env), 0);
+  }
 }
 
 export const ENTRIES = [
@@ -134,6 +158,8 @@ export const ENTRIES = [
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID], dir), 0);
       assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
+      // open 该读两份协议、协议声明两个必需技能：出口覆盖判据要求全部声明，夹具两条都写下
+      assertExit(runState(['skill-load', 'open', 'flow-comet-requirement', '--prompt', 'flow-kit/prompts/1-requirement.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
       writeIntakeArtifacts(dir);
       assertExit(runState(['record', 'open', '{"summary":"intake complete"}'], dir), 0);
       // 真实出口：exit open --apply（未激活声明机制 → 兼容警告 + 通过）
@@ -378,6 +404,9 @@ export const ENTRIES = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
         multiWaveTaskContent({ P01: 'pending', P02: 'pending', S01: 'pending', P03: 'pending' }));
       assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir), 0);
+      // 协议 plan.requiredSkillCalls = flow-comet-task（guarded）：节点实现技能与必需技能是两个声明面，
+      // 出口覆盖判据要求后者也有标记。
+      assertExit(runState(['skill-load', 'plan', 'flow-comet-task', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir), 0);
       assertExit(runState(['record', 'plan', '{"summary":"plan done"}'], dir), 0);
       assertExit(runGuard(['entry', 'plan'], dir), 0);
       const rPlan = runGuard(['exit', 'plan', '--apply'], dir);
@@ -385,6 +414,39 @@ export const ENTRIES = [
       assertOut(rPlan, 'ALL CHECKS PASSED');
       // 首趟路由:首波双并行无前置依赖 → 直接进入委托节点
       assertOut(rPlan, 'NODE: subagent-execute');
+      // 委托前置门的声明命令必须照抄可执行：解析打印文本 → 真执行 → 再 request 通过。旧形态是
+      // 「workflow-state.mjs skill-load <node> <skill>」——裸脚本名在 shell 里 command not found，
+      // `<skill>` 占位在 bash 下是重定向，且不带该节点全部 --prompt / --templates / --protocol，
+      // 字面断言钉不住「这条命令能不能用」。同一次 request 还断言开工前 LESSONS 命中集的围栏口径：
+      // 围栏里的书写样例不是真条目（围栏判定与段体单源同口径），围栏外的条目照常命中。
+      writeFile(dir, '.specs/LESSONS.md',
+        '# LESSONS\n\n## 条目区\n\n~~~md\n### L-901 · [proc] 围栏内的书写样例\n- **关键词**: p01 委托边界\n~~~\n\n'
+        + '### L-902 · [proc] 委托边界须留痕\n- **关键词**: p01\n');
+      const gatedRequest = runHandoff(['request', 'P01', 'P01 委托'], dir);
+      assertExit(gatedRequest, 1);
+      assertOut(gatedRequest, 'BLOCKED: 节点 subagent-execute 缺少技能加载声明标记');
+      assertNotOut(gatedRequest, 'HANDOFF REQUEST');
+      const declarationCommand = (gatedRequest.output.match(/^\s*(node "[^"]+" skill-load [^\n]+)$/m) || [])[1];
+      assertTrue(typeof declarationCommand === 'string',
+        '委托前置门的阻塞必须给出完整可执行命令（node "<脚本路径>" skill-load …）：\n' + gatedRequest.output);
+      // 打印命令按安装布局的执行面解析（脚本根是运行根相对形态）：先把技能树复制成安装副本，
+      // 再真跑打印文本——执行的是打印出来的脚本路径与参数，不是 harness 自己的绝对路径。
+      installSkillTreeCopy(dir, path.join('.claude', 'skills'));
+      const replayedDeclaration = runPrintedCommand(declarationCommand, dir,
+        { FLOW_COMET_RUN_ROOT: dir, FLOW_COMET_PROTOCOL: '' });
+      assertTrue(replayedDeclaration.status === 0,
+        '照抄的声明命令跑不通\n  命令: ' + declarationCommand
+        + '\n  exit ' + replayedDeclaration.status + '\n' + replayedDeclaration.output);
+      const declaredRequest = runHandoff(['request', 'P01', 'P01 委托'], dir);
+      assertExit(declaredRequest, 0);
+      assertOut(declaredRequest, 'HANDOFF REQUEST: P01');
+      assertOut(declaredRequest, 'LESSONS-HITS: 1 条');
+      assertOut(declaredRequest, 'L-902');
+      assertNotOut(declaredRequest, 'L-901');
+      // 这一格考的是开工前打印面（命中集 + 围栏判定）。出口侧的「逐条回应」判据按**任务写面**算命中，
+      // 本夹具的 L-902 只会落在 P01 的扫描段上——留着教训册就要把 A13 后续每份 SUMMARY 的措辞一并改写，
+      // 而那条判据另有场景逐格考（含缺回应 / 围栏内回应）。断言完成后撤掉夹具，A13 其余步骤保持原基线。
+      fs.rmSync(path.join(dir, '.specs', 'LESSONS.md'), { force: true });
       // 两层加载模型:执行域两节点的手动声明标记(record 前置门;一次声明后续趟次复用)
       assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir), 0);
       assertExit(runState(['skill-load', 'subagent-execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir), 0);
@@ -503,6 +565,9 @@ export const ENTRIES = [
         '<task id="X2" parallel="true" status="pending"><action>实现 X2</action><write_files>src/x2.mjs</write_files><verify>node --check src/x2.mjs</verify><depends_on>X1</depends_on></task>\n';
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + cyclic);
       assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir), 0);
+      // 协议 plan.requiredSkillCalls = flow-comet-task（guarded）：节点实现技能与必需技能是两个声明面，
+      // 出口覆盖判据要求后者也有标记。
+      assertExit(runState(['skill-load', 'plan', 'flow-comet-task', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir), 0);
       assertExit(runState(['record', 'plan', '{"summary":"plan drafted"}'], dir), 0);
       assertExit(runGuard(['entry', 'plan'], dir), 0);
       const blocked = runGuard(['exit', 'plan', '--apply'], dir);
@@ -560,7 +625,7 @@ export const ENTRIES = [
       // next 对「currentNode 无 evidence 且非固定路由后继」的委托跳转态按正常推进豁免不放行，
       // 仅断言 guard 侧 NODE；直接后继/回流态（next 可确认）才做双侧收敛断言。
       const drive = (nodeId, skill, prompt, prepare, { expectedNode, converge = true } = {}) => {
-        assertExit(runState(skillLoadArgs(nodeId, skill, prompt), dir, env), 0);
+        declareNodeDeclarations(dir, env, nodeId, skill, prompt);
         prepare();
         assertExit(runGuard(['entry', nodeId], dir), 0);
         const res = runGuard(['exit', nodeId, '--apply'], dir);
@@ -625,6 +690,8 @@ export const ENTRIES = [
       }, { expectedNode: 'archive', converge: true });
       // 归档出口：两侧均 NEXT: done
       assertExit(runState(['skill-load', 'archive', 'flow-comet-archive', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
+      // 协议 archive.requiredSkillCalls = flow-comet-integration（guarded）：出口覆盖判据要求该技能也有标记
+      assertExit(runState(['skill-load', 'archive', 'flow-comet-integration', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
       writeFile(dir, '.specs/archive/2026-08-28-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# 遗留问题\n\n无。\n');
       // 归档提名随证据落盘：本 change 写了 6 份任务 SUMMARY（并行 4 份 + 串行 2 份，扫描份数按
       // 同一清单对账）。提名门缺字段即拦，与本条被测的路由收敛判据无关。
@@ -657,6 +724,9 @@ export const ENTRIES = [
       const exitPlanNoApply = () => runGuard(['exit', 'plan'], dir, planEnv);
       const exitPlanApply = () => runGuard(['exit', 'plan', '--apply'], dir, planEnv);
       assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir), 0);
+      // 协议 plan.requiredSkillCalls = flow-comet-task（guarded）：节点实现技能与必需技能是两个声明面，
+      // 出口覆盖判据要求后者也有标记。
+      assertExit(runState(['skill-load', 'plan', 'flow-comet-task', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir), 0);
       assertExit(runState(['record', 'plan', '{"summary":"plan drafted"}'], dir), 0);
       assertExit(runGuard(['entry', 'plan'], dir), 0);
       const planTask = (taskBody) => writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + taskBody);
@@ -714,6 +784,18 @@ export const ENTRIES = [
       assertExit(globRecovered, 0);
       assertOut(globRecovered, 'ALL CHECKS PASSED');
       assertNotOut(globRecovered, 'BLOCKED');
+      // 写面判定的元素名大小写无关：`<WRITE_FILES>` 与 `<write_files>` 是同一种元素——7 字段门按
+      // 大小写不敏感判定在场，而「这份写面算不算有内容」的判据若只认小写，大写写法的任务就被静默
+      // 排除在 [P] 补集判据之外：同波同层、写面互不重叠的一对永远不被要求标 parallel（判据在场才判，
+      // 判据缺席就是放行）。
+      planTask(
+        '## 波次划分\n\nWave 1: U01, U02\n\n## 任务清单\n\n'
+        + '<task id="U01" status="pending"><action>实现 U01</action><WRITE_FILES>src/u01.mjs</WRITE_FILES><verify>node --check src/u01.mjs</verify></task>\n'
+        + '<task id="U02" status="pending"><action>实现 U02</action><WRITE_FILES>src/u02.mjs</WRITE_FILES><verify>node --check src/u02.mjs</verify></task>\n');
+      const upperCaseWriteFiles = exitPlanNoApply();
+      assertExit(upperCaseWriteFiles, 1);
+      assertOut(upperCaseWriteFiles, '同波任务可并行却未标 [P]');
+      assertOut(upperCaseWriteFiles, 'U01 × U02');
       // 同一文件跨任务族（负例）：两个非修复任务写入同一文件、彼此无依赖路径（串行拆分同样构成
       // 「未显式排序的同文件多任务」）→ 新 change BLOCKED，消息含任务对与重叠文件 + 恢复指引。
       // 同夹具并列一对修复任务（id 带修复前缀）写同一文件且无依赖路径——该族不参与判定，
@@ -820,7 +902,7 @@ export const ENTRIES = [
       };
       // drive 收敛面全量：每个转换点（含平行跳转与趟间回流）都断言 next 可达且与 guard 出口 NODE 一致
       const drive = (nodeId, skill, prompt, prepare, { expectedNode } = {}) => {
-        assertExit(runState(skillLoadArgs(nodeId, skill, prompt), dir, env), 0);
+        declareNodeDeclarations(dir, env, nodeId, skill, prompt);
         prepare();
         assertExit(runGuard(['entry', nodeId], dir), 0);
         const res = runGuard(['exit', nodeId, '--apply'], dir);
@@ -884,6 +966,8 @@ export const ENTRIES = [
       }, { expectedNode: 'archive' });
       // 归档出口：两侧均 NEXT: done
       assertExit(runState(['skill-load', 'archive', 'flow-comet-archive', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
+      // 协议 archive.requiredSkillCalls = flow-comet-integration（guarded）：出口覆盖判据要求该技能也有标记
+      assertExit(runState(['skill-load', 'archive', 'flow-comet-integration', '--prompt', 'flow-kit/prompts/7-integration.md'], dir, env), 0);
       writeFile(dir, '.specs/archive/2026-08-28-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# 遗留问题\n\n无。\n');
       // 归档提名随证据落盘：本 change 写了 6 份任务 SUMMARY（并行 4 份 + 串行 2 份，扫描份数按
       // 同一清单对账）。提名门缺字段即拦，与本条被测的路由收敛判据无关。
@@ -918,6 +1002,8 @@ export const ENTRIES = [
       driveThroughDesign(dir);
       writeTask({ S01: 'pending' });
       assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir, env), 0);
+      // 协议 plan.requiredSkillCalls = flow-comet-task（guarded）：出口覆盖判据要求该技能也有标记
+      assertExit(runState(['skill-load', 'plan', 'flow-comet-task', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir, env), 0);
       assertExit(runState(['record', 'plan', '{"summary":"plan complete"}'], dir, env), 0);
       assertExit(runGuard(['entry', 'plan'], dir), 0);
       assertExit(runGuard(['exit', 'plan', '--apply'], dir), 0);
@@ -925,6 +1011,8 @@ export const ENTRIES = [
       writeTask({ S01: 'done' });
       writeFile(dir, '.specs/' + CHANGE_ID + '/S01-SUMMARY.md', execSummaryFixture('S01'));
       assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
+      // 协议 execute.requiredSkillCalls = flow-comet-dev（guarded）：出口覆盖判据要求该技能也有标记
+      assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
       assertExit(runState(['record', 'execute', '{"summary":"executed","parallelTakeoverApproved":true}'], dir, env), 0);
       assertExit(runGuard(['entry', 'execute'], dir), 0);
       // R-1 欠账漂移态：currentNode 漂移到文件推导下一节点 review（execute 未 completed）
@@ -964,6 +1052,8 @@ export const ENTRIES = [
       driveThroughDesign(dir);
       writeTask({ P01: 'pending', S01: 'pending' });
       assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir, env), 0);
+      // 协议 plan.requiredSkillCalls = flow-comet-task（guarded）：出口覆盖判据要求该技能也有标记
+      assertExit(runState(['skill-load', 'plan', 'flow-comet-task', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir, env), 0);
       assertExit(runState(['record', 'plan', '{"summary":"plan complete"}'], dir, env), 0);
       assertExit(runGuard(['entry', 'plan'], dir), 0);
       assertExit(runGuard(['exit', 'plan', '--apply'], dir), 0);
@@ -1019,6 +1109,8 @@ export const ENTRIES = [
       driveThroughDesign(dir);
       writeTask({ S01: 'pending' });
       assertExit(runState(['skill-load', 'plan', 'flow-comet-plan', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir, env), 0);
+      // 协议 plan.requiredSkillCalls = flow-comet-task（guarded）：出口覆盖判据要求该技能也有标记
+      assertExit(runState(['skill-load', 'plan', 'flow-comet-task', '--prompt', 'flow-kit/prompts/3-task.md', '--templates', 'TASK.md'], dir, env), 0);
       assertExit(runState(['record', 'plan', '{"summary":"plan complete"}'], dir, env), 0);
       assertExit(runGuard(['entry', 'plan'], dir), 0);
       assertExit(runGuard(['exit', 'plan', '--apply'], dir), 0);
@@ -1026,6 +1118,8 @@ export const ENTRIES = [
       writeTask({ S01: 'done' });
       writeFile(dir, '.specs/' + CHANGE_ID + '/S01-SUMMARY.md', execSummaryFixture('S01'));
       assertExit(runState(['skill-load', 'execute', 'flow-comet-execute', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
+      // 协议 execute.requiredSkillCalls = flow-comet-dev（guarded）：出口覆盖判据要求该技能也有标记
+      assertExit(runState(['skill-load', 'execute', 'flow-comet-dev', '--prompt', 'flow-kit/prompts/4-dev.md', '--templates', 'SUMMARY.md'], dir, env), 0);
       assertExit(runState(['record', 'execute', '{"summary":"executed"}'], dir, env), 0);
       assertExit(runGuard(['entry', 'execute'], dir), 0);
       // 执行者自切 direct（directOverride=true 但无授权审计记录——B 方案前的自切/遗留形态）

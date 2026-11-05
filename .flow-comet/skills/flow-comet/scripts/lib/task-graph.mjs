@@ -1,14 +1,23 @@
 // task-graph.mjs — 任务与协议图的底层共享判定（单一权威实现）
 // 承载：① 协议节点顺序 / 启用 / 任务文件路径（route · protocolNodeEnabled · protocolTaskFilePath ·
-// EXECUTE_FAMILY_NODE_IDS）；② 任务依赖解析与依赖图（taskDependencyEligibility · analyzeDependencyGraph）；
+// EXECUTE_FAMILY_NODE_IDS）；② 任务依赖解析与依赖图（taskDependencyEligibility · analyzeDependencyGraph ·
+// taskWaveLevels 依赖层级）；
 // ③ 并行写冲突检测三族（findParallelWriteConflicts 及其构件）；④ 任务集签名与版本语义 ·
 // history 事件归属 · change 名形态 · 修复任务族文本谓词；⑤ 任务块 7 字段集合（TASK7_REQUIRED）。
 // 纯判定：只读 TASK.md 文本、协议对象与 state.history，无 console 输出、无 process.exit、无 state 写入。
-// 依赖方向：本模块不 import 其他 lib 模块（lib 层最底层）——入口与兄弟模块单向依赖本模块。
+// 依赖方向：只依赖叶子模块（lessons-hits 的条目边界、section-body 的段界）——入口与兄弟模块单向
+// 依赖本模块，不出现反向边。
 import { promises as fs } from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
 import { taskBlocks, taskOpeningAttrs } from '../task-parsing.mjs';
+// 写面元素（`<write_files>`…`</write_files>`，元素名大小写无关）与条目边界（剥注释 → 行切 → 分号
+// 容错切 → trim → 滤空）都取 lib/lessons-hits.mjs 的唯一实现：本模块只剩「路径归一」这一层自己的
+// 语义（见 normalizeTaskPath），不自带第二份元素提取或切分。
+import { taskWriteFilesById, writeFilesEntries } from './lessons-hits.mjs';
+// 段界（同级标题 / 围栏 / 分隔线 / 文末）取 lib/section-body.mjs 的唯一实现：修复段的段体此前自带一份
+// 「按行找下一个 `## `」的扫描，围栏代码块里的 `## ` 会把段体截断。
+import { sectionBody } from './section-body.mjs';
 
 // 任务块 7 字段集合（单一权威）：plan 出口的 TASK 完整性门禁与执行期 `replan` 的重签判据共用本常量。
 // `replan` 是执行期唯一允许修订任务集的通道，两侧判据必须同源——任何一侧另写一份字面集合，都会在
@@ -162,24 +171,22 @@ export function normalizeHeading(raw) {
 }
 
 // 修复段正文切片：首个同级（##）标题命中 → 返回标题行之后、下一个同级标题（或 EOF）之前的正文；
-// 无命中标题 → null。只认二级标题（### 不闭合本段）；CRLF / LF 归一后按行定位。
+// 无命中标题 → null。只认二级标题（### 不闭合本段）。段界（含围栏同步）由 lib/section-body.mjs
+// 单点决定，这里只表达自己的差异——标题按共享归一后比较（「Fix 任务（来自 REVIEW / INTEGRATION）」
+// 「## Fix 任务 ##」等写法命中同一段），且**不以分隔线结束**（修复段内允许 `---` 分节，历史语义）。
 function fixSectionBody(taskContent, fixSectionTitle) {
-  const lines = String(taskContent ?? '').replace(/\r\n?/g, '\n').split('\n');
   const wanted = normalizeHeading(fixSectionTitle);
   if (wanted === '') return null;
-  let start = -1;
-  for (let i = 0; i < lines.length; i += 1) {
-    const m = lines[i].match(/^##\s+(.+?)\s*$/);
-    if (!m) continue;
-    const heading = normalizeHeading(m[1]);
-    if (heading === wanted || heading.startsWith(wanted)) { start = i; break; }
-  }
-  if (start < 0) return null;
-  let end = lines.length;
-  for (let i = start + 1; i < lines.length; i += 1) {
-    if (/^##\s/.test(lines[i])) { end = i; break; }
-  }
-  return lines.slice(start + 1, end).join('\n');
+  return sectionBody(
+    taskContent,
+    (heading) => {
+      // 只认二级标题起段（### 不闭合本段，也不在这里起段——历史语义）
+      if (heading.level !== 2) return false;
+      const normalized = normalizeHeading(heading.text);
+      return normalized === wanted || normalized.startsWith(wanted);
+    },
+    { level: 2, endOnSeparator: false },
+  );
 }
 
 // 修复任务族 id 前缀（唯一谓词的 id 边界，全模块只此一处定义）：含尾连字符——形似编号（前缀
@@ -260,6 +267,40 @@ export function analyzeDependencyGraph(blocks) {
   return { ids, depsById, missing, cyclic, cycleIds };
 }
 
+// ---------- 依赖层级（波次投影的层级求值 · 单一权威） ----------
+// 层级定义：level(task) = 1 + max(level(dep))，无依赖 = 1（依赖链的最大深度）。「波次 = 依赖层级
+// 的投影」这一判据（plan 出口 / replan 重校，两处同源调用）消费本函数，不在判据侧自算——层级是
+// 同一份依赖数据的第二次求值，两处各算一遍必然分叉。
+// 输入 = <task> 块数组（与 analyzeDependencyGraph 同源解析），输出 Map<id, level>。
+// 依赖解析复用 analyzeDependencyGraph 的 depsById（依赖文本解析单一权威，不另起第二份正则）；
+// 引用不存在的依赖不计入层级（其合法性由依赖图判据负责），环上的任务不产出层级（本函数只求层级，
+// 不承担合法性判定——依赖环 / 缺失依赖由 analyzeDependencyGraph 的消费方先行拦截）。
+export function taskWaveLevels(blocks) {
+  const { ids, depsById } = analyzeDependencyGraph(blocks);
+  const levels = new Map();
+  const resolving = new Set();
+  const resolveLevel = (id) => {
+    const known = levels.get(id);
+    if (known !== undefined) return known;
+    if (resolving.has(id)) return null; // 环：该链无解，本 id 不产出层级
+    resolving.add(id);
+    let deepest = 0;
+    let solvable = true;
+    for (const dep of depsById.get(id) ?? []) {
+      if (!ids.has(dep)) continue;
+      const depLevel = resolveLevel(dep);
+      if (depLevel === null) { solvable = false; break; }
+      if (depLevel > deepest) deepest = depLevel;
+    }
+    resolving.delete(id);
+    if (!solvable) return null;
+    levels.set(id, deepest + 1);
+    return deepest + 1;
+  };
+  for (const id of ids) resolveLevel(id);
+  return levels;
+}
+
 // ---------- 并行文件依赖检测（单源：plan 出口门禁与 replan 重校共用） ----------
 // 解析 TASK.md 的任务 read/write_files 声明，分三族返回：
 //   ① writeConflicts（写写强判）：本趟可运行的 parallel=pending 任务间 write∩write 非空——同波次
@@ -317,14 +358,14 @@ function normalizeTaskPath(raw) {
   return out.join('/');
 }
 
-// 路径解析与既有自动解析同源：剥 HTML 注释 → 换行切分 → 分号二次切分 → trim → 滤空 → 归一。
+// 路径解析：入参是**已提取的**写面元素原文（元素提取与条目边界都取 lib/lessons-hits.mjs 的唯一实现
+// ——taskWriteFilesById + writeFilesEntries；与 handoff 的提交子集校验、plan 出口的伪并行启发式
+// 同一份：同一份写面在三处被切成不同条目集、或在元素名的大小写上分叉时，「谁越界」「哪一对并行
+// 任务重叠」会互相矛盾）。本函数只在条目之上叠加本模块自己的归一（normalizeTaskPath）。
 // 按声明实际内容解析，不做扩展名白名单过滤——txt/log/无扩展名路径同等检出（链式重命名的 .txt
 // 事故面闭合）。族①②③共用本实现，不另起第二份。
 function parsePaths(matchText) {
-  return String(matchText ?? '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .trim().split(/\s*\n\s*/).map((l) => l.trim()).filter(Boolean)
-    .flatMap((l) => l.split(';')).map((l) => l.trim()).filter(Boolean)
+  return writeFilesEntries(matchText)
     .map(normalizeTaskPath)
     .filter((p) => p !== null && p !== '');
 }
@@ -374,11 +415,18 @@ export function collectPathOverlaps(leftPaths, rightPaths) {
 }
 
 // 第三族（同文件跨任务且无依赖路径）计算——本模块具名纯函数：输入任务块 / 依赖图 / 既有族去重键，
-// 输出冲突对数组（{ a, b, files }）；无 fs / console / process.exit，不改任何入参。
+// 输出 { conflicts, isOverlappingPair }——conflicts 是冲突对明细（{ a, b, files }，报告面用），
+// isOverlappingPair 是**任务对键集合上的成员判定**（谓词）。任务对键的形态只在 taskPairKey 表达一次：
+// 消费方（wave-projection 的 [P] 判据）要的是「这一对是否写面重叠」，拿到的因此是判定而不是键形态——
+// 两端各算一次键时，形态一旦漂移（换分隔符 / 换定序）键就不相等，补集会静默失效（写面重叠的一对被
+// 当成「本可并行」）。无 fs / console / process.exit，不改任何入参。
 // taskContent 与 allBlocks 须同源（taskContent = 产出 allBlocks 的 TASK.md 文本）——修复任务族
 // 谓词需要全文以定位修复段（段标题取该谓词的缺省回退常量，与 fixTaskClassifier 的缺省一致）。
 export function collectCrossTaskConflicts({ taskContent = '', allBlocks = [], depsById = new Map(), excludedPairKeys = new Set() } = {}) {
   const isFixTask = fixTaskClassifier(taskContent);
+  // 写面元素（键 = 任务 id）取 lib/lessons-hits.mjs 的唯一提取：元素名大小写无关与 7 字段门的在场
+  // 判定同口径——大小写敏感的副本会让混合写法的任务在这里判「没有写面」，从而整对掉出本族。
+  const writeFaces = taskWriteFilesById(taskContent);
   const reachCache = new Map();
   const reachableFrom = (id) => {
     if (!reachCache.has(id)) reachCache.set(id, reachableTaskIds(depsById, id));
@@ -388,9 +436,9 @@ export function collectCrossTaskConflicts({ taskContent = '', allBlocks = [], de
   for (const block of allBlocks) {
     const attrs = taskOpeningAttrs(block);
     if (!attrs || !attrs.id || attrs.status === 'done' || isFixTask(block)) continue;
-    const wf = block.match(/<write_files>([\s\S]*?)<\/write_files>/);
-    if (!wf) continue;
-    const writes = new Set(parsePaths(wf[1]));
+    const element = writeFaces.get(attrs.id);
+    if (element === undefined) continue;
+    const writes = new Set(parsePaths(element));
     if (writes.size === 0) continue;
     participants.push({ id: attrs.id, writes });
   }
@@ -405,7 +453,8 @@ export function collectCrossTaskConflicts({ taskContent = '', allBlocks = [], de
       conflicts.push({ a: participants[i].id, b: participants[j].id, files: overlap });
     }
   }
-  return conflicts;
+  const pairKeys = new Set(conflicts.map((conflict) => taskPairKey(conflict.a, conflict.b)));
+  return { conflicts, isOverlappingPair: (a, b) => pairKeys.has(taskPairKey(a, b)) };
 }
 
 export async function findParallelWriteConflicts(changeDir) {
@@ -413,6 +462,9 @@ export async function findParallelWriteConflicts(changeDir) {
   let text;
   try { text = await fs.readFile(taskFile, 'utf8'); } catch { return { writeConflicts: [], readWarnings: [], crossTaskConflicts: [] }; }
   const allBlocks = taskBlocks(text);
+  // 写面元素（键 = 任务 id）取 lib/lessons-hits.mjs 的唯一提取（元素名大小写无关）：大小写敏感的副本
+  // 会让混合写法的任务在这里判「没有写面」，同波并行写同一路径的竞态因此漏拦。
+  const writeFaces = taskWriteFilesById(text);
   // 依赖资格收窄：仅统计「本趟可运行」的并行任务——deps ⊆ doneIds；等待后续趟次的并行任务
   // （依赖未满足）与已交付任务不参与同趟冲突判定，使 A→B 同写路径的跨趟合法计划不再被首趟误拦
   // （与路由谓词同一口径）。依赖文本解析与资格判定一律走 taskDependencyEligibility——本函数不再
@@ -430,13 +482,13 @@ export async function findParallelWriteConflicts(changeDir) {
   for (const b of blocks) {
     const a = taskOpeningAttrs(b);
     if (!a || !a.id) continue;
-    const wf = b.match(/<write_files>([\s\S]*?)<\/write_files>/);
+    const element = writeFaces.get(a.id);
     const rf = b.match(/<read_files>([\s\S]*?)<\/read_files>/);
-    if (!wf && !rf) continue;
+    if (element === undefined && !rf) continue;
     perTask.push({
       id: a.id,
       deps: new Set(taskDependencyEligibility(b).deps),
-      writes: new Set(parsePaths(wf && wf[1])),
+      writes: new Set(parsePaths(element)),
       reads: new Set(parsePaths(rf && rf[1])),
     });
   }
@@ -461,11 +513,12 @@ export async function findParallelWriteConflicts(changeDir) {
   // 全在该纯函数内，此处不内联第二份。
   const writePairKeys = new Set(writeConflicts.map((c) => taskPairKey(c.a, c.b)));
   const { depsById } = analyzeDependencyGraph(allBlocks);
+  // 只取说明面（明细）：键集合与判定留在纯函数里，本函数不另算一份键。
   const crossTaskConflicts = collectCrossTaskConflicts({
     taskContent: text,
     allBlocks,
     depsById,
     excludedPairKeys: writePairKeys,
-  });
+  }).conflicts;
   return { writeConflicts, readWarnings, crossTaskConflicts };
 }

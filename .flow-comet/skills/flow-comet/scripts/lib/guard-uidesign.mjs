@@ -22,6 +22,8 @@ import path from 'path';
 import { runRoot, fileExists } from './guard-state-io.mjs';
 import { isNewChange, templateSectionPatterns, TEMPLATE_FALLBACK_SECTION_PATTERNS } from './guard-routing.mjs';
 import { assessArtifact, evaluateArtifact, reportArtifactStructure } from './guard-template-fidelity.mjs';
+// 段界（下一个二级标题 / 文末）取 lib/section-body.mjs 的唯一实现：围栏代码块里的 `## ` 是正文示例。
+import { sectionBody } from './section-body.mjs';
 
 export const UI_DESIGN_SKILL = 'flow-comet-ui-design';
 const APPLICABILITY_GATED_BINDINGS = new Set(['design.' + UI_DESIGN_SKILL]);
@@ -65,15 +67,11 @@ async function visualToneSectionState(changeName) {
   if (headingPattern !== null && typeof headingPattern === 'object' && headingPattern.skip === true) {
     return { state: 'no-basis', body: null };
   }
-  let body = null;
-  for (const line of String(text).replace(/\uFEFF/g, '').split(/\r?\n/)) {
-    if (/^##\s+/.test(line)) {
-      if (body !== null) break; // 到达下一个 H2 → 本段结束
-      if (headingPattern.test(line)) body = '';
-      continue;
-    }
-    if (body !== null) body += line + '\n';
-  }
+  // 段界由 lib/section-body.mjs 单点决定（围栏代码块里的 `## ` 不结束本段）。此前这里是一份围栏盲
+  // 的按行扫描：段内贴一段 Markdown 示例后，示例之后的「不适用」声明整段消失，非前端 change 被误判
+  // 成前端（要求一份本不该存在的 UI-DESIGN.md）。本判据自己的语义保留：只认二级标题（level: 2）、
+  // 分隔线不结束本段（endOnSeparator: false）——「视觉调性」段以 `---` 分隔清单是既有书写形态。
+  const body = sectionBody(text, headingPattern, { level: 2, endOnSeparator: false });
   return body === null ? { state: 'section-missing', body: null } : { state: 'present', body };
 }
 

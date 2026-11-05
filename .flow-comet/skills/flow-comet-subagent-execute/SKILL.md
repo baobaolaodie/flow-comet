@@ -74,7 +74,7 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
 五要素（缺一不可）：
 
 1. **`git add -- <自己字面路径>`**：逐条字面路径（取自本任务 `write_files`），禁用 `.` / `-A` / `-u` 等宽泛形态。
-2. **`git commit -- <同一路径>`**：路径集与上一步**逐字一致**——提交只含自己的文件。
+2. **`git commit -m "<消息>" -- <同一路径>`**：路径集与上一步**逐字一致**——提交只含自己的文件；消息写在 `--` **之前**（落到 `--` 之后会被当成 pathspec）。
 3. **锁失败重试**：并发提交会撞 `index.lock` / `cannot lock ref`，**失败即重试**，不得因此改用宽泛命令。
 4. **禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`**：它们作用于整个共享工作区。
 5. **为什么**：并发写者共享**同一索引与工作树**，宽泛命令有**并发索引竞态**（把同伴半成品纳入自己的提交），`stash` / `clean` / `reset` 还会直接破坏同伴的未提交工作。
@@ -100,6 +100,24 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
 
 > **要核对授权留痕 / 轮次与续轮审计 / 备份指纹 / 归档侧重入边界时读 `../flow-comet/reference/fix-loop.md`**：受控重入的完整规格在该文件。
 
+### 节点视图三字段（currentNode / stateCurrentNode / routeNode）
+
+`status` 与 `next` 读的是同一份节点视图，但三个字段各说一件事，不能互相替代：
+
+- **currentNode** = **产物推导**的节点（按 `.specs/<change-id>/` 的工件推导出「按文件看现在在哪」；语义逐字未变）；
+- **stateCurrentNode** = **state 文件原值**（`.flow-comet/flow-comet-state.json` 里 `currentNode` 的原样读数，由 entry / exit / advance / reenter 写入；语义逐字未变）；
+- **routeNode** = **路由视图**（经「进行中保护」/ Fix 受控归位后的节点；常规路径下等于 `next` 的 `NODE:` 行，决定你现在该推进哪个节点）。
+
+三者不一致不是 bug，而是同一事实的三个视角：`ROUTE:` 行给出 `derived=… state=… route=…` 的对账（derived = 产物推导、state = state 原值、route = 路由视图）与下一步动作。**Fix 批次以 `FIX-BATCH` 行与 `next` 的 `NODE` 为准**——归位目标就是你要先跑出口的节点；预检与出口都跑在那个节点上，不要按 `stateCurrentNode` 或 `currentNode` 自行改道。
+
+**Node view: the three fields (currentNode / stateCurrentNode / routeNode)** — `status` and `next` read the same node view, but the three fields say three different things and cannot substitute for each other:
+
+- **currentNode** = artifact-derived (the node derived from the artifacts under `.specs/<change-id>/`, i.e. "where the files say we are"; semantics unchanged);
+- **stateCurrentNode** = the raw state-file value (the `currentNode` read verbatim from `.flow-comet/flow-comet-state.json`, written by entry / exit / advance / reenter; semantics unchanged);
+- **routeNode** = the routing view (after in-progress protection / controlled Fix-batch rollback; on the regular path it equals the `NODE:` line printed by `next` and decides which node you should advance now).
+
+A mismatch is not a bug but the same fact seen from three angles: the `ROUTE:` line gives the `derived=… state=… route=…` reconciliation (derived = artifact derivation, state = raw state value, route = routing view) plus the next action. **For a Fix batch, trust the `FIX-BATCH` line and the `NODE` printed by `next`** — the rollback target is the node whose exit you must run first; run preflight and exit on that node instead of rerouting by `stateCurrentNode` or `currentNode`.
+
 ### Prerequisites
 
 - `.specs/<change-id>/TASK.md` must exist with at least one task marked `parallel="true"` and `status="pending"`.
@@ -119,7 +137,7 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
 
 1. **Identify parallel tasks**: Read TASK.md and find all tasks with `parallel="true"` and `status="pending"`. Verify they are genuinely independent (no file conflicts between them — check `write_files` do not overlap).
 
-2. **For each parallel task, create handoff request**: Use `workflow-handoff.mjs request <task-id>` to register the handoff. **委托即记 request**——直接记录 result 而无对应 request 时,write_files 允许列表为空会被 BLOCKED(新 change 强制委托边界),补 request 后再重录 result 即可。
+2. **For each parallel task, create handoff request**: Use `workflow-handoff.mjs request <task-id>` to register the handoff. **委托即记 request（机制保证，不是经验之谈）**——`result` 在写盘前校验该任务存在 request 记录：缺失时新 change **BLOCKED**（state 字节零改写），并给出恢复指引「先照抄下面的命令记录委托（`description` 可省略），再重录 result」——命令形如 `node ".claude/skills/flow-comet/scripts/workflow-handoff.mjs" request T02`（设计形态，安装时脚本根按平台改写；引擎打印的就是带真实路径与任务号的那一行——脚本路径整条加引号，整行可直接执行）；旧 change 只 WARN。零提交的 result 与只交自身 `<task-id>-SUMMARY.md` 的 result 两种形态同样被拦——该校验先于零提交语义与提交子集校验，那两者都从 request 取范围，因此不存在「先记 result 再补 request」的可行顺序。
    > 若不传 `--write-files`，脚本会自动从 TASK.md 对应 task 的 `<write_files>` 块解析（orchestrator 无需手动从 TASK.md 提取文件列表）。
    **归属纪律**：request 会校验任务的并行属性与原始 `currentNode`——并行 pending 任务只归属本节点，串行 pending 任务归属 `execute`；错误节点的新 change 请求会被 BLOCK，并按输出运行 `workflow-state next` 与 `entry <目标节点>` 恢复后再重试。
    The handoff prompt must include:
@@ -134,10 +152,13 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
    - **写前读模板（固定句式）**：「开工前先读 <本任务产出物的模板路径>，按其标题 / 首部 / 段序填写，并按本仓登记补写增量段」——模板路径逐任务给出（本节点默认 `flow-kit/templates/SUMMARY.md`）；只写「按模板填写」视为委托前检查未完成。
    - **提交边界警告**:提交**只含该任务 write_files 范围内的文件**(含测试文件)——不得包含 TASK.md 与其他协调者维护的 .specs 工件(新 change 提交越界 BLOCKED;实测子代理提交含 TASK.md 被 W2-D 拦截)。**提交从属规则**:任务专属的 `<task-id>-SUMMARY.md`(位于 `.specs/<change-id>/`,是 flow-comet 强制产物)允许随任务提交属流程默认豁免——目标仓库的既有规定优先,若目标仓库忽略清单等既有规定拒绝其入库,被拒即为正确行为,严禁 force-add 强加越库提交;委托校验对任务摘要的豁免属于校验宽容度,不是入库指令。
 
-   - **提交面 pathspec 纪律（五要素，见 Guidance 同名小节）**：子代理必须用 `git add -- <自己字面路径>` + `git commit -- <同一路径>`，锁失败重试，禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`（适用条件：**多个写者共享同一工作区**；各自独立工作区内的局部 `reset` / `clean` 不在禁令内）。
+   - **提交面 pathspec 纪律（五要素，见 Guidance 同名小节）**：子代理必须用 `git add -- <自己字面路径>` + `git commit -m "<消息>" -- <同一路径>`（消息在 `--` 之前），锁失败重试，禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`（适用条件：**多个写者共享同一工作区**；各自独立工作区内的局部 `reset` / `clean` 不在禁令内）。
    - **集成纪律（四要素，见 Guidance 同名小节）**：协调者集成时优先 `git merge --no-ff`；降级 `cherry-pick` 必须记因；集成顺序按 `depends_on` 拓扑序 + 同层 task id 升序；冲突按**机械冲突 / 语义冲突**两类分别处置（后者必须中止并上抛）。
 
-3. **Delegate to subagents**（三平台同一判据，差异只在谁建树）: **Claude Code 平台**：直接委托子代理——守卫按**身份判据优先于路径判据**放行（载荷含 `agent_id` ⇒ 子代理语义）；`Agent` 工具的 `isolation: "worktree"` 是属性①的一种实现（**可选，非强制**，见「并行安全四属性契约」）；`.claude/worktrees/**` 路径前缀通道仍为兼容通道。**dsh 平台**：直接委托平台进程内子代理——守卫按会话身份分派（身份深度为正整数 ⇒ 放行（**最小保护集除外**）、项目内任意路径可写（含 gitignored）），**无需隔离区**；同一工作区的并行子代理会看到彼此未提交中间态，靠 `write_files` 边界互斥与提交时点作相互隔离纪律（**无需隔离区 ≠ 无需边界**）。**Codex 平台**：直接委托原生子代理（`spawn_agent` 等）——守卫按身份分派放行（真机实测：载荷含 `agent_id` / `agent_type`）；默认**共享工作区**，同样靠 `write_files` 边界互斥与提交时点纪律。**建树选择的适用面**：协调者显式 `git worktree add <路径>`（手工建树）**是受支持的建树选择**——在委派 prompt 里指定 `workdir`，写入由身份通道放行（原生子代理无自动建树）；**以建树绕过边界**不受支持——用独立树规避协调者禁令 / 最小保护集 / `write_files` 互斥与提交时点纪律 / handoff 与 Return Contract 证据，或把 worktree 当作四属性的替代品。**不得用 File API 直写等规避通道代替**（绕过写入防线不是受支持路径）。Each subagent (all three platforms):
+3. **Delegate to subagents**（三平台同一判据，差异只在谁建树）:
+   **委托顺序（硬顺序）**：先让 request 成功，再启动子代理——同一任务的 `workflow-handoff.mjs request` 与子代理启动是串行两步，禁止把 request 与子代理启动放进同一个并发调用（例如 `Promise.all` 里同时发 request 与 Agent / spawn_agent）。这是执行纪律，不是机制拦截：平台工具层没有可挂的判定点，引擎不会替你排队。**两件事别混**：本条管的是「request 与子代理启动的先后」，它没有挂点；「`result` 需要一条 request」是机制保证——缺 request 的 result 在写盘前被拒（新 change BLOCKED，恢复句见步骤 2）。
+   **Delegation order (mandatory)**: a successful request first, then launch the subagent — the `workflow-handoff.mjs request` call and the subagent launch are two sequential steps; never inside one concurrent call (e.g. request plus Agent / spawn_agent in the same `Promise.all`). This is execution discipline, not a mechanism interception: the platform tool layer offers no hook point, so the engine will not queue it for you. **Two different things**: this rule is about the order of the request and the subagent launch, and nothing enforces it; "a result needs a request" is a mechanism guarantee — a result without one is refused before anything is written (a new change blocks, recovery line in step 2).
+   **Claude Code 平台**：直接委托子代理——守卫按**身份判据优先于路径判据**放行（载荷含 `agent_id` ⇒ 子代理语义）；`Agent` 工具的 `isolation: "worktree"` 是属性①的一种实现（**可选，非强制**，见「并行安全四属性契约」）；`.claude/worktrees/**` 路径前缀通道仍为兼容通道。**dsh 平台**：直接委托平台进程内子代理——守卫按会话身份分派（身份深度为正整数 ⇒ 放行（**最小保护集除外**）、项目内任意路径可写（含 gitignored）），**无需隔离区**；同一工作区的并行子代理会看到彼此未提交中间态，靠 `write_files` 边界互斥与提交时点作相互隔离纪律（**无需隔离区 ≠ 无需边界**）。**Codex 平台**：直接委托原生子代理（`spawn_agent` 等）——守卫按身份分派放行（真机实测：载荷含 `agent_id` / `agent_type`）；默认**共享工作区**，同样靠 `write_files` 边界互斥与提交时点纪律。**建树选择的适用面**：协调者显式 `git worktree add <路径>`（手工建树）**是受支持的建树选择**——在委派 prompt 里指定 `workdir`，写入由身份通道放行（原生子代理无自动建树）；**以建树绕过边界**不受支持——用独立树规避协调者禁令 / 最小保护集 / `write_files` 互斥与提交时点纪律 / handoff 与 Return Contract 证据，或把 worktree 当作四属性的替代品。**不得用 File API 直写等规避通道代替**（绕过写入防线不是受支持路径）。Each subagent (all three platforms):
    - Reads TASK.md for its specific task block.
    - Executes the full TDD protocol (RED/GREEN/REFACTOR). **纯文档/纯配置任务无生产代码可测时，`redEvidence` 与 `greenEvidence` 均允许 `{"command":"N/A (non-code task)","output":"..."}` 形态**（guard W1-D 接受此形状；不得伪造测试输出）。
    - Greps existing abstractions (R6.4).
@@ -149,16 +170,19 @@ Division of labor (pass-based collaboration): this node handles parallel delegat
    - Writes `<task-id>-SUMMARY.md` to `.specs/<change-id>/`.
    - Returns evidence via `workflow-handoff.mjs result <task-id>`.
 
-4. **Collect evidence**: After all subagents complete, verify each returned:
+4. **每任务预检（`--preflight` · 只报结构问题）**：每个子代理回传、`workflow-handoff.mjs result` 记下之后立即运行 `node .claude/skills/flow-comet/scripts/workflow-guard.mjs exit subagent-execute --preflight` —— 它只跑**结构性门禁**（本节点声明工件的存在性 / SUMMARY 关键段 / 模板保真骨架 / 入口工件骨架〔在场才查〕/ TASK 7 字段〔仅 `plan` 节点生效〕），**不跑**进展类门禁（证据、任务集签名、串行 pending、可委托并行、在飞委托、verify 命令执行），不推进状态、不写 state、也不写模板提示账本。**本家族的预检作用域** = 本节点声明工件的存在性（协议声明的 file 类产物，缺件即 BLOCK，逐项给出路径与模板指针）+ SUMMARY 关键段 + 模板保真骨架 + 入口三件（`CHANGE` / `REQUIREMENT` / `DESIGN`，存在才查）；TASK 7 字段是 plan 出口的判据，对 subagent-execute 家族是 no-op，不在本步骤的范围内。**预检通过 = 结构面通过，不代表进展门禁会通过**（推进仍由完整 exit / `--apply` 决定）。价值：在「result 已记、尚未标 done」这个时点就能当场看到该任务 SUMMARY 的缺段 / 结构子段 / 条件段 / 首部字段问题——这正是本步骤存在的通道；不跑预检，这些问题会被更早的进展门禁挡下（可委托并行 / 在飞委托先于模板保真），攒到节点收尾一起爆。边界：它只报结构问题；**完整 `exit`（不带 `--apply`）仍是节点收尾的全链预演**——会先报进展类问题（可委托并行 / 在飞委托 / 证据），预检不替代它。它只读、不写提示账本，因此**缺 H2 段只报类别计数**；结构子段与父段写法建议照常点名。要看被计数的那些段名，请等节点收尾的完整 `exit`（它维护提示账本），或直接按模板逐段对照。
+   **Per-task preflight (`--preflight`, structural only)**: after each subagent returns and its result is recorded, run `node .claude/skills/flow-comet/scripts/workflow-guard.mjs exit subagent-execute --preflight` — it runs only the structural gates (existence of the node's declared artifacts / SUMMARY key sections / template-fidelity skeleton / intake-artifact skeleton, checked only when present / TASK seven fields, which apply at `plan` alone) and skips the progress gates (evidence, task-set signature, serial pending, delegable parallel tasks, in-flight handoffs, real verify execution); it does not advance, does not write workflow state, and does not write the template hint ledger. **The preflight scope of this family** = the existence of the node's declared file artifacts (a missing one blocks and names each path with its template) + the SUMMARY key sections + the template-fidelity skeleton + the three intake documents (`CHANGE` / `REQUIREMENT` / `DESIGN`, checked only when present); the TASK seven fields belong to the `plan` exit and are a no-op for the subagent-execute family, so they are not part of this step. **Passing the preflight means the structural face passes; it does not mean the progress gates will pass** (advancing is still decided by the full exit / `--apply`). Value: the task's SUMMARY defects (missing section / structure subsection / conditional section / header field) surface right away at the point where the result is recorded and the task is not yet marked done — that is exactly the channel this step exists for; without it those defects are blocked by earlier progress gates (delegable parallel tasks / in-flight handoffs precede template fidelity) and pile up at the node exit. Boundary: it reports structural problems only; the **full `exit` without `--apply` remains the node's whole-chain rehearsal** and reports progress-class problems first (delegable parallel tasks / in-flight handoffs / evidence) — preflight does not replace it. Because it is read-only and writes no hint ledger, **a missing H2 section is reported as a category count only**; a missing structural subsection, and the advice naming the parent section that should hold it, are still named. For the counted headings, wait for the node's closing full `exit` (which keeps that hint ledger) or compare the document against the template section by section.
+
+5. **Collect evidence**: After all subagents complete, verify each returned:
    - SUMMARY.md exists in `.specs/<change-id>/` and is **模板保真**（按 `flow-kit/templates/SUMMARY.md`：标题 `# SUMMARY:` / 首部 4 字段 / 段序一致，含 `## 自检方法` 段）。
    - Verify output is real (not fabricated).
    - Handoff evidence is recorded.
 
-5. **Mark done**: Update TASK.md — set `status="done"` for all completed parallel tasks.
+6. **Mark done**: Update TASK.md — set `status="done"` for all completed parallel tasks.
 
-6. **Record overall evidence**: Run `node .claude/skills/flow-comet/scripts/workflow-state.mjs record subagent-execute '<evidence JSON>'` to record completion.
+7. **Record overall evidence**: Run `node .claude/skills/flow-comet/scripts/workflow-state.mjs record subagent-execute '<evidence JSON>'` to record completion.
 
-7. **Exit check**: Run exit check.
+8. **Exit check**: Run exit check.
 
 ## Return Contract（子代理必须回传）
 
@@ -201,6 +225,7 @@ This node is truly done when:
 - **Agent thought**: "Subagent can figure out what to do from context." **Actual risk**: Subagent not loading `flow-comet-dev` means it skips TDD, LESSONS scan, diff boundary check, and self-review. The handoff prompt must explicitly require flow-comet-dev.
 - **Agent thought**: "Subagent might need to touch related files for context." **Actual risk**: Subagent exceeding `write_files` boundaries creates merge conflicts with other parallel subagents. Strict boundary enforcement is mandatory.
 - **Agent thought**: "One subagent finished, mark it done immediately." **Actual risk**: Marking tasks done before all subagents complete can cause issues if a later subagent fails and needs to reference completed work. Wait for all, then batch mark.
+- **Agent thought**: "同时发 request 和启动子代理，省一个来回。" **Actual risk**: 先让 request 成功，再启动子代理——禁止把 request 与子代理启动放进同一个并发调用（例如 `Promise.all`）；这是执行纪律，不是机制拦截（平台层没有挂点，引擎不替你排队）。与它相邻的另一件事已是机制保证：`result` 在写盘前校验该任务有 request 记录，缺失即新 change BLOCKED 并给出补 request 的恢复句。The order is mandatory: **a successful request first, then launch the subagent**, **never inside one concurrent call**; this is **execution discipline, not a mechanism interception** — the platform tool layer has no hook point to enforce it.
 
 ## Entry Check
 

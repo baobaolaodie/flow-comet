@@ -170,6 +170,141 @@ export function validateStateFields(state) {
   return bad;
 }
 
+// ---------- payload 形状校验(record / handoff result 单一来源) ----------
+// record 把解析后的 payload 原样展开进 evidence.<node>。字段类型错误此前一律静默落库:summary 写成
+// 对象/数组/数字时,下游出口门禁只看到「没有非空字符串 summary」,于是报 requires evidence:
+// <schema-id>——出错的是 record、报错的却是 exit,执行者得自己反推「载荷该写什么形状」。校验因此放在
+// **写入前**:点名字段路径与当前类型,不落库、也不先做其它副作用(声明标记补写等)。
+// 只做**类型**判定:取值是否合法(如 lessonsNomination.scanned 是否等于 SUMMARY 份数、提名编号是否
+// 真实登记)仍归出口门禁——本表不复制、不新增业务规则;未知字段继续放行(前向兼容)。
+// 字段集合 = evidence.<node> 上**被下游按特定类型消费**的字段(summary、completedChecks 元素、
+// lessonsNomination.nominated 元素与 reasonIfNone,以及 lessonsNomination.scanned——出口按**数值**
+// 与 SUMMARY 份数比对,字符串 "2" 落库后只会在 archive 出口才炸)。
+const RECORD_PAYLOAD_SHAPES = [
+  { field: 'summary', kind: 'non-empty-string' },
+  { field: 'completedChecks', kind: 'string-array' },
+  {
+    field: 'lessonsNomination',
+    kind: 'object',
+    fields: [
+      // 扫描份数在出口按数值比对(份数相等才算留痕成立):数字以外的类型必须写入前就拒,否则
+      // "2" 能 record 成功、要等 archive 出口才因 "2" !== 2 拦下——错误延后暴露,正是本表要消灭的。
+      { field: 'scanned', kind: 'number' },
+      { field: 'nominated', kind: 'string-array' },
+      { field: 'reasonIfNone', kind: 'string' },
+    ],
+  },
+];
+
+// Return Contract(handoff result)的形状表——与 record 表共用下方同一判定器(不另写一份校验):
+// 两条写通道(record 把载荷展开进 evidence.<node>,handoff result 把契约原样存进 handoffResult)
+// 此前只有 record 在写入前判形状,畸形的 result 一律静默落库,问题延后到出口门禁才暴露——那里只会
+// 报「缺 commitHash / 缺 greenEvidence」,或把对象元素判成「缺 completedChecks」,出错的是 result、
+// 报错的却是 exit。字段集合 = 契约文档登记、且被下游按特定类型消费的字段:
+//   status          取值集合沿用契约文档既有枚举(DONE | DONE_WITH_CONCERNS | BLOCKED |
+//                   NEEDS_CONTEXT),不在此新增取值;字段缺席放行(不声明状态的旧格式契约不被误拦)。
+//   completedChecks 字符串数组(对象元素 [{id, status}] 是既有踩坑形态)。
+//   redEvidence / greenEvidence 对象容器(容器内是否带 command 仍归出口门禁的渐进提示)。
+//   commitHash      零提交语义不变:任务无提交时允许缺席或显式空值(request 侧 noCommit 判据不受
+//                   本校验影响);一旦给值就必须是字符串——数字等错误类型不得靠「缺字段豁免」混过。
+const RETURN_CONTRACT_PAYLOAD_SHAPES = [
+  { field: 'status', kind: 'enum-string', values: ['DONE', 'DONE_WITH_CONCERNS', 'BLOCKED', 'NEEDS_CONTEXT'] },
+  { field: 'completedChecks', kind: 'string-array' },
+  { field: 'redEvidence', kind: 'object' },
+  { field: 'greenEvidence', kind: 'object' },
+  { field: 'commitHash', kind: 'optional-string' },
+];
+
+// 场景 → 形状表:record 与 handoff result 之间唯一的分界,判定器本身只有一处。
+const PAYLOAD_SHAPES_BY_SCOPE = {
+  record: RECORD_PAYLOAD_SHAPES,
+  'return-contract': RETURN_CONTRACT_PAYLOAD_SHAPES,
+};
+
+// 报错文案的两个零件(同一句话只在这里拼):类型名沿用 JS/JSON 习惯(object / array / number…),
+// 空值单独命名——「必须是字符串」对空串不成立,执行者需要看到的判据是「非空」。
+function evidenceValueTypeName(value) {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  return typeof value;
+}
+
+function evidenceTypeProblems(value, shape, fieldPath) {
+  const problems = [];
+  if (shape.kind === 'string' || shape.kind === 'non-empty-string') {
+    if (typeof value !== 'string') {
+      problems.push({ field: fieldPath, message: '必须是字符串（当前是 ' + evidenceValueTypeName(value) + '）' });
+    } else if (shape.kind === 'non-empty-string' && value.trim() === '') {
+      problems.push({ field: fieldPath, message: '必须是非空字符串（当前是' + (value === '' ? '空串' : '空白字符串') + '）' });
+    }
+    return problems;
+  }
+  if (shape.kind === 'number') {
+    // 数值字段:JSON 载荷不可能产出 NaN/Infinity,故 typeof 判定即是完整判据;取值是否等于
+    // SUMMARY 份数仍归出口门禁(本表不复制业务规则)。
+    if (typeof value !== 'number') {
+      problems.push({ field: fieldPath, message: '必须是数字（当前是 ' + evidenceValueTypeName(value) + '）' });
+    }
+    return problems;
+  }
+  if (shape.kind === 'optional-string') {
+    // 零提交:字段缺席 / 显式空值 = 「本次没有提交可回传」,放行;给值即必须字符串。
+    if (value === undefined || value === null || value === '') return problems;
+    if (typeof value !== 'string') {
+      problems.push({ field: fieldPath, message: '必须是字符串（当前是 ' + evidenceValueTypeName(value) + '）' });
+    }
+    return problems;
+  }
+  if (shape.kind === 'enum-string') {
+    if (typeof value !== 'string') {
+      problems.push({ field: fieldPath, message: '必须是字符串（当前是 ' + evidenceValueTypeName(value) + '）' });
+      return problems;
+    }
+    if (!shape.values.includes(value)) {
+      problems.push({
+        field: fieldPath,
+        message: '不属于允许取值（当前是 ' + value + '）；允许取值: ' + shape.values.join(' | '),
+      });
+    }
+    return problems;
+  }
+  if (shape.kind === 'string-array') {
+    if (!Array.isArray(value)) {
+      problems.push({ field: fieldPath, message: '必须是字符串数组（当前是 ' + evidenceValueTypeName(value) + '）' });
+      return problems;
+    }
+    value.forEach((item, index) => {
+      if (typeof item !== 'string') {
+        problems.push({ field: fieldPath + '[' + index + ']', message: '必须是字符串（当前是 ' + evidenceValueTypeName(item) + '）' });
+      }
+    });
+    return problems;
+  }
+  // object:容器本身先判类型,再逐个子字段判——嵌套字段的路径带上前缀(lessonsNomination.nominated[0])
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    problems.push({ field: fieldPath, message: '必须是对象（当前是 ' + evidenceValueTypeName(value) + '）' });
+    return problems;
+  }
+  for (const child of shape.fields ?? []) {
+    if (!Object.prototype.hasOwnProperty.call(value, child.field)) continue;
+    problems.push(...evidenceTypeProblems(value[child.field], child, fieldPath + '.' + child.field));
+  }
+  return problems;
+}
+
+// 返回形状问题数组(空 = 合法):调用方(record / handoff result)负责报文与退出码,本函数只描述事实。
+// scope 只选择字段表(默认 record——既有调用方的语义不变),判定逻辑两个写通道共用同一份。
+export function evidencePayloadProblems(payload, scope = 'record') {
+  const shapes = PAYLOAD_SHAPES_BY_SCOPE[scope] ?? RECORD_PAYLOAD_SHAPES;
+  const problems = [];
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return problems;
+  for (const shape of shapes) {
+    if (!Object.prototype.hasOwnProperty.call(payload, shape.field)) continue;
+    problems.push(...evidenceTypeProblems(payload[shape.field], shape, shape.field));
+  }
+  return problems;
+}
+
 // ---------- verifyFailures 按 change 读写(单一来源——workflow-state verify-fail 与
 // workflow-guard exit verify 共用) ----------
 

@@ -41,11 +41,19 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 | 命令 | 负责什么 |
 |---|---|
 | `workflow-guard.mjs` | `entry` / `exit` —— 门禁。出口校验该节点的工件、段、声明，并在 `verify` 时**真跑**测试命令 |
+| `workflow-guard.mjs exit <节点> --preflight` | 结构预检：该节点出口里只读的结构性部分——该节点声明的工件、摘要关键段、摘要与入口文档（在场时）的模板骨架，外加仅 `plan` 生效的任务字段——只报结构问题、不推进任何状态；完整 `exit`（不带 `--apply`）仍是全链预演 |
 | `workflow-state.mjs` | `init`、`status`、`next`、`select`、`record`、`verify-fail`、`advance`、`execution-mode`、`config`、`skill-load`、`bridge-check`、`reenter`、`replan`、`explain` —— 状态机与记账 |
 
-`skill-load` 要带上入口打印的那两条指针。`--prompt <flow-kit/prompts/…>` 指向该节点的协议文件——只能是它自己的那几份，否则入口拒绝这条声明；`--templates <DOC.md,...>` 以逗号分隔的完整清单声明该节点的模板，每次声明各写一遍。清单必须与该节点完全一致：缺失、多写或错名在新的 change 上被拒绝、旧 change 只告警。`verify` 与 `archive` 没有模板，不传 `--templates`；自定义协议按协议自己声明的 `templates` 走。
+`skill-load` 要带上入口打印的那两条指针。`--prompt <flow-kit/prompts/…>` 指向该节点的协议文件——只能是它自己的那几份，否则入口拒绝这条声明；`--templates <DOC.md,...>` 以逗号分隔的完整清单声明该节点的模板，每次声明各写一遍。清单必须与该节点完全一致：缺失、多写或错名在新的 change 上被拒绝、旧 change 只告警。`verify` 与 `archive` 没有模板，不传 `--templates`；自定义协议按协议自己声明的 `templates` 走。声明还要覆盖整个节点而不是抽样：出口处，该节点该读的每份协议文件与协议要求它的每个技能都必须由该节点的标记声明过——一条 `skill-load` 可以带多个 `--prompt`——缺项会拦下新 change 并逐项点名，旧 change 只告警。
 
-节点的出口会在以下情况拒绝通过：工件不完整或形态不合规、缺少技能加载声明、或从未记录进入；每次拒绝都会打印原因与修复命令。状态不存放在对话里：随时用 `status` / `next` 重新推导；单个节点的产物、门禁、命令与它把关的 `TEMPLATE:` 路径用 `explain <node>` 现问，不必从节点技能册里手抄。
+**证据载荷在写入前校验。** `record` 接受 `summary` 为非空字符串、`completedChecks` 为字符串数组、`lessonsNomination` 为对象且其 `scanned` 是数字、`nominated` 是字符串数组、`reasonIfNone` 是字符串。类型不对会立刻非零退出，逐条点名出错的字段路径与它当前的类型，并且什么都不写——状态保持原样，引擎不认识的字段则放行。
+
+```bash
+node <skills>/flow-comet/scripts/workflow-state.mjs record execute '{"summary":"T01 done","completedChecks":["unit-tests"]}'   # 合法形态
+node <skills>/flow-comet/scripts/workflow-state.mjs record execute '{"summary":"T01 done","completedChecks":[{"id":"unit-tests"}]}'   # 被拒——成员是 object 而不是字符串
+```
+
+节点的出口会在以下情况拒绝通过：工件不完整或形态不合规、缺少技能加载声明或声明未覆盖该节点的协议文件与必需技能、或从未记录进入；每次拒绝都会打印原因与修复命令。状态不存放在对话里：随时用 `status` / `next` 重新推导；单个节点的产物、门禁、命令与它把关的 `TEMPLATE:` 路径用 `explain <node>` 现问，不必从节点技能册里手抄。
 
 ## 工件
 

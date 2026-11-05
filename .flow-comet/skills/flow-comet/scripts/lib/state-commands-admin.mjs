@@ -9,9 +9,10 @@ import {
   findTemplatesArg,
   nodeTemplateDeclaration,
   templateDeclarationProblems,
-  templateDeclareCommand,
 } from '../protocol-utils.mjs';
-import { findPromptArg, protocolUnderFlowKitPrompts } from './state-skillmarkers.mjs';
+// 声明命令的唯一装配与状态命令族的运行上下文（与守卫侧同一份命令文本）。
+import { commandContext, declarationCommand } from './state-explain.mjs';
+import { findPromptArgs, protocolUnderFlowKitPrompts } from './state-skillmarkers.mjs';
 
 // config set <key> <value>——branchMode 只读（init 自动判定），enablePrReview 手动
 // 开关，last_evolve_at 为 evolve 元数据时刻（形态校验 fail-closed，写通道唯一）
@@ -82,10 +83,11 @@ export async function runExecutionMode(argv) {
   return;
 }
 
-// skill-load <node> <skill> [--prompt <path>] [--templates <a.md,b.md>]——写声明标记
+// skill-load <node> <skill> [--prompt <path>]... [--templates <a.md,b.md>]——写声明标记
 // .specs/<change-id>/.skill-loads/<node>-<skill>.json
-// （{ node, skill, protocol, templates, at }）；record 校验 completedChecks 的 required-skill 条目
-// 与节点模板声明以此为准。
+// （{ node, skill, protocol, protocols, templates, at }；protocol 为首个 --prompt 的 basename，
+// protocols 为全部 --prompt 的 basename——后者供出口的覆盖判据核对）；record 校验 completedChecks
+// 的 required-skill 条目与节点模板声明以此为准。
 // 诚实边界：标记是"声明"而非物理证明——运行时没有 Skill 调用观察点，脚本无法确认执行者
 // 真实加载过该 skill；标记仅记录"执行者主动声明已加载"，由流程纪律兜底。
 export async function runSkillLoad(protocol, argv) {
@@ -107,9 +109,13 @@ export async function runSkillLoad(protocol, argv) {
   // flow-kit 为 vendored 上游，协议提示只读引用）。协议加载本身由 resolveProtocol 全局
   // 处理（含受保护读取）——--protocol 语义不变（工作流协议 JSON）；此处仅校验用户显式传入的
   // --prompt 原始值（skill-load 专属参数，不再与全局协议解析共用 --protocol）。
-  const promptArg = findPromptArg(argv.slice(3));
-  if (promptArg !== null && !protocolUnderFlowKitPrompts(promptArg)) {
-    throw new Error('skill-load --prompt 路径必须位于 flow-kit/prompts/ 下（flow-kit 为 vendored 上游，协议提示只读引用）: ' + promptArg);
+  // 可重复出现：一个节点该读的协议常常不止一份（open 两份、review 两份），全部值逐个校验——
+  // 只校验第一个会让第二个非法路径混进标记（与「只记录第一个」是同一个缺陷的两面）。
+  const promptArgs = findPromptArgs(argv.slice(3));
+  for (const promptArg of promptArgs) {
+    if (!protocolUnderFlowKitPrompts(promptArg)) {
+      throw new Error('skill-load --prompt 路径必须位于 flow-kit/prompts/ 下（flow-kit 为 vendored 上游，协议提示只读引用）: ' + promptArg);
+    }
   }
   // 产出物模板声明（C4 / C11）：置入既有标记 JSON 的 templates 数组（节点级一份）。
   // 内置节点：声明集合必须与 C3 映射一致（required ⊆ declared ⊆ required ∪ optional）——新 change
@@ -117,17 +123,25 @@ export async function runSkillLoad(protocol, argv) {
   // WARN（渐进兼容：旧项目不可能一夜补齐声明，缺失由 record 侧统一给提示，不在声明处重复报）。
   // 自定义协议节点：不比对集合（ADR-002 特化层，C12：协议声明什么就记什么）。
   const templateArg = findTemplatesArg(argv.slice(3));
-  const templateDeclaration = nodeTemplateDeclaration((protocol.nodes ?? []).find((item) => item.id === nodeId));
+  const declarationNode = (protocol.nodes ?? []).find((item) => item.id === nodeId);
+  const templateDeclaration = nodeTemplateDeclaration(declarationNode);
   if (templateDeclaration.source === 'builtin') {
     const isNewChange = (await readState()).newChange === true;
     const requiredNames = describeTemplateList(templateDeclaration.required);
-    const declareCommand = templateDeclareCommand(templateDeclaration, { nodeId, skillName });
+    // 重新声明命令由协议派生（state-explain 的唯一装配）：脚本路径 + 该节点**全部**协议文件 +
+    // 模板全清单 + 协议上下文。此前的形态只带首份 --prompt，且是裸脚本名（照抄 command not found，
+    // 或照抄后同一 exit 仍被覆盖门点名另一份——报文与判据不是同一份）。
+    const declareCommand = declarationCommand({
+      node: declarationNode,
+      skill: skillName,
+      context: commandContext({ argv }),
+    });
+    // 命令自成一行（与其他两处声明报文同形）：整行可照抄，不会被前后措辞切碎。
     const reportUnsoundDeclaration = (reason) => {
-      if (isNewChange) {
-        console.error('BLOCKED: ' + reason + '——重跑 ' + declareCommand + ' 重新声明后重试');
-        process.exit(1);
-      }
-      console.error('WARN: ' + reason + '——重跑 ' + declareCommand + ' 重新声明（旧 change 渐进不阻断）');
+      console.error((isNewChange ? 'BLOCKED: ' : 'WARN: ') + reason
+        + '——照抄下面的命令重新声明（同一 node-skill 重跑会覆写该标记）'
+        + (isNewChange ? '后重试' : '；旧 change 渐进不阻断') + ':\n  ' + declareCommand);
+      if (isNewChange) process.exit(1);
     };
     const problems = templateDeclarationProblems(templateDeclaration, templateArg.values);
     if (!templateArg.provided && templateDeclaration.required.length > 0 && isNewChange) {
@@ -149,11 +163,15 @@ export async function runSkillLoad(protocol, argv) {
     // 但 record 的声明自动化仍可写归档路径标记——消息如实引导
     throw new Error('skill-load requires an active change（先运行 init <change-id>;若该 change 已归档,声明标记由 record 自动补写——M5 会写入归档路径的 .skill-loads/）');
   }
-  // 标记 protocol 字段 = --prompt 参数的 basename（如 0-change.md）——与 guard exit
-  // 校验的节点协议映射表 basename 精确比对同值（真实链路 skill-load → exit 一致）；未传 --prompt →
-  // null（无协议声明，exit 校验 fail-closed）。若写 resolveProtocol 解析后的完整绝对路径，与
-  // 节点协议映射表的 basename 比对必然失败（真实链路必 BLOCKED——机制实际不可用）。
-  const marker = { node: nodeId, skill: skillName, protocol: promptArg === null ? null : path.basename(promptArg), templates: templateArg.values, at: new Date().toISOString() };
+  // 标记的协议声明两形态并存：
+  //   · protocols = 全部 --prompt 的 basename（保序）——出口覆盖判据按它判「该读的每份协议是否
+  //     都被声明过」，一份命令声明多份时不会再丢；
+  //   · protocol = 首个 basename（旧读法：入口的声明核对与既有读标记的消费方只认这个单值）。
+  // 未传 --prompt → protocol = null、protocols = []（无协议声明，exit 覆盖判据 fail-closed）。
+  // 写 basename 而非 resolveProtocol 解析后的完整绝对路径：与节点协议映射表 basename 精确比对
+  // 同值（真实链路 skill-load → exit 一致）；写完整路径会让比对必然失败（机制实际不可用）。
+  const protocols = promptArgs.map((promptArg) => path.basename(promptArg));
+  const marker = { node: nodeId, skill: skillName, protocol: protocols[0] ?? null, protocols, templates: templateArg.values, at: new Date().toISOString() };
   // specsDir 已含 .specs/，相对路径为 <change-id>/.skill-loads/<node>-<skill>.json
   const markerRel = path.posix.join(changeName, '.skill-loads', nodeId + '-' + skillName + '.json');
   await writeJsonAtomic(path.join(specsDir(), markerRel), marker);
