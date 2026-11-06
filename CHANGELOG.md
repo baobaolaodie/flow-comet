@@ -12,6 +12,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Changed
+
+- **The dsh bridge covers the dsh-ops write surface and the PTC transport**: `ops_bash`, `ops_write_file` and `ops_edit_file` now use the same `Write`/`Edit`/`Bash` contract as the official tools; multi-target write tools (`ops_copy`, `ops_move`, `ops_remove`, `ops_replace`, `ops_batch`) are refused while a workflow is running, and `run_code` is refused in a running workflow because its in-process `node:fs` writes never reach the pre-execute hook; idle projects keep the PTC and dsh-ops tools untouched. ([#167](https://github.com/baobaolaodie/flow-comet/pull/167))
+
 ## [1.7.0] - 2026-11-05
 
 ### Added

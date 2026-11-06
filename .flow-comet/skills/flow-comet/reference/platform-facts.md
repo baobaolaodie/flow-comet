@@ -37,7 +37,7 @@
 
 | 属性 | Claude Code | Codex | dsh |
 |------|-------------|-------|-----|
-| ① 写权限 | 载荷 `agent_id` / `agent_type`——**证实**（真机实测：子代理载荷含二者、主会话载荷不含；与 Codex 同一判据） | 载荷 `agent_id` + `agent_type`——**证实**（实测：子代理载荷 12 键含二者、主线程 10 键不含）；守卫读 `agent_id`，与 CC 同一判据 | 桥接透传 `delegationDepth` **+ 通道标记**（`FLOW_COMET_AGENT_DEPTH_SOURCE`，守卫要求两者同时在场才接受 env 面身份——继承来的深度变量不作数）——**证实**（0.1.7-rc.2 全接缝重认证；本批收窄为「最小保护集除外」） |
+| ① 写权限 | 载荷 `agent_id` / `agent_type`——**证实**（真机实测：子代理载荷含二者、主会话载荷不含；与 Codex 同一判据） | 载荷 `agent_id` + `agent_type`——**证实**（实测：子代理载荷 12 键含二者、主线程 10 键不含）；守卫读 `agent_id`，与 CC 同一判据 | 桥接透传 `delegationDepth` **+ 通道标记**（`FLOW_COMET_AGENT_DEPTH_SOURCE`，守卫要求两者同时在场才接受 env 面身份——继承来的深度变量不作数）——**证实**（0.1.7-rc.2 全接缝重认证；本批收窄为「最小保护集除外」；**0.2.2-rc.1 重认证通过；dsh-ops 0.5.0 的 ops_bash/ops_write_file/ops_edit_file 经桥接别名覆盖；PTC run_code 运行态拒绝（进程内 fs 写对桥接不可见）**） |
 | ② 提交隔离 | pathspec 纪律（多写者共享同一工作区形态） | 同左 | 同左 |
 | ③ 验证隔离 | `subagent-execute` 出口锚：有 request 无 result（新 change BLOCKED / 旧 change WARN 渐进） | 同左 | 同左 |
 | ④ 集成纪律 | `merge --no-ff` 优先；降级 cherry-pick 必记因 | 同左 | 同左 |

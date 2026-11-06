@@ -12,6 +12,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **dsh 桥接覆盖 dsh-ops 写入面并封住 PTC transport**：`ops_bash`、`ops_write_file`、`ops_edit_file` 与官方工具使用同一套 `Write`/`Edit`/`Bash` 契约；多目标写入工具（`ops_copy`、`ops_move`、`ops_remove`、`ops_replace`、`ops_batch`）在流程运行中拒绝；`run_code` 在运行中的流程里拒绝——其进程内 `node:fs` 写不会到达 pre-execute 钩子；空闲项目保持 PTC 与 dsh-ops 工具可用。([#167](https://github.com/baobaolaodie/flow-comet/pull/167))
+
 ## [1.7.0] - 2026-11-05
 
 ### 新增

@@ -686,12 +686,37 @@ const RAW_ENTRIES = [
       for (const alias of ['edit', 'Edit', 'editfile', 'file-edit']) {
         if (bridge.normalizeToolName(alias) !== 'Edit') throw new Error('normalizeToolName 别名未归一化: ' + alias);
       }
+      // dsh-ops 0.5.0 写入面别名：桌面（hidePwsh + 动态工具）与 PTC host 派发均用这些名字；
+      // 不归一化即 next() 放行 = 白名单被 OPS 写入面绕过。
+      for (const alias of ['ops_write_file', 'OPS_WRITE_FILE']) {
+        if (bridge.normalizeToolName(alias) !== 'Write') throw new Error('dsh-ops Write 别名未归一化: ' + alias);
+      }
+      for (const alias of ['ops_edit_file', 'OPS_EDIT_FILE']) {
+        if (bridge.normalizeToolName(alias) !== 'Edit') throw new Error('dsh-ops Edit 别名未归一化: ' + alias);
+      }
+      for (const alias of ['ops_bash', 'OPS_BASH']) {
+        if (bridge.normalizeToolName(alias) !== 'Bash') throw new Error('dsh-ops Bash 别名未归一化: ' + alias);
+      }
       for (const alias of ['bash', 'Bash', 'shell', 'powershell', 'pwsh', 'Pwsh', 'PWSH', 'run_command', 'run-command']) {
         if (bridge.normalizeToolName(alias) !== 'Bash') throw new Error('normalizeToolName 别名未归一化: ' + alias);
       }
       // 非 Write/Edit/Bash 或非字符串 → null(监听侧按放行语义跳过)
-      for (const v of ['read', 'grep', '', null, undefined, 123, {}]) {
+      for (const v of ['read', 'grep', 'run_code', 'ops_remove', 'ops_copy', '', null, undefined, 123, {}]) {
         if (bridge.normalizeToolName(v) !== null) throw new Error('非写工具应归一化为 null: ' + JSON.stringify(v));
+      }
+      // 受控例外纯函数：run_code（PTC transport）与多目标写入工具没有 canonical 名，
+      // 但运行态必须拒绝；两者不得互相误判（write 不是 PTC，ops_write_file 不是多目标）。
+      if (!bridge.isPtcTransport('run_code') || !bridge.isPtcTransport('RUN_CODE')) {
+        throw new Error('isPtcTransport 应识别 run_code（大小写不敏感）');
+      }
+      if (bridge.isPtcTransport('write') || bridge.isPtcTransport('ops_bash')) {
+        throw new Error('isPtcTransport 不得误判普通写工具');
+      }
+      for (const t of ['ops_copy', 'ops_move', 'ops_remove', 'ops_replace', 'ops_batch', 'OPS_REMOVE']) {
+        if (!bridge.isMultiTargetWriteTool(t)) throw new Error('isMultiTargetWriteTool 应识别: ' + t);
+      }
+      if (bridge.isMultiTargetWriteTool('ops_write_file') || bridge.isMultiTargetWriteTool('write')) {
+        throw new Error('isMultiTargetWriteTool 不得误判单目标写工具');
       }
       // ② 参数映射别名提取:Write/Edit 的 file_path/filePath/path;Bash 的 command/cmd/script
       const m1 = bridge.mapToolInput('Write', { file_path: 'a.md' });
@@ -1007,7 +1032,68 @@ const RAW_ENTRIES = [
         }
         console.log('  桥接通道标记：继承形态按协调者拦 / 标记在场走身份放行 / 近形状标记不认 ✓');
       }
-      console.log('  bridge.apply 分派集成(子代理放行/协调者拦/越界·形状 deny 不受身份/保护集拦)✓');
+      // ⑦k dsh-ops ops_bash 归一化为 Bash：运行态协调者写 src/ 源码 → 真实 guard 白名单 deny。
+      //    反向构造：去掉 ops_bash 别名 ⇒ canonicalName=null → next() 放行（dsh-ops 桌面
+      //    hidePwsh 后 shell 只剩 ops_bash，等于 shell 写整链绕过）。
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'ops_bash', arguments: { command: "printf 'x' > src/ops-shell.txt", description: 'probe' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('ops_bash 写源码不应 next——OPS shell 别名缺失(fail-open)');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('白名单拦截')) {
+          throw new Error('ops_bash 写源码应走 guard 白名单拦截(deny): ' + JSON.stringify(res));
+        }
+      }
+      // ⑦l dsh-ops ops_write_file 归一化为 Write：运行态写 src/ → deny
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'ops_write_file', arguments: { path: path.join(longTarget, 'src', 'ops-write.md'), content: 'x', expectedRevision: 'absent' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('ops_write_file 写源码不应 next——OPS 文件别名缺失(fail-open)');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('白名单拦截')) {
+          throw new Error('ops_write_file 写源码应走 guard 白名单拦截(deny): ' + JSON.stringify(res));
+        }
+      }
+      // ⑦m 同工具写 .specs/ → 放行（别名不误伤白名单内写入）
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'ops_write_file', arguments: { path: path.join(longTarget, '.specs', 'ops-ok.md'), content: 'ok', expectedRevision: 'absent' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('ops_write_file 写 .specs 应放行(next): ' + JSON.stringify(res));
+        if (res) throw new Error('ops_write_file 写 .specs 不应返回 deny: ' + JSON.stringify(res));
+      }
+      // ⑦n PTC run_code 运行态 → deny（进程内 node:fs 写不经过 pre-execute，桥接只看到外层名字）
+      //    反向构造：去掉 4.6 的 ptcTransport 分支 ⇒ next() 放行（transport 洞重新打开）
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'run_code', arguments: { code: 'const fs = await import("node:fs"); fs.writeFileSync("x","y")', description: 'ptc probe' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('run_code 运行态不应 next——PTC transport 未封（进程内 fs 写绕过）');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('PTC')) {
+          throw new Error('run_code 运行态应 deny(含 PTC 语义): ' + JSON.stringify(res));
+        }
+      }
+      // ⑦o OPS 多目标写入工具运行态 → 保守 deny（目标无法逐项判定）
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'ops_remove', arguments: { paths: [path.join(longTarget, 'src', 'x.md')], dryRun: true }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('ops_remove 运行态不应 next——多目标写入未保守拒绝');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('多目标')) {
+          throw new Error('ops_remove 运行态应 deny(含多目标语义): ' + JSON.stringify(res));
+        }
+      }
+      console.log('  bridge.apply 分派集成(子代理放行/协调者拦/越界·形状 deny 不受身份/保护集拦/OPS 别名/PTC 拒绝)✓');
     },
   },
 
@@ -1078,6 +1164,22 @@ const RAW_ENTRIES = [
         const r = await preExec(mkOutsideWrite(), () => { usedNext = true; });
         if (!usedNext) throw new Error('AC-3 status completed 应放行(next 被调): ' + JSON.stringify(r));
         if (r) throw new Error('AC-3 completed 不应返回 deny: ' + JSON.stringify(r));
+      }
+      // AC-3b 空闲态不得误伤 PTC/OPS：completed 态下 run_code 与 ops_bash 均 next()
+      //      （运行态才拦——PTC 与 OPS 多目标写入的保守策略只在 active workflow 生效）
+      {
+        let usedNext = false;
+        const r = await preExec(
+          { name: 'run_code', arguments: { code: '1' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('空闲态 run_code 应放行(next): ' + JSON.stringify(r));
+        usedNext = false;
+        const r2 = await preExec(
+          { name: 'ops_bash', arguments: { command: 'printf x > y' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('空闲态 ops_bash 应放行(next): ' + JSON.stringify(r2));
       }
       // AC-7 解析失败：state 写成非法 JSON + 项目外 Write → deny（reason 含 fail-closed 拒绝语义；
       //   当前无条件 deny 已通过、T02 流程态门落地后必须保持 deny，不得当空闲放行）
