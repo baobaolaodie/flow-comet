@@ -115,6 +115,26 @@ export function isOpsFileOperationTool(toolName) {
   return OPS_FILE_OPERATION_TOOLS.has(toolName.toLowerCase());
 }
 
+// copy/move 的目标是 `to`、remove 的目标是 `path`（schema 已确定）；这三者可按单目标
+// 交给 Write 判定，只有 replace/batch 才是真多目标、保留组拒绝。
+const OPS_SINGLE_TARGET_TOOLS = new Set(['ops_copy', 'ops_move', 'ops_remove']);
+
+export function isSingleTargetOpsFileTool(toolName) {
+  if (typeof toolName !== 'string') return false;
+  return OPS_SINGLE_TARGET_TOOLS.has(toolName.toLowerCase());
+}
+
+export function mapSingleTargetOpsFileTool(toolName, args) {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    return { ok: false, reason: '工具参数缺失或非对象' };
+  }
+  const raw = toolName.toLowerCase() === 'ops_remove' ? args.path : args.to;
+  if (typeof raw !== 'string' || raw.trim() === '') {
+    return { ok: false, reason: toolName + ' 缺少目标路径' };
+  }
+  return { ok: true, target: raw, input: { file_path: raw } };
+}
+
 // PTC transport：run_code 进程内可直接写文件，桥接只看到外层调用——这是已记录边界。
 // 默认放行（PTC 是主要使用方式，拒绝会冻死流程）；host 工具子调用仍逐个经过
 // tools/pre-execute 判定。没有隐藏的严格模式开关。
@@ -406,14 +426,16 @@ export function apply(ctx) {
     // deny——不静默、不挂起、不放行（监听器未捕获异常对 dsh 未定义，可能挂起或 fail-open）。
     try {
       // 1. 工具名归一化：非 Write/Edit/Bash 且非受控例外不处理（放行）。
-      //    受控例外（没有 canonical 名，但运行中必须拒绝）：
-      //    - PTC transport（run_code）：进程内 node:fs 写对桥接不可见；
-      //    - OPS 文件类工具（copy/move/remove/replace/batch）：目标语义需按工具分别判定，当前按组拒绝。
+      //    受控例外：
+      //    - PTC transport（run_code）：默认放行（进程内直写是已记录边界）；
+      //    - OPS 单目标工具（copy/move/remove）：目标确定，映射为 Write 交给 guard；
+      //    - OPS 多目标工具（replace/batch）：运行中按组拒绝。
       const toolName = typeof exec?.name === 'string' ? exec.name : '';
       const canonicalName = normalizeToolName(toolName);
       const ptcTransport = isPtcTransport(toolName);
       const opsFileOperation = isOpsFileOperationTool(toolName);
-      if (!canonicalName && !ptcTransport && !opsFileOperation) {
+      const singleTargetOps = isSingleTargetOpsFileTool(toolName);
+      if (!canonicalName && !ptcTransport && !opsFileOperation && !singleTargetOps) {
         return next();
       }
       // ops_bash 的 script_path 形态：命令体在文件里，mapToolInput 无法静态判定。
@@ -461,18 +483,33 @@ export function apply(ctx) {
         workdirOutsideProject = !isPathInsideProjectRoot(projectRoot, resolvedWorkdir);
       }
 
-      // 4. 参数映射（仅 canonical 写工具）：形状不符/缺关键字段 -> WARN + fail-closed deny。
-      //    D5：形状 fail-closed 任意态生效（含空闲态）——与流程态无关，保持现状。
-      //    PTC transport / OPS 文件类工具没有统一的单一目标可映射，进入 4.6 的运行态策略。
+      // 4. 参数映射（仅 canonical 写工具 + OPS 单目标）：形状不符/缺关键字段 ->
+      //    WARN + fail-closed deny。D5：形状 fail-closed 任意态生效（含空闲态）。
       let mapped = null;
       if (canonicalName && !scriptPathOnly) {
         mapped = mapToolInput(canonicalName, exec?.arguments);
-        if (!mapped.ok) {
+      } else if (singleTargetOps) {
+        mapped = mapSingleTargetOpsFileTool(toolName, exec?.arguments);
+      }
+      if (canonicalName && !scriptPathOnly) {
+        // shape 判定保持原位置语义（mapped 可能为 null）
+        if (!mapped || !mapped.ok) {
           const reason =
             'dsh-flow-comet-bridge: 工具 ' +
             String(exec?.name) +
             ' 参数形状不符（' +
-            mapped.reason +
+            (mapped ? mapped.reason : '无映射') +
+            '）——fail-closed 拒绝';
+          console.warn(reason);
+          return { kind: 'deny', reason };
+        }
+      } else if (singleTargetOps) {
+        if (!mapped || !mapped.ok) {
+          const reason =
+            'dsh-flow-comet-bridge: 工具 ' +
+            String(exec?.name) +
+            ' 参数形状不符（' +
+            (mapped ? mapped.reason : '无映射') +
             '）——fail-closed 拒绝';
           console.warn(reason);
           return { kind: 'deny', reason };
@@ -512,29 +549,31 @@ export function apply(ctx) {
         return { kind: 'deny', reason };
       }
       if (scriptPathOnly) {
-        const reason =
-          'dsh-flow-comet-bridge: ops_bash 的 script_path 形态命令体不在命令文本里，运行中无法静态判定写入目标——拒绝；请改用 command 形式，或结束/归档当前流程';
-        console.warn(reason);
-        return { kind: 'deny', reason };
+        // 脚本体不在命令文本里；共享 Bash 解析器（codexWriteTargetsFromCommand）并非
+        // bash 专用，无法可靠判定脚本内容。默认放行，残余边界在分发参考页记录。
+        return next();
       }
       if (ptcTransport) {
         // PTC 默认放行：它是主要使用方式；进程内直写是已记录边界。
         // 不做隐藏开关；host 工具子调用仍逐个经过 tools/pre-execute 判定。
         return next();
       }
-      if (opsFileOperation) {
+      if (opsFileOperation && !singleTargetOps) {
+        // 只有 replace/batch 是真多目标；copy/move/remove 已在第 4 步映射为 Write。
         const reason =
-          'dsh-flow-comet-bridge: OPS 文件类工具 "' +
+          'dsh-flow-comet-bridge: OPS 多目标工具 "' +
           toolName +
-          '" 在流程运行中的目标需按工具分别判定，当前版本按组拒绝——请在流程外执行，或结束/归档当前流程';
+          '" 在流程运行中的目标无法逐项判定，当前版本按组拒绝——请在流程外执行，或结束/归档当前流程';
         console.warn(reason);
         return { kind: 'deny', reason };
       }
       // running（activeChange + status running/undefined）：继续走既有第 5 步包含性校验、
       // 5.5 身份信号透传、第 6 步 guard 判定（身份与保护集统一由守卫裁决）。
+      // OPS 单目标工具以 Write 的语义进入包含性校验与 guard。
+      const guardToolName = canonicalName || (singleTargetOps ? 'Write' : null);
 
       // 5. 包含性校验（Write/Edit）：越界直接 deny，不进 guard。
-      if (canonicalName === 'Write' || canonicalName === 'Edit') {
+      if (guardToolName === 'Write' || guardToolName === 'Edit') {
         if (!isPathInsideProjectRoot(projectRoot, mapped.target)) {
           const reason =
             'dsh-flow-comet-bridge: 写入目标 "' +
@@ -576,7 +615,7 @@ export function apply(ctx) {
 
       const decision = await runGuard(
         projectRoot,
-        canonicalName,
+        guardToolName,
         mapped.input,
         exec?.signal,
         agentDepthValue,

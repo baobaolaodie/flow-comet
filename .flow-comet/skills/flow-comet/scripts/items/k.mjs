@@ -1084,30 +1084,33 @@ const RAW_ENTRIES = [
         if (!usedNext) throw new Error('PTC 默认放行时 run_code 应 next: ' + JSON.stringify(res));
         if (res) throw new Error('PTC 默认放行时 run_code 不应返回 deny: ' + JSON.stringify(res));
       }
-      // ⑦o OPS 文件类工具运行态 → 保守 deny（目标需按工具分别判定）
+      // ⑦o ops_remove 单目标：映射为 Write，走 guard 白名单（写 src deny、写 .specs 放行）
       {
         let usedNext = false;
         const res = await preExec(
           { name: 'ops_remove', arguments: { path: path.join(longTarget, 'src', 'x.md'), expectedRevision: 'absent' }, agent: { cwd: longTarget, session: { header: {} } } },
           () => { usedNext = true; },
         );
-        if (usedNext) throw new Error('ops_remove 运行态不应 next——OPS 文件类工具未保守拒绝');
-        if (!res || res.kind !== 'deny' || !res.reason.includes('文件类工具')) {
-          throw new Error('ops_remove 运行态应 deny(含文件类工具语义): ' + JSON.stringify(res));
+        if (usedNext) throw new Error('ops_remove 写源码不应 next——单目标未走 guard');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('白名单拦截')) {
+          throw new Error('ops_remove 写源码应走 guard 白名单拦截(deny): ' + JSON.stringify(res));
         }
+        usedNext = false;
+        const res2 = await preExec(
+          { name: 'ops_remove', arguments: { path: path.join(longTarget, '.specs', 'x.md'), expectedRevision: 'absent' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('ops_remove 写 .specs 应放行(next): ' + JSON.stringify(res2));
       }
-      // ⑦p ops_bash 的 script_path 形态：运行态拒绝（脚本体不在命令文本里，
-      //    写目标无法静态判定）；空闲态放行由 K12 AC-3b 覆盖。
+      // ⑦p ops_bash 的 script_path 形态：默认放行（脚本体不在命令文本里；
+      //    共享 Bash 解析器并非 bash 专用，无法可靠判定；残余边界在参考页记录）。
       {
         let usedNext = false;
         const res = await preExec(
           { name: 'ops_bash', arguments: { script_path: 'probe.sh', description: 'probe' }, agent: { cwd: longTarget, session: { header: {} } } },
           () => { usedNext = true; },
         );
-        if (usedNext) throw new Error('ops_bash script_path 运行态不应 next——脚本体不可静态判定');
-        if (!res || res.kind !== 'deny' || !res.reason.includes('script_path')) {
-          throw new Error('ops_bash script_path 运行态应 deny(含 script_path 语义): ' + JSON.stringify(res));
-        }
+        if (!usedNext) throw new Error('ops_bash script_path 运行态应默认放行(next): ' + JSON.stringify(res));
       }
       // ⑦q ops_edit_file 归一化为 Edit：运行态写 src/ deny、写 .specs/ 放行
       {
@@ -1127,16 +1130,34 @@ const RAW_ENTRIES = [
         );
         if (!usedNext) throw new Error('ops_edit_file 写 .specs 应放行(next): ' + JSON.stringify(res2));
       }
-      // ⑦r OPS 文件类工具成员行为：ops_copy 运行态同样按组保守拒绝
+      // ⑦r ops_copy 单目标：to 是写目标，走 guard 白名单（写 src deny、写 .specs 放行）
       {
         let usedNext = false;
         const res = await preExec(
           { name: 'ops_copy', arguments: { path: path.join(longTarget, 'src', 'a.md'), to: path.join(longTarget, 'src', 'b.md'), expectedRevision: 'absent' }, agent: { cwd: longTarget, session: { header: {} } } },
           () => { usedNext = true; },
         );
-        if (usedNext) throw new Error('ops_copy 运行态不应 next——OPS 文件类工具未保守拒绝');
-        if (!res || res.kind !== 'deny' || !res.reason.includes('文件类工具')) {
-          throw new Error('ops_copy 运行态应 deny(含文件类工具语义): ' + JSON.stringify(res));
+        if (usedNext) throw new Error('ops_copy 写源码不应 next——单目标未走 guard');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('白名单拦截')) {
+          throw new Error('ops_copy 写源码应走 guard 白名单拦截(deny): ' + JSON.stringify(res));
+        }
+        usedNext = false;
+        const res2 = await preExec(
+          { name: 'ops_copy', arguments: { path: path.join(longTarget, '.specs', 'a.md'), to: path.join(longTarget, '.specs', 'b.md'), expectedRevision: 'absent' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('ops_copy 写 .specs 应放行(next): ' + JSON.stringify(res2));
+      }
+      // ⑦r2 ops_replace 仍是真多目标：运行态按组拒绝
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'ops_replace', arguments: { path: longTarget, pattern: 'a', replacement: 'b' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('ops_replace 运行态不应 next——多目标未按组拒绝');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('多目标')) {
+          throw new Error('ops_replace 运行态应 deny(含多目标语义): ' + JSON.stringify(res));
         }
       }
       // ⑦s ops_bash 的 workdir 在项目外：运行态拒绝（相对写入的真实落点与 guard 判定不一致）
@@ -1153,7 +1174,7 @@ const RAW_ENTRIES = [
           throw new Error('ops_bash workdir 在项目外应 deny(含 workdir 语义): ' + JSON.stringify(res));
         }
       }
-      console.log('  bridge.apply 分派集成(子代理放行/协调者拦/越界·形状 deny 不受身份/保护集拦/OPS 别名/script_path/workdir/PTC 默认放行)✓');
+      console.log('  bridge.apply 分派集成(子代理放行/协调者拦/越界·形状 deny 不受身份/保护集拦/OPS 别名·单目标映射·多目标组拒绝/script_path/workdir/PTC 默认放行)✓');
     },
   },
 
