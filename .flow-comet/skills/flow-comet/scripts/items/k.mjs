@@ -1091,7 +1091,7 @@ const RAW_ENTRIES = [
       {
         let usedNext = false;
         const res = await preExec(
-          { name: 'run_code', arguments: { code: 'const r = await tools.read({ file_path: "x.md" }); return r;', description: 'read-only ptc' }, agent: { cwd: longTarget, session: { header: {} } } },
+          { name: 'run_code', arguments: { code: 'const fs = await import("node:fs"); const t = fs.readFileSync("x.txt", "utf8"); return t;', description: 'read-only ptc' }, agent: { cwd: longTarget, session: { header: {} } } },
           () => { usedNext = true; },
         );
         if (!usedNext) throw new Error('纯工具调用的 run_code 运行态应放行(next): ' + JSON.stringify(res));

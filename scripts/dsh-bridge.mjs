@@ -118,7 +118,7 @@ export function isOpsFileOperationTool(toolName) {
 // PTC transport：run_code 进程内可用 node:fs 直接写文件，不经过 tools/pre-execute；
 // 桥接只看到外层 run_code。运行中不一律拒绝——只拒绝包含直接文件/进程写调用的程序，
 // 纯工具调用的程序照常放行；项目内 .flow-comet/ptc-allow 可显式覆盖。
-const PTC_DIRECT_WRITE_RE = /(?:node:fs|require\(\s*['"]fs['"]|from\s+['"]fs['"]|\bfs\.(?:writeFile|appendFile|createWriteStream|rm|rmdir|unlink|rename|copyFile|mkdir|chmod|chown|truncate|utimes|promises\.(?:write|append|rm|unlink|rename|copyFile|mkdir|chmod|truncate))|\bwriteFile(Sync)?\b|\bappendFile(Sync)?\b|\brm(Sync)?\b|\bunlink(Sync)?\b|\brename(Sync)?\b|\bcopyFile(Sync)?\b|\bmkdir(Sync)?\b|\bchmod(Sync)?\b|child_process|execSync|spawnSync|execFileSync|spawn\(|process\.binding|Deno\.(?:write|remove|rename|mkdir)|Bun\.write)/i;
+const PTC_DIRECT_WRITE_RE = /(?:\bfs\.(?:writeFile|appendFile|createWriteStream|rm|rmdir|unlink|rename|copyFile|mkdir|chmod|chown|truncate|utimes|promises\.(?:write|append|rm|unlink|rename|copyFile|mkdir|chmod|truncate))|\bwriteFile(Sync)?\b|\bappendFile(Sync)?\b|\brm(Sync)?\b|\bunlink(Sync)?\b|\brename(Sync)?\b|\bcopyFile(Sync)?\b|\bmkdir(Sync)?\b|\bchmod(Sync)?\b|child_process|execSync|spawnSync|execFileSync|spawn\(|process\.binding|Deno\.(?:write|remove|rename|mkdir)|Bun\.write)/i;
 
 export function ptcCodeHasDirectWrite(code) {
   return typeof code === 'string' && PTC_DIRECT_WRITE_RE.test(code);
