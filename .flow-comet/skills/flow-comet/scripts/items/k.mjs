@@ -1087,6 +1087,30 @@ const RAW_ENTRIES = [
           throw new Error('run_code 运行态应 deny(含 PTC 语义): ' + JSON.stringify(res));
         }
       }
+      // ⑦n2 纯工具调用的 run_code 运行态放行（不应因 PTC 一律拒绝）
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'run_code', arguments: { code: 'const r = await tools.read({ file_path: "x.md" }); return r;', description: 'read-only ptc' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('纯工具调用的 run_code 运行态应放行(next): ' + JSON.stringify(res));
+      }
+      // ⑦n3 含直接写调用的 run_code + .flow-comet/ptc-allow → 显式放行
+      {
+        const allowFile = path.join(longTarget, '.flow-comet', 'ptc-allow');
+        fs.writeFileSync(allowFile, 'allow', 'utf8');
+        try {
+          let usedNext = false;
+          const res = await preExec(
+            { name: 'run_code', arguments: { code: 'const fs = await import("node:fs"); fs.writeFileSync("x","y");', description: 'ptc write' }, agent: { cwd: longTarget, session: { header: {} } } },
+            () => { usedNext = true; },
+          );
+          if (!usedNext) throw new Error('ptc-allow 存在时 run_code 直写应放行(next): ' + JSON.stringify(res));
+        } finally {
+          fs.rmSync(allowFile, { force: true });
+        }
+      }
       // ⑦o OPS 文件类工具运行态 → 保守 deny（目标需按工具分别判定）
       {
         let usedNext = false;
@@ -1263,6 +1287,12 @@ const RAW_ENTRIES = [
           () => { usedNext = true; },
         );
         if (!usedNext) throw new Error('空闲态 ops_bash workdir 在项目外应放行(next): ' + JSON.stringify(r5));
+        usedNext = false;
+        const r6 = await preExec(
+          { name: 'run_code', arguments: { code: 'const fs = await import("node:fs"); fs.writeFileSync("x","y");', description: 'ptc idle' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('空闲态 run_code 直写应放行(next): ' + JSON.stringify(r6));
       }
       // AC-7 解析失败：state 写成非法 JSON + 项目外 Write → deny（reason 含 fail-closed 拒绝语义；
       //   当前无条件 deny 已通过、T02 流程态门落地后必须保持 deny，不得当空闲放行）
