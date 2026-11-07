@@ -1075,7 +1075,7 @@ const RAW_ENTRIES = [
         if (res) throw new Error('ops_write_file 写 .specs 不应返回 deny: ' + JSON.stringify(res));
       }
       // ⑦n PTC run_code 运行态 → deny（进程内 node:fs 写不经过 pre-execute，桥接只看到外层名字）
-      //    反向构造：去掉 4.6 的 ptcTransport 分支 ⇒ next() 放行（transport 洞重新打开）
+      //    反向构造：去掉 4.6 的 ptcTransport 分支 ⇒ 落到 catch（仍 deny，但理由为桥接器异常，而非 PTC 语义）
       {
         let usedNext = false;
         const res = await preExec(
@@ -1091,7 +1091,7 @@ const RAW_ENTRIES = [
       {
         let usedNext = false;
         const res = await preExec(
-          { name: 'ops_remove', arguments: { paths: [path.join(longTarget, 'src', 'x.md')], dryRun: true }, agent: { cwd: longTarget, session: { header: {} } } },
+          { name: 'ops_remove', arguments: { path: path.join(longTarget, 'src', 'x.md'), expectedRevision: 'absent' }, agent: { cwd: longTarget, session: { header: {} } } },
           () => { usedNext = true; },
         );
         if (usedNext) throw new Error('ops_remove 运行态不应 next——OPS 文件类工具未保守拒绝');
@@ -1116,7 +1116,7 @@ const RAW_ENTRIES = [
       {
         let usedNext = false;
         const res = await preExec(
-          { name: 'ops_edit_file', arguments: { path: path.join(longTarget, 'src', 'ops-edit.md'), expectedRevision: 'absent', edits: [] }, agent: { cwd: longTarget, session: { header: {} } } },
+          { name: 'ops_edit_file', arguments: { path: path.join(longTarget, 'src', 'ops-edit.md'), expectedRevision: 'absent', edits: [{ oldText: 'a', newText: 'b' }] }, agent: { cwd: longTarget, session: { header: {} } } },
           () => { usedNext = true; },
         );
         if (usedNext) throw new Error('ops_edit_file 写源码不应 next——OPS 编辑别名缺失');
@@ -1125,7 +1125,7 @@ const RAW_ENTRIES = [
         }
         usedNext = false;
         const res2 = await preExec(
-          { name: 'ops_edit_file', arguments: { path: path.join(longTarget, '.specs', 'ops-edit.md'), expectedRevision: 'absent', edits: [] }, agent: { cwd: longTarget, session: { header: {} } } },
+          { name: 'ops_edit_file', arguments: { path: path.join(longTarget, '.specs', 'ops-edit.md'), expectedRevision: 'absent', edits: [{ oldText: 'a', newText: 'b' }] }, agent: { cwd: longTarget, session: { header: {} } } },
           () => { usedNext = true; },
         );
         if (!usedNext) throw new Error('ops_edit_file 写 .specs 应放行(next): ' + JSON.stringify(res2));
@@ -1214,7 +1214,7 @@ const RAW_ENTRIES = [
         if (!usedNext) throw new Error('AC-3 status completed 应放行(next 被调): ' + JSON.stringify(r));
         if (r) throw new Error('AC-3 completed 不应返回 deny: ' + JSON.stringify(r));
       }
-      // AC-3b 空闲态不得误伤 PTC/OPS：completed 态下 run_code 与 ops_bash 均 next()
+      // AC-3c 空闲态不得误伤 PTC/OPS：completed 态下 run_code 与 ops_bash 均 next()
       //      （运行态才拦——PTC 与 OPS 文件类工具的保守策略只在 active workflow 生效）
       {
         let usedNext = false;

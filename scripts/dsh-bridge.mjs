@@ -30,7 +30,7 @@
 //
 // 0.2.2 / dsh-ops 适配（2026-11-06）：
 //   - dsh-ops 0.5.0 用独立工具名暴露写入面（ops_write_file/ops_edit_file/ops_bash），
-//     本桥接同样归一化到 Write/Edit/Bash；多目标工具（copy/move/remove/replace/batch）
+//     本桥接同样归一化到 Write/Edit/Bash；OPS 文件类工具（copy/move/remove/replace/batch）
 //     运行中保守拒绝；
 //   - PTC run_code 进程内的 node:fs 写不经过 tools/pre-execute：运行中一律拒绝
 //     （空闲项目仍放行，PTC 不被全局禁用）。
@@ -100,7 +100,7 @@ export function normalizeToolName(toolName) {
 }
 
 // dsh-ops 文件类工具：copy/move/remove 的目标字段其实是确定的（copy/move 看
-// `to`、remove 看 `path`），replace/batch 才是真多目标；本批在运行态按组保守
+// `to`、remove 看 `path`），replace/batch 才是真多目标；当前版本在运行态按组保守
 // 拒绝，公开措辞统一为「OPS 文件类工具」而不是 multi-target。空闲态由流程态门放行。
 const OPS_FILE_OPERATION_TOOLS = new Set([
   'ops_copy',
@@ -407,7 +407,7 @@ export function apply(ctx) {
       // 1. 工具名归一化：非 Write/Edit/Bash 且非受控例外不处理（放行）。
       //    受控例外（没有 canonical 名，但运行中必须拒绝）：
       //    - PTC transport（run_code）：进程内 node:fs 写对桥接不可见；
-      //    - OPS 多目标写入工具（copy/move/remove/replace/batch）：目标无法逐项判定。
+      //    - OPS 文件类工具（copy/move/remove/replace/batch）：目标语义需按工具分别判定，当前按组拒绝。
       const toolName = typeof exec?.name === 'string' ? exec.name : '';
       const canonicalName = normalizeToolName(toolName);
       const ptcTransport = isPtcTransport(toolName);
@@ -447,7 +447,7 @@ export function apply(ctx) {
 
       // 4. 参数映射（仅 canonical 写工具）：形状不符/缺关键字段 -> WARN + fail-closed deny。
       //    D5：形状 fail-closed 任意态生效（含空闲态）——与流程态无关，保持现状。
-      //    PTC transport / 多目标写入工具没有单一目标可映射，进入 4.6 的运行态策略。
+      //    PTC transport / OPS 文件类工具没有统一的单一目标可映射，进入 4.6 的运行态策略。
       let mapped = null;
       if (canonicalName && !scriptPathOnly) {
         mapped = mapToolInput(canonicalName, exec?.arguments);
@@ -484,10 +484,10 @@ export function apply(ctx) {
         return { kind: 'deny', reason };
       }
 
-      // 4.6 运行态的受控例外：PTC transport 与 OPS 多目标写入工具没有可判定的单一目标。
+      // 4.6 运行态的受控例外：PTC transport 与 OPS 文件类工具没有统一的单一目标。
       //     - run_code：进程内 node:fs 直接写文件时不经过 tools/pre-execute，桥接只看到
       //       外层 run_code；运行中一律拒绝（空闲态已在 4.5 放行，PTC 可用于非流程项目）。
-      //     - ops_copy/move/remove/replace/batch：多目标无法逐项判定，运行中保守拒绝；
+      //     - ops_copy/move/remove/replace/batch：目标语义需按工具分别判定，运行中按组拒绝；
       //       空闲态已在 4.5 放行。
       if (scriptPathOnly) {
         const reason =
@@ -497,7 +497,7 @@ export function apply(ctx) {
       }
       if (ptcTransport) {
         const reason =
-          'dsh-flow-comet-bridge: PTC run_code 不在 workflow guard 覆盖范围（run_code 进程内 fs 写对桥接不可见）——运行中拒绝；请改用 native 工具（若当前预设提供），或结束/归档当前流程';
+          'dsh-flow-comet-bridge: PTC run_code 不在流程守卫覆盖范围（run_code 进程内 fs 写对桥接不可见）——运行中拒绝；请改用 native 工具（若当前预设提供），或结束/归档当前流程';
         console.warn(reason);
         return { kind: 'deny', reason };
       }
@@ -505,7 +505,7 @@ export function apply(ctx) {
         const reason =
           'dsh-flow-comet-bridge: OPS 文件类工具 "' +
           toolName +
-          '" 在流程运行中的目标需按工具分别判定，本批按组保守拒绝——请在流程外执行，或结束/归档当前流程';
+          '" 在流程运行中的目标需按工具分别判定，当前版本按组拒绝——请在流程外执行，或结束/归档当前流程';
         console.warn(reason);
         return { kind: 'deny', reason };
       }
