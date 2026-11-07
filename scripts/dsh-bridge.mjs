@@ -77,8 +77,9 @@ export function normalizeToolName(toolName) {
   // dsh-ops（0.5.0）用独立工具名暴露写入面：官方 write/edit/bash/pwsh 之外
   // 必须同样归一化，否则在启用 dsh-ops 的桌面（hidePwsh + 动态工具）上
   // 写入绕过白名单 = fail-open。ops_write_file/ops_edit_file 用 `path`，
-  // mapToolInput 已接受 args.path；ops_bash 用 `command`（仅 script_path
-  // 的形态会因缺 command 走形状 fail-closed）。
+  // mapToolInput 已接受 args.path；ops_bash 的 command 形态直接映射，
+  // script_path 形态在 apply 第 4 步跳过形状映射，由第 4.6 步按流程态处理
+  // （空闲放行、运行中拒绝——脚本体不在命令文本里，写目标无法静态判定）。
   if (lower === 'ops_write_file') return 'Write';
   if (lower === 'ops_edit_file') return 'Edit';
   if (lower === 'ops_bash') return 'Bash';
@@ -98,9 +99,10 @@ export function normalizeToolName(toolName) {
   return null;
 }
 
-// dsh-ops 多目标写入工具：没有单一 file_path，运行中无法逐项判定目标；
-// 本桥接在运行态保守拒绝（空闲态由流程态门放行）。导出供 apply 与套件共用。
-const OPS_MULTI_TARGET_WRITE_TOOLS = new Set([
+// dsh-ops 文件类工具：copy/move/remove 的目标字段其实是确定的（copy/move 看
+// `to`、remove 看 `path`），replace/batch 才是真多目标；本批在运行态按组保守
+// 拒绝，公开措辞统一为「OPS 文件类工具」而不是 multi-target。空闲态由流程态门放行。
+const OPS_FILE_OPERATION_TOOLS = new Set([
   'ops_copy',
   'ops_move',
   'ops_remove',
@@ -108,9 +110,9 @@ const OPS_MULTI_TARGET_WRITE_TOOLS = new Set([
   'ops_batch',
 ]);
 
-export function isMultiTargetWriteTool(toolName) {
+export function isOpsFileOperationTool(toolName) {
   if (typeof toolName !== 'string') return false;
-  return OPS_MULTI_TARGET_WRITE_TOOLS.has(toolName.toLowerCase());
+  return OPS_FILE_OPERATION_TOOLS.has(toolName.toLowerCase());
 }
 
 // PTC transport：run_code 进程内可用 node:fs 直接写文件，不经过 tools/pre-execute；
@@ -409,10 +411,23 @@ export function apply(ctx) {
       const toolName = typeof exec?.name === 'string' ? exec.name : '';
       const canonicalName = normalizeToolName(toolName);
       const ptcTransport = isPtcTransport(toolName);
-      const multiTargetWrite = isMultiTargetWriteTool(toolName);
-      if (!canonicalName && !ptcTransport && !multiTargetWrite) {
+      const opsFileOperation = isOpsFileOperationTool(toolName);
+      if (!canonicalName && !ptcTransport && !opsFileOperation) {
         return next();
       }
+      // ops_bash 的 script_path 形态：命令体在文件里，mapToolInput 无法静态判定。
+      // 空闲态维持原行为（放行），运行态在第 4.6 步拒绝。
+      const args = exec?.arguments;
+      const scriptPathOnly =
+        canonicalName === 'Bash' &&
+        args &&
+        typeof args === 'object' &&
+        !Array.isArray(args) &&
+        typeof args.script_path === 'string' &&
+        args.script_path.trim() !== '' &&
+        !(typeof args.command === 'string' && args.command.trim() !== '') &&
+        !(typeof args.cmd === 'string' && args.cmd.trim() !== '') &&
+        !(typeof args.script === 'string' && args.script.trim() !== '');
 
       // 2. 会话 cwd：无法确定 -> next()（窄监听 fail-open 于非判定场景）。
       const cwd = sessionCwd(exec);
@@ -434,7 +449,7 @@ export function apply(ctx) {
       //    D5：形状 fail-closed 任意态生效（含空闲态）——与流程态无关，保持现状。
       //    PTC transport / 多目标写入工具没有单一目标可映射，进入 4.6 的运行态策略。
       let mapped = null;
-      if (canonicalName) {
+      if (canonicalName && !scriptPathOnly) {
         mapped = mapToolInput(canonicalName, exec?.arguments);
         if (!mapped.ok) {
           const reason =
@@ -474,17 +489,23 @@ export function apply(ctx) {
       //       外层 run_code；运行中一律拒绝（空闲态已在 4.5 放行，PTC 可用于非流程项目）。
       //     - ops_copy/move/remove/replace/batch：多目标无法逐项判定，运行中保守拒绝；
       //       空闲态已在 4.5 放行。
-      if (ptcTransport) {
+      if (scriptPathOnly) {
         const reason =
-          'dsh-flow-comet-bridge: PTC run_code 不在 workflow guard 覆盖范围（run_code 进程内 fs 写对桥接不可见）——运行中拒绝；请改用 native 工具，或结束/归档当前流程';
+          'dsh-flow-comet-bridge: ops_bash 的 script_path 形态命令体不在命令文本里，运行中无法静态判定写入目标——拒绝；请改用 command 形式，或结束/归档当前流程';
         console.warn(reason);
         return { kind: 'deny', reason };
       }
-      if (multiTargetWrite) {
+      if (ptcTransport) {
         const reason =
-          'dsh-flow-comet-bridge: OPS 多目标写入工具 "' +
+          'dsh-flow-comet-bridge: PTC run_code 不在 workflow guard 覆盖范围（run_code 进程内 fs 写对桥接不可见）——运行中拒绝；请改用 native 工具（若当前预设提供），或结束/归档当前流程';
+        console.warn(reason);
+        return { kind: 'deny', reason };
+      }
+      if (opsFileOperation) {
+        const reason =
+          'dsh-flow-comet-bridge: OPS 文件类工具 "' +
           toolName +
-          '" 的运行态目标无法逐项判定——保守拒绝；请改用 write/edit，或结束/归档当前流程';
+          '" 在流程运行中的目标需按工具分别判定，本批按组保守拒绝——请在流程外执行，或结束/归档当前流程';
         console.warn(reason);
         return { kind: 'deny', reason };
       }
