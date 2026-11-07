@@ -12,6 +12,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Fixed
+
+- **The dsh bridge covers the dsh-ops write surface and the in-process `run_code` tool**: `ops_bash`, `ops_write_file` and `ops_edit_file` now use the same `Write`/`Edit`/`Bash` contract as the official tools; OPS file operations (`ops_copy`, `ops_move`, `ops_remove`, `ops_replace`, `ops_batch`) are refused while a workflow is running, and `run_code` (the in-process code tool) is refused in a running workflow because its `node:fs` writes never reach the pre-execute hook; idle projects keep both tool families untouched, including `ops_bash` with `script_path`; `ops_bash` with a `workdir` outside the project is refused while a workflow is running. Installed projects need to re-run the installer to pick up the new bridge loader. ([#167](https://github.com/baobaolaodie/flow-comet/pull/167))
+
 ## [1.7.0] - 2026-11-05
 
 ### Added
