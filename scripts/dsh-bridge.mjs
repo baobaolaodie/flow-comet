@@ -445,6 +445,21 @@ export function apply(ctx) {
         return next();
       }
 
+      // 3.5 ops_bash 的 workdir 在项目根外：相对写入的真实落点与 guard 按项目根
+      //     解析的结果不一致（实测 fail-open）。仅在运行态拒绝；空闲态由 4.5 放行。
+      let workdirOutsideProject = false;
+      if (
+        canonicalName === 'Bash' &&
+        args &&
+        typeof args === 'object' &&
+        !Array.isArray(args) &&
+        typeof args.workdir === 'string' &&
+        args.workdir.trim() !== ''
+      ) {
+        const resolvedWorkdir = path.resolve(projectRoot, args.workdir);
+        workdirOutsideProject = !isPathInsideProjectRoot(projectRoot, resolvedWorkdir);
+      }
+
       // 4. 参数映射（仅 canonical 写工具）：形状不符/缺关键字段 -> WARN + fail-closed deny。
       //    D5：形状 fail-closed 任意态生效（含空闲态）——与流程态无关，保持现状。
       //    PTC transport / OPS 文件类工具没有统一的单一目标可映射，进入 4.6 的运行态策略。
@@ -489,6 +504,12 @@ export function apply(ctx) {
       //       外层 run_code；运行中一律拒绝（空闲态已在 4.5 放行，PTC 可用于非流程项目）。
       //     - ops_copy/move/remove/replace/batch：目标语义需按工具分别判定，运行中按组拒绝；
       //       空闲态已在 4.5 放行。
+      if (workdirOutsideProject) {
+        const reason =
+          'dsh-flow-comet-bridge: ops_bash 的 workdir 解析到项目根之外，运行中无法保证写入目标与白名单判定一致——拒绝；请在项目内执行，或结束/归档当前流程';
+        console.warn(reason);
+        return { kind: 'deny', reason };
+      }
       if (scriptPathOnly) {
         const reason =
           'dsh-flow-comet-bridge: ops_bash 的 script_path 形态命令体不在命令文本里，运行中无法静态判定写入目标——拒绝；请改用 command 形式，或结束/归档当前流程';

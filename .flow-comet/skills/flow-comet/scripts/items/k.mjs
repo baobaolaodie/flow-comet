@@ -1142,7 +1142,21 @@ const RAW_ENTRIES = [
           throw new Error('ops_copy 运行态应 deny(含文件类工具语义): ' + JSON.stringify(res));
         }
       }
-      console.log('  bridge.apply 分派集成(子代理放行/协调者拦/越界·形状 deny 不受身份/保护集拦/OPS 别名/script_path/PTC 拒绝)✓');
+      // ⑦s ops_bash 的 workdir 在项目外：运行态拒绝（相对写入的真实落点与 guard 判定不一致）
+      {
+        const outsideWorkdir = path.join(dir, 'k11-workdir-out');
+        fs.mkdirSync(outsideWorkdir, { recursive: true });
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'ops_bash', arguments: { command: "printf 'x' > .specs/evil", workdir: outsideWorkdir, description: 'probe' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('ops_bash workdir 在项目外不应 next——路径基准 fail-open');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('workdir')) {
+          throw new Error('ops_bash workdir 在项目外应 deny(含 workdir 语义): ' + JSON.stringify(res));
+        }
+      }
+      console.log('  bridge.apply 分派集成(子代理放行/协调者拦/越界·形状 deny 不受身份/保护集拦/OPS 别名/script_path/workdir/PTC 拒绝)✓');
     },
   },
 
@@ -1241,6 +1255,14 @@ const RAW_ENTRIES = [
           () => { usedNext = true; },
         );
         if (!usedNext) throw new Error('空闲态 ops_write_file 应放行(next): ' + JSON.stringify(r4));
+        usedNext = false;
+        const outsideWorkdir = path.join(dir, 'k12-workdir-out');
+        fs.mkdirSync(outsideWorkdir, { recursive: true });
+        const r5 = await preExec(
+          { name: 'ops_bash', arguments: { command: 'printf x > y', workdir: outsideWorkdir }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('空闲态 ops_bash workdir 在项目外应放行(next): ' + JSON.stringify(r5));
       }
       // AC-7 解析失败：state 写成非法 JSON + 项目外 Write → deny（reason 含 fail-closed 拒绝语义；
       //   当前无条件 deny 已通过、T02 流程态门落地后必须保持 deny，不得当空闲放行）
