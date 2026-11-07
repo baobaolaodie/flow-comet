@@ -1082,10 +1082,8 @@ const RAW_ENTRIES = [
           { name: 'run_code', arguments: { code: 'const fs = await import("node:fs"); fs.writeFileSync("x","y")', description: 'ptc probe' }, agent: { cwd: longTarget, session: { header: {} } } },
           () => { usedNext = true; },
         );
-        if (usedNext) throw new Error('run_code 运行态不应 next——PTC transport 未封（进程内 fs 写绕过）');
-        if (!res || res.kind !== 'deny' || !res.reason.includes('PTC')) {
-          throw new Error('run_code 运行态应 deny(含 PTC 语义): ' + JSON.stringify(res));
-        }
+        if (!usedNext) throw new Error('PTC 默认放行时 run_code 应 next: ' + JSON.stringify(res));
+        if (res) throw new Error('PTC 默认放行时 run_code 不应返回 deny: ' + JSON.stringify(res));
       }
       // ⑦n2 纯工具调用的 run_code 运行态放行（不应因 PTC 一律拒绝）
       {
@@ -1096,19 +1094,22 @@ const RAW_ENTRIES = [
         );
         if (!usedNext) throw new Error('纯工具调用的 run_code 运行态应放行(next): ' + JSON.stringify(res));
       }
-      // ⑦n3 含直接写调用的 run_code + .flow-comet/ptc-allow → 显式放行
+      // ⑦n3 含直接写调用的 run_code + .flow-comet/ptc-strict → 严格模式拒绝
       {
-        const allowFile = path.join(longTarget, '.flow-comet', 'ptc-allow');
-        fs.writeFileSync(allowFile, 'allow', 'utf8');
+        const strictFile = path.join(longTarget, '.flow-comet', 'ptc-strict');
+        fs.writeFileSync(strictFile, 'strict', 'utf8');
         try {
           let usedNext = false;
           const res = await preExec(
             { name: 'run_code', arguments: { code: 'const fs = await import("node:fs"); fs.writeFileSync("x","y");', description: 'ptc write' }, agent: { cwd: longTarget, session: { header: {} } } },
             () => { usedNext = true; },
           );
-          if (!usedNext) throw new Error('ptc-allow 存在时 run_code 直写应放行(next): ' + JSON.stringify(res));
+          if (usedNext) throw new Error('ptc-strict 存在时 run_code 直写不应 next');
+          if (!res || res.kind !== 'deny' || !res.reason.includes('严格')) {
+            throw new Error('ptc-strict 存在时 run_code 直写应 deny(含严格语义): ' + JSON.stringify(res));
+          }
         } finally {
-          fs.rmSync(allowFile, { force: true });
+          fs.rmSync(strictFile, { force: true });
         }
       }
       // ⑦o OPS 文件类工具运行态 → 保守 deny（目标需按工具分别判定）

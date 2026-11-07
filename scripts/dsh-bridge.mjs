@@ -524,18 +524,20 @@ export function apply(ctx) {
         return { kind: 'deny', reason };
       }
       if (ptcTransport) {
+        // 默认放行 PTC：PTC 是主要使用方式，一律拒绝会冻死运行中的流程。
+        // 直接文件/进程写调用是已记录的残留边界；需要严格的用户创建
+        // .flow-comet/ptc-strict，此时才拒绝这类程序。host 工具子调用仍逐个判定。
         const code = args && typeof args === 'object' && typeof args.code === 'string' ? args.code : '';
         if (ptcCodeHasDirectWrite(code)) {
-          const allowFile = path.join(projectRoot, '.flow-comet', 'ptc-allow');
-          if (!existsSync(allowFile)) {
+          const strictFile = path.join(projectRoot, '.flow-comet', 'ptc-strict');
+          if (existsSync(strictFile)) {
             const reason =
-              'dsh-flow-comet-bridge: PTC run_code 包含直接文件/进程写调用（writeFile/child_process 等），进程内写对桥接不可见——运行中拒绝；如确需本次流程使用，请在项目内创建 .flow-comet/ptc-allow 后重试，或改用 native 工具/结束当前流程';
+              'dsh-flow-comet-bridge: PTC run_code 包含直接文件/进程写调用（writeFile/child_process 等），.flow-comet/ptc-strict 严格模式已启用——运行中拒绝；请改用 host 工具，或临时移除 strict 文件';
             console.warn(reason);
             return { kind: 'deny', reason };
           }
-          console.warn('[dsh-flow-comet-bridge] WARN: PTC 直接写调用经 .flow-comet/ptc-allow 放行');
+          console.warn('[dsh-flow-comet-bridge] WARN: PTC 直接写调用默认放行（PTC 不在 workflow guard 覆盖范围；如需严格，创建 .flow-comet/ptc-strict）');
         }
-        // 非直接写程序：放行；其 host 工具子调用仍逐个经过 tools/pre-execute 判定。
         return next();
       }
       if (opsFileOperation) {
