@@ -1074,8 +1074,7 @@ const RAW_ENTRIES = [
         if (!usedNext) throw new Error('ops_write_file 写 .specs 应放行(next): ' + JSON.stringify(res));
         if (res) throw new Error('ops_write_file 写 .specs 不应返回 deny: ' + JSON.stringify(res));
       }
-      // ⑦n PTC run_code 运行态 → deny（进程内 node:fs 写不经过 pre-execute，桥接只看到外层名字）
-      //    反向构造：去掉 4.6 的 ptcTransport 分支 ⇒ 落到 catch（仍 deny，但理由为桥接器异常，而非 PTC 语义）
+      // ⑦n PTC run_code 运行态默认放行（PTC 是主要使用方式；进程内直写是已记录边界）
       {
         let usedNext = false;
         const res = await preExec(
@@ -1084,33 +1083,6 @@ const RAW_ENTRIES = [
         );
         if (!usedNext) throw new Error('PTC 默认放行时 run_code 应 next: ' + JSON.stringify(res));
         if (res) throw new Error('PTC 默认放行时 run_code 不应返回 deny: ' + JSON.stringify(res));
-      }
-      // ⑦n2 纯工具调用的 run_code 运行态放行（不应因 PTC 一律拒绝）
-      {
-        let usedNext = false;
-        const res = await preExec(
-          { name: 'run_code', arguments: { code: 'const fs = await import("node:fs"); const t = fs.readFileSync("x.txt", "utf8"); return t;', description: 'read-only ptc' }, agent: { cwd: longTarget, session: { header: {} } } },
-          () => { usedNext = true; },
-        );
-        if (!usedNext) throw new Error('纯工具调用的 run_code 运行态应放行(next): ' + JSON.stringify(res));
-      }
-      // ⑦n3 含直接写调用的 run_code + .flow-comet/ptc-strict → 严格模式拒绝
-      {
-        const strictFile = path.join(longTarget, '.flow-comet', 'ptc-strict');
-        fs.writeFileSync(strictFile, 'strict', 'utf8');
-        try {
-          let usedNext = false;
-          const res = await preExec(
-            { name: 'run_code', arguments: { code: 'const fs = await import("node:fs"); fs.writeFileSync("x","y");', description: 'ptc write' }, agent: { cwd: longTarget, session: { header: {} } } },
-            () => { usedNext = true; },
-          );
-          if (usedNext) throw new Error('ptc-strict 存在时 run_code 直写不应 next');
-          if (!res || res.kind !== 'deny' || !res.reason.includes('严格')) {
-            throw new Error('ptc-strict 存在时 run_code 直写应 deny(含严格语义): ' + JSON.stringify(res));
-          }
-        } finally {
-          fs.rmSync(strictFile, { force: true });
-        }
       }
       // ⑦o OPS 文件类工具运行态 → 保守 deny（目标需按工具分别判定）
       {
@@ -1181,7 +1153,7 @@ const RAW_ENTRIES = [
           throw new Error('ops_bash workdir 在项目外应 deny(含 workdir 语义): ' + JSON.stringify(res));
         }
       }
-      console.log('  bridge.apply 分派集成(子代理放行/协调者拦/越界·形状 deny 不受身份/保护集拦/OPS 别名/script_path/workdir/PTC 拒绝)✓');
+      console.log('  bridge.apply 分派集成(子代理放行/协调者拦/越界·形状 deny 不受身份/保护集拦/OPS 别名/script_path/workdir/PTC 默认放行)✓');
     },
   },
 

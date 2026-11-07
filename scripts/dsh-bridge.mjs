@@ -115,15 +115,9 @@ export function isOpsFileOperationTool(toolName) {
   return OPS_FILE_OPERATION_TOOLS.has(toolName.toLowerCase());
 }
 
-// PTC transport：run_code 进程内可用 node:fs 直接写文件，不经过 tools/pre-execute；
-// 桥接只看到外层 run_code。运行中不一律拒绝——只拒绝包含直接文件/进程写调用的程序，
-// 纯工具调用的程序照常放行；项目内 .flow-comet/ptc-allow 可显式覆盖。
-const PTC_DIRECT_WRITE_RE = /(?:\bfs\.(?:writeFile|appendFile|createWriteStream|rm|rmdir|unlink|rename|copyFile|mkdir|chmod|chown|truncate|utimes|promises\.(?:write|append|rm|unlink|rename|copyFile|mkdir|chmod|truncate))|\bwriteFile(Sync)?\b|\bappendFile(Sync)?\b|\brm(Sync)?\b|\bunlink(Sync)?\b|\brename(Sync)?\b|\bcopyFile(Sync)?\b|\bmkdir(Sync)?\b|\bchmod(Sync)?\b|child_process|execSync|spawnSync|execFileSync|spawn\(|process\.binding|Deno\.(?:write|remove|rename|mkdir)|Bun\.write)/i;
-
-export function ptcCodeHasDirectWrite(code) {
-  return typeof code === 'string' && PTC_DIRECT_WRITE_RE.test(code);
-}
-
+// PTC transport：run_code 进程内可直接写文件，桥接只看到外层调用——这是已记录边界。
+// 默认放行（PTC 是主要使用方式，拒绝会冻死流程）；host 工具子调用仍逐个经过
+// tools/pre-execute 判定。没有隐藏的严格模式开关。
 export function isPtcTransport(toolName) {
   return typeof toolName === 'string' && toolName.toLowerCase() === 'run_code';
 }
@@ -524,20 +518,8 @@ export function apply(ctx) {
         return { kind: 'deny', reason };
       }
       if (ptcTransport) {
-        // 默认放行 PTC：PTC 是主要使用方式，一律拒绝会冻死运行中的流程。
-        // 直接文件/进程写调用是已记录的残留边界；需要严格的用户创建
-        // .flow-comet/ptc-strict，此时才拒绝这类程序。host 工具子调用仍逐个判定。
-        const code = args && typeof args === 'object' && typeof args.code === 'string' ? args.code : '';
-        if (ptcCodeHasDirectWrite(code)) {
-          const strictFile = path.join(projectRoot, '.flow-comet', 'ptc-strict');
-          if (existsSync(strictFile)) {
-            const reason =
-              'dsh-flow-comet-bridge: PTC run_code 包含直接文件/进程写调用（writeFile/child_process 等），.flow-comet/ptc-strict 严格模式已启用——运行中拒绝；请改用 host 工具，或临时移除 strict 文件';
-            console.warn(reason);
-            return { kind: 'deny', reason };
-          }
-          console.warn('[dsh-flow-comet-bridge] WARN: PTC 直接写调用默认放行（PTC 不在 workflow guard 覆盖范围；如需严格，创建 .flow-comet/ptc-strict）');
-        }
+        // PTC 默认放行：它是主要使用方式；进程内直写是已记录边界。
+        // 不做隐藏开关；host 工具子调用仍逐个经过 tools/pre-execute 判定。
         return next();
       }
       if (opsFileOperation) {
