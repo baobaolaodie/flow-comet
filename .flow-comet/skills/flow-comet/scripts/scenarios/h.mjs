@@ -1401,6 +1401,33 @@ export const ENTRIES = [
       assertExit(viaDir, 0);
       assertOut(viaDir, 'workflow-hook-guard-ok');
 
+      // ⑦d worktree 隔离区只豁免白名单，不豁免保护集：worktrees 下指向 state 的硬链必须拒绝
+      //    （协调者通道的 worktree 早退曾绕过保护集判定——实测放行，现前置判定后拒绝）
+      {
+        const wtDir = path.join(dir, '.claude', 'worktrees', 'w');
+        fs.mkdirSync(wtDir, { recursive: true });
+        const wtState = path.join(wtDir, 'state-hl.json');
+        let wtReady = false;
+        try { fs.linkSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), wtState); wtReady = true; } catch { wtReady = false; }
+        if (!wtReady) {
+          console.error('SKIP: worktree 硬链断言不适用（本机无法创建硬链接）——未覆盖，不是通过');
+        } else {
+          const viaWt = runHook(['before_tool'], dir, {
+            tool_name: 'Write',
+            tool_input: { file_path: wtState },
+          });
+          assertExit(viaWt, 2);
+          assertOut(viaWt, 'BLOCKED');
+        }
+        // 对照：worktree 内的普通写入仍放行（隔离区放行不得被这条判据误伤）
+        const viaWtOk = runHook(['before_tool'], dir, {
+          tool_name: 'Write',
+          tool_input: { file_path: path.join(wtDir, 'src', 'ok.mjs') },
+        });
+        assertExit(viaWtOk, 0);
+        assertOut(viaWtOk, 'workflow-hook-guard-ok');
+      }
+
       // ⑧ 硬链接：同一文件对象的第二个名字，路径判定看不出来 → 一律拒绝
       //    （硬链接不需要符号链接特权，Windows 普通用户即可创建）
       const hardTarget = path.join(specs, 'hard.js');

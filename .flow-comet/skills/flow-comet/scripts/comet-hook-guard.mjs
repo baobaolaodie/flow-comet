@@ -963,6 +963,31 @@ async function main() {
     }
   }
 
+  // ── 最小保护集（先于隔离区放行）────────────────────────────────────────────
+  // worktree 的早退只该豁免**白名单**（隔离区里写源码是设计意图），不该豁免保护集：
+  // 实测「.claude/worktrees/ 下指向 state / 协议文件的硬链接」在协调者通道被放行，
+  // 而同一硬链放在 .specs/ 下被拒——同一目标因所在目录而异。三处判定前置到早退之前。
+  if (currentNode && fileTarget) {
+    if (fileTarget.blocked) {
+      blockUnsafeWriteTarget(fileTarget.raw, fileTarget.blockedReason);
+    }
+    const stateFileAbsolute = path.join(runRoot, ...STATE_FILE_REL.split('/'));
+    if (
+      (target !== null && blockedStateFileTarget(target)) ||
+      (await isSameProtectedFileObject(fileTarget.absolute, stateFileAbsolute))
+    ) {
+      blockStateFileWrite(
+        typeof fileTarget.lexicalRel === 'string' ? fileTarget.lexicalRel : fileTarget.raw,
+      );
+    }
+    if (
+      blockedProtocolFileTarget(fileTarget.absolute) ||
+      (await isSameProtectedFileObject(fileTarget.absolute, protocolPath))
+    ) {
+      blockProtocolFileWrite(fileTarget.raw);
+    }
+  }
+
   // ── worktree 隔离区放行（CC Agent isolation:"worktree"）────────────────────
   // 判定实现见 isInsideAgentWorktree + agentWorktreeWriteStaysIsolated（与上方 Bash 命令写入
   // 判定共用——同一路径不因工具而异）；词法命中但物理落点在区外 → 拒（fail-closed）。
@@ -989,31 +1014,7 @@ async function main() {
     );
   }
 
-  // 链接/硬链接的拒绝只在**活跃流程**生效：空闲（无 state / 无 activeChange / completed）时
-  // 与既有 (no active workflow) 语义一致——放行，不因链接形态拦住空闲项目的写入。
-  if (currentNode && fileTarget && fileTarget.blocked) {
-    blockUnsafeWriteTarget(fileTarget.raw, fileTarget.blockedReason);
-  }
-
   if (currentNode && target) {
-    const stateFileAbsolute = path.join(runRoot, ...STATE_FILE_REL.split('/'));
-    // 词法前缀之外再判一次**物理身份**：链接与硬链接都能把同一文件放到白名单路径下，
-    // 前缀匹配看不出来（链接由 targetRel 的物理化覆盖，硬链接只能靠文件对象同一性）。
-    if (
-      blockedStateFileTarget(target) ||
-      (await isSameProtectedFileObject(fileTarget.absolute, stateFileAbsolute))
-    ) {
-      // 报文回显用户原始拼写（既有断言依赖原样回显）
-      blockStateFileWrite(
-        fileTarget && typeof fileTarget.lexicalRel === 'string' ? fileTarget.lexicalRel : target,
-      );
-    }
-    if (
-      blockedProtocolFileTarget(fileTarget.absolute) ||
-      (await isSameProtectedFileObject(fileTarget.absolute, protocolPath))
-    ) {
-      blockProtocolFileWrite(fileTarget.raw);
-    }
     const whitelist = PHASE_WRITE_WHITELIST[currentNode];
     if (whitelist) {
       const allowed = targetAllowed(target, whitelist, activeChange);
