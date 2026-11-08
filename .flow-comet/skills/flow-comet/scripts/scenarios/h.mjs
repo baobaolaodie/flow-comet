@@ -1284,4 +1284,87 @@ export const ENTRIES = [
       assertOut(boundary, '项目概要');
     },
   },
+
+  // 243: 写目标按**物理落点**判定——白名单目录里的链接曾把写入引流到源码目录：
+  // `.specs/j` 指向 `src` 时，写 `.specs/j/x` 词法命中白名单，真实落点却是 src。
+  // 修复后白名单 / 包含性 / 保护集三处都按 realpath 后的相对路径判定，报文回显调用方拼写。
+  {
+    name: '243 hook 写目标物理判定：链接目录不再把白名单写入引流到源码目录',
+    run: (dir) => {
+      writeState(dir, { ...baseState('subagent-execute'), status: 'running' });
+      const posix = (p) => p.split(path.sep).join('/');
+      const specs = path.join(dir, '.specs');
+      const srcDir = path.join(dir, 'src');
+      fs.mkdirSync(specs, { recursive: true });
+      fs.mkdirSync(srcDir, { recursive: true });
+      const linkInto = path.join(specs, 'j');
+      try {
+        fs.symlinkSync(srcDir, linkInto, process.platform === 'win32' ? 'junction' : 'dir');
+      } catch (error) {
+        console.error('WARN: 无法创建目录链接，链接断言跳过（' + (error.code || error.message) + '）');
+        return;
+      }
+      // ① file_path：白名单内的链接路径 → 按物理落点拒绝（修复前词法放行 = RED）
+      const viaWrite = runHook(['before_tool'], dir, {
+        tool_name: 'Write',
+        tool_input: { file_path: path.join(linkInto, 'w.txt') },
+      });
+      assertExit(viaWrite, 2);
+      assertOut(viaWrite, 'BLOCKED');
+      // 报文点名物理相对路径，便于定位真实落点
+      assertOut(viaWrite, 'src/w.txt');
+      // ② Bash 命令目标：同一路径同一结论（两条判定共用解析）
+      const viaBash = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'printf x > "' + posix(path.join(linkInto, 'v.txt')) + '"' },
+      });
+      assertExit(viaBash, 2);
+      assertOut(viaBash, 'BLOCKED');
+      // ③ 物理文件不得被创建（拒绝是真的没写）
+      if (fs.existsSync(path.join(srcDir, 'w.txt'))) throw new Error('链接写入穿透：src/w.txt 被创建');
+      if (fs.existsSync(path.join(srcDir, 'v.txt'))) throw new Error('链接命令写入穿透：src/v.txt 被创建');
+      // ④ 放行面不受影响：白名单内的普通写入仍放行
+      const plain = runHook(['before_tool'], dir, {
+        tool_name: 'Write',
+        tool_input: { file_path: path.join(specs, 'plain.txt') },
+      });
+      assertExit(plain, 0);
+      assertOut(plain, 'workflow-hook-guard-ok');
+      // ⑤ 两端都在白名单内的链接仍放行（不能退化成"链接一律拒绝"）
+      const realDir = path.join(specs, 'real');
+      fs.mkdirSync(realDir, { recursive: true });
+      const alias = path.join(specs, 'alias');
+      try { fs.symlinkSync(realDir, alias, process.platform === 'win32' ? 'junction' : 'dir'); } catch { /* 已在上方降级过 */ }
+      if (fs.existsSync(alias)) {
+        const viaAlias = runHook(['before_tool'], dir, {
+          tool_name: 'Write',
+          tool_input: { file_path: path.join(alias, 'ok.md') },
+        });
+        assertExit(viaAlias, 0);
+        assertOut(viaAlias, 'workflow-hook-guard-ok');
+      }
+      // ⑥ 最小保护集也走物理判定：链接指向 .flow-comet 时写 state 仍拦
+      const stateLink = path.join(specs, 's');
+      try {
+        fs.symlinkSync(path.join(dir, '.flow-comet'), stateLink, process.platform === 'win32' ? 'junction' : 'dir');
+      } catch { /* 同上 */ }
+      if (fs.existsSync(stateLink)) {
+        const viaState = runHook(['before_tool'], dir, {
+          tool_name: 'Write',
+          tool_input: { file_path: path.join(stateLink, 'flow-comet-state.json') },
+        });
+        assertExit(viaState, 2);
+        assertOut(viaState, 'BLOCKED');
+      }
+      // ⑦ 恢复：移除链接后同一路径恢复放行（拦截不是永久状态）
+      try { fs.rmdirSync(linkInto); } catch { try { fs.unlinkSync(linkInto); } catch { /* 忽略 */ } }
+      if (fs.existsSync(linkInto)) throw new Error('恢复夹具：链接未被移除');
+      const recovered = runHook(['before_tool'], dir, {
+        tool_name: 'Write',
+        tool_input: { file_path: path.join(linkInto, 'again.txt') },
+      });
+      assertExit(recovered, 0);
+      assertOut(recovered, 'workflow-hook-guard-ok');
+    },
+  },
 ];
