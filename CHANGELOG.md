@@ -12,6 +12,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Fixed
+
+- **The dsh bridge normalizes the known dsh-ops write tool names and routes their deterministic targets**: `ops_bash`, `ops_write_file` and `ops_edit_file` now use the same `Write`/`Edit`/`Bash` contract as the official tools; OPS `ops_copy`, `ops_move` and `ops_remove` map their deterministic target to the same write contract (`ops_move` also checks the source path), while `ops_replace` and `ops_batch` are refused while a workflow is running; the shared Bash command parser and symlinked/junction paths remain documented boundaries. `run_code` (the in-process code tool) is allowed by default in a running workflow, with direct file/process writes as a documented residual. Idle projects keep both tool families untouched. While a workflow is running, `ops_bash` with `script_path` and the multi-target tools are refused for the coordinator only (subagents are executors and pass), and a Bash-class tool with an absolute `workdir` outside the project is refused for the coordinator. Installed projects need to re-run the installer to pick up the new bridge loader, then restart the dsh host — it loads the global plugin once at startup. ([#167](https://github.com/baobaolaodie/flow-comet/pull/167))
+
 ## [1.7.0] - 2026-11-05
 
 ### Added

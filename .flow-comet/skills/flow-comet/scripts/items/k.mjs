@@ -686,12 +686,60 @@ const RAW_ENTRIES = [
       for (const alias of ['edit', 'Edit', 'editfile', 'file-edit']) {
         if (bridge.normalizeToolName(alias) !== 'Edit') throw new Error('normalizeToolName 别名未归一化: ' + alias);
       }
+      // dsh-ops 0.5.0 写入面别名：桌面（hidePwsh + 动态工具）与 PTC host 派发均用这些名字；
+      // 不归一化即 next() 放行 = 白名单被 OPS 写入面绕过。
+      for (const alias of ['ops_write_file', 'OPS_WRITE_FILE']) {
+        if (bridge.normalizeToolName(alias) !== 'Write') throw new Error('dsh-ops Write 别名未归一化: ' + alias);
+      }
+      for (const alias of ['ops_edit_file', 'OPS_EDIT_FILE']) {
+        if (bridge.normalizeToolName(alias) !== 'Edit') throw new Error('dsh-ops Edit 别名未归一化: ' + alias);
+      }
+      for (const alias of ['ops_bash', 'OPS_BASH']) {
+        if (bridge.normalizeToolName(alias) !== 'Bash') throw new Error('dsh-ops Bash 别名未归一化: ' + alias);
+      }
       for (const alias of ['bash', 'Bash', 'shell', 'powershell', 'pwsh', 'Pwsh', 'PWSH', 'run_command', 'run-command']) {
         if (bridge.normalizeToolName(alias) !== 'Bash') throw new Error('normalizeToolName 别名未归一化: ' + alias);
       }
       // 非 Write/Edit/Bash 或非字符串 → null(监听侧按放行语义跳过)
-      for (const v of ['read', 'grep', '', null, undefined, 123, {}]) {
+      for (const v of ['read', 'grep', 'run_code', 'ops_remove', 'ops_copy', '', null, undefined, 123, {}]) {
         if (bridge.normalizeToolName(v) !== null) throw new Error('非写工具应归一化为 null: ' + JSON.stringify(v));
+      }
+      // 受控例外纯函数：run_code（PTC transport）与 OPS 文件类工具没有 canonical 名，
+      // 但运行态必须拒绝；两者不得互相误判（write 不是 PTC，ops_write_file 不是文件类工具）。
+      if (!bridge.isPtcTransport('run_code') || !bridge.isPtcTransport('RUN_CODE')) {
+        throw new Error('isPtcTransport 应识别 run_code（大小写不敏感）');
+      }
+      if (bridge.isPtcTransport('write') || bridge.isPtcTransport('ops_bash')) {
+        throw new Error('isPtcTransport 不得误判普通写工具');
+      }
+      for (const t of ['ops_copy', 'ops_move', 'ops_remove', 'ops_replace', 'ops_batch', 'OPS_REMOVE']) {
+        if (!bridge.isOpsFileOperationTool(t)) throw new Error('isOpsFileOperationTool 应识别: ' + t);
+      }
+      if (bridge.isOpsFileOperationTool('ops_write_file') || bridge.isOpsFileOperationTool('write')) {
+        throw new Error('isOpsFileOperationTool 不得误判单目标写工具');
+      }
+      // 单目标 OPS 的字段选择：copy/move 取 to（写目标），remove 取 path；move 的源端另取 path。
+      for (const t of ['ops_copy', 'ops_move', 'ops_remove', 'OPS_COPY']) {
+        if (!bridge.isSingleTargetOpsFileTool(t)) throw new Error('isSingleTargetOpsFileTool 应识别: ' + t);
+      }
+      if (bridge.isSingleTargetOpsFileTool('ops_replace') || bridge.isSingleTargetOpsFileTool('ops_batch')) {
+        throw new Error('isSingleTargetOpsFileTool 不得误判多目标工具');
+      }
+      const copyTarget = bridge.mapSingleTargetOpsFileTool('ops_copy', { path: 'src/a', to: '.specs/b' });
+      if (!copyTarget.ok || copyTarget.target !== '.specs/b') {
+        throw new Error('ops_copy 应取 to 为写目标: ' + JSON.stringify(copyTarget));
+      }
+      const moveTarget = bridge.mapSingleTargetOpsFileTool('ops_move', { path: 'src/a', to: '.specs/b' });
+      if (!moveTarget.ok || moveTarget.target !== '.specs/b') {
+        throw new Error('ops_move 应取 to 为写目标: ' + JSON.stringify(moveTarget));
+      }
+      const removeTarget = bridge.mapSingleTargetOpsFileTool('ops_remove', { path: 'src/a' });
+      if (!removeTarget.ok || removeTarget.target !== 'src/a') {
+        throw new Error('ops_remove 应取 path 为写目标: ' + JSON.stringify(removeTarget));
+      }
+      const moveSource = bridge.mapOpsMoveSource({ path: 'src/a', to: '.specs/b' });
+      if (!moveSource.ok || moveSource.target !== 'src/a') {
+        throw new Error('ops_move 源端应取 path: ' + JSON.stringify(moveSource));
       }
       // ② 参数映射别名提取:Write/Edit 的 file_path/filePath/path;Bash 的 command/cmd/script
       const m1 = bridge.mapToolInput('Write', { file_path: 'a.md' });
@@ -866,6 +914,12 @@ const RAW_ENTRIES = [
           () => { usedNext = true; },
         );
         if (!usedNext) throw new Error('非 flow-comet 项目应窄监听放行(next)');
+        usedNext = false;
+        const resRun = await preExec(
+          { name: 'run_code', arguments: { code: '1' }, agent: { cwd: plain, session: { header: { delegationDepth: 1 } } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('非 flow-comet 项目的 run_code 应窄监听放行(next): ' + JSON.stringify(resRun));
       }
       // ⑦d 越界写不受身份影响：子代理(depth=1)写项目根外 → 包含性 fail-closed deny
       {
@@ -1007,7 +1061,254 @@ const RAW_ENTRIES = [
         }
         console.log('  桥接通道标记：继承形态按协调者拦 / 标记在场走身份放行 / 近形状标记不认 ✓');
       }
-      console.log('  bridge.apply 分派集成(子代理放行/协调者拦/越界·形状 deny 不受身份/保护集拦)✓');
+      // ⑦k dsh-ops ops_bash 归一化为 Bash：运行态协调者写 src/ 源码 → 真实 guard 白名单 deny。
+      //    反向构造：去掉 ops_bash 别名 ⇒ canonicalName=null → next() 放行（dsh-ops 桌面
+      //    hidePwsh 后 shell 只剩 ops_bash，等于 shell 写整链绕过）。
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'ops_bash', arguments: { command: "printf 'x' > src/ops-shell.txt", description: 'probe' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('ops_bash 写源码不应 next——OPS shell 别名缺失(fail-open)');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('白名单拦截')) {
+          throw new Error('ops_bash 写源码应走 guard 白名单拦截(deny): ' + JSON.stringify(res));
+        }
+      }
+      // ⑦l dsh-ops ops_write_file 归一化为 Write：运行态写 src/ → deny
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'ops_write_file', arguments: { path: path.join(longTarget, 'src', 'ops-write.md'), content: 'x', expectedRevision: 'absent' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('ops_write_file 写源码不应 next——OPS 文件别名缺失(fail-open)');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('白名单拦截')) {
+          throw new Error('ops_write_file 写源码应走 guard 白名单拦截(deny): ' + JSON.stringify(res));
+        }
+      }
+      // ⑦m 同工具写 .specs/ → 放行（别名不误伤白名单内写入）
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'ops_write_file', arguments: { path: path.join(longTarget, '.specs', 'ops-ok.md'), content: 'ok', expectedRevision: 'absent' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('ops_write_file 写 .specs 应放行(next): ' + JSON.stringify(res));
+        if (res) throw new Error('ops_write_file 写 .specs 不应返回 deny: ' + JSON.stringify(res));
+      }
+      // ⑦n PTC run_code 运行态默认放行（PTC 是主要使用方式；进程内直写是已记录边界）
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'run_code', arguments: { code: 'const fs = await import("node:fs"); fs.writeFileSync("x","y")', description: 'ptc probe' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('PTC 默认放行时 run_code 应 next: ' + JSON.stringify(res));
+        if (res) throw new Error('PTC 默认放行时 run_code 不应返回 deny: ' + JSON.stringify(res));
+      }
+      const opsRev = 'a'.repeat(64); // dsh-ops copy/move/remove/edit 的 existingRevision 是 64-hex（write_file 才接受 absent）
+      // ⑦o ops_remove 单目标：映射为 Write，走 guard 白名单（写 src deny、写 .specs 放行）
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'ops_remove', arguments: { path: path.join(longTarget, 'src', 'x.md'), expectedRevision: opsRev }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('ops_remove 写源码不应 next——单目标未走 guard');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('白名单拦截')) {
+          throw new Error('ops_remove 写源码应走 guard 白名单拦截(deny): ' + JSON.stringify(res));
+        }
+        usedNext = false;
+        const res2 = await preExec(
+          { name: 'ops_remove', arguments: { path: path.join(longTarget, '.specs', 'x.md'), expectedRevision: opsRev }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('ops_remove 写 .specs 应放行(next): ' + JSON.stringify(res2));
+      }
+      // ⑦p ops_bash 的 script_path 形态：运行中的协调者拒绝（两步绕过：先写 .specs 脚本
+      //    再执行）；子代理是执行者，放行。
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'ops_bash', arguments: { script_path: 'probe.sh', description: 'probe' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('协调者运行态 ops_bash script_path 不应 next——两步绕过');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('script_path')) {
+          throw new Error('协调者运行态 ops_bash script_path 应 deny(含 script_path 语义): ' + JSON.stringify(res));
+        }
+        usedNext = false;
+        const sub = await preExec(
+          { name: 'ops_bash', arguments: { script_path: 'probe.sh', description: 'probe' }, agent: { cwd: longTarget, session: { header: { delegationDepth: 1 } } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('子代理 ops_bash script_path 应放行(next): ' + JSON.stringify(sub));
+      }
+      // ⑦q ops_edit_file 归一化为 Edit：运行态写 src/ deny、写 .specs/ 放行
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'ops_edit_file', arguments: { path: path.join(longTarget, 'src', 'ops-edit.md'), expectedRevision: opsRev, edits: [{ oldText: 'a', newText: 'b' }] }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('ops_edit_file 写源码不应 next——OPS 编辑别名缺失');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('白名单拦截')) {
+          throw new Error('ops_edit_file 写源码应走 guard 白名单拦截(deny): ' + JSON.stringify(res));
+        }
+        usedNext = false;
+        const res2 = await preExec(
+          { name: 'ops_edit_file', arguments: { path: path.join(longTarget, '.specs', 'ops-edit.md'), expectedRevision: opsRev, edits: [{ oldText: 'a', newText: 'b' }] }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('ops_edit_file 写 .specs 应放行(next): ' + JSON.stringify(res2));
+      }
+      // ⑦r ops_copy 单目标：to 是写目标，走 guard 白名单（写 src deny、写 .specs 放行）
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'ops_copy', arguments: { path: path.join(longTarget, 'src', 'a.md'), to: path.join(longTarget, 'src', 'b.md'), expectedRevision: opsRev }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('ops_copy 写源码不应 next——单目标未走 guard');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('白名单拦截')) {
+          throw new Error('ops_copy 写源码应走 guard 白名单拦截(deny): ' + JSON.stringify(res));
+        }
+        usedNext = false;
+        const res2 = await preExec(
+          { name: 'ops_copy', arguments: { path: path.join(longTarget, '.specs', 'a.md'), to: path.join(longTarget, '.specs', 'b.md'), expectedRevision: opsRev }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('ops_copy 写 .specs 应放行(next): ' + JSON.stringify(res2));
+      }
+      // ⑦r2 ops_replace 是真多目标：运行中的协调者按组拒绝；子代理（执行者）放行
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'ops_replace', arguments: { path: longTarget, pattern: 'a', replacement: 'b' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('协调者 ops_replace 运行态不应 next——多目标未按组拒绝');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('多目标')) {
+          throw new Error('协调者 ops_replace 运行态应 deny(含多目标语义): ' + JSON.stringify(res));
+        }
+        usedNext = false;
+        const subReplace = await preExec(
+          { name: 'ops_replace', arguments: { path: longTarget, pattern: 'a', replacement: 'b' }, agent: { cwd: longTarget, session: { header: { delegationDepth: 1 } } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('子代理 ops_replace 应放行(next，执行者身份): ' + JSON.stringify(subReplace));
+        usedNext = false;
+        const subBatch = await preExec(
+          { name: 'ops_batch', arguments: { action: 'plan', ops: [] }, agent: { cwd: longTarget, session: { header: { delegationDepth: 1 } } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('子代理 ops_batch 应放行(next，执行者身份): ' + JSON.stringify(subBatch));
+      }
+      // ⑦r3 ops_copy 跨侧：目的 .specs -> src 必须 deny；源 src 只读、目的 .specs 放行
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'ops_copy', arguments: { path: path.join(longTarget, '.specs', 'a.md'), to: path.join(longTarget, 'src', 'b.md'), expectedRevision: opsRev }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('ops_copy .specs -> src 不应 next——目的端未走 guard');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('白名单拦截')) {
+          throw new Error('ops_copy .specs -> src 应走 guard 白名单拦截(deny): ' + JSON.stringify(res));
+        }
+        usedNext = false;
+        const res2 = await preExec(
+          { name: 'ops_copy', arguments: { path: path.join(longTarget, 'src', 'a.md'), to: path.join(longTarget, '.specs', 'b.md'), expectedRevision: opsRev }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('ops_copy src -> .specs 应放行(next，源只读): ' + JSON.stringify(res2));
+      }
+      // ⑦r4 ops_move 双端：源 src/state/outside 与目的 src 都必须 deny；双 .specs 放行
+      {
+        let usedNext = false;
+        const srcToSpecs = await preExec(
+          { name: 'ops_move', arguments: { path: path.join(longTarget, 'src', 'a.md'), to: path.join(longTarget, '.specs', 'a.md'), expectedRevision: opsRev }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('ops_move src -> .specs 不应 next——源端 unlink 未判');
+        if (!srcToSpecs || srcToSpecs.kind !== 'deny' || !srcToSpecs.reason.includes('白名单拦截')) {
+          throw new Error('ops_move src -> .specs 应因源端白名单 deny: ' + JSON.stringify(srcToSpecs));
+        }
+        usedNext = false;
+        const specsToSrc = await preExec(
+          { name: 'ops_move', arguments: { path: path.join(longTarget, '.specs', 'a.md'), to: path.join(longTarget, 'src', 'a.md'), expectedRevision: opsRev }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('ops_move .specs -> src 不应 next——目的端未走 guard');
+        if (!specsToSrc || specsToSrc.kind !== 'deny' || !specsToSrc.reason.includes('白名单拦截')) {
+          throw new Error('ops_move .specs -> src 应因目的端白名单 deny: ' + JSON.stringify(specsToSrc));
+        }
+        usedNext = false;
+        const stateToSpecs = await preExec(
+          { name: 'ops_move', arguments: { path: path.join(longTarget, '.flow-comet', 'flow-comet-state.json'), to: path.join(longTarget, '.specs', 'state.json'), expectedRevision: opsRev }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('ops_move state -> .specs 不应 next——源端最小保护集未判');
+        if (!stateToSpecs || stateToSpecs.kind !== 'deny') {
+          throw new Error('ops_move state -> .specs 应因源端保护集 deny: ' + JSON.stringify(stateToSpecs));
+        }
+        usedNext = false;
+        const outsideToSpecs = await preExec(
+          { name: 'ops_move', arguments: { path: path.join(dir, 'k11-move-outside', 'a.md'), to: path.join(longTarget, '.specs', 'a.md'), expectedRevision: opsRev }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('ops_move outside -> .specs 不应 next——源端越界未判');
+        if (!outsideToSpecs || outsideToSpecs.kind !== 'deny' || !outsideToSpecs.reason.includes('越界移动')) {
+          throw new Error('ops_move outside -> .specs 应因源端越界 deny: ' + JSON.stringify(outsideToSpecs));
+        }
+        usedNext = false;
+        const specsToSpecs = await preExec(
+          { name: 'ops_move', arguments: { path: path.join(longTarget, '.specs', 'a.md'), to: path.join(longTarget, '.specs', 'b.md'), expectedRevision: opsRev }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('ops_move .specs -> .specs 应放行(next): ' + JSON.stringify(specsToSpecs));
+      }
+      // ⑦s ops_bash 的 workdir 在项目外：运行态拒绝（相对写入的真实落点与 guard 判定不一致）
+      {
+        const outsideWorkdir = path.join(dir, 'k11-workdir-out');
+        fs.mkdirSync(outsideWorkdir, { recursive: true });
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'ops_bash', arguments: { command: "printf 'x' > .specs/evil", workdir: outsideWorkdir, description: 'probe' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('ops_bash workdir 在项目外不应 next——路径基准 fail-open');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('workdir')) {
+          throw new Error('ops_bash workdir 在项目外应 deny(含 workdir 语义): ' + JSON.stringify(res));
+        }
+        // 子代理是执行者：同一 workdir 不应被这条协调者专属检查拦住
+        usedNext = false;
+        const subWorkdir = await preExec(
+          { name: 'ops_bash', arguments: { command: 'printf x > y', workdir: outsideWorkdir }, agent: { cwd: longTarget, session: { header: { delegationDepth: 1 } } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('子代理 ops_bash workdir 应放行(next，执行者身份): ' + JSON.stringify(subWorkdir));
+        // 官方 bash 同形（绝对 workdir 在项目外）同样被拒，避免换工具名绕过
+        usedNext = false;
+        const officialBash = await preExec(
+          { name: 'bash', arguments: { command: 'printf x > .specs/e.md', workdir: outsideWorkdir }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('官方 bash 绝对 workdir 在项目外不应 next——同形 fail-open');
+        if (!officialBash || officialBash.kind !== 'deny') {
+          throw new Error('官方 bash 绝对 workdir 在项目外应 deny: ' + JSON.stringify(officialBash));
+        }
+      }
+      // ⑦s2 相对 workdir 不在检查范围（只查绝对路径）：项目内子目录的相对 workdir 不误拦
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'ops_bash', arguments: { command: 'git status', workdir: 'src' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('项目内相对 workdir 不应被误拦: ' + JSON.stringify(res));
+      }
+      console.log('  bridge.apply 分派集成(子代理放行/协调者拦/越界·形状 deny 不受身份/保护集拦/OPS 别名·单目标映射·多目标组拒绝/script_path/workdir/PTC 默认放行)✓');
     },
   },
 
@@ -1079,6 +1380,48 @@ const RAW_ENTRIES = [
         if (!usedNext) throw new Error('AC-3 status completed 应放行(next 被调): ' + JSON.stringify(r));
         if (r) throw new Error('AC-3 completed 不应返回 deny: ' + JSON.stringify(r));
       }
+      // AC-3c 空闲态不得误伤 PTC/OPS：completed 态下 run_code 与 ops_bash 均 next()
+      //      （运行态才拦——PTC 与 OPS 文件类工具的保守策略只在 active workflow 生效）
+      {
+        let usedNext = false;
+        const r = await preExec(
+          { name: 'run_code', arguments: { code: '1' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('空闲态 run_code 应放行(next): ' + JSON.stringify(r));
+        usedNext = false;
+        const r2 = await preExec(
+          { name: 'ops_bash', arguments: { command: 'printf x > y' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('空闲态 ops_bash 应放行(next): ' + JSON.stringify(r2));
+        usedNext = false;
+        const r3 = await preExec(
+          { name: 'ops_bash', arguments: { script_path: 'probe.sh', description: 'probe' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('空闲态 ops_bash script_path 应放行(next): ' + JSON.stringify(r3));
+        usedNext = false;
+        const r4 = await preExec(
+          { name: 'ops_write_file', arguments: { path: path.join(longTarget, 'src', 'idle-ops.md'), content: 'x', expectedRevision: 'absent' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('空闲态 ops_write_file 应放行(next): ' + JSON.stringify(r4));
+        usedNext = false;
+        const outsideWorkdir = path.join(dir, 'k12-workdir-out');
+        fs.mkdirSync(outsideWorkdir, { recursive: true });
+        const r5 = await preExec(
+          { name: 'ops_bash', arguments: { command: 'printf x > y', workdir: outsideWorkdir }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('空闲态 ops_bash workdir 在项目外应放行(next): ' + JSON.stringify(r5));
+        usedNext = false;
+        const r6 = await preExec(
+          { name: 'run_code', arguments: { code: 'const fs = await import("node:fs"); fs.writeFileSync("x","y");', description: 'ptc idle' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('空闲态 run_code 直写应放行(next): ' + JSON.stringify(r6));
+      }
       // AC-7 解析失败：state 写成非法 JSON + 项目外 Write → deny（reason 含 fail-closed 拒绝语义；
       //   当前无条件 deny 已通过、T02 流程态门落地后必须保持 deny，不得当空闲放行）
       {
@@ -1088,6 +1431,17 @@ const RAW_ENTRIES = [
         if (usedNext) throw new Error('AC-7 非法 JSON 不应 next——解析失败必须 fail-closed deny');
         if (!r || r.kind !== 'deny') throw new Error('AC-7 非法 JSON 应 deny: ' + JSON.stringify(r));
         if (!r.reason.includes('拒绝')) throw new Error('AC-7 deny 应含 fail-closed(拒绝)语义: ' + JSON.stringify(r.reason));
+      }
+      // AC-7c 解析失败 + run_code：即使 PTC 默认放行，状态损坏也必须 fail-closed deny
+      {
+        writeFile(target, '.flow-comet/flow-comet-state.json', '{ not-valid-json ');
+        let usedNext = false;
+        const r = await preExec(
+          { name: 'run_code', arguments: { code: '1', description: 'ptc parse-error' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('AC-7c 非法 JSON 下 run_code 不应 next——必须 fail-closed deny');
+        if (!r || r.kind !== 'deny') throw new Error('AC-7c 非法 JSON 下 run_code 应 deny: ' + JSON.stringify(r));
       }
       // AC-8 未知 status：writeState { activeChange:'x', status:'weird' } + 项目外 Write → deny
       //   （当前通过、T02 流程态门落地后必须保持 deny，不得当空闲放行）
@@ -1116,7 +1470,7 @@ const RAW_ENTRIES = [
         if (!usedNext) throw new Error('AC-3b BOM+completed 应放行(next 被调)——BOM 容错: ' + JSON.stringify(r));
         if (r) throw new Error('AC-3b BOM+completed 不应返回 deny: ' + JSON.stringify(r));
       }
-      console.log('  流程态门断言:AC-1/2/3 空闲放行·AC-3b BOM 容错·AC-7/8/7b 异常态 fail-closed deny✓');
+      console.log('  流程态门断言:AC-1/2/3 空闲放行·AC-3b BOM 容错·AC-7/7c/8/7b 异常态 fail-closed deny✓');
     },
   },
 

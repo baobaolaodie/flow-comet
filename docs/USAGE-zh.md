@@ -85,6 +85,19 @@ node <skills>/flow-comet/scripts/workflow-state.mjs record execute '{"summary":"
 - **协调者边界** —— 默认的 `subagent` 执行模式下，协调会话不得亲自执行任务，引擎会报告越俎代庖；文档化豁免通道是显式声明 `record execute '{"parallelTakeoverApproved":true}'`。
 - **归档完整** —— 归档出口要求归档目录与其内的 `KNOWN-ISSUES.md`（无遗留也要显式写明）。
 
+## dsh 上的工具面
+
+在 DeepSeek Harness 上，写入守卫是宿主进程内的桥接插件，而不是 `PreToolUse` hook——它判定的是宿主实际挂出的工具。官方 `write` / `edit` / `bash` / `pwsh` 与 dsh-ops 的对应工具（`ops_write_file`、`ops_edit_file`、`ops_bash`）都归一到同一套 `Write` / `Edit` / `Bash` 契约；OPS 的单目标操作同样按确定目标判定（`ops_copy` 取 `to`，`ops_move` 的 `to` 与源 `path` 各判一次，`ops_remove` 取 `path`）。多目标操作 `ops_replace` 与 `ops_batch` 在流程运行中对协调者拒绝；子代理是执行者，放行。
+
+设计用法前值得知道两件事：
+
+- **`run_code` 放行。** PTC 是主要预设，拒绝它会冻死运行中的流程。进程内直接写文件（`node:fs`、`child_process`）属已记录的残留边界，不是被拦的形态；它对宿主工具的调用仍逐个经过同一守卫。
+- **shell 面比写入面窄。** 命令文本只检查重定向、PowerShell 路径型 cmdlet、`.NET File` 调用、`cp`/`mv`/`rm` 的目的地，以及 `apply_patch` 的补丁头。解释器（`node file`、`python -c`）、`tee`、`dd`、`sed -i`、裸 `rm` 与 move 的源端都不在这套分析内；相对 `workdir` 与命令内的 `cd` 也不会重算基准。把白名单当作「所用工具」的边界，而不是把 shell 关进沙箱。
+
+流程运行中，协调者传入项目外的绝对 `workdir` 会被拒绝；`ops_bash` 的 `script_path` 同样被拒绝——否则把脚本写进白名单目录 `.specs/` 再执行，就能到达任意路径。空闲项目（无 change，或 change 已完成）不受约束。
+
+子代理是执行者，这两条拒绝不作用于它；同时，脚本正文与多目标操作的逐项目标都不做分析。因此在宿主权限允许时，执行者脚本仍可能到达状态文件或协议文件——最小保护集在「具名工具」路径上生效，不覆盖脚本内容。
+
 ## 分支模式与执行模式
 
 在 git 项目里，引擎按 change 开分支：`init <change-id>` 会创建并切换到 `change/<change-id>`，`next` 会打印分支行；没有 git 的项目里该行显示 `none`。
