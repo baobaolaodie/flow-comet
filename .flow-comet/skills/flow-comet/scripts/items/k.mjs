@@ -1126,15 +1126,24 @@ const RAW_ENTRIES = [
         );
         if (!usedNext) throw new Error('ops_remove 写 .specs 应放行(next): ' + JSON.stringify(res2));
       }
-      // ⑦p ops_bash 的 script_path 形态：默认放行（脚本体不在命令文本里；
-      //    共享 Bash 解析器并非 bash 专用，无法可靠判定；残余边界在参考页记录）。
+      // ⑦p ops_bash 的 script_path 形态：运行中的协调者拒绝（两步绕过：先写 .specs 脚本
+      //    再执行）；子代理是执行者，放行。
       {
         let usedNext = false;
         const res = await preExec(
           { name: 'ops_bash', arguments: { script_path: 'probe.sh', description: 'probe' }, agent: { cwd: longTarget, session: { header: {} } } },
           () => { usedNext = true; },
         );
-        if (!usedNext) throw new Error('ops_bash script_path 运行态应默认放行(next): ' + JSON.stringify(res));
+        if (usedNext) throw new Error('协调者运行态 ops_bash script_path 不应 next——两步绕过');
+        if (!res || res.kind !== 'deny' || !res.reason.includes('script_path')) {
+          throw new Error('协调者运行态 ops_bash script_path 应 deny(含 script_path 语义): ' + JSON.stringify(res));
+        }
+        usedNext = false;
+        const sub = await preExec(
+          { name: 'ops_bash', arguments: { script_path: 'probe.sh', description: 'probe' }, agent: { cwd: longTarget, session: { header: { delegationDepth: 1 } } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('子代理 ops_bash script_path 应放行(next): ' + JSON.stringify(sub));
       }
       // ⑦q ops_edit_file 归一化为 Edit：运行态写 src/ deny、写 .specs/ 放行
       {
@@ -1172,17 +1181,29 @@ const RAW_ENTRIES = [
         );
         if (!usedNext) throw new Error('ops_copy 写 .specs 应放行(next): ' + JSON.stringify(res2));
       }
-      // ⑦r2 ops_replace 仍是真多目标：运行态按组拒绝
+      // ⑦r2 ops_replace 是真多目标：运行中的协调者按组拒绝；子代理（执行者）放行
       {
         let usedNext = false;
         const res = await preExec(
           { name: 'ops_replace', arguments: { path: longTarget, pattern: 'a', replacement: 'b' }, agent: { cwd: longTarget, session: { header: {} } } },
           () => { usedNext = true; },
         );
-        if (usedNext) throw new Error('ops_replace 运行态不应 next——多目标未按组拒绝');
+        if (usedNext) throw new Error('协调者 ops_replace 运行态不应 next——多目标未按组拒绝');
         if (!res || res.kind !== 'deny' || !res.reason.includes('多目标')) {
-          throw new Error('ops_replace 运行态应 deny(含多目标语义): ' + JSON.stringify(res));
+          throw new Error('协调者 ops_replace 运行态应 deny(含多目标语义): ' + JSON.stringify(res));
         }
+        usedNext = false;
+        const subReplace = await preExec(
+          { name: 'ops_replace', arguments: { path: longTarget, pattern: 'a', replacement: 'b' }, agent: { cwd: longTarget, session: { header: { delegationDepth: 1 } } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('子代理 ops_replace 应放行(next，执行者身份): ' + JSON.stringify(subReplace));
+        usedNext = false;
+        const subBatch = await preExec(
+          { name: 'ops_batch', arguments: { action: 'plan', ops: [] }, agent: { cwd: longTarget, session: { header: { delegationDepth: 1 } } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('子代理 ops_batch 应放行(next，执行者身份): ' + JSON.stringify(subBatch));
       }
       // ⑦r3 ops_copy 跨侧：目的 .specs -> src 必须 deny；源 src 只读、目的 .specs 放行
       {
@@ -1260,17 +1281,32 @@ const RAW_ENTRIES = [
         if (!res || res.kind !== 'deny' || !res.reason.includes('workdir')) {
           throw new Error('ops_bash workdir 在项目外应 deny(含 workdir 语义): ' + JSON.stringify(res));
         }
-      }
-      // ⑦s2 官方 bash 的 workdir 不再被桥接检查（范围收窄到 ops_bash）——只读命令放行
-      {
-        const outsideWorkdir = path.join(dir, 'k11-workdir-git');
-        fs.mkdirSync(outsideWorkdir, { recursive: true });
-        let usedNext = false;
-        const res = await preExec(
-          { name: 'bash', arguments: { command: 'git status', workdir: outsideWorkdir }, agent: { cwd: longTarget, session: { header: {} } } },
+        // 子代理是执行者：同一 workdir 不应被这条协调者专属检查拦住
+        usedNext = false;
+        const subWorkdir = await preExec(
+          { name: 'ops_bash', arguments: { command: 'printf x > y', workdir: outsideWorkdir }, agent: { cwd: longTarget, session: { header: { delegationDepth: 1 } } } },
           () => { usedNext = true; },
         );
-        if (!usedNext) throw new Error('官方 bash 只读命令不应被 ops_bash 的 workdir 检查误拦: ' + JSON.stringify(res));
+        if (!usedNext) throw new Error('子代理 ops_bash workdir 应放行(next，执行者身份): ' + JSON.stringify(subWorkdir));
+        // 官方 bash 同形（绝对 workdir 在项目外）同样被拒，避免换工具名绕过
+        usedNext = false;
+        const officialBash = await preExec(
+          { name: 'bash', arguments: { command: 'printf x > .specs/e.md', workdir: outsideWorkdir }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (usedNext) throw new Error('官方 bash 绝对 workdir 在项目外不应 next——同形 fail-open');
+        if (!officialBash || officialBash.kind !== 'deny') {
+          throw new Error('官方 bash 绝对 workdir 在项目外应 deny: ' + JSON.stringify(officialBash));
+        }
+      }
+      // ⑦s2 相对 workdir 不在检查范围（只查绝对路径）：项目内子目录的相对 workdir 不误拦
+      {
+        let usedNext = false;
+        const res = await preExec(
+          { name: 'ops_bash', arguments: { command: 'git status', workdir: 'src' }, agent: { cwd: longTarget, session: { header: {} } } },
+          () => { usedNext = true; },
+        );
+        if (!usedNext) throw new Error('项目内相对 workdir 不应被误拦: ' + JSON.stringify(res));
       }
       console.log('  bridge.apply 分派集成(子代理放行/协调者拦/越界·形状 deny 不受身份/保护集拦/OPS 别名·单目标映射·多目标组拒绝/script_path/workdir/PTC 默认放行)✓');
     },

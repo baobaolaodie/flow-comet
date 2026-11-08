@@ -183,7 +183,13 @@ function codexWriteTargetsFromCommand(command) {
   const addTarget = (raw) => {
     let t = raw && raw.trim();
     if (t) t = t.replace(/^["']|["']$/g, ''); // 剥引号
-    if (t && t !== 'NUL' && t !== '/dev/null' && !targets.includes(t)) targets.push(t); // 去重
+    if (t) {
+      // 空设备不是写入目标：Windows NUL 大小写不敏感（nul/NUL 同义），Unix 侧含标准流
+      const lower = t.toLowerCase();
+      if (lower !== 'nul' && lower !== '/dev/null' && lower !== '/dev/stdout' && lower !== '/dev/stderr' && !targets.includes(t)) {
+        targets.push(t);
+      }
+    } // 去重
   };
   const patterns = [
     // PowerShell **路径型**写类 cmdlet 的 -Path/-LiteralPath/-FilePath(引号内空格整体捕获并剥引号;

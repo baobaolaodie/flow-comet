@@ -481,13 +481,20 @@ export function apply(ctx) {
         return next();
       }
 
-      // 3.5 ops_bash 的绝对 workdir 在项目根外：相对写入的真实落点与 guard 按项目根
-      //     解析的结果不一致（实测 fail-open）。仅在运行态拒绝；空闲态由 4.5 放行。
-      //     范围收窄到 ops_bash（新别名）且仅绝对路径：官方 bash/pwsh 保持原行为，
+      // 3.5 身份信号先于路径判据（ADR-014 决策 2）：下面的 workdir 拒绝与多目标组拒绝
+      //     只作用于协调者（agentDepth === 0）。子代理是执行者，这些拒绝若前置于身份判定，
+      //     会让运行中的流程失去 ops_replace / ops_batch 等执行工具。
+      const agentDepthValue = agentDepth(exec);
+      const isCoordinator = agentDepthValue === 0;
+
+      // 3.6 Bash 类工具的绝对 workdir 在项目根外：相对写入的真实落点与 guard 按项目根
+      //     解析的结果不一致（实测 fail-open）。按工具语义（有 workdir）判定而不是按别名，
+      //     避免换工具名绕过；仅绝对路径、仅协调者、仅运行态（空闲由 4.5 放行）。
       //     相对 workdir 与命令内 cd 是已记录边界，不在此处误拦。
       let workdirOutsideProject = false;
       if (
-        toolName.toLowerCase() === 'ops_bash' &&
+        isCoordinator &&
+        canonicalName === 'Bash' &&
         args &&
         typeof args === 'object' &&
         !Array.isArray(args) &&
@@ -551,8 +558,15 @@ export function apply(ctx) {
         return { kind: 'deny', reason };
       }
       if (scriptPathOnly) {
-        // 脚本体不在命令文本里；共享 Bash 解析器（codexWriteTargetsFromCommand）并非
-        // bash 专用，无法可靠判定脚本内容。默认放行，残余边界在分发参考页记录。
+        // 协调者的 script_path 是两步绕过：先把脚本写进白名单目录（.specs/），再执行它
+        // 去写源码——脚本体不在命令文本里，共享解析器（codexWriteTargetsFromCommand）
+        // 并非 bash 专用，无法判定内容。运行中的协调者拒绝；子代理是执行者，放行。
+        if (isCoordinator) {
+          const reason =
+            'dsh-flow-comet-bridge: 运行中的协调者不能用 ops_bash 的 script_path（脚本体不在命令文本里，写入目标无法判定）——请改用 command 形式，或结束/归档当前流程';
+          console.warn(reason);
+          return { kind: 'deny', reason };
+        }
         return next();
       }
       if (ptcTransport) {
@@ -562,12 +576,17 @@ export function apply(ctx) {
       }
       if (opsFileOperation && !singleTargetOps) {
         // 只有 replace/batch 是真多目标；copy/move/remove 已在第 4 步映射为 Write。
-        const reason =
-          'dsh-flow-comet-bridge: OPS 多目标工具 "' +
-          toolName +
-          '" 在流程运行中的目标无法逐项判定，当前版本按组拒绝——请在流程外执行，或结束/归档当前流程';
-        console.warn(reason);
-        return { kind: 'deny', reason };
+        // 协调者按组拒绝；子代理是执行者，identity 通道放行（最小保护集不覆盖这两个形态，
+        // 已在分发参考页记录）。
+        if (isCoordinator) {
+          const reason =
+            'dsh-flow-comet-bridge: OPS 多目标工具 "' +
+            toolName +
+            '" 在流程运行中的目标无法逐项判定，协调者按组拒绝——请在流程外执行，或结束/归档当前流程';
+          console.warn(reason);
+          return { kind: 'deny', reason };
+        }
+        return next();
       }
       // running（activeChange + status running/undefined）：继续走既有第 5 步包含性校验、
       // 5.5 身份信号透传、第 6 步 guard 判定（身份与保护集统一由守卫裁决）。
@@ -595,14 +614,12 @@ export function apply(ctx) {
         mapped.input.file_path = normalizedTarget;
       }
 
-      // 5.5 代理身份信号：agentDepth(exec) > 0 = 子代理（执行者）。桥接**不再短路**——
+      // 5.5 代理身份信号：agentDepth(exec) > 0 = 子代理（执行者，已在 3.5 读出）。桥接**不再短路**——
       //     身份信号随守卫调用透传（env FLOW_COMET_AGENT_DEPTH + 通道标记
       //     FLOW_COMET_AGENT_DEPTH_SOURCE），身份判定与最小保护集
       //     拦截的整条判据由守卫独占实现（「D9 实现位置修订」/ ADR-014 决策 5：保护集
       //     判据不得出现第二份实现，L-067）。既有纪律保持：形状 fail-closed 与项目根
       //     包含性校验在上方已执行——子代理也不得越界写项目根外 / 参数形状不符。
-      const agentDepthValue = agentDepth(exec);
-
       // 5.6 ops_move 的源端：path 会被 unlink，按 Write 语义单独判一次（目的端已在
       //     上方按 to 判过）。先做包含性校验，再在 guard 存在时跑同一 guard。
       let moveSource = null;
