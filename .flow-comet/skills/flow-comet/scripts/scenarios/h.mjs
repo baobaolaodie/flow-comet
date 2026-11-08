@@ -1288,8 +1288,9 @@ export const ENTRIES = [
   // 243: 写目标按**物理落点**判定——白名单目录里的链接曾把写入引流到源码目录：
   // `.specs/j` 指向 `src` 时，写 `.specs/j/x` 词法命中白名单，真实落点却是 src。
   // 修复后白名单 / 包含性 / 保护集三处都按 realpath 后的相对路径判定，报文回显调用方拼写。
+  // 硬链接是路径判定的盲区（没有可解析的目标、realpath 仍指向自己），按"共享文件对象"fail-closed。
   {
-    name: '243 hook 写目标物理判定：链接目录不再把白名单写入引流到源码目录',
+    name: '243 hook 写目标物理判定：链接不再把白名单写入引流到源码目录，硬链接拒绝',
     run: (dir) => {
       writeState(dir, { ...baseState('subagent-execute'), status: 'running' });
       const posix = (p) => p.split(path.sep).join('/');
@@ -1297,6 +1298,7 @@ export const ENTRIES = [
       const srcDir = path.join(dir, 'src');
       fs.mkdirSync(specs, { recursive: true });
       fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(path.join(srcDir, 'app.js'), 'console.log(1);\n', 'utf8');
       const linkInto = path.join(specs, 'j');
       try {
         fs.symlinkSync(srcDir, linkInto, process.platform === 'win32' ? 'junction' : 'dir');
@@ -1311,8 +1313,7 @@ export const ENTRIES = [
       });
       assertExit(viaWrite, 2);
       assertOut(viaWrite, 'BLOCKED');
-      // 报文点名物理相对路径，便于定位真实落点
-      assertOut(viaWrite, 'src/w.txt');
+      assertOut(viaWrite, 'src/w.txt'); // 报文点名物理相对路径，便于定位真实落点
       // ② Bash 命令目标：同一路径同一结论（两条判定共用解析）
       const viaBash = runHook(['before_tool'], dir, {
         tool_name: 'Bash',
@@ -1320,21 +1321,18 @@ export const ENTRIES = [
       });
       assertExit(viaBash, 2);
       assertOut(viaBash, 'BLOCKED');
-      // ③ 物理文件不得被创建（拒绝是真的没写）
-      if (fs.existsSync(path.join(srcDir, 'w.txt'))) throw new Error('链接写入穿透：src/w.txt 被创建');
-      if (fs.existsSync(path.join(srcDir, 'v.txt'))) throw new Error('链接命令写入穿透：src/v.txt 被创建');
-      // ④ 放行面不受影响：白名单内的普通写入仍放行
+      // ③ 放行面不受影响：白名单内的普通写入仍放行
       const plain = runHook(['before_tool'], dir, {
         tool_name: 'Write',
         tool_input: { file_path: path.join(specs, 'plain.txt') },
       });
       assertExit(plain, 0);
       assertOut(plain, 'workflow-hook-guard-ok');
-      // ⑤ 两端都在白名单内的链接仍放行（不能退化成"链接一律拒绝"）
+      // ④ 两端都在白名单内的链接仍放行（不能退化成"链接一律拒绝"）
       const realDir = path.join(specs, 'real');
       fs.mkdirSync(realDir, { recursive: true });
       const alias = path.join(specs, 'alias');
-      try { fs.symlinkSync(realDir, alias, process.platform === 'win32' ? 'junction' : 'dir'); } catch { /* 已在上方降级过 */ }
+      try { fs.symlinkSync(realDir, alias, process.platform === 'win32' ? 'junction' : 'dir'); } catch { /* 上方已降级过 */ }
       if (fs.existsSync(alias)) {
         const viaAlias = runHook(['before_tool'], dir, {
           tool_name: 'Write',
@@ -1343,11 +1341,23 @@ export const ENTRIES = [
         assertExit(viaAlias, 0);
         assertOut(viaAlias, 'workflow-hook-guard-ok');
       }
-      // ⑥ 最小保护集也走物理判定：链接指向 .flow-comet 时写 state 仍拦
+      // ⑤ 链接指向**项目根之外**：包含性子句的锚（删掉协议层的物理包含性判定 ⇒ 此条必红）
+      const outsideDir = path.join(dir, 'outside-real');
+      fs.mkdirSync(outsideDir, { recursive: true });
+      const outLink = path.join(specs, 'out');
+      try { fs.symlinkSync(outsideDir, outLink, process.platform === 'win32' ? 'junction' : 'dir'); } catch { /* 已降级 */ }
+      if (fs.existsSync(outLink)) {
+        const viaOut = runHook(['before_tool'], dir, {
+          tool_name: 'Write',
+          tool_input: { file_path: path.join(outLink, 'escaped.md') },
+        });
+        assertExit(viaOut, 2);
+        assertOut(viaOut, 'BLOCKED');
+        assertOut(viaOut, 'outside');
+      }
+      // ⑥ 最小保护集：协调者经链接写状态文件 → 拒绝（物理相对路径命中保护集）
       const stateLink = path.join(specs, 's');
-      try {
-        fs.symlinkSync(path.join(dir, '.flow-comet'), stateLink, process.platform === 'win32' ? 'junction' : 'dir');
-      } catch { /* 同上 */ }
+      try { fs.symlinkSync(path.join(dir, '.flow-comet'), stateLink, process.platform === 'win32' ? 'junction' : 'dir'); } catch { /* 同上 */ }
       if (fs.existsSync(stateLink)) {
         const viaState = runHook(['before_tool'], dir, {
           tool_name: 'Write',
@@ -1355,8 +1365,47 @@ export const ENTRIES = [
         });
         assertExit(viaState, 2);
         assertOut(viaState, 'BLOCKED');
+        // ⑦ 身份通道同样不得写状态文件（保护集在身份放行下仍拦——此前该分支零断言）
+        const viaStateIdentity = runHook(['before_tool'], dir, {
+          tool_name: 'Write',
+          tool_input: { file_path: path.join(stateLink, 'flow-comet-state.json') },
+          agent_id: 'agent-abc123',
+        });
+        assertExit(viaStateIdentity, 2);
+        assertOut(viaStateIdentity, 'BLOCKED');
       }
-      // ⑦ 恢复：移除链接后同一路径恢复放行（拦截不是永久状态）
+      // ⑧ 硬链接：同一文件对象的第二个名字，路径判定看不出来 → 一律拒绝
+      //    （硬链接不需要符号链接特权，Windows 普通用户即可创建）
+      const hardTarget = path.join(specs, 'hard.js');
+      let hardKind = 'file';
+      try {
+        fs.linkSync(path.join(srcDir, 'app.js'), hardTarget);
+      } catch {
+        // 跨卷/文件系统不支持时退回目录 junction + 文件对（保持同一类判据仍被覆盖）
+        try { fs.symlinkSync(path.join(srcDir, 'app.js'), hardTarget, 'file'); hardKind = 'symlink'; } catch { hardKind = null; }
+      }
+      if (hardKind) {
+        const viaHard = runHook(['before_tool'], dir, {
+          tool_name: 'Write',
+          tool_input: { file_path: hardTarget },
+        });
+        assertExit(viaHard, 2);
+        assertOut(viaHard, 'BLOCKED');
+        // 撤掉 nlink 判定后，硬链接形态会退化成"白名单内普通文件"⇒ 此断言必红（判别力锚）
+        assertOut(viaHard, hardKind === 'file' ? '硬链接' : 'junction');
+      }
+      // ⑨ 同一实体不同拼写：win32 大小写不敏感 ⇒ 放行；非 win32 显式声明不适用（不静默跳过）
+      if (process.platform === 'win32') {
+        const viaCase = runHook(['before_tool'], dir, {
+          tool_name: 'Write',
+          tool_input: { file_path: path.join(dir, '.SPECS', 'case.md') },
+        });
+        assertExit(viaCase, 0);
+        assertOut(viaCase, 'workflow-hook-guard-ok');
+      } else {
+        console.error('SKIP: 大小写等价拼写断言不适用（非 win32 大小写敏感文件系统）——未覆盖，不是通过');
+      }
+      // ⑩ 恢复：移除链接后同一路径恢复放行（拦截不是永久状态）
       try { fs.rmdirSync(linkInto); } catch { try { fs.unlinkSync(linkInto); } catch { /* 忽略 */ } }
       if (fs.existsSync(linkInto)) throw new Error('恢复夹具：链接未被移除');
       const recovered = runHook(['before_tool'], dir, {

@@ -541,6 +541,20 @@ function blockProtocolFileWrite(target) {
   );
 }
 
+// 写目标解析失败（链接逃逸 / 硬链接共享文件对象 / realpath 报错）的统一出口：
+// 按成因选报文，避免把硬链接说成"符号链接"，也避免三处调用各写一份措辞。
+function blockUnsafeWriteTarget(rawTarget, reason, label = '写入') {
+  const shared = /硬链接/.test(reason);
+  hookBlock(
+    shared
+      ? 'BLOCKED: ' + label + ' "' + rawTarget + '" 指向被多处共享的文件对象（' + reason + '）——拒绝'
+      : 'BLOCKED: ' + label + ' "' + rawTarget + '" 经符号链接/junction 指向非法落点（' + reason + '）',
+    shared
+      ? '恢复: 该路径与白名单外的文件是同一实体，请改用独立文件；确需共享时移除多余链接后重试'
+      : '恢复: 改用项目内的真实路径，或移除指向项目外的链接后再写入'
+  );
+}
+
 // 身份在场时的最小保护集执行：候选写入目标逐个判定，命中即以既有报文风格拦截（hookBlock
 // 不返回）；未命中 ⇒ 返回（调用方按子代理语义放行）。判定入口唯一——身份短路与保护集判定都在此收口。
 // 两个目标各双判据：词法同一性（规范拼写）+ 物理同一性（别名形态）。
@@ -550,10 +564,7 @@ async function enforceMinimalProtectionSet(hookInput) {
     const resolvedTarget = await resolveWriteTarget(candidate);
     if (resolvedTarget === null) continue;
     if (resolvedTarget.blocked) {
-      hookBlock(
-        'BLOCKED: 写入 "' + resolvedTarget.raw + '" 经符号链接/junction 指向非法落点（' + resolvedTarget.blockedReason + '）',
-        '恢复: 改用项目内的真实路径，或移除指向项目外的链接后再写入'
-      );
+      blockUnsafeWriteTarget(resolvedTarget.raw, resolvedTarget.blockedReason);
     }
     if (
       blockedProtocolFileTarget(resolvedTarget.absolute) ||
@@ -561,13 +572,15 @@ async function enforceMinimalProtectionSet(hookInput) {
     ) {
       blockProtocolFileWrite(resolvedTarget.raw);
     }
-    if (resolvedTarget.targetRel !== null) {
-      if (
-        blockedStateFileTarget(resolvedTarget.targetRel) ||
-        (await isSameProtectedFileObject(resolvedTarget.absolute, stateFileAbsolute))
-      ) {
-        blockStateFileWrite(resolvedTarget.raw);
-      }
+    // 两条判据并列而非嵌套：路径词法命中（targetRel）与物理同一性（可能经链接、也可能在项目根外——
+    // 根外目标的 targetRel 恒为 null，嵌套会把"根外链接指向状态文件"整条放走）。
+    if (
+      (resolvedTarget.targetRel !== null && blockedStateFileTarget(resolvedTarget.targetRel)) ||
+      (await isSameProtectedFileObject(resolvedTarget.absolute, stateFileAbsolute))
+    ) {
+      blockStateFileWrite(
+        typeof resolvedTarget.lexicalRel === 'string' ? resolvedTarget.lexicalRel : resolvedTarget.raw,
+      );
     }
   }
 }
@@ -754,6 +767,18 @@ async function resolveWriteTarget(rawTarget) {
       blockedReason: error && error.message ? error.message : String(error),
     };
   }
+  // 硬链接是路径判定的盲区：它是同一文件对象的第二个名字，realpath 解析出的仍是它自己，
+  // 白名单前缀判不出来。目标存在且链接数 > 1 ⇒ 该路径与别处共享文件对象，写入会改到白名单之外
+  // 的文件——按 fail-closed 拒绝（普通新建/单链接文件 nlink === 1，不受影响）。
+  let nlink = 1;
+  if (inspection.exists) {
+    try {
+      const targetStat = await fs.stat(absolute, { bigint: true });
+      nlink = Number(targetStat.nlink);
+    } catch {
+      // stat 失败不在此处判定：后续白名单与身份判据仍会执行（错误方向由调用方的 fail-closed 兜底）
+    }
+  }
   return {
     raw: trimmed,
     absolute,
@@ -762,7 +787,10 @@ async function resolveWriteTarget(rawTarget) {
     physicalRel: inspection.physicalRel,
     lexicalRel,
     exists: inspection.exists,
-    blocked: false,
+    blocked: nlink > 1,
+    blockedReason: nlink > 1
+      ? '目标与其它路径共享同一文件对象（硬链接，链接数 ' + nlink + '）'
+      : undefined,
   };
 }
 
@@ -880,10 +908,7 @@ async function main() {
 
   const fileTarget = await fileWriteTargetFromHookInput(hookInput);
   if (fileTarget && fileTarget.blocked) {
-    hookBlock(
-      'BLOCKED: 写入 "' + fileTarget.raw + '" 经符号链接/junction 指向非法落点（' + fileTarget.blockedReason + '）',
-      '恢复: 改用项目内的真实路径，或移除指向项目外的链接后再写入'
-    );
+    blockUnsafeWriteTarget(fileTarget.raw, fileTarget.blockedReason);
   }
   const target = fileTarget ? fileTarget.targetRel : null;
 
@@ -900,10 +925,7 @@ async function main() {
       for (const t of writeTargets) {
         const resolvedTarget = await resolveWriteTarget(t);
         if (resolvedTarget && resolvedTarget.blocked) {
-          hookBlock(
-            'BLOCKED: 命令写入 "' + t + '" 经符号链接/junction 指向非法落点（' + resolvedTarget.blockedReason + '）',
-            '恢复: 改用项目内的真实路径，或移除指向项目外的链接后再写入'
-          );
+          blockUnsafeWriteTarget(t, resolvedTarget.blockedReason, '命令写入');
         }
         const targetRel = resolvedTarget ? resolvedTarget.targetRel : null;
         if (targetRel !== null && blockedStateFileTarget(targetRel)) {
@@ -958,11 +980,23 @@ async function main() {
   }
 
   if (currentNode && target) {
-    if (blockedStateFileTarget(target)) {
-      // 判定用物理相对路径（链接/大小写归一后），报文回显用户原始拼写（既有断言依赖原样回显）
+    const stateFileAbsolute = path.join(runRoot, ...STATE_FILE_REL.split('/'));
+    // 词法前缀之外再判一次**物理身份**：链接与硬链接都能把同一文件放到白名单路径下，
+    // 前缀匹配看不出来（链接由 targetRel 的物理化覆盖，硬链接只能靠文件对象同一性）。
+    if (
+      blockedStateFileTarget(target) ||
+      (await isSameProtectedFileObject(fileTarget.absolute, stateFileAbsolute))
+    ) {
+      // 报文回显用户原始拼写（既有断言依赖原样回显）
       blockStateFileWrite(
         fileTarget && typeof fileTarget.lexicalRel === 'string' ? fileTarget.lexicalRel : target,
       );
+    }
+    if (
+      blockedProtocolFileTarget(fileTarget.absolute) ||
+      (await isSameProtectedFileObject(fileTarget.absolute, protocolPath))
+    ) {
+      blockProtocolFileWrite(fileTarget.raw);
     }
     const whitelist = PHASE_WRITE_WHITELIST[currentNode];
     if (whitelist) {
