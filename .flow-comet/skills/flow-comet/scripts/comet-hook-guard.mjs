@@ -563,9 +563,9 @@ async function enforceMinimalProtectionSet(hookInput) {
   for (const candidate of protectedCandidateTargets(hookInput)) {
     const resolvedTarget = await resolveWriteTarget(candidate);
     if (resolvedTarget === null) continue;
-    if (resolvedTarget.blocked) {
-      blockUnsafeWriteTarget(resolvedTarget.raw, resolvedTarget.blockedReason);
-    }
+    // 身份通道不在此处拒绝链接形态（空闲放行与执行者可写任意路径的既有语义）；
+    // 链接指向受保护文件时由下方同一性判定拦住。
+
     if (
       blockedProtocolFileTarget(resolvedTarget.absolute) ||
       (await isSameProtectedFileObject(resolvedTarget.absolute, protocolPath))
@@ -770,11 +770,15 @@ async function resolveWriteTarget(rawTarget) {
   // 硬链接是路径判定的盲区：它是同一文件对象的第二个名字，realpath 解析出的仍是它自己，
   // 白名单前缀判不出来。目标存在且链接数 > 1 ⇒ 该路径与别处共享文件对象，写入会改到白名单之外
   // 的文件——按 fail-closed 拒绝（普通新建/单链接文件 nlink === 1，不受影响）。
+  let hardLinkedFile = false;
   let nlink = 1;
   if (inspection.exists) {
     try {
       const targetStat = await fs.stat(absolute, { bigint: true });
       nlink = Number(targetStat.nlink);
+      // 只对普通文件生效：POSIX 目录 nlink 恒 ≥2（"." 与 ".."），把目录算进来会在
+      // Linux / macOS 上把「写目录目标」全判成硬链接（本机 NTFS 目录 nlink=1，看不出来）。
+      hardLinkedFile = targetStat.isFile() && nlink > 1;
     } catch {
       // stat 失败不在此处判定：后续白名单与身份判据仍会执行（错误方向由调用方的 fail-closed 兜底）
     }
@@ -787,8 +791,8 @@ async function resolveWriteTarget(rawTarget) {
     physicalRel: inspection.physicalRel,
     lexicalRel,
     exists: inspection.exists,
-    blocked: nlink > 1,
-    blockedReason: nlink > 1
+    blocked: hardLinkedFile,
+    blockedReason: hardLinkedFile
       ? '目标与其它路径共享同一文件对象（硬链接，链接数 ' + nlink + '）'
       : undefined,
   };
@@ -907,9 +911,6 @@ async function main() {
   }
 
   const fileTarget = await fileWriteTargetFromHookInput(hookInput);
-  if (fileTarget && fileTarget.blocked) {
-    blockUnsafeWriteTarget(fileTarget.raw, fileTarget.blockedReason);
-  }
   const target = fileTarget ? fileTarget.targetRel : null;
 
   // R5: Bash 工具写路径适配(CC 与 Codex 通用)——Bash 工具的 command 字符串(无 file_path),
@@ -930,6 +931,15 @@ async function main() {
         const targetRel = resolvedTarget ? resolvedTarget.targetRel : null;
         if (targetRel !== null && blockedStateFileTarget(targetRel)) {
           blockStateFileWrite(t);
+        }
+        // 协议文件与状态文件同判：此前协议判定只加在 file_path 分支，同一个文件用 Bash
+        // 写（printf > / Remove-Item）能过——「同一路径不因所选工具而异」要求两通道同判。
+        if (
+          resolvedTarget &&
+          (blockedProtocolFileTarget(resolvedTarget.absolute) ||
+            (await isSameProtectedFileObject(resolvedTarget.absolute, protocolPath)))
+        ) {
+          blockProtocolFileWrite(t);
         }
         // worktree 隔离区放行(与 file_path 判定共用同一判定——同路径同结论);
         // 放行前置 = 物理包含性(词法命中但真实落点在区外 → 拒,不放行)
@@ -977,6 +987,12 @@ async function main() {
       `BLOCKED: 写入 "${fileTarget.raw}" 不在当前节点 "${currentNode}" 允许范围（目标在项目根之外）`,
       '恢复: 改用项目根内的路径；子代理经身份通道放行（载荷 agent_id / 桥接透传的环境变量 FLOW_COMET_AGENT_DEPTH，且桥接通道标记 FLOW_COMET_AGENT_DEPTH_SOURCE 在场）'
     );
+  }
+
+  // 链接/硬链接的拒绝只在**活跃流程**生效：空闲（无 state / 无 activeChange / completed）时
+  // 与既有 (no active workflow) 语义一致——放行，不因链接形态拦住空闲项目的写入。
+  if (currentNode && fileTarget && fileTarget.blocked) {
+    blockUnsafeWriteTarget(fileTarget.raw, fileTarget.blockedReason);
   }
 
   if (currentNode && target) {
