@@ -6,7 +6,7 @@
 
 - **Node.js 18 或更高**（`node --version`）。
 - **一个 agent 平台** —— Claude Code（默认）、Codex 或 DeepSeek Harness，任选其一；以后要装第二个，用不同的 `--platform` 重跑一次即可。
-- **一个项目目录**。安装器只在该目录内写入（dsh 平台额外写 `$DSH_HOME` 的插件目录）。dsh 的写入守卫是宿主启动时加载的全局插件：重跑安装器会更新它，但需重启宿主后新 loader 才生效。该守卫按同一套节点白名单检查宿主实际挂出的工具——官方 `write` / `edit` / `bash` / `pwsh` 与 dsh-ops 的写入工具名都包括在内；shell 解释器与 PTC 进程内直写属已记录边界，不是被拦的形态（见[使用](USAGE-zh.md#dsh-上的工具面)）。
+- **一个项目目录**。安装器只在该目录内写入；dsh 平台例外：它还会写 `$DSH_HOME/plugins/` 的插件，以及 `$DSH_HOME/cordis.patch.yml` 的托管块（两者都在项目外，备份或审计时注意）。dsh 的写入守卫是宿主启动时加载的全局插件：重跑安装器会更新它，但需重启宿主后新 loader 才生效。该守卫按同一套节点白名单检查宿主实际挂出的工具——官方 `write` / `edit` / `bash` / `pwsh` 与 dsh-ops 的写入工具名都包括在内；shell 解释器与 PTC 进程内直写属已记录边界，不是被拦的形态（见[使用](USAGE-zh.md#dsh-上的工具面)）。
 
 flow-kit 由安装器自行获取：项目里已有的 `flow-kit/` 会被尊重，缺失的会被克隆并锁定，此后不再改动该目录。
 

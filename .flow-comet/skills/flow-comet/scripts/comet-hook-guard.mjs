@@ -184,11 +184,16 @@ function codexWriteTargetsFromCommand(command) {
     let t = raw && raw.trim();
     if (t) t = t.replace(/^["']|["']$/g, ''); // 剥引号
     if (t) {
-      // 空设备不是写入目标：Windows NUL 大小写不敏感（nul/NUL 同义），Unix 侧含标准流
+      // 空设备不是写入目标，但"是设备"取决于执行它的 shell：
+      //   - `nul` 只在 Windows 是空设备（大小写不敏感）；POSIX shell 上 `>nul` 会真的
+      //     创建一个名为 nul 的文件，必须照常按写入目标判定；
+      //   - `/dev/null` 在两类 shell 上都不是落盘目标；
+      //   - `/dev/stdout` / `/dev/stderr` **不过滤**：它们可能被 `exec 1<>file` 之类的
+      //     重定向绑定到真实文件，放行等于给出一条绕过白名单的写路径。
       const lower = t.toLowerCase();
-      if (lower !== 'nul' && lower !== '/dev/null' && lower !== '/dev/stdout' && lower !== '/dev/stderr' && !targets.includes(t)) {
-        targets.push(t);
-      }
+      const isDevice =
+        lower === '/dev/null' || (lower === 'nul' && process.platform === 'win32');
+      if (!isDevice && !targets.includes(t)) targets.push(t);
     } // 去重
   };
   const patterns = [

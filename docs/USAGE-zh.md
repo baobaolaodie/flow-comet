@@ -96,6 +96,8 @@ node <skills>/flow-comet/scripts/workflow-state.mjs record execute '{"summary":"
 
 流程运行中，协调者传入项目外的绝对 `workdir` 会被拒绝；`ops_bash` 的 `script_path` 同样被拒绝——否则把脚本写进白名单目录 `.specs/` 再执行，就能到达任意路径。空闲项目（无 change，或 change 已完成）不受约束。
 
+子代理是执行者，这两条拒绝不作用于它；同时，脚本正文与多目标操作的逐项目标都不做分析。因此在宿主权限允许时，执行者脚本仍可能到达状态文件或协议文件——最小保护集在「具名工具」路径上生效，不覆盖脚本内容。
+
 ## 分支模式与执行模式
 
 在 git 项目里，引擎按 change 开分支：`init <change-id>` 会创建并切换到 `change/<change-id>`，`next` 会打印分支行；没有 git 的项目里该行显示 `none`。

@@ -42,7 +42,7 @@ That rule replaced an earlier one that required the same text to appear in sever
 
 | Layer | What it does | Where it is enforced |
 |---|---|---|
-| ① Physical write interception | Before a tool writes, the platform layer checks the target against the current node's write whitelist; out-of-scope writes are refused before they run | Claude Code and Codex: the `PreToolUse` hook the installer writes. dsh: an in-process `tools/pre-execute` bridge plugin at `$DSH_HOME/plugins/`, loaded at host start |
+| ① Physical write interception | Before a tool writes, the platform layer checks the target against the current node's write whitelist; out-of-scope writes are refused before they run. On dsh the check covers named tools and command text only — a `run_code` program and a shell interpreter are not target-analysed (see [Tool surface on dsh](USAGE.md#tool-surface-on-dsh)) | Claude Code and Codex: the `PreToolUse` hook the installer writes. dsh: an in-process `tools/pre-execute` bridge plugin at `$DSH_HOME/plugins/`, loaded at host start |
 | ② Guard validation | Node entry and exit are validated against evidence: required artifacts and sections, recorded node evidence, the skill-load declaration, the task-set signature, summaries for completed tasks, review dispositions, and the test commands that `verify` actually runs — a deferred finding counts only behind a recorded human ruling | the guard's `entry` / `exit` |
 | ③ State and schema validation | Every state write is validated against the schema (field types, nested records), and unwritable shapes are rejected rather than silently normalized | the state machine's write path |
 

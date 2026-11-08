@@ -96,6 +96,8 @@ Two things are worth knowing before you design around them:
 
 While a workflow is running, a coordinator passing an absolute `workdir` outside the project is refused, and so is `ops_bash` with `script_path` — a script written into the whitelisted `.specs/` and then executed would otherwise reach any path. Idle projects (no change, or a completed one) are not constrained.
 
+A subagent is the executor, so those two refusals do not apply to it, and neither the script body nor a multi-target operation's individual targets are analysed. Where host permissions allow it, an executor script can therefore still reach the state or protocol file; the minimal protected set is enforced on the named-tool path, not on script content.
+
 ## Branch mode and execution mode
 
 In a git project the engine works on a branch per change: `init <change-id>` creates and switches to `change/<change-id>`, and `next` reports the branch line. In a project without git the same line reports `none`.
