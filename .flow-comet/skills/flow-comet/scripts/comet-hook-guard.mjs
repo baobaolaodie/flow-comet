@@ -3,6 +3,7 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
+  inspectWorkflowPathSegments,
   inspectWorkflowProtectedPath,
   parseProtocolWriteWhitelist,
   readProtocolFile,
@@ -546,8 +547,14 @@ function blockProtocolFileWrite(target) {
 async function enforceMinimalProtectionSet(hookInput) {
   const stateFileAbsolute = path.join(runRoot, ...STATE_FILE_REL.split('/'));
   for (const candidate of protectedCandidateTargets(hookInput)) {
-    const resolvedTarget = resolveWriteTarget(candidate);
+    const resolvedTarget = await resolveWriteTarget(candidate);
     if (resolvedTarget === null) continue;
+    if (resolvedTarget.blocked) {
+      hookBlock(
+        'BLOCKED: 写入 "' + resolvedTarget.raw + '" 经符号链接/junction 指向非法落点（' + resolvedTarget.blockedReason + '）',
+        '恢复: 改用项目内的真实路径，或移除指向项目外的链接后再写入'
+      );
+    }
     if (
       blockedProtocolFileTarget(resolvedTarget.absolute) ||
       (await isSameProtectedFileObject(resolvedTarget.absolute, protocolPath))
@@ -707,7 +714,7 @@ function normalizeDriveRootSpelling(rawTarget) {
 //   insideRunRoot=true  → targetRel = 相对 runRoot 的 POSIX 路径（白名单前缀匹配 / 状态文件比较）
 //   insideRunRoot=false → targetRel = null（项目根之外；由「runRoot 外写入关断」与 Bash 分支同判）
 // 无写入语义（非字符串 / 空串）→ null（该目标不参与任何判定）。
-function resolveWriteTarget(rawTarget) {
+async function resolveWriteTarget(rawTarget) {
   if (typeof rawTarget !== 'string') return null;
   const trimmed = rawTarget.trim();
   if (trimmed === '') return null;
@@ -715,11 +722,47 @@ function resolveWriteTarget(rawTarget) {
   const relative = path.relative(runRoot, absolute);
   const outside =
     path.isAbsolute(relative) || relative === '..' || relative.startsWith('..' + path.sep);
+  const lexicalRel = outside ? null : relative === '' ? '.' : relative.replaceAll('\\', '/');
+  if (outside) {
+    return {
+      raw: trimmed,
+      absolute,
+      insideRunRoot: false,
+      targetRel: null,
+      physicalRel: null,
+      lexicalRel: null,
+      exists: false,
+      blocked: false,
+    };
+  }
+  let inspection;
+  try {
+    inspection = await inspectWorkflowPathSegments(runRoot, absolute, 'write target', 'any', {
+      followLinks: true,
+      physicalRel: true,
+    });
+  } catch (error) {
+    return {
+      raw: trimmed,
+      absolute,
+      insideRunRoot: true,
+      targetRel: null,
+      physicalRel: null,
+      lexicalRel,
+      exists: false,
+      blocked: true,
+      blockedReason: error && error.message ? error.message : String(error),
+    };
+  }
   return {
     raw: trimmed,
     absolute,
-    insideRunRoot: !outside,
-    targetRel: outside ? null : relative === '' ? '.' : relative.replaceAll('\\', '/'),
+    insideRunRoot: true,
+    targetRel: inspection.physicalRel,
+    physicalRel: inspection.physicalRel,
+    lexicalRel,
+    exists: inspection.exists,
+    blocked: false,
   };
 }
 
@@ -733,7 +776,7 @@ function toolFilePathFromHookInput(input) {
 
 // file_path 形态（Write / Edit / …）：载荷无 file_path ⇒ null（无写入语义，不判定）。
 // 与命令级 token 共用 resolveWriteTarget——同一路径不因所选工具而异。
-function fileWriteTargetFromHookInput(input) {
+async function fileWriteTargetFromHookInput(input) {
   return resolveWriteTarget(toolFilePathFromHookInput(input));
 }
 
@@ -835,7 +878,13 @@ async function main() {
     return;
   }
 
-  const fileTarget = fileWriteTargetFromHookInput(hookInput);
+  const fileTarget = await fileWriteTargetFromHookInput(hookInput);
+  if (fileTarget && fileTarget.blocked) {
+    hookBlock(
+      'BLOCKED: 写入 "' + fileTarget.raw + '" 经符号链接/junction 指向非法落点（' + fileTarget.blockedReason + '）',
+      '恢复: 改用项目内的真实路径，或移除指向项目外的链接后再写入'
+    );
+  }
   const target = fileTarget ? fileTarget.targetRel : null;
 
   // R5: Bash 工具写路径适配(CC 与 Codex 通用)——Bash 工具的 command 字符串(无 file_path),
@@ -849,7 +898,13 @@ async function main() {
       // 声明模式未列出节点 → fail-closed(同 file_path 判定);缺省表无此节点 → 协调者默认 .specs/
       const effectiveWhitelist = whitelist || (declared ? null : ['.specs/']);
       for (const t of writeTargets) {
-        const resolvedTarget = resolveWriteTarget(t);
+        const resolvedTarget = await resolveWriteTarget(t);
+        if (resolvedTarget && resolvedTarget.blocked) {
+          hookBlock(
+            'BLOCKED: 命令写入 "' + t + '" 经符号链接/junction 指向非法落点（' + resolvedTarget.blockedReason + '）',
+            '恢复: 改用项目内的真实路径，或移除指向项目外的链接后再写入'
+          );
+        }
         const targetRel = resolvedTarget ? resolvedTarget.targetRel : null;
         if (targetRel !== null && blockedStateFileTarget(targetRel)) {
           blockStateFileWrite(t);
@@ -904,7 +959,10 @@ async function main() {
 
   if (currentNode && target) {
     if (blockedStateFileTarget(target)) {
-      blockStateFileWrite(target);
+      // 判定用物理相对路径（链接/大小写归一后），报文回显用户原始拼写（既有断言依赖原样回显）
+      blockStateFileWrite(
+        fileTarget && typeof fileTarget.lexicalRel === 'string' ? fileTarget.lexicalRel : target,
+      );
     }
     const whitelist = PHASE_WRITE_WHITELIST[currentNode];
     if (whitelist) {
