@@ -6,7 +6,7 @@ Installs flow-comet into a project so that a Claude Code, Codex or DeepSeek Harn
 
 - **Node.js 18 or newer** (`node --version`).
 - **One agent platform** — Claude Code (default), Codex, or DeepSeek Harness. Pick one; installing a second one later is a re-run with a different `--platform`.
-- **A project directory** to install into. The installer only writes inside it (plus, for dsh, the `$DSH_HOME` plugin directory). On dsh the write guard is a global plugin loaded by the host at startup: re-running the installer updates it, and the host must be restarted for the new loader to take effect.
+- **A project directory** to install into. The installer only writes inside it (plus, for dsh, the `$DSH_HOME` plugin directory). On dsh the write guard is a global plugin loaded by the host at startup: re-running the installer updates it, and the host must be restarted for the new loader to take effect. That guard covers the tools the host actually offers — the official `write` / `edit` / `bash` / `pwsh` and the dsh-ops write names alike — against the same per-node whitelist; shell interpreters and in-process PTC writes are documented boundaries rather than blocked shapes (see [USAGE](USAGE.md#tool-surface-on-dsh)).
 
 flow-kit is fetched by the installer itself: an existing `flow-kit/` directory in the project is respected, a missing one is cloned and pinned, and the directory is never modified afterwards.
 

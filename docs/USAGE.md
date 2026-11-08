@@ -85,6 +85,17 @@ On archive the whole directory moves to `.specs/archive/<YYYY-MM-DD>-<change-id>
 - **Coordinator boundary** — in the default `subagent` execution mode the coordinating session may not carry out tasks itself; the engine reports a takeover instead. The documented escape hatch is an explicit `record execute '{"parallelTakeoverApproved":true}'` declaration.
 - **Archive completeness** — the archive exit requires the archived directory and a `KNOWN-ISSUES.md` inside it (write "no leftovers" explicitly when there are none).
 
+## Tool surface on dsh
+
+On DeepSeek Harness the write guard is an in-process bridge plugin rather than a `PreToolUse` hook, so it judges the tools the host actually offers. The official `write` / `edit` / `bash` / `pwsh` names map to the same `Write` / `Edit` / `Bash` contract, and so do the dsh-ops equivalents (`ops_write_file`, `ops_edit_file`, `ops_bash`), plus the single-target OPS operations (`ops_copy` to its `to`, `ops_move` to both its `to` and its source `path`, `ops_remove` to its `path`). The multi-target operations `ops_replace` and `ops_batch` are refused to the coordinator while a workflow is running; a subagent is the executor and passes.
+
+Two things are worth knowing before you design around them:
+
+- **`run_code` is allowed.** PTC is a primary preset, and refusing it would stall every running workflow. A program that writes files in-process (`node:fs`, `child_process`) is a documented residual rather than a blocked shape; calls it makes to host tools still pass the same guard one by one.
+- **The shell side is narrower than the write side.** Command text is checked for redirections, PowerShell path cmdlets, `.NET File` calls, `cp`/`mv`/`rm` destinations and `apply_patch` headers. Interpreters (`node file`, `python -c`), `tee`, `dd`, `sed -i`, a bare `rm` and a move's source are outside that analysis, and a relative `workdir` or a `cd` inside the command is not re-based. Treat the whitelist as a boundary on the tools you use, not as a sandbox around the shell.
+
+While a workflow is running, a coordinator passing an absolute `workdir` outside the project is refused, and so is `ops_bash` with `script_path` — a script written into the whitelisted `.specs/` and then executed would otherwise reach any path. Idle projects (no change, or a completed one) are not constrained.
+
 ## Branch mode and execution mode
 
 In a git project the engine works on a branch per change: `init <change-id>` creates and switches to `change/<change-id>`, and `next` reports the branch line. In a project without git the same line reports `none`.

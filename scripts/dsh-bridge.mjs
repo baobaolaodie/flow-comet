@@ -553,7 +553,9 @@ export function apply(ctx) {
       //     - replace/batch：真多目标，按组拒绝；copy/move/remove 已在第 4 步映射为 Write。
       if (workdirOutsideProject) {
         const reason =
-          'dsh-flow-comet-bridge: ops_bash 的 workdir 解析到项目根之外，运行中无法保证写入目标与白名单判定一致——拒绝；请在项目内执行，或结束/归档当前流程';
+          'dsh-flow-comet-bridge: Bash 类工具（' +
+          toolName +
+          '）的 workdir 解析到项目根之外，运行中无法保证写入目标与白名单判定一致——拒绝；请在项目内执行，或结束/归档当前流程';
         console.warn(reason);
         return { kind: 'deny', reason };
       }
