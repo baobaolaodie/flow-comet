@@ -74,6 +74,8 @@ Find your symptom, run the command. Everything here assumes you are inside the p
 
 **dsh reports a version skew** — the loader's version stamp and the project marker disagree. Re-run `fcomet init --platform dsh` (it rewrites both), then re-check with `bridge-check`. A development suffix on one side is normal for an install from a clone.
 
+**dsh write behaviour did not change after re-running the installer** — the bridge is a global plugin at `$DSH_HOME/plugins/`, and the host loads it once at startup. Quit the dsh host completely and start it again; a reload inside a running session is not enough. The bridge applies to every project, so a single re-install covers all of them.
+
 ### Upgrade and reset
 
 **The project still runs the old version after `npm install -g flow-comet`** — upgrading the global package only replaces the CLI. Run `fcomet init` in the project again; it overwrites generated files and is idempotent.

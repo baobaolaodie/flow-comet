@@ -14,7 +14,7 @@
 
 ### 修复
 
-- **dsh 桥接归一化已知 dsh-ops 写入工具名并路由确定目标**：`ops_bash`、`ops_write_file`、`ops_edit_file` 与官方工具使用同一套 `Write`/`Edit`/`Bash` 契约；OPS 的 `ops_copy`、`ops_move`、`ops_remove` 按确定的目标字段映射为同一写入契约（`ops_move` 的源端 `path` 另判一次），`ops_replace`、`ops_batch` 在流程运行中按组拒绝；共享 Bash 命令解析器与 symlink/junction 路径仍是已知边界；`run_code`（进程内代码工具）在运行中的流程里默认放行；直接文件/进程写调用是已记录的残留边界；空闲项目保持两类工具可用；`ops_bash` 的 `script_path` 形态默认放行（脚本体是已记录边界），`ops_bash` 的 `workdir` 在项目外时运行态拒绝。已安装项目需重新运行安装器以获取新 loader。([#167](https://github.com/baobaolaodie/flow-comet/pull/167))
+- **dsh 桥接归一化已知 dsh-ops 写入工具名并路由确定目标**：`ops_bash`、`ops_write_file`、`ops_edit_file` 与官方工具使用同一套 `Write`/`Edit`/`Bash` 契约；OPS 的 `ops_copy`、`ops_move`、`ops_remove` 按确定的目标字段映射为同一写入契约（`ops_move` 的源端 `path` 另判一次），`ops_replace`、`ops_batch` 在流程运行中按组拒绝；共享 Bash 命令解析器与 symlink/junction 路径仍是已知边界；`run_code`（进程内代码工具）在运行中的流程里默认放行；直接文件/进程写调用是已记录的残留边界；空闲项目保持两类工具可用。运行中的流程里，`ops_bash` 的 `script_path` 形态与多目标工具只对协调者拒绝（子代理是执行者、放行），Bash 类工具的绝对 `workdir` 在项目外时对协调者拒绝。已安装项目需重新运行安装器以获取新 loader。([#167](https://github.com/baobaolaodie/flow-comet/pull/167))
 
 ## [1.7.0] - 2026-11-05
 

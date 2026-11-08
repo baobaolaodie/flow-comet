@@ -74,6 +74,8 @@
 
 **dsh 报版本偏斜** —— loader 版本戳与项目标识不一致。重跑 `fcomet init --platform dsh`（两者都会被重写），再用 `bridge-check` 复查。从 clone 安装时一侧带开发态后缀属正常。
 
+**重跑安装器后 dsh 的写入行为没变** —— 桥接是 `$DSH_HOME/plugins/` 下的全局插件，宿主只在启动时加载一次。请完全退出 dsh 宿主再启动；在会话内热重载不够。桥接对所有项目生效，重装一次即可覆盖全部项目。
+
 ### 升级与重置
 
 **`npm install -g flow-comet` 之后项目还是旧版本** —— 升级全局包只换 CLI。在该项目重跑 `fcomet init`；它会覆盖生成文件且是幂等的。
