@@ -1342,7 +1342,8 @@ export const ENTRIES = [
         assertOut(viaAlias, 'workflow-hook-guard-ok');
       }
       // ⑤ 链接指向**项目根之外**：包含性子句的锚（删掉协议层的物理包含性判定 ⇒ 此条必红）
-      const outsideDir = path.join(dir, 'outside-real');
+      // 真·项目根之外（此前夹具建在根内，断言 'outside' 被目录名喂饱 —— 判别力为零）
+      const outsideDir = path.join(path.dirname(dir), 'outside-' + path.basename(dir));
       fs.mkdirSync(outsideDir, { recursive: true });
       const outLink = path.join(specs, 'out');
       try { fs.symlinkSync(outsideDir, outLink, process.platform === 'win32' ? 'junction' : 'dir'); } catch { /* 已降级 */ }
@@ -1353,7 +1354,8 @@ export const ENTRIES = [
         });
         assertExit(viaOut, 2);
         assertOut(viaOut, 'BLOCKED');
-        assertOut(viaOut, 'outside');
+        // 报文来自物理包含性判定（写目标解析越界），不是白名单前缀
+        assertOut(viaOut, 'resolves outside');
       }
       // ⑥ 最小保护集：协调者经链接写状态文件 → 拒绝（物理相对路径命中保护集）
       const stateLink = path.join(specs, 's');
@@ -1374,6 +1376,31 @@ export const ENTRIES = [
         assertExit(viaStateIdentity, 2);
         assertOut(viaStateIdentity, 'BLOCKED');
       }
+      // ⑦b 协议文件：经链接写它同样要拒（此前协议身份判定零断言）
+      const protoDir = path.join(dir, 'reference');
+      if (fs.existsSync(protoDir)) {
+        const protoLink = path.join(specs, 'p');
+        try { fs.symlinkSync(protoDir, protoLink, process.platform === 'win32' ? 'junction' : 'dir'); } catch { /* 已降级 */ }
+        if (fs.existsSync(protoLink)) {
+          const viaProto = runHook(['before_tool'], dir, {
+            tool_name: 'Write',
+            tool_input: { file_path: path.join(protoLink, 'workflow-protocol.json') },
+          });
+          assertExit(viaProto, 2);
+          assertOut(viaProto, 'BLOCKED');
+          assertOut(viaProto, '协议文件');
+        }
+      }
+      // ⑦c 目录目标不得被硬链接判据误拦（POSIX 上目录 nlink 恒 ≥2，判据只认普通文件）
+      const dirTarget = path.join(specs, 'dir-target');
+      fs.mkdirSync(dirTarget, { recursive: true });
+      const viaDir = runHook(['before_tool'], dir, {
+        tool_name: 'Write',
+        tool_input: { file_path: dirTarget },
+      });
+      assertExit(viaDir, 0);
+      assertOut(viaDir, 'workflow-hook-guard-ok');
+
       // ⑧ 硬链接：同一文件对象的第二个名字，路径判定看不出来 → 一律拒绝
       //    （硬链接不需要符号链接特权，Windows 普通用户即可创建）
       const hardTarget = path.join(specs, 'hard.js');
@@ -1383,6 +1410,9 @@ export const ENTRIES = [
       } catch {
         // 跨卷/文件系统不支持时退回目录 junction + 文件对（保持同一类判据仍被覆盖）
         try { fs.symlinkSync(path.join(srcDir, 'app.js'), hardTarget, 'file'); hardKind = 'symlink'; } catch { hardKind = null; }
+      }
+      if (!hardKind) {
+        console.error('SKIP: 硬链接断言不适用（本机无法创建硬链接或文件符号链接）——未覆盖，不是通过');
       }
       if (hardKind) {
         const viaHard = runHook(['before_tool'], dir, {
