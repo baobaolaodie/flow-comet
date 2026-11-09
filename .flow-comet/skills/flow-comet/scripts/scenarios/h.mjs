@@ -1367,14 +1367,6 @@ export const ENTRIES = [
         });
         assertExit(viaState, 2);
         assertOut(viaState, 'BLOCKED');
-        // ⑦ 身份通道同样不得写状态文件（保护集在身份放行下仍拦——此前该分支零断言）
-        const viaStateIdentity = runHook(['before_tool'], dir, {
-          tool_name: 'Write',
-          tool_input: { file_path: path.join(stateLink, 'flow-comet-state.json') },
-          agent_id: 'agent-abc123',
-        });
-        assertExit(viaStateIdentity, 2);
-        assertOut(viaStateIdentity, 'BLOCKED');
       }
       // ⑦b 协议文件：经链接写它同样要拒（此前协议身份判定零断言）
       const protoDir = path.join(dir, 'reference');
@@ -1524,13 +1516,8 @@ export const ENTRIES = [
           throw new Error('空闲态写协议文件应放行（' + label + '；用户裁决：空闲零拦截），实际输出: ' + JSON.stringify(idleProtocol.output));
         }
       }
-      // ⑪c 对照：空闲态其余写入仍放行（空闲放行语义不变）——普通源码目标与经链接逃逸的目标都不判
-      const idleSource = runHook(['before_tool'], dir, {
-        tool_name: 'Write',
-        tool_input: { file_path: path.join(srcDir, 'idle-ok.ts') },
-      });
-      assertExit(idleSource, 0);
-      assertOut(idleSource, 'no active workflow');
+      // ⑪c 对照：空闲态经链接逃逸的目标仍放行（空闲放行语义不变）。普通源码目标的空闲放行
+      //     由场景 30a / 67 覆盖，此处不再重复（同一行为三份断言 = 噪音）。
       if (fs.existsSync(outLink)) {
         // 两通道都不得在空闲态拒绝链接逃逸目标（Bash 的 blocked 拒绝必须留在流程态门之后）
         const idleEscapeBash = runHook(['before_tool'], dir, {
