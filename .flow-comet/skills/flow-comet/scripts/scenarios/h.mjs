@@ -1472,10 +1472,11 @@ export const ENTRIES = [
       assertExit(recovered, 0);
       assertOut(recovered, 'workflow-hook-guard-ok');
 
-      // ⑪ 保护集不受流程态门约束：空闲态写 state / 协议仍拒绝，其余写入保持放行（空闲放行语义不变）。
-      //    实测链条：删除 state 后守卫降为空闲 ⇒ 写协议、写源码、重建 state 全部放行 ⇒
-      //    可重建 executionMode=direct 的状态造成持久降级（机制文件的保护与"有没有活跃流程"无关）。
-      //    反向构造：把判定退回 currentNode 门内 ⇒ ⑪a / ⑪b 必红；把链接拒绝也移出流程态门 ⇒ ⑪c 必红。
+      // ⑪ 空闲态只保留一条拦截：state 文件（用户裁决：空闲零拦截，最多只拦 state）。
+      //    实测链条：删除 state 后守卫降为空闲；若连 state 也能写，就能重建
+      //    executionMode=direct 的状态造成持久降级。协议文件在空闲态放行（下次运行的协议由
+      //    人工/安装器通道维护）。反向构造：把状态判定退回 currentNode 门内 ⇒ ⑪b 必红；
+      //    把协议判定移出活跃流程门 ⇒ ⑪b 的协议放行用例必红；把链接拒绝移出流程态门 ⇒ ⑪c 必红。
       const stateTarget = path.join(dir, '.flow-comet', 'flow-comet-state.json');
       const protoTarget = path.join(dir, 'reference', 'workflow-protocol.json');
       // ⑪a 空闲态（state 在盘但无 activeChange / currentNode）+ 指向 state 的硬链接：
@@ -1502,17 +1503,25 @@ export const ENTRIES = [
       } else {
         console.error('SKIP: 空闲态保护集别名断言不适用（本机无法创建硬链接或文件符号链接）——未覆盖，不是通过');
       }
-      // ⑪b 无 state（空闲）时写 state / 协议同样拒绝——file_path 与 Bash 两通道同判
+      // ⑪b 无 state（空闲）时：写 state 仍拒绝（两通道同判）；写协议放行——空闲态零拦截，
+      //     最多只拦 state 文件（用户裁决）。反向构造：把协议判定移进活跃流程门 ⇒ 本条必红。
       fs.rmSync(stateTarget);
-      for (const [label, toolName, toolInput, marker] of [
-        ['state 文件（file_path）', 'Write', { file_path: stateTarget }, 'state 文件'],
-        ['state 文件（Bash）', 'Bash', { command: 'printf x > "' + posix(stateTarget) + '"' }, 'state 文件'],
-        ['协议文件（file_path）', 'Write', { file_path: protoTarget }, '协议文件'],
-        ['协议文件（Bash）', 'Bash', { command: 'printf x > "' + posix(protoTarget) + '"' }, '协议文件'],
+      for (const [label, toolName, toolInput] of [
+        ['state 文件（file_path）', 'Write', { file_path: stateTarget }],
+        ['state 文件（Bash）', 'Bash', { command: 'printf x > "' + posix(stateTarget) + '"' }],
       ]) {
         const idleProtected = runHook(['before_tool'], dir, { tool_name: toolName, tool_input: toolInput });
-        if (idleProtected.status !== 2 || !idleProtected.output.includes(marker)) {
-          throw new Error('空闲态写受保护目标应拒绝并点名（' + label + '），实际输出: ' + JSON.stringify(idleProtected.output));
+        if (idleProtected.status !== 2 || !idleProtected.output.includes('state 文件')) {
+          throw new Error('空闲态写 state 文件应拒绝并点名（' + label + '），实际输出: ' + JSON.stringify(idleProtected.output));
+        }
+      }
+      for (const [label, toolName, toolInput] of [
+        ['协议文件（file_path）', 'Write', { file_path: protoTarget }],
+        ['协议文件（Bash）', 'Bash', { command: 'printf x > "' + posix(protoTarget) + '"' }],
+      ]) {
+        const idleProtocol = runHook(['before_tool'], dir, { tool_name: toolName, tool_input: toolInput });
+        if (idleProtocol.status !== 0 || !idleProtocol.output.includes('no active workflow')) {
+          throw new Error('空闲态写协议文件应放行（' + label + '；用户裁决：空闲零拦截），实际输出: ' + JSON.stringify(idleProtocol.output));
         }
       }
       // ⑪c 对照：空闲态其余写入仍放行（空闲放行语义不变）——普通源码目标与经链接逃逸的目标都不判

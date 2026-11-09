@@ -920,10 +920,9 @@ async function main() {
   if (hookInput && typeof hookInput === 'object' && hookInput.tool_name === 'Bash') {
     const command = hookInput.tool_input && typeof hookInput.tool_input === 'object' ? hookInput.tool_input.command : null;
     const writeTargets = codexWriteTargetsFromCommand(command);
-    // 保护集（状态文件 / 本次运行生效的协议文件）**恒开**：机制文件的保护与"有没有活跃流程"
-    // 无关——否则删掉 state 文件就把保护集整体关掉（实测：删 state 后守卫降为空闲，写协议 /
-    // 写源码 / 重建 state 全部放行，可重建 executionMode=direct 的状态造成持久降级）。
-    // 其余判定仍只在活跃流程生效：链接/硬链拒绝、隔离区放行、白名单（空闲放行是既有语义）。
+    // 空闲态（无 state / 无 activeChange / completed）按既有语义零拦截，只保留一条例外：
+    // **状态文件**恒拦——否则删掉 state 文件就能重建 executionMode=direct 的状态造成持久降级。
+    // 协议文件、链接/硬链拒绝、隔离区放行与白名单仍只在活跃流程生效（用户裁决 2026-11-09）。
     if (writeTargets.length > 0) {
       for (const t of writeTargets) {
         const resolvedTarget = await resolveWriteTarget(t);
@@ -936,8 +935,11 @@ async function main() {
         ) {
           blockStateFileWrite(t);
         }
-        // 协议文件与状态文件同判：此前协议判定只加在 file_path 分支，同一个文件用 Bash
-        // 写（printf > / Remove-Item）能过——「同一路径不因所选工具而异」要求两通道同判。
+        // 空闲（无 state / 无 activeChange / completed）：只剩 state 文件一条拦截，其余与
+        // 既有 (no active workflow) 同语义——放行（用户裁决：空闲态零拦截）。
+        if (!currentNode) continue;
+        // 协议文件只在流程运行中拦（空闲态放行）；两通道同判——同一个文件用 Bash 写
+        //（printf > / Remove-Item）不得比 file_path 更宽（「同一路径不因所选工具而异」）。
         if (
           resolvedTarget &&
           (blockedProtocolFileTarget(resolvedTarget.absolute) ||
@@ -945,9 +947,6 @@ async function main() {
         ) {
           blockProtocolFileWrite(t);
         }
-        // 空闲（无 state / 无 activeChange / completed）：保护集已判过，其余判定与既有
-        // (no active workflow) 同语义——放行。
-        if (!currentNode) continue;
         if (resolvedTarget && resolvedTarget.blocked) {
           blockUnsafeWriteTarget(t, resolvedTarget.blockedReason, '命令写入');
         }
@@ -980,9 +979,9 @@ async function main() {
   // worktree 的早退只该豁免**白名单**（隔离区里写源码是设计意图），不该豁免保护集：
   // 实测「.claude/worktrees/ 下指向 state / 协议文件的硬链接」在协调者通道被放行，
   // 而同一硬链放在 .specs/ 下被拒——同一目标因所在目录而异。三处判定前置到早退之前。
-  // 链接/硬链的拒绝仍只在活跃流程生效（空闲放行是既有语义）；但 state / protocol 的
-  // 保护**恒开**——它们是机制文件，保护与"有没有活跃流程"无关（否则删掉 state 即可把
-  // 保护集整体关掉，实测可改写协议、重建 permissive state）。
+  // 链接/硬链的拒绝只在活跃流程生效（空闲放行是既有语义）；state 文件**恒拦**——否则删掉
+  // state 即可重建 permissive state（用户裁决 2026-11-09：空闲态零拦截，最多只拦 state）；
+  // 协议文件只在活跃流程拦。
   if (currentNode && fileTarget && fileTarget.blocked) {
     blockUnsafeWriteTarget(fileTarget.raw, fileTarget.blockedReason);
   }
@@ -996,8 +995,9 @@ async function main() {
       );
     }
     if (
-      blockedProtocolFileTarget(fileTarget.absolute) ||
-      (await isSameProtectedFileObject(fileTarget.absolute, protocolPath))
+      currentNode &&
+      (blockedProtocolFileTarget(fileTarget.absolute) ||
+        (await isSameProtectedFileObject(fileTarget.absolute, protocolPath)))
     ) {
       blockProtocolFileWrite(fileTarget.raw);
     }
