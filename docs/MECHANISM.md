@@ -137,7 +137,7 @@ The guard decides by identity, not by path: when the host marks the caller as a 
 | dsh | the platform's in-process subagent | none — the subagent shares the workspace | identity depth passed through the bridge together with its channel marker — **verified** |
 | Codex | native multi-agent sessions | shared workspace, or a tree the coordinator builds explicitly | payload `agent_id` — **verified** in an interactive session |
 
-Coverage is stated per row and stays that way: an uncovered item is not written as supported. The only platform difference left is who builds the tree. On a shared workspace the boundary comes from disjoint task write-sets, commit-time discipline and the minimal protected set.
+Coverage is stated per row and stays that way: an uncovered item is not written as supported. Within this delegation contract the only platform difference left is who builds the tree. On a shared workspace the boundary comes from disjoint task write-sets, commit-time discipline and the minimal protected set.
 
 ## Recovery
 
