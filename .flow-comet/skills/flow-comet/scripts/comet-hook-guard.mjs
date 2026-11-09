@@ -874,12 +874,13 @@ async function main() {
   }
   // Phase 写入控制：按运行时状态文件的 currentNode 检查写入目标是否在白名单内
   // state 文件读取失败时不阻断（state 可能不存在），继续执行后续安全检查
-  const stateFile = path.join(runRoot, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME);
+  // 机器状态文件的绝对路径（读取与保护集共用本表达式——各处不得再拼一遍）
+  const stateFileAbsolute = path.join(runRoot, ...STATE_FILE_REL.split('/'));
   let currentNode = null;
   let executionMode = 'subagent';
   let activeChange = null;
   try {
-    const stateContent = await fs.readFile(stateFile, 'utf8');
+    const stateContent = await fs.readFile(stateFileAbsolute, 'utf8');
     const state = JSON.parse(stateContent);
     currentNode = state.currentNode;
     executionMode = state.executionMode ?? 'subagent';
@@ -919,17 +920,20 @@ async function main() {
   if (hookInput && typeof hookInput === 'object' && hookInput.tool_name === 'Bash') {
     const command = hookInput.tool_input && typeof hookInput.tool_input === 'object' ? hookInput.tool_input.command : null;
     const writeTargets = codexWriteTargetsFromCommand(command);
-    if (writeTargets.length > 0 && currentNode) {
-      const whitelist = PHASE_WRITE_WHITELIST[currentNode];
-      // 声明模式未列出节点 → fail-closed(同 file_path 判定);缺省表无此节点 → 协调者默认 .specs/
-      const effectiveWhitelist = whitelist || (declared ? null : ['.specs/']);
+    // 保护集（状态文件 / 本次运行生效的协议文件）**恒开**：机制文件的保护与"有没有活跃流程"
+    // 无关——否则删掉 state 文件就把保护集整体关掉（实测：删 state 后守卫降为空闲，写协议 /
+    // 写源码 / 重建 state 全部放行，可重建 executionMode=direct 的状态造成持久降级）。
+    // 其余判定仍只在活跃流程生效：链接/硬链拒绝、隔离区放行、白名单（空闲放行是既有语义）。
+    if (writeTargets.length > 0) {
       for (const t of writeTargets) {
         const resolvedTarget = await resolveWriteTarget(t);
-        if (resolvedTarget && resolvedTarget.blocked) {
-          blockUnsafeWriteTarget(t, resolvedTarget.blockedReason, '命令写入');
-        }
         const targetRel = resolvedTarget ? resolvedTarget.targetRel : null;
-        if (targetRel !== null && blockedStateFileTarget(targetRel)) {
+        // 状态文件的两条判据并列（路径 + 物理身份）：硬链接是同一文件的第二个名字，路径前缀
+        // 看不见它（与身份通道的保护集判定同一个判据，不另写一份）。
+        if (
+          (targetRel !== null && blockedStateFileTarget(targetRel)) ||
+          (resolvedTarget && (await isSameProtectedFileObject(resolvedTarget.absolute, stateFileAbsolute)))
+        ) {
           blockStateFileWrite(t);
         }
         // 协议文件与状态文件同判：此前协议判定只加在 file_path 分支，同一个文件用 Bash
@@ -941,6 +945,12 @@ async function main() {
         ) {
           blockProtocolFileWrite(t);
         }
+        // 空闲（无 state / 无 activeChange / completed）：保护集已判过，其余判定与既有
+        // (no active workflow) 同语义——放行。
+        if (!currentNode) continue;
+        if (resolvedTarget && resolvedTarget.blocked) {
+          blockUnsafeWriteTarget(t, resolvedTarget.blockedReason, '命令写入');
+        }
         // worktree 隔离区放行(与 file_path 判定共用同一判定——同路径同结论);
         // 放行前置 = 物理包含性(词法命中但真实落点在区外 → 拒,不放行)
         if (targetRel !== null && isInsideAgentWorktree(targetRel)) {
@@ -950,6 +960,9 @@ async function main() {
             '恢复: 改用隔离区内的真实路径（隔离区放行仅限物理位于 <项目根>/.claude/worktrees/ 之下的写入）'
           );
         }
+        const whitelist = PHASE_WRITE_WHITELIST[currentNode];
+        // 声明模式未列出节点 → fail-closed(同 file_path 判定);缺省表无此节点 → 协调者默认 .specs/
+        const effectiveWhitelist = whitelist || (declared ? null : ['.specs/']);
         const allowed = targetRel !== null && effectiveWhitelist !== null && targetAllowed(targetRel, effectiveWhitelist, activeChange);
         if (!allowed) {
           hookBlock(
@@ -967,11 +980,13 @@ async function main() {
   // worktree 的早退只该豁免**白名单**（隔离区里写源码是设计意图），不该豁免保护集：
   // 实测「.claude/worktrees/ 下指向 state / 协议文件的硬链接」在协调者通道被放行，
   // 而同一硬链放在 .specs/ 下被拒——同一目标因所在目录而异。三处判定前置到早退之前。
-  if (currentNode && fileTarget) {
-    if (fileTarget.blocked) {
-      blockUnsafeWriteTarget(fileTarget.raw, fileTarget.blockedReason);
-    }
-    const stateFileAbsolute = path.join(runRoot, ...STATE_FILE_REL.split('/'));
+  // 链接/硬链的拒绝仍只在活跃流程生效（空闲放行是既有语义）；但 state / protocol 的
+  // 保护**恒开**——它们是机制文件，保护与"有没有活跃流程"无关（否则删掉 state 即可把
+  // 保护集整体关掉，实测可改写协议、重建 permissive state）。
+  if (currentNode && fileTarget && fileTarget.blocked) {
+    blockUnsafeWriteTarget(fileTarget.raw, fileTarget.blockedReason);
+  }
+  if (fileTarget) {
     if (
       (target !== null && blockedStateFileTarget(target)) ||
       (await isSameProtectedFileObject(fileTarget.absolute, stateFileAbsolute))
@@ -991,7 +1006,8 @@ async function main() {
   // ── worktree 隔离区放行（CC Agent isolation:"worktree"）────────────────────
   // 判定实现见 isInsideAgentWorktree + agentWorktreeWriteStaysIsolated（与上方 Bash 命令写入
   // 判定共用——同一路径不因工具而异）；词法命中但物理落点在区外 → 拒（fail-closed）。
-  if (isInsideAgentWorktree(target)) {
+  // 空闲态不进入：隔离区放行与它的穿越拒绝都只在活跃流程生效（空闲放行语义；与 Bash 分支逐条对齐）。
+  if (currentNode && isInsideAgentWorktree(target)) {
     if (!(await agentWorktreeWriteStaysIsolated(target))) {
       hookBlock(
         `BLOCKED: 写入 "${target}" 位于 worktree 隔离区但物理落点在区外（符号链接/junction 穿越）`,
@@ -1072,6 +1088,13 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error.message);
-  process.exit(1);
+  const detail = error && error.message ? error.message : String(error);
+  // 兜底必须是**阻塞**而不是普通错误：宿主只把 exit 2 当拒绝，其余非零退出码会被降级成
+  // 非阻断错误（实测：协议文件缺失时 exit 1 → 之后所有写入都不再被拦 = 整条防线关闭）。
+  // 与既有"解析失败 / 未知状态 fail-closed"同向：无法判定就不放行。拒绝通道复用 hookBlock
+  // （Codex = {"decision":"block"} + exit 0；CC = 文本 + exit 2）——否则 Codex 上仍会静默放行。
+  hookBlock(
+    'BLOCKED: 守卫无法完成判定（' + detail + '）',
+    '恢复: 确认本次运行使用的协议文件（技能包 reference/workflow-protocol.json，或 FLOW_COMET_PROTOCOL 指定的文件）与 .flow-comet/flow-comet-state.json 完好；必要时重跑安装器（prepare-env）修复技能副本，或用 workflow-state.mjs 修复状态',
+  );
 });
