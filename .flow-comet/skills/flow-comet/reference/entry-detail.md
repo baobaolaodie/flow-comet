@@ -208,7 +208,7 @@ All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT
 | `workflow-handoff.mjs` | 子代理交接：request/result/status |
 | `comet-plan.mjs` | 兼容别名入口（内容为 workflow-state 的别名壳） |
 | `comet-check.mjs` | workflow contract 检查 |
-| `comet-hook-guard.mjs` | 文件写入边界守卫（**身份判据先于路径判据**：载荷 `agent_id` / 桥接透传的 `delegationDepth` 在场 ⇒ 子代理语义放行；最小保护集 `.flow-comet/flow-comet-state.json` 与 `reference/workflow-protocol.json` 在身份在场时**仍拦**；无身份走 phase 白名单——subagent-execute 阶段只允许 .specs/，`.claude/worktrees/**` 前缀保留为兼容路径；`Write`/`Edit` 与 `Bash` 写命令两条判定路径同语义，runRoot 外一致拦截） |
+| `comet-hook-guard.mjs` | 文件写入边界守卫（**身份判据先于路径判据**：载荷 `agent_id` / 桥接透传的 `delegationDepth` 在场 ⇒ 子代理语义放行；最小保护集 `.flow-comet/flow-comet-state.json` 与 `reference/workflow-protocol.json` 在身份在场时**仍拦**，空闲态同样拦；无身份走 phase 白名单——subagent-execute 阶段只允许 .specs/，`.claude/worktrees/**` 前缀保留为兼容路径；`Write`/`Edit` 与 `Bash` 写命令两条判定路径同语义，runRoot 外一致拦截） |
 
 ### 机器拥有字段
 
