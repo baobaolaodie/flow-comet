@@ -446,19 +446,36 @@ export function composeState(overrides = {}) {
   };
 }
 
-// 完整 SUMMARY：六段齐全（## verify 输出 / ## 6 维自查 / ## 越界检查 / ## 做了什么 / ## 改动文件 / ## 自检方法）
-// 6 维自查默认含实质内容且声明 brooks-review；method='' 表示去掉 ## 自检方法 段（旧格式场景）
-// 结构子段与增量段按模板骨架补齐（`### 已知接受 + 理由` / `### 已知小问题` / `## LESSONS 扫描`）：
-// 这些 H3/增量段已成为新 change 的必填结构，夹具缺它们会被结构门当成工件缺陷而不是被测行为。
+// 完整 SUMMARY（**模板合规形态**：标题 + 首部 4 字段 + 模板段序 + 条件段标题在场）。
+// 单轨下模板保真对一切 change 生效，夹具必须是合规形态——否则被测门禁还没轮到，工件先被结构门
+// 拦下（夹具自身缺陷）。options.sixDim / options.method 可替换对应段体；method='' 表示去掉
+// ## 自检方法 段（旧格式场景，用于测「段标题必须在场」这一判据本身）。
 export function summaryContent(options = {}) {
   const sixDim = options.sixDim !== undefined
     ? options.sixDim
-    : '## 6 维自查\n\n- 功能: 通过（brooks-review 已跑）\n- 性能: 无影响\n- 安全: 无影响\n- 兼容: 通过\n- 可观测: 通过\n- 可维护: 通过\n\n### 已知接受 + 理由\n\n- 无（夹具）。\n\n### 已知小问题\n\n- 无（夹具）。';
+    : '## 6 维自查（生产代码改动必填 · 来自 4-dev 步骤 4）\n\n- 功能: 通过（brooks-review 已跑）\n- 性能: 无影响\n- 安全: 无影响\n- 兼容: 通过\n- 可观测: 通过\n- 可维护: 通过\n\n### 已知接受 + 理由（🟡 Major 项不修的）\n\n- 无（夹具）。\n\n### 已知小问题（🟢 Minor 项可省的）\n\n- 无（夹具）。';
   const method = options.method !== undefined ? options.method : '## 自检方法\n\nbrooks-review';
   return [
-    '# T01-SUMMARY',
+    '# SUMMARY: T01 - 实现 T01',
     '',
-    '## verify 输出',
+    '- **Change ID**: ' + CHANGE_ID,
+    '- **Task ID**: T01',
+    '- **完成时间**: 2026-08-01 10:00',
+    '- **AI 角色**: Dev',
+    '',
+    '---',
+    '',
+    '## 做了什么（一段话）',
+    '',
+    '实现 T01。',
+    '',
+    '## 改动文件',
+    '',
+    '| 文件 | 性质 | 说明 |',
+    '|---|---|---|',
+    '| src/t1.mjs | 修改 | 实现 T01 |',
+    '',
+    '## verify 输出（必填）',
     '',
     '```',
     'node --check src/t1.mjs',
@@ -466,17 +483,29 @@ export function summaryContent(options = {}) {
     '',
     sixDim,
     '',
-    '## 越界检查',
+    '## 数据库迁移（涉及 schema 变更必填 · 来自 4-dev 步骤 1.7 / R4.5）',
+    '',
+    'N/A：本任务无 schema 变更。',
+    '',
+    '## 越界检查（必填 · 来自 4-dev 步骤 5 / R6.5 / B3 老项目护栏）',
     '',
     '仅修改 src/t1.mjs，无越界。',
     '',
-    '## 做了什么',
+    '## 破坏性变更（涉及破坏性改动必填 · 来自 4-dev 步骤 1.8 / R4.6 / B4 老项目护栏）',
     '',
-    '实现 T01。',
+    'N/A：本任务不涉及破坏性变更。',
     '',
-    '## 改动文件',
+    '## 决策与偏离（如有）',
     '',
-    '- src/t1.mjs',
+    '无。',
+    '',
+    '## 是否触发新工作',
+    '',
+    '无。',
+    '',
+    '## 完成判定',
+    '',
+    '- TASK.md 中对应任务已勾选：是',
     '',
     method,
     '',
@@ -744,11 +773,141 @@ export function renderMultiWaveTasks(doneIds = []) {
     '</task>\n').join('');
 }
 
+// 前序产物的**模板合规**文本（单一构造点）：标题形态 + 首部字段 + 各段非空正文。
+// 单轨下模板保真对一切 change 生效（段标题必须在场、正文不得为空），夹具必须给出合规形态——
+// 否则被测门禁还没轮到，工件先被结构门拦下（夹具自身缺陷）。
+export function intakeChangeText() {
+  return [
+    '# CHANGE: 夹具 change',
+    '',
+    '- **Change ID**: ' + CHANGE_ID,
+    '- **创建日期**: 2026-08-01',
+    '- **路径建议**: 中等',
+    '- **状态**: active',
+    '',
+    '---',
+    '',
+    '## Why（为什么做）',
+    '',
+    '夹具：说明为什么做。',
+    '',
+    '## What（做什么）',
+    '',
+    '夹具：说明做什么。',
+    '',
+    '## 影响面',
+    '',
+    '- [x] 仅修复 bug，无范围变化',
+    '',
+    '## 范围排除（这次不做）',
+    '',
+    '- 夹具不做的项。',
+    '',
+    '## 验收线（粗粒度，不是 AC）',
+    '',
+    '- 夹具验收线。',
+    '',
+    '## 风险与未知',
+    '',
+    '- 无',
+    '',
+  ].join('\n');
+}
+
+export function intakeRequirementText() {
+  return [
+    '# REQUIREMENT: 夹具 change',
+    '',
+    '- **Change ID**: ' + CHANGE_ID,
+    '- **关联**: `@.specs/' + CHANGE_ID + '/CHANGE.md`',
+    '',
+    '---',
+    '',
+    '## 用户故事',
+    '',
+    '- **US-1**：作为执行者，我想让夹具成立，以便门禁可判。',
+    '',
+    '## 验收准则（AC）',
+    '',
+    '### AC-1 · 夹具准则',
+    '',
+    '- **Given** 前置',
+    '- **When** 动作',
+    '- **Then** 结果',
+    '- **验证方式**: 夹具',
+    '',
+    '---',
+    '',
+    '## 范围切分',
+    '',
+    '### v1（本次必做）',
+    '',
+    '- 夹具。',
+    '',
+    '### v2（下一轮考虑，不本次）',
+    '',
+    '- 无',
+    '',
+    '### out（永远不做）',
+    '',
+    '- 无',
+    '',
+    '---',
+    '',
+    '## 非功能性需求',
+    '',
+    '- **性能**: 无',
+    '- **安全**: 无',
+    '- **兼容性**: 无',
+    '- **可观测性**: 无',
+    '',
+    '## 依赖与假设',
+    '',
+    '- 无',
+    '',
+  ].join('\n');
+}
+
+export function intakeDesignText() {
+  return [
+    '# DESIGN: 夹具 change',
+    '',
+    '- **Change ID**: ' + CHANGE_ID,
+    '- **关联**: `@.specs/' + CHANGE_ID + '/REQUIREMENT.md`',
+    '- **作者**: 夹具',
+    '',
+    '---',
+    '',
+    '## 0. 技术栈选定',
+    '',
+    '- **选定**：Node.js（ESM）',
+    '',
+    '## 1. 决策清单',
+    '',
+    '| # | 决策 | 备选 | 理由 | 代价 |',
+    '|---|---|---|---|---|',
+    '| D1 | 夹具决策 | 无 | 夹具 | 无 |',
+    '',
+    '## 2. 数据流 / 架构图',
+    '',
+    '夹具：无数据流。',
+    '',
+    '## 5. 风险',
+    '',
+    '- 无',
+    '',
+    '## 6. 不在范围',
+    '',
+    '- 无',
+    '',
+  ].join('\n');
+}
+
 // 多波 next 断言公共材料：前序产物文件（open/design/plan 的产物门控按文件推导）
 export function writeIntakeArtifacts(dir) {
-  writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n\nx');
-  writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\nx\n\n## 验收准则（AC）\n\n- Given x When y Then z');
-  writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n## 0. 技术栈\n\nNode\n\n## 决策清单\n\n| # | D | R |\n|---|---|---|\n| D1 | x | y |');
+  writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', intakeChangeText());
+  writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', intakeRequirementText());
+  writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', intakeDesignText());
 }
 
 // ---------- 位置迁移 / 备份 / 感知层剥离场景材料 ----------

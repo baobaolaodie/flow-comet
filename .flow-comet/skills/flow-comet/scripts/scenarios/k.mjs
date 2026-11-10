@@ -371,7 +371,6 @@ export const ENTRIES = [
     run: (dir) => {
       writeReentryChangeDir(dir);
       const legacyState = reentryArchiveState();
-      delete legacyState.newChange;
       writeState(dir, legacyState);
       const blockedBytes = readStateBytes(dir);
       const resBlocked = runReenter(dir, 'verify');
@@ -636,7 +635,6 @@ export const ENTRIES = [
         // ① plan 出口（既有判定路径）对同一输入的机器分类
         const planState = baseState('plan');
         planState.evidence.plan = { summary: 'plan done' };
-        planState.newChange = true;
         writeState(dir, planState);
         const planRes = runPlanExit(dir, taskContent);
         assertExit(planRes, 1);
@@ -950,7 +948,6 @@ export const ENTRIES = [
       //    修复族对 → exit 0 且不出现该族消息（BLOCKED / WARN 两形态都不许有）。
       const crossState = baseState('plan');
       crossState.evidence.plan = { summary: 'plan done' };
-      crossState.newChange = true;
       writeState(dir, crossState);
       const plainRes = runPlanExit(dir, CROSS_TASK_PLAIN_PAIR);
       assertExit(plainRes, 1);

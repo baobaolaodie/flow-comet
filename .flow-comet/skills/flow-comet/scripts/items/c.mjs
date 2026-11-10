@@ -43,7 +43,6 @@ export const ENTRIES = [
       assertNotOut(result, 'HANDOFF WARN');
       // 新 change 提交越界(writeFiles 范围外文件)→ BLOCKED(记录时校验)
       const stForP4 = readStateFile(dir);
-      stForP4.newChange = true;
       writeState(dir, stForP4);
       writeFile(dir, 'src/evil.mjs', 'export const evil = 1;\n');
       execFileSync('git', ['add', 'src/evil.mjs'], { cwd: dir });
@@ -102,7 +101,6 @@ export const ENTRIES = [
       // ⑦ 零提交正式语义：write_files 为空 + 显式零提交 → 跳过提交子集校验 + 可审计提示；
       //    write_files 非空 + 声称 noCommit → 仍完整提交子集校验（不可借零提交绕过越界检查）
       const stEmpty = readStateFile(dir);
-      stEmpty.newChange = true;
       writeState(dir, stEmpty);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="T05" status="pending"><action>无边界任务</action><write_files></write_files><verify>echo ok</verify></task>\n');
       assertExit(runHandoff(['request', 'T05'], dir), 0);
@@ -117,7 +115,6 @@ export const ENTRIES = [
       assertOut(resZero, '零提交');
       // ⑦b 零提交滥用负例：write_files 非空 + 契约声称 noCommit → 仍完整校验（越界 BLOCK + 矛盾提示）
       const stNonEmpty = readStateFile(dir);
-      stNonEmpty.newChange = true;
       writeState(dir, stNonEmpty);
       writeFile(dir, 'src/rogue-zero.mjs', 'export const rogue = 1;\n');
       execFileSync('git', ['add', 'src/rogue-zero.mjs'], { cwd: dir });
@@ -202,7 +199,6 @@ export const ENTRIES = [
         + '<write_files>.specs/' + CHANGE_ID + '/T12-SUMMARY.md</write_files>'
         + '<verify>echo ok</verify></task>\n');
       const stIgnored = readStateFile(dir);
-      stIgnored.newChange = true;
       writeState(dir, stIgnored);
       const reqIgnored = runHandoff(['request', 'T12'], dir, { FLOW_COMET_PROTOCOL: '' });
       assertExit(reqIgnored, 0);
@@ -259,7 +255,6 @@ export const ENTRIES = [
       const stParallel = readStateFile(dir);
       stParallel.currentNode = 'subagent-execute';
       stParallel.enteredNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute'];
-      stParallel.newChange = true;
       writeState(dir, stParallel);
       const parallelEnv = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       const reqParallel = runHandoff(['request', 'P16', '并行零提交任务委托'], dir, parallelEnv);
@@ -324,7 +319,6 @@ export const ENTRIES = [
           verifyFailures: 0,
           executionMode: 'subagent',
           directOverride: false,
-          newChange: true,
         });
         const reqNonGit = runHandoff(['request', 'T16', '--write-files', '.specs/' + CHANGE_ID + '/x.md'], nonGitRoot,
           { GIT_CEILING_DIRECTORIES: os.tmpdir() });
@@ -348,7 +342,6 @@ export const ENTRIES = [
         verifyFailures: 0,
         executionMode: 'subagent',
         directOverride: false,
-        newChange: true,
       });
       writeIntakeArtifacts(dir);
       writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md',

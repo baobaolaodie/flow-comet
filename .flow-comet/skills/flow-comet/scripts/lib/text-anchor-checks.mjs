@@ -966,10 +966,25 @@ export function vocabularyMirrorProblems(root = REPO_ROOT) {
   return problems;
 }
 
+// 「自动补写」表述判据（新口径）：技能文本不得承诺自动补写（record 自动补写已整体删除，
+// 唯一路径是执行者手动 skill-load）。判据是声明级、不做语义判断：任何一行出现「自动补」
+// 却没有任何否定词（不 / 未 / 禁 / 无）→ 视为承诺自动补写；明确否定（「不再自动补写」
+// 「不覆盖 handoff scope」）与说明其不存在的写法放行。判别力由场景 167 的反向构造常驻证明
+// （追加一行无条件承诺必被判违规）。
+export function autoFillPromiseProblems(rel, text) {
+  const out = [];
+  for (const line of text.split('\n')) {
+    if (!line.includes('自动补')) continue;
+    if (/[不未禁无]/.test(line)) continue;
+    out.push(rel + ' 含自动补写承诺表述: ' + line.trim().slice(0, 80));
+  }
+  return out;
+}
+
 export function twoLayerEntryProblems(rel, text) {
   const out = [];
   if (text.includes('见上方 Required Calls 表')) out.push(rel + ' 含 Implementation/Required 混淆句式');
-  if (text.includes('record 会自动补写缺失的声明标记')) out.push(rel + ' 含无限定自动补表述');
+  out.push(...autoFillPromiseProblems(rel, text));
   if (!text.includes('Skill 工具加载该节点的 Implementation 技能')) out.push(rel + ' 缺入口层锚点句');
   if (!text.includes('前置门')) out.push(rel + ' 缺前置门表述');
   return out;
@@ -2427,7 +2442,7 @@ export function writeUiDesignBindingVariant(dir, variant) {
 }
 
 export function writeDesignExitFixture(dir, {
-  newChange, visualTone, uiDesign, declareUiDesign, changeName = CHANGE_ID, changeTail = '', declareDesign = true,
+  visualTone, uiDesign, declareUiDesign, changeName = CHANGE_ID, changeTail = '', declareDesign = true,
 }) {
   writeFile(dir, 'flow-kit/templates/DESIGN.md', '# DESIGN 模板\n\n## 0. 技术栈选型\n## 1. 技术决策清单\n');
   // CHANGE 模板同样在场：design 出口的前端判据用 `pick('change', ['视觉调性'])` 在**模板派生**的段名表里
@@ -2435,7 +2450,6 @@ export function writeDesignExitFixture(dir, {
   // （模板缺席下的跳过另由 TA-21 覆盖）。
   writeFile(dir, 'flow-kit/templates/CHANGE.md', '# CHANGE 模板\n\n## Why（为什么做）\n\n## 视觉调性（前端项目必填）\n');
   const state = baseState('design');
-  state.newChange = newChange === true;
   state.enteredNodes = ['design'];
   const checks = [];
   if (declareDesign) checks.push('required-skill:design.flow-comet-design');

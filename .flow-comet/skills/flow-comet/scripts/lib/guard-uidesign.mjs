@@ -20,7 +20,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { runRoot, fileExists } from './guard-state-io.mjs';
-import { isNewChange, templateSectionPatterns, TEMPLATE_FALLBACK_SECTION_PATTERNS } from './guard-routing.mjs';
+import { templateSectionPatterns, TEMPLATE_FALLBACK_SECTION_PATTERNS } from './guard-routing.mjs';
 import { assessArtifact, evaluateArtifact, reportArtifactStructure } from './guard-template-fidelity.mjs';
 // 段界（下一个二级标题 / 文末）取 lib/section-body.mjs 的唯一实现：围栏代码块里的 `## ` 是正文示例。
 import { sectionBody } from './section-body.mjs';
@@ -49,7 +49,7 @@ const TONE_MARKER_FIELD_VALUE = new RegExp(String.raw`(?:^|[\s|])(?:\*\*)?(?:`
 
 // 「视觉调性」段读取四态（区分「CHANGE.md 不存在」「模板整份缺失」「段缺席」「段在场」——四者判据
 // 不同：文件不存在时本门没有输入，交给其余门禁处理；模板整份缺失时段名无从派生（no-basis，按
-// 「未校验」显式跳过）；段缺席才按 newChange 分级，C10）。
+// 「未校验」显式跳过）；段缺席由适用性门控按「未显式标注」拦下）。
 async function visualToneSectionState(changeName) {
   if (!changeName) return { state: 'file-missing', body: null };
   let text;
@@ -159,13 +159,9 @@ export async function checkUiDesignArtifact(node, state) {
     // 要求执行者显式写「不适用」（缺席与声明不适用是两件事，只有后者是决策）。
     const toneRecovery = '在 .specs/' + state.activeChange + '/CHANGE.md 的「视觉调性」段填写选定调性，'
       + '或以结构形态标注「不适用」（非前端项目），然后重试 exit design';
-    if (isNewChange(state)) {
-      console.error('BLOCKED: CHANGE.md 的「视觉调性」段缺席——新 change 须显式标注「不适用」或填写调性（段缺席不再默认判非前端）');
-      console.error('恢复: ' + toneRecovery);
-      process.exit(1);
-    }
-    console.error('UI-DESIGN: skipped（旧 change 兼容）——「视觉调性」段缺席，沿用旧口径判非前端');
-    return;
+    console.error('BLOCKED: CHANGE.md 的「视觉调性」段缺席——须显式标注「不适用」或填写调性（段缺席不默认判非前端）');
+    console.error('恢复: ' + toneRecovery);
+    process.exit(1);
   }
   if (!frontend.applicable) {
     console.error('UI-DESIGN: skipped（非前端）——' + frontend.reason + '，不要求 UI-DESIGN.md');
@@ -192,11 +188,7 @@ export async function checkUiDesignArtifact(node, state) {
   }
   const recovery = '补 .specs/' + state.activeChange + '/UI-DESIGN.md（加载 ' + UI_DESIGN_SKILL + ' 并按其协议产出 design token / 反 AI-slop 自检），'
     + '或在 .specs/' + state.activeChange + '/CHANGE.md 的「视觉调性」段以结构形态标注「不适用」（非前端项目）后重试 exit design';
-  if (isNewChange(state)) {
-    console.error('BLOCKED: design 出口缺 UI-DESIGN.md——' + frontend.reason + '，前端项目须产出 UI-DESIGN.md');
-    console.error('恢复: ' + recovery);
-    process.exit(1);
-  }
-  console.error('UI-DESIGN WARN: 缺 .specs/' + state.activeChange + '/UI-DESIGN.md——' + frontend.reason + '（旧 change 渐进不阻断；新 change 将强制）');
+  console.error('BLOCKED: design 出口缺 UI-DESIGN.md——' + frontend.reason + '，前端项目须产出 UI-DESIGN.md');
   console.error('恢复: ' + recovery);
+  process.exit(1);
 }

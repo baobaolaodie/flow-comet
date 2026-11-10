@@ -10,15 +10,14 @@ import { route, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackDecisio
 import { taskOpeningAttrs, taskBlocks } from '../task-parsing.mjs';
 import {
   NODE_PROTOCOL_FILES,
-  SKILL_PROTOCOL_FILES,
   declarationSkillTargets,
   inspectWorkflowPathSegments,
 } from '../protocol-utils.mjs';
-import { evidencePayloadProblems, looksLikeObjectLiteral, toPersistedProtocolPath, writeJsonAtomic } from '../state-schema.mjs';
+import { evidencePayloadProblems, looksLikeObjectLiteral, toPersistedProtocolPath } from '../state-schema.mjs';
 import { nowTimestamp } from '../time-utils.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide } from '../context-init.mjs';
 import { fileExists, findActiveChange, readState, writeState, specsDir, runRootDir, hasExactSpecsEntry } from './state-io.mjs';
-import { hasNodeSkillDeclaration, verifySkillLoadMarkers, findSkillLoadsDir, verifyTemplateDeclaration } from './state-skillmarkers.mjs';
+import { hasNodeSkillDeclaration, verifySkillLoadMarkers, verifyTemplateDeclaration } from './state-skillmarkers.mjs';
 import { determineNode, normalAdvanceExempt } from './state-determine.mjs';
 import { isInsideWorkTree, gitBranchName, branchExists, printBranchLine } from './state-branch.mjs';
 import { printEvolveDueHint } from './state-evolve-hint.mjs';
@@ -493,9 +492,7 @@ export async function runInit(protocol, argv, protocolPath) {
     enablePrReview: false,
     branchPrefix,
     status: 'running',
-    // 新 change 标记——init 即新 change(严格模式开启,不依赖 entry;旧 change 无此字段渐进兼容)
-    newChange: true,
-    // 进入证据容器——entry 追加节点;未 entry 检测(新 change 强制)
+    // 进入证据容器——entry 追加节点;未 entry 检测强制
     enteredNodes: [],
     createdAt: new Date().toISOString(),
     // 项目级上下文字段跨 change 保留（迁移旧 state；--init-context 刷新扫描时间；--init-skip 记拒绝）
@@ -612,9 +609,7 @@ export async function runStatus(protocol) {
     // 与 routeNode 同一判定（One predicate）：本键回答「协调者模式是否生效」，必须指向路由视图
     // 那个节点——若另取产物推导，进行中态会在同一响应里给出两个「当前节点」口径（routeNode=
     // execute 而 coordinatorMode=false）。既有键名/类型/位置不变，只换判定来源。
-    coordinatorMode: EXECUTE_FAMILY_NODE_IDS.has(nodeView.routeNode),
-    // 新旧 change 标记——newChange true = 新 change(严格模式);false/缺失 = 旧 change(渐进)
-    newChange: state.newChange === true
+    coordinatorMode: EXECUTE_FAMILY_NODE_IDS.has(nodeView.routeNode)
   }, null, 2));
   console.log('ROUTE: ' + formatRouteLine(nodeView));
   printBranchLine(changeName, state.branchPrefix ?? 'change/');
@@ -751,7 +746,7 @@ export async function runSelect(protocol, argv) {
   return;
 }
 
-// record <node> <payload>：写证据（技能加载声明标记校验 + 前置门 + 旧 change 自动补写）
+// record <node> <payload>：写证据（技能加载声明标记校验 + 前置门）
 export async function runRecord(protocol, argv) {
   const nodeId = argv[3];
   if (!nodeId) throw new Error('record requires a Node id.');
@@ -886,73 +881,25 @@ export async function runRecord(protocol, argv) {
           context: declarationContext,
         }).map((entry) => entry.command).join('\n  ')
         + '\n然后重试 record';
-      if (state.newChange === true) {
-        console.error('BLOCKED: 节点 ' + nodeId + ' 缺少技能加载声明标记（.skill-loads/' + nodeId + '-*.json）——' + loadGuide);
-        process.exit(1);
-      }
-      console.error('WARN: 节点 ' + nodeId + ' 缺少技能加载声明标记（.skill-loads/' + nodeId + '-*.json）——' + loadGuide + '（旧 change 渐进不阻断，记录继续）');
+      console.error('BLOCKED: 节点 ' + nodeId + ' 缺少技能加载声明标记（.skill-loads/' + nodeId + '-*.json）——' + loadGuide);
+      process.exit(1);
     }
-    // 模板声明核对（C11）——声明标记里必须有与该节点映射一致的 templates 集合：新 change
-    // 缺失 / 多写 / 漏写 / 错名 BLOCK（fail-closed，不让人「声明了但说得不对」），旧 change WARN。
+    // 模板声明核对（C11）——声明标记里必须有与该节点映射一致的 templates 集合：缺失 / 多写 /
+    // 漏写 / 错名 BLOCK（fail-closed，不让人「声明了但说得不对」）。
     // 自定义协议节点不比对（C12）；无活动 change / 声明机制未激活时不在这里报（见该函数的边界注释）。
     const templateCheck = await verifyTemplateDeclaration({
       protocol,
       nodeId,
       changeName: markerChange,
-      newChange: state.newChange === true,
       commandContext: declarationContext,
     });
-    if (templateCheck.warn) console.error('WARN: ' + templateCheck.warn);
     if (!templateCheck.ok) {
       console.error('BLOCKED: ' + templateCheck.reason);
       process.exit(1);
     }
   }
-  // 声明自动化——record 时按协议 requiredSkillCalls 自动补写缺失的声明标记
-  // (执行者无需手动 skill-load;标记如实记录"节点完成即视为其实现/协议技能已加载",
-  // 由 record 代记;与手动 skill-load 标记同体系,exit 协议声明校验共用)
-  // 新 change 下 required 条目停用自动补写(手动声明唯一路径,否则抵消前置门);
-  // 旧 change 保留兜底(渐进兼容)。
-  if (recordNodeDef && markerChange && state.newChange !== true) {
-    const recordProtoFiles = NODE_PROTOCOL_FILES[nodeId] ?? [];
-    // 标记目录解析:活动路径优先;change 已归档(活动目录不存在但归档目录存在)
-    // 时写归档路径——防重建已归档的活动目录(归档移动语义;与 findSkillLoadsDir 双路径一致)。
-    // 跳过条件:活动与归档均无 .skill-loads **且活动 change 目录已不存在**(归档移动后)
-    // ——此时 writeJsonAtomic 的 mkdir recursive 会把已归档的活动目录残留回来;
-    // 活动 change 目录仍存在(正常流程)时创建 .skill-loads 子目录是自动补写的正常职责,不跳过
-    const activeLoadsDir = path.join(specsDir(), markerChange, '.skill-loads');
-    let targetLoadsDir = activeLoadsDir;
-    if (!(await fileExists(activeLoadsDir))) {
-      const archived = await findSkillLoadsDir(markerChange);
-      if (archived !== null && archived.dir !== activeLoadsDir) {
-        targetLoadsDir = archived.dir;
-      } else if (archived === null && !(await fileExists(path.join(specsDir(), markerChange)))) {
-        targetLoadsDir = null;
-      }
-    }
-    if (targetLoadsDir !== null) {
-      for (const binding of recordNodeDef.requiredSkillCalls ?? []) {
-        // handoff scope 技能由子代理加载(协调者不声明)——不自动补协调者标记
-        if (binding.scope === 'handoff') continue;
-        const markerFile = path.join(targetLoadsDir, nodeId + '-' + binding.skill + '.json');
-        let markerExists = false;
-        try { await fs.access(markerFile); markerExists = true; } catch { /* 标记不存在 */ }
-        if (!markerExists) {
-          // 自动补的 protocol 字段按 skill 归属协议文件(如 open 的 requirement 标记应写
-          // 1-requirement.md 而非节点首文件 0-change.md——所有 skill 都写首文件会让
-          // 标记的协议归属语义错误;exit 校验只查归属集合故能通过,但标记不可信)
-          const skillProtoFiles = SKILL_PROTOCOL_FILES[binding.skill] ?? [];
-          await writeJsonAtomic(markerFile, {
-            node: nodeId,
-            skill: binding.skill,
-            protocol: skillProtoFiles.length > 0 ? skillProtoFiles[0] : null,
-            at: recordedAt,
-            auto: true,
-          });
-        }
-      }
-    }
-  }
+  // 声明标记的唯一写入通道 = 执行者手动 skill-load（本命令不代记任何标记）：缺声明在上一道
+  // 前置门已 BLOCKED，走到这里说明声明齐备。
   state.evidence[nodeId] = {
     ...(state.evidence[nodeId] || {}),
     ...parsed,

@@ -844,7 +844,6 @@ export const ENTRIES = [
       // 旧 change 形态（无新 change 标记）：同形态仅 WARN 渐进不阻断，恢复指引仍在
       planTask(C1 + sameFilePairNoDeps + fixPair);
       const sameFileState = readStateFile(dir);
-      delete sameFileState.newChange;
       writeState(dir, sameFileState);
       const sameFileWarn = exitPlanNoApply();
       assertExit(sameFileWarn, 0);
@@ -852,7 +851,7 @@ export const ENTRIES = [
       assertOut(sameFileWarn, '同文件跨任务且无依赖路径');
       assertOut(sameFileWarn, 'X1×X2');
       assertNotOut(sameFileWarn, 'BLOCKED');
-      writeState(dir, { ...sameFileState, newChange: true });
+      writeState(dir, { ...sameFileState });
       // 恢复：按指引补显式 depends_on，且 **P02 保持写原重叠路径 bak_a.txt**
       // （不改路径避开重叠）——证明「补 depends_on 解决原重叠」而非「改路径避开重叠」；补依赖后
       // P02 跨趟（dep 未满足，不在本趟可运行集合）→ 同波次并行对只剩 P01 → 重叠消失 → 同出口通过。

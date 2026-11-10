@@ -273,13 +273,9 @@ async function revalidateResultZeroCommit(state, taskId, handoffReq) {
   const revokedAtMs = parseTimestamp(handoffReq.revokedAt);
   const revokedAtDisplay = Number.isNaN(revokedAtMs) ? String(handoffReq.revokedAt) : formatLocalTimestamp(revokedAtMs);
   const detail = '任务 ' + taskId + ' 零提交资格 result 重验失败（' + reasonText + '）——request evidence noCommit=false, revokedAt=' + revokedAtDisplay + ', revokeReason=' + verdict.reason;
-  if (state.newChange === true) {
-    // 新 change 只落 request 资格撤销；此刻尚未默认 handoffResult，确保「不落 result」不是文案承诺
-    console.error('HANDOFF ERROR: ' + detail + '；新 change 不落 result，出口校验不再豁免缺 commitHash。恢复: 修正 write_files / .gitignore 与路径形态后重新 request，或回传含合法 commitHash 的 Return Contract');
-    return 'block';
-  }
-  console.error('HANDOFF WARN: ' + detail + '（旧 change 渐进，继续记录 result；出口校验不再豁免缺 commitHash）');
-  return 'warn';
+  // 只落 request 资格撤销；此刻尚未默认 handoffResult，确保「不落 result」不是文案承诺
+  console.error('HANDOFF ERROR: ' + detail + '；不落 result，出口校验不再豁免缺 commitHash。恢复: 修正 write_files / .gitignore 与路径形态后重新 request，或回传含合法 commitHash 的 Return Contract');
+  return 'block';
 }
 
 async function readState() {
@@ -450,12 +446,8 @@ function reportRequestOwnership(state, taskId, taskAttrs, ownership) {
       + ' record + exit（退出后路由会自动前进），不要在未 exit 前 entry 目标节点；随后运行 workflow-state next，'
       + '按输出的 NODE 进入；若输出 execute 表示依赖未满足'
       + '（该任务当前按串行消化），待任务变为可委托（next 输出对应委托节点）后再 request';
-    if (state.newChange === true) {
-      console.error('BLOCKED: ' + detail + '——' + guide + '；本次请求未写入 state，也未记录 handoffRequests');
-      process.exit(1);
-    }
-    console.error('WARN: ' + detail + '（旧 change 渐进不阻断，请求照常记录）——' + guide);
-    return;
+    console.error('BLOCKED: ' + detail + '——' + guide + '；本次请求未写入 state，也未记录 handoffRequests');
+    process.exit(1);
   }
   if (ownership.verdict === 'mismatch') {
     const detail = '任务 ' + taskId + '（' + kind + ' pending）应归属节点 '
@@ -469,12 +461,8 @@ function reportRequestOwnership(state, taskId, taskAttrs, ownership) {
       + '：等当前节点 exit 后，再用 workflow-state entry ' + ownership.targetNode
       + ' 或 workflow-guard entry ' + ownership.targetNode + '）'
       + '；随后用 workflow-state next 查看当前路由并按 NODE 输出确认';
-    if (state.newChange === true) {
-      console.error('BLOCKED: ' + detail + '——' + guide + '；本次请求未写入 state，也未记录 handoffRequests');
-      process.exit(1);
-    }
-    console.error('WARN: ' + detail + '（旧 change 渐进不阻断，请求照常记录）——' + guide);
-    return;
+    console.error('BLOCKED: ' + detail + '——' + guide + '；本次请求未写入 state，也未记录 handoffRequests');
+    process.exit(1);
   }
   if (ownership.verdict === 'not-entered') {
     console.error('WARN: 任务 ' + taskId + ' 的归属节点 ' + ownership.targetNode
@@ -604,11 +592,8 @@ async function main() {
       const declared = await hasNodeSkillDeclaration(requestNode, state.activeChange);
       if (!declared) {
         const loadGuide = await requestSkillDeclarationGuide(requestNode, state);
-        if (state.newChange === true) {
-          console.error('BLOCKED: 节点 ' + requestNode + ' 缺少技能加载声明标记（.skill-loads/' + requestNode + '-*.json）——' + loadGuide);
-          process.exit(1);
-        }
-        console.error('WARN: 节点 ' + requestNode + ' 缺少技能加载声明标记（.skill-loads/' + requestNode + '-*.json）——' + loadGuide + '（旧 change 渐进不阻断）');
+        console.error('BLOCKED: 节点 ' + requestNode + ' 缺少技能加载声明标记（.skill-loads/' + requestNode + '-*.json）——' + loadGuide);
+        process.exit(1);
       }
     }
     // W2-D: 可选 --write-files 记录该 task 允许写入的文件列表（含 glob），供 result 的提交文件子集校验
@@ -655,11 +640,8 @@ async function main() {
     }
     if (!taskResolved) {
       const msg = '委托任务不可解析：TASK.md 缺失、无匹配 <task id=' + taskId + '> 或任务缺 <write_files> 元素——无法判定零提交语义；修正 TASK.md 后重试';
-      if (state.newChange === true) {
-        console.error('BLOCKED: ' + msg);
-        process.exit(1);
-      }
-      console.error('WARN: ' + msg + '（旧 change 渐进，不阻断，不记录 noCommit）');
+      console.error('BLOCKED: ' + msg);
+      process.exit(1);
     }
     // 开工前的 LESSONS 命中集（只读；与出口同一份命中算法）——放在归属门禁之前：request 不写 state，
     // 但执行者仍要看得到「当前任务要回应哪几条」（state 字节零改写由同一路径保证）。
@@ -793,13 +775,9 @@ async function main() {
         '恢复: 先照抄下面的命令记录委托（description 可省略，缺省即 pending），再重录 result：',
         '      ' + requestRecoveryCommand(taskId),
       ].join('\n');
-      if (state.newChange === true) {
-        console.error('BLOCKED: 任务 ' + taskId + ' 的 ' + missingRequest + '；本次 result 未写入 state');
-        console.error(requestRecovery);
-        process.exit(1);
-      }
-      console.error('HANDOFF WARN: ' + taskId + ' 的 ' + missingRequest + '（旧 change 渐进，不阻断）');
+      console.error('BLOCKED: 任务 ' + taskId + ' 的 ' + missingRequest + '；本次 result 未写入 state');
       console.error(requestRecovery);
+      process.exit(1);
     }
     // 已撤回 = 终态（撤回通道的闭合半边）：撤回后的 request 不再接受 result——否则被撤回的委托
     // 可被事后「复活」，撤回语义与守卫的放行判据（同一判据）分叉。要重新委托该任务须重新 request
@@ -846,11 +824,8 @@ async function main() {
           console.error('HANDOFF WARN: ' + taskId + ' 零提交提交对象不可校验——按确认提示语义不阻断');
         } else if (committed.length > 0) {
           const msg = taskId + ' 声明零提交但提交携带 tracked 文件: ' + committed.join(', ');
-          if (state.newChange === true) {
-            console.error('BLOCKED: ' + msg + '——回退越界文件或改按常规任务申报 write_files');
-            process.exit(1);
-          }
-          console.error('HANDOFF WARN: ' + msg + '（旧 change 渐进，不阻断）');
+          console.error('BLOCKED: ' + msg + '——回退越界文件或改按常规任务申报 write_files');
+          process.exit(1);
         } else {
           console.error('HANDOFF 零提交: ' + taskId + ' — 提交为空，校验通过');
         }
@@ -873,9 +848,8 @@ async function main() {
           const summaryExact = '.specs/' + state.activeChange + '/' + taskId + '-SUMMARY.md';
           const violations = committedFiles.filter(f => f !== summaryExact && !reqWriteFiles.some(a => matchWriteFilePattern(f, a)));
           if (violations.length > 0) {
-            const currentState = await readState();
             // 只补事实，不改判定：快照与当前写面分叉时多给一行**可观测事实** + **条件式成因**，
-            // 越界清单与 BLOCK/WARN 分级保持原样。措辞纪律：本判据只能证明两侧不一致，不能证明
+            // 越界清单与分级保持原样。措辞纪律：本判据只能证明两侧不一致，不能证明
             // 「计划是后来改的」——对真越界，让人去重新 request 会把越界文件写进允许列表，所以
             // 「回退越界文件」（上一行恢复指引）仍是首选，重新 request 只在成因确实成立时才走。
             // 出路是**重新发起委托**，命令因此独立成行（与其它「重新发起委托」路径同一装配）：说明行
@@ -886,13 +860,9 @@ async function main() {
                 + '若无 replan，越界文件仍不在该任务写面内，按上面的「回退越界文件」处理\n'
                 + '      ' + requestRecoveryCommand(taskId)
               : null;
-            if (currentState?.newChange === true) {
-              console.error('BLOCKED: 提交文件超出 writeFiles 范围: ' + violations.join(', ') + '——新 change 强制委托边界;恢复: 回退越界文件或扩展 write_files');
-              if (staleSnapshotHint) console.error(staleSnapshotHint);
-              process.exit(1);
-            }
-            console.error('HANDOFF WARN: 提交文件超出 writeFiles 范围: ' + violations.join(', '));
+            console.error('BLOCKED: 提交文件超出 writeFiles 范围: ' + violations.join(', ') + '——提交文件须在 writeFiles 范围内;恢复: 回退越界文件或扩展 write_files');
             if (staleSnapshotHint) console.error(staleSnapshotHint);
+            process.exit(1);
           }
         } catch {
           console.error('HANDOFF ERROR: commitHash 无效或 git show 失败: ' + commitHash + '——协调者需确认原因(跨仓库 worktree 提交校验降级属预期,确认后继续)');

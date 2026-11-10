@@ -29,9 +29,6 @@ import {
 } from '../lib/test-helpers.mjs';
 import {
   CHANGE_ID,
-  REPO_ROOT,
-  SCRIPTS_DIR,
-  TASK_DONE,
   customProtocol,
   dropNamedImport,
   engineCodeText,
@@ -40,9 +37,12 @@ import {
   engineDefinitionPattern,
   engineImportsSymbolFrom,
   engineScriptTexts,
-  handoffFor,
   HANDOFF,
+  handoffFor,
+  REPO_ROOT,
+  SCRIPTS_DIR,
   STATE,
+  TASK_DONE,
   writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import { scenarioProtocolPath } from '../lib/test-assertions.mjs';
@@ -397,7 +397,6 @@ function renderDoc(key, opts = {}) {
 
 function newChangeState(node) {
   const st = baseState(node);
-  st.newChange = true;
   st.enteredNodes = [node];
   return st;
 }
@@ -1744,42 +1743,43 @@ export const ENTRIES = [
     },
   },
 
-  // TA-11 · 旧 change 只告警（AC-11）——旧 change（无 newChange 标记）同构缺段 → 不阻断并输出 WARN；
-  // 反向构造：同一夹具置 newChange → BLOCKED。
+  // TA-11 · 单轨缺段判级（AC-11）——同一份缺损工件在**无任何新旧标记字段**的状态下同样 BLOCKED
+  // （不再有「旧 change 只 WARN」这一侧）；design 侧「视觉调性」段缺席同判。
   // ⑤ 追加「视觉调性」段体的围栏语义：段里贴了含 `## ` 的围栏示例时，示例之后的「不适用」声明
   // 仍要被读到（段界只由围栏外的标题决定）。
   {
-    name: 'TA-11 旧 change 同构缺段只 WARN 不阻断；同一夹具新 change 必 BLOCKED；视觉调性段内的围栏示例不截断',
+    name: 'TA-11 缺段一律 BLOCKED（无字段状态同判）；视觉调性段内的围栏示例不截断',
     run: async (dir) => {
       const missing = { omit: ['影响面'] };
-      // ① 新 change：拦（对照基准——同一份缺损工件）
+      // ① 缺段：拦（对照基准——同一份缺损工件）
       setupOpen(dir, missing);
       const newRes = exitNode(dir, 'open');
       assertExit(newRes, 1);
-      // ② 旧 change：WARN 不阻断（唯一差异 = state 缺 newChange 标记）
+      assertOut(newRes, 'BLOCKED');
+      // ② 同构缺段（无任何新旧标记字段）：同判 BLOCKED（单一等级）
       setupOpen(dir, missing);
       const legacy = baseState('open');
       legacy.evidence.open = { summary: 'intake complete' };
       writeState(dir, legacy);
       const legacyRes = exitNode(dir, 'open');
-      assertExit(legacyRes, 0);
-      assertOut(legacyRes, 'WARN');
-      assertNotOut(legacyRes, 'BLOCKED');
+      assertExit(legacyRes, 1);
+      assertOut(legacyRes, 'BLOCKED');
       // ③ design 侧段缺席：同一判据——CHANGE.md「视觉调性」段缺席，新 change 由 uidesign 门兜底拦，
       // 不再默认判非前端（段缺席与段内声明「不适用」是两件事，只有后者是决策）。
       setupDesign(dir, { changeOpts: { omit: ['视觉调性'] } });
       const designNew = exitNode(dir, 'design');
       assertExit(designNew, 1);
       assertOut(designNew, '「视觉调性」段缺席');
-      assertOut(designNew, '新 change 须显式标注「不适用」');
-      // ④ 反向构造（同一份缺损工件，唯一差异 = state 缺 newChange 标记）：旧 change 兼容跳过、不阻断。
+      assertOut(designNew, '须显式标注「不适用」');
+      // ④ 同构缺段（无任何新旧标记字段）：同判 BLOCKED（单一等级，不再有兼容跳过）
       setupDesign(dir, { changeOpts: { omit: ['视觉调性'] } });
       const designLegacy = baseState('design');
       designLegacy.evidence.design = { summary: 'design done' };
       writeState(dir, designLegacy);
       const designLegacyRes = exitNode(dir, 'design');
-      assertExit(designLegacyRes, 0);
-      assertOut(designLegacyRes, '旧 change 兼容');
+      assertExit(designLegacyRes, 1);
+      assertOut(designLegacyRes, '「视觉调性」段缺席');
+      assertNotOut(designLegacyRes, '旧 change 兼容');
       // ⑤ 段体围栏语义：「视觉调性」段里贴一段含 `## ` 的围栏示例，「不适用」声明写在围栏**之后**
       //    ⇒ 段体不被示例里的标题截断，判据仍读到声明（围栏是正文示例，不是段界）。旧的按行扫描
       //    在这里截断段体 → 标记消失 → 判成前端 → 要求一份本不该存在的 UI-DESIGN.md（BLOCKED）。
@@ -2057,7 +2057,6 @@ export const ENTRIES = [
         writeFile(dir, changeDirOf(), renderDoc('CHANGE', { omit: ['影响面'] }));
         const st = baseState('brainstorm');
         st.activeChange = CHANGE_ID;
-        st.newChange = true;
         st.enteredNodes = ['brainstorm'];
         st.evidence.brainstorm = { summary: 'notes done' };
         writeState(dir, st);
@@ -3577,7 +3576,6 @@ export const ENTRIES = [
         writeState(cwdRepo, {
           ...baseState('open'),
           activeChange: 'live-change',
-          newChange: true,
           status: 'running',
           enteredNodes: ['open'],
           evidence: {

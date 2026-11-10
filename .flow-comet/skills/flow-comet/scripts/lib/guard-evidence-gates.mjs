@@ -29,7 +29,6 @@ import {
   eligibleParallelBlocks,
   inFlightHandoffRequests,
   isArchivedChange,
-  isNewChange,
   missingAugmentationChecks,
   missingRequiredArtifacts,
   missingRequiredSchemaEvidence,
@@ -96,12 +95,9 @@ export function runInFlightHandoffGate({ node, state }) {
   if (inFlight.length > 0) {
     const inFlightDetail = '存在在飞委托（handoffRequests 有 request 无对应 handoffResult）: '
       + inFlight.join(', ') + '——验证隔离要求同一时刻只有一个写者（写者未收工）';
-    if (isNewChange(state)) {
-      console.error('BLOCKED: ' + inFlightDetail);
-      console.error('恢复: 待写入者收工后重跑——子代理回传后用 workflow-handoff.mjs result <task-id> <Return Contract> 记录结果再重试 exit；若该委托已作废（零提交复验失败 / 写边界被拒后遗弃），用 workflow-handoff.mjs withdraw <task-id> --by <来源> [--reason <原因>] 撤回后再重试 exit（撤回留痕 withdrawnAt/withdrawnBy，已撤回 = 终态，历史不删）');
-      process.exit(1);
-    }
-    console.error('WARN: ' + inFlightDetail + '（旧 change 渐进不阻断；待写入者收工后重跑全量判据；已作废的委托可用 workflow-handoff.mjs withdraw <task-id> --by <来源> 撤回）');
+    console.error('BLOCKED: ' + inFlightDetail);
+    console.error('恢复: 待写入者收工后重跑——子代理回传后用 workflow-handoff.mjs result <task-id> <Return Contract> 记录结果再重试 exit；若该委托已作废（零提交复验失败 / 写边界被拒后遗弃），用 workflow-handoff.mjs withdraw <task-id> --by <来源> [--reason <原因>] 撤回后再重试 exit（撤回留痕 withdrawnAt/withdrawnBy，已撤回 = 终态，历史不删）');
+    process.exit(1);
   }
 }
 
@@ -152,9 +148,8 @@ function mentionsLessonsId(body, id) {
   return new RegExp('(^|[^0-9])' + escaped + '(?![0-9])', 'iu').test(body);
 }
 
-// 每份 SUMMARY 的两条判据 → 问题描述数组（分级由调用方按 isNewChange 决定：新 change BLOCKED /
-// 旧 change WARN——C10 无例外）。TASK.md 或 .specs/LESSONS.md 缺席时对应输入为空：段在场判据照常，
-// 命中计算自然为空集（无条目可命中）。
+// 每份 SUMMARY 的两条判据 → 问题描述数组（命中即由调用方计入 violations → BLOCKED）。
+// TASK.md 或 .specs/LESSONS.md 缺席时对应输入为空：段在场判据照常，命中计算自然为空集（无条目可命中）。
 async function lessonsScanProblems(changeDir, summaryFiles) {
   if (summaryFiles.length === 0) return [];
   const rule = await lessonsScanRule();
@@ -240,59 +235,37 @@ export async function runSummarySectionsGate({ node, state }) {
       const method = methodSection === null ? null
         : /brooks.?review|cache.?brooks|builtin.?quickcheck/i.exec(methodSection);
       if (!method) {
-        // 过渡规则：旧格式 SUMMARY 无 ## 自检方法 段——若全文已声明 brooks-review/cache-brooks/
-        // builtin（旧模板行为），WARN 兼容不 BLOCKED；无任何自检声明才 BLOCKED
+        // 旧格式 SUMMARY 无 ## 自检方法 段——若全文已声明 brooks-review/cache-brooks/builtin
+        // （旧模板行为）按「段缺席」计入 violations（标题必须在场）；无任何自检声明同样 BLOCKED。
         if (/brooks.?review|cache.?brooks|builtin.?quickcheck/i.test(content)) {
-          if (isNewChange(state)) {
-            violations.push(f + ' 缺 ## 自检方法 段（新 change 强制声明自检方法）');
-          } else {
-            console.error('BROOKS-LINT WARN: ' + f + ' 缺 ## 自检方法 段（旧格式），6 维自查已声明自检方法——兼容通过，建议补全');
-          }
+          violations.push(f + ' 缺 ## 自检方法 段（须声明自检方法）');
         } else {
           violations.push(f + ' 缺 ## 自检方法 字段（必须声明 brooks-review 或 builtin-quickcheck）');
         }
       } else if (/builtin/i.test(method[0])) {
         // builtin 降级两级校验——① 必须声明不可用原因；② 必须含缓存尝试证据（已尝试 Read 插件缓存
         // 协议文件手动执行仍不可行——两级降级路径第 2 级；防「未尝试读缓存」的偷懒降级）。关键词
-        // 声明级校验（设计边界：不做语义判断）；缺失 → 新 change BLOCKED / 旧 SUMMARY WARN 渐进
+        // 声明级校验（设计边界：不做语义判断）；缺失 → BLOCKED
         if (!/brooks-lint 不可用|插件不可用|unavailable|N\/A/i.test(content)) {
-          if (isNewChange(state)) {
-            console.error('BLOCKED: SUMMARY 使用 builtin-quickcheck 未声明 brooks-lint 不可用原因（新 change 强制）;恢复: 在 ## 自检方法 段补原因（声明级校验——须含关键词: brooks-lint 不可用 / 插件不可用 / unavailable / N/A,如「brooks-lint 不可用(Skill 仅返回占位,插件执行体未加载)」）');
-            process.exit(1);
-          }
-          console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明 brooks-lint 不可用原因');
+          console.error('BLOCKED: SUMMARY 使用 builtin-quickcheck 未声明 brooks-lint 不可用原因;恢复: 在 ## 自检方法 段补原因（声明级校验——须含关键词: brooks-lint 不可用 / 插件不可用 / unavailable / N/A,如「brooks-lint 不可用(Skill 仅返回占位,插件执行体未加载)」）');
+          process.exit(1);
         } else if (!/插件缓存|缓存协议|协议文件|plugins\/cache/i.test(content)) {
-          if (isNewChange(state)) {
-            console.error('BLOCKED: SUMMARY 使用 builtin-quickcheck 未声明缓存尝试证据（新 change 强制先 Read 插件缓存协议文件）;恢复: 在 ## 自检方法 段声明缓存尝试（须含关键词: 插件缓存 / 缓存协议 / 协议文件 / plugins/cache,如「已 Read 插件缓存协议文件(~/.claude/plugins/cache/...)手动执行仍不可行」）');
-            process.exit(1);
-          }
-          console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明缓存尝试证据（应先 Read 插件缓存协议文件手动执行完整 brooks 流程）');
+          console.error('BLOCKED: SUMMARY 使用 builtin-quickcheck 未声明缓存尝试证据（须先 Read 插件缓存协议文件）;恢复: 在 ## 自检方法 段声明缓存尝试（须含关键词: 插件缓存 / 缓存协议 / 协议文件 / plugins/cache,如「已 Read 插件缓存协议文件(~/.claude/plugins/cache/...)手动执行仍不可行」）');
+          process.exit(1);
         }
       }
       if (sixDimBody !== null && !/brooks.?review|cache.?brooks/i.test(sixDimBody)) {
-        if (isNewChange(state)) {
-          console.error('BLOCKED: SUMMARY 的 6 维自查未声明使用 /brooks-review（新 change 强制声明自检方法）;恢复: 在 6 维自查段声明 /brooks-review 或理由');
-          process.exit(1);
-        }
-        console.error('BROOKS-LINT WARN: ' + f + ' 的 6 维自查未声明使用 /brooks-review（可能使用了内置快查）');
+        console.error('BLOCKED: SUMMARY 的 6 维自查未声明使用 /brooks-review;恢复: 在 6 维自查段声明 /brooks-review 或理由');
+        process.exit(1);
       }
     } catch {}
   }
-  // LESSONS 扫描（AC-18）：每份 SUMMARY 的扫描段在场 + 命中条目逐条回应。分级沿用既有语义——
-  // 新 change BLOCKED / 旧 change WARN（C10 无例外）。
+  // LESSONS 扫描（AC-18）：每份 SUMMARY 的扫描段在场 + 命中条目逐条回应；缺失即计入 violations。
   const lessonsProblems = await lessonsScanProblems(changeDir, summaryFiles);
-  if (lessonsProblems.length > 0) {
-    if (isNewChange(state)) {
-      violations.push(...lessonsProblems);
-    } else {
-      for (const problem of lessonsProblems) {
-        console.error('LESSONS SCAN WARN: ' + problem + '（旧 change 渐进，不阻断；新 change 将强制）');
-      }
-    }
-  }
+  if (lessonsProblems.length > 0) violations.push(...lessonsProblems);
   if (violations.length > 0) {
     console.error('BLOCKED: SUMMARY 关键段校验失败: ' + violations.join('; '));
-    if (lessonsProblems.length > 0 && isNewChange(state)) {
+    if (lessonsProblems.length > 0) {
       console.error('恢复: 按 flow-kit/templates/SUMMARY.md 在 ## 自检方法 之后补 ## LESSONS 扫描 段，并逐条写出命中条目编号与差异声明（无命中写「无 active 条目命中」）；命中来源 = TASK.md 该任务 write_files 的路径段 × .specs/LESSONS.md 条目的关键词行');
     }
     process.exit(1);
@@ -349,18 +322,14 @@ export async function runExecuteExitGate({ protocol, node, state, emptyExitAppro
       process.exit(1);
     }
 
-    // done 任务 ↔ SUMMARY 完整性：done 任务 ↔ <id>-SUMMARY.md 存在（WARN 渐进不 BLOCK——防旧
-    // change 卡死；结构级校验与 TASK 签名同源：任务完成声明须有对应产物）。新 change（enter 机制
-    // 激活）升级为 BLOCKED——执行遗漏（声称完成但无产物）不静默进归档；旧 change 保持渐进。
+    // done 任务 ↔ SUMMARY 完整性：done 任务 ↔ <id>-SUMMARY.md 存在（结构级校验与 TASK 签名同源：
+    // 任务完成声明须有对应产物）。缺失即 BLOCKED——执行遗漏（声称完成但无产物）不静默进归档。
     const ki8ChangeDir = path.join(runRoot, '.specs', state.activeChange ?? '');
     for (const tid of tasks.filter(t => t.status === 'done').map(t => t.id)) {
       if (!(await fileExists(path.join(ki8ChangeDir, tid + '-SUMMARY.md')))) {
-        if (isNewChange(state)) {
-          console.error('BLOCKED: done 任务 ' + tid + ' 缺少 ' + tid + '-SUMMARY.md——execute 产物不完整（新 change 强制任务完成须有对应 SUMMARY;旧 change 渐进 WARN）');
-          console.error('恢复: 补写 ' + tid + '-SUMMARY.md 后重试 exit;任务完成后补产物即可');
-          process.exit(1);
-        }
-        console.error('WARN: done 任务 ' + tid + ' 缺少 ' + tid + '-SUMMARY.md——execute 产物不完整（任务完成须有对应 SUMMARY）');
+        console.error('BLOCKED: done 任务 ' + tid + ' 缺少 ' + tid + '-SUMMARY.md——execute 产物不完整（任务完成须有对应 SUMMARY）');
+        console.error('恢复: 补写 ' + tid + '-SUMMARY.md 后重试 exit;任务完成后补产物即可');
+        process.exit(1);
       }
     }
 
@@ -401,14 +370,10 @@ export async function runExecuteExitGate({ protocol, node, state, emptyExitAppro
         && (state.executionMode ?? 'subagent') !== 'direct'
         && !takeoverApproved
         && ki10ProtocolHasSubagent) {
-      if (isNewChange(state)) {
-        console.error('BLOCKED: TASK 有 parallel done 任务（' + ki10ParallelDone.join(', ')
-          + '）但 subagent-execute 节点未 exit——新 change 强制 [P] 任务由 subagent-execute 节点委托');
-        console.error('恢复: 经 subagent-execute 节点完成委托后再 exit;或说明越权委托原因');
-        process.exit(1);
-      }
-      console.error('WARN: TASK 有 parallel done 任务（' + ki10ParallelDone.join(', ')
-        + '）但 subagent-execute 节点未 exit——疑似 execute 阶段越权委托，[P] 任务应由 subagent-execute 节点委托');
+      console.error('BLOCKED: TASK 有 parallel done 任务（' + ki10ParallelDone.join(', ')
+        + '）但 subagent-execute 节点未 exit——[P] 任务须由 subagent-execute 节点委托（execute 阶段越权委托）');
+      console.error('恢复: 经 subagent-execute 节点完成委托后再 exit;或说明越权委托原因');
+      process.exit(1);
     }
   } catch {}
   return { exempt };
@@ -439,23 +404,20 @@ export async function runAcCoverageGate({ node, state }) {
   }
   if (coverage.unjudgeable !== null) {
     if (node.id === 'review') return;
-    const blocking = isNewChange(state);
-    for (const line of acCoverageUnjudgeableLines({ coverage, level: blocking ? 'BLOCKED' : 'WARN' })) {
+    for (const line of acCoverageUnjudgeableLines({ coverage, level: 'BLOCKED' })) {
       console.error(line);
     }
-    if (blocking) process.exit(1);
-    return;
+    process.exit(1);
   }
   if (coverage.missing.length === 0) return;
   if (node.id === 'review') {
     console.error(acCoverageSummaryLine({ coverage }));
     return;
   }
-  const blocking = isNewChange(state);
-  for (const line of acCoverageReportLines({ coverage, level: blocking ? 'BLOCKED' : 'WARN' })) {
+  for (const line of acCoverageReportLines({ coverage, level: 'BLOCKED' })) {
     console.error(line);
   }
-  if (blocking) process.exit(1);
+  process.exit(1);
 }
 
 // verify 出口必须真实跑命令（严格版）——历史归档 change 豁免（过渡规则）。命令来源三级：TEST.md 的
@@ -487,14 +449,10 @@ export async function runVerifyExitGate({ protocol, node, state }) {
         && (state.executionMode ?? 'subagent') !== 'direct'
         && !ki9TakeoverApproved
         && ki9ProtocolHasSubagent) {
-      if (isNewChange(state)) {
-        console.error('BLOCKED: TASK 有 parallel done 任务（' + ki9ParallelDone.join(', ')
-          + '）但 subagent-execute 节点未 exit——新 change 强制(verify 兜底拦截)');
-        console.error('恢复: 经 subagent-execute 节点完成委托后再 exit;或说明越权委托原因');
-        process.exit(1);
-      }
-      console.error('WARN: TASK 有 parallel done 任务（' + ki9ParallelDone.join(', ')
-        + '）但 subagent-execute 节点未 exit——疑似越权委托（execute 出口未拦截,verify 兜底提示）');
+      console.error('BLOCKED: TASK 有 parallel done 任务（' + ki9ParallelDone.join(', ')
+        + '）但 subagent-execute 节点未 exit——[P] 任务须由 subagent-execute 节点委托（verify 兜底拦截）');
+      console.error('恢复: 经 subagent-execute 节点完成委托后再 exit;或说明越权委托原因');
+      process.exit(1);
     }
   } catch {}
   const { spawnSync } = await import('child_process');
@@ -588,13 +546,9 @@ export function runReturnContractGate({ node, state }) {
     const noCommitTask = !!(taskReq && taskReq.noCommit === true);
     if (!r.commitHash && !noCommitTask) violations.push(taskId + ' 缺 commitHash');
     if (!r.greenEvidence || !r.greenEvidence.command) violations.push(taskId + ' 缺 greenEvidence');
-    // redEvidence 缺失警告（过渡期不阻断）——新 change（enter 机制激活）升级为 BLOCKED（TDD RED 证据强制）
+    // redEvidence 缺失 = 违反 TDD RED 证据要求（BLOCKED）
     if (r && !r.redEvidence) {
-      if (isNewChange(state)) {
-        violations.push(taskId + ' 缺 redEvidence（新 change 强制 TDD RED 证据;旧 change 渐进 WARN）');
-      } else {
-        console.error('HANDOFF WARN: ' + taskId + ' 缺 redEvidence（可能未执行 TDD RED 阶段）');
-      }
+      violations.push(taskId + ' 缺 redEvidence（须回传 TDD RED 证据）');
     }
     // completedChecks 严格校验（无旧 change 豁免）
     if (requiredChecks.length > 0) {
@@ -625,12 +579,9 @@ export async function runSubagentSummaryGate({ node, state }) {
     const saDir = path.join(runRoot, '.specs', state.activeChange ?? '');
     for (const t of saTasks.filter(t => t.status === 'done')) {
       if (!(await fileExists(path.join(saDir, t.id + '-SUMMARY.md')))) {
-        if (isNewChange(state)) {
-          console.error('BLOCKED: done 任务 ' + t.id + ' 缺少 ' + t.id + '-SUMMARY.md——subagent-execute 产物不完整（新 change 强制任务完成须有对应 SUMMARY;旧 change 渐进 WARN）');
-          console.error('恢复: 补写 ' + t.id + '-SUMMARY.md 后重试 exit;任务完成后补产物即可');
-          process.exit(1);
-        }
-        console.error('WARN: done 任务 ' + t.id + ' 缺少 ' + t.id + '-SUMMARY.md——subagent-execute 产物不完整（任务完成须有对应 SUMMARY）');
+        console.error('BLOCKED: done 任务 ' + t.id + ' 缺少 ' + t.id + '-SUMMARY.md——subagent-execute 产物不完整（任务完成须有对应 SUMMARY）');
+        console.error('恢复: 补写 ' + t.id + '-SUMMARY.md' + ' 后重试 exit;任务完成后补产物即可');
+        process.exit(1);
       }
     }
   } catch {}
@@ -836,7 +787,7 @@ export async function runEvidenceCompletionGate({ protocol, node, state, evidenc
     for (const binding of node.requiredSkillCalls ?? []) {
       const check = 'required-skill:' + node.id + '.' + binding.skill;
       const applicabilityGated = applicabilityGatedBinding(node, binding.skill) !== null;
-      if (applicabilityGated && isNewChange(state) && (await frontendCriterion(state.activeChange)).applicable) continue;
+      if (applicabilityGated && (await frontendCriterion(state.activeChange)).applicable) continue;
       if (!checks.includes(check)) checks.push(check);
     }
     evidence.completedChecks = checks;

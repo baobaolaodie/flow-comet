@@ -20,13 +20,6 @@ import {
 } from '../lib/test-helpers.mjs';
 import {
   CHANGE_ID,
-  PREPARE_ENV,
-  SCRIPTS_DIR,
-  TASK_DEP_CYCLE,
-  TASK_MISSING_DEP,
-  TASK_MIXED_PSP,
-  TASK_MIXED_SPS,
-  TASK_VALID_ALL_PARALLEL,
   dropNamedImport,
   engineCodeText,
   engineConsumersOf,
@@ -34,9 +27,16 @@ import {
   engineDefinitionModule,
   engineScriptTexts,
   makeTmp,
+  PREPARE_ENV,
   renderMultiWaveTasks,
   runPlanExit,
   runPrepareEnv,
+  SCRIPTS_DIR,
+  TASK_DEP_CYCLE,
+  TASK_MISSING_DEP,
+  TASK_MIXED_PSP,
+  TASK_MIXED_SPS,
+  TASK_VALID_ALL_PARALLEL,
   writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import {
@@ -351,7 +351,6 @@ export const ENTRIES = [
     run: async (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
-      st.newChange = true;
       writeState(dir, st);
       const res = runPlanExit(dir, TASK_DEP_CYCLE);
       assertExit(res, 1);
@@ -548,7 +547,6 @@ export const ENTRIES = [
       // 分级二分（旧 change）：同一份删段任务集只 WARN 不阻断——判据在场（不是「旧 change 就跳过」），
       // 只是照常重签并产生备份。与上面那格共用同一夹具，唯一变量 = 有无 newChange 标记。
       const oldNoWaveState = replanExecuteState({ taskHash: REPLAN_STALE_SIGNATURE });
-      delete oldNoWaveState.newChange;
       writeState(dir, oldNoWaveState);
       const backupsBeforeOldWarn = replanBackupFiles(dir).length;
       const replanNoWaveOld = runStateWithProtocol(dir, ['replan', '删段 + 改任务集的重校（旧 change）', '--authorized-by', 'user-approval']);
@@ -570,7 +568,6 @@ export const ENTRIES = [
         'replan 的 TASK 段形失败行应报类别计数（与 plan 出口同一两阶段口径）:\n' + replanNoWaveSection.output);
       const planNoWaveState = baseState('plan');
       planNoWaveState.evidence.plan = { summary: 'plan done' };
-      planNoWaveState.newChange = true;
       writeState(dir, planNoWaveState);
       const planNoWaveSection = runPlanWithTask(dir, '# TASK\n\n## 任务清单\n\n' + waveTask('T01'));
       assertExit(planNoWaveSection, 1);
@@ -678,7 +675,6 @@ export const ENTRIES = [
       const planWithSection = (markdown) => {
         const planState = baseState('plan');
         planState.evidence.plan = { summary: 'plan done' };
-        planState.newChange = true;
         writeState(dir, planState);
         return runPlanWithTask(dir, markdown);
       };
@@ -904,7 +900,6 @@ export const ENTRIES = [
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
-      st.newChange = true;
       writeState(dir, st);
       const res = runPlanExit(dir, TASK_MISSING_DEP);
       assertExit(res, 1);
@@ -920,7 +915,6 @@ export const ENTRIES = [
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
-      st.newChange = true;
       writeState(dir, st);
       const res = runPlanExit(dir, TASK_MIXED_SPS);
       assertExit(res, 0);
@@ -934,7 +928,6 @@ export const ENTRIES = [
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
-      st.newChange = true;
       writeState(dir, st);
       const res = runPlanExit(dir, TASK_MIXED_PSP);
       assertExit(res, 0);
@@ -948,7 +941,6 @@ export const ENTRIES = [
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
-      st.newChange = true;
       writeState(dir, st);
       const res = runPlanExit(dir, renderMultiWaveTasks());
       assertExit(res, 0);
@@ -972,7 +964,6 @@ export const ENTRIES = [
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
-      st.newChange = true;
       writeState(dir, st);
       const res = runPlanExit(dir, TASK_VALID_ALL_PARALLEL);
       assertExit(res, 0);
@@ -980,69 +971,51 @@ export const ENTRIES = [
     },
   },
 
-  // 151（渐进语义适配）：旧 change（无 newChange）+ 依赖环 → 不 BLOCK（渐进 WARN——断言锁「不阻断」，
-  // 检测须真实发生：输出 WARN 且含「依赖环」明细）。混排本身已合法化，渐进路径改由依赖图违规承载。
+  // 151（单轨对照）：与 145 同一批夹具在**无任何新旧标记字段**的状态下同判——依赖图/波次投影/
+  // 同波漏标一律 BLOCKED（不再有「旧 change 渐进 WARN」这一侧）；载体缺席仍只「未校验」。
   {
-    name: '151 plan exit 兼容：旧 change 依赖环不 BLOCK（渐进 WARN）+ 波次投影旧 change 只 WARN',
+    name: '151 plan exit 单轨对照：依赖环/波次投影/同波漏标一律 BLOCKED（无字段状态同判）',
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
-      // 无 newChange（旧 change）
       writeState(dir, st);
       const res = runPlanExit(dir, TASK_DEP_CYCLE);
-      assertExit(res, 0);
-      assertNotOut(res, 'BLOCKED');
-      assertOut(res, 'WARN');
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
       assertOut(res, '依赖环');
-      // ⑤ 旧 change 走同一输入（② 的同波依赖夹具）：判据同源、明细同一措辞，但只 WARN 不阻断——
-      //    退出码不因该判据改变（既有归档流程不被阻断），明细仍点名任务与应到波。
+      // ⑤ 同一输入（② 的同波依赖夹具）：判据同源、明细同一措辞，判级同判 BLOCKED
       const oldWaveWarn = runPlanWithTask(dir, sameWavePlan());
-      assertExit(oldWaveWarn, 0);
-      assertNotOut(oldWaveWarn, 'BLOCKED');
+      assertExit(oldWaveWarn, 1);
+      assertOut(oldWaveWarn, 'BLOCKED');
       assertOut(oldWaveWarn, '波次划分与依赖层级不一致');
       assertOut(oldWaveWarn, 'T01');
       assertOut(oldWaveWarn, '应到波 1');
-      // ⑥ 旧 change + 未声明任务：同一明细、同一措辞（当前波 = 未声明），但只 WARN——退出码不因该
-      //    判据改变，明细仍点名未被波次覆盖的任务与应到波。
+      // ⑥ 未声明任务：同一明细、同一措辞（当前波 = 未声明），判级同判 BLOCKED
       const oldUndeclared = runPlanWithTask(dir, undeclaredWavePlan());
-      assertExit(oldUndeclared, 0);
-      assertNotOut(oldUndeclared, 'BLOCKED');
+      assertExit(oldUndeclared, 1);
+      assertOut(oldUndeclared, 'BLOCKED');
       assertOut(oldUndeclared, '未声明');
       assertOut(oldUndeclared, 'T02（依赖: T01）当前波 未声明 → 应到波 2');
       assertOut(oldUndeclared, '应到波 3');
-      // ⑦ 旧 change + 段在场而内容不可判（N/A 正文）：WARN 不阻断，且进入既有 WARN COUNT——
-      //    「未校验」不再静默（此前这一类只打印未校验、不进 WARN 汇总，等于零反馈）。
+      // ⑦ 段在场而内容不可判（N/A 正文）：内容不可判 = BLOCKED（与载体缺席的「未校验」二分不变）
       const oldUnjudgeable = runPlanWithTask(dir, naWavePlan());
-      assertExit(oldUnjudgeable, 0);
-      assertNotOut(oldUnjudgeable, 'BLOCKED');
+      assertExit(oldUnjudgeable, 1);
+      assertOut(oldUnjudgeable, 'BLOCKED');
       assertOut(oldUnjudgeable, '波次划分段内容不可判');
-      // 计数用例别力：同一任务集、唯一变量 = 波次段是否在场——载体缺席只「未校验」（不计 WARN），
-      // 内容不可判那一支必须使 WARN COUNT 恰好比它多 1（「未校验不再静默」的证据是计数差，不是
-      // 「输出里有 WARN 字样」）。
+      // 载体缺席只「未校验」并放行（同一任务集、唯一变量 = 波次段是否在场）
       const noSectionSameTasks = runPlanWithTask(dir, '# TASK\n\n## 任务清单\n\n'
         + waveTask('T01') + waveTask('T02', 'T01'));
       assertExit(noSectionSameTasks, 0);
       assertOut(noSectionSameTasks, '未校验（无波次段）');
-      const warnCountOf = (res) => {
-        const match = /WARN COUNT: (\d+)/u.exec(res.output);
-        return match === null ? 0 : Number(match[1]);
-      };
-      assertTrue(warnCountOf(oldUnjudgeable) === warnCountOf(noSectionSameTasks) + 1,
-        '段在场而内容不可判未计入 WARN COUNT（未校验仍静默）: N/A=' + warnCountOf(oldUnjudgeable)
-        + ' 无段=' + warnCountOf(noSectionSameTasks));
-      // ⑧ 旧 change + 同波可并行却漏标 [P]：同一输入只 WARN 不阻断，且该行进入既有 WARN COUNT——
-      //    计数差分（判别力）：唯一变量（T02 的 parallel 标记）补上后该 WARN 消失，计数恰少 1。
+      // ⑧ 同波可并行却漏标 [P]：同判 BLOCKED；补上标记后放行
       const oldGap = runPlanWithTask(dir, parallelGapPlan());
-      assertExit(oldGap, 0);
-      assertNotOut(oldGap, 'BLOCKED');
+      assertExit(oldGap, 1);
+      assertOut(oldGap, 'BLOCKED');
       assertOut(oldGap, '同波任务可并行却未标 [P]');
       assertOut(oldGap, 'T01 × T02');
       const oldGapFixed = runPlanWithTask(dir, parallelGapPlan({ markAll: true }));
       assertExit(oldGapFixed, 0);
       assertNotOut(oldGapFixed, '可并行却未标 [P]');
-      assertTrue(warnCountOf(oldGap) === warnCountOf(oldGapFixed) + 1,
-        '同波漏标 [P] 的 WARN 未计入 WARN COUNT: 漏标=' + warnCountOf(oldGap)
-        + ' 全标=' + warnCountOf(oldGapFixed));
       // ⑨ 补集等价：本判据的「写面不重叠」= task-graph 的 collectCrossTaskConflicts（写面重叠的唯一
       //    入口，其实现就是 collectPathOverlaps + 已归一路径 + glob）返回集合的**补集**。夹具构造反面：
       //    同波同层、都没标 parallel，但写同一个文件 → 写冲突族照常报，本判据必须沉默（否则同一对上

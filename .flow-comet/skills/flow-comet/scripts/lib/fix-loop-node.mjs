@@ -167,18 +167,7 @@ export function applyFixRollbackRound({ state, sourceNode, decision }) {
     setFixRoundsFor(state, round);
     return { ...EMPTY_FIX_ROLLBACK_ROUND, counted: true, round, overrideUsed: true, auditSuffix };
   }
-  if (state.newChange === true) {
-    return { ...EMPTY_FIX_ROLLBACK_ROUND, blocked: true, round, auditSuffix, blockedMessage: fixRoundBlockedMessage(sourceNode, round) };
-  }
-  setFixRoundsFor(state, round);
-  return {
-    ...EMPTY_FIX_ROLLBACK_ROUND,
-    counted: true,
-    warn: true,
-    round,
-    auditSuffix,
-    warnMessage: 'FIX-BATCH WARN: Fix 批次受控归位已达 ' + FIX_ROLLBACK_ROUND_LIMIT + ' 轮上限，第 ' + round + ' 轮在旧 change 上渐进放行（建议用户显式授权并在 evidence 记录 fixRoundOverride）。',
-  };
+  return { ...EMPTY_FIX_ROLLBACK_ROUND, blocked: true, round, auditSuffix, blockedMessage: fixRoundBlockedMessage(sourceNode, round) };
 }
 
 // Fix 回程节点推导（共享基础）：TASK.md 存在、至少一个任务块且全部 status="done" 时，

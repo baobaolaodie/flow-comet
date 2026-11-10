@@ -85,7 +85,6 @@ const RAW_ENTRIES = [
 
       // ⑥ 旧 change 同形：同一条「多写」声明只 WARN 且照常落标记（渐进兼容——旧项目不可能一夜补齐）
       const legacyState = readStateFile(dir);
-      delete legacyState.newChange;
       writeState(dir, legacyState);
       const legacy = runState([...DESIGN_SKILL_ARGS, '--templates', 'DESIGN.md,TASK.md'], dir);
       assertExit(legacy, 0);

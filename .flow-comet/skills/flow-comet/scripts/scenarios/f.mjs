@@ -17,24 +17,26 @@ import {
 } from '../lib/test-helpers.mjs';
 import {
   CHANGE_ID,
+  engineDefinitionHits,
+  engineDefinitionModule,
+  engineScriptTexts,
+  handoffFor,
   HOOK,
+  renderMultiWaveTasks,
   REPO_ROOT,
+  runPlanExit,
   SCRIPTS_DIR,
+  skillTreeDocFiles,
+  strictSummary,
+  summaryContent,
   TASK_P1,
   TASK_P2,
   TASK_P2_PENDING,
   TASK_VALID_ALL_SERIAL,
   TASK_VALID_PS,
   TASK_VALID_SP,
-  engineDefinitionHits,
-  engineDefinitionModule,
-  engineScriptTexts,
-  handoffFor,
-  renderMultiWaveTasks,
-  runPlanExit,
-  skillTreeDocFiles,
-  summaryContent,
   writeIntakeArtifacts,
+  writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import {
   runStateWithProtocol,
@@ -175,7 +177,7 @@ export const ENTRIES = [
       // 清空：全部 done + SUMMARY 在场 → 委托与串行均无残留 → review（产物门控照旧）。
       // 状态取真实链路形态：completedNodes 按路由序排列（末元素 = subagent-execute，
       // 其 exit --apply 已把 currentNode 推到 review——正常推进豁免放行 next）
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       res = goNext('review', ['T01', 'P01', 'P02', 'T02', 'P03', 'P04'], ['execute', 'subagent-execute']);
       assertExit(res, 0);
       assertOut(res, 'NODE: review');
@@ -246,8 +248,8 @@ export const ENTRIES = [
       assertOut(res, 'NODE: execute');
       // ③ 全部 done + SUMMARY 在场 → 合取完成（无 eligible ∧ 无 serial pending）→ review
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1 + pDone('P02', 'P01') + t03('done'));
-      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent());
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T03-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', strictSummary('T01'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T03-SUMMARY.md', strictSummary('T01'));
       res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: review');
@@ -468,8 +470,9 @@ export const ENTRIES = [
         '<task id="T03" parallel="true" status="pending"><action>实现 T03</action><write_files>src/t3.mjs</write_files><verify>node --check src/t3.mjs</verify><depends_on>T01</depends_on></task>\n' +
         '<task id="T04" parallel="false" status="pending"><action>实现 T04</action><write_files>src/t4.mjs</write_files><verify>node --check src/t4.mjs</verify><depends_on>T02,T03</depends_on></task>\n' +
         '<task id="T05" parallel="false"><action>遗留无状态串行</action><write_files>src/t5.mjs</write_files><verify>node --check src/t5.mjs</verify></task>\n');
+      writeNodeDeclarationMarkers(dir, 'execute');
       assertExit(runGuard(['entry', 'execute'], dir), 0);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
       writeState(dir, st2);
@@ -495,7 +498,7 @@ export const ENTRIES = [
         '<task id="T03" parallel="true" status="pending"><action>实现 T03</action><write_files>src/t3.mjs</write_files><verify>node --check src/t3.mjs</verify><depends_on>T01</depends_on></task>\n' +
         '<task id="T04" parallel="false" status="pending"><action>实现 T04</action><write_files>src/t4.mjs</write_files><verify>node --check src/t4.mjs</verify></task>\n');
       assertExit(runGuard(['entry', 'execute'], dir), 0);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
       writeState(dir, st2);
@@ -525,7 +528,6 @@ export const ENTRIES = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
         '<task id="T01"><action>实现 T01</action><write_files>src/todo_x.py; tests/test_todo_x.py</write_files><verify>node --check src/todo_x.py</verify></task>\n');
       const st = baseState('subagent-execute');
-      st.newChange = true;
       writeState(dir, st);
       // 技能加载前置门材料：新 change 下 request 须有本节点声明标记
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
@@ -587,8 +589,10 @@ export const ENTRIES = [
   {
     name: '182 execute 出口静默：全部任务 done 后无 ROUTE WARN',
     run: (dir) => {
+      writeNodeDeclarationMarkers(dir, 'execute');
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
+      st.completedNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute'];
       writeState(dir, st);
       // 未分类并行任务（缺 status）自初始 TASK 在场——全部可解析任务 done 后，
       // 该任务按「缺 status 不视为 pending」文档语义保持静默（与既有「无可解析 pending 静默」
@@ -596,8 +600,8 @@ export const ENTRIES = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1 + TASK_P2 +
         '<task id="P03" parallel="true"><action>实现 P03</action><write_files>src/p3.mjs</write_files><verify>node --check src/p3.mjs</verify></task>\n');
       assertExit(runGuard(['entry', 'execute'], dir), 0);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent());
-      writeFile(dir, '.specs/' + CHANGE_ID + '/P02-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', strictSummary('T01'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P02-SUMMARY.md', strictSummary('T01'));
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['P01', 'P02']) };
       writeState(dir, st2);
@@ -620,7 +624,7 @@ export const ENTRIES = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1 +
         '<task id="T02" parallel="false" status="pending"><action>实现 T02</action><write_files>src/t2.mjs</write_files><verify>node --check src/t2.mjs</verify><depends_on>P01</depends_on></task>\n');
       assertExit(runGuard(['entry', 'execute'], dir), 0);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', strictSummary('T01'));
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['P01']) };
       writeState(dir, st2);

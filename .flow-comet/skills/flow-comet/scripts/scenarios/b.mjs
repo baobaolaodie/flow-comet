@@ -38,6 +38,7 @@ import {
   engineScriptTexts,
   handoffFor,
   scriptTreeFiles,
+  strictSummary,
   summaryContent,
   writeCustomProtocol,
   writeNodeDeclarationMarkers,
@@ -152,6 +153,7 @@ export const ENTRIES = [
   {
     name: '34 subagent-execute exit 通过：handoff 含 completedChecks + 缺证据恢复命令可照抄执行',
     run: (dir) => {
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', strictSummary('P01'));
       const st = baseState('subagent-execute');
       st.evidence['subagent-execute'] = {
         summary: 'delegated and collected',
@@ -325,7 +327,7 @@ export const ENTRIES = [
         + '<task id="P01" status="done" parallel="true"><action>改模板保真门禁</action>'
         + '<write_files>scripts/lib/guard-template-fidelity.mjs</write_files>'
         + '<verify>node --check src/p1.mjs</verify></task>\n');
-      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', strictSummary('T01'));
       // ① 出口重算：扫描段没回应命中条目 → 逐条列出编号（旧 change 渐进不阻断）
       const exitLessons = runGuard(['exit', 'subagent-execute'], dir);
       assertOut(exitLessons, '未回应命中条目 L-501');
@@ -382,7 +384,6 @@ export const ENTRIES = [
       // 同一份 TASK 在**新 change** 下：写面缺失必须在入口 BLOCK——旧实现借来相邻任务的写面，request
       // 因而放行，越界要等到提交子集校验才炸。BLOCK 路径 state 字节零改写。
       const newChangeState = baseState('subagent-execute');
-      newChangeState.newChange = true;
       writeState(dir, newChangeState);
       const bytesBeforeBlock = readStateBytes(dir);
       const reqNoWriteNew = runHandoff(['request', 'P03', 'no write files new change'], dir);
@@ -739,6 +740,7 @@ export const ENTRIES = [
   {
     name: '38 handoff red 先于 green 通过（recordedAt）+ result PREFLIGHT 命令平台化并被真实执行',
     run: (dir) => {
+      assertExit(runHandoff(['request', 'P01', 'delegate', '--write-files', 'src/p1.mjs'], dir, { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) }), 0);
       writeState(dir, baseState('subagent-execute'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
       const redOnly = '{"redEvidence":{"command":"node --check src/p1.mjs"}}';
@@ -869,6 +871,7 @@ export const ENTRIES = [
   {
     name: '39 handoff BLOCKED：greenEvidence 后同批补录 redEvidence',
     run: (dir) => {
+      assertExit(runHandoff(['request', 'P01', 'delegate', '--write-files', 'src/p1.mjs'], dir, { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) }), 0);
       writeState(dir, baseState('subagent-execute'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
       const greenOnly = '{"greenEvidence":{"command":"node --check src/p1.mjs"}}';
@@ -890,7 +893,10 @@ export const ENTRIES = [
   {
     name: '40 execute exit 通过：TASK LF→CRLF 行尾变化签名一致',
     run: (dir) => {
+      // 单轨夹具前置：direct 模式（本格测签名判定，不涉及委托归属）+ 声明齐备
+      writeNodeDeclarationMarkers(dir, 'execute');
       const st = baseState('execute');
+      st.executionMode = 'direct';
       st.evidence.execute = { summary: 'executed' };
       writeState(dir, st);
       // LF 版本任务集（enter 时记录签名）
@@ -899,8 +905,8 @@ export const ENTRIES = [
       assertExit(runGuard(['entry', 'execute'], dir), 0);
       // 同一任务集改写为 CRLF 行尾（仅行尾差异，逻辑内容不变）
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskLF.replace(/\n/g, '\r\n'));
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
-      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent()); // M2: 新 change 强制 done 任务须有 SUMMARY
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', strictSummary('T01')); // M2: 新 change 强制 done 任务须有 SUMMARY
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01', 'P01']) };
       writeState(dir, st2);
@@ -923,7 +929,7 @@ export const ENTRIES = [
       // 逻辑内容变化（T01 action 文本被改），行尾保持 LF 不变
       const changed = taskLF.replace('实现 T01', '实现 T01 并补充单元测试');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', changed);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01', 'P01']) };
       writeState(dir, st2);
@@ -1018,7 +1024,10 @@ export const ENTRIES = [
   {
     name: '44 execute exit 通过：追加 completed_at 标记属性签名一致',
     run: (dir) => {
+      // 单轨夹具前置：direct 模式 + 声明齐备（同上）
+      writeNodeDeclarationMarkers(dir, 'execute');
       const st = baseState('execute');
+      st.executionMode = 'direct';
       st.evidence.execute = { summary: 'executed' };
       writeState(dir, st);
       const taskLF = '# TASK\n\n' + TASK_DONE + TASK_P1;
@@ -1027,8 +1036,8 @@ export const ENTRIES = [
       // 子代理标记 task done：T01 开标签追加 completed_at 属性（其余逻辑内容不变）
       const marked = taskLF.replace('id="T01"', 'id="T01" completed_at="2026-08-07"');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', marked);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
-      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent()); // M2: 新 change 强制 done 任务须有 SUMMARY
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', strictSummary('T01')); // M2: 新 change 强制 done 任务须有 SUMMARY
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01', 'P01']) };
       writeState(dir, st2);
@@ -1054,7 +1063,7 @@ export const ENTRIES = [
         .replace('id="T01"', 'id="T01" completed_at="2026-08-07"')
         .replace('实现 T01', '实现 T01（改）');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', changed);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01', 'P01']) };
       writeState(dir, st2);
@@ -1117,11 +1126,12 @@ export const ENTRIES = [
   {
     name: '48 execute exit BLOCKED：record 覆盖 handoff（越俎代庖）',
     run: (dir) => {
+      assertExit(runHandoff(['request', 'T01', 'delegate', '--write-files', 'src/t1.mjs'], dir, { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) }), 0);
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       // ① workflow-handoff result 正确记录 T01 的 Return Contract（含 completedChecks）
       const res = runHandoff(['result', 'T01', JSON.stringify({
         commitHash: 'abcd1234',
@@ -1199,7 +1209,6 @@ export const ENTRIES = [
         + '  <depends_on></depends_on>\n'
         + '</task>\n');
       const reqState = baseState('subagent-execute');
-      reqState.newChange = true;
       reqState.completedNodes = ['open', 'design', 'plan'];
       reqState.evidence = {
         open: { summary: 'open done' },
@@ -1729,10 +1738,10 @@ export const ENTRIES = [
 
   // ----------  场景（builtin 降级须含缓存尝试证据） ----------
 
-  // 74: builtin-quickcheck 声明 + 不可用原因但无缓存尝试证据 → BROOKS-LINT WARN
-  // （：防「未尝试 Read 插件缓存协议文件」的偷懒降级——修复前不校验 = RED）
+  // 74: builtin-quickcheck 声明 + 不可用原因但无缓存尝试证据 → BLOCKED
+  // （防「未尝试 Read 插件缓存协议文件」的偷懒降级——判据为 BLOCK，无渐进侧）
   {
-    name: '74 builtin 无缓存尝试证据 → WARN',
+    name: '74 builtin 无缓存尝试证据 → BLOCKED',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
@@ -1743,8 +1752,9 @@ export const ENTRIES = [
         method: '## 自检方法\n\nbuiltin-quickcheck — brooks-lint 不可用（Skill 仅返回占位，插件执行体未加载），按协议降级内置 R1~R6 快查',
       }));
       const res = runGuard(['exit', 'execute'], dir);
-      assertExit(res, 0);
-      assertOut(res, 'BROOKS-LINT WARN');
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, '缓存尝试证据');
     },
   },
 
@@ -1753,6 +1763,7 @@ export const ENTRIES = [
   {
     name: '75 cache-brooks 声明 → 放行',
     run: (dir) => {
+      writeNodeDeclarationMarkers(dir, 'execute');
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
       st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
@@ -1774,6 +1785,7 @@ export const ENTRIES = [
   {
     name: '76 builtin 含缓存尝试证据 → 无 WARN',
     run: (dir) => {
+      writeNodeDeclarationMarkers(dir, 'execute');
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
       st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
@@ -1814,6 +1826,7 @@ export const ENTRIES = [
   {
     name: '78 路由诊断：有 pending 无可委托并行 WARN 在场 / 无可解析 pending 静默',
     run: (dir) => {
+      writeNodeDeclarationMarkers(dir, 'plan');
       const st = baseState('plan');
       st.completedNodes = ['open', 'design'];
       st.evidence.plan = { summary: 'executed' };
@@ -1861,6 +1874,7 @@ export const ENTRIES = [
   {
     name: '80 handoff result 契约校验：无效 commitHash → ERROR；非对象与畸形形状写入前拒绝',
     run: (dir) => {
+      assertExit(runHandoff(['request', 'T01', 'delegate', '--write-files', 'src/t1.mjs'], dir, { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) }), 0);
       writeState(dir, baseState('subagent-execute'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
       execFileSync('git', ['init', '-q'], { cwd: dir });
@@ -1967,7 +1981,6 @@ export const ENTRIES = [
       execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'summary only'], { cwd: dir });
       const summaryHash = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
       const ledgerState = JSON.parse(readStateBytes(dir));
-      ledgerState.newChange = true;
       const ledgerRequests = ledgerState.evidence['subagent-execute'].handoffRequests || {};
       if (Object.prototype.hasOwnProperty.call(ledgerRequests, 'T06')) {
         throw new Error('夹具前提不成立：T06 不应已有 request（本段构造的是缺 request 的 result）');
@@ -2003,7 +2016,6 @@ export const ENTRIES = [
       assertRecoveryCommandLines(missingRequestRecovery, [requestRecoveryLine], '缺 request 的 result 恢复段');
       // 旧 change 同样的输入只 WARN（渐进，不阻断既有流程）
       const legacyLedger = JSON.parse(ledgerBytes);
-      delete legacyLedger.newChange;
       writeState(dir, legacyLedger);
       const legacy = runHandoff(['result', 'T06', ledgerPayload('T06', summaryHash)], dir);
       assertExit(legacy, 0);
@@ -2012,7 +2024,6 @@ export const ENTRIES = [
       assertOut(legacy, 'HANDOFF RESULT: T06');
       // 有 request 的 result 照常通过（零提交语义不变：noCommit 请求 + 无 commitHash 契约）
       const withRequest = JSON.parse(readStateBytes(dir));
-      withRequest.newChange = true;
       withRequest.evidence['subagent-execute'].handoffRequests = {
         ...withRequest.evidence['subagent-execute'].handoffRequests,
         T08: { description: 'delegated', noCommit: true },
@@ -2031,7 +2042,6 @@ export const ENTRIES = [
         + '<write_files>src/t06.mjs</write_files><verify>node --check src/t06.mjs</verify>'
         + '<depends_on></depends_on></task>\n');
       const execState = baseState('subagent-execute');
-      execState.newChange = true;
       execState.evidence['subagent-execute'] = { summary: 'delegated' };
       writeState(dir, execState);
       writeNodeDeclarationMarkers(dir, 'subagent-execute');
@@ -2074,7 +2084,6 @@ export const ENTRIES = [
         + taskWithWriteFiles('T09', ['allowed.js', 'rogue.js'])
         + taskWithWriteFiles('T10', ['allowed.js']));
       const replanState = baseState('subagent-execute');
-      replanState.newChange = true;
       replanState.evidence['subagent-execute'] = {
         handoffRequests: {
           T09: { description: 'replan 扩写面前的快照', writeFiles: ['allowed.js'] },
@@ -2118,7 +2127,6 @@ export const ENTRIES = [
       assertNotOut(genuineOverrun, staleSnapshotFact);
       // ③ 判定语义不变：同一份旧快照在旧 change 上只 WARN（诊断行随报文出现，结果照常落库）
       const legacySnapshot = JSON.parse(readStateBytes(dir));
-      delete legacySnapshot.newChange;
       writeState(dir, legacySnapshot);
       const legacyWarn = runHandoff(['result', 'T09', boundaryPayload('T09', replannedHash)], dir);
       assertExit(legacyWarn, 0);
@@ -2128,22 +2136,23 @@ export const ENTRIES = [
     },
   },
 
-  // 81: entry/exit WARN COUNT 汇总行——构造 BROOKS-LINT WARN → exit 输出 WARN COUNT
-  // （ F：可观测性——修复前无汇总行 = RED）
+  // 81: entry/exit WARN COUNT 汇总行——构造 SIGNATURE-ALGO WARN（跨算法版本签名，提示级）→ exit 输出
+  // WARN COUNT（可观测性：提示级判据不静默）
   {
     name: '81 exit 输出 WARN COUNT 汇总',
     run: (dir) => {
+      writeNodeDeclarationMarkers(dir, 'execute');
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
       st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
+      // 跨算法版本的签名：值不可比 → SIGNATURE-ALGO WARN（仍为提示级），用来驱动 WARN COUNT 汇总行
+      st.taskHash = 'v0:' + '0'.repeat(64);
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent({
-        method: '## 自检方法\n\nbuiltin-quickcheck — brooks-lint 不可用（Skill 仅返回占位，插件执行体未加载），按协议降级内置 R1~R6 快查',
-      }));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       const res = runGuardWithProtocol(dir, ['exit', 'execute']);
       assertExit(res, 0);
-      assertOut(res, 'BROOKS-LINT WARN');
+      assertOut(res, 'SIGNATURE-ALGO WARN');
       assertOut(res, 'WARN COUNT:');
     },
   },
@@ -2377,6 +2386,7 @@ export const ENTRIES = [
   {
     name: '96 自检方法段后续行声明 → 放行',
     run: (dir) => {
+      writeNodeDeclarationMarkers(dir, 'execute');
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
       st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };

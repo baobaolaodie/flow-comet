@@ -19,18 +19,18 @@ import {
   writeState,
 } from '../lib/test-helpers.mjs';
 import {
-  CHANGE_ID,
-  PREPARE_ENV,
-  REPO_ROOT,
-  SCRIPTS_DIR,
   bridgeStampSyncProblems,
   bridgeStampSyncSubAnchorCases,
+  CHANGE_ID,
   fixtureBridgeBaseVersion,
   fixtureIsBridgeDevVersion,
   handoffFor,
+  PREPARE_ENV,
+  REPO_ROOT,
   runBridgeCheck,
   runPlanExit,
   runPrepareEnv,
+  SCRIPTS_DIR,
   strictSummary,
   summaryContent,
   writeBridgeFixture,
@@ -458,6 +458,9 @@ export const ENTRIES = [
   {
     name: '198 多趟出口路由时序收敛：逐节点 exit --apply 后 next 输出 NODE 与 guard 出口 NODE 一致',
     run: (dir) => {
+      writeNodeDeclarationMarkers(dir, 'open');
+      writeNodeDeclarationMarkers(dir, 'design');
+      writeNodeDeclarationMarkers(dir, 'plan');
       const writeTask = (statusMap) => {
         const blk = (id, parallel, deps) =>
           '<task id="' + id + '"' + (parallel ? ' parallel="true"' : '') +
@@ -486,7 +489,7 @@ export const ENTRIES = [
         o.evidence[node] = merged;
         writeState(dir, o);
       };
-      const writeSummary = (ids) => { for (const id of ids) writeFile(dir, '.specs/' + CHANGE_ID + '/' + id + '-SUMMARY.md', summaryContent()); };
+      const writeSummary = (ids) => { for (const id of ids) writeFile(dir, '.specs/' + CHANGE_ID + '/' + id + '-SUMMARY.md', strictSummary('T01')); };
       const nodeOf = (out) => (out.match(/^NODE: ([a-z-]+)$/m) || [])[1] ?? null;
       const assertConverge = (guardRes) => {
         assertExit(guardRes, 0);
@@ -695,7 +698,6 @@ export const ENTRIES = [
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
-      st.newChange = true;
       writeState(dir, st);
       const tasks =
         '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n' +
@@ -755,10 +757,9 @@ export const ENTRIES = [
     },
   },
 
-  // 203: 写写强判分级（渐进）——同拓扑旧 change（无 newChange 标记）：plan 出口应 WARN 渐进
-  // 不 BLOCK（与依赖环分级同先例）。修复前 plan 出口无检测 = 预期 RED（无 WARN 亦无 BLOCK）。
+  // 203: 写写强判——同拓扑（无任何新旧标记字段）：plan 出口一律 BLOCKED（单轨，无渐进侧）
   {
-    name: '203 plan exit 兼容：旧 change 写写重叠不 BLOCK（渐进 WARN）',
+    name: '203 plan exit：写写重叠一律 BLOCKED',
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
@@ -767,9 +768,8 @@ export const ENTRIES = [
         '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n' +
         '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n';
       const res = runPlanExit(dir, tasks);
-      assertExit(res, 0);
-      assertNotOut(res, 'BLOCKED');
-      assertOut(res, 'WARN');
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
       assertOut(res, 'P01×P02');
       assertOut(res, 'bak_a.txt');
     },
@@ -782,7 +782,6 @@ export const ENTRIES = [
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
-      st.newChange = true;
       writeState(dir, st);
       const tasks =
         '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>notes.txt</write_files><verify>node --check notes.txt</verify></task>\n' +
@@ -806,7 +805,6 @@ export const ENTRIES = [
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
-      st.newChange = true;
       writeState(dir, st);
       // ① 无显式关联对：P01 读 shared-context.md，P02 写同路径 → WARN 提示级（不 BLOCK）
       const weak =
@@ -837,7 +835,6 @@ export const ENTRIES = [
     run: (dir) => {
       // ① 委托前锚：同波次并行 pending 写写重叠 → entry subagent-execute 仍 BLOCKED
       const st = baseState('subagent-execute');
-      st.newChange = true;
       writeState(dir, st);
       const conflictTasksForDelegation =
         '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>bak_a.txt</write_files><verify>node --check bak_a.txt</verify></task>\n' +
@@ -851,7 +848,6 @@ export const ENTRIES = [
       // 仍触发伪并行 WARN——新检测与既有检测并存不干扰
       const st2 = baseState('plan');
       st2.evidence.plan = { summary: 'plan done' };
-      st2.newChange = true;
       writeState(dir, st2);
       const coexisting =
         '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n' +
@@ -871,6 +867,7 @@ export const ENTRIES = [
   {
     name: '207 多趟平行转换 next 可达且与 guard NEXT 一致（完整时序锚）',
     run: (dir) => {
+      writeNodeDeclarationMarkers(dir, 'plan');
       const writeTask = (statusMap) => {
         const blk = (id, parallel, deps) =>
           '<task id="' + id + '"' + (parallel ? ' parallel="true"' : '') +
@@ -895,7 +892,7 @@ export const ENTRIES = [
         o.evidence[node] = merged;
         writeState(dir, o);
       };
-      const writeSummary = (ids) => { for (const id of ids) writeFile(dir, '.specs/' + CHANGE_ID + '/' + id + '-SUMMARY.md', summaryContent()); };
+      const writeSummary = (ids) => { for (const id of ids) writeFile(dir, '.specs/' + CHANGE_ID + '/' + id + '-SUMMARY.md', strictSummary('T01')); };
       const nodeOf = (out) => (out.match(/^NODE: ([a-z-]+)$/m) || [])[1] ?? null;
       const assertConverge = (guardRes) => {
         assertExit(guardRes, 0);
@@ -1001,7 +998,6 @@ export const ENTRIES = [
         design: { summary: 'design complete' },
         plan: { summary: 'plan complete' },
       };
-      st.newChange = true;
       writeState(dir, st);
       writeNodeDeclarationMarkers(dir, 'plan');
       // ① record 后未 exit 先 next：不把 currentNode 提前校正到 subagent-execute（路由后继）
@@ -1060,7 +1056,6 @@ export const ENTRIES = [
         plan: { summary: 'plan done' },
         execute: { summary: 'executed', parallelTakeoverApproved: true },
       };
-      st.newChange = true;
       writeState(dir, st);
       writeNodeDeclarationMarkers(dir, 'execute');
       const res = runGuard(['exit', 'execute', '--apply'], dir);
@@ -1094,7 +1089,6 @@ export const ENTRIES = [
         plan: { summary: 'plan done' },
         execute: { summary: 'executed' },
       };
-      st.newChange = true;
       writeState(dir, st);
       const res = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(res, 1);
@@ -1109,6 +1103,7 @@ export const ENTRIES = [
   {
     name: '211 路由诊断静默：剩余 pending 全串行（P→S 收尾转换）无 ROUTE WARN',
     run: (dir) => {
+      writeNodeDeclarationMarkers(dir, 'plan');
       writeIntakeArtifacts(dir);
       const st = baseState('plan');
       st.completedNodes = ['open', 'design'];
@@ -1131,6 +1126,7 @@ export const ENTRIES = [
   {
     name: '212 路由诊断保持：parallel 缺 status（畸形块）仍报 ROUTE WARN',
     run: (dir) => {
+      writeNodeDeclarationMarkers(dir, 'plan');
       writeIntakeArtifacts(dir);
       const st = baseState('plan');
       st.completedNodes = ['open', 'design'];
@@ -1166,7 +1162,6 @@ export const ENTRIES = [
       st.directOverride = true;
       st.directOverrideAt = '2026-08-29T10:00:00.000Z';
       st.directOverrideSource = 'execution-mode';
-      st.newChange = true;
       writeState(dir, st);
       writeNodeDeclarationMarkers(dir, 'execute');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
@@ -1197,7 +1192,6 @@ export const ENTRIES = [
       st.executionMode = 'direct';
       st.directOverride = true;
       // 无 directOverrideAt 授权审计记录（执行者自切/修复前遗留形态）
-      st.newChange = true;
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
         '<task id="S01" status="done"><action>实现 S01</action><write_files>src/s1.mjs</write_files><verify>node --check src/s1.mjs</verify></task>\n');
@@ -1247,7 +1241,6 @@ export const ENTRIES = [
           execute: { summary: 'executed' },
           'subagent-execute': { summary: 'delegated', handoffResult: handoffFor(['S01']) },
         };
-        st.newChange = true;
         return st;
       };
       const writeTask = () => writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
@@ -1329,7 +1322,7 @@ export const ENTRIES = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
         '<task id="T01" status="done"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n' +
         '<task id="T02" parallel="true"><action>实现 T02</action><write_files>src/t2.mjs</write_files><verify>node --check src/t2.mjs</verify></task>\n');
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       writeState(dir, {
         activeChange: CHANGE_ID,
         currentNode: 'execute',
@@ -1356,7 +1349,6 @@ export const ENTRIES = [
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
-      st.newChange = true;
       writeState(dir, st);
       const tasks =
         '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/a.mjs</write_files><verify>node --check src/a.mjs</verify></task>\n' +

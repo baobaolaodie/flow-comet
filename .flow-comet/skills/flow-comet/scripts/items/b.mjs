@@ -365,7 +365,7 @@ export const ENTRIES = [
       }
 
       // ⑦ 旧 change review 源 + pending：直接 exit review --apply → FIX-BATCH WARN 渐进放行（不 BLOCK、不死结）
-      writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending', newChange: false });
+      writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending' });
       const oldExit = runGuard(['exit', 'review', '--apply'], dir, env);
       assertExit(oldExit, 0);
       assertOut(oldExit, 'FIX-BATCH WARN');
@@ -378,7 +378,7 @@ export const ENTRIES = [
       }
 
       // ⑧ 旧 change next 入口：pending 修复 + 源节点驻留 → 不新增 BLOCK，归位 execute 可继续
-      writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending', newChange: false });
+      writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending' });
       const oldNext = runState(['next'], dir, env);
       assertExit(oldNext, 0);
       assertNotOut(oldNext, 'BLOCKED');
@@ -391,7 +391,7 @@ export const ENTRIES = [
 
       // ⑨ 旧 change verify 源 + pending：直接 exit verify --apply → WARN 渐进且验证出口真实执行、不卡死
       fs.rmSync(gateMarker, { force: true });
-      writeFixBatchFixture(dir, { kind: 'verify', fixStatus: 'pending', newChange: false });
+      writeFixBatchFixture(dir, { kind: 'verify', fixStatus: 'pending' });
       const oldVerify = runGuard(['exit', 'verify', '--apply'], dir, env);
       assertExit(oldVerify, 0);
       assertOut(oldVerify, 'FIX-BATCH WARN');
@@ -619,7 +619,7 @@ export const ENTRIES = [
         throw new Error('verify 失败累计不得改写 Fix 轮次计数: ' + JSON.stringify(readStateFile(dir).fixRoundsByChange));
       }
       // 旧 change 第 4 轮渐进：WARN 后照常归位（不 BLOCK、不卡死）
-      writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending', newChange: false });
+      writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending' });
       const oldRoundState = readStateFile(dir);
       oldRoundState.fixRoundsByChange = { ch: 3 };
       writeState(dir, oldRoundState);

@@ -23,15 +23,18 @@ import {
 import {
   BUILTIN_PROTOCOL_SOURCE,
   CHANGE_ID,
+  customProtocolWithSkillCall,
+  handoffFor,
+  intakeChangeText,
+  intakeRequirementText,
+  makeTmp,
   REPO_ROOT,
   SCRIPTS_DIR,
+  strictSummary,
+  summaryContent,
   TASK_DONE,
   TASK_DONE_TWO,
   TASK_P1,
-  customProtocolWithSkillCall,
-  handoffFor,
-  makeTmp,
-  summaryContent,
   writeCustomProtocol,
   writeIntakeArtifacts,
   writeNodeDeclarationMarkers,
@@ -523,7 +526,7 @@ function assertFrontendDesignEvidenceRoundTrip() {
   const root = makeReplayRoot();
   try {
     writeDesignExitFixture(root, {
-      newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: false,
+      visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: false,
     });
     const blocked = runGuard(['exit', 'design'], root);
     assertExit(blocked, 1);
@@ -897,7 +900,6 @@ export const ENTRIES = [
       const newChangeState = () => {
         const st = baseState('open');
         st.evidence.open = { summary: 'intake complete' };
-        st.newChange = true;
         st.enteredNodes = ['open'];
         return st;
       };
@@ -955,20 +957,22 @@ export const ENTRIES = [
       assertExit(resLegacy, 0);
       assertOut(resLegacy, 'ALL CHECKS PASSED');
       assertNotOut(resLegacy, 'BLOCKED');
-      // ⑤ 旧 change（无 newChange）：同样的「少声明」构造 → 只 WARN 不阻断（不收死既有 change），
-      //    报文与 ② 同样逐项点名
+      // ⑤ 旧状态带 newChange 字段（升级前的 init 产物）：同样的「少声明」构造 → 同判 BLOCKED
+      //    （字段只被忽略，不再有渐进放行），报文与 ② 同样逐项点名
       const legacyState = baseState('open');
       legacyState.evidence.open = { summary: 'intake complete' };
+      legacyState.enteredNodes = ['open'];
+      legacyState.newChange = true;
       writeState(dir, legacyState);
       fs.rmSync(loadsDir, { recursive: true, force: true });
       writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-change.json',
         JSON.stringify({ node: 'open', skill: 'flow-comet-change', protocol: '0-change.md', at: '2026-08-01T00:00:00.000Z' }, null, 2) + '\n');
       const resWarn = runGuard(['exit', 'open'], dir);
-      assertExit(resWarn, 0);
-      assertOut(resWarn, 'SKILL-LOAD WARN');
+      assertExit(resWarn, 1);
+      assertOut(resWarn, 'BLOCKED');
       assertOut(resWarn, '缺协议文件: 1-requirement.md');
       assertOut(resWarn, '缺必需技能声明: flow-comet-requirement');
-      assertOut(resWarn, 'ALL CHECKS PASSED');
+      assertNotOut(resWarn, 'SKILL-LOAD WARN');
       // ⑥ 未传 --prompt（protocol = null / protocols 空）→ 两个必需技能都在场，但没有协议文件被
       //    覆盖 → BLOCKED（fail-closed：声明了技能不等于读了两份协议）
       writeState(dir, newChangeState());
@@ -1009,7 +1013,7 @@ export const ENTRIES = [
         fs.mkdirSync(path.dirname(scenarioProtocolPath(chainRoot)), { recursive: true });
         fs.copyFileSync(BUILTIN_PROTOCOL_SOURCE, scenarioProtocolPath(chainRoot));
         writeDesignExitFixture(chainRoot, {
-          newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: false,
+          visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: false,
         });
         // 先写一条真实声明（design 技能 + 2-design.md）：机制已激活，缺口收敛到 ui-design 这一条绑定
         assertExit(runState(['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md', '--templates', 'DESIGN.md'], chainRoot), 0);
@@ -1019,7 +1023,7 @@ export const ENTRIES = [
         assertNotOut(bothMissing, '缺协议声明标记');
         // 第二趟：证据补齐（同一夹具的 declareUiDesign），声明覆盖仍缺 → 覆盖门收口并点名该技能
         writeDesignExitFixture(chainRoot, {
-          newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: true,
+          visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: true,
         });
         const markerMissing = runGuard(['exit', 'design'], chainRoot);
         assertExit(markerMissing, 1);
@@ -1066,7 +1070,6 @@ export const ENTRIES = [
         templates: ['REVIEW.md', 'TEST.md'],
         fixture: (root) => {
           const st = baseState('review');
-          st.newChange = true;
           st.enteredNodes = ['review'];
           writeState(root, st);
           writeFile(root, '.specs/' + CHANGE_ID + '/REVIEW.md',
@@ -1124,35 +1127,37 @@ export const ENTRIES = [
     },
   },
 
-  // 104: 旧 evidence/旧 change 兼容（AC-6）——旧格式记录（completedChecks 无 required-skill 条目 /
-  // 无 completedChecks）无标记照常通过；exit 在 .skill-loads/ 未激活（目录不存在）时
-  // SKILL-LOAD WARN 照常通过（声明机制未激活不追溯）
+  // 104: 旧 evidence 格式兼容（AC-6）——声明齐备时，旧格式记录（completedChecks 无
+  // required-skill 条目 / 无 completedChecks）照常通过，exit 也照常通过。声明缺席不再因
+  // 「旧 change」放行（单轨；负例见 120）。
   {
-    name: '104 旧 evidence/旧 change 兼容：无标记照常通过（AC-6）',
+    name: '104 旧 evidence 格式兼容：声明齐备时旧格式记录照常通过（AC-6）',
     run: (dir) => {
-      writeState(dir, baseState('open'));
-      fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
-      // ① 旧格式 record：completedChecks 无 required-skill 条目 → 无标记也通过
+      const st = baseState('open');
+      st.enteredNodes = ['open'];
+      writeState(dir, st);
+      writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
+      writeFile(dir, 'flow-kit/prompts/1-requirement.md', '# 阶段 1 · REQUIREMENT\n\n## 角色\n\n你是 Requirer。\n');
+      // 声明齐备（手动 skill-load 是唯一路径；模板清单按节点映射给全）
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change',
+        '--prompt', 'flow-kit/prompts/0-change.md', '--prompt', 'flow-kit/prompts/1-requirement.md',
+        '--templates', 'CHANGE.md,REQUIREMENT.md']), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-requirement',
+        '--prompt', 'flow-kit/prompts/1-requirement.md', '--templates', 'CHANGE.md,REQUIREMENT.md']), 0);
+      // ① 旧格式 record：completedChecks 无 required-skill 条目 → 照常通过
       const resA = runStateWithProtocol(dir, ['record', 'open', JSON.stringify({ summary: 'legacy', completedChecks: ['unit-tests'] })]);
       assertExit(resA, 0);
       assertOut(resA, 'EVIDENCE: open');
-      // ② 无 completedChecks 的纯 summary 记录 → 通过
+      // ② 无 completedChecks 的纯 summary 记录 → 照常通过
       const resB = runStateWithProtocol(dir, ['record', 'open', JSON.stringify({ summary: 'plain' })]);
       assertExit(resB, 0);
-      // ③ exit open：M5 后 record 已自动补声明标记 → 无 SKILL-LOAD WARN,正常通过
-      const st = baseState('open');
-      st.evidence.open = { summary: 'intake complete' };
-      writeState(dir, st);
+      // ③ exit open：声明齐备 → 通过且无兼容告警
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n\n## 范围\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\n## 验收准则（AC）\n');
       const resC = runGuard(['exit', 'open'], dir);
       assertExit(resC, 0);
       assertOut(resC, 'ALL CHECKS PASSED');
       assertNotOut(resC, 'SKILL-LOAD WARN');
-      // M5: record 已自动补 requiredSkillCalls 声明标记
-      if (!fs.existsSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads', 'open-flow-comet-change.json'))) {
-        throw new Error('record 自动声明标记缺失: open-flow-comet-change.json');
-      }
     },
   },
 
@@ -1170,6 +1175,8 @@ export const ENTRIES = [
   {
     name: '105 计数一致性自检同步 + 公开面机器字段名黑名单 + --preflight 锚 + 声明命令册子锚 + 权威源设计形态锚（AC-8 / AC-14）',
     run: async (dir) => {
+      writeNodeDeclarationMarkers(dir, 'subagent-execute');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', strictSummary('P01'));
       // 声明命令的册子锚：不按载体形态分派（两册随技能包一起分发，装到哪都该给出同一组命令）——
       // 这也是「缺声明时报文给出的命令」与册子口径一致的那条机检（两边各给一半时必有一侧缺锚）。
       const bookProblems = declarationBookProblems(path.join(SCRIPTS_DIR, '..'));
@@ -1292,54 +1299,57 @@ export const ENTRIES = [
   },
 
   // 106: exit review——REVIEW.md 发现区条目处置状态结构级校验（L3-1：问题处理原则）——
-  // 发现项（含 Minor）无处置状态标记（[已修]/[升级]/[转待办]）→ REVIEW WARN 渐进不 BLOCK
-  // （防旧 REVIEW 卡死——旧 REVIEW 未按新格式写标记只警告不阻断）；全部带标记 → 无 WARN
-  // （发现不得"记录后无声消失"——每条须有处置去向）
+  // 发现项（含 Minor）无处置状态标记（[已修]/[升级]/[转待办]）→ BLOCKED（单一等级）；
+  // 全部带标记且有裁决/判据 → 通过（发现不得"记录后无声消失"——每条须有处置去向）
   {
-    name: '106 exit review WARN：发现区条目缺处置状态标记（L3-1）',
+    name: '106 exit review BLOCKED：发现区条目缺处置状态标记（L3-1）',
     run: (dir) => {
       const st = baseState('review');
       st.evidence.review = { summary: 'review done' };
       writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'review');
       // ②④ 共用：本夹具下允许出现的 REVIEW WARN 类别由调用方逐条枚举，**枚举外的行一律算失败**——
       // 逐条 assertNotOut 只挡得住被点名的那一类，夹具上再冒出一类无关告警时不会红（判别力退化）。
       const reviewWarnsOutside = (res, allowed) => String(res.output || '').split(/\r?\n/)
         .filter((line) => line.includes('REVIEW WARN') && !allowed.some((marker) => line.includes(marker)));
-      // ① 发现区 Minor 条目无处置标记 → REVIEW WARN + 通过（渐进不阻断）
+      // ① 发现区 Minor 条目无处置标记 → BLOCKED（点名缺处置状态标记）
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
         '# REVIEW\n\n## 发现\n\n### Critical\n\n无\n\n### Major\n\n无\n\n### Minor\n\n- **m-1 · 示例发现**：描述（未处置）\n\n## 结论\n\n通过\n');
       const res = runGuard(['exit', 'review'], dir);
-      assertExit(res, 0);
-      assertOut(res, 'REVIEW WARN');
-      assertOut(res, 'ALL CHECKS PASSED');
-      // ② 同一条目带 [转待办] 处置标记 → 不再报「缺处置状态标记」（该条已有处置去向；Minor 延期
-      // 另受裁决/判据门槛约束，旧 change 只 WARN 不阻断）
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, '处置状态标记');
+      // ② 同一条目带 [转待办] → 处置门通过，但延期须有用户裁决 → BLOCKED（不报「缺处置状态标记」）
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
         '# REVIEW\n\n## 发现\n\n### Critical\n\n无\n\n### Major\n\n无\n\n### Minor\n\n- **m-1 · 示例发现**：描述 [转待办]\n\n## 结论\n\n通过\n');
       const res2 = runGuard(['exit', 'review'], dir);
-      assertExit(res2, 0);
-      // [转待办] 另触发延期裁决与 Minor 判据两道门——这两类之外不得出现任何 REVIEW WARN
-      // （含「缺处置状态标记」：该条已有处置去向，误报即本场景的回归）。
-      const outside2 = reviewWarnsOutside(res2, ['缺少用户裁决记录', '缺 `判 Minor：` 行']);
-      assertTrue(outside2.length === 0, '② 出现枚举外的 REVIEW WARN（未知告警类别）:\n' + outside2.join('\n'));
-      assertOut(res2, 'ALL CHECKS PASSED');
+      assertExit(res2, 1);
+      assertOut(res2, '缺少用户裁决记录');
+      assertNotOut(res2, '缺处置状态标记');
+      assertNotOut(res2, '处置状态标记');
       // ③ 有序条目（1. **...**）与无序同口径——缺处置标记 → 旧 change 仍渐进 REVIEW WARN
       // （修复前 .filter((item) => !item.ordered) 使有序条目静默通过 = RED）
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
         '# REVIEW\n\n## 发现\n\n1. **m-2 · 有序未处置**：某处问题，未给出任何处置结论，描述足够长以避免内容不足\n\n## 结论\n\n通过\n');
       const resOrdered = runGuard(['exit', 'review'], dir);
-      assertExit(resOrdered, 0);
-      assertOut(resOrdered, 'REVIEW WARN');
-      assertNotOut(resOrdered, 'BLOCKED');
+      assertExit(resOrdered, 1);
+      assertOut(resOrdered, 'BLOCKED');
+      assertOut(resOrdered, '处置状态标记');
       // ④ 有序 Minor 带 [转待办] → 无「缺处置状态标记」告警（有序条目接入校验不误报已处置项）
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
         '# REVIEW\n\n## 发现\n\n1. **m-3 · 有序小项**：某处小问题，已登记下一 change 跟踪处置 [转待办]\n\n## 结论\n\n通过\n');
       const resOrderedOk = runGuard(['exit', 'review'], dir);
-      assertExit(resOrderedOk, 0);
-      // 有序条目未标严重度 → 只允许延期待裁决一类告警（Minor 判据门对未标严重度的条目不适用）。
-      const outsideOrdered = reviewWarnsOutside(resOrderedOk, ['缺少用户裁决记录']);
-      assertTrue(outsideOrdered.length === 0, '④ 出现枚举外的 REVIEW WARN（未知告警类别）:\n' + outsideOrdered.join('\n'));
-      assertOut(resOrderedOk, 'ALL CHECKS PASSED');
+      assertExit(resOrderedOk, 1);
+      assertOut(resOrderedOk, '缺少用户裁决记录');
+      assertNotOut(resOrderedOk, '处置状态标记');
+      // ⑤ 处置齐备的正例：Minor 带 [已修] 且条目内自证「判 Minor：」→ 通过
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md',
+        '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-4 · 已修小项**：某处小问题 [已修]\n  判 Minor：仅影响日志措辞，不改变行为与接口\n\n## 结论\n\n通过\n');
+      const resAllDisposed = runGuard(['exit', 'review'], dir);
+      assertExit(resAllDisposed, 0);
+      assertOut(resAllDisposed, 'ALL CHECKS PASSED');
+      assertTrue(reviewWarnsOutside(resAllDisposed, []).length === 0,
+        '⑤ 处置齐备时不应出现任何 REVIEW WARN:\n' + reviewWarnsOutside(resAllDisposed, []).join('\n'));
     },
   },
 
@@ -1410,10 +1420,11 @@ export const ENTRIES = [
   },
 
   // 109: execute 出口校验——TASK done 任务 ↔ <id>-SUMMARY.md 存在——
-  // 缺任一 done 任务的 SUMMARY → WARN 渐进不 BLOCK（防旧 change 卡死）；齐全 → 无 WARN
+  // 缺任一 done 任务的 SUMMARY → BLOCKED（单一等级）；齐全 → 通过
   {
-    name: '109 execute exit：done 任务缺 SUMMARY → WARN 渐进',
+    name: '109 execute exit：done 任务缺 SUMMARY → BLOCKED',
     run: (dir) => {
+      writeNodeDeclarationMarkers(dir, 'execute');
       const st = baseState('execute');
       st.evidence.execute = { summary: 'execute done' };
       st.executionMode = 'direct'; // direct:串行任务主代理直写,不要求 handoff(聚焦产物完整性校验)
@@ -1422,15 +1433,14 @@ export const ENTRIES = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
         '<task id="T01" status="done"><action>实现 T01</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n' +
         '<task id="T02" status="done"><action>实现 T02</action><write_files>src/t2.mjs</write_files><verify>node --check src/t2.mjs</verify></task>\n');
-      // ① 只有 T02-SUMMARY.md(T01 缺)→ WARN 点名 T01-SUMMARY.md + 通过（渐进）
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T02-SUMMARY.md', summaryContent());
+      // ① 只有 T02-SUMMARY.md(T01 缺)→ BLOCKED 点名 T01-SUMMARY.md
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T02-SUMMARY.md', strictSummary('T01'));
       const res = runGuard(['exit', 'execute'], dir);
-      assertExit(res, 0);
-      assertOut(res, 'WARN');
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
       assertOut(res, 'T01-SUMMARY.md');
-      assertOut(res, 'ALL CHECKS PASSED');
       // ② 补 T01-SUMMARY.md → 无缺产物 WARN（既有 SKILL-LOAD 兼容 WARN 与本文无关）
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       const res2 = runGuard(['exit', 'execute'], dir);
       assertExit(res2, 0);
       assertNotOut(res2, '缺少 T01-SUMMARY.md');
@@ -1439,26 +1449,26 @@ export const ENTRIES = [
   },
 
   // 110: execute 出口越权委托检测——TASK 有 parallel done 任务 + completedNodes
-  // 无 subagent-execute + 非 direct 模式 → WARN 渐进（[P] 任务应由 subagent-execute 节点委托,
-  // execute 阶段完成 [P] 是越权委托痕迹）;completedNodes 含
-  // subagent-execute 或 direct 模式 → 无越权 WARN
+  // 无 subagent-execute + 非 direct 模式 → BLOCKED（[P] 任务应由 subagent-execute 节点委托，
+  // execute 阶段完成 [P] 是越权委托）;completedNodes 含 subagent-execute → 放行
   {
-    name: '110 execute exit：parallel done 无 subagent-execute → WARN 越权委托',
+    name: '110 execute exit：parallel done 无 subagent-execute → BLOCKED 越权委托',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'execute done' };
       st.completedNodes = ['open', 'design', 'plan', 'execute']; // subagent-execute 未 exit
       st.evidence['subagent-execute'] = { handoffResult: handoffFor(['P01']) }; // 已委托(共用证据库)
       writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'execute');
       // TASK:parallel done P01 + 产物 SUMMARY(满足 task-summaries 出口门禁 + KI-8)
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent());
-      // ① completedNodes 无 subagent-execute + 非 direct → WARN（越权委托）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', strictSummary('T01'));
+      // ① completedNodes 无 subagent-execute + 非 direct → BLOCKED（越权委托）
       const res = runGuard(['exit', 'execute'], dir);
-      assertExit(res, 0);
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
       assertOut(res, '越权委托');
       assertOut(res, 'subagent-execute');
-      assertOut(res, 'ALL CHECKS PASSED');
       // ② completedNodes 含 subagent-execute → 无越权 WARN
       st.completedNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute'];
       writeState(dir, st);
@@ -1470,23 +1480,25 @@ export const ENTRIES = [
   },
 
   // 111: verify 出口越权委托兜底检测——同 KI-10 判定（TASK parallel done +
-  // completedNodes 无 subagent-execute + 非 direct）,verify 时仍未 exit → WARN 兜底
-  // （execute 出口未拦截的兜底提示）
+  // completedNodes 无 subagent-execute + 非 direct）,verify 时仍未 exit → BLOCKED 兜底
   {
-    name: '111 verify exit：parallel done 无 subagent-execute → WARN 越权委托兜底',
+    name: '111 verify exit：parallel done 无 subagent-execute → BLOCKED 越权委托兜底',
     run: (dir) => {
+      writeNodeDeclarationMarkers(dir, 'verify');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', intakeRequirementText());
       const st = baseState('verify');
       st.evidence.verify = { summary: 'verified' };
       st.completedNodes = ['open', 'design', 'plan', 'execute', 'review']; // 无 subagent-execute
       st.evidence['subagent-execute'] = { handoffResult: handoffFor(['P01']) };
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', strictSummary('T01'));
       writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```bash\nnode -e "1"\n```\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/UAT.md', '# UAT\n\n通过\n');
-      // ① completedNodes 无 subagent-execute → WARN 兜底
+      // ① completedNodes 无 subagent-execute → BLOCKED 兜底
       const res = runGuard(['exit', 'verify'], dir);
-      assertExit(res, 0);
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
       assertOut(res, '越权委托');
       assertOut(res, 'subagent-execute');
       // ② completedNodes 含 subagent-execute → 无越权 WARN
@@ -1539,8 +1551,9 @@ export const ENTRIES = [
   // ③④ 追加同判据的段尾分支回归锚（波次段即文末，新 change 形态 ⇒ 必 BLOCK）：段尾判定若
   // 不成立，该检查会被整段静默跳过——下一条 [P] 行漏扫的同族形态见上一场景。
   {
-    name: '113 plan exit：波次散文与并行标记不一致 → WARN（旧 change）/ BLOCK（新 change，含段即文末形态）',
+    name: '113 plan exit：波次散文与并行标记不一致 → BLOCK（含段即文末形态）',
     run: (dir) => {
+      writeNodeDeclarationMarkers(dir, 'plan');
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
       writeState(dir, st);
@@ -1548,12 +1561,12 @@ export const ENTRIES = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n## 波次划分\n\nWave 1 (parallel): T01[P], T02[P]\n\n## 任务清单\n\n'
         + '<task id="T01" parallel="true" status="pending"><action>a</action><write_files>f1</write_files><verify>v</verify></task>\n'
         + '<task id="T02" status="pending"><action>b</action><write_files>f2</write_files><verify>v</verify></task>\n');
-      // ① 散文 T02[P] 但 XML 无 parallel → WARN
+      // ① 散文 T02[P] 但 XML 无 parallel → BLOCKED
       const res = runGuard(['exit', 'plan'], dir);
-      assertExit(res, 0);
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
       assertOut(res, '波次散文');
       assertOut(res, 'T02');
-      assertOut(res, 'ALL CHECKS PASSED');
       // ② XML 补 T02 parallel → 无波次 WARN
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n## 波次划分\n\nWave 1 (parallel): T01[P], T02[P]\n\n## 任务清单\n\n'
         + '<task id="T01" parallel="true" status="pending"><action>a</action><write_files>f1</write_files><verify>v</verify></task>\n'
@@ -1567,7 +1580,6 @@ export const ENTRIES = [
       //    语义行 ⇒ 放行（该对照因此在任一态都可观测到）。
       const stEof = baseState('plan');
       stEof.evidence.plan = { summary: 'plan done' };
-      stEof.newChange = true;
       writeState(dir, stEof);
       writeNodeDeclarationMarkers(dir, 'plan');
       assertExit(runGuard(['entry', 'plan'], dir), 0);
@@ -1621,22 +1633,22 @@ export const ENTRIES = [
     },
   },
 
-  // 115: M1 entry 证据化——新 change(enter 机制激活)未 entry 直接 exit → ENTER WARN(渐进不阻断)
+  // 115: entry 证据化——本节点未 entry 直接 exit → BLOCKED（单一等级，无渐进放行）
   {
-    name: '115 execute exit ENTER WARN：enter 机制激活但本节点未 entry（M1）',
+    name: '115 execute exit BLOCKED：本节点未 entry 直接 exit（M1）',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
-      st.enteredNodes = ['open', 'design', 'plan']; // 前序节点 enter 过(机制激活);execute 未 entry
+      st.enteredNodes = ['open', 'design', 'plan']; // 前序节点 enter 过;execute 未 entry
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
       writeState(dir, st2);
       const res = runGuard(['exit', 'execute'], dir);
-      assertExit(res, 0);
-      assertOut(res, 'ENTER WARN');
+      assertExit(res, 1);
+      assertOut(res, '未执行 entry 直接 exit');
     },
   },
 
@@ -1648,9 +1660,10 @@ export const ENTRIES = [
       st.evidence.execute = { summary: 'executed' };
       st.enteredNodes = ['open', 'design', 'plan'];
       writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'execute');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
       assertExit(runGuard(['entry', 'execute'], dir), 0); // entry 记录 enter 标记
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
       writeState(dir, st2);
@@ -1669,10 +1682,9 @@ export const ENTRIES = [
       st.evidence.execute = { summary: 'executed' };
       st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01', 'T02']) };
       st.enteredNodes = ['open', 'design', 'plan', 'execute'];
-      st.newChange = true;
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE_TWO);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       const res = runGuard(['exit', 'execute'], dir); // T02 缺 SUMMARY
       assertExit(res, 1);
       assertOut(res, 'SUMMARY');
@@ -1687,13 +1699,12 @@ export const ENTRIES = [
       const st = baseState('subagent-execute');
       st.evidence.execute = { summary: 'executed' };
       st.enteredNodes = ['open', 'design', 'plan', 'subagent-execute'];
-      st.newChange = true;
       const handoff = handoffFor(['T01']);
       delete handoff.T01.result.redEvidence;
       st.evidence['subagent-execute'] = { summary: 'delegated', handoffRequest: { T01: { taskId: 'T01' } }, handoffResult: handoff };
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       const res = runGuard(['exit', 'subagent-execute'], dir);
       assertExit(res, 1);
       assertOut(res, 'redEvidence');
@@ -1704,6 +1715,7 @@ export const ENTRIES = [
   {
     name: '119 handoff result 提交对象不可校验 → 协调者确认提示（M4）',
     run: (dir) => {
+      assertExit(runHandoff(['request', 'T01', 'delegate', '--write-files', 'src/t1.mjs'], dir, { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) }), 0);
       writeState(dir, baseState('subagent-execute'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
       execFileSync('git', ['init', '-q'], { cwd: dir });
@@ -1723,35 +1735,49 @@ export const ENTRIES = [
     },
   },
 
-  // 120: M5——record 自动补写 skill-load 声明标记(open 节点 requiredSkillCalls)
+  // 120: 缺声明一律 BLOCKED（record 自动补写已整体删除）——照抄报文命令手动声明后同一 record 通过。
+  // 反向构造：引擎若仍自动补写，第一趟就不会 BLOCKED（本格 RED）；标记若仍由 record 代记，
+  // ② 的「零标记」断言会命中 auto 标记文件。
   {
-    name: '120 record 自动补写 skill-load 声明标记（M5）',
+    name: '120 record 缺声明一律 BLOCKED：手动 skill-load 后同一 record 通过（自动补写已删除）',
     run: (dir) => {
       const st = baseState('open');
       st.enteredNodes = ['open'];
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why（为什么做）\nx');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\nx\n\n## 验收准则（AC）\n- Given x When y Then z');
-      const res = runStateWithProtocol(dir, ['record', 'open', '{"summary":"done"}']);
-      assertExit(res, 0);
+      writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
+      writeFile(dir, 'flow-kit/prompts/1-requirement.md', '# 阶段 1 · REQUIREMENT\n\n## 角色\n\n你是 Requirer。\n');
       const loads = path.join(dir, '.specs', CHANGE_ID, '.skill-loads');
-      const changeMarker = path.join(loads, 'open-flow-comet-change.json');
-      const requirementMarker = path.join(loads, 'open-flow-comet-requirement.json');
-      if (!fs.existsSync(changeMarker)) {
-        throw new Error('record 自动声明标记缺失: open-flow-comet-change.json');
+      // ① 无声明 → BLOCKED（唯一等级：旧 change 的渐进分支已随字段退役），报文给可照抄的声明命令
+      const blocked = runStateWithProtocol(dir, ['record', 'open', '{"summary":"done"}']);
+      assertExit(blocked, 1);
+      assertOut(blocked, 'BLOCKED: 节点 open 缺少技能加载声明标记');
+      assertOut(blocked, 'skill-load open flow-comet-change');
+      assertOut(blocked, 'skill-load open flow-comet-requirement');
+      // ② 缺声明时不得代记任何标记（自动补写已删除；任何 .skill-loads 文件都是回退）
+      if (fs.existsSync(loads)) {
+        const written = fs.readdirSync(loads);
+        if (written.length > 0) {
+          throw new Error('record 在缺声明时自动补写了标记（自动补写应已删除）: ' + written.join(', '));
+        }
       }
-      // 子断言:自动补标记的 protocol 字段按 skill 归属协议文件(修复前所有 skill 都写节点
-      // 首文件 0-change.md——requirement 标记的协议归属语义错误,此处应 RED)
-      const changeMeta = JSON.parse(fs.readFileSync(changeMarker, 'utf8'));
+      // ③ 手动声明（真实 skill-load，协议文件与模板清单照报文形态给全）→ 同一 record 通过
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change',
+        '--prompt', 'flow-kit/prompts/0-change.md', '--prompt', 'flow-kit/prompts/1-requirement.md',
+        '--templates', 'CHANGE.md,REQUIREMENT.md']), 0);
+      assertExit(runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-requirement',
+        '--prompt', 'flow-kit/prompts/1-requirement.md', '--templates', 'CHANGE.md,REQUIREMENT.md']), 0);
+      const passed = runStateWithProtocol(dir, ['record', 'open', '{"summary":"done"}']);
+      assertExit(passed, 0);
+      assertOut(passed, 'EVIDENCE: open');
+      // ④ 标记如实记录执行者声明的协议文件，且不带 auto（引擎代记的形态不再产生）
+      const changeMeta = JSON.parse(fs.readFileSync(path.join(loads, 'open-flow-comet-change.json'), 'utf8'));
       if (changeMeta.protocol !== '0-change.md') {
-        throw new Error('change 自动标记 protocol 应为 0-change.md: ' + JSON.stringify(changeMeta.protocol));
+        throw new Error('手动声明标记的 protocol 应为 0-change.md: ' + JSON.stringify(changeMeta.protocol));
       }
-      if (!fs.existsSync(requirementMarker)) {
-        throw new Error('record 自动声明标记缺失: open-flow-comet-requirement.json');
-      }
-      const requirementMeta = JSON.parse(fs.readFileSync(requirementMarker, 'utf8'));
-      if (requirementMeta.protocol !== '1-requirement.md') {
-        throw new Error('requirement 自动标记 protocol 应为 1-requirement.md(修复前误写 0-change.md): ' + JSON.stringify(requirementMeta.protocol));
+      if (changeMeta.auto === true) {
+        throw new Error('手动声明标记不应带 auto（自动补写已删除）: ' + JSON.stringify(changeMeta));
       }
     },
   },
@@ -1763,7 +1789,6 @@ export const ENTRIES = [
       const st = baseState('execute');
       st.evidence.execute = { summary: 'empty exit', emptyExitApproved: true };
       st.enteredNodes = ['open', 'design', 'plan', 'execute'];
-      st.newChange = true;
       writeState(dir, st);
       writeNodeDeclarationMarkers(dir, 'execute');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="T01" parallel="true" status="pending" depends_on="">\n  <name>p</name>\n  <write_files>a</write_files>\n  <action>p</action>\n  <verify>t</verify>\n  <done>d</done>\n</task>');
@@ -1780,18 +1805,23 @@ export const ENTRIES = [
 
   // 122: M7——旧 change(enter 机制未激活)done 缺 SUMMARY 仍 WARN 渐进,不升级(兼容正例)
   // 构造:两个 done 任务(T01/T02),仅 T01-SUMMARY 存在(满足产物通配符,隔离 KI-8 语义)
+  // 122: 同一「done 任务缺 SUMMARY」构造在**无任何新旧标记字段**的状态下同样 BLOCKED
+  // （单轨：不再有「旧 change 渐进放行」这一侧）
   {
-    name: '122 execute exit 兼容：旧 change done 缺 SUMMARY 仍 WARN 渐进（M7）',
+    name: '122 execute exit：done 缺 SUMMARY 一律 BLOCKED（无字段状态同判）',
     run: (dir) => {
       const st = baseState('execute');
+      st.enteredNodes = ['execute'];
       st.evidence.execute = { summary: 'executed' };
       st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01', 'T02']) };
-      writeState(dir, st); // 无 enteredNodes(旧 change)
+      writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'execute');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE_TWO);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
-      const res = runGuard(['exit', 'execute'], dir); // T02 缺 SUMMARY → 旧 change 仍 WARN 渐进
-      assertExit(res, 0);
-      assertOut(res, 'WARN');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
+      const res = runGuard(['exit', 'execute'], dir); // T02 缺 SUMMARY
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, 'SUMMARY');
     },
   },
 
@@ -1816,21 +1846,23 @@ export const ENTRIES = [
     },
   },
 
-  // 124: M3 旧兼容——旧 change(enter 机制未激活)handoff 缺 redEvidence 仍 WARN 渐进(不升级)
+  // 124: handoff 缺 redEvidence 一律 BLOCKED（无字段状态同判，不再有渐进 WARN 这一侧）
   {
-    name: '124 subagent-execute exit 兼容：旧 change handoff 缺 redEvidence 仍 WARN（M3 旧兼容）',
+    name: '124 subagent-execute exit：handoff 缺 redEvidence 一律 BLOCKED',
     run: (dir) => {
       const st = baseState('subagent-execute');
+      st.enteredNodes = ['subagent-execute'];
       st.evidence.execute = { summary: 'executed' };
       const handoff = handoffFor(['T01']);
       delete handoff.T01.result.redEvidence;
       st.evidence['subagent-execute'] = { summary: 'delegated', handoffRequest: { T01: { taskId: 'T01' } }, handoffResult: handoff };
-      writeState(dir, st); // 无 enteredNodes(旧 change)
+      writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'subagent-execute');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       const res = runGuard(['exit', 'subagent-execute'], dir);
-      assertExit(res, 0);
-      assertOut(res, 'HANDOFF WARN');
+      assertExit(res, 1);
+      assertOut(res, 'redEvidence');
     },
   },
 
@@ -1844,7 +1876,6 @@ export const ENTRIES = [
     run: (dir) => {
       const st = baseState('review');
       st.evidence.review = { summary: 'reviewed' };
-      st.newChange = true;
       writeState(dir, st);
       writeNodeDeclarationMarkers(dir, 'review');
       assertExit(runGuard(['entry', 'review'], dir), 0);
@@ -2038,7 +2069,6 @@ export const ENTRIES = [
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
       st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
-      st.newChange = true;
       writeState(dir, st);
       assertExit(runGuard(['entry', 'execute'], dir), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
@@ -2067,7 +2097,6 @@ export const ENTRIES = [
     run: (dir) => {
       const st = baseState('plan');
       st.evidence.plan = { summary: 'planned' };
-      st.newChange = true;
       writeState(dir, st);
       writeNodeDeclarationMarkers(dir, 'plan');
       assertExit(runGuard(['entry', 'plan'], dir), 0);
@@ -2108,11 +2137,11 @@ export const ENTRIES = [
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
-      st.newChange = true;
       writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'execute');
       assertExit(runGuard(['entry', 'execute'], dir), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent()); // 满足 M2
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', strictSummary('T01')); // 满足 M2
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['P01']) }; // 满足越俎代庖,触发 KI-10 越权委托
       writeState(dir, st2);
@@ -2133,7 +2162,6 @@ export const ENTRIES = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + pendingParallelTask);
       // ① 新 change 错误节点 pending 并行 request → BLOCK + state 字节零改写 + 不落请求记录 + 恢复指引
       const reqState = baseState('execute');
-      reqState.newChange = true;
       reqState.enteredNodes = ['execute'];
       writeState(dir, reqState);
       const beforeReqBytes = fs.readFileSync(reqStatePath, 'utf8');
@@ -2174,7 +2202,6 @@ export const ENTRIES = [
         '<task id="P-M03" parallel="true" status="pending"><action>实现 P-M03</action><write_files>src/p-m03.mjs</write_files><verify>node --check src/p-m03.mjs</verify><depends_on>S-M01</depends_on></task>\n';
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + unmetDepsTask);
       const unmetState = baseState('execute');
-      unmetState.newChange = true;
       unmetState.enteredNodes = ['execute'];
       unmetState.completedNodes = ['open', 'design', 'plan'];
       unmetState.evidence = { plan: { summary: 'plan done' } };
@@ -2210,7 +2237,6 @@ export const ENTRIES = [
       }
       // 旧 change 同形态 → 可见 WARN + 照常落库（渐进兼容，不因依赖未满足而卡死）
       const oldUnmetState = { ...unmetState };
-      delete oldUnmetState.newChange;
       writeState(dir, oldUnmetState);
       const resUnmetOld = runHandoff(['request', 'P-M03', 'old change unmet deps'], dir, reqEnv);
       assertExit(resUnmetOld, 0);
@@ -2220,117 +2246,153 @@ export const ENTRIES = [
     },
   },
 
-  // 129: R2——新 change 未 entry 直接 exit → BLOCKED(旧 change ENTER WARN 保留)
+  // 129: R2——未 entry 直接 exit → BLOCKED
   {
-    name: '129 execute exit BLOCKED：新 change 未 entry 直接 exit（R2）',
+    name: '129 execute exit BLOCKED：未 entry 直接 exit（R2）',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
       st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
-      st.newChange = true;
+      st.enteredNodes = []; // 显式构造未 entry 形态
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       const res = runGuard(['exit', 'execute'], dir);
       assertExit(res, 1);
       assertOut(res, 'entry');
     },
   },
 
-  // 130: R6——init 写 newChange: true
+  // 130: R6 退役——init 不写 newChange；旧状态带 true / null 与无字段逐字一致（AC-1 / AC-2）。
+  // 三态对照是唯一判据：同一构造写三份 state、跑同一序列，退出码与首行必须相同——「带字段
+  // BLOCK、无字段 WARN」的分级若残留，无字段那一份会 exit 0（本格 RED）。
   {
-    name: '130 init 写入 newChange 标记（R6）',
+    name: '130 init 不写 newChange；旧值 true/null 与无字段逐字一致（R6 退役）',
     run: (dir) => {
       execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
       execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
       const res = runStateWithProtocol(dir, ['init', CHANGE_ID]);
       assertExit(res, 0);
-      const st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
-      if (st.newChange !== true) throw new Error('init 未写入 newChange: true');
+      const initialized = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      if ('newChange' in initialized) {
+        throw new Error('init 不应写入 newChange 字段（字段已退役）: ' + JSON.stringify(initialized.newChange));
+      }
+      // 三态对照：同一夹具分别写 true / null / 无字段，跑同一序列（缺声明 record → status → exit open）
+      const signature = (r) => r.status + '|' + r.output.split('\n')[0];
+      const sequence = (field) => {
+        const st = { ...initialized, enteredNodes: ['open'] };
+        if (field !== undefined) st.newChange = field;
+        writeState(dir, st);
+        const record = runStateWithProtocol(dir, ['record', 'open', '{"summary":"x"}']);
+        const status = runStateWithProtocol(dir, ['status']);
+        const exit = runGuardWithProtocol(dir, ['exit', 'open']);
+        return {
+          record: signature(record),
+          exit: signature(exit),
+          statusCode: status.status,
+          statusJson: status.output.split('\nROUTE:')[0].trim(),
+        };
+      };
+      const withTrue = sequence(true);
+      const withNull = sequence(null);
+      const without = sequence(undefined);
+      for (const [label, got] of [['true', withTrue], ['null', withNull]]) {
+        if (got.record !== without.record) {
+          throw new Error('newChange=' + label + ' 的 record 行为与无字段不一致: ' + got.record + ' ≠ ' + without.record);
+        }
+        if (got.exit !== without.exit) {
+          throw new Error('newChange=' + label + ' 的 exit 行为与无字段不一致: ' + got.exit + ' ≠ ' + without.exit);
+        }
+        if (got.statusJson !== without.statusJson) {
+          throw new Error('newChange=' + label + ' 的 status 输出与无字段不一致');
+        }
+      }
+      // 单一行为 = 缺声明 BLOCKED：三态都拦（不是「只有某一态被拦」）
+      if (!without.record.startsWith('1|')) throw new Error('缺声明 record 应 BLOCKED（exit 1），实际: ' + without.record);
+      if (!without.exit.startsWith('1|')) throw new Error('缺声明 exit 应 BLOCKED（exit 1），实际: ' + without.exit);
+      // 旧值被容忍：status 不报 schema 错误，且 JSON 不再输出该键
+      if (without.statusCode !== 0) throw new Error('旧状态带 newChange 时 status 不应报错，实际 exit ' + without.statusCode);
+      if (without.statusJson.includes('newChange')) {
+        throw new Error('status JSON 不应再输出 newChange 键: ' + without.statusJson.slice(0, 200));
+      }
     },
   },
 
-  // 131: R1 旧兼容——旧 change(无 newChange)处置标记缺失仍 WARN；并内扩延期裁决门禁（含 Minor）
-  // 的旧 change 渐进面：无用户裁决 / Minor 缺判据 → 只 WARN 不 BLOCK（不卡死旧 REVIEW）；有裁决
-  // +[升级] → 放行。Minor 判据门（R2）扩到 [已修]/[升级] 后旧 change 同一渐进口径。
+  // 131: 处置标记缺失与延期裁决门禁（含 Minor）在**无任何新旧标记字段**的状态下同样 BLOCKED
+  // （单轨：不再有「旧 REVIEW 只 WARN」这一侧）；有裁决 +[升级] 的条目照常放行。
   {
-    name: '131 review exit 兼容：旧 change 处置标记缺失仍 WARN + 延期渐进（R1 旧兼容）',
+    name: '131 review exit：处置标记缺失/延期待裁决一律 BLOCKED（无字段状态同判）',
     run: (dir) => {
       const st = baseState('review');
+      st.enteredNodes = ['review'];
       st.evidence.review = { summary: 'reviewed' };
-      writeState(dir, st); // 无 newChange(旧 change)
+      writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'review');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## Critical\n\n无。\n\n## 发现\n\n- **问题A**: 某处存在一个需要记录的问题描述,但未给出任何处置结论\n\n## 结论\n\n通过\n');
       const res = runGuard(['exit', 'review'], dir);
-      assertExit(res, 0);
-      assertOut(res, 'WARN');
-      // 子断言:Major [转待办] 无用户裁决 → 旧 change 渐进 WARN 且不 BLOCK（不卡死旧 REVIEW）
+      assertExit(res, 1);
+      assertOut(res, '处置状态标记');
+      // 子断言:Major [转待办] 无用户裁决 → BLOCKED（延期是用户决策点，reviewer 不得自行决定）
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **F1 · 未裁决的延期**：某处问题 [转待办]\n\n## 结论\n\n通过\n');
       const resMajor = runGuard(['exit', 'review'], dir);
-      assertExit(resMajor, 0);
-      assertOut(resMajor, 'REVIEW WARN');
+      assertExit(resMajor, 1);
+      assertOut(resMajor, 'BLOCKED');
       assertOut(resMajor, 'Major');
       assertOut(resMajor, '用户裁决');
-      assertNotOut(resMajor, 'BLOCKED');
       // 子断言:有同段用户裁决 + [升级] 承接 → 无该渐进告警
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n- **F2 · 已裁决的延期**：某处问题 [升级] [转待办]（用户裁决：接受延期）\n\n## 结论\n\n通过\n');
       const resOk = runGuard(['exit', 'review'], dir);
       assertExit(resOk, 0);
       assertNotOut(resOk, '用户裁决');
       assertOut(resOk, 'ALL CHECKS PASSED');
-      // 子断言:有序 Major [转待办] 无用户裁决 → 旧 change 渐进 WARN 不 BLOCK（有序同口径）
+      // 子断言:有序 Major [转待办] 无用户裁决 → 同判 BLOCKED（有序同口径）
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Major\n\n1. **F3 · 有序未裁决的延期**：某处问题 [转待办]\n\n## 结论\n\n通过\n');
       const resOrderedMajor = runGuard(['exit', 'review'], dir);
-      assertExit(resOrderedMajor, 0);
-      assertOut(resOrderedMajor, 'REVIEW WARN');
+      assertExit(resOrderedMajor, 1);
+      assertOut(resOrderedMajor, 'BLOCKED');
       assertOut(resOrderedMajor, '用户裁决');
-      assertNotOut(resOrderedMajor, 'BLOCKED');
-      // 子断言:Minor [转待办] 无用户裁决 → 旧 change 同样只 WARN 不 BLOCK（延期门禁覆盖任何
-      // 严重度，旧 REVIEW 渐进提示、不卡死既有 change）
-      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-6 · 旧 change 未裁决的小项**：某处小问题 [转待办]\n\n## 结论\n\n通过\n');
+      // 子断言:Minor [转待办] 无用户裁决 → BLOCKED（延期门禁覆盖任何严重度）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-6 · 未裁决的小项**：某处小问题 [转待办]\n\n## 结论\n\n通过\n');
       const resMinorDeferred = runGuard(['exit', 'review'], dir);
-      assertExit(resMinorDeferred, 0);
-      assertOut(resMinorDeferred, 'REVIEW WARN');
-      assertOut(resMinorDeferred, 'm-6 · 旧 change 未裁决的小项');
+      assertExit(resMinorDeferred, 1);
+      assertOut(resMinorDeferred, 'BLOCKED');
+      assertOut(resMinorDeferred, 'm-6 · 未裁决的小项');
       assertOut(resMinorDeferred, '用户裁决');
-      assertNotOut(resMinorDeferred, 'BLOCKED');
-      // 子断言:Minor [转待办] + 裁决记录但缺「判 Minor：」判据 → 旧 change 只 WARN 不 BLOCK
-      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-7 · 旧 change 缺判据的小项**：某处小问题 [升级] [转待办]\n\n- 用户裁决：接受延期 —— 发现 m-7：下一 change 首修。\n\n## 结论\n\n通过\n');
+      // 子断言:Minor [转待办] + 裁决记录但缺「判 Minor：」判据 → BLOCKED
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-7 · 缺判据的小项**：某处小问题 [升级] [转待办]\n\n- 用户裁决：接受延期 —— 发现 m-7：下一 change 首修。\n\n## 结论\n\n通过\n');
       const resMinorNoReason = runGuard(['exit', 'review'], dir);
-      assertExit(resMinorNoReason, 0);
-      assertOut(resMinorNoReason, 'REVIEW WARN');
+      assertExit(resMinorNoReason, 1);
+      assertOut(resMinorNoReason, 'BLOCKED');
       assertOut(resMinorNoReason, '判 Minor：');
-      assertNotOut(resMinorNoReason, 'BLOCKED');
-      // 子断言(R2 判定时门禁的旧 change 渐进面)：[已修] 的 Minor 缺判据同样只 WARN 不 BLOCK
-      // ——不卡死既有 REVIEW，与 [转待办] 形态同一渐进口径（新 change 见 125）
-      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-8 · 旧 change 已修缺判据的小项**：某处小问题 [已修]\n\n## 结论\n\n通过\n');
+      // 子断言：[已修] 的 Minor 缺判据同样 BLOCKED（判据落在判定当时，与处置标记无关）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 发现\n\n### Minor\n\n- **m-8 · 已修缺判据的小项**：某处小问题 [已修]\n\n## 结论\n\n通过\n');
       const resMinorFixedNoReason = runGuard(['exit', 'review'], dir);
-      assertExit(resMinorFixedNoReason, 0);
-      assertOut(resMinorFixedNoReason, 'REVIEW WARN');
-      assertOut(resMinorFixedNoReason, 'm-8 · 旧 change 已修缺判据的小项');
+      assertExit(resMinorFixedNoReason, 1);
+      assertOut(resMinorFixedNoReason, 'BLOCKED');
+      assertOut(resMinorFixedNoReason, 'm-8 · 已修缺判据的小项');
       assertOut(resMinorFixedNoReason, '判 Minor：');
-      assertNotOut(resMinorFixedNoReason, 'BLOCKED');
     },
   },
 
-  // 132: R3——exit 校验对 auto 声明标记输出 WARN 提示
+  // 132: R3 退役——auto 标记提示随自动补写删除；残留 auto 标记不产生提示，也不替本节点
+  // 其它必需项作证（覆盖门照常逐项点名 BLOCKED）
   {
-    name: '132 exit 对 auto 声明标记输出提示（R3）',
+    name: '132 auto 声明标记不再提示且不替其它必需项作证（R3 退役）',
     run: (dir) => {
-      // 技能加载前置门对齐：record 无声明标记在新 change 下 BLOCK——本场景测 exit 的
-      // auto 标记提示，改用旧 change(无 newChange)构造，保留 record 通过 + exit auto 提示
-      // 的测试意图（新 change 无声明记录由前置门场景覆盖）。
       const st = baseState('open');
+      st.evidence.open = { summary: 'intake' };
       writeState(dir, st);
-      assertExit(runGuard(['entry', 'open'], dir), 0);
-      assertExit(runStateWithProtocol(dir, ['record', 'open', '{"summary":"intake"}']), 0);
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why（为什么做）\nx');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\nx\n\n## 验收准则（AC）\n- Given x When y Then z');
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
       writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-change.json',
         JSON.stringify({ node: 'open', skill: 'flow-comet-change', protocol: '0-change.md', at: '2026-08-01T00:00:00.000Z', auto: true }, null, 2) + '\n');
       const res = runGuard(['exit', 'open'], dir);
-      assertExit(res, 0);
-      assertOut(res, 'auto');
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED');
+      assertOut(res, '缺必需技能声明: flow-comet-requirement');
+      assertNotOut(res, 'SKILL-LOAD HINT');
+      assertNotOut(res, '自动补写');
     },
   },
 
@@ -2340,7 +2402,6 @@ export const ENTRIES = [
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'empty', emptyExitApproved: true };
-      st.newChange = true;
       writeState(dir, st);
       writeNodeDeclarationMarkers(dir, 'execute');
       assertExit(runGuard(['entry', 'execute'], dir), 0);
@@ -2358,28 +2419,25 @@ export const ENTRIES = [
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
       st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01', 'T02']) };
-      st.newChange = true;
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE_TWO);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       const res = runGuard(['exit', 'execute'], dir); // T02 缺 SUMMARY
       assertExit(res, 1);
       assertOut(res, '恢复:');
     },
   },
 
-  // 135: R1 旧格式兼容分支——自检方法段含 brooks-review 声明但缺 `## 自检方法` 段标题(旧格式形态):
-  // 新 change 全文声明方法但缺段标题 → BLOCKED(强制自检方法段,transition 规则 L2454-2455);
-  // 旧 change 同构造 → BROOKS-LINT WARN 渐进(兼容保留,L2457)
+  // 135: 自检方法段含 brooks-review 声明但缺 `## 自检方法` 段标题(旧格式形态) → BLOCKED；
+  // 旧状态带 newChange 字段同构造 → 同判（字段只被忽略）
   {
-    name: '135 execute exit BLOCKED：新 change 自检方法段缺标题（R1 旧格式兼容分支）',
+    name: '135 execute exit BLOCKED：自检方法段缺标题（旧格式分支）',
     run: (dir) => {
       // ① 新 change(newChange:true):T01-SUMMARY 含 brooks-review 声明(6 维自查+方法行)但缺
       // `## 自检方法` 段标题(旧格式) → BLOCKED(自检方法段强制;恢复:补 ## 自检方法 段标题)
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
       st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
-      st.newChange = true;
       writeState(dir, st);
       assertExit(runGuard(['entry', 'execute'], dir), 0); // R2: 新 change 须先 entry
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
@@ -2387,15 +2445,16 @@ export const ENTRIES = [
       const res = runGuard(['exit', 'execute'], dir);
       assertExit(res, 1);
       assertOut(res, '自检方法');
-      // ② 旧 change(无 newChange)同构造 → BROOKS-LINT WARN 渐进(兼容保留,不阻断)
+      // ② 旧状态带 newChange 字段 + 同构造 → 同判 BLOCKED（字段只被忽略，不再有 WARN 侧）
       const stOld = baseState('execute');
       stOld.evidence.execute = { summary: 'executed' };
       stOld.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
+      stOld.newChange = true;
       writeState(dir, stOld);
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent({ method: 'brooks-review' }));
       const resOld = runGuard(['exit', 'execute'], dir);
-      assertExit(resOld, 0);
-      assertOut(resOld, 'BROOKS-LINT WARN');
+      assertExit(resOld, 1);
+      assertOut(resOld, '自检方法');
     },
   },
 
@@ -2480,7 +2539,6 @@ export const ENTRIES = [
       const st = baseState('review');
       st.completedNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute'];
       st.evidence.review = { summary: 'reviewed' }; // record 过但 exit 被拦截
-      st.newChange = true;
       writeState(dir, st);
       writeNodeDeclarationMarkers(dir, 'review');
       // 前序产物(execute 产物门控需 *-SUMMARY.md)

@@ -16,12 +16,6 @@ import { SUMMARY_REQUIRED_SECTIONS, buildSkeleton } from './guard-artifact-skele
 // 单向边）：本模块只消费，不在这里另写一份后缀/日期匹配。
 import { isArchivedChangeDirName } from './state-io.mjs';
 
-// 新旧 change 区分——init 写入的 newChange: true = 新 change（严格，不依赖 entry——防系统性
-// 跳 entry 绕过）；缺失/非 true（旧 change）= 渐进 WARN 兼容。
-export function isNewChange(state) {
-  return state.newChange === true;
-}
-
 // flow-kit SUMMARY 模板必填段（正则匹配，大小写不敏感 + 变体兼容）——清单唯一来源是骨架模块，
 // 此处只取用（本模块不再自持第二份段名清单）。
 

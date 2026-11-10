@@ -6,7 +6,7 @@
 //
 // 模板整份缺失（derived=false，含登记表缺失 registry-missing，C13）→ 模板派生判据全部跳过并输出
 // 「未校验（模板缺失）」；标题形态与首部字段来自登记表而非模板正文，照常校验（既有语义）。
-// 分级沿用 isNewChange：新 change → BLOCKED，旧 change → WARN（C10 无例外）。
+// 段形不符一律 BLOCKED（单轨，无分级旁路）。
 //
 // 两阶段报错（AC-15）：首次只给「模板路径 + 类别与数量」，不列「缺段」的段名；同一工件再次
 // 失败时读 .specs/<change>/.template-hints.json 并列段名；该工件通过后清除其键（C5）。其它类别
@@ -24,7 +24,6 @@ import {
   templateKeyOf,
 } from '../protocol-utils.mjs';
 import { runRoot, fileExists, protocolPath } from './guard-state-io.mjs';
-import { isNewChange } from './guard-routing.mjs';
 import { buildSkeleton, LEGACY_SUMMARY_ORDER } from './guard-artifact-skeleton.mjs';
 import { scanHeadings } from './section-body.mjs';
 import { TASK7_REQUIRED } from './task-graph.mjs';
@@ -640,17 +639,12 @@ export async function reportArtifactStructure({ changeDir, state, assessments })
   if (failing.length > 0) {
     const lines = planFailureLines(hints, failing);
     await writeHints(hintsFile, hints);
-    if (isNewChange(state)) {
-      for (const line of lines) console.error('BLOCKED: ' + line);
-      const templatePaths = [...new Set(failing.map((item) => item.skeleton.file ?? '（未登记模板路径）'))];
-      console.error('恢复: 对照 ' + templatePaths.join(' / ') + ' 修正标题 / 首部字段 / 段序，并按模板补齐缺失的 H2 与结构型 H3 标题'
-        + '（条件段与无内容段正文可写 N/A；可选段按模板自述可整段删除）后重试 exit；同一工件再次失败时会列出具体段名'
-        + '（已记录在 .specs/' + (state.activeChange ?? '<change>') + '/' + HINT_FILE_NAME + '）');
-      process.exit(1);
-    }
-    for (const line of lines) {
-      console.error('TEMPLATE-STRUCTURE WARN: ' + line + '（旧 change 渐进，不阻断；新 change 将强制）');
-    }
+    for (const line of lines) console.error('BLOCKED: ' + line);
+    const templatePaths = [...new Set(failing.map((item) => item.skeleton.file ?? '（未登记模板路径）'))];
+    console.error('恢复: 对照 ' + templatePaths.join(' / ') + ' 修正标题 / 首部字段 / 段序，并按模板补齐缺失的 H2 与结构型 H3 标题'
+      + '（条件段与无内容段正文可写 N/A；可选段按模板自述可整段删除）后重试 exit；同一工件再次失败时会列出具体段名'
+      + '（已记录在 .specs/' + (state.activeChange ?? '<change>') + '/' + HINT_FILE_NAME + '）');
+    process.exit(1);
   } else if (released) {
     await writeHints(hintsFile, hints);
   }
@@ -820,12 +814,9 @@ async function legacyDesignLiteTitle(changeDir, state) {
   const firstLine = (text.replace(/^\uFEFF/u, '').split('\n').find((line) => line.trim() !== '') ?? '').trim();
   if (/^#\s*design\b/iu.test(firstLine)) return;
   const message = 'DESIGN-lite.md 标题应以 # DESIGN 开头（如 `# DESIGN: <标题>`，大小写不敏感、冒号可省）';
-  if (isNewChange(state)) {
-    console.error('BLOCKED: ' + message);
-    console.error('恢复: 修正 DESIGN-lite.md 首行标题后重试 exit design');
-    process.exit(1);
-  }
-  console.error('INTAKE-DOC WARN: ' + message + '（旧 change 渐进，不阻断；新 change 将强制）');
+  console.error('BLOCKED: ' + message);
+  console.error('恢复: 修正 DESIGN-lite.md 首行标题后重试 exit design');
+  process.exit(1);
 }
 
 // TASK 7 字段完整性门禁（plan 出口）：每个 <task> 块须含
@@ -850,14 +841,11 @@ export async function runTaskSevenFieldGate({ node, state }) {
     }
     if (broken.length > 0) {
       if (planNewFormat) {
-        if (isNewChange(state)) {
-          // 文案的集合字符串**从判据常量派生**（不得在此再写一遍字面集合——第二处同口径表达会在
-          // 判据演进时静默落后于实现；构造方式不改变渲染结果）。
-          console.error('BLOCKED: TASK.md 任务缺 7 字段（' + TASK7_REQUIRED.join('/') + '）: ' + broken.join('; '));
-          console.error('恢复: 对照 flow-kit/templates/TASK.md 补齐每个 <task> 的缺字段后重试 exit；新 change 强制任务块结构完整');
-          process.exit(1);
-        }
-        console.error('TASK-7FIELD WARN: TASK.md ' + broken.join('; ') + '（旧 change 渐进，不阻断；新 change 将强制补齐 7 字段）');
+        // 文案的集合字符串**从判据常量派生**（不得在此再写一遍字面集合——第二处同口径表达会在
+        // 判据演进时静默落后于实现；构造方式不改变渲染结果）。
+        console.error('BLOCKED: TASK.md 任务缺 7 字段（' + TASK7_REQUIRED.join('/') + '）: ' + broken.join('; '));
+        console.error('恢复: 对照 flow-kit/templates/TASK.md 补齐每个 <task> 的缺字段后重试 exit');
+        process.exit(1);
       } else {
         console.error('TASK-7FIELD WARN: TASK.md 任务为旧式一字段模板形态（' + broken.join('; ') +
           '）——建议按 flow-kit/templates/TASK.md 补全 7 字段（渐进不阻断）');

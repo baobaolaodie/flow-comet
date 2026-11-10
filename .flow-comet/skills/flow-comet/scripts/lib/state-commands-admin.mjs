@@ -118,15 +118,13 @@ export async function runSkillLoad(protocol, argv) {
     }
   }
   // 产出物模板声明（C4 / C11）：置入既有标记 JSON 的 templates 数组（节点级一份）。
-  // 内置节点：声明集合必须与 C3 映射一致（required ⊆ declared ⊆ required ∪ optional）——新 change
-  // 缺失 / 多写 / 漏写 / 错名一律 BLOCK（fail-closed），旧 change 只在「显式传了不一致的清单」时
-  // WARN（渐进兼容：旧项目不可能一夜补齐声明，缺失由 record 侧统一给提示，不在声明处重复报）。
+  // 内置节点：声明集合必须与 C3 映射一致（required ⊆ declared ⊆ required ∪ optional）——
+  // 缺失 / 多写 / 漏写 / 错名一律 BLOCK（fail-closed）。
   // 自定义协议节点：不比对集合（ADR-002 特化层，C12：协议声明什么就记什么）。
   const templateArg = findTemplatesArg(argv.slice(3));
   const declarationNode = (protocol.nodes ?? []).find((item) => item.id === nodeId);
   const templateDeclaration = nodeTemplateDeclaration(declarationNode);
   if (templateDeclaration.source === 'builtin') {
-    const isNewChange = (await readState()).newChange === true;
     const requiredNames = describeTemplateList(templateDeclaration.required);
     // 重新声明命令由协议派生（state-explain 的唯一装配）：脚本路径 + 该节点**全部**协议文件 +
     // 模板全清单 + 协议上下文。此前的形态只带首份 --prompt，且是裸脚本名（照抄 command not found，
@@ -138,13 +136,12 @@ export async function runSkillLoad(protocol, argv) {
     });
     // 命令自成一行（与其他两处声明报文同形）：整行可照抄，不会被前后措辞切碎。
     const reportUnsoundDeclaration = (reason) => {
-      console.error((isNewChange ? 'BLOCKED: ' : 'WARN: ') + reason
-        + '——照抄下面的命令重新声明（同一 node-skill 重跑会覆写该标记）'
-        + (isNewChange ? '后重试' : '；旧 change 渐进不阻断') + ':\n  ' + declareCommand);
-      if (isNewChange) process.exit(1);
+      console.error('BLOCKED: ' + reason
+        + '——照抄下面的命令重新声明（同一 node-skill 重跑会覆写该标记）后重试:\n  ' + declareCommand);
+      process.exit(1);
     };
     const problems = templateDeclarationProblems(templateDeclaration, templateArg.values);
-    if (!templateArg.provided && templateDeclaration.required.length > 0 && isNewChange) {
+    if (!templateArg.provided && templateDeclaration.required.length > 0) {
       reportUnsoundDeclaration('节点 ' + nodeId + ' 的模板声明缺失（C3 映射: ' + requiredNames + '）');
     }
     if (templateArg.provided && (problems.missing.length > 0 || problems.extra.length > 0)) {
@@ -159,9 +156,8 @@ export async function runSkillLoad(protocol, argv) {
   // 同 node-skill 重复调用覆盖（记录最新声明）
   const changeName = await findActiveChange();
   if (!changeName) {
-    // 归档后场景:change 目录已移入 .specs/archive/(无活跃 change)——skill-load 不可用,
-    // 但 record 的声明自动化仍可写归档路径标记——消息如实引导
-    throw new Error('skill-load requires an active change（先运行 init <change-id>;若该 change 已归档,声明标记由 record 自动补写——M5 会写入归档路径的 .skill-loads/）');
+    // 无活跃 change:声明标记的唯一写入通道就是本命令——不得承诺任何自动补写。
+    throw new Error('skill-load requires an active change（先运行 init <change-id> 或把 change 目录移回活动位置;声明标记必须由执行者手动 skill-load 写入，引擎不会代记）');
   }
   // 标记的协议声明两形态并存：
   //   · protocols = 全部 --prompt 的 basename（保序）——出口覆盖判据按它判「该读的每份协议是否

@@ -61,8 +61,7 @@ export function findPromptArgs(cliArgs) {
 }
 
 // 声明标记里「已声明的协议文件」提取（唯一实现：出口覆盖判据与任何读标记的消费方共用）：
-//   · protocols 数组（skill-load 多条 --prompt 的写入形态）∪ protocol 单值（收紧前的写入形态，
-//     以及 record 自动补写的标记）；
+//   · protocols 数组（skill-load 多条 --prompt 的写入形态）∪ protocol 单值（收紧前的写入形态）；
 //   · 每个值都按 basename 归一——旧标记可能是完整绝对路径（历史缺陷期写入的形态），新标记是
 //     basename；两种形态必须比对同一口径（节点协议映射表只存 basename）。
 // 返回去重保序的 basename 数组；null / 空串 / 非字符串一律忽略（fail-closed：覆盖判据只认
@@ -142,12 +141,12 @@ export async function hasNodeSkillDeclaration(nodeId, changeName) {
 // 模板声明核对（C11）：节点的产出物模板声明落在 .skill-loads/<node>-*.json 的 templates 数组里，
 // 集合必须与 C3 映射一致（required ⊆ declared ⊆ required ∪ optional）。同一节点可有多个 skill 标记
 // （open 有 change / requirement），取并集——节点级一份声明被任一标记满足即可（skill-load 每次
-// 都写全清单）。新 change 缺失 / 多写 / 漏写 / 错名 → BLOCK；旧 change → WARN（渐进兼容，C10）。
+// 都写全清单）。缺失 / 多写 / 漏写 / 错名 → BLOCK（单轨，无分级旁路）。
 // 不比对的三种情形：非内置节点（C12：自定义协议按自己的声明走）、无活动 change、声明机制未激活
 //（无 .skill-loads/ 或本节点无标记）——后者由「缺少技能加载声明标记」门负责，不重复报
 //（与 exit 侧协议声明校验的「未激活不追溯」同一口径）。
 // 零模板的内置节点（verify / archive）省略 --templates 即视为空集，通过。
-export async function verifyTemplateDeclaration({ protocol, nodeId, changeName, newChange, commandContext: context }) {
+export async function verifyTemplateDeclaration({ protocol, nodeId, changeName, commandContext: context }) {
   const declarationNode = (protocol?.nodes ?? []).find((node) => node.id === nodeId);
   const declaration = nodeTemplateDeclaration(declarationNode);
   if (declaration.source !== 'builtin' || !changeName) return { ok: true };
@@ -169,8 +168,8 @@ export async function verifyTemplateDeclaration({ protocol, nodeId, changeName, 
     } catch {
       continue; // 损坏标记由既有声明校验报（本判据不抢报）
     }
-    // record 自动补写的标记（auto）是引擎写的，不是执行者的声明——它不承担模板声明义务
-    // （exit 侧已有「建议手动 skill-load」提示），不拿它算缺失
+    // 旧版本 record 自动补写的标记（auto:true）是引擎写的，不是执行者的声明——历史 state 容忍
+    // 读取，但它不承担模板声明义务，不拿它算缺失（自动补写已删除，本形态不再产生）
     if (marker?.auto === true) continue;
     explicitMarkers += 1;
     // 技能名取**标记文件名**（<node>-<skill>.json 是这份标记的身份，扫描与覆盖判据也按它认）：
@@ -201,8 +200,7 @@ export async function verifyTemplateDeclaration({ protocol, nodeId, changeName, 
     + '；映射要求: ' + describeTemplateList(declaration.required) + '）——重跑下面的命令重新声明'
     + '（同一 node-skill 重跑会覆写该标记）:\n'
     + declareCommands.map((command) => '  ' + command).join('\n');
-  if (newChange === true) return { ok: false, reason };
-  return { ok: true, warn: reason };
+  return { ok: false, reason };
 }
 
 // completedChecks 真实性校验。解析 completedChecks 的 required-skill:<node>.<skill>

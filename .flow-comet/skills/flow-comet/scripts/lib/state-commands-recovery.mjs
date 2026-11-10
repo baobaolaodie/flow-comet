@@ -282,7 +282,7 @@ export async function runReenter(protocol, argv) {
 // 因此与 plan 出口**逐字一致**（escalate=false，两阶段口径不变）；重校段的现场适配只落在恢复行：
 // ① 缺的段名在这里点名（重校段没有提示账本可「再犯升级」，等第二次才说段名等于永远不说）；
 // ② 重试目标是本命令（人在 replan 现场，改完要重跑的是它）。分级沿用既有语义：新 change BLOCKED、
-// 旧 change WARN 渐进。
+// 命中即 BLOCKED。
 async function replanTaskStructureGate(state, taskContent) {
   const taskArtifact = await evaluateArtifact('TASK', taskContent, {});
   if (!taskArtifact.derived) return; // 模板缺席 ⇒ 段形无从派生（与 plan 出口同一支「未校验（模板缺失）」）
@@ -293,15 +293,12 @@ async function replanTaskStructureGate(state, taskContent) {
   if (parts.length === 0) return;
   const templateFile = taskArtifact.skeleton.file ?? '（登记表未登记模板路径）';
   const failureLine = 'TASK.md 模板结构校验失败: ' + parts.join('; ') + '（模板: ' + templateFile + '）';
-  if (state.newChange === true) {
-    const missingSections = taskArtifact.issues.missing ?? [];
-    console.error('BLOCKED: ' + failureLine);
-    console.error('恢复: 对照 ' + templateFile + ' 修正标题 / 首部字段 / 段序，并按模板补齐缺失的 H2 与结构型 H3 标题'
-      + (missingSections.length > 0 ? '（缺失的段: ' + missingSections.join('、') + '）' : '')
-      + '——承载段被删掉也算缺段，删段不是跳过判据的写法；改完重试 replan（replan 不做校验豁免，状态零改写）');
-    process.exit(1);
-  }
-  console.error('TEMPLATE-STRUCTURE WARN: ' + failureLine + '（旧 change 渐进，不阻断；新 change 将强制）');
+  const missingSections = taskArtifact.issues.missing ?? [];
+  console.error('BLOCKED: ' + failureLine);
+  console.error('恢复: 对照 ' + templateFile + ' 修正标题 / 首部字段 / 段序，并按模板补齐缺失的 H2 与结构型 H3 标题'
+    + (missingSections.length > 0 ? '（缺失的段: ' + missingSections.join('、') + '）' : '')
+    + '——承载段被删掉也算缺段，删段不是跳过判据的写法；改完重试 replan（replan 不做校验豁免，状态零改写）');
+  process.exit(1);
 }
 
 // replan <reason> --authorized-by <source> [--continue-round <n>]
@@ -470,14 +467,14 @@ export async function runReplan(protocol, argv) {
   // 分级与措辞都由 waveReviewOutcome 一处产出（本段只派生 blocking）：两处不可能各说一套，也不会
   // 因为「分级规则只改了一处」而在另一处静默落后。
   const waveReview = waveProjectionReview({ taskContent, blocks: taskList });
-  const waveOutcome = waveReviewOutcome(waveReview, { blocking: state.newChange === true });
+  const waveOutcome = waveReviewOutcome(waveReview, { blocking: true });
   for (const line of waveOutcome.lines) console.error(line);
   if (waveOutcome.block) process.exit(1);
   // 同波可并行却漏标 [P]：plan 出口的第二条波次面判据，重校段同样不豁免（ADR-013）——否则执行期
   // 重签就能把「本可并行却没标」的计划换一份发出去。波次分组复用上面同一次解析（waveReview.waves）。
   const gapOutcome = parallelGapOutcome(
     parallelGapReview({ taskContent, blocks: taskList, waves: waveReview.waves }),
-    { blocking: state.newChange === true },
+    { blocking: true },
   );
   for (const line of gapOutcome.lines) console.error(line);
   if (gapOutcome.block) process.exit(1);
@@ -495,15 +492,14 @@ export async function runReplan(protocol, argv) {
     }
   }
   if (replanTask7Broken.length > 0) {
-    if (replanTask7NewFormat && state.newChange === true) {
+    if (replanTask7NewFormat) {
       // 文案的集合字符串**从判据常量派生**（不得在此再写一遍字面集合——第二处同口径表达会在
       // 判据演进时静默落后于实现；构造方式不改变渲染结果）。
       console.error('BLOCKED: TASK.md 任务缺 7 字段（' + TASK7_REQUIRED.join('/') + '）: '
         + replanTask7Broken.join('; ') + '；恢复: 对照 flow-kit/templates/TASK.md 补齐每个 <task> 的缺字段后重试；replan 不做校验豁免');
       process.exit(1);
     }
-    console.error('TASK-7FIELD WARN: TASK.md ' + replanTask7Broken.join('; ')
-      + (replanTask7NewFormat ? '（旧 change 渐进，不阻断）' : '（旧式一字段模板形态，渐进不阻断）'));
+    console.error('TASK-7FIELD WARN: TASK.md ' + replanTask7Broken.join('; ') + '（旧式一字段模板形态，渐进不阻断）');
   }
   // 路径边界：change 名必须是 .specs/ 下的单段真实目录（realpath 归一后仍在 .specs/ 内、
   // 无 symlink/junction 逃逸；复用受控路径边界实现）——备份落点必须先通过该边界。
@@ -538,12 +534,9 @@ export async function runReplan(protocol, argv) {
   if (crossTaskConflicts.length > 0) {
     const crossDetail = crossTaskConflicts.map((c) => c.a + '×' + c.b + '(' + c.files.join(',') + ')').join('; ');
     const crossGuide = '；恢复: 补显式 depends_on 或合并为一个任务后重试';
-    if (state.newChange === true) {
-      console.error('BLOCKED: TASK.md 同文件跨任务且无依赖路径: ' + crossDetail
-        + '——replan 不做校验豁免，状态零改写' + crossGuide);
-      process.exit(1);
-    }
-    console.error('WARN: TASK.md 同文件跨任务且无依赖路径（旧 change 渐进不阻断）: ' + crossDetail + crossGuide);
+    console.error('BLOCKED: TASK.md 同文件跨任务且无依赖路径: ' + crossDetail
+      + '——replan 不做校验豁免，状态零改写' + crossGuide);
+    process.exit(1);
   }
   if (readWarnings.length > 0) {
     console.error('WARN: TASK.md 并行任务 read∩write 隐式依赖嫌疑（一方读取对方写路径，建议补显式 depends_on 声明）: '

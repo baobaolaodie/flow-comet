@@ -30,6 +30,9 @@ import {
   engineScriptFiles,
   engineScriptTexts,
   handoffFor,
+  intakeChangeText,
+  intakeDesignText,
+  intakeRequirementText,
   strictSummary,
   summaryContent,
   timeUtilsModule,
@@ -70,8 +73,12 @@ export const ENTRIES = [
       const st = baseState('open');
       st.evidence.open = { summary: 'intake complete' };
       writeState(dir, st);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n\n## 范围\n');
-      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\n## 验收准则（AC）\n');
+      writeNodeDeclarationMarkers(dir, 'open');
+      // 单轨：模板保真对一切 change 生效 → 夹具给出标题形态 + 首部字段 + 非空正文
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md',
+        '# CHANGE: 夹具\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## Why（为什么做）\n\n夹具。\n\n## 范围（Scope）\n\n夹具。\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md',
+        '# REQUIREMENT: 夹具\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 用户故事（User Story）\n\n- US-1\n\n## 验收准则（AC）\n\n- Given a When b Then c\n\n## 非目标（Non-Goals）\n\n- 无\n');
       const res = runGuard(['exit', 'open'], dir);
       assertExit(res, 0);
       assertOut(res, 'ALL CHECKS PASSED');
@@ -88,8 +95,12 @@ export const ENTRIES = [
       const st = baseState('open');
       st.evidence.open = { summary: 'intake complete' };
       writeState(dir, st);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## 变更目标\n\n## 方案\n');
-      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\n## 验收准则（AC）\n');
+      writeNodeDeclarationMarkers(dir, 'open');
+      // 标题形态与首部字段来自登记表（不依赖模板），夹具按合规形态给；缺的是模板段名（Why）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md',
+        '# CHANGE: 夹具\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 变更目标\n\n夹具。\n\n## 方案\n\n夹具。\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md',
+        '# REQUIREMENT: 夹具\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 用户故事\n\n- US-1\n\n## 验收准则（AC）\n\n- Given a When b Then c\n');
       const res = runGuard(['exit', 'open'], dir);
       assertExit(res, 0);
       assertOut(res, '未校验（模板缺失）: CHANGE.md');
@@ -109,6 +120,7 @@ export const ENTRIES = [
       const st = baseState('open');
       st.evidence.open = { summary: 'intake complete' };
       writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'open');
       writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n');
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\n## 需求分析\n');
       const res = runGuard(['exit', 'open'], dir);
@@ -126,7 +138,9 @@ export const ENTRIES = [
       const st = baseState('design');
       st.evidence.design = { summary: 'design done' };
       writeState(dir, st);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md', '# DESIGN\n\n## 0. 技术栈选型\n\n## 1. 技术决策清单\n');
+      writeNodeDeclarationMarkers(dir, 'design');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md',
+        '# DESIGN: 夹具\n\n- **Change ID**: ' + CHANGE_ID + '\n\n## 0. 技术栈选型\n\nNode.js（ESM）\n\n## 1. 技术决策清单\n\n- D1 夹具决策\n\n## 2. 数据流\n\n夹具：无数据流。\n');
       const res = runGuard(['exit', 'design'], dir);
       assertExit(res, 0);
       assertOut(res, 'ALL CHECKS PASSED');
@@ -158,9 +172,10 @@ export const ENTRIES = [
       const st = baseState('plan');
       st.evidence.plan = { summary: 'plan done' };
       writeState(dir, st);
-      const newChangeState = { ...baseState('plan'), newChange: true, enteredNodes: ['plan'] };
+      const newChangeState = { ...baseState('plan'), enteredNodes: ['plan'] };
       newChangeState.evidence.plan = { summary: 'plan done' };
       writeState(dir, newChangeState);
+      writeNodeDeclarationMarkers(dir, 'plan');
       // ① 缺 write_files → 预检 BLOCKED，且 state 字节零改写
       const missingFieldTask =
         '<task id="T01" status="pending"><name>任务一</name><read_files>src/*</read_files>'
@@ -213,6 +228,7 @@ export const ENTRIES = [
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
       writeState(dir, st);
+      writeNodeDeclarationMarkers(dir, 'execute');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
       // enter 时脚本自动记录 taskHash（写回 state）
       const entryView = runGuard(['entry', 'execute'], dir);
@@ -230,7 +246,7 @@ export const ENTRIES = [
       }
       assertNotOut(entryView, '只能通过 Agent 工具 worktree isolation 委托子代理');
       // exit 前补 SUMMARY + handoff（不碰 TASK.md）
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
       writeState(dir, st2);
@@ -260,7 +276,9 @@ export const ENTRIES = [
       }));
       const resVariantNeg = runGuard(['exit', 'execute'], dir);
       assertExit(resVariantNeg, 1);
-      assertOut(resVariantNeg, '自检方法');
+      // 单轨下方法门对一切 change 生效：「段内无方法声明」由 6 维自查段的同一判据先报出
+      // （措辞与旧口径不同，判据相同——都是「没有声明自检方法」）
+      assertOut(resVariantNeg, '6 维自查未声明使用 /brooks-review');
 
       // ---------- 节点视图收敛（in-place 扩展） ----------
       // 构造「execute 已 entry 未 exit、产物推导已指向其后继 review」的态：此前 status 只报
@@ -343,6 +361,7 @@ export const ENTRIES = [
       // 两个输出面同形：同一节点下 handoff result 打印的同一条命令必须逐字相同（不是各写一份）。
       // handoff 侧的路由视图要解析协议（与 next 同一判定），而 runHandoff 默认不注入协议副本——
       // 显式传入场景协议路径（与 runState 的默认注入同源）。
+      assertExit(runHandoff(['request', 'T01', 'delegate T01'], dir, { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) }), 0);
       const handoffPre = runHandoff(['result', 'T01', '{"greenEvidence":{"command":"node --check src/t1.mjs"},"redEvidence":{"command":"node --check src/t1.mjs"}}'], dir, {
         FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir),
       });
@@ -508,7 +527,6 @@ export const ENTRIES = [
         verifyFailures: 0,
         executionMode: 'subagent',
         directOverride: false,
-        newChange: true,
       };
       writeFile(dir, fixTaskPath, fixBatchTaskText('pending'));
       writeFile(dir, '.specs/' + CHANGE_ID + '/REVIEW.md', '# REVIEW\n\n## 结论\n\n修复任务已追加，待归位 execute 跑完其出口。\n');
@@ -672,7 +690,6 @@ export const ENTRIES = [
         verifyFailures: 0,
         executionMode: 'subagent',
         directOverride: false,
-        newChange: true,
       });
       const behindBytes = readStateBytes(dir);
       const behindStatus = runState(['status'], dir);
@@ -715,7 +732,7 @@ export const ENTRIES = [
       // 撞 BLOCKED，「同一状态同一答案」在这两种态上不成立。修复后 status 输出 routeNode=null 且
       // ROUTE: 行写明「next 将 BLOCKED：<原因>」，与 next 的实际行为一致；判定是 state 副本上的
       // 只读预演（真实字节零改写、不计轮次）。
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       writeFile(dir, fixTaskPath, fixBatchTaskText('pending'));
       writeState(dir, { ...fixState, fixRoundsByChange: { [CHANGE_ID]: 3 } });
       const blockedFixBytes = readStateBytes(dir);
@@ -873,9 +890,10 @@ export const ENTRIES = [
     },
   },
 
-  // 9: execute exit BLOCKED——6 维自查仅 "### 🟢 R1" 标题无正文
+  // 9: execute exit BLOCKED——6 维自查段内无方法声明（单轨：方法门对一切 change 生效；
+  // 旧口径下这一格先被「无实质内容」拦，现在由同一族的方法声明判据先报出——判据相同、措辞不同）
   {
-    name: '09 execute exit BLOCKED：6 维仅 🟢 标题无实质',
+    name: '09 execute exit BLOCKED：6 维自查无方法声明',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
@@ -887,7 +905,7 @@ export const ENTRIES = [
       }));
       const res = runGuard(['exit', 'execute'], dir);
       assertExit(res, 1);
-      assertOut(res, '无实质内容');
+      assertOut(res, '6 维自查未声明使用 /brooks-review');
     },
   },
 
@@ -901,18 +919,19 @@ export const ENTRIES = [
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent({
-        sixDim: '## 6 维自查\n\n- 功能: 通过\n- 性能: 无影响\n- 安全: 无影响\n- 兼容: 通过\n- 可观测: 通过\n- 可维护: 通过',
+        sixDim: '## 6 维自查\n\n- 功能: 通过（brooks-review 已跑）\n- 性能: 无影响\n- 安全: 无影响\n- 兼容: 通过\n- 可观测: 通过\n- 可维护: 通过',
         method: '',
       }));
       const res = runGuard(['exit', 'execute'], dir);
       assertExit(res, 1);
+      // 6 维段声明了方法（方法门通过）→ 由「## 自检方法 段必须在场」这一判据拦下
       assertOut(res, '自检方法');
     },
   },
 
-  // 11: execute exit 兼容——旧格式无 ## 自检方法 但 6 维含 brooks-review → WARN 不 BLOCK
+  // 11: execute exit——旧格式无 ## 自检方法 段但 6 维含 brooks-review → 段标题必须在场（BLOCKED）
   {
-    name: '11 execute exit 兼容：旧格式含 brooks-review → WARN',
+    name: '11 execute exit BLOCKED：旧格式缺 ## 自检方法 段',
     run: (dir) => {
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
@@ -921,8 +940,8 @@ export const ENTRIES = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent({ method: '' }));
       const res = runGuard(['exit', 'execute'], dir);
-      assertExit(res, 0);
-      assertOut(res, 'BROOKS-LINT WARN');
+      assertExit(res, 1);
+      assertOut(res, '自检方法');
     },
   },
 
@@ -948,12 +967,14 @@ export const ENTRIES = [
   {
     name: '13 execute exit BLOCKED：parallel done 无 handoffResult（越俎代庖）',
     run: (dir) => {
+      writeNodeDeclarationMarkers(dir, 'execute');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P02-SUMMARY.md', strictSummary('P02'));
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
       st.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) }; // P02 无 handoff
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE + TASK_P2);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       const res = runGuard(['exit', 'execute'], dir);
       assertExit(res, 1);
       assertOut(res, '越俎代庖');
@@ -995,7 +1016,6 @@ export const ENTRIES = [
         '',
       ].join('\n'));
       const st = baseState('execute');
-      st.newChange = true;
       st.enteredNodes = ['execute'];
       st.evidence.execute = { summary: 'executed' };
       st.evidence['subagent-execute'] = { handoffResult: handoffFor(['P02']) };
@@ -1005,7 +1025,7 @@ export const ENTRIES = [
       // 坏 SUMMARY：关键段齐（关键段门能过），但段形不合模板——标题缺 `# SUMMARY:`
       // 前缀、首部四字段缺席、段序偏离、缺「是否触发新工作」「完成判定」。这正是只有模板保真门
       // 才判、因而被更早的进展门挡住的结构问题。
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       const serialExit = runGuard(['exit', 'execute'], dir);
       assertExit(serialExit, 1);
       assertOut(serialExit, '串行 pending');
@@ -1027,7 +1047,7 @@ export const ENTRIES = [
         '--preflight 不得写模板提示账本（.template-hints.json）');
 
       // ② 分级不变：同一坏 SUMMARY 在旧 change 只 WARN 不阻断（预检不得把旧 change 升级成 BLOCK）
-      writeState(dir, { ...st, newChange: false });
+      writeState(dir, { ...st });
       const oldChangeBytes = readStateBytes(dir);
       const oldChangePre = runGuard(['exit', 'execute', '--preflight'], dir);
       assertExit(oldChangePre, 0);
@@ -1109,7 +1129,7 @@ export const ENTRIES = [
       // REQUIREMENT.md。改前结构子集只查「在场者」⇒ 一件都没查、打印 ALL CHECKS PASSED（假绿）。
       // 本节点声明的 file 类工件（open: CHANGE.md + REQUIREMENT.md）是否在场是**结构事实**，不是
       // 进展判定：缺失必须 BLOCK，逐项给路径，并给一句「先创建该工件（按模板路径）」的指引。
-      const openState = { ...baseState('open'), newChange: true, enteredNodes: ['open'] };
+      const openState = { ...baseState('open'), enteredNodes: ['open'] };
       fs.rmSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true, force: true });
       writeState(dir, openState);
       const emptyOpenBytes = readStateBytes(dir);
@@ -1208,6 +1228,9 @@ export const ENTRIES = [
   {
     name: '15 subagent-execute exit 三态（在飞委托 BLOCK·全部收工放行·无证据零输出）+ 留痕嵌套锚',
     run: (dir) => {
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P02-SUMMARY.md', strictSummary('P02'));
+      writeNodeDeclarationMarkers(dir, 'subagent-execute');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', strictSummary('P01'));
       const st = baseState('subagent-execute');
       st.evidence['subagent-execute'] = {
         summary: 'delegated and collected',
@@ -1253,7 +1276,7 @@ export const ENTRIES = [
       assertOut(unqualifiedExit, '缺 commitHash');
 
       // ② 在飞委托（有 request 无对应 result）⇒ 新 change BLOCKED，报文点名未收工任务并给恢复指引
-      const inFlight = { ...baseState('subagent-execute'), newChange: true };
+      const inFlight = { ...baseState('subagent-execute') };
       inFlight.enteredNodes = ['subagent-execute'];
       inFlight.evidence['subagent-execute'] = {
         summary: 'delegated, one writer still running',
@@ -1275,7 +1298,6 @@ export const ENTRIES = [
       assertNotOut(blocked, 'P01（');
       // ②b 旧 change 同形态 ⇒ 渐进 WARN 不阻断（向后兼容硬约束），指引仍在
       const inFlightOld = { ...inFlight };
-      delete inFlightOld.newChange;
       writeState(dir, inFlightOld);
       const warned = runGuard(['exit', 'subagent-execute'], dir);
       assertExit(warned, 0);
@@ -1300,7 +1322,7 @@ export const ENTRIES = [
         P01: { writeFiles: ['src/p1.mjs'] },
         P02: { writeFiles: ['src/p2.mjs'], requestedAt: '2026-10-07T00:00:00.000Z' },
       });
-      const withdrawCase = { ...baseState('subagent-execute'), newChange: true };
+      const withdrawCase = { ...baseState('subagent-execute') };
       withdrawCase.enteredNodes = ['subagent-execute'];
       withdrawCase.evidence['subagent-execute'] = {
         summary: 'delegated, one request abandoned',
@@ -1549,19 +1571,19 @@ export const ENTRIES = [
     },
   },
 
-  // 20: exit open——CONTEXT.md 孤立追加段 → WARN 不 BLOCK
+  // 20: exit open——CONTEXT.md 孤立追加段 → BLOCKED（结构段必须在场，单一等级）
   {
-    name: '20 exit open WARN：CONTEXT.md 孤立追加段',
+    name: '20 exit open BLOCKED：CONTEXT.md 孤立追加段',
     run: (dir) => {
       const st = baseState('open');
       st.evidence.open = { summary: 'intake complete' };
       writeState(dir, st);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n');
-      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\n## 验收准则（AC）\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', intakeChangeText());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', intakeRequirementText());
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n\n## 术语（test-change 追加）\n\n某术语\n');
       const res = runGuard(['exit', 'open'], dir);
-      assertExit(res, 0);
-      assertOut(res, 'WARN: CONTEXT.md 检测到孤立追加段');
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED: CONTEXT.md 检测到孤立追加段');
     },
   },
 
@@ -1575,6 +1597,7 @@ export const ENTRIES = [
   {
     name: '21 exit verify WARN：LESSONS.md 编号乱序 + verify timeout env 覆盖 + AC 覆盖（新 change BLOCK / 旧 change WARN / 判不了按成因二分）',
     run: async (dir) => {
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', intakeRequirementText());
       const st = baseState('verify');
       st.evidence.verify = { summary: 'verified' };
       writeState(dir, st);
@@ -1582,8 +1605,8 @@ export const ENTRIES = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/UAT.md', '# UAT\n\n通过\n');
       writeFile(dir, '.specs/LESSONS.md', '# LESSONS\n\n## 条目区\n\n### L-002: b\n### L-001: a\n');
       const res = runGuard(['exit', 'verify'], dir);
-      assertExit(res, 0);
-      assertOut(res, 'WARN: LESSONS.md 条目编号乱序');
+      assertExit(res, 1);
+      assertOut(res, 'BLOCKED: LESSONS.md 条目编号乱序');
       // 子断言:无区外条目时不得打印"条目在条目区外"WARN(误报修复——修复前
       // console.error 在 if(outside) 之外无条件执行,每次 exit 都刷一条空 WARN)
       assertNotOut(res, '条目在条目区外');
@@ -1593,10 +1616,10 @@ export const ENTRIES = [
       writeFile(dir, '.specs/LESSONS.md', '# LESSONS\n\n## 条目区\n\n### L-002: b\n\n'
         + '```md\n## 写法样例（围栏内的标题不结束条目区）\n```\n\n### L-001: a\n');
       const resFencedOrder = runGuard(['exit', 'verify'], dir);
-      assertExit(resFencedOrder, 0);
-      assertOut(resFencedOrder, 'WARN: LESSONS.md 条目编号乱序');
-      // 复位：后续子断言回到原夹具（两个乱序条目紧邻，判据与上面同形）
-      writeFile(dir, '.specs/LESSONS.md', '# LESSONS\n\n## 条目区\n\n### L-002: b\n### L-001: a\n');
+      assertExit(resFencedOrder, 1);
+      assertOut(resFencedOrder, 'BLOCKED: LESSONS.md 条目编号乱序');
+      // 复位：后续子断言要求出口通过 → LESSONS 回到有序形态（编号升序）
+      writeFile(dir, '.specs/LESSONS.md', '# LESSONS\n\n## 条目区\n\n### L-001: a\n### L-002: b\n');
       // 子断言:## 验证命令 段标题带括号后缀(与 ## 自检方法 段括号后缀兼容风格一致)不误 BLOCK
       writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令（必填 · exit verify 真实执行）\n\n```bash\nnode -e "1"\n```\n');
       const resBracket = runGuard(['exit', 'verify'], dir);
@@ -1756,7 +1779,6 @@ export const ENTRIES = [
       const acState = (isNew) => {
         const st = { ...baseState('verify'), evidence: { verify: { summary: 'verified' } } };
         if (isNew) {
-          st.newChange = true;
           st.enteredNodes = ['verify'];
         }
         return st;
@@ -1765,16 +1787,11 @@ export const ENTRIES = [
         writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', acRequirement(acceptanceBody));
         writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', acTest(coveredIds));
         writeState(dir, acState(isNew));
-        // 新 change 夹具补齐 verify 节点的声明标记（真实流程里由协调者 / record 写；夹具直接写 state）
-        if (isNew) writeNodeDeclarationMarkers(dir, 'verify');
+        // 声明标记（单轨：任何 change 出口都要求声明；夹具直接写 state，故由夹具补同一份事实）
+        writeNodeDeclarationMarkers(dir, 'verify');
       };
       // 缺覆盖报文的首行（明细只在这一行，断言按它取编号清单——正文别处的编号不算点名）
       const acMissingLine = (res) => (res.output.match(/缺 AC 覆盖[^\n]*/u) ?? [''])[0];
-      // WARN COUNT 汇总行读数：内容不可判那一支必须真的进入既有计数（差值断言用，形态同波次判据）
-      const warnCountOf = (res) => {
-        const matched = /WARN COUNT: (\d+)/u.exec(res.output);
-        return matched === null ? 0 : Number(matched[1]);
-      };
       // ① 全量覆盖 → 通过（判据不产生输出：缺覆盖报文与「未校验」都不出现）
       acWrite(acCriteria(['AC-1', 'AC-2']), ['AC-1', 'AC-2'], true);
       const acCovered = runGuard(['exit', 'verify'], dir);
@@ -1818,20 +1835,12 @@ export const ENTRIES = [
       assertOut(acNoIds, '给验收准则的每条准则编号');
       assertNotOut(acNoIds, '缺 AC 覆盖');
       assertNotOut(acNoIds, '未校验（REQUIREMENT 无 AC 编号）');
-      // ④b 旧 change 同一形态只 WARN（渐进不阻断），且该行进入既有 WARN COUNT——「判不了」不再静默；
-      //    计数差分（判别力）：同夹具补上编号且全覆盖后该 WARN 消失，WARN COUNT 恰少 1。
+      // ④b 旧状态带 newChange 字段：同一形态同判 BLOCKED（字段只被忽略，无「旧 change 渐进」侧）
       acWrite('- 本段只写散文、不含任何编号。', ['AC-1'], false);
       const acNoIdsOld = runGuard(['exit', 'verify'], dir);
-      assertExit(acNoIdsOld, 0);
-      assertOut(acNoIdsOld, 'WARN: AC 覆盖判据无法执行');
-      assertOut(acNoIdsOld, '（旧 change 渐进不阻断）');
-      assertOut(acNoIdsOld, 'ALL CHECKS PASSED');
-      acWrite(acCriteria(['AC-1']), ['AC-1'], false);
-      const acNoIdsOldFixed = runGuard(['exit', 'verify'], dir);
-      assertExit(acNoIdsOldFixed, 0);
-      assertTrue(warnCountOf(acNoIdsOld) === warnCountOf(acNoIdsOldFixed) + 1,
-        '内容不可判的 WARN 未计入 WARN COUNT（未校验仍静默）: 无编号='
-        + warnCountOf(acNoIdsOld) + ' 补编号后=' + warnCountOf(acNoIdsOldFixed));
+      assertExit(acNoIdsOld, 1);
+      assertOut(acNoIdsOld, 'BLOCKED: AC 覆盖判据无法执行');
+      assertOut(acNoIdsOld, '没有 AC-N 编号');
       // ⑤ TEST.md 缺席 → 与 REQUIREMENT 缺席同口径：**内容不可判**（载体文件被删，新 change
       //    BLOCKED），不是「未校验」放行。链序同源：AC 覆盖判据排在「## 验证命令」门之前，
       //    它一旦拦下，命令门就不会在本次出口说话——「没有清单」是更靠前的那一环。
@@ -1846,15 +1855,14 @@ export const ENTRIES = [
       assertNotOut(acNoTest, '缺 AC 覆盖');
       // 命令门自身另有断言（系统测试集 H6 的缺段格）；此处钉的是链序：AC 判据在它之前发言。
       assertNotOut(acNoTest, 'BLOCKED: TEST.md 需声明 ## 验证命令 段');
-      // ⑥ 旧 change 同输入只 WARN（渐进不阻断，退出码不变）
+      // ⑥ 无字段状态同输入 → 同判 BLOCKED（单轨：缺覆盖一律拦，报文点名缺失编号）
       acWrite(acCriteria(['AC-1', 'AC-2']), ['AC-1'], false);
       const acOldChange = runGuard(['exit', 'verify'], dir);
-      assertExit(acOldChange, 0);
-      assertOut(acOldChange, 'WARN: TEST.md 的 1.1 测试矩阵缺 AC 覆盖');
+      assertExit(acOldChange, 1);
+      assertOut(acOldChange, 'BLOCKED');
+      assertOut(acOldChange, '缺 AC 覆盖');
       assertTrue(acMissingLine(acOldChange).includes('AC-2'),
-        '旧 change 的 WARN 同样点名缺失编号，实际: ' + acMissingLine(acOldChange));
-      assertNotOut(acOldChange, 'BLOCKED');
-      assertOut(acOldChange, 'ALL CHECKS PASSED');
+        '缺覆盖清单应点名缺失编号，实际: ' + acMissingLine(acOldChange));
       // ⑦ 书写形态与编号词法：'### AC-N · 标题' 与 '- AC-N: 说明' 两种写法同样解析，同一行的多个编号
       // 全部收集；'AC-2a' 这类后缀没有自己的编号，归并到 AC-2（不因后缀漏判）。夹具里 AC-4 只在
       // REQUIREMENT 出现、矩阵无对应行 → 只有它缺。段内围栏里的 '## …' 示例不结束本段（围栏内标题
@@ -1930,20 +1938,12 @@ export const ENTRIES = [
       assertOut(acNoAcceptanceSection, '形如 AC-1');
       assertNotOut(acNoAcceptanceSection, '未校验（REQUIREMENT 无验收准则段）');
       assertNotOut(acNoAcceptanceSection, '缺 AC 覆盖');
-      // ⑩b 旧 change 走同一份夹具只 WARN（渐进不阻断），该行仍进入既有 WARN COUNT——计数差分
-      //    （判别力）：把承载段补回来并覆盖后 WARN 消失，计数恰少 1。
+      // ⑩b 无字段状态走同一份夹具 → 同判 BLOCKED（单轨：承载段缺席一律拦）
       writeState(dir, acState(false));
       const acNoAcceptanceOld = runGuard(['exit', 'verify'], dir);
-      assertExit(acNoAcceptanceOld, 0);
-      assertOut(acNoAcceptanceOld, 'WARN: AC 覆盖判据无法执行');
-      assertOut(acNoAcceptanceOld, '（旧 change 渐进不阻断）');
-      assertOut(acNoAcceptanceOld, 'ALL CHECKS PASSED');
-      acWrite(acCriteria(['AC-1']), ['AC-1'], false);
-      const acNoAcceptanceOldFixed = runGuard(['exit', 'verify'], dir);
-      assertExit(acNoAcceptanceOldFixed, 0);
-      assertTrue(warnCountOf(acNoAcceptanceOld) === warnCountOf(acNoAcceptanceOldFixed) + 1,
-        '承载段缺席的 WARN 未计入 WARN COUNT（删段仍静默）: 缺段=' + warnCountOf(acNoAcceptanceOld)
-        + ' 补段后=' + warnCountOf(acNoAcceptanceOldFixed));
+      assertExit(acNoAcceptanceOld, 1);
+      assertOut(acNoAcceptanceOld, 'BLOCKED: AC 覆盖判据无法执行');
+      assertOut(acNoAcceptanceOld, '定位不到验收准则段');
       // ⑪ **与入口同一份选段基准**（AC-4 的判别锚）：把模板的验收段改名成不含关键词的标题，模板仍在场 ——
       //    选段只能回落到与 open 出口**同一份**回退基准（TEMPLATE_FALLBACK_SECTION_PATTERNS
       //    的 requirementAcceptance），于是 verify 出口按入口口径定位到工件的「## 验收准则（AC）」
@@ -2008,25 +2008,15 @@ export const ENTRIES = [
       assertOut(acNoRequirement, '恢复: 补回 REQUIREMENT.md');
       assertNotOut(acNoRequirement, '未校验（REQUIREMENT 缺席）');
       assertNotOut(acNoRequirement, '缺 AC 覆盖');
-      // ⑬b 旧 change 同形态：WARN 渐进 + 计数差分（补回文件后该 WARN 消失，WARN COUNT 恰少 1）
-      //   模板按登记表的段名书写：AC 判据只在文件在场时读模板，模板段名与登记表不一致会**额外**
-      //   产出一条 TEMPLATE-REGISTRY WARN（只在补回文件那一趟出现），差分因此被它抵消——那条 WARN
-      //   不是本格被测对象，夹具把它消掉，差值才只剩 AC 那一条。
+      // ⑬b 无字段状态同形态：同判 BLOCKED（单轨——删承载文件不能换到「关掉判据」）
       writeFile(dir, 'flow-kit/templates/REQUIREMENT.md',
         '# REQUIREMENT 模板\n\n## 用户故事（User Story）\n## 验收准则（AC）\n## 范围切分\n'
         + '## 非功能性需求\n## 依赖与假设\n');
       writeState(dir, acState(false));
       const acNoRequirementOld = runGuard(['exit', 'verify'], dir);
-      assertExit(acNoRequirementOld, 0);
-      assertOut(acNoRequirementOld, 'WARN: AC 覆盖判据无法执行');
-      assertOut(acNoRequirementOld, '（旧 change 渐进不阻断）');
-      assertOut(acNoRequirementOld, 'ALL CHECKS PASSED');
-      acWrite(acCriteria(['AC-1']), ['AC-1'], false);
-      const acNoRequirementOldFixed = runGuard(['exit', 'verify'], dir);
-      assertExit(acNoRequirementOldFixed, 0);
-      assertTrue(warnCountOf(acNoRequirementOld) === warnCountOf(acNoRequirementOldFixed) + 1,
-        '载体文件被删的 WARN 未计入 WARN COUNT（删文件仍静默）: 缺文件=' + warnCountOf(acNoRequirementOld)
-        + ' 补文件后=' + warnCountOf(acNoRequirementOldFixed));
+      assertExit(acNoRequirementOld, 1);
+      assertOut(acNoRequirementOld, 'BLOCKED: AC 覆盖判据无法执行');
+      assertOut(acNoRequirementOld, '没有 REQUIREMENT.md');
       // ⑭ **围栏里的示例行不算覆盖**：1.1 矩阵段保留围栏内容（段界要跨围栏），但示例行只是书写
       //    样例——把 AC-2 / AC-3 写在围栏示例里而真实矩阵只有 AC-1 时，判据必须仍点名缺
       //    AC-2、AC-3（旧实现全段扫编号，示例行把它读成「覆盖了」= 假绿）。
@@ -2065,22 +2055,25 @@ export const ENTRIES = [
     name: '22 exit archive WARN：CHANGELOG.md 表格日期非倒序',
     run: async (dir) => {
       const st = baseState('archive');
-      st.evidence.archive = { summary: 'archived' };
+      st.evidence.archive = { summary: 'archived', lessonsNomination: { scanned: 0, nominated: [], reasonIfNone: '夹具无候选条目' } };
       writeState(dir, st);
       writeFile(dir, '.specs/archive/foo-' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n');
       writeFile(dir, '.specs/archive/foo-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# KNOWN-ISSUES\n\n无遗留问题\n');
-      writeFile(dir, '.specs/CHANGELOG.md', '# CHANGELOG\n\n| 日期 | 说明 |\n|------|------|\n| 2026-08-03 | a |\n| 2026-08-04 | b |\n');
-      const res = runGuard(['exit', 'archive'], dir);
-      assertExit(res, 0);
-      assertOut(res, 'WARN: CHANGELOG.md 表格日期非倒序');
-      // 子断言:CHANGELOG 未登记本 change → WARN 渐进(归档收尾登记兜底——
-      // 修复前无检测,执行者遗漏登记可静默进归档,此处应 RED)
-      assertOut(res, '未登记本 change');
-      // 子断言:登记后无未登记 WARN
+      // 子断言:登记（日期倒序、含 change-id）→ 通过且无未登记告警
       writeFile(dir, '.specs/CHANGELOG.md', '# CHANGELOG\n\n| 日期 | 说明 |\n|------|------|\n| 2026-08-15 | ' + CHANGE_ID + ' | 归档登记 |\n');
       const resRegistered = runGuard(['exit', 'archive'], dir);
       assertExit(resRegistered, 0);
       assertNotOut(resRegistered, '未登记本 change');
+      // 子断言:表格日期非倒序 → BLOCKED（单一等级）
+      writeFile(dir, '.specs/CHANGELOG.md', '# CHANGELOG\n\n| 日期 | 说明 |\n|------|------|\n| 2026-08-03 | a |\n| 2026-08-04 | b |\n');
+      const resOrder = runGuard(['exit', 'archive'], dir);
+      assertExit(resOrder, 1);
+      assertOut(resOrder, 'BLOCKED: CHANGELOG.md 表格日期非倒序');
+      // 子断言:CHANGELOG 未登记本 change → WARN（归档收尾登记兜底——提示级，不阻断）
+      writeFile(dir, '.specs/CHANGELOG.md', '# CHANGELOG\n\n| 日期 | 说明 |\n|------|------|\n| 2026-08-15 | 其它 change | 登记 |\n');
+      const resUnregistered = runGuard(['exit', 'archive'], dir);
+      assertExit(resUnregistered, 0);
+      assertOut(resUnregistered, '未登记本 change');
       // 子断言:归档缺 KNOWN-ISSUES.md(遗留清单为强制产物)→ BLOCKED
       fs.rmSync(path.join(dir, '.specs/archive/foo-' + CHANGE_ID, 'KNOWN-ISSUES.md'));
       const resMissing = runGuard(['exit', 'archive'], dir);
