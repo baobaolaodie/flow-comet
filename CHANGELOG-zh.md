@@ -19,7 +19,10 @@
 - **硬链接与保护集收口**：与其它路径共享同一文件对象的目标一律拒绝——这类形态无法由路径判定看出。状态文件不再与活跃流程绑定，空闲项目里写它同样被拒，删掉它不能再把这道保护关掉；其余判定（协议文件、链接/硬链拒绝、写入白名单）仍只在流程运行中生效。（[#177](https://github.com/baobaolaodie/flow-comet/pull/177)）
 - **读不到协议或状态时按平台拒绝通道阻塞**：不再以宿主会降级成非阻断错误的方式退出——此前删掉协议文件会让之后的所有写入放行。没有写入目标的调用放行并打一行可见的降级说明，因为拒绝报文给出的恢复命令本身就是 shell 调用，会被同一条兜底再拒一次。dsh 上桥接对空闲项目仍然短路，因此「state 文件恒拦」在 dsh 上只在流程运行中生效。回归基线 351 场景 / 95 项系统测试。（[#177](https://github.com/baobaolaodie/flow-comet/pull/177)）
 
-- **dsh 桥接归一化已知 dsh-ops 写入工具名并路由确定目标**：`ops_bash`、`ops_write_file`、`ops_edit_file` 与官方工具使用同一套 `Write`/`Edit`/`Bash` 契约；OPS 的 `ops_copy`、`ops_move`、`ops_remove` 按确定的目标字段映射为同一写入契约（`ops_move` 的源端 `path` 另判一次），`ops_replace`、`ops_batch` 在流程运行中按组拒绝；共享 Bash 命令解析器与 symlink/junction 路径仍是已知边界；`run_code`（进程内代码工具）在运行中的流程里默认放行；直接文件/进程写调用是已记录的残留边界；空闲项目保持两类工具可用。运行中的流程里，`ops_bash` 的 `script_path` 形态与多目标工具只对协调者拒绝（子代理是执行者、放行），Bash 类工具的绝对 `workdir` 在项目外时对协调者拒绝。已安装项目需重新运行安装器以获取新 loader，然后重启 dsh 宿主——全局插件只在宿主启动时加载一次。([#167](https://github.com/baobaolaodie/flow-comet/pull/167))
+- **dsh 桥接把已知 dsh-ops 写入工具归一到同一契约**：`ops_bash`、`ops_write_file`、`ops_edit_file` 与官方工具使用同一套 `Write`/`Edit`/`Bash` 契约；`ops_copy`、`ops_move`、`ops_remove` 按确定的目标字段映射为同一写入契约（`ops_move` 的源端 `path` 另判一次）。([#167](https://github.com/baobaolaodie/flow-comet/pull/167))
+- **多目标工具在流程运行中按组拒绝**：`ops_replace`、`ops_batch` 整体拒绝；`ops_bash` 的 `script_path` 形态与多目标工具只对协调者拒绝，子代理是执行者、放行；Bash 类工具的绝对 `workdir` 在项目外时对协调者拒绝。空闲项目保持两类工具可用。([#167](https://github.com/baobaolaodie/flow-comet/pull/167))
+- **dsh 写面的已知边界**：共享 Bash 命令解析器与 symlink/junction 路径仍是已知边界；`run_code`（进程内代码工具）在运行中的流程里默认放行，直接文件/进程写调用是已记录的残留边界。([#167](https://github.com/baobaolaodie/flow-comet/pull/167))
+- **已安装的 dsh 项目需重新运行安装器并重启宿主**：新 loader 要重新安装才会生效，而全局插件只在宿主启动时加载一次。([#167](https://github.com/baobaolaodie/flow-comet/pull/167))
 
 ## [1.7.0] - 2026-11-05
 
