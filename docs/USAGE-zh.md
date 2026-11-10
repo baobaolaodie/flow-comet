@@ -94,7 +94,7 @@ node <skills>/flow-comet/scripts/workflow-state.mjs record execute '{"summary":"
 - **`run_code` 放行。** PTC 是主要预设，拒绝它会冻死运行中的流程。进程内直接写文件（`node:fs`、`child_process`）属已记录的残留边界，不是被拦的形态；它对宿主工具的调用仍逐个经过同一守卫。
 - **shell 面比写入面窄。** 命令文本只检查重定向、PowerShell 路径型 cmdlet、`.NET File` 调用、`cp`/`mv`/`rm` 的目的地，以及 `apply_patch` 的补丁头。解释器（`node file`、`python -c`）、`tee`、`dd`、`sed -i`、裸 `rm` 与 move 的源端都不在这套分析内；相对 `workdir` 与命令内的 `cd` 也不会重算基准。把白名单当作「所用工具」的边界，而不是把 shell 关进沙箱。
 
-流程运行中，协调者传入项目外的绝对 `workdir` 会被拒绝；`ops_bash` 的 `script_path` 同样被拒绝——否则把脚本写进白名单目录 `.specs/` 再执行，就能到达任意路径。空闲项目（无 change，或 change 已完成）不受约束。
+流程运行中，协调者传入项目外的绝对 `workdir` 会被拒绝；`ops_bash` 的 `script_path` 同样被拒绝——否则把脚本写进白名单目录 `.specs/` 再执行，就能到达任意路径。空闲项目（无 change，或 change 已完成）不受约束，但有一个例外：状态文件在任何状态下都被拒绝，因此删掉它无法关掉这道保护。
 
 子代理是执行者，这两条拒绝不作用于它；同时，脚本正文与多目标操作的逐项目标都不做分析。因此在宿主权限允许时，执行者脚本仍可能到达状态文件或协议文件——最小保护集在「具名工具」路径上生效，不覆盖脚本内容。
 

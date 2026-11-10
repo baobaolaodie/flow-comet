@@ -727,11 +727,73 @@ function normalizeDriveRootSpelling(rawTarget) {
 //   insideRunRoot=true  → targetRel = 相对 runRoot 的 POSIX 路径（白名单前缀匹配 / 状态文件比较）
 //   insideRunRoot=false → targetRel = null（项目根之外；由「runRoot 外写入关断」与 Bash 分支同判）
 // 无写入语义（非字符串 / 空串）→ null（该目标不参与任何判定）。
+// '..' 段必须按文件系统顺序解析，不能交给 path.resolve 词法折叠：折叠发生在段扫描之前，
+// 链接段连同它后面的 '..' 一起被提前吃掉（.specs/j/../x 折成 .specs/x，扫描器看不到 j），
+// 而内核按分量走一遍是 .specs/j → src、再 '..' 回项目根。两结果不一致就是"折叠掩盖了链接"。
+// 只在目标含 '..' 段时才做这次复核——其余路径的折叠与逐段解析等价，不必多付一次遍历。
+async function resolveThroughSegmentsPhysically(rawTarget) {
+  const parts = rawTarget.split(/[\\/]+/).filter((segment) => segment !== '' && segment !== '.');
+  let cursor;
+  let start = 0;
+  if (path.isAbsolute(rawTarget)) {
+    cursor = path.parse(path.resolve(rawTarget)).root;
+    if (/^[A-Za-z]:$/.test(parts[0] ?? '')) start = 1;
+  } else {
+    cursor = runRoot;
+  }
+  for (let index = start; index < parts.length; index += 1) {
+    const segment = parts[index];
+    if (segment === '..') {
+      cursor = path.dirname(cursor);
+      continue;
+    }
+    const candidate = path.join(cursor, segment);
+    let stat = null;
+    try {
+      stat = await fs.lstat(candidate);
+    } catch {
+      stat = null; // 尚不存在（写资格允许新建）：按词法形态继续
+    }
+    if (stat && stat.isSymbolicLink()) {
+      try {
+        cursor = await fs.realpath(candidate);
+      } catch {
+        cursor = candidate;
+      }
+      continue;
+    }
+    cursor = candidate;
+  }
+  return cursor;
+}
+
 async function resolveWriteTarget(rawTarget) {
   if (typeof rawTarget !== 'string') return null;
   const trimmed = rawTarget.trim();
   if (trimmed === '') return null;
-  const absolute = path.resolve(runRoot, normalizeDriveRootSpelling(trimmed));
+  const normalizedTarget = normalizeDriveRootSpelling(trimmed);
+  const absolute = path.resolve(runRoot, normalizedTarget);
+  // 含 '..' 段 → 逐段物理复核（见上方注释）。折叠结果与物理解析不一致 ⇒ 拒绝，理由点名该段。
+  if (normalizedTarget.split(/[\\/]+/).some((segment) => segment === '..')) {
+    const physical = await resolveThroughSegmentsPhysically(normalizedTarget);
+    if (path.resolve(physical) !== path.resolve(absolute)) {
+      return {
+        raw: trimmed,
+        absolute,
+        insideRunRoot: true,
+        targetRel: null,
+        physicalRel: null,
+        lexicalRel: null,
+        exists: false,
+        blocked: true,
+        blockedReason:
+          '路径含 ".." 段且该段位于符号链接之后——词法折叠与逐段解析落点不同（折叠 '
+          + path.relative(runRoot, absolute).replaceAll('\\', '/')
+          + '，实际 ' + path.relative(runRoot, physical).replaceAll('\\', '/')
+          + '）；请改用不含 ".."' + ' 的目标路径',
+      };
+    }
+  }
   const relative = path.relative(runRoot, absolute);
   const outside =
     path.isAbsolute(relative) || relative === '..' || relative.startsWith('..' + path.sep);
@@ -779,8 +841,21 @@ async function resolveWriteTarget(rawTarget) {
       // 只对普通文件生效：POSIX 目录 nlink 恒 ≥2（"." 与 ".."），把目录算进来会在
       // Linux / macOS 上把「写目录目标」全判成硬链接（本机 NTFS 目录 nlink=1，看不出来）。
       hardLinkedFile = targetStat.isFile() && nlink > 1;
-    } catch {
-      // stat 失败不在此处判定：后续白名单与身份判据仍会执行（错误方向由调用方的 fail-closed 兜底）
+    } catch (error) {
+      // stat 失败时无法确认链接数 ⇒ 按 fail-closed 拒绝：硬链判据的意义就是"看不出来也要拒"，
+      // 在拿不到 nlink 的情况下放行，等于让瞬时文件系统错误把这条判据整个关掉。
+      return {
+        raw: trimmed,
+        absolute,
+        insideRunRoot: true,
+        targetRel: null,
+        physicalRel: null,
+        lexicalRel,
+        exists: false,
+        blocked: true,
+        blockedReason:
+          '无法确认目标的链接数（stat 失败：' + (error && error.code ? error.code : String(error)) + '）',
+      };
     }
   }
   return {
@@ -788,9 +863,7 @@ async function resolveWriteTarget(rawTarget) {
     absolute,
     insideRunRoot: true,
     targetRel: inspection.physicalRel,
-    physicalRel: inspection.physicalRel,
     lexicalRel,
-    exists: inspection.exists,
     blocked: hardLinkedFile,
     blockedReason: hardLinkedFile
       ? '目标与其它路径共享同一文件对象（硬链接，链接数 ' + nlink + '）'
@@ -1087,14 +1160,38 @@ async function main() {
   console.log('NODE: ' + current);
 }
 
-main().catch((error) => {
+main().catch(async (error) => {
   const detail = error && error.message ? error.message : String(error);
   // 兜底必须是**阻塞**而不是普通错误：宿主只把 exit 2 当拒绝，其余非零退出码会被降级成
   // 非阻断错误（实测：协议文件缺失时 exit 1 → 之后所有写入都不再被拦 = 整条防线关闭）。
   // 与既有"解析失败 / 未知状态 fail-closed"同向：无法判定就不放行。拒绝通道复用 hookBlock
   // （Codex = {"decision":"block"} + exit 0；CC = 文本 + exit 2）——否则 Codex 上仍会静默放行。
+  //
+  // 但**无写入语义的调用必须放行**：守卫在 main 的第一步就要读协议，读不到时连 ls / git status
+  // 都被拒——而报文给出的恢复命令（prepare-env / workflow-state）本身也是 Bash 调用，会被同一条
+  // 兜底再拒一次，恢复路径被自己堵死。判据与既有「未命中写入模式 = 无写入语义，放行」同源：
+  // 拿不到写入目标就没有可判的对象，阻塞换不来安全性，只换来会话不可用。
+  let hasWriteSemantics = false;
+  try {
+    const input = await readHookInput();
+    if (input && typeof input === 'object') {
+      if (input.tool_name === 'Bash') {
+        const command = input.tool_input && typeof input.tool_input === 'object' ? input.tool_input.command : null;
+        hasWriteSemantics = codexWriteTargetsFromCommand(command).length > 0;
+      } else {
+        hasWriteSemantics = toolFilePathFromHookInput(input) !== null;
+      }
+    }
+  } catch {
+    hasWriteSemantics = true; // 读不出来就按有写入语义处理（保守）
+  }
+  if (!hasWriteSemantics) {
+    console.error('DEGRADED: 守卫无法完成判定（' + detail + '）——本次调用没有写入目标，放行；写入仍会被拦，直到协议/状态修好');
+    hookOk('(guard degraded: no write target)');
+    return;
+  }
   hookBlock(
     'BLOCKED: 守卫无法完成判定（' + detail + '）',
-    '恢复: 确认本次运行使用的协议文件（技能包 reference/workflow-protocol.json，或 FLOW_COMET_PROTOCOL 指定的文件）与 .flow-comet/flow-comet-state.json 完好；必要时重跑安装器（prepare-env）修复技能副本，或用 workflow-state.mjs 修复状态',
+    '恢复: 确认本次运行使用的协议文件（技能包 reference/workflow-protocol.json，或 FLOW_COMET_PROTOCOL 指定的文件）与 .flow-comet/flow-comet-state.json 完好；必要时重跑安装器（prepare-env）修复技能副本，或用 workflow-state.mjs 修复状态。若恢复命令本身也被拒，先在 agent 会话之外的终端执行',
   );
 });

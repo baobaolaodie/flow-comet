@@ -1383,6 +1383,18 @@ export const ENTRIES = [
           assertOut(viaProto, '协议文件');
         }
       }
+      // ⑦b-2 Bash 通道同判：同一目标不因所选工具而异（此前这两条在两级套件里零断言——
+      //     撤掉 Bash 分支的协议判定与 blocked 判定，套件仍然全绿，等于行为无人看守）。
+      {
+        const bashProtoTarget = posix(path.join(dir, 'reference', 'workflow-protocol.json'));
+        const viaBashProto = runHook(['before_tool'], dir, {
+          tool_name: 'Bash',
+          tool_input: { command: 'printf x > "' + bashProtoTarget + '"' },
+        });
+        assertExit(viaBashProto, 2);
+        assertOut(viaBashProto, 'BLOCKED');
+        assertOut(viaBashProto, '协议文件');
+      }
       // ⑦c 目录目标不得被硬链接判据误拦（POSIX 上目录 nlink 恒 ≥2，判据只认普通文件）
       const dirTarget = path.join(specs, 'dir-target');
       fs.mkdirSync(dirTarget, { recursive: true });
@@ -1441,7 +1453,17 @@ export const ENTRIES = [
         assertExit(viaHard, 2);
         assertOut(viaHard, 'BLOCKED');
         // 撤掉 nlink 判定后，硬链接形态会退化成"白名单内普通文件"⇒ 此断言必红（判别力锚）
-        assertOut(viaHard, hardKind === 'file' ? '硬链接' : 'junction');
+        // 回退形态（文件符号链接）不走 nlink 判据，落点解析到 src/app.js ⇒ 报文是白名单拒绝，
+        // 这里按实际成因断言，避免"支持符号链接但不支持硬链接"的文件系统上整套件必红。
+        assertOut(viaHard, hardKind === 'file' ? '硬链接' : 'src/app.js');
+        // ⑦c-2 Bash 通道同判（此前该分支的 blocked 判定零断言，撤掉实现套件仍全绿）
+        const bashHard = runHook(['before_tool'], dir, {
+          tool_name: 'Bash',
+          tool_input: { command: 'printf x > "' + posix(hardTarget) + '"' },
+        });
+        assertExit(bashHard, 2);
+        assertOut(bashHard, 'BLOCKED');
+        assertOut(bashHard, hardKind === 'file' ? '硬链接' : 'src/app.js');
       }
       // ⑨ 同一实体不同拼写：win32 大小写不敏感 ⇒ 放行；非 win32 显式声明不适用（不静默跳过）
       if (process.platform === 'win32') {
