@@ -215,6 +215,7 @@ node .flow-comet/skills/flow-comet/scripts/workflow-state.mjs init <change-id> -
 - **发布 PR（dev → main）**：不更新 CHANGELOG——版本段已在 dev 上；发布 PR 只把它合并进 main。
 - **main**：从不单独编辑 CHANGELOG——通过发布 PR 合并获得版本段。
 - **发布后**：dev 自动与 main 树一致（发布 PR 把 dev 合入 main 历史），重新开启 `Unreleased` 段积累下一批次。
+- **一条一个变化**：一个条目只描述一个变化，独立的变化各自成条——即 Keep a Changelog 的 "a single line per change"。不设字数上限：判据是「这条能不能用一句话说清」，说不清就说明它其实是两件事。分类（新增/变更/修复）是归档位置，不是粒度——`修复` 下面四个互不相干的修复，就是四条条目。
 
 ## 保持 PR 更新
 

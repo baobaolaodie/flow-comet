@@ -215,6 +215,7 @@ The built-in default prefix is `change/` (backward-compatible with existing chan
 - **Release PR (dev → main)**: does not update CHANGELOG — the version section already exists on dev; the release PR only merges it into main.
 - **main**: never edits CHANGELOG separately — it receives the version section via the release PR merge.
 - **After a release**: dev is automatically tree-identical to main (the release PR merges dev into main's history) and a fresh `Unreleased` section starts accumulating the next batch.
+- **One line per change**: an entry describes a single change. Independent changes get their own entries — this is Keep a Changelog's "a single line per change". There is no length limit: the test is whether the entry can be stated in one sentence. If it cannot, it was two changes. Category (Added / Changed / Fixed) is a filing decision, not a granularity one — four fixes under `Fixed` are still four entries.
 
 ## Keeping a PR current
 
