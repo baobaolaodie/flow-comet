@@ -377,12 +377,12 @@ export const ENTRIES = [
         evidence: {}, verifyFailures: 0, executionMode: 'subagent', directOverride: false,
       });
       fs.mkdirSync(path.join(dir, 'deep'), { recursive: true });
-      const spawnDrift = (input, extraEnv) => {
+      const spawnDrift = (input, extraEnv, hookArgs = ['before_tool']) => {
         // 封闭性：剥离宿主可能注入的锚定变量，确保用例只测显式给定的锚定形态
         const inherited = { ...process.env };
         delete inherited.FLOW_COMET_RUN_ROOT;
         delete inherited.CLAUDE_PROJECT_DIR;
-        const res = spawnSync(process.execPath, [HOOK, 'before_tool'], {
+        const res = spawnSync(process.execPath, [HOOK, ...hookArgs], {
           cwd: path.join(dir, 'deep'),
           input: JSON.stringify(input),
           env: {
@@ -425,6 +425,26 @@ export const ENTRIES = [
       r = spawnDrift({ tool_name: 'Write', tool_input: { file_path: inspec } }, { CLAUDE_PROJECT_DIR: path.join(dir, 'gone') });
       assertExit(r, 0);
       assertOut(r, 'workflow-hook-guard-ok');
+      // ⑥ 协议不可读（缺失 / 损坏）→ 明确阻塞，不再 exit 1 静默放行。
+      //    实测：删除协议文件后每次调用 exit 1，宿主把它降级为非阻断错误 ⇒ 整条写入防线关闭；
+      //    拒绝通道按平台收口（CC = exit 2 + 恢复指引 / Codex = decision:"block" + exit 0），
+      //    否则 Codex 上同一故障仍是 fail-open。反向构造：把兜底退回 exit 1 ⇒ ⑥a/⑥b 必红。
+      const missingProtocol = path.join(dir, 'reference', 'missing-protocol.json');
+      const protocolProbe = { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'src', 'x.ts') } };
+      let r6 = spawnDrift(protocolProbe, { FLOW_COMET_PROTOCOL: missingProtocol });
+      assertExit(r6, 2);
+      assertOut(r6, 'BLOCKED');
+      assertOut(r6, '无法完成判定');
+      assertOut(r6, '恢复:');
+      const corruptProtocol = path.join(dir, 'reference', 'corrupt-protocol.json');
+      fs.writeFileSync(corruptProtocol, '{ not-json ', 'utf8');
+      r6 = spawnDrift(protocolProbe, { FLOW_COMET_PROTOCOL: corruptProtocol });
+      assertExit(r6, 2);
+      assertOut(r6, 'BLOCKED');
+      const codexMissing = spawnDrift(protocolProbe, { FLOW_COMET_PROTOCOL: missingProtocol }, ['before_tool', '--platform', 'codex']);
+      assertExit(codexMissing, 0);
+      assertOut(codexMissing, '"decision":"block"');
+      assertOut(codexMissing, '无法完成判定');
     },
   },
 

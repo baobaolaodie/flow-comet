@@ -134,7 +134,7 @@ node .claude/skills/flow-comet/scripts/context-scan.mjs [--root <项目根>] [--
 
 | 属性 | 含义（本节为口径单一来源） |
 |------|---------------------------|
-| ① 写权限 | 子代理写入目标的**放行依据**（含 gitignored 面）：身份在场 ⇒ 子代理语义放行；**最小保护集**（`.flow-comet/flow-comet-state.json`、`reference/workflow-protocol.json`）在身份在场时**仍拦** |
+| ① 写权限 | 子代理写入目标的**放行依据**（含 gitignored 面）：身份在场 ⇒ 子代理语义放行；**最小保护集**（`.flow-comet/flow-comet-state.json`、`reference/workflow-protocol.json`）在身份在场时**仍拦**，空闲态仍拦 state 文件 |
 | ② 提交隔离 | 各写者只提交**自己的字面路径**（`git add -- <路径>` / `git commit -m "<消息>" -- <同一路径>`，消息在 `--` 之前；多个写者共享同一工作区时禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`） |
 | ③ 验证隔离 | **同一时刻只有一个写者**（有 request 无对应 result 的在飞委托 ⇒ 不跑全量判据，待写入者收工后重跑；已作废的委托经 `workflow-handoff.mjs withdraw <task-id> --by <来源>` 撤回，留痕 `withdrawnAt` + `withdrawnBy`，已撤回 = 终态、历史不删） |
 | ④ 集成纪律 | 协调者按确定性规则**显式、可审计**地集成（`merge --no-ff` 优先、冲突难解时降级 cherry-pick 并记因；机械冲突与语义冲突分别处置） |
@@ -299,7 +299,7 @@ All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT
 | `workflow-handoff.mjs` | 子代理交接：request/result/status |
 | `comet-plan.mjs` | 兼容别名入口（内容为 workflow-state 的别名壳） |
 | `comet-check.mjs` | workflow contract 检查 |
-| `comet-hook-guard.mjs` | 文件写入边界守卫（**身份判据先于路径判据**：载荷 `agent_id` / 桥接透传的 `delegationDepth` 在场 ⇒ 子代理语义放行；最小保护集 `.flow-comet/flow-comet-state.json` 与 `reference/workflow-protocol.json` 在身份在场时**仍拦**；无身份走 phase 白名单——subagent-execute 阶段只允许 .specs/，`.claude/worktrees/**` 前缀保留为兼容路径；`Write`/`Edit` 与 `Bash` 写命令两条判定路径同语义，runRoot 外一致拦截） |
+| `comet-hook-guard.mjs` | 文件写入边界守卫（**身份判据先于路径判据**：载荷 `agent_id` / 桥接透传的 `delegationDepth` 在场 ⇒ 子代理语义放行；最小保护集 `.flow-comet/flow-comet-state.json` 与 `reference/workflow-protocol.json` 在身份在场时**仍拦**，空闲态仍拦 state 文件；无身份走 phase 白名单——subagent-execute 阶段只允许 .specs/，`.claude/worktrees/**` 前缀保留为兼容路径；`Write`/`Edit` 与 `Bash` 写命令两条判定路径同语义，runRoot 外一致拦截） |
 
 ### 机器拥有字段
 

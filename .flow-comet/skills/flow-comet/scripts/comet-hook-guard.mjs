@@ -3,6 +3,7 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
+  inspectWorkflowPathSegments,
   inspectWorkflowProtectedPath,
   parseProtocolWriteWhitelist,
   readProtocolFile,
@@ -540,27 +541,46 @@ function blockProtocolFileWrite(target) {
   );
 }
 
+// 写目标解析失败（链接逃逸 / 硬链接共享文件对象 / realpath 报错）的统一出口：
+// 按成因选报文，避免把硬链接说成"符号链接"，也避免三处调用各写一份措辞。
+function blockUnsafeWriteTarget(rawTarget, reason, label = '写入') {
+  const shared = /硬链接/.test(reason);
+  hookBlock(
+    shared
+      ? 'BLOCKED: ' + label + ' "' + rawTarget + '" 指向被多处共享的文件对象（' + reason + '）——拒绝'
+      : 'BLOCKED: ' + label + ' "' + rawTarget + '" 经符号链接/junction 指向非法落点（' + reason + '）',
+    shared
+      ? '恢复: 该路径与白名单外的文件是同一实体，请改用独立文件；确需共享时移除多余链接后重试'
+      : '恢复: 改用项目内的真实路径，或移除指向项目外的链接后再写入'
+  );
+}
+
 // 身份在场时的最小保护集执行：候选写入目标逐个判定，命中即以既有报文风格拦截（hookBlock
 // 不返回）；未命中 ⇒ 返回（调用方按子代理语义放行）。判定入口唯一——身份短路与保护集判定都在此收口。
 // 两个目标各双判据：词法同一性（规范拼写）+ 物理同一性（别名形态）。
 async function enforceMinimalProtectionSet(hookInput) {
   const stateFileAbsolute = path.join(runRoot, ...STATE_FILE_REL.split('/'));
   for (const candidate of protectedCandidateTargets(hookInput)) {
-    const resolvedTarget = resolveWriteTarget(candidate);
+    const resolvedTarget = await resolveWriteTarget(candidate);
     if (resolvedTarget === null) continue;
+    // 身份通道不在此处拒绝链接形态（空闲放行与执行者可写任意路径的既有语义）；
+    // 链接指向受保护文件时由下方同一性判定拦住。
+
     if (
       blockedProtocolFileTarget(resolvedTarget.absolute) ||
       (await isSameProtectedFileObject(resolvedTarget.absolute, protocolPath))
     ) {
       blockProtocolFileWrite(resolvedTarget.raw);
     }
-    if (resolvedTarget.targetRel !== null) {
-      if (
-        blockedStateFileTarget(resolvedTarget.targetRel) ||
-        (await isSameProtectedFileObject(resolvedTarget.absolute, stateFileAbsolute))
-      ) {
-        blockStateFileWrite(resolvedTarget.raw);
-      }
+    // 两条判据并列而非嵌套：路径词法命中（targetRel）与物理同一性（可能经链接、也可能在项目根外——
+    // 根外目标的 targetRel 恒为 null，嵌套会把"根外链接指向状态文件"整条放走）。
+    if (
+      (resolvedTarget.targetRel !== null && blockedStateFileTarget(resolvedTarget.targetRel)) ||
+      (await isSameProtectedFileObject(resolvedTarget.absolute, stateFileAbsolute))
+    ) {
+      blockStateFileWrite(
+        typeof resolvedTarget.lexicalRel === 'string' ? resolvedTarget.lexicalRel : resolvedTarget.raw,
+      );
     }
   }
 }
@@ -707,19 +727,147 @@ function normalizeDriveRootSpelling(rawTarget) {
 //   insideRunRoot=true  → targetRel = 相对 runRoot 的 POSIX 路径（白名单前缀匹配 / 状态文件比较）
 //   insideRunRoot=false → targetRel = null（项目根之外；由「runRoot 外写入关断」与 Bash 分支同判）
 // 无写入语义（非字符串 / 空串）→ null（该目标不参与任何判定）。
-function resolveWriteTarget(rawTarget) {
+// '..' 段必须按文件系统顺序解析，不能交给 path.resolve 词法折叠：折叠发生在段扫描之前，
+// 链接段连同它后面的 '..' 一起被提前吃掉（.specs/j/../x 折成 .specs/x，扫描器看不到 j），
+// 而内核按分量走一遍是 .specs/j → src、再 '..' 回项目根。两结果不一致就是"折叠掩盖了链接"。
+// 只在目标含 '..' 段时才做这次复核——其余路径的折叠与逐段解析等价，不必多付一次遍历。
+async function resolveThroughSegmentsPhysically(rawTarget) {
+  const parts = rawTarget.split(/[\\/]+/).filter((segment) => segment !== '' && segment !== '.');
+  let cursor;
+  let start = 0;
+  if (path.isAbsolute(rawTarget)) {
+    cursor = path.parse(path.resolve(rawTarget)).root;
+    if (/^[A-Za-z]:$/.test(parts[0] ?? '')) start = 1;
+  } else {
+    cursor = runRoot;
+  }
+  for (let index = start; index < parts.length; index += 1) {
+    const segment = parts[index];
+    if (segment === '..') {
+      cursor = path.dirname(cursor);
+      continue;
+    }
+    const candidate = path.join(cursor, segment);
+    let stat = null;
+    try {
+      stat = await fs.lstat(candidate);
+    } catch {
+      stat = null; // 尚不存在（写资格允许新建）：按词法形态继续
+    }
+    if (stat && stat.isSymbolicLink()) {
+      try {
+        cursor = await fs.realpath(candidate);
+      } catch {
+        cursor = candidate;
+      }
+      continue;
+    }
+    cursor = candidate;
+  }
+  return cursor;
+}
+
+async function resolveWriteTarget(rawTarget) {
   if (typeof rawTarget !== 'string') return null;
   const trimmed = rawTarget.trim();
   if (trimmed === '') return null;
-  const absolute = path.resolve(runRoot, normalizeDriveRootSpelling(trimmed));
+  const normalizedTarget = normalizeDriveRootSpelling(trimmed);
+  const absolute = path.resolve(runRoot, normalizedTarget);
+  // 含 '..' 段 → 逐段物理复核（见上方注释）。折叠结果与物理解析不一致 ⇒ 拒绝，理由点名该段。
+  if (normalizedTarget.split(/[\\/]+/).some((segment) => segment === '..')) {
+    const physical = await resolveThroughSegmentsPhysically(normalizedTarget);
+    if (path.resolve(physical) !== path.resolve(absolute)) {
+      return {
+        raw: trimmed,
+        absolute,
+        insideRunRoot: true,
+        targetRel: null,
+        physicalRel: null,
+        lexicalRel: null,
+        exists: false,
+        blocked: true,
+        blockedReason:
+          '路径含 ".." 段且该段位于符号链接之后——词法折叠与逐段解析落点不同（折叠 '
+          + path.relative(runRoot, absolute).replaceAll('\\', '/')
+          + '，实际 ' + path.relative(runRoot, physical).replaceAll('\\', '/')
+          + '）；请改用不含 ".."' + ' 的目标路径',
+      };
+    }
+  }
   const relative = path.relative(runRoot, absolute);
   const outside =
     path.isAbsolute(relative) || relative === '..' || relative.startsWith('..' + path.sep);
+  const lexicalRel = outside ? null : relative === '' ? '.' : relative.replaceAll('\\', '/');
+  if (outside) {
+    return {
+      raw: trimmed,
+      absolute,
+      insideRunRoot: false,
+      targetRel: null,
+      physicalRel: null,
+      lexicalRel: null,
+      exists: false,
+      blocked: false,
+    };
+  }
+  let inspection;
+  try {
+    inspection = await inspectWorkflowPathSegments(runRoot, absolute, 'write target', 'any', {
+      followLinks: true,
+      physicalRel: true,
+    });
+  } catch (error) {
+    return {
+      raw: trimmed,
+      absolute,
+      insideRunRoot: true,
+      targetRel: null,
+      physicalRel: null,
+      lexicalRel,
+      exists: false,
+      blocked: true,
+      blockedReason: error && error.message ? error.message : String(error),
+    };
+  }
+  // 硬链接是路径判定的盲区：它是同一文件对象的第二个名字，realpath 解析出的仍是它自己，
+  // 白名单前缀判不出来。目标存在且链接数 > 1 ⇒ 该路径与别处共享文件对象，写入会改到白名单之外
+  // 的文件——按 fail-closed 拒绝（普通新建/单链接文件 nlink === 1，不受影响）。
+  let hardLinkedFile = false;
+  let nlink = 1;
+  if (inspection.exists) {
+    try {
+      const targetStat = await fs.stat(absolute, { bigint: true });
+      nlink = Number(targetStat.nlink);
+      // 只对普通文件生效：POSIX 目录 nlink 恒 ≥2（"." 与 ".."），把目录算进来会在
+      // Linux / macOS 上把「写目录目标」全判成硬链接（本机 NTFS 目录 nlink=1，看不出来）。
+      hardLinkedFile = targetStat.isFile() && nlink > 1;
+    } catch (error) {
+      // stat 失败时无法确认链接数 ⇒ 按 fail-closed 拒绝：硬链判据的意义就是"看不出来也要拒"，
+      // 在拿不到 nlink 的情况下放行，等于让瞬时文件系统错误把这条判据整个关掉。
+      return {
+        raw: trimmed,
+        absolute,
+        insideRunRoot: true,
+        targetRel: null,
+        physicalRel: null,
+        lexicalRel,
+        exists: false,
+        blocked: true,
+        blockedReason:
+          '无法确认目标的链接数（stat 失败：' + (error && error.code ? error.code : String(error)) + '）',
+      };
+    }
+  }
   return {
     raw: trimmed,
     absolute,
-    insideRunRoot: !outside,
-    targetRel: outside ? null : relative === '' ? '.' : relative.replaceAll('\\', '/'),
+    insideRunRoot: true,
+    targetRel: inspection.physicalRel,
+    lexicalRel,
+    blocked: hardLinkedFile,
+    blockedReason: hardLinkedFile
+      ? '目标与其它路径共享同一文件对象（硬链接，链接数 ' + nlink + '）'
+      : undefined,
   };
 }
 
@@ -733,7 +881,7 @@ function toolFilePathFromHookInput(input) {
 
 // file_path 形态（Write / Edit / …）：载荷无 file_path ⇒ null（无写入语义，不判定）。
 // 与命令级 token 共用 resolveWriteTarget——同一路径不因所选工具而异。
-function fileWriteTargetFromHookInput(input) {
+async function fileWriteTargetFromHookInput(input) {
   return resolveWriteTarget(toolFilePathFromHookInput(input));
 }
 
@@ -799,12 +947,13 @@ async function main() {
   }
   // Phase 写入控制：按运行时状态文件的 currentNode 检查写入目标是否在白名单内
   // state 文件读取失败时不阻断（state 可能不存在），继续执行后续安全检查
-  const stateFile = path.join(runRoot, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME);
+  // 机器状态文件的绝对路径（读取与保护集共用本表达式——各处不得再拼一遍）
+  const stateFileAbsolute = path.join(runRoot, ...STATE_FILE_REL.split('/'));
   let currentNode = null;
   let executionMode = 'subagent';
   let activeChange = null;
   try {
-    const stateContent = await fs.readFile(stateFile, 'utf8');
+    const stateContent = await fs.readFile(stateFileAbsolute, 'utf8');
     const state = JSON.parse(stateContent);
     currentNode = state.currentNode;
     executionMode = state.executionMode ?? 'subagent';
@@ -835,7 +984,7 @@ async function main() {
     return;
   }
 
-  const fileTarget = fileWriteTargetFromHookInput(hookInput);
+  const fileTarget = await fileWriteTargetFromHookInput(hookInput);
   const target = fileTarget ? fileTarget.targetRel : null;
 
   // R5: Bash 工具写路径适配(CC 与 Codex 通用)——Bash 工具的 command 字符串(无 file_path),
@@ -844,15 +993,35 @@ async function main() {
   if (hookInput && typeof hookInput === 'object' && hookInput.tool_name === 'Bash') {
     const command = hookInput.tool_input && typeof hookInput.tool_input === 'object' ? hookInput.tool_input.command : null;
     const writeTargets = codexWriteTargetsFromCommand(command);
-    if (writeTargets.length > 0 && currentNode) {
-      const whitelist = PHASE_WRITE_WHITELIST[currentNode];
-      // 声明模式未列出节点 → fail-closed(同 file_path 判定);缺省表无此节点 → 协调者默认 .specs/
-      const effectiveWhitelist = whitelist || (declared ? null : ['.specs/']);
+    // 空闲态（无 state / 无 activeChange / completed）按既有语义零拦截，只保留一条例外：
+    // **状态文件**恒拦——否则删掉 state 文件就能重建 executionMode=direct 的状态造成持久降级。
+    // 协议文件、链接/硬链拒绝、隔离区放行与白名单仍只在活跃流程生效（用户裁决 2026-11-09）。
+    if (writeTargets.length > 0) {
       for (const t of writeTargets) {
-        const resolvedTarget = resolveWriteTarget(t);
+        const resolvedTarget = await resolveWriteTarget(t);
         const targetRel = resolvedTarget ? resolvedTarget.targetRel : null;
-        if (targetRel !== null && blockedStateFileTarget(targetRel)) {
+        // 状态文件的两条判据并列（路径 + 物理身份）：硬链接是同一文件的第二个名字，路径前缀
+        // 看不见它（与身份通道的保护集判定同一个判据，不另写一份）。
+        if (
+          (targetRel !== null && blockedStateFileTarget(targetRel)) ||
+          (resolvedTarget && (await isSameProtectedFileObject(resolvedTarget.absolute, stateFileAbsolute)))
+        ) {
           blockStateFileWrite(t);
+        }
+        // 空闲（无 state / 无 activeChange / completed）：只剩 state 文件一条拦截，其余与
+        // 既有 (no active workflow) 同语义——放行（用户裁决：空闲态零拦截）。
+        if (!currentNode) continue;
+        // 协议文件只在流程运行中拦（空闲态放行）；两通道同判——同一个文件用 Bash 写
+        //（printf > / Remove-Item）不得比 file_path 更宽（「同一路径不因所选工具而异」）。
+        if (
+          resolvedTarget &&
+          (blockedProtocolFileTarget(resolvedTarget.absolute) ||
+            (await isSameProtectedFileObject(resolvedTarget.absolute, protocolPath)))
+        ) {
+          blockProtocolFileWrite(t);
+        }
+        if (resolvedTarget && resolvedTarget.blocked) {
+          blockUnsafeWriteTarget(t, resolvedTarget.blockedReason, '命令写入');
         }
         // worktree 隔离区放行(与 file_path 判定共用同一判定——同路径同结论);
         // 放行前置 = 物理包含性(词法命中但真实落点在区外 → 拒,不放行)
@@ -863,6 +1032,9 @@ async function main() {
             '恢复: 改用隔离区内的真实路径（隔离区放行仅限物理位于 <项目根>/.claude/worktrees/ 之下的写入）'
           );
         }
+        const whitelist = PHASE_WRITE_WHITELIST[currentNode];
+        // 声明模式未列出节点 → fail-closed(同 file_path 判定);缺省表无此节点 → 协调者默认 .specs/
+        const effectiveWhitelist = whitelist || (declared ? null : ['.specs/']);
         const allowed = targetRel !== null && effectiveWhitelist !== null && targetAllowed(targetRel, effectiveWhitelist, activeChange);
         if (!allowed) {
           hookBlock(
@@ -876,10 +1048,39 @@ async function main() {
     }
   }
 
+  // ── 最小保护集（先于隔离区放行）────────────────────────────────────────────
+  // worktree 的早退只该豁免**白名单**（隔离区里写源码是设计意图），不该豁免保护集：
+  // 实测「.claude/worktrees/ 下指向 state / 协议文件的硬链接」在协调者通道被放行，
+  // 而同一硬链放在 .specs/ 下被拒——同一目标因所在目录而异。三处判定前置到早退之前。
+  // 链接/硬链的拒绝只在活跃流程生效（空闲放行是既有语义）；state 文件**恒拦**——否则删掉
+  // state 即可重建 permissive state（用户裁决 2026-11-09：空闲态零拦截，最多只拦 state）；
+  // 协议文件只在活跃流程拦。
+  if (currentNode && fileTarget && fileTarget.blocked) {
+    blockUnsafeWriteTarget(fileTarget.raw, fileTarget.blockedReason);
+  }
+  if (fileTarget) {
+    if (
+      (target !== null && blockedStateFileTarget(target)) ||
+      (await isSameProtectedFileObject(fileTarget.absolute, stateFileAbsolute))
+    ) {
+      blockStateFileWrite(
+        typeof fileTarget.lexicalRel === 'string' ? fileTarget.lexicalRel : fileTarget.raw,
+      );
+    }
+    if (
+      currentNode &&
+      (blockedProtocolFileTarget(fileTarget.absolute) ||
+        (await isSameProtectedFileObject(fileTarget.absolute, protocolPath)))
+    ) {
+      blockProtocolFileWrite(fileTarget.raw);
+    }
+  }
+
   // ── worktree 隔离区放行（CC Agent isolation:"worktree"）────────────────────
   // 判定实现见 isInsideAgentWorktree + agentWorktreeWriteStaysIsolated（与上方 Bash 命令写入
   // 判定共用——同一路径不因工具而异）；词法命中但物理落点在区外 → 拒（fail-closed）。
-  if (isInsideAgentWorktree(target)) {
+  // 空闲态不进入：隔离区放行与它的穿越拒绝都只在活跃流程生效（空闲放行语义；与 Bash 分支逐条对齐）。
+  if (currentNode && isInsideAgentWorktree(target)) {
     if (!(await agentWorktreeWriteStaysIsolated(target))) {
       hookBlock(
         `BLOCKED: 写入 "${target}" 位于 worktree 隔离区但物理落点在区外（符号链接/junction 穿越）`,
@@ -903,9 +1104,6 @@ async function main() {
   }
 
   if (currentNode && target) {
-    if (blockedStateFileTarget(target)) {
-      blockStateFileWrite(target);
-    }
     const whitelist = PHASE_WRITE_WHITELIST[currentNode];
     if (whitelist) {
       const allowed = targetAllowed(target, whitelist, activeChange);
@@ -962,7 +1160,38 @@ async function main() {
   console.log('NODE: ' + current);
 }
 
-main().catch((error) => {
-  console.error(error.message);
-  process.exit(1);
+main().catch(async (error) => {
+  const detail = error && error.message ? error.message : String(error);
+  // 兜底必须是**阻塞**而不是普通错误：宿主只把 exit 2 当拒绝，其余非零退出码会被降级成
+  // 非阻断错误（实测：协议文件缺失时 exit 1 → 之后所有写入都不再被拦 = 整条防线关闭）。
+  // 与既有"解析失败 / 未知状态 fail-closed"同向：无法判定就不放行。拒绝通道复用 hookBlock
+  // （Codex = {"decision":"block"} + exit 0；CC = 文本 + exit 2）——否则 Codex 上仍会静默放行。
+  //
+  // 但**无写入语义的调用必须放行**：守卫在 main 的第一步就要读协议，读不到时连 ls / git status
+  // 都被拒——而报文给出的恢复命令（prepare-env / workflow-state）本身也是 Bash 调用，会被同一条
+  // 兜底再拒一次，恢复路径被自己堵死。判据与既有「未命中写入模式 = 无写入语义，放行」同源：
+  // 拿不到写入目标就没有可判的对象，阻塞换不来安全性，只换来会话不可用。
+  let hasWriteSemantics = false;
+  try {
+    const input = await readHookInput();
+    if (input && typeof input === 'object') {
+      if (input.tool_name === 'Bash') {
+        const command = input.tool_input && typeof input.tool_input === 'object' ? input.tool_input.command : null;
+        hasWriteSemantics = codexWriteTargetsFromCommand(command).length > 0;
+      } else {
+        hasWriteSemantics = toolFilePathFromHookInput(input) !== null;
+      }
+    }
+  } catch {
+    hasWriteSemantics = true; // 读不出来就按有写入语义处理（保守）
+  }
+  if (!hasWriteSemantics) {
+    console.error('DEGRADED: 守卫无法完成判定（' + detail + '）——本次调用没有写入目标，放行；写入仍会被拦，直到协议/状态修好');
+    hookOk('(guard degraded: no write target)');
+    return;
+  }
+  hookBlock(
+    'BLOCKED: 守卫无法完成判定（' + detail + '）',
+    '恢复: 确认本次运行使用的协议文件（技能包 reference/workflow-protocol.json，或 FLOW_COMET_PROTOCOL 指定的文件）与 .flow-comet/flow-comet-state.json 完好；必要时重跑安装器（prepare-env）修复技能副本，或用 workflow-state.mjs 修复状态。若恢复命令本身也被拒，先在 agent 会话之外的终端执行',
+  );
 });

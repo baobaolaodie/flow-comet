@@ -1284,4 +1284,277 @@ export const ENTRIES = [
       assertOut(boundary, '项目概要');
     },
   },
+
+  // 243: 写目标按**物理落点**判定——白名单目录里的链接曾把写入引流到源码目录：
+  // `.specs/j` 指向 `src` 时，写 `.specs/j/x` 词法命中白名单，真实落点却是 src。
+  // 修复后白名单 / 包含性 / 保护集三处都按 realpath 后的相对路径判定，报文回显调用方拼写。
+  // 硬链接是路径判定的盲区（没有可解析的目标、realpath 仍指向自己），按"共享文件对象"fail-closed。
+  {
+    name: '243 hook 写目标物理判定：链接不再把白名单写入引流到源码目录，硬链接拒绝',
+    run: (dir) => {
+      writeState(dir, { ...baseState('subagent-execute'), status: 'running' });
+      const posix = (p) => p.split(path.sep).join('/');
+      const specs = path.join(dir, '.specs');
+      const srcDir = path.join(dir, 'src');
+      fs.mkdirSync(specs, { recursive: true });
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(path.join(srcDir, 'app.js'), 'console.log(1);\n', 'utf8');
+      const linkInto = path.join(specs, 'j');
+      try {
+        fs.symlinkSync(srcDir, linkInto, process.platform === 'win32' ? 'junction' : 'dir');
+      } catch (error) {
+        console.error('WARN: 无法创建目录链接，链接断言跳过（' + (error.code || error.message) + '）');
+        return;
+      }
+      // ① file_path：白名单内的链接路径 → 按物理落点拒绝（修复前词法放行 = RED）
+      const viaWrite = runHook(['before_tool'], dir, {
+        tool_name: 'Write',
+        tool_input: { file_path: path.join(linkInto, 'w.txt') },
+      });
+      assertExit(viaWrite, 2);
+      assertOut(viaWrite, 'BLOCKED');
+      assertOut(viaWrite, 'src/w.txt'); // 报文点名物理相对路径，便于定位真实落点
+      // ② Bash 命令目标：同一路径同一结论（两条判定共用解析）
+      const viaBash = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'printf x > "' + posix(path.join(linkInto, 'v.txt')) + '"' },
+      });
+      assertExit(viaBash, 2);
+      assertOut(viaBash, 'BLOCKED');
+      // ③ 放行面不受影响：白名单内的普通写入仍放行
+      const plain = runHook(['before_tool'], dir, {
+        tool_name: 'Write',
+        tool_input: { file_path: path.join(specs, 'plain.txt') },
+      });
+      assertExit(plain, 0);
+      assertOut(plain, 'workflow-hook-guard-ok');
+      // ④ 两端都在白名单内的链接仍放行（不能退化成"链接一律拒绝"）
+      const realDir = path.join(specs, 'real');
+      fs.mkdirSync(realDir, { recursive: true });
+      const alias = path.join(specs, 'alias');
+      try { fs.symlinkSync(realDir, alias, process.platform === 'win32' ? 'junction' : 'dir'); } catch { /* 上方已降级过 */ }
+      if (fs.existsSync(alias)) {
+        const viaAlias = runHook(['before_tool'], dir, {
+          tool_name: 'Write',
+          tool_input: { file_path: path.join(alias, 'ok.md') },
+        });
+        assertExit(viaAlias, 0);
+        assertOut(viaAlias, 'workflow-hook-guard-ok');
+      }
+      // ⑤ 链接指向**项目根之外**：包含性子句的锚（删掉协议层的物理包含性判定 ⇒ 此条必红）
+      // 真·项目根之外（此前夹具建在根内，断言 'outside' 被目录名喂饱 —— 判别力为零）
+      const outsideDir = path.join(path.dirname(dir), 'outside-' + path.basename(dir));
+      fs.mkdirSync(outsideDir, { recursive: true });
+      const outLink = path.join(specs, 'out');
+      try { fs.symlinkSync(outsideDir, outLink, process.platform === 'win32' ? 'junction' : 'dir'); } catch { /* 已降级 */ }
+      if (fs.existsSync(outLink)) {
+        const viaOut = runHook(['before_tool'], dir, {
+          tool_name: 'Write',
+          tool_input: { file_path: path.join(outLink, 'escaped.md') },
+        });
+        assertExit(viaOut, 2);
+        assertOut(viaOut, 'BLOCKED');
+        // 报文来自物理包含性判定（写目标解析越界），不是白名单前缀
+        assertOut(viaOut, 'resolves outside');
+      }
+      // ⑥ 最小保护集：协调者经链接写状态文件 → 拒绝（物理相对路径命中保护集）
+      const stateLink = path.join(specs, 's');
+      try { fs.symlinkSync(path.join(dir, '.flow-comet'), stateLink, process.platform === 'win32' ? 'junction' : 'dir'); } catch { /* 同上 */ }
+      if (fs.existsSync(stateLink)) {
+        const viaState = runHook(['before_tool'], dir, {
+          tool_name: 'Write',
+          tool_input: { file_path: path.join(stateLink, 'flow-comet-state.json') },
+        });
+        assertExit(viaState, 2);
+        assertOut(viaState, 'BLOCKED');
+      }
+      // ⑦b 协议文件：经链接写它同样要拒（此前协议身份判定零断言）
+      const protoDir = path.join(dir, 'reference');
+      if (fs.existsSync(protoDir)) {
+        const protoLink = path.join(specs, 'p');
+        try { fs.symlinkSync(protoDir, protoLink, process.platform === 'win32' ? 'junction' : 'dir'); } catch { /* 已降级 */ }
+        if (fs.existsSync(protoLink)) {
+          const viaProto = runHook(['before_tool'], dir, {
+            tool_name: 'Write',
+            tool_input: { file_path: path.join(protoLink, 'workflow-protocol.json') },
+          });
+          assertExit(viaProto, 2);
+          assertOut(viaProto, 'BLOCKED');
+          assertOut(viaProto, '协议文件');
+        }
+      }
+      // ⑦b-2 Bash 通道同判：同一目标不因所选工具而异（此前这两条在两级套件里零断言——
+      //     撤掉 Bash 分支的协议判定与 blocked 判定，套件仍然全绿，等于行为无人看守）。
+      {
+        const bashProtoTarget = posix(path.join(dir, 'reference', 'workflow-protocol.json'));
+        const viaBashProto = runHook(['before_tool'], dir, {
+          tool_name: 'Bash',
+          tool_input: { command: 'printf x > "' + bashProtoTarget + '"' },
+        });
+        assertExit(viaBashProto, 2);
+        assertOut(viaBashProto, 'BLOCKED');
+        assertOut(viaBashProto, '协议文件');
+      }
+      // ⑦c 目录目标不得被硬链接判据误拦（POSIX 上目录 nlink 恒 ≥2，判据只认普通文件）
+      const dirTarget = path.join(specs, 'dir-target');
+      fs.mkdirSync(dirTarget, { recursive: true });
+      const viaDir = runHook(['before_tool'], dir, {
+        tool_name: 'Write',
+        tool_input: { file_path: dirTarget },
+      });
+      assertExit(viaDir, 0);
+      assertOut(viaDir, 'workflow-hook-guard-ok');
+
+      // ⑦d worktree 隔离区只豁免白名单，不豁免保护集：worktrees 下指向 state 的硬链必须拒绝
+      //    （协调者通道的 worktree 早退曾绕过保护集判定——实测放行，现前置判定后拒绝）
+      {
+        const wtDir = path.join(dir, '.claude', 'worktrees', 'w');
+        fs.mkdirSync(wtDir, { recursive: true });
+        const wtState = path.join(wtDir, 'state-hl.json');
+        let wtReady = false;
+        try { fs.linkSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), wtState); wtReady = true; } catch { wtReady = false; }
+        if (!wtReady) {
+          console.error('SKIP: worktree 硬链断言不适用（本机无法创建硬链接）——未覆盖，不是通过');
+        } else {
+          const viaWt = runHook(['before_tool'], dir, {
+            tool_name: 'Write',
+            tool_input: { file_path: wtState },
+          });
+          assertExit(viaWt, 2);
+          assertOut(viaWt, 'BLOCKED');
+        }
+        // 对照：worktree 内的普通写入仍放行（隔离区放行不得被这条判据误伤）
+        const viaWtOk = runHook(['before_tool'], dir, {
+          tool_name: 'Write',
+          tool_input: { file_path: path.join(wtDir, 'src', 'ok.mjs') },
+        });
+        assertExit(viaWtOk, 0);
+        assertOut(viaWtOk, 'workflow-hook-guard-ok');
+      }
+
+      // ⑧ 硬链接：同一文件对象的第二个名字，路径判定看不出来 → 一律拒绝
+      //    （硬链接不需要符号链接特权，Windows 普通用户即可创建）
+      const hardTarget = path.join(specs, 'hard.js');
+      let hardKind = 'file';
+      try {
+        fs.linkSync(path.join(srcDir, 'app.js'), hardTarget);
+      } catch {
+        // 跨卷/文件系统不支持时退回目录 junction + 文件对（保持同一类判据仍被覆盖）
+        try { fs.symlinkSync(path.join(srcDir, 'app.js'), hardTarget, 'file'); hardKind = 'symlink'; } catch { hardKind = null; }
+      }
+      if (!hardKind) {
+        console.error('SKIP: 硬链接断言不适用（本机无法创建硬链接或文件符号链接）——未覆盖，不是通过');
+      }
+      if (hardKind) {
+        const viaHard = runHook(['before_tool'], dir, {
+          tool_name: 'Write',
+          tool_input: { file_path: hardTarget },
+        });
+        assertExit(viaHard, 2);
+        assertOut(viaHard, 'BLOCKED');
+        // 撤掉 nlink 判定后，硬链接形态会退化成"白名单内普通文件"⇒ 此断言必红（判别力锚）
+        // 回退形态（文件符号链接）不走 nlink 判据，落点解析到 src/app.js ⇒ 报文是白名单拒绝，
+        // 这里按实际成因断言，避免"支持符号链接但不支持硬链接"的文件系统上整套件必红。
+        assertOut(viaHard, hardKind === 'file' ? '硬链接' : 'src/app.js');
+        // ⑦c-2 Bash 通道同判（此前该分支的 blocked 判定零断言，撤掉实现套件仍全绿）
+        const bashHard = runHook(['before_tool'], dir, {
+          tool_name: 'Bash',
+          tool_input: { command: 'printf x > "' + posix(hardTarget) + '"' },
+        });
+        assertExit(bashHard, 2);
+        assertOut(bashHard, 'BLOCKED');
+        assertOut(bashHard, hardKind === 'file' ? '硬链接' : 'src/app.js');
+      }
+      // ⑨ 同一实体不同拼写：win32 大小写不敏感 ⇒ 放行；非 win32 显式声明不适用（不静默跳过）
+      if (process.platform === 'win32') {
+        const viaCase = runHook(['before_tool'], dir, {
+          tool_name: 'Write',
+          tool_input: { file_path: path.join(dir, '.SPECS', 'case.md') },
+        });
+        assertExit(viaCase, 0);
+        assertOut(viaCase, 'workflow-hook-guard-ok');
+      } else {
+        console.error('SKIP: 大小写等价拼写断言不适用（非 win32 大小写敏感文件系统）——未覆盖，不是通过');
+      }
+      // ⑩ 恢复：移除链接后同一路径恢复放行（拦截不是永久状态）
+      try { fs.rmdirSync(linkInto); } catch { try { fs.unlinkSync(linkInto); } catch { /* 忽略 */ } }
+      if (fs.existsSync(linkInto)) throw new Error('恢复夹具：链接未被移除');
+      const recovered = runHook(['before_tool'], dir, {
+        tool_name: 'Write',
+        tool_input: { file_path: path.join(linkInto, 'again.txt') },
+      });
+      assertExit(recovered, 0);
+      assertOut(recovered, 'workflow-hook-guard-ok');
+
+      // ⑪ 空闲态只保留一条拦截：state 文件（用户裁决：空闲零拦截，最多只拦 state）。
+      //    实测链条：删除 state 后守卫降为空闲；若连 state 也能写，就能重建
+      //    executionMode=direct 的状态造成持久降级。协议文件在空闲态放行（下次运行的协议由
+      //    人工/安装器通道维护）。反向构造：把状态判定退回 currentNode 门内 ⇒ ⑪b 必红；
+      //    把协议判定移出活跃流程门 ⇒ ⑪b 的协议放行用例必红；把链接拒绝移出流程态门 ⇒ ⑪c 必红。
+      const stateTarget = path.join(dir, '.flow-comet', 'flow-comet-state.json');
+      const protoTarget = path.join(dir, 'reference', 'workflow-protocol.json');
+      // ⑪a 空闲态（state 在盘但无 activeChange / currentNode）+ 指向 state 的硬链接：
+      //     路径前缀看不见同一文件的第二个名字，只有物理身份判据能拦（空闲态下硬链的
+      //     blocked 拒绝按空闲放行语义不生效，故本断言与 ⑧ 的活跃态硬链断言相互独立）。
+      writeState(dir, { ...baseState('review'), activeChange: null, currentNode: null, status: 'completed' });
+      const idleStateLink = path.join(specs, 'idle-state-link.json');
+      let idleLinkKind = null;
+      try { fs.linkSync(stateTarget, idleStateLink); idleLinkKind = 'hard'; }
+      catch { try { fs.symlinkSync(stateTarget, idleStateLink, 'file'); idleLinkKind = 'symlink'; } catch { idleLinkKind = null; } }
+      if (idleLinkKind) {
+        const idleLinkBash = runHook(['before_tool'], dir, {
+          tool_name: 'Bash',
+          tool_input: { command: 'printf x > "' + posix(idleStateLink) + '"' },
+        });
+        assertExit(idleLinkBash, 2);
+        assertOut(idleLinkBash, 'state 文件');
+        const idleLinkWrite = runHook(['before_tool'], dir, {
+          tool_name: 'Write',
+          tool_input: { file_path: idleStateLink },
+        });
+        assertExit(idleLinkWrite, 2);
+        assertOut(idleLinkWrite, 'state 文件');
+      } else {
+        console.error('SKIP: 空闲态保护集别名断言不适用（本机无法创建硬链接或文件符号链接）——未覆盖，不是通过');
+      }
+      // ⑪b 无 state（空闲）时：写 state 仍拒绝（两通道同判）；写协议放行——空闲态零拦截，
+      //     最多只拦 state 文件（用户裁决）。反向构造：把协议判定移进活跃流程门 ⇒ 本条必红。
+      fs.rmSync(stateTarget);
+      for (const [label, toolName, toolInput] of [
+        ['state 文件（file_path）', 'Write', { file_path: stateTarget }],
+        ['state 文件（Bash）', 'Bash', { command: 'printf x > "' + posix(stateTarget) + '"' }],
+      ]) {
+        const idleProtected = runHook(['before_tool'], dir, { tool_name: toolName, tool_input: toolInput });
+        if (idleProtected.status !== 2 || !idleProtected.output.includes('state 文件')) {
+          throw new Error('空闲态写 state 文件应拒绝并点名（' + label + '），实际输出: ' + JSON.stringify(idleProtected.output));
+        }
+      }
+      for (const [label, toolName, toolInput] of [
+        ['协议文件（file_path）', 'Write', { file_path: protoTarget }],
+        ['协议文件（Bash）', 'Bash', { command: 'printf x > "' + posix(protoTarget) + '"' }],
+      ]) {
+        const idleProtocol = runHook(['before_tool'], dir, { tool_name: toolName, tool_input: toolInput });
+        if (idleProtocol.status !== 0 || !idleProtocol.output.includes('no active workflow')) {
+          throw new Error('空闲态写协议文件应放行（' + label + '；用户裁决：空闲零拦截），实际输出: ' + JSON.stringify(idleProtocol.output));
+        }
+      }
+      // ⑪c 对照：空闲态经链接逃逸的目标仍放行（空闲放行语义不变）。普通源码目标的空闲放行
+      //     由场景 30a / 67 覆盖，此处不再重复（同一行为三份断言 = 噪音）。
+      if (fs.existsSync(outLink)) {
+        // 两通道都不得在空闲态拒绝链接逃逸目标（Bash 的 blocked 拒绝必须留在流程态门之后）
+        const idleEscapeBash = runHook(['before_tool'], dir, {
+          tool_name: 'Bash',
+          tool_input: { command: 'printf x > "' + posix(path.join(outLink, 'idle-escaped.txt')) + '"' },
+        });
+        assertExit(idleEscapeBash, 0);
+        assertOut(idleEscapeBash, 'no active workflow');
+        const idleEscape = runHook(['before_tool'], dir, {
+          tool_name: 'Write',
+          tool_input: { file_path: path.join(outLink, 'idle-escaped.md') },
+        });
+        assertExit(idleEscape, 0);
+        assertOut(idleEscape, 'no active workflow');
+      }
+    },
+  },
 ];
