@@ -1,0 +1,7 @@
+docs(changelog): split the write-target entry into one line per change
+
+The entry had grown to cover four separate behaviours in a single bullet:
+the physical-path judgment, the dot-dot component walk, the hard-link
+and protected-set rules, and the blocking fallback with its no-write-target
+exception. Split into four bullets so each one states a single change, the
+way the rest of the file reads.
