@@ -18,12 +18,6 @@ import {
 } from '../lib/test-helpers.mjs';
 import {
   CHANGE_ID,
-  REPO_ROOT,
-  SCRIPTS_DIR,
-  SIDE_CONTEXT_SCAN,
-  SIDE_EVOLVE,
-  SIDE_HEALTH,
-  SKILL_PROTOCOL_FILE,
   contextInitModule,
   copyEngineTree,
   engineConsumersOf,
@@ -33,14 +27,22 @@ import {
   handoffFor,
   hasNamedImport,
   makeTmp,
+  REPO_ROOT,
   requireModuleExport,
   runSideScript,
-  skillTreeDocFiles,
+  SCRIPTS_DIR,
+  SIDE_CONTEXT_SCAN,
+  SIDE_EVOLVE,
+  SIDE_HEALTH,
+  SKILL_PROTOCOL_FILE,
   skillsRootForScriptsDir,
+  skillTreeDocFiles,
   stateSchemaModule,
+  strictSummary,
   timeSingleSourceConsumerProblems,
   timeUtilsModule,
   treeFingerprint,
+  writeAllNodeDeclarationMarkers,
   writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import {
@@ -98,13 +100,14 @@ export const ENTRIES = [
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
         '# TASK\n\n<task id="T01" parallel="false" status="done"><action>串行任务已完成但缺 SUMMARY</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       const res = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(res, 1);
       assertOut(res, 'BLOCKED');
-      assertOut(res, 'task-summaries');
       assertOut(res, 'EMPTY-EXIT 未生效');
       assertNotOut(res, '豁免已生效');
       // 反向子锚：全并行 change 时豁免仍生效，且输出被跳过项清单（补既有全 parallel 通过锚）
+      writeNodeDeclarationMarkers(dir, 'execute');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
         '# TASK\n\n<task id="P01" parallel="true" status="pending"><action>并行任务</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n');
       const resParallel = runGuard(['exit', 'execute', '--apply'], dir);
@@ -716,14 +719,13 @@ export const ENTRIES = [
       assertOut(nonFrontend, 'UI-DESIGN: skipped（非前端）');
       assertOut(nonFrontend, 'ALL CHECKS PASSED');
 
-      // 恢复：旧 change 前端缺件 → WARN 渐进（不阻断，也不静默放行）
+      // 同构缺件（无任何新旧标记字段）→ 同判 BLOCKED（单轨，无渐进侧）
       writeDesignExitFixture(dir, {
         visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: true,
       });
       const legacy = runGuardWithProtocol(dir, ['exit', 'design']);
-      assertExit(legacy, 0);
-      assertOut(legacy, 'UI-DESIGN WARN: 缺 .specs/' + CHANGE_ID + '/UI-DESIGN.md');
-      assertOut(legacy, '旧 change 渐进不阻断');
+      assertExit(legacy, 1);
+      assertOut(legacy, 'BLOCKED: design 出口缺 UI-DESIGN.md');
     },
   },
 

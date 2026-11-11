@@ -35,6 +35,7 @@ import {
   TASK_DONE,
   TASK_DONE_TWO,
   TASK_P1,
+  writeAllNodeDeclarationMarkers,
   writeCustomProtocol,
   writeIntakeArtifacts,
   writeNodeDeclarationMarkers,
@@ -1101,13 +1102,14 @@ export const ENTRIES = [
       assertOut(resNoLoadsDir, '恢复: 照抄下面的命令补齐上述缺项');
       assertNotOut(resNoLoadsDir, '旧 change 兼容');
       assertNotOut(resNoLoadsDir, 'ALL CHECKS PASSED');
-      // ⑫b 旧 change 同形态：仍按过渡规则渐进 WARN（不计入清单，但报文说清为什么跳过）
+      // ⑫b 同一形态（无任何新旧标记字段）→ 同判 BLOCKED（单轨：目录缺席 = 一项都没声明）
       writeState(dir, legacyState);
       const resNoLoadsDirOld = runGuard(['exit', 'open'], dir);
-      assertExit(resNoLoadsDirOld, 0);
-      assertOut(resNoLoadsDirOld, 'SKILL-LOAD WARN');
-      assertOut(resNoLoadsDirOld, '旧 change 兼容');
-      assertOut(resNoLoadsDirOld, 'ALL CHECKS PASSED');
+      assertExit(resNoLoadsDirOld, 1);
+      assertOut(resNoLoadsDirOld, 'BLOCKED');
+      assertOut(resNoLoadsDirOld, '缺协议文件: 0-change.md、1-requirement.md');
+      assertNotOut(resNoLoadsDirOld, '旧 change 兼容');
+      assertNotOut(resNoLoadsDirOld, 'ALL CHECKS PASSED');
     },
   },
 
@@ -1136,6 +1138,7 @@ export const ENTRIES = [
       const st = baseState('open');
       st.enteredNodes = ['open'];
       writeState(dir, st);
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', intakeChangeText());
       writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
       writeFile(dir, 'flow-kit/prompts/1-requirement.md', '# 阶段 1 · REQUIREMENT\n\n## 角色\n\n你是 Requirer。\n');
       // 声明齐备（手动 skill-load 是唯一路径；模板清单按节点映射给全）
@@ -1152,8 +1155,8 @@ export const ENTRIES = [
       const resB = runStateWithProtocol(dir, ['record', 'open', JSON.stringify({ summary: 'plain' })]);
       assertExit(resB, 0);
       // ③ exit open：声明齐备 → 通过且无兼容告警
-      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n\n## 范围\n');
-      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\n\n## 验收准则（AC）\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', intakeChangeText());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', intakeRequirementText());
       const resC = runGuard(['exit', 'open'], dir);
       assertExit(resC, 0);
       assertOut(resC, 'ALL CHECKS PASSED');
@@ -1175,7 +1178,6 @@ export const ENTRIES = [
   {
     name: '105 计数一致性自检同步 + 公开面机器字段名黑名单 + --preflight 锚 + 声明命令册子锚 + 权威源设计形态锚（AC-8 / AC-14）',
     run: async (dir) => {
-      writeNodeDeclarationMarkers(dir, 'subagent-execute');
       writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', strictSummary('P01'));
       // 声明命令的册子锚：不按载体形态分派（两册随技能包一起分发，装到哪都该给出同一组命令）——
       // 这也是「缺声明时报文给出的命令」与册子口径一致的那条机检（两边各给一半时必有一侧缺锚）。
@@ -1715,7 +1717,7 @@ export const ENTRIES = [
   {
     name: '119 handoff result 提交对象不可校验 → 协调者确认提示（M4）',
     run: (dir) => {
-      assertExit(runHandoff(['request', 'T01', 'delegate', '--write-files', 'src/t1.mjs'], dir, { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) }), 0);
+      writeNodeDeclarationMarkers(dir, 'subagent-execute');
       writeState(dir, baseState('subagent-execute'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
       execFileSync('git', ['init', '-q'], { cwd: dir });
@@ -1728,6 +1730,7 @@ export const ENTRIES = [
         completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
         riskSignals: ['none'],
       });
+      assertExit(runHandoff(['request', 'T01', 'delegate', '--write-files', 'src/t1.mjs'], dir, { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) }), 0);
       const res = runHandoff(['result', 'T01', payload], dir);
       assertExit(res, 0);
       assertOut(res, 'HANDOFF ERROR');
@@ -2182,16 +2185,15 @@ export const ENTRIES = [
       if (reqsAfterBlock['P-M02']) {
         throw new Error('M-02 BLOCK 不得落 handoffRequests: ' + JSON.stringify(reqsAfterBlock));
       }
-      // ② 旧 change 同构造 → 可见 WARN + 照常落库（AC-3 渐进兼容）
+      // ② 同一构造（无任何新旧标记字段）→ 同判 BLOCKED（单轨：归属门禁不再有渐进侧）
       writeState(dir, { ...baseState('execute'), enteredNodes: ['execute'] });
       const resOldChange = runHandoff(['request', 'P-M02', 'parallel fix slice'], dir, reqEnv);
-      assertExit(resOldChange, 0);
-      assertOut(resOldChange, 'WARN: 任务 P-M02（并行 pending）应归属节点 subagent-execute');
-      assertOut(resOldChange, '旧 change 渐进不阻断');
-      assertOut(resOldChange, 'HANDOFF REQUEST: P-M02');
+      assertExit(resOldChange, 1);
+      assertOut(resOldChange, 'BLOCKED: 任务 P-M02（并行 pending）应归属节点 subagent-execute');
+      assertOut(resOldChange, '本次请求未写入 state');
       const stOldChange = readScenarioState(dir);
-      if (!stOldChange.evidence?.['subagent-execute']?.handoffRequests?.['P-M02']) {
-        throw new Error('旧 change 错误节点请求应照常落库（AC-3），实际 ' + JSON.stringify(stOldChange.evidence));
+      if (stOldChange.evidence?.['subagent-execute']?.handoffRequests?.['P-M02']) {
+        throw new Error('归属门禁 BLOCK 不得落 handoffRequests，实际 ' + JSON.stringify(stOldChange.evidence));
       }
       // ③ pending 并行任务依赖未满足 → 当前不可委托。恢复指引必须以 next 实际输出为准：
       // next 对依赖未满足的并行任务按串行消化输出 execute——指引不得再固定指向
@@ -2235,14 +2237,13 @@ export const ENTRIES = [
       if (readScenarioState(dir).currentNode !== 'execute') {
         throw new Error('依赖未满足时 next 应把工作归属留在 execute: ' + JSON.stringify(readScenarioState(dir).currentNode));
       }
-      // 旧 change 同形态 → 可见 WARN + 照常落库（渐进兼容，不因依赖未满足而卡死）
+      // 同一形态（无任何新旧标记字段）→ 同判 BLOCKED（单轨：无渐进放行侧）
       const oldUnmetState = { ...unmetState };
       writeState(dir, oldUnmetState);
       const resUnmetOld = runHandoff(['request', 'P-M03', 'old change unmet deps'], dir, reqEnv);
-      assertExit(resUnmetOld, 0);
-      assertOut(resUnmetOld, 'WARN: 任务 P-M03（并行 pending）当前不可委托：依赖未满足');
-      assertOut(resUnmetOld, '旧 change 渐进不阻断');
-      assertOut(resUnmetOld, 'HANDOFF REQUEST: P-M03');
+      assertExit(resUnmetOld, 1);
+      assertOut(resUnmetOld, 'BLOCKED: 任务 P-M03（并行 pending）当前不可委托：依赖未满足');
+      assertNotOut(resUnmetOld, 'HANDOFF REQUEST');
     },
   },
 
@@ -2382,8 +2383,8 @@ export const ENTRIES = [
       const st = baseState('open');
       st.evidence.open = { summary: 'intake' };
       writeState(dir, st);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why（为什么做）\nx');
-      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', '# REQUIREMENT\n\n## 用户故事\nx\n\n## 验收准则（AC）\n- Given x When y Then z');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', intakeChangeText());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', intakeRequirementText());
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
       writeFile(dir, '.specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-change.json',
         JSON.stringify({ node: 'open', skill: 'flow-comet-change', protocol: '0-change.md', at: '2026-08-01T00:00:00.000Z', auto: true }, null, 2) + '\n');

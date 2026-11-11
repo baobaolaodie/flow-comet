@@ -412,13 +412,13 @@ export const ENTRIES = [
       if (!fs.existsSync(gateMarker) || fs.readFileSync(gateMarker, 'utf8') !== 'GATE-RAN') {
         throw new Error('闭合后 verify 出口未真实执行 TEST.md 验证命令（副作用文件缺失/内容不符）');
       }
-      // ④ 旧 change（无 newChange 标记）pending 同路径：渐进 WARN 不阻断（向后兼容）
+      // ④ 同一形态（无任何新旧标记字段）pending 同路径：同判 BLOCKED（单轨，无渐进侧）
       writeFile(dir, taskPath, fixBatchTaskText('pending'));
       writeState(dir, { ...reviewState });
       const resOld = runGuard(['exit', 'review'], dir);
-      assertExit(resOld, 0);
-      assertOut(resOld, 'FIX-BATCH WARN');
-      assertOut(resOld, 'ALL CHECKS PASSED');
+      assertExit(resOld, 1);
+      assertOut(resOld, 'BLOCKED: 存在未归位/未跑出口的 Fix 批次');
+      assertNotOut(resOld, 'ALL CHECKS PASSED');
       // ④b 过渡态渐进（feature 之前创建的 state 无 exit execute 签名字段）：全 done 也不得
       // 仅凭「签名缺席」误判未闭合——无签名记录 → done 变体不成立，源节点出口保持可走
       writeFile(dir, taskPath, fixBatchTaskText('done'));

@@ -153,6 +153,7 @@ export const ENTRIES = [
   {
     name: '34 subagent-execute exit 通过：handoff 含 completedChecks + 缺证据恢复命令可照抄执行',
     run: (dir) => {
+      writeNodeDeclarationMarkers(dir, 'subagent-execute');
       writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', strictSummary('P01'));
       const st = baseState('subagent-execute');
       st.evidence['subagent-execute'] = {
@@ -174,6 +175,8 @@ export const ENTRIES = [
       writeState(dir, stNoEvidence);
       // 前提：本节点还没有技能加载声明标记（record 的前置门）——报文必须把这道前置条件一并给全。
       const loadsDir = path.join(dir, '.specs', CHANGE_ID, '.skill-loads');
+      // ① 的正例已写入声明标记；② 要测「缺声明」分支，故显式清掉（单轨下声明是出口硬前置）
+      fs.rmSync(loadsDir, { recursive: true, force: true });
       if (fs.existsSync(loadsDir)) {
         throw new Error('夹具前提不成立：缺声明分支要求 .skill-loads/ 不存在（实际: ' + loadsDir + '）');
       }
@@ -364,22 +367,17 @@ export const ENTRIES = [
         + '<verify>node --check src/p3.mjs</verify></task>\n'
         + '<task id="P04" status="pending" parallel="true"><action>相邻任务</action>'
         + '<write_files>src/p04.mjs</write_files><verify>node --check src/p04.mjs</verify></task>\n');
+      // 单轨：写面不可解析一律 BLOCK（不再有「旧 change 渐进记录」这一侧）
       const reqNoWriteFiles = runHandoff(['request', 'P03', 'no write files'], dir);
-      assertExit(reqNoWriteFiles, 0);
-      assertOut(reqNoWriteFiles, '无可回应条目（任务 P03 未声明 write_files）');
-      // 同一次 request 的另一半：写面不可解析 → 渐进提示（旧 change 不阻断），且不记录写面
-      assertOut(reqNoWriteFiles, '委托任务不可解析');
+      assertExit(reqNoWriteFiles, 1);
+      assertOut(reqNoWriteFiles, 'BLOCKED: 委托任务不可解析');
       const stNoWrite = JSON.parse(readStateBytes(dir));
-      const reqNoWrite = stNoWrite.evidence?.['subagent-execute']?.handoffRequests?.P03;
-      if (!reqNoWrite) {
-        throw new Error('写面不可解析的 request 仍应照常记录（旧 change 渐进），实际 evidence: '
+      if (stNoWrite.evidence?.['subagent-execute']?.handoffRequests?.P03) {
+        throw new Error('写面不可解析的 request 不得落库，实际 evidence: '
           + JSON.stringify(stNoWrite.evidence));
       }
-      if (Array.isArray(reqNoWrite.writeFiles) && reqNoWrite.writeFiles.length > 0) {
-        throw new Error('未声明写面的任务不得记录写面，实际: ' + JSON.stringify(reqNoWrite.writeFiles));
-      }
       if (JSON.stringify(stNoWrite).includes('src/p04.mjs')) {
-        throw new Error('未声明写面的任务把相邻任务的路径记进了 state（跨任务取值）: ' + JSON.stringify(reqNoWrite));
+        throw new Error('未声明写面的任务把相邻任务的路径记进了 state（跨任务取值）: ' + JSON.stringify(stNoWrite));
       }
       // 同一份 TASK 在**新 change** 下：写面缺失必须在入口 BLOCK——旧实现借来相邻任务的写面，request
       // 因而放行，越界要等到提交子集校验才炸。BLOCK 路径 state 字节零改写。
@@ -480,6 +478,9 @@ export const ENTRIES = [
       if (fs.existsSync(boundLoadsDir)) {
         throw new Error('夹具前提不成立：缺声明分支要求 .skill-loads/ 不存在（实际: ' + boundLoadsDir + '）');
       }
+      const boundState = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      boundState.enteredNodes = ['brainstorm'];
+      writeState(dir, boundState);
       const boundBlocked = runGuard(['exit', 'brainstorm'], dir, { FLOW_COMET_PROTOCOL: '' });
       assertExit(boundBlocked, 1);
       assertOut(boundBlocked, 'BLOCKED: missing Output Schema evidence: compose.notes.v1.notes-summary');
@@ -521,7 +522,7 @@ export const ENTRIES = [
       // ④ 第三种来源：--protocol CLI（state 无绑定、环境变量为空）——判据不看来源，命令同样自带该
       // 协议路径。这正是缺陷形态的原点：用 --protocol 调 guard 时，恢复命令曾不带协议上下文，照抄
       // 一步就落到 env/默认协议（自定义协议里才有的节点名在那份协议里不存在）。
-      writeState(dir, composeState({ currentNode: 'brainstorm', evidence: { brainstorm: {} } }));
+      writeState(dir, composeState({ currentNode: 'brainstorm', evidence: { brainstorm: {} }, enteredNodes: ['brainstorm'] }));
       const cliBlocked = runGuard(['exit', 'brainstorm', '--protocol', boundProtocolRel], dir, { FLOW_COMET_PROTOCOL: '' });
       assertExit(cliBlocked, 1);
       assertOut(cliBlocked, 'BLOCKED: missing Output Schema evidence: compose.notes.v1.notes-summary');
@@ -740,10 +741,11 @@ export const ENTRIES = [
   {
     name: '38 handoff red 先于 green 通过（recordedAt）+ result PREFLIGHT 命令平台化并被真实执行',
     run: (dir) => {
-      assertExit(runHandoff(['request', 'P01', 'delegate', '--write-files', 'src/p1.mjs'], dir, { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) }), 0);
+      writeNodeDeclarationMarkers(dir, 'subagent-execute');
       writeState(dir, baseState('subagent-execute'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
       const redOnly = '{"redEvidence":{"command":"node --check src/p1.mjs"}}';
+      assertExit(runHandoff(['request', 'P01', 'delegate', '--write-files', 'src/p1.mjs'], dir, { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) }), 0);
       const res1 = runHandoff(['result', 'P01', redOnly], dir, {
         FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir),
       });
@@ -871,10 +873,11 @@ export const ENTRIES = [
   {
     name: '39 handoff BLOCKED：greenEvidence 后同批补录 redEvidence',
     run: (dir) => {
-      assertExit(runHandoff(['request', 'P01', 'delegate', '--write-files', 'src/p1.mjs'], dir, { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) }), 0);
+      writeNodeDeclarationMarkers(dir, 'subagent-execute');
       writeState(dir, baseState('subagent-execute'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
       const greenOnly = '{"greenEvidence":{"command":"node --check src/p1.mjs"}}';
+      assertExit(runHandoff(['request', 'P01', 'delegate', '--write-files', 'src/p1.mjs'], dir, { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) }), 0);
       const res1 = runHandoff(['result', 'P01', greenOnly], dir);
       assertExit(res1, 0);
       const backfill = '{"greenEvidence":{"command":"node --check src/p1.mjs"},"redEvidence":{"command":"node --check src/p1.mjs"}}';
@@ -1126,13 +1129,19 @@ export const ENTRIES = [
   {
     name: '48 execute exit BLOCKED：record 覆盖 handoff（越俎代庖）',
     run: (dir) => {
-      assertExit(runHandoff(['request', 'T01', 'delegate', '--write-files', 'src/t1.mjs'], dir, { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) }), 0);
+      writeNodeDeclarationMarkers(dir, 'execute');
+      writeNodeDeclarationMarkers(dir, 'subagent-execute');
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_DONE);
       writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       // ① workflow-handoff result 正确记录 T01 的 Return Contract（含 completedChecks）
+      // 单轨：result 必须有对应 request（未记录的委托不能回传结果）——夹具补同一份事实
+      const pre48 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      pre48.evidence['subagent-execute'] = pre48.evidence['subagent-execute'] || {};
+      pre48.evidence['subagent-execute'].handoffRequests = { T01: { description: 'delegate', writeFiles: ['src/t1.mjs'] } };
+      writeState(dir, pre48);
       const res = runHandoff(['result', 'T01', JSON.stringify({
         commitHash: 'abcd1234',
         completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
@@ -1150,6 +1159,10 @@ export const ENTRIES = [
         throw new Error('record 未整体覆盖 handoffResult（T01 应被覆盖丢失）: ' + JSON.stringify(st2.evidence['subagent-execute']));
       }
       // ③ exit execute：T01 done 但 handoff 已被覆盖丢失 → 越俎代庖 BLOCK
+      // （单轨：record 的覆盖写把 request 一起清掉，否则先撞「在飞委托」——被测的是越俎代庖这一门）
+      const preExit2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      delete preExit2.evidence['subagent-execute'].handoffRequests;
+      writeState(dir, preExit2);
       const res2 = runGuard(['exit', 'execute'], dir);
       assertExit(res2, 1);
       assertOut(res2, '越俎代庖');
@@ -1874,7 +1887,7 @@ export const ENTRIES = [
   {
     name: '80 handoff result 契约校验：无效 commitHash → ERROR；非对象与畸形形状写入前拒绝',
     run: (dir) => {
-      assertExit(runHandoff(['request', 'T01', 'delegate', '--write-files', 'src/t1.mjs'], dir, { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) }), 0);
+      writeNodeDeclarationMarkers(dir, 'subagent-execute');
       writeState(dir, baseState('subagent-execute'));
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
       execFileSync('git', ['init', '-q'], { cwd: dir });
@@ -1887,6 +1900,7 @@ export const ENTRIES = [
         completedChecks: ['required-skill:subagent-execute.flow-comet-dev'],
         riskSignals: ['none'],
       });
+      assertExit(runHandoff(['request', 'T01', 'delegate', '--write-files', 'src/t1.mjs'], dir, { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) }), 0);
       const res = runHandoff(['result', 'T01', payload], dir);
       assertExit(res, 0);
       assertOut(res, 'HANDOFF ERROR: commitHash 无效或 git show 失败');
@@ -2014,14 +2028,12 @@ export const ENTRIES = [
       assertTrue(typeof requestRecoveryLine === 'string',
         '缺 request 的恢复段必须给出可照抄的 request 命令（行首 = node + 引号脚本路径）:\n' + missingRequestOutput);
       assertRecoveryCommandLines(missingRequestRecovery, [requestRecoveryLine], '缺 request 的 result 恢复段');
-      // 旧 change 同样的输入只 WARN（渐进，不阻断既有流程）
+      // 同一输入（无任何新旧标记字段）→ 同判 BLOCKED（单轨：无渐进放行侧）
       const legacyLedger = JSON.parse(ledgerBytes);
       writeState(dir, legacyLedger);
       const legacy = runHandoff(['result', 'T06', ledgerPayload('T06', summaryHash)], dir);
-      assertExit(legacy, 0);
-      assertOut(legacy, 'HANDOFF WARN: T06');
-      assertOut(legacy, '没有对应的委托 request');
-      assertOut(legacy, 'HANDOFF RESULT: T06');
+      assertExit(legacy, 1);
+      assertOut(legacy, 'BLOCKED: 任务 T06 的 result 没有对应的委托 request');
       // 有 request 的 result 照常通过（零提交语义不变：noCommit 请求 + 无 commitHash 契约）
       const withRequest = JSON.parse(readStateBytes(dir));
       withRequest.evidence['subagent-execute'].handoffRequests = {
@@ -2125,14 +2137,13 @@ export const ENTRIES = [
       assertOut(genuineOverrun, 'BLOCKED: 提交文件超出 writeFiles 范围: stray.js');
       assertOut(genuineOverrun, '恢复: 回退越界文件或扩展 write_files');
       assertNotOut(genuineOverrun, staleSnapshotFact);
-      // ③ 判定语义不变：同一份旧快照在旧 change 上只 WARN（诊断行随报文出现，结果照常落库）
+      // ③ 同一份旧快照（无任何新旧标记字段）→ 同判 BLOCKED（单轨：无渐进放行侧）
       const legacySnapshot = JSON.parse(readStateBytes(dir));
       writeState(dir, legacySnapshot);
       const legacyWarn = runHandoff(['result', 'T09', boundaryPayload('T09', replannedHash)], dir);
-      assertExit(legacyWarn, 0);
-      assertOut(legacyWarn, 'HANDOFF WARN: 提交文件超出 writeFiles 范围: rogue.js');
+      assertExit(legacyWarn, 1);
+      assertOut(legacyWarn, 'BLOCKED: 提交文件超出 writeFiles 范围: rogue.js');
       assertOut(legacyWarn, staleSnapshotCause);
-      assertOut(legacyWarn, 'HANDOFF RESULT: T09');
     },
   },
 

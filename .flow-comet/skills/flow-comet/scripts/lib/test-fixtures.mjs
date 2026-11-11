@@ -12,22 +12,23 @@
 
 import fs from 'fs';
 import path from 'path';
-import { spawnSync } from 'child_process';
 import { createHash } from 'crypto';
+import { spawnSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
 import {
   assertExit,
   assertOut,
   copyTreePortable,
+  makeTmp as sharedMakeTmp,
   runGuard,
   runState,
   writeFile,
-  makeTmp as sharedMakeTmp,
 } from './test-helpers.mjs';
 import {
   declarationSkillTargets,
   guardedDeclarationSkills,
   nodePromptFiles,
+  nodeTemplateDeclaration,
 } from '../protocol-utils.mjs';
 
 // 本模块位于 `<技能包>/scripts/lib/` ⇒ 脚本目录是它的上一级；技能树内所有兄弟脚本路径
@@ -90,10 +91,23 @@ export function writeNodeDeclarationMarkers(dir, nodeId, { changeId = CHANGE_ID,
         skill,
         protocol: files[0] ?? null,
         protocols: files,
+        // 模板声明清单（与节点映射一致）：单轨下 record/exit 的模板声明门对一切 change 生效，
+        // 夹具若只写 node/skill 会被判「模板声明缺失」——标记必须与真实 skill-load 同形。
+        templates: nodeTemplateDeclaration(node).required,
         at: '2026-08-01T00:00:00.000Z',
       }, null, 2) + '\n');
   }
   return targets;
+}
+
+// 全部节点的声明标记（多节点路由场景的前置）：单轨下每个节点的出口都要求本节点声明，
+// 多趟场景会逐节点 exit —— 一次性把协议里每个节点的必需标记写齐，避免夹具逐节点补漏。
+export function writeAllNodeDeclarationMarkers(dir, { changeId = CHANGE_ID } = {}) {
+  const protocol = JSON.parse(fs.readFileSync(SKILL_PROTOCOL_FILE, 'utf8'));
+  for (const node of protocol.nodes ?? []) {
+    if (!node || typeof node.id !== 'string') continue;
+    writeNodeDeclarationMarkers(dir, node.id, { changeId });
+  }
 }
 
 // 组件技能树布局感知（单一来源）：本 suite 恒位于 <skillsRoot>/flow-comet/scripts/，
@@ -687,6 +701,7 @@ export const TASK_VALID_ALL_PARALLEL =
 // ---------- 多趟路由场景任务集（多趟语义批次：依赖环拦截与缺失依赖拦截场景原位重写 + 尾部新增场景族） ----------
 // 依赖环：P01↔P02 互为 depends_on（依赖图有环 → plan 出口 BLOCKED 含「依赖环」+ depends_on 恢复指引）
 export const TASK_DEP_CYCLE =
+  '## 波次划分\n\nWave 1: P01, P02\n\n## 任务清单\n\n' +
   '<task id="P01" parallel="true" status="pending"><action>实现 P01</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify><depends_on>P02</depends_on></task>\n' +
   '<task id="P02" parallel="true" status="pending"><action>实现 P02</action><write_files>src/p2.mjs</write_files><verify>node --check src/p2.mjs</verify><depends_on>P01</depends_on></task>\n';
 // 依赖缺失：P01 依赖不存在的 T99（依赖链不可满足 → plan 出口 BLOCKED 含恢复指引）

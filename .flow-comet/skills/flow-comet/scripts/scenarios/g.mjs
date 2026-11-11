@@ -33,6 +33,7 @@ import {
   SCRIPTS_DIR,
   strictSummary,
   summaryContent,
+  writeAllNodeDeclarationMarkers,
   writeBridgeFixture,
   writeIntakeArtifacts,
   writeNodeDeclarationMarkers,
@@ -458,9 +459,10 @@ export const ENTRIES = [
   {
     name: '198 多趟出口路由时序收敛：逐节点 exit --apply 后 next 输出 NODE 与 guard 出口 NODE 一致',
     run: (dir) => {
-      writeNodeDeclarationMarkers(dir, 'open');
-      writeNodeDeclarationMarkers(dir, 'design');
-      writeNodeDeclarationMarkers(dir, 'plan');
+      writeNodeDeclarationMarkers(dir, 'execute');
+      writeNodeDeclarationMarkers(dir, 'subagent-execute');
+      writeNodeDeclarationMarkers(dir, 'review');
+      writeAllNodeDeclarationMarkers(dir);
       const writeTask = (statusMap) => {
         const blk = (id, parallel, deps) =>
           '<task id="' + id + '"' + (parallel ? ' parallel="true"' : '') +
@@ -574,7 +576,7 @@ export const ENTRIES = [
       // ⑩ archive 出口 → 全部完成（两侧均 NEXT: done）
       assertExit(runGuard(['entry', 'archive'], dir), 0);
       writeFile(dir, '.specs/archive/2026-08-28-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# 遗留问题\n\n无。\n');
-      appendEvidence('archive', { summary: 'archive complete' });
+      appendEvidence('archive', { summary: 'archive complete', lessonsNomination: { scanned: 6, nominated: [], reasonIfNone: '夹具无候选条目' } });
       const res = runGuard(['exit', 'archive', '--apply'], dir);
       assertExit(res, 0);
       assertOut(res, 'NEXT: done');
@@ -867,6 +869,7 @@ export const ENTRIES = [
   {
     name: '207 多趟平行转换 next 可达且与 guard NEXT 一致（完整时序锚）',
     run: (dir) => {
+      writeAllNodeDeclarationMarkers(dir);
       writeNodeDeclarationMarkers(dir, 'plan');
       const writeTask = (statusMap) => {
         const blk = (id, parallel, deps) =>
@@ -964,7 +967,7 @@ export const ENTRIES = [
       assertConverge(runGuard(['exit', 'verify', '--apply'], dir));
       // ⑩ archive 出口 → 完成（两侧均 NEXT: done）
       writeFile(dir, '.specs/archive/2026-08-28-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# 遗留问题\n\n无。\n');
-      appendEvidence('archive', { summary: 'archive complete' });
+      appendEvidence('archive', { summary: 'archive complete', lessonsNomination: { scanned: 6, nominated: [], reasonIfNone: '夹具无候选条目' } });
       assertExit(runGuard(['entry', 'archive'], dir), 0);
       const resArch = runGuard(['exit', 'archive', '--apply'], dir);
       assertExit(resArch, 0);

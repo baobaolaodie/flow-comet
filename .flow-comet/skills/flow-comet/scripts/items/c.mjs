@@ -602,7 +602,9 @@ export const ENTRIES = [
   {
     name: 'C2 handoff：红绿证据时间序（先红后绿通过 / 补录拦截）',
     run: (dir) => {
-      writeState(dir, baseState('subagent-execute'));
+      const c2State = baseState('subagent-execute');
+      c2State.evidence['subagent-execute'] = { handoffRequests: { P01: { description: 'delegate', writeFiles: ['src/p1.mjs'] } } };
+      writeState(dir, c2State);
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
       // ① 先记录 RED（TDD 红）
       const red = '{"redEvidence":{"command":"node --check src/p1.mjs"}}';
@@ -622,6 +624,13 @@ export const ENTRIES = [
         throw new Error('greenEvidence 未附带 recordedAt: ' + JSON.stringify(rec.greenEvidence));
       }
       // ③ 新任务：先 GREEN 后补 RED → 事后补录拦截
+      // 单轨：result 必须有对应 request（未记录的委托不能回传结果）——夹具补同一份事实
+      const c2b = readStateFile(dir);
+      c2b.evidence['subagent-execute'].handoffRequests = {
+        ...(c2b.evidence['subagent-execute'].handoffRequests || {}),
+        P02: { description: 'delegate', writeFiles: ['src/p2.mjs'] },
+      };
+      writeState(dir, c2b);
       const greenOnly = '{"greenEvidence":{"command":"node --check src/p2.mjs"}}';
       assertExit(runHandoff(['result', 'P02', greenOnly], dir), 0);
       const backfill = '{"greenEvidence":{"command":"node --check src/p2.mjs"},"redEvidence":{"command":"node --check src/p2.mjs"}}';

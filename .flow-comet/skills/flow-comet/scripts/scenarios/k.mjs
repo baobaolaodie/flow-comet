@@ -902,8 +902,12 @@ export const ENTRIES = [
         }
       }
       if (replanProblems(stateText).length !== 0) throw new Error('反向构造还原后未复绿');
-      if (!/WARN: TASK\.md 同文件跨任务且无依赖路径（旧 change 渐进不阻断）/.test(stateText)) {
-        throw new Error('replan 的第三族必须保留旧 change 渐进分支（WARN 不阻断）');
+      // 单轨：replan 的第三族不再有渐进分支——源码里必须是 BLOCKED 且带「replan 不做校验豁免」口径
+      if (!/BLOCKED: TASK\.md 同文件跨任务且无依赖路径/.test(stateText)) {
+        throw new Error('replan 的第三族必须是单轨 BLOCKED（无渐进分支）');
+      }
+      if (/旧 change 渐进不阻断/.test(stateText)) {
+        throw new Error('replan 的第三族不得残留旧 change 渐进分支');
       }
     },
   },

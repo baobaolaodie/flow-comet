@@ -1334,7 +1334,6 @@ export async function runSkillLoadMarkerGate({ node, state }) {
   const declaredFiles = new Set();
   const declaredSkills = new Set();
   const malformed = [];
-  let autoHinted = false;
   for (const name of names) {
     let marker;
     try {
@@ -1350,11 +1349,6 @@ export async function runSkillLoadMarkerGate({ node, state }) {
     }
     for (const basename of markerProtocolBasenames(marker)) declaredFiles.add(basename);
     if (typeof marker.skill === 'string' && marker.skill !== '') declaredSkills.add(marker.skill);
-    // auto 标记提示——record 自动补的标记（auto:true）不证明手动加载，提示建议手动声明
-    if (marker.auto === true && !autoHinted) {
-      autoHinted = true;
-      console.error('SKILL-LOAD HINT: ' + name + ' 为 record 自动补写标记(auto)——建议手动 skill-load 声明(如实记录加载动作与协议文件)');
-    }
   }
   const missingFiles = requiredFiles.filter((file) => !declaredFiles.has(file));
   const missingSkills = requiredSkills.filter((skill) => !declaredSkills.has(skill));

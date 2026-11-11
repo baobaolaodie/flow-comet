@@ -43,6 +43,7 @@ import {
   SCRIPTS_DIR,
   STATE,
   TASK_DONE,
+  writeAllNodeDeclarationMarkers,
   writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import { scenarioProtocolPath } from '../lib/test-assertions.mjs';
@@ -2636,6 +2637,7 @@ export const ENTRIES = [
   {
     name: 'TA-19 归档提名：缺字段/编号不存在/份数不符三负例拦，补齐后通过',
     run: async (dir) => {
+      writeNodeDeclarationMarkers(dir, 'archive');
       // ① 缺 lessonsNomination 字段
       setupArchive(dir);
       const missingField = exitNode(dir, 'archive');
@@ -2716,6 +2718,7 @@ export const ENTRIES = [
         '类型非法的载荷不得落库: ' + JSON.stringify(afterReject.evidence.archive));
       // 反向构造（单变量：只把 "2" 改成 2）：同一载荷 record 通过并原样写入——判据只判类型，
       // 不新增业务规则，合法载荷不因这条形状校验变得不可写。
+      writeNodeDeclarationMarkers(dir, 'archive');
       const numericScanned = runState(['record', 'archive',
         '{"summary":"archived","lessonsNomination":{"scanned":2,"nominated":[],"reasonIfNone":"无新增条目"}}'], dir);
       assertExit(numericScanned, 0);

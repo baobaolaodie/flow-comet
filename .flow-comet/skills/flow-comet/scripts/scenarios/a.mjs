@@ -1025,7 +1025,22 @@ export const ENTRIES = [
       // 坏 SUMMARY：关键段齐（关键段门能过），但段形不合模板——标题缺 `# SUMMARY:`
       // 前缀、首部四字段缺席、段序偏离、缺「是否触发新工作」「完成判定」。这正是只有模板保真门
       // 才判、因而被更早的进展门挡住的结构问题。
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', [
+        '# T01-SUMMARY',
+        '',
+        '## 做了什么（一段话）', '', '实现 T01。',
+        '## 改动文件', '', '- src/t1.mjs',
+        '## verify 输出（必填）', '', '```', 'node --check src/t1.mjs', '```',
+        '## 6 维自查（生产代码改动必填 · 来自 4-dev 步骤 4）', '', '- 功能: 通过（brooks-review 已跑）',
+        '### 已知接受 + 理由（🟡 Major 项不修的）', '', '- 无。',
+        '### 已知小问题（🟢 Minor 项可省的）', '', '- 无。',
+        '## 数据库迁移（涉及 schema 变更必填 · 来自 4-dev 步骤 1.7 / R4.5）', '', 'N/A',
+        '## 越界检查（必填 · 来自 4-dev 步骤 5 / R6.5 / B3 老项目护栏）', '', '无越界。',
+        '## 破坏性变更（涉及破坏性改动必填 · 来自 4-dev 步骤 1.8 / R4.6 / B4 老项目护栏）', '', 'N/A',
+        '## 决策与偏离（如有）', '', '无。',
+        '## 自检方法', '', 'brooks-review',
+        '## LESSONS 扫描', '', '无 active 条目命中（夹具）。',
+      ].join('\n'));
       const serialExit = runGuard(['exit', 'execute'], dir);
       assertExit(serialExit, 1);
       assertOut(serialExit, '串行 pending');
@@ -1050,9 +1065,10 @@ export const ENTRIES = [
       writeState(dir, { ...st });
       const oldChangeBytes = readStateBytes(dir);
       const oldChangePre = runGuard(['exit', 'execute', '--preflight'], dir);
-      assertExit(oldChangePre, 0);
-      assertOut(oldChangePre, 'TEMPLATE-STRUCTURE WARN');
-      assertNotOut(oldChangePre, 'BLOCKED');
+      // 单轨：段形不符一律 BLOCKED（不再有旧 change 渐进 WARN 这一侧）
+      assertExit(oldChangePre, 1);
+      assertOut(oldChangePre, 'BLOCKED');
+      assertOut(oldChangePre, 'T01-SUMMARY.md 模板结构校验失败');
       assertStateBytesUnchanged(dir, oldChangeBytes, '旧 change 预检同样只读');
       writeState(dir, st);
       const restoredBytes = readStateBytes(dir);
@@ -1296,12 +1312,12 @@ export const ENTRIES = [
       assertOut(blocked, '待写入者收工后重跑');
       assertOut(blocked, 'P03');
       assertNotOut(blocked, 'P01（');
-      // ②b 旧 change 同形态 ⇒ 渐进 WARN 不阻断（向后兼容硬约束），指引仍在
+      // ②b 同一形态（无任何新旧标记字段）⇒ 同判 BLOCKED（单轨，无渐进侧），指引仍在
       const inFlightOld = { ...inFlight };
       writeState(dir, inFlightOld);
       const warned = runGuard(['exit', 'subagent-execute'], dir);
-      assertExit(warned, 0);
-      assertOut(warned, 'WARN');
+      assertExit(warned, 1);
+      assertOut(warned, 'BLOCKED');
       assertOut(warned, '在飞委托');
       assertOut(warned, '待写入者收工后重跑');
       // ③ 无该证据对象（从未进入委托节点）⇒ 零输出：判据不得在无证据形态下制造噪音
@@ -1598,6 +1614,7 @@ export const ENTRIES = [
     name: '21 exit verify WARN：LESSONS.md 编号乱序 + verify timeout env 覆盖 + AC 覆盖（新 change BLOCK / 旧 change WARN / 判不了按成因二分）',
     run: async (dir) => {
       writeFile(dir, '.specs/' + CHANGE_ID + '/REQUIREMENT.md', intakeRequirementText());
+      writeNodeDeclarationMarkers(dir, 'verify');
       const st = baseState('verify');
       st.evidence.verify = { summary: 'verified' };
       writeState(dir, st);
@@ -2054,6 +2071,8 @@ export const ENTRIES = [
   {
     name: '22 exit archive WARN：CHANGELOG.md 表格日期非倒序',
     run: async (dir) => {
+      writeFile(dir, '.specs/' + CHANGE_ID + '/CHANGE.md', intakeChangeText());
+      writeNodeDeclarationMarkers(dir, 'archive');
       const st = baseState('archive');
       st.evidence.archive = { summary: 'archived', lessonsNomination: { scanned: 0, nominated: [], reasonIfNone: '夹具无候选条目' } };
       writeState(dir, st);
@@ -2070,7 +2089,7 @@ export const ENTRIES = [
       assertExit(resOrder, 1);
       assertOut(resOrder, 'BLOCKED: CHANGELOG.md 表格日期非倒序');
       // 子断言:CHANGELOG 未登记本 change → WARN（归档收尾登记兜底——提示级，不阻断）
-      writeFile(dir, '.specs/CHANGELOG.md', '# CHANGELOG\n\n| 日期 | 说明 |\n|------|------|\n| 2026-08-15 | 其它 change | 登记 |\n');
+      writeFile(dir, '.specs/CHANGELOG.md', '# CHANGELOG\n\n| 日期 | 说明 |\n|------|------|\n| 2026-08-15 | 其它条目 | 登记 |\n');
       const resUnregistered = runGuard(['exit', 'archive'], dir);
       assertExit(resUnregistered, 0);
       assertOut(resUnregistered, '未登记本 change');
@@ -2246,6 +2265,7 @@ export const ENTRIES = [
       writeState(dir, composeState({
         currentNode: 'brainstorm',
         evidence: { brainstorm: { summary: 'brainstorm done' } },
+        enteredNodes: ['brainstorm'],
       }));
       writeFile(dir, '.specs/compose-demo/notes.md', '# notes\n'); // brainstorm 产物（artifact 门控）
       writeFile(dir, '.specs/compose-demo/CHANGE.md', '# CHANGE\n\n## 变更目标\n\n## 方案\n');
@@ -2267,6 +2287,7 @@ export const ENTRIES = [
       writeState(dir, composeState({
         currentNode: 'brainstorm',
         evidence: { brainstorm: { summary: 'brainstorm done' } },
+        enteredNodes: ['brainstorm'],
       }));
       writeFile(dir, '.specs/compose-demo/notes.md', '# notes\n');
       const res = runGuard(['exit', 'brainstorm'], dir, { FLOW_COMET_PROTOCOL: custom });
@@ -2281,6 +2302,7 @@ export const ENTRIES = [
         evidence: { brainstorm: { summary: 'brainstorm done' } },
         protocolPath: 'custom-protocol.json',
       });
+      bound.enteredNodes = ['brainstorm'];
       writeState(dir, bound);
       const resBound = runGuard(['exit', 'brainstorm'], dir); // runGuard 默认 env=内置协议副本
       assertExit(resBound, 0);
@@ -2342,6 +2364,7 @@ export const ENTRIES = [
       writeState(dir, composeState({
         currentNode: 'brainstorm',
         evidence: { brainstorm: { summary: 'brainstorm done' } },
+        enteredNodes: ['brainstorm'],
       }));
       writeFile(dir, '.specs/compose-demo/notes.md', '# notes\n');
       const res = runGuard(['exit', 'brainstorm', '--protocol', custom], dir);
@@ -2384,6 +2407,7 @@ export const ENTRIES = [
       writeState(dir, composeState({
         currentNode: 'brainstorm',
         evidence: { brainstorm: { summary: 'brainstorm done' } },
+        enteredNodes: ['brainstorm'],
       }));
       writeFile(dir, '.specs/compose-demo/notes.md', '# notes\n');
       writeFile(dir, '.specs/compose-demo/T01-SUMMARY.md', '# T01-SUMMARY\n');

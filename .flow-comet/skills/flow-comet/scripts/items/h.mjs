@@ -721,14 +721,13 @@ export const ENTRIES = [
       writeState(dir, oldChangeState);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
         replanTaskText({ parallelPending: ['P01'], crossTaskPair: 'no-deps' }));
-      const crossWarn = runState(['replan', '计划缺陷重校 1（旧 change 形态）', '--authorized-by', '用户裁决'], dir);
-      assertExit(crossWarn, 0);
-      assertOut(crossWarn, 'REPLAN');
-      assertOut(crossWarn, 'WARN: TASK.md 同文件跨任务且无依赖路径');
+      const crossWarn = runState(['replan', '计划缺陷重校 1（无字段状态）', '--authorized-by', '用户裁决'], dir);
+      // 单轨：replan 不做校验豁免——同文件跨任务族一律 BLOCKED 且状态零改写
+      assertExit(crossWarn, 1);
+      assertOut(crossWarn, 'BLOCKED: TASK.md 同文件跨任务且无依赖路径');
       assertOut(crossWarn, 'X1×X2(src/shared-cross.mjs)');
-      assertNotOut(crossWarn, 'BLOCKED');
-      if (replanEventsOf(readStateFile(dir)).length !== 1) {
-        throw new Error('旧 change 形态应照常重签并写入第 1 条 replan-applied 事件');
+      if (replanEventsOf(readStateFile(dir)).length !== 0) {
+        throw new Error('BLOCK 不得写入 replan-applied 事件');
       }
       const afterWarnState = readStateFile(dir);
       writeState(dir, afterWarnState);
@@ -743,10 +742,10 @@ export const ENTRIES = [
       assertOut(crossBlocked, '补显式 depends_on 或合并为一个任务');
       assertNotOut(crossBlocked, 'REPLAN:');
       if (!readStateBytes(dir).equals(crossBytes)) throw new Error('replan 第三族 BLOCK 改写了 state 字节');
-      if (replanBackupFiles(dir).length !== 1) {
-        throw new Error('replan 第三族 BLOCK 不得新增备份（应仍为第 1 轮那一份）: ' + JSON.stringify(replanBackupFiles(dir)));
+      if (replanBackupFiles(dir).length !== 0) {
+        throw new Error('replan 第三族 BLOCK 不得新增备份（单轨：无成功重签即无备份）: ' + JSON.stringify(replanBackupFiles(dir)));
       }
-      if (replanEventsOf(readStateFile(dir)).length !== 1) {
+      if (replanEventsOf(readStateFile(dir)).length !== 0) {
         throw new Error('replan 第三族 BLOCK 不得写入 replan-applied 事件');
       }
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
@@ -754,21 +753,32 @@ export const ENTRIES = [
       const crossRecovered = runState(['replan', '计划缺陷重校 2（已补 depends_on）', '--authorized-by', '用户裁决'], dir);
       assertExit(crossRecovered, 0);
       assertOut(crossRecovered, 'REPLAN');
-      if (replanEventsOf(readStateFile(dir)).length !== 2) {
-        throw new Error('补显式 depends_on 后复签应写入第 2 条 replan-applied 事件');
+      if (replanEventsOf(readStateFile(dir)).length !== 1) {
+        throw new Error('补显式 depends_on 后复签应写入第 1 条 replan-applied 事件');
       }
-      // 第 3 轮：常规修订（轮次按 change 从事件累计）
+      // 第 2 轮：常规修订（轮次按 change 从事件累计）
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', replanTaskText({ parallelPending: parallelIds.slice(0, 3) }));
       const thirdRound = runState(['replan', '计划缺陷重校 3', '--authorized-by', '用户裁决'], dir);
       assertExit(thirdRound, 0);
       assertOut(thirdRound, 'REPLAN');
+      if (replanEventsOf(readStateFile(dir)).length !== 2) {
+        throw new Error('第 2 轮后 replan-applied 事件数应为 2');
+      }
+      if (replanBackupFiles(dir).length !== 2) {
+        throw new Error('两轮应产生两份备份: ' + JSON.stringify(replanBackupFiles(dir)));
+      }
+      // 第 3 轮（上限内的最后一轮）成功
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', replanTaskText({ parallelPending: parallelIds.slice(0, 2) }));
+      const thirdRoundB = runState(['replan', '计划缺陷重校 3b', '--authorized-by', '用户裁决'], dir);
+      assertExit(thirdRoundB, 0);
+      assertOut(thirdRoundB, 'REPLAN');
       if (replanEventsOf(readStateFile(dir)).length !== 3) {
         throw new Error('第 3 轮后 replan-applied 事件数应为 3');
       }
       if (replanBackupFiles(dir).length !== 3) {
         throw new Error('三轮应产生三份备份: ' + JSON.stringify(replanBackupFiles(dir)));
       }
-      // ③ 第 4 次 → BLOCK + 人工裁决指引（继续 / 停止）+ state 字节零改写
+      // ③ 第 4 次 → BLOCK + 人工裁决指引 + state 字节零改写
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', replanTaskText({ parallelPending: parallelIds }));
       const beforeFourth = readStateBytes(dir);
       const fourth = runState(['replan', '计划缺陷重校（上限后未授权）', '--authorized-by', '用户裁决'], dir);

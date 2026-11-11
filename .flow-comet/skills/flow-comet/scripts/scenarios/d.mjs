@@ -544,20 +544,16 @@ export const ENTRIES = [
       assertStateBytesUnchanged(dir, noWaveSectionBytes, 'replan 承载段缺席 BLOCK');
       assertTrue(replanBackupFiles(dir).length === backupsBeforeNoWave,
         '承载段缺席 BLOCK 不得新增重签前备份: ' + JSON.stringify(replanBackupFiles(dir)));
-      // 分级二分（旧 change）：同一份删段任务集只 WARN 不阻断——判据在场（不是「旧 change 就跳过」），
-      // 只是照常重签并产生备份。与上面那格共用同一夹具，唯一变量 = 有无 newChange 标记。
+      // 同一份删段任务集（无任何新旧标记字段）→ 同判 BLOCKED（单轨：replan 不做校验豁免）
       const oldNoWaveState = replanExecuteState({ taskHash: REPLAN_STALE_SIGNATURE });
       writeState(dir, oldNoWaveState);
       const backupsBeforeOldWarn = replanBackupFiles(dir).length;
       const replanNoWaveOld = runStateWithProtocol(dir, ['replan', '删段 + 改任务集的重校（旧 change）', '--authorized-by', 'user-approval']);
-      assertExit(replanNoWaveOld, 0);
-      assertOut(replanNoWaveOld, 'TEMPLATE-STRUCTURE WARN: TASK.md 模板结构校验失败');
+      assertExit(replanNoWaveOld, 1);
+      assertOut(replanNoWaveOld, 'BLOCKED: TASK.md 模板结构校验失败');
       assertOut(replanNoWaveOld, '波次划分');
-      assertOut(replanNoWaveOld, '（旧 change 渐进，不阻断；新 change 将强制）');
-      assertNotOut(replanNoWaveOld, 'BLOCKED:');
-      assertOut(replanNoWaveOld, 'REPLAN: execute');
-      assertTrue(replanBackupFiles(dir).length === backupsBeforeOldWarn + 1,
-        '旧 change 的段形 WARN 不应阻断重签（应新增 1 份备份）: ' + JSON.stringify(replanBackupFiles(dir)));
+      assertTrue(replanBackupFiles(dir).length === backupsBeforeOldWarn,
+        'BLOCK 不得产生重签前备份: ' + JSON.stringify(replanBackupFiles(dir)));
       // 两处措辞同源（plan 出口 / 重校段）：同一份 TASK.md（模板在场、承载段缺席）必须给出**逐字相同**
       // 的失败行——骨架取模板权威、片段取 guard-template-fidelity 的同一格式器、两阶段口径不变
       // （escalate=false：首次只给类别计数）。现场适配只落在恢复行：replan 在那里点名缺的段（重校段
@@ -1021,7 +1017,9 @@ export const ENTRIES = [
       //    同波同层、都没标 parallel，但写同一个文件 → 写冲突族照常报，本判据必须沉默（否则同一对上
       //    两条报文自相矛盾）。反向构造：抽掉该入口（M4）→ 这里同时冒出「可并行却未标 [P]」→ 判红。
       const oldOverlap = runPlanWithTask(dir, overlapPairWavePlan());
-      assertExit(oldOverlap, 0);
+      // 单轨：同文件跨任务且无依赖路径 → BLOCKED（写冲突族照常报）
+      assertExit(oldOverlap, 1);
+      assertOut(oldOverlap, 'BLOCKED');
       assertOut(oldOverlap, '同文件跨任务且无依赖路径');
       assertTrue(!oldOverlap.output.includes('可并行却未标 [P]'),
         '补集等价被破坏：写面重叠（collectCrossTaskConflicts 判为冲突）的一对不得被要求标 [P]（'

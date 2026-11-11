@@ -280,6 +280,7 @@ export const ENTRIES = [
           + '<write_files>.specs/' + CHANGE_ID + '/x.md</write_files>'
           + '<verify>node --check allowed.js</verify></task>\n');
         writeState(nonGit, baseState('subagent-execute'));
+        writeNodeDeclarationMarkers(nonGit, 'subagent-execute');
         const resNonGit = runHandoff(['request', 'T04', 'non-git slice'], nonGit);
         assertExit(resNonGit, 0);
         const stNonGit = JSON.parse(fs.readFileSync(path.join(nonGit, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -297,6 +298,7 @@ export const ENTRIES = [
         + '<verify>node --check allowed.js</verify></task>\n');
       const sub = path.join(dir, 'sub');
       writeState(sub, baseState('subagent-execute'));
+      writeNodeDeclarationMarkers(sub, 'subagent-execute');
       const resSub = runHandoff(['request', 'T05', 'subdir slice'], sub);
       assertExit(resSub, 0);
       const stSub = JSON.parse(fs.readFileSync(path.join(sub, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -1209,6 +1211,7 @@ export const ENTRIES = [
   {
     name: '168 verify 出口 EPERM 降级：VERIFY-DEGRADED 行 + inherit 真实重试 + exit 0',
     run: (dir) => {
+      writeNodeDeclarationMarkers(dir, 'verify');
       const st = baseState('verify');
       st.evidence.verify = { summary: 'verified' };
       writeState(dir, st);

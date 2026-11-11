@@ -83,16 +83,16 @@ const RAW_ENTRIES = [
       assertExit(undeclared, 1);
       assertOut(undeclared, '模板声明缺失');
 
-      // ⑥ 旧 change 同形：同一条「多写」声明只 WARN 且照常落标记（渐进兼容——旧项目不可能一夜补齐）
+      // ⑥ 同一形态（无任何新旧标记字段）：同判 BLOCKED（单轨，无渐进放行），且不覆写既有标记
       const legacyState = readStateFile(dir);
       writeState(dir, legacyState);
+      const markerBefore = fs.readFileSync(markerPath, 'utf8');
       const legacy = runState([...DESIGN_SKILL_ARGS, '--templates', 'DESIGN.md,TASK.md'], dir);
-      assertExit(legacy, 0);
-      assertOut(legacy, 'WARN');
-      assertNotOut(legacy, 'BLOCKED');
-      const legacyMarker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
-      if (legacyMarker.at === undefined || legacyMarker.templates.join(',') !== 'DESIGN,TASK') {
-        throw new Error('旧 change 的 WARN 路径应照常写标记（记录真实声明），实际: ' + JSON.stringify(legacyMarker));
+      assertExit(legacy, 1);
+      assertOut(legacy, 'BLOCKED');
+      assertOut(legacy, '多写/错名: TASK');
+      if (fs.readFileSync(markerPath, 'utf8') !== markerBefore) {
+        throw new Error('BLOCK 不得覆写既有声明标记');
       }
     },
   },
