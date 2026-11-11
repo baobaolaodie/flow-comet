@@ -20,7 +20,7 @@ import { nowTimestamp, formatLocalTimestamp, parseTimestamp } from './time-utils
 import { resolveRunRoot } from './lib/run-root.mjs';
 // 路径上下文（runRoot / specsRoot / statePath）：节点视图解析要经 state-io 的运行根，与 workflow-state
 // 入口同源；初始化在下方 runRoot 解析之后。
-import { initStateContext, findActiveChange } from './lib/state-io.mjs';
+import { initStateContext, findActiveChange, resolveChangeLocation } from './lib/state-io.mjs';
 // 技能加载声明判定（单一实现）：委托前置门与 record 前置门是同一判据——归档兜底范围也归它，
 // 本文件不自持第二份扫描（两份实现在「活动目录在场是否回溯归档」「多归档目录取哪个」上会分叉）。
 import { hasNodeSkillDeclaration } from './lib/state-skillmarkers.mjs';
@@ -351,12 +351,29 @@ async function resultPreflightHint(state) {
   try {
     const changeName = await findActiveChange();
     if (changeName !== null) {
-      const protocolRead = await readOwnershipProtocol(state);
-      if (protocolRead.protocol !== null) {
-        const view = await resolveNodeView({ changeName, protocol: protocolRead.protocol, state });
-        if (view.routeNode !== null) return structuralPreflightHint(String(view.routeNode));
+      // 身份（findActiveChange）与位置（state-io 的唯一解析器）同源取用：视图的产物根必须与 status /
+      // next / record 认同一个目录，否则这里会给出与 next 不同的节点（移动后按活动路径推导即回退 open）。
+      // 解析不到（目录两处都没有 / 归档多候选）→ 认定为不可用，报文复用三命令的同一句原因。
+      const located = await resolveChangeLocation({
+        root: runRoot,
+        changeName,
+        createdAt: state?.createdAt,
+      });
+      if (!located.ok) {
+        unavailable = located.message.replace(/^BLOCKED:\s*/, '');
       } else {
-        unavailable = '协议不可读：' + protocolRead.failure;
+        const protocolRead = await readOwnershipProtocol(state);
+        if (protocolRead.protocol !== null) {
+          const view = await resolveNodeView({
+            changeName,
+            protocol: protocolRead.protocol,
+            state,
+            location: located.resolution,
+          });
+          if (view.routeNode !== null) return structuralPreflightHint(String(view.routeNode));
+        } else {
+          unavailable = '协议不可读：' + protocolRead.failure;
+        }
       }
     } else {
       unavailable = '无活跃 change';

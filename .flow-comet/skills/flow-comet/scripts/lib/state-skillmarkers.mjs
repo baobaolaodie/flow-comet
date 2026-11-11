@@ -122,20 +122,17 @@ export function findSkillLoadsDir(changeName) {
 // 记录/委托前置门在「先加载技能（Skill 工具）并 skill-load 声明」之前拦截"先干活后补声明"。
 export async function hasNodeSkillDeclaration(nodeId, changeName) {
   if (!nodeId || !changeName) return false;
-  const activeDir = path.join(specsDir(), changeName, '.skill-loads');
+  // 标记面 = 位置解析到的目录 + .skill-loads/（活动优先、归档兜底——两条规则都在 findSkillLoadsDir
+  // 里，本函数不另拼一份活动路径：目录定位只此一处，移动后「标记还在不在」才有唯一答案）。
+  const loadsDir = await findSkillLoadsDir(changeName);
+  if (loadsDir === null) return false;
   const prefix = nodeId + '-';
-  const scan = async (dir) => {
-    try {
-      const entries = await fs.readdir(dir);
-      return entries.some((f) => f.startsWith(prefix) && f.endsWith('.json'));
-    } catch {
-      return false;
-    }
-  };
-  if (await scan(activeDir)) return true;
-  const archived = await findSkillLoadsDir(changeName);
-  if (archived !== null && archived.dir !== activeDir) return scan(archived.dir);
-  return false;
+  try {
+    const entries = await fs.readdir(loadsDir.dir);
+    return entries.some((f) => f.startsWith(prefix) && f.endsWith('.json'));
+  } catch {
+    return false;
+  }
 }
 
 // 模板声明核对（C11）：节点的产出物模板声明落在 .skill-loads/<node>-*.json 的 templates 数组里，
@@ -253,23 +250,14 @@ export async function verifySkillLoadMarkers(completedChecks, changeName, record
     }
     // 标记路径解析——活动路径优先，归档路径兜底（archive 节点「先移目录后 record」
     // 顺序下标记只在 .specs/archive/<日期>-<change-id>/.skill-loads/）；两处都找不到 → BLOCK + 指引
-    // （不静默放行）。展示路径补 .specs/ 前缀便于用户定位。
+    // （不静默放行）。标记路径 = 位置解析到的目录 + .skill-loads/<标记>：活动优先与归档兜底只有
+    // findSkillLoadsDir 一处实现（本处不另拼活动路径表达式）。not-found 报文措辞不在本次收口范围。
     const markerName = item.node + '-' + item.skill + '.json';
     const activeDisplay = '.specs/' + path.posix.join(changeName, '.skill-loads', markerName);
-    const activePath = path.join(specsDir(), changeName, '.skill-loads', markerName);
-    let markerPath = await fileExists(activePath) ? activePath : null;
-    let markerDisplay = activeDisplay;
-    if (!markerPath) {
-      const loadsDir = await findSkillLoadsDir(changeName);
-      if (loadsDir !== null) {
-        const altPath = path.join(loadsDir.dir, markerName);
-        if (await fileExists(altPath)) {
-          markerPath = altPath;
-          markerDisplay = loadsDir.display + markerName;
-        }
-      }
-    }
-    if (!markerPath) {
+    const loadsDir = await findSkillLoadsDir(changeName);
+    const markerPath = loadsDir === null ? null : path.join(loadsDir.dir, markerName);
+    const markerDisplay = loadsDir === null ? activeDisplay : loadsDir.display + markerName;
+    if (markerPath === null || !(await fileExists(markerPath))) {
       // 声明命令由协议派生（该条目所指节点的全部协议文件 + 模板全清单），脚本路径与协议上下文由
       // 唯一装配补齐：只给 "skill-load <node> <skill>" 或裸脚本名的旧形态，照抄后会被模板声明门 /
       // 出口覆盖门逐个拦下，或在 shell 里 command not found——报文给出的东西必须一次补齐。

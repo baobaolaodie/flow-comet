@@ -47,6 +47,7 @@ import {
 import { singleSourceImportProblems } from '../lib/text-anchor-checks.mjs';
 import {
   assertStateBytesUnchanged,
+  parseStatusJson,
   readStateBytes,
   requireRouteNodeExport,
   runGuardWithProtocol,
@@ -1460,11 +1461,14 @@ export const ENTRIES = [
     },
   },
 
-  // ----------  场景（归档完成态不兜底识别残留目录） ----------
+  // ----------  场景（归档完成态不兜底识别残留目录 / 身份只由状态判定） ----------
 
-  // 59: state 为归档完成态（completed + activeChange null）→ .specs/ 顶层残留目录（含 TASK.md）不被兜底识别
+  // 59: state 为归档完成态（completed + activeChange null）→ .specs/ 顶层残留目录（含 TASK.md）不被兜底识别。
+  // 原位扩展（身份与位置分离）：在办只由状态判定（activeChange 非空 ∧ status≠completed），目录位置
+  // 只是存储位置；`.specs/` 扫描是「state 丢失」的恢复通道，**不是第二身份来源**。移入同一场景的理由 =
+  // 判据同一：本场景已是「身份从哪里来」的锚点，位置解析只是同一事实的另一半（不新增场景）。
   {
-    name: '59 归档后残留目录不误判为 active',
+    name: '59 归档后残留目录不误判为 active + 身份只由状态判定（目录缺失/移动后）',
     run: (dir) => {
       writeState(dir, composeState({ status: 'completed', activeChange: null, currentNode: null }));
       writeFile(dir, '.specs/stale/CHANGE.md', '# CHANGE\n## Why\nx\n');
@@ -1473,6 +1477,116 @@ export const ENTRIES = [
       assertExit(res, 0);
       assertOut(res, 'no-change');
       assertNotOut(res, 'stale');
+
+      // ---------- 身份与位置（原位扩展 · ① 目录缺失 fail-closed / ② 移动后同一结论 / ③ 推导读归档产物） ----------
+      // 三格按「修复前会得到什么答案」构造：修复前 findActiveChange 把「进行中」绑在**活动目录存在**上，
+      // 活动目录不在就落到 `.specs/` 扫描分支——上一步留下的 .specs/stale（有 TASK.md）因此会接管身份
+      // （把 stale 当成本 change）或干脆返回 null（打 no-change）。两种都是假答案：身份来自 state，位置
+      // 解析不到时必须 fail-closed 点名两处路径，不得假装「没有在办 change」。
+      const MOVED = 'loc-moved';
+      const ARCHIVE_REL = '.specs/archive/2026-11-05-' + MOVED;
+      const completedAll = ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review', 'verify'];
+      const locationState = (changeName) => {
+        const evidence = {};
+        for (const nodeId of completedAll) evidence[nodeId] = { summary: nodeId + ' done' };
+        return {
+          activeChange: changeName,
+          currentNode: 'archive',
+          completedNodes: completedAll.slice(),
+          evidence,
+          verifyFailures: 0,
+          executionMode: 'subagent',
+          directOverride: false,
+          enteredNodes: completedAll.concat('archive'),
+          status: 'running',
+          createdAt: '2026-11-01T00:00:00Z',
+          branchMode: false,
+          enablePrReview: false,
+          branchPrefix: 'change/',
+        };
+      };
+      // ① running-orphan：两处目录都没有（活动目录 + 归档目录）→ 三命令 fail-closed，且不得假装 no-change。
+      // 诱饵 .specs/stale 仍在场：state 有在办 change 时扫描结果不得接管身份（否则 status 报 stale）。
+      writeState(dir, locationState('loc-orphan'));
+      const orphanBytes = readStateBytes(dir);
+      const orphanStatus = runStateWithProtocol(dir, ['status']);
+      assertExit(orphanStatus, 1);
+      assertOut(orphanStatus, 'BLOCKED: change 目录缺失');
+      assertOut(orphanStatus, '.specs/loc-orphan');
+      assertOut(orphanStatus, '.specs/archive/');
+      assertNotOut(orphanStatus, 'no-change');
+      assertNotOut(orphanStatus, '"change": "stale"');
+      const orphanNext = runStateWithProtocol(dir, ['next']);
+      assertExit(orphanNext, 1);
+      assertOut(orphanNext, 'BLOCKED: change 目录缺失');
+      assertNotOut(orphanNext, 'NEXT: done');
+      assertNotOut(orphanNext, 'NODE: ');
+      const orphanRecord = runStateWithProtocol(dir, ['record', 'archive', '{"summary":"orphan"}']);
+      assertExit(orphanRecord, 1);
+      assertOut(orphanRecord, 'BLOCKED: change 目录缺失');
+      assertStateBytesUnchanged(dir, orphanBytes, '目录缺失时 record 不得改写 state');
+
+      // ② running-moved：同一份 state + 同一份完整产物集，先跑「移动前」再跑「移动后」——两条命令在
+      // 两种位置下必须给出**同一结论**（在办 / archive 节点 / 下一步 exit），差别只在落点路径。
+      const artifacts = {
+        'CHANGE.md': '# CHANGE\n\n## Why\n\nx\n',
+        'REQUIREMENT.md': '# REQUIREMENT\n\n## 用户故事\n\nx\n\n## 验收准则（AC）\n\n- Given x When y Then z\n',
+        'DESIGN.md': '# DESIGN\n\n## 决策清单\n\n- 单轨\n',
+        'TASK.md': '# TASK\n\n' + TASK_DONE,
+        'T01-SUMMARY.md': '# SUMMARY: T01 - 夹具\n\n## 做了什么\n\nx\n',
+        'REVIEW.md': '# REVIEW\n\n## 汇总\n\n- 通过\n',
+        'TEST.md': '# TEST\n\n## 验证命令\n\n```bash\necho ok\n```\n',
+        'UAT.md': '# UAT\n\n## 验收结果\n\n- 通过\n',
+        'KNOWN-ISSUES.md': '# KNOWN-ISSUES\n\n无遗留问题\n',
+      };
+      for (const [name, content] of Object.entries(artifacts)) {
+        writeFile(dir, '.specs/' + MOVED + '/' + name, content);
+      }
+      // 归档节点的技能加载声明（随目录一起搬家——真实归档动作下标记天然跟随）
+      writeNodeDeclarationMarkers(dir, 'archive', { changeId: MOVED });
+      writeState(dir, locationState(MOVED));
+      const beforeStatus = runStateWithProtocol(dir, ['status']);
+      assertExit(beforeStatus, 0);
+      const beforeJson = parseStatusJson(beforeStatus);
+      assertEqual(beforeJson.status, 'running', '移动前 status.status');
+      assertEqual(beforeJson.change, MOVED, '移动前 status.change');
+      assertEqual(beforeJson.currentNode, 'archive', '移动前 status.currentNode（产物推导）');
+      assertEqual(beforeJson.routeNode, 'archive', '移动前 status.routeNode');
+      assertEqual(beforeJson.artifactRoot, '.specs/' + MOVED, '移动前 artifactRoot = 活动目录');
+      const beforeNext = runStateWithProtocol(dir, ['next']);
+      assertExit(beforeNext, 0);
+      assertTrue(/^NODE: archive$/m.test(beforeNext.output), '移动前 next 应报 NODE: archive\n' + beforeNext.output);
+      // 真实归档动作：目录整体搬进 .specs/archive/<日期>-<change-id>/
+      fs.mkdirSync(path.join(dir, '.specs', 'archive'), { recursive: true });
+      fs.renameSync(path.join(dir, '.specs', MOVED), path.join(dir, '.specs', 'archive', '2026-11-05-' + MOVED));
+      const movedStatus = runStateWithProtocol(dir, ['status']);
+      assertExit(movedStatus, 0);
+      const movedJson = parseStatusJson(movedStatus);
+      assertEqual(movedJson.status, 'running', '移动后 status 仍报进行中（不得回落到 no-change）');
+      assertEqual(movedJson.change, MOVED, '移动后的身份 = state.activeChange');
+      // ③ 节点推导读归档产物：产物随目录搬进归档后仍被认到 ⇒ 推导落在 archive；读不到会回退 open。
+      assertEqual(movedJson.currentNode, 'archive', '移动后 currentNode 必须按归档产物推导（不得回退 open）');
+      assertEqual(movedJson.routeNode, 'archive', '移动后 routeNode（= next 的 NODE 行）');
+      assertEqual(movedJson.artifactRoot, ARCHIVE_REL, '移动后 artifactRoot = 解析到的归档目录');
+      assertNotOut(movedStatus, 'no-change');
+      assertOut(movedStatus, 'ROUTE: ');
+      const movedNext = runStateWithProtocol(dir, ['next']);
+      assertExit(movedNext, 0);
+      assertTrue(/^NODE: archive$/m.test(movedNext.output), '移动后 next 应报 NODE: archive（不推 open）\n' + movedNext.output);
+      assertNotOut(movedNext, 'NEXT: done');
+      assertNotOut(movedNext, 'NODE: open');
+      // record 的尾部节点视图与 next / status 同源：移动后不得打印 NODE: open（那是「归档产物没被认到」的
+      // 典型假答案），证据照常写入 state，且不得重建活动目录（位置只读）。
+      const movedRecord = runStateWithProtocol(dir, ['record', 'archive', '{"summary":"archived"}']);
+      assertExit(movedRecord, 0);
+      assertOut(movedRecord, 'EVIDENCE: archive');
+      assertTrue(/^NODE: archive$/m.test(movedRecord.output), '移动后 record 的尾部视图不得回退 open\n' + movedRecord.output);
+      if (fs.existsSync(path.join(dir, '.specs', MOVED))) {
+        throw new Error('移动后 record 重建了活动目录: .specs/' + MOVED + '/');
+      }
+      if (!fs.existsSync(path.join(dir, '.specs', 'archive', '2026-11-05-' + MOVED))) {
+        throw new Error('移动后归档目录应仍在: ' + ARCHIVE_REL);
+      }
     },
   },
 

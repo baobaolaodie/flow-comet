@@ -754,7 +754,8 @@ export const ENTRIES = [
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
       const res = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--prompt', 'flow-kit/prompts/1-requirement.md', '--templates', 'CHANGE.md,REQUIREMENT.md']);
       assertExit(res, 0);
-      assertOut(res, 'SKILL-LOAD: open flow-comet-change → .skill-loads/open-flow-comet-change.json');
+      // 落点如实（报告写的是标记真正被放进哪个目录）：活动目录下就是 .specs/<change-id>/.skill-loads/。
+      assertOut(res, 'SKILL-LOAD: open flow-comet-change → .specs/' + CHANGE_ID + '/.skill-loads/open-flow-comet-change.json');
       const markerPath = path.join(dir, '.specs', CHANGE_ID, '.skill-loads', 'open-flow-comet-change.json');
       if (!fs.existsSync(markerPath)) throw new Error('标记文件未生成: ' + markerPath);
       const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
@@ -775,6 +776,27 @@ export const ENTRIES = [
       }
       if (typeof marker.at !== 'string' || Number.isNaN(Date.parse(marker.at))) {
         throw new Error('标记缺 ISO 时间戳 at: ' + JSON.stringify(marker));
+      }
+      // ---------- 移动后落点（原位扩展 · running-moved 仍可声明） ----------
+      // 归档搬到一半的现场：目录已进 `.specs/archive/<日期>-<change-id>/`，执行者照抄 record / exit 报文
+      // 打印的 skill-load 命令。标记必须写进**解析到的目录**（归档），报告要说出真实落点；不得抛
+      // 「无活跃 change」（修复前身份绑在活动目录存在上，移动后即丢身份），也不得重建活动目录
+      // （位置是只读事实，不是命令的副作用）。
+      const archiveRoot = path.join(dir, '.specs', 'archive');
+      const archivedChange = path.join(archiveRoot, '2026-11-05-' + CHANGE_ID);
+      fs.mkdirSync(archiveRoot, { recursive: true });
+      fs.renameSync(path.join(dir, '.specs', CHANGE_ID), archivedChange);
+      const moved = runStateWithProtocol(dir, ['skill-load', 'open', 'flow-comet-change',
+        '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md']);
+      assertExit(moved, 0);
+      assertOut(moved, 'SKILL-LOAD: open flow-comet-change → .specs/archive/2026-11-05-' + CHANGE_ID
+        + '/.skill-loads/open-flow-comet-change.json');
+      const archivedMarker = path.join(archivedChange, '.skill-loads', 'open-flow-comet-change.json');
+      if (!fs.existsSync(archivedMarker)) {
+        throw new Error('移动后 skill-load 应把标记写进归档目录: ' + archivedMarker);
+      }
+      if (fs.existsSync(path.join(dir, '.specs', CHANGE_ID))) {
+        throw new Error('移动后 skill-load 重建了活动目录: .specs/' + CHANGE_ID + '/');
       }
     },
   },

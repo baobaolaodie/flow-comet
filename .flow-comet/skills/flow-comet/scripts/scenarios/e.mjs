@@ -733,6 +733,9 @@ export const ENTRIES = [
       const resReq = runHandoff(['request', 'T01', 'delegate parallel task'], dir);
       assertExit(resReq, 1);
       assertOut(resReq, '先加载技能');
+      // 在办 change 的目录必在场（真实链路里 init 会建 .specs/<id>/）：缺目录是 running-orphan 形态，
+      // record 会先在位置门上 fail-closed（那是另一条判据，不是本场景要测的声明门）。
+      fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
       // ② record 前置门：新 change、plan 节点无声明标记、payload 不含 completedChecks → BLOCK
       const stRec = baseState('plan');
       writeState(dir, stRec);

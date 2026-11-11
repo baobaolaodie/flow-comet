@@ -3,7 +3,7 @@
 import path from 'path';
 import { isValidTimestamp } from '../time-utils.mjs';
 import { verifyFailuresFor, setVerifyFailuresFor, writeJsonAtomic } from '../state-schema.mjs';
-import { findActiveChange, readState, writeState, specsDir } from './state-io.mjs';
+import { findActiveChange, readState, writeState, runRootDir, resolveChangeLocation } from './state-io.mjs';
 import {
   describeTemplateList,
   findTemplatesArg,
@@ -157,7 +157,19 @@ export async function runSkillLoad(protocol, argv) {
   const changeName = await findActiveChange();
   if (!changeName) {
     // 无活跃 change:声明标记的唯一写入通道就是本命令——不得承诺任何自动补写。
-    throw new Error('skill-load requires an active change（先运行 init <change-id> 或把 change 目录移回活动位置;声明标记必须由执行者手动 skill-load 写入，引擎不会代记）');
+    throw new Error('skill-load requires an active change（先运行 init <change-id>；声明标记必须由执行者手动 skill-load 写入，引擎不会代记）');
+  }
+  // 位置门 = state-io 的唯一解析器（活动目录优先、归档兜底）。标记写进**解析到的目录**：归档搬移之后
+  // 声明照常可用（此前身份绑在活动目录存在上，移动后直接抛「无活跃 change」），报告如实说出落点。
+  // 解析不到（目录两处都没有 / 归档多候选）→ fail-closed，报文与 status / next / record 同一句。
+  const located = await resolveChangeLocation({
+    root: runRootDir(),
+    changeName,
+    createdAt: (await readState()).createdAt,
+  });
+  if (!located.ok) {
+    console.error(located.message);
+    process.exit(1);
   }
   // 标记的协议声明两形态并存：
   //   · protocols = 全部 --prompt 的 basename（保序）——出口覆盖判据按它判「该读的每份协议是否
@@ -168,10 +180,12 @@ export async function runSkillLoad(protocol, argv) {
   // 同值（真实链路 skill-load → exit 一致）；写完整路径会让比对必然失败（机制实际不可用）。
   const protocols = promptArgs.map((promptArg) => path.basename(promptArg));
   const marker = { node: nodeId, skill: skillName, protocol: protocols[0] ?? null, protocols, templates: templateArg.values, at: new Date().toISOString() };
-  // specsDir 已含 .specs/，相对路径为 <change-id>/.skill-loads/<node>-<skill>.json
-  const markerRel = path.posix.join(changeName, '.skill-loads', nodeId + '-' + skillName + '.json');
-  await writeJsonAtomic(path.join(specsDir(), markerRel), marker);
-  console.log('SKILL-LOAD: ' + nodeId + ' ' + skillName + ' → .skill-loads/' + nodeId + '-' + skillName + '.json');
+  // 落点 = 解析到的 change 目录（活动或归档）+ .skill-loads/<node>-<skill>.json；报告与写入同源，
+  // 执行者据此能直接核对「标记到底进了哪个目录」。
+  const markerName = nodeId + '-' + skillName + '.json';
+  await writeJsonAtomic(path.join(located.resolution.dir, '.skill-loads', markerName), marker);
+  console.log('SKILL-LOAD: ' + nodeId + ' ' + skillName + ' → ' + located.resolution.display
+    + '/.skill-loads/' + markerName);
   return;
 }
 

@@ -278,6 +278,9 @@ export const ENTRIES = [
       const st0 = readStateFile(dir);
       st0.currentNode = 'archive';
       st0.enteredNodes = ['open', 'archive'];
+      // 夹具自洽：归档日期必须不早于该 change 的创建日期（位置解析按 createdAt 排掉更早的同名归档
+      // 目录——排除不了就 fail-closed）。真实链路里归档发生在创建之后，夹具的固定日期须与之一致。
+      st0.createdAt = '2026-08-01T00:00:00.000Z';
       // 字段退役后的状态形态（init 不再写 newChange）：旧状态带该字段一律被忽略，
       // 这里显式去掉它构造「无字段」形态——删除是幂等的，字段退役后本行自然成为 no-op。
       writeState(dir, st0);
@@ -303,22 +306,25 @@ export const ENTRIES = [
       if (autoWritten.length > 0) {
         throw new Error('record 在缺声明时自动补写了标记(自动补写应已删除): ' + autoWritten.join(', '));
       }
-      // ③ 照抄报文命令(真实执行打印文本)声明 archive 技能——标记写在活动位置,随目录移动进归档;
-      //    同一 record 通过,活动目录仍不重建。声明需要在活动位置执行是「身份只看状态」之前的
-      //    既有前提(T02 解除),本格按当前链路给出可执行路径。
+      // ③ 移动后照抄报文命令(真实执行打印文本)直接声明 archive 技能——标记落**归档路径**(解析到的
+      //    目录),同一 record 通过,活动目录不重建。这是单轨的直连链路:身份只看状态、位置由解析器
+      //    给出,不再需要「先把目录移回活动位置→声明→再移回归档」那两步(该绕道随 T02 一并删除)。
       installSkillTreeCopy(dir, path.join('.claude', 'skills'));
-      fs.renameSync(archiveDir, path.join(dir, '.specs', 'arch-h4'));
       const declared = runPrintedCommand(declareLine, dir, { FLOW_COMET_RUN_ROOT: dir, FLOW_COMET_PROTOCOL: '' });
       assertTrue(declared.status === 0,
         '照抄的声明命令跑不通\n  命令: ' + declareLine + '\n  exit ' + declared.status + '\n' + declared.output);
-      fs.renameSync(path.join(dir, '.specs', 'arch-h4'), archiveDir);
-      const recPass = runState(['record', 'archive', '{"summary":"archived"}'], dir);
-      assertExit(recPass, 0);
-      assertOut(recPass, 'EVIDENCE: archive');
+      // 报告说出真实落点(归档目录),不是活动路径的相对形态
+      assertOut(declared, 'SKILL-LOAD: archive flow-comet-integration → .specs/archive/2026-08-14-arch-h4/.skill-loads/archive-flow-comet-integration.json');
       const markerInArchive = path.join(archiveDir, '.skill-loads', 'archive-flow-comet-integration.json');
       if (!fs.existsSync(markerInArchive)) {
         throw new Error('归档路径缺执行者声明的标记: ' + markerInArchive);
       }
+      if (fs.existsSync(path.join(dir, '.specs', 'arch-h4'))) {
+        throw new Error('声明命令在归档后重建了活动目录(残留): .specs/arch-h4/');
+      }
+      const recPass = runState(['record', 'archive', '{"summary":"archived"}'], dir);
+      assertExit(recPass, 0);
+      assertOut(recPass, 'EVIDENCE: archive');
       if (fs.existsSync(path.join(dir, '.specs', 'arch-h4'))) {
         throw new Error('record 在归档后重建了活动目录(残留): .specs/arch-h4/');
       }

@@ -16,7 +16,7 @@ import {
 import { evidencePayloadProblems, looksLikeObjectLiteral, toPersistedProtocolPath } from '../state-schema.mjs';
 import { nowTimestamp } from '../time-utils.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide } from '../context-init.mjs';
-import { fileExists, findActiveChange, readState, writeState, specsDir, runRootDir, hasExactSpecsEntry } from './state-io.mjs';
+import { fileExists, findActiveChange, readState, writeState, specsDir, runRootDir, hasExactSpecsEntry, resolveChangeLocation } from './state-io.mjs';
 import { hasNodeSkillDeclaration, verifySkillLoadMarkers, verifyTemplateDeclaration } from './state-skillmarkers.mjs';
 import { determineNode, normalAdvanceExempt } from './state-determine.mjs';
 import { isInsideWorkTree, gitBranchName, branchExists, printBranchLine } from './state-branch.mjs';
@@ -98,6 +98,25 @@ function printNext(protocol, nodeId, executionMode = 'subagent') {
   }
 }
 
+// ---------- 位置门（单一实现 · 身份在办时位置必须可解析） ----------
+// 身份由状态判定（findActiveChange），位置由 state-io 的唯一解析器给出。两者分开之后出现一类新的
+// 非法态：**身份在办但两处目录都没有**（running-orphan：目录被手工删除 / 搬移失败）。此时命令层
+// 既不能照旧打 no-change（那是在说「没有在办 change」），也不能编一个节点出来——只能 fail-closed
+// 点名两处路径。报文与退出码归本族（state-io 只回传 { ok, message }，自己不 exit），status / next /
+// record 三面因此说同一句话。
+async function requireChangeLocation(changeName, state) {
+  const located = await resolveChangeLocation({
+    root: runRootDir(),
+    changeName,
+    createdAt: state?.createdAt,
+  });
+  if (!located.ok) {
+    console.error(located.message);
+    process.exit(1);
+  }
+  return located.resolution;
+}
+
 // ---------- 节点视图（单一实现）：state 原值 / 产物推导 / 进行中保护 → 路由视图 ----------
 // 「我现在该在哪个节点」只有这一份判定（同一事实两处实现必然分叉——LESSONS 的路由单一权威族）。
 // 收敛前 next 内联一份、status 只报产物推导：同一 state 下两条命令报不同节点，执行者按任一输出
@@ -166,7 +185,7 @@ async function resolveZeroProgressBlock({ changeName, protocol, nodeId }) {
 // ——真乱序（跳节点）仍严格 BLOCK。
 // 归属：next 曾内联这一份，而 status 照常给节点——同一 state 下「status 叫人 exit 一个 next 根本不会
 // 打印的节点」。搬进共享视图后 next 只消费 view.blocked，两份判定不再可能分叉。
-async function resolveNodeOrderBlock({ changeName, protocol, completedArr, state }) {
+async function resolveNodeOrderBlock({ changeName, protocol, completedArr, state, changeDir = null }) {
   if (!state.currentNode || completedArr.includes(state.currentNode)) return null;
   const nodeEvidence = state.evidence && typeof state.evidence === 'object'
     ? state.evidence[state.currentNode]
@@ -176,7 +195,7 @@ async function resolveNodeOrderBlock({ changeName, protocol, completedArr, state
     runRoot: runRootDir(), changeName, protocol, completedNodes: completedArr, currentNode: state.currentNode,
     history: state.history,
   });
-  const advanceExempt = await normalAdvanceExempt(state, protocol, completedArr, state.currentNode, changeName);
+  const advanceExempt = await normalAdvanceExempt(state, protocol, completedArr, state.currentNode, changeName, changeDir);
   if (rollbackExempt || advanceExempt) return null;
   return [
     'BLOCKED: 疑似未 exit 节点 ' + state.currentNode + '，先 workflow-guard.mjs exit ' + state.currentNode + ' --apply',
@@ -199,9 +218,13 @@ async function resolveFixReturnTarget({ changeName, protocol, completedArr, stat
   return sourceNode;
 }
 
-export async function resolveNodeView({ changeName, protocol, state }) {
+// location = 位置门解析到的结果（state-io.resolveChangeDir）；缺省 null 时按 .specs/<changeName> 解析
+// （既有形态）。产物推导必须与位置解析认同一个目录：目录搬进归档后仍按活动路径推导，视图会回退到
+// 协议首节点（「移动后 record 打 NODE: open」的成因）。
+export async function resolveNodeView({ changeName, protocol, state, location = null }) {
   const completedArr = Array.isArray(state.completedNodes) ? state.completedNodes : [];
-  const derivedNode = await determineNode(changeName, protocol, completedArr);
+  const changeDir = location === null ? null : location.relative;
+  const derivedNode = await determineNode(changeName, protocol, completedArr, changeDir);
   // 进行中节点保护：currentNode 未 exit（不在 completedNodes）且已 entry（enteredNodes 含该节点）
   // 或已 record（evidence 记录过）→ 视为进行中（可能 exit 被内容级拦截后重跑），不校正推走——
   // 否则被拦截节点的 exit 前置校验（currentNode 匹配）无法重跑，advance/select 均不恢复 → 死结
@@ -221,7 +244,7 @@ export async function resolveNodeView({ changeName, protocol, state }) {
   // currentNode 仅是初始陈旧节点）时不做路由后继保护——产物推导继续生效推进到最终节点。
   // 推导跳跃/跨节点或回退 → 产物权威校正(漂移,防过度修复)。静态直接后继兜底（串行推进原语义）。
   const routingSuccessorOfCurrent = state.currentNode
-    ? await determineNode(changeName, protocol, [...completedArr, state.currentNode])
+    ? await determineNode(changeName, protocol, [...completedArr, state.currentNode], changeDir)
     : null;
   // 「相等」还不是后继：等号只在两处推导同值时成立，派生的节点仍可能在 currentNode **之前**
   // （currentNode 之后的节点产物缺失 → 派生回退；或 Fix 归位把任务推回 execute）——此时按等号
@@ -294,7 +317,7 @@ export async function resolveNodeView({ changeName, protocol, state }) {
     })
     : null;
   const orderBlockedMessage = fixRoundBlockedMessage === null && fixReturnTarget === null
-    ? await resolveNodeOrderBlock({ changeName, protocol, completedArr, state })
+    ? await resolveNodeOrderBlock({ changeName, protocol, completedArr, state, changeDir })
     : null;
   const blockedMessage = fixRoundBlockedMessage ?? orderBlockedMessage ?? zeroProgressMessage;
   const blocked = blockedMessage === null
@@ -562,9 +585,12 @@ export async function runStatus(protocol) {
     return;
   }
   const state = await readState();
+  // 位置门（先于任何视图）：身份在办但两处目录都没有 → fail-closed，**不得**回落到 no-change
+  // （no-change 的语义是「没有在办 change」，与这里的事实相反）。
+  const location = await requireChangeLocation(changeName, state);
   // 节点视图（与 next 共用同一判定）：currentNode 仍取产物推导（既有键语义逐字不变），
   // routeNode 才是经「进行中保护」后的路由视图（= next 的 NODE 行）。
-  const nodeView = await resolveNodeView({ changeName, protocol, state });
+  const nodeView = await resolveNodeView({ changeName, protocol, state, location });
   const detectedNode = nodeView.derivedNode;
   // 派生视图（ADR-013 决策 11；改为事件为准）：被强制推进的节点以
   // state.history 中本 change 的 advance-forced 事件为唯一判据——按 change 过滤（兼容旧事件
@@ -605,7 +631,8 @@ export async function runStatus(protocol) {
     directOverride: state.directOverride ?? false,
     branchMode: isInsideWorkTree(),
     enablePrReview: state.enablePrReview ?? false,
-    artifactRoot: '.specs/' + changeName,
+    // 产物根 = 位置解析到的目录（活动 / 归档）：移动后仍报 .specs/<id> 就是在说一个不存在的落点。
+    artifactRoot: location.display,
     // 与 routeNode 同一判定（One predicate）：本键回答「协调者模式是否生效」，必须指向路由视图
     // 那个节点——若另取产物推导，进行中态会在同一响应里给出两个「当前节点」口径（routeNode=
     // execute 而 coordinatorMode=false）。既有键名/类型/位置不变，只换判定来源。
@@ -626,6 +653,9 @@ export async function runNext(protocol) {
     return;
   }
   const state = await readState();
+  // 位置门（同 status）：解析不到就 fail-closed，不打印 NODE / NEXT: done——那是「没有在办 change」
+  // 或「已无待跑节点」的措辞，两者都在说假话。
+  const location = await requireChangeLocation(changeName, state);
   const completedArr = Array.isArray(state.completedNodes) ? state.completedNodes : [];
   // Fix 回退显式分支——必须早于「疑似未 exit」门禁与进行中漂移保护：
   // review/verify 驻留 + TASK 有 pending 修复任务（串行/并行）或未闭合家族出口签名时，把工作
@@ -672,7 +702,7 @@ export async function runNext(protocol) {
     ? await resolveFixReturnNode({ runRoot: runRootDir(), changeName, protocol, completedNodes: completedArr })
     : null;
   if (fixReturnNode !== null && fixReturnNode === state.currentNode) {
-    const returnView = await resolveNodeView({ changeName, protocol, state });
+    const returnView = await resolveNodeView({ changeName, protocol, state, location });
     if (returnView.fixReturnTarget !== null) {
       console.log('RETURN: 回程源节点 ' + returnView.fixReturnTarget + '（源节点产物在场且未出口；保留源节点跑出口）');
       printNext(protocol, returnView.routeNode, state.executionMode ?? 'subagent');
@@ -683,7 +713,7 @@ export async function runNext(protocol) {
   }
   // 节点视图（与 status 共用同一判定，见 resolveNodeView——节点顺序门禁也在其中，本命令不再内联
   // 第二份）：derivedNode 供零进展防呆与漂移校正使用，routeNode 才是输出节点（next 的 NODE 行）。
-  const nodeView = await resolveNodeView({ changeName, protocol, state });
+  const nodeView = await resolveNodeView({ changeName, protocol, state, location });
   const detectedNode = nodeView.derivedNode;
   // 此态 next 不打印 NODE、直接 BLOCKED（节点顺序门禁 / 单趟零进展 / Fix 归位第 4 轮无授权）：三个
   // 判定与报文都在共享视图里（resolveNodeOrderBlock / resolveZeroProgressBlock / applyFixRollbackRound
@@ -848,11 +878,18 @@ export async function runRecord(protocol, argv) {
   // 缺失 → BLOCKED + 指引先加载 skill 并运行 skill-load；标记 at 必须 ≤ 本次记录时间
   // （交叉自洽：标记先于记录声明）。仅校验本次写入的 payload，旧 evidence 不追溯（旧 change 兼容）。
   const recordedAt = new Date().toISOString();
-  // 标记归属 change 与 evidence 一致：优先 state.activeChange，缺失时回退 findActiveChange（与
-  // 下方 NEXT 推导同语义）；两者皆无 → verifySkillLoadMarkers 内 fail-closed BLOCK。
+  // 身份与位置（与 status / next 同源；先于任何写盘与声明门）：身份在办 → 位置必须可解析；解析不到
+  // 就 fail-closed（不写 evidence、不猜落点）。此前位置解析隐式散在两条取值路径上（标记归属与尾部
+  // 节点视图各算一次），移动后两处会各自给出「目录不存在」的假答案。
+  // 排序：载荷的形状校验在前（它判的是本命令自己的参数面，报的是「你怎么调用的」），位置门在后
+  // （它判的是这次记录能不能落地）——两者都 fail-closed，但先把参数问题说清楚。
+  const identityChange = state.activeChange || await findActiveChange();
+  const location = identityChange === null ? null : await requireChangeLocation(identityChange, state);
+  // 标记归属 change 与 evidence 一致：身份取值与 status / next / 尾部视图**同一份**（上方一次
+  // 取好）；无身份 → verifySkillLoadMarkers 内 fail-closed BLOCK。
   // 传入 protocol + state——按 requiredSkillCalls scope 分类条目（handoff scope 豁免标记，
   // 以共用证据库 handoffResult 为证据）
-  const markerChange = state.activeChange || await findActiveChange();
+  const markerChange = identityChange;
   const markerCheck = await verifySkillLoadMarkers(parsed.completedChecks, markerChange, recordedAt, protocol, state, declarationContext);
   if (!markerCheck.ok) {
     console.error('BLOCKED: ' + markerCheck.reason);
@@ -911,8 +948,8 @@ export async function runRecord(protocol, argv) {
   // 产物推导会让三面在**进行中保护**生效时分叉（record 报 review，而 next / status.routeNode 报
   // execute）——故复用 resolveNodeView 的 routeNode：本命令不自持第二份判定，也不改变自己的写面
   // （record 只写证据，不写 currentNode，视图是纯读）。
-  const changeName = state.activeChange || await findActiveChange();
-  const nodeView = changeName ? await resolveNodeView({ changeName, protocol, state }) : null;
+  const changeName = identityChange;
+  const nodeView = changeName ? await resolveNodeView({ changeName, protocol, state, location }) : null;
   // 边界态（next 会 BLOCKED、不打印 NODE）：record 是同一事实的第四个输出面，尾巴不得再声称
   // 「NEXT: done」——那是在说「没有下一节点了」，与 next 的 BLOCKED、status.routeNode=null 相反。
   // 命中时改打与 ROUTE: 行同源的一句（原因 + 先按恢复指引处理），NODE / SKILL 一律不打（next 此刻

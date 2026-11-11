@@ -44,18 +44,22 @@ export async function fileExists(file) {
 }
 
 export async function findActiveChange() {
-  // 1. Read from state file if exists
+  // 1. 身份只看状态（单一判定）：state 存在 ∧ activeChange 非空 ∧ status ≠ 'completed' ⇒ 在办。
+  // 目录在不在**不参与**身份判定——位置由 resolveChangeDir 回答：归档搬移只是把目录换个位置，
+  // change 仍在办（移动后 status / next / record 照常报进行中）。把身份绑在「活动目录存在」上
+  // 会让移动后瞬时丢掉身份，命令层随即把在办 change 报成 no-change / NEXT: done（假答案）。
   if (await fileExists(stateFile())) {
     const state = await readJson(stateFile());
     // completed 检查优先于 activeChange 分支——归档完成态（无论 activeChange 是否残留）
     // 一律不识别为 active（防归档残留目录 / 残留字段误判）
     if (state.status === 'completed') return null;
-    if (state.activeChange) {
-      const changeDir = path.join(specsDir(), state.activeChange);
-      if (await fileExists(changeDir)) return state.activeChange;
-    }
+    if (state.activeChange) return state.activeChange;
   }
-  // 2. Scan .specs/ for directories with TASK.md (active flow-kit changes)
+  // 2. .specs/ 扫描**只是 state 丢失时的恢复通道，不是第二身份来源**：它只在「无 state 文件」
+  //    与「state 无 activeChange」两种情形下运行，触发条件与上一步的分支互斥。读这段时不要把它当成
+  //    另一个身份来源——那会让同一事实出现两套判定（state 说 A、目录扫描说 B，命令各取一套）。
+  //    位置（活动 / 归档）由 resolveChangeDir 回答，不在本函数内。
+  //    Scan .specs/ for directories with TASK.md (active flow-kit changes)
   // 注: 曾尝试按 archive/ 对应归档跳过残留目录——但会误伤同名新 change（既有实证），已撤回。
   // 「state 缺失 + 归档残留」为已知限制；归档后正常态由上文 completed 分支覆盖。
   try {
@@ -164,11 +168,120 @@ export function isArchivedChangeDirName(entry, changeName) {
   return archiveDate !== null && entry === archiveDate + '-' + changeName;
 }
 
+// ---------- change 目录定位（唯一实现） ----------
+// 给定 change 名，回答「这个 change 的目录现在在哪」：活动目录 .specs/<id>/ 优先；不在就是归档目录
+// .specs/archive/<YYYY-MM-DD>-<id>/（整名精确比对——判据单源 isArchivedChangeDirName，不写第二份
+// 日期规则）。多候选按日期判：排除日期早于 state.createdAt 日期部分的候选、取日期最新的一份；
+// 仍并列 / 无候选 → **不猜**，把候选交还调用方按 fail-closed 处理（status='ambiguous' | 'missing'）。
+//
+// 身份与位置是两件事：身份只看 state（findActiveChange），本函数只回答位置。目录缺失不影响「这个
+// change 在办」的判定，只影响命令能不能落地——所以运行命令在解析不到时必须 fail-closed 并点名两处
+// 路径，而不是把在办 change 报成「没有在办 change」。
+//
+// 落点在本模块（.specs 路径上下文）：这是一条 change 目录的路径规则，命令族 / 守卫族 / 委托脚本都
+// 消费它，各写一份必然在「活动目录优先对不对」「多归档目录取哪个」上分叉（L-067）。运行根是显式
+// 参数：各族注入自己的根（状态族 runRootDir()、守卫族 runRoot），规则不绑定任何一族的运行上下文。
+//
+// 返回形态（消费方按 status 分派，不解读 dir 的字符串形态）：
+//   { status: 'active',    dir, relative, display, archiveDate: null, candidates: [] }
+//   { status: 'archived',  dir, relative, display, archiveDate, candidates }
+//   { status: 'missing',   dir: null, relative: null, display: null, archiveDate: null, candidates }
+//   { status: 'ambiguous', dir: null, relative: null, display: null, archiveDate, candidates }
+// relative = 相对 .specs/ 的 POSIX 路径（'<id>' / 'archive/<日期>-<id>'）——节点推导的产物根就按它
+// 拼（见 route-node.resolveNextNode 的 changeDir 入参）；display = 用户可见的 .specs/... 形态。
+export async function resolveChangeDir({ root, changeName, createdAt = null } = {}) {
+  const specsRoot = path.join(root, '.specs');
+  const activeDir = path.join(specsRoot, changeName);
+  if (await fileExists(activeDir)) {
+    return {
+      status: 'active',
+      dir: activeDir,
+      relative: changeName,
+      display: '.specs/' + changeName,
+      archiveDate: null,
+      candidates: [],
+    };
+  }
+  const archiveRoot = path.join(specsRoot, 'archive');
+  const entries = await fs.readdir(archiveRoot).catch(() => []);
+  const candidates = [];
+  for (const entry of entries) {
+    if (!isArchivedChangeDirName(entry, changeName)) continue;
+    candidates.push({ name: entry, date: archiveDateFromName(entry) });
+  }
+  const lowerBound = archiveDateLowerBound(createdAt);
+  const eligible = lowerBound === null
+    ? candidates.slice()
+    : candidates.filter((candidate) => candidate.date >= lowerBound);
+  if (eligible.length === 0) {
+    return { status: 'missing', dir: null, relative: null, display: null, archiveDate: null, candidates };
+  }
+  // 日期字典序 = 时间序（同一 YYYY-MM-DD 形态）；同日期多份即并列，不按 readdir 顺序挑一份。
+  // 判据契约是「排不出唯一就停」：在 `<日期>-<id>` 精确名规则下同一日期不可能有两份（每个日期只
+  // 拼出一个名字），所以并列支正常不可达——保留它是因为「不猜」是解析器对调用方的承诺，不该是某条
+  // 命名规则的副产品（命名规则一放宽，是本支先接住，而不是 readdir 顺序先替人做决定）。
+  const newest = eligible.reduce((best, candidate) => (candidate.date > best.date ? candidate : best), eligible[0]);
+  const tied = eligible.filter((candidate) => candidate.date === newest.date);
+  if (tied.length > 1) {
+    return { status: 'ambiguous', dir: null, relative: null, display: null, archiveDate: newest.date, candidates };
+  }
+  return {
+    status: 'archived',
+    dir: path.join(archiveRoot, newest.name),
+    relative: 'archive/' + newest.name,
+    display: '.specs/archive/' + newest.name,
+    archiveDate: newest.date,
+    candidates,
+  };
+}
+
+// createdAt 的日期下界：取 state 时间戳的前 10 个字符，交给 time-utils 的归档日期判据校验（不写
+// 第二份日期形态正则）。形态不可判 → null = 不设下界（判不了的日期不许当作「全都太早」把唯一
+// 候选也排掉）。
+function archiveDateLowerBound(createdAt) {
+  if (typeof createdAt !== 'string') return null;
+  return archiveDateFromName(createdAt.trim().slice(0, 10));
+}
+
+// 位置解析的命令面形态：可解析 → { ok: true, resolution }；解析不到 → { ok: false, resolution,
+// message }。退出码与打印归命令层（本模块不 process.exit），但**报文文本**落在这里——status /
+// next / record / skill-load 必须说同一句话（成因只有「两处都没有」与「多候选判不出」两类，各写
+// 一份措辞必然分叉）。
+export async function resolveChangeLocation({ root, changeName, createdAt = null } = {}) {
+  const resolution = await resolveChangeDir({ root, changeName, createdAt });
+  if (resolution.status === 'active' || resolution.status === 'archived') {
+    return { ok: true, resolution };
+  }
+  return { ok: false, resolution, message: changeLocationFailureMessage(changeName, resolution) };
+}
+
+// 位置解析失败的可见报文（fail-closed 的唯一措辞）：
+//   · missing：身份在办但两处目录都没有（running-orphan）——命令不得回落到「没有在办 change」；
+//   · ambiguous：同名归档多候选且日期判不出唯一一份——不许猜，列出候选请人工处置。
+export function changeLocationFailureMessage(changeName, resolution) {
+  const activeDisplay = '.specs/' + changeName;
+  if (resolution.status === 'ambiguous') {
+    return 'BLOCKED: 归档目录多候选，无法唯一判定 ' + changeName + ' 的目录（' + resolution.archiveDate
+      + ' 存在 ' + resolution.candidates.filter((candidate) => candidate.date === resolution.archiveDate).length
+      + ' 份：' + resolution.candidates.map((candidate) => candidate.name).join('、')
+      + '）——保留一份后重跑；引擎不猜';
+  }
+  const excluded = resolution.candidates.length > 0
+    ? '（归档区同名候选 ' + resolution.candidates.map((candidate) => candidate.name).join('、')
+      + ' 的日期均早于本次 change 的创建日期）'
+    : '';
+  return 'BLOCKED: change 目录缺失（' + activeDisplay + ' 与 .specs/archive/<日期>-' + changeName
+    + ' 均不存在）' + excluded
+    + '——身份由状态判定（该 change 仍在办），位置解析不到；恢复: 把目录移回 ' + activeDisplay
+    + '，或按 <YYYY-MM-DD>-' + changeName + ' 命名放进 .specs/archive/ 后重跑';
+}
+
 // 声明标记目录解析（活动路径 .specs/<change-id>/.skill-loads/ 优先；归档路径兜底——archive 节点
 // 「先移目录后 record/exit」顺序下 change 目录已在 .specs/archive/<日期>-<change-id>/，标记只随目录
-// 移动：只查活动路径会把「标记存在」误判成「机制未激活」）。归档目录按整名精确比对——协议声明的
-// archive/*-<change-id> 是产物 glob，目录名约定才是 <日期>-<change-id>（判据见
-// isArchivedChangeDirName）。两者皆无 → null，调用方按旧 change 兼容跳过。
+// 移动：只查活动路径会把「标记存在」误判成「机制未激活」）。归档目录的**定位**（是哪一份、多候选
+// 怎么办）走 resolveChangeDir 的唯一实现；本函数只把 .skill-loads/ 追加在解析到的目录之后。协议
+// 声明的 archive/*-<change-id> 是产物 glob，目录名约定才是 <日期>-<change-id>（判据见
+// isArchivedChangeDirName）。两者皆无 → null，调用方按「一项都没声明」处理。
 //
 // includeArchive 是这条规则唯一的形态开关，缺省 true（兜底归档）。入口侧（workflow-guard 的
 // checkPromptDeclarations）传 false：入口核对的是**这一轮**写下的声明，归档里的声明属于归档前的
@@ -187,14 +300,12 @@ export async function findSkillLoadsDir(root, changeName, { includeArchive = tru
     return { dir: activeDir, display: '.specs/' + changeName + '/.skill-loads/' };
   }
   if (!includeArchive) return null;
-  const archiveRoot = path.join(root, '.specs', 'archive');
-  const entries = await fs.readdir(archiveRoot).catch(() => []);
-  for (const entry of entries) {
-    if (!isArchivedChangeDirName(entry, changeName)) continue;
-    const candidate = path.join(archiveRoot, entry, '.skill-loads');
-    if (await fileExists(candidate)) {
-      return { dir: candidate, display: '.specs/archive/' + entry + '/.skill-loads/' };
-    }
-  }
-  return null;
+  // 归档路径 = 位置解析的结果 + .skill-loads/ —— 目录定位只有 resolveChangeDir 一份实现：标记查找、
+  // 命令写入与节点推导必须认同一个目录（否则「标记在 A、产物在 B」）。位置解析到活动目录时本函数
+  // 已在上一步返回；解析不出（缺失 / 多候选）→ null（调用方按「一项都没声明」fail-closed，不猜）。
+  const resolution = await resolveChangeDir({ root, changeName });
+  if (resolution.status !== 'archived') return null;
+  const candidate = path.join(resolution.dir, '.skill-loads');
+  if (!(await fileExists(candidate))) return null;
+  return { dir: candidate, display: resolution.display + '/.skill-loads/' };
 }
