@@ -1673,6 +1673,20 @@ export const ENTRIES = [
       const res = runGuard(['exit', 'execute'], dir);
       assertExit(res, 1);
       assertOut(res, '未执行 entry 直接 exit');
+      // 恢复指引按**目录在哪**分两种说法（in-place 扩展）：活动目录在场时，状态漂移的两条既有
+      // 出路（advance / select）是可行的那一步；目录已搬进归档时这两步都走不通——select 要求活动
+      // 目录在场，advance 的产物推导也读活动路径——只给可执行的那一步（把目录移回活动位置）。
+      assertOut(res, '状态漂移 → advance/select');
+      fs.mkdirSync(path.join(dir, '.specs', 'archive'), { recursive: true });
+      fs.renameSync(path.join(dir, '.specs', CHANGE_ID),
+        path.join(dir, '.specs', 'archive', '2026-11-05-' + CHANGE_ID));
+      const resMoved = runGuard(['exit', 'execute'], dir);
+      assertExit(resMoved, 1);
+      assertOut(resMoved, '未执行 entry 直接 exit');
+      assertOut(resMoved, '已移到归档位置（.specs/archive/2026-11-05-' + CHANGE_ID + '）');
+      assertOut(resMoved, '移回活动位置 .specs/' + CHANGE_ID + '/');
+      assertNotOut(resMoved, 'advance');
+      assertNotOut(resMoved, 'select');
     },
   },
 

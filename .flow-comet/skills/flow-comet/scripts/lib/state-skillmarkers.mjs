@@ -24,6 +24,7 @@ import {
   fileExists,
   findSkillLoadsDir as findSkillLoadsDirAtRoot,
   readJson,
+  resolveChangeDir,
   runRootDir,
   specsDir,
 } from './state-io.mjs';
@@ -200,6 +201,29 @@ export async function verifyTemplateDeclaration({ protocol, nodeId, changeName, 
   return { ok: false, reason };
 }
 
+// 「该标记到底在哪儿找过」的说明（缺声明报文的尾句，唯一实现）。活动路径找不到时按目录**实际**所在的
+// 位置说真话：
+//   · 目录已归档（<日期>-<change-id>）→ 点名归档路径：那里也没有该标记；
+//   · 归档多候选 / 两处都没有 → 才说「判不出」/「两处都没有」（成因措辞逐字沿用状态族的位置失败报文
+//     口径，不另写一套「未找到」说法）；
+//   · 活动目录在场 → 不给尾句：归档本来就不是这次该找的位置，对归档下任何结论都是假话。
+// 旧形态无条件打印「（归档路径也未找到）」——归档目录明明在场时那句话是假话，还把「找过哪里」这个
+// 可核对的事实糊掉了（L-079 同族：不可判 / 未发生的事不许写成已发生的结论）。
+async function markerLookupNote(changeName) {
+  const resolution = await resolveChangeDir({ root: runRootDir(), changeName });
+  if (resolution.status === 'archived') {
+    return '（该 change 已归档到 ' + resolution.display + '，那里也没有该标记）';
+  }
+  if (resolution.status === 'ambiguous') {
+    return '（归档目录多候选：' + resolution.candidates.map((candidate) => candidate.name).join('、')
+      + '——无法唯一判定该找哪一份）';
+  }
+  if (resolution.status === 'missing') {
+    return '（活动目录与 .specs/archive/<日期>-' + changeName + ' 两处都没有该目录）';
+  }
+  return '';
+}
+
 // completedChecks 真实性校验。解析 completedChecks 的 required-skill:<node>.<skill>
 // 条目 → 对应声明标记 .specs/<change-id>/.skill-loads/<node>-<skill>.json 必须存在（缺失 →
 // BLOCKED + 指引先加载 skill 并运行 skill-load）；标记 at 必须 ≤ 本次记录时间（交叉自洽：
@@ -266,8 +290,8 @@ export async function verifySkillLoadMarkers(completedChecks, changeName, record
       const declaredNode = (protocol?.nodes ?? []).find((node) => node.id === item.node) ?? { id: item.node };
       return {
         ok: false,
-        reason: 'completedChecks 条目 ' + item.raw + ' 缺少对应声明标记 ' + activeDisplay +
-          '（归档路径也未找到）——先加载该 skill 并照抄下面的命令声明已加载:\n  '
+        reason: 'completedChecks 条目 ' + item.raw + ' 缺少对应声明标记 ' + activeDisplay
+          + (await markerLookupNote(changeName)) + '——先加载该 skill 并照抄下面的命令声明已加载:\n  '
           + declarationCommand({ node: declaredNode, skill: item.skill, context }),
       };
     }

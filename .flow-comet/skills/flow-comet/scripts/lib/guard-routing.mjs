@@ -4,7 +4,7 @@
 // 依赖方向单向：本模块 → 既有共享模块（state-schema / protocol-utils / task-parsing /
 // route-node）+ guard-state-io；反向 import 不存在。
 
-import { promises as fs } from 'fs';
+import { existsSync, promises as fs, readdirSync } from 'fs';
 import path from 'path';
 import { handoffRequestWithdrawn } from '../state-schema.mjs';
 import { inspectWorkflowProtectedPath } from '../protocol-utils.mjs';
@@ -15,6 +15,9 @@ import { SUMMARY_REQUIRED_SECTIONS, buildSkeleton } from './guard-artifact-skele
 // 归档目录名「是不是本 change 的」判据单源在状态族的路径上下文模块（guard → state-* 是允许的
 // 单向边）：本模块只消费，不在这里另写一份后缀/日期匹配。
 import { isArchivedChangeDirName } from './state-io.mjs';
+// 归档日期判据与「今天」的形态同属时间纪律单一来源（time-utils）：本模块只取用——不为一条目录名
+// 诊断另写日期正则，也不自行拼当前日期。
+import { archiveDateFromName, formatLocalDate } from '../time-utils.mjs';
 
 // flow-kit SUMMARY 模板必填段（正则匹配，大小写不敏感 + 变体兼容）——清单唯一来源是骨架模块，
 // 此处只取用（本模块不再自持第二份段名清单）。
@@ -190,8 +193,16 @@ export function patternToRegExp(pattern) {
   return new RegExp('^' + String(pattern).split('*').map(escapeRegExp).join('.*') + '$', 'u');
 }
 
-export async function pathPatternExists(root, relativePattern) {
+// 在场判定（协议声明的产物路径 → 是否在场）。归档 change 目录段（`archive/<任意>-<change-id>`）的
+// 通配只表达「归档位下本 change 的目录」——目录名本身另有唯一规则（<YYYY-MM-DD>-<change-id>，判据
+// 单源 state-io.isArchivedChangeDirName）。带 change 调用时，名字不合规的目录**不算在场**：它由产物门
+// 当场报出实际名字与改名命令（archiveDirNameNotice），而不是被当成「本 change 的归档产物」放行。
+// 非归档通配段（以及未传 change 的调用）逐字保持既有语义——放宽/收紧只落在这一个位置。
+export async function pathPatternExists(root, relativePattern, { change = null } = {}) {
   const parts = workflowRelativeSegments(relativePattern, 'artifact path', true);
+  const archiveChangeDirSegment = change !== null && parts[0] === 'archive' && (parts[1] ?? '').includes('*')
+    ? 1
+    : -1;
   async function walk(current, index) {
     const inspection = await inspectWorkflowProtectedPath(
       runRoot,
@@ -221,9 +232,9 @@ export async function pathPatternExists(root, relativePattern) {
             path.join(current, entry.name),
         );
       }
-      if (matcher.test(entry.name) && (await walk(path.join(current, entry.name), index + 1))) {
-        return true;
-      }
+      if (!matcher.test(entry.name)) continue;
+      if (index === archiveChangeDirSegment && !isArchivedChangeDirName(entry.name, change)) continue;
+      if (await walk(path.join(current, entry.name), index + 1)) return true;
     }
     return false;
   }
@@ -293,7 +304,7 @@ export async function declaredRequiredArtifacts(protocol, node, change) {
       if (!unspecifiedPaths) {
         const artifactRoot = await workflowArtifactRoot(artifact.pathBase);
         present = (await Promise.all(
-          resolvedPaths.map((declaredPath) => pathPatternExists(artifactRoot, declaredPath)),
+          resolvedPaths.map((declaredPath) => pathPatternExists(artifactRoot, declaredPath, { change })),
         )).some(Boolean);
       }
       declared.push({ schemaId, artifact, resolvedPaths, present, kind: artifact.kind, unspecifiedPaths });
@@ -324,6 +335,79 @@ export async function isArchivedChange(changeName) {
   if (await fileExists(path.join(archiveRoot, changeName))) return true;
   const entries = await fs.readdir(archiveRoot).catch(() => []);
   return entries.some((entry) => entry === changeName || isArchivedChangeDirName(entry, changeName));
+}
+
+// ---------- 归档目录名诊断 / 目录位置在恢复指引里的说法 ----------
+
+// 归档区里「名字像是本 change 的、却没有日期前缀」的目录（如 foo-<id>）——运行路径不再解释它，
+// 所以要当场给出期望格式与改名命令，而不是把它当「不在场」→ 报缺件（那会让人去补一件其实存在的
+// 产物）。判据单源 = state-io.isArchivedChangeDirName，本函数只负责挑出这一类。
+// 两个刻意排除的形态：① 合规名（<YYYY-MM-DD>-<change-id>）是正常态；② 日期前缀在场但不是本 change
+// 的目录（如 2026-10-20-other-<id>）是**别人的归档**——把它当成「本 change 错名了」就是误报。
+function misnamedArchiveChangeDirs(changeName) {
+  if (!changeName) return [];
+  let entries = [];
+  try {
+    entries = readdirSync(path.join(runRoot, '.specs', 'archive'));
+  } catch {
+    return [];
+  }
+  const suffix = '-' + changeName;
+  return entries
+    .filter((entry) => entry.endsWith(suffix)
+      && !isArchivedChangeDirName(entry, changeName)
+      && archiveDateFromName(entry) === null)
+    .sort()
+    .map((entry) => ({ name: entry, display: '.specs/archive/' + entry }));
+}
+
+// 错名归档目录的**同一句**报文（出口产物门与结构化预检都渲染这一句，措辞只此一处）：期望格式 +
+// 实际目录名 + 可整行照抄的改名命令。改名命令的路径用与其余报文一致的 .specs/ 相对形态（平台无关、
+// 可直接贴进 shell），日期取本次搬移日（= 今天，与「归档日期由执行者按搬移日填写」同义）。
+export function archiveDirNameNotice(changeName, nodeId) {
+  const problems = misnamedArchiveChangeDirs(changeName);
+  if (problems.length === 0) return [];
+  const expected = '<YYYY-MM-DD>-' + changeName;
+  const today = formatLocalDate(new Date());
+  const lines = ['BLOCKED: 归档目录名不合规（' + problems.length + ' 处）——本 change 的归档目录名必须是 '
+    + expected + '（日期前缀 + change 名，运行路径只认这一种）:'];
+  for (const problem of problems) {
+    lines.push('  - ' + problem.display + '（实际目录名: ' + problem.name + '）');
+    lines.push('    改名: mv "' + problem.display + '" ".specs/archive/' + today + '-' + changeName + '"');
+  }
+  lines.push('恢复: 按上面的命令改名后重试 exit ' + nodeId + '——脚本不替你搬目录，也不猜目录名');
+  return lines;
+}
+
+// 「目录已不在活动位置、而在归档里」的可见形态（恢复指引据此换一种说法）：活动目录在原位 → null；
+// 归档区里通过 isArchivedChangeDirName 的条目（同名多份取日期最新的一份）→ 该目录的 .specs/ 形态。
+// 只回答「在不在归档、叫什么」，不参与定位写入（定位唯一实现是状态族的 resolveChangeDir，它还要套
+// createdAt 下界与并列判定）。恢复指引只关心「活动位置空没空」，同步取值即可——出口链上有同步门禁
+// （entry 记录门）取用同一份事实，不为一条提示改它的调用约定。
+export function archivedChangeLocation(changeName) {
+  if (!changeName) return null;
+  if (existsSync(path.join(runRoot, '.specs', changeName))) return null;
+  let entries = [];
+  try {
+    entries = readdirSync(path.join(runRoot, '.specs', 'archive'));
+  } catch {
+    return null;
+  }
+  // 归档日期是 YYYY-MM-DD（字典序 = 时间序），点名最新的一份（多份的真实处置是 resolveChangeDir 的
+  // 「排不出就停」，这里只给一句可执行的指引，不复制那套判定）。
+  const names = entries.filter((entry) => isArchivedChangeDirName(entry, changeName)).sort();
+  if (names.length === 0) return null;
+  return '.specs/archive/' + names[names.length - 1];
+}
+
+// 恢复动作那一句（门禁族共用的唯一分叉）：活动目录在场时 advance / select 是可行的那一步；目录已搬进
+// 归档时这两步都走不通——select 要求活动目录在场，advance 的产物推导读的也是活动路径，给出去就是让人
+// 去做一件做不到的事。此时只给可执行的那一步（把目录移回活动位置），并保留「禁止手改机器字段」。
+export function recoveryActionText(changeName, activeText) {
+  const location = archivedChangeLocation(changeName);
+  if (location === null) return activeText;
+  return '本 change 的目录已移到归档位置（' + location + '）——恢复动作是把它移回活动位置 '
+    + '.specs/' + changeName + '/ 后重跑；禁止手改 state 机器字段';
 }
 
 // 段名校验基准从模板自动派生——骨架计算统一委托 lib/guard-artifact-skeleton.mjs（单一实现：读

@@ -26,6 +26,7 @@ import {
 } from '../protocol-utils.mjs';
 import { runRoot, packageRoot, fileExists, statePath, writeJson, protocolPath } from './guard-state-io.mjs';
 import {
+  archiveDirNameNotice,
   eligibleParallelBlocks,
   inFlightHandoffRequests,
   isArchivedChange,
@@ -33,6 +34,7 @@ import {
   missingRequiredArtifacts,
   missingRequiredSchemaEvidence,
   missingRequiredSkillChecks,
+  recoveryActionText,
   taskDependsOn,
   verifySummaries,
 } from './guard-routing.mjs';
@@ -317,8 +319,12 @@ export async function runExecuteExitGate({ protocol, node, state, emptyExitAppro
       && taskDependsOn(blockById.get(t.id) || '').every(d => doneIds.has(d)));
     if (serialRunnable.length > 0) {
       console.error('BLOCKED: execute 出口仍有串行 pending 任务: ' + serialRunnable.map(t => t.id).join(', ')
-        + '——空退出豁免不适用于存在未完成可运行串行任务的情况(先完成该串行任务,或修正任务标记)'
-        + ';无可执行的常规恢复动作时，可用 workflow-state.mjs advance 渡过结构性死结（逃生口：使用后本节点须重新 entry 并重做交付记录）；常规缺产物/缺证据情形不适用');
+        + '——空退出豁免不适用于存在未完成可运行串行任务的情况(先完成该串行任务,或修正任务标记)');
+      // 恢复动作按目录在哪分两种说法（唯一分叉在 guard-routing 的 recoveryActionText）：活动态给
+      // advance 逃生口；目录已搬进归档时那一步走不通（advance 的产物推导读活动路径），只给可执行的
+      // 那一步——把目录移回活动位置。
+      console.error('恢复: ' + recoveryActionText(state.activeChange,
+        '无可执行的常规恢复动作时，可用 workflow-state.mjs advance 渡过结构性死结（逃生口：使用后本节点须重新 entry 并重做交付记录）；常规缺产物/缺证据情形不适用'));
       process.exit(1);
     }
 
@@ -668,8 +674,9 @@ async function nodeSkillDeclared(nodeId, changeName) {
 
 // 守卫族的命令运行上下文（形状与状态命令族的 commandContext 相同）：脚本目录由本模块位置推导，
 // 运行根 / 包根 / 协议路径取守卫运行上下文——协议路径是本次 guard 实际解析到的那一份（含 state 绑定），
-// 命令自带的协议上下文因此与本次运行一致。
-function declarationContext() {
+// 命令自带的协议上下文因此与本次运行一致。导出给同族门禁（guard-gates）取用：守卫侧的命令装配
+// 只有这一份上下文，各模块自行推一份必然在「架构化路径 / 协议绑定」上分叉。
+export function guardCommandContext() {
   return { scriptsDir, runRoot, packageRoot, protocolPath };
 }
 
@@ -701,7 +708,7 @@ export async function declarationSkillNames(node, state) {
 //
 // 返回命令条目 { skill, command }（命令文本的构造在 state-explain，本函数只决定「哪些技能」）。
 function skillLoadDeclarationCommands({ node, skills, frontend }) {
-  return declarationCommands({ node, skills, frontend, context: declarationContext() });
+  return declarationCommands({ node, skills, frontend, context: guardCommandContext() });
 }
 
 export async function nodeSkillLoadCommands({ node, state }) {
@@ -715,7 +722,7 @@ export async function nodeSkillLoadCommands({ node, state }) {
 // 单个技能的声明命令（入口 --prompt 冲突的兜底：标记声明的技能不在本节点目标集里时，仍要给一条
 // 覆写该标记的命令）。与上面同一装配，不另拼一份文本。
 export function guardDeclarationCommand({ node, skill, frontend = false }) {
-  return declarationCommand({ node, skill, frontend, context: declarationContext() });
+  return declarationCommand({ node, skill, frontend, context: guardCommandContext() });
 }
 
 // record 命令与「这条命令怎么执行」的说明分行给出（两处恢复段共用）：命令单独成行才是可整行照抄的
@@ -724,15 +731,22 @@ export function guardDeclarationCommand({ node, skill, frontend = false }) {
 const RECORD_RETRY_NOTE = '说明: bash / PowerShell 可直接执行；cmd.exe 请把单引号换成双引号，'
   + '并转义载荷里原有的双引号';
 
-function recordRecoveryCommand(node, completedChecks = []) {
-  const payload = { summary: '<本节点完成摘要>' };
-  if (completedChecks.length > 0) payload.completedChecks = completedChecks;
+// 任意节点 + 任意载荷的 record 命令（命令文本的唯一装配：脚本路径平台化 + 整条加引号 + 协议上下文）。
+// 缺证据恢复段、门控补证据段、归档提名的补录命令三处都从这里取——各自拼一段，就只有在其中一条上
+// 补得到协议上下文/引号形态，另外两条照抄即失败。
+export function nodeRecordCommand(nodeId, payload) {
   return scriptCommand({
     scriptsDir,
     runRoot,
     script: 'workflow-state.mjs',
-    args: ['record', node.id, "'" + JSON.stringify(payload) + "'", ...protocolContextArgs(declarationContext())],
+    args: ['record', nodeId, "'" + JSON.stringify(payload) + "'", ...protocolContextArgs(guardCommandContext())],
   });
+}
+
+function recordRecoveryCommand(node, completedChecks = []) {
+  const payload = { summary: '<本节点完成摘要>' };
+  if (completedChecks.length > 0) payload.completedChecks = completedChecks;
+  return nodeRecordCommand(node.id, payload);
 }
 
 // 「补证据」恢复段（单一实现）：两个门禁点打印同一段——缺 Output Schema 字段
@@ -807,6 +821,14 @@ export async function runEvidenceCompletionGate({ protocol, node, state, evidenc
 // （全 parallel 无 SUMMARY 属预期）；含串行任务的 change 豁免不生效，照常校验，不得静默放行。生效
 // 时追加被跳过项清单（EMPTY-EXIT-SKIPPED）。
 export async function runArtifactGate({ protocol, node, state, emptyExitApproved, emptyExitExempt }) {
+  // 归档目录名不合规（AC-6）：本 change 的归档目录在盘上但名字不是 <YYYY-MM-DD>-<change-id> —— 这条
+  // 规则先于在场判定失败，报文给期望格式 + 实际目录名 + 可照抄的改名命令。放在缺件之前：错名目录不是
+  // 「某件产物不在场」，报成缺件会让人去补一件其实存在的产物（同一事实两种说法）。
+  const archiveNameProblems = archiveDirNameNotice(state.activeChange, node.id);
+  if (archiveNameProblems.length > 0) {
+    for (const line of archiveNameProblems) console.error(line);
+    process.exit(1);
+  }
   const checkedArtifacts = await missingRequiredArtifacts(protocol, node, state.activeChange);
   let missingArtifacts = checkedArtifacts;
   if (emptyExitApproved && emptyExitExempt) {

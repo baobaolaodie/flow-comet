@@ -2076,8 +2076,10 @@ export const ENTRIES = [
       const st = baseState('archive');
       st.evidence.archive = { summary: 'archived', lessonsNomination: { scanned: 0, nominated: [], reasonIfNone: '夹具无候选条目' } };
       writeState(dir, st);
-      writeFile(dir, '.specs/archive/foo-' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n');
-      writeFile(dir, '.specs/archive/foo-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# KNOWN-ISSUES\n\n无遗留问题\n');
+      // 归档目录名 = <日期>-<change-id>（运行路径唯一的归档命名规则）——通过的路径必须用合规名，
+      // 非日期名的形态另由本场景末尾的负例断言守住。
+      writeFile(dir, '.specs/archive/2026-10-20-' + CHANGE_ID + '/CHANGE.md', '# CHANGE\n\n## Why\n');
+      writeFile(dir, '.specs/archive/2026-10-20-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# KNOWN-ISSUES\n\n无遗留问题\n');
       // 子断言:登记（日期倒序、含 change-id）→ 通过且无未登记告警
       writeFile(dir, '.specs/CHANGELOG.md', '# CHANGELOG\n\n| 日期 | 说明 |\n|------|------|\n| 2026-08-15 | ' + CHANGE_ID + ' | 归档登记 |\n');
       const resRegistered = runGuard(['exit', 'archive'], dir);
@@ -2094,10 +2096,38 @@ export const ENTRIES = [
       assertExit(resUnregistered, 0);
       assertOut(resUnregistered, '未登记本 change');
       // 子断言:归档缺 KNOWN-ISSUES.md(遗留清单为强制产物)→ BLOCKED
-      fs.rmSync(path.join(dir, '.specs/archive/foo-' + CHANGE_ID, 'KNOWN-ISSUES.md'));
+      fs.rmSync(path.join(dir, '.specs/archive/2026-10-20-' + CHANGE_ID, 'KNOWN-ISSUES.md'));
       const resMissing = runGuard(['exit', 'archive'], dir);
       assertExit(resMissing, 1);
       assertOut(resMissing, 'missing Output Schema artifacts');
+
+      // 子断言（归档目录一条规则 · in-place 扩展）：协议通配 `archive/*-<change-id>` 只匹配**合规
+      // 名字**的目录——`<YYYY-MM-DD>-<change-id>`（判据单源 isArchivedChangeDirName）。非日期名
+      // （foo-<id>）既不算「在场」，也不许报成「缺件」：出口当场失败，报文给期望格式 + 实际目录名 +
+      // 可整行照抄的改名命令（路径用与其余报文一致的 .specs/ 相对形态）。
+      writeFile(dir, '.specs/archive/2026-10-20-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# KNOWN-ISSUES\n\n无遗留问题\n');
+      fs.rmSync(path.join(dir, '.specs/archive/2026-10-20-' + CHANGE_ID), { recursive: true, force: true });
+      writeFile(dir, '.specs/archive/foo-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# KNOWN-ISSUES\n\n无遗留问题\n');
+      const resBadName = runGuard(['exit', 'archive'], dir);
+      assertExit(resBadName, 1);
+      assertOut(resBadName, '归档目录名不合规');
+      assertOut(resBadName, 'foo-' + CHANGE_ID);
+      assertOut(resBadName, '<YYYY-MM-DD>-' + CHANGE_ID);
+      assertOut(resBadName, 'mv ".specs/archive/foo-' + CHANGE_ID + '" ".specs/archive/'
+        + timeUtilsModule.formatLocalDate(new Date()) + '-' + CHANGE_ID + '"');
+      assertNotOut(resBadName, 'missing Output Schema artifacts');
+      // 预检侧同一句（in-place 扩展）：结构化预检与出口产物门共用同一条判据与同一句措辞——两个入口
+      // 对同一份盘上事实给出两种说法（一个说缺件、一个说改名）正是本 change 要收掉的分叉。
+      const preflightBadName = runGuard(['exit', 'archive', '--preflight'], dir);
+      assertExit(preflightBadName, 1);
+      assertOut(preflightBadName, '归档目录名不合规');
+      assertOut(preflightBadName, 'mv ".specs/archive/foo-' + CHANGE_ID + '" ".specs/archive/'
+        + timeUtilsModule.formatLocalDate(new Date()) + '-' + CHANGE_ID + '"');
+      // 反向构造（单变量 = 只改名）：同一目录改成合规名字后同一 exit 通过——判据不是「见归档目录就拦」。
+      fs.renameSync(path.join(dir, '.specs/archive', 'foo-' + CHANGE_ID),
+        path.join(dir, '.specs/archive', '2026-11-11-' + CHANGE_ID));
+      const resRenamed = runGuard(['exit', 'archive'], dir);
+      assertExit(resRenamed, 0);
 
       // 子断言:结构化预检的**时点分界**。归档产出（.specs/archive/<日期>-<change-id>/）是归档动作
       // 自己的产出位置——归档前连 .specs/archive/ 都不存在，把它报成缺件、还让人「先按上述路径创建」，
@@ -2143,8 +2173,9 @@ export const ENTRIES = [
         }],
       }, null, 2) + '\n');
       const incompleteProtocolPath = path.join(dir, 'reference', 'custom-unspecified-paths.json');
-      // 归档自身的两件必需产物先补齐：单变量 = 唯一缺陷就是那件「声明不完整」的产物。
-      writeFile(dir, '.specs/archive/foo-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# KNOWN-ISSUES\n\n无遗留问题\n');
+      // 归档自身的两件必需产物先补齐（归档目录名按唯一规则用 <日期>-<change-id>）：单变量 = 唯一
+      // 缺陷就是那件「声明不完整」的产物。
+      writeFile(dir, '.specs/archive/2026-10-20-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# KNOWN-ISSUES\n\n无遗留问题\n');
       const exitIncomplete = runGuard(['exit', 'archive', '--protocol', incompleteProtocolPath], dir);
       assertExit(exitIncomplete, 1);
       const preflightIncomplete = runGuard(

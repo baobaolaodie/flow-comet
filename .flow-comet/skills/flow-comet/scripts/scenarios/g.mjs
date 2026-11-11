@@ -1097,6 +1097,20 @@ export const ENTRIES = [
       assertExit(res, 1);
       assertOut(res, 'BLOCKED: currentNode is review');
       assertNotOut(res, 'ALL CHECKS PASSED');
+      // 恢复指引按目录在哪分两种说法（in-place 扩展）：活动态给 advance / select；目录已搬进归档时
+      // 这两步都走不通（select 要求活动目录在场，advance 的产物推导读的也是活动路径），只给可执行
+      // 的那一步——把目录移回活动位置。断言用「不出现」的负向形态钉住这个分叉。
+      assertOut(res, '用 workflow-state.mjs advance');
+      fs.mkdirSync(path.join(dir, '.specs', 'archive'), { recursive: true });
+      fs.renameSync(path.join(dir, '.specs', CHANGE_ID),
+        path.join(dir, '.specs', 'archive', '2026-11-05-' + CHANGE_ID));
+      const resMoved = runGuard(['exit', 'execute', '--apply'], dir);
+      assertExit(resMoved, 1);
+      assertOut(resMoved, 'BLOCKED: currentNode is review');
+      assertOut(resMoved, '已移到归档位置（.specs/archive/2026-11-05-' + CHANGE_ID + '）');
+      assertOut(resMoved, '移回活动位置 .specs/' + CHANGE_ID + '/');
+      assertNotOut(resMoved, 'advance');
+      assertNotOut(resMoved, 'select');
     },
   },
 

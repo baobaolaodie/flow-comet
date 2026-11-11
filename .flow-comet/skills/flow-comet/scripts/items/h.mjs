@@ -201,6 +201,9 @@ export const ENTRIES = [
       // 节点推进到归档（模拟前序节点出口已完成的状态——被测机制是归档出口本身）
       const st0 = readStateFile(dir);
       st0.currentNode = 'archive';
+      // 夹具自洽：归档日期必须不早于该 change 的创建日期（位置解析按 createdAt 排掉更早的同名归档
+      // 目录——排除不了就 fail-closed）。真实链路里归档发生在创建之后，夹具的固定日期须与之一致。
+      st0.createdAt = '2026-08-01T00:00:00.000Z';
       writeState(dir, st0);
       // 归档提名随证据落盘（该 change 无任务 SUMMARY → 扫描 0 份，理由写明无候选入库）
       assertExit(runState(['record', 'archive', archiveRecordJson('archived')], dir), 0);
@@ -246,6 +249,9 @@ export const ENTRIES = [
       // 节点推进到归档（模拟前序节点出口已完成的状态）
       const st0 = readStateFile(dir);
       st0.currentNode = 'archive';
+      // 夹具自洽：同 H2——归档日期必须不早于该 change 的创建日期（位置解析按 createdAt 排除更早的
+      // 同名归档目录）。夹具的固定归档日期须落在创建日期之后。
+      st0.createdAt = '2026-08-01T00:00:00.000Z';
       writeState(dir, st0);
       // 归档提名随证据落盘（该 change 无任务 SUMMARY → 扫描 0 份，理由写明无候选入库）
       assertExit(runState(['record', 'archive', archiveRecordJson('archived')], dir), 0);
@@ -275,6 +281,14 @@ export const ENTRIES = [
       writeFile(dir, 'flow-kit/prompts/7-integration.md', '# 阶段 7 · INTEGRATION\n\n## 角色\n\n你是 Integrationer。\n');
       // 归档前只声明 open(archive 声明留空——构造「移动后缺声明」)
       assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
+      // 缺声明报文按**实际查找结果**说话（in-place 扩展）：活动目录在场、归档区没有本 change 的目录时，
+      // 只点活动路径缺件，不对归档路径下任何结论（旧形态无条件打印「（归档路径也未找到）」）。
+      const activeMissing = runState(['record', 'archive',
+        '{"summary":"archived","completedChecks":["required-skill:archive.flow-comet-integration"]}'], dir);
+      assertExit(activeMissing, 1);
+      assertOut(activeMissing, '缺少对应声明标记 .specs/arch-h4/.skill-loads/archive-flow-comet-integration.json');
+      assertNotOut(activeMissing, '归档路径也未找到');
+      assertNotOut(activeMissing, '已归档');
       const st0 = readStateFile(dir);
       st0.currentNode = 'archive';
       st0.enteredNodes = ['open', 'archive'];
@@ -293,6 +307,14 @@ export const ENTRIES = [
       assertExit(rec, 1);
       assertOut(rec, 'BLOCKED');
       assertOut(rec, '缺少技能加载声明标记');
+      // 缺声明报文的第二态（in-place 扩展）：目录已随归档搬走、归档路径里也没有该标记 —— 报文如实
+      // 说出真实路径（哪里找过、哪里也没有），不再固定打印「（归档路径也未找到）」。
+      const movedMissing = runState(['record', 'archive',
+        '{"summary":"archived","completedChecks":["required-skill:archive.flow-comet-integration"]}'], dir);
+      assertExit(movedMissing, 1);
+      assertOut(movedMissing, '缺少对应声明标记 .specs/arch-h4/.skill-loads/archive-flow-comet-integration.json');
+      assertOut(movedMissing, '已归档到 .specs/archive/2026-08-14-arch-h4');
+      assertNotOut(movedMissing, '归档路径也未找到');
       const declareLine = (rec.output.match(/^\s*(node "[^"]+" skill-load archive flow-comet-integration[^\n]+)$/m) || [])[1];
       assertTrue(typeof declareLine === 'string', 'BLOCKED 报文应给出可照抄的 archive 声明命令:\n' + rec.output);
       // ② 不得重建已归档的活动目录,也不得代记任何标记(归档路径不得出现 archive-*.json)

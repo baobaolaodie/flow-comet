@@ -22,7 +22,9 @@ import {
   assertOut,
   assertTrue,
   baseState,
+  installSkillTreeCopy,
   runGuard,
+  runPrintedCommand,
   runState,
   writeFile,
   writeState,
@@ -2700,6 +2702,48 @@ export const ENTRIES = [
       assertExit(decoyOnly, 1);
       assertOut(decoyOnly, '工件目录缺失');
       assertNotOut(decoyOnly, 'ALL CHECKS PASSED');
+      // ④c 多候选按日期（in-place 扩展）：同名 change 有多份**合规**归档目录时，取日期最新的一份。
+      // 夹具用「结论可判别」的份数（最新 = 2、更早 = 5）：退回「取第一个命中」或「取更早的一份」都会
+      // 让下面的份数对账判红——这是日期判定真正在起作用的证据。
+      setupArchive(dir, {
+        evidence: { lessonsNomination: { scanned: 2, nominated: ['L-501'], reasonIfNone: '' } },
+      });
+      fs.renameSync(path.join(dir, CHANGE_DIR), path.join(archiveRoot, '2026-11-10-' + CHANGE_ID));
+      fs.renameSync(path.join(archiveRoot, '2026-10-20-' + CHANGE_ID, 'KNOWN-ISSUES.md'),
+        path.join(archiveRoot, '2026-11-10-' + CHANGE_ID, 'KNOWN-ISSUES.md'));
+      fs.rmSync(path.join(archiveRoot, '2026-10-20-' + CHANGE_ID), { recursive: true, force: true });
+      writeFile(dir, '.specs/archive/2026-11-01-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# KNOWN-ISSUES\n\n无遗留。\n');
+      for (let i = 3; i <= 7; i += 1) {
+        writeFile(dir, '.specs/archive/2026-11-01-' + CHANGE_ID + '/T0' + i + '-SUMMARY.md',
+          '# SUMMARY\n\n## 做了什么\n\n更早候选的份数（被选中即判红）。\n');
+      }
+      const newestCandidate = runGuard(['exit', 'archive'], dir);
+      assertExit(newestCandidate, 0);
+      assertOut(newestCandidate, 'ALL CHECKS PASSED');
+      // 反向构造（单变量 = 只把声明份数改成更早候选的 5）：取最新 ⇒ 声明与最新一份的 2 份不符 → BLOCK
+      const olderDeclared = newChangeState('archive');
+      olderDeclared.evidence.archive = {
+        summary: 'archived',
+        lessonsNomination: { scanned: 5, nominated: [], reasonIfNone: '无新增条目' },
+      };
+      writeState(dir, olderDeclared);
+      const olderCount = runGuard(['exit', 'archive'], dir);
+      assertExit(olderCount, 1);
+      assertOut(olderCount, '≠ 该 change 内 *-SUMMARY.md 份数 2');
+      // ④d 排除早于 createdAt 的候选（AC-7 的另一半）：两份候选都早于本 change 的创建日期 ⇒ 无合格
+      // 候选，份数无从核对（fail-closed「工件目录缺失」），不得拿更早的归档目录凑数——不设下界时
+      // 这里会选中 2026-11-10 的 2 份而与声明一致，判据随之变绿（假放行）。
+      const allTooEarly = newChangeState('archive');
+      allTooEarly.createdAt = '2026-12-01T00:00:00.000Z';
+      allTooEarly.evidence.archive = {
+        summary: 'archived',
+        lessonsNomination: { scanned: 2, nominated: [], reasonIfNone: '无新增条目' },
+      };
+      writeState(dir, allTooEarly);
+      const allEarly = runGuard(['exit', 'archive'], dir);
+      assertExit(allEarly, 1);
+      assertOut(allEarly, '工件目录缺失');
+      assertNotOut(allEarly, 'ALL CHECKS PASSED');
       // ⑤ 扫描份数的**类型**在写入前就拦（in-place 扩展）：scanned 是出口按**数值**比对的字段
       // （份数相等才算留痕成立），故字符串 "2" 必须被 record 拒。修复前它能落库成功、要等到 archive
       // 出口才因 "2" !== 2 炸——正是 record 形状校验要消灭的「错误延后暴露」（出错的是 record，
@@ -2725,6 +2769,38 @@ export const ENTRIES = [
       const afterAccept = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       assertTrue(afterAccept.evidence.archive.lessonsNomination?.scanned === 2,
         '类型合法的载荷应原样写入 scanned: ' + JSON.stringify(afterAccept.evidence.archive));
+      // ⑥ 提名恢复命令可照抄（in-place 扩展）：拒绝面必须给**可执行**的命令——脚本路径由唯一装配
+      // （state-explain 的 scriptCommand）平台化拼出、并带本次运行的协议上下文。断言不看「像不像
+      // 命令」，而是把它从报文里解析出来**真执行**：裸脚本名（workflow-state.mjs …）在这一步是
+      // command not found，照抄即失败。
+      setupArchive(dir, { evidence: {} }); // 只有 summary，缺 lessonsNomination
+      const missingNomination = runGuard(['exit', 'archive'], dir);
+      assertExit(missingNomination, 1);
+      assertOut(missingNomination, 'lessonsNomination');
+      const nominationRecoveryStart = missingNomination.output.lastIndexOf('恢复:');
+      const nominationRecovery = nominationRecoveryStart < 0
+        ? ''
+        : missingNomination.output.slice(nominationRecoveryStart);
+      const nominationRecordCommand =
+        (nominationRecovery.match(/^\s*(node "[^"]+" record archive [^\n]*)$/m) || [])[1];
+      assertTrue(typeof nominationRecordCommand === 'string',
+        '提名门的恢复段缺可解析的 record 命令（裸脚本名不可照抄）:\n' + missingNomination.output);
+      installSkillTreeCopy(dir, path.join('.claude', 'skills'));
+      const nominationRecorded = runPrintedCommand(nominationRecordCommand, dir, {
+        FLOW_COMET_RUN_ROOT: dir,
+        FLOW_COMET_PROTOCOL: '',
+      });
+      assertTrue(nominationRecorded.status === 0,
+        '照抄的提名恢复命令跑不通\n  命令: ' + nominationRecordCommand
+        + '\n  exit ' + nominationRecorded.status + '\n' + nominationRecorded.output);
+      const nominationState = JSON.parse(
+        fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      assertTrue(nominationState.evidence.archive.lessonsNomination?.scanned === 2,
+        '照抄恢复命令后应按该 change 的 SUMMARY 份数落盘 scanned: '
+        + JSON.stringify(nominationState.evidence.archive));
+      const nominationExit = runGuard(['exit', 'archive'], dir);
+      assertExit(nominationExit, 0);
+      assertOut(nominationExit, 'ALL CHECKS PASSED');
     },
   },
 

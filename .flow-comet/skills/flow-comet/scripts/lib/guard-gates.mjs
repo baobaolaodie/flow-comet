@@ -45,6 +45,8 @@ import {
   waveSectionBody,
 } from './wave-projection.mjs';
 import {
+  archiveDirNameNotice,
+  archivedChangeLocation,
   declaredRequiredArtifacts,
   evidenceFor,
   hasEvidenceField,
@@ -52,6 +54,7 @@ import {
   missingRequiredArtifacts,
   missingRequiredSchemaEvidence,
   nextNode,
+  recoveryActionText,
   templateSectionPatterns,
   unspecifiedPathsNotice,
 } from './guard-routing.mjs';
@@ -64,6 +67,7 @@ import {
 import {
   declarationSkillNames,
   evidenceRecoveryBlock,
+  nodeRecordCommand,
   nodeSkillLoadCommands,
   runAcCoverageGate,
   runSummarySectionsGate,
@@ -78,7 +82,11 @@ import { evaluateArtifact, formatIssueParts, runTaskSevenFieldGate } from './gua
 import { COORDINATOR_NOTICE } from './state-explain.mjs';
 // 声明标记目录的路径规则（活动路径优先、归档兜底）归状态族的路径上下文模块，与 record 前置门同一份
 // 实现——guard → state-* 是允许的单向边；规则若留在守卫族，状态 CLI 会为它加载整个守卫图。
-import { findSkillLoadsDir, isArchivedChangeDirName } from './state-io.mjs';
+import {
+  changeLocationFailureMessage,
+  findSkillLoadsDir,
+  resolveChangeDir,
+} from './state-io.mjs';
 // 声明标记的协议文件提取（protocols 数组 ∪ protocol 单值的 basename 归一）由状态族单源提供：
 // skill-load 写入侧与出口覆盖判据读同一份实现——各写一份时「旧标记里存完整绝对路径」这条口径
 // 会在一边生效、另一边判失配。
@@ -493,9 +501,12 @@ export async function requireNodeEvidence({ node, state }) {
       state,
       lead: '该节点已完成但缺证据记录（evidence.' + node.id + ' 不在场）',
     });
+    // 状态漂移的那一句按目录在哪分两种说法（唯一分叉在 guard-routing 的 recoveryActionText）：
+    // 目录已搬进归档时 advance / select 都走不通，只给可执行的那一步（移回活动位置）。
     console.error([
       ...recovery,
-      '      状态漂移 → workflow-state.mjs advance（强制推进）或 select（切换 change）；禁止手改 state 机器字段',
+      '      ' + recoveryActionText(state.activeChange,
+        '状态漂移 → workflow-state.mjs advance（强制推进）或 select（切换 change）；禁止手改 state 机器字段'),
     ].join('\n'));
     process.exit(1);
   }
@@ -525,8 +536,14 @@ export async function runExitDriftGate({ protocol, node, state, evidence }) {
   }
   if (!tolerable) {
     console.error('BLOCKED: currentNode is ' + String(state.currentNode) + ', cannot exit ' + node.id + '.');
-    console.error('恢复: 若节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进，确认节点实际已完成后再用）或 select（切换 change）；禁止手改 state 机器字段');
-    console.error('提示: 若 currentNode 已漂移到文件推导位置且本节点证据/产物齐（执行者确认本节点实际已完成）→ 可用容错 exit ' + node.id + ' --apply 补齐欠账（漂移容忍路径，不再只有不可行的 advance/select 指引）；漂移但证据/产物不齐则不适用');
+    // 恢复动作按目录在哪分两种说法（唯一分叉在 guard-routing 的 recoveryActionText）：活动态给
+    // advance / select；目录已搬进归档时这两步都走不通，只给可执行的那一步。归档态下「提示」行不再
+    // 提 advance/select——那正是它上面一行已经不成立的东西。
+    const archivedHint = archivedChangeLocation(state.activeChange) !== null;
+    console.error('恢复: ' + recoveryActionText(state.activeChange,
+      '若节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进，确认节点实际已完成后再用）或 select（切换 change）；禁止手改 state 机器字段'));
+    console.error('提示: 若 currentNode 已漂移到文件推导位置且本节点证据/产物齐（执行者确认本节点实际已完成）→ 可用容错 exit ' + node.id + ' --apply 补齐欠账（漂移容忍路径'
+      + (archivedHint ? '' : '，不再只有不可行的 advance/select 指引') + '）；漂移但证据/产物不齐则不适用');
     process.exit(1);
   }
 }
@@ -558,7 +575,8 @@ export async function runFixBatchExitGate({ protocol, node, state }) {
 export function runEntryRecordGate({ node, state }) {
   if (!Array.isArray(state.enteredNodes) || !state.enteredNodes.includes(node.id)) {
     console.error('BLOCKED: 节点 ' + node.id + ' 未执行 entry 直接 exit——先 entry(进入检查/协调者禁令/签名记录)');
-    console.error('恢复: 先运行 workflow-guard.mjs entry ' + node.id + ' 再重试 exit;状态漂移 → advance/select');
+    console.error('恢复: 先运行 workflow-guard.mjs entry ' + node.id + ' 再重试 exit;'
+      + recoveryActionText(state.activeChange, '状态漂移 → advance/select'));
     process.exit(1);
   }
 }
@@ -664,24 +682,24 @@ function lessonsLegacyEntries(content) {
   return hits;
 }
 
-// 该 change 的 SUMMARY 份数（C6：先看活动目录，目录已移入归档时看
-// `.specs/archive/<日期>-<change>/`；两处都不存在 → null = 归档产物缺失——不可核对的份数不当作 0）。
-// 归档目录按精确形态定位（判据单源在 state-io）：同后缀的别的 change 归档目录被算进来，份数对账就
-// 拿别人的归档作证；按后缀「先命中先用」还会因 readdir 顺序把本 change 的归档目录挤掉。
-async function changeSummaryCount(changeName) {
-  const activeDir = path.join(runRoot, '.specs', changeName);
-  let dir = null;
-  if (await fileExists(activeDir)) {
-    dir = activeDir;
-  } else {
-    const archiveRoot = path.join(runRoot, '.specs', 'archive');
-    const entries = await fs.readdir(archiveRoot).catch(() => []);
-    const archived = entries.find((entry) => isArchivedChangeDirName(entry, changeName));
-    if (archived) dir = path.join(archiveRoot, archived);
+// 该 change 的 SUMMARY 份数（C6）。目录定位走**唯一**位置解析器 resolveChangeDir（活动目录优先 →
+// 归档 <日期>-<change-id>；同名多份按日期——排除早于该 change createdAt 的候选、取最新、排不出就停
+// 并列候选），本函数只保留「份数规则」：数解析到的目录下 *-SUMMARY.md。此前这里自带一份「活动优先 +
+// 归档首个命中」的定位：同后缀的别的 change 归档目录会被算进来（份数对账拿别人的归档作证），
+// readdir 顺序还会把本 change 的目录挤掉。
+// 返回 { count, resolution }：count === null = 无从核对（目录缺失 / 多候选判不出），不当作 0 份——
+// 报文按 resolution 的成因分开说（同一句话不得在这里再写一份）。
+async function changeSummaryCount(state) {
+  const resolution = await resolveChangeDir({
+    root: runRoot,
+    changeName: state.activeChange,
+    createdAt: state.createdAt,
+  });
+  if (resolution.status !== 'active' && resolution.status !== 'archived') {
+    return { count: null, resolution };
   }
-  if (dir === null) return null;
-  const files = await fs.readdir(dir).catch(() => []);
-  return files.filter((name) => name.endsWith('-SUMMARY.md')).length;
+  const files = await fs.readdir(resolution.dir).catch(() => []);
+  return { count: files.filter((name) => name.endsWith('-SUMMARY.md')).length, resolution };
 }
 
 // LESSONS 里已登记的条目编号（旧形态与迁移后的新形态都算「编号存在」——形态由 ① 单独校验，
@@ -696,15 +714,20 @@ async function lessonsEntryNumbers() {
 }
 
 // 归档提名核对（结构级）：evidence.lessonsNomination = { scanned, nominated[], reasonIfNone }。
+// 返回 { problems, scanned }：scanned = 本 change 的 SUMMARY 份数（解析不出为 null），恢复命令据此
+// 把份数填成可照抄的具体值——让执行者手填一个自己也没数过的数字，等于把「照抄即推进」变成猜谜。
 async function lessonsNominationProblems(state) {
+  const { count: actual, resolution } = await changeSummaryCount(state);
   const nomination = evidenceFor(state, 'archive')?.lessonsNomination;
   if (!nomination || typeof nomination !== 'object' || Array.isArray(nomination)) {
-    return ['缺 evidence.lessonsNomination（应记录 { scanned, nominated[], reasonIfNone }）'];
+    return { problems: ['缺 evidence.lessonsNomination（应记录 { scanned, nominated[], reasonIfNone }）'], scanned: actual };
   }
   const problems = [];
-  const actual = await changeSummaryCount(state.activeChange);
   if (actual === null) {
-    problems.push('该 change 的工件目录缺失（.specs/<change>/ 与 .specs/archive/*-<change>/ 都不存在），无从核对扫描份数');
+    // 份数无从核对的两种成因分开说（多候选那一句与状态族同一措辞：BLOCKED 前缀在列表里多余，去掉）。
+    problems.push(resolution.status === 'ambiguous'
+      ? changeLocationFailureMessage(state.activeChange, resolution).replace(/^BLOCKED: /u, '')
+      : '该 change 的工件目录缺失（.specs/<change>/ 与 .specs/archive/*-<change>/ 都不存在），无从核对扫描份数');
   } else if (nomination.scanned !== actual) {
     problems.push('扫描份数 ' + JSON.stringify(nomination.scanned ?? null)
       + ' ≠ 该 change 内 *-SUMMARY.md 份数 ' + actual);
@@ -726,7 +749,7 @@ async function lessonsNominationProblems(state) {
       }
     }
   }
-  return problems;
+  return { problems, scanned: actual };
 }
 
 // ① 旧形态条目（`## L-NNN`）：open / verify / archive 三处出口都拦（AC-17）——报文逐行给「文件:
@@ -888,12 +911,24 @@ function checkLessonsEntryFields({ content, node, state, keys }) {
 // ⑤ archive 出口的归档提名核对（对账 SUMMARY 份数 / 提名编号存在性 / 无提名理由）——归档提名
 // 留痕且可核对；不成立即 BLOCKED。
 async function checkLessonsNomination({ state }) {
-  const problems = await lessonsNominationProblems(state);
+  const { problems, scanned } = await lessonsNominationProblems(state);
   if (problems.length === 0) return;
   console.error('BLOCKED: archive 出口的 evidence.lessonsNomination 不成立（' + problems.length + ' 项）:');
   for (const problem of problems) console.error('  - ' + problem);
-  console.error('恢复: workflow-state.mjs record archive \'{"summary":"<归档摘要>","lessonsNomination":'
-    + '{"scanned":<该 change 内 SUMMARY 份数>,"nominated":["L-NNN"],"reasonIfNone":"<无提名时的理由>"}}\' 补齐后重试 exit archive');
+  if (typeof scanned !== 'number') {
+    // 份数无从核对（目录缺失 / 多候选）时不给命令：打印一个猜出来的份数只会让 record 落一份错证据。
+    console.error('恢复: 先按上面的问题把该 change 的工件目录放到可解析的位置，再重试 exit archive');
+    process.exit(1);
+  }
+  // 恢复命令走唯一的命令装配（state-explain 的 scriptCommand：平台化脚本路径 + 协议上下文）：
+  // 裸脚本名的旧形态照抄是 command not found，等于没给命令。scanned 用本门已经算出的事实填好，
+  // 照抄即可推进（nominated 按本轮实际提名改，无提名保留 [] 并把 reasonIfNone 写成理由）。
+  console.error('恢复: 照抄下面的命令补齐 evidence.lessonsNomination 后重试 exit archive'
+    + '（nominated 填本轮实际提名的编号，无提名保留 [] 并把 reasonIfNone 写成理由）:');
+  console.error('      ' + nodeRecordCommand('archive', {
+    summary: '<归档摘要>',
+    lessonsNomination: { scanned, nominated: [], reasonIfNone: '<无提名时的理由>' },
+  }));
   process.exit(1);
 }
 
@@ -1490,6 +1525,14 @@ function reportIncompleteDeclarations(node, incomplete) {
 // 不是「旧 change 的进展宽容」能改写的东西）。返回是否命中，收口退出由 runStructuralPreflight 负责
 // （先让同轮的结构门禁也能报完，缺件不被别的报错抢先吞掉顺序）。
 async function runDeclaredArtifactExistenceCheck({ protocol, node, state }) {
+  // 归档目录名不合规（AC-6）先于在场判定失败：非日期名的归档目录既不是「在场」（产物门与声明门
+  // 给不出两种答案），也不许报成「缺件」（那会让人去建一件其实存在的产物）。报文与出口产物门同一句
+  // （判据与措辞都在 guard-routing 的 archiveDirNameNotice），预检因此不会给出另一个说法。
+  const archiveNameProblems = archiveDirNameNotice(state.activeChange, node.id);
+  if (archiveNameProblems.length > 0) {
+    for (const line of archiveNameProblems) console.error(line);
+    process.exit(1);
+  }
   const { missing, deferred, incomplete } = await missingDeclaredFileArtifacts({ protocol, node, state });
   // 归档产出：只报「归档执行后才会生成」这一事实与它的落点，不报缺件、不给「去创建」的指令——
   // 归档前那条指令不可执行（连 .specs/archive/ 都还不存在），预检也不该把归档的输出当它的前提。
