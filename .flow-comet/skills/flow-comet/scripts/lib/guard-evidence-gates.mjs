@@ -4,7 +4,7 @@
 // Return Contract、subagent-execute 摘要与多趟完成
 // 判定、required-skill / schema / 产物 存在性门禁——即「完成声明必须有证据与产物」这一族判据。
 //
-// 分级沿用既有语义：新 change（init 标记）强制 BLOCKED + 恢复指引，旧 change 渐进 WARN 不阻断。
+// 判级：单一判级——违反即 BLOCKED + 恢复指引（新旧双轨已退役，同一形态不再有渐进 WARN 侧）。
 
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -567,7 +567,7 @@ export function runReturnContractGate({ node, state }) {
   }
   if (violations.length > 0) {
     console.error('BLOCKED: Return Contract 校验失败: ' + violations.join('; '));
-    console.error('恢复: 子代理回传完整契约(含缺失字段)后用 workflow-handoff.mjs result 重录——新 change 强制 TDD RED/GREEN 证据与 completedChecks;注意:若已记录 greenEvidence 而缺 redEvidence,时序防护会拦截事后补录(防掩盖缺 RED)——确认子代理真实执行过 TDD RED 且证据在对应 SUMMARY 中时,用 workflow-state.mjs record subagent-execute 合并写入真实 redEvidence(证据可溯源),或重新委托任务获取完整契约');
+    console.error('恢复: 子代理回传完整契约(含缺失字段)后用 workflow-handoff.mjs result 重录——本判据强制 TDD RED/GREEN 证据与 completedChecks;注意:若已记录 greenEvidence 而缺 redEvidence,时序防护会拦截事后补录(防掩盖缺 RED)——确认子代理真实执行过 TDD RED 且证据在对应 SUMMARY 中时,用 workflow-state.mjs record subagent-execute 合并写入真实 redEvidence(证据可溯源),或重新委托任务获取完整契约');
     process.exit(1);
   }
 }

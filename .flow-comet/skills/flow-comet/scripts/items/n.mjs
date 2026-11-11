@@ -19,9 +19,9 @@ const RAW_ENTRIES = [
 
   // 声明集合判据 = required ⊆ declared ⊆ required ∪ optional（design 的 required=DESIGN、optional=UI-DESIGN）。
   // 四个负例分别打「多写（允许集外）」「漏写（空清单）」「错名（拼错）」「缺声明（整项没写）」，
-  // 旧 change 同形只 WARN——新 change 的 fail-closed 与旧 change 的渐进放行必须在同一条命令上分开。
+  // 四个负例一律 BLOCKED（单一判级）——阻断与「允许集内可选项放行」必须在同一条命令上分开。
   {
-    name: 'N1 加载链声明集合：多写/漏写/错名/缺声明对 BLOCKED，允许集内可选项放行，旧 change 同形 WARN',
+    name: 'N1 加载链声明集合：多写/漏写/错名/缺声明一律 BLOCKED，允许集内可选项放行',
     run: (dir) => {
       assertExit(runState(['init', CHANGE_ID, '--init-skip'], dir), 0);
 

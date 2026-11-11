@@ -822,11 +822,14 @@ export const ENTRIES = [
       });
       assertTrue(pointerStripped.some((problem) => problem.includes('指针不在场')),
         '抽掉各册指针未被判违规: ' + JSON.stringify(pointerStripped));
-      // 行为口径的散文锚：非前端可见跳过 + 旧 change 渐进（与 285 的行为断言同源）
+      // 行为口径的散文锚：非前端可见跳过 + 同一形态一个判级（与 285 的行为断言同源）。
+      // 分级双轨已退役：正向锚单轨表述，负向锚旧「旧 change 渐进 WARN」措辞零残留——两侧共守，
+      // 回流即红（旧锁要求「旧 change」在场，等于给已退役的分级背书）。
       const uiDesignSkill = fs.readFileSync(texts['flow-comet-ui-design/SKILL.md'], 'utf8');
       assertTrue(uiDesignSkill.includes('UI-DESIGN: skipped（非前端）'), 'ui-design 技能缺非前端跳过口径');
-      assertTrue(uiDesignSkill.includes('旧 change') && uiDesignSkill.includes('WARN'),
-        'ui-design 技能缺旧 change 渐进口径');
+      assertTrue(uiDesignSkill.includes('同一形态一个判级'), 'ui-design 技能缺单轨判级口径（同一形态一个判级）');
+      assertTrue(!/旧\s*change[^。\n]{0,24}(WARN|渐进)/.test(uiDesignSkill),
+        'ui-design 技能残留旧分级口径（旧 change 渐进 WARN 应零残留）');
     },
   },
 

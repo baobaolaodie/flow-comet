@@ -199,14 +199,14 @@ export const ENTRIES = [
     },
   },
   {
-    // 越界拦截 + done-but-unclosed 回放 + 旧 change 兼容（真实命令链路）：
+    // 越界拦截 + done-but-unclosed 回放 + 旧态同判（真实命令链路）：
     // ① 新 change review/pending → BLOCKED + state 不变；
     // ② 事故回放——Fix 任务全 done 但 history 最新 exit execute 签名仍是追加前值
     //    （从未重跑 execute 出口）→ 同出口 BLOCKED + state 字节零改写（修复前被错误断言为通过）；
     // ③ 正对照——按指引 entry execute + exit execute --apply 真闭合后，review 出口通过；
     // ④⑤ verify 源 pending / done-but-unclosed 同样 BLOCKED 且验证命令不执行，⑥ 闭合后通过；
-    // ⑦⑧⑨ 旧 change（无 new change 标记）同形态渐进 WARN 放行、next 归位可达、验证出口真实执行。
-    name: 'A23 Fix 越界拦截与旧 change 渐进：源节点直接 exit BLOCK（新）/WARN（旧）不卡死（真实命令）',
+    // ⑦⑧⑨ 同一形态（无任何新旧标记字段）同判 BLOCKED、next 归位可达、验证出口真实执行。
+    name: 'A23 Fix 越界拦截与旧态容忍：源节点直接 exit 一律 BLOCK 不卡死，next 归位可达（真实命令）',
     run: (dir) => {
       const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       const gateMarker = path.join(dir, 'verify-gate-ran.txt');
@@ -498,9 +498,9 @@ export const ENTRIES = [
         throw new Error('旧态未分类回程应停在 review: ' + JSON.stringify(legacyState.currentNode));
       }
 
-      // ⑬ 受控归位轮次真实链路（review 源）：第 1~3 轮输出「第 n/3 轮」并递增计数；第 4 轮新
-      //    change BLOCK（state 字节零改写、currentNode 保持 review）；用户显式授权（嵌套证据）
-      //    后放行；verify 失败计数与轮次计数各自独立；旧 change 第 4 轮渐进 WARN 放行。
+      // ⑬ 受控归位轮次真实链路（review 源）：第 1~3 轮输出「第 n/3 轮」并递增计数；第 4 轮
+      //    BLOCK（state 字节零改写、currentNode 保持 review）；用户显式授权（嵌套证据）
+      //    后放行；verify 失败计数与轮次计数各自独立；同一形态第 4 轮同判 BLOCKED。
       const fixRoundsText = (statuses) => '# TASK\n\n## 任务清单\n\n' + serialTaskBlock('T01', 'done')
         + '\n\n## Fix 任务（来自 REVIEW / INTEGRATION）\n\n'
         + statuses.map((s, i) => serialTaskBlock('T-FIX-0' + (i + 1), s)).join('\n') + '\n';

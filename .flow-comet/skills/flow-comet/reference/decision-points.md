@@ -59,6 +59,6 @@
 | 节点 | 决策点 | 判定 |
 |------|--------|------|
 | execute | 空退出豁免 | 全 parallel 无串行可做时,须显式声明 `emptyExitApproved`(否则 BLOCKED);exit 输出 EMPTY-EXIT 审计 |
-| execute | 越权委托豁免 | [P] 任务在 execute 完成属越权委托(新 change BLOCKED),须经 subagent-execute 委托或显式说明 |
-| 各节点 | entry 强制 | 新 change 未 entry 直接 exit → BLOCKED(旧 change WARN 渐进) |
-| 各节点 | 新旧判定 | init 写入 `newChange: true` = 新 change(严格模式);旧 change(无标记)渐进 WARN |
+| execute | 越权委托豁免 | [P] 任务在 execute 完成属越权委托(一律 BLOCKED),须经 subagent-execute 委托或显式说明 |
+| 各节点 | entry 强制 | 未 entry 直接 exit → BLOCKED（进入检查不可跳过；同一形态一个判级） |
+| 各节点 | 旧 state 字段 | `newChange` 已退役（不再写入、不再参与判级）——旧 state 带该字段时被忽略（不报 schema 错误），缺字段补默认；同一形态一个判级 |

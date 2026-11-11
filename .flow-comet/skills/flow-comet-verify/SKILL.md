@@ -155,7 +155,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record verify '{"summa
 | `verify-evidence` | UAT.md exists | artifact-exists |
 | `automation-passed` | All automated checks pass (real output) | 执行纪律（review 把关），guard 不校验 |
 | `retry-limit` | No more than 3 auto-retries（机器计数 verifyFailures，第 4 次 BLOCKED） | process-check |
-| `lessons-nominated` | LESSONS.md 条目形态与条目区合规（完成提名扫描；仅当有合格条目时更新——无合格条目不强制新增，避免噪音条目） | 结构级（guard 强制：本出口校验 `.specs/LESSONS.md` 的条目写 `### L-NNN`、位于条目区、编号升序——新 change 违反即 BLOCKED，旧 change WARN）；「是否有合格条目」由执行者把关，归档时另以 `evidence.lessonsNomination` 核对 |
+| `lessons-nominated` | LESSONS.md 条目形态与条目区合规（完成提名扫描；仅当有合格条目时更新——无合格条目不强制新增，避免噪音条目） | 结构级（guard 强制：本出口校验 `.specs/LESSONS.md` 的条目写 `### L-NNN`、位于条目区、编号升序——违反即 BLOCKED（同一形态一个判级））；「是否有合格条目」由执行者把关，归档时另以 `evidence.lessonsNomination` 核对 |
 
 ## Exit Check
 

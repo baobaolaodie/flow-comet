@@ -950,7 +950,7 @@ export const ENTRIES = [
           ['AC 覆盖 · 判不了即未校验（中文）', '未校验（<原因>）'],
           ['AC 覆盖 · 不改退出码（中文）', '不改变退出码'],
           ['AC 覆盖 · 内容不可判按分级（中文）', 'AC 覆盖判据无法执行'],
-          ['AC 覆盖 · 内容不可判进 WARN 计数（中文）', '该行进入 WARN 计数'],
+          ['AC 覆盖 · 内容不可判同判 BLOCKED（中文）', '一律 BLOCKED（同一形态一个判级）'],
         ];
         const acAnchorsEn = [
           ['AC 覆盖 · 判不了即未校验（英文）', 'not checked (<reason>)'],
@@ -1069,8 +1069,8 @@ export const ENTRIES = [
             '报文按**协议派生**给出该节点**每个** `guarded` 必需技能各一条命令'],
           ['展开册 · 恢复命令一次给全、照抄即通', 'flow-comet/reference/entry-detail.md',
             '三个面一次给全，照抄即通'],
-          ['展开册 · 分级（新 BLOCKED / 旧 WARN）', 'flow-comet/reference/entry-detail.md',
-            '新 change BLOCKED（强制全部覆盖）、旧 change 只 WARN'],
+          ['展开册 · 单轨判级（同一形态一律 BLOCKED）', 'flow-comet/reference/entry-detail.md',
+            '同一形态一律 BLOCKED（强制全部覆盖'],
           ['展开册 · 旧单值标记按 basename 计入覆盖', 'flow-comet/reference/entry-detail.md',
             '照样按 basename 计入覆盖'],
         ];

@@ -144,7 +144,7 @@ flow-comet automates the [flow-kit](https://github.com/rihebty/flow-kit) methodo
 - **Distribution contract**: the npm package name and the `fcomet` / `flow-comet` bin names become contract once released, and the package boundary is the `files` whitelist in `package.json` — fail-closed, never relaxed to a blacklist or a whole-directory include. Decision record: ADR-010.
 - **Documentation sync**: behavior-layer docs live in `docs/` (bilingual EN/zh — keep both in sync when a doc changes); implementation details stay out of public docs
 - **Bilingual discipline**: English docs contain no Chinese (except the language switcher, flow-kit artifact section names, and runtime message quotes); Chinese docs contain no long English sentences (except commands, URLs, and proper terms)
-- **Backward compatibility**: old changes/states keep working — progressive WARN over BLOCK
+- **Backward compatibility**: old states keep working — missing fields get defaults and a retired initialization-marker field is ignored; a given shape gets one grade, BLOCKED (no progressive tier)
 - **Public docs stay jargon-free**: no codes, numbers, or process shorthand in README/docs/CHANGELOG/commit messages
 
 ## Commit convention

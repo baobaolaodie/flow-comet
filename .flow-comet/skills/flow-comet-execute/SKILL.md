@@ -21,7 +21,7 @@ In subagent mode (default) this node is a coordinator: it does not write impleme
 |------|------|------|
 | `SUMMARY.md` | `## 做了什么（一段话）` / `## 改动文件` / `## verify 输出（必填）` / `## 6 维自查`（须含实质内容）/ `## 越界检查（必填）` / `## 是否触发新工作` / `## 完成判定`；首部四字段 `Change ID` / `Task ID` / `完成时间` / `AI 角色` 必填 | **条件段**：`## 数据库迁移（涉及 schema 变更必填 · 来自 4-dev 步骤 1.7 / R4.5）` / `## 破坏性变更（涉及破坏性改动必填 · 来自 4-dev 步骤 1.8 / R4.6 / B4 老项目护栏）` / `## 决策与偏离（如有）`——标题必须在场，不适用写 `N/A`；**增量段**：`## 自检方法`（整段必填，紧随 `## 越界检查` 或文末）、`## LESSONS 扫描`（整段必填，紧随 `## 自检方法`） |
 
-> **注意**：flow-kit 的 SUMMARY 模板**不含 `## 自检方法` 与 `## LESSONS 扫描` 两段**——它们是 flow-comet 登记的增量段（前者校验自检方法声明，后者校验开工前扫描可核对）。使用 `flow-kit/templates/SUMMARY.md` 填写后，**必须按上方右栏补写这两段**：`## 自检方法` 声明 brooks-review / cache-brooks / builtin-quickcheck 三值之一及降级证据，`## LESSONS 扫描` 声明命中条目与逐条回应；否则新 change 的 exit 会被 BLOCKED。
+> **注意**：flow-kit 的 SUMMARY 模板**不含 `## 自检方法` 与 `## LESSONS 扫描` 两段**——它们是 flow-comet 登记的增量段（前者校验自检方法声明，后者校验开工前扫描可核对）。使用 `flow-kit/templates/SUMMARY.md` 填写后，**必须按上方右栏补写这两段**：`## 自检方法` 声明 brooks-review / cache-brooks / builtin-quickcheck 三值之一及降级证据，`## LESSONS 扫描` 声明命中条目与逐条回应；否则 exit 会被 BLOCKED。
 
 guard 校验见 workflow-guard.mjs 的 execute 出口门禁（必填段 + 6 维自查实质内容 + 自检方法声明三值 + LESSONS 扫描段与命中核对）与模板骨架派生（段标题 / 段序 / 首部字段 / 增量段位置）；「填得好不好」由 review 把关。
 
@@ -60,7 +60,7 @@ A mismatch is not a bug but the same fact seen from three angles: the `ROUTE:` l
 
 execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pending 任务**。
 
-**归属纪律**：request 会校验任务的并行属性与原始 `currentNode`——串行 pending 任务只归属本节点，并行 pending 任务归属 `subagent-execute`；错误节点的新 change 请求会被 BLOCK，并按输出运行 `workflow-state next` 与 `entry <目标节点>` 恢复后再重试。
+**归属纪律**：request 会校验任务的并行属性与原始 `currentNode`——串行 pending 任务只归属本节点，并行 pending 任务归属 `subagent-execute`；错误节点的请求会被 BLOCK，并按输出运行 `workflow-state next` 与 `entry <目标节点>` 恢复后再重试。
 
 **TASK 签名校验（C3，execute 期间）**：entry execute 时记录任务集签名（行尾规范化 + 标记属性剥离）；exit 时比对——execute 期间 TASK.md **只允许改开标签的标记属性**（`status` done/pending；时间戳如需记录写在开标签属性如 `completed_at`——签名剥离白名单允许；**禁止写入 action/其他 task 内容**），增删任务/改 action/改边界/改其他内容会在 exit 被 BLOCKED（签名不匹配）。回退修复任务（review/verify 发现缺陷追加）须先经 review 流程追加到 `## Fix 任务` 段，再按下方「修复回路状态机路径」受控归位 execute，并由 entry execute 刷新签名（端到端验证实证：直接注入任务会被签名拦截）。
 
@@ -72,8 +72,8 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 - execute 遍历 TASK.md 时，遇到 `parallel="true" status="pending"` 的任务块应**跳过**
 - **全 parallel 任务时 execute 不得空退出（除非显式豁免）**：guard 的 exit 校验（evidence 前置 → 串行 pending 检测 → Output Schema 产物）会 BLOCKED——「空退出」默认不可达（实测确认）。正确路径：
   1. 正常流程下 determineNode 的 路由逻辑会**直接路由到 subagent-execute**（无需经过 execute 空退出）——协调者确认 路由逻辑生效（`NODE: subagent-execute`）后直接进入该节点
-  2. 若已进入 execute 且确认无串行任务可做：按正常 exit 流程处理（record execute evidence + 满足产物校验），需要豁免越俎代庖检测时用 `record execute '{"parallelTakeoverApproved":true}'` 显式声明；[P] 任务由 execute 完成属越权委托——新 change BLOCKED（旧 change WARN 渐进）
-  3. **显式空退出豁免（新 change 可用）**：确认全 parallel 无串行可做且无法路由时，用 `record execute '{"emptyExitApproved":true}'` 显式声明后 exit 通过（跳过串行 pending 与产物校验；防规划错误仍默认 BLOCKED——豁免须显式声明；exit 输出 EMPTY-EXIT 审计提示）
+  2. 若已进入 execute 且确认无串行任务可做：按正常 exit 流程处理（record execute evidence + 满足产物校验），需要豁免越俎代庖检测时用 `record execute '{"parallelTakeoverApproved":true}'` 显式声明；[P] 任务由 execute 完成属越权委托——一律 BLOCKED（同一形态一个判级）
+  3. **显式空退出豁免（须显式声明）**：确认全 parallel 无串行可做且无法路由时，用 `record execute '{"emptyExitApproved":true}'` 显式声明后 exit 通过（跳过串行 pending 与产物校验；防规划错误仍默认 BLOCKED——豁免须显式声明；exit 输出 EMPTY-EXIT 审计提示）
 - determineNode 路由逻辑会优先检测依赖已满足的 parallel 任务并路由到 subagent-execute；若 determineNode 路由到了 execute，说明当前趟存在需要 execute 处理的串行任务（此时应执行而非空退出——**除非已显式声明空退出豁免** `emptyExitApproved`，见上条第 3 项）——串行消化完成后再次路由，剩余并行任务回到 subagent-execute 的下一趟（多趟循环直至无可并行 pending 且无串行残留）
 
 ### 并行安全四属性契约
@@ -84,7 +84,7 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 > |---|------|------|----------|
 > | ① | **写权限** | 每个写者必须有一条被守卫认可的写入通道 | **身份分派**（CC / Codex 载荷含 `agent_id` ⇒ 子代理语义；dsh 桥接以环境变量 `FLOW_COMET_AGENT_DEPTH` 透传正整数身份深度，**并同时注入桥接通道标记 `FLOW_COMET_AGENT_DEPTH_SOURCE`——守卫要求标记与深度同时在场才接受该通道**）——**worktree 只是本属性的实现之一**，不是必须；**最小保护集除外**：身份在场时 `.flow-comet/flow-comet-state.json` 与 `../flow-comet/reference/workflow-protocol.json` 仍受拦（三平台一致 BLOCKED） |
 > | ② | **提交隔离** | 提交只含自己 `write_files` 的字面路径 | 提交面 pathspec 纪律五要素（见 Guidance 同名小节） |
-> | ③ | **验证隔离** | 同一时刻只有一个写者：全量判据不得与在飞写者并行 | 出口校验锚 = `handoffRequests` 有 request 无对应 `handoffResult` ⇒ 新 change BLOCKED / 旧 change WARN；全部有 result ⇒ 放行；无证据 ⇒ 零输出（**已撤回的 request 不构成在飞委托**：`workflow-handoff.mjs withdraw <task-id> --by <来源>` 在原记录上留痕 `withdrawnAt` + `withdrawnBy`，已撤回 = 终态、历史不删） |
+> | ③ | **验证隔离** | 同一时刻只有一个写者：全量判据不得与在飞写者并行 | 出口校验锚 = `handoffRequests` 有 request 无对应 `handoffResult` ⇒ 一律 BLOCKED（同一形态一个判级）；全部有 result ⇒ 放行；无证据 ⇒ 零输出（**已撤回的 request 不构成在飞委托**：`workflow-handoff.mjs withdraw <task-id> --by <来源>` 在原记录上留痕 `withdrawnAt` + `withdrawnBy`，已撤回 = 终态、历史不删） |
 > | ④ | **集成纪律** | 机制选择 / 顺序 / 审计 / 冲突处置四项均有明文规则 | 集成纪律四要素（见 Guidance 同名小节） |
 >
 > **写面含 gitignored 面的任务（四属性映射 · 与其他任务同一判据）**：任务 `write_files` 全为 gitignored 字面路径时，四属性的满足方式不变——① **写权限**仍走**身份通道**（载荷 `agent_id` / 环境变量身份深度 ⇒ 子代理语义放行，项目内任意路径可写（含 gitignored）；gitignored 只是路径属性，不是通道差异）；② **提交隔离**走既有 **`noCommit` 资格**（request 按 `.gitignore` 命中记 `noCommit:true` ⇒ 任务零提交，「提交只含自己 `write_files` 的字面路径」由**无提交**满足，不是放宽校验；资格 fail-closed：glob / `..` 越界 / 非 git 仓 / tracked 文件 / 链接逃逸一律不授予，result 时刻按同一判据重验，失败即撤销资格）；③④ 与其他任务同形（同一时刻单写者 + 集成四要素）。**并行 × 零提交**因此合法：任务可标 `parallel="true"` 并被并行委派，出口校验按 request 的 `noCommit` 资格豁免缺 `commitHash`。
@@ -130,9 +130,9 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 
 对 TASK.md 每个 pending 串行任务，协调者执行：
 
-1. **读 task 块，构造 handoff request**：读 `<task>` XML 块（`action` / `read_files` / `write_files` / `verify` / `done`）。若内容有歧义，停下询问——不要猜。构造 handoff request 内容：task 全文 + DESIGN §0/§0.5 + AC + read/write_files 边界。运行 `node .claude/skills/flow-comet/scripts/workflow-handoff.mjs request <task-id>` 记录。**委托即记 request（机制保证，不是经验之谈）**——`result` 在写盘前校验该任务存在 request 记录：缺失时新 change **BLOCKED**（state 字节零改写），并给出恢复指引「先照抄下面的命令记录委托（`description` 可省略），再重录 result」——命令形如 `node ".claude/skills/flow-comet/scripts/workflow-handoff.mjs" request T02`（设计形态，安装时脚本根按平台改写；引擎打印的就是带真实路径与任务号的那一行——脚本路径整条加引号，整行可直接执行）；旧 change 只 WARN。零提交的 result 与只交自身 `<task-id>-SUMMARY.md` 的 result 两种形态同样被拦——该校验先于零提交语义与提交子集校验，那两者都从 request 取范围，因此不存在「先记 result 再补 request」的可行顺序。
+1. **读 task 块，构造 handoff request**：读 `<task>` XML 块（`action` / `read_files` / `write_files` / `verify` / `done`）。若内容有歧义，停下询问——不要猜。构造 handoff request 内容：task 全文 + DESIGN §0/§0.5 + AC + read/write_files 边界。运行 `node .claude/skills/flow-comet/scripts/workflow-handoff.mjs request <task-id>` 记录。**委托即记 request（机制保证，不是经验之谈）**——`result` 在写盘前校验该任务存在 request 记录：缺失时 **BLOCKED**（state 字节零改写），并给出恢复指引「先照抄下面的命令记录委托（`description` 可省略），再重录 result」——命令形如 `node ".claude/skills/flow-comet/scripts/workflow-handoff.mjs" request T02`（设计形态，安装时脚本根按平台改写；引擎打印的就是带真实路径与任务号的那一行——脚本路径整条加引号，整行可直接执行）。零提交的 result 与只交自身 `<task-id>-SUMMARY.md` 的 result 两种形态同样被拦——该校验先于零提交语义与提交子集校验，那两者都从 request 取范围，因此不存在「先记 result 再补 request」的可行顺序。
 2. **委托子代理**：
-   **委托顺序（硬顺序）**：先让 request 成功，再启动子代理——同一任务的 `workflow-handoff.mjs request`（步骤 1）与子代理启动是串行两步，禁止把 request 与子代理启动放进同一个并发调用（例如 `Promise.all` 里同时发 request 与 Agent / spawn_agent）。这是执行纪律，不是机制拦截：平台工具层没有可挂的判定点，引擎不会替你排队。**两件事别混**：本条管的是「request 与子代理启动的先后」，它没有挂点；「`result` 需要一条 request」是机制保证——缺 request 的 result 在写盘前被拒（新 change BLOCKED，恢复句见步骤 1）。
+   **委托顺序（硬顺序）**：先让 request 成功，再启动子代理——同一任务的 `workflow-handoff.mjs request`（步骤 1）与子代理启动是串行两步，禁止把 request 与子代理启动放进同一个并发调用（例如 `Promise.all` 里同时发 request 与 Agent / spawn_agent）。这是执行纪律，不是机制拦截：平台工具层没有可挂的判定点，引擎不会替你排队。**两件事别混**：本条管的是「request 与子代理启动的先后」，它没有挂点；「`result` 需要一条 request」是机制保证——缺 request 的 result 在写盘前被拒（BLOCKED，恢复句见步骤 1）。
    **Delegation order (mandatory)**: a successful request first, then launch the subagent — the `workflow-handoff.mjs request` call and the subagent launch are two sequential steps; never inside one concurrent call (e.g. request plus Agent / spawn_agent in the same `Promise.all`). This is execution discipline, not a mechanism interception: the platform tool layer offers no hook point, so the engine will not queue it for you. **Two different things**: this rule is about the order of the request and the subagent launch, and nothing enforces it; "a result needs a request" is a mechanism guarantee — a result without one is refused before anything is written (a new change blocks, recovery line in step 1).
    按平台通道委托 fresh-context 子代理（三平台同一身份判据，差异只在谁建树；`isolation: "worktree"` 是属性①的可选实现，非强制——见「并行安全四属性契约」）。handoff prompt 强制协议：子代理用 **Skill 工具**加载 flow-comet-dev 并按 `flow-kit/prompts/4-dev.md` 协议执行（TDD RED/GREEN/REFACTOR、LESSONS 扫描、既有抽象 grep、verify、6 维自查、越界检查、原子 commit `<type>(<scope>): <subject>`（scope 推荐可选：子系统短词；禁 change-id/日期作 scope；任务号放提交正文尾注 Task: <task-id>，change-id 不入标题）），按 `flow-kit/templates/SUMMARY.md` 模板写 `.specs/<change-id>/<task-id>-SUMMARY.md`（标题/首部/段序保真，另补 flow-comet 增量 `## 自检方法` 段），回传 Return Contract（含 commitHash + greenEvidence + completedChecks + selfReview）。**SUMMARY 自引用 hash 注**：提交内容无法包含自身 hash——若子代理 amend 提交,SUMMARY 内记录的 commitHash 为 amend 前值属预期(文件集一致即可,以实际提交对象为准)。
    **提交从属规则**:任务专属的 `<task-id>-SUMMARY.md`(位于 `.specs/<change-id>/`,是 flow-comet 强制产物)允许随任务提交属流程默认豁免——目标仓库的既有规定优先,若目标仓库忽略清单等既有规定拒绝其入库,被拒即为正确行为,严禁 force-add 强加越库提交;委托校验对任务摘要的豁免属于校验宽容度,不是入库指令。
@@ -145,7 +145,7 @@ execute 节点**只处理 `parallel="false"`（或未标注 parallel）的 pendi
 6. **下一个 pending 任务**：重复步骤 1-5。
 
 > 原 Steps 的 TDD / LESSONS / verify / 6 维自查 / 越界检查 / commit 协议**移入 handoff prompt 作为子代理的强制协议**，协调者不亲自执行。
-> **Return Contract 非代码任务**：纯文档 / 纯配置任务子代理回传时，`greenEvidence` 与 `redEvidence` 均允许 `{"command":"N/A (non-code task)","output":"..."}` 形态（command 字段存在即可通过 W1-D 校验；redEvidence 缺失在新 change 下仍会被 W1-D 拦截，因此必须显式提供此形态而非省略字段）。
+> **Return Contract 非代码任务**：纯文档 / 纯配置任务子代理回传时，`greenEvidence` 与 `redEvidence` 均允许 `{"command":"N/A (non-code task)","output":"..."}` 形态（command 字段存在即可通过 W1-D 校验；redEvidence 缺失仍会被 W1-D 拦截，因此必须显式提供此形态而非省略字段）。
 > **Return Contract 的 completedChecks 统一契约**：子代理回传的 `completedChecks` 必须包含 `required-skill:subagent-execute.flow-comet-dev`——execute（串行委托）与 subagent-execute（并行委托）的 handoff 统一记录在 subagent-execute 证据库（共用证据库语义），guard 的 W1-D 对全部委托结果统一校验该契约。取值与节点自证命名（本节点自身证据用的 `required-skill:execute.flow-comet-dev`，见 Required Skill Calls）无关。**格式要求**：`completedChecks` 必须是**字符串数组**（如 `["required-skill:subagent-execute.flow-comet-dev"]`）——对象数组（如 `[{id, status}]`）会被 guard 的严格比较判"缺"→ exit BLOCKED。示例：
 >
 > - 正确：`"completedChecks": ["required-skill:subagent-execute.flow-comet-dev"]`
@@ -174,7 +174,7 @@ This node is truly done when:
 - **Agent thought**: "I see a bug in an adjacent file, let me fix it along the way." **Actual risk**: "Fixing along the way" without a new task or CHANGE violates R7.1 (scope control). Must stop and create a new task or CHANGE.
 - **Agent thought**: "This task is taking long, let me skip the self-review." **Actual risk**: Skipping self-review defers quality issues to the review node, where they become Critical items requiring fix tasks. Better to catch early.
 - **Agent thought**: "这个 parallel 任务小，我顺手在主会话做了。" **Actual risk**: 违反并行委托设计——subagent-execute 节点被静默跳过，丢失并行隔离与 write_files 冲突防护；且 execute 出口的 all-tasks-done 校验会 BLOCKED（parallel 无 handoffResult）。parallel="true" 任务只能由 subagent-execute 委托。
-- **Agent thought**: "同时发 request 和启动子代理，省一个来回。" **Actual risk**: 先让 request 成功，再启动子代理——禁止把 request 与子代理启动放进同一个并发调用（例如 `Promise.all`）；这是执行纪律，不是机制拦截（平台层没有挂点，引擎不替你排队）。与它相邻的另一件事已是机制保证：`result` 在写盘前校验该任务有 request 记录，缺失即新 change BLOCKED 并给出补 request 的恢复句。The order is mandatory: **a successful request first, then launch the subagent**, **never inside one concurrent call**; this is **execution discipline, not a mechanism interception** — the platform tool layer has no hook point to enforce it.
+- **Agent thought**: "同时发 request 和启动子代理，省一个来回。" **Actual risk**: 先让 request 成功，再启动子代理——禁止把 request 与子代理启动放进同一个并发调用（例如 `Promise.all`）；这是执行纪律，不是机制拦截（平台层没有挂点，引擎不替你排队）。与它相邻的另一件事已是机制保证：`result` 在写盘前校验该任务有 request 记录，缺失即 BLOCKED 并给出补 request 的恢复句。The order is mandatory: **a successful request first, then launch the subagent**, **never inside one concurrent call**; this is **execution discipline, not a mechanism interception** — the platform tool layer has no hook point to enforce it.
 
 ## 修复回路状态机路径
 
@@ -246,7 +246,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record execute '{"summ
 | Guardrail ID | Label | Validation Type |
 |--------------|-------|-----------------|
 | `build-evidence` | At least one SUMMARY.md produced | artifact-exists |
-| `all-tasks-done` | All tasks in TASK.md have status="done"（pending 串行任务 → BLOCKED）；done 任务须有对应 SUMMARY（新 change 强制 BLOCKED，旧 change WARN 渐进） | content-check |
+| `all-tasks-done` | All tasks in TASK.md have status="done"（pending 串行任务 → BLOCKED）；done 任务须有对应 SUMMARY（一律 BLOCKED，同一形态一个判级） | content-check |
 | `verify-output-real` | Every SUMMARY.md has verify output (not fabricated) | 结构级（guard 强制：`## verify 输出` 段在场且正文非空，骨架校验同批拦截）；输出是否真实由 review 把关（伪造不可机检） |
 | `no-design-changes` | REQUIREMENT.md and DESIGN.md not modified | 执行纪律（review 把关），guard 不校验 |
 | `self-check-method` | Every SUMMARY.md declares `## 自检方法`（brooks-review / cache-brooks / builtin-quickcheck） | W1-B 段级校验 |

@@ -26,8 +26,8 @@
 //   · 载体缺席（无 `## 波次划分` 段 / 段名无从派生）→ unverified 非空：调用方打印 notice
 //     （「未校验」）并放行——判据没有可判对象，不改退出码；
 //   · 工件内容不可判（段在场，但一行 Wave 行都解析不出可对应任务：正文只写 N/A、点的是不存在的
-//     任务 id、行首强调记号让 Wave 行不成立）→ unjudgeable 非空：新 change BLOCKED / 旧 change
-//     WARN（WARN 行进入既有 WARN COUNT——「该写的没写」不再静默；恢复出路在载荷里）。
+//     任务 id、行首强调记号让 Wave 行不成立）→ unjudgeable 非空：一律 BLOCKED（单轨判级——「该写的
+//     没写」不再静默；恢复出路在载荷里）。
 // 收敛到这一形态（而不是 { judgeable, reason }）的理由：① 载荷跟着分类走——notice /
 // explanation + recovery 直接可用于打印，调用方不必再按 reason 反查第二张表（同一组取值只许有一张
 // 表：按 key 反查的第二张表与判定表必然分叉）；② 「能否判定」由字段出现与否表达，reason 只留人读

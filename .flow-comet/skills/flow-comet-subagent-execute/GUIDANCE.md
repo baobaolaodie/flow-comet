@@ -35,5 +35,5 @@ guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B；「填得好�
 
 ### 委托前写写拦截（第二道锚保持）
 
-plan 出口已做文件级依赖检测（写写强判：新 change BLOCKED / 旧 change WARN；读写弱判：无显式 depends_on 关联对 WARN；伪并行 WARN 并存渐进）——委托前既有 write∩write 拦截**保持为第二道防线**（`BLOCKED: parallel tasks write_files 冲突`，行为与消息既有语义不变）。并行委托前仍校验本趟并行任务的 `write_files` 交集，plan 出口检测的提示/拦截不改变委托前拦截。
+plan 出口已做文件级依赖检测（写写强判：一律 BLOCKED；读写弱判：无显式 depends_on 关联对 WARN；伪并行 WARN 并存）——委托前既有 write∩write 拦截**保持为第二道防线**（`BLOCKED: parallel tasks write_files 冲突`，行为与消息既有语义不变）。并行委托前仍校验本趟并行任务的 `write_files` 交集，plan 出口检测的提示/拦截不改变委托前拦截。
 

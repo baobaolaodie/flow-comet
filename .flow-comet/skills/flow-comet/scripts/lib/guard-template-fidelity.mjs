@@ -673,7 +673,7 @@ function addLegacySummaryIssues(text, issues) {
 
 // SUMMARY 结构门禁（execute / subagent-execute）：标题形态 / 首部四字段 / 全骨架（H2 + 结构型 H3，
 // 条件段允许正文 N/A）/ 段序 / 空正文 / 逐字占位 / 增量段位置（自检方法 紧随越界检查或文末；
-// LESSONS 扫描 紧随自检方法或在自检方法之后），新 change BLOCKED、旧 change WARN；模板缺席时
+// LESSONS 扫描 紧随自检方法或在自检方法之后），违反一律 BLOCKED（单轨判级）；模板缺席时
 // 只保留既有兜底段序判据并显式输出「未校验（模板缺失）」。
 export async function runSummaryTemplateFidelityGate({ node, state }) {
   if (!EXECUTE_FAMILY_NODE_IDS.has(node.id)) return;
@@ -820,10 +820,10 @@ async function legacyDesignLiteTitle(changeDir, state) {
 }
 
 // TASK 7 字段完整性门禁（plan 出口）：每个 <task> 块须含
-// name/read_files/write_files/action/verify/done/depends_on；缺任一 → 新 BLOCK / 旧 WARN。
-// 开标签解析/整块提取沿用 task-parsing.mjs（属性序无关）。宽容：任务块采用旧式一字段形态
-// （无 <name> 标记）的 TASK 视为旧格式 → 仅渐进 WARN（不误拦既有波次/路由回归载体）；采用新
-// 模板形态（含 <name>）则按 7 字段强校验。字段集从 `task-graph.mjs` 的单一权威常量取用（执行期
+// name/read_files/write_files/action/verify/done/depends_on；缺任一 → BLOCKED / WARN，分级依据是
+// **模板形态**（不是 change 新旧）。开标签解析/整块提取沿用 task-parsing.mjs（属性序无关）。宽容：
+// 任务块采用旧式一字段形态（无 <name> 标记）的 TASK 视为旧格式 → 仅 WARN（不误拦既有波次/路由回
+// 归载体）；采用新模板形态（含 <name>）则按 7 字段强校验。字段集从 `task-graph.mjs` 的单一权威常量取用（执行期
 // `replan` 判据同源）——本模块不得再写一份字面集合，否则两侧会在规则演进时分叉。
 export async function runTaskSevenFieldGate({ node, state }) {
   if (node.id !== 'plan' || !state.activeChange) return;

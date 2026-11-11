@@ -76,7 +76,7 @@ This node finalizes a completed change by extracting reusable lessons from the d
 归档已 entry 但归档移动尚未发生（`.specs/<change-id>/` 仍在原位、`status !== 'completed'`）时，review / verify / 执行阶段发现的新缺陷**不得**在归档阶段就地修完——工作归属须先受控归位回既有生命周期，再按修复回路收口。要点：
 
 - **未移动** → 受控重入：由用户显式授权后运行 `node .claude/skills/flow-comet/scripts/workflow-state.mjs reenter <target> --authorized-by <source> --reason <text>`——目标限 `execute` / `subagent-execute` / `review` / `verify` 之一；每次调用都需要用户显式授权，每 change 上限 3 轮（达上限后凭显式续轮授权 `--continue-round <n>`，n ≥ 已用轮次 + 1）；命令先自动落 state 备份快照（`.specs/<change-id>/.reentry-backups/`），再转移工作归属；缺授权、目标越界、超上限或归档移动已发生一律 BLOCKED（state 字节零改写），不会静默跳过。
-- **已移动 / 已合并** → 人工处置或新 change：归档移动已发生（`.specs/archive/<日期>-<change-id>/`）或 change 已 `completed` / 已合并时，受控重入不适用（不承诺把文件搬回原位）；走人工处置，或把修复放进新 change / hotfix，并在遗留清单里登记指针。
+- **已移动 / 已合并** → 人工处置或另开 change：归档移动已发生（`.specs/archive/<日期>-<change-id>/`）或 change 已 `completed` / 已合并时，受控重入不适用（不承诺把文件搬回原位）；走人工处置，或把修复放进另一个 change / hotfix，并在遗留清单里登记指针。
 - **写权限顺序（先转移后写 TASK）**：先跑 `reenter` 完成转移（写入权限随即跟随目标节点），再在目标节点权限内追加 Fix 任务 / 修改工件；archive 阶段 hook 对 change 目录只放行 `KNOWN-ISSUES.md` 这一个精确文件（另有 `.specs/archive/`、`.specs/CHANGELOG.md`、`.specs/LESSONS.md`、`STATE.md`），**不要试图在归档阶段先写 TASK.md**。
 - **回源路径不因归档而放宽**：修复回路本身不变——回到 `execute` 生命周期时照样跑完四类出口，随后**回源节点跑出口**（`entry <源节点>` → `exit <源节点> --apply`）；受控重入只改工作归属，不写任何闭合标记，也**禁止绕过**目标节点入口 / 出口与源节点出口门禁。
 

@@ -29,8 +29,8 @@
 //     清单**（REQUIREMENT 在场却定位不到验收准则段；验收段在而无任何 AC-N 编号；TEST.md 在场却
 //     定位不到第 1 轮段；第 1 轮段在而段内没有 1.1 矩阵段，即「整段 N/A」）；② **change 自己的
 //     载体文件缺席**（REQUIREMENT.md / TEST.md 不在）——这两个文件是这个 change 自己的东西，作者
-//     抬手就能删，删掉它换不到「没有可判对象」。两支同属「不是判过且通过」，调用方按既有分级：
-//     新 change BLOCKED / 旧 change WARN（WARN 行进入既有 WARN COUNT）。删段、删文件因此都不是
+//     抬手就能删，删掉它换不到「没有可判对象」。两支同属「不是判过且通过」，调用方按单一判级：
+//     一律 BLOCKED（同一形态一个判级）。删段、删文件因此都不是
 //     关掉判据的写法，出路只有「按模板把段、清单与文件补回来」。
 //
 // 词法：AC-<数字>，大小写不敏感；AC-1a 归并到 AC-1（后缀不参与编号），AC-01 与 AC-1 归一为同一编号；
@@ -40,7 +40,7 @@
 // 围栏外才是台账。段界本身由 sectionBody 跨围栏给出（围栏内的 `## ` 不结束段体），编号扫描再
 // 过一次围栏状态——两件事各管一段：前者决定读多远，后者决定读到的哪些真算数。
 //
-// 分级（新 change BLOCK / 旧 change WARN、review 出口只汇总）不在这里判：本模块只产出判定结果与
+// 判级（违反即 BLOCKED；review 出口只汇总）不在这里判：本模块只产出判定结果与
 // 报文文本，console / exit 只在门禁层（与「纯判定 + 门禁编排」的既有分层一致）。
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -213,7 +213,7 @@ const UNJUDGEABLE_CAUSES = {
 };
 
 // 判不了时返回的判定结果形态：两个成因字段互斥，调用方按「模板缺席 → 未校验放行」/「内容不可判 →
-// 按 change 新旧分级」两支处置。
+// 单一判级（一律 BLOCKED）」两支处置。
 function unverifiable(reason) {
   const explanation = UNVERIFIED_EXPLANATIONS[reason] ?? reason;
   return {
@@ -246,7 +246,7 @@ function unjudgeable(reason) {
 //   · acIds    = REQUIREMENT 验收段内的编号（有序去重）；
 //   · missing  = 这些编号里未出现在 1.1 矩阵段文本中的（同样按 REQUIREMENT 顺序）；
 //   · unverified / unjudgeable = 非 null 表示没判成：前者只剩「模板缺席」（放行），后者是工件
-//     内容不可判——载体文件被删或承载段 / 清单读不出（按 change 新旧分级）；两者都为 null 才表示
+//     内容不可判——载体文件被删或承载段 / 清单读不出（内容不可判一律 BLOCKED）；两者都为 null 才表示
 //     判据真的判过。
 // 顺序固定：承载段在不在一级（段缺席 = 内容不可判，不是「无可判对象」），再判「有没有编号」，最后判
 // 「矩阵能不能读」——三级「判不了」因此不会互相遮蔽，报文说的是真正卡住的那一环。
@@ -258,7 +258,7 @@ export async function acCoverageReview(changeDir) {
   if (acceptanceMatcher === TEMPLATE_SECTION_SKIP) return unverifiable('模板缺席（段名无从派生）');
   const acceptanceBody = sectionBody(requirementText, acceptanceMatcher, { level: 2, endOnSeparator: false });
   // 承载段缺席 ≠ 载体缺席：REQUIREMENT.md 与模板都在场，缺的是作者自己删掉的段——按内容不可判
-  // 分级（新 change BLOCKED / 旧 change WARN），删段因此不是关掉 AC 覆盖判据的写法。
+  // 判级（一律 BLOCKED），删段因此不是关掉 AC 覆盖判据的写法。
   if (acceptanceBody === null) return unjudgeable('REQUIREMENT 无验收准则段');
   const acIds = parseAcIds(acceptanceBody);
   if (acIds.length === 0) return unjudgeable('REQUIREMENT 无 AC 编号');
@@ -293,8 +293,8 @@ export function acCoverageReportLines({ coverage, level = 'BLOCKED' }) {
   ];
 }
 
-// 「工件内容不可判」的报文（verify 出口 BLOCKED / 旧 change WARN 同一文本，只换分级前缀与末尾的
-// 分级说明——与波次判据同形）：首行点名是哪一环读不出来，第二行给能照做的恢复出路。WARN 前缀让该行
+// 「工件内容不可判」的报文（BLOCKED / WARN 同一文本，只换分级前缀与末尾的
+// 分级说明——与波次判据同形；单轨下调用方只传 BLOCKED）：首行点名是哪一环读不出来，第二行给能照做的恢复出路。WARN 前缀让该行
 // 进入既有 WARN COUNT（「该写的没写」不再静默为「未校验」）。
 export function acCoverageUnjudgeableLines({ coverage, level = 'BLOCKED' }) {
   const blocking = level === 'BLOCKED';

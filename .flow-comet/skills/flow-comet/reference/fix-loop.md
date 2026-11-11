@@ -18,7 +18,7 @@ review / verify 发现缺陷后的修复必须回到 `execute` 节点生命周�
    - **`next` 回程审计行语义**：回程豁免行始终输出中性 `RETURN: 回程源节点 <源节点>`（源节点产物在场且未出口；保留源节点跑出口），不再输出 FIX-BATCH；受控归位行的 `FIX-BATCH: 归位 <execute 家族>` 保留（真实 Fix 回退行），两者不得混同。
 6. **禁止绕过**：驻留源节点不归位、顺手改完后直接跑源节点 exit 收场会被 BLOCKED（存在未归位/未跑出口的修复回路），必须按上述路径恢复；不得用跳过归位或出口门禁的手段（含手动改写 `.flow-comet/flow-comet-state.json`）替代本路径。
 
-**由受控重入打开的场景（archive 源）**：缺陷在归档后才暴露、且归档移动尚未发生时，可先由用户显式授权把工作归属退回 `execute` / `subagent-execute` / `review` / `verify` 之一，再按本节路径回到 execute 生命周期完成修复。重入命令：`node .claude/skills/flow-comet/scripts/workflow-state.mjs reenter <target> --authorized-by <source> --reason <text> [--continue-round <n>]`——每次调用都需要用户显式授权，每 change 上限 3 轮（达上限后凭显式续轮授权 `--continue-round <n>`（n ≥ 已用轮次 + 1）可继续并计入下一轮）；重入前自动落 state 备份快照（`.specs/<change-id>/.reentry-backups/`）；成功打印 `REENTRY: archive → <target>（授权源 <source>；第 n/3 轮；备份 <file>）` 与 `REASON: <text>` 行（续轮审计行为 `第 n 轮（显式授权续轮，上限 3）`），与 Fix 回炉的 `FIX-BATCH` 行、正常多趟收尾的 `RETURN` 行三态可区分。归档移动已发生或 change 已 `completed` 时重入 BLOCKED，须走人工处置或新 change，不得静默跳过。重入只改工作归属，不写任何闭合标记，也不跳过目标节点入口 / 出口与源节点出口门禁；重复调用同一目标为空操作（输出 `REENTRY: 空操作——…`，不备份、不计数、不改写 state）。
+**由受控重入打开的场景（archive 源）**：缺陷在归档后才暴露、且归档移动尚未发生时，可先由用户显式授权把工作归属退回 `execute` / `subagent-execute` / `review` / `verify` 之一，再按本节路径回到 execute 生命周期完成修复。重入命令：`node .claude/skills/flow-comet/scripts/workflow-state.mjs reenter <target> --authorized-by <source> --reason <text> [--continue-round <n>]`——每次调用都需要用户显式授权，每 change 上限 3 轮（达上限后凭显式续轮授权 `--continue-round <n>`（n ≥ 已用轮次 + 1）可继续并计入下一轮）；重入前自动落 state 备份快照（`.specs/<change-id>/.reentry-backups/`）；成功打印 `REENTRY: archive → <target>（授权源 <source>；第 n/3 轮；备份 <file>）` 与 `REASON: <text>` 行（续轮审计行为 `第 n 轮（显式授权续轮，上限 3）`），与 Fix 回炉的 `FIX-BATCH` 行、正常多趟收尾的 `RETURN` 行三态可区分。归档移动已发生或 change 已 `completed` 时重入 BLOCKED，须走人工处置或另开 change，不得静默跳过。重入只改工作归属，不写任何闭合标记，也不跳过目标节点入口 / 出口与源节点出口门禁；重复调用同一目标为空操作（输出 `REENTRY: 空操作——…`，不备份、不计数、不改写 state）。
 
 ## 受控重入与归档侧边界
 
@@ -35,7 +35,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs reenter <target> --aut
 - **上限与显式续轮**：每 change 最多 3 轮；第 4 次 BLOCKED 并给出「继续 / 停止」人工裁决指引。人工裁决「继续」须追加 `--continue-round <n>`（正整数，且 n ≥ 已用轮次 + 1）作显式续轮授权：满足则放行并计入下一轮、审计行打印 `第 n 轮（显式授权续轮，上限 3）`；未到上限即传该参数、或轮次不足一律 BLOCKED 且零改写。轮次与审计事件记入 `state.history`（事件类型 `reentry-applied`，含 `reason`；续轮时附 `continuationAuthorized: true`），成功输出 `REENTRY: archive → <target>（授权源 <source>；第 n/3 轮；备份 <file>）` 与 `REASON: <text>` 两行。
 - **备份**：转移前自动落 state 快照 `.specs/<change-id>/.reentry-backups/<UTC ISO>-pre-<target>.json`（时间戳中的 `:` 替换为 `-`），并记录 sha256 指纹，供审查核验与手工回滚。
 - **顺序**：命令成功后再写修复内容——archive 阶段写入白名单只放行 `.specs/<change-id>/KNOWN-ISSUES.md` 等少数路径；重入后写入权限跟随目标节点，此时才追加 Fix 任务 / 修改工件。
-- **边界**：归档移动已发生或 change 已 `completed` → BLOCKED，走人工处置或新 change / hotfix；重复调用同一目标 → 空操作（输出 `REENTRY: 空操作——…`，不备份、不计数、不改写 state），不会静默跳过。
+- **边界**：归档移动已发生或 change 已 `completed` → BLOCKED，走人工处置或另开 change / hotfix；重复调用同一目标 → 空操作（输出 `REENTRY: 空操作——…`，不备份、不计数、不改写 state），不会静默跳过。
 
 ### 归档后发现缺陷（受控重入）
 
@@ -48,10 +48,10 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs reenter <target> --aut
   ```
 
   目标限 `execute` / `subagent-execute` / `review` / `verify` 之一；每次调用都需要用户显式授权，每 change 上限 3 轮（达上限后凭显式续轮授权 `--continue-round <n>`（n ≥ 已用轮次 + 1）可继续并计入下一轮）；命令先自动落 state 备份快照（`.specs/<change-id>/.reentry-backups/`），再转移工作归属，并打印 `REENTRY: archive → <target>（授权源 <source>；第 n/3 轮；备份 <file>）` 与 `REASON: <text>` 行（续轮审计行为 `第 n 轮（显式授权续轮，上限 3）`）。缺授权、目标越界、超上限或归档移动已发生一律 BLOCKED（state 字节零改写），不会静默跳过。
-- **已移动 / 已合并** → 人工处置或新 change：归档移动已发生（`.specs/archive/<日期>-<change-id>/`）或 change 已 `completed` / 已合并时，受控重入不适用（不承诺把文件搬回原位）；走人工处置，或把修复放进新 change / hotfix，并在遗留清单里登记指针。
+- **已移动 / 已合并** → 人工处置或另开 change：归档移动已发生（`.specs/archive/<日期>-<change-id>/`）或 change 已 `completed` / 已合并时，受控重入不适用（不承诺把文件搬回原位）；走人工处置，或把修复放进另一个 change / hotfix，并在遗留清单里登记指针。
 
 **写权限顺序（先转移后写 TASK）**：archive 阶段 hook 对 change 目录只放行 `KNOWN-ISSUES.md` 这一个精确文件（另有 `.specs/archive/`、`.specs/CHANGELOG.md`、`.specs/LESSONS.md`、`STATE.md`），TASK.md 的修复任务写入不在放行面内。顺序固定为：先跑 `reenter` 完成转移（写入权限随即跟随目标节点），再在目标节点权限内追加 Fix 任务 / 修改工件——不要试图在 archive 阶段先写 TASK.md。若重入成功后追加任务失败，用 `next` / `status` 核对归属；重复调用同一目标为空操作（不备份、不计数、不改写 state）。
 
 ### 受控重入打开的修复场景（archive 源）
 
-缺陷在归档后才暴露、且归档移动尚未发生时，可先由用户显式授权把工作归属退回本节点或 `execute` / `review` / `verify`，再按常规委托与出口流程完成修复。重入命令：`node .claude/skills/flow-comet/scripts/workflow-state.mjs reenter <target> --authorized-by <source> --reason <text> [--continue-round <n>]`——每次调用都需要用户显式授权，每 change 上限 3 轮（达上限后凭显式续轮授权 `--continue-round <n>`（n ≥ 已用轮次 + 1）可继续并计入下一轮）；重入前自动落 state 备份快照（`.specs/<change-id>/.reentry-backups/`）；成功打印 `REENTRY: archive → <target>（授权源 <source>；第 n/3 轮；备份 <file>）` 与 `REASON: <text>` 行（续轮审计行为 `第 n 轮（显式授权续轮，上限 3）`），与 Fix 回炉的 `FIX-BATCH` 行、正常多趟收尾的 `RETURN` 行三态可区分。归档移动已发生或 change 已 `completed` 时重入 BLOCKED，须走人工处置或新 change，不得静默跳过。重入只改工作归属，不写任何闭合标记，也不跳过本节点入口 / 出口门禁；重入后并行任务的委托证据、write_files 边界与 Return Contract 校验与常规流程完全一致；重复调用同一目标为空操作（输出 `REENTRY: 空操作——…`，不备份、不计数、不改写 state）。
+缺陷在归档后才暴露、且归档移动尚未发生时，可先由用户显式授权把工作归属退回本节点或 `execute` / `review` / `verify`，再按常规委托与出口流程完成修复。重入命令：`node .claude/skills/flow-comet/scripts/workflow-state.mjs reenter <target> --authorized-by <source> --reason <text> [--continue-round <n>]`——每次调用都需要用户显式授权，每 change 上限 3 轮（达上限后凭显式续轮授权 `--continue-round <n>`（n ≥ 已用轮次 + 1）可继续并计入下一轮）；重入前自动落 state 备份快照（`.specs/<change-id>/.reentry-backups/`）；成功打印 `REENTRY: archive → <target>（授权源 <source>；第 n/3 轮；备份 <file>）` 与 `REASON: <text>` 行（续轮审计行为 `第 n 轮（显式授权续轮，上限 3）`），与 Fix 回炉的 `FIX-BATCH` 行、正常多趟收尾的 `RETURN` 行三态可区分。归档移动已发生或 change 已 `completed` 时重入 BLOCKED，须走人工处置或另开 change，不得静默跳过。重入只改工作归属，不写任何闭合标记，也不跳过本节点入口 / 出口门禁；重入后并行任务的委托证据、write_files 边界与 Return Contract 校验与常规流程完全一致；重复调用同一目标为空操作（输出 `REENTRY: 空操作——…`，不备份、不计数、不改写 state）。

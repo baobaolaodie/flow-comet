@@ -825,8 +825,8 @@ export async function runNext(protocol) {
   });
   if (fixRollbackDecision) {
     const sourceNode = state.currentNode;
-    // 轮次计数与阈值/授权判定全部走共享 helper：分支②不计数；第 4 轮新 change 先 BLOCK
-    // （此处尚未写盘，满足不写 currentNode），旧 change WARN 后照常归位。
+    // 轮次计数与阈值/授权判定全部走共享 helper：分支②不计数；第 4 轮无授权时先 BLOCK
+    // （此处尚未写盘，满足不写 currentNode；单一判级，无按 change 新旧的放行侧）。
     const rollbackRound = applyFixRollbackRound({ state, sourceNode, decision: fixRollbackDecision });
     if (rollbackRound.blocked) {
       console.error(rollbackRound.blockedMessage);
@@ -1055,7 +1055,7 @@ export async function runRecord(protocol, argv) {
   }
   // 技能加载前置门（方案 A）：节点完成记录必须先有本节点
   // skill-load 声明标记——无论 payload 是否含 completedChecks 都校验（堵"先干活后补
-  // 声明"旁路）：缺失 → 新 change BLOCK / 旧 change 渐进 WARN。指引先加载技能，再照抄派生出的
+  // 声明"旁路）：缺失 → BLOCKED（单一判级）。指引先加载技能，再照抄派生出的
   // 声明命令（该节点每个必需技能各一条，全部协议文件 + 模板全清单）后重试。handoff scope 技能
   // （子代理加载）不要求协调者声明（与 verifySkillLoadMarkers 的 scope 豁免一致）——本门按
   // <node>-*.json 存在性判定，与 guard exit 侧协议声明标记校验同构。仅对存在于当前协议的节点生效

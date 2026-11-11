@@ -11,4 +11,4 @@
 
 ## 恢复指引（workflow-run）
 
-- 未 entry 直接 exit 被拦（新 change BLOCKED）：先 `workflow-guard.mjs entry <node>` 再重试 exit——entry 的进入检查（协调者禁令/委托前检查/签名记录）是节点进入前置，不可跳过
+- 未 entry 直接 exit 被拦（BLOCKED，同一形态一个判级）：先 `workflow-guard.mjs entry <node>` 再重试 exit——entry 的进入检查（协调者禁令/委托前检查/签名记录）是节点进入前置，不可跳过
