@@ -1150,16 +1150,18 @@ export const ENTRIES = [
           }
         }
       }
-      // —— ⑦ 文档口径与实现一致：入口只拦错路径 / 旧 change 按 `newChange` 标记分级 ——
+      // —— ⑦ 文档口径与实现一致：入口只拦错路径 / 排障册的分级句按初始化标记表述 ——
       // 与实现逐条对账（不在断言里写第二份判据）：
       //   ① 入口侧的声明核对只判「已写下的每条声明是否落在节点协议面内」——缺失不在入口判；
       //      「该读的每份是否都声明过」只在出口判。两册必须这样写——旧口径「错路径与少声明都由入口拦」
       //      把出口的判据说成了入口的，读者会以为少声明也能在入口被挡下。
-      //   ② 旧 change 的分级判据是 `state.newChange === true`（`isNewChange`）——排障册不得再写成
-      //      「本规则之前创建的 change」：那是拿时间猜判据，而判据只有一个输入（初始化标记在不在）。
-      //      公开面不直写机器状态字段名（键名黑名单在场景 105），故文档侧一律写行为描述。
-      // 判据 = 锚句逐条在其所属册在场 + 旧句零残留 + 排障册每处旧 change 分级句都按标记表述；
-      // 反向构造：抽掉任一锚 ⇒ 必报缺该锚；还原旧句 / 摘掉某行的标记 ⇒ 必报残留或该行违规。
+      //   ② 双向分级已退役（单轨：同一形态一个判级），排障册里经裁决已删净「旧 change 只告警」句。
+      //      本段因此保留两件**回流防护**：按时间猜判据的旧句零残留；若谁再把分级句写回排障册，
+      //      必须按「初始化标记」表述而不是按时间（公开面不直写机器状态字段名——键名黑名单在场景
+      //      105，故文档侧一律写行为描述）。
+      // 判据 = 锚句逐条在其所属册在场 + 旧句零残留 + 排障册每处分级句都按标记表述；
+      // 反向构造：抽掉任一锚 ⇒ 必报缺该锚；还原旧句 ⇒ 必报残留；注入一条缺标记的分级行 ⇒ 必报
+      // 该行违规（分级行已被删净后，判别力由这条合成前提承担，不再依赖真实文档里是否还剩该句）。
       {
         const skillRoot = path.join(SCRIPTS_DIR, '..');
         const wordingDocs = {
@@ -1192,12 +1194,16 @@ export const ENTRIES = [
             'docs/MECHANISM-zh.md': ['规则生效之前创建', '在本规则之前创建'],
           },
         };
-        // 排障册里每一处「旧 change 只告警」都别写成按时间判——判据只有「标记在不在」这一个输入。
-        // 判别句不是键名而是**行为描述**：公开面不直写机器状态字段名（场景 105 的黑名单），
-        // 所以文档只能写「初始化标记」这类说法——判据锚它，锚键名会与那条纪律直接打架。
+        // 排障册里若还出现「旧 change 只告警」一类的分级行，别把它写成按时间判——判据只有「标记在
+        // 不在」这一个输入。判别句不是键名而是**行为描述**：公开面不直写机器状态字段名（场景 105 的
+        // 黑名单），所以文档只能写「初始化标记」这类说法——判据锚它，锚键名会与那条纪律直接打架。
+        // 单轨退役后这类分级行已按裁决删净；本规则保留为回流防护，probe 是它反向构造用的**合成
+        // 前提**（命中「分级行」形态、不带标记）——不依赖真实文档里是否还剩该句。
         const markerWordingRules = {
-          'docs/TROUBLESHOOTING.md': { line: /\bchange\b[^.]*\bwarn/i, marker: 'initialization marker' },
-          'docs/TROUBLESHOOTING-zh.md': { line: /change[^。]*只告警/, marker: '初始化标记' },
+          'docs/TROUBLESHOOTING.md': { line: /\bchange\b[^.]*\bwarn/i, marker: 'initialization marker',
+            probe: 'an old change only warns (synthetic probe line)' },
+          'docs/TROUBLESHOOTING-zh.md': { line: /change[^。]*只告警/, marker: '初始化标记',
+            probe: '旧 change 只告警（合成探针行）' },
         };
         // 单一判据实现：真实核对与反向构造探针共用（两份实现必然分叉）。
         const wordingProblems = ({ entry, troubleshooting }) => {
@@ -1268,11 +1274,25 @@ export const ENTRIES = [
           const rule = markerWordingRules[rel];
           if (!rule) continue; // 只做旧句零残留的册（机制册）不走逐行探针
           const lines = text.split(String.fromCharCode(10));
-          const hitIndex = lines.findIndex((line) => rule.line.test(line) && line.includes(rule.marker));
-          if (hitIndex < 0) {
-            problems.push('反向构造的前提不成立（' + rel + ': 找不到按标记表述旧 change 分级的行）');
+          // 合成前提：命中「分级行」规则但**不带标记**的行注入同一判据后必须被判违规。单轨退役后
+          // 排障册已按裁决删净那类句子（方向正确），继续拿真实句当探针前提会让判别力探针随文档一起
+          // 消失——判定规则一旦被中和（不再逐行核对标记），这条注入就没人报 ⇒ 探针必红。注入的是
+          // 文本数据，不改真实文件；前提形态（命中规则 ∧ 缺标记）先自检，改规则/改标记词都会当场红。
+          if (!rule.line.test(rule.probe) || rule.probe.includes(rule.marker)) {
+            problems.push('反向构造的前提不成立（' + rel + ': 合成探针行不满足「命中分级行且缺标记」形态）');
             continue;
           }
+          const injectedLines = lines.concat([rule.probe]);
+          const injected = { entry: wordingDocs.entry,
+            troubleshooting: new Map(wordingDocs.troubleshooting)
+              .set(rel, injectedLines.join(String.fromCharCode(10))) };
+          if (!wordingProblems(injected).some((p) => p.includes('第 ' + injectedLines.length + ' 行'))) {
+            problems.push('反向构造判别力缺失（' + rel + ': 注入缺标记的 old change 分级行未被判违规）');
+          }
+          // 真实文档里若仍有按标记表述的分级行，照旧做「摘掉标记 ⇒ 必报该行」的探针（判别力加倍）；
+          // 单轨退役后该句不存在，此处只跳过这一半、不判红——文档该不该有它由真实判据的第一半判。
+          const hitIndex = lines.findIndex((line) => rule.line.test(line) && line.includes(rule.marker));
+          if (hitIndex < 0) continue;
           const mutated = lines.slice();
           mutated[hitIndex] = mutated[hitIndex].split(rule.marker).join('（标记）');
           const stripped = { entry: wordingDocs.entry,

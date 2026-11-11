@@ -858,7 +858,7 @@ export const ENTRIES = [
       assertOut(setRes, 'CONFIG: last_evolve_at = ' + baseline);
 
       // ② 真实 init 换 change——跨 change 的全部动作就是这一步（不碰 writeState）
-      const secondInit = runStateWithProtocol(dir, ['init', CHANGE_ID + '-2', '--init-skip']);
+      const secondInit = runStateWithProtocol(dir, ['init', CHANGE_ID + '-2', '--init-skip', '--replace', CHANGE_ID, '--reason', '验证跨 change 保留演化基线']);
       assertExit(secondInit, 0);
       const state = JSON.parse(readStateBytes(dir));
       assertEqual(state.activeChange, CHANGE_ID + '-2', 'init 后 activeChange');

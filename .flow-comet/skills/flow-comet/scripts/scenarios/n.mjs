@@ -2889,7 +2889,7 @@ export const ENTRIES = [
       assertOut(ctxFenced, 'INIT-DONE');
       assertNotOut(ctxFenced, 'INIT-VALIDATE-FAILED');
       writeFile(ctxRoot, '.specs/CONTEXT.md', contextDoc(true));
-      const ctxFencedOnly = runState(['init', CHANGE_ID + '-ctx2', '--init-context'], ctxRoot);
+      const ctxFencedOnly = runState(['init', CHANGE_ID + '-ctx2', '--init-context', '--replace', CHANGE_ID + '-ctx', '--reason', '验证段内围栏示例判定'], ctxRoot);
       assertExit(ctxFencedOnly, 0);
       assertOut(ctxFencedOnly, 'INIT-VALIDATE-FAILED');
       assertOut(ctxFencedOnly, 'evolve 元数据');
@@ -3729,7 +3729,10 @@ export const ENTRIES = [
         // ⑤ 反向构造（同一夹具、去掉变量）：解析退回进程 cwd —— 上面「cwd 零改动」三条断言正是会红的
         //    那三条；这里直接证明夹具确实能把 cwd 侧改写照出来（不是恒绿）。
         const envRootStateBefore = stateBytesAt(envRoot);
-        const noRootInit = asRes(spawnSync(process.execPath, [STATE, 'init', 'cwd-change'], {
+        // 反向构造同样要过覆盖闸门：cwd 侧本就有在途 change（live-change），显式 --replace 让它放行并
+        // 留档——本格要证的是「state 落在了哪个根」，不是「闸门要不要拦」（那是另一格的面）。
+        const noRootInit = asRes(spawnSync(process.execPath,
+          [STATE, 'init', 'cwd-change', '--replace', 'live-change', '--reason', '反向构造：证明无变量时写回进程 cwd'], {
           cwd: cwdRepo,
           env: {
             ...process.env,

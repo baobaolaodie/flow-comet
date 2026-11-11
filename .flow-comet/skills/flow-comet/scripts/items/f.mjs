@@ -40,7 +40,7 @@ export const ENTRIES = [
       const st1 = readStateFile(dir);
       if (st1.ai_context_doc !== 'none') throw new Error('跳过后 ai_context_doc 应为 none');
       // 下次 init（新 id）尊重既有决策 → 静默
-      const second = runState(['init', CHANGE_ID + '-2'], dir);
+      const second = runState(['init', CHANGE_ID + '-2', '--replace', CHANGE_ID, '--reason', '验证跳过记忆跨 change 生效'], dir);
       assertExit(second, 0);
       assertNotOut(second, 'INIT-NEEDED');
       assertNotOut(second, 'INIT-HINT');

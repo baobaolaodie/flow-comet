@@ -978,7 +978,7 @@ export const ENTRIES = [
         nodes: proto.nodes.filter((n) => n.id !== 'execute' && n.id !== 'subagent-execute'),
       };
       writeFile(dir, 'reference/protocol-bound.json', JSON.stringify(boundProtocol, null, 2) + '\n');
-      assertExit(runState(['init', boundChange, '--init-skip', '--protocol', 'reference/protocol-bound.json'], dir), 0);
+      assertExit(runState(['init', boundChange, '--init-skip', '--replace', CHANGE_ID, '--reason', '验证 state 协议绑定', '--protocol', 'reference/protocol-bound.json'], dir), 0);
       writeFile(dir, '.specs/' + boundChange + '/TASK.md', taskXml('B01', 'parallel="false" status="pending"', 'src/b01.mjs'));
       const resBound = runHandoff(['request', 'B01', 'bound protocol serial'], dir,
         { FLOW_COMET_PROTOCOL: scenarioProtocolPath(dir) });

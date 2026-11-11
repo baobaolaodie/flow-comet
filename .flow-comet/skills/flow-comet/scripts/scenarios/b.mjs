@@ -2319,7 +2319,7 @@ export const ENTRIES = [
       runStateWithProtocol(dir, ['init', CHANGE_ID, '--init-skip']);
       const st1 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (st1.ai_context_doc !== 'none') throw new Error('ai_context_doc 应为 none');
-      const res2 = runStateWithProtocol(dir, ['init', CHANGE_ID + '-2']);
+      const res2 = runStateWithProtocol(dir, ['init', CHANGE_ID + '-2', '--replace', CHANGE_ID, '--reason', '验证跳过记忆跨 change 生效']);
       if (res2.output.includes('INIT-NEEDED') || res2.output.includes('INIT-HINT')) throw new Error('下次 init 不应再提示');
     },
   },
@@ -2418,7 +2418,7 @@ export const ENTRIES = [
       if (st.last_intel_scan) throw new Error('校验失败不应写 last_intel_scan');
       // ② 段名变体（含正文提及）不满足必填段
       writeFile(dir, '.specs/CONTEXT.md', '# CONTEXT\n## 项目概要\nx\n## 技术栈补充\nx\n## 域语言说明\n| 术语 | 定义 |\n|---|---|\n| 例 | 定义 |\n## 已锁决策说明\n- [2026-08-01] 决策一\n## 默认偏好补充\nx\n## 既有抽象索引附录\nx\n## intel-scan 元数据附录\n- **last_intel_scan**: x\n- **scanner**: x\n- **下次重扫建议**: x\n正文提及 域语言 与 默认偏好 与 既有抽象索引（文本非标题）。\n');
-      res = runStateWithProtocol(dir, ['init', CHANGE_ID + '-2', '--init-context']);
+      res = runStateWithProtocol(dir, ['init', CHANGE_ID + '-2', '--init-context', '--replace', CHANGE_ID, '--reason', '验证 CONTEXT 校验跨 change 复跑']);
       assertExit(res, 0);
       assertOut(res, 'INIT-VALIDATE-FAILED');
       st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -2440,7 +2440,7 @@ export const ENTRIES = [
         '~~~text', '## 默认偏好', '~~~',
         '',
       ].join('\n'));
-      res = runStateWithProtocol(dir, ['init', CHANGE_ID + '-3', '--init-context']);
+      res = runStateWithProtocol(dir, ['init', CHANGE_ID + '-3', '--init-context', '--replace', CHANGE_ID + '-2', '--reason', '验证围栏段名判定跨 change 复跑']);
       assertExit(res, 0);
       assertOut(res, 'INIT-VALIDATE-FAILED');
       st = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -2492,16 +2492,100 @@ export const ENTRIES = [
     },
   },
 
-  // 95: init 同 id 重跑（.specs/<id>/ 已存在）→ WARN 防护输出且不阻断（F）
+  // 95: init 与既有 change 的关系——同 id 重跑仍是 WARN 不阻断；**另一个 change 在途**时
+  // 默认阻断（state 字节零改写 + 两条可照抄的出路）；只有 --replace <在途 change> --reason <非空
+  // 原因> 才放行，放行前把旧 state **按原始字节**快照到旧 change 目录的 recovery/（BOM / CRLF 一律
+  // 不改）并写同前缀 .md 记录；RECOVERY 块给出快照路径与回滚命令，回滚命令照抄真执行后旧状态逐
+  // 字节恢复。反向构造：闸门缺席（实现退化为直接覆盖）时第一条阻断断言必红。
   {
-    name: '95 init 同 id 重跑 → WARN 防护不阻断',
+    name: '95 init 与既有 change：同 id 重跑不阻断 / 在途 change 默认阻断 / --replace 留档与回滚可执行',
     run: (dir) => {
+      const stateFile = path.join(dir, '.flow-comet', 'flow-comet-state.json');
+      const recoveryDirOf = (changeName) => path.join(dir, '.specs', changeName, 'recovery');
+      // RECOVERY 块按行标签取值（快照 / 记录 / 回滚）——取值形态就是执行者要照抄的文本
+      const recoveryLine = (res, label) => {
+        const line = res.output.split('\n').find((row) => row.startsWith('RECOVERY: ' + label + ' '));
+        if (!line) throw new Error('输出缺少 RECOVERY: ' + label + ' 行\n实际输出:\n' + res.output);
+        return line.slice(('RECOVERY: ' + label + ' ').length).trim();
+      };
+      const runRootPath = (displayPath) => path.join(dir, ...displayPath.split('/'));
+
       writeFile(dir, 'package.json', '{"name":"x"}');
-      runStateWithProtocol(dir, ['init', CHANGE_ID]);
+      // ① 正常 init（无在途 change）：零留档、零新参数要求——输出与既有断言一致
+      const first = runStateWithProtocol(dir, ['init', CHANGE_ID]);
+      assertExit(first, 0);
+      assertOut(first, 'Initialized: ' + CHANGE_ID);
+      assertNotOut(first, 'RECOVERY');
+      assertTrue(!fs.existsSync(recoveryDirOf(CHANGE_ID)), '无在途 change 的正常 init 不应创建 recovery/');
+
+      // ② 同 id 重跑：既有 WARN 防护不阻断（行为不变，也不留档）
       const res = runStateWithProtocol(dir, ['init', CHANGE_ID]);
       assertExit(res, 0);
       assertOut(res, 'WARN: change ' + CHANGE_ID + ' 已存在');
       assertOut(res, '重置节点状态');
+      assertNotOut(res, 'BLOCKED');
+      assertTrue(!fs.existsSync(recoveryDirOf(CHANGE_ID)), '同 id 重跑不应留档');
+
+      // ③ 另一个 change 在途 → 默认阻断：非零退出 + 点名在途 change + 两条出路；state 字节零改写
+      const blockedBytes = readStateBytes(dir);
+      const blocked = runStateWithProtocol(dir, ['init', 'other-change']);
+      assertExit(blocked, 1);
+      assertOut(blocked, 'BLOCKED: 在途 change "' + CHANGE_ID + '" 尚未完成');
+      assertOut(blocked, '--replace ' + CHANGE_ID);
+      assertOut(blocked, '--reason');
+      assertOut(blocked, 'workflow-state.mjs" status');
+      assertStateBytesUnchanged(dir, blockedBytes, '在途 change + init 默认阻断');
+      assertTrue(!fs.existsSync(recoveryDirOf('other-change')), '阻断路径不得创建留档');
+
+      // ④ 显式放行的形态约束（缺 --reason / 空白 reason / --replace 名不符 / 空 --replace 值）：
+      //    一律 BLOCK 且零改写、零留档
+      const badShapes = [
+        { args: ['init', 'other-change', '--replace', CHANGE_ID], label: '缺 --reason' },
+        { args: ['init', 'other-change', '--replace', CHANGE_ID, '--reason', '   '], label: '空白 --reason' },
+        { args: ['init', 'other-change', '--replace', 'not-the-active-one', '--reason', 'x'], label: '--replace 名不符' },
+        { args: ['init', 'other-change', '--replace'], label: '空 --replace 值' },
+      ];
+      for (const shape of badShapes) {
+        const bad = runStateWithProtocol(dir, shape.args);
+        assertExit(bad, 1);
+        assertOut(bad, 'BLOCKED');
+        assertStateBytesUnchanged(dir, blockedBytes, '放行形态不合法（' + shape.label + '）');
+        assertTrue(!fs.existsSync(recoveryDirOf(CHANGE_ID)), '形态不合法不得留档（' + shape.label + '）');
+      }
+
+      // ⑤ 旧状态换成可辨识形态（BOM + CRLF）：逐字节判据必须能看见这两类字节，否则「逐字节」退化成「JSON 相等」
+      const oldState = { ...baseState('design'), status: 'running', evidence: { design: { summary: '旧进度' } } };
+      const oldBytes = Buffer.from('\uFEFF' + JSON.stringify(oldState, null, 2).replace(/\n/g, '\r\n') + '\r\n', 'utf8');
+      fs.writeFileSync(stateFile, oldBytes);
+
+      // ⑥ 正确 --replace + --reason → 留档（逐字节）+ 记录 + RECOVERY 块 + 新 change 正常初始化
+      const replaced = runStateWithProtocol(dir, ['init', 'new-change', '--replace', CHANGE_ID, '--reason', '切换到新 change']);
+      assertExit(replaced, 0);
+      assertOut(replaced, 'Initialized: new-change');
+      assertOut(replaced, 'RECOVERY: 在途 change "' + CHANGE_ID + '" 的状态已留档');
+      const snapshotDisplay = recoveryLine(replaced, '快照');
+      const recordDisplay = recoveryLine(replaced, '记录');
+      const rollbackCommand = recoveryLine(replaced, '回滚');
+      assertTrue(snapshotDisplay.endsWith('-pre-init.state.json'), '快照文件名应为 <时间戳>-pre-init.state.json: ' + snapshotDisplay);
+      assertEqual(snapshotDisplay.replace(/-pre-init\.state\.json$/, '-pre-init.md'), recordDisplay, '记录与快照同前缀');
+      assertTrue(snapshotDisplay.startsWith('.specs/' + CHANGE_ID + '/recovery/'), '快照应落在旧 change 目录的 recovery/: ' + snapshotDisplay);
+      assertTrue(Buffer.compare(fs.readFileSync(runRootPath(snapshotDisplay)), oldBytes) === 0,
+        '快照必须是旧状态文件的逐字节副本（BOM / 行尾不得改写）');
+      const recordText = fs.readFileSync(runRootPath(recordDisplay), 'utf8');
+      assertTrue(recordText.includes('init 目标') && recordText.includes('new-change'), '记录缺 init 目标');
+      assertTrue(recordText.includes('currentNode') && recordText.includes('design'), '记录缺旧 currentNode');
+      assertTrue(recordText.includes('running'), '记录缺旧 status');
+      assertTrue(recordText.includes('切换到新 change'), '记录缺原因');
+      assertTrue(recordText.includes(snapshotDisplay), '记录缺快照路径');
+      assertTrue(recordText.includes(rollbackCommand), '记录缺回滚命令');
+      const newState = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+      assertEqual(newState.activeChange, 'new-change', '放行后新 change 应正常初始化');
+      assertEqual(newState.currentNode, 'open', '新 change 节点应为协议首节点');
+
+      // ⑦ 回滚命令照抄真执行 → 旧状态逐字节恢复（打印出来的文本本身就是可执行命令）
+      const rolled = runPrintedCommand(rollbackCommand, dir);
+      assertExit(rolled, 0);
+      assertTrue(Buffer.compare(fs.readFileSync(stateFile), oldBytes) === 0, '回滚命令未把旧状态逐字节恢复');
     },
   },
 

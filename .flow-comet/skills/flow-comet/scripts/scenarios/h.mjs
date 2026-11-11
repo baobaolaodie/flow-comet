@@ -1281,7 +1281,7 @@ export const ENTRIES = [
         '## intel-scan 元数据 ##', '- **last_intel_scan**: x', '- **scanner**: x', '- **下次重扫建议**: x',
         '',
       ].join('\n'));
-      const boundary = runStateWithProtocol(dir, ['init', CHANGE_ID + '-2', '--init-context']);
+      const boundary = runStateWithProtocol(dir, ['init', CHANGE_ID + '-2', '--init-context', '--replace', CHANGE_ID, '--reason', '验证段标题闭合标记判定']);
       assertExit(boundary, 0);
       assertOut(boundary, 'INIT-VALIDATE-FAILED');
       assertOut(boundary, '项目概要');

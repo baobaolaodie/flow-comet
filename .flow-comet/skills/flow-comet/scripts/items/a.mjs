@@ -96,7 +96,7 @@ export const ENTRIES = [
   },
 
   {
-    name: 'A3 init 同 id 重跑：防护提示不阻断',
+    name: 'A3 init 同 id 重跑：防护提示不阻断；另一 change 在途时默认阻断 + --replace 留档可见',
     run: (dir) => {
       writeFile(dir, 'package.json', '{"name":"x"}');
       assertExit(runState(['init', CHANGE_ID], dir), 0);
@@ -104,6 +104,25 @@ export const ENTRIES = [
       assertExit(res, 0);
       assertOut(res, 'WARN: change ' + CHANGE_ID + ' 已存在');
       assertOut(res, '重置节点状态');
+      // 另一 change 在途：默认阻断（非零退出 + 点名在途 change + 两条出路），state 字节零改写
+      const statePath = path.join(dir, '.flow-comet', 'flow-comet-state.json');
+      const before = fs.readFileSync(statePath);
+      const blocked = runState(['init', 'next-change'], dir);
+      assertExit(blocked, 1);
+      assertOut(blocked, 'BLOCKED: 在途 change "' + CHANGE_ID + '" 尚未完成');
+      assertOut(blocked, '--replace ' + CHANGE_ID);
+      assertOut(blocked, 'workflow-state.mjs" status');
+      if (!fs.readFileSync(statePath).equals(before)) throw new Error('默认阻断路径改写了 state 字节');
+      // 显式 --replace + --reason：旧状态逐字节留档 + RECOVERY 块可见 + 新 change 正常初始化
+      const replaced = runState(['init', 'next-change', '--replace', CHANGE_ID, '--reason', '切换 change'], dir);
+      assertExit(replaced, 0);
+      assertOut(replaced, 'RECOVERY: 在途 change "' + CHANGE_ID + '" 的状态已留档');
+      const snapshotLine = replaced.output.split('\n').find((row) => row.startsWith('RECOVERY: 快照 '));
+      if (!snapshotLine) throw new Error('RECOVERY 块缺快照路径:\n' + replaced.output);
+      const snapshotPath = path.join(dir, ...snapshotLine.slice('RECOVERY: 快照 '.length).trim().split('/'));
+      if (!fs.readFileSync(snapshotPath).equals(before)) throw new Error('留档快照与覆盖前的 state 字节不一致');
+      const st = readStateFile(dir);
+      if (st.activeChange !== 'next-change') throw new Error('放行后新 change 未初始化: ' + JSON.stringify(st.activeChange));
     },
   },
 

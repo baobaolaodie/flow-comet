@@ -579,7 +579,7 @@ export const ENTRIES = [
       const boundProtocol = JSON.parse(fs.readFileSync(path.join(dir, 'reference', 'workflow-protocol.json'), 'utf8'));
       boundProtocol.nodes = boundProtocol.nodes.filter((n) => n.id !== 'execute' && n.id !== 'subagent-execute');
       writeFile(dir, 'reference/protocol-bound.json', JSON.stringify(boundProtocol, null, 2) + '\n');
-      assertExit(runState(['init', boundChange, '--init-skip', '--protocol', 'reference/protocol-bound.json'], dir), 0);
+      assertExit(runState(['init', boundChange, '--init-skip', '--replace', CHANGE_ID, '--reason', '验证 state 协议绑定（真实命令链路）', '--protocol', 'reference/protocol-bound.json'], dir), 0);
       writeFile(dir, '.specs/' + boundChange + '/TASK.md',
         '# TASK\n\n<task id="R01" parallel="false" status="pending"><action>实现 R01</action>'
         + '<write_files>src/r01.mjs</write_files><verify>node --check src/r01.mjs</verify></task>\n');

@@ -43,17 +43,31 @@ export async function fileExists(file) {
   try { await fs.access(file); return true; } catch { return false; }
 }
 
+// 「在办」身份的唯一判据：state.activeChange 非空 ∧ status ≠ 'completed' ⇒ 在办（返回 change 名），
+// 否则 null。目录在不在**不参与**（位置由 resolveChangeDir 回答）。抽成具名函数是为了让「同一身份
+// 口径」有唯一表达：findActiveChange（读文件 + state 缺失时的恢复扫描）与 init 的覆盖闸门（手里
+// 已有 prevState，不重读）消费的是同一条规则，而不是各写一遍表达式。
+// 消费方注意：init 的闸门只认状态——state 文件缺席时「没有可被覆盖的旧状态」，恢复扫描出的目录
+// 不构成阻断理由，也不该被当成留档对象。
+export function inFlightChangeName(state) {
+  if (!state || typeof state !== 'object' || Array.isArray(state)) return null;
+  if (state.status === 'completed') return null;
+  return typeof state.activeChange === 'string' && state.activeChange !== '' ? state.activeChange : null;
+}
+
 export async function findActiveChange() {
-  // 1. 身份只看状态（单一判定）：state 存在 ∧ activeChange 非空 ∧ status ≠ 'completed' ⇒ 在办。
-  // 目录在不在**不参与**身份判定——位置由 resolveChangeDir 回答：归档搬移只是把目录换个位置，
-  // change 仍在办（移动后 status / next / record 照常报进行中）。把身份绑在「活动目录存在」上
-  // 会让移动后瞬时丢掉身份，命令层随即把在办 change 报成 no-change / NEXT: done（假答案）。
+  // 1. 身份只看状态（单一判定，判据 = inFlightChangeName）：state 存在 ∧ activeChange 非空 ∧
+  //    status ≠ 'completed' ⇒ 在办。目录在不在**不参与**身份判定——位置由 resolveChangeDir 回答：
+  //    归档搬移只是把目录换个位置，change 仍在办（移动后 status / next / record 照常报进行中）。
+  //    把身份绑在「活动目录存在」上会让移动后瞬时丢掉身份，命令层随即把在办 change 报成
+  //    no-change / NEXT: done（假答案）。
   if (await fileExists(stateFile())) {
     const state = await readJson(stateFile());
-    // completed 检查优先于 activeChange 分支——归档完成态（无论 activeChange 是否残留）
-    // 一律不识别为 active（防归档残留目录 / 残留字段误判）
+    const inFlight = inFlightChangeName(state);
+    if (inFlight) return inFlight;
+    // completed 检查优先于恢复扫描——归档完成态（无论 activeChange 是否残留）一律不识别为 active
+    //（防归档残留目录 / 残留字段误判）
     if (state.status === 'completed') return null;
-    if (state.activeChange) return state.activeChange;
   }
   // 2. .specs/ 扫描**只是 state 丢失时的恢复通道，不是第二身份来源**：它只在「无 state 文件」
   //    与「state 无 activeChange」两种情形下运行，触发条件与上一步的分支互斥。读这段时不要把它当成

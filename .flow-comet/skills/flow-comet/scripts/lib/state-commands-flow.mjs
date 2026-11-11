@@ -14,9 +14,9 @@ import {
   inspectWorkflowPathSegments,
 } from '../protocol-utils.mjs';
 import { evidencePayloadProblems, looksLikeObjectLiteral, toPersistedProtocolPath } from '../state-schema.mjs';
-import { nowTimestamp } from '../time-utils.mjs';
+import { formatLocalTimestamp, nowTimestamp } from '../time-utils.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide } from '../context-init.mjs';
-import { fileExists, findActiveChange, readState, writeState, specsDir, runRootDir, hasExactSpecsEntry, resolveChangeLocation } from './state-io.mjs';
+import { fileExists, findActiveChange, readState, writeState, specsDir, runRootDir, hasExactSpecsEntry, resolveChangeLocation, inFlightChangeName, stateFile } from './state-io.mjs';
 import { hasNodeSkillDeclaration, verifySkillLoadMarkers, verifyTemplateDeclaration } from './state-skillmarkers.mjs';
 import { determineNode, normalAdvanceExempt } from './state-determine.mjs';
 import { isInsideWorkTree, gitBranchName, branchExists, printBranchLine } from './state-branch.mjs';
@@ -25,7 +25,7 @@ import { reportIntelScanDrift } from './state-intelscan.mjs';
 // 命令文本的唯一实现（平台化脚本根 + 整条路径加引号）：运行期 PREFLIGHT 与 handoff result /
 // guard 恢复指引 / explain 的 COMMAND 行同源（L-067：同一推导两处表达必然分叉）。声明命令与守卫族
 // 同一装配（declarationCommands）+ 本族的运行上下文（commandContext）——不再各拼一份文本。
-import { commandContext, declarationCommands, scriptCommand } from './state-explain.mjs';
+import { commandContext, declarationCommands, protocolContextArgs, scriptCommand } from './state-explain.mjs';
 // 协调者提示的单一来源：entry（门禁族）与 next / record（本模块）共用同一常量，各输出面逐字
 // 一致。常量落在中立模块（state-explain）而不是门禁族——本模块只为一句措辞去依赖整个上游门禁面
 // 是一条反向边——为此状态命令族不再 import 门禁族。
@@ -407,7 +407,136 @@ function printPreflightLine(nodeId) {
   console.log('PREFLIGHT: ' + structuralPreflightHint(nodeId));
 }
 
+// ---------- init 覆盖在途 change：默认阻断 + --replace 留档 ----------
+// 「进行中」的身份口径与 status / next / record 同一份（state.activeChange 非空 ∧ status ≠
+// 'completed'，判据 = state-io.inFlightChangeName）：只有**另一个** change 在办才进闸门——同 id
+// 重跑走既有 WARN 路径（不阻断，行为不变）。覆盖别的 change 会连同它的节点进度 / evidence 一起
+// 清掉，是破坏性动作，故「沉默即拒绝」：必须显式 --replace <在途 change> --reason <非空原因>，
+// 且放行前先把旧 state 按**原始字节**留档（快照 + 记录）到旧 change 目录的 recovery/。留档写不成
+// 就不覆盖——旧状态不得无痕消失。无在途 change 时整段不进入：零备份、零新参数要求，正常 init 的
+// 输出保持原样。
+//
+// 位置：留档落点走唯一解析器（resolveChangeLocation）而不是硬拼 .specs/<旧>/——在办 change 可能
+// 已被搬进 .specs/archive/（移动后尚未 exit），留档必须跟着 change 走；两处都没有 / 多候选判不出
+// 时拒绝覆盖（拿不准落点就不许销毁旧状态）。
+//
+// 返回：null（无需留档）或 RECOVERY 块要打印的信息；任何不合法的放行形态在这里 fail-closed
+//（BLOCKED + 非零退出，state 字节零改写），调用方不重复判定。
+async function gateInitOverInFlightChange({ protocolArgv, changeName, prevState, replaceChange, replaceReason }) {
+  const inFlightChange = inFlightChangeName(prevState);
+  if (!inFlightChange || inFlightChange === changeName) return null;
+  const context = commandContext({ argv: protocolArgv, runRoot: runRootDir() });
+  const stateDisplay = path.relative(runRootDir(), stateFile()).split(path.sep).join('/');
+  const statusCommand = scriptCommand({
+    scriptsDir: context.scriptsDir, runRoot: context.runRoot, script: 'workflow-state.mjs', args: ['status'],
+  });
+  // 恢复指引里的**那一条命令**：形态与 record / 声明命令同源（平台化脚本路径 + 整条加引号），
+  // 参数面按本次实际调用生成（--protocol 上下文同样带上），照抄即可执行。
+  const replaceCommand = scriptCommand({
+    scriptsDir: context.scriptsDir,
+    runRoot: context.runRoot,
+    script: 'workflow-state.mjs',
+    args: ['init', changeName, '--replace', inFlightChange, '--reason', '"<原因>"', ...protocolContextArgs(context)],
+  });
+  const inFlightShape = '（status: ' + String(prevState?.status ?? '-')
+    + '，当前节点: ' + String(prevState?.currentNode ?? '-') + '）';
+  const block = (lines) => {
+    for (const line of lines) console.error(line);
+    process.exit(1);
+  };
+  if (replaceChange === null) {
+    block([
+      'BLOCKED: 在途 change "' + inFlightChange + '" 尚未完成' + inFlightShape
+        + '——init "' + changeName + '" 会覆盖它的机器状态（节点进度 / evidence），默认阻断；未改写任何状态。',
+      '恢复: ① 先完成在途 change（查看进度: ' + statusCommand + '）；',
+      '     ② 或确认覆盖并留档后重跑: ' + replaceCommand,
+    ]);
+  }
+  if (replaceChange !== inFlightChange) {
+    block([
+      'BLOCKED: --replace 的 change 名 "' + replaceChange + '" 与在途 change "' + inFlightChange
+        + '" 不一致——只能覆盖当前在办的那一个；未改写任何状态。',
+      '恢复: ' + replaceCommand,
+    ]);
+  }
+  if (replaceReason === null || replaceReason.trim() === '') {
+    block([
+      'BLOCKED: --replace "' + inFlightChange + '" 还需要非空的 --reason <原因文本>（原因会写进留档，'
+        + '供事后追溯）；未改写任何状态。',
+      '恢复: ' + replaceCommand,
+    ]);
+  }
+  // change 名形态 = 单段目录名（与受控重入 / select 同一判据）：不合法就没有可落笔的留档位置
+  if (!isSingleSegmentChangeName(inFlightChange)) {
+    block([
+      'BLOCKED: 在途 change 名 "' + inFlightChange + '" 不是单段目录名——拒绝在它名下写留档；未改写任何状态。',
+      '恢复: 修正 ' + stateDisplay + ' 的 activeChange（机器字段由脚本通道写，不要手改）后重跑。',
+    ]);
+  }
+  const location = await resolveChangeLocation({
+    root: runRootDir(),
+    changeName: inFlightChange,
+    createdAt: prevState?.createdAt,
+  });
+  if (!location.ok) {
+    block([
+      'BLOCKED: 覆盖前必须先把在途 change "' + inFlightChange + '" 的旧状态留档，但它的目录解析不到——未改写任何状态。',
+      '原因: ' + location.message.replace(/^BLOCKED: /, ''),
+      '恢复: 先运行 ' + statusCommand + ' 查看位置解析结果，按提示恢复该目录后重跑。',
+    ]);
+  }
+  const stamp = formatLocalTimestamp();
+  const stampSafe = stamp.replace(/:/g, '-');
+  const recoveryDir = path.join(location.resolution.dir, 'recovery');
+  const recoveryDisplay = location.resolution.display + '/recovery';
+  const snapshotName = stampSafe + '-pre-init.state.json';
+  const recordName = stampSafe + '-pre-init.md';
+  const snapshotDisplay = recoveryDisplay + '/' + snapshotName;
+  const recordDisplay = recoveryDisplay + '/' + recordName;
+  // 回滚 = 把快照字节原样写回状态文件。命令用 node + copyFileSync 而不是 cp / copy：cp 在 cmd 下
+  // 不存在、copy 是内建命令且覆盖时会二次确认——两条路径参数各自加引号，跨平台整行可照抄。
+  const rollbackCommand = 'node -e "require(\'fs\').copyFileSync(process.argv[1],process.argv[2])"'
+    + ' "' + snapshotDisplay + '" "' + stateDisplay + '"';
+  const recordLines = [
+    '# 留档：init 覆盖在途 change "' + inFlightChange + '"',
+    '',
+    '- **时间**: ' + stamp,
+    '- **init 目标**: ' + changeName,
+    '- **覆盖前状态**: change `' + inFlightChange + '` · currentNode `' + String(prevState?.currentNode ?? '-')
+      + '` · status `' + String(prevState?.status ?? '-') + '`',
+    '- **原因**: ' + replaceReason,
+    '- **快照**: ' + snapshotDisplay + '（旧状态文件的逐字节副本）',
+    '- **回滚命令**（在项目根执行，恢复旧状态字节）:',
+    '',
+    '```bash',
+    rollbackCommand,
+    '```',
+    '',
+  ];
+  try {
+    // 逐字节：读原始 bytes、写同一份 bytes（BOM / 行尾都不改）——JSON 深比会漏掉格式化与序列化漂移
+    const snapshotBytes = await fs.readFile(stateFile());
+    await fs.mkdir(recoveryDir, { recursive: true });
+    await fs.writeFile(path.join(recoveryDir, snapshotName), snapshotBytes);
+    await fs.writeFile(path.join(recoveryDir, recordName), recordLines.join('\n'), 'utf8');
+  } catch (error) {
+    block([
+      'BLOCKED: 在途 change "' + inFlightChange + '" 的旧状态留档写入失败（' + error.message + '）——未改写任何状态。',
+      '恢复: 检查 ' + recoveryDisplay + '/ 的写权限后重跑同一条命令。',
+    ]);
+  }
+  return {
+    inFlight: inFlightChange,
+    currentNode: String(prevState?.currentNode ?? '-'),
+    status: String(prevState?.status ?? '-'),
+    snapshotDisplay,
+    recordDisplay,
+    rollbackCommand,
+  };
+}
+
 // init <change-id> [--branch-prefix <prefix>] [--init-context|--init-skip]
+//      [--replace <在途 change> --reason <原因>]
 // protocolPath = 入口 resolveProtocol 解析出的协议路径（协议来源绑定的持久化取值）
 export async function runInit(protocol, argv, protocolPath) {
   const changeName = argv[3];
@@ -419,12 +548,16 @@ export async function runInit(protocol, argv, protocolPath) {
   // 参数误用防护:以 -- 开头的参数(如 --help)是选项不是 change 名——报错并提示用法,
   // 防止被当作 change id 执行(自动开 change、建分支、写状态——有破坏性)
   if (normalizedChangeName.startsWith('--')) {
-    throw new Error('init: ' + normalizedChangeName + ' looks like a flag, not a change name. Usage: workflow-state.mjs init <change-id> [--branch-prefix <prefix>] [--init-context|--init-skip]');
+    throw new Error('init: ' + normalizedChangeName + ' looks like a flag, not a change name. Usage: workflow-state.mjs init <change-id> [--branch-prefix <prefix>] [--init-context|--init-skip] [--replace <in-flight-change> --reason <text>]');
   }
   // --branch-prefix <prefix>（缺省 'change/'）；--init-context / --init-skip（自动初始化检测授权）
+  // --replace <在途 change> / --reason <原因>：覆盖另一个在途 change 的显式放行参数（缺省 = 默认阻断；
+  // 取值形态在这里只做「有没有给 / 给了什么」，是否放行由下方覆盖闸门单点判定）
   let branchPrefix = 'change/';
   let initContext = false;
   let initSkip = false;
+  let replaceChange = null;
+  let replaceReason = null;
   const initArgs = argv.slice(4);
   for (let i = 0; i < initArgs.length; i++) {
     if (initArgs[i] === '--branch-prefix') {
@@ -443,6 +576,17 @@ export async function runInit(protocol, argv, protocolPath) {
       initContext = true;
     } else if (initArgs[i] === '--init-skip') {
       initSkip = true;
+    } else if (initArgs[i] === '--replace' || initArgs[i] === '--reason') {
+      // 空格形与等号形同义（与 --branch-prefix 的既有形态一致）：值缺失 / 空串不在这里 exit——
+      // 形态不符的报文与退出码由下方覆盖闸门统一给出（同一件事一处措辞），这里只记录「给了什么」。
+      const value = initArgs[i + 1];
+      const text = typeof value === 'string' ? value.trim() : '';
+      if (initArgs[i] === '--replace') replaceChange = text; else replaceReason = text;
+    } else if (typeof initArgs[i] === 'string'
+      && (initArgs[i].startsWith('--replace=') || initArgs[i].startsWith('--reason='))) {
+      const equalsAt = initArgs[i].indexOf('=');
+      const text = initArgs[i].slice(equalsAt + 1).trim();
+      if (initArgs[i].slice(0, equalsAt) === '--replace') replaceChange = text; else replaceReason = text;
     }
   }
   // 自动初始化检测（前置步骤）：读旧 state（项目级字段跨 change 保留）→ 探测 → 判决 → 提示/执行
@@ -450,6 +594,11 @@ export async function runInit(protocol, argv, protocolPath) {
   // （intel-scan 语义）；生成后重跑 → 脚本校验 7 段结构 → 通过写 last_intel_scan（确定性校验）。
   let prevState = null;
   try { prevState = await readState(); } catch { prevState = null; }
+  // init 覆盖在途 change：默认阻断 + --replace 留档——判定与留档收在单一实现
+  //（gateInitOverInFlightChange），本处只取它给出的留档信息用于成功路径的 RECOVERY 块。
+  const initRecovery = await gateInitOverInFlightChange({
+    protocolArgv: argv, changeName, prevState, replaceChange, replaceReason,
+  });
   const probe = await probeProject(runRootDir(), prevState);
   const verdict = classify(probe, prevState);
   let ctxValid = null; // null=未进入校验（非 init-context 或已新鲜）；true/false=校验结果
@@ -570,6 +719,15 @@ export async function runInit(protocol, argv, protocolPath) {
   }
   console.log('Initialized: ' + changeName);
   console.log('BRANCH: ' + (branchMode && !emptyRepo ? expectedBranch : 'none（非 git 仓库或空仓库）'));
+  // 留档可见性：覆盖在途 change 的异常路径必须在成功输出里**看得见**——快照路径 + 回滚命令
+  // 整行可照抄（回滚命令只在 RECOVERY 块里给一次，.md 记录里是同一行）。
+  if (initRecovery) {
+    console.log('RECOVERY: 在途 change "' + initRecovery.inFlight + '" 的状态已留档（覆盖前 currentNode: '
+      + initRecovery.currentNode + ' · status: ' + initRecovery.status + '）');
+    console.log('RECOVERY: 快照 ' + initRecovery.snapshotDisplay);
+    console.log('RECOVERY: 记录 ' + initRecovery.recordDisplay);
+    console.log('RECOVERY: 回滚 ' + initRecovery.rollbackCommand);
+  }
   // init 输出取协议首节点（与 state.currentNode 一致——内置协议 = open，行为不变）
   printNext(protocol, route(protocol)[0]?.id ?? 'open');
   return;
