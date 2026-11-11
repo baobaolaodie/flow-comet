@@ -290,9 +290,10 @@ export function changeLocationFailureMessage(changeName, resolution) {
     + '，或按 <YYYY-MM-DD>-' + changeName + ' 命名放进 .specs/archive/ 后重跑';
 }
 
-// 声明标记目录解析（活动路径 .specs/<change-id>/.skill-loads/ 优先；归档路径兜底——archive 节点
-// 「先移目录后 record/exit」顺序下 change 目录已在 .specs/archive/<日期>-<change-id>/，标记只随目录
-// 移动：只查活动路径会把「标记存在」误判成「机制未激活」）。归档目录的**定位**（是哪一份、多候选
+// 声明标记目录解析（活动路径 .specs/<change-id>/.skill-loads/ 优先；归档路径兜底）：规范顺序是
+// 「声明 → 记录 → 搬目录 → exit」——搬目录在 exit 前、记录之后；移动后补 record / 补声明仅作
+// 兼容 / 恢复路径，标记因此仍须能在 .specs/archive/<日期>-<change-id>/.skill-loads/ 被读到。
+// 只查活动路径会把「标记存在」误判成「机制未激活」。归档目录的**定位**（是哪一份、多候选
 // 怎么办）走 resolveChangeDir 的唯一实现；本函数只把 .skill-loads/ 追加在解析到的目录之后。协议
 // 声明的 archive/*-<change-id> 是产物 glob，目录名约定才是 <日期>-<change-id>（判据见
 // isArchivedChangeDirName）。两者皆无 → null，调用方按「一项都没声明」处理。

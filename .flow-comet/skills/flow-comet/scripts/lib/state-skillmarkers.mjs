@@ -106,10 +106,10 @@ export function findRequiredSkillBinding(protocol, nodeId, skillName) {
   return (node.requiredSkillCalls ?? []).find((binding) => binding.skill === skillName) ?? null;
 }
 
-// 标记目录解析（活动路径 .specs/<change-id>/.skill-loads/ 优先，归档路径兜底——archive 节点
-// 「先移目录后 record/exit」顺序下 change 目录已在 .specs/archive/<日期>-<change-id>/，标记只随
-// 目录移动）：路径规则与守卫族同一份实现，实现在本族的路径上下文模块（state-io），本处只注入状态
-// 命令族的运行根。规则落状态族而不是守卫族是依赖方向决定的：状态命令族不得 import 守卫族（否则
+// 标记目录解析（活动路径 .specs/<change-id>/.skill-loads/ 优先，归档路径兜底）：规范顺序是
+// 「声明 → 记录 → 搬目录 → exit」，搬目录在 exit 前、记录之后；移动后补 record / 补声明仅作
+// 兼容 / 恢复路径，标记因此仍须能在归档路径被读到。路径规则与守卫族同一份实现，实现在本族的路径
+// 上下文模块（state-io），本处只注入状态命令族的运行根。规则落状态族而不是守卫族是依赖方向决定的：状态命令族不得 import 守卫族（否则
 // 一条路径规则就让状态 CLI 加载整个守卫图），守卫侧按允许的 guard → state-* 方向取用同一份实现。
 // 两族各持一份扫描时，同一个标记会因「活动目录在场是否回溯归档」「多归档目录取哪个」各自得出答案。
 // 两者皆无 → null。
@@ -272,8 +272,9 @@ export async function verifySkillLoadMarkers(completedChecks, changeName, record
       }
       continue;
     }
-    // 标记路径解析——活动路径优先，归档路径兜底（archive 节点「先移目录后 record」
-    // 顺序下标记只在 .specs/archive/<日期>-<change-id>/.skill-loads/）；两处都找不到 → BLOCK + 指引
+    // 标记路径解析——活动路径优先，归档路径兜底（规范顺序「记录 → 搬目录」，搬目录之后补 record /
+    // 补声明仅作兼容 / 恢复路径，标记此时只在 .specs/archive/<日期>-<change-id>/.skill-loads/）；
+    // 两处都找不到 → BLOCK + 指引
     // （不静默放行）。标记路径 = 位置解析到的目录 + .skill-loads/<标记>：活动优先与归档兜底只有
     // findSkillLoadsDir 一处实现（本处不另拼活动路径表达式）。not-found 报文措辞不在本次收口范围。
     const markerName = item.node + '-' + item.skill + '.json';

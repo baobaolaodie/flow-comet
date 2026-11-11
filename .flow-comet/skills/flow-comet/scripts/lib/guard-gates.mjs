@@ -1353,8 +1353,8 @@ export async function runSkillLoadMarkerGate({ node, state }) {
   const requiredSkills = await declarationSkillNames(node, state);
   // 零协议文件且零必需技能：本节点没有声明义务（自定义协议节点没有引擎映射，也没有 guarded 绑定）
   if (requiredFiles.length === 0 && requiredSkills.length === 0) return;
-  // 标记目录活动/归档双路径解析（archive 节点「先移目录后 exit」顺序下标记只在归档路径——单查
-  // 活动路径会误报「机制未激活」静默放行）
+  // 标记目录活动/归档双路径解析（规范顺序「记录 → 搬目录 → exit」：搬目录在 exit 前、记录之后，
+  // 移动后补记录仅作兼容 / 恢复路径——此时标记只在归档路径；单查活动路径会误报「机制未激活」静默放行）
   const foundDir = await findSkillLoadsDir(runRoot, state.activeChange);
   // 目录缺席按「一项都没声明」继续走下面那条判据（逐项点名 + BLOCKED）——把目录当成空的声明面，
   // 而不是「机制未激活」的放行口。

@@ -1155,13 +1155,17 @@ export const ENTRIES = [
     },
   },
 
-  // 167: 两层加载模型措辞——阶段层禁止在节点 SKILL 内指示用 Skill 工具加载任何节点实现技能
+  // 167: 两层加载模型与归档顺序措辞——阶段层禁止在节点 SKILL 内指示用 Skill 工具加载任何节点实现技能
   //（本节点技能已由入口路由经 Skill 工具加载）；入口层禁止 Implementation/Required 混淆句式；
   // 全部 10 文件禁止任何承诺自动补写的表述（record 自动补写已整体删除，唯一路径是执行者手动
   // skill-load——判据与入口层共用 autoFillPromiseProblems 单一实现，不做语义判断）。
   // 入口层的第二份随 `GUIDANCE.md` 改名同步为 `reference/entry-detail.md`（判据强度不变）。
+  //
+  // 归档顺序（证据先于不可逆）：三册的步骤序是「准备 → 记录 → 搬目录 → 登记 → 通知 → 出口」——
+  // 记录步骤在搬目录之前、搬目录在 exit 之前、技能加载声明先于任何动作（尤其先于搬目录）；同一判据
+  // 还清掉新旧分级 / 渐进 WARN / 自动补写的旧口径残留（三册内零残留）。判定与反向构造共用同一函数。
   {
-    name: '167 两层加载模型措辞：禁自加载句式/禁混淆句式/禁自动补写承诺',
+    name: '167 两层加载与归档顺序措辞：禁自加载/禁混淆/禁自动补写承诺 + 记录先于搬目录、声明先于搬移',
     run: () => {
       const nodeDirs = ['flow-comet-open', 'flow-comet-design', 'flow-comet-plan', 'flow-comet-execute',
         'flow-comet-subagent-execute', 'flow-comet-review', 'flow-comet-verify', 'flow-comet-archive'];
@@ -1199,6 +1203,81 @@ export const ENTRIES = [
           if (!regressedProblems.some((p) => p.includes(label))) {
             problems.push(rel + ' 反向构造判别力缺失（还原「' + label + '」未被判违规）');
           }
+        }
+      }
+      // —— 归档顺序（证据先于不可逆）与三册口径 ——
+      // 判据两半：① 步骤序——记录步骤在搬目录之前、搬目录在 exit 之前、声明硬规则先于搬目录；
+      // ② 口径——三册内不得残留新旧分级 / 渐进 WARN / 自动补写承诺（后者复用 autoFillPromiseProblems）。
+      // 反向构造：把搬目录步骤提到最前（序颠倒）、抽掉声明硬规则句、注入旧分级行、注入自动补写承诺
+      // ⇒ 四条各必报，证明判据不是恒真的摆设。
+      const archiveBooks = new Map([
+        ['flow-comet-archive/SKILL.md', path.join(SCRIPTS_DIR, '..', '..', 'flow-comet-archive', 'SKILL.md')],
+        ['flow-comet-integration/SKILL.md', path.join(SCRIPTS_DIR, '..', '..', 'flow-comet-integration', 'SKILL.md')],
+        ['flow-comet/SKILL.md', path.join(SCRIPTS_DIR, '..', 'SKILL.md')],
+      ].map(([rel, file]) => [rel, fs.readFileSync(file, 'utf8')]));
+      const orderRules = [
+        ['flow-comet-archive/SKILL.md', '记录步骤先于搬目录', '**Record evidence**', '**Move change to archive**'],
+        ['flow-comet-archive/SKILL.md', '搬目录先于出口', '**Move change to archive**', '## Exit Check'],
+        ['flow-comet-archive/SKILL.md', '声明硬规则先于搬目录', '技能加载声明必须先于任何动作', '**Move change to archive**'],
+        ['flow-comet-integration/SKILL.md', '记录步骤先于搬目录', '**记录**', '**搬目录**'],
+        ['flow-comet-integration/SKILL.md', '搬目录先于登记与出口', '**搬目录**', '**通知与出口**'],
+        ['flow-comet-integration/SKILL.md', '声明硬规则先于搬目录', '技能加载声明必须先于任何动作', '**搬目录**'],
+      ];
+      const orderProblems = (docs) => {
+        const out = [];
+        for (const [rel, label, first, second] of orderRules) {
+          const text = docs.get(rel);
+          if (typeof text !== 'string') { out.push(rel + ' 不在判据面内（' + label + '）'); continue; }
+          const firstIndex = text.indexOf(first);
+          const secondIndex = text.indexOf(second);
+          if (firstIndex < 0) out.push(rel + ' 缺「' + first + '」（' + label + '）');
+          if (secondIndex < 0) out.push(rel + ' 缺「' + second + '」（' + label + '）');
+          if (firstIndex >= 0 && secondIndex >= 0 && firstIndex > secondIndex) {
+            out.push(rel + ' 步骤序颠倒：' + first + ' 在 ' + second + ' 之后（' + label + '）');
+          }
+        }
+        for (const [rel, needle] of [
+          ['flow-comet-archive/SKILL.md', '尤其先于搬目录'],
+          ['flow-comet-archive/SKILL.md', '先记录、后搬目录'],
+          ['flow-comet-integration/SKILL.md', '尤其先于搬目录'],
+          ['flow-comet-integration/SKILL.md', '先记录、后搬目录'],
+          ['flow-comet/SKILL.md', '证据先于不可逆'],
+          ['flow-comet/SKILL.md', '技能加载声明必须先于任何动作'],
+          ['flow-comet/SKILL.md', '记录必须早于搬目录'],
+          ['flow-comet/SKILL.md', '仍是 `exit` 的前置'],
+        ]) {
+          const text = docs.get(rel);
+          if (typeof text === 'string' && !text.includes(needle)) out.push(rel + ' 缺「' + needle + '」');
+        }
+        // 旧分级口径的行级判据：「旧 change」/ 机器字段名 / 「渐进」出现即残留；「新 change」只有落在
+        // 判级语境（WARN / BLOCK / 严格 / 判级）才算残留——「init 一个新 change」是正常表述，不能误红。
+        const legacyLine = /旧\s*change|newChange|渐进|新\s*change[^。\n]{0,24}(WARN|BLOCK|严格|判级)/;
+        for (const [rel, text] of docs) {
+          if (typeof text !== 'string') continue;
+          for (const line of text.split('\n')) {
+            if (legacyLine.test(line)) out.push(rel + ' 残留旧分级口径「' + line.trim().slice(0, 80) + '」');
+          }
+          out.push(...autoFillPromiseProblems(rel, text));
+        }
+        return out;
+      };
+      problems.push(...orderProblems(archiveBooks));
+      for (const [label, rel, mutate, expected] of [
+        ['搬目录步骤提到最前', 'flow-comet-archive/SKILL.md',
+          (text) => '**Move change to archive**\n' + text, '步骤序颠倒'],
+        ['抽掉声明硬规则', 'flow-comet-archive/SKILL.md',
+          (text) => text.split('技能加载声明必须先于任何动作').join('（反向构造：抽掉）'),
+          '缺「技能加载声明必须先于任何动作」'],
+        ['注入旧分级行', 'flow-comet-integration/SKILL.md',
+          (text) => text + '\n旧 change 只 WARN（渐进）\n', '残留旧分级口径'],
+        ['注入自动补写承诺', 'flow-comet/SKILL.md',
+          (text) => text + '\nrecord 会自动补写缺失的声明标记。\n', '含自动补写承诺表述'],
+      ]) {
+        const before = archiveBooks.get(rel);
+        const probed = new Map(archiveBooks).set(rel, mutate(before));
+        if (probed.get(rel) === before) { problems.push('反向构造前提失效（' + label + '）'); continue; }
+        if (!orderProblems(probed).some((problem) => problem.includes(expected))) {
+          problems.push('反向构造判别力缺失（' + label + '：未被判「' + expected + '」）');
         }
       }
       if (problems.length > 0) throw new Error('两层加载模型措辞不符: ' + problems.join('; '));
