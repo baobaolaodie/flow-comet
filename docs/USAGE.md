@@ -15,7 +15,7 @@ Everything here is done inside the project you installed into, with the installe
 | 5 | `subagent-execute` | Delegated task execution with a handoff request and a Return Contract | handoff |
 | 6 | `review` | Multi-round review; findings must carry a disposition | control |
 | 7 | `verify` | Integration verification; the exit actually runs the test commands | control |
-| 8 | `archive` | Compile leftovers, move the change into the archive, record it | control |
+| 8 | `archive` | Compile leftovers, declare and record the node, move the change into the archive, register it | control |
 
 `next` tells you where you are; `status` prints the machine state. Both are read-only.
 
@@ -44,7 +44,7 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 | `workflow-guard.mjs exit <node> --preflight` | The structural preflight: the read-only structural half of that node's exit — the artifacts that node declares, the summary's key sections, the template skeleton for summaries and the intake documents (when present), plus the task fields at `plan` — which reports what is malformed and advances nothing; the full `exit` without `--apply` stays the whole-chain rehearsal |
 | `workflow-state.mjs` | `init`, `status`, `next`, `select`, `record`, `verify-fail`, `advance`, `execution-mode`, `config`, `skill-load`, `bridge-check`, `reenter`, `replan`, `explain` — the state machine and its bookkeeping |
 
-`skill-load` carries the two pointers the entry printed. `--prompt <flow-kit/prompts/…>` names the node's protocol file — one of the node's own, or the entry refuses the declaration — and `--templates <DOC.md,...>` names its templates as one comma-separated list, written out on every declaration. The list must match the node exactly: a missing, extra or misspelled name is refused on a new change and only warned on an older one. `verify` and `archive` have no templates and take no `--templates`; a custom protocol follows the `templates` that protocol declares. The declaration also has to cover the node rather than sample it: at the exit, every protocol file the node reads and every skill its protocol makes mandatory must be declared by a marker of that node — one `skill-load` may carry several `--prompt` flags — a missing item blocks a new change and is named, and an older change is warned.
+`skill-load` carries the two pointers the entry printed. `--prompt <flow-kit/prompts/…>` names the node's protocol file — one of the node's own, or the entry refuses the declaration — and `--templates <DOC.md,...>` names its templates as one comma-separated list, written out on every declaration. The list must match the node exactly: a missing, extra or misspelled name is refused. `verify` and `archive` have no templates and take no `--templates`; a custom protocol follows the `templates` that protocol declares. The declaration also has to cover the node rather than sample it: at the exit, every protocol file the node reads and every skill its protocol makes mandatory must be declared by a marker of that node — one `skill-load` may carry several `--prompt` flags — a missing item is refused and named.
 
 **The evidence payload is checked before it is written.** `record` accepts `summary` as a non-empty string, `completedChecks` as a list of strings, and `lessonsNomination` as an object whose `scanned` is a number and whose `nominated` is a list of strings and `reasonIfNone` is a string. A wrong type stops the command with a non-zero exit that names each offending field path and the type it actually holds, and nothing is written — the state is exactly what it was, and a field the engine does not know is left alone.
 
@@ -72,7 +72,7 @@ A change lives in `.specs/<change-id>/`:
 | `KNOWN-ISSUES.md` | `archive` | Everything still open or explicitly out of scope |
 | `.skill-loads/` | every node | The declaration markers, one per node and skill |
 
-On archive the whole directory moves to `.specs/archive/<YYYY-MM-DD>-<change-id>/` and a row is appended to `.specs/CHANGELOG.md`. Nothing in `.specs/` is committed: it is the runtime record of the work, kept out of the repository by the entry the installer manages in `.gitignore`.
+On archive the order follows what is reversible: declare the node's skills, record its evidence, then move the whole directory to `.specs/archive/<YYYY-MM-DD>-<change-id>/`, append a row to `.specs/CHANGELOG.md` and run the exit. The dated name is the one the run commands read — a directory carrying this change's id without a date prefix is refused at the exit together with the command that renames it — and when several dated directories exist, the newest one not older than the change's creation date is used, while a tie stops the run instead of picking one. Nothing in `.specs/` is committed: it is the runtime record of the work, kept out of the repository by the entry the installer manages in `.gitignore`.
 
 ## Discipline the engine enforces
 

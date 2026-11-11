@@ -15,7 +15,7 @@
 | 5 | `subagent-execute` | 委托执行：handoff 请求 + Return Contract | handoff |
 | 6 | `review` | 多轮审查；每条发现必须有处置 | control |
 | 7 | `verify` | 集成验证；出口会**真实执行**测试命令 | control |
-| 8 | `archive` | 汇总遗留、把 change 移入归档、登记 | control |
+| 8 | `archive` | 汇总遗留、声明并记录本节点、把 change 移入归档、登记 | control |
 
 `next` 告诉你现在在哪；`status` 打印机器状态。两者都是只读命令。
 
@@ -44,7 +44,7 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 | `workflow-guard.mjs exit <节点> --preflight` | 结构预检：该节点出口里只读的结构性部分——该节点声明的工件、摘要关键段、摘要与入口文档（在场时）的模板骨架，外加仅 `plan` 生效的任务字段——只报结构问题、不推进任何状态；完整 `exit`（不带 `--apply`）仍是全链预演 |
 | `workflow-state.mjs` | `init`、`status`、`next`、`select`、`record`、`verify-fail`、`advance`、`execution-mode`、`config`、`skill-load`、`bridge-check`、`reenter`、`replan`、`explain` —— 状态机与记账 |
 
-`skill-load` 要带上入口打印的那两条指针。`--prompt <flow-kit/prompts/…>` 指向该节点的协议文件——只能是它自己的那几份，否则入口拒绝这条声明；`--templates <DOC.md,...>` 以逗号分隔的完整清单声明该节点的模板，每次声明各写一遍。清单必须与该节点完全一致：缺失、多写或错名在新的 change 上被拒绝、旧 change 只告警。`verify` 与 `archive` 没有模板，不传 `--templates`；自定义协议按协议自己声明的 `templates` 走。声明还要覆盖整个节点而不是抽样：出口处，该节点该读的每份协议文件与协议要求它的每个技能都必须由该节点的标记声明过——一条 `skill-load` 可以带多个 `--prompt`——缺项会拦下新 change 并逐项点名，旧 change 只告警。
+`skill-load` 要带上入口打印的那两条指针。`--prompt <flow-kit/prompts/…>` 指向该节点的协议文件——只能是它自己的那几份，否则入口拒绝这条声明；`--templates <DOC.md,...>` 以逗号分隔的完整清单声明该节点的模板，每次声明各写一遍。清单必须与该节点完全一致：缺失、多写或错名一律被拒绝。`verify` 与 `archive` 没有模板，不传 `--templates`；自定义协议按协议自己声明的 `templates` 走。声明还要覆盖整个节点而不是抽样：出口处，该节点该读的每份协议文件与协议要求它的每个技能都必须由该节点的标记声明过——一条 `skill-load` 可以带多个 `--prompt`——缺项会被拒绝并逐项点名。
 
 **证据载荷在写入前校验。** `record` 接受 `summary` 为非空字符串、`completedChecks` 为字符串数组、`lessonsNomination` 为对象且其 `scanned` 是数字、`nominated` 是字符串数组、`reasonIfNone` 是字符串。类型不对会立刻非零退出，逐条点名出错的字段路径与它当前的类型，并且什么都不写——状态保持原样，引擎不认识的字段则放行。
 
@@ -72,7 +72,7 @@ node <skills>/flow-comet/scripts/workflow-state.mjs record execute '{"summary":"
 | `KNOWN-ISSUES.md` | `archive` | 仍然开放或明确排除的事项 |
 | `.skill-loads/` | 每个节点 | 声明标记，每节点每技能一份 |
 
-归档时整个目录迁到 `.specs/archive/<YYYY-MM-DD>-<change-id>/`，并向 `.specs/CHANGELOG.md` 追加一行。`.specs/` 不纳入版本控制：它是工作的运行时记录，由安装器写入 `.gitignore` 的托管条目挡在仓库之外。
+归档的顺序由「哪一步可逆」决定：先声明本节点的技能、记录节点证据，再把整个目录迁到 `.specs/archive/<YYYY-MM-DD>-<change-id>/`，向 `.specs/CHANGELOG.md` 追加一行，最后跑出口。运行命令只读带日期的目录名——只带本 change 的 id、没有日期前缀的目录会在出口被拒绝，并给出把它改名的命令；存在多份带日期的目录时，取「日期不早于该 change 创建日期」的最新一份，候选并列则停下而不是替人挑一份。`.specs/` 不纳入版本控制：它是工作的运行时记录，由安装器写入 `.gitignore` 的托管条目挡在仓库之外。
 
 ## 引擎强制的纪律
 
