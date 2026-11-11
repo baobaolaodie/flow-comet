@@ -2129,6 +2129,30 @@ export const ENTRIES = [
       const resRenamed = runGuard(['exit', 'archive'], dir);
       assertExit(resRenamed, 0);
 
+      // 子断言（真实归档路径 · in-place 扩展）：**活动目录已整体搬走** + 归档目录名不合规。上一段的
+      // 夹具里活动目录还在场，提名门按活动目录里的 SUMMARY 份数对账，因而从不触发——真实归档动作
+      // 之后活动目录已不在（整份搬进 archive），此时完整 exit 的首个失败门必须是「归档目录名不合规」
+      // 并给可整行照抄的改名命令，而不是提名门的「工件目录缺失…无从核对扫描份数」（只说没有，不说
+      // 怎么有：同一事实的两种说法，后者不可执行）。
+      const todayPrefix = timeUtilsModule.formatLocalDate(new Date());
+      fs.rmSync(path.join(dir, '.specs/archive/2026-11-11-' + CHANGE_ID), { recursive: true, force: true });
+      fs.renameSync(path.join(dir, '.specs', CHANGE_ID), path.join(dir, '.specs/archive', 'foo-' + CHANGE_ID));
+      writeFile(dir, '.specs/archive/foo-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# KNOWN-ISSUES\n\n无遗留问题\n');
+      const resArchivedBadName = runGuard(['exit', 'archive'], dir);
+      assertExit(resArchivedBadName, 1);
+      assertOut(resArchivedBadName, '归档目录名不合规');
+      assertOut(resArchivedBadName, '.specs/archive/foo-' + CHANGE_ID);
+      assertOut(resArchivedBadName, '<YYYY-MM-DD>-' + CHANGE_ID);
+      assertOut(resArchivedBadName, 'mv ".specs/archive/foo-' + CHANGE_ID + '" ".specs/archive/'
+        + todayPrefix + '-' + CHANGE_ID + '"');
+      assertNotOut(resArchivedBadName, '工件目录缺失');
+      assertNotOut(resArchivedBadName, '无从核对扫描份数');
+      // 反向构造（单变量 = 只改名）：照抄上面的改名命令后同一 exit 通过——恢复动作真的可执行。
+      fs.renameSync(path.join(dir, '.specs/archive', 'foo-' + CHANGE_ID),
+        path.join(dir, '.specs/archive', todayPrefix + '-' + CHANGE_ID));
+      const resArchivedRenamed = runGuard(['exit', 'archive'], dir);
+      assertExit(resArchivedRenamed, 0);
+
       // 子断言:结构化预检的**时点分界**。归档产出（.specs/archive/<日期>-<change-id>/）是归档动作
       // 自己的产出位置——归档前连 .specs/archive/ 都不存在，把它报成缺件、还让人「先按上述路径创建」，
       // 给的是归档前不可能执行的指令（完整出口照旧要求它：那是归档动作做完后的判据，由上面的

@@ -911,6 +911,16 @@ function checkLessonsEntryFields({ content, node, state, keys }) {
 // ⑤ archive 出口的归档提名核对（对账 SUMMARY 份数 / 提名编号存在性 / 无提名理由）——归档提名
 // 留痕且可核对；不成立即 BLOCKED。
 async function checkLessonsNomination({ state }) {
+  // 归档目录名不合规（AC-6）先于「工件目录缺失」失败：真实归档路径下活动目录已整份搬进 archive，
+  // 名字不是 <YYYY-MM-DD>-<change-id> 时定位器解析不到它——这正是「份数无从核对」的一种成因，而
+  // 那句只说「两处都没有」，把盘上其实在场的目录报成缺失，还让执行者去补一件存在的东西。报文改用
+  // 唯一的 archiveDirNameNotice（期望格式 + 实际名字 + 可照抄的改名命令，与出口产物门 / 结构化预检
+  // 同一句措辞，不另写判据也不另写措辞）。
+  const archiveNameProblems = archiveDirNameNotice(state.activeChange, 'archive');
+  if (archiveNameProblems.length > 0) {
+    for (const line of archiveNameProblems) console.error(line);
+    process.exit(1);
+  }
   const { problems, scanned } = await lessonsNominationProblems(state);
   if (problems.length === 0) return;
   console.error('BLOCKED: archive 出口的 evidence.lessonsNomination 不成立（' + problems.length + ' 项）:');
