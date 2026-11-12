@@ -7,7 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 import { createHash } from 'crypto';
-import { assertExit, assertNotOut, assertOut, runGuard, runHandoff, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
+import { assertExit, assertNotOut, assertOut, assertTrue, installSkillTreeCopy, runGuard, runHandoff, runPrintedCommand, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
 import { archiveRecordJson, CHANGE_ID, assertNodeLine, assertNotNodeLine, completeFixTaskAndRecord, driveThroughDesign, execSummaryFixture, fixBatchReviewDoc, fixBatchTaskText, fullContract, parseStatusOutput, readStateBytes, readStateFile, writeIntakeArtifacts } from '../lib/system-fixtures.mjs';
 
 // 同夹具的「段内大写 Z 早于方法名」变体（真实机检标记形态）：6 维自查段体首行是含大写 Z 的机检
@@ -201,6 +201,9 @@ export const ENTRIES = [
       // 节点推进到归档（模拟前序节点出口已完成的状态——被测机制是归档出口本身）
       const st0 = readStateFile(dir);
       st0.currentNode = 'archive';
+      // 夹具自洽：归档日期必须不早于该 change 的创建日期（位置解析按 createdAt 排掉更早的同名归档
+      // 目录——排除不了就 fail-closed）。真实链路里归档发生在创建之后，夹具的固定日期须与之一致。
+      st0.createdAt = '2026-08-01T00:00:00.000Z';
       writeState(dir, st0);
       // 归档提名随证据落盘（该 change 无任务 SUMMARY → 扫描 0 份，理由写明无候选入库）
       assertExit(runState(['record', 'archive', archiveRecordJson('archived')], dir), 0);
@@ -246,6 +249,9 @@ export const ENTRIES = [
       // 节点推进到归档（模拟前序节点出口已完成的状态）
       const st0 = readStateFile(dir);
       st0.currentNode = 'archive';
+      // 夹具自洽：同 H2——归档日期必须不早于该 change 的创建日期（位置解析按 createdAt 排除更早的
+      // 同名归档目录）。夹具的固定归档日期须落在创建日期之后。
+      st0.createdAt = '2026-08-01T00:00:00.000Z';
       writeState(dir, st0);
       // 归档提名随证据落盘（该 change 无任务 SUMMARY → 扫描 0 份，理由写明无候选入库）
       assertExit(runState(['record', 'archive', archiveRecordJson('archived')], dir), 0);
@@ -265,53 +271,88 @@ export const ENTRIES = [
   },
 
   {
-    name: 'H4 归档:M5 自动补标记写归档路径,不重建活动目录',
+    name: 'H4 归档:移动后缺声明一律 BLOCKED,手动声明后同一 record 通过,不重建活动目录',
     run: (dir) => {
-      // 归档顺序(先移目录后 record)下,record archive 的 M5 自动补声明标记应写归档路径
-      // (.skill-loads/ 随目录移动),不得重建已归档的活动目录(归档移动语义)
-      assertExit(runState(['init', 'arch-m5'], dir), 0);
+      // 自动补写已整体删除(单轨):移动目录后 record 缺声明不再由引擎代记,执行者必须手动声明。
+      // 两条不变量:① 归档路径的声明由执行者写入(报文命令可照抄执行);② 任何路径都不得重建
+      // 已归档的活动目录。
+      assertExit(runState(['init', 'arch-h4'], dir), 0);
       writeFile(dir, 'flow-kit/prompts/0-change.md', '# 阶段 0 · CHANGE\n\n## 角色\n\n你是 Changeer。\n');
       writeFile(dir, 'flow-kit/prompts/7-integration.md', '# 阶段 7 · INTEGRATION\n\n## 角色\n\n你是 Integrationer。\n');
-      // 手动 skill-load(活动路径标记,随目录移动进归档)
+      // 归档前只声明 open(archive 声明留空——构造「移动后缺声明」)
       assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
-      assertExit(runState(['skill-load', 'archive', 'flow-comet-integration', '--prompt', 'flow-kit/prompts/7-integration.md'], dir), 0);
-      // 推进到 archive
+      // 缺声明报文按**实际查找结果**说话（in-place 扩展）：活动目录在场、归档区没有本 change 的目录时，
+      // 只点活动路径缺件，不对归档路径下任何结论（旧形态无条件打印「（归档路径也未找到）」）。
+      const activeMissing = runState(['record', 'archive',
+        '{"summary":"archived","completedChecks":["required-skill:archive.flow-comet-integration"]}'], dir);
+      assertExit(activeMissing, 1);
+      assertOut(activeMissing, '缺少对应声明标记 .specs/arch-h4/.skill-loads/archive-flow-comet-integration.json');
+      assertNotOut(activeMissing, '归档路径也未找到');
+      assertNotOut(activeMissing, '已归档');
       const st0 = readStateFile(dir);
       st0.currentNode = 'archive';
+      st0.enteredNodes = ['open', 'archive'];
+      // 夹具自洽：归档日期必须不早于该 change 的创建日期（位置解析按 createdAt 排掉更早的同名归档
+      // 目录——排除不了就 fail-closed）。真实链路里归档发生在创建之后，夹具的固定日期须与之一致。
+      st0.createdAt = '2026-08-01T00:00:00.000Z';
+      // 字段退役后的状态形态（init 不再写 newChange）：旧状态带该字段一律被忽略，
+      // 这里显式去掉它构造「无字段」形态——删除是幂等的，字段退役后本行自然成为 no-op。
       writeState(dir, st0);
       // 移动目录到归档(真实归档流程:先移动后 record/exit)
+      const archiveDir = path.join(dir, '.specs', 'archive', '2026-08-14-arch-h4');
       fs.mkdirSync(path.join(dir, '.specs', 'archive'), { recursive: true });
-      fs.renameSync(path.join(dir, '.specs', 'arch-m5'), path.join(dir, '.specs', 'archive', '2026-08-14-arch-m5'));
-      // record archive(移动后)——M5 自动补 archive 声明标记
+      fs.renameSync(path.join(dir, '.specs', 'arch-h4'), archiveDir);
+      // ① 移动后 record 缺 archive 声明 → BLOCKED(唯一等级;自动补写已删除),报文给可照抄的命令
       const rec = runState(['record', 'archive', '{"summary":"archived"}'], dir);
-      assertExit(rec, 0);
-      // 断言 1:活动目录不得重建(归档移动语义——M5 不得重建已归档的活动目录)
-      if (fs.existsSync(path.join(dir, '.specs', 'arch-m5'))) {
-        throw new Error('M5 在归档后重建了活动目录(残留): .specs/arch-m5/');
+      assertExit(rec, 1);
+      assertOut(rec, 'BLOCKED');
+      assertOut(rec, '缺少技能加载声明标记');
+      // 缺声明报文的第二态（in-place 扩展）：目录已随归档搬走、归档路径里也没有该标记 —— 报文如实
+      // 说出真实路径（哪里找过、哪里也没有），不再固定打印「（归档路径也未找到）」。
+      const movedMissing = runState(['record', 'archive',
+        '{"summary":"archived","completedChecks":["required-skill:archive.flow-comet-integration"]}'], dir);
+      assertExit(movedMissing, 1);
+      assertOut(movedMissing, '缺少对应声明标记 .specs/arch-h4/.skill-loads/archive-flow-comet-integration.json');
+      assertOut(movedMissing, '已归档到 .specs/archive/2026-08-14-arch-h4');
+      assertNotOut(movedMissing, '归档路径也未找到');
+      const declareLine = (rec.output.match(/^\s*(node "[^"]+" skill-load archive flow-comet-integration[^\n]+)$/m) || [])[1];
+      assertTrue(typeof declareLine === 'string', 'BLOCKED 报文应给出可照抄的 archive 声明命令:\n' + rec.output);
+      // ② 不得重建已归档的活动目录,也不得代记任何标记(归档路径不得出现 archive-*.json)
+      if (fs.existsSync(path.join(dir, '.specs', 'arch-h4'))) {
+        throw new Error('record 在归档后重建了活动目录(残留): .specs/arch-h4/');
       }
-      // 断言 2:归档路径有 M5 自动补的 archive 标记(标记随目录移动后的归属路径)
-      const markerInArchive = path.join(dir, '.specs', 'archive', '2026-08-14-arch-m5', '.skill-loads', 'archive-flow-comet-integration.json');
+      const archiveLoads = path.join(archiveDir, '.skill-loads');
+      const autoWritten = fs.existsSync(archiveLoads)
+        ? fs.readdirSync(archiveLoads).filter((f) => f.startsWith('archive-'))
+        : [];
+      if (autoWritten.length > 0) {
+        throw new Error('record 在缺声明时自动补写了标记(自动补写应已删除): ' + autoWritten.join(', '));
+      }
+      // ③ 移动后照抄报文命令(真实执行打印文本)直接声明 archive 技能——标记落**归档路径**(解析到的
+      //    目录),同一 record 通过,活动目录不重建。这是单轨的直连链路:身份只看状态、位置由解析器
+      //    给出,不再需要「先把目录移回活动位置→声明→再移回归档」那两步(该绕道已随单轨删除)。
+      installSkillTreeCopy(dir, path.join('.claude', 'skills'));
+      const declared = runPrintedCommand(declareLine, dir, { FLOW_COMET_RUN_ROOT: dir, FLOW_COMET_PROTOCOL: '' });
+      assertTrue(declared.status === 0,
+        '照抄的声明命令跑不通\n  命令: ' + declareLine + '\n  exit ' + declared.status + '\n' + declared.output);
+      // 报告说出真实落点(归档目录),不是活动路径的相对形态
+      assertOut(declared, 'SKILL-LOAD: archive flow-comet-integration → .specs/archive/2026-08-14-arch-h4/.skill-loads/archive-flow-comet-integration.json');
+      const markerInArchive = path.join(archiveDir, '.skill-loads', 'archive-flow-comet-integration.json');
       if (!fs.existsSync(markerInArchive)) {
-        throw new Error('归档路径缺 M5 自动补标记: ' + markerInArchive);
+        throw new Error('归档路径缺执行者声明的标记: ' + markerInArchive);
       }
-      // 变体:change 从未 skill-load(活动与归档路径皆无 .skill-loads)→ record 不得重建
-      // 活动目录(修复前 targetLoadsDir 回退活动路径,writeJson 的 mkdir 会重建已归档目录)
-      assertExit(runState(['init', 'arch-m5b'], dir), 0);
-      assertExit(runState(['skill-load', 'archive', 'flow-comet-integration'], dir), 0);
-      const stB = readStateFile(dir);
-      stB.currentNode = 'archive';
-      writeState(dir, stB);
-      fs.renameSync(path.join(dir, '.specs', 'arch-m5b'), path.join(dir, '.specs', 'archive', '2026-08-14-arch-m5b'));
-      const recB = runState(['record', 'archive', '{"summary":"archived"}'], dir);
-      assertExit(recB, 0);
-      if (fs.existsSync(path.join(dir, '.specs', 'arch-m5b'))) {
-        throw new Error('M5 在双路径皆无时重建了活动目录(残留): .specs/arch-m5b/');
+      if (fs.existsSync(path.join(dir, '.specs', 'arch-h4'))) {
+        throw new Error('声明命令在归档后重建了活动目录(残留): .specs/arch-h4/');
       }
-      // 变体:归档后 skill-load 报错须引导 record 自动补路径(真实会话实证:归档后手动声明
-      // 不可行,消息须指明 M5 自动补仍可写归档路径标记)
-      const slArchive = runState(['skill-load', 'archive', 'flow-comet-integration'], dir);
-      assertExit(slArchive, 1);
-      assertOut(slArchive, 'record 自动补写');
+      const recPass = runState(['record', 'archive', '{"summary":"archived"}'], dir);
+      assertExit(recPass, 0);
+      assertOut(recPass, 'EVIDENCE: archive');
+      if (fs.existsSync(path.join(dir, '.specs', 'arch-h4'))) {
+        throw new Error('record 在归档后重建了活动目录(残留): .specs/arch-h4/');
+      }
+      // ④ 出口的声明覆盖门认归档路径的标记——不再点名缺声明(出口其余判据不在本格范围内)
+      const exitRes = runGuard(['exit', 'archive'], dir);
+      assertNotOut(exitRes, '缺协议声明标记');
     },
   },
 
@@ -705,21 +746,18 @@ export const ENTRIES = [
       // depends_on 后复签通过（同一通道，不做校验豁免）。
       const parallelIds = ['P01', 'P02', 'P03', 'P04'];
       const oldChangeState = readStateFile(dir);
-      delete oldChangeState.newChange;
       writeState(dir, oldChangeState);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
         replanTaskText({ parallelPending: ['P01'], crossTaskPair: 'no-deps' }));
-      const crossWarn = runState(['replan', '计划缺陷重校 1（旧 change 形态）', '--authorized-by', '用户裁决'], dir);
-      assertExit(crossWarn, 0);
-      assertOut(crossWarn, 'REPLAN');
-      assertOut(crossWarn, 'WARN: TASK.md 同文件跨任务且无依赖路径');
+      const crossWarn = runState(['replan', '计划缺陷重校 1（无字段状态）', '--authorized-by', '用户裁决'], dir);
+      // 单轨：replan 不做校验豁免——同文件跨任务族一律 BLOCKED 且状态零改写
+      assertExit(crossWarn, 1);
+      assertOut(crossWarn, 'BLOCKED: TASK.md 同文件跨任务且无依赖路径');
       assertOut(crossWarn, 'X1×X2(src/shared-cross.mjs)');
-      assertNotOut(crossWarn, 'BLOCKED');
-      if (replanEventsOf(readStateFile(dir)).length !== 1) {
-        throw new Error('旧 change 形态应照常重签并写入第 1 条 replan-applied 事件');
+      if (replanEventsOf(readStateFile(dir)).length !== 0) {
+        throw new Error('BLOCK 不得写入 replan-applied 事件');
       }
       const afterWarnState = readStateFile(dir);
-      afterWarnState.newChange = true;
       writeState(dir, afterWarnState);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
         replanTaskText({ parallelPending: ['P01', 'P02'], crossTaskPair: 'no-deps' }));
@@ -732,10 +770,10 @@ export const ENTRIES = [
       assertOut(crossBlocked, '补显式 depends_on 或合并为一个任务');
       assertNotOut(crossBlocked, 'REPLAN:');
       if (!readStateBytes(dir).equals(crossBytes)) throw new Error('replan 第三族 BLOCK 改写了 state 字节');
-      if (replanBackupFiles(dir).length !== 1) {
-        throw new Error('replan 第三族 BLOCK 不得新增备份（应仍为第 1 轮那一份）: ' + JSON.stringify(replanBackupFiles(dir)));
+      if (replanBackupFiles(dir).length !== 0) {
+        throw new Error('replan 第三族 BLOCK 不得新增备份（单轨：无成功重签即无备份）: ' + JSON.stringify(replanBackupFiles(dir)));
       }
-      if (replanEventsOf(readStateFile(dir)).length !== 1) {
+      if (replanEventsOf(readStateFile(dir)).length !== 0) {
         throw new Error('replan 第三族 BLOCK 不得写入 replan-applied 事件');
       }
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
@@ -743,21 +781,32 @@ export const ENTRIES = [
       const crossRecovered = runState(['replan', '计划缺陷重校 2（已补 depends_on）', '--authorized-by', '用户裁决'], dir);
       assertExit(crossRecovered, 0);
       assertOut(crossRecovered, 'REPLAN');
-      if (replanEventsOf(readStateFile(dir)).length !== 2) {
-        throw new Error('补显式 depends_on 后复签应写入第 2 条 replan-applied 事件');
+      if (replanEventsOf(readStateFile(dir)).length !== 1) {
+        throw new Error('补显式 depends_on 后复签应写入第 1 条 replan-applied 事件');
       }
-      // 第 3 轮：常规修订（轮次按 change 从事件累计）
+      // 第 2 轮：常规修订（轮次按 change 从事件累计）
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', replanTaskText({ parallelPending: parallelIds.slice(0, 3) }));
       const thirdRound = runState(['replan', '计划缺陷重校 3', '--authorized-by', '用户裁决'], dir);
       assertExit(thirdRound, 0);
       assertOut(thirdRound, 'REPLAN');
+      if (replanEventsOf(readStateFile(dir)).length !== 2) {
+        throw new Error('第 2 轮后 replan-applied 事件数应为 2');
+      }
+      if (replanBackupFiles(dir).length !== 2) {
+        throw new Error('两轮应产生两份备份: ' + JSON.stringify(replanBackupFiles(dir)));
+      }
+      // 第 3 轮（上限内的最后一轮）成功
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', replanTaskText({ parallelPending: parallelIds.slice(0, 2) }));
+      const thirdRoundB = runState(['replan', '计划缺陷重校 3b', '--authorized-by', '用户裁决'], dir);
+      assertExit(thirdRoundB, 0);
+      assertOut(thirdRoundB, 'REPLAN');
       if (replanEventsOf(readStateFile(dir)).length !== 3) {
         throw new Error('第 3 轮后 replan-applied 事件数应为 3');
       }
       if (replanBackupFiles(dir).length !== 3) {
         throw new Error('三轮应产生三份备份: ' + JSON.stringify(replanBackupFiles(dir)));
       }
-      // ③ 第 4 次 → BLOCK + 人工裁决指引（继续 / 停止）+ state 字节零改写
+      // ③ 第 4 次 → BLOCK + 人工裁决指引 + state 字节零改写
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', replanTaskText({ parallelPending: parallelIds }));
       const beforeFourth = readStateBytes(dir);
       const fourth = runState(['replan', '计划缺陷重校（上限后未授权）', '--authorized-by', '用户裁决'], dir);

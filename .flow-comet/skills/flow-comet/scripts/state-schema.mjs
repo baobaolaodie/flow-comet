@@ -123,8 +123,6 @@ export const STATE_FIELD_VALIDATORS = [
   { field: 'taskHash', check: (v) => typeof v === 'string' || v === undefined },
   // M1: 节点进入标记（entry 写入,exit 检测未 entry;旧 state 缺失放行)
   { field: 'enteredNodes', check: (v) => (Array.isArray(v) && v.every((x) => typeof x === 'string')) || v === undefined || v === null },
-  // R6: 新 change 标记（init 写入 true——新旧判定的确定性依据,不依赖 entry;旧 state 缺失 = 旧 change 渐进兼容)
-  { field: 'newChange', check: (v) => v === true || v === undefined || v === null },
   // 分支模式与 PR 审查开关字段（readState 默认补后类型校验；旧 state 缺失字段放行）
   { field: 'branchMode', check: (v) => typeof v === 'boolean' },
   { field: 'enablePrReview', check: (v) => typeof v === 'boolean' },

@@ -4,7 +4,7 @@
 // Return Contract、subagent-execute 摘要与多趟完成
 // 判定、required-skill / schema / 产物 存在性门禁——即「完成声明必须有证据与产物」这一族判据。
 //
-// 分级沿用既有语义：新 change（init 标记）强制 BLOCKED + 恢复指引，旧 change 渐进 WARN 不阻断。
+// 判级：单一判级——违反即 BLOCKED + 恢复指引（新旧双轨已退役，同一形态不再有渐进 WARN 侧）。
 
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -26,14 +26,15 @@ import {
 } from '../protocol-utils.mjs';
 import { runRoot, packageRoot, fileExists, statePath, writeJson, protocolPath } from './guard-state-io.mjs';
 import {
+  archiveDirNameNotice,
   eligibleParallelBlocks,
   inFlightHandoffRequests,
   isArchivedChange,
-  isNewChange,
   missingAugmentationChecks,
   missingRequiredArtifacts,
   missingRequiredSchemaEvidence,
   missingRequiredSkillChecks,
+  recoveryActionText,
   taskDependsOn,
   verifySummaries,
 } from './guard-routing.mjs';
@@ -85,7 +86,7 @@ export function runDirectOverrideGate({ node, state }) {
 
 // 验证隔离「同一时刻只有一个写者」出口校验——读 state.evidence['subagent-execute'].handoffRequests：
 // 存在条目且**至少一个无对应 handoffResult** ⇒ 在飞委托（写者未收工，跑全量判据会被未提交中间态
-// 污染）：新 change BLOCKED（含恢复指引「待写入者收工后重跑 / 已作废则撤回」）/ 旧 change WARN 渐进；
+// 污染）：一律 BLOCKED（含恢复指引「待写入者收工后重跑 / 已作废则撤回」）；
 // 全部有对应 result ⇒ 放行；已撤回（withdrawnAt + withdrawnBy 齐备）的 request 不构成在飞委托 ⇒
 // 放行；无该证据对象 ⇒ 零输出。落点 = 出口校验流（与其余 violations / WARN 同风格，不新增独立命令
 // 面）；判据经 inFlightHandoffRequests 单处求值（与 Return Contract 的 result 侧契约校验正交，不
@@ -96,12 +97,9 @@ export function runInFlightHandoffGate({ node, state }) {
   if (inFlight.length > 0) {
     const inFlightDetail = '存在在飞委托（handoffRequests 有 request 无对应 handoffResult）: '
       + inFlight.join(', ') + '——验证隔离要求同一时刻只有一个写者（写者未收工）';
-    if (isNewChange(state)) {
-      console.error('BLOCKED: ' + inFlightDetail);
-      console.error('恢复: 待写入者收工后重跑——子代理回传后用 workflow-handoff.mjs result <task-id> <Return Contract> 记录结果再重试 exit；若该委托已作废（零提交复验失败 / 写边界被拒后遗弃），用 workflow-handoff.mjs withdraw <task-id> --by <来源> [--reason <原因>] 撤回后再重试 exit（撤回留痕 withdrawnAt/withdrawnBy，已撤回 = 终态，历史不删）');
-      process.exit(1);
-    }
-    console.error('WARN: ' + inFlightDetail + '（旧 change 渐进不阻断；待写入者收工后重跑全量判据；已作废的委托可用 workflow-handoff.mjs withdraw <task-id> --by <来源> 撤回）');
+    console.error('BLOCKED: ' + inFlightDetail);
+    console.error('恢复: 待写入者收工后重跑——子代理回传后用 workflow-handoff.mjs result <task-id> <Return Contract> 记录结果再重试 exit；若该委托已作废（零提交复验失败 / 写边界被拒后遗弃），用 workflow-handoff.mjs withdraw <task-id> --by <来源> [--reason <原因>] 撤回后再重试 exit（撤回留痕 withdrawnAt/withdrawnBy，已撤回 = 终态，历史不删）');
+    process.exit(1);
   }
 }
 
@@ -152,9 +150,8 @@ function mentionsLessonsId(body, id) {
   return new RegExp('(^|[^0-9])' + escaped + '(?![0-9])', 'iu').test(body);
 }
 
-// 每份 SUMMARY 的两条判据 → 问题描述数组（分级由调用方按 isNewChange 决定：新 change BLOCKED /
-// 旧 change WARN——C10 无例外）。TASK.md 或 .specs/LESSONS.md 缺席时对应输入为空：段在场判据照常，
-// 命中计算自然为空集（无条目可命中）。
+// 每份 SUMMARY 的两条判据 → 问题描述数组（命中即由调用方计入 violations → BLOCKED）。
+// TASK.md 或 .specs/LESSONS.md 缺席时对应输入为空：段在场判据照常，命中计算自然为空集（无条目可命中）。
 async function lessonsScanProblems(changeDir, summaryFiles) {
   if (summaryFiles.length === 0) return [];
   const rule = await lessonsScanRule();
@@ -240,59 +237,37 @@ export async function runSummarySectionsGate({ node, state }) {
       const method = methodSection === null ? null
         : /brooks.?review|cache.?brooks|builtin.?quickcheck/i.exec(methodSection);
       if (!method) {
-        // 过渡规则：旧格式 SUMMARY 无 ## 自检方法 段——若全文已声明 brooks-review/cache-brooks/
-        // builtin（旧模板行为），WARN 兼容不 BLOCKED；无任何自检声明才 BLOCKED
+        // 旧格式 SUMMARY 无 ## 自检方法 段——若全文已声明 brooks-review/cache-brooks/builtin
+        // （旧模板行为）按「段缺席」计入 violations（标题必须在场）；无任何自检声明同样 BLOCKED。
         if (/brooks.?review|cache.?brooks|builtin.?quickcheck/i.test(content)) {
-          if (isNewChange(state)) {
-            violations.push(f + ' 缺 ## 自检方法 段（新 change 强制声明自检方法）');
-          } else {
-            console.error('BROOKS-LINT WARN: ' + f + ' 缺 ## 自检方法 段（旧格式），6 维自查已声明自检方法——兼容通过，建议补全');
-          }
+          violations.push(f + ' 缺 ## 自检方法 段（须声明自检方法）');
         } else {
           violations.push(f + ' 缺 ## 自检方法 字段（必须声明 brooks-review 或 builtin-quickcheck）');
         }
       } else if (/builtin/i.test(method[0])) {
         // builtin 降级两级校验——① 必须声明不可用原因；② 必须含缓存尝试证据（已尝试 Read 插件缓存
         // 协议文件手动执行仍不可行——两级降级路径第 2 级；防「未尝试读缓存」的偷懒降级）。关键词
-        // 声明级校验（设计边界：不做语义判断）；缺失 → 新 change BLOCKED / 旧 SUMMARY WARN 渐进
+        // 声明级校验（设计边界：不做语义判断）；缺失 → BLOCKED
         if (!/brooks-lint 不可用|插件不可用|unavailable|N\/A/i.test(content)) {
-          if (isNewChange(state)) {
-            console.error('BLOCKED: SUMMARY 使用 builtin-quickcheck 未声明 brooks-lint 不可用原因（新 change 强制）;恢复: 在 ## 自检方法 段补原因（声明级校验——须含关键词: brooks-lint 不可用 / 插件不可用 / unavailable / N/A,如「brooks-lint 不可用(Skill 仅返回占位,插件执行体未加载)」）');
-            process.exit(1);
-          }
-          console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明 brooks-lint 不可用原因');
+          console.error('BLOCKED: SUMMARY 使用 builtin-quickcheck 未声明 brooks-lint 不可用原因;恢复: 在 ## 自检方法 段补原因（声明级校验——须含关键词: brooks-lint 不可用 / 插件不可用 / unavailable / N/A,如「brooks-lint 不可用(Skill 仅返回占位,插件执行体未加载)」）');
+          process.exit(1);
         } else if (!/插件缓存|缓存协议|协议文件|plugins\/cache/i.test(content)) {
-          if (isNewChange(state)) {
-            console.error('BLOCKED: SUMMARY 使用 builtin-quickcheck 未声明缓存尝试证据（新 change 强制先 Read 插件缓存协议文件）;恢复: 在 ## 自检方法 段声明缓存尝试（须含关键词: 插件缓存 / 缓存协议 / 协议文件 / plugins/cache,如「已 Read 插件缓存协议文件(~/.claude/plugins/cache/...)手动执行仍不可行」）');
-            process.exit(1);
-          }
-          console.error('BROOKS-LINT WARN: ' + f + ' 使用 builtin-quickcheck 但未声明缓存尝试证据（应先 Read 插件缓存协议文件手动执行完整 brooks 流程）');
+          console.error('BLOCKED: SUMMARY 使用 builtin-quickcheck 未声明缓存尝试证据（须先 Read 插件缓存协议文件）;恢复: 在 ## 自检方法 段声明缓存尝试（须含关键词: 插件缓存 / 缓存协议 / 协议文件 / plugins/cache,如「已 Read 插件缓存协议文件(~/.claude/plugins/cache/...)手动执行仍不可行」）');
+          process.exit(1);
         }
       }
       if (sixDimBody !== null && !/brooks.?review|cache.?brooks/i.test(sixDimBody)) {
-        if (isNewChange(state)) {
-          console.error('BLOCKED: SUMMARY 的 6 维自查未声明使用 /brooks-review（新 change 强制声明自检方法）;恢复: 在 6 维自查段声明 /brooks-review 或理由');
-          process.exit(1);
-        }
-        console.error('BROOKS-LINT WARN: ' + f + ' 的 6 维自查未声明使用 /brooks-review（可能使用了内置快查）');
+        console.error('BLOCKED: SUMMARY 的 6 维自查未声明使用 /brooks-review;恢复: 在 6 维自查段声明 /brooks-review 或理由');
+        process.exit(1);
       }
     } catch {}
   }
-  // LESSONS 扫描（AC-18）：每份 SUMMARY 的扫描段在场 + 命中条目逐条回应。分级沿用既有语义——
-  // 新 change BLOCKED / 旧 change WARN（C10 无例外）。
+  // LESSONS 扫描（AC-18）：每份 SUMMARY 的扫描段在场 + 命中条目逐条回应；缺失即计入 violations。
   const lessonsProblems = await lessonsScanProblems(changeDir, summaryFiles);
-  if (lessonsProblems.length > 0) {
-    if (isNewChange(state)) {
-      violations.push(...lessonsProblems);
-    } else {
-      for (const problem of lessonsProblems) {
-        console.error('LESSONS SCAN WARN: ' + problem + '（旧 change 渐进，不阻断；新 change 将强制）');
-      }
-    }
-  }
+  if (lessonsProblems.length > 0) violations.push(...lessonsProblems);
   if (violations.length > 0) {
     console.error('BLOCKED: SUMMARY 关键段校验失败: ' + violations.join('; '));
-    if (lessonsProblems.length > 0 && isNewChange(state)) {
+    if (lessonsProblems.length > 0) {
       console.error('恢复: 按 flow-kit/templates/SUMMARY.md 在 ## 自检方法 之后补 ## LESSONS 扫描 段，并逐条写出命中条目编号与差异声明（无命中写「无 active 条目命中」）；命中来源 = TASK.md 该任务 write_files 的路径段 × .specs/LESSONS.md 条目的关键词行');
     }
     process.exit(1);
@@ -344,23 +319,23 @@ export async function runExecuteExitGate({ protocol, node, state, emptyExitAppro
       && taskDependsOn(blockById.get(t.id) || '').every(d => doneIds.has(d)));
     if (serialRunnable.length > 0) {
       console.error('BLOCKED: execute 出口仍有串行 pending 任务: ' + serialRunnable.map(t => t.id).join(', ')
-        + '——空退出豁免不适用于存在未完成可运行串行任务的情况(先完成该串行任务,或修正任务标记)'
-        + ';无可执行的常规恢复动作时，可用 workflow-state.mjs advance 渡过结构性死结（逃生口：使用后本节点须重新 entry 并重做交付记录）；常规缺产物/缺证据情形不适用');
+        + '——空退出豁免不适用于存在未完成可运行串行任务的情况(先完成该串行任务,或修正任务标记)');
+      // 恢复动作按目录在哪分两种说法（唯一分叉在 guard-routing 的 recoveryActionText）：活动态给
+      // advance 逃生口；目录已搬进归档时那一步走不通（advance 的产物推导读活动路径），只给可执行的
+      // 那一步——把目录移回活动位置。
+      console.error('恢复: ' + recoveryActionText(state.activeChange,
+        '无可执行的常规恢复动作时，可用 workflow-state.mjs advance 渡过结构性死结（逃生口：使用后本节点须重新 entry 并重做交付记录）；常规缺产物/缺证据情形不适用'));
       process.exit(1);
     }
 
-    // done 任务 ↔ SUMMARY 完整性：done 任务 ↔ <id>-SUMMARY.md 存在（WARN 渐进不 BLOCK——防旧
-    // change 卡死；结构级校验与 TASK 签名同源：任务完成声明须有对应产物）。新 change（enter 机制
-    // 激活）升级为 BLOCKED——执行遗漏（声称完成但无产物）不静默进归档；旧 change 保持渐进。
+    // done 任务 ↔ SUMMARY 完整性：done 任务 ↔ <id>-SUMMARY.md 存在（结构级校验与 TASK 签名同源：
+    // 任务完成声明须有对应产物）。缺失即 BLOCKED——执行遗漏（声称完成但无产物）不静默进归档。
     const ki8ChangeDir = path.join(runRoot, '.specs', state.activeChange ?? '');
     for (const tid of tasks.filter(t => t.status === 'done').map(t => t.id)) {
       if (!(await fileExists(path.join(ki8ChangeDir, tid + '-SUMMARY.md')))) {
-        if (isNewChange(state)) {
-          console.error('BLOCKED: done 任务 ' + tid + ' 缺少 ' + tid + '-SUMMARY.md——execute 产物不完整（新 change 强制任务完成须有对应 SUMMARY;旧 change 渐进 WARN）');
-          console.error('恢复: 补写 ' + tid + '-SUMMARY.md 后重试 exit;任务完成后补产物即可');
-          process.exit(1);
-        }
-        console.error('WARN: done 任务 ' + tid + ' 缺少 ' + tid + '-SUMMARY.md——execute 产物不完整（任务完成须有对应 SUMMARY）');
+        console.error('BLOCKED: done 任务 ' + tid + ' 缺少 ' + tid + '-SUMMARY.md——execute 产物不完整（任务完成须有对应 SUMMARY）');
+        console.error('恢复: 补写 ' + tid + '-SUMMARY.md 后重试 exit;任务完成后补产物即可');
+        process.exit(1);
       }
     }
 
@@ -401,14 +376,10 @@ export async function runExecuteExitGate({ protocol, node, state, emptyExitAppro
         && (state.executionMode ?? 'subagent') !== 'direct'
         && !takeoverApproved
         && ki10ProtocolHasSubagent) {
-      if (isNewChange(state)) {
-        console.error('BLOCKED: TASK 有 parallel done 任务（' + ki10ParallelDone.join(', ')
-          + '）但 subagent-execute 节点未 exit——新 change 强制 [P] 任务由 subagent-execute 节点委托');
-        console.error('恢复: 经 subagent-execute 节点完成委托后再 exit;或说明越权委托原因');
-        process.exit(1);
-      }
-      console.error('WARN: TASK 有 parallel done 任务（' + ki10ParallelDone.join(', ')
-        + '）但 subagent-execute 节点未 exit——疑似 execute 阶段越权委托，[P] 任务应由 subagent-execute 节点委托');
+      console.error('BLOCKED: TASK 有 parallel done 任务（' + ki10ParallelDone.join(', ')
+        + '）但 subagent-execute 节点未 exit——[P] 任务须由 subagent-execute 节点委托（execute 阶段越权委托）');
+      console.error('恢复: 经 subagent-execute 节点完成委托后再 exit;或说明越权委托原因');
+      process.exit(1);
     }
   } catch {}
   return { exempt };
@@ -421,10 +392,9 @@ export async function runExecuteExitGate({ protocol, node, state, emptyExitAppro
 //        可判对象；未验证既不冒充通过也不冒充失败）。这是本出口唯一还会放行的「判不了」；
 //     ② **工件内容不可判**——**change 自己的载体文件被删**（REQUIREMENT.md / TEST.md 不在）与承载段 /
 //        清单读不出（REQUIREMENT 定位不到验收准则段 / TEST.md 定位不到第 1 轮段 / 没有 AC 编号 /
-//        第 1 轮整段 N/A 而没有 1.1 矩阵）同属这一支 → 不是「判过且通过」：新 change BLOCKED / 旧
-//        change WARN（WARN 行因此进入既有 WARN COUNT）——删文件、删段都不能换到放行。
-//   · 真判过且缺覆盖：verify 出口新 change BLOCKED（点名缺失编号 + 「在 1.1 矩阵补行」的恢复指引）/
-//     旧 change WARN 渐进。
+//        第 1 轮整段 N/A 而没有 1.1 矩阵）同属这一支 → 不是「判过且通过」：BLOCKED——删文件、
+//        删段都不能换到放行。
+//   · 真判过且缺覆盖：verify 出口 BLOCKED（点名缺失编号 + 「在 1.1 矩阵补行」的恢复指引）。
 //   · review 出口：一条汇总 WARN（列缺失编号），不阻断、不影响退出码——review 出口今天不要求
 //     TEST.md，权威判定在 verify 出口；两支「判不了」都不打印（不制造噪音）。
 // 归档 change 与 verify 出口的既有豁免同源（历史归档不重判）。
@@ -439,23 +409,20 @@ export async function runAcCoverageGate({ node, state }) {
   }
   if (coverage.unjudgeable !== null) {
     if (node.id === 'review') return;
-    const blocking = isNewChange(state);
-    for (const line of acCoverageUnjudgeableLines({ coverage, level: blocking ? 'BLOCKED' : 'WARN' })) {
+    for (const line of acCoverageUnjudgeableLines({ coverage, level: 'BLOCKED' })) {
       console.error(line);
     }
-    if (blocking) process.exit(1);
-    return;
+    process.exit(1);
   }
   if (coverage.missing.length === 0) return;
   if (node.id === 'review') {
     console.error(acCoverageSummaryLine({ coverage }));
     return;
   }
-  const blocking = isNewChange(state);
-  for (const line of acCoverageReportLines({ coverage, level: blocking ? 'BLOCKED' : 'WARN' })) {
+  for (const line of acCoverageReportLines({ coverage, level: 'BLOCKED' })) {
     console.error(line);
   }
-  if (blocking) process.exit(1);
+  process.exit(1);
 }
 
 // verify 出口必须真实跑命令（严格版）——历史归档 change 豁免（过渡规则）。命令来源三级：TEST.md 的
@@ -487,14 +454,10 @@ export async function runVerifyExitGate({ protocol, node, state }) {
         && (state.executionMode ?? 'subagent') !== 'direct'
         && !ki9TakeoverApproved
         && ki9ProtocolHasSubagent) {
-      if (isNewChange(state)) {
-        console.error('BLOCKED: TASK 有 parallel done 任务（' + ki9ParallelDone.join(', ')
-          + '）但 subagent-execute 节点未 exit——新 change 强制(verify 兜底拦截)');
-        console.error('恢复: 经 subagent-execute 节点完成委托后再 exit;或说明越权委托原因');
-        process.exit(1);
-      }
-      console.error('WARN: TASK 有 parallel done 任务（' + ki9ParallelDone.join(', ')
-        + '）但 subagent-execute 节点未 exit——疑似越权委托（execute 出口未拦截,verify 兜底提示）');
+      console.error('BLOCKED: TASK 有 parallel done 任务（' + ki9ParallelDone.join(', ')
+        + '）但 subagent-execute 节点未 exit——[P] 任务须由 subagent-execute 节点委托（verify 兜底拦截）');
+      console.error('恢复: 经 subagent-execute 节点完成委托后再 exit;或说明越权委托原因');
+      process.exit(1);
     }
   } catch {}
   const { spawnSync } = await import('child_process');
@@ -588,13 +551,9 @@ export function runReturnContractGate({ node, state }) {
     const noCommitTask = !!(taskReq && taskReq.noCommit === true);
     if (!r.commitHash && !noCommitTask) violations.push(taskId + ' 缺 commitHash');
     if (!r.greenEvidence || !r.greenEvidence.command) violations.push(taskId + ' 缺 greenEvidence');
-    // redEvidence 缺失警告（过渡期不阻断）——新 change（enter 机制激活）升级为 BLOCKED（TDD RED 证据强制）
+    // redEvidence 缺失 = 违反 TDD RED 证据要求（BLOCKED）
     if (r && !r.redEvidence) {
-      if (isNewChange(state)) {
-        violations.push(taskId + ' 缺 redEvidence（新 change 强制 TDD RED 证据;旧 change 渐进 WARN）');
-      } else {
-        console.error('HANDOFF WARN: ' + taskId + ' 缺 redEvidence（可能未执行 TDD RED 阶段）');
-      }
+      violations.push(taskId + ' 缺 redEvidence（须回传 TDD RED 证据）');
     }
     // completedChecks 严格校验（无旧 change 豁免）
     if (requiredChecks.length > 0) {
@@ -607,7 +566,7 @@ export function runReturnContractGate({ node, state }) {
   }
   if (violations.length > 0) {
     console.error('BLOCKED: Return Contract 校验失败: ' + violations.join('; '));
-    console.error('恢复: 子代理回传完整契约(含缺失字段)后用 workflow-handoff.mjs result 重录——新 change 强制 TDD RED/GREEN 证据与 completedChecks;注意:若已记录 greenEvidence 而缺 redEvidence,时序防护会拦截事后补录(防掩盖缺 RED)——确认子代理真实执行过 TDD RED 且证据在对应 SUMMARY 中时,用 workflow-state.mjs record subagent-execute 合并写入真实 redEvidence(证据可溯源),或重新委托任务获取完整契约');
+    console.error('恢复: 子代理回传完整契约(含缺失字段)后用 workflow-handoff.mjs result 重录——本判据强制 TDD RED/GREEN 证据与 completedChecks;注意:若已记录 greenEvidence 而缺 redEvidence,时序防护会拦截事后补录(防掩盖缺 RED)——确认子代理真实执行过 TDD RED 且证据在对应 SUMMARY 中时,用 workflow-state.mjs record subagent-execute 合并写入真实 redEvidence(证据可溯源),或重新委托任务获取完整契约');
     process.exit(1);
   }
 }
@@ -625,12 +584,9 @@ export async function runSubagentSummaryGate({ node, state }) {
     const saDir = path.join(runRoot, '.specs', state.activeChange ?? '');
     for (const t of saTasks.filter(t => t.status === 'done')) {
       if (!(await fileExists(path.join(saDir, t.id + '-SUMMARY.md')))) {
-        if (isNewChange(state)) {
-          console.error('BLOCKED: done 任务 ' + t.id + ' 缺少 ' + t.id + '-SUMMARY.md——subagent-execute 产物不完整（新 change 强制任务完成须有对应 SUMMARY;旧 change 渐进 WARN）');
-          console.error('恢复: 补写 ' + t.id + '-SUMMARY.md 后重试 exit;任务完成后补产物即可');
-          process.exit(1);
-        }
-        console.error('WARN: done 任务 ' + t.id + ' 缺少 ' + t.id + '-SUMMARY.md——subagent-execute 产物不完整（任务完成须有对应 SUMMARY）');
+        console.error('BLOCKED: done 任务 ' + t.id + ' 缺少 ' + t.id + '-SUMMARY.md——subagent-execute 产物不完整（任务完成须有对应 SUMMARY）');
+        console.error('恢复: 补写 ' + t.id + '-SUMMARY.md' + ' 后重试 exit;任务完成后补产物即可');
+        process.exit(1);
       }
     }
   } catch {}
@@ -717,8 +673,9 @@ async function nodeSkillDeclared(nodeId, changeName) {
 
 // 守卫族的命令运行上下文（形状与状态命令族的 commandContext 相同）：脚本目录由本模块位置推导，
 // 运行根 / 包根 / 协议路径取守卫运行上下文——协议路径是本次 guard 实际解析到的那一份（含 state 绑定），
-// 命令自带的协议上下文因此与本次运行一致。
-function declarationContext() {
+// 命令自带的协议上下文因此与本次运行一致。导出给同族门禁（guard-gates）取用：守卫侧的命令装配
+// 只有这一份上下文，各模块自行推一份必然在「架构化路径 / 协议绑定」上分叉。
+export function guardCommandContext() {
   return { scriptsDir, runRoot, packageRoot, protocolPath };
 }
 
@@ -750,7 +707,7 @@ export async function declarationSkillNames(node, state) {
 //
 // 返回命令条目 { skill, command }（命令文本的构造在 state-explain，本函数只决定「哪些技能」）。
 function skillLoadDeclarationCommands({ node, skills, frontend }) {
-  return declarationCommands({ node, skills, frontend, context: declarationContext() });
+  return declarationCommands({ node, skills, frontend, context: guardCommandContext() });
 }
 
 export async function nodeSkillLoadCommands({ node, state }) {
@@ -764,7 +721,7 @@ export async function nodeSkillLoadCommands({ node, state }) {
 // 单个技能的声明命令（入口 --prompt 冲突的兜底：标记声明的技能不在本节点目标集里时，仍要给一条
 // 覆写该标记的命令）。与上面同一装配，不另拼一份文本。
 export function guardDeclarationCommand({ node, skill, frontend = false }) {
-  return declarationCommand({ node, skill, frontend, context: declarationContext() });
+  return declarationCommand({ node, skill, frontend, context: guardCommandContext() });
 }
 
 // record 命令与「这条命令怎么执行」的说明分行给出（两处恢复段共用）：命令单独成行才是可整行照抄的
@@ -773,15 +730,22 @@ export function guardDeclarationCommand({ node, skill, frontend = false }) {
 const RECORD_RETRY_NOTE = '说明: bash / PowerShell 可直接执行；cmd.exe 请把单引号换成双引号，'
   + '并转义载荷里原有的双引号';
 
-function recordRecoveryCommand(node, completedChecks = []) {
-  const payload = { summary: '<本节点完成摘要>' };
-  if (completedChecks.length > 0) payload.completedChecks = completedChecks;
+// 任意节点 + 任意载荷的 record 命令（命令文本的唯一装配：脚本路径平台化 + 整条加引号 + 协议上下文）。
+// 缺证据恢复段、门控补证据段、归档提名的补录命令三处都从这里取——各自拼一段，就只有在其中一条上
+// 补得到协议上下文/引号形态，另外两条照抄即失败。
+export function nodeRecordCommand(nodeId, payload) {
   return scriptCommand({
     scriptsDir,
     runRoot,
     script: 'workflow-state.mjs',
-    args: ['record', node.id, "'" + JSON.stringify(payload) + "'", ...protocolContextArgs(declarationContext())],
+    args: ['record', nodeId, "'" + JSON.stringify(payload) + "'", ...protocolContextArgs(guardCommandContext())],
   });
+}
+
+function recordRecoveryCommand(node, completedChecks = []) {
+  const payload = { summary: '<本节点完成摘要>' };
+  if (completedChecks.length > 0) payload.completedChecks = completedChecks;
+  return nodeRecordCommand(node.id, payload);
 }
 
 // 「补证据」恢复段（单一实现）：两个门禁点打印同一段——缺 Output Schema 字段
@@ -836,7 +800,7 @@ export async function runEvidenceCompletionGate({ protocol, node, state, evidenc
     for (const binding of node.requiredSkillCalls ?? []) {
       const check = 'required-skill:' + node.id + '.' + binding.skill;
       const applicabilityGated = applicabilityGatedBinding(node, binding.skill) !== null;
-      if (applicabilityGated && isNewChange(state) && (await frontendCriterion(state.activeChange)).applicable) continue;
+      if (applicabilityGated && (await frontendCriterion(state.activeChange)).applicable) continue;
       if (!checks.includes(check)) checks.push(check);
     }
     evidence.completedChecks = checks;
@@ -856,6 +820,14 @@ export async function runEvidenceCompletionGate({ protocol, node, state, evidenc
 // （全 parallel 无 SUMMARY 属预期）；含串行任务的 change 豁免不生效，照常校验，不得静默放行。生效
 // 时追加被跳过项清单（EMPTY-EXIT-SKIPPED）。
 export async function runArtifactGate({ protocol, node, state, emptyExitApproved, emptyExitExempt }) {
+  // 归档目录名不合规（AC-6）：本 change 的归档目录在盘上但名字不是 <YYYY-MM-DD>-<change-id> —— 这条
+  // 规则先于在场判定失败，报文给期望格式 + 实际目录名 + 可照抄的改名命令。放在缺件之前：错名目录不是
+  // 「某件产物不在场」，报成缺件会让人去补一件其实存在的产物（同一事实两种说法）。
+  const archiveNameProblems = archiveDirNameNotice(state.activeChange, node.id);
+  if (archiveNameProblems.length > 0) {
+    for (const line of archiveNameProblems) console.error(line);
+    process.exit(1);
+  }
   const checkedArtifacts = await missingRequiredArtifacts(protocol, node, state.activeChange);
   let missingArtifacts = checkedArtifacts;
   if (emptyExitApproved && emptyExitExempt) {

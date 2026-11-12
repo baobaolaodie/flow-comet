@@ -20,6 +20,7 @@ export const ENTRIES = [
     run: (dir) => {
       const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending' });
+      { const s = readStateFile(dir); s.fixRoundsByChange = {}; writeState(dir, s); }
 
       // ① 旧绕过路径：Fix 任务仍 pending 时直接 exit review --apply → 新 change BLOCKED + 恢复指引
       const bypass = runGuard(['exit', 'review', '--apply'], dir, env);
@@ -128,6 +129,7 @@ export const ENTRIES = [
       const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       const gateMarker = path.join(dir, 'verify-gate-ran.txt');
       writeFixBatchFixture(dir, { kind: 'verify', fixStatus: 'pending' });
+      { const s = readStateFile(dir); s.fixRoundsByChange = {}; writeState(dir, s); }
 
       // ① 旧绕过路径：pending 修复任务时直接 exit verify --apply → BLOCKED，且验证命令未被执行
       const bypass = runGuard(['exit', 'verify', '--apply'], dir, env);
@@ -197,14 +199,14 @@ export const ENTRIES = [
     },
   },
   {
-    // 越界拦截 + done-but-unclosed 回放 + 旧 change 兼容（真实命令链路）：
+    // 越界拦截 + done-but-unclosed 回放 + 旧态同判（真实命令链路）：
     // ① 新 change review/pending → BLOCKED + state 不变；
     // ② 事故回放——Fix 任务全 done 但 history 最新 exit execute 签名仍是追加前值
     //    （从未重跑 execute 出口）→ 同出口 BLOCKED + state 字节零改写（修复前被错误断言为通过）；
     // ③ 正对照——按指引 entry execute + exit execute --apply 真闭合后，review 出口通过；
     // ④⑤ verify 源 pending / done-but-unclosed 同样 BLOCKED 且验证命令不执行，⑥ 闭合后通过；
-    // ⑦⑧⑨ 旧 change（无 new change 标记）同形态渐进 WARN 放行、next 归位可达、验证出口真实执行。
-    name: 'A23 Fix 越界拦截与旧 change 渐进：源节点直接 exit BLOCK（新）/WARN（旧）不卡死（真实命令）',
+    // ⑦⑧⑨ 同一形态（无任何新旧标记字段）同判 BLOCKED、next 归位可达、验证出口真实执行。
+    name: 'A23 Fix 越界拦截与旧态容忍：源节点直接 exit 一律 BLOCK 不卡死，next 归位可达（真实命令）',
     run: (dir) => {
       const env = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       const gateMarker = path.join(dir, 'verify-gate-ran.txt');
@@ -212,6 +214,7 @@ export const ENTRIES = [
 
       // ① 新 change review 源 + pending：直接 exit review --apply → BLOCKED + 恢复指引 + state 不变
       writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending' });
+      { const s = readStateFile(dir); s.fixRoundsByChange = {}; writeState(dir, s); }
       const rBlock = runGuard(['exit', 'review', '--apply'], dir, env);
       assertExit(rBlock, 1);
       assertOut(rBlock, 'BLOCKED: 存在未归位/未跑出口的 Fix 批次');
@@ -228,6 +231,7 @@ export const ENTRIES = [
       // ② 事故回放形态：Fix 任务已全 done，但 history 最新 exit execute 记录的是追加前签名
       //（done 后从未再跑 execute 出口）→ 修复前静默放行，修复后必须 BLOCKED + state 字节零改写
       writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'done' });
+      { const s = readStateFile(dir); s.fixRoundsByChange = {}; writeState(dir, s); }
       writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-01-SUMMARY.md', execSummaryFixture('T-FIX-01'));
       const doneUnclosed = readStateFile(dir);
       doneUnclosed.history = fixBatchHistoryWithStaleExecuteExit();
@@ -267,6 +271,7 @@ export const ENTRIES = [
       // 直接 exit review BLOCKED；next 归位 subagent-execute；完成委托后第二趟
       // exit subagent-execute --apply 回源 review；源节点出口真实执行并推进 verify。
       writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending', parallelFix: true });
+      { const s = readStateFile(dir); s.fixRoundsByChange = {}; writeState(dir, s); }
       const pBypass = runGuard(['exit', 'review', '--apply'], dir, env);
       assertExit(pBypass, 1);
       assertOut(pBypass, 'BLOCKED: 存在未归位/未跑出口的 Fix 批次');
@@ -316,6 +321,7 @@ export const ENTRIES = [
       // ④ 新 change verify 源 + pending：直接 exit verify --apply → BLOCKED，验证命令未执行
       fs.rmSync(gateMarker, { force: true });
       writeFixBatchFixture(dir, { kind: 'verify', fixStatus: 'pending' });
+      { const s = readStateFile(dir); s.fixRoundsByChange = {}; writeState(dir, s); }
       const vBlock = runGuard(['exit', 'verify', '--apply'], dir, env);
       assertExit(vBlock, 1);
       assertOut(vBlock, 'BLOCKED: 存在未归位/未跑出口的 Fix 批次');
@@ -331,6 +337,7 @@ export const ENTRIES = [
       //（原路径会跳过 verify 去 archive）+ 全 done + 最新 execute exit 签名过时 → BLOCKED，验证命令
       // 不执行、state 字节零改写；⑥ 按指引闭合后 exit verify 真实执行验证命令并推进 archive
       writeFixBatchFixture(dir, { kind: 'verify', fixStatus: 'done' });
+      { const s = readStateFile(dir); s.fixRoundsByChange = {}; writeState(dir, s); }
       writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-01-SUMMARY.md', execSummaryFixture('T-FIX-01'));
       const verifyDoneUnclosed = readStateFile(dir);
       verifyDoneUnclosed.history = fixBatchHistoryWithStaleExecuteExit();
@@ -364,21 +371,18 @@ export const ENTRIES = [
         throw new Error('闭合后 verify 出口未真实执行 TEST.md 验证命令（副作用文件缺失/内容不符）');
       }
 
-      // ⑦ 旧 change review 源 + pending：直接 exit review --apply → FIX-BATCH WARN 渐进放行（不 BLOCK、不死结）
-      writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending', newChange: false });
+      // ⑦ 同一形态（无任何新旧标记字段）review 源 + pending：同判 BLOCKED（单轨，无渐进放行）
+      // （前序 ①~⑥ 已消耗归位轮次；本段测的是「直接 exit 源节点」这一门，先把轮次计数清零）
+      writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending' });
+      { const s = readStateFile(dir); s.fixRoundsByChange = {}; writeState(dir, s); }
       const oldExit = runGuard(['exit', 'review', '--apply'], dir, env);
-      assertExit(oldExit, 0);
-      assertOut(oldExit, 'FIX-BATCH WARN');
-      assertNotOut(oldExit, 'BLOCKED');
-      assertOut(oldExit, 'ALL CHECKS PASSED');
-      assertNodeLine(oldExit, 'execute'); // pending 修复任务使路由继续回 execute（流程未卡死）
-      st = readStateFile(dir);
-      if (st.currentNode !== 'execute') {
-        throw new Error('旧 change 渐进放行后 currentNode 应为 execute，实际 ' + JSON.stringify(st.currentNode));
-      }
+      assertExit(oldExit, 1);
+      assertOut(oldExit, 'BLOCKED: 存在未归位/未跑出口的 Fix 批次');
+      assertNotOut(oldExit, 'ALL CHECKS PASSED');
 
-      // ⑧ 旧 change next 入口：pending 修复 + 源节点驻留 → 不新增 BLOCK，归位 execute 可继续
-      writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending', newChange: false });
+      // ⑧ 同一形态 next 入口：pending 修复 + 源节点驻留 → next 仍归位 execute（路由不受分级影响）
+      writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending' });
+      { const s = readStateFile(dir); s.fixRoundsByChange = {}; writeState(dir, s); }
       const oldNext = runState(['next'], dir, env);
       assertExit(oldNext, 0);
       assertNotOut(oldNext, 'BLOCKED');
@@ -389,22 +393,19 @@ export const ENTRIES = [
         throw new Error('旧 change next 归位后 currentNode 应为 execute，实际 ' + JSON.stringify(st.currentNode));
       }
 
-      // ⑨ 旧 change verify 源 + pending：直接 exit verify --apply → WARN 渐进且验证出口真实执行、不卡死
+      // ⑨ 同一形态 verify 源 + pending：同判 BLOCKED（单轨），验证命令不执行（拦截早于命令）
       fs.rmSync(gateMarker, { force: true });
-      writeFixBatchFixture(dir, { kind: 'verify', fixStatus: 'pending', newChange: false });
+      writeFixBatchFixture(dir, { kind: 'verify', fixStatus: 'pending' });
+      { const s = readStateFile(dir); s.fixRoundsByChange = {}; writeState(dir, s); }
       const oldVerify = runGuard(['exit', 'verify', '--apply'], dir, env);
-      assertExit(oldVerify, 0);
-      assertOut(oldVerify, 'FIX-BATCH WARN');
-      assertNotOut(oldVerify, 'BLOCKED');
-      assertOut(oldVerify, 'ALL CHECKS PASSED');
-      assertNodeLine(oldVerify, 'execute'); // pending 修复任务使路由继续回 execute
-      if (!fs.existsSync(gateMarker) || fs.readFileSync(gateMarker, 'utf8') !== 'GATE-RAN') {
-        throw new Error('旧 change verify 出口未真实执行 TEST.md 验证命令（渐进不等于跳过门禁）');
-      }
+      assertExit(oldVerify, 1);
+      assertOut(oldVerify, 'BLOCKED: 存在未归位/未跑出口的 Fix 批次');
+      assertNotOut(oldVerify, 'ALL CHECKS PASSED');
 
       // ⑩ 多波次真实 Fix：第一波收口后追加第二波；第三趟收口时历史最新签名已等于当前签名、
       //    更早签名仍发散——全量签名扫描不得被最新签名覆盖，仍须保留 FIX-BATCH 锚。
       writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending' });
+      { const s = readStateFile(dir); s.fixRoundsByChange = {}; writeState(dir, s); }
       assertExit(runState(['next'], dir, env), 0); // 受控归位 execute
       completeFixTaskAndRecord(dir, env); // 第一波：单修复任务 done + 声明/record
       const wave1 = runGuard(['exit', 'execute', '--apply'], dir, env);
@@ -453,6 +454,7 @@ export const ENTRIES = [
 
       // ⑪ 源未 entry 的真实 Fix：分类只认历史签名/Fix 结构标记，不依赖 enteredNodes → 仍 FIX-BATCH
       writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending' });
+      { const s = readStateFile(dir); s.fixRoundsByChange = {}; writeState(dir, s); }
       const noEntryState = readStateFile(dir);
       noEntryState.enteredNodes = (noEntryState.enteredNodes || []).filter((nodeId) => nodeId !== 'review');
       writeState(dir, noEntryState);
@@ -496,9 +498,9 @@ export const ENTRIES = [
         throw new Error('旧态未分类回程应停在 review: ' + JSON.stringify(legacyState.currentNode));
       }
 
-      // ⑬ 受控归位轮次真实链路（review 源）：第 1~3 轮输出「第 n/3 轮」并递增计数；第 4 轮新
-      //    change BLOCK（state 字节零改写、currentNode 保持 review）；用户显式授权（嵌套证据）
-      //    后放行；verify 失败计数与轮次计数各自独立；旧 change 第 4 轮渐进 WARN 放行。
+      // ⑬ 受控归位轮次真实链路（review 源）：第 1~3 轮输出「第 n/3 轮」并递增计数；第 4 轮
+      //    BLOCK（state 字节零改写、currentNode 保持 review）；用户显式授权（嵌套证据）
+      //    后放行；verify 失败计数与轮次计数各自独立；同一形态第 4 轮同判 BLOCKED。
       const fixRoundsText = (statuses) => '# TASK\n\n## 任务清单\n\n' + serialTaskBlock('T01', 'done')
         + '\n\n## Fix 任务（来自 REVIEW / INTEGRATION）\n\n'
         + statuses.map((s, i) => serialTaskBlock('T-FIX-0' + (i + 1), s)).join('\n') + '\n';
@@ -542,6 +544,7 @@ export const ENTRIES = [
       };
 
       writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending' });
+      { const s = readStateFile(dir); s.fixRoundsByChange = {}; writeState(dir, s); }
       // verify 失败计数先落到 2——后续 4 轮归位都不得触碰该值
       assertExit(runState(['verify-fail'], dir, env), 0);
       const vfTwo = runState(['verify-fail'], dir, env);
@@ -618,25 +621,25 @@ export const ENTRIES = [
       if (readStateFile(dir).fixRoundsByChange?.ch !== 4) {
         throw new Error('verify 失败累计不得改写 Fix 轮次计数: ' + JSON.stringify(readStateFile(dir).fixRoundsByChange));
       }
-      // 旧 change 第 4 轮渐进：WARN 后照常归位（不 BLOCK、不卡死）
-      writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending', newChange: false });
+      // 同一形态第 4 轮（无任何新旧标记字段）：同判 BLOCKED（单轨，无渐进放行侧），计数不推进
+      writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'pending' });
+      { const s = readStateFile(dir); s.fixRoundsByChange = {}; writeState(dir, s); }
       const oldRoundState = readStateFile(dir);
       oldRoundState.fixRoundsByChange = { ch: 3 };
       writeState(dir, oldRoundState);
       const oldRound4 = runState(['next'], dir, env);
-      assertExit(oldRound4, 0);
-      assertOut(oldRound4, 'FIX-BATCH WARN');
-      assertOut(oldRound4, '（第 4/3 轮）');
-      assertNotOut(oldRound4, 'BLOCKED');
+      assertExit(oldRound4, 1);
+      assertOut(oldRound4, 'BLOCKED: Fix 批次受控归位已达 3 轮上限');
       const oldRoundAfter = readStateFile(dir);
-      if (oldRoundAfter.currentNode !== 'execute' || oldRoundAfter.fixRoundsByChange?.ch !== 4) {
-        throw new Error('旧 change 第 4 轮应渐进归位并计数: '
-          + JSON.stringify({ currentNode: oldRoundAfter.currentNode, rounds: oldRoundAfter.fixRoundsByChange }));
+      if (oldRoundAfter.fixRoundsByChange?.ch !== 3) {
+        throw new Error('BLOCK 不得推进 Fix 轮次计数: '
+          + JSON.stringify({ rounds: oldRoundAfter.fixRoundsByChange }));
       }
 
       // ⑭ 签名算法版本可判别（真实命令链路）：跨版本（v2 事件 vs 当前 v1）不做同版本比对——
       //    不得把正常回程误判为未闭合 Fix；同版本 legacy 裸 hex 按既有语义参与（②⑤ 已锚）。
       writeFixBatchFixture(dir, { kind: 'review', fixStatus: 'done' });
+      { const s = readStateFile(dir); s.fixRoundsByChange = {}; writeState(dir, s); }
       writeFile(dir, '.specs/' + CHANGE_ID + '/T-FIX-01-SUMMARY.md', execSummaryFixture('T-FIX-01'));
       const versionSkewState = readStateFile(dir);
       versionSkewState.history = [{

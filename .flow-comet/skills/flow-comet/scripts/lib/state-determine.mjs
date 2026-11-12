@@ -6,8 +6,13 @@ import { runRootDir } from './state-io.mjs';
 // 判定核心在共享模块 route-node.mjs——本函数保持既有签名与返回语义，仅委托 resolveNextNode
 // （output 与抽取前一致）。route / buildNodeCompletionFlags / pathPatternExists / nodeFlagsComplete /
 // protocolTaskFilePath / hasSubagentNode 同为该模块的单一实现（guard 与状态机共用，杜绝双实现漂移）。
-export async function determineNode(changeName, protocol, completedNodes = []) {
-  return resolveNextNode({ runRoot: runRootDir(), changeName, protocol, completedNodes });
+//
+// changeDir（可选）= 该 change 目录相对 .specs/ 的 POSIX 路径（活动 '<id>' / 归档
+// 'archive/<日期>-<id>'，由 state-io.resolveChangeDir 解析）。目录已搬进归档时产物与任务文件都在
+// 归档目录里——不传它会让推导看不到任何产物、回退到协议首节点（移动后报 open 的成因）。缺省 null
+// = 既有形态（按 .specs/<changeName> 解析），旧调用零变化。
+export async function determineNode(changeName, protocol, completedNodes = [], changeDir = null) {
+  return resolveNextNode({ runRoot: runRootDir(), changeName, protocol, completedNodes, changeDir });
 }
 
 // 正常推进豁免判定——exit --apply 会把 currentNode 推进到下一节点（如 open exit 后
@@ -20,7 +25,7 @@ export async function determineNode(changeName, protocol, completedNodes = []) {
 // NEXT 同源），静态直接后继兜底（串行推进原语义，旧态/序列流不回归）。与回退豁免独立判断
 // （回退 = TASK.md 有 pending 回退修复任务；本豁免 = 正常推进后继）。真乱序（currentNode
 // 既非路由后继也非静态后继）仍维持严格 BLOCK。
-export async function normalAdvanceExempt(state, protocol, completedNodes, currentNode, changeName) {
+export async function normalAdvanceExempt(state, protocol, completedNodes, currentNode, changeName, changeDir = null) {
   if (completedNodes.length === 0) return false;
   const lastNodeId = completedNodes[completedNodes.length - 1];
   const routeIds = route(protocol).map((node) => node.id);
@@ -42,7 +47,9 @@ export async function normalAdvanceExempt(state, protocol, completedNodes, curre
   // 路由后继判定（与 guard 出口同源）：currentNode === resolveNextNode(completedNodes) 即
   // 正常推进后的下一路由目标（含平行转换与趟间回流）；文件推导失败（异常态）不豁免。
   try {
-    const routingNext = await determineNode(changeName, protocol, completedNodes);
+    // 产物根与共享视图取同一个 changeDir：两处各按自己的根推导，「路由后继」就会与 next 的 NODE
+    // 行给出两个答案（移动后尤其明显：一处读归档、一处读已不存在的活动目录）。
+    const routingNext = await determineNode(changeName, protocol, completedNodes, changeDir);
     if (routingNext === currentNode) return true;
   } catch {
     return false;

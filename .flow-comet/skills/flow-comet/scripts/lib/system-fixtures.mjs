@@ -202,9 +202,8 @@ export function fixBatchHistoryWithStaleExecuteExit() {
 }
 
 // Fix 批次夹具写入：state + TASK + 既有任务 SUMMARY + REVIEW.md（verify 源另备 TEST/UAT）。
-// kind='review'（审查驻留，execute 已首次完成）/ 'verify'（验证驻留，review 已完成）；
-// newChange=false 时 state 不带新 change 标记（旧 change 渐进形态）。
-export function writeFixBatchFixture(dir, { kind, fixStatus, newChange = true, parallelFix = false }) {
+// kind='review'（审查驻留，execute 已首次完成）/ 'verify'（验证驻留，review 已完成）。
+export function writeFixBatchFixture(dir, { kind, fixStatus, parallelFix = false }) {
   const completed = kind === 'verify'
     ? ['open', 'design', 'plan', 'execute', 'subagent-execute', 'review']
     : ['open', 'design', 'plan', 'execute', 'subagent-execute'];
@@ -222,7 +221,6 @@ export function writeFixBatchFixture(dir, { kind, fixStatus, newChange = true, p
     directOverride: false,
   };
   if (kind === 'verify') state.evidence.verify = { summary: 'verify in progress' };
-  if (newChange) state.newChange = true;
   writeState(dir, state);
   // 前置节点产物齐备（open/design/plan）——共享路由在任务特判前先过前置产物门控
   writeIntakeArtifacts(dir);

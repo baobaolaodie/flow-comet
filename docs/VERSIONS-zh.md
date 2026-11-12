@@ -26,7 +26,7 @@
 ## 兼容策略
 
 - 旧 change/旧 state 自动补默认字段（executionMode/branchMode/enablePrReview）；无分支 change 照常运行——向后兼容
-- 旧 change 重入渐进 WARN 不 BLOCK（redEvidence/greenEvidence 缺失、纯字符串 handoff）
+- 旧 state 缺字段补默认；含已退役初始化标记字段的旧 state 被忽略（不报 schema 错误）。同一形态一个判级——一律 BLOCK，不再有渐进档（如 redEvidence/greenEvidence 缺失、纯字符串 handoff）
 - 回归基线（两级）：`guard-self-test.mjs` 351 场景 + `system-test.mjs` 95 项全绿（每次改动后必须）
 - dsh 平台：项目级技能副本携带与 flow-comet 发布版本同步的 `INSTALLED_VERSION` 标识；卸载经 `prepare-env --purge --platform dsh --yes`（见[安装](INSTALLATION-zh.md#方案-d--deepseek-harnessdsh平台)）
 

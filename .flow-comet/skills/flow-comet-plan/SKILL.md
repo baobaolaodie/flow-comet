@@ -23,21 +23,21 @@ Responsibility: 拆原子任务（XML 格式）+ 波次划分。生成 TASK.md�
 
 首部字段 `Change ID` / `关联` 已在场时值不得为空（键集不强制）。
 
-guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B：任务块结构、每任务 `<verify>`、**新格式任务的 7 字段在场**、以及 TASK.md 的模板骨架（段标题 / 段序 / 首部字段值非空）都由 guard 拦（新 change 缺任一 = 出口 BLOCKED；旧格式模板 / 旧 change 渐进 WARN）；「填得好不好」——字段内容质量与任务粒度——由 review 把关。
+guard 校验见 workflow-guard.mjs NODE_TRANSITION_GATES / W1-B：任务块结构、每任务 `<verify>`、**新格式任务的 7 字段在场**、以及 TASK.md 的模板骨架（段标题 / 段序 / 首部字段值非空）都由 guard 拦（缺任一 = 出口 BLOCKED；其中 7 字段一项在「旧式一字段模板形态（无 `<name>`）」下仅 WARN——分级依据是模板形态，不是 change 新旧）；「填得好不好」——字段内容质量与任务粒度——由 review 把关。
 
 > **模板权威**：本节点产出工件的段形 = **上游模板 + 本仓登记的增量段**——唯一权威 = `flow-kit/templates/**`（段与正文），条件段 / 结构子段 / 增量段与指纹由 `../flow-comet/reference/artifact-templates.json` 登记；`.specs/archive/**` 是历史证据、**不是模板来源**——不得以「上一轮就是这么写的」对齐段形。
 
 加载顺序：先读 `READ PROMPT:`（`3-task`），再读 `READ TEMPLATE:`（`TASK`）。
 
-波次散文一致性：`## 波次划分` 中标记为并行（[P]）的任务必须与 XML 任务 `parallel="true"` 一致——新 change 不一致 BLOCKED（旧 change WARN 渐进）。波次投影一致性：`## 波次划分` 声明的波次必须等于任务的依赖层级（判据与恢复指引见下方「波次形态约束」）——新 change 不一致 BLOCKED（旧 change WARN 渐进）；判不了按成因二分——**载体缺席**（`## 波次划分` 不在 / 段名无从派生）→ 打印「未校验（无波次段）」并跳过该判据（未验证 ≠ 通过），**内容不可判**（段在场而没有一行 Wave 行能落到真实任务 id）→ 出口打印 `TASK.md 波次划分段内容不可判`，新 change BLOCKED / 旧 change WARN 渐进（该行进入 WARN 计数）；任务集里的任务还必须被某条 Wave 行覆盖（修复族除外，漏写的以「未声明」点名）。
+波次散文一致性：`## 波次划分` 中标记为并行（[P]）的任务必须与 XML 任务 `parallel="true"` 一致——不一致 BLOCKED（同一形态一个判级）。波次投影一致性：`## 波次划分` 声明的波次必须等于任务的依赖层级（判据与恢复指引见下方「波次形态约束」）——不一致 BLOCKED（同一形态一个判级）；判不了按成因二分——**载体缺席**（`## 波次划分` 不在 / 段名无从派生）→ 打印「未校验（无波次段）」并跳过该判据（未验证 ≠ 通过），**内容不可判**（段在场而没有一行 Wave 行能落到真实任务 id）→ 出口打印 `TASK.md 波次划分段内容不可判`，一律 BLOCKED（同一形态一个判级）；任务集里的任务还必须被某条 Wave 行覆盖（修复族除外，漏写的以「未声明」点名）。
 
 ### 波次形态约束（依赖驱动多趟 · 规划期必守）
 
 **约束本体**：并行任务按依赖关系组织——每个并行任务显式声明 `depends_on`，依赖面的合法性只取决于依赖图本身：`depends_on` 无环且引用的任务都存在，依赖面即合法；波次编号另按「波次 = 依赖层级的投影」（下一条）单独校验——依赖面合法不等于波次声明合法，两条判据各自独立拦截。全并行、全串行、串→并、并→串四种基本形态与任意混排序列（如 `S→P→S`、`P→S→P`）一律放行——引擎按依赖拓扑自动分趟（每趟委托全部依赖已满足的并行任务，趟间回串行消化），混排序列由多趟路由按依赖拓扑自动分趟消化，并行任务的先后位置不受任何限制。
 
-**波次 = 依赖层级的投影（波次编号的判据）**：`## 波次划分` 里的波次编号不是自由排版，而是任务依赖层级的投影——① 每个任务的波次 = 其依赖中最晚波次的下一波（无依赖 = 第 1 波）；② 同波任务必须彼此没有依赖；③ 想让某任务晚一点跑，就写 `depends_on` 把顺序声明出来，而不是把它挪到后面的波却不声明。声明波次与依赖层级不一致（同波依赖 / 排在依赖之前 / 明明只需更早波次却排得更靠后）→ 新 change 出口 **BLOCKED**：明细逐条点名「任务 / 依赖 / 当前波 / 应到波」，并给两条恢复出路——把该任务移到第 N 波，或补 `depends_on` 把顺序声明出来（要保留当前波次，就把「它为何排在后面」的依赖写成显式 `depends_on`）；旧 change 只 WARN 渐进。**判不了按成因二分**：**载体缺席**（无 `## 波次划分` 段 / 段名无从派生）→ 打印「未校验（无波次段）」并跳过该判据（未验证 ≠ 通过）；**内容不可判**（段在场而没有一行 Wave 行能落到真实任务 id——正文只写 `N/A`、Wave 行点的是不存在的 id、行首强调记号让 Wave 行不成立）→ 出口打印 `TASK.md 波次划分段内容不可判`，新 change BLOCKED / 旧 change WARN 渐进（该行进入 WARN 计数）。**覆盖义务**：TASK 里的每个非修复族任务都必须被某个 Wave 行覆盖（修复族不要求排进波次），漏写的任务在明细里以「未声明」的当前波逐条点名——没有「当前波」可挪，恢复出路是把它写进应到波的 Wave 行。`replan` 重校走同一判据、同一报文，不豁免。**与混排合法化并存**：本条只要求「波次编号与依赖层级一致」，不恢复旧的「并行块必须连续成组」形态约束——上面的串→并→串混排照旧合法，并行任务的先后位置照旧不受限制。
+**波次 = 依赖层级的投影（波次编号的判据）**：`## 波次划分` 里的波次编号不是自由排版，而是任务依赖层级的投影——① 每个任务的波次 = 其依赖中最晚波次的下一波（无依赖 = 第 1 波）；② 同波任务必须彼此没有依赖；③ 想让某任务晚一点跑，就写 `depends_on` 把顺序声明出来，而不是把它挪到后面的波却不声明。声明波次与依赖层级不一致（同波依赖 / 排在依赖之前 / 明明只需更早波次却排得更靠后）→ 出口 **BLOCKED**：明细逐条点名「任务 / 依赖 / 当前波 / 应到波」，并给两条恢复出路——把该任务移到第 N 波，或补 `depends_on` 把顺序声明出来（要保留当前波次，就把「它为何排在后面」的依赖写成显式 `depends_on`）。**判不了按成因二分**：**载体缺席**（无 `## 波次划分` 段 / 段名无从派生）→ 打印「未校验（无波次段）」并跳过该判据（未验证 ≠ 通过）；**内容不可判**（段在场而没有一行 Wave 行能落到真实任务 id——正文只写 `N/A`、Wave 行点的是不存在的 id、行首强调记号让 Wave 行不成立）→ 出口打印 `TASK.md 波次划分段内容不可判`，一律 BLOCKED（同一形态一个判级）。**覆盖义务**：TASK 里的每个非修复族任务都必须被某个 Wave 行覆盖（修复族不要求排进波次），漏写的任务在明细里以「未声明」的当前波逐条点名——没有「当前波」可挪，恢复出路是把它写进应到波的 Wave 行。`replan` 重校走同一判据、同一报文，不豁免。**与混排合法化并存**：本条只要求「波次编号与依赖层级一致」，不恢复旧的「并行块必须连续成组」形态约束——上面的串→并→串混排照旧合法，并行任务的先后位置照旧不受限制。
 
-**硬性拦截（规划出口 BLOCKED，附恢复指引）**：任务块结构（至少一个 `<task>` 块）/ 每任务 `<verify>` 字段 / 新格式任务的 7 字段在场（集合见上表；新 change 缺任一即 BLOCKED，旧格式模板 / 旧 change 渐进 WARN）/ 任务图依赖环 / 缺失依赖（`depends_on` 引用不存在的任务 id）/ 并行写写冲突（并行任务 `write_files` 重叠）/ 波次声明与依赖层级不一致（明细与两条恢复出路见上一条）——任一项不成立即在规划出口被 BLOCKED（读写重叠仅 WARN），按提示修正后重新 exit 即可通过。任务间依赖不得成环（如 A→B→A），也不得构成不可满足的依赖链。
+**硬性拦截（规划出口 BLOCKED，附恢复指引）**：任务块结构（至少一个 `<task>` 块）/ 每任务 `<verify>` 字段 / 新格式任务的 7 字段在场（集合见上表；缺任一即 BLOCKED——7 字段一项在旧式一字段模板形态下仅 WARN）/ 任务图依赖环 / 缺失依赖（`depends_on` 引用不存在的任务 id）/ 并行写写冲突（并行任务 `write_files` 重叠）/ 波次声明与依赖层级不一致（明细与两条恢复出路见上一条）——任一项不成立即在规划出口被 BLOCKED（读写重叠仅 WARN），按提示修正后重新 exit 即可通过。任务间依赖不得成环（如 A→B→A），也不得构成不可满足的依赖链。
 
 **警示**：落笔时先画依赖方向再标 [P]，避免出口返工。
 
@@ -95,7 +95,7 @@ This node decomposes the technical design into atomic, executable tasks with cle
    - Flow-comet override: the permissive flow-kit upstream semantics — "no conflict ⇒ [P]" and "same layer = same wave, parallel" — are superseded by this node's rule; the vendored upstream files stay read-only and are not modified.
    - Output wave diagram: `Wave 1: T01[P], T02[P]` etc.; isolated tasks appear as serial steps.
 
-   A declared wave that disagrees with the dependency level — a same-wave dependency, a task placed before its dependency, or a conservative placement later than needed — blocks a new change at the plan exit: every mismatch is named as task / dependencies / declared wave / expected wave, together with the two ways out (move it to wave N, or add the `depends_on` that explains the order), while an older change only warns. When the section is absent (no `## 波次划分` section, or its name cannot be derived), the exit prints "not checked (no wave section)" and skips the rule — unverified is not a pass. When the section is present but no Wave line resolves to a real task (a body that only says N/A, a line naming an unknown id, a leading emphasis mark that breaks the line), the content cannot be judged: a new change blocks there, an older change warns, and that warning is counted with the other warnings. Every task in the set must be covered by some Wave line (the fix-task family excepted); a task the section never mentions is named with "undeclared" as its current wave, and the way out is to write it into the wave it should reach. `replan` runs the same judgement with the same wording. This rule constrains the agreement between wave numbers and dependency levels only: it does not bring back the old "parallel blocks must be contiguous" shape constraint, so the mixed-sequence freedom above stands (serial → parallel → serial stays legal).
+   A declared wave that disagrees with the dependency level — a same-wave dependency, a task placed before its dependency, or a conservative placement later than needed — blocks at the plan exit: every mismatch is named as task / dependencies / declared wave / expected wave, together with the two ways out (move it to wave N, or add the `depends_on` that explains the order). When the section is absent (no `## 波次划分` section, or its name cannot be derived), the exit prints "not checked (no wave section)" and skips the rule — unverified is not a pass. When the section is present but no Wave line resolves to a real task (a body that only says N/A, a line naming an unknown id, a leading emphasis mark that breaks the line), the content cannot be judged: it blocks there. Every task in the set must be covered by some Wave line (the fix-task family excepted); a task the section never mentions is named with "undeclared" as its current wave, and the way out is to write it into the wave it should reach. `replan` runs the same judgement with the same wording. This rule constrains the agreement between wave numbers and dependency levels only: it does not bring back the old "parallel blocks must be contiguous" shape constraint, so the mixed-sequence freedom above stands (serial → parallel → serial stays legal).
 
 8. **LESSONS scan**: Grep `.specs/LESSONS.md` for keywords related to planned file paths or actions. If active lessons hit, declare difference or confirm still applies.
 
@@ -106,12 +106,12 @@ The full task decomposition protocol, XML template, and constraints are in:
 
 This node is truly done when:
 - `.specs/<change-id>/TASK.md` exists in XML format.
-- At least one `<task>` block exists; every task carries a `<verify>` field, and the 7-field set `name` / `read_files` / `write_files` / `action` / `verify` / `done` / `depends_on` is present (`id` is an **attribute** of the `<task>` element, not a field) — field **presence** is enforced by the guard (missing any field on a new-format task in a new change = exit BLOCKED; old-format templates / old changes degrade to WARN), while **field content quality** is judged by review.
+- At least one `<task>` block exists; every task carries a `<verify>` field, and the 7-field set `name` / `read_files` / `write_files` / `action` / `verify` / `done` / `depends_on` is present (`id` is an **attribute** of the `<task>` element, not a field) — field **presence** is enforced by the guard (missing any field on a new-format task = exit BLOCKED; a task set written in the old one-field template shape degrades to WARN — that tier follows the template shape, not the age of the change), while **field content quality** is judged by review.
 - Every `verify` field is an executable command (not a description).
 - Every `write_files` is strictly within DESIGN.md touched + new modules range (not in forbidden list).
 - Every `[P]` mark has a genuine concurrent companion in its wave with non-overlapping `write_files`; isolated tasks are serial (a fully serial plan is valid when no genuine companion exists).
 - Wave division diagram is clear and has no circular dependencies.
-- Wave numbers agree with dependency levels: each wave is one past the latest dependency wave, and tasks sharing a wave have no dependencies between them (an absent wave section is reported as "not checked", never as a pass; a section whose content cannot be judged blocks a new change and only warns on an older change).
+- Wave numbers agree with dependency levels: each wave is one past the latest dependency wave, and tasks sharing a wave have no dependencies between them (an absent wave section is reported as "not checked", never as a pass; a section whose content cannot be judged blocks).
 - Task numbering is continuous.
 
 ### Red flags
@@ -171,7 +171,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record plan '{"summary
 | Guardrail ID | Label | Validation Type |
 |--------------|-------|-----------------|
 | `plan-artifacts` | TASK.md exists with XML tasks | artifact-exists |
-| `task-fields-complete` | All tasks have 7 required fields | 结构在场（新格式任务缺任一字段 = 出口 BLOCKED；旧格式模板 / 旧 change 渐进 WARN）——**字段内容质量**由 review 把关 |
+| `task-fields-complete` | All tasks have 7 required fields | 结构在场（新格式任务缺任一字段 = 出口 BLOCKED；旧式一字段模板形态的缺项仅 WARN——按模板形态分级）——**字段内容质量**由 review 把关 |
 | `write-files-safe` | No write_files in DESIGN forbidden list | 执行纪律（review 把关），guard 不校验 |
 | `has-parallel` | At least 1 [P] task (if applicable) | 执行纪律（review 把关），guard 不校验 |
 

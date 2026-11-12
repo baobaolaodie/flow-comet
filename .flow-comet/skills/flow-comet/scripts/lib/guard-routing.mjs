@@ -4,7 +4,7 @@
 // 依赖方向单向：本模块 → 既有共享模块（state-schema / protocol-utils / task-parsing /
 // route-node）+ guard-state-io；反向 import 不存在。
 
-import { promises as fs } from 'fs';
+import { existsSync, promises as fs, readdirSync } from 'fs';
 import path from 'path';
 import { handoffRequestWithdrawn } from '../state-schema.mjs';
 import { inspectWorkflowProtectedPath } from '../protocol-utils.mjs';
@@ -13,14 +13,14 @@ import { resolveNextNode, normalizeHeading, FIX_SECTION_TITLE_FALLBACK } from '.
 import { runRoot, fileExists, workflowRelativeSegments } from './guard-state-io.mjs';
 import { SUMMARY_REQUIRED_SECTIONS, buildSkeleton } from './guard-artifact-skeleton.mjs';
 // 归档目录名「是不是本 change 的」判据单源在状态族的路径上下文模块（guard → state-* 是允许的
-// 单向边）：本模块只消费，不在这里另写一份后缀/日期匹配。
-import { isArchivedChangeDirName } from './state-io.mjs';
-
-// 新旧 change 区分——init 写入的 newChange: true = 新 change（严格，不依赖 entry——防系统性
-// 跳 entry 绕过）；缺失/非 true（旧 change）= 渐进 WARN 兼容。
-export function isNewChange(state) {
-  return state.newChange === true;
-}
+// 单向边）：本模块只消费，不在这里另写一份后缀/日期匹配。恢复动作的分叉（archivedChangeLocationAt /
+// recoveryActionTextAt）同样落在那里——四类消费方之一在状态命令族（next 的节点顺序门禁），而状态族
+// 反向 import 门禁族会把整个守卫图拖进 workflow-state.mjs。本模块只做薄包装（注入 runRoot），既有
+// 导出面与调用点因此不变。
+import { isArchivedChangeDirName, archivedChangeLocationAt, recoveryActionTextAt } from './state-io.mjs';
+// 归档日期判据与「今天」的形态同属时间纪律单一来源（time-utils）：本模块只取用——不为一条目录名
+// 诊断另写日期正则，也不自行拼当前日期。
+import { archiveDateFromName, formatLocalDate } from '../time-utils.mjs';
 
 // flow-kit SUMMARY 模板必填段（正则匹配，大小写不敏感 + 变体兼容）——清单唯一来源是骨架模块，
 // 此处只取用（本模块不再自持第二份段名清单）。
@@ -196,8 +196,16 @@ export function patternToRegExp(pattern) {
   return new RegExp('^' + String(pattern).split('*').map(escapeRegExp).join('.*') + '$', 'u');
 }
 
-export async function pathPatternExists(root, relativePattern) {
+// 在场判定（协议声明的产物路径 → 是否在场）。归档 change 目录段（`archive/<任意>-<change-id>`）的
+// 通配只表达「归档位下本 change 的目录」——目录名本身另有唯一规则（<YYYY-MM-DD>-<change-id>，判据
+// 单源 state-io.isArchivedChangeDirName）。带 change 调用时，名字不合规的目录**不算在场**：它由产物门
+// 当场报出实际名字与改名命令（archiveDirNameNotice），而不是被当成「本 change 的归档产物」放行。
+// 非归档通配段（以及未传 change 的调用）逐字保持既有语义——放宽/收紧只落在这一个位置。
+export async function pathPatternExists(root, relativePattern, { change = null } = {}) {
   const parts = workflowRelativeSegments(relativePattern, 'artifact path', true);
+  const archiveChangeDirSegment = change !== null && parts[0] === 'archive' && (parts[1] ?? '').includes('*')
+    ? 1
+    : -1;
   async function walk(current, index) {
     const inspection = await inspectWorkflowProtectedPath(
       runRoot,
@@ -227,9 +235,9 @@ export async function pathPatternExists(root, relativePattern) {
             path.join(current, entry.name),
         );
       }
-      if (matcher.test(entry.name) && (await walk(path.join(current, entry.name), index + 1))) {
-        return true;
-      }
+      if (!matcher.test(entry.name)) continue;
+      if (index === archiveChangeDirSegment && !isArchivedChangeDirName(entry.name, change)) continue;
+      if (await walk(path.join(current, entry.name), index + 1)) return true;
     }
     return false;
   }
@@ -299,7 +307,7 @@ export async function declaredRequiredArtifacts(protocol, node, change) {
       if (!unspecifiedPaths) {
         const artifactRoot = await workflowArtifactRoot(artifact.pathBase);
         present = (await Promise.all(
-          resolvedPaths.map((declaredPath) => pathPatternExists(artifactRoot, declaredPath)),
+          resolvedPaths.map((declaredPath) => pathPatternExists(artifactRoot, declaredPath, { change })),
         )).some(Boolean);
       }
       declared.push({ schemaId, artifact, resolvedPaths, present, kind: artifact.kind, unspecifiedPaths });
@@ -330,6 +338,75 @@ export async function isArchivedChange(changeName) {
   if (await fileExists(path.join(archiveRoot, changeName))) return true;
   const entries = await fs.readdir(archiveRoot).catch(() => []);
   return entries.some((entry) => entry === changeName || isArchivedChangeDirName(entry, changeName));
+}
+
+// ---------- 归档目录名诊断 / 目录位置在恢复指引里的说法 ----------
+
+// 归档区里「名字像是本 change 的、却没有日期前缀」的目录（如 foo-<id>）——运行路径不再解释它，
+// 所以要当场给出期望格式与改名命令，而不是把它当「不在场」→ 报缺件（那会让人去补一件其实存在的
+// 产物）。判据单源 = state-io.isArchivedChangeDirName，本函数只负责挑出这一类。
+// 两个刻意排除的形态：① 合规名（<YYYY-MM-DD>-<change-id>）是正常态；② 日期前缀在场但不是本 change
+// 的目录（如 2026-10-20-other-<id>）是**别人的归档**——把它当成「本 change 错名了」就是误报。
+function misnamedArchiveChangeDirs(changeName) {
+  if (!changeName) return [];
+  let entries = [];
+  try {
+    entries = readdirSync(path.join(runRoot, '.specs', 'archive'));
+  } catch {
+    return [];
+  }
+  const suffix = '-' + changeName;
+  return entries
+    .filter((entry) => entry.endsWith(suffix)
+      && !isArchivedChangeDirName(entry, changeName)
+      && archiveDateFromName(entry) === null)
+    .sort()
+    .map((entry) => ({ name: entry, display: '.specs/archive/' + entry }));
+}
+
+// 错名归档目录的**同一句**报文（出口产物门与结构化预检都渲染这一句，措辞只此一处）：期望格式 +
+// 实际目录名 + 可整行照抄的改名命令。改名命令的路径用与其余报文一致的 .specs/ 相对形态（平台无关、
+// 可直接贴进 shell），日期取本次搬移日（= 今天，与「归档日期由执行者按搬移日填写」同义）。
+export function archiveDirNameNotice(changeName, nodeId) {
+  const problems = misnamedArchiveChangeDirs(changeName);
+  if (problems.length === 0) return [];
+  const expected = '<YYYY-MM-DD>-' + changeName;
+  const today = formatLocalDate(new Date());
+  const lines = ['BLOCKED: 归档目录名不合规（' + problems.length + ' 处）——本 change 的归档目录名必须是 '
+    + expected + '（日期前缀 + change 名，运行路径只认这一种）:'];
+  const target = '.specs/archive/' + today + '-' + changeName;
+  for (const problem of problems) {
+    lines.push('  - ' + problem.display + '（实际目录名: ' + problem.name + '）');
+  }
+  let renameCommandGiven = false;
+  if (problems.length > 1) {
+    // 多份错名目录会拼出**同一个**目标名：第一条 mv 之后第二条会把源目录搬进那个目录之下，
+    // 而不是改名——先让人只留一份，再按命令改名。
+    lines.push('    改名目标相同（' + target + '）——先只保留本 change 的那一份（删除或改名其余），重试后再改名');
+  } else if (existsSync(path.join(runRoot, target))) {
+    // 目标已在场时 mv 同样会把源目录搬进那个目录之下：先核对，不打印会改变目录结构的命令。
+    lines.push('    目标目录已存在（' + target + '）——先核对哪一份是本 change 的，删除或移走后重试');
+  } else {
+    lines.push('    改名: mv "' + problems[0].display + '" "' + target + '"');
+    renameCommandGiven = true;
+  }
+  // 恢复语的动词跟着有没有命令走：多份错名 / 目标已存在两形态不打印命令，说「按上面的命令」会让人找
+  // 一条不存在的命令（判据已满足，措辞不能自相矛盾）。
+  lines.push('恢复: ' + (renameCommandGiven ? '按上面的命令改名后' : '按上面的指引处理后')
+    + '重试 exit ' + nodeId + '——脚本不替你搬目录，也不猜目录名');
+  return lines;
+}
+
+// 恢复动作与归档位置的唯一实现已迁到状态族（state-io.archivedChangeLocationAt /
+// recoveryActionTextAt）：第四类消费方（next 的节点顺序门禁）在状态命令族，分叉必须落在两边都能
+// 取用、又不会让状态族反向依赖门禁族的模块里。本模块保留既有导出面作为薄包装（注入 guard 运行根），
+// guard-gates / guard-evidence-gates 的调用点因此逐字不变。
+export function archivedChangeLocation(changeName) {
+  return archivedChangeLocationAt(runRoot, changeName);
+}
+
+export function recoveryActionText(changeName, activeText) {
+  return recoveryActionTextAt(runRoot, changeName, activeText);
 }
 
 // 段名校验基准从模板自动派生——骨架计算统一委托 lib/guard-artifact-skeleton.mjs（单一实现：读

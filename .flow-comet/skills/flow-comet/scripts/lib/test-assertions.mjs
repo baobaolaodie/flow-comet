@@ -194,7 +194,6 @@ export function fixReturnBaseState(overrides = {}) {
     verifyFailures: 0,
     executionMode: 'subagent',
     directOverride: false,
-    newChange: true,
     ...overrides,
   };
 }
@@ -271,7 +270,6 @@ export function reentryArchiveState(overrides = {}) {
     verifyFailures: 0,
     executionMode: 'subagent',
     directOverride: false,
-    newChange: true,
     status: 'running',
     branchMode: true,
     enablePrReview: false,
@@ -407,7 +405,6 @@ export function replanExecuteState(overrides = {}) {
     verifyFailures: 0,
     executionMode: 'subagent',
     directOverride: false,
-    newChange: true,
     status: 'running',
     branchMode: false,
     enablePrReview: false,

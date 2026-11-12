@@ -34,10 +34,15 @@ description: "flow-kit INTEGRATION 阶段协议：集成验证 + UAT + 失败诊
 
 ### 归档（archive 阶段）
 
-1. `.specs/<change-id>/` → `.specs/archive/<YYYY-MM-DD>-<change-id>/`
-2. `.specs/CHANGELOG.md` 顶部按日期倒序插入一行——**跟随项目既有格式**（非表格格式同样在顶部插入，不强制转表格；guard 的倒序检测只针对表格格式行）——完整协议见 `flow-comet-archive` 册
-3. **不归档** `.specs/LESSONS.md`（项目级常驻）
-4. DESIGN.md § 9 架构沉淀建议留待 A-evolve 批量同步
+> **硬规则（先于任何动作）**：archive 节点的**技能加载声明必须先于任何动作，尤其先于搬目录**——先用 Skill 工具加载 `flow-comet-integration`，再照抄 `flow-comet-archive` 册的 `skill-load` 命令写下声明标记，之后才开始下面的步骤。移动目录之后补声明 / 补记录仍可完成（引擎按状态判身份、按解析到的目录读写标记），但那是**恢复路径**；规范顺序永远是**先记录、后搬目录**。
+
+1. **准备**：LESSONS 提名（本册上段）与遗留清单（`KNOWN-ISSUES.md`）就位——本步只写工件，不动目录。
+2. **记录**：`node .claude/skills/flow-comet/scripts/workflow-state.mjs record archive '<evidence JSON>'` 写下归档证据——**搬目录之前的最后一件证据动作**。
+3. **搬目录**：`.specs/<change-id>/` → `.specs/archive/<YYYY-MM-DD>-<change-id>/`——本流程唯一的不可逆动作，排在声明与记录之后。
+4. **登记**：`.specs/CHANGELOG.md` 顶部按日期倒序插入一行——**跟随项目既有格式**（非表格格式同样在顶部插入，不强制转表格；guard 的倒序检测只针对表格格式行）——完整协议见 `flow-comet-archive` 册；**不归档** `.specs/LESSONS.md`（项目级常驻）。
+5. **通知与出口**：向用户列出遗留清单并告知沉淀候选 → `workflow-guard.mjs exit archive --apply`（**搬目录仍是 `exit` 的前置**）。
+
+DESIGN.md § 9 架构沉淀建议留待 A-evolve 批量同步。
 
 ## 产物
 

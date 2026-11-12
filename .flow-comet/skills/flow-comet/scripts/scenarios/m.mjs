@@ -915,7 +915,7 @@ export const ENTRIES = [
 
       // ② 段缺席（CONTEXT 不含 intel-scan 段）→ 无可比对面 → 零提示
       writeFile(dir, '.specs/CONTEXT.md', contextFixtureText({ intelSection: false }));
-      const noSection = runStateWithProtocol(dir, ['init', CHANGE_ID + '-no-section']);
+      const noSection = runStateWithProtocol(dir, ['init', CHANGE_ID + '-no-section', '--replace', CHANGE_ID, '--reason', '验证段缺席零误报']);
       assertExit(noSection, 0);
       assertNotOut(noSection, 'INIT-NOTICE');
 
@@ -923,7 +923,7 @@ export const ENTRIES = [
       //    写入」长期不可见）；占位词元之后的说明不参与判定（类别由词元决定）
       writeFile(dir, '.specs/CONTEXT.md',
         contextFixtureText().replace(INTEL_FIELD_VALUE, '（待扫描）'));
-      const placeholder = runStateWithProtocol(dir, ['init', CHANGE_ID + '-placeholder']);
+      const placeholder = runStateWithProtocol(dir, ['init', CHANGE_ID + '-placeholder', '--replace', CHANGE_ID + '-no-section', '--reason', '验证占位取值不静默']);
       assertExit(placeholder, 0);
       assertOut(placeholder, 'INIT-NOTICE');
       assertOut(placeholder, '段内取值不是合法时间戳');

@@ -17,29 +17,30 @@ import {
   writeState,
 } from '../lib/test-helpers.mjs';
 import {
+  assertGitignoreManaged,
+  bridgeIdentityEnv,
   BUILTIN_PROTOCOL_SOURCE,
   CHANGE_ID,
   GUARD,
   HOOK,
   LEGACY_RUNTIME_DIR,
-  MIGRATION_CHANGE,
-  PREPARE_ENV,
-  REPO_ROOT,
-  RUNTIME_DIR,
-  RUNTIME_STATE_NAME,
-  SCRIPTS_DIR,
-  assertGitignoreManaged,
-  bridgeIdentityEnv,
   makeTmp,
   migratableStateBytes,
+  MIGRATION_CHANGE,
   migrationBackups,
   normalizeRoot,
+  PREPARE_ENV,
+  REPO_ROOT,
   runGitignoreForm,
   runInstalled,
   runPrepareEnv,
+  RUNTIME_DIR,
+  RUNTIME_STATE_NAME,
+  SCRIPTS_DIR,
   writeClassicCometAssets,
   writeIntakeArtifacts,
   writeMigratedProjectArtifacts,
+  writeNodeDeclarationMarkers,
   writeSharedCometDir,
 } from '../lib/test-fixtures.mjs';
 import {
@@ -328,6 +329,7 @@ export const ENTRIES = [
         st.status = 'running';
         st.evidence.open = { summary: 'intake complete' };
         writeState(proj, st);
+        writeNodeDeclarationMarkers(proj, 'open');
         if (withClassic) writeClassicCometAssets(proj);
         return proj;
       };
@@ -378,6 +380,7 @@ export const ENTRIES = [
         st.status = 'running';
         st.evidence.open = { summary: 'intake complete' };
         writeState(proj, st);
+        writeNodeDeclarationMarkers(proj, 'open');
         writeClassicCometAssets(proj); // 叠加分支的前置（classic 活动 change）在场
         return proj;
       };
@@ -1278,7 +1281,7 @@ export const ENTRIES = [
         '## intel-scan 元数据 ##', '- **last_intel_scan**: x', '- **scanner**: x', '- **下次重扫建议**: x',
         '',
       ].join('\n'));
-      const boundary = runStateWithProtocol(dir, ['init', CHANGE_ID + '-2', '--init-context']);
+      const boundary = runStateWithProtocol(dir, ['init', CHANGE_ID + '-2', '--init-context', '--replace', CHANGE_ID, '--reason', '验证段标题闭合标记判定']);
       assertExit(boundary, 0);
       assertOut(boundary, 'INIT-VALIDATE-FAILED');
       assertOut(boundary, '项目概要');

@@ -281,6 +281,8 @@ export function runPrintedCommand(command, root, envOverrides = {}) {
 }
 
 // 最小合法 state（夹具起点）：字段与状态校验器的类型要求同形；node 为当前节点。
+// enteredNodes 默认含当前节点：这是「已 entry」的正常在途形态（未 entry 即 exit 一律 BLOCKED）。
+// 专门测 entry 门的场景自行构造不含该节点的 state（显式覆盖或 delete）。
 export function baseState(node) {
   return {
     activeChange: CHANGE_ID,
@@ -290,5 +292,6 @@ export function baseState(node) {
     verifyFailures: 0,
     executionMode: 'subagent',
     directOverride: false,
+    enteredNodes: [node],
   };
 }

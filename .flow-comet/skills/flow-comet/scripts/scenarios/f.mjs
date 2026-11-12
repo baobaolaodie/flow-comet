@@ -17,24 +17,26 @@ import {
 } from '../lib/test-helpers.mjs';
 import {
   CHANGE_ID,
+  engineDefinitionHits,
+  engineDefinitionModule,
+  engineScriptTexts,
+  handoffFor,
   HOOK,
+  renderMultiWaveTasks,
   REPO_ROOT,
+  runPlanExit,
   SCRIPTS_DIR,
+  skillTreeDocFiles,
+  strictSummary,
+  summaryContent,
   TASK_P1,
   TASK_P2,
   TASK_P2_PENDING,
   TASK_VALID_ALL_SERIAL,
   TASK_VALID_PS,
   TASK_VALID_SP,
-  engineDefinitionHits,
-  engineDefinitionModule,
-  engineScriptTexts,
-  handoffFor,
-  renderMultiWaveTasks,
-  runPlanExit,
-  skillTreeDocFiles,
-  summaryContent,
   writeIntakeArtifacts,
+  writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import {
   runStateWithProtocol,
@@ -175,7 +177,7 @@ export const ENTRIES = [
       // 清空：全部 done + SUMMARY 在场 → 委托与串行均无残留 → review（产物门控照旧）。
       // 状态取真实链路形态：completedNodes 按路由序排列（末元素 = subagent-execute，
       // 其 exit --apply 已把 currentNode 推到 review——正常推进豁免放行 next）
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       res = goNext('review', ['T01', 'P01', 'P02', 'T02', 'P03', 'P04'], ['execute', 'subagent-execute']);
       assertExit(res, 0);
       assertOut(res, 'NODE: review');
@@ -246,8 +248,8 @@ export const ENTRIES = [
       assertOut(res, 'NODE: execute');
       // ③ 全部 done + SUMMARY 在场 → 合取完成（无 eligible ∧ 无 serial pending）→ review
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1 + pDone('P02', 'P01') + t03('done'));
-      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent());
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T03-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', strictSummary('T01'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T03-SUMMARY.md', strictSummary('T01'));
       res = runStateWithProtocol(dir, ['next']);
       assertExit(res, 0);
       assertOut(res, 'NODE: review');
@@ -468,8 +470,9 @@ export const ENTRIES = [
         '<task id="T03" parallel="true" status="pending"><action>实现 T03</action><write_files>src/t3.mjs</write_files><verify>node --check src/t3.mjs</verify><depends_on>T01</depends_on></task>\n' +
         '<task id="T04" parallel="false" status="pending"><action>实现 T04</action><write_files>src/t4.mjs</write_files><verify>node --check src/t4.mjs</verify><depends_on>T02,T03</depends_on></task>\n' +
         '<task id="T05" parallel="false"><action>遗留无状态串行</action><write_files>src/t5.mjs</write_files><verify>node --check src/t5.mjs</verify></task>\n');
+      writeNodeDeclarationMarkers(dir, 'execute');
       assertExit(runGuard(['entry', 'execute'], dir), 0);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
       writeState(dir, st2);
@@ -495,7 +498,7 @@ export const ENTRIES = [
         '<task id="T03" parallel="true" status="pending"><action>实现 T03</action><write_files>src/t3.mjs</write_files><verify>node --check src/t3.mjs</verify><depends_on>T01</depends_on></task>\n' +
         '<task id="T04" parallel="false" status="pending"><action>实现 T04</action><write_files>src/t4.mjs</write_files><verify>node --check src/t4.mjs</verify></task>\n');
       assertExit(runGuard(['entry', 'execute'], dir), 0);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['T01']) };
       writeState(dir, st2);
@@ -525,7 +528,6 @@ export const ENTRIES = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' +
         '<task id="T01"><action>实现 T01</action><write_files>src/todo_x.py; tests/test_todo_x.py</write_files><verify>node --check src/todo_x.py</verify></task>\n');
       const st = baseState('subagent-execute');
-      st.newChange = true;
       writeState(dir, st);
       // 技能加载前置门材料：新 change 下 request 须有本节点声明标记
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID, '.skill-loads'), { recursive: true });
@@ -587,8 +589,10 @@ export const ENTRIES = [
   {
     name: '182 execute 出口静默：全部任务 done 后无 ROUTE WARN',
     run: (dir) => {
+      writeNodeDeclarationMarkers(dir, 'execute');
       const st = baseState('execute');
       st.evidence.execute = { summary: 'executed' };
+      st.completedNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute'];
       writeState(dir, st);
       // 未分类并行任务（缺 status）自初始 TASK 在场——全部可解析任务 done 后，
       // 该任务按「缺 status 不视为 pending」文档语义保持静默（与既有「无可解析 pending 静默」
@@ -596,8 +600,8 @@ export const ENTRIES = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1 + TASK_P2 +
         '<task id="P03" parallel="true"><action>实现 P03</action><write_files>src/p3.mjs</write_files><verify>node --check src/p3.mjs</verify></task>\n');
       assertExit(runGuard(['entry', 'execute'], dir), 0);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent());
-      writeFile(dir, '.specs/' + CHANGE_ID + '/P02-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', strictSummary('T01'));
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P02-SUMMARY.md', strictSummary('T01'));
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['P01', 'P02']) };
       writeState(dir, st2);
@@ -620,7 +624,7 @@ export const ENTRIES = [
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n' + TASK_P1 +
         '<task id="T02" parallel="false" status="pending"><action>实现 T02</action><write_files>src/t2.mjs</write_files><verify>node --check src/t2.mjs</verify><depends_on>P01</depends_on></task>\n');
       assertExit(runGuard(['entry', 'execute'], dir), 0);
-      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', summaryContent());
+      writeFile(dir, '.specs/' + CHANGE_ID + '/P01-SUMMARY.md', strictSummary('T01'));
       const st2 = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       st2.evidence['subagent-execute'] = { handoffResult: handoffFor(['P01']) };
       writeState(dir, st2);
@@ -946,7 +950,7 @@ export const ENTRIES = [
           ['AC 覆盖 · 判不了即未校验（中文）', '未校验（<原因>）'],
           ['AC 覆盖 · 不改退出码（中文）', '不改变退出码'],
           ['AC 覆盖 · 内容不可判按分级（中文）', 'AC 覆盖判据无法执行'],
-          ['AC 覆盖 · 内容不可判进 WARN 计数（中文）', '该行进入 WARN 计数'],
+          ['AC 覆盖 · 内容不可判同判 BLOCKED（中文）', '一律 BLOCKED（同一形态一个判级）'],
         ];
         const acAnchorsEn = [
           ['AC 覆盖 · 判不了即未校验（英文）', 'not checked (<reason>)'],
@@ -1065,8 +1069,8 @@ export const ENTRIES = [
             '报文按**协议派生**给出该节点**每个** `guarded` 必需技能各一条命令'],
           ['展开册 · 恢复命令一次给全、照抄即通', 'flow-comet/reference/entry-detail.md',
             '三个面一次给全，照抄即通'],
-          ['展开册 · 分级（新 BLOCKED / 旧 WARN）', 'flow-comet/reference/entry-detail.md',
-            '新 change BLOCKED（强制全部覆盖）、旧 change 只 WARN'],
+          ['展开册 · 单轨判级（同一形态一律 BLOCKED）', 'flow-comet/reference/entry-detail.md',
+            '同一形态一律 BLOCKED（强制全部覆盖'],
           ['展开册 · 旧单值标记按 basename 计入覆盖', 'flow-comet/reference/entry-detail.md',
             '照样按 basename 计入覆盖'],
         ];
@@ -1146,16 +1150,18 @@ export const ENTRIES = [
           }
         }
       }
-      // —— ⑦ 文档口径与实现一致：入口只拦错路径 / 旧 change 按 `newChange` 标记分级 ——
+      // —— ⑦ 文档口径与实现一致：入口只拦错路径 / 排障册的分级句按初始化标记表述 ——
       // 与实现逐条对账（不在断言里写第二份判据）：
       //   ① 入口侧的声明核对只判「已写下的每条声明是否落在节点协议面内」——缺失不在入口判；
       //      「该读的每份是否都声明过」只在出口判。两册必须这样写——旧口径「错路径与少声明都由入口拦」
       //      把出口的判据说成了入口的，读者会以为少声明也能在入口被挡下。
-      //   ② 旧 change 的分级判据是 `state.newChange === true`（`isNewChange`）——排障册不得再写成
-      //      「本规则之前创建的 change」：那是拿时间猜判据，而判据只有一个输入（初始化标记在不在）。
-      //      公开面不直写机器状态字段名（键名黑名单在场景 105），故文档侧一律写行为描述。
-      // 判据 = 锚句逐条在其所属册在场 + 旧句零残留 + 排障册每处旧 change 分级句都按标记表述；
-      // 反向构造：抽掉任一锚 ⇒ 必报缺该锚；还原旧句 / 摘掉某行的标记 ⇒ 必报残留或该行违规。
+      //   ② 双向分级已退役（单轨：同一形态一个判级），排障册里经裁决已删净「旧 change 只告警」句。
+      //      本段因此保留两件**回流防护**：按时间猜判据的旧句零残留；若谁再把分级句写回排障册，
+      //      必须按「初始化标记」表述而不是按时间（公开面不直写机器状态字段名——键名黑名单在场景
+      //      105，故文档侧一律写行为描述）。
+      // 判据 = 锚句逐条在其所属册在场 + 旧句零残留 + 排障册每处分级句都按标记表述；
+      // 反向构造：抽掉任一锚 ⇒ 必报缺该锚；还原旧句 ⇒ 必报残留；注入一条缺标记的分级行 ⇒ 必报
+      // 该行违规（分级行已被删净后，判别力由这条合成前提承担，不再依赖真实文档里是否还剩该句）。
       {
         const skillRoot = path.join(SCRIPTS_DIR, '..');
         const wordingDocs = {
@@ -1188,12 +1194,16 @@ export const ENTRIES = [
             'docs/MECHANISM-zh.md': ['规则生效之前创建', '在本规则之前创建'],
           },
         };
-        // 排障册里每一处「旧 change 只告警」都别写成按时间判——判据只有「标记在不在」这一个输入。
-        // 判别句不是键名而是**行为描述**：公开面不直写机器状态字段名（场景 105 的黑名单），
-        // 所以文档只能写「初始化标记」这类说法——判据锚它，锚键名会与那条纪律直接打架。
+        // 排障册里若还出现「旧 change 只告警」一类的分级行，别把它写成按时间判——判据只有「标记在
+        // 不在」这一个输入。判别句不是键名而是**行为描述**：公开面不直写机器状态字段名（场景 105 的
+        // 黑名单），所以文档只能写「初始化标记」这类说法——判据锚它，锚键名会与那条纪律直接打架。
+        // 单轨退役后这类分级行已按裁决删净；本规则保留为回流防护，probe 是它反向构造用的**合成
+        // 前提**（命中「分级行」形态、不带标记）——不依赖真实文档里是否还剩该句。
         const markerWordingRules = {
-          'docs/TROUBLESHOOTING.md': { line: /\bchange\b[^.]*\bwarn/i, marker: 'initialization marker' },
-          'docs/TROUBLESHOOTING-zh.md': { line: /change[^。]*只告警/, marker: '初始化标记' },
+          'docs/TROUBLESHOOTING.md': { line: /\bchange\b[^.]*\bwarn/i, marker: 'initialization marker',
+            probe: 'an old change only warns (synthetic probe line)' },
+          'docs/TROUBLESHOOTING-zh.md': { line: /change[^。]*只告警/, marker: '初始化标记',
+            probe: '旧 change 只告警（合成探针行）' },
         };
         // 单一判据实现：真实核对与反向构造探针共用（两份实现必然分叉）。
         const wordingProblems = ({ entry, troubleshooting }) => {
@@ -1264,11 +1274,25 @@ export const ENTRIES = [
           const rule = markerWordingRules[rel];
           if (!rule) continue; // 只做旧句零残留的册（机制册）不走逐行探针
           const lines = text.split(String.fromCharCode(10));
-          const hitIndex = lines.findIndex((line) => rule.line.test(line) && line.includes(rule.marker));
-          if (hitIndex < 0) {
-            problems.push('反向构造的前提不成立（' + rel + ': 找不到按标记表述旧 change 分级的行）');
+          // 合成前提：命中「分级行」规则但**不带标记**的行注入同一判据后必须被判违规。单轨退役后
+          // 排障册已按裁决删净那类句子（方向正确），继续拿真实句当探针前提会让判别力探针随文档一起
+          // 消失——判定规则一旦被中和（不再逐行核对标记），这条注入就没人报 ⇒ 探针必红。注入的是
+          // 文本数据，不改真实文件；前提形态（命中规则 ∧ 缺标记）先自检，改规则/改标记词都会当场红。
+          if (!rule.line.test(rule.probe) || rule.probe.includes(rule.marker)) {
+            problems.push('反向构造的前提不成立（' + rel + ': 合成探针行不满足「命中分级行且缺标记」形态）');
             continue;
           }
+          const injectedLines = lines.concat([rule.probe]);
+          const injected = { entry: wordingDocs.entry,
+            troubleshooting: new Map(wordingDocs.troubleshooting)
+              .set(rel, injectedLines.join(String.fromCharCode(10))) };
+          if (!wordingProblems(injected).some((p) => p.includes('第 ' + injectedLines.length + ' 行'))) {
+            problems.push('反向构造判别力缺失（' + rel + ': 注入缺标记的 old change 分级行未被判违规）');
+          }
+          // 真实文档里若仍有按标记表述的分级行，照旧做「摘掉标记 ⇒ 必报该行」的探针（判别力加倍）；
+          // 单轨退役后该句不存在，此处只跳过这一半、不判红——文档该不该有它由真实判据的第一半判。
+          const hitIndex = lines.findIndex((line) => rule.line.test(line) && line.includes(rule.marker));
+          if (hitIndex < 0) continue;
           const mutated = lines.slice();
           mutated[hitIndex] = mutated[hitIndex].split(rule.marker).join('（标记）');
           const stripped = { entry: wordingDocs.entry,
@@ -1761,7 +1785,7 @@ export const ENTRIES = [
             ['委托记账 · 判定先于零提交与子集校验（中文）', '该校验先于零提交语义与提交子集校验'],
             ['委托顺序 · 两件事别混（中文）', '本条管的是「request 与子代理启动的先后」'],
             ['result 需 request · 机制保证（英文）', 'is a mechanism guarantee'],
-            ['委托记账 · 写盘前拒绝（英文）', 'refused before anything is written (a new change blocks'],
+            ['委托记账 · 写盘前拒绝（英文）', 'refused before anything is written (it blocks'],
             ['委托顺序 · 两件事别混（英文）', 'this rule is about the order of the request and the subagent launch'],
           ];
           const bookAnchorProblems = (books, anchors) => {

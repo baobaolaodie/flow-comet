@@ -18,12 +18,6 @@ import {
 } from '../lib/test-helpers.mjs';
 import {
   CHANGE_ID,
-  REPO_ROOT,
-  SCRIPTS_DIR,
-  SIDE_CONTEXT_SCAN,
-  SIDE_EVOLVE,
-  SIDE_HEALTH,
-  SKILL_PROTOCOL_FILE,
   contextInitModule,
   copyEngineTree,
   engineConsumersOf,
@@ -33,14 +27,22 @@ import {
   handoffFor,
   hasNamedImport,
   makeTmp,
+  REPO_ROOT,
   requireModuleExport,
   runSideScript,
-  skillTreeDocFiles,
+  SCRIPTS_DIR,
+  SIDE_CONTEXT_SCAN,
+  SIDE_EVOLVE,
+  SIDE_HEALTH,
+  SKILL_PROTOCOL_FILE,
   skillsRootForScriptsDir,
+  skillTreeDocFiles,
   stateSchemaModule,
+  strictSummary,
   timeSingleSourceConsumerProblems,
   timeUtilsModule,
   treeFingerprint,
+  writeAllNodeDeclarationMarkers,
   writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import {
@@ -98,13 +100,14 @@ export const ENTRIES = [
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
         '# TASK\n\n<task id="T01" parallel="false" status="done"><action>串行任务已完成但缺 SUMMARY</action><write_files>src/t1.mjs</write_files><verify>node --check src/t1.mjs</verify></task>\n');
+      writeFile(dir, '.specs/' + CHANGE_ID + '/T01-SUMMARY.md', strictSummary('T01'));
       const res = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(res, 1);
       assertOut(res, 'BLOCKED');
-      assertOut(res, 'task-summaries');
       assertOut(res, 'EMPTY-EXIT 未生效');
       assertNotOut(res, '豁免已生效');
       // 反向子锚：全并行 change 时豁免仍生效，且输出被跳过项清单（补既有全 parallel 通过锚）
+      writeNodeDeclarationMarkers(dir, 'execute');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md',
         '# TASK\n\n<task id="P01" parallel="true" status="pending"><action>并行任务</action><write_files>src/p1.mjs</write_files><verify>node --check src/p1.mjs</verify></task>\n');
       const resParallel = runGuard(['exit', 'execute', '--apply'], dir);
@@ -682,7 +685,7 @@ export const ENTRIES = [
       writeNodeDeclarationMarkers(dir, 'design', { frontend: true });
       // 正例：前端（「视觉调性」段在场且未标注不适用）+ 工件齐备 + 真实声明
       writeDesignExitFixture(dir, {
-        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: true,
+        visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: true,
       });
       const positive = runGuardWithProtocol(dir, ['exit', 'design']);
       assertExit(positive, 0);
@@ -691,7 +694,7 @@ export const ENTRIES = [
 
       // 负例 A：前端缺 UI-DESIGN.md → BLOCKED + 两条恢复路径
       writeDesignExitFixture(dir, {
-        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: true,
+        visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: true,
       });
       const missingArtifact = runGuardWithProtocol(dir, ['exit', 'design']);
       assertExit(missingArtifact, 1);
@@ -700,7 +703,7 @@ export const ENTRIES = [
 
       // 负例 B：工件齐备但缺 `required-skill:design.flow-comet-ui-design` → BLOCKED（出口不再自动补写）
       writeDesignExitFixture(dir, {
-        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: false,
+        visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: false,
       });
       const missingDeclaration = runGuardWithProtocol(dir, ['exit', 'design']);
       assertExit(missingDeclaration, 1);
@@ -709,21 +712,20 @@ export const ENTRIES = [
 
       // 越界：非前端（「视觉调性」段标注不适用）→ 可见跳过，不要求工件、也不要求该声明
       writeDesignExitFixture(dir, {
-        newChange: true, visualTone: VISUAL_TONE_NOT_APPLICABLE, uiDesign: false, declareUiDesign: false,
+        visualTone: VISUAL_TONE_NOT_APPLICABLE, uiDesign: false, declareUiDesign: false,
       });
       const nonFrontend = runGuardWithProtocol(dir, ['exit', 'design']);
       assertExit(nonFrontend, 0);
       assertOut(nonFrontend, 'UI-DESIGN: skipped（非前端）');
       assertOut(nonFrontend, 'ALL CHECKS PASSED');
 
-      // 恢复：旧 change 前端缺件 → WARN 渐进（不阻断，也不静默放行）
+      // 同构缺件（无任何新旧标记字段）→ 同判 BLOCKED（单轨，无渐进侧）
       writeDesignExitFixture(dir, {
-        newChange: false, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: true,
+        visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: true,
       });
       const legacy = runGuardWithProtocol(dir, ['exit', 'design']);
-      assertExit(legacy, 0);
-      assertOut(legacy, 'UI-DESIGN WARN: 缺 .specs/' + CHANGE_ID + '/UI-DESIGN.md');
-      assertOut(legacy, '旧 change 渐进不阻断');
+      assertExit(legacy, 1);
+      assertOut(legacy, 'BLOCKED: design 出口缺 UI-DESIGN.md');
     },
   },
 
@@ -820,11 +822,14 @@ export const ENTRIES = [
       });
       assertTrue(pointerStripped.some((problem) => problem.includes('指针不在场')),
         '抽掉各册指针未被判违规: ' + JSON.stringify(pointerStripped));
-      // 行为口径的散文锚：非前端可见跳过 + 旧 change 渐进（与 285 的行为断言同源）
+      // 行为口径的散文锚：非前端可见跳过 + 同一形态一个判级（与 285 的行为断言同源）。
+      // 分级双轨已退役：正向锚单轨表述，负向锚旧「旧 change 渐进 WARN」措辞零残留——两侧共守，
+      // 回流即红（旧锁要求「旧 change」在场，等于给已退役的分级背书）。
       const uiDesignSkill = fs.readFileSync(texts['flow-comet-ui-design/SKILL.md'], 'utf8');
       assertTrue(uiDesignSkill.includes('UI-DESIGN: skipped（非前端）'), 'ui-design 技能缺非前端跳过口径');
-      assertTrue(uiDesignSkill.includes('旧 change') && uiDesignSkill.includes('WARN'),
-        'ui-design 技能缺旧 change 渐进口径');
+      assertTrue(uiDesignSkill.includes('同一形态一个判级'), 'ui-design 技能缺单轨判级口径（同一形态一个判级）');
+      assertTrue(!/旧\s*change[^。\n]{0,24}(WARN|渐进)/.test(uiDesignSkill),
+        'ui-design 技能残留旧分级口径（旧 change 渐进 WARN 应零残留）');
     },
   },
 
@@ -856,7 +861,7 @@ export const ENTRIES = [
       assertOut(setRes, 'CONFIG: last_evolve_at = ' + baseline);
 
       // ② 真实 init 换 change——跨 change 的全部动作就是这一步（不碰 writeState）
-      const secondInit = runStateWithProtocol(dir, ['init', CHANGE_ID + '-2', '--init-skip']);
+      const secondInit = runStateWithProtocol(dir, ['init', CHANGE_ID + '-2', '--init-skip', '--replace', CHANGE_ID, '--reason', '验证跨 change 保留演化基线']);
       assertExit(secondInit, 0);
       const state = JSON.parse(readStateBytes(dir));
       assertEqual(state.activeChange, CHANGE_ID + '-2', 'init 后 activeChange');
@@ -894,7 +899,7 @@ export const ENTRIES = [
       // 负例：协议删掉该绑定 → 前端判据成立且缺件也不再拦（门随绑定退场）
       writeUiDesignBindingVariant(dir, 'absent');
       writeDesignExitFixture(dir, {
-        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: true,
+        visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: true,
       });
       const absent = runGuardWithProtocol(dir, ['exit', 'design']);
       assertExit(absent, 0);
@@ -906,7 +911,7 @@ export const ENTRIES = [
       // 越界：绑定缺席时 design 的另一 guarded 绑定（flow-comet-design）仍由出口自动补写——
       // 零真实声明也放行，证明自动补语义只在登记表命中的绑定上改道
       writeDesignExitFixture(dir, {
-        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: false, declareDesign: false,
+        visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: false, declareDesign: false,
       });
       const otherBindings = runGuardWithProtocol(dir, ['exit', 'design']);
       assertExit(otherBindings, 0);
@@ -915,7 +920,7 @@ export const ENTRIES = [
       // 正例：协议写回 guarded 绑定 → 同一夹具、同一 change 立刻恢复拦截（与既有语义逐字一致）
       writeUiDesignBindingVariant(dir, 'guarded');
       writeDesignExitFixture(dir, {
-        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: true,
+        visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: true,
       });
       const guardedInPlace = runGuardWithProtocol(dir, ['exit', 'design']);
       assertExit(guardedInPlace, 1);
@@ -924,7 +929,7 @@ export const ENTRIES = [
 
       // 恢复：补齐工件 + 真实声明 → 出口放行（恢复路径未被键控改动波及）
       writeDesignExitFixture(dir, {
-        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: true,
+        visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: true,
       });
       const recovered = runGuardWithProtocol(dir, ['exit', 'design']);
       assertExit(recovered, 0);
@@ -943,7 +948,7 @@ export const ENTRIES = [
       // 负例：等级调回 advisory → 缺工件 + 零真实声明也放行（自动补写保持原语义）
       writeUiDesignBindingVariant(dir, 'advisory');
       writeDesignExitFixture(dir, {
-        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: false,
+        visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: false,
       });
       const advisory = runGuardWithProtocol(dir, ['exit', 'design']);
       assertExit(advisory, 0);
@@ -954,7 +959,7 @@ export const ENTRIES = [
 
       // 越界：同一节点的另一 guarded 绑定零真实声明仍放行（自动补语义未被本次键控改道）
       writeDesignExitFixture(dir, {
-        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: false, declareDesign: false,
+        visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: false, declareDesign: false,
       });
       const otherBindings = runGuardWithProtocol(dir, ['exit', 'design']);
       assertExit(otherBindings, 0);
@@ -963,7 +968,7 @@ export const ENTRIES = [
       // 正例：等级写回 guarded → 缺件与缺声明双拦截同时回来
       writeUiDesignBindingVariant(dir, 'guarded');
       writeDesignExitFixture(dir, {
-        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: true,
+        visualTone: VISUAL_TONE_APPLICABLE, uiDesign: false, declareUiDesign: true,
       });
       const guardedInPlace = runGuardWithProtocol(dir, ['exit', 'design']);
       assertExit(guardedInPlace, 1);
@@ -972,7 +977,7 @@ export const ENTRIES = [
 
       // 恢复：补齐工件 + 真实声明 → 放行
       writeDesignExitFixture(dir, {
-        newChange: true, visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: true,
+        visualTone: VISUAL_TONE_APPLICABLE, uiDesign: true, declareUiDesign: true,
       });
       const recovered = runGuardWithProtocol(dir, ['exit', 'design']);
       assertExit(recovered, 0);
@@ -991,7 +996,7 @@ export const ENTRIES = [
       writeNodeDeclarationMarkers(dir, 'design', { frontend: true });
       // 负例：自然句子（标记词在行首且后接「于」，句内再出现一次）→ 判据仍是前端 ⇒ 缺件 BLOCKED
       writeDesignExitFixture(dir, {
-        newChange: true, visualTone: VISUAL_TONE_NATURAL_SENTENCE, uiDesign: false, declareUiDesign: true,
+        visualTone: VISUAL_TONE_NATURAL_SENTENCE, uiDesign: false, declareUiDesign: true,
       });
       const naturalSentence = runGuardWithProtocol(dir, ['exit', 'design']);
       assertExit(naturalSentence, 1);
@@ -1002,7 +1007,7 @@ export const ENTRIES = [
       // 负例（结构形态的越界面）：子维度字段 `- 暗色主题：不适用` 是结构形态但主体不是本 change
       // 的适用性 ⇒ 仍判前端（标签表把可误伤的字段形态挡在外面）
       writeDesignExitFixture(dir, {
-        newChange: true, visualTone: VISUAL_TONE_SUBDIMENSION_FIELD, uiDesign: false, declareUiDesign: true,
+        visualTone: VISUAL_TONE_SUBDIMENSION_FIELD, uiDesign: false, declareUiDesign: true,
       });
       const subDimensionField = runGuardWithProtocol(dir, ['exit', 'design']);
       assertExit(subDimensionField, 1);
@@ -1011,7 +1016,6 @@ export const ENTRIES = [
 
       // 越界：标记出现在「视觉调性」段之外的独立行 → 不参与判据（判据限段内）
       writeDesignExitFixture(dir, {
-        newChange: true,
         visualTone: VISUAL_TONE_APPLICABLE,
         changeTail: '\n## 范围排除（Out of Scope）\n\n不适用。\n',
         uiDesign: false,
@@ -1024,7 +1028,7 @@ export const ENTRIES = [
 
       // 正例 A：独立行（带括注理由）→ 可见跳过 + 回显命中片段
       writeDesignExitFixture(dir, {
-        newChange: true, visualTone: VISUAL_TONE_NOT_APPLICABLE, uiDesign: false, declareUiDesign: false,
+        visualTone: VISUAL_TONE_NOT_APPLICABLE, uiDesign: false, declareUiDesign: false,
       });
       const standalone = runGuardWithProtocol(dir, ['exit', 'design']);
       assertExit(standalone, 0);
@@ -1034,7 +1038,7 @@ export const ENTRIES = [
 
       // 正例 B：字段值位（`- 适用性：不适用（…）`）→ 同样判非前端（结构形态之二，非行首）
       writeDesignExitFixture(dir, {
-        newChange: true, visualTone: VISUAL_TONE_FIELD_MARKER, uiDesign: false, declareUiDesign: false,
+        visualTone: VISUAL_TONE_FIELD_MARKER, uiDesign: false, declareUiDesign: false,
       });
       const fieldValue = runGuardWithProtocol(dir, ['exit', 'design']);
       assertExit(fieldValue, 0);
@@ -1044,7 +1048,7 @@ export const ENTRIES = [
 
       // 正例 C：行首形态（标记 + 破折号理由，非独立行）→ 同样判非前端
       writeDesignExitFixture(dir, {
-        newChange: true, visualTone: VISUAL_TONE_LINE_HEAD_MARKER, uiDesign: false, declareUiDesign: false,
+        visualTone: VISUAL_TONE_LINE_HEAD_MARKER, uiDesign: false, declareUiDesign: false,
       });
       const lineHead = runGuardWithProtocol(dir, ['exit', 'design']);
       assertExit(lineHead, 0);
@@ -1054,7 +1058,7 @@ export const ENTRIES = [
 
       // 恢复：把调性段改成结构形态（标注路径）→ 同一 change 放行，命中片段一并回显
       writeDesignExitFixture(dir, {
-        newChange: true, visualTone: VISUAL_TONE_NOT_APPLICABLE, uiDesign: false, declareUiDesign: false,
+        visualTone: VISUAL_TONE_NOT_APPLICABLE, uiDesign: false, declareUiDesign: false,
       });
       const recovered = runGuardWithProtocol(dir, ['exit', 'design']);
       assertExit(recovered, 0);

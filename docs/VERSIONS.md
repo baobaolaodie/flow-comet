@@ -26,7 +26,7 @@
 ## Compatibility strategy
 
 - Old changes / old states auto-fill default fields (executionMode/branchMode/enablePrReview); changes without a branch run unchanged — backward compatible
-- Progressive WARN (not BLOCK) for legacy change re-entry (missing redEvidence/greenEvidence, pure-string handoff)
+- Legacy states get defaults for missing fields; a retired initialization-marker field carried by an old state is ignored (no schema error). Every shape gets the same grade — BLOCKED, with no progressive tier (e.g. missing redEvidence/greenEvidence, pure-string handoff)
 - Regression baseline (two-tier): `guard-self-test.mjs` 351 scenarios + `system-test.mjs` 95 items green (required after every change)
 - dsh platform: the project-level skill copy carries an `INSTALLED_VERSION` marker synced with flow-comet releases; uninstall via `prepare-env --purge --platform dsh --yes` (see [Installation](INSTALLATION.md#option-d--deepseek-harness-dsh-platform))
 

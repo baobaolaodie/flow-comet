@@ -72,8 +72,8 @@ flow-kit 9 阶段工作流的 workflow-kernel 实现。保留 flow-kit 的全部
 | "LESSONS.md 不用扫" | R1.8：每个 DEV 任务必须扫描 |
 | "测试从实现派生就行" | R5.1：测试必须从 AC 派生 |
 | "guard 失败了，让用户决定" | 先自动诊断并执行唯一安全修复；无合法动作时才报告停止条件 |
-| "跳过 entry 直接 exit，反正没检查" | 新 change 未 entry 直接 exit → BLOCKED（进入检查不可跳过）；旧 change WARN 渐进 |
-| "SUMMARY 不写，任务先标 done" | 新 change done 任务缺 SUMMARY → BLOCKED（产物完整性强制）；旧 change WARN 渐进 |
+| "跳过 entry 直接 exit，反正没检查" | 未 entry 直接 exit → BLOCKED（进入检查不可跳过；同一形态一个判级） |
+| "SUMMARY 不写，任务先标 done" | done 任务缺 SUMMARY → BLOCKED（产物完整性强制；同一形态一个判级） |
 | "subagent-execute 阶段，我直接改源码更快" | 协调者禁令：subagent-execute 阶段主会话禁止写源码（hook 白名单只允许 .specs/，Write/Edit 与 Bash 写命令均物理拦截），必须委托子代理——委托走**身份通道**（三平台同一判据），worktree 只是「① 写权限」的实现之一，不是委托前提 |
 
 ## Workflow Nodes
@@ -96,7 +96,7 @@ flow-kit 9 阶段工作流的 workflow-kernel 实现。保留 flow-kit 的全部
 | 节点 | Implementation | Required Calls | Enforcement |
 |------|---------------|----------------|-------------|
 | open | flow-comet-open | flow-comet-change, flow-comet-requirement | guarded |
-| design | flow-comet-design | flow-comet-design, flow-comet-ui-design (guarded，仅前端适用——前端须先 skill-load 建标记 + record 载荷带 `required-skill:design.flow-comet-ui-design`；非前端不加载不声明；旧 change 渐进 WARN) | guarded |
+| design | flow-comet-design | flow-comet-design, flow-comet-ui-design (guarded，仅前端适用——前端须先 skill-load 建标记 + record 载荷带 `required-skill:design.flow-comet-ui-design`；非前端不加载不声明；同一形态一个判级) | guarded |
 | plan | flow-comet-plan | flow-comet-task | guarded |
 | execute | flow-comet-execute | flow-comet-dev | guarded |
 | subagent-execute | flow-comet-subagent-execute | flow-comet-dev (handoff) | handoff-guarded |
@@ -136,9 +136,9 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-c
 - **协议文件面**：该节点该读的**每一份**协议文件都要被声明过（open 两份、review 两份，其余节点一份）。多份可以在同一个标记的 `protocols` 里（一条命令给多个 `--prompt`），也可以分散在各技能自己的标记上——判据按节点汇总，只看这些文件是否都被声明过。
 - **技能面**：协议 `requiredSkillCalls` 里**每个** `guarded` 必需技能，都要有一个属于它的标记（适用性门控的绑定除外——`flow-comet-ui-design` 只在**前端** change 上要求，见下方该段判据）。**`handoff-guarded` 不在判据内**——那是子代理侧义务，由 Return Contract 的 `required-skill:` 核对负责（让协调者声明一个它没加载的技能，只会造出另一类假声明）。
 
-**缺声明时的恢复命令形态**（BLOCKED / WARN 报文给的就是这个形态）：报文按**协议派生**给出该节点**每个** `guarded` 必需技能各一条命令（`node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <skill> …`）——每条把该节点该读的**全部**协议文件都带上（多个 `--prompt`）并带 `--templates <该节点模板全清单>`，三个面一次给全，照抄即通。旧口径的 `skill-load <node> <skill> --prompt <缺的那份协议文件>` 只补缺项、漏模板清单，照抄完同一 exit 会再被覆盖门与模板门各拦一次（已废弃；报文仍逐项点名缺哪份协议文件、哪个必需技能，命令本身则给全）。同一 `<node>-<skill>` 重跑会**覆写**该标记，补齐后重试 `exit <node>`。**分级**：新 change BLOCKED（强制全部覆盖）、旧 change 只 WARN（既有 change 不因判据变严卡死）。**兼容**：判据改为全部覆盖之前写下的标记只有一个 `protocol` 单值（历史形态甚至是完整路径），照样按 basename 计入覆盖；不可解析的标记**不计入**，并在报文里列名——不静默当通过。
+**缺声明时的恢复命令形态**（BLOCKED / WARN 报文给的就是这个形态）：报文按**协议派生**给出该节点**每个** `guarded` 必需技能各一条命令（`node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load <node> <skill> …`）——每条把该节点该读的**全部**协议文件都带上（多个 `--prompt`）并带 `--templates <该节点模板全清单>`，三个面一次给全，照抄即通。旧口径的 `skill-load <node> <skill> --prompt <缺的那份协议文件>` 只补缺项、漏模板清单，照抄完同一 exit 会再被覆盖门与模板门各拦一次（已废弃；报文仍逐项点名缺哪份协议文件、哪个必需技能，命令本身则给全）。同一 `<node>-<skill>` 重跑会**覆写**该标记，补齐后重试 `exit <node>`。**判级**：同一形态一律 BLOCKED（强制全部覆盖；不再有按 change 新旧分级的渐进档）。**兼容**：判据改为全部覆盖之前写下的标记只有一个 `protocol` 单值（历史形态甚至是完整路径），照样按 basename 计入覆盖；不可解析的标记**不计入**，并在报文里列名——不静默当通过。
 
-声明如实记录执行者动作——加载了哪个 skill、按哪份协议工作——**不等于产出证明**；产出是否正确由产物结构校验与门禁把关。**技能加载前置门**：新 change 的 required 条目不再自动补写——handoff request / record 前必须已有本节点声明标记（先加载、再声明、后干活）；声明标记自动补写仅对旧 change 兜底（按协议 requiredSkillCalls 代记，标记带 `auto: true`），手动声明仍推荐（如实记录加载动作与协议文件）。`flow-comet-ui-design` 与协议同等级（`guarded`）且**仅前端适用**：前端 change 须先加载并 `skill-load` 声明、record 载荷带 `required-skill:design.flow-comet-ui-design`（出口不再自动补写）；非前端不加载不声明（出口输出可见的 `UI-DESIGN: skipped（非前端）`）；旧 change 渐进，缺件仅 WARN。前端判据是**结构级**的：`CHANGE.md` 的「视觉调性」段在场，且段内的「不适用」标记成**结构形态**——**独立行**、居**行首**（可带列表符号 / 引用 / 加粗），或写在适用性类标签的**字段值位**；标记之后须成**词形边界**（紧跟空白、标点或行尾），命中即回显**命中片段**。段内其它位置顺带提到「不适用」不算标注，仍判前端。
+声明如实记录执行者动作——加载了哪个 skill、按哪份协议工作——**不等于产出证明**；产出是否正确由产物结构校验与门禁把关。**技能加载前置门**：required 条目的声明标记**只能由执行者手动 `skill-load` 写入，引擎不代记**——handoff request / record 前必须已有本节点声明标记（先加载、再声明、后干活）；缺标记不会被补记，手动声明是唯一路径（如实记录加载动作与协议文件）。`flow-comet-ui-design` 与协议同等级（`guarded`）且**仅前端适用**：前端 change 须先加载并 `skill-load` 声明、record 载荷带 `required-skill:design.flow-comet-ui-design`（出口不代记该条目）；非前端不加载不声明（出口输出可见的 `UI-DESIGN: skipped（非前端）`）——缺件一律拦截（同一形态一个判级）。前端判据是**结构级**的：`CHANGE.md` 的「视觉调性」段在场，且段内的「不适用」标记成**结构形态**——**独立行**、居**行首**（可带列表符号 / 引用 / 加粗），或写在适用性类标签的**字段值位**；标记之后须成**词形边界**（紧跟空白、标点或行尾），命中即回显**命中片段**。段内其它位置顺带提到「不适用」不算标注，仍判前端。
 
 > **侧命令**：`evolve`（架构沉淀同步）/ `health`（健康巡检）/ `context-scan`（上下文重扫）三条横向命令**不进 8 节点流程**——不路由、不 entry/exit、不写节点证据，一律由用户显式调用；触发词、命令面与落盘产物见主 `SKILL.md` 的「侧命令」小节（单一来源，本文不复述其命令表）。
 
@@ -172,7 +172,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-c
 ### Node Boundary Rules
 
 - **节点顺序**:每个节点按 `entry <node>` → 产出工件 → `record <node>` → `exit <node> --apply` 执行(record 必须先于 exit——exit 校验 evidence 前置,缺证据会 BLOCKED)。
-- Before leaving a Node, run `node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry <node>` then `exit <node> --apply` to advance state. **新 change 未 entry 直接 exit → BLOCKED**（旧 change WARN 渐进）——entry 的进入检查（协调者禁令/委托前检查/签名记录）不可跳过。
+- Before leaving a Node, run `node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry <node>` then `exit <node> --apply` to advance state. **未 entry 直接 exit → BLOCKED**（同一形态一个判级）——entry 的进入检查（协调者禁令/委托前检查/签名记录）不可跳过。
 - If the guard fails, do not proceed past it — 先自动诊断并执行唯一安全修复（与 Decision Core 停止条件一致）；存在多个会改变范围/风险的合法恢复动作时，展示 guard 输出并询问用户。
 - If the user wants to redo a completed Node, reset its completion state and re-enter rather than creating a parallel path.
 
