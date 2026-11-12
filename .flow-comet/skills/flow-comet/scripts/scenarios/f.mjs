@@ -1785,7 +1785,7 @@ export const ENTRIES = [
             ['委托记账 · 判定先于零提交与子集校验（中文）', '该校验先于零提交语义与提交子集校验'],
             ['委托顺序 · 两件事别混（中文）', '本条管的是「request 与子代理启动的先后」'],
             ['result 需 request · 机制保证（英文）', 'is a mechanism guarantee'],
-            ['委托记账 · 写盘前拒绝（英文）', 'refused before anything is written (a new change blocks'],
+            ['委托记账 · 写盘前拒绝（英文）', 'refused before anything is written (it blocks'],
             ['委托顺序 · 两件事别混（英文）', 'this rule is about the order of the request and the subagent launch'],
           ];
           const bookAnchorProblems = (books, anchors) => {

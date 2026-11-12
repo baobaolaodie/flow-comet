@@ -180,7 +180,7 @@ Evidence: `archive-summary` (required)
 ## Evidence Record
 
 ```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs record archive '{"summary":"Change archived to .specs/archive/<date>-<id>/, N lessons added, CHANGELOG updated"}'
+node .claude/skills/flow-comet/scripts/workflow-state.mjs record archive '{"summary":"Archive evidence prepared before the move: N lessons nominated, leftover list compiled; directory move and CHANGELOG registration follow"}'
 ```
 
 ## Guardrails

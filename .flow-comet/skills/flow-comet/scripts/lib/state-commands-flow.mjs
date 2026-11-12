@@ -584,9 +584,13 @@ export async function runInit(protocol, argv, protocolPath) {
     } else if (initArgs[i] === '--replace' || initArgs[i] === '--reason') {
       // 空格形与等号形同义（与 --branch-prefix 的既有形态一致）：值缺失 / 空串不在这里 exit——
       // 形态不符的报文与退出码由下方覆盖闸门统一给出（同一件事一处措辞），这里只记录「给了什么」。
+      // 值位紧跟另一个选项（如 `--reason --init-skip`）是漏写原因，不是把选项当原因：记为没给，
+      // 让覆盖闸门给出「需要非空 --reason」。消费成功的值同时跳过，不再被下一轮当成选项处理。
       const value = initArgs[i + 1];
-      const text = typeof value === 'string' ? value.trim() : '';
+      const usable = typeof value === 'string' && value.trim() !== '' && !value.trim().startsWith('--');
+      const text = usable ? value.trim() : '';
       if (initArgs[i] === '--replace') replaceChange = text; else replaceReason = text;
+      if (usable) i += 1;
     } else if (typeof initArgs[i] === 'string'
       && (initArgs[i].startsWith('--replace=') || initArgs[i].startsWith('--reason='))) {
       const equalsAt = initArgs[i].indexOf('=');

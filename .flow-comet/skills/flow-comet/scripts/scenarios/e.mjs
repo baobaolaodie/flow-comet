@@ -1204,6 +1204,11 @@ export const ENTRIES = [
             problems.push(rel + ' 反向构造判别力缺失（还原「' + label + '」未被判违规）');
           }
         }
+        // 混合小句（否定词落在另一个小句里）不得被当成否定：判据只认「自动补」所在小句内的否定。
+        const mixed = text + '\n无需手动声明，record 会自动补写缺失的声明标记。\n';
+        if (!twoLayerEntryProblems(rel, mixed).some((p) => p.includes('自动补写承诺表述'))) {
+          problems.push(rel + ' 反向构造判别力缺失（混合小句的自动补写承诺未被判违规）');
+        }
       }
       // —— 归档顺序（证据先于不可逆）与三册口径 ——
       // 判据两半：① 步骤序——记录步骤在搬目录之前、搬目录在 exit 之前、声明硬规则先于搬目录；

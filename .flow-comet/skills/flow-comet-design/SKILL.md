@@ -145,6 +145,8 @@ Evidence: `design-summary` (required)
 
 ```bash
 node .claude/skills/flow-comet/scripts/workflow-state.mjs record design '{"summary":"DESIGN.md produced with tech stack, architecture alignment, ADRs, risks"}'
+# frontend change: add "required-skill:design.flow-comet-ui-design" to an evidence payload, e.g.
+#   ... record design '{"summary":"...","completedChecks":["required-skill:design.flow-comet-ui-design"]}'
 ```
 
 ## Guardrails

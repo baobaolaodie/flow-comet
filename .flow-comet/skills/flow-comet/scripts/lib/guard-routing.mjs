@@ -4,7 +4,7 @@
 // 依赖方向单向：本模块 → 既有共享模块（state-schema / protocol-utils / task-parsing /
 // route-node）+ guard-state-io；反向 import 不存在。
 
-import { promises as fs, readdirSync } from 'fs';
+import { existsSync, promises as fs, readdirSync } from 'fs';
 import path from 'path';
 import { handoffRequestWithdrawn } from '../state-schema.mjs';
 import { inspectWorkflowProtectedPath } from '../protocol-utils.mjs';
@@ -374,9 +374,19 @@ export function archiveDirNameNotice(changeName, nodeId) {
   const today = formatLocalDate(new Date());
   const lines = ['BLOCKED: 归档目录名不合规（' + problems.length + ' 处）——本 change 的归档目录名必须是 '
     + expected + '（日期前缀 + change 名，运行路径只认这一种）:'];
+  const target = '.specs/archive/' + today + '-' + changeName;
   for (const problem of problems) {
     lines.push('  - ' + problem.display + '（实际目录名: ' + problem.name + '）');
-    lines.push('    改名: mv "' + problem.display + '" ".specs/archive/' + today + '-' + changeName + '"');
+  }
+  if (problems.length > 1) {
+    // 多份错名目录会拼出**同一个**目标名：第一条 mv 之后第二条会把源目录搬进那个目录之下，
+    // 而不是改名——先让人只留一份，再按命令改名。
+    lines.push('    改名目标相同（' + target + '）——先只保留本 change 的那一份（删除或改名其余），重试后再改名');
+  } else if (existsSync(path.join(runRoot, target))) {
+    // 目标已在场时 mv 同样会把源目录搬进那个目录之下：先核对，不打印会改变目录结构的命令。
+    lines.push('    目标目录已存在（' + target + '）——先核对哪一份是本 change 的，删除或移走后重试');
+  } else {
+    lines.push('    改名: mv "' + problems[0].display + '" "' + target + '"');
   }
   lines.push('恢复: 按上面的命令改名后重试 exit ' + nodeId + '——脚本不替你搬目录，也不猜目录名');
   return lines;

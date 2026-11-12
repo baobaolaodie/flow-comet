@@ -2123,6 +2123,15 @@ export const ENTRIES = [
       assertOut(preflightBadName, '归档目录名不合规');
       assertOut(preflightBadName, 'mv ".specs/archive/foo-' + CHANGE_ID + '" ".specs/archive/'
         + timeUtilsModule.formatLocalDate(new Date()) + '-' + CHANGE_ID + '"');
+      // 子断言（多份错名目录）：两份错名目录会拼出同一个目标名——第一条 mv 之后第二条会把源目录
+      // 搬进那个目录之下（不是改名），因此此时只给「先保留一份」的指引，不打印会改变目录结构的命令。
+      writeFile(dir, '.specs/archive/bar-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# KNOWN-ISSUES\n\n无遗留问题\n');
+      const resTwoBadNames = runGuard(['exit', 'archive'], dir);
+      assertExit(resTwoBadNames, 1);
+      assertOut(resTwoBadNames, '归档目录名不合规（2 处）');
+      assertOut(resTwoBadNames, '改名目标相同');
+      assertNotOut(resTwoBadNames, '改名: mv');
+      fs.rmSync(path.join(dir, '.specs/archive', 'bar-' + CHANGE_ID), { recursive: true, force: true });
       // 反向构造（单变量 = 只改名）：同一目录改成合规名字后同一 exit 通过——判据不是「见归档目录就拦」。
       fs.renameSync(path.join(dir, '.specs/archive', 'foo-' + CHANGE_ID),
         path.join(dir, '.specs/archive', '2026-11-11-' + CHANGE_ID));

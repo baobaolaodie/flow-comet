@@ -971,11 +971,15 @@ export function vocabularyMirrorProblems(root = REPO_ROOT) {
 // 却没有任何否定词（不 / 未 / 禁 / 无）→ 视为承诺自动补写；明确否定（「不再自动补写」
 // 「不覆盖 handoff scope」）与说明其不存在的写法放行。判别力由场景 167 的反向构造常驻证明
 // （追加一行无条件承诺必被判违规）。
+// 否定判定**限定在「自动补」所在的小句内**：整行任意位置出现「无 / 不」就放行，会被
+// 「无需手动声明，record 会自动补写…」这类混合句绕过（否定词落在另一个小句）。句读（。；，）
+// 是边界，跨过边界的否定不算否定这条承诺。
+const AUTO_FILL_NEGATED = /(?:不|未|禁|无|别)[^。；;，,\n]{0,12}自动补|自动补[^。；;，,\n]{0,12}(?:已删|删除|不再|不写|不存在)/;
 export function autoFillPromiseProblems(rel, text) {
   const out = [];
   for (const line of text.split('\n')) {
     if (!line.includes('自动补')) continue;
-    if (/[不未禁无]/.test(line)) continue;
+    if (AUTO_FILL_NEGATED.test(line)) continue;
     out.push(rel + ' 含自动补写承诺表述: ' + line.trim().slice(0, 80));
   }
   return out;

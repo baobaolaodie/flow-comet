@@ -2581,6 +2581,7 @@ export const ENTRIES = [
         { args: ['init', 'other-change', '--replace', CHANGE_ID, '--reason', '   '], label: '空白 --reason' },
         { args: ['init', 'other-change', '--replace', 'not-the-active-one', '--reason', 'x'], label: '--replace 名不符' },
         { args: ['init', 'other-change', '--replace'], label: '空 --replace 值' },
+        { args: ['init', 'other-change', '--replace', CHANGE_ID, '--reason', '--init-skip'], label: '--reason 的值位是另一个选项' },
       ];
       for (const shape of badShapes) {
         const bad = runStateWithProtocol(dir, shape.args);
