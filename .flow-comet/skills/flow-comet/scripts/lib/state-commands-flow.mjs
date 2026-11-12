@@ -16,7 +16,7 @@ import {
 import { evidencePayloadProblems, looksLikeObjectLiteral, toPersistedProtocolPath } from '../state-schema.mjs';
 import { formatLocalTimestamp, nowTimestamp } from '../time-utils.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide } from '../context-init.mjs';
-import { fileExists, findActiveChange, readState, writeState, specsDir, runRootDir, hasExactSpecsEntry, resolveChangeLocation, inFlightChangeName, stateFile } from './state-io.mjs';
+import { fileExists, findActiveChange, readState, writeState, specsDir, runRootDir, hasExactSpecsEntry, resolveChangeLocation, inFlightChangeName, stateFile, recoveryActionTextAt } from './state-io.mjs';
 import { hasNodeSkillDeclaration, verifySkillLoadMarkers, verifyTemplateDeclaration } from './state-skillmarkers.mjs';
 import { determineNode, normalAdvanceExempt } from './state-determine.mjs';
 import { isInsideWorkTree, gitBranchName, branchExists, printBranchLine } from './state-branch.mjs';
@@ -197,9 +197,14 @@ async function resolveNodeOrderBlock({ changeName, protocol, completedArr, state
   });
   const advanceExempt = await normalAdvanceExempt(state, protocol, completedArr, state.currentNode, changeName, changeDir);
   if (rollbackExempt || advanceExempt) return null;
+  // 第二行的恢复动作按目录在哪分叉——与出口侧（转移前置 / entry 记录门 / 证据门）同一实现
+  // （state-io.recoveryActionTextAt）：目录已搬进归档时 advance / select 都走不通（select 要求活动
+  // 目录在场，advance 的产物推导读活动路径），只给可执行的那一步（把目录移回活动位置）。活动态下
+  // 该函数原样返回 activeText，输出因此与改动前逐字相同。
   return [
     'BLOCKED: 疑似未 exit 节点 ' + state.currentNode + '，先 workflow-guard.mjs exit ' + state.currentNode + ' --apply',
-    '恢复: 确认当前节点实际已完成 → 用 exit <节点> --apply 正常推进；节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进）或 select（切换 change）；禁止手改 state 机器字段',
+    '恢复: 确认当前节点实际已完成 → 用 exit <节点> --apply 正常推进；节点状态漂移/卡死 → '
+      + recoveryActionTextAt(runRootDir(), changeName, '用 workflow-state.mjs advance（强制推进）或 select（切换 change）；禁止手改 state 机器字段'),
   ].join('\n');
 }
 

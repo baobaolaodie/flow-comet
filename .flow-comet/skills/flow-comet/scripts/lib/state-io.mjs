@@ -3,7 +3,7 @@
 // 路径锚由入口在分派前初始化一次；运行根由唯一解析模块（run-root.mjs）给定——FLOW_COMET_RUN_ROOT
 // 优先、否则进程 cwd。模块内不自行取 cwd：入口与模块各持一份「运行根」就是同一事实的第二处表达。
 // 目录名与状态文件名常量来自 state-schema.mjs。
-import { promises as fs } from 'fs';
+import { existsSync, promises as fs, readdirSync } from 'fs';
 import path from 'path';
 import { validateStateFields, writeJsonAtomic, RUNTIME_DIR, RUNTIME_STATE_FILE_NAME } from '../state-schema.mjs';
 import { inspectWorkflowPathSegments } from '../protocol-utils.mjs';
@@ -288,6 +288,48 @@ export function changeLocationFailureMessage(changeName, resolution) {
     + ' 均不存在）' + excluded
     + '——身份由状态判定（该 change 仍在办），位置解析不到；恢复: 把目录移回 ' + activeDisplay
     + '，或按 <YYYY-MM-DD>-' + changeName + ' 命名放进 .specs/archive/ 后重跑';
+}
+
+// ---------- 恢复指引里的「目录在哪」（唯一分叉 · 状态族与门禁族共用） ----------
+
+// 「目录已不在活动位置、而在归档里」的可见形态（恢复指引据此换一种说法）：活动目录在原位 → null；
+// 归档区里通过 isArchivedChangeDirName 的条目（同名多份取日期最新的一份）→ 该目录的 .specs/ 形态。
+// 只回答「在不在归档、叫什么」，不参与定位写入（定位唯一实现是 resolveChangeDir，它还要套
+// createdAt 下界与并列判定）。恢复指引只关心「活动位置空没空」，同步取值即可——出口链上有同步门禁
+//（entry 记录门）取用同一份事实，不为一条提示改它的调用约定。
+//
+// 恢复动作的分叉**只有这一处实现**：活动态给 advance / select，归档态只给「把目录移回活动位置」。
+// 四类消费方共用它——出口的转移前置 BLOCK、出口的 entry 记录门、证据门的状态漂移句、状态族的
+// next 节点顺序门禁。此前实现落在门禁族（guard-routing），next 侧拿不到就自己拼了一句，于是同一
+// 分叉只改了三处、漏了第四处（归档态下 next 推销走不通的 advance / select）。落点因此迁到本模块
+// （.specs 路径上下文）：状态族取用这里是允许的 state ← guard 单向边，反向 import 门禁族会把整个
+// 守卫图拖进 workflow-state.mjs。运行根是显式参数（状态族 runRootDir()、门禁族 runRoot）——规则
+// 不绑定任何一族的运行上下文，与 resolveChangeDir 同一形态。
+export function archivedChangeLocationAt(root, changeName) {
+  if (!changeName) return null;
+  if (existsSync(path.join(root, '.specs', changeName))) return null;
+  let entries = [];
+  try {
+    entries = readdirSync(path.join(root, '.specs', 'archive'));
+  } catch {
+    return null;
+  }
+  // 归档日期是 YYYY-MM-DD（字典序 = 时间序），点名最新的一份（多份的真实处置是 resolveChangeDir 的
+  // 「排不出就停」，这里只给一句可执行的指引，不复制那套判定）。
+  const names = entries.filter((entry) => isArchivedChangeDirName(entry, changeName)).sort();
+  if (names.length === 0) return null;
+  return '.specs/archive/' + names[names.length - 1];
+}
+
+// 恢复动作那一句（与 archivedChangeLocationAt 同一分叉）：活动目录在场时原样返回 activeText（调用方
+// 给出的可行动作）；目录已搬进归档时 advance / select 都走不通——select 要求活动目录在场，advance 的
+// 产物推导读的也是活动路径，给出去就是让人去做一件做不到的事。此时只给可执行的那一步（把目录移回
+// 活动位置），并保留「禁止手改状态机器字段」。
+export function recoveryActionTextAt(root, changeName, activeText) {
+  const location = archivedChangeLocationAt(root, changeName);
+  if (location === null) return activeText;
+  return '本 change 的目录已移到归档位置（' + location + '）——恢复动作是把它移回活动位置 '
+    + '.specs/' + changeName + '/ 后重跑；禁止手改 state 机器字段';
 }
 
 // 声明标记目录解析（活动路径 .specs/<change-id>/.skill-loads/ 优先；归档路径兜底）：规范顺序是

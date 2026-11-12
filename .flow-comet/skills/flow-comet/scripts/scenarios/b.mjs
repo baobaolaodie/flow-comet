@@ -1587,6 +1587,43 @@ export const ENTRIES = [
       if (!fs.existsSync(path.join(dir, '.specs', 'archive', '2026-11-05-' + MOVED))) {
         throw new Error('移动后归档目录应仍在: ' + ARCHIVE_REL);
       }
+
+      // ---------- ④ 节点顺序门禁的恢复句同样按目录在哪分叉（原位扩展：同一分叉的第四处消费方） ----------
+      // 第四次出现的同一问题：这条 BLOCK 报告的是「该节点从未 exit」，出口侧（guard-gates /
+      // guard-evidence-gates）早已按目录在哪换一种说法，next 侧却还在固定推销 advance / select。
+      // 归档态下 select 要求活动目录在场、advance 的产物推导读活动路径——两条都走不通，报文只能给
+      // 可执行的那一步（把目录移回活动位置）。活动态对照必须**逐字不变**（同一句话仍给 advance /
+      // select），否则「归档态收敛」是用活动态退化换来的。
+      const ORDER = 'loc-order';
+      const orderState = () => {
+        const state = locationState(ORDER);
+        // 顺序门禁的触发条件 = currentNode 未 exit（不在 completedNodes）且无任何证据。已完成节点
+        // 的证据必须在场，否则 lastEvidence 校验不通过、判定会落到别的分支。
+        state.currentNode = 'execute';
+        state.completedNodes = ['open', 'design'];
+        state.evidence = { open: { summary: 'open done' }, design: { summary: 'design done' } };
+        state.enteredNodes = ['open', 'design'];
+        return state;
+      };
+      // 活动态对照：活动目录在场 → 恢复句仍是 advance / select
+      fs.mkdirSync(path.join(dir, '.specs', ORDER), { recursive: true });
+      writeState(dir, orderState());
+      const activeOrderNext = runStateWithProtocol(dir, ['next']);
+      assertExit(activeOrderNext, 1);
+      assertOut(activeOrderNext, 'BLOCKED: 疑似未 exit 节点 execute');
+      assertOut(activeOrderNext, 'advance');
+      assertOut(activeOrderNext, 'select（切换 change）');
+      assertNotOut(activeOrderNext, '移回活动位置');
+      // 归档态：目录真实搬进归档 → 恢复句换成唯一可执行的那一步，不再推荐 advance / select
+      fs.renameSync(path.join(dir, '.specs', ORDER), path.join(dir, '.specs', 'archive', '2026-11-06-' + ORDER));
+      writeState(dir, orderState());
+      const archivedOrderNext = runStateWithProtocol(dir, ['next']);
+      assertExit(archivedOrderNext, 1);
+      assertOut(archivedOrderNext, 'BLOCKED: 疑似未 exit 节点 execute');
+      assertOut(archivedOrderNext, '移回活动位置');
+      assertOut(archivedOrderNext, '.specs/' + ORDER + '/');
+      assertNotOut(archivedOrderNext, 'advance');
+      assertNotOut(archivedOrderNext, 'select（切换 change）');
     },
   },
 

@@ -4,7 +4,7 @@
 // 依赖方向单向：本模块 → 既有共享模块（state-schema / protocol-utils / task-parsing /
 // route-node）+ guard-state-io；反向 import 不存在。
 
-import { existsSync, promises as fs, readdirSync } from 'fs';
+import { promises as fs, readdirSync } from 'fs';
 import path from 'path';
 import { handoffRequestWithdrawn } from '../state-schema.mjs';
 import { inspectWorkflowProtectedPath } from '../protocol-utils.mjs';
@@ -13,8 +13,11 @@ import { resolveNextNode, normalizeHeading, FIX_SECTION_TITLE_FALLBACK } from '.
 import { runRoot, fileExists, workflowRelativeSegments } from './guard-state-io.mjs';
 import { SUMMARY_REQUIRED_SECTIONS, buildSkeleton } from './guard-artifact-skeleton.mjs';
 // 归档目录名「是不是本 change 的」判据单源在状态族的路径上下文模块（guard → state-* 是允许的
-// 单向边）：本模块只消费，不在这里另写一份后缀/日期匹配。
-import { isArchivedChangeDirName } from './state-io.mjs';
+// 单向边）：本模块只消费，不在这里另写一份后缀/日期匹配。恢复动作的分叉（archivedChangeLocationAt /
+// recoveryActionTextAt）同样落在那里——四类消费方之一在状态命令族（next 的节点顺序门禁），而状态族
+// 反向 import 门禁族会把整个守卫图拖进 workflow-state.mjs。本模块只做薄包装（注入 runRoot），既有
+// 导出面与调用点因此不变。
+import { isArchivedChangeDirName, archivedChangeLocationAt, recoveryActionTextAt } from './state-io.mjs';
 // 归档日期判据与「今天」的形态同属时间纪律单一来源（time-utils）：本模块只取用——不为一条目录名
 // 诊断另写日期正则，也不自行拼当前日期。
 import { archiveDateFromName, formatLocalDate } from '../time-utils.mjs';
@@ -379,35 +382,16 @@ export function archiveDirNameNotice(changeName, nodeId) {
   return lines;
 }
 
-// 「目录已不在活动位置、而在归档里」的可见形态（恢复指引据此换一种说法）：活动目录在原位 → null；
-// 归档区里通过 isArchivedChangeDirName 的条目（同名多份取日期最新的一份）→ 该目录的 .specs/ 形态。
-// 只回答「在不在归档、叫什么」，不参与定位写入（定位唯一实现是状态族的 resolveChangeDir，它还要套
-// createdAt 下界与并列判定）。恢复指引只关心「活动位置空没空」，同步取值即可——出口链上有同步门禁
-// （entry 记录门）取用同一份事实，不为一条提示改它的调用约定。
+// 恢复动作与归档位置的唯一实现已迁到状态族（state-io.archivedChangeLocationAt /
+// recoveryActionTextAt）：第四类消费方（next 的节点顺序门禁）在状态命令族，分叉必须落在两边都能
+// 取用、又不会让状态族反向依赖门禁族的模块里。本模块保留既有导出面作为薄包装（注入 guard 运行根），
+// guard-gates / guard-evidence-gates 的调用点因此逐字不变。
 export function archivedChangeLocation(changeName) {
-  if (!changeName) return null;
-  if (existsSync(path.join(runRoot, '.specs', changeName))) return null;
-  let entries = [];
-  try {
-    entries = readdirSync(path.join(runRoot, '.specs', 'archive'));
-  } catch {
-    return null;
-  }
-  // 归档日期是 YYYY-MM-DD（字典序 = 时间序），点名最新的一份（多份的真实处置是 resolveChangeDir 的
-  // 「排不出就停」，这里只给一句可执行的指引，不复制那套判定）。
-  const names = entries.filter((entry) => isArchivedChangeDirName(entry, changeName)).sort();
-  if (names.length === 0) return null;
-  return '.specs/archive/' + names[names.length - 1];
+  return archivedChangeLocationAt(runRoot, changeName);
 }
 
-// 恢复动作那一句（门禁族共用的唯一分叉）：活动目录在场时 advance / select 是可行的那一步；目录已搬进
-// 归档时这两步都走不通——select 要求活动目录在场，advance 的产物推导读的也是活动路径，给出去就是让人
-// 去做一件做不到的事。此时只给可执行的那一步（把目录移回活动位置），并保留「禁止手改机器字段」。
 export function recoveryActionText(changeName, activeText) {
-  const location = archivedChangeLocation(changeName);
-  if (location === null) return activeText;
-  return '本 change 的目录已移到归档位置（' + location + '）——恢复动作是把它移回活动位置 '
-    + '.specs/' + changeName + '/ 后重跑；禁止手改 state 机器字段';
+  return recoveryActionTextAt(runRoot, changeName, activeText);
 }
 
 // 段名校验基准从模板自动派生——骨架计算统一委托 lib/guard-artifact-skeleton.mjs（单一实现：读
