@@ -276,7 +276,7 @@ export async function verifySkillLoadMarkers(completedChecks, changeName, record
     // 补声明仅作兼容 / 恢复路径，标记此时只在 .specs/archive/<日期>-<change-id>/.skill-loads/）；
     // 两处都找不到 → BLOCK + 指引
     // （不静默放行）。标记路径 = 位置解析到的目录 + .skill-loads/<标记>：活动优先与归档兜底只有
-    // findSkillLoadsDir 一处实现（本处不另拼活动路径表达式）。not-found 报文措辞不在本次收口范围。
+    // findSkillLoadsDir 一处实现（本处不另拼活动路径表达式）。
     const markerName = item.node + '-' + item.skill + '.json';
     const activeDisplay = '.specs/' + path.posix.join(changeName, '.skill-loads', markerName);
     const loadsDir = await findSkillLoadsDir(changeName);

@@ -10,8 +10,8 @@
 // 按 `<nodeId>.<skill>` 键控，工件门与出口自动补写共用 applicabilityGatedBinding 查询。
 //
 // 判据必须结构性可判：CHANGE.md 的「视觉调性」段在场且段内不含**结构形态**的「不适用」标记 ⇒
-// 前端；段内以结构形态标注 ⇒ 非前端。段**缺席**只在旧 change 上沿用「判非前端」的兼容口径——
-// 新 change 由 open 出口按模板条件段拦（标题必须在场），此处缺席即拦，不再默认判非前端
+// 前端；段内以结构形态标注 ⇒ 非前端。段**缺席**一律拦——与 open 出口的模板条件段同判（标题必须
+// 在场），不再默认判非前端
 // （否则「漏写段」会被静默翻译成一个更弱的门）。
 //
 // UI-DESIGN.md 在场时，其模板结构（frontmatter 8 键 / H2 骨架 / 结构型 H3）由产出物模板结构门禁
@@ -135,8 +135,7 @@ export async function frontendCriterion(changeName) {
 }
 
 // design 出口 ui-design 工件门（按协议绑定键控：登记 ∧ 等级 = guarded ∧ 判据成立）——判据成立 ⇒
-// 要求 UI-DESIGN.md 在场：新 change 缺件 BLOCKED + 恢复指引，旧 change WARN 渐进不阻断（不静默
-// 放行）；判据不成立（非前端）⇒ 可见跳过行（含命中片段）后照常放行；协议删掉该绑定或等级非
+// 要求 UI-DESIGN.md 在场：缺件 BLOCKED + 恢复指引（不静默放行）；判据不成立（非前端）⇒ 可见跳过行（含命中片段）后照常放行；协议删掉该绑定或等级非
 // guarded ⇒ 门未启用（同样可见输出），行为回到未登记绑定的原语义——闸门开关由协议表达。
 export async function checkUiDesignArtifact(node, state) {
   if (!state.activeChange || !isRegisteredApplicabilityBinding(node, UI_DESIGN_SKILL)) return;

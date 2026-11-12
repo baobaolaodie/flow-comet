@@ -330,7 +330,7 @@ export const ENTRIES = [
       }
       // ③ 移动后照抄报文命令(真实执行打印文本)直接声明 archive 技能——标记落**归档路径**(解析到的
       //    目录),同一 record 通过,活动目录不重建。这是单轨的直连链路:身份只看状态、位置由解析器
-      //    给出,不再需要「先把目录移回活动位置→声明→再移回归档」那两步(该绕道随 T02 一并删除)。
+      //    给出,不再需要「先把目录移回活动位置→声明→再移回归档」那两步(该绕道已随单轨删除)。
       installSkillTreeCopy(dir, path.join('.claude', 'skills'));
       const declared = runPrintedCommand(declareLine, dir, { FLOW_COMET_RUN_ROOT: dir, FLOW_COMET_PROTOCOL: '' });
       assertTrue(declared.status === 0,

@@ -86,7 +86,7 @@ export function runDirectOverrideGate({ node, state }) {
 
 // 验证隔离「同一时刻只有一个写者」出口校验——读 state.evidence['subagent-execute'].handoffRequests：
 // 存在条目且**至少一个无对应 handoffResult** ⇒ 在飞委托（写者未收工，跑全量判据会被未提交中间态
-// 污染）：新 change BLOCKED（含恢复指引「待写入者收工后重跑 / 已作废则撤回」）/ 旧 change WARN 渐进；
+// 污染）：一律 BLOCKED（含恢复指引「待写入者收工后重跑 / 已作废则撤回」）；
 // 全部有对应 result ⇒ 放行；已撤回（withdrawnAt + withdrawnBy 齐备）的 request 不构成在飞委托 ⇒
 // 放行；无该证据对象 ⇒ 零输出。落点 = 出口校验流（与其余 violations / WARN 同风格，不新增独立命令
 // 面）；判据经 inFlightHandoffRequests 单处求值（与 Return Contract 的 result 侧契约校验正交，不
@@ -392,10 +392,9 @@ export async function runExecuteExitGate({ protocol, node, state, emptyExitAppro
 //        可判对象；未验证既不冒充通过也不冒充失败）。这是本出口唯一还会放行的「判不了」；
 //     ② **工件内容不可判**——**change 自己的载体文件被删**（REQUIREMENT.md / TEST.md 不在）与承载段 /
 //        清单读不出（REQUIREMENT 定位不到验收准则段 / TEST.md 定位不到第 1 轮段 / 没有 AC 编号 /
-//        第 1 轮整段 N/A 而没有 1.1 矩阵）同属这一支 → 不是「判过且通过」：新 change BLOCKED / 旧
-//        change WARN（WARN 行因此进入既有 WARN COUNT）——删文件、删段都不能换到放行。
-//   · 真判过且缺覆盖：verify 出口新 change BLOCKED（点名缺失编号 + 「在 1.1 矩阵补行」的恢复指引）/
-//     旧 change WARN 渐进。
+//        第 1 轮整段 N/A 而没有 1.1 矩阵）同属这一支 → 不是「判过且通过」：BLOCKED——删文件、
+//        删段都不能换到放行。
+//   · 真判过且缺覆盖：verify 出口 BLOCKED（点名缺失编号 + 「在 1.1 矩阵补行」的恢复指引）。
 //   · review 出口：一条汇总 WARN（列缺失编号），不阻断、不影响退出码——review 出口今天不要求
 //     TEST.md，权威判定在 verify 出口；两支「判不了」都不打印（不制造噪音）。
 // 归档 change 与 verify 出口的既有豁免同源（历史归档不重判）。
