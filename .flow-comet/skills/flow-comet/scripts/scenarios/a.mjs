@@ -2130,6 +2130,7 @@ export const ENTRIES = [
       assertExit(resTwoBadNames, 1);
       assertOut(resTwoBadNames, '归档目录名不合规（2 处）');
       assertOut(resTwoBadNames, '改名目标相同');
+      assertOut(resTwoBadNames, '按上面的指引处理后');
       assertNotOut(resTwoBadNames, '改名: mv');
       fs.rmSync(path.join(dir, '.specs/archive', 'bar-' + CHANGE_ID), { recursive: true, force: true });
       // 反向构造（单变量 = 只改名）：同一目录改成合规名字后同一 exit 通过——判据不是「见归档目录就拦」。

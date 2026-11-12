@@ -378,6 +378,7 @@ export function archiveDirNameNotice(changeName, nodeId) {
   for (const problem of problems) {
     lines.push('  - ' + problem.display + '（实际目录名: ' + problem.name + '）');
   }
+  let renameCommandGiven = false;
   if (problems.length > 1) {
     // 多份错名目录会拼出**同一个**目标名：第一条 mv 之后第二条会把源目录搬进那个目录之下，
     // 而不是改名——先让人只留一份，再按命令改名。
@@ -387,8 +388,12 @@ export function archiveDirNameNotice(changeName, nodeId) {
     lines.push('    目标目录已存在（' + target + '）——先核对哪一份是本 change 的，删除或移走后重试');
   } else {
     lines.push('    改名: mv "' + problems[0].display + '" "' + target + '"');
+    renameCommandGiven = true;
   }
-  lines.push('恢复: 按上面的命令改名后重试 exit ' + nodeId + '——脚本不替你搬目录，也不猜目录名');
+  // 恢复语的动词跟着有没有命令走：多份错名 / 目标已存在两形态不打印命令，说「按上面的命令」会让人找
+  // 一条不存在的命令（判据已满足，措辞不能自相矛盾）。
+  lines.push('恢复: ' + (renameCommandGiven ? '按上面的命令改名后' : '按上面的指引处理后')
+    + '重试 exit ' + nodeId + '——脚本不替你搬目录，也不猜目录名');
   return lines;
 }
 

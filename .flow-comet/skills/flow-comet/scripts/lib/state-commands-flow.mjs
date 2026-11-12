@@ -589,7 +589,9 @@ export async function runInit(protocol, argv, protocolPath) {
       const value = initArgs[i + 1];
       const usable = typeof value === 'string' && value.trim() !== '' && !value.trim().startsWith('--');
       const text = usable ? value.trim() : '';
-      if (initArgs[i] === '--replace') replaceChange = text; else replaceReason = text;
+      // 没给到值（缺值 / 值位是另一个选项 / 纯空白）视为**没给**：`--replace` 留 null 走「默认阻断」，
+      // 报「change 名 "" 与在途 change 不一致」会把「漏写」渲染成「给了个空名字」，误导排查。
+      if (initArgs[i] === '--replace') replaceChange = usable ? text : null; else replaceReason = text;
       if (usable) i += 1;
     } else if (typeof initArgs[i] === 'string'
       && (initArgs[i].startsWith('--replace=') || initArgs[i].startsWith('--reason='))) {
