@@ -12,6 +12,8 @@
 
 ## [Unreleased]
 
+> 回归基线：352 场景 / 95 项系统测试，全部通过。
+
 ### 变更
 
 - **破坏性变更——所有 change 只有一条生命周期，不再是两条轨道**：`newChange` 状态字段退役——`init` 不再写入它，旧状态文件里仍带着它（`true` 或 `null`）时按「没有该字段」读取，因此不需要迁移。对你的影响：原来「对新建的 change 拦截、对更早的 change 只告警」的规则，现在对每个 change 只有一个判定；`record` 也不再为更早版本创建的 change 自动补写缺失的技能加载声明——由执行者声明，拒绝报文会打印该跑的命令。([#179](https://github.com/baobaolaodie/flow-comet/pull/179))

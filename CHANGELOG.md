@@ -12,6 +12,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+> Regression baseline: 352 scenarios / 95 items, all green.
+
 ### Changed
 
 - **Breaking — one lifecycle for every change instead of two tracks**: the `newChange` state field is retired — `init` no longer writes it, and a state file that still carries it (as `true` or as `null`) is read as if it were absent, so nothing has to be migrated. What changes for you: a rule that used to block a "new" change and only warn an "older" one now has a single verdict for every change, and `record` no longer fills in a missing skill-load declaration for a change created by an earlier version — the executor declares it, and the refusal prints the command to run. ([#179](https://github.com/baobaolaodie/flow-comet/pull/179))

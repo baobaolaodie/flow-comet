@@ -11,6 +11,9 @@
 //
 // 待实现面：本组场景先于实现落盘（RED），由产出物门禁扩展 / 加载链 / 扫描与提名 / 侧命令 /
 // 文本同步各任务转绿。
+//
+// 尾部 352 号场景不属模板权威族：它守的是**分发参考册**（`reference/post-archive-handoff.md`
+// 的协议要素与段序）。共处一组只因场景按组文件顺序编号——新场景追加在本文件末尾，既有编号不动。
 
 import fs from 'fs';
 import path from 'path';
@@ -644,6 +647,87 @@ function assertProbesDiscriminate(problems, docs, rules, probes) {
       problems.push('反向构造判别力缺失（' + label + '：' + (expectReported ? '未被判违规' : '被误判违规') + '）');
     }
   }
+}
+
+// 归档后交接协议页（`reference/post-archive-handoff.md`，分发参考册）的判据：场景 352 与它自己
+// 的变异探针共用同一实现——文本进、问题清单出。只判协议要素（段序 / 选项 / 命令 / 降级 /
+// 不写状态 / 草稿视角 / roadmap 结构），不判散文措辞：措辞可以改，要素缺席或反向陈述才是要拦的形态。
+const HANDOFF_PAGE_SECTIONS = [
+  ['触发', '## 触发与顺序'],
+  ['探测', '## 探测（只读）'],
+  ['一次询问', '## 一次载体询问'],
+  ['展示与确认', '## 展示、粒度与确认'],
+  ['降级', '## 降级与失败'],
+];
+const HANDOFF_PAGE_OPTIONS = ['GitHub Issues', 'GitLab Issues', '本地 roadmap', '暂不处理'];
+const HANDOFF_PAGE_PROBE_COMMANDS = [
+  'git rev-parse --is-inside-work-tree',
+  'git remote get-url origin',
+  'gh --version',
+  'glab --version',
+  'gh auth status --hostname',
+  'glab auth status --hostname',
+];
+// 降级 = 内容 + 可照抄的命令两件套，且不得把「没创建」写成「已创建」。
+const HANDOFF_PAGE_DEGRADE = ['内容 + 命令', 'gh issue create', 'glab issue create', '不声明已创建'];
+// 缺陷类草稿的七段按**编号**认（编号即骨架顺序）：页内别处出现的同名单词不算骨架在场。
+const HANDOFF_PAGE_DRAFT_PARTS = [
+  '1. 用户版本', '2. 终端', '3. 现象', '4. 复现', '5. 期望', '6. 代码位置', '7. 未验证',
+];
+const HANDOFF_PAGE_ROADMAP_COLUMNS = ['索引七列', 'ID', '标题', '状态', '优先级', '时间向', '负责人', '链接'];
+const HANDOFF_PAGE_ROADMAP_SECTIONS = ['每条六段', 'What', 'Why', 'Context', 'Acceptance', 'Links', 'Notes'];
+const HANDOFF_PAGE_STATE_FILE = '.flow-comet/flow-comet-state.json';
+
+function handoffPageProblems(text) {
+  if (typeof text !== 'string') return ['归档后交接协议页不在检出面'];
+  const problems = [];
+  // ① 段序：五段俱全，且 触发 → 探测 → 一次询问 → 展示 → 降级 严格递增（缺段与乱序分开报）。
+  let previousIndex = -1;
+  let previousHeading = null;
+  for (const [label, heading] of HANDOFF_PAGE_SECTIONS) {
+    const index = text.indexOf(heading);
+    if (index < 0) { problems.push('缺段「' + heading + '」（' + label + '）'); continue; }
+    if (previousIndex >= 0 && index < previousIndex) {
+      problems.push('段序颠倒：「' + heading + '」排在「' + previousHeading + '」之前');
+    }
+    previousIndex = index;
+    previousHeading = heading;
+  }
+  // ② 四选项：少一个就是替用户排除了一条路。
+  for (const option of HANDOFF_PAGE_OPTIONS) {
+    if (!text.includes(option)) problems.push('缺载体选项「' + option + '」');
+  }
+  // ③ 固定探测命令块：git 在树内 → remote 分类 → CLI 版本 → 认证状态。
+  for (const command of HANDOFF_PAGE_PROBE_COMMANDS) {
+    if (!text.includes(command)) problems.push('缺探测命令「' + command + '」');
+  }
+  // ④ 降级两件套与「不声明已创建」。
+  for (const needle of HANDOFF_PAGE_DEGRADE) {
+    if (!text.includes(needle)) problems.push('缺降级要素「' + needle + '」');
+  }
+  // ⑤ 不写状态：点名状态文件的行必须是否定句；一处都没点名 = 边界没写。
+  const stateLines = text.split(/\r?\n/).filter((line) => line.includes(HANDOFF_PAGE_STATE_FILE));
+  if (stateLines.length === 0) problems.push('缺「不写状态文件」边界（页内未点名状态文件）');
+  for (const line of stateLines) {
+    if (!/不写|不新增|不把|不改/.test(line)) {
+      problems.push('状态文件出现在肯定语境「' + line.trim().slice(0, 60) + '」');
+    }
+  }
+  // ⑥ 公开草稿视角：七段骨架 + 维护者第一遍读 + 0 命中不等于通过。
+  for (const part of HANDOFF_PAGE_DRAFT_PARTS) {
+    if (!text.includes(part)) problems.push('缺草稿骨架「' + part + '」');
+  }
+  for (const needle of ['第一遍读', '0 命中']) {
+    if (!text.includes(needle)) problems.push('缺草稿视角「' + needle + '」');
+  }
+  // ⑦ 本地 roadmap 的规定形式：索引七列 + 每条六段。
+  for (const needle of HANDOFF_PAGE_ROADMAP_COLUMNS) {
+    if (!text.includes(needle)) problems.push('缺 roadmap 索引结构「' + needle + '」');
+  }
+  for (const needle of HANDOFF_PAGE_ROADMAP_SECTIONS) {
+    if (!text.includes(needle)) problems.push('缺 roadmap 条目结构「' + needle + '」');
+  }
+  return problems;
 }
 
 // 公开面自检的**形态分派**（判定本体在 lib：publicFaceSelfCheck）——各载体形态各造一个临时根、驱动
@@ -4175,6 +4259,66 @@ export const ENTRIES = [
         if (!guide.includes('模板')) problems.push('CLAUDE.md 的 guard 校验描述未同步模板权威口径');
       }
       if (problems.length > 0) throw new Error('治理落盘不符: ' + problems.join('; '));
+    },
+  },
+  // 352 号场景：归档后交接协议页（分发参考册）的文本锚。这一步没有脚本可跑，协议页就是行为唯一
+  // 的可判载体——要素在场且成序，才谈得上「每批都按同一套流程交接」。
+  //   ① 段序（触发 → 探测 → 一次询问 → 展示 → 降级）② 四选项 ③ 固定探测命令块
+  //   ④ 降级两件套且不声明已创建 ⑤ 不写状态 ⑥ 公开草稿视角（七段 + 第一遍读 + 0 命中）
+  //   ⑦ 本地 roadmap 结构（索引七列 + 每条六段）。
+  // 判据与探针**共用同一函数**（handoffPageProblems）：原页零问题（判据不恒真）；抽掉任一条锚点
+  // ⇒ 必报它自己那句；把降级段提到最前 ⇒ 必报段序颠倒；状态文件写成肯定句 ⇒ 必报、写成否定句 ⇒ 不报。
+  {
+    name: '352 归档后交接协议页：段序/四选项/探测命令/降级/不写状态/草稿视角/roadmap 结构（含反向构造）',
+    run: () => {
+      const page = fs.readFileSync(
+        path.join(SCRIPTS_DIR, '..', 'reference', 'post-archive-handoff.md'), 'utf8');
+      const problems = handoffPageProblems(page);
+      // 正向探针：每条锚点抽掉后必须报出**它自己那句**（完整期望片段比对——「报了别的问题」
+      // 不算判别力）。抽掉的落点用同一个标记串，便于一眼看出探针动过哪里。
+      const probes = [
+        ['段序（触发段）', '## 触发与顺序', '缺段「## 触发与顺序」（触发）'],
+        ['段序（降级段）', '## 降级与失败', '缺段「## 降级与失败」（降级）'],
+        ['四选项（本地 roadmap）', '本地 roadmap', '缺载体选项「本地 roadmap」'],
+        ['探测（工作树判定）', 'git rev-parse --is-inside-work-tree',
+          '缺探测命令「git rev-parse --is-inside-work-tree」'],
+        ['探测（remote 分类）', 'git remote get-url origin', '缺探测命令「git remote get-url origin」'],
+        ['探测（认证状态）', 'glab auth status --hostname', '缺探测命令「glab auth status --hostname」'],
+        ['降级两件套', '内容 + 命令', '缺降级要素「内容 + 命令」'],
+        ['降级不声明已创建', '不声明已创建', '缺降级要素「不声明已创建」'],
+        ['草稿七段（第 7 段）', '7. 未验证', '缺草稿骨架「7. 未验证」'],
+        ['草稿视角（第一遍读）', '第一遍读', '缺草稿视角「第一遍读」'],
+        ['草稿视角（0 命中）', '0 命中', '缺草稿视角「0 命中」'],
+        ['roadmap 索引七列', '索引七列', '缺 roadmap 索引结构「索引七列」'],
+        ['roadmap 每条六段', '每条六段', '缺 roadmap 条目结构「每条六段」'],
+      ];
+      for (const [label, needle, expected] of probes) {
+        if (!page.includes(needle)) {
+          problems.push('反向构造前提失效（' + label + '）：协议页本就不含「' + needle + '」');
+          continue;
+        }
+        const stripped = page.split(needle).join('（反向构造：抽掉）');
+        if (!handoffPageProblems(stripped).includes(expected)) {
+          problems.push('反向构造判别力缺失（' + label + '：抽掉「' + needle + '」未被判「' + expected + '」）');
+        }
+      }
+      // 段序的判别力不能只靠「段没了」证：把降级段提到最前，判据必须报乱序而不是当缺段。
+      const reordered = '## 降级与失败\n' + page;
+      if (!handoffPageProblems(reordered).some((problem) => problem.startsWith('段序颠倒'))) {
+        problems.push('反向构造判别力缺失（降级段提到最前未被判段序颠倒）');
+      }
+      // 状态边界的方向性：判据读语义、不认固定串——肯定句必报，否定句不报（两向都构造）。
+      const stateClaim = '- 写入 `' + HANDOFF_PAGE_STATE_FILE + '` 记住本批选择。';
+      const stateDenial = '- 不写 `' + HANDOFF_PAGE_STATE_FILE + '`，也不新增字段。';
+      const claimed = handoffPageProblems(page + '\n' + stateClaim);
+      if (!claimed.some((problem) => problem.startsWith('状态文件出现在肯定语境'))) {
+        problems.push('反向构造判别力缺失（状态文件出现在肯定语境未被判违规）');
+      }
+      const denied = handoffPageProblems(page + '\n' + stateDenial);
+      if (denied.length > 0) {
+        problems.push('反向构造误报（否定句「不写 <状态文件>」被判成状态写入）: ' + denied.join('; '));
+      }
+      if (problems.length > 0) throw new Error('归档后交接协议页不符: ' + problems.join('; '));
     },
   },
 ];
