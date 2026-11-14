@@ -12,10 +12,9 @@
 
 ## [Unreleased]
 
-> 回归基线：352 场景 / 95 项系统测试，全部通过。
-
 ### 变更
 
+- **遗留项不再沉睡在归档里**：归档出口通过之后，本批的遗留清单会被交接到项目已经在用的载体上——issue 跟踪器，或留在仓库里的 roadmap——每批只问一次，创建或写入之前先把每条的标题与正文完整展示出来，对应的命令行缺席或未登录时降级为一条可照抄的命令。选择不记忆、历史不回填，跳过或失败都不会让归档状态回退。回归基线 352 场景 / 95 项系统测试。（[#180](https://github.com/baobaolaodie/flow-comet/pull/180)）
 - **破坏性变更——所有 change 只有一条生命周期，不再是两条轨道**：`newChange` 状态字段退役——`init` 不再写入它，旧状态文件里仍带着它（`true` 或 `null`）时按「没有该字段」读取，因此不需要迁移。对你的影响：原来「对新建的 change 拦截、对更早的 change 只告警」的规则，现在对每个 change 只有一个判定；`record` 也不再为更早版本创建的 change 自动补写缺失的技能加载声明——由执行者声明，拒绝报文会打印该跑的命令。([#179](https://github.com/baobaolaodie/flow-comet/pull/179))
 - **目录已搬进归档的 change 仍在办**：此前「在办」绑在活动目录存在上，目录一离开 `.specs/<change-id>/`，change 就当场丢掉：`status` 报没有 change、`next` 指向终点、`record` 说当前是 open 节点、`skill-load` 直接拒绝。现在「在办」只由状态判定，目录位置是每条命令现答的另一个问题——节点推导去 `.specs/archive/<YYYY-MM-DD>-<change-id>/` 读产物，搬移之后才补的声明写进归档目录，记录也对得上搬移后的产物。两处都没有目录时，命令被拒绝并点名它查过的两个位置，而不是把一个仍在办的 change 报成没有 change。([#179](https://github.com/baobaolaodie/flow-comet/pull/179))
 - **归档先落证据，最后才做那步不可逆的搬移**：归档步骤读作「声明 → 记录 → 搬目录 → 登记（CHANGELOG 与状态）→ 出口」。搬目录无法撤销，而它原先排在需要它的证据之前——这正是「目录搬走了、证据却记不下来、节点也退不出去」的成因。([#179](https://github.com/baobaolaodie/flow-comet/pull/179))
