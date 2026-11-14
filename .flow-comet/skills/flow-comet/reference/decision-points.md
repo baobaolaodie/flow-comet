@@ -6,7 +6,7 @@
 
 | 分类 | 定义 | 处理 |
 |------|------|------|
-| 用户决策 | ≥2 个会改变范围/行为/风险/不可逆结果的合法选项 | 用交互确认问（Claude Code 用 AskUserQuestion 优先；Codex 用文本提问+内联确认）或文本回退；相邻选择合并为一个问题，不重问已持久化选择 |
+| 用户决策 | ≥2 个会改变范围/行为/风险/不可逆结果的合法选项 | dsh 用 ask_user_question、Claude Code 用 AskUserQuestion、Codex 用 ask_user_question——当前版本没有该工具时退回文本提问 + 内联确认；非交互会话显式跳过；相邻选择合并为一个问题，不重问已持久化选择 |
 | 自动处理 | 唯一安全下一步 | 直接执行并汇报，不许制造确认 |
 | 停止条件 | guard 失败 / 缺依赖 / 状态损坏 | 报告阻塞与恢复条件；存在多个会改变范围或风险的合法恢复动作时才升级为用户决策 |
 | 手动交接 | `NEXT: manual`（若有） | 不是用户决策，直接继续 |
@@ -26,7 +26,7 @@
 | review | REVIEW Critical 项 | 审查发现 Critical 严重性项 | 暂停等人工确认处置 |
 | verify | UAT 失败超限 | 第 4 次失败（机器计数 verifyFailures） | 暂停问用户「继续修 / 停止」（R2.6，≤3 次自动重试） |
 | archive | 归档操作 | 移动文件到 .specs/archive/（不可逆） | 用户确认后才执行 |
-| archive | 合并 change 分支到 main | 归档收尾 | merge 前暂停等用户确认 |
+| archive | 归档收尾 | 归档收尾发生时 | 归档收尾按项目既有流程（PR 或本地合并）；交接本身不做分支操作；不产生节点内确认点 |
 | archive | PR approve | enablePrReview 开启时（archive 前置） | 等用户/GitHub approve |
 
 ### 自动处理（唯一安全下一步，直接执行并汇报）
