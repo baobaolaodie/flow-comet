@@ -66,7 +66,7 @@ description: "Use when the user wants the flow-comet managed workflow for flow-k
 | 停止条件 | guard 失败 / 缺依赖 / 状态损坏 | 报告阻塞与恢复条件，无合法动作时才升级为用户决策 |
 | 手动交接 | `NEXT: manual`（若有） | 不是用户决策，直接继续 |
 
-**决策点分布（挂到四分类下 · 逐节点作者化的完整清单见 `reference/decision-points.md`）**：**用户决策**集中在六个相位——open（主题 / 范围澄清）· design（技术栈选型）· execute（破坏性变更 R4.6 / Schema 迁移 R4.5 / 切 direct 模式并记录 `directOverride`）· review（Critical 项处置）· verify（UAT 第 4 次失败，机器计数 `verifyFailures`）· archive（归档 / PR approve）；归档收尾按项目既有流程（PR 或本地合并）；交接本身不做分支操作；**自动处理**＝唯一安全下一步直接执行（flow-kit 反问协议要求确认时按 flow-kit 规则暂停等待）；**停止条件**＝guard 失败先自动诊断并执行唯一安全修复，缺依赖或状态损坏时报阻塞与恢复条件，只有恢复方式存在多个合法选项时才升级为用户决策。
+**决策点分布（挂到四分类下 · 逐节点作者化的完整清单见 `reference/decision-points.md`）**：**用户决策**集中在六个相位——open（主题 / 范围澄清）· design（技术栈选型）· execute（破坏性变更 R4.6 / Schema 迁移 R4.5 / 切 direct 模式并记录 `directOverride`）· review（Critical 项处置）· verify（UAT 第 4 次失败，机器计数 `verifyFailures`）· archive（归档 / PR approve）；归档收尾按项目既有流程（PR 或本地合并；本地合并前仍等用户确认）；交接本身不做分支操作；**自动处理**＝唯一安全下一步直接执行（flow-kit 反问协议要求确认时按 flow-kit 规则暂停等待）；**停止条件**＝guard 失败先自动诊断并执行唯一安全修复，缺依赖或状态损坏时报阻塞与恢复条件，只有恢复方式存在多个合法选项时才升级为用户决策。
 
 > **当你遇到四分类里的「用户决策」、不确定该不该停下来问时读 `reference/decision-points.md`**（按节点作者化的确认点清单 + 机制性决策点，逐条给出触发条件与处置）。
 
