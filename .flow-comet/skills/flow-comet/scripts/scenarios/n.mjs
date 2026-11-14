@@ -670,6 +670,8 @@ const HANDOFF_PAGE_PROBE_COMMANDS = [
 ];
 // 降级 = 内容 + 可照抄的命令两件套，且不得把「没创建」写成「已创建」。
 const HANDOFF_PAGE_DEGRADE = ['内容 + 命令', 'gh issue create', 'glab issue create', '不声明已创建'];
+// 步骤权威：八步顺序有两处表达（归档册 / 本页），页内必须声明以归档册为准，否则下次改顺序只会改一处。
+const HANDOFF_PAGE_AUTHORITY = ['步骤权威', 'flow-comet-archive'];
 // 缺陷类草稿的七段按**编号**认（编号即骨架顺序）：页内别处出现的同名单词不算骨架在场。
 const HANDOFF_PAGE_DRAFT_PARTS = [
   '1. 用户版本', '2. 终端', '3. 现象', '4. 复现', '5. 期望', '6. 代码位置', '7. 未验证',
@@ -704,6 +706,10 @@ function handoffPageProblems(text) {
   // ④ 降级两件套与「不声明已创建」。
   for (const needle of HANDOFF_PAGE_DEGRADE) {
     if (!text.includes(needle)) problems.push('缺降级要素「' + needle + '」');
+  }
+  // ④b 步骤权威：顺序不能有两处权威——页内必须声明以归档册为准。
+  for (const needle of HANDOFF_PAGE_AUTHORITY) {
+    if (!text.includes(needle)) problems.push('缺步骤权威声明「' + needle + '」');
   }
   // ⑤ 不写状态：点名状态文件的行必须是否定句；一处都没点名 = 边界没写。
   const stateLines = text.split(/\r?\n/).filter((line) => line.includes(HANDOFF_PAGE_STATE_FILE));
@@ -4265,7 +4271,7 @@ export const ENTRIES = [
   // 的可判载体——要素在场且成序，才谈得上「每批都按同一套流程交接」。
   //   ① 段序（触发 → 探测 → 一次询问 → 展示 → 降级）② 四选项 ③ 固定探测命令块
   //   ④ 降级两件套且不声明已创建 ⑤ 不写状态 ⑥ 公开草稿视角（七段 + 第一遍读 + 0 命中）
-  //   ⑦ 本地 roadmap 结构（索引七列 + 每条六段）。
+  //   ⑦ 本地 roadmap 结构（索引七列 + 每条六段）⑧ 步骤权威声明在场（页内以归档册为准）。
   // 判据与探针**共用同一函数**（handoffPageProblems）：原页零问题（判据不恒真）；抽掉任一条锚点
   // ⇒ 必报它自己那句；把降级段提到最前 ⇒ 必报段序颠倒；状态文件写成肯定句 ⇒ 必报、写成否定句 ⇒ 不报。
   {
@@ -4291,6 +4297,7 @@ export const ENTRIES = [
         ['草稿视角（0 命中）', '0 命中', '缺草稿视角「0 命中」'],
         ['roadmap 索引七列', '索引七列', '缺 roadmap 索引结构「索引七列」'],
         ['roadmap 每条六段', '每条六段', '缺 roadmap 条目结构「每条六段」'],
+        ['步骤权威（归档册）', '步骤权威', '缺步骤权威声明「步骤权威」'],
       ];
       for (const [label, needle, expected] of probes) {
         if (!page.includes(needle)) {

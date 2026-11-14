@@ -217,7 +217,7 @@ If the script prints `NEXT: done`, run the 「归档完成后的交接」 sectio
 
 **边界**：不写 `.flow-comet/flow-comet-state.json`；不修改归档的 `KNOWN-ISSUES.md`；不自动提交、不关闭 issue；本段全程不做任何分支操作。
 
-**归档完成后要执行交接时**读 `../flow-comet/reference/post-archive-handoff.md`（探测命令序列、四选项询问、载体决策表、公开草稿骨架、降级路径与操作矩阵）。
+**归档完成后要执行交接时**读 `../flow-comet/reference/post-archive-handoff.md`（触发与顺序、探测命令序列、四选项询问、载体决策表、公开草稿骨架、降级路径与操作矩阵）。
 
 ## Recovery
 
