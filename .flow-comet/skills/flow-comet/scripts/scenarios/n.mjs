@@ -651,7 +651,8 @@ function assertProbesDiscriminate(problems, docs, rules, probes) {
 
 // 归档后交接协议页（`reference/post-archive-handoff.md`，分发参考册）的判据：场景 352 与它自己
 // 的变异探针共用同一实现——文本进、问题清单出。只判协议要素（段序 / 选项 / 命令 / 降级 /
-// 不写状态 / 草稿视角 / roadmap 结构），不判散文措辞：措辞可以改，要素缺席或反向陈述才是要拦的形态。
+// 不写状态 / 草稿视角 / roadmap 结构）；其中若干要素以固定措辞出现（如「内容 + 命令」「不声明已创建」），
+// 那几句的措辞即判据：改措辞须同批改本文件的锚，否则场景会红。
 const HANDOFF_PAGE_SECTIONS = [
   ['触发', '## 触发与顺序'],
   ['探测', '## 探测（只读）'],
