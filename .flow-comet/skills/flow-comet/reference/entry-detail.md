@@ -51,13 +51,13 @@ flow-kit 9 阶段工作流的 workflow-kernel 实现。保留 flow-kit 的全部
 
 | 分类 | 定义 | 处理 |
 |------|------|------|
-| 用户决策 | ≥2 个会改变范围/行为/风险/不可逆结果的合法选项 | 用交互确认问（Claude Code 用 AskUserQuestion 优先；Codex 用文本提问+内联确认）或文本回退；相邻选择合并为一个问题，不重问已持久化选择 |
+| 用户决策 | ≥2 个会改变范围/行为/风险/不可逆结果的合法选项 | dsh 用 ask_user_question、Claude Code 用 AskUserQuestion、Codex 用 ask_user_question——当前版本没有该工具时退回文本提问 + 内联确认；非交互会话：不提问、把该决策点显式报告为未决并停下（不替用户选择）；相邻选择合并为一个问题，不重问已持久化选择 |
 | 自动处理 | 唯一安全下一步 | 直接执行并汇报，不许制造确认 |
 | 停止条件 | guard 失败 / 缺依赖 / 状态损坏 | 报告阻塞与恢复条件，无合法动作时才升级为用户决策 |
 | 手动交接 | `NEXT: manual`（若有） | 不是用户决策，直接继续 |
 
 **决策点清单（挂到四分类下，详细作者化见 `reference/decision-points.md`）**：
-- **用户决策**：首次调用且主题/范围有多个合法解释；技术栈选型（5~6 卡，design 节点内暂停）；破坏性变更检测（R4.6，execute 节点内暂停展示引用图）；Schema 迁移（R4.5，execute 节点内暂停）；REVIEW Critical 项（review 节点暂停等人工确认）；UAT 失败超限（第 4 次，机器计数 verifyFailures，verify 节点暂停）；归档操作（不可逆，archive 节点暂停等最终确认）；切换 executionMode 到 direct（execute 节点内暂停，需用户确认，记录 directOverride）；合并 change 分支到 main（归档收尾，merge 前暂停等用户确认）；PR approve（enablePrReview 开启时，archive 前置，等用户/GitHub approve）
+- **用户决策**：首次调用且主题/范围有多个合法解释；技术栈选型（5~6 卡，design 节点内暂停）；破坏性变更检测（R4.6，execute 节点内暂停展示引用图）；Schema 迁移（R4.5，execute 节点内暂停）；REVIEW Critical 项（review 节点暂停等人工确认）；UAT 失败超限（第 4 次，机器计数 verifyFailures，verify 节点暂停）；归档操作（不可逆，archive 节点暂停等最终确认）；切换 executionMode 到 direct（execute 节点内暂停，需用户确认，记录 directOverride）；归档收尾按项目既有流程（PR 或本地合并；本地合并前仍等用户确认）；交接本身不做分支操作；PR approve（enablePrReview 开启时，archive 前置，等用户/GitHub approve）
 - **自动处理**：唯一安全下一步直接执行；flow-kit 反问协议要求确认（CHANGE/REQUIREMENT/DESIGN）按 flow-kit 规则暂停等待
 - **停止条件**：Node guard 失败时先自动诊断并执行唯一安全修复；缺依赖或状态损坏导致无法继续时报告停止条件与恢复条件；只有恢复方式存在多个会改变范围或风险的合法选项时，才升级为用户决策
 
