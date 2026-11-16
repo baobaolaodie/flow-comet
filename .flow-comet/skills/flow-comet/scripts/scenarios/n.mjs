@@ -660,7 +660,13 @@ const HANDOFF_PAGE_SECTIONS = [
   ['展示与确认', '## 展示、粒度与确认'],
   ['降级', '## 降级与失败'],
 ];
-const HANDOFF_PAGE_OPTIONS = ['GitHub Issues', 'GitLab Issues', '本地 roadmap', '暂不处理'];
+// 四选项按**整行**认：这四个词在推荐矩阵里各自也出现，只按词判会让「整张表被删」仍然全绿。
+const HANDOFF_PAGE_OPTIONS = [
+  '| GitHub Issues | 用 `gh` 按目标项目现有 issue 模板创建 |',
+  '| GitLab Issues | 用 `glab` 创建 |',
+  '| 本地 roadmap | 写进项目自己的路线图文件（索引 + 每条一份文件） |',
+  '| 暂不处理 | 结束本步骤，不写盘；不记忆，下一次归档仍会问 |',
+];
 const HANDOFF_PAGE_PROBE_COMMANDS = [
   'git rev-parse --is-inside-work-tree',
   'git remote get-url origin',
@@ -698,7 +704,7 @@ function handoffPageProblems(text) {
   }
   // ② 四选项：少一个就是替用户排除了一条路。
   for (const option of HANDOFF_PAGE_OPTIONS) {
-    if (!text.includes(option)) problems.push('缺载体选项「' + option + '」');
+    if (!text.includes(option)) problems.push('缺载体选项行「' + option + '」');
   }
   // ③ 固定探测命令块：git 在树内 → remote 分类 → CLI 版本 → 认证状态。
   for (const command of HANDOFF_PAGE_PROBE_COMMANDS) {
@@ -712,14 +718,16 @@ function handoffPageProblems(text) {
   for (const needle of HANDOFF_PAGE_AUTHORITY) {
     if (!text.includes(needle)) problems.push('缺步骤权威声明「' + needle + '」');
   }
-  // ⑤ 不写状态：否定必须**紧贴**这次写入（尾部锚定）——句子别处的否定不能替它开脱：
-  //    「写入 state，不新增字段」被句末否定蒙混、「不写报告，但写入 state」被前置否定蒙混，都不允许。
-  const NEG_WRITE_TAIL_RE = /(不写|不写入|禁止写|不得写|不要写|勿写|绝不写|不直接写|不手动写)\s*`?\s*$/;
+  // ⑤ 不写状态：只拦「紧贴着把状态文件当写入目标」的句子（正向写入检测）——
+  //    否定在句首（`不写状态文件（<路径>）：…`）或在路径之后的从句（`<路径> 只读，不写入`）都不误伤；
+  //    而 `写入 <路径>，不新增字段` / `不写报告，但写入 <路径>` 这类「否定在别处」的句子仍必须红。
+  const WRITE_VERB_TAIL_RE = /(写|写入|修改|覆盖|改动)\s*`?\s*$/;
+  const NEGATED_WRITE_TAIL_RE = /(不写|不写入|禁止写|不得写|不要写|勿写|绝不写|不直接写|不手动写)\s*`?\s*$/;
   const stateLines = text.split(/\r?\n/).filter((line) => line.includes(HANDOFF_PAGE_STATE_FILE));
   if (stateLines.length === 0) problems.push('缺「不写状态文件」边界（页内未点名状态文件）');
   for (const line of stateLines) {
-    const at = line.indexOf(HANDOFF_PAGE_STATE_FILE);
-    if (!NEG_WRITE_TAIL_RE.test(line.slice(0, at))) {
+    const before = line.slice(0, line.indexOf(HANDOFF_PAGE_STATE_FILE));
+    if (WRITE_VERB_TAIL_RE.test(before) && !NEGATED_WRITE_TAIL_RE.test(before)) {
       problems.push('状态文件出现在肯定语境「' + line.trim().slice(0, 60) + '」');
     }
   }
@@ -4289,7 +4297,8 @@ export const ENTRIES = [
       const probes = [
         ['段序（触发段）', '## 触发与顺序', '缺段「## 触发与顺序」（触发）'],
         ['段序（降级段）', '## 降级与失败', '缺段「## 降级与失败」（降级）'],
-        ['四选项（本地 roadmap）', '本地 roadmap', '缺载体选项「本地 roadmap」'],
+        ['四选项（本地 roadmap 行）', '| 本地 roadmap | 写进项目自己的路线图文件（索引 + 每条一份文件） |',
+          '缺载体选项行「| 本地 roadmap | 写进项目自己的路线图文件（索引 + 每条一份文件） |」'],
         ['探测（工作树判定）', 'git rev-parse --is-inside-work-tree',
           '缺探测命令「git rev-parse --is-inside-work-tree」'],
         ['探测（remote 分类）', 'git remote get-url origin', '缺探测命令「git remote get-url origin」'],
@@ -4340,6 +4349,29 @@ export const ENTRIES = [
       const masked = handoffPageProblems(page + '\n' + stateMasked);
       if (!masked.some((problem) => problem.startsWith('状态文件出现在肯定语境'))) {
         problems.push('反向构造判别力缺失（前置子句的否定掩盖了状态写入）');
+      }
+      // 四选项的判别力不能靠「词还在别处」：整张选项表删掉也必须红（推荐矩阵里同样有这四个词）。
+      {
+        const tableStart = page.indexOf('| 选项 | 说明 |');
+        const tableEndIndex = page.indexOf('| 暂不处理 |');
+        if (tableStart < 0 || tableEndIndex < tableStart) {
+          problems.push('反向构造前提失效（找不到载体选项表）');
+        } else {
+          const endOfRow = page.indexOf('\n', tableEndIndex);
+          const withoutTable = page.slice(0, tableStart) + page.slice(endOfRow + 1);
+          if (!handoffPageProblems(withoutTable).some((problem) => problem.startsWith('缺载体选项行'))) {
+            problems.push('反向构造判别力缺失（整张载体选项表被删未被判缺选项）');
+          }
+        }
+      }
+      // 误伤侧：句首否定与「路径之后」的否定都是自然写法，不得判违规（两个方向都要锁）。
+      const leadingNegation = '- **不写状态文件**（`' + HANDOFF_PAGE_STATE_FILE + '`）：不写入、不改写。';
+      const trailingNegation = '- `' + HANDOFF_PAGE_STATE_FILE + '` 只读，不写入。';
+      for (const [label, line] of [['句首否定', leadingNegation], ['路径后否定', trailingNegation]]) {
+        const found = handoffPageProblems(page + '\n' + line);
+        if (found.some((problem) => problem.startsWith('状态文件出现在肯定语境'))) {
+          problems.push('反向构造误报（' + label + '形态被判成状态写入）: ' + line);
+        }
       }
       if (problems.length > 0) throw new Error('归档后交接协议页不符: ' + problems.join('; '));
     },
