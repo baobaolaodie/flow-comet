@@ -72,7 +72,7 @@ node <skills>/flow-comet/scripts/workflow-state.mjs record execute '{"summary":"
 | `KNOWN-ISSUES.md` | `archive` | 仍然开放或明确排除的事项 |
 | `.skill-loads/` | 每个节点 | 声明标记，每节点每技能一份 |
 
-归档的顺序由「哪一步可逆」决定：先声明本节点的技能、记录节点证据，再把整个目录迁到 `.specs/archive/<YYYY-MM-DD>-<change-id>/`，向 `.specs/CHANGELOG.md` 追加一行，最后跑出口。运行命令只读带日期的目录名——只带本 change 的 id、没有日期前缀的目录会在出口被拒绝，并给出把它改名的命令；存在多份带日期的目录时，取「日期不早于该 change 创建日期」的最新一份，候选并列则停下而不是替人挑一份。`.specs/` 不纳入版本控制：它是工作的运行时记录，由安装器写入 `.gitignore` 的托管条目挡在仓库之外。
+归档的顺序由「哪一步可逆」决定：先声明本节点的技能、记录节点证据，再把整个目录迁到 `.specs/archive/<YYYY-MM-DD>-<change-id>/`，向 `.specs/CHANGELOG.md` 追加一行，最后跑出口。运行命令只读带日期的目录名——只带本 change 的 id、没有日期前缀的目录会在出口被拒绝，并给出把它改名的命令；存在多份带日期的目录时，取「日期不早于该 change 创建日期」的最新一份，候选并列则停下而不是替人挑一份。`.specs/` 不纳入版本控制：它是工作的运行时记录，由安装器写入 `.gitignore` 的托管条目挡在仓库之外。遗留清单不是死路：出口通过后，工作流会把它交给项目已经在用的载体（见[归档之后的交接](MECHANISM-zh.md#归档之后的交接)）。
 
 ## 引擎强制的纪律
 

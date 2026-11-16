@@ -1213,8 +1213,10 @@ export const ENTRIES = [
       // —— 归档顺序（证据先于不可逆）与三册口径 ——
       // 判据两半：① 步骤序——记录步骤在搬目录之前、搬目录在 exit 之前、声明硬规则先于搬目录；
       // ② 口径——三册内不得残留新旧分级 / 渐进 WARN / 自动补写承诺（后者复用 autoFillPromiseProblems）。
-      // 反向构造：把搬目录步骤提到最前（序颠倒）、抽掉声明硬规则句、注入旧分级行、注入自动补写承诺
-      // ⇒ 四条各必报，证明判据不是恒真的摆设。
+      // 归档完成后的交接段接在出口之后：出口先于交接段（段序），收尾句与接线句必须在场——交接的
+      // 触发时机与协议页只能从这三处读到；缺任何一处、或把段位挪走，执行者就找不到入口。
+      // 反向构造：把搬目录步骤提到最前（序颠倒）、抽掉声明硬规则句、注入旧分级行、注入自动补写承诺、
+      // 把交接段提到 Exit Check 之前（段序颠倒）、抽掉收尾句 ⇒ 六条各必报，证明判据不是恒真的摆设。
       const archiveBooks = new Map([
         ['flow-comet-archive/SKILL.md', path.join(SCRIPTS_DIR, '..', '..', 'flow-comet-archive', 'SKILL.md')],
         ['flow-comet-integration/SKILL.md', path.join(SCRIPTS_DIR, '..', '..', 'flow-comet-integration', 'SKILL.md')],
@@ -1224,6 +1226,7 @@ export const ENTRIES = [
         ['flow-comet-archive/SKILL.md', '记录步骤先于搬目录', '**Record evidence**', '**Move change to archive**'],
         ['flow-comet-archive/SKILL.md', '搬目录先于出口', '**Move change to archive**', '## Exit Check'],
         ['flow-comet-archive/SKILL.md', '声明硬规则先于搬目录', '技能加载声明必须先于任何动作', '**Move change to archive**'],
+        ['flow-comet-archive/SKILL.md', '出口先于交接段', '## Exit Check', '### 归档完成后的交接'],
         ['flow-comet-integration/SKILL.md', '记录步骤先于搬目录', '**记录**', '**搬目录**'],
         ['flow-comet-integration/SKILL.md', '搬目录先于登记与出口', '**搬目录**', '**通知与出口**'],
         ['flow-comet-integration/SKILL.md', '声明硬规则先于搬目录', '技能加载声明必须先于任何动作', '**搬目录**'],
@@ -1244,8 +1247,11 @@ export const ENTRIES = [
         for (const [rel, needle] of [
           ['flow-comet-archive/SKILL.md', '尤其先于搬目录'],
           ['flow-comet-archive/SKILL.md', '先记录、后搬目录'],
+          ['flow-comet-archive/SKILL.md', 'run the 「归档完成后的交接」 section below first'],
+          ['flow-comet-archive/SKILL.md', '../flow-comet/reference/post-archive-handoff.md'],
           ['flow-comet-integration/SKILL.md', '尤其先于搬目录'],
           ['flow-comet-integration/SKILL.md', '先记录、后搬目录'],
+          ['flow-comet-integration/SKILL.md', 'post-archive-handoff'],
           ['flow-comet/SKILL.md', '证据先于不可逆'],
           ['flow-comet/SKILL.md', '技能加载声明必须先于任何动作'],
           ['flow-comet/SKILL.md', '记录必须早于搬目录'],
@@ -1277,6 +1283,11 @@ export const ENTRIES = [
           (text) => text + '\n旧 change 只 WARN（渐进）\n', '残留旧分级口径'],
         ['注入自动补写承诺', 'flow-comet/SKILL.md',
           (text) => text + '\nrecord 会自动补写缺失的声明标记。\n', '含自动补写承诺表述'],
+        ['把交接段提到最前', 'flow-comet-archive/SKILL.md',
+          (text) => '### 归档完成后的交接\n' + text, '步骤序颠倒'],
+        ['抽掉交接收尾句', 'flow-comet-archive/SKILL.md',
+          (text) => text.split('run the 「归档完成后的交接」 section below first').join(''),
+          '缺「run the 「归档完成后的交接」 section below first」'],
       ]) {
         const before = archiveBooks.get(rel);
         const probed = new Map(archiveBooks).set(rel, mutate(before));

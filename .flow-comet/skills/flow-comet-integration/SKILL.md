@@ -41,6 +41,7 @@ description: "flow-kit INTEGRATION 阶段协议：集成验证 + UAT + 失败诊
 3. **搬目录**：`.specs/<change-id>/` → `.specs/archive/<YYYY-MM-DD>-<change-id>/`——本流程唯一的不可逆动作，排在声明与记录之后。
 4. **登记**：`.specs/CHANGELOG.md` 顶部按日期倒序插入一行——**跟随项目既有格式**（非表格格式同样在顶部插入，不强制转表格；guard 的倒序检测只针对表格格式行）——完整协议见 `flow-comet-archive` 册；**不归档** `.specs/LESSONS.md`（项目级常驻）。
 5. **通知与出口**：向用户列出遗留清单并告知沉淀候选 → `workflow-guard.mjs exit archive --apply`（**搬目录仍是 `exit` 的前置**）。
+   - 出口打印 `NEXT: done` 之后的**交接**：步骤权威在 `flow-comet-archive` 册的「归档完成后的交接」段（触发时机 / 顺序 / 不阻断归档 / 不做任何分支操作），载体探测与操作矩阵见 `../flow-comet/reference/post-archive-handoff.md`；本步的 exit 顺序与出口判据不变。
 
 DESIGN.md § 9 架构沉淀建议留待 A-evolve 批量同步。
 

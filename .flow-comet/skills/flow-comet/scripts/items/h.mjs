@@ -7,7 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 import { createHash } from 'crypto';
-import { assertExit, assertNotOut, assertOut, assertTrue, installSkillTreeCopy, runGuard, runHandoff, runPrintedCommand, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
+import { assertExit, assertNotOut, assertOut, assertTrue, installSkillTreeCopy, runGuard, runHandoff, runHook, runPrintedCommand, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
 import { archiveRecordJson, CHANGE_ID, assertNodeLine, assertNotNodeLine, completeFixTaskAndRecord, driveThroughDesign, execSummaryFixture, fixBatchReviewDoc, fixBatchTaskText, fullContract, parseStatusOutput, readStateBytes, readStateFile, writeIntakeArtifacts } from '../lib/system-fixtures.mjs';
 
 // 同夹具的「段内大写 Z 早于方法名」变体（真实机检标记形态）：6 维自查段体首行是含大写 Z 的机检
@@ -232,6 +232,16 @@ export const ENTRIES = [
       const status = runState(['status'], dir);
       assertExit(status, 0);
       assertOut(status, '"status": "no-change"');
+      // ⑤ 完成态之后（交接的落点）：归档已闭合——写项目文件放行，state 机器文件仍恒拦。
+      // 两句成对：前一句证明完成态不再是「处处拦」，后一句证明放行没有把守卫整体关掉。
+      const postArchiveWrite = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, 'docs', 'roadmap', 'KI-arch-demo-01.md') } });
+      assertExit(postArchiveWrite, 0);
+      assertOut(postArchiveWrite, 'no active workflow');
+      const stateWrite = runHook(['before_tool'], dir,
+        { tool_name: 'Write', tool_input: { file_path: path.join(dir, '.flow-comet', 'flow-comet-state.json') } });
+      assertExit(stateWrite, 2);
+      assertOut(stateWrite, 'state 文件');
     },
   },
 
