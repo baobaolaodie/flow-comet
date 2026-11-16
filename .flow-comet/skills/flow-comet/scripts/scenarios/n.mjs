@@ -712,11 +712,15 @@ function handoffPageProblems(text) {
   for (const needle of HANDOFF_PAGE_AUTHORITY) {
     if (!text.includes(needle)) problems.push('缺步骤权威声明「' + needle + '」');
   }
-  // ⑤ 不写状态：点名状态文件的行必须是否定句；一处都没点名 = 边界没写。
+  // ⑤ 不写状态：点名状态文件的行，否定词必须落在**这次写入**上（就近判定）——
+  //    「写入 state，不新增字段」这类混合句不再被句末的「不新增」蒙混过去。
+  const NEG_WRITE_RE = /不写|不写入|禁止写|不得写|不要写|勿写|绝不写|不直接写|不手动写/;
   const stateLines = text.split(/\r?\n/).filter((line) => line.includes(HANDOFF_PAGE_STATE_FILE));
   if (stateLines.length === 0) problems.push('缺「不写状态文件」边界（页内未点名状态文件）');
   for (const line of stateLines) {
-    if (!/不写|不新增|不把|不改/.test(line)) {
+    const at = line.indexOf(HANDOFF_PAGE_STATE_FILE);
+    const localBefore = line.slice(0, at).slice(-20);
+    if (!NEG_WRITE_RE.test(localBefore)) {
       problems.push('状态文件出现在肯定语境「' + line.trim().slice(0, 60) + '」');
     }
   }
@@ -4325,6 +4329,12 @@ export const ENTRIES = [
       const denied = handoffPageProblems(page + '\n' + stateDenial);
       if (denied.length > 0) {
         problems.push('反向构造误报（否定句「不写 <状态文件>」被判成状态写入）: ' + denied.join('; '));
+      }
+      // 混合句：句子里有「写 state」也有别处的否定——否定必须就近落在这次写入上。
+      const stateMixed = '- 写入 `' + HANDOFF_PAGE_STATE_FILE + '`，不新增字段。';
+      const mixed = handoffPageProblems(page + '\n' + stateMixed);
+      if (!mixed.some((problem) => problem.startsWith('状态文件出现在肯定语境'))) {
+        problems.push('反向构造判别力缺失（混合句「写入 state，不新增字段」未被判违规）');
       }
       if (problems.length > 0) throw new Error('归档后交接协议页不符: ' + problems.join('; '));
     },
