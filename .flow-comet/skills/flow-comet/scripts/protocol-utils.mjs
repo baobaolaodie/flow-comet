@@ -45,7 +45,10 @@ export async function inspectWorkflowPathSegments(
   target,
   label,
   expected = 'any',
+  options = {},
 ) {
+  const followLinks = options.followLinks === true;
+  const wantPhysical = options.physicalRel === true;
   const lexicalRoot = path.resolve(projectRoot);
   const lexicalTarget = path.resolve(target);
   if (!workflowPathInside(lexicalRoot, lexicalTarget)) {
@@ -56,9 +59,14 @@ export async function inspectWorkflowPathSegments(
     throw new Error(label + ' project root must be a real directory');
   }
   const realRoot = await fs.realpath(lexicalRoot);
+  const toRel = (absolute) => {
+    const relativeToRoot = path.relative(realRoot, absolute);
+    return relativeToRoot === '' ? '.' : relativeToRoot.replaceAll('\\', '/');
+  };
   const relative = path.relative(lexicalRoot, lexicalTarget);
   const segments = relative === '' ? [] : relative.split(path.sep);
   let cursor = lexicalRoot;
+  let physicalCursor = realRoot;
   for (let index = 0; index < segments.length; index++) {
     cursor = path.join(cursor, segments[index]);
     let stat;
@@ -70,13 +78,37 @@ export async function inspectWorkflowPathSegments(
         typeof error === 'object' &&
         (error.code === 'ENOENT' || error.code === 'ENOTDIR')
       ) {
-        return { target: lexicalTarget, exists: false };
+        const remainder = segments.slice(index).join(path.sep);
+        return {
+          target: lexicalTarget,
+          exists: false,
+          physicalRel: wantPhysical
+            ? toRel(remainder ? path.join(physicalCursor, remainder) : physicalCursor)
+            : null,
+        };
       }
       throw error;
     }
     const display = path.relative(lexicalRoot, cursor).replaceAll('\\', '/');
     if (stat.isSymbolicLink()) {
-      throw new Error(label + ' crosses a symbolic link or junction at ' + display);
+      if (!followLinks) {
+        throw new Error(label + ' crosses a symbolic link or junction at ' + display);
+      }
+      const physical = await fs.realpath(cursor);
+      if (!workflowPathInside(realRoot, physical)) {
+        throw new Error(label + ' resolves outside the project root at ' + display);
+      }
+      physicalCursor = physical;
+      if (index === segments.length - 1 && expected !== 'any') {
+        const resolved = await fs.stat(physical);
+        if (
+          (expected === 'file' && !resolved.isFile()) ||
+          (expected === 'directory' && !resolved.isDirectory())
+        ) {
+          throw new Error(label + ' must be a real ' + expected);
+        }
+      }
+      continue;
     }
     const final = index === segments.length - 1;
     if (!final && !stat.isDirectory()) {
@@ -94,8 +126,13 @@ export async function inspectWorkflowPathSegments(
     if (!workflowPathInside(realRoot, physical)) {
       throw new Error(label + ' resolves outside the project root');
     }
+    physicalCursor = physical;
   }
-  return { target: lexicalTarget, exists: true };
+  return {
+    target: lexicalTarget,
+    exists: true,
+    physicalRel: wantPhysical ? toRel(physicalCursor) : null,
+  };
 }
 
 // 兼容既有消费方（readWorkflowProtectedFile / comet-hook-guard）：受保护读取使用同一段

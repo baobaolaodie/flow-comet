@@ -24,6 +24,7 @@ import {
   fileExists,
   findSkillLoadsDir as findSkillLoadsDirAtRoot,
   readJson,
+  resolveChangeDir,
   runRootDir,
   specsDir,
 } from './state-io.mjs';
@@ -61,8 +62,7 @@ export function findPromptArgs(cliArgs) {
 }
 
 // 声明标记里「已声明的协议文件」提取（唯一实现：出口覆盖判据与任何读标记的消费方共用）：
-//   · protocols 数组（skill-load 多条 --prompt 的写入形态）∪ protocol 单值（收紧前的写入形态，
-//     以及 record 自动补写的标记）；
+//   · protocols 数组（skill-load 多条 --prompt 的写入形态）∪ protocol 单值（收紧前的写入形态）；
 //   · 每个值都按 basename 归一——旧标记可能是完整绝对路径（历史缺陷期写入的形态），新标记是
 //     basename；两种形态必须比对同一口径（节点协议映射表只存 basename）。
 // 返回去重保序的 basename 数组；null / 空串 / 非字符串一律忽略（fail-closed：覆盖判据只认
@@ -106,10 +106,10 @@ export function findRequiredSkillBinding(protocol, nodeId, skillName) {
   return (node.requiredSkillCalls ?? []).find((binding) => binding.skill === skillName) ?? null;
 }
 
-// 标记目录解析（活动路径 .specs/<change-id>/.skill-loads/ 优先，归档路径兜底——archive 节点
-// 「先移目录后 record/exit」顺序下 change 目录已在 .specs/archive/<日期>-<change-id>/，标记只随
-// 目录移动）：路径规则与守卫族同一份实现，实现在本族的路径上下文模块（state-io），本处只注入状态
-// 命令族的运行根。规则落状态族而不是守卫族是依赖方向决定的：状态命令族不得 import 守卫族（否则
+// 标记目录解析（活动路径 .specs/<change-id>/.skill-loads/ 优先，归档路径兜底）：规范顺序是
+// 「声明 → 记录 → 搬目录 → exit」，搬目录在 exit 前、记录之后；移动后补 record / 补声明仅作
+// 兼容 / 恢复路径，标记因此仍须能在归档路径被读到。路径规则与守卫族同一份实现，实现在本族的路径
+// 上下文模块（state-io），本处只注入状态命令族的运行根。规则落状态族而不是守卫族是依赖方向决定的：状态命令族不得 import 守卫族（否则
 // 一条路径规则就让状态 CLI 加载整个守卫图），守卫侧按允许的 guard → state-* 方向取用同一份实现。
 // 两族各持一份扫描时，同一个标记会因「活动目录在场是否回溯归档」「多归档目录取哪个」各自得出答案。
 // 两者皆无 → null。
@@ -123,31 +123,28 @@ export function findSkillLoadsDir(changeName) {
 // 记录/委托前置门在「先加载技能（Skill 工具）并 skill-load 声明」之前拦截"先干活后补声明"。
 export async function hasNodeSkillDeclaration(nodeId, changeName) {
   if (!nodeId || !changeName) return false;
-  const activeDir = path.join(specsDir(), changeName, '.skill-loads');
+  // 标记面 = 位置解析到的目录 + .skill-loads/（活动优先、归档兜底——两条规则都在 findSkillLoadsDir
+  // 里，本函数不另拼一份活动路径：目录定位只此一处，移动后「标记还在不在」才有唯一答案）。
+  const loadsDir = await findSkillLoadsDir(changeName);
+  if (loadsDir === null) return false;
   const prefix = nodeId + '-';
-  const scan = async (dir) => {
-    try {
-      const entries = await fs.readdir(dir);
-      return entries.some((f) => f.startsWith(prefix) && f.endsWith('.json'));
-    } catch {
-      return false;
-    }
-  };
-  if (await scan(activeDir)) return true;
-  const archived = await findSkillLoadsDir(changeName);
-  if (archived !== null && archived.dir !== activeDir) return scan(archived.dir);
-  return false;
+  try {
+    const entries = await fs.readdir(loadsDir.dir);
+    return entries.some((f) => f.startsWith(prefix) && f.endsWith('.json'));
+  } catch {
+    return false;
+  }
 }
 
 // 模板声明核对（C11）：节点的产出物模板声明落在 .skill-loads/<node>-*.json 的 templates 数组里，
 // 集合必须与 C3 映射一致（required ⊆ declared ⊆ required ∪ optional）。同一节点可有多个 skill 标记
 // （open 有 change / requirement），取并集——节点级一份声明被任一标记满足即可（skill-load 每次
-// 都写全清单）。新 change 缺失 / 多写 / 漏写 / 错名 → BLOCK；旧 change → WARN（渐进兼容，C10）。
+// 都写全清单）。缺失 / 多写 / 漏写 / 错名 → BLOCK（单轨，无分级旁路）。
 // 不比对的三种情形：非内置节点（C12：自定义协议按自己的声明走）、无活动 change、声明机制未激活
 //（无 .skill-loads/ 或本节点无标记）——后者由「缺少技能加载声明标记」门负责，不重复报
 //（与 exit 侧协议声明校验的「未激活不追溯」同一口径）。
 // 零模板的内置节点（verify / archive）省略 --templates 即视为空集，通过。
-export async function verifyTemplateDeclaration({ protocol, nodeId, changeName, newChange, commandContext: context }) {
+export async function verifyTemplateDeclaration({ protocol, nodeId, changeName, commandContext: context }) {
   const declarationNode = (protocol?.nodes ?? []).find((node) => node.id === nodeId);
   const declaration = nodeTemplateDeclaration(declarationNode);
   if (declaration.source !== 'builtin' || !changeName) return { ok: true };
@@ -169,8 +166,8 @@ export async function verifyTemplateDeclaration({ protocol, nodeId, changeName, 
     } catch {
       continue; // 损坏标记由既有声明校验报（本判据不抢报）
     }
-    // record 自动补写的标记（auto）是引擎写的，不是执行者的声明——它不承担模板声明义务
-    // （exit 侧已有「建议手动 skill-load」提示），不拿它算缺失
+    // 旧版本 record 自动补写的标记（auto:true）是引擎写的，不是执行者的声明——历史 state 容忍
+    // 读取，但它不承担模板声明义务，不拿它算缺失（自动补写已删除，本形态不再产生）
     if (marker?.auto === true) continue;
     explicitMarkers += 1;
     // 技能名取**标记文件名**（<node>-<skill>.json 是这份标记的身份，扫描与覆盖判据也按它认）：
@@ -201,8 +198,30 @@ export async function verifyTemplateDeclaration({ protocol, nodeId, changeName, 
     + '；映射要求: ' + describeTemplateList(declaration.required) + '）——重跑下面的命令重新声明'
     + '（同一 node-skill 重跑会覆写该标记）:\n'
     + declareCommands.map((command) => '  ' + command).join('\n');
-  if (newChange === true) return { ok: false, reason };
-  return { ok: true, warn: reason };
+  return { ok: false, reason };
+}
+
+// 「该标记到底在哪儿找过」的说明（缺声明报文的尾句，唯一实现）。活动路径找不到时按目录**实际**所在的
+// 位置说真话：
+//   · 目录已归档（<日期>-<change-id>）→ 点名归档路径：那里也没有该标记；
+//   · 归档多候选 / 两处都没有 → 才说「判不出」/「两处都没有」（成因措辞逐字沿用状态族的位置失败报文
+//     口径，不另写一套「未找到」说法）；
+//   · 活动目录在场 → 不给尾句：归档本来就不是这次该找的位置，对归档下任何结论都是假话。
+// 旧形态无条件打印「（归档路径也未找到）」——归档目录明明在场时那句话是假话，还把「找过哪里」这个
+// 可核对的事实糊掉了（L-079 同族：不可判 / 未发生的事不许写成已发生的结论）。
+async function markerLookupNote(changeName) {
+  const resolution = await resolveChangeDir({ root: runRootDir(), changeName });
+  if (resolution.status === 'archived') {
+    return '（该 change 已归档到 ' + resolution.display + '，那里也没有该标记）';
+  }
+  if (resolution.status === 'ambiguous') {
+    return '（归档目录多候选：' + resolution.candidates.map((candidate) => candidate.name).join('、')
+      + '——无法唯一判定该找哪一份）';
+  }
+  if (resolution.status === 'missing') {
+    return '（活动目录与 .specs/archive/<日期>-' + changeName + ' 两处都没有该目录）';
+  }
+  return '';
 }
 
 // completedChecks 真实性校验。解析 completedChecks 的 required-skill:<node>.<skill>
@@ -253,25 +272,17 @@ export async function verifySkillLoadMarkers(completedChecks, changeName, record
       }
       continue;
     }
-    // 标记路径解析——活动路径优先，归档路径兜底（archive 节点「先移目录后 record」
-    // 顺序下标记只在 .specs/archive/<日期>-<change-id>/.skill-loads/）；两处都找不到 → BLOCK + 指引
-    // （不静默放行）。展示路径补 .specs/ 前缀便于用户定位。
+    // 标记路径解析——活动路径优先，归档路径兜底（规范顺序「记录 → 搬目录」，搬目录之后补 record /
+    // 补声明仅作兼容 / 恢复路径，标记此时只在 .specs/archive/<日期>-<change-id>/.skill-loads/）；
+    // 两处都找不到 → BLOCK + 指引
+    // （不静默放行）。标记路径 = 位置解析到的目录 + .skill-loads/<标记>：活动优先与归档兜底只有
+    // findSkillLoadsDir 一处实现（本处不另拼活动路径表达式）。
     const markerName = item.node + '-' + item.skill + '.json';
     const activeDisplay = '.specs/' + path.posix.join(changeName, '.skill-loads', markerName);
-    const activePath = path.join(specsDir(), changeName, '.skill-loads', markerName);
-    let markerPath = await fileExists(activePath) ? activePath : null;
-    let markerDisplay = activeDisplay;
-    if (!markerPath) {
-      const loadsDir = await findSkillLoadsDir(changeName);
-      if (loadsDir !== null) {
-        const altPath = path.join(loadsDir.dir, markerName);
-        if (await fileExists(altPath)) {
-          markerPath = altPath;
-          markerDisplay = loadsDir.display + markerName;
-        }
-      }
-    }
-    if (!markerPath) {
+    const loadsDir = await findSkillLoadsDir(changeName);
+    const markerPath = loadsDir === null ? null : path.join(loadsDir.dir, markerName);
+    const markerDisplay = loadsDir === null ? activeDisplay : loadsDir.display + markerName;
+    if (markerPath === null || !(await fileExists(markerPath))) {
       // 声明命令由协议派生（该条目所指节点的全部协议文件 + 模板全清单），脚本路径与协议上下文由
       // 唯一装配补齐：只给 "skill-load <node> <skill>" 或裸脚本名的旧形态，照抄后会被模板声明门 /
       // 出口覆盖门逐个拦下，或在 shell 里 command not found——报文给出的东西必须一次补齐。
@@ -280,8 +291,8 @@ export async function verifySkillLoadMarkers(completedChecks, changeName, record
       const declaredNode = (protocol?.nodes ?? []).find((node) => node.id === item.node) ?? { id: item.node };
       return {
         ok: false,
-        reason: 'completedChecks 条目 ' + item.raw + ' 缺少对应声明标记 ' + activeDisplay +
-          '（归档路径也未找到）——先加载该 skill 并照抄下面的命令声明已加载:\n  '
+        reason: 'completedChecks 条目 ' + item.raw + ' 缺少对应声明标记 ' + activeDisplay
+          + (await markerLookupNote(changeName)) + '——先加载该 skill 并照抄下面的命令声明已加载:\n  '
           + declarationCommand({ node: declaredNode, skill: item.skill, context }),
       };
     }

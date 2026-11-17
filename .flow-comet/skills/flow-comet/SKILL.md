@@ -61,12 +61,12 @@ description: "Use when the user wants the flow-comet managed workflow for flow-k
 
 | 分类 | 定义 | 处理 |
 |------|------|------|
-| 用户决策 | ≥2 个会改变范围/行为/风险/不可逆结果的合法选项 | 用交互确认问（Claude Code 用 AskUserQuestion 优先；Codex 用文本提问+内联确认）或文本回退；相邻选择合并为一个问题，不重问已持久化选择 |
+| 用户决策 | ≥2 个会改变范围/行为/风险/不可逆结果的合法选项 | dsh 用 ask_user_question、Claude Code 用 AskUserQuestion、Codex 用 ask_user_question——当前版本没有该工具时退回文本提问 + 内联确认；非交互会话：不提问、把该决策点显式报告为未决并停下（不替用户选择）；相邻选择合并为一个问题，不重问已持久化选择 |
 | 自动处理 | 唯一安全下一步 | 直接执行并汇报，不许制造确认 |
 | 停止条件 | guard 失败 / 缺依赖 / 状态损坏 | 报告阻塞与恢复条件，无合法动作时才升级为用户决策 |
 | 手动交接 | `NEXT: manual`（若有） | 不是用户决策，直接继续 |
 
-**决策点分布（挂到四分类下 · 逐节点作者化的完整清单见 `reference/decision-points.md`）**：**用户决策**集中在六个相位——open（主题 / 范围澄清）· design（技术栈选型）· execute（破坏性变更 R4.6 / Schema 迁移 R4.5 / 切 direct 模式并记录 `directOverride`）· review（Critical 项处置）· verify（UAT 第 4 次失败，机器计数 `verifyFailures`）· archive（归档 / 合并 main / PR approve）；**自动处理**＝唯一安全下一步直接执行（flow-kit 反问协议要求确认时按 flow-kit 规则暂停等待）；**停止条件**＝guard 失败先自动诊断并执行唯一安全修复，缺依赖或状态损坏时报阻塞与恢复条件，只有恢复方式存在多个合法选项时才升级为用户决策。
+**决策点分布（挂到四分类下 · 逐节点作者化的完整清单见 `reference/decision-points.md`）**：**用户决策**集中在六个相位——open（主题 / 范围澄清）· design（技术栈选型）· execute（破坏性变更 R4.6 / Schema 迁移 R4.5 / 切 direct 模式并记录 `directOverride`）· review（Critical 项处置）· verify（UAT 第 4 次失败，机器计数 `verifyFailures`）· archive（归档 / PR approve）；归档收尾按项目既有流程（PR 或本地合并；本地合并前仍等用户确认）；交接本身不做分支操作；**自动处理**＝唯一安全下一步直接执行（flow-kit 反问协议要求确认时按 flow-kit 规则暂停等待）；**停止条件**＝guard 失败先自动诊断并执行唯一安全修复，缺依赖或状态损坏时报阻塞与恢复条件，只有恢复方式存在多个合法选项时才升级为用户决策。
 
 > **当你遇到四分类里的「用户决策」、不确定该不该停下来问时读 `reference/decision-points.md`**（按节点作者化的确认点清单 + 机制性决策点，逐条给出触发条件与处置）。
 
@@ -81,14 +81,14 @@ description: "Use when the user wants the flow-comet managed workflow for flow-k
 | "LESSONS.md 不用扫" | R1.8：每个 DEV 任务必须扫描 |
 | "测试从实现派生就行" | R5.1：测试必须从 AC 派生 |
 | "guard 失败了，让用户决定" | 先自动诊断并执行唯一安全修复；无合法动作时才报告停止条件 |
-| "跳过 entry 直接 exit,反正没检查" | 新 change 未 entry 直接 exit → BLOCKED(进入检查不可跳过);旧 change WARN 渐进 |
-| "SUMMARY 不写,任务先标 done" | 新 change done 任务缺 SUMMARY → BLOCKED(产物完整性强制);旧 change WARN 渐进 |
+| "跳过 entry 直接 exit,反正没检查" | 未 entry 直接 exit → BLOCKED(进入检查不可跳过——单一判级，没有放宽侧) |
+| "SUMMARY 不写,任务先标 done" | done 任务缺 SUMMARY → BLOCKED(产物完整性强制——单一判级) |
 | "subagent-execute 阶段，我直接改源码更快" | 协调者禁令：subagent-execute 阶段主会话禁止写源码（hook 白名单只允许 .specs/，Write/Edit 与 Bash 写命令均物理拦截），必须委托子代理——委托走**身份通道**（三平台同一判据），worktree 只是「① 写权限」的实现之一，不是委托前提 |
-| "用户要健康检查 / 同步架构，我给他 init 一个新 change" | 三条侧命令（evolve / health / context-scan）**不进 8 节点流程**——它们不路由、不 entry/exit、不写节点证据；按下方「侧命令」小节的命令面直接执行即可 |
+| "用户要健康检查 / 同步架构，我给他新开一个 change" | 三条侧命令（evolve / health / context-scan）**不进 8 节点流程**——它们不路由、不 entry/exit、不写节点证据；按下方「侧命令」小节的命令面直接执行即可 |
 
 ## 侧命令（横向命令 · 不进 8 节点流程）
 
-随包分发的三条**侧命令**不属于 8 节点流程：不参与节点路由，不被 `entry` / `exit` 门禁校验，也不会在流程里自动触发——一律由用户**显式调用**，涉及写入的动作要**人工逐项确认**。**上游对应物（只读基准，不修改）**：`flow-kit/prompts/{A-evolve,M-health,I-intel-scan}.md`——三条命令均已按本仓语义**显式覆盖**上游表述。**以下上游语义不采用**：① 把三条命令当作流程内的节点或自动触发项（上游各自成篇、不声明与 8 节点的关系）→ 本仓一律**显式调用**：不路由、不 `entry` / `exit`、不写节点证据；② 把三条命令的语义细则抄进入口册（同一口径两处表达）→ 本仓只在入口留**指针**，细则以各自技能册的「覆盖声明」为单一表达。**冲突处以各自技能册的「覆盖声明」与引擎实现为准**。用户表达下列意图时，**不要** `init` 新 change、**不要** `entry` / `exit` 任何节点，直接加载对应技能并按其协议执行：
+随包分发的三条**侧命令**不属于 8 节点流程：不参与节点路由，不被 `entry` / `exit` 门禁校验，也不会在流程里自动触发——一律由用户**显式调用**，涉及写入的动作要**人工逐项确认**。**上游对应物（只读基准，不修改）**：`flow-kit/prompts/{A-evolve,M-health,I-intel-scan}.md`——三条命令均已按本仓语义**显式覆盖**上游表述。**以下上游语义不采用**：① 把三条命令当作流程内的节点或自动触发项（上游各自成篇、不声明与 8 节点的关系）→ 本仓一律**显式调用**：不路由、不 `entry` / `exit`、不写节点证据；② 把三条命令的语义细则抄进入口册（同一口径两处表达）→ 本仓只在入口留**指针**，细则以各自技能册的「覆盖声明」为单一表达。**冲突处以各自技能册的「覆盖声明」与引擎实现为准**。用户表达下列意图时，**不要** `init` 新建 change、**不要** `entry` / `exit` 任何节点，直接加载对应技能并按其协议执行：
 
 | 命令 | 触发词（用户怎么说） | 用途 | 落盘产物 | 技能 |
 |------|---------------------|------|---------|---------|
@@ -126,6 +126,8 @@ node .claude/skills/flow-comet/scripts/context-scan.mjs [--root <项目根>] [--
 | verify | control | 集成验证 + UAT | flowkit.verify.v1 |
 | archive | control | 归档 + LESSONS | flowkit.archive.v1 |
 
+> **归档顺序（证据先于不可逆）**：`entry → 声明 → 记录 → 搬目录 → CHANGELOG / STATE → 通知 → exit`——技能加载声明必须先于任何动作（尤其先于搬目录），**记录必须早于搬目录**；搬目录是唯一不可逆动作，且**仍是 `exit` 的前置**（归档目录不在场时出口的产物门直接拦下）。移动之后补声明 / 补记录仍可完成（引擎按状态判身份、按解析到的目录读写标记），但那是恢复路径；步骤权威在 `flow-comet-archive` 册。
+
 > **并行任务路由（节点顺序是动态的 · 多趟语义）**：TASK 含依赖已满足的 `parallel="true" status="pending"` 任务时路由到 subagent-execute——每趟委托全部依赖已满足的并行任务；子代理返回后重新判定：仍有可并行 pending 就再次进入 subagent-execute（委托节点可多次往返），存在串行 pending 时回 execute 消化一趟再循环。委托节点的完成 = 不存在依赖已满足的可并行 pending 且无串行残留；并行/串行交错的混排序列合法——plan 出口的硬性拦截**不止**依赖环；完整拦截集与恢复指引以 plan 节点册的「硬性拦截」段为单一来源（本文不复述，避免同一口径两处表达分叉）。全部为串行任务时走 execute，行为不变。`next` 的输出始终是权威——以 `NODE:` 输出为准，不按静态顺序推断。
 
 ### 并行委派契约（四属性）· 三平台通道
@@ -134,7 +136,7 @@ node .claude/skills/flow-comet/scripts/context-scan.mjs [--root <项目根>] [--
 
 | 属性 | 含义（本节为口径单一来源） |
 |------|---------------------------|
-| ① 写权限 | 子代理写入目标的**放行依据**（含 gitignored 面）：身份在场 ⇒ 子代理语义放行；**最小保护集**（`.flow-comet/flow-comet-state.json`、`reference/workflow-protocol.json`）在身份在场时**仍拦** |
+| ① 写权限 | 子代理写入目标的**放行依据**（含 gitignored 面）：身份在场 ⇒ 子代理语义放行；**最小保护集**（`.flow-comet/flow-comet-state.json`、`reference/workflow-protocol.json`）在身份在场时**仍拦**，空闲态仍拦 state 文件 |
 | ② 提交隔离 | 各写者只提交**自己的字面路径**（`git add -- <路径>` / `git commit -m "<消息>" -- <同一路径>`，消息在 `--` 之前；多个写者共享同一工作区时禁裸 `add` / `commit -a` / `stash` / `clean` / `reset`） |
 | ③ 验证隔离 | **同一时刻只有一个写者**（有 request 无对应 result 的在飞委托 ⇒ 不跑全量判据，待写入者收工后重跑；已作废的委托经 `workflow-handoff.mjs withdraw <task-id> --by <来源>` 撤回，留痕 `withdrawnAt` + `withdrawnBy`，已撤回 = 终态、历史不删） |
 | ④ 集成纪律 | 协调者按确定性规则**显式、可审计**地集成（`merge --no-ff` 优先、冲突难解时降级 cherry-pick 并记因；机械冲突与语义冲突分别处置） |
@@ -145,7 +147,7 @@ node .claude/skills/flow-comet/scripts/context-scan.mjs [--root <项目根>] [--
 
 | 属性 | Claude Code | Codex | dsh |
 |------|-------------|-------|-----|
-| ① 写权限 | 载荷 `agent_id` / `agent_type`——**证实**（真机实测：子代理载荷含二者、主会话载荷不含；与 Codex 同一判据） | 载荷 `agent_id` + `agent_type`——**证实**（实测：子代理载荷 12 键含二者、主线程 10 键不含）；守卫读 `agent_id`，与 CC 同一判据 | 桥接透传 `delegationDepth` **+ 通道标记**（`FLOW_COMET_AGENT_DEPTH_SOURCE`，守卫要求两者同时在场才接受 env 面身份——继承来的深度变量不作数）——**证实**（0.1.7-rc.2 全接缝重认证；本批收窄为「最小保护集除外」） |
+| ① 写权限 | 载荷 `agent_id` / `agent_type`——**证实**（真机实测：子代理载荷含二者、主会话载荷不含；与 Codex 同一判据） | 载荷 `agent_id` + `agent_type`——**证实**（实测：子代理载荷 12 键含二者、主线程 10 键不含）；守卫读 `agent_id`，与 CC 同一判据 | 桥接透传 `delegationDepth` **+ 通道标记**（`FLOW_COMET_AGENT_DEPTH_SOURCE`，守卫要求两者同时在场才接受 env 面身份——继承来的深度变量不作数）——**证实**（0.1.7-rc.2 全接缝重认证；本批收窄为「最小保护集除外」；**0.2.2-rc.1 官方工具核心链路真实会话通过；dsh-ops 0.5.0 已知写入工具名由桥接归一化（桥接系统测试覆盖；未做 dsh-ops 真实会话）；运行中的流程里，`ops_bash` 的 script_path 形态与多目标工具（replace/batch）只对协调者拒绝；子代理是执行者、放行，但这两类形态**不经过内容检查**（脚本正文/批量目标不可见），最小保护集对它们不生效——宿主权限允许时，执行者脚本仍可能改动状态或协议文件；`ops_copy`/`ops_move`/`ops_remove` 按目标字段映射为 Write（`ops_move` 源端另判）；Bash 类工具的绝对 workdir 在项目外时对协调者拒绝；PTC 默认放行，进程内直写为已记录边界；项目内可变工作目录、相对 workdir、命令内 cd、junction/symlink、解释器与 shell 删除形态为已知边界**） |
 | **谁建树**（三平台唯一差异） | 可选：harness `isolation: "worktree"` 建独立树，或共享工作区直写 | 协调者**显式** `git worktree add` 并在委派 prompt 指定 `workdir`（原生子代理无自动建树；**证实**：子代理可被指向独立目录并落盘），或共享工作区直写；**建树选择的适用面**：协调者显式 `git worktree add <路径>`（手工建树）**是受支持的建树选择**——在委派 prompt 里指定 `workdir`，写入由身份通道放行（原生子代理无自动建树）；**以建树绕过边界**不受支持——用独立树规避协调者禁令 / 最小保护集 / `write_files` 互斥与提交时点纪律 / handoff 与 Return Contract 证据，或把 worktree 当作四属性的替代品。 | **不建树**：进程内子代理、同一工作区运行——**无需隔离区 ≠ 无需边界**（`write_files` 互斥 + 提交时点 + 最小保护集仍构成边界） |
 
 **已知边界（不得写成机械保证 · 摘要）**：① Codex 载荷 `cwd` = 会话根，**与实际工作目录无关**（实测证实）⇒ 路径判定在 Codex 上必错，故判定序为**身份先于路径**（精确对照见下）；② 身份判据是**声明式信任边界**——守卫读到的 `agent_id` 来自宿主载荷，本机制**不声称能证明**其真实来源；③ 实测结论只覆盖限定形态，`agent_type` 取值域、嵌套委派载荷、非 Windows 环境、非 `bypassPermissions` 权限模式**均未覆盖**（未覆盖 ≠ 已验证，不得写成已支持）。
@@ -177,9 +179,9 @@ node .claude/skills/flow-comet/scripts/context-scan.mjs [--root <项目根>] [--
 | verify | flow-comet-verify | flow-comet-integration | guarded |
 | archive | flow-comet-archive | flow-comet-integration | guarded |
 
-**新 change 严格模式**：`init` 创建的 change 标记为"新"（`newChange: true`）——新 change 下全部内容级检查强制 BLOCKED（处置标记/缓存证据/波次散文/越权委托/SUMMARY 完整性/进入证据等）；旧 change（历史遗留,无标记）保持渐进 WARN。执行者可通过 `status` 确认当前 change 的新旧。
+**单轨判级**：全部内容级检查（处置标记 / 缓存证据 / 波次散文 / 越权委托 / SUMMARY 完整性 / 进入证据等）只有一个判级——同一形态同一个判级（BLOCKED + 恢复指引），没有按 change 来历放宽的一侧。执行者可用 `status` 确认当前在办的 change。
 
-> **design 行绑定的前端适用性**：`flow-comet-ui-design` 与协议一致为 `guarded`，但只对**前端 change** 适用——**触发与跳过判据的唯一权威是 `flow-comet-ui-design` 册**；结构形态按其口径压缩为：`CHANGE.md` 的「视觉调性」段在场，段内「不适用」标记须成**独立行**、居**行首**，或写在适用性类标签的**字段值位**，标记之后须成**词形边界**（命中即回显**命中片段**自证）。前端须先用 Skill 工具加载该技能 + `skill-load design flow-comet-ui-design --prompt flow-kit/prompts/2a-ui-design.md --templates DESIGN.md` 建标记，并在 record 载荷带 `required-skill:design.flow-comet-ui-design`；非前端不加载、不声明，出口打印可见的 `UI-DESIGN: skipped（非前端）` 后放行；旧 change 缺件仅 WARN。
+> **design 行绑定的前端适用性**：`flow-comet-ui-design` 与协议一致为 `guarded`，但只对**前端 change** 适用——**触发与跳过判据的唯一权威是 `flow-comet-ui-design` 册**；结构形态按其口径压缩为：`CHANGE.md` 的「视觉调性」段在场，段内「不适用」标记须成**独立行**、居**行首**，或写在适用性类标签的**字段值位**，标记之后须成**词形边界**（命中即回显**命中片段**自证）。前端须先用 Skill 工具加载该技能 + `skill-load design flow-comet-ui-design --prompt flow-kit/prompts/2a-ui-design.md --templates DESIGN.md` 建标记，并在 record 载荷带 `required-skill:design.flow-comet-ui-design`；非前端不加载、不声明，出口打印可见的 `UI-DESIGN: skipped（非前端）` 后放行。
 
 **节点技能两层加载模型（入口层 · 双步硬规则）**：路由到节点后，以下两步**都不可跳过**：
 
@@ -204,11 +206,11 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-c
 
 > **提示词 = 步骤权威、模板 = 段形权威，两者缺一即未完成加载**：`--prompt` 指向的 `flow-kit/prompts/<阶段>.md` 规定这一步**怎么做**（流程步骤、检查项、交接物），`--templates` 指向的 `flow-kit/templates/<DOC>.md` 规定产出**长什么样**（标题、段序、段形）。节点入口先打印 `READ PROMPT:`；**有模板的节点**再打印 `READ TEMPLATE:`（verify / archive 为零模板节点，只打印一行）；**两条 READ 行都要读**。design 的**前端** change 还会多打印一行 `READ PROMPT（条件提示词）: …2a-ui-design.md…`（按 `frontendCriterion` 判定；非前端不打印）。`--prompt` 必须是该节点的协议文件（以入口打印的 `READ PROMPT:` 行为准）；**入口只拦错路径**——逐份核对已写下的声明，落在节点协议面外即 BLOCKED 并点名；**缺失由出口拦**——逐份核对节点协议集，缺哪份逐项点名。两处判据分工不同：既不会静默写成一条与节点无关的声明，也不存在「有一份就过」。
 
-> **`--templates` 是内置节点的必填声明**（每个声明标记各写**全清单**，与节点映射一致）：open → `CHANGE.md,REQUIREMENT.md` · design → `DESIGN.md`（前端 change 可再加 `UI-DESIGN.md`）· plan → `TASK.md` · execute / subagent-execute → `SUMMARY.md` · review → `REVIEW.md,TEST.md` · verify / archive → **零模板节点，省略该参数**（省略即空集；多写反而不一致）。声明集合由引擎校验：漏写 / 多写 / 错名在新 change 下即 BLOCK，旧 change 仅 WARN。
+> **`--templates` 是内置节点的必填声明**（每个声明标记各写**全清单**，与节点映射一致）：open → `CHANGE.md,REQUIREMENT.md` · design → `DESIGN.md`（前端 change 可再加 `UI-DESIGN.md`）· plan → `TASK.md` · execute / subagent-execute → `SUMMARY.md` · review → `REVIEW.md,TEST.md` · verify / archive → **零模板节点，省略该参数**（省略即空集；多写反而不一致）。声明集合由引擎校验：漏写 / 多写 / 错名即 **BLOCK**。
 
 > **跑声明命令 ≠ 加载**：声明只把“哪次会话加载了哪个 skill、按哪份协议工作”写进状态供 exit/record 核对；真正加载只有第 1 步的 Skill 工具能做到。协议的引用示例：execute / subagent-execute 节点加载 flow-comet-dev 时用 `--prompt flow-kit/prompts/4-dev.md`（DEV 阶段协议），交付物按 `flow-kit/templates/SUMMARY.md` 模板填写并补写 `## 自检方法` 段。
 
-节点退出（exit）与证据记录（record）会核对声明标记。**exit 的判据是「全部覆盖」而不是「任一命中」**：该节点该读的**每一份**协议文件、以及协议里**每一个** `guarded` 必需技能，都要有声明标记——`handoff-guarded` 是子代理侧义务，由 Return Contract 负责，不在节点标记判据内；缺任一即逐项点名并给出补齐命令，新 change BLOCKED、旧 change 只 WARN（恢复命令形态与旧标记兼容口径见 `reference/entry-detail.md` 的「exit 核对声明标记」小节）。声明如实记录执行者动作——加载了哪个 skill、按哪份协议工作——**不等于产出证明**；产出是否正确由产物结构校验与门禁把关。**技能加载前置门**：新 change 的 required 条目不再自动补写——handoff request / record 前必须已有本节点声明标记（先加载、再声明、后干活）；声明标记自动补写仅对旧 change 兜底（按协议 requiredSkillCalls 代记，标记带 `auto: true`），手动声明仍推荐（如实记录加载动作与协议文件）。
+节点退出（exit）与证据记录（record）会核对声明标记。**exit 的判据是「全部覆盖」而不是「任一命中」**：该节点该读的**每一份**协议文件、以及协议里**每一个** `guarded` 必需技能，都要有声明标记——`handoff-guarded` 是子代理侧义务，由 Return Contract 负责，不在节点标记判据内；缺任一即逐项点名并给出补齐命令，**BLOCKED**（恢复命令形态与旧标记兼容口径见 `reference/entry-detail.md` 的「exit 核对声明标记」小节）。声明如实记录执行者动作——加载了哪个 skill、按哪份协议工作——**不等于产出证明**；产出是否正确由产物结构校验与门禁把关。**技能加载前置门**：required 条目的声明标记**只能由执行者手动 `skill-load` 写入，引擎不代记**——handoff request / record 前必须已有本节点声明标记（先加载、再声明、后干活）；缺标记时唯一路径是执行者手动 `skill-load`，报文给出的命令照抄即通。
 
 ## Guardrails And Evidence
 
@@ -242,7 +244,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs skill-load open flow-c
 ### Node Boundary Rules
 
 - **节点顺序**:每个节点按 `entry <node>` → 产出工件 → `record <node>` → `exit <node> --apply` 执行(record 必须先于 exit——exit 校验 evidence 前置,缺证据会 BLOCKED)。
-- Before leaving a Node, run `node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry <node>` then `exit <node> --apply` to advance state. **新 change 未 entry 直接 exit → BLOCKED**（旧 change WARN 渐进）——entry 的进入检查（协调者禁令/委托前检查/签名记录）不可跳过。
+- Before leaving a Node, run `node .claude/skills/flow-comet/scripts/workflow-guard.mjs entry <node>` then `exit <node> --apply` to advance state. **未 entry 直接 exit → BLOCKED**——entry 的进入检查（协调者禁令/委托前检查/签名记录）不可跳过。
 - If the guard fails, do not proceed past it — 先自动诊断并执行唯一安全修复（与 Decision Core 停止条件一致）；存在多个会改变范围/风险的合法恢复动作时，展示 guard 输出并询问用户。
 - If the user wants to redo a completed Node, reset its completion state and re-enter rather than creating a parallel path.
 
@@ -299,7 +301,7 @@ All artifacts in `.specs/<change-id>/`. Cross-change files in `.specs/` (CONTEXT
 | `workflow-handoff.mjs` | 子代理交接：request/result/status |
 | `comet-plan.mjs` | 兼容别名入口（内容为 workflow-state 的别名壳） |
 | `comet-check.mjs` | workflow contract 检查 |
-| `comet-hook-guard.mjs` | 文件写入边界守卫（**身份判据先于路径判据**：载荷 `agent_id` / 桥接透传的 `delegationDepth` 在场 ⇒ 子代理语义放行；最小保护集 `.flow-comet/flow-comet-state.json` 与 `reference/workflow-protocol.json` 在身份在场时**仍拦**；无身份走 phase 白名单——subagent-execute 阶段只允许 .specs/，`.claude/worktrees/**` 前缀保留为兼容路径；`Write`/`Edit` 与 `Bash` 写命令两条判定路径同语义，runRoot 外一致拦截） |
+| `comet-hook-guard.mjs` | 文件写入边界守卫（**身份判据先于路径判据**：载荷 `agent_id` / 桥接透传的 `delegationDepth` 在场 ⇒ 子代理语义放行；最小保护集 `.flow-comet/flow-comet-state.json` 与 `reference/workflow-protocol.json` 在身份在场时**仍拦**，空闲态仍拦 state 文件；无身份走 phase 白名单——subagent-execute 阶段只允许 .specs/，`.claude/worktrees/**` 前缀保留为兼容路径；`Write`/`Edit` 与 `Bash` 写命令两条判定路径同语义，runRoot 外一致拦截） |
 
 ### 机器拥有字段
 

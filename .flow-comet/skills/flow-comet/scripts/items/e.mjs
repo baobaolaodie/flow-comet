@@ -194,7 +194,7 @@ export const ENTRIES = [
       // 对照：同一夹具换成未登记等级的绑定（skill 变体）时零该技能声明照样放行——等级是唯一开关。
       const guardedProtocol = writeCustomProtocol(dir, 'guarded');
       const guardedEnv = { FLOW_COMET_PROTOCOL: guardedProtocol };
-      assertExit(runState(['init', 'cp-guard', '--protocol', guardedProtocol], dir), 0);
+      assertExit(runState(['init', 'cp-guard', '--replace', 'cp-skill', '--reason', '切换协议夹具（覆盖闸门显式放行）', '--protocol', guardedProtocol], dir), 0);
       assertExit(runState(['skill-load', 'brainstorm', 'flow-comet-tdd'], dir, guardedEnv), 0);
       assertExit(runState(['record', 'brainstorm', '{"summary":"brainstorm done"}'], dir, guardedEnv), 0);
       writeFile(dir, '.specs/cp-guard/notes.md', '# notes\n');
@@ -212,7 +212,7 @@ export const ENTRIES = [
       // 对照：未登记等级的同一绑定 → 只声明别的技能也放行（覆盖判据不在这条路径上生效）
       const plainProtocol = writeCustomProtocol(dir, 'skill');
       const plainEnv = { FLOW_COMET_PROTOCOL: plainProtocol };
-      assertExit(runState(['init', 'cp-plain', '--protocol', plainProtocol], dir), 0);
+      assertExit(runState(['init', 'cp-plain', '--replace', 'cp-guard', '--reason', '切换协议夹具（覆盖闸门显式放行）', '--protocol', plainProtocol], dir), 0);
       assertExit(runState(['skill-load', 'brainstorm', 'flow-comet-tdd'], dir, plainEnv), 0);
       assertExit(runState(['record', 'brainstorm', '{"summary":"brainstorm done"}'], dir, plainEnv), 0);
       writeFile(dir, '.specs/cp-plain/notes.md', '# notes\n');

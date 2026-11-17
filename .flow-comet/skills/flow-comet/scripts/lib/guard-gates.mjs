@@ -1,8 +1,7 @@
 // 节点门禁（守卫模块）：entry 链 + 出口前置 / 文件纪律 / 节点结构 门禁。
 //
-// 判据只在本模块一处实现（入口零内联副本）；每条门禁沿用既有分级——新 change（init 标记）强制
-// BLOCKED + 恢复指引，旧 change 渐进 WARN 不阻断。门禁命中即显式报出原因并按 fail-closed 拒绝
-// （未验证 ≠ 通过）。
+// 判据只在本模块一处实现（入口零内联副本）；门禁命中即 BLOCKED + 恢复指引（单轨，无分级旁路）。
+// 门禁命中即显式报出原因并按 fail-closed 拒绝（未验证 ≠ 通过）。
 
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -46,14 +45,16 @@ import {
   waveSectionBody,
 } from './wave-projection.mjs';
 import {
+  archiveDirNameNotice,
+  archivedChangeLocation,
   declaredRequiredArtifacts,
   evidenceFor,
   hasEvidenceField,
   hasNonEmptyHandoffResult,
-  isNewChange,
   missingRequiredArtifacts,
   missingRequiredSchemaEvidence,
   nextNode,
+  recoveryActionText,
   templateSectionPatterns,
   unspecifiedPathsNotice,
 } from './guard-routing.mjs';
@@ -66,6 +67,7 @@ import {
 import {
   declarationSkillNames,
   evidenceRecoveryBlock,
+  nodeRecordCommand,
   nodeSkillLoadCommands,
   runAcCoverageGate,
   runSummarySectionsGate,
@@ -80,7 +82,11 @@ import { evaluateArtifact, formatIssueParts, runTaskSevenFieldGate } from './gua
 import { COORDINATOR_NOTICE } from './state-explain.mjs';
 // 声明标记目录的路径规则（活动路径优先、归档兜底）归状态族的路径上下文模块，与 record 前置门同一份
 // 实现——guard → state-* 是允许的单向边；规则若留在守卫族，状态 CLI 会为它加载整个守卫图。
-import { findSkillLoadsDir, isArchivedChangeDirName } from './state-io.mjs';
+import {
+  changeLocationFailureMessage,
+  findSkillLoadsDir,
+  resolveChangeDir,
+} from './state-io.mjs';
 // 声明标记的协议文件提取（protocols 数组 ∪ protocol 单值的 basename 归一）由状态族单源提供：
 // skill-load 写入侧与出口覆盖判据读同一份实现——各写一份时「旧标记里存完整绝对路径」这条口径
 // 会在一边生效、另一边判失配。
@@ -103,8 +109,8 @@ const NODE_TRANSITION_GATES = {
 };
 
 // REVIEW.md 发现区解析——发现的合法位置是模板位置 `### 2.2 …详细发现`（REVIEW 模板的结构子段）；
-// 旧形态 `## 发现` 段（历史 REVIEW 的写法）继续按同一套条目口径解析，供旧 change 渐进处置与迁移
-// 提示。发现项有两种合法书写形态：① 列表项（"- **" 无序 / "1. **" 有序，两种列表形态同口径解析）；
+// 旧形态 `## 发现` 段（历史 REVIEW 的写法）继续按同一套条目口径解析，供迁移提示（位置不对即拦）。
+// 发现项有两种合法书写形态：① 列表项（"- **" 无序 / "1. **" 有序，两种列表形态同口径解析）；
 // ② 模板范例形态（flow-kit/templates/REVIEW.md 2.2 的书写样例 `### 🔴 R<x> · <名字>：<结论>` +
 // 粗体字段行）——模板位置下以严重度 token 起头的 H3 同样是发现，标题行即条目自身的第一行（处置
 // 标记按该行判定）。不以严重度 token 起头的 H3（如 `### Major`）仍是严重度分区。旧 `## 发现` 段
@@ -306,8 +312,8 @@ function reviewItemSeverityLabel(item) {
 
 // 延期裁决门禁：发现区任何条目（**任何严重度**，含 Minor）处置为 [转待办] 时，必须同时存在用户裁决
 // 记录——同段（条目自身段落）或其它段落（位置不限，须与条目以空行分隔）含「用户裁决：接受延期」且
-// 指向该条目，并由 [升级] 承接（条目自身块或裁决记录含 [升级]）。任一缺失 → 返回该条目（调用方按
-// 新 change BLOCK / 旧 change WARN 渐进处置）。只认 [已修]/[升级] 的条目直接放行：它们的处置不是
+// 指向该条目，并由 [升级] 承接（条目自身块或裁决记录含 [升级]）。任一缺失 → 返回该条目（调用方
+// BLOCK）。只认 [已修]/[升级] 的条目直接放行：它们的处置不是
 // 延期，没有用户决策点。条目自身的处置标记（[转待办]）只认该条目标题/行首（无序与有序同口径），
 // 正文续行引用他条标记不触发本门禁；[升级] 承接可出现在条目自身块或用户裁决记录中（承接非本条处置）。
 // 历史语义：本门禁曾只覆盖 Major——Minor 的自行延期因此长期无门槛，成为延期积压的制度口子。
@@ -371,8 +377,8 @@ export async function runEntryGates({ protocol, node, state, file }) {
   }
   if (fixBatchRollback) {
     const sourceNode = state.currentNode;
-    // 轮次计数与阈值/授权判定全部走共享 helper：分支②不计数；第 4 轮新 change 先 BLOCK
-    // （此处尚未写盘，满足不写 currentNode），旧 change WARN 后照常归位。
+    // 轮次计数与阈值/授权判定全部走共享 helper：分支②不计数；第 4 轮先 BLOCK
+    // （此处尚未写盘，满足不写 currentNode）。
     const rollbackRound = applyFixRollbackRound({ state, sourceNode, decision: fixBatchDecision });
     if (rollbackRound.blocked) {
       console.error(rollbackRound.blockedMessage);
@@ -495,9 +501,12 @@ export async function requireNodeEvidence({ node, state }) {
       state,
       lead: '该节点已完成但缺证据记录（evidence.' + node.id + ' 不在场）',
     });
+    // 状态漂移的那一句按目录在哪分两种说法（唯一分叉在 guard-routing 的 recoveryActionText）：
+    // 目录已搬进归档时 advance / select 都走不通，只给可执行的那一步（移回活动位置）。
     console.error([
       ...recovery,
-      '      状态漂移 → workflow-state.mjs advance（强制推进）或 select（切换 change）；禁止手改 state 机器字段',
+      '      ' + recoveryActionText(state.activeChange,
+        '状态漂移 → workflow-state.mjs advance（强制推进）或 select（切换 change）；禁止手改 state 机器字段'),
     ].join('\n'));
     process.exit(1);
   }
@@ -527,8 +536,14 @@ export async function runExitDriftGate({ protocol, node, state, evidence }) {
   }
   if (!tolerable) {
     console.error('BLOCKED: currentNode is ' + String(state.currentNode) + ', cannot exit ' + node.id + '.');
-    console.error('恢复: 若节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进，确认节点实际已完成后再用）或 select（切换 change）；禁止手改 state 机器字段');
-    console.error('提示: 若 currentNode 已漂移到文件推导位置且本节点证据/产物齐（执行者确认本节点实际已完成）→ 可用容错 exit ' + node.id + ' --apply 补齐欠账（漂移容忍路径，不再只有不可行的 advance/select 指引）；漂移但证据/产物不齐则不适用');
+    // 恢复动作按目录在哪分两种说法（唯一分叉在 guard-routing 的 recoveryActionText）：活动态给
+    // advance / select；目录已搬进归档时这两步都走不通，只给可执行的那一步。归档态下「提示」行不再
+    // 提 advance/select——那正是它上面一行已经不成立的东西。
+    const archivedHint = archivedChangeLocation(state.activeChange) !== null;
+    console.error('恢复: ' + recoveryActionText(state.activeChange,
+      '若节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进，确认节点实际已完成后再用）或 select（切换 change）；禁止手改 state 机器字段'));
+    console.error('提示: 若 currentNode 已漂移到文件推导位置且本节点证据/产物齐（执行者确认本节点实际已完成）→ 可用容错 exit ' + node.id + ' --apply 补齐欠账（漂移容忍路径'
+      + (archivedHint ? '' : '，不再只有不可行的 advance/select 指引') + '）；漂移但证据/产物不齐则不适用');
     process.exit(1);
   }
 }
@@ -537,7 +552,7 @@ export async function runExitDriftGate({ protocol, node, state, evidence }) {
 // done 但本批 execute 家族生命周期未闭合（本 change 最新家族出口签名 ≠ 当前任务集签名）时，直接
 // exit 源节点收场会静默跳过 execute 家族生命周期与四类出口（缺陷形态）。排在 entry 证据门之前：
 // 该越界路径给 Fix 恢复指引，避免通用 entry 提示覆盖更具体的归位路径。复用共享回退谓词判定：
-// 新 change 强制 BLOCKED 含恢复指引；旧 change 渐进 WARN 不阻断。
+// 命中即 BLOCKED 并给恢复指引（单轨，无渐进放行）。
 export async function runFixBatchExitGate({ protocol, node, state }) {
   if ((node.id !== 'review' && node.id !== 'verify') || !state.activeChange) return;
   const fixBatchUnclosed = await resolveFixRollbackState({
@@ -548,27 +563,21 @@ export async function runFixBatchExitGate({ protocol, node, state }) {
     currentNode: node.id,
     history: state.history,
   });
-  if (fixBatchUnclosed && isNewChange(state)) {
+  if (fixBatchUnclosed) {
     console.error('BLOCKED: 存在未归位/未跑出口的 Fix 批次——' + node.id + ' 驻留且 TASK.md 存在 pending 修复任务，或修复任务已 done 但本批 execute / subagent-execute 生命周期未闭合（最近一次 execute 家族 exit 后任务集仍有变更），不能直接 exit ' + node.id + ' 收场（会静默跳过 execute 家族生命周期与四类出口）');
     console.error('恢复: 运行 workflow-state.mjs next 或 workflow-guard.mjs entry execute / entry subagent-execute 受控归位 execute 家族节点 → 在 execute 家族生命周期内完成修复任务 → record/exit 该节点 --apply 跑完四类出口并回源节点 ' + node.id + ' → 再 exit ' + node.id + ' --apply');
     process.exit(1);
   }
-  if (fixBatchUnclosed) {
-    console.error('FIX-BATCH WARN: 存在未归位/未跑出口的 Fix 批次——' + node.id + ' 驻留且 TASK.md 存在 pending 修复任务，或修复任务已 done 但本批 execute / subagent-execute 生命周期未闭合，直接 exit ' + node.id + ' 会跳过 execute 家族出口门禁（旧 change 渐进不阻断；建议 next/entry execute 家族节点归位跑完出口后回源节点 exit）');
-  }
 }
 
-// enter 证据检测——未 entry 直接 exit：新 change（init 标记）强制 BLOCKED，旧 change 渐进 WARN。
+// enter 证据检测——未 entry 直接 exit：一律 BLOCKED。
 // 跳过 entry 会漏掉进入检查（协调者禁令 / 委托前工件 commit 提示 / PROGRESS 提示 / 签名记录）。
 export function runEntryRecordGate({ node, state }) {
-  if (isNewChange(state)) {
-    if (!Array.isArray(state.enteredNodes) || !state.enteredNodes.includes(node.id)) {
-      console.error('BLOCKED: 节点 ' + node.id + ' 未执行 entry 直接 exit——新 change 强制先 entry(进入检查/协调者禁令/签名记录)');
-      console.error('恢复: 先运行 workflow-guard.mjs entry ' + node.id + ' 再重试 exit;状态漂移 → advance/select');
-      process.exit(1);
-    }
-  } else if (Array.isArray(state.enteredNodes) && !state.enteredNodes.includes(node.id)) {
-    console.error('ENTER WARN: 节点 ' + node.id + ' 未执行 entry 直接 exit——entry 的进入检查(协调者禁令/C4 委托前检查/签名记录)被跳过,请先 entry 该节点再 exit(旧 change 渐进不阻断)');
+  if (!Array.isArray(state.enteredNodes) || !state.enteredNodes.includes(node.id)) {
+    console.error('BLOCKED: 节点 ' + node.id + ' 未执行 entry 直接 exit——先 entry(进入检查/协调者禁令/签名记录)');
+    console.error('恢复: 先运行 workflow-guard.mjs entry ' + node.id + ' 再重试 exit;'
+      + recoveryActionText(state.activeChange, '状态漂移 → advance/select'));
+    process.exit(1);
   }
 }
 
@@ -627,11 +636,8 @@ export async function runContextAppendGate({ node, state }) {
   if (content === null) return;
   const m = content.match(/^## (术语|已锁决策|决策|术语表)[（(][^\n]*(?:追加|update)[^\n]*$/im);
   if (m) {
-    if (isNewChange(state)) {
-      console.error('BLOCKED: CONTEXT.md 检测到孤立追加段（新 change 强制插入既有结构段）;恢复: 把内容移入术语表/已锁决策段');
-      process.exit(1);
-    }
-    console.error('WARN: CONTEXT.md 检测到孤立追加段（术语/决策应插入既有结构段）：' + m[0].replace(/^##\s*/, '').trim());
+    console.error('BLOCKED: CONTEXT.md 检测到孤立追加段（内容须插入既有结构段）;恢复: 把内容移入术语表/已锁决策段');
+    process.exit(1);
   }
   const problems = await contextTemplateProblems(state, content);
   if (problems === null) {
@@ -641,23 +647,19 @@ export async function runContextAppendGate({ node, state }) {
     return;
   }
   if (problems.length === 0) return;
-  if (isNewChange(state)) {
-    console.error('BLOCKED: CONTEXT.md 有 ' + problems.length + ' 处与模板段形不符（新 change 强制项目上下文按模板段形书写）:');
-    for (const problem of problems) console.error('  - ' + problem);
-    console.error('恢复: 按 flow-kit/templates/CONTEXT.md 补齐段标题（未发现的写「未发现」；前端子段按条件段裁剪）后重试 exit open');
-    process.exit(1);
-  }
-  console.error('WARN: CONTEXT.md 有 ' + problems.length + ' 处与模板段形不符（旧 change 渐进不阻断）: '
-    + problems.join('、'));
+  console.error('BLOCKED: CONTEXT.md 有 ' + problems.length + ' 处与模板段形不符（项目上下文须按模板段形书写）:');
+  for (const problem of problems) console.error('  - ' + problem);
+  console.error('恢复: 按 flow-kit/templates/CONTEXT.md 补齐段标题（未发现的写「未发现」；前端子段按条件段裁剪）后重试 exit open');
+  process.exit(1);
 }
 
 // LESSONS.md 结构检测（每条判据的作用面逐个交代）：
-// ① 旧形态 `## L-NNN`（条目写成二级标题）——open / verify / archive 三处出口都拦（AC-17），新
-//    change BLOCKED 并逐行给「文件:行号 → 改法」，旧 change WARN 渐进；
+// ① 旧形态 `## L-NNN`（条目写成二级标题）——open / verify / archive 三处出口都拦（AC-17），
+//    BLOCKED 并逐行给「文件:行号 → 改法」；
 // ② 条目区外条目（条目区锚点用段名归一，容忍模板标题的括号后缀，如 `## 条目区（夹具）`）与
 //    ③ 同段内编号递增——两条保持既有作用面（verify / archive），不随 ① 扩到 open；
-// ④ `### L-NNN` 条目的字段键（C20）——键集合从 LESSONS 模板「条目格式」段的书写样例派生；新 change
-//    的新条目缺任一键 BLOCKED，旧条目（迁移形态 / 首发指向别的 change）与旧 change 只 WARN；
+// ④ `### L-NNN` 条目的字段键（C20）——键集合从 LESSONS 模板「条目格式」段的书写样例派生；
+//    缺任一键 BLOCKED（迁移形态 / 首发指向别的 change 的旧条目仍只告警）；
 // ⑤ archive 出口核对 evidence.lessonsNomination：扫描份数 = 该 change 内 SUMMARY 份数、提名编号在
 //    LESSONS 中真实存在、无提名时理由非空——归档提名留痕且可核对。
 const LESSONS_LEGACY_ENTRY_RE = /^##\s+(L-\d+)\b/u;
@@ -680,24 +682,24 @@ function lessonsLegacyEntries(content) {
   return hits;
 }
 
-// 该 change 的 SUMMARY 份数（C6：先看活动目录，目录已移入归档时看
-// `.specs/archive/<日期>-<change>/`；两处都不存在 → null = 归档产物缺失——不可核对的份数不当作 0）。
-// 归档目录按精确形态定位（判据单源在 state-io）：同后缀的别的 change 归档目录被算进来，份数对账就
-// 拿别人的归档作证；按后缀「先命中先用」还会因 readdir 顺序把本 change 的归档目录挤掉。
-async function changeSummaryCount(changeName) {
-  const activeDir = path.join(runRoot, '.specs', changeName);
-  let dir = null;
-  if (await fileExists(activeDir)) {
-    dir = activeDir;
-  } else {
-    const archiveRoot = path.join(runRoot, '.specs', 'archive');
-    const entries = await fs.readdir(archiveRoot).catch(() => []);
-    const archived = entries.find((entry) => isArchivedChangeDirName(entry, changeName));
-    if (archived) dir = path.join(archiveRoot, archived);
+// 该 change 的 SUMMARY 份数（C6）。目录定位走**唯一**位置解析器 resolveChangeDir（活动目录优先 →
+// 归档 <日期>-<change-id>；同名多份按日期——排除早于该 change createdAt 的候选、取最新、排不出就停
+// 并列候选），本函数只保留「份数规则」：数解析到的目录下 *-SUMMARY.md。此前这里自带一份「活动优先 +
+// 归档首个命中」的定位：同后缀的别的 change 归档目录会被算进来（份数对账拿别人的归档作证），
+// readdir 顺序还会把本 change 的目录挤掉。
+// 返回 { count, resolution }：count === null = 无从核对（目录缺失 / 多候选判不出），不当作 0 份——
+// 报文按 resolution 的成因分开说（同一句话不得在这里再写一份）。
+async function changeSummaryCount(state) {
+  const resolution = await resolveChangeDir({
+    root: runRoot,
+    changeName: state.activeChange,
+    createdAt: state.createdAt,
+  });
+  if (resolution.status !== 'active' && resolution.status !== 'archived') {
+    return { count: null, resolution };
   }
-  if (dir === null) return null;
-  const files = await fs.readdir(dir).catch(() => []);
-  return files.filter((name) => name.endsWith('-SUMMARY.md')).length;
+  const files = await fs.readdir(resolution.dir).catch(() => []);
+  return { count: files.filter((name) => name.endsWith('-SUMMARY.md')).length, resolution };
 }
 
 // LESSONS 里已登记的条目编号（旧形态与迁移后的新形态都算「编号存在」——形态由 ① 单独校验，
@@ -712,15 +714,20 @@ async function lessonsEntryNumbers() {
 }
 
 // 归档提名核对（结构级）：evidence.lessonsNomination = { scanned, nominated[], reasonIfNone }。
+// 返回 { problems, scanned }：scanned = 本 change 的 SUMMARY 份数（解析不出为 null），恢复命令据此
+// 把份数填成可照抄的具体值——让执行者手填一个自己也没数过的数字，等于把「照抄即推进」变成猜谜。
 async function lessonsNominationProblems(state) {
+  const { count: actual, resolution } = await changeSummaryCount(state);
   const nomination = evidenceFor(state, 'archive')?.lessonsNomination;
   if (!nomination || typeof nomination !== 'object' || Array.isArray(nomination)) {
-    return ['缺 evidence.lessonsNomination（应记录 { scanned, nominated[], reasonIfNone }）'];
+    return { problems: ['缺 evidence.lessonsNomination（应记录 { scanned, nominated[], reasonIfNone }）'], scanned: actual };
   }
   const problems = [];
-  const actual = await changeSummaryCount(state.activeChange);
   if (actual === null) {
-    problems.push('该 change 的工件目录缺失（.specs/<change>/ 与 .specs/archive/*-<change>/ 都不存在），无从核对扫描份数');
+    // 份数无从核对的两种成因分开说（多候选那一句与状态族同一措辞：BLOCKED 前缀在列表里多余，去掉）。
+    problems.push(resolution.status === 'ambiguous'
+      ? changeLocationFailureMessage(state.activeChange, resolution).replace(/^BLOCKED: /u, '')
+      : '该 change 的工件目录缺失（.specs/<change>/ 与 .specs/archive/*-<change>/ 都不存在），无从核对扫描份数');
   } else if (nomination.scanned !== actual) {
     problems.push('扫描份数 ' + JSON.stringify(nomination.scanned ?? null)
       + ' ≠ 该 change 内 *-SUMMARY.md 份数 ' + actual);
@@ -742,24 +749,20 @@ async function lessonsNominationProblems(state) {
       }
     }
   }
-  return problems;
+  return { problems, scanned: actual };
 }
 
 // ① 旧形态条目（`## L-NNN`）：open / verify / archive 三处出口都拦（AC-17）——报文逐行给「文件:
-// 行号 → 改法」，迁移口径 = 改级 + 移入条目区 + 按编号排序。新 change BLOCKED / 旧 change WARN。
+// 行号 → 改法」，迁移口径 = 改级 + 移入条目区 + 按编号排序。命中即 BLOCKED。
 function checkLessonsEntryForm({ content, node, state }) {
   const legacyEntries = lessonsLegacyEntries(content);
   if (legacyEntries.length === 0) return;
-  if (isNewChange(state)) {
-    console.error('BLOCKED: LESSONS.md 有 ' + legacyEntries.length + ' 条旧形态条目（## L-NNN）——新 change 强制条目写成三级标题并置于条目区:');
-    for (const entry of legacyEntries) {
-      console.error('  - .specs/LESSONS.md:' + entry.line + ' → 改成 "### ' + entry.id + '"（并移入 ## 条目区，按编号升序）');
-    }
-    console.error('恢复: 逐行按上述改法迁移（改级 + 移入条目区 + 按编号排序）后重试 exit ' + node.id);
-    process.exit(1);
+  console.error('BLOCKED: LESSONS.md 有 ' + legacyEntries.length + ' 条旧形态条目（## L-NNN）——条目须写成三级标题并置于条目区:');
+  for (const entry of legacyEntries) {
+    console.error('  - .specs/LESSONS.md:' + entry.line + ' → 改成 "### ' + entry.id + '"（并移入 ## 条目区，按编号升序）');
   }
-  console.error('WARN: LESSONS.md 有 ' + legacyEntries.length + ' 条旧形态条目（应为 ### L-NNN 并置于条目区；旧 change 渐进不阻断）: '
-    + legacyEntries.map((entry) => '.specs/LESSONS.md:' + entry.line + ' → ### ' + entry.id).join('、'));
+  console.error('恢复: 逐行按上述改法迁移（改级 + 移入条目区 + 按编号排序）后重试 exit ' + node.id);
+  process.exit(1);
 }
 
 // ② 条目区外条目 + ③ 同段内编号递增：既有结构判据保持原作用面（verify / archive）——open 出口只
@@ -783,12 +786,8 @@ function checkLessonsZoneAndOrder({ content, state }) {
   if (zoneIndex !== -1) {
     const outside = headings.some(h => h.index < zoneIndex);
     if (outside) {
-      if (isNewChange(state)) {
-        console.error('BLOCKED: LESSONS.md 有条目在条目区外（新 change 强制条目插入条目区）;恢复: 移入条目区');
-        process.exit(1);
-      }
-      // 诊断信息附带 zoneIndex/条目位置——偶发 WARN 排查时可直接定位（文件时序/编码差异兜底）
-      console.error('WARN: LESSONS.md 有条目在条目区外(zoneIndex=' + zoneIndex + ', 条目数=' + headings.length + ', 区外条目: ' + headings.filter(h => h.index < zoneIndex).map(h => 'L-' + h.number).join(',') + ')');
+      console.error('BLOCKED: LESSONS.md 有条目在条目区外（条目须插入条目区）;恢复: 移入条目区');
+      process.exit(1);
     }
   }
   const nums = headings.map(h => parseInt(h.number, 10));
@@ -798,12 +797,8 @@ function checkLessonsZoneAndOrder({ content, state }) {
   for (let i = 1; i < nums.length; i++) {
     const sameSection = !sectionStarts.some(s => s > headings[i - 1].index && s < headings[i].index);
     if (sameSection && nums[i] <= nums[i - 1]) {
-      if (isNewChange(state)) {
-        console.error('BLOCKED: LESSONS.md 条目编号乱序（新 change 强制按编号插入条目区）;恢复: 按 L-NNN 顺序插入');
-        process.exit(1);
-      }
-      console.error('WARN: LESSONS.md 条目编号乱序（L-' + String(nums[i]).padStart(3, '0') + ' 应按序插入条目区）');
-      break;
+      console.error('BLOCKED: LESSONS.md 条目编号乱序（L-' + String(nums[i]).padStart(3, '0') + ' 应按编号顺序插入条目区）;恢复: 按 L-NNN 顺序插入');
+      process.exit(1);
     }
   }
 }
@@ -882,7 +877,7 @@ function lessonsEntryIsOld(block, originKey, state) {
   return false;
 }
 
-// ④ 字段键存在性（C20）：新 change 的新条目缺任一键 → BLOCKED；旧条目 / 旧 change → WARN 渐进。
+// ④ 字段键存在性（C20）：条目缺任一键 → BLOCKED；迁移形态 / 首发指向别的 change 的旧条目只告警。
 function checkLessonsEntryFields({ content, node, state, keys }) {
   const originKey = keys.find((key) => key.includes('首发')) ?? null;
   const blocked = [];
@@ -907,30 +902,44 @@ function checkLessonsEntryFields({ content, node, state, keys }) {
   if (blocked.length === 0) return;
   const guide = '恢复: 按 flow-kit/templates/LESSONS.md「条目格式」段补全字段键（' + keys.join(' / ')
     + '；正文块不强制）后重试 exit ' + node.id;
-  if (!isNewChange(state)) {
-    console.error('LESSONS WARN: LESSONS.md 有 ' + blocked.length + ' 条条目缺字段键（旧 change 渐进不阻断）: '
-      + blocked.map(describe).join('、') + '；' + guide);
-    return;
-  }
-  console.error('BLOCKED: LESSONS.md 有 ' + blocked.length + ' 条新条目缺字段键（新 change 强制新条目按模板条目格式书写）:');
+  console.error('BLOCKED: LESSONS.md 有 ' + blocked.length + ' 条条目缺字段键（条目须按模板条目格式书写）:');
   for (const entry of blocked) console.error('  - ' + describe(entry));
   console.error(guide);
   process.exit(1);
 }
 
 // ⑤ archive 出口的归档提名核对（对账 SUMMARY 份数 / 提名编号存在性 / 无提名理由）——归档提名
-// 留痕且可核对。新 change BLOCKED / 旧 change WARN（C10）。
+// 留痕且可核对；不成立即 BLOCKED。
 async function checkLessonsNomination({ state }) {
-  const problems = await lessonsNominationProblems(state);
-  if (problems.length === 0) return;
-  if (isNewChange(state)) {
-    console.error('BLOCKED: archive 出口的 evidence.lessonsNomination 不成立（' + problems.length + ' 项）:');
-    for (const problem of problems) console.error('  - ' + problem);
-    console.error('恢复: workflow-state.mjs record archive \'{"summary":"<归档摘要>","lessonsNomination":'
-      + '{"scanned":<该 change 内 SUMMARY 份数>,"nominated":["L-NNN"],"reasonIfNone":"<无提名时的理由>"}}\' 补齐后重试 exit archive');
+  // 归档目录名不合规（AC-6）先于「工件目录缺失」失败：真实归档路径下活动目录已整份搬进 archive，
+  // 名字不是 <YYYY-MM-DD>-<change-id> 时定位器解析不到它——这正是「份数无从核对」的一种成因，而
+  // 那句只说「两处都没有」，把盘上其实在场的目录报成缺失，还让执行者去补一件存在的东西。报文改用
+  // 唯一的 archiveDirNameNotice（期望格式 + 实际名字 + 可照抄的改名命令，与出口产物门 / 结构化预检
+  // 同一句措辞，不另写判据也不另写措辞）。
+  const archiveNameProblems = archiveDirNameNotice(state.activeChange, 'archive');
+  if (archiveNameProblems.length > 0) {
+    for (const line of archiveNameProblems) console.error(line);
     process.exit(1);
   }
-  console.error('NOMINATION WARN: evidence.lessonsNomination 不成立（旧 change 渐进不阻断）: ' + problems.join('；'));
+  const { problems, scanned } = await lessonsNominationProblems(state);
+  if (problems.length === 0) return;
+  console.error('BLOCKED: archive 出口的 evidence.lessonsNomination 不成立（' + problems.length + ' 项）:');
+  for (const problem of problems) console.error('  - ' + problem);
+  if (typeof scanned !== 'number') {
+    // 份数无从核对（目录缺失 / 多候选）时不给命令：打印一个猜出来的份数只会让 record 落一份错证据。
+    console.error('恢复: 先按上面的问题把该 change 的工件目录放到可解析的位置，再重试 exit archive');
+    process.exit(1);
+  }
+  // 恢复命令走唯一的命令装配（state-explain 的 scriptCommand：平台化脚本路径 + 协议上下文）：
+  // 裸脚本名的旧形态照抄是 command not found，等于没给命令。scanned 用本门已经算出的事实填好，
+  // 照抄即可推进（nominated 按本轮实际提名改，无提名保留 [] 并把 reasonIfNone 写成理由）。
+  console.error('恢复: 照抄下面的命令补齐 evidence.lessonsNomination 后重试 exit archive'
+    + '（nominated 填本轮实际提名的编号，无提名保留 [] 并把 reasonIfNone 写成理由）:');
+  console.error('      ' + nodeRecordCommand('archive', {
+    summary: '<归档摘要>',
+    lessonsNomination: { scanned, nominated: [], reasonIfNone: '<无提名时的理由>' },
+  }));
+  process.exit(1);
 }
 
 export async function runLessonsZoneGate({ node, state }) {
@@ -963,12 +972,8 @@ export async function runArchiveLogOrderGate({ node, state }) {
     const dates = [...content.matchAll(/^- `?\[(\d{4}-\d{2}-\d{2})\]/gm)].map(m => m[1]);
     for (let i = 1; i < dates.length; i++) {
       if (dates[i] > dates[i - 1]) {
-        if (isNewChange(state)) {
-          console.error('BLOCKED: STATE.md 决策日志非倒序（新 change 强制顶部插入）;恢复: 顶部插入新决策');
-          process.exit(1);
-        }
-        console.error('WARN: STATE.md 决策日志非倒序（新决策应插入顶部）');
-        break;
+        console.error('BLOCKED: STATE.md 决策日志非倒序（决策须顶部插入）;恢复: 顶部插入新决策');
+        process.exit(1);
       }
     }
   } catch {}
@@ -978,12 +983,8 @@ export async function runArchiveLogOrderGate({ node, state }) {
     const dates = [...content.matchAll(/^\| (\d{4}-\d{2}-\d{2}) \|/gm)].map(m => m[1]);
     for (let i = 1; i < dates.length; i++) {
       if (dates[i] > dates[i - 1]) {
-        if (isNewChange(state)) {
-          console.error('BLOCKED: CHANGELOG.md 表格日期非倒序（新 change 强制顶部插入）;恢复: 表格顶部插入新条目');
-          process.exit(1);
-        }
-        console.error('WARN: CHANGELOG.md 表格日期非倒序（新条目应插入表格顶部）');
-        break;
+        console.error('BLOCKED: CHANGELOG.md 表格日期非倒序（新条目须插入表格顶部）;恢复: 表格顶部插入新条目');
+        process.exit(1);
       }
     }
     // 归档收尾登记兜底（WARN 渐进，新旧一致）——CHANGELOG 未含本 change 标识（change-id）→ 提示
@@ -1170,11 +1171,8 @@ export async function runPlanExitGate({ node, state }) {
           .filter(Boolean);
         const missing = proseParallelIds.filter(id => !xmlParallelIds.includes(id));
         if (missing.length > 0) {
-          if (isNewChange(state)) {
-            console.error('BLOCKED: 波次散文标记任务为并行（[P]）但任务无 parallel="true"（新 change 强制散文与任务标记一致）;恢复: 对齐散文或任务标记');
-            process.exit(1);
-          }
-          console.error('WARN: 波次散文标记为并行（[P]）但任务无 parallel="true"——散文与任务标记不一致（以任务标记为准）: ' + missing.join(', '));
+          console.error('BLOCKED: 波次散文标记任务为并行（[P]）但任务无 parallel="true"（散文与任务标记须一致）: ' + missing.join(', ') + ';恢复: 对齐散文或任务标记');
+          process.exit(1);
         }
       }
     }
@@ -1182,46 +1180,40 @@ export async function runPlanExitGate({ node, state }) {
     // 废除——串行任务位置不再受限，串→并→串 / 并→串→并 / 多波混合均合法（多趟循环路由按依赖拓扑
     // 分趟）。改为依赖图校验：① 全部任务建依赖图（deps 边）做 Kahn 拓扑排序判环——有环即规划结构性
     // 死锁；② 全部引用的任务 id 必须存在（无环图下「每个 parallel 任务的全部传递依赖存在且非环」
-    // ⟺ 直接引用都存在）。违规分级：新 change BLOCKED（含「依赖环」/缺失依赖明细 + depends_on 调整
-    // 恢复指引）；旧 change 渐进 WARN 不阻断。波次散文一致性检测保留不动（与形态约束正交的既有独立
-    // 检测，维持不变）。
+    // ⟺ 直接引用都存在）。违规即 BLOCKED（含「依赖环」/缺失依赖明细 + depends_on 调整恢复指引）。
+    // 波次散文一致性检测保留不动（与形态约束正交的既有独立检测，维持不变）。
     const depGraph = analyzeDependencyGraph(taskList);
     if (depGraph.cyclic || depGraph.missing.length > 0) {
       const detail = depGraph.cyclic
         ? '依赖环（拓扑排序无解，涉及任务: ' + depGraph.cycleIds.join(', ') + '）'
         : '依赖不存在的任务: ' + depGraph.missing.map((m) => m.id + '→' + m.dep).join(', ');
       const guide = ';恢复: 调整任务 depends_on——移除成环引用或改为真实存在的任务 id 后重试';
-      if (isNewChange(state)) {
-        console.error('BLOCKED: TASK.md ' + detail + '——依赖图不可满足（任务的依赖链必须存在且无环）' + guide);
-        process.exit(1);
-      }
-      console.error('WARN: TASK.md ' + detail + '——依赖图不可满足（旧 change 渐进不阻断）' + guide);
+      console.error('BLOCKED: TASK.md ' + detail + '——依赖图不可满足（任务的依赖链必须存在且无环）' + guide);
+      process.exit(1);
     }
     // 波次投影判定（波次 = 依赖层级的投影）：`## 波次划分` 声明的波次必须等于任务的依赖层级
     // （无依赖 = 第 1 波，其余 = 1 + 依赖中最晚波次），且任务集里每个非修复族任务都必须被某个
     // Wave 行声明过（未声明记入同一明细，取值「未声明」）。这是「图必须等于依赖」的判据——同波
     // 依赖、排在依赖之前、只需更早波次却排到更后面的保守排法、以及根本没写进波次段的任务都会被
-    // 逐条点名（任务 / 依赖 / 当前波 / 应到波）。分级沿用既有先例：新 change BLOCKED（明细 +
-    // 恢复指引），旧 change WARN 渐进。「判不了」按成因二分：载体缺席（无段 / 段名无从派生）只
-    // 打印「未校验」放行——判据没有可判对象；工件内容不可判（段在场却没有一行 Wave 行能落到真实
-    // 任务上）按同一先例分级，旧 change 的 WARN 行进入既有 WARN COUNT（「该写的没写」不静默）。
+    // 逐条点名（任务 / 依赖 / 当前波 / 应到波）。不一致即 BLOCKED（明细 + 恢复指引）。「判不了」按
+    // 成因二分：载体缺席（无段 / 段名无从派生）只打印「未校验」放行——判据没有可判对象；工件内容
+    // 不可判（段在场却没有一行 Wave 行能落到真实任务上）按同一先例判红（「该写的没写」不静默）。
     // 位置在依赖图判据之后：环与缺失依赖是更根本的规划错误，先报它们；replan 重校段（ADR-013
     // 不豁免）调用同一判定与同一报文构造，措辞与分级因此不会分叉。
-    // 分级 → 输出单源：本出口只派生 blocking（新 change 强制、旧 change 渐进），「哪一支打什么行、
-    // 要不要拒绝」全在 waveReviewOutcome 一处——与 replan 重校段共用同一份，改分级只改一处。
+    // 分级 → 输出单源：「哪一支打什么行、要不要拒绝」全在 waveReviewOutcome 一处——与 replan 重校段
+    // 共用同一份，改分级只改一处。
     const waveReview = waveProjectionReview({ taskContent: content, blocks: taskList });
-    const waveOutcome = waveReviewOutcome(waveReview, { blocking: isNewChange(state) });
+    const waveOutcome = waveReviewOutcome(waveReview, { blocking: true });
     for (const line of waveOutcome.lines) console.error(line);
     if (waveOutcome.block) process.exit(1);
     // 同波可并行却漏标 [P]（波次判据之后的第二条波次面判据）：同一波次内彼此无依赖路径、write_files
     // 不重叠的两个任务，只标一个 parallel="true" 不成立——单边标记既不表达「可并行」，机器路由又按
-    // 串行跑（白丢一波并行度）。新 change BLOCKED（逐对点名 + 两条出路：都标 [P] / 补 depends_on 换
-    // 波次），旧 change WARN 渐进（WARN 行进既有 WARN COUNT）。判据本身（含「写面重叠」与「无依赖
-    // 路径」两个前提）在 wave-projection 一处实现，本处只分级与打印；波次分组复用同一份解析结果
-    // （waveReview.waves），不重解析波次段。
+    // 串行跑（白丢一波并行度）。漏标即 BLOCKED（逐对点名 + 两条出路：都标 [P] / 补 depends_on 换波次）。
+    // 判据本身（含「写面重叠」与「无依赖路径」两个前提）在 wave-projection 一处实现，本处只分级与
+    // 打印；波次分组复用同一份解析结果（waveReview.waves），不重解析波次段。
     const gapOutcome = parallelGapOutcome(
       parallelGapReview({ taskContent: content, blocks: taskList, waves: waveReview.waves }),
-      { blocking: isNewChange(state) },
+      { blocking: true },
     );
     for (const line of gapOutcome.lines) console.error(line);
     if (gapOutcome.block) process.exit(1);
@@ -1234,29 +1226,22 @@ export async function runPlanExitGate({ node, state }) {
         + testOnlyParallelIds.join(', ')
         + '。测试通常依赖实现产出的符号，可能存在隐式依赖；建议添加 depends_on 声明或合并为垂直切片');
     }
-    // 并行文件依赖检测前移（触发面）：write∩write 写写强判（新 change BLOCKED / 旧 change WARN
-    // 渐进，与依赖环分级同先例）+ read∩write 读写弱判（仅无显式 depends_on 关联的并行对；WARN
-    // 提示级，新/旧均不 BLOCK——渐进提示）+ 同文件跨任务且无依赖路径（未完成任务写入面重叠而两
-    // 任务间无依赖路径——新 change BLOCKED / 旧 change WARN 渐进；串行拆分同样命中，修复任务族不
-    // 参与）。与委托前既有拦截并存（委托前为第二道写写锚，行为与消息保持既有语义不变）。
+    // 并行文件依赖检测前移（触发面）：write∩write 写写强判（BLOCKED）+ read∩write 读写弱判（仅无
+    // 显式 depends_on 关联的并行对；WARN 提示级，不 BLOCK）+ 同文件跨任务且无依赖路径（未完成任务
+    // 写入面重叠而两任务间无依赖路径——BLOCKED；串行拆分同样命中，修复任务族不参与）。与委托前
+    // 既有拦截并存（委托前为第二道写写锚，行为与消息保持既有语义不变）。
     const { writeConflicts, readWarnings, crossTaskConflicts } = await findParallelWriteConflicts(path.join(runRoot, '.specs', state.activeChange));
     if (writeConflicts.length > 0) {
       const detail = writeConflicts.map((c) => `${c.a}×${c.b}(${c.files.join(',')})`).join('; ');
       const guide = ';恢复: 补显式 depends_on 或拆为串行任务后重试';
-      if (isNewChange(state)) {
-        console.error('BLOCKED: TASK.md 并行任务 write_files 重叠（写写冲突，同波次并行会竞态覆盖）: ' + detail + guide);
-        process.exit(1);
-      }
-      console.error('WARN: TASK.md 并行任务 write_files 重叠（写写冲突，建议补显式 depends_on 或拆为串行任务）: ' + detail + guide);
+      console.error('BLOCKED: TASK.md 并行任务 write_files 重叠（写写冲突，同波次并行会竞态覆盖）: ' + detail + guide);
+      process.exit(1);
     }
     if (crossTaskConflicts.length > 0) {
       const detail = crossTaskConflicts.map((c) => `${c.a}×${c.b}(${c.files.join(',')})`).join('; ');
       const guide = ';恢复: 补显式 depends_on 或合并为一个任务后重试';
-      if (isNewChange(state)) {
-        console.error('BLOCKED: TASK.md 同文件跨任务且无依赖路径: ' + detail + guide);
-        process.exit(1);
-      }
-      console.error('WARN: TASK.md 同文件跨任务且无依赖路径（建议补显式 depends_on 或合并为一个任务）: ' + detail + guide);
+      console.error('BLOCKED: TASK.md 同文件跨任务且无依赖路径: ' + detail + guide);
+      process.exit(1);
     }
     if (readWarnings.length > 0) {
       console.error('WARN: TASK.md 并行任务 read∩write 隐式依赖嫌疑（一方读取对方写路径，建议补显式 depends_on 声明）: '
@@ -1285,7 +1270,7 @@ export async function runReviewExitGate({ node, state }) {
     // 只警告不阻断（防旧 REVIEW 卡死），执行者补标记后可消除。
     const reviewText = await fs.readFile(reviewFile, 'utf8');
     // 发现位置（模板 2.2）：发现写在旧 `## 发现` 而模板位置 `### 2.2 …详细发现` 下无条目——旧段不被
-    // 任何出口消费，等于「记录后静默丢弃」。新 change BLOCKED + 逐条迁移指引；旧 change WARN 渐进。
+    // 任何出口消费，等于「记录后静默丢弃」。命中即 BLOCKED + 逐条迁移指引。
     // 模板缺席（primary=null）时不判位置：模板派生判据不臆造（C9），旧形态解析与处置校验照常。
     const scope = await reviewFindingScope();
     const findings = reviewFindingsItems(reviewText, scope);
@@ -1294,35 +1279,26 @@ export async function runReviewExitGate({ node, state }) {
       && reviewLegacyFindingsHasContent(reviewText);
     if (misplacedFindings) {
       const templateFile = (await buildSkeleton('REVIEW')).file ?? 'flow-kit/templates/REVIEW.md';
-      if (isNewChange(state)) {
-        console.error('BLOCKED: REVIEW.md 的发现写在模板外的段「## 发现」，而模板位置（第二轮下的 2.2 详细发现）无条目——新 change 强制写在模板位置');
-        console.error('恢复: 把「## 发现」下的条目逐条移入「### 2.2 …详细发现」段内（模板: ' + templateFile
-          + '），删除旧段后重试 exit review');
-        process.exit(1);
-      }
-      console.error('REVIEW WARN: REVIEW.md 的发现写在模板外的段「## 发现」，模板位置 2.2 详细发现 无条目'
-        + '——迁移到 2.2 后本警告消除（旧 change 渐进不阻断；模板: ' + templateFile + '）');
+      console.error('BLOCKED: REVIEW.md 的发现写在模板外的段「## 发现」，而模板位置（第二轮下的 2.2 详细发现）无条目——发现须写在模板位置');
+      console.error('恢复: 把「## 发现」下的条目逐条移入「### 2.2 …详细发现」段内（模板: ' + templateFile
+        + '），删除旧段后重试 exit review');
+      process.exit(1);
     }
     const missingDisposition = reviewFindingsMissingDisposition(reviewText, scope);
     if (missingDisposition.length > 0) {
-      if (isNewChange(state)) {
-        console.error('BLOCKED: REVIEW.md 发现区 ' + missingDisposition.length + ' 项条目缺处置状态标记（[已修]/[升级]/[转待办]）——新 change 强制每项发现须有处置');
-        console.error('恢复: 为发现区条目补处置标记后重试;未处置的发现(含 Minor)不应无声消失');
-        process.exit(1);
-      }
-      console.error('REVIEW WARN: REVIEW.md 发现区 ' + missingDisposition.length +
-        ' 项条目缺处置状态标记（[已修]/[升级]/[转待办]）: ' + missingDisposition.join('、') +
-        '——未处置的发现（含 Minor）不应无声消失，补标记后本警告消除（渐进不阻断）');
+      console.error('BLOCKED: REVIEW.md 发现区 ' + missingDisposition.length + ' 项条目缺处置状态标记（[已修]/[升级]/[转待办]）——每项发现须有处置: ' + missingDisposition.join('、'));
+      console.error('恢复: 为发现区条目补处置标记后重试;未处置的发现(含 Minor)不应无声消失');
+      process.exit(1);
     }
     // 延期裁决门禁：延期是用户决策点——reviewer 不得自行把任何严重度的发现标 [转待办]。结构校验：
     // 条目标 [转待办] 时须同时存在用户裁决记录（同段或其它段落含「用户裁决：接受延期」且指向该条目，
-    // 并由 [升级] 承接）；缺失 → 新 change BLOCKED / 旧 change WARN 渐进。只以 [已修]/[升级] 处置的
+    // 并由 [升级] 承接）；缺失 → BLOCKED。只以 [已修]/[升级] 处置的
     // 条目直接放行（不是延期，没有决策点）。Minor 并入同一门禁：此前只有 Major 受约束，Minor 可自行
     // 延期，延期因此长期无门槛积压。
     //
     // Minor 判定理由门禁：**每条**判为 Minor 的发现都须在条目块内自证判据——一行「判 Minor：<理由>」，
     // 与处置标记无关（[已修]/[升级]/[转待办] 一律要：判据落在判定当时，而不是延期时补票）。结构级校验
-    // （理由内容不做语义判断）；缺失 → 新 change BLOCKED / 旧 change WARN 渐进。报文把「改判 Major」
+    // （理由内容不做语义判断）；缺失 → BLOCKED。报文把「改判 Major」
     // 作为默认出口——写不出理由通常说明这根本够不上 Minor。
     const deferredFindings = reviewDeferredFindingProblems(reviewText, scope);
     const minorUnjustified = reviewMinorJustificationProblems(reviewText, scope);
@@ -1331,30 +1307,19 @@ export async function runReviewExitGate({ node, state }) {
       const guide = '；恢复: 把该条目补 [升级] 交用户裁决；用户接受延期后，在与该条目以空行分隔的段落写'
         + '「用户裁决：接受延期 —— 发现 <条目标识>：<理由>」，并由 [升级] 承接（条目内或该段落带 [升级]）。'
         + '示例: 「- **F1 · 标题**：[升级] [转待办]」+ 空行 +「用户裁决：接受延期 —— 发现 F1：下一 change 首修」';
-      if (isNewChange(state)) {
-        console.error('BLOCKED: REVIEW.md 发现区 ' + deferredFindings.length + ' 项条目为 [转待办] 但缺少用户裁决记录——任何严重度（含 Minor）的延期都不得由 reviewer 自行决定: ' + named + guide);
-      } else {
-        console.error('REVIEW WARN: REVIEW.md 发现区 ' + deferredFindings.length
-          + ' 项条目为 [转待办] 但缺少用户裁决记录: ' + named
-          + '——任何严重度（含 Minor）的延期都不得由 reviewer 自行决定' + guide + '（渐进不阻断）');
-      }
+      console.error('BLOCKED: REVIEW.md 发现区 ' + deferredFindings.length + ' 项条目为 [转待办] 但缺少用户裁决记录——任何严重度（含 Minor）的延期都不得由 reviewer 自行决定: ' + named + guide);
     }
     if (minorUnjustified.length > 0) {
       const named = minorUnjustified.map((p) => p.title + '（' + p.severity + '）').join('、');
       const guide = '；恢复: 在该条目块内（与条目标题之间不留空行）补一行「判 Minor：<一句话理由>」，'
         + '示例: 条目行「- **F2 · 标题**：[已修]」的下一行写「  判 Minor：仅影响日志措辞，不改变行为与接口」；'
         + '若判断其实够不上 Minor，请改判 Major（拿不准时默认 Major）';
-      if (isNewChange(state)) {
-        console.error('BLOCKED: REVIEW.md 发现区 ' + minorUnjustified.length + ' 项条目被判为 Minor 但缺 `判 Minor：` 行'
-          + '——判为 Minor 须在判定当时自证判据，与处置标记（[已修]/[升级]/[转待办]）无关: ' + named + guide);
-      } else {
-        console.error('REVIEW WARN: REVIEW.md 发现区 ' + minorUnjustified.length
-          + ' 项条目被判为 Minor 但缺 `判 Minor：` 行: ' + named + guide + '（渐进不阻断）');
-      }
+      console.error('BLOCKED: REVIEW.md 发现区 ' + minorUnjustified.length + ' 项条目被判为 Minor 但缺 `判 Minor：` 行'
+        + '——判为 Minor 须在判定当时自证判据，与处置标记（[已修]/[升级]/[转待办]）无关: ' + named + guide);
     }
-    if (isNewChange(state) && (deferredFindings.length > 0 || minorUnjustified.length > 0)) process.exit(1);
+    if (deferredFindings.length > 0 || minorUnjustified.length > 0) process.exit(1);
     // AC 覆盖汇总（只提示、不阻断）：TEST.md 在场且其 1.1 测试矩阵漏了 AC → 一条汇总 WARN，退出码不变。
-    // 同一判定的强制面在 verify 出口（新 change BLOCKED），两处共用证据/产物门禁族的同一实现——
+    // 同一判定的强制面在 verify 出口（BLOCKED），两处共用证据/产物门禁族的同一实现——
     // 本出口今天不要求 TEST.md，故只在判得了且真缺时报，不让「判不了」变成噪音。
     await runAcCoverageGate({ node, state });
   } catch {}
@@ -1384,31 +1349,25 @@ async function missingDeclarationRecovery({ node, state, missingSkills }) {
 //      声明过：标记的 protocols 数组（多 --prompt）与 protocol 单值（收紧前的写入形态、record 自动补
 //      写的形态）都算，值一律按 basename 比对；
 //   ② 协议声明的必需技能（enforcement='guarded' 且非 handoff scope）各自要有属于该技能的标记。
-// 缺任一 → 新 change BLOCKED 并**逐项点名**缺哪个协议文件、哪个必需技能；旧 change WARN 渐进（既有
-// change 不因收紧卡死）。判定从「任一命中即通过」改为「全部覆盖」：旧口径把节点该读的清单当成允许
+// 缺任一 → BLOCKED 并**逐项点名**缺哪个协议文件、哪个必需技能。判定从「任一命中即通过」改为
+// 「全部覆盖」：旧口径把节点该读的清单当成允许
 // 集合，声明一份就能过——另一份协议文件、另一个必需技能从来没有判据。
 // 诚实边界：标记是执行者的自我声明——校验只确认「声明覆盖了必需项」，无法证明执行者真的阅读了协议
-// （声明非物理证明，仅保证声明可追溯）。**目录整体缺席按新/旧 change 分开**：新 change 缺席 = 一项
-// 都没声明（同一道判据的两半——「目录在但没覆盖」与「目录根本不在」不该有两种放行），逐项点名并
-// BLOCKED；只有旧 change 才走「机制未激活」的渐进告警（该 change 从未运行过 skill-load）。删目录因此
-// 不是关掉覆盖判据的写法。节点已 exit 不重验（校验只在当前 exit 时执行）；节点重新 exit（重入后再退）
-// 时按新规则要求，无豁免。
+// （声明非物理证明，仅保证声明可追溯）。**目录整体缺席 = 一项都没声明**（同一道判据的两半——
+// 「目录在但没覆盖」与「目录根本不在」不该有两种放行），逐项点名并 BLOCKED。删目录因此不是关掉
+// 覆盖判据的写法。节点已 exit 不重验（校验只在当前 exit 时执行）；节点重新 exit（重入后再退）时
+// 按同一规则要求，无豁免。
 export async function runSkillLoadMarkerGate({ node, state }) {
   if (!state.activeChange) return;
   const requiredFiles = NODE_PROTOCOL_FILES[node.id] ?? [];
   const requiredSkills = await declarationSkillNames(node, state);
   // 零协议文件且零必需技能：本节点没有声明义务（自定义协议节点没有引擎映射，也没有 guarded 绑定）
   if (requiredFiles.length === 0 && requiredSkills.length === 0) return;
-  // 标记目录活动/归档双路径解析（archive 节点「先移目录后 exit」顺序下标记只在归档路径——单查
-  // 活动路径会误报「机制未激活」静默放行）；两处皆无才走旧 change 兼容
+  // 标记目录活动/归档双路径解析（规范顺序「记录 → 搬目录 → exit」：搬目录在 exit 前、记录之后，
+  // 移动后补记录仅作兼容 / 恢复路径——此时标记只在归档路径；单查活动路径会误报「机制未激活」静默放行）
   const foundDir = await findSkillLoadsDir(runRoot, state.activeChange);
-  // 目录缺席：新 change 按「一项都没声明」继续走下面那条判据（逐项点名 + BLOCKED）——把目录当成
-  // 空的声明面，而不是「机制未激活」的放行口。只有旧 change 才在这里收口（渐进告警、不追溯）。
-  if (!foundDir && !isNewChange(state)) {
-    console.error('SKILL-LOAD WARN: 旧 change 兼容——.specs/' + state.activeChange +
-      '/.skill-loads/（活动与归档路径）不存在，协议声明校验跳过（机制未激活；首个 skill-load 后新规则生效）');
-    return;
-  }
+  // 目录缺席按「一项都没声明」继续走下面那条判据（逐项点名 + BLOCKED）——把目录当成空的声明面，
+  // 而不是「机制未激活」的放行口。
   // 声明面 = 「找到的目录」或「缺席的空声明面」：一处归一，下面的读目录 / 报文显示 / 缺项判定都只
   // 依赖这个形状（不再各自 `=== null` 判一遍，三处分支各自演进就是三份判据）。
   const surface = foundDir ?? { dir: null, display: '.specs/' + state.activeChange + '/.skill-loads/' };
@@ -1420,7 +1379,6 @@ export async function runSkillLoadMarkerGate({ node, state }) {
   const declaredFiles = new Set();
   const declaredSkills = new Set();
   const malformed = [];
-  let autoHinted = false;
   for (const name of names) {
     let marker;
     try {
@@ -1436,11 +1394,6 @@ export async function runSkillLoadMarkerGate({ node, state }) {
     }
     for (const basename of markerProtocolBasenames(marker)) declaredFiles.add(basename);
     if (typeof marker.skill === 'string' && marker.skill !== '') declaredSkills.add(marker.skill);
-    // auto 标记提示——record 自动补的标记（auto:true）不证明手动加载，提示建议手动声明
-    if (marker.auto === true && !autoHinted) {
-      autoHinted = true;
-      console.error('SKILL-LOAD HINT: ' + name + ' 为 record 自动补写标记(auto)——建议手动 skill-load 声明(如实记录加载动作与协议文件)');
-    }
   }
   const missingFiles = requiredFiles.filter((file) => !declaredFiles.has(file));
   const missingSkills = requiredSkills.filter((skill) => !declaredSkills.has(skill));
@@ -1458,15 +1411,10 @@ export async function runSkillLoadMarkerGate({ node, state }) {
     + (surface.dir === null
       ? '（活动与归档路径）不存在，即一项声明都没有'
       : ' 下的声明未覆盖本节点全部必需项');
-  if (isNewChange(state)) {
-    console.error('BLOCKED: ' + lead + '（新 change 强制全部覆盖）:');
-    for (const line of details) console.error(line);
-    console.error(recovery);
-    process.exit(1);
-  }
-  console.error('SKILL-LOAD WARN: ' + lead + '（旧 change 渐进不阻断，新 change 强制全部覆盖）:');
+  console.error('BLOCKED: ' + lead + '（声明须全部覆盖）:');
   for (const line of details) console.error(line);
   console.error(recovery);
+  process.exit(1);
 }
 
 // ---------- 结构化预检（exit <node> --preflight）----------
@@ -1587,6 +1535,14 @@ function reportIncompleteDeclarations(node, incomplete) {
 // 不是「旧 change 的进展宽容」能改写的东西）。返回是否命中，收口退出由 runStructuralPreflight 负责
 // （先让同轮的结构门禁也能报完，缺件不被别的报错抢先吞掉顺序）。
 async function runDeclaredArtifactExistenceCheck({ protocol, node, state }) {
+  // 归档目录名不合规（AC-6）先于在场判定失败：非日期名的归档目录既不是「在场」（产物门与声明门
+  // 给不出两种答案），也不许报成「缺件」（那会让人去建一件其实存在的产物）。报文与出口产物门同一句
+  // （判据与措辞都在 guard-routing 的 archiveDirNameNotice），预检因此不会给出另一个说法。
+  const archiveNameProblems = archiveDirNameNotice(state.activeChange, node.id);
+  if (archiveNameProblems.length > 0) {
+    for (const line of archiveNameProblems) console.error(line);
+    process.exit(1);
+  }
   const { missing, deferred, incomplete } = await missingDeclaredFileArtifacts({ protocol, node, state });
   // 归档产出：只报「归档执行后才会生成」这一事实与它的落点，不报缺件、不给「去创建」的指令——
   // 归档前那条指令不可执行（连 .specs/archive/ 都还不存在），预检也不该把归档的输出当它的前提。
@@ -1627,7 +1583,7 @@ async function preflightSkeletonTargets({ node, state }) {
 }
 
 // 骨架子集：判据 = evaluateArtifact（与模板保真门禁同一实现）；报告 = 首段形态（只读投影）。
-// 分级沿用既有语义：新 change BLOCKED（含恢复指引）/ 旧 change WARN 渐进不阻断。
+// 命中即 BLOCKED（含恢复指引）。
 async function runPreflightSkeletonChecks({ node, state }) {
   if (!state.activeChange) return;
   const changeDir = path.join(runRoot, '.specs', state.activeChange);
@@ -1663,18 +1619,13 @@ async function runPreflightSkeletonChecks({ node, state }) {
   if (failures.length === 0) return;
   const lines = failures.map((failure) => failure.file + ' 模板结构校验失败: '
     + failure.parts.join('; ') + '（模板: ' + (failure.template ?? '（登记表未登记模板路径）') + '）');
-  if (isNewChange(state)) {
-    for (const line of lines) console.error('BLOCKED: ' + line);
-    console.error('恢复: 对照 ' + [...templatePaths].join(' / ')
-      + ' 修正标题 / 首部字段 / 段序，并按模板补齐缺失的 H2 与结构型 H3 标题'
-      + '（条件段与无内容段正文可写 N/A；可选段按模板自述可整段删除）后重试 exit ' + node.id + ' --preflight'
-      + '（预检只读、不写提示账本，故 H2 缺段只报类别计数；结构子段与父段写法建议会点名到具体段。'
-      + '要知道被计数的那些段名，请等节点收尾的完整 exit（它维护提示账本），或直接按模板逐段对照）');
-    process.exit(1);
-  }
-  for (const line of lines) {
-    console.error('TEMPLATE-STRUCTURE WARN: ' + line + '（旧 change 渐进，不阻断；新 change 将强制）');
-  }
+  for (const line of lines) console.error('BLOCKED: ' + line);
+  console.error('恢复: 对照 ' + [...templatePaths].join(' / ')
+    + ' 修正标题 / 首部字段 / 段序，并按模板补齐缺失的 H2 与结构型 H3 标题'
+    + '（条件段与无内容段正文可写 N/A；可选段按模板自述可整段删除）后重试 exit ' + node.id + ' --preflight'
+    + '（预检只读、不写提示账本，故 H2 缺段只报类别计数；结构子段与父段写法建议会点名到具体段。'
+    + '要知道被计数的那些段名，请等节点收尾的完整 exit（它维护提示账本），或直接按模板逐段对照）');
+  process.exit(1);
 }
 
 // 结构化预检子集（显式清单，单一表达处）：workflow-guard 的 --preflight 分支只调用本函数。

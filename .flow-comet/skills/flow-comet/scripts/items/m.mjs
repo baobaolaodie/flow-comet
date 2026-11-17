@@ -401,7 +401,7 @@ export const ENTRIES = [
       // ① fail-open 反向控制：段内自然句子「不适用于暗色主题…」不是结构形态 → 仍判前端、缺件 BLOCKED；
       // ② 结构形态（`适用性` 标签的字段值位）→ 可见跳过 + 命中片段回显，且不要求工件与该声明。
       const nfChange = CHANGE_ID + '-nf';
-      assertExit(runState(['init', nfChange, '--init-skip'], dir), 0);
+      assertExit(runState(['init', nfChange, '--init-skip', '--replace', CHANGE_ID, '--reason', '第二个 change 走跳过半（覆盖闸门显式放行）'], dir), 0);
       assertExit(runState(['skill-load', 'open', 'flow-comet-change', '--prompt', 'flow-kit/prompts/0-change.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
       // 第二个 change 的 open 同样要覆盖两份协议与两个必需技能（出口覆盖判据按节点核对）
       assertExit(runState(['skill-load', 'open', 'flow-comet-requirement', '--prompt', 'flow-kit/prompts/1-requirement.md', '--templates', 'CHANGE.md,REQUIREMENT.md'], dir), 0);
@@ -453,7 +453,7 @@ export const ENTRIES = [
       const setRes = runState(['config', 'set', 'last_evolve_at', baseline], dir);
       assertExit(setRes, 0);
       assertOut(setRes, 'CONFIG: last_evolve_at = ' + baseline);
-      assertExit(runState(['init', CHANGE_ID + '-2', '--init-skip'], dir), 0);
+      assertExit(runState(['init', CHANGE_ID + '-2', '--init-skip', '--replace', CHANGE_ID, '--reason', '验证跨 change 保留演化基线'], dir), 0);
       const state = readStateFile(dir);
       assertEqual(state.activeChange, CHANGE_ID + '-2', 'init 后 activeChange');
       assertEqual(state.last_evolve_at, baseline, 'init 跨 change 保留 last_evolve_at');

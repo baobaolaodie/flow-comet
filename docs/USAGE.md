@@ -15,7 +15,7 @@ Everything here is done inside the project you installed into, with the installe
 | 5 | `subagent-execute` | Delegated task execution with a handoff request and a Return Contract | handoff |
 | 6 | `review` | Multi-round review; findings must carry a disposition | control |
 | 7 | `verify` | Integration verification; the exit actually runs the test commands | control |
-| 8 | `archive` | Compile leftovers, move the change into the archive, record it | control |
+| 8 | `archive` | Compile leftovers, declare and record the node, move the change into the archive, register it | control |
 
 `next` tells you where you are; `status` prints the machine state. Both are read-only.
 
@@ -44,7 +44,7 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 | `workflow-guard.mjs exit <node> --preflight` | The structural preflight: the read-only structural half of that node's exit — the artifacts that node declares, the summary's key sections, the template skeleton for summaries and the intake documents (when present), plus the task fields at `plan` — which reports what is malformed and advances nothing; the full `exit` without `--apply` stays the whole-chain rehearsal |
 | `workflow-state.mjs` | `init`, `status`, `next`, `select`, `record`, `verify-fail`, `advance`, `execution-mode`, `config`, `skill-load`, `bridge-check`, `reenter`, `replan`, `explain` — the state machine and its bookkeeping |
 
-`skill-load` carries the two pointers the entry printed. `--prompt <flow-kit/prompts/…>` names the node's protocol file — one of the node's own, or the entry refuses the declaration — and `--templates <DOC.md,...>` names its templates as one comma-separated list, written out on every declaration. The list must match the node exactly: a missing, extra or misspelled name is refused on a new change and only warned on an older one. `verify` and `archive` have no templates and take no `--templates`; a custom protocol follows the `templates` that protocol declares. The declaration also has to cover the node rather than sample it: at the exit, every protocol file the node reads and every skill its protocol makes mandatory must be declared by a marker of that node — one `skill-load` may carry several `--prompt` flags — a missing item blocks a new change and is named, and an older change is warned.
+`skill-load` carries the two pointers the entry printed. `--prompt <flow-kit/prompts/…>` names the node's protocol file — one of the node's own, or the entry refuses the declaration — and `--templates <DOC.md,...>` names its templates as one comma-separated list, written out on every declaration. The list must match the node exactly: a missing, extra or misspelled name is refused. `verify` and `archive` have no templates and take no `--templates`; a custom protocol follows the `templates` that protocol declares. The declaration also has to cover the node rather than sample it: at the exit, every protocol file the node reads and every skill its protocol makes mandatory must be declared by a marker of that node — one `skill-load` may carry several `--prompt` flags — a missing item is refused and named.
 
 **The evidence payload is checked before it is written.** `record` accepts `summary` as a non-empty string, `completedChecks` as a list of strings, and `lessonsNomination` as an object whose `scanned` is a number and whose `nominated` is a list of strings and `reasonIfNone` is a string. A wrong type stops the command with a non-zero exit that names each offending field path and the type it actually holds, and nothing is written — the state is exactly what it was, and a field the engine does not know is left alone.
 
@@ -72,7 +72,7 @@ A change lives in `.specs/<change-id>/`:
 | `KNOWN-ISSUES.md` | `archive` | Everything still open or explicitly out of scope |
 | `.skill-loads/` | every node | The declaration markers, one per node and skill |
 
-On archive the whole directory moves to `.specs/archive/<YYYY-MM-DD>-<change-id>/` and a row is appended to `.specs/CHANGELOG.md`. Nothing in `.specs/` is committed: it is the runtime record of the work, kept out of the repository by the entry the installer manages in `.gitignore`.
+On archive the order follows what is reversible: declare the node's skills, record its evidence, then move the whole directory to `.specs/archive/<YYYY-MM-DD>-<change-id>/`, append a row to `.specs/CHANGELOG.md` and run the exit. The dated name is the one the run commands read — a directory carrying this change's id without a date prefix is refused at the exit together with the command that renames it — and when several dated directories exist, the newest one not older than the change's creation date is used, while a tie stops the run instead of picking one. Nothing in `.specs/` is committed: it is the runtime record of the work, kept out of the repository by the entry the installer manages in `.gitignore`. The leftover list is not a dead end: once the exit passes, the workflow hands it to the carrier the project already uses (see [After archive](MECHANISM.md#after-archive)).
 
 ## Discipline the engine enforces
 
@@ -84,6 +84,19 @@ On archive the whole directory moves to `.specs/archive/<YYYY-MM-DD>-<change-id>
 - **Review findings stay visible** — each finding in `REVIEW.md` needs a disposition marker (fixed / escalated / deferred), and deferring a major finding asks for a user ruling.
 - **Coordinator boundary** — in the default `subagent` execution mode the coordinating session may not carry out tasks itself; the engine reports a takeover instead. The documented escape hatch is an explicit `record execute '{"parallelTakeoverApproved":true}'` declaration.
 - **Archive completeness** — the archive exit requires the archived directory and a `KNOWN-ISSUES.md` inside it (write "no leftovers" explicitly when there are none).
+
+## Tool surface on dsh
+
+On DeepSeek Harness the write guard is an in-process bridge plugin rather than a `PreToolUse` hook, so it judges the tools the host actually offers. The official `write` / `edit` / `bash` / `pwsh` names map to the same `Write` / `Edit` / `Bash` contract, and so do the dsh-ops equivalents (`ops_write_file`, `ops_edit_file`, `ops_bash`), plus the single-target OPS operations (`ops_copy` to its `to`, `ops_move` to both its `to` and its source `path`, `ops_remove` to its `path`). The multi-target operations `ops_replace` and `ops_batch` are refused to the coordinator while a workflow is running; a subagent is the executor and passes.
+
+Two things are worth knowing before you design around them:
+
+- **`run_code` is allowed.** PTC is a primary preset, and refusing it would stall every running workflow. A program that writes files in-process (`node:fs`, `child_process`) is a documented residual rather than a blocked shape; calls it makes to host tools still pass the same guard one by one.
+- **The shell side is narrower than the write side.** Command text is checked for redirections, PowerShell path cmdlets, `.NET File` calls, `cp`/`mv`/`rm` destinations and `apply_patch` headers. Interpreters (`node file`, `python -c`), `tee`, `dd`, `sed -i`, a bare `rm` and a move's source are outside that analysis, and a relative `workdir` or a `cd` inside the command is not re-based. Treat the whitelist as a boundary on the tools you use, not as a sandbox around the shell.
+
+While a workflow is running, a coordinator passing an absolute `workdir` outside the project is refused, and so is `ops_bash` with `script_path` — a script written into the whitelisted `.specs/` and then executed would otherwise reach any path. Idle projects (no change, or a completed one) are not constrained, with one exception: the state file is refused in every state, so deleting it cannot turn that protection off.
+
+A subagent is the executor, so those two refusals do not apply to it, and neither the script body nor a multi-target operation's individual targets are analysed. Where host permissions allow it, an executor script can therefore still reach the state or protocol file; the minimal protected set is enforced on the named-tool path, not on script content.
 
 ## Branch mode and execution mode
 

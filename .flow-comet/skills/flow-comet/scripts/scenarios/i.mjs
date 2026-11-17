@@ -705,7 +705,6 @@ export const ENTRIES = [
         activeChange: CHANGE_ID,
         currentNode: 'review',
         evidence: { review: { summary: 'pending fix' } },
-        newChange: true,
       };
       const pendingDecision = { kind: 'pending', target: 'execute' };
       for (let round = 1; round <= 3; round += 1) {
@@ -767,7 +766,7 @@ export const ENTRIES = [
         throw new Error('授权放行后计数器应为 4，实际 ' + JSON.stringify(roundState.fixRoundsByChange));
       }
       // 旧 change 缺轮次字段 → 缺省 0、不因计数 BLOCK
-      const legacyRoundState = { activeChange: CHANGE_ID, currentNode: 'review', evidence: {}, newChange: false };
+      const legacyRoundState = { activeChange: CHANGE_ID, currentNode: 'review', evidence: {} };
       const legacyRound = applyRound({ state: legacyRoundState, sourceNode: 'review', decision: pendingDecision });
       if (!legacyRound.counted || legacyRound.blocked || legacyRound.round !== 1) {
         throw new Error('旧 change 缺省 0 应可从第 1 轮计数，实际 ' + JSON.stringify(legacyRound));
@@ -776,7 +775,7 @@ export const ENTRIES = [
         throw new Error('旧 change 第 1 轮应写入缺省容器，实际 ' + JSON.stringify(legacyRoundState.fixRoundsByChange));
       }
       // 分支② done-but-unclosed 不计数（计数语义 = 一次受控归位）
-      const unclosedState = { activeChange: CHANGE_ID, currentNode: 'review', evidence: {}, newChange: true };
+      const unclosedState = { activeChange: CHANGE_ID, currentNode: 'review', evidence: {} };
       const unclosedRound = applyRound({ state: unclosedState, sourceNode: 'review', decision: { kind: 'unclosed', target: 'execute' } });
       if (unclosedRound.counted || unclosedRound.round !== null || unclosedState.fixRoundsByChange) {
         throw new Error('done-but-unclosed 分支不得计数/建容器，实际 '
@@ -1074,7 +1073,6 @@ export const ENTRIES = [
         verifyFailures: 0,
         executionMode: 'subagent',
         directOverride: false,
-        newChange: true,
       };
       // ① 正例：pending Fix 任务在场 → 受控归位 + 审计行 + 真实写盘
       writeFile(dir, taskPath, fixBatchTaskText('pending'));
@@ -1193,7 +1191,6 @@ export const ENTRIES = [
         verifyFailures: 0,
         executionMode: 'subagent',
         directOverride: false,
-        newChange: true,
       };
       writeFile(dir, taskPath, fixBatchTaskText('pending'));
       writeState(dir, st);
@@ -1280,7 +1277,6 @@ export const ENTRIES = [
         verifyFailures: 0,
         executionMode: 'subagent',
         directOverride: false,
-        newChange: true,
       });
       // 声明标记：真实流程里由协调者 / record 写；夹具直接写 state，须补同一份事实（否则先撞覆盖门）
       writeNodeDeclarationMarkers(dir, 'execute');

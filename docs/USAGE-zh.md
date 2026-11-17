@@ -15,7 +15,7 @@
 | 5 | `subagent-execute` | 委托执行：handoff 请求 + Return Contract | handoff |
 | 6 | `review` | 多轮审查；每条发现必须有处置 | control |
 | 7 | `verify` | 集成验证；出口会**真实执行**测试命令 | control |
-| 8 | `archive` | 汇总遗留、把 change 移入归档、登记 | control |
+| 8 | `archive` | 汇总遗留、声明并记录本节点、把 change 移入归档、登记 | control |
 
 `next` 告诉你现在在哪；`status` 打印机器状态。两者都是只读命令。
 
@@ -44,7 +44,7 @@ node <skills>/flow-comet/scripts/workflow-guard.mjs exit <node> --apply         
 | `workflow-guard.mjs exit <节点> --preflight` | 结构预检：该节点出口里只读的结构性部分——该节点声明的工件、摘要关键段、摘要与入口文档（在场时）的模板骨架，外加仅 `plan` 生效的任务字段——只报结构问题、不推进任何状态；完整 `exit`（不带 `--apply`）仍是全链预演 |
 | `workflow-state.mjs` | `init`、`status`、`next`、`select`、`record`、`verify-fail`、`advance`、`execution-mode`、`config`、`skill-load`、`bridge-check`、`reenter`、`replan`、`explain` —— 状态机与记账 |
 
-`skill-load` 要带上入口打印的那两条指针。`--prompt <flow-kit/prompts/…>` 指向该节点的协议文件——只能是它自己的那几份，否则入口拒绝这条声明；`--templates <DOC.md,...>` 以逗号分隔的完整清单声明该节点的模板，每次声明各写一遍。清单必须与该节点完全一致：缺失、多写或错名在新的 change 上被拒绝、旧 change 只告警。`verify` 与 `archive` 没有模板，不传 `--templates`；自定义协议按协议自己声明的 `templates` 走。声明还要覆盖整个节点而不是抽样：出口处，该节点该读的每份协议文件与协议要求它的每个技能都必须由该节点的标记声明过——一条 `skill-load` 可以带多个 `--prompt`——缺项会拦下新 change 并逐项点名，旧 change 只告警。
+`skill-load` 要带上入口打印的那两条指针。`--prompt <flow-kit/prompts/…>` 指向该节点的协议文件——只能是它自己的那几份，否则入口拒绝这条声明；`--templates <DOC.md,...>` 以逗号分隔的完整清单声明该节点的模板，每次声明各写一遍。清单必须与该节点完全一致：缺失、多写或错名一律被拒绝。`verify` 与 `archive` 没有模板，不传 `--templates`；自定义协议按协议自己声明的 `templates` 走。声明还要覆盖整个节点而不是抽样：出口处，该节点该读的每份协议文件与协议要求它的每个技能都必须由该节点的标记声明过——一条 `skill-load` 可以带多个 `--prompt`——缺项会被拒绝并逐项点名。
 
 **证据载荷在写入前校验。** `record` 接受 `summary` 为非空字符串、`completedChecks` 为字符串数组、`lessonsNomination` 为对象且其 `scanned` 是数字、`nominated` 是字符串数组、`reasonIfNone` 是字符串。类型不对会立刻非零退出，逐条点名出错的字段路径与它当前的类型，并且什么都不写——状态保持原样，引擎不认识的字段则放行。
 
@@ -72,7 +72,7 @@ node <skills>/flow-comet/scripts/workflow-state.mjs record execute '{"summary":"
 | `KNOWN-ISSUES.md` | `archive` | 仍然开放或明确排除的事项 |
 | `.skill-loads/` | 每个节点 | 声明标记，每节点每技能一份 |
 
-归档时整个目录迁到 `.specs/archive/<YYYY-MM-DD>-<change-id>/`，并向 `.specs/CHANGELOG.md` 追加一行。`.specs/` 不纳入版本控制：它是工作的运行时记录，由安装器写入 `.gitignore` 的托管条目挡在仓库之外。
+归档的顺序由「哪一步可逆」决定：先声明本节点的技能、记录节点证据，再把整个目录迁到 `.specs/archive/<YYYY-MM-DD>-<change-id>/`，向 `.specs/CHANGELOG.md` 追加一行，最后跑出口。运行命令只读带日期的目录名——只带本 change 的 id、没有日期前缀的目录会在出口被拒绝，并给出把它改名的命令；存在多份带日期的目录时，取「日期不早于该 change 创建日期」的最新一份，候选并列则停下而不是替人挑一份。`.specs/` 不纳入版本控制：它是工作的运行时记录，由安装器写入 `.gitignore` 的托管条目挡在仓库之外。遗留清单不是死路：出口通过后，工作流会把它交给项目已经在用的载体（见[归档之后的交接](MECHANISM-zh.md#归档之后的交接)）。
 
 ## 引擎强制的纪律
 
@@ -84,6 +84,19 @@ node <skills>/flow-comet/scripts/workflow-state.mjs record execute '{"summary":"
 - **审查发现不消失** —— `REVIEW.md` 每条发现都要有处置标记（已修 / 升级 / 转待办）；把 Major 转待办需要用户裁决记录。
 - **协调者边界** —— 默认的 `subagent` 执行模式下，协调会话不得亲自执行任务，引擎会报告越俎代庖；文档化豁免通道是显式声明 `record execute '{"parallelTakeoverApproved":true}'`。
 - **归档完整** —— 归档出口要求归档目录与其内的 `KNOWN-ISSUES.md`（无遗留也要显式写明）。
+
+## dsh 上的工具面
+
+在 DeepSeek Harness 上，写入守卫是宿主进程内的桥接插件，而不是 `PreToolUse` hook——它判定的是宿主实际挂出的工具。官方 `write` / `edit` / `bash` / `pwsh` 与 dsh-ops 的对应工具（`ops_write_file`、`ops_edit_file`、`ops_bash`）都归一到同一套 `Write` / `Edit` / `Bash` 契约；OPS 的单目标操作同样按确定目标判定（`ops_copy` 取 `to`，`ops_move` 的 `to` 与源 `path` 各判一次，`ops_remove` 取 `path`）。多目标操作 `ops_replace` 与 `ops_batch` 在流程运行中对协调者拒绝；子代理是执行者，放行。
+
+设计用法前值得知道两件事：
+
+- **`run_code` 放行。** PTC 是主要预设，拒绝它会冻死运行中的流程。进程内直接写文件（`node:fs`、`child_process`）属已记录的残留边界，不是被拦的形态；它对宿主工具的调用仍逐个经过同一守卫。
+- **shell 面比写入面窄。** 命令文本只检查重定向、PowerShell 路径型 cmdlet、`.NET File` 调用、`cp`/`mv`/`rm` 的目的地，以及 `apply_patch` 的补丁头。解释器（`node file`、`python -c`）、`tee`、`dd`、`sed -i`、裸 `rm` 与 move 的源端都不在这套分析内；相对 `workdir` 与命令内的 `cd` 也不会重算基准。把白名单当作「所用工具」的边界，而不是把 shell 关进沙箱。
+
+流程运行中，协调者传入项目外的绝对 `workdir` 会被拒绝；`ops_bash` 的 `script_path` 同样被拒绝——否则把脚本写进白名单目录 `.specs/` 再执行，就能到达任意路径。空闲项目（无 change，或 change 已完成）不受约束，但有一个例外：状态文件在任何状态下都被拒绝，因此删掉它无法关掉这道保护。
+
+子代理是执行者，这两条拒绝不作用于它；同时，脚本正文与多目标操作的逐项目标都不做分析。因此在宿主权限允许时，执行者脚本仍可能到达状态文件或协议文件——最小保护集在「具名工具」路径上生效，不覆盖脚本内容。
 
 ## 分支模式与执行模式
 

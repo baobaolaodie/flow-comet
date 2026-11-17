@@ -144,7 +144,7 @@ flow-comet 自动化的是 [flow-kit](https://github.com/rihebty/flow-kit) 的�
 - **分发契约**：npm 包名与 `fcomet` / `flow-comet` 两个 bin 名一经发布即为契约；包体边界是 `package.json` 的 `files` 白名单——**fail-closed**，不得放宽为黑名单或整目录包含。决策记录：ADR-010。
 - **文档同步**：行为层文档在 `docs/`（中英双语——改文档时两语同步）；实现细节不进公开文档
 - **双语纪律**：英文文档不含中文（语言切换器、flow-kit 工件段名、运行时消息原文除外）；中文文档不含英文长句（命令、URL、专有术语除外）
-- **向后兼容**：旧 change/旧 state 照常工作——渐进 WARN 优先于 BLOCK
+- **向后兼容**：旧 state 照常工作——缺字段补默认、含已退役初始化标记字段被忽略；同一形态一个判级，一律 BLOCK（不再有渐进档）
 - **公开文档不使用代号、编号或行话**：README/docs/CHANGELOG/提交信息保持一致
 
 ## 提交规范
@@ -215,6 +215,7 @@ node .flow-comet/skills/flow-comet/scripts/workflow-state.mjs init <change-id> -
 - **发布 PR（dev → main）**：不更新 CHANGELOG——版本段已在 dev 上；发布 PR 只把它合并进 main。
 - **main**：从不单独编辑 CHANGELOG——通过发布 PR 合并获得版本段。
 - **发布后**：dev 自动与 main 树一致（发布 PR 把 dev 合入 main 历史），重新开启 `Unreleased` 段积累下一批次。
+- **一条一个变化**：一个条目只描述一个变化，独立的变化各自成条——即 Keep a Changelog 的 "a single line per change"。不设字数上限：判据是「这条能不能用一句话说清」，说不清就说明它其实是两件事。分类（新增/变更/修复）是归档位置，不是粒度——`修复` 下面四个互不相干的修复，就是四条条目。
 
 ## 保持 PR 更新
 

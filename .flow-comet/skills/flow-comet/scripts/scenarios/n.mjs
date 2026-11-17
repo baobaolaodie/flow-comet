@@ -11,6 +11,9 @@
 //
 // 待实现面：本组场景先于实现落盘（RED），由产出物门禁扩展 / 加载链 / 扫描与提名 / 侧命令 /
 // 文本同步各任务转绿。
+//
+// 尾部 352 号场景不属模板权威族：它守的是**分发参考册**（`reference/post-archive-handoff.md`
+// 的协议要素与段序）。共处一组只因场景按组文件顺序编号——新场景追加在本文件末尾，既有编号不动。
 
 import fs from 'fs';
 import path from 'path';
@@ -22,16 +25,15 @@ import {
   assertOut,
   assertTrue,
   baseState,
+  installSkillTreeCopy,
   runGuard,
+  runPrintedCommand,
   runState,
   writeFile,
   writeState,
 } from '../lib/test-helpers.mjs';
 import {
   CHANGE_ID,
-  REPO_ROOT,
-  SCRIPTS_DIR,
-  TASK_DONE,
   customProtocol,
   dropNamedImport,
   engineCodeText,
@@ -40,9 +42,13 @@ import {
   engineDefinitionPattern,
   engineImportsSymbolFrom,
   engineScriptTexts,
-  handoffFor,
   HANDOFF,
+  handoffFor,
+  REPO_ROOT,
+  SCRIPTS_DIR,
   STATE,
+  TASK_DONE,
+  writeAllNodeDeclarationMarkers,
   writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import { scenarioProtocolPath } from '../lib/test-assertions.mjs';
@@ -397,7 +403,6 @@ function renderDoc(key, opts = {}) {
 
 function newChangeState(node) {
   const st = baseState(node);
-  st.newChange = true;
   st.enteredNodes = [node];
   return st;
 }
@@ -592,8 +597,8 @@ function repoFileText(rel) {
   return fs.readFileSync(path.join(REPO_ROOT, ...rel.split('/')), 'utf8');
 }
 
-function repoFileExists(rel) {
-  return fs.existsSync(path.join(REPO_ROOT, ...rel.split('/')));
+function repoFileExists(rel, root = REPO_ROOT) {
+  return fs.existsSync(path.join(root, ...rel.split('/')));
 }
 
 // 公开面缺席判据（同一实现驱动真实断言与变异探针）：形态判据认定本检出带公开面时（docs/、
@@ -644,6 +649,105 @@ function assertProbesDiscriminate(problems, docs, rules, probes) {
   }
 }
 
+// 归档后交接协议页（`reference/post-archive-handoff.md`，分发参考册）的判据：场景 352 与它自己
+// 的变异探针共用同一实现——文本进、问题清单出。只判协议要素（段序 / 选项 / 命令 / 降级 /
+// 不写状态 / 草稿视角 / roadmap 结构）；其中若干要素以固定措辞出现（如「内容 + 命令」「不声明已创建」），
+// 那几句的措辞即判据：改措辞须同批改本文件的锚，否则场景会红。
+const HANDOFF_PAGE_SECTIONS = [
+  ['触发', '## 触发与顺序'],
+  ['探测', '## 探测（只读）'],
+  ['一次询问', '## 一次载体询问'],
+  ['展示与确认', '## 展示、粒度与确认'],
+  ['降级', '## 降级与失败'],
+];
+// 四选项按**整行**认：这四个词在推荐矩阵里各自也出现，只按词判会让「整张表被删」仍然全绿。
+const HANDOFF_PAGE_OPTIONS = [
+  '| GitHub Issues | 用 `gh` 按目标项目现有 issue 模板创建 |',
+  '| GitLab Issues | 用 `glab` 创建 |',
+  '| 本地 roadmap | 写进项目自己的路线图文件（索引 + 每条一份文件） |',
+  '| 暂不处理 | 结束本步骤，不写盘；不记忆，下一次归档仍会问 |',
+];
+const HANDOFF_PAGE_PROBE_COMMANDS = [
+  'git rev-parse --is-inside-work-tree',
+  'git remote get-url origin',
+  'gh --version',
+  'glab --version',
+  'gh auth status --hostname',
+  'glab auth status --hostname',
+];
+// 降级 = 内容 + 可照抄的命令两件套，且不得把「没创建」写成「已创建」。
+const HANDOFF_PAGE_DEGRADE = ['内容 + 命令', 'gh issue create', 'glab issue create', '不声明已创建'];
+// 步骤权威：八步顺序有两处表达（归档册 / 本页），页内必须声明以归档册为准，否则下次改顺序只会改一处。
+const HANDOFF_PAGE_AUTHORITY = ['步骤权威', 'flow-comet-archive'];
+// 缺陷类草稿的七段按**编号**认（编号即骨架顺序）：页内别处出现的同名单词不算骨架在场。
+const HANDOFF_PAGE_DRAFT_PARTS = [
+  '1. 用户版本', '2. 终端', '3. 现象', '4. 复现', '5. 期望', '6. 代码位置', '7. 未验证',
+];
+const HANDOFF_PAGE_ROADMAP_COLUMNS = ['索引七列', 'ID', '标题', '状态', '优先级', '时间向', '负责人', '链接'];
+const HANDOFF_PAGE_ROADMAP_SECTIONS = ['每条六段', 'What', 'Why', 'Context', 'Acceptance', 'Links', 'Notes'];
+const HANDOFF_PAGE_STATE_FILE = '.flow-comet/flow-comet-state.json';
+
+function handoffPageProblems(text) {
+  if (typeof text !== 'string') return ['归档后交接协议页不在检出面'];
+  const problems = [];
+  // ① 段序：五段俱全，且 触发 → 探测 → 一次询问 → 展示 → 降级 严格递增（缺段与乱序分开报）。
+  let previousIndex = -1;
+  let previousHeading = null;
+  for (const [label, heading] of HANDOFF_PAGE_SECTIONS) {
+    const index = text.indexOf(heading);
+    if (index < 0) { problems.push('缺段「' + heading + '」（' + label + '）'); continue; }
+    if (previousIndex >= 0 && index < previousIndex) {
+      problems.push('段序颠倒：「' + heading + '」排在「' + previousHeading + '」之前');
+    }
+    previousIndex = index;
+    previousHeading = heading;
+  }
+  // ② 四选项：少一个就是替用户排除了一条路。
+  for (const option of HANDOFF_PAGE_OPTIONS) {
+    if (!text.includes(option)) problems.push('缺载体选项行「' + option + '」');
+  }
+  // ③ 固定探测命令块：git 在树内 → remote 分类 → CLI 版本 → 认证状态。
+  for (const command of HANDOFF_PAGE_PROBE_COMMANDS) {
+    if (!text.includes(command)) problems.push('缺探测命令「' + command + '」');
+  }
+  // ④ 降级两件套与「不声明已创建」。
+  for (const needle of HANDOFF_PAGE_DEGRADE) {
+    if (!text.includes(needle)) problems.push('缺降级要素「' + needle + '」');
+  }
+  // ④b 步骤权威：顺序不能有两处权威——页内必须声明以归档册为准。
+  for (const needle of HANDOFF_PAGE_AUTHORITY) {
+    if (!text.includes(needle)) problems.push('缺步骤权威声明「' + needle + '」');
+  }
+  // ⑤ 不写状态：只拦「紧贴着把状态文件当写入目标」的句子（正向写入检测）——
+  //    否定在句首（`不写状态文件（<路径>）：…`）或在路径之后的从句（`<路径> 只读，不写入`）都不误伤；
+  //    而 `写入 <路径>，不新增字段` / `不写报告，但写入 <路径>` 这类「否定在别处」的句子仍必须红。
+  const WRITE_VERB_TAIL_RE = /(写|写入|修改|覆盖|改动)\s*`?\s*$/;
+  const NEGATED_WRITE_TAIL_RE = /(不写|不写入|禁止写|不得写|不要写|勿写|绝不写|不直接写|不手动写)\s*`?\s*$/;
+  const stateLines = text.split(/\r?\n/).filter((line) => line.includes(HANDOFF_PAGE_STATE_FILE));
+  if (stateLines.length === 0) problems.push('缺「不写状态文件」边界（页内未点名状态文件）');
+  for (const line of stateLines) {
+    const before = line.slice(0, line.indexOf(HANDOFF_PAGE_STATE_FILE));
+    if (WRITE_VERB_TAIL_RE.test(before) && !NEGATED_WRITE_TAIL_RE.test(before)) {
+      problems.push('状态文件出现在肯定语境「' + line.trim().slice(0, 60) + '」');
+    }
+  }
+  // ⑥ 公开草稿视角：七段骨架 + 维护者第一遍读 + 0 命中不等于通过。
+  for (const part of HANDOFF_PAGE_DRAFT_PARTS) {
+    if (!text.includes(part)) problems.push('缺草稿骨架「' + part + '」');
+  }
+  for (const needle of ['第一遍读', '0 命中']) {
+    if (!text.includes(needle)) problems.push('缺草稿视角「' + needle + '」');
+  }
+  // ⑦ 本地 roadmap 的规定形式：索引七列 + 每条六段。
+  for (const needle of HANDOFF_PAGE_ROADMAP_COLUMNS) {
+    if (!text.includes(needle)) problems.push('缺 roadmap 索引结构「' + needle + '」');
+  }
+  for (const needle of HANDOFF_PAGE_ROADMAP_SECTIONS) {
+    if (!text.includes(needle)) problems.push('缺 roadmap 条目结构「' + needle + '」');
+  }
+  return problems;
+}
+
 // 公开面自检的**形态分派**（判定本体在 lib：publicFaceSelfCheck）——各载体形态各造一个临时根、驱动
 // 同一判定，分派对错因此成为常驻断言，不必等到在包形态里整跑一次套件才知道：
 //   ① 包形态（技能树锚在场、docs/ + CONTRIBUTING.md + .github/ 三者俱缺）→ SKIP 通知 + 零问题：
@@ -666,6 +770,15 @@ function countFaceFiles() {
   ])];
 }
 
+// 夹具预检（只回答「照真迹复制的夹具能不能从本检出构造」，root 可覆盖以便在临时根上反向构造）：
+// 逐份判存在、返回缺席清单，不复制也不写盘。它与产品面的缺席判据（publicFaceAbsenceProblems）
+// 分工不同——后者判「公开面文档在不在检出面」，本函数判「构造夹具所需的受检面文件在不在」。
+// 少了这层，复制循环里的 copyfile 会以文件错误崩在半路，读者会把 ENOENT 读成产品缺陷，而真因是
+// 「本检出被判为带公开面、却缺公开文档」——那个判红本身是对的，只是崩法不可读。
+function missingShapeFixtureFiles(root = REPO_ROOT) {
+  return countFaceFiles().filter((rel) => !repoFileExists(rel, root));
+}
+
 function copyRepoFileInto(root, rel) {
   const parts = rel.split('/');
   const dest = path.join(root, ...parts);
@@ -673,7 +786,7 @@ function copyRepoFileInto(root, rel) {
   fs.copyFileSync(path.join(REPO_ROOT, ...parts), dest);
 }
 
-async function assertPublicFaceSelfCheckShapes(dir) {
+async function assertPublicFaceSelfCheckShapes(dir, { repoRoot = REPO_ROOT } = {}) {
   const shapeRoot = (name, { authoritative = true } = {}) => {
     const root = path.join(dir, 'shape-' + name);
     fs.mkdirSync(root, { recursive: true });
@@ -698,6 +811,16 @@ async function assertPublicFaceSelfCheckShapes(dir) {
     throw new Error('包形态的跳过提示必须写明「未校验」（跳过 ≠ 通过）: ' + packaged.skip.notice);
   }
   // ② 权威源形态完整：受检面文件照真迹复制，计数自然同步（不硬编码数字）
+  //    复制之前先预检：受检面清单里缺任何一份，copyfile 都会以文件错误崩在循环半路，而真因是
+  //    「本检出被判为带公开面、却缺公开文档」。预检把缺席逐份点名后再抛，读者不会把文件错误
+  //    读成产品缺陷；清单为空才进入复制与 shape 自检。
+  const missingFixture = missingShapeFixtureFiles(repoRoot);
+  if (missingFixture.length > 0) {
+    throw new Error('形态自检夹具无法构造：本检出被判为带公开面（docs/、CONTRIBUTING.md 或 .github/'
+      + ' 任一在场），但照真迹复制的受检面文件缺 ' + missingFixture.length + ' 份——'
+      + missingFixture.join('、') + '。这是「本检出被判为带公开面」的判红形态，不是复制文件失败；'
+      + '补齐上述文件后重跑本套件（相对根 ' + repoRoot + '）');
+  }
   const full = shapeRoot('authoritative');
   for (const rel of countFaceFiles()) copyRepoFileInto(full, rel);
   const complete = await publicFaceSelfCheck({ root: full });
@@ -1744,42 +1867,43 @@ export const ENTRIES = [
     },
   },
 
-  // TA-11 · 旧 change 只告警（AC-11）——旧 change（无 newChange 标记）同构缺段 → 不阻断并输出 WARN；
-  // 反向构造：同一夹具置 newChange → BLOCKED。
+  // TA-11 · 单轨缺段判级（AC-11）——同一份缺损工件在**无任何新旧标记字段**的状态下同样 BLOCKED
+  // （不再有「旧 change 只 WARN」这一侧）；design 侧「视觉调性」段缺席同判。
   // ⑤ 追加「视觉调性」段体的围栏语义：段里贴了含 `## ` 的围栏示例时，示例之后的「不适用」声明
   // 仍要被读到（段界只由围栏外的标题决定）。
   {
-    name: 'TA-11 旧 change 同构缺段只 WARN 不阻断；同一夹具新 change 必 BLOCKED；视觉调性段内的围栏示例不截断',
+    name: 'TA-11 缺段一律 BLOCKED（无字段状态同判）；视觉调性段内的围栏示例不截断',
     run: async (dir) => {
       const missing = { omit: ['影响面'] };
-      // ① 新 change：拦（对照基准——同一份缺损工件）
+      // ① 缺段：拦（对照基准——同一份缺损工件）
       setupOpen(dir, missing);
       const newRes = exitNode(dir, 'open');
       assertExit(newRes, 1);
-      // ② 旧 change：WARN 不阻断（唯一差异 = state 缺 newChange 标记）
+      assertOut(newRes, 'BLOCKED');
+      // ② 同构缺段（无任何新旧标记字段）：同判 BLOCKED（单一等级）
       setupOpen(dir, missing);
       const legacy = baseState('open');
       legacy.evidence.open = { summary: 'intake complete' };
       writeState(dir, legacy);
       const legacyRes = exitNode(dir, 'open');
-      assertExit(legacyRes, 0);
-      assertOut(legacyRes, 'WARN');
-      assertNotOut(legacyRes, 'BLOCKED');
+      assertExit(legacyRes, 1);
+      assertOut(legacyRes, 'BLOCKED');
       // ③ design 侧段缺席：同一判据——CHANGE.md「视觉调性」段缺席，新 change 由 uidesign 门兜底拦，
       // 不再默认判非前端（段缺席与段内声明「不适用」是两件事，只有后者是决策）。
       setupDesign(dir, { changeOpts: { omit: ['视觉调性'] } });
       const designNew = exitNode(dir, 'design');
       assertExit(designNew, 1);
       assertOut(designNew, '「视觉调性」段缺席');
-      assertOut(designNew, '新 change 须显式标注「不适用」');
-      // ④ 反向构造（同一份缺损工件，唯一差异 = state 缺 newChange 标记）：旧 change 兼容跳过、不阻断。
+      assertOut(designNew, '须显式标注「不适用」');
+      // ④ 同构缺段（无任何新旧标记字段）：同判 BLOCKED（单一等级，不再有兼容跳过）
       setupDesign(dir, { changeOpts: { omit: ['视觉调性'] } });
       const designLegacy = baseState('design');
       designLegacy.evidence.design = { summary: 'design done' };
       writeState(dir, designLegacy);
       const designLegacyRes = exitNode(dir, 'design');
-      assertExit(designLegacyRes, 0);
-      assertOut(designLegacyRes, '旧 change 兼容');
+      assertExit(designLegacyRes, 1);
+      assertOut(designLegacyRes, '「视觉调性」段缺席');
+      assertNotOut(designLegacyRes, '旧 change 兼容');
       // ⑤ 段体围栏语义：「视觉调性」段里贴一段含 `## ` 的围栏示例，「不适用」声明写在围栏**之后**
       //    ⇒ 段体不被示例里的标题截断，判据仍读到声明（围栏是正文示例，不是段界）。旧的按行扫描
       //    在这里截断段体 → 标记消失 → 判成前端 → 要求一份本不该存在的 UI-DESIGN.md（BLOCKED）。
@@ -2057,7 +2181,6 @@ export const ENTRIES = [
         writeFile(dir, changeDirOf(), renderDoc('CHANGE', { omit: ['影响面'] }));
         const st = baseState('brainstorm');
         st.activeChange = CHANGE_ID;
-        st.newChange = true;
         st.enteredNodes = ['brainstorm'];
         st.evidence.brainstorm = { summary: 'notes done' };
         writeState(dir, st);
@@ -2637,6 +2760,7 @@ export const ENTRIES = [
   {
     name: 'TA-19 归档提名：缺字段/编号不存在/份数不符三负例拦，补齐后通过',
     run: async (dir) => {
+      writeNodeDeclarationMarkers(dir, 'archive');
       // ① 缺 lessonsNomination 字段
       setupArchive(dir);
       const missingField = exitNode(dir, 'archive');
@@ -2699,6 +2823,48 @@ export const ENTRIES = [
       assertExit(decoyOnly, 1);
       assertOut(decoyOnly, '工件目录缺失');
       assertNotOut(decoyOnly, 'ALL CHECKS PASSED');
+      // ④c 多候选按日期（in-place 扩展）：同名 change 有多份**合规**归档目录时，取日期最新的一份。
+      // 夹具用「结论可判别」的份数（最新 = 2、更早 = 5）：退回「取第一个命中」或「取更早的一份」都会
+      // 让下面的份数对账判红——这是日期判定真正在起作用的证据。
+      setupArchive(dir, {
+        evidence: { lessonsNomination: { scanned: 2, nominated: ['L-501'], reasonIfNone: '' } },
+      });
+      fs.renameSync(path.join(dir, CHANGE_DIR), path.join(archiveRoot, '2026-11-10-' + CHANGE_ID));
+      fs.renameSync(path.join(archiveRoot, '2026-10-20-' + CHANGE_ID, 'KNOWN-ISSUES.md'),
+        path.join(archiveRoot, '2026-11-10-' + CHANGE_ID, 'KNOWN-ISSUES.md'));
+      fs.rmSync(path.join(archiveRoot, '2026-10-20-' + CHANGE_ID), { recursive: true, force: true });
+      writeFile(dir, '.specs/archive/2026-11-01-' + CHANGE_ID + '/KNOWN-ISSUES.md', '# KNOWN-ISSUES\n\n无遗留。\n');
+      for (let i = 3; i <= 7; i += 1) {
+        writeFile(dir, '.specs/archive/2026-11-01-' + CHANGE_ID + '/T0' + i + '-SUMMARY.md',
+          '# SUMMARY\n\n## 做了什么\n\n更早候选的份数（被选中即判红）。\n');
+      }
+      const newestCandidate = runGuard(['exit', 'archive'], dir);
+      assertExit(newestCandidate, 0);
+      assertOut(newestCandidate, 'ALL CHECKS PASSED');
+      // 反向构造（单变量 = 只把声明份数改成更早候选的 5）：取最新 ⇒ 声明与最新一份的 2 份不符 → BLOCK
+      const olderDeclared = newChangeState('archive');
+      olderDeclared.evidence.archive = {
+        summary: 'archived',
+        lessonsNomination: { scanned: 5, nominated: [], reasonIfNone: '无新增条目' },
+      };
+      writeState(dir, olderDeclared);
+      const olderCount = runGuard(['exit', 'archive'], dir);
+      assertExit(olderCount, 1);
+      assertOut(olderCount, '≠ 该 change 内 *-SUMMARY.md 份数 2');
+      // ④d 排除早于 createdAt 的候选（AC-7 的另一半）：两份候选都早于本 change 的创建日期 ⇒ 无合格
+      // 候选，份数无从核对（fail-closed「工件目录缺失」），不得拿更早的归档目录凑数——不设下界时
+      // 这里会选中 2026-11-10 的 2 份而与声明一致，判据随之变绿（假放行）。
+      const allTooEarly = newChangeState('archive');
+      allTooEarly.createdAt = '2026-12-01T00:00:00.000Z';
+      allTooEarly.evidence.archive = {
+        summary: 'archived',
+        lessonsNomination: { scanned: 2, nominated: [], reasonIfNone: '无新增条目' },
+      };
+      writeState(dir, allTooEarly);
+      const allEarly = runGuard(['exit', 'archive'], dir);
+      assertExit(allEarly, 1);
+      assertOut(allEarly, '工件目录缺失');
+      assertNotOut(allEarly, 'ALL CHECKS PASSED');
       // ⑤ 扫描份数的**类型**在写入前就拦（in-place 扩展）：scanned 是出口按**数值**比对的字段
       // （份数相等才算留痕成立），故字符串 "2" 必须被 record 拒。修复前它能落库成功、要等到 archive
       // 出口才因 "2" !== 2 炸——正是 record 形状校验要消灭的「错误延后暴露」（出错的是 record，
@@ -2717,12 +2883,45 @@ export const ENTRIES = [
         '类型非法的载荷不得落库: ' + JSON.stringify(afterReject.evidence.archive));
       // 反向构造（单变量：只把 "2" 改成 2）：同一载荷 record 通过并原样写入——判据只判类型，
       // 不新增业务规则，合法载荷不因这条形状校验变得不可写。
+      writeNodeDeclarationMarkers(dir, 'archive');
       const numericScanned = runState(['record', 'archive',
         '{"summary":"archived","lessonsNomination":{"scanned":2,"nominated":[],"reasonIfNone":"无新增条目"}}'], dir);
       assertExit(numericScanned, 0);
       const afterAccept = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       assertTrue(afterAccept.evidence.archive.lessonsNomination?.scanned === 2,
         '类型合法的载荷应原样写入 scanned: ' + JSON.stringify(afterAccept.evidence.archive));
+      // ⑥ 提名恢复命令可照抄（in-place 扩展）：拒绝面必须给**可执行**的命令——脚本路径由唯一装配
+      // （state-explain 的 scriptCommand）平台化拼出、并带本次运行的协议上下文。断言不看「像不像
+      // 命令」，而是把它从报文里解析出来**真执行**：裸脚本名（workflow-state.mjs …）在这一步是
+      // command not found，照抄即失败。
+      setupArchive(dir, { evidence: {} }); // 只有 summary，缺 lessonsNomination
+      const missingNomination = runGuard(['exit', 'archive'], dir);
+      assertExit(missingNomination, 1);
+      assertOut(missingNomination, 'lessonsNomination');
+      const nominationRecoveryStart = missingNomination.output.lastIndexOf('恢复:');
+      const nominationRecovery = nominationRecoveryStart < 0
+        ? ''
+        : missingNomination.output.slice(nominationRecoveryStart);
+      const nominationRecordCommand =
+        (nominationRecovery.match(/^\s*(node "[^"]+" record archive [^\n]*)$/m) || [])[1];
+      assertTrue(typeof nominationRecordCommand === 'string',
+        '提名门的恢复段缺可解析的 record 命令（裸脚本名不可照抄）:\n' + missingNomination.output);
+      installSkillTreeCopy(dir, path.join('.claude', 'skills'));
+      const nominationRecorded = runPrintedCommand(nominationRecordCommand, dir, {
+        FLOW_COMET_RUN_ROOT: dir,
+        FLOW_COMET_PROTOCOL: '',
+      });
+      assertTrue(nominationRecorded.status === 0,
+        '照抄的提名恢复命令跑不通\n  命令: ' + nominationRecordCommand
+        + '\n  exit ' + nominationRecorded.status + '\n' + nominationRecorded.output);
+      const nominationState = JSON.parse(
+        fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
+      assertTrue(nominationState.evidence.archive.lessonsNomination?.scanned === 2,
+        '照抄恢复命令后应按该 change 的 SUMMARY 份数落盘 scanned: '
+        + JSON.stringify(nominationState.evidence.archive));
+      const nominationExit = runGuard(['exit', 'archive'], dir);
+      assertExit(nominationExit, 0);
+      assertOut(nominationExit, 'ALL CHECKS PASSED');
     },
   },
 
@@ -2811,7 +3010,7 @@ export const ENTRIES = [
       assertOut(ctxFenced, 'INIT-DONE');
       assertNotOut(ctxFenced, 'INIT-VALIDATE-FAILED');
       writeFile(ctxRoot, '.specs/CONTEXT.md', contextDoc(true));
-      const ctxFencedOnly = runState(['init', CHANGE_ID + '-ctx2', '--init-context'], ctxRoot);
+      const ctxFencedOnly = runState(['init', CHANGE_ID + '-ctx2', '--init-context', '--replace', CHANGE_ID + '-ctx', '--reason', '验证段内围栏示例判定'], ctxRoot);
       assertExit(ctxFencedOnly, 0);
       assertOut(ctxFencedOnly, 'INIT-VALIDATE-FAILED');
       assertOut(ctxFencedOnly, 'evolve 元数据');
@@ -3577,7 +3776,6 @@ export const ENTRIES = [
         writeState(cwdRepo, {
           ...baseState('open'),
           activeChange: 'live-change',
-          newChange: true,
           status: 'running',
           enteredNodes: ['open'],
           evidence: {
@@ -3652,7 +3850,10 @@ export const ENTRIES = [
         // ⑤ 反向构造（同一夹具、去掉变量）：解析退回进程 cwd —— 上面「cwd 零改动」三条断言正是会红的
         //    那三条；这里直接证明夹具确实能把 cwd 侧改写照出来（不是恒绿）。
         const envRootStateBefore = stateBytesAt(envRoot);
-        const noRootInit = asRes(spawnSync(process.execPath, [STATE, 'init', 'cwd-change'], {
+        // 反向构造同样要过覆盖闸门：cwd 侧本就有在途 change（live-change），显式 --replace 让它放行并
+        // 留档——本格要证的是「state 落在了哪个根」，不是「闸门要不要拦」（那是另一格的面）。
+        const noRootInit = asRes(spawnSync(process.execPath,
+          [STATE, 'init', 'cwd-change', '--replace', 'live-change', '--reason', '反向构造：证明无变量时写回进程 cwd'], {
           cwd: cwdRepo,
           env: {
             ...process.env,
@@ -3939,6 +4140,27 @@ export const ENTRIES = [
       // 形态分派自身的常驻判别力锚：临时根上驱动同一判定，分派对错不再只能靠「在包形态里整跑一次
       // 套件」才知道。夹具的「完整形态」从本检出的公开面真迹复制，故只在声明了公开面的检出上跑。
       await assertPublicFaceSelfCheckShapes(dir);
+      // 夹具预检的 in-place 判别力锚：给 shape 自检一个缺全部受检面文件的源根，真实预检必须逐份
+      // 点名并抛「形态自检夹具无法构造」。把预检从 shape 自检里拿掉，这里就会看到「没有抛错」而红——
+      // 这是本探针唯一要证明的行为（只测 helper 的清单会把实现删掉仍留绿）。
+      const truncatedFixtureRoot = path.join(dir, 'face-truncated');
+      fs.mkdirSync(truncatedFixtureRoot, { recursive: true });
+      let fixturePreflightError = null;
+      try {
+        await assertPublicFaceSelfCheckShapes(path.join(dir, 'face-preflight'), { repoRoot: truncatedFixtureRoot });
+      } catch (error) {
+        fixturePreflightError = error;
+      }
+      const fixturePreflightMessage = fixturePreflightError ? String(fixturePreflightError.message) : '';
+      if (!fixturePreflightMessage.includes('形态自检夹具无法构造')) {
+        throw new Error('形态预检在缺文件的源根上没有抛「形态自检夹具无法构造」（拿掉预检的回归）: '
+          + (fixturePreflightMessage || '没有抛错'));
+      }
+      for (const rel of ['README-zh.md', 'CONTRIBUTING-zh.md']) {
+        if (!fixturePreflightMessage.includes(rel)) {
+          throw new Error('形态预检没有逐份点名缺席文件 ' + rel + '：' + fixturePreflightMessage);
+        }
+      }
       // 判据面完整在册（缺席用 null 占位而不是从集合里删掉）：缺席由下面的缺席判据逐份点名，
       // 「少了哪份文件」因此是**判据事实**，不是可以静默缩小的受检面。
       const docs = new Map();
@@ -4049,7 +4271,9 @@ export const ENTRIES = [
         'docs/internal/DOC-CHECKLIST.md',
         'docs/internal/ROADMAP.md',
       ];
-      const present = maintainerDocs.filter(repoFileExists);
+      // 以箭头函数传参：本函数带可选的根参数，直接把函数名交给 filter 会把下标当成 root，
+      // 在 path.join 处以「Received type number」崩掉（同形调用点一律显式包一层）。
+      const present = maintainerDocs.filter((rel) => repoFileExists(rel));
       if (present.length !== maintainerDocs.length) {
         console.log('SKIP: 治理落盘判据——docs/internal/ 维护者面缺席（' + maintainerDocs.filter((rel) => !repoFileExists(rel)).join('、')
           + '）；本次检出未校验该面，请回维护者主树重跑');
@@ -4095,6 +4319,103 @@ export const ENTRIES = [
         if (!guide.includes('模板')) problems.push('CLAUDE.md 的 guard 校验描述未同步模板权威口径');
       }
       if (problems.length > 0) throw new Error('治理落盘不符: ' + problems.join('; '));
+    },
+  },
+  // 352 号场景：归档后交接协议页（分发参考册）的文本锚。这一步没有脚本可跑，协议页就是行为唯一
+  // 的可判载体——要素在场且成序，才谈得上「每批都按同一套流程交接」。
+  //   ① 段序（触发 → 探测 → 一次询问 → 展示 → 降级）② 四选项 ③ 固定探测命令块
+  //   ④ 降级两件套且不声明已创建 ⑤ 不写状态 ⑥ 公开草稿视角（七段 + 第一遍读 + 0 命中）
+  //   ⑦ 本地 roadmap 结构（索引七列 + 每条六段）⑧ 步骤权威声明在场（页内以归档册为准）。
+  // 判据与探针**共用同一函数**（handoffPageProblems）：原页零问题（判据不恒真）；抽掉任一条锚点
+  // ⇒ 必报它自己那句；把降级段提到最前 ⇒ 必报段序颠倒；状态文件写成肯定句 ⇒ 必报、写成否定句 ⇒ 不报。
+  {
+    name: '352 归档后交接协议页：段序/四选项/探测命令/降级/不写状态/草稿视角/roadmap 结构（含反向构造）',
+    run: () => {
+      const page = fs.readFileSync(
+        path.join(SCRIPTS_DIR, '..', 'reference', 'post-archive-handoff.md'), 'utf8');
+      const problems = handoffPageProblems(page);
+      // 正向探针：每条锚点抽掉后必须报出**它自己那句**（完整期望片段比对——「报了别的问题」
+      // 不算判别力）。抽掉的落点用同一个标记串，便于一眼看出探针动过哪里。
+      const probes = [
+        ['段序（触发段）', '## 触发与顺序', '缺段「## 触发与顺序」（触发）'],
+        ['段序（降级段）', '## 降级与失败', '缺段「## 降级与失败」（降级）'],
+        ['四选项（本地 roadmap 行）', '| 本地 roadmap | 写进项目自己的路线图文件（索引 + 每条一份文件） |',
+          '缺载体选项行「| 本地 roadmap | 写进项目自己的路线图文件（索引 + 每条一份文件） |」'],
+        ['探测（工作树判定）', 'git rev-parse --is-inside-work-tree',
+          '缺探测命令「git rev-parse --is-inside-work-tree」'],
+        ['探测（remote 分类）', 'git remote get-url origin', '缺探测命令「git remote get-url origin」'],
+        ['探测（认证状态）', 'glab auth status --hostname', '缺探测命令「glab auth status --hostname」'],
+        ['降级两件套', '内容 + 命令', '缺降级要素「内容 + 命令」'],
+        ['降级不声明已创建', '不声明已创建', '缺降级要素「不声明已创建」'],
+        ['草稿七段（第 7 段）', '7. 未验证', '缺草稿骨架「7. 未验证」'],
+        ['草稿视角（第一遍读）', '第一遍读', '缺草稿视角「第一遍读」'],
+        ['草稿视角（0 命中）', '0 命中', '缺草稿视角「0 命中」'],
+        ['roadmap 索引七列', '索引七列', '缺 roadmap 索引结构「索引七列」'],
+        ['roadmap 每条六段', '每条六段', '缺 roadmap 条目结构「每条六段」'],
+        ['步骤权威（归档册）', '步骤权威', '缺步骤权威声明「步骤权威」'],
+      ];
+      for (const [label, needle, expected] of probes) {
+        if (!page.includes(needle)) {
+          problems.push('反向构造前提失效（' + label + '）：协议页本就不含「' + needle + '」');
+          continue;
+        }
+        const stripped = page.split(needle).join('（反向构造：抽掉）');
+        if (!handoffPageProblems(stripped).includes(expected)) {
+          problems.push('反向构造判别力缺失（' + label + '：抽掉「' + needle + '」未被判「' + expected + '」）');
+        }
+      }
+      // 段序的判别力不能只靠「段没了」证：把降级段提到最前，判据必须报乱序而不是当缺段。
+      const reordered = '## 降级与失败\n' + page;
+      if (!handoffPageProblems(reordered).some((problem) => problem.startsWith('段序颠倒'))) {
+        problems.push('反向构造判别力缺失（降级段提到最前未被判段序颠倒）');
+      }
+      // 状态边界的方向性：判据读语义、不认固定串——肯定句必报，否定句不报（两向都构造）。
+      const stateClaim = '- 写入 `' + HANDOFF_PAGE_STATE_FILE + '` 记住本批选择。';
+      const stateDenial = '- 不写 `' + HANDOFF_PAGE_STATE_FILE + '`，也不新增字段。';
+      const claimed = handoffPageProblems(page + '\n' + stateClaim);
+      if (!claimed.some((problem) => problem.startsWith('状态文件出现在肯定语境'))) {
+        problems.push('反向构造判别力缺失（状态文件出现在肯定语境未被判违规）');
+      }
+      const denied = handoffPageProblems(page + '\n' + stateDenial);
+      if (denied.length > 0) {
+        problems.push('反向构造误报（否定句「不写 <状态文件>」被判成状态写入）: ' + denied.join('; '));
+      }
+      // 混合句：句子里有「写 state」也有别处的否定——否定必须就近落在这次写入上。
+      const stateMixed = '- 写入 `' + HANDOFF_PAGE_STATE_FILE + '`，不新增字段。';
+      const mixed = handoffPageProblems(page + '\n' + stateMixed);
+      if (!mixed.some((problem) => problem.startsWith('状态文件出现在肯定语境'))) {
+        problems.push('反向构造判别力缺失（混合句「写入 state，不新增字段」未被判违规）');
+      }
+      // 前置子句的否定同样不能替状态写入开脱。
+      const stateMasked = '- 不写报告，但写入 `' + HANDOFF_PAGE_STATE_FILE + '`。';
+      const masked = handoffPageProblems(page + '\n' + stateMasked);
+      if (!masked.some((problem) => problem.startsWith('状态文件出现在肯定语境'))) {
+        problems.push('反向构造判别力缺失（前置子句的否定掩盖了状态写入）');
+      }
+      // 四选项的判别力不能靠「词还在别处」：整张选项表删掉也必须红（推荐矩阵里同样有这四个词）。
+      {
+        const tableStart = page.indexOf('| 选项 | 说明 |');
+        const tableEndIndex = page.indexOf('| 暂不处理 |');
+        if (tableStart < 0 || tableEndIndex < tableStart) {
+          problems.push('反向构造前提失效（找不到载体选项表）');
+        } else {
+          const endOfRow = page.indexOf('\n', tableEndIndex);
+          const withoutTable = page.slice(0, tableStart) + page.slice(endOfRow + 1);
+          if (!handoffPageProblems(withoutTable).some((problem) => problem.startsWith('缺载体选项行'))) {
+            problems.push('反向构造判别力缺失（整张载体选项表被删未被判缺选项）');
+          }
+        }
+      }
+      // 误伤侧：句首否定与「路径之后」的否定都是自然写法，不得判违规（两个方向都要锁）。
+      const leadingNegation = '- **不写状态文件**（`' + HANDOFF_PAGE_STATE_FILE + '`）：不写入、不改写。';
+      const trailingNegation = '- `' + HANDOFF_PAGE_STATE_FILE + '` 只读，不写入。';
+      for (const [label, line] of [['句首否定', leadingNegation], ['路径后否定', trailingNegation]]) {
+        const found = handoffPageProblems(page + '\n' + line);
+        if (found.some((problem) => problem.startsWith('状态文件出现在肯定语境'))) {
+          problems.push('反向构造误报（' + label + '形态被判成状态写入）: ' + line);
+        }
+      }
+      if (problems.length > 0) throw new Error('归档后交接协议页不符: ' + problems.join('; '));
     },
   },
 ];

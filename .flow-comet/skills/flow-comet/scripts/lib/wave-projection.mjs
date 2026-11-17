@@ -5,11 +5,10 @@
 // level(task) = 1 + max(level(dep))（无依赖 = 第 1 波，见 task-graph.mjs 的 taskWaveLevels）。
 // 声明波次 ≠ 层级即不一致：同波依赖（依赖方与被依赖方写在同一波）、排在依赖之前、以及明明只需
 // 更早波次却排到更后面的保守排法，都会在明细里被逐条点名为「当前波 → 应到波」。
-// 分级不在这里判：本模块产出「判不了」的分类与载荷、明细与报文行；BLOCK / WARN 由调用方按
-// isNewChange 给出 blocking。**分级 → 输出只有一处**（waveReviewOutcome）：plan 出口门禁与 replan
-// 重校段各自只派生 blocking（两处的 isNewChange 取法不同，由调用方传入）。调用方不得自写
-// 「不可判 → 选级别 → 打印 → exit」的同构分支——同一分级有两份实现时，改一处只会在另一处静默落后
-// （ADR-013 的前提正是「两处同判」：replan 不豁免）。
+// 分级不在这里判：本模块产出「判不了」的分类与载荷、明细与报文行；BLOCK / WARN 由调用方给出
+// blocking（单轨下内容不可判一律 blocking）。**分级 → 输出只有一处**（waveReviewOutcome）：plan
+// 出口门禁与 replan 重校段共用同一份。调用方不得自写「不可判 → 选级别 → 打印 → exit」的同构分支
+// ——同一分级有两份实现时，改一处只会在另一处静默落后（ADR-013 的前提正是「两处同判」：replan 不豁免）。
 //
 // 判定面覆盖两侧：① 已声明任务的波次必须等于依赖层级；② 任务集里存在、Wave 行一次都没提到的
 // 任务同样不一致（明细取值 = 「未声明」）——只沿「已声明」一侧求差集，未写进 Wave 行的任务会整个
@@ -27,8 +26,8 @@
 //   · 载体缺席（无 `## 波次划分` 段 / 段名无从派生）→ unverified 非空：调用方打印 notice
 //     （「未校验」）并放行——判据没有可判对象，不改退出码；
 //   · 工件内容不可判（段在场，但一行 Wave 行都解析不出可对应任务：正文只写 N/A、点的是不存在的
-//     任务 id、行首强调记号让 Wave 行不成立）→ unjudgeable 非空：新 change BLOCKED / 旧 change
-//     WARN（WARN 行进入既有 WARN COUNT——「该写的没写」不再静默；恢复出路在载荷里）。
+//     任务 id、行首强调记号让 Wave 行不成立）→ unjudgeable 非空：一律 BLOCKED（单轨判级——「该写的
+//     没写」不再静默；恢复出路在载荷里）。
 // 收敛到这一形态（而不是 { judgeable, reason }）的理由：① 载荷跟着分类走——notice /
 // explanation + recovery 直接可用于打印，调用方不必再按 reason 反查第二张表（同一组取值只许有一张
 // 表：按 key 反查的第二张表与判定表必然分叉）；② 「能否判定」由字段出现与否表达，reason 只留人读
@@ -185,8 +184,8 @@ export function waveProjectionReview({ taskContent, blocks = [] } = {}) {
 
 // 「工件内容不可判」的报文构造（plan 出口与 replan 重校共用同一份，只换分级前缀）：首行点名哪一环
 // 读不出来并给出分级，第二行给能照做的恢复出路——与 ac-coverage 的 acCoverageUnjudgeableLines 同形
-// （同一件事两处措辞必然先漂移）。旧 change 用 WARN 前缀，因此该行进入既有 WARN COUNT（未校验不再
-// 静默）；新 change 用 BLOCKED 前缀并由调用方拒绝通过。载荷来自判定结果，本函数只做渲染。
+// （同一件事两处措辞必然先漂移）。判不了即由调用方拒绝通过（不再有渐进档）；载荷来自判定结果，
+// 本函数只做渲染。
 function waveContentUnjudgeableLines(unjudgeable, level) {
   const blocking = level === 'BLOCKED';
   return [
@@ -249,7 +248,7 @@ export function waveReviewOutcome(review, { blocking = false } = {}) {
 //   · 波次分组 / 层级：分组取 waveProjectionReview 的 waves（同一次解析，见该函数），层级取
 //     task-graph 的 taskWaveLevels。**同层 ⇒ 彼此无依赖路径**（依赖边严格抬高层级：
 //     level(依赖方) ≥ level(被依赖方) + 1），故「同波 ∧ 同层」即「同一波次内且彼此无依赖路径」——
-//     波次投影一致时两者本就等价，投影不一致（旧 change 只 WARN 才走到这里）时取交集使判据保守。
+//     波次投影一致时两者本就等价，投影不一致时取交集使判据保守。
 //   · 写面重叠：**唯一入口是 task-graph 的 collectCrossTaskConflicts**。任务书写的是
 //     collectPathOverlaps（重叠判定的底层唯一实现），落地走它的上层入口——后者才带着「已归一路径」
 //     的解析、glob 语义与参与者规则（未完成、非修复族），且这些都收在 task-graph 一处；为直接调底层
@@ -309,7 +308,7 @@ export function parallelGapReview({ taskContent = '', blocks = [], waves = null 
   return { gaps };
 }
 
-// 报文（plan 出口 BLOCKED / 旧 change WARN 同一文本，只换分级前缀）：逐对点名哪两个任务同波、谁没标，
+// 报文（plan 出口 BLOCKED）：逐对点名哪两个任务同波、谁没标，
 // 恢复句给两条出路（都标 [P]，或补 depends_on 换波次）——只有一条出路时执行者会以为「标 [P] 是唯一
 // 正确答案」，而真实计划里「这两个任务其实有先后」是同样常见的形态。
 function parallelGapLines(gaps, level = 'BLOCKED') {

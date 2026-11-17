@@ -10,15 +10,14 @@ import { route, hasSubagentNode, protocolTaskFilePath, resolveFixRollbackDecisio
 import { taskOpeningAttrs, taskBlocks } from '../task-parsing.mjs';
 import {
   NODE_PROTOCOL_FILES,
-  SKILL_PROTOCOL_FILES,
   declarationSkillTargets,
   inspectWorkflowPathSegments,
 } from '../protocol-utils.mjs';
-import { evidencePayloadProblems, looksLikeObjectLiteral, toPersistedProtocolPath, writeJsonAtomic } from '../state-schema.mjs';
-import { nowTimestamp } from '../time-utils.mjs';
+import { evidencePayloadProblems, looksLikeObjectLiteral, toPersistedProtocolPath } from '../state-schema.mjs';
+import { formatLocalTimestamp, nowTimestamp } from '../time-utils.mjs';
 import { probeProject, classify, printDetection, validateContext, printGenerationGuide } from '../context-init.mjs';
-import { fileExists, findActiveChange, readState, writeState, specsDir, runRootDir, hasExactSpecsEntry } from './state-io.mjs';
-import { hasNodeSkillDeclaration, verifySkillLoadMarkers, findSkillLoadsDir, verifyTemplateDeclaration } from './state-skillmarkers.mjs';
+import { fileExists, findActiveChange, readState, writeState, specsDir, runRootDir, hasExactSpecsEntry, resolveChangeLocation, inFlightChangeName, stateFile, recoveryActionTextAt } from './state-io.mjs';
+import { hasNodeSkillDeclaration, verifySkillLoadMarkers, verifyTemplateDeclaration } from './state-skillmarkers.mjs';
 import { determineNode, normalAdvanceExempt } from './state-determine.mjs';
 import { isInsideWorkTree, gitBranchName, branchExists, printBranchLine } from './state-branch.mjs';
 import { printEvolveDueHint } from './state-evolve-hint.mjs';
@@ -26,7 +25,7 @@ import { reportIntelScanDrift } from './state-intelscan.mjs';
 // 命令文本的唯一实现（平台化脚本根 + 整条路径加引号）：运行期 PREFLIGHT 与 handoff result /
 // guard 恢复指引 / explain 的 COMMAND 行同源（L-067：同一推导两处表达必然分叉）。声明命令与守卫族
 // 同一装配（declarationCommands）+ 本族的运行上下文（commandContext）——不再各拼一份文本。
-import { commandContext, declarationCommands, scriptCommand } from './state-explain.mjs';
+import { commandContext, declarationCommands, protocolContextArgs, scriptCommand } from './state-explain.mjs';
 // 协调者提示的单一来源：entry（门禁族）与 next / record（本模块）共用同一常量，各输出面逐字
 // 一致。常量落在中立模块（state-explain）而不是门禁族——本模块只为一句措辞去依赖整个上游门禁面
 // 是一条反向边——为此状态命令族不再 import 门禁族。
@@ -99,6 +98,25 @@ function printNext(protocol, nodeId, executionMode = 'subagent') {
   }
 }
 
+// ---------- 位置门（单一实现 · 身份在办时位置必须可解析） ----------
+// 身份由状态判定（findActiveChange），位置由 state-io 的唯一解析器给出。两者分开之后出现一类新的
+// 非法态：**身份在办但两处目录都没有**（running-orphan：目录被手工删除 / 搬移失败）。此时命令层
+// 既不能照旧打 no-change（那是在说「没有在办 change」），也不能编一个节点出来——只能 fail-closed
+// 点名两处路径。报文与退出码归本族（state-io 只回传 { ok, message }，自己不 exit），status / next /
+// record 三面因此说同一句话。
+async function requireChangeLocation(changeName, state) {
+  const located = await resolveChangeLocation({
+    root: runRootDir(),
+    changeName,
+    createdAt: state?.createdAt,
+  });
+  if (!located.ok) {
+    console.error(located.message);
+    process.exit(1);
+  }
+  return located.resolution;
+}
+
 // ---------- 节点视图（单一实现）：state 原值 / 产物推导 / 进行中保护 → 路由视图 ----------
 // 「我现在该在哪个节点」只有这一份判定（同一事实两处实现必然分叉——LESSONS 的路由单一权威族）。
 // 收敛前 next 内联一份、status 只报产物推导：同一 state 下两条命令报不同节点，执行者按任一输出
@@ -167,7 +185,7 @@ async function resolveZeroProgressBlock({ changeName, protocol, nodeId }) {
 // ——真乱序（跳节点）仍严格 BLOCK。
 // 归属：next 曾内联这一份，而 status 照常给节点——同一 state 下「status 叫人 exit 一个 next 根本不会
 // 打印的节点」。搬进共享视图后 next 只消费 view.blocked，两份判定不再可能分叉。
-async function resolveNodeOrderBlock({ changeName, protocol, completedArr, state }) {
+async function resolveNodeOrderBlock({ changeName, protocol, completedArr, state, changeDir = null }) {
   if (!state.currentNode || completedArr.includes(state.currentNode)) return null;
   const nodeEvidence = state.evidence && typeof state.evidence === 'object'
     ? state.evidence[state.currentNode]
@@ -177,11 +195,16 @@ async function resolveNodeOrderBlock({ changeName, protocol, completedArr, state
     runRoot: runRootDir(), changeName, protocol, completedNodes: completedArr, currentNode: state.currentNode,
     history: state.history,
   });
-  const advanceExempt = await normalAdvanceExempt(state, protocol, completedArr, state.currentNode, changeName);
+  const advanceExempt = await normalAdvanceExempt(state, protocol, completedArr, state.currentNode, changeName, changeDir);
   if (rollbackExempt || advanceExempt) return null;
+  // 第二行的恢复动作按目录在哪分叉——与出口侧（转移前置 / entry 记录门 / 证据门）同一实现
+  // （state-io.recoveryActionTextAt）：目录已搬进归档时 advance / select 都走不通（select 要求活动
+  // 目录在场，advance 的产物推导读活动路径），只给可执行的那一步（把目录移回活动位置）。活动态下
+  // 该函数原样返回 activeText，输出因此与改动前逐字相同。
   return [
     'BLOCKED: 疑似未 exit 节点 ' + state.currentNode + '，先 workflow-guard.mjs exit ' + state.currentNode + ' --apply',
-    '恢复: 确认当前节点实际已完成 → 用 exit <节点> --apply 正常推进；节点状态漂移/卡死 → 用 workflow-state.mjs advance（强制推进）或 select（切换 change）；禁止手改 state 机器字段',
+    '恢复: 确认当前节点实际已完成 → 用 exit <节点> --apply 正常推进；节点状态漂移/卡死 → '
+      + recoveryActionTextAt(runRootDir(), changeName, '用 workflow-state.mjs advance（强制推进）或 select（切换 change）；禁止手改 state 机器字段'),
   ].join('\n');
 }
 
@@ -200,9 +223,13 @@ async function resolveFixReturnTarget({ changeName, protocol, completedArr, stat
   return sourceNode;
 }
 
-export async function resolveNodeView({ changeName, protocol, state }) {
+// location = 位置门解析到的结果（state-io.resolveChangeDir）；缺省 null 时按 .specs/<changeName> 解析
+// （既有形态）。产物推导必须与位置解析认同一个目录：目录搬进归档后仍按活动路径推导，视图会回退到
+// 协议首节点（「移动后 record 打 NODE: open」的成因）。
+export async function resolveNodeView({ changeName, protocol, state, location = null }) {
   const completedArr = Array.isArray(state.completedNodes) ? state.completedNodes : [];
-  const derivedNode = await determineNode(changeName, protocol, completedArr);
+  const changeDir = location === null ? null : location.relative;
+  const derivedNode = await determineNode(changeName, protocol, completedArr, changeDir);
   // 进行中节点保护：currentNode 未 exit（不在 completedNodes）且已 entry（enteredNodes 含该节点）
   // 或已 record（evidence 记录过）→ 视为进行中（可能 exit 被内容级拦截后重跑），不校正推走——
   // 否则被拦截节点的 exit 前置校验（currentNode 匹配）无法重跑，advance/select 均不恢复 → 死结
@@ -222,7 +249,7 @@ export async function resolveNodeView({ changeName, protocol, state }) {
   // currentNode 仅是初始陈旧节点）时不做路由后继保护——产物推导继续生效推进到最终节点。
   // 推导跳跃/跨节点或回退 → 产物权威校正(漂移,防过度修复)。静态直接后继兜底（串行推进原语义）。
   const routingSuccessorOfCurrent = state.currentNode
-    ? await determineNode(changeName, protocol, [...completedArr, state.currentNode])
+    ? await determineNode(changeName, protocol, [...completedArr, state.currentNode], changeDir)
     : null;
   // 「相等」还不是后继：等号只在两处推导同值时成立，派生的节点仍可能在 currentNode **之前**
   // （currentNode 之后的节点产物缺失 → 派生回退；或 Fix 归位把任务推回 execute）——此时按等号
@@ -295,7 +322,7 @@ export async function resolveNodeView({ changeName, protocol, state }) {
     })
     : null;
   const orderBlockedMessage = fixRoundBlockedMessage === null && fixReturnTarget === null
-    ? await resolveNodeOrderBlock({ changeName, protocol, completedArr, state })
+    ? await resolveNodeOrderBlock({ changeName, protocol, completedArr, state, changeDir })
     : null;
   const blockedMessage = fixRoundBlockedMessage ?? orderBlockedMessage ?? zeroProgressMessage;
   const blocked = blockedMessage === null
@@ -385,7 +412,136 @@ function printPreflightLine(nodeId) {
   console.log('PREFLIGHT: ' + structuralPreflightHint(nodeId));
 }
 
+// ---------- init 覆盖在途 change：默认阻断 + --replace 留档 ----------
+// 「进行中」的身份口径与 status / next / record 同一份（state.activeChange 非空 ∧ status ≠
+// 'completed'，判据 = state-io.inFlightChangeName）：只有**另一个** change 在办才进闸门——同 id
+// 重跑走既有 WARN 路径（不阻断，行为不变）。覆盖别的 change 会连同它的节点进度 / evidence 一起
+// 清掉，是破坏性动作，故「沉默即拒绝」：必须显式 --replace <在途 change> --reason <非空原因>，
+// 且放行前先把旧 state 按**原始字节**留档（快照 + 记录）到旧 change 目录的 recovery/。留档写不成
+// 就不覆盖——旧状态不得无痕消失。无在途 change 时整段不进入：零备份、零新参数要求，正常 init 的
+// 输出保持原样。
+//
+// 位置：留档落点走唯一解析器（resolveChangeLocation）而不是硬拼 .specs/<旧>/——在办 change 可能
+// 已被搬进 .specs/archive/（移动后尚未 exit），留档必须跟着 change 走；两处都没有 / 多候选判不出
+// 时拒绝覆盖（拿不准落点就不许销毁旧状态）。
+//
+// 返回：null（无需留档）或 RECOVERY 块要打印的信息；任何不合法的放行形态在这里 fail-closed
+//（BLOCKED + 非零退出，state 字节零改写），调用方不重复判定。
+async function gateInitOverInFlightChange({ protocolArgv, changeName, prevState, replaceChange, replaceReason }) {
+  const inFlightChange = inFlightChangeName(prevState);
+  if (!inFlightChange || inFlightChange === changeName) return null;
+  const context = commandContext({ argv: protocolArgv, runRoot: runRootDir() });
+  const stateDisplay = path.relative(runRootDir(), stateFile()).split(path.sep).join('/');
+  const statusCommand = scriptCommand({
+    scriptsDir: context.scriptsDir, runRoot: context.runRoot, script: 'workflow-state.mjs', args: ['status'],
+  });
+  // 恢复指引里的**那一条命令**：形态与 record / 声明命令同源（平台化脚本路径 + 整条加引号），
+  // 参数面按本次实际调用生成（--protocol 上下文同样带上），照抄即可执行。
+  const replaceCommand = scriptCommand({
+    scriptsDir: context.scriptsDir,
+    runRoot: context.runRoot,
+    script: 'workflow-state.mjs',
+    args: ['init', changeName, '--replace', inFlightChange, '--reason', '"<原因>"', ...protocolContextArgs(context)],
+  });
+  const inFlightShape = '（status: ' + String(prevState?.status ?? '-')
+    + '，当前节点: ' + String(prevState?.currentNode ?? '-') + '）';
+  const block = (lines) => {
+    for (const line of lines) console.error(line);
+    process.exit(1);
+  };
+  if (replaceChange === null) {
+    block([
+      'BLOCKED: 在途 change "' + inFlightChange + '" 尚未完成' + inFlightShape
+        + '——init "' + changeName + '" 会覆盖它的机器状态（节点进度 / evidence），默认阻断；未改写任何状态。',
+      '恢复: ① 先完成在途 change（查看进度: ' + statusCommand + '）；',
+      '     ② 或确认覆盖并留档后重跑: ' + replaceCommand,
+    ]);
+  }
+  if (replaceChange !== inFlightChange) {
+    block([
+      'BLOCKED: --replace 的 change 名 "' + replaceChange + '" 与在途 change "' + inFlightChange
+        + '" 不一致——只能覆盖当前在办的那一个；未改写任何状态。',
+      '恢复: ' + replaceCommand,
+    ]);
+  }
+  if (replaceReason === null || replaceReason.trim() === '') {
+    block([
+      'BLOCKED: --replace "' + inFlightChange + '" 还需要非空的 --reason <原因文本>（原因会写进留档，'
+        + '供事后追溯）；未改写任何状态。',
+      '恢复: ' + replaceCommand,
+    ]);
+  }
+  // change 名形态 = 单段目录名（与受控重入 / select 同一判据）：不合法就没有可落笔的留档位置
+  if (!isSingleSegmentChangeName(inFlightChange)) {
+    block([
+      'BLOCKED: 在途 change 名 "' + inFlightChange + '" 不是单段目录名——拒绝在它名下写留档；未改写任何状态。',
+      '恢复: 修正 ' + stateDisplay + ' 的 activeChange（机器字段由脚本通道写，不要手改）后重跑。',
+    ]);
+  }
+  const location = await resolveChangeLocation({
+    root: runRootDir(),
+    changeName: inFlightChange,
+    createdAt: prevState?.createdAt,
+  });
+  if (!location.ok) {
+    block([
+      'BLOCKED: 覆盖前必须先把在途 change "' + inFlightChange + '" 的旧状态留档，但它的目录解析不到——未改写任何状态。',
+      '原因: ' + location.message.replace(/^BLOCKED: /, ''),
+      '恢复: 先运行 ' + statusCommand + ' 查看位置解析结果，按提示恢复该目录后重跑。',
+    ]);
+  }
+  const stamp = formatLocalTimestamp();
+  const stampSafe = stamp.replace(/:/g, '-');
+  const recoveryDir = path.join(location.resolution.dir, 'recovery');
+  const recoveryDisplay = location.resolution.display + '/recovery';
+  const snapshotName = stampSafe + '-pre-init.state.json';
+  const recordName = stampSafe + '-pre-init.md';
+  const snapshotDisplay = recoveryDisplay + '/' + snapshotName;
+  const recordDisplay = recoveryDisplay + '/' + recordName;
+  // 回滚 = 把快照字节原样写回状态文件。命令用 node + copyFileSync 而不是 cp / copy：cp 在 cmd 下
+  // 不存在、copy 是内建命令且覆盖时会二次确认——两条路径参数各自加引号，跨平台整行可照抄。
+  const rollbackCommand = 'node -e "require(\'fs\').copyFileSync(process.argv[1],process.argv[2])"'
+    + ' "' + snapshotDisplay + '" "' + stateDisplay + '"';
+  const recordLines = [
+    '# 留档：init 覆盖在途 change "' + inFlightChange + '"',
+    '',
+    '- **时间**: ' + stamp,
+    '- **init 目标**: ' + changeName,
+    '- **覆盖前状态**: change `' + inFlightChange + '` · currentNode `' + String(prevState?.currentNode ?? '-')
+      + '` · status `' + String(prevState?.status ?? '-') + '`',
+    '- **原因**: ' + replaceReason,
+    '- **快照**: ' + snapshotDisplay + '（旧状态文件的逐字节副本）',
+    '- **回滚命令**（在项目根执行，恢复旧状态字节）:',
+    '',
+    '```bash',
+    rollbackCommand,
+    '```',
+    '',
+  ];
+  try {
+    // 逐字节：读原始 bytes、写同一份 bytes（BOM / 行尾都不改）——JSON 深比会漏掉格式化与序列化漂移
+    const snapshotBytes = await fs.readFile(stateFile());
+    await fs.mkdir(recoveryDir, { recursive: true });
+    await fs.writeFile(path.join(recoveryDir, snapshotName), snapshotBytes);
+    await fs.writeFile(path.join(recoveryDir, recordName), recordLines.join('\n'), 'utf8');
+  } catch (error) {
+    block([
+      'BLOCKED: 在途 change "' + inFlightChange + '" 的旧状态留档写入失败（' + error.message + '）——未改写任何状态。',
+      '恢复: 检查 ' + recoveryDisplay + '/ 的写权限后重跑同一条命令。',
+    ]);
+  }
+  return {
+    inFlight: inFlightChange,
+    currentNode: String(prevState?.currentNode ?? '-'),
+    status: String(prevState?.status ?? '-'),
+    snapshotDisplay,
+    recordDisplay,
+    rollbackCommand,
+  };
+}
+
 // init <change-id> [--branch-prefix <prefix>] [--init-context|--init-skip]
+//      [--replace <在途 change> --reason <原因>]
 // protocolPath = 入口 resolveProtocol 解析出的协议路径（协议来源绑定的持久化取值）
 export async function runInit(protocol, argv, protocolPath) {
   const changeName = argv[3];
@@ -397,12 +553,16 @@ export async function runInit(protocol, argv, protocolPath) {
   // 参数误用防护:以 -- 开头的参数(如 --help)是选项不是 change 名——报错并提示用法,
   // 防止被当作 change id 执行(自动开 change、建分支、写状态——有破坏性)
   if (normalizedChangeName.startsWith('--')) {
-    throw new Error('init: ' + normalizedChangeName + ' looks like a flag, not a change name. Usage: workflow-state.mjs init <change-id> [--branch-prefix <prefix>] [--init-context|--init-skip]');
+    throw new Error('init: ' + normalizedChangeName + ' looks like a flag, not a change name. Usage: workflow-state.mjs init <change-id> [--branch-prefix <prefix>] [--init-context|--init-skip] [--replace <in-flight-change> --reason <text>]');
   }
   // --branch-prefix <prefix>（缺省 'change/'）；--init-context / --init-skip（自动初始化检测授权）
+  // --replace <在途 change> / --reason <原因>：覆盖另一个在途 change 的显式放行参数（缺省 = 默认阻断；
+  // 取值形态在这里只做「有没有给 / 给了什么」，是否放行由下方覆盖闸门单点判定）
   let branchPrefix = 'change/';
   let initContext = false;
   let initSkip = false;
+  let replaceChange = null;
+  let replaceReason = null;
   const initArgs = argv.slice(4);
   for (let i = 0; i < initArgs.length; i++) {
     if (initArgs[i] === '--branch-prefix') {
@@ -421,6 +581,23 @@ export async function runInit(protocol, argv, protocolPath) {
       initContext = true;
     } else if (initArgs[i] === '--init-skip') {
       initSkip = true;
+    } else if (initArgs[i] === '--replace' || initArgs[i] === '--reason') {
+      // 空格形与等号形同义（与 --branch-prefix 的既有形态一致）：值缺失 / 空串不在这里 exit——
+      // 形态不符的报文与退出码由下方覆盖闸门统一给出（同一件事一处措辞），这里只记录「给了什么」。
+      // 值位紧跟另一个选项（如 `--reason --init-skip`）是漏写原因，不是把选项当原因：记为没给，
+      // 让覆盖闸门给出「需要非空 --reason」。消费成功的值同时跳过，不再被下一轮当成选项处理。
+      const value = initArgs[i + 1];
+      const usable = typeof value === 'string' && value.trim() !== '' && !value.trim().startsWith('--');
+      const text = usable ? value.trim() : '';
+      // 没给到值（缺值 / 值位是另一个选项 / 纯空白）视为**没给**：`--replace` 留 null 走「默认阻断」，
+      // 报「change 名 "" 与在途 change 不一致」会把「漏写」渲染成「给了个空名字」，误导排查。
+      if (initArgs[i] === '--replace') replaceChange = usable ? text : null; else replaceReason = text;
+      if (usable) i += 1;
+    } else if (typeof initArgs[i] === 'string'
+      && (initArgs[i].startsWith('--replace=') || initArgs[i].startsWith('--reason='))) {
+      const equalsAt = initArgs[i].indexOf('=');
+      const text = initArgs[i].slice(equalsAt + 1).trim();
+      if (initArgs[i].slice(0, equalsAt) === '--replace') replaceChange = text; else replaceReason = text;
     }
   }
   // 自动初始化检测（前置步骤）：读旧 state（项目级字段跨 change 保留）→ 探测 → 判决 → 提示/执行
@@ -428,6 +605,11 @@ export async function runInit(protocol, argv, protocolPath) {
   // （intel-scan 语义）；生成后重跑 → 脚本校验 7 段结构 → 通过写 last_intel_scan（确定性校验）。
   let prevState = null;
   try { prevState = await readState(); } catch { prevState = null; }
+  // init 覆盖在途 change：默认阻断 + --replace 留档——判定与留档收在单一实现
+  //（gateInitOverInFlightChange），本处只取它给出的留档信息用于成功路径的 RECOVERY 块。
+  const initRecovery = await gateInitOverInFlightChange({
+    protocolArgv: argv, changeName, prevState, replaceChange, replaceReason,
+  });
   const probe = await probeProject(runRootDir(), prevState);
   const verdict = classify(probe, prevState);
   let ctxValid = null; // null=未进入校验（非 init-context 或已新鲜）；true/false=校验结果
@@ -493,9 +675,7 @@ export async function runInit(protocol, argv, protocolPath) {
     enablePrReview: false,
     branchPrefix,
     status: 'running',
-    // 新 change 标记——init 即新 change(严格模式开启,不依赖 entry;旧 change 无此字段渐进兼容)
-    newChange: true,
-    // 进入证据容器——entry 追加节点;未 entry 检测(新 change 强制)
+    // 进入证据容器——entry 追加节点;未 entry 检测强制
     enteredNodes: [],
     createdAt: new Date().toISOString(),
     // 项目级上下文字段跨 change 保留（迁移旧 state；--init-context 刷新扫描时间；--init-skip 记拒绝）
@@ -550,6 +730,15 @@ export async function runInit(protocol, argv, protocolPath) {
   }
   console.log('Initialized: ' + changeName);
   console.log('BRANCH: ' + (branchMode && !emptyRepo ? expectedBranch : 'none（非 git 仓库或空仓库）'));
+  // 留档可见性：覆盖在途 change 的异常路径必须在成功输出里**看得见**——快照路径 + 回滚命令
+  // 整行可照抄（回滚命令只在 RECOVERY 块里给一次，.md 记录里是同一行）。
+  if (initRecovery) {
+    console.log('RECOVERY: 在途 change "' + initRecovery.inFlight + '" 的状态已留档（覆盖前 currentNode: '
+      + initRecovery.currentNode + ' · status: ' + initRecovery.status + '）');
+    console.log('RECOVERY: 快照 ' + initRecovery.snapshotDisplay);
+    console.log('RECOVERY: 记录 ' + initRecovery.recordDisplay);
+    console.log('RECOVERY: 回滚 ' + initRecovery.rollbackCommand);
+  }
   // init 输出取协议首节点（与 state.currentNode 一致——内置协议 = open，行为不变）
   printNext(protocol, route(protocol)[0]?.id ?? 'open');
   return;
@@ -565,9 +754,12 @@ export async function runStatus(protocol) {
     return;
   }
   const state = await readState();
+  // 位置门（先于任何视图）：身份在办但两处目录都没有 → fail-closed，**不得**回落到 no-change
+  // （no-change 的语义是「没有在办 change」，与这里的事实相反）。
+  const location = await requireChangeLocation(changeName, state);
   // 节点视图（与 next 共用同一判定）：currentNode 仍取产物推导（既有键语义逐字不变），
   // routeNode 才是经「进行中保护」后的路由视图（= next 的 NODE 行）。
-  const nodeView = await resolveNodeView({ changeName, protocol, state });
+  const nodeView = await resolveNodeView({ changeName, protocol, state, location });
   const detectedNode = nodeView.derivedNode;
   // 派生视图（ADR-013 决策 11；改为事件为准）：被强制推进的节点以
   // state.history 中本 change 的 advance-forced 事件为唯一判据——按 change 过滤（兼容旧事件
@@ -608,13 +800,12 @@ export async function runStatus(protocol) {
     directOverride: state.directOverride ?? false,
     branchMode: isInsideWorkTree(),
     enablePrReview: state.enablePrReview ?? false,
-    artifactRoot: '.specs/' + changeName,
+    // 产物根 = 位置解析到的目录（活动 / 归档）：移动后仍报 .specs/<id> 就是在说一个不存在的落点。
+    artifactRoot: location.display,
     // 与 routeNode 同一判定（One predicate）：本键回答「协调者模式是否生效」，必须指向路由视图
     // 那个节点——若另取产物推导，进行中态会在同一响应里给出两个「当前节点」口径（routeNode=
     // execute 而 coordinatorMode=false）。既有键名/类型/位置不变，只换判定来源。
-    coordinatorMode: EXECUTE_FAMILY_NODE_IDS.has(nodeView.routeNode),
-    // 新旧 change 标记——newChange true = 新 change(严格模式);false/缺失 = 旧 change(渐进)
-    newChange: state.newChange === true
+    coordinatorMode: EXECUTE_FAMILY_NODE_IDS.has(nodeView.routeNode)
   }, null, 2));
   console.log('ROUTE: ' + formatRouteLine(nodeView));
   printBranchLine(changeName, state.branchPrefix ?? 'change/');
@@ -631,6 +822,9 @@ export async function runNext(protocol) {
     return;
   }
   const state = await readState();
+  // 位置门（同 status）：解析不到就 fail-closed，不打印 NODE / NEXT: done——那是「没有在办 change」
+  // 或「已无待跑节点」的措辞，两者都在说假话。
+  const location = await requireChangeLocation(changeName, state);
   const completedArr = Array.isArray(state.completedNodes) ? state.completedNodes : [];
   // Fix 回退显式分支——必须早于「疑似未 exit」门禁与进行中漂移保护：
   // review/verify 驻留 + TASK 有 pending 修复任务（串行/并行）或未闭合家族出口签名时，把工作
@@ -642,8 +836,8 @@ export async function runNext(protocol) {
   });
   if (fixRollbackDecision) {
     const sourceNode = state.currentNode;
-    // 轮次计数与阈值/授权判定全部走共享 helper：分支②不计数；第 4 轮新 change 先 BLOCK
-    // （此处尚未写盘，满足不写 currentNode），旧 change WARN 后照常归位。
+    // 轮次计数与阈值/授权判定全部走共享 helper：分支②不计数；第 4 轮无授权时先 BLOCK
+    // （此处尚未写盘，满足不写 currentNode；单一判级，无按 change 新旧的放行侧）。
     const rollbackRound = applyFixRollbackRound({ state, sourceNode, decision: fixRollbackDecision });
     if (rollbackRound.blocked) {
       console.error(rollbackRound.blockedMessage);
@@ -677,7 +871,7 @@ export async function runNext(protocol) {
     ? await resolveFixReturnNode({ runRoot: runRootDir(), changeName, protocol, completedNodes: completedArr })
     : null;
   if (fixReturnNode !== null && fixReturnNode === state.currentNode) {
-    const returnView = await resolveNodeView({ changeName, protocol, state });
+    const returnView = await resolveNodeView({ changeName, protocol, state, location });
     if (returnView.fixReturnTarget !== null) {
       console.log('RETURN: 回程源节点 ' + returnView.fixReturnTarget + '（源节点产物在场且未出口；保留源节点跑出口）');
       printNext(protocol, returnView.routeNode, state.executionMode ?? 'subagent');
@@ -688,7 +882,7 @@ export async function runNext(protocol) {
   }
   // 节点视图（与 status 共用同一判定，见 resolveNodeView——节点顺序门禁也在其中，本命令不再内联
   // 第二份）：derivedNode 供零进展防呆与漂移校正使用，routeNode 才是输出节点（next 的 NODE 行）。
-  const nodeView = await resolveNodeView({ changeName, protocol, state });
+  const nodeView = await resolveNodeView({ changeName, protocol, state, location });
   const detectedNode = nodeView.derivedNode;
   // 此态 next 不打印 NODE、直接 BLOCKED（节点顺序门禁 / 单趟零进展 / Fix 归位第 4 轮无授权）：三个
   // 判定与报文都在共享视图里（resolveNodeOrderBlock / resolveZeroProgressBlock / applyFixRollbackRound
@@ -751,7 +945,7 @@ export async function runSelect(protocol, argv) {
   return;
 }
 
-// record <node> <payload>：写证据（技能加载声明标记校验 + 前置门 + 旧 change 自动补写）
+// record <node> <payload>：写证据（技能加载声明标记校验 + 前置门）
 export async function runRecord(protocol, argv) {
   const nodeId = argv[3];
   if (!nodeId) throw new Error('record requires a Node id.');
@@ -853,11 +1047,18 @@ export async function runRecord(protocol, argv) {
   // 缺失 → BLOCKED + 指引先加载 skill 并运行 skill-load；标记 at 必须 ≤ 本次记录时间
   // （交叉自洽：标记先于记录声明）。仅校验本次写入的 payload，旧 evidence 不追溯（旧 change 兼容）。
   const recordedAt = new Date().toISOString();
-  // 标记归属 change 与 evidence 一致：优先 state.activeChange，缺失时回退 findActiveChange（与
-  // 下方 NEXT 推导同语义）；两者皆无 → verifySkillLoadMarkers 内 fail-closed BLOCK。
+  // 身份与位置（与 status / next 同源；先于任何写盘与声明门）：身份在办 → 位置必须可解析；解析不到
+  // 就 fail-closed（不写 evidence、不猜落点）。此前位置解析隐式散在两条取值路径上（标记归属与尾部
+  // 节点视图各算一次），移动后两处会各自给出「目录不存在」的假答案。
+  // 排序：载荷的形状校验在前（它判的是本命令自己的参数面，报的是「你怎么调用的」），位置门在后
+  // （它判的是这次记录能不能落地）——两者都 fail-closed，但先把参数问题说清楚。
+  const identityChange = state.activeChange || await findActiveChange();
+  const location = identityChange === null ? null : await requireChangeLocation(identityChange, state);
+  // 标记归属 change 与 evidence 一致：身份取值与 status / next / 尾部视图**同一份**（上方一次
+  // 取好）；无身份 → verifySkillLoadMarkers 内 fail-closed BLOCK。
   // 传入 protocol + state——按 requiredSkillCalls scope 分类条目（handoff scope 豁免标记，
   // 以共用证据库 handoffResult 为证据）
-  const markerChange = state.activeChange || await findActiveChange();
+  const markerChange = identityChange;
   const markerCheck = await verifySkillLoadMarkers(parsed.completedChecks, markerChange, recordedAt, protocol, state, declarationContext);
   if (!markerCheck.ok) {
     console.error('BLOCKED: ' + markerCheck.reason);
@@ -865,7 +1066,7 @@ export async function runRecord(protocol, argv) {
   }
   // 技能加载前置门（方案 A）：节点完成记录必须先有本节点
   // skill-load 声明标记——无论 payload 是否含 completedChecks 都校验（堵"先干活后补
-  // 声明"旁路）：缺失 → 新 change BLOCK / 旧 change 渐进 WARN。指引先加载技能，再照抄派生出的
+  // 声明"旁路）：缺失 → BLOCKED（单一判级）。指引先加载技能，再照抄派生出的
   // 声明命令（该节点每个必需技能各一条，全部协议文件 + 模板全清单）后重试。handoff scope 技能
   // （子代理加载）不要求协调者声明（与 verifySkillLoadMarkers 的 scope 豁免一致）——本门按
   // <node>-*.json 存在性判定，与 guard exit 侧协议声明标记校验同构。仅对存在于当前协议的节点生效
@@ -886,73 +1087,25 @@ export async function runRecord(protocol, argv) {
           context: declarationContext,
         }).map((entry) => entry.command).join('\n  ')
         + '\n然后重试 record';
-      if (state.newChange === true) {
-        console.error('BLOCKED: 节点 ' + nodeId + ' 缺少技能加载声明标记（.skill-loads/' + nodeId + '-*.json）——' + loadGuide);
-        process.exit(1);
-      }
-      console.error('WARN: 节点 ' + nodeId + ' 缺少技能加载声明标记（.skill-loads/' + nodeId + '-*.json）——' + loadGuide + '（旧 change 渐进不阻断，记录继续）');
+      console.error('BLOCKED: 节点 ' + nodeId + ' 缺少技能加载声明标记（.skill-loads/' + nodeId + '-*.json）——' + loadGuide);
+      process.exit(1);
     }
-    // 模板声明核对（C11）——声明标记里必须有与该节点映射一致的 templates 集合：新 change
-    // 缺失 / 多写 / 漏写 / 错名 BLOCK（fail-closed，不让人「声明了但说得不对」），旧 change WARN。
+    // 模板声明核对（C11）——声明标记里必须有与该节点映射一致的 templates 集合：缺失 / 多写 /
+    // 漏写 / 错名 BLOCK（fail-closed，不让人「声明了但说得不对」）。
     // 自定义协议节点不比对（C12）；无活动 change / 声明机制未激活时不在这里报（见该函数的边界注释）。
     const templateCheck = await verifyTemplateDeclaration({
       protocol,
       nodeId,
       changeName: markerChange,
-      newChange: state.newChange === true,
       commandContext: declarationContext,
     });
-    if (templateCheck.warn) console.error('WARN: ' + templateCheck.warn);
     if (!templateCheck.ok) {
       console.error('BLOCKED: ' + templateCheck.reason);
       process.exit(1);
     }
   }
-  // 声明自动化——record 时按协议 requiredSkillCalls 自动补写缺失的声明标记
-  // (执行者无需手动 skill-load;标记如实记录"节点完成即视为其实现/协议技能已加载",
-  // 由 record 代记;与手动 skill-load 标记同体系,exit 协议声明校验共用)
-  // 新 change 下 required 条目停用自动补写(手动声明唯一路径,否则抵消前置门);
-  // 旧 change 保留兜底(渐进兼容)。
-  if (recordNodeDef && markerChange && state.newChange !== true) {
-    const recordProtoFiles = NODE_PROTOCOL_FILES[nodeId] ?? [];
-    // 标记目录解析:活动路径优先;change 已归档(活动目录不存在但归档目录存在)
-    // 时写归档路径——防重建已归档的活动目录(归档移动语义;与 findSkillLoadsDir 双路径一致)。
-    // 跳过条件:活动与归档均无 .skill-loads **且活动 change 目录已不存在**(归档移动后)
-    // ——此时 writeJsonAtomic 的 mkdir recursive 会把已归档的活动目录残留回来;
-    // 活动 change 目录仍存在(正常流程)时创建 .skill-loads 子目录是自动补写的正常职责,不跳过
-    const activeLoadsDir = path.join(specsDir(), markerChange, '.skill-loads');
-    let targetLoadsDir = activeLoadsDir;
-    if (!(await fileExists(activeLoadsDir))) {
-      const archived = await findSkillLoadsDir(markerChange);
-      if (archived !== null && archived.dir !== activeLoadsDir) {
-        targetLoadsDir = archived.dir;
-      } else if (archived === null && !(await fileExists(path.join(specsDir(), markerChange)))) {
-        targetLoadsDir = null;
-      }
-    }
-    if (targetLoadsDir !== null) {
-      for (const binding of recordNodeDef.requiredSkillCalls ?? []) {
-        // handoff scope 技能由子代理加载(协调者不声明)——不自动补协调者标记
-        if (binding.scope === 'handoff') continue;
-        const markerFile = path.join(targetLoadsDir, nodeId + '-' + binding.skill + '.json');
-        let markerExists = false;
-        try { await fs.access(markerFile); markerExists = true; } catch { /* 标记不存在 */ }
-        if (!markerExists) {
-          // 自动补的 protocol 字段按 skill 归属协议文件(如 open 的 requirement 标记应写
-          // 1-requirement.md 而非节点首文件 0-change.md——所有 skill 都写首文件会让
-          // 标记的协议归属语义错误;exit 校验只查归属集合故能通过,但标记不可信)
-          const skillProtoFiles = SKILL_PROTOCOL_FILES[binding.skill] ?? [];
-          await writeJsonAtomic(markerFile, {
-            node: nodeId,
-            skill: binding.skill,
-            protocol: skillProtoFiles.length > 0 ? skillProtoFiles[0] : null,
-            at: recordedAt,
-            auto: true,
-          });
-        }
-      }
-    }
-  }
+  // 声明标记的唯一写入通道 = 执行者手动 skill-load（本命令不代记任何标记）：缺声明在上一道
+  // 前置门已 BLOCKED，走到这里说明声明齐备。
   state.evidence[nodeId] = {
     ...(state.evidence[nodeId] || {}),
     ...parsed,
@@ -964,8 +1117,8 @@ export async function runRecord(protocol, argv) {
   // 产物推导会让三面在**进行中保护**生效时分叉（record 报 review，而 next / status.routeNode 报
   // execute）——故复用 resolveNodeView 的 routeNode：本命令不自持第二份判定，也不改变自己的写面
   // （record 只写证据，不写 currentNode，视图是纯读）。
-  const changeName = state.activeChange || await findActiveChange();
-  const nodeView = changeName ? await resolveNodeView({ changeName, protocol, state }) : null;
+  const changeName = identityChange;
+  const nodeView = changeName ? await resolveNodeView({ changeName, protocol, state, location }) : null;
   // 边界态（next 会 BLOCKED、不打印 NODE）：record 是同一事实的第四个输出面，尾巴不得再声称
   // 「NEXT: done」——那是在说「没有下一节点了」，与 next 的 BLOCKED、status.routeNode=null 相反。
   // 命中时改打与 ROUTE: 行同源的一句（原因 + 先按恢复指引处理），NODE / SKILL 一律不打（next 此刻

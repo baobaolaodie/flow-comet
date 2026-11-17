@@ -10,7 +10,7 @@
 
 | Item | Description |
 |------|-------------|
-| **Current version** | v1.7.0. Release truth: [CHANGELOG.md](../CHANGELOG.md) + git tag (created at the release step); README badge mirrors it; `skills/flow-comet/INSTALLED_VERSION` is the installed copy's marker: the release version for an npm install, or the source repository's `git describe` value for an install from a clone (with a `-<n>-g<hash>` suffix when that clone is ahead of its tag). The dsh platform (via `prepare-env --platform dsh`) carries the same version marker in its project-level skill copy, and the npm package carries it in `package.json`. v1.0.0 = first stable: 8-node workflow + three defense layers + guard validation |
+| **Current version** | v1.8.0. Release truth: [CHANGELOG.md](../CHANGELOG.md) + git tag (created at the release step); README badge mirrors it; `skills/flow-comet/INSTALLED_VERSION` is the installed copy's marker: the release version for an npm install, or the source repository's `git describe` value for an install from a clone (with a `-<n>-g<hash>` suffix when that clone is ahead of its tag). The dsh platform (via `prepare-env --platform dsh`) carries the same version marker in its project-level skill copy, and the npm package carries it in `package.json`. v1.0.0 = first stable: 8-node workflow + three defense layers + guard validation |
 | **Versioning** | Semantic Versioning: feature release → minor (1.2.0), bug fix → patch (1.1.1), breaking change → major (2.0.0); bump at the end of each feature release |
 | **Version record surfaces** | Ten places, kept in agreement by CI on the release surface: the release git tag; the installed-copy marker `skills/flow-comet/INSTALLED_VERSION`; the npm package's `package.json` `version`; the dsh bridge's version marker, whose marker line and exported constant are contract-bound to the installed-copy marker; and the documentation surfaces counted per language — README badge ×2, this document ×2, CHANGELOG ×2. git tag + CHANGELOG remain the single source of truth |
 
@@ -26,8 +26,8 @@
 ## Compatibility strategy
 
 - Old changes / old states auto-fill default fields (executionMode/branchMode/enablePrReview); changes without a branch run unchanged — backward compatible
-- Progressive WARN (not BLOCK) for legacy change re-entry (missing redEvidence/greenEvidence, pure-string handoff)
-- Regression baseline (two-tier): `guard-self-test.mjs` 350 scenarios + `system-test.mjs` 95 items green (required after every change)
+- Legacy states get defaults for missing fields; a retired initialization-marker field carried by an old state is ignored (no schema error). Every shape gets the same grade — BLOCKED, with no progressive tier (e.g. missing redEvidence/greenEvidence, pure-string handoff)
+- Regression baseline (two-tier): `guard-self-test.mjs` 352 scenarios + `system-test.mjs` 95 items green (required after every change)
 - dsh platform: the project-level skill copy carries an `INSTALLED_VERSION` marker synced with flow-comet releases; uninstall via `prepare-env --purge --platform dsh --yes` (see [Installation](INSTALLATION.md#option-d--deepseek-harness-dsh-platform))
 
 ## Release checklist (per release)
@@ -37,7 +37,7 @@ Releases are **batched**: `dev` accumulates feature changes; one release PR ship
 1. Update CHANGELOG (Added/Changed/Fixed — with PR links)
 2. Update README version badge + version status
 3. `git tag vX.Y.Z` + push --tags
-4. prepare-env release to all installed copies (main `.claude/` + target projects) when functionality changed
+4. prepare-env release to all installed copies (main `.claude/` + target projects) when functionality changed; on dsh this also rewrites the global bridge at `$DSH_HOME/plugins/`, so re-launch the host afterwards and confirm the loader and the project copy carry the new version
 5. `npm publish` from the tagged commit (pre-release versions require an explicit `--tag`)
 6. Create the GitHub Release for the tag (notes from the corresponding CHANGELOG section; mark pre-releases as pre-release)
 7. Fast-forward `dev` to `main` (right after the release merge): the release PR merge makes dev's tip an ancestor of main, so `git merge main` on dev is a zero-commit fast-forward — dev becomes identical to main (no sync merge commit)

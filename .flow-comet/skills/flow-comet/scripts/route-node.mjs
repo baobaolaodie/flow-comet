@@ -150,11 +150,13 @@ export function resolveDelegationTarget({
 }
 
 // 判定核心（行为逐字等价——重构保持锚）：
-// 输入 { runRoot, changeName, protocol, completedNodes = [] } → 输出节点 id 或 null（完成态）。
+// 输入 { runRoot, changeName, protocol, completedNodes = [], changeDir = null } → 输出节点 id 或
+// null（完成态）。changeDir 是**可选**的产物根替换值：该 change 目录相对 .specs/ 的 POSIX 路径
+// （'<id>' / 'archive/<日期>-<id>'，由 state-io.resolveChangeDir 的 relative 给出）。
 // 判定顺序：① completedNodes 全齐 → null；② execute 家族之前的节点产物门控；③ 无 execute 家族 →
 // 最后节点；④ 任务状态特判（pending 且依赖满足的 parallel → subagent-execute / 串行 pending →
 // execute / 全 done 但缺 SUMMARY → execute / 后置节点产物门控 / 全部通过 → 最后节点）；⑤ 解析失败兜底 execute。
-export async function resolveNextNode({ runRoot, changeName, protocol, completedNodes = [] }) {
+export async function resolveNextNode({ runRoot, changeName, protocol, completedNodes = [], changeDir = null }) {
   const specsRoot = path.join(runRoot, '.specs');
   // 全部节点已完成 → 完成态，不产出最后节点。自定义协议无 archive 节点时，completedNodes 全齐后
   // next 仍会输出 NODE: <最后节点>（产物推导只返回最后节点 id）——此处（产物推导之前）判定：
@@ -166,12 +168,17 @@ export async function resolveNextNode({ runRoot, changeName, protocol, completed
   if (protocolNodeIds.length > 0 && protocolNodeIds.every((id) => completedNodes.includes(id))) {
     return null;
   }
-  const changeDir = path.join(specsRoot, changeName);
+  // 产物根替换值：目录已搬进归档时用归档目录（移动后产物仍在归档目录里，file-as-truth 认产物不认
+  // 位置）。只换 `<change-id>` 的替换值——nodeFlagsComplete 的根推导（specs-root / project）不动，
+  // 那条判据与守卫侧同源，改根会让两侧对「产物在哪」有两种说法。取值形态由生产侧唯一决定
+  // （state-io.resolveChangeDir 的 relative：POSIX，'<id>' / 'archive/<日期>-<id>'），本模块不做
+  // 二次归一——多一处形态转换就多一处「与解析结果不一致」的机会。
+  const changeRef = typeof changeDir === 'string' && changeDir !== '' ? changeDir : changeName;
   // 节点完成判定: 节点完成标志从协议 outputSchemas 推导（内置协议缺省行为与现硬编码逐字节一致）
-  const nodeFlags = buildNodeCompletionFlags(protocol, changeName);
+  const nodeFlags = buildNodeCompletionFlags(protocol, changeRef);
   // 任务文件路径：协议可选 taskFile 字段（相对 changeDir），无声明时缺省 TASK.md。
   // 自定义协议无 taskFile 时 parallel 检测自然降级为串行（任务文件缺失 → 不路由 subagent-execute）。
-  const taskPath = protocolTaskFilePath(protocol, changeName, specsRoot);
+  const taskPath = protocolTaskFilePath(protocol, changeRef, specsRoot);
 
   // 节点顺序 = 协议 nodes 顺序（disabled 过滤，见 task-graph 的 route）；execute/subagent-execute 由
   // 任务状态特判。按协议顺序拆分：execute/subagent-execute 之前的节点走产物门控（内置 = open →

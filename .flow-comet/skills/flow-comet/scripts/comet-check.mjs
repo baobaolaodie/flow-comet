@@ -25,6 +25,7 @@ const required = [
   "reference/replan.md",
   "reference/commit-discipline.md",
   "reference/entry-detail.md",
+  "reference/post-archive-handoff.md",
   "scripts/comet-plan.mjs",
   "scripts/comet-check.mjs",
   "scripts/comet-hook-guard.mjs",

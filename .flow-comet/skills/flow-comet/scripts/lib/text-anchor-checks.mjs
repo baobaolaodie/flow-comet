@@ -966,10 +966,29 @@ export function vocabularyMirrorProblems(root = REPO_ROOT) {
   return problems;
 }
 
+// 「自动补写」表述判据（新口径）：技能文本不得承诺自动补写（record 自动补写已整体删除，
+// 唯一路径是执行者手动 skill-load）。判据是声明级、不做语义判断：任何一行出现「自动补」
+// 却没有任何否定词（不 / 未 / 禁 / 无）→ 视为承诺自动补写；明确否定（「不再自动补写」
+// 「不覆盖 handoff scope」）与说明其不存在的写法放行。判别力由场景 167 的反向构造常驻证明
+// （追加一行无条件承诺必被判违规）。
+// 否定判定**限定在「自动补」所在的小句内**：整行任意位置出现「无 / 不」就放行，会被
+// 「无需手动声明，record 会自动补写…」这类混合句绕过（否定词落在另一个小句）。句读（。；，）
+// 是边界，跨过边界的否定不算否定这条承诺。
+const AUTO_FILL_NEGATED = /(?:不|未|禁|无|别)[^。；;，,\n]{0,12}自动补|自动补[^。；;，,\n]{0,12}(?:已删|删除|不再|不写|不存在)/;
+export function autoFillPromiseProblems(rel, text) {
+  const out = [];
+  for (const line of text.split('\n')) {
+    if (!line.includes('自动补')) continue;
+    if (AUTO_FILL_NEGATED.test(line)) continue;
+    out.push(rel + ' 含自动补写承诺表述: ' + line.trim().slice(0, 80));
+  }
+  return out;
+}
+
 export function twoLayerEntryProblems(rel, text) {
   const out = [];
   if (text.includes('见上方 Required Calls 表')) out.push(rel + ' 含 Implementation/Required 混淆句式');
-  if (text.includes('record 会自动补写缺失的声明标记')) out.push(rel + ' 含无限定自动补表述');
+  out.push(...autoFillPromiseProblems(rel, text));
   if (!text.includes('Skill 工具加载该节点的 Implementation 技能')) out.push(rel + ' 缺入口层锚点句');
   if (!text.includes('前置门')) out.push(rel + ' 缺前置门表述');
   return out;
@@ -1024,14 +1043,14 @@ export const COMMIT_DISCIPLINE_AUTHORITY_PHRASES = [
   '2. **顺序（确定性规则）**：先按 `depends_on` 的**拓扑序**集成（被依赖者先入）；同一拓扑层内按 **task id 升序**（计划期固定的稳定键，与完成先后无关）。**不得依赖书写顺序** / 提交到达顺序 / 完成先后等运行期不确定量。',
   '3. **审计留痕**：每次集成输出一行审计行 `INTEGRATE: <task-id> <commitHash> → <集成提交>`；降级路径为 `INTEGRATE: <task-id> <commitHash> via cherry-pick -- 降级原因：<原因>`。映射（task-id → commitHash → 集成提交）记入该趟流程记录（`<task-id>-SUMMARY.md` / handoff evidence 文本字段）。**判级**：审计行是**执行纪律**（review 把关），本节点不声称存在机械门禁校验它。',
   '   - **机械冲突**（不改用户可见行为：同一文件不同区域 / 相邻行 / 纯格式）：执行者**可自行解决**——解决后必须跑**合并后验证**（该任务 `verify` + 受影响任务的判据），并在审计行记录冲突与解决方式。',
-  '   - **语义冲突**（两侧对同一行为 / 契约 / 接口给出不同语义：同一函数语义分叉、同一 AC 的两种实现、公共 API 形状不一致）：**必须中止集成并上抛**（记 BLOCKED + 恢复指引），**不得**由执行者自行拍板；由协调者 / 用户裁决（补 `depends_on`、拆任务或开新 change）。',
+  '   - **语义冲突**（两侧对同一行为 / 契约 / 接口给出不同语义：同一函数语义分叉、同一 AC 的两种实现、公共 API 形状不一致）：**必须中止集成并上抛**（记 BLOCKED + 恢复指引），**不得**由执行者自行拍板；由协调者 / 用户裁决（补 `depends_on`、拆任务或另开 change）。',
 ];
 // 四属性契约（能力契约锚 · ADR-016 明示「该怎么干」类 ⇒ 留两册正文；两册不再要求逐字相同）。
 export const PARALLEL_CONTRACT_BOOK_PHRASES = [
   '> **并行安全四属性契约**：契约对象是**四属性**，不是 worktree',
   '| ① | **写权限** | 每个写者必须有一条被守卫认可的写入通道 |',
   '| ③ | **验证隔离** | 同一时刻只有一个写者：全量判据不得与在飞写者并行 |',
-  '出口校验锚 = `handoffRequests` 有 request 无对应 `handoffResult` ⇒ 新 change BLOCKED / 旧 change WARN；全部有 result ⇒ 放行；无证据 ⇒ 零输出',
+  '出口校验锚 = `handoffRequests` 有 request 无对应 `handoffResult` ⇒ 一律 BLOCKED（同一形态一个判级）；全部有 result ⇒ 放行；无证据 ⇒ 零输出',
   '**已撤回的 request 不构成在飞委托**',
   '`workflow-handoff.mjs withdraw <task-id> --by <来源>` 在原记录上留痕 `withdrawnAt` + `withdrawnBy`，已撤回 = 终态、历史不删',
   '**并同时注入桥接通道标记 `FLOW_COMET_AGENT_DEPTH_SOURCE`——守卫要求标记与深度同时在场才接受该通道**',
@@ -2427,7 +2446,7 @@ export function writeUiDesignBindingVariant(dir, variant) {
 }
 
 export function writeDesignExitFixture(dir, {
-  newChange, visualTone, uiDesign, declareUiDesign, changeName = CHANGE_ID, changeTail = '', declareDesign = true,
+  visualTone, uiDesign, declareUiDesign, changeName = CHANGE_ID, changeTail = '', declareDesign = true,
 }) {
   writeFile(dir, 'flow-kit/templates/DESIGN.md', '# DESIGN 模板\n\n## 0. 技术栈选型\n## 1. 技术决策清单\n');
   // CHANGE 模板同样在场：design 出口的前端判据用 `pick('change', ['视觉调性'])` 在**模板派生**的段名表里
@@ -2435,7 +2454,6 @@ export function writeDesignExitFixture(dir, {
   // （模板缺席下的跳过另由 TA-21 覆盖）。
   writeFile(dir, 'flow-kit/templates/CHANGE.md', '# CHANGE 模板\n\n## Why（为什么做）\n\n## 视觉调性（前端项目必填）\n');
   const state = baseState('design');
-  state.newChange = newChange === true;
   state.enteredNodes = ['design'];
   const checks = [];
   if (declareDesign) checks.push('required-skill:design.flow-comet-design');

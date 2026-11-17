@@ -28,6 +28,8 @@ This node finalizes a completed change by extracting reusable lessons from the d
 
 ### Steps
 
+> **硬规则（先于任何动作）**：进入本节点后，**先用 Skill 工具加载** `flow-comet-integration`，并**立即**运行下节 Required Skill Calls 的 `skill-load` 命令写下声明标记——**技能加载声明必须先于任何动作，尤其先于搬目录**。移动目录之后补声明 / 补记录仍可完成（引擎按状态判身份、按解析到的目录读写标记），但那只是**兼容 / 恢复路径**；规范顺序永远是**先记录、后搬目录**。
+
 1. **Scan SUMMARY.md files for lessons**: Read all `<task-id>-SUMMARY.md` files in `.specs/<change-id>/`. Focus on "decisions and deviations" sections. Also check any remaining `<task-id>-PROGRESS.md` "excluded solutions" sections.
 
 2. **Apply nomination criteria**: 三条判据（含「其余一律不提名」兜底）见 `flow-comet-integration` 册的「LESSONS 提名」段——该段是判据的**单一权威**，本册不复述、以该册为准。
@@ -44,19 +46,22 @@ This node finalizes a completed change by extracting reusable lessons from the d
    - Write `.specs/<change-id>/KNOWN-ISSUES.md` — each entry: issue description, why it was deferred, and where it may surface again.
    - The file moves with the change into `.specs/archive/<YYYY-MM-DD>-<change-id>/` (archived alongside the other artifacts), so the leftover issues never silently vanish after archive.
    - If there are no leftovers, still state that explicitly in the file (e.g. "无遗留问题" / "No known leftover issues").
+   - **本步必须在搬目录之前完成**：工件随目录一起归档，搬完再补只是恢复路径（与上方硬规则的「先记录、后搬目录」同一条顺序纪律）。
 
-6. **Move change to archive**: After user confirmation:
+6. **Record evidence**: Run `node .claude/skills/flow-comet/scripts/workflow-state.mjs record archive '<evidence JSON>'` to record archive completion——**记录是搬目录之前的最后一件证据动作**（LESSONS 提名与遗留清单都已就位）；搬目录之后补记录只是兼容 / 恢复路径，不是规范顺序。
+
+7. **Move change to archive**: After user confirmation——**搬目录是本节点唯一的不可逆动作，声明与记录都已就位后才执行**：
    - Move `.specs/<change-id>/` to `.specs/archive/<YYYY-MM-DD>-<change-id>/`.
    - Date format: YYYY-MM-DD of the archive date.
    - Verify the move completed successfully (source no longer exists, destination has all files).
    - **git 索引同步**:移动含 `.skill-loads/` 等隐藏目录时,用 `git mv` 逐项移动或移动后用 `git add -A .specs/` 同步索引——文件系统 `mv` 后 git 索引不同步,`git checkout` 会从树恢复残留文件(实测:归档后 checkout 恢复 9 个 .skill-loads 源路径文件)。
 
-7. **Update CHANGELOG.md**: 在 `.specs/CHANGELOG.md` **顶部**按日期倒序插入新条目（倒序约定：新条目永远在最新日期行之上；文件不存在则从模板创建）。若项目既有 CHANGELOG 采用其他格式（如 `## 日期 + 列表`），**跟随项目既有格式**在顶部插入（不强制转表格——保持仓库一致性；guard 的倒序检测只针对表格格式行）:
+8. **Update CHANGELOG.md**: 在 `.specs/CHANGELOG.md` **顶部**按日期倒序插入新条目（倒序约定：新条目永远在最新日期行之上；文件不存在则从模板创建）。若项目既有 CHANGELOG 采用其他格式（如 `## 日期 + 列表`），**跟随项目既有格式**在顶部插入（不强制转表格——保持仓库一致性；guard 的倒序检测只针对表格格式行）:
    - 表格格式: `| YYYY-MM-DD | <change-id> | one-line summary | PR link | new L-NNN entries |`
 
-8. **Update STATE.md（可选决策日志）**: 若项目维护 `STATE.md`，新决策日志条目**顶部**插入（倒序约定，**禁止文件尾追加**）。flow-comet 的活动 change 状态由 `.flow-comet/flow-comet-state.json` 管理——STATE.md 无 active change 字段，不需要也不应手动清除。
+9. **Update STATE.md（可选决策日志）**: 若项目维护 `STATE.md`，新决策日志条目**顶部**插入（倒序约定，**禁止文件尾追加**）。flow-comet 的活动 change 状态由 `.flow-comet/flow-comet-state.json` 管理——STATE.md 无 active change 字段，不需要也不应手动清除。
 
-9. **Notify user of architecture sedimentation + leftover issues**: Check DESIGN.md section 9 for sedimentation suggestions. If N > 0 suggestions exist, tell user — and always explicitly enumerate the leftover issues from KNOWN-ISSUES.md in the archive notification (they must not silently disappear after archive):
+10. **Notify user of architecture sedimentation + leftover issues**: Check DESIGN.md section 9 for sedimentation suggestions. If N > 0 suggestions exist, tell user — and always explicitly enumerate the leftover issues from KNOWN-ISSUES.md in the archive notification (they must not silently disappear after archive):
    ```
    Archived to .specs/archive/<YYYY-MM-DD>-<change-id>/
    遗留问题清单（KNOWN-ISSUES.md，随工件归档）: <each leftover issue, or 无>
@@ -64,16 +69,14 @@ This node finalizes a completed change by extracting reusable lessons from the d
    Recommended: run A-evolve workflow after >= 5 个带 `§9` 的归档 change，或距上次沉淀 > 60 天（阈值与入口册 `EVOLVE-DUE` 提示同口径）——批量 review 后 patch CONTEXT.md。
    ```
 
-10. **Record evidence**: Run `node .claude/skills/flow-comet/scripts/workflow-state.mjs record archive '<evidence JSON>'` to record archive completion.
-
-11. **Exit check**: Run exit check.
+11. **Exit check**: Run exit check——搬目录仍是 `exit` 的前置：归档目录不在场时出口的产物门会直接拦下；登记与通知的措辞也一律按归档后的位置写。
 
 ### 归档后发现缺陷（受控重入）
 
 归档已 entry 但归档移动尚未发生（`.specs/<change-id>/` 仍在原位、`status !== 'completed'`）时，review / verify / 执行阶段发现的新缺陷**不得**在归档阶段就地修完——工作归属须先受控归位回既有生命周期，再按修复回路收口。要点：
 
 - **未移动** → 受控重入：由用户显式授权后运行 `node .claude/skills/flow-comet/scripts/workflow-state.mjs reenter <target> --authorized-by <source> --reason <text>`——目标限 `execute` / `subagent-execute` / `review` / `verify` 之一；每次调用都需要用户显式授权，每 change 上限 3 轮（达上限后凭显式续轮授权 `--continue-round <n>`，n ≥ 已用轮次 + 1）；命令先自动落 state 备份快照（`.specs/<change-id>/.reentry-backups/`），再转移工作归属；缺授权、目标越界、超上限或归档移动已发生一律 BLOCKED（state 字节零改写），不会静默跳过。
-- **已移动 / 已合并** → 人工处置或新 change：归档移动已发生（`.specs/archive/<日期>-<change-id>/`）或 change 已 `completed` / 已合并时，受控重入不适用（不承诺把文件搬回原位）；走人工处置，或把修复放进新 change / hotfix，并在遗留清单里登记指针。
+- **已移动 / 已合并** → 人工处置或另开 change：归档移动已发生（`.specs/archive/<日期>-<change-id>/`）或 change 已 `completed` / 已合并时，受控重入不适用（不承诺把文件搬回原位）；走人工处置，或把修复放进另一个 change / hotfix，并在遗留清单里登记指针。
 - **写权限顺序（先转移后写 TASK）**：先跑 `reenter` 完成转移（写入权限随即跟随目标节点），再在目标节点权限内追加 Fix 任务 / 修改工件；archive 阶段 hook 对 change 目录只放行 `KNOWN-ISSUES.md` 这一个精确文件（另有 `.specs/archive/`、`.specs/CHANGELOG.md`、`.specs/LESSONS.md`、`STATE.md`），**不要试图在归档阶段先写 TASK.md**。
 - **回源路径不因归档而放宽**：修复回路本身不变——回到 `execute` 生命周期时照样跑完四类出口，随后**回源节点跑出口**（`entry <源节点>` → `exit <源节点> --apply`）；受控重入只改工作归属，不写任何闭合标记，也**禁止绕过**目标节点入口 / 出口与源节点出口门禁。
 
@@ -177,7 +180,7 @@ Evidence: `archive-summary` (required)
 ## Evidence Record
 
 ```bash
-node .claude/skills/flow-comet/scripts/workflow-state.mjs record archive '{"summary":"Change archived to .specs/archive/<date>-<id>/, N lessons added, CHANGELOG updated"}'
+node .claude/skills/flow-comet/scripts/workflow-state.mjs record archive '{"summary":"Archive evidence prepared before the move: N lessons nominated, leftover list compiled; directory move and CHANGELOG registration follow"}'
 ```
 
 ## Guardrails
@@ -185,7 +188,7 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record archive '{"summ
 | Guardrail ID | Label | Validation Type |
 |--------------|-------|-----------------|
 | `archive-evidence` | Archive directory exists, source removed | state-transition |
-| `changelog-updated` | CHANGELOG.md 有新条目，且表格条目按日期倒序 | 结构级（guard 强制：`CHANGELOG.md` 表格日期倒序——新 change 非倒序即 BLOCKED、旧 change WARN；未含本 change 标识只 WARN 提示补登记）；条目内容与格式由 review 把关 |
+| `changelog-updated` | CHANGELOG.md 有新条目，且表格条目按日期倒序 | 结构级（guard 强制：`CHANGELOG.md` 表格日期倒序——非倒序即 BLOCKED；未含本 change 标识只 WARN 提示补登记）；条目内容与格式由 review 把关 |
 | `lessons-preserved` | LESSONS.md still in .specs/ (not archived) | 执行纪律（review 把关），guard 不校验 |
 | `user-confirmed` | User confirmed archive before execution | 执行纪律（review 把关），guard 不校验 |
 
@@ -195,7 +198,26 @@ node .claude/skills/flow-comet/scripts/workflow-state.mjs record archive '{"summ
 node .claude/skills/flow-comet/scripts/workflow-guard.mjs exit archive --apply
 ```
 
-If the script prints `NEXT: done`, summarize the workflow evidence and stop. The change is complete.
+If the script prints `NEXT: done`, run the 「归档完成后的交接」 section below first, then summarize the workflow evidence and stop. The change is complete.
+
+### 归档完成后的交接（Known-Issue 后续处理）
+
+**触发**：`exit archive --apply` 打印 `NEXT: done`、状态已变为 `completed` 之后才进入本段。归档在此之前已经闭合——**本段不阻断归档**：不重跑出口、不改出口判据、不改变 `entry → record → move → exit` 的顺序；用户选择稍后处理或直接跳过，归档结果同样成立。
+
+**顺序**（逐条执行，不跳步、不调换）：
+
+1. **读当前分支与工作区状态**——只用于向用户报告（当前分支名、未提交改动）；**不做任何分支操作**：不 merge、不 checkout、不删除分支、不 push。
+2. **读归档的遗留清单**——`.specs/archive/<YYYY-MM-DD>-<change-id>/KNOWN-ISSUES.md`，逐条整体读、不是只数条数；文件写明无遗留问题时如实报告，可就此结束。
+3. **探测载体**——只读探测：是否 git 工作树、`origin` 的 host 分类、`gh` / `glab` 是否在场及认证状态、本地 roadmap 是否存在与其形式。
+4. **一次询问**——带着探测摘要与推荐，用结构化提问工具问一次（平台没有该工具时退回文本提问），问的是**载体**（范围只限载体本身）；**载体只问一次**（粒度选择、是否提交、是否转入是各自独立的确认，不算追问），之后不再为载体追问第二遍。
+5. **完整展示**——把将要创建或写入的全部内容完整呈现给用户（过长可分批，但不得截断、不得用摘要代替）。
+6. **选择**——用户选定之后才进入执行；未选定不动任何远端或本地文件。
+7. **执行**——按用户选择创建 issue、写入本地 roadmap，或输出草稿与可复制命令。
+8. **报告**——逐条给出成功 / 跳过 / 失败原因与草稿位置，并说明遗留清单最终落在何处。本地写入时**另**按参考页「提交（仅本地写入）」节处理：先 `git check-ignore` 判定可达提交面，未被忽略则展示路径与当前分支、问一次是否提交（这一问同样不是对载体那一问的追问）。
+
+**边界**：不写 `.flow-comet/flow-comet-state.json`；不修改归档的 `KNOWN-ISSUES.md`；不自动提交、不关闭 issue；本段全程不做任何分支操作。
+
+**归档完成后要执行交接时**读 `../flow-comet/reference/post-archive-handoff.md`（触发与顺序、探测命令序列、四选项询问、载体决策表、公开草稿骨架、降级路径与操作矩阵）。
 
 ## Recovery
 

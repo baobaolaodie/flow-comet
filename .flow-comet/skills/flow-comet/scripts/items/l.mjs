@@ -8,7 +8,27 @@ import fs from 'fs';
 import path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 import { assertExit, assertNotOut, assertOut, baseState, runGuard, runState, writeFile, writeState } from '../lib/test-helpers.mjs';
-import { SCRIPTS_DIR, CONTRACT, resolvePackageContext, assertPackageContextJudgment, seedForeignFlowKit, assertPublishableManifest, assertPackageBoundary, assertWorkflowContractCheck, assertBinContract, assertInitTokenContract, assertInstallerUpgradePathCleanup, assertMirrorRootLinkFailClosed, CHANGE_ID, readStateFile, gitInit, writeIntakeArtifacts, DISTRIBUTION_MARKERS, applyDistributionSurface } from '../lib/system-fixtures.mjs';
+import {
+  applyDistributionSurface,
+  assertBinContract,
+  assertInitTokenContract,
+  assertInstallerUpgradePathCleanup,
+  assertMirrorRootLinkFailClosed,
+  assertPackageBoundary,
+  assertPackageContextJudgment,
+  assertPublishableManifest,
+  assertWorkflowContractCheck,
+  CHANGE_ID,
+  CONTRACT,
+  DISTRIBUTION_MARKERS,
+  gitInit,
+  readStateFile,
+  resolvePackageContext,
+  SCRIPTS_DIR,
+  seedForeignFlowKit,
+  writeIntakeArtifacts,
+} from '../lib/system-fixtures.mjs';
+import { writeNodeDeclarationMarkers } from '../lib/test-fixtures.mjs';
 
 const RAW_ENTRIES = [
 
@@ -80,6 +100,8 @@ const RAW_ENTRIES = [
       assertOut(before, '"stateCurrentNode": "design"'); // 迁移搬移的状态字段原值可读
       // ④ 流程可继续：entry → record → exit 推进到下一节点
       assertExit(installed('workflow-guard.mjs', ['entry', 'design']), 0);
+      // 单轨：record 的声明前置门对一切 change 生效——迁移后的项目按真实链路先声明
+      assertExit(installed('workflow-state.mjs', ['skill-load', 'design', 'flow-comet-design', '--prompt', 'flow-kit/prompts/2-design.md', '--templates', 'DESIGN.md']), 0);
       assertExit(installed('workflow-state.mjs', ['record', 'design', '{"summary":"design done"}']), 0);
       const exitDesign = installed('workflow-guard.mjs', ['exit', 'design', '--apply']);
       assertExit(exitDesign, 0);
@@ -246,6 +268,7 @@ const RAW_ENTRIES = [
       writeState(dir, st);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', taskAllParallel);
       assertExit(runGuard(['entry', 'execute'], dir), 0);
+      writeNodeDeclarationMarkers(dir, 'execute');
       assertExit(runState(['record', 'execute', '{"summary":"no serial tasks","emptyExitApproved":true}'], dir), 0);
       const r = runGuard(['exit', 'execute', '--apply'], dir);
       assertExit(r, 0);

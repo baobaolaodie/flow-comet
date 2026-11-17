@@ -43,7 +43,6 @@ export const ENTRIES = [
       assertNotOut(result, 'HANDOFF WARN');
       // 新 change 提交越界(writeFiles 范围外文件)→ BLOCKED(记录时校验)
       const stForP4 = readStateFile(dir);
-      stForP4.newChange = true;
       writeState(dir, stForP4);
       writeFile(dir, 'src/evil.mjs', 'export const evil = 1;\n');
       execFileSync('git', ['add', 'src/evil.mjs'], { cwd: dir });
@@ -102,7 +101,6 @@ export const ENTRIES = [
       // ⑦ 零提交正式语义：write_files 为空 + 显式零提交 → 跳过提交子集校验 + 可审计提示；
       //    write_files 非空 + 声称 noCommit → 仍完整提交子集校验（不可借零提交绕过越界检查）
       const stEmpty = readStateFile(dir);
-      stEmpty.newChange = true;
       writeState(dir, stEmpty);
       writeFile(dir, '.specs/' + CHANGE_ID + '/TASK.md', '# TASK\n\n<task id="T05" status="pending"><action>无边界任务</action><write_files></write_files><verify>echo ok</verify></task>\n');
       assertExit(runHandoff(['request', 'T05'], dir), 0);
@@ -117,7 +115,6 @@ export const ENTRIES = [
       assertOut(resZero, '零提交');
       // ⑦b 零提交滥用负例：write_files 非空 + 契约声称 noCommit → 仍完整校验（越界 BLOCK + 矛盾提示）
       const stNonEmpty = readStateFile(dir);
-      stNonEmpty.newChange = true;
       writeState(dir, stNonEmpty);
       writeFile(dir, 'src/rogue-zero.mjs', 'export const rogue = 1;\n');
       execFileSync('git', ['add', 'src/rogue-zero.mjs'], { cwd: dir });
@@ -202,7 +199,6 @@ export const ENTRIES = [
         + '<write_files>.specs/' + CHANGE_ID + '/T12-SUMMARY.md</write_files>'
         + '<verify>echo ok</verify></task>\n');
       const stIgnored = readStateFile(dir);
-      stIgnored.newChange = true;
       writeState(dir, stIgnored);
       const reqIgnored = runHandoff(['request', 'T12'], dir, { FLOW_COMET_PROTOCOL: '' });
       assertExit(reqIgnored, 0);
@@ -259,7 +255,6 @@ export const ENTRIES = [
       const stParallel = readStateFile(dir);
       stParallel.currentNode = 'subagent-execute';
       stParallel.enteredNodes = ['open', 'design', 'plan', 'execute', 'subagent-execute'];
-      stParallel.newChange = true;
       writeState(dir, stParallel);
       const parallelEnv = { FLOW_COMET_PROTOCOL: path.join(dir, 'reference', 'workflow-protocol.json') };
       const reqParallel = runHandoff(['request', 'P16', '并行零提交任务委托'], dir, parallelEnv);
@@ -324,7 +319,6 @@ export const ENTRIES = [
           verifyFailures: 0,
           executionMode: 'subagent',
           directOverride: false,
-          newChange: true,
         });
         const reqNonGit = runHandoff(['request', 'T16', '--write-files', '.specs/' + CHANGE_ID + '/x.md'], nonGitRoot,
           { GIT_CEILING_DIRECTORIES: os.tmpdir() });
@@ -348,7 +342,6 @@ export const ENTRIES = [
         verifyFailures: 0,
         executionMode: 'subagent',
         directOverride: false,
-        newChange: true,
       });
       writeIntakeArtifacts(dir);
       writeFile(dir, '.specs/' + CHANGE_ID + '/DESIGN.md',
@@ -586,7 +579,7 @@ export const ENTRIES = [
       const boundProtocol = JSON.parse(fs.readFileSync(path.join(dir, 'reference', 'workflow-protocol.json'), 'utf8'));
       boundProtocol.nodes = boundProtocol.nodes.filter((n) => n.id !== 'execute' && n.id !== 'subagent-execute');
       writeFile(dir, 'reference/protocol-bound.json', JSON.stringify(boundProtocol, null, 2) + '\n');
-      assertExit(runState(['init', boundChange, '--init-skip', '--protocol', 'reference/protocol-bound.json'], dir), 0);
+      assertExit(runState(['init', boundChange, '--init-skip', '--replace', CHANGE_ID, '--reason', '验证 state 协议绑定（真实命令链路）', '--protocol', 'reference/protocol-bound.json'], dir), 0);
       writeFile(dir, '.specs/' + boundChange + '/TASK.md',
         '# TASK\n\n<task id="R01" parallel="false" status="pending"><action>实现 R01</action>'
         + '<write_files>src/r01.mjs</write_files><verify>node --check src/r01.mjs</verify></task>\n');
@@ -609,7 +602,9 @@ export const ENTRIES = [
   {
     name: 'C2 handoff：红绿证据时间序（先红后绿通过 / 补录拦截）',
     run: (dir) => {
-      writeState(dir, baseState('subagent-execute'));
+      const c2State = baseState('subagent-execute');
+      c2State.evidence['subagent-execute'] = { handoffRequests: { P01: { description: 'delegate', writeFiles: ['src/p1.mjs'] } } };
+      writeState(dir, c2State);
       fs.mkdirSync(path.join(dir, '.specs', CHANGE_ID), { recursive: true });
       // ① 先记录 RED（TDD 红）
       const red = '{"redEvidence":{"command":"node --check src/p1.mjs"}}';
@@ -629,6 +624,13 @@ export const ENTRIES = [
         throw new Error('greenEvidence 未附带 recordedAt: ' + JSON.stringify(rec.greenEvidence));
       }
       // ③ 新任务：先 GREEN 后补 RED → 事后补录拦截
+      // 单轨：result 必须有对应 request（未记录的委托不能回传结果）——夹具补同一份事实
+      const c2b = readStateFile(dir);
+      c2b.evidence['subagent-execute'].handoffRequests = {
+        ...(c2b.evidence['subagent-execute'].handoffRequests || {}),
+        P02: { description: 'delegate', writeFiles: ['src/p2.mjs'] },
+      };
+      writeState(dir, c2b);
       const greenOnly = '{"greenEvidence":{"command":"node --check src/p2.mjs"}}';
       assertExit(runHandoff(['result', 'P02', greenOnly], dir), 0);
       const backfill = '{"greenEvidence":{"command":"node --check src/p2.mjs"},"redEvidence":{"command":"node --check src/p2.mjs"}}';

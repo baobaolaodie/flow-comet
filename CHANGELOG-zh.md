@@ -10,7 +10,31 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本记录在哪些位置见 [docs/VERSIONS-zh.md](docs/VERSIONS-zh.md)，由 CI 在发布面对账保持一致。
 
-## [Unreleased]
+## [1.8.0] - 2026-11-18
+
+### 变更
+
+- **任务书里的动作与验证要能对得上**：任务书编写规范现在要求一个任务写下的动作与它的验证文本一致，执行者不必为了通过自己的检查而改写任务。回归基线 352 场景 / 95 项系统测试。（[#181](https://github.com/baobaolaodie/flow-comet/pull/181)）
+- **遗留项不再沉睡在归档里**：归档出口通过之后，本批的遗留清单会被交接到项目已经在用的载体上——issue 跟踪器，或留在仓库里的 roadmap——每批只问一次载体，创建或写入之前先把每条的标题与正文完整展示出来，对应的命令行缺席或未登录时降级为一条可照抄的命令。选择不记忆、历史不回填，跳过或失败都不会让归档状态回退。回归基线 352 场景 / 95 项系统测试。（[#180](https://github.com/baobaolaodie/flow-comet/pull/180)）
+- **破坏性变更——所有 change 只有一条生命周期，不再是两条轨道**：`newChange` 状态字段退役——`init` 不再写入它，旧状态文件里仍带着它（`true` 或 `null`）时按「没有该字段」读取，因此不需要迁移。对你的影响：原来「对新建的 change 拦截、对更早的 change 只告警」的规则，现在对每个 change 只有一个判定；`record` 也不再为更早版本创建的 change 自动补写缺失的技能加载声明——由执行者声明，拒绝报文会打印该跑的命令。([#179](https://github.com/baobaolaodie/flow-comet/pull/179))
+- **目录已搬进归档的 change 仍在办**：此前「在办」绑在活动目录存在上，目录一离开 `.specs/<change-id>/`，change 就当场丢掉：`status` 报没有 change、`next` 指向终点、`record` 说当前是 open 节点、`skill-load` 直接拒绝。现在「在办」只由状态判定，目录位置是每条命令现答的另一个问题——节点推导去 `.specs/archive/<YYYY-MM-DD>-<change-id>/` 读产物，搬移之后才补的声明写进归档目录，记录也对得上搬移后的产物。两处都没有目录时，命令被拒绝并点名它查过的两个位置，而不是把一个仍在办的 change 报成没有 change。([#179](https://github.com/baobaolaodie/flow-comet/pull/179))
+- **归档先落证据，最后才做那步不可逆的搬移**：归档步骤读作「声明 → 记录 → 搬目录 → 登记（CHANGELOG 与状态）→ 出口」。搬目录无法撤销，而它原先排在需要它的证据之前——这正是「目录搬走了、证据却记不下来、节点也退不出去」的成因。([#179](https://github.com/baobaolaodie/flow-comet/pull/179))
+- **归档目录只按带日期的名字读取**：运行命令只有一条规则——`archive/<YYYY-MM-DD>-<change-id>`；带了本 change 的 id 却没有日期前缀的归档目录会在出口被拒绝，并给出把它改名的 `mv` 命令（引擎不替你改名）；产物门与声明门对同一个目录给出同一个答案。命中多份带日期的目录时，取「日期不早于该 change 创建日期」的最新一份；候选并列时报出候选并停下，而不是替人挑一份。([#179](https://github.com/baobaolaodie/flow-comet/pull/179))
+- **新建 change 不再静默覆盖另一个仍在办的 change**：`init` 过去会无痕重置另一个未完成 change 的状态，把它的证据一并带走。现在另一个 change 未完成时 `init` 拒绝执行；只有把被替换的那个显式点名——`--replace <旧change> --reason <text>`——才继续，且在写入任何东西之前，先把旧状态逐字节快照到 `.specs/<旧change>/recovery/`，记下时间、目标、它当时所在的节点与原因，并打印快照路径与回滚命令。没有在办 change 的 `init` 行为不变，不多写任何东西。([#179](https://github.com/baobaolaodie/flow-comet/pull/179))
+- **拒绝报文给的是能照抄的命令与能核对的结果**：恢复命令全部出自同一处装配——平台化的脚本路径、本次运行实际解析到的协议、该节点的模板全清单；缺声明的报文按实际查找结果描述，不再固定打印「归档路径也未找到」；用户可见报文不再带机制编号；目录已经搬走的 change 也不再被建议去跑 `advance` 或 `select`（它们读活动目录，在那里走不通），给的是走得通的那一步。([#179](https://github.com/baobaolaodie/flow-comet/pull/179))
+
+### 修复
+
+- **检出缺公开文档时会被逐份点名**：回归套件现在会逐份列出检出里缺的文件，而不是以文件错误崩溃，因此缺一套公开文档不再被误读成产品缺陷。回归基线 352 场景 / 95 项系统测试。（[#181](https://github.com/baobaolaodie/flow-comet/pull/181)）
+- **写目标按物理落点判定**：白名单目录里的目录链接可以把写入引流到源码目录——`.specs/j` 指向 `src` 时，写 `.specs/j/file` 通过全部检查，而直写 `src/file` 被拒。共享路径扫描现在同时返回相对物理根的路径，白名单、包含性与最小保护集三处都按该路径判定，`Write`/`Edit` 与 shell 命令目标同判。白名单拒绝点名解析后的真实落点；保护集与链接逃逸的拒绝回显调用方拼写。（[#177](https://github.com/baobaolaodie/flow-comet/pull/177)）
+- **`..` 段按分量解析**：先做字面折叠会把它前面的链接藏掉——检查看到的是折叠后的路径，而内核会走进链接再退回来。含 `..` 的目标改为逐段走一遍，与折叠结果不一致即拒绝并点名两个落点。（[#177](https://github.com/baobaolaodie/flow-comet/pull/177)）
+- **硬链接与保护集收口**：与其它路径共享同一文件对象的目标一律拒绝——这类形态无法由路径判定看出。状态文件不再与活跃流程绑定，空闲项目里写它同样被拒，删掉它不能再把这道保护关掉；其余判定（协议文件、链接/硬链拒绝、写入白名单）仍只在流程运行中生效。（[#177](https://github.com/baobaolaodie/flow-comet/pull/177)）
+- **读不到协议或状态时按平台拒绝通道阻塞**：不再以宿主会降级成非阻断错误的方式退出——此前删掉协议文件会让之后的所有写入放行。没有写入目标的调用放行并打一行可见的降级说明，因为拒绝报文给出的恢复命令本身就是 shell 调用，会被同一条兜底再拒一次。dsh 上桥接对空闲项目仍然短路，因此「state 文件恒拦」在 dsh 上只在流程运行中生效。回归基线 351 场景 / 95 项系统测试。（[#177](https://github.com/baobaolaodie/flow-comet/pull/177)）
+
+- **dsh 桥接把已知 dsh-ops 写入工具归一到同一契约**：`ops_bash`、`ops_write_file`、`ops_edit_file` 与官方工具使用同一套 `Write`/`Edit`/`Bash` 契约；`ops_copy`、`ops_move`、`ops_remove` 按确定的目标字段映射为同一写入契约（`ops_move` 的源端 `path` 另判一次）。([#167](https://github.com/baobaolaodie/flow-comet/pull/167))
+- **多目标工具在流程运行中按组拒绝**：`ops_replace`、`ops_batch` 整体拒绝；`ops_bash` 的 `script_path` 形态与多目标工具只对协调者拒绝，子代理是执行者、放行；Bash 类工具的绝对 `workdir` 在项目外时对协调者拒绝。空闲项目保持两类工具可用。([#167](https://github.com/baobaolaodie/flow-comet/pull/167))
+- **dsh 写面的已知边界**：共享 Bash 命令解析器与 symlink/junction 路径仍是已知边界；`run_code`（进程内代码工具）在运行中的流程里默认放行，直接文件/进程写调用是已记录的残留边界。([#167](https://github.com/baobaolaodie/flow-comet/pull/167))
+- **已安装的 dsh 项目需重新运行安装器并重启宿主**：新 loader 要重新安装才会生效，而全局插件只在宿主启动时加载一次。([#167](https://github.com/baobaolaodie/flow-comet/pull/167))
 
 ## [1.7.0] - 2026-11-05
 
