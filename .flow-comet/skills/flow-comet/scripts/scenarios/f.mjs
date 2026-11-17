@@ -909,6 +909,17 @@ export const ENTRIES = [
         if (!guidance.includes('仍必须由 subagent-execute 委托消化')) {
           problems.push(guidanceRel + ' 缺「仍必须由 subagent-execute 委托消化」（direct 委托消化判别句）');
         }
+        // —— 任务书「action 与 verify 同源」自检规则锚（规则本体是 7 字段段的子条目，既有锚句不动）——
+        // 判据 = 固定锚句在本册在场；反向构造用同一谓词：全量 split/join 抽掉后必须判缺——抽掉仍判
+        // 在场即锚失效（谓词被放宽成别名匹配时，真实编辑可能漏过）。
+        const actionVerifyAnchor = 'action 与 verify 同源';
+        const actionVerifyMissing = (text) => (text.includes(actionVerifyAnchor)
+          ? []
+          : ['flow-comet-task/SKILL.md 缺「action 与 verify 同源」（action/verify 同源规则）']);
+        problems.push(...actionVerifyMissing(taskText));
+        if (actionVerifyMissing(taskText.split(actionVerifyAnchor).join('（反向构造：抽掉）')).length === 0) {
+          problems.push('反向构造判别力缺失（flow-comet-task/SKILL.md 抽掉「action 与 verify 同源」未被判缺）');
+        }
       }
       // —— 波次投影与 AC 覆盖判据句（本批新增判据的文本锁）——
       // 判据 = 关键句在**该在场的册**里逐条在案：plan / task 两册锁「波次 = 依赖层级的投影」的规则

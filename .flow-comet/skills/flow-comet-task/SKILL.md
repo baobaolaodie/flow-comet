@@ -26,6 +26,7 @@ description: "flow-kit TASK 阶段协议：拆原子任务（XML 格式）、rea
    - 依赖：`depends_on: <task-id>`
 3. **每任务 7 字段**：name / read_files / write_files / action / verify / done / depends_on——与 plan 出口「新格式任务的 7 字段在场」判据同一集合；`id` **不是字段**，它是 `<task>` 元素的属性（`<task id="T01" parallel="true" status="pending">`）；`depends_on` 元素必在（无依赖写空元素）
    - **write_files 必须包含关联测试文件**：若任务修改组件/函数，且有关联测试直接 import 其本地导出（如 `src/**/__tests__/*.test.ts` 从组件文件 import），该测试文件**必须纳入该任务 write_files**。否则组件删除本地导出/改 import 后，关联测试会编译失败或断言失效（实测：改组件时破坏了关联测试文件）。
+   - **action 与 verify 同源**：`<action>` 中要落地的替换文本必须包含同任务 `<verify>` 断言的字面串；`<verify>` 需要出现的每一段字面文本都必须能在 `<action>` 的替换文本里找到。两边不一致时**先改任务书对齐**——不得让执行者按 `<verify>` 自行改写、再把偏差在 SUMMARY 里登记成例外
 4. **波次划分**：跨层顺序；同层任务只有确有并发同伴、且 write_files 互不重叠时才标 [P]，孤立任务一律串行；**波次编号是依赖层级的投影**——层 = 1 + 依赖中最晚层（无依赖 = 第 1 波），写出「无依赖 / 第 N 波」的对应关系，不要用挪动波次代替依赖声明（判据与恢复指引见第 2 条同名条目）；flow-kit 上游宽松语义（「无冲突即可标 [P]」「同层即同波并行」）以本节点为准（显式覆盖，vendored 只读不改）
 5. **XML 格式**：便于 AI 解析与执行
 
