@@ -786,7 +786,7 @@ function copyRepoFileInto(root, rel) {
   fs.copyFileSync(path.join(REPO_ROOT, ...parts), dest);
 }
 
-async function assertPublicFaceSelfCheckShapes(dir) {
+async function assertPublicFaceSelfCheckShapes(dir, { repoRoot = REPO_ROOT } = {}) {
   const shapeRoot = (name, { authoritative = true } = {}) => {
     const root = path.join(dir, 'shape-' + name);
     fs.mkdirSync(root, { recursive: true });
@@ -814,12 +814,12 @@ async function assertPublicFaceSelfCheckShapes(dir) {
   //    复制之前先预检：受检面清单里缺任何一份，copyfile 都会以文件错误崩在循环半路，而真因是
   //    「本检出被判为带公开面、却缺公开文档」。预检把缺席逐份点名后再抛，读者不会把文件错误
   //    读成产品缺陷；清单为空才进入复制与 shape 自检。
-  const missingFixture = missingShapeFixtureFiles();
+  const missingFixture = missingShapeFixtureFiles(repoRoot);
   if (missingFixture.length > 0) {
     throw new Error('形态自检夹具无法构造：本检出被判为带公开面（docs/、CONTRIBUTING.md 或 .github/'
       + ' 任一在场），但照真迹复制的受检面文件缺 ' + missingFixture.length + ' 份——'
       + missingFixture.join('、') + '。这是「本检出被判为带公开面」的判红形态，不是复制文件失败；'
-      + '补齐上述文件后重跑本套件（相对根 ' + REPO_ROOT + '）');
+      + '补齐上述文件后重跑本套件（相对根 ' + repoRoot + '）');
   }
   const full = shapeRoot('authoritative');
   for (const rel of countFaceFiles()) copyRepoFileInto(full, rel);
@@ -4140,30 +4140,26 @@ export const ENTRIES = [
       // 形态分派自身的常驻判别力锚：临时根上驱动同一判定，分派对错不再只能靠「在包形态里整跑一次
       // 套件」才知道。夹具的「完整形态」从本检出的公开面真迹复制，故只在声明了公开面的检出上跑。
       await assertPublicFaceSelfCheckShapes(dir);
-      // 夹具预检的 in-place 反向构造：只含 docs/ 的临时根 =「本检出被判为带公开面、却缺公开文档」
-      // 的判红形态——预检必须把缺席逐份点名（而不是让复制循环崩在文件错误上）；同理，受检面文件
-      // 都在场的检出上必须为零缺席，否则预检就是恒红的摆设。
+      // 夹具预检的 in-place 判别力锚：给 shape 自检一个缺全部受检面文件的源根，真实预检必须逐份
+      // 点名并抛「形态自检夹具无法构造」。把预检从 shape 自检里拿掉，这里就会看到「没有抛错」而红——
+      // 这是本探针唯一要证明的行为（只测 helper 的清单会把实现删掉仍留绿）。
       const truncatedFixtureRoot = path.join(dir, 'face-truncated');
-      fs.mkdirSync(path.join(truncatedFixtureRoot, 'docs'), { recursive: true });
-      const truncatedMissing = missingShapeFixtureFiles(truncatedFixtureRoot);
-      if (truncatedMissing.length === 0) {
-        throw new Error('夹具预检未报缺席：只含 docs/ 的临时根上受检面文件全缺，预检却报零缺席');
+      fs.mkdirSync(truncatedFixtureRoot, { recursive: true });
+      let fixturePreflightError = null;
+      try {
+        await assertPublicFaceSelfCheckShapes(path.join(dir, 'face-preflight'), { repoRoot: truncatedFixtureRoot });
+      } catch (error) {
+        fixturePreflightError = error;
+      }
+      const fixturePreflightMessage = fixturePreflightError ? String(fixturePreflightError.message) : '';
+      if (!fixturePreflightMessage.includes('形态自检夹具无法构造')) {
+        throw new Error('形态预检在缺文件的源根上没有抛「形态自检夹具无法构造」（拿掉预检的回归）: '
+          + (fixturePreflightMessage || '没有抛错'));
       }
       for (const rel of ['README-zh.md', 'CONTRIBUTING-zh.md']) {
-        if (!truncatedMissing.includes(rel)) {
-          throw new Error('夹具预检未逐份点名缺席文件 ' + rel + '（实际报出: '
-            + truncatedMissing.join('、') + '）');
+        if (!fixturePreflightMessage.includes(rel)) {
+          throw new Error('形态预检没有逐份点名缺席文件 ' + rel + '：' + fixturePreflightMessage);
         }
-      }
-      const fixtureInventory = countFaceFiles();
-      const strayMissing = truncatedMissing.filter((rel) => !fixtureInventory.includes(rel));
-      if (strayMissing.length > 0) {
-        throw new Error('夹具预检报出了受检清单之外的条目: ' + strayMissing.join('、'));
-      }
-      const absentOnAuthoritative = missingShapeFixtureFiles(REPO_ROOT);
-      if (absentOnAuthoritative.length > 0) {
-        throw new Error('受检面文件都在场的检出上预检必须为零缺席，实际报出: '
-          + absentOnAuthoritative.join('、'));
       }
       // 判据面完整在册（缺席用 null 占位而不是从集合里删掉）：缺席由下面的缺席判据逐份点名，
       // 「少了哪份文件」因此是**判据事实**，不是可以静默缩小的受检面。
