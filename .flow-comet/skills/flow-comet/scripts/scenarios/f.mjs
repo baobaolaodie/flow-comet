@@ -912,7 +912,7 @@ export const ENTRIES = [
         // —— 任务书「action 与 verify 同源」自检规则锚（规则本体是 7 字段段的子条目，既有锚句不动）——
         // 判据 = 标签与操作条款都在场；反向构造用同一谓词：全量 split/join 抽掉后必须判缺——抽掉仍判
         // 在场即锚失效（只锚标题会漏掉「义务句被删、标题保留」的退化）。
-        const actionVerifyAnchors = ['action 与 verify 同源', '必须包含同任务'];
+        const actionVerifyAnchors = ['action 与 verify 同源', '必须包含同任务 `<verify>` 断言的字面串'];
         for (const actionVerifyAnchor of actionVerifyAnchors) {
           const actionVerifyMissing = (text) => (text.includes(actionVerifyAnchor)
             ? []
