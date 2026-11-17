@@ -597,8 +597,8 @@ function repoFileText(rel) {
   return fs.readFileSync(path.join(REPO_ROOT, ...rel.split('/')), 'utf8');
 }
 
-function repoFileExists(rel) {
-  return fs.existsSync(path.join(REPO_ROOT, ...rel.split('/')));
+function repoFileExists(rel, root = REPO_ROOT) {
+  return fs.existsSync(path.join(root, ...rel.split('/')));
 }
 
 // 公开面缺席判据（同一实现驱动真实断言与变异探针）：形态判据认定本检出带公开面时（docs/、
@@ -770,6 +770,15 @@ function countFaceFiles() {
   ])];
 }
 
+// 夹具预检（只回答「照真迹复制的夹具能不能从本检出构造」，root 可覆盖以便在临时根上反向构造）：
+// 逐份判存在、返回缺席清单，不复制也不写盘。它与产品面的缺席判据（publicFaceAbsenceProblems）
+// 分工不同——后者判「公开面文档在不在检出面」，本函数判「构造夹具所需的受检面文件在不在」。
+// 少了这层，复制循环里的 copyfile 会以文件错误崩在半路，读者会把 ENOENT 读成产品缺陷，而真因是
+// 「本检出被判为带公开面、却缺公开文档」——那个判红本身是对的，只是崩法不可读。
+function missingShapeFixtureFiles(root = REPO_ROOT) {
+  return countFaceFiles().filter((rel) => !repoFileExists(rel, root));
+}
+
 function copyRepoFileInto(root, rel) {
   const parts = rel.split('/');
   const dest = path.join(root, ...parts);
@@ -777,7 +786,7 @@ function copyRepoFileInto(root, rel) {
   fs.copyFileSync(path.join(REPO_ROOT, ...parts), dest);
 }
 
-async function assertPublicFaceSelfCheckShapes(dir) {
+async function assertPublicFaceSelfCheckShapes(dir, { repoRoot = REPO_ROOT } = {}) {
   const shapeRoot = (name, { authoritative = true } = {}) => {
     const root = path.join(dir, 'shape-' + name);
     fs.mkdirSync(root, { recursive: true });
@@ -802,6 +811,16 @@ async function assertPublicFaceSelfCheckShapes(dir) {
     throw new Error('包形态的跳过提示必须写明「未校验」（跳过 ≠ 通过）: ' + packaged.skip.notice);
   }
   // ② 权威源形态完整：受检面文件照真迹复制，计数自然同步（不硬编码数字）
+  //    复制之前先预检：受检面清单里缺任何一份，copyfile 都会以文件错误崩在循环半路，而真因是
+  //    「本检出被判为带公开面、却缺公开文档」。预检把缺席逐份点名后再抛，读者不会把文件错误
+  //    读成产品缺陷；清单为空才进入复制与 shape 自检。
+  const missingFixture = missingShapeFixtureFiles(repoRoot);
+  if (missingFixture.length > 0) {
+    throw new Error('形态自检夹具无法构造：本检出被判为带公开面（docs/、CONTRIBUTING.md 或 .github/'
+      + ' 任一在场），但照真迹复制的受检面文件缺 ' + missingFixture.length + ' 份——'
+      + missingFixture.join('、') + '。这是「本检出被判为带公开面」的判红形态，不是复制文件失败；'
+      + '补齐上述文件后重跑本套件（相对根 ' + repoRoot + '）');
+  }
   const full = shapeRoot('authoritative');
   for (const rel of countFaceFiles()) copyRepoFileInto(full, rel);
   const complete = await publicFaceSelfCheck({ root: full });
@@ -4121,6 +4140,27 @@ export const ENTRIES = [
       // 形态分派自身的常驻判别力锚：临时根上驱动同一判定，分派对错不再只能靠「在包形态里整跑一次
       // 套件」才知道。夹具的「完整形态」从本检出的公开面真迹复制，故只在声明了公开面的检出上跑。
       await assertPublicFaceSelfCheckShapes(dir);
+      // 夹具预检的 in-place 判别力锚：给 shape 自检一个缺全部受检面文件的源根，真实预检必须逐份
+      // 点名并抛「形态自检夹具无法构造」。把预检从 shape 自检里拿掉，这里就会看到「没有抛错」而红——
+      // 这是本探针唯一要证明的行为（只测 helper 的清单会把实现删掉仍留绿）。
+      const truncatedFixtureRoot = path.join(dir, 'face-truncated');
+      fs.mkdirSync(truncatedFixtureRoot, { recursive: true });
+      let fixturePreflightError = null;
+      try {
+        await assertPublicFaceSelfCheckShapes(path.join(dir, 'face-preflight'), { repoRoot: truncatedFixtureRoot });
+      } catch (error) {
+        fixturePreflightError = error;
+      }
+      const fixturePreflightMessage = fixturePreflightError ? String(fixturePreflightError.message) : '';
+      if (!fixturePreflightMessage.includes('形态自检夹具无法构造')) {
+        throw new Error('形态预检在缺文件的源根上没有抛「形态自检夹具无法构造」（拿掉预检的回归）: '
+          + (fixturePreflightMessage || '没有抛错'));
+      }
+      for (const rel of ['README-zh.md', 'CONTRIBUTING-zh.md']) {
+        if (!fixturePreflightMessage.includes(rel)) {
+          throw new Error('形态预检没有逐份点名缺席文件 ' + rel + '：' + fixturePreflightMessage);
+        }
+      }
       // 判据面完整在册（缺席用 null 占位而不是从集合里删掉）：缺席由下面的缺席判据逐份点名，
       // 「少了哪份文件」因此是**判据事实**，不是可以静默缩小的受检面。
       const docs = new Map();
@@ -4231,7 +4271,9 @@ export const ENTRIES = [
         'docs/internal/DOC-CHECKLIST.md',
         'docs/internal/ROADMAP.md',
       ];
-      const present = maintainerDocs.filter(repoFileExists);
+      // 以箭头函数传参：本函数带可选的根参数，直接把函数名交给 filter 会把下标当成 root，
+      // 在 path.join 处以「Received type number」崩掉（同形调用点一律显式包一层）。
+      const present = maintainerDocs.filter((rel) => repoFileExists(rel));
       if (present.length !== maintainerDocs.length) {
         console.log('SKIP: 治理落盘判据——docs/internal/ 维护者面缺席（' + maintainerDocs.filter((rel) => !repoFileExists(rel)).join('、')
           + '）；本次检出未校验该面，请回维护者主树重跑');
