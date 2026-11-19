@@ -104,6 +104,8 @@ The process is flow-kit's nine stages; the engine runs them as eight nodes. CHAN
 
 Driving a node by hand, the artifacts each node produces, and the two command surfaces are documented in [Usage](docs/USAGE.md); what the engine guarantees and how a node's exit is validated are in [Core Mechanisms](docs/MECHANISM.md).
 
+The fullest introduction is the [node reference](docs/NODES.md): it goes node by node through what each node's agent loads, reads, does and checks.
+
 ## Why flow-comet
 
 1. **Discipline goes from "self-discipline" to "machine-checked"** — every stage entry/exit has script validation: artifacts complete, sections filled, verify commands actually run, tasks stay in bounds.
