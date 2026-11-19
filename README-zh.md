@@ -143,6 +143,7 @@ flow-comet 自动化的是 [flow-kit](https://github.com/rihebty/flow-kit) 的�
 |---|---|
 | [安装](docs/INSTALLATION-zh.md) | 前置条件、四种安装方式、平台选择、安装验证、以及重置（purge 是删除并重建，非卸载） |
 | [使用](docs/USAGE-zh.md) | 8 节点工作流、节点生命周期与其命令、工件、分支模式、执行模式、用户入口 |
+| [节点参考](docs/NODES-zh.md) | 逐节点视图：每个节点的 agent 加载什么、读什么、做什么、产出什么、检测什么 |
 | [核心机制](docs/MECHANISM-zh.md) | 行为契约、三条防线、守卫校验、自定义协议 |
 | [故障排查](docs/TROUBLESHOOTING-zh.md) | 按症状分节：安装、首次运行、节点卡住、平台 |
 | [版本](docs/VERSIONS-zh.md) | 版本语义、版本记录位置、发布清单 |
