@@ -104,7 +104,7 @@ The process is flow-kit's nine stages; the engine runs them as eight nodes. CHAN
 
 Driving a node by hand, the artifacts each node produces, and the two command surfaces are documented in [Usage](docs/USAGE.md); what the engine guarantees and how a node's exit is validated are in [Core Mechanisms](docs/MECHANISM.md).
 
-The fullest introduction is the [node reference](docs/NODES.md): it goes node by node through what each node's agent loads, reads, does and checks.
+The [node reference](docs/NODES.md) is the deepest cut: all eight nodes, column by column.
 
 ## Why flow-comet
 

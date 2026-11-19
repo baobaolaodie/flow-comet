@@ -104,7 +104,7 @@ processor-pipeline/            （归档 change，完整产物集）
 
 手动驱动一个节点、每个节点产出什么工件、以及两套命令面，见[使用](docs/USAGE-zh.md)；引擎保证什么、节点出口如何被校验，见[核心机制](docs/MECHANISM-zh.md)。
 
-更完整的介绍是[节点参考](docs/NODES-zh.md)：它逐节点讲清每个节点的 agent 加载什么、读什么、做什么、检测什么。
+[节点参考](docs/NODES-zh.md)是这份介绍的最深处：八个节点，逐栏摊开。
 
 ## 为什么用 flow-comet
 

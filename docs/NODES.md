@@ -12,7 +12,7 @@ Read it starting with the shared part, then section by section. The shared part 
 
 This page gives no task example you could copy outright. Every project's change is different — artifact content, task breakdown and verification commands all follow the project — and writing one run's content into a reference page turns special-case detail into a general rule. What the page gives is the node's own behaviour: what an artifact looks like is settled by the template, and how the work is done is settled by the prompt and the node book.
 
-The eight nodes are the default protocol. Any installed skills can be composed into a custom protocol and driven by the same engine — routing, gates and the write boundary keep their criteria, and what changes is which nodes exist and what each node declares. This page describes only the default eight.
+The eight nodes are the default protocol. Any installed skills can be composed into a custom protocol and driven by the same engine: routing and gate execution are the same mechanism, while the nodes, outputs, evidence, gates and write scope are declared by the protocol itself. This page describes only the default eight.
 
 ## The shape of the workflow
 
@@ -44,7 +44,7 @@ There is one handover outside the workflow: once the archive exit passes, the le
 
 ## The complete architecture
 
-Pulled back, the workflow is five faces stacked: the user face, the protocol face, the engine face, the artifact face and the cross-change face. The user face decides when work starts and whether a side command runs; the protocol face is all the working method and output constraint the executor reads; the engine face is state, gates and the write boundary; the artifact face is the only truth; the cross-change face accumulates outside a single change and is read or written only at that change's start and close.
+Pulled back, the workflow is five faces stacked: the user face, the protocol face, the engine face, the artifact face and the cross-change face. The user face decides when work starts and whether a side command runs; the protocol face is all the working method and output constraint the executor reads; the engine face is state, gates and the write boundary; the artifact face is the only truth; the cross-change face accumulates outside a single change, is read while framing, designing and planning, and is written back at acceptance and archive.
 
 **Figure 2 · the five faces and the main chain of nodes**
 
@@ -84,7 +84,7 @@ flowchart TB
   PROTO -->|"reads"| C1 & C2 & C3
   ENGINE -->|"checks"| C1 & C2 & C3
   C1 & C2 & C3 -->|"writes"| ARTIFACT
-  C1 -->|"reads: context"| CROSS
+  C1 -->|"reads: context and lessons"| CROSS
   C3 -->|"writes: lessons and changelog"| CROSS
   U2 -. "outside the flow" .-> CROSS
 ```
@@ -101,9 +101,9 @@ The five layers are not five directories but five faces of one thing. Read them 
 | Protocol face | Node books, protocol skills, prompts and templates | The agent executing the node |
 | Engine face | The state machine and node evidence, the entry and exit gates, the write boundary | The engine itself; an agent writes only indirectly, through the commands the engine hands out |
 | Artifact face | Change artifacts and skill declaration markers | The gates, routing and the next session |
-| Cross-change face | Project context, lessons book and changelog | The start and the close of every change |
+| Cross-change face | Project context, lessons book and changelog | Framing, design and planning (read); acceptance and archive (write back) |
 
-Read this way, one node pass crosses only the first four layers: the user face gives the start, the protocol face gives the method and the shape, the engine face keeps the gate, and the artifact face keeps the output and the declaration; the cross-change face does not show up in a pass and is touched only when a change starts (reading the context) and archives (nominating lessons, registering the change). The division between the three documents follows from this — the usage page covers the operating face of the first and fourth layers, the mechanisms page covers the criteria of the third, and this page covers how the second and third land on each node.
+Read this way, one node pass crosses only the first four layers: the user face gives the start, the protocol face gives the method and the shape, the engine face keeps the gate, and the artifact face keeps the output and the declaration; the cross-change face does not show up in every pass, but it is read at framing, design, planning and acceptance, and written back at archive (nominating lessons, registering the change). The division between the three documents follows from this — the usage page covers the operating face of the first and fourth layers, the mechanisms page covers the criteria of the third, and this page covers how the second and third land on each node.
 
 ## What every node shares
 
@@ -154,9 +154,9 @@ A delegation node's evidence takes a different form: it has no artifact of its o
 
 ### The write boundary
 
-Every node has a scope it may write in, and a write outside it is refused before it lands: the platform layer resolves the target to a physical path first, then compares it with the current node's whitelist, so a directory link cannot lead an allowed write elsewhere. This layer and the gates divide the work — the gates govern whether the node may advance, the write boundary governs whether this action may land; both have to pass, so there is no "write it first and clean up later".
+Every node has a scope it may write in, and a write outside it is refused before it lands: the platform layer resolves the target to a physical path first, then compares it with the current node's whitelist, so a directory link cannot lead an allowed write elsewhere. This layer and the gates divide the work — the gates govern whether the node may advance, the write boundary governs whether this action may land; both have to pass, so there is no "write it first and clean up later". The division between the three defense layers, and what each one decides, is on the behaviour page; this section covers only the relation to node progress.
 
-In the default execution mode the coordinating session may not carry out implementation tasks itself: during a delegation it may write only artifacts and task state, and source changes go to a subagent. The subagent is the executor and is admitted by its task's write set; but the state file and the protocol files form the minimal protected set and are opened to no one — editing them by hand is exactly what distorts the state. The judgement runs on identity rather than on path: once the platform marks the caller as a subagent, subagent semantics apply ahead of any path resolution.
+In the default execution mode the coordinating session may not carry out implementation tasks itself: during a delegation it may write only artifacts and task state, and source changes go to a subagent. The subagent is the executor: once the platform marks the caller as a subagent, subagent semantics apply ahead of any path resolution, and a submission outside its task's write set is refused when it returns; the state file and the protocol files form the minimal protected set and are opened to no one — editing them by hand is exactly what distorts the state.
 
 The boundary is not a sandbox: targets inside a script body, an interpreter or command text are not all analysed, and where host permissions allow it a write can still get around. So the accurate statement is that the whitelist bounds the tools you use, not that it seals writes off entirely; the detail of the tool face is in [Usage](USAGE.md#tool-surface-on-dsh).
 
@@ -175,7 +175,7 @@ User decisions are not spread evenly; they cluster in a few places: the topic an
 
 The line between auto-handled and stop condition is whether there is one safe step: take it if there is, report the blockage and the recovery condition if there is not. Nor is a gate failure automatically a question for the user — diagnose it yourself first, carry out the single safe repair if one exists, and escalate to a user decision only when several legitimate ways back exist or a risk has to be accepted.
 
-One default runs through all four classes: the boundary must be declared. Anything that looks like user authority — a repair round past its cap, re-entering an archived change, the coordinator taking over a task — must be explicit and on the record, and silence counts as refusal. This default is the same in every node and does not loosen because the matter is urgent. The confirmation points listed per node are in the decision-points reference book in the skill tree; each node section below marks only that node's decision points and its next hop.
+One default runs through all four classes: the boundary must be declared — anything that looks like user authority must be explicit and on the record, and silence counts as refusal; the concrete forms are on the behaviour page. This default is the same in every node and does not loosen because the matter is urgent. The confirmation points listed per node are in the decision-points reference book in the skill tree; each node section below marks only that node's decision points and its next hop.
 
 ## Node by node
 
@@ -344,7 +344,7 @@ flowchart LR
 
 #### Responsibility
 
-execute is half of the execution segment: it works through the tasks in the task list whose dependencies are already met and which are not marked parallel, one by one, until no serial task is left. By default it is not the one writing code but the coordinator — tasks go to subagents in fresh contexts, each running the development protocol through; only when the user explicitly switches to direct mode does the main agent do the work itself. Parallel tasks are not its business, and subagent-execute delegates those in batches; the two nodes alternate by task state until everything is complete.
+execute is half of the execution segment: it works through the tasks in the task list whose dependencies are already met and which are not marked parallel, one by one, until no runnable serial task is left. By default it is not the one writing code but the coordinator — tasks go to subagents in fresh contexts, each running the development protocol through; only when the user explicitly switches to direct mode does the main agent do the work itself. Parallel tasks are not its business, and subagent-execute delegates those in batches; the two nodes alternate by task state until everything is complete.
 
 #### Skills loaded
 
@@ -377,7 +377,7 @@ execute is half of the execution segment: it works through the tasks in the task
 
 #### Exit checks
 
-- Serial leftovers: a pending serial task blocks, and a parallel-marked task done by this node is blocked as an over-authorised delegation.
+- Serial leftovers: a runnable serial task (its dependencies met) blocks, and a parallel-marked task done by this node is blocked as an over-authorised delegation.
 - Summary completeness: every completed task has a summary, with the skeleton, header and section order matching the template, the self-check method declared as one of the three values and the lessons-scan section present; how well it is written is not judged here.
 - Task-set signature agreement: compared with the one computed on entry, and a task added, removed or changed is blocked with the pointer to a controlled replan.
 - Empty exit: with every task parallel the node may not exit empty; when there really is no serial work it declares the empty exit explicitly, the exit passes and leaves one audit note — the default is still to block.
@@ -419,13 +419,13 @@ subagent-execute is the other half of the execution segment: it delegates in bat
 #### Artifacts and evidence
 
 - No artifact of its own. The evidence is a pair of records: a delegation request per task (id handoff-request) and a returned result (id handoff-result).
-- The result must carry three things — the commit identifier, the real verification output and the checks it declares complete, that is the Return Contract; a task that is pure documentation or produces no code change may state honestly that there is no corresponding test, rather than dropping the field.
+- The result must carry four things — the failure evidence, the commit identifier, the real verification output and the checks it declares complete, that is the Return Contract; a task with nothing to commit has the commit identifier waived by its request record, and the other fields cannot be dropped.
 - The task summary is still produced by the subagent and lands in the change directory; the coordinator uses it for acceptance and not as a substitute for evidence.
 
 #### Exit checks
 
 - In-flight delegations: a request without a matching result blocks; a withdrawn request is not in flight, and the withdrawal is on the record with the history kept.
-- A Return Contract item missing sends it back: the commit identifier, the verification output and the completed checks. The checks are named per this node's uniform contract, and a wrong name is judged the same as a protocol never loaded.
+- A Return Contract item missing sends it back: the failure evidence, the commit identifier, the verification output and the completed checks, with the commit identifier waived for a task with nothing to commit. The checks are named per this node's uniform contract, and a wrong name is judged the same as a protocol never loaded.
 - Write boundary: a returned commit that leaves the task's write set is blocked, and a commit carrying along the task list the coordinator maintains is blocked too.
 - The summary is present and matches the template: every delegated and completed task has its own summary.
 - Parallel only: a serial task delegated by this node is an over-authorised delegation, blocked, with the task sent back to execute.
@@ -443,13 +443,14 @@ flowchart LR
   T["Task list<br/>parallel tasks whose dependencies are met, and pending serial tasks"]
   X["execute<br/>delegates serial tasks one by one<br/>changes only task state and summaries"]
   S["subagent-execute<br/>delegates parallel tasks in batches"]
-  C["Return Contract<br/>commit identifier · verification output · completed checks"]
+  C["Return Contract<br/>failure evidence · commit identifier · verification output · completed checks"]
   G["Execution segment closes<br/>summaries in, signature unchanged, no serial leftovers"]
   R["review"]
   T --> X
   X -->|"ready parallel tasks"| S
   S -->|"the subagent returns"| C
-  C --> X
+  C -->|"a serial task is left"| X
+  C -->|"a ready parallel task is left"| S
   X -->|"next pass"| S
   X -->|"serial and parallel both empty"| G
   G --> R
@@ -459,7 +460,7 @@ flowchart LR
 
 #### Responsibility
 
-review is the quality gate before merging: it checks implementation, tests and UI together, confirms that every acceptance criterion is really met, that no round of the test pyramid is missing and that the code brings no debt into the trunk, then tags every finding with a severity and a disposition. It produces only a report and fix tasks and changes no code — a finding that needs fixing goes back into the execution node's lifecycle. Review runs in four rounds — specification compliance, contract consistency, the six dimensions of code quality and UI visuals (frontend only) — plus two supplementary reviews added when their trigger holds.
+review is the quality gate before merging: it checks implementation, tests and UI together, confirms that every acceptance criterion is really met, that no round of the test pyramid is missing and that the code brings no debt into the trunk, then tags every finding with a severity and a disposition. It produces only a report and fix tasks and changes no code — a finding that needs fixing goes back into the execution node's lifecycle. Review runs in four rounds — specification compliance (with a contract-consistency pass between the first and the second), the six dimensions of code quality, UI visuals (frontend only) and the supplementary round added when its trigger holds (tech-debt assessment and cross-model spot-check); a change that adds top-level modules or spans five or more modules also runs an architecture dependency check.
 
 #### Skills loaded
 
@@ -639,8 +640,8 @@ flowchart TB
   RE["Controlled re-entry<br/>back to execution / delegated execution / review / verification"]
   ENTER --> LESSON --> ISSUE --> RECORD --> MOVE --> LOG --> NOTIFY --> BRANCH --> DONE
   RECORD -. "the record precedes the move" .-> MOVE
-  DONE -. "a defect surfaces before the move, and the user has authorised it" .-> RE
-  RE -. "returns to the source after the target node's exit" .-> DONE
+  RECORD -. "a defect surfaces before the move, and the user has authorised it" .-> RE
+  RE -. "the target node's exit passes, and the work returns to archive" .-> RECORD
 ```
 
 ## How nodes loop
@@ -719,15 +720,11 @@ It accumulates across changes: a refresh keeps the existing terminology and sett
 
 A decline is on the record too: once the skip is recorded, later initialisations do not prompt again; a skip is not a refusal but a note that the matter is known and decided against. The context document is not a workflow artifact: it does not go into the change directory and does not archive with the change.
 
-### Custom protocols
+### Composing a protocol
 
-The eight nodes are the default protocol, not the only one. Protocol composition assembles any installed skills into one protocol file and hands it to the same engine: the node sequence and transitions, the entry and exit gates and the write boundary all follow the declaration, with no new runtime capability required.
+The eight nodes are the default protocol, not the only one. Composition assembles any installed skills into one protocol file and hands it to the same engine: the node sequence and transitions, the entry and exit gates and the write boundary all follow the protocol's own declaration; the built-in eight stay the default and cannot be replaced, and a custom protocol coexists with the built-in one.
 
-A protocol declares at least its nodes, each node's implementation skill, each node's outputs and each output's evidence; every node must have artifacts and evidence, and node ids must not reuse the built-in eight — without artifacts there is nothing to validate or recover from. The write whitelist may be declared explicitly and supports the change identifier as a placeholder, so one protocol serves every change; when it is omitted, built-in nodes keep the built-in table and custom nodes may write the artifact directory only, with an explicit declaration needed for source.
-
-Taking effect is explicit: an explicit choice outranks the project environment setting, which outranks the built-in default. Without an explicit choice everything behaves exactly like the built-in protocol; the built-in eight nodes stay available and cannot be replaced, and a custom protocol and the built-in one coexist without interfering.
-
-Protocol composition itself is outside the flow: it produces a protocol file only, the destination is yours to name and it cannot be written into the skill directory; once generated it takes effect only after passing protocol validation, whose output is echoed as evidence — if it fails, change it until it passes.
+The minimal structure, the rule that every node needs artifacts and evidence, the reserved node ids, the write whitelist and the precedence of explicit choices live in the behaviour page's "Custom protocols"; the composition steps and the validation command are in the composition skill book.
 
 ## Where the authority lives
 
