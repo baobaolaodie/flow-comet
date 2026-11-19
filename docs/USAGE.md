@@ -17,6 +17,8 @@ Everything here is done inside the project you installed into, with the installe
 | 7 | `verify` | Integration verification; the exit actually runs the test commands | control |
 | 8 | `archive` | Compile leftovers, declare and record the node, move the change into the archive, register it | control |
 
+For what each node's agent loads, reads, does and checks, see the [node reference](NODES.md).
+
 `next` tells you where you are; `status` prints the machine state. Both are read-only.
 
 ## How you use it
