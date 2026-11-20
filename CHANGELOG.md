@@ -20,6 +20,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 ### Changed
 
 - **`health` refuses to write a report when the lessons count regresses**: a run whose lessons count is below the previous report's fails instead of writing a new baseline. ([#186](https://github.com/baobaolaodie/flow-comet/pull/186))
+- **`verify` waits long enough for the project's own baseline**: the exit's default wait budget is 15 minutes instead of 5, still overridable through the documented environment variable, so a change that runs the two regression suites from its verify block is no longer cut off mid-run. ([#187](https://github.com/baobaolaodie/flow-comet/pull/187))
+- **A timeout and a failing command are told apart**: the verify exit reports them as different problems — a timeout names the budget it used, the elapsed time and the command that raises it, while a failing command names its exit code and its output. ([#187](https://github.com/baobaolaodie/flow-comet/pull/187))
+- **The fourth consecutive failure keeps its diagnosis**: the decision point prints the command, the budget and the error output before asking whether to keep fixing or stop. ([#187](https://github.com/baobaolaodie/flow-comet/pull/187))
 
 ## [1.8.0] - 2026-11-18
 
