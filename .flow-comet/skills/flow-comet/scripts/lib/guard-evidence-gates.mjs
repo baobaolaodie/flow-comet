@@ -425,15 +425,19 @@ export async function runAcCoverageGate({ node, state }) {
   process.exit(1);
 }
 
-// verify 命令的等待预算（毫秒）：默认 900000ms（15 分钟）——文档化的两级基线在本机实测约 8 分钟，
-// 留近一倍余量；FLOW_COMET_VERIFY_TIMEOUT_MS 优先，非数字 / 0 / 负数一律回落默认（0 不是「不限时」：
+// verify 命令的等待预算默认值（毫秒）：15 分钟 = 文档化的两级基线在本机实测约 8 分钟 + 近一倍余量。
+// 默认值只此一处——纯函数的回落、环境变量缺省、超时支放宽建议的下限全部消费它（同一个事实两处表达
+// 必然分叉：改一处漏一处时，上限与建议值会各说各话）。
+const DEFAULT_VERIFY_TIMEOUT_MS = 900000;
+
+// 等待预算解析：FLOW_COMET_VERIFY_TIMEOUT_MS 优先，非数字 / 0 / 负数一律回落默认（0 不是「不限时」：
 // 按 0 去 spawn 等于每次 verify 都当场超时）。纯函数——只吃传入的 env、不读 process.env 全局，因此
-// 「默认 / 覆盖 / 非数字 / 0」四种形态都能被场景直接断言。执行路径的唯一消费点在下方
-// runVerifyExitGate：报文回显的预算就是真实生效的上限（同一个数只留一处推导，两处表达必然分叉）。
+// 「默认 / 覆盖 / 非数字 / 0」四种形态都能被场景直接断言。执行路径的唯一消费点在下方 runVerifyExitGate：
+// 报文回显的预算就是真实生效的上限。
 export function resolveVerifyTimeoutBudget(env = process.env) {
-  const raw = env?.FLOW_COMET_VERIFY_TIMEOUT_MS ?? '900000';
+  const raw = env?.FLOW_COMET_VERIFY_TIMEOUT_MS ?? String(DEFAULT_VERIFY_TIMEOUT_MS);
   const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 900000;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_VERIFY_TIMEOUT_MS;
 }
 
 // 「子进程被掐断」与「命令自己非零退出」是两种事实：恢复动作不同（等更久 / 去改命令），因此不能合成
@@ -551,7 +555,8 @@ export async function runVerifyExitGate({ protocol, node, state }) {
     const exitCode = e.verifyExitCode == null ? 'unknown' : e.verifyExitCode;
     if (e.verifyTimeout) {
       console.error('BLOCKED: verify 超时（预算 ' + verifyTimeoutMs + 'ms，实际耗时 ' + elapsed + 'ms，命令已被终止）: ' + verifyCommand);
-      const suggested = verifyTimeoutMs < 900000 ? 900000 : verifyTimeoutMs * 2;
+      const suggested = verifyTimeoutMs < DEFAULT_VERIFY_TIMEOUT_MS
+        ? DEFAULT_VERIFY_TIMEOUT_MS : verifyTimeoutMs * 2;
       console.error('恢复: 需要更长等待时设置 FLOW_COMET_VERIFY_TIMEOUT_MS=' + suggested + '（当前生效上限 ' + verifyTimeoutMs + 'ms）后重跑同一命令');
     } else {
       // 失败支全文不得出现 timeout 字样：「命令自己非零退出」的时间预算与结论无关，写进去只会把两种
