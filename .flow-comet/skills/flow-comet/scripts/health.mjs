@@ -661,29 +661,37 @@ function buildSnapshot(readings) {
   return SNAPSHOT_FIELDS.map((field) => ({ key: field.key, value: field.value(readings) }));
 }
 
+// 审计行的**单一表达处**（日期 / 增补层在场 / 基线）：成功路径与回退路径共用同一段拼装。
+// 文件头承诺「标准输出恒输出 `HEALTH:` 审计行」——两条路径各写一份表达，承诺就会在失败分支
+// 出现静默缺口（回退时曾只打两行：日期与当次基线都无处可读）。
+// 审计行内容当日确定（日期 / 在场判定 / 基线）——不引入新的易变行。
+function auditSegment(root, { date, baseline, brooks }) {
+  return 'HEALTH: 日期 ' + date + ' · 增补层 ' + (brooks.present ? '在场' : '不在场')
+    + ' · 基线 ' + (baseline
+      ? '`' + relativeLabel(root, path.join(root, '.specs', 'health', baseline.name)) + '`'
+      : '无（本次为基线，无差异可比）');
+}
+
 // 结果摘要（前缀行供机检检索）：审计行与**报告落盘路径恒输出**（不带 `--stdout` 亦然）——
 // 报告是唯一写入面，调用方至少要能从标准输出确认「跑没跑、落在哪、基线是谁、增补层在不在场」。
 // `--stdout` 时报告正文原样在前（与落盘逐字节一致），审计行追加在后且不混进报告字节。
-// 审计行内容当日确定（日期 / 在场判定 / 基线）——不引入新的易变行。
 function printResult({ stdout, root, reportText, reportPath, date, baseline, brooks, lessonsGuard }) {
   const output = [];
   // 回退 = 不落盘、不回流正文：报告是唯一写入面，写一份「已回退」的读数就会成为下次对比的基线；
   // 不写 = 每次运行都继续红，直到条目补齐或由人工另行处置（未验证 ≠ 通过）。
   if (lessonsGuard.status === 'fail') {
+    // 审计行先于 FAIL 原因：日期 / 基线 / 「报告未写入」三件事实都在这一行，失败时恰恰最需要它。
+    output.push(auditSegment(root, { date, baseline, brooks })
+      + ' · 报告 `' + relativeLabel(root, reportPath) + '` 未写入');
     output.push('HEALTH: FAIL 经验条目数回退 ' + lessonsGuard.previous + ' → ' + lessonsGuard.current
       + '（基线 `' + relativeLabel(root, path.join(root, '.specs', 'health', lessonsGuard.baselineName))
-      + '`；当前 `' + LESSONS_DISPLAY + '`）');
-    output.push('HEALTH: 本次报告未写入 `' + relativeLabel(root, reportPath)
-      + '`——回退读数落盘会成为下次对比基线；补齐条目后再跑，接受损失须人工另行处置');
+      + '`；当前 `' + LESSONS_DISPLAY + '`）——回退读数落盘会成为下次对比基线；补齐条目后再跑，接受损失须人工另行处置');
     console.log(output.join('\n'));
     return;
   }
   if (stdout) output.push(reportText, '');
   output.push('HEALTH: 报告 `' + relativeLabel(root, reportPath) + '`');
-  output.push('HEALTH: 日期 ' + date + ' · 增补层 ' + (brooks.present ? '在场' : '不在场')
-    + ' · 基线 ' + (baseline
-      ? '`' + relativeLabel(root, path.join(root, '.specs', 'health', baseline.name)) + '`'
-      : '无（本次为基线，无差异可比）'));
+  output.push(auditSegment(root, { date, baseline, brooks }));
   output.push('HEALTH: 经验条目数 ' + lessonsGuard.current + '（' + lessonGuardNote(lessonsGuard) + '）');
   output.push('HEALTH-DONE');
   console.log(output.join('\n'));

@@ -422,8 +422,12 @@ export const ENTRIES = [
 
   // 280: health 复现性——同一冻结树两次运行，差异必须落在报告的「易变行声明」集合内（声明的
   // 差异集合之外逐字节一致）；`--stdout` 与落盘逐字节相同；state 零改写（报告是唯一写入面）。
+  // 同场景内再挂条目数回退门的三态子锚（in-place，不新增场景号）：回退 → exit 1 且当天报告
+  // 不落盘、审计行照常输出；持平 → exit 0 并落盘；基线报告无「条目数」读数 → exit 0 并显式
+  // 说明为什么没判。三态各用独立夹具根（health 成功即写当天报告，同根复用会让上一态的产物
+  // 成为下一态的基线——判据自我污染）。
   {
-    name: '280 health 两次运行：易变行声明之外逐字节一致 + --stdout 与落盘相同 + state 零改写',
+    name: '280 health 两次运行：易变行声明之外逐字节一致 + --stdout 与落盘相同 + state 零改写 + 条目数回退门三态',
     run: (dir) => {
       writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
       writeFile(dir, '.specs/LESSONS.md', '# LESSONS\n\n### L-001 首条\n\n### L-002 次条\n');
@@ -454,7 +458,8 @@ export const ENTRIES = [
       }
       assertEqual(differing.length, 0, '两次运行的差异落在易变行声明之外: ' + differing.join(' | '));
 
-      const today = requireModuleExport(timeUtilsModule, 'formatLocalDate', 'time-utils.mjs')(new Date());
+      const formatLocalDate = requireModuleExport(timeUtilsModule, 'formatLocalDate', 'time-utils.mjs');
+      const today = formatLocalDate(new Date());
       const reportFile = path.join(dir, '.specs', 'health', today + '-HEALTH.md');
       assertTrue(fs.existsSync(reportFile), '报告未按 <日期>-HEALTH.md 形态落盘: ' + reportFile);
       // `--stdout` = 落盘报告正文原样在前 + `HEALTH:` 审计行追加在后：审计行是 CLI 摘要而非报告
@@ -468,6 +473,60 @@ export const ENTRIES = [
       assertStateBytesUnchanged(dir, stateBytes, 'health 运行后');
       // 同日重跑不与自己对比（否则报告自我污染、复现性判据失效）
       assertOut(second, '基线：无（`.specs/health` 下无日期不同的历史报告）');
+
+      // ---------- 条目数回退门的三态子锚（in-place：不新增场景号） ----------
+      // 判据 = 「最近一份日期不同的历史报告」的条目数读数与当前读数比大小：更少 → 红；相等 → 绿；
+      // 基线无读数 → 显式跳过（未判 ≠ 通过）。三个独立夹具根：health 成功即写当天报告，同根复用
+      // 会让上一态的产物成为下一态的基线（判据自我污染）。
+      const baselineDate = formatLocalDate(new Date(Date.now() - 24 * 60 * 60 * 1000)); // 必然 ≠ 今天
+      const lessonsFixture = (count) => '# LESSONS\n\n'
+        + Array.from({ length: count }, (_, i) => '### L-' + String(i + 1).padStart(3, '0') + ' 夹具条目').join('\n\n') + '\n';
+      const baselineReport = (entriesLine) => '# 健康巡检 · 历史夹具\n\n' + entriesLine + '\n';
+      const baselineReportRel = '.specs/health/' + baselineDate + '-HEALTH.md';
+      const todayReportRel = '.specs/health/' + today + '-HEALTH.md';
+
+      // ① 回退（历史 5 / 当前 2）→ exit 1，当天报告不落盘（夹具根零写入），审计行照常输出
+      const rollbackRoot = path.join(dir, 'regression-rollback');
+      writeFile(rollbackRoot, '.specs/LESSONS.md', lessonsFixture(2));
+      writeFile(rollbackRoot, baselineReportRel, baselineReport('- 条目数：5'));
+      const rollbackBefore = treeFingerprint(rollbackRoot);
+      const regressed = runSideScript(SIDE_HEALTH, ['--root', rollbackRoot, '--stdout'], dir);
+      assertExit(regressed, 1);
+      assertOut(regressed, 'HEALTH: 日期 ' + today + ' · 增补层 ');
+      assertOut(regressed, '基线 `' + baselineReportRel + '`');
+      assertOut(regressed, '报告 `' + todayReportRel + '` 未写入');
+      assertOut(regressed, 'HEALTH: FAIL 经验条目数回退 5 → 2');
+      assertTrue(regressed.output.indexOf('HEALTH: 日期 ') < regressed.output.indexOf('HEALTH: FAIL '),
+        '审计行应排在 FAIL 原因之前（「报告未写入」只在这一行表达）');
+      assertTrue(!regressed.output.includes('## 确定性层（机器可判）'), '回退时报告正文不应回流到标准输出');
+      assertEqual(fingerprintChanges(rollbackBefore, treeFingerprint(rollbackRoot)).join(' | '), '',
+        '回退时夹具根有写入（回退读数不得落盘——落盘会成为下次对比的基线）');
+
+      // ② 持平（历史 3 / 当前 3）→ exit 0，当天报告照常落盘（「没有增长」不是回退）
+      const flatRoot = path.join(dir, 'regression-flat');
+      writeFile(flatRoot, '.specs/LESSONS.md', lessonsFixture(3));
+      writeFile(flatRoot, baselineReportRel, baselineReport('- 条目数：3'));
+      const flat = runSideScript(SIDE_HEALTH, ['--root', flatRoot], dir);
+      assertExit(flat, 0);
+      assertOut(flat, 'HEALTH: 经验条目数 3（基线 3 · 未回退）');
+      const flatReportPath = path.join(flatRoot, todayReportRel);
+      assertTrue(fs.existsSync(flatReportPath), '持平态报告未按 <日期>-HEALTH.md 落盘');
+      assertTrue(fs.readFileSync(flatReportPath, 'utf8').includes('- 条目数：3'),
+        '落盘报告缺条目数读数（下一轮基线取不到读数 → 判据静默退化成跳过）');
+
+      // ③ 历史报告无该读数（旧版 / 夹具报告）→ exit 0，显式说明为什么没判（未判 ≠ 通过）
+      const legacyRoot = path.join(dir, 'regression-legacy');
+      writeFile(legacyRoot, '.specs/LESSONS.md', lessonsFixture(2));
+      writeFile(legacyRoot, baselineReportRel, '# 健康巡检 · 旧版夹具（无条目数读数）\n');
+      const legacy = runSideScript(SIDE_HEALTH, ['--root', legacyRoot], dir);
+      assertExit(legacy, 0);
+      assertOut(legacy, 'HEALTH: 经验条目数 2（跳过：基线报告 ' + baselineDate + '-HEALTH.md 无「条目数」读数）');
+      assertTrue(fs.existsSync(path.join(legacyRoot, todayReportRel)),
+        '基线无读数时应按不可判处理并照常落盘（本轮报告成为下一轮基线）');
+
+      // 结构锚：审计行两路径共用同一段拼装（第二份表达即红——「失败分支少打审计行」正是这样发生的）
+      assertEqual(fs.readFileSync(SIDE_HEALTH, 'utf8').split("'HEALTH: 日期 '").length - 1, 1,
+        'health.mjs 的审计行拼装应只有一处（成功与失败路径共用同一段）');
     },
   },
 
