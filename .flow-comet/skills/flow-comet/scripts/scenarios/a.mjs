@@ -1698,6 +1698,7 @@ export const ENTRIES = [
       assertOut(resEnv, 'verify 超时');
       assertOut(resEnv, '500ms');
       assertOut(resEnv, 'FLOW_COMET_VERIFY_TIMEOUT_MS=');
+      assertOut(resEnv, '子进程可能仍在运行');
       assertNotOut(resEnv, 'verify 命令失败');
       // 子断言:失败计数按 change 写入(guard 侧递增语义)
       const stFail = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
@@ -1730,6 +1731,13 @@ export const ENTRIES = [
       const iDiag = res4.output.indexOf('verify 命令失败');
       const iDecide = res4.output.indexOf('已失败 4 次');
       assertTrue(iDiag >= 0 && iDecide >= 0 && iDiag < iDecide, '第 4 次失败必须先打印诊断再打印决策行');
+      // ENOBUFS：输出超过捕获上限的 spawn 错误不得被当成超时（加预算治不了缓冲上限）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n' +
+        '```bash\nnode -e "process.stdout.write(Buffer.alloc(2*1024*1024, 97))"\n```\n');
+      const resBuf = runGuard(['exit', 'verify'], dir, { FLOW_COMET_VERIFY_TIMEOUT_MS: '900000' });
+      assertExit(resBuf, 1);
+      assertOut(resBuf, 'ENOBUFS');
+      assertNotOut(resBuf, 'verify 超时');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```bash\nnode -e "1"\n```\n');
       // AC-5 隔离：verify 成功只清 verify 计数，不得清 Fix 归位轮次（预置计数，成功出口后核对）
       const stBeforePass = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));

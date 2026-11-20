@@ -181,6 +181,7 @@ export const ENTRIES = [
       assertOut(timedOut, 'verify 超时');
       assertOut(timedOut, '500ms');
       assertOut(timedOut, 'FLOW_COMET_VERIFY_TIMEOUT_MS=');
+      assertOut(timedOut, '子进程可能仍在运行');
       assertNotOut(timedOut, 'verify 命令失败');
       // 子断言:失败计数按 change 写入(guard 侧)
       const stTimed = readStateFile(dir);
