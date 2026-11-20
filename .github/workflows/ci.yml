@@ -447,7 +447,7 @@ jobs:
           console.log('single-authority check passed');
           EOF
 
-      - name: '图语法检查 / Docs diagram syntax (mermaid@12 + jsdom)'
+      - name: '图语法检查 / Docs diagram syntax (mermaid@12.3.0 + jsdom@29.1.1)'
         run: |
           # 判据只有一条：mermaid 解析器能接受 docs/NODES*.md 里的图；「看起来像 mermaid」不算证据。
           #
@@ -467,7 +467,7 @@ jobs:
           mkdir -p "$MERMAID_HOME"
           cp scripts/check-mermaid.mjs "$MERMAID_HOME/check-mermaid.mjs"
           cd "$MERMAID_HOME"
-          npm install --no-save --package-lock=false mermaid@12 jsdom
+          npm install --no-save --package-lock=false mermaid@12.3.0 jsdom@29.1.1
           LOG="$MERMAID_HOME/check.log"
           set +e
           node "$MERMAID_HOME/check-mermaid.mjs" "$GITHUB_WORKSPACE" > "$LOG" 2>&1

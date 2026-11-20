@@ -25,7 +25,7 @@ description: "Use only when explicitly invoked as /flow-comet-health; periodic c
 
 | 层 | 内容 | 产出者 |
 |---|---|---|
-| 确定性层 | 项目上下文一致性 · 经验条目编号连续性 · 技术债表项数 · 冗余工具在场判定 · 版本历史统计 · **架构文档结构**（`.specs/ARCHITECTURE.md` 在场时按上游模板的 8 个 H2 与「ADR 列表」段的 `### ADR-<数字>` 条目形态报告结构问题；文件缺席输出「跳过」、骨架不可派生输出「未校验」——只读报告，不阻断、不写状态） | `health.mjs`（逐项带计数、判据与复现命令） |
+| 确定性层 | 项目上下文一致性 · 经验条目编号连续性 · 经验条目数不回退（对最近一份日期不同的历史报告；回退时本命令以非零退出且不写报告） · 技术债表项数 · 冗余工具在场判定 · 版本历史统计 · **架构文档结构**（`.specs/ARCHITECTURE.md` 在场时按上游模板的 8 个 H2 与「ADR 列表」段的 `### ADR-<数字>` 条目形态报告结构问题；文件缺席输出「跳过」、骨架不可派生输出「未校验」——只读报告，不阻断、不写状态） | `health.mjs`（逐项带计数、判据与复现命令） |
 | 增补层 | 代码体检工具的 4 维结果（代码质量 / 架构 / 技术债 / 测试质量） | agent：工具在场时执行体检技能，结果**并入同一份报告**并标注来源 |
 | 降级声明 | 可选工具不在场的原因 + 判据说明 | `health.mjs`（每份报告都有） |
 
@@ -39,7 +39,7 @@ description: "Use only when explicitly invoked as /flow-comet-health; periodic c
    node .claude/skills/flow-comet/scripts/health.mjs --root . --stdout
    ```
 
-   落盘 `.specs/health/<日期>-HEALTH.md`；`--stdout` 打印与落盘**逐字节相同**的内容，便于两次运行对照。
+   落盘 `.specs/health/<日期>-HEALTH.md`；`--stdout` 打印与落盘**逐字节相同**的内容，便于两次运行对照。经验条目数低于最近一份历史报告时，本命令以非零退出且**不落盘**——报警读数本身就是结果，写成报告会变成下一次的基线。
 
 2. 看报告「增补层」的在场判定：
    - **在场**：执行代码体检技能（`brooks-health`），把 4 维结果填进增补层的四个槽位，并在来源标注行写明命中落点；
@@ -66,7 +66,7 @@ description: "Use only when explicitly invoked as /flow-comet-health; periodic c
 ## 只读边界
 
 - **读**：`.specs/CONTEXT.md`、`.specs/LESSONS.md`、`.specs/health/*.md`（基线）、版本历史、可选工具的在场探测。
-- **写**：只写 `.specs/health/<日期>-HEALTH.md` 一份报告。
+- **写**：只写 `.specs/health/<日期>-HEALTH.md` 一份报告；**例外**：经验条目数回退时不写任何报告并以非零退出。
 - **不写运行状态**：不触碰 `.flow-comet/flow-comet-state.json`，本命令不新增任何状态字段（横向命令不进 change 生命周期）。
 - **不改业务代码**，也不自动改写 `.specs/CONTEXT.md` / `.specs/LESSONS.md`：发现项只进报告与建议清单——就地改写会让「巡检」变成隐式写入通道。
 - **不自动开 change**：是否立项由用户决定。

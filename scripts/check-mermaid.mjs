@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const PAGES = ['docs/NODES.md', 'docs/NODES-zh.md'];
-const DEPENDENCY_HINT = 'npm install --no-save --package-lock=false mermaid@12 jsdom';
+const DEPENDENCY_HINT = 'npm install --no-save --package-lock=false mermaid@12.3.0 jsdom@29.1.1';
 
 // 抽取全部 mermaid 块（先归一化 CRLF）。围栏按 Markdown 规则逐行扫描：
 //  - 开启围栏允许 0~3 个前导空格，围栏长度 ≥ 3；
@@ -53,8 +53,8 @@ export function extractMermaidBlocks(text) {
 }
 
 // mermaid 运行在浏览器 DOM 上：jsdom 建最小文档，把解析器会碰到的构造器挂到全局。
-// 这与此前一次性可行性验证跑通的垫片同形（window / document / Element / HTMLElement /
-// SVGElement），不额外初始化 mermaid 配置。
+// 垫片只提供 mermaid 解析路径需要的 DOM 构造器（window / document / Element /
+// HTMLElement / SVGElement），不额外初始化 mermaid 配置。
 async function loadMermaid() {
   const { JSDOM } = await import('jsdom');
   const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/' });
@@ -138,7 +138,7 @@ async function main(argv) {
   return 0;
 }
 
-// 直接运行才执行检查：被 import 时（单测只读 extractMermaidBlocks）不得触发解析。
+// 直接运行才执行检查：被 import 时（调用方只读 extractMermaidBlocks）不得触发解析。
 function isDirectRun() {
   if (!process.argv[1]) return false;
   try {
