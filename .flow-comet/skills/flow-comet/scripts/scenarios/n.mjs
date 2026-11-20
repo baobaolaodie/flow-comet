@@ -52,6 +52,15 @@ import {
   writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import { scenarioProtocolPath } from '../lib/test-assertions.mjs';
+import {
+  NODE_IDS,
+  comparePage,
+  extractColumn,
+  extractNodeSections,
+  normalizeNewlines,
+  parseExplain,
+} from '../lib/nodes-facts.mjs';
+import { scanHeadings } from '../lib/section-body.mjs';
 import { taskBlocks } from '../task-parsing.mjs';
 // 波次段名的登记点与「登记名 ↔ 模板段名」对账：登记值在骨架模块（模板缺席时的段名基准唯一登记处），
 // 归一化取共享实现——两边同一把尺子，改字的段名不得被判成一致。
@@ -647,6 +656,117 @@ function assertProbesDiscriminate(problems, docs, rules, probes) {
       problems.push('反向构造判别力缺失（' + label + '：' + (expectReported ? '未被判违规' : '被误判违规') + '）');
     }
   }
+}
+
+// 节点参考页的事实锚（TA-24 的子锚，不新增场景号）：`docs/NODES.md` 与 `docs/NODES-zh.md` 的
+// 「加载技能 / 提示词与模板 / 产出与证据」三栏必须与引擎派生视图一致。期望值只从
+// `workflow-state.mjs explain <node>` 子进程读（与门禁同源），页面抽取与比较只在 lib/nodes-facts.mjs
+// 一处——本文件不另写页面解析，也不另立一份事实派生规则。
+const NODE_FACT_PROBE_NODE = 'plan';
+
+// 反向构造之一：在节点的「加载技能」栏里把某个技能名换成错误名（纯内存）。返回改后的全文；
+// 该栏缺席或找不到要被替换的名字时返回 null——前提失效与「改了却不报」是两件事，分开报。
+function rewriteSkillInNodeColumn(text, node, from, to) {
+  const section = extractNodeSections(text).get(node);
+  if (section === undefined) return null;
+  const column = extractColumn(section, 'skills');
+  if (column === null || !column.includes(from)) return null;
+  const sectionStart = text.indexOf(section);
+  const columnStart = sectionStart < 0 ? -1 : text.indexOf(column, sectionStart);
+  if (columnStart < 0 || columnStart >= sectionStart + section.length) return null;
+  return text.slice(0, columnStart) + column.replace(from, to) + text.slice(columnStart + column.length);
+}
+
+// 反向构造之二：删掉一个节点小节。段界沿用 lib/section-body.mjs 的围栏感知扫描（与页面抽取
+// 同一口径——围栏内的标题是正文示例，不结束小节），本函数只用于内存反构造。未命中返回 null。
+function removeNodeSection(text, node) {
+  const { lines, headings } = scanHeadings(text);
+  const start = headings.findIndex((heading) => heading.level === 3 && heading.text === node);
+  if (start < 0) return null;
+  const next = headings.slice(start + 1).find((heading) => heading.level <= 3);
+  const end = next === undefined ? lines.length : next.index;
+  lines.splice(headings[start].index, end - headings[start].index);
+  return lines.join('\n');
+}
+
+// 两类反向构造的判别力断言（与真实断言共用同一比较实现）：换成错误技能名 ⇒ 必须点名该节点的
+// 「技能集合」；删掉小节 ⇒ 必须报「节点小节」缺席。构造没生效或没被判红都计入 problems——
+// 前者说明锚该随页面更新，后者说明比较成了恒绿的摆设。
+function nodeFactProbeProblems(page, text, factsByNode) {
+  const problems = [];
+  const skill = 'flow-comet-' + NODE_FACT_PROBE_NODE;
+  const wrong = rewriteSkillInNodeColumn(text, NODE_FACT_PROBE_NODE, skill, skill + '-wrong');
+  if (wrong === null) {
+    problems.push(page + ' 反向构造前提失效（未在 ' + NODE_FACT_PROBE_NODE + ' 的加载技能栏找到 ' + skill + '）');
+  } else if (!comparePage({ page, text: wrong, factsByNode })
+    .some((problem) => problem.node === NODE_FACT_PROBE_NODE && problem.field === '技能集合')) {
+    problems.push(page + ' 反向构造判别力缺失（把 ' + NODE_FACT_PROBE_NODE + ' 的技能名换成错误名未被判违规）');
+  }
+  const removed = removeNodeSection(text, NODE_FACT_PROBE_NODE);
+  if (removed === null) {
+    problems.push(page + ' 反向构造前提失效（未找到 ### ' + NODE_FACT_PROBE_NODE + ' 小节）');
+  } else if (!comparePage({ page, text: removed, factsByNode })
+    .some((problem) => problem.node === NODE_FACT_PROBE_NODE && problem.field === '节点小节')) {
+    problems.push(page + ' 反向构造判别力缺失（删掉 ### ' + NODE_FACT_PROBE_NODE + ' 小节未被判缺小节）');
+  }
+  return problems;
+}
+
+// 期望值来源：逐节点子进程读 `explain <node>`（与门禁同源）。失败 / 无法解析 / 节点身份不符都计入
+// problems——缺一个节点就没法完整对账，未对账不等于通过；调用方看到任何 problem 就不再比较页面。
+function explainFactsByNode() {
+  const problems = [];
+  const env = { ...process.env };
+  delete env.FLOW_COMET_PROTOCOL;
+  delete env.FLOW_COMET_RUN_ROOT;
+  const factsByNode = new Map();
+  for (const node of NODE_IDS) {
+    const res = spawnSync(process.execPath, [path.join(SCRIPTS_DIR, 'workflow-state.mjs'), 'explain', node], {
+      cwd: REPO_ROOT,
+      env,
+      encoding: 'utf8',
+      timeout: 60000,
+    });
+    if (res.status !== 0) {
+      problems.push('explain ' + node + ' 失败（退出码 ' + (res.status ?? 'null') + '）: '
+        + String(res.stderr || '').trim());
+      continue;
+    }
+    let facts;
+    try {
+      facts = parseExplain(String(res.stdout || ''));
+    } catch (error) {
+      problems.push('explain ' + node + ' 的输出无法解析（' + error.message + '）');
+      continue;
+    }
+    if (facts.node !== node) {
+      problems.push('explain ' + node + ' 返回的节点身份是 ' + facts.node + '（期望 ' + node + '）');
+      continue;
+    }
+    factsByNode.set(node, facts);
+  }
+  if (factsByNode.size !== NODE_IDS.length) {
+    problems.push('节点事实来源不完整（' + factsByNode.size + '/' + NODE_IDS.length
+      + ' 个节点的 explain 可用）——未对账不等于通过');
+  }
+  return { factsByNode, problems };
+}
+
+// 节点事实锚本体：页面的在场由调用方的形态判据保证——安装副本 / npm 包形态在 TA-24 开头整面
+// SKIP，走到这里的检出带公开面，页面缺席即判据失效。逐节点比较后，两页各跑一遍内存反构造证明判别力。
+function nodeFactsAnchorProblems() {
+  const { factsByNode, problems } = explainFactsByNode();
+  if (problems.length > 0) return problems;
+  for (const rel of ['docs/NODES.md', 'docs/NODES-zh.md']) {
+    if (!repoFileExists(rel)) {
+      problems.push(rel + ' 不在检出面（形态判据认定本检出带公开面；节点参考页缺席即判据失效）');
+      continue;
+    }
+    const text = normalizeNewlines(repoFileText(rel));
+    problems.push(...comparePage({ page: rel, text, factsByNode }));
+    problems.push(...nodeFactProbeProblems(rel, text, factsByNode));
+  }
+  return problems;
 }
 
 // 归档后交接协议页（`reference/post-archive-handoff.md`，分发参考册）的判据：场景 352 与它自己
@@ -4111,6 +4231,10 @@ export const ENTRIES = [
   // 「完全继承 / 段名在运行时派生」这类 overclaim；机制册的「哪些节点查段名」表覆盖全部出口；
   // 故障排查给出两阶段报错指引；工件保真条点明本仓增量段。
   //
+  // 子锚（不新增场景号）：节点参考页（docs/NODES.md / docs/NODES-zh.md）的三栏事实必须与
+  // `explain <node>` 的派生视图逐节点一致——判据在 nodeFactsAnchorProblems，两类内存反构造
+  // （换错技能名 / 删小节）证明比较有判别力。
+  //
   // 缺席的**两种读法**（判据面形态先判，再判内容）：本检出带公开面（docs/、CONTRIBUTING.md 或
   // .github/ 任一在场）时，该面任何一份文档缺席都是判据失效——「两份机制册都被删」= 公开面机制
   // 文档不在检出面，判红，不能只落一条 SKIP；只有整份载体俱缺（安装副本只带技能树、npm 包按 files
@@ -4232,6 +4356,8 @@ export const ENTRIES = [
           (text) => text + '\n工件保真 = 上游模板段 + 本仓增量段。\n', '缺「增量段」', false],
       ].filter(([, rel]) => typeof docs.get(rel) === 'string');
       assertProbesDiscriminate(problems, docs, rules, activeProbes);
+      // 子锚：两页节点事实与 explain 派生视图对账（逐节点），并各带两类内存反构造。
+      problems.push(...nodeFactsAnchorProblems());
       if (problems.length > 0) throw new Error('公开面口径不符: ' + problems.join('; '));
     },
   },
