@@ -441,11 +441,11 @@ export function resolveVerifyTimeoutBudget(env = process.env) {
 }
 
 // 「子进程被掐断」与「命令自己非零退出」是两种事实：恢复动作不同（等更久 / 去改命令），因此不能合成
-// 一句报文。spawnSync 只在超时或被信号终止时给出 error 且没有退出码；有退出码就是命令自己的结论。
+// 一句报文。有退出码就是命令自己的结论。只认错误码：输出超过捕获上限（ENOBUFS）这类 spawn 错误同样
+// 带 signal 且没有退出码，拿 signal 判超时会把它们一并说成超时——而加预算治不了缓冲上限。
 // 两次 spawn 尝试（管道 / inherit 重试）共用这一份判定——分类口径不分叉。
 function isTimeoutResult(r) {
-  return r != null && r.error != null
-    && (r.error.code === 'ETIMEDOUT' || (r.signal != null && r.status == null));
+  return r != null && r.error != null && r.error.code === 'ETIMEDOUT';
 }
 
 // verify 出口必须真实跑命令（严格版）——历史归档 change 豁免（过渡规则）。命令来源三级：TEST.md 的
@@ -527,6 +527,7 @@ export async function runVerifyExitGate({ protocol, node, state }) {
         const e = new Error(r2.error != null ? String(r2.error.message) : ('exit code ' + r2.status));
         e.verifyTimeout = isTimeoutResult(r2);
         e.verifyExitCode = r2.status;
+        e.verifyErrorCode = r2.error ? r2.error.code : null;
         throw e;
       }
     } else if (firstFailed) {
@@ -535,6 +536,7 @@ export async function runVerifyExitGate({ protocol, node, state }) {
       e.stdout = first.stdout;
       e.verifyTimeout = isTimeoutResult(first);
       e.verifyExitCode = first.status;
+      e.verifyErrorCode = first.error ? first.error.code : null;
       throw e;
     }
   } catch (e) {
@@ -552,16 +554,20 @@ export async function runVerifyExitGate({ protocol, node, state }) {
     // ——两支的恢复动作不同（放宽预算重跑 / 去改命令），再把「继续修 / 停止」的选择摆出来。
     // 判定用 e.verifyTimeout（isTimeoutResult 对实际结果分类）；退出码缺失时不编造（如重试没起来）。
     const detail = (e.stdout && e.stdout.length) ? e.stdout : e.message;
-    const exitCode = e.verifyExitCode == null ? 'unknown' : e.verifyExitCode;
+    // 退出码缺席时说清是哪一类 spawn 层错误（如 ENOBUFS）——「unknown」不该吞掉有名字的成因。
+    const failReason = e.verifyExitCode != null
+      ? 'exit ' + e.verifyExitCode
+      : (e.verifyErrorCode ? 'spawn ' + e.verifyErrorCode : 'unknown');
     if (e.verifyTimeout) {
-      console.error('BLOCKED: verify 超时（预算 ' + verifyTimeoutMs + 'ms，实际耗时 ' + elapsed + 'ms，命令已被终止）: ' + verifyCommand);
+      console.error('BLOCKED: verify 超时（预算 ' + verifyTimeoutMs + 'ms，实际耗时 ' + elapsed + 'ms；已停止等待，但子进程可能仍在运行）: ' + verifyCommand);
       const suggested = verifyTimeoutMs < DEFAULT_VERIFY_TIMEOUT_MS
         ? DEFAULT_VERIFY_TIMEOUT_MS : verifyTimeoutMs * 2;
-      console.error('恢复: 需要更长等待时设置 FLOW_COMET_VERIFY_TIMEOUT_MS=' + suggested + '（当前生效上限 ' + verifyTimeoutMs + 'ms）后重跑同一命令');
+      console.error('恢复: 需要更长等待时设置 FLOW_COMET_VERIFY_TIMEOUT_MS=' + suggested + '（当前生效上限 ' + verifyTimeoutMs + 'ms）后重跑同一命令；重跑前先确认上一次的子进程已退出');
     } else {
       // 失败支全文不得出现 timeout 字样：「命令自己非零退出」的时间预算与结论无关，写进去只会把两种
-      // 事实搅成一种。只说退出码——detail 取自命令自己的输出，没有输出时才是错误消息。
-      console.error('BLOCKED: verify 命令失败（exit ' + exitCode + '）: ' + verifyCommand);
+      // 事实搅成一种。只说退出码（没有退出码时说明 spawn 层错误码）——detail 取自命令自己的输出，
+      // 没有输出时才是错误消息。
+      console.error('BLOCKED: verify 命令失败（' + failReason + '）: ' + verifyCommand);
     }
     if (detail) console.error(String(detail).slice(0, 500));
     if (count >= 4) {
