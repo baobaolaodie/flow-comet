@@ -3,7 +3,7 @@
 //
 // 报告分层：
 //   · 确定性层：文件 / 结构可判项——项目上下文段与格式、经验条目编号连续性、经验条目数不回退
-//     （对最近一份历史报告的「条目数」读数）、技术债表项数、可选工具在场判定、版本历史统计、
+//     （跨日报告与当天已有报告的「条目数」读数取大者）、技术债表项数、可选工具在场判定、版本历史统计、
 //     架构文档结构（`.specs/ARCHITECTURE.md`，可选工件）。
 //     每项都带计数与判据；同一冻结树两次运行逐字节一致。
 //   · 增补层：代码体检工具（brooks-lint）在场时，由 agent 执行其 4 维体检并把结果并入同一份
@@ -25,8 +25,12 @@
 //     两份实现必然分叉：自写前缀正则会把 `2026-02-30-HEALTH.md` 一类日历不自洽的名字采作基线。
 //
 // 复现性纪律：报告中的「机器可判项」必须可逐字节复现；两次运行允许不同的行由报告末尾的
-// 「易变行声明」逐条列出（差异集合显式标注，不靠口头约定）。基线对比取「最近一份**日期不同**的
-// 历史报告」——同日重跑不与自己对比，否则报告自我污染、复现性判据失效。
+// 「易变行声明」逐条列出（差异集合显式标注，不靠口头约定）。**基线有两个面，判据各不同**：
+//   · 报告自身的「与上次对比」只取最近一份**日期不同**的历史报告——今日报告是本次将要写的，
+//     不与自己对比，否则报告自我污染、复现性判据失效；
+//   · 条目数回退判据取「跨日报告」与「当天已有报告」两者读数的较大者——只比跨日报告时，同一
+//     天先跑出 12 条、再跑读到 11 条会判通过并覆盖当天报告，明天 11 条反倒成了基线（回退读数
+//     经由同日覆盖被洗白）。审计行点名判据实际采用的报告，两个面不同时各说各的。
 //
 // 读数快照的**键形态单一来源**：字段表（SNAPSHOT_FIELDS）是键名与取值的唯一表达处，写方
 // （buildSnapshot）与读方（parseSnapshot / 基线对比）都从它派生——读方不再自行表达键形态。
@@ -335,7 +339,8 @@ async function collectBrooks(runRoot) {
   return { present: resolved.some((probe) => probe.hit), probes: resolved };
 }
 
-// ---------- 基线：最近一份「日期不同」的历史报告 + 其读数快照 ----------
+// ---------- 差异基线：最近一份「日期不同」的历史报告 + 其读数快照 ----------
+// 它只喂报告自身的「与上次对比」；回退判据还要看当天已有报告（readSameDayBaseline），两者取较大者。
 // 报告文件名约定（日期前缀 + 固定后缀）只在本函数里表达一次，避免与写盘路径各写一份字面量；
 // 日期前缀的**形态与日历自洽**判定复用 time-utils 的同一实现（归档日期判据的单一权威）——
 // 本文件不另写前缀正则：两份判据必然分叉，而日历不自洽的名字（`2026-02-30-HEALTH.md`）会让
@@ -361,6 +366,16 @@ async function readBaseline(runRoot, currentDate) {
   return { name, snapshot: parseSnapshot(text), lessonsCount: parseLessonCount(text) };
 }
 
+// 当天已有的报告（同日重跑）：回退判据必须把它算进基线——只比跨日报告时，同一天先成功写 12 条、
+// 再跑读到 11 条会判通过并覆盖当天报告，明天 11 条就成了基线（回退读数被同日覆盖洗白）。
+// 它只参与回退判据，不参与报告自身的「与上次对比」（那一面仍只对日期不同的报告）。
+async function readSameDayBaseline(runRoot, currentDate) {
+  const name = currentDate + REPORT_SUFFIX;
+  const text = await readTextIfExists(path.join(runRoot, '.specs', 'health', name));
+  if (text === null) return null;
+  return { name, lessonsCount: parseLessonCount(text) };
+}
+
 // 报告里的条目数读数。缺失 = 该报告不可作回退判据（旧版本 / 夹具报告），由调用方按「跳过并说明」
 // 处理——不给默认值：默认 0 会把任何报告都判成回退，默认当前值则等于恒绿。
 function parseLessonCount(text) {
@@ -374,19 +389,25 @@ function parseLessonCount(text) {
 }
 
 // 条目数回退判定：只比大小，不加容差、不设豁免——少一条就是少一条（「截断读取 → 整文件写回」的
-// 损失形态正是条目数骤降）。基线取法与「与上次对比」同一份：最近一份**日期不同**的历史报告——
-// 今日报告是本次将要写的，不与自己对比（同日重跑的输出因此恒定）。
-function evaluateLessonsRegression(baseline, lessons) {
+// 损失形态正是条目数骤降）。基线取两个面的**较大者**：跨日报告（差异基线）与当天已有报告的条目数
+// ——任一记录过更高的读数，都说明当前已回退。只比跨日报告时，同一天「先写 12、再读到 11」会判
+// 持平并通过，覆盖当天报告后 11 就成了明天的基线（回退读数被同日覆盖洗白）。
+function evaluateLessonsRegression(baseline, sameDay, lessons) {
   const current = lessons.entries;
+  const candidates = [baseline, sameDay].filter((report) => report && report.lessonsCount !== null);
   // 跳过态也带上当前读数：审计行恒说「当前多少」，跳过只影响判据，不影响读数（缺读数会印成 undefined）。
-  if (!baseline) return { status: 'skipped', current, reason: '.specs/health 下无日期不同的历史报告（无基线可比）' };
-  if (baseline.lessonsCount === null) {
-    return { status: 'skipped', current, reason: '基线报告 ' + baseline.name + ' 无「条目数」读数' };
+  if (candidates.length === 0) {
+    // 报告在场但读不到条目数（旧版本 / 夹具报告）：点名是哪一份，未判 ≠ 通过。
+    const named = baseline ?? sameDay;
+    if (named) return { status: 'skipped', current, reason: '基线报告 ' + named.name + ' 无「条目数」读数' };
+    return { status: 'skipped', current, reason: '.specs/health 下无历史报告（无基线可比）' };
   }
-  if (current < baseline.lessonsCount) {
-    return { status: 'fail', previous: baseline.lessonsCount, current, baselineName: baseline.name };
+  // 相等时取先出现者（跨日报告在前）——同值时它就是「与上次对比」那一份，审计行不必再分开表述。
+  const adopted = candidates.reduce((best, report) => (report.lessonsCount > best.lessonsCount ? report : best));
+  if (current < adopted.lessonsCount) {
+    return { status: 'fail', previous: adopted.lessonsCount, current, baselineName: adopted.name };
   }
-  return { status: 'ok', previous: baseline.lessonsCount, current, baselineName: baseline.name };
+  return { status: 'ok', previous: adopted.lessonsCount, current, baselineName: adopted.name };
 }
 
 // 审计行里的判据说明：跳过也必须说清为什么没判（未判 ≠ 通过）。
@@ -665,11 +686,15 @@ function buildSnapshot(readings) {
 // 文件头承诺「标准输出恒输出 `HEALTH:` 审计行」——两条路径各写一份表达，承诺就会在失败分支
 // 出现静默缺口（回退时曾只打两行：日期与当次基线都无处可读）。
 // 审计行内容当日确定（日期 / 在场判定 / 基线）——不引入新的易变行。
-function auditSegment(root, { date, baseline, brooks }) {
+// 「基线」= 报告「与上次对比」用的那一份（日期不同的报告）。回退判据实际采用的报告若是另一份
+// （同日报告读数更高 / 只有同日报告），另附一段点名——实际采用的基线是哪一份，审计行必须说出来。
+function auditSegment(root, { date, baseline, brooks, lessonsGuard }) {
+  const label = (name) => '`' + relativeLabel(root, path.join(root, '.specs', 'health', name)) + '`';
+  const adopted = lessonsGuard.status === 'skipped' ? null : lessonsGuard.baselineName;
+  const criterion = adopted && adopted !== (baseline ? baseline.name : null) ? ' · 回退判据 ' + label(adopted) : '';
   return 'HEALTH: 日期 ' + date + ' · 增补层 ' + (brooks.present ? '在场' : '不在场')
-    + ' · 基线 ' + (baseline
-      ? '`' + relativeLabel(root, path.join(root, '.specs', 'health', baseline.name)) + '`'
-      : '无（本次为基线，无差异可比）');
+    + ' · 基线 ' + (baseline ? label(baseline.name) : '无（本次为基线，无差异可比）')
+    + criterion;
 }
 
 // 结果摘要（前缀行供机检检索）：审计行与**报告落盘路径恒输出**（不带 `--stdout` 亦然）——
@@ -681,7 +706,7 @@ function printResult({ stdout, root, reportText, reportPath, date, baseline, bro
   // 不写 = 每次运行都继续红，直到条目补齐或由人工另行处置（未验证 ≠ 通过）。
   if (lessonsGuard.status === 'fail') {
     // 审计行先于 FAIL 原因：日期 / 基线 / 「报告未写入」三件事实都在这一行，失败时恰恰最需要它。
-    output.push(auditSegment(root, { date, baseline, brooks })
+    output.push(auditSegment(root, { date, baseline, brooks, lessonsGuard })
       + ' · 报告 `' + relativeLabel(root, reportPath) + '` 未写入');
     output.push('HEALTH: FAIL 经验条目数回退 ' + lessonsGuard.previous + ' → ' + lessonsGuard.current
       + '（基线 `' + relativeLabel(root, path.join(root, '.specs', 'health', lessonsGuard.baselineName))
@@ -691,7 +716,7 @@ function printResult({ stdout, root, reportText, reportPath, date, baseline, bro
   }
   if (stdout) output.push(reportText, '');
   output.push('HEALTH: 报告 `' + relativeLabel(root, reportPath) + '`');
-  output.push(auditSegment(root, { date, baseline, brooks }));
+  output.push(auditSegment(root, { date, baseline, brooks, lessonsGuard }));
   output.push('HEALTH: 经验条目数 ' + lessonsGuard.current + '（' + lessonGuardNote(lessonsGuard) + '）');
   output.push('HEALTH-DONE');
   console.log(output.join('\n'));
@@ -716,7 +741,8 @@ async function main(argv) {
   const git = collectGit(options.root);
   const brooks = await collectBrooks(options.root);
   const baseline = await readBaseline(options.root, date);
-  const lessonsGuard = evaluateLessonsRegression(baseline, lessons);
+  const sameDay = await readSameDayBaseline(options.root, date);
+  const lessonsGuard = evaluateLessonsRegression(baseline, sameDay, lessons);
   const snapshot = buildSnapshot({ context, lessons, debt, redundancy, git, brooks });
 
   const report = renderReport({

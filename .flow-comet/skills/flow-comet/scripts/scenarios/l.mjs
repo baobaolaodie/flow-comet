@@ -422,17 +422,25 @@ export const ENTRIES = [
 
   // 280: health 复现性——同一冻结树两次运行，差异必须落在报告的「易变行声明」集合内（声明的
   // 差异集合之外逐字节一致）；`--stdout` 与落盘逐字节相同；state 零改写（报告是唯一写入面）。
-  // 同场景内再挂条目数回退门的三态子锚（in-place，不新增场景号）：回退 → exit 1 且当天报告
+  // 首跑没有任何基线，第二跑起当天已有报告 → 回退判据的基线就是当天那份（报告自身的「与上次
+  // 对比」仍只取日期不同的报告），故逐字节对照取第二、三跑（两跑的基线状态相同）。
+  // 同场景内再挂条目数回退门的四态子锚（in-place，不新增场景号）：回退 → exit 1 且当天报告
   // 不落盘、审计行照常输出；持平 → exit 0 并落盘；基线报告无「条目数」读数 → exit 0 并显式
-  // 说明为什么没判。三态各用独立夹具根（health 成功即写当天报告，同根复用会让上一态的产物
-  // 成为下一态的基线——判据自我污染）。
+  // 说明为什么没判；当天报告读数更高（同日先高后低）→ exit 1 且当天报告不得被覆盖。
+  // 各态用独立夹具根（health 成功即写当天报告，同根复用会让上一态的产物成为下一态的基线
+  // ——判据自我污染）。
   {
-    name: '280 health 两次运行：易变行声明之外逐字节一致 + --stdout 与落盘相同 + state 零改写 + 条目数回退门三态',
+    name: '280 health 两次运行：易变行声明之外逐字节一致 + --stdout 与落盘相同 + state 零改写 + 条目数回退门四态（含同日覆盖反构造）',
     run: (dir) => {
       writeFile(dir, '.specs/CONTEXT.md', contextFixtureText());
       writeFile(dir, '.specs/LESSONS.md', '# LESSONS\n\n### L-001 首条\n\n### L-002 次条\n');
       writeState(dir, baseState('open'));
       const stateBytes = readStateBytes(dir);
+
+      const formatLocalDate = requireModuleExport(timeUtilsModule, 'formatLocalDate', 'time-utils.mjs');
+      const today = formatLocalDate(new Date());
+      const reportFile = path.join(dir, '.specs', 'health', today + '-HEALTH.md');
+      const reportRel = '`.specs/health/' + today + '-HEALTH.md`';
 
       const first = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir);
       assertExit(first, 0);
@@ -443,41 +451,49 @@ export const ENTRIES = [
       assertOut(first, '## 增补层（代码体检工具的 4 维结果 · 可选）');
       assertOut(first, '## 降级声明');
       assertOut(first, '## 易变行声明（两次运行的允许差异集合）');
+      // 首跑没有任何基线：报告自身的「与上次对比」与回退判据都显式声明「无」，且不附判据段
+      assertOut(first, '· 基线 无（本次为基线，无差异可比）');
+      assertNotOut(first, '回退判据');
 
       const second = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir);
       assertExit(second, 0);
-      const volatilePrefixes = ['- **生成时间**：', '- 最近 30 天提交数：'];
-      const firstLines = first.output.split('\n');
-      const secondLines = second.output.split('\n');
-      const differing = [];
-      for (let i = 0; i < Math.max(firstLines.length, secondLines.length); i += 1) {
-        if (firstLines[i] === secondLines[i]) continue;
-        const line = firstLines[i] ?? secondLines[i] ?? '';
-        if (volatilePrefixes.some((prefix) => line.startsWith(prefix))) continue;
-        differing.push('第 ' + (i + 1) + ' 行 ' + JSON.stringify(firstLines[i]) + ' → ' + JSON.stringify(secondLines[i]));
-      }
-      assertEqual(differing.length, 0, '两次运行的差异落在易变行声明之外: ' + differing.join(' | '));
-
-      const formatLocalDate = requireModuleExport(timeUtilsModule, 'formatLocalDate', 'time-utils.mjs');
-      const today = formatLocalDate(new Date());
-      const reportFile = path.join(dir, '.specs', 'health', today + '-HEALTH.md');
       assertTrue(fs.existsSync(reportFile), '报告未按 <日期>-HEALTH.md 形态落盘: ' + reportFile);
       // `--stdout` = 落盘报告正文原样在前 + `HEALTH:` 审计行追加在后：审计行是 CLI 摘要而非报告
       // 内容，不进报告字节（报告仍是唯一写入面）；正文部分与落盘逐字节一致。
       const reportText = fs.readFileSync(reportFile, 'utf8');
       assertTrue(second.output.startsWith(reportText),
         '--stdout 的报告正文应与落盘逐字节一致（审计行追加在后）: ' + JSON.stringify(second.output.slice(0, 120)));
-      assertOut(second, 'HEALTH: 报告 `.specs/health/' + today + '-HEALTH.md`');
+      assertOut(second, 'HEALTH: 报告 ' + reportRel);
       assertOut(second, 'HEALTH-DONE');
       assertOut(second, '- **写入边界**：只写本报告文件；不改代码、不写运行状态文件（本命令不新增任何状态字段）');
-      assertStateBytesUnchanged(dir, stateBytes, 'health 运行后');
-      // 同日重跑不与自己对比（否则报告自我污染、复现性判据失效）
+      // 报告自身的「与上次对比」仍只取日期不同的报告：同为无——同日报告不与自己对比（自我污染）
       assertOut(second, '基线：无（`.specs/health` 下无日期不同的历史报告）');
+      // 但同日重跑的回退判据必须以当天已有报告为基线：审计行点名它，读数与当前相等 → 未回退
+      assertOut(second, '· 基线 无（本次为基线，无差异可比） · 回退判据 ' + reportRel);
+      assertOut(second, 'HEALTH: 经验条目数 2（基线 2 · 未回退）');
 
-      // ---------- 条目数回退门的三态子锚（in-place：不新增场景号） ----------
-      // 判据 = 「最近一份日期不同的历史报告」的条目数读数与当前读数比大小：更少 → 红；相等 → 绿；
-      // 基线无读数 → 显式跳过（未判 ≠ 通过）。三个独立夹具根：health 成功即写当天报告，同根复用
-      // 会让上一态的产物成为下一态的基线（判据自我污染）。
+      // 复现性：两跑的基线状态相同才可比——首跑写出当天报告后，基线段从「无」变成点名当天报告，
+      // 那是运行状态的差异而不是易变行；故对照取第二、三跑。
+      const third = runSideScript(SIDE_HEALTH, ['--root', dir, '--stdout'], dir);
+      assertExit(third, 0);
+      const volatilePrefixes = ['- **生成时间**：', '- 最近 30 天提交数：'];
+      const secondLines = second.output.split('\n');
+      const thirdLines = third.output.split('\n');
+      const differing = [];
+      for (let i = 0; i < Math.max(secondLines.length, thirdLines.length); i += 1) {
+        if (secondLines[i] === thirdLines[i]) continue;
+        const line = secondLines[i] ?? thirdLines[i] ?? '';
+        if (volatilePrefixes.some((prefix) => line.startsWith(prefix))) continue;
+        differing.push('第 ' + (i + 1) + ' 行 ' + JSON.stringify(secondLines[i]) + ' → ' + JSON.stringify(thirdLines[i]));
+      }
+      assertEqual(differing.length, 0, '两次运行的差异落在易变行声明之外: ' + differing.join(' | '));
+      assertStateBytesUnchanged(dir, stateBytes, 'health 运行后');
+
+      // ---------- 条目数回退门的四态子锚（in-place：不新增场景号） ----------
+      // 判据 = max(最近一份日期不同报告的条目数, 当天已有报告的条目数) 与当前读数比大小：
+      // 更少 → 红；相等 → 绿；两份都读不到条目数 → 显式跳过（未判 ≠ 通过）；当天报告读数更高
+      // → 红，且当天报告不得被覆盖（否则回退读数经同日覆盖成为明天的基线）。各态独立夹具根：
+      // health 成功即写当天报告，同根复用会让上一态的产物成为下一态的基线（判据自我污染）。
       const baselineDate = formatLocalDate(new Date(Date.now() - 24 * 60 * 60 * 1000)); // 必然 ≠ 今天
       const lessonsFixture = (count) => '# LESSONS\n\n'
         + Array.from({ length: count }, (_, i) => '### L-' + String(i + 1).padStart(3, '0') + ' 夹具条目').join('\n\n') + '\n';
@@ -523,6 +539,24 @@ export const ENTRIES = [
       assertOut(legacy, 'HEALTH: 经验条目数 2（跳过：基线报告 ' + baselineDate + '-HEALTH.md 无「条目数」读数）');
       assertTrue(fs.existsSync(path.join(legacyRoot, todayReportRel)),
         '基线无读数时应按不可判处理并照常落盘（本轮报告成为下一轮基线）');
+
+      // ④ 同日反构造：当天报告 3 条、跨日报告 2 条、当前 2 条 → 只比跨日报告会判持平并通过，
+      //    并把当天报告覆盖成 2（明天 2 就成了基线，回退被同日覆盖洗白）；取 max(3, 2) = 3
+      //    → exit 1，当天报告逐字节不变（回退读数不得落盘）。
+      const sameDayRoot = path.join(dir, 'regression-same-day');
+      writeFile(sameDayRoot, '.specs/LESSONS.md', lessonsFixture(2));
+      writeFile(sameDayRoot, baselineReportRel, baselineReport('- 条目数：2'));
+      writeFile(sameDayRoot, todayReportRel, '# 健康巡检 · 同日夹具\n\n- 条目数：3\n');
+      const sameDayBefore = treeFingerprint(sameDayRoot);
+      const sameDay = runSideScript(SIDE_HEALTH, ['--root', sameDayRoot, '--stdout'], dir);
+      assertExit(sameDay, 1);
+      // 审计行两个面各说各的：报告「与上次对比」的基线仍是跨日那份，回退判据用的是当天那份
+      assertOut(sameDay, '基线 `' + baselineReportRel + '`');
+      assertOut(sameDay, '· 回退判据 `' + todayReportRel + '`');
+      assertOut(sameDay, 'HEALTH: FAIL 经验条目数回退 3 → 2');
+      assertOut(sameDay, '报告 `' + todayReportRel + '` 未写入');
+      assertEqual(fingerprintChanges(sameDayBefore, treeFingerprint(sameDayRoot)).join(' | '), '',
+        '同日回退时当天报告被改写（回退读数经同日覆盖洗白）');
 
       // 结构锚：审计行两路径共用同一段拼装（第二份表达即红——「失败分支少打审计行」正是这样发生的）
       assertEqual(fs.readFileSync(SIDE_HEALTH, 'utf8').split("'HEALTH: 日期 '").length - 1, 1,
