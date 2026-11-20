@@ -55,6 +55,7 @@ import { scenarioProtocolPath } from '../lib/test-assertions.mjs';
 import {
   NODE_IDS,
   comparePage,
+  concreteArtifactNames,
   extractColumn,
   extractNodeSections,
   normalizeNewlines,
@@ -663,22 +664,29 @@ function assertProbesDiscriminate(problems, docs, rules, probes) {
 // `workflow-state.mjs explain <node>` 子进程读（与门禁同源），页面抽取与比较只在 lib/nodes-facts.mjs
 // 一处——本文件不另写页面解析，也不另立一份事实派生规则。
 const NODE_FACT_PROBE_NODE = 'plan';
+// 零模板节点（explain 只打提示词、不打 TEMPLATE 行）：把该栏换成一句顺口带 template 词的普通句子，
+// 零模板声明判据必须发声。
+const NODE_FACT_ZERO_TEMPLATE_PROBE_NODE = 'verify';
 
-// 反向构造之一：在节点的「加载技能」栏里把某个技能名换成错误名（纯内存）。返回改后的全文；
-// 该栏缺席或找不到要被替换的名字时返回 null——前提失效与「改了却不报」是两件事，分开报。
-function rewriteSkillInNodeColumn(text, node, from, to) {
+// 在某个节点的某一栏里做一次纯内存变异：mutate 收到栏正文，返回改后的正文（null = 放弃构造）。
+// 返回改后的全文；栏缺席 / 变异没改变正文都返回 null——前提失效与「改了却不报」是两件事，分开报。
+// 只动这一栏：正文和其他栏里的同名文本不受影响，构造因此不会顺带把别的判据弄红。
+function mutateNodeColumn(text, node, column, mutate) {
   const section = extractNodeSections(text).get(node);
   if (section === undefined) return null;
-  const column = extractColumn(section, 'skills');
-  if (column === null || !column.includes(from)) return null;
+  const body = extractColumn(section, column);
+  if (body === null || body === '') return null;
+  const changed = mutate(body);
+  if (changed === null || changed === body) return null;
   const sectionStart = text.indexOf(section);
-  const columnStart = sectionStart < 0 ? -1 : text.indexOf(column, sectionStart);
+  if (sectionStart < 0) return null;
+  const columnStart = text.indexOf(body, sectionStart);
   if (columnStart < 0 || columnStart >= sectionStart + section.length) return null;
-  return text.slice(0, columnStart) + column.replace(from, to) + text.slice(columnStart + column.length);
+  return text.slice(0, columnStart) + changed + text.slice(columnStart + body.length);
 }
 
-// 反向构造之二：删掉一个节点小节。段界沿用 lib/section-body.mjs 的围栏感知扫描（与页面抽取
-// 同一口径——围栏内的标题是正文示例，不结束小节），本函数只用于内存反构造。未命中返回 null。
+// 只供内存反构造：删掉一个节点小节。段界沿用 lib/section-body.mjs 的围栏感知扫描（与页面抽取
+// 同一口径——围栏内的标题是正文示例，不结束小节）。未命中返回 null。
 function removeNodeSection(text, node) {
   const { lines, headings } = scanHeadings(text);
   const start = headings.findIndex((heading) => heading.level === 3 && heading.text === node);
@@ -689,37 +697,98 @@ function removeNodeSection(text, node) {
   return lines.join('\n');
 }
 
-// 两类反向构造的判别力断言（与真实断言共用同一比较实现）：换成错误技能名 ⇒ 必须点名该节点的
-// 「技能集合」；删掉小节 ⇒ 必须报「节点小节」缺席。构造没生效或没被判红都计入 problems——
-// 前者说明锚该随页面更新，后者说明比较成了恒绿的摆设。
-function nodeFactProbeProblems(page, text, factsByNode) {
+// 单个内存反构造：变异后的页面必须报出 reported 认的字段。构造没生效（页面已不是构造假设的样子）
+// 与「改了却不报」（比较成了恒绿的摆设）分别点名——前者说明锚该随页面更新，后者说明判据失效。
+function assertNodeFactProbe(problems, page, label, mutated, factsByNode, reported) {
+  if (mutated === null) {
+    problems.push(page + ' 反向构造前提失效（' + label + '）');
+    return;
+  }
+  if (!comparePage({ page, text: mutated, factsByNode }).some(reported)) {
+    problems.push(page + ' 反向构造判别力缺失（' + label + ' 未被判违规）');
+  }
+}
+
+// 六类真实边界的判别力（与真实断言共用同一比较实现）：每一类都是「页面上看起来还在、实际已不是
+// 那件事」的写法，逐类构造一遍，变异后必须报出对应字段。构造目标取自 explain 派生的事实（技能名 /
+// 工件名），不在这里另抄一份名字；构造只改内存文本，不改真实页面。
+function nodeFactProbeProblems(page, text, factsByNode, explainOutputs) {
   const problems = [];
-  const skill = 'flow-comet-' + NODE_FACT_PROBE_NODE;
-  const wrong = rewriteSkillInNodeColumn(text, NODE_FACT_PROBE_NODE, skill, skill + '-wrong');
-  if (wrong === null) {
-    problems.push(page + ' 反向构造前提失效（未在 ' + NODE_FACT_PROBE_NODE + ' 的加载技能栏找到 ' + skill + '）');
-  } else if (!comparePage({ page, text: wrong, factsByNode })
-    .some((problem) => problem.node === NODE_FACT_PROBE_NODE && problem.field === '技能集合')) {
-    problems.push(page + ' 反向构造判别力缺失（把 ' + NODE_FACT_PROBE_NODE + ' 的技能名换成错误名未被判违规）');
+  const node = NODE_FACT_PROBE_NODE;
+  const facts = factsByNode.get(node);
+  const skill = 'flow-comet-' + node;
+  const fileName = concreteArtifactNames(facts.artifacts)[0];
+  const artifactLabel = fileName ?? '工件名';
+  const forNode = (field) => (problem) => problem.node === node && problem.field === field;
+
+  // ① 换成错误技能名 ⇒ 技能集合必须报（「换了一个技能」不能靠在场判据蒙混）。
+  assertNodeFactProbe(problems, page, '把 ' + node + ' 的技能名换成错误名',
+    mutateNodeColumn(text, node, 'skills', (body) => body.replace(skill, skill + '-wrong')),
+    factsByNode, forNode('技能集合'));
+
+  // ② 删掉小节 ⇒ 报小节缺席。
+  assertNodeFactProbe(problems, page, '删掉 ### ' + node + ' 小节',
+    removeNodeSection(text, node), factsByNode, forNode('节点小节'));
+
+  // ③ 同一页再出现一个 ### <node> ⇒ 报重复（第一个之后的整段内容不会被比较，不能静默留在页面上）。
+  assertNodeFactProbe(problems, page, '同一页重复 ### ' + node + ' 小节',
+    text + '\n### ' + node + '\n\n- 重复小节\n', factsByNode, forNode('节点小节'));
+
+  // ④ 注释掉工件名 ⇒ 报工件文件名缺席（HTML 注释里的条目在页面上看不见，不算在场）。
+  assertNodeFactProbe(problems, page, '把 ' + artifactLabel + ' 注释掉',
+    fileName === undefined ? null : mutateNodeColumn(text, node, 'artifacts',
+      (body) => body.replace(fileName, '<!-- ' + fileName + ' -->')),
+    factsByNode, forNode('工件文件名'));
+
+  // ⑤ 技能名加 _v2 后缀 ⇒ 报该技能不再在场（长名字不能顶替短名字）。
+  assertNodeFactProbe(problems, page, '把技能名改成 ' + skill + '_v2',
+    mutateNodeColumn(text, node, 'skills', (body) => body.replace(skill, skill + '_v2')),
+    factsByNode, forNode('技能集合'));
+
+  // ⑥ 工件名加 .bak 后缀 ⇒ 报工件文件名缺席（.bak 是另一个文件，不顶替正本）。
+  assertNodeFactProbe(problems, page, '把 ' + artifactLabel + ' 改成 .bak 副本',
+    fileName === undefined ? null : mutateNodeColumn(text, node, 'artifacts',
+      (body) => body.replace(fileName, fileName + '.bak')),
+    factsByNode, forNode('工件文件名'));
+
+  // ⑦ 零模板栏换成一句顺口带 template 词的普通句子 ⇒ 报零模板声明缺席（子串不算声明）。
+  assertNodeFactProbe(problems, page, '把 ' + NODE_FACT_ZERO_TEMPLATE_PROBE_NODE + ' 的零模板声明换成普通句子',
+    mutateNodeColumn(text, NODE_FACT_ZERO_TEMPLATE_PROBE_NODE, 'prompts',
+      () => '- No template is optional. Read TASK.md'),
+    factsByNode, (problem) => problem.node === NODE_FACT_ZERO_TEMPLATE_PROBE_NODE
+      && problem.field === '零模板声明');
+
+  // ⑧ explain 的产出行整块缺失（模拟标签被改名成 OUTPUT-ARTIFACT）⇒ 解析必须报，而不是把空列表
+  //    当成「该节点没有工件」。用真实输出改一处，不另造一份 explain 文本。
+  const explainText = explainOutputs.get(node);
+  const drifted = typeof explainText === 'string' ? explainText.replace('ARTIFACT:', 'OUTPUT-ARTIFACT:') : null;
+  if (drifted === null || drifted === explainText) {
+    problems.push(page + ' 反向构造前提失效（' + node + ' 的 explain 输出里没有 ARTIFACT 行）');
+  } else {
+    let driftError = null;
+    try {
+      parseExplain(drifted);
+    } catch (error) {
+      driftError = String(error.message);
+    }
+    if (driftError === null || !driftError.includes('ARTIFACT')) {
+      problems.push(page + ' 反向构造判别力缺失（把 ARTIFACT 行改名成 OUTPUT-ARTIFACT 未被判违规）');
+    }
   }
-  const removed = removeNodeSection(text, NODE_FACT_PROBE_NODE);
-  if (removed === null) {
-    problems.push(page + ' 反向构造前提失效（未找到 ### ' + NODE_FACT_PROBE_NODE + ' 小节）');
-  } else if (!comparePage({ page, text: removed, factsByNode })
-    .some((problem) => problem.node === NODE_FACT_PROBE_NODE && problem.field === '节点小节')) {
-    problems.push(page + ' 反向构造判别力缺失（删掉 ### ' + NODE_FACT_PROBE_NODE + ' 小节未被判缺小节）');
-  }
+
   return problems;
 }
 
 // 期望值来源：逐节点子进程读 `explain <node>`（与门禁同源）。失败 / 无法解析 / 节点身份不符都计入
 // problems——缺一个节点就没法完整对账，未对账不等于通过；调用方看到任何 problem 就不再比较页面。
+// 原始输出一并带回：产出行是否整块缺失只有解析层知道，反向构造用真实输出改一处来验它。
 function explainFactsByNode() {
   const problems = [];
   const env = { ...process.env };
   delete env.FLOW_COMET_PROTOCOL;
   delete env.FLOW_COMET_RUN_ROOT;
   const factsByNode = new Map();
+  const explainOutputs = new Map();
   for (const node of NODE_IDS) {
     const res = spawnSync(process.execPath, [path.join(SCRIPTS_DIR, 'workflow-state.mjs'), 'explain', node], {
       cwd: REPO_ROOT,
@@ -732,9 +801,12 @@ function explainFactsByNode() {
         + String(res.stderr || '').trim());
       continue;
     }
+    // 原始输出留给反向构造用（模拟产出行标签被改名）；解析失败即报——缺产出行与缺 NODE 行一样，
+    // 都是「这份输出不能当事实来源」，不是「该节点没有工件」。
+    const output = String(res.stdout || '');
     let facts;
     try {
-      facts = parseExplain(String(res.stdout || ''));
+      facts = parseExplain(output);
     } catch (error) {
       problems.push('explain ' + node + ' 的输出无法解析（' + error.message + '）');
       continue;
@@ -744,18 +816,20 @@ function explainFactsByNode() {
       continue;
     }
     factsByNode.set(node, facts);
+    explainOutputs.set(node, output);
   }
   if (factsByNode.size !== NODE_IDS.length) {
     problems.push('节点事实来源不完整（' + factsByNode.size + '/' + NODE_IDS.length
       + ' 个节点的 explain 可用）——未对账不等于通过');
   }
-  return { factsByNode, problems };
+  return { factsByNode, problems, explainOutputs };
 }
 
 // 节点事实锚本体：页面的在场由调用方的形态判据保证——安装副本 / npm 包形态在 TA-24 开头整面
-// SKIP，走到这里的检出带公开面，页面缺席即判据失效。逐节点比较后，两页各跑一遍内存反构造证明判别力。
+// SKIP，走到这里的检出带公开面，页面缺席即判据失效。逐节点比较后，两页各跑一遍内存反构造证明判据
+// 认得出六类「看起来还在、实际已不是那件事」的写法。
 function nodeFactsAnchorProblems() {
-  const { factsByNode, problems } = explainFactsByNode();
+  const { factsByNode, problems, explainOutputs } = explainFactsByNode();
   if (problems.length > 0) return problems;
   for (const rel of ['docs/NODES.md', 'docs/NODES-zh.md']) {
     if (!repoFileExists(rel)) {
@@ -764,7 +838,7 @@ function nodeFactsAnchorProblems() {
     }
     const text = normalizeNewlines(repoFileText(rel));
     problems.push(...comparePage({ page: rel, text, factsByNode }));
-    problems.push(...nodeFactProbeProblems(rel, text, factsByNode));
+    problems.push(...nodeFactProbeProblems(rel, text, factsByNode, explainOutputs));
   }
   return problems;
 }
@@ -4232,8 +4306,9 @@ export const ENTRIES = [
   // 故障排查给出两阶段报错指引；工件保真条点明本仓增量段。
   //
   // 子锚（不新增场景号）：节点参考页（docs/NODES.md / docs/NODES-zh.md）的三栏事实必须与
-  // `explain <node>` 的派生视图逐节点一致——判据在 nodeFactsAnchorProblems，两类内存反构造
-  // （换错技能名 / 删小节）证明比较有判别力。
+  // `explain <node>` 的派生视图逐节点一致——判据在 nodeFactsAnchorProblems，六类内存反构造
+  // （换错技能名 / 删小节 / 重复小节 / 注释掉工件 / _v2 技能名 / .bak 工件）+ explain 产出行
+  // 整块缺失 + 松散的零模板句子，证明比较认得出这些「看起来还在、实际已不是那件事」的写法。
   //
   // 缺席的**两种读法**（判据面形态先判，再判内容）：本检出带公开面（docs/、CONTRIBUTING.md 或
   // .github/ 任一在场）时，该面任何一份文档缺席都是判据失效——「两份机制册都被删」= 公开面机制
@@ -4356,7 +4431,8 @@ export const ENTRIES = [
           (text) => text + '\n工件保真 = 上游模板段 + 本仓增量段。\n', '缺「增量段」', false],
       ].filter(([, rel]) => typeof docs.get(rel) === 'string');
       assertProbesDiscriminate(problems, docs, rules, activeProbes);
-      // 子锚：两页节点事实与 explain 派生视图对账（逐节点），并各带两类内存反构造。
+      // 子锚：两页节点事实与 explain 派生视图对账（逐节点），并各带六类内存反构造 + explain
+      // 产出行缺失。
       problems.push(...nodeFactsAnchorProblems());
       if (problems.length > 0) throw new Error('公开面口径不符: ' + problems.join('; '));
     },

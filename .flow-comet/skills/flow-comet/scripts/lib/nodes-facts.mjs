@@ -16,14 +16,24 @@
 // 比较口径：
 //   · 技能集合：只看「加载技能 / Skills loaded」栏里的 flow-comet-*，与该节点的技能集合全量比对，
 //     多/少都报。只查「在不在」抓不到「换成另一个技能」，所以用集合；限定在同一栏，避免正文
-//     别处提到非本节点技能时误报。
+//     别处提到非本节点技能时误报。技能名两侧都要有词界：`flow-comet-plan_v2` 不是
+//     `flow-comet-plan`（借着长名字蹭上场的另一份人工制品会被当成技能在场），反引号包裹的名字
+//     照旧算在场。
 //   · 提示词 / 模板 / 证据 / 工件：只查在场（presence）。这些名字在其他栏也可能被合理提及，
 //     集合相等会误伤；多写的无关模板由审查兜底。
-//   · 零模板节点：该栏必须声明「零模板」或 no template——没有模板不等于没有判据。
+//   · HTML 注释：比较前剥掉 `<!-- … -->`——注释掉的条目在人眼里不存在，不能靠「文件里还留着这
+//     几个字」把缺件判成在场；行内代码是可见正文，照旧参与匹配。
+//   · 重复节点小节：同一页出现两个 `### <node>` 时只有第一个会被比较，第二个里的内容谁也读不到；
+//     重复本身要点名报出（多一份小节不是多一份判据，是安静的丢件）。
+//   · 零模板节点：该栏必须有**独立的**零模板声明（行首或列表项位置：零模板 / zero templates /
+//     no templates / Template: none / 模板：无）——没有模板不等于没有判据；正文里顺口带 template
+//     词的句子（如「No template is optional.」）不算声明。
 //   · 工件文件名只对具体路径断言：去掉 `<change-id>` 占位后仍含 `*` / `<...>` 的产物，
 //     页面上是按语义描述的（「每个任务一份摘要」「遗留清单」），字面名不是该栏的承诺；它们的
-//     模板名与证据 id 仍被断言。
-//   · 缺节点小节、缺栏、空栏都逐条报出来，不当作「没有可比较的东西」（缺席不等于通过）。
+//     模板名与证据 id 仍被断言。文件名按**完整名字**比对：`DESIGN.md.bak` 是另一个文件，不能
+//     顶替 `DESIGN.md`；无扩展名的提示词 / 模板名仍按原口径（点不是名字的一部分）。
+//   · 缺节点小节、缺栏、空栏、重复小节、explain 的产出行整块缺失都逐条报出来，不当作「没有可
+//     比较的东西」（缺席不等于通过）。
 //   · 每条问题点名页 / 节点 / 字段 / 期望 / 实际；message 可直接打印，toString 让调用方也能
 //     直接 join。
 //
@@ -33,16 +43,17 @@
 //   extractNodeSections(text, nodeIds = NODE_IDS) -> Map<nodeId, sectionBody>
 //   extractColumn(sectionBody, 'skills' | 'prompts' | 'artifacts') -> string | null
 //   extractFlowCometSkills(sectionBody) -> string[] | null
+//   concreteArtifactNames(artifacts) -> string[]
 //   parseExplain(explainOutput) -> facts
 //   comparePage({ page, text, factsByNode, nodeIds }) -> problems[]
 //
-// facts 形状（parseExplain 的返回值）：{ node, implementationSkill, skills, prompts, templates,
-// artifacts, evidence }。
+// facts 形状（parseExplain 的返回值）：{ node, kind, implementationSkill, skills, prompts,
+// templates, artifacts, evidence }。
 import {
   NODE_CONDITIONAL_PROMPTS,
   nodePromptFiles,
 } from '../protocol-utils.mjs';
-import { sectionBody } from './section-body.mjs';
+import { scanHeadings, sectionBody } from './section-body.mjs';
 
 // 页面覆盖的八个内置节点（顺序即页面主链顺序）。
 export const NODE_IDS = [
@@ -77,6 +88,13 @@ export function normalizeNewlines(text) {
   return String(text ?? '').replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n');
 }
 
+// 去掉 HTML 注释（含跨行、以及到文末仍未闭合的那种——没闭合的注释在渲染后同样是不可见内容，
+// 宁可把它当缺席报出来）。替换成一个空格而不是空串：两侧的词不会因此粘成一个新词。行内代码是
+// 可见正文，不在此列。
+function stripHtmlComments(text) {
+  return String(text ?? '').replace(/<!--[\s\S]*?(?:-->|$)/gu, ' ');
+}
+
 // 栏位标题谓词：级别 + 标题文本（大小写不敏感）。
 function headingMatches(level, titles) {
   const wanted = new Set(titles.map((title) => title.toLowerCase()));
@@ -100,6 +118,20 @@ export function extractNodeSections(text, nodeIds = NODE_IDS) {
   return sections;
 }
 
+// 同一页里出现多次的节点小节（[{ node, count }]）：切小节只取首个命中，第二个及之后的内容不会
+// 被比较——重复本身即问题，否则「补一份小节并列」就能让旧内容留在页面上而不受任何判据约束。
+// 命中口径与 extractNodeSections 同一把尺子（围栏内的标题不算标题，取 lib/section-body.mjs）。
+function duplicateNodeSections(text, nodeIds = NODE_IDS) {
+  const counts = new Map();
+  for (const heading of scanHeadings(normalizeNewlines(text)).headings) {
+    if (heading.level !== 3 || !nodeIds.includes(heading.text)) continue;
+    counts.set(heading.text, (counts.get(heading.text) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([node, count]) => ({ node, count }));
+}
+
 // 从节点小节里取某一栏的正文（H4 标题到下一个同级或更高级标题）。栏目名两页不同，用
 // COLUMN_LABELS 里的任一写法命中；返回 null 表示「栏缺席」，空串表示「栏在场但正文为空」。
 export function extractColumn(sectionText, column) {
@@ -118,8 +150,12 @@ export function extractFlowCometSkills(sectionText) {
   return body === null ? null : flowCometSkillsIn(body);
 }
 
+// 技能名两侧都要有词界（前后不得紧邻字母 / 数字 / 下划线 / 连字符）：`flow-comet-plan_v2`、
+// `flow-comet-plan2`、`flow-comet-plan-old` 都不是 `flow-comet-plan`——它们各自是另一份人工
+// 制品，蹭着前缀在场等于把「没加载这个技能」判成加载了。反引号包裹时两侧是标点，照旧命中。
 function flowCometSkillsIn(body) {
-  const matches = String(body ?? '').match(/flow-comet-[a-z0-9]+(?:-[a-z0-9]+)*/gu) ?? [];
+  const visible = stripHtmlComments(body);
+  const matches = visible.match(/(?<![A-Za-z0-9_-])flow-comet-[a-z0-9]+(?:-[a-z0-9]+)*(?![A-Za-z0-9_-])/gu) ?? [];
   return [...new Set(matches)].sort();
 }
 
@@ -177,12 +213,13 @@ function promptBasenames(nodeId) {
   return [...new Set(files.map((file) => file.replace(/\.md$/iu, '')))];
 }
 
-// 解析 `workflow-state.mjs explain <node>` 的输出。缺 NODE 行直接抛错——没有节点身份的
-// 输出无法对账，不能当成「空事实」继续比较。
+// 解析 `workflow-state.mjs explain <node>` 的输出。缺 NODE 行、或一条产出行都解析不到，
+// 都直接抛错——没有节点身份或没有产出的输出无法对账，不能当成「空事实」继续比较。
 export function parseExplain(output) {
   const lines = normalizeNewlines(output).split('\n');
   const facts = {
     node: null,
+    kind: null,
     implementationSkill: null,
     skills: [],
     prompts: [],
@@ -193,6 +230,10 @@ export function parseExplain(output) {
   for (const line of lines) {
     if (line.startsWith('NODE: ')) {
       facts.node = line.slice('NODE: '.length).trim();
+      continue;
+    }
+    if (line.startsWith('KIND: ')) {
+      facts.kind = line.slice('KIND: '.length).trim();
       continue;
     }
     if (line.startsWith('REQUIRED-SKILL: ')) {
@@ -214,6 +255,14 @@ export function parseExplain(output) {
   }
   if (facts.node === null || facts.node === '') {
     throw new Error('explain 输出缺 NODE 行，无法作为节点事实来源');
+  }
+  // 一条产出行都没解析到 = 无法对账，不是「该节点没有工件」：工件文件名与产物的在场判据会因此
+  // 静默消失。内置协议里唯一合法为零的是 handoff 节点（subagent-execute：产物由子代理产出、不落
+  // 本节点名下，schema 的 artifacts 为空）；其余节点零产出行只可能是行格式变了（如被改名成
+  // OUTPUT-ARTIFACT）——fail-closed，把「格式可能变了」说出来而不是当成空列表继续比。
+  if (facts.artifacts.length === 0 && facts.kind !== 'handoff') {
+    throw new Error('explain 输出解析不到任何 ARTIFACT 记录（KIND: ' + (facts.kind ?? '缺失')
+      + '）——产出行格式可能变了，未对账不等于通过');
   }
   facts.implementationSkill = 'flow-comet-' + facts.node;
   facts.prompts = promptBasenames(facts.node);
@@ -250,9 +299,12 @@ function toFactsLookup(factsByNode) {
 
 // 名字在场判据：词界式匹配（前后不得紧邻字母 / 数字 / 下划线 / 连字符），避免 `DESIGN` 被
 // `UI-DESIGN` 顶替掉、`2-design` 被更长的编号串命中。仍然只是 presence：正文多写一处不算错。
-function mentionsName(text, name) {
+// forbidDot 给**完整文件名**用：`.md` 之后的点仍是文件名的一部分——`DESIGN.md.bak` 是另一个
+// 文件，不能顶替 `DESIGN.md`；无扩展名的提示词 / 模板名按原口径（点不是名字的一部分）。
+function mentionsName(text, name, { forbidDot = false } = {}) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-  return new RegExp('(?<![A-Za-z0-9_-])' + escaped + '(?![A-Za-z0-9_-])', 'u').test(text);
+  const boundary = forbidDot ? '[-A-Za-z0-9_.]' : '[-A-Za-z0-9_]';
+  return new RegExp('(?<!' + boundary + ')' + escaped + '(?!' + boundary + ')', 'u').test(text);
 }
 
 function describeList(list) {
@@ -305,6 +357,27 @@ function skillProblems(page, node, body, facts) {
   return problems;
 }
 
+// 零模板声明：必须是**独立**的一条声明——行首或列表项位置（去掉 `- ` / `1. ` 这类列表记号）
+// 就是这几个词；后面接着写解释照旧算（页面的声明通常接一句「只读提示词，不读模板」）。正文里
+// 顺口带 template 词的句子不是声明：「No template is optional.」只说明这句话在谈模板，没说这个
+// 节点没有模板——按子串放行等于把「留白」读成「已声明」。
+const ZERO_TEMPLATE_DECLARATIONS = [
+  /^零模板/u,
+  /^zero\s+templates?\b/iu,
+  /^no\s+templates\b/iu,
+  /^templates?\s*[:：]\s*none\b/iu,
+  /^模板\s*[:：]\s*无/u,
+];
+
+function isZeroTemplateDeclaration(line) {
+  const text = String(line ?? '').trim().replace(/^(?:[-*+]|\d+[.)])\s+/u, '');
+  return ZERO_TEMPLATE_DECLARATIONS.some((pattern) => pattern.test(text));
+}
+
+function hasZeroTemplateDeclaration(body) {
+  return String(body ?? '').split('\n').some(isZeroTemplateDeclaration);
+}
+
 function promptAndTemplateProblems(page, node, body, facts) {
   const problems = [];
   for (const prompt of facts.prompts) {
@@ -314,9 +387,10 @@ function promptAndTemplateProblems(page, node, body, facts) {
   }
   const templates = facts.templates.map((template) => template.name);
   if (templates.length === 0) {
-    // 零模板不是零判据：页面必须把「没有模板」说出来，不能靠留空让人猜。
-    if (!/(?:零模板|no\s+templates?)/iu.test(body)) {
-      problems.push(makeProblem(page, node, '零模板声明', '含「零模板」或 no template 声明', '未见声明'));
+    // 零模板不是零判据：页面必须把「没有模板」写成一条独立声明，不能靠留空让人猜。
+    if (!hasZeroTemplateDeclaration(body)) {
+      problems.push(makeProblem(page, node, '零模板声明',
+        '含独立声明（零模板 / zero templates / no templates / Template: none / 模板：无）', '未见声明'));
     }
     return problems;
   }
@@ -331,7 +405,7 @@ function promptAndTemplateProblems(page, node, body, facts) {
 // 工件字面名：只取具体路径（去掉 change-id 占位后没有通配与其他占位符）的 .md 文件名。
 // 带通配的产物（`*-SUMMARY.md`、归档目录）在页面上按语义描述，不做字面断言；它们的模板名
 // 与证据 id 仍在别处被断言。
-function concreteArtifactNames(artifacts) {
+export function concreteArtifactNames(artifacts) {
   const names = new Set();
   for (const artifact of artifacts) {
     for (const pointer of artifact.paths) {
@@ -353,31 +427,40 @@ function artifactKindProblems(page, node, body, facts) {
     }
   }
   for (const name of concreteArtifactNames(facts.artifacts)) {
-    if (!mentionsName(body, name)) {
+    // 完整文件名：`DESIGN.md.bak` 不顶替 `DESIGN.md`。
+    if (!mentionsName(body, name, { forbidDot: true })) {
       problems.push(makeProblem(page, node, '工件文件名', '含 ' + name, '未出现'));
     }
   }
   return problems;
 }
 
+// 栏正文的可见视图：HTML 注释剥掉后再比。注释掉的条目在人眼里不存在，靠「文件里还留着这几个
+// 字」判在场，等于给缺件开了一条静默通道。栏缺席仍是 null（「整栏被注释掉」不是缺席——它由下面的
+// 在场判据逐项报缺，而不是把问题换成另一类）。
+function visibleColumn(section, column) {
+  const body = extractColumn(section, column);
+  return body === null ? null : stripHtmlComments(body);
+}
+
 function compareSection({ page, node, section, facts }) {
   const problems = [];
 
-  const skillsBody = extractColumn(section, 'skills');
+  const skillsBody = visibleColumn(section, 'skills');
   if (columnAbsent(skillsBody)) {
     problems.push(columnProblem(page, node, 'skills', skillsBody));
   } else {
     problems.push(...skillProblems(page, node, skillsBody, facts));
   }
 
-  const promptsBody = extractColumn(section, 'prompts');
+  const promptsBody = visibleColumn(section, 'prompts');
   if (columnAbsent(promptsBody)) {
     problems.push(columnProblem(page, node, 'prompts', promptsBody));
   } else {
     problems.push(...promptAndTemplateProblems(page, node, promptsBody, facts));
   }
 
-  const artifactsBody = extractColumn(section, 'artifacts');
+  const artifactsBody = visibleColumn(section, 'artifacts');
   if (columnAbsent(artifactsBody)) {
     problems.push(columnProblem(page, node, 'artifacts', artifactsBody));
   } else {
@@ -396,6 +479,17 @@ export function comparePage({ page, text, factsByNode, nodeIds = NODE_IDS } = {}
   const factsLookup = toFactsLookup(factsByNode);
   const sections = extractNodeSections(text, nodeIds);
   const problems = [];
+  // 重复小节先报：切小节只取首个命中，第二个及之后的内容不会被下面的比较读到——「页面上有一段
+  // 谁都不看的小节」本身就是问题，不能等它碰巧也缺件才被发现。
+  for (const { node, count } of duplicateNodeSections(text, nodeIds)) {
+    problems.push(makeProblem(
+      page,
+      node,
+      '节点小节',
+      '### ' + node + ' 小节只出现一次',
+      '出现 ' + count + ' 次（只有第一个参与比较）',
+    ));
+  }
   for (const nodeId of nodeIds) {
     const facts = factsLookup.get(nodeId);
     if (facts === undefined) {
