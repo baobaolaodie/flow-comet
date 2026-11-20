@@ -425,7 +425,7 @@ export async function runAcCoverageGate({ node, state }) {
   process.exit(1);
 }
 
-// verify 命令的等待预算默认值（毫秒）：15 分钟 = 文档化的两级基线在本机实测约 8 分钟 + 近一倍余量。
+// verify 命令的等待预算默认值（毫秒）：15 分钟 = 文档化的两级基线实测约 8 分钟 + 近一倍余量。
 // 默认值只此一处——纯函数的回落、环境变量缺省、超时支放宽建议的下限全部消费它（同一个事实两处表达
 // 必然分叉：改一处漏一处时，上限与建议值会各说各话）。
 const DEFAULT_VERIFY_TIMEOUT_MS = 900000;

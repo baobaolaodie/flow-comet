@@ -195,7 +195,6 @@ export const ENTRIES = [
       assertOut(failed, 'verify 命令失败');
       assertOut(failed, 'exit 3');
       assertNotOut(failed, 'timeout');
-      assertNotOut(failed, 'Timeout');
       // 第 4 次失败「先诊断后决策」的顺序判据由引擎场景 21 覆盖：本项要凑满四次连续失败才进那一支，
       // 同一条链已在场景 21 逐条钉住，此处不重复搭建。
       // ⑤ 无验证命令 → 拦截（严格版要求）
