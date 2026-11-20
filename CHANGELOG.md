@@ -10,6 +10,17 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). The places that record the version are listed in [docs/VERSIONS.md](docs/VERSIONS.md), and CI keeps them in agreement on the release surface.
 
+## [Unreleased]
+
+### Added
+
+- **The node reference is machine-anchored**: the public-face check compares both reference pages with the engine's own node view — skills, prompts, templates, evidence and artifacts — and names the page, node and field when they disagree, so a rename in the engine cannot silently strand the page. ([#186](https://github.com/baobaolaodie/flow-comet/pull/186))
+- **Diagram syntax is checked before merge**: the quality job parses every Mermaid block in the reference pages with a throwaway install of the parser, and fails when a block is malformed or the check cannot run. ([#186](https://github.com/baobaolaodie/flow-comet/pull/186))
+
+### Changed
+
+- **`health` refuses to write a report when the lessons count regresses**: a run whose lessons count is below the previous report's fails instead of writing a new baseline. ([#186](https://github.com/baobaolaodie/flow-comet/pull/186))
+
 ## [1.8.0] - 2026-11-18
 
 ### Changed

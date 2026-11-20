@@ -10,6 +10,17 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本记录在哪些位置见 [docs/VERSIONS-zh.md](docs/VERSIONS-zh.md)，由 CI 在发布面对账保持一致。
 
+## [Unreleased]
+
+### 新增
+
+- **节点参考页有了机器锚**：公开面检查把两页节点参考与引擎自己的节点视图逐节点对照——技能、提示词、模板、证据与工件——不一致时点名页、节点与字段，引擎改名不会让页面悄悄失真。（[#186](https://github.com/baobaolaodie/flow-comet/pull/186)）
+- **图语法在合并前被检查**：quality job 用一次性安装的解析器逐块解析参考页里的全部 Mermaid，块不合法或检查跑不起来时失败。（[#186](https://github.com/baobaolaodie/flow-comet/pull/186)）
+
+### 变更
+
+- **教训册条目数回退时 `health` 拒绝出报告**：条目数低于上一份报告时以失败结束，而不是把损失写成新基线。（[#186](https://github.com/baobaolaodie/flow-comet/pull/186)）
+
 ## [1.8.0] - 2026-11-18
 
 ### 变更
