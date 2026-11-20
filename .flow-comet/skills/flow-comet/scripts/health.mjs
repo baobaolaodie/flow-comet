@@ -2,8 +2,9 @@
 // health.mjs — 横向命令 health（技能 flow-comet-health）的确定性收集器
 //
 // 报告分层：
-//   · 确定性层：文件 / 结构可判项——项目上下文段与格式、经验条目编号连续性、技术债表项数、
-//     可选工具在场判定、版本历史统计、架构文档结构（`.specs/ARCHITECTURE.md`，可选工件）。
+//   · 确定性层：文件 / 结构可判项——项目上下文段与格式、经验条目编号连续性、经验条目数不回退
+//     （对最近一份历史报告的「条目数」读数）、技术债表项数、可选工具在场判定、版本历史统计、
+//     架构文档结构（`.specs/ARCHITECTURE.md`，可选工件）。
 //     每项都带计数与判据；同一冻结树两次运行逐字节一致。
 //   · 增补层：代码体检工具（brooks-lint）在场时，由 agent 执行其 4 维体检并把结果并入同一份
 //     报告、标注来源；脚本不执行 agent 技能，缺省保留占位而不伪造结论。
@@ -14,6 +15,8 @@
 //   · 读：.specs/CONTEXT.md、.specs/LESSONS.md、.specs/ARCHITECTURE.md（结构检查，可选）、
 //     .specs/health/*.md（基线）、git 历史、可选工具的在场探测（文件 / 路径判定）；
 //   · 写：仅一份报告 .specs/health/<日期>-HEALTH.md；`--stdout` 时把报告正文原样打到标准输出；
+//     条目数回退时**不写**该报告——落盘会把回退读数变成下次的基线，门禁等于亲手把自己刚报出的
+//     损失合法化（「一次性告警」与「硬门」的分界就在这里）；
 //   · 标准输出另**恒**输出 `HEALTH:` 审计行（报告路径 / 日期 / 增补层在场 / 基线）——不带
 //     `--stdout` 时只有审计行（报告正文不回流）；
 //   · 不写运行状态（不触碰 .flow-comet/flow-comet-state.json，不新增任何状态字段）；
@@ -66,6 +69,11 @@ const COMMIT_KIND = /^([a-z][a-z-]*)(?:\([^)]*\))?!?:/;
 // 快照行（`key=value`）：读方**不表达键形态**——键身份由 SNAPSHOT_FIELDS 判定（两侧同源），
 // 此处只做「首个 `=` 之前是非空白串」的通用切分。
 const SNAPSHOT_LINE = /^([^=\s]+)=(.*)$/;
+// 条目数读数的**行形态单一来源**：报告写方（renderLessonsSection）与回退检查的读方都从这里派生。
+// 标签若两处各写一份，写方改一个字读方就静默不匹配——判据退化成「跳过」，而这是它唯一看不出的
+// 失效形态（本文件顶部「读数快照的键形态单一来源」踩过同一个坑）。快照里的 `lessons.entries` 是
+// 同一次读数的另一表达，另读一处等于给同一判据留第二个真相。
+const LESSON_COUNT_LABEL = '- 条目数：';
 
 const DEBT_ITEM_LIMIT = 20;
 const KIND_ITEM_LIMIT = 12;
@@ -350,7 +358,41 @@ async function readBaseline(runRoot, currentDate) {
   const name = candidates[candidates.length - 1];
   const text = await readTextIfExists(path.join(dir, name));
   if (text === null) return null;
-  return { name, snapshot: parseSnapshot(text) };
+  return { name, snapshot: parseSnapshot(text), lessonsCount: parseLessonCount(text) };
+}
+
+// 报告里的条目数读数。缺失 = 该报告不可作回退判据（旧版本 / 夹具报告），由调用方按「跳过并说明」
+// 处理——不给默认值：默认 0 会把任何报告都判成回退，默认当前值则等于恒绿。
+function parseLessonCount(text) {
+  for (const line of text.split('\n')) {
+    const value = line.trim();
+    if (!value.startsWith(LESSON_COUNT_LABEL)) continue;
+    const rest = value.slice(LESSON_COUNT_LABEL.length);
+    if (/^\d+$/.test(rest)) return Number(rest);
+  }
+  return null;
+}
+
+// 条目数回退判定：只比大小，不加容差、不设豁免——少一条就是少一条（「截断读取 → 整文件写回」的
+// 损失形态正是条目数骤降）。基线取法与「与上次对比」同一份：最近一份**日期不同**的历史报告——
+// 今日报告是本次将要写的，不与自己对比（同日重跑的输出因此恒定）。
+function evaluateLessonsRegression(baseline, lessons) {
+  const current = lessons.entries;
+  // 跳过态也带上当前读数：审计行恒说「当前多少」，跳过只影响判据，不影响读数（缺读数会印成 undefined）。
+  if (!baseline) return { status: 'skipped', current, reason: '.specs/health 下无日期不同的历史报告（无基线可比）' };
+  if (baseline.lessonsCount === null) {
+    return { status: 'skipped', current, reason: '基线报告 ' + baseline.name + ' 无「条目数」读数' };
+  }
+  if (current < baseline.lessonsCount) {
+    return { status: 'fail', previous: baseline.lessonsCount, current, baselineName: baseline.name };
+  }
+  return { status: 'ok', previous: baseline.lessonsCount, current, baselineName: baseline.name };
+}
+
+// 审计行里的判据说明：跳过也必须说清为什么没判（未判 ≠ 通过）。
+function lessonGuardNote(guard) {
+  if (guard.status === 'skipped') return '跳过：' + guard.reason;
+  return '基线 ' + guard.previous + ' · 未回退';
 }
 
 function parseSnapshot(text) {
@@ -401,7 +443,7 @@ function renderContextSection(push, context, selfDirDisplay) {
 function renderLessonsSection(push, lessons) {
   push('### 2 · 经验条目编号连续性', '');
   push('- 文件：`' + LESSONS_DISPLAY + '`（' + (lessons.exists ? '在场' : '缺失') + '）');
-  push('- 条目数：' + lessons.entries);
+  push(LESSON_COUNT_LABEL + lessons.entries);
   push('- 编号区间：' + (lessons.min === null ? '无条目' : formatLessonId(lessons.min) + '~' + formatLessonId(lessons.max)));
   push('- 缺失编号（' + lessons.missing.length + '）：' + compressRanges(lessons.missing));
   push('- 重复编号（' + lessons.duplicates.length + '）：' + (lessons.duplicates.length === 0 ? '无' : lessons.duplicates.map(formatLessonId).join(', ')));
@@ -623,14 +665,26 @@ function buildSnapshot(readings) {
 // 报告是唯一写入面，调用方至少要能从标准输出确认「跑没跑、落在哪、基线是谁、增补层在不在场」。
 // `--stdout` 时报告正文原样在前（与落盘逐字节一致），审计行追加在后且不混进报告字节。
 // 审计行内容当日确定（日期 / 在场判定 / 基线）——不引入新的易变行。
-function printResult({ stdout, root, reportText, reportPath, date, baseline, brooks }) {
+function printResult({ stdout, root, reportText, reportPath, date, baseline, brooks, lessonsGuard }) {
   const output = [];
+  // 回退 = 不落盘、不回流正文：报告是唯一写入面，写一份「已回退」的读数就会成为下次对比的基线；
+  // 不写 = 每次运行都继续红，直到条目补齐或由人工另行处置（未验证 ≠ 通过）。
+  if (lessonsGuard.status === 'fail') {
+    output.push('HEALTH: FAIL 经验条目数回退 ' + lessonsGuard.previous + ' → ' + lessonsGuard.current
+      + '（基线 `' + relativeLabel(root, path.join(root, '.specs', 'health', lessonsGuard.baselineName))
+      + '`；当前 `' + LESSONS_DISPLAY + '`）');
+    output.push('HEALTH: 本次报告未写入 `' + relativeLabel(root, reportPath)
+      + '`——回退读数落盘会成为下次对比基线；补齐条目后再跑，接受损失须人工另行处置');
+    console.log(output.join('\n'));
+    return;
+  }
   if (stdout) output.push(reportText, '');
   output.push('HEALTH: 报告 `' + relativeLabel(root, reportPath) + '`');
   output.push('HEALTH: 日期 ' + date + ' · 增补层 ' + (brooks.present ? '在场' : '不在场')
     + ' · 基线 ' + (baseline
       ? '`' + relativeLabel(root, path.join(root, '.specs', 'health', baseline.name)) + '`'
       : '无（本次为基线，无差异可比）'));
+  output.push('HEALTH: 经验条目数 ' + lessonsGuard.current + '（' + lessonGuardNote(lessonsGuard) + '）');
   output.push('HEALTH-DONE');
   console.log(output.join('\n'));
 }
@@ -654,6 +708,7 @@ async function main(argv) {
   const git = collectGit(options.root);
   const brooks = await collectBrooks(options.root);
   const baseline = await readBaseline(options.root, date);
+  const lessonsGuard = evaluateLessonsRegression(baseline, lessons);
   const snapshot = buildSnapshot({ context, lessons, debt, redundancy, git, brooks });
 
   const report = renderReport({
@@ -674,10 +729,14 @@ async function main(argv) {
   });
 
   const reportPath = path.join(options.root, '.specs', 'health', date + REPORT_SUFFIX);
-  await fs.mkdir(path.dirname(reportPath), { recursive: true });
-  await fs.writeFile(reportPath, report, 'utf8');
-  printResult({ stdout: options.stdout, root: options.root, reportText: report, reportPath, date, baseline, brooks });
-  return 0;
+  // 判定先于落盘：写完再删，磁盘上就出现过一份回退读数（中途中断还会把它留下）。
+  const regressed = lessonsGuard.status === 'fail';
+  if (!regressed) {
+    await fs.mkdir(path.dirname(reportPath), { recursive: true });
+    await fs.writeFile(reportPath, report, 'utf8');
+  }
+  printResult({ stdout: options.stdout, root: options.root, reportText: report, reportPath, date, baseline, brooks, lessonsGuard });
+  return regressed ? 1 : 0;
 }
 
 main(process.argv.slice(2))
