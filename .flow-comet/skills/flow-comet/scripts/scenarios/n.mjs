@@ -52,6 +52,16 @@ import {
   writeNodeDeclarationMarkers,
 } from '../lib/test-fixtures.mjs';
 import { scenarioProtocolPath } from '../lib/test-assertions.mjs';
+import {
+  NODE_IDS,
+  comparePage,
+  concreteArtifactNames,
+  extractColumn,
+  extractNodeSections,
+  normalizeNewlines,
+  parseExplain,
+} from '../lib/nodes-facts.mjs';
+import { scanHeadings } from '../lib/section-body.mjs';
 import { taskBlocks } from '../task-parsing.mjs';
 // 波次段名的登记点与「登记名 ↔ 模板段名」对账：登记值在骨架模块（模板缺席时的段名基准唯一登记处），
 // 归一化取共享实现——两边同一把尺子，改字的段名不得被判成一致。
@@ -647,6 +657,215 @@ function assertProbesDiscriminate(problems, docs, rules, probes) {
       problems.push('反向构造判别力缺失（' + label + '：' + (expectReported ? '未被判违规' : '被误判违规') + '）');
     }
   }
+}
+
+// 节点参考页的事实锚（TA-24 的子锚，不新增场景号）：`docs/NODES.md` 与 `docs/NODES-zh.md` 的
+// 「加载技能 / 提示词与模板 / 产出与证据」三栏必须与引擎派生视图一致。期望值只从
+// `workflow-state.mjs explain <node>` 子进程读（与门禁同源），页面抽取与比较只在 lib/nodes-facts.mjs
+// 一处——本文件不另写页面解析，也不另立一份事实派生规则。
+const NODE_FACT_PROBE_NODE = 'plan';
+// 零模板节点（explain 只打提示词、不打 TEMPLATE 行）：把该栏换成一句顺口带 template 词的普通句子，
+// 零模板声明判据必须发声。
+const NODE_FACT_ZERO_TEMPLATE_PROBE_NODE = 'verify';
+
+// 在某个节点的某一栏里做一次纯内存变异：mutate 收到栏正文，返回改后的正文（null = 放弃构造）。
+// 返回改后的全文；栏缺席 / 变异没改变正文都返回 null——前提失效与「改了却不报」是两件事，分开报。
+// 只动这一栏：正文和其他栏里的同名文本不受影响，构造因此不会顺带把别的判据弄红。
+function mutateNodeColumn(text, node, column, mutate) {
+  const section = extractNodeSections(text).get(node);
+  if (section === undefined) return null;
+  const body = extractColumn(section, column);
+  if (body === null || body === '') return null;
+  const changed = mutate(body);
+  if (changed === null || changed === body) return null;
+  const sectionStart = text.indexOf(section);
+  if (sectionStart < 0) return null;
+  const columnStart = text.indexOf(body, sectionStart);
+  if (columnStart < 0 || columnStart >= sectionStart + section.length) return null;
+  return text.slice(0, columnStart) + changed + text.slice(columnStart + body.length);
+}
+
+// 只供内存反构造：删掉一个节点小节。段界沿用 lib/section-body.mjs 的围栏感知扫描（与页面抽取
+// 同一口径——围栏内的标题是正文示例，不结束小节）。未命中返回 null。
+function removeNodeSection(text, node) {
+  const { lines, headings } = scanHeadings(text);
+  const start = headings.findIndex((heading) => heading.level === 3 && heading.text === node);
+  if (start < 0) return null;
+  const next = headings.slice(start + 1).find((heading) => heading.level <= 3);
+  const end = next === undefined ? lines.length : next.index;
+  lines.splice(headings[start].index, end - headings[start].index);
+  return lines.join('\n');
+}
+
+// 单个内存反构造：变异后的页面必须报出 reported 认的字段。构造没生效（页面已不是构造假设的样子）
+// 与「改了却不报」（比较成了恒绿的摆设）分别点名——前者说明锚该随页面更新，后者说明判据失效。
+function assertNodeFactProbe(problems, page, label, mutated, factsByNode, reported) {
+  if (mutated === null) {
+    problems.push(page + ' 反向构造前提失效（' + label + '）');
+    return;
+  }
+  if (!comparePage({ page, text: mutated, factsByNode }).some(reported)) {
+    problems.push(page + ' 反向构造判别力缺失（' + label + ' 未被判违规）');
+  }
+}
+
+// 各类真实边界的判别力（与真实断言共用同一比较实现）：每一类都是「页面上看起来还在、实际已不是
+// 那件事」的写法，逐类构造一遍，变异后必须报出对应字段。构造目标取自 explain 派生的事实（技能名 /
+// 工件名），不在这里另抄一份名字；构造只改内存文本，不改真实页面。〇～⑥ 变异页面，⑦ 变异零模板
+// 声明，⑧⑨ 变异 explain 输出（产出行整块缺失 / 工件记录改名）。
+function nodeFactProbeProblems(page, text, factsByNode, explainOutputs) {
+  const problems = [];
+  const node = NODE_FACT_PROBE_NODE;
+  const facts = factsByNode.get(node);
+  const skill = 'flow-comet-' + node;
+  const fileName = concreteArtifactNames(facts.artifacts)[0];
+  const artifactLabel = fileName ?? '工件名';
+  const forNode = (field) => (problem) => problem.node === node && problem.field === field;
+
+  // ① 换成错误技能名 ⇒ 技能集合必须报（「换了一个技能」不能靠在场判据蒙混）。
+  assertNodeFactProbe(problems, page, '把 ' + node + ' 的技能名换成错误名',
+    mutateNodeColumn(text, node, 'skills', (body) => body.replace(skill, skill + '-wrong')),
+    factsByNode, forNode('技能集合'));
+
+  // ② 删掉小节 ⇒ 报小节缺席。
+  assertNodeFactProbe(problems, page, '删掉 ### ' + node + ' 小节',
+    removeNodeSection(text, node), factsByNode, forNode('节点小节'));
+
+  // ③ 同一页再出现一个 ### <node> ⇒ 报重复（第一个之后的整段内容不会被比较，不能静默留在页面上）。
+  assertNodeFactProbe(problems, page, '同一页重复 ### ' + node + ' 小节',
+    text + '\n### ' + node + '\n\n- 重复小节\n', factsByNode, forNode('节点小节'));
+
+  // ④ 注释掉工件名 ⇒ 报工件文件名缺席（HTML 注释里的条目在页面上看不见，不算在场）。
+  assertNodeFactProbe(problems, page, '把 ' + artifactLabel + ' 注释掉',
+    fileName === undefined ? null : mutateNodeColumn(text, node, 'artifacts',
+      (body) => body.replace(fileName, '<!-- ' + fileName + ' -->')),
+    factsByNode, forNode('工件文件名'));
+
+  // ⑤ 技能名加 _v2 后缀 ⇒ 报该技能不再在场（长名字不能顶替短名字）。
+  assertNodeFactProbe(problems, page, '把技能名改成 ' + skill + '_v2',
+    mutateNodeColumn(text, node, 'skills', (body) => body.replace(skill, skill + '_v2')),
+    factsByNode, forNode('技能集合'));
+
+  // ⑥ 工件名加 .bak 后缀 ⇒ 报工件文件名缺席（.bak 是另一个文件，不顶替正本）。
+  assertNodeFactProbe(problems, page, '把 ' + artifactLabel + ' 改成 .bak 副本',
+    fileName === undefined ? null : mutateNodeColumn(text, node, 'artifacts',
+      (body) => body.replace(fileName, fileName + '.bak')),
+    factsByNode, forNode('工件文件名'));
+
+  // ⑦ 零模板栏换成「前缀是 no templates、意思却相反」的句子 ⇒ 报零模板声明缺席。按前缀放行时
+  //    这一句正好被当成声明（`No templates` 后面接了 `are optional`），而它说的是「模板是可选的」——
+  //    同一个前缀对两种相反的意思都成立，事实抽取就漏掉了页面真正在讲什么。
+  assertNodeFactProbe(problems, page, '把 ' + NODE_FACT_ZERO_TEMPLATE_PROBE_NODE + ' 的零模板声明换成复数前缀句',
+    mutateNodeColumn(text, NODE_FACT_ZERO_TEMPLATE_PROBE_NODE, 'prompts',
+      () => '- No templates are optional. Read TASK.md'),
+    factsByNode, (problem) => problem.node === NODE_FACT_ZERO_TEMPLATE_PROBE_NODE
+      && problem.field === '零模板声明');
+
+  // ⑧ explain 的产出行整块缺失（模拟标签被改名成 OUTPUT-ARTIFACT）⇒ 解析必须报，而不是把空列表
+  //    当成「该节点没有工件」。用真实输出改一处，不另造一份 explain 文本。
+  const explainText = explainOutputs.get(node);
+  const drifted = typeof explainText === 'string' ? explainText.replace('ARTIFACT:', 'OUTPUT-ARTIFACT:') : null;
+  if (drifted === null || drifted === explainText) {
+    problems.push(page + ' 反向构造前提失效（' + node + ' 的 explain 输出里没有 ARTIFACT 行）');
+  } else {
+    let driftError = null;
+    try {
+      parseExplain(drifted);
+    } catch (error) {
+      driftError = String(error.message);
+    }
+    if (driftError === null || !driftError.includes('ARTIFACT')) {
+      problems.push(page + ' 反向构造判别力缺失（把 ARTIFACT 行改名成 OUTPUT-ARTIFACT 未被判违规）');
+    }
+  }
+
+  // ⑨ 工件清单少一条（模拟 open 的 CHANGE.md 记录被改名）⇒ 解析必须点名缺的是哪一份，而不是
+  //    「还有别的产出行就继续比」。open 有两个工件：只改掉 CHANGE.md 那条时 REQUIREMENT.md 仍能
+  //    解析，缺掉的那份会被静默放过，页面上的 CHANGE.md 断言随之消失。改的是产物路径本身，
+  //    OUTPUT-SCHEMA 行不动——两份说法对不上才是要抓的形态。
+  const openOutput = explainOutputs.get('open');
+  const renamed = typeof openOutput === 'string'
+    ? openOutput.replace('.specs/<change-id>/CHANGE.md', '.specs/<change-id>/CHANGE-DRAFT.md')
+    : null;
+  if (renamed === null || renamed === openOutput) {
+    problems.push(page + ' 反向构造前提失效（open 的 explain 输出里没有 CHANGE.md 的产物路径）');
+  } else {
+    let renameError = null;
+    try {
+      parseExplain(renamed);
+    } catch (error) {
+      renameError = String(error.message);
+    }
+    if (renameError === null || !renameError.includes('CHANGE.md')) {
+      problems.push(page + ' 反向构造判别力缺失（把 open 的 CHANGE.md 工件记录改名未被判缺工件）');
+    }
+  }
+
+  return problems;
+}
+
+// 期望值来源：逐节点子进程读 `explain <node>`（与门禁同源）。失败 / 无法解析 / 节点身份不符都计入
+// problems——缺一个节点就没法完整对账，未对账不等于通过；调用方看到任何 problem 就不再比较页面。
+// 原始输出一并带回：产出行是否整块缺失只有解析层知道，反向构造用真实输出改一处来验它。
+function explainFactsByNode() {
+  const problems = [];
+  const env = { ...process.env };
+  delete env.FLOW_COMET_PROTOCOL;
+  delete env.FLOW_COMET_RUN_ROOT;
+  const factsByNode = new Map();
+  const explainOutputs = new Map();
+  for (const node of NODE_IDS) {
+    const res = spawnSync(process.execPath, [path.join(SCRIPTS_DIR, 'workflow-state.mjs'), 'explain', node], {
+      cwd: REPO_ROOT,
+      env,
+      encoding: 'utf8',
+      timeout: 60000,
+    });
+    if (res.status !== 0) {
+      problems.push('explain ' + node + ' 失败（退出码 ' + (res.status ?? 'null') + '）: '
+        + String(res.stderr || '').trim());
+      continue;
+    }
+    // 原始输出留给反向构造用（模拟产出行标签被改名）；解析失败即报——缺产出行与缺 NODE 行一样，
+    // 都是「这份输出不能当事实来源」，不是「该节点没有工件」。
+    const output = String(res.stdout || '');
+    let facts;
+    try {
+      facts = parseExplain(output);
+    } catch (error) {
+      problems.push('explain ' + node + ' 的输出无法解析（' + error.message + '）');
+      continue;
+    }
+    if (facts.node !== node) {
+      problems.push('explain ' + node + ' 返回的节点身份是 ' + facts.node + '（期望 ' + node + '）');
+      continue;
+    }
+    factsByNode.set(node, facts);
+    explainOutputs.set(node, output);
+  }
+  if (factsByNode.size !== NODE_IDS.length) {
+    problems.push('节点事实来源不完整（' + factsByNode.size + '/' + NODE_IDS.length
+      + ' 个节点的 explain 可用）——未对账不等于通过');
+  }
+  return { factsByNode, problems, explainOutputs };
+}
+
+// 节点事实锚本体：页面的在场由调用方的形态判据保证——安装副本 / npm 包形态在 TA-24 开头整面
+// SKIP，走到这里的检出带公开面，页面缺席即判据失效。逐节点比较后，两页各跑一遍内存反构造证明判据
+// 认得出六类「看起来还在、实际已不是那件事」的写法。
+function nodeFactsAnchorProblems() {
+  const { factsByNode, problems, explainOutputs } = explainFactsByNode();
+  if (problems.length > 0) return problems;
+  for (const rel of ['docs/NODES.md', 'docs/NODES-zh.md']) {
+    if (!repoFileExists(rel)) {
+      problems.push(rel + ' 不在检出面（形态判据认定本检出带公开面；节点参考页缺席即判据失效）');
+      continue;
+    }
+    const text = normalizeNewlines(repoFileText(rel));
+    problems.push(...comparePage({ page: rel, text, factsByNode }));
+    problems.push(...nodeFactProbeProblems(rel, text, factsByNode, explainOutputs));
+  }
+  return problems;
 }
 
 // 归档后交接协议页（`reference/post-archive-handoff.md`，分发参考册）的判据：场景 352 与它自己
@@ -4111,6 +4330,12 @@ export const ENTRIES = [
   // 「完全继承 / 段名在运行时派生」这类 overclaim；机制册的「哪些节点查段名」表覆盖全部出口；
   // 故障排查给出两阶段报错指引；工件保真条点明本仓增量段。
   //
+  // 子锚（不新增场景号）：节点参考页（docs/NODES.md / docs/NODES-zh.md）的三栏事实必须与
+  // `explain <node>` 的派生视图逐节点一致——判据在 nodeFactsAnchorProblems，内存反构造覆盖
+  // 页面侧（换错技能名 / 删小节 / 重复小节 / 注释掉工件 / _v2 技能名 / .bak 工件）与 explain 侧
+  // （产出行整块缺失 / 工件记录改名 / 复数前缀的零模板句），证明比较认得出这些「看起来还在、
+  // 实际已不是那件事」的写法。
+  //
   // 缺席的**两种读法**（判据面形态先判，再判内容）：本检出带公开面（docs/、CONTRIBUTING.md 或
   // .github/ 任一在场）时，该面任何一份文档缺席都是判据失效——「两份机制册都被删」= 公开面机制
   // 文档不在检出面，判红，不能只落一条 SKIP；只有整份载体俱缺（安装副本只带技能树、npm 包按 files
@@ -4232,6 +4457,9 @@ export const ENTRIES = [
           (text) => text + '\n工件保真 = 上游模板段 + 本仓增量段。\n', '缺「增量段」', false],
       ].filter(([, rel]) => typeof docs.get(rel) === 'string');
       assertProbesDiscriminate(problems, docs, rules, activeProbes);
+      // 子锚：两页节点事实与 explain 派生视图对账（逐节点），并各带页面侧内存反构造 + explain
+      // 侧的产出行缺失 / 工件记录改名 / 零模板复数前缀句。
+      problems.push(...nodeFactsAnchorProblems());
       if (problems.length > 0) throw new Error('公开面口径不符: ' + problems.join('; '));
     },
   },

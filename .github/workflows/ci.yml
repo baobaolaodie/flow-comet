@@ -447,6 +447,42 @@ jobs:
           console.log('single-authority check passed');
           EOF
 
+      - name: '图语法检查 / Docs diagram syntax (mermaid@12.3.0 + jsdom@29.1.1)'
+        run: |
+          # 判据只有一条：mermaid 解析器能接受 docs/NODES*.md 里的图；「看起来像 mermaid」不算证据。
+          #
+          # 依赖边界（ADR-007：全仓唯一第三方依赖是 @clack/prompts）：mermaid / jsdom 不进
+          # package.json，也不装进工作区——只装在 $RUNNER_TEMP 的一次性目录；--no-save +
+          # --package-lock=false 让包清单即便是在工作区里被误跑也不会被写。
+          # 检查器用裸说明符动态 import，按**脚本自身位置**解析依赖，故须把仓库里的脚本复制到
+          # 该目录后运行；在原地运行只会得到 NOT-CHECKED（exit 2）。
+          #
+          # 断言两条（缺一不可）：
+          #   ① 退出码 0——图解析失败与页面缺失都是非 0；
+          #   ② 输出含成功行「Mermaid 语法检查通过」——脚本入口的「直接运行才执行」判定一旦失效
+          #      就会静默 exit 0，只认退出码的检查在那种回归下照样全绿。成功行因此是脚本与本步
+          #      之间的契约：改写脚本措辞时须同步本步。
+          MERMAID_HOME="$RUNNER_TEMP/mermaid-check"
+          rm -rf "$MERMAID_HOME"
+          mkdir -p "$MERMAID_HOME"
+          cp scripts/check-mermaid.mjs "$MERMAID_HOME/check-mermaid.mjs"
+          cd "$MERMAID_HOME"
+          npm install --no-save --package-lock=false mermaid@12.3.0 jsdom@29.1.1
+          LOG="$MERMAID_HOME/check.log"
+          set +e
+          node "$MERMAID_HOME/check-mermaid.mjs" "$GITHUB_WORKSPACE" > "$LOG" 2>&1
+          STATUS=$?
+          set -e
+          cat "$LOG"
+          if [ "$STATUS" -ne 0 ]; then
+            echo "图语法检查失败 / mermaid syntax check failed (exit $STATUS): docs/NODES*.md 的图未被解析器接受"
+            exit 1
+          fi
+          grep -q 'Mermaid 语法检查通过' "$LOG" || {
+            echo "缺少成功行 / missing success line: 检查器未报告「Mermaid 语法检查通过」（入口可能静默退出）"
+            exit 1
+          }
+
       - name: '取锁定快照 / Materialize the locked flow-kit snapshot'
         id: snapshot
         run: |
