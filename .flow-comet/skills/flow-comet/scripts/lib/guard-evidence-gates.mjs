@@ -425,6 +425,29 @@ export async function runAcCoverageGate({ node, state }) {
   process.exit(1);
 }
 
+// verify 命令的等待预算默认值（毫秒）：15 分钟 = 文档化的两级基线实测约 8 分钟 + 近一倍余量。
+// 默认值只此一处——纯函数的回落、环境变量缺省、超时支放宽建议的下限全部消费它（同一个事实两处表达
+// 必然分叉：改一处漏一处时，上限与建议值会各说各话）。
+const DEFAULT_VERIFY_TIMEOUT_MS = 900000;
+
+// 等待预算解析：FLOW_COMET_VERIFY_TIMEOUT_MS 优先，非数字 / 0 / 负数一律回落默认（0 不是「不限时」：
+// 按 0 去 spawn 等于每次 verify 都当场超时）。纯函数——只吃传入的 env、不读 process.env 全局，因此
+// 「默认 / 覆盖 / 非数字 / 0」四种形态都能被场景直接断言。执行路径的唯一消费点在下方 runVerifyExitGate：
+// 报文回显的预算就是真实生效的上限。
+export function resolveVerifyTimeoutBudget(env = process.env) {
+  const raw = env?.FLOW_COMET_VERIFY_TIMEOUT_MS ?? String(DEFAULT_VERIFY_TIMEOUT_MS);
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_VERIFY_TIMEOUT_MS;
+}
+
+// 「子进程被掐断」与「命令自己非零退出」是两种事实：恢复动作不同（等更久 / 去改命令），因此不能合成
+// 一句报文。有退出码就是命令自己的结论。只认错误码：输出超过捕获上限（ENOBUFS）这类 spawn 错误同样
+// 带 signal 且没有退出码，拿 signal 判超时会把它们一并说成超时——而加预算治不了缓冲上限。
+// 两次 spawn 尝试（管道 / inherit 重试）共用这一份判定——分类口径不分叉。
+function isTimeoutResult(r) {
+  return r != null && r.error != null && r.error.code === 'ETIMEDOUT';
+}
+
 // verify 出口必须真实跑命令（严格版）——历史归档 change 豁免（过渡规则）。命令来源三级：TEST.md 的
 // ## 验证命令 段 → state 的 verifyCommand → 项目探测回退。失败按 change 隔离计数（≥4 次要求用户
 // 决策）。二段式执行（受限沙箱兼容）：首选管道式捕获，仅当 spawn 层被拒（EPERM）时以继承 stdio
@@ -482,9 +505,10 @@ export async function runVerifyExitGate({ protocol, node, state }) {
     console.error('BLOCKED: TEST.md 需声明 ## 验证命令 段（严格版要求）');
     process.exit(1);
   }
-  // verify 命令 timeout 可配置——FLOW_COMET_VERIFY_TIMEOUT_MS 环境变量优先，缺省 300000ms（300s；
-  // 后端测试耗时可超 300s，用 env 调大）；非数字/0 → 回退缺省
-  const verifyTimeoutMs = Number.parseInt(process.env.FLOW_COMET_VERIFY_TIMEOUT_MS ?? '300000', 10) || 300000;
+  // 等待预算的唯一消费点（解析在 resolveVerifyTimeoutBudget）：两次 spawn 尝试共用一个开始时间——
+  // 报文里的「实际耗时」覆盖真实等待过的全部时间，而不只是最后一次尝试。
+  const verifyTimeoutMs = resolveVerifyTimeoutBudget();
+  const startedAt = Date.now();
   try {
     // 测试钩子（仅测试用途）：FLOW_COMET_VERIFY_FORCE_EPERM=1 使首次管道执行模拟 EPERM 拒绝——
     // 真实受限会话中命令在管道阶段不会启动，故跳过管道阶段直接产生 EPERM 结果，让降级路径可确定性
@@ -499,15 +523,25 @@ export async function runVerifyExitGate({ protocol, node, state }) {
       console.error('VERIFY-DEGRADED: ' + verifyCommand + '（沙箱管道受限，以 inherit 重试）');
       const r2 = spawnSync(verifyCommand, { cwd: runRoot, shell: true, stdio: 'inherit', timeout: verifyTimeoutMs });
       if (!(r2.error == null && r2.status === 0)) {
-        throw new Error(r2.error != null ? String(r2.error.message) : ('exit code ' + r2.status));
+        // 降级重试同样要分两支：分类与退出码随失败对象带到 catch（stdout 语义不动）
+        const e = new Error(r2.error != null ? String(r2.error.message) : ('exit code ' + r2.status));
+        e.verifyTimeout = isTimeoutResult(r2);
+        e.verifyExitCode = r2.status;
+        e.verifyErrorCode = r2.error ? r2.error.code : null;
+        throw e;
       }
     } else if (firstFailed) {
       // 非 EPERM 失败维持现状路径——抛出与既有 execSync 形态兼容的错误对象（stdout 优先展示）
       const e = new Error('Command failed: ' + verifyCommand + '\n' + String(first.stderr ?? ''));
       e.stdout = first.stdout;
+      e.verifyTimeout = isTimeoutResult(first);
+      e.verifyExitCode = first.status;
+      e.verifyErrorCode = first.error ? first.error.code : null;
       throw e;
     }
   } catch (e) {
+    // 实测耗时在计数落盘之前取（紧接着 spawn 返回，不含 state 写入的毫秒级开销）
+    const elapsed = Date.now() - startedAt;
     // verify-fail 自动递增（无需 LLM 主动调用）——计数按当前 change 存储（verifyFailuresByChange，
     // 切换 change 不串扰；旧顶层字段迁移并入）
     const count = verifyFailuresFor(state) + 1;
@@ -516,13 +550,29 @@ export async function runVerifyExitGate({ protocol, node, state }) {
     const bad = validateStateFields(state);
     if (bad.length) { console.error('BLOCKED: state 字段类型非法: ' + bad[0]); process.exit(1); }
     await writeJson(file, state);
-    if (count >= 4) {
-      console.error('BLOCKED: verify 已失败 ' + count + ' 次，需用户决策（继续修/停止）。');
+    // 诊断先于决策（第 4 次失败也一样）：先按实际跑过的那次结果说清「是时间不够还是命令自己报错」
+    // ——两支的恢复动作不同（放宽预算重跑 / 去改命令），再把「继续修 / 停止」的选择摆出来。
+    // 判定用 e.verifyTimeout（isTimeoutResult 对实际结果分类）；退出码缺失时不编造（如重试没起来）。
+    const detail = (e.stdout && e.stdout.length) ? e.stdout : e.message;
+    // 退出码缺席时说清是哪一类 spawn 层错误（如 ENOBUFS）——「unknown」不该吞掉有名字的成因。
+    const failReason = e.verifyExitCode != null
+      ? 'exit ' + e.verifyExitCode
+      : (e.verifyErrorCode ? 'spawn ' + e.verifyErrorCode : 'unknown');
+    if (e.verifyTimeout) {
+      console.error('BLOCKED: verify 超时（预算 ' + verifyTimeoutMs + 'ms，实际耗时 ' + elapsed + 'ms；已停止等待，但子进程可能仍在运行）: ' + verifyCommand);
+      const suggested = verifyTimeoutMs < DEFAULT_VERIFY_TIMEOUT_MS
+        ? DEFAULT_VERIFY_TIMEOUT_MS : verifyTimeoutMs * 2;
+      console.error('恢复: 需要更长等待时设置 FLOW_COMET_VERIFY_TIMEOUT_MS=' + suggested + '（当前生效上限 ' + verifyTimeoutMs + 'ms）后重跑同一命令；重跑前先确认上一次的子进程已退出');
     } else {
-      // stdout 为空（如超时被 kill 时 stdout 是空 Buffer——truthy）→ 显示错误消息；消息中带实际
-      // 应用的 timeout（超时可诊断，且与 Node 版本无关）
-      const detail = (e.stdout && e.stdout.length) ? e.stdout : e.message;
-      console.error('BLOCKED: verify 命令失败（timeout ' + verifyTimeoutMs + 'ms）: ' + verifyCommand + '\n' + String(detail).slice(0, 500));
+      // 失败支全文不得出现 timeout 字样：「命令自己非零退出」的时间预算与结论无关，写进去只会把两种
+      // 事实搅成一种。只说退出码（没有退出码时说明 spawn 层错误码）——detail 取自命令自己的输出，
+      // 没有输出时才是错误消息。
+      console.error('BLOCKED: verify 命令失败（' + failReason + '）: ' + verifyCommand);
+    }
+    if (detail) console.error(String(detail).slice(0, 500));
+    if (count >= 4) {
+      console.error('BLOCKED: verify 已失败 ' + count + ' 次，需用户决策（继续修 / 停止）。');
+    } else {
       console.error('VERIFY-FAIL: ' + count + '/3');
     }
     process.exit(1);

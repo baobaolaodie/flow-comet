@@ -68,7 +68,7 @@
 | 节点的文档是否存在、首部字段与段名是否符合模板？ | `open`、`design`、`plan`、`execute`、`subagent-execute`、`review`、`verify`、`archive`——每个节点只按它自己产出的工件判（见下表） |
 | 任务是否全部完成、每个完成任务是否有摘要、任务集是否未被改动？ | `execute`、`subagent-execute` |
 | 自检是否已声明，降级的那一种是否带证据？ | `execute`、`subagent-execute`（SUMMARY 的自检段） |
-| 验证是否真的跑过、是否通过？ | `verify`（执行 `TEST.md` 的命令块） |
+| 验证是否真的跑过、是否通过？ | `verify`（执行 `TEST.md` 的命令块；超时与命令失败分别报告，等待预算默认 15 分钟） |
 | 审查的每条发现是否都有处置、任何严重度的延期是否都经用户裁决、判为 Minor 的发现是否写明了判定理由（默认按 Major 处理）？ | `review` |
 | 归档目录与其遗留清单是否就位？ | `archive` |
 

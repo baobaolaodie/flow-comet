@@ -20,6 +20,9 @@
 ### 变更
 
 - **教训册条目数回退时 `health` 拒绝出报告**：条目数低于上一份报告时以失败结束，而不是把损失写成新基线。（[#186](https://github.com/baobaolaodie/flow-comet/pull/186)）
+- **`verify` 等得够久**：出口的默认等待预算从 5 分钟提到 15 分钟（仍可用文档化的环境变量覆盖），把两级回归套件写进验证段的 change 不会再跑到一半被掐断。（[#187](https://github.com/baobaolaodie/flow-comet/pull/187)）
+- **超时与命令失败分开报告**：超时写明用掉的预算、实际耗时与可照抄的放宽命令；命令失败写明退出码与输出。（[#187](https://github.com/baobaolaodie/flow-comet/pull/187)）
+- **连续第 4 次失败保留诊断**：决策行之前先打印命令、预算与错误输出，不再把它们丢掉。（[#187](https://github.com/baobaolaodie/flow-comet/pull/187)）
 
 ## [1.8.0] - 2026-11-18
 
