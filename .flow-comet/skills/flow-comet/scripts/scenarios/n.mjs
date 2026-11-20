@@ -709,9 +709,10 @@ function assertNodeFactProbe(problems, page, label, mutated, factsByNode, report
   }
 }
 
-// 六类真实边界的判别力（与真实断言共用同一比较实现）：每一类都是「页面上看起来还在、实际已不是
+// 各类真实边界的判别力（与真实断言共用同一比较实现）：每一类都是「页面上看起来还在、实际已不是
 // 那件事」的写法，逐类构造一遍，变异后必须报出对应字段。构造目标取自 explain 派生的事实（技能名 /
-// 工件名），不在这里另抄一份名字；构造只改内存文本，不改真实页面。
+// 工件名），不在这里另抄一份名字；构造只改内存文本，不改真实页面。〇～⑥ 变异页面，⑦ 变异零模板
+// 声明，⑧⑨ 变异 explain 输出（产出行整块缺失 / 工件记录改名）。
 function nodeFactProbeProblems(page, text, factsByNode, explainOutputs) {
   const problems = [];
   const node = NODE_FACT_PROBE_NODE;
@@ -751,10 +752,12 @@ function nodeFactProbeProblems(page, text, factsByNode, explainOutputs) {
       (body) => body.replace(fileName, fileName + '.bak')),
     factsByNode, forNode('工件文件名'));
 
-  // ⑦ 零模板栏换成一句顺口带 template 词的普通句子 ⇒ 报零模板声明缺席（子串不算声明）。
-  assertNodeFactProbe(problems, page, '把 ' + NODE_FACT_ZERO_TEMPLATE_PROBE_NODE + ' 的零模板声明换成普通句子',
+  // ⑦ 零模板栏换成「前缀是 no templates、意思却相反」的句子 ⇒ 报零模板声明缺席。按前缀放行时
+  //    这一句正好被当成声明（`No templates` 后面接了 `are optional`），而它说的是「模板是可选的」——
+  //    同一个前缀对两种相反的意思都成立，事实抽取就漏掉了页面真正在讲什么。
+  assertNodeFactProbe(problems, page, '把 ' + NODE_FACT_ZERO_TEMPLATE_PROBE_NODE + ' 的零模板声明换成复数前缀句',
     mutateNodeColumn(text, NODE_FACT_ZERO_TEMPLATE_PROBE_NODE, 'prompts',
-      () => '- No template is optional. Read TASK.md'),
+      () => '- No templates are optional. Read TASK.md'),
     factsByNode, (problem) => problem.node === NODE_FACT_ZERO_TEMPLATE_PROBE_NODE
       && problem.field === '零模板声明');
 
@@ -773,6 +776,28 @@ function nodeFactProbeProblems(page, text, factsByNode, explainOutputs) {
     }
     if (driftError === null || !driftError.includes('ARTIFACT')) {
       problems.push(page + ' 反向构造判别力缺失（把 ARTIFACT 行改名成 OUTPUT-ARTIFACT 未被判违规）');
+    }
+  }
+
+  // ⑨ 工件清单少一条（模拟 open 的 CHANGE.md 记录被改名）⇒ 解析必须点名缺的是哪一份，而不是
+  //    「还有别的产出行就继续比」。open 有两个工件：只改掉 CHANGE.md 那条时 REQUIREMENT.md 仍能
+  //    解析，缺掉的那份会被静默放过，页面上的 CHANGE.md 断言随之消失。改的是产物路径本身，
+  //    OUTPUT-SCHEMA 行不动——两份说法对不上才是要抓的形态。
+  const openOutput = explainOutputs.get('open');
+  const renamed = typeof openOutput === 'string'
+    ? openOutput.replace('.specs/<change-id>/CHANGE.md', '.specs/<change-id>/CHANGE-DRAFT.md')
+    : null;
+  if (renamed === null || renamed === openOutput) {
+    problems.push(page + ' 反向构造前提失效（open 的 explain 输出里没有 CHANGE.md 的产物路径）');
+  } else {
+    let renameError = null;
+    try {
+      parseExplain(renamed);
+    } catch (error) {
+      renameError = String(error.message);
+    }
+    if (renameError === null || !renameError.includes('CHANGE.md')) {
+      problems.push(page + ' 反向构造判别力缺失（把 open 的 CHANGE.md 工件记录改名未被判缺工件）');
     }
   }
 
@@ -4306,9 +4331,10 @@ export const ENTRIES = [
   // 故障排查给出两阶段报错指引；工件保真条点明本仓增量段。
   //
   // 子锚（不新增场景号）：节点参考页（docs/NODES.md / docs/NODES-zh.md）的三栏事实必须与
-  // `explain <node>` 的派生视图逐节点一致——判据在 nodeFactsAnchorProblems，六类内存反构造
-  // （换错技能名 / 删小节 / 重复小节 / 注释掉工件 / _v2 技能名 / .bak 工件）+ explain 产出行
-  // 整块缺失 + 松散的零模板句子，证明比较认得出这些「看起来还在、实际已不是那件事」的写法。
+  // `explain <node>` 的派生视图逐节点一致——判据在 nodeFactsAnchorProblems，内存反构造覆盖
+  // 页面侧（换错技能名 / 删小节 / 重复小节 / 注释掉工件 / _v2 技能名 / .bak 工件）与 explain 侧
+  // （产出行整块缺失 / 工件记录改名 / 复数前缀的零模板句），证明比较认得出这些「看起来还在、
+  // 实际已不是那件事」的写法。
   //
   // 缺席的**两种读法**（判据面形态先判，再判内容）：本检出带公开面（docs/、CONTRIBUTING.md 或
   // .github/ 任一在场）时，该面任何一份文档缺席都是判据失效——「两份机制册都被删」= 公开面机制
@@ -4431,8 +4457,8 @@ export const ENTRIES = [
           (text) => text + '\n工件保真 = 上游模板段 + 本仓增量段。\n', '缺「增量段」', false],
       ].filter(([, rel]) => typeof docs.get(rel) === 'string');
       assertProbesDiscriminate(problems, docs, rules, activeProbes);
-      // 子锚：两页节点事实与 explain 派生视图对账（逐节点），并各带六类内存反构造 + explain
-      // 产出行缺失。
+      // 子锚：两页节点事实与 explain 派生视图对账（逐节点），并各带页面侧内存反构造 + explain
+      // 侧的产出行缺失 / 工件记录改名 / 零模板复数前缀句。
       problems.push(...nodeFactsAnchorProblems());
       if (problems.length > 0) throw new Error('公开面口径不符: ' + problems.join('; '));
     },

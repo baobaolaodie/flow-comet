@@ -25,15 +25,18 @@
 //     几个字」把缺件判成在场；行内代码是可见正文，照旧参与匹配。
 //   · 重复节点小节：同一页出现两个 `### <node>` 时只有第一个会被比较，第二个里的内容谁也读不到；
 //     重复本身要点名报出（多一份小节不是多一份判据，是安静的丢件）。
-//   · 零模板节点：该栏必须有**独立的**零模板声明（行首或列表项位置：零模板 / zero templates /
-//     no templates / Template: none / 模板：无）——没有模板不等于没有判据；正文里顺口带 template
-//     词的句子（如「No template is optional.」）不算声明。
+//   · 零模板节点：该栏必须有**完整的**零模板声明（去掉列表记号与首尾空白后行首只能是：零模板 /
+//     zero templates / no templates / Template: none / 模板：无，其后只余空白或句末标点）——没有
+//     模板不等于没有判据；接着把话说下去的句子（如「No templates are optional.」）不算声明：它的
+//     前缀与「该节点没有模板」相同，意思却相反。
 //   · 工件文件名只对具体路径断言：去掉 `<change-id>` 占位后仍含 `*` / `<...>` 的产物，
 //     页面上是按语义描述的（「每个任务一份摘要」「遗留清单」），字面名不是该栏的承诺；它们的
 //     模板名与证据 id 仍被断言。文件名按**完整名字**比对：`DESIGN.md.bak` 是另一个文件，不能
 //     顶替 `DESIGN.md`；无扩展名的提示词 / 模板名仍按原口径（点不是名字的一部分）。
-//   · 缺节点小节、缺栏、空栏、重复小节、explain 的产出行整块缺失都逐条报出来，不当作「没有可
-//     比较的东西」（缺席不等于通过）。
+//   · explain 侧同样 fail-closed：产出行整块缺失、出现未知的记录类型（如 `OUTPUT-ARTIFACT:`）、
+//     schema 点名的 .md 工件在 ARTIFACT 记录里找不到，都直接抛错——旁路掉的那部分记录会让页面
+//     断言静默缩水。
+//   · 缺节点小节、缺栏、空栏、重复小节都逐条报出来，不当作「没有可比较的东西」（缺席不等于通过）。
 //   · 每条问题点名页 / 节点 / 字段 / 期望 / 实际；message 可直接打印，toString 让调用方也能
 //     直接 join。
 //
@@ -206,6 +209,42 @@ function parseEvidenceLine(line) {
     .filter((item) => item.id !== '');
 }
 
+// explain 的记录类型（引擎 lib/state-explain.mjs 的打印面）。别的全大写类型名——例如把
+// `ARTIFACT:` 改成 `OUTPUT-ARTIFACT:`——不是「一行无关输出」，而是产出行格式漂移：那一整类记录会
+// 被逐个忽略，下游少掉的是一类判据，而不是一条文本。类型按「全大写名字 + 紧跟冒号」认：
+// `COMMAND entry: …` 这类值不在其列（类型名后面是空白）。
+const KNOWN_EXPLAIN_RECORD_TYPES = new Set([
+  'NODE', 'LABEL', 'KIND', 'DISABLED', 'TEMPLATE', 'OUTPUT-SCHEMA',
+  'ARTIFACT', 'EVIDENCE', 'GUARDRAIL', 'REQUIRED-SKILL', 'COMMAND',
+]);
+const EXPLAIN_RECORD_TYPE_RE = /^\s*([A-Z][A-Z0-9-]*):/u;
+
+// OUTPUT-SCHEMA 行：`OUTPUT-SCHEMA: flowkit.intake.v1 — CHANGE.md + REQUIREMENT.md`。破折号之后那一段
+// 是该 schema 点名的**完整工件清单**——ARTIFACT 记录逐条派生产物路径，两份说法必须对得上。
+const OUTPUT_SCHEMA_LINE_RE = /^OUTPUT-SCHEMA:\s*(.*?)\s*$/u;
+
+function schemaArtifactNames(lines) {
+  const names = new Set();
+  for (const line of lines) {
+    const matched = OUTPUT_SCHEMA_LINE_RE.exec(line);
+    if (matched === null) continue;
+    for (const name of matched[1].match(/(?<![\w.-])[A-Za-z0-9][\w.-]*\.md(?![\w.-])/gu) ?? []) {
+      names.add(name);
+    }
+  }
+  return [...names];
+}
+
+// ARTIFACT 记录是否覆盖 schema 点名的工件：路径基名就是这个名字，或者只多一个通配前缀——
+// `*-SUMMARY.md` 表示「每个任务一份 SUMMARY.md」，schema 用单数名字说的是这件事，名字仍是 SUMMARY.md。
+// 其余任何差别都不覆盖：`CHANGE-DRAFT.md`、`CHANGE.md.bak` 各自是另一个文件。
+function artifactRecordCovers(name, pointer) {
+  const base = String(pointer).replaceAll('\\', '/').split('/').pop() ?? '';
+  if (base === name) return true;
+  if (!base.endsWith(name)) return false;
+  return base.slice(0, base.length - name.length).includes('*');
+}
+
 // 该节点应读的提示词清单（基名，不带 .md）：引擎映射是唯一一份，条件提示词一并纳入——页面把
 // 条件件也写在「提示词与模板」栏里。
 function promptBasenames(nodeId) {
@@ -228,6 +267,11 @@ export function parseExplain(output) {
     evidence: [],
   };
   for (const line of lines) {
+    const recordType = EXPLAIN_RECORD_TYPE_RE.exec(line);
+    if (recordType !== null && !KNOWN_EXPLAIN_RECORD_TYPES.has(recordType[1])) {
+      throw new Error('explain 输出出现未知的记录类型 ' + recordType[1] + '（' + line.trim()
+        + '）——产出行格式可能变了：未知类型的记录不会被解析，未对账不等于通过');
+    }
     if (line.startsWith('NODE: ')) {
       facts.node = line.slice('NODE: '.length).trim();
       continue;
@@ -263,6 +307,16 @@ export function parseExplain(output) {
   if (facts.artifacts.length === 0 && facts.kind !== 'handoff') {
     throw new Error('explain 输出解析不到任何 ARTIFACT 记录（KIND: ' + (facts.kind ?? '缺失')
       + '）——产出行格式可能变了，未对账不等于通过');
+  }
+  // 工件清单对账：schema 点名的每一份 .md 工件都要有 ARTIFACT 记录覆盖。只查「有没有产出行」不够——
+  // open 有两个工件，只改掉 CHANGE.md 那一条时 REQUIREMENT.md 仍能解析，缺掉的那份会被静默放过，
+  // 页面上的工件断言随之缩水。KIND: handoff 的 schema 不点名工件，因此合法为空。
+  const records = facts.artifacts.flatMap((artifact) => artifact.paths);
+  for (const name of schemaArtifactNames(lines)) {
+    if (records.some((pointer) => artifactRecordCovers(name, pointer))) continue;
+    throw new Error('explain 输出的 OUTPUT-SCHEMA 点名工件 ' + name + '，但没有任何 ARTIFACT 记录覆盖它'
+      + '（记录: ' + (records.length > 0 ? records.join(', ') : '（无 ARTIFACT 记录）') + '）'
+      + '——工件清单不完整，未对账不等于通过');
   }
   facts.implementationSkill = 'flow-comet-' + facts.node;
   facts.prompts = promptBasenames(facts.node);
@@ -357,21 +411,29 @@ function skillProblems(page, node, body, facts) {
   return problems;
 }
 
-// 零模板声明：必须是**独立**的一条声明——行首或列表项位置（去掉 `- ` / `1. ` 这类列表记号）
-// 就是这几个词；后面接着写解释照旧算（页面的声明通常接一句「只读提示词，不读模板」）。正文里
-// 顺口带 template 词的句子不是声明：「No template is optional.」只说明这句话在谈模板，没说这个
-// 节点没有模板——按子串放行等于把「留白」读成「已声明」。
+// 零模板声明：必须是**完整的一条**声明，不是「行首凑巧是这几个词」。去掉列表记号与首尾空白后，
+// 行首只能是下面几种写法之一，并且声明就此收束——其后要么没有内容（只余空白），要么以句末标点
+// 断开（页面的声明通常再接一句「只读提示词，不读模板」，那是另一句，不是声明的一部分）。
+// 判定理由：按前缀放行会把「留白」读成「已声明」——`No templates are optional.` 的前缀正是
+// `No templates`，句子却在说「模板是可选的」，与「该节点没有模板」相反；同一个前缀能同时对两种
+// 相反的意思成立，就不是判据。句中的逗号 / 冒号不算收束：它们接着把这句话说下去。
 const ZERO_TEMPLATE_DECLARATIONS = [
   /^零模板/u,
   /^zero\s+templates?\b/iu,
-  /^no\s+templates\b/iu,
+  /^no\s+templates?\b/iu,
   /^templates?\s*[:：]\s*none\b/iu,
   /^模板\s*[:：]\s*无/u,
 ];
 
+// 声明之后的合法形态：行到此为止，或句末标点（. 。 ． ! ！ ? ？ ; ；）。
+const ZERO_TEMPLATE_TERMINUS_RE = /^(?:[ \t]*$|[ \t]*[.。．!！?？;；])/u;
+
 function isZeroTemplateDeclaration(line) {
   const text = String(line ?? '').trim().replace(/^(?:[-*+]|\d+[.)])\s+/u, '');
-  return ZERO_TEMPLATE_DECLARATIONS.some((pattern) => pattern.test(text));
+  return ZERO_TEMPLATE_DECLARATIONS.some((pattern) => {
+    const matched = pattern.exec(text);
+    return matched !== null && ZERO_TEMPLATE_TERMINUS_RE.test(text.slice(matched[0].length));
+  });
 }
 
 function hasZeroTemplateDeclaration(body) {
