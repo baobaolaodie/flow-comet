@@ -625,6 +625,29 @@ jobs:
           }
           EOF
 
+      - name: 'issue autoclose dry run / Issue autoclose dry run'
+        run: |
+          # 判据：只有「已合并且目标分支为 dev」的 PR 才会关闭正文声明的编号，且围栏代码块里的示例
+          # 编号不算声明——这正是 .github/scripts/issue-autoclose.mjs 的三段决策。这里真实调用它的
+          # --dry-run（不触网、不需要令牌），把同一份契约放进每次 PR 的 required check：决策在脚本、
+          # 断言在本步，任一侧单独漂移都会红。
+          WORK="$RUNNER_TEMP/autoclose"
+          mkdir -p "$WORK"
+          # 夹具①：合并进 dev 的 PR 正文——真声明 #12 + 围栏代码块里的示例 #99（不得采纳）
+          # 正文里的三个反引号是 JSON 字符串的代码围栏：写在单引号内原样交给脚本解析，不是 shell 展开
+          # shellcheck disable=SC2016
+          printf '%s' '{"action":"closed","pull_request":{"number":42,"merged":true,"base":{"ref":"dev"},"head":{"repo":{"full_name":"o/r"}},"body":"Closes #12\n```\nCloses #99\n```"},"repository":{"full_name":"o/r"}}' > "$WORK/merged.json"
+          # 夹具②：同一 PR 的未合并形态（关闭但未合并）——必须不动作
+          printf '%s' '{"action":"closed","pull_request":{"number":43,"merged":false,"base":{"ref":"dev"},"head":{"repo":{"full_name":"o/r"}},"body":"Closes #12"},"repository":{"full_name":"o/r"}}' > "$WORK/unmerged.json"
+          OUT="$(node .github/scripts/issue-autoclose.mjs --dry-run --payload "$WORK/merged.json")"
+          echo "$OUT"
+          echo "$OUT" | grep -q '将关闭 #12' || { echo 'dry run 未计划关闭 #12'; exit 1; }
+          if echo "$OUT" | grep -q '#99'; then echo '围栏代码块里的编号不得被关闭（#99）'; exit 1; fi
+          OUT2="$(node .github/scripts/issue-autoclose.mjs --dry-run --payload "$WORK/unmerged.json")"
+          echo "$OUT2"
+          echo "$OUT2" | grep -q 'SKIP: not-merged' || { echo '未合并的 PR 必须输出 SKIP: not-merged'; exit 1; }
+          echo 'issue autoclose dry run 通过 / issue autoclose dry run passed'
+
 
   # ── PR 纪律: 分支规范 + 模板完整 + 提交规范 / PR policy ──
   pr-policy:
