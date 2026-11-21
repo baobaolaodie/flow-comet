@@ -4387,6 +4387,12 @@ export const ENTRIES = [
         const sameNumberList = (actual, expected) => Array.isArray(actual)
           && actual.length === expected.length
           && actual.every((value, index) => Number(value) === expected[index]);
+        // 本检出 PR 模板的全文本：GitHub 用模板预填 PR 正文，模板正文因此是绝大多数 PR 的实际正文
+        // （默认路径）。断言取真迹而非合成串——模板改了写法，这里会跟着说话。模板缺席由 ⑤ 点名。
+        const prTemplate = '.github/PULL_REQUEST_TEMPLATE.md';
+        const templateText = repoFileExists(prTemplate)
+          ? normalizeNewlines(repoFileText(prTemplate))
+          : null;
         // ① 解析：行首（可带 -/*）的 Closes/Fixes/Resolves（可带冒号、大小写不敏感）后的 #N 才算；
         //    围栏 / 行内代码 / 引用块 / 句中都不算；结果是去重升序的编号数组。八类样本逐条写期望值。
         const parseSamples = [
@@ -4465,6 +4471,42 @@ export const ENTRIES = [
                 autoCloseProblems.push('decideTrigger(' + label + ') 不动作时没有给出原因');
               }
             }
+            // ②b 模板预填正文与 HTML 注释：GitHub 用模板预填 PR 正文，模板把退出标记
+            //    （[skip-issue-close]）与关闭关键词的用法写在 HTML 注释里。注释是隐藏的说明文字，不是
+            //    本 PR 的意图——默认路径（用模板开 PR、在关联段补一行可见 Closes #12）必须照常动作，
+            //    否则自动化只会在每个按模板填写的 PR 上输出『SKIP: skip-marker』；可见的退出标记仍然
+            //    有效（用户明确写出来才是退出）。
+            const assertBodyDecision = (label, body, shouldAct) => {
+              const decision = decideTrigger(withPullRequest({ body }));
+              if (decisionActs(decision) !== shouldAct) {
+                autoCloseProblems.push('decideTrigger(' + label + ') 期望' + (shouldAct ? '动作' : '不动作')
+                  + '，实际 ' + JSON.stringify(decision));
+              } else if (!shouldAct && !/skip|opt-?out|退出/i.test(decisionReason(decision))) {
+                autoCloseProblems.push('decideTrigger(' + label + ') 不动作时原因未点明退出标记：'
+                  + JSON.stringify(decisionReason(decision)));
+              }
+            };
+            assertBodyDecision('可见的退出标记', 'Fixed it.\n\n[skip-issue-close]\n\nCloses #12', false);
+            assertBodyDecision('只写在注释里的退出标记', '<!-- [skip-issue-close] -->\n\nCloses #12', true);
+            if (templateText !== null) {
+              assertBodyDecision('模板预填正文 + Closes #12', templateText + '\n\nCloses #12', true);
+            }
+            // 注释里的关键词同样不是关闭声明：只有可见的行首关键词才进计划。
+            if (typeof parseClosingReferences === 'function') {
+              const commentCases = [
+                ['注释里的关键词', '<!-- Closes #99 -->\n\nCloses #12', [12]],
+              ];
+              if (templateText !== null) {
+                commentCases.push(['模板预填正文', templateText + '\n\nCloses #12', [12]]);
+              }
+              for (const [label, body, expected] of commentCases) {
+                const actual = parseClosingReferences(body);
+                if (!sameNumberList(actual, expected)) {
+                  autoCloseProblems.push('parseClosingReferences(' + label + ') 期望 '
+                    + JSON.stringify(expected) + '（注释里的编号不算），实际 ' + JSON.stringify(actual));
+                }
+              }
+            }
           }
           // ③ 计划：只关 open 的编号；已关闭的记为跳过并说明原因；超过上限一个都不关、全部跳过。
           //    计划的事实（哪些关 / 哪些跳过 / 为什么）可从数组或 actions / entries / items 容器里读，
@@ -4538,6 +4580,29 @@ export const ENTRIES = [
                 autoCloseProblems.push('refs 超过上限时跳过必须带原因（超限不能被静默忽略）');
               }
             }
+            // 默认上限：不传 limits 时 11 个 open 编号同样一个都不关——只锚「显式传 10」的分支时，
+            // 把默认值改成 11 或删掉默认上限都仍然全绿；这条锚住默认值本身是 10。
+            const defaultRefs = Array.from({ length: 11 }, (unused, index) => 200 + index);
+            const defaultPlan = planFacts(planIssueActions({
+              refs: defaultRefs,
+              issues: defaultRefs.map((number) => ({ number, state: 'open' })),
+            }));
+            if (defaultPlan === null) {
+              autoCloseProblems.push('planIssueActions 在不传 limits 的输入上返回形状无法解读');
+            } else {
+              if (defaultPlan.close.length > 0) {
+                autoCloseProblems.push('不传 limits 时默认上限必须让 11 个引用一个都不关（默认 10），实际计划关闭 '
+                  + JSON.stringify(defaultPlan.close));
+              }
+              const missedByDefault = defaultRefs.filter((number) => !defaultPlan.skip.includes(number));
+              if (missedByDefault.length > 0) {
+                autoCloseProblems.push('不传 limits 且超过默认上限时每个编号都要记为跳过，漏记 '
+                  + JSON.stringify(missedByDefault));
+              }
+              if (defaultPlan.reasons.size === 0) {
+                autoCloseProblems.push('不传 limits 且超过默认上限时跳过必须带原因（默认上限不能被静默忽略）');
+              }
+            }
           }
         }
         // ④ 工作流形态：触发器 pull_request + closed；只声明三项最小权限；不出现 pull_request_target
@@ -4564,31 +4629,36 @@ export const ENTRIES = [
             autoCloseProblems.push(autoCloseWorkflow + ' 既未读 GITHUB_EVENT_PATH 也未调用 issue-autoclose.mjs：工作流没接上脚本');
           }
         }
-        // ⑤ 承诺与自动化在场：PR 模板说「由机器人关闭 / 自动关闭」，工作流就必须真在。按标点切句再判
-        //    否定——同一行里「关键词不会触发自动关闭」与「合并时自动关闭」是两种口径，整行判会把它们
-        //    混成一谈（那是把承诺判据反过来用）。
+        // ⑤ 承诺与自动化在场：PR 模板说「合入 dev 时由仓库自动化关闭」，工作流就必须真在。正向词表
+        //    只认真正的承诺句式——宽词「自动关闭」单独出现时，退出说明里的「不想被自动关闭时写
+        //    [skip-issue-close]」也会命中，判据于是把退出说明当成承诺（模板里两句挨着，认错句就是
+        //    认错面）。按标点切句再判否定：否定词划掉的是一个分句，不是整段。
         const automationClosePromises = (text) => text
           .split(/[。；;！!？?\n]/)
           .flatMap((chunk) => chunk.split(/(?<=\.)\s+/))
           .map((chunk) => chunk.trim())
-          .filter((segment) => /自动关闭|由机器人|机器人关闭|automatically close|auto-?closed/i.test(segment))
+          .filter((segment) => /由仓库自动化关闭|automation closes|automatically closes|自动关闭 issue/i
+            .test(segment))
           .filter((segment) => !/不会|不再|不自动|never|\bnot\b|won't|will not/i.test(segment));
-        // 判据自身的判别力锚（纯内存）：负向口径不得算承诺，正向承诺必须认出来——两条都构造，
-        // 否则「恒不认承诺」的判据会让 ⑤ 永远空转。
+        // 判据自身的判别力锚（纯内存）：真承诺必须认出来，退出说明与否定句都不得算承诺——三条都构造，
+        // 否则「把退出说明当承诺」的判据会让 ⑤ 的承诺面指着错的那句。
         for (const [label, sample, expectedPromise] of [
-          ['负向口径不得算承诺', '注意：dev PR 不是默认分支，关键词不会触发自动关闭。', false],
-          ['正向承诺必须认出来', 'dev PR 写 `Closes #N` 即可，合并时由机器人关闭。', true],
+          ['真实承诺必须认出来', '目标是 dev 的 PR 合并时由仓库自动化关闭（详见 CONTRIBUTING）。', true],
+          ['退出说明不算承诺', '不想被自动关闭时在正文写 [skip-issue-close]。', false],
+          ['否定句里的正向词不算承诺', '注意：合并时不会由仓库自动化关闭。', false],
         ]) {
           if ((automationClosePromises(sample).length > 0) !== expectedPromise) {
             autoCloseProblems.push('承诺判据判别力缺失：' + label);
           }
         }
-        const prTemplate = '.github/PULL_REQUEST_TEMPLATE.md';
-        if (!repoFileExists(prTemplate)) {
+        if (templateText === null) {
           autoCloseProblems.push(prTemplate + ' 不在场：承诺与自动化在场无从比对');
         } else {
-          const promises = automationClosePromises(normalizeNewlines(repoFileText(prTemplate)));
-          if (promises.length > 0 && !repoFileExists(autoCloseWorkflow)) {
+          const promises = automationClosePromises(templateText);
+          if (promises.length === 0) {
+            autoCloseProblems.push(prTemplate + ' 未带正向自动关闭承诺：模板须说明合并时会关闭 issue'
+              + '（退出标记是补充而非主句），否则「承诺与自动化一致」无从验证');
+          } else if (!repoFileExists(autoCloseWorkflow)) {
             autoCloseProblems.push('PR 模板承诺自动化关闭（' + JSON.stringify(promises[0].slice(0, 60))
               + '），但 ' + autoCloseWorkflow + ' 不在场：承诺与自动化不一致');
           }
