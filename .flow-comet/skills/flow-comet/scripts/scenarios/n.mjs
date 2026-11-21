@@ -4352,9 +4352,10 @@ export const ENTRIES = [
         ['docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md'],
       ];
       // ---- 子锚 · dev 合并时自动关闭 issue 的契约（同场景原位扩展，不新增场景号）----
-      // ① 解析 ② 触发 ③ 计划三段纯函数住在 .github/scripts/issue-autoclose.mjs；④ 工作流形态；
-      // ⑤ PR 模板的承诺与自动化在场。五段同属一条契约：正文里说「合并时关 issue」，脚下就得真有
-      // 那三段判据与那个工作流——它守的正是「公开面上的话与自动化行为一致」，故与公开面口径同场景。
+      // ① 解析 ② 触发 ③ 计划 ③b 回链幂等四段纯函数住在 .github/scripts/issue-autoclose.mjs；
+      // ④ 工作流形态；⑤ PR 模板的承诺与自动化在场。五段同属一条契约：正文里说「合并时关 issue」，
+      // 脚下就得真有那四段判据与那个工作流——它守的正是「公开面上的话与自动化行为一致」，
+      // 故与公开面口径同场景。
       // 本组自带错误标签（与公开面 overclaim 判据是两件事）：混进同一条报文会让失败归属变模糊。
       // ⑥ 安装副本检出不带 .github/workflows/ 与仓根 CONTRIBUTING.md（结构性缺席）：整段输出可见
       // SKIP——未验证 ≠ 通过，但也不把合法形态判红；判据放在场景开头，该形态下先看到它自己的 SKIP 行。
@@ -4394,7 +4395,8 @@ export const ENTRIES = [
           ? normalizeNewlines(repoFileText(prTemplate))
           : null;
         // ① 解析：行首（可带 -/*）的 Closes/Fixes/Resolves（可带冒号、大小写不敏感）后的 #N 才算；
-        //    围栏 / 行内代码 / 引用块 / 句中都不算；结果是去重升序的编号数组。八类样本逐条写期望值。
+        //    围栏 / 缩进代码块 / 行内代码（含跨行 span）/ 引用块 / 句中都不算；结果是去重升序的
+        //    编号数组。十二类样本逐条写期望值。
         const parseSamples = [
           // 正常：正文中段的一行，前面还有一句普通文字
           ['正常行', 'Fixed stuff.\n\nCloses #12', [12]],
@@ -4414,6 +4416,14 @@ export const ENTRIES = [
           ['句中', 'see Closes #5 for details', []],
           // 去重升序：同一编号写多遍只关一次，输出按编号升序
           ['去重升序', 'Closes #9\nCloses #9\nFixes #2', [2, 9]],
+          // 缩进代码块（4 空格 / Tab 开头）同样是示例：示例里的 99 不算，其后的真指令照常算
+          ['缩进代码块', 'Example:\n\n    Closes #99\n\nCloses #12', [12]],
+          // 嵌套围栏：内层三个反引号不是外层四个反引号的闭合，示例里的 99 不算
+          ['嵌套围栏', '````md\n```\nCloses #99\n````\n\nCloses #12', [12]],
+          // 行内代码可以跨行：span 里的关键词同样不算关闭指令
+          ['跨行行内代码', 'Example: `Closes\n#99`\n\nCloses #12', [12]],
+          // 缩进两格仍在行首关键词允许的前导空白内（列表项），照常算
+          ['缩进两格仍有效', '  - Closes #15', [15]],
         ];
         let autoCloseModule = null;
         try {
@@ -4424,7 +4434,7 @@ export const ENTRIES = [
             + '（import 失败：' + String(error && error.message ? error.message : error) + '）');
         }
         if (autoCloseModule !== null) {
-          const { decideTrigger, parseClosingReferences, planIssueActions } = autoCloseModule;
+          const { decideTrigger, needsBacklink, parseClosingReferences, planIssueActions } = autoCloseModule;
           if (typeof parseClosingReferences !== 'function') {
             autoCloseProblems.push(autoCloseScript + ' 未导出 parseClosingReferences：解析契约无法校验');
           } else {
@@ -4601,6 +4611,22 @@ export const ENTRIES = [
               }
               if (defaultPlan.reasons.size === 0) {
                 autoCloseProblems.push('不传 limits 且超过默认上限时跳过必须带原因（默认上限不能被静默忽略）');
+              }
+            }
+          }
+          // ③b 回链幂等：每条 issue 先留言后关闭。重跑时（上一次关闭失败）必须凭已有回链认出「已经
+          //    留过言」，只补关闭、不重复留言——判据是评论正文以「Fixed by #<PR 号>」开头。
+          if (typeof needsBacklink !== 'function') {
+            autoCloseProblems.push(autoCloseScript + ' 未导出 needsBacklink：回链幂等无法校验');
+          } else {
+            const backlinkCases = [
+              ['已有本 PR 的回链', [{ body: 'Fixed by #42 (merged into `dev`) ...' }], 42, false],
+              ['无关评论', [{ body: '无关评论' }], 42, true],
+            ];
+            for (const [label, comments, prNumber, expected] of backlinkCases) {
+              const actual = needsBacklink(comments, prNumber);
+              if (actual !== expected) {
+                autoCloseProblems.push('needsBacklink(' + label + ') 期望 ' + expected + '，实际 ' + actual);
               }
             }
           }
