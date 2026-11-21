@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // Close the issues a pull request declares it resolves, once that pull request is merged into `dev`.
 //
-// The module exports three pure decision functions (body parsing, trigger decision, action plan) so the
-// behaviour can be checked without a network. The command line wrapper on top of them reads a webhook
-// payload, asks the GitHub REST API for the current issue states, then closes what is still open.
+// The module exports four pure decision functions (body parsing, trigger decision, action plan, backlink
+// idempotency) so the behaviour can be checked without a network. The command line wrapper on top of them
+// reads a webhook payload, asks the GitHub REST API for the current issue states, leaves the backlink
+// comment on what it is about to close, and only then closes it. The order matters: the comment is what a
+// rerun can see afterwards, so the durable half is written first (see `needsBacklink`).
 //
 // Usage:
 //   node .github/scripts/issue-autoclose.mjs [--payload <file>] [--dry-run]
@@ -24,15 +26,29 @@ import { pathToFileURL } from 'node:url';
 
 // Closing keywords are honoured only as the first meaningful token of a line, so a sentence that
 // happens to mention "closes #5" cannot close an issue. The list marker (and its trailing space) is
-// skipped, but nothing else in front of the keyword is.
-const CLOSING_REFERENCE = /^\s*(?:[-*+]\s+)?(closes|fixes|resolves)\s*:?\s*#(\d+)/i;
+// skipped, but nothing else in front of the keyword is — in particular only up to three spaces may
+// precede it: four spaces (or a tab) put the line in an indented code block, which is sample text.
+const CLOSING_REFERENCE = /^ {0,3}(?:[-*+]\s+)?(closes|fixes|resolves)\s*:?\s*#(\d+)/i;
 
-// Fences (backticks or tildes) start and end a block whose content is sample text, not intent.
-const FENCE = /^\s*(`{3,}|~{3,})/;
+// A fence opens on a line of its own (at most three spaces of indentation) and closes with the same
+// character repeated at least as many times, with nothing but whitespace behind it. Remembering the
+// character and the length keeps a three-backtick line inside a four-backtick block from closing it.
+const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
+const FENCE_CLOSE = /^ {0,3}(`+|~+)[ \t]*$/;
 
-// A reference inside inline code is an example as well, so inline code spans are removed before the
-// keyword match. The backreference keeps double-backtick spans intact.
-const INLINE_CODE = /(`+)[^`]*?\1/g;
+// Four or more leading spaces, or a tab, is an indented code block: its content is sample text too, so
+// the whole line is skipped instead of being matched.
+const INDENTED_CODE = /^(?: {4,}|\t)/;
+
+// A reference inside inline code is an example as well, and a code span may wrap onto the next line, so
+// spans are blanked over the whole body before the line scan. The backreference pairs a run of n
+// backticks with the next run of exactly n; the newlines survive so the line structure stays intact.
+const INLINE_CODE = /(`+)[\s\S]*?\1/g;
+
+/** Blank a code span (delimiters included), keeping newlines so the line structure is unchanged. */
+function blankInlineCode(text) {
+  return text.replace(INLINE_CODE, (span) => span.replace(/[^\n]/g, ' '));
+}
 
 // GitHub prefills a pull request body from the template, and the template documents the opt-out
 // marker and the closing keywords inside HTML comments; comments are hidden text, never intent.
@@ -43,8 +59,11 @@ function stripHtmlComments(text) {
 const DEFAULT_MAX_REFS = 10;
 const SKIP_MARKER = /\[skip-issue-close\]/i;
 const SKIP_LABEL = 'no-issue-close';
+// Every backlink comment starts with this marker; it doubles as the idempotency key a rerun reads back
+// (see needsBacklink), so the body is built from it instead of repeating the wording.
+const BACKLINK_MARKER = 'Fixed by #';
 const COMMENT_BODY = (pullRequestNumber) =>
-  `Fixed by #${pullRequestNumber} (merged into \`dev\`); it ships with the next release.`;
+  `${BACKLINK_MARKER}${pullRequestNumber} (merged into \`dev\`); it ships with the next release.`;
 
 /**
  * Collect the issue numbers a pull request body claims to close.
@@ -56,21 +75,50 @@ export function parseClosingReferences(body) {
   // Comments are removed first: a keyword written there is documentation of the syntax, not a claim.
   const text = stripHtmlComments(typeof body === 'string' ? body : '');
   const numbers = new Set();
-  let insideFence = false;
-  for (const line of text.split(/\r?\n/)) {
-    if (FENCE.test(line)) {
-      insideFence = !insideFence;
+  let fence = null;
+  // Code spans are blanked up front: a span may wrap, so a line-local strip would leave the tail of the
+  // example looking like a declaration on the next line.
+  for (const line of blankInlineCode(text).split(/\r?\n/)) {
+    if (fence !== null) {
+      const closing = FENCE_CLOSE.exec(line);
+      if (closing !== null && closing[1][0] === fence.character && closing[1].length >= fence.length) {
+        fence = null;
+      }
       continue;
     }
-    if (insideFence) continue;
+    const opening = FENCE_OPEN.exec(line);
+    if (opening !== null) {
+      fence = { character: opening[1][0], length: opening[1].length };
+      continue;
+    }
+    if (INDENTED_CODE.test(line)) continue;
     // Quoted lines are someone else's words (the template, an earlier comment), not this PR's claim.
     if (/^\s*>/.test(line)) continue;
-    const match = CLOSING_REFERENCE.exec(line.replace(INLINE_CODE, ''));
+    const match = CLOSING_REFERENCE.exec(line);
     if (match === null) continue;
     const number = Number.parseInt(match[2], 10);
     if (Number.isFinite(number)) numbers.add(number);
   }
   return [...numbers].sort((left, right) => left - right);
+}
+
+/**
+ * Decide whether the backlink comment still has to be written.
+ *
+ * The comment is the durable evidence that the automation handled an issue, so it is written before the
+ * close. A rerun after a failed close then finds its own comment and only finishes the close; in the old
+ * order (close first) a failed comment was unrecoverable, because the rerun saw a closed issue and
+ * skipped it.
+ *
+ * @param {{ body?: string }[]} existingComments comments already on the issue
+ * @param {number|string} prNumber pull request that is credited
+ * @returns {boolean} true when no comment already credits this pull request
+ */
+export function needsBacklink(existingComments, prNumber) {
+  const marker = `${BACKLINK_MARKER}${prNumber}`;
+  const comments = Array.isArray(existingComments) ? existingComments : [];
+  return !comments.some((comment) => comment && typeof comment === 'object'
+    && typeof comment.body === 'string' && comment.body.startsWith(marker));
 }
 
 /**
@@ -289,6 +337,24 @@ async function runCli(argv) {
       console.log(`跳过 #${action.number}（${reason}）`);
       continue;
     }
+    // Comment first, close second: a closed issue that the rerun skips is the one state the automation
+    // cannot repair, and the previous order created it whenever the comment call failed. In this order a
+    // comment failure leaves the issue open (the next run retries both steps) and a close failure leaves
+    // the comment behind (the next run sees the backlink and only retries the close).
+    try {
+      const comments = await requestJson(
+        `${api}/repos/${repoFullName}/issues/${action.number}/comments?per_page=100`, token);
+      if (needsBacklink(Array.isArray(comments) ? comments : [], pullRequestNumber)) {
+        await requestJson(`${api}/repos/${repoFullName}/issues/${action.number}/comments`, token, {
+          method: 'POST',
+          body: JSON.stringify({ body: COMMENT_BODY(pullRequestNumber) }),
+        });
+      }
+    } catch (error) {
+      failures.push({ number: action.number, step: 'comment', message: error.message });
+      console.log(`失败 #${action.number}（留言失败：${error.message}）`);
+      continue;
+    }
     try {
       await requestJson(`${api}/repos/${repoFullName}/issues/${action.number}`, token, {
         method: 'PATCH',
@@ -297,16 +363,6 @@ async function runCli(argv) {
     } catch (error) {
       failures.push({ number: action.number, step: 'close', message: error.message });
       console.log(`失败 #${action.number}（关闭失败：${error.message}）`);
-      continue;
-    }
-    try {
-      await requestJson(`${api}/repos/${repoFullName}/issues/${action.number}/comments`, token, {
-        method: 'POST',
-        body: JSON.stringify({ body: COMMENT_BODY(pullRequestNumber) }),
-      });
-    } catch (error) {
-      failures.push({ number: action.number, step: 'comment', message: error.message });
-      console.log(`失败 #${action.number}（已关闭但留言失败：${error.message}）`);
       continue;
     }
     closed += 1;
