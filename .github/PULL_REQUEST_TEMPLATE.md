@@ -39,8 +39,8 @@
 
 ## 关联（可选）/ Related (optional)
 
-<!-- 仅本 PR 解决的 issue 用 Fixes/Closes/Resolves #N（合入默认分支时自动关闭）；注意：开发 PR 目标是 dev（非默认分支），关键词不会触发自动关闭——需在发布 PR（dev → main）中处理。
-Only use Fixes/Closes/Resolves #N for issues this PR actually resolves (auto-closed on merge into the default branch). Note: dev-targeted PRs are not the default branch, so these keywords do not auto-close — handle closing in the release PR (dev → main).
+<!-- 本 PR 解决的 issue 用 Closes #N 写在这里（行首、每行一个）：目标是 dev 的 PR 合并时由仓库自动化关闭（详见 CONTRIBUTING）。来自 fork 的 PR 不会被自动关闭，合并后请手动关闭；不想被自动关闭时在正文写 [skip-issue-close]。
+List the issues this PR resolves with Closes #N, one per line at the start of a line: for pull requests targeting dev, repository automation closes them on merge (see CONTRIBUTING). Pull requests opened from a fork are not auto-closed — close those issues manually after merging; add [skip-issue-close] to the description to opt out.
 非解决性事项用文字描述即可，不要引用 issue 编号（避免在 issue 时间线留下误导性引用）。
 For anything not resolved by this PR, describe it in text without referencing issue numbers (avoids misleading cross-references on the issue timeline). -->
 
