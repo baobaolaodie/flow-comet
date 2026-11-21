@@ -4351,6 +4351,252 @@ export const ENTRIES = [
         ['docs/MECHANISM.md', 'docs/MECHANISM-zh.md'],
         ['docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md'],
       ];
+      // ---- 子锚 · dev 合并时自动关闭 issue 的契约（同场景原位扩展，不新增场景号）----
+      // ① 解析 ② 触发 ③ 计划三段纯函数住在 .github/scripts/issue-autoclose.mjs；④ 工作流形态；
+      // ⑤ PR 模板的承诺与自动化在场。五段同属一条契约：正文里说「合并时关 issue」，脚下就得真有
+      // 那三段判据与那个工作流——它守的正是「公开面上的话与自动化行为一致」，故与公开面口径同场景。
+      // 本组自带错误标签（与公开面 overclaim 判据是两件事）：混进同一条报文会让失败归属变模糊。
+      // ⑥ 安装副本检出不带 .github/workflows/ 与仓根 CONTRIBUTING.md（结构性缺席）：整段输出可见
+      // SKIP——未验证 ≠ 通过，但也不把合法形态判红；判据放在场景开头，该形态下先看到它自己的 SKIP 行。
+      if (!repoFileExists('.github/workflows') || !repoFileExists('CONTRIBUTING.md')) {
+        console.log('SKIP: dev 合并时自动关闭 issue 的契约（.github/workflows/ 或仓根 CONTRIBUTING.md 不在本检出：'
+          + '安装副本形态）——本次检出未校验解析 / 触发 / 计划三段纯函数与工作流权限形态（未验证 ≠ 通过）');
+      } else {
+        const autoCloseScript = '.github/scripts/issue-autoclose.mjs';
+        const autoCloseWorkflow = '.github/workflows/issue-autoclose.yml';
+        // 上限是验收准则的契约常量（超过即一个都不关），经 limits 显式交给计划函数——不让「默认 10」
+        // 成为谁也没写明的隐含约定。
+        const autoCloseLimit = 10;
+        const autoCloseProblems = [];
+        // 「动作 / 不动作」的取值：返回形状由模块自己定——布尔返回值，或对象里 act / action /
+        // shouldAct 等任一布尔字段；字段名不写死，但两种状态必须能分开，否则这条契约无从校验。
+        const decisionActs = (decision) => {
+          if (typeof decision === 'boolean') return decision;
+          if (!decision || typeof decision !== 'object') return false;
+          return ['act', 'action', 'shouldAct', 'shouldRun', 'trigger', 'run', 'allow']
+            .some((key) => decision[key] === true);
+        };
+        // 不动作必须说清原因（跳过原因要能打印出来），字段名同样不写死。
+        const decisionReason = (decision) => {
+          if (!decision || typeof decision !== 'object') return '';
+          for (const key of ['reason', 'why', 'message', 'detail']) {
+            if (typeof decision[key] === 'string' && decision[key].trim() !== '') return decision[key].trim();
+          }
+          return '';
+        };
+        const sameNumberList = (actual, expected) => Array.isArray(actual)
+          && actual.length === expected.length
+          && actual.every((value, index) => Number(value) === expected[index]);
+        // ① 解析：行首（可带 -/*）的 Closes/Fixes/Resolves（可带冒号、大小写不敏感）后的 #N 才算；
+        //    围栏 / 行内代码 / 引用块 / 句中都不算；结果是去重升序的编号数组。八类样本逐条写期望值。
+        const parseSamples = [
+          // 正常：正文中段的一行，前面还有一句普通文字
+          ['正常行', 'Fixed stuff.\n\nCloses #12', [12]],
+          // 列表符：「Fixed stuff.」里的 Fixed 不是 Fixes
+          ['列表符', '- Closes #7\n* Fixes #9', [7, 9]],
+          // 冒号：Resolves 与编号之间可以有冒号
+          ['冒号', 'Resolves: #3', [3]],
+          // 大小写不敏感
+          ['大小写', 'cLoSeS #21', [21]],
+          // 围栏代码块里的关键词是「示例」，不是关闭指令
+          ['围栏代码块', '```\nCloses #99\n```', []],
+          // 行内代码同理
+          ['行内代码', '`Closes #88`', []],
+          // 引用块（引用别人的话）不算本 PR 的关闭声明
+          ['引用块', '> Closes #77', []],
+          // 句中：只认行首关键词，避免散文里顺口提到就关掉
+          ['句中', 'see Closes #5 for details', []],
+          // 去重升序：同一编号写多遍只关一次，输出按编号升序
+          ['去重升序', 'Closes #9\nCloses #9\nFixes #2', [2, 9]],
+        ];
+        let autoCloseModule = null;
+        try {
+          autoCloseModule = await import(
+            pathToFileURL(path.join(REPO_ROOT, ...autoCloseScript.split('/'))).href);
+        } catch (error) {
+          autoCloseProblems.push('自动关闭脚本不在场，契约无从校验：' + autoCloseScript
+            + '（import 失败：' + String(error && error.message ? error.message : error) + '）');
+        }
+        if (autoCloseModule !== null) {
+          const { decideTrigger, parseClosingReferences, planIssueActions } = autoCloseModule;
+          if (typeof parseClosingReferences !== 'function') {
+            autoCloseProblems.push(autoCloseScript + ' 未导出 parseClosingReferences：解析契约无法校验');
+          } else {
+            for (const [label, body, expected] of parseSamples) {
+              const actual = parseClosingReferences(body);
+              if (!sameNumberList(actual, expected)) {
+                autoCloseProblems.push('parseClosingReferences(' + label + ') 期望 '
+                  + JSON.stringify(expected) + '，实际 ' + JSON.stringify(actual));
+              }
+            }
+          }
+          // ② 触发：已合并且 base=dev 才动作；未合并 / base=main / head 来自 fork 一律不动作，
+          //    且必须给出跳过原因（fork 的 PR 正文会进入有写权限的上下文，是提权面）。
+          if (typeof decideTrigger !== 'function') {
+            autoCloseProblems.push(autoCloseScript + ' 未导出 decideTrigger：触发契约无法校验');
+          } else {
+            const mergedIntoDev = {
+              action: 'closed',
+              pull_request: {
+                number: 42,
+                merged: true,
+                base: { ref: 'dev' },
+                head: { repo: { full_name: 'owner/repo' } },
+                body: 'Closes #12',
+              },
+              repository: { full_name: 'owner/repo' },
+            };
+            const withPullRequest = (patch) => ({
+              ...mergedIntoDev,
+              pull_request: { ...mergedIntoDev.pull_request, ...patch },
+            });
+            const triggerCases = [
+              ['已合并且 base=dev', mergedIntoDev, true],
+              ['未合并', withPullRequest({ merged: false }), false],
+              ['base=main', withPullRequest({ base: { ref: 'main' } }), false],
+              ['head 来自 fork', withPullRequest({ head: { repo: { full_name: 'forker/repo' } } }), false],
+            ];
+            for (const [label, payload, shouldAct] of triggerCases) {
+              const decision = decideTrigger(payload);
+              if (decisionActs(decision) !== shouldAct) {
+                autoCloseProblems.push('decideTrigger(' + label + ') 期望' + (shouldAct ? '动作' : '不动作')
+                  + '，实际 ' + JSON.stringify(decision));
+              } else if (!shouldAct && decisionReason(decision) === '') {
+                autoCloseProblems.push('decideTrigger(' + label + ') 不动作时没有给出原因');
+              }
+            }
+          }
+          // ③ 计划：只关 open 的编号；已关闭的记为跳过并说明原因；超过上限一个都不关、全部跳过。
+          //    计划的事实（哪些关 / 哪些跳过 / 为什么）可从数组或 actions / entries / items 容器里读，
+          //    形状可自定；断言不锁死字段名。
+          if (typeof planIssueActions !== 'function') {
+            autoCloseProblems.push(autoCloseScript + ' 未导出 planIssueActions：计划契约无法校验');
+          } else {
+            const planFacts = (plan) => {
+              const entries = Array.isArray(plan)
+                ? plan
+                : (plan && typeof plan === 'object'
+                  ? (['actions', 'entries', 'items'].map((key) => plan[key])
+                    .find((value) => Array.isArray(value)) ?? null)
+                  : null);
+              if (entries === null) return null;
+              const facts = { close: [], skip: [], reasons: new Map() };
+              for (const entry of entries) {
+                if (!entry || typeof entry !== 'object') continue;
+                const number = Number(entry.number ?? entry.issueNumber ?? entry.ref
+                  ?? (entry.issue && typeof entry.issue === 'object' ? entry.issue.number : entry.issue));
+                if (!Number.isFinite(number)) continue;
+                const rawAction = entry.action ?? entry.decision ?? entry.act ?? entry.close;
+                const action = typeof rawAction === 'boolean'
+                  ? (rawAction ? 'close' : 'skip')
+                  : String(rawAction ?? '');
+                const reason = String(entry.reason ?? entry.why ?? entry.message ?? '').trim();
+                (/close/i.test(action) ? facts.close : facts.skip).push(number);
+                if (reason !== '') facts.reasons.set(number, reason);
+              }
+              facts.close.sort((left, right) => left - right);
+              return facts;
+            };
+            const mixed = planFacts(planIssueActions({
+              refs: [12, 13],
+              issues: [{ number: 12, state: 'open' }, { number: 13, state: 'closed' }],
+              limits: { maxRefs: autoCloseLimit },
+            }));
+            if (mixed === null) {
+              autoCloseProblems.push('planIssueActions 的返回形状无法解读（期望数组或含 actions / entries / items 的对象）');
+            } else {
+              if (!sameNumberList(mixed.close, [12])) {
+                autoCloseProblems.push('planIssueActions 应只关 open 的 #12，实际计划关闭 '
+                  + JSON.stringify(mixed.close));
+              }
+              if (!mixed.skip.includes(13)) {
+                autoCloseProblems.push('planIssueActions 未把已关闭的 #13 记为跳过（实际跳过 '
+                  + JSON.stringify(mixed.skip) + '）');
+              } else if (!/closed|already|已关闭/i.test(mixed.reasons.get(13) ?? '')) {
+                autoCloseProblems.push('planIssueActions 跳过 #13 的原因未点明已关闭：'
+                  + JSON.stringify(mixed.reasons.get(13) ?? ''));
+              }
+            }
+            const overflowRefs = Array.from({ length: autoCloseLimit + 1 }, (unused, index) => 100 + index);
+            const overflow = planFacts(planIssueActions({
+              refs: overflowRefs,
+              issues: overflowRefs.map((number) => ({ number, state: 'open' })),
+              limits: { maxRefs: autoCloseLimit },
+            }));
+            if (overflow === null) {
+              autoCloseProblems.push('planIssueActions 在超过上限的输入上返回形状无法解读');
+            } else {
+              if (overflow.close.length > 0) {
+                autoCloseProblems.push('refs 超过上限 ' + autoCloseLimit + ' 时必须一个都不关，实际计划关闭 '
+                  + JSON.stringify(overflow.close));
+              }
+              const unskipped = overflowRefs.filter((number) => !overflow.skip.includes(number));
+              if (unskipped.length > 0) {
+                autoCloseProblems.push('refs 超过上限时每个编号都要记为跳过，漏记 ' + JSON.stringify(unskipped));
+              }
+              if (overflow.reasons.size === 0) {
+                autoCloseProblems.push('refs 超过上限时跳过必须带原因（超限不能被静默忽略）');
+              }
+            }
+          }
+        }
+        // ④ 工作流形态：触发器 pull_request + closed；只声明三项最小权限；不出现 pull_request_target
+        //    （fork 提权面的红线）；并且真的接上了脚本（读事件载荷或显式调用脚本）。
+        if (!repoFileExists(autoCloseWorkflow)) {
+          autoCloseProblems.push('自动关闭工作流不在场：' + autoCloseWorkflow
+            + '（触发器 / 最小权限 / 无 pull_request_target 的形态无从校验）');
+        } else {
+          const workflow = normalizeNewlines(repoFileText(autoCloseWorkflow));
+          const workflowAnchors = [
+            ['触发器 pull_request', /pull_request\s*:/],
+            ['触发器 closed', /closed/],
+            ['权限 issues: write', /issues:\s*write/],
+            ['权限 contents: read', /contents:\s*read/],
+            ['权限 pull-requests: read', /pull-requests:\s*read/],
+          ];
+          for (const [label, pattern] of workflowAnchors) {
+            if (!pattern.test(workflow)) autoCloseProblems.push(autoCloseWorkflow + ' 缺' + label);
+          }
+          if (/pull_request_target/.test(workflow)) {
+            autoCloseProblems.push(autoCloseWorkflow + ' 出现 pull_request_target（fork 提权面，禁止）');
+          }
+          if (!/GITHUB_EVENT_PATH/.test(workflow) && !/issue-autoclose\.mjs/.test(workflow)) {
+            autoCloseProblems.push(autoCloseWorkflow + ' 既未读 GITHUB_EVENT_PATH 也未调用 issue-autoclose.mjs：工作流没接上脚本');
+          }
+        }
+        // ⑤ 承诺与自动化在场：PR 模板说「由机器人关闭 / 自动关闭」，工作流就必须真在。按标点切句再判
+        //    否定——同一行里「关键词不会触发自动关闭」与「合并时自动关闭」是两种口径，整行判会把它们
+        //    混成一谈（那是把承诺判据反过来用）。
+        const automationClosePromises = (text) => text
+          .split(/[。；;！!？?\n]/)
+          .flatMap((chunk) => chunk.split(/(?<=\.)\s+/))
+          .map((chunk) => chunk.trim())
+          .filter((segment) => /自动关闭|由机器人|机器人关闭|automatically close|auto-?closed/i.test(segment))
+          .filter((segment) => !/不会|不再|不自动|never|\bnot\b|won't|will not/i.test(segment));
+        // 判据自身的判别力锚（纯内存）：负向口径不得算承诺，正向承诺必须认出来——两条都构造，
+        // 否则「恒不认承诺」的判据会让 ⑤ 永远空转。
+        for (const [label, sample, expectedPromise] of [
+          ['负向口径不得算承诺', '注意：dev PR 不是默认分支，关键词不会触发自动关闭。', false],
+          ['正向承诺必须认出来', 'dev PR 写 `Closes #N` 即可，合并时由机器人关闭。', true],
+        ]) {
+          if ((automationClosePromises(sample).length > 0) !== expectedPromise) {
+            autoCloseProblems.push('承诺判据判别力缺失：' + label);
+          }
+        }
+        const prTemplate = '.github/PULL_REQUEST_TEMPLATE.md';
+        if (!repoFileExists(prTemplate)) {
+          autoCloseProblems.push(prTemplate + ' 不在场：承诺与自动化在场无从比对');
+        } else {
+          const promises = automationClosePromises(normalizeNewlines(repoFileText(prTemplate)));
+          if (promises.length > 0 && !repoFileExists(autoCloseWorkflow)) {
+            autoCloseProblems.push('PR 模板承诺自动化关闭（' + JSON.stringify(promises[0].slice(0, 60))
+              + '），但 ' + autoCloseWorkflow + ' 不在场：承诺与自动化不一致');
+          }
+        }
+        if (autoCloseProblems.length > 0) {
+          throw new Error('dev 合并时自动关闭 issue 的契约不符: ' + autoCloseProblems.join('; '));
+        }
+      }
       // 形态判据先于内容判据：公开面载体整份缺席 = 本检出不含公开文档（安装副本 / npm 包形态），
       // 整面输出一条可见 SKIP——不是「已校验」，也不把合法形态判红。判据本体走 lib 的
       // publicFaceDocsAbsent（与底部自检、场景 105 同一实现）：本场景不再自持第二套（曾按

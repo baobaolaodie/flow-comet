@@ -40,6 +40,8 @@ dev ──PR(merge)──▶ main   (release branch — one merge commit per rel
 6. **Release PR (batched)** — when `dev` has accumulated a set of related changes (a feature batch or a maintenance batch), open **one** release PR into `main` (base `main`, head `dev`). Merge with **merge** — the merge commit brings all of dev's change-level commits into main; dev's tip becomes an ancestor of main, so dev no longer leads main after the release. The release PR title/body carries the public-facing release summary.
 7. After merge, delete the feature branch.
 
+**Automatic issue closing** — when a pull request targeting `dev` is merged, a repository workflow reads the closing keywords in its description (`Closes #N` / `Fixes #N` / `Resolves #N`, one per line, at the start of a line) and closes those issues, leaving a comment that links back to the pull request. Pull requests opened from a fork are not auto-closed (their token is read-only) — close those issues manually after merging. To opt out, write `[skip-issue-close]` in the description or add the `no-issue-close` label. Parsing is strict: keywords inside code blocks, inline code or blockquotes do not count, and more than ten references are left alone for a human.
+
 **Maintenance batches**: pure-documentation or cleanup changes without behavior impact may accumulate on a single branch (e.g. `docs/maintenance-<date>`) and ship as **one** PR into `dev` — reducing PR count without losing traceability.
 
 ## Branch protection (reference)

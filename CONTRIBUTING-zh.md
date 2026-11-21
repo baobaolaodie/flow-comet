@@ -40,6 +40,8 @@ dev ──PR(merge)──▶ main    （发布分支——每次发布 1 个 mer
 6. **发布 PR（批次）**——`dev` 积累一组相关改动（功能批次或维护批次）后，开**一个**发布 PR 合入 `main`（base `main`，head `dev`）。以 **merge** 合并——merge 提交把 dev 的全部 change 级提交带入 main；dev 的 tip 成为 main 的祖先，发布后 dev 不再领先 main。发布 PR 标题/正文承载公开面发布摘要。
 7. 合并后删除 feature 分支。
 
+**Issue 自动关闭** —— 目标是 `dev` 的 PR 合并后，仓库工作流会读取其描述里的关闭关键词（`Closes #N` / `Fixes #N` / `Resolves #N`，写在行首、每行一个）并关闭对应 issue，在 issue 上留下回链 PR 的说明。来自 fork 的 PR 不会被自动关闭（其令牌只读），合并后请手动关闭。不想被自动关闭时，在描述里写 `[skip-issue-close]` 或给 PR 加 `no-issue-close` 标签。解析取严格侧：代码块、行内代码、引用块里的关键词不算；一次超过十个引用会原样留给人工。
+
 **维护批次**：纯文档/清理类改动（无行为影响）可积累在一个分支（如 `docs/maintenance-<日期>`）作为**一个** PR 合入 `dev`——减少 PR 数量且不丢可追溯性。
 
 ## 分支保护（参考）
