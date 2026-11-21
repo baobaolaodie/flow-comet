@@ -34,6 +34,12 @@ const FENCE = /^\s*(`{3,}|~{3,})/;
 // keyword match. The backreference keeps double-backtick spans intact.
 const INLINE_CODE = /(`+)[^`]*?\1/g;
 
+// GitHub prefills a pull request body from the template, and the template documents the opt-out
+// marker and the closing keywords inside HTML comments; comments are hidden text, never intent.
+function stripHtmlComments(text) {
+  return String(text ?? '').replace(/<!--[\s\S]*?-->/g, '');
+}
+
 const DEFAULT_MAX_REFS = 10;
 const SKIP_MARKER = /\[skip-issue-close\]/i;
 const SKIP_LABEL = 'no-issue-close';
@@ -47,7 +53,8 @@ const COMMENT_BODY = (pullRequestNumber) =>
  * @returns {number[]} distinct numbers, ascending
  */
 export function parseClosingReferences(body) {
-  const text = typeof body === 'string' ? body : '';
+  // Comments are removed first: a keyword written there is documentation of the syntax, not a claim.
+  const text = stripHtmlComments(typeof body === 'string' ? body : '');
   const numbers = new Set();
   let insideFence = false;
   for (const line of text.split(/\r?\n/)) {
@@ -99,7 +106,7 @@ export function decideTrigger(payload) {
   }
   if (base.ref !== 'dev') return { act: false, reason: 'base-not-dev' };
   if (head.repo.full_name !== repository.full_name) return { act: false, reason: 'fork-pr' };
-  if (typeof pullRequest.body === 'string' && SKIP_MARKER.test(pullRequest.body)) {
+  if (typeof pullRequest.body === 'string' && SKIP_MARKER.test(stripHtmlComments(pullRequest.body))) {
     return { act: false, reason: 'skip-marker' };
   }
   if (pullRequest.labels !== undefined && !Array.isArray(pullRequest.labels)) {
