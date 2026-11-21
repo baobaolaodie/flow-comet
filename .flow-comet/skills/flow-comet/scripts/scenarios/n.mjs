@@ -4481,11 +4481,11 @@ export const ENTRIES = [
                 autoCloseProblems.push('decideTrigger(' + label + ') 不动作时没有给出原因');
               }
             }
-            // ②b 模板预填正文与 HTML 注释：GitHub 用模板预填 PR 正文，模板把退出标记
-            //    （[skip-issue-close]）与关闭关键词的用法写在 HTML 注释里。注释是隐藏的说明文字，不是
-            //    本 PR 的意图——默认路径（用模板开 PR、在关联段补一行可见 Closes #12）必须照常动作，
-            //    否则自动化只会在每个按模板填写的 PR 上输出『SKIP: skip-marker』；可见的退出标记仍然
-            //    有效（用户明确写出来才是退出）。
+            // ②b 模板预填正文与「隐藏文字」：GitHub 用模板预填 PR 正文，模板把退出标记
+            //    （[skip-issue-close]）与关闭关键词的用法写在 HTML 注释里。注释、围栏与行内代码都是
+            //    隐藏或示例文字（介绍这个标记本身的写法），不是本 PR 的意图——默认路径（用模板开 PR、
+            //    在关联段补一行可见 Closes #12）必须照常动作，否则自动化只会在每个按模板填写的 PR 上
+            //    输出『SKIP: skip-marker』；可见的退出标记仍然有效（用户明确写出来才是退出）。
             const assertBodyDecision = (label, body, shouldAct) => {
               const decision = decideTrigger(withPullRequest({ body }));
               if (decisionActs(decision) !== shouldAct) {
@@ -4498,6 +4498,9 @@ export const ENTRIES = [
             };
             assertBodyDecision('可见的退出标记', 'Fixed it.\n\n[skip-issue-close]\n\nCloses #12', false);
             assertBodyDecision('只写在注释里的退出标记', '<!-- [skip-issue-close] -->\n\nCloses #12', true);
+            // 行内代码与围栏是「举例」的写法：正文里介绍这个标记，不等于用它退出。
+            assertBodyDecision('行内代码里的退出标记', 'Fixed.\n\n`[skip-issue-close]`\n\nCloses #12', true);
+            assertBodyDecision('围栏里的退出标记', 'Fixed.\n\n```\n[skip-issue-close]\n```\n\nCloses #12', true);
             if (templateText !== null) {
               assertBodyDecision('模板预填正文 + Closes #12', templateText + '\n\nCloses #12', true);
             }
