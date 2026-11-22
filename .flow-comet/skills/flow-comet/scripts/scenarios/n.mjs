@@ -4501,6 +4501,10 @@ export const ENTRIES = [
             // 行内代码与围栏是「举例」的写法：正文里介绍这个标记，不等于用它退出。
             assertBodyDecision('行内代码里的退出标记', 'Fixed.\n\n`[skip-issue-close]`\n\nCloses #12', true);
             assertBodyDecision('围栏里的退出标记', 'Fixed.\n\n```\n[skip-issue-close]\n```\n\nCloses #12', true);
+            // 缩进代码块（四个空格 / Tab）在 Markdown 里同样是「示例」：关键词解析早已跳过它，
+            // 标记判定必须同口径——否则同一段正文里「解析说不算、跳过说算」。
+            assertBodyDecision('缩进代码块里的退出标记', 'Fixed.\n\n    [skip-issue-close]\n\nCloses #12', true);
+            assertBodyDecision('Tab 缩进的退出标记', 'Fixed.\n\n\t[skip-issue-close]\n\nCloses #12', true);
             if (templateText !== null) {
               assertBodyDecision('模板预填正文 + Closes #12', templateText + '\n\nCloses #12', true);
             }
