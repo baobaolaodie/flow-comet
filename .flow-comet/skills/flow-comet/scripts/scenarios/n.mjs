@@ -4508,6 +4508,9 @@ export const ENTRIES = [
             // GFM：反引号围栏的 info string 里不允许出现反引号，```` ```example``` ```` 不是围栏；
             // 不等长的反引号串也不构成行内代码 —— 两种形态下标记都仍是**可见文字**，不能被剥掉。
             assertBodyDecision('不等长反引号不是代码 span', 'Example: ``[skip-issue-close]```.\n\nCloses #12', false);
+            // GFM：代码 span 不能跨空行（一个段落内才成 span）——跨空行的反引号只是普通字符，
+            // 中间的标记仍然可见，不能被当成代码而「悄悄失去」退出意图。
+            assertBodyDecision('跨空行的反引号不是代码 span', 'Example: `brief\n\n[skip-issue-close]` here.\n\nCloses #12', false);
             if (templateText !== null) {
               assertBodyDecision('模板预填正文 + Closes #12', templateText + '\n\nCloses #12', true);
             }
