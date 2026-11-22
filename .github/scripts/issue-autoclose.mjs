@@ -36,6 +36,22 @@ const CLOSING_REFERENCE = /^ {0,3}(?:[-*+]\s+)?(closes|fixes|resolves)\s*:?\s*#(
 const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
 const FENCE_CLOSE = /^ {0,3}(`+|~+)[ \t]*$/;
 
+/**
+ * Read a fenced-block opener, honouring the rule GFM adds on top of the pattern: a backtick fence's info
+ * string may not contain a backtick, so a line of three backticks followed by sample text and ending in
+ * three backticks is inline code, not a block. Treating it as an opener would blank the rest of the body
+ * and hide a real closing keyword.
+ *
+ * @param {string} line one line of the body
+ * @returns {{character: string, length: number}|null} the opener, or null when the line is not one
+ */
+function fenceOpening(line) {
+  const match = FENCE_OPEN.exec(line);
+  if (match === null) return null;
+  if (match[1][0] === '`' && line.slice(match[0].length).includes('`')) return null;
+  return { character: match[1][0], length: match[1].length };
+}
+
 // Four or more leading spaces, or a tab, is an indented code block: its content is sample text too, so
 // the whole line is skipped instead of being matched.
 const INDENTED_CODE = /^(?: {4,}|\t)/;
@@ -43,7 +59,9 @@ const INDENTED_CODE = /^(?: {4,}|\t)/;
 // A reference inside inline code is an example as well, and a code span may wrap onto the next line, so
 // spans are blanked over the whole body before the line scan. The backreference pairs a run of n
 // backticks with the next run of exactly n; the newlines survive so the line structure stays intact.
-const INLINE_CODE = /(`+)[\s\S]*?\1/g;
+// A code span's closing delimiter is a run of exactly the same length as the opener, and neither run
+// may be part of a longer one; otherwise the text is literal and stays visible.
+const INLINE_CODE = /(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g;
 
 /** Replace every character but the newlines with a space, so only the line structure survives. */
 function blankExceptNewlines(text) {
@@ -74,9 +92,9 @@ function stripFences(text) {
       }
       continue;
     }
-    const opening = FENCE_OPEN.exec(parts[index]);
+    const opening = fenceOpening(parts[index]);
     if (opening === null) continue;
-    fence = { character: opening[1][0], length: opening[1].length };
+    fence = opening;
     parts[index] = blankExceptNewlines(parts[index]);
   }
   return parts.join('');
