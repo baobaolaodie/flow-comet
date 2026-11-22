@@ -24,7 +24,7 @@
 - **超时与命令失败分开报告**：超时写明用掉的预算、实际耗时与可照抄的放宽命令；命令失败写明退出码与输出。（[#187](https://github.com/baobaolaodie/flow-comet/pull/187)）
 - **连续第 4 次失败保留诊断**：决策行之前先打印命令、预算与错误输出，不再把它们丢掉。（[#187](https://github.com/baobaolaodie/flow-comet/pull/187)）
 - **PR 里点名的 issue 在合入 `dev` 时关闭**：仓库工作流读取描述里的关闭关键词（`Closes #N` / `Fixes #N` / `Resolves #N`，行首、每行一个）并关闭对应 issue，留一条回链 PR 的说明。解析取严格侧——代码块、行内代码、引用块里的不算；来自 fork 的 PR 留给人工；一次超过十个引用留给人工；`[skip-issue-close]` 或 `no-issue-close` 标签可退出。PR 模板与贡献指南已同步。（[#188](https://github.com/baobaolaodie/flow-comet/pull/188)）
-- **PR 描述里的代码与注释不再被当作退出自动关闭**：退出标记只从可见文本读取——HTML 注释、围栏代码块与行内代码里的不算；写成纯文本的标记仍然生效。解析与退出判定共用同一处归约，两者不会再给出相反结论。（[#189](https://github.com/baobaolaodie/flow-comet/pull/189)）
+- **PR 描述里的代码与注释不再被当作退出自动关闭**：退出标记只从可见文本读取——HTML 注释、围栏代码块、缩进代码块与行内代码里的不算；写成纯文本的标记仍然生效。解析与退出判定共用同一处归约，示例文字不会被读成意图。（[#189](https://github.com/baobaolaodie/flow-comet/pull/189)）
 
 ## [1.8.0] - 2026-11-18
 
