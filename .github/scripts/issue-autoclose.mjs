@@ -59,9 +59,10 @@ const INDENTED_CODE = /^(?: {4,}|\t)/;
 // A reference inside inline code is an example as well, and a code span may wrap onto the next line, so
 // spans are blanked over the whole body before the line scan. The backreference pairs a run of n
 // backticks with the next run of exactly n; the newlines survive so the line structure stays intact.
-// A code span's closing delimiter is a run of exactly the same length as the opener, and neither run
-// may be part of a longer one; otherwise the text is literal and stays visible.
-const INLINE_CODE = /(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g;
+// A code span's closing delimiter is a run of exactly the same length as the opener, neither run may be
+// part of a longer one, and the span cannot cross a blank line (it lives inside one paragraph); anything
+// else is literal text and stays visible.
+const INLINE_CODE = /(?<!`)(`+)(?!`)(?:(?!\r?\n[ \t]*\r?\n)[\s\S])*?(?<!`)\1(?!`)/g;
 
 /** Replace every character but the newlines with a space, so only the line structure survives. */
 function blankExceptNewlines(text) {
