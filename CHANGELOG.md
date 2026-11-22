@@ -10,10 +10,13 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). The places that record the version are listed in [docs/VERSIONS.md](docs/VERSIONS.md), and CI keeps them in agreement on the release surface.
 
+## [Unreleased]
+
 ## [1.8.1] - 2026-11-22
 
 ### Added
 
+- **A node-by-node reference page explains the workflow in one place**: `docs/NODES.md` and its Chinese twin describe each of the eight nodes — the skills it loads, the prompt and template it reads, what it does, what it produces, how its exit is checked, and where it hands off — plus the loops between nodes and the capabilities outside the eight. ([#185](https://github.com/baobaolaodie/flow-comet/pull/185))
 - **The node reference is machine-anchored**: the public-face check compares both reference pages with the engine's own node view — skills, prompts, templates, evidence and artifacts — and names the page, node and field when they disagree, so a rename in the engine cannot silently strand the page. ([#186](https://github.com/baobaolaodie/flow-comet/pull/186))
 - **Diagram syntax is checked before merge**: the quality job parses every Mermaid block in the reference pages with a throwaway install of the parser, and fails when a block is malformed or the check cannot run. ([#186](https://github.com/baobaolaodie/flow-comet/pull/186))
 
