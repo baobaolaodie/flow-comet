@@ -178,14 +178,27 @@ export const ENTRIES = [
       // （Windows：父 cmd 被杀、孙进程继续跑完自身定时器）——断言前同步等待其自然退出
       execFileSync(process.execPath, ['-e', 'setTimeout(()=>{}, 2000)']);
       assertExit(timedOut, 1);
-      assertOut(timedOut, 'BLOCKED: verify 命令失败');
-      assertOut(timedOut, 'timeout 500ms');
+      assertOut(timedOut, 'verify 超时');
+      assertOut(timedOut, '500ms');
+      assertOut(timedOut, 'FLOW_COMET_VERIFY_TIMEOUT_MS=');
+      assertOut(timedOut, '子进程可能仍在运行');
+      assertNotOut(timedOut, 'verify 命令失败');
       // 子断言:失败计数按 change 写入(guard 侧)
       const stTimed = readStateFile(dir);
       if (!stTimed.verifyFailuresByChange || stTimed.verifyFailuresByChange[CHANGE_ID] < 1) {
         throw new Error('exit verify 失败计数未按 change 写入: ' + JSON.stringify(stTimed.verifyFailuresByChange));
       }
-      // ④ 无验证命令 → 拦截（严格版要求）
+      // ④ 失败支报文：命令非零退出（不是超时）→ 「verify 命令失败」+ 实际退出码；两支措辞互不
+      //    混用，失败支里出现 timeout 词面即红。显式给大预算，避免把失败误判成超时。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n' + acCoverageBlock + '## 验证命令\n\n```bash\nnode -e "process.exit(3)"\n```\n');
+      const failed = runGuard(['exit', 'verify'], dir, { FLOW_COMET_VERIFY_TIMEOUT_MS: '900000' });
+      assertExit(failed, 1);
+      assertOut(failed, 'verify 命令失败');
+      assertOut(failed, 'exit 3');
+      assertNotOut(failed, 'timeout');
+      // 第 4 次失败「先诊断后决策」的顺序判据由引擎场景 21 覆盖：本项要凑满四次连续失败才进那一支，
+      // 同一条链已在场景 21 逐条钉住，此处不重复搭建。
+      // ⑤ 无验证命令 → 拦截（严格版要求）
       writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n' + acCoverageBlock + '无验证命令段。\n');
       const noCmd = runGuard(['exit', 'verify'], dir);
       assertExit(noCmd, 1);

@@ -307,6 +307,7 @@ jobs:
           pairs = [('README.md','README-zh.md'),('CONTRIBUTING.md','CONTRIBUTING-zh.md'),
                    ('CHANGELOG.md','CHANGELOG-zh.md'),('docs/INSTALLATION.md','docs/INSTALLATION-zh.md'),
                    ('docs/USAGE.md','docs/USAGE-zh.md'),
+                   ('docs/NODES.md','docs/NODES-zh.md'),
                    ('docs/MECHANISM.md','docs/MECHANISM-zh.md'),('docs/TROUBLESHOOTING.md','docs/TROUBLESHOOTING-zh.md'),
                    ('docs/VERSIONS.md','docs/VERSIONS-zh.md'),
                    ('SECURITY.md','SECURITY-zh.md')]
@@ -364,7 +365,7 @@ jobs:
               if [k for k, _ in te] != [k for k, _ in tz]:
                   raise SystemExit('bilingual structure mismatch: %s %d tokens vs %s %d tokens%s'
                                    % (en, len(te), zh, len(tz), ' (after removing the declared deviation)' if ex else ''))
-          print('9 bilingual pairs OK (structural token stream)')
+          print('10 bilingual pairs OK (structural token stream)')
           EOF
       - name: '文档权威单一性 / Documentation single-authority check'
         run: |
@@ -373,6 +374,7 @@ jobs:
           const CONTRACT = {
             install: { authority: 'docs/INSTALLATION.md', twin: 'docs/INSTALLATION-zh.md', sentinel: ['Verify the installation'], forbidden: ['README.md','docs/USAGE.md','docs/MECHANISM.md','docs/TROUBLESHOOTING.md'], mustLink: ['README.md'] },
             workflow: { authority: 'docs/USAGE.md', twin: 'docs/USAGE-zh.md', sentinel: ['## The 8-node workflow','## User entry points'], forbidden: ['README.md','docs/INSTALLATION.md','docs/MECHANISM.md'], mustLink: ['README.md','docs/MECHANISM.md'] },
+            'node-reference': { authority: 'docs/NODES.md', twin: 'docs/NODES-zh.md', sentinel: ['## Node by node','## How nodes loop'], forbidden: ['README.md','docs/USAGE.md','docs/MECHANISM.md'], mustLink: ['docs/USAGE.md','README.md'] },
             troubleshooting: { authority: 'docs/TROUBLESHOOTING.md', twin: 'docs/TROUBLESHOOTING-zh.md', sentinel: ['## Symptoms'], forbidden: ['README.md','docs/INSTALLATION.md','docs/MECHANISM.md'], mustLink: ['README.md','docs/INSTALLATION.md'] },
             release: { authority: 'docs/VERSIONS.md', twin: 'docs/VERSIONS-zh.md', sentinel: ['Update CHANGELOG','Version record surfaces'], forbidden: ['README.md','CONTRIBUTING.md','docs/MECHANISM.md'], mustLink: ['README.md','CONTRIBUTING.md'] },
             behaviour: { authority: 'docs/MECHANISM.md', twin: 'docs/MECHANISM-zh.md', sentinel: ['## Behaviour contract','## Custom protocols'], forbidden: ['README.md','docs/INSTALLATION.md','docs/USAGE.md'], mustLink: ['README.md','docs/USAGE.md'] },
@@ -386,7 +388,7 @@ jobs:
           const COUNTS_SENTINEL = ['badge/version-', 'Version record surfaces'];
           const RELEASE_AUTHORITY = ['docs/VERSIONS.md','docs/VERSIONS-zh.md'];
           const INTERNALS = ['comet-hook-guard.mjs','comet-hook-guard','dsh-bridge.mjs','delegationDepth','reentryAuthorization'];
-          const PUBLIC = ['README.md','README-zh.md','CONTRIBUTING.md','CONTRIBUTING-zh.md','CHANGELOG.md','CHANGELOG-zh.md','docs/INSTALLATION.md','docs/INSTALLATION-zh.md','docs/USAGE.md','docs/USAGE-zh.md','docs/MECHANISM.md','docs/MECHANISM-zh.md','docs/TROUBLESHOOTING.md','docs/TROUBLESHOOTING-zh.md','docs/VERSIONS.md','docs/VERSIONS-zh.md'];
+          const PUBLIC = ['README.md','README-zh.md','CONTRIBUTING.md','CONTRIBUTING-zh.md','CHANGELOG.md','CHANGELOG-zh.md','docs/INSTALLATION.md','docs/INSTALLATION-zh.md','docs/USAGE.md','docs/USAGE-zh.md','docs/MECHANISM.md','docs/MECHANISM-zh.md','docs/TROUBLESHOOTING.md','docs/TROUBLESHOOTING-zh.md','docs/VERSIONS.md','docs/VERSIONS-zh.md','docs/NODES.md','docs/NODES-zh.md'];
           const read = (f) => fs.readFileSync(f, 'utf8');
           const exists = (f) => fs.existsSync(f);
           const path = require('path');
@@ -444,6 +446,42 @@ jobs:
           if (failed) { console.log(failed + ' single-authority checks failed'); process.exit(1); }
           console.log('single-authority check passed');
           EOF
+
+      - name: '图语法检查 / Docs diagram syntax (mermaid@12.3.0 + jsdom@29.1.1)'
+        run: |
+          # 判据只有一条：mermaid 解析器能接受 docs/NODES*.md 里的图；「看起来像 mermaid」不算证据。
+          #
+          # 依赖边界（ADR-007：全仓唯一第三方依赖是 @clack/prompts）：mermaid / jsdom 不进
+          # package.json，也不装进工作区——只装在 $RUNNER_TEMP 的一次性目录；--no-save +
+          # --package-lock=false 让包清单即便是在工作区里被误跑也不会被写。
+          # 检查器用裸说明符动态 import，按**脚本自身位置**解析依赖，故须把仓库里的脚本复制到
+          # 该目录后运行；在原地运行只会得到 NOT-CHECKED（exit 2）。
+          #
+          # 断言两条（缺一不可）：
+          #   ① 退出码 0——图解析失败与页面缺失都是非 0；
+          #   ② 输出含成功行「Mermaid 语法检查通过」——脚本入口的「直接运行才执行」判定一旦失效
+          #      就会静默 exit 0，只认退出码的检查在那种回归下照样全绿。成功行因此是脚本与本步
+          #      之间的契约：改写脚本措辞时须同步本步。
+          MERMAID_HOME="$RUNNER_TEMP/mermaid-check"
+          rm -rf "$MERMAID_HOME"
+          mkdir -p "$MERMAID_HOME"
+          cp scripts/check-mermaid.mjs "$MERMAID_HOME/check-mermaid.mjs"
+          cd "$MERMAID_HOME"
+          npm install --no-save --package-lock=false mermaid@12.3.0 jsdom@29.1.1
+          LOG="$MERMAID_HOME/check.log"
+          set +e
+          node "$MERMAID_HOME/check-mermaid.mjs" "$GITHUB_WORKSPACE" > "$LOG" 2>&1
+          STATUS=$?
+          set -e
+          cat "$LOG"
+          if [ "$STATUS" -ne 0 ]; then
+            echo "图语法检查失败 / mermaid syntax check failed (exit $STATUS): docs/NODES*.md 的图未被解析器接受"
+            exit 1
+          fi
+          grep -q 'Mermaid 语法检查通过' "$LOG" || {
+            echo "缺少成功行 / missing success line: 检查器未报告「Mermaid 语法检查通过」（入口可能静默退出）"
+            exit 1
+          }
 
       - name: '取锁定快照 / Materialize the locked flow-kit snapshot'
         id: snapshot
@@ -586,6 +624,37 @@ jobs:
             process.exit(1);
           }
           EOF
+
+      - name: 'issue autoclose dry run / Issue autoclose dry run'
+        run: |
+          # 判据：只有「已合并且目标分支为 dev」的 PR 才会关闭正文声明的编号，且围栏代码块里的示例
+          # 编号不算声明——这正是 .github/scripts/issue-autoclose.mjs 的三段决策。这里真实调用它的
+          # --dry-run（不触网、不需要令牌），把同一份契约放进每次 PR 的 required check：决策在脚本、
+          # 断言在本步，任一侧单独漂移都会红。
+          WORK="$RUNNER_TEMP/autoclose"
+          mkdir -p "$WORK"
+          # 夹具①：合并进 dev 的 PR 正文——真声明 #12 + 围栏代码块里的示例 #99（不得采纳）
+          # 正文里的三个反引号是 JSON 字符串的代码围栏：写在单引号内原样交给脚本解析，不是 shell 展开
+          # shellcheck disable=SC2016
+          printf '%s' '{"action":"closed","pull_request":{"number":42,"merged":true,"base":{"ref":"dev"},"head":{"repo":{"full_name":"o/r"}},"body":"Closes #12\n```\nCloses #99\n```"},"repository":{"full_name":"o/r"}}' > "$WORK/merged.json"
+          # 夹具②：同一 PR 的未合并形态（关闭但未合并）——必须不动作
+          printf '%s' '{"action":"closed","pull_request":{"number":43,"merged":false,"base":{"ref":"dev"},"head":{"repo":{"full_name":"o/r"}},"body":"Closes #12"},"repository":{"full_name":"o/r"}}' > "$WORK/unmerged.json"
+          OUT="$(node .github/scripts/issue-autoclose.mjs --dry-run --payload "$WORK/merged.json")"
+          echo "$OUT"
+          echo "$OUT" | grep -q '将关闭 #12' || { echo 'dry run 未计划关闭 #12'; exit 1; }
+          if echo "$OUT" | grep -q '#99'; then echo '围栏代码块里的编号不得被关闭（#99）'; exit 1; fi
+          OUT2="$(node .github/scripts/issue-autoclose.mjs --dry-run --payload "$WORK/unmerged.json")"
+          echo "$OUT2"
+          echo "$OUT2" | grep -q 'SKIP: not-merged' || { echo '未合并的 PR 必须输出 SKIP: not-merged'; exit 1; }
+          # 夹具③：退出标记写进行内代码——反引号里的是文档示例，不是退出意图；
+          # 可见的 Closes #12 仍要生效（行内代码里的标记不得导致跳过）
+          # shellcheck disable=SC2016
+          printf '%s' '{"action":"closed","pull_request":{"number":44,"merged":true,"base":{"ref":"dev"},"head":{"repo":{"full_name":"o/r"}},"body":"Fixed.\n\n`[skip-issue-close]`\n\nCloses #12"},"repository":{"full_name":"o/r"}}' > "$WORK/inline-marker.json"
+          OUT3="$(node .github/scripts/issue-autoclose.mjs --dry-run --payload "$WORK/inline-marker.json")"
+          echo "$OUT3"
+          echo "$OUT3" | grep -q '将关闭 #12' || { echo '行内代码里的标记不得导致跳过（期望将关闭 #12）'; exit 1; }
+          if echo "$OUT3" | grep -q 'SKIP'; then echo '行内代码里的标记不得导致跳过（输出出现 SKIP）'; exit 1; fi
+          echo 'issue autoclose dry run 通过 / issue autoclose dry run passed'
 
 
   # ── PR 纪律: 分支规范 + 模板完整 + 提交规范 / PR policy ──

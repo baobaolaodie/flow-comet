@@ -68,7 +68,7 @@ At each node the guard answers a fixed set of questions; a "no" is a refusal wit
 | Do the node's documents exist, with the template's header fields and section names? | `open`, `design`, `plan`, `execute`, `subagent-execute`, `review`, `verify`, `archive` — each node is judged only on the documents it writes (next table) |
 | Are all tasks complete, with a summary per completed task and an unchanged task set? | `execute`, `subagent-execute` |
 | Is the self-check declared, and does a degraded one carry its evidence? | `execute`, `subagent-execute` (the SUMMARY's self-check section) |
-| Did the verification actually run, and did it pass? | `verify` (runs the command block in `TEST.md`) |
+| Did the verification actually run, and did it pass? | `verify` (runs the command block in `TEST.md`; a timeout and a failing command are reported as different problems, and the wait budget is 15 minutes by default) |
 | Does every review finding carry a disposition, does a deferred finding of any severity have a user ruling, and does a minor one state why it is minor (the default is major)? | `review` |
 | Are the archive directory and its leftover list in place? | `archive` |
 
@@ -152,7 +152,7 @@ State is always re-derivable: `status` prints the machine view, `next` prints th
 
 ## Side commands
 
-Three commands ship with the installed skill tree but stay outside the 8-node flow: `evolve`, `health` and `context-scan`. They work on the project as a whole rather than inside a single change, so they never route, never pass a node's entry or exit gate, and never record node evidence. Nothing triggers them for you either: you invoke them explicitly. `evolve` asks you to approve its candidates one by one before it writes anything; `health` writes its report when you invoke it; and `context-scan` writes its report and its scan metadata when you invoke it.
+Three commands ship with the installed skill tree but stay outside the 8-node flow: `evolve`, `health` and `context-scan`. They work on the project as a whole rather than inside a single change, so they never route, never pass a node's entry or exit gate, and never record node evidence. Nothing triggers them for you either: you invoke them explicitly. `evolve` asks you to approve its candidates one by one before it writes anything; `health` writes its report when you invoke it — unless the lessons count has regressed, in which case it fails without writing, so a loss cannot become the next baseline; and `context-scan` writes its report and its scan metadata when you invoke it.
 
 | Command | Reach for it when | What it leaves behind |
 |---|---|---|

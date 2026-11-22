@@ -10,6 +10,22 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/). The places that record the version are listed in [docs/VERSIONS.md](docs/VERSIONS.md), and CI keeps them in agreement on the release surface.
 
+## [1.8.1] - 2026-11-22
+
+### Added
+
+- **The node reference is machine-anchored**: the public-face check compares both reference pages with the engine's own node view — skills, prompts, templates, evidence and artifacts — and names the page, node and field when they disagree, so a rename in the engine cannot silently strand the page. ([#186](https://github.com/baobaolaodie/flow-comet/pull/186))
+- **Diagram syntax is checked before merge**: the quality job parses every Mermaid block in the reference pages with a throwaway install of the parser, and fails when a block is malformed or the check cannot run. ([#186](https://github.com/baobaolaodie/flow-comet/pull/186))
+
+### Changed
+
+- **`health` refuses to write a report when the lessons count regresses**: a run whose lessons count is below the previous report's fails instead of writing a new baseline. ([#186](https://github.com/baobaolaodie/flow-comet/pull/186))
+- **`verify` waits long enough for the project's own baseline**: the exit's default wait budget is 15 minutes instead of 5, still overridable through the documented environment variable, so a change that runs the two regression suites from its verify block is no longer cut off mid-run. ([#187](https://github.com/baobaolaodie/flow-comet/pull/187))
+- **A timeout and a failing command are told apart**: the verify exit reports them as different problems — a timeout names the budget it used, the elapsed time and the command that raises it, while a failing command names its exit code and its output. ([#187](https://github.com/baobaolaodie/flow-comet/pull/187))
+- **The fourth consecutive failure keeps its diagnosis**: the decision point prints the command, the budget and the error output before asking whether to keep fixing or stop. ([#187](https://github.com/baobaolaodie/flow-comet/pull/187))
+- **Issues a pull request names are closed when it merges into `dev`**: a repository workflow reads the closing keywords in the description (`Closes #N` / `Fixes #N` / `Resolves #N`, one per line at the start of a line) and closes those issues with a comment linking back to the pull request. Parsing is strict — code blocks, inline code and blockquotes do not count — pull requests opened from a fork are left to a human, more than ten references are left alone, and `[skip-issue-close]` or the `no-issue-close` label opts out. The pull-request template and the contributing guide now say so. ([#188](https://github.com/baobaolaodie/flow-comet/pull/188))
+- **Code and comments in a pull request description no longer opt out of automatic issue closing**: the opt-out marker is read from visible text only — HTML comments, fenced code blocks, indented code blocks and inline code do not count — while a marker written as plain text still works. Parsing and the opt-out share one reduction, so sample text cannot be read as intent. ([#189](https://github.com/baobaolaodie/flow-comet/pull/189))
+
 ## [1.8.0] - 2026-11-18
 
 ### Changed

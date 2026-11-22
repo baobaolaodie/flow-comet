@@ -22,6 +22,14 @@
       "must_link": ["README.md", "docs/MECHANISM.md"],
       "why": "The node list, the per-node lifecycle and the real entry points are the product contract; other files summarise and link."
     },
+    "node-reference": {
+      "authority": "docs/NODES.md",
+      "twin": "docs/NODES-zh.md",
+      "sentinel": ["## Node by node", "## How nodes loop"],
+      "forbidden_in": ["README.md", "docs/USAGE.md", "docs/MECHANISM.md"],
+      "must_link": ["docs/USAGE.md", "README.md"],
+      "why": "The per-node reader view lives on one page; the workflow contract stays in USAGE and the behaviour contract in MECHANISM."
+    },
     "troubleshooting": {
       "authority": "docs/TROUBLESHOOTING.md",
       "twin": "docs/TROUBLESHOOTING-zh.md",

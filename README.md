@@ -12,7 +12,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow?style=flat" alt="License: MIT" /></a>
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js_%E2%89%A518-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js 18+" /></a>
   <a href="https://github.com/baobaolaodie/flow-comet/actions"><img src="https://img.shields.io/github/actions/workflow/status/baobaolaodie/flow-comet/ci.yml?style=flat" alt="CI status" /></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.8.0-blue.svg" alt="Version 1.8.0" /></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.8.1-blue.svg" alt="Version 1.8.1" /></a>
 </p>
 
 <p align="center">
@@ -104,6 +104,8 @@ The process is flow-kit's nine stages; the engine runs them as eight nodes. CHAN
 
 Driving a node by hand, the artifacts each node produces, and the two command surfaces are documented in [Usage](docs/USAGE.md); what the engine guarantees and how a node's exit is validated are in [Core Mechanisms](docs/MECHANISM.md).
 
+The [node reference](docs/NODES.md) is the deepest cut: all eight nodes, column by column.
+
 ## Why flow-comet
 
 1. **Discipline goes from "self-discipline" to "machine-checked"** — every stage entry/exit has script validation: artifacts complete, sections filled, verify commands actually run, tasks stay in bounds.
@@ -143,6 +145,7 @@ flow-comet automates the methodology of [flow-kit](https://github.com/rihebty/fl
 |---|---|
 | [Installation](docs/INSTALLATION.md) | Prerequisites, the four install options, platform choice, verification, and reset (purge is delete-and-rebuild, not uninstall) |
 | [Usage](docs/USAGE.md) | The 8-node workflow, the per-node lifecycle and its commands, artifacts, branch mode, execution modes, user entry points |
+| [Node reference](docs/NODES.md) | The per-node view: what each node's agent loads, reads, does, produces and checks |
 | [Core Mechanisms](docs/MECHANISM.md) | The behaviour contract, the three defense layers, guard validation, and custom protocols |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Symptoms grouped by where they bite: installation, first run, a stuck node, platform |
 | [Versions](docs/VERSIONS.md) | Version semantics, the places that record the version, and the release checklist |

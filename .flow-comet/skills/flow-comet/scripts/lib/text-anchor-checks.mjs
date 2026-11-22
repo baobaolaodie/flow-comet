@@ -224,6 +224,7 @@ export const PUBLIC_FACE_CODE_DOCS = [
   'CHANGELOG.md', 'CHANGELOG-zh.md',
   'docs/INSTALLATION.md', 'docs/INSTALLATION-zh.md', 'docs/MECHANISM.md', 'docs/MECHANISM-zh.md',
   'docs/USAGE.md', 'docs/USAGE-zh.md',
+  'docs/NODES.md', 'docs/NODES-zh.md',
   'docs/TROUBLESHOOTING.md', 'docs/TROUBLESHOOTING-zh.md', 'docs/VERSIONS.md', 'docs/VERSIONS-zh.md',
   '.github/PULL_REQUEST_TEMPLATE.md',
   '.github/ISSUE_TEMPLATE/1-bug_report.yml', '.github/ISSUE_TEMPLATE/2-feature_request.yml',

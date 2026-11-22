@@ -10,6 +10,22 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。版本记录在哪些位置见 [docs/VERSIONS-zh.md](docs/VERSIONS-zh.md)，由 CI 在发布面对账保持一致。
 
+## [1.8.1] - 2026-11-22
+
+### 新增
+
+- **节点参考页有了机器锚**：公开面检查把两页节点参考与引擎自己的节点视图逐节点对照——技能、提示词、模板、证据与工件——不一致时点名页、节点与字段，引擎改名不会让页面悄悄失真。（[#186](https://github.com/baobaolaodie/flow-comet/pull/186)）
+- **图语法在合并前被检查**：quality job 用一次性安装的解析器逐块解析参考页里的全部 Mermaid，块不合法或检查跑不起来时失败。（[#186](https://github.com/baobaolaodie/flow-comet/pull/186)）
+
+### 变更
+
+- **教训册条目数回退时 `health` 拒绝出报告**：条目数低于上一份报告时以失败结束，而不是把损失写成新基线。（[#186](https://github.com/baobaolaodie/flow-comet/pull/186)）
+- **`verify` 等得够久**：出口的默认等待预算从 5 分钟提到 15 分钟（仍可用文档化的环境变量覆盖），把两级回归套件写进验证段的 change 不会再跑到一半被掐断。（[#187](https://github.com/baobaolaodie/flow-comet/pull/187)）
+- **超时与命令失败分开报告**：超时写明用掉的预算、实际耗时与可照抄的放宽命令；命令失败写明退出码与输出。（[#187](https://github.com/baobaolaodie/flow-comet/pull/187)）
+- **连续第 4 次失败保留诊断**：决策行之前先打印命令、预算与错误输出，不再把它们丢掉。（[#187](https://github.com/baobaolaodie/flow-comet/pull/187)）
+- **PR 里点名的 issue 在合入 `dev` 时关闭**：仓库工作流读取描述里的关闭关键词（`Closes #N` / `Fixes #N` / `Resolves #N`，行首、每行一个）并关闭对应 issue，留一条回链 PR 的说明。解析取严格侧——代码块、行内代码、引用块里的不算；来自 fork 的 PR 留给人工；一次超过十个引用留给人工；`[skip-issue-close]` 或 `no-issue-close` 标签可退出。PR 模板与贡献指南已同步。（[#188](https://github.com/baobaolaodie/flow-comet/pull/188)）
+- **PR 描述里的代码与注释不再被当作退出自动关闭**：退出标记只从可见文本读取——HTML 注释、围栏代码块、缩进代码块与行内代码里的不算；写成纯文本的标记仍然生效。解析与退出判定共用同一处归约，示例文字不会被读成意图。（[#189](https://github.com/baobaolaodie/flow-comet/pull/189)）
+
 ## [1.8.0] - 2026-11-18
 
 ### 变更

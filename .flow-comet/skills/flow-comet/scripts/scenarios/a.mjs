@@ -1605,7 +1605,10 @@ export const ENTRIES = [
 
   // 21: exit verify——LESSONS.md 条目编号乱序 → WARN 不 BLOCK；verify 命令 timeout 可配置：
   // ① 缺省 timeout（无 env）下耗时命令通过（缺省保持大值）；② env
-  // FLOW_COMET_VERIFY_TIMEOUT_MS 覆盖生效——设小值后同耗时命令超时 BLOCK。同场景 in-place 扩展
+  // FLOW_COMET_VERIFY_TIMEOUT_MS 覆盖生效——设小值后同耗时命令超时 BLOCK；预算解析本身是纯函数，
+  // 四形态（缺省 / env 覆盖 / 非数字 / 0）逐个对返回值断言。超时支与失败支是两种报文：超时说明
+  // 实际预算与 env 名，失败说明实际退出码，两支互不混用措辞。同一 change 第 4 次失败必须先打印
+  // 诊断再打印决策行（先给事实、再给选择）。同场景 in-place 扩展
   // AC 覆盖判据（verify 出口）：全覆盖通过 / 漏一条点名 BLOCK / 多条全点名 / 旧 change 只 WARN /
   // 两种书写形态与编号后缀归并 / 模板段名不含关键词时回落到与入口同一份基准 / 「判不了」按成因二分
   // （载体缺席 = 文件 / 模板根本不在 → 显式未校验且不改退出码；工件内容不可判 = 承载段被删掉或清单
@@ -1670,13 +1673,21 @@ export const ENTRIES = [
       }
       // 复位：归档目录撤掉、TEST.md 回到快速通过的形态，后续 timeout 断言按原样执行
       fs.rmSync(path.join(dir, '.specs', 'archive'), { recursive: true, force: true });
+      // 预算解析是纯函数（返回毫秒数），四形态直接对返回值断言：缺省 900000 / env 覆盖 / 非数字
+      // 回落缺省 / '0' 也回落缺省（0 不是「不限时」——按 0 去 spawn 等于每次 verify 都当场超时）。
+      // 同一个数既是超时门的上限，也是超时支报文里回显的那个预算。
+      const { resolveVerifyTimeoutBudget } = await import('../lib/guard-evidence-gates.mjs');
+      assertEqual(resolveVerifyTimeoutBudget({}), 900000, '默认预算应为 900000ms');
+      assertEqual(resolveVerifyTimeoutBudget({ FLOW_COMET_VERIFY_TIMEOUT_MS: '500' }), 500, '环境变量应覆盖默认预算');
+      assertEqual(resolveVerifyTimeoutBudget({ FLOW_COMET_VERIFY_TIMEOUT_MS: 'abc' }), 900000, '非数字应回落默认预算');
+      assertEqual(resolveVerifyTimeoutBudget({ FLOW_COMET_VERIFY_TIMEOUT_MS: '0' }), 900000, '0 应回落默认预算');
       // ① 缺省 timeout（未设 env）保持大值：1.5s 耗时命令通过（若缺省被误改小 → 超时 RED）
       writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```bash\nnode -e "setTimeout(()=>{}, 1500)"\n```\n');
       const resDefault = runGuard(['exit', 'verify'], dir);
       assertExit(resDefault, 0);
       assertOut(resDefault, 'ALL CHECKS PASSED');
       // ② env 覆盖生效：FLOW_COMET_VERIFY_TIMEOUT_MS=500 时 1.5s 命令超时 → BLOCKED
-      // （不设 env 时同命令走缺省 300s 会通过——env 覆盖被忽略即 RED）
+      // （不设 env 时同命令走缺省大值会通过——env 覆盖被忽略即 RED）
       writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```bash\nnode -e "setTimeout(()=>{}, 1500)"\n```\n');
       const resEnv = runGuard(['exit', 'verify'], dir, { FLOW_COMET_VERIFY_TIMEOUT_MS: '500' });
       // 超时 kill 的 cmd 孙进程（node）孤儿化后短暂存活，其 cwd 锁定场景目录
@@ -1684,14 +1695,18 @@ export const ENTRIES = [
       // 自然退出，避免场景收尾 rmSync 因目录被占用而失败（EPERM/EBUSY）
       execFileSync(process.execPath, ['-e', 'setTimeout(()=>{}, 2000)']);
       assertExit(resEnv, 1);
-      assertOut(resEnv, 'BLOCKED: verify 命令失败');
-      assertOut(resEnv, 'timeout 500ms');
+      assertOut(resEnv, 'verify 超时');
+      assertOut(resEnv, '500ms');
+      assertOut(resEnv, 'FLOW_COMET_VERIFY_TIMEOUT_MS=');
+      assertOut(resEnv, '子进程可能仍在运行');
+      assertNotOut(resEnv, 'verify 命令失败');
       // 子断言:失败计数按 change 写入(guard 侧递增语义)
       const stFail = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
       if (!stFail.verifyFailuresByChange || stFail.verifyFailuresByChange[CHANGE_ID] !== 1) {
         throw new Error('exit verify 失败计数未按 change 写入: ' + JSON.stringify(stFail.verifyFailuresByChange));
       }
-      // 子断言:再次失败递增(2/3);恢复快速命令后 exit --apply 成功清零当前 change
+      // 子断言:再次失败递增(2/3);随后同一 change 连跑到第 4 次（失败支报文 + 先诊断后决策），
+      // 最后由快速命令 exit --apply 成功清零当前 change
       const resEnv2 = runGuard(['exit', 'verify'], dir, { FLOW_COMET_VERIFY_TIMEOUT_MS: '500' });
       execFileSync(process.execPath, ['-e', 'setTimeout(()=>{}, 2000)']);
       assertExit(resEnv2, 1);
@@ -1699,6 +1714,30 @@ export const ENTRIES = [
       if (!stFail2.verifyFailuresByChange || stFail2.verifyFailuresByChange[CHANGE_ID] !== 2) {
         throw new Error('exit verify 失败计数未递增: ' + JSON.stringify(stFail2.verifyFailuresByChange));
       }
+      // ③ 失败支报文：命令自身非零退出（不是超时）时，报文说「失败」+ 实际退出码；两支措辞互不
+      //    混用——失败支里出现 timeout 词面就是把两种事实搅成一种。显式给大预算，避免误判成超时。
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```bash\nnode -e "process.exit(3)"\n```\n');
+      const resFail = runGuard(['exit', 'verify'], dir, { FLOW_COMET_VERIFY_TIMEOUT_MS: '900000' });
+      assertExit(resFail, 1);
+      assertOut(resFail, 'verify 命令失败');
+      assertOut(resFail, 'exit 3');
+      assertNotOut(resFail, 'timeout');
+      assertNotOut(resFail, 'Timeout');
+      // ④ 第 4 次失败（计数此时为 3）：诊断与决策行都在场，且诊断在前——先给事实、再给选择。
+      const res4 = runGuard(['exit', 'verify'], dir, { FLOW_COMET_VERIFY_TIMEOUT_MS: '900000' });
+      assertExit(res4, 1);
+      assertOut(res4, 'verify 命令失败'); // 诊断必须在场
+      assertOut(res4, '已失败 4 次'); // 决策行仍在
+      const iDiag = res4.output.indexOf('verify 命令失败');
+      const iDecide = res4.output.indexOf('已失败 4 次');
+      assertTrue(iDiag >= 0 && iDecide >= 0 && iDiag < iDecide, '第 4 次失败必须先打印诊断再打印决策行');
+      // ENOBUFS：输出超过捕获上限的 spawn 错误不得被当成超时（加预算治不了缓冲上限）
+      writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n' +
+        '```bash\nnode -e "process.stdout.write(Buffer.alloc(2*1024*1024, 97))"\n```\n');
+      const resBuf = runGuard(['exit', 'verify'], dir, { FLOW_COMET_VERIFY_TIMEOUT_MS: '900000' });
+      assertExit(resBuf, 1);
+      assertOut(resBuf, 'ENOBUFS');
+      assertNotOut(resBuf, 'verify 超时');
       writeFile(dir, '.specs/' + CHANGE_ID + '/TEST.md', '# TEST\n\n## 验证命令\n\n```bash\nnode -e "1"\n```\n');
       // AC-5 隔离：verify 成功只清 verify 计数，不得清 Fix 归位轮次（预置计数，成功出口后核对）
       const stBeforePass = JSON.parse(fs.readFileSync(path.join(dir, '.flow-comet', 'flow-comet-state.json'), 'utf8'));
