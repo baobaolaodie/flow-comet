@@ -4505,6 +4505,9 @@ export const ENTRIES = [
             // 标记判定必须同口径——否则同一段正文里「解析说不算、跳过说算」。
             assertBodyDecision('缩进代码块里的退出标记', 'Fixed.\n\n    [skip-issue-close]\n\nCloses #12', true);
             assertBodyDecision('Tab 缩进的退出标记', 'Fixed.\n\n\t[skip-issue-close]\n\nCloses #12', true);
+            // GFM：反引号围栏的 info string 里不允许出现反引号，```` ```example``` ```` 不是围栏；
+            // 不等长的反引号串也不构成行内代码 —— 两种形态下标记都仍是**可见文字**，不能被剥掉。
+            assertBodyDecision('不等长反引号不是代码 span', 'Example: ``[skip-issue-close]```.\n\nCloses #12', false);
             if (templateText !== null) {
               assertBodyDecision('模板预填正文 + Closes #12', templateText + '\n\nCloses #12', true);
             }
@@ -4512,6 +4515,8 @@ export const ENTRIES = [
             if (typeof parseClosingReferences === 'function') {
               const commentCases = [
                 ['注释里的关键词', '<!-- Closes #99 -->\n\nCloses #12', [12]],
+                // 反引号围栏的 info string 含反引号 ⇒ 不是围栏（GFM 规定），行尾的 ``` 不能把后面的行吞掉。
+                ['info string 含反引号的伪围栏', '```example```\n\nCloses #12', [12]],
               ];
               if (templateText !== null) {
                 commentCases.push(['模板预填正文', templateText + '\n\nCloses #12', [12]]);
