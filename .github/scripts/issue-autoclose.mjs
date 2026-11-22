@@ -101,8 +101,24 @@ function stripHtmlComments(text) {
  * @param {string} text pull request body
  * @returns {string} the visible text, with the line structure kept
  */
+function blankIndentedCode(text) {
+  const parts = String(text ?? '').split(/(\r?\n)/);
+  for (let index = 0; index < parts.length; index += 2) {
+    if (INDENTED_CODE.test(parts[index])) parts[index] = blankExceptNewlines(parts[index]);
+  }
+  return parts.join('');
+}
+
+/**
+ * Reduce a body to the text a reader can see: comments, fenced blocks, indented code blocks and inline
+ * code spans are hidden or sample text, so nothing written there is the author's intent. Both decision
+ * functions read this one reduction, so "which text counts" is expressed once instead of once per reader.
+ *
+ * @param {string} text pull request body
+ * @returns {string} the visible text, with the line structure kept
+ */
 function visibleText(text) {
-  return stripInlineCode(stripFences(stripHtmlComments(text)));
+  return stripInlineCode(blankIndentedCode(stripFences(stripHtmlComments(text))));
 }
 
 const DEFAULT_MAX_REFS = 10;
@@ -127,7 +143,6 @@ export function parseClosingReferences(body) {
   // written there is documentation or an example, not a claim.
   const numbers = new Set();
   for (const line of visibleText(body).split(/\r?\n/)) {
-    if (INDENTED_CODE.test(line)) continue;
     // Quoted lines are someone else's words (the template, an earlier comment), not this PR's claim.
     if (/^\s*>/.test(line)) continue;
     const match = CLOSING_REFERENCE.exec(line);
