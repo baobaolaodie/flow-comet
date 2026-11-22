@@ -646,6 +646,14 @@ jobs:
           OUT2="$(node .github/scripts/issue-autoclose.mjs --dry-run --payload "$WORK/unmerged.json")"
           echo "$OUT2"
           echo "$OUT2" | grep -q 'SKIP: not-merged' || { echo '未合并的 PR 必须输出 SKIP: not-merged'; exit 1; }
+          # 夹具③：退出标记写进行内代码——反引号里的是文档示例，不是退出意图；
+          # 可见的 Closes #12 仍要生效（行内代码里的标记不得导致跳过）
+          # shellcheck disable=SC2016
+          printf '%s' '{"action":"closed","pull_request":{"number":44,"merged":true,"base":{"ref":"dev"},"head":{"repo":{"full_name":"o/r"}},"body":"Fixed.\n\n`[skip-issue-close]`\n\nCloses #12"},"repository":{"full_name":"o/r"}}' > "$WORK/inline-marker.json"
+          OUT3="$(node .github/scripts/issue-autoclose.mjs --dry-run --payload "$WORK/inline-marker.json")"
+          echo "$OUT3"
+          echo "$OUT3" | grep -q '将关闭 #12' || { echo '行内代码里的标记不得导致跳过（期望将关闭 #12）'; exit 1; }
+          if echo "$OUT3" | grep -q 'SKIP'; then echo '行内代码里的标记不得导致跳过（输出出现 SKIP）'; exit 1; fi
           echo 'issue autoclose dry run 通过 / issue autoclose dry run passed'
 
 

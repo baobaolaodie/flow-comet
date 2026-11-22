@@ -4481,11 +4481,11 @@ export const ENTRIES = [
                 autoCloseProblems.push('decideTrigger(' + label + ') 不动作时没有给出原因');
               }
             }
-            // ②b 模板预填正文与 HTML 注释：GitHub 用模板预填 PR 正文，模板把退出标记
-            //    （[skip-issue-close]）与关闭关键词的用法写在 HTML 注释里。注释是隐藏的说明文字，不是
-            //    本 PR 的意图——默认路径（用模板开 PR、在关联段补一行可见 Closes #12）必须照常动作，
-            //    否则自动化只会在每个按模板填写的 PR 上输出『SKIP: skip-marker』；可见的退出标记仍然
-            //    有效（用户明确写出来才是退出）。
+            // ②b 模板预填正文与「隐藏文字」：GitHub 用模板预填 PR 正文，模板把退出标记
+            //    （[skip-issue-close]）与关闭关键词的用法写在 HTML 注释里。注释、围栏与行内代码都是
+            //    隐藏或示例文字（介绍这个标记本身的写法），不是本 PR 的意图——默认路径（用模板开 PR、
+            //    在关联段补一行可见 Closes #12）必须照常动作，否则自动化只会在每个按模板填写的 PR 上
+            //    输出『SKIP: skip-marker』；可见的退出标记仍然有效（用户明确写出来才是退出）。
             const assertBodyDecision = (label, body, shouldAct) => {
               const decision = decideTrigger(withPullRequest({ body }));
               if (decisionActs(decision) !== shouldAct) {
@@ -4498,6 +4498,19 @@ export const ENTRIES = [
             };
             assertBodyDecision('可见的退出标记', 'Fixed it.\n\n[skip-issue-close]\n\nCloses #12', false);
             assertBodyDecision('只写在注释里的退出标记', '<!-- [skip-issue-close] -->\n\nCloses #12', true);
+            // 行内代码与围栏是「举例」的写法：正文里介绍这个标记，不等于用它退出。
+            assertBodyDecision('行内代码里的退出标记', 'Fixed.\n\n`[skip-issue-close]`\n\nCloses #12', true);
+            assertBodyDecision('围栏里的退出标记', 'Fixed.\n\n```\n[skip-issue-close]\n```\n\nCloses #12', true);
+            // 缩进代码块（四个空格 / Tab）在 Markdown 里同样是「示例」：关键词解析早已跳过它，
+            // 标记判定必须同口径——否则同一段正文里「解析说不算、跳过说算」。
+            assertBodyDecision('缩进代码块里的退出标记', 'Fixed.\n\n    [skip-issue-close]\n\nCloses #12', true);
+            assertBodyDecision('Tab 缩进的退出标记', 'Fixed.\n\n\t[skip-issue-close]\n\nCloses #12', true);
+            // GFM：反引号围栏的 info string 里不允许出现反引号，```` ```example``` ```` 不是围栏；
+            // 不等长的反引号串也不构成行内代码 —— 两种形态下标记都仍是**可见文字**，不能被剥掉。
+            assertBodyDecision('不等长反引号不是代码 span', 'Example: ``[skip-issue-close]```.\n\nCloses #12', false);
+            // GFM：代码 span 不能跨空行（一个段落内才成 span）——跨空行的反引号只是普通字符，
+            // 中间的标记仍然可见，不能被当成代码而「悄悄失去」退出意图。
+            assertBodyDecision('跨空行的反引号不是代码 span', 'Example: `brief\n\n[skip-issue-close]` here.\n\nCloses #12', false);
             if (templateText !== null) {
               assertBodyDecision('模板预填正文 + Closes #12', templateText + '\n\nCloses #12', true);
             }
@@ -4505,6 +4518,8 @@ export const ENTRIES = [
             if (typeof parseClosingReferences === 'function') {
               const commentCases = [
                 ['注释里的关键词', '<!-- Closes #99 -->\n\nCloses #12', [12]],
+                // 反引号围栏的 info string 含反引号 ⇒ 不是围栏（GFM 规定），行尾的 ``` 不能把后面的行吞掉。
+                ['info string 含反引号的伪围栏', '```example```\n\nCloses #12', [12]],
               ];
               if (templateText !== null) {
                 commentCases.push(['模板预填正文', templateText + '\n\nCloses #12', [12]]);

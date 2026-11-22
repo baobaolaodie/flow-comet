@@ -36,6 +36,22 @@ const CLOSING_REFERENCE = /^ {0,3}(?:[-*+]\s+)?(closes|fixes|resolves)\s*:?\s*#(
 const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
 const FENCE_CLOSE = /^ {0,3}(`+|~+)[ \t]*$/;
 
+/**
+ * Read a fenced-block opener, honouring the rule GFM adds on top of the pattern: a backtick fence's info
+ * string may not contain a backtick, so a line of three backticks followed by sample text and ending in
+ * three backticks is inline code, not a block. Treating it as an opener would blank the rest of the body
+ * and hide a real closing keyword.
+ *
+ * @param {string} line one line of the body
+ * @returns {{character: string, length: number}|null} the opener, or null when the line is not one
+ */
+function fenceOpening(line) {
+  const match = FENCE_OPEN.exec(line);
+  if (match === null) return null;
+  if (match[1][0] === '`' && line.slice(match[0].length).includes('`')) return null;
+  return { character: match[1][0], length: match[1].length };
+}
+
 // Four or more leading spaces, or a tab, is an indented code block: its content is sample text too, so
 // the whole line is skipped instead of being matched.
 const INDENTED_CODE = /^(?: {4,}|\t)/;
@@ -43,11 +59,51 @@ const INDENTED_CODE = /^(?: {4,}|\t)/;
 // A reference inside inline code is an example as well, and a code span may wrap onto the next line, so
 // spans are blanked over the whole body before the line scan. The backreference pairs a run of n
 // backticks with the next run of exactly n; the newlines survive so the line structure stays intact.
-const INLINE_CODE = /(`+)[\s\S]*?\1/g;
+// A code span's closing delimiter is a run of exactly the same length as the opener, neither run may be
+// part of a longer one, and the span cannot cross a blank line (it lives inside one paragraph); anything
+// else is literal text and stays visible.
+const INLINE_CODE = /(?<!`)(`+)(?!`)(?:(?!\r?\n[ \t]*\r?\n)[\s\S])*?(?<!`)\1(?!`)/g;
 
-/** Blank a code span (delimiters included), keeping newlines so the line structure is unchanged. */
-function blankInlineCode(text) {
-  return text.replace(INLINE_CODE, (span) => span.replace(/[^\n]/g, ' '));
+/** Replace every character but the newlines with a space, so only the line structure survives. */
+function blankExceptNewlines(text) {
+  return text.replace(/[^\n]/g, ' ');
+}
+
+/**
+ * Blank the fenced code blocks of a body, keeping the newlines so the line structure is unchanged.
+ *
+ * Fences are reduced over the whole body rather than tracked during the line scan, so one rule serves
+ * every reader of the text: the closing keywords and the opt-out marker see the same reduction.
+ *
+ * @param {string} text pull request body
+ * @returns {string} the body with fenced blocks blanked
+ */
+function stripFences(text) {
+  // The capture keeps the newlines themselves, so joining the parts restores the body byte for byte:
+  // lines sit at even indices and the separators between them at odd ones.
+  const parts = String(text ?? '').split(/(\r?\n)/);
+  let fence = null;
+  for (let index = 0; index < parts.length; index += 2) {
+    if (fence !== null) {
+      // Every line inside a block is sample text, the closing fence line included.
+      const closing = FENCE_CLOSE.exec(parts[index]);
+      parts[index] = blankExceptNewlines(parts[index]);
+      if (closing !== null && closing[1][0] === fence.character && closing[1].length >= fence.length) {
+        fence = null;
+      }
+      continue;
+    }
+    const opening = fenceOpening(parts[index]);
+    if (opening === null) continue;
+    fence = opening;
+    parts[index] = blankExceptNewlines(parts[index]);
+  }
+  return parts.join('');
+}
+
+/** Blank an inline code span (delimiters included), keeping newlines so the line structure is unchanged. */
+function stripInlineCode(text) {
+  return String(text ?? '').replace(INLINE_CODE, (span) => blankExceptNewlines(span));
 }
 
 // GitHub prefills a pull request body from the template, and the template documents the opt-out
@@ -56,7 +112,37 @@ function stripHtmlComments(text) {
   return String(text ?? '').replace(/<!--[\s\S]*?-->/g, '');
 }
 
+/**
+ * Reduce a body to the text a reader can see: comments, fenced blocks and inline code spans are hidden
+ * or sample text, so nothing written there is the author's intent. Both decision functions read this one
+ * reduction, so "which text counts" is expressed once instead of once per reader.
+ *
+ * @param {string} text pull request body
+ * @returns {string} the visible text, with the line structure kept
+ */
+function blankIndentedCode(text) {
+  const parts = String(text ?? '').split(/(\r?\n)/);
+  for (let index = 0; index < parts.length; index += 2) {
+    if (INDENTED_CODE.test(parts[index])) parts[index] = blankExceptNewlines(parts[index]);
+  }
+  return parts.join('');
+}
+
+/**
+ * Reduce a body to the text a reader can see: comments, fenced blocks, indented code blocks and inline
+ * code spans are hidden or sample text, so nothing written there is the author's intent. Both decision
+ * functions read this one reduction, so "which text counts" is expressed once instead of once per reader.
+ *
+ * @param {string} text pull request body
+ * @returns {string} the visible text, with the line structure kept
+ */
+function visibleText(text) {
+  return stripInlineCode(blankIndentedCode(stripFences(stripHtmlComments(text))));
+}
+
 const DEFAULT_MAX_REFS = 10;
+// The opt-out marker is intent only where a reader can see it: quoted in a comment, a fenced block or
+// inline code it documents the marker instead of using it, so the body is reduced before it is tested.
 const SKIP_MARKER = /\[skip-issue-close\]/i;
 const SKIP_LABEL = 'no-issue-close';
 // Every backlink comment starts with this marker; it doubles as the idempotency key a rerun reads back
@@ -72,26 +158,10 @@ const COMMENT_BODY = (pullRequestNumber) =>
  * @returns {number[]} distinct numbers, ascending
  */
 export function parseClosingReferences(body) {
-  // Comments are removed first: a keyword written there is documentation of the syntax, not a claim.
-  const text = stripHtmlComments(typeof body === 'string' ? body : '');
+  // Hidden and sample text is blanked first (comments, fenced blocks, inline code spans): a keyword
+  // written there is documentation or an example, not a claim.
   const numbers = new Set();
-  let fence = null;
-  // Code spans are blanked up front: a span may wrap, so a line-local strip would leave the tail of the
-  // example looking like a declaration on the next line.
-  for (const line of blankInlineCode(text).split(/\r?\n/)) {
-    if (fence !== null) {
-      const closing = FENCE_CLOSE.exec(line);
-      if (closing !== null && closing[1][0] === fence.character && closing[1].length >= fence.length) {
-        fence = null;
-      }
-      continue;
-    }
-    const opening = FENCE_OPEN.exec(line);
-    if (opening !== null) {
-      fence = { character: opening[1][0], length: opening[1].length };
-      continue;
-    }
-    if (INDENTED_CODE.test(line)) continue;
+  for (const line of visibleText(body).split(/\r?\n/)) {
     // Quoted lines are someone else's words (the template, an earlier comment), not this PR's claim.
     if (/^\s*>/.test(line)) continue;
     const match = CLOSING_REFERENCE.exec(line);
@@ -154,7 +224,7 @@ export function decideTrigger(payload) {
   }
   if (base.ref !== 'dev') return { act: false, reason: 'base-not-dev' };
   if (head.repo.full_name !== repository.full_name) return { act: false, reason: 'fork-pr' };
-  if (typeof pullRequest.body === 'string' && SKIP_MARKER.test(stripHtmlComments(pullRequest.body))) {
+  if (typeof pullRequest.body === 'string' && SKIP_MARKER.test(visibleText(pullRequest.body))) {
     return { act: false, reason: 'skip-marker' };
   }
   if (pullRequest.labels !== undefined && !Array.isArray(pullRequest.labels)) {
