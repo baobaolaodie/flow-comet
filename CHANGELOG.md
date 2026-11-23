@@ -14,7 +14,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ### Fixed
 
-- **A redirection symbol inside quotes no longer counts as a write target**: a read-only command such as `printf "… >=2条…"` was refused because the guard read the `>` inside the quoted text as an output redirection and named the following fragment as the file being written. The redirection rule now asks the same quote mask the command-position rule already uses: a `>` inside quotes or after a backslash is a literal, while a real redirection outside quotes is still refused — and when a command carries both, the refusal names the real target instead of the text inside the quotes. Code carried inside quotes (`bash -c "… > f"`) and writes made by a program itself (`node -e` / `python -c` / awk) stay documented boundaries of this text-level check, not file-system guarantees. The regression baseline is 353 scenarios / 95 system tests. ([#195](https://github.com/baobaolaodie/flow-comet/pull/195))
+- **A redirection symbol inside a closed quote no longer counts as a write target**: read-only commands such as `printf "… >=2条…"` are no longer refused. ([#195](https://github.com/baobaolaodie/flow-comet/pull/195))
+- **A real redirection is still refused, and an unclosed quote is fail-closed**: a `>` outside quotes is still a write target, and one that follows an unclosed quote is still judged as a write instead of being masked with the rest of the line. ([#195](https://github.com/baobaolaodie/flow-comet/pull/195))
+- **The documented boundaries are unchanged**: code carried inside quotes (`bash -c "… > f"`) and writes made by a program itself (`node -e` / `python -c` / awk) stay outside this text-level check; the regression baseline is 353 scenarios / 95 system tests. ([#195](https://github.com/baobaolaodie/flow-comet/pull/195))
 
 ## [1.8.1] - 2026-11-22
 
