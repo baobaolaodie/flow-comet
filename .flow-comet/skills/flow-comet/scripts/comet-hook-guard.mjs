@@ -197,6 +197,15 @@ function codexWriteTargetsFromCommand(command) {
       if (!isDevice && !targets.includes(t)) targets.push(t);
     } // 去重
   };
+  // 重定向符是否落在引号 / 转义里，由**同一份**引号掩码回答：下方目的地型命令复用这次扫描的
+  // masked/starts——只算一次，不复制扫描逻辑（L-067）。掩码必须早于重定向规则：候选文本由该规则
+  // 先生成，而 `printf "a > b"` 里的 `>` 是引号内的字面量，不是写目标；`echo "a > b" > src/a` 仍拦，
+  // 且点名的是真实的 `src/a`（旧实现把引号里的 `b` 报成写目标）。引号内的代码载荷
+  // （`bash -c "… > f"`）与程序自身发起的写入（`node -e` / `python -c` / awk 程序）属已登记边界，不在本次收紧范围。
+  const { masked, starts } = scanCommandStructure(command);
+  // shell 重定向(含描述符变体:> / >> / 2> / 1>>)。判定对象是候选文本里的**第一个** `>`：前缀
+  // 分隔符 `(?:^|[;\s|&])` 与描述符数字都不含 `>`，故 `m[0].indexOf('>')` 就是重定向符本身。
+  const redirectRe = /(?:^|[;\s|&])(?:[0-9]*>>?)\s*("[^"]*"|'[^']*'|[^\s;|&]+)/gi;
   const patterns = [
     // PowerShell **路径型**写类 cmdlet 的 -Path/-LiteralPath/-FilePath(引号内空格整体捕获并剥引号;
     // 只匹配写类 cmdlet——读类(Get-Content 等)的 -Path 不提取;同一命令内 [^;|&]*? 防跨命令)。
@@ -204,12 +213,16 @@ function codexWriteTargetsFromCommand(command) {
     // (见下方目的地型模式):把源取成目标正是本函数曾经的取向错误——写入目标从不被检查,
     // 源路径反而被误拦(只读命令也拦)。
     /(?:Set-Content|Add-Content|New-Item|Out-File|Remove-Item|Set-Item|Export-Csv)[^;|&]*?-(?:Path|LiteralPath|FilePath)\s+("[^"]*"|'[^']*'|[^\s;|&]+)/gi,
-    // shell 重定向(含描述符变体:> / >> / 2> / 1>>)
-    /(?:^|[;\s|&])(?:[0-9]*>>?)\s*("[^"]*"|'[^']*'|[^\s;|&]+)/gi,
+    redirectRe,
   ];
   for (const re of patterns) {
     let m;
-    while ((m = re.exec(command)) !== null) addTarget(m[1]);
+    while ((m = re.exec(command)) !== null) {
+      // 落在掩码上（引号内 / 反斜杠转义）的重定向符是字面量，不是写目标：跳过该候选，
+      // 其余候选照旧交给 addTarget（目标归一 / 空设备过滤 / 去重语义零改动）。
+      if (re === redirectRe && masked[m.index + m[0].indexOf('>')]) continue;
+      addTarget(m[1]);
+    }
   }
   // **目的地型**命令(与上方 .NET File API 的 Copy/Move 分支同向:写目标是第二参数):
   //   Copy-Item / Move-Item / Remove-Item  与位置型形态 cp / mv
@@ -223,7 +236,7 @@ function codexWriteTargetsFromCommand(command) {
   //      写命令 → 合法命令被拦(误拦);② 段捕获 `[^;|&]*` 会跨行吞并——`cp <src> <dst>` 后跟另一
   //      行命令时,「最后一个位置参数」取到下一行的参数,真正被写的 <dst> 反而从不被检查(逃逸)。
   // 非命令位置的内嵌形态(如 powershell -Command "…")不提取,属命令级检测的既有边界。
-  const { masked, starts } = scanCommandStructure(command);
+  // 引号掩码与命令位置取自**本函数开头那一次**扫描（同一口径只算一次，此处不重复扫描）。
   const destinationRe = /(?:Copy-Item|Move-Item|Remove-Item|cp|mv)/gi;
   let destMatch;
   while ((destMatch = destinationRe.exec(command)) !== null) {

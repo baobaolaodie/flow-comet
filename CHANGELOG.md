@@ -12,6 +12,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Fixed
+
+- **A redirection symbol inside quotes no longer counts as a write target**: a read-only command such as `printf "… >=2条…"` was refused because the guard read the `>` inside the quoted text as an output redirection and named the following fragment as the file being written. The redirection rule now asks the same quote mask the command-position rule already uses: a `>` inside quotes or after a backslash is a literal, while a real redirection outside quotes is still refused — and when a command carries both, the refusal names the real target instead of the text inside the quotes. Code carried inside quotes (`bash -c "… > f"`) and writes made by a program itself (`node -e` / `python -c` / awk) stay documented boundaries of this text-level check, not file-system guarantees. The regression baseline is 353 scenarios / 95 system tests. ([#171](https://github.com/baobaolaodie/flow-comet/issues/171))
+
 ## [1.8.1] - 2026-11-22
 
 ### Added

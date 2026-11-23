@@ -1560,4 +1560,57 @@ export const ENTRIES = [
       }
     },
   },
+
+  // 353: 重定向判定必须**引号感知**——重定向规则只认 `>` 这个字符，不看它在不在引号里：
+  // `printf "… >=2条…"`（2026-11-17 真实被拦的只读统计命令）里引号内的 `>` 被读成写目标
+  // `=2条…`，命令被拒（误拦方向）。修复后取候选匹配文本里第一个 `>` 的下标查同一份引号掩码，
+  // 落在引号/转义内即跳过；引号外的真重定向继续拦，混合形态报的是真实目标 `src/a` 而不是引号里的 `b`。
+  // 反向构造：把掩码过滤改成恒不跳过 ⇒ ①~⑤ 与 ⑦ 必红；改成恒跳过 ⇒ ⑥ 必红（判别力锚）。
+  {
+    name: '353 hook 命令写：引号内的重定向符不产生写目标（混合形态报真实目标，引号外重定向仍拦）',
+    run: (dir) => {
+      writeState(dir, { ...baseState('open'), status: 'running' });
+      const expectPass = (label, command) => {
+        const res = runHook(['before_tool'], dir, { tool_name: 'Bash', tool_input: { command } });
+        if (res.status !== 0 || !res.output.includes('workflow-hook-guard-ok')) {
+          throw new Error(label + '：期望放行（exit 0 + workflow-hook-guard-ok），实际 exit '
+            + res.status + '\n实际输出:\n' + res.output);
+        }
+      };
+      const expectBlocked = (label, command, target) => {
+        const res = runHook(['before_tool'], dir, { tool_name: 'Bash', tool_input: { command } });
+        const named = res.output.includes('命令写入 "' + target + '"');
+        if (res.status !== 2 || !res.output.includes('BLOCKED') || !named) {
+          throw new Error(label + '：期望拦截并点名 ' + target + '（exit 2），实际 exit '
+            + res.status + '\n实际输出:\n' + res.output);
+        }
+      };
+      // ① 2026-11-17 真实误拦的只读统计命令：`printf "… <=1条… >=2条…"`（引号内两个比较符）
+      expectPass('真实统计命令（引号内 >=2条）',
+        'printf "n=%d 中位=%d 最长=%d <=1条=%d(%.0f%%) >=2条=%d(%.0f%%)\\n" 353 1 42 208 58.9 145 41.1');
+      // ②~⑤ 同一误拦族的其余四条（提交消息 / 程序比较 / 格式串 / 程序文本）
+      expectPass('git commit 消息（引号内 >）', 'git commit -m "rename a > b"');
+      expectPass('python 比较（引号内 >）', 'python -c "print(1 > 0)"');
+      expectPass('printf 格式串（引号内 >）', 'printf "a > b"');
+      expectPass('awk 程序文本（单引号内 >）', "awk 'BEGIN{print 1 > \"out.txt\"}'");
+      // ⑥ 引号外的真重定向仍拦（收紧不得放过真写）：无引号目标 / 带空格目标 / heredoc 目标
+      expectBlocked('重定向到未加引号目标', 'printf x > src/a', 'src/a');
+      expectBlocked('重定向到带空格目标', 'printf x > "src/my file.txt"', 'src/my file.txt');
+      expectBlocked('heredoc 重定向目标', 'cat > src/a <<EOF', 'src/a');
+      // ⑦ 混合形态：引号内的 `>` 不是目标，报文点名的必须是引号外的真实目标 `src/a`——
+      //    旧实现先命中引号内的 `>`，报的是 `b`（判定方向对、目标错）。
+      const mixed = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'echo "a > b" > src/a' },
+      });
+      assertExit(mixed, 2);
+      assertOut(mixed, 'BLOCKED');
+      assertOut(mixed, '命令写入 "src/a"');
+      assertNotOut(mixed, '命令写入 "b"');
+      // ⑧ 转义形态：`\>` 是字面量、不是重定向（掩码同时覆盖反斜杠转义，不只认引号）
+      expectPass('反斜杠转义的重定向符', 'echo a \\> b');
+      // ⑨ 引号内的空白不等于目标边界：带空格的白名单目标整体捕获并放行（修复不得误伤）
+      expectPass('白名单内带空格目标', 'printf x > ".specs/' + CHANGE_ID + '/ok file.txt"');
+    },
+  },
 ];
