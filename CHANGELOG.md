@@ -15,7 +15,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 ### Fixed
 
 - **A redirection symbol counts as a write target only outside one-line quotes, comments and heredoc bodies**: read-only commands such as `printf "a > b"` are no longer refused, and when a command mixes quoted text, a comment or a heredoc body with a real redirection, the refusal names the real target. ([#195](https://github.com/baobaolaodie/flow-comet/pull/195))
-- **A quote whose mask spans lines is fail-closed**: quoted text that stays on a single line is only a literal; a single-line quote left unclosed is a shell syntax error and does not write. Code payloads (quoted, or fed to an interpreter via a heredoc) and writes made by a program itself remain documented limits of this text-level check; the regression baseline is 353 scenarios / 95 system tests. ([#195](https://github.com/baobaolaodie/flow-comet/pull/195))
+- **A quote that spans lines is fail-closed**: quoted text that stays on a single line is only a literal; a single-line quote left unclosed is a shell syntax error and does not write. Code payloads (quoted, or fed to an interpreter via a heredoc) and writes made by a program itself remain documented limits of this text-level check; the regression baseline is 353 scenarios / 95 system tests. ([#195](https://github.com/baobaolaodie/flow-comet/pull/195))
 
 ## [1.8.1] - 2026-11-22
 
