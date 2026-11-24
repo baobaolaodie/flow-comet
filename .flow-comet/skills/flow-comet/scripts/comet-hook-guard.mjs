@@ -84,25 +84,22 @@ const DEST_VALUE_FLAGS = new Set([
 //   masked[i] = 该位置在引号内（含引号字符本身，以及反斜杠转义的下一字符——转义字符是字面量，
 //               不参与结构判定；被转义的换行是续行，不算命令分隔）；
 //   starts    = 候选命令位置（行首，以及未加引号的 `; & | ( ) { }` 或换行之后的首个非空白位置）；
-//   unclosedQuoteStart = 未闭合引号的起点下标（无未闭合为 -1；同一时刻最多只有一种引号处于打开状态，闭合即复位）。
-//               掩码对未闭合引号一视同仁地掩到命令末尾——这对结构判定是对的（引号里没有命令位置），
-//               但**不能**直接拿来判定"字面量"：注释或 heredoc 正文里的一个撇号会让它之后所有字符都
-//               处在掩码里，按掩码一律跳过就把其后真正的重定向一并放过（fail-open）。故重定向判定
-//               同时看这个起点，只承认它之前的引号内 `>` 是字面量（见 codexWriteTargetsFromCommand）。
+//               掩码是结构判定用的；字面量判定（重定向）另按**掩码段整段是否同一行**收紧：只有整段
+//               同一行时的 `>` 是字面量。注释或 heredoc 正文里的撇号与后文撇号配对时，掩码段会
+//               跨行；按行比较仍会判定中间的真重定向（fail-closed）。跨行引号内的 `>` 因此可能过拦，
+//               方向与 fail-closed 一致（见 codexWriteTargetsFromCommand）。
 // 逐字符扫描而非字符类正则：字符类不区分引号内外（引号内的括号/分号不是命令边界），
 // 也不覆盖「引号内文本含命令名」的形态——详见下方目的地型模式的注释。
 function scanCommandStructure(command) {
   const masked = new Array(command.length).fill(false);
   let inSingle = false;
   let inDouble = false;
-  let unclosedQuoteStart = -1;
   for (let i = 0; i < command.length; i++) {
     const ch = command[i];
     if (inSingle) {
       masked[i] = true;
       if (ch === "'") {
         inSingle = false;
-        unclosedQuoteStart = -1;
       }
       continue;
     }
@@ -116,13 +113,11 @@ function scanCommandStructure(command) {
       masked[i] = true;
       if (ch === '"') {
         inDouble = false;
-        unclosedQuoteStart = -1;
       }
       continue;
     }
     if (ch === "'" || ch === '"') {
       masked[i] = true;
-      unclosedQuoteStart = i;
       if (ch === "'") inSingle = true;
       else inDouble = true;
     }
@@ -142,7 +137,7 @@ function scanCommandStructure(command) {
       pending = false;
     }
   }
-  return { masked, starts, unclosedQuoteStart };
+  return { masked, starts };
 }
 
 // 参数段结束位置（引号感知）：自 from 起第一个未在引号内的段边界（`;` / `|` / `&` 或换行/回车）。
@@ -210,14 +205,14 @@ function codexWriteTargetsFromCommand(command) {
       if (!isDevice && !targets.includes(t)) targets.push(t);
     } // 去重
   };
-  // 重定向符是否落在引号 / 转义里，由**同一份**引号掩码回答：下方目的地型命令复用这次扫描的
+  // 重定向符是否落在同一行引号里，由**同一份**引号掩码回答：下方目的地型命令复用这次扫描的
   // masked/starts——只算一次，不复制扫描逻辑（L-067）。掩码必须早于重定向规则：候选文本由该规则
   // 先生成，而 `printf "a > b"` 里的 `>` 是引号内的字面量，不是写目标；`echo "a > b" > src/a` 仍拦，
-  // 且点名的是真实的 `src/a`（旧实现把引号里的 `b` 报成写目标）。未闭合引号只掩到「未闭合起点之前」
-  // 才认作字面量：注释或 heredoc 正文里的撇号会让掩码延伸到命令末尾，若照掩码一路跳过，其后的真重定向
-  // 就整条不被判定（fail-open）——故未闭合起点之后的候选仍按写目标判定。引号内的代码载荷
+  // 且点名的是真实的 `src/a`（旧实现把引号里的 `b` 报成写目标）。掩码段整段在同一行才跳过：
+  // 注释或 heredoc 正文里的撇号与后文撇号配对时掩码段会跨行，只有整段同一行才认作字面量，其余候选
+  // 仍按写目标判定（fail-closed）。引号内的代码载荷
   // （`bash -c "… > f"`）与程序自身发起的写入（`node -e` / `python -c` / awk 程序）属已登记边界，不在本次收紧范围。
-  const { masked, starts, unclosedQuoteStart } = scanCommandStructure(command);
+  const { masked, starts } = scanCommandStructure(command);
   // shell 重定向(含描述符变体:> / >> / 2> / 1>>)。判定对象是候选文本里的**第一个** `>`：前缀
   // 分隔符 `(?:^|[;\s|&])` 与描述符数字都不含 `>`，故 `m[0].indexOf('>')` 就是重定向符本身。
   const redirectRe = /(?:^|[;\s|&])(?:[0-9]*>>?)\s*("[^"]*"|'[^']*'|[^\s;|&]+)/gi;
@@ -233,13 +228,23 @@ function codexWriteTargetsFromCommand(command) {
   for (const re of patterns) {
     let m;
     while ((m = re.exec(command)) !== null) {
-      // 落在**已闭合**引号内（或反斜杠转义上）的重定向符是字面量，不是写目标：跳过该候选，
-      // 其余候选照旧交给 addTarget（目标归一 / 空设备过滤 / 去重语义零改动）。
-      // 未闭合引号的起点之后不再按掩码跳过（fail-closed）：掩码已经把其后的命令整段掩进去，
-      // 照掩码跳过等于让一个撇号关掉整条命令的重定向拦截。
+      // 落在**整段同一行**的掩码段里的重定向符是字面量，不是写目标：跳过该候选，其余候选照旧交给
+      // addTarget（目标归一 / 空设备过滤 / 去重语义零改动）。跨行掩码段（含注释/heredoc 正文里
+      // 成对撇号造成的长掩码）不跳过：掩码可能来自一个与后文撇号配对的起点，照掩码跳过会把中间的
+      // 真重定向整条放过（fail-open）。跨行引号内的重定向符因此可能被过拦，方向与 fail-closed 一致。
       if (re === redirectRe) {
         const gt = m.index + m[0].indexOf('>');
-        if (masked[gt] && (unclosedQuoteStart === -1 || gt < unclosedQuoteStart)) continue;
+        if (masked[gt]) {
+          let runStart = gt;
+          while (runStart > 0 && masked[runStart - 1]) runStart -= 1;
+          let runEnd = gt;
+          while (runEnd + 1 < command.length && masked[runEnd + 1]) runEnd += 1;
+          let startLine = 0;
+          for (let li = 0; li < runStart; li++) if (command[li] === '\n') startLine += 1;
+          let endLine = startLine;
+          for (let li = runStart; li <= runEnd; li++) if (command[li] === '\n') endLine += 1;
+          if (startLine === endLine) continue;
+        }
       }
       addTarget(m[1]);
     }

@@ -1564,12 +1564,12 @@ export const ENTRIES = [
   // 353: 重定向判定必须**引号感知**——重定向规则只认 `>` 这个字符，不看它在不在引号里：
   // `printf "… >=2条…"`（2026-11-17 真实被拦的只读统计命令）里引号内的 `>` 被读成写目标
   // `=2条…`，命令被拒（误拦方向）。修复后取候选匹配文本里第一个 `>` 的下标查同一份引号掩码，
-  // 落在**已闭合**引号内即跳过；引号外的真重定向继续拦，混合形态报的是真实目标 `src/a` 而不是引号里的 `b`。
-  // 掩码本身不区分已闭合 / 未闭合：未闭合引号之后的 `>` 仍按写目标判定（fail-closed）——否则注释或
-  // heredoc 正文里的一个撇号就能把其后所有重定向一并掩掉（一处撇号 = 关掉整条命令的重定向拦截）。
-  // 反向构造：把掩码过滤改成恒不跳过 ⇒ ①~⑤ 与 ⑦ 必红；改成恒跳过 ⇒ ⑥ 与 ⑧ 必红（判别力锚）。
+  // 只有**整段同一行**的掩码段里的 `>` 才算字面量；引号外的真重定向继续拦，混合形态报的是真实目标 `src/a` 而不是引号里的 `b`。
+  // 掩码段会跨行（注释 / heredoc 正文里的成对撇号）：跨行掩码段之后的 `>` 仍按写目标判定（fail-closed）——
+  // 否则一个撇号就能把其后所有重定向一并掩掉（一处撇号 = 关掉整条命令的重定向拦截）。
+  // 反向构造：把掩码过滤改成恒不跳过 ⇒ ①~⑤ 与 ⑦ 必红；改成恒跳过（不看行）⇒ ⑥、⑧ 与成对撇号用例必红（判别力锚）。
   {
-    name: '353 hook 命令写：引号内的重定向符不产生写目标（混合形态报真实目标，引号外与未闭合引号之后的重定向仍拦）',
+    name: '353 hook 命令写：引号内的重定向符不产生写目标（混合形态报真实目标，引号外与跨行掩码段之后的重定向仍拦）',
     run: (dir) => {
       writeState(dir, { ...baseState('open'), status: 'running' });
       const expectPass = (label, command) => {
@@ -1609,16 +1609,29 @@ export const ENTRIES = [
       assertOut(mixed, 'BLOCKED');
       assertOut(mixed, '命令写入 "src/a"');
       assertNotOut(mixed, '命令写入 "b"');
-      // ⑧ 未闭合引号不得关掉其后真重定向的拦截（fail-closed）：注释里的撇号 / 引号、
+      // ⑧ 未闭合引号或成对撇号不得关掉其后真重定向的拦截（fail-closed）：注释里的撇号 / 引号、
       //    heredoc 正文里的撇号都会把引号掩码一路拉到命令末尾——若「落在掩码上就跳过」，
       //    其后真正在引号外的 `>` 也被掩掉（fail-open）。判定收紧为：只有位于
-      //    **未闭合引号起点之前**的 `>` 才算引号内字面量，之后的候选仍按写目标判定。
+      //    只有掩码段**整段同一行**的 `>` 才算字面量，跨行掩码段之后的候选仍按写目标判定。
       expectBlocked('未闭合单引号（注释里的撇号）之后的真重定向',
         "# don't run this\nprintf x > src/a", 'src/a');
       expectBlocked('未闭合双引号（注释里的引号）之后的真重定向',
         '# note " here\nprintf x > src/a', 'src/a');
       expectBlocked('heredoc 正文含撇号之后的真重定向',
         "cat <<EOF\nIt's fine\nEOF\nprintf x > src/a", 'src/a');
+      // ⑧b 成对撇号：注释里的撇号与后文撇号配对后，中间的真重定向仍在引号外；
+      //     按「掩码段整段同一行」比较，跨行掩码段之后的候选仍按写目标判定。
+      expectBlocked('注释成对撇号之间的真重定向',
+        "# don't edit\nprintf x > src/a\n# it's fine", 'src/a');
+      const pairedState = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: "# don't\nprintf '{}' > .flow-comet/flow-comet-state.json\n# it's fine" },
+      });
+      assertExit(pairedState, 2);
+      assertOut(pairedState, 'state 文件');
+      assertOut(pairedState, '禁手动工具写');
+      expectBlocked('heredoc 正文撇号与后文撇号配对后的真重定向',
+        "cat <<EOF\nIt's fine\nEOF\nprintf x > src/a\n# it's late", 'src/a');
       // ⑨ 引号内的空白不等于目标边界：带空格的白名单目标整体捕获并放行（修复不得误伤）
       expectPass('白名单内带空格目标', 'printf x > ".specs/' + CHANGE_ID + '/ok file.txt"');
     },
