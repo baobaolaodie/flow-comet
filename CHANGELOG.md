@@ -14,9 +14,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ### Fixed
 
-- **A redirection symbol inside a closed quote no longer counts as a write target**: read-only commands such as `printf "… >=2条…"` are no longer refused. ([#195](https://github.com/baobaolaodie/flow-comet/pull/195))
-- **A real redirection is still refused, and an unclosed quote is fail-closed**: a `>` outside quotes is still a write target, and one that follows an unclosed quote is still judged as a write instead of being masked with the rest of the line. ([#195](https://github.com/baobaolaodie/flow-comet/pull/195))
-- **The documented boundaries are unchanged**: code carried inside quotes (`bash -c "… > f"`) and writes made by a program itself (`node -e` / `python -c` / awk) stay outside this text-level check; the regression baseline is 353 scenarios / 95 system tests. ([#195](https://github.com/baobaolaodie/flow-comet/pull/195))
+- **A redirection symbol inside a closed quote no longer counts as a write target**: read-only commands such as `printf "… >=2条…"` are no longer refused; when a command mixes quoted text with a real redirection, the refusal names the real target. ([#195](https://github.com/baobaolaodie/flow-comet/pull/195))
+- **An unclosed quote is fail-closed**: it no longer masks later redirections. Quoted code payloads and writes made by a program itself remain documented limits of this text-level check; the regression baseline is 353 scenarios / 95 system tests. ([#195](https://github.com/baobaolaodie/flow-comet/pull/195))
 
 ## [1.8.1] - 2026-11-22
 

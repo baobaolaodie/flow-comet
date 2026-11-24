@@ -14,9 +14,8 @@
 
 ### 修复
 
-- **已闭合引号里的重定向符不再算写目标**：`printf "… >=2条…"` 这类只读命令不再被拒。([#195](https://github.com/baobaolaodie/flow-comet/pull/195))
-- **引号外的真重定向仍被拒，未闭合引号按 fail-closed 判**：引号外的 `>` 仍算写目标，未闭合引号之后的 `>` 也照旧按写入判定，不会被连同后文一起掩掉。([#195](https://github.com/baobaolaodie/flow-comet/pull/195))
-- **已登记边界不变**：引号内的代码载荷（`bash -c "… > f"`）与程序自身的写入（`node -e` / `python -c` / awk）仍不在这一文本层检查之内；回归基线 353 场景 / 95 项系统测试。([#195](https://github.com/baobaolaodie/flow-comet/pull/195))
+- **已闭合引号里的重定向符不再算写目标**：`printf "… >=2条…"` 这类只读命令不再被拒；当命令把引号内的文本与引号外的真实重定向混在一起时，拒绝报文点名的是那个真实目标。([#195](https://github.com/baobaolaodie/flow-comet/pull/195))
+- **未闭合引号按 fail-closed 判**：它不再把其后的重定向一起掩掉。引号内的代码载荷与程序自身的写入仍是这一文本层检查的已登记边界；回归基线 353 场景 / 95 项系统测试。([#195](https://github.com/baobaolaodie/flow-comet/pull/195))
 
 ## [1.8.1] - 2026-11-22
 
