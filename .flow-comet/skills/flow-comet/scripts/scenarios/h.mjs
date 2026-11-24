@@ -1564,15 +1564,15 @@ export const ENTRIES = [
   // 353: 重定向判定必须**引号感知**——重定向规则只认 `>` 这个字符，不看它在不在引号里：
   // `printf "… >=2条…"`（2026-11-17 真实被拦的只读统计命令）里引号内的 `>` 被读成写目标
   // `=2条…`，命令被拒（误拦方向）。修复后取候选匹配文本里第一个 `>` 的下标查同一份结构扫描：
-  // 注释 / heredoc 正文里的 `>` 恒为字面量（ignoredText），真引号里的 `>` 只有其掩码段**整段同一行**
-  // 时才算字面量；引号外的真重定向继续拦，混合形态报的是真实目标 `src/a` 而不是引号里的 `b`。
-  // 掩码段**跨行**的**真引号**之后的 `>` 仍按写目标判定（fail-closed）；单行内未闭合的引号整段
-  // 在同一行、按字面量跳过——bash 对那种命令报语法错误、不写入，故不算 fail-closed 的形态。
+  // 注释 / heredoc 正文里的 `>` 恒为字面量（ignoredText），真引号里的 `>` 只有其掩码段**整段同一行
+  // 且段尾是可信闭合引号**时才算字面量；引号外的真重定向继续拦，混合形态报的是真实目标 `src/a`。
+  // 引号未闭合到行尾（含 PowerShell 的 `"C:\Windows\"` 与单行未闭合的 `printf "a > b`）按写目标
+  // 判定（fail-closed）；掩码段**跨行**的真引号同样按写目标判定。
+  // 双引号里 `\` 与 PowerShell 反引号都按转义处理；被转义的分隔符（`a\ #b`）不是注释词首。
   // 跳过候选时从该 `>` 之后继续找——候选的目标捕获可能跨过一个真实操作符
   // （`printf "a > " > "src/a"`），不这样做它会被吞掉。
-  // 反向构造：把 ignoredText 整段掩码撤掉 ⇒ ⑩/⑪ 的放行与拦截用例必红；把跳过候选时的 lastIndex
-  // 改动撤掉 ⇒ ⑬ 必红；把真引号的掩码行界判据改成恒跳过 ⇒ ⑦b 必红（实测：⑦ 仍绿——它的第二个
-  // `>` 在引号外，照旧走到真实目标；⑥/⑧ 的 `>` 根本不在掩码段里，故旧文案的「⑥/⑧ 必红」不成立）。
+  // 反向构造：撤掉 trustedClosing ⇒ ⑯/⑱ 必红；撤掉 `masked[index-1]` ⇒ ⑰ 五条必红；
+  // 撤掉 ignoredText ⇒ ⑩/⑪ 必红；撤掉 lastIndex ⇒ ⑬ 必红；把 `)` 加回前导集合 ⇒ ⑮ 前三条必红。
   {
     name: '353 hook 命令写：引号/注释/heredoc 正文里的重定向符不产生写目标（混合形态报真实目标，真引号外的重定向仍拦）',
     run: (dir) => {
@@ -1711,6 +1711,24 @@ export const ENTRIES = [
       expectBlocked('单词内的 # 不是注释', 'echo foo#bar > src/a', 'src/a');
       expectBlocked('参数展开内的 # 不是注释', 'echo ${x#prefix} > src/a', 'src/a');
       expectBlocked('位置参数计数的 # 不是注释', 'echo $# > src/a', 'src/a');
+      // ⑯ PowerShell 双引号里的尾反斜杠不是 POSIX 的 `\"` 转义：引号在 `"` 处闭合，其后的 `>` 是
+      //    真重定向（base 拦、旧 head 放行）。修法是“可信闭合”判据：段尾必须是未被转义的闭合引号。
+      expectBlocked('PowerShell 尾反斜杠之后的真重定向',
+        'Get-ChildItem "C:\\Windows\\" > src/a', 'src/a');
+      expectBlocked('PowerShell dir 尾反斜杠之后的真重定向',
+        'dir "C:\\Windows\\" > src/a', 'src/a');
+      expectBlocked('PowerShell Write-Output 尾反斜杠之后的真重定向',
+        'Write-Output "C:\\" > src/a', 'src/a');
+      expectBlocked('PowerShell 反引号转义引号之后的真重定向',
+        'Write-Output "a`" # x" > src/a', 'src/a');
+      // ⑰ 被转义的分隔符不是词首：bash 里 `a\ #b` 的 `#` 仍在同一个词内，不是注释起点。
+      expectBlocked('转义空格后的 # 之后的真重定向', 'echo a\\ #b > src/a', 'src/a');
+      expectBlocked('转义分号后的 # 之后的真重定向', 'echo a\\;#b > src/a', 'src/a');
+      expectBlocked('转义竖线后的 # 之后的真重定向', 'echo a\\|#b > src/a', 'src/a');
+      expectBlocked('转义 & 后的 # 之后的真重定向', 'echo a\\&#b > src/a', 'src/a');
+      expectBlocked('转义括号后的 # 之后的真重定向', 'echo a\\(#b > src/a', 'src/a');
+      // ⑱ 单行未闭合引号不再按字面量跳过：`printf "a > b` 的引号到行尾都没闭合，按写目标判定。
+      expectBlocked('单行未闭合引号之后的比较符按写目标判定', 'printf "a > b', 'b');
     },
   },
 ];

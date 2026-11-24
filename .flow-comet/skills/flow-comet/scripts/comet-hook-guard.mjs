@@ -85,14 +85,18 @@ const DEST_VALUE_FLAGS = new Set([
 // 把它当注释会将其后的真重定向整段掩成字面量（fail-open）。代价是 `(…)#` 这种以 `)` 收尾的
 // 子 shell 之后的注释里的 `>` 会被多拦一次（bash 在那里确实按注释处理），方向安全。
 // 引号内、算术内、heredoc 正文内的 `#` 由扫描状态与掩码排除，不在此判定。
-function isCommentStart(command, index) {
+function isCommentStart(command, index, masked) {
   if (index === 0) return true;
+  // 被转义的分隔符（`a\ #b`、`a\;#b`）不是词首：bash 里它是字面量，`#` 仍在同一个词内。
+  if (masked[index - 1]) return false;
   const previous = command[index - 1];
   return previous === ' ' || previous === '\t' || previous === '\r' || previous === '\n'
     || previous === ';' || previous === '|' || previous === '&' || previous === '(';
 }
 
 // heredoc 正文定位（`<<` / `<<-`）：定界串可带单/双引号，`<<-` 的定界行允许前导制表符。
+// 与下方 applyPatchHeredocs 的定界解析同形不同策：这里未闭合返回 null（不掩），那里未闭合按正文到末尾
+// （偏拦截）。两处对引号定界串、`<<-` 制表符、行尾 CR 的处理必须同步；改一处时另一处一起看。
 // 返回 { tokenEnd, bodyStart, bodyEnd }——正文是 [bodyStart, bodyEnd)，止于定界行前；
 // 找不到定界行返回 null（不掩）：单行命令里的 `<<` 没有正文，不能凭它把后续文本吞掉。
 // 操作符到定界串之间同一行上的其余文本不在返回值里：调用方从 tokenEnd 继续扫描，
@@ -152,7 +156,7 @@ function heredocBodyAt(command, operatorStart) {
 //   ignoredText[i]= 该位置是**注释或 heredoc 正文**——整段不是 shell 语法，重定向判定里恒为字面量；
 //                   普通引号只进 masked（是否字面量由重定向规则按掩码段行界判）；
 //   starts        = 候选命令位置（行首，以及未加引号的 `; & | ( ) { }` 或换行之后的首个非空白位置）。
-// 引号状态分三种：普通单引号（反斜杠不转义）、普通双引号（反斜杠转义下一字符）、ANSI-C 的 `$'...'`
+// 引号状态分三种：普通单引号（反斜杠不转义）、普通双引号（反斜杠 / PowerShell 反引号转义下一字符）、ANSI-C 的 `$'...'`
 // （反斜杠转义下一字符，只有未转义的 `'` 才闭合——`$'it\'s'` 的撇号属于参数，不闭合引号）。
 // 算术（`((` / `$((`）跟踪深度：算术里的 `#` 与 `<<` 不是注释 / heredoc（`((a << 2))` 是位移）。
 // 注释与 heredoc 正文里的引号与 `#` 不参与引号状态：注释里的撇号（`# don't`）或正文里的 `It's`
@@ -187,7 +191,9 @@ function scanCommandStructure(command) {
     }
     if (inDouble) {
       masked[i] = true;
-      if (ch === '\\' && i + 1 < len) {
+      // 双引号里两个转义面都要认：POSIX 的 `\` 与 PowerShell 的 ```；否则
+      // `"C:\Windows\"` 会被当成“引号未闭合到行尾”，其后的真重定向被整段掩掉。
+      if ((ch === '\\' || ch === '`') && i + 1 < len) {
         masked[i + 1] = true;
         i += 1;
       } else if (ch === '"') {
@@ -202,7 +208,7 @@ function scanCommandStructure(command) {
       continue;
     }
     // 词首 `#` 起注释：掩到行尾（换行本身保留为命令分隔符），不再开引号状态。
-    if (arithmeticDepth === 0 && ch === '#' && isCommentStart(command, i)) {
+    if (arithmeticDepth === 0 && ch === '#' && isCommentStart(command, i, masked)) {
       let end = i;
       while (end < len && command[end] !== '\n') {
         masked[end] = true;
@@ -379,7 +385,12 @@ function codexWriteTargetsFromCommand(command) {
           for (let li = 0; li < runStart; li++) if (command[li] === '\n') startLine += 1;
           let endLine = startLine;
           for (let li = runStart; li <= runEnd; li++) if (command[li] === '\n') endLine += 1;
-          if (startLine === endLine) {
+          // 只有**可信闭合**的单行掩码段才是字面量：段尾必须是未被 `\` / 反引号转义的闭合引号。
+          // 引号未闭合到行尾时（如 PowerShell 的 `"C:\Windows\"`），段尾不是引号——按写目标判定。
+          const closing = command[runEnd];
+          const trustedClosing = (closing === '"' || closing === "'")
+            && command[runEnd - 1] !== '\\' && command[runEnd - 1] !== '`';
+          if (trustedClosing && startLine === endLine) {
             re.lastIndex = gt + 1;
             continue;
           }

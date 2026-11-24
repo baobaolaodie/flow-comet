@@ -14,8 +14,8 @@
 
 ### 修复
 
-- **重定向符只有在单行引号、注释与 heredoc 正文之外才算写目标**：`printf "… >=2条…"` 这类只读命令不再被拒；当命令把引号文本、注释或 heredoc 正文与真实重定向混在一起时，拒绝报文点名的是那个真实目标。([#195](https://github.com/baobaolaodie/flow-comet/pull/195))
-- **跨行的引号按 fail-closed 判**：单行里的引号文本只是字面量；单行内未闭合的引号是 bash 语法错误、不会写入。代码载荷（引号内的，或经 heredoc 喂给解释器的）与程序自身的写入仍是这一文本层检查的已登记边界；回归基线 353 场景 / 95 项系统测试。([#195](https://github.com/baobaolaodie/flow-comet/pull/195))
+- **重定向符只有在单行引号、注释与 heredoc 正文之外才算写目标**：`printf "… >=2条…"` 这类只读命令不再被拒；当命令把引号文本、注释或 heredoc 正文与真实重定向混在一起时，拒绝报文点名的是那个真实目标。同一份扫描也会阻止注释 / heredoc 正文里的引号掩盖其后的目的地型写入（`cp` / `mv`）。([#195](https://github.com/baobaolaodie/flow-comet/pull/195))
+- **跨行的引号按 fail-closed 判**：单行里的引号文本只有在闭合引号可信时才是字面量；引号到行尾仍未闭合时按写目标判定（fail-closed）。代码载荷（引号内的，或经 heredoc 喂给解释器的）与程序自身的写入仍是这一文本层检查的已登记边界；回归基线 353 场景 / 95 项系统测试。([#195](https://github.com/baobaolaodie/flow-comet/pull/195))
 
 ## [1.8.1] - 2026-11-22
 
