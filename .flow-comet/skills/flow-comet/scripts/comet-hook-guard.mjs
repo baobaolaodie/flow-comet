@@ -191,7 +191,7 @@ function scanCommandStructure(command) {
     }
     if (inDouble) {
       masked[i] = true;
-      // 双引号里两个转义面都要认：POSIX 的 `\` 与 PowerShell 的 ```；否则
+      // 双引号里两个转义面都要认：POSIX 的 `\` 与 PowerShell 的反引号；否则
       // `"C:\Windows\"` 会被当成“引号未闭合到行尾”，其后的真重定向被整段掩掉。
       if ((ch === '\\' || ch === '`') && i + 1 < len) {
         masked[i + 1] = true;
@@ -342,9 +342,9 @@ function codexWriteTargetsFromCommand(command) {
   // 规则先生成，而 `printf "a > b"` 里的 `>` 是引号内的字面量，不是写目标；`echo "a > b" > src/a`
   // 仍拦，且点名的是真实的 `src/a`（旧实现把引号里的 `b` 报成写目标）。
   // 两类字面量的判据不同：注释 / heredoc 正文整段不是 shell 语法（ignoredText，其中的 `>` 恒为
-  // 字面量）；真引号里的 `>` 只有其掩码段**整段同一行**时才算字面量——掩码段跨行的真引号仍按
-  // 写目标判定（fail-closed）。单行内未闭合的引号整段在同一行、按字面量跳过：bash 自身对那条命令
-  // 报语法错误，不会写入，故这里不把它算作 fail-closed 的情形。
+  // 字面量）；真引号里的 `>` 只有其掩码段**整段同一行且段尾是可信闭合引号**时才算字面量——
+  // 掩码段跨行的真引号、引号到行尾仍未闭合（含 PowerShell 尾反斜杠 / 目标开引号）都按写目标判定
+  // （fail-closed）。
   // 跳过候选后从该 `>` 之后继续找：候选的目标捕获可能跨过一个真实的操作符
   // （`printf "a > " > "src/a"`），继续到整个 match 之后会把它一并吞掉。
   // 代码载荷——引号内的（`bash -c "… > f"`），或经 heredoc 喂给解释器的（`bash <<'EOS' … EOS`）——
@@ -366,7 +366,7 @@ function codexWriteTargetsFromCommand(command) {
     let m;
     while ((m = re.exec(command)) !== null) {
       // 只对重定向规则过滤：落在注释 / heredoc 正文里的 `>` 不是操作符；落在真引号里的 `>` 只有
-      // 整段同一行的掩码段才认作字面量（掩码段跨行的真引号仍按写目标判定，fail-closed）——
+      // 整段同一行且段尾可信闭合的掩码段才认作字面量（跨行 / 未闭合 / 方言歧义仍按写目标判定，fail-closed）——
       // 其余候选照旧交给 addTarget（目标归一 / 空设备过滤 / 去重语义零改动）。
       // 两种跳过都从该 `>` 之后继续找：候选的目标捕获可能跨过一个真实操作符，继续到整个 match
       // 之后会把它一并吞掉（见上方注释）。
@@ -388,8 +388,14 @@ function codexWriteTargetsFromCommand(command) {
           // 只有**可信闭合**的单行掩码段才是字面量：段尾必须是未被 `\` / 反引号转义的闭合引号。
           // 引号未闭合到行尾时（如 PowerShell 的 `"C:\Windows\"`），段尾不是引号——按写目标判定。
           const closing = command[runEnd];
+          // 掩码段里若出现 \" 或反引号+引号，闭合位置依赖方言（bash 的转义 vs PowerShell 的普通字符），
+          // 不能用“段尾是引号”来信任：`Get-ChildItem "C:\Windows\" > "src/a"` 的段尾其实是目标的
+          // 开引号。此类段一律按写目标判定（fail-closed；BASE 也拦，方向安全）。
+          const runText = command.slice(runStart, runEnd + 1);
+          const dialectAmbiguous = /\\"|`"/.test(runText);
           const trustedClosing = (closing === '"' || closing === "'")
-            && command[runEnd - 1] !== '\\' && command[runEnd - 1] !== '`';
+            && command[runEnd - 1] !== '\\' && command[runEnd - 1] !== '`'
+            && !dialectAmbiguous;
           if (trustedClosing && startLine === endLine) {
             re.lastIndex = gt + 1;
             continue;

@@ -1721,6 +1721,17 @@ export const ENTRIES = [
         'Write-Output "C:\\" > src/a', 'src/a');
       expectBlocked('PowerShell 反引号转义引号之后的真重定向',
         'Write-Output "a`" # x" > src/a', 'src/a');
+      // ⑯b 段尾是“目标的**开引号**”不算可信闭合：加引号的目标必须仍判成写目标。
+      expectBlocked('PowerShell 尾反斜杠 + 引号目标',
+        'Get-ChildItem "C:\\Windows\\" > "src/a"', 'src/a');
+      expectBlocked('PowerShell 尾反斜杠 + 追加引号目标',
+        'Get-ChildItem "C:\\Windows\\" >> "src/a"', 'src/a');
+      expectBlocked('PowerShell 尾反斜杠 + 无空格引号目标',
+        'Get-ChildItem "C:\\Windows\\" >"src/a"', 'src/a');
+      expectBlocked('PowerShell 尾反斜杠 + 带空格引号目标',
+        'Get-ChildItem "C:\\Windows\\" > "src/a b"', 'src/a b');
+      expectBlocked('PowerShell 尾反斜杠 + 2>&1 + 引号目标',
+        'Get-ChildItem "C:\\Windows\\" 2>&1 > "src/a"', 'src/a');
       // ⑰ 被转义的分隔符不是词首：bash 里 `a\ #b` 的 `#` 仍在同一个词内，不是注释起点。
       expectBlocked('转义空格后的 # 之后的真重定向', 'echo a\\ #b > src/a', 'src/a');
       expectBlocked('转义分号后的 # 之后的真重定向', 'echo a\\;#b > src/a', 'src/a');
