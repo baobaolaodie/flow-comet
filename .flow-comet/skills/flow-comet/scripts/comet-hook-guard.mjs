@@ -80,13 +80,16 @@ const DEST_VALUE_FLAGS = new Set([
   'destination', 'dest', 'path', 'literalpath', 'filepath', 'filter', 'include', 'exclude',
 ]);
 
-// 注释起点（词首 `#`）：行首，或前一字符是空白 / `; | & ( )`——`foo#bar` 里的不是注释。
+// 注释起点（词首 `#`）：行首，或前一字符是空白 / `; | & (`——`foo#bar` 里的不是注释。
+// `)` **不在**集合里：`echo $(date)# > f` 的 `#` 与命令替换同属一个词（bash 先认词、再看 `#`），
+// 把它当注释会将其后的真重定向整段掩成字面量（fail-open）。代价是 `(…)#` 这种以 `)` 收尾的
+// 子 shell 之后的注释里的 `>` 会被多拦一次（bash 在那里确实按注释处理），方向安全。
 // 引号内、算术内、heredoc 正文内的 `#` 由扫描状态与掩码排除，不在此判定。
 function isCommentStart(command, index) {
   if (index === 0) return true;
   const previous = command[index - 1];
   return previous === ' ' || previous === '\t' || previous === '\r' || previous === '\n'
-    || previous === ';' || previous === '|' || previous === '&' || previous === '(' || previous === ')';
+    || previous === ';' || previous === '|' || previous === '&' || previous === '(';
 }
 
 // heredoc 正文定位（`<<` / `<<-`）：定界串可带单/双引号，`<<-` 的定界行允许前导制表符。
@@ -333,11 +336,13 @@ function codexWriteTargetsFromCommand(command) {
   // 规则先生成，而 `printf "a > b"` 里的 `>` 是引号内的字面量，不是写目标；`echo "a > b" > src/a`
   // 仍拦，且点名的是真实的 `src/a`（旧实现把引号里的 `b` 报成写目标）。
   // 两类字面量的判据不同：注释 / heredoc 正文整段不是 shell 语法（ignoredText，其中的 `>` 恒为
-  // 字面量）；真引号里的 `>` 只有其掩码段**整段同一行**时才算字面量——跨行或未闭合的真引号仍按
-  // 写目标判定（fail-closed）。跳过候选后从该 `>` 之后继续找：候选的目标捕获可能跨过一个真实
-  // 操作符（`printf "a > " > "src/a"`），继续到整个 match 之后会把它一并吞掉。
-  // 引号内的代码载荷（`bash -c "… > f"`）与程序自身发起的写入（`node -e` / `python -c` / awk
-  // 程序）属已登记边界，不在本次收紧范围。
+  // 字面量）；真引号里的 `>` 只有其掩码段**整段同一行**时才算字面量——掩码段跨行的真引号仍按
+  // 写目标判定（fail-closed）。单行内未闭合的引号整段在同一行、按字面量跳过：bash 自身对那条命令
+  // 报语法错误，不会写入，故这里不把它算作 fail-closed 的情形。
+  // 跳过候选后从该 `>` 之后继续找：候选的目标捕获可能跨过一个真实的操作符
+  // （`printf "a > " > "src/a"`），继续到整个 match 之后会把它一并吞掉。
+  // 代码载荷——引号内的（`bash -c "… > f"`），或经 heredoc 喂给解释器的（`bash <<'EOS' … EOS`）——
+  // 与程序自身发起的写入（`node -e` / `python -c` / awk 程序）属已登记边界，不在本次收紧范围。
   const { masked, starts, ignoredText } = scanCommandStructure(command);
   // shell 重定向(含描述符变体:> / >> / 2> / 1>>)。判定对象是候选文本里的**第一个** `>`：前缀
   // 分隔符 `(?:^|[;\s|&])` 与描述符数字都不含 `>`，故 `m[0].indexOf('>')` 就是重定向符本身。
@@ -355,7 +360,7 @@ function codexWriteTargetsFromCommand(command) {
     let m;
     while ((m = re.exec(command)) !== null) {
       // 只对重定向规则过滤：落在注释 / heredoc 正文里的 `>` 不是操作符；落在真引号里的 `>` 只有
-      // 整段同一行的掩码段才认作字面量（跨行 / 未闭合的真引号仍按写目标判定，fail-closed）——
+      // 整段同一行的掩码段才认作字面量（掩码段跨行的真引号仍按写目标判定，fail-closed）——
       // 其余候选照旧交给 addTarget（目标归一 / 空设备过滤 / 去重语义零改动）。
       // 两种跳过都从该 `>` 之后继续找：候选的目标捕获可能跨过一个真实操作符，继续到整个 match
       // 之后会把它一并吞掉（见上方注释）。

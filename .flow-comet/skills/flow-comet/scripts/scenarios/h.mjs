@@ -1566,10 +1566,13 @@ export const ENTRIES = [
   // `=2条…`，命令被拒（误拦方向）。修复后取候选匹配文本里第一个 `>` 的下标查同一份结构扫描：
   // 注释 / heredoc 正文里的 `>` 恒为字面量（ignoredText），真引号里的 `>` 只有其掩码段**整段同一行**
   // 时才算字面量；引号外的真重定向继续拦，混合形态报的是真实目标 `src/a` 而不是引号里的 `b`。
-  // 跨行或未闭合的**真引号**之后的 `>` 仍按写目标判定（fail-closed）；跳过候选时从该 `>` 之后
-  // 继续找——候选的目标捕获可能跨过一个真实操作符（`printf "a > " > "src/a"`），不这样做它会被吞掉。
+  // 掩码段**跨行**的**真引号**之后的 `>` 仍按写目标判定（fail-closed）；单行内未闭合的引号整段
+  // 在同一行、按字面量跳过——bash 对那种命令报语法错误、不写入，故不算 fail-closed 的形态。
+  // 跳过候选时从该 `>` 之后继续找——候选的目标捕获可能跨过一个真实操作符
+  // （`printf "a > " > "src/a"`），不这样做它会被吞掉。
   // 反向构造：把 ignoredText 整段掩码撤掉 ⇒ ⑩/⑪ 的放行与拦截用例必红；把跳过候选时的 lastIndex
-  // 改动撤掉 ⇒ ⑬ 必红；把真引号的掩码行界判据改成恒跳过 ⇒ ⑥/⑧ 必红。
+  // 改动撤掉 ⇒ ⑬ 必红；把真引号的掩码行界判据改成恒跳过 ⇒ ⑦b 必红（实测：⑦ 仍绿——它的第二个
+  // `>` 在引号外，照旧走到真实目标；⑥/⑧ 的 `>` 根本不在掩码段里，故旧文案的「⑥/⑧ 必红」不成立）。
   {
     name: '353 hook 命令写：引号/注释/heredoc 正文里的重定向符不产生写目标（混合形态报真实目标，真引号外的重定向仍拦）',
     run: (dir) => {
@@ -1611,6 +1614,16 @@ export const ENTRIES = [
       assertOut(mixed, 'BLOCKED');
       assertOut(mixed, '命令写入 "src/a"');
       assertNotOut(mixed, '命令写入 "b"');
+      // ⑦b 真引号的掩码段**跨行**：引号不在同一行闭合 ⇒ 不按字面量跳过，其后的 `>` 仍按写目标
+      //    判定（fail-closed，偏拦截方向）。点名的是引号里的文本 `b`——掩码段已越过行界，
+      //    守卫不再声称知道引号在哪闭合。反向构造：把行界判据改成「掩码一律跳过」⇒ 本条放行（红）。
+      const multilineQuote = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'printf "a > b\nprintf x > src/a' },
+      });
+      assertExit(multilineQuote, 2);
+      assertOut(multilineQuote, 'BLOCKED');
+      assertOut(multilineQuote, '命令写入 "b"');
       // ⑧ 注释 / heredoc 正文不得关掉其后真重定向的拦截：这两种文本里的撇号（# don't / It's）
       //    过去会开一个永不闭合的引号，把其后命令整段掩进引号（一处撇号 = 关掉整条重定向拦截的
       //    fail-open）。现在注释与正文整段标为 ignoredText：既不参与引号状态，也不产生目标。
@@ -1675,9 +1688,29 @@ export const ENTRIES = [
       // ⑬ 跳过候选时不得吞掉其中跨越的真实操作符：第一个 > 在引号里（字面量），第二个 > 是真实
       //    重定向；继续到整个 match 之后会把后者一并跳过（无目标 = 放行）。
       expectBlocked('引号参数之后紧接的真实操作符', 'printf "a > " > "src/a"', 'src/a');
-      // ⑭ 算术位移不是 heredoc；here-string（<<<）也不是 heredoc。
-      expectBlocked('算术位移之后的真重定向', '((a << 2))\nprintf x > src/a', 'src/a');
-      expectPass('here-string 不是 heredoc', 'cat <<< "a > b"');
+      // ⑭ 算术位移不是 heredoc；here-string（<<<）也不是 heredoc。两条都带**可终止行**——把排除
+      //    判据撤掉，`<<` 就会被当成 heredoc 起点，其后的真重定向被吞进假正文（放行）：
+      //    ① 算术：`<< 2))` 的定界串一直读到行尾（`2))`），第三行恰好与它相等；
+      //    ② here-string：`<<< x` 从第二个 `<` 起被读作 `<<`，`x` 是定界串、第三行 `x` 收口。
+      expectBlocked('算术位移之后的真重定向（含可终止行）',
+        '((a << 2))\nprintf x > src/a\n2))', 'src/a');
+      expectBlocked('here-string 之后的真重定向（含可终止行）',
+        'cat <<< x\nprintf y > src/a\nx', 'src/a');
+      // ⑮ 词内 `#` 不是注释起点：`)` 从词首集合去掉之后，命令替换 / 算术扩展紧邻的 `#` 不再把
+      //    其后的真重定向掩成字面量（旧行为 = 一处 `#` 关掉整条写入判定，fail-open）。
+      //    反向构造：把 `)` 加回前导集合 ⇒ 本组前三条必红。后三条修复前后都判对——钉的是判据
+      //    本身（前导集合不得继续放宽），不是本次的修复点。
+      expectBlocked('命令替换后的词内 # 之后的真重定向', 'echo $(date)# > src/a', 'src/a');
+      expectBlocked('算术扩展后的词内 # 之后的真重定向', 'echo $((1+1))# > src/a', 'src/a');
+      const substitutionState = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'echo $(date)# > .flow-comet/flow-comet-state.json' },
+      });
+      assertExit(substitutionState, 2);
+      assertOut(substitutionState, 'state 文件');
+      expectBlocked('单词内的 # 不是注释', 'echo foo#bar > src/a', 'src/a');
+      expectBlocked('参数展开内的 # 不是注释', 'echo ${x#prefix} > src/a', 'src/a');
+      expectBlocked('位置参数计数的 # 不是注释', 'echo $# > src/a', 'src/a');
     },
   },
 ];
