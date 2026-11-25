@@ -80,32 +80,172 @@ const DEST_VALUE_FLAGS = new Set([
   'destination', 'dest', 'path', 'literalpath', 'filepath', 'filter', 'include', 'exclude',
 ]);
 
-// 引号感知的命令结构扫描（目的地型命令的「命令位置」与「参数段边界」共用）：
-//   masked[i] = 该位置在引号内（含引号字符本身，以及反斜杠转义的下一字符——转义字符是字面量，
-//               不参与结构判定；被转义的换行是续行，不算命令分隔）；
-//   starts    = 候选命令位置（行首，以及未加引号的 `; & | ( ) { }` 或换行之后的首个非空白位置）。
+// 注释起点（词首 `#`）：行首，或前一字符是空白 / `; | & (`——`foo#bar` 里的不是注释。
+// `)` **不在**集合里：`echo $(date)# > f` 的 `#` 与命令替换同属一个词（bash 先认词、再看 `#`），
+// 把它当注释会将其后的真重定向整段掩成字面量（fail-open）。代价是 `(…)#` 这种以 `)` 收尾的
+// 子 shell 之后的注释里的 `>` 会被多拦一次（bash 在那里确实按注释处理），方向安全。
+// 引号内、算术内、heredoc 正文内的 `#` 由扫描状态与掩码排除，不在此判定。
+function isCommentStart(command, index, masked) {
+  if (index === 0) return true;
+  // 被转义的分隔符（`a\ #b`、`a\;#b`）不是词首：bash 里它是字面量，`#` 仍在同一个词内。
+  if (masked[index - 1]) return false;
+  const previous = command[index - 1];
+  return previous === ' ' || previous === '\t' || previous === '\r' || previous === '\n'
+    || previous === ';' || previous === '|' || previous === '&' || previous === '(';
+}
+
+// heredoc 正文定位（`<<` / `<<-`）：定界串可带单/双引号，`<<-` 的定界行允许前导制表符。
+// 与下方 applyPatchHeredocs 的定界解析同形不同策：这里未闭合返回 null（不掩），那里未闭合按正文到末尾
+// （偏拦截）。两处对引号定界串、`<<-` 制表符、行尾 CR 的处理必须同步；改一处时另一处一起看。
+// 返回 { tokenEnd, bodyStart, bodyEnd }——正文是 [bodyStart, bodyEnd)，止于定界行前；
+// 找不到定界行返回 null（不掩）：单行命令里的 `<<` 没有正文，不能凭它把后续文本吞掉。
+// 操作符到定界串之间同一行上的其余文本不在返回值里：调用方从 tokenEnd 继续扫描，
+// `cat > src/a <<EOF` 的 `src/a` 照常是写目标。
+function heredocBodyAt(command, operatorStart) {
+  const len = command.length;
+  let index = operatorStart + 2;
+  let stripLeadingTabs = false;
+  if (command[index] === '-') {
+    stripLeadingTabs = true;
+    index += 1;
+  }
+  while (index < len && (command[index] === ' ' || command[index] === '\t')) index += 1;
+  let delimiter = '';
+  while (index < len) {
+    const ch = command[index];
+    if (ch === "'" || ch === '"') {
+      const quote = ch;
+      index += 1;
+      while (index < len && command[index] !== quote) {
+        delimiter += command[index];
+        index += 1;
+      }
+      if (index < len) index += 1; // 闭合引号
+      continue;
+    }
+    if (ch === '\\' && index + 1 < len) {
+      delimiter += command[index + 1];
+      index += 2;
+      continue;
+    }
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === ';' || ch === '|' || ch === '&' || ch === '<' || ch === '>') break;
+    delimiter += ch;
+    index += 1;
+  }
+  if (delimiter === '') return null;
+  const lineBreak = command.indexOf('\n', index);
+  if (lineBreak === -1) return null;
+  const bodyStart = lineBreak + 1;
+  let cursor = bodyStart;
+  while (cursor <= len) {
+    let lineEnd = command.indexOf('\n', cursor);
+    if (lineEnd === -1) lineEnd = len;
+    let line = command.slice(cursor, lineEnd);
+    if (line.endsWith('\r')) line = line.slice(0, -1);
+    if ((stripLeadingTabs ? line.replace(/^\t+/, '') : line) === delimiter) {
+      return { tokenEnd: index, bodyStart, bodyEnd: cursor };
+    }
+    if (lineEnd >= len) break;
+    cursor = lineEnd + 1;
+  }
+  return null;
+}
+
+// 引号 / 注释 / heredoc 感知的命令结构扫描（目的地型命令的「命令位置」与「参数段边界」共用）：
+//   masked[i]     = 该位置不是 shell 结构（引号与转义字符本身、注释整行、heredoc 正文）；
+//   ignoredText[i]= 该位置是**注释或 heredoc 正文**——整段不是 shell 语法，重定向判定里恒为字面量；
+//                   普通引号只进 masked（是否字面量由重定向规则按掩码段行界判）；
+//   starts        = 候选命令位置（行首，以及未加引号的 `; & | ( ) { }` 或换行之后的首个非空白位置）。
+// 引号状态分三种：普通单引号（反斜杠不转义）、普通双引号（反斜杠 / PowerShell 反引号转义下一字符）、ANSI-C 的 `$'...'`
+// （反斜杠转义下一字符，只有未转义的 `'` 才闭合——`$'it\'s'` 的撇号属于参数，不闭合引号）。
+// 算术（`((` / `$((`）跟踪深度：算术里的 `#` 与 `<<` 不是注释 / heredoc（`((a << 2))` 是位移）。
+// 注释与 heredoc 正文里的引号与 `#` 不参与引号状态：注释里的撇号（`# don't`）或正文里的 `It's`
+// 不再把掩码拉过后续命令（跨行掩码段因此只来自真正的跨行引号）。
 // 逐字符扫描而非字符类正则：字符类不区分引号内外（引号内的括号/分号不是命令边界），
 // 也不覆盖「引号内文本含命令名」的形态——详见下方目的地型模式的注释。
 function scanCommandStructure(command) {
-  const masked = new Array(command.length).fill(false);
+  const len = command.length;
+  const masked = new Array(len).fill(false);
+  const ignoredText = new Array(len).fill(false);
   let inSingle = false;
   let inDouble = false;
-  for (let i = 0; i < command.length; i++) {
+  let inAnsiC = false;
+  let arithmeticDepth = 0;
+  for (let i = 0; i < len; i++) {
     const ch = command[i];
+    if (ignoredText[i]) continue; // 已标记的注释 / heredoc 正文整段跳过（不更新引号状态）
+    if (inAnsiC) {
+      masked[i] = true;
+      if (ch === '\\' && i + 1 < len) {
+        masked[i + 1] = true;
+        i += 1;
+      } else if (ch === "'") {
+        inAnsiC = false;
+      }
+      continue;
+    }
     if (inSingle) {
       masked[i] = true;
       if (ch === "'") inSingle = false;
       continue;
     }
-    if (ch === '\\' && i + 1 < command.length) {
+    if (inDouble) {
+      masked[i] = true;
+      // 双引号里两个转义面都要认：POSIX 的 `\` 与 PowerShell 的反引号；否则
+      // `"C:\Windows\"` 会被当成“引号未闭合到行尾”，其后的真重定向被整段掩掉。
+      if ((ch === '\\' || ch === '`') && i + 1 < len) {
+        masked[i + 1] = true;
+        i += 1;
+      } else if (ch === '"') {
+        inDouble = false;
+      }
+      continue;
+    }
+    if (ch === '\\' && i + 1 < len) {
       masked[i] = true;
       masked[i + 1] = true;
       i += 1;
       continue;
     }
-    if (inDouble) {
+    // 词首 `#` 起注释：掩到行尾（换行本身保留为命令分隔符），不再开引号状态。
+    if (arithmeticDepth === 0 && ch === '#' && isCommentStart(command, i, masked)) {
+      let end = i;
+      while (end < len && command[end] !== '\n') {
+        masked[end] = true;
+        ignoredText[end] = true;
+        end += 1;
+      }
+      i = end - 1;
+      continue;
+    }
+    // heredoc：`<<` / `<<-`，不是 `<<<`（here-string），也不是重复的 `<<` 的第二字符。
+    if (arithmeticDepth === 0 && ch === '<' && command[i + 1] === '<' && command[i + 2] !== '<' && command[i - 1] !== '<') {
+      const heredoc = heredocBodyAt(command, i);
+      if (heredoc) {
+        for (let k = heredoc.bodyStart; k < heredoc.bodyEnd; k++) {
+          masked[k] = true;
+          ignoredText[k] = true;
+        }
+        i = heredoc.tokenEnd - 1;
+        continue;
+      }
+    }
+    // 算术扩展：`((` 与 `))` 只用于跟踪深度，不产生命令位置。
+    if (ch === '(' && command[i + 1] === '(') {
+      arithmeticDepth += 1;
+      i += 1;
+      continue;
+    }
+    if (ch === ')' && command[i + 1] === ')' && arithmeticDepth > 0) {
+      arithmeticDepth -= 1;
+      i += 1;
+      continue;
+    }
+    if (ch === '$' && command[i + 1] === "'") {
       masked[i] = true;
-      if (ch === '"') inDouble = false;
+      masked[i + 1] = true;
+      inAnsiC = true;
+      i += 1;
       continue;
     }
     if (ch === "'" || ch === '"') {
@@ -129,7 +269,7 @@ function scanCommandStructure(command) {
       pending = false;
     }
   }
-  return { masked, starts };
+  return { masked, starts, ignoredText };
 }
 
 // 参数段结束位置（引号感知）：自 from 起第一个未在引号内的段边界（`;` / `|` / `&` 或换行/回车）。
@@ -197,6 +337,22 @@ function codexWriteTargetsFromCommand(command) {
       if (!isDevice && !targets.includes(t)) targets.push(t);
     } // 去重
   };
+  // 重定向符是否落在引号 / 注释 / heredoc 正文里，由**同一份**命令结构扫描回答：下方目的地型命令
+  // 复用这次扫描的 masked/starts——只算一次，不复制扫描逻辑。掩码必须早于重定向规则：候选文本由该
+  // 规则先生成，而 `printf "a > b"` 里的 `>` 是引号内的字面量，不是写目标；`echo "a > b" > src/a`
+  // 仍拦，且点名的是真实的 `src/a`（旧实现把引号里的 `b` 报成写目标）。
+  // 两类字面量的判据不同：注释 / heredoc 正文整段不是 shell 语法（ignoredText，其中的 `>` 恒为
+  // 字面量）；真引号里的 `>` 只有其掩码段**整段同一行且段尾是可信闭合引号**时才算字面量——
+  // 掩码段跨行的真引号、引号到行尾仍未闭合（含 PowerShell 尾反斜杠 / 目标开引号）都按写目标判定
+  // （fail-closed）。
+  // 跳过候选后从该 `>` 之后继续找：候选的目标捕获可能跨过一个真实的操作符
+  // （`printf "a > " > "src/a"`），继续到整个 match 之后会把它一并吞掉。
+  // 代码载荷——引号内的（`bash -c "… > f"`），或经 heredoc 喂给解释器的（`bash <<'EOS' … EOS`）——
+  // 与程序自身发起的写入（`node -e` / `python -c` / awk 程序）属已登记边界，不在本次收紧范围。
+  const { masked, starts, ignoredText } = scanCommandStructure(command);
+  // shell 重定向(含描述符变体:> / >> / 2> / 1>>)。判定对象是候选文本里的**第一个** `>`：前缀
+  // 分隔符 `(?:^|[;\s|&])` 与描述符数字都不含 `>`，故 `m[0].indexOf('>')` 就是重定向符本身。
+  const redirectRe = /(?:^|[;\s|&])(?:[0-9]*>>?)\s*("[^"]*"|'[^']*'|[^\s;|&]+)/gi;
   const patterns = [
     // PowerShell **路径型**写类 cmdlet 的 -Path/-LiteralPath/-FilePath(引号内空格整体捕获并剥引号;
     // 只匹配写类 cmdlet——读类(Get-Content 等)的 -Path 不提取;同一命令内 [^;|&]*? 防跨命令)。
@@ -204,12 +360,50 @@ function codexWriteTargetsFromCommand(command) {
     // (见下方目的地型模式):把源取成目标正是本函数曾经的取向错误——写入目标从不被检查,
     // 源路径反而被误拦(只读命令也拦)。
     /(?:Set-Content|Add-Content|New-Item|Out-File|Remove-Item|Set-Item|Export-Csv)[^;|&]*?-(?:Path|LiteralPath|FilePath)\s+("[^"]*"|'[^']*'|[^\s;|&]+)/gi,
-    // shell 重定向(含描述符变体:> / >> / 2> / 1>>)
-    /(?:^|[;\s|&])(?:[0-9]*>>?)\s*("[^"]*"|'[^']*'|[^\s;|&]+)/gi,
+    redirectRe,
   ];
   for (const re of patterns) {
     let m;
-    while ((m = re.exec(command)) !== null) addTarget(m[1]);
+    while ((m = re.exec(command)) !== null) {
+      // 只对重定向规则过滤：落在注释 / heredoc 正文里的 `>` 不是操作符；落在真引号里的 `>` 只有
+      // 整段同一行且段尾可信闭合的掩码段才认作字面量（跨行 / 未闭合 / 方言歧义仍按写目标判定，fail-closed）——
+      // 其余候选照旧交给 addTarget（目标归一 / 空设备过滤 / 去重语义零改动）。
+      // 两种跳过都从该 `>` 之后继续找：候选的目标捕获可能跨过一个真实操作符，继续到整个 match
+      // 之后会把它一并吞掉（见上方注释）。
+      if (re === redirectRe) {
+        const gt = m.index + m[0].indexOf('>');
+        if (ignoredText[gt]) {
+          re.lastIndex = gt + 1;
+          continue;
+        }
+        if (masked[gt]) {
+          let runStart = gt;
+          while (runStart > 0 && masked[runStart - 1]) runStart -= 1;
+          let runEnd = gt;
+          while (runEnd + 1 < command.length && masked[runEnd + 1]) runEnd += 1;
+          let startLine = 0;
+          for (let li = 0; li < runStart; li++) if (command[li] === '\n') startLine += 1;
+          let endLine = startLine;
+          for (let li = runStart; li <= runEnd; li++) if (command[li] === '\n') endLine += 1;
+          // 只有**可信闭合**的单行掩码段才是字面量：段尾必须是未被 `\` / 反引号转义的闭合引号。
+          // 引号未闭合到行尾时（如 PowerShell 的 `"C:\Windows\"`），段尾不是引号——按写目标判定。
+          const closing = command[runEnd];
+          // 掩码段里若出现 \" 或反引号+引号，闭合位置依赖方言（bash 的转义 vs PowerShell 的普通字符），
+          // 不能用“段尾是引号”来信任：`Get-ChildItem "C:\Windows\" > "src/a"` 的段尾其实是目标的
+          // 开引号。此类段一律按写目标判定（fail-closed；BASE 也拦，方向安全）。
+          const runText = command.slice(runStart, runEnd + 1);
+          const dialectAmbiguous = /\\"|`"/.test(runText);
+          const trustedClosing = (closing === '"' || closing === "'")
+            && command[runEnd - 1] !== '\\' && command[runEnd - 1] !== '`'
+            && !dialectAmbiguous;
+          if (trustedClosing && startLine === endLine) {
+            re.lastIndex = gt + 1;
+            continue;
+          }
+        }
+      }
+      addTarget(m[1]);
+    }
   }
   // **目的地型**命令(与上方 .NET File API 的 Copy/Move 分支同向:写目标是第二参数):
   //   Copy-Item / Move-Item / Remove-Item  与位置型形态 cp / mv
@@ -223,7 +417,7 @@ function codexWriteTargetsFromCommand(command) {
   //      写命令 → 合法命令被拦(误拦);② 段捕获 `[^;|&]*` 会跨行吞并——`cp <src> <dst>` 后跟另一
   //      行命令时,「最后一个位置参数」取到下一行的参数,真正被写的 <dst> 反而从不被检查(逃逸)。
   // 非命令位置的内嵌形态(如 powershell -Command "…")不提取,属命令级检测的既有边界。
-  const { masked, starts } = scanCommandStructure(command);
+  // 命令结构与引号/注释/heredoc 掩码取自**本函数开头那一次**扫描（同一口径只算一次，此处不重复扫描）。
   const destinationRe = /(?:Copy-Item|Move-Item|Remove-Item|cp|mv)/gi;
   let destMatch;
   while ((destMatch = destinationRe.exec(command)) !== null) {

@@ -1560,4 +1560,186 @@ export const ENTRIES = [
       }
     },
   },
+
+  // 353: 重定向判定必须**引号感知**——重定向规则只认 `>` 这个字符，不看它在不在引号里：
+  // `printf "… >=2条…"`（2026-11-17 真实被拦的只读统计命令）里引号内的 `>` 被读成写目标
+  // `=2条…`，命令被拒（误拦方向）。修复后取候选匹配文本里第一个 `>` 的下标查同一份结构扫描：
+  // 注释 / heredoc 正文里的 `>` 恒为字面量（ignoredText），真引号里的 `>` 只有其掩码段**整段同一行
+  // 且段尾是可信闭合引号**时才算字面量；引号外的真重定向继续拦，混合形态报的是真实目标 `src/a`。
+  // 引号未闭合到行尾（含 PowerShell 的 `"C:\Windows\"` 与单行未闭合的 `printf "a > b`）按写目标
+  // 判定（fail-closed）；掩码段**跨行**的真引号同样按写目标判定。
+  // 双引号里 `\` 与 PowerShell 反引号都按转义处理；被转义的分隔符（`a\ #b`）不是注释词首。
+  // 跳过候选时从该 `>` 之后继续找——候选的目标捕获可能跨过一个真实操作符
+  // （`printf "a > " > "src/a"`），不这样做它会被吞掉。
+  // 反向构造：撤掉 trustedClosing ⇒ ⑯/⑱ 必红；撤掉 `masked[index-1]` ⇒ ⑰ 五条必红；
+  // 撤掉 ignoredText ⇒ ⑩/⑪ 必红；撤掉 lastIndex ⇒ ⑬ 必红；把 `)` 加回前导集合 ⇒ ⑮ 前三条必红。
+  {
+    name: '353 hook 命令写：引号/注释/heredoc 正文里的重定向符不产生写目标（混合形态报真实目标，真引号外的重定向仍拦）',
+    run: (dir) => {
+      writeState(dir, { ...baseState('open'), status: 'running' });
+      const expectPass = (label, command) => {
+        const res = runHook(['before_tool'], dir, { tool_name: 'Bash', tool_input: { command } });
+        if (res.status !== 0 || !res.output.includes('workflow-hook-guard-ok')) {
+          throw new Error(label + '：期望放行（exit 0 + workflow-hook-guard-ok），实际 exit '
+            + res.status + '\n实际输出:\n' + res.output);
+        }
+      };
+      const expectBlocked = (label, command, target) => {
+        const res = runHook(['before_tool'], dir, { tool_name: 'Bash', tool_input: { command } });
+        const named = res.output.includes('命令写入 "' + target + '"');
+        if (res.status !== 2 || !res.output.includes('BLOCKED') || !named) {
+          throw new Error(label + '：期望拦截并点名 ' + target + '（exit 2），实际 exit '
+            + res.status + '\n实际输出:\n' + res.output);
+        }
+      };
+      // ① 2026-11-17 真实误拦的只读统计命令：`printf "… <=1条… >=2条…"`（引号内两个比较符）
+      expectPass('真实统计命令（引号内 >=2条）',
+        'printf "n=%d 中位=%d 最长=%d <=1条=%d(%.0f%%) >=2条=%d(%.0f%%)\\n" 353 1 42 208 58.9 145 41.1');
+      // ②~⑤ 同一误拦族的其余四条（提交消息 / 程序比较 / 格式串 / 程序文本）
+      expectPass('git commit 消息（引号内 >）', 'git commit -m "rename a > b"');
+      expectPass('python 比较（引号内 >）', 'python -c "print(1 > 0)"');
+      expectPass('printf 格式串（引号内 >）', 'printf "a > b"');
+      expectPass('awk 程序文本（单引号内 >）', "awk 'BEGIN{print 1 > \"out.txt\"}'");
+      // ⑥ 引号外的真重定向仍拦（收紧不得放过真写）：无引号目标 / 带空格目标 / heredoc 目标
+      expectBlocked('重定向到未加引号目标', 'printf x > src/a', 'src/a');
+      expectBlocked('重定向到带空格目标', 'printf x > "src/my file.txt"', 'src/my file.txt');
+      expectBlocked('heredoc 重定向目标', 'cat > src/a <<EOF', 'src/a');
+      // ⑦ 混合形态：引号内的 `>` 不是目标，报文点名的必须是引号外的真实目标 `src/a`——
+      //    旧实现先命中引号内的 `>`，报的是 `b`（判定方向对、目标错）。
+      const mixed = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'echo "a > b" > src/a' },
+      });
+      assertExit(mixed, 2);
+      assertOut(mixed, 'BLOCKED');
+      assertOut(mixed, '命令写入 "src/a"');
+      assertNotOut(mixed, '命令写入 "b"');
+      // ⑦b 真引号的掩码段**跨行**：引号不在同一行闭合 ⇒ 不按字面量跳过，其后的 `>` 仍按写目标
+      //    判定（fail-closed，偏拦截方向）。点名的是引号里的文本 `b`——掩码段已越过行界，
+      //    守卫不再声称知道引号在哪闭合。反向构造：把行界判据改成「掩码一律跳过」⇒ 本条放行（红）。
+      const multilineQuote = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'printf "a > b\nprintf x > src/a' },
+      });
+      assertExit(multilineQuote, 2);
+      assertOut(multilineQuote, 'BLOCKED');
+      assertOut(multilineQuote, '命令写入 "b"');
+      // ⑧ 注释 / heredoc 正文不得关掉其后真重定向的拦截：这两种文本里的撇号（# don't / It's）
+      //    过去会开一个永不闭合的引号，把其后命令整段掩进引号（一处撇号 = 关掉整条重定向拦截的
+      //    fail-open）。现在注释与正文整段标为 ignoredText：既不参与引号状态，也不产生目标。
+      expectBlocked('注释里的撇号之后的真重定向',
+        "# don't run this\nprintf x > src/a", 'src/a');
+      expectBlocked('注释里的引号之后的真重定向',
+        '# note " here\nprintf x > src/a', 'src/a');
+      expectBlocked('heredoc 正文含撇号之后的真重定向',
+        "cat <<EOF\nIt's fine\nEOF\nprintf x > src/a", 'src/a');
+      // ⑧b 成对撇号（注释首尾各一处）：中间的 printf 仍在引号外，真重定向照常判定；
+      //     同一形态绕写 state 文件必须拦（最小保护集不因注释文本失效）。
+      expectBlocked('注释成对撇号之间的真重定向',
+        "# don't edit\nprintf x > src/a\n# it's fine", 'src/a');
+      const pairedState = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: "# don't\nprintf '{}' > .flow-comet/flow-comet-state.json\n# it's fine" },
+      });
+      assertExit(pairedState, 2);
+      assertOut(pairedState, 'state 文件');
+      assertOut(pairedState, '禁手动工具写');
+      expectBlocked('heredoc 正文撇号与后文撇号配对后的真重定向',
+        "cat <<EOF\nIt's fine\nEOF\nprintf x > src/a\n# it's late", 'src/a');
+      // ⑨ 引号内的空白不等于目标边界：带空格的白名单目标整体捕获并放行（修复不得误伤）
+      expectPass('白名单内带空格目标', 'printf x > ".specs/' + CHANGE_ID + '/ok file.txt"');
+      // ⑩ 注释区域不是 shell 语法：注释里的撇号/双引号不再开引号状态（跨行掩码段只来自真引号）。
+      expectBlocked('注释撇号 + 引号参数之后的真重定向', "# don't\nprintf 'x' > src/a", 'src/a');
+      const commentState = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: "# don't\nprintf 'x' > .flow-comet/flow-comet-state.json\n# it's fine" },
+      });
+      assertExit(commentState, 2);
+      assertOut(commentState, 'state 文件');
+      assertOut(commentState, '禁手动工具写');
+      const commentProtocol = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: "# don't\nprintf 'x' > reference/workflow-protocol.json" },
+      });
+      assertExit(commentProtocol, 2);
+      assertOut(commentProtocol, '协议文件');
+      expectBlocked('注释撇号 + awk 单引号程序 + 带引号目标', "# don't\nawk '{print}' f > 'out.txt' && echo 'done'", 'out.txt');
+      expectPass('注释撇号 + 引号内的比较符（无真重定向）', '# don\'t\nprintf "a > b"');
+      // ⑪ heredoc 正文区域：正文里的撇号不再开引号状态；引号定界串与 <<- 制表符定界行同样成立。
+      const heredocState = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: "cat <<EOF\nIt's fine\nEOF\nprintf 'x' > .flow-comet/flow-comet-state.json" },
+      });
+      assertExit(heredocState, 2);
+      assertOut(heredocState, 'state 文件');
+      assertOut(heredocState, '禁手动工具写');
+      expectPass('heredoc 正文撇号 + 引号内的比较符（无真重定向）', 'cat <<EOF\nIt\'s fine\nEOF\nprintf "a > b"');
+      expectBlocked('引号定界串 heredoc 正文撇号之后的真重定向', "cat <<'EOF'\nIt's fine\nEOF\nprintf x > src/a", 'src/a');
+      expectBlocked('<<- 制表符定界 heredoc 正文撇号之后的真重定向', "cat <<-EOF\n\tIt's fine\n\tEOF\nprintf x > src/a", 'src/a');
+      // ⑫ ANSI-C 引号（$'...'）：反斜杠转义的撇号不闭合引号，只有未转义的 ' 才闭合。
+      const ansiState = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: "printf $'it\\'s' > .flow-comet/flow-comet-state.json" },
+      });
+      assertExit(ansiState, 2);
+      assertOut(ansiState, 'state 文件');
+      assertOut(ansiState, '禁手动工具写');
+      expectPass('ANSI-C 引号内的比较符（无真重定向）', "printf $'a > b'");
+      // ⑬ 跳过候选时不得吞掉其中跨越的真实操作符：第一个 > 在引号里（字面量），第二个 > 是真实
+      //    重定向；继续到整个 match 之后会把后者一并跳过（无目标 = 放行）。
+      expectBlocked('引号参数之后紧接的真实操作符', 'printf "a > " > "src/a"', 'src/a');
+      // ⑭ 算术位移不是 heredoc；here-string（<<<）也不是 heredoc。两条都带**可终止行**——把排除
+      //    判据撤掉，`<<` 就会被当成 heredoc 起点，其后的真重定向被吞进假正文（放行）：
+      //    ① 算术：`<< 2))` 的定界串一直读到行尾（`2))`），第三行恰好与它相等；
+      //    ② here-string：`<<< x` 从第二个 `<` 起被读作 `<<`，`x` 是定界串、第三行 `x` 收口。
+      expectBlocked('算术位移之后的真重定向（含可终止行）',
+        '((a << 2))\nprintf x > src/a\n2))', 'src/a');
+      expectBlocked('here-string 之后的真重定向（含可终止行）',
+        'cat <<< x\nprintf y > src/a\nx', 'src/a');
+      // ⑮ 词内 `#` 不是注释起点：`)` 从词首集合去掉之后，命令替换 / 算术扩展紧邻的 `#` 不再把
+      //    其后的真重定向掩成字面量（旧行为 = 一处 `#` 关掉整条写入判定，fail-open）。
+      //    反向构造：把 `)` 加回前导集合 ⇒ 本组前三条必红。后三条修复前后都判对——钉的是判据
+      //    本身（前导集合不得继续放宽），不是本次的修复点。
+      expectBlocked('命令替换后的词内 # 之后的真重定向', 'echo $(date)# > src/a', 'src/a');
+      expectBlocked('算术扩展后的词内 # 之后的真重定向', 'echo $((1+1))# > src/a', 'src/a');
+      const substitutionState = runHook(['before_tool'], dir, {
+        tool_name: 'Bash',
+        tool_input: { command: 'echo $(date)# > .flow-comet/flow-comet-state.json' },
+      });
+      assertExit(substitutionState, 2);
+      assertOut(substitutionState, 'state 文件');
+      expectBlocked('单词内的 # 不是注释', 'echo foo#bar > src/a', 'src/a');
+      expectBlocked('参数展开内的 # 不是注释', 'echo ${x#prefix} > src/a', 'src/a');
+      expectBlocked('位置参数计数的 # 不是注释', 'echo $# > src/a', 'src/a');
+      // ⑯ PowerShell 双引号里的尾反斜杠不是 POSIX 的 `\"` 转义：引号在 `"` 处闭合，其后的 `>` 是
+      //    真重定向（base 拦、旧 head 放行）。修法是“可信闭合”判据：段尾必须是未被转义的闭合引号。
+      expectBlocked('PowerShell 尾反斜杠之后的真重定向',
+        'Get-ChildItem "C:\\Windows\\" > src/a', 'src/a');
+      expectBlocked('PowerShell dir 尾反斜杠之后的真重定向',
+        'dir "C:\\Windows\\" > src/a', 'src/a');
+      expectBlocked('PowerShell Write-Output 尾反斜杠之后的真重定向',
+        'Write-Output "C:\\" > src/a', 'src/a');
+      expectBlocked('PowerShell 反引号转义引号之后的真重定向',
+        'Write-Output "a`" # x" > src/a', 'src/a');
+      // ⑯b 段尾是“目标的**开引号**”不算可信闭合：加引号的目标必须仍判成写目标。
+      expectBlocked('PowerShell 尾反斜杠 + 引号目标',
+        'Get-ChildItem "C:\\Windows\\" > "src/a"', 'src/a');
+      expectBlocked('PowerShell 尾反斜杠 + 追加引号目标',
+        'Get-ChildItem "C:\\Windows\\" >> "src/a"', 'src/a');
+      expectBlocked('PowerShell 尾反斜杠 + 无空格引号目标',
+        'Get-ChildItem "C:\\Windows\\" >"src/a"', 'src/a');
+      expectBlocked('PowerShell 尾反斜杠 + 带空格引号目标',
+        'Get-ChildItem "C:\\Windows\\" > "src/a b"', 'src/a b');
+      expectBlocked('PowerShell 尾反斜杠 + 2>&1 + 引号目标',
+        'Get-ChildItem "C:\\Windows\\" 2>&1 > "src/a"', 'src/a');
+      // ⑰ 被转义的分隔符不是词首：bash 里 `a\ #b` 的 `#` 仍在同一个词内，不是注释起点。
+      expectBlocked('转义空格后的 # 之后的真重定向', 'echo a\\ #b > src/a', 'src/a');
+      expectBlocked('转义分号后的 # 之后的真重定向', 'echo a\\;#b > src/a', 'src/a');
+      expectBlocked('转义竖线后的 # 之后的真重定向', 'echo a\\|#b > src/a', 'src/a');
+      expectBlocked('转义 & 后的 # 之后的真重定向', 'echo a\\&#b > src/a', 'src/a');
+      expectBlocked('转义括号后的 # 之后的真重定向', 'echo a\\(#b > src/a', 'src/a');
+      // ⑱ 单行未闭合引号不再按字面量跳过：`printf "a > b` 的引号到行尾都没闭合，按写目标判定。
+      expectBlocked('单行未闭合引号之后的比较符按写目标判定', 'printf "a > b', 'b');
+    },
+  },
 ];
